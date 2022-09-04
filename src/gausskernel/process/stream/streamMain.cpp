@@ -23,7 +23,6 @@
  */
 #include "postgres.h"
 
-#include "access/dfs/dfs_am.h"
 #include "access/gtm.h"
 #include "access/printtup.h"
 #include "distributelayer/streamMain.h"
@@ -213,6 +212,7 @@ static void InitStreamSignal()
 {
     (void)gspqsignal(SIGINT, StatementCancelHandler);
     (void)gspqsignal(SIGTERM, die);
+    (void)gspqsignal(SIGURG, print_stack);
     (void)gspqsignal(SIGALRM, handle_sig_alarm); /* timeout conditions */
     (void)gspqsignal(SIGUSR1, procsignal_sigusr1_handler);
     (void)gs_signal_unblock_sigusr2();
@@ -272,6 +272,10 @@ void ExtractProduerInfo()
 
     /* Get the node group information */
     t_thrd.wlm_cxt.thread_node_group = WLMGetNodeGroupFromHTAB(g_wlm_params->ngroup);
+    if (t_thrd.wlm_cxt.thread_node_group == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+            errmsg("Can't get the %s logic cluster information by hash table.", g_wlm_params->ngroup)));
+    }
     t_thrd.wlm_cxt.thread_climgr = &t_thrd.wlm_cxt.thread_node_group->climgr;
     t_thrd.wlm_cxt.thread_srvmgr = &t_thrd.wlm_cxt.thread_node_group->srvmgr;
 
@@ -582,7 +586,7 @@ void ResetStreamEnv()
     u_sess->stream_cxt.enter_sync_point = false;
     t_thrd.pgxc_cxt.GlobalNetInstr = NULL;
 #ifndef ENABLE_MULTIPLE_NODES
-    u_sess->opt_cxt.query_dop = u_sess->attr.attr_sql.query_dop_tmp;
+    u_sess->opt_cxt.query_dop = u_sess->opt_cxt.query_dop_store;
 #endif
 
     /*
@@ -595,15 +599,19 @@ void ResetStreamEnv()
         u_sess->opt_cxt.not_shipping_info->not_shipping_reason, NOTPLANSHIPPING_LENGTH, '\0', NOTPLANSHIPPING_LENGTH);
     securec_check_c(errorno, "\0", "\0");
 
-    t_thrd.postgres_cxt.table_created_in_CTAS = false;
+    u_sess->instr_cxt.gs_query_id->queryId = 0;
+}
+
+void ResetSessionEnv()
+{
+    ResetStreamEnv();
 
     if (IS_PGXC_COORDINATOR) {
         u_sess->exec_cxt.need_track_resource = false;
     }
 
-    u_sess->instr_cxt.gs_query_id->queryId = 0;
-
     u_sess->wlm_cxt->local_foreign_respool = NULL;
+
     t_thrd.postmaster_cxt.forceNoSeparate = false;
 
     u_sess->pcache_cxt.gpc_remote_msg = false;
@@ -622,6 +630,16 @@ void ResetStreamEnv()
             return;
     }
 
+    pfree_ext(t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan);
+    t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->plan_size = 0;
+    pfree_ext(t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan_issue);
+
+    t_thrd.wlm_cxt.collect_info->status = WLM_STATUS_RESERVE;
+    t_thrd.wlm_cxt.dn_cpu_detail->status = WLM_STATUS_RESERVE;
+
+    t_thrd.sig_cxt.gs_sigale_check_type = SIGNAL_CHECK_NONE;
+    t_thrd.sig_cxt.session_id = 0;
+
     t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->initMemInChunks = t_thrd.utils_cxt.trackedMemChunks;
     t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->queryMemInChunks = t_thrd.utils_cxt.trackedMemChunks;
     t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->peakChunksQuery = t_thrd.utils_cxt.trackedMemChunks;
@@ -636,16 +654,6 @@ void ResetStreamEnv()
     t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->iscomplex = 0;
     t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->dnStartTime = GetCurrentTimestamp();
     t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->dnEndTime = 0;
-
-    pfree_ext(t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan);
-    t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->plan_size = 0;
-    pfree_ext(t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan_issue);
-
-    t_thrd.wlm_cxt.collect_info->status = WLM_STATUS_RESERVE;
-    t_thrd.wlm_cxt.dn_cpu_detail->status = WLM_STATUS_RESERVE;
-
-    t_thrd.sig_cxt.gs_sigale_check_type = SIGNAL_CHECK_NONE;
-    t_thrd.sig_cxt.session_id = 0;
 }
 
 void SetStreamWorkerInfo(StreamProducer* proObj)
@@ -743,8 +751,6 @@ void StreamExit()
 
     /* Reset to Local vfd if we have attach it to global vfdcache */
     ResetToLocalVfdCache();
-
-    CleanupDfsHandlers(true);
 
     closeAllVfds();
 

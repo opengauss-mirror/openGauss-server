@@ -27,6 +27,7 @@
 #include "access/tableam.h"
 #include "catalog/storage_gtt.h"
 #include "commands/matview.h"
+#include "commands/sequence.h"
 #include "executor/node/nodeModifyTable.h"
 #include "parser/parse_coerce.h"
 
@@ -34,7 +35,8 @@ void InsertFusion::InitGlobals()
 {
     m_c_global = (InsertFusionGlobalVariable*)palloc0(sizeof(InsertFusionGlobalVariable));
 
-    m_global->m_reloid = getrelid(linitial_int(m_global->m_planstmt->resultRelations), m_global->m_planstmt->rtable);
+    m_global->m_reloid = getrelid(linitial_int((List*)linitial(m_global->m_planstmt->resultRelations)),
+                                  m_global->m_planstmt->rtable);
     ModifyTable* node = (ModifyTable*)m_global->m_planstmt->planTree;
     BaseResult* baseresult = (BaseResult*)linitial(node->plans);
     List* targetList = baseresult->plan.targetlist;
@@ -104,7 +106,7 @@ void InsertFusion::InitGlobals()
 }
 void InsertFusion::InitLocals(ParamListInfo params)
 {
-    m_c_local.m_estate = CreateExecutorState();
+    m_c_local.m_estate = CreateExecutorStateForOpfusion(m_local.m_localContext, m_local.m_tmpContext);
     m_c_local.m_estate->es_range_table = m_global->m_planstmt->rtable;
     m_c_local.m_estate->es_plannedstmt = m_global->m_planstmt;
     m_local.m_reslot = MakeSingleTupleTableSlot(m_global->m_tupDesc);
@@ -232,14 +234,19 @@ unsigned long InsertFusion::ExecInsert(Relation rel, ResultRelInfo* result_rel_i
         /*
          * If values violate constraints, directly return.
          */
-        if(!ExecConstraints(result_rel_info, m_local.m_reslot, m_c_local.m_estate)) {
+        if(!ExecConstraints(result_rel_info, m_local.m_reslot, m_c_local.m_estate, true)) {
             if (u_sess->utils_cxt.sql_ignore_strategy_val != SQL_OVERWRITE_NULL) {
                 return 0;
             }
             tuple = ReplaceTupleNullCol(RelationGetDescr(result_rel_info->ri_RelationDesc), m_local.m_reslot);
             /* Double check constraints in case that new val in column with not null constraints
              * violated check constraints */
-            ExecConstraints(result_rel_info, m_local.m_reslot, m_c_local.m_estate);
+            ExecConstraints(result_rel_info, m_local.m_reslot, m_c_local.m_estate, true);
+        }
+        tuple = ExecAutoIncrement(rel, m_c_local.m_estate, m_local.m_reslot, tuple);
+        if (tuple != m_local.m_reslot->tts_tuple) {
+            tableam_tops_free_tuple(tuple);
+            tuple = m_local.m_reslot->tts_tuple;
         }
     }
     Relation destRel = RELATION_IS_PARTITIONED(rel) ? partRel : rel;
@@ -282,7 +289,6 @@ unsigned long InsertFusion::ExecInsert(Relation rel, ResultRelInfo* result_rel_i
     }
 
     (void)tableam_tuple_insert(bucket_rel == NULL ? destRel : bucket_rel, tuple, mycid, 0, NULL);
-
     if (!RELATION_IS_PARTITIONED(rel)) {
         /* try to insert tuple into mlog-table. */
         if (rel != NULL && rel->rd_mlogoid != InvalidOid) {
@@ -377,6 +383,6 @@ bool InsertFusion::execute(long max_rows, char* completionTag)
             snprintf_s(completionTag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1, "INSERT 0 %ld", nprocessed);
     }
     securec_check_ss(errorno, "\0", "\0");
-
+    FreeExecutorStateForOpfusion(m_c_local.m_estate);
     return success;
 }

@@ -98,6 +98,7 @@ typedef struct knl_session_attr_common {
     int tcp_keepalives_idle;
     int tcp_keepalives_interval;
     int tcp_keepalives_count;
+    int tcp_user_timeout;
     int GinFuzzySearchLimit;
     int server_version_num;
     int log_temp_files;
@@ -107,10 +108,12 @@ typedef struct knl_session_attr_common {
     int gtm_rw_timeout;
     int transaction_sync_timeout;
     int fault_mon_timeout;
+    int block_encryption_mode;
     int64 group_concat_max_len;
     double ConnectionAlarmRate;
     char* client_encoding_string;
     char* Log_line_prefix;
+    char* safe_data_path;
     char* log_timezone_string;
     char* datestyle_string;
     char* Dynamic_library_path;
@@ -225,9 +228,12 @@ typedef struct knl_session_attr_common {
     char* node_name;
 #ifndef ENABLE_MULTIPLE_NODES
     bool plsql_show_all_error;
+    bool enable_seqscan_fusion;
 #endif
     uint32 extension_session_vars_array_size;
     void** extension_session_vars_array;
+    char* threadpool_reset_percent_item;
+    int threadpool_reset_percent_list[2];
 } knl_session_attr_common;
 
 #endif /* SRC_INCLUDE_KNL_KNL_SESSION_ATTR_COMMON_H_ */

@@ -348,9 +348,8 @@ TupleTableSlot* ExecHashJoin(HashJoinState* node)
 
                     if (otherqual == NIL || ExecQual(otherqual, econtext, false)) {
                         TupleTableSlot* result = NULL;
-
+                        
                         result = ExecProject(node->js.ps.ps_ProjInfo, &isDone);
-
                         if (isDone != ExprEndResult) {
                             node->js.ps.ps_TupFromTlist = (isDone == ExprMultipleResult);
                             return result;

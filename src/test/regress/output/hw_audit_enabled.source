@@ -1,0 +1,14 @@
+-- 启动后默认开启审计，查看审计线程是否按照线程数量启动
+\! cd @abs_srcdir@/tmp_check/datanode1/pg_log && num=$( grep -rn "audit_process_cxt_init pipe init successfully for pipe" | awk '!a[$18]++{print $18}'  | wc -l) &&  [[ $num == 1 ]] && echo 'initiate auditor thread successfully' || echo 'fail to initiate auditor thread'
+initiate auditor thread successfully
+-- 关闭审计功能
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_enabled=off" > /dev/null 2>&1
+\! sleep 5
+-- 查看审计日志线程退出
+\! cd @abs_srcdir@/tmp_check/datanode1/pg_log && num=$( grep -rn "auditor thread exit" | awk '!a[$16]++{print $16}' | wc -l)  && [[ $num == 1 ]] && echo 'exit auditor thread successfully' || echo 'fail to exit auditor thread'
+exit auditor thread successfully
+-- 重新开启审计功能
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_enabled=on" > /dev/null 2>&1
+-- 查看审计线程重新启动
+\! cd @abs_srcdir@/tmp_check/datanode1/pg_log && num=$( grep -rn "audit_process_cxt_init pipe init successfully for pipe" | awk '!a[$18]++{print $18}' | wc -l)   && [[ $num == 1 ]] && echo 'restart auditor thread successfully' || echo 'fail to restart auditor thread'
+restart auditor thread successfully

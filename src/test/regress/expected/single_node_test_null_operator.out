@@ -1,0 +1,176 @@
+-- A format database not support <=>
+SELECT 1 <=> 1;
+ERROR:  operator does not exist: integer <=> integer
+LINE 1: SELECT 1 <=> 1;
+                 ^
+HINT:  No operator matches the given name and argument type(s). You might need to add explicit type casts.
+SELECT '' <=> NULL;
+ERROR:  operator does not exist: unknown <=> unknown
+LINE 1: SELECT '' <=> NULL;
+                  ^
+HINT:  No operator matches the given name and argument type(s). You might need to add explicit type casts.
+SELECT NULL <=> NULL;
+ERROR:  operator does not exist: unknown <=> unknown
+LINE 1: SELECT NULL <=> NULL;
+                    ^
+HINT:  No operator matches the given name and argument type(s). You might need to add explicit type casts.
+SELECT (1,2) <=> (1,2);
+ERROR:  operator does not exist: integer <=> integer
+LINE 1: SELECT (1,2) <=> (1,2);
+                     ^
+HINT:  No operator matches the given name and argument type(s). You might need to add explicit type casts.
+create database test dbcompatibility = 'B';
+\c test
+-- expression comparison
+SELECT 1 <=> 1;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT 1 <=> 2;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT 1<=>-1;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT -1<=>-1;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT 1<=>(-1);
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT '1' <=> '2';
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT 1 <=> NULL;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT '' <=> NULL;
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT '' <=> '';
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT NULL <=> NULL;
+ ?column? 
+----------
+ t
+(1 row)
+
+-- row expression comparison
+SELECT (1,2) <=> (1,2);
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT (1,2,3) <=> (1,2,3);
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT (NULL,2,3) <=> (NULL,2,3);
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT (NULL,2,3) <=> (1,2,3);
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT ('',2,3) <=> (NULL,2,3);
+ ?column? 
+----------
+ f
+(1 row)
+
+SELECT ('',2,3) <=> ('',2,3);
+ ?column? 
+----------
+ t
+(1 row)
+
+DROP TABLE IF EXISTS t1;
+NOTICE:  table "t1" does not exist, skipping
+DROP TABLE IF EXISTS t2;
+NOTICE:  table "t2" does not exist, skipping
+CREATE TABLE t1(a int, b text, c int);
+insert into t1 values(1, 'a', 10);
+insert into t1 values(null, 'b', 20);
+insert into t1 values(3, null, 30);
+insert into t1 values(4, 'd', null);
+insert into t1 values(5, '', 50);
+CREATE TABLE t2(a int, b text, c int);
+insert into t2 values(1, 'a', 1);
+insert into t2 values(null, 'b', 2);
+insert into t2 values(3, null, 3);
+insert into t2 values(4, 'd', null);
+insert into t2 values(5, null, 5);
+SELECT * FROM t1,t2 WHERE t1.a <=> t2.a;
+ a | b | c  | a | b | c 
+---+---+----+---+---+---
+ 1 | a | 10 | 1 | a | 1
+   | b | 20 |   | b | 2
+ 3 |   | 30 | 3 |   | 3
+ 4 | d |    | 4 | d |  
+ 5 |   | 50 | 5 |   | 5
+(5 rows)
+
+SELECT * FROM t1,t2 WHERE t1.b <=> t2.b;
+ a | b | c  | a | b | c 
+---+---+----+---+---+---
+ 1 | a | 10 | 1 | a | 1
+   | b | 20 |   | b | 2
+ 3 |   | 30 | 3 |   | 3
+ 3 |   | 30 | 5 |   | 5
+ 4 | d |    | 4 | d |  
+(5 rows)
+
+SELECT * FROM t1,t2 WHERE (t1.a,t1.b) <=> (t2.a,t2.b);
+ a | b | c  | a | b | c 
+---+---+----+---+---+---
+ 1 | a | 10 | 1 | a | 1
+   | b | 20 |   | b | 2
+ 3 |   | 30 | 3 |   | 3
+ 4 | d |    | 4 | d |  
+(4 rows)
+
+SELECT * FROM t1,t2 WHERE (t1.a,t1.c) <=> (t2.a,t2.c);
+ a | b | c | a | b | c 
+---+---+---+---+---+---
+ 4 | d |   | 4 | d |  
+(1 row)
+
+DROP TABLE IF EXISTS t1;
+DROP TABLE IF EXISTS t2;
+\c regression
+DROP DATABASE IF EXISTS test;

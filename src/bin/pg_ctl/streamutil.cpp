@@ -280,7 +280,8 @@ void update_obs_build_status(const char* build_status)
     char sql_cmd[MAXPGPATH] = {0};
 
     ret = snprintf_s(sql_cmd, MAXPGPATH, MAX_PATH_LEN - 1,
-        "select * from gs_set_obs_file_context('%s/%s', '%s', '%s')", pgxc_node_name, taskid, build_status, slotname);
+        "select * from pg_catalog.gs_set_obs_file_context('%s/%s', '%s', '%s')",
+        pgxc_node_name, taskid, build_status, slotname);
     securec_check_ss_c(ret, "\0", "\0");
     if (exe_sql(dbConn, sql_cmd) == false) {
         pg_log(PG_WARNING, _("failed to execute sql [%s]!\n"), sql_cmd);

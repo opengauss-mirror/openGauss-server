@@ -594,7 +594,7 @@ static int32 IdentifyRemoteVersion()
     return remoteTerm;
 }
 
-static void SetWalSendTermChanged(void)
+static void NotifyWalSendForMainStandby(uint32 localTerm, uint32 remoteTerm)
 {
     for (int i = 0; i < g_instance.attr.attr_storage.max_wal_senders; i++) {
         volatile WalSnd *walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
@@ -603,7 +603,10 @@ static void SetWalSendTermChanged(void)
             continue;
 
         SpinLockAcquire(&walsnd->mutex);
-        walsnd->isTermChanged = true;
+        if (IS_DISASTER_RECOVER_MODE && localTerm != remoteTerm) {
+            walsnd->isTermChanged = true;
+        }
+        walsnd->sendKeepalive = true;
         SpinLockRelease(&walsnd->mutex);
     }
 }
@@ -633,18 +636,29 @@ bool libpqrcv_connect(char *conninfo, XLogRecPtr *startpoint, char *slotname, in
     char *remoteMaxLsnStr = NULL;
     char *remoteMaxLsnCrcStr = NULL;
     uint32 hi, lo;
+    char uuidOption[MAXCONNINFO] = {0};
+
+    if (u_sess->attr.attr_storage.repl_auth_mode == REPL_AUTH_UUID &&
+        u_sess->attr.attr_storage.repl_uuid != NULL && strlen(u_sess->attr.attr_storage.repl_uuid) > 0) {
+        nRet = snprintf_s(uuidOption, sizeof(uuidOption), sizeof(uuidOption) - 1,
+                          "options='-c repl_uuid=%s'", u_sess->attr.attr_storage.repl_uuid);
+        securec_check_ss(nRet, "\0", "\0");
+    }
 
     /*
      * Connect using deliberately undocumented parameter: replication. The
      * database name is ignored by the server in replication mode, but specify
      * "replication" for .pgpass lookup.
+     *
+     * For normal standbys(i.e. not hadr standby or Dorado standby), UUID is passed as startup option
+     * if uuid auth mode is required.
      */
     if (dummyStandbyMode) {
         nRet = snprintf_s(conninfoRepl, sizeof(conninfoRepl), sizeof(conninfoRepl) - 1,
                           "%s dbname=replication replication=true "
                           "fallback_application_name=dummystandby "
-                          "connect_timeout=%d",
-                          conninfo, u_sess->attr.attr_storage.wal_receiver_connect_timeout);
+                          "connect_timeout=%d %s",
+                          conninfo, u_sess->attr.attr_storage.wal_receiver_connect_timeout, uuidOption);
 #ifndef ENABLE_MULTIPLE_NODES
     } else if (AM_HADR_WAL_RECEIVER) {
 #else
@@ -680,13 +694,14 @@ bool libpqrcv_connect(char *conninfo, XLogRecPtr *startpoint, char *slotname, in
         nRet = snprintf_s(conninfoRepl, sizeof(conninfoRepl), sizeof(conninfoRepl) - 1,
                           "%s dbname=replication replication=true "
                           "fallback_application_name=%s "
-                          "connect_timeout=%d",
+                          "connect_timeout=%d %s",
                           conninfo,
                           (u_sess->attr.attr_common.application_name &&
                            strlen(u_sess->attr.attr_common.application_name) > 0)
                                 ? u_sess->attr.attr_common.application_name
                                 : "walreceiver",
-                          u_sess->attr.attr_storage.wal_receiver_connect_timeout);
+                          u_sess->attr.attr_storage.wal_receiver_connect_timeout,
+                          uuidOption);
     }
 
     securec_check_ss(nRet, "", "");
@@ -835,7 +850,6 @@ retry:
         res = libpqrcv_PQexec(cmd);
         if (PQresultStatus(res) != PGRES_TUPLES_OK) {
             PQclear(res);
-            ha_set_rebuild_connerror(WALSEGMENT_REBUILD, REPL_INFO_ERROR);
             ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
                             errmsg("failed to identify consistence at %X/%X: %s", (uint32)(localRec >> 32),
                                    (uint32)localRec, PQerrorMessage(t_thrd.libwalreceiver_cxt.streamConn))));
@@ -916,11 +930,24 @@ retry:
                          * standby connect to primary
                          * Direct check Primary and Standby, trigger build.
                          */
-                        ha_set_rebuild_connerror(WALSEGMENT_REBUILD, REPL_INFO_ERROR);
-                        ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
-                                        errmsg("standby's local request lsn[%X/%X] 's crc mismatched with remote server"
-                                               "crc(local, remote):[%u,%u].",
-                                               (uint32)(localRec >> 32), (uint32)localRec, localRecCrc, recCrc)));
+                        if (t_thrd.postmaster_cxt.HaShmData->is_cross_region &&
+                            t_thrd.postmaster_cxt.HaShmData->is_cascade_standby &&
+                            recCrc == 0 && XLByteLT(remoteMaxLsn, localRec)) {
+                            /* The cascaded standby instance of the disaster recovery cluster
+                            has more logs than the main standby instance, the build is not triggered */
+                            ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+                                    errmsg("cascaded standby's local request lsn[%X/%X] 's crc mismatched with "
+                                           "main standby crc(local, remote):[%u,%u], remote max lsn is [%X/%X].",
+                                           (uint32)(localRec >> 32), (uint32)localRec, localRecCrc, recCrc,
+                                           (uint32)(remoteMaxLsn >> 32), (uint32)remoteMaxLsn)));
+                            return false;
+                        } else {
+                            ha_set_rebuild_connerror(WALSEGMENT_REBUILD, REPL_INFO_ERROR);
+                            ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+                                    errmsg("standby's local request lsn[%X/%X] 's crc mismatched with remote server "
+                                           "crc(local, remote):[%u,%u].",
+                                           (uint32)(localRec >> 32), (uint32)localRec, localRecCrc, recCrc)));
+                        }
                     }
                 }
             } else if (t_thrd.walreceiver_cxt.AmWalReceiverForStandby) {
@@ -1078,8 +1105,8 @@ retry:
             (errmsg("streaming replication successfully connected to primary, the connection is %s, start from %X/%X ",
                     conninfo, (uint32)(*startpoint >> 32), (uint32)(*startpoint))));
 
-    if (IS_DISASTER_RECOVER_MODE && t_thrd.postmaster_cxt.HaShmData->is_hadr_main_standby && localTerm != remoteTerm) {
-        SetWalSendTermChanged();
+    if (t_thrd.postmaster_cxt.HaShmData->is_hadr_main_standby) {
+        NotifyWalSendForMainStandby(localTerm, remoteTerm);
     }
 
     if (!t_thrd.walreceiver_cxt.AmWalReceiverForFailover) {

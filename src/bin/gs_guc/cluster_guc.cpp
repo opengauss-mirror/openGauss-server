@@ -271,6 +271,7 @@ const char *value_type_list[] = {
 const char* unit_eight_kB_parameter_list[] = {
     "backwrite_quantity",
     "effective_cache_size",
+    "pca_shared_buffers",
     "prefetch_quantity",
     "segment_size",
     "shared_buffers",
@@ -547,7 +548,7 @@ static char* form_commandline_options(const char* instance_name, const char* ind
     /* find length required for options */
     for (i = 0; i < config_param_number; i++) {
         if (!is_hba_conf) {
-            buflen += (ALLIG_POSTGRES_CONF_LEN + strlen(config_param[i]));
+            buflen += (int)(ALLIG_POSTGRES_CONF_LEN + strlen(config_param[i]));
             if (config_value[i] != NULL) {
                 buflen += strlen(config_value[i]);
             }

@@ -637,7 +637,7 @@ static ForeignScan *postgresGetForeignPlan(PlannerInfo *root, RelOptInfo *basere
      * Note: because we actually run the query as a cursor, this assumes that
      * DECLARE CURSOR ... FOR UPDATE is supported, which it isn't before 8.3.
      */
-    if (baserel->relid == (unsigned int)root->parse->resultRelation &&
+    if (baserel->relid == (unsigned int)linitial2_int(root->parse->resultRelations) &&
         (root->parse->commandType == CMD_UPDATE || root->parse->commandType == CMD_DELETE)) {
         /* Relation is UPDATE/DELETE target, so use FOR UPDATE */
         appendStringInfoString(&sql, " FOR UPDATE");
@@ -912,7 +912,8 @@ static void postgresAddForeignUpdateTargets(Query *parsetree, RangeTblEntry *tar
      * In postgres_fdw, what we need is the ctid, same as for a regular table.
      * Make a Var representing the desired value
      */
-    Var* var = makeVar((Index)parsetree->resultRelation, SelfItemPointerAttributeNumber, TIDOID, -1, InvalidOid, 0);
+    Var* var = makeVar((Index)linitial_int(parsetree->resultRelations), SelfItemPointerAttributeNumber,
+                       TIDOID, -1, InvalidOid, 0);
 
     /* Wrap it in a resjunk TLE with the right name ... */
     const char *attrname = "ctid";

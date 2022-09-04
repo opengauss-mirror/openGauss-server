@@ -88,7 +88,7 @@ function logo()
 	echo " | |    | | (_| | | | |  ____) | | | | | | | |_| | | (_| | || (_) | |     " 
 	echo " |_|    |_|\__,_|_| |_| |_____/|_|_| |_| |_|\__,_|_|\__,_|\__|___/|_|     "
 	echo "                                                                          "
-	echo "                                                 Version 3.0.0"
+	echo "                                                 Version 3.1.0"
 	echo "--------------------------------------------------------------------------"
 }
 
@@ -447,7 +447,7 @@ function construct_command()
 
 function parse_para()
 {
-	while getopts ':d:m:p:U:W:I:N:E:D:C:T:H:A:' arg
+	while getopts ':d:m:p:U:W:I:N:E:D:C:T:A:' arg
 	do
 		case $arg in
 			d)
@@ -476,9 +476,6 @@ function parse_para()
 				;;
 			T)
 				tables="$OPTARG"
-				;;
-			H)
-				ishdfs="$OPTARG"
 				;;
 			A)
 				all_db_dir="$OPTARG"
@@ -782,17 +779,6 @@ function restore_alldb_stats()
 			do
 				sed -i "s/$line//g" $object_info_location
 			done
-
-			if [[ $ishdfs == 'yes' ]]; then
-				tmp_dir="$files_path""/tablespace"$RANDOM
-				conf="/opt/config"
-				tmp_string=$(cat $object_info_location|grep 'create tablespace'|awk -F "'" '{print $2}')
-				sed -i "s|$tmp_string|$tmp_dir|g" $object_info_location
-				tmp_string=$(cat $object_info_location|grep 'cfgpath = '|awk -F "'" '{print $2}')
-				sed -i "s|$tmp_string|$conf|g" $object_info_location
-				tmp_string=$(cat $object_info_location|grep 'storepath = '|awk -F "'" '{print $2}')
-				sed -i "s|$tmp_string|$tmp_dir|g" $object_info_location
-			fi
 		fi
 
 		echo -e "\n\n\n"					>>$log_file_location 2>&1

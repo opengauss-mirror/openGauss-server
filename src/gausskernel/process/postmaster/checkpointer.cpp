@@ -58,6 +58,7 @@
 #include "utils/memutils.h"
 #include "utils/resowner.h"
 #include "gssignal/gs_signal.h"
+#include "postmaster/pagewriter.h"
 
 /* ----------
  * Shared memory area for communication between checkpointer and backends
@@ -191,6 +192,7 @@ void CheckpointerMain(void)
      * want to wait for the backends to exit, whereupon the postmaster will
      * tell us it's okay to shut down (via SIGUSR2).
      */
+    (void)gspqsignal(SIGURG, print_stack);
     (void)gspqsignal(SIGHUP, ChkptSigHupHandler);   /* set flag to read config
                                                      * file */
     (void)gspqsignal(SIGINT, ReqCheckpointHandler); /* request checkpoint */
@@ -293,6 +295,9 @@ void CheckpointerMain(void)
         AtEOXact_Files();
         AtEOXact_HashTables(false);
 
+        /* release compression ctx */
+        crps_destory_ctxs();
+
         /* Warn any waiting backends that the checkpoint failed. */
         if (t_thrd.checkpoint_cxt.ckpt_active) {
             /* use volatile pointer to prevent code rearrangement */
@@ -354,6 +359,9 @@ void CheckpointerMain(void)
      * sleeping.
      */
     g_instance.proc_base->checkpointerLatch = &t_thrd.proc->procLatch;
+
+    /* init compression ctx for page compression */
+    crps_create_ctxs(CHECKPOINT_THREAD);
 
     pgstat_report_appname("CheckPointer");
     pgstat_report_activity(STATE_IDLE, NULL);
@@ -423,6 +431,10 @@ void CheckpointerMain(void)
             
             /* Close down the database */
             ShutdownXLOG(0, 0);
+
+            /* release compression ctx */
+            crps_destory_ctxs();
+
             /* Normal exit from the checkpointer is here */
             proc_exit(0); /* done */
         }
@@ -613,8 +625,13 @@ void CheckpointerMain(void)
          * Emergency bailout if postmaster has died.  This is to avoid the
          * necessity for manual cleanup of all postmaster children.
          */
-        if (rc & WL_POSTMASTER_DEATH)
+        if (rc & WL_POSTMASTER_DEATH) {
+
+            /* release compression ctx */
+            crps_destory_ctxs();
+
             gs_thread_exit(1);
+        }
     }
 }
 
@@ -852,6 +869,10 @@ static void chkpt_quickdie(SIGNAL_ARGS)
      * should ensure the postmaster sees this as a crash, too, but no harm in
      * being doubly sure.)
      */
+
+    /* release compression ctx */
+    crps_destory_ctxs();
+
     exit(2);
 }
 

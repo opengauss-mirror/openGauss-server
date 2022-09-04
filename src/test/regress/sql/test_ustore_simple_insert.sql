@@ -6,6 +6,9 @@ insert into t1(c1) values(1);
 insert into t1(c1) values(2);
 COMMIT;
 select * from t1;
+-- UHeapFetchRowVersion
+select * from t1 where ctid='(0,1)';
+
 
 -- Data type variants
 drop table if exists t2;

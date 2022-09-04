@@ -166,16 +166,14 @@ void GlobalSysTupCache::ReleaseGlobalCatCList(GlobalCatCList *cl)
 
 static uint64 GetClEstimateSize(GlobalCatCList *cl)
 {
-    uint64 cl_size = offsetof(GlobalCatCList, members) +
-        (cl->n_members + 1) * sizeof(GlobalCatCTup *) +
-        cl->nkeys * (NAMEDATALEN + CHUNK_ALGIN_PAD) + /* estimate space of keys */
-        CHUNK_ALGIN_PAD;
+    uint64 cl_size = GetMemoryChunkSpace(cl) +
+        cl->nkeys * (NAMEDATALEN + CHUNK_ALGIN_PAD); /* estimate space of keys */
     return cl_size;
 }
 
 static uint64 GetCtEstimateSize(GlobalCatCTup *ct)
 {
-    uint64 ct_size = sizeof(GlobalCatCTup) + MAXIMUM_ALIGNOF + ct->tuple.t_len + CHUNK_ALGIN_PAD;
+    uint64 ct_size = GetMemoryChunkSpace(ct);
     return ct_size;
 }
 
@@ -1297,16 +1295,20 @@ void GlobalSysTupCache::InitHashTable()
     /* this func allow palloc fail */
     size_t sz = (cc_nbuckets + 1) * sizeof(Dllist) + PG_CACHE_LINE_SIZE;
     if (cc_buckets == NULL) {
-        cc_buckets = (Dllist *)CACHELINEALIGN(palloc0(sz));
+        void *origin_ptr = palloc0(sz);
+        cc_buckets = (Dllist *)CACHELINEALIGN(origin_ptr);
+        m_dbEntry->MemoryEstimateAdd(GetMemoryChunkSpace(origin_ptr));
     }
     if (m_bucket_rw_locks == NULL) {
         m_bucket_rw_locks = (pthread_rwlock_t *)palloc0((cc_nbuckets + 1) * sizeof(pthread_rwlock_t));
+        m_dbEntry->MemoryEstimateAdd(GetMemoryChunkSpace(m_bucket_rw_locks));
         for (int i = 0; i <= cc_nbuckets; i++) {
             PthreadRwLockInit(&m_bucket_rw_locks[i], NULL);
         }
     }
     if (m_is_tup_swappingouts == NULL) {
         m_is_tup_swappingouts = (volatile uint32 *)palloc0(sizeof(volatile uint32) * (cc_nbuckets + 1));
+        m_dbEntry->MemoryEstimateAdd(GetMemoryChunkSpace((void *)m_is_tup_swappingouts));
     }
     m_is_list_swappingout = 0;
     
@@ -1361,14 +1363,63 @@ void GlobalSysTupCache::InitCacheInfo(Oid reloid, Oid indexoid, int nkeys, const
 
     if (m_list_rw_lock == NULL) {
         m_list_rw_lock = (pthread_rwlock_t *)palloc0(sizeof(pthread_rwlock_t));
+        m_dbEntry->MemoryEstimateAdd(GetMemoryChunkSpace(m_list_rw_lock));
         PthreadRwLockInit(m_list_rw_lock, NULL);
     }
     if (m_concurrent_lock == NULL) {
         m_concurrent_lock = (pthread_rwlock_t *)palloc0(sizeof(pthread_rwlock_t));
+        m_dbEntry->MemoryEstimateAdd(GetMemoryChunkSpace(m_concurrent_lock));
         PthreadRwLockInit(m_concurrent_lock, NULL);
     }
 
     (void)MemoryContextSwitchTo(old);
+}
+
+uint64 GetTupdescSize(TupleDesc tupdesc)
+{
+    uint64 main_size = GetMemoryChunkSpace(tupdesc);
+    uint64 constr_size = 0;
+    uint64 clusterkey_size = 0;
+    if (tupdesc->constr != NULL) {
+        TupleConstr *constr = tupdesc->constr;
+        constr_size += GetMemoryChunkSpace(constr);
+        if (constr->num_defval > 0) {
+            constr_size += GetMemoryChunkSpace(constr->defval);
+            for (int i = 0; i < constr->num_defval; i++) {
+                constr_size += GetMemoryChunkSpace(constr->defval[i].adbin);
+            }
+            constr_size += GetMemoryChunkSpace(constr->generatedCols);
+        }
+        
+        if (constr->num_check) {
+            constr_size += GetMemoryChunkSpace(constr->check);
+            for (int i = 0; i < constr->num_check; i++) {
+                if (constr->check[i].ccname) {
+                    constr_size += GetMemoryChunkSpace(constr->check[i].ccname);
+                }
+                if (constr->check[i].ccbin) {
+                    constr_size += GetMemoryChunkSpace(constr->check[i].ccbin);
+                }
+            }
+        }
+        if (constr->clusterKeyNum != 0) {
+            clusterkey_size += GetMemoryChunkSpace(constr->clusterKeys);
+        }
+    }
+
+    uint64 defval_size = 0;
+    if (tupdesc->initdefvals != NULL) {
+        defval_size += GetMemoryChunkSpace(tupdesc->initdefvals);
+        TupInitDefVal *pInitDefVal = tupdesc->initdefvals;
+        for (int i = 0; i < tupdesc->natts; i++) {
+            if (!pInitDefVal[i].isNull) {
+                defval_size += GetMemoryChunkSpace(pInitDefVal[i].datum);
+            }
+        }
+    }
+
+    uint64 tupdesc_size = main_size + clusterkey_size + constr_size + defval_size;
+    return tupdesc_size;
 }
 
 void GlobalSysTupCache::InitRelationInfo()
@@ -1403,6 +1454,7 @@ void GlobalSysTupCache::InitRelationInfo()
      */
     if (m_relinfo.cc_tupdesc == NULL) {
         m_relinfo.cc_tupdesc = CopyTupleDesc(RelationGetDescr(relation));
+        m_dbEntry->MemoryEstimateAdd(GetTupdescSize(m_relinfo.cc_tupdesc));
     }
 
     /*
@@ -1411,6 +1463,7 @@ void GlobalSysTupCache::InitRelationInfo()
      */
     if (m_relinfo.cc_relname == NULL) {
         m_relinfo.cc_relname = pstrdup(RelationGetRelationName(relation));
+        m_dbEntry->MemoryEstimateAdd(GetMemoryChunkSpace((void *)m_relinfo.cc_relname));
     }
     Assert(m_relinfo.cc_relisshared == RelationGetForm(relation)->relisshared);
 

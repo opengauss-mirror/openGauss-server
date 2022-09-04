@@ -178,11 +178,8 @@ void CleanUndoFileDirectory(UndoPersistence upersistence)
 {
     char dir[UNDO_FILE_DIR_LEN];
     GetUndoFileDirectory(dir, UNDO_FILE_DIR_LEN, upersistence);
-    if (rmdir(dir) < 0 && errno != ENOENT) {
-        /* try again */
-        if ((rmdir(dir) < 0) && (errno != ENOENT)) {
-            ereport(WARNING, (errmsg(UNDOFORMAT("could not remove file \"%s\": %m."), dir)));
-        }
+    if (!rmtree(dir, false)) {
+        ereport(WARNING, (errmsg(UNDOFORMAT("could not remove file \"%s\": %m."), dir)));
     }
     return;
 }
@@ -227,7 +224,7 @@ static BlockNumber GetUndoFileBlocks(SMgrRelation reln, ForkNumber forknum, cons
 
     if (len % BLCKSZ != 0) {
         CloseUndoFile(reln, forknum, InvalidBlockNumber);
-        ereport(ERROR, (errmsg(UNDOFORMAT("The expected size of file \"%s\" is %d, but the actual size is %ld."),
+        ereport(WARNING, (errmsg(UNDOFORMAT("The expected size of file \"%s\" is %d, but the actual size is %ld."),
             fileName, undoFileSize, len)));
     }
 
@@ -310,9 +307,9 @@ void ExtendUndoFile(SMgrRelation reln, ForkNumber forknum, BlockNumber blockno, 
     while (seekpos < (off_t)undoFileSize) {
         off_t diffSize = (off_t)undoFileSize - seekpos;
         if (diffSize < BLCKSZ) {
-            nbytes = FilePWrite(fd, (char *)undoBuffer, diffSize, seekpos, WAIT_EVENT_UNDO_FILE_EXTEND);
+            nbytes = FilePWrite(fd, (char *)undoBuffer, (int)diffSize, seekpos, (uint32)WAIT_EVENT_UNDO_FILE_EXTEND);
         } else {
-            nbytes = FilePWrite(fd, (char *)undoBuffer, BLCKSZ, seekpos, WAIT_EVENT_UNDO_FILE_EXTEND);
+            nbytes = FilePWrite(fd, (char *)undoBuffer, BLCKSZ, seekpos, (uint32)WAIT_EVENT_UNDO_FILE_EXTEND);
         }
         if (nbytes < 0) {
             CloseUndoFile(reln, forknum, InvalidBlockNumber);
@@ -478,7 +475,7 @@ void WriteUndoFile(SMgrRelation reln, ForkNumber forknum, BlockNumber blockNum, 
 
     WHITEBOX_TEST_STUB(UNDO_WRITE_FILE_FAILED, WhiteboxDefaultErrorEmit);
 
-    nbytes = FilePWrite(state->file, buffer, BLCKSZ, seekpos, WAIT_EVENT_UNDO_FILE_WRITE);
+    nbytes = FilePWrite(state->file, buffer, BLCKSZ, seekpos, (uint32)WAIT_EVENT_UNDO_FILE_WRITE);
     if (nbytes != BLCKSZ) {
         CloseUndoFile(reln, forknum, InvalidBlockNumber);
         if (nbytes < 0) {
@@ -625,7 +622,7 @@ int SyncUndoFile(const FileTag *tag, char *path)
     UndoFileState *state = OpenUndoFile(reln, tag->forknum,
         tag->segno * undoFileBlocks, EXTENSION_RETURN_NULL);
     if (state == NULL) {
-        return -1;
+        return 0;
     }
 
     return FileSync(state->file, WAIT_EVENT_UNDO_FILE_SYNC);

@@ -45,6 +45,7 @@ typedef void (*check_password_hook_type)(
 
 extern THR_LOCAL PGDLLIMPORT check_password_hook_type check_password_hook;
 
+extern bool isStrHasInvalidCharacter(const char* str);
 extern void CreateRole(CreateRoleStmt* stmt);
 extern void AlterRole(AlterRoleStmt* stmt);
 extern void AlterRoleSet(AlterRoleSetStmt* stmt);

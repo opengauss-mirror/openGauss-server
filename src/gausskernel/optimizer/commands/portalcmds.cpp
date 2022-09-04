@@ -339,7 +339,7 @@ static bool PortalCheckRemotePlan(PlannedStmt* plannedstmt)
  * portal must be done via the Tuplestore (not by invoking the
  * executor).
  */
-void PersistHoldablePortal(Portal portal)
+void PersistHoldablePortal(Portal portal, bool is_rollback)
 {
     QueryDesc* queryDesc = PortalGetQueryDesc(portal);
     Portal saveActivePortal;
@@ -347,6 +347,7 @@ void PersistHoldablePortal(Portal portal)
     MemoryContext savePortalContext;
     MemoryContext oldcxt;
     Oid saveUserid;
+    Oid saveOldUserid;
     int saveSecContext;
 
     /*
@@ -383,12 +384,14 @@ void PersistHoldablePortal(Portal portal)
     saveActivePortal = ActivePortal;
     saveResourceOwner = t_thrd.utils_cxt.CurrentResourceOwner;
     savePortalContext = t_thrd.mem_cxt.portal_mem_cxt;
+    saveOldUserid = GetOldUserId(false);
 
     if (OidIsValid(portal->cursorHoldUserId)) {
         /* GetUserIdAndSecContext is cheap enough that no harm in a wasted call */
         GetUserIdAndSecContext(&saveUserid, &saveSecContext);
+        SetOldUserId(saveUserid, false);
         SetUserIdAndSecContext(portal->cursorHoldUserId, 
-            portal->cursorHoldSecRestrictionCxt | SECURITY_LOCAL_USERID_CHANGE);
+            portal->cursorHoldSecRestrictionCxt | SECURITY_LOCAL_USERID_CHANGE | SENDER_LOCAL_USERID_CHANGE);
     }
     PG_TRY();
     {
@@ -421,6 +424,12 @@ void PersistHoldablePortal(Portal portal)
 
         (*queryDesc->dest->rDestroy)(queryDesc->dest);
         queryDesc->dest = NULL;
+
+        if (is_rollback && queryDesc->estate->have_current_xact_date) {
+            portal->have_rollback_transaction = true;
+        } else {
+            portal->have_rollback_transaction = false;
+        }
 
         /*
          * Now shut down the inner executor.
@@ -474,6 +483,7 @@ void PersistHoldablePortal(Portal portal)
             tuplestore_rescan(portal->holdStore);
         }
 #endif
+        SetOldUserId(saveOldUserid, false);
     }
     PG_CATCH();
     {
@@ -487,6 +497,7 @@ void PersistHoldablePortal(Portal portal)
         if (OidIsValid(portal->cursorHoldUserId)) {
             SetUserIdAndSecContext(saveUserid, saveSecContext);
         }
+        SetOldUserId(saveOldUserid, false);
         PG_RE_THROW();
     }
     PG_END_TRY();

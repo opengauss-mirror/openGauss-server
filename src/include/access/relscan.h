@@ -141,6 +141,9 @@ typedef struct IndexScanDescData {
     /* used in ubtree only, indicate that we need to recheck the returned IndexTuple */
     bool xs_recheck_itup;
 
+    /* indicate whether this scan is for sampling only */
+    bool xs_sampling_scan;
+
     /* state data for traversing HOT chains in index_getnext */
     bool xs_continue_hot; /* T if must keep walking HOT chain */
     IndexFetchTableData *xs_heapfetch;

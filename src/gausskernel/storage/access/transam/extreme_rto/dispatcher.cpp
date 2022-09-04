@@ -129,6 +129,7 @@ static bool DispatchXactRecord(XLogReaderState *record, List *expectedTLIs, Time
 static bool DispatchSmgrRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
 static bool DispatchCLogRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
 static bool DispatchHashRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
+static bool DispatchCompresseShrinkRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
 static bool DispatchDataBaseRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
 static bool DispatchTableSpaceRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
 static bool DispatchMultiXactRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
@@ -215,6 +216,8 @@ static const RmgrDispatchData g_dispatchTable[RM_MAX_ID + 1] = {
     { DispatchSegpageSmgrRecord, RmgrRecordInfoValid, RM_SEGPAGE_ID, XLOG_SEG_ATOMIC_OPERATION,
         XLOG_SEG_NEW_PAGE},
     { DispatchRepOriginRecord, RmgrRecordInfoValid, RM_REPLORIGIN_ID, XLOG_REPLORIGIN_SET, XLOG_REPLORIGIN_DROP },
+    { DispatchCompresseShrinkRecord, RmgrRecordInfoValid, RM_COMPRESSION_REL_ID, XLOG_CFS_SHRINK_OPERATION,
+        XLOG_CFS_SHRINK_OPERATION },
 };
 
 const int REDO_WAIT_SLEEP_TIME = 5000; /* 5ms */
@@ -1175,6 +1178,13 @@ static bool DispatchHashRecord(XLogReaderState *record, List *expectedTLIs, Time
     return isNeedFullSync;
 }
 
+/* for cfs row-compression. */
+static bool DispatchCompresseShrinkRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
+{
+    DispatchTxnRecord(record, expectedTLIs);
+    return true;
+}
+
 static bool DispatchBtreeRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
 {
     uint8 info = (XLogRecGetInfo(record) & (~XLR_INFO_MASK));
@@ -1616,7 +1626,12 @@ void ClearRecordInfo(XLogReaderState *xlogState)
 #endif
     }
     xlogState->max_block_id = -1;
-    
+    if (xlogState->readRecordBufSize > BIG_RECORD_LENGTH) {
+        pfree(xlogState->readRecordBuf);
+        xlogState->readRecordBuf = NULL;
+        xlogState->readRecordBufSize = 0;
+    }
+
     xlogState->isDecode = false;
     xlogState->isFullSync = false;
     xlogState->refcount = 0;
@@ -1625,13 +1640,13 @@ void ClearRecordInfo(XLogReaderState *xlogState)
 /* Run from each page worker thread. */
 void FreeRedoItem(RedoItem *item)
 {
-#ifdef USE_ASSERT_CHECKING
     if (item->record.isDecode) {
+#ifdef USE_ASSERT_CHECKING
         ItemBlocksOfItemIsReplayed(item);
         ItemLsnCheck(item);
-    }
 #endif
-    CountXLogNumbers(&item->record);
+        CountXLogNumbers(&item->record);
+    }
     ClearRecordInfo(&item->record);
     pg_write_barrier();
     RedoItem *oldHead = (RedoItem *)pg_atomic_read_uintptr((uintptr_t *)&g_dispatcher->freeHead);
@@ -1889,6 +1904,13 @@ void UpdateStandbyState(HotStandbyState newState)
         UpdatePageRedoWorkerStandbyState(g_dispatcher->readLine.readPageThd, newState);
         UpdatePageRedoWorkerStandbyState(g_dispatcher->readLine.readThd, newState);
         pg_atomic_write_u32(&(g_dispatcher->standbyState), newState);
+    }
+}
+
+void UpdateMinRecoveryForTrxnRedoThd(XLogRecPtr newMinRecoveryPoint)
+{
+    if ((get_real_recovery_parallelism() > 1) && (GetBatchCount() > 0)) {
+        g_dispatcher->trxnLine.redoThd->minRecoveryPoint = newMinRecoveryPoint;
     }
 }
 
@@ -2160,13 +2182,6 @@ static bool DispatchUHeapUndoRecord(XLogReaderState* record, List* expectedTLIs,
             undo::XlogUndoExtend *xlrec = (undo::XlogUndoExtend *) XLogRecGetData(record);
             zoneId = UNDO_PTR_GET_ZONE_ID(xlrec->tail);
             opName = "UNDO_ALLOCATE";
-            break;
-        }
-        case XLOG_UNDO_CLEAN: 
-        case XLOG_SLOT_CLEAN: {
-            undo::XlogUndoClean *xlrec = (undo::XlogUndoClean *)XLogRecGetData(record);
-            zoneId = UNDO_PTR_GET_ZONE_ID(xlrec->tail);
-            opName = "UNDO_CLEAN";
             break;
         }
         default: {

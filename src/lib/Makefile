@@ -26,7 +26,7 @@ subdir = src/lib
 top_builddir = ../..
 include $(top_builddir)/src/Makefile.global
 
-SUBDIRS = build_query config pgcommon alarm gstrace hotpatch cm_common cm_communication page_compression
+SUBDIRS = build_query config pgcommon alarm gstrace page_compression hotpatch cm_common cm_communication
 
 $(recurse)
 

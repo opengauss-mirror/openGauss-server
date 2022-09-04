@@ -298,11 +298,11 @@ PGXCNodeConnStr(const char *host, int port, const char *dbname,
         num = snprintf_s(connstr, sizeof(connstr), sizeof(connstr)-1,
             "host=%s port=%d dbname=%s user=%s application_name=%s connect_timeout=%d rw_timeout=%d "
             "options='-c remotetype=%s %s' prototype=%d "
-            "keepalives_idle=%d keepalives_interval=%d keepalives_count=%d",
+            "keepalives_idle=%d keepalives_interval=%d keepalives_count=%d tcp_user_timeout=%d",
             host, port, dbname, user, appName, u_sess->attr.attr_network.PoolerConnectTimeout,
             u_sess->attr.attr_network.PoolerTimeout, remote_type, pgoptions, proto_type,
             u_sess->attr.attr_common.tcp_keepalives_idle, u_sess->attr.attr_common.tcp_keepalives_interval,
-            u_sess->attr.attr_common.tcp_keepalives_count);
+            u_sess->attr.attr_common.tcp_keepalives_count, u_sess->attr.attr_common.tcp_user_timeout);
 	/* Check for overflow */
 	if (num != -1)
 	{
@@ -1893,7 +1893,7 @@ void pgxc_palloc_net_ctl(int conn_num)
 bool
 pgxc_node_receive(const int conn_count,
 							PGXCNodeHandle **connections,
-							struct timeval *timeout)
+							struct timeval *timeout, bool ignoreTimeoutWarning)
 {
 #ifndef ENABLE_MULTIPLE_NODES
 	Assert(false);

@@ -106,6 +106,24 @@ typedef enum {
     PGC_S_SESSION          /* SET command */
 } GucSource;
 
+typedef enum {
+    AES_128_CBC,
+    AES_192_CBC,
+    AES_256_CBC,
+    AES_128_CFB1,
+    AES_192_CFB1,
+    AES_256_CFB1,
+    AES_128_CFB8,
+    AES_192_CFB8,
+    AES_256_CFB8,
+    AES_128_CFB128,
+    AES_192_CFB128,
+    AES_256_CFB128,
+    AES_128_OFB,
+    AES_192_OFB,
+    AES_256_OFB
+} AesBlockMode;
+
 /*
  * Parsing the configuration file will return a list of name-value pairs
  * with source location info.
@@ -362,6 +380,7 @@ typedef enum {
     PRED_PUSH = 64, /* push predicate into subquery block */
     PRED_PUSH_NORMAL = 128,
     PRED_PUSH_FORCE = 256,
+    SUBLINK_PULLUP_DISABLE_EXPR = 512, /* disable pull sublink in expr clause */
 } rewrite_param;
 
 typedef enum {
@@ -380,7 +399,8 @@ typedef enum {
     A_STYLE_COERCE = 2048,
     PLPGSQL_STREAM_FETCHALL = 4096, /* fetch all tuple when has stream sql under plpgsql's for-loop */
     PREDPUSH_SAME_LEVEL = 8192, /* predpush same level */
-    PARTITION_FDW_ON = 16384 /* support create foreign table on partitioned table */
+    PARTITION_FDW_ON = 16384, /* support create foreign table on partitioned table */
+    DISABLE_BITMAP_COST_WITH_LOSSY_PAGES = 32768 /* stop computing bitmap path cost with lossy pages */ 
 } sql_beta_param;
 
 typedef enum {
@@ -394,6 +414,12 @@ typedef enum {
     SQL_OVERWRITE_NULL
 }SqlIgnoreHandleStrategy;
 
+typedef enum {
+    BAYESNET_OPTION,
+    MCV_OPTION,
+    ALL_OPTION
+} MultiStatsOptions;
+
 #define ENABLE_PRED_PUSH(root) \
     ((PRED_PUSH & (uint)u_sess->attr.attr_sql.rewrite_rule) && permit_predpush(root))
 
@@ -402,6 +428,9 @@ typedef enum {
 
 #define ENABLE_PRED_PUSH_FORCE(root) \
     ((PRED_PUSH_FORCE & (uint)u_sess->attr.attr_sql.rewrite_rule) && permit_predpush(root))
+
+#define DISABLE_SUBLINK_PULLUP_EXPR() \
+    ((SUBLINK_PULLUP_DISABLE_EXPR) & (uint)u_sess->attr.attr_sql.rewrite_rule)
 
 #define ENABLE_PRED_PUSH_ALL(root) \
     ((ENABLE_PRED_PUSH(root) || ENABLE_PRED_PUSH_NORMAL(root) || ENABLE_PRED_PUSH_FORCE(root)) && permit_predpush(root))
@@ -412,7 +441,8 @@ typedef enum {
 #define PARTITION_OPFUSION_MAX_NUMA_NODE 4
 #define PARTITION_ENABLE_CACHE_OPFUSION             \
     (ENABLE_SQL_BETA_FEATURE(PARTITION_OPFUSION) && \
-        g_instance.shmem_cxt.numaNodeNum <= PARTITION_OPFUSION_MAX_NUMA_NODE)
+        g_instance.shmem_cxt.numaNodeNum <= PARTITION_OPFUSION_MAX_NUMA_NODE && \
+        !g_instance.attr.attr_common.enable_global_syscache)
 
 typedef enum {
     SUMMARY = 0, /* not collect multi column statistics info */

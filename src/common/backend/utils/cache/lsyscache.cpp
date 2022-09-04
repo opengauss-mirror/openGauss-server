@@ -79,6 +79,10 @@
 #include "catalog/pg_proc_fn.h"
 #include "catalog/gs_package.h"
 
+#ifndef ENABLE_MULTIPLE_NODES
+#include "optimizer/func_dependency.h"
+#endif
+
 
 /*				---------- AMOP CACHES ----------						 */
 
@@ -4162,6 +4166,15 @@ bool type_is_enum(Oid typid)
 }
 
 /*
+ * type_is_set
+ *	  Returns true if the given type is an set type.
+ */
+bool type_is_set(Oid typid)
+{
+    return (get_typtype(typid) == TYPTYPE_SET);
+}
+
+/*
  * type_is_range
  *	  Returns true if the given type is a range type.
  */
@@ -4816,6 +4829,173 @@ bool get_attmultistatsslot(HeapTuple statstuple, Oid atttype, int32 atttypmod, i
     }
     return true;
 }
+
+#ifndef ENABLE_MULTIPLE_NODES
+/*
+ * get_slot_index_dependency
+ *      Given a statstuple and a reqkind, return the slot index.
+ *      Return -1, if not found.
+ */
+int get_slot_index_dependencies(HeapTuple statstuple, int reqkind)
+{
+    Form_pg_statistic_ext stats = (Form_pg_statistic_ext)GETSTRUCT(statstuple);
+    int slot_index = 0;
+    for (slot_index = 0; slot_index < STATISTIC_NUM_SLOTS; ++slot_index) {
+        if ((&stats->stakind1)[slot_index] == reqkind) {
+            break;
+        }
+    }
+    if (slot_index >= STATISTIC_NUM_SLOTS) {
+        slot_index = -1;
+    }
+    return slot_index;
+}
+
+/*
+ * get_attmultistatsslot_dependencies
+ *      Extract functional dependency relations from PG_STATISTIC_EXT.
+ *      Return TRUE if requested slot type was found, else FALSE.
+ *
+ * stakind must be STATISTIC_EXT_DEPENDENCIES. The attributes are saved in stavalues slot and the degrees are saved in
+ * stanumbers slot. These two lists must have the same length.
+ * For example:
+ *      stavalues: {.625,.375,.625}
+ *      stanumbers: {"{1,2,3}","{1,3,2}","{2,3,1}"
+ * We can extract three functional dependency relations as follows
+ *      "1, 2 -> 3 : 0.625"
+ *      "1, 3 -> 2 : 0.375"
+ *      "2, 3 -> 1 : 0.625"
+ */
+bool get_attmultistatsslot_dependencies(bool dependencies_flag, HeapTuple statstuple, int reqkind,
+    MVDependencies **dependencies)
+{
+    Datum* values = NULL;
+    int nvalues;
+    float4* numbers = NULL;
+    int nnumbers;
+    Datum val;
+    bool isnull = false;
+    ArrayType* statarray = NULL;
+    Oid arrayelemtype;
+    HeapTuple typeTuple;
+    Form_pg_type typeForm;
+    int slot_index;
+
+    /* PART 1: Find the slot index where saved the functional dependency relations */
+    if (!dependencies_flag) {
+        return false;
+    }
+    slot_index = get_slot_index_dependencies(statstuple, reqkind);
+    if (slot_index == -1) {
+        return false;
+    }
+
+    /* PART 2: Extract attributes of functional dependency relations */
+    val = SysCacheGetAttr(STATRELKINDKEYINH, statstuple, Anum_pg_statistic_ext_stavalues1 + slot_index, &isnull);
+    if (isnull) {
+        ereport(ERROR,
+                (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmsg("stavalues is null when extract multi statistics")));
+    }
+    statarray = DatumGetArrayTypeP(val);
+    arrayelemtype = ARR_ELEMTYPE(statarray);
+    typeTuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(arrayelemtype));
+    if (!HeapTupleIsValid(typeTuple)) {
+        ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                        errmsg("cache lookup failed for type %u when extract multi statistics", arrayelemtype)));
+    }
+    typeForm = (Form_pg_type)GETSTRUCT(typeTuple);
+
+    /* Deconstruct array into Datum elements; NULLs not expected */
+    deconstruct_array(statarray, arrayelemtype, typeForm->typlen, typeForm->typbyval, typeForm->typalign, &values, NULL,
+                      &nvalues);
+
+    /* Allocate memory for functional dependency relations */
+    *dependencies = (MVDependencies *)palloc0(offsetof(MVDependencies, deps) + nvalues * sizeof(char *));
+    (*dependencies)->magic = STATS_DEPS_MAGIC;
+    (*dependencies)->type = STATS_DEPS_TYPE_BASIC;
+    (*dependencies)->ndeps = nvalues;
+    for (int i = 0; i < nvalues; ++i) {
+        ArrayType *attr_value_array = DatumGetArrayTypeP(values[i]);
+        Oid attr_type = ARR_ELEMTYPE(attr_value_array);
+        HeapTuple attr_type_tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(attr_type));
+        if (!HeapTupleIsValid(attr_type_tuple)) {
+            ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                            errmsg("cache lookup failed for type %u when extract multi statistics", attr_type)));
+        }
+        Form_pg_type attr_type_form = (Form_pg_type)GETSTRUCT(attr_type_tuple);
+        Datum* attr_values = NULL;
+        bool* attr_nulls = NULL;
+        int attr_nvalues = 0;
+        deconstruct_array(attr_value_array, attr_type, attr_type_form->typlen, attr_type_form->typbyval,
+                          attr_type_form->typalign, &attr_values, &attr_nulls, &attr_nvalues);
+
+        (*dependencies)->deps[i] =
+            (MVDependency *)palloc0(offsetof(MVDependency, attributes) + attr_nvalues * sizeof(AttrNumber));
+        (*dependencies)->deps[i]->nattributes = (AttrNumber)attr_nvalues;
+        for (int j = 0; j < attr_nvalues; j++) {
+            (*dependencies)->deps[i]->attributes[j] = (AttrNumber)(attr_values[j]);
+        }
+        /*
+         * The functional dependency degree is initialized as 0 here in consideration of robustness.
+         * 0 means no functional dependency relation among these attributes and this statistic info will no be used for
+         * computing selectivity. It will be updated with its real degree in PART 3.
+         */
+        (*dependencies)->deps[i]->degree = 0;
+
+        ReleaseSysCache(attr_type_tuple);
+        if ((Pointer)attr_value_array != DatumGetPointer(values[i])) {
+            pfree_ext(attr_value_array);
+        }
+        pfree_ext(attr_values);
+        pfree_ext(attr_nulls);
+    }
+
+    ReleaseSysCache(typeTuple);
+
+    /* Free statarray if it's a detoasted copy. */
+    if ((Pointer)statarray != DatumGetPointer(val)) {
+        pfree_ext(statarray);
+    }
+
+    /* PART 3: Extract and update the real degree of each functional dependency relation. */
+    val = SysCacheGetAttr(STATRELKINDKEYINH, statstuple, Anum_pg_statistic_ext_stanumbers1 + slot_index, &isnull);
+    if (isnull) {
+        ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmsg("stanumbers is null")));
+    }
+
+    statarray = DatumGetArrayTypeP(val);
+    nnumbers = ARR_DIMS(statarray)[0];
+    if (ARR_NDIM(statarray) != 1 || nnumbers <= 0 || ARR_HASNULL(statarray) || ARR_ELEMTYPE(statarray) != FLOAT4OID) {
+        ereport(ERROR,
+            (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg("stanumbers is not a 1-D float4 array")));
+    }
+    if (nvalues != nnumbers) {
+        ereport(ERROR,
+            (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg("nvalues isn't equal to nnumbers")));
+    }
+
+    numbers = (float4 *)palloc(nnumbers * sizeof(float4));
+    errno_t rc = memcpy_s(numbers, nnumbers * sizeof(float4), ARR_DATA_PTR(statarray), nnumbers * sizeof(float4));
+    securec_check(rc, "\0", "\0");
+
+    for (int i = 0; i < nnumbers; i++) {
+        if (numbers[i] < 0 || numbers[i] > 1) {
+            ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                errmsg("functional dependency degree must be greater than 0 and less than 1 strictly")));
+        }
+        (*dependencies)->deps[i]->degree = numbers[i];
+    }
+
+    pfree_ext(numbers);
+
+    /* Free statarray if it's a detoasted copy. */
+    if ((Pointer)statarray != DatumGetPointer(val)) {
+        pfree_ext(statarray);
+    }
+
+    return true;
+}
+#endif
 
 /*
  * free_attstatsslot

@@ -615,7 +615,6 @@ static XLogRecParseState *BtreeXlogSplitParseBlock(XLogReaderState *record, uint
 static XLogRecParseState *BtreeXlogVacuumParseBlock(XLogReaderState *record, uint32 *blocknum)
 {
     XLogRecParseState *recordstatehead = NULL;
-    XLogRecParseState *blockstate = NULL;
 
     *blocknum = 1;
     XLogParseBufferAllocListFunc(record, &recordstatehead, NULL);
@@ -624,27 +623,6 @@ static XLogRecParseState *BtreeXlogVacuumParseBlock(XLogReaderState *record, uin
     }
 
     XLogRecSetBlockDataState(record, BTREE_VACUUM_ORIG_BLOCK_NUM, recordstatehead);
-
-    if (g_supportHotStandby) {
-        BlockNumber thisblkno;
-        RelFileNode thisrnode;
-
-        xl_btree_vacuum *xlrec = (xl_btree_vacuum *)XLogRecGetData(record);
-        XLogRecGetBlockTag(record, BTREE_VACUUM_ORIG_BLOCK_NUM, &thisrnode, NULL, &thisblkno);
-
-        if ((xlrec->lastBlockVacuumed + 1) < thisblkno) {
-            (*blocknum)++;
-            XLogParseBufferAllocListFunc(record, &blockstate, recordstatehead);
-            if (blockstate == NULL) {
-                return NULL;
-            }
-
-            RelFileNodeForkNum filenode = RelFileNodeForkNumFill(&thisrnode, InvalidBackendId, MAIN_FORKNUM, thisblkno);
-            XLogRecSetBlockCommonState(record, BLOCK_DATA_VACUUM_PIN_TYPE, filenode, blockstate);
-            XLogRecSetPinVacuumState(&blockstate->blockparse.extra_rec.blockvacuumpin, xlrec->lastBlockVacuumed);
-        }
-    }
-
     return recordstatehead;
 }
 

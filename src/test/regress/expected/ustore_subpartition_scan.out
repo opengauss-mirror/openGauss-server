@@ -29,7 +29,6 @@ insert into range_list values('201902', '2', '1', 1);
 insert into range_list values('201902', '1', '1', 1);
 insert into range_list values('201903', '2', '1', 1);
 insert into range_list values('201903', '1', '1', 1);
-insert into range_list values('201903', '2', '1', 1);
 explain(costs off, verbose on) select * from range_list order by 1, 2, 3, 4;
                                             QUERY PLAN                                             
 ---------------------------------------------------------------------------------------------------
@@ -53,8 +52,7 @@ select * from range_list order by 1, 2, 3, 4;
  201902     | 2         | 1       |         1
  201903     | 1         | 1       |         1
  201903     | 2         | 1       |         1
- 201903     | 2         | 1       |         1
-(6 rows)
+(5 rows)
 
 create index idx_month_code on range_list(month_code) local;
 create index idx_dept_code on range_list(dept_code) local;
@@ -144,8 +142,7 @@ select * from range_list where user_no = '1' order by 1, 2, 3, 4;
  201902     | 2         | 1       |         1
  201903     | 1         | 1       |         1
  201903     | 2         | 1       |         1
- 201903     | 2         | 1       |         1
-(6 rows)
+(5 rows)
 
 set enable_bitmapscan = off;
 explain(costs off, verbose on) select * from range_list where month_code = '201902' order by 1, 2, 3, 4;
@@ -220,8 +217,7 @@ select * from range_list where user_no = '1' order by 1, 2, 3, 4;
  201902     | 2         | 1       |         1
  201903     | 1         | 1       |         1
  201903     | 2         | 1       |         1
- 201903     | 2         | 1       |         1
-(6 rows)
+(5 rows)
 
 reset enable_seqscan;
 reset enable_bitmapscan;

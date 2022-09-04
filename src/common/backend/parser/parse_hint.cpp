@@ -186,7 +186,7 @@ static void append_value(StringInfo buf, Value* value, Node* node)
 }
 
 #define HINT_NUM 17
-#define HINT_KEYWORD_NUM 22
+#define HINT_KEYWORD_NUM 23
 
 typedef struct {
     HintKeyword keyword;
@@ -215,6 +215,7 @@ const char* G_HINT_KEYWORD[HINT_KEYWORD_NUM] = {
     (char*) HINT_CPLAN,
     (char*) HINT_GPLAN,
     (char*) HINT_SQL_IGNORE,
+    (char*) HINT_CHOOSE_ADAPTIVE_GPLAN,
     (char*) HINT_NO_GPC,
 };
 
@@ -1213,7 +1214,7 @@ HintState* HintStateCreate()
     hstate->cache_plan_hint = NIL;
     hstate->no_expand_hint = NIL;
     hstate->sql_ignore_hint = false;
-
+    hstate->from_sql_patch = false;
     return hstate;
 }
 
@@ -1415,24 +1416,9 @@ const AddHintFunc G_HINT_CREATOR[HINT_NUM] = {
     AddNoGPCHint,
 };
 
-/*
- * @Description: Generate hint struct according to hint str.
- * @in hints: Hint string.
- * @return: Hintstate struct.
- */
-HintState* create_hintstate(const char* hints)
+HintState* create_hintstate_worker(const char* hint_str)
 {
-    if (hints == NULL) {
-        return NULL;
-    }
-
-    char* hint_str = NULL;
     HintState* hstate = NULL;
-
-    hint_str = get_hints_from_comment(hints);
-    if (hint_str == NULL) {
-        return NULL;
-    }
 
     /* Initilized plan hint variable, which will be set in hint parser */
     u_sess->parser_cxt.hint_list = u_sess->parser_cxt.hint_warning = NIL;
@@ -1497,6 +1483,29 @@ HintState* create_hintstate(const char* hints)
         /* Only keep the last cplan/gplanhint */
         hstate->cache_plan_hint = keep_last_hint_cell(hstate->cache_plan_hint);
     }
+
+    return hstate;
+}
+
+/*
+ * @Description: Generate hint struct according to hint str.
+ * @in hints: Hint string.
+ * @return: Hintstate struct.
+ */
+HintState* create_hintstate(const char* hints)
+{
+    if (hints == NULL) {
+        return NULL;
+    }
+
+    char* hint_str = NULL;
+
+    hint_str = get_hints_from_comment(hints);
+    if (hint_str == NULL) {
+        return NULL;
+    }
+
+    HintState* hstate = create_hintstate_worker(hint_str);
 
     pfree_ext(hint_str);
     return hstate;
@@ -2689,7 +2698,7 @@ static void set_colinfo_by_relation(Oid relid, int location, SkewColumnInfo* col
 {
     ResourceOwner currentOwner = t_thrd.utils_cxt.CurrentResourceOwner;
     ResourceOwner tmpOwner;
-    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "ForSkewHint",
+    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(currentOwner, "ForSkewHint",
         THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER));
     Relation relation = NULL;
 
@@ -3401,7 +3410,13 @@ static void transform_predpush_hint(PlannerInfo* root, Query* parse, List* predp
         }
 
         int relid = find_relid_aliasname(parse, predpush_hint->dest_name, true);
-        if (relid <= NOTFOUNDRELNAME) {
+        if (relid == NOTFOUNDRELNAME) {
+            append_warning_to_list(root, (Hint *)predpush_hint, "Error hint:%s, relation name \"%s\" is not found.",
+                                   hint_string, predpush_hint->dest_name);
+            continue;
+        } else if (relid == AMBIGUOUSRELNAME) {
+            append_warning_to_list(root, (Hint *)predpush_hint, "Error hint:%s, relation name \"%s\" is ambiguous.",
+                                   hint_string, predpush_hint->dest_name);
             continue;
         }
 
@@ -3499,8 +3514,11 @@ static unsigned int get_rewrite_rule_bits(RewriteHint* hint)
         else if (pg_strcasecmp(param_name, "intargetlist") == 0) {
             bits = bits | SUBLINK_PULLUP_IN_TARGETLIST;
         }
-        else {
-            elog(WARNING, "invalid rewrite rule. (Supported rules: lazyagg, magicset, partialpush, uniquecheck, disablerep, intargetlist)");
+        else if (pg_strcasecmp(param_name, "disable_pullup_expr_sublink") == 0) {
+            bits = bits | SUBLINK_PULLUP_DISABLE_EXPR;
+        } else {
+            elog(WARNING, "invalid rewrite rule. (Supported rules: lazyagg, magicset, partialpush, uniquecheck, "
+                          "disablerep, intargetlist,disable_pullup_expr_sublink)");
         }
     }
 
@@ -3530,8 +3548,10 @@ bool permit_from_rewrite_hint(PlannerInfo *root, unsigned int params)
         else 
             bits = rewrite_hint->param_bits;
 
-        if (bits & params)
+        if (bits & params) {
+            rewrite_hint->base.state = HINT_STATE_USED;
             return false;
+        }
     }
     return true;
 }
@@ -3799,7 +3819,7 @@ bool permit_predpush(PlannerInfo *root)
     return !predpushHint->negative;
 }
 
-const unsigned int G_NUM_SET_HINT_WHITE_LIST = 33;
+const unsigned int G_NUM_SET_HINT_WHITE_LIST = 38;
 const char* G_SET_HINT_WHITE_LIST[G_NUM_SET_HINT_WHITE_LIST] = {
     /* keep in the ascending alphabetical order of frequency */
     (char*)"best_agg_plan",
@@ -3812,6 +3832,7 @@ const char* G_SET_HINT_WHITE_LIST[G_NUM_SET_HINT_WHITE_LIST] = {
     (char*)"enable_bitmapscan",
     (char*)"enable_broadcast",
     (char*)"enable_fast_query_shipping",
+    (char*)"enable_functional_dependency",
     (char*)"enable_hashagg",
     (char*)"enable_hashjoin",
     (char*)"enable_index_nestloop",
@@ -3831,10 +3852,14 @@ const char* G_SET_HINT_WHITE_LIST[G_NUM_SET_HINT_WHITE_LIST] = {
     (char*)"enable_tidscan",
     (char*)"enable_trigger_shipping",
     (char*)"node_name",
+    (char*)"partition_iterator_elimination",
+    (char*)"partition_page_estimation",
     (char*)"query_dop",
     (char*)"random_page_cost",
+    (char*)"rewrite_rule",
     (char*)"seq_page_cost",
-    (char*)"try_vector_engine_strategy"};
+    (char*)"try_vector_engine_strategy",
+    (char*)"var_eq_const_selectivity"};
 
 static int param_str_cmp(const void *s1, const void *s2)
 {

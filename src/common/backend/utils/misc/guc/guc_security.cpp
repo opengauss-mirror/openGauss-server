@@ -35,7 +35,6 @@
 #include "access/twophase.h"
 #include "access/xact.h"
 #include "access/xlog.h"
-#include "access/dfs/dfs_insert.h"
 #include "gs_bbox.h"
 #include "catalog/namespace.h"
 #include "catalog/pgxc_group.h"
@@ -707,7 +706,7 @@ static void InitSecurityConfigureNamesInt()
             0},
             &u_sess->attr.attr_security.Audit_RemainThreshold,
             1024 * 1024,
-            1,
+            100,
             1024 * 1024,
             NULL,
             NULL,
@@ -796,9 +795,9 @@ static void InitSecurityConfigureNamesInt()
             NULL,
             0},
             &u_sess->attr.attr_security.Audit_DDL,
-            12295,
+            67121159,
             0,
-            67108863,
+            134217727,
             NULL,
             NULL,
             NULL},
@@ -870,7 +869,7 @@ static void InitSecurityConfigureNamesInt()
             gettext_noop("audit set operation."),
             NULL},
             &u_sess->attr.attr_security.Audit_Set,
-            1,
+            0,
             0,
             1,
             NULL,

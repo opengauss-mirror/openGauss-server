@@ -423,30 +423,68 @@ static void set_rcv_slot_name(const char *slotname)
 
     SpinLockAcquire(&walrcv->mutex);
     if (slotname != NULL) {
-        retcode = strncpy_s((char *)walrcv->slotname, NAMEDATALEN, slotname, NAMEDATALEN - 1);
+        /* Three bytes are reserverd: one for string termination and two for double quotes */
+        retcode = strncpy_s((char *)walrcv->slotname, NAMEDATALEN, slotname, NAMEDATALEN - 3);
         securec_check(retcode, "\0", "\0");
     } else if (u_sess->attr.attr_common.application_name && strlen(u_sess->attr.attr_common.application_name) > 0) {
         int rc = 0;
-        rc = snprintf_s((char *)walrcv->slotname, NAMEDATALEN, NAMEDATALEN - 1, "%s",
-                        u_sess->attr.attr_common.application_name);
-        securec_check_ss(rc, "\0", "\0");
+        size_t length = NAMEDATALEN - 3; /* one for string termination and two for double quotes */
+
+        if (strlen(u_sess->attr.attr_common.application_name) < length)
+            length = strlen(u_sess->attr.attr_common.application_name);
+
+        rc = memcpy_s((char *)walrcv->slotname, NAMEDATALEN, u_sess->attr.attr_common.application_name, length);
+        securec_check(rc, "\0", "\0");
+
+        walrcv->slotname[length] = '\0';
     } else if (g_instance.attr.attr_common.PGXCNodeName != NULL) {
         int rc = 0;
+        size_t length = NAMEDATALEN - 3; /* one for string termination and two for double quotes */
 
         if (IS_DN_DUMMY_STANDYS_MODE()) {
-            rc = snprintf_s((char *)walrcv->slotname, NAMEDATALEN, NAMEDATALEN - 1, "%s",
-                            g_instance.attr.attr_common.PGXCNodeName);
+            if (strlen(g_instance.attr.attr_common.PGXCNodeName) < length)
+                length = strlen(g_instance.attr.attr_common.PGXCNodeName);
+
+            rc = memcpy_s((char *)walrcv->slotname, NAMEDATALEN, g_instance.attr.attr_common.PGXCNodeName, length);
+            securec_check(rc, "\0", "\0");
+
+            walrcv->slotname[length] = '\0';
         } else if (conninfo != NULL) {
             char slotData[NAMEDATALEN] = {'\0'};
             char *slotTmp = NULL;
+            char *tot_name = NULL;
+            /* 8 stands for 5 digit port number plus two underscore plus string termination */
+            size_t tot_length = strlen(g_instance.attr.attr_common.PGXCNodeName) + 8;
 
             /* trim char  ':' and '%' */
             slotTmp = trim_ipv6_char(conninfo->localhost, slotData);
+            tot_length += strlen(slotTmp);
 
-            rc = snprintf_s((char *)walrcv->slotname, NAMEDATALEN, NAMEDATALEN - 1, "%s_%s_%d",
+            tot_name = (char *)palloc(tot_length);
+            rc = snprintf_s(tot_name, tot_length, tot_length - 1, "%s_%s_%d",
                             g_instance.attr.attr_common.PGXCNodeName, slotTmp, conninfo->localport);
+            securec_check_ss(rc, "\0", "\0");
+
+            if (strlen(tot_name) <= length) {
+                length = strlen(tot_name);
+
+                rc = memcpy_s((char *)walrcv->slotname, NAMEDATALEN, tot_name, length);
+                securec_check(rc, "\0", "\0");
+            } else {
+                size_t sub_length = 0;
+                sub_length = strlen(g_instance.attr.attr_common.PGXCNodeName) - (strlen(tot_name) - length);
+
+                rc = memcpy_s((char *)walrcv->slotname, NAMEDATALEN, tot_name, sub_length);
+                securec_check(rc, "\0", "\0");
+
+                rc = memcpy_s((char *)walrcv->slotname + sub_length, NAMEDATALEN - sub_length,
+                    tot_name + strlen(g_instance.attr.attr_common.PGXCNodeName), length - sub_length);
+                securec_check(rc, "\0", "\0");
+            }
+
+            walrcv->slotname[length] = '\0';
+            pfree(tot_name);
         }
-        securec_check_ss(rc, "\0", "\0");
     } else
         walrcv->slotname[0] = '\0';
 
@@ -566,7 +604,7 @@ void ShutdownWalRcv(void)
  */
 void RequestXLogStreaming(XLogRecPtr *recptr, const char *conninfo, ReplConnTarget conn_target, const char *slotname)
 {
-    if (IS_SHARED_STORAGE_MODE) {
+    if (IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE) {
         ShareStorageXLogCtl *ctlInfo = g_instance.xlog_cxt.shareStorageXLogCtl;
         ReadShareStorageCtlInfo(ctlInfo);
         if ((uint64)g_instance.attr.attr_storage.xlog_file_size != ctlInfo->xlogFileSize) {
@@ -623,9 +661,13 @@ void RequestXLogStreaming(XLogRecPtr *recptr, const char *conninfo, ReplConnTarg
         SpinLockRelease(&walrcv->mutex);
         return;
     }
+
+    if (walrcv->walRcvState != WALRCV_STOPPED) {
+        SpinLockRelease(&walrcv->mutex);
+        return;
+    }
     walrcv->conn_target = conn_target;
-    /* It better be stopped before we try to restart it */
-    Assert(walrcv->walRcvState == WALRCV_STOPPED);
+    walrcv->walRcvState = WALRCV_STARTING;
     if(conn_target != REPCONNTARGET_OBS) {
         if (conninfo != NULL) {
             retcode = strncpy_s((char *)walrcv->conninfo, MAXCONNINFO, conninfo, MAXCONNINFO - 1);
@@ -641,8 +683,7 @@ void RequestXLogStreaming(XLogRecPtr *recptr, const char *conninfo, ReplConnTarg
         set_rcv_slot_name(slotname);
         SpinLockAcquire(&walrcv->mutex);
     }
-
-    walrcv->walRcvState = WALRCV_STARTING;
+    
     walrcv->startTime = now;
 
     /*
@@ -1083,6 +1124,8 @@ const char* wal_get_role_string(ServerMode mode, bool getPeerRole)
         {
             if (am_cascade_standby() && !getPeerRole) {
                 return "Cascade Standby";
+            } else if (am_cascade_standby() && getPeerRole && t_thrd.postmaster_cxt.HaShmData->is_cross_region) {
+                return "Main Standby";
             } else if (AM_HADR_WAL_RECEIVER && !getPeerRole) {
                 return "Main Standby";
             } else {
@@ -1189,8 +1232,8 @@ static void wal_get_ha_rebuild_reason_with_multi(char *buildReason, ServerMode l
         replConnInfo = t_thrd.postmaster_cxt.ReplConnArray[hashmdata->current_repl];
     }
     if ((replConnInfo != NULL &&
-        (walrcv->conn_target == REPCONNTARGET_PRIMARY || am_cascade_standby() || IS_SHARED_STORAGE_MODE)) ||
-        IS_OBS_DISASTER_RECOVER_MODE) {
+        (walrcv->conn_target == REPCONNTARGET_PRIMARY || am_cascade_standby() ||
+        walrcv->conn_target == REPCONNTARGET_SHARED_STORAGE)) || IS_OBS_DISASTER_RECOVER_MODE) {
         if (hashmdata->repl_reason[hashmdata->current_repl] == NONE_REBUILD && isRunning) {
             rcs = snprintf_s(buildReason, MAXFNAMELEN, MAXFNAMELEN - 1, "%s", "Normal");
             securec_check_ss(rcs, "\0", "\0");

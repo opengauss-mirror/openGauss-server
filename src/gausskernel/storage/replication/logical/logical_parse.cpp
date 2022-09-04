@@ -167,7 +167,7 @@ static bool ParallelFilterRecord(ParallelLogicalDecodingContext *ctx, XLogReader
         return true;
     }
     if (((flags & XLZ_UPDATE_PREFIX_FROM_OLD) != 0) || ((flags & XLZ_UPDATE_SUFFIX_FROM_OLD) != 0)) {
-        ereport(WARNING, (errmsg("update tuple has affix, don't decode it")));
+        ereport(WARNING, (errmodule(MOD_LOGICAL_DECODE), errmsg("update tuple has affix, don't decode it")));
         return true;
     }
     XLogRecGetBlockTag(r, 0, rnode, NULL, NULL);
@@ -182,8 +182,8 @@ static bool ParallelFilterRecord(ParallelLogicalDecodingContext *ctx, XLogReader
  * The return value represents whether the current tuple needs to be decoded.
  * Ordinary tables (non system tables, toast tables, etc.) need to be decoded.
  */
-void SplicingToastTuple(ParallelReorderBufferChange *change, ParallelLogicalDecodingContext *ctx, bool *needDecode,
-    bool istoast, ParallelDecodeReaderWorker *worker, bool isHeap)
+bool SplicingToastTuple(ParallelReorderBufferChange *change, ParallelLogicalDecodingContext *ctx, bool *needDecode,
+    bool istoast, bool isHeap, bool freeNow, int slotId)
 {
     Oid reloid;
     Relation relation = NULL;
@@ -201,19 +201,15 @@ void SplicingToastTuple(ParallelReorderBufferChange *change, ParallelLogicalDeco
     if (!istoast) {
         txn = ParallelReorderBufferTXNByXid(ctx->reorder, change->xid, false, NULL, change->lsn, true);
         if (txn == NULL || txn->toast_hash == NULL) {
+            CheckNewTupleMissingToastChunk(change, isHeap);
             *needDecode = true;
-            return;
+            return false;
         }
     }
 
     bool isSegment = IsSegmentFileNode(change->data.tp.relnode);
-    reloid = RelidByRelfilenode(change->data.tp.relnode.spcNode, change->data.tp.relnode.relNode, isSegment);
-
-    if (reloid == InvalidOid) {
-        reloid = PartitionRelidByRelfilenode(change->data.tp.relnode.spcNode,
-            change->data.tp.relnode.relNode, partitionReltoastrelid, NULL,isSegment);
-    }
-
+    reloid = HeapGetRelid(change->data.tp.relnode.spcNode, change->data.tp.relnode.relNode, partitionReltoastrelid,
+        NULL, isSegment);
     /*
      * Catalog tuple without data, emitted while catalog was
      * in the process of being rewritten.
@@ -224,24 +220,24 @@ void SplicingToastTuple(ParallelReorderBufferChange *change, ParallelLogicalDeco
          * When we try to decode a table who is already dropped.
          * Maybe we could not find its relnode. In this time, we will not decode this log.
          */
-        ereport(DEBUG1, (errmsg("could not lookup relation %s",
+        ereport(DEBUG1, (errmodule(MOD_LOGICAL_DECODE), errmsg("could not lookup relation %s",
             relpathperm(change->data.tp.relnode, MAIN_FORKNUM))));
         *needDecode = false;
-        return;
+        return true;
     }
     
     relation = RelationIdGetRelation(reloid);
     if (relation == NULL) {
-        ereport(DEBUG1, (errmsg("could open relation descriptor %s",
+        ereport(DEBUG1, (errmodule(MOD_LOGICAL_DECODE), errmsg("could open relation descriptor %s",
             relpathperm(change->data.tp.relnode, MAIN_FORKNUM))));
         *needDecode = false;
-        return;
+        return true;
     }
 
     if (CSTORE_NAMESPACE == get_rel_namespace(RelationGetRelid(relation))) {
         RelationClose(relation);
         *needDecode = false;
-        return ;
+        return true;
     }
 
     /*
@@ -250,14 +246,19 @@ void SplicingToastTuple(ParallelReorderBufferChange *change, ParallelLogicalDeco
      * query whether there is a toast record before it.
      * If so, splice it into a complete toast tuple.
      */
-    if (CheckToastTuple(change, ctx, relation, istoast)) {
+    if (CheckToastTuple(change, ctx, relation, istoast, slotId)) {
+        RelationClose(relation);
         *needDecode = false;
+        return false;
     } else if (!IsToastRelation(relation)) {
-        ToastTupleReplace(ctx->reorder, relation, change, partitionReltoastrelid, worker, isHeap);
-        *needDecode = true;
+        *needDecode =
+            ToastTupleReplace(ctx->reorder, relation, change, partitionReltoastrelid, isHeap, freeNow, slotId);
+        RelationClose(relation);
+        return !(*needDecode);
     }
 
-    return;
+    RelationClose(relation);
+    return true;
 }
 
 /*
@@ -266,7 +267,7 @@ void SplicingToastTuple(ParallelReorderBufferChange *change, ParallelLogicalDeco
  * Return value means whether current table is as toast table.
  */
 bool CheckToastTuple(ParallelReorderBufferChange *change, ParallelLogicalDecodingContext *ctx, Relation relation,
-    bool istoast)
+    bool istoast, int slotId)
 {
     if (!istoast) {
         return false;
@@ -290,7 +291,7 @@ bool CheckToastTuple(ParallelReorderBufferChange *change, ParallelLogicalDecodin
             return false;
         } else if (change->action == PARALLEL_REORDER_BUFFER_CHANGE_INSERT ||
             change->action == PARALLEL_REORDER_BUFFER_CHANGE_UINSERT) {
-            ToastTupleAppendChunk(ctx->reorder, relation, change);
+            ToastTupleAppendChunk(ctx->reorder, relation, change, slotId);
             return true;
         }
     }
@@ -308,13 +309,17 @@ void ParseCommitXlog(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf,
     int slotId = worker->slotId;
 
     setInvalidationsMessageToDecodeQueue(ctx, worker, ninval_msgs, msgs);
+    /* Also invalid local relcache */
+    for (int i = 0; i < ninval_msgs; i++) {
+        LocalExecuteThreadAndSessionInvalidationMessage(&msgs[i]);
+    }
 
     change = ParallelReorderBufferGetChange(ctx->reorder, slotId);
 
     change->action = PARALLEL_REORDER_BUFFER_CHANGE_COMMIT;
     change->xid = xid;
     change->csn = csn;
-    change->lsn =ctx->reader->ReadRecPtr;
+    change->lsn = ctx->reader->ReadRecPtr;
     change->finalLsn = buf->origptr;
     change->endLsn = buf->endptr;
     change->nsubxacts = nsubxacts;
@@ -388,8 +393,8 @@ void ParseHeap2Op(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf, Pa
 
             break;
         default:
-            ereport(WARNING,
-                    (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unexpected RM_HEAP2_ID record type: %u", info)));
+            ereport(WARNING, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                errmsg("unexpected RM_HEAP2_ID record type: %u", info)));
     }
 }
 
@@ -452,8 +457,8 @@ void ParseHeapOp(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf, Par
             break;
 
         default:
-            ereport(WARNING,
-                    (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unexpected RM_HEAP_ID record type: %u", info)));
+            ereport(WARNING, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                errmsg("unexpected RM_HEAP_ID record type: %u", info)));
             break;
     }
 }
@@ -464,6 +469,7 @@ void ParseNewCid(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf, Par
     ParallelReorderBufferChange *change = ParallelReorderBufferGetChange(ctx->reorder, slotId);
     change->action = PARALLEL_REORDER_BUFFER_NEW_CID;
     change->xid = XLogRecGetXid(buf->record);
+    change->lsn = ctx->reader->ReadRecPtr;
     PutChangeQueue(slotId, change);
 }
 
@@ -481,8 +487,8 @@ void ParseHeap3Op(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf, Pa
         case XLOG_HEAP3_INVALID:
             break;
         default:
-            ereport(WARNING,
-                    (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unexpected RM_HEAP3_ID record type: %u", info)));
+            ereport(WARNING, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                errmsg("unexpected RM_HEAP3_ID record type: %u", info)));
     }
 }
 
@@ -513,8 +519,8 @@ void ParseUheapOp(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf, Pa
             break;
 
         default:
-            ereport(WARNING,
-                    (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unexpected RM_HEAP3_ID record type: %u", info)));
+            ereport(WARNING, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                errmsg("unexpected RM_HEAP3_ID record type: %u", info)));
     }
 }
 
@@ -528,7 +534,7 @@ void ParseInsertXlog(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf,
     XLogReaderState *r = buf->record;
     xl_heap_insert *xlrec = NULL;
     ParallelReorderBufferChange *change = NULL;
-    RelFileNode target_node = {0, 0, 0, 0};
+    RelFileNode target_node = {0, 0, 0, 0, 0};
     xlrec = (xl_heap_insert *)GetXlrec(r);
     CommitSeqNo curCSN = *(CommitSeqNo *)((char *)xlrec + SizeOfHeapInsert);
     int rc = 0;
@@ -539,7 +545,8 @@ void ParseInsertXlog(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf,
     int slotId = worker->slotId;
 
     if (tuplelen == 0 && !AllocSizeIsValid(tuplelen)) {
-        ereport(ERROR, (errmsg("ParseInsertXlog tuplelen is invalid(%lu), don't decode it", tuplelen)));
+        ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE),
+            errmsg("ParseInsertXlog tuplelen is invalid(%lu), don't decode it", tuplelen)));
         return;
     }
     XLogRecGetBlockTag(r, 0, &target_node, NULL, NULL);
@@ -558,7 +565,7 @@ void ParseInsertXlog(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf,
      */
     bool istoast = (((uint32)(XLogRecGetOrigin(r)) & TOAST_FLAG) != 0);
     if (istoast) {
-        ereport(DEBUG2, (errmsg("ParallelDecodeInsert %d", istoast)));
+        ereport(DEBUG2, (errmodule(MOD_LOGICAL_DECODE), errmsg("ParallelDecodeInsert %d", istoast)));
     }
 
     change = ParallelReorderBufferGetChange(ctx->reorder, slotId);
@@ -575,10 +582,13 @@ void ParseInsertXlog(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf,
     change->data.tp.snapshotcsn = curCSN;
     change->data.tp.clear_toast_afterwards = true;
 
-    SplicingToastTuple(change, ctx, &needDecode, istoast, worker, true);
+    bool needFree = SplicingToastTuple(change, ctx, &needDecode, istoast, true, true, slotId);
 
     if (needDecode) {
         PutChangeQueue(slotId, change);
+    }
+    if (needFree) {
+        ParallelFreeChange(change, slotId);
     }
 }
 
@@ -592,7 +602,7 @@ void ParseUInsert(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf, Pa
     XLogReaderState *r = buf->record;
     XlUHeapInsert *xlrec = NULL;
     ParallelReorderBufferChange *change = NULL;
-    RelFileNode target_node = {0, 0, 0, 0};
+    RelFileNode target_node = {0, 0, 0, 0, 0};
     xlrec = (XlUHeapInsert *)UGetXlrec(r);
     CommitSeqNo curCSN = *(CommitSeqNo *)((char *)xlrec + SizeOfUHeapInsert);
     bool needDecode = false;
@@ -603,7 +613,8 @@ void ParseUInsert(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf, Pa
     int slotId = worker->slotId;
 
     if (tuplelen == 0 && !AllocSizeIsValid(tuplelen)) {
-        ereport(ERROR, (errmsg("ParseUinsert tuplelen is invalid(%lu), don't decode it", tuplelen)));
+        ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE),
+            errmsg("ParseUinsert tuplelen is invalid(%lu), don't decode it", tuplelen)));
         return;
     }
     XLogRecGetBlockTag(r, 0, &target_node, NULL, NULL);
@@ -632,9 +643,12 @@ void ParseUInsert(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf, Pa
     change->data.tp.clear_toast_afterwards = true;
 
     bool isToast = (((uint32)(XLogRecGetOrigin(r)) & TOAST_FLAG) != 0);
-    SplicingToastTuple(change, ctx, &needDecode, isToast, worker, false);
+    bool needFree = SplicingToastTuple(change, ctx, &needDecode, isToast, false, true, slotId);
     if (needDecode) {
         PutChangeQueue(slotId, change);
+    }
+    if (needFree) {
+        ParallelFreeChange(change, slotId);
     }
 }
 
@@ -648,7 +662,7 @@ void ParseUpdateXlog(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf,
     XLogReaderState *r = buf->record;
     xl_heap_update *xlrec = NULL;
     ParallelReorderBufferChange *change = NULL;
-    RelFileNode target_node = {0, 0, 0, 0};
+    RelFileNode target_node = {0, 0, 0, 0, 0};
     Size datalen_new;
     Size tuplelen_new;
     char *data_new = NULL;
@@ -678,7 +692,8 @@ void ParseUpdateXlog(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf,
     data_new = XLogRecGetBlockData(r, 0, &datalen_new);
     tuplelen_new = datalen_new - SizeOfHeapHeader;
     if (tuplelen_new == 0 && !AllocSizeIsValid(tuplelen_new)) {
-        ereport(WARNING, (errmsg("tuplelen is invalid(%lu), tuplelen, don't decode it", tuplelen_new)));
+        ereport(WARNING, (errmodule(MOD_LOGICAL_DECODE),
+            errmsg("tuplelen is invalid(%lu), tuplelen, don't decode it", tuplelen_new)));
         return;
     }
 
@@ -693,7 +708,8 @@ void ParseUpdateXlog(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf,
     }
     tuplelen_old = datalen_old - SizeOfHeapHeader;
     if (tuplelen_old == 0 && !AllocSizeIsValid(tuplelen_old)) {
-        ereport(WARNING, (errmsg("tuplelen is invalid(%lu), tuplelen, don't decode it", tuplelen_old)));
+        ereport(WARNING, (errmodule(MOD_LOGICAL_DECODE),
+            errmsg("tuplelen is invalid(%lu), tuplelen, don't decode it", tuplelen_old)));
         return;
     }
 
@@ -726,10 +742,13 @@ void ParseUpdateXlog(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf,
     change->data.tp.snapshotcsn = curCSN;
     change->data.tp.clear_toast_afterwards = true;
 
-    SplicingToastTuple(change, ctx, &needDecode, istoast, worker, true);
+    bool needFree = SplicingToastTuple(change, ctx, &needDecode, istoast, true, true, slotId);
 
     if (needDecode) {
         PutChangeQueue(slotId, change);
+    }
+    if (needFree) {
+        ParallelFreeChange(change, slotId);
     }
 }
 
@@ -742,12 +761,13 @@ void ParseUpdateXlog(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf,
 void ParseUUpdate(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf, ParallelDecodeReaderWorker *worker)
 {
     XLogReaderState *r = buf->record;
-    RelFileNode targetNode = {0, 0, 0, 0};
+    RelFileNode targetNode = {0, 0, 0, 0, 0};
     XlUHeapUpdate *xlrec = (XlUHeapUpdate *)UGetXlrec(r);
     CommitSeqNo curCSN = *(CommitSeqNo *)((char *)xlrec + SizeOfUHeapUpdate);
     int slotId = worker->slotId;
     bool isInplaceUpdate = (xlrec->flags & XLZ_NON_INPLACE_UPDATE) == 0;
     bool needDecode = false;
+    bool hasToast = false;
     if (ParallelFilterRecord(ctx, r, xlrec->flags, &targetNode)) {
         return;
     }
@@ -755,16 +775,27 @@ void ParseUUpdate(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf, Pa
     char *dataNew = XLogRecGetBlockData(r, 0, &datalenNew);
 
     if (datalenNew == 0 && !AllocSizeIsValid(datalenNew)) {
-        ereport(WARNING, (errmsg("tuplelen is invalid(%lu), don't decode it", datalenNew)));
+        ereport(WARNING, (errmodule(MOD_LOGICAL_DECODE),
+            errmsg("tuplelen is invalid(%lu), don't decode it", datalenNew)));
         return;
     }
 
     Size tuplelenOld = XLogRecGetDataLen(r) - SizeOfUHeapUpdate - sizeof(CommitSeqNo);
     char *dataOld = (char *)xlrec + SizeOfUHeapUpdate + sizeof(CommitSeqNo);
-    UpdateOldTupleCalc(isInplaceUpdate, r, &dataOld, &tuplelenOld);
+    uint32 toastLen = 0;
+    char *toastPos = UpdateOldTupleCalc(isInplaceUpdate, r, &dataOld, &tuplelenOld, &toastLen);
 
-    if (tuplelenOld == 0 && !AllocSizeIsValid(tuplelenOld)) {
-        ereport(ERROR, (errmsg("tuplelen is invalid(%lu), don't decode it", tuplelenOld)));
+    char *toastData = NULL;
+    if (toastLen > 0) {
+        toastData = (char *)palloc0(toastLen);
+        errno_t rc = memcpy_s(toastData, toastLen, toastPos, toastLen);
+        securec_check(rc, "", "");
+        hasToast = true;
+    }
+
+    if (toastLen == 0 && (tuplelenOld == 0 || !AllocSizeIsValid(tuplelenOld))) {
+        ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE),
+            errmsg("tuplelen is invalid(%lu), don't decode it", tuplelenOld)));
         return;
     }
 
@@ -780,25 +811,37 @@ void ParseUUpdate(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf, Pa
 
     DecodeXLogTuple(dataNew, datalenNew, change->data.tp.newtuple, false);
     if (xlrec->flags & XLZ_HAS_UPDATE_UNDOTUPLE) {
-        change->data.tp.oldtuple = ParallelReorderBufferGetTupleBuf(ctx->reorder, tuplelenOld, worker, false);
-        if (!isInplaceUpdate) {
-            DecodeXLogTuple(dataOld, tuplelenOld, change->data.tp.oldtuple, false);
-        } else if ((xlrec->flags & XLOG_UHEAP_CONTAINS_OLD_HEADER) != 0) {
-            int undoXorDeltaSize = *(int *)dataOld;
-            dataOld += sizeof(int) + undoXorDeltaSize;
-            tuplelenOld -= sizeof(int) + undoXorDeltaSize;
-            DecodeXLogTuple(dataOld, tuplelenOld, change->data.tp.oldtuple, false);
+        if (!hasToast) {
+            change->data.tp.oldtuple = ParallelReorderBufferGetTupleBuf(ctx->reorder, tuplelenOld, worker, false);
+            if (!isInplaceUpdate) {
+                DecodeXLogTuple(dataOld, tuplelenOld, change->data.tp.oldtuple, false);
+            } else if ((xlrec->flags & XLOG_UHEAP_CONTAINS_OLD_HEADER) != 0) {
+                int undoXorDeltaSize = *(int *)dataOld;
+                dataOld += sizeof(int) + undoXorDeltaSize;
+                tuplelenOld -= sizeof(int) + undoXorDeltaSize;
+                DecodeXLogTuple(dataOld, tuplelenOld, change->data.tp.oldtuple, false);
+            } else {
+                ereport(LOG, (errmodule(MOD_LOGICAL_DECODE),
+                    errmsg("current tuple is not fully logged, don't decode it")));
+                return;
+            }
         } else {
-            ereport(LOG, (errmsg("current tuple is not fully logged, don't decode it")));
-            return;
+            change->data.tp.oldtuple = ParallelReorderBufferGetTupleBuf(ctx->reorder, toastLen, worker, false);
+            DecodeUHeapToastTuple(toastData, toastLen, (ReorderBufferTupleBuf *)change->data.tp.oldtuple);
         }
     }
     change->data.tp.snapshotcsn = curCSN;
     change->data.tp.clear_toast_afterwards = true;
 
-    SplicingToastTuple(change, ctx, &needDecode, isToast, worker, false);
+    bool needFree = SplicingToastTuple(change, ctx, &needDecode, isToast, false, true, slotId);
     if (needDecode) {
         PutChangeQueue(slotId, change);
+    }
+    if (toastData != NULL) {
+        pfree(toastData);
+    }
+    if (needFree) {
+        ParallelFreeChange(change, slotId);
     }
 }
 
@@ -811,16 +854,16 @@ void ParseDeleteXlog(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf,
 {
     XLogReaderState *r = buf->record;
     xl_heap_delete *xlrec = NULL;
-    
+
     int slotId = worker->slotId;
     ParallelReorderBufferChange *change = NULL;
-    RelFileNode target_node = {0, 0, 0, 0};
+    RelFileNode target_node = {0, 0, 0, 0, 0};
     int rc = 0;
     Size datalen = 0;
     bool needDecode = false;
     bool istoast = (((uint32)(XLogRecGetOrigin(r)) & TOAST_FLAG) != 0);
     if (istoast) {
-        ereport(DEBUG2, (errmsg("ParallelDecodeDelete %d", istoast)));
+        ereport(DEBUG2, (errmodule(MOD_LOGICAL_DECODE), errmsg("ParallelDecodeDelete %d", istoast)));
     }
 
     Size heapDeleteSize = 0;
@@ -844,7 +887,8 @@ void ParseDeleteXlog(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf,
 
     datalen = XLogRecGetDataLen(r) - heapDeleteSize;
     if (datalen == 0 && !AllocSizeIsValid(datalen)) {
-        ereport(WARNING, (errmsg("tuplelen is invalid(%lu), tuplelen, don't decode it", datalen)));
+        ereport(WARNING, (errmodule(MOD_LOGICAL_DECODE),
+            errmsg("tuplelen is invalid(%lu), tuplelen, don't decode it", datalen)));
         return;
     }
 
@@ -866,9 +910,12 @@ void ParseDeleteXlog(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf,
     change->data.tp.snapshotcsn = curCSN;
     change->data.tp.clear_toast_afterwards = true;
 
-    SplicingToastTuple(change, ctx, &needDecode, istoast, worker, true);
+    bool needFree = SplicingToastTuple(change, ctx, &needDecode, istoast, true, true, slotId);
     if (needDecode) {
         PutChangeQueue(slotId, change);
+    }
+    if (needFree) {
+        ParallelFreeChange(change, slotId);
     }
 }
 
@@ -877,7 +924,7 @@ void ParseUDelete(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf, Pa
     XLogReaderState *r = buf->record;
     XlUHeapDelete *xlrec = NULL;
     int slotId = worker->slotId;
-    RelFileNode targetNode = {0, 0, 0, 0};
+    RelFileNode targetNode = {0, 0, 0, 0, 0};
     bool needDecode = false;
     bool isToast = (((uint32)(XLogRecGetOrigin(r)) & TOAST_FLAG) != 0);
     xlrec = (XlUHeapDelete *)UGetXlrec(r);
@@ -893,15 +940,26 @@ void ParseUDelete(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf, Pa
     }
 
     XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapDelete + sizeof(CommitSeqNo));
+    bool hasToast = (xlundohdr->flag & XLOG_UNDO_HEADER_HAS_TOAST) != 0;
     Size datalen = XLogRecGetDataLen(r) - SizeOfUHeapDelete - SizeOfXLUndoHeader - sizeof(CommitSeqNo);
     Size addLen = 0;
-    UpdateUndoBody(&addLen, xlundohdr->flag);
+    uint32 toastLen = 0;
+    UpdateUndoBody(&addLen, (char *)xlundohdr + SizeOfXLUndoHeader, xlundohdr->flag, &toastLen);
+    char *toastData = NULL;
+    if (toastLen > 0) {
+        toastData = (char *)palloc0(toastLen);
+        errno_t rc = memcpy_s(toastData, toastLen,
+            (char *)xlrec + SizeOfUHeapDelete + sizeof(CommitSeqNo) + SizeOfXLUndoHeader + addLen, toastLen);
+        securec_check(rc, "\0", "\0");
+    }
+    addLen += toastLen;
 
     Size metaLen = DecodeUndoMeta((char*)xlrec + SizeOfUHeapDelete + sizeof(CommitSeqNo) + SizeOfXLUndoHeader + addLen);
     addLen += metaLen;
 
-    if (datalen == 0 && !AllocSizeIsValid(datalen)) {
-        ereport(WARNING, (errmsg("tuplelen is invalid(%lu), don't decode it", datalen)));
+    if (toastLen == 0 && (datalen == 0 || !AllocSizeIsValid(datalen))) {
+        ereport(WARNING, (errmodule(MOD_LOGICAL_DECODE),
+            errmsg("tuplelen is invalid(%lu), don't decode it", datalen)));
         return;
     }
 
@@ -913,16 +971,28 @@ void ParseUDelete(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf, Pa
     int rc = memcpy_s(&change->data.tp.relnode, sizeof(RelFileNode), &targetNode, sizeof(RelFileNode));
     securec_check(rc, "\0", "\0");
 
-    change->data.tp.oldtuple = ParallelReorderBufferGetTupleBuf(ctx->reorder, datalen, worker, false);
-    DecodeXLogTuple((char *)xlrec + SizeOfUHeapDelete + sizeof(CommitSeqNo) + SizeOfXLUndoHeader + addLen,
-        datalen - addLen, change->data.tp.oldtuple, false);
+    char *dataold = (char *)xlrec + SizeOfUHeapDelete + sizeof(CommitSeqNo) + SizeOfXLUndoHeader + addLen;
+
+    if (!hasToast) {
+        change->data.tp.oldtuple = ParallelReorderBufferGetTupleBuf(ctx->reorder, datalen -addLen, worker, false);
+        DecodeXLogTuple(dataold, datalen - addLen, change->data.tp.oldtuple, false);
+    } else {
+        change->data.tp.oldtuple = ParallelReorderBufferGetTupleBuf(ctx->reorder, toastLen, worker, false);
+        DecodeUHeapToastTuple(toastData, toastLen, (ReorderBufferTupleBuf *)change->data.tp.oldtuple);
+    }
 
     change->data.tp.snapshotcsn = curCSN;
     change->data.tp.clear_toast_afterwards = true;
 
-    SplicingToastTuple(change, ctx, &needDecode, isToast, worker, false);
+    bool needFree = SplicingToastTuple(change, ctx, &needDecode, isToast, false, true, slotId);
     if (needDecode) {
         PutChangeQueue(slotId, change);
+    }
+    if (toastData != NULL) {
+        pfree(toastData);
+    }
+    if (needFree) {
+        ParallelFreeChange(change, slotId);
     }
 }
 
@@ -934,13 +1004,14 @@ void ParseMultiInsert(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf
     char *data = NULL;
     char *tupledata = NULL;
     Size tuplelen = 0;
-    RelFileNode rnode = {0, 0, 0, 0};
+    RelFileNode rnode = {0, 0, 0, 0, 0};
     int rc = 0;
     xlrec = (xl_heap_multi_insert *)GetXlrec(r);
     CommitSeqNo curCSN = *(CommitSeqNo *)((char *)xlrec + SizeOfHeapMultiInsert);
     int slotId = worker->slotId;
     if (xlrec->isCompressed)
         return;
+    bool needDecode = true;
     /* only interested in our database */
     XLogRecGetBlockTag(r, 0, &rnode, NULL, NULL);
     if (rnode.dbNode != ctx->slot->data.database)
@@ -1000,8 +1071,10 @@ void ParseMultiInsert(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf
                 header->t_hoff = xlhdr->t_hoff;
                 header->t_infomask = xlhdr->t_infomask;
                 header->t_infomask2 = xlhdr->t_infomask2;
+                change->data.tp.snapshotcsn = curCSN;
             } else {
-                ereport(ERROR, (errmsg("tuplelen is invalid(%d), tuplelen, don't decode it", datalen)));
+                ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE),
+                    errmsg("tuplelen is invalid(%d), tuplelen, don't decode it", datalen)));
                 return;
             }
             data += datalen;
@@ -1016,9 +1089,14 @@ void ParseMultiInsert(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf
         } else {
             change->data.tp.clear_toast_afterwards = false;
         }
-        change->data.tp.snapshotcsn = curCSN;
-
-        PutChangeQueue(slotId, change);
+        bool needFree = SplicingToastTuple(change, ctx, &needDecode, false, true,
+            change->data.tp.clear_toast_afterwards, slotId);
+        if (needDecode) {
+            PutChangeQueue(slotId, change);
+        }
+        if (needFree) {
+            ParallelFreeChange(change, slotId);
+        }
     }
 }
 
@@ -1026,11 +1104,11 @@ void ParseUMultiInsert(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *bu
 {
     XLogReaderState *r = buf->record;
     Size tuplelen = 0;
-    RelFileNode rnode = {0, 0, 0, 0};
+    RelFileNode rnode = {0, 0, 0, 0, 0};
     CommitSeqNo curCSN = 0;
     XlUHeapMultiInsert *xlrec = (XlUHeapMultiInsert *)UGetMultiInsertXlrec(r, &curCSN);
     int slotId = worker->slotId;
-
+    bool needDecode = true;
     XLogRecGetBlockTag(r, 0, &rnode, NULL, NULL);
     if (rnode.dbNode != ctx->slot->data.database) {
         return;
@@ -1084,8 +1162,10 @@ void ParseUMultiInsert(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *bu
                 header->flag = xlhdr->flag;
                 header->flag2 = xlhdr->flag2;
                 header->t_hoff = xlhdr->t_hoff;
+                change->data.tp.snapshotcsn = curCSN;
             } else {
-                ereport(ERROR, (errmsg("tuplelen is invalid(%d), don't decode it", len)));
+                ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE),
+                    errmsg("tuplelen is invalid(%d), don't decode it", len)));
                 return;
             }
             data += len;
@@ -1096,13 +1176,20 @@ void ParseUMultiInsert(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *bu
          * xl_multi_insert_tuple record emitted by one heap_multi_insert()
          * call.
          */
-        if ((i + 1) == xlrec->ntuples) {
+        if ((xlrec->flags & XLOG_UHEAP_INSERT_LAST_IN_MULTI) && (i + 1) == xlrec->ntuples) {
             change->data.tp.clear_toast_afterwards = true;
         } else {
             change->data.tp.clear_toast_afterwards = false;
         }
-        change->data.tp.snapshotcsn = curCSN;
-        PutChangeQueue(slotId, change);
+
+        bool needFree = SplicingToastTuple(change, ctx, &needDecode, false, false,
+            change->data.tp.clear_toast_afterwards, slotId);
+        if (needDecode) {
+            PutChangeQueue(slotId, change);
+        }
+        if (needFree) {
+            ParallelFreeChange(change, slotId);
+        }
     }
 }
 
@@ -1125,7 +1212,7 @@ void ParseStandbyOp(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf, 
         case XLOG_STANDBY_CSN_COMMITTING:
             break;
         default:
-            ereport(WARNING, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+            ereport(WARNING, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
                 errmsg("unexpected RM_STANDBY_ID record type: %u", info)));
     }
 }
@@ -1183,12 +1270,36 @@ void ParseProcessRecord(ParallelLogicalDecodingContext *ctx, XLogReaderState *re
 }
 
 /*
+ * Handle subtransactions assignment.
+ */
+void ParseAssignmentLog(ParallelLogicalDecodingContext *ctx, int nsubxacts, TransactionId xid, TransactionId *sub_xids,
+    XLogRecPtr lsn, ParallelDecodeReaderWorker *worker)
+{
+    ParallelReorderBufferChange *change = NULL;
+    int slotId = worker->slotId;
+    change = ParallelReorderBufferGetChange(ctx->reorder, slotId);
+    change->action = PARALLEL_REORDER_BUFFER_ASSIGNMENT;
+    change->xid = xid;
+    change->lsn = lsn;
+    change->nsubxacts = nsubxacts;
+    Size subXidSize = sizeof(TransactionId) * INT2SIZET(nsubxacts);
+    if (nsubxacts > 0 && sub_xids != NULL) {
+        change->subXids = (TransactionId *)MemoryContextAllocZero(
+            g_instance.comm_cxt.pdecode_cxt[slotId].parallelDecodeCtx, subXidSize);
+        errno_t rc = memcpy_s(change->subXids, subXidSize, sub_xids, subXidSize);
+        securec_check(rc, "", "");
+    }
+    PutChangeQueue(slotId, change);
+}
+
+/*
  * Handle rmgr XACT_ID records for parsing records into ParallelReorderBuffer.
  */
 void ParseXactOp(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf, ParallelDecodeReaderWorker *worker)
 {
     XLogReaderState *r = buf->record;
     uint8 info = XLogRecGetInfo(r) & ~XLR_INFO_MASK;
+    bool compress = (bool)(XLogRecGetInfo(r) & XLR_REL_COMPRESS);
     /*
      * No point in doing anything yet, data could not be decoded anyway. It's
      * ok not to call ReorderBufferProcessXid() in that case, except in the
@@ -1204,7 +1315,7 @@ void ParseXactOp(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf, Par
 
             xlrec = (xl_xact_commit *)buf->record_data;
 
-            subxacts = (TransactionId *)&(xlrec->xnodes[xlrec->nrels]);
+            subxacts = GET_SUB_XACTS(xlrec->xnodes, xlrec->nrels, compress);
             invals = (SharedInvalidationMessage *)&(subxacts[xlrec->nsubxacts]);
 
             ParseCommitXlog(ctx, buf, XLogRecGetXid(r), xlrec->csn, xlrec->dbId, xlrec->xact_time, xlrec->nsubxacts,
@@ -1217,7 +1328,7 @@ void ParseXactOp(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf, Par
             xl_xact_commit_prepared *prec = (xl_xact_commit_prepared *)buf->record_data;
             xl_xact_commit *xlrec = &prec->crec;
 
-            TransactionId *subxacts = (TransactionId *)&(xlrec->xnodes[xlrec->nrels]);
+            TransactionId *subxacts = GET_SUB_XACTS(xlrec->xnodes, xlrec->nrels, compress);
             SharedInvalidationMessage *invals = (SharedInvalidationMessage *)&(subxacts[xlrec->nsubxacts]);
 
             ParseCommitXlog(ctx, buf, prec->xid, xlrec->csn, xlrec->dbId, xlrec->xact_time, xlrec->nsubxacts, subxacts,
@@ -1238,8 +1349,7 @@ void ParseXactOp(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf, Par
             TransactionId *sub_xids = NULL;
 
             xlrec = (xl_xact_abort *)buf->record_data;
-
-            sub_xids = (TransactionId *)&(xlrec->xnodes[xlrec->nrels]);
+            sub_xids = GET_SUB_XACTS(xlrec->xnodes, xlrec->nrels, compress);
 
             ParseAbortXlog(ctx, buf->origptr, XLogRecGetXid(r), sub_xids, xlrec->nsubxacts, worker);
             break;
@@ -1247,8 +1357,8 @@ void ParseXactOp(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf, Par
         case XLOG_XACT_ABORT_WITH_XID: {
             xl_xact_abort *xlrec = (xl_xact_abort *)buf->record_data;
             TransactionId curId = XLogRecGetXid(r);
-            TransactionId *sub_xids = (TransactionId *)(&(xlrec->xnodes[xlrec->nrels]));
-            curId = *(TransactionId *)((char*)&(xlrec->xnodes[xlrec->nrels]) +
+            TransactionId *sub_xids = GET_SUB_XACTS(xlrec->xnodes, xlrec->nrels, compress);
+            curId = *(TransactionId *)((char*)sub_xids +
                 (unsigned)(xlrec->nsubxacts) * sizeof(TransactionId));
 
             ParseAbortXlog(ctx, buf->origptr, curId, sub_xids, xlrec->nsubxacts, worker);
@@ -1263,13 +1373,20 @@ void ParseXactOp(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf, Par
             prec = (xl_xact_abort_prepared *)buf->record_data;
             xlrec = &prec->arec;
             
-            sub_xids = (TransactionId *)&(xlrec->xnodes[xlrec->nrels]);
+            sub_xids = GET_SUB_XACTS(xlrec->xnodes, xlrec->nrels, compress);
             
             /* r->xl_xid is committed in a separate record */
             ParseAbortXlog(ctx, buf->origptr, XLogRecGetXid(r), sub_xids, xlrec->nsubxacts, worker);
             break;
         }
-        case XLOG_XACT_ASSIGNMENT:
+        case XLOG_XACT_ASSIGNMENT: {
+            xl_xact_assignment *xlrec = NULL;
+            TransactionId *sub_xid = NULL;
+            xlrec = (xl_xact_assignment *)buf->record_data;
+            sub_xid = &xlrec->xsub[0];
+            ParseAssignmentLog(ctx, xlrec->nsubxacts, xlrec->xtop, sub_xid, buf->origptr, worker);
+            break;
+        }
         case XLOG_XACT_PREPARE:
             break;
         default:

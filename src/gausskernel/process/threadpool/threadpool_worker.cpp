@@ -169,6 +169,13 @@ void ThreadPoolWorker::WaitMission()
     if (!WorkerThreadCanSeekAnotherMission(&m_reason)) {
         return;
     }
+    if (unlikely((u_sess->misc_cxt.SecurityRestrictionContext & RECEIVER_LOCAL_USERID_CHANGE) != 0)) {
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                 errmsg("Does not change back to old userid when session detach or clean up, and receive buffer %s.",
+                        t_thrd.libpq_cxt.PqRecvPointer < t_thrd.libpq_cxt.PqRecvLength ?
+                            "still has msg" : "is clear")));
+    }
 
     (void)enable_session_sig_alarm(u_sess->attr.attr_common.SessionTimeout * 1000);
 #ifndef ENABLE_MULTIPLE_NODES
@@ -398,6 +405,10 @@ void ThreadPoolWorker::WaitNextSession()
     while (true) {
         /* Wait if the thread was turned into pending mode. */
         if (unlikely(m_threadStatus == THREAD_PENDING)) {
+            /* drop table/db operator need delete files, which cannot be opened. so we need close them when sleep */
+            if (EnableLocalSysCache()) {
+                closeAllVfds();
+            }
             Pending();
             /* pending thread must don't have session on it */
             if (m_currentSession != NULL) {
@@ -417,6 +428,10 @@ void ThreadPoolWorker::WaitNextSession()
         if (!lsn->TryFeedWorker(this)) {
             /* report thread status. */
             u_sess = t_thrd.fake_session;
+            /* we need close vfds to allow delete files by drop table/db operator before sleep */
+            if (EnableLocalSysCache()) {
+                closeAllVfds();
+            }
             WaitState oldStatus = pgstat_report_waitstatus(STATE_WAIT_COMM);
 
             pthread_mutex_lock(m_mutex);
@@ -541,8 +556,6 @@ void ThreadPoolWorker::DetachSessionFromThread()
     /* If some error occur at session initialization, we need to close it. */
     if (m_currentSession->status == KNL_SESS_UNINIT) {
         m_currentSession->status = KNL_SESS_CLOSERAW;
-        /* cache may be in wrong stat, rebuild is ok */
-        ReBuildLSC();
         CleanUpSession(false);
         m_currentSession = NULL;
         u_sess = NULL;
@@ -660,11 +673,6 @@ bool ThreadPoolWorker::AttachSessionToThread()
             CleanUpSession(false);
             m_currentSession = NULL;
             u_sess = NULL;
-#ifdef ENABLE_LITE_MODE
-            if (EnableLocalSysCache()) {
-                t_thrd.lsc_cxt.lsc->LocalSysDBCacheReSet();
-            }
-#endif
         } break;
 
         default:
@@ -746,10 +754,6 @@ void ThreadPoolWorker::CleanUpSession(bool threadexit)
     pgstat_beshutdown_session(m_currentSession->session_ctr_index);
     localeconv_deinitialize_session();
 
-    /* clean gpc refcount and plancache in shared memory */
-    if (ENABLE_DN_GPC)
-        CleanSessGPCPtr(m_currentSession);
-
     /*
      * clear invalid msg slot
      * If called during pool worker thread exit, session's invalid msg slot has already
@@ -759,6 +763,17 @@ void ThreadPoolWorker::CleanUpSession(bool threadexit)
         CleanupWorkSessionInvalidation();
     }
 
+#ifdef ENABLE_LITE_MODE
+    if (EnableLocalSysCache()) {
+        t_thrd.lsc_cxt.lsc->LocalSysDBCacheReSet();
+    }
+#else
+    if (EnableLocalSysCache() && m_group->m_waitServeSessionCount == 0) {
+        t_thrd.lsc_cxt.lsc->LocalSysDBCacheReSet();
+    }
+#endif
+
+    /* don't do thing like palloc between this and use_fake_session() which called by free_session_context */
     g_threadPoolControler->GetSessionCtrl()->FreeSlot(m_currentSession->session_ctr_index);
     m_currentSession->session_ctr_index = -1;
 

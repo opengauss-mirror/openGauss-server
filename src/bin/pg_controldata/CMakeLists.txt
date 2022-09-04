@@ -19,7 +19,7 @@ set(controldata_LINK_LIBS libelog.a libpgport.a -lcrypt -ldl -lm -lssl -lcrypto 
 add_bintarget(pg_controldata TGT_controldata_SRC TGT_controldata_INC "${controldata_DEF_OPTIONS}" "${controldata_COMPILE_OPTIONS}" "${controldata_LINK_OPTIONS}" "${controldata_LINK_LIBS}")
 add_dependencies(pg_controldata elog_static pgport_static)
 target_link_directories(pg_controldata PUBLIC
-    ${LIBOPENSSL_LIB_PATH} ${PROTOBUF_LIB_PATH} ${LIBPARQUET_LIB_PATH} ${LIBCURL_LIB_PATH} ${KERBEROS_LIB_PATH}
+    ${LIBOPENSSL_LIB_PATH} ${LIBCURL_LIB_PATH} ${KERBEROS_LIB_PATH}
     ${ZLIB_LIB_PATH} ${LIBOBS_LIB_PATH} ${LIBEDIT_LIB_PATH} ${LIBCGROUP_LIB_PATH} ${SECURE_LIB_PATH} ${CMAKE_BINARY_DIR}/lib
 )
 

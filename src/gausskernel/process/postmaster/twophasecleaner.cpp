@@ -120,7 +120,7 @@ NON_EXEC_STATIC void TwoPhaseCleanerMain()
     (void)gspqsignal(SIGPIPE, SIG_IGN);
     (void)gspqsignal(SIGUSR1, SIG_IGN);
     (void)gspqsignal(SIGUSR2, SIG_IGN); /* not used */
-
+    (void)gspqsignal(SIGURG, print_stack);
     /* Reset some signals that are accepted by postmaster but not here */
     (void)gspqsignal(SIGCHLD, SIG_DFL);
     (void)gspqsignal(SIGTTIN, SIG_DFL);

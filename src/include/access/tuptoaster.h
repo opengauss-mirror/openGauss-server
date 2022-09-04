@@ -297,6 +297,6 @@ inline Datum fetch_real_lob_if_need(Datum toast_pointer)
 }
 
 extern HeapTuple ctid_get_tuple(Relation relation, ItemPointer tid);
-
+extern struct varlena* toast_fetch_datum(struct varlena* attr);
 #endif /* TUPTOASTER_H */
 

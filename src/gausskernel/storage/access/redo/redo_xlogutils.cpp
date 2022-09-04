@@ -128,7 +128,8 @@ bool DoLsnCheck(const RedoBufferInfo *bufferinfo, bool willInit, XLogRecPtr last
                                     "lsn in current page %lu, page info:%u/%u/%u forknum %d lsn %lu blknum:%u",
                                     lastLsn, pageCurLsn, blockinfo->rnode.spcNode, blockinfo->rnode.dbNode,
                                     blockinfo->rnode.relNode, blockinfo->forknum, lsn, blockinfo->blkno)));
-        } else if (pageCurLsn == InvalidXLogRecPtr && PageIsEmpty(page) && PageUpperIsInitNew(page)) {
+        } else if ((pageCurLsn == InvalidXLogRecPtr && PageIsEmpty(page) && PageUpperIsInitNew(page)) ||
+            (g_instance.roach_cxt.isRoachRestore)) {
             return XLogLsnCheckLogInvalidPage(bufferinfo, LSN_CHECK_ERROR, pblk);
         } else {
             int elevel = PANIC;
@@ -758,27 +759,11 @@ void XLogRecSetUndoBlockState(XLogReaderState *record, uint32 blockid, XLogRecPa
             zoneId = blockundo->undoExtendParse.zoneId;
             break;
         }
-        case XLOG_UNDO_CLEAN: {
-            UndoRecPtr tailPtr = ((undo::XlogUndoClean *)xlrec)->tail;
-            blockundo->undoCleanParse.zoneId = UNDO_PTR_GET_ZONE_ID(tailPtr);
-            blockundo->undoCleanParse.tailOffset = UNDO_PTR_GET_OFFSET(tailPtr);
-            blockundo->undoCleanParse.cleanLsn = record->EndRecPtr;
-            zoneId = blockundo->undoCleanParse.zoneId;
-            break;
-        }
-        case XLOG_SLOT_CLEAN: {
-            UndoRecPtr tailPtr = ((undo::XlogUndoClean *)xlrec)->tail;
-            blockundo->undoCleanParse.zoneId = UNDO_PTR_GET_ZONE_ID(tailPtr);
-            blockundo->undoCleanParse.tailOffset = UNDO_PTR_GET_OFFSET(tailPtr);
-            blockundo->undoCleanParse.cleanLsn = record->EndRecPtr;
-            zoneId = blockundo->undoCleanParse.zoneId;
-            break;
-        }
         default:
             ereport(PANIC, (errmsg("XLogRecSetUndoBlockState: unknown op code %u", (uint8)info)));
     }
 
-    RelFileNode rnode = { DEFAULTTABLESPACE_OID, UNDO_DB_OID, (Oid)zoneId, InvalidBktId };
+    RelFileNode rnode = { DEFAULTTABLESPACE_OID, UNDO_DB_OID, (Oid)zoneId, InvalidBktId, 0};
     RelFileNodeForkNum filenode = RelFileNodeForkNumFill(&rnode, InvalidBackendId, UNDO_FORKNUM, InvalidBlockNumber);
     XLogRecSetBlockCommonState(record, BLOCK_DATA_UNDO_TYPE, filenode, undostate);
 }
@@ -789,7 +774,7 @@ void XLogRecSetRollbackFinishBlockState(XLogReaderState *record, uint32 blockid,
     undo::XlogRollbackFinish *xlrec = (undo::XlogRollbackFinish *)XLogRecGetData(record);
 
     RelFileNode rnode = {
-        DEFAULTTABLESPACE_OID, UNDO_DB_OID, (Oid)(UNDO_PTR_GET_ZONE_ID(xlrec->slotPtr)), InvalidBktId
+        DEFAULTTABLESPACE_OID, UNDO_DB_OID, (Oid)(UNDO_PTR_GET_ZONE_ID(xlrec->slotPtr)), InvalidBktId, 0
     };
     RelFileNodeForkNum filenode = RelFileNodeForkNumFill(&rnode, InvalidBackendId, UNDO_FORKNUM, InvalidBlockNumber);
     XLogRecSetBlockCommonState(record, BLOCK_DATA_UNDO_TYPE, filenode, undostate);
@@ -816,15 +801,17 @@ void XLogUpdateCopyedBlockState(XLogRecParseState *recordblockstate, XLogBlockPa
     recordblockstate->blockparse.blockhead.relNode = relid;
     recordblockstate->blockparse.blockhead.blkno = blkno;
     recordblockstate->blockparse.blockhead.forknum = forknum;
-    recordblockstate->blockparse.blockhead.bucketNode = bucketNode;
+    recordblockstate->blockparse.blockhead.bucketNode = (int2)bucketNode;
 }
 
-void XLogRecSetBlockDdlState(XLogBlockDdlParse *blockddlstate, uint32 blockddltype, char *mainData, int rels)
+void XLogRecSetBlockDdlState(XLogBlockDdlParse *blockddlstate, uint32 blockddltype, char *mainData,
+                             int rels, bool compress)
 {
     Assert(blockddlstate != NULL);
     blockddlstate->blockddltype = blockddltype;
     blockddlstate->rels = rels;
     blockddlstate->mainData = mainData;
+    blockddlstate->compress = compress;
 }
 
 void XLogRecSetBlockCLogState(XLogBlockCLogParse *blockclogstate, TransactionId topxid, uint16 status, uint16 xidnum,
@@ -1526,14 +1513,16 @@ void XLogBlockDdlDoSmgrAction(XLogBlockHead *blockhead, void *blockrecbody, Redo
             xlog_block_smgr_redo_truncate(rnode, blockhead->blkno, blockhead->end_ptr);
             break;
         case BLOCK_DDL_DROP_RELNODE: {
+            bool compress = blockddlrec->compress;
             ColFileNodeRel *xnodes = (ColFileNodeRel *)blockddlrec->mainData;
             for (int i = 0; i < blockddlrec->rels; ++i) {
-                ColFileNodeRel *colFileNodeRel = xnodes + i;
                 ColFileNode colFileNode;
-                ColFileNodeCopy(&colFileNode, colFileNodeRel);
-                if (IS_COMPRESS_DELETE_FORK(colFileNode.forknum)) {
-                    SET_OPT_BY_NEGATIVE_FORK(colFileNode.filenode, colFileNode.forknum);
-                    colFileNode.forknum = MAIN_FORKNUM;
+                if (compress) {
+                    ColFileNode *colFileNodeRel = ((ColFileNode *)(void *)xnodes) + i;
+                    ColFileNodeFullCopy(&colFileNode, colFileNodeRel);
+                } else {
+                    ColFileNodeRel *colFileNodeRel = xnodes + i;
+                    ColFileNodeCopy(&colFileNode, colFileNodeRel);
                 }
                 if (!IsValidColForkNum(colFileNode.forknum)) {
                     XlogDropRowReation(colFileNode.filenode);

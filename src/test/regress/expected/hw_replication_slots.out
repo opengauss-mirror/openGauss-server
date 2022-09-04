@@ -25,11 +25,11 @@ select * from pg_create_physical_replication_slot('my_physical_slot1my_physical_
 (1 row)
 
 select * from pg_replication_slots order by 1;
-                            slot_name                            | plugin | slot_type | datoid | database | active | xmin | catalog_xmin | restart_lsn | dummy_standby 
------------------------------------------------------------------+--------+-----------+--------+----------+--------+------+--------------+-------------+---------------
- dummystandby_slot                                               |        | physical  |      0 |          | f      |      |              |             | t
- my_physical_slot1my_physical_slot2my_physical_slot6my_physical_ |        | physical  |      0 |          | f      |      |              |             | t
- standby_slot                                                    |        | physical  |      0 |          | f      |      |              |             | f
+                            slot_name                            | plugin | slot_type | datoid | database | active | xmin | catalog_xmin | restart_lsn | dummy_standby | confirmed_flush 
+-----------------------------------------------------------------+--------+-----------+--------+----------+--------+------+--------------+-------------+---------------+-----------------
+ dummystandby_slot                                               |        | physical  |      0 |          | f      |      |              |             | t             | 
+ my_physical_slot1my_physical_slot2my_physical_slot6my_physical_ |        | physical  |      0 |          | f      |      |              |             | t             | 
+ standby_slot                                                    |        | physical  |      0 |          | f      |      |              |             | f             | 
 (3 rows)
 
 select * from pg_drop_replication_slot('dummystandby_slot');

@@ -99,7 +99,6 @@ explain (verbose on, costs off) select sum(c1) from t1 where c2=1 limit 1;
                Index Cond: (t1.c2 = 1::numeric)
 (7 rows)
 
-
 -- agg fusion
 drop index idx2;
 -- index t1(c2): indexonlyscan
@@ -120,7 +119,6 @@ select sum(c2) from t1 where c2=3;
    6
 (1 row)
 
-
 -- index t1(c2): indexscan
 explain (verbose on, costs off) select sum(c3) from t1 where c2=3;
                 QUERY PLAN                
@@ -138,7 +136,6 @@ select sum(c3) from t1 where c2=3;
 -----
    4
 (1 row)
-
 
 -- index t1(c3, c2): indexonlyscan
 drop index idx1;
@@ -187,7 +184,6 @@ explain (verbose on, costs off) select sum(c2) from t1 where c2=3;
          Index Cond: (t1.c2 = 3::numeric)
 (6 rows)
 
-
 select sum(c3) from t1 where c3=3;
  sum 
 -----
@@ -212,7 +208,6 @@ select sum(c2) from t1 where c2=3;
    6
 (1 row)
 
-
 -- sort fusion
 explain (verbose on, costs off) select c3 from t1 where c3 < 10 order by c2;
                   QUERY PLAN                   
@@ -234,7 +229,6 @@ select c3 from t1 where c3 < 10 order by c2;
   3
   3
 (4 rows)
-
 
 -- nestloop fusion
 drop table if exists tn1, tn2;
@@ -356,9 +350,44 @@ select tn2.c1, tn1.c1 from tn1,tn2 where tn1.c2 <20 and tn2.c2 <20;
  17 |  7
 (9 rows)
 
-
 drop table if exists t1, t2;
 drop table if exists tn1, tn2;
+-- test opfusion update time
+show enable_opfusion;
+ enable_opfusion 
+-----------------
+ on
+(1 row)
+
+drop table if exists test_opfusion_update;
+NOTICE:  table "test_opfusion_update" does not exist, skipping
+create table test_opfusion_update(a int);
+insert into test_opfusion_update values(1);
+select pg_stat_get_last_data_changed_time(oid) != 0 from pg_class where relname = 'test_opfusion_update';
+ ?column? 
+----------
+ t
+(1 row)
+
+drop table test_opfusion_update;
+-- test pbe opfusion when param set null
+create table test_bypass (a int, b int);
+create index itest on test_bypass(a);
+insert into test_bypass values(1,2);
+prepare p1 as select * from test_bypass where a = $1;
+execute p1(null);
+ a | b 
+---+---
+(0 rows)
+
+execute p1(1);
+ a | b 
+---+---
+ 1 | 2
+(1 row)
+
+drop table test_bypass;
+-- clean 
 reset enable_seqscan;
 reset enable_bitmapscan;
 reset enable_material;

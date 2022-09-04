@@ -276,6 +276,29 @@ array_v1 pack1.array_type1;
 procedure pp1();
 end pack3;
 /
+set check_function_bodies = 'off';
+create or replace function test1(aa int) return arrytype
+is 
+begin
+return null;
+end;
+/
+select name, status, type, src from dbe_pldeveloper.gs_source where name='test1';
+create or replace function aa.test1(aa arrytype) return arrytype
+is 
+begin
+return null;
+end;
+/
+select name, status, type, src from dbe_pldeveloper.gs_source where name='test1';
+create or replace function test2(aa int) return int
+is 
+begin
+a a;
+return arrytype;
+end;
+/
+select  name, status, type, src from dbe_pldeveloper.gs_source where name='test1';
 set behavior_compat_options='skip_insert_gs_source';
 create or replace procedure SkipInsertGsSource
 is

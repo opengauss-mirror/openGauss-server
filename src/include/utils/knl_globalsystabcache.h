@@ -120,8 +120,12 @@ private:
      * GlobalSysTabCache(in db level), with length SysCacheSize
      */
     GlobalSysTupCache **m_global_systupcaches;
-    pthread_rwlock_t *m_systab_locks;
+    pthread_rwlock_t   *m_systab_locks;
 
+    /*
+     * Pointer back refers current DB object's "GlobalSysDBCacheEntry" which is held
+     * as an array in GlobalSysDBCache
+     */
     struct GlobalSysDBCacheEntry *m_dbEntry;
 
     /* stat info fields */

@@ -1847,7 +1847,7 @@ extractPageInfo(XLogReaderState *record, XLogReaderData *reader_data,
         if (OidIsValid(pblk.relNode)) {
             Assert(PhyBlockIsValid(pblk));
             rnode.relNode = pblk.relNode;
-            rnode.bucketNode = pblk.block;
+            rnode.bucketNode = (int2)pblk.block;
         }
 
         process_block_change(forknum, rnode, blkno);

@@ -45,6 +45,7 @@
 #include "utils/guc.h"
 #include "utils/timestamp.h"
 #include "postmaster/barrier_creator.h"
+#include "postmaster/barrier_preparse.h"
 #include "postmaster/bgwriter.h"
 #include "postmaster/postmaster.h"
 
@@ -110,6 +111,8 @@ Datum pg_start_backup(PG_FUNCTION_ARGS)
         startpoint = do_pg_start_backup(backupidstr, fast, NULL, dir, NULL, NULL, false, true);
         RegisterAbortExclusiveBackup();
     }
+
+    (void)FreeDir(dir);
 
     errorno = snprintf_s(startxlogstr, sizeof(startxlogstr), sizeof(startxlogstr) - 1, "%X/%X",
                          (uint32)(startpoint >> 32), (uint32)startpoint);
@@ -206,6 +209,8 @@ Datum pg_start_backup_v2(PG_FUNCTION_ARGS)
             u_sess->proc_cxt.TblspcMapFile = NULL;
         }
     }
+
+    (void)FreeDir(dir);
 
     errorno = snprintf_s(startxlogstr, sizeof(startxlogstr), sizeof(startxlogstr) - 1, "%X/%X",
                          (uint32)(startpoint >> 32), (uint32)startpoint);
@@ -991,7 +996,7 @@ Datum gs_roach_enable_delay_ddl_recycle(PG_FUNCTION_ARGS)
     char location[MAXFNAMELEN];
     errno_t rc = EOK;
 
-    (void)ValidateName(NameStr(*name));
+    ValidateInputString(NameStr(*name));
 
     pg_check_xlog_func_permission();
 
@@ -1018,7 +1023,7 @@ Datum gs_roach_disable_delay_ddl_recycle(PG_FUNCTION_ARGS)
     HeapTuple resultHeapTuple;
     Datum result;
 
-    (void)ValidateName(NameStr(*name));
+    ValidateInputString(NameStr(*name));
 
     pg_check_xlog_func_permission();
 
@@ -1264,7 +1269,7 @@ Datum gs_set_obs_delete_location(PG_FUNCTION_ARGS)
     errorno = snprintf_s(xlogfilename, MAXFNAMELEN, MAXFNAMELEN - 1, "%08X%08X%08X_%02u", DEFAULT_TIMELINE_ID,
                          (uint32)((xlogsegno) / XLogSegmentsPerXLogId), (uint32)((xlogsegno) % XLogSegmentsPerXLogId),
                          (uint32)((locationpoint / OBS_XLOG_SLICE_BLOCK_SIZE) & OBS_XLOG_SLICE_NUM_MAX));
-    securec_check_ss(errorno, "", "");    
+    securec_check_ss(errorno, "", "");
 
     PG_RETURN_TEXT_P(cstring_to_text(xlogfilename));
 #else
@@ -2020,7 +2025,7 @@ Datum gs_streaming_dr_in_switchover(PG_FUNCTION_ARGS)
     if (!g_instance.streaming_dr_cxt.isInSwitchover) {
         ereport(LOG, (errmsg("Streaming disaster recovery is not in switchover.")));
         PG_RETURN_BOOL(false);
-    }    
+    }
 
 #ifdef ENABLE_MULTIPLE_NODES
     char barrier_id[MAX_BARRIER_ID_LENGTH];
@@ -2041,13 +2046,6 @@ Datum gs_streaming_dr_in_switchover(PG_FUNCTION_ARGS)
 Datum gs_streaming_dr_service_truncation_check(PG_FUNCTION_ARGS)
 {
 #ifndef ENABLE_LITE_MODE
-    XLogRecPtr switchoverLsn = g_instance.streaming_dr_cxt.switchoverBarrierLsn;
-    XLogRecPtr flushLsn = InvalidXLogRecPtr;
-    bool isInteractionCompleted = false;
-    int hadrWalSndNum = 0;
-    int InteractionCompletedNum = 0;
-    const uint32 shiftSize = 32;
-
     for (int i = 0; i < g_instance.attr.attr_storage.max_wal_senders; i++) {
         /* use volatile pointer to prevent code rearrangement */
         volatile WalSnd *walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
@@ -2056,24 +2054,21 @@ Datum gs_streaming_dr_service_truncation_check(PG_FUNCTION_ARGS)
         }
 
         if (walsnd->is_cross_cluster) {
-            hadrWalSndNum++;
             SpinLockAcquire(&walsnd->mutex);
-            flushLsn = walsnd->flush;
-            isInteractionCompleted = walsnd->isInteractionCompleted;
-            SpinLockRelease(&walsnd->mutex);
-            if (isInteractionCompleted && 
-                XLByteEQ(switchoverLsn, flushLsn)) {
-                InteractionCompletedNum++;
-            } else {
-                ereport(LOG,
-                        (errmsg("walsnd %d, the switchover Lsn is %X/%X, the hadr receiver flush Lsn is %X/%X",
-                        i, (uint32)(switchoverLsn >> shiftSize), (uint32)switchoverLsn,
-                        (uint32)(flushLsn >> shiftSize), (uint32)flushLsn)));
+            if (walsnd->interactiveState == SDRS_DEFAULT) {
+                walsnd->interactiveState = SDRS_INTERACTION_BEGIN;
+                g_instance.streaming_dr_cxt.hadrWalSndNum++;
             }
+            SpinLockRelease(&walsnd->mutex);
         }
     }
 
-    if (hadrWalSndNum != 0 && hadrWalSndNum == InteractionCompletedNum) {
+    ereport(LOG, (errmsg("Checking streaming dr switchover service truncation."
+        "hadrWalSndNum: %d, interactionCompletedNum: %d",
+        g_instance.streaming_dr_cxt.hadrWalSndNum, g_instance.streaming_dr_cxt.interactionCompletedNum)));
+
+    if (g_instance.streaming_dr_cxt.hadrWalSndNum != 0 &&
+        g_instance.streaming_dr_cxt.hadrWalSndNum == g_instance.streaming_dr_cxt.interactionCompletedNum) {
         PG_RETURN_BOOL(true);
     } else {
         PG_RETURN_BOOL(false);
@@ -2117,9 +2112,7 @@ Datum gs_streaming_dr_get_switchover_barrier(PG_FUNCTION_ARGS)
     }
     if (t_thrd.xlog_cxt.is_hadr_main_standby || IS_PGXC_COORDINATOR) {
         g_instance.streaming_dr_cxt.isInSwitchover = true;
-        if (g_instance.streaming_dr_cxt.isInteractionCompleted &&
-            XLByteEQ(last_flush_location, last_replay_location) &&
-            XLByteEQ(walrcv->targetSwitchoverBarrierLSN, last_replay_location)) {
+        if (g_instance.streaming_dr_cxt.isInteractionCompleted) {
             PG_RETURN_BOOL(true);
         }
     } 
@@ -2303,7 +2296,7 @@ Datum gs_pitr_archive_slot_force_advance(PG_FUNCTION_ARGS)
     List *all_archive_slots = NIL;
     char globalBarrierId[MAX_BARRIER_ID_LENGTH] = {0};
     long endBarrierTimestamp = 0;
-    int readLen = 0;
+    size_t readLen = 0;
     char* oldestBarrierForNow = NULL;
     errno_t rc = EOK;
 
@@ -2338,9 +2331,26 @@ Datum gs_pitr_archive_slot_force_advance(PG_FUNCTION_ARGS)
         long currendTimestamp = 0;
         char* slotname = (char*)lfirst(cell);
         ArchiveSlotConfig *archive_conf = NULL;
-        if ((archive_conf = slot_func(slotname)) == NULL) {
-            readLen = ArchiveRead(HADR_BARRIER_ID_FILE, 0, globalBarrierId, MAX_BARRIER_ID_LENGTH,
-                &archive_conf->archive_config);
+        if ((archive_conf = slot_func(slotname)) != NULL) {
+            char pathPrefix[MAXPGPATH] = {0};
+            ArchiveConfig obsConfig;
+            /* copy OBS configs to temporary variable for customising file path */
+            rc = memcpy_s(&obsConfig, sizeof(ArchiveConfig), &archive_conf->archive_config, sizeof(ArchiveConfig));
+            securec_check(rc, "", "");
+
+            if (!IS_PGXC_COORDINATOR) {
+                rc = strcpy_s(pathPrefix, MAXPGPATH, obsConfig.archive_prefix);
+                securec_check(rc, "\0", "\0");
+
+                char *p = strrchr(pathPrefix, '/');
+                if (p == NULL) {
+                    ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                            errmsg("Obs path prefix is invalid")));
+                }
+                *p = '\0';
+                obsConfig.archive_prefix = pathPrefix;
+            }
+            readLen = ArchiveRead(HADR_BARRIER_ID_FILE, 0, globalBarrierId, MAX_BARRIER_ID_LENGTH, &obsConfig);
             if (readLen == 0) {
                 ereport(ERROR, (errcode(ERRCODE_NO_DATA_FOUND),
                     (errmsg("Cannot read global barrier ID in %s file!", HADR_BARRIER_ID_FILE))));
@@ -2432,11 +2442,11 @@ Datum gs_get_standby_cluster_barrier_status(PG_FUNCTION_ARGS)
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                  (errmsg("gs_get_standby_cluster_barrier_status only support on standby-cluster-mode."))));
 
+    SpinLockAcquire(&walrcv->mutex);
     rc = strncpy_s((char *)lastestbarrierId, MAX_BARRIER_ID_LENGTH, (char *)walrcv->lastReceivedBarrierId,
                    MAX_BARRIER_ID_LENGTH - 1);
     securec_check(rc, "\0", "\0");
 
-    SpinLockAcquire(&walrcv->mutex);
     barrierLsn = walrcv->lastReceivedBarrierLSN;
 
     rc = snprintf_s(barrierLocation, MAXFNAMELEN, MAXFNAMELEN - 1, "%08X/%08X", (uint32)(barrierLsn >> shiftSize),
@@ -2522,8 +2532,8 @@ Datum gs_set_standby_cluster_target_barrier_id(PG_FUNCTION_ARGS)
     SpinLockAcquire(&walrcv->mutex);
     errorno = strncpy_s((char *)walrcv->recoveryTargetBarrierId, MAX_BARRIER_ID_LENGTH, (char *)barrierstr,
                         MAX_BARRIER_ID_LENGTH - 1);
-    SpinLockRelease(&walrcv->mutex);
     securec_check(errorno, "\0", "\0");
+    SpinLockRelease(&walrcv->mutex);
 
     ereport(LOG, (errmsg("gs_set_standby_cluster_target_barrier_id set the barrier ID is %s", targetbarrier)));
 
@@ -2551,7 +2561,7 @@ Datum gs_query_standby_cluster_barrier_id_exist(PG_FUNCTION_ARGS)
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                  (errmsg("gs_query_standby_cluster_barrier_id_exist only support on standby-cluster-mode."))));
 
-    if (g_instance.csn_barrier_cxt.barrier_hash_table == NULL) {
+    if (!IS_BARRIER_HASH_INIT) {
         ereport(WARNING, (errcode(ERRCODE_OPERATE_NOT_SUPPORTED), (errmsg("barrier hash table is NULL."))));
         PG_RETURN_BOOL(found);
     }

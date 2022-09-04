@@ -1,6 +1,5 @@
 #!/bin/bash
-#############################################################################
-# Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+# Copyright (c) Huawei Technologies Co., Ltd. 2020-2025. All rights reserved.
 #
 # openGauss is licensed under Mulan PSL v2.
 # You can use this software according to the terms
@@ -15,7 +14,6 @@
 # See the Mulan PSL v2 for more details.
 # ----------------------------------------------------------------------------
 # Description  : gs_backup is a utility to back up or restore binary files and parameter files.
-#############################################################################
 
 declare UPGRADE_SQL_DIR="${ROOT_DIR}/src/include/catalog/upgrade_sql"
 

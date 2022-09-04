@@ -29,6 +29,7 @@
 #include "catalog/objectaccess.h"
 #include "catalog/pg_class.h"
 #include "catalog/pg_rewrite.h"
+#include "catalog/pg_namespace.h"
 #include "catalog/pgxc_class.h"
 #include "catalog/pgxc_slice.h"
 #include "catalog/storage.h"
@@ -57,6 +58,7 @@
 #include "utils/snapmgr.h"
 
 static void checkRuleResultList(List* targetList, TupleDesc resultDesc, bool isSelect);
+static bool checkWhetherForbiddenRule(Oid relId);
 static bool setRuleCheckAsUser_walker(Node* node, Oid* context);
 static void setRuleCheckAsUser_Query(Query* qry, Oid userid);
 
@@ -202,7 +204,12 @@ void DefineRule(RuleStmt* stmt, const char* queryString)
      * DefineQueryRewrite.
      */
     relId = RangeVarGetRelid(stmt->relation, AccessExclusiveLock, false);
-
+    if (checkWhetherForbiddenRule(relId)) {
+        ereport(ERROR,
+            (errmodule(MOD_EXECUTOR),
+                errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("not supported to create a rule on this table.")));
+    }
     /* ... and execute */
     DefineQueryRewrite(stmt->rulename, relId, whereClause, stmt->event, stmt->instead, stmt->replace, actions);
 }
@@ -267,17 +274,17 @@ void DefineQueryRewrite(
      */
     foreach (l, action) {
         query = (Query*)lfirst(l);
-        if (query->resultRelation == 0)
+        if (linitial2_int(query->resultRelations) == 0)
             continue;
         /* Don't be fooled by INSERT/SELECT */
         if (query != getInsertSelectQuery(query, NULL))
             continue;
-        if (query->resultRelation == PRS2_OLD_VARNO)
+        if (linitial2_int(query->resultRelations) == PRS2_OLD_VARNO)
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("rule actions on OLD are not implemented"),
                     errhint("Use views or triggers instead.")));
-        if (query->resultRelation == PRS2_NEW_VARNO)
+        if (linitial2_int(query->resultRelations) == PRS2_NEW_VARNO)
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("rule actions on NEW are not implemented"),
@@ -390,8 +397,6 @@ void DefineQueryRewrite(
                             ViewSelectRuleName)));
             rulename = pstrdup(ViewSelectRuleName);
         }
-
-        event_relation->rd_rel->relkind = RELKIND_MATVIEW;
 
         /*
          * Are we converting a relation to a view?
@@ -613,7 +618,7 @@ void DefineQueryRewrite(
         tableam_tops_free_tuple(classTup);
         heap_close(relationRelation, RowExclusiveLock);
 
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NODES
         RemovePgxcClass(event_relid);
         RemovePgxcSlice(event_relid);
         deleteDependencyRecordsFor(PgxcClassRelationId, event_relid, false);
@@ -634,6 +639,25 @@ void DefineQueryRewrite(
     /* Close rel, but keep lock till commit... */
     heap_close(event_relation, NoLock);
 }
+
+
+/* Check whether the rule creates on a forbidden table. */
+static bool checkWhetherForbiddenRule(Oid relId)
+{
+    Relation rel = heap_open(relId, NoLock);
+    Oid namespaceId = RelationGetNamespace(rel);
+    
+    /* Currently, there is only one schema in the blacklist. */
+    /* Therefore, we can make a simple judgment by using the following method. */
+    bool forbidden = false;
+    if (namespaceId == PG_DB4AI_NAMESPACE && !strcmp(RelationGetRelationName(rel), "snapshot")) {
+        forbidden = true;
+    }
+    
+    heap_close(rel, NoLock);
+    return forbidden;
+}
+
 
 /*
  * checkRuleResultList

@@ -533,7 +533,7 @@ Relation heap_create(const char* relname, Oid relnamespace, Oid reltablespace, O
      */
     if (!allow_system_table_mods && 
         (IsSystemNamespace(relnamespace) || IsToastNamespace(relnamespace) || IsCStoreNamespace(relnamespace) || 
-        IsPackageSchemaOid(relnamespace)) && IsNormalProcessingMode()) {
+        IsPackageSchemaOid(relnamespace) || IsPldeveloper(relnamespace)) && IsNormalProcessingMode()) {
         ereport(ERROR,
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                 errmsg("permission denied to create \"%s.%s\"", get_namespace_name(relnamespace), relname),
@@ -620,22 +620,21 @@ Relation heap_create(const char* relname, Oid relnamespace, Oid reltablespace, O
      * build the relcache entry.
      */
     rel = RelationBuildLocalRelation(relname,
-        relnamespace,
-        tupDesc,
-        relid,
-        relfilenode,
-        reltablespace,
-        shared_relation,
-        mapped_relation,
-        relpersistence,
-        relkind,
-        row_compress,
-        reloptions,
-        tam_type,
-        relindexsplit,
-        storage_type,
-        accessMethodObjectId
-    );
+                                     relnamespace,
+                                     tupDesc,
+                                     relid,
+                                     relfilenode,
+                                     reltablespace,
+                                     shared_relation,
+                                     mapped_relation,
+                                     relpersistence,
+                                     relkind,
+                                     row_compress,
+                                     reloptions,
+                                     tam_type,
+                                     relindexsplit,
+                                     storage_type,
+                                     accessMethodObjectId);
 
     if (partitioned_relation) {
         rel->rd_rel->parttype = PARTTYPE_PARTITIONED_RELATION;
@@ -3927,6 +3926,62 @@ static void StoreConstraints(Relation rel, List* cooked_constraints)
         SetRelationNumChecks(rel, numchecks);
 }
 
+static void CheckAutoIncrementDataType(Form_pg_attribute attr)
+{
+    switch (attr->atttypid) {
+        case BOOLOID:
+        case INT1OID:
+        case INT2OID:
+        case INT4OID:
+        case INT8OID:
+        case FLOAT4OID:
+        case FLOAT8OID:
+            break;
+        default:
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("The datatype of column '%s' does not support auto_increment", attr->attname.data)));
+            break;
+    };
+}
+
+static Node* CookAutoIncDefault(ParseState* pstate, Relation rel, RawColumnDefault* colDef, Form_pg_attribute atp)
+{
+    AutoIncrement *autoinc = NULL;
+
+    CheckAutoIncrementDataType(atp);
+    if (RelHasAutoInc(rel)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                (errmsg("Incorrect column definition, there can be only one auto_increment column"))));
+    }
+
+    autoinc = makeNode(AutoIncrement);
+    (void)find_coercion_pathway(INT16OID, atp->atttypid, COERCION_ASSIGNMENT, &autoinc->autoincin_funcid);
+    (void)find_coercion_pathway(atp->atttypid, INT16OID, COERCION_ASSIGNMENT, &autoinc->autoincout_funcid);
+    autoinc->expr = cookDefault(pstate, ((AutoIncrement*)colDef->raw_default)->expr, atp->atttypid,
+        atp->atttypmod, NameStr(atp->attname), colDef->generatedCol);
+
+    /* If relation is temp table, cooked default must be a constant of the auto increment start value. */
+    if (rel->rd_rel->relpersistence == RELPERSISTENCE_TEMP) {
+        Const* con = (Const*)((AutoIncrement*)colDef->raw_default)->expr;
+        tmptable_autoinc_reset(rel->rd_rel->relfilenode, DatumGetInt128(con->constvalue));
+    }
+    return (Node*)autoinc;
+}
+
+static void CheckAutoIncrementCheckExpr(Node* expr, AttrNumber attrnum)
+{
+    if (attrnum == 0) {
+        return;
+    }
+    Bitmapset *checkattrs = NULL;
+
+    pull_varattnos(expr, 1, &checkattrs);
+    if (bms_is_member(attrnum - FirstLowInvalidHeapAttributeNumber, checkattrs)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    (errmsg("check constraint cannot refer to an auto_increment column"))));
+    }
+}
+
 /*
  * AddRelationNewConstraints
  *
@@ -3966,6 +4021,7 @@ List* AddRelationNewConstraints(
     ListCell* cell = NULL;
     Node* expr = NULL;
     CookedConstraint* cooked = NULL;
+    AttrNumber autoinc_attnum = RelAutoIncAttrNum(rel);
     Node* update_expr = NULL;
 
     /*
@@ -3994,11 +4050,17 @@ List* AddRelationNewConstraints(
     foreach (cell, newColDefaults) {
         RawColumnDefault* colDef = (RawColumnDefault*)lfirst(cell);
         Form_pg_attribute atp = rel->rd_att->attrs[colDef->attnum - 1];
-
+        
         if (colDef->raw_default != NULL) {
-            expr = cookDefault(pstate, colDef->raw_default, atp->atttypid, atp->atttypmod, NameStr(atp->attname),
+            if (IsA(colDef->raw_default, AutoIncrement)) {
+                autoinc_attnum = colDef->attnum;
+                expr = CookAutoIncDefault(pstate, rel, colDef, atp);
+            } else {
+                expr = cookDefault(pstate, colDef->raw_default, atp->atttypid, atp->atttypmod, NameStr(atp->attname),
                 colDef->generatedCol);
+            }
         }
+
         if (colDef->update_expr != NULL) {
             update_expr = cookDefault(pstate, colDef->update_expr, atp->atttypid, atp->atttypmod, NameStr(atp->attname),
                 colDef->generatedCol);
@@ -4066,6 +4128,10 @@ List* AddRelationNewConstraints(
             expr = (Node*)stringToNode(cdef->cooked_expr);
         }
 
+        /*
+         * Check constraint expressions cannot contain auto_increment column.
+         */
+        CheckAutoIncrementCheckExpr(expr, autoinc_attnum);
         /*
          * Check name uniqueness, or generate a name if none was given.
          */
@@ -6272,8 +6338,8 @@ Oid HeapAddListPartition(Relation pgPartRel, Oid partTableOid, Oid partTablespac
         forPartitionTable = false;
     }
     newListPartition = heapCreatePartition(newListPartDef->partitionName, forPartitionTable, newPartitionTableSpaceOid,
-                                           newListPartitionOid, partrelfileOid, bucketOid, ownerid, storage_type,false,
-        reloptions);
+                                           newListPartitionOid, partrelfileOid, bucketOid, ownerid, storage_type,
+                                           false, reloptions);
 
     Assert(newListPartitionOid == PartitionGetPartid(newListPartition));
 
@@ -7792,6 +7858,25 @@ bool* CheckPartkeyHasTimestampwithzone(Relation partTableRel, bool isForSubParti
 
     relation_close(pgPartRel, AccessShareLock);
     return isTimestamptz;
+}
+
+bool *CheckSubPartkeyHasTimestampwithzone(Relation partTableRel, List *subpartKeyPosList)
+{
+    Assert(RelationIsSubPartitioned(partTableRel));
+
+    int subPartKeyNum = list_length(subpartKeyPosList);
+    bool *isTimestamptzForSubPartKey = (bool *)palloc0(sizeof(bool) * subPartKeyNum);
+    ListCell *subpartKeyCell = NULL;
+    int partKeyIdx = 0;
+    foreach (subpartKeyCell, subpartKeyPosList) {
+        int pos = lfirst_int(subpartKeyCell);
+        if ((RelationGetDescr(partTableRel))->attrs[pos]->atttypid == TIMESTAMPTZOID) {
+            isTimestamptzForSubPartKey[partKeyIdx] = true;
+        }
+        partKeyIdx++;
+    }
+
+    return isTimestamptzForSubPartKey;
 }
 
 /*

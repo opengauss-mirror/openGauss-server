@@ -515,7 +515,7 @@ static void BufFileDumpBuffer(BufFile* file)
             file->offsets[file->curFile] = file->curOffset;
         }
         bytestowrite =
-            FilePWrite(thisfile, file->buffer + wpos, bytestowrite, file->curOffset, WAIT_EVENT_BUFFILE_WRITE);
+            FilePWrite(thisfile, file->buffer + wpos, bytestowrite, file->curOffset, (uint32)WAIT_EVENT_BUFFILE_WRITE);
         if (bytestowrite <= 0) {
             return; /* failed to write */
         }

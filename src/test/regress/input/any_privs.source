@@ -1,0 +1,321 @@
+-- prepare
+CREATE USER user_new PASSWORD '1234567i*';
+CREATE USER user_any1 PASSWORD '1234567i*';
+create schema scm_any;
+create schema scm_any1;
+grant create on schema scm_any1 to user_any1;
+set search_path='scm_any';
+
+-- ALTER ANY TYPE, DROP ANY TYPE
+RESET ROLE;
+CREATE TYPE typecom AS (f1 int, f2 text);
+CREATE TYPE typeenum AS ENUM ('create', 'modify', 'closed');
+
+grant alter any type to user_any1;
+SELECT has_any_privilege('user_any1','alter any type'); -- true
+SELECT has_any_privilege('user_any1','alter any type with admin option'); -- false
+
+SET ROLE user_any1 PASSWORD '1234567i*';
+CREATE TYPE typeany1;
+
+ALTER TYPE typecom RENAME TO typecom1; -- success
+ALTER TYPE typecom1 RENAME TO typecom; -- success
+ALTER TYPE typecom OWNER TO user_new;
+ALTER TYPE typecom SET SCHEMA scm_any1;
+ALTER TYPE typecom ADD ATTRIBUTE f3 int; -- success
+ALTER TYPE typeenum ADD VALUE IF NOT EXISTS 'regress' BEFORE 'closed'; -- success
+ALTER TYPE typeenum RENAME VALUE 'create' TO 'new'; -- success
+
+DROP TYPE typecom;
+DROP TYPE typeenum;
+
+RESET ROLE;
+revoke alter any type from user_any1;
+grant drop any type to user_any1;
+SELECT has_any_privilege('user_any1','drop any type'); -- true
+SELECT has_any_privilege('user_any1','drop any type with admin option'); -- false
+
+SET ROLE user_any1 PASSWORD '1234567i*';
+CREATE TYPE typeany1;
+
+ALTER TYPE typecom RENAME TO typecom1;
+ALTER TYPE typecom ADD ATTRIBUTE f3 int;
+
+DROP TYPE typecom; -- success
+DROP TYPE typeenum; -- success
+
+RESET ROLE;
+revoke drop any type from user_any1;
+
+-- ALTER ANY SEQUENCE、DROP ANY SEQUENCE、SELECT ANY SEQUENCE
+RESET ROLE;
+CREATE SEQUENCE serial START 101 CACHE 20;
+CREATE TABLE tbl (fir int);
+CREATE SEQUENCE serial1 START 10 OWNED BY tbl.fir;
+CREATE TABLE tbl1(C1 bigint default nextval('serial'));
+
+grant select any sequence to user_any1;
+SELECT has_any_privilege('user_any1','select any sequence'); -- true
+SELECT has_any_privilege('user_any1','select any sequence with admin option'); -- false
+
+SET ROLE user_any1 PASSWORD '1234567i*';
+CREATE SEQUENCE serial2 START 101 CACHE 20;
+
+SELECT nextval('serial'); -- success
+SELECT nextval('serial1'); -- success
+
+ALTER SEQUENCE serial OWNER TO user_new;
+ALTER SEQUENCE serial OWNED BY tbl1.C1;
+
+DROP SEQUENCE serial cascade;
+DROP SEQUENCE serial1 cascade;
+
+RESET ROLE;
+revoke select any sequence from user_any1;
+grant alter any sequence to user_any1;
+SELECT has_any_privilege('user_any1','alter any sequence'); -- true
+SELECT has_any_privilege('user_any1','alter any sequence with admin option'); -- false
+
+SET ROLE user_any1 PASSWORD '1234567i*';
+CREATE SEQUENCE serial2 START 101 CACHE 20;
+
+SELECT nextval('serial');
+
+ALTER SEQUENCE serial OWNER TO user_new;
+ALTER SEQUENCE serial OWNED BY tbl1.C1; -- success
+
+DROP SEQUENCE serial cascade;
+DROP SEQUENCE serial1 cascade;
+
+RESET ROLE;
+revoke alter any sequence from user_any1;
+grant drop any sequence to user_any1;
+SELECT has_any_privilege('user_any1','drop any sequence'); -- true
+SELECT has_any_privilege('user_any1','drop any sequence with admin option'); -- false
+
+SET ROLE user_any1 PASSWORD '1234567i*';
+CREATE SEQUENCE serial2 START 101 CACHE 20;
+
+SELECT nextval('serial');
+
+ALTER SEQUENCE serial OWNER TO user_new;
+ALTER SEQUENCE serial OWNED BY tbl1.C1;
+
+DROP SEQUENCE serial cascade; -- success
+DROP SEQUENCE serial1 cascade; -- success
+
+RESET ROLE;
+revoke drop any sequence from user_any1;
+DROP TABLE tbl,tbl1;
+
+-- ALTER ANY INDEX、DROP ANY INDEX
+RESET ROLE;
+CREATE TABLESPACE tsp LOCATION '@testtablespace@/tsp_any';
+CREATE TABLESPACE tsp1 LOCATION '@testtablespace@/tsp_any_1';
+CREATE TABLESPACE tsp2 LOCATION '@testtablespace@/tsp_any_2';
+grant create on tablespace tsp to public;
+grant create on tablespace tsp2 to public;
+
+CREATE TABLE tbl(fir int,sec int);
+CREATE UNIQUE INDEX i1 ON tbl(fir);
+
+CREATE TABLE tbl_par(fir INTEGER NOT NULL, sec CHAR(16) NOT NULL)
+TABLESPACE tsp
+PARTITION BY RANGE(fir)
+(
+    PARTITION p1 VALUES LESS THAN (3000),
+    PARTITION p2 VALUES LESS THAN (5000) TABLESPACE tsp1
+)ENABLE ROW MOVEMENT;
+CREATE INDEX i1_par ON tbl_par(fir) LOCAL
+(
+    PARTITION p1_index1,
+    PARTITION p2_index2 TABLESPACE tsp1
+)TABLESPACE tsp2;
+
+grant alter any index to user_any1;
+SELECT has_any_privilege('user_any1','alter any index'); -- true
+SELECT has_any_privilege('user_any1','alter any index with admin option'); -- false
+
+SET ROLE user_any1 PASSWORD '1234567i*';
+CREATE UNIQUE INDEX i2 ON tbl(fir);
+CREATE INDEX i2_par ON tbl_par(fir) LOCAL
+(
+    PARTITION p1_index1,
+    PARTITION p2_index2 TABLESPACE tsp1
+)TABLESPACE tsp2;
+
+ALTER INDEX i1 RENAME TO i1_new;
+ALTER INDEX i1 UNUSABLE; -- alter any index and drop any index
+ALTER INDEX i1 REBUILD; -- success
+ALTER INDEX i1 SET TABLESPACE tsp; -- success
+ALTER INDEX i1 SET (FILLFACTOR=11); -- success
+ALTER INDEX i1 RESET (FASTUPDATE) ; -- success
+ALTER INDEX i1_par MOVE PARTITION p2_index2 TABLESPACE tsp2; -- success
+ALTER INDEX i1_par RENAME PARTITION p1_index1 TO p1_index1_new;
+
+DROP INDEX i1;
+DROP INDEX i1_par;
+
+RESET ROLE;
+grant create on schema scm_any to public;
+SET ROLE user_any1 PASSWORD '1234567i*';
+ALTER INDEX i1 RENAME TO i1_new; -- success
+ALTER INDEX i1_new RENAME TO i1; -- success
+ALTER INDEX i1_par RENAME PARTITION p1_index1 TO p1_index1_new; -- success
+
+RESET ROLE;
+revoke create on schema scm_any from public;
+grant drop any index to user_any1;
+SET ROLE user_any1 PASSWORD '1234567i*';
+ALTER INDEX i1 UNUSABLE; -- success
+
+RESET ROLE;
+revoke alter any index from user_any1;
+grant drop any index to user_any1;
+SELECT has_any_privilege('user_any1','drop any index'); -- true
+SELECT has_any_privilege('user_any1','drop any index with admin option'); -- false
+
+SET ROLE user_any1 PASSWORD '1234567i*';
+CREATE UNIQUE INDEX i2 ON tbl(fir);
+CREATE INDEX i2_par ON tbl_par(fir) LOCAL
+(
+    PARTITION p1_index1,
+    PARTITION p2_index2 TABLESPACE tsp1
+)TABLESPACE tsp2;
+
+ALTER INDEX i1 RENAME TO i1_new;
+ALTER INDEX i1 UNUSABLE; -- alter any index and drop any index
+ALTER INDEX i1 REBUILD;
+ALTER INDEX i1 SET TABLESPACE tsp;
+ALTER INDEX i1 SET (FILLFACTOR=11);
+ALTER INDEX i1_par MOVE PARTITION p2_index2 TABLESPACE tsp2;
+ALTER INDEX i1_par RENAME PARTITION p1_index1 TO p1_index1_new;
+
+DROP INDEX i1; -- success
+DROP INDEX i1_par; -- success
+
+RESET ROLE;
+revoke drop any index from user_any1;
+DROP TABLE tbl,tbl_par;
+DROP TABLESPACE tsp;
+DROP TABLESPACE tsp1;
+DROP TABLESPACE tsp2;
+\! rm -rf @testtablespace@/tsp_any
+\! rm -rf @testtablespace@/tsp_any1
+\! rm -rf @testtablespace@/tsp_any2
+
+-- CREATE ANY SYNONYM、DROP ANY SYNONYM
+RESET ROLE;
+CREATE TABLE scm_any1.t(id int, name varchar2(10));
+CREATE VIEW scm_any1.v_t AS SELECT * FROM scm_any1.t;
+CREATE OR REPLACE FUNCTION scm_any1.add(a integer, b integer) RETURNS integer AS
+$$ SELECT $1 + $2 $$ LANGUAGE sql;
+CREATE SYNONYM t FOR scm_any1.t;
+CREATE SYNONYM v_t FOR scm_any1.v_t;
+CREATE OR REPLACE SYNONYM add FOR scm_any1.add;
+
+grant create any synonym to user_any1;
+SELECT has_any_privilege('user_any1','create any synonym'); -- true
+SELECT has_any_privilege('user_any1','create any synonym with admin option'); -- false
+
+SET ROLE user_any1 PASSWORD '1234567i*';
+CREATE SYNONYM t1 FOR scm_any1.t; -- success
+CREATE OR REPLACE SYNONYM t FOR scm_any1.v_t; -- success
+CREATE SYNONYM v_t1 FOR scm_any1.v_t; -- success
+CREATE OR REPLACE SYNONYM add1 FOR scm_any1.add; -- success
+DROP SYNONYM t1;
+DROP SYNONYM v_t1;
+DROP SYNONYM add1;
+
+ALTER SYNONYM t owner to user_new;
+
+DROP SYNONYM t;
+DROP SYNONYM v_t;
+DROP SYNONYM add;
+
+RESET ROLE;
+revoke create any synonym from user_any1;
+grant drop any synonym to user_any1;
+SELECT has_any_privilege('user_any1','drop any synonym'); -- true
+SELECT has_any_privilege('user_any1','drop any synonym with admin option'); -- false
+
+SET ROLE user_any1 PASSWORD '1234567i*';
+CREATE SYNONYM t1 FOR scm_any1.t;
+CREATE SYNONYM add1 FOR scm_any1.add;
+
+ALTER SYNONYM t owner to user_new;
+
+DROP SYNONYM t; -- success
+DROP SYNONYM v_t; -- success
+DROP SYNONYM add; -- success
+
+RESET ROLE;
+revoke drop any synonym from user_any1;
+drop table scm_any1.t cascade;
+drop function scm_any1.add(integer,integer);
+
+-- CREATE ANY TRIGGER、ALTER ANY TRIGGER、DROP ANY TRIGGER
+RESET ROLE;
+CREATE TABLE src_tbl(id1 INT, id2 INT, id3 INT);
+CREATE TABLE des_tbl(id1 INT, id2 INT, id3 INT);
+CREATE OR REPLACE FUNCTION tri_insert_func() RETURNS TRIGGER AS
+$$ DECLARE
+BEGIN
+INSERT INTO des_tbl VALUES(NEW.id1, NEW.id2, NEW.id3);
+RETURN NEW;
+END $$ LANGUAGE PLPGSQL;
+CREATE TRIGGER insert_trigger BEFORE INSERT ON src_tbl
+FOR EACH ROW EXECUTE PROCEDURE tri_insert_func();
+
+grant create any trigger to user_any1;
+SELECT has_any_privilege('user_any1','create any trigger'); -- true
+SELECT has_any_privilege('user_any1','create any trigger with admin option'); -- false
+
+SET ROLE user_any1 PASSWORD '1234567i*';
+CREATE TRIGGER insert_trigger1 BEFORE INSERT ON src_tbl
+FOR EACH ROW EXECUTE PROCEDURE tri_insert_func(); -- success
+DROP TRIGGER insert_trigger1 ON src_tbl; -- failed (need table owner)
+
+ALTER TRIGGER insert_trigger ON src_tbl RENAME TO insert_trigger_renamed;
+
+DROP TRIGGER insert_trigger ON src_tbl;
+
+RESET ROLE;
+revoke create any trigger from user_any1;
+grant alter any trigger to user_any1;
+SELECT has_any_privilege('user_any1','alter any trigger'); -- true
+SELECT has_any_privilege('user_any1','alter any trigger with admin option'); -- false
+
+SET ROLE user_any1 PASSWORD '1234567i*';
+CREATE TRIGGER insert_trigger1 BEFORE INSERT ON src_tbl
+FOR EACH ROW EXECUTE PROCEDURE tri_insert_func();
+
+ALTER TRIGGER insert_trigger ON src_tbl RENAME TO insert_trigger_renamed; -- success
+ALTER TRIGGER insert_trigger_renamed ON src_tbl RENAME TO insert_trigger; -- success
+
+DROP TRIGGER insert_trigger ON src_tbl;
+
+RESET ROLE;
+revoke alter any trigger from user_any1;
+grant drop any trigger to user_any1;
+SELECT has_any_privilege('user_any1','drop any trigger'); -- true
+SELECT has_any_privilege('user_any1','drop any trigger with admin option'); -- false
+
+SET ROLE user_any1 PASSWORD '1234567i*';
+CREATE TRIGGER insert_trigger1 BEFORE INSERT ON src_tbl
+FOR EACH ROW EXECUTE PROCEDURE tri_insert_func();
+
+ALTER TRIGGER insert_trigger ON src_tbl RENAME TO insert_trigger_renamed;
+
+DROP TRIGGER insert_trigger ON src_tbl; -- success
+DROP TRIGGER insert_trigger1 ON src_tbl; -- success
+
+RESET ROLE;
+revoke drop any trigger from user_any1;
+DROP TABLE src_tbl,des_tbl;
+DROP FUNCTION tri_insert_func();
+
+-- clean
+RESET ROLE;
+DROP SCHEMA scm_any,scm_any1;
+DROP USER user_new,user_any1;

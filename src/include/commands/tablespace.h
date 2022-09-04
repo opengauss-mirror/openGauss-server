@@ -17,7 +17,6 @@
 #include "access/xloginsert.h"
 #include "lib/stringinfo.h"
 #include "nodes/parsenodes.h"
-#include "storage/dfs/dfs_connector.h"
 #include "workload/workload.h"
 #include "catalog/indexing.h"
 
@@ -121,10 +120,6 @@ extern char* GetTablespaceOptionValue(Oid spcNode, const char* optionName);
  * Get the all optioin values.
  */
 extern List* GetTablespaceOptionValues(Oid spcNode);
-/*
- * Get the DfsSrvOptions info from pg_tablespace.
- */
-extern DfsSrvOptions* GetDfsSrvOptions(Oid spcNode);
 
 extern void PrepareTempTablespaces(void);
 

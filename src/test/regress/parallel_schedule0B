@@ -45,7 +45,7 @@ test: gpi_create_constraint
 test: gpi_unique_check
 
 # gpi index scan
-test: gpi_index
+#test: gpi_index
 
 # gpi index only scan
 test: gpi_index_only

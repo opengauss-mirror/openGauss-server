@@ -65,7 +65,7 @@ const int max_parallel_maintenance_workers = 32;
 
 static bool check_func_walker(Node* node, bool* found);
 static bool check_func(Node* node);
-static void set_base_rel_sizes(PlannerInfo* root);
+
 static void set_base_rel_pathlists(PlannerInfo* root);
 static void set_correlated_rel_pathlist(PlannerInfo* root, RelOptInfo* rel);
 static void set_rel_pathlist(PlannerInfo* root, RelOptInfo* rel, Index rti, RangeTblEntry* rte);
@@ -305,7 +305,7 @@ RelOptInfo* make_one_rel(PlannerInfo* root, List* joinlist)
  * We do this in a separate pass over the base rels so that rowcount
  * estimates are available for parameterized path generation.
  */
-static void set_base_rel_sizes(PlannerInfo* root)
+extern void set_base_rel_sizes(PlannerInfo* root, bool onlyRelatinalTable)
 {
     int rti;
 
@@ -322,7 +322,12 @@ static void set_base_rel_sizes(PlannerInfo* root)
         if (rel->reloptkind != RELOPT_BASEREL)
             continue;
 
-        set_rel_size(root, rel, rti, root->simple_rte_array[rti]);
+        RangeTblEntry *tbl = root->simple_rte_array[rti];
+        if (onlyRelatinalTable && tbl->rtekind != RTE_RELATION) {
+            continue;
+        }
+
+        set_rel_size(root, rel, rti, tbl);
 
         /* Try inlist2join optimization */
         inlist2join_qrw_optimization(root, rti);
@@ -859,17 +864,37 @@ static void set_rel_pathlist(PlannerInfo* root, RelOptInfo* rel, Index rti, Rang
 #endif
 }
 
-static void SetPlainReSizeWithPruningRatio(RelOptInfo *rel, double pruningRatio)
+static void SetPlainReSizeWithPruningRatio(RelOptInfo *rel, double pruningRatio, PlannerInfo* root)
 {
     ListCell *cell = NULL;
     IndexOptInfo *index = NULL;
+    RangeTblEntry *rte = root->simple_rte_array[rel->relid];
 
     Assert(rel->isPartitionedTable);
-    rel->pages = clamp_row_est(rel->pages * pruningRatio);
+    double pruningPages = clamp_row_est(rel->pages * pruningRatio);
+
+    ereport(DEBUG2, (errmodule(MOD_OPT),
+                     errmsg("Computing partition table relpages: %s, Pre-Pruning Pages: %lf,  pruningRatio: %lf, Pages "
+                            "after pruning: %lf",
+                            rte->relname, rel->pages, pruningRatio, pruningPages)));
+
+    rel->pages = pruningPages;
 
     foreach (cell, rel->indexlist){
         index = (IndexOptInfo *) lfirst(cell);
-        index->pages = clamp_row_est(index->pages * pruningRatio);
+        double indexPages = index->pages;
+        if (u_sess->attr.attr_sql.partition_page_estimation) {
+            if (!index->isGlobal) {
+                index->pages = clamp_row_est(index->pages * pruningRatio);
+            }
+        } else {
+            index->pages = clamp_row_est(index->pages * pruningRatio);
+        }
+        ereport(DEBUG2,
+                (errmodule(MOD_OPT),
+                 errmsg("Computing partition index relpages: %s, Pre-Pruning Pages: %lf,  pruningRatio: %lf, Pages "
+                        "after pruning: %lf",
+                        get_rel_name(index->indexoid), indexPages, pruningRatio, index->pages)));
     }
 }
 
@@ -878,20 +903,20 @@ static void SetPlainReSizeWithPruningRatio(RelOptInfo *rel, double pruningRatio)
  */
 static bool IsPbeSinglePartition(Relation rel, RelOptInfo* relInfo)
 {
-    if (relInfo->pruning_result->paramArg == NULL) {
+    if (relInfo->pruning_result->paramArg == NULL || relInfo->pruning_result->paramArg->paramkind != PARAM_EXTERN) {
         return false;
     }
     if (RelationIsSubPartitioned(rel)) {
         return false;
     }
-    if (rel->partMap->type != PART_TYPE_RANGE) {
-        return false;
+    if (rel->partMap->type == PART_TYPE_RANGE || rel->partMap->type == PART_TYPE_INTERVAL) {
+        RangePartitionMap *partMap = (RangePartitionMap *)rel->partMap;
+        int partKeyNum = partMap->partitionKey->dim1;
+        if (partKeyNum > 1) {
+            return false;
+        }
     }
-    RangePartitionMap* partMap = (RangePartitionMap*)rel->partMap;
-    int partKeyNum = partMap->partitionKey->dim1;
-    if (partKeyNum > 1) {
-        return false;
-    }
+
     if (relInfo->pruning_result->isPbeSinlePartition) {
         return true;
     }
@@ -909,17 +934,19 @@ static void set_plain_rel_size(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry
         Relation relation = heap_open(rte->relid, NoLock);
         double pruningRatio = 1.0;
 
+        /* Before static pruning, we save the partmap in pruning_result, which will used in dynamic pruning and
+         * executor, seen in GetPartitionInfo and getPartitionOidFromSequence */
+        PartitionMap *partmap = CopyPartitionMap(relation->partMap);
+
         /* get pruning result */
-        if (rte->isContainPartition) {
-            rel->pruning_result = singlePartitionPruningForRestrictInfo(rte->partitionOid, relation);
-        } else if (rte->isContainSubPartition) {
-            rel->pruning_result =
-                SingleSubPartitionPruningForRestrictInfo(rte->subpartitionOid, relation, rte->partitionOid);
+        if (rte->partitionOidList == NIL) {
+            rel->pruning_result = partitionPruningForRestrictInfo(root, rte, relation, rel->baserestrictinfo, partmap);
         } else {
-            rel->pruning_result = partitionPruningForRestrictInfo(root, rte, relation, rel->baserestrictinfo);
+            rel->pruning_result = PartitionPruningForPartitionList(rte, relation);
         }
 
         Assert(rel->pruning_result);
+        rel->pruning_result->partMap = partmap;
 
         if (IsPbeSinglePartition(relation, rel)) {
             rel->partItrs = 1;
@@ -929,10 +956,29 @@ static void set_plain_rel_size(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry
             bms_num_members(rel->pruning_result->intervalSelectedPartitions);
         }
 
-
-        if (relation->partMap != NULL && PartitionMapIsRange(relation->partMap)) {
-            RangePartitionMap *partMmap = (RangePartitionMap *)relation->partMap;
-            pruningRatio = (double)rel->partItrs / partMmap->rangeElementsNum;
+        if (u_sess->attr.attr_sql.partition_page_estimation) {
+            /* If pruning exists in the partition, estimate the number of pages in the partition after pruning. */
+            if (relation->partMap != NULL && rel->pruning_result != NULL) {
+                int partItrs = 0;
+                int nparts = 0;
+                if (RelationIsSubPartitioned(relation)) {
+                    ListCell *cell = NULL;
+                    foreach (cell, rel->pruning_result->ls_selectedSubPartitions) {
+                        SubPartitionPruningResult *subPartPruningResult = (SubPartitionPruningResult *)lfirst(cell);
+                        partItrs += bms_num_members(subPartPruningResult->bm_selectedSubPartitions);
+                    }
+                    nparts = GetSubPartitionNumber(relation);
+                } else {
+                    partItrs = rel->partItrs;
+                    nparts = getPartitionNumber(relation->partMap);
+                }
+                pruningRatio = 1.0 * partItrs / nparts;
+            }
+        } else {
+            if (relation->partMap != NULL && PartitionMapIsRange(relation->partMap)) {
+                RangePartitionMap *partMmap = (RangePartitionMap *)relation->partMap;
+                pruningRatio = (double)rel->partItrs / partMmap->rangeElementsNum;
+            }
         }
 
         heap_close(relation, NoLock);
@@ -941,7 +987,7 @@ static void set_plain_rel_size(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry
          * refresh pages/tuples since executor will skip some page
          * scan with pruning info
          */
-        SetPlainReSizeWithPruningRatio(rel, pruningRatio);
+        SetPlainReSizeWithPruningRatio(rel, pruningRatio, root);
     }
     /*
      * Test any partial indexes of rel for applicability.  We must do this
@@ -1180,9 +1226,6 @@ static void set_plain_rel_pathlist(PlannerInfo* root, RelOptInfo* rel, RangeTblE
                 (errmodule(MOD_OPT),
                     errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
                     errmsg("could not open relation with OID %u", relId)));
-        }
-        if (RelationIsDfsStore(relation)) {
-            rte->inh = true;
         }
 
         RelationClose(relation);
@@ -3768,9 +3811,17 @@ static void make_partiterator_pathkey(
         return;
     }
 
+    if (RelationIsSubPartitioned(relation)) {
+        return;
+    }
+
     if (rel->partItrs <= 1) {
         /* inherit pathkeys if pruning result is <= 1 */
         itrpath->path.pathkeys = pathkeys;
+        return;
+    }
+
+    if (relation->partMap->type != PART_TYPE_RANGE && relation->partMap->type != PART_TYPE_INTERVAL) {
         return;
     }
 
@@ -4038,6 +4089,8 @@ static Path* create_partiterator_path(PlannerInfo* root, RelOptInfo* rel, Path* 
             itrpath->path.startup_cost = path->startup_cost;
             itrpath->path.total_cost = path->total_cost;
             itrpath->path.dop = path->dop;
+            itrpath->partType = relation->partMap->type;
+            itrpath->path.hint_value = path->hint_value;
 
             /* scan parttition from lower boundary to upper boundary by default */
             itrpath->direction = ForwardScanDirection;

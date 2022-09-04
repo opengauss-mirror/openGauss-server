@@ -1,0 +1,140 @@
+-- 1. test packgae var.col%type as procedure param type when reset session
+create or replace package pck1 as
+type t1 is record(c1 int,c2 varchar2);
+v1 t1 :=(1,'1');
+procedure proc1(var1 out v1.c2%type);
+end pck1;
+/
+create or replace package body pck1 as
+procedure proc1(var1 out v1.c2%type) as
+begin
+var1 := 'aaa';
+end;
+end pck1;
+/
+create or replace package pck2 as
+procedure proc2();
+end pck2;
+/
+create or replace package body pck2 as
+procedure proc2() as
+va varchar2;
+begin
+pck1.proc1(va);
+end;
+end pck2;
+/
+declare
+begin
+pck2.proc2();
+end;
+/
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "call pck2.proc2();";
+
+
+drop package pck2;
+drop package pck1;
+
+create table tytbl094(c1 int,c2 number(8,1),c3 varchar2(20),c4 date,c5 timestamp,c6 clob,c7 blob);
+create or replace package pkg094 as 
+type ty1 is table of tytbl094.c4%type index by varchar2(20);
+type ty2 is table of timestamp index by varchar2(20);
+procedure p1(c1 ty1);
+procedure p2(); end pkg094;
+/
+
+create or replace package body pkg094 as 
+procedure p1(c1 ty1) is
+begin
+raise info 'c1.first is %',c1.first;
+raise info 'c1.last is %',c1.last;
+raise info 'c1.first.next %',c1.next(c1.first);
+raise info 'c1.last.prior %',c1.prior(c1.last);
+raise info 'c1.first.prior %',c1.prior(c1.first);
+raise info 'c1.last.next %',c1.next(c1.last);
+raise info 'c1(c1.first) is %,c1(c1.last) is %,c1(c1.next(c1.first)) is %',c1(c1.first),c1(c1.last),c1(c1.next(c1.first));
+raise info 'c1 is %',c1;
+end;
+procedure p2 is 
+v1 ty2; 
+begin  
+v1('v1a%&'):='2022-01-05';
+v1('2#QErt'):='2022-01-05 22:22:22.123455'; 
+v1('2020-21'):='2020-01-05 13:44:56';   
+p1(v1); 
+end; 
+end pkg094;
+/
+
+create or replace procedure proc094() is
+declare 
+type ty3 is table of timestamp index by varchar2(20); 
+v1 ty3; 
+begin 
+v1('f'):='2022-01-06 11:22:33.234657'; 
+v1('t'):='2022-01-06 09:36:45.123456'; 
+v1('true'):='2022-01-06 12:02:44.123456'; 
+pkg094.p1(v1); 
+raise info 'v1 is %',v1; 
+raise info 'v1.first is %',v1.first; 
+raise info 'v1.last is %',v1.last; 
+end;
+/
+
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "call proc094();";
+
+drop procedure proc094;
+drop package pkg094;
+drop table tytbl094;
+
+-- test global syscache
+show enable_global_syscache;
+create or replace package pkg096
+as
+type ty1 is table of blob index by varchar2(20);
+procedure p1(c1 ty1,c2 ty1);
+procedure p2();
+procedure p3(c1 in ty1);
+end pkg096;
+/
+
+create or replace package body pkg096
+as
+procedure p1(c1 ty1,c2 ty1) is
+begin
+p3(c1=>c1);
+raise info 'c1 is %',c1;
+raise info 'c1.first is %,c1.last is %,c1.first.next is %',c1.first,c1.last,c1.next(c1.first);
+raise info 'c1(c1.first) is %,c1(c1.last) is %,c1(c1.first.next) is %',
+c1(c1.first),c1(c1.last),c1(c1.next(c1.first));
+raise info 'c2 is %',c2;
+raise info 'c2.first is %,c2.last is %,c2.first.next is %,c2.count is %',
+c2.first,c2.last,c2.next(c2.first),c2.count;
+end;
+procedure p2()
+is
+r1 ty1;
+r2 ty1;
+begin
+r1('pingJIEsubstr'):='123455';
+r1(substr(r1.first,1,5)):='ABCDEF';
+r1(substr(r1.last,5,8)):=hextoraw('12345');
+r2:=r1;
+r2(length(r1.last)):='678910';
+pkg096.p1(c1=>r1,c2=>r2);
+raise info 'r1 is %',r1;
+raise info 'r2 is %',r2;
+end;
+procedure p3(c1 in ty1)
+is
+begin
+raise info 'c1 is %',c1;
+end;
+end pkg096;
+/
+
+call pkg096.p2();
+
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -c "call pkg096.p2();";
+
+drop package pkg096;

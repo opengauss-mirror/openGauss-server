@@ -126,7 +126,8 @@ MotJitModifyFusion::MotJitModifyFusion(
 
 void MotJitModifyFusion::InitGlobals()
 {
-    m_global->m_reloid = getrelid(linitial_int(m_global->m_planstmt->resultRelations), m_global->m_planstmt->rtable);
+    m_global->m_reloid = getrelid(linitial_int((List*)linitial(m_global->m_planstmt->resultRelations)),
+                                  m_global->m_planstmt->rtable);
     ModifyTable* node = (ModifyTable*)m_global->m_planstmt->planTree;
     BaseResult* baseresult = (BaseResult*)linitial(node->plans);
     List* targetList = baseresult->plan.targetlist;

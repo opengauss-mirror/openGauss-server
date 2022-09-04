@@ -271,7 +271,6 @@ extern PgStat_MsgBgWriter bgwriterStats;
 
 extern GlobalNodeDefinition* global_node_definition;
 
-extern int64 MetaCacheGetCurrentUsedSize();
 extern char* getNodenameByIndex(int index);
 
 extern char* GetRoleName(Oid rolid, char* rolname, size_t size);
@@ -293,7 +292,7 @@ int g_stat_file_id = -1;
 #define IR_FILE_SIZE 29800
 #define WAITSTATELEN 256
 
-static int64 pgxc_exec_partition_tuples_stat(HeapTuple classTuple, HeapTuple partTuple, char* funcname);
+static int64 pgxc_exec_partition_tuples_stat(HeapTuple classTuple, HeapTuple partTuple, const char* funcname);
 
 static inline void InitPlanOperatorInfoTuple(int operator_plan_info_attrnum, FuncCallContext *funcctx);
 
@@ -344,6 +343,7 @@ static const char* WaitStateDesc[] = {
     "flush data",                    // STATE_WAIT_FLUSH_DATA
     "wait reserve td",               // STATE_WAIT_RESERVE_TD
     "wait td rollback",              // STATE_WAIT_TD_ROLLBACK
+    "wait available td",             // STATE_WAIT_AVAILABLE_TD
     "wait transaction rollback",     // STATE_WAIT_TRANSACTION_ROLLBACK
     "prune table",                   // STATE_PRUNE_TABLE
     "prune index",                   // STATE_PRUNE_INDEX
@@ -698,15 +698,18 @@ Datum pg_stat_get_numscans(PG_FUNCTION_ARGS)
 
 void pg_stat_get_stat_list(List** stat_list, uint32* statFlag_ref, Oid relid)
 {
-    if (isPartitionedObject(relid, RELKIND_RELATION, true)) {
-        *statFlag_ref = STATFLG_PARTITION;
+    if (isSubPartitionedObject(relid, RELKIND_RELATION, true)) {
+        *statFlag_ref = relid;
+        *stat_list = getSubPartitionObjectIdList(relid);
+    } else if (isPartitionedObject(relid, RELKIND_RELATION, true)) {
+        *statFlag_ref = relid;
         *stat_list = getPartitionObjectIdList(relid, PART_OBJ_TYPE_TABLE_PARTITION);
     } else if (isPartitionedObject(relid, RELKIND_INDEX, true)) {
-        *statFlag_ref = STATFLG_PARTITION;
+        *statFlag_ref = relid;
         *stat_list = getPartitionObjectIdList(relid, PART_OBJ_TYPE_INDEX_PARTITION);
     } else {
-        *statFlag_ref = STATFLG_RELATION;
-        *stat_list = lappend_oid(*stat_list, relid);
+        *statFlag_ref = InvalidOid;
+        *stat_list = list_make1_oid(relid);
     }
 }
 
@@ -878,56 +881,20 @@ Datum pg_stat_get_live_tuples(PG_FUNCTION_ARGS)
     int64 result = 0;
     List* stat_list = NIL;
     ListCell* stat_cell = NULL;
-    List* sublist = NIL;
-    ListCell* subcell = NULL;
 
     /* for user-define table, fetch live tuples from datanode*/
     if (IS_PGXC_COORDINATOR && GetRelationLocInfo((relid)))
         PG_RETURN_INT64(pgxc_exec_tuples_stat(relid, "pg_stat_get_live_tuples", EXEC_ON_DATANODES));
 
-    HeapTuple reltuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
-    if (!HeapTupleIsValid(reltuple)) {
-        PG_RETURN_INT64(result);
-    }
-    Form_pg_class relation = (Form_pg_class)GETSTRUCT(reltuple);
-    if (PARTTYPE_SUBPARTITIONED_RELATION == relation->parttype) {
-        stat_list = getPartitionObjectIdList(relid, PART_OBJ_TYPE_TABLE_PARTITION);
-        foreach (stat_cell, stat_list) {
-            Oid subparentid = lfirst_oid(stat_cell);
-            sublist = getPartitionObjectIdList(subparentid, PART_OBJ_TYPE_TABLE_SUB_PARTITION);
-            tabkey.statFlag = subparentid;
-            foreach (subcell, sublist) {
-                tabkey.tableid = lfirst_oid(subcell);
-                tabentry = pgstat_fetch_stat_tabentry(&tabkey);
-                if (tabentry != NULL)
-                    result += (int64)(tabentry->n_live_tuples);
-            }
-            list_free_ext(sublist);
-        }
-        list_free_ext(stat_list);
-    } else if (PARTTYPE_PARTITIONED_RELATION == relation->parttype) {
-        char objtype = PART_OBJ_TYPE_TABLE_PARTITION;
-        if (relation->relkind == RELKIND_INDEX) {
-            objtype = PART_OBJ_TYPE_INDEX_PARTITION;
-        }
-        stat_list = getPartitionObjectIdList(relid, objtype);
-        tabkey.statFlag = relid;
-        foreach (stat_cell, stat_list) {
-            tabkey.tableid = lfirst_oid(stat_cell);
-            tabentry = pgstat_fetch_stat_tabentry(&tabkey);
-            if (tabentry != NULL)
-                result += (int64)(tabentry->n_live_tuples);
-        }
-        list_free_ext(stat_list);
-    } else {
-        tabkey.statFlag = InvalidOid;
-        tabkey.tableid = relid;
+    pg_stat_get_stat_list(&stat_list, &tabkey.statFlag, relid);
+    foreach (stat_cell, stat_list) {
+        tabkey.tableid = lfirst_oid(stat_cell);
         tabentry = pgstat_fetch_stat_tabentry(&tabkey);
         if (tabentry != NULL)
             result += (int64)(tabentry->n_live_tuples);
     }
-    ReleaseSysCache(reltuple);
 
+    list_free_ext(stat_list);
     PG_RETURN_INT64(result);
 }
 
@@ -939,55 +906,19 @@ Datum pg_stat_get_dead_tuples(PG_FUNCTION_ARGS)
     int64 result = 0;
     List* stat_list = NIL;
     ListCell* stat_cell = NULL;
-    List* sublist = NIL;
-    ListCell* subcell = NULL;
 
     if (IS_PGXC_COORDINATOR && GetRelationLocInfo((relid)))
         PG_RETURN_INT64(pgxc_exec_tuples_stat(relid, "pg_stat_get_dead_tuples", EXEC_ON_DATANODES));
 
-    HeapTuple reltuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
-    if (!HeapTupleIsValid(reltuple)) {
-        PG_RETURN_INT64(result);
-    }
-    Form_pg_class relation = (Form_pg_class)GETSTRUCT(reltuple);
-    if (PARTTYPE_SUBPARTITIONED_RELATION == relation->parttype) {
-        stat_list = getPartitionObjectIdList(relid, PART_OBJ_TYPE_TABLE_PARTITION);
-        foreach (stat_cell, stat_list) {
-            Oid subparentid = lfirst_oid(stat_cell);
-            sublist = getPartitionObjectIdList(subparentid, PART_OBJ_TYPE_TABLE_SUB_PARTITION);
-            tabkey.statFlag = subparentid;
-            foreach (subcell, sublist) {
-                tabkey.tableid = lfirst_oid(subcell);
-                tabentry = pgstat_fetch_stat_tabentry(&tabkey);
-                if (tabentry != NULL)
-                    result += (int64)(tabentry->n_dead_tuples);
-            }
-            list_free_ext(sublist);
-        }
-        list_free_ext(stat_list);
-    } else if (PARTTYPE_PARTITIONED_RELATION == relation->parttype) {
-        char objtype = PART_OBJ_TYPE_TABLE_PARTITION;
-        if (relation->relkind == RELKIND_INDEX) {
-            objtype = PART_OBJ_TYPE_INDEX_PARTITION;
-        }
-        stat_list = getPartitionObjectIdList(relid, objtype);
-        tabkey.statFlag = relid;
-        foreach (stat_cell, stat_list) {
-            tabkey.tableid = lfirst_oid(stat_cell);
-            tabentry = pgstat_fetch_stat_tabentry(&tabkey);
-            if (tabentry != NULL)
-                result += (int64)(tabentry->n_dead_tuples);
-        }
-        list_free_ext(stat_list);
-    } else {
-        tabkey.statFlag = InvalidOid;
-        tabkey.tableid = relid;
+    pg_stat_get_stat_list(&stat_list, &tabkey.statFlag, relid);
+    foreach (stat_cell, stat_list) {
+        tabkey.tableid = lfirst_oid(stat_cell);
         tabentry = pgstat_fetch_stat_tabentry(&tabkey);
         if (tabentry != NULL)
             result += (int64)(tabentry->n_dead_tuples);
     }
-    ReleaseSysCache(reltuple);
 
+    list_free_ext(stat_list);
     PG_RETURN_INT64(result);
 }
 
@@ -7721,8 +7652,6 @@ static void pg_stat_update_xact_tuples(Oid relid, PgStat_Counter *result, XactAc
     PgStat_TableXactStatus* trans = NULL;
     List* stat_list = NIL;
     ListCell* stat_cell = NULL;
-    List* sublist = NIL;
-    ListCell* subcell = NULL;
     Oid t_statFlag = InvalidOid;
     Oid t_id = InvalidOid;
 
@@ -7753,54 +7682,9 @@ static void pg_stat_update_xact_tuples(Oid relid, PgStat_Counter *result, XactAc
             return;
     }
 
-    HeapTuple reltuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
-    if (!HeapTupleIsValid(reltuple)) {
-        return;
-    }
-    Form_pg_class relation = (Form_pg_class)GETSTRUCT(reltuple);
-
-    if (PARTTYPE_SUBPARTITIONED_RELATION == relation->parttype) {
-        stat_list = getPartitionObjectIdList(relid, PART_OBJ_TYPE_TABLE_PARTITION);
-        foreach (stat_cell, stat_list) {
-            Oid subparentid = lfirst_oid(stat_cell);
-            sublist = getPartitionObjectIdList(subparentid, PART_OBJ_TYPE_TABLE_SUB_PARTITION);
-            t_statFlag = subparentid;
-            foreach (subcell, sublist) {
-                t_id = lfirst_oid(subcell);
-                tabentry = find_tabstat_entry(t_id, t_statFlag);
-                if (tabentry != NULL) {
-                    *result += *(PgStat_Counter *)((char *)&tabentry->t_counts + offset1);
-                    if (hassubtransactions) {
-                        for (trans = tabentry->trans; trans != NULL; trans = trans->upper)
-                            *result += *(PgStat_Counter *)((char *)trans + offset2);
-                    }
-                }
-            }
-            list_free_ext(sublist);
-        }
-        list_free_ext(stat_list);
-    } else if (PARTTYPE_PARTITIONED_RELATION == relation->parttype) {
-        char objtype = PART_OBJ_TYPE_TABLE_PARTITION;
-        if (relation->relkind == RELKIND_INDEX) {
-            objtype = PART_OBJ_TYPE_INDEX_PARTITION;
-        }
-        stat_list = getPartitionObjectIdList(relid, objtype);
-        t_statFlag = relid;
-        foreach (stat_cell, stat_list) {
-            t_id = lfirst_oid(stat_cell);
-            tabentry = find_tabstat_entry(t_id, t_statFlag);
-            if (tabentry != NULL) {
-                *result += *(PgStat_Counter *)((char *)&tabentry->t_counts + offset1);
-                if (hassubtransactions) {
-                    for (trans = tabentry->trans; trans != NULL; trans = trans->upper)
-                        *result += *(PgStat_Counter *)((char *)trans + offset2);
-                }
-            }
-        }
-        list_free_ext(stat_list);
-    } else {
-        t_statFlag = InvalidOid;
-        t_id = relid;
+    pg_stat_get_stat_list(&stat_list, &t_statFlag, relid);
+    foreach (stat_cell, stat_list) {
+        t_id = lfirst_oid(stat_cell);
         tabentry = find_tabstat_entry(t_id, t_statFlag);
         if (tabentry != NULL) {
             *result += *(PgStat_Counter *)((char *)&tabentry->t_counts + offset1);
@@ -7810,7 +7694,8 @@ static void pg_stat_update_xact_tuples(Oid relid, PgStat_Counter *result, XactAc
             }
         }
     }
-    ReleaseSysCache(reltuple);
+
+    list_free_ext(stat_list);
 }
 
 Datum pg_stat_get_xact_tuples_inserted(PG_FUNCTION_ARGS)
@@ -8050,44 +7935,15 @@ Datum pg_stat_reset_single_table_counters(PG_FUNCTION_ARGS)
     Oid relid = PG_GETARG_OID(0);
     List* stat_list = NIL;
     ListCell* stat_cell = NULL;
-    List* sublist = NIL;
-    ListCell* subcell = NULL;
+    uint32 statFlag = STATFLG_RELATION;
 
-    /* no syscache in collector thread, we just deal with all partitions here */
-    HeapTuple reltuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
-    if (!HeapTupleIsValid(reltuple)) {
-        pgstat_reset_single_counter(InvalidOid, relid, RESET_TABLE);
-    } else {
-        Form_pg_class relation = (Form_pg_class)GETSTRUCT(reltuple);
+    pg_stat_get_stat_list(&stat_list, &statFlag, relid);
 
-        if (PARTTYPE_SUBPARTITIONED_RELATION == relation->parttype) {
-            stat_list = getPartitionObjectIdList(relid, PART_OBJ_TYPE_TABLE_PARTITION);
-            foreach (stat_cell, stat_list) {
-                Oid subparentid = lfirst_oid(stat_cell);
-                sublist = getPartitionObjectIdList(subparentid, PART_OBJ_TYPE_TABLE_SUB_PARTITION);
-                foreach (subcell, sublist) {
-                    /* reset every partition it is a subpartitioned object */
-                    pgstat_reset_single_counter(subparentid, lfirst_oid(subcell), RESET_TABLE);
-                }
-                list_free_ext(sublist);
-            }
-            list_free_ext(stat_list);
-        } else if (PARTTYPE_PARTITIONED_RELATION == relation->parttype) {
-            char objtype = PART_OBJ_TYPE_TABLE_PARTITION;
-            if (relation->relkind == RELKIND_INDEX) {
-                objtype = PART_OBJ_TYPE_INDEX_PARTITION;
-            }
-            stat_list = getPartitionObjectIdList(relid, objtype);
-            foreach (stat_cell, stat_list) {
-                /* reset every partition it is a partitioned object */
-                pgstat_reset_single_counter(relid, lfirst_oid(stat_cell), RESET_TABLE);
-            }
-            list_free_ext(stat_list);
-        } else {
-            pgstat_reset_single_counter(InvalidOid, relid, RESET_TABLE);
-        }
-        ReleaseSysCache(reltuple);
+    foreach (stat_cell, stat_list) {
+        Oid relationid = lfirst_oid(stat_cell);
+        pgstat_reset_single_counter(statFlag, relationid, RESET_TABLE);
     }
+    list_free_ext(stat_list);
 
     if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
         Relation rel = NULL;
@@ -9871,7 +9727,7 @@ Datum pv_total_memory_detail(PG_FUNCTION_ARGS)
 
         int mctx_max_size = maxChunksPerProcess << (chunkSizeInBits - BITS_IN_MB);
         int mctx_used_size = processMemInChunks << (chunkSizeInBits - BITS_IN_MB);
-        int cu_size = (CUCache->GetCurrentMemSize() + MetaCacheGetCurrentUsedSize()) >> BITS_IN_MB;
+        int cu_size = CUCache->GetCurrentMemSize() >> BITS_IN_MB;
         int comm_size = (int)(gs_get_comm_used_memory() >> BITS_IN_MB);
         int comm_peak_size = (int)(gs_get_comm_peak_memory() >> BITS_IN_MB);
         unsigned long total_vm = 0, res = 0, shared = 0, text = 0, lib, data, dt;
@@ -11846,7 +11702,7 @@ Datum pg_autovac_coordinator(PG_FUNCTION_ARGS)
     PG_RETURN_NULL();
 }
 
-static int64 pgxc_exec_partition_tuples_stat(HeapTuple classTuple, HeapTuple partTuple, char* funcname)
+static int64 pgxc_exec_partition_tuples_stat(HeapTuple classTuple, HeapTuple partTuple, const char* funcname)
 {
     ExecNodes* exec_nodes = NULL;
     ParallelFunctionState* state = NULL;
@@ -11906,9 +11762,8 @@ static int64 pgxc_exec_partition_tuples_stat(HeapTuple classTuple, HeapTuple par
     return result;
 }
 
-Datum pg_stat_get_partition_tuples_changed(PG_FUNCTION_ARGS)
+static int64 TabEntryGetPgStatCounter(Oid partOid, unsigned long offset, const char* funcname)
 {
-    Oid partOid = PG_GETARG_OID(0);
     Oid relid = InvalidOid;
     HeapTuple partTuple = NULL;
     HeapTuple classTuple = NULL;
@@ -11917,35 +11772,127 @@ Datum pg_stat_get_partition_tuples_changed(PG_FUNCTION_ARGS)
     PgStat_StatTabEntry* tabentry = NULL;
     int64 result = 0;
 
+    Assert(offset < sizeof(PgStat_StatTabEntry));
+
     partTuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(partOid));
     if (!HeapTupleIsValid(partTuple)) {
-        PG_RETURN_INT64(result);
+        return 0;
     }
+
     partForm = (Form_pg_partition)GETSTRUCT(partTuple);
-    relid = partForm->parentid;
+    if (partForm->parttype == PART_OBJ_TYPE_TABLE_SUB_PARTITION) {
+        relid = partid_get_parentid(partForm->parentid);
+    } else {
+        relid = partForm->parentid;
+    }
     classTuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
     if (!HeapTupleIsValid(classTuple)) {
         ReleaseSysCache(partTuple);
-        PG_RETURN_INT64(result);
+        return 0;
     }
 
     if (IS_PGXC_COORDINATOR && GetRelationLocInfo((relid))) {
-        result = pgxc_exec_partition_tuples_stat(classTuple, partTuple, "pg_stat_get_partition_tuples_changed");
+        result = pgxc_exec_partition_tuples_stat(classTuple, partTuple, funcname);
         ReleaseSysCache(classTuple);
         ReleaseSysCache(partTuple);
 
-        PG_RETURN_INT64(result);
+        return result;
     }
-
-    tabkey.tableid = partOid;
-    tabkey.statFlag = relid;
-    tabentry = pgstat_fetch_stat_tabentry(&tabkey);
-
-    if (tabentry != NULL)
-        result = (int64)(tabentry->changes_since_analyze);
 
     ReleaseSysCache(classTuple);
     ReleaseSysCache(partTuple);
+
+    List *partid_list = NIL;
+    ListCell* cell = NULL;
+    if (partForm->relfilenode == InvalidOid) { /* a partition of subpartition */
+        partid_list = getPartitionObjectIdList(partOid, PART_OBJ_TYPE_TABLE_SUB_PARTITION);
+    } else {
+        partid_list = list_make1_oid(partOid);
+    }
+    tabkey.statFlag = relid;
+    foreach(cell, partid_list) {
+        tabkey.tableid = lfirst_oid(cell);
+        tabentry = pgstat_fetch_stat_tabentry(&tabkey);
+        if (PointerIsValid(tabentry))
+            result += *(PgStat_Counter *)((char *)tabentry + offset);
+    }
+    list_free_ext(partid_list);
+
+    return result;
+}
+
+static int64 TableStatusGetPgStatCounter(Oid partOid, unsigned long offset1, unsigned long offset2,
+    const char *funcname, bool hassubtransactions)
+{
+    Oid relid = InvalidOid;
+    HeapTuple partTuple = NULL;
+    HeapTuple classTuple = NULL;
+    Form_pg_partition partForm = NULL;
+    PgStat_TableStatus* tabentry = NULL;
+    PgStat_TableXactStatus* trans = NULL;
+    int64 result = 0;
+
+    Assert(offset1 < sizeof(PgStat_TableCounts));
+    Assert(offset2 < sizeof(PgStat_TableXactStatus));
+
+    partTuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(partOid));
+    if (!HeapTupleIsValid(partTuple)) {
+        return 0;
+    }
+
+    partForm = (Form_pg_partition)GETSTRUCT(partTuple);
+    if (partForm->parttype == PART_OBJ_TYPE_TABLE_SUB_PARTITION) {
+        relid = partid_get_parentid(partForm->parentid);
+    } else {
+        relid = partForm->parentid;
+    }
+    classTuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
+    if (!HeapTupleIsValid(classTuple)) {
+        ReleaseSysCache(partTuple);
+        return 0;
+    }
+
+    if (IS_PGXC_COORDINATOR && GetRelationLocInfo((relid))) {
+        result = pgxc_exec_partition_tuples_stat(classTuple, partTuple, funcname);
+        ReleaseSysCache(classTuple);
+        ReleaseSysCache(partTuple);
+
+        return result;
+    }
+
+    ReleaseSysCache(classTuple);
+    ReleaseSysCache(partTuple);
+
+    List *partid_list = NIL;
+    ListCell* cell = NULL;
+    if (partForm->relfilenode == InvalidOid) { /* a partition of subpartition */
+        partid_list = getPartitionObjectIdList(partOid, PART_OBJ_TYPE_TABLE_SUB_PARTITION);
+    } else {
+        partid_list = list_make1_oid(partOid);
+    }
+    foreach(cell, partid_list) {
+        Oid partid = lfirst_oid(cell);
+        tabentry = find_tabstat_entry(partid, relid);
+        if (PointerIsValid(tabentry)) {
+            result += *(PgStat_Counter *)((char *)&tabentry->t_counts + offset1);
+            if (hassubtransactions) {
+                for (trans = tabentry->trans; trans != NULL; trans = trans->upper)
+                    result += *(PgStat_Counter *)((char *)trans + offset2);
+            }
+        }
+    }
+    list_free_ext(partid_list);
+
+    return result;
+}
+
+Datum pg_stat_get_partition_tuples_changed(PG_FUNCTION_ARGS)
+{
+    Oid partOid = PG_GETARG_OID(0);
+    int64 result = 0;
+
+    result = TabEntryGetPgStatCounter(partOid, offsetof(PgStat_StatTabEntry, changes_since_analyze),
+        "pg_stat_get_partition_tuples_changed");
 
     PG_RETURN_INT64(result);
 }
@@ -11953,43 +11900,10 @@ Datum pg_stat_get_partition_tuples_changed(PG_FUNCTION_ARGS)
 Datum pg_stat_get_partition_tuples_inserted(PG_FUNCTION_ARGS)
 {
     Oid partOid = PG_GETARG_OID(0);
-    Oid relid = InvalidOid;
-    HeapTuple partTuple = NULL;
-    HeapTuple classTuple = NULL;
-    Form_pg_partition partForm = NULL;
-    PgStat_StatTabKey tabkey;
-    PgStat_StatTabEntry* tabentry = NULL;
     int64 result = 0;
 
-    partTuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(partOid));
-    if (!HeapTupleIsValid(partTuple)) {
-        PG_RETURN_INT64(result);
-    }
-    partForm = (Form_pg_partition)GETSTRUCT(partTuple);
-    relid = partForm->parentid;
-    classTuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
-    if (!HeapTupleIsValid(classTuple)) {
-        ReleaseSysCache(partTuple);
-        PG_RETURN_INT64(result);
-    }
-
-    if (IS_PGXC_COORDINATOR && GetRelationLocInfo((relid))) {
-        result = pgxc_exec_partition_tuples_stat(classTuple, partTuple, "pg_stat_get_partition_tuples_inserted");
-        ReleaseSysCache(classTuple);
-        ReleaseSysCache(partTuple);
-
-        PG_RETURN_INT64(result);
-    }
-
-    tabkey.tableid = partOid;
-    tabkey.statFlag = relid;
-    tabentry = pgstat_fetch_stat_tabentry(&tabkey);
-
-    if (tabentry != NULL)
-        result = (int64)(tabentry->tuples_inserted);
-
-    ReleaseSysCache(classTuple);
-    ReleaseSysCache(partTuple);
+    result = TabEntryGetPgStatCounter(partOid, offsetof(PgStat_StatTabEntry, tuples_inserted),
+        "pg_stat_get_partition_tuples_inserted");
 
     PG_RETURN_INT64(result);
 }
@@ -11997,43 +11911,10 @@ Datum pg_stat_get_partition_tuples_inserted(PG_FUNCTION_ARGS)
 Datum pg_stat_get_partition_tuples_updated(PG_FUNCTION_ARGS)
 {
     Oid partOid = PG_GETARG_OID(0);
-    Oid relid = InvalidOid;
-    HeapTuple partTuple = NULL;
-    HeapTuple classTuple = NULL;
-    Form_pg_partition partForm = NULL;
-    PgStat_StatTabKey tabkey;
-    PgStat_StatTabEntry* tabentry = NULL;
     int64 result = 0;
 
-    partTuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(partOid));
-    if (!HeapTupleIsValid(partTuple)) {
-        PG_RETURN_INT64(result);
-    }
-    partForm = (Form_pg_partition)GETSTRUCT(partTuple);
-    relid = partForm->parentid;
-    classTuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
-    if (!HeapTupleIsValid(classTuple)) {
-        ReleaseSysCache(partTuple);
-        PG_RETURN_INT64(result);
-    }
-
-    if (IS_PGXC_COORDINATOR && GetRelationLocInfo((relid))) {
-        result = pgxc_exec_partition_tuples_stat(classTuple, partTuple, "pg_stat_get_partition_tuples_updated");
-        ReleaseSysCache(classTuple);
-        ReleaseSysCache(partTuple);
-
-        PG_RETURN_INT64(result);
-    }
-
-    tabkey.tableid = partOid;
-    tabkey.statFlag = relid;
-    tabentry = pgstat_fetch_stat_tabentry(&tabkey);
-
-    if (tabentry != NULL)
-        result = (int64)(tabentry->tuples_updated);
-
-    ReleaseSysCache(classTuple);
-    ReleaseSysCache(partTuple);
+    result = TabEntryGetPgStatCounter(partOid, offsetof(PgStat_StatTabEntry, tuples_updated),
+        "pg_stat_get_partition_tuples_updated");
 
     PG_RETURN_INT64(result);
 }
@@ -12041,43 +11922,10 @@ Datum pg_stat_get_partition_tuples_updated(PG_FUNCTION_ARGS)
 Datum pg_stat_get_partition_tuples_deleted(PG_FUNCTION_ARGS)
 {
     Oid partOid = PG_GETARG_OID(0);
-    Oid relid = InvalidOid;
-    HeapTuple partTuple = NULL;
-    HeapTuple classTuple = NULL;
-    Form_pg_partition partForm = NULL;
-    PgStat_StatTabKey tabkey;
-    PgStat_StatTabEntry* tabentry = NULL;
     int64 result = 0;
 
-    partTuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(partOid));
-    if (!HeapTupleIsValid(partTuple)) {
-        PG_RETURN_INT64(result);
-    }
-    partForm = (Form_pg_partition)GETSTRUCT(partTuple);
-    relid = partForm->parentid;
-    classTuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
-    if (!HeapTupleIsValid(classTuple)) {
-        ReleaseSysCache(partTuple);
-        PG_RETURN_INT64(result);
-    }
-
-    if (IS_PGXC_COORDINATOR && GetRelationLocInfo((relid))) {
-        result = pgxc_exec_partition_tuples_stat(classTuple, partTuple, "pg_stat_get_partition_tuples_deleted");
-        ReleaseSysCache(classTuple);
-        ReleaseSysCache(partTuple);
-
-        PG_RETURN_INT64(result);
-    }
-
-    tabkey.tableid = partOid;
-    tabkey.statFlag = relid;
-    tabentry = pgstat_fetch_stat_tabentry(&tabkey);
-
-    if (tabentry != NULL)
-        result = (int64)(tabentry->tuples_deleted);
-
-    ReleaseSysCache(classTuple);
-    ReleaseSysCache(partTuple);
+    result = TabEntryGetPgStatCounter(partOid, offsetof(PgStat_StatTabEntry, tuples_deleted),
+        "pg_stat_get_partition_tuples_deleted");
 
     PG_RETURN_INT64(result);
 }
@@ -12085,43 +11933,10 @@ Datum pg_stat_get_partition_tuples_deleted(PG_FUNCTION_ARGS)
 Datum pg_stat_get_partition_tuples_hot_updated(PG_FUNCTION_ARGS)
 {
     Oid partOid = PG_GETARG_OID(0);
-    Oid relid = InvalidOid;
-    HeapTuple partTuple = NULL;
-    HeapTuple classTuple = NULL;
-    Form_pg_partition partForm = NULL;
-    PgStat_StatTabKey tabkey;
-    PgStat_StatTabEntry* tabentry = NULL;
     int64 result = 0;
 
-    partTuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(partOid));
-    if (!HeapTupleIsValid(partTuple)) {
-        PG_RETURN_INT64(result);
-    }
-    partForm = (Form_pg_partition)GETSTRUCT(partTuple);
-    relid = partForm->parentid;
-    classTuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
-    if (!HeapTupleIsValid(classTuple)) {
-        ReleaseSysCache(partTuple);
-        PG_RETURN_INT64(result);
-    }
-
-    if (IS_PGXC_COORDINATOR && GetRelationLocInfo((relid))) {
-        result = pgxc_exec_partition_tuples_stat(classTuple, partTuple, "pg_stat_get_partition_tuples_hot_updated");
-        ReleaseSysCache(classTuple);
-        ReleaseSysCache(partTuple);
-
-        PG_RETURN_INT64(result);
-    }
-
-    tabkey.tableid = partOid;
-    tabkey.statFlag = relid;
-    tabentry = pgstat_fetch_stat_tabentry(&tabkey);
-
-    if (tabentry != NULL)
-        result = (int64)(tabentry->tuples_hot_updated);
-
-    ReleaseSysCache(classTuple);
-    ReleaseSysCache(partTuple);
+    result = TabEntryGetPgStatCounter(partOid, offsetof(PgStat_StatTabEntry, tuples_hot_updated),
+        "pg_stat_get_partition_tuples_hot_updated");
 
     PG_RETURN_INT64(result);
 }
@@ -12129,43 +11944,10 @@ Datum pg_stat_get_partition_tuples_hot_updated(PG_FUNCTION_ARGS)
 Datum pg_stat_get_partition_dead_tuples(PG_FUNCTION_ARGS)
 {
     Oid partOid = PG_GETARG_OID(0);
-    Oid relid = InvalidOid;
-    HeapTuple partTuple = NULL;
-    HeapTuple classTuple = NULL;
-    Form_pg_partition partForm = NULL;
-    PgStat_StatTabKey tabkey;
-    PgStat_StatTabEntry* tabentry = NULL;
     int64 result = 0;
 
-    partTuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(partOid));
-    if (!HeapTupleIsValid(partTuple)) {
-        PG_RETURN_INT64(result);
-    }
-    partForm = (Form_pg_partition)GETSTRUCT(partTuple);
-    relid = partForm->parentid;
-    classTuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
-    if (!HeapTupleIsValid(classTuple)) {
-        ReleaseSysCache(partTuple);
-        PG_RETURN_INT64(result);
-    }
-
-    if (IS_PGXC_COORDINATOR && GetRelationLocInfo((relid))) {
-        result = pgxc_exec_partition_tuples_stat(classTuple, partTuple, "pg_stat_get_partition_dead_tuples");
-        ReleaseSysCache(classTuple);
-        ReleaseSysCache(partTuple);
-
-        PG_RETURN_INT64(result);
-    }
-
-    tabkey.tableid = partOid;
-    tabkey.statFlag = relid;
-    tabentry = pgstat_fetch_stat_tabentry(&tabkey);
-
-    if (tabentry != NULL)
-        result = (int64)(tabentry->n_dead_tuples);
-
-    ReleaseSysCache(classTuple);
-    ReleaseSysCache(partTuple);
+    result = TabEntryGetPgStatCounter(partOid, offsetof(PgStat_StatTabEntry, n_dead_tuples),
+        "pg_stat_get_partition_dead_tuples");
 
     PG_RETURN_INT64(result);
 }
@@ -12173,43 +11955,10 @@ Datum pg_stat_get_partition_dead_tuples(PG_FUNCTION_ARGS)
 Datum pg_stat_get_partition_live_tuples(PG_FUNCTION_ARGS)
 {
     Oid partOid = PG_GETARG_OID(0);
-    Oid relid = InvalidOid;
-    HeapTuple partTuple = NULL;
-    HeapTuple classTuple = NULL;
-    Form_pg_partition partForm = NULL;
-    PgStat_StatTabKey tabkey;
-    PgStat_StatTabEntry* tabentry = NULL;
     int64 result = 0;
 
-    partTuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(partOid));
-    if (!HeapTupleIsValid(partTuple)) {
-        PG_RETURN_INT64(result);
-    }
-    partForm = (Form_pg_partition)GETSTRUCT(partTuple);
-    relid = partForm->parentid;
-    classTuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
-    if (!HeapTupleIsValid(classTuple)) {
-        ReleaseSysCache(partTuple);
-        PG_RETURN_INT64(result);
-    }
-
-    if (IS_PGXC_COORDINATOR && GetRelationLocInfo((relid))) {
-        result = pgxc_exec_partition_tuples_stat(classTuple, partTuple, "pg_stat_get_partition_live_tuples");
-        ReleaseSysCache(classTuple);
-        ReleaseSysCache(partTuple);
-
-        PG_RETURN_INT64(result);
-    }
-
-    tabkey.tableid = partOid;
-    tabkey.statFlag = relid;
-    tabentry = pgstat_fetch_stat_tabentry(&tabkey);
-
-    if (tabentry != NULL)
-        result = (int64)(tabentry->n_live_tuples);
-
-    ReleaseSysCache(classTuple);
-    ReleaseSysCache(partTuple);
+    result = TabEntryGetPgStatCounter(partOid, offsetof(PgStat_StatTabEntry, n_live_tuples),
+        "pg_stat_get_partition_live_tuples");
 
     PG_RETURN_INT64(result);
 }
@@ -12217,45 +11966,10 @@ Datum pg_stat_get_partition_live_tuples(PG_FUNCTION_ARGS)
 Datum pg_stat_get_xact_partition_tuples_inserted(PG_FUNCTION_ARGS)
 {
     Oid partOid = PG_GETARG_OID(0);
-    Oid relid = InvalidOid;
-    HeapTuple partTuple = NULL;
-    HeapTuple classTuple = NULL;
-    Form_pg_partition partForm = NULL;
-    PgStat_TableStatus* tabentry = NULL;
-    PgStat_TableXactStatus* trans = NULL;
     int64 result = 0;
 
-    partTuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(partOid));
-    if (!HeapTupleIsValid(partTuple)) {
-        PG_RETURN_INT64(result);
-    }
-    partForm = (Form_pg_partition)GETSTRUCT(partTuple);
-    relid = partForm->parentid;
-    classTuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
-    if (!HeapTupleIsValid(classTuple)) {
-        ReleaseSysCache(partTuple);
-        PG_RETURN_INT64(result);
-    }
-
-    if (IS_PGXC_COORDINATOR && GetRelationLocInfo((relid))) {
-        result = pgxc_exec_partition_tuples_stat(classTuple, partTuple, "pg_stat_get_xact_partition_tuples_inserted");
-        ReleaseSysCache(classTuple);
-        ReleaseSysCache(partTuple);
-
-        PG_RETURN_INT64(result);
-    }
-
-    tabentry = find_tabstat_entry(partOid, relid);
-    if (tabentry != NULL) {
-        result += tabentry->t_counts.t_tuples_inserted;
-
-        /* live subtransactions' counts aren't in t_tuples_inserted yet */
-        for (trans = tabentry->trans; trans != NULL; trans = trans->upper)
-            result += trans->tuples_inserted;
-    }
-
-    ReleaseSysCache(classTuple);
-    ReleaseSysCache(partTuple);
+    result = TableStatusGetPgStatCounter(partOid, offsetof(PgStat_TableCounts, t_tuples_inserted),
+        offsetof(PgStat_TableXactStatus, tuples_inserted), "pg_stat_get_xact_partition_tuples_inserted", true);
 
     PG_RETURN_INT64(result);
 }
@@ -12263,46 +11977,10 @@ Datum pg_stat_get_xact_partition_tuples_inserted(PG_FUNCTION_ARGS)
 Datum pg_stat_get_xact_partition_tuples_updated(PG_FUNCTION_ARGS)
 {
     Oid partOid = PG_GETARG_OID(0);
-    Oid relid = InvalidOid;
-    HeapTuple partTuple = NULL;
-    HeapTuple classTuple = NULL;
-    Form_pg_partition partForm = NULL;
-    PgStat_TableStatus* tabentry = NULL;
-    PgStat_TableXactStatus* trans = NULL;
     int64 result = 0;
 
-    partTuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(partOid));
-    if (!HeapTupleIsValid(partTuple)) {
-        PG_RETURN_INT64(result);
-    }
-    partForm = (Form_pg_partition)GETSTRUCT(partTuple);
-    relid = partForm->parentid;
-    classTuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
-    if (!HeapTupleIsValid(classTuple)) {
-        ReleaseSysCache(partTuple);
-        PG_RETURN_INT64(result);
-    }
-
-    if (IS_PGXC_COORDINATOR && GetRelationLocInfo((relid))) {
-        result = pgxc_exec_partition_tuples_stat(classTuple, partTuple, "pg_stat_get_xact_partition_tuples_updated");
-        ReleaseSysCache(classTuple);
-        ReleaseSysCache(partTuple);
-
-        PG_RETURN_INT64(result);
-    }
-
-    tabentry = find_tabstat_entry(partOid, relid);
-
-    if (PointerIsValid(tabentry)) {
-        result += tabentry->t_counts.t_tuples_updated;
-
-        /* live subtransactions' counts aren't in t_tuples_updated yet */
-        for (trans = tabentry->trans; trans != NULL; trans = trans->upper)
-            result += trans->tuples_updated;
-    }
-
-    ReleaseSysCache(classTuple);
-    ReleaseSysCache(partTuple);
+    result = TableStatusGetPgStatCounter(partOid, offsetof(PgStat_TableCounts, t_tuples_updated),
+        offsetof(PgStat_TableXactStatus, tuples_updated), "pg_stat_get_xact_partition_tuples_updated", true);
 
     PG_RETURN_INT64(result);
 }
@@ -12310,45 +11988,10 @@ Datum pg_stat_get_xact_partition_tuples_updated(PG_FUNCTION_ARGS)
 Datum pg_stat_get_xact_partition_tuples_deleted(PG_FUNCTION_ARGS)
 {
     Oid partOid = PG_GETARG_OID(0);
-    Oid relid = InvalidOid;
-    HeapTuple partTuple = NULL;
-    HeapTuple classTuple = NULL;
-    Form_pg_partition partForm = NULL;
     int64 result = 0;
-    PgStat_TableStatus* tabentry = NULL;
-    PgStat_TableXactStatus* trans = NULL;
 
-    partTuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(partOid));
-    if (!HeapTupleIsValid(partTuple)) {
-        PG_RETURN_INT64(result);
-    }
-    partForm = (Form_pg_partition)GETSTRUCT(partTuple);
-    relid = partForm->parentid;
-    classTuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
-    if (!HeapTupleIsValid(classTuple)) {
-        ReleaseSysCache(partTuple);
-        PG_RETURN_INT64(result);
-    }
-
-    if (IS_PGXC_COORDINATOR && GetRelationLocInfo((relid))) {
-        result = pgxc_exec_partition_tuples_stat(classTuple, partTuple, "pg_stat_get_xact_partition_tuples_deleted");
-        ReleaseSysCache(classTuple);
-        ReleaseSysCache(partTuple);
-
-        PG_RETURN_INT64(result);
-    }
-
-    tabentry = find_tabstat_entry(partOid, relid);
-    if (PointerIsValid(tabentry)) {
-        result += tabentry->t_counts.t_tuples_deleted;
-
-        /* live subtransactions' counts aren't in t_tuples_updated yet */
-        for (trans = tabentry->trans; trans != NULL; trans = trans->upper)
-            result += trans->tuples_deleted;
-    }
-
-    ReleaseSysCache(classTuple);
-    ReleaseSysCache(partTuple);
+    result = TableStatusGetPgStatCounter(partOid, offsetof(PgStat_TableCounts, t_tuples_deleted),
+        offsetof(PgStat_TableXactStatus, tuples_deleted), "pg_stat_get_xact_partition_tuples_deleted", true);
 
     PG_RETURN_INT64(result);
 }
@@ -12356,41 +11999,10 @@ Datum pg_stat_get_xact_partition_tuples_deleted(PG_FUNCTION_ARGS)
 Datum pg_stat_get_xact_partition_tuples_hot_updated(PG_FUNCTION_ARGS)
 {
     Oid partOid = PG_GETARG_OID(0);
-    Oid relid = InvalidOid;
-    HeapTuple partTuple = NULL;
-    HeapTuple classTuple = NULL;
-    Form_pg_partition partForm = NULL;
-    PgStat_TableStatus* tabentry = NULL;
     int64 result = 0;
 
-    partTuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(partOid));
-    if (!HeapTupleIsValid(partTuple)) {
-        PG_RETURN_INT64(result);
-    }
-
-    partForm = (Form_pg_partition)GETSTRUCT(partTuple);
-    relid = partForm->parentid;
-    classTuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
-    if (!HeapTupleIsValid(classTuple)) {
-        ReleaseSysCache(partTuple);
-        PG_RETURN_INT64(result);
-    }
-
-    if (IS_PGXC_COORDINATOR && GetRelationLocInfo((relid))) {
-        result =
-            pgxc_exec_partition_tuples_stat(classTuple, partTuple, "pg_stat_get_xact_partition_tuples_hot_updated");
-        ReleaseSysCache(classTuple);
-        ReleaseSysCache(partTuple);
-
-        PG_RETURN_INT64(result);
-    }
-
-    tabentry = find_tabstat_entry(partOid, relid);
-    if (PointerIsValid(tabentry))
-        result += tabentry->t_counts.t_tuples_hot_updated;
-
-    ReleaseSysCache(classTuple);
-    ReleaseSysCache(partTuple);
+    result = TableStatusGetPgStatCounter(partOid, offsetof(PgStat_TableCounts, t_tuples_hot_updated), 0,
+        "pg_stat_get_xact_partition_tuples_hot_updated", false);
 
     PG_RETURN_INT64(result);
 }

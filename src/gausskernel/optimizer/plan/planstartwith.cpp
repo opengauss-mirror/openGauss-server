@@ -77,6 +77,7 @@
 #include "optimizer/randomplan.h"
 #include "optimizer/optimizerdebug.h"
 #include "parser/parse_oper.h"
+#include "parser/parse_expr.h"
 
 extern Node* preprocess_expression(PlannerInfo* root, Node* expr, int kind);
 
@@ -173,7 +174,9 @@ static Sort *CreateSortPlanUnderRU(PlannerInfo* root, Plan* lefttree,
         List *siblings, double limit_tuples);
 static Sort *CreateSortPlanAboveRU(PlannerInfo* root, Plan* lefttree,
         double limit_tuples);
-
+static char *CheckAndFixSiblingsColName(PlannerInfo *root, Plan *basePlan,
+                                        char *colname, TargetEntry *te);
+static char *GetOrderSiblingsColName(PlannerInfo* root, SortBy *sb, Plan *basePlan);
 
 /*
  * --------------------------------------------------------------------------------------
@@ -418,11 +421,111 @@ static char* GetSiblingsColNameFromFunc(Node* node)
 }
 
 /*
+ * @Brief: check fix order-siblings columns, normally we can find sort-key from from
+ * basePlan's targetlist, but some special case we need additional process:
+ *   1. check colname exists in base-plan's targetlist, return if ok
+ *   2. check colname exists in parse->targetlist's rename
+ *   un-named expr, assign "?column?" as default
+ *   3. alias name
+ *
+ * For these cases, we need scan parse->targetlist(alias case) and find the basePlan's
+ * to recreate sort key
+ */
+static char *CheckAndFixSiblingsColName(PlannerInfo *root, Plan *basePlan,
+    char *colname, TargetEntry *te)
+{
+    /* step1. check if searched colname exists in base-plan's targetlist */
+    char *resultColName = NULL;
+    ListCell *lc = NULL;
+    foreach (lc, basePlan->targetlist) {
+        TargetEntry *entry = (TargetEntry *)lfirst(lc);
+        if (entry->resname == NULL) {
+            continue;
+        }
+
+        char *label = strrchr(entry->resname, '@');
+        label += 1;
+
+        if (strcmp(colname, label) == 0) {
+            resultColName = colname;
+            break;
+        }
+    }
+
+    /*
+     * If resultColName is found in basePlan's targelist, it says we are in regular
+     * case and it is safely to build sort plan for Order-Sibling clause
+     *
+     * regular case, we found sort-entry in base-plan's targetlist
+     */
+    if (resultColName != NULL) {
+        return resultColName;
+    }
+
+    /*
+     *  step2. try to find sort-entry in parse->targetlist as resname(for alias case)
+     *     case 1. regular alias, e.g. select id as alias_id,... te->resname: "alias_id"
+     *     case 2. unnamed expr,  e.g. select id * 2, pid,....   te->resname: "?column?"
+     */
+    bool found = false;
+    if (te == NULL) {
+        /* normally for alias case */
+        foreach (lc, root->parse->targetList) {
+            te = (TargetEntry *)lfirst(lc);
+
+            /* te->resname may be null, so check it first */
+            if (te->resname && strcmp(te->resname, colname) == 0) {
+                found = true;
+                break;
+            }
+        }
+
+        /*
+         * Still not found just return origin colname, error-out later in sort-plan
+         * creation stage
+         */
+        if (!found || te == NULL) {
+            return colname;
+        }
+    }
+
+    /* Pull the aggregates and var nodes from the quals */
+    List *vars = pull_var_clause((Node *)te->expr,
+                                 PVC_INCLUDE_AGGREGATES,
+                                 PVC_RECURSE_PLACEHOLDERS);
+
+    /*
+     * do not support none-table column's ref specified as order siblings's sort entry
+     *
+     * Keep origin behavior as previous version
+     */
+    if (vars == NIL) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("expression with none-var in order siblings is not supported")));
+    }
+
+    /* do not support multi-column refs specified as order sibling's sort entry */
+    if (list_length(vars) > 1) {
+        ereport(WARNING, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("expression with multi-vars in order siblings is not full-supported,"
+                       " only 1st var will be sorted.")));
+    }
+    Var *var = (Var *)linitial(vars);
+    RangeTblEntry *rte = root->simple_rte_array[var->varno];
+    char *raw_cte_alias = (char *)strVal(list_nth(rte->eref->colnames, var->varattno - 1));
+    resultColName = strrchr(raw_cte_alias, '@');
+    resultColName += 1;   /* fix '@' offset */
+
+    return resultColName;
+}
+
+/*
  * @Brief: Get Siblings column name according Siblings-SortBy Clause.
  */
-char *GetOrderSiblingsColName(PlannerInfo* root, SortBy *sb)
+static char *GetOrderSiblingsColName(PlannerInfo* root, SortBy *sb, Plan *basePlan)
 {
     char *colname = NULL;
+    TargetEntry *te = NULL;
 
     if (IsA(sb->node, ColumnRef)) {
         ColumnRef  *cr = (ColumnRef *)sb->node;
@@ -451,7 +554,20 @@ char *GetOrderSiblingsColName(PlannerInfo* root, SortBy *sb)
                      errmsg("Order siblings by tlistIdx %d exceed length of targetList.", siblingIdx)));
         }
 
-        TargetEntry *te = (TargetEntry *)list_nth(root->parse->targetList, siblingIdx - 1);
+        te = (TargetEntry *)list_nth(root->parse->targetList, siblingIdx - 1);
+
+        if (IsA(te->expr, FuncExpr) && IsStartWithFunction((FuncExpr *)te->expr)) {
+            ereport(ERROR,
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                     errmsg("Not support refer startwithfunc column in order siblings by.")));
+        }
+
+        if (te->resname != NULL && IsPseudoReturnColumn(te->resname)) {
+            ereport(ERROR,
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                     errmsg("Not support refer startwith Pseudo column in order siblings by.")));
+        }
+
         colname = te->resname;
     }
 
@@ -462,6 +578,17 @@ char *GetOrderSiblingsColName(PlannerInfo* root, SortBy *sb)
     if (colname == NULL) {
         colname = GetSiblingsColNameFromFunc(sb->node);
     }
+
+    /*
+     * Check and fix none regular columns, e.g. expr with no alias ?column? and
+     * name-alias that can not be found from StartWithOp plan's targetlist
+     *
+     * Special case: we do not have to process PRC
+     */
+    if (colname != NULL && !IsPseudoReturnColumn(colname)) {
+        colname = CheckAndFixSiblingsColName(root, basePlan, colname, te);
+    }
+
     return colname;
 }
 
@@ -1393,7 +1520,7 @@ static Sort *CreateSortPlanUnderRU(PlannerInfo* root, Plan* lefttree, List *sibl
     foreach (lc, siblings) {
         SortBy *sb = (SortBy *)lfirst(lc);
 
-        char *colname = GetOrderSiblingsColName(root, sb);
+        char *colname = GetOrderSiblingsColName(root, sb, lefttree);
         if (colname == NULL) {
             ereport(WARNING,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),

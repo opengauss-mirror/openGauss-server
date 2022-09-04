@@ -380,7 +380,7 @@ Datum clean_workload(PG_FUNCTION_ARGS)
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
             errmsg("Global workload is using, can't clean workload.")));
     }
-
+    (void)LWLockAcquire(SQLAdvisorLock, LW_EXCLUSIVE);
     g_instance.adv_cxt.isOnlineRunning = 0;
     g_instance.adv_cxt.isUsingGWC = 0;
     g_instance.adv_cxt.maxMemory = 0;
@@ -392,6 +392,7 @@ Datum clean_workload(PG_FUNCTION_ARGS)
         MemoryContextDelete(g_instance.adv_cxt.SQLAdvisorContext);
         g_instance.adv_cxt.SQLAdvisorContext = NULL;
     }
+    LWLockRelease(SQLAdvisorLock);
 
     PG_RETURN_BOOL(true);
 }
@@ -756,12 +757,15 @@ Datum start_collect_workload(PG_FUNCTION_ARGS)
             errmsg("maxMemory %d must 0 < maxMemory <= 10240.", maxMemory)));
     }
 
+    (void)LWLockAcquire(SQLAdvisorLock, LW_EXCLUSIVE);
     if (g_instance.adv_cxt.SQLAdvisorContext != NULL) {
+        LWLockRelease(SQLAdvisorLock);
         ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
             errmsg("call clean_workload first.")));
     }
 
     if (pg_atomic_exchange_u32(&g_instance.adv_cxt.isOnlineRunning, 1) != 0) {
+        LWLockRelease(SQLAdvisorLock);
         ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
             errmsg("Online collect workload is running.")));
     }
@@ -780,6 +784,7 @@ Datum start_collect_workload(PG_FUNCTION_ARGS)
                                                                 false);
 
     initGlobalWorkloadCache();
+    LWLockRelease(SQLAdvisorLock);
     PG_RETURN_BOOL(true);
 }
 
@@ -877,6 +882,7 @@ Datum analyze_workload(PG_FUNCTION_ARGS)
 
     PG_TRY();
     {
+        (void)LWLockAcquire(SQLAdvisorLock, LW_SHARED);
         for (int i = 0; i < GWC_NUM_OF_BUCKETS; i++) {
             HASH_SEQ_STATUS hashSeq;
             SQLStatementEntry* entry = NULL;
@@ -894,11 +900,13 @@ Datum analyze_workload(PG_FUNCTION_ARGS)
 
             LWLockRelease(GetMainLWLockByIndex(g_instance.adv_cxt.GWCArray[i].lockId));
         }
+        LWLockRelease(SQLAdvisorLock);
     }
     PG_CATCH();
     {
         pg_atomic_write_u32(&g_instance.adv_cxt.isUsingGWC, 0);
         (void)MemoryContextSwitchTo(oldcxt);
+        LWLockRelease(SQLAdvisorLock);
         PG_RE_THROW();
     }
     PG_END_TRY();

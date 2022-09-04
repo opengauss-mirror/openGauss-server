@@ -36,8 +36,8 @@
 #include "access/twophase.h"
 #include "access/xact.h"
 #include "access/xlog.h"
-#include "access/dfs/dfs_insert.h"
 #include "access/ustore/knl_whitebox_test.h"
+#include "access/ubtree.h"
 #include "gs_bbox.h"
 #include "catalog/namespace.h"
 #include "catalog/pgxc_group.h"
@@ -148,6 +148,22 @@
 #include "workload/workload.h"
 #include "utils/guc_sql.h"
 
+#define DEFAULT_USTATS_TRACKER_NAPTIME 20
+#define DEFAULT_UMAX_PRUNE_SEARCH_LEN 10
+
+#define ENABLE_USTORE_PARTIAL_SEQSCAN_IDX (0)
+#define ENABLE_CANDIATATE_BUF_USAGE_IDX (1)
+#define USTATS_TRACKER_NAPTIME_IDX (2)
+#define USEARCH_LENGTH_FOR_PRUNE_IDX (3)
+#define ENABLE_USTORE_SYNC_ROLLBACK_IDX (4)
+#define ENABLE_USTORE_ASYNC_ROLLBACK_IDX (5)
+#define ENABLE_USTORE_PAGE_ROLLBACK_IDX (6)
+#define ENABLE_USTORE_VERIFY_LEVEL_IDX (7)
+#define ENABLE_USTORE_VERIFY_MODULE_IDX (8)
+#define ENABLE_USTORE_TRACE_LEVEL_IDX (9)
+#define ENABLE_USTORE_LOG_TUPLE_IDX (10)
+#define ENABLE_USTORE_UNIT_TEST_IDX (11)
+
 static bool parse_query_dop(int* newval, void** extra, GucSource source);
 static void AssignQueryDop(int newval, void* extra);
 static bool check_job_max_workers(int* newval, void** extra, GucSource source);
@@ -159,9 +175,12 @@ static bool check_inlist2joininfo(char** newval, void** extra, GucSource source)
 static void assign_inlist2joininfo(const char* newval, void* extra);
 static bool check_behavior_compat_options(char** newval, void** extra, GucSource source);
 static void assign_behavior_compat_options(const char* newval, void* extra);
+static bool check_plsql_compile_behavior_compat_options(char** newval, void** extra, GucSource source);
+static void assign_plsql_compile_behavior_compat_options(const char* newval, void* extra);
 static void assign_connection_info(const char* newval, void* extra);
 static bool check_application_type(int* newval, void** extra, GucSource source);
 static void assign_convert_string_to_digit(bool newval, void* extra);
+static bool CheckUStoreAttr(char** newval, void** extra, GucSource source);
 static void AssignUStoreAttr(const char* newval, void* extra);
 static bool check_snapshot_delimiter(char** newval, void** extra, GucSource source);
 static bool check_snapshot_separator(char** newval, void** extra, GucSource source);
@@ -221,6 +240,7 @@ static const struct config_enum_entry rewrite_options[] = {
     {"predpush", PRED_PUSH, false},
     {"predpushnormal", PRED_PUSH_NORMAL, false},
     {"predpushforce", PRED_PUSH_FORCE, false},
+    {"disable_pullup_expr_sublink", SUBLINK_PULLUP_DISABLE_EXPR, false},
     {NULL, 0, false}
 };
 
@@ -293,6 +313,7 @@ static const struct config_enum_entry sql_beta_options[] = {
     {"plpgsql_stream_fetchall", PLPGSQL_STREAM_FETCHALL, false},
     {"predpush_same_level", PREDPUSH_SAME_LEVEL, false},
     {"partition_fdw_on", PARTITION_FDW_ON, false},
+    {"disable_bitmap_cost_with_lossy_pages", DISABLE_BITMAP_COST_WITH_LOSSY_PAGES, false},
     {NULL, 0, false}
 };
 
@@ -302,6 +323,14 @@ static const struct config_enum_entry vector_engine_strategy[] = {
     {"optimal", OPT_VECTOR_ENGINE, false},
     {NULL, 0, false}
 };
+
+static const struct config_enum_entry multi_stats_options[] = {
+    {"bayesnet", BAYESNET_OPTION, false},
+    {"mcv", MCV_OPTION, false},
+    {"all", ALL_OPTION, false},
+    {NULL, 0, false}
+};
+
 
 typedef struct behavior_compat_entry {
     const char* name; /* name of behavior compat entry */
@@ -332,7 +361,8 @@ static const struct behavior_compat_entry behavior_compat_options[OPT_MAX] = {
     {"rownum_type_compat", OPT_ROWNUM_TYPE_COMPAT},
     {"compat_cursor", OPT_COMPAT_CURSOR},
     {"char_coerce_compat", OPT_CHAR_COERCE_COMPAT},
-    {"pgformat_substr", OPT_PGFORMAT_SUBSTR}
+    {"pgformat_substr", OPT_PGFORMAT_SUBSTR},
+    {"truncate_numeric_tail_zero", OPT_TRUNC_NUMERIC_TAIL_ZERO}
 };
 
 // increase SQL_IGNORE_STRATEGY_NUM if we need more strategy
@@ -341,6 +371,32 @@ static const struct config_enum_entry sql_ignore_strategy[] = {
     {"ignore_null", SQL_IGNORE_NULL, false},
     {"overwrite_null", SQL_OVERWRITE_NULL, false},
 };
+
+static const struct behavior_compat_entry plsql_compile_check_options[PLPSQL_OPT_MAX] = {
+    {"for_loop", PLPSQL_OPT_FOR_LOOP},
+    {"outparam", PLPSQL_OPT_OUTPARAM}
+};
+
+#define USTORE_ATTR_KEY_COUNTS (12)
+struct enum_ustore_attr_config {
+    const char* name;
+    int min;
+    int max;
+};
+static const char* ustore_attr_keys[] = {
+    "enable_ustore_partial_seqscan",
+    "enable_candidate_buf_usage_count",
+    "ustats_tracker_naptime",
+    "umax_search_length_for_prune",
+    "enable_ustore_sync_rollback",
+    "enable_ustore_async_rollback",
+    "enable_ustore_page_rollback",
+    "ustore_verify_level",
+    "ustore_verify_module",
+    "index_trace_level",
+    "enable_log_tuple",
+    "ustore_unit_test"
+    };
 
 /*
  * Contents of GUC tables
@@ -1310,6 +1366,17 @@ static void InitSqlConfigureNamesBool()
             NULL,
             NULL,
             NULL},
+        {{"enable_ai_stats",
+            PGC_USERSET,
+            NODE_ALL,
+            QUERY_TUNING_METHOD,
+            gettext_noop("Sets the bayes network based statistic enable flag."),
+            NULL},
+            &u_sess->attr.attr_sql.enable_ai_stats,
+            false,
+            NULL,
+            NULL,
+            NULL},
 
 #ifndef ENABLE_MULTIPLE_NODES
         {{"enable_beta_opfusion",
@@ -1330,6 +1397,17 @@ static void InitSqlConfigureNamesBool()
              gettext_noop("Enables custom parser"),
              NULL},
             &u_sess->attr.attr_sql.enable_custom_parser,
+            false,
+            NULL,
+            NULL,
+            NULL},
+        {{"enable_functional_dependency",
+            PGC_USERSET,
+            NODE_SINGLENODE,
+            QUERY_TUNING_METHOD,
+            gettext_noop("Enables the functional dependency statistic features."),
+            NULL},
+            &u_sess->attr.attr_sql.enable_functional_dependency,
             false,
             NULL,
             NULL,
@@ -1526,6 +1604,17 @@ static void InitSqlConfigureNamesBool()
             NULL,
             NULL,
             NULL},
+        {{"partition_page_estimation",
+            PGC_USERSET,
+            NODE_SINGLENODE,
+            QUERY_TUNING_METHOD,
+            gettext_noop("Enables partition table pages estimation in the case of pruning."),
+            NULL},
+            &u_sess->attr.attr_sql.partition_page_estimation,
+            false,
+            NULL,
+            NULL,
+            NULL},
         {{"enable_agg_pushdown_for_ca",
             PGC_USERSET,
             NODE_DISTRIBUTE,
@@ -1534,6 +1623,17 @@ static void InitSqlConfigureNamesBool()
             NULL},
             &u_sess->attr.attr_sql.enable_agg_pushdown_for_cooperation_analysis,
             true,
+            NULL,
+            NULL,
+            NULL},
+        {{"partition_iterator_elimination",
+            PGC_USERSET,
+            NODE_SINGLENODE,
+            QUERY_TUNING_METHOD,
+            gettext_noop("Enables partition iterator elimination."),
+            NULL},
+            &u_sess->attr.attr_sql.partition_iterator_elimination,
+            false,
             NULL,
             NULL,
             NULL},
@@ -1570,6 +1670,17 @@ static void InitSqlConfigureNamesBool()
             NULL,
             GUC_REPORT},
             &u_sess->attr.attr_sql.uppercase_attribute_name,
+            false,
+            NULL,
+            NULL,
+            NULL},
+        {{"var_eq_const_selectivity",
+            PGC_USERSET,
+            NODE_SINGLENODE,
+            QUERY_TUNING_METHOD,
+            gettext_noop("Enables var const selectivity with histogram."),
+            NULL},
+            &u_sess->attr.attr_sql.var_eq_const_selectivity,
             false,
             NULL,
             NULL,
@@ -2626,6 +2737,18 @@ static void InitSqlConfigureNamesString()
             check_behavior_compat_options,
             assign_behavior_compat_options,
             NULL},
+        {{"plsql_compile_check_options",
+            PGC_USERSET,
+            NODE_SINGLENODE,
+            COMPAT_OPTIONS,
+            gettext_noop("plsql compile compatibility options"),
+            NULL,
+            GUC_LIST_INPUT | GUC_REPORT},
+            &u_sess->attr.attr_sql.plsql_compile_behavior_compat_string,
+            "",
+            check_plsql_compile_behavior_compat_options,
+            assign_plsql_compile_behavior_compat_options,
+            NULL},
         {{"connection_info",
             PGC_USERSET,
             NODE_ALL,
@@ -2660,7 +2783,7 @@ static void InitSqlConfigureNamesString()
             GUC_LIST_INPUT | GUC_LIST_QUOTE},
             &u_sess->attr.attr_sql.ustore_attr,
             "",
-            NULL,
+            CheckUStoreAttr,
             AssignUStoreAttr,
             NULL},
         {{"db4ai_snapshot_mode",
@@ -2878,6 +3001,18 @@ static void InitSqlConfigureNamesEnum()
             &u_sess->attr.attr_sql.vectorEngineStrategy,
             OFF_VECTOR_ENGINE,
             vector_engine_strategy,
+            NULL,
+            NULL,
+            NULL},
+        {{"multi_stats_type",
+            PGC_USERSET,
+            NODE_ALL,
+            QUERY_TUNING,
+            gettext_noop("Sets the type of multi-column statistics."),
+            NULL},
+            &u_sess->attr.attr_sql.multi_stats_type,
+            BAYESNET_OPTION,
+            multi_stats_options,
             NULL,
             NULL,
             NULL},
@@ -3236,6 +3371,82 @@ static void assign_behavior_compat_options(const char* newval, void* extra)
     u_sess->utils_cxt.behavior_compat_flags = result;
 }
 
+/*
+ * check_behavior_compat_options: GUC check_hook for behavior compat options
+ */
+static bool check_plsql_compile_behavior_compat_options(char** newval, void** extra, GucSource source)
+{
+    char* rawstring = NULL;
+    List* elemlist = NULL;
+    ListCell* cell = NULL;
+    int start = 0;
+
+    /* Need a modifiable copy of string */
+    rawstring = pstrdup(*newval);
+    /* Parse string into list of identifiers */
+    if (!SplitIdentifierString(rawstring, ',', &elemlist)) {
+        /* syntax error in list */
+        GUC_check_errdetail("invalid paramater for plsql compile behavior compat information.");
+        pfree(rawstring);
+        list_free(elemlist);
+
+        return false;
+    }
+
+    foreach (cell, elemlist) {
+        const char* item = (const char*)lfirst(cell);
+        bool nfound = true;
+
+        for (start = 0; start < PLPSQL_OPT_MAX; start++) {
+            if (strcmp(item, plsql_compile_check_options[start].name) == 0) {
+                nfound = false;
+                break;
+            }
+        }
+        if (nfound) {
+            GUC_check_errdetail("invalid plsql compile behavior compat option \"%s\"", item);
+            pfree(rawstring);
+            list_free(elemlist);
+            return false;
+        }
+    }
+
+    pfree(rawstring);
+    list_free(elemlist);
+
+    return true;
+}
+
+/*
+ * assign_distribute_test_param: GUC assign_hook for distribute_test_param
+ */
+static void assign_plsql_compile_behavior_compat_options(const char* newval, void* extra)
+{
+    char* rawstring = NULL;
+    List* elemlist = NULL;
+    ListCell* cell = NULL;
+    int start = 0;
+    int result = 0;
+
+    rawstring = pstrdup(newval);
+    (void)SplitIdentifierString(rawstring, ',', &elemlist);
+
+    u_sess->utils_cxt.plsql_compile_behavior_compat_flags = 0;
+    foreach (cell, elemlist) {
+        for (start = 0; start < PLPSQL_OPT_MAX; start++) {
+            const char* item = (const char*)lfirst(cell);
+
+            if (strcmp(item, plsql_compile_check_options[start].name) == 0)
+                result += plsql_compile_check_options[start].flag;
+        }
+    }
+
+    pfree(rawstring);
+    list_free(elemlist);
+
+    u_sess->utils_cxt.plsql_compile_behavior_compat_flags = result;
+}
+
 static void assign_connection_info(const char* newval, void* extra)
 {
     /* Update the pg_stat_activity view */
@@ -3293,17 +3504,29 @@ const int MAX_USTATS_TRACKER_NAPTIME = INT_MAX / 1000;
 const int MIN_UMAX_PRUNE_SEARCH_LEN = 1;
 const int MAX_UMAX_PRUNE_SEARCH_LEN = INT_MAX / 1000;
 
-static void ParseUStoreBool(bool* pBool, const char* ptoken, const char* pdelimiter, char* psave)
+static const struct config_enum_entry index_trace_level_options[] = {
+    {"no", TRACE_NO, false},
+    {"normal", TRACE_NORMAL, false},
+    {"visibility", TRACE_VISIBILITY, false},
+    {"showhikey", TRACE_SHOWHIKEY, false},
+    {"all", TRACE_ALL, false}
+};
+
+static void ParseUStoreBool(bool* pBool, char* ptoken, const char* pdelimiter, char* psave)
 {
     ptoken = TrimStr(strtok_r(NULL, pdelimiter, &psave));
-    if (!parse_bool(ptoken, pBool)) {
-        ereport(ERROR,
+    if (!IS_NULL_STR(ptoken) && !parse_bool(ptoken, pBool)) {
+        ereport(LOG,
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                  errmsg("a parameter inside ustore_attr contains an invalid Boolean value")));
     }
+
+    if (ptoken != NULL) {
+        pfree(ptoken);
+    }
 }
 
-static void ParseUStoreInt(int* pInt, const char* ptoken, const char* pdelimiter, char* psave,
+static void ParseUStoreInt(int* pInt, char* ptoken, const char* pdelimiter, char* psave,
                            int gucMin, int gucMax)
 {
     ptoken = TrimStr(strtok_r(NULL, pdelimiter, &psave));
@@ -3313,20 +3536,333 @@ static void ParseUStoreInt(int* pInt, const char* ptoken, const char* pdelimiter
             *pInt = newValue;
         }
     }
+
+    if (ptoken != NULL) {
+        pfree(ptoken);
+    }
+}
+
+static void ParseUstoreVerifyLevel(int* mLevel, char* ptoken, const char* pdelimiter, char* psave)
+{
+    int setVal = 0;
+    ptoken = TrimStr(strtok_r(NULL, pdelimiter, &psave));
+    if (!IS_NULL_STR(ptoken)) {
+        if (strcasecmp(ptoken, "NONE") == 0) {
+            setVal = (int) USTORE_VERIFY_NONE;
+        } else if (strcasecmp(ptoken, "FAST") == 0) {
+            setVal = (int) USTORE_VERIFY_DEFAULT;
+        } else if (strcasecmp(ptoken, "NORMAL") == 0) {
+            setVal = (int) USTORE_VERIFY_FAST;
+        } else if (strcasecmp(ptoken, "SLOW") == 0) {
+            setVal = (int) USTORE_VERIFY_COMPLETE;
+        } else {
+            setVal = 0;
+            ereport(LOG, (errmodule(MOD_GUC),
+                errmsg("Invalid parameter settings, only support fast, normal and slow value.")));
+        }
+    }
+
+    if (setVal >= USTORE_VERIFY_NONE && setVal <= USTORE_VERIFY_COMPLETE) {
+        *mLevel = setVal;
+    }
+
+    if (ptoken != NULL) {
+        pfree(ptoken);
+    }
+}
+
+static void ParseUstoreVerifyModule(int* moduleVal, char* ptoken, const char* pdelimiter, char * psave)
+{
+    bool copyStr = false;
+    int setVal = 0;
+    do {
+        if (copyStr) {
+            pfree(ptoken);
+            copyStr = false;
+        }
+        ptoken = TrimStr(strtok_r(NULL, pdelimiter, &psave));
+        if (ptoken != NULL) {
+            copyStr = true;
+            if (strcasecmp(ptoken, "ALL") == 0) {
+                setVal = USTORE_VERIFY_MOD_MASK;
+            } else if (strcasecmp(ptoken, "NULL") == 0) {
+                setVal = USTORE_VERIFY_MOD_INVALID;
+            } else if (strcasecmp(ptoken, "UPAGE") == 0) {
+                setVal |= USTORE_VERIFY_MOD_UPAGE;
+            } else if (strcasecmp(ptoken, "UBTREE") == 0) {
+                setVal |= USTORE_VERIFY_MOD_UBTREE;
+            } else if (strcasecmp(ptoken, "UNDO") == 0) {
+                setVal |= USTORE_VERIFY_MOD_UNDO;
+            } else if (strcasecmp(ptoken, "REDO") == 0) {
+                setVal |= USTORE_VERIFY_MOD_REDO;
+            } else {
+                setVal = 0;
+                ereport(LOG, (errmodule(MOD_GUC),
+                    errmsg(" only the following parameters are supported: upage, ubtree,undo,redo,null, all,"
+                    "or combination of upage, ubtree, undo, and redo")));
+            }
+        }
+    } while (ptoken != NULL);
+
+    if (setVal >= 0&& setVal <= USTORE_VERIFY_MOD_MASK) {
+        *moduleVal = setVal;
+    }
+}
+
+static void ParseUstoreOption(int* pOption, char* ptoken, const char* pdelimiter, char* psave)
+{
+    ptoken = TrimStr(strtok_r(NULL, pdelimiter, &psave));
+    if (!IS_NULL_STR(ptoken)) {
+        for (auto item : index_trace_level_options) {
+            if (strcasecmp(ptoken, item.name) == 0) {
+                *pOption = item.val;
+                break;
+            }
+        }
+    }
+
+    if (ptoken != NULL) {
+        pfree(ptoken);
+    }
+}
+
+static bool ValidateVerifyModules(char* value, const char* pdelimiter, char* psave)
+{
+    bool flag = false;
+    char *ptoken = NULL;
+    ptoken = TrimStr(strtok_r(value, pdelimiter, &psave));
+
+    do {
+        if (ptoken != NULL) {
+            if (strcasecmp(ptoken, "ALL") == 0 ||
+                strcasecmp(ptoken, "NULL") == 0 ||
+                strcasecmp(ptoken, "UPAGE") == 0 ||
+                strcasecmp(ptoken, "UBTREE") == 0 ||
+                strcasecmp(ptoken, "UNDO") == 0 ||
+                strcasecmp(ptoken, "REDO") == 0) {
+                flag = true;
+                pfree(ptoken);
+            } else {
+                flag = false;
+                pfree(ptoken);
+                break;
+            }
+        }
+        ptoken = TrimStr(strtok_r(NULL, pdelimiter, &psave));
+    } while (ptoken != NULL);
+
+    return flag;
+}
+
+static bool IsValidUstoreAttrKeys(const char* keyStr)
+{
+    uint32 i = 0;
+    if (keyStr == NULL) {
+        return false;
+    }
+
+    for (i = 0; i < USTORE_ATTR_KEY_COUNTS; i++) {
+        if (strcasecmp(keyStr, ustore_attr_keys[i]) == 0) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static bool IsValidUstoreAttrValues(const char* keyStr, char* value)
+{
+    if (keyStr == NULL || value == NULL) {
+        return false;
+    }
+
+    if (strcasecmp(keyStr, "enable_ustore_partial_seqscan") == 0 ||
+        strcasecmp(keyStr, "enable_candidate_buf_usage_count") == 0 ||
+        strcasecmp(keyStr, "enable_ustore_sync_rollback") == 0 ||
+        strcasecmp(keyStr, "enable_ustore_async_rollback") == 0 ||
+        strcasecmp(keyStr, "enable_ustore_page_rollback") == 0) {
+        return (strcasecmp(value, "true") == 0 || strcasecmp(value, "false") == 0) ? true : false;
+    } else if (strcasecmp(keyStr, "ustats_tracker_naptime") == 0) {
+        int keyValues = pg_strtoint32(value);
+        return (keyValues >= MIN_USTATS_TRACKER_NAPTIME && keyValues <= MAX_USTATS_TRACKER_NAPTIME) ?
+            true : false;
+    } else if (strcasecmp(keyStr, "umax_search_length_for_prune") == 0) {
+        int keyValues = pg_strtoint32(value);
+        return (keyValues >= MIN_UMAX_PRUNE_SEARCH_LEN && keyValues <= MAX_UMAX_PRUNE_SEARCH_LEN) ?
+            true : false;
+#ifdef ENABLE_WHITEBOX
+    } else if (strcasecmp(keyStr, "ustore_unit_test") == 0) {
+        return (strlen(value) != 0) true : false;
+#endif
+    } else if (strcasecmp(keyStr, "ustore_verify_level") == 0) {
+        return (strcasecmp(value, "none") == 0 || strcasecmp(value, "fast") == 0 ||
+            strcasecmp(value, "normal") == 0 || strcasecmp(value, "slow") == 0) ? true : false;
+    } else if (strcasecmp(keyStr, "ustore_verify_module") == 0) {
+        char *psave = NULL;
+        const char* pdelimiter = ":";
+        return ValidateVerifyModules(value, pdelimiter, psave) ? true : false;
+    } else if (strcasecmp(keyStr, "index_trace_level") == 0) {
+        return (strcasecmp(value, "no") == 0 || strcasecmp(value, "normal") == 0 ||
+            strcasecmp(value, "visibility") == 0 || strcasecmp(value, "showhikey") == 0 ||
+            strcasecmp(value, "all") == 0) ? true : false;
+    } else if (strcasecmp(keyStr, "enable_log_tuple") == 0) {
+        return (strcasecmp(value, "on") == 0 || strcasecmp(value, "off") == 0) ? true : false;
+    }
+    return false;
+}
+
+static void ResetUstoreAttrValues()
+{
+    u_sess->attr.attr_storage.enable_ustore_partial_seqscan = false;
+    u_sess->attr.attr_storage.enable_candidate_buf_usage_count = false;
+    u_sess->attr.attr_storage.ustats_tracker_naptime = DEFAULT_USTATS_TRACKER_NAPTIME;
+    u_sess->attr.attr_storage.umax_search_length_for_prune = DEFAULT_UMAX_PRUNE_SEARCH_LEN;
+    u_sess->attr.attr_storage.enable_ustore_sync_rollback = true;
+    u_sess->attr.attr_storage.enable_ustore_async_rollback = true;
+    u_sess->attr.attr_storage.enable_ustore_page_rollback = true;
+    u_sess->attr.attr_storage.ustore_verify_level = USTORE_VERIFY_DEFAULT;
+    u_sess->attr.attr_storage.ustore_verify_module = USTORE_VERIFY_MOD_INVALID;
+    u_sess->attr.attr_storage.index_trace_level = TRACE_NO;
+    u_sess->attr.attr_storage.enable_log_tuple = false;
+}
+
+static void ResetPrevUstoreAttrSettings(bool status[])
+{
+    if (!status[ENABLE_USTORE_PARTIAL_SEQSCAN_IDX]) {
+        u_sess->attr.attr_storage.enable_ustore_partial_seqscan = false;
+    }
+    if (!status[ENABLE_CANDIATATE_BUF_USAGE_IDX]) {
+        u_sess->attr.attr_storage.enable_candidate_buf_usage_count = false;
+    }
+    if (!status[USTATS_TRACKER_NAPTIME_IDX]) {
+        u_sess->attr.attr_storage.ustats_tracker_naptime = DEFAULT_USTATS_TRACKER_NAPTIME;
+    }
+        if (!status[USEARCH_LENGTH_FOR_PRUNE_IDX]) {
+        u_sess->attr.attr_storage.umax_search_length_for_prune = DEFAULT_UMAX_PRUNE_SEARCH_LEN;
+    }
+    if (!status[ENABLE_USTORE_SYNC_ROLLBACK_IDX]) {
+        u_sess->attr.attr_storage.enable_ustore_sync_rollback = true;
+    }
+    if (!status[ENABLE_USTORE_ASYNC_ROLLBACK_IDX]) {
+        u_sess->attr.attr_storage.enable_ustore_async_rollback = true;
+    }
+    if (!status[ENABLE_USTORE_PAGE_ROLLBACK_IDX]) {
+        u_sess->attr.attr_storage.enable_ustore_page_rollback = true;
+    }
+    if (!status[ENABLE_USTORE_VERIFY_LEVEL_IDX]) {
+        u_sess->attr.attr_storage.ustore_verify_level = USTORE_VERIFY_DEFAULT;
+    }
+    if (!status[ENABLE_USTORE_VERIFY_MODULE_IDX]) {
+        u_sess->attr.attr_storage.ustore_verify_module = USTORE_VERIFY_MOD_INVALID;
+    }
+    if (!status[ENABLE_USTORE_TRACE_LEVEL_IDX]) {
+        u_sess->attr.attr_storage.index_trace_level = TRACE_NO;
+    }
+    if (!status[ENABLE_USTORE_LOG_TUPLE_IDX]) {
+        u_sess->attr.attr_storage.enable_log_tuple = false;
+    }
+}
+
+static bool CheckUStoreAttr(char** newval, void** extra, GucSource source)
+{
+    if (newval == NULL) {
+        return false;
+    }
+
+    char* trimStr = NULL;
+    char* pStr = NULL;
+    List* eleList = NULL;
+    ListCell* cell = NULL;
+
+    trimStr = pstrdup(*newval);
+    pStr = trimStr;
+    if (*trimStr == '\0') {
+        pfree(trimStr);
+        return true;
+    }
+
+    /* if rawstring is surrounded by quotes, remove the quotes. */
+    if (pStr && pStr[0] == '\"') {
+        pStr++;
+        if (pStr[strlen(pStr) - 1] == '\"') {
+            pStr[strlen(pStr) - 1] = '\0';
+        }
+    }
+
+    if (!SplitIdentifierString(pStr, ';', &eleList, false, false)) {
+        pfree(trimStr);
+        list_free(eleList);
+        ereport(LOG,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+             errmsg("Invalid syntax occured while parsing ustore_attr")));
+        return false;
+    }
+
+    foreach (cell, eleList) {
+        char* item = static_cast<char*>(lfirst(cell));
+        char* ptoken = NULL;
+        char* psave = NULL;
+        const char* pdelimiter = "=";
+        ptoken = TrimStr(strtok_r(item, pdelimiter, &psave));
+        if (!IS_NULL_STR(ptoken)) {
+            if (IsValidUstoreAttrKeys(ptoken)) {
+                char *value = NULL;
+                bool isValid = false;
+                value = TrimStr(strtok_r(NULL, pdelimiter, &psave));
+                isValid = IsValidUstoreAttrValues(ptoken, value);
+                if (value != NULL) {
+                    pfree(value);
+                }
+                if (!isValid) {
+                    pfree(trimStr);
+                    list_free(eleList);
+                    ereport(LOG,
+                        (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                            errmsg("Invalid value of key(%s) of ustore_attr.", ptoken)));
+                    pfree(ptoken);
+                    return false;
+                }
+            } else {
+                pfree(trimStr);
+                list_free(eleList);
+                ereport(LOG,
+                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("Invalid key(%s) of ustore_attr.", ptoken)));
+                pfree(ptoken);
+                return false;
+            }
+        }
+
+        if (ptoken != NULL) {
+            pfree(ptoken);
+        }
+    }
+
+    pfree(trimStr);
+    list_free(eleList);
+    return true;
 }
 
 static void AssignUStoreAttr(const char* newval, void* extra)
 {
-    char* rawstring = NULL;
+    char* trimString = NULL;
     char* rawstringNoparent  = NULL; // rawstring without parenthese
     List* elemlist = NULL;
     ListCell* cell = NULL;
+    bool status[USTORE_ATTR_KEY_COUNTS] = {false};
 
-    rawstring = pstrdup(newval);
-    rawstringNoparent  = rawstring;
+    trimString = pstrdup(newval);
+    rawstringNoparent = trimString;
+
+    /* Empty ustore_attr , reset values. */
+    if (*trimString == '\0') {
+        pfree(trimString);
+        ResetUstoreAttrValues();
+        return;
+    }
 
     // if rawstring is surrounded by quotes, remove the quotes
-    if (rawstringNoparent  && rawstringNoparent[0] == '\"') {
+    if (rawstringNoparent && rawstringNoparent[0] == '\"') {
         rawstringNoparent++;
         if (rawstringNoparent[strlen(rawstringNoparent) - 1] == '\"') {
             rawstringNoparent[strlen(rawstringNoparent) - 1] = '\0';
@@ -3334,42 +3870,71 @@ static void AssignUStoreAttr(const char* newval, void* extra)
     }
 
     if (!SplitIdentifierString(rawstringNoparent, ';', &elemlist, false, false)) {
-        pfree(rawstring);
+        pfree(trimString);
         list_free(elemlist);
-        ereport(ERROR,
+        ereport(LOG,
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                 errmsg("an error occured while parsing ustore_attr")));
+                 errmsg("Invalid syntax occured occured while parsing ustore_attr")));
         return;
     }
 
     foreach (cell, elemlist) {
         char* item = static_cast<char*>(lfirst(cell));
-
         char* ptoken = NULL;
         char* psave = NULL;
         const char* pdelimiter = "=";
-
         ptoken = TrimStr(strtok_r(item, pdelimiter, &psave));
         if (!IS_NULL_STR(ptoken)) {
             if (strcasecmp(ptoken, "enable_ustore_partial_seqscan") == 0) {
                 ParseUStoreBool(&u_sess->attr.attr_storage.enable_ustore_partial_seqscan, ptoken, pdelimiter, psave);
+                status[ENABLE_USTORE_PARTIAL_SEQSCAN_IDX] = true;
             } else if (strcasecmp(ptoken, "enable_candidate_buf_usage_count") == 0) {
                 ParseUStoreBool(&u_sess->attr.attr_storage.enable_candidate_buf_usage_count, ptoken, pdelimiter, psave);
+                status[ENABLE_CANDIATATE_BUF_USAGE_IDX] = true;
             } else if (strcasecmp(ptoken, "ustats_tracker_naptime") == 0) {
                 ParseUStoreInt(&u_sess->attr.attr_storage.ustats_tracker_naptime, ptoken, pdelimiter, psave,
                     MIN_USTATS_TRACKER_NAPTIME, MAX_USTATS_TRACKER_NAPTIME);
+                status[USTATS_TRACKER_NAPTIME_IDX] = true;
             } else if (strcasecmp(ptoken, "umax_search_length_for_prune") == 0) {
-                ParseUStoreInt(&u_sess->attr.attr_storage.ustats_tracker_naptime, ptoken, pdelimiter, psave,
+                ParseUStoreInt(&u_sess->attr.attr_storage.umax_search_length_for_prune, ptoken, pdelimiter, psave,
                     MIN_UMAX_PRUNE_SEARCH_LEN, MAX_UMAX_PRUNE_SEARCH_LEN);
+                status[USEARCH_LENGTH_FOR_PRUNE_IDX] = true;
 #ifdef ENABLE_WHITEBOX
             } else if (strcasecmp(ptoken, "ustore_unit_test") == 0) {
                 AssignUStoreUnitTest(psave, extra);
+                status[ENABLE_USTORE_UNIT_TEST_IDX] = true;
 #endif
+            } else if (strcasecmp(ptoken, "ustore_verify_level") == 0) {
+                ParseUstoreVerifyLevel(&u_sess->attr.attr_storage.ustore_verify_level, ptoken, pdelimiter, psave);
+                status[ENABLE_USTORE_VERIFY_LEVEL_IDX] = true;
+            } else if (strcasecmp(ptoken, "ustore_verify_module") == 0) {
+                ParseUstoreVerifyModule(&u_sess->attr.attr_storage.ustore_verify_module, ptoken, ":", psave);
+                status[ENABLE_USTORE_VERIFY_MODULE_IDX] = true;
+            } else if (strcasecmp(ptoken, "enable_ustore_sync_rollback") == 0) {
+                ParseUStoreBool(&u_sess->attr.attr_storage.enable_ustore_sync_rollback, ptoken, pdelimiter, psave);
+                status[ENABLE_USTORE_SYNC_ROLLBACK_IDX] = true;
+            } else if (strcasecmp(ptoken, "enable_ustore_async_rollback") == 0) {
+                ParseUStoreBool(&u_sess->attr.attr_storage.enable_ustore_async_rollback, ptoken, pdelimiter, psave);
+                status[ENABLE_USTORE_ASYNC_ROLLBACK_IDX] = true;
+            } else if (strcasecmp(ptoken, "enable_ustore_page_rollback") == 0) {
+                ParseUStoreBool(&u_sess->attr.attr_storage.enable_ustore_page_rollback, ptoken, pdelimiter, psave);
+                status[ENABLE_USTORE_PAGE_ROLLBACK_IDX] = true;
+            } else if (strcasecmp(ptoken, "index_trace_level") == 0) {
+                ParseUstoreOption(&u_sess->attr.attr_storage.index_trace_level, ptoken, pdelimiter, psave);
+                status[ENABLE_USTORE_TRACE_LEVEL_IDX] = true;
+            } else if (strcasecmp(ptoken, "enable_log_tuple") == 0) {
+                ParseUStoreBool(&u_sess->attr.attr_storage.enable_log_tuple, ptoken, pdelimiter, psave);
+                status[ENABLE_USTORE_LOG_TUPLE_IDX] = true;
             }
+        }
+
+        if (ptoken != NULL) {
+            pfree(ptoken);
         }
     }
 
-    pfree(rawstring);
+    ResetPrevUstoreAttrSettings(status);
+    pfree(trimString);
     list_free(elemlist);
 }
 

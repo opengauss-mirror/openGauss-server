@@ -78,6 +78,12 @@ static bool is_rangequery_contain_scalarop(Node* clause, RestrictInfo* rinfo);
 static void set_varratio_for_rqclause(
     PlannerInfo* root, List* varlist, int varRelid, double ratio, SpecialJoinInfo* sjinfo);
 
+#ifndef ENABLE_MULTIPLE_NODES
+static RelOptInfo *find_single_rel_for_clauses(PlannerInfo *root, const List *clauses);
+static Selectivity calculate_selectivity_dependency(bool flag_dependency, PlannerInfo *root, ES_SELECTIVITY *es,
+    int varRelid, JoinType jointype, SpecialJoinInfo *sjinfo, List** clauselist);
+#endif
+
 /****************************************************************************
  *		ROUTINES TO COMPUTE SELECTIVITIES
  ****************************************************************************/
@@ -127,7 +133,7 @@ static void set_varratio_for_rqclause(
  * varratio_cached: if we cache the selectivity into the relation or not for estimate distinct using possion.
  */
 Selectivity clauselist_selectivity(
-    PlannerInfo* root, List* clauses, int varRelid, JoinType jointype, SpecialJoinInfo* sjinfo, bool varratio_cached)
+    PlannerInfo* root, List* clauses, int varRelid, JoinType jointype, SpecialJoinInfo* sjinfo, bool varratio_cached, bool use_poisson)
 {
     Selectivity s1 = 1.0;
     RangeQueryClause* rqlist = NULL;
@@ -137,13 +143,12 @@ Selectivity clauselist_selectivity(
     ES_SELECTIVITY* es = NULL;
     MemoryContext ExtendedStat = NULL;
     MemoryContext oldcontext;
-
     /*
      * If there's exactly one clause, then no use in trying to match up pairs,
      * so just go directly to clause_selectivity().
      */
     if (list_length(clauses) == 1)
-        return clause_selectivity(root, (Node*)linitial(clauses), varRelid, jointype, sjinfo, varratio_cached);
+        return clause_selectivity(root, (Node*)linitial(clauses), varRelid, jointype, sjinfo, varratio_cached, false, use_poisson);
 
     /* initialize es_selectivity class, list_length(clauses) can be 0 when called by set_baserel_size_estimates */
     if (list_length(clauses) >= 2 &&
@@ -159,6 +164,18 @@ Selectivity clauselist_selectivity(
         Assert(root != NULL);
         s1 = es->calculate_selectivity(root, clauses, sjinfo, jointype, NULL, ES_EQJOINSEL);
         clauselist = es->unmatched_clause_group;
+
+#ifndef ENABLE_MULTIPLE_NODES
+        /*
+         * If these clauses references a single relation and it exists extended statistics for functional dependency
+         * in pg_statistic_ext, try to apply functional dependency to compute selecticity.
+         */
+        bool flag_dependency = u_sess->attr.attr_sql.enable_functional_dependency;
+        flag_dependency = flag_dependency && es->unmatched_clause_group && es->statlist;
+        s1 *= calculate_selectivity_dependency(flag_dependency, root, es, varRelid, jointype, sjinfo, &clauselist);
+#endif
+
+        es->clear();
         (void)MemoryContextSwitchTo(oldcontext);
     }
 
@@ -173,7 +190,7 @@ Selectivity clauselist_selectivity(
         Selectivity s2;
 
         /* Always compute the selectivity using clause_selectivity */
-        s2 = clause_selectivity(root, clause, varRelid, jointype, sjinfo, varratio_cached, true);
+        s2 = clause_selectivity(root, clause, varRelid, jointype, sjinfo, varratio_cached, true, use_poisson);
 
         /*
          * Check for being passed a RestrictInfo.
@@ -436,6 +453,31 @@ bool treat_as_join_clause(Node* clause, RestrictInfo* rinfo, int varRelid, Speci
     }
 }
 
+#ifndef ENABLE_MULTIPLE_NODES
+
+/*
+ * bms_is_subset_singleton
+ *
+ * Same result as bms_is_subset(s, bms_make_singleton(x)),
+ * but a little faster and doesn't leak memory.
+ *
+ * Is this of use anywhere else?  If so move to bitmapset.c ...
+ */
+static bool
+bms_is_subset_singleton(const Bitmapset *s, int x)
+{
+    BMS_Membership type = bms_membership(s);
+    if (type == BMS_EMPTY_SET) {
+        return true;
+    } else if (type == BMS_SINGLETON) {
+        return bms_is_member(x, s);
+    } else {
+        return false;
+    }
+}
+#endif
+
+
 /*
  * clause_selectivity -
  *	  Compute the selectivity of a general boolean expression clause.
@@ -479,7 +521,7 @@ bool treat_as_join_clause(Node* clause, RestrictInfo* rinfo, int varRelid, Speci
  * check_scalarop: if we need to check tha scalar op which belong to a range query clause, it is true.
  */
 Selectivity clause_selectivity(PlannerInfo* root, Node* clause, int varRelid, JoinType jointype,
-    SpecialJoinInfo* sjinfo, bool varratio_cached, bool check_scalarop)
+    SpecialJoinInfo* sjinfo, bool varratio_cached, bool check_scalarop, bool use_poisson)
 {
     Selectivity s1 = 0.5; /* default for any unhandled clause type */
     RestrictInfo* rinfo = NULL;
@@ -522,7 +564,26 @@ Selectivity clause_selectivity(PlannerInfo* root, Node* clause, int varRelid, Jo
          * considering a unique-ified case, so we only need one cache variable
          * for all non-JOIN_INNER cases.
          */
+#ifndef ENABLE_MULTIPLE_NODES
+        if (!use_poisson &&
+            (varRelid == 0 || bms_is_subset_singleton(rinfo->clause_relids, varRelid))) {
+            /* Cacheable --- do we already have the result? */
+            if (jointype == JOIN_INNER) {
+                if (rinfo->norm_selec >= 0) {
+                    return rinfo->norm_selec;
+                }
+            } else {
+                if (rinfo->outer_selec >= 0) {
+                    return rinfo->outer_selec;
+                }
+            }
+            cacheable = true;
+        } else {
+#endif
         cacheable = true;
+#ifndef ENABLE_MULTIPLE_NODES
+    }
+#endif
 
         /*
          * Proceed with examination of contained clause.  If the clause is an
@@ -583,10 +644,17 @@ Selectivity clause_selectivity(PlannerInfo* root, Node* clause, int varRelid, Jo
 
         s1 = 0.0;
         foreach (arg, ((BoolExpr*)clause)->args) {
-            Selectivity s2 = clause_selectivity(root, (Node*)lfirst(arg), varRelid, jointype, sjinfo);
+            /* DO NOT cache the var ratio of single or-clauses */
+            Selectivity s2 = clause_selectivity(root, (Node*)lfirst(arg), varRelid, jointype, sjinfo, false);
 
             s1 = s1 + s2 - s1 * s2;
         }
+        /*
+         * Ideally, or-clauses should be splitted into groups identified by Var oprend. However, Poisson optimization
+         * is known to bring about NDV underestimation and cardinality overestimation in OLTP cases. Also, it is hard
+         * to take acount of the effect of different Vars (e.g. t1.a = 1 or t2.b = 1) on single Vars.
+         * Therefore, or clauses is ignored for var ratio cache for now.
+         */
     } else if (is_opclause(clause) || IsA(clause, DistinctExpr)) {
         OpExpr* opclause = (OpExpr*)clause;
         Oid opno = opclause->opno;
@@ -689,7 +757,8 @@ Selectivity clause_selectivity(PlannerInfo* root, Node* clause, int varRelid, Jo
      * if it is filter for baserel and cached, or not inner join,
      * we should cache the var's selectivity into relation.
      */
-    if (((RatioType_Filter == ratiotype && varratio_cached) || (jointype == JOIN_SEMI) || (jointype == JOIN_ANTI)) &&
+    if (use_poisson &&
+        ((RatioType_Filter == ratiotype && varratio_cached) || (jointype == JOIN_SEMI) || (jointype == JOIN_ANTI)) &&
         (!check_scalarop || !is_rangequery_contain_scalarop(clause, rinfo)))
         get_vardata_for_filter_or_semijoin(root, clause, varRelid, s1, sjinfo, ratiotype);
 
@@ -1092,3 +1161,107 @@ static void set_varratio_for_rqclause(
         ReleaseVariableStats(vardata);
     }
 }
+
+#ifndef ENABLE_MULTIPLE_NODES
+/*
+ * find_single_rel_for_clauses
+ *		Examine each clause in 'clauses' and determine if all clauses
+ *		reference only a single relation.  If so return that relation,
+ *		otherwise return NULL.
+ */
+static RelOptInfo* find_single_rel_for_clauses(PlannerInfo* root, const List* clauses)
+{
+    int lastrelid = 0;
+    ListCell* l;
+
+    foreach (l, clauses) {
+        RestrictInfo *rinfo = (RestrictInfo *)lfirst(l);
+        int relid;
+
+        /*
+         * If we have a list of bare clauses rather than RestrictInfos, we
+         * could pull out their relids the hard way with pull_varnos().
+         * However, currently the extended-stats machinery won't do anything
+         * with non-RestrictInfo clauses anyway, so there's no point in
+         * spending extra cycles; just fail if that's what we have.
+         *
+         * An exception to that rule is if we have a bare BoolExpr AND clause.
+         * We treat this as a special case because the restrictinfo machinery
+         * doesn't build RestrictInfos on top of AND clauses.
+         */
+        if (rinfo != NULL && IsA(rinfo, BoolExpr) && ((const BoolExpr *)rinfo)->boolop == AND_EXPR) {
+            RelOptInfo *rel;
+
+            rel = find_single_rel_for_clauses(root, ((BoolExpr *)rinfo)->args);
+            if (rel == NULL) {
+                return NULL;
+            }
+            if (lastrelid == 0) {
+                lastrelid = rel->relid;
+                continue;
+            }
+            if (lastrelid != 0 && (int)(rel->relid) != lastrelid) {
+                return NULL;
+            }
+        }
+
+        if (!IsA(rinfo, RestrictInfo)) {
+            return NULL;
+        }
+
+        if (bms_is_empty(rinfo->clause_relids)) {
+            continue; /* we can ignore variable-free clauses */
+        }
+        if (!bms_get_singleton_member(rinfo->clause_relids, &relid)) {
+            return NULL; /* multiple relations in this clause */
+        }
+        if (lastrelid == 0) {
+            lastrelid = relid; /* first clause referencing a relation */
+        }
+        if (lastrelid != 0 && relid != lastrelid) {
+            return NULL; /* relation not same as last one */
+        }
+    }
+
+    if (lastrelid != 0) {
+        return find_base_rel(root, lastrelid);
+    }
+
+    return NULL; /* no clauses */
+}
+
+/*
+ * calculate_selectivity_dependency
+ *		Calculate selectivity through functional dependency statistics
+ */
+static Selectivity calculate_selectivity_dependency(bool flag_dependency, PlannerInfo *root, ES_SELECTIVITY *es,
+    int varRelid, JoinType jointype, SpecialJoinInfo *sjinfo, List** clauselist)
+{
+    if (!flag_dependency) {
+        return 1.0;
+    }
+
+    RelOptInfo *rel = NULL;
+    Selectivity sel = 1.0;
+    ListCell *l = NULL;
+
+    rel = find_single_rel_for_clauses(root, es->unmatched_clause_group);
+    if (rel && rel->rtekind == RTE_RELATION) {
+        int listidx = 0;
+        Bitmapset *estimatedclauses = NULL;
+
+        rel->statlist = es->statlist;
+        sel = dependencies_clauselist_selectivity(root, es->unmatched_clause_group, varRelid, jointype, sjinfo, rel,
+            &estimatedclauses);
+        *clauselist = NULL;
+        foreach (l, es->unmatched_clause_group) {
+            Node *clause = (Node *)lfirst(l);
+            if (!bms_is_member(listidx, estimatedclauses)) {
+                *clauselist = lappend(*clauselist, clause);
+            }
+            listidx++;
+        }
+    }
+    return sel;
+}
+#endif

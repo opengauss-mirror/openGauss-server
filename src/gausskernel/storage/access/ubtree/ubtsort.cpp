@@ -351,8 +351,8 @@ static void UBTreeSortAddTuple(Page page, Size itemsize, IndexTuple itup,
     if (!(isnew && P_ISLEAF(opaque))) {
         /* not new(copied tuple) or internal page. Don't need to handle xmin/xmax, normal insert */
         if (PageAddItem(page, (Item)itup, itemsize, itup_off, false, false) == InvalidOffsetNumber)
-            ereport(PANIC,
-                (errcode(ERRCODE_INDEX_CORRUPTED), errmsg("Index tuple cant fit in the page when creating index.")));
+            ereport(PANIC, (errcode(ERRCODE_INDEX_CORRUPTED),
+                    errmsg("Index tuple cant fit in the page when creating index.")));
     } else {
         Size storageSize = IndexTupleSize(itup);
         Size newsize = storageSize - TXNINFOSIZE;
@@ -771,8 +771,8 @@ static void UBTreeLoad(BTWriteState *wstate, BTSpool *btspool, BTSpool *btspool2
                 break;
             }
 
-            /* _index_tuple_compare() will take TID as tie-breaker if all key columns are equal. */
-            load1 = _index_tuple_compare(tupdes, wstate->inskey->scankeys, keysz, itup, itup2);
+            /* _bt_index_tuple_compare() will take TID as tie-breaker if all key columns are equal. */
+            load1 = _bt_index_tuple_compare(tupdes, wstate->inskey->scankeys, keysz, itup, itup2);
 
             /* When we see first tuple, create first index page */
             if (state == NULL)

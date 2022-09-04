@@ -45,6 +45,7 @@
 #include "replication/reorderbuffer.h"
 #include "replication/snapbuild.h"
 #include "replication/walreceiver.h"
+#include "replication/walsender.h"
 
 #include "storage/proc.h"
 #include "storage/procarray.h"
@@ -91,12 +92,12 @@ void CheckLogicalDecodingRequirements(Oid databaseId)
 {
     CheckSlotRequirements();
     if (g_instance.attr.attr_storage.wal_level < WAL_LEVEL_LOGICAL)
-        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                        errmsg("logical decoding requires wal_level >= logical")));
+        ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+            errmsg("logical decoding requires wal_level >= logical")));
 
     if (databaseId == InvalidOid)
-        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                        errmsg("logical decoding requires a database connection")));
+        ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+            errmsg("logical decoding requires a database connection")));
 
     /* ----
      * description: We got to change that someday soon...
@@ -155,8 +156,8 @@ static LogicalDecodingContext *StartupDecodingContext(List *output_plugin_option
 
     ctx->reader = XLogReaderAllocate(read_page, ctx);
     if (unlikely(ctx->reader == NULL))
-        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_RESOURCES),
-                        errmsg("memory is temporarily unavailable while allocate xlog reader")));
+        ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_INSUFFICIENT_RESOURCES),
+            errmsg("memory is temporarily unavailable while allocate xlog reader")));
 
     ctx->reader->private_data = ctx;
 
@@ -200,8 +201,8 @@ static LogicalDecodingContext *StartupDecodingContextForArea(List *output_plugin
 
     ctx->reader = XLogReaderAllocate(read_page, ctx);
     if (unlikely(ctx->reader == NULL))
-        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_RESOURCES),
-                        errmsg("memory is temporarily unavailable while allocate xlog reader")));
+        ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_INSUFFICIENT_RESOURCES),
+            errmsg("memory is temporarily unavailable while allocate xlog reader")));
 
     ctx->reader->private_data = ctx;
 
@@ -261,8 +262,8 @@ static ParallelLogicalDecodingContext *ParallelStartupDecodingContext(List *outp
 
     ctx->reader = XLogReaderAllocate(read_page, ctx);
     if (unlikely(ctx->reader == NULL))
-        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_RESOURCES),
-                        errmsg("memory is temporarily unavailable while allocate xlog reader")));
+        ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_INSUFFICIENT_RESOURCES),
+            errmsg("memory is temporarily unavailable while allocate xlog reader")));
 
     ctx->reader->private_data = ctx;
     ctx->slot = slot;
@@ -316,25 +317,25 @@ LogicalDecodingContext *CreateInitDecodingContext(const char *plugin, List *outp
 
     /* first some sanity checks that are unlikely to be violated */
     if (slot == NULL)
-        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                        errmsg("cannot perform logical decoding without a acquired slot")));
+        ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+            errmsg("cannot perform logical decoding without a acquired slot")));
 
     if (plugin == NULL)
-        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                        errmsg("cannot initialize logical decoding without a specified plugin")));
+        ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+            errmsg("cannot initialize logical decoding without a specified plugin")));
 
     /* Make sure the passed slot is suitable. These are user facing errors. */
     if (slot->data.database == InvalidOid)
-        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                        errmsg("cannot use physical replication slot created for logical decoding")));
+        ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+            errmsg("cannot use physical replication slot created for logical decoding")));
 
     if (slot->data.database != u_sess->proc_cxt.MyDatabaseId)
-        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                        errmsg("replication slot \"%s\" was not created in this database", NameStr(slot->data.name))));
+        ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+            errmsg("replication slot \"%s\" was not created in this database", NameStr(slot->data.name))));
 
     if (IsTransactionState() && GetTopTransactionIdIfAny() != InvalidTransactionId)
-        ereport(ERROR, (errcode(ERRCODE_ACTIVE_SQL_TRANSACTION),
-                        errmsg("cannot create logical replication slot in transaction that has performed writes")));
+        ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_ACTIVE_SQL_TRANSACTION),
+            errmsg("cannot create logical replication slot in transaction that has performed writes")));
 
     /* register output plugin name with slot */
     SpinLockAcquire(&slot->mutex);
@@ -470,18 +471,17 @@ LogicalDecodingContext *CreateDecodingContext(XLogRecPtr start_lsn, List *output
 
     /* first some sanity checks that are unlikely to be violated */
     if (slot == NULL)
-        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                        errmsg("cannot perform logical decoding without a acquired slot")));
+        ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+            errmsg("cannot perform logical decoding without a acquired slot")));
 
     /* make sure the passed slot is suitable, these are user facing errors */
     if (slot->data.database == InvalidOid)
-        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                        (errmsg("cannot use physical replication slot for logical decoding"))));
+        ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+            (errmsg("cannot use physical replication slot for logical decoding"))));
 
     if (slot->data.database != u_sess->proc_cxt.MyDatabaseId)
-        ereport(ERROR,
-                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                 (errmsg("replication slot \"%s\" was not created in this database", NameStr(slot->data.name)))));
+        ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+            (errmsg("replication slot \"%s\" was not created in this database", NameStr(slot->data.name)))));
 
     if (XLByteEQ(start_lsn, InvalidXLogRecPtr)) {
         /* continue from last position */
@@ -495,10 +495,9 @@ LogicalDecodingContext *CreateDecodingContext(XLogRecPtr start_lsn, List *output
          * decoding. Clients have to be able to do that to support
          * synchronous replication.
          */
-        if (!RecoveryInProgress())
-            ereport(DEBUG1, (errmsg("cannot stream from %X/%X, minimum is %X/%X, forwarding", (uint32)(start_lsn >> 32),
-                                    uint32(start_lsn), (uint32)(slot->data.confirmed_flush >> 32),
-                                    (uint32)slot->data.confirmed_flush)));
+        ereport(DEBUG1, (errmodule(MOD_LOGICAL_DECODE),
+            errmsg("cannot stream from %X/%X, minimum is %X/%X, forwarding", (uint32)(start_lsn >> 32),
+                   uint32(start_lsn), (uint32)(slot->data.confirmed_flush >> 32), (uint32)slot->data.confirmed_flush)));
 
         start_lsn = slot->data.confirmed_flush;
     }
@@ -512,11 +511,11 @@ LogicalDecodingContext *CreateDecodingContext(XLogRecPtr start_lsn, List *output
         startup_cb_wrapper(ctx, &ctx->options, false);
     (void)MemoryContextSwitchTo(old_context);
 
-    if (!RecoveryInProgress())
-        ereport(LOG, (errmsg("starting logical decoding for slot %s", NameStr(slot->data.name)),
-                      errdetail("streaming transactions committing after %X/%X, reading WAL from %X/%X",
-                                (uint32)(slot->data.confirmed_flush >> 32), (uint32)slot->data.confirmed_flush,
-                                (uint32)(slot->data.restart_lsn >> 32), (uint32)slot->data.restart_lsn)));
+    ereport(LOG, (errmodule(MOD_LOGICAL_DECODE),
+        errmsg("starting logical decoding for slot %s", NameStr(slot->data.name)),
+        errdetail("streaming transactions committing after %X/%X, reading WAL from %X/%X",
+                  (uint32)(slot->data.confirmed_flush >> 32), (uint32)slot->data.confirmed_flush,
+                  (uint32)(slot->data.restart_lsn >> 32), (uint32)slot->data.restart_lsn)));
 
     return ctx;
 }
@@ -548,15 +547,28 @@ ParallelLogicalDecodingContext *ParallelCreateDecodingContext(XLogRecPtr start_l
     bool fast_forward, XLogPageReadCB read_page, int slotId)
 {
     ParallelLogicalDecodingContext *ctx = NULL;
+    ReplicationSlot *slot = NULL;
+
+    /* shorter lines... */
+    slot = t_thrd.slot_cxt.MyReplicationSlot;
+
+    /* first some sanity checks that are unlikely to be violated */
+    if (slot != NULL) {
+        Assert(AM_LOGICAL_READ_RECORD);
+        /* make sure the passed slot is suitable, these are user facing errors */
+        if (slot->data.database == InvalidOid)
+            ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                (errmsg("cannot use physical replication slot for logical decoding"))));
+
+        if (slot->data.database != u_sess->proc_cxt.MyDatabaseId)
+            ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                (errmsg("replication slot \"%s\" was not created in this database", NameStr(slot->data.name)))));
+    }
 
     ctx = ParallelStartupDecodingContext(output_plugin_options, start_lsn, InvalidTransactionId, false, fast_forward,
         read_page, slotId);
 
-    if (!RecoveryInProgress()) {
-        ereport(LOG, (errmsg("starting logical decoding for slot "),
-                      errdetail("streaming transactions committing after")));
-    }
-
+    ereport(LOG, (errmodule(MOD_LOGICAL_DECODE), errmsg("create parallel decoding context")));
     return ctx;
 }
 
@@ -577,10 +589,9 @@ void DecodingContextFindStartpoint(LogicalDecodingContext *ctx)
 
     /* Initialize from where to start reading WAL. */
     startptr = ctx->slot->data.restart_lsn;
-    if (!RecoveryInProgress()) {
-        ereport(DEBUG1, (errmsg("searching for logical decoding starting point, starting at %X/%X",
-                                (uint32)(ctx->slot->data.restart_lsn >> 32), (uint32)ctx->slot->data.restart_lsn)));
-    }
+    ereport(DEBUG1, (errmodule(MOD_LOGICAL_DECODE),
+        errmsg("searching for logical decoding starting point, starting at %X/%X",
+               (uint32)(ctx->slot->data.restart_lsn >> 32), (uint32)ctx->slot->data.restart_lsn)));
 
     /* Wait for a consistent starting point */
     for (;;) {
@@ -590,9 +601,9 @@ void DecodingContextFindStartpoint(LogicalDecodingContext *ctx)
         /* the read_page callback waits for new WAL */
         record = XLogReadRecord(ctx->reader, startptr, &err);
         if (err != NULL)
-            ereport(ERROR, (errcode(ERRCODE_LOGICAL_DECODE_ERROR),
-                            errmsg("Stopped to parse any valid XLog Record at %X/%X: %s.",
-                                   (uint32)(ctx->reader->EndRecPtr >> 32), (uint32)ctx->reader->EndRecPtr, err)));
+            ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_LOGICAL_DECODE_ERROR),
+                errmsg("Stopped to parse any valid XLog Record at %X/%X: %s.",
+                       (uint32)(ctx->reader->EndRecPtr >> 32), (uint32)ctx->reader->EndRecPtr, err)));
 
         Assert(record);
 
@@ -630,8 +641,8 @@ void FreeDecodingContext(LogicalDecodingContext *ctx)
 void OutputPluginPrepareWrite(struct LogicalDecodingContext *ctx, bool last_write)
 {
     if (!ctx->accept_writes)
-        ereport(ERROR, (errcode(ERRCODE_LOGICAL_DECODE_ERROR),
-                        errmsg("writes are only accepted in commit, begin and change callbacks")));
+        ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_LOGICAL_DECODE_ERROR),
+            errmsg("writes are only accepted in commit, begin and change callbacks")));
 
     ctx->prepare_write(ctx, ctx->write_location, ctx->write_xid, last_write);
     ctx->prepared_write = true;
@@ -643,8 +654,8 @@ void OutputPluginPrepareWrite(struct LogicalDecodingContext *ctx, bool last_writ
 void OutputPluginWrite(struct LogicalDecodingContext *ctx, bool last_write)
 {
     if (!ctx->prepared_write)
-        ereport(ERROR, (errcode(ERRCODE_LOGICAL_DECODE_ERROR),
-                        errmsg("OutputPluginPrepareWrite needs to be called before OutputPluginWrite")));
+        ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_LOGICAL_DECODE_ERROR),
+            errmsg("OutputPluginPrepareWrite needs to be called before OutputPluginWrite")));
 
     ctx->write(ctx, ctx->write_location, ctx->write_xid, last_write);
     ctx->prepared_write = false;
@@ -654,7 +665,7 @@ static void CheckLogicalAllowedPlugin(const char *plugin)
 {
     bool have_slash = (first_dir_separator(plugin) != NULL);
     if (have_slash) {
-        ereport(ERROR, (errcode(ERRCODE_LOGICAL_DECODE_ERROR),
+        ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_LOGICAL_DECODE_ERROR),
             errmsg("The path cannot be specified for the decoding plugin.")));
     }
 }
@@ -671,24 +682,24 @@ static void LoadOutputPlugin(OutputPluginCallbacks *callbacks, const char *plugi
     plugin_init = (LogicalOutputPluginInit)tmpCF.user_fn;
 
     if (plugin_init == NULL)
-        ereport(ERROR, (errcode(ERRCODE_LOGICAL_DECODE_ERROR),
-                        errmsg("output plugins have to declare the _PG_output_plugin_init symbol")));
+        ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_LOGICAL_DECODE_ERROR),
+            errmsg("output plugins have to declare the _PG_output_plugin_init symbol")));
 
     /* ask the output plugin to fill the callback struct */
     plugin_init(callbacks);
 
     if (callbacks->begin_cb == NULL)
-        ereport(ERROR,
-                (errcode(ERRCODE_LOGICAL_DECODE_ERROR), errmsg("output plugins have to register a begin callback")));
+        ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_LOGICAL_DECODE_ERROR),
+            errmsg("output plugins have to register a begin callback")));
     if (callbacks->change_cb == NULL)
-        ereport(ERROR,
-                (errcode(ERRCODE_LOGICAL_DECODE_ERROR), errmsg("output plugins have to register a change callback")));
+        ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_LOGICAL_DECODE_ERROR),
+            errmsg("output plugins have to register a change callback")));
     if (callbacks->commit_cb == NULL)
-        ereport(ERROR,
-                (errcode(ERRCODE_LOGICAL_DECODE_ERROR), errmsg("output plugins have to register a commit callback")));
+        ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_LOGICAL_DECODE_ERROR),
+            errmsg("output plugins have to register a commit callback")));
     if (callbacks->abort_cb == NULL)
-        ereport(WARNING,
-                (errcode(ERRCODE_LOGICAL_DECODE_ERROR), errmsg("output plugins have to register a abort callback")));
+        ereport(WARNING, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_LOGICAL_DECODE_ERROR),
+            errmsg("output plugins have to register a abort callback")));
 }
 
 static void LoadOutputPlugin(ParallelOutputPluginCallbacks *callbacks, const char *plugin)
@@ -699,24 +710,24 @@ static void LoadOutputPlugin(ParallelOutputPluginCallbacks *callbacks, const cha
     plugin_init = (ParallelLogicalOutputPluginInit)tmpCF.user_fn;
 
     if (plugin_init == NULL) {
-        ereport(ERROR, (errcode(ERRCODE_LOGICAL_DECODE_ERROR),
-                        errmsg("output plugins have to declare the _PG_output_plugin_init symbol")));
+        ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_LOGICAL_DECODE_ERROR),
+            errmsg("output plugins have to declare the _PG_output_plugin_init symbol")));
     }
 
     /* ask the output plugin to fill the callback struct */
     plugin_init(callbacks);
 
     if (callbacks->begin_cb == NULL) {
-        ereport(ERROR,
-                (errcode(ERRCODE_LOGICAL_DECODE_ERROR), errmsg("output plugins have to register a begin callback")));
+        ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_LOGICAL_DECODE_ERROR),
+            errmsg("output plugins have to register a begin callback")));
     }
     if (callbacks->change_cb == NULL) {
-        ereport(ERROR,
-                (errcode(ERRCODE_LOGICAL_DECODE_ERROR), errmsg("output plugins have to register a change callback")));
+        ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_LOGICAL_DECODE_ERROR),
+            errmsg("output plugins have to register a change callback")));
     }
     if (callbacks->commit_cb == NULL) {
-        ereport(ERROR,
-                (errcode(ERRCODE_LOGICAL_DECODE_ERROR), errmsg("output plugins have to register a commit callback")));
+        ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_LOGICAL_DECODE_ERROR),
+            errmsg("output plugins have to register a commit callback")));
     }
 }
 
@@ -1100,20 +1111,18 @@ void LogicalIncreaseRestartDecodingForSlot(XLogRecPtr current_lsn, XLogRecPtr re
     if (XLByteEQ(slot->candidate_restart_valid, InvalidXLogRecPtr)) {
         slot->candidate_restart_valid = current_lsn;
         slot->candidate_restart_lsn = restart_lsn;
-        if (!RecoveryInProgress())
-            ereport(DEBUG1, (errmsg("got new restart lsn %X/%X at %X/%X", (uint32)(restart_lsn >> 32),
-                                    (uint32)restart_lsn, (uint32)(current_lsn >> 32), (uint32)current_lsn)));
+        ereport(DEBUG1, (errmodule(MOD_LOGICAL_DECODE),
+            errmsg("got new restart lsn %X/%X at %X/%X", (uint32)(restart_lsn >> 32),
+                   (uint32)restart_lsn, (uint32)(current_lsn >> 32), (uint32)current_lsn)));
     } else {
-        if (!RecoveryInProgress())
-            ereport(
-                DEBUG1,
-                (errmsg("failed to increase restart lsn: proposed %X/%X, after %X/%X, current candidate %X/%X, current "
-                        "after %X/%X, flushed up to %X/%X",
-                        (uint32)(restart_lsn >> 32), (uint32)restart_lsn, (uint32)(current_lsn >> 32),
-                        (uint32)current_lsn, (uint32)(slot->candidate_restart_lsn >> 32),
-                        (uint32)slot->candidate_restart_lsn, (uint32)(slot->candidate_restart_valid >> 32),
-                        (uint32)slot->candidate_restart_valid, (uint32)(slot->data.confirmed_flush >> 32),
-                        (uint32)slot->data.confirmed_flush)));
+        ereport(DEBUG1, (errmodule(MOD_LOGICAL_DECODE),
+            errmsg("failed to increase restart lsn: proposed %X/%X, after %X/%X, current candidate %X/%X, current "
+                   "after %X/%X, flushed up to %X/%X",
+                   (uint32)(restart_lsn >> 32), (uint32)restart_lsn, (uint32)(current_lsn >> 32),
+                   (uint32)current_lsn, (uint32)(slot->candidate_restart_lsn >> 32),
+                   (uint32)slot->candidate_restart_lsn, (uint32)(slot->candidate_restart_valid >> 32),
+                   (uint32)slot->candidate_restart_valid, (uint32)(slot->data.confirmed_flush >> 32),
+                   (uint32)slot->data.confirmed_flush)));
     }
     SpinLockRelease(&slot->mutex);
 
@@ -1187,8 +1196,8 @@ void LogicalConfirmReceivedLocation(XLogRecPtr lsn)
         if (updated_xmin || updated_restart) {
             ReplicationSlotMarkDirty();
             ReplicationSlotSave();
-            if (!RecoveryInProgress())
-                ereport(DEBUG1, (errmsg("updated xmin: %d restart: %d", updated_xmin, updated_restart)));
+            ereport(DEBUG1, (errmodule(MOD_LOGICAL_DECODE),
+                errmsg("updated xmin: %d restart: %d", updated_xmin, updated_restart)));
         }
         /*
          * Now the new xmin is safely on disk, we can let the global value
@@ -1215,7 +1224,7 @@ void LogicalConfirmReceivedLocation(XLogRecPtr lsn)
 }
 
 /* Connect primary to advance logical replication slot. */
-void LogicalAdvanceConnect()
+bool LogicalAdvanceConnect()
 {
     char conninfoRepl[MAXCONNINFO + 75];
     char conninfo[MAXCONNINFO];
@@ -1252,10 +1261,9 @@ retry:
     t_thrd.walsender_cxt.advancePrimaryConn = PQconnectdb(conninfoRepl);
     if (PQstatus(t_thrd.walsender_cxt.advancePrimaryConn) != CONNECTION_OK) {
         if (++count < retryNum) {
-            ereport(LOG,
-                (errmsg("DRS_sender could not connect to the remote server, "
-                        "the connection info :%s : %s",
-                        conninfo, PQerrorMessage(t_thrd.walsender_cxt.advancePrimaryConn))));
+            ereport(LOG, (errmodule(MOD_LOGICAL_DECODE),
+                errmsg("DRS_sender could not connect to the remote server, the connection info :%s : %s",
+                       conninfo, PQerrorMessage(t_thrd.walsender_cxt.advancePrimaryConn))));
 
             PQfinish(t_thrd.walsender_cxt.advancePrimaryConn);
             t_thrd.walsender_cxt.advancePrimaryConn = NULL;
@@ -1264,34 +1272,33 @@ retry:
             pg_usleep(100000L);
             goto retry;
         }
-        ereport(FATAL,
-            (errmsg("DRS_sender could not connect to the remote server, "
-                     "we have tried %d times, the connection info :%s : %s",
-                     count, conninfo, PQerrorMessage(t_thrd.walsender_cxt.advancePrimaryConn))));
+        ereport(LOG, (errmodule(MOD_LOGICAL_DECODE),
+            errmsg("DRS_sender could not connect to the remote server, "
+                   "we have tried %d times, the connection info :%s : %s",
+                   count, conninfo, PQerrorMessage(t_thrd.walsender_cxt.advancePrimaryConn))));
+        return false;
     }
 
     /* 2. identify version */
     res = PQexec(t_thrd.walsender_cxt.advancePrimaryConn, "IDENTIFY_VERSION");
     if (PQresultStatus(res) != PGRES_TUPLES_OK) {
         PQclear(res);
-        ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
-                        errmsg("could not receive database system version and protocol "
-                               "version from the remote server: %s",
-                               PQerrorMessage(t_thrd.walsender_cxt.advancePrimaryConn))));
+        ereport(LOG, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_LOG),
+            errmsg("could not receive database system version and protocol version from the remote server: %s",
+                   PQerrorMessage(t_thrd.walsender_cxt.advancePrimaryConn))));
 
-        return;
+        return false;
     }
     if (PQnfields(res) != 3 || PQntuples(res) != 1) {
         int numTuples = PQntuples(res);
         int numFields = PQnfields(res);
 
         PQclear(res);
-        ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
-                        errmsg("invalid response from remote server"),
-                        errdetail("Expected 1 tuple with 3 fields, got %d tuples with %d fields.",
-                                  numTuples, numFields)));
+        ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_INVALID_STATUS),
+            errmsg("invalid response from remote server"),
+            errdetail("Expected 1 tuple with 3 fields, got %d tuples with %d fields.", numTuples, numFields)));
 
-        return;
+        return false;
     }
     remoteSversion = pg_strtoint32(PQgetvalue(res, 0, 0));
     localSversion = PG_VERSION_NUM;
@@ -1300,29 +1307,28 @@ retry:
     remoteTerm = pg_strtoint32(PQgetvalue(res, 0, 2));
     localTerm = Max(g_instance.comm_cxt.localinfo_cxt.term_from_file,
                     g_instance.comm_cxt.localinfo_cxt.term_from_xlog);
-    ereport(LOG, (errmsg("remote term[%u], local term[%u]", remoteTerm, localTerm)));
+    ereport(LOG, (errmodule(MOD_LOGICAL_DECODE), errmsg("remote term[%u], local term[%u]", remoteTerm, localTerm)));
 
     if (remoteSversion != localSversion ||
         strncmp(remotePversion, localPversion, strlen(PG_PROTOCOL_VERSION)) != 0) {
         PQclear(res);
 
         if (remoteSversion != localSversion) {
-            ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
-                            errmsg("database system version is different between the remote and local"),
-                            errdetail("The remote's system version is %u, the local's system version is %u.",
-                                      remoteSversion, localSversion)));
+            ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_INVALID_STATUS),
+                errmsg("database system version is different between the remote and local"),
+                errdetail("The remote's system version is %u, the local's system version is %u.",
+                          remoteSversion, localSversion)));
         } else {
-            ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
-                            errmsg("the remote protocal version %s is not the same as "
-                                   "the local protocal version %s.",
-                                   remotePversion, localPversion)));
+            ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_INVALID_STATUS),
+                errmsg("the remote protocal version %s is not the same as the local protocal version %s.",
+                       remotePversion, localPversion)));
         }
 
         if (localPversion != NULL) {
             pfree(localPversion);
             localPversion = NULL;
         }
-        return;
+        return false;
     }
 
     PQclear(res);
@@ -1331,36 +1337,34 @@ retry:
     res = PQexec(t_thrd.walsender_cxt.advancePrimaryConn, "IDENTIFY_MODE");
     if (PQresultStatus(res) != PGRES_TUPLES_OK) {
         PQclear(res);
-        ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
-                        errmsg("could not receive the ongoing mode infomation from "
-                               "the remote server: %s",
-                               PQerrorMessage(t_thrd.walsender_cxt.advancePrimaryConn))));
+        ereport(LOG, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_LOG),
+            errmsg("could not receive the ongoing mode infomation from the remote server: %s",
+                   PQerrorMessage(t_thrd.walsender_cxt.advancePrimaryConn))));
 
-        return;
+        return false;
     }
     if (PQnfields(res) != 1 || PQntuples(res) != 1) {
         int numTuples = PQntuples(res);
         int numFields = PQnfields(res);
 
         PQclear(res);
-        ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
-                        errmsg("invalid response from remote server"),
-                        errdetail("Expected 1 tuple with 1 fields, got %d tuples with %d fields.",
-                                  numTuples, numFields)));
+        ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_INVALID_STATUS),
+            errmsg("invalid response from remote server"),
+            errdetail("Expected 1 tuple with 1 fields, got %d tuples with %d fields.", numTuples, numFields)));
 
-        return;
+        return false;
     }
     ServerMode remoteMode = (ServerMode)pg_strtoint32(PQgetvalue(res, 0, 0));
     if (!t_thrd.walreceiver_cxt.AmWalReceiverForFailover && remoteMode != PRIMARY_MODE) {
         PQclear(res);
-        ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
-                        errmsg("the mode of the remote server must be primary, current is %s",
-                               wal_get_role_string(remoteMode))));
+        ereport(LOG, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_LOG),
+            errmsg("the mode of the remote server must be primary, current is %s", wal_get_role_string(remoteMode))));
 
-        return;
+        return false;
     }
 
     PQclear(res);
+    return true;
 }
 
 /* Clean the connection for advance logical replication slot. */
@@ -1370,6 +1374,13 @@ void CloseLogicalAdvanceConnect()
         PQfinish(t_thrd.walsender_cxt.advancePrimaryConn);
         t_thrd.walsender_cxt.advancePrimaryConn = NULL;
     }
+}
+
+static void NotifyPrimaryFailedReport(const char* notifyContent)
+{
+    ereport(LOG, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_LOG),
+        errmsg("Cannot notify primary slot now, content: %s", notifyContent),
+        errcause("Maybe priamry is not avaliable now.")));
 }
 
 /* Notify the primary to advance logical replication slot. */
@@ -1389,30 +1400,86 @@ void NotifyPrimaryAdvance(XLogRecPtr restart, XLogRecPtr flush)
 
     securec_check_ss_c(nRet, "\0", "\0");
 
-    if (t_thrd.walsender_cxt.advancePrimaryConn == NULL) {
-        LogicalAdvanceConnect();
+    if (t_thrd.walsender_cxt.advancePrimaryConn == NULL && !LogicalAdvanceConnect()) {
+        CloseLogicalAdvanceConnect();
+        NotifyPrimaryFailedReport(query);
+        return;
     }
     res = PQexec(t_thrd.walsender_cxt.advancePrimaryConn, query);
     if (PQresultStatus(res) != PGRES_TUPLES_OK) {
         PQclear(res);
-        ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
-                        errmsg("could not send replication command \"%s\": %s\n",
-                               query, PQerrorMessage(t_thrd.walsender_cxt.advancePrimaryConn))));
-
+        ereport(LOG, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_LOG),
+            errmsg("could not send replication command \"%s\": %s\n",
+                   query, PQerrorMessage(t_thrd.walsender_cxt.advancePrimaryConn))));
+        CloseLogicalAdvanceConnect();
+        NotifyPrimaryFailedReport(query);
         return;
     }
 
     if (PQnfields(res) != 2 || PQntuples(res) != 1) {
-            int numTuples = PQntuples(res);
-            int numFields = PQnfields(res);
+        int numTuples = PQntuples(res);
+        int numFields = PQnfields(res);
 
-            PQclear(res);
-            ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
-                            errmsg("invalid response from remote server"),
-                            errdetail("Expected 1 tuple with 2 fields, got %d tuples with %d fields.",
-                                      numTuples, numFields)));
+        PQclear(res);
+        ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_INVALID_STATUS),
+            errmsg("invalid response from remote server"),
+            errdetail("Expected 1 tuple with 2 fields, got %d tuples with %d fields.", numTuples, numFields)));
 
-            return;
+        return;
+    }
+
+    PQclear(res);
+}
+
+/* Notify the primary to advance catalog_xmin of the logical replication slot. */
+void NotifyPrimaryCatalogXmin(TransactionId catalogXmin)
+{
+    char query[256];
+    PGresult* res = NULL;
+
+    if ((t_thrd.proc->workingVersionNum < ADVANCE_CATALOG_XMIN_VERSION_NUM &&
+        t_thrd.proc->workingVersionNum >= HASUID_VERSION_NUM) ||
+        t_thrd.proc->workingVersionNum < V5R2C00_ADVANCE_CATALOG_XMIN_VERSION_NUM) {
+        ereport(LOG, (errmodule(MOD_LOGICAL_DECODE),
+            errmsg("Current version %u does not support NotifyPrimaryCatalogXmin function, stop it",
+                   t_thrd.proc->workingVersionNum)));
+        return;
+    }
+
+    int nRet = snprintf_s(query, sizeof(query), sizeof(query) - 1,
+                      "ADVANCE_CATALOG_XMIN SLOT \"%s\" LOGICAL %X/%X",
+                      NameStr(t_thrd.slot_cxt.MyReplicationSlot->data.name),
+                      (uint32)(catalogXmin >> 32),
+                      (uint32)(catalogXmin));
+
+    securec_check_ss_c(nRet, "\0", "\0");
+
+    if (t_thrd.walsender_cxt.advancePrimaryConn == NULL && !LogicalAdvanceConnect()) {
+        CloseLogicalAdvanceConnect();
+        NotifyPrimaryFailedReport(query);
+        return;
+    }
+
+    res = PQexec(t_thrd.walsender_cxt.advancePrimaryConn, query);
+    if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+        PQclear(res);
+        ereport(LOG, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_LOG),
+            errmsg("could not send replication command \"%s\": %s\n",
+                   query, PQerrorMessage(t_thrd.walsender_cxt.advancePrimaryConn))));
+        CloseLogicalAdvanceConnect();
+        NotifyPrimaryFailedReport(query);
+        return;
+    }
+
+    if (PQnfields(res) != 2 || PQntuples(res) != 1) {
+        int numTuples = PQntuples(res);
+        int numFields = PQnfields(res);
+
+        PQclear(res);
+        ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_INVALID_STATUS),
+            errmsg("invalid response from remote server"),
+            errdetail("Expected 1 tuple with 2 fields, got %d tuples with %d fields.", numTuples, numFields)));
+        return;
     }
 
     PQclear(res);
@@ -1430,13 +1497,27 @@ void CheckBooleanOption(DefElem *elem, bool *booleanOption, bool defaultValue)
     }
 }
 
+/* Check a boolean option with a default value */
+void CheckIntOption(DefElem *elem, int *intOption, int defaultValue, int minVal, int maxVal)
+{
+    if (elem->arg == NULL) {
+        *intOption = defaultValue;
+    } else if (!parse_int(strVal(elem->arg), intOption, 0, NULL) || *intOption < minVal || *intOption > maxVal) {
+        ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("could not parse value \"%s\" for parameter \"%s\"", strVal(elem->arg), elem->defname),
+            errdetail("N/A"),  errcause("Wrong input value"),
+            erraction("Input a integer between %d and %d", minVal, maxVal)));
+    }
+}
+
 /* parse each decoding option */
 void ParseDecodingOptionPlugin(ListCell* option, PluginTestDecodingData* data, OutputPluginOptions* opt)
 {
     DefElem* elem = (DefElem*)lfirst(option);
 
     Assert(elem->arg == NULL || IsA(elem->arg, String));
-
+    const int maxTxn = 100; /* max transaction in memory limit is between 0 and 100 in MB */
+    const int maxReorderBuffer = 100; /* max reorderbuffer in memory is between 0 and 100 in GB */
     if (strncmp(elem->defname, "force-binary", sizeof("force-binary")) == 0) {
         bool force_binary = false;
         CheckBooleanOption(elem, &force_binary, false);
@@ -1457,10 +1538,217 @@ void ParseDecodingOptionPlugin(ListCell* option, PluginTestDecodingData* data, O
     } else if (strncmp(elem->defname, "standby-connection", sizeof("standby-connection")) == 0 &&
         t_thrd.role != WORKER) {
         CheckBooleanOption(elem, &t_thrd.walsender_cxt.standbyConnection, false);
+    } else if (strncmp(elem->defname, "max-txn-in-memory", sizeof("max-txn-in-memory")) == 0) {
+        CheckIntOption(elem, &data->max_txn_in_memory, 0, 0, maxTxn);
+    } else if (strncmp(elem->defname, "sender-timeout", sizeof("sender_timeout")) == 0 && elem->arg != NULL) {
+        SetConfigOption("logical_sender_timeout", strVal(elem->arg), PGC_USERSET, PGC_S_OVERRIDE);
+    } else if (strncmp(elem->defname, "max-reorderbuffer-in-memory", sizeof("max-reorderbuffer-in-memory")) == 0) {
+        CheckIntOption(elem, &data->max_reorderbuffer_in_memory, 0, 0, maxReorderBuffer);
     } else if (strncmp(elem->defname, "parallel-decode-num", sizeof("parallel-decode-num")) != 0) {
         ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
             errmsg("option \"%s\" = \"%s\" is unknown", elem->defname, elem->arg ? strVal(elem->arg) : "(null)"),
             errdetail("N/A"),  errcause("Wrong input option"), erraction("Please check documents for help")));
     }
 }
+
+void LogicalCleanSnapDirectory(bool rebuild)
+{
+    /*
+     * Rebuild logical slot snap dir
+     */
+    char snappath[MAXPGPATH];
+    struct stat st;
+
+    Assert(t_thrd.slot_cxt.MyReplicationSlot != NULL);
+
+    int rc = snprintf_s(snappath, MAXPGPATH, MAXPGPATH - 1,
+        "pg_replslot/%s/snap", NameStr(t_thrd.slot_cxt.MyReplicationSlot->data.name));
+    securec_check_ss(rc, "\0", "\0");
+
+    if (stat(snappath, &st) == 0 && S_ISDIR(st.st_mode)) {
+        if (!rmtree(snappath, true)) {
+            ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode_for_file_access(),
+                errmsg("could not remove directory \"%s\": %m", snappath), errdetail("N/A"),
+                errcause("System error."), erraction("Retry it in a few minutes.")));
+        }
+    }
+
+    if (!rebuild) {
+        return;
+    }
+    if (mkdir(snappath, S_IRWXU) < 0) {
+        ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode_for_file_access(),
+            errmsg("could not create directory \"%s\": %m", snappath),
+            errdetail("N/A"), errcause("System error."),
+            erraction("Retry it in a few minutes.")));
+    }
+}
+
+void CleanMyReplicationSlot()
+{
+    if (t_thrd.slot_cxt.MyReplicationSlot != NULL) {
+        if (t_thrd.slot_cxt.MyReplicationSlot->data.database != InvalidOid) {
+            LogicalCleanSnapDirectory(false);
+        }
+        ReplicationSlotRelease();
+    }
+}
+
+/*
+ * Splite string with specified delimiter, and return a list with items.
+ */
+static List* split_string_with_delimiter(const char* str, const char* delimiter)
+{
+    char *toParse = TrimStr(str);
+
+    if (toParse == NULL || toParse[0] == '\0') {
+        return NIL;
+    }
+
+    List *result = NIL;
+    char* nextToken = NULL;
+    char* token = strtok_s(toParse, delimiter, &nextToken);
+    while (token != NULL) {
+        result = lappend(result, TrimStr(token));
+        token = strtok_s(NULL, delimiter, &nextToken);
+    }
+    pfree(toParse);
+    return result;
+}
+
+/*
+ * Initialize logical decode options default with the same as code says.
+ */
+static void initDecodeOptionsDefault(DecodeOptionsDefault *option)
+{
+    option->parallel_decode_num = 1;
+    option->parallel_queue_size = DEFAULT_PARALLEL_QUEUE_SIZE;
+    option->max_txn_in_memory = 0;
+    option->max_reorderbuffer_in_memory = 0;
+}
+
+/*
+ * Check whether integer option is a valid one and is within a specified range.
+ */
+static bool parseIntDecodeOption(int *intOption, const char* value, int minVal, int maxVal)
+{
+    if (!parse_int(value, intOption, 0, NULL))
+        return false;
+
+    if (*intOption < minVal)
+        return false;
+
+    if (*intOption > maxVal)
+        return false;
+
+    return true;
+}
+
+/*
+ * Parse option and fill DecodeOptionsDefault's releated field with value.
+ * return false if keyValue stands for an invalid option.
+ */
+static bool parseOptionDefault(DecodeOptionsDefault *optionDefault, List *keyValue)
+{
+    if (list_length(keyValue) != 2)
+        return false;
+
+    const char* key = (char *)linitial(keyValue);
+    const char* value = (char*)lsecond(keyValue);
+
+    if (key == NULL || value == NULL)
+        return false;
+
+    const int maxTxn = 100; /* max transaction in memory limit is between 0 and 100 in MB */
+    const int maxReorderBuffer = 100; /* max reorderbuffer in memory is between 0 and 100 in GB */
+
+    /* Now only support following four options. */
+    if (strncmp(key, "parallel-decode-num", sizeof("parallel-decode-num")) == 0) {
+        return parseIntDecodeOption(&optionDefault->parallel_decode_num, value, 1, MAX_PARALLEL_DECODE_NUM);
+    } else if (strncmp(key, "parallel-queue-size", sizeof("parallel-queue-size")) == 0) {
+        return parseIntDecodeOption(&optionDefault->parallel_queue_size, value, MIN_PARALLEL_QUEUE_SIZE,
+            MAX_PARALLEL_QUEUE_SIZE) && POWER_OF_TWO(optionDefault->parallel_queue_size);
+    } else if (strncmp(key, "max-txn-in-memory", sizeof("max-txn-in-memory")) == 0) {
+        return parseIntDecodeOption(&optionDefault->max_txn_in_memory, value, 0, maxTxn);
+    } else if (strncmp(key, "max-reorderbuffer-in-memory", sizeof("max-reorderbuffer-in-memory")) == 0) {
+        return parseIntDecodeOption(&optionDefault->max_reorderbuffer_in_memory, value, 0, maxReorderBuffer);
+    } else {
+        return false;
+    }
+}
+
+/*
+ * A pattern like 'parallel-decode-num=4,parallel-queue-size=256'
+ */
+bool LogicalDecodeParseOptionsDefault(const char* defaultStr, void **defaults)
+{
+    *defaults = NULL;
+
+    DecodeOptionsDefault optionDefault;
+    initDecodeOptionsDefault(&optionDefault);
+
+    ListCell* lc = NULL;
+    List *opt = split_string_with_delimiter(defaultStr, ",");
+
+    if (list_length(opt) == 0)
+        return true;
+
+    foreach (lc, opt) {
+        List* keyValue = split_string_with_delimiter((const char*)lfirst(lc), "=");
+
+        if (!parseOptionDefault(&optionDefault, keyValue)) {
+            GUC_check_errhint("option default setting (%s) is invalid.", (char*)lfirst(lc));
+            list_free_deep(keyValue);
+            return false;
+        }
+        list_free_deep(keyValue);
+    }
+    list_free_deep(opt);
+
+    *defaults = MemoryContextAlloc(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB), sizeof(DecodeOptionsDefault));
+    *((DecodeOptionsDefault*)*defaults) = optionDefault;
+
+    return true;
+}
+
+DecodeOptionsDefault* LogicalDecodeGetOptionsDefault()
+{
+    return (DecodeOptionsDefault *) u_sess->attr.attr_storage.logical_decode_options_default;
+}
+
+template <typename T>
+void LogicalDecodeReportLostChanges(const T *iterstate)
+{
+    const int lsnShiftBits = 32;
+    StringInfoData xidLostStartLSN;
+
+    Assert(iterstate->nr_txns != 0);
+
+    initStringInfo(&xidLostStartLSN);
+    for (Size off = 0; off < iterstate->nr_txns; off++) {
+        appendStringInfo(&xidLostStartLSN, " <" XID_FMT ", %X/%X, %X/%X, %X/%X>,",
+            iterstate->entries[off].txn->xid,
+            (uint32)(iterstate->entries[off].txn->first_lsn >> lsnShiftBits),
+            (uint32)iterstate->entries[off].txn->first_lsn,
+            (uint32)(iterstate->entries[off].txn->final_lsn >> lsnShiftBits),
+            (uint32)iterstate->entries[off].txn->final_lsn,
+            (uint32)(iterstate->entries[off].lsn >> lsnShiftBits),
+            (uint32)iterstate->entries[off].lsn);
+    }
+
+    /* remove the last comma */
+    xidLostStartLSN.data[xidLostStartLSN.len - 1] = '\0';
+
+    ereport(WARNING, (errmodule(MOD_LOGICAL_DECODE),
+        errmsg("Due to DDL in the same top transaction, partial modification may be lost for "
+               "<XID, FIRST_LSN, FINAL_LSN, SKIP_START_LSN> = {%s }", xidLostStartLSN.data)));
+
+    FreeStringInfo(&xidLostStartLSN);
+}
+
+/* explicity instantiate template function: LogicalDecodeReportLostChanges() */
+template void LogicalDecodeReportLostChanges<ReorderBufferIterTXNState>(
+    const ReorderBufferIterTXNState *iterstate);
+template void LogicalDecodeReportLostChanges<ParallelReorderBufferIterTXNState>(
+    const ParallelReorderBufferIterTXNState *iterstate);
 

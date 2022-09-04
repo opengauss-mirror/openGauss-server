@@ -276,6 +276,215 @@ delete from cloblongtbl where a = 1;
 delete from cloblongtbl where a = 2;
 rollback;
 
+drop table if exists clob_sel_1;
+create table clob_sel_1(c1 int,c2 clob);
+insert into clob_sel_1 values(1,repeat('AAAA11111aaaaaaaaaaaa',1000000));
+update clob_sel_1 set c2=c2||c2||c2||c2||c2;
+update clob_sel_1 set c2=c2||c2||c2||c2||c2;
+update clob_sel_1 set c2=c2||c2;
+update clob_sel_1 set c2=c2||c2;
+
+create or replace procedure test_lob_read_new
+as
+declare
+    dest_clob clob;
+	src_lob clob;
+	PSV_SQL varchar(100);
+begin
+    PSV_SQL := 'select c2 from clob_sel_1 where c1 = 1 ';
+	EXECUTE IMMEDIATE PSV_SQL into dest_clob;
+    dbe_lob.read(dest_clob, 1, 1, src_lob);
+	DBE_OUTPUT.print_line(src_lob);
+	return;
+end;
+/
+call test_lob_read_new();
+
+create or replace procedure test_lob_read_into
+as
+declare
+    dest_clob clob;
+	src_lob clob;
+begin
+    select c2 from clob_sel_1 into dest_clob where c1 = 1;
+    dbe_lob.read(dest_clob, 1, 1, src_lob);
+	DBE_OUTPUT.print_line(src_lob);
+	return;
+end;
+/
+call test_lob_read_into();
+
+create or replace procedure test_lob_append_new
+as
+declare
+    dest_clob clob;
+	src_lob clob;
+	PSV_SQL varchar(100);
+begin
+    PSV_SQL := 'select c2 from clob_sel_1 where c1 = 1 ';
+	EXECUTE IMMEDIATE PSV_SQL into dest_clob;
+    src_lob := dbe_lob.append(dest_clob,'no money no work');
+	update clob_sel_1 set c2=src_lob;
+	return;
+end;
+/
+call test_lob_append_new();
+
+create or replace procedure test_lob_append_into
+as
+declare
+    dest_clob clob;
+	src_lob clob;
+begin
+    select c2 from clob_sel_1 into dest_clob where c1 = 1;
+    src_lob := dbe_lob.append(dest_clob,'runrunrun');
+	update clob_sel_1 set c2=src_lob;
+	return;
+end;
+/
+call test_lob_append_into();
+
+-- partition
+create table bigclobtbl018(c1 int,c2 clob,c3 clob,c4 blob,c5 date,c6 timestamp,c7 number(7))
+partition by range(c1) (partition p1 values less than(5),partition p2 values less than(10),partition p3 values less than(maxvalue));
+insert into bigclobtbl018 values(generate_series(1,30),repeat('AAAA11111李白杜甫杜牧白居易唐宋八大家',1000000),repeat('唐李白床前明月光，疑是地上霜，举头望明月，低头思故乡',1000000),hextoraw(repeat('12345678990abcdef',1000)),sysdate,to_timestamp('','yyyy-mm-dd hh24:mi:ss.ff6'),7000);
+update bigclobtbl018 set c2=c2||c2||c2||c2||c2 where mod(c1,3)=1;
+update bigclobtbl018 set c2=c2||c2||c2||c2||c2 where mod(c1,3)=1;
+update bigclobtbl018 set c3=c3||c3 where mod(c1,3)=1;
+create or replace procedure pro_cb4_018 is
+v1 clob;
+v2 clob;
+v3 clob;
+begin
+v2:='v2v2v2v2v2v2';
+execute immediate 'select c2 from bigclobtbl018 where c1=10' into v1;
+update bigclobtbl018 set c3=v1 where c1=10;
+end;
+/
+call pro_cb4_018();
+select length(c3),length(c2) from bigclobtbl018 where c1=10;
+-- sub partition
+create table bigclobtbl015(c1 int,c2 text,c3 clob,c4 blob,c5 date,c6 timestamp,c7 number(7), c8 clob)
+partition by range(c1) subpartition by range (c2) (partition p1 values less than(5)(subpartition p1sub1 values less than('BB'),subpartition p1sub2 values less than('CC')),partition p2 values less than(10)(subpartition p2sub1 values less than('BB'),subpartition p2sub2 values less than('CC')),partition p3 values less than(maxvalue)(subpartition p3sub1 values less than('BB'),subpartition p3sub2 values less than('CC')));
+ insert into bigclobtbl015 values(generate_series(1,5),'AAAA11111李白杜甫杜牧白居易唐宋八大家',repeat('唐李白床前明月光，疑是地上霜，举头望明月，低头思故乡',1000000),hextoraw(repeat('12345678990abcdef',1000)),sysdate,to_timestamp('','yyyy-mm-dd hh24:mi:ss.ff6'),7000);
+update bigclobtbl015 set c3=c3||c3||c3||c3 where  c1=1;
+
+create or replace procedure pro_cb4_019 is
+v1 clob;
+v2 clob;
+v3 clob;
+begin
+v2:='v2v2v2v2v2v2';
+execute immediate 'select c3 from bigclobtbl015 where c1=1' into v1;
+update bigclobtbl015 set c8=v1 where c1=1;
+end;
+/
+call pro_cb4_019();
+
+select length(c3) from bigclobtbl015 where c1=1;
+
+create table cloblongtbl001(c1 int,c2 number,c3 varchar2,c4 clob,c5 blob,c6 text);
+alter table cloblongtbl001 alter c3 set storage external;
+alter table cloblongtbl001 alter c4 set storage external;
+alter table cloblongtbl001 alter c5 set storage external;
+alter table cloblongtbl001 alter c6 set storage external;
+insert into cloblongtbl001 values(-1,-1,repeat('abRF中国',1000),repeat('唐李白床前明月光，疑是地上霜，举头望明月，低头思故乡',1000),HEXTORAW(repeat('12345678990abcdef',1000)),repeat('text春眠不觉晓',1000));
+insert into cloblongtbl001 values(1,1,repeat('abRF中国',1000),repeat('唐李白床前明月光，疑是地上霜，举头望明月，低头思故乡',10000000),HEXTORAW(repeat('12345678990abcdef',10000000)),repeat('text春眠不觉晓',1000));
+update cloblongtbl001 set c4=c4||c4 where c1=1;
+insert into cloblongtbl001 values(3,3,repeat('abRF中国',10000000),repeat('唐李白床前明月光，疑是地上霜，举头望明月，低头思故乡',10000000),HEXTORAW(repeat('12345678990abcdef',10000000)),repeat('text春眠不觉晓',1000));
+update cloblongtbl001 set c4=c4||c4 where c1=3;
+update cloblongtbl001 set c4=c4||c2 where c1=3;
+update cloblongtbl001 set c4=c4||c4 where c1=3;
+insert into cloblongtbl001 values(4,4,repeat('abRF中国',1000),repeat('唐李白床前明月光，疑是地上霜，举头望明月，低头思故乡',10000000),HEXTORAW(repeat('12345678990abcdef',1000)),repeat('text春眠不觉晓',1000));
+update cloblongtbl001 set c4=c4||c4 where c1=4;
+update cloblongtbl001 set c4=c4||c4 where c1=4;
+update cloblongtbl001 set c4=c4||c4 where c1=4;
+insert into cloblongtbl001 values(6,6,repeat('abRF中国',1000),repeat('唐李白床前明月光，疑是地上霜，举头望明月，低头思故乡',10000000),HEXTORAW(repeat('12345678990abcdef',1000)),repeat('text春眠不觉晓',1000));
+update cloblongtbl001 set c4=c4||c4 where c1=6;
+update cloblongtbl001 set c4=c4||c4 where c1=6;
+update cloblongtbl001 set c4=c4||c4 where c1=6;
+update cloblongtbl001 set c4=c4||c4 where c1=6;
+insert into cloblongtbl001 values(7,7,'1234455app','1234455app','1234455a','567893clob');
+create table cloblongtbl001_1(c1 int,c2 clob,c3 clob);
+create or replace procedure pro_cb4_001 is
+v1 clob;
+v2 clob;
+v3 clob;
+v4 integer;
+begin
+select c4 into v1 from cloblongtbl001 where c1=1;
+select c4 into v2 from cloblongtbl001 where c1=3;
+raise info 'v1 is %',length(v1);
+raise info 'v2 is %',length(v2);
+dbe_lob.write(v2,32767,1,v1);
+raise info 'v2 is %',length(v2);
+insert into cloblongtbl001_1 values(1,v2,null);
+end;
+/
+call pro_cb4_001();
+
+create or replace procedure pro_cb4_001 is
+v1 clob;
+v2 clob:='bigbibbig';
+v3 clob;
+v4 integer;
+begin
+select c4 into v1 from cloblongtbl001 where c1=7;
+select c4 into v2 from cloblongtbl001 where c1=3;
+dbe_lob.write(v2,length(v1),1000,v1);
+update cloblongtbl001_1 set c2=v2 where c1=1;
+end;
+/
+
+call pro_cb4_001();
+
+drop table if exists cloblongtbl001;
+create table cloblongtbl001(c1 int,c2 number,c3 varchar2,c4 clob,c5 blob,c6 text);
+insert into cloblongtbl001 values(-1,-1,repeat('abRF中国',1000),
+	repeat('唐李白床前明月光，疑是地上霜，举头望明月，低头思故乡',1000),
+	HEXTORAW(repeat('12345678990abcdef',1000)),repeat('text春眠不觉晓',1000));
+
+insert into cloblongtbl001 values(1,1,repeat('abRF中国',1000),
+	repeat('唐李白床前明月光，疑是地上霜，举头望明月，低头思故乡',10000000),
+	HEXTORAW(repeat('12345678990abcdef',10000000)),repeat('text春眠不觉晓',1000));
+
+update cloblongtbl001 set c4=c4||c4 where c1=1;
+insert into cloblongtbl001 values(3,3,repeat('abRF中国',10000000),
+	repeat('唐李白床前明月光，疑是地上霜，举头望明月，低头思故乡',10000000),
+	HEXTORAW(repeat('12345678990abcdef',10000000)),repeat('text春眠不觉晓',1000));
+
+update cloblongtbl001 set c4=c4||c4 where c1=3;
+update cloblongtbl001 set c4=c4||c2 where c1=3;
+update cloblongtbl001 set c4=c4||c4 where c1=3;
+insert into cloblongtbl001 values(4,4,repeat('abRF中国',1000),
+	repeat('唐李白床前明月光，疑是地上霜，举头望明月，低头思故乡',10000000),
+	HEXTORAW(repeat('12345678990abcdef',1000)),repeat('text春眠不觉晓',1000));
+
+update cloblongtbl001 set c4=c4||c4 where c1=4;
+update cloblongtbl001 set c4=c4||c4 where c1=4;
+update cloblongtbl001 set c4=c4||c4 where c1=4;
+insert into cloblongtbl001 values(6,6,repeat('abRF中国',1000),
+	repeat('唐李白床前明月光，疑是地上霜，举头望明月，低头思故乡',10000000),
+	HEXTORAW(repeat('12345678990abcdef',1000)),repeat('text春眠不觉晓',1000));
+
+create or replace procedure pro_cb4_001 is
+v1 clob;
+v2 clob;
+v3 clob;
+v4 integer;
+begin
+  select c4 into v1 from cloblongtbl001 where c1=1;
+  select c4 into v2 from cloblongtbl001 where c1=3;
+  raise info 'v1 is %',length(v1);
+  raise info 'v2 is %',length(v2);
+  dbe_lob.write(v2,32767,1,v1);
+  raise info 'v2 is %',length(v2);
+end;
+/
+
+call pro_cb4_001();
+
+drop table if exists clob_sel_1;
 drop table if exists cloblongtbl;
 -- clean
 drop schema if exists huge_clob cascade;

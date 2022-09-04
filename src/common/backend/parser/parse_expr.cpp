@@ -89,6 +89,7 @@ static Node* transformConnectByRootFuncCall(ParseState* pstate, Node* funcNameVa
 static char *ColumnRefFindRelname(ParseState *pstate, const char *colname);
 static Node *transformStartWithColumnRef(ParseState *pstate, ColumnRef *cref, char **colname);
 static Node* tryTransformFunc(ParseState* pstate, List* fields, int location);
+static void SubCheckOutParam(List* exprtargs, Oid funcid);
 static Node* transformPrefixKey(ParseState* pstate, PrefixKey* pkey);
 
 #define OrientedIsCOLorPAX(rte) ((rte)->orientation == REL_COL_ORIENTED || (rte)->orientation == REL_PAX_ORIENTED)
@@ -1290,6 +1291,7 @@ static Node* transformAExprIn(ParseState* pstate, A_Expr* a)
     List* rnonvars = NIL;
     bool useOr = false;
     bool haveRowExpr = false;
+    bool haveSetType = false;
     ListCell* l = NULL;
 
     /*
@@ -1314,11 +1316,13 @@ static Node* transformAExprIn(ParseState* pstate, A_Expr* a)
      */
     lexpr = transformExpr(pstate, a->lexpr);
     haveRowExpr = (lexpr && IsA(lexpr, RowExpr));
+    haveSetType = type_is_set(exprType(lexpr));
     rexprs = rvars = rnonvars = NIL;
     foreach (l, (List*)a->rexpr) {
         Node* rexpr = (Node*)transformExpr(pstate, (Node*)lfirst(l));
 
         haveRowExpr = haveRowExpr || (rexpr && IsA(rexpr, RowExpr));
+        haveSetType = haveSetType || type_is_set(exprType(rexpr));
         rexprs = lappend(rexprs, rexpr);
         if (contain_vars_of_level(rexpr, 0)) {
             rvars = lappend(rvars, rexpr);
@@ -1335,7 +1339,7 @@ static Node* transformAExprIn(ParseState* pstate, A_Expr* a)
         List* allexprs = NIL;
         Oid scalar_type;
         Oid array_type;
-
+        const char *context = haveSetType ? "IN" : NULL;
         /*
          * Try to select a common type for the array elements.	Note that
          * since the LHS' type is first in the list, it will be preferred when
@@ -1344,7 +1348,7 @@ static Node* transformAExprIn(ParseState* pstate, A_Expr* a)
          * Note: use list_concat here not lcons, to avoid damaging rnonvars.
          */
         allexprs = list_concat(list_make1(lexpr), rnonvars);
-        scalar_type = select_common_type(pstate, allexprs, NULL, NULL);
+        scalar_type = select_common_type(pstate, allexprs, context, NULL);
 
         /* Do we have an array type to use? */
         if (OidIsValid(scalar_type)) {
@@ -1412,7 +1416,7 @@ static Node* transformAExprIn(ParseState* pstate, A_Expr* a)
     return result;
 }
 
-static bool IsStartWithFunction(FuncExpr* result)
+bool IsStartWithFunction(FuncExpr* result)
 {
     return result->funcid == SYS_CONNECT_BY_PATH_FUNCOID ||
            result->funcid == CONNECT_BY_ROOT_FUNCOID;
@@ -1433,6 +1437,10 @@ static bool NeedExtractOutParam(FuncCall* fn, Node* result)
      * When proc_outparam_override is on, extract all but select func
      */
     FuncExpr* funcexpr = (FuncExpr*)result;
+    Oid schema_oid = get_func_namespace(funcexpr->funcid);
+    if (IsAformatStyleFunctionOid(schema_oid) && enable_out_param_override()) {
+        return false;
+    }
     if (is_function_with_plpgsql_language_and_outparam(funcexpr->funcid) && !fn->call_func) {
         return true;
     }
@@ -1525,6 +1533,14 @@ static Node* transformFuncCall(ParseState* pstate, FuncCall* fn)
                 erraction("Please check and revise your query")));
     }
 
+#ifndef ENABLE_MULTIPLE_NODES
+    if (u_sess->plsql_cxt.curr_compile_context != NULL) {
+        if (result != NULL && nodeTag(result) == T_FuncExpr) {
+            FuncExpr* funcexpr = (FuncExpr*)result;
+            SubCheckOutParam(targs, funcexpr->funcid);
+        }
+    }
+#endif
     /* extract out parameter for package function */
     if (NeedExtractOutParam(fn, result)) {
         FuncExpr* funcexpr = (FuncExpr*)result;
@@ -1562,7 +1578,7 @@ void lockSeqForNextvalFunc(Node* node)
  * @in expr - plpgsql expr
  * @return - function's oid
  */
-Oid getMultiFuncInfo(char* fun_expr, PLpgSQL_expr* expr)
+Oid getMultiFuncInfo(char* fun_expr, PLpgSQL_expr* expr, bool isoutparamcheck)
 {
     List* raw_parser_list = raw_parser(fun_expr);
     ListCell* parsetree_item = NULL;
@@ -1574,28 +1590,37 @@ Oid getMultiFuncInfo(char* fun_expr, PLpgSQL_expr* expr)
         plpgsql_parser_setup(pstate, expr);
         if (nodeTag(parsetree) == T_SelectStmt) {
             SelectStmt* stmt = (SelectStmt*)parsetree;
-            List* frmList = stmt->fromClause;
+            List* frmList = isoutparamcheck ? stmt->targetList : stmt->fromClause;
             ListCell* fl = NULL;
             foreach (fl, frmList) {
                 Node* n = (Node*)lfirst(fl);
+                List* targs = NIL;
+                ListCell* args = NULL;
+                FuncCall* fn = NULL;
                 if (IsA(n, RangeFunction)) {
                     RangeFunction* r = (RangeFunction*)n;
                     if (r->funccallnode != NULL && nodeTag(r->funccallnode) == T_FuncCall) {
-                        List* targs = NIL;
-                        ListCell* args = NULL;
-                        FuncCall* fn = (FuncCall*)(r->funccallnode);
-
-                        foreach (args, fn->args) {
-                            targs = lappend(targs, transformExpr(pstate, (Node*)lfirst(args)));
-                        }
-
-                        Node* result = ParseFuncOrColumn(pstate, fn->funcname, targs, fn, fn->location, true);
-
-                        if (result != NULL && nodeTag(result) == T_FuncExpr) {
-                            FuncExpr* funcexpr = (FuncExpr*)result;
-                            return funcexpr->funcid;
-                        }
+                        fn = (FuncCall*)(r->funccallnode);
                     }
+                } else if (isoutparamcheck && IsA(n, ResTarget)) {
+                    ResTarget* r = (ResTarget*)n;
+                    if (r->val != NULL && nodeTag(r->val) == T_FuncCall) {
+                        fn = (FuncCall*)(r->val);
+                    }
+                }
+                if (fn == NULL) {
+                    continue;
+                }
+                foreach (args, fn->args) {
+                    targs = lappend(targs, transformExpr(pstate, (Node*)lfirst(args)));
+                }
+                Node* result = ParseFuncOrColumn(pstate, fn->funcname, targs, fn, fn->location, true);
+                if (result != NULL && nodeTag(result) == T_FuncExpr) {
+                    FuncExpr* funcexpr = (FuncExpr*)result;
+                    if (isoutparamcheck) {
+                        SubCheckOutParam(targs, funcexpr->funcid);
+                    }
+                    return funcexpr->funcid;
                 }
             }
         }
@@ -1603,6 +1628,83 @@ Oid getMultiFuncInfo(char* fun_expr, PLpgSQL_expr* expr)
 
     return InvalidOid;
 }
+
+static void SubCheckOutParam(List* exprtargs, Oid funcid)
+{
+    if (OidIsValid(funcid)) {
+        HeapTuple proctup = SearchSysCache(PROCOID, ObjectIdGetDatum(funcid), 0, 0, 0);
+        /*
+         * function may be deleted after clist be searched.
+         */
+        if (!HeapTupleIsValid(proctup)) {
+            ereport(ERROR,
+                    (errcode(ERRCODE_UNDEFINED_FUNCTION),
+                     errmsg("function Oid \"%d\" doesn't exist ", funcid)));
+        }
+        Oid *p_argtypes = NULL;
+        char **p_argnames = NULL;
+        char *p_argmodes = NULL;
+        /* get the all args informations, only "in" parameters if p_argmodes is null */
+        int all_arg = get_func_arg_info(proctup, &p_argtypes, &p_argnames, &p_argmodes);
+        Form_pg_proc procStruct = (Form_pg_proc) GETSTRUCT(proctup);
+        char *funcname = NameStr(procStruct->proname);
+        ReleaseSysCache(proctup);
+        if ((0 == all_arg || NULL == p_argmodes || all_arg != list_length(exprtargs))) {
+            return;
+        }
+        ListCell* cell1 = NULL;
+        int i = 0;
+        foreach(cell1, exprtargs) {
+            if (nodeTag(((Node*)lfirst(cell1))) != T_Param && (p_argmodes[i] == 'o' || p_argmodes[i] == 'b')) {
+                StringInfoData buf;
+                initStringInfo(&buf);
+                appendStringInfo(&buf, "$%d", i);
+                char *p_argname = p_argnames != NULL ? p_argnames[i]:buf.data;
+                ereport(ERROR,
+                    (errcode(ERRCODE_SYNTAX_ERROR),
+                     errmsg("when invoking function %s, no destination for argments num \"%s\"",
+                            funcname, p_argname)));
+            }
+            i++;
+        }
+    }
+}
+
+
+
+void CheckOutParamIsConst(PLpgSQL_expr* expr)
+{
+    PLpgSQL_function *function = NULL;
+    PLpgSQL_execstate *estate = (PLpgSQL_execstate*)palloc(sizeof(PLpgSQL_execstate));
+    expr->func = (PLpgSQL_function *) palloc0(sizeof(PLpgSQL_function));
+    function = expr->func;
+    function->fn_is_trigger = false;
+    function->fn_input_collation = InvalidOid;
+    function->out_param_varno = -1;     /* set up for no OUT param */
+    function->resolve_option = GetResolveOption();
+    function->fn_cxt = CurrentMemoryContext;
+    
+    PLpgSQL_compile_context* curr_compile = u_sess->plsql_cxt.curr_compile_context;
+    estate->ndatums = curr_compile->plpgsql_nDatums;
+    estate->datums = (PLpgSQL_datum **)palloc(sizeof(PLpgSQL_datum *) * curr_compile->plpgsql_nDatums);
+    for (int i = 0; i < curr_compile->plpgsql_nDatums; i++)
+        estate->datums[i] = curr_compile->plpgsql_Datums[i];
+
+    function->cur_estate = estate;
+    function->cur_estate->func = function;
+
+    (void)getMultiFuncInfo(expr->query, expr, true);
+
+    if (expr->func != NULL)
+        pfree_ext(expr->func);
+    if (estate->datums != NULL)
+        pfree_ext(estate->datums);
+    if (estate != NULL)
+        pfree_ext(estate);
+    expr->func = NULL;
+
+}
+
 
 static Node* transformCaseExpr(ParseState* pstate, CaseExpr* c)
 {
@@ -1829,7 +1931,7 @@ static Node* transformSubLink(ParseState* pstate, SubLink* sublink)
             param->paramtypmod = exprTypmod((Node*)tent->expr);
             param->paramcollid = exprCollation((Node*)tent->expr);
             param->location = -1;
-            param->tableOfIndexType = InvalidOid;
+            param->tableOfIndexTypeList = NULL;
 
             right_list = lappend(right_list, param);
         }
@@ -2309,7 +2411,7 @@ static Node* transformCurrentOfExpr(ParseState* pstate, CurrentOfExpr* cexpr)
 
     /* CURRENT OF can only appear at top level of UPDATE/DELETE */
     AssertEreport(pstate->p_target_rangetblentry != NULL, MOD_OPT, "");
-    cexpr->cvarno = RTERangeTablePosn(pstate, pstate->p_target_rangetblentry, &sublevels_up);
+    cexpr->cvarno = RTERangeTablePosn(pstate, (RangeTblEntry*)linitial(pstate->p_target_rangetblentry), &sublevels_up);
     AssertEreport(sublevels_up == 0, MOD_OPT, "");
 
     /*
@@ -2556,6 +2658,15 @@ static Node* transformCollateClause(ParseState* pstate, CollateClause* c)
     return (Node*)newc;
 }
 
+static char *add_double_quotes(const char *src)
+{
+    unsigned long max_len = strlen("\"") + strlen(src) + strlen("\"") + 1;
+    char *tmp_buffer = (char *)palloc0(max_len);
+    int rt = sprintf_s(tmp_buffer, max_len, "\"%s\"", src);
+    securec_check_ss(rt, "\0", "\0");
+    return tmp_buffer;
+}
+
 static Node* transformSequenceFuncCall(ParseState* pstate, Node* field1, Node* field2, Node* field3, int location)
 {
     Value* arg = NULL;
@@ -2567,6 +2678,10 @@ static Node* transformSequenceFuncCall(ParseState* pstate, Node* field1, Node* f
         arg = makeString(buf.data);
     } else {
         arg = (Value*)field2;
+        if (arg->type == T_String) {
+            char *new_str = add_double_quotes(arg->val.str);
+            arg->val.str = new_str;
+        }
     }
 
     List* args = list_make1(makeAConst(arg, location));

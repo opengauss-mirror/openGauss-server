@@ -27,6 +27,7 @@
 #endif
 
 #define ISNULL_BITMAP_NUMBER 2
+#define HIGH_BITS_LENGTH_OF_LSN 32
 
 template<UPageType upagetype> void UPageInit(Page page, Size pageSize, Size specialSize, uint8 tdSlots)
 {
@@ -134,45 +135,6 @@ static void FindNextFreeSlot(const UHeapBufferPage *bufpage, Page input_page, Of
         for (*offsetNumber = FirstOffsetNumber; *offsetNumber < limit; (*offsetNumber)++) {
             itemId = UPageGetRowPtr(uphdr, *offsetNumber);
             if (!RowPtrIsUsed(itemId) && !RowPtrHasStorage(itemId)) {
-                /*
-                 * We allow Unused entries to be reused only if there is
-                 * no transaction information for the entry or the
-                 * transaction is committed.
-                 */
-                if (RowPtrHasPendingXact(itemId)) {
-                    UHeapTupleTransInfo xactinfo;
-
-                    xactinfo.td_slot = RowPtrGetTDSlot(itemId);
-
-                    /*
-                     * We can't reach here for a valid input page as the
-                     * callers passed it for the pages that wouldn't have
-                     * been pruned.
-                     */
-                    Assert(!PageIsValid(input_page));
-
-                    /*
-                     * Here, we are relying on the transaction information
-                     * in slot as if the corresponding slot has been
-                     * reused, then transaction information from the entry
-                     * would have been cleared.  See PageFreezeTransSlots.
-                     */
-                    if (xactinfo.td_slot == UHEAPTUP_SLOT_FROZEN) {
-                        break;
-                    }
-
-                    GetTDSlotInfo(bufpage->buffer, xactinfo.td_slot, &xactinfo);
-
-                    if (xactinfo.td_slot == UHEAPTUP_SLOT_FROZEN) {
-                        break;
-                    }
-
-                    if (TransactionIdIsValid(xactinfo.xid) &&
-                        !UHeapTransactionIdDidCommit(xactinfo.xid)) {
-                        hasPendingXact = true;
-                        continue;
-                    }
-                }
                 break;
             }
         }
@@ -225,7 +187,7 @@ static bool CalculateLowerUpperPointers(Page page, OffsetNumber offsetNumber, It
     /*
      * OK to insert the item.  First, shuffle the existing pointers if needed.
      */
-    itemId = UPageGetRowPtr(uphdr, offsetNumber);
+    itemId = UPageGenerateRowPtr(uphdr, offsetNumber);
 
     if (needshuffle) {
         errno_t rc = memmove_s(itemId + 1, (limit - offsetNumber) * sizeof(ItemIdData),
@@ -243,6 +205,7 @@ static bool CalculateLowerUpperPointers(Page page, OffsetNumber offsetNumber, It
     /* adjust page header */
     uphdr->pd_lower = (uint16) lower;
     uphdr->pd_upper   = (uint16) upper;
+    FastVerifyUPageRowPtr(itemId, uphdr, offsetNumber);
 
     return true;
 }
@@ -440,6 +403,7 @@ UHeapTuple UHeapGetTuplePartial(Relation relation, Buffer buffer, OffsetNumber o
             UHeapCopyDiskTupleWithNulls(rowDesc, boolArr, tuple, lastVar, item);
         }
     }
+    FastVerifyUTuple(tuple->disk_tuple, buffer);
     Assert(UHeapTupleHeaderGetNatts(tuple->disk_tuple) == diskTupleNAttrs);
     return tuple;
 }
@@ -487,7 +451,7 @@ Size PageGetUHeapFreeSpace(Page page)
                      * The unused items that have pending xact information
                      * can't be reused.
                      */
-                    if (!RowPtrIsUsed(lp) && !RowPtrHasPendingXact(lp))
+                    if (!RowPtrIsUsed(lp))
                         break;
                 }
 
@@ -672,4 +636,335 @@ void UHeapRecordPotentialFreeSpace(Buffer buffer, int delta)
     Size newPotentialFreespace = Min(oldPotentialFreespace + delta, maxWritableSpc);
 
     page->potential_freespace = newPotentialFreespace;
+}
+
+bool VerifyPageHeader(Page page)
+{
+    if (page == NULL) {
+        return false;
+    }
+    
+    PageHeader phdr = (PageHeader)page;
+    uint16 pdLower = phdr->pd_lower;
+    uint16 pdUpper = phdr->pd_upper;
+    uint16 pdSpecial = phdr->pd_special;
+
+    if (pdLower > pdUpper || pdUpper > pdSpecial || pdSpecial != BLCKSZ) {
+        ereport(PANIC, (errcode(ERRCODE_DATA_CORRUPTED),
+            errmsg("page header invalid: lower = %u, upper = %u, special = %u.",
+            pdLower, pdUpper, pdSpecial)));
+    }
+
+    return true;
+}
+
+static bool VerifyUPageHeader(Page page, VerifyLevel level, int logLevel)
+{
+    if (page == NULL) {
+        return false;
+    }
+
+    UHeapPageHeader phdr = (UHeapPageHeader)page;
+    uint16 pdLower = phdr->pd_lower;
+    uint16 pdUpper = phdr->pd_upper;
+    uint16 pdSpecial = phdr->pd_special;
+    uint16 potentialSpace = phdr->potential_freespace;
+    uint16 tdCount = phdr->td_count;
+    TransactionId pruneXid = phdr->pd_prune_xid;
+    TransactionId xidBase = phdr->pd_xid_base;
+
+    if (pdLower < (SizeOfUHeapPageHeaderData + SizeOfUHeapTDData(phdr)) || pdLower > pdUpper ||
+        pdUpper > pdSpecial || pdSpecial != BLCKSZ || potentialSpace > BLCKSZ) {
+        ereport(logLevel, (errcode(ERRCODE_DATA_CORRUPTED),
+            errmsg("upage header invalid: lower = %u, upper = %u, special = %u, potential = %u.",
+            pdLower, pdUpper, pdSpecial, potentialSpace)));
+    }
+
+    if (tdCount <= 0 || tdCount > UHEAP_MAX_TD) {
+        ereport(logLevel, (errcode(ERRCODE_DATA_CORRUPTED),
+            errmsg("upage tdcount invalid: tdcount = %u.", tdCount)));
+    }
+
+    if ((level > USTORE_VERIFY_FAST) &&
+        (TransactionIdFollows(pruneXid, t_thrd.xact_cxt.ShmemVariableCache->nextXid) ||
+        TransactionIdFollows(xidBase, t_thrd.xact_cxt.ShmemVariableCache->nextXid))) {
+        ereport(logLevel, (errcode(ERRCODE_DATA_CORRUPTED),
+            errmsg("upage xidbase invalid: xidbase = %lu, nextxid = %lu.",
+            xidBase, t_thrd.xact_cxt.ShmemVariableCache->nextXid)));
+    }
+
+    return true;
+}
+
+static bool VerifyTDInfo(Page page, int tdId, UHeapTupleTransInfo *tdinfo, VerifyLevel level,
+    bool tdReuse, TransactionId tupXid, int logLevel)
+{
+    if (page == NULL || tdinfo == NULL) {
+        return false;
+    }
+
+    UHeapPageTDData *tdPtr = (UHeapPageTDData *)PageGetTDPointer(page);
+    UHeapPageHeaderData *phdr = (UHeapPageHeaderData *)page;
+
+    if (tdId == UHEAPTUP_SLOT_FROZEN) {
+        tdinfo->td_slot = tdId;
+        tdinfo->cid = InvalidCommandId;
+        tdinfo->xid = InvalidTransactionId;
+        tdinfo->urec_add = INVALID_UNDO_REC_PTR;
+        return true;
+    }
+
+    if (tdId < 1 || tdId > phdr->td_count) {
+        ereport(logLevel, (errcode(ERRCODE_DATA_CORRUPTED),
+            errmsg("An out of bounds of the array td_info, tdid = %d.", tdId)));
+    }
+
+    TD *thistrans = &tdPtr->td_info[tdId - 1];
+
+    if ((level > USTORE_VERIFY_FAST) &&
+        TransactionIdFollows(thistrans->xactid, t_thrd.xact_cxt.ShmemVariableCache->nextXid)) {
+        ereport(logLevel, (errcode(ERRCODE_DATA_CORRUPTED),
+            errmsg("td xid invalid: tdid %d, tdxid = %lu, nextxid = %lu.",
+            tdId, thistrans->xactid, t_thrd.xact_cxt.ShmemVariableCache->nextXid)));
+    }
+
+    if (!tdReuse && (!TransactionIdIsValid(thistrans->xactid) ||
+        (TransactionIdIsValid(tupXid) && !TransactionIdEquals(thistrans->xactid, tupXid)))) {
+        ereport(logLevel, (errcode(ERRCODE_DATA_CORRUPTED),
+            errmsg("tup xid inconsistency with td: tupxid = %lu, tdxid = %lu, urp %lu.",
+            tupXid, thistrans->xactid, thistrans->undo_record_ptr)));
+    }
+
+    tdinfo->td_slot = tdId;
+    tdinfo->cid = InvalidCommandId;
+    tdinfo->urec_add = thistrans->undo_record_ptr;
+    tdinfo->xid = thistrans->xactid;
+
+    return true;
+}
+
+static bool VerifyUTuple(Relation rel, Page page, BlockNumber blkno, OffsetNumber offnum,
+    TupleDesc tupDesc, VerifyLevel level, int logLevel)
+{
+    RowPtr *rp = UPageGetRowPtr(page, offnum);
+    UHeapDiskTuple diskTup = (UHeapDiskTuple)UPageGetRowData(page, rp);
+    int tdId = UHeapTupleHeaderGetTDSlot(diskTup);
+    bool isInvalidSlot = UHeapTupleHasInvalidXact(diskTup->flag);
+    TransactionId tupXid = UDiskTupleGetModifiedXid(diskTup, page);
+    UHeapTupleTransInfo tdinfo;
+    int tupSize = (rel == NULL) ? 0 : CalTupSize(rel, diskTup, tupDesc);
+    if (tupSize > (int)RowPtrGetLen(rp) || (diskTup->reserved != 0 &&
+        diskTup->reserved != 0xFF)) {
+        ereport(logLevel, (errcode(ERRCODE_DATA_CORRUPTED),
+            errmsg("corrupted tuple: tupsize = %d, rpsize = %u.",
+            tupSize, RowPtrGetLen(rp))));
+    }
+
+    VerifyTDInfo(page, tdId, &tdinfo, level, isInvalidSlot, tupXid, logLevel);
+    if (!isInvalidSlot && IS_VALID_UNDO_REC_PTR(tdinfo.urec_add) &&
+        (!TransactionIdIsValid(tdinfo.xid) || (TransactionIdIsValid(tupXid) &&
+        !TransactionIdEquals(tdinfo.xid, tupXid)))) {
+        ereport(logLevel, (errcode(ERRCODE_DATA_CORRUPTED),
+            errmsg("tup xid inconsistency with td: tupxid = %lu, tdxid = %lu.",
+            tupXid, tdinfo.xid)));
+    }
+
+    if (level <= USTORE_VERIFY_FAST || !TransactionIdIsValid(tupXid)) {
+        return true;
+    }
+
+    if (isInvalidSlot) {
+        if (!TransactionIdDidCommit(tupXid)) {
+            ereport(logLevel, (errcode(ERRCODE_DATA_CORRUPTED),
+                errmsg("tup xid not commit, tupxid = %lu.", tupXid)));
+        }
+        if (TransactionIdEquals(tdinfo.xid, tupXid)) {
+            ereport(logLevel, (errcode(ERRCODE_DATA_CORRUPTED),
+                errmsg("td reused but xid equal td: tupxid = %lu, tdxid = %lu.",
+                tupXid, tdinfo.xid)));
+        }
+    }
+
+    return true;
+}
+
+static int RpCompare(const void *rp1, const void *rp2)
+{
+    return ((RpSort)rp1)->start - ((RpSort)rp2)->start;
+}
+
+static bool VerifyUPageRowPtr(Relation rel, Page page, BlockNumber blkno, TupleDesc tupDesc,
+    VerifyLevel level, int logLevel)
+{
+    UHeapPageHeader phdr = (UHeapPageHeader)page;
+    uint16 pdLower = phdr->pd_lower;
+    uint16 pdUpper = phdr->pd_upper;
+    uint16 pdSpecial = phdr->pd_special;
+    int nline = UHeapPageGetMaxOffsetNumber(page);
+    int tdSlot = 0;
+    int nstorage = 0;
+    int i;
+    RpSortData rpBase[MaxPossibleUHeapTuplesPerPage];
+    RpSort rpSortPtr = rpBase;
+    RowPtr *rp = NULL;
+    UHeapTupleTransInfo tdinfo;
+
+    for (i = FirstOffsetNumber; i <= nline; i++) {
+        rp = UPageGetRowPtr(page, i);
+        if (RowPtrIsNormal(rp)) {
+            rpSortPtr->start = RowPtrGetOffset(rp);
+            rpSortPtr->end = rpSortPtr->start + SHORTALIGN(RowPtrGetLen(rp));
+            rpSortPtr->offset = i;
+            if (rpSortPtr->start < pdUpper || rpSortPtr->end > pdSpecial) {
+                ereport(logLevel, (errcode(ERRCODE_DATA_CORRUPTED),
+                    errmsg("corrupted line pointer: offset = %u, rpstart = %u, "
+                    "rplen = %u, pdlower = %u, pdupper = %u.",
+                    i, RowPtrGetOffset(rp), RowPtrGetLen(rp), pdLower, pdUpper)));
+            }
+            rpSortPtr++;
+            VerifyUTuple(rel, page, blkno, i, tupDesc, level, logLevel);
+        } else if (RowPtrIsDeleted(rp)) {
+            bool tdReuse = (RowPtrGetVisibilityInfo(rp) & ROWPTR_XACT_INVALID);
+            tdSlot = RowPtrGetTDSlot(rp);
+            if (tdSlot == UHEAPTUP_SLOT_FROZEN) {
+                ereport(WARNING, (errcode(ERRCODE_DATA_CORRUPTED),
+                    errmsg("rowptr(offsetnumber = %d) tdslot frozen, tdid = %d.", i, tdSlot)));
+            }
+            VerifyTDInfo(page, tdSlot, &tdinfo, level, tdReuse, InvalidTransactionId, logLevel);
+        }
+    }
+
+    nstorage = rpSortPtr - rpBase;
+
+    if (nstorage <= 1 || level <= USTORE_VERIFY_FAST) {
+        return true;
+    }
+
+    qsort((char *)rpBase, nstorage, sizeof(RpSortData), RpCompare);
+
+    for (i = 0; i < nstorage - 1; i++) {
+        RpSort tempPtr1 = &rpBase[i];
+        RpSort tempPtr2 = &rpBase[i + 1];
+        if (tempPtr1->end > tempPtr2->start) {
+            ereport(logLevel, (errcode(ERRCODE_DATA_CORRUPTED),
+                errmsg("corrupted line pointer: rp1offset %u, rp1start = %u, rp1end = %u, "
+                "rp2offset = %u, rp2start = %u, rp2end = %u.",
+                tempPtr1->offset, tempPtr1->start, tempPtr1->end,
+                tempPtr2->offset, tempPtr2->start, tempPtr2->end)));
+        }
+    }
+
+    return true;
+}
+
+/*
+ * Checks whether the LSN in the header of the uheap page is smaller than the value
+ * of the last checkpoint. This check item is mainly used for verification after the page
+ * is modified in parallel redo mode..
+ */
+static void ValidateUPageLsn(Page page, XLogRecPtr lastCheckpoint, int logLevel)
+{
+    if (page == NULL || lastCheckpoint == InvalidXLogRecPtr) {
+        return;
+    }
+
+    if (PageGetLSN(page) < lastCheckpoint) {
+        ereport(logLevel, (errcode(ERRCODE_DATA_CORRUPTED),
+            errmsg("Current lsn(%X/%X) in page is smaller than last checkpoint(%X/%X)).",
+            (uint32)(PageGetLSN(page) >> HIGH_BITS_LENGTH_OF_LSN), (uint32)PageGetLSN(page),
+            (uint32)(lastCheckpoint >> HIGH_BITS_LENGTH_OF_LSN), (uint32)lastCheckpoint)));
+    }
+}
+
+bool VerifyUPageValid(UPageVerifyParams *verifyParams)
+{
+    if (verifyParams == NULL) {
+        return false;
+    }
+
+    VerifyLevel vLevel = verifyParams->bvInfo.vLevel;
+    Relation rel = verifyParams->bvInfo.rel;
+    Page page = verifyParams->page;
+    BlockNumber blkno = verifyParams->blk;
+    TupleDesc tupDesc = verifyParams->tupDesc;
+    XLogRecPtr latestRedo = InvalidXLogRecPtr;
+    int logLevel = (verifyParams->bvInfo.analyzeVerify) ? WARNING : PANIC;
+
+    VerifyUPageHeader(page, vLevel, logLevel);
+    VerifyUPageRowPtr(rel, page, blkno, tupDesc, vLevel, logLevel);
+    ValidateUPageLsn(page, latestRedo, logLevel);
+    return true;
+}
+
+bool VerifyRedoUPageValid(URedoVerifyParams*verifyParams)
+{
+    if (verifyParams == NULL) {
+        return false;
+    }
+
+    VerifyLevel vLevel = verifyParams->pageVerifyParams.bvInfo.vLevel;
+    Relation rel = verifyParams->pageVerifyParams.bvInfo.rel;
+    Page page = verifyParams->pageVerifyParams.page;
+    BlockNumber blkno = verifyParams->pageVerifyParams.blk;
+    TupleDesc tupDesc = verifyParams->pageVerifyParams.tupDesc;
+    XLogRecPtr latestRedo = verifyParams->latestRedo;
+
+    VerifyUPageHeader(page, vLevel, PANIC);
+    VerifyUPageRowPtr(rel, page, blkno, tupDesc, vLevel, PANIC);
+    ValidateUPageLsn(page, latestRedo, PANIC);
+    return true;
+}
+
+
+void FastVerifyUTuple(UHeapDiskTuple diskTup, Buffer buffer)
+{
+    if (u_sess->attr.attr_storage.ustore_verify_level < (int) USTORE_VERIFY_DEFAULT) {
+        return;
+    }
+
+    int tdId = UHeapTupleHeaderGetTDSlot(diskTup);
+    int tdCount = UHEAP_MAX_TD;
+    BlockNumber blockno = InvalidBlockNumber;
+    Oid relId = InvalidOid;
+    uint16 reserved = diskTup->reserved;
+    if (!BufferIsInvalid(buffer)) {
+        BufferDesc *bufdesc = GetBufferDescriptor(buffer - 1);
+        Page page = BufferGetPage(buffer);
+        UHeapPageHeaderData *phdr = (UHeapPageHeaderData *)page;
+        tdCount = phdr->td_count;
+        relId = bufdesc->tag.rnode.relNode;
+        blockno = BufferGetBlockNumber(buffer);
+    }
+    if (tdId < 0 || tdId > tdCount) {
+        ereport(PANIC, (errmodule(MOD_USTORE), errmsg(
+            "verify utuple invalid! "
+            "LogInfo: tdid %d, tdcount %u, reserved %u. "
+            "TransInfo: oid %u, blockno %u.",
+            tdId, tdCount, reserved, relId, blockno)));
+    }
+}
+
+RowPtr *FastVerifyUPageRowPtr(RowPtr *rp, UHeapPageHeader uphdr, OffsetNumber offsetNumber)
+{
+    OffsetNumber maxOffsetNum = UHeapPageGetMaxOffsetNumber((char *)uphdr);
+    if (offsetNumber > maxOffsetNum) {
+        return rp;
+    }
+    if (u_sess->attr.attr_storage.ustore_verify_level >= (int) USTORE_VERIFY_DEFAULT) {
+        if (RowPtrIsNormal(rp)) {
+            if (RowPtrGetOffset(rp) < uphdr->pd_upper || RowPtrGetOffset(rp) >= uphdr->pd_special ||
+                RowPtrGetOffset(rp) + RowPtrGetLen(rp) > BLCKSZ) {
+                ereport(PANIC,
+                        (errmodule(MOD_USTORE),
+                         errmsg("row pointer error, offset:%u, flags:%u, len:%u, upper:%u, special:%u.",
+                                RowPtrGetOffset(rp), rp->flags, RowPtrGetLen(rp), (uphdr)->pd_upper,
+                                (uphdr)->pd_special)));
+            }
+        } else if (RowPtrGetLen(rp) != 0) {
+            ereport(PANIC,
+                    (errmodule(MOD_USTORE), errmsg("row pointer's length is too long, offset:%u, flags:%u, len:%u.",
+                                                   RowPtrGetOffset(rp), (rp)->flags, RowPtrGetLen(rp))));
+        }
+    }
+    return rp;
 }

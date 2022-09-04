@@ -1310,7 +1310,7 @@ static void print_html_text(const printTableContent* cont, FILE* fout)
     }
 
     if (cont->opt->start_table) {
-        fprintf(fout, "<table border=\"%d\"", opt_border);
+        fprintf(fout, "<table border=\"%d\"", (int)opt_border);
         if (opt_table_attr != NULL)
             fprintf(fout, " %s", opt_table_attr);
         fputs(">\n", fout);
@@ -1390,7 +1390,7 @@ static void print_html_vertical(const printTableContent* cont, FILE* fout)
         return;
     }
     if (cont->opt->start_table) {
-        fprintf(fout, "<table border=\"%d\"", opt_border);
+        fprintf(fout, "<table border=\"%d\"", (int)opt_border);
         if (opt_table_attr != NULL)
             fprintf(fout, " %s", opt_table_attr);
         fputs(">\n", fout);
@@ -1951,12 +1951,12 @@ void printTableInit(
     content->ncolumns = ncolumns;
     content->nrows = nrows;
 
-    content->headers = (const char**)pg_local_calloc(ncolumns + 1, sizeof(*content->headers));
-
     if (ncolumns * nrows + 1 <= 0) {
         fprintf(stderr, _("Error: Integer overflow when select execution.\n"));
         exit(EXIT_FAILURE);
     }
+
+    content->headers = (const char**)pg_local_calloc(ncolumns + 1, sizeof(*content->headers));
     content->cells = (const char**)pg_local_calloc(ncolumns * nrows + 1, sizeof(*content->cells));
 
     content->cellmustfree = NULL;

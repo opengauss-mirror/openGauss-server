@@ -52,6 +52,7 @@
 #include "utils/lsyscache.h"
 #include "utils/fmgroids.h"
 #include "utils/snapmgr.h"
+#include "distributelayer/streamMain.h"
 
 #define MAX_SAMPLE_ROWS 10000    /* sampling range for executing a query */
 #define CARDINALITY_THRESHOLD 30 /* the threshold of index selection */
@@ -97,6 +98,12 @@ typedef struct {
     char *index_type;
 } IndexPrint;
 
+struct StmtCell {
+SelectStmt *stmt;
+StmtCell *parent_stmt;
+List *tables;
+};
+
 namespace index_advisor {
     typedef struct {
         char *field;
@@ -121,9 +128,10 @@ static void shutdown(DestReceiver *self);
 static void startup(DestReceiver *self, int operation, TupleDesc typeinfo);
 static void destroy(DestReceiver *self);
 static void free_global_resource();
-static void find_select_stmt(Node *);
-static void extract_stmt_from_clause(List *);
-static void extract_stmt_where_clause(Node *);
+static void find_select_stmt(Node *, StmtCell *);
+static void extract_stmt_from_clause(const List *, StmtCell *);
+static void extract_stmt_where_clause(Node *, StmtCell *);
+static void generate_stmt_tables(StmtCell *);
 static void parse_where_clause(Node *);
 static void field_value_trans(_out_ StringInfoData, A_Const *);
 static void parse_field_expr(List *, List *, List *);
@@ -152,7 +160,7 @@ static void parse_join_tree(JoinExpr *);
 static void add_join_cond(TableCell *, char *, TableCell *, char *);
 static void parse_join_expr(Node *);
 static void parse_join_expr(JoinExpr *);
-static void determine_driver_table();
+static void determine_driver_table(int);
 static uint4 get_join_table_result_set(const char *, const char *, const char *);
 static void add_index_from_join(TableCell *, char *);
 static void add_index_for_drived_tables();
@@ -160,6 +168,8 @@ static void extract_info_from_plan(Node* parse_tree, const char *query_string);
 static void adv_get_info_from_plan_hook(Node* node, List* rtable);
 static void get_join_condition_from_plan(Node* node, List* rtable);
 static void get_order_condition_from_plan(Node* node);
+static bool check_join_expr(A_Expr *);
+static bool check_joined_tables();
 
 Datum gs_index_advise(PG_FUNCTION_ARGS)
 {
@@ -265,7 +275,8 @@ SuggestedIndex *suggest_index(const char *query_string, _out_ int *len)
     Node *parsetree_copy = (Node *)copyObject(parsetree);
     // Check for syntax errors
     parse_analyze(parsetree, query_string, NULL, 0);
-    find_select_stmt(parsetree_copy);
+    StmtCell *stmt_cell = NULL;
+    find_select_stmt(parsetree_copy, stmt_cell);
     if (!g_stmt_list) {
         ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
             errmsg("can not advise for the query because not found a select statement.")));
@@ -277,29 +288,33 @@ SuggestedIndex *suggest_index(const char *query_string, _out_ int *len)
     foreach (item, g_stmt_list) {
         t_thrd.index_advisor_cxt.stmt_table_list = NIL;
         t_thrd.index_advisor_cxt.stmt_target_list = NIL;
-        SelectStmt *stmt = (SelectStmt *)lfirst(item);
+        StmtCell *stmt_cell = (StmtCell *)lfirst(item);
+        SelectStmt *stmt = stmt_cell->stmt;
         parse_from_clause(stmt->fromClause);
         parse_target_list(stmt->targetList);
-
         if (t_thrd.index_advisor_cxt.stmt_table_list) {
+            int local_stmt_table_count = t_thrd.index_advisor_cxt.stmt_table_list->length;
+            generate_stmt_tables(stmt_cell);
+            t_thrd.index_advisor_cxt.stmt_table_list = stmt_cell->tables;
             parse_where_clause(stmt->whereClause);
-            determine_driver_table();
+            determine_driver_table(local_stmt_table_count);
             if (parse_group_clause(stmt->groupClause, stmt->targetList)) {
                 add_index_from_group_order(g_driver_table, stmt->groupClause, stmt->targetList, true);
             } else if (parse_order_clause(stmt->sortClause, stmt->targetList)) {
                 add_index_from_group_order(g_driver_table, stmt->sortClause, stmt->targetList, false);
             }
-            if (t_thrd.index_advisor_cxt.stmt_table_list->length > 1 && g_driver_table) {
+            if (check_joined_tables() && g_driver_table) {
                 add_index_for_drived_tables();
             }
-
             // Generate the final index string for each table.
             generate_final_index();
 
             g_driver_table = NULL;
         }
-        list_free_ext(t_thrd.index_advisor_cxt.stmt_table_list);
+        t_thrd.index_advisor_cxt.stmt_table_list = NIL;
         list_free_ext(t_thrd.index_advisor_cxt.stmt_target_list);
+        list_free(g_drived_tables);
+        g_drived_tables = NIL;
     }
     if (g_table_list == NIL) {
         ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), 
@@ -364,6 +379,24 @@ SuggestedIndex *suggest_index(const char *query_string, _out_ int *len)
     free_global_resource();
 
     return array;
+}
+
+static void generate_stmt_tables(StmtCell *stmt_cell)
+{
+    StmtCell *parent_stmt = stmt_cell->parent_stmt;
+    stmt_cell->tables = NIL;
+
+    ListCell *table_item = NULL;
+    foreach (table_item, t_thrd.index_advisor_cxt.stmt_table_list) {
+        stmt_cell->tables = lappend(stmt_cell->tables, (TableCell *)lfirst(table_item));
+    }
+    if (parent_stmt && parent_stmt->tables) {
+        ListCell *global_table = NULL;
+        foreach (global_table, parent_stmt->tables) {
+            stmt_cell->tables = lappend(stmt_cell->tables, (TableCell *)lfirst(global_table));
+        }
+    }
+    list_free_ext(t_thrd.index_advisor_cxt.stmt_table_list);
 }
 
 void extract_info_from_plan(Node* parse_tree, const char *query_string)
@@ -623,7 +656,10 @@ StmtResult *execute_stmt(const char *query_string, bool need_result)
 
     Assert(list_length(parsetree_list) == 1); // ought to be one query
     parsetree_item = list_head(parsetree_list);
-
+#ifndef ENABLE_MULTIPLE_NODES
+    AutoDopControl dopControl;
+    dopControl.CloseSmp();
+#endif
     Portal portal = NULL;
     DestReceiver *receiver = NULL;
     List *querytree_list = NULL;
@@ -767,21 +803,24 @@ void destroy(DestReceiver *self)
  * 'from' and 'where' clauses, and it is added to the global variable
  * "g_stmt_list" only if it has no subquery structure.
  */
-void find_select_stmt(Node *parsetree)
+static void find_select_stmt(Node *parsetree, StmtCell *parent_stmt)
 {
     if (parsetree == NULL || nodeTag(parsetree) != T_SelectStmt) {
         return;
     }
     SelectStmt *stmt = (SelectStmt *)parsetree;
-    g_stmt_list = lappend(g_stmt_list, stmt);
+    StmtCell *stmt_cell = (StmtCell *)palloc0(sizeof(StmtCell));
+    stmt_cell->stmt = stmt;
+    stmt_cell->parent_stmt = parent_stmt;
+    g_stmt_list = lappend(g_stmt_list, stmt_cell);
 
     switch (stmt->op) {
         case SETOP_INTERSECT:
         case SETOP_EXCEPT:
         case SETOP_UNION: {
             // analyze the set operation: union
-            find_select_stmt((Node *)stmt->larg);
-            find_select_stmt((Node *)stmt->rarg);
+            find_select_stmt((Node *)stmt->larg, stmt_cell);
+            find_select_stmt((Node *)stmt->rarg, stmt_cell);
             break;
         }
         case SETOP_NONE: {
@@ -793,19 +832,19 @@ void find_select_stmt(Node *parsetree)
                 foreach (item, cte_list) {
                     CommonTableExpr *cte = (CommonTableExpr *)lfirst(item);
                     g_tmp_table_list = lappend(g_tmp_table_list, cte->ctename);
-                    find_select_stmt(cte->ctequery);
+                    find_select_stmt(cte->ctequery, stmt_cell);
                 }
                 break;
             }
 
             // analyze the 'from' clause
             if (stmt->fromClause) {
-                extract_stmt_from_clause(stmt->fromClause);
+                extract_stmt_from_clause(stmt->fromClause, stmt_cell);
             }
 
             // analyze the 'where' clause
             if (stmt->whereClause) {
-                extract_stmt_where_clause(stmt->whereClause);
+                extract_stmt_where_clause(stmt->whereClause, stmt_cell);
             }
             break;
         }
@@ -815,44 +854,43 @@ void find_select_stmt(Node *parsetree)
     }
 }
 
-void extract_stmt_from_clause(List *from_list)
+static void extract_stmt_from_clause(const List *from_list, StmtCell *stmt_cell)
 {
     ListCell *item = NULL;
 
     foreach (item, from_list) {
         Node *from = (Node *)lfirst(item);
         if (from && IsA(from, RangeSubselect)) {
-            find_select_stmt(((RangeSubselect *)from)->subquery);
+            find_select_stmt(((RangeSubselect *)from)->subquery, stmt_cell);
         }
         if (from && IsA(from, JoinExpr)) {
             Node *larg = ((JoinExpr *)from)->larg;
             Node *rarg = ((JoinExpr *)from)->rarg;
             if (larg && IsA(larg, RangeSubselect)) {
-                find_select_stmt(((RangeSubselect *)larg)->subquery);
+                find_select_stmt(((RangeSubselect *)larg)->subquery, stmt_cell);
             }
             if (rarg && IsA(rarg, RangeSubselect)) {
-                find_select_stmt(((RangeSubselect *)rarg)->subquery);
+                find_select_stmt(((RangeSubselect *)rarg)->subquery, stmt_cell);
             }                                
         }
     }
 }
 
-void extract_stmt_where_clause(Node *item_where)
+static void extract_stmt_where_clause(Node *item_where, StmtCell *stmt_cell)
 {
     if (IsA(item_where, SubLink)) {
-        find_select_stmt(((SubLink *)item_where)->subselect);
+        find_select_stmt(((SubLink *)item_where)->subselect, stmt_cell);
     }
-    while (item_where && IsA(item_where, A_Expr)) {
+    if (item_where && IsA(item_where, A_Expr)) {
         A_Expr *expr = (A_Expr *)item_where;
         Node *lexpr = expr->lexpr;
         Node *rexpr = expr->rexpr;
-        if (lexpr && IsA(lexpr, SubLink)) {
-            find_select_stmt(((SubLink *)lexpr)->subselect);
+        if (lexpr) {
+            extract_stmt_where_clause((Node *)lexpr, stmt_cell);
         }
-        if (rexpr && IsA(rexpr, SubLink)) {
-            find_select_stmt(((SubLink *)rexpr)->subselect);
+        if (rexpr) {
+            extract_stmt_where_clause((Node *)rexpr, stmt_cell);
         }
-        item_where = lexpr;
     }
 }
 
@@ -1260,15 +1298,18 @@ void add_join_cond(TableCell *begin_table, char *begin_field, TableCell *end_tab
     begin_table->join_cond = lappend(begin_table->join_cond, join_cond);
 }
 
+bool check_join_expr(A_Expr *join_cond)
+{
+    return (join_cond->lexpr && join_cond->rexpr);
+}
 // parse 'join ... on'
 void parse_join_expr(Node *item_join)
 {
-    if (!item_join) {
+    if (!item_join || nodeTag(item_join) != T_A_Expr) {
         return;
     }
-
     A_Expr *join_cond = (A_Expr *)item_join;
-    if (!join_cond->lexpr || !join_cond->rexpr) {
+    if (!check_join_expr(join_cond)) {
         return;
     }
     List *field_value = NIL;
@@ -1669,7 +1710,8 @@ bool check_relation_type_valid(Oid relid)
         return result;
     }
     if (RelationIsRelation(relation) && RelationGetStorageType(relation) == HEAP_DISK &&
-        RelationGetRelPersistence(relation) == RELPERSISTENCE_PERMANENT) {
+        RelationGetRelPersistence(relation) == RELPERSISTENCE_PERMANENT &&
+        !RelationIsSubPartitioned(relation)) {
         const char *format = ((relation->rd_options) && (((StdRdOptions *)(relation->rd_options))->orientation)) ?
             ((char *)(relation->rd_options) + *(int *)&(((StdRdOptions *)(relation->rd_options))->orientation)) :
             ORIENTATION_ROW;
@@ -1879,10 +1921,16 @@ void add_index_from_field(char *schema_name, char *table_name, IndexCell *index)
     }
 }
 
-// The table that has smallest result set is set as the driver table.
-void determine_driver_table()
+// Check if there are joined tables
+static bool check_joined_tables()
 {
-    if (t_thrd.index_advisor_cxt.stmt_table_list->length == 1) {
+    return (g_drived_tables && g_drived_tables->length > 1);
+}
+
+// The table that has smallest result set is set as the driver table.
+static void determine_driver_table(int local_stmt_table_count)
+{
+    if (local_stmt_table_count == 1 && (!check_joined_tables())) {
         g_driver_table = (TableCell *)linitial(t_thrd.index_advisor_cxt.stmt_table_list);
     } else {
         if (g_drived_tables != NIL) {
@@ -1905,8 +1953,6 @@ void determine_driver_table()
             }
         }
     }
-    list_free(g_drived_tables);
-    g_drived_tables = NIL;
 }
 
 uint4 get_join_table_result_set(const char *schema_name, const char *table_name, const char *condition)
@@ -2039,8 +2085,8 @@ bool parse_group_clause(List *group_clause, List *target_list)
     }
 
     if (is_only_one_table && pre_schema && pre_table) {
-        if (t_thrd.index_advisor_cxt.stmt_table_list->length == 1 || (g_driver_table &&
-            IsSameRel(pre_schema, pre_table, g_driver_table->schema_name, g_driver_table->table_name))) {
+        if (g_driver_table &&
+            IsSameRel(pre_schema, pre_table, g_driver_table->schema_name, g_driver_table->table_name)) {
             return true;
         }
     }
@@ -2104,8 +2150,8 @@ bool parse_order_clause(List *order_clause, List *target_list)
     }
 
     if (is_only_one_table && pre_schema && pre_table) {
-        if (t_thrd.index_advisor_cxt.stmt_table_list->length == 1 || (g_driver_table &&
-            IsSameRel(pre_schema, pre_table, g_driver_table->schema_name, g_driver_table->table_name))) {
+        if (g_driver_table &&
+            IsSameRel(pre_schema, pre_table, g_driver_table->schema_name, g_driver_table->table_name)) {
             return true;
         }
     }

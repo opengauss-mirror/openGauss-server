@@ -70,7 +70,6 @@ set(TGT_replication_INC
     ${PROJECT_SRC_DIR}/lib/gstrace
     ${LZ4_INCLUDE_PATH}
     ${ZLIB_INCLUDE_PATH}
-    ${LIBORC_INCLUDE_PATH}
     ${DCF_INCLUDE_PATH}
 )
 

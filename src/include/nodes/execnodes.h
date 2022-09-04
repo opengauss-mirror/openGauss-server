@@ -206,6 +206,8 @@ typedef struct ExprContext {
     Cursor_Data cursor_data;
     int dno;
     PLpgSQL_execstate* plpgsql_estate;
+
+    bool hasSetResultStore;
     /*
      * For vector set-result function.
      */
@@ -644,6 +646,9 @@ typedef struct EState {
 #endif
 
     PruningResult* pruningResult;
+    bool have_current_xact_date; /* Check whether dirty reads exist in the cursor rollback scenario. */
+    int128 first_autoinc; /* autoinc has increased during this execution */
+	int result_rel_index;    /* which result_rel_info to be excuted when multiple-relation modified. */
 } EState;
 
 /*
@@ -1399,6 +1404,10 @@ typedef struct ModifyTableState {
     UpsertState* mt_upsert;                /*  DUPLICATE KEY UPDATE evaluation state */
     instr_time first_tuple_modified; /* record the end time for the first tuple inserted, deleted, or updated */
     ExprContext* limitExprContext; /* for limit expresssion */
+
+    List* targetlists;                    /* for multiple modifying, targetlist's list for each result relation. */
+    List* mt_ResultTupleSlots;            /* for multiple modifying, ResultTupleSlot list for build mt_ProjInfos. */
+    ProjectionInfo** mt_ProjInfos;        /* for multiple modifying, projectInfo list array for each result relation. */
 } ModifyTableState;
 
 typedef struct CopyFromManagerData* CopyFromManager;
@@ -1659,7 +1668,8 @@ struct SeqScanAccessor;
  */
 typedef TupleTableSlot *(*ExecScanAccessMtd) (ScanState *node);
 typedef bool(*ExecScanRecheckMtd) (ScanState *node, TupleTableSlot *slot);
-typedef void (*SeqScanGetNextMtd)(TableScanDesc scan, TupleTableSlot* slot, ScanDirection direction);
+typedef void (*SeqScanGetNextMtd)(TableScanDesc scan, TupleTableSlot* slot, ScanDirection direction,
+    bool* has_cur_xact_write);
 
 typedef struct ScanState {
     PlanState ps; /* its first field is NodeTag */
@@ -1689,6 +1699,7 @@ typedef struct ScanState {
     ExecScanAccessMtd ScanNextMtd;
     bool scanBatchMode;
     ScanBatchState* scanBatchState;
+    Snapshot timecapsuleSnapshot;    /* timecapusule snap info */
 } ScanState;
 
 /*
@@ -2568,7 +2579,7 @@ typedef struct GroupingIdExprState {
 } GroupingIdExprState;
 
 /*
- * used by CstoreInsert and DfsInsert in nodeModifyTable.h and vecmodifytable.cpp
+ * used by CstoreInsert in nodeModifyTable.h and vecmodifytable.cpp
  */
 #define FLUSH_DATA(obj, type)                             \
     do {                                                  \

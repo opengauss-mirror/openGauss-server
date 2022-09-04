@@ -338,6 +338,16 @@ RelOptInfo* build_simple_rel(PlannerInfo* root, int relid, RelOptKind reloptkind
     return rel;
 }
 
+bool contain_foreign_table(PlannerInfo *root)
+{
+    for (int i = 1; i < root->simple_rel_array_size; ++i) {
+        if (root->simple_rte_array[i]->relkind == 'f') {
+            return true;
+        }
+    }
+    return false;
+}
+
 /*
  * find_base_rel
  *	  Find a base or other relation entry, which must already exist.
@@ -346,6 +356,10 @@ RelOptInfo* find_base_rel(PlannerInfo* root, int relid)
 {
     RelOptInfo* rel = NULL;
 
+    if (relid <= 0 && contain_foreign_table(root)) {
+        ereport(ERROR,
+                (errmodule(MOD_OPT), errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE), errmsg("unavailable relid: 0")));
+    }
     AssertEreport(relid > 0, MOD_OPT, "Expected positive relid, run into exception.");
 
     if (relid < root->simple_rel_array_size) {

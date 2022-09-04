@@ -87,6 +87,7 @@ DROP DIRECTORY test_dir1;
 
 \! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "enable_access_server_directory=on" >/dev/null 2>&1
 
+select pg_sleep(1);
 SET ROLE test_user1 PASSWORD '1234567i*';
 CREATE DIRECTORY test_dir2 AS '@testtablespace@/dir2';
 ALTER DIRECTORY test_dir1 OWNER TO test_user3;

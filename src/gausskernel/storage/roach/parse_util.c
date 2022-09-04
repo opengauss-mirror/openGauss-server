@@ -540,6 +540,32 @@ ROACH_VALIDATION_TYPE parseValidationType(const char* media)
     }
 }
 
+/**
+ * parseSnapshotAction
+ * Parse for the snapshot action
+ * @param value
+ * @return
+ */
+SNAPSHOT_ACTION parseSnapshotAction(const char* value)
+{
+    const char* v = value;
+
+    while (isspace(*v)) {
+        v++;
+    }
+
+    if (strNCaseCmp(SNAPSHOT_BACKUP_PREPARE, v, sizeof(SNAPSHOT_BACKUP_PREPARE)) == 0) {
+        return SNAPSHOT_ACTION_BACKUP_PREPARE;
+    } else if (strNCaseCmp(SNAPSHOT_BACKUP_XLOG, v, sizeof(SNAPSHOT_BACKUP_XLOG)) == 0) {
+        return SNAPSHOT_ACTION_BACKUP_XLOG;
+    } else if (strNCaseCmp(SNAPSHOT_RESTORE_XLOG, v, sizeof(SNAPSHOT_RESTORE_XLOG)) == 0) {
+        return SNAPSHOT_ACTION_RESTORE_XLOG;
+    } else {
+        return SNAPSHOT_ACTION_INVALID;
+    }
+}
+
+
 /*
  * parseInt32
  * Parse string as 32bit signed int.
@@ -1239,9 +1265,19 @@ ERROR_CODE getArgvValueForStringOption(roach_option* opt, const char* optargs)
 
             return EC_INVALID_ARGUMENT;
         }
-
         return EC_SUCCESS;
     }
+    /* Check snapshot action */
+    else if (strNCaseCmp(opt->lname, "snapshot-action", strlen("snapshot-action")) == 0) {
+        clioptions.snapshotAction = parseSnapshotAction(optargs);
+        if (clioptions.snapshotAction == SNAPSHOT_ACTION_INVALID) {
+            LOGERROR("Invalid Snapshot Action Specified\n");
+
+            return EC_INVALID_ARGUMENT;
+        }
+        return EC_SUCCESS;
+    }
+
     /* Check Tablename only in Master machine */
     if (!clioptions.bMaster && strCaseCmp(opt->lname, "tablename") == 0) {
         return EC_SUCCESS;

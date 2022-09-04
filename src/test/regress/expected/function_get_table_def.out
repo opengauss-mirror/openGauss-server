@@ -591,6 +591,188 @@ select * from pg_get_tabledef('generated_test');
 drop table generated_test;
 reset current_schema;
 drop schema test_get_table_def cascade;
+drop database if exists b1;
+NOTICE:  database "b1" does not exist, skipping
+create database b1 dbcompatibility 'b';
+ 
+\c b1
+CREATE TABLE range_list
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    c  int,
+    unique u_range (c desc)
+) 
+PARTITION BY RANGE (month_code) SUBPARTITION BY LIST (dept_code)
+(
+  PARTITION p_201901 VALUES LESS THAN( '201903' )
+  (
+    SUBPARTITION p_201901_a values ('1'),
+    SUBPARTITION p_201901_b values ('2')
+  ),
+  PARTITION p_201902 VALUES LESS THAN( '201910' )
+  (
+    SUBPARTITION p_201902_a values ('1'),
+    SUBPARTITION p_201902_b values ('2')
+  )
+);
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "u_range" for table "range_list"
+select pg_get_tabledef('range_list');
+                                        pg_get_tabledef                                        
+-----------------------------------------------------------------------------------------------
+ SET search_path = public;                                                                    +
+ CREATE TABLE range_list (                                                                    +
+     month_code character varying(30) NOT NULL,                                               +
+     dept_code character varying(30) NOT NULL,                                                +
+     user_no character varying(30) NOT NULL,                                                  +
+     c integer                                                                                +
+ )                                                                                            +
+ WITH (orientation=row, compression=no)                                                       +
+ PARTITION BY RANGE (month_code) SUBPARTITION BY LIST (dept_code)                             +
+ (                                                                                            +
+     PARTITION p_201901 VALUES LESS THAN ('201903') TABLESPACE pg_default                     +
+     (                                                                                        +
+         SUBPARTITION p_201901_a VALUES ('1') TABLESPACE pg_default,                          +
+         SUBPARTITION p_201901_b VALUES ('2') TABLESPACE pg_default                           +
+     ),                                                                                       +
+     PARTITION p_201902 VALUES LESS THAN ('201910') TABLESPACE pg_default                     +
+     (                                                                                        +
+         SUBPARTITION p_201902_a VALUES ('1') TABLESPACE pg_default,                          +
+         SUBPARTITION p_201902_b VALUES ('2') TABLESPACE pg_default                           +
+     )                                                                                        +
+ )                                                                                            +
+ ENABLE ROW MOVEMENT;                                                                         +
+ ALTER TABLE range_list ADD CONSTRAINT u_range UNIQUE USING btree (c DESC) INCLUDE (tableoid);
+(1 row)
+
+create table test_unique
+(
+    u1 int,
+    u2 int,
+    constraint con_test2 unique u_t1 using btree ((abs((u1+u2)*2)) desc)
+);
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "u_t1" for table "test_unique"
+select pg_get_tabledef('test_unique');
+                                       pg_get_tabledef                                       
+---------------------------------------------------------------------------------------------
+ SET search_path = public;                                                                  +
+ CREATE TABLE test_unique (                                                                 +
+     u1 integer,                                                                            +
+     u2 integer                                                                             +
+ )                                                                                          +
+ WITH (orientation=row, compression=no);                                                    +
+ ALTER TABLE test_unique ADD CONSTRAINT u_t1 UNIQUE USING btree ((abs((u1 + u2) * 2)) DESC);
+(1 row)
+
+ 
+create table test_primary
+(
+    p1 int,
+    p2 int,
+    constraint con_test1 primary key using btree (p1 desc)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "con_test1" for table "test_primary"
+select pg_get_tabledef('test_primary');
+                                    pg_get_tabledef                                    
+---------------------------------------------------------------------------------------
+ SET search_path = public;                                                            +
+ CREATE TABLE test_primary (                                                          +
+     p1 integer NOT NULL,                                                             +
+     p2 integer                                                                       +
+ )                                                                                    +
+ WITH (orientation=row, compression=no);                                              +
+ ALTER TABLE test_primary ADD CONSTRAINT con_test1 PRIMARY KEY USING btree  (p1 DESC);
+(1 row)
+
+ 
+create table test_primary1
+(
+    p11 int,
+    p21 int,
+    constraint primary key using btree (p11 asc)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test_primary1_pkey" for table "test_primary1"
+select pg_get_tabledef('test_primary1');
+                                       pg_get_tabledef                                       
+---------------------------------------------------------------------------------------------
+ SET search_path = public;                                                                  +
+ CREATE TABLE test_primary1 (                                                               +
+     p11 integer NOT NULL,                                                                  +
+     p21 integer                                                                            +
+ )                                                                                          +
+ WITH (orientation=row, compression=no);                                                    +
+ ALTER TABLE test_primary1 ADD CONSTRAINT test_primary1_pkey PRIMARY KEY USING btree  (p11);
+(1 row)
+
+ 
+ 
+create table test_unique12
+(
+    u12 int,
+    u22 int,
+    constraint unique u_t12 using btree (u22 desc)
+);
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "u_t12" for table "test_unique12"
+select pg_get_tabledef('test_unique12');
+                                pg_get_tabledef                                
+-------------------------------------------------------------------------------
+ SET search_path = public;                                                    +
+ CREATE TABLE test_unique12 (                                                 +
+     u12 integer,                                                             +
+     u22 integer                                                              +
+ )                                                                            +
+ WITH (orientation=row, compression=no);                                      +
+ ALTER TABLE test_unique12 ADD CONSTRAINT u_t12 UNIQUE USING btree (u22 DESC);
+(1 row)
+
+ 
+create table test_fk
+(
+    f1 int,
+    f2 int,
+    constraint con_test3 foreign key fk_t3 (f1) references test_primary(p1)
+);
+select pg_get_tabledef('test_fk');
+                            pg_get_tabledef                            
+-----------------------------------------------------------------------
+ SET search_path = public;                                            +
+ CREATE TABLE test_fk (                                               +
+     f1 integer,                                                      +
+     f2 integer,                                                      +
+     CONSTRAINT con_test3 FOREIGN KEY (f1) REFERENCES test_primary(p1)+
+ )                                                                    +
+ WITH (orientation=row, compression=no);
+(1 row)
+
+ 
+CREATE TABLE test_us
+(
+    us1 int,
+    us2 varchar(20),
+    constraint u1 primary key (us2)
+)with (storage_type=USTORE);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "u1" for table "test_us"
+select pg_get_tabledef('test_us');
+                                          pg_get_tabledef                                          
+---------------------------------------------------------------------------------------------------
+ SET search_path = public;                                                                        +
+ CREATE TABLE test_us (                                                                           +
+     us1 integer,                                                                                 +
+     us2 character varying(20) NOT NULL                                                           +
+ )                                                                                                +
+ WITH (orientation=row, storage_type=ustore, compression=no);                                     +
+ ALTER TABLE test_us ADD CONSTRAINT u1 PRIMARY KEY USING ubtree  (us2) WITH (storage_type=USTORE);
+(1 row)
+
+ 
+drop table test_unique;
+drop table range_list;
+drop table test_unique12;
+drop table test_fk;
+drop table test_primary;
+drop table test_primary1;
+drop table test_us; 
 create database mysql dbcompatibility 'B';
 \c mysql
 create table if not exists test(a int, b timestamp default now() on update current_timestamp);

@@ -479,30 +479,6 @@ SELECT p1.relname, p1.parttype, p1.partstrategy, p1.relfilenode!=0 hasfilenode, 
     ORDER BY p1.relname;
 \d+ hash_sales
 
-create table test_range_pt (a int primary key, b int, c int)
-partition by range(a)
-(
-	partition p1 values less than (2000),
-	partition p2 values less than (3000),
-	partition p3 values less than (4000),
-	partition p4 values less than (5000),
-	partition p5 values less than (maxvalue)
-)ENABLE ROW MOVEMENT;
-
-insert into test_range_pt values(1),(2001);
-
-create view vp1 as select * from test_range_pt partition for (1);
-
-alter table test_range_pt drop partition p1;
-
-create table tt ( a int, b int,c int);
-
-alter table test_range_pt exchange partition (p1) with table tt update global index;
-
-drop view vp1;
-drop table test_range_pt;
-drop table tt;
-
 --finish
 DROP TABLE range_sales;
 DROP TABLE range2_sales;

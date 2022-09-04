@@ -1004,7 +1004,7 @@ ERROR:  syntax error at or near "@"
 LINE 1: set @ v1:=10;
             ^
 select @v1:=10;
-ERROR:  unrecognized node type: 5009
+ERROR:  unrecognized node type: 5014
 \c regression
 drop database if exists test_set;
 \! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "enable_set_variable_b_format=off" >/dev/null 2>&1

@@ -813,6 +813,43 @@ void gs_close_timeout_connections(libcommaddrinfo** libcomm_addrinfo, int addr_n
     }
 }
 
+
+static bool IsValidLibcommAddr(int node_idx, int fd, ip_key* addr)
+{
+    if (fd < 0) {
+        LIBCOMM_ELOG(WARNING, "(s|connect)\tInvalid libcomm fd[%d] node_id[%d]", fd, node_idx);
+        return false;
+    }
+
+    struct sockaddr_in sa = {0};
+    socklen_t len = sizeof(sa);
+    const int max_ip_addr_len = 64;
+
+    if (getpeername(fd, (struct sockaddr *)&sa, &len) < 0) {
+        LIBCOMM_ELOG(WARNING, "(s|connect)\tFailed to check libcomm addr node[%d]%s, fd[%d]",
+            node_idx, g_instance.comm_cxt.g_s_node_sock[node_idx].remote_nodename, fd);
+        return false;
+    }
+
+    struct sockaddr_in* ipConn = (struct sockaddr_in*)&sa;
+    char peer_host[max_ip_addr_len] = {0};
+    (void)inet_ntop(AF_INET, &ipConn->sin_addr, (char*)peer_host, max_ip_addr_len);
+    int peer_port = ntohs(ipConn->sin_port);
+
+    if (strcmp(peer_host, addr->ip) == 0 && peer_port == addr->port) {
+        COMM_DEBUG_LOG("(s|connect)\tConnection is valid:ip-port[%s:%d], get peer ip-port[%s:%d]",
+            addr->ip, addr->port, peer_host, peer_port);
+        return true;
+    } else {
+        LIBCOMM_ELOG(WARNING,
+            "(s|connect)\tInvalid libcomm addr node[%d]%s, fd[%d], p-port[%s:%d], get peer ip-port[%s:%d]",
+            node_idx, g_instance.comm_cxt.g_s_node_sock[node_idx].remote_nodename,
+            fd, addr->ip, addr->port, peer_host, peer_port);
+        return false;
+    }
+
+}
+
 /*
  * function name   : gs_s_check_connection
  * description     : sender check that is receiver changed.
@@ -855,7 +892,9 @@ retry:
         /* data channel need to check socket even if the connection state in htap is succeed */
         if (type == DATA_CHANNEL) {
             LIBCOMM_PTHREAD_RWLOCK_WRLOCK(&g_instance.comm_cxt.g_senders->sender_conn[node_idx].rwlock);
-            if (LibCommClientCheckSocket(g_instance.attr.attr_network.comm_data_channel_conn[node_idx - 1]) != 0) {
+            if (IsValidLibcommAddr(node_idx,
+                g_instance.attr.attr_network.comm_data_channel_conn[node_idx - 1]->socket, &addr) == false ||
+                LibCommClientCheckSocket(g_instance.attr.attr_network.comm_data_channel_conn[node_idx - 1]) != 0) {
                 fd_id.fd = g_instance.comm_cxt.g_senders->sender_conn[node_idx].socket;
                 fd_id.id = g_instance.comm_cxt.g_senders->sender_conn[node_idx].socket_id;
                 LIBCOMM_ELOG(WARNING,

@@ -59,13 +59,54 @@ void SetLatestFetchState(TransactionId transactionId, CommitSeqNo result)
     t_thrd.xact_cxt.latestFetchCSN = result;
 }
 
+static CommitSeqNo GetCSNByCLog(TransactionId transactionId, bool isCommit)
+{
+    XLogRecPtr lsn;
+    if (isCommit) {
+        return COMMITSEQNO_FROZEN;
+    }
+    if (CLogGetStatus(transactionId, &lsn) == CLOG_XID_STATUS_COMMITTED) {
+        return COMMITSEQNO_FROZEN;
+    } else {
+        return COMMITSEQNO_ABORTED;
+    }
+}
+
+static CommitSeqNo FetchCSNFromCache(TransactionId transactionId, Snapshot snapshot, bool isMvcc)
+{
+    if (!TransactionIdEquals(transactionId, t_thrd.xact_cxt.cachedFetchCSNXid)) {
+        return InvalidCommitSeqNo;
+    }
+
+    if (snapshot == NULL) {
+        goto TRY_USE_CACHE;
+    }
+
+    if (IsVersionMVCCSnapshot(snapshot) || (snapshot->satisfies == SNAPSHOT_DECODE_MVCC)) {
+        return InvalidCommitSeqNo;
+    }
+
+    if (!isMvcc || GTM_LITE_MODE) {
+        goto TRY_USE_CACHE;
+    }
+
+    /* frozen csn is not the true csn, only use frozen csn cache if we know xid is finished in my snapshot */
+    if (IsMVCCSnapshot(snapshot) && !TransactionIdPrecedes(transactionId, snapshot->xmin) &&
+        t_thrd.xact_cxt.cachedFetchCSN == COMMITSEQNO_FROZEN) {
+        return InvalidCommitSeqNo;
+    }
+
+TRY_USE_CACHE:
+    SetLatestFetchState(t_thrd.xact_cxt.cachedFetchCSNXid, t_thrd.xact_cxt.cachedFetchCSN);
+    return t_thrd.xact_cxt.cachedFetchCSN;
+}
+
 /*
  * TransactionIdGetCommitSeqNo --- fetch CSN of specified transaction id
  */
 CommitSeqNo TransactionIdGetCommitSeqNo(TransactionId transactionId, bool isCommit, bool isMvcc, bool isNest,
     Snapshot snapshot)
 {
-    XLogRecPtr lsn;
     CommitSeqNo result;
     TransactionId xid = InvalidTransactionId;
     int retry_times = 0;
@@ -74,11 +115,9 @@ CommitSeqNo TransactionIdGetCommitSeqNo(TransactionId transactionId, bool isComm
      * Before going to the commit log manager, check our single item cache to
      * see if we didn't just check the transaction status a moment ago.
      */
-    if ((snapshot == NULL || (!IsVersionMVCCSnapshot(snapshot) && !(snapshot->satisfies == SNAPSHOT_DECODE_MVCC))) &&
-        TransactionIdEquals(transactionId, t_thrd.xact_cxt.cachedFetchCSNXid)) {
-        t_thrd.xact_cxt.latestFetchCSNXid = t_thrd.xact_cxt.cachedFetchCSNXid;
-        t_thrd.xact_cxt.latestFetchCSN = t_thrd.xact_cxt.cachedFetchCSN;
-        return t_thrd.xact_cxt.cachedFetchCSN;
+    CommitSeqNo cacheCsn = FetchCSNFromCache(transactionId, snapshot, isMvcc);
+    if (cacheCsn != InvalidCommitSeqNo) {
+        return cacheCsn;
     }
 
     /*
@@ -92,7 +131,7 @@ CommitSeqNo TransactionIdGetCommitSeqNo(TransactionId transactionId, bool isComm
         }
         return COMMITSEQNO_ABORTED;
     }
-
+MemoryContext old = CurrentMemoryContext;
 RETRY:
     /*
      * If the XID is older than RecentGlobalXmin, check the clog. Otherwise
@@ -115,15 +154,7 @@ RETRY:
 
     Assert(TransactionIdIsValid(xid));
     if ((!IS_DISASTER_RECOVER_MODE) && (snapshot == NULL || !IsVersionMVCCSnapshot(snapshot)) && TransactionIdPrecedes(transactionId, xid)) {
-        if (isCommit) {
-            result = COMMITSEQNO_FROZEN;
-        } else {
-            if (CLogGetStatus(transactionId, &lsn) == CLOG_XID_STATUS_COMMITTED) {
-                result = COMMITSEQNO_FROZEN;
-            } else {
-                result = COMMITSEQNO_ABORTED;
-            }
-        }
+        result = GetCSNByCLog(transactionId, isCommit);
     } else {
         uint32 saveInterruptHoldoffCount = t_thrd.int_cxt.InterruptHoldoffCount;
         /*
@@ -141,11 +172,14 @@ RETRY:
             if ((IS_CN_DISASTER_RECOVER_MODE || IS_DISASTER_RECOVER_MODE) &&
                 t_thrd.xact_cxt.slru_errcause == SLRU_OPEN_FAILED)
             {
-                t_thrd.int_cxt.InterruptHoldoffCount = saveInterruptHoldoffCount;
+                (void)MemoryContextSwitchTo(old);
                 FlushErrorState();
-                ereport(LOG, (errmsg("TransactionIdGetCommitSeqNo: "
-                     "Treat CSN as frozen when csnlog file cannot be found for the given xid: %lu", transactionId)));
-                result = COMMITSEQNO_FROZEN;
+                t_thrd.int_cxt.InterruptHoldoffCount = saveInterruptHoldoffCount;
+                result = GetCSNByCLog(transactionId, isCommit);
+                ereport(LOG,
+                        (errmsg("TransactionIdGetCommitSeqNo: "
+                                "Treat CSN as frozen when csnlog file cannot be found for the given xid: %lu csn: %lu",
+                                transactionId, result)));
             } else if (GTM_LITE_MODE && retry_times == 0) {
                 t_thrd.int_cxt.InterruptHoldoffCount = saveInterruptHoldoffCount;
                 FlushErrorState();
@@ -153,6 +187,7 @@ RETRY:
                                      " %lu recentLocalXmin %lu.",
                                      xid, t_thrd.xact_cxt.ShmemVariableCache->recentGlobalXmin)));
                 retry_times++;
+                (void)MemoryContextSwitchTo(old);
                 goto RETRY;
             } else {
                 PG_RE_THROW();
@@ -160,11 +195,13 @@ RETRY:
         }
         PG_END_TRY();
     }
-    ereport(DEBUG1,
-            (errmsg("Get CSN xid %lu cur_xid %lu xid %lu result %lu iscommit %d, recentLocalXmin %lu, isMvcc :%d, "
-                    "RecentXmin: %lu",
-                    transactionId, GetCurrentTransactionIdIfAny(), xid, result, isCommit,
-                    t_thrd.xact_cxt.ShmemVariableCache->recentLocalXmin, isMvcc, u_sess->utils_cxt.RecentXmin)));
+    if (SHOW_DEBUG_MESSAGE()) {
+        ereport(DEBUG1,
+                (errmsg("Get CSN xid %lu cur_xid %lu xid %lu result %lu iscommit %d, recentLocalXmin %lu, isMvcc :%d, "
+                        "RecentXmin: %lu",
+                        transactionId, GetCurrentTransactionIdIfAny(), xid, result, isCommit,
+                        t_thrd.xact_cxt.ShmemVariableCache->recentLocalXmin, isMvcc, u_sess->utils_cxt.RecentXmin)));
+    }
 
     /*
      * Cache it, but DO NOT cache status for unfinished transactions!
@@ -403,8 +440,8 @@ bool TransactionIdDidCommit(TransactionId transactionId) /* true if given transa
 }
 
 /*
- * For ustore, clog is truncated based on oldestXidInUndo. Therefore, we need to perform a quick check
- * first. If the transaction is smaller than oldestXidInUndo, the transaction must be committed.
+ * For ustore, clog is truncated based on globalRecycleXid. Therefore, we need to perform a quick check
+ * first. If the transaction is smaller than globalRecycleXid, the transaction must be committed.
  *
  *      true iff given transaction committed
  */
@@ -414,7 +451,8 @@ bool UHeapTransactionIdDidCommit(TransactionId transactionId)
         return true;
     }
     if (TransactionIdIsNormal(transactionId) &&
-        TransactionIdPrecedes(transactionId, pg_atomic_read_u64(&g_instance.undo_cxt.oldestXidInUndo))) {
+        TransactionIdPrecedes(transactionId, pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid))) {
+        Assert(TransactionIdDidCommit(transactionId));
         return true;
     }
     return TransactionIdDidCommit(transactionId);
@@ -468,27 +506,6 @@ bool TransactionIdDidAbort(TransactionId transactionId) /* true if given transac
      * It's not aborted.
      */
     return false;
-}
-
-/*
- * For ustore, clog is truncated based on oldestXidInUndo. Therefore, we need to perform a quick check
- * first. If the transaction is smaller than oldestXidInUndo, the transaction must be committed.
- *
- *      true iff given transaction aborted
- */
-bool UHeapTransactionIdDidAbort(TransactionId transactionId)
-{
-    if (transactionId == FrozenTransactionId) {
-        return false;
-    }
-    TransactionId oldestXidInUndo = pg_atomic_read_u64(&g_instance.undo_cxt.oldestXidInUndo);
-    if (TransactionIdIsNormal(transactionId) && TransactionIdPrecedes(transactionId, oldestXidInUndo)) {
-        /* The transaction must be committed or rollback finish, not abort. */
-        ereport(PANIC, (errmsg("The transaction cannot rollback, transactionId = %lu, oldestXidInUndo = %lu.",
-            transactionId, oldestXidInUndo)));
-        return false;
-    }
-    return TransactionIdDidAbort(transactionId);
 }
 
 /*

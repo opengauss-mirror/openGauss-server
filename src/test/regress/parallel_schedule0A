@@ -8,14 +8,15 @@
 test: hw_subpartition_createtable hw_subpartition_scan hw_subpartition_select hw_subpartition_split hw_subpartition_truncate hw_subpartition_update hw_subpartition_gpi hw_subpartition_alter_table hw_subpartition_index hw_subpartition_add_drop_partition hw_subpartition_tablespace hw_subpartition_ddl_index
 test: hw_subpartition_vacuum_partition
 
-test: replace_func_with_two_args trunc_func_for_date updatable_views
+test: smp single_node_user_mapping
+
+test: replace_func_with_two_args trunc_func_for_date updatable_views outerjoin_bugfix
 
 test: analyze_commands
 #test: single_node_job
 test: single_node_ddl
 test: single_node_sqlbypass
 test: median
-
 
 # run tablespace by itself, and first, because it forces a checkpoint;
 # we'd prefer not to have checkpoints later in the tests because that
@@ -294,7 +295,7 @@ test: tpch01 tpch03 tpch04 libcomm_check_status tpch03_querymem
 test: tpch05 tpch06 tpch07 tpch08
 test: tpch09 tpch10 tpch11 tpch12
 test: tpch13 tpch14 tpch15 tpch16
-#test: tpch_vector_optimal
+test: tpch_vector_optimal
 test: tpch18 tpch19 tpch20 tpch18_querymem
 test: tpch21 tpch22 tpch11_pretty_performance
 #test: tpch02 tpch17
@@ -425,7 +426,7 @@ test: pmk
 # Test of changed data type compatible with Oracle
 
 test: hw_datatype_2 hw_datatype_3
-test: hw_datatype
+#test: hw_datatype hw_datatype_set
 test: test_regex llt_atc
 
 # ----------
@@ -553,7 +554,6 @@ test: llvm_vecsort llvm_vecsort2
 
 test: udf_crem create_c_function
 
-test: smp single_node_user_mapping
 # test: hw_package
 # publication and subscription, we need to record audit log for them, so seperate them into two test group
 test: publication

@@ -138,6 +138,8 @@ struct TableCreateSupport {
     bool compressPreAllocChunks;
     bool compressByteConvert;
     bool compressDiffConvert;
+    bool is_orientation_row;
+    bool is_storage_type_ustore;
 };
 
 inline bool HasCompressOption(TableCreateSupport *tableCreateSupport)
@@ -146,7 +148,6 @@ inline bool HasCompressOption(TableCreateSupport *tableCreateSupport)
            tableCreateSupport->compressPreAllocChunks || tableCreateSupport->compressByteConvert ||
            tableCreateSupport->compressDiffConvert;
 }
-
 /* 
  * The following are the table append modes currently supported.
  * on: mark the table on-line scaleout mode, when it is set, later data write by append mode.

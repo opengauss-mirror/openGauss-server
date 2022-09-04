@@ -27,6 +27,7 @@
 #include "gtm/gtm_c.h"
 #include "alarm/alarm.h"
 #include "utils/atomic.h"
+#include "utils/snapshot.h"
 #include "access/multi_redo_settings.h"
 
 
@@ -197,17 +198,30 @@ struct PGPROC {
     char myProgName[64];
     pg_time_t myStartTime;
     syscalllock deleMemContextMutex;
+    int64* usedMemory;
 
     /* Support for group XID clearing. */
     /* true, if member of ProcArray group waiting for XID clear */
     bool procArrayGroupMember;
     /* next ProcArray group member waiting for XID clear */
     pg_atomic_uint32 procArrayGroupNext;
+
     /*
      * latest transaction id among the transaction's main XID and
      * subtransactions
      */
     TransactionId procArrayGroupMemberXid;
+
+    /* Support for group snapshot getting. */
+    bool snapshotGroupMember;
+    /* next ProcArray group member waiting for snapshot getting */
+    pg_atomic_uint32 snapshotGroupNext;
+    Snapshot snapshotGroup;
+    TransactionId xminGroup;
+    TransactionId xmaxGroup;
+    TransactionId globalxminGroup;
+    volatile TransactionId replicationSlotXminGroup;
+    volatile TransactionId replicationSlotCatalogXminGroup;
 
     /* commit sequence number send down */
     CommitSeqNo commitCSN;
@@ -360,6 +374,8 @@ typedef struct PROC_HDR {
     PGPROC* bgworkerFreeProcs;
     /* First pgproc waiting for group XID clear */
     pg_atomic_uint32 procArrayGroupFirst;
+    /* First pgproc waiting for group snapshot getting */
+    pg_atomic_uint32 snapshotGroupFirst;
     /* First pgproc waiting for group transaction status update */
     pg_atomic_uint32 clogGroupFirst;
     /* WALWriter process's latch */
@@ -396,7 +412,7 @@ typedef struct PROC_HDR {
  *
  * PGXC needs another slot for the pool manager process
  */
-const int MAX_PAGE_WRITER_THREAD_NUM = 16;
+const int MAX_PAGE_WRITER_THREAD_NUM = 17;
 
 #ifndef ENABLE_LITE_MODE
 const int MAX_COMPACTION_THREAD_NUM = 100;
@@ -453,6 +469,9 @@ extern void InitProcess(void);
 extern void InitProcessPhase2(void);
 extern void InitAuxiliaryProcess(void);
 
+extern void ProcBaseLockAcquire(pthread_mutex_t *procBaseLock);
+extern void ProcBaseLockRelease(pthread_mutex_t *procBaseLock);
+
 extern int GetAuxProcEntryIndex(int baseIdx);
 extern void PublishStartupProcessInformation(void);
 
@@ -503,12 +522,12 @@ extern void BecomeLockGroupMember(PGPROC *leader);
 
 static inline bool TransactionIdOlderThanAllUndo(TransactionId xid)
 {
-    uint64 cutoff = pg_atomic_read_u64(&g_instance.undo_cxt.oldestXidInUndo);
+    uint64 cutoff = pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid);
     return xid < cutoff;
 }
 static inline bool TransactionIdOlderThanFrozenXid(TransactionId xid)
 {
-    uint64 cutoff = pg_atomic_read_u64(&g_instance.undo_cxt.oldestFrozenXid);
+    uint64 cutoff = pg_atomic_read_u64(&g_instance.undo_cxt.globalFrozenXid);
     return xid < cutoff;
 }
 

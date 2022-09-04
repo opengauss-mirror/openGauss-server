@@ -18,6 +18,7 @@
 #include "nodes/plannodes.h"
 #include "nodes/relation.h"
 #include "optimizer/planmain.h"
+#include "optimizer/aioptimizer.h"
 #include "utils/aset.h"
 #include "utils/extended_statistics.h"
 
@@ -63,6 +64,8 @@
 
 #define TUPLE_OVERHEAD(colorsort) ((colorsort) ? 24 : 8)
 
+const int64 max_unknown_offset = 10000;
+
 typedef enum {
     CONSTRAINT_EXCLUSION_OFF,      /* do not use c_e */
     CONSTRAINT_EXCLUSION_ON,       /* apply c_e to all rels */
@@ -71,11 +74,11 @@ typedef enum {
 
 extern void init_plan_cost(Plan* plan);
 extern void cost_insert(Path* path, bool vectorized, Cost input_cost, double tuples, int width, Cost comparison_cost,
-    int modify_mem, int dop, Oid resultRelOid, bool isDfsStore, OpMemInfo* mem_info);
+    int modify_mem, int dop, Oid resultRelOid, OpMemInfo* mem_info);
 extern void cost_delete(Path* path, bool vectorized, Cost input_cost, double tuples, int width, Cost comparison_cost,
-    int modify_mem, int dop, Oid resultRelOid, bool isDfsStore, OpMemInfo* mem_info);
+    int modify_mem, int dop, Oid resultRelOid, OpMemInfo* mem_info);
 extern void cost_update(Path* path, bool vectorized, Cost input_cost, double tuples, int width, Cost comparison_cost,
-    int modify_mem, int dop, Oid resultRelOid, bool isDfsStore, OpMemInfo* mem_info);
+    int modify_mem, int dop, Oid resultRelOid, OpMemInfo* mem_info);
 
 extern double clamp_row_est(double nrows);
 extern double index_pages_fetched(
@@ -84,7 +87,6 @@ extern void cost_seqscan(Path* path, PlannerInfo* root, RelOptInfo* baserel, Par
 extern void cost_resultscan(Path *path, PlannerInfo *root, RelOptInfo *baserel, ParamPathInfo *param_info);
 extern void cost_samplescan(Path* path, PlannerInfo* root, RelOptInfo* baserel, ParamPathInfo* param_info);
 extern void cost_cstorescan(Path* path, PlannerInfo* root, RelOptInfo* baserel);
-extern void cost_dfsscan(Path* path, PlannerInfo* root, RelOptInfo* baserel);
 #ifdef ENABLE_MULTIPLE_NODES
 extern void cost_tsstorescan(Path *path, PlannerInfo *root, RelOptInfo *baserel);
 #endif   /* ENABLE_MULTIPLE_NODES */
@@ -151,15 +153,18 @@ extern void set_values_size_estimates(PlannerInfo* root, RelOptInfo* rel);
 extern void set_cte_size_estimates(PlannerInfo* root, RelOptInfo* rel, Plan* cteplan);
 extern void set_foreign_size_estimates(PlannerInfo* root, RelOptInfo* rel);
 extern void set_result_size_estimates(PlannerInfo *root, RelOptInfo *rel);
+extern double adjust_limit_row_count(double lefttree_rows);
+extern void estimate_limit_offset_count(PlannerInfo* root, int64* offset_est, int64* count_est,
+    RelOptInfo* final_rel = NULL, bool* fix_param = NULL);
 
 /*
  * prototypes for clausesel.c
  *	  routines to compute clause selectivities
  */
 extern Selectivity clauselist_selectivity(PlannerInfo* root, List* clauses, int varRelid, JoinType jointype,
-    SpecialJoinInfo* sjinfo, bool varratio_cached = true);
+    SpecialJoinInfo* sjinfo, bool varratio_cached = true, bool use_poisson = true);
 extern Selectivity clause_selectivity(PlannerInfo* root, Node* clause, int varRelid, JoinType jointype,
-    SpecialJoinInfo* sjinfo, bool varratio_cached = true, bool check_scalarop = false);
+    SpecialJoinInfo* sjinfo, bool varratio_cached = true, bool check_scalarop = false, bool use_poisson = true);
 
 extern void set_rel_width(PlannerInfo* root, RelOptInfo* rel);
 extern void restore_hashjoin_cost(Path* path);
@@ -245,6 +250,7 @@ struct es_candidate {
                                             * the original clause.
                                             */
     bool has_null_clause;                  /* if "is null" used in the clauses */
+    bool extended_stats_only_ai = false;
 };
 
 /*
@@ -260,6 +266,7 @@ public:
     List* origin_clauses;    /* clauselist from input */
     JoinPath* path;          /* path from input */
     List* bucketsize_list;   /* list of bucket size */
+    List* statlist;          /* list of ExtendedStats extracted from pg_statistic_ext */
 
     /* a simplified structure from clause */
     struct es_clause_map {
@@ -329,6 +336,12 @@ private:
     void set_up_attnum_order(es_candidate* es, int* attnum_order, bool left) const;
     bool try_equivalence_class(es_candidate* es);
     void setup_es(es_candidate* es, es_type type, RestrictInfo* clause);
+
+/* AI optimizer
+ */
+    Selectivity cal_eqsel_ai(es_candidate* es);
+	Selectivity cal_eqjoinsel_inner_ai(es_candidate* es);
+    void set_up_attnum_order_reversed(es_candidate* es, int* attnum_order) const;
 };
 
 #endif /* COST_H */

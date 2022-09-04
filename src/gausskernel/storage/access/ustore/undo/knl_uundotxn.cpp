@@ -51,34 +51,15 @@ void TransactionSlot::Init(TransactionId xid, Oid dbId)
     dbId_ = dbId;
 }
 
-#ifdef ENABLE_MULTIPLE_NODES
-const static bool SUPPORT_HOT_STANDBY = false; /* don't support consistency view */
-#else
-const static bool SUPPORT_HOT_STANDBY = true;
-#endif
-
 void TransactionSlot::Update(UndoRecPtr start, UndoRecPtr end)
 {
     WHITEBOX_TEST_STUB(UNDO_UPDATE_SLOT_FAILED, WhiteboxDefaultErrorEmit);
-
+    Assert(UNDO_PTR_GET_ZONE_ID(start) == UNDO_PTR_GET_ZONE_ID(end));
+    Assert(start <= end);
     endUndoPtr_ = end;
-    if (end < start) {
-        ereport(PANIC, (errmsg(
-            UNDOFORMAT("update slot error: from start %lu to end %lu."), start, end)));
-    }
     if (startUndoPtr_ == INVALID_UNDO_REC_PTR) {
         pg_write_barrier();
-
-    WHITEBOX_TEST_STUB(UNDO_UPDATE_BEFORE_UPDATE_FAILED, WhiteboxDefaultErrorEmit);
-
         startUndoPtr_ = start;
-
-    WHITEBOX_TEST_STUB(UNDO_UPDATE_AFTER_UPDATE_FAILED, WhiteboxDefaultErrorEmit);
-
-    }
-    if (UNDO_PTR_GET_ZONE_ID(start) != UNDO_PTR_GET_ZONE_ID(end)) {
-        ereport(PANIC, (errmsg(UNDOFORMAT("update slot error: start zid %d != end zid %d."),
-            (int)UNDO_PTR_GET_ZONE_ID(start), (int)UNDO_PTR_GET_ZONE_ID(end))));
     }
     return;
 }
@@ -95,13 +76,13 @@ void UndoSlotBuffer::PrepareTransactionSlot(UndoSlotPtr slotPtr, uint8 info)
                 ereport(PANIC, (errmsg(UNDOFORMAT("invalid cached slot buffer %d slot ptr %lu."), buffer_, slotPtr)));
             }
             bool result = PinBuffer(buf, NULL);
+            if (!result) {
+                ereport(PANIC, (errmsg(UNDOFORMAT("prepare transaction slot: %lu info: %u."), slotPtr, info)));
+            }
             ResourceOwnerEnlargeBuffers(t_thrd.utils_cxt.TopTransactionResourceOwner);
             ResourceOwnerRememberBuffer(t_thrd.utils_cxt.TopTransactionResourceOwner, buffer_);
             ResourceOwnerForgetBuffer(t_thrd.utils_cxt.CurrentResourceOwner, buffer_);
             SetInfo(UNDOSLOTBUFFER_PREPARED);
-            if (!result) {
-                ereport(PANIC, (errmsg(UNDOFORMAT("prepare transaction slot: %lu info: %u."), slotPtr, info)));
-            }
         }
     } else {
         if (!BufferIsInvalid(buffer_)) {
@@ -111,25 +92,13 @@ void UndoSlotBuffer::PrepareTransactionSlot(UndoSlotPtr slotPtr, uint8 info)
                     (int)(UNDO_PTR_GET_ZONE_ID(slotPtr)), buffer_, blk_, info_)));
                 UnSetInfo(UNDOSLOTBUFFER_KEEP);
             }
-            if (IsReviseRBM()) {
-                UnSetInfo(UNDOSLOTBUFFER_RBM);
-            }
         }
-        blk_ = UNDO_PTR_GET_BLOCK_NUM(slotPtr);
         RelFileNode rnode;
         UNDO_PTR_ASSIGN_REL_FILE_NODE(rnode, slotPtr, UNDO_SLOT_DB_OID);
-        DECLARE_NODE_COUNT();
-        GET_UPERSISTENCE_BY_ZONEID((int)UNDO_PTR_GET_ZONE_ID(slotPtr), nodeCount);
         ReadBufferMode rbm = RBM_NORMAL;
-        int startingByte = UNDO_PTR_GET_PAGE_OFFSET(slotPtr);
-        if (info & UNDOSLOTBUFFER_RBM) {
-            if (startingByte == UNDO_LOG_BLOCK_HEADER_SIZE) {
-                rbm = RBM_ZERO;
-            }
-            SetInfo(UNDOSLOTBUFFER_RBM);
-        }
         buffer_ = ReadUndoBufferWithoutRelcache(
-            rnode, UNDO_FORKNUM, blk_, rbm, NULL, REL_PERSISTENCE(upersistence));
+            rnode, UNDO_FORKNUM, UNDO_PTR_GET_BLOCK_NUM(slotPtr), rbm, NULL, RELPERSISTENCE_PERMANENT);
+        blk_ = UNDO_PTR_GET_BLOCK_NUM(slotPtr);
         if (BufferIsValid(buffer_)) {
             BufferDesc *buf = GetBufferDescriptor(buffer_ - 1);
             if (!IsSlotBufferValid(buf, UNDO_PTR_GET_ZONE_ID(slotPtr), slotPtr)) {
@@ -157,14 +126,23 @@ TransactionSlot *UndoSlotBuffer::FetchTransactionSlot(UndoSlotPtr slotPtr)
 {
     WHITEBOX_TEST_STUB(UNDO_FETCH_TRANSACTION_SLOT_FAILED, WhiteboxDefaultErrorEmit);
 
-    UndoSlotOffset slotOffset = UNDO_PTR_GET_OFFSET(slotPtr);
+    UndoSlotOffset slotOffset = (UNDO_PTR_GET_OFFSET(slotPtr)) % BLCKSZ;
     Page page = BufferGetPage(buffer_);
-    if (((PageHeader)page)->pd_upper == 0) {
-        ereport(DEBUG1, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT("INIT UNDO PAGE: urp=%lu, blockno=%u"),
-            slotPtr, GetBufferDescriptor(buffer_ - 1)->tag.blockNum)));
+    if (PageIsNew(page)) {
+        if ((slotOffset != UNDO_LOG_BLOCK_HEADER_SIZE) && !t_thrd.xlog_cxt.InRecovery) {
+            ereport(WARNING, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT("INIT UNDO PAGE: slotptr=%lu, blockno=%u"),
+                slotPtr, GetBufferDescriptor(buffer_ - 1)->tag.blockNum)));
+        }
         PageInit(page, BLCKSZ, 0);
     }
-    TransactionSlot *slot = (TransactionSlot *)((char *)page + slotOffset % BLCKSZ);
+
+    uint32 verifyModule = USTORE_VERIFY_MOD_UNDO | USTORE_VERIFY_UNDO_SUB_TRANSLOT_BUFFER;
+    UndoVerifyParams verifyParam;
+    if (unlikely(ConstructUstoreVerifyParam(verifyModule, USTORE_VERIFY_COMPLETE, (char *) &verifyParam,
+        NULL, page, InvalidBlockNumber))) {
+        ExecuteUstoreVerify(verifyModule, (char *) &verifyParam);
+    }
+    TransactionSlot *slot = (TransactionSlot *)((char *)page + slotOffset);
     return slot;
 }
 
@@ -350,4 +328,49 @@ UndoSlotPtr GetNextSlotPtr(UndoSlotPtr slotPtr)
     Assert (offset <= UNDO_LOG_MAX_SIZE);
     return MAKE_UNDO_PTR(UNDO_PTR_GET_ZONE_ID(slotPtr), offset);
 }
+
+bool VerifyTransactionSlotValid(TransactionSlot *slot)
+{
+    if (u_sess->attr.attr_storage.ustore_verify_level <= USTORE_VERIFY_DEFAULT) {
+        return true;
+    }
+    if (!TransactionIdIsValid(slot->xactId_)) {
+        ereport(PANIC, (errmodule(MOD_UNDO),
+            errmsg(UNDOFORMAT("Verify TransactionSlot failed: slot xact %lu"),
+                slot->XactId())));
+    }
+    return true;
+}
+
+bool VerifyTransactionSlotBuffer(Page page)
+{
+    if (u_sess->attr.attr_storage.ustore_verify_level < USTORE_VERIFY_COMPLETE) {
+        return true;
+    }
+
+    TransactionSlot *slot = NULL;
+    int flag = 0;
+    VerifyPageHeader(page);
+
+    for (uint32 offset = UNDO_LOG_BLOCK_HEADER_SIZE; offset < BLCKSZ - MAXALIGN(sizeof(TransactionSlot));
+        offset += MAXALIGN(sizeof(TransactionSlot))) {
+        slot = (TransactionSlot *) (page + offset);
+        if (slot->XactId() != InvalidTransactionId || slot->StartUndoPtr() != INVALID_UNDO_REC_PTR) {
+            if (TransactionIdFollows(slot->XactId(), t_thrd.xact_cxt.ShmemVariableCache->nextXid)) {
+                ereport(PANIC, (errcode(ERRCODE_DATA_CORRUPTED),
+                    errmsg("slot xid invalid: slotxid = %lu, nextxid = %lu, offset %u.",
+                    slot->XactId(), t_thrd.xact_cxt.ShmemVariableCache->nextXid, offset)));
+            }
+            if (!t_thrd.xlog_cxt.InRecovery && flag > 0) {
+                uint32 tempOffset = offset - flag * MAXALIGN(sizeof(TransactionSlot));
+                ereport(PANIC, (errcode(ERRCODE_DATA_CORRUPTED),
+                    errmsg("invalid slot: num = %d, offset = %u.", flag, tempOffset)));
+            }
+        } else {
+            flag++;
+        }
+    }
+    return true;
+}
+
 } // namespace undo

@@ -22,6 +22,7 @@
 
 #include "catalog/pg_collation.h"
 #include "catalog/pg_type.h"
+#include "catalog/pg_proc.h"
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
@@ -1889,11 +1890,13 @@ bool expression_tree_walker(Node* node, bool (*walker)(), void* context)
         } break;
         case T_PlaceHolderInfo:
             return p2walker(((PlaceHolderInfo*)node)->ph_var, context);
+        case T_AutoIncrement:
+            return p2walker(((AutoIncrement*)node)->expr, context);
         case T_PrefixKey:
             return p2walker(((PrefixKey*)node)->arg, context);
         default:
-            ereport(
-                ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("unrecognized node type: %d", (int)nodeTag(node))));
+            ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH),
+                            errmsg("expression_tree_walker:unrecognized node type: %d", (int)nodeTag(node))));
             break;
     }
     return false;
@@ -2964,6 +2967,9 @@ bool raw_expression_tree_walker(Node* node, bool (*walker)(), void* context)
             if (p2walker(stmt->limitClause, context)) {
                 return true;
             }
+            if (p2walker(stmt->relations, context)) {
+                return true;
+            }
         } break;
         case T_UpdateStmt: {
             UpdateStmt* stmt = (UpdateStmt*)node;
@@ -2984,6 +2990,9 @@ bool raw_expression_tree_walker(Node* node, bool (*walker)(), void* context)
                 return true;
             }
             if (p2walker(stmt->withClause, context)) {
+                return true;
+            }
+            if (p2walker(stmt->relationClause, context)) {
                 return true;
             }
         } break;
@@ -3264,4 +3273,18 @@ bool lockNextvalWalker(Node* node, void* context)
     /* lock nextval on cn when select nextval to avoid dead lock with alter sequence */
     lockSeqForNextvalFunc(node);
     return expression_tree_walker(node, (bool (*)())lockNextvalWalker, context);
+}
+
+void find_nextval_seqoid_walker(Node* node, Oid* seqoid)
+{
+    if (node != NULL && IsA(node, FuncExpr) && ((FuncExpr*)node)->funcid == NEXTVALFUNCOID) {
+        FuncExpr* funcexpr = (FuncExpr*)node;
+        Assert(funcexpr->args->length == 1);
+        if (IsA(linitial(funcexpr->args), Const)) {
+            Const* con = (Const*)linitial(funcexpr->args);
+            *seqoid = DatumGetObjectId(con->constvalue);
+            return;
+        }
+    }
+    (void)expression_tree_walker(node, (bool (*)())find_nextval_seqoid_walker, (void*)seqoid);
 }

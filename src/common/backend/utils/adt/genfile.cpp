@@ -21,17 +21,23 @@
 
 #include "catalog/pg_authid.h"
 #include "catalog/pg_type.h"
+#include "commands/tablespace.h"
 #include "funcapi.h"
 #include "mb/pg_wchar.h"
 #include "miscadmin.h"
 #include "postmaster/alarmchecker.h"
 #include "postmaster/syslogger.h"
 #include "storage/smgr/fd.h"
+#include "storage/cfs/cfs_tools.h"
 #include "storage/checksum.h"
 #include "replication/basebackup.h"
 #include "utils/builtins.h"
 #include "utils/memutils.h"
+#include "utils/relmapper.h"
 #include "utils/timestamp.h"
+#include "utils/lsyscache.h"
+#include "catalog/pg_partition_fn.h"
+#include "storage/cfs/cfs_buffers.h"
 
 typedef struct {
     char* location;
@@ -47,6 +53,17 @@ typedef struct stated_file {
 typedef struct StatFile_State {
     stated_file* cur_file;
 } StatFile_State;
+
+#include "storage/cfs/cfs.h"
+#include "storage/cfs/cfs_converter.h"
+
+typedef struct {
+    FILE* fd;
+    BlockNumber maxExtent;
+    BlockNumber extentCount;
+    BlockNumber blockNumber;
+    char extentHeaderChar[BLCKSZ];
+} CompressAddrState;
 
 /*
  * Convert a "text" filename argument to C string, and check it's allowable.
@@ -98,7 +115,7 @@ bytea* read_binary_file(const char* filename, int64 seek_offset, int64 bytes_to_
     int64 offset = 0;
     bool isNeedCheck = false;
     int segNo = 0;
-    const int MAX_RETRY_LIMIT = 60;
+    const int MAX_RETRY_LIMITS = 60;
     int retryCnt = 0;
     errno_t rc = 0;
     UndoFileType undoFileType = UNDO_INVALID;
@@ -131,7 +148,9 @@ bytea* read_binary_file(const char* filename, int64 seek_offset, int64 bytes_to_
             ereport(ERROR, (errcode_for_file_access(), errmsg("could not open file \"%s\" for reading: %m", filename)));
     }
 
-    isNeedCheck = is_row_data_file(filename, &segNo, &undoFileType);
+    /* do not need to check if table is compressed table file */
+    isNeedCheck =
+        is_row_data_file(filename, &segNo, &undoFileType) && !IsCompressedFile(filename, strlen(filename));
     ereport(DEBUG1, (errmsg("read_binary_file, filename is %s, isNeedCheck is %d", filename, isNeedCheck)));
 
     buf = (bytea*)palloc((Size)bytes_to_read + VARHDRSZ);
@@ -191,7 +210,7 @@ recheck:
             if (phdr->pd_checksum != checksum) {
                 rc = memset_s(buf, (Size)bytes_to_read + VARHDRSZ, 0, (Size)bytes_to_read + VARHDRSZ);
                 securec_check_c(rc, "", "");
-                if (retryCnt < MAX_RETRY_LIMIT) {
+                if (retryCnt < MAX_RETRY_LIMITS) {
                     retryCnt++;
                     pg_usleep(1000000);
                     goto recheck;
@@ -316,15 +335,17 @@ Datum pg_read_binary_file_all(PG_FUNCTION_ARGS)
 
     PG_RETURN_BYTEA_P(read_binary_file(filename, 0, -1, false));
 }
+
 struct CompressAddressItemState {
     uint32 blkno;
     int segmentNo;
-    ReadBlockChunksStruct rbStruct;
-    FILE *pcaFile;
+    CfsHeaderMap rbStruct;
+    FILE *compressedFd;
 };
 
 static void ReadBinaryFileBlocksFirstCall(PG_FUNCTION_ARGS, int32 startBlockNum, int32 blockCount)
 {
+    // todo compatibility of cfs
     char* path = convert_and_check_filename(PG_GETARG_TEXT_PP(0));
     int segmentNo = 0;
     UndoFileType undoFileType = UNDO_INVALID;
@@ -341,57 +362,601 @@ static void ReadBinaryFileBlocksFirstCall(PG_FUNCTION_ARGS, int32 startBlockNum,
     CompressAddressItemState* itemState = (CompressAddressItemState*)palloc(sizeof(CompressAddressItemState));
 
     /* save mmap to inter_call_data->pcMap */
-    char pcaFilePath[MAXPGPATH];
-    errno_t rc = snprintf_s(pcaFilePath, MAXPGPATH, MAXPGPATH - 1, PCA_SUFFIX, path);
-    securec_check_ss(rc, "\0", "\0");
-    FILE* pcaFile = AllocateFile((const char*)pcaFilePath, "rb");
-    if (pcaFile == NULL) {
-        ereport(ERROR, (errcode_for_file_access(), errmsg("could not open file \"%s\": %m", pcaFilePath)));
+
+    FILE *compressedFd = AllocateFile((const char *)path, "rb");
+    auto blockNumber = ReadBlockNumberOfCFile(compressedFd);
+    if (blockNumber >= MIN_COMPRESS_ERROR_RT) {
+        ereport(ERROR, (ERRCODE_INVALID_PARAMETER_VALUE,
+                        errmsg("can not read actual block from %s, error code: %lu,", path, blockNumber)));
     }
-    PageCompressHeader* map = pc_mmap(fileno(pcaFile), ReadChunkSize(pcaFile, pcaFilePath, MAXPGPATH), true);
-    if (map == MAP_FAILED) {
-        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_RESOURCES), errmsg("Failed to mmap %s: %m", pcaFilePath)));
-    }
-    if ((BlockNumber)startBlockNum + (BlockNumber)blockCount > map->nblocks) {
-        auto blockNum = map->nblocks;
-        ReleaseMap(map, pcaFilePath);
+
+    if ((BlockNumber)startBlockNum + (BlockNumber)blockCount > blockNumber) {
+        (void)FreeFile(compressedFd);
         ereport(ERROR,
             (ERRCODE_INVALID_PARAMETER_VALUE,
-                errmsg("invalid blocknum \"%d\" and block count \"%d\", the max blocknum is \"%u\"",
+                errmsg("invalid blocknum \"%d\" and block count \"%d\", the max blocknum is \"%lu\"",
                     startBlockNum,
                     blockCount,
-                    blockNum)));
+                    blockNumber)));
     }
     /* construct ReadBlockChunksStruct */
-    char* pcdFilePath = (char*)palloc0(MAXPGPATH);
-    rc = snprintf_s(pcdFilePath, MAXPGPATH, MAXPGPATH - 1, PCD_SUFFIX, path);
-    securec_check_ss(rc, "\0", "\0");
-    FILE* fp = AllocateFile(pcdFilePath, "rb");
-    if (fp == NULL) {
-        ereport(ERROR, (errcode_for_file_access(), errmsg("could not open file \"%s\": %m", pcdFilePath)));
-    }
-    itemState->pcaFile = pcaFile;
-    itemState->rbStruct.header = map;
-    itemState->rbStruct.fp = fp;
-    itemState->rbStruct.segmentNo = segmentNo;
-    itemState->rbStruct.fileName = pcdFilePath;
+    itemState->rbStruct.header = NULL;
+    itemState->rbStruct.extentCount = 0;
+    itemState->rbStruct.pointer = NULL;
+    itemState->rbStruct.mmapLen = 0;
+    itemState->compressedFd = compressedFd;
+    itemState->segmentNo = segmentNo;
 
     /*
      * build tupdesc for result tuples. This must match this function's
      * pg_proc entry!
      */
-    TupleDesc tupdesc = CreateTemplateTupleDesc(4, false, TAM_HEAP);
-    TupleDescInitEntry(tupdesc, (AttrNumber)1, "path", TEXTOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)2, "blocknum", INT4OID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)3, "len", INT4OID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)4, "data", BYTEAOID, -1, 0);
+    TupleDesc tupdesc = CreateTemplateTupleDesc(6, false, TAM_HEAP);
+    int i = 1;
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "path", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "blocknum", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "len", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "algorithm", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "chunksize", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "data", BYTEAOID, -1, 0);
     fctx->tuple_desc = BlessTupleDesc(tupdesc);
 
-    itemState->blkno = startBlockNum;
-    fctx->max_calls = blockCount;
+    itemState->blkno = (uint32)startBlockNum;
+    fctx->max_calls = (uint32)blockCount;
     fctx->user_fctx = itemState;
 
-    MemoryContextSwitchTo(mctx);
+    (void)MemoryContextSwitchTo(mctx);
+}
+
+static Relation CompressAddressGetRelation(Oid relid)
+{
+    // try to get origin oid
+    Relation relation = try_relation_open(relid, AccessShareLock);
+    if (RelationIsValid(relation)) {
+        return relation;
+    }
+
+    // try to open parrent oid
+    Oid parentoid = partid_get_parentid(relid);
+    if (!OidIsValid(parentoid)) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("the specified relid is invalid.")));
+    }
+
+    relation = try_relation_open(parentoid, AccessShareLock);
+    if (RelationIsValid(relation)) {
+        return relation;
+    }
+
+    // try to open parrent oid
+    parentoid = partid_get_parentid(parentoid);
+    if (!OidIsValid(parentoid)) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("the specified relid is invalid.")));
+    }
+
+    relation = try_relation_open(parentoid, AccessShareLock);
+    if (RelationIsValid(relation)) {
+        return relation;
+    }
+
+    ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("the specified relid is invalid.")));
+    return relation;
+}
+
+static CompressAddrState* CompressAddressInit(PG_FUNCTION_ARGS)
+{
+    Oid relid = PG_GETARG_OID(0);
+    int64 segmentNo = PG_GETARG_INT64(1);
+    RelFileNode relFileNode;
+
+    Relation relation = CompressAddressGetRelation(relid);
+    relation_close(relation, AccessShareLock);
+    relFileNode = relation->rd_node;
+    relFileNode.relNode = relid;  // specified the reloid to construct the path
+
+    if (!OidIsValid(relFileNode.relNode)) {
+        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg("can not find table ")));
+    }
+    if (!IS_COMPRESSED_RNODE(relFileNode, MAIN_FORKNUM)) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("the specified file(relation) is non-compression relation.")));
+    }
+    char *path = relpathbackend(relFileNode, InvalidBackendId, MAIN_FORKNUM);
+
+    char pcaFilePath[MAXPGPATH];
+    if (segmentNo == 0) {
+        errno_t rc = snprintf_s(pcaFilePath, MAXPGPATH, MAXPGPATH - 1, COMPRESS_SUFFIX, path);
+        securec_check_ss(rc, "\0", "\0");
+    } else {
+        errno_t rc = snprintf_s(pcaFilePath, MAXPGPATH, MAXPGPATH - 1, "%s.%d%s", path, segmentNo, COMPRESS_STR);
+        securec_check_ss(rc, "\0", "\0");
+    }
+    pfree(path);
+    FILE* pcaFile = AllocateFile((const char*)pcaFilePath, "rb");
+    if (pcaFile == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg("compress File: can not find file")));
+    }
+    struct stat fileStat;
+    if (fstat(fileno(pcaFile), &fileStat) != 0) {
+        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg("fileStat: can not find file")));
+    }
+    auto compressAddressState = (CompressAddrState*)palloc(sizeof(CompressAddrState));
+    compressAddressState->fd = pcaFile;
+    auto maxExtent = (fileStat.st_size / BLCKSZ) / CFS_EXTENT_SIZE;
+    compressAddressState->maxExtent = (BlockNumber)maxExtent;
+    compressAddressState->extentCount= 0;
+    compressAddressState->blockNumber= 0;
+
+    return compressAddressState;
+}
+
+Datum compress_address_details(PG_FUNCTION_ARGS)
+{
+    if (SRF_IS_FIRSTCALL()) {
+        int i = 1;
+        FuncCallContext* fctx = SRF_FIRSTCALL_INIT();
+        MemoryContext mctx = MemoryContextSwitchTo(fctx->multi_call_memory_ctx);
+
+        TupleDesc tupdesc = CreateTemplateTupleDesc(6, false, TAM_HEAP);
+        TupleDescInitEntry(tupdesc, (AttrNumber)i++, "extent", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)i++, "extent_block_number", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)i++, "block_number", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)i++, "alocated_chunks", INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)i++, "nchunks", INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)i++, "chunknos", INT4ARRAYOID, -1, 0);
+        fctx->tuple_desc = BlessTupleDesc(tupdesc);
+
+        CompressAddrState *pState = CompressAddressInit(fcinfo);
+        fctx->user_fctx = pState;
+        fctx->max_calls = pState->maxExtent;
+
+        (void)MemoryContextSwitchTo(mctx);
+    }
+
+    /* stuff done on every call of the function */
+    FuncCallContext *fctx = SRF_PERCALL_SETUP();
+    auto itemState = (CompressAddrState *)fctx->user_fctx;
+
+    if (itemState->extentCount < itemState->maxExtent) {
+        CfsExtentHeader* extentHeader = NULL;
+        if (itemState->blockNumber == 0) {
+            if (fseeko(itemState->fd, (((itemState->extentCount + 1) * CFS_EXTENT_SIZE) - 1) * BLCKSZ, SEEK_SET) != 0) {
+                ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                                errmsg("fseeko: can not seek file")));
+            }
+            if (fread(itemState->extentHeaderChar, 1, BLCKSZ, itemState->fd) == BLCKSZ) {
+                extentHeader = (CfsExtentHeader*)itemState->extentHeaderChar;
+            } else {
+                ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                                errmsg("fread: can not read file")));
+            }
+        } else {
+            extentHeader = (CfsExtentHeader*)itemState->extentHeaderChar;
+        }
+        if (extentHeader->nblocks == 0) {
+            (void)FreeFile(itemState->fd);
+            SRF_RETURN_DONE(fctx);
+        }
+        CfsExtentAddress *cfsExtentAddress = GetExtentAddress(extentHeader, (uint16)itemState->blockNumber);
+        auto allocatedChunk = cfsExtentAddress->allocated_chunks;
+
+        Datum values[6];
+        values[0] = Int64GetDatum(itemState->extentCount);
+        values[1] = Int64GetDatum(itemState->blockNumber);
+        values[2] = Int64GetDatum(PG_GETARG_INT64(1) * CFS_LOGIC_BLOCKS_PER_FILE + itemState->extentCount *
+                                  CFS_LOGIC_BLOCKS_PER_EXTENT + itemState->blockNumber);
+        values[3] = Int32GetDatum(allocatedChunk);
+        values[4] = Int32GetDatum(cfsExtentAddress->nchunks);
+
+        Datum* chunknos = (Datum*)MemoryContextAlloc(fctx->multi_call_memory_ctx, (allocatedChunk) * sizeof(Datum));
+        for (int i = 0; i < allocatedChunk; i++) {
+            chunknos[i] = Int32GetDatum(cfsExtentAddress->chunknos[i]);
+        }
+        values[5] = PointerGetDatum(construct_array(chunknos, allocatedChunk, INT4OID, sizeof(int32), true, 'i'));
+
+         /* Build and return the result tuple. */
+        bool nulls[6];
+        securec_check(memset_s(nulls, sizeof(nulls), 0, sizeof(nulls)), "\0", "\0");
+        HeapTuple tuple = heap_form_tuple(fctx->tuple_desc, (Datum*)values, (bool*)nulls);
+        Datum result = HeapTupleGetDatum(tuple);
+        if (itemState->blockNumber >= extentHeader->nblocks - 1) {
+            itemState->extentCount++;
+            itemState->blockNumber = 0;
+        } else {
+            itemState->blockNumber++;
+        }
+        SRF_RETURN_NEXT(fctx, result);
+    } else {
+        (void)FreeFile(itemState->fd);
+        SRF_RETURN_DONE(fctx);
+    }
+}
+
+Datum compress_address_header(PG_FUNCTION_ARGS)
+{
+    if (SRF_IS_FIRSTCALL()) {
+        int i = 1;
+        FuncCallContext* fctx = SRF_FIRSTCALL_INIT();
+        MemoryContext mctx = MemoryContextSwitchTo(fctx->multi_call_memory_ctx);
+
+        TupleDesc tupdesc = CreateTemplateTupleDesc(5, false, TAM_HEAP);
+        TupleDescInitEntry(tupdesc, (AttrNumber)i++, "extent", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)i++, "nblocks", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)i++, "alocated_chunks", INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)i++, "chunk_size", INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)i++, "algorithm", INT8OID, -1, 0);
+        fctx->tuple_desc = BlessTupleDesc(tupdesc);
+
+        CompressAddrState *pState = CompressAddressInit(fcinfo);
+        fctx->user_fctx = pState;
+        fctx->max_calls = pState->maxExtent;
+
+        (void)MemoryContextSwitchTo(mctx);
+    }
+
+    /* stuff done on every call of the function */
+    FuncCallContext *fctx = SRF_PERCALL_SETUP();
+    auto itemState = (CompressAddrState *)fctx->user_fctx;
+
+    if (fctx->call_cntr < fctx->max_calls) {
+        CfsExtentHeader* extentHeader = NULL;
+        if (fseeko(itemState->fd, (((itemState->extentCount + 1) * CFS_EXTENT_SIZE) - 1) * BLCKSZ, SEEK_SET) != 0) {
+            ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg("fseeko: can not seek file")));
+        }
+        if (fread(itemState->extentHeaderChar, 1, BLCKSZ, itemState->fd) == BLCKSZ) {
+            extentHeader = (CfsExtentHeader*)itemState->extentHeaderChar;
+        } else {
+            ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg("fread: can not read file")));
+        }
+
+        Datum values[5];
+        values[0] = Int64GetDatum(fctx->call_cntr);
+        values[1] = Int64GetDatum(extentHeader->nblocks);
+        values[2] = Int32GetDatum(extentHeader->allocated_chunks);
+        values[3] = Int32GetDatum(extentHeader->chunk_size);
+        values[4] = Int64GetDatum((int)extentHeader->algorithm);
+
+         /* Build and return the result tuple. */
+        bool nulls[5];
+        securec_check(memset_s(nulls, sizeof(nulls), 0, sizeof(nulls)), "\0", "\0");
+        HeapTuple tuple = heap_form_tuple(fctx->tuple_desc, (Datum*)values, (bool*)nulls);
+        Datum result = HeapTupleGetDatum(tuple);
+        itemState->extentCount++;
+        SRF_RETURN_NEXT(fctx, result);
+    } else {
+        (void)FreeFile(itemState->fd);
+        SRF_RETURN_DONE(fctx);
+    }
+}
+
+#define PCA_BUFFERS_STAT_INFO_COLS (4)
+Datum compress_buffer_stat_info(PG_FUNCTION_ARGS)
+{
+    int i = 1;
+    TupleDesc tupdesc = CreateTemplateTupleDesc(PCA_BUFFERS_STAT_INFO_COLS, false, TAM_HEAP);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "ctrl_cnt", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "main_cnt", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "free_cnt", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)i++, "recycle_times", INT8OID, -1, 0);
+    tupdesc = BlessTupleDesc(tupdesc);
+
+    uint64 main_cnt = 0;
+    uint64 free_cnt = 0;
+    for (int j = 0; j < PCA_PART_LIST_NUM; j++) {
+        main_cnt += g_pca_buf_ctx->main_lru[j].count;
+        free_cnt += g_pca_buf_ctx->free_lru[j].count;
+    }
+
+    Datum values[PCA_BUFFERS_STAT_INFO_COLS];
+    values[0] = Int64GetDatum(g_pca_buf_ctx->max_count);
+    values[1] = Int64GetDatum(main_cnt);
+    values[2] = Int64GetDatum(free_cnt);
+    values[3] = Int64GetDatum(g_pca_buf_ctx->stat.recycle_cnt);
+
+     /* Build and return the result tuple. */
+    bool nulls[PCA_BUFFERS_STAT_INFO_COLS];
+    securec_check(memset_s(nulls, sizeof(nulls), 0, sizeof(nulls)), "\0", "\0");
+    HeapTuple tuple = heap_form_tuple(tupdesc, (Datum*)values, (bool*)nulls);
+    PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
+}
+
+void compress_ratio_info_single(char* path, int64 *file_count, int64 *logic_size, int64 *physic_size)
+{
+    char pathname[MAXPGPATH] = {0};
+    unsigned int segcount = 0;
+    errno_t rc;
+
+    for (segcount = 0;; segcount++) {
+        struct stat fst;
+        rc = memset_s(pathname, MAXPGPATH, 0, MAXPGPATH);
+        securec_check(rc, "\0", "\0");
+
+        CHECK_FOR_INTERRUPTS();  // can be interrputed at any time
+
+        if (segcount == 0) {
+            rc = snprintf_s(pathname, MAXPGPATH, MAXPGPATH - 1, "%s%s", path, COMPRESS_STR);
+        } else {
+            rc = snprintf_s(pathname, MAXPGPATH, MAXPGPATH - 1, "%s.%u%s", path, segcount, COMPRESS_STR);
+        }
+        securec_check_ss(rc, "\0", "\0");
+
+        if (stat(pathname, &fst) < 0) {
+            if (errno == ENOENT && segcount > 0) {
+                break;
+            } else {
+                ereport(ERROR, (errcode_for_file_access(), errmsg("could not stat file \"%s\": ", pathname)));
+            }
+        }
+
+        *logic_size += fst.st_size;
+        *physic_size += (fst.st_blocks * FILE_BLOCK_SIZE_512);
+    }
+
+    *file_count += segcount;
+}
+
+void checkPath(char* path)
+{
+    if (path == NULL || strlen(path) <= 1)
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("The input path is incorrect.")));
+    for (uint32 n = 0; n < strlen(path) - 1; n++) {
+        if (path[n] == '/' && path[n + 1] == '/') {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                            errmsg("The input path is incorrect.")));
+        }
+    }
+}
+
+#define PCA_COMPRESS_RATIO_INFO_COLS (6)
+Datum compress_ratio_info(PG_FUNCTION_ARGS)
+{
+    int i = 0, j = 1;
+
+    // get input params
+    char* path = text_to_cstring(PG_GETARG_TEXT_P(0));
+    checkPath(path);
+
+    // format the tupdesc
+    TupleDesc tupdesc = CreateTemplateTupleDesc(PCA_COMPRESS_RATIO_INFO_COLS, false, TAM_HEAP);
+    TupleDescInitEntry(tupdesc, (AttrNumber)j++, "path", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)j++, "is_compress", BOOLOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)j++, "file_count", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)j++, "logic_size", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)j++, "physic_size", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)j++, "compress_ratio", TEXTOID, -1, 0);
+    tupdesc = BlessTupleDesc(tupdesc);
+
+    // calculate the values
+    int64 file_count = 0, logic_size = 0, physic_size = 0;
+
+    // get complete RelFileNode
+    RelFileNodeForkNum relfilenode = relpath_to_filenode(path);
+    Relation relation = try_relation_open(relfilenode.rnode.node.relNode, AccessShareLock);
+    if (!RelationIsValid(relation)) {
+        PG_RETURN_NULL();
+    }
+    relfilenode.rnode.node = relation->rd_node;
+    relation_close(relation, AccessShareLock);
+
+    bool isCompress = IS_COMPRESSED_RNODE(relfilenode.rnode.node, MAIN_FORKNUM);
+    if (!isCompress) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("the specified file(relation) is non-compression relation.")));
+    }
+
+    if (relation->rd_rel->parttype == PARTTYPE_NON_PARTITIONED_RELATION) {
+        compress_ratio_info_single(path, &file_count, &logic_size, &physic_size);
+    } else if (PART_OBJ_TYPE_TABLE_PARTITION == relation->rd_rel->parttype ||
+           PART_OBJ_TYPE_INDEX_PARTITION == relation->rd_rel->parttype) {
+        List *partid_list = getPartitionObjectIdList(relfilenode.rnode.node.relNode, relation->rd_rel->parttype);
+        ListCell *cell;
+        RelFileNode rnode = relfilenode.rnode.node;
+        foreach (cell, partid_list) {
+            rnode.relNode = lfirst_oid(cell);
+            char *sub_path = relpathbackend(rnode, InvalidBackendId, MAIN_FORKNUM);
+            compress_ratio_info_single(sub_path, &file_count, &logic_size, &physic_size);
+            pfree(sub_path);
+        }
+    } else if (PART_OBJ_TYPE_TABLE_SUB_PARTITION == relation->rd_rel->parttype) {
+        List *subpartid_list = getSubPartitionObjectIdList(relfilenode.rnode.node.relNode);
+        ListCell *cell;
+        RelFileNode rnode = relfilenode.rnode.node;
+        foreach (cell, subpartid_list) {
+            rnode.relNode = lfirst_oid(cell);
+            char *sub_path = relpathbackend(rnode, InvalidBackendId, MAIN_FORKNUM);
+            compress_ratio_info_single(sub_path, &file_count, &logic_size, &physic_size);
+            pfree(sub_path);
+        }
+    } else {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("the specified file(relation) is unsupported compressed type.")));
+    }
+
+    // input the values
+    Datum values[PCA_COMPRESS_RATIO_INFO_COLS];
+    values[i++] = CStringGetTextDatum(path);
+    values[i++] = BoolGetDatum(isCompress);
+    values[i++] = Int64GetDatum(file_count);
+    values[i++] = Int64GetDatum(logic_size);
+    values[i++] = Int64GetDatum(physic_size);
+
+    double ratio = (logic_size == 0 ? 0 : (double)physic_size / (double)logic_size) * 100;
+    int ratio_len = 8;
+    char* ratio_str = (char*)palloc0((uint32)ratio_len);
+
+    errno_t rc = sprintf_s(ratio_str, (uint32)ratio_len, "%.2lf%%", ratio);
+    securec_check_ss(rc, "\0", "\0");
+    values[i++] = CStringGetTextDatum(ratio_str);
+
+     /* Build and return the result tuple. */
+    bool nulls[PCA_COMPRESS_RATIO_INFO_COLS];
+    securec_check(memset_s(nulls, sizeof(nulls), 0, sizeof(nulls)), "\0", "\0");
+
+    HeapTuple tuple = heap_form_tuple(tupdesc, (Datum*)values, (bool*)nulls);
+
+    pfree(ratio_str);
+    PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
+}
+
+void compress_statistic_single_file_info(char* pathname,
+    int64 *extent_count, int64 *dispersion_count, int64 *void_count, size_t file_size, int16 step)
+{
+    FILE *compressedFd = AllocateFile((const char *)pathname, "rb");
+
+    uint32 extCnt = (uint32)(file_size / (BLCKSZ * CFS_EXTENT_SIZE) +
+                             (file_size % (BLCKSZ * CFS_EXTENT_SIZE) != 0 ? 1 : 0));
+    for (uint32 extentIndex = 0; extentIndex < extCnt; extentIndex += (uint16)step) {
+        CHECK_FOR_INTERRUPTS();  // can be interrputed at any time
+        auto mmapHeaderResult = MMapHeader(compressedFd, extentIndex, true);
+
+        CfsExtentHeader *header = mmapHeaderResult.header;
+        // get statistic
+        uint16 sum_allocated_chunks = 0;
+        for (uint16 pageIdx = 0; pageIdx < header->nblocks; pageIdx++) {
+            CfsExtentAddress *cfsExtentAddress = GetExtentAddress(header, pageIdx);
+            sum_allocated_chunks += cfsExtentAddress->allocated_chunks;
+            uint16 minChrunkNo = 0xFFFF, maxChrunkNo = 0;
+            for (uint16 idx = 0; idx < cfsExtentAddress->allocated_chunks; idx++) {
+                minChrunkNo = minChrunkNo <
+                    cfsExtentAddress->chunknos[idx] ? minChrunkNo : cfsExtentAddress->chunknos[idx];
+                maxChrunkNo = maxChrunkNo >
+                    cfsExtentAddress->chunknos[idx] ? maxChrunkNo : cfsExtentAddress->chunknos[idx];
+            }
+            if (((maxChrunkNo - minChrunkNo) + 1) != cfsExtentAddress->allocated_chunks) {
+                (*dispersion_count)++;
+            }
+        }
+
+        *void_count += (header->allocated_chunks - sum_allocated_chunks);
+        MmapFree(&mmapHeaderResult);
+    }
+
+    *extent_count += extCnt;
+    (void)FreeFile(compressedFd);
+}
+
+void compress_statistic_info_single(char* path, int16 step,
+    int64 *extent_count, int64 *dispersion_count, int64 *void_count)
+{
+    char pathname[MAXPGPATH] = {0};
+    unsigned int segcount = 0;
+    errno_t rc;
+
+    for (segcount = 0;; segcount++) {
+        struct stat fst;
+        rc = memset_s(pathname, MAXPGPATH, 0, MAXPGPATH);
+        securec_check(rc, "\0", "\0");
+
+        CHECK_FOR_INTERRUPTS();  // can be interrputed at any time
+
+        if (segcount == 0) {
+            rc = snprintf_s(pathname, MAXPGPATH, MAXPGPATH - 1, "%s%s", path, COMPRESS_STR);
+        } else {
+            rc = snprintf_s(pathname, MAXPGPATH, MAXPGPATH - 1, "%s.%u%s", path, segcount, COMPRESS_STR);
+        }
+        securec_check_ss(rc, "\0", "\0");
+
+        if (stat(pathname, &fst) < 0) {
+            if (errno == ENOENT && segcount > 0) {
+                break;
+            } else {
+                ereport(ERROR, (errcode_for_file_access(), errmsg("could not stat file \"%s\": ", pathname)));
+            }
+        }
+
+        // get every file statistic
+        compress_statistic_single_file_info(pathname, extent_count, dispersion_count, void_count,
+                                            (size_t)fst.st_size, step);
+    }
+}
+
+#define PCA_COMPRESS_STATISTIC_INFO_COLS (4)
+#define PCA_COMPRESS_STATISTIC_SKIP_MIN  (1)
+#define PCA_COMPRESS_STATISTIC_SKIP_MAX  (99)
+Datum compress_statistic_info(PG_FUNCTION_ARGS)
+{
+    int i = 0, j = 1;
+
+    // get input params
+    char* path = text_to_cstring(PG_GETARG_TEXT_P(0));
+    checkPath(path);
+
+    int16 step = PG_GETARG_INT16(1);
+    if (step < PCA_COMPRESS_STATISTIC_SKIP_MIN || step > PCA_COMPRESS_STATISTIC_SKIP_MAX) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("the value of skip-count is between [1, 99]")));
+    }
+
+    // get complete RelFileNode
+    RelFileNodeForkNum relfilenode = relpath_to_filenode(path);
+    Relation relation = try_relation_open(relfilenode.rnode.node.relNode, AccessShareLock);
+    if (!RelationIsValid(relation)) {
+        PG_RETURN_NULL();
+    }
+    relfilenode.rnode.node = relation->rd_node;
+    relation_close(relation, AccessShareLock);
+
+    if (!IS_COMPRESSED_RNODE(relfilenode.rnode.node, MAIN_FORKNUM)) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("the specified file(relation) is non-compression relation.")));
+    }
+
+    // format the tupdesc
+    TupleDesc tupdesc = CreateTemplateTupleDesc(PCA_COMPRESS_STATISTIC_INFO_COLS, false, TAM_HEAP);
+    TupleDescInitEntry(tupdesc, (AttrNumber)j++, "path", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)j++, "extent_count", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)j++, "dispersion_count", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)j++, "void_count", INT8OID, -1, 0);
+    tupdesc = BlessTupleDesc(tupdesc);
+
+    // calculate the values
+    int64 extent_count = 0, dispersion_count = 0, void_count = 0;
+
+    if (relation->rd_rel->parttype == PARTTYPE_NON_PARTITIONED_RELATION) {
+        compress_statistic_info_single(path, step, &extent_count, &dispersion_count, &void_count);
+    } else if (PART_OBJ_TYPE_TABLE_PARTITION == relation->rd_rel->parttype ||
+           PART_OBJ_TYPE_INDEX_PARTITION == relation->rd_rel->parttype) {
+        List *partid_list = getPartitionObjectIdList(relfilenode.rnode.node.relNode, relation->rd_rel->parttype);
+        ListCell *cell;
+        RelFileNode rnode = relfilenode.rnode.node;
+        foreach (cell, partid_list) {
+            rnode.relNode = lfirst_oid(cell);
+            char *sub_path = relpathbackend(rnode, InvalidBackendId, MAIN_FORKNUM);
+            compress_statistic_info_single(sub_path, step, &extent_count, &dispersion_count, &void_count);
+            pfree(sub_path);
+        }
+    } else if (PART_OBJ_TYPE_TABLE_SUB_PARTITION == relation->rd_rel->parttype) {
+        List *subpartid_list = getSubPartitionObjectIdList(relfilenode.rnode.node.relNode);
+        ListCell *cell;
+        RelFileNode rnode = relfilenode.rnode.node;
+        foreach (cell, subpartid_list) {
+            rnode.relNode = lfirst_oid(cell);
+            char *sub_path = relpathbackend(rnode, InvalidBackendId, MAIN_FORKNUM);
+            compress_statistic_info_single(sub_path, step, &extent_count, &dispersion_count, &void_count);
+            pfree(sub_path);
+        }
+    } else {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("the specified file(relation) is unsupported compressed type.")));
+    }
+
+    // input the values
+    Datum values[PCA_COMPRESS_STATISTIC_INFO_COLS];
+    values[i++] = CStringGetTextDatum(path);
+    values[i++] = Int64GetDatum(extent_count);
+    values[i++] = Int64GetDatum(dispersion_count);
+    values[i++] = Int64GetDatum(void_count);
+
+     /* Build and return the result tuple. */
+    bool nulls[PCA_COMPRESS_STATISTIC_INFO_COLS];
+    securec_check(memset_s(nulls, sizeof(nulls), 0, sizeof(nulls)), "\0", "\0");
+
+    HeapTuple tuple = heap_form_tuple(tupdesc, (Datum*)values, (bool*)nulls);
+
+    PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
 }
 
 Datum pg_read_binary_file_blocks(PG_FUNCTION_ARGS)
@@ -415,16 +980,32 @@ Datum pg_read_binary_file_blocks(PG_FUNCTION_ARGS)
 
     if (fctx->call_cntr < fctx->max_calls) {
         bytea *buf = (bytea *)palloc(BLCKSZ + VARHDRSZ);
-        size_t len = ReadAllChunkOfBlock(VARDATA(buf), BLCKSZ, itemState->blkno, itemState->rbStruct);
+        BlockNumber extentCount = itemState->blkno / CFS_LOGIC_BLOCKS_PER_EXTENT;
+        if (itemState->rbStruct.extentCount != extentCount || itemState->rbStruct.header == NULL) {
+            MmapFree(&itemState->rbStruct);
+            auto curHeader = MMapHeader(itemState->compressedFd, extentCount, true);
+
+            itemState->rbStruct.header = curHeader.header;
+            itemState->rbStruct.extentCount = curHeader.extentCount;
+            itemState->rbStruct.pointer = curHeader.pointer;
+            itemState->rbStruct.mmapLen = curHeader.mmapLen;
+        }
+
+        CfsReadStruct cfsReadStruct{itemState->compressedFd, itemState->rbStruct.header, extentCount};
+        size_t len = CfsReadCompressedPage(VARDATA(buf), BLCKSZ,
+            itemState->blkno % CFS_LOGIC_BLOCKS_PER_EXTENT, &cfsReadStruct,
+            CFS_LOGIC_BLOCKS_PER_FILE * itemState->segmentNo + itemState->blkno);
         SET_VARSIZE(buf, len + VARHDRSZ);
-        Datum values[4];
+        Datum values[6];
         values[0] = PG_GETARG_DATUM(0);
         values[1] = Int32GetDatum(itemState->blkno);
         values[2] = Int32GetDatum(len);
-        values[3] = PointerGetDatum(buf);
+        values[3] = Int32GetDatum(itemState->rbStruct.header->algorithm);
+        values[4] = Int32GetDatum(itemState->rbStruct.header->chunk_size);
+        values[5] = PointerGetDatum(buf);
 
         /* Build and return the result tuple. */
-        bool nulls[4];
+        bool nulls[6];
         securec_check(memset_s(nulls, sizeof(nulls), 0, sizeof(nulls)), "\0", "\0");
         HeapTuple tuple = heap_form_tuple(fctx->tuple_desc, (Datum*)values, (bool*)nulls);
         Datum result = HeapTupleGetDatum(tuple);
@@ -432,10 +1013,9 @@ Datum pg_read_binary_file_blocks(PG_FUNCTION_ARGS)
         SRF_RETURN_NEXT(fctx, result);
     } else {
         if (itemState->rbStruct.header != NULL) {
-            pc_munmap(itemState->rbStruct.header);
+            MmapFree(&itemState->rbStruct);
         }
-        FreeFile(itemState->pcaFile);
-        FreeFile(itemState->rbStruct.fp);
+        (void)FreeFile(itemState->compressedFd);
         SRF_RETURN_DONE(fctx);
     }
 }
@@ -560,6 +1140,14 @@ static stated_file* pg_ls_dir_recursive(const char* location, stated_file* sd_fi
 
     while ((de = ReadDir(dirdesc, location)) != NULL) {
         if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0)
+            continue;
+
+        /*
+         * Do not copy log directory during gs_rewind. Currently we only consider such case that
+         * log_directory is relative path and only one level deep. More complicated cases should
+         * be taken care of in the future.
+         */
+        if (u_sess->proc_cxt.clientIsGsrewind && strcmp(de->d_name, u_sess->attr.attr_common.Log_directory) == 0)
             continue;
 
         int maxPathLen = strlen(location) + strlen(de->d_name) + 2;
@@ -708,4 +1296,140 @@ Datum pg_stat_file_recursive(PG_FUNCTION_ARGS)
     }
 
     SRF_RETURN_DONE(funcctx);
+}
+
+/*
+ * Generic function to return a directory listing of files.
+ *
+ * If the directory isn't there, silently return an empty set if missing_ok.
+ * Other unreadable-directory cases throw an error.
+ */
+static Datum pg_ls_dir_files(FunctionCallInfo fcinfo, const char *dir, bool missing_ok)
+{
+    ReturnSetInfo *rsinfo = (ReturnSetInfo *)fcinfo->resultinfo;
+    bool randomAccess;
+    TupleDesc tupdesc;
+    Tuplestorestate *tupstore;
+    DIR *dirdesc;
+    struct dirent *de;
+    MemoryContext oldcontext;
+    errno_t rc = EOK;
+
+    /* check to see if caller supports us returning a tuplestore */
+    if (rsinfo == NULL || !IsA(rsinfo, ReturnSetInfo))
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("set-valued function called in context that cannot accept a set")));
+    if (!(rsinfo->allowedModes & SFRM_Materialize))
+        ereport(ERROR,
+            (errcode(ERRCODE_SYNTAX_ERROR),
+                errmsg("materialize mode required, but it is not allowed in this context")));
+
+    /* The tupdesc and tuplestore must be created in ecxt_per_query_memory */
+    oldcontext = MemoryContextSwitchTo(rsinfo->econtext->ecxt_per_query_memory);
+
+    if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
+        elog(ERROR, "return type must be a row type");
+
+    randomAccess = (rsinfo->allowedModes & SFRM_Materialize_Random) != 0;
+    tupstore = tuplestore_begin_heap(randomAccess, false, u_sess->attr.attr_memory.work_mem);
+    rsinfo->returnMode = SFRM_Materialize;
+    rsinfo->setResult = tupstore;
+    rsinfo->setDesc = tupdesc;
+
+    (void)MemoryContextSwitchTo(oldcontext);
+
+    /*
+     * Now walk the directory.  Note that we must do this within a single SRF
+     * call, not leave the directory open across multiple calls, since we
+     * can't count on the SRF being run to completion.
+     */
+    dirdesc = AllocateDir(dir);
+    if (!dirdesc) {
+        /* Return empty tuplestore if appropriate */
+        if (missing_ok && errno == ENOENT)
+            return (Datum)0;
+        /* Otherwise, we can let ReadDir() throw the error */
+    }
+
+    while ((de = ReadDir(dirdesc, dir)) != NULL) {
+        Datum values[3];
+        bool nulls[3];
+        char path[MAXPGPATH * 2];
+        struct stat attrib;
+
+        /* Skip hidden files */
+        if (de->d_name[0] == '.')
+            continue;
+
+        /* Get the file info */
+        rc = snprintf_s(path, sizeof(path), sizeof(path) - 1, "%s/%s", dir, de->d_name);
+        securec_check_ss(rc, "\0", "\0");
+
+        if (stat(path, &attrib) < 0) {
+            /* Ignore concurrently-deleted files, else complain */
+            if (errno == ENOENT)
+                continue;
+            ereport(ERROR, (errcode_for_file_access(), errmsg("could not stat file \"%s\": %m", path)));
+        }
+
+        /* Ignore anything but regular files */
+        if (!S_ISREG(attrib.st_mode))
+            continue;
+
+        values[0] = CStringGetTextDatum(de->d_name);
+        values[1] = Int64GetDatum((int64)attrib.st_size);
+        values[2] = TimestampTzGetDatum(time_t_to_timestamptz(attrib.st_mtime));
+        rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
+        securec_check(rc, "\0", "\0");
+
+        tuplestore_putvalues(tupstore, tupdesc, values, nulls);
+    }
+
+    (void)FreeDir(dirdesc);
+    return (Datum)0;
+}
+
+/* Function to return the list of files in the WAL directory */
+Datum pg_ls_waldir(PG_FUNCTION_ARGS)
+{
+    if (!superuser() && !isMonitoradmin(GetUserId()))
+        ereport(ERROR,
+            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("only system/monitor admin can check WAL directory!")));
+    return pg_ls_dir_files(fcinfo, XLOGDIR, false);
+}
+
+/*
+ * Generic function to return the list of files in pgsql_tmp
+ */
+static Datum pg_ls_tmpdir(FunctionCallInfo fcinfo, Oid tblspc)
+{
+    char path[MAXPGPATH];
+    if (!superuser() && !isMonitoradmin(GetUserId()))
+        ereport(ERROR,
+            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                errmsg("only system/monitor admin can check pgsql_tmp directory!")));
+    if (!SearchSysCacheExists1(TABLESPACEOID, ObjectIdGetDatum(tblspc)))
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("tablespace with OID %u does not exist", tblspc)));
+
+    TempTablespacePath(path, tblspc);
+    return pg_ls_dir_files(fcinfo, path, true);
+}
+
+/*
+ * Function to return the list of temporary files in the pg_default tablespace's
+ * pgsql_tmp directory
+ */
+Datum pg_ls_tmpdir_noargs(PG_FUNCTION_ARGS)
+{
+    return pg_ls_tmpdir(fcinfo, DEFAULTTABLESPACE_OID);
+}
+
+/*
+ * Function to return the list of temporary files in the specified tablespace's
+ * pgsql_tmp directory
+ */
+Datum pg_ls_tmpdir_1arg(PG_FUNCTION_ARGS)
+{
+    return pg_ls_tmpdir(fcinfo, PG_GETARG_OID(0));
 }

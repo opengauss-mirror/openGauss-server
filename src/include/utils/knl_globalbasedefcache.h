@@ -132,7 +132,14 @@ protected:
     int m_nbuckets;                  /* GSC hashtable's bucket num, assigned in constructor */
     pthread_rwlock_t *m_obj_locks;   /* GSC internal bucket level locks, type as array
                                         with length m_nbuckets */
-    DllistWithLock m_dead_entries;   /* List with elem removed from current GSC */
+
+    /* List with elem removed from current GSC, its element type couble be
+     *   1. GlobalRelationEntry(for RelCache)
+     *   2. GlobalPartEntry(for PartCache)
+     *
+     * Note: CatCache's dead list implemented in its original way
+     */
+    DllistWithLock m_dead_entries;
 
     pthread_rwlock_t *m_oid_locks;   /* locks for GSC object, partRelOid or relOid, avoid xact
                                         commit thread conflict with other threads */

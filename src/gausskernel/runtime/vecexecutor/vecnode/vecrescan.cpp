@@ -54,7 +54,6 @@
 #include "vecexecutor/vecnodecstoreindexand.h"
 #include "vecexecutor/vecnodecstoreindexor.h"
 #include "vecexecutor/vecnodevectorow.h"
-#include "vecexecutor/vecnodedfsindexscan.h"
 #ifdef ENABLE_MULTIPLE_NODES
 #include "vecexecutor/vectsstorescan.h"
 #endif   /* ENABLE_MULTIPLE_NODES */
@@ -133,9 +132,6 @@ void VecExecReScan(PlanState* node)
         case T_CStoreScanState:
             ExecReScanCStoreScan((CStoreScanState*)node);
             break;
-        case T_DfsScanState:
-            ExecReScanDfsScan((DfsScanState*)node);
-            break;
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScanState:
             ExecReScanTsStoreScan((TsStoreScanState*)node);
@@ -170,9 +166,6 @@ void VecExecReScan(PlanState* node)
             break;
         case T_VecSortState:
             ExecReScanVecSort((VecSortState*)node);
-            break;
-        case T_DfsIndexScanState:
-            ExecReScanDfsIndexScan((DfsIndexScanState*)node);
             break;
         case T_CStoreIndexScanState:
             ExecReScanCStoreIndexScan((CStoreIndexScanState*)node);

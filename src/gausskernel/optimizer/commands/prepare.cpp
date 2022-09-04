@@ -48,6 +48,7 @@
 #include "catalog/pgxc_node.h"
 #endif
 #include "replication/walreceiver.h"
+#include "optimizer/gplanmgr.h"
 
 #define CLUSTER_EXPANSION_BASE 2
 
@@ -278,7 +279,12 @@ void ExecuteQuery(ExecuteStmt* stmt, IntoClause* intoClause, const char* querySt
     query_string = MemoryContextStrdup(PortalGetHeapMemory(portal), entry->plansource->query_string);
 
     /* Replan if needed, and increment plan refcount for portal */
-    cplan = GetCachedPlan(entry->plansource, paramLI, false);
+    if (ENABLE_CACHEDPLAN_MGR) {
+        cplan = GetWiseCachedPlan(psrc, paramLI, false);
+    } else {
+        cplan = GetCachedPlan(psrc, paramLI, false);
+    }
+
     plan_list = cplan->stmt_list;
 
     /* 
@@ -288,6 +294,7 @@ void ExecuteQuery(ExecuteStmt* stmt, IntoClause* intoClause, const char* querySt
     * above GetCachedPlan call and here.
     */
     PortalDefineQuery(portal, NULL, query_string, entry->plansource->commandTag, plan_list, cplan);
+    portal->nextval_default_expr_type = psrc->nextval_default_expr_type;
 
     /* incase change shared plan in execute stage */
     CopyPlanForGPCIfNecessary(entry->plansource, portal);
@@ -454,6 +461,8 @@ static ParamListInfo EvaluateParams(CachedPlanSource* psrc, List* params, const 
     paramLI->parserSetupArg = NULL;
     paramLI->params_need_process = false;
     paramLI->numParams = num_params;
+    paramLI->uParamInfo = DEFUALT_INFO;
+    paramLI->params_lazy_bind = false;
 
     i = 0;
     foreach (l, exprstates) {
@@ -675,7 +684,7 @@ void StorePreparedStatementCNGPC(const char *stmt_name, CachedPlanSource *planso
 
     /* Now it's safe to move the CachedPlanSource to permanent memory */
     if (!is_share) {
-        Assert(IsA((plansource)->raw_parse_tree, TransactionStmt) ||
+        Assert((plansource->raw_parse_tree && IsA(plansource->raw_parse_tree, TransactionStmt)) ||
                !plansource->is_support_gplan || plansource->gpc.status.IsSharePlan());
         plansource->gpc.status.SetLoc(GPC_SHARE_IN_LOCAL_SAVE_PLAN_LIST);
         SaveCachedPlan(plansource);
@@ -1212,7 +1221,11 @@ void ExplainExecuteQuery(
 
     u_sess->attr.attr_sql.explain_allow_multinode = true;
 
-    cplan = GetCachedPlan(psrc, paramLI, true);
+    if (ENABLE_CACHEDPLAN_MGR) {
+        cplan = GetWiseCachedPlan(psrc, paramLI, true);
+    } else {
+        cplan = GetCachedPlan(psrc, paramLI, true);
+    }
 
     /* use shared plan here, add refcount */
     if (cplan->isShared())

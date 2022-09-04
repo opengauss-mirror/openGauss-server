@@ -392,6 +392,30 @@ UPDATE gtt_test13 SET c0 = (NOT (gtt_test13.c0)) WHERE gtt_test13.c0;
 INSERT INTO gtt_test13(c0) VALUES(FALSE), (FALSE) ON DUPLICATE KEY UPDATE  NOTHING;
 TRUNCATE gtt_test13 CONTINUE IDENTITY;
 
+-- alter table bugfix
+drop table if exists gtt_test14;
+create global temp table gtt_test14(c_id int,
+c_street_1 varchar(10485760) ,
+c_text text,
+c_clob clob) on commit preserve rows;
+
+insert into gtt_test14 values(1, repeat('中文（Chinese）是中国的语言文字。特指汉族的语言文字，即汉语和汉字。在汉字文化圈和海外华人社区中，中文
+也被称为华文、汉文。中文（汉语）有标准语和方言之分，其标准语即汉语普通话，是规范后的汉民族共同语，也是中国的国家通用语言
+',100), repeat('中文（Chinese）是中国的语言文字。特指汉族的语言文字，即汉语和汉字。在汉字文化圈和海外华人社区中，中文也被称为华文、汉文。中文（汉语）有标准语和方言之分，其标准语即汉语普通话，是规范后的汉民族共同语，也是中国的国家通用语言',1000));
+
+select c_id, length(c_street_1), length(c_text) c_clob from gtt_test14;
+alter table gtt_test14 add column c_id1 int default 100;
+select c_id, length(c_street_1), length(c_text) c_clob from gtt_test14;
+update gtt_test14 set c_street_1='street1',c_text='text',c_clob='clob';
+select * from gtt_test14;
+
+--test index in new session
+\c regression
+set search_path=gtt_function,sys;
+select * from gtt_test12;
+insert into gtt_test12 values(generate_series(1,2), 't');
+insert into gtt_test12 values(generate_series(1,2), 't'); --should fail
+
 reset search_path;
 
 drop schema gtt_function cascade;

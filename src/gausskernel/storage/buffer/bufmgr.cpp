@@ -43,7 +43,6 @@
 #include "access/double_write.h"
 #include "access/parallel_recovery/dispatcher.h"
 #include "catalog/catalog.h"
-#include "catalog/dfsstore_ctlg.h"
 #include "catalog/pg_hashbucket_fn.h"
 #include "catalog/storage_gtt.h"
 #include "commands/tablespace.h"
@@ -6228,8 +6227,11 @@ void shared_buffer_write_error_callback(void *arg)
     /* Buffer is pinned, so we can read the tag without locking the spinlock */
     if (buf_desc != NULL) {
         char *path = relpathperm(((BufferDesc *)buf_desc)->tag.rnode, ((BufferDesc *)buf_desc)->tag.forkNum);
-
-        (void)errcontext("writing block %u of relation %s", buf_desc->tag.blockNum, path);
+        if (buf_desc->tag.rnode.opt) {
+            (void)errcontext("writing block %u of relation %s_pcd", buf_desc->tag.blockNum, path);
+        } else {
+            (void)errcontext("writing block %u of relation %s", buf_desc->tag.blockNum, path);
+        }
         pfree(path);
     }
 }

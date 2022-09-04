@@ -80,8 +80,14 @@ void set_default_stream()
         u_sess->opt_cxt.is_stream = false;
         u_sess->opt_cxt.is_stream_support = false;
     } else {
-        u_sess->opt_cxt.is_stream = (u_sess->opt_cxt.query_dop > 1);
-        u_sess->opt_cxt.is_stream_support = (u_sess->opt_cxt.query_dop > 1);
+        /* u_sess->opt_cxt.smp_enabled is false means current query could not use smp.
+         * And u_sess->stream_cxt.global_obj != NULL means outer query already init
+         * stream object, do not use smp in inner query.
+         */
+        u_sess->opt_cxt.is_stream = (u_sess->opt_cxt.query_dop > 1 &&
+                                     u_sess->opt_cxt.smp_enabled &&
+                                     u_sess->stream_cxt.global_obj == NULL);
+        u_sess->opt_cxt.is_stream_support = u_sess->opt_cxt.is_stream;
     }
 }
 

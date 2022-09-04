@@ -7,10 +7,14 @@ create table t2(a int, b int);
 insert into t2 values(generate_series(1, 10), generate_series(1, 30));
 create table t3(a int, b int, c int);
 insert into t3 values(generate_series(1, 50), generate_series(1, 100), generate_series(1, 10));
+create table t4(id int, val text);
+insert into t4 values(generate_series(1,1000), random());
+create index on t4(id);
 
 analyze t1;
 analyze t2;
 analyze t3;
+analyze t4;
 
 set query_dop=1002;
 explain (costs off) select * from t2 order by 1,2;
@@ -67,7 +71,12 @@ explain (costs off) select * from t1 limit 1;
 explain (costs off) select * from t1 limit 1 offset 10;
 
 explain (costs off) select * from t1 order by 1 limit 1 offset 10;
+-- test subquery recursive
+explain (costs off) select (select max(id) from t4);
+select (select max(id) from t4);
 
+explain (costs off) select * from (select a, rownum as row from (select a from t3) where rownum <= 10) where row >=5;
+select * from (select a, rownum as row from (select a from t3) where rownum <= 10) where row >=5;
 --clean
 set search_path=public;
 drop schema test_smp cascade;

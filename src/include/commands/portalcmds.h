@@ -25,6 +25,6 @@ extern void PerformPortalClose(const char* name);
 
 extern void PortalCleanup(Portal portal);
 
-extern void PersistHoldablePortal(Portal portal);
+extern void PersistHoldablePortal(Portal portal, bool is_rollback = false);
 
 #endif /* PORTALCMDS_H */

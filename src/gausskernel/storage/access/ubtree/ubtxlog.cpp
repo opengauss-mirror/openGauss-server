@@ -955,6 +955,7 @@ bool IsUBTreeVacuum(const XLogReaderState *record)
 static void UBTreeXlogReusePage(XLogReaderState *record)
 {
     xl_btree_reuse_page *xlrec = (xl_btree_reuse_page *)XLogRecGetData(record);
+    XLogRecPtr lsn = record->EndRecPtr;
 
     /*
      * Btree reuse_page records exist to provide a conflict point when we
@@ -970,7 +971,7 @@ static void UBTreeXlogReusePage(XLogReaderState *record)
     RelFileNodeCopy(tmp_node, xlrec->node, XLogRecGetBucketId(record));
 
     if (InHotStandby && g_supportHotStandby) {
-        ResolveRecoveryConflictWithSnapshot(xlrec->latestRemovedXid, tmp_node);
+        ResolveRecoveryConflictWithSnapshot(xlrec->latestRemovedXid, tmp_node, lsn);
     }
 }
 
@@ -993,13 +994,14 @@ static void UBTreeXlogPrunePage(XLogReaderState* record)
     buffer.buf = InvalidBuffer;
     RelFileNode rnode;
     xl_ubtree_prune_page *xlrec = (xl_ubtree_prune_page*)XLogRecGetData(record);
+    XLogRecPtr lsn = record->EndRecPtr;
 
     if (!XLogRecGetBlockTag(record, 0, &rnode, NULL, NULL)) {
         /* Caller specified a bogus block_id */
         ereport(PANIC, (errmsg("failed to locate backup block with ID %d", 0)));
     }
     if (InHotStandby && TransactionIdIsValid(xlrec->latestRemovedXid))
-        ResolveRecoveryConflictWithSnapshot(xlrec->latestRemovedXid, rnode);
+        ResolveRecoveryConflictWithSnapshot(xlrec->latestRemovedXid, rnode, lsn);
 
     if (XLogReadBufferForRedo(record, 0, &buffer) == BLK_NEEDS_REDO) {
         UBTreeXlogPrunePageOperatorPage(&buffer, XLogRecGetData(record));

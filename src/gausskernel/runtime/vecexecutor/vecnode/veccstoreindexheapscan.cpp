@@ -72,6 +72,7 @@ CStoreIndexHeapScanState* ExecInitCstoreIndexHeapScan(CStoreIndexHeapScan* node,
     cstorescan->itrs = node->scan.itrs;
     cstorescan->pruningInfo = node->scan.pruningInfo;
     cstorescan->partScanDirection = node->scan.partScanDirection;
+    cstorescan->partition_iterator_elimination = node->scan.partition_iterator_elimination;
 
     cstorescanstate = ExecInitCStoreScan(cstorescan, NULL, estate, eflags, false, true);
 

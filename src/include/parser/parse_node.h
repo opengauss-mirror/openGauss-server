@@ -175,8 +175,8 @@ struct ParseState {
     bool p_locked_from_parent;
     bool p_resolve_unknowns; /* resolve unknown-type SELECT outputs as type text */
     bool p_hasSynonyms;
-    Relation p_target_relation;
-    RangeTblEntry* p_target_rangetblentry;
+    List* p_target_relation;
+    List* p_target_rangetblentry;
     bool p_is_case_when;
 
     /*
@@ -259,6 +259,10 @@ struct ParseState {
                      */
 
     PlusJoinRTEInfo* p_plusjoin_rte_info; /* The RTE info while processing "(+)" */
+    List* p_updateRelations; /* For multiple-update, this is used to record the target table in the
+                              * update statement, then assign to qry->resultRelations.
+                              */
+    List* p_updateRangeVars; /* For multiple-update, use relationClase to generate RangeVar list. */
 };
 
 /* An element of p_relnamespace or p_varnamespace */

@@ -535,6 +535,7 @@ void StatementRetryController::TriggerRetry(bool is_extend_query)
             LOG, false, "%s fail to dump history command, unable to retry statement.", PRINT_PREFIX_TYPE_ALERT);
         DisableRetry();
         dumpok = false;
+        FlushErrorState();
     }
     PG_END_TRY();
 

@@ -455,7 +455,7 @@ static char* upgrade_script_dir = "../upgrade";
 static bool super_user_altered = true;
 static bool passwd_altered = true;
 bool test_single_node = false;
-static char* platform = "euleros2.0_sp2_x86_64";
+static char* platform = "euleros2.0_sp5_x86_64";
 
 /* client logic jdbc run regression tests */
 static bool use_jdbc_client = false;
@@ -5199,7 +5199,7 @@ static void CheckCleanCodeWarningInfo(const int baseNum, const int currentNum,
     return;
 }
 
-#define BASE_GLOBAL_VARIABLE_NUM 222
+#define BASE_GLOBAL_VARIABLE_NUM 220
 
 #define CMAKE_CMD_BUF_LEN 1000
 
@@ -5248,7 +5248,7 @@ static void check_global_variables()
     }
 }
 
-#define BASE_PGXC_LIKE_MACRO_NUM 1404
+#define BASE_PGXC_LIKE_MACRO_NUM 1394
 static void check_pgxc_like_macros()
 {
 #ifdef BUILD_BY_CMAKE 

@@ -3802,3 +3802,38 @@ SELECT * FROM
 (6 rows)
 
 rollback;
+-- If we didn't declare the "lateral" keyword before in delete clause with subqueries,
+-- "hasLateralRTEs" in "PlannerInfo" won't be set to true.
+-- And then there will be mistakes in "Assert(root->hasLateralRTEs);".
+-- Modify it to "subqueries in USING can see the result relation only via LATERAL"
+-- can avoid the above mistakes.
+DROP TABLE IF EXISTS int4_tbl;
+NOTICE:  table "int4_tbl" does not exist, skipping
+CREATE TABLE int4_tbl(f1 int4);
+INSERT INTO int4_tbl(f1) VALUES ('   0  ');
+INSERT INTO int4_tbl(f1) VALUES ('123456     ');
+INSERT INTO int4_tbl(f1) VALUES ('    -123456');
+INSERT INTO int4_tbl(f1) VALUES (' 2147483647');
+INSERT INTO int4_tbl(f1) VALUES ('-2147483647');
+create temp table xx1 as select f1 as x1, -f1 as x2 from int4_tbl;
+update xx1 set x2 = f1 from (select * from int4_tbl where f1 = x1) ss;
+ERROR:  column "x1" does not exist
+LINE 1: ... set x2 = f1 from (select * from int4_tbl where f1 = x1) ss;
+                                                                ^
+HINT:  There is a column named "x1" in table "xx1", but it cannot be referenced from this part of the query.
+update xx1 set x2 = f1 from (select * from int4_tbl where f1 = xx1.x1) ss;
+ERROR:  invalid reference to FROM-clause entry for table "xx1"
+LINE 1: ...t x2 = f1 from (select * from int4_tbl where f1 = xx1.x1) ss...
+                                                             ^
+HINT:  There is an entry for table "xx1", but it cannot be referenced from this part of the query.
+delete from xx1 using (select * from int4_tbl where f1 = x1) ss;
+ERROR:  column "x1" does not exist
+LINE 1: ...te from xx1 using (select * from int4_tbl where f1 = x1) ss;
+                                                                ^
+HINT:  There is a column named "x1" in table "xx1", but it cannot be referenced from this part of the query.
+delete from xx1 using (select * from int4_tbl where f1 = xx1.x1) ss;
+ERROR:  invalid reference to FROM-clause entry for table "xx1"
+LINE 1: ...from xx1 using (select * from int4_tbl where f1 = xx1.x1) ss...
+                                                             ^
+HINT:  There is an entry for table "xx1", but it cannot be referenced from this part of the query.
+DROP TABLE int4_tbl;

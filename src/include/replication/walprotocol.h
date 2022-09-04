@@ -273,6 +273,7 @@ typedef struct StandbySwitchRequestMessage {
 typedef struct {
     /* The barrier LSN used by the streaming dr switchover this time */
     XLogRecPtr switchoverBarrierLsn;
+    bool isMasterInstanceReady;
 } HadrSwitchoverMessage;
 
 /*

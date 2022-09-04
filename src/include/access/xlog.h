@@ -905,7 +905,7 @@ void RecoveryDropSegsFromRemainSegsFile(struct HTAB* drop_segs_hbtl, char* buf, 
 void RecoveryShrinkExtentsFromRemainSegsFile(struct HTAB* shrink_extents_htbl, char* buf, uint32* used_len);
 void WriteRemainSegsFile(int fd, const char* buffer, uint32 used_len);
 void InitXlogStatuEntryTblSize();
-void CheckShareStorageWriteLock();
+void GetWritePermissionSharedStorage();
 XLogRecPtr GetFlushMainStandby();
 extern bool RecoveryIsSuspend(void);
 

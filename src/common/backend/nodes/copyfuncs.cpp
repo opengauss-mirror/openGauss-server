@@ -52,6 +52,8 @@ typedef struct OpMemInfo {
 #include "optimizer/streamplan.h"
 #include "bulkload/dist_fdw.h"
 #include "storage/tcap.h"
+#include "optimizer/gplanmgr.h"
+
 #endif /* FRONTEND_PARSER */
 
 /*
@@ -177,6 +179,7 @@ static PlannedStmt* _copyPlannedStmt(const PlannedStmt* from)
     COPY_SCALAR_FIELD(is_stream_plan);
     COPY_SCALAR_FIELD(multi_node_hint);
     COPY_SCALAR_FIELD(uniqueSQLId);
+
     /*
      * Not copy ng_queryMem to avoid memory leak in CachedPlan context,
      * and dywlm_client_manager always calls CalculateQueryMemMain to generate it.
@@ -314,6 +317,7 @@ static ModifyTable* _copyModifyTable(const ModifyTable* from)
     COPY_NODE_FIELD(exclRelTlist);
     COPY_SCALAR_FIELD(exclRelRTIndex);
     COPY_NODE_FIELD(upsertWhere);
+    COPY_NODE_FIELD(targetlists);
 
     return newnode;
 }
@@ -580,6 +584,7 @@ static void CopyScanFields(const Scan* from, Scan* newnode)
     COPY_NODE_FIELD(tablesample);
     CopyMemInfoFields(&from->mem_info, &newnode->mem_info);
     COPY_SCALAR_FIELD(is_inplace);
+    COPY_SCALAR_FIELD(partition_iterator_elimination);
 }
 
 /*
@@ -634,6 +639,8 @@ static IndexScan* _copyIndexScan(const IndexScan* from)
     COPY_NODE_FIELD(indexorderbyorig);
     COPY_SCALAR_FIELD(indexorderdir);
     COPY_SCALAR_FIELD(is_ustore);
+    COPY_SCALAR_FIELD(selectivity);
+    COPY_SCALAR_FIELD(is_partial);
 
     return newnode;
 }
@@ -670,37 +677,6 @@ static CStoreIndexScan* _copyCStoreIndexScan(const CStoreIndexScan* from)
 }
 
 /*
- * _copyCStoreIndexScan
- */
-static DfsIndexScan* _copyDfsIndexScan(const DfsIndexScan* from)
-{
-    DfsIndexScan* newnode = makeNode(DfsIndexScan);
-
-    /*
-     * copy node superclass fields
-     */
-    CopyScanFields((const Scan*)from, (Scan*)newnode);
-
-    /*
-     * copy remainder of node
-     */
-    COPY_SCALAR_FIELD(indexid);
-    COPY_NODE_FIELD(indextlist);
-    COPY_NODE_FIELD(indexqual);
-    COPY_NODE_FIELD(indexqualorig);
-    COPY_NODE_FIELD(indexorderby);
-    COPY_NODE_FIELD(indexorderbyorig);
-    COPY_SCALAR_FIELD(indexorderdir);
-    COPY_SCALAR_FIELD(relStoreLocation);
-    COPY_NODE_FIELD(cstorequal);
-    COPY_NODE_FIELD(indexScantlist);
-    COPY_NODE_FIELD(dfsScan);
-    COPY_SCALAR_FIELD(indexonly);
-
-    return newnode;
-}
-
-/*
  * _copyIndexOnlyScan
  */
 static IndexOnlyScan* _copyIndexOnlyScan(const IndexOnlyScan* from)
@@ -717,9 +693,12 @@ static IndexOnlyScan* _copyIndexOnlyScan(const IndexOnlyScan* from)
      */
     COPY_SCALAR_FIELD(indexid);
     COPY_NODE_FIELD(indexqual);
+    COPY_NODE_FIELD(indexqualorig);
     COPY_NODE_FIELD(indexorderby);
     COPY_NODE_FIELD(indextlist);
     COPY_SCALAR_FIELD(indexorderdir);
+    COPY_SCALAR_FIELD(selectivity);
+    COPY_SCALAR_FIELD(is_partial);
 
     return newnode;
 }
@@ -743,6 +722,8 @@ static BitmapIndexScan* _copyBitmapIndexScan(const BitmapIndexScan* from)
     COPY_NODE_FIELD(indexqual);
     COPY_NODE_FIELD(indexqualorig);
     COPY_SCALAR_FIELD(is_ustore);
+    COPY_SCALAR_FIELD(selectivity);
+    COPY_SCALAR_FIELD(is_partial);
 
     return newnode;
 }
@@ -1655,20 +1636,6 @@ static CStoreScan* _copyCStoreScan(const CStoreScan* from)
     return newnode;
 }
 
-static DfsScan* _copyDfsScan(const DfsScan* from)
-{
-    DfsScan* newnode = makeNode(DfsScan);
-
-    /*
-     * copy node superclass fields
-     */
-    CopyScanFields((const Scan*)from, (Scan*)newnode);
-    COPY_SCALAR_FIELD(relStoreLocation);
-    COPY_STRING_FIELD(storeFormat);
-    COPY_NODE_FIELD(privateData);
-    return newnode;
-}
-
 #ifdef ENABLE_MULTIPLE_NODES
 static TsStoreScan*
 _copyTsStoreScan(const TsStoreScan * from)
@@ -2315,7 +2282,7 @@ static RangeVar* _copyRangeVar(const RangeVar* from)
     COPY_SCALAR_FIELD(foreignOid);
 #endif
     COPY_SCALAR_FIELD(withVerExpr);
-
+    COPY_NODE_FIELD(partitionNameList);
     return newnode;
 }
 
@@ -2440,6 +2407,7 @@ static Param* _copyParam(const Param* from)
     COPY_LOCATION_FIELD(location);
     COPY_SCALAR_FIELD(tableOfIndexType);
     COPY_SCALAR_FIELD(recordVarTypOid);
+    COPY_NODE_FIELD(tableOfIndexTypeList);
 
     return newnode;
 }
@@ -3129,6 +3097,7 @@ static TargetEntry* _copyTargetEntry(const TargetEntry* from)
     COPY_SCALAR_FIELD(resorigtbl);
     COPY_SCALAR_FIELD(resorigcol);
     COPY_SCALAR_FIELD(resjunk);
+    COPY_SCALAR_FIELD(rtindex);
 
     return newnode;
 }
@@ -3346,8 +3315,9 @@ static MergeAction* _copyMergeAction(const MergeAction* from)
 /* ****************************************************************
  *						relation.h copy functions
  *
- * We don't support copying RelOptInfo, IndexOptInfo, or Path nodes.
- * There are some subsidiary structs that are useful to copy, though.
+ * We don't support full copying RelOptInfo, IndexOptInfo, or Path
+ * nodes. There are some subsidiary structs that are useful to copy,
+ * though.
  * ****************************************************************
  */
 
@@ -3568,6 +3538,8 @@ static RangeTblEntry* _copyRangeTblEntry(const RangeTblEntry* from)
     COPY_SCALAR_FIELD(sublink_pull_up);
     COPY_SCALAR_FIELD(is_ustore);
     COPY_SCALAR_FIELD(pulled_from_subquery);
+    COPY_NODE_FIELD(partitionOidList);
+    COPY_NODE_FIELD(subpartitionOidList);
 
     return newnode;
 }
@@ -3805,7 +3777,7 @@ static A_Const* _copyAConst(const A_Const* from)
             break;
         default:
             ereport(ERROR,
-                (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unrecognized node type: %d", (int)from->val.type)));
+                (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("_copyAConst: unrecognized node type: %d", (int)from->val.type)));
             break;
     }
 
@@ -4255,6 +4227,7 @@ static PlanCacheHint* _copyPlanCacheHint(const PlanCacheHint* from)
 
     CopyBaseHintFilelds((const Hint*)from, (Hint*)newnode);
     COPY_SCALAR_FIELD(chooseCustomPlan);
+    COPY_SCALAR_FIELD(method);
     return newnode;
 }
 
@@ -4533,6 +4506,7 @@ static HintState* _copyHintState(const HintState* from)
     COPY_NODE_FIELD(cache_plan_hint);
     COPY_NODE_FIELD(no_gpc_hint);
     COPY_NODE_FIELD(predpush_same_level_hint);
+    COPY_SCALAR_FIELD(from_sql_patch);
 
     return newnode;
 }
@@ -4612,6 +4586,7 @@ static Query* _copyQuery(const Query* from)
 #endif
     COPY_SCALAR_FIELD(can_push);
     COPY_SCALAR_FIELD(unique_check);
+    COPY_NODE_FIELD(resultRelations);
 
     return newnode;
 }
@@ -4641,8 +4616,10 @@ static DeleteStmt* _copyDeleteStmt(const DeleteStmt* from)
     COPY_NODE_FIELD(whereClause);
     COPY_NODE_FIELD(returningList);
     COPY_NODE_FIELD(withClause);
-    COPY_NODE_FIELD(limitClause);
     COPY_NODE_FIELD(hintState);
+    COPY_NODE_FIELD(limitClause);
+    COPY_NODE_FIELD(sortClause);
+    COPY_NODE_FIELD(relations);
 
     return newnode;
 }
@@ -4659,6 +4636,9 @@ static UpdateStmt* _copyUpdateStmt(const UpdateStmt* from)
     COPY_NODE_FIELD(withClause);
     COPY_NODE_FIELD(hintState);
     COPY_SCALAR_FIELD(hasIgnore);
+    COPY_NODE_FIELD(sortClause);
+    COPY_NODE_FIELD(limitClause);
+    COPY_NODE_FIELD(relationClause);
 
     return newnode;
 }
@@ -4994,6 +4974,7 @@ static void CopyCreateStmtFields(const CreateStmt* from, CreateStmt* newnode)
     COPY_STRING_FIELD(internalData);
     COPY_NODE_FIELD(uuids);
     COPY_SCALAR_FIELD(relkind);
+    COPY_NODE_FIELD(autoIncStart);
 }
 
 static CreateStmt* _copyCreateStmt(const CreateStmt* from)
@@ -6441,7 +6422,7 @@ static Value* _copyValue(const Value* from)
             break;
         default:
             ereport(ERROR,
-                (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unrecognized node type: %d", (int)from->type)));
+                (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("_copyValue: unrecognized node type: %d", (int)from->type)));
             break;
     }
     return newnode;
@@ -6784,6 +6765,208 @@ static SubPartitionPruningResult *_copySubPartitionPruningResult(const SubPartit
     return newnode;
 }
 
+/* ==================partial node copy ================================= */
+
+
+/*
+ * A copied IndexOptInfo is used for.query selectivity extraction in plan
+ * management. To deal with the circular linkages between RelOptInfo and
+ * IndexOptInfo, the function does not copy "IndexOptInfo->rel" by a deep
+ * traverse. Therefore, caller should guarantee that the rel has been copied
+ * in ahead.
+ */
+static IndexOptInfo *_copyPartialIndexOptInfo(const IndexOptInfo *from)
+{
+    errno_t rc = 0;
+    IndexOptInfo *newnode = makeNode(IndexOptInfo);
+
+    COPY_SCALAR_FIELD(indexoid);
+    COPY_SCALAR_FIELD(ispartitionedindex);
+    COPY_SCALAR_FIELD(partitionindex);
+    COPY_SCALAR_FIELD(reltablespace);
+
+    /* guarantee that the rel has been copied */
+    COPY_SCALAR_FIELD(rel);
+
+    COPY_SCALAR_FIELD(pages);
+    COPY_SCALAR_FIELD(tuples);
+    COPY_SCALAR_FIELD(ncolumns);
+    COPY_SCALAR_FIELD(nkeycolumns);
+    COPY_SCALAR_FIELD(relam);
+
+    newnode->opfamily = (Oid *)palloc0(sizeof(Oid) * from->nkeycolumns);
+    rc = memcpy_s(newnode->opfamily,
+                  sizeof(Oid) * from->nkeycolumns,
+                  from->opfamily,
+                  sizeof(int) * from->nkeycolumns);
+    securec_check(rc, "", "");
+
+    newnode->indexcollations = (Oid *)palloc0(sizeof(Oid) * from->nkeycolumns);
+    rc = memcpy_s(newnode->indexcollations,
+                  sizeof(Oid) * from->nkeycolumns,
+                  from->indexcollations,
+                  sizeof(int) * from->nkeycolumns);
+    securec_check(rc, "", "");
+
+    newnode->indexkeys = (int *)palloc0(sizeof(int) * from->ncolumns);
+    rc = memcpy_s(newnode->indexkeys,
+                  sizeof(int) * from->ncolumns,
+                  from->indexkeys,
+                  sizeof(int) * from->ncolumns);
+    securec_check(rc, "", "");
+
+    COPY_NODE_FIELD(indpred);
+    COPY_SCALAR_FIELD(predOK);
+    COPY_SCALAR_FIELD(unique);
+    return newnode;
+}
+
+
+static PlannerGlobal *_copyPlannerGlobal(const PlannerGlobal *from)
+{
+    PlannerGlobal *newnode = makeNode(PlannerGlobal);
+    newnode->boundParams = NULL;
+    newnode->subplans = NIL;
+    newnode->subroots = NIL;
+
+    newnode->subroots = NIL;
+    COPY_BITMAPSET_FIELD(rewindPlanIDs);
+
+    newnode->finalrtable = NIL;
+    newnode->finalrowmarks = NIL;
+    newnode->resultRelations = NIL;
+    newnode->relationOids = NIL;
+    newnode->invalItems = NIL;
+
+    COPY_SCALAR_FIELD(nParamExec);
+    COPY_SCALAR_FIELD(lastPHId);
+    COPY_SCALAR_FIELD(lastRowMarkId);
+    COPY_SCALAR_FIELD(transientPlan);
+    COPY_SCALAR_FIELD(dependsOnRole);
+    COPY_SCALAR_FIELD(insideRecursion);
+
+    COPY_SCALAR_FIELD(estiopmem);
+
+    return newnode;
+}
+
+static RelOptInfo *_copyRelOptInfo(const RelOptInfo *from)
+{
+    if (from == NULL) {
+        return NULL;
+    }
+
+    RelOptInfo *newnode;
+
+    newnode = makeNode(RelOptInfo);
+
+    COPY_SCALAR_FIELD(reloptkind);
+    COPY_BITMAPSET_FIELD(relids);
+    COPY_SCALAR_FIELD(isPartitionedTable);
+    COPY_SCALAR_FIELD(partflag);
+    COPY_SCALAR_FIELD(rows);
+
+    COPY_SCALAR_FIELD(width);
+    COPY_SCALAR_FIELD(encodedwidth);
+    COPY_SCALAR_FIELD(encodednum);
+
+    COPY_SCALAR_FIELD(relid);
+    COPY_SCALAR_FIELD(reltablespace);
+    COPY_SCALAR_FIELD(rtekind);
+    COPY_SCALAR_FIELD(min_attr);
+    COPY_SCALAR_FIELD(max_attr);
+
+    if (from->max_attr > from->min_attr + 1) {
+        COPY_POINTER_FIELD(attr_needed,
+                           (from->max_attr - from->min_attr + 1) * sizeof(int32));
+        COPY_POINTER_FIELD(attr_widths,
+                           (from->max_attr - from->min_attr + 1) * sizeof(int32));
+    } else {
+        newnode->attr_needed = NULL;
+        newnode->attr_widths = NULL;
+    }
+
+    COPY_NODE_FIELD(indexlist);
+    COPY_SCALAR_FIELD(pages);
+    COPY_SCALAR_FIELD(tuples);
+    COPY_SCALAR_FIELD(allvisfrac);
+    COPY_NODE_FIELD(baserestrictinfo);
+    COPY_SCALAR_FIELD(baserestrictcost);
+
+    return newnode;
+}
+
+static RelOptInfo **_copyRelOptInfoArray(RelOptInfo **from, int len)
+{
+    RelOptInfo **newnode;
+    if (from == NULL && len <= 1) {
+        return NULL;
+    }
+
+    newnode = (RelOptInfo **)palloc0(len * sizeof(RelOptInfo *));
+
+    for (int i = 1; i < len; i++) {
+        newnode[i] = _copyRelOptInfo(from[i]);
+    }
+    return newnode;
+}
+
+static RangeTblEntry **_copyRangeTblEntryArray(RangeTblEntry **from, int len)
+{
+    RangeTblEntry **newnode;
+    if (from == NULL && len <= 1) {
+        return NULL;
+    }
+
+    newnode = (RangeTblEntry **)palloc0(len * sizeof(RangeTblEntry *));
+
+    for (int i = 1; i < len; i++) {
+        newnode[i] = _copyRangeTblEntry(from[i]);
+    }
+    return newnode;
+}
+
+static PlannerInfo *_copyPartialPlannerInfo(const PlannerInfo *from)
+{
+    PlannerInfo *newnode = makeNode(PlannerInfo);
+
+    COPY_NODE_FIELD(parse);
+    COPY_NODE_FIELD(glob);
+    COPY_SCALAR_FIELD(query_level);
+    COPY_NODE_FIELD(plan_params);
+
+    newnode->simple_rel_array = _copyRelOptInfoArray(from->simple_rel_array,
+                                                     from->simple_rel_array_size);
+    COPY_SCALAR_FIELD(simple_rel_array_size);
+    newnode->simple_rte_array = _copyRangeTblEntryArray(from->simple_rte_array,
+                                                        from->simple_rel_array_size);
+    COPY_BITMAPSET_FIELD(all_baserels);
+    COPY_SCALAR_FIELD(grouping_map);
+    COPY_SCALAR_FIELD(total_table_pages);
+
+    COPY_SCALAR_FIELD(tuple_fraction);
+    COPY_SCALAR_FIELD(limit_tuples);
+    COPY_SCALAR_FIELD(hasInheritedTarget);
+    COPY_SCALAR_FIELD(hasJoinRTEs);
+    COPY_SCALAR_FIELD(hasLateralRTEs);
+
+    COPY_SCALAR_FIELD(hasHavingQual);
+    COPY_SCALAR_FIELD(hasPseudoConstantQuals);
+    COPY_SCALAR_FIELD(hasRecursion);
+    COPY_SCALAR_FIELD(wt_param_id);
+    return newnode;
+}
+
+
+static AutoIncrement *_copyAutoIncrement(const AutoIncrement *from)
+{
+    AutoIncrement* newnode = makeNode(AutoIncrement);
+    COPY_NODE_FIELD(expr);
+    COPY_SCALAR_FIELD(autoincin_funcid);
+    COPY_SCALAR_FIELD(autoincout_funcid);
+    return newnode;
+}
+
 static PrefixKey* _copyPrefixKey(const PrefixKey* from)
 {
     PrefixKey* newnode = makeNode(PrefixKey);
@@ -6862,9 +7045,6 @@ void* copyObject(const void* from)
             break;
         case T_IndexOnlyScan:
             retval = _copyIndexOnlyScan((IndexOnlyScan*)from);
-            break;
-        case T_DfsIndexScan:
-            retval = _copyDfsIndexScan((DfsIndexScan*)from);
             break;
         case T_CStoreIndexScan:
             retval = _copyCStoreIndexScan((CStoreIndexScan*)from);
@@ -6997,9 +7177,6 @@ void* copyObject(const void* from)
             break;
         case T_CStoreScan:
             retval = _copyCStoreScan((CStoreScan*)from);
-            break;
-        case T_DfsScan:
-            retval = _copyDfsScan((DfsScan*)from);
             break;
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
@@ -7953,6 +8130,9 @@ void* copyObject(const void* from)
         case T_AddTableIntoCBIState:
             retval = _copyAddTblIntoCBIState((AddTableIntoCBIState*)from);
             break;
+        case T_AutoIncrement:
+            retval = _copyAutoIncrement((AutoIncrement*)from);
+            break;
             /*
              * PLAN HINT NODES
              */
@@ -8041,7 +8221,6 @@ void* copyObject(const void* from)
         case T_SubPartitionPruningResult:
             retval = _copySubPartitionPruningResult((SubPartitionPruningResult*)from);
             break;
-
         case T_CreatePublicationStmt:
             retval = _copyCreatePublicationStmt((CreatePublicationStmt *)from);
             break;
@@ -8066,10 +8245,19 @@ void* copyObject(const void* from)
         case T_DropSubscriptionStmt:
             retval = _copyDropSubscriptionStmt((DropSubscriptionStmt *)from);
             break;
-
+        case T_PlannerInfo:
+            /* Only a partial copy for the adptive cached plan management */
+            retval = _copyPartialPlannerInfo((PlannerInfo *)from);
+            break;
+        case T_PlannerGlobal:
+            retval = _copyPlannerGlobal((PlannerGlobal*)from);
+            break;
+        case T_IndexOptInfo:
+            retval = _copyPartialIndexOptInfo((IndexOptInfo *)from);
+            break;
         default:
             ereport(ERROR,
-                (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unrecognized node type: %d", (int)nodeTag(from))));
+                (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("copyObject: unrecognized node type: %d", (int)nodeTag(from))));
             retval = 0; /* keep compiler quiet */
             break;
     }

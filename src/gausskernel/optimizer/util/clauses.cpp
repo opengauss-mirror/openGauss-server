@@ -2407,6 +2407,9 @@ Node* eval_const_expressions_mutator(Node* node, eval_const_expressions_context*
         case T_Param: {
             Param* param = (Param*)node;
 
+            if (ENABLE_CACHEDPLAN_MGR && context->boundParams != NULL && context->boundParams->params_lazy_bind) {
+                return (Node *)copyObject(param);
+            }
             /* Look to see if we've been given a value for this Param */
             if (param->paramkind == PARAM_EXTERN && context->boundParams != NULL && param->paramid > 0 &&
                 param->paramid <= context->boundParams->numParams) {
@@ -4038,17 +4041,17 @@ static void recheck_cast_function_args(List* args, Oid result_type, HeapTuple fu
         }
     }
 
-    /* if argtype is table of, change its element type */
-    for (int i = 0; i < nargs; i++) {
-        Oid baseOid = InvalidOid;
-        if (isTableofType(proargtypes[i], &baseOid, NULL)) {
-            proargtypes[i] = baseOid;
-        }
-    }
-
     errno_t errorno;
     errorno = memcpy_s(declared_arg_types, FUNC_MAX_ARGS * sizeof(Oid), proargtypes, proc_arg * sizeof(Oid));
     securec_check(errorno, "", "");
+
+    /* if argtype is table of, change its element type */
+    for (int i = 0; i < nargs; i++) {
+        Oid baseOid = InvalidOid;
+        if (isTableofType(declared_arg_types[i], &baseOid, NULL)) {
+            declared_arg_types[i] = baseOid;
+        }
+    }
 
     rettype =
         enforce_generic_type_consistency(actual_arg_types, declared_arg_types, nargs, funcform->prorettype, false);

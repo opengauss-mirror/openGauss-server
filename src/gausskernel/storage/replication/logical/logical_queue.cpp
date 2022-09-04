@@ -33,19 +33,24 @@
 #include "utils/atomic.h"
 #include "utils/elog.h"
 #include "utils/palloc.h"
-#include "replication/logical_queue.h"
+#include "replication/logical_parse.h"
+#include "replication/parallel_decode_worker.h"
 #include "storage/ipc.h"
 
 static const int gMaxCnt = 10;
+static const int QUEUE_CAPACITY_MIN_LIMIT = 2;
+static const long queueWaitTime = 100L;
 
-LogicalQueue *LogicalQueueCreate(uint32 capacity, uint32 slotId, CallBackFunc func)
+LogicalQueue *LogicalQueueCreate(int slotId, CallBackFunc func)
 {
     /*
      * We require the capacity to be a power of 2, so index wrap can be
      * handled by a bit-wise and.  The actual capacity is one less than
      * the specified, so the minimum capacity is 2.
      */
-    Assert(capacity >= QUEUE_CAPACITY_MIN_LIMIT && POWER_OF_TWO(capacity));
+    uint32 capacity = (uint32)GetParallelQueueSize(slotId);
+
+    Assert(capacity >= MIN_PARALLEL_QUEUE_SIZE && POWER_OF_TWO(capacity));
 
     size_t allocSize = sizeof(LogicalQueue) + sizeof(void *) * capacity;
     MemoryContext oldCtx = MemoryContextSwitchTo(g_instance.comm_cxt.pdecode_cxt[slotId].parallelDecodeCtx);
@@ -64,7 +69,7 @@ LogicalQueue *LogicalQueueCreate(uint32 capacity, uint32 slotId, CallBackFunc fu
     return queue;
 }
 
-bool LogicalQueuePut(LogicalQueue *queue, void *element)
+void LogicalQueuePut(LogicalQueue *queue, void *element)
 {
     uint32 head = 0;
     uint32 tail = 0;
@@ -72,8 +77,7 @@ bool LogicalQueuePut(LogicalQueue *queue, void *element)
 
     head = pg_atomic_read_u32(&queue->writeHead);
     do {
-        if (t_thrd.logicalreadworker_cxt.shutdown_requested ||
-            t_thrd.parallel_decode_cxt.shutdown_requested) {
+        if (IsLogicalWorkerShutdownRequested()) {
             ereport(LOG, (errmsg("Parallel Decode Worker stop")));
             proc_exit(0);
         }
@@ -81,7 +85,7 @@ bool LogicalQueuePut(LogicalQueue *queue, void *element)
         cnt++;
 
         if (cnt >= gMaxCnt) {
-            pg_usleep(500L);
+            pg_usleep(queueWaitTime);
             cnt = 0;
         }
     } while (SPACE(head, tail, queue->mask) == 0);
@@ -105,8 +109,6 @@ bool LogicalQueuePut(LogicalQueue *queue, void *element)
     pg_write_barrier();
 
     pg_atomic_write_u32(&queue->writeHead, (head + 1) & queue->mask);
-
-    return true;
 }
 
 void *LogicalQueueTop(LogicalQueue *queue)
@@ -121,7 +123,7 @@ void *LogicalQueueTop(LogicalQueue *queue)
         /* here we sleep, let the cpu to do other important work */
 
         if (count >= gMaxCnt) {
-            pg_usleep(1000L);
+            pg_usleep(queueWaitTime);
             return NULL;
         }
 
@@ -143,7 +145,8 @@ void LogicalQueuePop(LogicalQueue *queue)
     tail = pg_atomic_read_u32(&queue->readTail);
     head = pg_atomic_read_u32(&queue->writeHead);
     if (COUNT(head, tail, queue->mask) == 0) {
-        ereport(WARNING, (errmodule(MOD_REDO), errcode(ERRCODE_LOG), errmsg("LogicalQueuePop queue error!")));
+        ereport(WARNING, (errmodule(MOD_LOGICAL_DECODE),
+            errcode(ERRCODE_LOG), errmsg("LogicalQueuePop queue error!")));
         return;
     }
 

@@ -28,6 +28,7 @@
 #include "access/tableam.h"
 #include "access/visibilitymap.h"
 #include "opfusion/opfusion_util.h"
+#include "utils/knl_partcache.h"
 
 
 IndexOnlyScanFusion::IndexOnlyScanFusion(IndexOnlyScan* node, PlannedStmt* planstmt, ParamListInfo params)

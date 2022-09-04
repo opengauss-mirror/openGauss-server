@@ -41,15 +41,15 @@ extern "C" Datum dist_fdw_validator(PG_FUNCTION_ARGS);
 extern "C" Datum file_fdw_handler(PG_FUNCTION_ARGS);
 extern "C" Datum file_fdw_validator(PG_FUNCTION_ARGS);
 
-extern "C" Datum hdfs_fdw_handler(PG_FUNCTION_ARGS);
-extern "C" Datum hdfs_fdw_validator(PG_FUNCTION_ARGS);
-
 #ifdef ENABLE_MOT
 extern "C" Datum mot_fdw_validator(PG_FUNCTION_ARGS);
 extern "C" Datum mot_fdw_handler(PG_FUNCTION_ARGS);
 #endif
 
 extern void encryptOBSForeignTableOption(List** options);
+
+BlockNumber getPageCountForFt(void *additionalData);
+
 
 /*
  * in shared mode coordinator assign file to data node

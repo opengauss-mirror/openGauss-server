@@ -38,6 +38,12 @@ SELECT pg_delete_audit('1012-11-10', '3012-11-11');
 
 --enable publication and subscription audit
 \! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_system_object=16777215" > /dev/null 2>&1
+select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
 --- prepare
 \! echo $OLDGAUSSHOME | xargs -I{} rm -f {}/bin/subscription.key.cipher
 \! echo $OLDGAUSSHOME | xargs -I{} rm -f {}/bin/subscription.key.rand
@@ -315,3 +321,9 @@ SELECT pg_delete_audit('1012-11-10', '3012-11-11');
 (1 row)
 
 \! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_system_object" > /dev/null 2>&1
+select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+

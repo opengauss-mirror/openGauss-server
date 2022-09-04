@@ -53,7 +53,7 @@
 #define XLOG_UHEAP_CONTAINS_NEW_TUPLE (1 << 4)
 #define XLZ_INSERT_IS_FROZEN (1 << 5)
 #define XLOG_UHEAP_CONTAINS_OLD_HEADER (1 << 6)
-
+#define XLOG_UHEAP_INSERT_LAST_IN_MULTI (1 << 7)
 /*
  * XlUndoHeader -> flage values, 8 bits are available
  */
@@ -62,7 +62,7 @@
 #define XLOG_UNDO_HEADER_HAS_PREV_URP (1 << 3)
 #define XLOG_UNDO_HEADER_HAS_PARTITION_OID (1 << 4)
 #define XLOG_UNDO_HEADER_HAS_CURRENT_XID (1 << 5)
-
+#define XLOG_UNDO_HEADER_HAS_TOAST (1 << 6)
 /*
  * XlUHeapDelete flag values, 8 bits are available.
  */
@@ -72,7 +72,7 @@
 /* all fields in UHeapDiskTuple */
 /* size=8 alignment=2 */
 typedef struct XlUHeapHeader {
-    uint16 td_id : 8, locker_td_id : 8;
+    uint16 td_id : 8, reserved : 8;
     uint16 flag;
     uint16 flag2;
     uint8 t_hoff;
@@ -122,7 +122,7 @@ typedef struct XlUHeapInsert {
 #define XLZ_UPDATE_SUFFIX_FROM_OLD (1 << 1)
 #define XLZ_NON_INPLACE_UPDATE (1 << 2)
 #define XLZ_HAS_UPDATE_UNDOTUPLE (1 << 3)
-#define XLZ_BLOCK_INPLACE_UPDATE (1 << 4)
+#define XLZ_LINK_UPDATE (1 << 4)
 
 /* size=24 alignment=8 */
 typedef struct XlUHeapUpdate {
@@ -158,6 +158,7 @@ typedef struct XlUHeapFreezeTdSlot {
  */
 #define XLZ_CLEAN_CONTAINS_OFFSET (1 << 0)
 #define XLZ_CLEAN_ALLOW_PRUNING (1 << 1)
+#define XLZ_CLEAN_CONTAINS_TUPLEN (1 << 2)
 
 /* size=16 alignment=8 */
 typedef struct XlUHeapClean {

@@ -67,6 +67,7 @@
 #include "catalog/pg_description.h"
 #include "catalog/pg_directory.h"
 #include "catalog/pg_enum.h"
+#include "catalog/pg_set.h"
 #include "catalog/pg_extension.h"
 #include "catalog/pg_foreign_data_wrapper.h"
 #include "catalog/pg_foreign_server.h"
@@ -209,6 +210,8 @@
 #include "utils/knl_relcache.h"
 #include "utils/knl_partcache.h"
 #include "utils/knl_localtabdefcache.h"
+#include "utils/fmgrtab.h"
+#include "parser/parse_coerce.h"
 
 /*
  *		name of relcache init file(s), used to speed up backend startup
@@ -273,6 +276,7 @@ static const FormData_pg_attribute Desc_pg_auth_history[Natts_pg_auth_history] =
 static const FormData_pg_attribute Desc_pg_app_workloadgroup_mapping[Natts_pg_app_workloadgroup_mapping] = {
     Schema_pg_app_workloadgroup_mapping};
 static const FormData_pg_attribute Desc_pg_enum[Natts_pg_enum] = {Schema_pg_enum};
+static const FormData_pg_attribute Desc_pg_set[Natts_pg_set] = {Schema_pg_set};
 static const FormData_pg_attribute Desc_pg_range[Natts_pg_range] = {Schema_pg_range};
 static const FormData_pg_attribute Desc_pg_shseclabel[Natts_pg_shseclabel] = {Schema_pg_shseclabel};
 static const FormData_pg_attribute Desc_pg_seclabel[Natts_pg_seclabel] = {Schema_pg_seclabel};
@@ -740,6 +744,7 @@ static struct CatalogRelationBuildParam catalogBuildParam[CATALOG_NUM] = {{Defau
         false,
         true},
     {EnumRelationId, "pg_enum", EnumRelation_Rowtype_Id, false, true, Natts_pg_enum, Desc_pg_enum, false, true},
+    {SetRelationId, "pg_set", SetRelation_Rowtype_Id, false, true, Natts_pg_set, Desc_pg_set, false, true},
     {RangeRelationId, "pg_range", RangeRelation_Rowtype_Id, false, false, Natts_pg_range, Desc_pg_range, false, true},
     {PgSynonymRelationId,
         "pg_synonym",
@@ -1274,7 +1279,6 @@ typedef struct opclasscacheent {
 } OpClassCacheEnt;
 
 /* non-export function prototypes */
-static void RememberToFreeTupleDescAtEOX(TupleDesc td);
 
 static void RelationFlushRelation(Relation relation);
 static bool load_relcache_init_file(bool shared);
@@ -1321,7 +1325,7 @@ HeapTuple ScanPgRelation(Oid targetRelId, bool indexOK, bool force_non_historic)
      * gonna work, so bail out with a useful error message.  If this happens,
      * it probably means a relcache entry that needs to be nailed isn't.
      */
-    if (!OidIsValid(GetMyDatabaseId())) {
+    if (!OidIsValid(u_sess->proc_cxt.MyDatabaseId)) {
         ereport(FATAL, (errmsg("cannot read pg_class without having selected a database")));
     }
 
@@ -1567,6 +1571,11 @@ static void RelationBuildTupleDesc(Relation relation, bool onlyLoadInitDefVal)
     /* set all the *TupInitDefVal* objects later. */
     initdvals = (TupInitDefVal*)MemoryContextAllocZero(LocalMyDBCacheMemCxt(), need * sizeof(TupInitDefVal));
 
+    if (unlikely(pg_attribute_scan->iscan && !pg_attribute_scan->irel)) {
+        ereport(ERROR,
+                (errcode(ERRCODE_INDEX_CORRUPTED),
+                    errmsg("index data corrupted for %s", RelationGetRelationName(relation))));
+    }
     while (HeapTupleIsValid(pg_attribute_tuple = systable_getnext(pg_attribute_scan))) {
         Form_pg_attribute attp;
 
@@ -1635,6 +1644,11 @@ static void RelationBuildTupleDesc(Relation relation, bool onlyLoadInitDefVal)
         need--;
         if (need == 0)
             break;
+        if (unlikely(pg_attribute_scan->iscan && !pg_attribute_scan->irel)) {
+            ereport(ERROR,
+                    (errcode(ERRCODE_INDEX_CORRUPTED),
+                        errmsg("index data corrupted for %s", RelationGetRelationName(relation))));
+        }
     }
 
     /*
@@ -1790,7 +1804,7 @@ void RelationBuildRuleLock(Relation relation)
         ALLOCSET_SMALL_MINSIZE,
         ALLOCSET_SMALL_INITSIZE,
         ALLOCSET_SMALL_MAXSIZE);
-    
+
     relation->rd_rulescxt = rulescxt;
 
     /*
@@ -2000,6 +2014,8 @@ static Relation CatalogRelationBuildDesc(const char* relationName, Oid relationR
     relation->rd_att->tdrefcount = 1; /* mark as refcounted */
     relation->rd_att->tdtypeid = relationReltype;
     relation->rd_att->tdtypmod = -1;
+    /* initialize the relreplident field */
+    relation->relreplident = REPLICA_IDENTITY_NOTHING;
     has_not_null = false;
     for (i = 0; i < natts; i++) {
         errno_t rc = EOK;
@@ -2137,12 +2153,21 @@ Relation RelationBuildDesc(Oid targetRelId, bool insertIt, bool buildkey)
         securec_check(rc, "\0", "\0");
         relation->rd_rel->relnatts = natts;
     } else {
+        bool isNull = false;
+        Datum datum;
         /*
          * allocate storage for the relation descriptor, and copy pg_class_tuple
          * to relation->rd_rel.
          */
         relation = AllocateRelationDesc(relp);
 
+        /* copy relreplident field */
+        datum = heap_getattr(pg_class_tuple, Anum_pg_class_relreplident, GetDefaultPgClassDesc(), &isNull);
+        if (isNull) {
+            relation->relreplident = REPLICA_IDENTITY_NOTHING;
+        } else {
+            relation->relreplident = CharGetDatum(datum);
+        }
         /*
          * initialize the relation's relation id (relation->rd_id)
          */
@@ -2205,7 +2230,7 @@ Relation RelationBuildDesc(Oid targetRelId, bool insertIt, bool buildkey)
 
     relation->rd_att->tdhasuids = RELATION_HAS_UIDS(relation);
     if (RELATION_HAS_UIDS(relation)) {
-        BuildUidHashCache(GetMyDatabaseId(), relid);
+        BuildUidHashCache(u_sess->proc_cxt.MyDatabaseId, relid);
     }
 
     if (RelationIsRedistributeDest(relation))
@@ -2455,9 +2480,9 @@ void RelationInitPhysicalAddr(Relation relation)
         relation->rd_node.dbNode = InvalidOid;
     else {
         Assert(CheckMyDatabaseMatch());
-        relation->rd_node.dbNode = GetMyDatabaseId();
+        relation->rd_node.dbNode = u_sess->proc_cxt.MyDatabaseId;
     }
-        
+
     if (relation->rd_rel->relfilenode) {
         /*
          * Even if we are using a decoding snapshot that doesn't represent
@@ -2517,7 +2542,8 @@ void RelationInitPhysicalAddr(Relation relation)
     // setup page compression options
     relation->rd_node.opt = 0;
     if (relation->rd_options && REL_SUPPORT_COMPRESSED(relation)) {
-        SetupPageCompressForRelation(&relation->rd_node, &((StdRdOptions*)(relation->rd_options))->compress, RelationGetRelationName(relation));
+        SetupPageCompressForRelation(&relation->rd_node, &((StdRdOptions*)(void *)(relation->rd_options))->compress,
+                                     RelationGetRelationName(relation));
     }
 }
 
@@ -2635,8 +2661,8 @@ void RelationInitIndexAccessInfo(Relation relation, HeapTuple index_tuple)
      * Allocate arrays to hold data. Opclasses are not used for included
      * columns, so allocate them for indnkeyatts only.
      */
-    
-        
+
+
     relation->rd_aminfo = (RelationAmInfo*)MemoryContextAllocZero(indexcxt, sizeof(RelationAmInfo));
 
     relation->rd_opfamily = (Oid*)MemoryContextAllocZero(indexcxt, indnkeyatts * sizeof(Oid));
@@ -2655,7 +2681,7 @@ void RelationInitIndexAccessInfo(Relation relation, HeapTuple index_tuple)
     relation->rd_indcollation = (Oid*)MemoryContextAllocZero(indexcxt, indnkeyatts * sizeof(Oid));
 
     relation->rd_indoption = (int16*)MemoryContextAllocZero(indexcxt, indnkeyatts * sizeof(int16));
-    
+
     /*
      * indcollation cannot be referenced directly through the C struct,
      * because it comes after the variable-width indkey field.	Must extract
@@ -3079,6 +3105,9 @@ extern void formrdesc(const char* relationName, Oid relationReltype, bool isshar
     /* It's fully valid */
     relation->rd_isvalid = true;
 
+    /* initialize the relreplident field */
+    relation->relreplident = REPLICA_IDENTITY_NOTHING;
+
     /*
      * add new reldesc to relcache
      */
@@ -3111,7 +3140,11 @@ Relation RelationIdGetRelation(Oid relationId)
 {
     Assert(CheckMyDatabaseMatch());
     if (EnableLocalSysCache()) {
-        return t_thrd.lsc_cxt.lsc->tabdefcache.RelationIdGetRelation(relationId);
+        Relation rel = t_thrd.lsc_cxt.lsc->tabdefcache.RelationIdGetRelation(relationId);
+        if (rel != NULL) {
+            rel->rd_att->tdTableAmType = rel->rd_tam_type;
+        }
+        return rel;
     }
     Relation rd;
 
@@ -3143,6 +3176,7 @@ Relation RelationIdGetRelation(Oid relationId)
         if (rd->rd_rel->relpersistence == RELPERSISTENCE_TEMP)
             (void)checkGroup(relationId, RELATION_IS_OTHER_TEMP(rd));
 
+        rd->rd_att->tdTableAmType = rd->rd_tam_type;
         return rd;
     }
 
@@ -3159,6 +3193,9 @@ Relation RelationIdGetRelation(Oid relationId)
         }
     }
 
+    if (rd != NULL) {
+        rd->rd_att->tdTableAmType = rd->rd_tam_type;
+    }
     return rd;
 }
 
@@ -3181,7 +3218,7 @@ void RelationIncrementReferenceCount(Relation rel)
     if (RelationIsPartition(rel) || RelationIsBucket(rel)) {
         return;
     }
-    
+
     ResourceOwnerEnlargeRelationRefs(LOCAL_SYSDB_RESOWNER);
     rel->rd_refcnt += 1;
     if (!IsBootstrapProcessingMode())
@@ -3371,8 +3408,6 @@ void RelationReloadIndexInfo(Relation relation)
         HeapTupleSetXmin(relation->rd_indextuple, HeapTupleGetRawXmin(tuple));
 
         ReleaseSysCache(tuple);
-
-        gtt_fix_index_state(relation);
     }
 
     /* Okay, now it's valid again */
@@ -3471,7 +3506,7 @@ void RelationDestroyRelation(Relation relation, bool remember_tupdesc)
     RelationDestroyRule(relation);
     pfree_ext(relation->rd_fdwroutine);
     if (relation->partMap) {
-        RelationDestroyPartitionMap(relation->partMap);
+        DestroyPartitionMap(relation->partMap);
     }
     if (REALTION_BUCKETKEY_VALID(relation)) {
         pfree_ext(relation->rd_bucketkey->bucketKey);
@@ -3632,6 +3667,7 @@ void RelationClearRelation(Relation relation, bool rebuild)
         Oid save_relid = RelationGetRelid(relation);
         bool keep_tupdesc = false;
         bool keep_rules = false;
+        bool keep_partmap = false;
         bool buildkey = !REALTION_BUCKETKEY_INITED(relation);
 
         /* Build temporary entry, but don't link it into hashtable */
@@ -3670,6 +3706,7 @@ void RelationClearRelation(Relation relation, bool rebuild)
         newrel->rd_isnailed = relation->rd_isnailed;
         keep_tupdesc = equalTupleDescs(relation->rd_att, newrel->rd_att);
         keep_rules = equalRuleLocks(relation->rd_rules, newrel->rd_rules);
+        keep_partmap = EqualPartitonMap(relation->partMap, newrel->partMap);
 
         /*
          * Perform swapping of the relcache entry contents.  Within this
@@ -3715,7 +3752,9 @@ void RelationClearRelation(Relation relation, bool rebuild)
         errno_t rc = memcpy_s(relation->rd_rel, CLASS_TUPLE_SIZE, newrel->rd_rel, CLASS_TUPLE_SIZE);
         securec_check(rc, "", "");
         if (newrel->partMap) {
-            RebuildPartitonMap(newrel->partMap, relation->partMap);
+            if (!keep_partmap) {
+                RebuildPartitonMap(newrel->partMap, relation->partMap);
+            }
             SWAPFIELD(PartitionMap*, partMap);
         }
 
@@ -3903,6 +3942,8 @@ void RelationCacheInvalidate(void)
             /* Delete this entry immediately */
             Assert(!relation->rd_isnailed);
             RelationClearRelation(relation, false);
+            hash_seq_term(&status);
+            hash_seq_init(&status, u_sess->relcache_cxt.RelationIdCache);
         } else {
             /*
              * If it's a mapped relation, immediately update its rd_node in
@@ -3995,8 +4036,21 @@ void InvalidateRelationNodeList()
 
     while ((idhentry = (RelIdCacheEnt*)hash_seq_search(&status)) != NULL) {
         relation = idhentry->reldesc;
+
         if (relation->rd_locator_info != NULL) {
+            bool clear = RelationHasReferenceCountZero(relation) &&
+                    !(RelationIsIndex(relation) && relation->rd_refcnt > 0 && relation->rd_indexcxt != NULL);
             RelationClearRelation(relation, !RelationHasReferenceCountZero(relation));
+            if (!clear) {
+                hash_seq_term(&status);
+                hash_seq_init(&status, u_sess->relcache_cxt.RelationIdCache);
+                while ((idhentry = (RelIdCacheEnt*)hash_seq_search(&status)) != NULL) {
+                    Relation start_relation = idhentry->reldesc;
+                    if (start_relation == relation) {
+                        break;
+                    }
+                }
+            }
         }
     }
 }
@@ -4078,7 +4132,7 @@ TransactionId PartGetRelFrozenxid64(Partition part)
     } else {
         relfrozenxid64 = DatumGetTransactionId(datum);
     }
-    
+
     heap_close(partRel, AccessShareLock);
     ReleaseSysCache(partTuple);
 
@@ -4130,7 +4184,7 @@ void AtEOXact_FreeTupleDesc()
         Assert(u_sess->relcache_cxt.EOXactTupleDescArray != NULL);
         int i;
         for (i = 0; i < u_sess->relcache_cxt.NextEOXactTupleDescNum; i++)
-            FreeTupleDesc(u_sess->relcache_cxt.EOXactTupleDescArray[i]);
+            FreeTupleDesc(u_sess->relcache_cxt.EOXactTupleDescArray[i], false);
         pfree(u_sess->relcache_cxt.EOXactTupleDescArray);
         u_sess->relcache_cxt.EOXactTupleDescArray = NULL;
     }
@@ -4223,10 +4277,12 @@ void AtEOXact_RelationCache(bool isCommit)
          * processing of the aborted pg_class insertion.)
          */
         if (relation->rd_createSubid != InvalidSubTransactionId) {
-            if (isCommit)
+            if (isCommit) {
                 relation->rd_createSubid = InvalidSubTransactionId;
-            else if (RelationHasReferenceCountZero(relation)) {
+            } else if (RelationHasReferenceCountZero(relation)) {
                 RelationClearRelation(relation, false);
+                hash_seq_term(&status);
+                hash_seq_init(&status, u_sess->relcache_cxt.RelationIdCache);
                 continue;
             } else {
                 /*
@@ -4309,6 +4365,8 @@ void AtEOSubXact_RelationCache(bool isCommit, SubTransactionId mySubid, SubTrans
                 relation->rd_createSubid = parentSubid;
             else if (RelationHasReferenceCountZero(relation)) {
                 RelationClearRelation(relation, false);
+                hash_seq_term(&status);
+                hash_seq_init(&status, u_sess->relcache_cxt.RelationIdCache);
                 continue;
             } else {
                 /*
@@ -4501,6 +4559,13 @@ Relation RelationBuildLocalRelation(const char* relname, Oid relnamespace, Tuple
      */
     rel->rd_rel->relisshared = shared_relation;
 
+    /* initialize the relreplident field */
+    if (!IsSystemNamespace(rel->rd_rel->relnamespace) && rel->rd_rel->relkind == RELKIND_RELATION) {
+        rel->relreplident = REPLICA_IDENTITY_DEFAULT;
+    } else {
+        rel->relreplident = REPLICA_IDENTITY_NOTHING;
+    }
+
     RelationGetRelid(rel) = relid;
 
     for (i = 0; i < natts; i++)
@@ -4532,7 +4597,7 @@ Relation RelationBuildLocalRelation(const char* relname, Oid relnamespace, Tuple
 
     /* compressed option was set by RelationInitPhysicalAddr if rel->rd_options != NULL */
     if (rel->rd_options == NULL && reloptions && SUPPORT_COMPRESSED(relkind, rel->rd_rel->relam)) {
-        StdRdOptions *options = (StdRdOptions *) default_reloptions(reloptions, false, RELOPT_KIND_HEAP);
+        StdRdOptions *options = (StdRdOptions *)(void*)default_reloptions(reloptions, false, RELOPT_KIND_HEAP);
         SetupPageCompressForRelation(&rel->rd_node, &options->compress, RelationGetRelationName(rel));
     }
 
@@ -4556,7 +4621,7 @@ Relation RelationBuildLocalRelation(const char* relname, Oid relnamespace, Tuple
      */
     (void)MemoryContextSwitchTo(oldcxt);
 
-    
+
 
     /*
      * Caller expects us to pin the returned entry.
@@ -4728,7 +4793,9 @@ void RelationSetNewRelfilenode(Relation relation, TransactionId freezeXid, Multi
         RelationIsPartitioned(relation) ? InvalidOid : relation->rd_bucketoid,
         relation);
     smgrclosenode(newrnode);
-
+    if (RelationUsesSpaceType(relation->rd_rel->relpersistence) == SP_TEMP) {
+        make_tmptable_cache_key(newrelfilenode);
+    }
     /*
      * Schedule unlinking of the old storage at transaction commit.
      */
@@ -5000,6 +5067,7 @@ void UpdatePartition(Relation parent, Partition part, TransactionId freezeXid, c
 void RelationCacheInitialize(void)
 {
     if (EnableLocalSysCache()) {
+        t_thrd.lsc_cxt.lsc->StartInit();
         t_thrd.lsc_cxt.lsc->tabdefcache.Init();
         return;
     }
@@ -5136,6 +5204,7 @@ void RelationCacheInitializePhase3(void)
 {
     if (EnableLocalSysCache()) {
         t_thrd.lsc_cxt.lsc->tabdefcache.InitPhase3();
+        t_thrd.lsc_cxt.lsc->FinishInit();
         return;
     }
     HASH_SEQ_STATUS status;
@@ -5307,6 +5376,11 @@ retry:
                     (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                         errmsg("invalid relowner in pg_class entry for \"%s\"", RelationGetRelationName(relation))));
 
+            restart = true;
+        }
+
+        if (relation->relreplident == 0) {
+            relation->relreplident = RelationGetRelReplident(relation);
             restart = true;
         }
 
@@ -5530,6 +5604,35 @@ static void GeneratedColFetch(TupleConstr *constr, HeapTuple htup, Relation adre
     }
 }
 
+static void AttrAutoIncrementFetch(Relation relation, AttrNumber attnum, char* adbin)
+{
+    ConstrAutoInc* cons_autoinc = NULL;
+    AutoIncrement* autoinc = NULL;
+    const FmgrBuiltin* castfunc = NULL;
+    Node *adexpr = (Node*)stringToNode_skip_extern_fields(adbin);
+    Assert(adexpr != NULL);
+    if (!IsA(adexpr, AutoIncrement)) {
+        return;
+    }
+
+    autoinc = (AutoIncrement*)adexpr;
+    cons_autoinc = (ConstrAutoInc*)MemoryContextAllocZero(LocalMyDBCacheMemCxt(), sizeof(ConstrAutoInc));
+    cons_autoinc->attnum = attnum;
+    if (relation->rd_rel->relpersistence == RELPERSISTENCE_TEMP) {
+        cons_autoinc->next = find_tmptable_cache_autoinc(relation->rd_rel->relfilenode);
+        cons_autoinc->seqoid = InvalidOid;
+    } else {
+        cons_autoinc->next = NULL;
+        find_nextval_seqoid_walker(adexpr, &cons_autoinc->seqoid);
+    }
+
+    castfunc = (const FmgrBuiltin*)SearchBuiltinFuncByOid(autoinc->autoincin_funcid);
+    cons_autoinc->datum2autoinc_func = castfunc ? (void*)(uintptr_t)castfunc->func : NULL;
+    castfunc = (const FmgrBuiltin*)SearchBuiltinFuncByOid(autoinc->autoincout_funcid);
+    cons_autoinc->autoinc2datum_func = castfunc ? (void*)(uintptr_t)castfunc->func : NULL;
+    relation->rd_att->constr->cons_autoinc = cons_autoinc;
+}
+
 /*
  * Load updated column attribute value definitions for the relation.
  */
@@ -5557,7 +5660,7 @@ static void UpdatedColFetch(TupleConstr *constr, HeapTuple htup, Relation adrel,
  */
 static void AttrDefaultFetch(Relation relation)
 {
-    AttrDefault *attrdef = relation->rd_att->constr->defval;
+    AttrDefault *attrdef =  relation->rd_att->constr->defval;
     int ndef = relation->rd_att->constr->num_defval;
     ScanKeyData skey;
     HeapTuple htup;
@@ -5591,11 +5694,15 @@ static void AttrDefaultFetch(Relation relation)
             UpdatedColFetch(relation->rd_att->constr, htup, adrel, i);
 
             val = fastgetattr(htup, Anum_pg_attrdef_adbin, adrel->rd_att, &isnull);
-            if (isnull)
+            if (isnull) {
                 ereport(WARNING, (errmsg("null adbin for attr %s of rel %s",
                     NameStr(relation->rd_att->attrs[adform->adnum - 1]->attname), RelationGetRelationName(relation))));
-            else
+            } else {
                 attrdef[i].adbin = MemoryContextStrdup(LocalMyDBCacheMemCxt(), TextDatumGetCString(val));
+                if (!attrdef[i].has_on_update) {
+                    AttrAutoIncrementFetch(relation, adform->adnum, attrdef[i].adbin);
+                }
+            }
 
             val = fastgetattr(htup, Anum_pg_attrdef_adbin_on_update, adrel->rd_att, &isnull);
             if (!isnull)
@@ -8026,7 +8133,7 @@ Relation get_rel_from_meta(RelationMetaData* node)
     rel->rd_node.spcNode = node->spcNode;
     rel->rd_node.dbNode = node->dbNode;
     rel->rd_node.relNode = node->relNode;
-    rel->rd_node.bucketNode = node->bucketNode;
+    rel->rd_node.bucketNode = (int2)node->bucketNode;
 
     rel->rd_rel = (Form_pg_class)palloc0(sizeof(FormData_pg_class));
     rel->rd_rel->relkind = node->relkind;
@@ -8076,6 +8183,8 @@ Relation tuple_get_rel(HeapTuple pg_class_tuple, LOCKMODE lockmode, TupleDesc tu
 {
     Assert(lockmode >= NoLock && lockmode < MAX_LOCKMODES);
     MemoryContext oldcxt;
+    bool isNull = false;
+    Datum datum;
 
     Oid relid = HeapTupleGetOid(pg_class_tuple);
     if (lockmode != NoLock) {
@@ -8112,6 +8221,13 @@ Relation tuple_get_rel(HeapTuple pg_class_tuple, LOCKMODE lockmode, TupleDesc tu
     relation->rd_rules = NULL;
     relation->rd_rulescxt = NULL;
     relation->trigdesc = NULL;
+    /* initialize the relreplident field */
+    datum = heap_getattr(pg_class_tuple, Anum_pg_class_relreplident, GetDefaultPgClassDesc(), &isNull);
+    if (isNull) {
+        relation->relreplident = REPLICA_IDENTITY_NOTHING;
+    } else {
+        relation->relreplident = CharGetDatum(datum);
+    }
     /* 
      * If it's an index, initialize index-related information.
      * We modify RelationInitIndexAccessInfo interface to input index tuple which cached by ourself.
@@ -8181,43 +8297,44 @@ void GetTdeInfoFromRel(Relation rel, TdeInfo *tde_info)
     }
 }
 
+
+/* setup page compress options for relation */
 void SetupPageCompressForRelation(RelFileNode* node, PageCompressOpts* compress_options, const char* relationName)
 {
-    uint1 algorithm = compress_options->compressType;
-    if (algorithm == COMPRESS_TYPE_NONE) {
+    uint32 algorithm = (uint32)compress_options->compressType;
+    if (algorithm == (uint32)COMPRESS_TYPE_NONE) {
         node->opt = 0;
     } else {
-        if (!SUPPORT_PAGE_COMPRESSION) {
-            ereport(ERROR, (errmsg("unsupported page compression on this platform")));
-        }
-
-        uint1 compressLevel;
+        uint8 compressLevel;
         bool symbol = false;
         if (compress_options->compressLevel >= 0) {
             symbol = true;
-            compressLevel = compress_options->compressLevel;
+            compressLevel = (uint8)compress_options->compressLevel;
         } else {
             symbol = false;
-            compressLevel = -compress_options->compressLevel;
+            compressLevel = (uint8)-compress_options->compressLevel;
         }
+
         bool success = false;
         uint1 chunkSize = ConvertChunkSize(compress_options->compressChunkSize, &success);
         if (!success) {
-            ereport(ERROR, (errmsg("invalid compress_chunk_size %d , must be one of %d, %d, %d or %d for %s",
+            ereport(ERROR, (errmsg("invalid compress_chunk_size %u, must be one of %d, %d, %d or %d for %s",
                                    compress_options->compressChunkSize, BLCKSZ / 16, BLCKSZ / 8, BLCKSZ / 4, BLCKSZ / 2,
                                    relationName)));
         }
+
         uint1 preallocChunks = 0;
         if (compress_options->compressPreallocChunks >= BLCKSZ / compress_options->compressChunkSize) {
-            ereport(ERROR, (errmsg("invalid compress_prealloc_chunks %d , must be less than %d for %s",
+            ereport(ERROR, (errmsg("invalid compress_prealloc_chunks %u, must be less than %u for %s",
                                    compress_options->compressPreallocChunks,
                                    BLCKSZ / compress_options->compressChunkSize, relationName)));
         } else {
             preallocChunks = (uint1)(compress_options->compressPreallocChunks);
         }
         node->opt = 0;
-        SET_COMPRESS_OPTION((*node), compress_options->compressByteConvert, compress_options->compressDiffConvert,
-                            preallocChunks, symbol, compressLevel, algorithm, chunkSize);
+        SET_COMPRESS_OPTION((*node), (int)compress_options->compressByteConvert,
+                            (int)compress_options->compressDiffConvert, preallocChunks, (int)symbol,
+                            compressLevel, algorithm, chunkSize);
     }
 }
 char RelationGetRelReplident(Relation r)
@@ -8239,7 +8356,7 @@ char RelationGetRelReplident(Relation r)
     } else {
         relreplident = CharGetDatum(datum);
     }
-    
+
     heap_close(classRel, AccessShareLock);
     ReleaseSysCache(tuple);
 

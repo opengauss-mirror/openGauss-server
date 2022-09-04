@@ -309,7 +309,7 @@ Type LookupTypeNameExtended(ParseState* pstate, const TypeName* typname, int32* 
         if (schemaname != NULL) {
             /* Look in package type */
             if (isPkgType) {
-                typoid = LookupTypeInPackage(typeName, pkgOid, namespaceId);
+                typoid = LookupTypeInPackage(typname->names, typeName, pkgOid, namespaceId);
             } else {
                 /* Look in specific schema only */
                 typoid = GetSysCacheOid2(TYPENAMENSP, PointerGetDatum(typeName), ObjectIdGetDatum(namespaceId));
@@ -321,10 +321,10 @@ Type LookupTypeNameExtended(ParseState* pstate, const TypeName* typname, int32* 
         } else {
             if (pkgName == NULL) {
                 /* find type in current packgae first */
-                typoid = LookupTypeInPackage(typeName);
+                typoid = LookupTypeInPackage(typname->names, typeName);
             }
             if (isPkgType) {
-                typoid = LookupTypeInPackage(typeName, pkgOid);
+                typoid = LookupTypeInPackage(typname->names, typeName, pkgOid);
             }
             if (!OidIsValid(typoid)) {
                 /* Unqualified type name, so search the search path */
@@ -985,16 +985,39 @@ bool IsTypeSupportedByCStore(Oid typeOid)
         case VARBITARRAYOID:
         case BYTEAWITHOUTORDERCOLOID:
         case BYTEAWITHOUTORDERWITHEQUALCOLOID:
-        case VOIDOID:
             return true;
         default:
             break;
     }
 
-    ereport(DEBUG2, (errmodule(MOD_OPT_PLANNER),
-        errmsg("Vectorize plan failed due to unsupport type: %d", typeOid)));
     return false;
 }
+
+bool IsTypeSupportedByVectorEngine(Oid typeOid)
+{
+    if (IsTypeSupportedByCStore(typeOid)) {
+        return true;
+    }
+
+    switch (typeOid) {
+        /* Name, MacAddr and UUID also be processed in rowtovec and vectorow,
+         * but it may cause result not correct. So do not support it here.
+         */
+        case VOIDOID:
+        case UNKNOWNOID:
+        case CSTRINGOID: {
+            return true;
+        }
+        default:
+            break;
+    }
+
+    ereport(DEBUG2, (errmodule(MOD_OPT_PLANNER),
+        errmsg("Vectorize plan failed due to unsupport type: %u", typeOid)));
+
+    return false;
+}
+
 /*
  * IsTypeSupportedByORCRelation
  * Return true if the type is supported by ORC format relation.
@@ -1301,6 +1324,10 @@ HeapTuple FindPkgVariableType(ParseState* pstate, const TypeName* typname, int32
     }
     PLpgSQL_datum* datum = GetPackageDatum(typname->names);
     if (datum != NULL && datum->dtype == PLPGSQL_DTYPE_VAR) {
+        if (OidIsValid(((PLpgSQL_var*)datum)->datatype->tableOfIndexType)) {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("not support ref table of variable as procedure argument type")));
+        }
         Oid typOid =  ((PLpgSQL_var*)datum)->datatype->typoid;
         tup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typOid));
         /* should not happen */
@@ -1317,8 +1344,41 @@ HeapTuple FindPkgVariableType(ParseState* pstate, const TypeName* typname, int32
 #endif
 }
 
+static void check_record_nest_tableof_index_type(const char* typeName, List* typeNames)
+{
+    PLpgSQL_datum* datum = NULL;
+    if (typeName != NULL) {
+        PLpgSQL_nsitem* ns = NULL;
+        PLpgSQL_package* pkg = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package;
+        ns = plpgsql_ns_lookup(pkg->public_ns, false, typeName, NULL, NULL, NULL);
+        if (ns == NULL) {
+            ns = plpgsql_ns_lookup(pkg->private_ns, false, typeName, NULL, NULL, NULL);
+        }
+
+        if (ns == NULL || ns->itemtype != PLPGSQL_NSTYPE_RECORD) {
+            return ;
+        }
+        datum = pkg->datums[ns->itemno];
+    } else {
+        datum = GetPackageDatum(typeNames);
+    }
+
+    if (datum != NULL && datum->dtype == PLPGSQL_DTYPE_RECORD_TYPE) {
+        PLpgSQL_rec_type* var_type = (PLpgSQL_rec_type*)datum;
+        PLpgSQL_type* type = NULL;
+        for (int i = 0; i < var_type->attrnum; i++) {
+            type = var_type->types[i];
+            if (type->ttype == PLPGSQL_TTYPE_SCALAR && OidIsValid(type->tableOfIndexType)) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("record nested table of index type do not support in out args")));
+            }
+        }
+    }
+}
+
 /* find the type if it is a package type */
-Oid LookupTypeInPackage(const char* typeName, Oid pkgOid, Oid namespaceId)
+Oid LookupTypeInPackage(List* typeNames, const char* typeName, Oid pkgOid, Oid namespaceId)
 {
     Oid typOid = InvalidOid;
     char* castTypeName = NULL;
@@ -1343,6 +1403,9 @@ Oid LookupTypeInPackage(const char* typeName, Oid pkgOid, Oid namespaceId)
             pfree_ext(castTypeName);
         }
 
+        if (OidIsValid(typOid)) {
+            check_record_nest_tableof_index_type(typeName, NULL);
+        }
         return typOid;
     }
 
@@ -1361,6 +1424,7 @@ Oid LookupTypeInPackage(const char* typeName, Oid pkgOid, Oid namespaceId)
     pfree_ext(castTypeName);
 
     if (OidIsValid(typOid)) {
+        check_record_nest_tableof_index_type(NULL, typeNames);
         return typOid;
     }
 

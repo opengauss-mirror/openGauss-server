@@ -1137,7 +1137,8 @@ static void MOTAddForeignUpdateTargets(Query* parsetree, RangeTblEntry* targetRt
     TargetEntry* tle;
 
     /* Make a Var representing the desired value */
-    var = makeVar(parsetree->resultRelation, SelfItemPointerAttributeNumber, TIDOID, -1, InvalidOid, 0);
+    var = makeVar((Index)linitial_int(parsetree->resultRelations), SelfItemPointerAttributeNumber,
+                  TIDOID, -1, InvalidOid, 0);
 
     /* Wrap it in a resjunk TLE with the right name ... */
     attrname = MOT_REC_TID_NAME;

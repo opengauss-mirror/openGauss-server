@@ -42,7 +42,7 @@ typedef struct CookedConstraint {
 	int			inhcount;        /* number of times constraint is inherited */
 	bool		is_no_inherit;   /* constraint has local def and cannot be
 								 * inherited */
-	Node        *update_expr;
+    Node        *update_expr;
 } CookedConstraint;
 
 typedef struct CeHeapInfo {
@@ -243,6 +243,7 @@ extern char* make_column_map(TupleDesc tuple_desc);
  * @Notes: remember to pfree the array.
  */
 extern bool* CheckPartkeyHasTimestampwithzone(Relation partTableRel, bool isForSubPartition = false);
+extern bool *CheckSubPartkeyHasTimestampwithzone(Relation partTableRel, List *subpartKeyPosList);
 
 extern Oid AddNewIntervalPartition(Relation rel, void* insertTuple, bool isDDL = false);
 

@@ -698,7 +698,7 @@ void SegDropSpaceMetaBuffers(Oid spcNode, Oid dbNode)
          * As in DropRelFileNodeBuffers, an unlocked precheck should be safe
          * and saves some cycles.
          */
-        if (buf_desc->tag.rnode.spcNode != spcNode) {
+        if (buf_desc->tag.rnode.spcNode != spcNode || buf_desc->tag.rnode.dbNode != dbNode) {
             continue;
         }
 

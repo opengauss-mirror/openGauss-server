@@ -316,7 +316,7 @@ bool HeapFetchRowVersion(TidScanState* node, Relation relation,
     tuple->t_data = &(node->tss_ctbuf_hdr);
     Assert(tid != NULL);
     tuple->t_self = *tid;
-    if (heap_fetch(relation, scanSnap, tuple, &buffer, false, NULL)) {
+    if (heap_fetch(relation, scanSnap, tuple, &buffer, false, NULL, &node->ss.ps.state->have_current_xact_date)) {
         /*
          * store the scanned tuple in the scan tuple slot of the scan
          * state.  Eventually we will only do this and not return a tuple.
@@ -483,7 +483,7 @@ void ExecReScanTidScan(TidScanState* node)
     node->tss_NumTids = 0;
     node->tss_TidPtr = -1;
 
-    if (node->ss.isPartTbl) {
+    if (node->ss.isPartTbl && !(((Scan *)node->ss.ps.plan)->partition_iterator_elimination)) {
         scan_handler_tbl_end_tidscan((TableScanDesc)(node->ss.ss_currentScanDesc));
 
         if (PointerIsValid(node->ss.partitions)) {
@@ -778,7 +778,8 @@ static void ExecInitPartitionForTidScan(TidScanState* tidstate, EState* estate)
             Oid table_partitionid = InvalidOid;
             int part_seq = lfirst_int(cell);
             /* add table partition to list */
-            table_partitionid = getPartitionOidFromSequence(current_relation, part_seq);
+            table_partitionid =
+                getPartitionOidFromSequence(current_relation, part_seq, plan->scan.pruningInfo->partMap);
             table_partition = partitionOpen(current_relation, table_partitionid, lock);
             tidstate->ss.partitions = lappend(tidstate->ss.partitions, table_partition);
             if (plan->scan.pruningInfo->ls_selectedSubPartitions != NIL) {

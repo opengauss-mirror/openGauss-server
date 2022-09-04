@@ -246,7 +246,7 @@ FETCH_URL_ERROR2:
 #define SLEEP_UNITS_PER_SECOND 1
 #endif
 
-#define MAX_RETRIES 5
+#define MAX_RETRIES 3
 #define ERROR_MESSAGE_LEN 1024
 #define ERROR_DETAIL_LEN 4096
 #define MAX_PATH_LEN 1024
@@ -921,7 +921,7 @@ List *list_obs_bucket_objects(const char *uri, bool encrypt, const char *access_
     List *result_list = NIL;
     obs_options option;
 
-    ereport(DEBUG1, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmodule(MOD_DFS),
+    ereport(DEBUG1, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmodule(MOD_OBS),
                      errmsg("The location string: %s in current list bucket objects.", uri)));
 
     /* Parse uri into hostname, bucket, prefix */
@@ -1005,7 +1005,7 @@ List *listObsObjects(OBSReadWriteHandler *handler, bool reportError)
 {
     List *result_list = NIL;
 
-    ereport(DEBUG1, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmodule(MOD_DFS),
+    ereport(DEBUG1, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmodule(MOD_OBS),
                     errmsg("The location string: %s in current list bucket objects.", handler->m_object_info.key)));
 
     obs_list_objects_handler listBucketHandler = {{ &responsePropertiesCallback, &responseCompleteCallback },
@@ -1180,6 +1180,14 @@ size_t read_bucket_object(OBSReadWriteHandler *handler, char *output_buffer, uin
         pgstat_report_waitevent(WAIT_EVENT_END);
         PROFILING_OBS_ERROR(rb.actual_length, DSRQ_READ);
 
+        if (t_thrd.role == BARRIER_CREATOR && t_thrd.postmaster_cxt.HaShmData->is_cross_region) {
+            ereport(LOG, (errcode(ERRCODE_INVALID_STATUS),
+                errmsg("Datanode '%s' fail to read OBS object bucket:'%s' key:'%s' with OBS error code:%s %s",
+                g_instance.attr.attr_common.PGXCNodeName, handler->m_option.bucket_options.bucket_name,
+                handler->m_object_info.key, obs_get_status_name(statusG), errorMessageG),
+                errdetail_log("%s", errorDetailsG)));
+            return -1;
+        }
         /* Otherwise to error-out unexpected OBS read errors */
         ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
                         errmsg("Datanode '%s' fail to read OBS object bucket:'%s' key:'%s' with OBS error code:%s %s",
@@ -1332,7 +1340,13 @@ int writeObsTempFile(OBSReadWriteHandler *handler, const char *bufferData, int d
     Assert(handler != NULL && bufferData != NULL);
 
     int ret = 0;
-    int retriesG = MAX_RETRIES;
+    int retriesG = 0;
+    const int barrierCreatorRetries = 1;
+    if (t_thrd.role == BARRIER_CREATOR && t_thrd.postmaster_cxt.HaShmData->is_cross_region) {
+        retriesG = barrierCreatorRetries;
+    } else {
+        retriesG = MAX_RETRIES;
+    }
 
     handler->properties.put_cond.byte_count = dataSize;
 
@@ -1811,6 +1825,10 @@ static void fillBucketContext(OBSReadWriteHandler *handler, const char* key, Arc
     if (shortenConnTime == true) {
         handler->m_option.request_options.connect_time = 1000;
     }
+    if (t_thrd.role == BARRIER_CREATOR && t_thrd.postmaster_cxt.HaShmData->is_cross_region) {
+        handler->m_option.request_options.connect_time = 100;
+        handler->m_option.request_options.max_connected_time = 1;
+    }
 
     /* Fill in obs full file path */
     if (strncmp(key, "global_barrier_records", headerLen) != 0) {
@@ -1970,6 +1988,10 @@ void fillObsOption(obs_options *option, ArchiveConfig *obs_config = NULL)
     t_thrd.obs_cxt.pCAInfo = getCAInfo();
     option->bucket_options.certificate_info = t_thrd.obs_cxt.pCAInfo;
     option->request_options.ssl_cipher_list = OBS_CIPHER_LIST;
+    if (t_thrd.role == BARRIER_CREATOR && t_thrd.postmaster_cxt.HaShmData->is_cross_region) {
+        option->request_options.connect_time = 100;
+        option->request_options.max_connected_time = 1;
+    }
 
 }
 
@@ -2516,7 +2538,13 @@ bool checkOBSFileExist(const char* file_path, ArchiveConfig *obs_config)
     HEAD_OBJECT_DATA data;
     data.object_length = 0;
     data.ret_status = OBS_STATUS_OK;
-    int retriesG = MAX_RETRIES;
+    int retriesG = 0;
+    const int barrierCreatorRetries = 1;
+    if (t_thrd.role == BARRIER_CREATOR && t_thrd.postmaster_cxt.HaShmData->is_cross_region) {
+        retriesG = barrierCreatorRetries;
+    } else {
+        retriesG = MAX_RETRIES;
+    }
     int rc = 0;
     char obsFilePath[MAXPGPATH] = {0};
     /* create obs_option for list bucket objects */

@@ -65,6 +65,14 @@ typedef struct constrCheck {
     bool ccnoinherit; /* this is a non-inheritable constraint */
 } ConstrCheck;
 
+typedef struct ConstrAutoInc {
+    AttrNumber attnum;          /* auto_increment attribute number */
+    int128 *next;               /* auto_increment counter for local temp table  */
+    Oid seqoid;                 /* auto_increment counter sequence for not local temp table */
+    void* datum2autoinc_func;   /* function cast datum to auto_increment counter */
+    void* autoinc2datum_func;   /* function cast auto_increment counter to datum */
+} ConstrAutoInc;
+
 /* This structure contains constraints of a tuple */
 typedef struct tupleConstr {
     AttrDefault* defval;     /* array */
@@ -76,6 +84,7 @@ typedef struct tupleConstr {
     bool has_not_null;
     bool has_generated_stored;
     char* generatedCols;     /* attribute array */
+    ConstrAutoInc* cons_autoinc; /* pointer*/
     bool* has_on_update;
 } TupleConstr;
 
@@ -158,7 +167,7 @@ extern TupleDesc CreateTupleDescCopy(TupleDesc tupdesc);
 
 extern TupleDesc CreateTupleDescCopyConstr(TupleDesc tupdesc);
 
-extern void FreeTupleDesc(TupleDesc tupdesc);
+extern void FreeTupleDesc(TupleDesc tupdesc, bool need_check = true);
 
 extern void IncrTupleDescRefCount(TupleDesc tupdesc);
 extern void DecrTupleDescRefCount(TupleDesc tupdesc);
@@ -197,5 +206,11 @@ extern char GetGeneratedCol(TupleDesc tupdesc, int atti);
 
 extern TupleConstr *TupleConstrCopy(const TupleDesc tupdesc);
 extern TupInitDefVal *tupInitDefValCopy(TupInitDefVal *pInitDefVal, int nAttr);
+
+#define RelHasAutoInc(rel)  ((rel)->rd_att->constr && (rel)->rd_att->constr->cons_autoinc)
+#define RelAutoIncSeqOid(rel)  (RelHasAutoInc(rel) ? (rel)->rd_att->constr->cons_autoinc->seqoid : InvalidOid)
+#define RelAutoIncAttrNum(rel)  (RelHasAutoInc(rel) ? (rel)->rd_att->constr->cons_autoinc->attnum : 0)
+#define TempRelAutoInc(rel)  (RelHasAutoInc(rel) ? (rel)->rd_att->constr->cons_autoinc->next : NULL)
+
 #endif /* TUPDESC_H */
 

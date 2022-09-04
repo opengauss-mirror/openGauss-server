@@ -1,6 +1,7 @@
 -- test update
 drop table if exists t1;
 create table t1(c1 integer, c2 integer default 200) with (storage_type=USTORE);
+create index idx1 on t1(c1);
 start transaction;
 insert into t1 values(10, 20);
 insert into t1 values(20, 30);
@@ -10,42 +11,17 @@ insert into t1 values(50, 60);
 insert into t1 values(60, 70);
 insert into t1 values(70, 80);
 insert into t1 values(80, 90);
+update t1 set c2 = 100 where c1 > 60;
 commit;
 select * from t1;
+select /*+ indexonlyscan(t1) */ sum(c1), count(*) from t1 union select /*+ tablescan(t1) */ sum(c1),count(*) from t1;
 
 start transaction;
 update t1 set c2 = 100 where c1 > 60;
 commit;
 
-select * from t1;
-
-start transaction;
-update t1 set c2 = DEFAULT where c1 > 60;
-commit;
-
-select * from t1;
-
--- Try with a larger column value. Pruning logic will shuffle all the rows to make space for the larger rows
-drop table if exists t2;
-create table t2(c1 integer, c2 varchar(64)) with (storage_type=USTORE);
-start transaction;
-insert into t2 values(10, 'abc');
-insert into t2 values(20, 'bbc');
-insert into t2 values(30, 'cbc');
-insert into t2 values(40, 'dbc');
-insert into t2 values(50, 'ebc');
-insert into t2 values(60, 'fbc');
-insert into t2 values(70, 'gbc');
-insert into t2 values(80, 'hbc');
-insert into t2 values(90, 'ibc');
-insert into t2 values(100, 'jbc');
-commit;
-select * from t2;
-
-start transaction;
-update t2 set c2 = 'abcabcabc' where c1 > 60;
-commit;
-select * from t2;
+select * from t1 order by c1;
+select /*+ indexonlyscan(t1) */ sum(c1), count(*) from t1 union select /*+ tablescan(t1) */ sum(c1),count(*) from t1;
 
 -- Rollback of inplace update
 drop table if exists t3;
@@ -57,16 +33,19 @@ insert into t3 values(5, 6);
 insert into t3 values(7, 8);
 insert into t3 values(9, 10);
 commit;
+create index idx3 on t3(c1);
 
-select * from t3;
+select * from t3 order by c1;
+select /*+ indexonlyscan(t3) */ sum(c1), count(*) from t3 union select /*+ tablescan(t3) */ sum(c1),count(*) from t3;
 
 start transaction;
 update t3 set c2 = 20 where c1 = 5;
 update t3 set c2 = 30 where c1 = 7;
-select * from t3;
+select * from t3 order by c1;
 rollback;
 
-select * from t3;
+select * from t3 order by c1;
+select /*+ indexonlyscan(t3) */ sum(c1), count(*) from t3 union select /*+ tablescan(t3) */ sum(c1),count(*) from t3;
 
 -- Rollback of non-inplace update
 -- Note that the first update statement causes 
@@ -74,24 +53,39 @@ select * from t3;
 -- The second update is done as a pure non-inplace update because 
 -- we do not prune a data page with open transaction on a tuple. 
 drop table if exists t4;
-create table t4(c1 integer, c2 varchar(128)) with (storage_type=USTORE);
+create table t4(c1 integer primary key, c2 varchar(128)) with (storage_type=USTORE);
 start transaction;
 insert into t4 values(1, 'abc');
 insert into t4 values(2, 'bcd');
 insert into t4 values(3, 'cde');
-insert into t4 values(4, 'def');
-insert into t4 values(5, 'efg');
+insert into t4 values(generate_series(4, 500), 'defdewjhdlsahdlsa');
+update t4 set c2 = 'aaaabbbb' where c1 < 10;
+update t4 set c2 = 'aaaabbbbhjhjjhjhjhjhjhjhjhj' where c1 < 10;
 commit;
+create index idx4 on t4(c1);
 
-select * from t4 order by c1;
+select * from t4 order by c1 limit 10;
+select /*+ indexonlyscan(t4) */ sum(c1), count(*) from t4 union select /*+ tablescan(t4) */ sum(c1),count(*) from t4;
 
 start transaction;
 update t4 set c2 = 'aaaabbbbccccdddd' where c1 = 3;
-update t4 set c2 = 'aaaabbbbccccdddd' where c1 = 2;
-select * from t4 order by c1;
+update t4 set c2 = 'aa';
+update t4 set c2 = 'aaaaa';
+update t4 set c2 = 'aaaaaaaaaaaaaaaahdkjdsd';
+select /*+ indexonlyscan(t4) */ sum(c1), count(*) from t4 union select /*+ tablescan(t4) */ sum(c1),count(*) from t4;
 rollback;
 
-select * from t4 order by c1;
+select * from t4 order by c1 limit 10;
+select /*+ indexonlyscan(t4) */ sum(c1), count(*) from t4 union select /*+ tablescan(t4) */ sum(c1),count(*) from t4;
+
+start transaction;
+update t4 set c2 = 'aa';
+update t4 set c2 = 'aaaaa';
+update t4 set c2 = 'aaaaaaaaaaaaaaaahdkjdsd';
+commit;
+
+select * from t4 order by c1 limit 10;
+select /*+ indexonlyscan(t4) */ sum(c1), count(*) from t4 union select /*+ tablescan(t4) */ sum(c1),count(*) from t4;
 
 -- Test updates involving mixed table types
 drop table if exists t5;
@@ -104,7 +98,6 @@ update t5 set b = 999 from t6 where t5.a=t6.a;
 select count(*) from t5 where b = 999;
 
 drop table t1;
-drop table t2;
 drop table t3;
 drop table t4;
 drop table t5;

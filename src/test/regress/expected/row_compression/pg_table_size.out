@@ -13,19 +13,19 @@ select pg_table_size('table_size_schema.normal_table');
 select pg_table_size('table_size_schema.compressed_table_1024');
  pg_table_size 
 ---------------
-       5592896
+             0
 (1 row)
 
 select pg_table_size('table_size_schema.compressed_table_2048');
  pg_table_size 
 ---------------
-       3196168
+             0
 (1 row)
 
 select pg_table_size('table_size_schema.compressed_table_4096');
  pg_table_size 
 ---------------
-       2097664
+             0
 (1 row)
 
 drop schema table_size_schema cascade;
@@ -56,19 +56,19 @@ select pg_table_size('partition_table_size_schema.normal_partition');
 select pg_table_size('partition_table_size_schema.compressed_partition_1024');
  pg_table_size 
 ---------------
-      11185792
+             0
 (1 row)
 
 select pg_table_size('partition_table_size_schema.compressed_partition_2048');
  pg_table_size 
 ---------------
-       6392336
+             0
 (1 row)
 
 select pg_table_size('partition_table_size_schema.compressed_partition_4096');
  pg_table_size 
 ---------------
-       4195328
+             0
 (1 row)
 
 drop schema partition_table_size_schema cascade;

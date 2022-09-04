@@ -143,7 +143,6 @@ void ThreadPoolStream::InitStream()
     read_nondefault_variables();
 
     /* Do local initialization of file, storage and buffer managers */
-    ReBuildLSC();
     InitFileAccess();
     smgrinit();
 

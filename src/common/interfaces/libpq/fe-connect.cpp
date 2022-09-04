@@ -214,6 +214,7 @@ static const PQconninfoOption PQconninfoOptions[] = {
     {"keepalives_idle", NULL, NULL, NULL, "TCP-Keepalives-Idle", "", 10, 0},
     {"keepalives_interval", NULL, NULL, NULL, "TCP-Keepalives-Interval", "", 10, 0},
     {"keepalives_count", NULL, NULL, NULL, "TCP-Keepalives-Count", "", 10, 0},
+    {"tcp_user_timeout", NULL, NULL, NULL, "TCP-User-Timeout", "", 10, 0},
     {"rw_timeout", NULL, NULL, NULL, "Read write timeout", "", 10, 0},
 
     /*
@@ -915,6 +916,8 @@ static void fillPGconn(PGconn* conn, PQconninfoOption* connOptions)
     conn->keepalives_interval = (tmp != NULL) ? strdup(tmp) : NULL;
     tmp = conninfo_getval(connOptions, "keepalives_count");
     conn->keepalives_count = (tmp != NULL) ? strdup(tmp) : NULL;
+    tmp = conninfo_getval(connOptions, "tcp_user_timeout");
+    conn->tcp_user_timeout = (tmp != NULL) ? strdup(tmp) : NULL;
     tmp = conninfo_getval(connOptions, "rw_timeout");
     conn->rw_timeout = (tmp != NULL) ? strdup(tmp) : NULL;
     tmp = conninfo_getval(connOptions, "sslmode");
@@ -1580,6 +1583,40 @@ static int setKeepalivesWin32(PGconn* conn)
 #endif /* SIO_KEEPALIVE_VALS */
 #endif /* WIN32 */
 
+/*
+ * Set the TCP user timeout.
+ */
+static int setTCPUserTimeout(PGconn *conn)
+{
+    int timeout;
+
+    if (conn->tcp_user_timeout == NULL) {
+        return 1;
+    }
+
+    if (!parse_int_param(conn->tcp_user_timeout, &timeout, conn, "tcp_user_timeout")) {
+        return 0;
+    }
+
+    if (timeout < 0) {
+        timeout = 0;
+    }
+
+#ifdef TCP_USER_TIMEOUT
+    if (setsockopt(conn->sock, IPPROTO_TCP, TCP_USER_TIMEOUT, (char *) &timeout, sizeof(timeout)) < 0) {
+        char sebuf[256];
+
+        appendPQExpBuffer(&conn->errorMessage,
+                          libpq_gettext("setsockopt(%s) failed: %s\n"),
+                          "TCP_USER_TIMEOUT",
+                          SOCK_STRERROR(SOCK_ERRNO, sebuf, sizeof(sebuf)));
+        return 0;
+    }
+#endif
+
+    return 1;
+}
+
 /* ----------
  * connectDBStart -
  *		Begin the process of making a connection to the backend.
@@ -2107,6 +2144,9 @@ keep_going: /* We will come back to here until there is
                         err = 1;
 #endif /* SIO_KEEPALIVE_VALS */
 #endif /* WIN32 */
+                    else if (!setTCPUserTimeout(conn)) {
+                        err = 1;
+                    }
 
                     if (err) {
                         closesocket(conn->sock);
@@ -3408,6 +3448,7 @@ void freePGconn(PGconn* conn)
     libpq_free(conn->keepalives_idle);
     libpq_free(conn->keepalives_interval);
     libpq_free(conn->keepalives_count);
+    libpq_free(conn->tcp_user_timeout);
     libpq_free(conn->rw_timeout);
     libpq_free(conn->sslmode);
     libpq_free(conn->sslcert);

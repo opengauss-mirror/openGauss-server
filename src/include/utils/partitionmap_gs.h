@@ -480,6 +480,7 @@ typedef struct PruningResult {
     Expr* expr;
     /* This variable applies only to single-partition key range partition tables in PBE mode. */
     bool isPbeSinlePartition = false;
+    PartitionMap* partMap;
 } PruningResult;
 
 extern Oid partIDGetPartOid(Relation relation, PartitionIdentifier* partID);
@@ -487,6 +488,7 @@ extern PartitionIdentifier* partOidGetPartID(Relation rel, Oid partOid);
 
 extern void RebuildPartitonMap(PartitionMap* oldMap, PartitionMap* newMap);
 extern void RebuildRangePartitionMap(RangePartitionMap* oldMap, RangePartitionMap* newMap);
+extern bool EqualPartitonMap(const PartitionMap* partMap1, const PartitionMap* partMap2);
 
 bool isPartKeyValuesInPartition(RangePartitionMap* partMap, Const** partKeyValues, int partkeyColumnNum, int partSeq);
 
@@ -508,6 +510,8 @@ extern int HashElementCmp(const void* a, const void* b);
 extern void DestroyListElements(ListPartElement* src, int elementNum);
 extern void PartitionMapDestroyHashArray(HashPartElement* hashArray, int arrLen);
 extern void partitionMapDestroyRangeArray(RangeElement* rangeArray, int arrLen);
-extern void RelationDestroyPartitionMap(PartitionMap* partMap);
+extern void DestroyPartitionMap(PartitionMap* partMap);
+extern bool trySearchFakeReationForPartitionOid(HTAB** fakeRels, MemoryContext cxt, Relation rel, Oid partOid,
+    Relation* fakeRelation, Partition* partition, LOCKMODE lmode, bool checkSubPart = true);
 
 #endif /* PARTITIONMAP_GS_H_ */

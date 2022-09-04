@@ -1,6 +1,6 @@
 create schema unsupported_feature;
--- unspport compressType: 3
-CREATE TABLE unsupported_feature.compressed_table_1024(id int) WITH(compresstype=3, compress_chunk_size=1024);
+-- unspport compressType: 4
+CREATE TABLE unsupported_feature.compressed_table_1024(id int) WITH(compresstype=4, compress_chunk_size=1024);
 -- unspport compress_chunk_size: 2000
 CREATE TABLE unsupported_feature.compressed_table_1024(id int) WITH(compresstype=2, compress_chunk_size=2000);
 -- unspport compress_prealloc_chunks: -1
@@ -52,9 +52,6 @@ create table unsupported_feature.t_rowcompress_pglz_compresslevel(id int) with (
 create table unsupported_feature.t_rowcompress_pglz_compresslevel(id int) with (compresstype=2,compress_level=2); -- success
 
 CREATE TABLE unsupported_feature.index_test(id int, c1 text);
--- ustore
-CREATE TABLE unsupported_feature.ustore_table(id int, c1 text) WITH(compresstype=2, storage_type=ustore); --failed
-CREATE INDEX tbl_pc_idx1 on unsupported_feature.index_test(c1) WITH(compresstype=2, storage_type=ustore); --failed
 -- segment
 CREATE TABLE unsupported_feature.segment_table(id int, c1 text) WITH(compresstype=2, segment=on);  --failed
 CREATE INDEX on unsupported_feature.index_test(c1) WITH(compresstype=2, segment=on); --failed

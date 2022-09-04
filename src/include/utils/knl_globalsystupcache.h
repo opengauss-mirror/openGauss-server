@@ -423,7 +423,14 @@ private:
     ScanKeyData cc_skey[CATCACHE_MAXKEYS]; /* precomputed key info for
                                             * heap scans */
 
-    /* # of hash buckets in this cache */
+    /*
+     * # of hash buckets in this cache
+     *
+     * Reminding, we may use GlobalBucketList to unifom the "bucket implementation"
+     * GlobalBucketList
+     *      - m_bucket_entry
+     *      - m_nbuckets
+     */
     int cc_nbuckets;
     Dllist *cc_buckets;     /* same to CatCache::cc_bucket */
     Dllist cc_lists;        /* same to CatCache::cc_list */

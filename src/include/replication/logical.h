@@ -126,11 +126,14 @@ typedef struct {
     bool skip_empty_xacts;
     bool xact_wrote_changes;
     bool only_local;
+    int max_txn_in_memory;
+    int max_reorderbuffer_in_memory;
     char decode_style; /* 'j' stands for json while 't' stands for text */
     int parallel_decode_num;
     int sending_batch;
     ParallelDecodeChangeCB decode_change;
     List *tableWhiteList;
+    int parallel_queue_size;
 } ParallelDecodeOption;
 
 typedef struct {
@@ -145,6 +148,8 @@ typedef struct {
     bool skip_empty_xacts;
     bool xact_wrote_changes;
     bool only_local;
+    int max_txn_in_memory;
+    int max_reorderbuffer_in_memory;
     List *tableWhiteList;
 } PluginTestDecodingData;
 
@@ -204,7 +209,7 @@ typedef struct ParallelLogicalDecodingContext {
 
 typedef struct ParallelDecodeWorker {
     /* Worker id. */
-    uint32 id;
+    int id;
     /* Thread id */
     gs_thread_t tid;
     int slotId;
@@ -280,16 +285,28 @@ typedef struct LogicalDispatcher {
     bool firstLoop;
     bool abnormal;
     XLogRecPtr startpoint;
+    int64 workingTxnCnt;
+    int64 workingTxnMemory;
     struct ReplicationSlot* MyReplicationSlot;
 } LogicalDispatcher;
 
-#define QUEUE_RESULT_LEN 256
+#define QUEUE_RESULT_LEN 512
 typedef struct ParallelStatusData {
     char slotName[NAMEDATALEN];
     int parallelDecodeNum;
     char readQueueLen[QUEUE_RESULT_LEN];
     char decodeQueueLen[QUEUE_RESULT_LEN];
+    char readerLsn[MAXFNAMELEN];
+    int64 workingTxnCnt;
+    int64 workingTxnMemory;
 } ParallelStatusData;
+
+typedef struct DecodeOptionsDefault {
+    int parallel_decode_num;
+    int parallel_queue_size;
+    int max_txn_in_memory;
+    int max_reorderbuffer_in_memory;
+} DecodeOptionsDefault;
 
 extern LogicalDispatcher g_Logicaldispatcher[];
 extern bool firstCreateDispatcher;
@@ -324,13 +341,15 @@ extern void LogicalConfirmReceivedLocation(XLogRecPtr lsn);
 extern bool filter_by_origin_cb_wrapper(LogicalDecodingContext* ctx, RepOriginId origin_id);
 extern void CloseLogicalAdvanceConnect();
 extern void NotifyPrimaryAdvance(XLogRecPtr restart, XLogRecPtr flush);
+extern void NotifyPrimaryCatalogXmin(TransactionId catalogXmin);
 extern void ParallelDecodeWorkerMain(void* point);
 extern void LogicalReadWorkerMain(void* point);
 extern void ParseProcessRecord(ParallelLogicalDecodingContext *ctx, XLogReaderState *record, ParallelDecodeReaderWorker
     *worker);
-extern void XLogSendPararllelLogical();
-extern int StartLogicalLogWorkers(char* dbUser, char* dbName, char* slotname, List *options, int parallelDecodeNum);
+extern void XLogSendParallelLogical();
+extern void StartLogicalLogWorkers(char* dbUser, char* dbName, char* slotname, List *options, int parallelDecodeNum);
 extern void CheckBooleanOption(DefElem *elem, bool *booleanOption, bool defaultValue);
+extern void CheckIntOption(DefElem *elem, int *intOption, int defaultValue, int minVal, int maxVal);
 extern int ParseParallelDecodeNumOnly(List *options);
 extern bool CheckWhiteList(const List *whiteList, const char *schema, const char *table);
 extern bool ParseStringToWhiteList(char *tableString, List **tableWhiteList);
@@ -338,4 +357,10 @@ extern void ParseWhiteList(List **whiteList, DefElem* elem);
 extern void ParseDecodingOptionPlugin(ListCell* option, PluginTestDecodingData* data, OutputPluginOptions* opt);
 extern ParallelStatusData *GetParallelDecodeStatus(uint32 *num);
 extern void PrintLiteral(StringInfo s, Oid typid, char* outputstr);
+extern void FreeLogicalLog(ParallelReorderBuffer *rb, logicalLog *logChange, int slotId, bool nocache);
+
+extern bool LogicalDecodeParseOptionsDefault(const char* defaultStr, void **options);
+extern DecodeOptionsDefault* LogicalDecodeGetOptionsDefault();
+template <typename T> void LogicalDecodeReportLostChanges(const T *iterstate);
+
 #endif

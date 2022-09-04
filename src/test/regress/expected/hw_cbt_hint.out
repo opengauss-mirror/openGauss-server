@@ -1,0 +1,65 @@
+/*
+ * Test caser for hint is not valid for "PartIterator" where a none-unique index in such case is un-hintable
+ */
+EXPLAIN
+SELECT
+    /*+ rows(b #189) rows(a #55233) leading((a b)) indexscan(a txn_inv_transactions_t_n6) */
+    a.*, b.*
+FROM
+    txn_inv_transactions_t a INNER JOIN txn_inv_transaction_costs_t b on a.TRANSACTION_ID = b.transaction_id
+WHERE
+    a.route_group_id = '1031' AND
+    a.delete_flag = 'N' AND
+    b.route_group_id = '1031' AND
+    b.delete_flag = 'N' AND
+    b.costed_flag NOT IN ('Y','X' ) AND
+    ((a.organization_code = 'MY1' AND a.transaction_date >= '2022-04-01 00:00:00' AND a.transaction_date <= '2022-04-30 23:59:59'))
+ORDER BY a.TRANSACTION_ID ASC LIMIT 1000 OFFSET 0;
+                                                                                                                  QUERY PLAN                                                                                                                   
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=9127.44..9129.94 rows=1000 width=2644)
+   ->  Sort  (cost=9127.44..9470.83 rows=137356 width=2644)
+         Sort Key: a.transaction_id
+         ->  Hash Join  (cost=11.20..1596.36 rows=137356 width=2644)
+               Hash Cond: (a.transaction_id = b.transaction_id)
+               ->  Partitioned Index Scan using txn_inv_transactions_t_n6 on txn_inv_transactions_t a  (cost=0.00..8.28 rows=55233 width=1604)
+                     Index Cond: ((transaction_date >= 'Fri Apr 01 00:00:00 2022'::timestamp without time zone) AND (transaction_date <= 'Sat Apr 30 23:59:59 2022'::timestamp without time zone) AND ((route_group_id)::text = '1031'::text))
+                     Filter: ((delete_flag = 'N'::bpchar) AND ((organization_code)::text = 'MY1'::text))
+                     Selected Partitions:  1
+               ->  Hash  (cost=8.84..8.84 rows=189 width=1040)
+                     ->  Partitioned Index Scan using txn_inv_transaction_costs_u1 on txn_inv_transaction_costs_t b  (cost=0.00..8.84 rows=189 width=1040)
+                           Index Cond: ((route_group_id)::text = '1031'::text)
+                           Filter: ((costed_flag <> ALL ('{Y,X}'::bpchar[])) AND (delete_flag = 'N'::bpchar))
+                           Selected Partitions:  1
+(14 rows)
+
+EXPLAIN
+SELECT
+    /*+ set(enable_hashjoin off) rows(b #189) rows(a #55233) leading((a b)) indexscan(a txn_inv_transactions_t_n6) */
+    a.*, b.*
+FROM
+    txn_inv_transactions_t a INNER JOIN txn_inv_transaction_costs_t b on a.TRANSACTION_ID = b.transaction_id
+WHERE
+    a.route_group_id = '1031' AND
+    a.delete_flag = 'N' AND
+    b.route_group_id = '1031' AND
+    b.delete_flag = 'N' AND
+    b.costed_flag NOT IN ('Y','X' ) AND
+    ((a.organization_code = 'MY1' AND a.transaction_date >= '2022-04-01 00:00:00' AND a.transaction_date <= '2022-04-30 23:59:59'))
+ORDER BY a.TRANSACTION_ID ASC LIMIT 1000 OFFSET 0;
+                                                                                                                  QUERY PLAN                                                                                                                   
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=23586.85..23589.35 rows=1000 width=2644)
+   ->  Sort  (cost=23586.85..23930.24 rows=137356 width=2644)
+         Sort Key: a.transaction_id
+         ->  Nested Loop  (cost=0.00..16055.76 rows=137356 width=2644)
+               ->  Partitioned Index Scan using txn_inv_transactions_t_n6 on txn_inv_transactions_t a  (cost=0.00..8.28 rows=55233 width=1604)
+                     Index Cond: ((transaction_date >= 'Fri Apr 01 00:00:00 2022'::timestamp without time zone) AND (transaction_date <= 'Sat Apr 30 23:59:59 2022'::timestamp without time zone) AND ((route_group_id)::text = '1031'::text))
+                     Filter: ((delete_flag = 'N'::bpchar) AND ((organization_code)::text = 'MY1'::text))
+                     Selected Partitions:  1
+               ->  Partitioned Index Scan using txn_inv_transaction_costs_u1 on txn_inv_transaction_costs_t b  (cost=0.00..0.28 rows=1 width=1040)
+                     Index Cond: ((transaction_id = a.transaction_id) AND ((route_group_id)::text = '1031'::text))
+                     Filter: ((costed_flag <> ALL ('{Y,X}'::bpchar[])) AND (delete_flag = 'N'::bpchar))
+                     Selected Partitions:  1
+(12 rows)
+

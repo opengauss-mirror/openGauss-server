@@ -57,6 +57,24 @@
 
 static void AlterOperatorOwner_internal(Relation rel, Oid operOid, Oid newOwnerId);
 
+void CheckDefineOperatorPrivilege(Oid oprNamespace, const char* oprName)
+{
+    if ((oprNamespace == PG_CATALOG_NAMESPACE || oprNamespace == PG_PUBLIC_NAMESPACE) && !initialuser()) {
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+            errmsg("permission denied to create operator \"%s\"", oprName),
+            errhint("must be initial user to create an operator in %s schema.", get_namespace_name(oprNamespace))));
+    }
+
+    if (!IsInitdb && !u_sess->attr.attr_common.IsInplaceUpgrade &&
+        !g_instance.attr.attr_common.allow_create_sysobject &&
+        IsSysSchema(oprNamespace)) {
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+            errmsg("permission denied to create operator \"%s\"", oprName),
+            errhint("not allowd to create an operator in %s schema when allow_create_sysobject is off.",
+            get_namespace_name(oprNamespace))));
+    }
+}
+
 /*
  * DefineOperator
  *		this function extracts all the information from the
@@ -127,6 +145,8 @@ void DefineOperator(List* names, List* parameters)
         if (aclresult != ACLCHECK_OK)
             aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(oprNamespace));
     }
+
+    CheckDefineOperatorPrivilege(oprNamespace, oprName);
 
     /*
      * loop over the definition list and extract the information we need.
@@ -451,6 +471,13 @@ void AlterOperatorNamespace(List* names, List* argtypes, const char* newschema)
 
     /* get schema OID */
     nspOid = LookupCreationNamespace(newschema);
+
+    /* only super user can alter to public */
+    if (nspOid == PG_PUBLIC_NAMESPACE && !initialuser()) {
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+            errmsg("permission denied to alter %s", getObjectDescriptionOids(RelationGetRelid(rel), operOid)),
+            errhint("must be initial user to alter a operator to public schema.")));
+    }
 
     (void)AlterObjectNamespace(rel,
         OPEROID,

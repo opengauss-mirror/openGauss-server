@@ -55,6 +55,7 @@ typedef struct TmptableCacheKey {
 typedef struct TmpTableCacheEntry {
     TmptableCacheKey key;
     bool isTmptable;
+    int128 autoinc;
 } TmptableCacheEntry;
 
 inline bool do_not_statistic_space(Oid userId)
@@ -204,6 +205,66 @@ void perm_space_increase(Oid ownerID, uint64 size, DataSpaceType type)
     return;
 }
 
+int128* find_tmptable_cache_autoinc(Oid relNode)
+{
+    TmptableCacheKey key = {0};
+    TmptableCacheEntry* tmptable_entry = NULL;
+    MemoryContext old_mem = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB));
+    if (u_sess->wlm_cxt->TmptableCacheHash == NULL) {
+        return NULL;
+    }
+
+    key.relNode = relNode;
+
+    /* Look for an existing entry */
+    tmptable_entry = (TmptableCacheEntry*)hash_search(u_sess->wlm_cxt->TmptableCacheHash, (void*)&key, HASH_FIND, NULL);
+    (void)MemoryContextSwitchTo(old_mem);
+    if (tmptable_entry == NULL) {
+        return NULL;
+    }
+
+    return &tmptable_entry->autoinc;
+}
+
+int128 tmptable_autoinc_nextval(Oid relnode, int128 *autoinc_next)
+{
+    int128 autoinc;
+    if (autoinc_next == NULL) {
+        autoinc_next = find_tmptable_cache_autoinc(relnode);
+        AssertEreport(autoinc_next != NULL, MOD_OPT, "failed to get temp table auto_increment counter");
+    }
+    autoinc = *autoinc_next;
+    if (autoinc + 1 > autoinc) {
+        *autoinc_next = autoinc + 1;
+    }
+    return autoinc;
+}
+
+void tmptable_autoinc_setval(Oid relnode, int128 *autoinc_next, int128 value, bool iscalled)
+{
+    if (autoinc_next == NULL) {
+        autoinc_next = find_tmptable_cache_autoinc(relnode);
+        AssertEreport(autoinc_next != NULL, MOD_OPT, "failed to get temp table auto_increment counter");
+    }
+    if (iscalled) {
+        value = (value < INT128_MAX) ? value + 1 : value;
+    }
+    if (*autoinc_next < value) {
+        *autoinc_next = value;
+    }
+}
+
+void tmptable_autoinc_reset(Oid relnode, int128 value)
+{
+    int128* autoinc_next = find_tmptable_cache_autoinc(relnode);
+    if (autoinc_next == NULL) { /* Shouldn't happen */
+        make_tmptable_cache_key(relnode);
+        autoinc_next = find_tmptable_cache_autoinc(relnode);
+        Assert(autoinc_next);
+    }
+    *autoinc_next = value;
+}
+
 bool find_tmptable_cache_key(Oid relNode)
 {
     TmptableCacheKey key = {0};
@@ -250,6 +311,7 @@ void make_tmptable_cache_key(Oid relNode)
     tmptable_entry =
         (TmptableCacheEntry*)hash_search(u_sess->wlm_cxt->TmptableCacheHash, (void*)&key, HASH_ENTER, NULL);
     tmptable_entry->isTmptable = true;
+    tmptable_entry->autoinc = 1;
     (void)MemoryContextSwitchTo(old_mem);
 }
 

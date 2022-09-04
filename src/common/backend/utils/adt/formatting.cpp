@@ -6684,7 +6684,7 @@ Datum numeric_to_char(PG_FUNCTION_ARGS)
             }
 
             x = DatumGetNumeric(DirectFunctionCall2(numeric_round, NumericGetDatum(val), Int32GetDatum(Num.post)));
-            orgnum = DatumGetCString(DirectFunctionCall1(numeric_out, NumericGetDatum(x)));
+            orgnum = DatumGetCString(DirectFunctionCall1(numeric_out_with_zero, NumericGetDatum(x)));
         }
 
         if (*orgnum == '-') {
@@ -6709,6 +6709,11 @@ Datum numeric_to_char(PG_FUNCTION_ARGS)
     }
 
     NUM_TOCHAR_finish;
+    if (orgnum[0] == '0' && orgnum[1] == '\0' && HIDE_TAILING_ZERO) {
+        SET_VARSIZE(result, strlen(orgnum) + VARHDRSZ);
+        int errorno = memcpy_s(VARDATA(result), strlen(orgnum), orgnum, strlen(orgnum));
+        securec_check(errorno, "\0", "\0");
+    }
     PG_RETURN_TEXT_P(result);
 }
 

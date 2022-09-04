@@ -901,12 +901,12 @@ void check_object_ownership(
         case OBJECT_FOREIGN_TABLE:
         case OBJECT_STREAM:
         case OBJECT_COLUMN:
+        case OBJECT_TRIGGER:
             if (!pg_class_ownercheck(RelationGetRelid(relation), roleid)) {
                 aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_CLASS, RelationGetRelationName(relation));
             }
             break;
         case OBJECT_RULE:
-        case OBJECT_TRIGGER:
         case OBJECT_CONSTRAINT:
         case OBJECT_RLSPOLICY:
             if (!pg_class_ownercheck(RelationGetRelid(relation), roleid))

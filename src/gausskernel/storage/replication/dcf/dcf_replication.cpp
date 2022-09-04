@@ -449,6 +449,7 @@ bool SetDcfParams()
     #endif
 
     SetDcfParam("LOG_LEVEL", u_sess->attr.attr_storage.dcf_attr.dcf_log_level);
+    SetDcfParam("MAJORITY_GROUPS", u_sess->attr.attr_storage.dcf_attr.dcf_majority_groups);
 
     SetDcfParam("LOG_FILENAME_FORMAT", "1");
 
@@ -995,11 +996,13 @@ bool DcfArchiveRoachForPitrMaster(XLogRecPtr targetLsn)
     if (archive_task_status == NULL) {
         return false;
     }
-
+    SpinLockAcquire(&archive_task_status->mutex);
+    archive_task_status->pitr_finish_result = false;
     archive_task_status->archive_task.targetLsn = targetLsn;
     archive_task_status->archive_task.tli = get_controlfile_timeline();
     archive_task_status->archive_task.term = Max(g_instance.comm_cxt.localinfo_cxt.term_from_file,
                                                  g_instance.comm_cxt.localinfo_cxt.term_from_xlog);
+    SpinLockRelease(&archive_task_status->mutex);
     /* subterm update when follower changed */
     int rc = memcpy_s(archive_task_status->archive_task.slot_name, NAMEDATALEN, t_thrd.arch.slot_name, NAMEDATALEN);
     securec_check(rc, "\0", "\0");
@@ -1027,11 +1030,14 @@ bool DcfArchiveRoachForPitrMaster(XLogRecPtr targetLsn)
         return false;
 
     /* check targetLsn for deal message with wrong order */
+    SpinLockAcquire(&archive_task_status->mutex);
     if (archive_task_status->pitr_finish_result == true &&
         XLByteEQ(archive_task_status->archive_task.targetLsn, targetLsn)) {
         archive_task_status->pitr_finish_result = false;
+        SpinLockRelease(&archive_task_status->mutex);
         return true;
     } else {
+        SpinLockRelease(&archive_task_status->mutex);
         return false;
     }
 }
@@ -1050,8 +1056,10 @@ void DcfSendArchiveXlogResponse(ArchiveTaskStatus *archive_task_status)
     char buf[sizeof(ArchiveXlogResponseMessage) + 1];
     ArchiveXlogResponseMessage reply;
     errno_t errorno = EOK;
+    SpinLockAcquire(&archive_task_status->mutex);
     reply.pitr_result = archive_task_status->pitr_finish_result;
     reply.targetLsn = archive_task_status->archive_task.targetLsn;
+    SpinLockRelease(&archive_task_status->mutex);
     errorno = memcpy_s(&reply.slot_name, NAMEDATALEN, archive_task_status->slotname, NAMEDATALEN);
     securec_check(errorno, "\0", "\0");
 

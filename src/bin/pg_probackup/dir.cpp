@@ -226,10 +226,10 @@ pgFileInit(const char *rel_path)
     file->n_headers = 0;
 
     /* set uncompressed file default */
-    file->compressedFile = false;
-    file->compressedAlgorithm = 0;
-    file->compressedChunkSize = 0;
-    
+    file->compressed_file = false;
+    file->compressed_algorithm = 0;
+    file->compressed_chunk_size = 0;
+
     return file;
 }
 
@@ -840,8 +840,27 @@ static char check_db_dir(pgFile *file)
 static char check_digit_file(pgFile *file)
 {
     char    *fork_name;
-    int     len;
+    uint32     len;
     char    suffix[MAXPGPATH];
+    int sscanf_res;
+
+    if (PageCompression::SkipCompressedFile(file->name, MAXPGPATH)) {
+        /* change oid_compress or oid.x_compress to oid or oid.x */
+        uint32 offset = strlen(file->name) - strlen("_compress");
+        file->name[offset] = '\0';
+        sscanf_res = sscanf_s(file->name, "%u.%d.%s", &(file->relOid),
+                              &(file->segno), suffix, sizeof(suffix));
+        /* recover oid_compress or oid.x_compress from oid or oid.x */
+        file->name[offset] = '_';
+        if (sscanf_res == 0) {
+            elog(ERROR, "Cannot parse compressed file name \"%s\"", file->name);
+        } else if (sscanf_res == 1 || sscanf_res == 2) {
+            file->is_datafile = true;
+            file->segno = (sscanf_res == 1) ? 0 : file->segno;
+        }
+
+        return CHECK_TRUE;
+    }
 
     fork_name = strstr(file->name, "_");
     if (fork_name)
@@ -868,7 +887,6 @@ static char check_digit_file(pgFile *file)
     }
     else
     {
-        int  sscanf_res;
         /*
         * snapfs files:
         * RELFILENODE.BLOCKNO.snapmap.SNAPID
@@ -877,8 +895,8 @@ static char check_digit_file(pgFile *file)
         if (strstr(file->name, "snap") != NULL)
                 return CHECK_TRUE;
 
-        len = strlen(file->name);
         /* reloid.cfm */
+        len = strlen(file->name);
         if (len > 3 && strcmp(file->name + len - 3, "cfm") == 0)
             return CHECK_TRUE;
 
@@ -893,19 +911,36 @@ static char check_digit_file(pgFile *file)
     return -1;
 }
 
-static inline void SetFileCompressOption(pgFile *file, char *child, size_t childLen)
+static inline void SetFileCompressOption(pgFile *file, char *child)
 {
-    if (file->is_datafile && PageCompression::IsCompressedTableFile(child, childLen)) {
-        std::unique_ptr<PageCompression> pageCompression = std::make_unique<PageCompression>();
-        COMPRESS_ERROR_STATE state = pageCompression->Init(child, childLen, InvalidBlockNumber);
-        if (state != SUCCESS) {
-            elog(ERROR, "can not read block of '%s_pca': ", child);
-        }
-        file->compressedFile = true;
-        file->size = pageCompression->GetMaxBlockNumber() * BLCKSZ;
-        file->compressedChunkSize = pageCompression->GetChunkSize();
-        file->compressedAlgorithm = pageCompression->GetAlgorithm();
+    if (!file->is_datafile ||
+        !PageCompression::SkipCompressedFile(child, strlen(child))) {
+        return;
     }
+
+    file->compressed_file = true;
+    file->size = 0;
+    file->compressed_chunk_size = 0;
+    file->compressed_algorithm = 0;
+
+    PageCompression *pageCompression = new(std::nothrow) PageCompression();
+    if (pageCompression == NULL) {
+        elog(ERROR, "compression page init failed");
+        return;
+    }
+    if (pageCompression->Init(child, file->segno) != SUCCESS) {
+        delete pageCompression;
+        elog(ERROR, "Cannot parse compressed file name \"%s\"", file->name);
+        return;
+    }
+
+    BlockNumber blknum = pageCompression->GetMaxBlockNumber();
+    file->size = blknum * BLCKSZ;
+    file->compressed_chunk_size = pageCompression->chunkSize;
+    file->compressed_algorithm = pageCompression->algorithm;
+
+    delete pageCompression;
+    return;
 }
 
 bool SkipSomeDirFile(pgFile *file, struct dirent *dent, bool skipHidden)
@@ -929,6 +964,7 @@ bool SkipSomeDirFile(pgFile *file, struct dirent *dent, bool skipHidden)
     }
     return true;
 }
+
 /*
  * List files in parent->path directory.  If "exclude" is true do not add into
  * "files" files from pgdata_exclude_files and directories from
@@ -970,11 +1006,6 @@ dir_list_file_internal(parray *files, pgFile *parent, const char *parent_dir,
         join_path_components(child, parent_dir, dent->d_name);
         join_path_components(rel_child, parent->rel_path, dent->d_name);
 
-        /* skip real compressed file cause we mark compress flag at oid file */
-        if (PageCompression::SkipCompressedFile(child, MAXPGPATH)) {
-            continue;
-        }
-
         file = pgFileNew(child, rel_child, follow_symlink, external_dir_num, location);
         if (file == NULL)
             continue;
@@ -999,8 +1030,8 @@ dir_list_file_internal(parray *files, pgFile *parent, const char *parent_dir,
                 parray_append(files, file);
                 continue;
             } else if (check_res == CHECK_TRUE) {
-                /* persistence compress option */
-                SetFileCompressOption(file, child, MAXPGPATH);
+                /* just deal with compressed file, persist it's option */
+                SetFileCompressOption(file, child);
             }
         }
 
@@ -1690,9 +1721,9 @@ dir_read_file_list(const char *root, const char *external_prefix,
         file->write_size = (int64) write_size;
         file->mode = (mode_t) mode;
         file->is_datafile = is_datafile ? true : false;
-        file->compressedFile = false;
-        file->compressedChunkSize = 0;
-        file->compressedAlgorithm = 0;
+        file->compressed_file = false;
+        file->compressed_chunk_size = 0;
+        file->compressed_algorithm = 0;
         file->is_cfs = is_cfs ? true : false;
         file->crc = (pg_crc32) crc;
         file->compress_alg = parse_compress_alg(compress_alg_string);
@@ -1712,13 +1743,13 @@ dir_read_file_list(const char *root, const char *external_prefix,
         /* read compress option from control file */
         int64 compressedFile = 0;
         if (get_control_value(buf, "compressedFile", NULL, &compressedFile, false)) {
-            file->compressedFile = true;
-            int64 compressedAlgorithm = 0;
-            int64 compressedChunkSize = 0;
-            get_control_value(buf, "compressedAlgorithm", NULL, &compressedAlgorithm, true);
-            get_control_value(buf, "compressedChunkSize", NULL, &compressedChunkSize, true);
-            file->compressedAlgorithm = (uint8)compressedAlgorithm;
-            file->compressedChunkSize = (int16)compressedChunkSize;
+            file->compressed_file = true;
+            int64 compressed_algorithm = 0;
+            int64 compressed_chunk_size = 0;
+            (void)get_control_value(buf, "compressedAlgorithm", NULL, &compressed_algorithm, true);
+            (void)get_control_value(buf, "compressedChunkSize", NULL, &compressed_chunk_size, true);
+            file->compressed_algorithm = (uint8)compressed_algorithm;
+            file->compressed_chunk_size = (uint16)compressed_chunk_size;
         }
 
         if (get_control_value(buf, "segno", NULL, &segno, false))

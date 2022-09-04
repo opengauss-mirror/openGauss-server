@@ -203,6 +203,7 @@ static void trunc_var(NumericVar* var, int rscale);
 static void strip_var(NumericVar* var);
 static void compute_bucket(
     Numeric operand, Numeric bound1, Numeric bound2, NumericVar* count_var, NumericVar* result_var);
+static void remove_tail_zero(char *ascii);
 
 /*
  * @Description: call corresponding big integer operator functions.
@@ -317,12 +318,12 @@ Datum numeric_in(PG_FUNCTION_ARGS)
 }
 
 /*
- * numeric_out() -
+ * numeric_out_with_zero -
  *
  *	Output function for numeric data type.
  *	include bi64 and bi128 type
  */
-Datum numeric_out(PG_FUNCTION_ARGS)
+Datum numeric_out_with_zero(PG_FUNCTION_ARGS)
 {
     Numeric num = PG_GETARG_NUMERIC(0);
     NumericVar x;
@@ -363,6 +364,24 @@ Datum numeric_out(PG_FUNCTION_ARGS)
     PG_FREE_IF_COPY(num, 0);
 
     PG_RETURN_CSTRING(str);
+}
+
+/*
+ * numeric_out() -
+ *
+ *  Output function for numeric data type.
+ *  include bi64 and bi128 type
+ *  Call function numeric_out_with_zero with pg origin logic, and then check if need trunc tail zero or not.
+ */
+Datum numeric_out(PG_FUNCTION_ARGS)
+{
+    char* ans = DatumGetCString(numeric_out_with_zero(fcinfo));
+
+    if (TRUNC_NUMERIC_TAIL_ZERO) {
+        remove_tail_zero(ans);
+    }
+
+    PG_RETURN_CSTRING(ans);
 }
 
 /*
@@ -3144,7 +3163,7 @@ Datum numeric_float8(PG_FUNCTION_ARGS)
         }
     }
 
-    tmp = DatumGetCString(DirectFunctionCall1(numeric_out, NumericGetDatum(num)));
+    tmp = DatumGetCString(DirectFunctionCall1(numeric_out_with_zero, NumericGetDatum(num)));
 
     result = DirectFunctionCall1(float8in, CStringGetDatum(tmp));
 
@@ -3221,7 +3240,7 @@ Datum numeric_float4(PG_FUNCTION_ARGS)
         }
     }
 
-    tmp = DatumGetCString(DirectFunctionCall1(numeric_out, NumericGetDatum(num)));
+    tmp = DatumGetCString(DirectFunctionCall1(numeric_out_with_zero, NumericGetDatum(num)));
 
     if (fcinfo->can_ignore) {
         result = DirectFunctionCall1Coll(float4in, InvalidOid, CStringGetDatum(tmp), true);
@@ -4206,7 +4225,7 @@ init_var_from_var(const NumericVar *value, NumericVar *dest)
 
 static void remove_tail_zero(char *ascii)
 {
-    if (!HIDE_TAILING_ZERO || ascii == NULL) {
+    if (ascii == NULL) {
         return;
     }
     int len = 0;
@@ -4368,7 +4387,9 @@ static char* get_str_from_var(NumericVar* var)
      * terminate the string and return it
      */
     *cp = '\0';
-    remove_tail_zero(str);
+    if (HIDE_TAILING_ZERO) {
+        remove_tail_zero(str);
+    }
     return str;
 }
 
@@ -4757,7 +4778,7 @@ static double numeric_to_double_no_overflow(Numeric num)
     double val;
     char* endptr = NULL;
 
-    tmp = DatumGetCString(DirectFunctionCall1(numeric_out, NumericGetDatum(num)));
+    tmp = DatumGetCString(DirectFunctionCall1(numeric_out_with_zero, NumericGetDatum(num)));
 
     /* unlike float8in, we ignore ERANGE from strtod */
     val = strtod(tmp, &endptr);
@@ -7088,7 +7109,7 @@ Datum numtodsinterval(PG_FUNCTION_ARGS)
 
     StringInfoData str;
     initStringInfo(&str);
-    appendStringInfoString(&str, DatumGetCString(CHECK_RETNULL_CALL1(numeric_out, collation, num)));
+    appendStringInfoString(&str, DatumGetCString(CHECK_RETNULL_CALL1(numeric_out_with_zero, collation, num)));
     appendStringInfoString(&str, " ");
     appendStringInfoString(&str, TextDatumGetCString(fmt));
     cp = str.data;
@@ -7130,7 +7151,7 @@ Datum numeric_interval(PG_FUNCTION_ARGS)
     CHECK_RETNULL_INIT();
 
     initStringInfo(&str);
-    appendStringInfoString(&str, DatumGetCString(CHECK_RETNULL_CALL1(numeric_out, collation, num)));
+    appendStringInfoString(&str, DatumGetCString(CHECK_RETNULL_CALL1(numeric_out_with_zero, collation, num)));
     appendStringInfoString(&str, " ");
     appendStringInfoString(&str, fmt);
     cp = str.data;
@@ -19028,7 +19049,7 @@ int32 get_ndigit_from_numeric(Numeric num)
         if (NUMERIC_IS_BI(num)) {
             num = makeNumericNormal(num);
         }
-        string_from_numeric = DatumGetCString(DirectFunctionCall1(numeric_out, NumericGetDatum(num)));
+        string_from_numeric = DatumGetCString(DirectFunctionCall1(numeric_out_with_zero, NumericGetDatum(num)));
         string_length_from_numeric = strlen(string_from_numeric);
         for (i = 0; i < string_length_from_numeric; i++) {
             if (string_from_numeric[i] == '.') {

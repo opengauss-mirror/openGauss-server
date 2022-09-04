@@ -22,6 +22,8 @@
  *
  * -------------------------------------------------------------------------
  */
+#ifndef WHITEBOX_TEST
+#define WHITEBOX_TEST
 
 #define MAX_NAME_STR_LEN (256)
 #define MAX_UNIT_TEST (32)
@@ -160,3 +162,5 @@ extern bool WhiteboxTestSetError(const char* functionName, const bool& enabled);
 #define XLOG_FILE_INIT_CLOSE_FAILED "XLOG_FILE_INIT_CLOSE"
 #define XLOG_FILE_INIT_OPEN_TARGET_FAILED "XLOG_FILE_OPEN_TARGET_FAILED"
 #define XLOG_FILE_WRITE_INIT_FAILED "XLOG_FILE_WRITE_INIT"
+
+#endif

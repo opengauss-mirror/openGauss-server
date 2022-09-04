@@ -1,0 +1,33 @@
+-- 线程数 由 1 变成 3 显示线程数
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_thread_num=3" > /dev/null 2>&1
+\! @abs_bindir@/gs_ctl stop -D  @abs_srcdir@/tmp_check/datanode1/  > /dev/null 2>&1
+\! @abs_bindir@/gs_ctl start -D  @abs_srcdir@/tmp_check/datanode1/ > /dev/null 2>&1
+\! sleep 5
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "show audit_thread_num";
+
+-- 获取当前运行的数据库服务器PID 追踪进程 输出到指定文件
+\! pid=$(ps -ux | grep @abs_srcdir@/tmp_check/datanode1| grep -v grep | awk '{print $2 "\t"}' | tr -cd "[0-9]") && gstack $pid > @abs_srcdir@/tmp_check/datanode1/gdb_audit.txt && sleep 5 
+
+-- 获取正在写入的 adt文件个数 应该等于线程数 3
+\! num=$(cat @abs_srcdir@/tmp_check/datanode1/gdb_audit.txt | grep "PgAuditorMain" |  wc -l)  &&  [[ $num == 3 ]] && echo 'change thread num successfully' || echo 'fail to set thread num'
+ 
+-- 线程数 由 3 变成 2 显示线程数
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_thread_num=2" > /dev/null 2>&1
+\! @abs_bindir@/gs_ctl stop -D @abs_srcdir@/tmp_check/datanode1/ > /dev/null 2>&1
+\! @abs_bindir@/gs_ctl start -D  @abs_srcdir@/tmp_check/datanode1/ > /dev/null 2>&1
+\! sleep 5
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "show audit_thread_num";
+
+-- 获取当前运行的数据库服务器PID 追踪进程 输出到指定文件
+\! pid=$(ps -ux | grep @abs_srcdir@/tmp_check/datanode1| grep -v grep | awk '{print $2 "\t"}' | tr -cd "[0-9]") && gstack $pid > @abs_srcdir@/tmp_check/datanode1/gdb_audit.txt && sleep 5
+
+-- 获取正在写入的 adt文件个数 应该等于线程数 2
+\! num=$(cat @abs_srcdir@/tmp_check/datanode1/gdb_audit.txt | grep "PgAuditorMain" |  wc -l)  &&  [[ $num == 2 ]] && echo 'change thread num successfully' || echo 'fail to set thread num'
+
+--恢复guc参数
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_thread_num" > /dev/null 2>&1
+\! @abs_bindir@/gs_ctl stop -D @abs_srcdir@/tmp_check/datanode1/ > /dev/null 2>&1
+\! @abs_bindir@/gs_ctl start -D  @abs_srcdir@/tmp_check/datanode1/ > /dev/null 2>&1
+\! sleep 5
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "show audit_thread_num";
+

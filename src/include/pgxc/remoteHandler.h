@@ -30,5 +30,6 @@
 extern int light_handle_response(PGXCNodeHandle* conn, lightProxyMsgCtl* msgctl, lightProxy* lp);
 extern void light_node_report_error(lightProxyErrData* combiner);
 extern void HandleCmdComplete(CmdType commandType, CombineTag* combine, const char* msg_body, size_t len);
+extern bool check_receive_buffer(RemoteQueryState* combiner, int tapenum, bool* has_checked, int* has_err_idx);
 
 #endif

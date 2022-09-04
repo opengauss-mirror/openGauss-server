@@ -1030,7 +1030,7 @@ Oid GetNewRelFileNode(Oid reltablespace, Relation pg_class, char relpersistence)
 
     /* This logic should match RelationInitPhysicalAddr */
     rnode.node.spcNode = ConvertToRelfilenodeTblspcOid(reltablespace);
-    rnode.node.dbNode = (rnode.node.spcNode == GLOBALTABLESPACE_OID) ? InvalidOid : GetMyDatabaseId();
+    rnode.node.dbNode = (rnode.node.spcNode == GLOBALTABLESPACE_OID) ? InvalidOid : u_sess->proc_cxt.MyDatabaseId;
     rnode.node.bucketNode = InvalidBktId;
 
     /*
@@ -1087,50 +1087,72 @@ Oid GetNewRelFileNode(Oid reltablespace, Relation pg_class, char relpersistence)
 
 bool IsPackageSchemaOid(Oid relnamespace)
 {
-    const char* packageSchemaList[] = {
-        "dbe_lob",
-        "dbe_random",
-        "dbe_output",
-        "dbe_raw",
-        "dbe_task",
-        "dbe_scheduler",
-        "dbe_sql",
-        "dbe_file",
-        "pkg_service",
-        "pkg_util",
-        "dbe_match",
-        "dbe_perf",
-        "dbe_session"
-    };
-    int schemaNum = 10;
     char* schemaName = get_namespace_name(relnamespace);
     if (schemaName == NULL) {
         return false;
     }
+    return IsPackageSchemaName(schemaName);
+}
+
+bool IsPackageSchemaName(const char* schemaName)
+{
+    const char* packageSchemaList[] = {
+        "dbe_application_info",
+        "dbe_file",
+        "dbe_lob",
+        "dbe_match",
+        "dbe_output",
+        "dbe_perf",
+        "dbe_pldebugger",
+        "dbe_random",
+        "dbe_raw",
+        "dbe_scheduler",
+        "dbe_session",
+        "dbe_sql",
+        "dbe_sql_util",
+        "dbe_task",
+        "dbe_utility",
+        "information_schema",
+        "pkg_service",
+        "pkg_util",
+        "sqladvisor"
+    };
+    int schemaNum = lengthof(packageSchemaList);
     for (int i = 0; i < schemaNum; ++i) {
         if (strcmp(schemaName, packageSchemaList[i]) == 0) {
-            pfree_ext(schemaName);
             return true;
         }
     }
     return false;
 }
 
-bool IsPackageSchemaName(const char* schemaName)
+bool IsPldeveloper(Oid nspnamespace)
+{
+    char* schemaname = get_namespace_name(nspnamespace);
+    if (schemaname == NULL) {
+        return false;
+    }
+    if (strcmp(schemaname, "dbe_pldeveloper") == 0) {
+        return true;
+    }
+    return false;
+}
+bool IsAformatStyleFunctionOid(Oid relnamespace)
+{
+    char* schemaName = get_namespace_name(relnamespace);
+    if (schemaName == NULL) {
+        return false;
+    }
+    return IsAformatStyleFunctionName(schemaName);
+}
+ 
+bool IsAformatStyleFunctionName(const char* schemaName)
 {
     const char* packageSchemaList[] = {
-        "dbe_lob",
-        "dbe_random",
-        "dbe_output",
-        "dbe_raw",
-        "dbe_task",
-        "dbe_scheduler",
-        "dbe_sql",
-        "dbe_file",
-        "pkg_service",
-        "pkg_util"
+        "pg_catalog",
+        "dbe_perf"
     };
-    int schemaNum = 10;
+    int schemaNum = lengthof(packageSchemaList);
     for (int i = 0; i < schemaNum; ++i) {
         if (strcmp(schemaName, packageSchemaList[i]) == 0) {
             return true;

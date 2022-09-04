@@ -39,10 +39,6 @@ void ForgetRelSonMemCxtSpace(Relation rel);
 
 bool CheckMyDatabaseMatch();
 
-char *GetMyDatabasePath();
-Oid GetMyDatabaseId();
-Oid GetMyDatabaseTableSpace();
-
 bool IsGotPoolReload();
 void ResetGotPoolReload(bool value);
 
@@ -80,8 +76,6 @@ dlist_head *getUnownedReln();
 
 extern void AtEOXact_SysDBCache(bool is_commit);
 
-extern void ReBuildLSC();
-
 struct BadPtrObj : public BaseObject {
     int nbadptr;
     void **bad_ptr_lists;
@@ -105,30 +99,36 @@ struct GSCRdLockInfo {
     pthread_rwlock_t *concurrent_lock[MAX_GSC_READLOCK_COUNT];
 };
 
+enum LscInitStatus {
+    LscNotInit,
+    LscIniting,
+    LscInitfinished
+};
+
 class LocalSysDBCache : public BaseObject {
 public:
     LocalSysDBCache();
 
     GlobalSysTabCache *GetGlobalSysTabCache()
     {
-        if (!is_inited) {
-            Init();
+        if (m_global_db == NULL) {
+            InitDBRef();
         }
         return m_global_db->m_systabCache;
     }
 
     GlobalTabDefCache *GetGlobalTabDefCache()
     {
-        if (!is_inited) {
-            Init();
+        if (m_global_db == NULL) {
+            InitDBRef();
         }
         return m_global_db->m_tabdefCache;
     }
 
     GlobalPartDefCache *GetGlobalPartDefCache()
     {
-        if (!is_inited) {
-            Init();
+        if (m_global_db == NULL) {
+            InitDBRef();
         }
         return m_global_db->m_partdefCache;
     }
@@ -202,12 +202,22 @@ public:
     MemoryContext lsc_share_memcxt;
     MemoryContext lsc_mydb_memcxt;
     /* mark whether we have loaded syscache */
-    bool is_inited;
+    LscInitStatus init_status;
+    void ResetInitStatus()
+    {
+        init_status = LscNotInit;
+    }
+    void StartInit()
+    {
+        init_status = LscIniting;
+    }
+    void FinishInit()
+    {
+        init_status = LscInitfinished;
+    }
 
     bool recovery_finished;
 
-    /* used for query lsc/gsc out of transaction */
-    struct ResourceOwnerData *local_sysdb_resowner;
     /* used to record multi palloc, unused for now */
     BadPtrObj bad_ptr_obj;
     /* mark lsc close flag, never query lsc if is_closed == true */
@@ -223,12 +233,20 @@ public:
     GSCRdLockInfo rdlock_info;
     double cur_swapout_ratio;
 private:
-    void Init();
+    void InitDBRef();
     void CreateCatBucket();
-    void LocalSysDBCacheClearMyDB(Oid db_id, const char *db_name);
+    void LocalSysDBCacheClearMyDB();
     bool LocalSysDBCacheNeedClearMyDB(Oid db_id, const char *db_name);
+    bool DBNotMatch(Oid db_id, const char *db_name);
+    bool DBStandbyChanged();
+    bool LockAndAttachDBFailed();
+    void FixWrongCacheStat(Oid db_id, Oid db_tabspc);
+
+    void LocalSysDBCacheCleanCache();
+    bool LocalSysDBCacheNeedCleanCache();
 
     void LocalSysDBCacheReleaseCritialReSource(bool include_shared);
+    void LocalSysDBCacheResetMyDBStat();
     void SetDatabaseName(const char *db_name);
     
     struct GlobalSysDBCacheEntry *m_global_db;
@@ -241,9 +259,8 @@ private:
 extern void AppendBadPtr(void *elem);
 extern void RemoveBadPtr(void *elem);
 
-#define LOCAL_SYSDB_RESOWNER  \
-    (unlikely(t_thrd.utils_cxt.CurrentResourceOwner == NULL) ?  \
-        (AssertMacro(!IsTransactionOrTransactionBlock()), t_thrd.lsc_cxt.lsc->local_sysdb_resowner) \
-                                                   : t_thrd.utils_cxt.CurrentResourceOwner)
 
+#define LOCAL_SYSDB_RESOWNER  \
+    (t_thrd.utils_cxt.CurrentResourceOwner == NULL ? t_thrd.lsc_cxt.local_sysdb_resowner : \
+        t_thrd.utils_cxt.CurrentResourceOwner)
 #endif

@@ -490,7 +490,7 @@ UHeapTuple UHeapToastInsertOrUpdate(Relation relation, UHeapTuple newtup, UHeapT
      * increase the target tuple size, so that 'm' attributes aren't stored
      * externally unless really necessary.
      */
-    maxDataLen = UTOAST_TUPLE_TARGET_MAIN - hoff;
+    maxDataLen = MaxUHeapTupleSize(relation) - hoff;
 
     while (UHeapCalcTupleDataSize(tupleDesc, toastValues, toastIsNull, hoff, enableReverseBitmap,enableReserve) >
             maxDataLen && relation->rd_rel->reltoastrelid != InvalidOid) {

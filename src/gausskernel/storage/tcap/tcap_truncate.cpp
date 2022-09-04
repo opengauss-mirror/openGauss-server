@@ -239,7 +239,8 @@ void TrTruncateOnePart(Relation rel, HeapTuple tup, Oid insertBaseid)
     partitionClose(rel, p, AccessExclusiveLock);
 
     /* report truncate partition to PgStatCollector */
-    pgstat_report_truncate(partOid, rel->rd_id, rel->rd_rel->relisshared);
+    Oid statFlag = RelationIsPartitionOfSubPartitionTable(rel) ? partid_get_parentid(rel->rd_id) : rel->rd_id;
+    pgstat_report_truncate(partOid, statFlag, rel->rd_rel->relisshared);
 }
 
 void TrPartitionTableProcess(Relation rel, Oid insertBaseid)
@@ -284,6 +285,31 @@ void TrPartitionTableProcess(Relation rel, Oid insertBaseid)
     pgstat_report_truncate(heap_relid, InvalidOid, is_shared);
 }
 
+bool TrJudgeHaveTrigger(Oid tgOid)
+{
+    HeapTuple tup;
+    Relation relTrig;
+    ScanKeyData skey[1];
+    SysScanDesc sd;
+    uint16 tgType;
+
+    relTrig = heap_open(TriggerRelationId, AccessShareLock);
+    ScanKeyInit(&skey[0], Anum_pg_trigger_tgrelid, BTEqualStrategyNumber,
+        F_OIDEQ, ObjectIdGetDatum(tgOid));
+    sd = systable_beginscan(relTrig, InvalidOid, false, NULL, 1, skey);
+    if ((tup = systable_getnext(sd)) != NULL) {
+        tgType = ((Form_pg_trigger)GETSTRUCT(tup))->tgtype;
+        if (TRIGGER_FOR_TRUNCATE(tgType)) {
+            systable_endscan(sd);
+            heap_close(relTrig, AccessShareLock);
+            return true;
+        }
+    }
+    systable_endscan(sd);
+    heap_close(relTrig, AccessShareLock);
+    return false;
+}
+
 void TrTruncate(const TruncateStmt *stmt)
 {
     RangeVar *rv = (RangeVar*)linitial(stmt->relations);
@@ -291,6 +317,7 @@ void TrTruncate(const TruncateStmt *stmt)
     Oid relid;
     Oid toastRelid;
     TrObjDesc baseDesc;
+    bool haveTrigger = false;
 
     /*
      * 1. Open relation in AccessExclusiveLock, and check permission, etc.
@@ -299,9 +326,21 @@ void TrTruncate(const TruncateStmt *stmt)
     rel = heap_openrv(rv, AccessExclusiveLock);
     relid = RelationGetRelid(rel);
 
+    /*
+     * seqScan table pg_trigger and find exist truncate trigger.
+     */
+    haveTrigger = TrJudgeHaveTrigger(relid);
+    if (haveTrigger) {
+        ereport(WARNING,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Not support truncate triggers where use recyclebin features, "
+                        "requires manual truncate target table")));
+    }
+
     /* find matview exists or not. */
     Oid mlogid = find_matview_mlog_table(relid);
     if (OidIsValid(mlogid)) {
+        heap_close(rel, NoLock);
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
             errmsg("Not support truncate table under materialized view.")));

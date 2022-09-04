@@ -219,9 +219,10 @@ typedef struct RmgrData {
     void (*rm_startup)(void);
     void (*rm_cleanup)(void);
     bool (*rm_safe_restartpoint)(void);
-    bool (*rm_undo)(URecVector *urecvector, int startIdx, int endIdx,
+    int (*rm_undo)(URecVector *urecvector, int startIdx, int endIdx,
                     TransactionId xid, Oid reloid, Oid partitionoid,
-                    BlockNumber blkno, bool isFullChain);
+                    BlockNumber blkno, bool isFullChain, 
+                    int preRetCode, Oid *preReloid, Oid *prePartitionoid);
     void (*rm_undo_desc) (StringInfo buf, UndoRecord *record);
     const char* (*rm_type_name)(uint8 subtype);
 } RmgrData;

@@ -47,10 +47,6 @@ function main() {
     upgrade_commit
     exit 0
     ;;
-  query_start_mode)
-    query_start_mode
-    exit 0
-    ;;
   switch_over)
     switch_over
     exit 0

@@ -91,6 +91,7 @@
 #include "utils/typcache.h"
 #include "utils/numeric.h"
 #include "utils/numeric_gs.h"
+#include "utils/int16.h"
 #include "mb/pg_wchar.h"
 #include "gaussdb_version.h"
 #include "gs_ledger/ledger_utils.h"
@@ -148,6 +149,7 @@ static void CheckDistributionSyntax(CreateStmt* stmt);
 static void CheckListRangeDistribClause(CreateStmtContext *cxt, CreateStmt *stmt);
 
 static void transformIndexConstraints(CreateStmtContext* cxt);
+static void checkPartitionConstraintWithExpr(Constraint* con);
 static void checkConditionForTransformIndex(
     Constraint* constraint, CreateStmtContext* cxt, Oid index_oid, Relation index_rel);
 static IndexStmt* transformIndexConstraint(Constraint* constraint, CreateStmtContext* cxt, bool mustGlobal = false);
@@ -155,6 +157,10 @@ static void transformFKConstraints(CreateStmtContext* cxt, bool skipValidation, 
 static void transformConstraintAttrs(CreateStmtContext* cxt, List* constraintList);
 static void transformColumnType(CreateStmtContext* cxt, ColumnDef* column);
 static void setSchemaName(char* context_schema, char** stmt_schema_name);
+static void TrySetAutoIncNotNullConstraint(ColumnDef* column);
+static void TransformTempAutoIncrement(ColumnDef* column, CreateStmt* stmt);
+static int128 TransformAutoIncStart(CreateStmt* stmt);
+
 /*
  * @hdfs
  * The following three functions are used for HDFS foreign talbe constraint.
@@ -190,7 +196,9 @@ static List* DividePartitionStartEndInterval(ParseState* pstate, Form_pg_attribu
 extern Node* makeAConst(Value* v, int location);
 static bool IsElementExisted(List* indexElements, IndexElem* ielem);
 static char* CreatestmtGetOrientation(CreateStmt *stmt);
+static void CheckAutoIncrementIndex(CreateStmtContext *cxt);
 #define REDIS_SCHEMA "data_redis"
+
 /*
  * transformCreateStmt -
  *	  parse analysis for CREATE TABLE
@@ -205,6 +213,24 @@ static char* CreatestmtGetOrientation(CreateStmt *stmt);
  * then expand those into multiple IndexStmt blocks.
  *	  - thomas 1997-12-02
  */
+
+static void checkPartitionConstraintWithExpr(Constraint* con)
+{
+    /* the primary key and unique index of partition table does not support expression index */
+    if (con->contype == CONSTR_PRIMARY || con->contype == CONSTR_UNIQUE) {
+        ListCell* lc_key = NULL;
+        
+        foreach(lc_key, con->keys) {
+            IndexElem *elem = (IndexElem*)lfirst(lc_key);
+            
+            if (PointerIsValid(elem->expr)) {
+                ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("partition table does not support expression index")));
+            }
+        }
+    }
+}
+
 List* transformCreateStmt(CreateStmt* stmt, const char* queryString, const List* uuids, bool preCheck,
 Oid *namespaceid, bool isFirstNode)
 {
@@ -573,6 +599,20 @@ Oid *namespaceid, bool isFirstNode)
         }
     }
 
+    /* expresssion syntax is not supported in distributed database,
+     * therefore, we do not have to judge whether to support distributed database in any mode.
+     */
+    if (cxt.ispartitioned && DB_IS_CMPT(B_FORMAT)) {
+        ListCell* lc_con = NULL;
+        
+        foreach (lc_con, cxt.ixconstraints) {
+            Constraint* constraint = (Constraint*)lfirst(lc_con);
+            AssertEreport(IsA(constraint, Constraint), MOD_OPT, "");
+
+            checkPartitionConstraintWithExpr(constraint);
+        }
+    }
+
     checkPartitionValue(&cxt, stmt);
 
     /*
@@ -713,12 +753,108 @@ Oid *namespaceid, bool isFirstNode)
     return result;
 }
 
+static List* GetAutoIncSeqOptions(CreateStmtContext* cxt)
+{
+    Node* option = NULL;
+    if (cxt->node != NULL && IsA(cxt->node, CreateStmt) && ((CreateStmt*)cxt->node)->autoIncStart != NULL) {
+        (void)TransformAutoIncStart((CreateStmt*)cxt->node);
+        option = ((CreateStmt*)cxt->node)->autoIncStart;
+    } else {
+        option = (Node*)makeDefElem("start", (Node*)makeInteger(1));
+    }
+    return list_make1(option);
+}
+
+/*
+ * createSetOwnedByTable -
+ *		create a set owned by table, need to add record to pg_depend.
+ */
+static void CreateSetOwnedByTable(CreateStmtContext* cxt, ColumnDef* column, char *colname)
+{
+    Oid snamespaceid;
+    char* snamespace = NULL;
+    char* setname = NULL;
+    CreateSetStmt* setstmt = NULL;
+
+    /*
+     * get the table namespace for the set type
+     */
+    if (cxt->rel)
+        snamespaceid = RelationGetNamespace(cxt->rel);
+    else {
+        snamespaceid = RangeVarGetCreationNamespace(cxt->relation);
+        RangeVarAdjustRelationPersistence(cxt->relation, snamespaceid);
+    }
+    snamespace = get_namespace_name(snamespaceid);
+    /*
+     * create a new set type named 'relname_colname_oid' in the
+     * relation's namespace.
+     */
+    setname = ChooseRelationName(cxt->relation->relname, colname,
+                                 "set", strlen("set"), snamespaceid);
+
+    ereport(NOTICE,
+        (errmsg("%s will create implicit set \"%s\" for column \"%s.%s\"",
+            cxt->stmtType,
+            setname,
+            cxt->relation->relname,
+            colname)));
+
+    /*
+     * Build a CREATE SET command to create the entries in pg_set, and
+     * add it to the list of things to be done before this CREATE/ALTER
+     * TABLE.
+     */
+    setstmt = makeNode(CreateSetStmt);
+    setstmt->typname = column->typname;
+
+    cxt->blist = lappend(cxt->blist, setstmt);
+
+    /* replace the set column type namespace and name for CreateStmt */
+    linitial(column->typname->names) = makeString(snamespace);
+    lappend(column->typname->names, makeString(setname));
+}
+
+static bool DropSetOwnedByTable(CreateStmtContext* cxt, char *colname)
+{
+    /* Look up the attribute type id */
+    HeapTuple attTuple = SearchSysCache2(ATTNAME, ObjectIdGetDatum(RelationGetRelid(cxt->rel)),
+        PointerGetDatum(colname));
+
+    if (!HeapTupleIsValid(attTuple)) {
+        /* can not find the columns, take it as not-set type */
+        return false;
+    }
+
+    Oid atttypid = ((Form_pg_attribute)GETSTRUCT(attTuple))->atttypid;
+    ReleaseSysCache(attTuple);
+
+    if (type_is_set(atttypid)) {
+        char *nspace = get_typenamespace(atttypid);
+        char *typname = get_typename(atttypid);
+
+        DropStmt *stmt = makeNode(DropStmt);
+        stmt->removeType = OBJECT_TYPE;
+        stmt->objects = list_make1(list_make2(makeString(nspace), makeString(typname)));
+        stmt->behavior = DROP_CASCADE;
+        stmt->arguments = NIL;
+        stmt->missing_ok = true;
+        stmt->purge = false;
+        stmt->concurrent = false;
+        stmt->isProcedure = false;
+        cxt->alist = lappend(cxt->alist, stmt);
+        return true;
+    }
+
+    return false;
+}
+
 /*
  * createSeqOwnedByTable -
  *		create a sequence owned by table, need to add record to pg_depend.
  *		used in CREATE TABLE and CREATE TABLE ... LIKE
  */
-static void createSeqOwnedByTable(CreateStmtContext* cxt, ColumnDef* column, bool preCheck, bool large)
+static void createSeqOwnedByTable(CreateStmtContext* cxt, ColumnDef* column, bool preCheck, bool large, bool is_autoinc)
 {
     Oid snamespaceid;
     char* snamespace = NULL;
@@ -727,6 +863,7 @@ static void createSeqOwnedByTable(CreateStmtContext* cxt, ColumnDef* column, boo
     A_Const* snamenode = NULL;
     TypeCast* castnode = NULL;
     FuncCall* funccallnode = NULL;
+    AutoIncrement* autoincnode = NULL;
     CreateSeqStmt* seqstmt = NULL;
     AlterSeqStmt* altseqstmt = NULL;
     List* attnamelist = NIL;
@@ -767,7 +904,8 @@ static void createSeqOwnedByTable(CreateStmtContext* cxt, ColumnDef* column, boo
      */
     seqstmt = makeNode(CreateSeqStmt);
     seqstmt->sequence = makeRangeVar(snamespace, sname, -1);
-    seqstmt->options = NIL;
+    seqstmt->options = is_autoinc ? GetAutoIncSeqOptions(cxt) : NULL;
+
 #ifdef PGXC
     seqstmt->is_serial = true;
 #endif
@@ -851,15 +989,25 @@ static void createSeqOwnedByTable(CreateStmtContext* cxt, ColumnDef* column, boo
     constraint = makeNode(Constraint);
     constraint->contype = CONSTR_DEFAULT;
     constraint->location = -1;
-    constraint->raw_expr = (Node*)funccallnode;
+    if (is_autoinc) {
+        autoincnode = makeNode(AutoIncrement);
+        autoincnode->expr = (Node*)funccallnode;
+        constraint->raw_expr = (Node*)autoincnode;
+    } else {
+        constraint->raw_expr = (Node*)funccallnode;
+    }
     constraint->cooked_expr = NULL;
     column->constraints = lappend(column->constraints, constraint);
     column->raw_default = constraint->raw_expr;
 
-    constraint = makeNode(Constraint);
-    constraint->contype = CONSTR_NOTNULL;
-    constraint->location = -1;
-    column->constraints = lappend(column->constraints, constraint);
+    if (is_autoinc) {
+        TrySetAutoIncNotNullConstraint(column);
+    } else {
+        constraint = makeNode(Constraint);
+        constraint->contype = CONSTR_NOTNULL;
+        constraint->location = -1;
+        column->constraints = lappend(column->constraints, constraint);
+    }
 }
 
 static bool isColumnEncryptionAllowed(CreateStmtContext *cxt, ColumnDef *column)
@@ -872,6 +1020,41 @@ static bool isColumnEncryptionAllowed(CreateStmtContext *cxt, ColumnDef *column)
     return true;
 }
 
+static void AutoIncrementCheckOrientation(CreateStmtContext *cxt)
+{
+    const char *storeChar = IsA(cxt->node, CreateStmt) ?
+        CreatestmtGetOrientation((CreateStmt*)cxt->node) :
+        RelationGetOrientation(cxt->rel);
+    if (pg_strcasecmp(storeChar, ORIENTATION_ROW) != 0) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Un-supported feature"),
+                    errdetail("Orientation type %s is not supported for auto_increment", storeChar)));
+    }
+}
+
+/*
+ * precheckColumnTypeForSet -
+ *  not support empty set type and set array.
+ */
+static void PrecheckColumnTypeForSet(CreateStmtContext* cxt, TypeName *typname)
+{
+    if (typname->arrayBounds != NIL) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("array of set is not implemented"),
+                parser_errposition(cxt->pstate, typname->location)));
+    }
+
+    List *typmods = typname->typmods;
+    if (typmods == NULL) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("It's not supported to create empty set column"),
+                parser_errposition(cxt->pstate, typname->location)));
+    }
+}
+
 /*
  * transformColumnDefinition -
  *		transform a single ColumnDef within CREATE TABLE
@@ -880,6 +1063,7 @@ static bool isColumnEncryptionAllowed(CreateStmtContext *cxt, ColumnDef *column)
 static void transformColumnDefinition(CreateStmtContext* cxt, ColumnDef* column, bool preCheck)
 {
     bool is_serial = false;
+    bool is_set = false;
     bool large = false;
     bool saw_nullable = false;
     bool saw_default = false;
@@ -956,14 +1140,27 @@ static void transformColumnDefinition(CreateStmtContext* cxt, ColumnDef* column,
         }
     }
 
-    /* Do necessary work on the column type declaration */
-    if (column->typname)
+    if (column->typname && column->typname->names && !column->typname->pct_type) {
+        char* typname = strVal(llast(column->typname->names));
+        if (strcmp(typname, "set") == 0) {
+            PrecheckColumnTypeForSet(cxt, column->typname);
+
+            is_set = true;
+            column->typname->typeOid = InvalidOid; // pg_attribute.atttypid
+            CreateSetOwnedByTable(cxt, column, column->colname);
+        }
+    }
+
+    /* Do necessary work on the column type declaration. But for set type,
+     * no need to check before because the type has not created yet.
+     */
+    if (!is_set && column->typname)
         transformColumnType(cxt, column);
 
     /* Special actions for SERIAL pseudo-types */
     column->is_serial = is_serial;
     if (is_serial) {
-        createSeqOwnedByTable(cxt, column, preCheck, large);
+        createSeqOwnedByTable(cxt, column, preCheck, large, false);
     }
 
     /* Process column constraints, if any... */
@@ -1041,8 +1238,17 @@ static void transformColumnDefinition(CreateStmtContext* cxt, ColumnDef* column,
 
             case CONSTR_PRIMARY:
             case CONSTR_UNIQUE:
-                if (constraint->keys == NIL)
-                    constraint->keys = list_make1(makeString(column->colname));
+                if (constraint->keys == NIL) {
+                    IndexElem *elem = makeNode(IndexElem);
+                    elem->name = pstrdup(column->colname);
+                    elem->expr = NULL;
+                    elem->indexcolname = NULL;
+                    elem->collation = NIL;
+                    elem->opclass = NIL;
+                    elem->ordering = SORTBY_DEFAULT;
+                    elem->nulls_ordering = SORTBY_NULLS_DEFAULT;
+                    constraint->keys = list_make1((Node *)elem);
+                }
                 cxt->ixconstraints = lappend(cxt->ixconstraints, constraint);
                 break;
 
@@ -1068,7 +1274,27 @@ static void transformColumnDefinition(CreateStmtContext* cxt, ColumnDef* column,
             case CONSTR_ATTR_IMMEDIATE:
                 /* transformConstraintAttrs took care of these */
                 break;
-
+            case CONSTR_AUTO_INCREMENT:
+                if (column->is_serial) {
+                    ereport(ERROR, (errcode(ERRCODE_OPERATE_NOT_SUPPORTED),
+                        errmsg("The datatype of column '%s' does not support auto_increment", column->colname)));
+                }
+                if (saw_default) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_SYNTAX_ERROR),
+                            errmsg("multiple default values specified for column \"%s\" of table \"%s\"",
+                                column->colname,
+                                cxt->relation->relname),
+                            parser_errposition(cxt->pstate, constraint->location)));
+                }
+                AutoIncrementCheckOrientation(cxt);
+                if (cxt->relation->relpersistence == RELPERSISTENCE_TEMP) {
+                    TransformTempAutoIncrement(column, IsA(cxt->node, CreateStmt) ? (CreateStmt*)cxt->node: NULL);
+                } else {
+                    createSeqOwnedByTable(cxt, column, preCheck, true, true);
+                    column->is_serial = true;
+                }
+                break;
             default:
                 ereport(ERROR,
                     (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
@@ -1179,6 +1405,7 @@ static void transformTableConstraint(CreateStmtContext* cxt, Constraint* constra
         case CONSTR_ATTR_NOT_DEFERRABLE:
         case CONSTR_ATTR_DEFERRED:
         case CONSTR_ATTR_IMMEDIATE:
+        case CONSTR_AUTO_INCREMENT:
             ereport(ERROR,
                 (errcode(ERRCODE_INTEGRITY_CONSTRAINT_VIOLATION),
                     errmsg("invalid context for constraint type %d", constraint->contype)));
@@ -1290,7 +1517,7 @@ static void transformTableLikeFromSerialData(CreateStmtContext* cxt, TableLikeCl
         ColumnDef* column = (ColumnDef*)lfirst(cell);
         if (column->is_serial) {
             bool large = (column->typname->typeOid == NUMERICOID);
-            createSeqOwnedByTable(cxt, column, false, large);
+            createSeqOwnedByTable(cxt, column, false, large, false);
         } else if (column->cooked_default != NULL) {
             checkTableLikeSequence(column->cooked_default);
         }
@@ -1601,6 +1828,14 @@ static void transformTableLikeClause(
             continue;
         }
 
+        /*  Not support copying relation with set type attribute */
+        if (type_is_set(attribute->atttypid)) {
+            ereport(ERROR,
+            (errcode(ERRCODE_DATATYPE_MISMATCH),
+                errmsg("can not use existed set type %s for column definition", format_type_be(attribute->atttypid)),
+                parser_errposition(cxt->pstate, table_like_clause->relation->location)));
+        }
+
         if (u_sess->attr.attr_sql.enable_cluster_resize && attribute->attisdropped) {
             def = makeNode(ColumnDef);
             def->type = T_ColumnDef;
@@ -1693,6 +1928,7 @@ static void transformTableLikeClause(
             AttrDefault* attrdef = NULL;
             int i;
             Oid seqId = InvalidOid;
+            bool is_autoinc = false;
 
             /* Find default in constraint structure */
             Assert(constr != NULL);
@@ -1707,6 +1943,19 @@ static void transformTableLikeClause(
                 }
             }
             Assert(this_default != NULL || update_default != NULL);
+            if (!attrdef->has_on_update) {
+                if (IsA(this_default, AutoIncrement)) {
+                    AutoIncrementCheckOrientation(cxt);
+                    if (cxt->relation->relpersistence == RELPERSISTENCE_TEMP) {
+                        TransformTempAutoIncrement(def, (CreateStmt*)cxt->node);
+                        def->is_serial = true; /* set def->is_serial to avoid setting def->cooked_default */
+                    } else {
+                        this_default = ((AutoIncrement*)this_default)->expr;
+                    }
+                    is_autoinc = true;
+                }
+            }
+            
 
             /*
              *  Whether default expr is serial type and the sequence is owned by the table.
@@ -1722,7 +1971,7 @@ static void transformTableLikeClause(
                             bool large = (get_rel_relkind(seqId) == RELKIND_LARGE_SEQUENCE);
                             /* Special actions for SERIAL pseudo-types */
 
-                            createSeqOwnedByTable(cxt, def, preCheck, large);
+                            createSeqOwnedByTable(cxt, def, preCheck, large, is_autoinc);
                         }
                     }
                 }
@@ -2894,6 +3143,7 @@ static void transformIndexConstraints(CreateStmtContext* cxt)
                           constraint->contype == CONSTR_EXCLUSION,
             MOD_OPT,
             "");
+
         if (cxt->ispartitioned && !cxt->isalter) {
             AssertEreport(PointerIsValid(cxt->partitionKey), MOD_OPT, "");
 
@@ -3006,6 +3256,8 @@ static void transformIndexConstraints(CreateStmtContext* cxt)
         if (keep)
             cxt->alist = lappend(cxt->alist, index);
     }
+    /* Check whether index constraints meet the auto_increment column requirements */
+    CheckAutoIncrementIndex(cxt);
 }
 
 /*
@@ -3049,17 +3301,31 @@ static void checkConditionForTransformIndex(
                 errdetail("Cannot create a primary key or unique constraint using such an index."),
                 parser_errposition(cxt->pstate, constraint->location)));
 
+#ifdef ENABLE_MULTIPLE_NODES
+    /* create a primary key or unique constraint using such an index
+     * is not supported in distributed database.
+     */
     if (RelationGetIndexExpressions(index_rel) != NIL)
         ereport(ERROR,
             (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                 errmsg("index \"%s\" contains expressions", index_name),
                 errdetail("Cannot create a primary key or unique constraint using such an index."),
                 parser_errposition(cxt->pstate, constraint->location)));
+#else
+    if (!DB_IS_CMPT(B_FORMAT)) {
+        if (RelationGetIndexExpressions(index_rel) != NIL)
+            ereport(ERROR,
+                (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                    errmsg("index \"%s\" contains expressions", index_name),
+                    errdetail("Cannot create a primary key or unique constraint using such an index."),
+                    parser_errposition(cxt->pstate, constraint->location)));
+    }
+#endif
 
     if (RelationGetIndexPredicate(index_rel) != NIL)
         ereport(ERROR,
             (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                errmsg("\"%s\" is a partial index", index_name),
+                errmsg("\"%s\" is a partial index", index_name), 
                 errdetail("Cannot create a primary key or unique constraint using such an index."),
                 parser_errposition(cxt->pstate, constraint->location)));
 
@@ -3108,12 +3374,14 @@ static IndexStmt* transformIndexConstraint(Constraint* constraint, CreateStmtCon
         if (cxt->pkey != NULL) {
             if (0 == pg_strncasecmp(cxt->stmtType, CREATE_FOREIGN_TABLE, strlen(cxt->stmtType)) ||
                 0 == pg_strncasecmp(cxt->stmtType, ALTER_FOREIGN_TABLE, strlen(cxt->stmtType))) {
-                ereport(ERROR, (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+                ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
                         errmsg(
                             "Multiple primary keys for foreign table \"%s\" are not allowed.", cxt->relation->relname),
                         parser_errposition(cxt->pstate, constraint->location)));
             } else {
-                ereport(ERROR, (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+                ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
                         errmsg("multiple primary keys for table \"%s\" are not allowed", cxt->relation->relname),
                         parser_errposition(cxt->pstate, constraint->location)));
             }
@@ -3180,6 +3448,11 @@ static IndexStmt* transformIndexConstraint(Constraint* constraint, CreateStmtCon
         Form_pg_index index_form;
         oidvector* indclass = NULL;
         Datum indclassDatum;
+        HeapTuple tup_idx;
+        List* indexprs = NIL;
+        ListCell* indexpr_item = NULL;
+        Datum indoptionDatum;
+        int2vector* indoption = NULL;
         bool isnull = true;
         int i;
         int indnkeyatts;
@@ -3192,7 +3465,8 @@ static IndexStmt* transformIndexConstraint(Constraint* constraint, CreateStmtCon
 
         /* Must be ALTER, not CREATE, but grammar doesn't enforce that */
         if (!cxt->isalter)
-            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("cannot use an existing index in CREATE TABLE"),
                     parser_errposition(cxt->pstate, constraint->location)));
 
@@ -3200,13 +3474,40 @@ static IndexStmt* transformIndexConstraint(Constraint* constraint, CreateStmtCon
         index_oid = get_relname_relid(index_name, RelationGetNamespace(heap_rel));
 
         if (!OidIsValid(index_oid))
-            ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+            ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_OBJECT),
                     errmsg("index \"%s\" does not exist", index_name),
                     parser_errposition(cxt->pstate, constraint->location)));
 
         /* Open the index (this will throw an error if it is not an index) */
         index_rel = index_open(index_oid, AccessShareLock);
         index_form = index_rel->rd_index;
+        tup_idx = SearchSysCache1(INDEXRELID, ObjectIdGetDatum(index_oid));
+        if (!HeapTupleIsValid(tup_idx)) {
+            ereport(ERROR,
+                (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                    errmsg("cache lookup failed for index %u", index_oid)));
+        }
+
+        indoptionDatum = SysCacheGetAttr(INDEXRELID, tup_idx, Anum_pg_index_indoption, &isnull);
+        AssertEreport(!isnull, MOD_OPT, "");
+        indoption = (int2vector*)DatumGetPointer(indoptionDatum);
+
+        if (!heap_attisnull(tup_idx, Anum_pg_index_indexprs, NULL)) {
+            Datum exprsDatum;
+            indexprs = NIL;
+            char* exprsString = NULL;
+
+            exprsDatum = SysCacheGetAttr(INDEXRELID, tup_idx, Anum_pg_index_indexprs, &isnull);
+            AssertEreport(!isnull, MOD_OPT, "");
+            exprsString = TextDatumGetCString(exprsDatum);
+            indexprs = (List*)stringToNode(exprsString);
+            pfree_ext(exprsString);
+        } else {
+            indexprs = NIL;
+        }
+
+        indexpr_item = list_head(indexprs);
         indnkeyatts = IndexRelationGetNumberOfKeyAttributes(index_rel);
 
         /* check the conditons for this function,
@@ -3225,26 +3526,57 @@ static IndexStmt* transformIndexConstraint(Constraint* constraint, CreateStmtCon
             char* attname = NULL;
             Oid defopclass;
 
-            /*
-             * We shouldn't see attnum == 0 here, since we already rejected
-             * expression indexes.	If we do, SystemAttributeDefinition will
-             * throw an error.
-             */
-            if (attnum > 0) {
-                AssertEreport(attnum <= heap_rel->rd_att->natts, MOD_OPT, "");
-                attform = heap_rel->rd_att->attrs[attnum - 1];
-            } else
-                attform = SystemAttributeDefinition(attnum, heap_rel->rd_rel->relhasoids,  RELATION_HAS_BUCKET(heap_rel), RELATION_HAS_UIDS(heap_rel));
-            attname = pstrdup(NameStr(attform->attname));
-
             if (i < indnkeyatts) {
-                /*
-                 * Insist on default opclass and sort options.  While the
-                 * index would still work as a constraint with non-default
-                 * settings, it might not provide exactly the same uniqueness
-                 * semantics as you'd get from a normally-created constraint;
-                 * and there's also the dump/reload problem mentioned above.
+                IndexElem *idxElem = makeNode(IndexElem);
+                int16 opt = indoption->values[i];
+
+                if (attnum > 0) {
+                    // simple index column
+                    AssertEreport(attnum <= heap_rel->rd_att->natts, MOD_OPT, "");
+                    attform = heap_rel->rd_att->attrs[attnum - 1];
+                    
+                    idxElem->name = pstrdup(NameStr(attform->attname));
+                    idxElem->expr = NULL;
+                    idxElem->indexcolname = NULL;
+                    idxElem->collation = NIL;
+                    idxElem->opclass = NIL;
+                    idxElem->ordering = (opt & INDOPTION_DESC) ? SORTBY_DESC : SORTBY_DEFAULT;
+                    idxElem->nulls_ordering = SORTBY_NULLS_DEFAULT;
+                } else if (attnum == 0) {
+                    // expresional index
+                    Node *indexkey = NULL;
+                    attform = 0;
+
+                    if (indexpr_item == NULL) {
+                        ereport(ERROR,
+                            (errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+                                errmsg("too few entries in indexprs list")));
+                    }
+
+                    indexkey = (Node*)lfirst(indexpr_item);
+                    indexpr_item = lnext(indexpr_item);
+
+                    idxElem->name = NULL;
+                    idxElem->expr = indexkey;
+                    idxElem->indexcolname = NULL;
+                    idxElem->collation = NIL;
+                    idxElem->opclass = NIL;
+                    idxElem->ordering = (opt & INDOPTION_DESC) ? SORTBY_DESC : SORTBY_DEFAULT;
+                    idxElem->nulls_ordering = SORTBY_NULLS_DEFAULT;
+                } else {
+                    attform = SystemAttributeDefinition(attnum, heap_rel->rd_rel->relhasoids, 
+                        RELATION_HAS_BUCKET(heap_rel), RELATION_HAS_UIDS(heap_rel));
+                    attname = pstrdup(NameStr(attform->attname));
+                }
+
+#ifdef ENABLE_MULTIPLE_NODES
+                /* create a primary key or unique constraint using such an index
+                 * is not supported in distributed database.
                  */
+                 if (attform == 0) {
+                     ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("get pg_attribute failed.")));
+                 }
+
                 defopclass = GetDefaultOpClass(attform->atttypid, index_rel->rd_rel->relam);
                 if (indclass->values[i] != defopclass || index_rel->rd_indoption[i] != 0)
                     ereport(ERROR,
@@ -3252,8 +3584,45 @@ static IndexStmt* transformIndexConstraint(Constraint* constraint, CreateStmtCon
                             errmsg("index \"%s\" does not have default sorting behavior", index_name),
                             errdetail("Cannot create a primary key or unique constraint using such an index."),
                             parser_errposition(cxt->pstate, constraint->location)));
-                constraint->keys = lappend(constraint->keys, makeString(attname));
+#else
+                /*
+                 * Insist on default opclass and sort options.  While the
+                 * index would still work as a constraint with non-default
+                 * settings, it might not provide exactly the same uniqueness
+                 * semantics as you'd get from a normally-created constraint;
+                 * and there's also the dump/reload problem mentioned above.
+                 */
+                if (!DB_IS_CMPT(B_FORMAT)) {
+                    if (attform == 0) {
+                        ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("get pg_attribute failed.")));
+                    }
+
+                    defopclass = GetDefaultOpClass(attform->atttypid, index_rel->rd_rel->relam);
+                    if (indclass->values[i] != defopclass || index_rel->rd_indoption[i] != 0)
+                        ereport(ERROR,
+                            (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                                errmsg("index \"%s\" does not have default sorting behavior", index_name),
+                                errdetail("Cannot create a primary key or unique constraint using such an index."),
+                                parser_errposition(cxt->pstate, constraint->location)));
+                }
+#endif
+
+                constraint->keys = (attnum >= 0) ? 
+                    lappend(constraint->keys, idxElem) : lappend(constraint->keys, makeString(attname));
             } else {
+                /*
+                 * We shouldn't see attnum == 0 here, since we already rejected
+                 * expression indexes.	If we do, SystemAttributeDefinition will
+                 * throw an error.
+                 */
+                if (attnum > 0) {
+                    AssertEreport(attnum <= heap_rel->rd_att->natts, MOD_OPT, "");
+                    attform = heap_rel->rd_att->attrs[attnum - 1];
+                } else {
+                    attform = SystemAttributeDefinition(attnum, heap_rel->rd_rel->relhasoids,
+                        RELATION_HAS_BUCKET(heap_rel), RELATION_HAS_UIDS(heap_rel));
+                }
+                attname = pstrdup(NameStr(attform->attname));
                 constraint->including = lappend(constraint->including, makeString(attname));
             }
 
@@ -3261,6 +3630,7 @@ static IndexStmt* transformIndexConstraint(Constraint* constraint, CreateStmtCon
 
         /* Close the index relation but keep the lock */
         relation_close(index_rel, NoLock);
+        ReleaseSysCache(tup_idx);
 
         index->indexOid = index_oid;
     }
@@ -3296,96 +3666,99 @@ static IndexStmt* transformIndexConstraint(Constraint* constraint, CreateStmtCon
          * get it right the first time.)
          */
         foreach (lc, constraint->keys) {
-            char* key = strVal(lfirst(lc));
+            IndexElem* idxElem = (IndexElem*)lfirst(lc);
             bool found = false;
             ColumnDef* column = NULL;
             ListCell* columns = NULL;
             IndexElem* iparam = NULL;
 
-            foreach (columns, cxt->columns) {
-                column = (ColumnDef*)lfirst(columns);
-                AssertEreport(IsA(column, ColumnDef), MOD_OPT, "");
-                if (strcmp(column->colname, key) == 0) {
-                    found = true;
-                    break;
-                }
-            }
-            if (found) {
-                /* found column in the new table; force it to be NOT NULL */
-                if (constraint->contype == CONSTR_PRIMARY && !constraint->inforConstraint->nonforced)
-                    column->is_not_null = TRUE;
-            } else if (SystemAttributeByName(key, cxt->hasoids) != NULL) {
-                /*
-                 * column will be a system column in the new table, so accept it.
-                 * System columns can't ever be null, so no need to worry about
-                 * PRIMARY/NOT NULL constraint.
-                 */
-                found = true;
-            } else if (cxt->inhRelations != NIL) {
-                /* try inherited tables */
-                ListCell* inher = NULL;
-
-                foreach (inher, cxt->inhRelations) {
-                    RangeVar* inh = (RangeVar*)lfirst(inher);
-                    Relation rel;
-                    int count;
-
-                    AssertEreport(IsA(inh, RangeVar), MOD_OPT, "");
-                    rel = heap_openrv(inh, AccessShareLock);
-                    if (rel->rd_rel->relkind != RELKIND_RELATION)
-                        ereport(ERROR,
-                            (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                                errmsg("inherited relation \"%s\" is not a table", inh->relname)));
-                    for (count = 0; count < rel->rd_att->natts; count++) {
-                        Form_pg_attribute inhattr = rel->rd_att->attrs[count];
-                        char* inhname = NameStr(inhattr->attname);
-
-                        if (inhattr->attisdropped)
-                            continue;
-                        if (strcmp(key, inhname) == 0) {
-                            found = true;
-
-                            /*
-                             * We currently have no easy way to force an inherited
-                             * column to be NOT NULL at creation, if its parent
-                             * wasn't so already. We leave it to DefineIndex to
-                             * fix things up in this case.
-                             */
-                            break;
-                        }
-                    }
-                    heap_close(rel, NoLock);
-                    if (found)
+            if (idxElem->name != NULL) {
+                foreach (columns, cxt->columns) {
+                    column = (ColumnDef*)lfirst(columns);
+                    AssertEreport(IsA(column, ColumnDef), MOD_OPT, "");
+                    if (strcmp(column->colname, idxElem->name) == 0) {
+                        found = true;
                         break;
+                    }
                 }
-            }
 
-            /*
-             * In the ALTER TABLE case, don't complain about index keys not
-             * created in the command; they may well exist already. DefineIndex
-             * will complain about them if not, and will also take care of marking
-             * them NOT NULL.
-             */
-            if (!found && !cxt->isalter)
-                ereport(ERROR,
-                    (errcode(ERRCODE_UNDEFINED_COLUMN),
-                        errmsg("column \"%s\" named in key does not exist", key),
-                        parser_errposition(cxt->pstate, constraint->location)));
+                if (found) {
+                    /* found column in the new table; force it to be NOT NULL */
+                    if (constraint->contype == CONSTR_PRIMARY && !constraint->inforConstraint->nonforced)
+                        column->is_not_null = TRUE;
+                } else if (SystemAttributeByName(idxElem->name, cxt->hasoids) != NULL) {
+                    /*
+                     * column will be a system column in the new table, so accept it.
+                     * System columns can't ever be null, so no need to worry about
+                     * PRIMARY/NOT NULL constraint.
+                     */
+                    found = true;
+                } else if (cxt->inhRelations != NIL) {
+                    /* try inherited tables */
+                    ListCell* inher = NULL;
 
-            /* Check for PRIMARY KEY(foo, foo) */
-            foreach (columns, index->indexParams) {
-                iparam = (IndexElem*)lfirst(columns);
-                if (iparam->name && strcmp(key, iparam->name) == 0) {
-                    if (index->primary)
-                        ereport(ERROR,
-                            (errcode(ERRCODE_DUPLICATE_COLUMN),
-                                errmsg("column \"%s\" appears twice in primary key constraint", key),
-                                parser_errposition(cxt->pstate, constraint->location)));
-                    else
-                        ereport(ERROR,
-                            (errcode(ERRCODE_DUPLICATE_COLUMN),
-                                errmsg("column \"%s\" appears twice in unique constraint", key),
-                                parser_errposition(cxt->pstate, constraint->location)));
+                    foreach (inher, cxt->inhRelations) {
+                        RangeVar* inh = (RangeVar*)lfirst(inher);
+                        Relation rel;
+                        int count;
+
+                        AssertEreport(IsA(inh, RangeVar), MOD_OPT, "");
+                        rel = heap_openrv(inh, AccessShareLock);
+                        if (rel->rd_rel->relkind != RELKIND_RELATION)
+                            ereport(ERROR,
+                                (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                                    errmsg("inherited relation \"%s\" is not a table", inh->relname)));
+                        for (count = 0; count < rel->rd_att->natts; count++) {
+                            Form_pg_attribute inhattr = rel->rd_att->attrs[count];
+                            char* inhname = NameStr(inhattr->attname);
+
+                            if (inhattr->attisdropped)
+                                continue;
+                            if (strcmp(idxElem->name, inhname) == 0) {
+                                found = true;
+
+                                /*
+                                 * We currently have no easy way to force an inherited
+                                 * column to be NOT NULL at creation, if its parent
+                                 * wasn't so already. We leave it to DefineIndex to
+                                 * fix things up in this case.
+                                 */
+                                break;
+                            }
+                        }
+                        heap_close(rel, NoLock);
+                        if (found)
+                            break;
+                    }
+                }
+
+                /*
+                 * In the ALTER TABLE case, don't complain about index keys not
+                 * created in the command; they may well exist already. DefineIndex
+                 * will complain about them if not, and will also take care of marking
+                 * them NOT NULL.
+                 */
+                if (!found && !cxt->isalter)
+                    ereport(ERROR,
+                        (errcode(ERRCODE_UNDEFINED_COLUMN),
+                            errmsg("column \"%s\" named in key does not exist", idxElem->name),
+                            parser_errposition(cxt->pstate, constraint->location)));
+
+                /* Check for PRIMARY KEY(foo, foo) */
+                foreach (columns, index->indexParams) {
+                    iparam = (IndexElem*)lfirst(columns);
+                    if (iparam->name && strcmp(idxElem->name, iparam->name) == 0) {
+                        if (index->primary)
+                            ereport(ERROR,
+                                (errcode(ERRCODE_DUPLICATE_COLUMN),
+                                    errmsg("column \"%s\" appears twice in primary key constraint", idxElem->name),
+                                    parser_errposition(cxt->pstate, constraint->location)));
+                        else
+                            ereport(ERROR,
+                                (errcode(ERRCODE_DUPLICATE_COLUMN),
+                                    errmsg("column \"%s\" appears twice in unique constraint", idxElem->name),
+                                    parser_errposition(cxt->pstate, constraint->location)));
+                    }
                 }
             }
 
@@ -3400,19 +3773,41 @@ static IndexStmt* transformIndexConstraint(Constraint* constraint, CreateStmtCon
                     list_free_deep(cxt->fallback_dist_col);
                     cxt->fallback_dist_col = NULL;
                 }
-                cxt->fallback_dist_col = lappend(cxt->fallback_dist_col, makeString(pstrdup(key)));
+
+                if (idxElem->name != NULL) {
+                    cxt->fallback_dist_col = lappend(cxt->fallback_dist_col, makeString(pstrdup(idxElem->name)));
+                }
             }
 #endif
 
             /* OK, add it to the index definition */
             iparam = makeNode(IndexElem);
-            iparam->name = pstrdup(key);
-            iparam->expr = NULL;
-            iparam->indexcolname = NULL;
-            iparam->collation = NIL;
-            iparam->opclass = NIL;
-            iparam->ordering = SORTBY_DEFAULT;
-            iparam->nulls_ordering = SORTBY_NULLS_DEFAULT;
+            if (idxElem->name != NULL) {
+                iparam->name = pstrdup(idxElem->name);
+                iparam->expr = NULL;
+                iparam->indexcolname = NULL;
+                iparam->collation = NIL;
+                iparam->opclass = NIL;
+                if (idxElem->ordering == SORTBY_ASC || idxElem->ordering == SORTBY_DESC) {
+                    iparam->ordering = idxElem->ordering;
+                } else {
+                    iparam->ordering = SORTBY_DEFAULT;
+                }
+                iparam->nulls_ordering = SORTBY_NULLS_DEFAULT;
+            } else if (idxElem->expr != NULL) {
+                iparam->name = NULL;
+                iparam->expr = idxElem->expr;
+                iparam->indexcolname = NULL;
+                iparam->collation = NIL;
+                iparam->opclass = NIL;
+                if (idxElem->ordering == SORTBY_ASC || idxElem->ordering == SORTBY_DESC) {
+                    iparam->ordering = idxElem->ordering;
+                } else {
+                    iparam->ordering = SORTBY_DEFAULT;
+                }
+                iparam->nulls_ordering = SORTBY_NULLS_DEFAULT;
+            }
+            
             index->indexParams = lappend(index->indexParams, iparam);
         }
     }
@@ -3723,7 +4118,6 @@ IndexStmt* transformIndexStmt(Oid relid, IndexStmt* stmt, const char* queryStrin
                     errmsg("cross-bucket index does not support column store")));
         }
     } else {
-        bool isDfsStore = RelationIsDfsStore(rel);
         const bool isPsortMothed = (0 == pg_strcasecmp(stmt->accessMethod, DEFAULT_CSTORE_INDEX_TYPE));
 
         /* check if this is the cstore btree index */
@@ -3770,11 +4164,6 @@ IndexStmt* transformIndexStmt(Oid relid, IndexStmt* stmt, const char* queryStrin
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("access method \"%s\" does not support column store", stmt->accessMethod)));
-        } else if (isColStore && isCGinBtreeMethod && isDfsStore) {
-            /* dfs store does not support cginbtree index currently */
-            ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("access method \"%s\" does not support dfs store", stmt->accessMethod)));
         }
     }
 
@@ -4341,6 +4730,13 @@ List* transformAlterTableStmt(Oid relid, AlterTableStmt* stmt, const char* query
                                 errmodule(MOD_OPT),
                                 errmsg("can not add partition against NON-PARTITIONED table")));
 
+                    if (rel->partMap->type != PART_TYPE_RANGE) {
+                        ereport(ERROR,
+                            (errcode(ERRCODE_INVALID_OPERATION),
+                                errmodule(MOD_OPT),
+                                errmsg("Only support add start/end partition on RANGE-PARTITIONED table")));
+                    }
+
                     /* get partition number */
                     partNum = getNumberOfPartitions(rel);
                     if (partNum >= MAX_PARTITION_NUM)
@@ -4477,6 +4873,47 @@ List* transformAlterTableStmt(Oid relid, AlterTableStmt* stmt, const char* query
                     newcmds = lappend(newcmds, cmd);
                 }
                 break;
+            case AT_AlterColumnType:
+            {
+                ColumnDef *def = (ColumnDef *)cmd->def;
+
+                /* pre-alter column type is an set, should drop it after */
+                bool oldIsSet = DropSetOwnedByTable(&cxt, cmd->name);
+
+                /* alter the column to a new set type, should create it before */
+                Value *v = (Value *)linitial(def->typname->names);
+                if (strcmp(v->val.str, "set") == 0) {
+                    if (oldIsSet) {
+                        ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH),
+                            errmsg("can not alter column type to another set")));
+                    } else {
+                        PrecheckColumnTypeForSet(&cxt, def->typname);
+                        CreateSetOwnedByTable(&cxt, def, cmd->name);
+                    }
+                }
+                /* can NOT change column to an existed set data type */
+                Type tup = LookupTypeName(pstate, def->typname, NULL);
+                if (HeapTupleIsValid(tup)) {
+                    Form_pg_type typform = (Form_pg_type)GETSTRUCT(tup);
+                    if (typform->typtype == TYPTYPE_SET) {
+                        ereport(ERROR,
+                            (errcode(ERRCODE_DATATYPE_MISMATCH),
+                            errmsg("can not use existed set type %s for column definition", format_type_be(HeapTupleGetOid(tup)))));
+                    }
+                    ReleaseSysCache(tup);
+                }
+
+                newcmds = lappend(newcmds, cmd);
+                break;
+            }
+            case AT_DropColumn:
+            {
+                /* if the dropped column type is an set, should drop it after */
+                DropSetOwnedByTable(&cxt, cmd->name);
+                newcmds = lappend(newcmds, cmd);
+                break;
+            }
+
             default:
                 newcmds = lappend(newcmds, cmd);
                 break;
@@ -4695,10 +5132,16 @@ static void transformColumnType(CreateStmtContext* cxt, ColumnDef* column)
      * including any collation spec that might be present.
      */
     Type ctype = typenameType(cxt->pstate, column->typname, NULL);
+    Form_pg_type typtup = (Form_pg_type)GETSTRUCT(ctype);
+
+    if (typtup->typtype == TYPTYPE_SET) {
+        ereport(ERROR,
+            (errcode(ERRCODE_DATATYPE_MISMATCH),
+                errmsg("can not use existed set type %s for column definition", format_type_be(HeapTupleGetOid(ctype))),
+                parser_errposition(cxt->pstate, column->typname->location)));
+    }
 
     if (column->collClause) {
-        Form_pg_type typtup = (Form_pg_type)GETSTRUCT(ctype);
-
         LookupCollation(cxt->pstate, column->collClause->collname, column->collClause->location);
         /* Complain if COLLATE is applied to an uncollatable type */
         if (!OidIsValid(typtup->typcollation))
@@ -7539,4 +7982,124 @@ static bool IsCreatingSeqforAnalyzeTempTable(CreateStmtContext* cxt)
                                  strlen(ANALYZE_TEMP_TABLE_PREFIX)) == 0);
     }
     return isUnderAnalyze;
+}
+
+static void CheckAutoIncrementIndex(CreateStmtContext *cxt)
+{
+    ListCell *clc = NULL;
+    ListCell *ilc = NULL;
+    bool has_autoinc = false;
+    foreach (clc, cxt->columns) {
+        ColumnDef* column = (ColumnDef*)lfirst(clc);
+        if (!column->raw_default || !IsA(column->raw_default, AutoIncrement)) {
+            continue;
+        }
+        if (has_autoinc) {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                (errmsg("Incorrect table definition, there can be only one auto_increment column"))));
+        }
+        has_autoinc = true;
+
+        bool has_found = false;
+        foreach (ilc, cxt->ixconstraints) {
+            Constraint* cons =  (Constraint *)lfirst(ilc);
+            if (cons->contype != CONSTR_PRIMARY && cons->contype != CONSTR_UNIQUE) {
+                continue;
+            }
+            Assert(cons->keys->length > 0);
+            Value *name = (Value *)lfirst(cons->keys->head);
+            if (strcasecmp(name->val.str, column->colname) == 0) {
+                has_found = true;
+                break;
+            }
+        }
+
+        if (has_found) {
+            continue;
+        }
+
+        foreach (ilc, cxt->inh_indexes) {
+            IndexStmt* index =  (IndexStmt *)lfirst(ilc);
+            if (!index->unique && !index->primary) {
+                continue;
+            }
+            Assert(index->indexParams->length > 0);
+            IndexElem *elem = (IndexElem *)lfirst(index->indexParams->head);
+            if (strcasecmp(elem->name, column->colname) == 0) {
+                has_found = true;
+                break;
+            }
+        }
+
+        if (!has_found) {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                (errmsg("Incorrect table definition, auto_increment column must be defined as a key"))));
+        }
+    }
+}
+
+static int128 TransformAutoIncStart(CreateStmt* stmt)
+{
+    int128 autoinc;
+    DefElem* defel = (DefElem*)stmt->autoIncStart;
+    if (defel == NULL) {
+        return (int128)1;
+    }
+    if (IsA(defel->arg, Integer)) {
+        autoinc = (int128)intVal(defel->arg);
+    } else { /* T_Float */
+        autoinc = DatumGetInt128(DirectFunctionCall1(int16in, CStringGetDatum(strVal(defel->arg))));
+    }
+    if (autoinc <= 0) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("auto_increment value must be greater than 0")));
+    }
+    return autoinc;
+}
+
+static void TrySetAutoIncNotNullConstraint(ColumnDef* column)
+{
+    Constraint* constraint = NULL;
+    bool has_nullcons = false;
+
+    foreach_cell (clist, column->constraints) {
+        if (((Constraint*)lfirst(clist))->contype == CONSTR_NULL) {
+            has_nullcons = true;
+            break;
+        }
+    }
+    /* If nullable constraint is specified, no need to set NOT-NULL constraint. */
+    if (!has_nullcons) {
+        constraint = makeNode(Constraint);
+        constraint->contype = CONSTR_NOTNULL;
+        constraint->location = -1;
+        column->constraints = lappend(column->constraints, constraint);
+    }
+}
+
+static void TransformTempAutoIncrement(ColumnDef* column, CreateStmt* stmt)
+{
+    int128 autoinc;
+    Const* constnode = NULL;
+    AutoIncrement* autoincnode = NULL;
+    Constraint* constraint = NULL;
+
+    if (stmt) {
+        autoinc = TransformAutoIncStart(stmt);
+    } else {
+        autoinc = (int128)1;
+    }
+    /* build default expression */
+    constnode = makeConst(INT16OID, -1, InvalidOid, sizeof(int128), Int128GetDatum(autoinc), false, false);
+    autoincnode = makeNode(AutoIncrement);
+    autoincnode->expr = (Node*)constnode;
+    constraint = makeNode(Constraint);
+    constraint->contype = CONSTR_DEFAULT;
+    constraint->location = -1;
+    constraint->raw_expr = (Node*)autoincnode;
+    constraint->cooked_expr = NULL;
+    column->constraints = lappend(column->constraints, constraint);
+    column->raw_default = constraint->raw_expr;
+
+    TrySetAutoIncNotNullConstraint(column);
 }

@@ -49,6 +49,10 @@ struct XLogPhyBlock;
 
 /* The time unit is microsecond. */
 static const int MAX_RPO_SLEEP_TIME = 500000;
+typedef enum XLOG_FPI_FOR_HINT_TYPE {
+    XLOG_FPI_FOR_HINT_HEAP = 0,
+    XLOG_FPI_FOR_HINT_UHEAP
+} XLOG_FPI_FOR_HINT_TYPE;
 
 /* prototypes for public functions in xloginsert.c: */
 extern void XLogBeginInsert(void);

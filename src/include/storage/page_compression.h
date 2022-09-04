@@ -13,10 +13,10 @@
 
 #include <sys/mman.h>
 
+#include "c.h"
 #include "storage/buf/bufpage.h"
 #include "datatype/timestamp.h"
 #include "catalog/pg_class.h"
-#include "catalog/pg_am.h"
 #include "utils/atomic.h"
 
 /* The page compression feature relies on native atomic operation support.
@@ -37,25 +37,19 @@
 /* COMPRESS_ALGORITHM_XXX must be the same as COMPRESS_TYPE_XXX */
 #define COMPRESS_ALGORITHM_PGLZ 1
 #define COMPRESS_ALGORITHM_ZSTD 2
+#define COMPRESS_ALGORITHM_PGZSTD 3
 
 constexpr uint32 COMPRESS_ADDRESS_FLUSH_CHUNKS = 5000;
 
 #define SUPPORT_COMPRESSED(relKind, relam) \
     ((relKind) == RELKIND_RELATION ||      \
-     (((relKind) == RELKIND_INDEX || (relKind == RELKIND_GLOBAL_INDEX)) && (relam) == BTREE_AM_OID))
+     (((relKind) == RELKIND_INDEX || (relKind == RELKIND_GLOBAL_INDEX)) && \
+     ((relam) == BTREE_AM_OID || (relam) == UBTREE_AM_OID)))
 
 #define REL_SUPPORT_COMPRESSED(relation) SUPPORT_COMPRESSED((relation)->rd_rel->relkind, (relation)->rd_rel->relam)
 
 typedef uint32 pc_chunk_number_t;
-const uint32 PAGE_COMPRESSION_VERSION = 92603;
-
-enum CompressedFileType {
-    COMPRESSED_TYPE_UNKNOWN,
-    COMPRESSED_TABLE_FILE,
-    COMPRESSED_TABLE_PCA_FILE,
-    COMPRESSED_TABLE_PCD_FILE
-};
-
+const uint32 PAGE_COMPRESSION_VERSION = 92765;
 /*
  * layout of files for Page Compress:
  *
@@ -99,10 +93,10 @@ typedef struct PageCompressData {
     uint32 size : 16;                       /* size of compressed data */
     uint32 byte_convert : 1;
     uint32 diff_convert : 1;
-    uint32 unused : 14;
+    uint32 algorithm : 4;
+    uint32 unused : 10;
     char data[FLEXIBLE_ARRAY_MEMBER];       /* compressed page, except for the page header */
 } PageCompressData;
-
 
 typedef struct HeapPageCompressData {
     char page_header[SizeOfHeapPageHeaderData]; /* page header */
@@ -110,7 +104,8 @@ typedef struct HeapPageCompressData {
     uint32 size : 16;                       /* size of compressed data */
     uint32 byte_convert : 1;
     uint32 diff_convert : 1;
-    uint32 unused : 14;
+    uint32 algorithm : 4;
+    uint32 unused : 10;
     char data[FLEXIBLE_ARRAY_MEMBER];       /* compressed page, except for the page header */
 } HeapPageCompressData;
 
@@ -120,13 +115,12 @@ constexpr uint4 INDEX_OF_QUARTER_BLCKSZ = 1;
 constexpr uint4 INDEX_OF_EIGHTH_BRICK_BLCKSZ = 2; 
 constexpr uint4 INDEX_OF_SIXTEENTHS_BLCKSZ = 3; 
 #define MAX_PREALLOC_CHUNKS 7
-#define PCA_SUFFIX "%s_pca"
-#define PCD_SUFFIX "%s_pcd"
+#define COMPRESS_STR "_compress"
+#define COMPRESS_SUFFIX "%s" COMPRESS_STR
+
 
 #define SIZE_OF_PAGE_COMPRESS_HEADER_DATA sizeof(PageCompressHeader)
 #define SIZE_OF_PAGE_COMPRESS_ADDR_HEADER_DATA offsetof(PageCompressAddr, chunknos)
-#define SIZE_OF_PAGE_COMPRESS_DATA_HEADER_DATA(heapData) \
-    ((heapData) ? offsetof(HeapPageCompressData, data) : offsetof(PageCompressData, data))
 
 #define SIZE_OF_PAGE_COMPRESS_ADDR(chunk_size) \
     (SIZE_OF_PAGE_COMPRESS_ADDR_HEADER_DATA + sizeof(pc_chunk_number_t) * (BLCKSZ / (chunk_size)))
@@ -167,13 +161,13 @@ constexpr unsigned CMP_LEVEL_INDEX = 4;
 constexpr unsigned CMP_ALGORITHM_INDEX = 5;
 constexpr unsigned CMP_CHUNK_SIZE_INDEX = 6;
 
-struct CmpBitStruct {
+struct CmpBitStuct {
     unsigned int bitLen;
     unsigned int mask;
     unsigned int moveBit;
 };
 
-constexpr CmpBitStruct g_cmpBitStruct[] = {{CMP_BYTE_CONVERT_LEN, 0x01, 15},
+constexpr CmpBitStuct g_cmpBitStruct[] = {{CMP_BYTE_CONVERT_LEN, 0x01, 15},
     {CMP_DIFF_CONVERT_LEN, 0x01, 14},
     {CMP_PRE_CHUNK_LEN, 0x07, 11},
     {CMP_LEVEL_SYMBOL_LEN, 0x01, 10},
@@ -237,49 +231,30 @@ inline void TransCompressOptions(const RelFileNode& node, RelFileCompressOption*
             (((opt) >> g_cmpBitStruct[CMP_DIFF_CONVERT_INDEX].moveBit) & g_cmpBitStruct[CMP_DIFF_CONVERT_INDEX].mask)
 #define GET_COMPRESS_PRE_CHUNKS(opt) \
     (((opt) >> g_cmpBitStruct[CMP_PRE_CHUNK_INDEX].moveBit) & g_cmpBitStruct[CMP_PRE_CHUNK_INDEX].mask)
-#define GET_COMPRESS_LEVEL_SYMBOL(opt) \
-    (((opt) >> g_cmpBitStruct[CMP_COMPRESS_LEVEL_SYMBOL].moveBit) & g_cmpBitStruct[CMP_COMPRESS_LEVEL_SYMBOL].mask)
-#define GET_COMPRESS_LEVEL(opt) \
-    (((opt) >> g_cmpBitStruct[CMP_LEVEL_INDEX].moveBit) & g_cmpBitStruct[CMP_LEVEL_INDEX].mask)
-#define GET_COMPRESS_ALGORITHM(opt) \
-    (((opt) >> g_cmpBitStruct[CMP_ALGORITHM_INDEX].moveBit) & g_cmpBitStruct[CMP_ALGORITHM_INDEX].mask)
 #define GET_COMPRESS_CHUNK_SIZE(opt) \
     (((opt) >> g_cmpBitStruct[CMP_CHUNK_SIZE_INDEX].moveBit) & g_cmpBitStruct[CMP_CHUNK_SIZE_INDEX].mask)
 
 #define IS_COMPRESSED_MAINFORK(reln, forkNum) ((reln)->smgr_rnode.node.opt != 0 && (forkNum) == MAIN_FORKNUM)
-#define IS_COMPRESS_DELETE_FORK(forkNum) ((forkNum) == COMPRESS_FORKNUM)
 #define IS_COMPRESSED_RNODE(rnode, forkNum) ((rnode).opt != 0 && (forkNum) == MAIN_FORKNUM)
 /* Compress function */
-template <bool heapPageData>
+template <uint8 pagetype>
 extern int TemplateCompressPage(const char* src, char* dst, int dst_size, RelFileCompressOption option);
 
-template <bool heapPageData>
-extern int TemplateDecompressPage(const char* src, char* dst, uint8 algorithm);
+template <uint8 pagetype>
+extern int TemplateDecompressPage(const char* src, char* dst);
 
 int CompressPageBufferBound(const char* page, uint8 algorithm);
 
 int CompressPage(const char* src, char* dst, int dst_size, RelFileCompressOption option);
 
-int DecompressPage(const char* src, char* dst, uint8 algorithm);
-
-#define SET_OPT_BY_NEGATIVE_FORK(rnode, forkNumber)                              \
-    do {                                                                         \
-        SET_COMPRESS_OPTION((rnode), 0, 0, 0, 0, 0, COMPRESS_ALGORITHM_ZSTD, 0); \
-    } while (0)
-
-/* Memory mapping function */
-extern PageCompressHeader* pc_mmap(int fd, int chunk_size, bool readonly);
-extern PageCompressHeader* pc_mmap_real_size(int fd, int size, bool readonly);
-extern int pc_munmap(PageCompressHeader * map);
-extern int pc_msync(PageCompressHeader * map);
+int DecompressPage(const char* src, char* dst);
 
 /**
  * format mainfork path name to compressed path
  * @param dst destination buffer
  * @param pathName uncompressed table name
- * @param compressFileType pca or pcd
  */
-extern void CopyCompressedPath(char dst[MAXPGPATH], const char* pathName, CompressedFileType compressFileType);
+extern void CopyCompressedPath(char *dst, const char* pathName);
 
 /**
  * @param pathName mainFork File path name
@@ -287,33 +262,20 @@ extern void CopyCompressedPath(char dst[MAXPGPATH], const char* pathName, Compre
  * @param forkNumber for validation
  * @return size of mainFork
  */
+ 
+#define FILE_BLOCK_SIZE_512 (512)
 extern int64 CalculateMainForkSize(char* pathName, RelFileNode* relFileNode, ForkNumber forkNumber);
 extern int64 CalculateCompressMainForkSize(char* pathName, bool suppressedENOENT = false);
 
-extern uint16 ReadChunkSize(FILE *pcaFile, char* pcaFilePath, size_t len);
-
-/**
- * read compressed chunks into dst, and decompressed page into pageBuffer
- * @param dst destination
- * @param destLen destination length
- * @param blockNumber blockNumber
- * @param ReadBlockChunksStruct other data needed
- */
-size_t ReadAllChunkOfBlock(char *dst, size_t destLen, BlockNumber blockNumber, ReadBlockChunksStruct& rbStruct);
 /**
  * check if fileName is end with pca or pcd
  * @param fileName fileName
  * @return filetype
  */
-CompressedFileType IsCompressedFile(char *fileName, size_t fileNameLen);
+bool IsCompressedFile(const char *fileName, size_t fileNameLen);
 
-int64 CalculateFileSize(char* pathName, size_t size, bool suppressedENOENT = false);
-/**
- * release mmap. print warning log if failed
- * @param map mmap pointer
- * @param fileName mmap filename, for loggging
- */
-void ReleaseMap(PageCompressHeader* map, const char* fileName);
+int64 CalculateFileSize(char* pathName, bool suppressedENOENT = false);
+int64 CalculateFilePhyRealSize(char* pathName, bool suppressedENOENT = false);
 
 /**
  * convert chunk size to the index of CHUNK_SIZE_LIST
@@ -323,19 +285,6 @@ void ReleaseMap(PageCompressHeader* map, const char* fileName);
  */
 extern uint1 ConvertChunkSize(uint32 compressedChunkSize, bool* success);
 
-/**
- *
- * @param blockNumber block number
- * @param pageCompressAddr addr of block
- * @return checksum uint32
- */
-extern uint32 AddrChecksum32(BlockNumber blockNumber, const PageCompressAddr* pageCompressAddr, uint16 chunkSize);
 
-#ifndef FRONTEND
-extern void CheckAndRepairCompressAddress(PageCompressHeader *pcMap, uint16 chunk_size, uint8 algorithm, const char *path);
-PageCompressHeader* GetPageCompressHeader(void* vfd, uint16 chunkSize, const RelFileNodeForkNum &relFileNodeForkNum);
-void UnReferenceAddrFile(void* vfd);
-void RealInitialMMapLockArray();
-#endif
 
 #endif /* PAGE_COMPRESSION_H */

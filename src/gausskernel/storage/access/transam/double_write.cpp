@@ -43,6 +43,94 @@
 #define static
 #endif
 
+void check_block_id(const char *identifier)
+{
+    if (identifier == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_NAME), errmsg("The identifier should not be NULL.")));
+    }
+
+    if (strlen(identifier) == 0) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_NAME), errmsg("The identifier \"%s\" is too short", identifier)));
+    }
+
+    if (strlen(identifier) >= NAMEDATALEN) {
+        ereport(ERROR, (errcode(ERRCODE_NAME_TOO_LONG), errmsg("The identifier \"%s\" is too long", identifier)));
+    }
+
+    const char *validCharacters = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_";
+    for (int i = 0; identifier[i]; i++) {
+        if (strchr(validCharacters, identifier[i]) == NULL) {
+            ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_NAME),
+                     errmsg("The identifier \"%s\" contains invalid character", identifier),
+                     errhint("The identifier may only contain letters, "
+                             "numbers and the underscore character.")));
+        }
+    }
+}
+
+Datum gs_block_dw_io(PG_FUNCTION_ARGS)
+{
+    if (!superuser() &&
+        !(isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode)) {
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                        errmsg("must be system admin or "
+                               "operator admin in operation mode to run gs_block_dw_io")));
+    }
+
+    if (PG_ARGISNULL(0) || PG_ARGISNULL(1)) {
+        ereport(ERROR, (errmodule(MOD_DW), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("Parameter can not be null.")));
+    }
+    const int TIMEOUT_MIN = 0;
+    const int TIMEOUT_MAX = 3600;
+    struct timeval startTime;
+    struct timeval currentTime;
+    int32 timeOutSeconds = PG_GETARG_INT32(0);
+    /* This parameter is used to identify the current operation */
+    char* currentBlockId = text_to_cstring(PG_GETARG_TEXT_P(1));
+    check_block_id(currentBlockId);
+    if (timeOutSeconds < TIMEOUT_MIN || timeOutSeconds > TIMEOUT_MAX) {
+        ereport(ERROR, (errmodule(MOD_DW), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                (errmsg("The timeOutSeconds(%d) is an incorrect input. Value range: [0, 3600]. \n", timeOutSeconds))));
+    }
+
+    ereport(LOG, (errmodule(MOD_DW), errmsg("The gs_block_dw_io identifier is %s.", currentBlockId)));
+
+    dw_blocked_for_snapshot();
+    ereport(LOG, (errmodule(MOD_DW), errmsg("The dw io has been blocked for %s.", currentBlockId)));
+    (void)gettimeofday(&startTime, NULL);
+    do {
+        (void)gettimeofday(&currentTime, NULL);
+        if ((currentTime.tv_sec - startTime.tv_sec) > timeOutSeconds) {
+            break;
+        }
+        if (t_thrd.int_cxt.QueryCancelPending || t_thrd.int_cxt.ProcDiePending) {
+            dw_released_after_snapshot();
+            ereport(ERROR, (errmodule(MOD_DW),
+                errmsg("The gs_block_dw_io for %s receive Cancel Interrupt.", currentBlockId)));
+        }
+        pg_usleep(100000L); /* sleep 100ms */
+    } while (1);
+
+    dw_released_after_snapshot();
+    ereport(LOG, (errmodule(MOD_DW), errmsg("The dw io has been unblocked for %s.", currentBlockId)));
+    PG_RETURN_BOOL(true);
+}
+
+Datum gs_is_dw_io_blocked(PG_FUNCTION_ARGS)
+{
+    if (!superuser() &&
+        !(isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode)) {
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                        errmsg("must be system admin or "
+                               "operator admin in operation mode to run gs_is_dw_io_blocked")));
+    }
+
+    bool blocked = is_dw_snapshot_blocked();
+    PG_RETURN_BOOL(blocked);
+}
+
 Datum dw_get_node_name()
 {
     if (g_instance.attr.attr_common.PGXCNodeName == NULL || g_instance.attr.attr_common.PGXCNodeName[0] == '\0') {
@@ -196,11 +284,8 @@ const dw_view_col_t g_dw_view_col_arr[DW_VIEW_COL_NUM] = {
 
 static int dw_fetch_file_id(int thread_id);
 static void dw_fetch_thread_ids(int file_id, int &size, int *thread_ids);
-static void dw_remove_batch_file(int dw_file_num);
-static void dw_remove_batch_meta_file();
 static void dw_recover_partial_write_batch(dw_batch_file_context *cxt);
 static void dw_write_meta_file(int fd, dw_batch_meta_file *batch_meta_file);
-static int dw_create_file(const char* file_name);
 static void dw_generate_batch_file(int file_id, uint64 dw_file_size);
 void dw_cxt_init_batch();
 
@@ -328,7 +413,7 @@ static void dw_prepare_page(dw_batch_t *batch, uint16 page_num, uint16 page_id, 
         if (t_thrd.proc->workingVersionNum < PAGE_COMPRESSION_VERSION) {
             batch->buftag_ver = HASHBUCKET_TAG;
         } else {
-            batch->buftag_ver = PAGE_COMPRESS_TAG;
+            batch->buftag_ver = (uint16)PAGE_COMPRESS_TAG;
         }
     } else {
         batch->buftag_ver = ORIGIN_TAG;
@@ -353,7 +438,7 @@ void dw_prepare_file_head(char *file_head, uint16 start, uint16 dwn, int32 dw_ve
         curr_head->head.page_id = 0;
         curr_head->head.dwn = dwn;
         curr_head->start = start;
-        curr_head->buftag_version = PAGE_COMPRESS_TAG;
+        curr_head->buftag_version = (uint16)PAGE_COMPRESS_TAG;
         curr_head->tail.dwn = dwn;
         curr_head->dw_version = dw_version;
         dw_calc_file_head_checksum(curr_head);
@@ -439,6 +524,8 @@ static inline void dw_log_data_page(int elevel, const char* state, T* buf_tag)
 template <typename T>
 static SMGR_READ_STATUS dw_recover_read_page(SMgrRelation relation, RelFileNode relnode, char *data_page, T *buf_tag)
 {
+    BlockNumber blk_num;
+
     if (IsSegmentPhysicalRelNode(relnode)) {
         SMgrOpenSpace(relation);
         if (relation->seg_space == NULL) {
@@ -460,7 +547,12 @@ static SMGR_READ_STATUS dw_recover_read_page(SMgrRelation relation, RelFileNode 
             dw_log_data_page(WARNING, "Data file deleted", buf_tag);
             return SMGR_READ_STATUS::SMGR_RD_NO_BLOCK;
         }
-        BlockNumber blk_num = smgrnblocks(relation, buf_tag->forkNum);
+
+        blk_num = smgrnblocks_cached(relation, buf_tag->forkNum);
+        if (blk_num == InvalidBlockNumber) {
+            blk_num = smgrnblocks(relation, buf_tag->forkNum);
+        }
+
         if (blk_num <= buf_tag->blockNum) {
             dw_log_data_page(WARNING, "Data page deleted", buf_tag);
             return SMGR_READ_STATUS::SMGR_RD_NO_BLOCK;
@@ -468,6 +560,46 @@ static SMGR_READ_STATUS dw_recover_read_page(SMgrRelation relation, RelFileNode 
         SMGR_READ_STATUS rdStatus = smgrread(relation, buf_tag->forkNum, buf_tag->blockNum, data_page);
         return rdStatus;
     }
+}
+
+template <typename T1>
+static bool dw_is_pca_need_recover(T1 **lst_buf_tag, T1 *buf_tag, SMgrRelation relnode)
+{
+    /* in uncompressed table:
+     * opt will be 0xff if the previous version does not support compresssion
+     * opt will be 0 if the previous version supports compresssion
+     */
+    if (relnode->smgr_rnode.node.opt == 0xffff || relnode->smgr_rnode.node.opt == 0 ||
+        buf_tag->forkNum != MAIN_FORKNUM) {
+        return false;
+    }
+
+    /*  in segment_extstore, page will not be compressed if it belong to ext which size is 8 pages */
+    if (IsSegmentPhysicalRelNode(relnode->smgr_rnode.node) && buf_tag->blockNum < DW_EXT_LOGIC_PAGE_NUM) {
+        return false;
+    }
+
+    /* first buffer */
+    if (*lst_buf_tag == NULL) {
+        *lst_buf_tag = buf_tag;
+        return true;
+    }
+
+    /* different rnode or different fork,  of coures different pca */
+    errno_t rc = memcmp(&((*lst_buf_tag)->rnode), &(buf_tag->rnode), offsetof(T1, blockNum));
+    if (rc != 0) {
+        *lst_buf_tag = buf_tag;
+        return true;
+    }
+
+    /* different ext means different pca */
+    BlockNumber ext_num = buf_tag->blockNum / DW_EXT_LOGIC_PAGE_NUM;
+    if (ext_num != (*lst_buf_tag)->blockNum / DW_EXT_LOGIC_PAGE_NUM) {
+        *lst_buf_tag = buf_tag;
+        return true;
+    }
+
+    return false;
 }
 
 template <typename T1, typename T2>
@@ -478,6 +610,8 @@ static void dw_recover_pages(T1 *batch, T2 *buf_tag, PageHeader data_page, BufTa
     SMgrRelation relation;
     RelFileNode relnode;
     bool pageCorrupted = false;
+    bool needPcaCheck = false;
+    T2 *lastBufTag = NULL;
 
     for (i = 0; i < GET_REL_PGAENUM(batch->page_num); i++) {
         buf_tag = &batch->buf_tag[i];
@@ -487,10 +621,10 @@ static void dw_recover_pages(T1 *batch, T2 *buf_tag, PageHeader data_page, BufTa
         if (tag_ver == HASHBUCKET_TAG) {
             relnode.opt = 0;
             // 2 bytes are used for bucketNode.
-            relnode.bucketNode = (int2)((BufferTagSecondVer *)buf_tag)->rnode.bucketNode;
+            relnode.bucketNode = (int2)((BufferTagSecondVer *)(void *)buf_tag)->rnode.bucketNode;
         } else if (tag_ver == PAGE_COMPRESS_TAG) {
-            relnode.opt = ((BufferTag *)buf_tag)->rnode.opt;
-            relnode.bucketNode = ((BufferTag *)buf_tag)->rnode.bucketNode;
+            relnode.opt = ((BufferTag *)(void *)buf_tag)->rnode.opt;
+            relnode.bucketNode = ((BufferTag *)(void *)buf_tag)->rnode.bucketNode;
         } else {
             relnode.dbNode = buf_tag->rnode.dbNode;
             relnode.spcNode = buf_tag->rnode.spcNode;
@@ -516,11 +650,13 @@ static void dw_recover_pages(T1 *batch, T2 *buf_tag, PageHeader data_page, BufTa
         pageCorrupted = (rdStatus == SMGR_READ_STATUS::SMGR_RD_CRC_ERROR);
 
         if (pageCorrupted || XLByteLT(PageGetLSN(data_page), PageGetLSN(dw_page))) {
+            needPcaCheck = dw_is_pca_need_recover<T2>(&lastBufTag, buf_tag, relation);
             if (IsSegmentPhysicalRelNode(relnode)) {
                 // seg_space must be initialized before.
                 seg_physical_write(relation->seg_space, relnode, buf_tag->forkNum, buf_tag->blockNum,
                                    (const char *)dw_page, false);
             } else {
+                SmgrRecoveryPca(relation, buf_tag->forkNum, buf_tag->blockNum, needPcaCheck, false);
                 smgrwrite(relation, buf_tag->forkNum, buf_tag->blockNum, (const char *)dw_page, false);
             }
 
@@ -583,24 +719,26 @@ int get_dw_page_min_idx(int file_id)
     int* thread_ids;
     int thread_num;
 
-    if (g_instance.ckpt_cxt_ctl->pgwr_procs.writer_proc != NULL) {
-        thread_num = g_instance.ckpt_cxt_ctl->pgwr_procs.num;
-        thread_ids = (int *)palloc0(thread_num * sizeof(int));
+    if (g_instance.ckpt_cxt_ctl->pgwr_procs.writer_proc == NULL) {
+        return min_idx;
+    }
 
-        dw_fetch_thread_ids(file_id, size, thread_ids);
+    thread_num = g_instance.ckpt_cxt_ctl->pgwr_procs.num;
+    thread_ids = (int *)palloc0(thread_num * sizeof(int));
 
-        for (int i = 0; i < size; i++) {
-            thread_id = thread_ids[i];
-            dw_page_idx = g_instance.ckpt_cxt_ctl->pgwr_procs.writer_proc[thread_id].thrd_dw_cxt.dw_page_idx;
-            if (dw_page_idx != -1) {
-                if (min_idx == 0 || (uint16)dw_page_idx < min_idx) {
-                    min_idx = dw_page_idx;
-                }
+    dw_fetch_thread_ids(file_id, size, thread_ids);
+
+    for (int i = 0; i < size; i++) {
+        thread_id = thread_ids[i];
+        dw_page_idx = g_instance.ckpt_cxt_ctl->pgwr_procs.writer_proc[thread_id].thrd_dw_cxt.dw_page_idx;
+        if (dw_page_idx != -1) {
+            if (min_idx == 0 || (uint16)dw_page_idx < min_idx) {
+                min_idx = dw_page_idx;
             }
         }
-
-        pfree(thread_ids);
     }
+
+    pfree(thread_ids);
 
     return min_idx;
 }
@@ -852,13 +990,14 @@ static void dw_check_batch_parameter_change(knl_g_dw_context *batch_cxt)
     }
 }
 
-static void dw_recover_all_partial_write_batch(knl_g_dw_context *batch_cxt)
+void dw_recover_all_partial_write_batch(knl_g_dw_context *batch_cxt)
 {
     int i;
     int dw_file_num;
     dw_batch_file_context* batch_file_cxt;
 
     dw_file_num = batch_cxt->batch_meta_file.dw_file_num;
+    ereport(LOG, (errmodule(MOD_DW), errmsg("DW batch flush file recovery start.")));
 
     for (i = 0; i < dw_file_num; i++) {
         batch_file_cxt = &batch_cxt->batch_file_cxts[i];
@@ -866,6 +1005,8 @@ static void dw_recover_all_partial_write_batch(knl_g_dw_context *batch_cxt)
         dw_recover_partial_write_batch(batch_file_cxt);
         LWLockRelease(batch_file_cxt->flush_lock);
     }
+    
+    ereport(LOG, (errmodule(MOD_DW), errmsg("DW batch flush file recovery finish.")));
 }
 
 static void dw_recover_partial_write_batch(dw_batch_file_context *cxt)
@@ -901,10 +1042,12 @@ static void dw_recover_partial_write_batch(dw_batch_file_context *cxt)
 
         if (t_thrd.proc->workingVersionNum < DW_SUPPORT_SINGLE_FLUSH_VERSION) {
             bool is_hashbucket = ((curr_head->page_num & IS_HASH_BKT_SEGPAGE_MASK) != 0);
-            curr_head->buftag_ver = is_hashbucket ?
-                                    (t_thrd.proc->workingVersionNum < PAGE_COMPRESSION_VERSION ? HASHBUCKET_TAG
-                                                                                               : PAGE_COMPRESS_TAG)
-                                                  : ORIGIN_TAG;
+            curr_head->buftag_ver =
+                is_hashbucket ?
+                              (t_thrd.proc->workingVersionNum < PAGE_COMPRESSION_VERSION ?
+                                                                                         (uint16)HASHBUCKET_TAG
+                                                                                         : (uint16)PAGE_COMPRESS_TAG)
+                              : (uint16)ORIGIN_TAG;
         }
 
         remain_pages = read_asst.buf_end - read_asst.buf_start;
@@ -1063,20 +1206,16 @@ void dw_generate_batch_files(int batch_file_num, uint64 dw_file_size)
 static void dw_generate_batch_file(int file_id, uint64 dw_file_size)
 {
     int64 remain_size;
+    int fd;
     char* file_head = NULL;
     dw_batch_t* batch_head = NULL;
-    int fd = -1;
     char* unaligned_buf = NULL;
     char batch_file_name[PATH_MAX];
 
     dw_fetch_batch_file_name(file_id, batch_file_name);
 
     /* create dw batch flush file */
-    fd = open(batch_file_name, (DW_FILE_FLAG | O_CREAT), DW_FILE_PERM);
-    if (fd == -1) {
-        ereport(PANIC,
-            (errcode_for_file_access(), errmodule(MOD_DW), errmsg("Could not create file \"%s\"", batch_file_name)));
-    }
+    fd = dw_create_file(batch_file_name);
 
     /* Open file with O_SYNC, to make sure the data and file system control info on file after block writing. */
     unaligned_buf = (char *)palloc0(DW_FILE_EXTEND_SIZE + BLCKSZ);
@@ -1322,12 +1461,8 @@ void dw_file_check()
     /* during C10 upgrade to R2C00, need generate the dw single file */
     if (!file_exists(SINGLE_DW_FILE_NAME)) {
         /* create dw batch flush file */
-        int fd = open(DW_UPGRADE_FILE_NAME, (DW_FILE_FLAG | O_CREAT), DW_FILE_PERM);
-        if (fd == -1) {
-            ereport(PANIC,
-                    (errcode_for_file_access(), errmodule(MOD_DW),
-                        errmsg("Could not create file \"%s\"", DW_UPGRADE_FILE_NAME)));
-        }
+        int fd = dw_create_file(DW_UPGRADE_FILE_NAME);
+
         ereport(LOG, (errmodule(MOD_DW),
                 errmsg("first upgrade to DW_SUPPORT_NEW_SINGLE_FLUSH, need init the single file")));
         dw_generate_new_single_file();
@@ -1388,13 +1523,7 @@ static void dw_file_cxt_init_batch(int id, dw_batch_file_context *batch_file_cxt
     batch_file_cxt->file_size = file_size;
 
     /* double write file disk space pre-allocated, O_DSYNC for less IO */
-    batch_file_cxt->fd = open(batch_file_cxt->file_name, DW_FILE_FLAG, DW_FILE_PERM);
-    if (batch_file_cxt->fd == -1) {
-        ereport(PANIC,
-            (errcode_for_file_access(), errmodule(MOD_DW),
-                errmsg("Could not open file \"%s\"", batch_file_cxt->file_name)));
-    }
-
+    batch_file_cxt->fd = dw_open_file(batch_file_cxt->file_name);
     buf_size = DW_MEM_CTX_MAX_BLOCK_SIZE_FOR_NOHBK;
     batch_file_cxt->unaligned_buf = (char *)palloc0(buf_size); /* one more BLCKSZ for alignment */
     buf = (char *)TYPEALIGN(BLCKSZ, batch_file_cxt->unaligned_buf);
@@ -1415,24 +1544,47 @@ static void dw_file_cxt_init_batch(int id, dw_batch_file_context *batch_file_cxt
 
 int dw_open_file(const char* file_name)
 {
-    int fd = open(file_name, DW_FILE_FLAG, DW_FILE_PERM);
-    if (fd == -1) {
-        ereport(PANIC,
-            (errcode_for_file_access(), errmodule(MOD_DW), errmsg("Could not open file \"%s\"", file_name)));
+    int fd;
+    for (int i = 0; i < DW_FILE_RETRY_TIMES; i++) {
+        fd = open(file_name, DW_FILE_FLAG, DW_FILE_PERM);
+        if (fd > 0) {
+            break;
+        }
     }
+
+    if (fd < 0) {
+        ereport(PANIC,
+            (errcode_for_file_access(), errmodule(MOD_DW), errmsg("Could not open file \"%s\": %m", file_name)));
+    }
+
     return fd;
 }
 
-static int dw_create_file(const char* file_name)
+int dw_create_file(const char* file_name)
 {
-    int fd = -1;
-    fd = open(file_name, (DW_FILE_FLAG | O_CREAT), DW_FILE_PERM);
-    if (fd == -1) {
+    int fd;
+    for (int i = 0; i < DW_FILE_RETRY_TIMES; i++) {
+        fd = open(file_name, (DW_FILE_FLAG | O_CREAT), DW_FILE_PERM);
+        if (fd > 0) {
+            break;
+        }
+    }
+
+    if (fd < 0) {
         ereport(PANIC,
-                (errcode_for_file_access(), errmodule(MOD_DW), errmsg("Could not create file \"%s\"", file_name)));
+                (errcode_for_file_access(), errmodule(MOD_DW), errmsg("Could not create file \"%s\": %m", file_name)));
     }
 
     return fd;
+}
+
+static void dw_create_directory(const char* direct_path)
+{
+    int mask = S_IRUSR | S_IWUSR | S_IXUSR | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH;
+    if (mkdir(direct_path, (uint32)mask) != 0) {
+        ereport(PANIC,
+            (errcode_for_file_access(), errmodule(MOD_DW), errmsg("Could not create directory \"%s\"", direct_path)));
+    }
 }
 
 bool dw_verify_meta_info(dw_batch_meta_file *batch_meta_file)
@@ -1725,7 +1877,97 @@ bool dw_disable_init()
     return disable_dw_first_init;
 }
 
-void dw_init(bool shut_down)
+void dw_remove_assist_file(const char* file_name)
+{
+    char filePath[MAXPGPATH];
+    errno_t rc = snprintf_s(filePath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", DW_EXT_DIRECTORY, file_name);
+    securec_check_ss(rc, "\0", "\0");
+
+    dw_remove_file(filePath);
+}
+
+void dw_ext_assist_file_process(int assistFd)
+{
+    Assert(assistFd != -1);
+    
+    char *buf = (char *)palloc0(BLCKSZ + BLCKSZ); /* one more BLCKSZ for alignment */
+    char *file_head = (char *)TYPEALIGN(BLCKSZ, buf);
+
+    /* the address of file_head may not be the bookmark of 4K
+        without TYPEALIGN above, dw_pread_file will break down
+    */
+    dw_pread_file(assistFd, file_head, BLCKSZ, DW_ASSIST_FILE_SIZE - BLCKSZ);
+
+    SmgrAssistFileProcess(file_head, assistFd);
+    pfree(buf);
+}
+
+void dw_recover_ext_partial_writes(const char* file_name)
+{
+    size_t len = 0;
+    size_t suffixLen = 0;
+    off_t fileSize = 0;
+    char suffix[] = "_assist_tmp";
+
+    /* if suffix is not assist_tmp, skip it */
+    len = strlen(file_name);
+    suffixLen = strlen(suffix);
+    if (len <= suffixLen || strcmp(file_name + len - suffixLen, suffix) != 0) {
+        return;
+    }
+
+    char filePath[MAXPGPATH];
+    errno_t rc = snprintf_s(filePath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", DW_EXT_DIRECTORY, file_name);
+    securec_check_ss(rc, "\0", "\0");
+
+    /* assist file is created but not used, just return */
+    int fd = dw_open_file(filePath);
+    fileSize = lseek(fd, 0L, SEEK_END);
+    if (fileSize < DW_ASSIST_FILE_SIZE) {
+        close(fd);
+        return;
+    }
+
+    /* file size must be (129 + 1) * BLCKSZ if assist file is used */
+    Assert(fileSize == DW_ASSIST_FILE_SIZE);
+    dw_ext_assist_file_process(fd);
+    close(fd);
+}
+
+void dw_ext_init()
+{
+    if (!directory_exists(DW_EXT_DIRECTORY)) {
+        dw_create_directory(DW_EXT_DIRECTORY);
+        ereport(LOG, (errmodule(MOD_DW), errmsg("Init of double write for ext finished.")));
+        return;
+    }
+
+    /* Traverse DW_EXT_DIRECTORY to deal with each assist file */
+    DIR *dir;
+    struct dirent *ptr;
+
+    dir = opendir(DW_EXT_DIRECTORY);
+    if (dir == NULL) {
+        ereport(PANIC, (errcode_for_file_access(), errmodule(MOD_DW),
+                errmsg("Could not open the directory: %s.", DW_EXT_DIRECTORY)));
+    }
+
+    while ((ptr = readdir(dir)) != NULL) {
+        if (strcmp(ptr->d_name, ".") == 0 || strcmp(ptr->d_name, "..") == 0) {
+            continue;
+        }
+
+        Assert(ptr->d_type != DT_DIR);
+        dw_recover_ext_partial_writes(ptr->d_name);
+        dw_remove_assist_file(ptr->d_name);
+    }
+
+    (void)closedir(dir);
+    ereport(LOG, (errmodule(MOD_DW), errmsg("Init of double write for ext finished.")));
+}
+
+
+void dw_init()
 {
     MemoryContext old_mem_cxt;
     bool disable_dw_first_init = false;
@@ -1977,6 +2219,10 @@ static void dw_batch_flush(dw_batch_file_context *dw_cxt, XLogRecPtr latest_lsn,
     uint16 pages_to_write = 0;
     dw_file_head_t* file_head = NULL;
     errno_t rc;
+    
+    /* used to block the io for snapshot feature */
+    (void)LWLockAcquire(g_instance.ckpt_cxt_ctl->snapshotBlockLock, LW_SHARED);
+    LWLockRelease(g_instance.ckpt_cxt_ctl->snapshotBlockLock);
 
     if (!XLogRecPtrIsInvalid(latest_lsn)) {
         XLogWaitFlush(latest_lsn);
@@ -2015,6 +2261,37 @@ static void dw_batch_flush(dw_batch_file_context *dw_cxt, XLogRecPtr latest_lsn,
              errmsg("[batch flush] file_head[dwn %hu, start %hu], total_pages %hu, data_pages %hu, flushed_pages %hu",
                     dw_cxt->file_head->head.dwn, dw_cxt->file_head->start, dw_cxt->flush_page, dw_cxt->write_pos,
                     pages_to_write)));
+}
+
+void dw_blocked_for_snapshot()
+{
+    /* block all the io flush */
+    (void)LWLockAcquire(g_instance.ckpt_cxt_ctl->snapshotBlockLock, LW_EXCLUSIVE);
+
+    /* wait all the single dw and batch dw flush to finish */
+    wait_all_single_dw_finish_flush(true);
+    wait_all_single_dw_finish_flush(false);
+    wait_all_dw_page_finish_flush();
+    
+    /* sync all the flushed data to disk */
+    RequestPgwrSync();
+
+    pg_write_barrier();
+    /* set the blocked flag which means all the flushed data are synced and all comming io are blocked */
+    g_instance.ckpt_cxt_ctl->io_blocked_for_snapshot = true;
+}
+
+void dw_released_after_snapshot()
+{
+    g_instance.ckpt_cxt_ctl->io_blocked_for_snapshot = false;
+    pg_write_barrier();
+    LWLockRelease(g_instance.ckpt_cxt_ctl->snapshotBlockLock);
+}
+
+bool is_dw_snapshot_blocked()
+{
+    pg_read_barrier();
+    return g_instance.ckpt_cxt_ctl->io_blocked_for_snapshot;
 }
 
 void dw_perform_batch_flush(uint32 size, CkptSortItem *dirty_buf_list, int thread_id, ThrdDwCxt* thrd_dw_cxt)
@@ -2122,13 +2399,14 @@ void dw_truncate()
     }
 
     gstrace_entry(GS_TRC_ID_dw_truncate);
-    dw_batch_file_truncate();
     if (pg_atomic_read_u32(&g_instance.dw_single_cxt.dw_version) == DW_SUPPORT_NEW_SINGLE_FLUSH) {
         dw_single_file_truncate(true);
         dw_single_file_truncate(false);
     } else {
         dw_single_old_file_truncate();
     }
+
+    dw_batch_file_truncate();
     gstrace_exit(GS_TRC_ID_dw_truncate);
 }
 
@@ -2231,9 +2509,9 @@ int buftag_compare(const void *pa, const void *pb)
 void dw_log_recovery_page(int elevel, const char *state, BufferTag buf_tag)
 {
     ereport(elevel, (errmodule(MOD_DW),
-        errmsg("[single flush] recovery, %s: buf_tag[rel %u/%u/%u blk %u fork %d], compress: %u",
-            state, buf_tag.rnode.spcNode, buf_tag.rnode.dbNode, buf_tag.rnode.relNode, buf_tag.blockNum,
-            buf_tag.forkNum, buf_tag.rnode.opt)));
+        errmsg("[single flush] recovery, %s: buf_tag[rel %u/%u/%u blk %d fork %d], compress: %d",
+            state, buf_tag.rnode.spcNode, buf_tag.rnode.dbNode, buf_tag.rnode.relNode, (int)buf_tag.blockNum,
+            buf_tag.forkNum, (int)buf_tag.rnode.opt)));
 }
 
 bool dw_read_data_page(BufferTag buf_tag, SMgrRelation reln, char* data_block)
@@ -2257,7 +2535,12 @@ bool dw_read_data_page(BufferTag buf_tag, SMgrRelation reln, char* data_block)
             dw_log_recovery_page(WARNING, "Data file deleted", buf_tag);
             return false;
         }
-        blk_num = smgrnblocks(reln, buf_tag.forkNum);
+
+        blk_num = smgrnblocks_cached(reln, buf_tag.forkNum);
+        if (blk_num == InvalidBlockNumber) {
+            blk_num = smgrnblocks(reln, buf_tag.forkNum);
+        }
+
         if (blk_num <= buf_tag.blockNum) {
             dw_log_recovery_page(WARNING, "Data page deleted", buf_tag);
             return false;

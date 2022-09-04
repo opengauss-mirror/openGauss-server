@@ -291,6 +291,22 @@ select count(*) from alter_table where INV_WAREHOUSE_SK < 20000;
 
 vacuum freeze pg_partition;
 
+-- test change col type
+CREATE TABLE range1
+(
+ col_1 int,
+ col_2 int unique,
+ col_3 VARCHAR2
+)
+PARTITION BY range (col_1)
+(
+ PARTITION p_range_1 values less than (10),
+ PARTITION p_range_2 values less than (20)
+);
+alter table range1 modify(col_2 int);
+alter table range1 modify(col_3 int);
+drop table range1;
+
 --clean
 drop index if exists local_exchange_table_index1;
 drop table if exists exchange_table;

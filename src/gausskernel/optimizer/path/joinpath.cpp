@@ -606,7 +606,7 @@ static void try_nestloop_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType j
 
             if (!canSeparateComputeAndStorageGroupForDelete(root)) {
                 RangeTblEntry* rte =
-                    rt_fetch(root->parse->resultRelation, root->parse->rtable); /* target udi relation */
+                    rt_fetch(linitial_int(root->parse->resultRelations), root->parse->rtable); /* target udi relation */
 
                 Distribution* distribution = ng_get_baserel_data_distribution(rte->relid, rte->relkind);
 
@@ -814,7 +814,7 @@ static void try_mergejoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType 
 
             if (!canSeparateComputeAndStorageGroupForDelete(root)) {
                 RangeTblEntry* rte =
-                    rt_fetch(root->parse->resultRelation, root->parse->rtable); /* target udi relation */
+                    rt_fetch(linitial_int(root->parse->resultRelations), root->parse->rtable); /* target udi relation */
 
                 Distribution* distribution = ng_get_baserel_data_distribution(rte->relid, rte->relkind);
 
@@ -989,7 +989,7 @@ static void try_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType j
 
             if (!canSeparateComputeAndStorageGroupForDelete(root)) {
                 RangeTblEntry* rte =
-                    rt_fetch(root->parse->resultRelation, root->parse->rtable); /* target udi relation */
+                    rt_fetch(linitial_int(root->parse->resultRelations), root->parse->rtable); /* target udi relation */
 
                 Distribution* distribution = ng_get_baserel_data_distribution(rte->relid, rte->relkind);
 

@@ -59,7 +59,7 @@ typedef enum {
 } DECODEExitStatus;
 
 
-extern void ParallelDecodeChange(ParallelReorderBufferChange* change, ParallelLogicalDecodingContext* ctx,
+extern logicalLog* ParallelDecodeChange(ParallelReorderBufferChange* change, ParallelLogicalDecodingContext* ctx,
     ParallelDecodeWorker *worker);
 extern void parallel_decode_change_to_json(Relation relation, ParallelReorderBufferChange* change,
     logicalLog *logChange, ParallelLogicalDecodingContext* ctx, int slotId);
@@ -70,7 +70,6 @@ extern void parallel_decode_change_to_bin(Relation relation, ParallelReorderBuff
 extern int GetDecodeParallelism(int slotId);
 extern ParallelReorderBufferTXN *ParallelReorderBufferGetOldestTXN(ParallelReorderBuffer *rb);
 extern logicalLog* GetLogicalLog(ParallelDecodeWorker *worker);
-extern void FreeLogicalLog(logicalLog *logChange, int slotId);
 Snapshot GetLocalSnapshot(MemoryContext ctx);
 
 #endif

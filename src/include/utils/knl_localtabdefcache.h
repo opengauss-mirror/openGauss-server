@@ -33,7 +33,7 @@
 class LocalTabDefCache : public LocalBaseDefCache {
 public:
     LocalTabDefCache();
-    void ResetInitFlag();
+    void ResetInitFlag(bool include_shared);
     Relation SearchRelation(Oid rel_id);
     Relation SearchRelationFromLocal(Oid rel_id);
     template <bool insert_into_local>
@@ -149,6 +149,8 @@ private:
 
     GlobalTabDefCache *m_global_tabdefcache;
     GlobalTabDefCache *m_global_shared_tabdefcache;
+
+    struct HTAB *PartRelCache;
 };
 
 #endif

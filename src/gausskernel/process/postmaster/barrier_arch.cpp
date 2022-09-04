@@ -363,6 +363,8 @@ static void SingleBarrierArch(ArchiveConfig *archive_obs)
     if (strncmp(t_thrd.barrier_arch.barrierName, g_instance.archive_obs_cxt.barrierName, 
         strlen(g_instance.archive_obs_cxt.barrierName)) == 0) {
         SpinLockRelease(&g_instance.archive_obs_cxt.barrier_lock);
+        /* if barrier not change, we wait for a while here. */
+        pg_usleep(250000);
         return;
     }
         
@@ -403,7 +405,13 @@ NON_EXEC_STATIC void BarrierArchMain(knl_thread_arg* arg)
     BarrierArchSetupSignalHook();
 
     BaseInit();
-    
+
+    /*
+     * Unblock signals (they were blocked when the postmaster forked us)
+     */
+    gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
+    (void)gs_signal_unblock_sigusr2();
+
     t_thrd.proc_cxt.PostInit->SetDatabaseAndUser(dbname, InvalidOid, username);
     t_thrd.proc_cxt.PostInit->InitBarrierCreator();
 
@@ -471,7 +479,7 @@ NON_EXEC_STATIC void BarrierArchMain(knl_thread_arg* arg)
     t_thrd.log_cxt.PG_exception_stack = &localSigjmpBuf;
 
     /*
-     * Unblock signals (they were blocked when the postmaster forked us)
+     * Unblock signals in case they were blocked during long jump
      */
     gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
     (void)gs_signal_unblock_sigusr2();

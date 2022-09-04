@@ -91,11 +91,12 @@ static TupleTableSlot* IndexNext(IndexScanState* node)
     while (true) {
         IndexScanDesc indexScan = GetIndexScanDesc(scandesc);
         if (isUstore) {
-            if (!IndexGetnextSlot(scandesc, direction, slot)) {
+            if (!IndexGetnextSlot(scandesc, direction, slot, &node->ss.ps.state->have_current_xact_date)) {
                 break;
             }
         } else {
-            if ((tuple = scan_handler_idx_getnext(scandesc, direction)) == NULL) {
+            if ((tuple = scan_handler_idx_getnext(scandesc, direction, InvalidOid, InvalidBktId,
+                                                  &node->ss.ps.state->have_current_xact_date)) == NULL) {
                 break;
             }
             /* Update indexScan, because hashbucket may switch current index in scan_handler_idx_getnext */
@@ -221,14 +222,16 @@ void ExecReScanIndexScan(IndexScanState* node)
     /*
      * deal with partitioned table
      */
-    bool partpruning = ENABLE_SQL_BETA_FEATURE(PARTITION_OPFUSION) && list_length(node->ss.partitions) == 1;
+    bool partpruning = !RelationIsSubPartitioned(node->ss.ss_currentRelation) &&
+        ENABLE_SQL_BETA_FEATURE(PARTITION_OPFUSION) && list_length(node->ss.partitions) == 1;
     /* if only one partition is scaned in indexscan, we don't need do rescan for partition */
     if (node->ss.isPartTbl && !partpruning) {
         /*
          * if node->ss.ss_ReScan = true, just do rescaning as non-partitioned
          * table; else switch to next partition for scaning.
          */
-        if (node->ss.ss_ReScan) {
+        if (node->ss.ss_ReScan ||
+            (((Scan *)node->ss.ps.plan)->partition_iterator_elimination)) {
             /* reset the rescan falg */
             node->ss.ss_ReScan = false;
         } else {
@@ -585,9 +588,11 @@ void ExecInitIndexRelation(IndexScanState* node, EState* estate, int eflags)
                     if (TransactionIdPrecedes(FirstNormalTransactionId, scanSnap->xmax) &&
                         !TransactionIdIsCurrentTransactionId(relfrozenxid64) &&
                         TransactionIdPrecedes(scanSnap->xmax, relfrozenxid64)) {
-                        ereport(ERROR,
-                                (errcode(ERRCODE_SNAPSHOT_INVALID),
-                                 (errmsg("Snapshot too old."))));
+                        ereport(ERROR, (errcode(ERRCODE_SNAPSHOT_INVALID),
+                            (errmsg("Snapshot too old, IndexRelation is  PartTbl, the info: snapxmax is %lu, "
+                                "snapxmin is %lu, csn is %lu, relfrozenxid64 is %lu, globalRecycleXid is %lu.",
+                                scanSnap->xmax, scanSnap->xmin, scanSnap->snapshotcsn, relfrozenxid64,
+                                g_instance.undo_cxt.globalRecycleXid))));
                     }
                 }
 
@@ -611,9 +616,11 @@ void ExecInitIndexRelation(IndexScanState* node, EState* estate, int eflags)
             if (TransactionIdPrecedes(FirstNormalTransactionId, scanSnap->xmax) &&
                 !TransactionIdIsCurrentTransactionId(relfrozenxid64) &&
                 TransactionIdPrecedes(scanSnap->xmax, relfrozenxid64)) {
-                ereport(ERROR,
-                        (errcode(ERRCODE_SNAPSHOT_INVALID),
-                         (errmsg("Snapshot too old."))));
+                ereport(ERROR, (errcode(ERRCODE_SNAPSHOT_INVALID),
+                    (errmsg("Snapshot too old, IndexRelation is not  PartTbl, the info: snapxmax is %lu, "
+                        "snapxmin is %lu, csn is %lu, relfrozenxid64 is %lu, globalRecycleXid is %lu.",
+                        scanSnap->xmax, scanSnap->xmin, scanSnap->snapshotcsn, relfrozenxid64,
+                        g_instance.undo_cxt.globalRecycleXid))));
             }
         }
 
@@ -1323,6 +1330,11 @@ static void ExecInitNextPartitionForIndexScan(IndexScanState* node)
     int subPartParamno = -1;
     ParamExecData* SubPrtParam = NULL;
 
+    IndexScanState* indexState = node;
+    IndexScan *indexScan = (IndexScan *)node->ss.ps.plan;
+    Snapshot scanSnap;
+    scanSnap = TvChooseScanSnap(indexState->iss_RelationDesc, &indexScan->scan, &indexState->ss);
+
     plan = (IndexScan*)(node->ss.ps.plan);
 
     /* get partition sequnce */
@@ -1371,7 +1383,7 @@ static void ExecInitNextPartitionForIndexScan(IndexScanState* node)
     /* Initialize scan descriptor. */
     node->iss_ScanDesc = scan_handler_idx_beginscan(node->ss.ss_currentPartition,
         node->iss_CurrentIndexPartition,
-        node->ss.ps.state->es_snapshot,
+        scanSnap,
         node->iss_NumScanKeys,
         node->iss_NumOrderByKeys,
         (ScanState*)node);
@@ -1448,7 +1460,7 @@ void ExecInitPartitionForIndexScan(IndexScanState* index_state, EState* estate)
             int partSeq = lfirst_int(cell);
 
             /* get table partition and add it to a list for following scan */
-            tablepartitionid = getPartitionOidFromSequence(current_relation, partSeq);
+            tablepartitionid = getPartitionOidFromSequence(current_relation, partSeq, plan->scan.pruningInfo->partMap);
             table_partition = partitionOpen(current_relation, tablepartitionid, lock);
             index_state->ss.partitions = lappend(index_state->ss.partitions, table_partition);
 

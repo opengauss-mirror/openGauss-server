@@ -21,6 +21,7 @@ endif
 
 include $(top_builddir)/src/Makefile.global
 
+ifeq ($(enable_lite_mode), no)
 ifdef LLT
 	CC = /home/vignesh/LLT/hutaf_llt/g++
 	LIBS += -lNCSCore_suse10_x86-64
@@ -28,6 +29,16 @@ ifdef LLT
 else
 	override CPPFLAGS := -I$(libpq_srcdir) $(CPPFLAGS) -DHAVE_LIBZ -DHAVE_CE
 	CC = g++
+endif
+else
+ifdef LLT
+	CC = /home/vignesh/LLT/hutaf_llt/g++
+	LIBS += -lNCSCore_suse10_x86-64
+	override CPPFLAGS := -I$(libpq_srcdir) $(CPPFLAGS) -DGSDUMP_LLT -DHAVE_LIBZ
+else
+	override CPPFLAGS := -I$(libpq_srcdir) $(CPPFLAGS) -DHAVE_LIBZ
+	CC = g++
+endif
 endif
 
 override CPPFLAGS := -I$(ZLIB_INCLUDE_PATH) -I$(CJSON_INCLUDE_PATH) -I$(LIBCURL_INCLUDE_PATH) $(CPPFLAGS)
@@ -60,13 +71,16 @@ kwlookup.cpp: % : $(top_srcdir)/src/common/backend/parser/%
 	rm -f $@ && $(LN_S) $< .
 
 all: submake-aes gs_dump gs_restore gs_dumpall
+ifeq ($(enable_lite_mode), no)
 libpq_pgport:=$(subst -lpq,-lpq_ce,$(libpq_pgport))
+endif
 ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
   ifneq ($(enable_lite_mode), yes)
     libpq_pgport += -L$(top_builddir)/../distribute/bin/gs_ktool/ -lgs_ktool -l$(SECURE_C_CHECK) -L$(LIBKMC_LIB_PATH) -lkmc
   endif
 endif
 
+ifeq ($(enable_lite_mode), no)
 gs_dump: pg_dump.o common.o pg_dump_sort.o $(OBJS) $(KEYWRDOBJS) $(COMMON_OBJS) | submake-libpq_ce submake-libpgport
 	$(CC) $(CXXFLAGS) $(MY_CFLAGS) pg_dump.o common.o pg_dump_sort.o $(KEYWRDOBJS) $(OBJS) $(EXTRA_OBJS) $(COMMON_OBJS) $(LIBS) $(libpq_pgport) $(LDFLAGS) $(LDFLAGS_EX) -o $@$(X)
 
@@ -83,6 +97,24 @@ gs_dumpall: pg_dumpall.o dumputils.o dumpmem.o $(COMMON_OBJS) $(KEYWRDOBJS) | su
 gs_dumpall_ut: pg_dumpall.o $(OBJS) $(COMMON_OBJS) $(KEYWRDOBJS) | submake-libpq_ce submake-libpgport
 	$(CC)  -fPIC -shared $(CXXFLAGS) $(MY_CFLAGS) pg_dumpall.o $(OBJS) $(COMMON_OBJS) $(KEYWRDOBJS)  $(EXTRA_OBJS) $(WIN32RES) $(libpq_pgport) $(LDFLAGS) $(LDFLAGS_EX) $(LIBS) -o lib$@.so
 	mv lib$@.so $(top_builddir)/../distribute/test/ut/lib
+else
+gs_dump: pg_dump.o common.o pg_dump_sort.o $(OBJS) $(KEYWRDOBJS) $(COMMON_OBJS) | submake-libpq submake-libpgport
+	$(CC) $(CXXFLAGS) $(MY_CFLAGS) pg_dump.o common.o pg_dump_sort.o $(KEYWRDOBJS) $(OBJS) $(EXTRA_OBJS) $(COMMON_OBJS) $(LIBS) $(libpq_pgport) $(LDFLAGS) $(LDFLAGS_EX) -o $@$(X)
+
+gs_dump_ut: pg_dump.o common.o pg_dump_sort.o $(OBJS) $(KEYWRDOBJS) $(COMMON_OBJS) | submake-libpq submake-libpgport
+	$(CC) -fPIC -shared $(CXXFLAGS) $(MY_CFLAGS) pg_dump.o common.o pg_dump_sort.o $(KEYWRDOBJS) $(OBJS) $(EXTRA_OBJS) $(COMMON_OBJS) $(LIBS) $(libpq_pgport) $(LDFLAGS) $(LDFLAGS_EX) -o lib$@.so
+	mv lib$@.so $(top_builddir)/../distribute/test/ut/lib
+
+gs_restore: pg_restore.o $(OBJS) $(KEYWRDOBJS) $(COMMON_OBJS) | submake-libpq submake-libpgport
+	$(CC) $(CXXFLAGS) $(MY_CFLAGS) pg_restore.o $(KEYWRDOBJS) $(OBJS) $(EXTRA_OBJS) $(COMMON_OBJS) $(LIBS) $(libpq_pgport) $(LDFLAGS) $(LDFLAGS_EX) -o $@$(X)
+
+gs_dumpall: pg_dumpall.o dumputils.o dumpmem.o $(COMMON_OBJS) $(KEYWRDOBJS) | submake-libpq submake-libpgport
+	$(CC) $(CXXFLAGS) $(MY_CFLAGS) pg_dumpall.o dumputils.o dumpmem.o $(COMMON_OBJS) $(KEYWRDOBJS)  $(EXTRA_OBJS) $(WIN32RES) $(LIBS) $(libpq_pgport) $(LDFLAGS) $(LDFLAGS_EX)  -o $@$(X)
+
+gs_dumpall_ut: pg_dumpall.o $(OBJS) $(COMMON_OBJS) $(KEYWRDOBJS) | submake-libpq submake-libpgport
+	$(CC)  -fPIC -shared $(CXXFLAGS) $(MY_CFLAGS) pg_dumpall.o $(OBJS) $(COMMON_OBJS) $(KEYWRDOBJS)  $(EXTRA_OBJS) $(WIN32RES) $(libpq_pgport) $(LDFLAGS) $(LDFLAGS_EX) $(LIBS) -o lib$@.so
+	mv lib$@.so $(top_builddir)/../distribute/test/ut/lib
+endif
 
 .PHONY: submake-aes
 submake-aes:

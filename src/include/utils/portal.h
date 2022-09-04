@@ -125,6 +125,15 @@ typedef struct PortalStream {
         query_id = 0;
     }
 
+    void ResetEnv()
+    {
+        t_thrd.subrole = NO_SUBROLE;
+        u_sess->stream_cxt.global_obj = NULL;
+        u_sess->stream_cxt.stream_runtime_mem_cxt = NULL;
+        u_sess->stream_cxt.data_exchange_mem_cxt = NULL;
+        u_sess->debug_query_id = 0;
+    }
+
     void RecordSessionInfo()
     {
         streamGroup = u_sess->stream_cxt.global_obj;
@@ -233,11 +242,17 @@ typedef struct PortalData {
     int funcUseCount;
     MemoryContext copyCxt;             /*  memory for gpc copy plan */
     bool is_from_spi;
+    /*
+     * have_rollback_transaction parameter has dirty read and rollback is available.
+     * This parameter is used to report an error when the cursor is rolled back.
+     */
+    bool have_rollback_transaction;
 #ifndef ENABLE_MULTIPLE_NODES
     PortalStream streamInfo;
     bool isAutoOutParam;  /* is autonomous transaction procedure out param? */
     bool isPkgCur; /* cursor variable is a package variable? */
 #endif
+    int nextval_default_expr_type; /* nextval does not support lightproxy and sqlbypass */
 } PortalData;
 
 /*
@@ -263,7 +278,7 @@ extern void AtSubCommit_Portals(SubTransactionId mySubid, SubTransactionId paren
 extern void AtSubAbort_Portals(SubTransactionId mySubid, SubTransactionId parentSubid,
     ResourceOwner myXactOwner, ResourceOwner parentXactOwner, bool inSTP);
 extern void AtSubCleanup_Portals(SubTransactionId mySubid);
-extern Portal CreatePortal(const char* name, bool allowDup, bool dupSilent, bool is_from_spi = false);
+extern Portal CreatePortal(const char* name, bool allowDup, bool dupSilent, bool is_from_spi = false, bool is_from_pbe = false);
 extern Portal CreateNewPortal(bool is_from_spi = false);
 extern void PinPortal(Portal portal);
 extern void UnpinPortal(Portal portal);
@@ -279,6 +294,6 @@ extern void PortalCreateHoldStore(Portal portal);
 extern void PortalHashTableDeleteAll(void);
 extern bool ThereAreNoReadyPortals(void);
 extern void ResetPortalCursor(SubTransactionId mySubid, Oid funOid, int funUseCount, bool reset = true);
-extern void HoldPinnedPortals(void);
-extern void HoldPortal(Portal portal);
+extern void HoldPinnedPortals(bool is_rollback = false);
+extern void HoldPortal(Portal portal, bool is_rollback = false);
 #endif /* PORTAL_H */

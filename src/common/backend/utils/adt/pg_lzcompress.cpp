@@ -675,5 +675,5 @@ int32 pglz_decompress(const PGLZ_Header* source, char* dest)
     /*
      * That's it.
      */
-    return (char*) dp - dest;
+    return source->rawsize;
 }

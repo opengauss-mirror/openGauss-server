@@ -365,56 +365,6 @@ drop table range_range;
 CREATE TABLE range_range
 (
     month_code VARCHAR2 ( 30 ) ,
-    dept_code  VARCHAR2 ( 30 ) primary key,
-    user_no    VARCHAR2 ( 30 ) ,
-    sales_amt  int
-) WITH (STORAGE_TYPE=USTORE)
-PARTITION BY RANGE (month_code) SUBPARTITION BY RANGE (dept_code)
-(
-  PARTITION p_201901 VALUES LESS THAN( '201903' )
-  (
-    SUBPARTITION p_201901_a VALUES LESS THAN( '2' ),
-    SUBPARTITION p_201901_b VALUES LESS THAN( MAXVALUE )
-  ),
-  PARTITION p_201902 VALUES LESS THAN( '201904' )
-  (
-    SUBPARTITION p_201902_a VALUES LESS THAN( '2' ),
-    SUBPARTITION p_201902_b VALUES LESS THAN( '3' )
-  )
-);
-select relkind from pg_class
-  where relname = 'range_range_pkey'
-  and relnamespace=(select oid from pg_namespace where nspname=CURRENT_SCHEMA);
-drop table range_range;
-
-CREATE TABLE range_range
-(
-    month_code VARCHAR2 ( 30 ) ,
-    dept_code  VARCHAR2 ( 30 ) ,
-    user_no    VARCHAR2 ( 30 ) primary key,
-    sales_amt  int
-) WITH (STORAGE_TYPE=USTORE)
-PARTITION BY RANGE (month_code) SUBPARTITION BY RANGE (dept_code)
-(
-  PARTITION p_201901 VALUES LESS THAN( '201903' )
-  (
-    SUBPARTITION p_201901_a VALUES LESS THAN( '2' ),
-    SUBPARTITION p_201901_b VALUES LESS THAN( MAXVALUE )
-  ),
-  PARTITION p_201902 VALUES LESS THAN( '201904' )
-  (
-    SUBPARTITION p_201902_a VALUES LESS THAN( '2' ),
-    SUBPARTITION p_201902_b VALUES LESS THAN( '3' )
-  )
-);
-select relkind from pg_class
-  where relname = 'range_range_pkey'
-  and relnamespace=(select oid from pg_namespace where nspname=CURRENT_SCHEMA);
-drop table range_range;
-
-CREATE TABLE range_range
-(
-    month_code VARCHAR2 ( 30 ) ,
     dept_code  VARCHAR2 ( 30 ) ,
     user_no    VARCHAR2 ( 30 ) ,
     sales_amt  int,

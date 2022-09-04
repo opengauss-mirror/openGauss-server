@@ -45,7 +45,7 @@ typedef struct _FuncCandidateList
 	int			ndargs;			/* number of defaulted args */
 	int		   *argnumbers;		/* args' positional indexes, if named call */
 	Oid			refSynOid;		/* referenced synonym's OID if mapping successfully, and drop it when view decoupling */
-        int 		allArgNum;      /* all param num including in/out/inout */
+    int 		allArgNum;      /* all param num including in/out/inout */
 	Oid			args[FLEXIBLE_ARRAY_MEMBER];		/* arg types --- VARIABLE LENGTH ARRAY */
 }	*FuncCandidateList;	/* VARIABLE LENGTH STRUCT */
 

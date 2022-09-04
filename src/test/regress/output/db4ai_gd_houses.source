@@ -1,3 +1,4 @@
+DELETE FROM gs_model_warehouse;
 CREATE TABLE db4ai_houses (id INT, tax INT, bedroom INT, bath FLOAT, price INT, size INT, lot INT);
 COPY db4ai_houses FROM '@abs_srcdir@/data/houses.txt' DELIMITER '|';
 -- normalize min/max

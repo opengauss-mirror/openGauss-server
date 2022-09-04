@@ -76,6 +76,15 @@ extern bool bms_nonempty_difference(const Bitmapset* a, const Bitmapset* b);
 extern int bms_singleton_member(const Bitmapset* a);
 extern int bms_num_members(const Bitmapset* a);
 
+/* These two macros are used to describe 1 byte. */
+#define BYTE_NUMBER 8
+#define BYTE_VALUE 255
+
+#ifndef ENABLE_MULTIPLE_NODES
+extern int bms_member_index(const Bitmapset *a, int x);
+extern bool bms_get_singleton_member(const Bitmapset *a, int *member);
+#endif
+
 /* optimized tests when we don't need to know exact membership count: */
 extern BMS_Membership bms_membership(const Bitmapset* a);
 extern bool bms_is_empty(const Bitmapset* a);

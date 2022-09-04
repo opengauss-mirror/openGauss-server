@@ -79,10 +79,6 @@ static char *ReplaceSWCTEOutSrting(ParseState *pstate, RangeTblEntry *rte, char 
     char *result = NULL;
     char *relname = NULL;
 
-    if (pstate->parentParseState != NULL) {
-        return label;
-    }
-
     foreach(lc, rte->origin_index) {
         int index = (int)lfirst_int(lc);
         RangeTblEntry *old_rte = (RangeTblEntry *)list_nth(pstate->p_rtable, index - 1);
@@ -1212,13 +1208,15 @@ RangeTblEntry* addRangeTableEntry(ParseState* pstate, RangeVar* relation, Alias*
 
     /* select from clause contain partition. */
     if (relation->ispartition) {
-        rte->isContainPartition = true;
-        rte->partitionOid = getPartitionOidForRTE(rte, relation, pstate, rel);
+        rte->isContainPartition = GetPartitionOidForRTE(rte, relation, pstate, rel);
     }
     /* select from clause contain subpartition. */
     if (relation->issubpartition) {
-        rte->isContainSubPartition = true;
-        rte->subpartitionOid = GetSubPartitionOidForRTE(rte, relation, pstate, rel, &rte->partitionOid);
+        rte->isContainSubPartition = GetSubPartitionOidForRTE(rte, relation, pstate, rel);
+    }
+    /* delete from clause contain PARTIION (..., ...). */
+    if (list_length(relation->partitionNameList) > 0) {
+        GetPartitionOidListForRTE(rte, relation);
     }
     if (!rte->relhasbucket && relation->isbucket) {
         ereport(ERROR, (errmsg("table is normal,cannot contains buckets(0,1,2...)")));
@@ -2460,7 +2458,6 @@ void get_rte_attribute_type(RangeTblEntry* rte, AttrNumber attnum, Oid* vartype,
             tp = SearchSysCache2(ATTNUM, ObjectIdGetDatum(rte->relid), Int16GetDatum(attnum));
             if (!HeapTupleIsValid(tp)) {
                 /* shouldn't happen */
-                Assert(0);
                 ereport(ERROR,
                     (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
                         errmsg("cache lookup failed for attribute %d of relation %u", attnum, rte->relid)));

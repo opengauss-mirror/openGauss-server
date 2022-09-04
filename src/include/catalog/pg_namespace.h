@@ -118,6 +118,10 @@ DATA(insert OID = 4993 ( "dbe_pldeveloper" PGUID 0 _null_ n f));
 DESCR("dbe_pldeveloper schema");
 #define DBE_PLDEVELOPER_NAMESPACE 4993
 #endif
+
+DATA(insert OID = 9049 ( "dbe_sql_util" PGUID 0 _null_ n f));
+DESCR("sql util schema");
+#define DBE_SQL_UTIL_NAMESPACE 9049
 /*
  * prototypes for functions in pg_namespace.c
  */

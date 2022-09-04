@@ -248,7 +248,7 @@ void GetRlsPolicies(const Query* query, const RangeTblEntry* rte, const Relation
      * for example in UPDATE t1 ... FROM t2 we need to apply t1's UPDATE
      * policies and t2's SELECT policies.
      */
-    CmdType cmdType = (rtIndex == query->resultRelation) ? query->commandType : CMD_SELECT;
+    CmdType cmdType = (rtIndex == linitial2_int(query->resultRelations)) ? query->commandType : CMD_SELECT;
     List* rlsPermissivePolicies = NULL;
     List* rlsRestrictivePolicies = NULL;
 

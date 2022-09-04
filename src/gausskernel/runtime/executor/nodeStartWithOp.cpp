@@ -605,6 +605,12 @@ static bool isStoppedByRowNum(RecursiveUnionState* node, TupleTableSlot* slot)
     return ret;
 }
 
+static void DiscardSWLastTuple(StartWithOpState *node)
+{
+    node->sw_rownum--;
+    node->sw_numtuples--;
+}
+
 TupleTableSlot* GetStartWithSlot(RecursiveUnionState* node, TupleTableSlot* slot)
 {
     TupleTableSlot* dstSlot = node->swstate->ps.ps_ResultTupleSlot;
@@ -625,6 +631,8 @@ TupleTableSlot* GetStartWithSlot(RecursiveUnionState* node, TupleTableSlot* slot
         node->swstate->swop_status = isDfsEnabled && isStoppedByRowNum(node, slot) ?
                                      SWOP_ESCAPE :
                                      node->swstate->swop_status;
+
+        DiscardSWLastTuple(node->swstate);
         return NULL;
     }
 

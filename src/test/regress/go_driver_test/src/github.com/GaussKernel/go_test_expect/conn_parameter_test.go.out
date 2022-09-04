@@ -1,0 +1,54 @@
+********************No Runtime Parameter********************
+PARSE SUCCESS: connect_timeout=5
+FAILED: connect_timeout=-1, parse error: invalid connect_timeout (negative timeout)
+PARSE SUCCESS: connect_timeout=0
+FAILED: connect_timeout=22.33, parse error: invalid syntax)
+PARSE SUCCESS: disable_prepared_binary_result=no
+PARSE SUCCESS: disable_prepared_binary_result=yes
+FAILED: disable_prepared_binary_result=NO, parse error: invalid disable_prepared_binary_result (unrecognized value "NO" for disable_prepared_binary_result)
+FAILED: disable_prepared_binary_result=YES, parse error: invalid disable_prepared_binary_result (unrecognized value "YES" for disable_prepared_binary_result)
+FAILED: disable_prepared_binary_result=n, parse error: invalid disable_prepared_binary_result (unrecognized value "n" for disable_prepared_binary_result)
+FAILED: disable_prepared_binary_result=y, parse error: invalid disable_prepared_binary_result (unrecognized value "y" for disable_prepared_binary_result)
+FAILED: disable_prepared_binary_result=N, parse error: invalid disable_prepared_binary_result (unrecognized value "N" for disable_prepared_binary_result)
+FAILED: disable_prepared_binary_result=Y, parse error: invalid disable_prepared_binary_result (unrecognized value "Y" for disable_prepared_binary_result)
+PARSE SUCCESS: binary_parameters=yes
+FAILED: binary_parameters=YES, parse error: invalid binary_parameters (unrecognized value "YES" for binary_parameters)
+FAILED: binary_parameters=NO, parse error: invalid binary_parameters (unrecognized value "NO" for binary_parameters)
+PARSE SUCCESS: binary_parameters=no
+FAILED: binary_parameters=y, parse error: invalid binary_parameters (unrecognized value "y" for binary_parameters)
+FAILED: binary_parameters=Y, parse error: invalid binary_parameters (unrecognized value "Y" for binary_parameters)
+FAILED: binary_parameters=n, parse error: invalid binary_parameters (unrecognized value "n" for binary_parameters)
+FAILED: binary_parameters=N, parse error: invalid binary_parameters (unrecognized value "N" for binary_parameters)
+********************Runtime Parameter********************
+RESULT: show application_name: go-test-api
+RESULT: show application_name: default
+RESULT: show application_name: 123456
+RESULT: show datestyle: SQL, YMD
+RESULT: show datestyle: ISO, MDY
+FAILED: datestyle=SQL, YMD, parse error: failed to parse as DSN (invalid dsn)
+RESULT: show timezone: GMT
+FAILED: timezone=ABC, parse error: bad connection
+RESULT: show timezone: 08:00:00
+RESULT: show timezone: -05:00
+RESULT: show timezone: 22:00:00
+RESULT: show timezone: 24:00:00
+RESULT: show timezone: -23:00:00
+RESULT: show timezone: 25:00:00
+RESULT: show timezone: -24:00:00
+RESULT: show timezone: 1234:00:00
+RESULT: show client_encoding: SQL_ASCII
+RESULT: show client_encoding: GBK
+RESULT: show client_encoding: UTF8
+FAILED: client_encoding=ABCD, parse error: bad connection
+FAILED: client_encoding=default, parse error: bad connection
+FAILED: client_encoding=0, parse error: bad connection
+RESULT: show search_path: pqgotest
+RESULT: show search_path: 12345
+RESULT: show search_path: default
+RESULT: show extra_float_digits: 0
+RESULT: show extra_float_digits: -15
+RESULT: show extra_float_digits: 3
+FAILED: extra_float_digits=4, parse error: bad connection
+FAILED: extra_float_digits=-16, parse error: bad connection
+FAILED: extra_float_digits=3.4, parse error: bad connection
+PASS

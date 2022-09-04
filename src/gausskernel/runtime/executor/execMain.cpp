@@ -95,6 +95,7 @@
 #endif
 #include "gs_ledger/ledger_utils.h"
 #include "gs_policy/gs_policy_masking.h"
+#include "optimizer/gplanmgr.h"
 
 /* Hooks for plugins to get control in ExecutorStart/Run/Finish/End */
 THR_LOCAL ExecutorStart_hook_type ExecutorStart_hook = NULL;
@@ -172,7 +173,7 @@ static void report_iud_time(QueryDesc *query)
 
     PlannedStmt *plannedstmt = query->plannedstmt;
 
-    foreach (lc, plannedstmt->resultRelations) {
+    foreach (lc, (List*)linitial(plannedstmt->resultRelations)) {
         Index idx = lfirst_int(lc);
         rid = getrelid(idx, plannedstmt->rtable);
         if (OidIsValid(rid) == false || rid < FirstNormalObjectId) {
@@ -228,7 +229,6 @@ void standard_ExecutorStart(QueryDesc *queryDesc, int eflags)
 {
     EState *estate = NULL;
     MemoryContext old_context;
-    instr_time starttime;
     double totaltime = 0;
 
     /* sanity checks: queryDesc must not be started already */
@@ -377,12 +377,17 @@ void standard_ExecutorStart(QueryDesc *queryDesc, int eflags)
     /*
      * Initialize the plan state tree
      */
+#ifndef ENABLE_LITE_MODE
+    instr_time starttime;
     (void)INSTR_TIME_SET_CURRENT(starttime);
+#endif
 
     IPC_PERFORMANCE_LOG_OUTPUT("standard_ExecutorStart InitPlan start.");
     InitPlan(queryDesc, eflags);
     IPC_PERFORMANCE_LOG_OUTPUT("standard_ExecutorStart InitPlan end.");
+#ifndef ENABLE_LITE_MODE
     totaltime += elapsed_time(&starttime);
+#endif
 
     /*
      * if current plan is working for expression, no need to collect instrumentation.
@@ -531,7 +536,6 @@ void standard_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long co
     DestReceiver *dest = NULL;
     bool send_tuples = false;
     MemoryContext old_context;
-    instr_time starttime;
     double totaltime = 0;
 
     /* sanity checks */
@@ -596,7 +600,10 @@ void standard_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long co
         u_sess->exec_cxt.global_bucket_cnt = 0;
     }
 
+#ifndef ENABLE_LITE_MODE
+    instr_time starttime;
     (void)INSTR_TIME_SET_CURRENT(starttime);
+#endif
     /*
      * run plan
      */
@@ -612,15 +619,21 @@ void standard_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long co
 #endif
         }
     }
+#ifndef ENABLE_LITE_MODE
     totaltime += elapsed_time(&starttime);
+#endif
 
     queryDesc->executed = true;
 
     /*
     *  if current plan is working for expression, no need to collect instrumentation.
     */
-    if (estate->es_instrument != INSTRUMENT_NONE && StreamTopConsumerAmI() && u_sess->instr_cxt.global_instr &&
-        u_sess->instr_cxt.thread_instr) {
+    if (
+#ifndef ENABLE_MULTIPLE_NODES
+        !u_sess->attr.attr_common.enable_seqscan_fusion &&
+#endif
+        estate->es_instrument != INSTRUMENT_NONE
+        && StreamTopConsumerAmI() && u_sess->instr_cxt.global_instr && u_sess->instr_cxt.thread_instr) {
         int node_id = queryDesc->plannedstmt->planTree->plan_node_id - 1;
         int* m_instrArrayMap = u_sess->instr_cxt.thread_instr->m_instrArrayMap;
 
@@ -738,10 +751,12 @@ void standard_ExecutorEnd(QueryDesc *queryDesc)
 {
     EState *estate = NULL;
     MemoryContext old_context;
-    instr_time starttime;
     double totaltime = 0;
 
+#ifndef ENABLE_LITE_MODE
+    instr_time starttime;
     (void)INSTR_TIME_SET_CURRENT(starttime);
+#endif
 
     /* sanity checks */
     Assert(queryDesc != NULL);
@@ -801,7 +816,9 @@ void standard_ExecutorEnd(QueryDesc *queryDesc)
 
     /* output the memory tracking information into file */
     MemoryTrackingOutputFile();
+#ifndef ENABLE_LITE_MODE
     totaltime += elapsed_time(&starttime);
+#endif
 
     /*
      * if current plan is working for expression, no need to collect instrumentation.
@@ -945,6 +962,7 @@ static bool ExecCheckRTEPerms(RangeTblEntry *rte)
         }
     }
 
+#ifndef ENABLE_LITE_MODE
     /*
      * If relation is in ledger schema, avoid procedure or function on it.
      */
@@ -952,6 +970,7 @@ static bool ExecCheckRTEPerms(RangeTblEntry *rte)
         gstrace_exit(GS_TRC_ID_ExecCheckRTEPerms);
         return false;
     }
+#endif
 
     /*
      * No work if requiredPerms is empty.
@@ -1154,6 +1173,7 @@ void InitPlan(QueryDesc *queryDesc, int eflags)
     PlanState *planstate = NULL;
     TupleDesc tupType = NULL;
     ListCell *l = NULL;
+    ListCell *lc = NULL;
     int i;
     bool check = false;
 
@@ -1208,27 +1228,33 @@ void InitPlan(QueryDesc *queryDesc, int eflags)
     if (plannedstmt->resultRelations && (!StreamThreadAmI() || NeedExecute(plan))) {
 #endif
         List *resultRelations = plannedstmt->resultRelations;
-        int numResultRelations = list_length(resultRelations);
+        int numResultRelations = 0;
         ResultRelInfo *resultRelInfos = NULL;
         ResultRelInfo *resultRelInfo = NULL;
 
+        foreach (l, plannedstmt->resultRelations) {
+            numResultRelations += list_length((List*)lfirst(l));
+        }
         resultRelInfos = (ResultRelInfo *)palloc(numResultRelations * sizeof(ResultRelInfo));
         resultRelInfo = resultRelInfos;
-        foreach (l, resultRelations) {
-            Index resultRelationIndex = lfirst_int(l);
-            Oid resultRelationOid;
-            Relation resultRelation;
+        foreach (lc, resultRelations) {
+            List* resultRels = (List*)lfirst(lc);
+            foreach (l, resultRels) {
+                Index resultRelationIndex = lfirst_int(l);
+                Oid resultRelationOid;
+                Relation resultRelation;
 
-            resultRelationOid = getrelid(resultRelationIndex, rangeTable);
-            resultRelation = heap_open(resultRelationOid, RowExclusiveLock);
-            /* check if modifytable's related temp table is valid */
-            if (STMT_RETRY_ENABLED) {
-                // do noting for now, if query retry is on, just to skip validateTempRelation here
-            } else
-                validateTempRelation(resultRelation);
+                resultRelationOid = getrelid(resultRelationIndex, rangeTable);
+                resultRelation = heap_open(resultRelationOid, RowExclusiveLock);
+                /* check if modifytable's related temp table is valid */
+                if (STMT_RETRY_ENABLED) {
+                    // do noting for now, if query retry is on, just to skip validateTempRelation here
+                } else
+                    validateTempRelation(resultRelation);
 
-            InitResultRelInfo(resultRelInfo, resultRelation, resultRelationIndex, estate->es_instrument);
-            resultRelInfo++;
+                InitResultRelInfo(resultRelInfo, resultRelation, resultRelationIndex, estate->es_instrument);
+                resultRelInfo++;
+            }
         }
         estate->es_result_relations = resultRelInfos;
         estate->es_num_result_relations = numResultRelations;
@@ -2260,8 +2286,12 @@ static void ExecutePlan(EState *estate, PlanState *planstate, CmdType operation,
     /*
      * if current plan is working for expression, no need to collect instrumentation.
      */
-    if (estate->es_instrument != INSTRUMENT_NONE && u_sess->instr_cxt.global_instr && StreamTopConsumerAmI() &&
-        u_sess->instr_cxt.thread_instr) {
+    if (
+#ifndef ENABLE_MULTIPLE_NODES
+        !u_sess->attr.attr_common.enable_seqscan_fusion &&
+#endif
+        estate->es_instrument != INSTRUMENT_NONE &&
+        u_sess->instr_cxt.global_instr && StreamTopConsumerAmI() && u_sess->instr_cxt.thread_instr) {
         int64 peak_memory = (uint64)(t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->peakChunksQuery -
             t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->initMemInChunks)
             << (chunkSizeInBits - BITS_IN_MB);
@@ -2449,7 +2479,7 @@ static const char *ExecRelCheck(ResultRelInfo *resultRelInfo, TupleTableSlot *sl
     return NULL;
 }
 
-bool ExecConstraints(ResultRelInfo *resultRelInfo, TupleTableSlot *slot, EState *estate)
+bool ExecConstraints(ResultRelInfo *resultRelInfo, TupleTableSlot *slot, EState *estate, bool skipAutoInc)
 {
     Relation rel = resultRelInfo->ri_RelationDesc;
     TupleDesc tupdesc = RelationGetDescr(rel);
@@ -2469,6 +2499,10 @@ bool ExecConstraints(ResultRelInfo *resultRelInfo, TupleTableSlot *slot, EState 
 
         for (attrChk = 1; attrChk <= natts; attrChk++) {
             if (tupdesc->attrs[attrChk - 1]->attnotnull && tableam_tslot_attisnull(slot, attrChk)) {
+                 /* Skip auto_increment attribute not null check, ExecAutoIncrement will deal with it. */
+                if (skipAutoInc && constr->cons_autoinc && constr->cons_autoinc->attnum == attrChk) {
+                    continue;
+                }
                 char *val_desc = NULL;
                 bool rel_masked = u_sess->attr.attr_security.Enable_Security_Policy &&
                     is_masked_relation_enabled(RelationGetRelid(rel));
@@ -3594,6 +3628,10 @@ void Setestate(EState *estate, EState *parentestate)
     estate->es_result_relations = parentestate->es_result_relations;
     estate->es_num_result_relations = parentestate->es_num_result_relations;
     estate->es_result_relation_info = parentestate->es_result_relation_info;
+    estate->result_rel_index = parentestate->result_rel_index;
+    if (estate->result_rel_index != 0) {
+        estate->es_result_relation_info -= estate->result_rel_index;
+    }
     estate->es_skip_early_free = parentestate->es_skip_early_free;
     estate->es_skip_early_deinit_consumer = parentestate->es_skip_early_deinit_consumer;
 

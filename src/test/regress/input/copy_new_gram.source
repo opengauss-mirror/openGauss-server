@@ -1,0 +1,13 @@
+create table t_gbk2utf8(a varchar(100));
+
+insert into t_gbk2utf8 values('12345你好abc');
+
+copy t_gbk2utf8 to '@abs_builddir@/results/t_gbk2utf8.data' encoding 'gbk';
+
+copy t_gbk2utf8 from '@abs_builddir@/results/t_gbk2utf8.data' fixed formatter(a(0,5)) encoding 'gbk';
+
+copy t_gbk2utf8 from '@abs_builddir@/results/t_gbk2utf8.data' fixed formatter(a(0,7)) encoding 'gbk';
+
+select * from t_gbk2utf8 order by a asc;
+
+drop table t_gbk2utf8;

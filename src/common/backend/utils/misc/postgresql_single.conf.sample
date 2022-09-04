@@ -365,6 +365,7 @@ enable_kill_query = off			# optional: [on, off], default: off
 #cpu_index_tuple_cost = 0.005		# same scale as above
 #cpu_operator_cost = 0.0025		# same scale as above
 #effective_cache_size = 128MB
+#var_eq_const_selectivity = off
 
 # - Genetic Query Optimizer -
 
@@ -386,6 +387,7 @@ enable_kill_query = off			# optional: [on, off], default: off
 					# JOIN clauses
 #plan_mode_seed = 0         # range -1-0x7fffffff
 #check_implicit_conversions = off
+#enable_functional_dependency = off
 
 #------------------------------------------------------------------------------
 # ERROR REPORTING AND LOGGING
@@ -589,6 +591,10 @@ use_workload_manager = on		# Enables workload manager in the system.
 					# autovacuum, -1 means use
 					# vacuum_cost_limit
 
+#------------------------------------------------------------------------------
+# AI-based Optimizer
+#------------------------------------------------------------------------------
+# enable_ai_stats = on           # Enable AI Ext Statistics? default value is 'on'
 
 #------------------------------------------------------------------------------
 # CLIENT CONNECTION DEFAULTS
@@ -618,6 +624,22 @@ use_workload_manager = on		# Enables workload manager in the system.
 #vacuum_freeze_min_age = 50000000
 #vacuum_freeze_table_age = 150000000
 #bytea_output = 'hex'			# hex, escape
+#block_encryption_mode = 'aes-128-cbc'     #  values in order of decreasing detail:
+    #  aes-128-cbc
+    #  aes-192-cbc
+    #  aes-256-cbc
+    #  aes-128-cfb1
+    #  aes-192-cfb1
+    #  aes-256-cfb1
+    #  aes-128-cfb8
+    #  aes-192-cfb8
+    #  aes-256-cfb8
+    #  aes-128-cfb128
+    #  aes-192-cfb128
+    #  aes-256-cfb128
+    #  aes-128-ofb
+    #  aes-192-ofb
+    #  aes-256-ofb
 #xmlbinary = 'base64'
 #xmloption = 'content'
 #max_compile_functions = 1000
@@ -786,3 +808,5 @@ job_queue_processes = 10        # Number of concurrent jobs, optional: [0..1000]
 # PLSQL COMPILE OPTIONS
 #------------------------------------------------------------------------------
 #plsql_show_all_error=off
+#enable_seqscan_fusion = off
+#enable_cachedplan_mgr=on

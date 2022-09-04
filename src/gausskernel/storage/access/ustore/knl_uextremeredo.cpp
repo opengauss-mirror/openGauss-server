@@ -1,3 +1,4 @@
+
 /*
  * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  *
@@ -69,8 +70,8 @@ struct UpdateRedoAffixLens {
     uint16 suffixlen;
 };
 
-static UHeapDiskTuple GetUHeapDiskTupleFromRedoData(char *data, Size *datalen, TupleBuffer &tbuf, 
-    const bool hasInvalidLockerTDId)
+static UHeapDiskTuple GetUHeapDiskTupleFromRedoData(char *data, Size *datalen,
+    TupleBuffer &tbuf)
 {
     UHeapDiskTuple disktup;
     XlUHeapHeader xlhdr;
@@ -88,13 +89,7 @@ static UHeapDiskTuple GetUHeapDiskTupleFromRedoData(char *data, Size *datalen, T
     *datalen += SizeOfUHeapDiskTupleData;
 
     UHeapTupleHeaderSetTDSlot(disktup, xlhdr.td_id);
-
-    if (hasInvalidLockerTDId) {
-        UHeapTupleHeaderSetLockerTDSlot(disktup, InvalidTDSlotId);
-    } else {
-        UHeapTupleHeaderSetLockerTDSlot(disktup, xlhdr.locker_td_id);
-    }
-
+    disktup->xid = (ShortTransactionId)FrozenTransactionId;
     disktup->flag2 = xlhdr.flag2;
     disktup->flag = xlhdr.flag;
     disktup->t_hoff = xlhdr.t_hoff;
@@ -374,18 +369,6 @@ static XLogRecParseState *UHeapXlogUndoExtendParseBlock(XLogReaderState *record,
     return recordstatehead;
 }
 
-static XLogRecParseState *UHeapXlogUndoCleanParseBlock(XLogReaderState *record, uint32 *blocknum)
-{
-    XLogRecParseState *recordstatehead = NULL;
-    *blocknum = 1;
-    XLogParseBufferAllocListFunc(record, &recordstatehead, NULL);
-    if (recordstatehead == NULL) {
-        return NULL;
-    }
-    XLogRecSetUndoBlockState(record, UHEAP_UNDO_ORIG_BLOCK_NUM, recordstatehead);
-    return recordstatehead;
-}
-
 XLogRecParseState *UHeapUndoRedoParseToBlock(XLogReaderState *record, uint32 *blocknum)
 {
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
@@ -407,10 +390,6 @@ XLogRecParseState *UHeapUndoRedoParseToBlock(XLogReaderState *record, uint32 *bl
         case XLOG_UNDO_EXTEND:
         case XLOG_SLOT_EXTEND:
             recordblockstate = UHeapXlogUndoExtendParseBlock(record, blocknum);
-            break;
-        case XLOG_UNDO_CLEAN:
-        case XLOG_SLOT_CLEAN:
-            recordblockstate = UHeapXlogUndoCleanParseBlock(record, blocknum);
             break;
         default:
             ereport(PANIC, (errmsg("UHeapUndoRedoParseToBlock: unknown op code %u", info)));
@@ -539,7 +518,7 @@ void UHeapXlogInsertOperatorPage(RedoBufferInfo *buffer, void *recorddata, bool 
     securec_check(rc, "\0", "\0");
 
     Assert(datalen > SizeOfUHeapHeader && newlen <= MaxPossibleUHeapTupleSize);
-    UHeapDiskTuple utup = GetUHeapDiskTupleFromRedoData(data, &newlen, tbuf, true);
+    UHeapDiskTuple utup = GetUHeapDiskTupleFromRedoData(data, &newlen, tbuf);
 
     undo::XlogUndoMeta undometa;
     XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapInsert);
@@ -617,7 +596,7 @@ void UHeapXlogDeleteOperatorPage(RedoBufferInfo *buffer, void *recorddata, Size 
      * If the WAL stream contains undo tuple, then replace it with the
      * explicitly stored tuple.
      */
-    utup.disk_tuple = GetUHeapDiskTupleFromRedoData(data, &datalen, tbuf, false);
+    utup.disk_tuple = GetUHeapDiskTupleFromRedoData(data, &datalen, tbuf);
     utup.disk_tuple_size = datalen;
 
     ItemPointerSetBlockNumber(&targetTid, buffer->blockinfo.blkno);
@@ -900,13 +879,11 @@ Size UHeapXlogUpdateOperatorNewpage(UpdateRedoBuffers* buffers, void *recorddata
 
     if (onlyCopyDelta) {
         UHeapTupleHeaderSetTDSlot(oldtup->disk_tuple, xlhdr.td_id);
-        UHeapTupleHeaderSetLockerTDSlot(oldtup->disk_tuple, xlhdr.locker_td_id);
         oldtup->disk_tuple->flag2 = xlhdr.flag2;
         oldtup->disk_tuple->flag = xlhdr.flag;
         oldtup->disk_tuple->t_hoff = xlhdr.t_hoff;
     } else {
         UHeapTupleHeaderSetTDSlot(newtup, xlhdr.td_id);
-        UHeapTupleHeaderSetLockerTDSlot(newtup, xlhdr.locker_td_id);
         newtup->flag2 = xlhdr.flag2;
         newtup->flag = xlhdr.flag;
         newtup->t_hoff = xlhdr.t_hoff;
@@ -923,7 +900,7 @@ Size UHeapXlogUpdateOperatorNewpage(UpdateRedoBuffers* buffers, void *recorddata
     if (blockInplaceUpdate) {
         Assert(!onlyCopyDelta);
         RowPtr *rp = UPageGetRowPtr(oldpage, xlrec->old_offnum);
-        PutBlockInplaceUpdateTuple(oldpage, (Item)newtup, rp, newlen);
+        PutLinkUpdateTuple(oldpage, (Item)newtup, rp, newlen);
         /* update the potential freespace */
         UHeapRecordPotentialFreeSpace(newbuf, newlen);
         Assert(oldpage == newpage);
@@ -1038,7 +1015,7 @@ static UHeapDiskTuple GetUHeapDiskTupleFromMultiInsertRedoData(char **data, int 
     *datalen += SizeOfUHeapDiskTupleData;
     // the same as UheapXlogInsert
     UHeapTupleHeaderSetTDSlot(disktup, xlhdr->td_id);
-    UHeapTupleHeaderSetLockerTDSlot(disktup, InvalidTDSlotId);
+    disktup->xid = (ShortTransactionId)FrozenTransactionId;
     disktup->flag2 = xlhdr->flag2;
     disktup->flag = xlhdr->flag;
     disktup->t_hoff = xlhdr->t_hoff;
@@ -1172,7 +1149,7 @@ void UHeapXlogFreezeTDOperatorPage(RedoBufferInfo *buffer, void *recorddata)
     TD *transinfo = tdPtr->td_info;
 
     if (InHotStandby && TransactionIdIsValid(xlrec->latestFrozenXid))
-        ResolveRecoveryConflictWithSnapshot(xlrec->latestFrozenXid, buffer->blockinfo.rnode);
+        ResolveRecoveryConflictWithSnapshot(xlrec->latestFrozenXid, buffer->blockinfo.rnode, buffer->lsn);
 
     UHeapFreezeOrInvalidateTuples(buffer->buf, nFrozen, frozenSlots, true);
 
@@ -1213,21 +1190,19 @@ void UHeapXlogInvalidTDOperatorPage(RedoBufferInfo *buffer, void *recorddata)
 }
 
 void UHeapXlogCleanOperatorPrunePage(RedoBufferInfo *buffer, void *recorddata, void *blkdata,
-    Size datalen, OffsetNumber *targetOffnum)
+    Size datalen, OffsetNumber *targetOffnum, uint16 nfixed, int nunused)
 {
     XlUHeapClean *xlrec = (XlUHeapClean *)recorddata;
     UPruneState prstate;
-
     int ndeleted = xlrec->ndeleted;
     int ndead = xlrec->ndead;
-
     OffsetNumber *deleted = (OffsetNumber *)blkdata;
     OffsetNumber *end = (OffsetNumber *)((char *)deleted + datalen);
     OffsetNumber *nowdead = deleted + (ndeleted * 2);
     OffsetNumber *nowunused = nowdead + ndead;
-
-    int nunused = (end - nowunused);
+    nunused = nfixed > 0 ? nunused : (end - nowunused);
     Assert(nunused >= 0);
+    OffsetNumber *nowfixed = nowunused + nunused;
 
     OffsetNumber *offnum = deleted;
     for (int i = 0; i < ndeleted; i++) {
@@ -1244,9 +1219,20 @@ void UHeapXlogCleanOperatorPrunePage(RedoBufferInfo *buffer, void *recorddata, v
         prstate.nowunused[i] = *offnum++;
     }
 
+    offnum = nowfixed;
+    for (int i = 0; i < nfixed; i++) {
+        prstate.nowfixed[i] = *offnum++;
+    }
+
+    offnum = nowfixed + nfixed;
+    for (int i = 0; i < nfixed; i++) {
+        prstate.fixedlen[i] = *offnum++;
+    }
+
     prstate.ndeleted = ndeleted;
     prstate.ndead = ndead;
     prstate.nunused = nunused;
+    prstate.nfixed = nfixed;
     UHeapPagePruneExecute(buffer->buf, *targetOffnum, &prstate);
 }
 
@@ -1254,11 +1240,15 @@ void UHeapXlogCleanOperatorPage(RedoBufferInfo *buffer, void *recorddata, void *
 {
     XlUHeapClean *xlrec = (XlUHeapClean *)recorddata;
     Page page = buffer->pageinfo.page;
-
     OffsetNumber *targetOffnum;
     OffsetNumber tmpTargetOff;
     Size *spaceRequired;
     Size tmpSpcRqd;
+    int tmpunused = 0;
+    int *nunused = &tmpunused;
+    uint16 tmpfixed = 0;
+    uint16 *nfixed = &tmpfixed;
+    char *unused = (char *)xlrec + SizeOfUHeapClean;
 
     /*
      * We're about to remove tuples. In Hot Standby mode, ensure that there's
@@ -1269,12 +1259,13 @@ void UHeapXlogCleanOperatorPage(RedoBufferInfo *buffer, void *recorddata, void *
      * latestRemovedXid is invalid, skip conflict processing.
      */
     if (InHotStandby && TransactionIdIsValid(xlrec->latestRemovedXid))
-        ResolveRecoveryConflictWithSnapshot(xlrec->latestRemovedXid, buffer->blockinfo.rnode);
+        ResolveRecoveryConflictWithSnapshot(xlrec->latestRemovedXid, buffer->blockinfo.rnode, buffer->lsn);
 
     /* Update all item pointers per the record, and repair fragmentation */
     if (xlrec->flags & XLZ_CLEAN_CONTAINS_OFFSET) {
         targetOffnum = (OffsetNumber *)((char *)xlrec + SizeOfUHeapClean);
         spaceRequired = (Size *)((char *)targetOffnum + sizeof(OffsetNumber));
+        unused = ((char *)spaceRequired + sizeof(Size));
     } else {
         targetOffnum = &tmpTargetOff;
         *targetOffnum = InvalidOffsetNumber;
@@ -1282,14 +1273,24 @@ void UHeapXlogCleanOperatorPage(RedoBufferInfo *buffer, void *recorddata, void *
         *spaceRequired = 0;
     }
 
+    if (xlrec->flags & XLZ_CLEAN_CONTAINS_TUPLEN) {
+        nunused = (int *)unused;
+        nfixed = (uint16 *)((char *)nunused + sizeof(int));
+        Assert(*nfixed > 0);
+    } else {
+        *nfixed = 0;
+    }
+    Assert(*nunused >= 0);
+
     if (blkdata != NULL) {
-        UHeapXlogCleanOperatorPrunePage(buffer, recorddata, blkdata, datalen, targetOffnum);
+        UHeapXlogCleanOperatorPrunePage(buffer, recorddata, blkdata, datalen, targetOffnum,
+            *nfixed, *nunused);
     }
 
     if (xlrec->flags & XLZ_CLEAN_ALLOW_PRUNING) {
         bool pruned PG_USED_FOR_ASSERTS_ONLY = false;
 
-        UPageRepairFragmentation(buffer->buf, *targetOffnum, *spaceRequired, &pruned, false);
+        UPageRepairFragmentation(NULL, buffer->buf, *targetOffnum, *spaceRequired, &pruned, false);
 
         /*
          * Pruning must be successful at redo time, otherwise the page
@@ -1362,7 +1363,7 @@ static void UHeapXlogUpdateBlock(XLogBlockHead *blockhead, XLogBlockDataParse *b
     bool isinit = (XLogBlockHeadGetInfo(blockhead) & XLOG_UHEAP_INIT_PAGE) != 0;
     bool istoast = (XLogBlockHeadGetInfo(blockhead) & XLOG_UHEAP_INIT_TOAST_PAGE) != 0;
     bool inplaceUpdate = !(xlrec->flags & XLZ_NON_INPLACE_UPDATE);
-    bool blockInplaceUpdate = (xlrec->flags & XLZ_BLOCK_INPLACE_UPDATE);
+    bool blockInplaceUpdate = (xlrec->flags & XLZ_LINK_UPDATE);
     TransactionId recordxid = XLogBlockHeadGetXid(blockhead);
     bool sameBlock = false;
     XLogRedoAction action;
@@ -1540,7 +1541,7 @@ void UHeap2XlogFreezeOperatorPage(RedoBufferInfo *buffer, void *recorddata, void
      * consider the frozen xids as running.
      */
     if (InHotStandby && SUPPORT_HOT_STANDBY) {
-        ResolveRecoveryConflictWithSnapshot(cutoffXid, buffer->blockinfo.rnode);
+        ResolveRecoveryConflictWithSnapshot(cutoffXid, buffer->blockinfo.rnode, buffer->lsn);
     }
 
     if (datalen > 0) {
@@ -1696,16 +1697,17 @@ static void RedoUndoInsertBlock(XLogBlockHead *blockhead, XLogBlockUndoParse *bl
      */
     Oid relNode = blockdatarec->insertUndoParse.relNode;
     Oid spcNode = blockdatarec->insertUndoParse.spcNode;
-    UndoRecord *undorec = u_sess->ustore_cxt.undo_records[0];
+    UndoRecord *undorec = (*t_thrd.ustore_cxt.urecvec)[0];
     undorec->SetUrp(urecptr);
     urecptr = UHeapPrepareUndoInsert(xlundohdr->relOid, xlundohdrextra->partitionOid, relNode, spcNode,
-        UNDO_PERMANENT, InvalidBuffer, recxid, 0, xlundohdrextra->blkprev, xlundohdrextra->prevurp,
+        UNDO_PERMANENT, recxid, 0, xlundohdrextra->blkprev, xlundohdrextra->prevurp,
         blockdatarec->insertUndoParse.blkno, xlundohdr, xlundometa);
     Assert(urecptr == xlundohdr->urecptr);
     undorec->SetOffset(blockdatarec->insertUndoParse.offnum);
     if (!skipInsert) {
-        InsertPreparedUndo(u_sess->ustore_cxt.urecvec, lsn);
+        InsertPreparedUndo(t_thrd.ustore_cxt.urecvec, lsn);
     }
+    VerifyUndoRecordValid(undorec);
 
     XLogReaderState record;
     XLogRecord decodedRecord;
@@ -1713,9 +1715,9 @@ static void RedoUndoInsertBlock(XLogBlockHead *blockhead, XLogBlockUndoParse *bl
     record.decoded_record = &decodedRecord;
     record.EndRecPtr = lsn;
 
-    undo::RedoUndoMeta(&record, xlundometa, urecptr, u_sess->ustore_cxt.urecvec->LastRecord(), 
-        u_sess->ustore_cxt.urecvec->LastRecordSize());
-    UHeapResetPreparedUndo(UNDO_PERMANENT, UNDO_PTR_GET_ZONE_ID(urecptr));
+    undo::RedoUndoMeta(&record, xlundometa, urecptr, t_thrd.ustore_cxt.urecvec->LastRecord(),
+        t_thrd.ustore_cxt.urecvec->LastRecordSize());
+    UHeapResetPreparedUndo();
 }
 
 static void RedoUndoDeleteBlock(XLogBlockHead *blockhead, XLogBlockUndoParse *blockdatarec, RedoBufferInfo *bufferinfo)
@@ -1758,13 +1760,13 @@ static void RedoUndoDeleteBlock(XLogBlockHead *blockhead, XLogBlockUndoParse *bl
     securec_check_ss(rc, "\0", "\0");
     utup.table_oid = xlundohdr->relOid;
     utup.ctid = targetTid;
-    utup.disk_tuple = GetUHeapDiskTupleFromRedoData(data, &datalen, tbuf, false);
+    utup.disk_tuple = GetUHeapDiskTupleFromRedoData(data, &datalen, tbuf);
     utup.disk_tuple_size = datalen;
 
     TD oldTD;
     oldTD.xactid = blockdatarec->deleteUndoParse.oldxid;
     oldTD.undo_record_ptr = INVALID_UNDO_REC_PTR;
-    UndoRecord *undorec = u_sess->ustore_cxt.undo_records[0];
+    UndoRecord *undorec = (*t_thrd.ustore_cxt.urecvec)[0];
     undorec->SetUrp(urecptr);
 
     /* We need to pass in tablespace and relfilenode in PrepareUndo but we never explicitly
@@ -1782,7 +1784,7 @@ static void RedoUndoDeleteBlock(XLogBlockHead *blockhead, XLogBlockUndoParse *bl
     undorec->SetOffset(blockdatarec->deleteUndoParse.offnum);
     if (!skipInsert) {
         /* Insert the Undo record into the undo store */
-        InsertPreparedUndo(u_sess->ustore_cxt.urecvec, lsn);
+        InsertPreparedUndo(t_thrd.ustore_cxt.urecvec, lsn);
     }
 
     XLogReaderState record;
@@ -1791,9 +1793,10 @@ static void RedoUndoDeleteBlock(XLogBlockHead *blockhead, XLogBlockUndoParse *bl
     record.decoded_record = &decodedRecord;
     record.EndRecPtr = lsn;
 
-    undo::RedoUndoMeta(&record, xlundometa, urecptr, u_sess->ustore_cxt.urecvec->LastRecord(),
-        u_sess->ustore_cxt.urecvec->LastRecordSize());
-    UHeapResetPreparedUndo(UNDO_PERMANENT, UNDO_PTR_GET_ZONE_ID(urecptr));
+    undo::RedoUndoMeta(&record, xlundometa, urecptr, t_thrd.ustore_cxt.urecvec->LastRecord(),
+        t_thrd.ustore_cxt.urecvec->LastRecordSize());
+    VerifyUndoRecordValid(undorec);
+    UHeapResetPreparedUndo();
 }
 
 static void RedoUndoUpdateBlock(XLogBlockHead *blockhead, XLogBlockUndoParse *blockdatarec, RedoBufferInfo *bufferinfo)
@@ -1818,13 +1821,13 @@ static void RedoUndoUpdateBlock(XLogBlockHead *blockhead, XLogBlockUndoParse *bl
     TD oldTD;
     oldTD.xactid = blockdatarec->updateUndoParse.oldxid;
     oldTD.undo_record_ptr = INVALID_UNDO_REC_PTR;
-    UndoRecord *oldundorec = u_sess->ustore_cxt.undo_records[0];
+    UndoRecord *oldundorec = (*t_thrd.ustore_cxt.urecvec)[0];
     UndoRecord *newundorec = NULL;
     oldundorec->SetUrp(urecptr);
     errno_t rc = EOK;
 
     if (!inplaceUpdate) {
-        newundorec = u_sess->ustore_cxt.undo_records[1];
+        newundorec = (*t_thrd.ustore_cxt.urecvec)[1];
         newundorec->SetUrp(xlnewundohdr->urecptr);
     }
 
@@ -1839,7 +1842,7 @@ static void RedoUndoUpdateBlock(XLogBlockHead *blockhead, XLogBlockUndoParse *bl
         rc = memset_s(&tbuf, sizeof(tbuf), 0, sizeof(tbuf));
         securec_check_ss(rc, "\0", "\0");
 
-        oldtup.disk_tuple = GetUHeapDiskTupleFromRedoData(data, &datalen, tbuf, false);
+        oldtup.disk_tuple = GetUHeapDiskTupleFromRedoData(data, &datalen, tbuf);
         oldtup.disk_tuple_size = datalen;
     }
 
@@ -1870,7 +1873,7 @@ static void RedoUndoUpdateBlock(XLogBlockHead *blockhead, XLogBlockUndoParse *bl
             newundorec->SetOffset(blockdatarec->updateUndoParse.new_offnum);
             appendBinaryStringInfo(oldundorec->Rawdata(), (char *)&newtid, sizeof(ItemPointerData));
         } else {
-            UndoRecord *undorec = (*u_sess->ustore_cxt.urecvec)[0];
+            UndoRecord *undorec = (*t_thrd.ustore_cxt.urecvec)[0];
             appendBinaryStringInfo(undorec->Rawdata(), 
                 blockdatarec->updateUndoParse.xlogXorDelta, 
                 blockdatarec->updateUndoParse.undoXorDeltaSize);
@@ -1884,7 +1887,7 @@ static void RedoUndoUpdateBlock(XLogBlockHead *blockhead, XLogBlockUndoParse *bl
         }
 
         /* Insert the Undo record into the undo store */
-        InsertPreparedUndo(u_sess->ustore_cxt.urecvec, lsn);
+        InsertPreparedUndo(t_thrd.ustore_cxt.urecvec, lsn);
     }
 
     XLogReaderState record;
@@ -1893,9 +1896,17 @@ static void RedoUndoUpdateBlock(XLogBlockHead *blockhead, XLogBlockUndoParse *bl
     record.decoded_record = &decodedRecord;
     record.EndRecPtr = lsn;
 
-    undo::RedoUndoMeta(&record, xlundometa, urecptr, u_sess->ustore_cxt.urecvec->LastRecord(),
-        u_sess->ustore_cxt.urecvec->LastRecordSize());
-    UHeapResetPreparedUndo(UNDO_PERMANENT, UNDO_PTR_GET_ZONE_ID(urecptr));
+    undo::RedoUndoMeta(&record, xlundometa, urecptr, t_thrd.ustore_cxt.urecvec->LastRecord(),
+        t_thrd.ustore_cxt.urecvec->LastRecordSize());
+    
+    URecVector *urecvec = t_thrd.ustore_cxt.urecvec;
+    UndoRecord *undorec = (*urecvec)[0];
+    VerifyUndoRecordValid(undorec);
+    if (!inplaceUpdate) {
+        UndoRecord *newundorec = (*urecvec)[1];
+        VerifyUndoRecordValid(newundorec);
+    }
+    UHeapResetPreparedUndo();
 }
 
 static void RedoUndoMultiInsertBlock(XLogBlockHead *blockhead, XLogBlockUndoParse *blockdatarec,
@@ -1948,7 +1959,9 @@ static void RedoUndoMultiInsertBlock(XLogBlockHead *blockhead, XLogBlockUndoPars
     elog(LOG, "Undo record prepared: %d for Block Number: %d", nranges, blockdatarec->multiInsertUndoParse.blkno);
     if (!skipUndo && !skipInsert) {
         for (int i = 0; i < nranges; i++) {
+            MemoryContext old_cxt = MemoryContextSwitchTo((*urecvec)[i]->mem_context());
             initStringInfo((*urecvec)[i]->Rawdata());
+            MemoryContextSwitchTo(old_cxt);
             appendBinaryStringInfo((*urecvec)[i]->Rawdata(), (char *)&(ufreeOffsetRanges)->startOffset[i],
                 sizeof(OffsetNumber));
             appendBinaryStringInfo((*urecvec)[i]->Rawdata(), (char *)&(ufreeOffsetRanges)->endOffset[i],
@@ -1970,8 +1983,8 @@ static void RedoUndoMultiInsertBlock(XLogBlockHead *blockhead, XLogBlockUndoPars
     record.EndRecPtr = lsn;
 
     undo::RedoUndoMeta(&record, &undometa, xlundohdr->urecptr, urecvec->LastRecord(), urecvec->LastRecordSize());
-    UHeapResetPreparedUndo(UNDO_PERMANENT, UNDO_PTR_GET_ZONE_ID(urecptr));
-    urecvec->Destroy();
+    UHeapResetPreparedUndo();
+    DELETE_EX(urecvec);
     pfree(ufreeOffsetRanges);
 }
 
@@ -2001,7 +2014,6 @@ static void RedoUndoDiscardBlock(XLogBlockHead *blockhead, XLogBlockUndoParse *b
 {
     int zoneId = blockdatarec->undoDiscardParse.zoneId;
     UndoSlotPtr endSlot = blockdatarec->undoDiscardParse.endSlot;
-    UndoSlotPtr startSlot = blockdatarec->undoDiscardParse.startSlot;
     UndoRecPtr endUndoPtr = blockdatarec->undoDiscardParse.endUndoPtr;
     TransactionId recycledXid = blockdatarec->undoDiscardParse.recycledXid;
     XLogRecPtr lsn = blockdatarec->undoDiscardParse.lsn;
@@ -2012,14 +2024,10 @@ static void RedoUndoDiscardBlock(XLogBlockHead *blockhead, XLogBlockUndoParse *b
     }
     if (zone->GetLSN() < lsn) {
         zone->LockUndoZone();
-        Assert(startSlot == zone->GetRecycle());
-        zone->ForgetUndoBuffer(UNDO_PTR_GET_OFFSET(zone->GetForceDiscard()),
-            UNDO_PTR_GET_OFFSET(endUndoPtr), UNDO_DB_OID);
-        zone->ForgetUndoBuffer(UNDO_PTR_GET_OFFSET(startSlot),
-            UNDO_PTR_GET_OFFSET(endSlot), UNDO_SLOT_DB_OID);
-        zone->SetRecycle(endSlot);
-        zone->SetDiscard(endUndoPtr);
-        zone->SetForceDiscard(endUndoPtr);
+        Assert(blockdatarec->undoDiscardParse.startSlot == zone->GetRecycleTSlotPtr());
+        zone->SetRecycleTSlotPtr(endSlot);
+        zone->SetDiscardURecPtr(endUndoPtr);
+        zone->SetForceDiscardURecPtr(endUndoPtr);
         zone->SetRecycleXid(recycledXid);
         zone->MarkDirty();
         zone->SetLSN(lsn);
@@ -2114,58 +2122,6 @@ static void RedoSlotExtendBlock(XLogBlockHead *blockhead, XLogBlockUndoParse *bl
     }
 }
 
-static void RedoUndoCleanBlock(XLogBlockHead *blockhead, XLogBlockUndoParse *blockdatarec, RedoBufferInfo *bufferinfo)
-{
-    int zoneId = blockdatarec->undoCleanParse.zoneId;
-    Assert(IS_VALID_ZONE_ID(zoneId));
-    XLogRecPtr cleanLsn = blockdatarec->undoCleanParse.cleanLsn;
-    UndoLogOffset newTail = blockdatarec->undoCleanParse.tailOffset;
-    UndoZone *zone = UndoZoneGroup::GetUndoZone(zoneId);
-    if (zone == NULL) {
-        return;
-    }
-    UndoSpace *usp = zone->GetUndoSpace();
-    if (usp->LSN() < cleanLsn) {
-        usp->LockSpace();
-        if ((usp->Head() + UNDO_LOG_SEGMENT_SIZE != usp->Tail()) || (usp->Head() != newTail)) {
-            ereport(PANIC, (errmsg(UNDOFORMAT("zone %d not used but head %lu + segment size != tail %lu, newTail=%lu."),
-                zoneId, usp->Head(), usp->Tail(), newTail)));
-        }
-        usp->MarkDirty();
-        usp->UnlinkUndoLog(zoneId, usp->Tail(), UNDO_DB_OID);
-        usp->SetHead(newTail);
-        usp->SetTail(newTail);
-        usp->SetLSN(cleanLsn);
-        usp->UnlockSpace();
-    }
-}
-
-static void RedoSlotCleanBlock(XLogBlockHead *blockhead, XLogBlockUndoParse *blockdatarec, RedoBufferInfo *bufferinfo)
-{
-    int zoneId = blockdatarec->undoCleanParse.zoneId;
-    Assert(IS_VALID_ZONE_ID(zoneId));
-    XLogRecPtr cleanLsn = blockdatarec->undoCleanParse.cleanLsn;
-    UndoLogOffset newTail = blockdatarec->undoCleanParse.tailOffset;
-    UndoZone *zone = UndoZoneGroup::GetUndoZone(zoneId);
-    if (zone == NULL) {
-        return;
-    }
-    UndoSpace *usp = zone->GetSlotSpace();
-    if (usp->LSN() < cleanLsn) {
-        usp->LockSpace();
-        if ((usp->Head() + UNDO_META_SEGMENT_SIZE != usp->Tail()) || (usp->Head() != newTail)) {
-            ereport(PANIC, (errmsg(UNDOFORMAT("zone %d not used but head %lu + segment size != tail %lu, newTail=%lu."),
-                zoneId, usp->Head(), usp->Tail(), newTail)));
-        }
-        usp->MarkDirty();
-        usp->UnlinkUndoLog(zoneId, usp->Tail(), UNDO_SLOT_DB_OID);
-        usp->SetHead(newTail);
-        usp->SetTail(newTail);
-        usp->SetLSN(cleanLsn);
-        usp->UnlockSpace();
-    }
-}
-
 void RedoUndoBlock(XLogBlockHead *blockhead, XLogBlockUndoParse *blockdatarec, RedoBufferInfo *bufferinfo)
 {
     uint8 info = XLogBlockHeadGetInfo(blockhead) & ~XLR_INFO_MASK;
@@ -2185,12 +2141,6 @@ void RedoUndoBlock(XLogBlockHead *blockhead, XLogBlockUndoParse *blockdatarec, R
             break;
         case XLOG_SLOT_EXTEND:
             RedoSlotExtendBlock(blockhead, blockdatarec, bufferinfo);
-            break;
-        case XLOG_UNDO_CLEAN:
-            RedoUndoCleanBlock(blockhead, blockdatarec, bufferinfo);
-            break;
-        case XLOG_SLOT_CLEAN:
-            RedoSlotCleanBlock(blockhead, blockdatarec, bufferinfo);
             break;
         default:
             ereport(PANIC, (errmsg("RedoUndoBlock: unknown op code %u", info)));

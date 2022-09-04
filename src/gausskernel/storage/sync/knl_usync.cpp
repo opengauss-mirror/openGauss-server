@@ -125,9 +125,12 @@ void InitPendingOps(void)
          * Fortunately the hash table is small so that's unlikely to happen in
          * practice.
          */
-        u_sess->storage_cxt.pendingOpsCxt = AllocSetContextCreate(u_sess->top_mem_cxt,
-            "Pending ops context", ALLOCSET_DEFAULT_SIZES);
-        MemoryContextAllowInCriticalSection(u_sess->storage_cxt.pendingOpsCxt, true);
+        if (u_sess->storage_cxt.pendingOpsCxt == NULL) {
+            u_sess->storage_cxt.pendingOpsCxt = AllocSetContextCreate(u_sess->top_mem_cxt,
+                "Pending ops context", ALLOCSET_DEFAULT_SIZES);
+            MemoryContextAllowInCriticalSection(u_sess->storage_cxt.pendingOpsCxt, true);
+        }
+
         rc = memset_s(&hashCtl, sizeof(hashCtl), 0, sizeof(hashCtl));
         securec_check(rc, "", "");
         hashCtl.keysize = sizeof(FileTag);

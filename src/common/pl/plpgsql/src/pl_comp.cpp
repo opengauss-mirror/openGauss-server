@@ -272,7 +272,6 @@ recheck:
      */
     fcinfo->flinfo->fn_extra = (void*)func;
     restoreCallFromPkgOid(old_value);
-
     /*
      * Finally return the compiled function
      */
@@ -475,26 +474,20 @@ void clearCompileContext(PLpgSQL_compile_context* compile_cxt)
     pfree_ext(compile_cxt);
 }
 
-void clearCompileContextList(const int releaseLength)
+void clearCompileContextList(const int saveLength)
 {
     if (u_sess->plsql_cxt.compile_context_list == NULL) {
         return ;
     }
-    ListCell* lc = list_head(u_sess->plsql_cxt.compile_context_list);
+    ListCell* lc = NULL;
     PLpgSQL_compile_context* compile_cxt = NULL;
     int len = list_length(u_sess->plsql_cxt.compile_context_list);
-    int i = len;
-    while (lc != NULL) {
-        i--;
-        ListCell* newlc = lnext(lc);
-        if (i < len - releaseLength) {
-            lc = newlc;
-            continue;
-        }
+    while (len > saveLength) {
+        lc = list_head(u_sess->plsql_cxt.compile_context_list);
         compile_cxt = (PLpgSQL_compile_context*)lfirst(lc);
         u_sess->plsql_cxt.compile_context_list = list_delete(u_sess->plsql_cxt.compile_context_list, compile_cxt);
         clearCompileContext(compile_cxt);
-        lc = newlc;
+        len--;
     }
 }
 
@@ -943,9 +936,10 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
              * directly to it.	If there's more than one, build a row that
              * holds all of them.
              */
-            if (num_out_args == 1) {
+            if (num_out_args == 1 && !is_function_with_plpgsql_language_and_outparam(func->fn_oid)) {
                 func->out_param_varno = out_arg_variables[0]->dno;
-            } else if (num_out_args > 1) {
+            } else if (num_out_args > 1 || (num_out_args == 1 &&
+                is_function_with_plpgsql_language_and_outparam(func->fn_oid))) {
                 PLpgSQL_row* row = build_row_from_vars(out_arg_variables, num_out_args);
                 row->isImplicit = true;
 
@@ -1825,6 +1819,11 @@ static Node* resolve_column_ref(ParseState* pstate, PLpgSQL_expr* expr, ColumnRe
         }
         if (pkg != NULL) {
             PLpgSQL_nsitem* pkgPublicNs = plpgsql_ns_lookup(pkg->public_ns, false, nse->name, NULL, NULL, NULL);
+            if (unlikely(pkgPublicNs == NULL)) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_UNDEFINED_PACKAGE),
+                        (errmsg("not found package variable %s", nse->name))));
+            }
             nse->itemtype = pkgPublicNs->itemtype;
         } else {
             ereport(ERROR,
@@ -1962,6 +1961,15 @@ static Node* make_datum_param(PLpgSQL_expr* expr, int dno, int location)
         estate = NULL;
         datum = expr->func->datums[dno];
     }
+#ifndef ENABLE_MULTIPLE_NODES
+    bool isPkgNestTableVar = datum->ispkg && datum->dtype == PLPGSQL_DTYPE_VAR
+                             && ((PLpgSQL_var*)datum)->nest_table != NULL;
+    if (unlikely(u_sess->is_autonomous_session && isPkgNestTableVar)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("Un-support feature: nest tableof variable \"%s\" not support pass through autonm function",
+                ((PLpgSQL_var*)datum)->refname)));
+    }
+#endif
     /*
     * Bitmapset must be allocated in function's permanent memory context
     */
@@ -1972,11 +1980,11 @@ static Node* make_datum_param(PLpgSQL_expr* expr, int dno, int location)
     param = makeNode(Param);
     param->paramkind = PARAM_EXTERN;
     param->paramid = dno + 1;
-    Oid tableOfIndexType = InvalidOid;
+    List* tableOfIndexType = NULL;
     exec_get_datum_type_info(estate, datum, &param->paramtype, &param->paramtypmod, &param->paramcollid,
         &tableOfIndexType, expr->func);
     param->location = location;
-    param->tableOfIndexType = tableOfIndexType;
+    param->tableOfIndexTypeList = tableOfIndexType;
     if (datum->dtype == PLPGSQL_DTYPE_RECORD) {
         param->recordVarTypOid = ((PLpgSQL_row*)datum)->recordVarTypOid;
     } else {
@@ -2002,6 +2010,10 @@ HeapTuple getPLpgsqlVarTypeTup(char* word)
             }
             if (ns != NULL && ns->itemtype == PLPGSQL_NSTYPE_VAR) {
                 PLpgSQL_var* var = (PLpgSQL_var*)pkg->datums[ns->itemno];
+                if (OidIsValid(var->datatype->tableOfIndexType)) {
+                    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("not support ref table of variable as procedure argument type")));
+                }
                 if (OidIsValid(var->datatype->typoid)) {
                     HeapTuple typeTup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(var->datatype->typoid));
                     return typeTup;
@@ -2011,17 +2023,34 @@ HeapTuple getPLpgsqlVarTypeTup(char* word)
     } else {
         if (ns != NULL && ns->itemtype == PLPGSQL_NSTYPE_VAR) {
             PLpgSQL_var* var = (PLpgSQL_var*)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[ns->itemno];
+            if (OidIsValid(var->datatype->tableOfIndexType)) {
+                ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("not support ref table of variable as procedure argument type")));
+            }
             if (OidIsValid(var->datatype->typoid)) {
                 HeapTuple typeTup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(var->datatype->typoid));
                 return typeTup;
             }
         }
     }
-    
+
     return NULL;
 }
 
-HeapTuple FindRowVarColType(List* nameList)
+void getTableofTypeFromVar(PLpgSQL_var* var, int* collectionType, Oid* tableofIndexType)
+{
+    if (OidIsValid(var->datatype->tableOfIndexType)) {
+        if (tableofIndexType == NULL) {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("not support ref table of variable as procedure argument type")));
+        } else {
+            *collectionType = var->datatype->collectionType;
+            *tableofIndexType = var->datatype->tableOfIndexType;
+        }
+    }
+}
+
+HeapTuple FindRowVarColType(List* nameList, int* collectionType, Oid* tableofIndexType)
 {
     if (u_sess->plsql_cxt.curr_compile_context == NULL) {
         return NULL;
@@ -2081,6 +2110,7 @@ HeapTuple FindRowVarColType(List* nameList)
             if (datum->dtype == PLPGSQL_DTYPE_VAR) {
                 /* scalar variable, just return the datatype */
                 typOid = ((PLpgSQL_var*)datum)->datatype->typoid;
+                getTableofTypeFromVar((PLpgSQL_var*)datum, collectionType, tableofIndexType);
             } else if (datum->dtype == PLPGSQL_DTYPE_ROW) {
                 /* row variable, need to build a new one */
                 typOid = ((PLpgSQL_row*)datum)->rowtupdesc->tdtypeid;
@@ -3131,7 +3161,7 @@ PLpgSQL_type* plpgsql_parse_wordrowtype(char* ident)
         char message[MAXSTRLEN]; 
         errno_t rc = 0;
         rc = sprintf_s(message, MAXSTRLEN, "relation \"%s\" does not exist when parse word.", ident);
-        securec_check_ss_c(rc, "", "");
+        securec_check_ss(rc, "", "");
         InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc, true);
         ereport(ERROR,
             (errmodule(MOD_PLSQL),
@@ -4187,7 +4217,7 @@ int plpgsql_recognize_err_condition(const char* condname, bool allow_sqlstate)
     char message[MAXSTRLEN]; 
     errno_t rc = 0;
     rc = sprintf_s(message, MAXSTRLEN, "unrecognized exception condition \"%s\"", condname);
-    securec_check_ss_c(rc, "", "");
+    securec_check_ss(rc, "", "");
     InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
     ereport(ERROR,
         (errmodule(MOD_PLSQL),
@@ -4240,7 +4270,7 @@ PLpgSQL_condition* plpgsql_parse_err_condition(char* condname)
         char message[MAXSTRLEN]; 
         errno_t rc = 0;
         rc = sprintf_s(message, MAXSTRLEN, "unrecognized exception condition \"%s\"", condname);
-        securec_check_ss_c(rc, "", "");
+        securec_check_ss(rc, "", "");
         InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
         ereport(ERROR,
             (errmodule(MOD_PLSQL),

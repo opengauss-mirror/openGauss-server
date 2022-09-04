@@ -67,6 +67,9 @@ typedef struct SessionHistEntry {
     LOCALLOCKTAG locallocktag;       /* locked object */
     uint64 st_block_sessionid;       /* block session */
     GlobalSessionId globalSessionId;
+    TimestampTz xact_start_time;
+    TimestampTz query_start_time;
+    BackendState state;
 } SessionHistEntry;
 
 typedef struct ActiveSessHistArrary {

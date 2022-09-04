@@ -43,6 +43,16 @@ typedef struct StringInfoData {
 
 typedef StringInfoData* StringInfo;
 
+typedef struct StringInfoDataHuge {
+    char* data;
+    int64 len;
+    int64 maxlen;
+    int64 cursor;
+} StringInfoDataHuge;
+
+typedef StringInfoDataHuge* StringInfoHuge;
+
+
 /* ------------------------
  * There are two ways to create a StringInfo object initially:
  *

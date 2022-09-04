@@ -80,9 +80,6 @@ typedef struct {
 /* Signal handlers */
 static void LWLockMonitorSigHupHandler(SIGNAL_ARGS);
 static void LWLockMonitorShutdownHandler(SIGNAL_ARGS);
-#ifdef ENABLE_UT
-static void ut_test_find_deadlock_cycle(void);
-#endif /* ENABLE_UT */
 
 /*
  * maybe a thread is blocked when these hold,
@@ -598,7 +595,7 @@ NON_EXEC_STATIC void FaultMonitorMain()
     t_thrd.proc_cxt.MyProcPid = gs_thread_self();
 
     ereport(DEBUG5, (errmsg("lwlockmonitor process is started: %lu", t_thrd.proc_cxt.MyProcPid)));
-
+    (void)gspqsignal(SIGURG, print_stack);
     (void)gspqsignal(SIGHUP, LWLockMonitorSigHupHandler);    /* set flag to read config file */
     (void)gspqsignal(SIGINT, LWLockMonitorShutdownHandler);  /* request shutdown */
     (void)gspqsignal(SIGTERM, LWLockMonitorShutdownHandler); /* request shutdown */
@@ -630,11 +627,6 @@ NON_EXEC_STATIC void FaultMonitorMain()
         ALLOCSET_DEFAULT_INITSIZE,
         ALLOCSET_DEFAULT_MAXSIZE);
     (void)MemoryContextSwitchTo(lwm_context);
-
-#ifdef ENABLE_UT
-    /* unit testcase */
-    ut_test_find_deadlock_cycle();
-#endif /* ENABLE_UT */
 
     int curTryCounter;
     int* oldTryCounter = NULL;
@@ -807,220 +799,3 @@ static void LWLockMonitorShutdownHandler(SIGNAL_ARGS)
     errno = save_errno;
 }
 
-#ifdef ENABLE_UT
-
-static void ut_free_locks(lwm_lwlocks* locks_array, int n_holders)
-{
-    for (int i = 0; i < n_holders; ++i) {
-        pfree_ext(locks_array[i].held_lwlocks);
-    }
-    pfree_ext(locks_array);
-}
-
-static void ut_test_deadlock00(lwm_lwlocks* locks, int* nlocks)
-{
-    *nlocks = 1;
-
-    /* holding lwlock 1 and acquiring lwlock 1 */
-    locks->be_idx = 1;
-    locks->be_tid.thread_id = 1;
-    locks->want_lwlock.lock = GetMainLWLockByIndex(1);
-    locks->lwlocks_num = 1;
-    locks->held_lwlocks = (lwlock_id_mode*)palloc(sizeof(lwlock_id_mode));
-    locks->held_lwlocks[0].lock_addr.lock = GetMainLWLockByIndex(1);
-    locks->held_lwlocks[0].lock_sx = (LWLockMode)0;
-}
-
-static lwm_lwlocks* ut_test_deadlock01(int* nlocks)
-{
-    int nholders = 1;
-    *nlocks = 2;
-    lwm_lwlocks* locks_array = (lwm_lwlocks*)palloc(sizeof(lwm_lwlocks) * (*nlocks));
-
-    /* holding lwlock 2, and acquiring lwlock 1 */
-    locks_array[0].be_idx = 1;
-    locks_array[0].be_tid.thread_id = 1;
-    locks_array[0].want_lwlock.lock = GetMainLWLockByIndex(1);
-    locks_array[0].lwlocks_num = nholders;
-    locks_array[0].held_lwlocks = (lwlock_id_mode*)palloc(sizeof(lwlock_id_mode) * (nholders));
-    locks_array[0].held_lwlocks->lock_addr.lock = GetMainLWLockByIndex(2);
-    locks_array[0].held_lwlocks->lock_sx = (LWLockMode)0;
-
-    /* holding lwlock 1, and acquiring lwlock 2 */
-    locks_array[1].be_idx = 2;
-    locks_array[1].be_tid.thread_id = 2;
-    locks_array[1].want_lwlock.lock = GetMainLWLockByIndex(2);
-    locks_array[1].lwlocks_num = nholders;
-    locks_array[1].held_lwlocks = (lwlock_id_mode*)palloc(sizeof(lwlock_id_mode) * (nholders));
-    locks_array[1].held_lwlocks->lock_addr.lock = GetMainLWLockByIndex(1);
-    locks_array[1].held_lwlocks->lock_sx = (LWLockMode)1;
-
-    return locks_array;
-}
-
-static lwm_lwlocks* ut_test_deadlock02(int* nlocks)
-{
-    *nlocks = 5;
-    int nholders = 1;
-    lwm_lwlocks* locks_array = (lwm_lwlocks*)palloc(sizeof(lwm_lwlocks) * (*nlocks));
-
-    /* holding lwlock 1, and acquiring lwlock 2 */
-    locks_array[0].be_idx = 1;
-    locks_array[0].be_tid.thread_id = 1;
-    locks_array[0].held_lwlocks = (lwlock_id_mode*)palloc(sizeof(lwlock_id_mode) * (nholders));
-    locks_array[0].held_lwlocks[0].lock_addr.lock = GetMainLWLockByIndex(1);
-    locks_array[0].held_lwlocks[0].lock_sx = (LWLockMode)0;
-    locks_array[0].want_lwlock.lock = GetMainLWLockByIndex(2);
-    locks_array[0].lwlocks_num = nholders;
-
-    /* holding lwlock 2, and acquiring lwlock 3 */
-    locks_array[1].be_idx = 2;
-    locks_array[1].be_tid.thread_id = 2;
-    locks_array[1].held_lwlocks = (lwlock_id_mode*)palloc(sizeof(lwlock_id_mode) * (nholders));
-    locks_array[1].held_lwlocks[0].lock_addr.lock = GetMainLWLockByIndex(2);
-    locks_array[1].held_lwlocks[0].lock_sx = (LWLockMode)0;
-
-    locks_array[1].want_lwlock.lock = GetMainLWLockByIndex(3);
-    locks_array[1].lwlocks_num = nholders;
-
-    /* holding lwlock 3, and acquiring lwlock 4 */
-    locks_array[2].be_idx = 3;
-    locks_array[2].be_tid.thread_id = 3;
-    locks_array[2].held_lwlocks = (lwlock_id_mode*)palloc(sizeof(lwlock_id_mode) * (nholders));
-    locks_array[2].held_lwlocks[0].lock_addr.lock = GetMainLWLockByIndex(3);
-    locks_array[2].held_lwlocks[0].lock_sx = (LWLockMode)0;
-
-    locks_array[2].want_lwlock.lock = GetMainLWLockByIndex(4);
-    locks_array[2].lwlocks_num = nholders;
-
-    /* holding lwlock 4, and acquiring lwlock 5 */
-    locks_array[3].be_idx = 4;
-    locks_array[3].be_tid.thread_id = 4;
-    locks_array[3].held_lwlocks = (lwlock_id_mode*)palloc(sizeof(lwlock_id_mode) * (nholders));
-    locks_array[3].held_lwlocks[0].lock_addr.lock = GetMainLWLockByIndex(4);
-    locks_array[3].held_lwlocks[0].lock_sx = (LWLockMode)1;
-
-    locks_array[3].want_lwlock.lock = GetMainLWLockByIndex(5);
-    locks_array[3].lwlocks_num = nholders;
-
-    /* holding lwlock 5, and acquiring lwlock 1 */
-    locks_array[4].be_idx = 5;
-    locks_array[4].be_tid.thread_id = 5;
-    locks_array[4].held_lwlocks = (lwlock_id_mode*)palloc(sizeof(lwlock_id_mode) * (nholders));
-    locks_array[4].held_lwlocks[0].lock_addr.lock = GetMainLWLockByIndex(5);
-    locks_array[4].held_lwlocks[0].lock_sx = (LWLockMode)0;
-
-    locks_array[4].want_lwlock.lock = GetMainLWLockByIndex(1);
-    locks_array[4].lwlocks_num = nholders;
-
-    return locks_array;
-}
-
-#define held_lwlocks_1d(_x) locks_array[_x].held_lwlocks
-#define held_lwlocks_2d(_x, _y) locks_array[_x].held_lwlocks[_y]
-
-static lwm_lwlocks* ut_test_deadlock03(int* nlocks)
-{
-    *nlocks = 5;
-    int nholders = 5;
-    lwm_lwlocks* locks_array = (lwm_lwlocks*)palloc(sizeof(lwm_lwlocks) * (*nlocks));
-
-    held_lwlocks_1d(0) = (lwlock_id_mode*)palloc(sizeof(lwlock_id_mode) * (nholders));
-    held_lwlocks_1d(1) = (lwlock_id_mode*)palloc(sizeof(lwlock_id_mode) * (nholders));
-    held_lwlocks_1d(2) = (lwlock_id_mode*)palloc(sizeof(lwlock_id_mode) * (nholders));
-    held_lwlocks_1d(3) = (lwlock_id_mode*)palloc(sizeof(lwlock_id_mode) * (nholders));
-    held_lwlocks_1d(4) = (lwlock_id_mode*)palloc(sizeof(lwlock_id_mode) * (nholders));
-
-    locks_array[0].lwlocks_num = locks_array[1].lwlocks_num = locks_array[2].lwlocks_num = nholders;
-    locks_array[3].lwlocks_num = locks_array[4].lwlocks_num = nholders;
-
-    locks_array[0].want_lwlock.lock = GetMainLWLockByIndex(1);
-    held_lwlocks_2d(0, 4).lock_addr.lock = GetMainLWLockByIndex(7);
-    held_lwlocks_2d(0, 4).lock_sx = (LWLockMode)1;
-    locks_array[1].want_lwlock.lock = GetMainLWLockByIndex(2);
-    held_lwlocks_2d(1, 3).lock_addr.lock = GetMainLWLockByIndex(6);
-    held_lwlocks_2d(1, 3).lock_sx = (LWLockMode)0;
-    locks_array[2].want_lwlock.lock = GetMainLWLockByIndex(3);
-    held_lwlocks_2d(2, 2).lock_addr.lock = GetMainLWLockByIndex(1);
-    held_lwlocks_2d(2, 2).lock_sx = (LWLockMode)0;
-    held_lwlocks_2d(2, 1).lock_addr.lock = GetMainLWLockByIndex(5);
-    held_lwlocks_2d(2, 1).lock_sx = (LWLockMode)2;
-    locks_array[3].want_lwlock.lock = GetMainLWLockByIndex(4);
-    held_lwlocks_2d(3, 1).lock_addr.lock = GetMainLWLockByIndex(3);
-    held_lwlocks_2d(3, 1).lock_sx = (LWLockMode)0;
-    locks_array[4].want_lwlock.lock = GetMainLWLockByIndex(5);
-    held_lwlocks_2d(4, 0).lock_addr.lock = GetMainLWLockByIndex(4);
-    held_lwlocks_2d(4, 0).lock_sx = (LWLockMode)0;
-
-    held_lwlocks_2d(0, 0).lock_addr.lock = GetMainLWLockByIndex(8);
-    held_lwlocks_2d(0, 0).lock_sx = (LWLockMode)1;
-    held_lwlocks_2d(0, 1).lock_addr.lock = GetMainLWLockByIndex(9);
-    held_lwlocks_2d(0, 1).lock_sx = (LWLockMode)2;
-    held_lwlocks_2d(0, 2).lock_addr.lock = GetMainLWLockByIndex(10);
-    held_lwlocks_2d(0, 2).lock_sx = (LWLockMode)0;
-    held_lwlocks_2d(0, 3).lock_addr.lock = GetMainLWLockByIndex(11);
-    held_lwlocks_2d(0, 3).lock_sx = (LWLockMode)0;
-    held_lwlocks_2d(1, 0).lock_addr.lock = GetMainLWLockByIndex(12);
-    held_lwlocks_2d(1, 0).lock_sx = (LWLockMode)0;
-    held_lwlocks_2d(1, 1).lock_addr.lock = GetMainLWLockByIndex(13);
-    held_lwlocks_2d(1, 1).lock_sx = (LWLockMode)0;
-    held_lwlocks_2d(1, 2).lock_addr.lock = GetMainLWLockByIndex(14);
-    held_lwlocks_2d(1, 2).lock_sx = (LWLockMode)0;
-    held_lwlocks_2d(1, 4).lock_addr.lock = GetMainLWLockByIndex(15);
-    held_lwlocks_2d(1, 4).lock_sx = (LWLockMode)0;
-    held_lwlocks_2d(2, 0).lock_addr.lock = GetMainLWLockByIndex(16);
-    held_lwlocks_2d(2, 0).lock_sx = (LWLockMode)0;
-    held_lwlocks_2d(2, 3).lock_addr.lock = GetMainLWLockByIndex(17);
-    held_lwlocks_2d(2, 3).lock_sx = (LWLockMode)0;
-    held_lwlocks_2d(2, 4).lock_addr.lock = GetMainLWLockByIndex(18);
-    held_lwlocks_2d(2, 4).lock_sx = (LWLockMode)0;
-    held_lwlocks_2d(3, 0).lock_addr.lock = GetMainLWLockByIndex(19);
-    held_lwlocks_2d(3, 0).lock_sx = (LWLockMode)0;
-    held_lwlocks_2d(3, 2).lock_addr.lock = GetMainLWLockByIndex(20);
-    held_lwlocks_2d(3, 2).lock_sx = (LWLockMode)0;
-    held_lwlocks_2d(3, 3).lock_addr.lock = GetMainLWLockByIndex(21);
-    held_lwlocks_2d(3, 3).lock_sx = (LWLockMode)0;
-    held_lwlocks_2d(3, 4).lock_addr.lock = GetMainLWLockByIndex(22);
-    held_lwlocks_2d(3, 4).lock_sx = (LWLockMode)0;
-    held_lwlocks_2d(4, 1).lock_addr.lock = GetMainLWLockByIndex(23);
-    held_lwlocks_2d(4, 1).lock_sx = (LWLockMode)0;
-    held_lwlocks_2d(4, 2).lock_addr.lock = GetMainLWLockByIndex(24);
-    held_lwlocks_2d(4, 2).lock_sx = (LWLockMode)0;
-    held_lwlocks_2d(4, 3).lock_addr.lock = GetMainLWLockByIndex(25);
-    held_lwlocks_2d(4, 3).lock_sx = (LWLockMode)0;
-    held_lwlocks_2d(4, 4).lock_addr.lock = GetMainLWLockByIndex(26);
-    held_lwlocks_2d(4, 4).lock_sx = (LWLockMode)0;
-    return locks_array;
-}
-
-typedef lwm_lwlocks* (*ut_test_deadlock)(int*);
-
-const ut_test_deadlock ut_testcases[] = {ut_test_deadlock01, ut_test_deadlock02, ut_test_deadlock03};
-
-static void ut_test_find_deadlock_cycle(void)
-{
-    int nlocks = 0;
-    bool has_cycle = false;
-
-    lwm_deadlock deadlock;
-    deadlock.info = NULL;
-
-    lwm_lwlocks locks;
-    locks.held_lwlocks = NULL;
-    ut_test_deadlock00(&locks, &nlocks);
-    has_cycle = lwm_heavy_diagnosis(&deadlock, &locks, nlocks);
-    Assert(has_cycle);
-    pfree_ext(locks.held_lwlocks);
-
-    for (int i = 0; i < (int)(sizeof(ut_testcases) / sizeof(ut_testcases[0])); ++i) {
-        lwm_lwlocks* locks_array = ut_testcases[i](&nlocks);
-        has_cycle = lwm_heavy_diagnosis(&deadlock, locks_array, nlocks);
-        Assert(has_cycle);
-        lw_deadlock_auto_healing(&deadlock);
-        ut_free_locks(locks_array, nlocks);
-    }
-
-    pfree_ext(deadlock.info);
-}
-
-#endif /* ENABLE_UT */

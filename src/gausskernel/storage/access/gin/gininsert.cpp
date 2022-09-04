@@ -19,7 +19,6 @@
 #include "access/xloginsert.h"
 #include "access/cbtree.h"
 #include "access/cstore_am.h"
-#include "access/dfs/dfs_am.h"
 #include "access/sysattr.h"
 #include "access/tableam.h"
 #include "catalog/index.h"

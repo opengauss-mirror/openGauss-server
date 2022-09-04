@@ -1,0 +1,283 @@
+create schema spm_adaptive_gplan;
+set search_path = 'spm_adaptive_gplan';
+-------------------------------------------------------------------
+---adaptive select the right index accroding given constraint values
+create table t1(c1 int, c2 int, c3 int, c4 varchar(32), c5 text);
+Create index t1_idx2 on t1(c1,c2,c3,c4);
+Create index t1_idx1 on t1(c1,c2,c3);
+insert into t1( c1, c2, c3, c4, c5) SELECT (random()*(2*10^9))::integer , (random()*(2*10^9))::integer,  (random()*(2*10^9))::integer, (random()*(2*10^9))::integer,  repeat('abc', i%10) ::text from generate_series(1,10000) i;
+insert into t1( c1, c2, c3, c4, c5) SELECT (random()*1)::integer, (random()*1)::integer, (random()*1)::integer, (random()*(2*10^9))::integer, repeat('abc', i%10) ::text from generate_series(1,10000) i;
+analyze;
+---cplan
+explain(costs off) select * from t1 where c1=1 and c2=1 and c3=1 and c4='1';
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ [Bypass]
+ Index Scan using t1_idx2 on t1
+   Index Cond: ((c1 = 1) AND (c2 = 1) AND (c3 = 1) AND ((c4)::text = '1'::text))
+(3 rows)
+
+explain(costs off) select * from t1 where c1=1 and c2=1 and c3=11 and c4='11';
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Index Scan using t1_idx1 on t1
+   Index Cond: ((c1 = 1) AND (c2 = 1) AND (c3 = 11))
+   Filter: ((c4)::text = '11'::text)
+(3 rows)
+
+prepare multi_indices_test as select * from t1 where c1=$1 and c2=$2 and c3=$3 and c4=$4;
+explain(costs off) execute multi_indices_test(1,1,1,'1');
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Index Scan using t1_idx1 on t1
+   Index Cond: ((c1 = $1) AND (c2 = $2) AND (c3 = $3))
+   Filter: ((c4)::text = $4)
+(3 rows)
+
+explain(costs off) execute multi_indices_test(11,11,11, '11');
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Index Scan using t1_idx1 on t1
+   Index Cond: ((c1 = $1) AND (c2 = $2) AND (c3 = $3))
+   Filter: ((c4)::text = $4)
+(3 rows)
+
+deallocate multi_indices_test;
+prepare multi_indices_test as select /*+ use_cplan */ * from t1 where c1=$1 and c2=$2 and c3=$3 and c4=$4;
+explain(costs off) execute multi_indices_test(1,1,1,'1');
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Index Scan using t1_idx2 on t1
+   Index Cond: ((c1 = 1) AND (c2 = 1) AND (c3 = 1) AND ((c4)::text = '1'::text))
+(2 rows)
+
+explain(costs off) execute multi_indices_test(11,11,11, '11');
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Index Scan using t1_idx1 on t1
+   Index Cond: ((c1 = 11) AND (c2 = 11) AND (c3 = 11))
+   Filter: ((c4)::text = '11'::text)
+(3 rows)
+
+deallocate multi_indices_test;
+---adpative gplan selection
+prepare multi_indices_test as select /*+ choose_adaptive_gplan */ * from t1 where c1=$1 and c2=$2 and c3=$3 and c4=$4;
+explain(costs off) execute multi_indices_test(1,1,1,'1');
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ [Bypass]
+ Index Scan using t1_idx2 on t1
+   Index Cond: ((c1 = $1) AND (c2 = $2) AND (c3 = $3) AND ((c4)::text = $4))
+(3 rows)
+
+explain(costs off) execute multi_indices_test(1,1,1, '11');
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ [Bypass]
+ Index Scan using t1_idx2 on t1
+   Index Cond: ((c1 = $1) AND (c2 = $2) AND (c3 = $3) AND ((c4)::text = $4))
+(3 rows)
+
+explain(costs off) execute multi_indices_test(1,1,11, '11');
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Index Scan using t1_idx1 on t1
+   Index Cond: ((c1 = $1) AND (c2 = $2) AND (c3 = $3))
+   Filter: ((c4)::text = $4)
+(3 rows)
+
+explain(costs off) execute multi_indices_test(1,1,20, '11');
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Index Scan using t1_idx1 on t1
+   Index Cond: ((c1 = $1) AND (c2 = $2) AND (c3 = $3))
+   Filter: ((c4)::text = $4)
+(3 rows)
+
+explain(costs off) execute multi_indices_test(1,1,10,'1');
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Index Scan using t1_idx1 on t1
+   Index Cond: ((c1 = $1) AND (c2 = $2) AND (c3 = $3))
+   Filter: ((c4)::text = $4)
+(3 rows)
+
+deallocate multi_indices_test;
+prepare multi_indices_test as select /*+ choose_adaptive_gplan */ c1, c2, c3 from t1 where c1=$1 and c2=$2 and c3=$3;
+explain(costs off) execute multi_indices_test(1,1,1);
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Bitmap Heap Scan on t1
+   Recheck Cond: ((c1 = $1) AND (c2 = $2) AND (c3 = $3))
+   ->  Bitmap Index Scan on t1_idx1
+         Index Cond: ((c1 = $1) AND (c2 = $2) AND (c3 = $3))
+(4 rows)
+
+explain(costs off) execute multi_indices_test(11,11,11);
+                      QUERY PLAN                       
+-------------------------------------------------------
+ [Bypass]
+ Index Only Scan using t1_idx1 on t1
+   Index Cond: ((c1 = $1) AND (c2 = $2) AND (c3 = $3))
+(3 rows)
+
+deallocate multi_indices_test;
+prepare multi_indices_test as select /*+ choose_adaptive_gplan */ c1, c2, c3 from t1 where c1=$1 and c2=$2;
+explain(costs off) execute multi_indices_test(1,1);
+                  QUERY PLAN                   
+-----------------------------------------------
+ Bitmap Heap Scan on t1
+   Recheck Cond: ((c1 = $1) AND (c2 = $2))
+   ->  Bitmap Index Scan on t1_idx1
+         Index Cond: ((c1 = $1) AND (c2 = $2))
+(4 rows)
+
+explain(costs off) execute multi_indices_test(11,11);
+               QUERY PLAN                
+-----------------------------------------
+ [Bypass]
+ Index Only Scan using t1_idx1 on t1
+   Index Cond: ((c1 = $1) AND (c2 = $2))
+(3 rows)
+
+-------------------------------------------------------------------
+---enable gplan using partial index
+create table t0(c1 int, c2 text);
+create index t0_partial_index on t0(c1) where c1 < 3;
+insert into t0( c1, c2) SELECT (random()*100)::integer, repeat('abc', i%10) ::text from generate_series(1,100000) i;
+---cplan
+explain select * from t0 where c1 = 1;
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Bitmap Heap Scan on t0  (cost=11.17..575.12 rows=377 width=36)
+   Recheck Cond: (c1 = 1)
+   ->  Bitmap Index Scan on t0_partial_index  (cost=0.00..11.08 rows=377 width=0)
+         Index Cond: (c1 = 1)
+(4 rows)
+
+explain select * from t0 where c1 = 10;
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Seq Scan on t0  (cost=0.00..1553.65 rows=377 width=36)
+   Filter: (c1 = 10)
+(2 rows)
+
+---adpative gplan selection
+prepare partidx_test as select /*+ choose_adaptive_gplan */ * from t0 where c1 = $1;
+explain(costs off) execute partidx_test(1);
+                 QUERY PLAN                  
+---------------------------------------------
+ Bitmap Heap Scan on t0
+   Recheck Cond: ((c1 = $1) AND (c1 < 3))
+   ->  Bitmap Index Scan on t0_partial_index
+         Index Cond: (c1 = $1)
+(4 rows)
+
+explain(costs off) execute partidx_test(10);
+     QUERY PLAN      
+---------------------
+ Seq Scan on t0
+   Filter: (c1 = $1)
+(2 rows)
+
+explain(costs off) execute partidx_test(2);
+                 QUERY PLAN                  
+---------------------------------------------
+ Bitmap Heap Scan on t0
+   Recheck Cond: ((c1 = $1) AND (c1 < 3))
+   ->  Bitmap Index Scan on t0_partial_index
+         Index Cond: (c1 = $1)
+(4 rows)
+
+explain(costs off) execute partidx_test(11);
+     QUERY PLAN      
+---------------------
+ Seq Scan on t0
+   Filter: (c1 = $1)
+(2 rows)
+
+deallocate partidx_test;
+--------------------
+---adaptive select the right join operator according to given limit offset values
+create table tt1(c1 int, c2 int);
+create table tt2(c1 int, c2 int);
+insert into tt1 values(generate_series(1, 10), generate_series(1, 1000));
+insert into tt2 values(generate_series(1, 10), generate_series(1, 1000));
+---cplan
+explain(costs off) select * from tt1, tt2 where tt1.c1 = tt2.c1 limit 1, 1;
+               QUERY PLAN               
+----------------------------------------
+ Limit
+   ->  Nested Loop
+         Join Filter: (tt1.c1 = tt2.c1)
+         ->  Seq Scan on tt1
+         ->  Materialize
+               ->  Seq Scan on tt2
+(6 rows)
+
+explain(costs off) select * from tt1, tt2 where tt1.c1 = tt2.c1 limit 1000, 1;
+              QUERY PLAN              
+--------------------------------------
+ Limit
+   ->  Hash Join
+         Hash Cond: (tt1.c1 = tt2.c1)
+         ->  Seq Scan on tt1
+         ->  Hash
+               ->  Seq Scan on tt2
+(6 rows)
+
+---adpative gplan selection
+prepare offset_test as select /*+ choose_adaptive_gplan */ * from tt1, tt2 where tt1.c1 = tt2.c1 limit $1, 1;
+explain(costs off) execute offset_test(1);
+               QUERY PLAN               
+----------------------------------------
+ Limit
+   ->  Nested Loop
+         Join Filter: (tt1.c1 = tt2.c1)
+         ->  Seq Scan on tt1
+         ->  Materialize
+               ->  Seq Scan on tt2
+(6 rows)
+
+explain(costs off) execute offset_test(1000);
+              QUERY PLAN              
+--------------------------------------
+ Limit
+   ->  Hash Join
+         Hash Cond: (tt1.c1 = tt2.c1)
+         ->  Seq Scan on tt1
+         ->  Hash
+               ->  Seq Scan on tt2
+(6 rows)
+
+explain(costs off) execute offset_test(1);
+               QUERY PLAN               
+----------------------------------------
+ Limit
+   ->  Nested Loop
+         Join Filter: (tt1.c1 = tt2.c1)
+         ->  Seq Scan on tt1
+         ->  Materialize
+               ->  Seq Scan on tt2
+(6 rows)
+
+explain(costs off) execute offset_test(1000);
+              QUERY PLAN              
+--------------------------------------
+ Limit
+   ->  Hash Join
+         Hash Cond: (tt1.c1 = tt2.c1)
+         ->  Seq Scan on tt1
+         ->  Hash
+               ->  Seq Scan on tt2
+(6 rows)
+
+deallocate offset_test;
+--------------------------------------------------------------------
+---cleaning up
+drop table t0;
+drop table t1;
+drop table tt1;
+drop table tt2;
+drop schema spm_adaptive_gplan cascade;
+reset current_schema;

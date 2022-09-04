@@ -115,39 +115,6 @@ float8 datum_get_float8(Oid type, Datum datum)
     return value;
 }
 
-int32 datum_get_int(Oid type, Datum datum)
-{
-    int32 value = 0;
-    switch (type) {
-        case BOOLOID:
-            value = DatumGetBool(datum) ? 1 : 0;
-            break;
-        case INT1OID:
-            value = DatumGetInt8(datum);
-            break;
-        case INT2OID:
-            value = DatumGetInt16(datum);
-            break;
-        case INT4OID:
-            value = DatumGetInt32(datum);
-            break;
-        case INT8OID:
-            value = DatumGetInt64(datum);
-            break;
-        case FLOAT4OID:
-            value = DatumGetFloat4(datum);
-            break;
-        case FLOAT8OID:
-            value = DatumGetFloat8(datum);
-            break;
-        default:
-            ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("Oid type %u not yet supported", type)));
-            break;
-    }
-    return value;
-}
-
 Datum string_to_datum(const char *str, Oid datatype)
 {
     switch (datatype) {

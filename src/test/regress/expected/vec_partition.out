@@ -32,18 +32,15 @@ select L_ORDERKEY from LINEITEM_partition where L_ORDERKEY = 8001::int8;
 (7 rows)
 
 explain (verbose on, costs off) select L_ORDERKEY from LINEITEM_partition where L_ORDERKEY > 8000::int8 ;
-                               QUERY PLAN                                
--------------------------------------------------------------------------
+                            QUERY PLAN                             
+-------------------------------------------------------------------
  Row Adapter
    Output: l_orderkey
-   ->  Vector Partition Iterator
+   ->  Partitioned CStore Scan on vector_engine.lineitem_partition
          Output: l_orderkey
-         Iterations: 1
-         ->  Partitioned CStore Scan on vector_engine.lineitem_partition
-               Output: l_orderkey
-               Filter: (lineitem_partition.l_orderkey > 8000::bigint)
-               Selected Partitions:  7
-(9 rows)
+         Filter: (lineitem_partition.l_orderkey > 8000::bigint)
+         Selected Partitions:  7
+(6 rows)
 
 reset enable_vector_engine;
 create table test_vec_sortinfo_row(b1 VARCHAR(1000), b2 INT,  b4 INT) 

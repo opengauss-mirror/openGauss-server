@@ -48,6 +48,7 @@
 #include "pgxc/pgxc.h"
 #include "pgxc/poolutils.h"
 #endif
+#include "utils/mem_snapshot.h"
 
 static void WLMmonitor_MainLoop(void);
 static void WLMmonitor_worker(int type);
@@ -924,6 +925,7 @@ static void WLMmonitor_MainLoop(void)
 {
     TimestampTz last_monitor_time = GetCurrentTimestamp();
     TimestampTz next_timeout_time = 0;
+    TimestampTz next_memcheck_time = 0;
     int verify_count = 0;
 
     /* instance statistics parameters */
@@ -956,6 +958,12 @@ static void WLMmonitor_MainLoop(void)
         }
 
         ResetLatch(&t_thrd.wlm_cxt.wlm_mainloop_latch);
+
+        TimestampTz memcheck_time = GetCurrentTimestamp();
+        if (memcheck_time > next_memcheck_time) {
+            ExecOverloadEscape();
+            next_memcheck_time = TimestampTzPlusMilliseconds(memcheck_time, 10 * MSECS_PER_SEC);
+        }
 
         /*
          * Sleep until a signal is received, or until a poll is forced by
@@ -992,6 +1000,7 @@ static void WLMmonitor_MainLoop(void)
                 WLMUpdateCgroupCPUInfo();
                 next_timeout_time = TimestampTzPlusMilliseconds(time_now, 10 * MSECS_PER_SEC);
             }
+
         }
 
         if (IS_PGXC_COORDINATOR) {
@@ -1168,7 +1177,7 @@ NON_EXEC_STATIC void WLMmonitorMain(void)
 
     t_thrd.wlm_cxt.wlm_init_done = false;
     t_thrd.wlm_cxt.wlm_xact_start = false;
-
+    (void)gspqsignal(SIGURG, print_stack);
     (void)gspqsignal(SIGHUP, WLMSigHupHandler);
     (void)gspqsignal(SIGINT, SIG_IGN);
     (void)gspqsignal(SIGTERM, WLMmonitorSigTermHandler);
@@ -1496,6 +1505,7 @@ NON_EXEC_STATIC void WLMarbiterMain(void)
     t_thrd.wlm_cxt.wlm_init_done = false;
     t_thrd.wlm_cxt.wlm_xact_start = false;
 
+    (void)gspqsignal(SIGURG, print_stack);
     (void)gspqsignal(SIGHUP, WLMSigHupHandler);
     (void)gspqsignal(SIGINT, SIG_IGN);
     (void)gspqsignal(SIGTERM, WLMarbiterSigTermHandler);

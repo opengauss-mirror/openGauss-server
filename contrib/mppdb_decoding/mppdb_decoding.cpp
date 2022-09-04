@@ -105,6 +105,13 @@ static void pg_decode_startup(LogicalDecodingContext* ctx, OutputPluginOptions* 
     data->only_local = true;
     data->tableWhiteList = NIL;
 
+    /* read default option from GUC */
+    DecodeOptionsDefault *defaultOption = LogicalDecodeGetOptionsDefault();
+    if (defaultOption != NULL) {
+        data->max_txn_in_memory = defaultOption->max_txn_in_memory;
+        data->max_reorderbuffer_in_memory = defaultOption->max_reorderbuffer_in_memory;
+    }
+
     ctx->output_plugin_private = data;
 
     opt->output_type = OUTPUT_PLUGIN_TEXTUAL_OUTPUT;

@@ -23,6 +23,10 @@
 #include "storage/smgr/fd.h"
 #include "utils/hsearch.h"
 
+#ifdef ENABLE_UT
+#define static
+#endif
+
 /* Current session timezone (controlled by TimeZone GUC) */
 THR_LOCAL pg_tz* session_timezone = NULL;
 

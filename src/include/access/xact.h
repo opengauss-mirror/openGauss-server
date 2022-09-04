@@ -159,6 +159,7 @@ typedef struct xl_xact_commit {
     int nlibrary;          /* number of library */
     /* Array of ColFileNode(s) to drop at commit */
     ColFileNodeRel xnodes[1]; /* VARIABLE LENGTH ARRAY */
+                           /* ColFileNode is used in new verion */
                            /* ARRAY OF COMMITTED SUBTRANSACTION XIDs FOLLOWS */
                            /* ARRAY OF SHARED INVALIDATION MESSAGES FOLLOWS */
                            /* xl_xact_origin if XACT_HAS_ORIGIN present */
@@ -191,8 +192,13 @@ typedef struct xl_xact_abort {
     int nlibrary;          /* number of library */
     /* Array of ColFileNode(s) to drop at abort */
     ColFileNodeRel xnodes[1]; /* VARIABLE LENGTH ARRAY */
+						   /* ColFileNode is used in new verion */
                            /* ARRAY OF ABORTED SUBTRANSACTION XIDs FOLLOWS */
 } xl_xact_abort;
+
+#define GET_SUB_XACTS(xnodes, nRels, compress)                            \
+    (compress) ? ((TransactionId *)&(((ColFileNode *)(void *)(xnodes))[(nRels)])) \
+               : ((TransactionId *)&(((ColFileNodeRel *)(void *)(xnodes))[(nRels)]))
 
 /* Note the intentional lack of an invalidation message array c.f. commit */
 
@@ -306,7 +312,6 @@ extern TransactionId GetCurrentTransactionIdIfAny(void);
 extern GTM_TransactionHandle GetTransactionHandleIfAny(TransactionState s);
 extern GTM_TransactionHandle GetCurrentTransactionHandleIfAny(void);
 extern TransactionState GetCurrentTransactionState(void);
-extern TransactionId GetParentTransactionIdIfAny(TransactionState s);
 extern void ResetTransactionInfo(void);
 extern void EndParallelWorkerTransaction(void);
 
@@ -327,7 +332,6 @@ extern bool GetCurrentCommandIdUsed(void);
 extern TimestampTz GetCurrentTransactionStartTimestamp(void);
 extern TimestampTz GetCurrentStatementStartTimestamp(void);
 extern TimestampTz GetCurrentStatementLocalStartTimestamp(void);
-extern TimestampTz GetCurrentTransactionStopTimestamp(void);
 extern void SetCurrentStatementStartTimestamp();
 #ifdef PGXC
 extern TimestampTz GetCurrentGTMStartTimestamp(void);
@@ -421,7 +425,7 @@ extern void parseAndRemoveLibrary(char* library, int nlibrary);
 extern bool IsInLiveSubtransaction();
 extern void ExtendCsnlogForSubtrans(TransactionId parent_xid, int nsub_xid, TransactionId* sub_xids);
 extern CommitSeqNo SetXact2CommitInProgress(TransactionId xid, CommitSeqNo csn);
-extern void XactGetRelFiles(XLogReaderState* record, ColFileNodeRel** xnodesPtr, int* nrelsPtr);
+extern void XactGetRelFiles(XLogReaderState* record, ColFileNode** xnodesPtr, int* nrelsPtr, bool* compress);
 extern bool XactWillRemoveRelFiles(XLogReaderState *record);
 extern HTAB* relfilenode_hashtbl_create();
 extern CommitSeqNo getLocalNextCSN();
@@ -454,7 +458,7 @@ extern void ApplyUndoActions(void);
 extern void SetUndoActionsInfo(void);
 extern void ResetUndoActionsInfo(void);
 extern bool CanPerformUndoActions(void);
-extern void push_unlink_rel_to_hashtbl(ColFileNodeRel *xnodes, int nrels);
+extern void push_unlink_rel_to_hashtbl(ColFileNode *xnodes, int nrels);
 
 extern void XactCleanExceptionSubTransaction(SubTransactionId head);
 extern char* GetCurrentTransactionName();

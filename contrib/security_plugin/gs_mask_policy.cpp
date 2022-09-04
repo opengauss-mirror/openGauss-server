@@ -179,11 +179,8 @@ static bool is_valid_for_masking(const char* func_name, Oid funcnsp, int& funcid
 {
     CatCList   *catlist = NULL;
 #ifndef ENABLE_MULTIPLE_NODES
-    if (t_thrd.proc->workingVersionNum < 92470) {
-        catlist = SearchSysCacheList1(PROCNAMEARGSNSP, CStringGetDatum(func_name));
-    } else {
-        catlist = SearchSysCacheList1(PROCALLARGS, CStringGetDatum(func_name));
-    }
+    int cacheId = (t_thrd.proc->workingVersionNum < 92470) ? PROCNAMEARGSNSP : PROCALLARGS;
+    catlist = SearchSysCacheList1(cacheId, CStringGetDatum(func_name));
 #else
     catlist = SearchSysCacheList1(PROCNAMEARGSNSP, CStringGetDatum(func_name));
 #endif

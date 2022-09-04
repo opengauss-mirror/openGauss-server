@@ -893,3 +893,91 @@ int bms_next_member(const Bitmapset* a, int prevbit)
     }
     return -2;
 }
+
+#ifndef ENABLE_MULTIPLE_NODES
+/*
+ * bms_get_singleton_member
+ *
+ * Test whether the given set is a singleton.
+ * If so, set *member to the value of its sole member, and return true.
+ * If not, return false, without changing *member.
+ *
+ * This is more convenient and faster than calling bms_membership() and then
+ * bms_singleton_member(), if we don't care about distinguishing empty sets
+ * from multiple-member sets.
+ */
+bool bms_get_singleton_member(const Bitmapset *a, int *member)
+{
+    int result = -1;
+    int nwords;
+    int wordnum;
+
+    if (a == NULL)
+        return false;
+    nwords = a->nwords;
+    for (wordnum = 0; wordnum < nwords; wordnum++) {
+        bitmapword w = a->words[wordnum];
+
+        if (w != 0) {
+            if (result >= 0 || HAS_MULTIPLE_ONES(w))
+                return false;
+            result = wordnum * BITS_PER_BITMAPWORD;
+            while ((w & BYTE_VALUE) == 0) {
+                w >>= BYTE_NUMBER;
+                result += BYTE_NUMBER;
+            }
+            result += rightmost_one_pos[w & BYTE_VALUE];
+        }
+    }
+    if (result < 0) {
+        return false;
+    }
+    *member = result;
+    return true;
+}
+
+/*
+ * bms_member_index
+ *		determine 0-based index of member x in the bitmap
+ *
+ * Returns (-1) when x is not a member.
+ */
+int bms_member_index(const Bitmapset *a, int x)
+{
+    int bitnum;
+    int wordnum;
+    int result = 0;
+    bitmapword mask;
+
+    /* return -1 if not a member of the bitmap */
+    if (!bms_is_member(x, a))
+        return -1;
+
+    wordnum = WORDNUM(x);
+    bitnum = BITNUM(x);
+
+    /* count bits in preceding words */
+    for (int i = 0; i < wordnum; i++) {
+        bitmapword w = a->words[i];
+
+        /* No need to count the bits in a zero word */
+        if (w != 0) {
+            result += number_of_ones[w & BYTE_VALUE];
+            w >>= BYTE_NUMBER;
+        }
+    }
+
+    /*
+     * Now add bits of the last word, but only those before the item. We can
+     * do that by applying a mask and then using popcount again. To get
+     * 0-based index, we want to count only preceding bits, not the item
+     * itself, so we subtract 1.
+     */
+    mask = ((bitmapword)1 << bitnum) - 1;
+    bitmapword tmp = a->words[wordnum] & mask;
+    result += number_of_ones[tmp & BYTE_VALUE];
+    tmp >>= BYTE_NUMBER;
+
+    return result;
+}
+#endif

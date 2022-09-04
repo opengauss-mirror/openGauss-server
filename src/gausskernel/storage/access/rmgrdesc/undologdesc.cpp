@@ -34,16 +34,6 @@ const char* undo::undo_xlog_type_name(uint8 subtype)
             return "undo_extend";
             break;
         }
-        case XLOG_UNDO_CLEAN:
-        {
-            return "undo_clean";
-            break;
-        }
-        case XLOG_SLOT_CLEAN:
-        {
-            return "undo_slot_clean";
-            break;
-        }
         case XLOG_UNDO_DISCARD:
         {
             return "undo_slot_discard";
@@ -84,20 +74,6 @@ void undo::UndoXlogDesc(StringInfo buf, XLogReaderState *record)
             XlogUndoExtend *xlrec = (XlogUndoExtend *) rec;
             appendStringInfo(buf, "EXTEND_UNDO_LOG: pre tail zoneId/offset=%d/%lu, tail zoneId/offset=%d/%lu.",
                 (int)(UNDO_PTR_GET_ZONE_ID(xlrec->prevtail)), UNDO_PTR_GET_OFFSET(xlrec->prevtail),
-                (int)(UNDO_PTR_GET_ZONE_ID(xlrec->tail)), UNDO_PTR_GET_OFFSET(xlrec->tail));
-            break;
-        }
-        case XLOG_UNDO_CLEAN:
-        {
-            XlogUndoClean *xlrec = (XlogUndoClean *) rec;
-            appendStringInfo(buf, "CLEAN_UNDO_LOG: zoneId=%d, tail=%lu.",
-                (int)(UNDO_PTR_GET_ZONE_ID(xlrec->tail)), UNDO_PTR_GET_OFFSET(xlrec->tail));
-            break;
-        }
-        case XLOG_SLOT_CLEAN:
-        {
-            XlogUndoClean *xlrec = (XlogUndoClean *) rec;
-            appendStringInfo(buf, "CLEAN_UNDO_SLOT_LOG: zoneId=%d, tail=%lu.",
                 (int)(UNDO_PTR_GET_ZONE_ID(xlrec->tail)), UNDO_PTR_GET_OFFSET(xlrec->tail));
             break;
         }

@@ -51,6 +51,7 @@
 #include "postmaster/autovacuum.h"
 #include "postmaster/bgworker.h"
 #include "postmaster/snapcapturer.h"
+#include "postmaster/cfs_shrinker.h"
 #include "postmaster/rbcleaner.h"
 #include "replication/slot.h"
 #ifdef PGXC
@@ -62,7 +63,6 @@
 #include "storage/lmgr.h"
 #include "storage/pmsignal.h"
 #include "storage/proc.h"
-#include "storage/procarray.h"
 #include "storage/procsignal.h"
 #include "storage/spin.h"
 #include "utils/timestamp.h"
@@ -286,7 +286,9 @@ void InitProcGlobal(void)
     g_instance.proc_base->bgworkerFreeProcs  = NULL;	
     g_instance.proc_base->cbmwriterLatch = NULL;
     g_instance.proc_base->ShareStoragexlogCopyerLatch = NULL;
+    g_instance.proc_base->BarrierPreParseLatch = NULL;
     pg_atomic_init_u32(&g_instance.proc_base->procArrayGroupFirst, INVALID_PGPROCNO);
+    pg_atomic_init_u32(&g_instance.proc_base->snapshotGroupFirst, INVALID_PGPROCNO);
     pg_atomic_init_u32(&g_instance.proc_base->clogGroupFirst, INVALID_PGPROCNO);
 
     /*
@@ -470,8 +472,8 @@ void InitProcGlobal(void)
     g_instance.proc_preparexact_base = &procs[g_instance.shmem_cxt.MaxBackends +
                                               NUM_CMAGENT_PROCS + NUM_AUXILIARY_PROCS + NUM_DCF_CALLBACK_PROCS];
 
-    /* Create &g_instance.proc_base_lock mutexlock, too */
-    pthread_mutex_init(&g_instance.proc_base_lock, NULL);
+    /* Create &g_instance.proc_base_mutex_lock mutexlock, too */
+    pthread_mutex_init(&g_instance.proc_base_mutex_lock, NULL);
 
     MemoryContextSwitchTo(oldContext);
 }
@@ -566,54 +568,68 @@ PGPROC* GetFreeCMAgentProc()
     /* sleep 100ms every time while proc has not init */
     const int sleepTime = 100000;
     const int maxRepeatTimes = 10;
+
+    int times = 0;
+    PG_TRY();
+    {
+        while ((g_instance.conn_cxt.CurCMAProcCount == 0) && (g_instance.proc_base->cmAgentFreeProcs == NULL)) {
+            times++;
+            pg_usleep(sleepTime);
+            /* Check interrupt in order to reveive cancel signal and break loop */
+            CHECK_FOR_INTERRUPTS();
+            ereport(WARNING, (errmsg("CMA-proc list has not init completely, current %d times, total %d us period",
+                times, times * sleepTime)));
+            if (times >= maxRepeatTimes) {
+                break;
+            }
+        }
+    }
+    PG_CATCH();
+    {
+        ProcBaseLockRelease(&g_instance.proc_base_mutex_lock);
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+
+    return g_instance.proc_base->cmAgentFreeProcs;
+}
+
+static void CheckCMAReservedProc()
+{
     /* Set threshold value. If proc consumed number is more than threshold, send single to print thread stack */
     const float procThreshold = 0.8;
     uint32 procWarningCount = NUM_CMAGENT_PROCS * procThreshold;
-    int times = 0;
-    while ((g_instance.conn_cxt.CurCMAProcCount == 0) && (g_instance.proc_base->cmAgentFreeProcs == NULL)) {
-        times++;
-        pg_usleep(sleepTime);
-        /* Check interrupt in order to reveive cancel signal and break loop */
-        CHECK_FOR_INTERRUPTS();
-        ereport(WARNING, (errmsg("CMA-proc list has not init completely, current %d times, total %d us period",
-            times, times * sleepTime)));
-        if (times >= maxRepeatTimes) {
-            break;
-        }
-    }
 
-    PGPROC* cmaProc = g_instance.proc_base->cmAgentFreeProcs;
+    PGPROC* cmaProc = t_thrd.proc;
 
     if (cmaProc != NULL) {
         (void)pg_atomic_add_fetch_u32(&g_instance.conn_cxt.CurCMAProcCount, 1);
-        SpinLockRelease(&g_instance.conn_cxt.ConnCountLock);
-        ereport(DEBUG5, (errmsg("Get free proc from CMA-proc list, proc location is %p. Current proc count %d",
-            cmaProc, g_instance.conn_cxt.CurCMAProcCount)));
     }
+    int curCMAProcCount = g_instance.conn_cxt.CurCMAProcCount;
+    ereport(DEBUG5, (errmsg("Get free proc from CMA-proc list, proc location is %p. Current proc count %d",
+        cmaProc, curCMAProcCount)));
 
     /*
      * If proc consumed number for cm_agent is more than threshold, print all threads wait status which appname
      * equals to 'cm_agent'
      */
-    if (g_instance.conn_cxt.CurCMAProcCount >= procWarningCount) {
+    if (curCMAProcCount >= (int)procWarningCount) {
         ereport(WARNING, (errmsg("Get free proc from CMA-proc list, proc location is %p."
-            " Current proc count %d is more than threshold %d. Ready to print thread wait status",
-            cmaProc, g_instance.conn_cxt.CurCMAProcCount, procWarningCount)));
+            " Current proc count %d is more than threshold %u. Ready to print thread wait status",
+            cmaProc, curCMAProcCount, procWarningCount)));
         PgStatCMAThreadStatus();
     }
-
-    return cmaProc;
 }
 
 /* Relase child slot in some cases, other role will release slot in CleanupBackend */
 static inline void ReleaseChildSlot(void)
 {
-    if (IsUnderPostmaster && ((t_thrd.role == WLM_WORKER || t_thrd.role == WLM_MONITOR || t_thrd.role == WLM_ARBITER ||
-        t_thrd.role == WLM_CPMONITOR) ||
-        IsJobAspProcess() || t_thrd.role == STREAMING_BACKEND || IsStatementFlushProcess() || IsJobSnapshotProcess() ||
+    if (IsUnderPostmaster && (WLMThreadAmI() || IsJobAspProcess() ||
+        t_thrd.role == STREAMING_BACKEND || IsStatementFlushProcess() || IsJobSnapshotProcess() ||
         t_thrd.postmaster_cxt.IsRPCWorkerThread || IsJobPercentileProcess() || t_thrd.role == ARCH ||
         IsTxnSnapCapturerProcess() || IsRbCleanerProcess() || t_thrd.role == GLOBALSTATS_THREAD ||
-        t_thrd.role == BARRIER_ARCH || t_thrd.role == BARRIER_CREATOR || t_thrd.role == APPLY_LAUNCHER)) {
+        t_thrd.role == BARRIER_ARCH || t_thrd.role == BARRIER_CREATOR || t_thrd.role == APPLY_LAUNCHER ||
+        t_thrd.role == STACK_PERF_WORKER || ParallelLogicalWorkerThreadAmI())) {
         (void)ReleasePostmasterChildSlot(t_thrd.proc_cxt.MyPMChildSlot);
     }
 }
@@ -637,6 +653,54 @@ static void GetProcFromFreeList()
         t_thrd.proc = GetFreeProc();
 #endif
     }
+}
+
+/*
+ * Provide two helper functions lock/unlock for proc_base_mutex_lock, ideally we need have
+ * ResourceOwner to do so, however in ProcInit stage ResourceOwner is not setup yet,
+ * provide a more privmitive method to avoid leak of lock
+ *
+ * Basically, any lock that do not coverd by ResourceOwner should have suck kind of
+ * protection mechanism
+ */
+void ProcBaseLockAccquire(pthread_mutex_t *procBaseLock)
+{
+    if (unlikely(procBaseLock != &g_instance.proc_base_mutex_lock)) {
+        return;
+    }
+
+    if (unlikely(t_thrd.utils_cxt.holdProcBaseLock)) {
+        return;
+    }
+
+    /* mark proc_bas_lock is held by current thread */
+    t_thrd.utils_cxt.holdProcBaseLock = true;
+
+    pthread_mutex_lock(&g_instance.proc_base_mutex_lock);
+}
+
+void ProcBaseLockRelease(pthread_mutex_t *procBaseLock)
+{
+    if (unlikely(procBaseLock != &g_instance.proc_base_mutex_lock)) {
+        return;
+    }
+
+    /*
+     * we have to check if mutex lock is held by current thread, normally it is not safe
+     * to handle lock/unlock on pthread_mutex_t in different threads (OS' design)
+     */
+    if (unlikely(!t_thrd.utils_cxt.holdProcBaseLock)) {
+        return;
+    }
+    /*
+     * do check holdProcBaseLock flag in release, as pthread_mutex_unlock() fucntion
+     * can ReEntrancy
+     */
+
+    pthread_mutex_unlock(&g_instance.proc_base_mutex_lock);
+
+    /* mark proc_base_mutex_lock is released from current thread */
+    t_thrd.utils_cxt.holdProcBaseLock = false;
 }
 
 /*
@@ -668,19 +732,27 @@ void InitProcess(void)
      * Try to get a proc struct from the free list.  If this fails, we must be
      * out of PGPROC structures (not to mention semaphores).
      *
-     * While we are holding the &g_instance.proc_base_lock, also copy the current shared
+     * While we are holding the &g_instance.proc_base_mutex_lock, also copy the current shared
      * estimate of spins_per_delay to local storage.
      */
-    pthread_mutex_lock(&g_instance.proc_base_lock);
+    ProcBaseLockAccquire(&g_instance.proc_base_mutex_lock);
+
 #ifndef ENABLE_THREAD_CHECK
     set_spins_per_delay(g_instance.proc_base->spins_per_delay);
 #endif
 
+    /*
+     * Allocate a per thread level proc object and store its poiter as t_thrd.proc
+     *
+     * Normally, once the needed proc is not available to be allocated, we FATAL this
+     * thread and do DFX info as much as possible
+     */
     GetProcFromFreeList();
 
     if (t_thrd.proc != NULL) {
         t_thrd.myLogicTid = t_thrd.proc->logictid;
 
+        /* write back to its entry handler in proc_base */
         if (IsAnyAutoVacuumProcess()) {
             g_instance.proc_base->autovacFreeProcs = (PGPROC*)t_thrd.proc->links.next;
         } else if (IsJobSchedulerProcess() || IsJobWorkerProcess()) {
@@ -697,7 +769,7 @@ void InitProcess(void)
 #endif
         }
 
-        pthread_mutex_unlock(&g_instance.proc_base_lock);
+        ProcBaseLockRelease(&g_instance.proc_base_mutex_lock);
     } else {
         /*
          * If we reach here, all the PGPROCs are in use.  This is one of the
@@ -705,7 +777,7 @@ void InitProcess(void)
          * error message.  XXX do we need to give a different failure message
          * in the autovacuum case?
          */
-        pthread_mutex_unlock(&g_instance.proc_base_lock);
+        ProcBaseLockRelease(&g_instance.proc_base_mutex_lock);
 
         if (IsUnderPostmaster && StreamThreadAmI())
             MarkPostmasterChildUnuseForStreamWorker();
@@ -733,6 +805,10 @@ void InitProcess(void)
                         (u_sess->libpq_cxt.IsConnFromCmAgent) ? cmaConnNumInfo : "")));
     }
 
+    if (u_sess->libpq_cxt.IsConnFromCmAgent) {
+        CheckCMAReservedProc();
+    }
+
 #ifdef __USE_NUMA
     if (g_instance.shmem_cxt.numaNodeNum > 1) {
         if (!g_instance.numa_cxt.inheritThreadPool) {
@@ -750,6 +826,9 @@ void InitProcess(void)
         ereport(ERROR,
                 (errcode(ERRCODE_LOCK_NOT_AVAILABLE), errmsg("failed to acquire mutex lock for deleMemContextMutex.")));
     t_thrd.proc->topmcxt = t_thrd.top_mem_cxt;
+    if (t_thrd.role == WORKER || t_thrd.role == THREADPOOL_WORKER) {
+        t_thrd.proc->usedMemory = &t_thrd.utils_cxt.trackedBytes;
+    }
     if (syscalllockRelease(&t_thrd.proc->deleMemContextMutex) != 0)
         ereport(ERROR,
                 (errcode(ERRCODE_LOCK_NOT_AVAILABLE), errmsg("failed to release mutex lock for deleMemContextMutex.")));
@@ -809,7 +888,6 @@ void InitProcess(void)
     t_thrd.proc->waitProcLock = NULL;
     t_thrd.proc->blockProcLock = NULL;
     t_thrd.proc->waitLockThrd = &t_thrd;
-    init_proc_dw_buf();
 #ifdef USE_ASSERT_CHECKING
     if (assert_enabled) {
         int i;
@@ -842,6 +920,16 @@ void InitProcess(void)
     t_thrd.proc->procArrayGroupMember = false;
     t_thrd.proc->procArrayGroupMemberXid = InvalidTransactionId;
     pg_atomic_init_u32(&t_thrd.proc->procArrayGroupNext, INVALID_PGPROCNO);
+
+    /* Initialize fields for group snapshot getting. */
+    t_thrd.proc->snapshotGroupMember = false;
+    pg_atomic_init_u32(&t_thrd.proc->snapshotGroupNext, INVALID_PGPROCNO);
+    t_thrd.proc->snapshotGroup = NULL;
+    t_thrd.proc->xminGroup = InvalidTransactionId;
+    t_thrd.proc->xmaxGroup = InvalidTransactionId;
+    t_thrd.proc->globalxminGroup = InvalidTransactionId;
+    t_thrd.proc->replicationSlotXminGroup = InvalidTransactionId;
+    t_thrd.proc->replicationSlotCatalogXminGroup = InvalidTransactionId;
 
     /* Initialize fields for group transaction status update. */
     t_thrd.proc->clogGroupMember = false;
@@ -894,6 +982,8 @@ void InitProcess(void)
      * Arrange to clean up at backend exit.
      */
     on_shmem_exit(ProcKill, 0);
+
+    init_proc_dw_buf();
 
     /*
      * Now that we have a PGPROC, we could try to acquire locks, so initialize
@@ -966,13 +1056,13 @@ void InitAuxiliaryProcess(void)
     InitializeLatchSupport();
 
     /*
-     * We use the &g_instance.proc_base_lock to protect assignment and releasing of
+     * We use the &g_instance.proc_base_mutex_lock to protect assignment and releasing of
      * &g_instance.proc_aux_base entries.
      *
-     * While we are holding the &g_instance.proc_base_lock, also copy the current shared
+     * While we are holding the &g_instance.proc_base_mutex_lock, also copy the current shared
      * estimate of spins_per_delay to local storage.
      */
-    pthread_mutex_lock(&g_instance.proc_base_lock);
+    ProcBaseLockAccquire(&g_instance.proc_base_mutex_lock);
 #ifndef ENABLE_THREAD_CHECK
     set_spins_per_delay(g_instance.proc_base->spins_per_delay);
 #endif
@@ -986,7 +1076,7 @@ void InitAuxiliaryProcess(void)
             break;
     }
     if (proctype >= NUM_AUXILIARY_PROCS) {
-        pthread_mutex_unlock(&g_instance.proc_base_lock);
+        ProcBaseLockRelease(&g_instance.proc_base_mutex_lock);
         ereport(FATAL, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("all &g_instance.proc_aux_base are in use")));
     }
 
@@ -997,7 +1087,7 @@ void InitAuxiliaryProcess(void)
     t_thrd.proc = auxproc;
     t_thrd.pgxact = &g_instance.proc_base_all_xacts[auxproc->pgprocno];
 
-    pthread_mutex_unlock(&g_instance.proc_base_lock);
+    ProcBaseLockRelease(&g_instance.proc_base_mutex_lock);
 
     /*
      * Initialize all fields of t_thrd.proc, except for those previously
@@ -1120,12 +1210,12 @@ int GetAuxProcEntryIndex(int baseIdx)
  */
 void PublishStartupProcessInformation(void)
 {
-    pthread_mutex_lock(&g_instance.proc_base_lock);
+    ProcBaseLockAccquire(&g_instance.proc_base_mutex_lock);
 
     g_instance.proc_base->startupProc = t_thrd.proc;
     g_instance.proc_base->startupProcPid = t_thrd.proc_cxt.MyProcPid;
 
-    pthread_mutex_unlock(&g_instance.proc_base_lock);
+    ProcBaseLockRelease(&g_instance.proc_base_mutex_lock);
 }
 
 
@@ -1138,7 +1228,7 @@ bool HaveNFreeProcs(int n)
 {
     PGPROC* proc = NULL;
 
-    pthread_mutex_lock(&g_instance.proc_base_lock);
+    ProcBaseLockAccquire(&g_instance.proc_base_mutex_lock);
 
     if (u_sess->libpq_cxt.IsConnFromCmAgent) {
         proc = g_instance.proc_base->cmAgentFreeProcs;
@@ -1151,7 +1241,7 @@ bool HaveNFreeProcs(int n)
         n--;
     }
 
-    pthread_mutex_unlock(&g_instance.proc_base_lock);
+    ProcBaseLockRelease(&g_instance.proc_base_mutex_lock);
 
     return (n <= 0);
 }
@@ -1334,8 +1424,8 @@ static void ProcKill(int code, Datum arg)
     LWLockReleaseAll();
 
     /* Make sure active replication slots are released */
-    if (t_thrd.slot_cxt.MyReplicationSlot != NULL)
-        ReplicationSlotRelease();
+    CleanMyReplicationSlot();
+
     /*
      * Detach from any lock group of which we are a member.  If the leader
      * exist before all other group members, it's PGPROC will remain allocated
@@ -1375,6 +1465,7 @@ static void ProcKill(int code, Datum arg)
         ereport(ERROR,
                 (errcode(ERRCODE_LOCK_NOT_AVAILABLE), errmsg("failed to acquire mutex lock for deleMemContextMutex.")));
     t_thrd.proc->topmcxt = NULL;
+    t_thrd.proc->usedMemory = NULL;
     if (syscalllockRelease(&t_thrd.proc->deleMemContextMutex) != 0)
         ereport(ERROR,
                 (errcode(ERRCODE_LOCK_NOT_AVAILABLE), errmsg("failed to release mutex lock for deleMemContextMutex.")));
@@ -1382,7 +1473,7 @@ static void ProcKill(int code, Datum arg)
     clean_proc_dw_buf();
     /* Clean subxid cache if needed. */
     ProcSubXidCacheClean();
-    pthread_mutex_lock(&g_instance.proc_base_lock);
+    ProcBaseLockAccquire(&g_instance.proc_base_mutex_lock);
 
     /*
      * If we're still a member of a locking group, that means we're a leader
@@ -1410,7 +1501,7 @@ static void ProcKill(int code, Datum arg)
     g_instance.proc_base->spins_per_delay = update_spins_per_delay(g_instance.proc_base->spins_per_delay);
 #endif
 
-    pthread_mutex_unlock(&g_instance.proc_base_lock);
+    ProcBaseLockRelease(&g_instance.proc_base_mutex_lock);
 
     /*
      * This process is no longer present in shared memory in any meaningful
@@ -1471,7 +1562,7 @@ static void AuxiliaryProcKill(int code, Datum arg)
 
     clean_proc_dw_buf();
 
-    pthread_mutex_lock(&g_instance.proc_base_lock);
+    ProcBaseLockAccquire(&g_instance.proc_base_mutex_lock);
 
     /* Mark auxiliary proc no longer in use */
     t_thrd.proc->pid = 0;
@@ -1487,7 +1578,7 @@ static void AuxiliaryProcKill(int code, Datum arg)
     g_instance.proc_base->spins_per_delay = update_spins_per_delay(g_instance.proc_base->spins_per_delay);
 #endif
 
-    pthread_mutex_unlock(&g_instance.proc_base_lock);
+    ProcBaseLockRelease(&g_instance.proc_base_mutex_lock);
 }
 
 /*
@@ -2360,7 +2451,7 @@ void ProcSendSignal(ThreadId pid)
     PGPROC* proc = NULL;
 
     if (RecoveryInProgress()) {
-        pthread_mutex_lock(&g_instance.proc_base_lock);
+        ProcBaseLockAccquire(&g_instance.proc_base_mutex_lock);
 
         /*
          * Check to see whether it is the Startup process we wish to signal.
@@ -2372,7 +2463,7 @@ void ProcSendSignal(ThreadId pid)
          */
         proc = MultiRedoThreadPidGetProc(pid);
 
-        pthread_mutex_unlock(&g_instance.proc_base_lock);
+        ProcBaseLockRelease(&g_instance.proc_base_mutex_lock);
     }
 
     if (proc == NULL)

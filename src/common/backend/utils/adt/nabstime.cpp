@@ -209,9 +209,12 @@ Datum abstimein(PG_FUNCTION_ARGS)
     char* field[MAXDATEFIELDS];
     char workbuf[MAXDATELEN + 1];
     int dtype = -1;
-    int nf, ftype[MAXDATEFIELDS];
+    int nf = 0, ftype[MAXDATEFIELDS];
 
     dterr = ParseDateTime(str, workbuf, sizeof(workbuf), field, ftype, MAXDATEFIELDS, &nf);
+    if (dterr != 0) {
+        DateTimeParseError(dterr, str, "abstime");
+    }
     if ((IS_PGXC_COORDINATOR || (IS_PGXC_DATANODE && !IS_SINGLE_NODE)) &&
         t_thrd.time_cxt.is_abstimeout_in == true &&
         (ftype[nf - 1] == DTK_STRING || ftype[nf - 1] == DTK_TZ) &&

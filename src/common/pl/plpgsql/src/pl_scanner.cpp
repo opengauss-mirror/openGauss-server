@@ -219,6 +219,10 @@ static void push_back_token(int token, TokenAuxData* auxdata);
 static void location_lineno_init(void);
 static int get_self_defined_tok(int tok_flag);
 static int plpgsql_parse_cursor_attribute(int* loc);
+static void RecordDependencyOfPkg(PLpgSQL_package* pkg, Oid pkgOid, Oid currCompPkgOid);
+static PLpgSQL_datum* SearchPackageDatum(PLpgSQL_package* pkg, Oid pkgOid, Oid currCompPkgOid,
+    const char* pkgname, const char* objname);
+
 
 /*
  * This is the yylex routine called from the PL/pgSQL grammar.
@@ -259,7 +263,7 @@ int plpgsql_yylex(void)
             TokenAuxData aux3;
 
             tok3 = internal_yylex(&aux3);
-            if (tok3 == IDENT || (tok1 == IDENT && tok3 == K_DELETE)) {
+            if (tok3 == IDENT || (tok1 == IDENT && (tok3 == K_DELETE || tok3 == K_CLOSE || tok3 == K_OPEN))) {
                 int tok4;
                 TokenAuxData aux4;
 
@@ -1137,19 +1141,50 @@ bool plpgsql_is_token_keyword(int token)
     }
 }
 
-static PLpgSQL_package* compilePackageSpec(Oid pkgOid)
+static PLpgSQL_package* GetCompileListPkg(Oid pkgOid)
 {
+    List* compPkgList = u_sess->plsql_cxt.compile_context_list;
+    ListCell *item = NULL;
+    foreach(item, compPkgList) {
+        PLpgSQL_compile_context* compPkg = (PLpgSQL_compile_context*)lfirst(item);
+        if (compPkg->plpgsql_curr_compile_package &&
+            compPkg->plpgsql_curr_compile_package->pkg_oid == pkgOid) {
+            return compPkg->plpgsql_curr_compile_package;
+        }
+    }
+    return NULL;
+}
+
+static PLpgSQL_package* compilePackageSpec(Oid pkgOid, bool isNestedCompile)
+{
+    /*
+     * First, search the package in the compile list,
+     * if exists, just return the compiling package.
+     */
+    PLpgSQL_package* pkg = GetCompileListPkg(pkgOid);
+    if (unlikely(pkg != NULL)) {
+        return pkg;
+    }
     int oldCompileStatus = getCompileStatus();
     HeapTuple pkgTuple = SearchSysCache1(PACKAGEOID, ObjectIdGetDatum(pkgOid));
     bool isnull = false;
-    PLpgSQL_package* pkg = NULL;
-    if (u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package != NULL ||
-        u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile != NULL) {
-        CompileStatusSwtichTo(COMPILIE_PKG);
+    if (isNestedCompile) {
+        if (u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package != NULL ||
+            u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile != NULL) {
+            CompileStatusSwtichTo(COMPILIE_PKG);
+        } else {
+            ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                errmsg("nest compile package can't be null.")));
+        }
     } else {
-         ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
-            errmsg("nest compile package can't be null.")));
+        if (oldCompileStatus == NONE_STATUS) {
+            CompileStatusSwtichTo(COMPILIE_PKG);
+        } else {
+            ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                errmsg("compile status should be none status.")));
+        }
     }
+    
     TokenAuxData temp_pushback_auxdata[MAX_PUSHBACKS];
     for (int i = 0; i < MAX_PUSHBACKS; i++) {
         temp_pushback_auxdata[i] = pushback_auxdata[i];
@@ -1195,8 +1230,25 @@ PLpgSQL_datum* GetPackageDatum(List* name, bool* isSamePackage)
     }
     /* namespace and pkgname has checked. */
     pkgOid = PackageNameGetOid(pkgname, namespaceId);
+    if (!OidIsValid(pkgOid)) {
+        return NULL;
+    }
 
     PLpgSQL_compile_context* curr_compile = u_sess->plsql_cxt.curr_compile_context;
+
+    /* when create the function parse the in out paramters, curr_compile is null */
+    if (curr_compile == NULL) {
+        pkg = compilePackageSpec(pkgOid, false);
+        if (pkg == NULL) {
+            return NULL;
+        }
+        struct PLpgSQL_nsitem* nse = plpgsql_ns_lookup(pkg->public_ns, false, pkgname, objname, NULL, NULL);
+        if (nse == NULL || nse->itemtype == PLPGSQL_NSTYPE_REFCURSOR) {
+            return NULL;
+        }
+        return pkg->datums[nse->itemno];
+    }
+
     if (curr_compile->plpgsql_curr_compile_package != NULL) {
         currentCompilePkgOid = curr_compile->plpgsql_curr_compile_package->pkg_oid;
         if (currentCompilePkgOid == pkgOid) {
@@ -1205,10 +1257,6 @@ PLpgSQL_datum* GetPackageDatum(List* name, bool* isSamePackage)
                 *isSamePackage = true;
             }
         }
-    }
-
-    if (!OidIsValid(pkgOid)) {
-        return NULL;
     }
 
     if (u_sess->plsql_cxt.need_pkg_dependencies) {
@@ -1220,43 +1268,83 @@ PLpgSQL_datum* GetPackageDatum(List* name, bool* isSamePackage)
     
     if (pkg == NULL) {
         MemoryContext temp = MemoryContextSwitchTo(curr_compile->compile_tmp_cxt);
-        pkg = compilePackageSpec(pkgOid);
+        pkg = compilePackageSpec(pkgOid, true);
         MemoryContextSwitchTo(temp);
     }
 
     /* when compilePackageSpec, the curr compile package maybe invalided, need to check it */
-    bool compilePackage = curr_compile->plpgsql_curr_compile_package != NULL;
-    if (compilePackage && currentCompilePkgOid != pkgOid) {
-        if (curr_compile->plpgsql_curr_compile_package->pkg_cxt == NULL) {
-            ereport(ERROR,
-                (errmodule(MOD_PLSQL), errcode(ERRCODE_PLPGSQL_ERROR),
-                 errmsg("concurrent error when compile package."),
-                 errdetail("when compile package, it has been invalidated by other session."),
-                 errcause("excessive concurrency"),
-                 erraction("reduce concurrency and retry")));
-        }
+    bool currCompPkgInvalid = curr_compile->plpgsql_curr_compile_package != NULL && currentCompilePkgOid != pkgOid
+                              && curr_compile->plpgsql_curr_compile_package->pkg_cxt == NULL;
+    if (currCompPkgInvalid) {
+        ereport(ERROR,
+            (errmodule(MOD_PLSQL), errcode(ERRCODE_PLPGSQL_ERROR),
+            errmsg("concurrent error when compile package."),
+            errdetail("when compile package, it has been invalidated by other session."),
+            errcause("excessive concurrency"),
+            erraction("reduce concurrency and retry")));
     }
 
-    struct PLpgSQL_nsitem* nse = plpgsql_ns_lookup(pkg->public_ns, false, pkgname, objname, NULL, NULL);
-    if (nse == NULL) {
+    PLpgSQL_datum* resultDatum = SearchPackageDatum(pkg, pkgOid, currentCompilePkgOid, pkgname, objname);
+
+    if (resultDatum == NULL) {
         return NULL;
     }
 
-    if (isSamePackage != NULL && *isSamePackage) {
-        return pkg->datums[nse->itemno];
-    }
+    RecordDependencyOfPkg(pkg, pkgOid, currentCompilePkgOid);
 
+    return resultDatum;
+}
+
+static void RecordDependencyOfPkg(PLpgSQL_package* pkg, Oid pkgOid, Oid currCompPkgOid)
+{
+    if (pkgOid == currCompPkgOid) {
+        /* same package, need not record dependency */
+        return;
+    }
     /* record dependcy of func or package */
+    PLpgSQL_compile_context* curr_compile = u_sess->plsql_cxt.curr_compile_context;
     if (curr_compile->plpgsql_curr_compile == NULL) {
         MemoryContext temp = MemoryContextSwitchTo(curr_compile->plpgsql_curr_compile_package->pkg_cxt);
-        record_pkg_function_dependency(pkg, &curr_compile->plpgsql_curr_compile_package->invalItems, InvalidOid, pkgOid);
+        record_pkg_function_dependency(
+            pkg, &curr_compile->plpgsql_curr_compile_package->invalItems, InvalidOid, pkgOid);
         (void)MemoryContextSwitchTo(temp);
     } else {
         MemoryContext temp = MemoryContextSwitchTo(curr_compile->plpgsql_curr_compile->fn_cxt);
         record_pkg_function_dependency(pkg, &curr_compile->plpgsql_curr_compile->invalItems, InvalidOid, pkgOid);
         (void)MemoryContextSwitchTo(temp);
     }
+}
 
+static PLpgSQL_datum* SearchPackageDatum(PLpgSQL_package* pkg, Oid pkgOid, Oid currCompPkgOid,
+    const char* pkgname, const char* objname)
+{
+    PLpgSQL_compile_context* curr_compile = u_sess->plsql_cxt.curr_compile_context;
+    struct PLpgSQL_nsitem* nse = NULL;
+    if (currCompPkgOid == pkgOid) {
+        /* same package, if not compile package function search top first */
+        if (curr_compile->plpgsql_curr_compile == NULL) {
+            nse = plpgsql_ns_lookup(plpgsql_ns_top(), false, objname, NULL, NULL, NULL);
+        }
+        if (nse != NULL) {
+            if (nse->itemtype == PLPGSQL_NSTYPE_REFCURSOR) {
+                return NULL;
+            }
+            return curr_compile->plpgsql_Datums[nse->itemno];
+        } else {
+            /* search public second */
+            nse = plpgsql_ns_lookup(pkg->public_ns, false, pkgname, objname, NULL, NULL);
+        }
+        if (nse == NULL) {
+            /* search private third */
+            nse = plpgsql_ns_lookup(pkg->private_ns, false, pkgname, objname, NULL, NULL);
+        }
+    } else {
+        nse = plpgsql_ns_lookup(pkg->public_ns, false, pkgname, objname, NULL, NULL);
+    }
+
+    if (nse == NULL || nse->itemtype == PLPGSQL_NSTYPE_REFCURSOR) {
+        return NULL;
+    }
     return pkg->datums[nse->itemno];
 }
 

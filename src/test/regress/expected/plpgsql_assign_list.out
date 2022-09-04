@@ -276,6 +276,25 @@ drop package autonomous_pkg_a;
 NOTICE:  drop cascades to function plpgsql_assignlist.autonomous_f_public(integer)
 drop type ct1;
 drop type ct;
+-- test select into syntax error
+declare
+va int;
+vb varchar2;
+vc varchar2;
+begin
+select 1,'a','b' into va,vb vc;
+end;
+/
+ERROR:  syntax error, expected ","
+LINE 6: select 1,'a','b' into va,vb vc;
+                                    ^
+QUERY:  DECLARE 
+va int;
+vb varchar2;
+vc varchar2;
+begin
+select 1,'a','b' into va,vb vc;
+end
 --------------------------------------------------
 ------------------ END OF TESTS ------------------
 --------------------------------------------------

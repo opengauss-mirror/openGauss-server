@@ -302,6 +302,8 @@ public:
     /* Synchronize quit. */
     static void syncQuit(StreamObjStatus status);
 
+    static void ReleaseStreamGroup(bool resetSession);
+
     /* Grant stream connect permission. */
     static void grantStreamConnectPermission();
 

@@ -58,12 +58,13 @@ public:
     void Destroy();
     void Reset(bool needUnlockBuffer = true);
     inline UndoRecord *&operator[](int i);
-    int GetUndoBufidx(RelFileNode rnode, BlockNumber blk, ReadBufferMode rbm, UndoPersistence upersistence);
+    int GetUndoBufidx(RelFileNode rnode, BlockNumber blk, ReadBufferMode rbm);
     bool PushBack(UndoRecord *urec);
     void SortByBlkNo();
     uint64 TotalSize();
     UndoRecPtr LastRecord();
     UndoRecordSize LastRecordSize();
+    void SetMemoryContext(MemoryContext mem_cxt);
     /* The first record must be valid. */
     UndoRecPtr FirstRecord()
     {
@@ -97,6 +98,7 @@ private:
     int ubuffersIdx_;
     bool isPrepared_;
     bool isInited_;
+    MemoryContext mem_context_;
 }; // class URecVector
 
 inline UndoRecord *&URecVector::operator[](int i)
@@ -146,4 +148,6 @@ void InsertPreparedUndo(_in_ URecVector *urecvec, _in_ XLogRecPtr lsn = 0);
 void SetUndoPageLSN(_in_ URecVector *urecvec, _in_ XLogRecPtr lsn);
 
 void ReleaseUndoBuffers(void);
+
+void VerifyUndoRecordValid(UndoRecord *urec, bool needCheckXidInvalid = false);
 #endif // __KNL_UUNDOVEC_H__

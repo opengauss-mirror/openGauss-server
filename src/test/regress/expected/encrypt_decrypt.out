@@ -1,0 +1,2114 @@
+-- b compatibility case
+drop database if exists b;
+NOTICE:  database "b" does not exist, skipping
+create database b dbcompatibility 'b';
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef');
+ERROR:  aes_encrypt is supported only in B-format database.
+CONTEXT:  referenced column: aes_encrypt
+select aes_decrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef');
+ERROR:  aes_decrypt is supported only in B-format database.
+CONTEXT:  referenced column: aes_decrypt
+\c b
+-- aes_encrypt(str, key_str, init_vector)
+set block_encryption_mode = 'aes-128-cbc';
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+ERROR:  function aes_encrypt(unknown, unknown) does not exist
+LINE 1: select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', 'abcd');
+ERROR:  the size of init_vector must be greater than or equal to 16.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef');
+     aes_encrypt     
+---------------------
+ ar+V\x0B6\x0E>\x1D*
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef');
+     aes_encrypt     
+---------------------
+ ar+V\x0B6\x0E>\x1D*
+(1 row)
+
+select lengthb(aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456')), lengthb('HuaweiGauss_234');
+ lengthb | lengthb 
+---------+---------
+      16 |      15
+(1 row)
+
+select lengthb(aes_encrypt('1234567890', 'cdjsfj3713vdVHV1', '1234567890abcdef123456')), lengthb('1234567890');
+ lengthb | lengthb 
+---------+---------
+      16 |      10
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef') = aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456');
+ ?column? 
+----------
+ t
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890dgjahdjk');
+   aes_encrypt    
+------------------
+ SvGʠ\.ܛJ\x1F\x06
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef') = aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890dgjahdjk');
+ ?column? 
+----------
+ f
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', NULL);
+ERROR:  the size of init_vector must be greater than or equal to 16.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt('HuaweiGauss_234', NULL, '1234567890dgjahdjk');
+ aes_encrypt 
+-------------
+ 
+(1 row)
+
+select aes_encrypt(NULL, 'cdjsfj3713vdVHV1', '1234567890dgjahdjk');
+ aes_encrypt 
+-------------
+ 
+(1 row)
+
+select aes_encrypt(NULL, NULL, '1234567890dgjahdjk');
+ aes_encrypt 
+-------------
+ 
+(1 row)
+
+select aes_encrypt(NULL, 'dadsads'), aes_encrypt('dadsadsadsadfcs', NULL), aes_encrypt(NULL, NULL);
+ERROR:  function aes_encrypt(unknown, unknown) does not exist
+LINE 1: select aes_encrypt(NULL, 'dadsads'), aes_encrypt('dadsadsads...
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt(NULL, 'dadsads', 'dadsadsadsa'), aes_encrypt('dadsadsadsadfcs', NULL, 'dadsadsadsa'), aes_encrypt(NULL, NULL, NULL);
+ aes_encrypt | aes_encrypt | aes_encrypt 
+-------------+-------------+-------------
+             |             | 
+(1 row)
+
+select aes_decrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+ERROR:  function aes_decrypt(unknown, unknown) does not exist
+LINE 1: select aes_decrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: aes_decrypt
+select aes_decrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', 'abcd');
+ERROR:  the size of init_vector must be greater than or equal to 16.
+CONTEXT:  referenced column: aes_decrypt
+create table test_encrypt(f1 text);
+insert into test_encrypt select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef');
+select aes_decrypt(f1, 'cdjsfj3713vdVHV1', '1234567890abcdef') from test_encrypt;
+   aes_decrypt   
+-----------------
+ HuaweiGauss_234
+(1 row)
+
+select aes_decrypt(f1, 'cdjsfj3713vdVHV1', '1234567890abcdef') = 'HuaweiGauss_234' from test_encrypt;
+ ?column? 
+----------
+ t
+(1 row)
+
+select aes_decrypt(aes_encrypt('~`!@#$%^&*()_+-=<>?,./;''“”""[]{}\|','cdjsfj3713vdVHV1', '1234567890abcdef'),'cdjsfj3713vdVHV1', '1234567890abcdef');
+            aes_decrypt             
+------------------------------------
+ ~`!@#$%^&*()_+-=<>?,./;'“”""[]{}\|
+(1 row)
+
+select aes_decrypt(NULL, NULL, 'dadsa'), aes_decrypt(NULL, 'dasdsa', 'dsadsa'), aes_decrypt('dadsad', NULL, 'dadsadsa');
+ aes_decrypt | aes_decrypt | aes_decrypt 
+-------------+-------------+-------------
+             |             | 
+(1 row)
+
+select aes_decrypt(aes_encrypt('大家好','cdjsfj3713vdVHV1', '1234567890abcdef'),'cdjsfj3713vdVHV1', '1234567890abcdef');
+ aes_decrypt 
+-------------
+ 大家好
+(1 row)
+
+select aes_decrypt(aes_encrypt(E'd\nsa\tdj\bsaf\Z\\dssa\ca\rs','dajd123FGBJG', '1234567890abcdef'),'dajd123FGBJG', '1234567890abcdef');
+         aes_decrypt          
+------------------------------
+ d                           +
+ sa      dj\x08safZ\dssaca\rs
+(1 row)
+
+select aes_decrypt(aes_encrypt('~·！@#￥%……&*（）-=——+{}【】、|：‘’，。《》、？','12345dvghadCVBUJNF', '1234567890abcdef'),'12345dvghadCVBUJNF', '1234567890abcdef');
+                  aes_decrypt                  
+-----------------------------------------------
+ ~·！@#￥%……&*（）-=——+{}【】、|：‘’，。《》、？
+(1 row)
+
+drop table test_encrypt;
+set block_encryption_mode = 'aes-192-cbc';
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+ERROR:  function aes_encrypt(unknown, unknown) does not exist
+LINE 1: select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', 'abcd');
+ERROR:  the size of init_vector must be greater than or equal to 16.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef');
+       aes_encrypt       
+-------------------------
+ 8\x01MP\x1Fe3\x0F \x08`
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456');
+       aes_encrypt       
+-------------------------
+ 8\x01MP\x1Fe3\x0F \x08`
+(1 row)
+
+select lengthb(aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456')), lengthb('HuaweiGauss_234');
+ lengthb | lengthb 
+---------+---------
+      16 |      15
+(1 row)
+
+select lengthb(aes_encrypt('1234567890', 'cdjsfj3713vdVHV1', '1234567890abcdef123456')), lengthb('1234567890');
+ lengthb | lengthb 
+---------+---------
+      16 |      10
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef') = aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456');
+ ?column? 
+----------
+ t
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890dgjahdjk');
+   aes_encrypt   
+-----------------
+ ƋA`\x0FO}7\x01/
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef') = aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890dgjahdjk');
+ ?column? 
+----------
+ f
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', NULL);
+ERROR:  the size of init_vector must be greater than or equal to 16.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt('HuaweiGauss_234', NULL, '1234567890dgjahdjk');
+ aes_encrypt 
+-------------
+ 
+(1 row)
+
+select aes_encrypt(NULL, 'cdjsfj3713vdVHV1', '1234567890dgjahdjk');
+ aes_encrypt 
+-------------
+ 
+(1 row)
+
+select aes_encrypt(NULL, NULL, '1234567890dgjahdjk');
+ aes_encrypt 
+-------------
+ 
+(1 row)
+
+select aes_encrypt(NULL, 'dadsads'), aes_encrypt('dadsadsadsadfcs', NULL), aes_encrypt(NULL, NULL);
+ERROR:  function aes_encrypt(unknown, unknown) does not exist
+LINE 1: select aes_encrypt(NULL, 'dadsads'), aes_encrypt('dadsadsads...
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt(NULL, 'dadsads', 'dadsadsadsa'), aes_encrypt('dadsadsadsadfcs', NULL, 'dadsadsadsa'), aes_encrypt(NULL, NULL, NULL);
+ aes_encrypt | aes_encrypt | aes_encrypt 
+-------------+-------------+-------------
+             |             | 
+(1 row)
+
+select aes_decrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+ERROR:  function aes_decrypt(unknown, unknown) does not exist
+LINE 1: select aes_decrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: aes_decrypt
+select aes_decrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', 'abcd');
+ERROR:  the size of init_vector must be greater than or equal to 16.
+CONTEXT:  referenced column: aes_decrypt
+create table test_encrypt(f1 text);
+insert into test_encrypt select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef');
+select aes_decrypt(f1, 'cdjsfj3713vdVHV1', '1234567890abcdef') from test_encrypt;
+   aes_decrypt   
+-----------------
+ HuaweiGauss_234
+(1 row)
+
+select aes_decrypt(f1, 'cdjsfj3713vdVHV1', '1234567890abcdef') = 'HuaweiGauss_234' from test_encrypt;
+ ?column? 
+----------
+ t
+(1 row)
+
+select aes_decrypt(aes_encrypt('~`!@#$%^&*()_+-=<>?,./;''“”""[]{}\|','cdjsfj3713vdVHV1', '1234567890abcdef'),'cdjsfj3713vdVHV1', '1234567890abcdef');
+            aes_decrypt             
+------------------------------------
+ ~`!@#$%^&*()_+-=<>?,./;'“”""[]{}\|
+(1 row)
+
+select aes_decrypt(NULL, NULL, 'dadsa'), aes_decrypt(NULL, 'dasdsa', 'dsadsa'), aes_decrypt('dadsad', NULL, 'dadsadsa');
+ aes_decrypt | aes_decrypt | aes_decrypt 
+-------------+-------------+-------------
+             |             | 
+(1 row)
+
+select aes_decrypt(aes_encrypt('大家好','cdjsfj3713vdVHV1', '1234567890abcdef'),'cdjsfj3713vdVHV1', '1234567890abcdef');
+ aes_decrypt 
+-------------
+ 大家好
+(1 row)
+
+select aes_decrypt(aes_encrypt(E'd\nsa\tdj\bsaf\Z\\dssa\ca\rs','dajd123FGBJG', '1234567890abcdef'),'dajd123FGBJG', '1234567890abcdef');
+         aes_decrypt          
+------------------------------
+ d                           +
+ sa      dj\x08safZ\dssaca\rs
+(1 row)
+
+select aes_decrypt(aes_encrypt('~·！@#￥%……&*（）-=——+{}【】、|：‘’，。《》、？','12345dvghadCVBUJNF', '1234567890abcdef'),'12345dvghadCVBUJNF', '1234567890abcdef');
+                  aes_decrypt                  
+-----------------------------------------------
+ ~·！@#￥%……&*（）-=——+{}【】、|：‘’，。《》、？
+(1 row)
+
+drop table test_encrypt;
+set block_encryption_mode = 'aes-256-cbc';
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+ERROR:  function aes_encrypt(unknown, unknown) does not exist
+LINE 1: select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', 'abcd');
+ERROR:  the size of init_vector must be greater than or equal to 16.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef');
+ aes_encrypt 
+-------------
+ _E)|oD\x04:ޮ
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456');
+ aes_encrypt 
+-------------
+ _E)|oD\x04:ޮ
+(1 row)
+
+select lengthb(aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456')), lengthb('HuaweiGauss_234');
+ lengthb | lengthb 
+---------+---------
+      16 |      15
+(1 row)
+
+select lengthb(aes_encrypt('1234567890', 'cdjsfj3713vdVHV1', '1234567890abcdef123456')), lengthb('1234567890');
+ lengthb | lengthb 
+---------+---------
+      16 |      10
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef') = aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456');
+ ?column? 
+----------
+ t
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890dgjahdjk');
+ aes_encrypt 
+-------------
+ 쀗'\x13rUF
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef') = aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890dgjahdjk');
+ ?column? 
+----------
+ f
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', NULL);
+ERROR:  the size of init_vector must be greater than or equal to 16.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt('HuaweiGauss_234', NULL, '1234567890dgjahdjk');
+ aes_encrypt 
+-------------
+ 
+(1 row)
+
+select aes_encrypt(NULL, 'cdjsfj3713vdVHV1', '1234567890dgjahdjk');
+ aes_encrypt 
+-------------
+ 
+(1 row)
+
+select aes_encrypt(NULL, NULL, '1234567890dgjahdjk');
+ aes_encrypt 
+-------------
+ 
+(1 row)
+
+select aes_encrypt(NULL, 'dadsads'), aes_encrypt('dadsadsadsadfcs', NULL), aes_encrypt(NULL, NULL);
+ERROR:  function aes_encrypt(unknown, unknown) does not exist
+LINE 1: select aes_encrypt(NULL, 'dadsads'), aes_encrypt('dadsadsads...
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt(NULL, 'dadsads', 'dadsadsadsa'), aes_encrypt('dadsadsadsadfcs', NULL, 'dadsadsadsa'), aes_encrypt(NULL, NULL, NULL);
+ aes_encrypt | aes_encrypt | aes_encrypt 
+-------------+-------------+-------------
+             |             | 
+(1 row)
+
+select aes_decrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+ERROR:  function aes_decrypt(unknown, unknown) does not exist
+LINE 1: select aes_decrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: aes_decrypt
+select aes_decrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', 'abcd');
+ERROR:  the size of init_vector must be greater than or equal to 16.
+CONTEXT:  referenced column: aes_decrypt
+create table test_encrypt(f1 text);
+insert into test_encrypt select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef');
+select aes_decrypt(f1, 'cdjsfj3713vdVHV1', '1234567890abcdef') from test_encrypt;
+   aes_decrypt   
+-----------------
+ HuaweiGauss_234
+(1 row)
+
+select aes_decrypt(f1, 'cdjsfj3713vdVHV1', '1234567890abcdef') = 'HuaweiGauss_234' from test_encrypt;
+ ?column? 
+----------
+ t
+(1 row)
+
+select aes_decrypt(aes_encrypt('~`!@#$%^&*()_+-=<>?,./;''“”""[]{}\|','cdjsfj3713vdVHV1', '1234567890abcdef'),'cdjsfj3713vdVHV1', '1234567890abcdef');
+            aes_decrypt             
+------------------------------------
+ ~`!@#$%^&*()_+-=<>?,./;'“”""[]{}\|
+(1 row)
+
+select aes_decrypt(NULL, NULL, 'dadsa'), aes_decrypt(NULL, 'dasdsa', 'dsadsa'), aes_decrypt('dadsad', NULL, 'dadsadsa');
+ aes_decrypt | aes_decrypt | aes_decrypt 
+-------------+-------------+-------------
+             |             | 
+(1 row)
+
+select aes_decrypt(aes_encrypt('大家好','cdjsfj3713vdVHV1', '1234567890abcdef'),'cdjsfj3713vdVHV1', '1234567890abcdef');
+ aes_decrypt 
+-------------
+ 大家好
+(1 row)
+
+select aes_decrypt(aes_encrypt(E'd\nsa\tdj\bsaf\Z\\dssa\ca\rs','dajd123FGBJG', '1234567890abcdef'),'dajd123FGBJG', '1234567890abcdef');
+         aes_decrypt          
+------------------------------
+ d                           +
+ sa      dj\x08safZ\dssaca\rs
+(1 row)
+
+select aes_decrypt(aes_encrypt('~·！@#￥%……&*（）-=——+{}【】、|：‘’，。《》、？','12345dvghadCVBUJNF', '1234567890abcdef'),'12345dvghadCVBUJNF', '1234567890abcdef');
+                  aes_decrypt                  
+-----------------------------------------------
+ ~·！@#￥%……&*（）-=——+{}【】、|：‘’，。《》、？
+(1 row)
+
+drop table test_encrypt;
+set block_encryption_mode = 'aes-128-cfb1';
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+ERROR:  function aes_encrypt(unknown, unknown) does not exist
+LINE 1: select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', 'abcd');
+ERROR:  the size of init_vector must be greater than or equal to 16.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef');
+      aes_encrypt      
+-----------------------
+  vo\x120\x12\x01\x02C
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456');
+      aes_encrypt      
+-----------------------
+  vo\x120\x12\x01\x02C
+(1 row)
+
+select lengthb(aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456')), lengthb('HuaweiGauss_234');
+ lengthb | lengthb 
+---------+---------
+      15 |      15
+(1 row)
+
+select lengthb(aes_encrypt('1234567890', 'cdjsfj3713vdVHV1', '1234567890abcdef123456')), lengthb('1234567890');
+ lengthb | lengthb 
+---------+---------
+      10 |      10
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef') = aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456');
+ ?column? 
+----------
+ t
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890dgjahdjk');
+ aes_encrypt 
+-------------
+ 
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef') = aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890dgjahdjk');
+ ?column? 
+----------
+ f
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', NULL);
+ERROR:  the size of init_vector must be greater than or equal to 16.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt('HuaweiGauss_234', NULL, '1234567890dgjahdjk');
+ aes_encrypt 
+-------------
+ 
+(1 row)
+
+select aes_encrypt(NULL, 'cdjsfj3713vdVHV1', '1234567890dgjahdjk');
+ aes_encrypt 
+-------------
+ 
+(1 row)
+
+select aes_encrypt(NULL, NULL, '1234567890dgjahdjk');
+ aes_encrypt 
+-------------
+ 
+(1 row)
+
+select aes_encrypt(NULL, 'dadsads'), aes_encrypt('dadsadsadsadfcs', NULL), aes_encrypt(NULL, NULL);
+ERROR:  function aes_encrypt(unknown, unknown) does not exist
+LINE 1: select aes_encrypt(NULL, 'dadsads'), aes_encrypt('dadsadsads...
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt(NULL, 'dadsads', 'dadsadsadsa'), aes_encrypt('dadsadsadsadfcs', NULL, 'dadsadsadsa'), aes_encrypt(NULL, NULL, NULL);
+ aes_encrypt | aes_encrypt | aes_encrypt 
+-------------+-------------+-------------
+             |             | 
+(1 row)
+
+select aes_decrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+ERROR:  function aes_decrypt(unknown, unknown) does not exist
+LINE 1: select aes_decrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: aes_decrypt
+select aes_decrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', 'abcd');
+ERROR:  the size of init_vector must be greater than or equal to 16.
+CONTEXT:  referenced column: aes_decrypt
+create table test_encrypt(f1 text);
+insert into test_encrypt select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef');
+select aes_decrypt(f1, 'cdjsfj3713vdVHV1', '1234567890abcdef') from test_encrypt;
+   aes_decrypt   
+-----------------
+ HuaweiGauss_234
+(1 row)
+
+select aes_decrypt(f1, 'cdjsfj3713vdVHV1', '1234567890abcdef') = 'HuaweiGauss_234' from test_encrypt;
+ ?column? 
+----------
+ t
+(1 row)
+
+select aes_decrypt(aes_encrypt('~`!@#$%^&*()_+-=<>?,./;''“”""[]{}\|','cdjsfj3713vdVHV1', '1234567890abcdef'),'cdjsfj3713vdVHV1', '1234567890abcdef');
+            aes_decrypt             
+------------------------------------
+ ~`!@#$%^&*()_+-=<>?,./;'“”""[]{}\|
+(1 row)
+
+select aes_decrypt(NULL, NULL, 'dadsa'), aes_decrypt(NULL, 'dasdsa', 'dsadsa'), aes_decrypt('dadsad', NULL, 'dadsadsa');
+ aes_decrypt | aes_decrypt | aes_decrypt 
+-------------+-------------+-------------
+             |             | 
+(1 row)
+
+select aes_decrypt(aes_encrypt('大家好','cdjsfj3713vdVHV1', '1234567890abcdef'),'cdjsfj3713vdVHV1', '1234567890abcdef');
+ aes_decrypt 
+-------------
+ 大家好
+(1 row)
+
+select aes_decrypt(aes_encrypt(E'd\nsa\tdj\bsaf\Z\\dssa\ca\rs','dajd123FGBJG', '1234567890abcdef'),'dajd123FGBJG', '1234567890abcdef');
+         aes_decrypt          
+------------------------------
+ d                           +
+ sa      dj\x08safZ\dssaca\rs
+(1 row)
+
+select aes_decrypt(aes_encrypt('~·！@#￥%……&*（）-=——+{}【】、|：‘’，。《》、？','12345dvghadCVBUJNF', '1234567890abcdef'),'12345dvghadCVBUJNF', '1234567890abcdef');
+                  aes_decrypt                  
+-----------------------------------------------
+ ~·！@#￥%……&*（）-=——+{}【】、|：‘’，。《》、？
+(1 row)
+
+drop table test_encrypt;
+set block_encryption_mode = 'aes-192-cfb1';
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+ERROR:  function aes_encrypt(unknown, unknown) does not exist
+LINE 1: select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', 'abcd');
+ERROR:  the size of init_vector must be greater than or equal to 16.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef');
+   aes_encrypt   
+-----------------
+ l1\x1DQ0Cn0\x14
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456');
+   aes_encrypt   
+-----------------
+ l1\x1DQ0Cn0\x14
+(1 row)
+
+select lengthb(aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456')), lengthb('HuaweiGauss_234');
+ lengthb | lengthb 
+---------+---------
+      15 |      15
+(1 row)
+
+select lengthb(aes_encrypt('1234567890', 'cdjsfj3713vdVHV1', '1234567890abcdef123456')), lengthb('1234567890');
+ lengthb | lengthb 
+---------+---------
+      10 |      10
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef') = aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456');
+ ?column? 
+----------
+ t
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890dgjahdjk');
+        aes_encrypt        
+---------------------------
+  $+&+\x074uC\x08\x1CK\x1E
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef') = aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890dgjahdjk');
+ ?column? 
+----------
+ f
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', NULL);
+ERROR:  the size of init_vector must be greater than or equal to 16.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt('HuaweiGauss_234', NULL, '1234567890dgjahdjk');
+ aes_encrypt 
+-------------
+ 
+(1 row)
+
+select aes_encrypt(NULL, 'cdjsfj3713vdVHV1', '1234567890dgjahdjk');
+ aes_encrypt 
+-------------
+ 
+(1 row)
+
+select aes_encrypt(NULL, NULL, '1234567890dgjahdjk');
+ aes_encrypt 
+-------------
+ 
+(1 row)
+
+select aes_encrypt(NULL, 'dadsads'), aes_encrypt('dadsadsadsadfcs', NULL), aes_encrypt(NULL, NULL);
+ERROR:  function aes_encrypt(unknown, unknown) does not exist
+LINE 1: select aes_encrypt(NULL, 'dadsads'), aes_encrypt('dadsadsads...
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt(NULL, 'dadsads', 'dadsadsadsa'), aes_encrypt('dadsadsadsadfcs', NULL, 'dadsadsadsa'), aes_encrypt(NULL, NULL, NULL);
+ aes_encrypt | aes_encrypt | aes_encrypt 
+-------------+-------------+-------------
+             |             | 
+(1 row)
+
+select aes_decrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+ERROR:  function aes_decrypt(unknown, unknown) does not exist
+LINE 1: select aes_decrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: aes_decrypt
+select aes_decrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', 'abcd');
+ERROR:  the size of init_vector must be greater than or equal to 16.
+CONTEXT:  referenced column: aes_decrypt
+create table test_encrypt(f1 text);
+insert into test_encrypt select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef');
+select aes_decrypt(f1, 'cdjsfj3713vdVHV1', '1234567890abcdef') from test_encrypt;
+   aes_decrypt   
+-----------------
+ HuaweiGauss_234
+(1 row)
+
+select aes_decrypt(f1, 'cdjsfj3713vdVHV1', '1234567890abcdef') = 'HuaweiGauss_234' from test_encrypt;
+ ?column? 
+----------
+ t
+(1 row)
+
+select aes_decrypt(aes_encrypt('~`!@#$%^&*()_+-=<>?,./;''“”""[]{}\|','cdjsfj3713vdVHV1', '1234567890abcdef'),'cdjsfj3713vdVHV1', '1234567890abcdef');
+            aes_decrypt             
+------------------------------------
+ ~`!@#$%^&*()_+-=<>?,./;'“”""[]{}\|
+(1 row)
+
+select aes_decrypt(NULL, NULL, 'dadsa'), aes_decrypt(NULL, 'dasdsa', 'dsadsa'), aes_decrypt('dadsad', NULL, 'dadsadsa');
+ aes_decrypt | aes_decrypt | aes_decrypt 
+-------------+-------------+-------------
+             |             | 
+(1 row)
+
+select aes_decrypt(aes_encrypt('大家好','cdjsfj3713vdVHV1', '1234567890abcdef'),'cdjsfj3713vdVHV1', '1234567890abcdef');
+ aes_decrypt 
+-------------
+ 大家好
+(1 row)
+
+select aes_decrypt(aes_encrypt(E'd\nsa\tdj\bsaf\Z\\dssa\ca\rs','dajd123FGBJG', '1234567890abcdef'),'dajd123FGBJG', '1234567890abcdef');
+         aes_decrypt          
+------------------------------
+ d                           +
+ sa      dj\x08safZ\dssaca\rs
+(1 row)
+
+select aes_decrypt(aes_encrypt('~·！@#￥%……&*（）-=——+{}【】、|：‘’，。《》、？','12345dvghadCVBUJNF', '1234567890abcdef'),'12345dvghadCVBUJNF', '1234567890abcdef');
+                  aes_decrypt                  
+-----------------------------------------------
+ ~·！@#￥%……&*（）-=——+{}【】、|：‘’，。《》、？
+(1 row)
+
+drop table test_encrypt;
+set block_encryption_mode = 'aes-256-cfb1';
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+ERROR:  function aes_encrypt(unknown, unknown) does not exist
+LINE 1: select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', 'abcd');
+ERROR:  the size of init_vector must be greater than or equal to 16.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef');
+ aes_encrypt 
+-------------
+ \x1B\HKL/
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456');
+ aes_encrypt 
+-------------
+ \x1B\HKL/
+(1 row)
+
+select lengthb(aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456')), lengthb('HuaweiGauss_234');
+ lengthb | lengthb 
+---------+---------
+      15 |      15
+(1 row)
+
+select lengthb(aes_encrypt('1234567890', 'cdjsfj3713vdVHV1', '1234567890abcdef123456')), lengthb('1234567890');
+ lengthb | lengthb 
+---------+---------
+      10 |      10
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef') = aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456');
+ ?column? 
+----------
+ t
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890dgjahdjk');
+  aes_encrypt  
+---------------
+ :镾e}\x07zĘB0
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef') = aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890dgjahdjk');
+ ?column? 
+----------
+ f
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', NULL);
+ERROR:  the size of init_vector must be greater than or equal to 16.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt('HuaweiGauss_234', NULL, '1234567890dgjahdjk');
+ aes_encrypt 
+-------------
+ 
+(1 row)
+
+select aes_encrypt(NULL, 'cdjsfj3713vdVHV1', '1234567890dgjahdjk');
+ aes_encrypt 
+-------------
+ 
+(1 row)
+
+select aes_encrypt(NULL, NULL, '1234567890dgjahdjk');
+ aes_encrypt 
+-------------
+ 
+(1 row)
+
+select aes_encrypt(NULL, 'dadsads'), aes_encrypt('dadsadsadsadfcs', NULL), aes_encrypt(NULL, NULL);
+ERROR:  function aes_encrypt(unknown, unknown) does not exist
+LINE 1: select aes_encrypt(NULL, 'dadsads'), aes_encrypt('dadsadsads...
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt(NULL, 'dadsads', 'dadsadsadsa'), aes_encrypt('dadsadsadsadfcs', NULL, 'dadsadsadsa'), aes_encrypt(NULL, NULL, NULL);
+ aes_encrypt | aes_encrypt | aes_encrypt 
+-------------+-------------+-------------
+             |             | 
+(1 row)
+
+select aes_decrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+ERROR:  function aes_decrypt(unknown, unknown) does not exist
+LINE 1: select aes_decrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: aes_decrypt
+select aes_decrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', 'abcd');
+ERROR:  the size of init_vector must be greater than or equal to 16.
+CONTEXT:  referenced column: aes_decrypt
+create table test_encrypt(f1 text);
+insert into test_encrypt select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef');
+select aes_decrypt(f1, 'cdjsfj3713vdVHV1', '1234567890abcdef') from test_encrypt;
+   aes_decrypt   
+-----------------
+ HuaweiGauss_234
+(1 row)
+
+select aes_decrypt(f1, 'cdjsfj3713vdVHV1', '1234567890abcdef') = 'HuaweiGauss_234' from test_encrypt;
+ ?column? 
+----------
+ t
+(1 row)
+
+select aes_decrypt(aes_encrypt('~`!@#$%^&*()_+-=<>?,./;''“”""[]{}\|','cdjsfj3713vdVHV1', '1234567890abcdef'),'cdjsfj3713vdVHV1', '1234567890abcdef');
+            aes_decrypt             
+------------------------------------
+ ~`!@#$%^&*()_+-=<>?,./;'“”""[]{}\|
+(1 row)
+
+select aes_decrypt(NULL, NULL, 'dadsa'), aes_decrypt(NULL, 'dasdsa', 'dsadsa'), aes_decrypt('dadsad', NULL, 'dadsadsa');
+ aes_decrypt | aes_decrypt | aes_decrypt 
+-------------+-------------+-------------
+             |             | 
+(1 row)
+
+select aes_decrypt(aes_encrypt('大家好','cdjsfj3713vdVHV1', '1234567890abcdef'),'cdjsfj3713vdVHV1', '1234567890abcdef');
+ aes_decrypt 
+-------------
+ 大家好
+(1 row)
+
+select aes_decrypt(aes_encrypt(E'd\nsa\tdj\bsaf\Z\\dssa\ca\rs','dajd123FGBJG', '1234567890abcdef'),'dajd123FGBJG', '1234567890abcdef');
+         aes_decrypt          
+------------------------------
+ d                           +
+ sa      dj\x08safZ\dssaca\rs
+(1 row)
+
+select aes_decrypt(aes_encrypt('~·！@#￥%……&*（）-=——+{}【】、|：‘’，。《》、？','12345dvghadCVBUJNF', '1234567890abcdef'),'12345dvghadCVBUJNF', '1234567890abcdef');
+                  aes_decrypt                  
+-----------------------------------------------
+ ~·！@#￥%……&*（）-=——+{}【】、|：‘’，。《》、？
+(1 row)
+
+drop table test_encrypt;
+set block_encryption_mode = 'aes-128-cfb8';
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+ERROR:  function aes_encrypt(unknown, unknown) does not exist
+LINE 1: select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', 'abcd');
+ERROR:  the size of init_vector must be greater than or equal to 16.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef');
+ aes_encrypt 
+-------------
+ h֧\x16z
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456');
+ aes_encrypt 
+-------------
+ h֧\x16z
+(1 row)
+
+select lengthb(aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456')), lengthb('HuaweiGauss_234');
+ lengthb | lengthb 
+---------+---------
+      15 |      15
+(1 row)
+
+select lengthb(aes_encrypt('1234567890', 'cdjsfj3713vdVHV1', '1234567890abcdef123456')), lengthb('1234567890');
+ lengthb | lengthb 
+---------+---------
+      10 |      10
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef') = aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456');
+ ?column? 
+----------
+ t
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890dgjahdjk');
+ aes_encrypt 
+-------------
+ ZQrWf\x06m
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef') = aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890dgjahdjk');
+ ?column? 
+----------
+ f
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', NULL);
+ERROR:  the size of init_vector must be greater than or equal to 16.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt('HuaweiGauss_234', NULL, '1234567890dgjahdjk');
+ aes_encrypt 
+-------------
+ 
+(1 row)
+
+select aes_encrypt(NULL, 'cdjsfj3713vdVHV1', '1234567890dgjahdjk');
+ aes_encrypt 
+-------------
+ 
+(1 row)
+
+select aes_encrypt(NULL, NULL, '1234567890dgjahdjk');
+ aes_encrypt 
+-------------
+ 
+(1 row)
+
+select aes_encrypt(NULL, 'dadsads'), aes_encrypt('dadsadsadsadfcs', NULL), aes_encrypt(NULL, NULL);
+ERROR:  function aes_encrypt(unknown, unknown) does not exist
+LINE 1: select aes_encrypt(NULL, 'dadsads'), aes_encrypt('dadsadsads...
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt(NULL, 'dadsads', 'dadsadsadsa'), aes_encrypt('dadsadsadsadfcs', NULL, 'dadsadsadsa'), aes_encrypt(NULL, NULL, NULL);
+ aes_encrypt | aes_encrypt | aes_encrypt 
+-------------+-------------+-------------
+             |             | 
+(1 row)
+
+select aes_decrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+ERROR:  function aes_decrypt(unknown, unknown) does not exist
+LINE 1: select aes_decrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: aes_decrypt
+select aes_decrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', 'abcd');
+ERROR:  the size of init_vector must be greater than or equal to 16.
+CONTEXT:  referenced column: aes_decrypt
+create table test_encrypt(f1 text);
+insert into test_encrypt select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef');
+select aes_decrypt(f1, 'cdjsfj3713vdVHV1', '1234567890abcdef') from test_encrypt;
+   aes_decrypt   
+-----------------
+ HuaweiGauss_234
+(1 row)
+
+select aes_decrypt(f1, 'cdjsfj3713vdVHV1', '1234567890abcdef') = 'HuaweiGauss_234' from test_encrypt;
+ ?column? 
+----------
+ t
+(1 row)
+
+select aes_decrypt(aes_encrypt('~`!@#$%^&*()_+-=<>?,./;''“”""[]{}\|','cdjsfj3713vdVHV1', '1234567890abcdef'),'cdjsfj3713vdVHV1', '1234567890abcdef');
+            aes_decrypt             
+------------------------------------
+ ~`!@#$%^&*()_+-=<>?,./;'“”""[]{}\|
+(1 row)
+
+select aes_decrypt(NULL, NULL, 'dadsa'), aes_decrypt(NULL, 'dasdsa', 'dsadsa'), aes_decrypt('dadsad', NULL, 'dadsadsa');
+ aes_decrypt | aes_decrypt | aes_decrypt 
+-------------+-------------+-------------
+             |             | 
+(1 row)
+
+select aes_decrypt(aes_encrypt('大家好','cdjsfj3713vdVHV1', '1234567890abcdef'),'cdjsfj3713vdVHV1', '1234567890abcdef');
+ aes_decrypt 
+-------------
+ 大家好
+(1 row)
+
+select aes_decrypt(aes_encrypt(E'd\nsa\tdj\bsaf\Z\\dssa\ca\rs','dajd123FGBJG', '1234567890abcdef'),'dajd123FGBJG', '1234567890abcdef');
+         aes_decrypt          
+------------------------------
+ d                           +
+ sa      dj\x08safZ\dssaca\rs
+(1 row)
+
+select aes_decrypt(aes_encrypt('~·！@#￥%……&*（）-=——+{}【】、|：‘’，。《》、？','12345dvghadCVBUJNF', '1234567890abcdef'),'12345dvghadCVBUJNF', '1234567890abcdef');
+                  aes_decrypt                  
+-----------------------------------------------
+ ~·！@#￥%……&*（）-=——+{}【】、|：‘’，。《》、？
+(1 row)
+
+drop table test_encrypt;
+set block_encryption_mode = 'aes-192-cfb8';
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+ERROR:  function aes_encrypt(unknown, unknown) does not exist
+LINE 1: select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', 'abcd');
+ERROR:  the size of init_vector must be greater than or equal to 16.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef');
+    aes_encrypt     
+--------------------
+ .\x13{M\x1Ccǹ,\x10
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456');
+    aes_encrypt     
+--------------------
+ .\x13{M\x1Ccǹ,\x10
+(1 row)
+
+select lengthb(aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456')), lengthb('HuaweiGauss_234');
+ lengthb | lengthb 
+---------+---------
+      15 |      15
+(1 row)
+
+select lengthb(aes_encrypt('1234567890', 'cdjsfj3713vdVHV1', '1234567890abcdef123456')), lengthb('1234567890');
+ lengthb | lengthb 
+---------+---------
+      10 |      10
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef') = aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456');
+ ?column? 
+----------
+ t
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890dgjahdjk');
+ aes_encrypt 
+-------------
+ +Ma].\x05ާR
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef') = aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890dgjahdjk');
+ ?column? 
+----------
+ f
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', NULL);
+ERROR:  the size of init_vector must be greater than or equal to 16.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt('HuaweiGauss_234', NULL, '1234567890dgjahdjk');
+ aes_encrypt 
+-------------
+ 
+(1 row)
+
+select aes_encrypt(NULL, 'cdjsfj3713vdVHV1', '1234567890dgjahdjk');
+ aes_encrypt 
+-------------
+ 
+(1 row)
+
+select aes_encrypt(NULL, NULL, '1234567890dgjahdjk');
+ aes_encrypt 
+-------------
+ 
+(1 row)
+
+select aes_encrypt(NULL, 'dadsads'), aes_encrypt('dadsadsadsadfcs', NULL), aes_encrypt(NULL, NULL);
+ERROR:  function aes_encrypt(unknown, unknown) does not exist
+LINE 1: select aes_encrypt(NULL, 'dadsads'), aes_encrypt('dadsadsads...
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt(NULL, 'dadsads', 'dadsadsadsa'), aes_encrypt('dadsadsadsadfcs', NULL, 'dadsadsadsa'), aes_encrypt(NULL, NULL, NULL);
+ aes_encrypt | aes_encrypt | aes_encrypt 
+-------------+-------------+-------------
+             |             | 
+(1 row)
+
+select aes_decrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+ERROR:  function aes_decrypt(unknown, unknown) does not exist
+LINE 1: select aes_decrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: aes_decrypt
+select aes_decrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', 'abcd');
+ERROR:  the size of init_vector must be greater than or equal to 16.
+CONTEXT:  referenced column: aes_decrypt
+create table test_encrypt(f1 text);
+insert into test_encrypt select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef');
+select aes_decrypt(f1, 'cdjsfj3713vdVHV1', '1234567890abcdef') from test_encrypt;
+   aes_decrypt   
+-----------------
+ HuaweiGauss_234
+(1 row)
+
+select aes_decrypt(f1, 'cdjsfj3713vdVHV1', '1234567890abcdef') = 'HuaweiGauss_234' from test_encrypt;
+ ?column? 
+----------
+ t
+(1 row)
+
+select aes_decrypt(aes_encrypt('~`!@#$%^&*()_+-=<>?,./;''“”""[]{}\|','cdjsfj3713vdVHV1', '1234567890abcdef'),'cdjsfj3713vdVHV1', '1234567890abcdef');
+            aes_decrypt             
+------------------------------------
+ ~`!@#$%^&*()_+-=<>?,./;'“”""[]{}\|
+(1 row)
+
+select aes_decrypt(NULL, NULL, 'dadsa'), aes_decrypt(NULL, 'dasdsa', 'dsadsa'), aes_decrypt('dadsad', NULL, 'dadsadsa');
+ aes_decrypt | aes_decrypt | aes_decrypt 
+-------------+-------------+-------------
+             |             | 
+(1 row)
+
+select aes_decrypt(aes_encrypt('大家好','cdjsfj3713vdVHV1', '1234567890abcdef'),'cdjsfj3713vdVHV1', '1234567890abcdef');
+ aes_decrypt 
+-------------
+ 大家好
+(1 row)
+
+select aes_decrypt(aes_encrypt(E'd\nsa\tdj\bsaf\Z\\dssa\ca\rs','dajd123FGBJG', '1234567890abcdef'),'dajd123FGBJG', '1234567890abcdef');
+         aes_decrypt          
+------------------------------
+ d                           +
+ sa      dj\x08safZ\dssaca\rs
+(1 row)
+
+select aes_decrypt(aes_encrypt('~·！@#￥%……&*（）-=——+{}【】、|：‘’，。《》、？','12345dvghadCVBUJNF', '1234567890abcdef'),'12345dvghadCVBUJNF', '1234567890abcdef');
+                  aes_decrypt                  
+-----------------------------------------------
+ ~·！@#￥%……&*（）-=——+{}【】、|：‘’，。《》、？
+(1 row)
+
+drop table test_encrypt;
+set block_encryption_mode = 'aes-256-cfb8';
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+ERROR:  function aes_encrypt(unknown, unknown) does not exist
+LINE 1: select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', 'abcd');
+ERROR:  the size of init_vector must be greater than or equal to 16.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef');
+ aes_encrypt 
+-------------
+ $+?i?Č
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456');
+ aes_encrypt 
+-------------
+ $+?i?Č
+(1 row)
+
+select lengthb(aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456')), lengthb('HuaweiGauss_234');
+ lengthb | lengthb 
+---------+---------
+      15 |      15
+(1 row)
+
+select lengthb(aes_encrypt('1234567890', 'cdjsfj3713vdVHV1', '1234567890abcdef123456')), lengthb('1234567890');
+ lengthb | lengthb 
+---------+---------
+      10 |      10
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef') = aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456');
+ ?column? 
+----------
+ t
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890dgjahdjk');
+ aes_encrypt  
+--------------
+ /\x069rw\x0B
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef') = aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890dgjahdjk');
+ ?column? 
+----------
+ f
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', NULL);
+ERROR:  the size of init_vector must be greater than or equal to 16.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt('HuaweiGauss_234', NULL, '1234567890dgjahdjk');
+ aes_encrypt 
+-------------
+ 
+(1 row)
+
+select aes_encrypt(NULL, 'cdjsfj3713vdVHV1', '1234567890dgjahdjk');
+ aes_encrypt 
+-------------
+ 
+(1 row)
+
+select aes_encrypt(NULL, NULL, '1234567890dgjahdjk');
+ aes_encrypt 
+-------------
+ 
+(1 row)
+
+select aes_encrypt(NULL, 'dadsads'), aes_encrypt('dadsadsadsadfcs', NULL), aes_encrypt(NULL, NULL);
+ERROR:  function aes_encrypt(unknown, unknown) does not exist
+LINE 1: select aes_encrypt(NULL, 'dadsads'), aes_encrypt('dadsadsads...
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt(NULL, 'dadsads', 'dadsadsadsa'), aes_encrypt('dadsadsadsadfcs', NULL, 'dadsadsadsa'), aes_encrypt(NULL, NULL, NULL);
+ aes_encrypt | aes_encrypt | aes_encrypt 
+-------------+-------------+-------------
+             |             | 
+(1 row)
+
+select aes_decrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+ERROR:  function aes_decrypt(unknown, unknown) does not exist
+LINE 1: select aes_decrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: aes_decrypt
+select aes_decrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', 'abcd');
+ERROR:  the size of init_vector must be greater than or equal to 16.
+CONTEXT:  referenced column: aes_decrypt
+create table test_encrypt(f1 text);
+insert into test_encrypt select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef');
+select aes_decrypt(f1, 'cdjsfj3713vdVHV1', '1234567890abcdef') from test_encrypt;
+   aes_decrypt   
+-----------------
+ HuaweiGauss_234
+(1 row)
+
+select aes_decrypt(f1, 'cdjsfj3713vdVHV1', '1234567890abcdef') = 'HuaweiGauss_234' from test_encrypt;
+ ?column? 
+----------
+ t
+(1 row)
+
+select aes_decrypt(aes_encrypt('~`!@#$%^&*()_+-=<>?,./;''“”""[]{}\|','cdjsfj3713vdVHV1', '1234567890abcdef'),'cdjsfj3713vdVHV1', '1234567890abcdef');
+            aes_decrypt             
+------------------------------------
+ ~`!@#$%^&*()_+-=<>?,./;'“”""[]{}\|
+(1 row)
+
+select aes_decrypt(NULL, NULL, 'dadsa'), aes_decrypt(NULL, 'dasdsa', 'dsadsa'), aes_decrypt('dadsad', NULL, 'dadsadsa');
+ aes_decrypt | aes_decrypt | aes_decrypt 
+-------------+-------------+-------------
+             |             | 
+(1 row)
+
+select aes_decrypt(aes_encrypt('大家好','cdjsfj3713vdVHV1', '1234567890abcdef'),'cdjsfj3713vdVHV1', '1234567890abcdef');
+ aes_decrypt 
+-------------
+ 大家好
+(1 row)
+
+select aes_decrypt(aes_encrypt(E'd\nsa\tdj\bsaf\Z\\dssa\ca\rs','dajd123FGBJG', '1234567890abcdef'),'dajd123FGBJG', '1234567890abcdef');
+         aes_decrypt          
+------------------------------
+ d                           +
+ sa      dj\x08safZ\dssaca\rs
+(1 row)
+
+select aes_decrypt(aes_encrypt('~·！@#￥%……&*（）-=——+{}【】、|：‘’，。《》、？','12345dvghadCVBUJNF', '1234567890abcdef'),'12345dvghadCVBUJNF', '1234567890abcdef');
+                  aes_decrypt                  
+-----------------------------------------------
+ ~·！@#￥%……&*（）-=——+{}【】、|：‘’，。《》、？
+(1 row)
+
+drop table test_encrypt;
+set block_encryption_mode = 'aes-128-cfb128';
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+ERROR:  function aes_encrypt(unknown, unknown) does not exist
+LINE 1: select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', 'abcd');
+ERROR:  the size of init_vector must be greater than or equal to 16.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef');
+      aes_encrypt      
+-----------------------
+ hJ#\x0E\x1A\x01跟uGfG
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456');
+      aes_encrypt      
+-----------------------
+ hJ#\x0E\x1A\x01跟uGfG
+(1 row)
+
+select lengthb(aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456')), lengthb('HuaweiGauss_234');
+ lengthb | lengthb 
+---------+---------
+      15 |      15
+(1 row)
+
+select lengthb(aes_encrypt('1234567890', 'cdjsfj3713vdVHV1', '1234567890abcdef123456')), lengthb('1234567890');
+ lengthb | lengthb 
+---------+---------
+      10 |      10
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef') = aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456');
+ ?column? 
+----------
+ t
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890dgjahdjk');
+     aes_encrypt     
+---------------------
+ $^.\x07\\x0C#nT\x01
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef') = aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890dgjahdjk');
+ ?column? 
+----------
+ f
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', NULL);
+ERROR:  the size of init_vector must be greater than or equal to 16.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt('HuaweiGauss_234', NULL, '1234567890dgjahdjk');
+ aes_encrypt 
+-------------
+ 
+(1 row)
+
+select aes_encrypt(NULL, 'cdjsfj3713vdVHV1', '1234567890dgjahdjk');
+ aes_encrypt 
+-------------
+ 
+(1 row)
+
+select aes_encrypt(NULL, NULL, '1234567890dgjahdjk');
+ aes_encrypt 
+-------------
+ 
+(1 row)
+
+select aes_encrypt(NULL, 'dadsads'), aes_encrypt('dadsadsadsadfcs', NULL), aes_encrypt(NULL, NULL);
+ERROR:  function aes_encrypt(unknown, unknown) does not exist
+LINE 1: select aes_encrypt(NULL, 'dadsads'), aes_encrypt('dadsadsads...
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt(NULL, 'dadsads', 'dadsadsadsa'), aes_encrypt('dadsadsadsadfcs', NULL, 'dadsadsadsa'), aes_encrypt(NULL, NULL, NULL);
+ aes_encrypt | aes_encrypt | aes_encrypt 
+-------------+-------------+-------------
+             |             | 
+(1 row)
+
+select aes_decrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+ERROR:  function aes_decrypt(unknown, unknown) does not exist
+LINE 1: select aes_decrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: aes_decrypt
+select aes_decrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', 'abcd');
+ERROR:  the size of init_vector must be greater than or equal to 16.
+CONTEXT:  referenced column: aes_decrypt
+create table test_encrypt(f1 text);
+insert into test_encrypt select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef');
+select aes_decrypt(f1, 'cdjsfj3713vdVHV1', '1234567890abcdef') from test_encrypt;
+   aes_decrypt   
+-----------------
+ HuaweiGauss_234
+(1 row)
+
+select aes_decrypt(f1, 'cdjsfj3713vdVHV1', '1234567890abcdef') = 'HuaweiGauss_234' from test_encrypt;
+ ?column? 
+----------
+ t
+(1 row)
+
+select aes_decrypt(aes_encrypt('~`!@#$%^&*()_+-=<>?,./;''“”""[]{}\|','cdjsfj3713vdVHV1', '1234567890abcdef'),'cdjsfj3713vdVHV1', '1234567890abcdef');
+            aes_decrypt             
+------------------------------------
+ ~`!@#$%^&*()_+-=<>?,./;'“”""[]{}\|
+(1 row)
+
+select aes_decrypt(NULL, NULL, 'dadsa'), aes_decrypt(NULL, 'dasdsa', 'dsadsa'), aes_decrypt('dadsad', NULL, 'dadsadsa');
+ aes_decrypt | aes_decrypt | aes_decrypt 
+-------------+-------------+-------------
+             |             | 
+(1 row)
+
+select aes_decrypt(aes_encrypt('大家好','cdjsfj3713vdVHV1', '1234567890abcdef'),'cdjsfj3713vdVHV1', '1234567890abcdef');
+ aes_decrypt 
+-------------
+ 大家好
+(1 row)
+
+select aes_decrypt(aes_encrypt(E'd\nsa\tdj\bsaf\Z\\dssa\ca\rs','dajd123FGBJG', '1234567890abcdef'),'dajd123FGBJG', '1234567890abcdef');
+         aes_decrypt          
+------------------------------
+ d                           +
+ sa      dj\x08safZ\dssaca\rs
+(1 row)
+
+select aes_decrypt(aes_encrypt('~·！@#￥%……&*（）-=——+{}【】、|：‘’，。《》、？','12345dvghadCVBUJNF', '1234567890abcdef'),'12345dvghadCVBUJNF', '1234567890abcdef');
+                  aes_decrypt                  
+-----------------------------------------------
+ ~·！@#￥%……&*（）-=——+{}【】、|：‘’，。《》、？
+(1 row)
+
+drop table test_encrypt;
+set block_encryption_mode = 'aes-192-cfb128';
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+ERROR:  function aes_encrypt(unknown, unknown) does not exist
+LINE 1: select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', 'abcd');
+ERROR:  the size of init_vector must be greater than or equal to 16.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef');
+ aes_encrypt  
+--------------
+ .1\x0CHpM4&H
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456');
+ aes_encrypt  
+--------------
+ .1\x0CHpM4&H
+(1 row)
+
+select lengthb(aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456')), lengthb('HuaweiGauss_234');
+ lengthb | lengthb 
+---------+---------
+      15 |      15
+(1 row)
+
+select lengthb(aes_encrypt('1234567890', 'cdjsfj3713vdVHV1', '1234567890abcdef123456')), lengthb('1234567890');
+ lengthb | lengthb 
+---------+---------
+      10 |      10
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef') = aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456');
+ ?column? 
+----------
+ t
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890dgjahdjk');
+ aes_encrypt 
+-------------
+ +P^1;,lQv|
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef') = aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890dgjahdjk');
+ ?column? 
+----------
+ f
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', NULL);
+ERROR:  the size of init_vector must be greater than or equal to 16.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt('HuaweiGauss_234', NULL, '1234567890dgjahdjk');
+ aes_encrypt 
+-------------
+ 
+(1 row)
+
+select aes_encrypt(NULL, 'cdjsfj3713vdVHV1', '1234567890dgjahdjk');
+ aes_encrypt 
+-------------
+ 
+(1 row)
+
+select aes_encrypt(NULL, NULL, '1234567890dgjahdjk');
+ aes_encrypt 
+-------------
+ 
+(1 row)
+
+select aes_encrypt(NULL, 'dadsads'), aes_encrypt('dadsadsadsadfcs', NULL), aes_encrypt(NULL, NULL);
+ERROR:  function aes_encrypt(unknown, unknown) does not exist
+LINE 1: select aes_encrypt(NULL, 'dadsads'), aes_encrypt('dadsadsads...
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt(NULL, 'dadsads', 'dadsadsadsa'), aes_encrypt('dadsadsadsadfcs', NULL, 'dadsadsadsa'), aes_encrypt(NULL, NULL, NULL);
+ aes_encrypt | aes_encrypt | aes_encrypt 
+-------------+-------------+-------------
+             |             | 
+(1 row)
+
+select aes_decrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+ERROR:  function aes_decrypt(unknown, unknown) does not exist
+LINE 1: select aes_decrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: aes_decrypt
+select aes_decrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', 'abcd');
+ERROR:  the size of init_vector must be greater than or equal to 16.
+CONTEXT:  referenced column: aes_decrypt
+create table test_encrypt(f1 text);
+insert into test_encrypt select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef');
+select aes_decrypt(f1, 'cdjsfj3713vdVHV1', '1234567890abcdef') from test_encrypt;
+   aes_decrypt   
+-----------------
+ HuaweiGauss_234
+(1 row)
+
+select aes_decrypt(f1, 'cdjsfj3713vdVHV1', '1234567890abcdef') = 'HuaweiGauss_234' from test_encrypt;
+ ?column? 
+----------
+ t
+(1 row)
+
+select aes_decrypt(aes_encrypt('~`!@#$%^&*()_+-=<>?,./;''“”""[]{}\|','cdjsfj3713vdVHV1', '1234567890abcdef'),'cdjsfj3713vdVHV1', '1234567890abcdef');
+            aes_decrypt             
+------------------------------------
+ ~`!@#$%^&*()_+-=<>?,./;'“”""[]{}\|
+(1 row)
+
+select aes_decrypt(NULL, NULL, 'dadsa'), aes_decrypt(NULL, 'dasdsa', 'dsadsa'), aes_decrypt('dadsad', NULL, 'dadsadsa');
+ aes_decrypt | aes_decrypt | aes_decrypt 
+-------------+-------------+-------------
+             |             | 
+(1 row)
+
+select aes_decrypt(aes_encrypt('大家好','cdjsfj3713vdVHV1', '1234567890abcdef'),'cdjsfj3713vdVHV1', '1234567890abcdef');
+ aes_decrypt 
+-------------
+ 大家好
+(1 row)
+
+select aes_decrypt(aes_encrypt(E'd\nsa\tdj\bsaf\Z\\dssa\ca\rs','dajd123FGBJG', '1234567890abcdef'),'dajd123FGBJG', '1234567890abcdef');
+         aes_decrypt          
+------------------------------
+ d                           +
+ sa      dj\x08safZ\dssaca\rs
+(1 row)
+
+select aes_decrypt(aes_encrypt('~·！@#￥%……&*（）-=——+{}【】、|：‘’，。《》、？','12345dvghadCVBUJNF', '1234567890abcdef'),'12345dvghadCVBUJNF', '1234567890abcdef');
+                  aes_decrypt                  
+-----------------------------------------------
+ ~·！@#￥%……&*（）-=——+{}【】、|：‘’，。《》、？
+(1 row)
+
+drop table test_encrypt;
+set block_encryption_mode = 'aes-256-cfb128';
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+ERROR:  function aes_encrypt(unknown, unknown) does not exist
+LINE 1: select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', 'abcd');
+ERROR:  the size of init_vector must be greater than or equal to 16.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef');
+    aes_encrypt    
+-------------------
+ p\x1A\x05pg\x17R®
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456');
+    aes_encrypt    
+-------------------
+ p\x1A\x05pg\x17R®
+(1 row)
+
+select lengthb(aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456')), lengthb('HuaweiGauss_234');
+ lengthb | lengthb 
+---------+---------
+      15 |      15
+(1 row)
+
+select lengthb(aes_encrypt('1234567890', 'cdjsfj3713vdVHV1', '1234567890abcdef123456')), lengthb('1234567890');
+ lengthb | lengthb 
+---------+---------
+      10 |      10
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef') = aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456');
+ ?column? 
+----------
+ t
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890dgjahdjk');
+  aes_encrypt  
+---------------
+ %Eyi>Sc`A\x15
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef') = aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890dgjahdjk');
+ ?column? 
+----------
+ f
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', NULL);
+ERROR:  the size of init_vector must be greater than or equal to 16.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt('HuaweiGauss_234', NULL, '1234567890dgjahdjk');
+ aes_encrypt 
+-------------
+ 
+(1 row)
+
+select aes_encrypt(NULL, 'cdjsfj3713vdVHV1', '1234567890dgjahdjk');
+ aes_encrypt 
+-------------
+ 
+(1 row)
+
+select aes_encrypt(NULL, NULL, '1234567890dgjahdjk');
+ aes_encrypt 
+-------------
+ 
+(1 row)
+
+select aes_encrypt(NULL, 'dadsads'), aes_encrypt('dadsadsadsadfcs', NULL), aes_encrypt(NULL, NULL);
+ERROR:  function aes_encrypt(unknown, unknown) does not exist
+LINE 1: select aes_encrypt(NULL, 'dadsads'), aes_encrypt('dadsadsads...
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt(NULL, 'dadsads', 'dadsadsadsa'), aes_encrypt('dadsadsadsadfcs', NULL, 'dadsadsadsa'), aes_encrypt(NULL, NULL, NULL);
+ aes_encrypt | aes_encrypt | aes_encrypt 
+-------------+-------------+-------------
+             |             | 
+(1 row)
+
+select aes_decrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+ERROR:  function aes_decrypt(unknown, unknown) does not exist
+LINE 1: select aes_decrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: aes_decrypt
+select aes_decrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', 'abcd');
+ERROR:  the size of init_vector must be greater than or equal to 16.
+CONTEXT:  referenced column: aes_decrypt
+create table test_encrypt(f1 text);
+insert into test_encrypt select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef');
+select aes_decrypt(f1, 'cdjsfj3713vdVHV1', '1234567890abcdef') from test_encrypt;
+   aes_decrypt   
+-----------------
+ HuaweiGauss_234
+(1 row)
+
+select aes_decrypt(f1, 'cdjsfj3713vdVHV1', '1234567890abcdef') = 'HuaweiGauss_234' from test_encrypt;
+ ?column? 
+----------
+ t
+(1 row)
+
+select aes_decrypt(aes_encrypt('~`!@#$%^&*()_+-=<>?,./;''“”""[]{}\|','cdjsfj3713vdVHV1', '1234567890abcdef'),'cdjsfj3713vdVHV1', '1234567890abcdef');
+            aes_decrypt             
+------------------------------------
+ ~`!@#$%^&*()_+-=<>?,./;'“”""[]{}\|
+(1 row)
+
+select aes_decrypt(NULL, NULL, 'dadsa'), aes_decrypt(NULL, 'dasdsa', 'dsadsa'), aes_decrypt('dadsad', NULL, 'dadsadsa');
+ aes_decrypt | aes_decrypt | aes_decrypt 
+-------------+-------------+-------------
+             |             | 
+(1 row)
+
+select aes_decrypt(aes_encrypt('大家好','cdjsfj3713vdVHV1', '1234567890abcdef'),'cdjsfj3713vdVHV1', '1234567890abcdef');
+ aes_decrypt 
+-------------
+ 大家好
+(1 row)
+
+select aes_decrypt(aes_encrypt(E'd\nsa\tdj\bsaf\Z\\dssa\ca\rs','dajd123FGBJG', '1234567890abcdef'),'dajd123FGBJG', '1234567890abcdef');
+         aes_decrypt          
+------------------------------
+ d                           +
+ sa      dj\x08safZ\dssaca\rs
+(1 row)
+
+select aes_decrypt(aes_encrypt('~·！@#￥%……&*（）-=——+{}【】、|：‘’，。《》、？','12345dvghadCVBUJNF', '1234567890abcdef'),'12345dvghadCVBUJNF', '1234567890abcdef');
+                  aes_decrypt                  
+-----------------------------------------------
+ ~·！@#￥%……&*（）-=——+{}【】、|：‘’，。《》、？
+(1 row)
+
+drop table test_encrypt;
+set block_encryption_mode = 'aes-128-ofb';
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+ERROR:  function aes_encrypt(unknown, unknown) does not exist
+LINE 1: select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', 'abcd');
+ERROR:  the size of init_vector must be greater than or equal to 16.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef');
+      aes_encrypt      
+-----------------------
+ hJ#\x0E\x1A\x01跟uGfG
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456');
+      aes_encrypt      
+-----------------------
+ hJ#\x0E\x1A\x01跟uGfG
+(1 row)
+
+select lengthb(aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456')), lengthb('HuaweiGauss_234');
+ lengthb | lengthb 
+---------+---------
+      15 |      15
+(1 row)
+
+select lengthb(aes_encrypt('1234567890', 'cdjsfj3713vdVHV1', '1234567890abcdef123456')), lengthb('1234567890');
+ lengthb | lengthb 
+---------+---------
+      10 |      10
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef') = aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456');
+ ?column? 
+----------
+ t
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890dgjahdjk');
+     aes_encrypt     
+---------------------
+ $^.\x07\\x0C#nT\x01
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef') = aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890dgjahdjk');
+ ?column? 
+----------
+ f
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', NULL);
+ERROR:  the size of init_vector must be greater than or equal to 16.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt('HuaweiGauss_234', NULL, '1234567890dgjahdjk');
+ aes_encrypt 
+-------------
+ 
+(1 row)
+
+select aes_encrypt(NULL, 'cdjsfj3713vdVHV1', '1234567890dgjahdjk');
+ aes_encrypt 
+-------------
+ 
+(1 row)
+
+select aes_encrypt(NULL, NULL, '1234567890dgjahdjk');
+ aes_encrypt 
+-------------
+ 
+(1 row)
+
+select aes_encrypt(NULL, 'dadsads'), aes_encrypt('dadsadsadsadfcs', NULL), aes_encrypt(NULL, NULL);
+ERROR:  function aes_encrypt(unknown, unknown) does not exist
+LINE 1: select aes_encrypt(NULL, 'dadsads'), aes_encrypt('dadsadsads...
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt(NULL, 'dadsads', 'dadsadsadsa'), aes_encrypt('dadsadsadsadfcs', NULL, 'dadsadsadsa'), aes_encrypt(NULL, NULL, NULL);
+ aes_encrypt | aes_encrypt | aes_encrypt 
+-------------+-------------+-------------
+             |             | 
+(1 row)
+
+select aes_decrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+ERROR:  function aes_decrypt(unknown, unknown) does not exist
+LINE 1: select aes_decrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: aes_decrypt
+select aes_decrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', 'abcd');
+ERROR:  the size of init_vector must be greater than or equal to 16.
+CONTEXT:  referenced column: aes_decrypt
+create table test_encrypt(f1 text);
+insert into test_encrypt select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef');
+select aes_decrypt(f1, 'cdjsfj3713vdVHV1', '1234567890abcdef') from test_encrypt;
+   aes_decrypt   
+-----------------
+ HuaweiGauss_234
+(1 row)
+
+select aes_decrypt(f1, 'cdjsfj3713vdVHV1', '1234567890abcdef') = 'HuaweiGauss_234' from test_encrypt;
+ ?column? 
+----------
+ t
+(1 row)
+
+select aes_decrypt(aes_encrypt('~`!@#$%^&*()_+-=<>?,./;''“”""[]{}\|','cdjsfj3713vdVHV1', '1234567890abcdef'),'cdjsfj3713vdVHV1', '1234567890abcdef');
+            aes_decrypt             
+------------------------------------
+ ~`!@#$%^&*()_+-=<>?,./;'“”""[]{}\|
+(1 row)
+
+select aes_decrypt(NULL, NULL, 'dadsa'), aes_decrypt(NULL, 'dasdsa', 'dsadsa'), aes_decrypt('dadsad', NULL, 'dadsadsa');
+ aes_decrypt | aes_decrypt | aes_decrypt 
+-------------+-------------+-------------
+             |             | 
+(1 row)
+
+select aes_decrypt(aes_encrypt('大家好','cdjsfj3713vdVHV1', '1234567890abcdef'),'cdjsfj3713vdVHV1', '1234567890abcdef');
+ aes_decrypt 
+-------------
+ 大家好
+(1 row)
+
+select aes_decrypt(aes_encrypt(E'd\nsa\tdj\bsaf\Z\\dssa\ca\rs','dajd123FGBJG', '1234567890abcdef'),'dajd123FGBJG', '1234567890abcdef');
+         aes_decrypt          
+------------------------------
+ d                           +
+ sa      dj\x08safZ\dssaca\rs
+(1 row)
+
+select aes_decrypt(aes_encrypt('~·！@#￥%……&*（）-=——+{}【】、|：‘’，。《》、？','12345dvghadCVBUJNF', '1234567890abcdef'),'12345dvghadCVBUJNF', '1234567890abcdef');
+                  aes_decrypt                  
+-----------------------------------------------
+ ~·！@#￥%……&*（）-=——+{}【】、|：‘’，。《》、？
+(1 row)
+
+drop table test_encrypt;
+set block_encryption_mode = 'aes-192-ofb';
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+ERROR:  function aes_encrypt(unknown, unknown) does not exist
+LINE 1: select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', 'abcd');
+ERROR:  the size of init_vector must be greater than or equal to 16.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef');
+ aes_encrypt  
+--------------
+ .1\x0CHpM4&H
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456');
+ aes_encrypt  
+--------------
+ .1\x0CHpM4&H
+(1 row)
+
+select lengthb(aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456')), lengthb('HuaweiGauss_234');
+ lengthb | lengthb 
+---------+---------
+      15 |      15
+(1 row)
+
+select lengthb(aes_encrypt('1234567890', 'cdjsfj3713vdVHV1', '1234567890abcdef123456')), lengthb('1234567890');
+ lengthb | lengthb 
+---------+---------
+      10 |      10
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef') = aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456');
+ ?column? 
+----------
+ t
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890dgjahdjk');
+ aes_encrypt 
+-------------
+ +P^1;,lQv|
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef') = aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890dgjahdjk');
+ ?column? 
+----------
+ f
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', NULL);
+ERROR:  the size of init_vector must be greater than or equal to 16.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt('HuaweiGauss_234', NULL, '1234567890dgjahdjk');
+ aes_encrypt 
+-------------
+ 
+(1 row)
+
+select aes_encrypt(NULL, 'cdjsfj3713vdVHV1', '1234567890dgjahdjk');
+ aes_encrypt 
+-------------
+ 
+(1 row)
+
+select aes_encrypt(NULL, NULL, '1234567890dgjahdjk');
+ aes_encrypt 
+-------------
+ 
+(1 row)
+
+select aes_encrypt(NULL, 'dadsads'), aes_encrypt('dadsadsadsadfcs', NULL), aes_encrypt(NULL, NULL);
+ERROR:  function aes_encrypt(unknown, unknown) does not exist
+LINE 1: select aes_encrypt(NULL, 'dadsads'), aes_encrypt('dadsadsads...
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt(NULL, 'dadsads', 'dadsadsadsa'), aes_encrypt('dadsadsadsadfcs', NULL, 'dadsadsadsa'), aes_encrypt(NULL, NULL, NULL);
+ aes_encrypt | aes_encrypt | aes_encrypt 
+-------------+-------------+-------------
+             |             | 
+(1 row)
+
+select aes_decrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+ERROR:  function aes_decrypt(unknown, unknown) does not exist
+LINE 1: select aes_decrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: aes_decrypt
+select aes_decrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', 'abcd');
+ERROR:  the size of init_vector must be greater than or equal to 16.
+CONTEXT:  referenced column: aes_decrypt
+create table test_encrypt(f1 text);
+insert into test_encrypt select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef');
+select aes_decrypt(f1, 'cdjsfj3713vdVHV1', '1234567890abcdef') from test_encrypt;
+   aes_decrypt   
+-----------------
+ HuaweiGauss_234
+(1 row)
+
+select aes_decrypt(f1, 'cdjsfj3713vdVHV1', '1234567890abcdef') = 'HuaweiGauss_234' from test_encrypt;
+ ?column? 
+----------
+ t
+(1 row)
+
+select aes_decrypt(aes_encrypt('~`!@#$%^&*()_+-=<>?,./;''“”""[]{}\|','cdjsfj3713vdVHV1', '1234567890abcdef'),'cdjsfj3713vdVHV1', '1234567890abcdef');
+            aes_decrypt             
+------------------------------------
+ ~`!@#$%^&*()_+-=<>?,./;'“”""[]{}\|
+(1 row)
+
+select aes_decrypt(NULL, NULL, 'dadsa'), aes_decrypt(NULL, 'dasdsa', 'dsadsa'), aes_decrypt('dadsad', NULL, 'dadsadsa');
+ aes_decrypt | aes_decrypt | aes_decrypt 
+-------------+-------------+-------------
+             |             | 
+(1 row)
+
+select aes_decrypt(aes_encrypt('大家好','cdjsfj3713vdVHV1', '1234567890abcdef'),'cdjsfj3713vdVHV1', '1234567890abcdef');
+ aes_decrypt 
+-------------
+ 大家好
+(1 row)
+
+select aes_decrypt(aes_encrypt(E'd\nsa\tdj\bsaf\Z\\dssa\ca\rs','dajd123FGBJG', '1234567890abcdef'),'dajd123FGBJG', '1234567890abcdef');
+         aes_decrypt          
+------------------------------
+ d                           +
+ sa      dj\x08safZ\dssaca\rs
+(1 row)
+
+select aes_decrypt(aes_encrypt('~·！@#￥%……&*（）-=——+{}【】、|：‘’，。《》、？','12345dvghadCVBUJNF', '1234567890abcdef'),'12345dvghadCVBUJNF', '1234567890abcdef');
+                  aes_decrypt                  
+-----------------------------------------------
+ ~·！@#￥%……&*（）-=——+{}【】、|：‘’，。《》、？
+(1 row)
+
+drop table test_encrypt;
+set block_encryption_mode = 'aes-256-ofb';
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+ERROR:  function aes_encrypt(unknown, unknown) does not exist
+LINE 1: select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', 'abcd');
+ERROR:  the size of init_vector must be greater than or equal to 16.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef');
+    aes_encrypt    
+-------------------
+ p\x1A\x05pg\x17R®
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456');
+    aes_encrypt    
+-------------------
+ p\x1A\x05pg\x17R®
+(1 row)
+
+select lengthb(aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456')), lengthb('HuaweiGauss_234');
+ lengthb | lengthb 
+---------+---------
+      15 |      15
+(1 row)
+
+select lengthb(aes_encrypt('1234567890', 'cdjsfj3713vdVHV1', '1234567890abcdef123456')), lengthb('1234567890');
+ lengthb | lengthb 
+---------+---------
+      10 |      10
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef') = aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef123456');
+ ?column? 
+----------
+ t
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890dgjahdjk');
+  aes_encrypt  
+---------------
+ %Eyi>Sc`A\x15
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef') = aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890dgjahdjk');
+ ?column? 
+----------
+ f
+(1 row)
+
+select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', NULL);
+ERROR:  the size of init_vector must be greater than or equal to 16.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt('HuaweiGauss_234', NULL, '1234567890dgjahdjk');
+ aes_encrypt 
+-------------
+ 
+(1 row)
+
+select aes_encrypt(NULL, 'cdjsfj3713vdVHV1', '1234567890dgjahdjk');
+ aes_encrypt 
+-------------
+ 
+(1 row)
+
+select aes_encrypt(NULL, NULL, '1234567890dgjahdjk');
+ aes_encrypt 
+-------------
+ 
+(1 row)
+
+select aes_encrypt(NULL, 'dadsads'), aes_encrypt('dadsadsadsadfcs', NULL), aes_encrypt(NULL, NULL);
+ERROR:  function aes_encrypt(unknown, unknown) does not exist
+LINE 1: select aes_encrypt(NULL, 'dadsads'), aes_encrypt('dadsadsads...
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: aes_encrypt
+select aes_encrypt(NULL, 'dadsads', 'dadsadsadsa'), aes_encrypt('dadsadsadsadfcs', NULL, 'dadsadsadsa'), aes_encrypt(NULL, NULL, NULL);
+ aes_encrypt | aes_encrypt | aes_encrypt 
+-------------+-------------+-------------
+             |             | 
+(1 row)
+
+select aes_decrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+ERROR:  function aes_decrypt(unknown, unknown) does not exist
+LINE 1: select aes_decrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: aes_decrypt
+select aes_decrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', 'abcd');
+ERROR:  the size of init_vector must be greater than or equal to 16.
+CONTEXT:  referenced column: aes_decrypt
+create table test_encrypt(f1 text);
+insert into test_encrypt select aes_encrypt('HuaweiGauss_234', 'cdjsfj3713vdVHV1', '1234567890abcdef');
+select aes_decrypt(f1, 'cdjsfj3713vdVHV1', '1234567890abcdef') from test_encrypt;
+   aes_decrypt   
+-----------------
+ HuaweiGauss_234
+(1 row)
+
+select aes_decrypt(f1, 'cdjsfj3713vdVHV1', '1234567890abcdef') = 'HuaweiGauss_234' from test_encrypt;
+ ?column? 
+----------
+ t
+(1 row)
+
+select aes_decrypt(aes_encrypt('~`!@#$%^&*()_+-=<>?,./;''“”""[]{}\|','cdjsfj3713vdVHV1', '1234567890abcdef'),'cdjsfj3713vdVHV1', '1234567890abcdef');
+            aes_decrypt             
+------------------------------------
+ ~`!@#$%^&*()_+-=<>?,./;'“”""[]{}\|
+(1 row)
+
+select aes_decrypt(NULL, NULL, 'dadsa'), aes_decrypt(NULL, 'dasdsa', 'dsadsa'), aes_decrypt('dadsad', NULL, 'dadsadsa');
+ aes_decrypt | aes_decrypt | aes_decrypt 
+-------------+-------------+-------------
+             |             | 
+(1 row)
+
+select aes_decrypt(aes_encrypt('大家好','cdjsfj3713vdVHV1', '1234567890abcdef'),'cdjsfj3713vdVHV1', '1234567890abcdef');
+ aes_decrypt 
+-------------
+ 大家好
+(1 row)
+
+select aes_decrypt(aes_encrypt(E'd\nsa\tdj\bsaf\Z\\dssa\ca\rs','dajd123FGBJG', '1234567890abcdef'),'dajd123FGBJG', '1234567890abcdef');
+         aes_decrypt          
+------------------------------
+ d                           +
+ sa      dj\x08safZ\dssaca\rs
+(1 row)
+
+select aes_decrypt(aes_encrypt('~·！@#￥%……&*（）-=——+{}【】、|：‘’，。《》、？','12345dvghadCVBUJNF', '1234567890abcdef'),'12345dvghadCVBUJNF', '1234567890abcdef');
+                  aes_decrypt                  
+-----------------------------------------------
+ ~·！@#￥%……&*（）-=——+{}【】、|：‘’，。《》、？
+(1 row)
+
+drop table test_encrypt;
+\c postgres
+drop database b;

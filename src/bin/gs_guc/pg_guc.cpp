@@ -1876,7 +1876,7 @@ static void do_help_set_reset_options(void)
     (void)printf(_("\nOptions for set and reload with -h host-auth-policy: \n"));
     (void)printf(_("  -Z NODE-TYPE   can be \"coordinator\", or \"datanode\"\n"));
 #else
-
+#ifdef ENABLE_LITE_MODE
     (void)printf(_("\nOptions for set with -c parameter: \n"));
     (void)printf(_("  -Z NODE-TYPE   can only be \"datanode\", default is \"datanode\". "));
 
@@ -1885,6 +1885,18 @@ static void do_help_set_reset_options(void)
 
     (void)printf(_("\nOptions for set and reload with -h host-auth-policy: \n"));
     (void)printf(_("  -Z NODE-TYPE   can only be \"datanode\", default is \"datanode\"\n"));
+#else
+    (void)printf(_("\nOptions for set with -c parameter: \n"));
+    (void)printf(_("  -Z NODE-TYPE   can be \"datanode\", \"cmserver\" or \"cmagent\". "));
+
+    (void)printf(_("NODE-TYPE is used to identify configuration file (with -c parameter) in data directory\n"));
+    (void)printf(_("  \"datanode\"                                      -- postgresql.conf\n"));
+    (void)printf(_("  \"cmserver\"                                      -- cm_server.conf\n"));
+    (void)printf(_("  \"cmagent\"                                       -- cm_agent.conf\n"));
+
+    (void)printf(_("\nOptions for set and reload with -h host-auth-policy: \n"));
+    (void)printf(_("  -Z NODE-TYPE   can only be \"datanode\"\n"));
+#endif
 #endif
 }
 
@@ -2921,6 +2933,16 @@ int main(int argc, char** argv)
 
     if ((nodetype == INSTANCE_CMAGENT) || (nodetype == INSTANCE_CMSERVER)) {
         checkCMParameter(pgdata_D, nodename, instance_name);
+    }
+
+    if ((NULL == instance_name) && (NULL == pgdata_D) &&
+        ((nodetype != INSTANCE_CMAGENT) && (nodetype != INSTANCE_CMSERVER))) {
+        char* env_value = NULL;
+        env_value = getenv("PGDATA");
+        if ((NULL != env_value) && ('\0' != env_value[0]) && (MAXPGPATH > strlen(env_value))) {
+            pgdata_D = xstrdup(env_value);
+            canonicalize_path(pgdata_D);
+        }
     }
 
     if (nodetype == INSTANCE_DATANODE || nodetype == INSTANCE_COORDINATOR) {

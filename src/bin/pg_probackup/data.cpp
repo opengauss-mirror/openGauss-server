@@ -29,7 +29,6 @@
 #include "lz4.h"
 #include "zstd.h"
 
-
 /* Union to ease operations on relation pages */
 typedef struct DataPage
 {
@@ -456,8 +455,6 @@ get_checksum_errormsg(Page page, char **errormsg, BlockNumber absolute_blkno)
  *         PageIsCorrupted(-3) if the page checksum mismatch
  *                                or header corruption,
  *                                only used for checkdb
- *                                TODO: probably we should always
- *                                      return it to the caller
  */
 static int32
 prepare_page(ConnectionArgs *conn_arg,
@@ -467,8 +464,7 @@ prepare_page(ConnectionArgs *conn_arg,
                             Page page, bool strict,
                             uint32 checksum_version,
                             const char *from_fullpath,
-                            PageState *page_st, PageCompression *pageCompression = NULL)
-
+                            PageState *page_st, PageCompression *pageCompression)
 {
     int     try_again = PAGE_READ_ATTEMPTS;
     bool        page_is_valid = false;
@@ -598,7 +594,7 @@ compress_and_backup_page(pgFile *file, BlockNumber blknum,
         elog(WARNING, "An error occured during compressing block %u of file \"%s\": %s",
             blknum, from_fullpath, errormsg);
 
-    file->compress_alg = calg; /* TODO: wtf? why here? */
+    file->compress_alg = calg;
 
     /* compression didn`t worked */
     if (compressed_size <= 0 || compressed_size >= BLCKSZ)
@@ -711,7 +707,6 @@ backup_data_file(ConnectionArgs* conn_arg, pgFile *file,
     }
     else
     {
-        /* TODO: stop handling errors internally */
         rc = send_pages(conn_arg, to_fullpath, from_fullpath, file,
                                 /* send prev backup START_LSN */
                                 InvalidXLogRecPtr,
@@ -1032,7 +1027,7 @@ restore_data_file_internal(FILE *in, FILE *out, pgFile *file, uint32 backup_vers
             {
                 cur_pos_in += sizeof(BackupPageHeader);
 
-                /* backward compatibility kludge TODO: remove in 3.0 */
+                /* backward compatibility kludge */
                 blknum = page.bph.block;
                 compressed_size = page.bph.compressed_size;
 
@@ -1064,7 +1059,6 @@ restore_data_file_internal(FILE *in, FILE *out, pgFile *file, uint32 backup_vers
         * Nowadays every backup type has n_blocks, so instead of
         * writing and then truncating redundant data, writing
         * is not happening in the first place.
-        * TODO: remove in 3.0.0
         */
         if (compressed_size == PageIsTruncated)
         {
@@ -1121,7 +1115,7 @@ restore_data_file_internal(FILE *in, FILE *out, pgFile *file, uint32 backup_vers
         /* if this page is marked as already restored, then skip it */
         if (map && datapagemap_is_set(map, blknum))
         {
-            /* Backward compatibility kludge TODO: remove in 3.0
+            /* Backward compatibility kludge
             * go to the next page.
             */
             if (!headers && fseek(in, read_len, SEEK_CUR) != 0)
@@ -1420,7 +1414,6 @@ bool backup_remote_file(const char *from_fullpath, const char *to_fullpath, pgFi
  * Copy file to backup.
  * We do not apply compression to these files, because
  * it is either small control file or already compressed cfs file.
- * TODO: optimize remote copying
  */
 void
 backup_non_data_file_internal(const char *from_fullpath,
@@ -1565,7 +1558,6 @@ create_empty_file(fio_location from_location, const char *to_root,
  * This function is expected to be executed multiple times,
  * so avoid using elog within it.
  * lsn from page is assigned to page_lsn pointer.
- * TODO: switch to enum for return codes.
  */
 int
 validate_one_page(Page page, BlockNumber absolute_blkno,
@@ -1600,7 +1592,7 @@ validate_one_page(Page page, BlockNumber absolute_blkno,
     if (checksum_version)
     {
         /* Checksums are enabled, so check them. */
-        if (page_st->checksum != ((PageHeader) page)->pd_checksum && !PageCompression::InnerPageCompressChecksum(page)) {
+        if ((page_st->checksum != ((PageHeader) page)->pd_checksum) && !CompressedChecksum(page)) {
             return PAGE_CHECKSUM_MISMATCH;
         }
     }
@@ -1670,7 +1662,7 @@ check_data_file(ConnectionArgs *arguments, pgFile *file,
         page_state = prepare_page(NULL, file, InvalidXLogRecPtr,
                                                     blknum, in, BACKUP_MODE_FULL,
                                                     curr_page, false, checksum_version,
-                                                    from_fullpath, &page_st);
+                                                    from_fullpath, &page_st, NULL);
 
         if (page_state == PageIsTruncated)
             break;
@@ -1777,7 +1769,7 @@ validate_file_pages(pgFile *file, const char *fullpath, XLogRecPtr stop_lsn,
         {
             if (get_page_header(in, fullpath, &(compressed_page).bph, &crc, use_crc32c))
             {
-                /* Backward compatibility kludge, TODO: remove in 3.0
+                /* Backward compatibility kludge,
                 * for some reason we padded compressed pages in old versions
                 */
                 blknum = compressed_page.bph.block;
@@ -1788,7 +1780,7 @@ validate_file_pages(pgFile *file, const char *fullpath, XLogRecPtr stop_lsn,
                 break;
         }
 
-        /* backward compatibility kludge TODO: remove in 3.0 */
+        /* backward compatibility kludge */
         if (compressed_size == PageIsTruncated)
         {
             elog(INFO, "Block %u of \"%s\" is truncated",
@@ -2139,12 +2131,21 @@ send_pages(ConnectionArgs* conn_arg, const char *to_fullpath, const char *from_f
     char *in_buf = NULL;
     char *out_buf = NULL;
 
-    if (file->compressedFile) {
+    if (file->compressed_file) {
         /* init pageCompression and return pcdFd for error check */
-        pageCompression = new PageCompression();
+        pageCompression = new(std::nothrow) PageCompression();
+        if (pageCompression == NULL) {
+            elog(ERROR, "Decompression page init failed");
+            return READ_FAILED;
+        }
         pageCompressionPtr = std::unique_ptr<PageCompression>(pageCompression);
-        pageCompression->Init(from_fullpath, MAXPGPATH, file->segno, file->compressedChunkSize);
-        in = pageCompression->GetPcdFile();
+        auto result = pageCompression->Init(from_fullpath, (BlockNumber)file->segno);
+        if (result != SUCCESS) {
+            elog(ERROR, "Decompression page init failed \"%s\": %d", from_fullpath, (int)result);
+            return READ_FAILED;
+        }
+
+        in = pageCompression->GetCompressionFile();
         /* force compress page if file is compressed file */
         calg = (calg == NOT_DEFINED_COMPRESS || calg == NONE_COMPRESS) ? PGLZ_COMPRESS : calg;
     } else {
@@ -2157,10 +2158,11 @@ send_pages(ConnectionArgs* conn_arg, const char *to_fullpath, const char *from_f
         * If file is not found, this is not en error.
         * It could have been deleted by concurrent openGauss transaction.
         */
-        if (errno == ENOENT)
-        return FILE_MISSING;
-
+        if (errno == ENOENT) {
+            return FILE_MISSING;
+        }
         elog(ERROR, "Cannot open file \"%s\": %s", from_fullpath, strerror(errno));
+        return OPEN_FAILED;
     }
 
     /*
@@ -2245,17 +2247,12 @@ send_pages(ConnectionArgs* conn_arg, const char *to_fullpath, const char *from_f
     }
 
     /* cleanup */
-    if (in && fclose(in))
-        elog(ERROR, "Cannot close the source file \"%s\": %s",
-            to_fullpath, strerror(errno));
-    
-    if (pageCompressionPtr) {
-        pageCompressionPtr->ResetPcdFd();
-    }
+    if (!file->compressed_file && in && fclose(in))
+        elog(ERROR, "Cannot close the source file \"%s\": %s", to_fullpath, strerror(errno));
+
     /* close local output file */
     if (out && fclose(out))
-        elog(ERROR, "Cannot close the backup file \"%s\": %s",
-            to_fullpath, strerror(errno));
+        elog(ERROR, "Cannot close the backup file \"%s\": %s", to_fullpath, strerror(errno));
 
     pg_free(iter);
     pg_free(in_buf);
@@ -2267,7 +2264,6 @@ send_pages(ConnectionArgs* conn_arg, const char *to_fullpath, const char *from_f
 /*
  * Attempt to open header file, read content and return as
  * array of headers.
- * TODO: some access optimizations would be great here:
  * less fseeks, buffering, descriptor sharing, etc.
  */
 BackupPageHeader2*
@@ -2290,7 +2286,6 @@ get_data_file_headers(HeaderMap *hdr_map, pgFile *file, uint32 backup_version, b
     if (file->n_headers <= 0)
         return NULL;
 
-    /* TODO: consider to make this descriptor thread-specific */
     in = fopen(hdr_map->path, PG_BINARY_R);
 
     if (!in)

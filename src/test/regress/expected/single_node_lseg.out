@@ -48,3 +48,11 @@ SELECT * FROM LSEG_TBL WHERE s <= lseg '[(1,2),(3,4)]';
 
 SELECT * FROM LSEG_TBL WHERE (s <-> lseg '[(1,2),(3,4)]') < 10;
 ERROR:  type "line" not yet implemented
+set sql_beta_feature = sel_expr_instr;
+explain (costs off) SELECT s FROM LSEG_TBL WHERE ?| s;
+      QUERY PLAN      
+----------------------
+ Seq Scan on lseg_tbl
+   Filter: (?| s)
+(2 rows)
+

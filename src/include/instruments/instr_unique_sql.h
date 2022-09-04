@@ -89,7 +89,7 @@ typedef struct {
 extern int GetUniqueSQLTrackType();
 
 #define UniqueSQLStatCountReturnedRows(n)                                     \
-    if ((IS_PGXC_COORDINATOR || IS_SINGLE_NODE) && is_unique_sql_enabled()) { \
+    if (is_local_unique_sql() && is_unique_sql_enabled()) {                   \
         (u_sess->unique_sql_cxt.unique_sql_returned_rows_counter += n);       \
         ereport(DEBUG1,                                                       \
             (errmodule(MOD_INSTR),                                            \
@@ -99,7 +99,7 @@ extern int GetUniqueSQLTrackType();
     }
 
 #define UniqueSQLStatCountResetReturnedRows()                                                                      \
-    if ((IS_PGXC_COORDINATOR || IS_SINGLE_NODE) && is_unique_sql_enabled()) {                                      \
+    if (is_local_unique_sql() && is_unique_sql_enabled()) {                                                        \
         (u_sess->unique_sql_cxt.unique_sql_returned_rows_counter = 0);                                             \
         ereport(DEBUG1,                                                                                            \
             (errmodule(MOD_INSTR),                                                                                 \
@@ -160,7 +160,8 @@ extern int GetUniqueSQLTrackType();
         uint64 old_unique_sql_id = 0;                                                   \
         bool old_is_multi_unique_sql = false;                                           \
         char *old_curr_single_unique_sql = NULL;                                        \
-        int32 old_multi_sql_offset = 0;
+        int32 old_multi_sql_offset = 0;                                                 \
+        bool old_force_gen_unique_sql = false;
 
 #define BACKUP_UNIQUE_SQL_CXT()                                                         \
         old_is_top_unique_sql = IsTopUniqueSQL();                                       \
@@ -174,7 +175,9 @@ extern int GetUniqueSQLTrackType();
             old_curr_single_unique_sql = u_sess->unique_sql_cxt.curr_single_unique_sql; \
             old_multi_sql_offset = u_sess->unique_sql_cxt.multi_sql_offset;             \
             u_sess->unique_sql_cxt.multi_sql_offset = 0;                                \
-        }
+        }                                                                               \
+        old_force_gen_unique_sql = u_sess->unique_sql_cxt.force_generate_unique_sql;    \
+        u_sess->unique_sql_cxt.force_generate_unique_sql = true;
 
 #define RESTORE_UNIQUE_SQL_CXT()                                                        \
         if (old_is_top_unique_sql) {                                                    \
@@ -185,7 +188,8 @@ extern int GetUniqueSQLTrackType();
             u_sess->unique_sql_cxt.is_multi_unique_sql = true;                          \
             u_sess->unique_sql_cxt.curr_single_unique_sql = old_curr_single_unique_sql; \
             u_sess->unique_sql_cxt.multi_sql_offset = old_multi_sql_offset;             \
-        }
+        }                                                                               \
+        u_sess->unique_sql_cxt.force_generate_unique_sql = old_force_gen_unique_sql;
 
 #define START_TRX_UNIQUE_SQL_ID 2718638560
 
@@ -200,6 +204,7 @@ void ResetUniqueSQLString();
 void instr_unique_sql_register_hook();
 void SetUniqueSQLIdFromPortal(Portal portal, CachedPlanSource* unnamedPsrc);
 void SetUniqueSQLIdFromCachedPlanSource(CachedPlanSource* cplan);
+void SetUniqueSQLIdInBatchBindExecute(CachedPlanSource* cplan, const ParamListInfo* params_set, int batch_count);
 
 void ReplyUniqueSQLsStat(StringInfo msg, uint32 count);
 
@@ -228,4 +233,6 @@ bool is_instr_top_portal();
 void increase_instr_portal_nesting_level();
 void decrease_instr_portal_nesting_level();
 void instr_unique_sql_handle_multi_sql(bool is_first_parsetree);
+void instr_unique_sql_report_elapse_time(int64 elapse_start_time);
+void instr_unique_sql_set_start_time(bool condition, int64 val1, int64 val2);
 #endif

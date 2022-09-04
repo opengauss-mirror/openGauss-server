@@ -599,10 +599,10 @@ static void PGXCSendTransfer(Name schemaName, bool isLock)
     int rc;
     if (isLock) {
         rc = snprintf_s(updateSql, CHAR_BUF_SIZE, CHAR_BUF_SIZE - 1,
-            "select pgxc_unlock_for_transfer('%s'::name)", schemaName->data);
+            "select pg_catalog.pgxc_unlock_for_transfer('%s'::name)", schemaName->data);
     } else {
         rc = snprintf_s(updateSql, CHAR_BUF_SIZE, CHAR_BUF_SIZE - 1,
-            "select pgxc_lock_for_transfer('%s'::name)", schemaName->data);
+            "select pg_catalog.pgxc_lock_for_transfer('%s'::name)", schemaName->data);
     }
     securec_check_ss(rc, "\0", "\0");
     ExecUtilityStmtOnNodes(updateSql, NULL, false, false, EXEC_ON_COORDS, false);
@@ -654,10 +654,7 @@ static bool pgxc_advisory_lock(int64 key64, int32 key1, int32 key2, bool iskeybi
      * can not process SIGUSR1 of "pgxc_pool_reload" command immediately.
      */
 #ifdef ENABLE_MULTIPLE_NODES
-        if (IsGotPoolReload()) {
-            processPoolerReload();
-            ResetGotPoolReload(false);
-        }
+    ReloadPoolerWithoutTransaction();
 #endif
     PgxcNodeGetOids(&coOids, &dnOids, &numcoords, &numdnodes, false);
 

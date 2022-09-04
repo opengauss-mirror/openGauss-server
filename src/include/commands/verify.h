@@ -27,7 +27,6 @@
 
 #include "pgxc/pgxcnode.h"
 #include "tcop/tcopprot.h"
-#include "dfsdesc.h"
 #include "access/htup.h"
 #include "catalog/pg_authid.h"
 #include "catalog/pg_auth_members.h"
@@ -68,6 +67,7 @@
 #include "pgstat.h"
 #include "access/double_write.h"
 #include "miscadmin.h"
+#include "utils/relfilenodemap.h"
 
 #define FAIL_RETRY_MAX_NUM 5
 #define REGR_MCR_SIZE_1MB 1048576
@@ -98,13 +98,13 @@ extern void addGlobalRepairBadBlockStat(const RelFileNodeBackend &rnode, ForkNum
 extern void UpdateRepairTime(const RelFileNode &rnode, ForkNumber forknum, BlockNumber blocknum);
 extern void initRepairBadBlockStat();
 extern void verifyAndTryRepairPage(char* path, int blockNum, bool verify_mem, bool is_segment);
-extern void PrepForRead(char* path, int64 blocknum, bool is_segment, RelFileNode *relnode);
+extern void PrepForRead(char* path, uint blocknum, bool is_segment, RelFileNode *relnode);
 extern Buffer PageIsInMemory(SMgrRelation smgr, ForkNumber forkNum, BlockNumber blockNum);
 extern void resetRepairBadBlockStat();
 extern bool repairPage(char* path, uint blocknum, bool is_segment, int timeout);
-extern bool tryRepairPage(int blocknum, bool is_segment, RelFileNode *relnode, int timeout);
+extern bool tryRepairPage(BlockNumber blocknum, bool is_segment, RelFileNode *relnode, int timeout);
 extern char* relSegmentDir(RelFileNode rnode, ForkNumber forknum);
-extern List* getSegmentMainFilesPath(char* segmentDir, char split, int num);
+extern List* getSegmentMainFilesPath(char* segmentDir, char split, int num, bool isCompressed);
 extern List* appendIfNot(List* targetList, Oid datum);
 extern uint32 getSegmentFileHighWater(char* path);
 extern int getIntLength(uint32 intValue);
@@ -112,13 +112,14 @@ extern List* getPartitionBadFiles(Relation tableRel, List* badFileItems, Oid rel
 extern int getMaxSegno(RelFileNode* prnode);
 extern List* getTableBadFiles(List* badFileItems, Oid relOid, Form_pg_class classForm, Relation tableRel);
 extern List* getSegmentBadFiles(List* spcList, List* badFileItems);
-extern List* getSegnoBadFiles(char* path, int maxSegno, Oid relOid, char* tabName, List* badFileItems);
+extern List* getSegnoBadFiles(char* path, int maxSegno, Oid relOid, char* tabName, List* badFileItems, bool isCompressed);
 extern List* appendBadFileItems(List* badFileItems, Oid relOid, char* tabName, char* path);
 extern List* getNonSegmentBadFiles(List* badFileItems, Oid relOid, Form_pg_class classForm, Relation tableRel);
 extern void gs_verify_page_by_disk(SMgrRelation smgr, ForkNumber forkNum, int blockNum, char* disk_page_res);
 extern void splicMemPageMsg(bool isPageValid, bool isDirty, char* mem_page_res);
-extern bool isNeedRepairPageByMem(char* disk_page_res, int blockNum, char* mem_page_res,
-                                  XLogPhyBlock *pblk, RelFileNode relnode);
+extern bool isNeedRepairPageByMem(char* disk_page_res, BlockNumber blockNum, char* mem_page_res,
+                                  bool isSegment, RelFileNode relnode);
+extern void gs_tryrepair_compress_extent(SMgrRelation reln, BlockNumber logicBlockNumber);
 extern int CheckAndRenameFile(char* path);
 extern void BatchClearBadBlock(const RelFileNode rnode, ForkNumber forknum, BlockNumber startblkno);
 extern void df_close_all_file(RepairFileKey key, int32 max_sliceno);

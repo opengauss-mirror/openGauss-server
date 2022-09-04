@@ -39,7 +39,7 @@
 #include "replication/parallel_decode.h"
 #include "replication/parallel_reorderbuffer.h"
 
-extern void ParallelDecodeChange(ParallelReorderBufferChange* change, ParallelLogicalDecodingContext* ctx,
+extern logicalLog* ParallelDecodeChange(ParallelReorderBufferChange* change, ParallelLogicalDecodingContext* ctx,
     ParallelDecodeWorker *worker);
 extern void parallel_decode_change_to_json(Relation relation, ParallelReorderBufferChange* change,
     logicalLog *logChange, ParallelLogicalDecodingContext* ctx, int slotId);
@@ -55,14 +55,14 @@ extern void ParseAbortXlog(ParallelLogicalDecodingContext *ctx, XLogRecPtr lsn, 
 extern void ParseInsertXlog(ParallelLogicalDecodingContext *ctx, XLogRecordBuffer *buf,
     ParallelDecodeReaderWorker *worker);
 extern int GetDecodeParallelism(int slotId);
+extern int GetParallelQueueSize(int slotId);
 extern ParallelReorderBufferTXN *ParallelReorderBufferGetOldestTXN(ParallelReorderBuffer *rb);
 extern logicalLog* GetLogicalLog(ParallelDecodeWorker *worker, int slotId = -1);
-extern void FreeLogicalLog(logicalLog *logChange, int slotId);
 extern void PutChangeQueue(int slotId, ParallelReorderBufferChange *change);
 extern bool CheckToastTuple(ParallelReorderBufferChange *change, ParallelLogicalDecodingContext *ctx,
-    Relation relation, bool istoast);
-extern void ToastTupleReplace(ParallelReorderBuffer *rb, Relation relation,
-    ParallelReorderBufferChange *change, Oid partationReltoastrelid, ParallelDecodeReaderWorker *worker, bool isHeap);
+    Relation relation, bool istoast, int slotId);
+extern bool ToastTupleReplace(ParallelReorderBuffer *rb, Relation relation, ParallelReorderBufferChange *change,
+    Oid partationReltoastrelid, bool isHeap, bool freeNow, int slotId);
 extern void ToastTupleAppendChunk(ParallelReorderBuffer *rb, Relation relation,
-    ParallelReorderBufferChange *change);
+    ParallelReorderBufferChange *change, int slotId);
 #endif

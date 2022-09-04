@@ -144,7 +144,7 @@ void createBCMFile(Relation rel, int col)
     hd->node.relNode = rel->rd_node.relNode;
     hd->node.spcNode = rel->rd_node.spcNode;
     hd->node.bucketNode = rel->rd_node.bucketNode;
-    hd->node.opt = 0;
+    hd->node.opt = rel->rd_node.opt;
     hd->blockSize = col > 0 ? CUAlignUtils::GetCuAlignSizeColumnId(col) : BLCKSZ; /* defaut size for ROW_STORE */
 
     if (col > 0)
@@ -704,7 +704,7 @@ void BCM_pin(Relation rel, BlockNumber heapBlk, Buffer *buf)
  */
 static void BCMSendData(const RelFileNode &relfilenode, const char *bcmpath, int col)
 {
-    RelFileNode InvalidRelFileNode = { 0, 0, 0, -1 };
+    RelFileNode InvalidRelFileNode = { 0, 0, 0, -1, 0};
     Relation rel;
     Buffer metabuffer = InvalidBuffer;
     ForkNumber forknum = BCM_FORKNUM;
@@ -1033,7 +1033,7 @@ static bool CheckFilePostfix(const char *str1, const char *str2)
  */
 static void BCMClearFile(const RelFileNode &relfilenode, int col)
 {
-    RelFileNode InvalidRelFileNode = { 0, 0, 0, -1 };
+    RelFileNode InvalidRelFileNode = { 0, 0, 0, -1, 0};
     Relation rel;
 
     if (0 == memcmp(&relfilenode, &InvalidRelFileNode, sizeof(RelFileNode)))

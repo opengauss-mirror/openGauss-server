@@ -57,7 +57,15 @@ SUBDIRS = \
 	pg_probackup \
 	gs_plan_simulator
 
+ifeq ($(enable_ut), yes)
+	SUBDIRS += gs_persist
+else
+ifeq ($(enable_multiple_nodes)_$(enable_privategauss), no_yes)
+	SUBDIRS += gs_persist
 endif
+endif
+endif
+
 
 $(recurse)
 $(recurse_always)

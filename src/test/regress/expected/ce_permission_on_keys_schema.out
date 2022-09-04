@@ -122,8 +122,8 @@ DROP COLUMN ENCRYPTION KEY MyCEK1 CASCADE;
 ERROR:  cannot drop column encryption key: mycek1 cascadely because encrypted column depend on it.
 HINT:  we have to drop encrypted column: x2, ... before drop column encryption key: mycek1 cascadely.
 DROP CLIENT MASTER KEY MyCMK1 CASCADE;
-ERROR:  cannot drop client master key: mycmk1 cascadely because encrypted column depend on it.
-HINT:  we have to drop encrypted column: x2, ... before drop client master key: mycmk1 cascadely.
+ERROR:  cannot drop column encryption key: mycek1 cascadely because encrypted column depend on it.
+HINT:  we have to drop encrypted column: x2, ... before drop column encryption key: mycek1 cascadely.
 --check drop table(success)
 DROP TABLE acltest1;
 SET SESSION AUTHORIZATION newuser PASSWORD 'gauss@123';

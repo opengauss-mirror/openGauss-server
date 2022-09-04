@@ -30,7 +30,6 @@ insert into range_list values('201902', '2', '1', 1);
 insert into range_list values('201902', '1', '1', 1);
 insert into range_list values('201903', '2', '1', 1);
 insert into range_list values('201903', '1', '1', 1);
-insert into range_list values('201903', '2', '1', 1);
 
 explain(costs off, verbose on) select * from range_list order by 1, 2, 3, 4;
 select * from range_list order by 1, 2, 3, 4;

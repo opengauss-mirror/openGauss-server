@@ -461,8 +461,17 @@ void UBTree2Desc(StringInfo buf, XLogReaderState* record)
         }
         case XLOG_UBTREE2_FREEZE: {
             xl_ubtree2_freeze *xlrec = (xl_ubtree2_freeze *)rec;
+            OffsetNumber *offsets = (OffsetNumber *)(((char *)xlrec) + SizeOfUBTree2Freeze);
             appendStringInfo(buf, "freeze page: blkno %u, nfrozen: %d, latestRemovedXid: %lu",
                 xlrec->blkno, xlrec->nfrozen, xlrec->oldestXmin);
+            if (xlrec->nfrozen > 0) {
+                appendStringInfo(buf, ", offsets info: ");
+                int32 offsetIdx = 0;
+                while (offsetIdx < xlrec->nfrozen) {
+                    appendStringInfo(buf, "(%d : %u) ", offsetIdx, offsets[offsetIdx]);
+                    offsetIdx++;
+                }
+            }
             break;
         }
         default:

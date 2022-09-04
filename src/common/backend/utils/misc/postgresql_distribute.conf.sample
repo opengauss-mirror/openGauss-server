@@ -614,6 +614,22 @@ use_workload_manager = on		# Enables workload manager in the system.
 #vacuum_freeze_min_age = 50000000
 #vacuum_freeze_table_age = 150000000
 #bytea_output = 'hex'			# hex, escape
+#block_encryption_mode = 'aes-128-cbc'     #  values in order of decreasing detail:
+    #  aes-128-cbc
+    #  aes-192-cbc
+    #  aes-256-cbc
+    #  aes-128-cfb1
+    #  aes-192-cfb1
+    #  aes-256-cfb1
+    #  aes-128-cfb8
+    #  aes-192-cfb8
+    #  aes-256-cfb8
+    #  aes-128-cfb128
+    #  aes-192-cfb128
+    #  aes-256-cfb128
+    #  aes-128-ofb
+    #  aes-192-ofb
+    #  aes-256-ofb
 #xmlbinary = 'base64'
 #xmloption = 'content'
 #max_compile_functions = 1000

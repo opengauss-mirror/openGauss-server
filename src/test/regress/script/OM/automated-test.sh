@@ -1,4 +1,4 @@
-﻿#!/bin/bash
+#!/bin/bash
 
 # username:omm  usergroup:dbgrp 工具脚本路径：/home/om/ xml文件路径：/home/om/cluster_1m0s_config.xml
 

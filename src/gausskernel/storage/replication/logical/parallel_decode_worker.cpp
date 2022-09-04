@@ -66,97 +66,41 @@
 #include "catalog/catalog.h"
 #include "catalog/pg_namespace.h"
 #include "lib/binaryheap.h"
-void SendSignalToDecodeWorker(int signal, int slotId);
-void SendSignalToReaderWorker(int signal, int slotId);
 
-static const uint64 OUTPUT_WAIT_COUNT = 0x7FFFFFF;
-static const uint64 PRINT_ALL_WAIT_COUNT = 0x7FFFFFFFF;
-static const uint32 maxQueueLen = 1024;
+
+static const uint32 OUTPUT_WAIT_COUNT = 0xF;
+static const uint32 PRINT_ALL_WAIT_COUNT = 0x7FF;
 
 /*
  * Parallel decoding kill a decoder.
  */
 static void ParallelDecodeKill(int code, Datum arg)
 {
-    knl_t_parallel_decode_worker_context tDecodeCxt = t_thrd.parallel_decode_cxt;
-    int slotId = tDecodeCxt.slotId;
-    int id = tDecodeCxt.parallelDecodeId;
-    knl_g_parallel_decode_context *gDecodeCxt = g_instance.comm_cxt.pdecode_cxt;
-    SpinLockAcquire(&(gDecodeCxt[slotId].rwlock));
-    gDecodeCxt[slotId].ParallelDecodeWorkerStatusList[id].threadState = PARALLEL_DECODE_WORKER_EXIT;
-    g_Logicaldispatcher[slotId].abnormal = true;
-    SpinLockRelease(&(gDecodeCxt[slotId].rwlock));
-    SendSignalToReaderWorker(SIGTERM, DatumGetInt32(arg));
-    SendSignalToDecodeWorker(SIGTERM, DatumGetInt32(arg));
-}
+    ParallelDecodeWorker *worker = (ParallelDecodeWorker*) arg;
 
-/*
- * Send signal to a decoder thread.
- */
-void SendSignalToDecodeWorker(int signal, int slotId)
-{
     knl_g_parallel_decode_context *gDecodeCxt = g_instance.comm_cxt.pdecode_cxt;
-    for (int i = 0; i < gDecodeCxt[slotId].totalNum; ++i) {
-        SpinLockAcquire(&(gDecodeCxt[slotId].rwlock));
-        uint32 state = gDecodeCxt[slotId].ParallelDecodeWorkerStatusList[i].threadState;
-        SpinLockRelease(&(gDecodeCxt[slotId].rwlock));
-        if (state != PARALLEL_DECODE_WORKER_INVALID) {
-            int err = gs_signal_send(gDecodeCxt[slotId].ParallelDecodeWorkerStatusList[i].threadId, signal);
-            if (err != 0) {
-                ereport(WARNING, (errmsg("Kill logicalDecoder(pid %lu, signal %d) failed: \"%s\",",
-                    gDecodeCxt[slotId].ParallelDecodeWorkerStatusList[i].threadId, signal, gs_strerror(err))));
-            } else {
-                ereport(LOG, (errmsg("Kill logicalDecoder(pid %lu, signal %d) successfully: \"%s\",",
-                    gDecodeCxt[slotId].ParallelDecodeWorkerStatusList[i].threadId, signal, gs_strerror(err))));
-            }
-        }
-    }
-}
-
-/*
- * Send signal to the reader thread.
- */
-void SendSignalToReaderWorker(int signal, int slotId)
-{
-    knl_g_parallel_decode_context *gDecodeCxt = g_instance.comm_cxt.pdecode_cxt;
-    SpinLockAcquire(&(gDecodeCxt[slotId].rwlock));
-    uint32 state = gDecodeCxt[slotId].ParallelReaderWorkerStatus.threadState;
-    SpinLockRelease(&(gDecodeCxt[slotId].rwlock));
-
-    if (state != PARALLEL_DECODE_WORKER_INVALID) {
-        int err = gs_signal_send(gDecodeCxt[slotId].ParallelReaderWorkerStatus.threadId, signal);
-        if (err != 0) {
-            ereport(WARNING, (errmsg("Kill logicalReader(pid %lu, signal %d) failed: \"%s\",",
-                gDecodeCxt[slotId].ParallelReaderWorkerStatus.threadId, signal, gs_strerror(err))));
-        } else {
-            ereport(LOG, (errmsg("Kill logicalReader(pid %lu, signal %d) Successfully: \"%s\",",
-                gDecodeCxt[slotId].ParallelReaderWorkerStatus.threadId, signal, gs_strerror(err))));
-        }
-    }
+    SpinLockAcquire(&(gDecodeCxt[worker->slotId].rwlock));
+    gDecodeCxt[worker->slotId].ParallelDecodeWorkerStatusList[worker->id].threadState = PARALLEL_DECODE_WORKER_EXIT;
+    g_Logicaldispatcher[worker->slotId].abnormal = true;
+    SpinLockRelease(&(gDecodeCxt[worker->slotId].rwlock));
+    LWLockReleaseAll();
 }
 
 /* Run from the worker thread. */
-static void ParallelDecodeSigHupHandler(SIGNAL_ARGS)
+static void LogicalWorkerSigHupHandler(SIGNAL_ARGS)
 {
     t_thrd.parallel_decode_cxt.got_SIGHUP = true;
 }
 
-static void ParallelDecodeShutdownHandler(SIGNAL_ARGS)
+static void LogicalWorkerShutdownHandler(SIGNAL_ARGS)
 {
-    t_thrd.parallel_decode_cxt.shutdown_requested = true;
-    ereport(LOG, (errmsg("ParallelDecodeShutdownHandler process shutdown.")));
+    if (t_thrd.logical_cxt.dispatchSlotId != -1) {
+        g_Logicaldispatcher[t_thrd.logical_cxt.dispatchSlotId].abnormal = true;
+    }
 }
 
-static void ParallelReaderShutdownHandler(SIGNAL_ARGS)
+static void LogicalWorkerQuickDie(SIGNAL_ARGS)
 {
-    t_thrd.logicalreadworker_cxt.shutdown_requested = true;
-    ereport(LOG, (errmsg("ParallelReaderShutdownHandler process shutdown.")));
-}
-
-static void ParallelDecodeQuickDie(SIGNAL_ARGS)
-{
-    ereport(LOG, (errmsg("ParallelDecodeQuickDie process shutdown.")));
-
     int status = 2;
     gs_signal_setmask(&t_thrd.libpq_cxt.BlockSig, NULL);
     on_exit_reset();
@@ -164,14 +108,13 @@ static void ParallelDecodeQuickDie(SIGNAL_ARGS)
 }
 
 /*
- * Run from the worker thread, set up the common part of signal handlers
- * for logical decoding workers.
+ * Run from the worker thread, set up signal handlers for logical reader/decoder.
  */
-static void SetupLogicalWorkerCommonHandlers()
+static void SetupLogicalWorkerSignalHandlers()
 {
-    (void)gspqsignal(SIGHUP, ParallelDecodeSigHupHandler);
+    (void)gspqsignal(SIGHUP, LogicalWorkerSigHupHandler);
     (void)gspqsignal(SIGINT, SIG_IGN);
-    (void)gspqsignal(SIGQUIT, ParallelDecodeQuickDie);
+    (void)gspqsignal(SIGQUIT, LogicalWorkerQuickDie);
     (void)gspqsignal(SIGALRM, SIG_IGN);
     (void)gspqsignal(SIGPIPE, SIG_IGN);
     (void)gspqsignal(SIGUSR1, SIG_IGN);
@@ -181,30 +124,17 @@ static void SetupLogicalWorkerCommonHandlers()
     (void)gspqsignal(SIGTTOU, SIG_IGN);
     (void)gspqsignal(SIGCONT, SIG_IGN);
     (void)gspqsignal(SIGWINCH, SIG_IGN);
-}
 
-/*
- * Run from the worker thread, set up signal handlers for a decoder.
- */
-static void SetupDecoderSignalHandlers()
-{
-    SetupLogicalWorkerCommonHandlers();
-    (void)gspqsignal(SIGTERM, ParallelDecodeShutdownHandler);
+    (void)gspqsignal(SIGTERM, LogicalWorkerShutdownHandler);
 
     gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
     (void)gs_signal_unblock_sigusr2();
 }
 
-/*
- * Run from the worker thread, set up signal handlers for the reader.
- */
-static void SetupLogicalReaderSignalHandlers()
+bool IsLogicalWorkerShutdownRequested()
 {
-    SetupLogicalWorkerCommonHandlers();
-    (void)gspqsignal(SIGTERM, ParallelReaderShutdownHandler);
-
-    gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
-    (void)gs_signal_unblock_sigusr2();
+    return (t_thrd.logical_cxt.dispatchSlotId != -1 &&
+        g_Logicaldispatcher[t_thrd.logical_cxt.dispatchSlotId].abnormal);
 }
 
 /*
@@ -215,32 +145,77 @@ static void LogicalReadKill(int code, Datum arg)
     ereport(LOG, (errmsg("LogicalReader process shutdown.")));
 
     /* Make sure active replication slots are released */
-    if (t_thrd.slot_cxt.MyReplicationSlot != NULL) {
-        ReplicationSlotRelease();
-    }
+    CleanMyReplicationSlot();
+
     int slotId = DatumGetInt32(arg);
     SpinLockAcquire(&(g_instance.comm_cxt.pdecode_cxt[slotId].rwlock));
     knl_g_parallel_decode_context *gDecodeCxt = g_instance.comm_cxt.pdecode_cxt;
     gDecodeCxt[slotId].ParallelReaderWorkerStatus.threadState = PARALLEL_DECODE_WORKER_EXIT;
     g_Logicaldispatcher[slotId].abnormal = true;
     SpinLockRelease(&(gDecodeCxt[slotId].rwlock));
-    SendSignalToReaderWorker(SIGTERM, DatumGetInt32(arg));
-    SendSignalToDecodeWorker(SIGTERM, DatumGetInt32(arg));
 }
+
+static void SetDecodeReaderThreadId(int slotId, ThreadId threadId)
+{
+    knl_g_parallel_decode_context *pdecode_cxt = &g_instance.comm_cxt.pdecode_cxt[slotId];
+
+    SpinLockAcquire(&pdecode_cxt->rwlock);
+    pdecode_cxt->ParallelReaderWorkerStatus.threadId = threadId;
+    SpinLockRelease(&pdecode_cxt->rwlock);
+}
+
+static void SetDecodeWorkerThreadId(int slotId,  int workId, ThreadId threadId)
+{
+    knl_g_parallel_decode_context *pdecode_cxt = &g_instance.comm_cxt.pdecode_cxt[slotId];
+
+    SpinLockAcquire(&pdecode_cxt->rwlock);
+    pdecode_cxt->ParallelDecodeWorkerStatusList[workId].threadId = threadId;
+    SpinLockRelease(&pdecode_cxt->rwlock);
+}
+
+static void SetDecodeReaderThreadState(int slotId, int state)
+{
+    knl_g_parallel_decode_context *pdecode_cxt = &g_instance.comm_cxt.pdecode_cxt[slotId];
+
+    SpinLockAcquire(&pdecode_cxt->rwlock);
+    pdecode_cxt->ParallelReaderWorkerStatus.threadState = state;
+    SpinLockRelease(&pdecode_cxt->rwlock);
+}
+
+static void SetDecodeWorkerThreadState(int slotId, int workId, int state)
+{
+    knl_g_parallel_decode_context *pdecode_cxt = &g_instance.comm_cxt.pdecode_cxt[slotId];
+
+    SpinLockAcquire(&pdecode_cxt->rwlock);
+    pdecode_cxt->ParallelDecodeWorkerStatusList[workId].threadState = state;
+    SpinLockRelease(&pdecode_cxt->rwlock);
+}
+
 
 /*
  * Parallel decoding release resource.
  */
 void ReleaseParallelDecodeResource(int slotId)
 {
-    SpinLockAcquire(&(g_instance.comm_cxt.pdecode_cxt[slotId].destroy_lock));
-    MemoryContextDelete(g_instance.comm_cxt.pdecode_cxt[slotId].parallelDecodeCtx);
-    g_instance.comm_cxt.pdecode_cxt[slotId].parallelDecodeCtx = NULL;
-    SpinLockRelease(&(g_instance.comm_cxt.pdecode_cxt[slotId].destroy_lock));
+    knl_g_parallel_decode_context *pDecodeCxt = &g_instance.comm_cxt.pdecode_cxt[slotId];
+
+    SpinLockAcquire(&pDecodeCxt->destroy_lock);
+    if (pDecodeCxt->parallelDecodeCtx != NULL) {
+        MemoryContextDelete(pDecodeCxt->parallelDecodeCtx);
+        pDecodeCxt->parallelDecodeCtx = NULL;
+    }
+    if (pDecodeCxt->logicalLogCtx != NULL) {
+        MemoryContextDelete(pDecodeCxt->logicalLogCtx);
+        pDecodeCxt->logicalLogCtx = NULL;
+    }
+    SpinLockRelease(&pDecodeCxt->destroy_lock);
+
+    SpinLockAcquire(&pDecodeCxt->rwlock);
     g_Logicaldispatcher[slotId].active = false;
-    ereport(LOG, (errmsg("g_Logicaldispatcher[%d].active = false", slotId)));
     g_Logicaldispatcher[slotId].abnormal = false;
-    return;
+    SpinLockRelease(&pDecodeCxt->rwlock);
+
+    ereport(LOG, (errmsg("g_Logicaldispatcher[%d].active = false", slotId)));
 }
 
 /*
@@ -264,40 +239,30 @@ ThreadId StartLogicalReadWorkerThread(ParallelDecodeReaderWorker *worker)
 /*
  * Parallel decoding start a decode worker.
  */
-ParallelDecodeWorker* StartLogicalDecodeWorker(uint32 id, uint32 slotId, char* dbUser, char* dbName, char* slotname)
+ParallelDecodeWorker* StartLogicalDecodeWorker(int id, int slotId, char* dbUser, char* dbName, char* slotname)
 {
     ParallelDecodeWorker *worker = CreateLogicalDecodeWorker(id, dbUser, dbName, slotname, slotId);
     worker->slotId = slotId;
-    knl_g_parallel_decode_context *gDecodeCxt = g_instance.comm_cxt.pdecode_cxt;
+
     ThreadId threadId = StartDecodeWorkerThread(worker);
     if (threadId == 0) {
         ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_LOG),
             errmsg("Create parallel logical decoder thread failed"), errdetail("id = %u, slotId = %u, %m", id, slotId),
             errcause("System error."), erraction("Retry it in a few minutes.")));
-        SpinLockAcquire(&(gDecodeCxt[slotId].rwlock));
-        gDecodeCxt[slotId].ParallelDecodeWorkerStatusList[id].threadState = PARALLEL_DECODE_WORKER_EXIT;
-        SpinLockRelease(&(gDecodeCxt[slotId].rwlock));
-        ReleaseParallelDecodeResource(slotId);
         return NULL;
-    } else {
-        ereport(LOG, (errmsg("StartParallelDecodeWorker successfully create logical decoder id: %u, threadId:%lu.", id,
-            worker->tid.thid)));
     }
 
-    SpinLockAcquire(&(gDecodeCxt[slotId].rwlock));
-    gDecodeCxt[slotId].ParallelDecodeWorkerStatusList[id].threadId = threadId;
-    uint32 state = pg_atomic_read_u32(&(gDecodeCxt[slotId].ParallelDecodeWorkerStatusList[id].threadState));
-    if (state != PARALLEL_DECODE_WORKER_READY) {
-        gDecodeCxt[slotId].ParallelDecodeWorkerStatusList[id].threadState = PARALLEL_DECODE_WORKER_START;
-    }
-    SpinLockRelease(&(gDecodeCxt[slotId].rwlock));
+    SetDecodeWorkerThreadId(slotId, id, threadId);
+    ereport(LOG, (errmsg("StartParallelDecodeWorker successfully create logical decoder id: %d, threadId:%lu.",
+        id, worker->tid.thid)));
+
     return worker;
 }
 
 /*
  * Parallel decoding start all decode workers.
  */
-void StartLogicalDecodeWorkers(int parallelism, uint32 slotId, char* dbUser, char* dbName, char* slotname)
+void StartLogicalDecodeWorkers(int parallelism, int slotId, char* dbUser, char* dbName, char* slotname)
 {
     MemoryContext oldCtx = MemoryContextSwitchTo(g_instance.comm_cxt.pdecode_cxt[slotId].parallelDecodeCtx);
     g_Logicaldispatcher[slotId].decodeWorkers = (ParallelDecodeWorker **)palloc0(sizeof(ParallelDecodeWorker *)
@@ -339,7 +304,7 @@ void StartLogicalDecodeWorkers(int parallelism, uint32 slotId, char* dbUser, cha
 /*
  * Parallel decoding create the read worker.
  */
-ParallelDecodeReaderWorker *CreateLogicalReadWorker(uint32 slotId, char* dbUser, char* dbName, char* slotname,
+ParallelDecodeReaderWorker *CreateLogicalReadWorker(int slotId, char* dbUser, char* dbName, char* slotname,
     List *options)
 {
     errno_t rc;
@@ -351,7 +316,7 @@ ParallelDecodeReaderWorker *CreateLogicalReadWorker(uint32 slotId, char* dbUser,
     worker->slotId = slotId;
     worker->tid = InvalidTid;
 
-    worker->queue = LogicalQueueCreate(maxQueueLen, slotId);
+    worker->queue = LogicalQueueCreate(slotId);
     rc = memcpy_s(worker->slotname, NAMEDATALEN, slotname, strlen(slotname));
     securec_check(rc, "\0", "\0");
     rc = memcpy_s(worker->dbUser, NAMEDATALEN, dbUser, strlen(dbUser));
@@ -360,9 +325,7 @@ ParallelDecodeReaderWorker *CreateLogicalReadWorker(uint32 slotId, char* dbUser,
     rc = memcpy_s(worker->dbName, NAMEDATALEN, dbName, strlen(dbName));
     securec_check(rc, "\0", "\0");
 
-    SpinLockAcquire(&(g_instance.comm_cxt.pdecode_cxt[slotId].rwlock));
-    g_instance.comm_cxt.pdecode_cxt[slotId].ParallelReaderWorkerStatus.threadState = PARALLEL_DECODE_WORKER_INVALID;
-    SpinLockRelease(&(g_instance.comm_cxt.pdecode_cxt[slotId].rwlock));
+    SetDecodeReaderThreadState(slotId, PARALLEL_DECODE_WORKER_INIT);
     SpinLockInit(&(worker->rwlock));
     return worker;
 }
@@ -377,25 +340,14 @@ ThreadId StartDecodeReadWorker(ParallelDecodeReaderWorker *worker)
     if (threadId == 0) {
         ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_LOG), errmsg("Cannot create readworker thread"),
             errdetail("N/A"), errcause("System error."), erraction("Retry it in a few minutes.")));
-        SpinLockAcquire(&(g_instance.comm_cxt.pdecode_cxt[slotId].rwlock));
-        g_instance.comm_cxt.pdecode_cxt[slotId].ParallelReaderWorkerStatus.threadState = PARALLEL_DECODE_WORKER_EXIT;
-        SpinLockRelease(&(g_instance.comm_cxt.pdecode_cxt[slotId].rwlock));
+
         return threadId;
-    } else {
-        ereport(LOG, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_LOG),
-            errmsg("StartDecodeReadWorker successfully create decodeReaderWorker id:%u,threadId:%lu",
-                worker->id, threadId)));
     }
-    SpinLockAcquire(&(g_instance.comm_cxt.pdecode_cxt[slotId].rwlock));
-    g_instance.comm_cxt.pdecode_cxt[worker->slotId].ParallelReaderWorkerStatus.threadId = threadId;
-    uint32 state = g_instance.comm_cxt.pdecode_cxt[worker->slotId].ParallelReaderWorkerStatus.threadState;
-    SpinLockRelease(&(g_instance.comm_cxt.pdecode_cxt[slotId].rwlock));
-    if (state != PARALLEL_DECODE_WORKER_READY) {
-        SpinLockAcquire(&(g_instance.comm_cxt.pdecode_cxt[slotId].rwlock));
-        g_instance.comm_cxt.pdecode_cxt[worker->slotId].ParallelReaderWorkerStatus.threadState =
-            PARALLEL_DECODE_WORKER_START;
-        SpinLockRelease(&(g_instance.comm_cxt.pdecode_cxt[slotId].rwlock));
-    }
+
+    SetDecodeReaderThreadId(slotId, threadId);
+    ereport(LOG, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_LOG),
+        errmsg("StartDecodeReadWorker successfully create decodeReaderWorker id:%u,threadId:%lu",
+            worker->id, threadId)));
 
     return threadId;
 }
@@ -405,7 +357,7 @@ ThreadId StartDecodeReadWorker(ParallelDecodeReaderWorker *worker)
  */
 void CheckAliveDecodeWorkers(uint32 slotId)
 {
-    uint32 state = -1;
+    int state = -1;
 
     /*
      * Check reader thread state.
@@ -413,9 +365,9 @@ void CheckAliveDecodeWorkers(uint32 slotId)
     SpinLockAcquire(&(g_instance.comm_cxt.pdecode_cxt[slotId].rwlock));
     state = g_instance.comm_cxt.pdecode_cxt[slotId].ParallelReaderWorkerStatus.threadState;
     SpinLockRelease(&(g_instance.comm_cxt.pdecode_cxt[slotId].rwlock));
-    if (state != PARALLEL_DECODE_WORKER_INVALID) {
+    if (state != PARALLEL_DECODE_WORKER_INVALID && state != PARALLEL_DECODE_WORKER_EXIT) {
         ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_LOG),
-            errmsg("Check alive reader worker failed"),
+            errmsg("Check alive reader worker failed, state is %d", state),
             errdetail("Logical reader thread %lu is still alive",
             g_instance.comm_cxt.pdecode_cxt[slotId].ParallelReaderWorkerStatus.threadId),
             errcause("Previous reader thread exits too slow"),
@@ -431,9 +383,9 @@ void CheckAliveDecodeWorkers(uint32 slotId)
         SpinLockAcquire(&(g_instance.comm_cxt.pdecode_cxt[slotId].rwlock));
         state = g_instance.comm_cxt.pdecode_cxt[slotId].ParallelDecodeWorkerStatusList[i].threadState;
         SpinLockRelease(&(g_instance.comm_cxt.pdecode_cxt[slotId].rwlock));
-        if (state != PARALLEL_DECODE_WORKER_INVALID) {
+        if (state != PARALLEL_DECODE_WORKER_INVALID && state != PARALLEL_DECODE_WORKER_EXIT) {
             ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_LOG),
-                errmsg("Check alive decoder workers failed"),
+                errmsg("Check alive decoder workers failed, state is %d", state),
                 errdetail("Logical decoder thread %lu is still alive",
                     g_instance.comm_cxt.pdecode_cxt[slotId].ParallelDecodeWorkerStatusList[i].threadId),
                 errcause("Previous decoder thread exits too slow"),
@@ -450,6 +402,11 @@ void CheckAliveDecodeWorkers(uint32 slotId)
 int GetDecodeParallelism(int slotId)
 {
     return g_Logicaldispatcher[slotId].pOptions.parallel_decode_num;
+}
+
+int GetParallelQueueSize(int slotId)
+{
+    return g_Logicaldispatcher[slotId].pOptions.parallel_queue_size;
 }
 
 /*
@@ -473,14 +430,14 @@ void InitLogicalDispatcher(LogicalDispatcher *dispatcher)
 /*
  * Get the number of ready decoders.
  */
-int GetReadyDecodeWorker(uint32 slotId)
+int GetReadyDecodeWorker(int slotId)
 {
     int readyWorkerCnt = 0;
     knl_g_parallel_decode_context *gDecodeCxt = g_instance.comm_cxt.pdecode_cxt;
     SpinLockAcquire(&(gDecodeCxt[slotId].rwlock));
     for (int i = 0; i < gDecodeCxt[slotId].totalNum; i++) {
-        uint32 state = gDecodeCxt[slotId].ParallelDecodeWorkerStatusList[i].threadState;
-        if (state == PARALLEL_DECODE_WORKER_READY) {
+        int state = gDecodeCxt[slotId].ParallelDecodeWorkerStatusList[i].threadState;
+        if (state == PARALLEL_DECODE_WORKER_RUN) {
             ++readyWorkerCnt;
         }
     }
@@ -491,41 +448,87 @@ int GetReadyDecodeWorker(uint32 slotId)
 /*
  * Get the number of ready reader.
  */
-uint32 GetReadyDecodeReader(uint32 slotId)
+int GetReadyDecodeReader(int slotId)
 {
     knl_g_parallel_decode_context *gDecodeCxt = g_instance.comm_cxt.pdecode_cxt;
     SpinLockAcquire(&(gDecodeCxt[slotId].rwlock));
-    uint32 state = gDecodeCxt[slotId].ParallelReaderWorkerStatus.threadState;
+    int state = gDecodeCxt[slotId].ParallelReaderWorkerStatus.threadState;
     SpinLockRelease(&(gDecodeCxt[slotId].rwlock));
-    if (state == PARALLEL_DECODE_WORKER_READY) {
+    if (state == PARALLEL_DECODE_WORKER_RUN) {
         return 1;
     }
     return 0;
 }
 
 /*
- * Wait until all workers are ready.
+ * Handle emitted error when checking decode worker status.
  */
-void WaitWorkerReady(uint32 slotId)
+static void DecodeWorkerErrorEmitter(int slotId)
+{
+    knl_g_parallel_decode_context *gDecodeCxt = &g_instance.comm_cxt.pdecode_cxt[slotId];
+    if (g_Logicaldispatcher[slotId].abnormal) {
+        if (gDecodeCxt->edata != NULL) {
+            ReThrowError(gDecodeCxt->edata);
+        } else {
+            ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_LOG),
+                errmsg("Wait for worker ready failed. Maybe resource is unavaliable now."),
+                errdetail("At least one decode worker thread is abnormal to startup."),
+                errcause("System error."), erraction("Retry it in a few minutes.")));
+        }
+    }
+}
+
+/*
+ * Wait until all decoders are ready.
+ */
+void WaitDecoderReady(int slotId)
 {
     uint32 loop = 0;
     int readyDecoder = 0;
-    uint32 readyReader = 0;
-    const uint32 maxWaitSecondsForDecoder = 6000;
-    knl_g_parallel_decode_context *gDecodeCxt = g_instance.comm_cxt.pdecode_cxt;
+    const uint32 maxCheckLoops = 6000;
+    knl_g_parallel_decode_context *gDecodeCxt = &g_instance.comm_cxt.pdecode_cxt[slotId];
 
-    /* MAX wait 2min */
-    for (loop = 0; loop < maxWaitSecondsForDecoder; ++loop) {
+    for (; loop < maxCheckLoops; ++loop) {
         /* This connection exit if logical thread abnormal */
-        if (g_Logicaldispatcher[slotId].abnormal) {
-            ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_LOG),
-                errmsg("Wait for worker ready failed."), errdetail("At least one thread is abnormal."),
-                errcause("System error."), erraction("Retry it in a few minutes.")));
+        DecodeWorkerErrorEmitter(slotId);
+
+        readyDecoder = GetReadyDecodeWorker(slotId);
+        if (readyDecoder == gDecodeCxt->totalNum) {
+            ereport(LOG, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_LOG),
+                errmsg("WaitDecoderReady total decoder count:%d", readyDecoder)));
+            break;
         }
-        
+        const long sleepTime = 1000;
+        pg_usleep(sleepTime);
+    }
+
+    readyDecoder = GetReadyDecodeWorker(slotId);
+    int totalDecoders = gDecodeCxt->totalNum;
+    if (loop == maxCheckLoops && readyDecoder != totalDecoders) {
+        ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_LOG), errmsg("Wait for worker ready failed"),
+            errdetail("Not all decoders are ready for work, totalDecoderCount: %d",
+                readyDecoder), errcause("System error."), erraction("Retry it in a few minutes.")));
+    }
+}
+
+/*
+ * Wait until all workers are ready.
+ */
+void WaitWorkerReady(int slotId)
+{
+    uint32 loop = 0;
+    int readyDecoder = 0;
+    int readyReader = 0;
+    const uint32 maxCheckLoops = 6000;
+    knl_g_parallel_decode_context *gDecodeCxt = &g_instance.comm_cxt.pdecode_cxt[slotId];
+
+    for (; loop < maxCheckLoops; ++loop) {
+        /* This connection exit if logical thread abnormal */
+        DecodeWorkerErrorEmitter(slotId);
+
         readyDecoder = GetReadyDecodeWorker(slotId);
         readyReader = GetReadyDecodeReader(slotId);
-        if ((readyDecoder == gDecodeCxt[slotId].totalNum) && (readyReader == 1)) {
+        if ((readyDecoder == gDecodeCxt->totalNum) && (readyReader == 1)) {
             ereport(LOG, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_LOG),
                 errmsg("WaitWorkerReady total worker count:%d, readyWorkerCnt:%d",
                     g_Logicaldispatcher[slotId].totalWorkerCount, readyDecoder)));
@@ -534,16 +537,18 @@ void WaitWorkerReady(uint32 slotId)
         const long sleepTime = 1000;
         pg_usleep(sleepTime);
     }
-    SpinLockAcquire(&(gDecodeCxt[slotId].rwlock));
-    gDecodeCxt[slotId].state = DECODE_STARTING_END;
-    SpinLockRelease(&(gDecodeCxt[slotId].rwlock));
+
+    SpinLockAcquire(&gDecodeCxt->rwlock);
+    gDecodeCxt->state = DECODE_STARTING_END;
+    SpinLockRelease(&gDecodeCxt->rwlock);
+
     readyDecoder = GetReadyDecodeWorker(slotId);
     readyReader = GetReadyDecodeReader(slotId);
-    int totalDecoders = gDecodeCxt[slotId].totalNum;
-    if (loop == maxWaitSecondsForDecoder &&
+    int totalDecoders = gDecodeCxt->totalNum;
+    if (loop == maxCheckLoops &&
         (readyDecoder != totalDecoders || readyReader != 1)) {
         ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_LOG), errmsg("Wait for worker ready failed"),
-            errdetail("Not all workers or no reader are ready for work. totalWorkerCount: %d",
+            errdetail("Not all workers or no reader are ready for work, totalWorkerCount: %d",
                 g_Logicaldispatcher[slotId].totalWorkerCount),
             errcause("System error."), erraction("Retry it in a few minutes.")));
     }
@@ -553,51 +558,18 @@ void WaitWorkerReady(uint32 slotId)
             g_Logicaldispatcher[slotId].totalWorkerCount, readyDecoder)));
 }
 
-/*
- * Send signal to the reader and all decoders.
- */
-void SendSingalToReaderAndDecoder(uint32 slotId, int signal)
-{
-    ereport(LOG, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_LOG), errmsg("Send signal to reader and decoders.")));
-    uint32 state = -1;
-    knl_g_parallel_decode_context *gDecodeCxt = g_instance.comm_cxt.pdecode_cxt;
-    /* kill reader */
-    SpinLockAcquire(&(gDecodeCxt[slotId].rwlock));
-    state = gDecodeCxt[slotId].ParallelReaderWorkerStatus.threadState;
-    SpinLockRelease(&(gDecodeCxt[slotId].rwlock));
-    if (state != PARALLEL_DECODE_WORKER_EXIT) {
-        int err = gs_signal_send(gDecodeCxt[slotId].ParallelReaderWorkerStatus.threadId, signal);
-        if (0 != err) {
-            ereport(WARNING, (errmsg("Walsender kill reader(pid %lu, signal %d) failed: \"%s\",",
-                gDecodeCxt[slotId].ParallelReaderWorkerStatus.threadId, signal, gs_strerror(err))));
-        }
-    }
-
-    /* kill decoders */
-    for (int i = 0; i < gDecodeCxt[slotId].totalNum; ++i) {
-        SpinLockAcquire(&(gDecodeCxt[slotId].rwlock));
-        state = gDecodeCxt[slotId].ParallelDecodeWorkerStatusList[i].threadState;
-        SpinLockRelease(&(gDecodeCxt[slotId].rwlock));
-        if (state != PARALLEL_DECODE_WORKER_EXIT) {
-            int err = gs_signal_send(gDecodeCxt[slotId].ParallelDecodeWorkerStatusList[i].threadId,
-                signal);
-            if (0 != err) {
-                ereport(WARNING, (errmsg("Walsender kill decoder(pid %lu, signal %d) failed: \"%s\",",
-                    gDecodeCxt[slotId].ParallelDecodeWorkerStatusList[i].threadId, signal, gs_strerror(err))));
-            }
-        }
-    }
-}
-
 /* Check if logicalReader and all logicalDecoder threads is PARALLEL_DECODE_WORKER_EXIT. */
-bool logicalWorkerCouldExit(int slotId)
+bool logicalWorkerCouldExit(int slotId, ThreadId* tid, int* stateptr, bool* isReader)
 {
-    uint32 state = -1;
+    int state = -1;
     knl_g_parallel_decode_context *gDecodeCxt = g_instance.comm_cxt.pdecode_cxt;
     SpinLockAcquire(&(gDecodeCxt[slotId].rwlock));
     state = gDecodeCxt[slotId].ParallelReaderWorkerStatus.threadState;
     SpinLockRelease(&(gDecodeCxt[slotId].rwlock));
-    if (state != PARALLEL_DECODE_WORKER_EXIT) {
+    if (state != PARALLEL_DECODE_WORKER_EXIT && state != PARALLEL_DECODE_WORKER_INVALID) {
+        *tid = gDecodeCxt[slotId].ParallelReaderWorkerStatus.threadId;
+        *stateptr = state;
+        *isReader = true;
         return false;
     }
 
@@ -605,7 +577,10 @@ bool logicalWorkerCouldExit(int slotId)
         SpinLockAcquire(&(gDecodeCxt[slotId].rwlock));
         state = gDecodeCxt[slotId].ParallelDecodeWorkerStatusList[i].threadState;
         SpinLockRelease(&(gDecodeCxt[slotId].rwlock));
-        if (state != PARALLEL_DECODE_WORKER_EXIT) {
+        if (state != PARALLEL_DECODE_WORKER_EXIT && state != PARALLEL_DECODE_WORKER_INVALID) {
+            *tid = gDecodeCxt[slotId].ParallelDecodeWorkerStatusList[i].threadId;
+            *stateptr = state;
+            *isReader = false;
             return false;
         }
     }
@@ -618,35 +593,50 @@ bool logicalWorkerCouldExit(int slotId)
  */
 void StopParallelDecodeWorkers(int code, Datum arg)
 {
-    uint32 slotId = DatumGetUInt32(arg);
-    SendSingalToReaderAndDecoder(slotId, SIGTERM);
-    knl_g_parallel_decode_context *gDecodeCxt = g_instance.comm_cxt.pdecode_cxt;
+    int slotId = DatumGetInt32(arg);
+    knl_g_parallel_decode_context *gDecodeCxt = &g_instance.comm_cxt.pdecode_cxt[slotId];
 
-    uint64 count = 0;
-    while (!logicalWorkerCouldExit(slotId)) {
+    /* Notify all logical parallel worker (reader, decoder) to shutdown */
+    SpinLockAcquire(&gDecodeCxt->rwlock);
+    g_Logicaldispatcher[slotId].abnormal = true;
+    SpinLockRelease(&gDecodeCxt->rwlock);
+
+    uint32 count = 0;
+    ThreadId tid = 0;
+    int state = 0;
+    bool isReader = false;
+    while (!logicalWorkerCouldExit(slotId, &tid, &state, &isReader)) {
         ++count;
         if ((count & OUTPUT_WAIT_COUNT) == OUTPUT_WAIT_COUNT) {
             ereport(WARNING, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_LOG),
-                errmsg("StopDecodeWorkers wait reader and decoder exit")));
+                errmsg("StopDecodeWorkers wait reader and decoder exit, tid = %lu, state = %d, isReader = %d",
+                tid, state, isReader)));
             if ((count & PRINT_ALL_WAIT_COUNT) == PRINT_ALL_WAIT_COUNT) {
                 ereport(PANIC, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_LOG),
                     errmsg("StopDecodeWorkers wait too long!!!"), errdetail("N/A"), errcause("System error."),
                     erraction("Retry it in a few minutes.")));
             }
-            const long sleepCheckTime = 100;
-            pg_usleep(sleepCheckTime);
         }
+        const long sleepCheckTime = 1000000L;
+        pg_usleep(sleepCheckTime);
     }
 
-    SpinLockAcquire(&(gDecodeCxt[slotId].rwlock));
-    gDecodeCxt[slotId].ParallelReaderWorkerStatus.threadState = PARALLEL_DECODE_WORKER_INVALID;
-    for (int i = 0; i < gDecodeCxt[slotId].totalNum; ++i) {
-        gDecodeCxt[slotId].ParallelDecodeWorkerStatusList[i].threadState = PARALLEL_DECODE_WORKER_INVALID;
+    SpinLockAcquire(&gDecodeCxt->rwlock);
+    gDecodeCxt->ParallelReaderWorkerStatus.threadState = PARALLEL_DECODE_WORKER_INVALID;
+    for (int i = 0; i < gDecodeCxt->totalNum; ++i) {
+        gDecodeCxt->ParallelDecodeWorkerStatusList[i].threadState = PARALLEL_DECODE_WORKER_INVALID;
     }
+    gDecodeCxt->state = DECODE_DONE;
+    if (gDecodeCxt->edata != NULL) {
+        FreeErrorData(gDecodeCxt->edata);
+        gDecodeCxt->edata = NULL;
+    }
+    SpinLockRelease(&gDecodeCxt->rwlock);
 
-    gDecodeCxt[slotId].state = DECODE_DONE;
-    SpinLockRelease(&(gDecodeCxt[slotId].rwlock));
+    /* When parallel decoding is stopped, detach the logical slot */
+    t_thrd.slot_cxt.MyReplicationSlot = NULL;
     ReleaseParallelDecodeResource(slotId);
+
     ereport(LOG, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_LOG),
         errmsg("parallel decode thread exit in startup")));
 }
@@ -658,15 +648,16 @@ void StopParallelDecodeWorkers(int code, Datum arg)
 int GetLogicalDispatcher()
 {
     int slotId = -1;
-    int max_replication_slots = g_instance.attr.attr_storage.max_replication_slots;
+    const int maxReaderNum = 20;
+    int maxDispatcherNum = Min(g_instance.attr.attr_storage.max_replication_slots, maxReaderNum);
     LWLockAcquire(ParallelDecodeLock, LW_EXCLUSIVE);
     MemoryContext ctx = AllocSetContextCreate(g_instance.instance_context, "ParallelDecodeDispatcher",
-                                              ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE,
-                                              ALLOCSET_DEFAULT_MAXSIZE, SHARED_CONTEXT);
+        ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE, SHARED_CONTEXT);
+    MemoryContext logctx = AllocSetContextCreate(g_instance.instance_context, "ParallelDecodeLog",
+        ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE, SHARED_CONTEXT);
     knl_g_parallel_decode_context *gDecodeCxt = g_instance.comm_cxt.pdecode_cxt;
-    static int i = 0;
 
-    for (; i < max_replication_slots; i++) {
+    for (int i = 0; i < maxDispatcherNum; i++) {
         if (g_Logicaldispatcher[i].active == false) {
             slotId = i;
             errno_t rc = memset_s(&g_Logicaldispatcher[slotId], sizeof(LogicalDispatcher), 0,
@@ -678,6 +669,7 @@ int GetLogicalDispatcher()
             ereport(LOG, (errmsg("g_Logicaldispatcher[%d].active = true", slotId)));
             g_Logicaldispatcher[i].abnormal = false;
             gDecodeCxt[i].parallelDecodeCtx = ctx;
+            gDecodeCxt[i].logicalLogCtx = logctx;
             break;
         }
     }
@@ -689,11 +681,13 @@ int GetLogicalDispatcher()
     SpinLockAcquire(&(gDecodeCxt[slotId].rwlock));
     int state = gDecodeCxt[slotId].state;
     if (state == DECODE_IN_PROGRESS) {
+        SpinLockRelease(&(gDecodeCxt[slotId].rwlock));
         ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_LOG), errmsg("Get logical dispatcher failed"),
             errdetail("walsender reconnected thread exit."), errcause("System error."),
             erraction("Retry it in a few minutes.")));
     }
     gDecodeCxt[slotId].state = DECODE_STARTING_BEGIN;
+    gDecodeCxt[slotId].edata = NULL;
     SpinLockRelease(&(gDecodeCxt[slotId].rwlock));
     return slotId;
 }
@@ -895,21 +889,17 @@ int ParseParallelDecodeNumOnly(List *options)
 {
     ListCell *option = NULL;
     int parallelDecodeNum = 1;
+
+    DecodeOptionsDefault *defaultOption = LogicalDecodeGetOptionsDefault();
+    if (defaultOption != NULL) {
+        parallelDecodeNum = defaultOption->parallel_decode_num;
+    }
+
     foreach (option, options) {
         DefElem* elem = (DefElem*)lfirst(option);
         ParseParallelDecodeNum(elem, &parallelDecodeNum);
     }
     return parallelDecodeNum;
-}
-
-static void CheckBatchSendingOption(const DefElem* elem, int *sendingBatch)
-{
-    if (elem->arg != NULL && (!parse_int(strVal(elem->arg), sendingBatch, 0, NULL) ||
-        *sendingBatch < 0 || *sendingBatch > 1)) {
-        ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg("could not parse value \"%s\" for parameter \"%s\"", strVal(elem->arg), elem->defname),
-                errdetail("N/A"),  errcause("Wrong input value"), erraction("Input 0 or 1.")));
-    }
 }
 
 /*
@@ -918,6 +908,8 @@ static void CheckBatchSendingOption(const DefElem* elem, int *sendingBatch)
 static void ParseDecodingOption(ParallelDecodeOption *data, ListCell *option)
 {
     DefElem* elem = (DefElem*)lfirst(option);
+    const int maxTxn = 100; /* max transaction in memory limit is between 0 and 100 in MB */
+    const int maxReorderBuffer = 100; /* max reorderbuffer in memory is between 0 and 100 in GB */
 
     if (strncmp(elem->defname, "include-xids", sizeof("include-xids")) == 0) {
         CheckBooleanOption(elem, &data->include_xids, true);
@@ -930,11 +922,25 @@ static void ParseDecodingOption(ParallelDecodeOption *data, ListCell *option)
     } else if (strncmp(elem->defname, "standby-connection", sizeof("standby-connection")) == 0) {
         CheckBooleanOption(elem, &t_thrd.walsender_cxt.standbyConnection, false);
     } else if (strncmp(elem->defname, "sending-batch", sizeof("sending-batch")) == 0) {
-        CheckBatchSendingOption(elem, &data->sending_batch);
+        CheckIntOption(elem, &data->sending_batch, 0, 0, 1);
     } else if (strncmp(elem->defname, "decode-style", sizeof("decode-style")) == 0) {
         CheckDecodeStyle(data, elem);
+    } else if (strncmp(elem->defname, "max-txn-in-memory", sizeof("max-txn-in-memory")) == 0) {
+        CheckIntOption(elem, &data->max_txn_in_memory, 0, 0, maxTxn);
+    } else if (strncmp(elem->defname, "max-reorderbuffer-in-memory", sizeof("max-reorderbuffer-in-memory")) == 0) {
+        CheckIntOption(elem, &data->max_reorderbuffer_in_memory, 0, 0, maxReorderBuffer);
     } else if (strncmp(elem->defname, "white-table-list", sizeof("white-table-list")) == 0) {
         ParseWhiteList(&data->tableWhiteList, elem);
+    }  else if (strncmp(elem->defname, "parallel-queue-size", sizeof("parallel-queue-size")) == 0) {
+        CheckIntOption(elem, &data->parallel_queue_size, DEFAULT_PARALLEL_QUEUE_SIZE,
+            MIN_PARALLEL_QUEUE_SIZE, MAX_PARALLEL_QUEUE_SIZE);
+        if (!POWER_OF_TWO(data->parallel_queue_size)) {
+            ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("option parallel-queue-size should be a power of two"),
+            errdetail("N/A"),  errcause("Wrong input option"), erraction("Please check documents for help")));
+        }
+    } else if (strncmp(elem->defname, "sender-timeout", sizeof("sender-timeout")) == 0 && elem->arg != NULL) {
+        SetConfigOption("logical_sender_timeout", strVal(elem->arg), PGC_USERSET, PGC_S_OVERRIDE);
     } else if (strncmp(elem->defname, "parallel-decode-num", sizeof("parallel-decode-num")) != 0) {
         ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
             errmsg("option \"%s\" = \"%s\" is unknown", elem->defname, elem->arg ? strVal(elem->arg) : "(null)"),
@@ -953,6 +959,31 @@ static void ParseDecodingOptions(ParallelDecodeOption *data, List *options)
     }
 }
 
+static void initParallelDecodeOption(ParallelDecodeOption *pOptions, int parallelDecodeNum)
+{
+    pOptions->include_xids = true;
+    pOptions->include_timestamp = false;
+    pOptions->skip_empty_xacts = false;
+    pOptions->only_local = true;
+    pOptions->decode_style = 'b';
+    pOptions->parallel_decode_num = 0;
+    pOptions->sending_batch = 0;
+    pOptions->decode_change = parallel_decode_change_to_bin;
+    pOptions->parallel_queue_size = DEFAULT_PARALLEL_QUEUE_SIZE;
+
+    /* GUC */
+    DecodeOptionsDefault *defaultOption = LogicalDecodeGetOptionsDefault();
+    if (defaultOption != NULL) {
+        pOptions->parallel_decode_num = defaultOption->parallel_decode_num;
+        pOptions->parallel_queue_size = defaultOption->parallel_queue_size;
+        pOptions->max_txn_in_memory = defaultOption->max_txn_in_memory;
+        pOptions->max_reorderbuffer_in_memory = defaultOption->max_reorderbuffer_in_memory;
+    }
+
+    /* what sepcified by startup has  a higher priority */
+    pOptions->parallel_decode_num = parallelDecodeNum;
+}
+
 /*
  * Start a reader thread and N decoder threads.
  * When the client initiates a streaming decoding connection, if it is in parallel decoding mode,
@@ -960,47 +991,91 @@ static void ParseDecodingOptions(ParallelDecodeOption *data, List *options)
  * Each group of decoding threads will occupy a logicaldispatcher slot.
  * The return value of the function is logicaldispatcher slot ID.
  */
-int StartLogicalLogWorkers(char* dbUser, char* dbName, char* slotname, List *options, int parallelDecodeNum)
+void StartLogicalLogWorkers(char* dbUser, char* dbName, char* slotname, List *options, int parallelDecodeNum)
 {
     int slotId = GetLogicalDispatcher();
+    t_thrd.walsender_cxt.LogicalSlot = slotId;
     if (slotId == -1) {
         ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_LOG),
             errmsg("can't create logical decode dispatcher"), errdetail("N/A"), errcause("System error."),
             erraction("Retry it in a few minutes.")));
     }
+
     on_shmem_exit(StopParallelDecodeWorkers, slotId);
-    if (parallelDecodeNum > 1) {
-        CheckAliveDecodeWorkers(slotId);
-        ParallelDecodeOption *pOptions = &g_Logicaldispatcher[slotId].pOptions;
-        pOptions->include_xids = true;
-        pOptions->include_timestamp = false;
-        pOptions->skip_empty_xacts = false;
-        pOptions->only_local = true;
-        pOptions->decode_style = 'b';
-        pOptions->parallel_decode_num = parallelDecodeNum;
-        pOptions->sending_batch = 0;
-        pOptions->decode_change = parallel_decode_change_to_text;
-        ParseDecodingOptions(&g_Logicaldispatcher[slotId].pOptions, options);
-        errno_t rc = memcpy_s(g_Logicaldispatcher[slotId].slotName, NAMEDATALEN, slotname, strlen(slotname));
-        securec_check(rc, "", "");
 
-        StartLogicalDecodeWorkers(parallelDecodeNum, slotId, dbUser, dbName, slotname);
-        g_Logicaldispatcher[slotId].readWorker = CreateLogicalReadWorker(slotId, dbUser, dbName, slotname, options);
-        g_Logicaldispatcher[slotId].readWorker->tid = StartDecodeReadWorker(g_Logicaldispatcher[slotId].readWorker);
+    CheckAliveDecodeWorkers(slotId);
+    initParallelDecodeOption(&g_Logicaldispatcher[slotId].pOptions, parallelDecodeNum);
+    ParseDecodingOptions(&g_Logicaldispatcher[slotId].pOptions, options);
+    errno_t rc = memcpy_s(g_Logicaldispatcher[slotId].slotName, NAMEDATALEN, slotname, strlen(slotname));
+    securec_check(rc, "", "");
 
-        WaitWorkerReady(slotId);
-        knl_g_parallel_decode_context *gDecodeCxt = g_instance.comm_cxt.pdecode_cxt;
-        SpinLockAcquire(&(gDecodeCxt[slotId].rwlock));
-        gDecodeCxt[slotId].state = DECODE_IN_PROGRESS;
-        SpinLockRelease(&(gDecodeCxt[slotId].rwlock));
+    StartLogicalDecodeWorkers(parallelDecodeNum, slotId, dbUser, dbName, slotname);
+    WaitDecoderReady(slotId);
+    g_Logicaldispatcher[slotId].readWorker = CreateLogicalReadWorker(slotId, dbUser, dbName, slotname, options);
+    g_Logicaldispatcher[slotId].readWorker->tid = StartDecodeReadWorker(g_Logicaldispatcher[slotId].readWorker);
+
+    WaitWorkerReady(slotId);
+    knl_g_parallel_decode_context *gDecodeCxt = g_instance.comm_cxt.pdecode_cxt;
+    SpinLockAcquire(&(gDecodeCxt[slotId].rwlock));
+    gDecodeCxt[slotId].state = DECODE_IN_PROGRESS;
+    SpinLockRelease(&(gDecodeCxt[slotId].rwlock));
+}
+
+static void ParallelWorkerHandleError(int slotId)
+{
+    knl_g_parallel_decode_context *pDecodeCxt = &g_instance.comm_cxt.pdecode_cxt[slotId];
+
+    /* Prevent interrupts while cleaning up */
+    HOLD_INTERRUPTS();
+
+    MemoryContext oldCxt = MemoryContextSwitchTo(pDecodeCxt->parallelDecodeCtx);
+    ErrorData *edata = CopyErrorData();
+    MemoryContextSwitchTo(oldCxt);
+
+    SpinLockAcquire(&pDecodeCxt->rwlock);
+    /* capture the first ErrorData in parallel workers */
+    if (pDecodeCxt->edata == NULL) {
+        pDecodeCxt->edata = edata;
+    } else {
+        FreeErrorData(edata);
     }
-    return slotId;
+    SpinLockRelease(&pDecodeCxt->rwlock);
+
+    /* Report the error to the server log */
+    EmitErrorReport();
+
+    FlushErrorState();
+
+    /* Now we can allow interrupts again */
+    RESUME_INTERRUPTS();
+}
+
+static void ParallelDecodeCleanup()
+{
+    /* release resource held by lsc */
+    AtEOXact_SysDBCache(false);
+
+    LWLockReleaseAll();
+    AbortBufferIO();
+    UnlockBuffers();
+
+    /* buffer pins are released here */
+    if (t_thrd.utils_cxt.CurrentResourceOwner != NULL) {
+        ResourceOwnerRelease(t_thrd.utils_cxt.CurrentResourceOwner, RESOURCE_RELEASE_BEFORE_LOCKS, false, true);
+        ResourceOwnerRelease(t_thrd.utils_cxt.CurrentResourceOwner, RESOURCE_RELEASE_LOCKS, false, true);
+        ResourceOwnerRelease(t_thrd.utils_cxt.CurrentResourceOwner, RESOURCE_RELEASE_AFTER_LOCKS, false, true);
+    }
+
+    if (t_thrd.logicalreadworker_cxt.ReadWorkerCxt != NULL) {
+        MemoryContextResetAndDeleteChildren(t_thrd.logicalreadworker_cxt.ReadWorkerCxt);
+    }
 }
 
 void ParallelDecodeWorkerMain(void* point)
 {
     ParallelDecodeWorker *worker = (ParallelDecodeWorker*)point;
-    ParallelReorderBufferChange* LogicalChangeHead;
+
+    SetDecodeWorkerThreadState(worker->slotId, worker->id, PARALLEL_DECODE_WORKER_START);
 
     /* we are a postmaster subprocess now */
     IsUnderPostmaster = true;
@@ -1011,6 +1086,7 @@ void ParallelDecodeWorkerMain(void* point)
     t_thrd.proc_cxt.MyProgName = "LogicalDecodeWorker";
 
     t_thrd.role = PARALLEL_DECODE;
+
     /* Identify myself via ps */
     init_ps_display("Logical decoding worker process", "", "", "");
 
@@ -1018,12 +1094,19 @@ void ParallelDecodeWorkerMain(void* point)
 
     SetProcessingMode(InitProcessing);
 
-    on_shmem_exit(ParallelDecodeKill, Int32GetDatum(worker->slotId));
+    on_shmem_exit(ParallelDecodeKill, PointerGetDatum(worker));
+    BaseInit();
+
+    /* setup signal handler and unblock signal before initialization xact */
+    SetupLogicalWorkerSignalHandlers();
 
     t_thrd.proc_cxt.PostInit->SetDatabaseAndUser(worker->dbName,
         InvalidOid, worker->dbUser);
     t_thrd.proc_cxt.PostInit->InitParallelDecode();
     SetProcessingMode(NormalProcessing);
+
+    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "parallel decoder resource owner",
+        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
 
     t_thrd.logicalreadworker_cxt.ReadWorkerCxt = AllocSetContextCreate(t_thrd.top_mem_cxt, "Read Worker",
         ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
@@ -1039,38 +1122,50 @@ void ParallelDecodeWorkerMain(void* point)
     securec_check(rc, "", "");
     ctx->output_plugin_private = data;
 
-    t_thrd.role = PARALLEL_DECODE;
-
     ereport(LOG, (errmsg("Parallel Decode Worker started")));
 
-    SetupDecoderSignalHandlers();
-    t_thrd.parallel_decode_cxt.slotId = worker->slotId;
+    /* do assginment ahead since some signal handler depends it. */
+    t_thrd.logical_cxt.dispatchSlotId = worker->slotId;
     t_thrd.parallel_decode_cxt.parallelDecodeId = worker->id;
 
-    knl_g_parallel_decode_context* pdecode_cxt = g_instance.comm_cxt.pdecode_cxt;
-    int id = worker->id;
-    SpinLockAcquire(&(g_instance.comm_cxt.pdecode_cxt[worker->slotId].rwlock));
-    pdecode_cxt[worker->slotId].ParallelDecodeWorkerStatusList[id].threadState = PARALLEL_DECODE_WORKER_READY;
-    SpinLockRelease(&(g_instance.comm_cxt.pdecode_cxt[worker->slotId].rwlock));
+    PG_TRY();
+    {
+        ParallelReorderBufferChange *LogicalChangeHead = NULL;
 
-    while (true) {
-        if (t_thrd.parallel_decode_cxt.shutdown_requested) {
-            ereport(LOG, (errmsg("Parallel Decode Worker stop")));
-            proc_exit(0);
+        SetDecodeWorkerThreadState(worker->slotId, worker->id, PARALLEL_DECODE_WORKER_RUN);
+
+        while (true) {
+            if (IsLogicalWorkerShutdownRequested()) {
+                ereport(LOG, (errmsg("Parallel Decode Worker stop")));
+                break;
+            }
+
+            LogicalChangeHead = (ParallelReorderBufferChange *)LogicalQueueTop(worker->changeQueue);
+            if (LogicalChangeHead == NULL) {
+                continue;
+            }
+
+            logicalLog* logChange = ParallelDecodeChange(LogicalChangeHead, ctx, worker);
+            if (logChange != NULL) {
+                logChange->toast_hash = LogicalChangeHead->toast_hash;
+                LogicalChangeHead->toast_hash = NULL;
+                LogicalQueuePut(worker->LogicalLogQueue, logChange);
+            }
+            LogicalQueuePop(worker->changeQueue);
+            ParallelFreeChange(LogicalChangeHead, worker->slotId);
         }
-
-        LogicalChangeHead = (ParallelReorderBufferChange *)LogicalQueueTop(worker->changeQueue);
-        if (LogicalChangeHead == NULL) {
-            continue;
-        }
-
-        ParallelDecodeChange(LogicalChangeHead, ctx, worker);
-        LogicalQueuePop(worker->changeQueue);
-        ParallelFreeChange(LogicalChangeHead, worker->slotId);
     }
+    PG_CATCH();
+    {
+        /* save edata into decode context and inform the sender what's wrong. */
+        ParallelWorkerHandleError(worker->slotId);
+    }
+    PG_END_TRY();
+
+    ParallelDecodeCleanup();
 }
 
-ParallelDecodeWorker *CreateLogicalDecodeWorker(uint32 id, char* dbUser, char* dbName, char* slotname, uint32 slotId)
+ParallelDecodeWorker *CreateLogicalDecodeWorker(int id, char* dbUser, char* dbName, char* slotname, int slotId)
 {
     MemoryContext oldCtx = MemoryContextSwitchTo(g_instance.comm_cxt.pdecode_cxt[slotId].parallelDecodeCtx);
     ParallelDecodeWorker *worker = (ParallelDecodeWorker *)palloc0(sizeof(ParallelDecodeWorker));
@@ -1078,14 +1173,15 @@ ParallelDecodeWorker *CreateLogicalDecodeWorker(uint32 id, char* dbUser, char* d
 
     worker->id = id;
     worker->tid.thid = InvalidTid;
-    worker->changeQueue = LogicalQueueCreate(maxQueueLen, slotId);
-    worker->LogicalLogQueue = LogicalQueueCreate(maxQueueLen, slotId);
+    worker->changeQueue = LogicalQueueCreate(slotId);
+    worker->LogicalLogQueue = LogicalQueueCreate(slotId);
     errno_t rc = memcpy_s(worker->slotname, NAMEDATALEN, slotname, strlen(slotname));
     securec_check(rc, "\0", "\0");
     rc = memcpy_s(worker->dbUser, NAMEDATALEN, dbUser, strlen(dbUser));
     securec_check(rc, "\0", "\0");
     rc = memcpy_s(worker->dbName, NAMEDATALEN, dbName, strlen(dbName));
     securec_check(rc, "\0", "\0");
+    SetDecodeWorkerThreadState(slotId, id, PARALLEL_DECODE_WORKER_INIT);
     return worker;
 }
 
@@ -1095,6 +1191,9 @@ ParallelDecodeWorker *CreateLogicalDecodeWorker(uint32 id, char* dbUser, char* d
 void LogicalReadWorkerMain(void* point)
 {
     ParallelDecodeReaderWorker *reader = (ParallelDecodeReaderWorker*)point;
+
+    SetDecodeReaderThreadState(reader->slotId, PARALLEL_DECODE_WORKER_START);
+
     /* we are a postmaster subprocess now */
     IsUnderPostmaster = true;
 
@@ -1113,20 +1212,24 @@ void LogicalReadWorkerMain(void* point)
 
     on_shmem_exit(LogicalReadKill, Int32GetDatum(reader->slotId));
 
+    BaseInit();
+
+    /* setup signal handler and unblock signal before initialization xact */
+    SetupLogicalWorkerSignalHandlers();
+
     t_thrd.proc_cxt.PostInit->SetDatabaseAndUser(reader->dbName,
         InvalidOid, reader->dbUser);
     t_thrd.proc_cxt.PostInit->InitParallelDecode();
     SetProcessingMode(NormalProcessing);
+    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "logical reader resource owner",
+        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
 
     t_thrd.logicalreadworker_cxt.ReadWorkerCxt = AllocSetContextCreate(t_thrd.top_mem_cxt, "Read Worker",
         ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
     (void)MemoryContextSwitchTo(t_thrd.logicalreadworker_cxt.ReadWorkerCxt);
 
-    SetupLogicalReaderSignalHandlers();
-    SpinLockAcquire(&(g_instance.comm_cxt.pdecode_cxt[reader->slotId].rwlock));
-    g_instance.comm_cxt.pdecode_cxt[reader->slotId].ParallelReaderWorkerStatus.threadState =
-        PARALLEL_DECODE_WORKER_READY;
-    SpinLockRelease(&(g_instance.comm_cxt.pdecode_cxt[reader->slotId].rwlock));
+    /* do assginment ahead since some signal handler depends it. */
+    t_thrd.logical_cxt.dispatchSlotId = reader->slotId;
 
     LogicalReadRecordMain(reader);
 }
@@ -1135,101 +1238,86 @@ void LogicalReadRecordMain(ParallelDecodeReaderWorker *worker)
 {
     struct ParallelLogicalDecodingContext* ctx;
 
-    /* make sure that our requirements are still fulfilled */
-    CheckLogicalDecodingRequirements(u_sess->proc_cxt.MyDatabaseId);
-    
-    XLogRecPtr startptr = InvalidXLogRecPtr;
-    Assert(!t_thrd.slot_cxt.MyReplicationSlot);
-    ReplicationSlotAcquire(worker->slotname, false);
+    SetDecodeReaderThreadState(worker->slotId, PARALLEL_DECODE_WORKER_RUN);
+
+    PG_TRY();
     {
+        /* make sure that our requirements are still fulfilled */
+        CheckLogicalDecodingRequirements(u_sess->proc_cxt.MyDatabaseId);
+
+        XLogRecPtr startptr = InvalidXLogRecPtr;
+        Assert(!t_thrd.slot_cxt.MyReplicationSlot);
+        ReplicationSlotAcquire(worker->slotname, false);
+        LogicalCleanSnapDirectory(true);
+
         /*
-         * Rebuild snap dir
+         * Initialize position to the last ack'ed one, then the xlog records begin
+         * to be shipped from that position.
          */
-        char snappath[MAXPGPATH];
-        struct stat st;
-        int rc = 0;
+        int slotId = worker->slotId;
+        g_Logicaldispatcher[slotId].MyReplicationSlot = t_thrd.slot_cxt.MyReplicationSlot;
 
-        rc = snprintf_s(snappath,
-            MAXPGPATH,
-            MAXPGPATH - 1,
-            "pg_replslot/%s/snap",
-            NameStr(t_thrd.slot_cxt.MyReplicationSlot->data.name));
-        securec_check_ss(rc, "\0", "\0");
+        ctx = ParallelCreateDecodingContext(0, NULL, false, logical_read_xlog_page, worker->slotId);
 
-        if (stat(snappath, &st) == 0 && S_ISDIR(st.st_mode)) {
-            if (!rmtree(snappath, true)) {
-                ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode_for_file_access(),
-                    errmsg("could not remove directory \"%s\": %m", snappath), errdetail("N/A"),
-                    errcause("System error."), erraction("Retry it in a few minutes.")));
+        ParallelDecodingData *data = (ParallelDecodingData *)MemoryContextAllocZero(
+            g_instance.comm_cxt.pdecode_cxt[slotId].parallelDecodeCtx, sizeof(ParallelDecodingData));
+        data->pOptions.only_local = g_Logicaldispatcher[slotId].pOptions.only_local;
+        ctx->output_plugin_private = data;
+
+        /* Start reading WAL from the oldest required WAL. */
+        t_thrd.walsender_cxt.logical_startptr = t_thrd.slot_cxt.MyReplicationSlot->data.restart_lsn;
+
+        /*
+         * Report the location after which we'll send out further commits as the
+         * current sentPtr.
+         */
+        t_thrd.walsender_cxt.sentPtr = t_thrd.slot_cxt.MyReplicationSlot->data.confirmed_flush;
+        startptr = t_thrd.slot_cxt.MyReplicationSlot->data.restart_lsn;
+
+        ereport(LOG, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_LOGICAL_DECODE_ERROR),
+            errmsg("init decode parallel")));
+
+        ParallelReorderBufferChange *change = ParallelReorderBufferGetChange(ctx->reorder, slotId);
+        change->action = PARALLEL_REORDER_BUFFER_CHANGE_CONFIRM_FLUSH;
+        change->lsn = t_thrd.slot_cxt.MyReplicationSlot->data.confirmed_flush;
+        PutChangeQueue(slotId, change);
+
+        while (true) {
+            if (IsLogicalWorkerShutdownRequested()) {
+                ereport(LOG, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_LOGICAL_DECODE_ERROR),
+                    errmsg("Reader worker exit due to request")));
+                break;
             }
-        }
-        if (mkdir(snappath, S_IRWXU) < 0) {
-            ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode_for_file_access(),
-                errmsg("could not create directory \"%s\": %m", snappath), errdetail("N/A"), errcause("System error."),
-                erraction("Retry it in a few minutes.")));
+
+            char *errm = NULL;
+            XLogRecord *record = XLogReadRecord(ctx->reader, startptr, &errm);
+            if (errm != NULL) {
+                const uint32 upperLen = 32;
+                ereport(LOG, (errmsg("Stop parsing any XLog Record at %X/%X, sleep 1 second: %s.",
+                    (uint32)(ctx->reader->EndRecPtr >> upperLen), (uint32)ctx->reader->EndRecPtr, errm)));
+
+                const long sleepTime = 1000000L;
+                pg_usleep(sleepTime);
+                continue;
+            }
+            startptr = InvalidXLogRecPtr;
+
+            if (record != NULL) {
+                ParseProcessRecord(ctx, ctx->reader, worker);
+            }
+
+            pg_atomic_write_u64(&g_Logicaldispatcher[slotId].sentPtr, ctx->reader->EndRecPtr);
         }
     }
-    /*
-     * Initialize position to the last ack'ed one, then the xlog records begin
-     * to be shipped from that position.
-     */
-    int slotId = worker->slotId;
-    g_Logicaldispatcher[slotId].MyReplicationSlot = t_thrd.slot_cxt.MyReplicationSlot;
-    ctx = ParallelCreateDecodingContext(
-        0, NULL, false, logical_read_xlog_page, worker->slotId);
-    MemoryContext oldContext = MemoryContextSwitchTo(g_instance.comm_cxt.pdecode_cxt[slotId].parallelDecodeCtx);
-    ParallelDecodingData *data = (ParallelDecodingData *)palloc0(sizeof(ParallelDecodingData));
-    data->pOptions.only_local = g_Logicaldispatcher[slotId].pOptions.only_local;
-    ctx->output_plugin_private = data;
-    MemoryContextSwitchTo(oldContext);
+    PG_CATCH();
+    {
+        /* save edata into decode context and inform the sender what's wrong. */
+        ParallelWorkerHandleError(worker->slotId);
+    }
+    PG_END_TRY();
 
-    /* Start reading WAL from the oldest required WAL. */
-    t_thrd.walsender_cxt.logical_startptr = t_thrd.slot_cxt.MyReplicationSlot->data.restart_lsn;
-
-    /*
-     * Report the location after which we'll send out further commits as the
-     * current sentPtr.
-     */
-    t_thrd.walsender_cxt.sentPtr = t_thrd.slot_cxt.MyReplicationSlot->data.confirmed_flush;
-    startptr = t_thrd.slot_cxt.MyReplicationSlot->data.restart_lsn;
-
-    ereport(LOG, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_LOGICAL_DECODE_ERROR),
-        errmsg("init decode parallel")));
-
-    ParallelReorderBufferChange *change = NULL;
-
-    change = ParallelReorderBufferGetChange(ctx->reorder, slotId);
-
-    change->action = PARALLEL_REORDER_BUFFER_CHANGE_CONFIRM_FLUSH;
-    change->lsn = t_thrd.slot_cxt.MyReplicationSlot->data.confirmed_flush;
-    PutChangeQueue(slotId, change);
-
-    while (true) {
-        if (t_thrd.logicalreadworker_cxt.shutdown_requested) {
-            ereport(LOG, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_LOGICAL_DECODE_ERROR),
-                errmsg("Reader worker exit due to request")));
-            proc_exit(1);
-        }
-        XLogRecord *record = NULL;
-        char *errm = NULL;
-
-        record = XLogReadRecord(ctx->reader, startptr, &errm);
-        if (errm != NULL) {
-            const uint32 upperLen = 32;
-            ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_LOGICAL_DECODE_ERROR),
-                errmsg("Stopped to parse any valid XLog Record at %X/%X: %s.",
-                       (uint32)(ctx->reader->EndRecPtr >> upperLen), (uint32)ctx->reader->EndRecPtr, errm),
-                errdetail("N/A"), errcause("Xlog damaged or removed."),
-                erraction("Contact engineer to recover xlog files.")));
-        }
-        startptr = InvalidXLogRecPtr;
-
-        if (record != NULL) {
-            ParseProcessRecord(ctx, ctx->reader, worker);
-        }
-
-        pg_atomic_write_u64(&g_Logicaldispatcher[slotId].sentPtr, ctx->reader->EndRecPtr);
-    };
-    ReplicationSlotRelease();
+    /* release slot and do cleanup. */
+    CleanMyReplicationSlot();
+    ParallelDecodeCleanup();
 }
 

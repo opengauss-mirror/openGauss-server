@@ -263,6 +263,8 @@ extern Buffer ReleaseAndReadBuffer(Buffer buffer, Relation relation, BlockNumber
 void InvalidateBuffer(BufferDesc *buf);
 
 extern void InitBufferPool(void);
+extern void pca_buf_init_ctx();
+
 extern void InitBufferPoolAccess(void);
 extern void InitBufferPoolBackend(void);
 extern void AtEOXact_Buffers(bool isCommit);
