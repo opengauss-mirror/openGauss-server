@@ -65,8 +65,8 @@ explain (verbose on, costs off, analyze on, cpu on)
 
 explain (verbose on, costs off, analyze on, cpu on)
 (select col_interval from row_append_table_01 where col_int > 11) union (select col_interval from row_append_table_02 where col_int > 12) order by col_interval;
-                                                 QUERY PLAN                                                  
--------------------------------------------------------------------------------------------------------------
+--?.*
+--?.*
 --? Sort (actual time=.* rows=3 loops=1)
    Output: row_append_table_01.col_interval
    Sort Key: row_append_table_01.col_interval

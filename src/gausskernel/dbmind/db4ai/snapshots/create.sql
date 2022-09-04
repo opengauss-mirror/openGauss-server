@@ -159,7 +159,6 @@ BEGIN
     END IF;
 
     dist_cmd := ''; -- we silently drop DISTRIBUTE_BY
-
     EXECUTE 'CREATE TABLE db4ai.t' || s_id::TEXT || ' WITH (orientation = column, compression = low)' || dist_cmd
         || ' AS SELECT ' || i_commands[4] || ' FROM _db4ai_tmp_x' || s_id::TEXT;
     EXECUTE 'COMMENT ON TABLE db4ai.t' || s_id::TEXT || ' IS ''snapshot backing table, root is ' || pg_catalog.quote_ident(i_schema)
@@ -206,7 +205,7 @@ BEGIN
 
     -- obtain active message level
     BEGIN
-        EXECUTE 'SET LOCAL client_min_messages TO ' || pg_catalog.current_setting('db4ai.message_level');
+        EXECUTE 'SET LOCAL client_min_messages TO ' || pg_catalog.current_setting('db4ai.message_level')::TEXT;
         RAISE INFO 'effective client_min_messages is ''%''', pg_catalog.upper(pg_catalog.current_setting('db4ai.message_level'));
     EXCEPTION WHEN OTHERS THEN
     END;
@@ -428,8 +427,8 @@ BEGIN
         RAISE EXCEPTION 'snapshot % already exists' , qual_name;
     END IF;
 
-    --SELECT nextval('db4ai.snapshot_sequence') INTO STRICT s_id;
-    SELECT COALESCE(pg_catalog.MAX(id)+1,0) FROM db4ai.snapshot INTO STRICT s_id; -- openGauss BUG: cannot create sequences in initdb
+    --SELECT nextval('db4ai.snapshot_sequence') ==> -1 at first time fetch
+    SELECT nextval('db4ai.snapshot_sequence') + 1 INTO STRICT s_id;
 
     -- execute using current user privileges
     DECLARE
@@ -451,8 +450,8 @@ BEGIN
     -- extract normalized projection list
     i_commands := ARRAY[proj_cmd, from_cmd, dist_cmd, '', ''];
     SELECT pg_catalog.string_agg(ident, ', '),
-           pg_catalog.string_agg(ident || ' AS f' || ordinal_position::TEXT, ', '),
-           pg_catalog.string_agg('t' || s_id::TEXT || '.f' || ordinal_position::TEXT || ' AS ' || ident, ', ')
+           pg_catalog.string_agg(ident::TEXT || ' AS f' || ordinal_position::TEXT, ', '),
+           pg_catalog.string_agg('t' || s_id::TEXT || '.f' || ordinal_position::TEXT || ' AS ' || ident::TEXT, ', ')
     FROM ( SELECT ordinal_position, pg_catalog.quote_ident(column_name) AS ident
         FROM information_schema.columns
         WHERE table_schema = (SELECT nspname FROM pg_namespace WHERE oid=pg_catalog.pg_my_temp_schema())
@@ -473,7 +472,7 @@ BEGIN
     EXECUTE 'CREATE VIEW ' || qual_name || ' WITH(security_barrier) AS SELECT ' || proj_cmd || ' FROM db4ai.v' || s_id::TEXT;
     EXECUTE 'COMMENT ON VIEW ' || qual_name || ' IS ''snapshot view backed by db4ai.v' || s_id::TEXT
         || CASE WHEN pg_catalog.length(i_comment) > 0 THEN ' comment is "' || i_comment || '"' ELSE '' END || '''';
-    EXECUTE 'ALTER VIEW ' || qual_name || ' OWNER TO "' || CURRENT_USER || '"';
+    EXECUTE 'ALTER VIEW ' || qual_name || ' OWNER TO "' || CURRENT_USER::TEXT || '"';
 
     -- return final snapshot name
     res := ROW(i_schema, i_name);

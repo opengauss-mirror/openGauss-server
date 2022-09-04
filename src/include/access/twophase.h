@@ -92,6 +92,7 @@ typedef struct GlobalTransactionData {
  */
 const uint32 TWOPHASE_MAGIC = 0x57F94532; /* format identifier */
 const uint32 TWOPHASE_MAGIC_NEW = 0x57F94533;
+const uint32 TWOPHASE_MAGIC_COMPRESSION = 0x57F94534;
 typedef struct TwoPhaseFileHeader {
     uint32 magic;            /* format identifier */
     uint32 total_len;        /* actual file length */
@@ -173,9 +174,9 @@ extern void RecoverPreparedTransactions(void);
 
 extern void CheckPointTwoPhase(XLogRecPtr redo_horizon);
 
-void DropBufferForDelRelinXlogUsingScan(ColFileNodeRel *delrels, int ndelrels);
-void DropBufferForDelRelsinXlogUsingHash(ColFileNodeRel *delrels, int ndelrels);
-bool relsContainsSegmentTable(ColFileNodeRel *delrels, int ndelrels);
+void DropBufferForDelRelinXlogUsingScan(ColFileNode *delrels, int ndelrels);
+void DropBufferForDelRelsinXlogUsingHash(ColFileNode *delrels, int ndelrels);
+bool relsContainsSegmentTable(ColFileNode *delrels, int ndelrels);
 
 extern void FinishPreparedTransaction(const char* gid, bool isCommit);
 

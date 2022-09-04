@@ -78,7 +78,6 @@ static const uint16 DW_BATCH_DATA_PAGE_MAX =
 static const uint16 DW_BATCH_DATA_PAGE_MAX_FOR_NOHBK =
     (uint16)((BLCKSZ - sizeof(dw_batch_first_ver) - sizeof(dw_page_tail_t)) / sizeof(BufferTagFirstVer));
 
-
 /* 1 head + data + 1 tail */
 static const uint16 DW_EXTRA_FOR_ONE_BATCH = 2;
 
@@ -259,7 +258,8 @@ void dw_bootstrap();
  * all the half-written pages should be recovered after this
  * it should be finished before XLOG module start which may replay redo log
  */
-void dw_init(bool shutdown);
+void dw_init();
+void dw_ext_init();
 
 /**
  * double write only work when incremental checkpoint enabled and double write enabled
@@ -336,6 +336,7 @@ uint16 second_version_dw_single_flush(BufferTag tag, Block block, XLogRecPtr pag
 extern uint16 seg_dw_single_flush_without_buffer(BufferTag tag, Block block, bool* flush_old_file);
 extern uint16 seg_dw_single_flush(BufferDesc *buf_desc, bool* flush_old_file);
 extern void wait_all_single_dw_finish_flush_old();
+extern void wait_all_single_dw_finish_flush(bool is_first);
 extern uint16 dw_single_flush_internal_old(BufferTag tag, Block block, XLogRecPtr page_lsn,
     BufferTag phy_tag, bool *dw_flush);
 extern void dw_single_old_file_truncate();
@@ -345,10 +346,18 @@ extern void dw_fetch_batch_file_name(int i, char* buf);
 extern void wait_all_dw_page_finish_flush();
 extern void dw_generate_meta_file(dw_batch_meta_file* batch_meta_file);
 extern void dw_generate_batch_files(int batch_file_num, uint64 dw_file_size);
+extern void dw_remove_batch_file(int dw_file_num);
+extern void dw_remove_batch_meta_file();
+extern void dw_recover_all_partial_write_batch(knl_g_dw_context *batch_cxt);
 extern void dw_cxt_init_batch();
 extern void dw_remove_file(const char* file_name);
 extern int dw_open_file(const char* file_name);
+extern int dw_create_file(const char* file_name);
 extern void dw_upgrade_renable_double_write();
+
+extern void dw_blocked_for_snapshot();
+extern void dw_released_after_snapshot();
+extern bool is_dw_snapshot_blocked();
 
 extern int g_stat_file_id;
 

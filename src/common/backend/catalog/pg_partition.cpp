@@ -534,6 +534,31 @@ bool isPartitionedObject(Oid relid, char relkind, bool missing_ok)
     return result;
 }
 
+bool isSubPartitionedObject(Oid relid, char relkind, bool missing_ok)
+{
+    HeapTuple reltuple = NULL;
+    Form_pg_class relation = NULL;
+    bool result = false;
+
+    reltuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
+    if (HeapTupleIsValid(reltuple)) {
+        relation = (Form_pg_class)GETSTRUCT(reltuple);
+        if (relation->parttype == PARTTYPE_SUBPARTITIONED_RELATION && relation->relkind == relkind) {
+            result = true;
+        }
+        ReleaseSysCache(reltuple);
+    }
+
+    if (!result && !missing_ok) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+                errmsg("the object with oid %u is not a subpartitioned object", relid)));
+    }
+
+    return result;
+}
+
+
 /*
  * @@GaussDB@@
  * Target		: data partition
@@ -836,6 +861,22 @@ List* getPartitionObjectIdList(Oid relid, char relkind)
     return result;
 }
 
+List* getSubPartitionObjectIdList(Oid relid)
+{
+    List *partid_list = getPartitionObjectIdList(relid, PART_OBJ_TYPE_TABLE_PARTITION);
+    List *subpartid_list = NIL;
+    ListCell *cell;
+    Oid partid = InvalidOid;
+    foreach (cell, partid_list) {
+        partid = lfirst_oid(cell);
+        subpartid_list = list_concat(subpartid_list,
+            getPartitionObjectIdList(partid, PART_OBJ_TYPE_TABLE_SUB_PARTITION));
+    }
+    list_free_ext(partid_list);
+    return subpartid_list;
+}
+
+
 /*
  * @@GaussDB@@
  * Target		: data partition
@@ -877,7 +918,7 @@ List* searchPartitionIndexesByblid(Oid blid)
  * 					must free the list by call freePartList
  * Notes		:
  */
-List* searchPgPartitionByParentId(char parttype, Oid parentId)
+List* searchPgPartitionByParentId(char parttype, Oid parentId, ScanDirection direction)
 {
     List* partition_list = NULL;
     Relation pg_partition = NULL;
@@ -885,6 +926,15 @@ List* searchPgPartitionByParentId(char parttype, Oid parentId)
     SysScanDesc scan = NULL;
     HeapTuple tuple = NULL;
     HeapTuple dtuple = NULL;
+
+    /*
+     * Note that all partitions have the same parentid, the tuple inserted last will be read first if we use the index
+     * on parentid and scan forward.
+     * So when we want to obtain all partition tuples in order, MUST use systable_getnext_back instead.
+     */
+    Assert(ScanDirectionIsForward(direction) || ScanDirectionIsBackward(direction));
+    HeapTuple (*ScanMethod)(SysScanDesc);
+    ScanMethod = ScanDirectionIsForward(direction) ? systable_getnext : systable_getnext_back;
 
     pg_partition = heap_open(PartitionRelationId, AccessShareLock);
     ScanKeyInit(&key[0], Anum_pg_partition_parttype, BTEqualStrategyNumber, F_CHAREQ, CharGetDatum(parttype));
@@ -902,7 +952,7 @@ List* searchPgPartitionByParentId(char parttype, Oid parentId)
     }
 
     scan = systable_beginscan(pg_partition, PartitionParentOidIndexId, true, snapshot, 2, key);
-    while (HeapTupleIsValid(tuple = systable_getnext(scan))) {
+    while (HeapTupleIsValid(tuple = ScanMethod(scan))) {
         dtuple = heap_copytuple(tuple);
 
         partition_list = lappend(partition_list, dtuple);
@@ -917,7 +967,7 @@ List* searchPgPartitionByParentId(char parttype, Oid parentId)
 /*
  * Get the sub-partition list-list
  */
-List* searchPgSubPartitionByParentId(char parttype, List *partTuples)
+List* searchPgSubPartitionByParentId(char parttype, List *partTuples, ScanDirection direction)
 {
     List *result = NIL;
     ListCell *lc = NULL;
@@ -926,7 +976,7 @@ List* searchPgSubPartitionByParentId(char parttype, List *partTuples)
     {
         HeapTuple tuple = (HeapTuple)lfirst(lc);
         Oid parentOid = HeapTupleGetOid(tuple);
-        List *subPartTuples = searchPgPartitionByParentId(parttype, parentOid);
+        List *subPartTuples = searchPgPartitionByParentId(parttype, parentOid, direction);
         result = lappend(result, subPartTuples);
     }
 
@@ -1304,7 +1354,7 @@ List* relationGetPartitionOidList(Relation rel)
 /*
  * Get sub-partition list, free with releasePartitionOidList.
  */
-List* RelationGetSubPartitionOidList(Relation rel, LOCKMODE lockmode)
+List* RelationGetSubPartitionOidList(Relation rel, LOCKMODE lockmode, bool estimate)
 {
     if (!RelationIsSubPartitioned(rel))
         return NULL;
@@ -1312,10 +1362,20 @@ List* RelationGetSubPartitionOidList(Relation rel, LOCKMODE lockmode)
     List *parts = relationGetPartitionOidList(rel);
     List *result = NULL;
     ListCell *lc = NULL;
+    Partition part = NULL;
     foreach (lc, parts)
     {
         Oid partOid = lfirst_oid(lc);
-        Partition part = partitionOpen(rel, partOid, lockmode);
+        if (estimate) {
+            if (!ConditionalLockPartition(rel->rd_id, partOid, lockmode, PARTITION_LOCK))
+                continue;
+            part = tryPartitionOpen(rel, partOid, NoLock);
+            if (part == NULL)
+                continue;
+        } else {
+            part = partitionOpen(rel, partOid, lockmode);
+        }
+
         Relation partRel = partitionGetRelation(rel, part);
         List *subParts = relationGetPartitionOidList(partRel);
         result = list_concat(result, subParts);

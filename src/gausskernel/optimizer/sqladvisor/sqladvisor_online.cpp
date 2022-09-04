@@ -60,12 +60,14 @@ static void statementStore(SQLStatementKey key, ParamListInfo boundParams, int c
 void collectDynWithArgs(const char *src, ParamListInfo srcParamLI, int cursorOptions)
 {
     checkGlobalAdvMemSize();
+    (void)LWLockAcquire(SQLAdvisorLock, LW_SHARED);
     MemoryContext oldcxt = MemoryContextSwitchTo(g_instance.adv_cxt.SQLAdvisorContext);
     ParamListInfo destParamLI = copyDynParam(srcParamLI);
     SQLStatementKey key = initSQLStatementKey(src);
     statementStore(key, destParamLI, cursorOptions);
 
     (void)MemoryContextSwitchTo(oldcxt);
+    LWLockRelease(SQLAdvisorLock);
 }
 
 static void statementStore(SQLStatementKey key, ParamListInfo boundParams, int cursorOptions)
@@ -152,6 +154,8 @@ ParamListInfo copyDynParam(ParamListInfo srcParamLI)
     destParamLI->paramFetch = NULL;
     destParamLI->paramFetchArg = NULL;
     destParamLI->params_need_process = false;
+    destParamLI->uParamInfo = DEFUALT_INFO;;
+    destParamLI->params_lazy_bind = false;
     destParamLI->numParams = srcParamLI->numParams;
 
     if (srcParamLI->parserSetup) {
@@ -642,8 +646,10 @@ void checkQuery(List* querytreeList, TableConstraint* tableConstraint)
 
 static bool checkGlobalAdvMemSize()
 {
+    (void)LWLockAcquire(SQLAdvisorLock, LW_SHARED);
     if (g_instance.adv_cxt.maxMemory > 0 && g_instance.adv_cxt.SQLAdvisorContext) {
         int64 totalsize = ((AllocSet)g_instance.adv_cxt.SQLAdvisorContext)->totalSpace;
+        LWLockRelease(SQLAdvisorLock);
         if ((int64)g_instance.adv_cxt.maxMemory * 1024 * 1024 >= totalsize) {
             return true;
         } else {
@@ -651,6 +657,7 @@ static bool checkGlobalAdvMemSize()
                 errmsg("SQL Advisor collect out of memory")));
         }
     } else {
+        LWLockRelease(SQLAdvisorLock);
         ereport(DEBUG1, (errmodule(MOD_ADVISOR),
             errmsg("SQL Advisor collect memory not init")));
     }

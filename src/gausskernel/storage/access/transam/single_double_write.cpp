@@ -143,7 +143,7 @@ void dw_generate_single_file()
 {
     char *file_head = NULL;
     int64 remain_size;
-    int fd = -1;
+    int fd;
     errno_t rc;
     char *unaligned_buf = NULL;
 
@@ -153,12 +153,7 @@ void dw_generate_single_file()
 
     ereport(LOG, (errmodule(MOD_DW), errmsg("DW bootstrap single flush file")));
 
-    fd = open(SINGLE_DW_FILE_NAME, (DW_FILE_FLAG | O_CREAT), DW_FILE_PERM);
-    if (fd == -1) {
-        ereport(PANIC,
-                (errcode_for_file_access(), errmodule(MOD_DW), errmsg("Could not create file \"%s\"",
-                    SINGLE_DW_FILE_NAME)));
-    }
+    fd = dw_create_file(SINGLE_DW_FILE_NAME);
 
     unaligned_buf = (char *)palloc0(DW_FILE_EXTEND_SIZE + BLCKSZ); /* one more BLCKSZ for alignment */
 
@@ -179,6 +174,47 @@ void dw_generate_single_file()
     return;
 }
 
+static bool dw_is_pca_need_recover_single(BufferTag *lst_buf_tag, BufferTag *buf_tag,
+                                          SMgrRelation relnode, bool *isFirst)
+{
+    /* in uncompressed table:
+     * opt will be 0xff if the previous version does not support compresssion
+     * opt will be 0 if the previous version supports compresssion
+     */
+    if (relnode->smgr_rnode.node.opt == 0xffff || relnode->smgr_rnode.node.opt == 0 ||
+        buf_tag->forkNum != MAIN_FORKNUM) {
+        return false;
+    }
+
+    /*  in segment_extstore, page will not be compressed if it belong to ext which size is 8 pages */
+    if (IsSegmentPhysicalRelNode(relnode->smgr_rnode.node) && buf_tag->blockNum < DW_EXT_LOGIC_PAGE_NUM) {
+        return false;
+    }
+
+    /* first buffer */
+    if (isFirst) {
+        *isFirst = false;
+        *lst_buf_tag = *buf_tag;
+        return true;
+    }
+
+    /* different rnode or different fork,  of coures different pca */
+    errno_t rc = memcmp(&(lst_buf_tag->rnode), &(buf_tag->rnode), offsetof(BufferTag, blockNum));
+    if (rc != 0) {
+        *lst_buf_tag = *buf_tag;
+        return true;
+    }
+
+    /* different ext means different pca */
+    BlockNumber ext_num = buf_tag->blockNum / DW_EXT_LOGIC_PAGE_NUM;
+    if (ext_num != lst_buf_tag->blockNum / DW_EXT_LOGIC_PAGE_NUM) {
+        *lst_buf_tag = *buf_tag;
+        return true;
+    }
+
+    return false;
+}
+
 static void dw_recovery_first_version_page()
 {
     knl_g_dw_context* single_cxt = &g_instance.dw_single_cxt;
@@ -191,6 +227,9 @@ static void dw_recovery_first_version_page()
     char *dw_block = (char *)TYPEALIGN(BLCKSZ, unaligned_buf);
     char *data_block = (char *)palloc0(BLCKSZ);
     dw_first_flush_item flush_item;
+    bool needPcaCheck = false;
+    bool isFisrt = true;
+    BufferTag preBufferTag;
 
     for (uint16 i = file_head->start; i < DW_FIRST_DATA_PAGE_NUM; i++) {
         offset = (i + 1) * BLCKSZ;  /* need skip the file head */
@@ -224,11 +263,13 @@ static void dw_recovery_first_version_page()
             securec_check(rc, "\0", "\0");
             dw_set_pg_checksum(dw_block, flush_item.buf_tag.blockNum);
 
+            needPcaCheck = dw_is_pca_need_recover_single(&preBufferTag, &(flush_item.buf_tag), reln, &isFisrt);
             if (IsSegmentPhysicalRelNode(flush_item.buf_tag.rnode)) {
                 // seg_space must be initialized before.
                 seg_physical_write(reln->seg_space, flush_item.buf_tag.rnode, flush_item.buf_tag.forkNum,
                                    flush_item.buf_tag.blockNum, (const char *)dw_block, false);
             } else {
+                SmgrRecoveryPca(reln, flush_item.buf_tag.forkNum, flush_item.buf_tag.blockNum, needPcaCheck, false);
                 smgrwrite(reln, flush_item.buf_tag.forkNum, flush_item.buf_tag.blockNum,
                     (const char *)dw_block, false);
             }
@@ -281,6 +322,9 @@ static void dw_recovery_single_page(const dw_single_flush_item *item, uint16 ite
     char *dw_block = (char *)TYPEALIGN(BLCKSZ, unaligned_buf);
     char *data_block = (char *)palloc0(BLCKSZ);
     uint64 base_offset = 0;
+    bool needPcaCheck = false;
+    bool isFisrt = true;
+    BufferTag preBufferTag;
 
     if (single_cxt->file_head->dw_version == DW_SUPPORT_NEW_SINGLE_FLUSH) {
         base_offset = 1 + DW_FIRST_DATA_PAGE_NUM + 1 + DW_SECOND_BUFTAG_PAGE_NUM;
@@ -310,11 +354,13 @@ static void dw_recovery_single_page(const dw_single_flush_item *item, uint16 ite
         dw_log_page_header((PageHeader)data_block);
         if (!dw_verify_pg_checksum((PageHeader)data_block, buf_tag.blockNum, false) ||
             XLByteLT(PageGetLSN(data_block), PageGetLSN(dw_block))) {
+            needPcaCheck = dw_is_pca_need_recover_single(&preBufferTag, &buf_tag, reln, &isFisrt);
             if (IsSegmentPhysicalRelNode(buf_tag.rnode)) {
                 // seg_space must be initialized before.
                 seg_physical_write(reln->seg_space, buf_tag.rnode, buf_tag.forkNum, buf_tag.blockNum,
                                    (const char *)dw_block, false);
             } else {
+                SmgrRecoveryPca(reln, buf_tag.forkNum, buf_tag.blockNum, needPcaCheck, false);
                 smgrwrite(reln, buf_tag.forkNum, buf_tag.blockNum, (const char *)dw_block, false);
             }
             dw_log_recovery_page(LOG, "Date page recovered", buf_tag);
@@ -438,6 +484,7 @@ void dw_recovery_partial_write_single()
 {
     knl_g_dw_context* single_cxt = &g_instance.dw_single_cxt;
 
+    ereport(LOG, (errmodule(MOD_DW), errmsg("DW single flush file recovery start.")));
     if (single_cxt->file_head->dw_version == DW_SUPPORT_NEW_SINGLE_FLUSH) {
         dw_recovery_first_version_page();
         dw_recovery_second_version_page();
@@ -556,7 +603,7 @@ void dw_generate_new_single_file()
 {
     char *file_head = NULL;
     int64 extend_size;
-    int fd = -1;
+    int fd;
     errno_t rc;
     char *unaligned_buf = NULL;
 
@@ -567,12 +614,7 @@ void dw_generate_new_single_file()
 
     ereport(LOG, (errmodule(MOD_DW), errmsg("DW bootstrap new single flush file")));
 
-    fd = open(SINGLE_DW_FILE_NAME, (DW_FILE_FLAG | O_CREAT), DW_FILE_PERM);
-    if (fd == -1) {
-        ereport(PANIC,
-                (errcode_for_file_access(), errmodule(MOD_DW), errmsg("Could not create file \"%s\"",
-                    SINGLE_DW_FILE_NAME)));
-    }
+    fd = dw_create_file(SINGLE_DW_FILE_NAME);
 
     /* NO EREPORT(ERROR) from here till changes are logged */
     START_CRIT_SECTION();
@@ -618,6 +660,10 @@ uint16 first_version_dw_single_flush(BufferDesc *buf_desc)
     dw_first_flush_item item;
     PageHeader pghr = NULL;
     BufferTag phy_tag;
+
+    /* used to block the io for snapshot feature */
+    (void)LWLockAcquire(g_instance.ckpt_cxt_ctl->snapshotBlockLock, LW_SHARED);
+    LWLockRelease(g_instance.ckpt_cxt_ctl->snapshotBlockLock);
 
     uint32 buf_state = LockBufHdr(buf_desc);
     Block block = BufHdrGetBlock(buf_desc);
@@ -670,6 +716,10 @@ uint16 second_version_dw_single_flush(BufferTag tag, Block block, XLogRecPtr pag
     knl_g_dw_context* dw_single_cxt = &g_instance.dw_single_cxt;
     dw_file_head_t *file_head = dw_single_cxt->second_file_head;
     char *buf = t_thrd.proc->dw_buf;
+
+    /* used to block the io for snapshot feature */
+    (void)LWLockAcquire(g_instance.ckpt_cxt_ctl->snapshotBlockLock, LW_SHARED);
+    LWLockRelease(g_instance.ckpt_cxt_ctl->snapshotBlockLock);
 
     /* first step, copy buffer to dw buf, than flush page lsn, the buffer content lock  is already held */
     rc = memcpy_s(buf, BLCKSZ, block, BLCKSZ);
@@ -919,11 +969,7 @@ void dw_cxt_init_single()
     single_cxt->second_flush_lock = LWLockAssign(LWTRANCHE_DW_SINGLE_SECOND);
     single_cxt->second_buftag_lock = LWLockAssign(LWTRANCHE_DW_SINGLE_SECOND_BUFTAG);
 
-    single_cxt->fd = open(SINGLE_DW_FILE_NAME, DW_FILE_FLAG, DW_FILE_PERM);
-    if (single_cxt->fd == -1) {
-        ereport(PANIC,
-            (errcode_for_file_access(), errmodule(MOD_DW), errmsg("Could not open file \"%s\"", SINGLE_DW_FILE_NAME)));
-    }
+    single_cxt->fd = dw_open_file(SINGLE_DW_FILE_NAME);
 
     data_page_num = DW_FIRST_DATA_PAGE_NUM + DW_SECOND_DATA_PAGE_NUM;
 

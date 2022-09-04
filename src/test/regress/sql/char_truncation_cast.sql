@@ -1,4 +1,4 @@
-﻿set td_compatible_truncation=on;
+set td_compatible_truncation=on;
 set td_compatible_truncation=off;
 drop database if exists td_db_char_cast;
 create database td_db_char_cast DBCOMPATIBILITY 'C';

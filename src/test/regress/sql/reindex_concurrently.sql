@@ -133,6 +133,20 @@ REINDEX INDEX CONCURRENTLY concur_reindex_ind5;
 \d concur_reindex_tab4
 DROP TABLE concur_reindex_tab4;
 
+-- Check handling of unusable indexes
+CREATE TABLE concur_reindex_tab5 (c1 int);
+CREATE INDEX concur_reindex_ind6 ON concur_reindex_tab5(c1);
+-- Set concur_reindex_ind6 unusable
+ALTER INDEX concur_reindex_ind6 UNUSABLE;
+\d concur_reindex_tab5
+-- The unusable index is not processed when running REINDEX TABLE.
+REINDEX TABLE CONCURRENTLY concur_reindex_tab5;
+\d concur_reindex_tab5
+-- But it is fixes with REINDEX INDEX
+REINDEX INDEX CONCURRENTLY concur_reindex_ind6;
+\d concur_reindex_tab5
+DROP TABLE concur_reindex_tab5;
+
 -- Check handling of indexes with expressions and predicates.  The
 -- definitions of the rebuilt indexes should match the original
 -- definitions.

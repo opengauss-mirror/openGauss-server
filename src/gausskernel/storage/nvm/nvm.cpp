@@ -23,8 +23,42 @@
 #include "storage/nvm/nvm.h"
 
 #include "postgres.h"
+#include "utils/guc.h"
 #include "knl/knl_variable.h"
 #include "storage/buf/bufmgr.h"
+
+extern bool check_special_character(char c);
+
+bool check_nvm_path(char** newval, void** extra, GucSource source)
+{
+    char *absPath;
+
+    absPath = pstrdup(*newval);
+
+    int len = strlen(absPath);
+    for (int i = 0; i < len; i++) {
+        if (!check_special_character(absPath[i]) || isspace(absPath[i])) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static bool LockNvmFile(int fd)
+{
+    struct flock lock;
+    lock.l_type = F_WRLCK;
+    lock.l_start = 0;
+    lock.l_whence = SEEK_SET;
+    lock.l_len = 0;
+    lock.l_pid = getpid();
+
+    if (fcntl(fd, F_SETLK, &lock) == 0) {
+        return false;
+    }
+    return true;
+}
 
 void nvm_init(void)
 {
@@ -32,22 +66,34 @@ void nvm_init(void)
 
     if (NVM_BUFFER_NUM == 0) {
         LWLockRelease(ShmemIndexLock);
-        ereport(FATAL, (errmsg("nvm_buffers is not set.\n")));
+        ereport(WARNING, (errmsg("nvm_buffers is not set.")));
+        return;
     }
 
     if (g_instance.attr.attr_storage.nvm_attr.nvmBlocks == NULL) {
         int nvmBufFd = open(g_instance.attr.attr_storage.nvm_attr.nvm_file_path, O_RDWR);
         if (nvmBufFd < 0) {
             LWLockRelease(ShmemIndexLock);
-            ereport(FATAL, (errmsg("can not open nvm file.\n")));
+            ereport(FATAL, (errmsg("can not open nvm file.")));
         }
+
+        if (LockNvmFile(nvmBufFd)) {
+            LWLockRelease(ShmemIndexLock);
+            ereport(FATAL, (errmsg("can not lock nvm file.")));
+        }
+
         size_t nvmBufferSize = (NVM_BUFFER_NUM) * (Size)BLCKSZ;
 
         g_instance.attr.attr_storage.nvm_attr.nvmBlocks = (char *)mmap(NULL, nvmBufferSize,
             PROT_READ | PROT_WRITE, MAP_SHARED, nvmBufFd, 0);
         if (g_instance.attr.attr_storage.nvm_attr.nvmBlocks == NULL) {
             LWLockRelease(ShmemIndexLock);
-            ereport(FATAL, (errmsg("mmap nvm buffer failed.\n")));
+            ereport(FATAL,
+                (errmsg("could not create nvm buffer"),
+                    errdetail("Failed system call was mmap(size=%lu)", nvmBufferSize),
+                    errhint("This error usually means that openGauss's request for a"
+                            "nvm shared buffer exceeded your nvm's file size. you can either"
+                            "reduce the request the request size or resize the nvm file.")));
         }
     }
 

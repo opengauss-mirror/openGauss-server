@@ -344,7 +344,7 @@ int StrategySyncStart(uint32 *complete_passes, uint32 *num_buf_alloc)
 
     SpinLockAcquire(&t_thrd.storage_cxt.StrategyControl->buffer_strategy_lock);
     next_victim_buffer = pg_atomic_read_u32(&t_thrd.storage_cxt.StrategyControl->nextVictimBuffer);
-    result = next_victim_buffer % TOTAL_BUFFER_NUM;
+    result = ((int) next_victim_buffer) % NORMAL_SHARED_BUFFER_NUM;
 
     if (complete_passes != NULL) {
         *complete_passes = t_thrd.storage_cxt.StrategyControl->completePasses;

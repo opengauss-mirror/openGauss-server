@@ -174,17 +174,24 @@ public:
     /* Deallocator function for rbtree.c */
     static void deallocDataEntry(RBNode *x, void *arg)
     {
+        if (x == NULL) {
+            return;
+        }
         IteratorTreeNodeWrapper *iter_wrapper = (IteratorTreeNodeWrapper *)x;
-        if (std::is_trivial<key_type>::value == 0) {
+        if (std::is_trivial<key_type>::value == 0 && iter_wrapper->m_iter.first != NULL) {
             iter_wrapper->m_iter.first->~key_type();
         }
-        if (std::is_trivial<mapped_type>::value == 0) {
+        if (std::is_trivial<mapped_type>::value == 0 && iter_wrapper->m_iter.second != NULL) {
             iter_wrapper->m_iter.second->~mapped_type();
         }
-        pfree(iter_wrapper->m_iter.first);
-        pfree(iter_wrapper->m_iter.second);
-        iter_wrapper->m_iter.first = NULL;
-        iter_wrapper->m_iter.second = NULL;
+        if (iter_wrapper->m_iter.first != NULL) {
+            pfree(iter_wrapper->m_iter.first);
+            iter_wrapper->m_iter.first = NULL;
+        }
+        if (iter_wrapper->m_iter.second != NULL) {
+            pfree(iter_wrapper->m_iter.second);
+            iter_wrapper->m_iter.second = NULL;
+        }
         pfree(iter_wrapper);
         iter_wrapper = NULL;
     }

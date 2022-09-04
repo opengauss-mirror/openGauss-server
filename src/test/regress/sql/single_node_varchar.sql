@@ -80,3 +80,8 @@ select * from tab_1 where col1='   ';
 set behavior_compat_options = ''; 
 drop table tab_1;
 drop table tab_2;
+
+select length(rtrim('123   '));
+set behavior_compat_options = 'char_coerce_compat';
+select length(rtrim('123   '));
+set behavior_compat_options = '';

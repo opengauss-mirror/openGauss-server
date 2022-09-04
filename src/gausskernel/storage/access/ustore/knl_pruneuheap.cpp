@@ -44,15 +44,68 @@
 #include "access/ustore/knl_whitebox_test.h"
 
 static int UHeapPruneItem(const RelationBuffer *relbuf, OffsetNumber rootoffnum, TransactionId oldestXmin,
-    UPruneState *prstate, Size *spaceFreed);
+    UPruneState *prstate, Size *spaceFreed, bool isTarget);
 static void UHeapPruneRecordPrunable(UPruneState *prstate, TransactionId xid);
 static void UHeapPruneRecordDead(UPruneState *prstate, OffsetNumber offnum, Relation relation);
 static void UHeapPruneRecordDeleted(UPruneState *prstate, OffsetNumber offnum, Relation relation);
+static void UHeapPruneRecordFixed(UPruneState *prstate, OffsetNumber offnum, Relation relation,
+    uint16 tupSize);
 
 static int Itemoffcompare(const void *itemidp1, const void *itemidp2)
 {
     /* Sort in decreasing itemoff order */
     return ((itemIdSort)itemidp2)->itemoff - ((itemIdSort)itemidp1)->itemoff;
+}
+
+int CalTupSize(Relation relation, UHeapDiskTuple diskTuple, TupleDesc scanTupDesc)
+{
+    TupleDesc rowDesc = (scanTupDesc == NULL) ? RelationGetDescr(relation) : scanTupDesc;
+    bool hasnulls = UHeapDiskTupHasNulls(diskTuple);
+    Form_pg_attribute *att = rowDesc->attrs;
+    int natts; /* number of atts to extract */
+    int attnum;
+    bits8 *bp = diskTuple->data;
+    int off = diskTuple->t_hoff;
+    char *tupPtr = (char *)diskTuple;
+    int nullcount = 0;
+    int tupleAttrs = UHeapTupleHeaderGetNatts(diskTuple);
+    bool enableReverseBitmap = NAttrsReserveSpace(tupleAttrs);
+
+    WHITEBOX_TEST_STUB(UHEAP_DEFORM_TUPLE_FAILED, WhiteboxDefaultErrorEmit);
+
+    natts = Min(tupleAttrs, rowDesc->natts);
+    for (attnum = 0; attnum < natts; attnum++) {
+        Form_pg_attribute thisatt = att[attnum];
+
+        if (hasnulls && att_isnull(attnum, bp)) {
+            /* Skip attribute length in case the tuple was stored with
+               space reserved for null attributes */
+            if (enableReverseBitmap) {
+                if (!att_isnull(tupleAttrs + nullcount, bp)) {
+                    off += thisatt->attlen;
+                }
+            }
+
+            nullcount++;
+
+            continue;
+        }
+
+        /*
+         * If this is a varlena, there might be alignment padding, if it has a
+         * 4-byte header.  Otherwise, there will only be padding if it's not
+         * pass-by-value.
+         */
+        if (thisatt->attlen == -1) {
+            off = att_align_pointer(off, thisatt->attalign, -1, tupPtr + off);
+        } else if (!thisatt->attbyval) {
+            off = att_align_nominal(off, thisatt->attalign);
+        }
+
+        off = att_addlength_pointer(off, thisatt->attlen, tupPtr + off);
+    }
+
+    return off;
 }
 
 bool UHeapPagePruneOptPage(Relation relation, Buffer buffer, TransactionId xid, bool acquireContionalLock)
@@ -113,14 +166,14 @@ bool UHeapPagePruneOptPage(Relation relation, Buffer buffer, TransactionId xid, 
         RelationBuffer relbuf = {relation, buffer};
         if (!acquireContionalLock) {
             /* Exclusive lock is acquired, OK to prune */
-            (void)UHeapPagePrune(&relbuf, oldestXmin, true, &ignore, &pruned);
+            (void)UHeapPagePrune(relation, &relbuf, oldestXmin, true, &ignore, &pruned);
         } else {
             if (!ConditionalLockUHeapBufferForCleanup(buffer)) {
                 return false;
             }
 
             if (PageIsFull(page) || PageGetExactUHeapFreeSpace(page) < minfree) {
-                (void)UHeapPagePrune(&relbuf, oldestXmin, true, &ignore, &pruned);
+                (void)UHeapPagePrune(relation, &relbuf, oldestXmin, true, &ignore, &pruned);
             }
 
             LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
@@ -138,7 +191,7 @@ bool UHeapPagePruneOptPage(Relation relation, Buffer buffer, TransactionId xid, 
     return false;
 }
 
-int UHeapPagePrune(const RelationBuffer *relbuf, TransactionId oldestXmin, bool reportStats,
+int UHeapPagePrune(Relation relation, const RelationBuffer *relbuf, TransactionId oldestXmin, bool reportStats,
     TransactionId *latestRemovedXid, bool *pruned)
 {
     int ndeleted = 0;
@@ -169,6 +222,7 @@ int UHeapPagePrune(const RelationBuffer *relbuf, TransactionId oldestXmin, bool 
     prstate.new_prune_xid = InvalidTransactionId;
     prstate.latestRemovedXid = *latestRemovedXid;
     prstate.ndeleted = prstate.ndead = prstate.nunused = 0;
+    prstate.nfixed = 0;
     rc = memset_s(prstate.marked, sizeof(prstate.marked), 0, sizeof(prstate.marked));
     securec_check(rc, "\0", "\0");
 
@@ -203,12 +257,12 @@ int UHeapPagePrune(const RelationBuffer *relbuf, TransactionId oldestXmin, bool 
             }
 
             /* Process this item */
-            ndeleted += UHeapPruneItem(relbuf, offnum, oldestXmin, &prstate, &spaceFreed);
+            ndeleted += UHeapPruneItem(relbuf, offnum, oldestXmin, &prstate, &spaceFreed, true);
         }
     }
 
     /* Do we want to prune? */
-    if (prstate.ndeleted > 0 || prstate.ndead > 0 || prstate.nunused > 0) {
+    if (prstate.ndeleted > 0 || prstate.ndead > 0 || prstate.nunused > 0 || prstate.nfixed > 0) {
         executePruning = true;
     }
 
@@ -221,7 +275,6 @@ int UHeapPagePrune(const RelationBuffer *relbuf, TransactionId oldestXmin, bool 
          * update the page's hint bit about whether it has free line pointers.
          * first print relation oid
          */
-
         WaitState oldStatus = pgstat_report_waitstatus(STATE_PRUNE_TABLE);
         UHeapPagePruneExecute(relbuf->buffer, InvalidOffsetNumber, &prstate);
 
@@ -249,7 +302,7 @@ int UHeapPagePrune(const RelationBuffer *relbuf, TransactionId oldestXmin, bool 
          * Finally, repair any fragmentation, and update the page's hint bit
          * whether it has free pointers.
          */
-        UPageRepairFragmentation(relbuf->buffer, InvalidOffsetNumber, 0, &hasPruned, false);
+        UPageRepairFragmentation(relation, relbuf->buffer, InvalidOffsetNumber, 0, &hasPruned, false);
 
 #ifdef DEBUG_UHEAP
         if (hasPruned) {
@@ -281,8 +334,8 @@ int UHeapPagePrune(const RelationBuffer *relbuf, TransactionId oldestXmin, bool 
             XLogRecPtr recptr;
 
             recptr = LogUHeapClean(relbuf->relation, relbuf->buffer, InvalidOffsetNumber, 0, prstate.nowdeleted,
-                prstate.ndeleted, prstate.nowdead, 0, prstate.nowunused, prstate.nunused, prstate.latestRemovedXid,
-                hasPruned);
+                prstate.ndeleted, prstate.nowdead, 0, prstate.nowunused, prstate.nunused, prstate.nowfixed,
+                prstate.fixedlen, prstate.nfixed, prstate.latestRemovedXid, hasPruned);
 
             PageSetLSN(BufferGetPage(relbuf->buffer), recptr);
         }
@@ -396,14 +449,12 @@ bool UHeapPagePruneOpt(Relation relation, Buffer buffer, OffsetNumber offnum, Si
      * Forget it if page is not hinted to contain something prunable that's
      * committed and we don't want to forcefully prune the page.
      */
-    if (!UPageIsPrunable(page) && !forcePrune) {
-#ifdef DEBUG_UHEAP
-        UHEAPSTAT_COUNT_PRUNEPAGE(PRUNE_PAGE_NO_SPACE);
-#endif
+    if (!UPageIsPrunableWithXminHorizon(page, oldestXmin)  && !forcePrune) {
         return false;
     }
 
-    UHeapPagePruneGuts(&relbuf, oldestXmin, offnum, spaceRequired, true, forcePrune, &ignore, &pruned);
+    UHeapPagePruneGuts(relation, &relbuf, oldestXmin, offnum, spaceRequired, true,
+        forcePrune, &ignore, &pruned);
     if (pruned) {
         return true;
     }
@@ -434,8 +485,9 @@ bool UHeapPagePruneOpt(Relation relation, Buffer buffer, OffsetNumber offnum, Si
  * latestRemovedXid.  It returns 0, when removed the dead tuples can't free up
  * the space required.
  */
-int UHeapPagePruneGuts(const RelationBuffer *relbuf, TransactionId oldestXmin, OffsetNumber targetOffnum,
-    Size spaceRequired, bool reportStats, bool forcePrune, TransactionId *latestRemovedXid, bool *pruned)
+int UHeapPagePruneGuts(Relation relation, const RelationBuffer *relbuf, TransactionId oldestXmin,
+    OffsetNumber targetOffnum, Size spaceRequired, bool reportStats, bool forcePrune,
+    TransactionId *latestRemovedXid, bool *pruned)
 {
     int ndeleted = 0;
     Size spaceFreed = 0;
@@ -469,6 +521,7 @@ int UHeapPagePruneGuts(const RelationBuffer *relbuf, TransactionId oldestXmin, O
     prstate.new_prune_xid = InvalidTransactionId;
     prstate.latestRemovedXid = *latestRemovedXid;
     prstate.ndeleted = prstate.ndead = prstate.nunused = 0;
+    prstate.nfixed = 0; 
     rc = memset_s(prstate.marked, sizeof(prstate.marked), 0, sizeof(prstate.marked));
     securec_check(rc, "\0", "\0");
 
@@ -480,7 +533,7 @@ int UHeapPagePruneGuts(const RelationBuffer *relbuf, TransactionId oldestXmin, O
      * strategy to rearrange the page where we anyway need to traverse all
      * rows.
      */
-    if (forcePrune && !UPageIsPrunable(page)) {
+    if (forcePrune && !UPageIsPrunableWithXminHorizon(page, oldestXmin)) {
         ; /* no need to scan */
     } else {
         /* Scan the page */
@@ -503,7 +556,8 @@ int UHeapPagePruneGuts(const RelationBuffer *relbuf, TransactionId oldestXmin, O
             }
 
             /* Process this item */
-            ndeleted += UHeapPruneItem(relbuf, offnum, oldestXmin, &prstate, &spaceFreed);
+            ndeleted += UHeapPruneItem(relbuf, offnum, oldestXmin, &prstate, &spaceFreed,
+                (offnum == targetOffnum));
         }
     }
 
@@ -526,7 +580,8 @@ int UHeapPagePruneGuts(const RelationBuffer *relbuf, TransactionId oldestXmin, O
     }
 
     /* Do we want to prune? */
-    if (prstate.ndeleted > 0 || prstate.ndead > 0 || prstate.nunused > 0 || forcePrune) {
+    if (prstate.ndeleted > 0 || prstate.ndead > 0 || prstate.nunused > 0 || forcePrune ||
+        prstate.nfixed > 0) {
         executePruning = true;
     }
 
@@ -565,7 +620,7 @@ int UHeapPagePruneGuts(const RelationBuffer *relbuf, TransactionId oldestXmin, O
          * Finally, repair any fragmentation, and update the page's hint bit
          * whether it has free pointers.
          */
-        UPageRepairFragmentation(relbuf->buffer, targetOffnum, spaceRequired, &hasPruned, false);
+        UPageRepairFragmentation(relation, relbuf->buffer, targetOffnum, spaceRequired, &hasPruned, false);
 
 #ifdef DEBUG_UHEAP
         if (hasPruned) {
@@ -598,7 +653,7 @@ int UHeapPagePruneGuts(const RelationBuffer *relbuf, TransactionId oldestXmin, O
 
             recptr = LogUHeapClean(relbuf->relation, relbuf->buffer, targetOffnum, spaceRequired, prstate.nowdeleted,
                 prstate.ndeleted, prstate.nowdead, prstate.ndead, prstate.nowunused, prstate.nunused,
-                prstate.latestRemovedXid, hasPruned);
+                prstate.nowfixed, prstate.fixedlen, prstate.nfixed, prstate.latestRemovedXid, hasPruned);
 
             PageSetLSN(BufferGetPage(relbuf->buffer), recptr);
         }
@@ -660,6 +715,7 @@ void UHeapPagePruneExecute(Buffer buffer, OffsetNumber targetOffnum, const UPrun
 {
     Page page = (Page)BufferGetPage(buffer);
     const OffsetNumber *offnum;
+    const uint16 *tupSize;
     int i;
 
     WHITEBOX_TEST_STUB(UHEAP_PAGE_PRUNE_FAILED, WhiteboxDefaultErrorEmit);
@@ -697,7 +753,10 @@ void UHeapPagePruneExecute(Buffer buffer, OffsetNumber targetOffnum, const UPrun
          * Mark the Item as deleted and copy the visibility info and
          * transaction slot information from tuple to RowPtr.
          */
-        Assert(tdSlot >= 0);
+        if (tdSlot <= 0 && !t_thrd.xlog_cxt.InRecovery && !RecoveryInProgress()) {
+            ereport(PANIC, (errcode(ERRCODE_DATA_CORRUPTED),
+                errmsg("Invalid td slot %d in disk tuple, offsetnum is %u", tdSlot, off)));
+        }
         utdSlot = (unsigned int)tdSlot;
         RowPtrSetDeleted(lp, utdSlot, visInfo);
     }
@@ -730,6 +789,17 @@ void UHeapPagePruneExecute(Buffer buffer, OffsetNumber targetOffnum, const UPrun
 
         RowPtrSetUnused(lp);
     }
+
+    offnum = prstate->nowfixed;
+    tupSize = prstate->fixedlen;
+    for (i = 0; i < prstate->nfixed; i++) {
+        OffsetNumber off = *offnum++;
+        uint16 realSize = *tupSize++;
+        RowPtr *lp = UPageGetRowPtr(page, off);
+        /* The target offset must not be fixed. */
+        Assert(targetOffnum != off);
+        RowPtrChangeLen(lp, realSize);
+    }
 }
 
 /*
@@ -745,7 +815,7 @@ void UHeapPagePruneExecute(Buffer buffer, OffsetNumber targetOffnum, const UPrun
  * Returns the number of tuples (to be) deleted from the page.
  */
 static int UHeapPruneItem(const RelationBuffer *relbuf, OffsetNumber offnum, TransactionId oldestXmin,
-    UPruneState *prstate, Size *spaceFreed)
+    UPruneState *prstate, Size *spaceFreed, bool isTarget)
 {
     UHeapTupleData tup;
     RowPtr *lp;
@@ -754,6 +824,7 @@ static int UHeapPruneItem(const RelationBuffer *relbuf, OffsetNumber offnum, Tra
     TransactionId xid = InvalidTransactionId;
     bool tupdead = false;
     bool recentDead = false;
+    bool inplaceUpdated = false;
 
     lp = UPageGetRowPtr(dp, offnum);
 
@@ -769,7 +840,8 @@ static int UHeapPruneItem(const RelationBuffer *relbuf, OffsetNumber offnum, Tra
      */
     tupdead = recentDead = false;
 
-    switch (UHeapTupleSatisfiesOldestXmin(&tup, oldestXmin, relbuf->buffer, false, NULL, &xid, NULL)) {
+    switch (UHeapTupleSatisfiesOldestXmin(&tup, oldestXmin, relbuf->buffer, false, NULL, &xid,
+        NULL, relbuf->relation, &inplaceUpdated)) {
         case UHEAPTUPLE_DEAD:
             tupdead = true;
             break;
@@ -808,6 +880,13 @@ static int UHeapPruneItem(const RelationBuffer *relbuf, OffsetNumber offnum, Tra
             break;
     }
 
+    if (inplaceUpdated && !isTarget) {
+        int tupSize = CalTupSize(relbuf->relation, tup.disk_tuple);
+        if (tupSize < (int)tup.disk_tuple_size) {
+            UHeapPruneRecordFixed(prstate, offnum, relbuf->relation, (uint16)tupSize);
+        }
+    }
+
     if (tupdead) {
         UHeapTupleHeaderAdvanceLatestRemovedXid(tup.disk_tuple, xid, &prstate->latestRemovedXid);
     }
@@ -818,10 +897,11 @@ static int UHeapPruneItem(const RelationBuffer *relbuf, OffsetNumber offnum, Tra
          * that can be freed.
          */
         ndeleted++;
+        Assert(!TransactionIdIsValid(xid) || !TransactionIdIsInProgress(xid));
         if (TransactionIdIsValid(xid) && TransactionIdIsInProgress(xid)) {
             ereport(PANIC, (errcode(ERRCODE_DATA_CORRUPTED),
-                errmsg("Tuple will be pruned but xid is inprogress, xid=%lu, oldestxmin=%lu, oldestXidInUndo=%lu.",
-                xid, oldestXmin, g_instance.undo_cxt.oldestXidInUndo)));
+                errmsg("Tuple will be pruned but xid is inprogress, xid=%lu, oldestxmin=%lu, globalRecycleXid=%lu.",
+                xid, oldestXmin, pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid))));
         }
         /* short aligned */
         *spaceFreed += SHORTALIGN(tup.disk_tuple_size);
@@ -834,6 +914,7 @@ static int UHeapPruneItem(const RelationBuffer *relbuf, OffsetNumber offnum, Tra
 
     /* Record deleted item */
     if (recentDead) {
+        Assert(UHeapTupleHeaderGetTDSlot(tup.disk_tuple) > 0);
         UHeapPruneRecordDeleted(prstate, offnum, relbuf->relation);
     }
 
@@ -866,7 +947,7 @@ static void UHeapPruneRecordDead(UPruneState *prstate, OffsetNumber offnum, Rela
 /* Record item pointer to be deleted */
 static void UHeapPruneRecordDeleted(UPruneState *prstate, OffsetNumber offnum, Relation relation)
 {
-    Assert(prstate->ndead < MaxUHeapTuplesPerPage(relation));
+    Assert(prstate->ndeleted < MaxUHeapTuplesPerPage(relation));
     prstate->nowdeleted[prstate->ndeleted] = offnum;
     prstate->ndeleted++;
     Assert(offnum < MaxUHeapTuplesPerPage(relation) + 1);
@@ -874,6 +955,15 @@ static void UHeapPruneRecordDeleted(UPruneState *prstate, OffsetNumber offnum, R
     prstate->marked[offnum] = true;
 }
 
+static void UHeapPruneRecordFixed(UPruneState *prstate, OffsetNumber offnum, Relation relation,
+    uint16 tupSize)
+{
+    Assert(prstate->nfixed < MaxUHeapTuplesPerPage(relation));
+    Assert(offnum < MaxUHeapTuplesPerPage(relation) + 1);
+    prstate->nowfixed[prstate->nfixed] = offnum;
+    prstate->fixedlen[prstate->nfixed] = tupSize;
+    prstate->nfixed++;
+}
 
 /*
  * After removing or marking some line pointers unused, move the tuples to
@@ -967,8 +1057,8 @@ static void CompactifyTuples(itemIdSort itemidbase, int nitems, Page page, Offse
  * itemId when it is already set with transaction slot information in the
  * caller function.
  */
-void UPageRepairFragmentation(Buffer buffer, OffsetNumber targetOffnum, Size spaceRequired, bool *pruned,
-    bool unusedSet)
+void UPageRepairFragmentation(Relation rel, Buffer buffer, OffsetNumber targetOffnum, Size spaceRequired,
+    bool *pruned, bool unusedSet)
 {
     Page page = BufferGetPage(buffer);
     uint16 pdLower = ((UHeapPageHeaderData *)page)->pd_lower;
@@ -997,62 +1087,7 @@ void UPageRepairFragmentation(Buffer buffer, OffsetNumber targetOffnum, Size spa
     }
 
     nline = UHeapPageGetMaxOffsetNumber(page);
-
     WHITEBOX_TEST_STUB(UHEAP_REPAIR_FRAGMENTATION_FAILED, WhiteboxDefaultErrorEmit);
-
-    /*
-     * If there are any tuples which are inplace updated by any open
-     * transactions we shall not compactify the page contents, otherwise,
-     * rollback of those transactions will not be possible.  There could be a
-     * case, where within a transaction tuple is first inplace updated and
-     * then, either updated or deleted. So for now avoid compaction if there
-     * are any tuples which are marked inplace updated, updated or deleted by
-     * an open transaction.
-     */
-    for (i = FirstOffsetNumber; i <= nline; i++) {
-        lp = UPageGetRowPtr(page, i);
-        if (RowPtrIsUsed(lp) && RowPtrHasStorage(lp)) {
-            UHeapDiskTuple tup = (UHeapDiskTuple)UPageGetRowData(page, lp);
-            if (!(tup->flag & (UHEAP_INPLACE_UPDATED | UHEAP_UPDATED | UHEAP_DELETED))) {
-                continue;
-            }
-            if (!UHeapTupleHasInvalidXact(tup->flag)) {
-                UHeapTupleTransInfo txactinfo;
-                txactinfo.td_slot = UHeapTupleHeaderGetTDSlot(tup);
-                if (txactinfo.td_slot == UHEAPTUP_SLOT_FROZEN) {
-                    continue;
-                }
-
-                /*
-                 * XXX There is possibility that the updater's slot got reused
-                 * by a locker in such a case the INVALID_XACT will be moved
-                 * to lockers undo.  Now, we will find that the tuple has
-                 * in-place update flag but it doesn't have INVALID_XACT flag
-                 * and the slot transaction is also running, in such case we
-                 * will not prune this page.  Ideally if the multi-locker is
-                 * set we can get the actual transaction and check the status
-                 * of the transaction.
-                 */
-                GetTDSlotInfo(buffer, txactinfo.td_slot, &txactinfo);
-
-                /*
-                 * It is quite possible that the item is showing some valid
-                 * transaction slot, but actual slot has been frozen. This can
-                 * happen when the tuple is in active state but the entry's xid
-                 * is older than oldestXidInUndo 
-                 */
-                if (txactinfo.td_slot == UHEAPTUP_SLOT_FROZEN) {
-                    continue;
-                }
-                /* For parallel replay, clog of txactinfo.xid may not finish replay */
-                if (t_thrd.xlog_cxt.InRecovery && get_real_recovery_parallelism() > 1)
-                    ;
-                else if (!UHeapTransactionIdDidCommit(txactinfo.xid)) {
-                    return;
-                }
-            }
-        }
-    }
 
     /*
      * Run through the line pointer array and collect data about live items.
@@ -1083,45 +1118,6 @@ void UPageRepairFragmentation(Buffer buffer, OffsetNumber targetOffnum, Size spa
             }
         } else {
             nunused++;
-            /*
-             * We allow Unused entries to be reused only if there is no
-             * transaction information for the entry or the transaction is
-             * committed.
-             */
-            if (RowPtrHasPendingXact(lp)) {
-                UHeapTupleTransInfo txactinfo;
-
-                /*
-                 * If unusedSet is true, it means that itemIds are already
-                 * set unused with transaction slot information by the caller
-                 * and we should not clear it.
-                 */
-                if (unusedSet) {
-                    continue;
-                }
-                txactinfo.td_slot = RowPtrGetTDSlot(lp);
-
-                /*
-                 * Here, we are relying on the transaction information in slot
-                 * as if the corresponding slot has been reused, then
-                 * transaction information from the entry would have been
-                 * cleared.  See PageFreezeTransSlots.
-                 */
-                if (txactinfo.td_slot != UHEAPTUP_SLOT_FROZEN) {
-                    GetTDSlotInfo(buffer, txactinfo.td_slot, &txactinfo);
-
-                    /*
-                     * It is quite possible that the item is showing some
-                     * valid transaction slot, but actual slot has been
-                     * frozen. This can happen when the tuple is in active state 
-                     * but the entry's xid is older than oldestXidInUndo 
-                     */
-                    if (txactinfo.td_slot != UHEAPTUP_SLOT_FROZEN && !UHeapTransactionIdDidCommit(txactinfo.xid)) {
-                        continue;
-                    }
-                }
-            }
-
             /* Unused entries should have lp_len = 0, but make sure */
             RowPtrSetUnused(lp);
         }

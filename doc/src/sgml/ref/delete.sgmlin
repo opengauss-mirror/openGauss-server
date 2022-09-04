@@ -10,11 +10,21 @@
 </refnamediv>
 <refsynopsisdiv>
 <synopsis>
+DELETE Single-Relation Syntax：
 [ WITH [ RECURSIVE ] with_query [, ...] ]
-DELETE [/*+ plan_hint */] FROM [ ONLY ] table_name [partition_clause] [ * ] [ [ AS ] alias ]
+DELETE [/*+ plan_hint */] [FROM] [ ONLY ] table_name [ * ] [ [ [partition_clause] [ [ AS ] alias ] ] | [ [ [ AS ] alias ] [ partitions_clause ] ] ]
     [ USING using_list ]
-    [ WHERE condition | WHERE CURRENT OF cursor_name ] [ LIMIT row_count ]
+    [ WHERE condition | WHERE CURRENT OF cursor_name ]
+    [ ORDER BY {expression [ [ ASC | DESC | USING operator ]
+    [ LIMIT { count } ]
     [ RETURNING { * | { output_expr [ [ AS ] output_name ] } [, ...] } ];
+
+DELETE Multiple-Relation Syntax：
+[ WITH [ RECURSIVE ] with_query [, ...] ]
+DELETE [/*+ plan_hint */] [FROM] 
+    {[ ONLY ] table_name [ * ] [ [ [partition_clause]  [ [ AS ] alias ] ] | [ [ [ AS ] alias ] [partitions_clause] ] ]} [, ...]
+    [ USING using_list ]
+    [ WHERE condition | WHERE CURRENT OF cursor_name ];
 
 where with_query can be:
 with_query_name [ ( column_name [, ...] ) ] AS [ [ NOT ] MATERIALIZED ]
@@ -22,6 +32,10 @@ with_query_name [ ( column_name [, ...] ) ] AS [ [ NOT ] MATERIALIZED ]
 where partition_clause can be:
 PARTITION { ( partition_name ) | FOR ( partition_value [, ...] ) } |
 SUBPARTITION { ( subpartition_name ) | FOR ( subpartition_value [, ...] ) }
+where partitions_clause can be:
+PARTITION { ( { partition_name | subpartition_name } [, ...] ) }
+NOTICE: DELETE Multiple-Relation Syntax is only avaliable in CENTRALIZED mode and B-format database!
+NOTICE: 'partitions_clause' is only avaliable in CENTRALIZED mode and B-format database!
 NOTICE: 'partition_clause' is only avaliable in CENTRALIZED mode!
 </synopsis>
 </refsynopsisdiv>

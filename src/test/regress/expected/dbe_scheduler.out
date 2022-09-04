@@ -1928,3 +1928,6 @@ select * from gs_job_attribute where attribute_name <> 'owner';
 ----------+----------------+-----------------
 (0 rows)
 
+select DBE_SCHEDULER.create_credential('cre_1', 'scheduler_user1', '''''passwd''');
+ERROR:  Password cannot contain characters except numbers, alphabetic characters and specified special characters.
+CONTEXT:  referenced column: create_credential

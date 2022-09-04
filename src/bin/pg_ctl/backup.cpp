@@ -46,6 +46,7 @@
 #include "catalog/catalog.h"
 #include "port/pg_crc32c.h"
 #include "replication/dcf_data.h"
+#include "PageCompression.h"
 
 #ifdef ENABLE_MOT
 #include "fetchmot.h"
@@ -88,8 +89,8 @@ static pg_time_t last_caculate_time = 0;
 static int old_percent = 0;
 static uint64 checkpoint_size = 0;
 static uint64 sync_speed = 0;
-static char remotelsn[MAXPGPATH] = {0};      /* LSN of remote node */
-static char remotenodename[MAXPGPATH] = {0}; /* name of remote node */
+char remotelsn[MAXPGPATH] = {0};      /* LSN of remote node */
+char remotenodename[MAXPGPATH] = {0}; /* name of remote node */
 static char conf_file[MAXPGPATH] = {0};
 static char buildstart_file[MAXPGPATH] = {0};
 static char builddone_file[MAXPGPATH] = {0};
@@ -219,6 +220,7 @@ static int tblspaceIndex = 0;
         if (PQresultStatus(res) != PGRES_TUPLES_OK) {                                            \
             pg_log(PG_WARNING, _(" could not identify maxlsn: %s"), PQerrorMessage(streamConn)); \
             DisconnectConnection();                                                              \
+            PQclear(res);                                                                        \
             return false;                                                                        \
         }                                                                                        \
         if (PQntuples(res) != 1 || PQnfields(res) != 1) {                                        \
@@ -227,17 +229,20 @@ static int tblspaceIndex = 0;
                 PQntuples(res),                                                                  \
                 PQnfields(res));                                                                 \
             DisconnectConnection();                                                              \
+            PQclear(res);                                                                        \
             return false;                                                                        \
         }                                                                                        \
         return_value = PQgetvalue(res, 0, 0);                                                    \
         if (NULL == return_value) {                                                              \
             pg_log(PG_WARNING, _(" get remote lsn failed\n"));                                   \
             DisconnectConnection();                                                              \
+            PQclear(res);                                                                        \
             return false;                                                                        \
         }                                                                                        \
         if (NULL == strchr(return_value, '|')) {                                                 \
             pg_log(PG_WARNING, _(" get remote lsn style failed\n"));                             \
             DisconnectConnection();                                                              \
+            PQclear(res);                                                                        \
             return false;                                                                        \
         }                                                                                        \
         err = strncpy_s(remotelsn, MAXPGPATH, return_value, MAXPGPATH - 1);                      \
@@ -803,6 +808,8 @@ static bool ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
              * End of chunk
              */
             if (file != NULL) {
+                /* punch hole before closing file */
+                PunchHoleForCompressedFile(file, filename);
                 fclose(file);
                 file = NULL;
             }
@@ -1013,6 +1020,9 @@ static bool ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
                  * expected. Close the file and move on to the next tar
                  * header.
                  */
+
+                /* punch hole before closing file */
+                PunchHoleForCompressedFile(file, filename);
                 fclose(file);
                 file = NULL;
                 continue;
@@ -1189,7 +1199,12 @@ static bool BaseBackup(const char* dirname, uint32 term)
             return false;
         }
 
-        show_full_build_process("connect to server success, build started.");
+        show_full_build_process("connected to server success, build started.");
+
+        /* delete data/ and pg_tblspc/, but keep .config */
+        delete_datadir(dirname);
+        show_full_build_process("clear old target dir success");
+
         /* create  build tag file */
         ret = CreateBuildtagFile(buildstart_file);
         if (ret == FALSE) {
@@ -1199,11 +1214,6 @@ static bool BaseBackup(const char* dirname, uint32 term)
         }
 
         show_full_build_process("create build tag file success");
-
-        /* delete data/ and  pg_tblspc/, but keep .config */
-        delete_datadir(dirname);
-
-        show_full_build_process("clear old target dir success");
 
         /* create  build tag file again*/
         ret = CreateBuildtagFile(buildstart_file);
@@ -1218,14 +1228,41 @@ static bool BaseBackup(const char* dirname, uint32 term)
     }
 
     /*
-     * Run IDENTIFY_SYSTEM so we can get the timeline
+     * Run IDENTIFY_SYSTEM so we can get the timeline.
+     *
+     * Attention: Keep this as the first query after connected to primary, in order to
+     * allow retry from reconnection if this query failed due to connection timeout.
      */
     res = PQexec(streamConn, "IDENTIFY_SYSTEM");
     if (PQresultStatus(res) != PGRES_TUPLES_OK) {
-        pg_log(PG_WARNING, _("could not identify system: %s"), PQerrorMessage(streamConn));
-        DisconnectConnection();
+        pg_log(PG_WARNING, _("could not identify system: %s\n"), PQerrorMessage(streamConn));
+        pg_log(PG_WARNING, _("IDENTIFY_SYSTEM failed for the first time. Retry once again.\n"));
+
+        /* reconnect from start */
         PQclear(res);
-        return false;
+        PQfinish(streamConn);
+        streamConn = NULL;
+
+        /* find a available conn */
+        if (isBuildFromStandby) {
+            streamConn = check_and_conn_for_standby(standby_connect_timeout, standby_recv_timeout, term);
+        } else {
+            streamConn = check_and_conn(standby_connect_timeout, standby_recv_timeout, term);
+        }
+
+        if (streamConn == NULL) {
+            show_full_build_process("could not connect to server.");
+            DisconnectConnection();
+            return false;
+        }
+
+        res = PQexec(streamConn, "IDENTIFY_SYSTEM");
+        if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+            pg_log(PG_WARNING, _("could not identify system: %s\n"), PQerrorMessage(streamConn));
+            DisconnectConnection();
+            PQclear(res);
+            return false;
+        }
     }
     if (PQntuples(res) != 1 || PQnfields(res) != 4) {
         pg_log(PG_WARNING, _("could not identify system, got %d rows and %d fields\n"), PQntuples(res), PQnfields(res));
@@ -1281,7 +1318,7 @@ static bool BaseBackup(const char* dirname, uint32 term)
     securec_check_ss_c(nRet, "", "");
 
     if (PQsendQuery(streamConn, current_path) == 0) {
-        pg_log(PG_WARNING, _("could not send base backup command: %s"), PQerrorMessage(streamConn));
+        pg_log(PG_WARNING, _("could not send base backup command: %s\n"), PQerrorMessage(streamConn));
         pg_free(sysidentifier);
         sysidentifier = NULL;
         DisconnectConnection();
@@ -1293,7 +1330,7 @@ static bool BaseBackup(const char* dirname, uint32 term)
      */
     res = PQgetResult(streamConn);
     if (PQresultStatus(res) != PGRES_TUPLES_OK) {
-        pg_log(PG_WARNING, _("could not get xlog location: %s"), PQerrorMessage(streamConn));
+        pg_log(PG_WARNING, _("could not get xlog location: %s\n"), PQerrorMessage(streamConn));
         pg_free(sysidentifier);
         sysidentifier = NULL;
         DisconnectConnection();
@@ -1333,7 +1370,7 @@ static bool BaseBackup(const char* dirname, uint32 term)
      */
     res = PQgetResult(streamConn);
     if (PQresultStatus(res) != PGRES_TUPLES_OK) {
-        pg_log(PG_WARNING, _("could not initiate base backup: %s"), PQerrorMessage(streamConn));
+        pg_log(PG_WARNING, _("could not initiate base backup: %s\n"), PQerrorMessage(streamConn));
         pg_free(sysidentifier);
         sysidentifier = NULL;
         DisconnectConnection();
@@ -1376,7 +1413,7 @@ static bool BaseBackup(const char* dirname, uint32 term)
      */
     res = PQgetResult(streamConn);
     if (PQresultStatus(res) != PGRES_TUPLES_OK) {
-        pg_log(PG_WARNING, _("could not get backup header. Please check server's information. Error message: %s"),
+        pg_log(PG_WARNING, _("could not get backup header. Please check server's information. Error message: %s\n"),
             PQerrorMessage(streamConn));
         pg_free(sysidentifier);
         sysidentifier = NULL;
@@ -1516,7 +1553,7 @@ static bool BaseBackup(const char* dirname, uint32 term)
      */
     res = PQgetResult(streamConn);
     if (PQresultStatus(res) != PGRES_TUPLES_OK) {
-        pg_log(PG_WARNING, _("could not get WAL end position from server: %s"), PQerrorMessage(streamConn));
+        pg_log(PG_WARNING, _("could not get WAL end position from server: %s\n"), PQerrorMessage(streamConn));
         DisconnectConnection();
         PQclear(res);
         return false;
@@ -1576,7 +1613,7 @@ static bool BaseBackup(const char* dirname, uint32 term)
 
     res = PQgetResult(streamConn);
     if (PQresultStatus(res) != PGRES_COMMAND_OK) {
-        pg_log(PG_WARNING, _("final receive failed: %s"), PQerrorMessage(streamConn));
+        pg_log(PG_WARNING, _("final receive failed: %s\n"), PQerrorMessage(streamConn));
         DisconnectConnection();
         PQclear(res);
         return false;
@@ -2433,22 +2470,22 @@ static bool UpdatePaxosIndexFile(unsigned long long paxosIndex)
         }
         paxos_index_fd = open(tmp_paxos_index_file, O_CREAT | O_RDWR | PG_BINARY, S_IRUSR | S_IWUSR);
         if (paxos_index_fd < 0) {
-            pg_log(PG_ERROR, _("Open paxos index file %s failed: %m\n"), tmp_paxos_index_file);
+            pg_log(PG_ERROR, _("Open paxos index file %s failed: %s\n"), tmp_paxos_index_file, strerror(errno));
             return false;
         }
         if ((write(paxos_index_fd, &dcfData, len)) != len) {
             close(paxos_index_fd);
-            pg_log(PG_ERROR, _("Write paxos index file %s failed: %m\n"), tmp_paxos_index_file);
+            pg_log(PG_ERROR, _("Write paxos index file %s failed: %s\n"), tmp_paxos_index_file, strerror(errno));
             return false;
         }
         if (fsync(paxos_index_fd)) {
             close(paxos_index_fd);
-            pg_log(PG_ERROR, _("could not fsync dcf paxos index file: %m\n"));
+            pg_log(PG_ERROR, _("could not fsync dcf paxos index file: %s\n"), strerror(errno));
             return false;
         }
 
         if (close(paxos_index_fd)) {
-            pg_log(PG_ERROR, _("could not close dcf paxos index file: %m\n"));
+            pg_log(PG_ERROR, _("could not close dcf paxos index file: %s\n"), strerror(errno));
             return false;
         }
     }
@@ -2567,4 +2604,59 @@ static int DeleteUnusedFile(const char* path, unsigned int SegNo, unsigned int f
         }
     }
     return 0;
+}
+
+bool RenameTblspcDir(char *dataDir)
+{
+    char tblspcParentPath[MAXPGPATH] = {0};
+    char tblspcCurPath[MAXPGPATH] = {0};
+    char tblspcSourceDir[MAXPGPATH] = {0};
+    char tblspcTargetDir[MAXPGPATH] = {0};
+    DIR *tblspcParentDir = NULL;
+    struct dirent *dirEnt = NULL;
+    struct stat tblspcSourceStat;
+    errno_t rc = EOK;
+    int ret = 0;
+
+    if (strcmp(remotenodename, pgxcnodename) == 0) {
+        return true;
+    }
+
+    rc = snprintf_s(tblspcParentPath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", dataDir, "pg_tblspc");
+    securec_check_ss_c(rc, "\0", "\0");
+    tblspcParentDir = opendir(tblspcParentPath);
+    if (!tblspcParentDir) {
+        pg_log(PG_WARNING, _("open tablespace dir %s failed when rename tablespace dir.\n"), tblspcParentPath);
+        return false;
+    }
+
+    while ((dirEnt = readdir(tblspcParentDir)) != NULL) {
+        rc = snprintf_s(tblspcCurPath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", tblspcParentPath, dirEnt->d_name);
+        securec_check_ss_c(rc, "\0", "\0");
+        rc = snprintf_s(tblspcSourceDir, MAXPGPATH, MAXPGPATH - 1, "%s/%s_%s",
+                        tblspcCurPath, TABLESPACE_VERSION_DIRECTORY, remotenodename);
+        securec_check_ss_c(rc, "\0", "\0");
+        rc = snprintf_s(tblspcTargetDir, MAXPGPATH, MAXPGPATH - 1, "%s/%s_%s",
+                        tblspcCurPath, TABLESPACE_VERSION_DIRECTORY, pgxcnodename);
+        securec_check_ss_c(rc, "\0", "\0");
+
+        if (stat(tblspcSourceDir, &tblspcSourceStat) != 0) {
+            if (errno == ENOENT) {
+                continue;
+            }
+            pg_log(PG_WARNING, _("failed to stat \"%s\".\n"), tblspcSourceDir);
+            (void)closedir(tblspcParentDir);
+            return false;
+        }
+        ret = rename(tblspcSourceDir, tblspcTargetDir);
+        if (ret != 0) {
+            pg_log(PG_WARNING, _("failed to rename tablespace dir: %s\n"), tblspcSourceDir);
+            (void)closedir(tblspcParentDir);
+            return false;
+        }
+    }
+    (void)closedir(tblspcParentDir);
+    pg_log(PG_WARNING, _("rename table space dir success.\n"));
+
+    return true;
 }

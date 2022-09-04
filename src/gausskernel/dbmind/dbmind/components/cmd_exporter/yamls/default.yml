@@ -1,0 +1,44 @@
+# Copyright (c) 2022 Huawei Technologies Co.,Ltd.
+#
+# openGauss is licensed under Mulan PSL v2.
+# You can use this software according to the terms and conditions of the Mulan PSL v2.
+# You may obtain a copy of Mulan PSL v2 at:
+#
+#          http://license.coscl.org.cn/MulanPSL2
+#
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+# EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+# MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+# See the Mulan PSL v2 for more details.
+
+# Format of this configuration file:
+# <metric_prefix>:
+# query: <common query command>
+# metrics:
+#   - <metric_suffix>:
+#     subquery: <read the execution result of common query command
+#                from standard input stream, and filter
+#                the result by using the subquery>
+#     usage: <type>
+#     description: <description text, optional>
+#   ...
+
+
+cluster:
+  query: "cm_ctl query -Cvi"
+  timeout: 5
+  metrics:
+    - state:
+        subquery: grep cluster_state | awk '{if ($3=="Normal") print 1; else print 0}'
+        usage: "GAUGE"
+        description: "cluster state, 0 meaning abnormal and 1 meaning normal"
+    - primary:
+        subquery: grep -E "Primary" | grep -v "|" | awk '{print $3}'
+        usage: "LABEL"
+        description: "primary node list"
+    - standby:
+        subquery: grep -E "Standby" | grep -v "|" | awk '{print $3}'
+        usage: "LABEL"
+        description: "standby node list"
+
+

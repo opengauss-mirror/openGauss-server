@@ -60,6 +60,9 @@ extern void ckpt_shutdown_bgwriter();
 extern HTAB* relfilenode_hashtbl_create(const char* name, bool use_heap_mem);
 extern HTAB *relfilenode_fork_hashtbl_create(const char* name, bool use_heap_mem);
 
+extern void drop_rel_all_forks_buffers();
+extern void drop_rel_one_fork_buffers();
+
 typedef struct DelFileTag {
     RelFileNode rnode;
     int32 maxSegNo;

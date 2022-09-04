@@ -38,6 +38,11 @@ static void resetCreateFuncFlag()
     u_sess->parser_cxt.isCreateFuncOrProc = false;
 }
 
+static void resetForbidTruncateFlag()
+{
+    u_sess->parser_cxt.isForbidTruncate = false;
+}
+
 /*
  * raw_parser
  *        Given a query in string form, do lexical and grammatical analysis.
@@ -58,6 +63,9 @@ List* raw_parser(const char* str, List** query_string_locationlist)
 
     /* reset u_sess->parser_cxt.isCreateFuncOrProc */
     resetCreateFuncFlag();
+
+    /* reset u_sess->parser_cxt.isForbidTruncate */
+    resetForbidTruncateFlag();
 
     /* initialize the flex scanner */
     yyscanner = scanner_init(str, &yyextra.core_yy_extra, ScanKeywords, NumScanKeywords);
@@ -478,6 +486,38 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
                     lvalp->core_yystype = cur_yylval;
                     *llocp = cur_yylloc;
                     break;
+            }
+            break;
+        case ON:
+            cur_yylval = lvalp->core_yystype;
+            cur_yylloc = *llocp;
+            next_token = core_yylex(&(lvalp->core_yystype), llocp, yyscanner);
+            /* get first token after ON (Normal UPDATE). We don't care what it is */
+            yyextra->lookahead_token[1] = next_token;
+            yyextra->lookahead_yylval[1] = lvalp->core_yystype;
+            yyextra->lookahead_yylloc[1] = *llocp;
+
+            /* get the second token after ON. */
+            next_token = core_yylex(&(lvalp->core_yystype), llocp, yyscanner);
+            yyextra->lookahead_token[0] = next_token;
+            yyextra->lookahead_yylval[0] = lvalp->core_yystype;
+            yyextra->lookahead_yylloc[0] = *llocp;
+            yyextra->lookahead_num = 2;
+            switch (next_token) {
+            case CURRENT_TIMESTAMP:
+            case CURRENT_TIME:
+            case CURRENT_DATE:
+            case LOCALTIME:
+            case LOCALTIMESTAMP:
+                cur_token = ON_UPDATE_TIME;
+                lvalp->core_yystype = cur_yylval;
+                *llocp = cur_yylloc;
+                break;
+            default:
+                /* and back up the output info to cur_token */
+                lvalp->core_yystype = cur_yylval;
+                *llocp = cur_yylloc;
+                break;
             }
             break;
         default:

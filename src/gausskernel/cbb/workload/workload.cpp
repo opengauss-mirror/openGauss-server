@@ -3443,7 +3443,7 @@ void UpdateUsedSpace(Oid userID, int64 permSpace, int64 tempSpace)
     Datum newRecord[Natts_pg_user_status] = {0};
     bool newRecordNulls[Natts_pg_user_status] = {0};
     bool newRecordRepl[Natts_pg_user_status] = {0};
-    Relation relation = heap_open(UserStatusRelationId, RowExclusiveLock);
+    Relation relation = heap_open(UserStatusRelationId, ShareUpdateExclusiveLock);
     tuple = SearchSysCache1(USERSTATUSROLEID, ObjectIdGetDatum(userID));
     if (HeapTupleIsValid(tuple)) {
         TupleDesc pgUsedSpaceDsc = RelationGetDescr(relation);
@@ -3460,12 +3460,13 @@ void UpdateUsedSpace(Oid userID, int64 permSpace, int64 tempSpace)
             CatalogUpdateIndexes(relation, newTuple);
         } else {
             heap_inplace_update(relation, newTuple);
+            CacheInvalidateHeapTupleInplace(relation, newTuple);
         }
 
         ReleaseSysCache(tuple);
         heap_freetuple_ext(newTuple);
     }
-    heap_close(relation, RowExclusiveLock);
+    heap_close(relation, ShareUpdateExclusiveLock);
 }
 
 /*
@@ -3551,7 +3552,7 @@ bool BuildUserInfoHash(LOCKMODE lockmode)
         }
 
         /* create user data in hash table */
-        tempUserData = (TmpUserData *)palloc0_noexcept(sizeof(TmpUserData));
+        tempUserData = (TmpUserData *)palloc0(sizeof(TmpUserData));
 
         /* set user id */
         tempUserData->userid        = userid;

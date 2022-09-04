@@ -34,8 +34,17 @@ typedef enum SndRole {
     SNDROLE_PRIMARY_STANDBY = 1,      /* primary to standby */
     SNDROLE_PRIMARY_BUILDSTANDBY = 2, /* primary to gs_ctl when run build command */
     SNDROLE_PRIMARY_DUMMYSTANDBY = 4, /* primary to dummy standby */
-    SNDROLE_DUMMYSTANDBY_STANDBY = 8  /* dummy standby to standby */
+    SNDROLE_DUMMYSTANDBY_STANDBY = 8, /* dummy standby to standby */
+    SNDROLE_LOGICAL_SENDER = 16       /* logical decode sender */
 } SndRole;
+
+/* Streaming DR Switchover interactive state */
+typedef enum SDRSInteractiveState {
+    SDRS_DEFAULT = 0,
+    SDRS_INTERACTION_BEGIN = 1,
+    SDRS_MASTER_INSTANCE_READY = 2,
+    SDRS_INTERACTION_COMPLETE = 3,
+} SDRSInteractiveState;
 
 typedef struct WSXLogPageReadPrivate {
     TimeLineID tli;
@@ -142,7 +151,8 @@ typedef struct WalSnd {
      */
     double catchupRate;
     /* Whether the interaction between the active and standby clusters of the streaming disaster recovery switchover is complete */
-    bool isInteractionCompleted;
+    SDRSInteractiveState interactiveState;
+    bool isMasterInstanceReady;
     TimestampTz lastRequestTimestamp;
 } WalSnd;
 

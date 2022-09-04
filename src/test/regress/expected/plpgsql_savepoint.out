@@ -1377,6 +1377,34 @@ CREATE OR REPLACE PROCEDURE sp_test1 is
         RAISE INFO 'wrong1';
   END;
   /
+create table t1(a int);
+drop type if exists typet1;
+NOTICE:  type "typet1" does not exist, skipping
+create type typet1 is table of t1%rowtype;
+create or replace procedure p3()
+as
+l_error_count number:=0;
+type02 typet1;
+begin
+for i in 1..2 loop
+    type02(i).a=1;
+    raise info 'type02(1).a %',type02(1).a;
+end loop;
+savepoint s1;
+select 1/0;
+exception
+when others then
+    rollback to savepoint s1;
+end;
+/
+call p3();
+INFO:  type02(1).a 1
+INFO:  type02(1).a 1
+ p3 
+----
+ 
+(1 row)
+
 SET behavior_compat_options = 'plstmt_implicit_savepoint';
 TRUNCATE TABLE pl_txn_t;
 CALL sp_test();
@@ -1435,4 +1463,58 @@ SELECT * FROM pl_txn_t ORDER BY 1, 2;
 
 DROP PROCEDURE sp_test;
 DROP PROCEDURE sp_test1;
+DROP PROCEDURE P3;
 DROP TABLE pl_txn_t;
+SET behavior_compat_options = '';
+-- test tuplde desc refed by sql
+create table test_subxact_t1 (a int, b varchar2(100), c int);
+insert into test_subxact_t1 values(1,'aa',2),(2,'bb',2),(3,'cc',3);
+create or replace procedure insert_log(v1 int, v2 varchar2, v3 int) as
+begin
+raise info '%',v1;
+commit;
+end;
+/
+create or replace procedure test_subxact_p1() as
+    type r1 is record (a int, b varchar2(100), c int);
+    type r2 is table of r1;
+    va r2;
+begin
+    select a,b,c from test_subxact_t1 bulk collect into va;
+    insert_log(v1=>va(1).a,v2=>'aa',v3=>3);
+    insert_log(v1=>va(2).a,v2=>'aa',v3=>3);
+    insert_log(v1=>va(3).a,v2=>'aa',v3=>3);
+exception when others then
+    commit;
+end;
+/
+call test_subxact_p1();
+INFO:  1
+CONTEXT:  SQL statement "CALL insert_log(v1=>va[1].a,v2=>'aa',v3=>3)"
+PL/pgSQL function test_subxact_p1() line 6 at PERFORM
+--?.*
+CONTEXT:  PL/pgSQL function insert_log(integer,character varying,integer) line 4 at COMMIT
+SQL statement "CALL insert_log(v1=>va[1].a,v2=>'aa',v3=>3)"
+PL/pgSQL function test_subxact_p1() line 6 at PERFORM
+INFO:  2
+CONTEXT:  SQL statement "CALL insert_log(v1=>va[2].a,v2=>'aa',v3=>3)"
+PL/pgSQL function test_subxact_p1() line 7 at PERFORM
+--?.*
+CONTEXT:  PL/pgSQL function insert_log(integer,character varying,integer) line 4 at COMMIT
+SQL statement "CALL insert_log(v1=>va[2].a,v2=>'aa',v3=>3)"
+PL/pgSQL function test_subxact_p1() line 7 at PERFORM
+INFO:  3
+CONTEXT:  SQL statement "CALL insert_log(v1=>va[3].a,v2=>'aa',v3=>3)"
+PL/pgSQL function test_subxact_p1() line 8 at PERFORM
+--?.*
+CONTEXT:  PL/pgSQL function insert_log(integer,character varying,integer) line 4 at COMMIT
+SQL statement "CALL insert_log(v1=>va[3].a,v2=>'aa',v3=>3)"
+PL/pgSQL function test_subxact_p1() line 8 at PERFORM
+ test_subxact_p1 
+-----------------
+ 
+(1 row)
+
+drop procedure test_subxact_p1;
+drop procedure insert_log;
+drop table test_subxact_t1;

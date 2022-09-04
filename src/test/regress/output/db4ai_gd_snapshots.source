@@ -81,14 +81,14 @@ SELECT COUNT(*),SUM(rings) FROM abalone@test;
 (1 row)
 
 -- SELECT * FROM abalone@test ORDER BY id LIMIT 10;
-SELECT id, parent_id, matrix_id, root_id, schema, name, commands,
+SELECT schema, name, commands,
        comment, published, archived, row_count
   FROM db4ai.snapshot;
- id | parent_id | matrix_id | root_id | schema |     name      |                       commands                        | comment | published | archived | row_count 
-----+-----------+-----------+---------+--------+---------------+-------------------------------------------------------+---------+-----------+----------+-----------
-  0 |           |         0 |       0 | public | abalone@1.0.0 | {"SELECT *","FROM abalone",NULL}                      |         | t         | f        |        60
-  1 |         0 |         0 |       0 | public | abalone@train | {DELETE,"WHERE RANDOM() <= 0.2"}                      |         | f         | f        |        50
-  2 |         0 |         0 |       0 | public | abalone@test  | {DELETE,"WHERE id IN (SELECT id FROM abalone@train)"} |         | f         | f        |        10
+ schema |     name      |                       commands                        | comment | published | archived | row_count 
+--------+---------------+-------------------------------------------------------+---------+-----------+----------+-----------
+ public | abalone@1.0.0 | {"SELECT *","FROM abalone",NULL}                      |         | t         | f        |        60
+ public | abalone@train | {DELETE,"WHERE RANDOM() <= 0.2"}                      |         | f         | f        |        50
+ public | abalone@test  | {DELETE,"WHERE id IN (SELECT id FROM abalone@train)"} |         | f         | f        |        10
 (3 rows)
 
 -- linear regression

@@ -130,7 +130,7 @@ static RangeTblRef* transformItem(ParseState* pstate, RangeTblEntry* rte, RangeT
  * POSTQUEL, we allowed references to relations not specified in the
  * from-clause.  openGauss keeps this extension to standard SQL.)
  */
-void transformFromClause(ParseState* pstate, List* frmList, bool isFirstNode, bool isCreateView)
+void transformFromClause(ParseState* pstate, List* frmList, bool isFirstNode, bool isCreateView, bool addUpdateTable)
 {
     ListCell* fl = NULL;
 
@@ -154,7 +154,7 @@ void transformFromClause(ParseState* pstate, List* frmList, bool isFirstNode, bo
         List* relnamespace = NIL;
 
         n = transformFromClauseItem(
-            pstate, n, &rte, &rtindex, NULL, NULL, &relnamespace, isFirstNode, isCreateView);
+            pstate, n, &rte, &rtindex, NULL, NULL, &relnamespace, isFirstNode, isCreateView, false, addUpdateTable);
 
         /* Mark the new relnamespace items as visible to LATERAL */
         setNamespaceLateralState(relnamespace, true, true);
@@ -197,47 +197,77 @@ void transformFromClause(ParseState* pstate, List* frmList, bool isFirstNode, bo
  *
  *	  Returns the rangetable index of the target relation.
  */
-int setTargetTable(ParseState* pstate, RangeVar* relation, bool inh, bool alsoSource, AclMode requiredPerms)
+int setTargetTable(ParseState* pstate, RangeVar* relRv, bool inh, bool alsoSource, AclMode requiredPerms,
+                   bool multiModify)
 {
     RangeTblEntry* rte = NULL;
-    int rtindex;
+    Relation relation = NULL;
+    int index = 0;
 
-    /* Close old target; this could only happen for multi-action rules */
-    if (pstate->p_target_relation != NULL) {
-        heap_close(pstate->p_target_relation, NoLock);
+    /*
+     * for DELETE and UPDATE, maybe target table has been added to rtable before.
+     * if that, no need to do that again, just set resultRelation to the existed rtindex.
+     */
+    if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) {
+        if (multiModify && (requiredPerms & ACL_UPDATE)) {
+            relation = parserOpenTable(pstate, relRv, RowExclusiveLock, true, false, true);
+            /* When update multiple relations, rte has been just now added to p_rtable in transformFromClauseItem. */
+            rte = (RangeTblEntry *)llast(pstate->p_rtable);
+            index = list_length(pstate->p_rtable);
+        } else if (requiredPerms & ACL_DELETE) {
+            int rtindex = 1;
+            /* for sql_compatibility B, relation may has been added in p_rtable by usingClause. */
+            foreach_cell (l, pstate->p_rtable) {
+                RangeTblEntry *rte1 = (RangeTblEntry *)lfirst(l);
+                if (relRv->alias != NULL && strcmp(rte1->eref->aliasname, relRv->alias->aliasname) == 0) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_DUPLICATE_ALIAS), errmsg("table name \"%s\" specified more than once",
+                            relRv->alias->aliasname)));
+                } else if (relRv->alias == NULL && strcmp(rte1->eref->aliasname, relRv->relname) == 0) {
+                    if (list_member_ptr(pstate->p_target_rangetblentry, rte1)) {
+                        ereport(ERROR,
+                            (errcode(ERRCODE_DUPLICATE_ALIAS), errmsg("table name \"%s\" specified more than once",
+                                relRv->relname)));
+                    }
+                    rte = rte1;
+                    index = rtindex;
+                    relRv->relname = rte1->relname;
+                    relation = parserOpenTable(pstate, relRv, RowExclusiveLock, true, false, true);
+                    break;
+                }
+                rtindex++;
+            }
+        }
     }
 
-    /*
-     * Open target rel and grab suitable lock (which we will hold till end of
-     * transaction).
-     *
-     * free_parsestate() will eventually do the corresponding heap_close(),
-     * but *not* release the lock.
-     */
-    pstate->p_target_relation = parserOpenTable(pstate, relation, RowExclusiveLock, true, false, true);
+    if (index == 0) {
+        relation = parserOpenTable(pstate, relRv, RowExclusiveLock, true, false, true);
+        /*
+        * Now build an RTE.
+        */
+        rte = addRangeTableEntryForRelation(pstate, relation, relRv->alias, inh, false);
+    }
+    pstate->p_target_relation = lappend(pstate->p_target_relation, relation);
 
-    /*
-     * Now build an RTE.
-     */
-    rte = addRangeTableEntryForRelation(pstate, pstate->p_target_relation, relation->alias, inh, false);
+    if (requiredPerms & ACL_UPDATE) {
+        pstate->p_updateRangeVars = lappend(pstate->p_updateRangeVars, relRv);
+    }
 
     /* IUD contain partition. */
-    if (relation->ispartition) {
-        rte->isContainPartition = true;
-        rte->partitionOid = getPartitionOidForRTE(rte, relation, pstate, pstate->p_target_relation);
+    if (relRv->ispartition) {
+        rte->isContainPartition = GetPartitionOidForRTE(rte, relRv, pstate, relation);
     }
     /* IUD contain subpartition. */
-    if (relation->issubpartition) {
-        rte->isContainSubPartition = true;
-        rte->subpartitionOid =
-            GetSubPartitionOidForRTE(rte, relation, pstate, pstate->p_target_relation, &rte->partitionOid);
+    if (relRv->issubpartition) {
+        rte->isContainSubPartition = GetSubPartitionOidForRTE(rte, relRv, pstate, relation);
+    }
+    /* delete from clause contain PARTIION (..., ...). */
+    if (list_length(relRv->partitionNameList) > 0) {
+        GetPartitionOidListForRTE(rte, relRv);
     }
 
-    pstate->p_target_rangetblentry = rte;
+    pstate->p_target_rangetblentry = lappend(pstate->p_target_rangetblentry, rte);
 
-    /* assume new rte is at end */
-    rtindex = list_length(pstate->p_rtable);
-    Assert(rte == rt_fetch(rtindex, pstate->p_rtable));
     /*
      * Restrict DML privileges to pg_authid which stored sensitive messages like rolepassword.
      * there are lots of system catalog and restrict permissions of all system catalog
@@ -247,25 +277,25 @@ int setTargetTable(ParseState* pstate, RangeVar* relation, bool inh, bool alsoSo
      * length. These parameters will not be modified after initdb.
      */
     if (IsUnderPostmaster && !g_instance.attr.attr_common.allowSystemTableMods &&
-        !u_sess->attr.attr_common.IsInplaceUpgrade && IsSystemRelation(pstate->p_target_relation) &&
-        (strcmp(RelationGetRelationName(pstate->p_target_relation), "pg_authid") == 0 ||
-        strcmp(RelationGetRelationName(pstate->p_target_relation), "gs_global_config") == 0)) {
+        !u_sess->attr.attr_common.IsInplaceUpgrade && IsSystemRelation(relation) &&
+        (strcmp(RelationGetRelationName(relation), "pg_authid") == 0 ||
+        strcmp(RelationGetRelationName(relation), "gs_global_config") == 0)) {
         ereport(ERROR,
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                 errmsg("permission denied: \"%s\" is a system catalog",
-                    RelationGetRelationName(pstate->p_target_relation))));
+                    RelationGetRelationName(relation))));
     }
 
     /* Restrict DML privileges to gs_global_chain which stored history and consistent message like hash. */
-    if (IsUnderPostmaster && !u_sess->attr.attr_common.IsInplaceUpgrade && IsSystemRelation(pstate->p_target_relation)
-        && strcmp(RelationGetRelationName(pstate->p_target_relation), "gs_global_chain") == 0) {
+    if (IsUnderPostmaster && !u_sess->attr.attr_common.IsInplaceUpgrade && IsSystemRelation(relation)
+        && strcmp(RelationGetRelationName(relation), "gs_global_chain") == 0) {
         ereport(ERROR,
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                 errmsg("permission denied: \"%s\" is a system catalog",
-                    RelationGetRelationName(pstate->p_target_relation))));
+                    RelationGetRelationName(relation))));
     }
 
-    if (IS_FOREIGNTABLE(pstate->p_target_relation)||IS_STREAM_TABLE(pstate->p_target_relation)) {
+    if (IS_FOREIGNTABLE(relation)||IS_STREAM_TABLE(relation)) {
         /*
          * In the security mode, the useft privilege of a user must be
          * checked before the user inserts into a foreign table.
@@ -289,10 +319,51 @@ int setTargetTable(ParseState* pstate, RangeVar* relation, bool inh, bool alsoSo
     rte->requiredPerms = requiredPerms;
 
     /*
-     * If UPDATE/DELETE, add table to joinlist and namespaces.
+     * when index equal to 0, indicate that result relation does not exist in rtable.
+     * assume new rte is at end.
      */
-    if (alsoSource) {
-        addRTEtoQuery(pstate, rte, true, true, true);    
+    if (index == 0) {
+        index = list_length(pstate->p_rtable);
+        Assert(rte == rt_fetch(index, pstate->p_rtable));
+        /*
+         * If UPDATE/DELETE, and haven't added by fromClause/usingClause, add table to joinlist and namespaces.
+         * But when UPDATE use relationClause, no need to add.
+         */
+        if (alsoSource) {
+            addRTEtoQuery(pstate, rte, true, true, true);
+        }
+    }
+    return index;
+}
+
+List* setTargetTables(ParseState* pstate, List* relations, bool expandInh, bool alsoSource, AclMode requiredPerms)
+{
+    List* rtindex = NULL;
+    ListCell* l;
+    bool inhOpt = false;
+    bool multiModify = (list_length(relations) > 1);
+
+    /* Close old target; this could only happen for multi-action rules */
+    foreach (l, pstate->p_target_relation) {
+        Relation relation = (Relation)lfirst(l);
+        if (relation != NULL) {
+            heap_close(relation, NoLock);
+        }
+    }
+
+    /*
+     * Open target rel and grab suitable lock (which we will hold till end of
+     * transaction).
+     *
+     * free_parsestate() will eventually do the corresponding heap_close(),
+     * but *not* release the lock.
+     */
+    foreach (l, relations) {
+        RangeVar* relRv = (RangeVar*)lfirst(l);
+        if (expandInh) {
+            inhOpt = interpretInhOption(relRv->inhOpt);
+        }
+        rtindex = lappend_int(rtindex, setTargetTable(pstate, relRv, inhOpt, alsoSource, requiredPerms, multiModify));
     }
     return rtindex;
 }
@@ -502,7 +573,7 @@ static RangeTblEntry* transformCTEReference(ParseState* pstate, RangeVar* r, Com
 {
     RangeTblEntry* rte = NULL;
 
-    if (r->ispartition || r->issubpartition) {
+    if (r->ispartition || r->issubpartition || list_length(r->partitionNameList) > 0) {
         ereport(
             ERROR, (errcode(ERRCODE_UNDEFINED_TABLE), errmsg("relation \"%s\" is not partitioned table", r->relname)));
     }
@@ -740,6 +811,11 @@ static TimeCapsuleClause* transformRangeTimeCapsule(ParseState* pstate, RangeTim
                 parser_errposition(pstate, rtc->location)));
     }
 
+    if (RecoveryInProgress()) {
+        ereport(ERROR, (errcode(ERRCODE_OPERATE_FAILED),
+            errmsg("cannot execute TimeCapsule Query in recovery state")));
+    }
+
     timeCapsule = makeNode(TimeCapsuleClause);
 
     timeCapsule->tvver = TvTransformVersionExpr(pstate, rtc->tvtype, rtc->tvver);
@@ -777,12 +853,15 @@ static TimeCapsuleClause* transformRangeTimeCapsule(ParseState* pstate, RangeTim
  * of all the base and join relations represented in this jointree item.
  * This is needed for checking JOIN/ON conditions in higher levels.
  *
+ * addUpdateTable: if has multiple relations to update, relationClause in
+ * transformUpdateStmt need to setTargetTable.
+ *
  * We do not need to pass back an explicit varnamespace value, because
  * in all cases the varnamespace contribution is exactly top_rte.
  */
 Node* transformFromClauseItem(ParseState* pstate, Node* n, RangeTblEntry** top_rte, int* top_rti,
     RangeTblEntry** right_rte, int* right_rti, List** relnamespace, bool isFirstNode,
-    bool isCreateView, bool isMergeInto)
+    bool isCreateView, bool isMergeInto, bool addUpdateTable)
 
 {
     if (IsA(n, RangeVar)) {
@@ -809,6 +888,11 @@ Node* transformFromClauseItem(ParseState* pstate, Node* n, RangeTblEntry** top_r
 
         rtr = transformItem(pstate, rte, top_rte, top_rti, relnamespace);
 
+        /* If UPDATE multiple relations in sql_compatibility B, add target table here. */
+        if (addUpdateTable) {
+            pstate->p_updateRelations = lappend_int(pstate->p_updateRelations,
+                setTargetTable(pstate, rv, interpretInhOption(rv->inhOpt), true, ACL_UPDATE, true));
+        }
         /* add startinfo if needed */
         if (pstate->p_addStartInfo) {
             AddStartWithTargetRelInfo(pstate, n, rte, rtr);
@@ -841,6 +925,7 @@ Node* transformFromClauseItem(ParseState* pstate, Node* n, RangeTblEntry** top_r
              * so anything fixed on sw_backup could also fix back to (RangeSubselect*)n.
              * */
             ((RangeSubselect*)n)->alias->aliasname = ((RangeSubselect*)sw_backup)->alias->aliasname;
+            rte->eref->aliasname = ((RangeSubselect*)sw_backup)->alias->aliasname;
         }
 
         return (Node*)rtr;
@@ -940,13 +1025,13 @@ Node* transformFromClauseItem(ParseState* pstate, Node* n, RangeTblEntry** top_r
          * added to the range table. Here, we only build RangeTblRef.
          */
         if (isMergeInto == false) {
-            j->larg = transformFromClauseItem(
-                pstate, j->larg, &l_rte, &l_rtindex, NULL, NULL, &l_relnamespace);
+            j->larg = transformFromClauseItem(pstate, j->larg, &l_rte, &l_rtindex, NULL, NULL, &l_relnamespace,
+                                              true, false, false, addUpdateTable);
         } else {
             RangeTblRef* rtr = makeNode(RangeTblRef);
             rtr->rtindex = list_length(pstate->p_rtable);
             j->larg = (Node*)rtr;
-            l_rte = pstate->p_target_rangetblentry;
+            l_rte = (RangeTblEntry*)linitial(pstate->p_target_rangetblentry);
             l_rtindex = rtr->rtindex;
             l_relnamespace = list_make1(makeNamespaceItem(l_rte, false, true));
         }
@@ -973,7 +1058,8 @@ Node* transformFromClauseItem(ParseState* pstate, Node* n, RangeTblEntry** top_r
                                  makeNamespaceItem(l_rte, true, lateral_ok));
 
         /* And now we can process the RHS */
-        j->rarg = transformFromClauseItem(pstate, j->rarg, &r_rte, &r_rtindex, NULL, NULL, &r_relnamespace);
+        j->rarg = transformFromClauseItem(pstate, j->rarg, &r_rte, &r_rtindex, NULL, NULL, &r_relnamespace,
+                                          true, false, false, addUpdateTable);
 
         /* Remove the left-side RTEs from the namespace lists again */
         pstate->p_relnamespace = list_truncate(pstate->p_relnamespace,sv_relnamespace_length);

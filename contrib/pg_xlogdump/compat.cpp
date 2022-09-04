@@ -78,14 +78,17 @@ const char* timestamptz_to_str(TimestampTz dt)
     char zone[MAXDATELEN + 1];
     time_t result = (time_t)timestamptz_to_time_t(dt);
     struct tm* ltime = localtime(&result);
+    errno_t rc = EOK;
 
     strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", ltime);
     strftime(zone, sizeof(zone), "%Z", ltime);
 
 #ifdef HAVE_INT64_TIMESTAMP
-    sprintf(buf, "%s.%06d %s", ts, (int)(dt % USECS_PER_SEC), zone);
+    rc = snprintf_s(buf, sizeof(buf), sizeof(buf) - 1, "%s.%06d %s", ts, (int)(dt % USECS_PER_SEC), zone);
+    securec_check_ss_c(rc, "\0", "\0");
 #else
-    sprintf(buf, "%s.%.6f %s", ts, fabs(dt - floor(dt)), zone);
+    rc = snprintf_s(buf, sizeof(buf), sizeof(buf) - 1, "%s.%.6f %s", ts, fabs(dt - floor(dt)), zone);
+    securec_check_ss_c(rc, "\0", "\0");
 #endif
 
     return buf;
@@ -142,41 +145,36 @@ ForkNumber forkname_to_number(const char* forkName)
 /*
  * relpathbackend - construct path to a relation's file
  */
-char* relpathbackend(RelFileNode rnode, BackendId backend, ForkNumber forknum)
+char *relpathbackend(RelFileNode rnode, BackendId backend, ForkNumber forknum)
 {
     int pathlen;
-    char* path = NULL;
+    char *path = NULL;
+    errno_t rc = EOK;
 
     /* Column store file path, e.g: 16384_C1.0, 16384_C1_bcm */
     if (forknum > MAX_FORKNUM) {
         char attr_name[32];
         int attid = forknum - MAX_FORKNUM;
 
-        path = (char*)calloc(MAXPGPATH, sizeof(char));
-        (void)snprintf(attr_name, sizeof(attr_name), "C%d", attid);
+        path = (char *)calloc(MAXPGPATH, sizeof(char));
+        rc = snprintf_s(attr_name, sizeof(attr_name), sizeof(attr_name) - 1, "C%d", attid);
+        securec_check_ss_c(rc, "\0", "\0");
 
         if (rnode.spcNode == GLOBALTABLESPACE_OID) {
             /* Shared system relations live in {datadir}/global */
             Assert(rnode.dbNode == 0);
             pathlen = strlen("global") + 1 + OIDCHARS + 1 + strlen(attr_name) + 1;
-            (void)snprintf(path, pathlen, "global/%u_%s", rnode.relNode, attr_name);
+            rc = snprintf_s(path, pathlen, pathlen - 1, "global/%u_%s", rnode.relNode, attr_name);
         } else if (rnode.spcNode == DEFAULTTABLESPACE_OID) {
             /* The default tablespace is {datadir}/base */
             pathlen = strlen("base") + 1 + OIDCHARS + 1 + OIDCHARS + 1 + strlen(attr_name) + 1;
-            (void)snprintf(path, pathlen, "base/%u/%u_%s", rnode.dbNode, rnode.relNode, attr_name);
+            rc = snprintf_s(path, pathlen, pathlen - 1, "base/%u/%u_%s", rnode.dbNode, rnode.relNode, attr_name);
         } else {
             /* All other tablespaces are accessed via symlinks */
             pathlen = 9 + 1 + OIDCHARS + 1 + strlen(TABLESPACE_VERSION_DIRECTORY) + 1 + strlen(PGXCNodeName) + 1 +
-                      OIDCHARS + 1 + OIDCHARS + 1 + strlen(attr_name) + 1;
-            (void)snprintf(path,
-                pathlen,
-                "pg_tblspc/%u/%s_%s/%u/%u_%s",
-                rnode.spcNode,
-                TABLESPACE_VERSION_DIRECTORY,
-                PGXCNodeName,
-                rnode.dbNode,
-                rnode.relNode,
-                attr_name);
+                OIDCHARS + 1 + OIDCHARS + 1 + strlen(attr_name) + 1;
+            rc = snprintf_s(path, pathlen, pathlen - 1, "pg_tblspc/%u/%s_%s/%u/%u_%s", rnode.spcNode,
+                TABLESPACE_VERSION_DIRECTORY, PGXCNodeName, rnode.dbNode, rnode.relNode, attr_name);
         }
     } else {
         if (rnode.spcNode == GLOBALTABLESPACE_OID) {
@@ -184,133 +182,85 @@ char* relpathbackend(RelFileNode rnode, BackendId backend, ForkNumber forknum)
             Assert(rnode.dbNode == 0);
             Assert(backend == InvalidBackendId);
             pathlen = 7 + OIDCHARS + 1 + FORKNAMECHARS + 1;
-            path = (char*)malloc(pathlen);
+            path = (char *)malloc(pathlen);
             if (forknum != MAIN_FORKNUM)
-                (void)snprintf(path, pathlen, "global/%u_%s", rnode.relNode, forkNames[forknum]);
+                rc = snprintf_s(path, pathlen, pathlen - 1, "global/%u_%s", rnode.relNode, forkNames[forknum]);
             else
-                (void)snprintf(path, pathlen, "global/%u", rnode.relNode);
+                rc = snprintf_s(path, pathlen, pathlen - 1, "global/%u", rnode.relNode);
         } else if (rnode.spcNode == DEFAULTTABLESPACE_OID) {
             /* The default tablespace is {datadir}/base */
             if (backend == InvalidBackendId) {
                 pathlen = 5 + OIDCHARS + 1 + OIDCHARS + 1 + FORKNAMECHARS + 1;
-                path = (char*)malloc(pathlen);
+                path = (char *)malloc(pathlen);
                 if (forknum != MAIN_FORKNUM)
-                    (void)snprintf(path, pathlen, "base/%u/%u_%s", rnode.dbNode, rnode.relNode, forkNames[forknum]);
+                    rc = snprintf_s(path, pathlen, pathlen - 1, "base/%u/%u_%s", rnode.dbNode, rnode.relNode,
+                        forkNames[forknum]);
                 else
-                    (void)snprintf(path, pathlen, "base/%u/%u", rnode.dbNode, rnode.relNode);
+                    rc = snprintf_s(path, pathlen, pathlen - 1, "base/%u/%u", rnode.dbNode, rnode.relNode);
             } else {
                 /* OIDCHARS will suffice for an integer, too */
                 pathlen = 5 + OIDCHARS + 2 + OIDCHARS + 1 + OIDCHARS + 1 + FORKNAMECHARS + 1;
-                path = (char*)malloc(pathlen);
+                path = (char *)malloc(pathlen);
                 if (forknum != MAIN_FORKNUM)
-                    (void)snprintf(
-                        path, pathlen, "base/%u/t%d_%u_%s", rnode.dbNode, backend, rnode.relNode, forkNames[forknum]);
+                    rc = snprintf_s(path, pathlen, pathlen - 1, "base/%u/t%d_%u_%s", rnode.dbNode, backend,
+                        rnode.relNode, forkNames[forknum]);
                 else
-                    (void)snprintf(path, pathlen, "base/%u/t%d_%u", rnode.dbNode, backend, rnode.relNode);
+                    rc = snprintf_s(path, pathlen, pathlen - 1, "base/%u/t%d_%u", rnode.dbNode, backend,
+                        rnode.relNode);
             }
         } else {
             /* All other tablespaces are accessed via symlinks */
             if (backend == InvalidBackendId) {
                 pathlen = 9 + 1 + OIDCHARS + 1 + strlen(TABLESPACE_VERSION_DIRECTORY) + 1 + OIDCHARS +
-                          1
+                    1
 #ifdef PGXC
-                          /* Postgres-XC tablespaces include node name */
-                          + strlen(PGXCNodeName) + 1
+                    /* Postgres-XC tablespaces include node name */
+                    + strlen(PGXCNodeName) + 1
 #endif
-                          + OIDCHARS + 1 + FORKNAMECHARS + 1;
-                path = (char*)malloc(pathlen);
+                    + OIDCHARS + 1 + FORKNAMECHARS + 1;
+                path = (char *)malloc(pathlen);
 #ifdef PGXC
                 if (forknum != MAIN_FORKNUM)
-                    (void)snprintf(path,
-                        pathlen,
-                        "pg_tblspc/%u/%s_%s/%u/%u_%s",
-                        rnode.spcNode,
-                        TABLESPACE_VERSION_DIRECTORY,
-                        PGXCNodeName,
-                        rnode.dbNode,
-                        rnode.relNode,
-                        forkNames[forknum]);
+                    rc = snprintf_s(path, pathlen, pathlen - 1, "pg_tblspc/%u/%s_%s/%u/%u_%s", rnode.spcNode,
+                        TABLESPACE_VERSION_DIRECTORY, PGXCNodeName, rnode.dbNode, rnode.relNode, forkNames[forknum]);
                 else
-                    (void)snprintf(path,
-                        pathlen,
-                        "pg_tblspc/%u/%s_%s/%u/%u",
-                        rnode.spcNode,
-                        TABLESPACE_VERSION_DIRECTORY,
-                        PGXCNodeName,
-                        rnode.dbNode,
-                        rnode.relNode);
+                    rc = snprintf_s(path, pathlen, pathlen - 1, "pg_tblspc/%u/%s_%s/%u/%u", rnode.spcNode,
+                        TABLESPACE_VERSION_DIRECTORY, PGXCNodeName, rnode.dbNode, rnode.relNode);
 #else
                 if (forknum != MAIN_FORKNUM)
-                    (void)snprintf(path,
-                        pathlen,
-                        "pg_tblspc/%u/%s/%u/%u_%s",
-                        rnode.spcNode,
-                        TABLESPACE_VERSION_DIRECTORY,
-                        rnode.dbNode,
-                        rnode.relNode,
-                        forkNames[forknum]);
+                    rc = snprintf_s(path, pathlen, pathlen - 1, "pg_tblspc/%u/%s/%u/%u_%s", rnode.spcNode,
+                        TABLESPACE_VERSION_DIRECTORY, rnode.dbNode, rnode.relNode, forkNames[forknum]);
                 else
-                    (void)snprintf(path,
-                        pathlen,
-                        "pg_tblspc/%u/%s/%u/%u",
-                        rnode.spcNode,
-                        TABLESPACE_VERSION_DIRECTORY,
-                        rnode.dbNode,
-                        rnode.relNode);
+                    rc = snprintf_s(path, pathlen, pathlen - 1, "pg_tblspc/%u/%s/%u/%u", rnode.spcNode,
+                        TABLESPACE_VERSION_DIRECTORY, rnode.dbNode, rnode.relNode);
 #endif
             } else {
                 /* OIDCHARS will suffice for an integer, too */
                 pathlen = 9 + 1 + OIDCHARS + 1 + strlen(TABLESPACE_VERSION_DIRECTORY) + 1 + OIDCHARS + 2
 #ifdef PGXC
-                          + strlen(PGXCNodeName) + 1
+                    + strlen(PGXCNodeName) + 1
 #endif
-                          + OIDCHARS + 1 + OIDCHARS + 1 + FORKNAMECHARS + 1;
-                path = (char*)malloc(pathlen);
+                    + OIDCHARS + 1 + OIDCHARS + 1 + FORKNAMECHARS + 1;
+                path = (char *)malloc(pathlen);
 #ifdef PGXC
                 if (forknum != MAIN_FORKNUM)
-                    (void)snprintf(path,
-                        pathlen,
-                        "pg_tblspc/%u/%s_%s/%u/t%d_%u_%s",
-                        rnode.spcNode,
-                        TABLESPACE_VERSION_DIRECTORY,
-                        PGXCNodeName,
-                        rnode.dbNode,
-                        backend,
-                        rnode.relNode,
+                    rc = snprintf_s(path, pathlen, pathlen - 1, "pg_tblspc/%u/%s_%s/%u/t%d_%u_%s", rnode.spcNode,
+                        TABLESPACE_VERSION_DIRECTORY, PGXCNodeName, rnode.dbNode, backend, rnode.relNode,
                         forkNames[forknum]);
                 else
-                    (void)snprintf(path,
-                        pathlen,
-                        "pg_tblspc/%u/%s_%s/%u/t%d_%u",
-                        rnode.spcNode,
-                        TABLESPACE_VERSION_DIRECTORY,
-                        PGXCNodeName,
-                        rnode.dbNode,
-                        backend,
-                        rnode.relNode);
+                    rc = snprintf_s(path, pathlen, pathlen - 1, "pg_tblspc/%u/%s_%s/%u/t%d_%u", rnode.spcNode,
+                        TABLESPACE_VERSION_DIRECTORY, PGXCNodeName, rnode.dbNode, backend, rnode.relNode);
 #else
                 if (forknum != MAIN_FORKNUM)
-                    (void)snprintf(path,
-                        pathlen,
-                        "pg_tblspc/%u/%s/%u/t%d_%u_%s",
-                        rnode.spcNode,
-                        TABLESPACE_VERSION_DIRECTORY,
-                        rnode.dbNode,
-                        backend,
-                        rnode.relNode,
-                        forkNames[forknum]);
+                    rc = snprintf_s(path, pathlen, pathlen - 1, "pg_tblspc/%u/%s/%u/t%d_%u_%s", rnode.spcNode,
+                        TABLESPACE_VERSION_DIRECTORY, rnode.dbNode, backend, rnode.relNode, forkNames[forknum]);
                 else
-                    (void)snprintf(path,
-                        pathlen,
-                        "pg_tblspc/%u/%s/%u/t%d_%u",
-                        rnode.spcNode,
-                        TABLESPACE_VERSION_DIRECTORY,
-                        rnode.dbNode,
-                        backend,
-                        rnode.relNode);
+                    rc = snprintf_s(path, pathlen, pathlen - 1, "pg_tblspc/%u/%s/%u/t%d_%u", rnode.spcNode,
+                        TABLESPACE_VERSION_DIRECTORY, rnode.dbNode, backend, rnode.relNode);
 #endif
             }
         }
     }
+    securec_check_ss_c(rc, "\0", "\0");
     return path;
 }

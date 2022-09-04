@@ -23,6 +23,7 @@
 #include "catalog/dependency.h"
 #include "catalog/indexing.h"
 #include "catalog/namespace.h"
+#include "catalog/pg_authid.h"
 #include "catalog/pg_namespace.h"
 #include "catalog/gs_package.h"
 #include "commands/dbcommands.h"
@@ -46,12 +47,40 @@
 #include "optimizer/pgxcplan.h"
 #endif
 
-static const int TABLE_TYPE_HDFS = 1;
 static const int TABLE_TYPE_TIMESERIES = 2;
 static const int TABLE_TYPE_ANY = 3;
 
 static void AlterSchemaOwner_internal(HeapTuple tup, Relation rel, Oid newOwnerId);
 static StringInfo TableExistInSchema(Oid schemaOid, const int tableType);
+
+/*
+ * True iff schema name same as initial account.
+ */
+static bool IsSameAsInitialAccount(const char* name)
+{
+    HeapTuple tup = SearchSysCache1((int)AUTHOID, BOOTSTRAP_SUPERUSERID);
+    if (HeapTupleIsValid(tup)) {
+        char* bootstrap_username = NameStr(((Form_pg_authid)GETSTRUCT(tup))->rolname);
+        ReleaseSysCache(tup);
+
+        if (strcmp(name, bootstrap_username) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/*
+ * True iff schema name starts with the gs_role_ prefix.
+ */
+static bool IsReservedSchemaName(const char* name)
+{
+    if (strncmp(name, "gs_role_", strlen("gs_role_")) == 0) {
+        return true;
+    } else {
+        return false;
+    }
+}
 
 /*
  * CREATE SCHEMA
@@ -85,6 +114,21 @@ void CreateSchemaCommand(CreateSchemaStmt* stmt, const char* queryString)
                 errcause("schema name conflict"),
                 erraction("rename schema name")));
     }
+
+    if (IsSameAsInitialAccount(schemaName)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("unacceptable schema name \"%s\"", schemaName),
+                errdetail("schema name can not same as initial account")));
+    }
+
+    if (IsReservedSchemaName(schemaName)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_RESERVED_NAME),
+                errmsg("unacceptable schema name \"%s\"", schemaName),
+                errdetail("The prefix \"gs_role_\" is reserved.")));
+    }
+
     /*
      * Who is supposed to own the new schema?
      */
@@ -93,7 +137,7 @@ void CreateSchemaCommand(CreateSchemaStmt* stmt, const char* queryString)
     else
         owner_uid = saved_uid;
 
-    if (IS_PGXC_DATANODE) {
+    if (IS_PGXC_DATANODE && stmt->temptype != Temp_Lob_Toast) {
         if (isToastTempNamespaceName(stmt->schemaname))
             stmt->temptype = Temp_Toast;
         else if (isTempNamespaceName(stmt->schemaname))
@@ -426,16 +470,12 @@ void RenameSchema(const char* oldname, const char* newname)
     HeapTuple tup;
     Relation rel;
     AclResult aclresult;
-    const int STR_SCHEMA_NAME_LENGTH = 9;
-    const int STR_SNAPSHOT_LENGTH = 8;
     bool is_nspblockchain = false;
-    if ((strncmp(oldname, "dbe_perf", STR_SCHEMA_NAME_LENGTH) == 0) ||
-        (strncmp(oldname, "snapshot", STR_SNAPSHOT_LENGTH) == 0)) {
-        ereport(ERROR, (errcode(ERRCODE_OPERATE_FAILED), errmsg("The schema '%s' doesn't allow to rename", oldname)));
-    }
 
-    if (get_namespace_oid(oldname, true) == PG_BLOCKCHAIN_NAMESPACE) {
-        ereport(ERROR, (errcode(ERRCODE_OPERATE_FAILED), errmsg("The schema blockchain doesn't allow to rename")));
+    if (!g_instance.attr.attr_common.allowSystemTableMods && !u_sess->attr.attr_common.IsInplaceUpgrade &&
+        !IsBootstrapProcessingMode() &&
+        ((strcmp(oldname, "public") == 0) || IsSysSchema(get_namespace_oid(oldname, false)))) {
+        ereport(ERROR, (errcode(ERRCODE_OPERATE_FAILED), errmsg("The schema '%s' doesn't allow to rename", oldname)));
     }
 
     rel = heap_open(NamespaceRelationId, RowExclusiveLock);
@@ -447,6 +487,20 @@ void RenameSchema(const char* oldname, const char* newname)
     /* make sure the new name doesn't exist */
     if (OidIsValid(get_namespace_oid(newname, true)))
         ereport(ERROR, (errcode(ERRCODE_DUPLICATE_SCHEMA), errmsg("schema \"%s\" already exists", newname)));
+
+    if (IsSameAsInitialAccount(newname)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("unacceptable schema name \"%s\"", newname),
+                errdetail("schema name can not same as initial account")));
+    }
+
+    if (IsReservedSchemaName(newname)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_RESERVED_NAME),
+                errmsg("unacceptable schema name \"%s\"", newname),
+                errdetail("The prefix \"gs_role_\" is reserved.")));
+    }
 
     /* Must be owner or have alter privilege of the schema. */
     aclresult = pg_namespace_aclcheck(HeapTupleGetOid(tup), GetUserId(), ACL_ALTER);
@@ -466,17 +520,9 @@ void RenameSchema(const char* oldname, const char* newname)
                 errmsg("unacceptable schema name \"%s\"", newname),
                 errdetail("The prefix \"pg_\" is reserved for system schemas.")));
     /*
-     * If the HDFS table or timeseries table exists in the schema, do not rename it.
+     * If the timeseries table exists in the schema, do not rename it.
      */
-    StringInfo existDFSTbl = TableExistInSchema(HeapTupleGetOid(tup), TABLE_TYPE_HDFS);
     StringInfo existTimeSeriesTbl = TableExistInSchema(HeapTupleGetOid(tup), TABLE_TYPE_TIMESERIES);
-    if (0 != existDFSTbl->len) {
-        ereport(ERROR,
-            (errcode(ERRCODE_RESERVED_NAME),
-                errmsg("It is not supported to rename schema \"%s\" which includes DFS table \"%s\".",
-                    oldname,
-                    existDFSTbl->data)));
-    }
     if (0 != existTimeSeriesTbl->len) {
         ereport(ERROR,
             (errcode(ERRCODE_RESERVED_NAME),
@@ -534,10 +580,6 @@ static StringInfo TableExistInSchema(Oid namespaceId, const int tableType)
 
         Relation rel = relation_open(RelOid, AccessShareLock);
         if (tableType == TABLE_TYPE_ANY) {
-            appendStringInfo(existTbl, "%s", RelationGetRelationName(rel));
-            relation_close(rel, AccessShareLock);
-            break;
-        } else if (tableType == TABLE_TYPE_HDFS && RelationIsDfsStore(rel)) {
             appendStringInfo(existTbl, "%s", RelationGetRelationName(rel));
             relation_close(rel, AccessShareLock);
             break;

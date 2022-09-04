@@ -25,6 +25,7 @@ set(TGT_misc_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/superuser.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/tzparser.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/oidrbtree.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/pgfincore.cpp
 )
 
 set(TGT_misc_INC 

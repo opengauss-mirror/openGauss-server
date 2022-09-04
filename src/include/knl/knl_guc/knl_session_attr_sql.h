@@ -91,6 +91,7 @@ typedef struct knl_session_attr_sql {
     bool enable_random_datanode;
     bool enable_fstream;
     bool enable_geqo;
+    bool enable_gtt_concurrent_truncate;
     bool restart_after_crash;
     bool enable_early_free;
     bool enable_kill_query;
@@ -106,6 +107,13 @@ typedef struct knl_session_attr_sql {
     bool check_function_bodies;
     bool Array_nulls;
     bool default_with_oids;
+    
+#ifndef ENABLE_MULTIPLE_NODES
+    bool enable_functional_dependency;
+#endif
+    bool enable_ai_stats;
+    int  multi_stats_type;
+
 #ifdef DEBUG_BOUNDED_SORT
     bool optimize_bounded_sort;
 #endif
@@ -181,6 +189,7 @@ typedef struct knl_session_attr_sql {
     char* default_storage_nodegroup;
     char* inlist2join_optmode;
     char* behavior_compat_string;
+    char* plsql_compile_behavior_compat_string;
     char* connection_info;
     char* retry_errcode_list;
     char* sql_ignore_strategy_string;
@@ -215,6 +224,7 @@ typedef struct knl_session_attr_sql {
     double default_limit_rows;
 
     int sql_beta_feature;
+    bool partition_iterator_elimination;
     /* hypo index */
     bool enable_hypo_index;
     bool hypopg_is_explain;
@@ -231,10 +241,12 @@ typedef struct knl_session_attr_sql {
     char* db4ai_snapshot_version_delimiter;
     char* db4ai_snapshot_version_separator;
     int pldebugger_timeout;
+    bool partition_page_estimation;
 
 #ifndef ENABLE_MULTIPLE_NODES
     bool uppercase_attribute_name;
 #endif
+    bool var_eq_const_selectivity;
     int vectorEngineStrategy;
 #ifndef ENABLE_MULTIPLE_NODES
     bool enable_custom_parser;
@@ -244,3 +256,5 @@ typedef struct knl_session_attr_sql {
 } knl_session_attr_sql;
 
 #endif /* SRC_INCLUDE_KNL_KNL_SESSION_ATTR_SQL */
+
+

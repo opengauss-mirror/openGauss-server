@@ -180,5 +180,15 @@ SELECT * FROM information_schema.sequences WHERE sequence_name IN
    'serialtest2_f4_seq', 'serialtest2_f5_seq', 'serialtest2_f6_seq')
   ORDER BY sequence_name ASC;
 
+-- test case sensitivity of index names
+create sequence "QUOTATION_SEQ";
+create sequence NO_QUOTATION_SEQ;
+select "QUOTATION_SEQ".nextval;
+select QUOTATION_SEQ.nextval;
+select NO_QUOTATION_SEQ.nextval;
+select no_quotation_seq.nextval;
+
 DROP USER seq_user;
 DROP SEQUENCE seq;
+drop sequence "QUOTATION_SEQ";
+drop sequence no_quotation_seq;

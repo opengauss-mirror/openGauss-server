@@ -24,7 +24,7 @@ ifneq "$(MAKECMDGOALS)" "clean"
   endif
 endif
 
-SUBDIRS = gd kmeans xgboost
+SUBDIRS = algorithms optimize
 OBJS = fp_ops.o distance_functions.o hyperparameter_validation.o direct.o kernel.o matrix.o
 
 include $(top_srcdir)/src/gausskernel/common.mk

@@ -182,6 +182,26 @@ typedef FormData_pg_statistic_ext *Form_pg_statistic_ext;
  */
 #define STATISTIC_KIND_NULL_MCV 6
 
+#ifndef ENABLE_MULTIPLE_NODES
+/*
+ * STATISTIC_EXT_DEPENDENCIES represents the functinal dependency between
+ * multiple columns in a table. In a "functional dependency" slot, stavalues
+ * contains the attribute numbers, and stanumbers contains theirs' functional 
+ * dependency degrees which must be in 0~1 strictly.
+ */
+#define STATISTIC_EXT_DEPENDENCIES 7
+#endif /* ENABLE_MULTIPLE_NODES */
+
+/*
+ ** A "bayes network" slot describes the joint distribution of columns.
+ ** Bayes Network constructs a probability graph according to the given edges.
+ ** All edges are constructed according to the function dependency of columns.
+ ** A bayes network can describe: lossless distribution, distribution with 
+ ** independence assumption, and distribution with conditional independence 
+ ** assumption.
+ **/
+#define STATISTIC_KIND_BAYESNET 8
+
 #define STATISTIC_KIND_MULTICOLUMN 10001
 
 #endif   /* PG_STATISTIC_EXT_H */

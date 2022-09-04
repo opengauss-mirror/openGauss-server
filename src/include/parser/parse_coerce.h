@@ -46,6 +46,8 @@ extern TYPCATEGORY TypeCategory(Oid type);
 extern Node* coerce_to_target_type(ParseState* pstate, Node* expr, Oid exprtype, Oid targettype, int32 targettypmod,
     CoercionContext ccontext, CoercionForm cformat, int location);
 extern bool can_coerce_type(int nargs, Oid* input_typeids, Oid* target_typeids, CoercionContext ccontext);
+extern Node *type_transfer(Node *node, Oid atttypid, bool isSelect);
+extern Node *const_expression_to_const(Node *node);
 extern Node* coerce_type(ParseState* pstate, Node* node, Oid inputTypeId, Oid targetTypeId, int32 targetTypeMod,
     CoercionContext ccontext, CoercionForm cformat, int location);
 extern Node* coerce_to_domain(Node* arg, Oid baseTypeId, int32 baseTypeMod, Oid typeId, CoercionForm cformat,

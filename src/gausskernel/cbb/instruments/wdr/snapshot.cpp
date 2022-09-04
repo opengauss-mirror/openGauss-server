@@ -29,6 +29,7 @@
 #include "pgxc/pgxc.h"
 #include "pgxc/pgxcnode.h"
 #include "pgxc/poolutils.h"
+#include "executor/executor.h"
 #include "executor/spi.h"
 #include "fmgr.h"
 #include "miscadmin.h"
@@ -195,7 +196,7 @@ static bool CheckNodeGroup()
     Datum colval;
     bool isnull = false;
     const char* query =
-        "select count(*) from pgxc_group WHERE in_redistribution='n' and is_installation = TRUE;";
+        "select pg_catalog.count(*) from pgxc_group WHERE in_redistribution='n' and is_installation = TRUE;";
     colval = GetDatumValue(query, 0, 0, &isnull);
     SPI_STACK_LOG("finish", NULL, NULL);
     SPI_finish();
@@ -301,7 +302,7 @@ void kill_snapshot_remote()
     exec_nodes->nodeList = NIL;
 
     initStringInfo(&buf);
-    appendStringInfo(&buf, "SELECT kill_snapshot();");
+    appendStringInfo(&buf, "SELECT pg_catalog.kill_snapshot();");
     state = RemoteFunctionResultHandler(buf.data, exec_nodes, NULL, true, EXEC_ON_COORDS, true);
     FreeParallelFunctionState(state);
     pfree_ext(buf.data);
@@ -527,7 +528,7 @@ void SnapshotNameSpace::init_curr_table_size(void)
 {
     Datum colval;
     bool isnull = false;
-    const char* sql = "select count(*) from snapshot.snapshot";
+    const char* sql = "select pg_catalog.count(*) from snapshot.snapshot";
     colval = GetDatumValue(sql, 0, 0, &isnull);
     if (isnull) {
         colval = 0;
@@ -540,7 +541,7 @@ void SnapshotNameSpace::CreateSequence(void)
     Datum colval;
     bool isnull = false;
     const char* query_seq_sql =
-        "select count(*) from pg_class c left join pg_namespace n"
+        "select pg_catalog.count(*) from pg_class c left join pg_namespace n"
         " on n.oid = c.relnamespace"
         " where n.nspname = 'snapshot' and c.relname = 'snap_seq'";
     colval = GetDatumValue(query_seq_sql, 0, 0, &isnull);
@@ -562,7 +563,7 @@ void SnapshotNameSpace::init_curr_snapid(void)
 {
     Datum colval;
     bool isnull = false;
-    const char* sql = "select nextval('snapshot.snap_seq')";
+    const char* sql = "select pg_catalog.nextval('snapshot.snap_seq')";
     colval = GetDatumValue(sql, 0, 0, &isnull);
     if (isnull) {
         colval = 0;
@@ -886,9 +887,9 @@ void SnapshotNameSpace::InsertOneTableData(const char** views, int numViews, uin
             GetCurrentTimeStampString(), snapid, dbName, views[i]);
         if (views == lastStatViews) {
             appendStringInfo(&query,
-            " and start_ts = (select max(start_ts) from snapshot.tables_snap_timestamp "
-            "where snapshot_id = %lu and db_name = '%s' and tablename = 'snap_%s')",
-            snapid, dbName, views[i]);
+                " and start_ts = (select pg_catalog.max(start_ts) from snapshot.tables_snap_timestamp "
+                "where snapshot_id = %lu and db_name = '%s' and tablename = 'snap_%s')",
+                snapid, dbName, views[i]);
         }
         if (!SnapshotNameSpace::ExecuteQuery(query.data, SPI_OK_UPDATE)) {
             ereport(ERROR, (errmodule(MOD_WDR_SNAPSHOT), errcode(ERRCODE_DATA_EXCEPTION),
@@ -1011,7 +1012,8 @@ static void CreateStatTable(const char* query, const char* tablename)
 
     /* if the table is not created ,we will create it */
     appendStringInfo(
-        &sql, "select count(*) from pg_tables where tablename = '%s' and schemaname = 'snapshot'", tablename);
+        &sql, "select pg_catalog.count(*) from pg_tables where tablename = '%s' and schemaname = 'snapshot'",
+        tablename);
     colval = GetDatumValue(sql.data, 0, 0, &isnull);
     if (!DatumGetInt32(colval)) {
         if (!SnapshotNameSpace::ExecuteQuery(query, SPI_OK_UTILITY)) {
@@ -1085,7 +1087,7 @@ void SnapshotNameSpace::CreateTable(const char** views, int numViews, bool isSha
         resetStringInfo(&query);
         /* if the table is not created, we will create it */
         appendStringInfo(&query,
-            "select count(*) from pg_tables where tablename = 'snap_%s' "
+            "select pg_catalog.count(*) from pg_tables where tablename = 'snap_%s' "
             "and schemaname = 'snapshot'",
             views[i]);
         Datum colval = GetDatumValue(query.data, 0, 0, &isnull);
@@ -1155,7 +1157,7 @@ void SnapshotNameSpace::GetQueryStr(StringInfoData& query, const char* viewname,
     char* snapColAttrType = SnapshotNameSpace::GetTableColAttr(viewname, false, true);
     appendStringInfo(&query,
         "insert into snapshot.snap_%s(snapshot_id, db_name, %s) select snapshot_id, dbname1, %s from"
-        " wdr_xdb_query('dbname=%s'::text, 'select %lu, ''%s'', t.* from dbe_perf.%s t'::text)"
+        " pg_catalog.wdr_xdb_query('dbname=%s'::text, 'select %lu, ''%s'', t.* from dbe_perf.%s t'::text)"
         " as i(snapshot_id int8, dbname1 text, %s)",
         viewname,
         snapColAttr,
@@ -1289,7 +1291,7 @@ void SnapshotNameSpace::CreateIndexes(const char* views)
     StringInfoData query;
     initStringInfo(&query);
     appendStringInfo(&query,
-        "select count(*) from pg_indexes where schemaname = 'snapshot' and "
+        "select pg_catalog.count(*) from pg_indexes where schemaname = 'snapshot' and "
         "tablename = 'snap_%s' and indexname = 'snap_%s_idx'",
         views, views);
     Datum indexNum = GetDatumValue(query.data, 0, 0, &isnull);
@@ -1357,7 +1359,7 @@ static void ProcessSignal(void)
     (void)gspqsignal(SIGTTOU, SIG_DFL);
     (void)gspqsignal(SIGCONT, SIG_DFL);
     (void)gspqsignal(SIGWINCH, SIG_DFL);
-
+    (void)gspqsignal(SIGURG, print_stack);
     gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
     (void)gs_signal_unblock_sigusr2();
     if (u_sess->proc_cxt.MyProcPort->remote_host) {
@@ -1468,6 +1470,11 @@ NON_EXEC_STATIC void SnapshotMain()
     exec_init_poolhandles();
     /* initialize function of sql such as now() */
     InitVecFuncMap();
+#ifndef ENABLE_MULTIPLE_NODES
+    /* forbid smp in snapshot thread */
+    AutoDopControl dopControl;
+    dopControl.CloseSmp();
+#endif
     pgstat_bestart();
     pgstat_report_appname("WDRSnapshot");
     pgstat_report_activity(STATE_IDLE, NULL);

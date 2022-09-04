@@ -72,6 +72,11 @@ test: create_c_function
 #test: plan_table03
 #test: plan_table04
 
+# test customer base environment hint
+test: hw_cbt_hint_prep
+test: hw_cbt_hint
+test: hw_cbt_hint_drop
+
 #test with recursive
 test: recursive_ref_recursive
 test: distribute_recursive_prepare

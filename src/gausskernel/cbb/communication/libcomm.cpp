@@ -2670,6 +2670,7 @@ void SetupCommSignalHook()
     (void)gspqsignal(SIGCHLD, SIG_IGN);
     /* when support guc online change, we can accept sighup, but now we don't handle it */
     (void)gspqsignal(SIGHUP, SIG_IGN);
+    (void)gspqsignal(SIGURG, print_stack);
 }
 
 /* SIGTERM: set flag to exit normally */
@@ -2753,7 +2754,8 @@ extern void clean_pooler_idle_connections(void);
 void commPoolCleanerMain()
 {
     sigjmp_buf local_sigjmp_buf;
-    uint64 current_time, last_start_time, poolerMaxIdleTime, nodeNameHashVal;
+    uint64 current_time, last_start_time, poolerMaxIdleTime;
+    uint64 nodeNameHashVal = 10000;  /*  Different period time of cleaning free pooler in every CN, ms */
     MemoryContext poolCleaner_context;
     char *curNodeName = g_instance.attr.attr_common.PGXCNodeName;
     const Size nodeNameHashMaxVal = 60000;
@@ -2811,7 +2813,7 @@ void commPoolCleanerMain()
 
     /* We can now handle ereport(ERROR) */
     t_thrd.log_cxt.PG_exception_stack = &local_sigjmp_buf;
-
+    (void)gspqsignal(SIGURG, print_stack);
     /*
      * Unblock signals (they were blocked when the postmaster forked us)
      */

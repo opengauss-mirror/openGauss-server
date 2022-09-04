@@ -1247,6 +1247,221 @@ select usename from pg_user where usesysid = (select typowner from pg_type where
 drop function alt_user_1.func1();
 drop user alt_user_1 cascade;
 drop user alt_user_2 cascade;
+set search_path=plpgsql_packagetype1;
+-- test record with table of to be nested
+  -- a. nested table, should error
+create or replace package pck1 as
+type t1 is table of int index by int;
+type t2 is table of t1;
+type r1 is record (a t2, b int);
+end pck1;
+/
+ERROR:  nested table of type is not supported as record type attribute
+LINE 4: type r1 is record (a t2, b int);
+                             ^
+QUERY:   PACKAGE  DECLARE 
+type t1 is table of int index by int;
+type t2 is table of t1;
+type r1 is record (a t2, b int);
+end 
+CONTEXT:  compilation of PL/pgSQL package near line 4
+  -- b. table with index by, should error
+create or replace package pck1 as
+type t1 is table of int index by int;
+type r1 is record (a t1, b int);
+type r2 is record (a r1, b int);
+end pck1;
+/
+ERROR:  record type with table of attribute is not suppoted to be nested.
+LINE 4: type r2 is record (a r1, b int);
+                             ^
+DETAIL:  attribute "a" of record type "r1" is table of with index by, which is not supported to be nested.
+QUERY:   PACKAGE  DECLARE 
+type t1 is table of int index by int;
+type r1 is record (a t1, b int);
+type r2 is record (a r1, b int);
+end 
+CONTEXT:  compilation of PL/pgSQL package near line 4
+  -- c. table without index by, should success
+create or replace package pck1 as
+type t1 is table of int;
+type r1 is record (a t1, b int);
+type r2 is record (a r1, b int);
+end pck1;
+/
+  -- d. table with index by, should error
+create or replace package pck1 as
+type t1 is table of int index by int;
+type r1 is record (a t1, b int);
+type r2 is varray(10) of r1;
+end pck1;
+/
+ERROR:  record type with table of attribute is not suppoted to be nested.
+LINE 4: type r2 is varray(10) of r1;
+                                 ^
+DETAIL:  attribute "a" of record type "r1" is table of with index by, which is not supported to be nested.
+QUERY:   PACKAGE  DECLARE 
+type t1 is table of int index by int;
+type r1 is record (a t1, b int);
+type r2 is varray(10) of r1;
+end 
+CONTEXT:  compilation of PL/pgSQL package near line 4
+drop package pck1;
+-- test pck.r1 ref record with table of, should error
+-- a, self ref
+create or replace package pck1 as
+type t1 is table of int index by int;
+type r1 is record (a t1, b int);
+va pck1.r1;
+procedure p1;
+end pck1;
+/
+ERROR:  record type with table of attribute is not suppoted to be referenced by another package.
+LINE 4: va pck1.r1;
+                  ^
+DETAIL:  attribute "a" of record type "r1" is table of with index by, which is not supported to be referenced by another package.
+QUERY:   PACKAGE  DECLARE 
+type t1 is table of int index by int;
+type r1 is record (a t1, b int);
+va pck1.r1;
+procedure p1;
+end 
+CONTEXT:  compilation of PL/pgSQL package near line 4
+create or replace package pck1 as
+type t1 is table of int index by int;
+type r1 is record (a t1, b int);
+procedure p1;
+end pck1;
+/
+create or replace package body pck1 as
+procedure p1 as
+vb pck1.r1;
+begin
+null;
+end;
+end pck1;
+/
+ERROR:  record type with table of attribute is not suppoted to be referenced by another package.
+LINE 2: vb pck1.r1;
+                  ^
+DETAIL:  attribute "a" of record type "r1" is table of with index by, which is not supported to be referenced by another package.
+QUERY:   DECLARE 
+vb pck1.r1;
+begin
+null;
+end
+drop package pck1;
+NOTICE:  drop cascades to function plpgsql_packagetype1.p1()
+-- b, another ref
+create or replace package pck1 as
+type t1 is table of int index by int;
+type r1 is record (a t1, b int);
+end pck1;
+/
+create or replace procedure p1 as
+va pck1.r1;
+begin
+null;
+end;
+/
+ERROR:  record type with table of attribute is not suppoted to be referenced by another package.
+LINE 2: va pck1.r1;
+                  ^
+DETAIL:  attribute "a" of record type "r1" is table of with index by, which is not supported to be referenced by another package.
+QUERY:   DECLARE 
+va pck1.r1;
+begin
+null;
+end
+drop package pck1;
+drop procedure p1;
+ERROR:  function p1 does not exist
+-- test pck1.va%type ref table of
+-- a. var ref
+create or replace package pck2 as
+type t1 is table of int index by varchar2;
+va t1;
+end pck2;
+/
+create or replace procedure p1 as
+type t1 is table of int index by varchar2;
+va t1;
+vb pck2.va%type;
+begin
+va('aa') := 1;
+vb('bb') := 1;
+end;
+/
+call p1();
+ p1 
+----
+ 
+(1 row)
+
+drop procedure p1;
+drop package pck2;
+-- b. procedure ref
+create or replace package pck2 as
+type t1 is table of int index by varchar2;
+va t1;
+procedure p1(vb pck2.va%type);
+end pck2;
+/
+ERROR:  not support ref table of variable as procedure argument type
+CONTEXT:  compilation of PL/pgSQL package near line 3
+create or replace package pck2 as
+type t1 is table of int index by varchar2;
+va t1;
+procedure p1(vb va%type);
+end pck2;
+/
+ERROR:  not support ref table of variable as procedure argument type
+CONTEXT:  compilation of PL/pgSQL package near line 3
+-- test va.col%type ref table of
+-- a. var ref
+create or replace package pck1 as
+type t1 is table of int index by varchar;
+type r1 is record (a t1, b int);
+va r1;
+procedure p1;
+end pck1;
+/
+create or replace package body pck1 as
+procedure p1 as
+vb va.a%type;
+begin
+vb('aa') := 1;
+end;
+end pck1;
+/
+call pck1.p1();
+ p1 
+----
+ 
+(1 row)
+
+drop package pck1;
+NOTICE:  drop cascades to function plpgsql_packagetype1.p1()
+-- b. procedure ref
+create or replace package pck1 as
+type t1 is table of int index by varchar;
+type r1 is record (a t1, b int);
+va r1;
+procedure p1(vb va.a%type);
+end pck1;
+/
+ERROR:  not support ref table of variable as procedure argument type
+CONTEXT:  compilation of PL/pgSQL package near line 4
+-- test record.col%type ref table of
+create or replace package pck1 as
+type t1 is table of int index by varchar;
+type r1 is record (a t1, b int);
+va pck1.r1.a%type;
+procedure p1;
+end pck1;
+/
+-- test pck1.record.col%type ref table of
+-- test pck1.va.col%type ref table of
 --------------------------------------------------
 ------------------ END OF TESTS ------------------
 --------------------------------------------------
@@ -1260,3 +1475,6 @@ ERROR:  package plpgsql_packagetype1.p_test1 does not exist
 drop schema if exists plpgsql_packagetype2 cascade;
 NOTICE:  drop cascades to synonym plpgsql_packagetype2.proc1
 drop schema if exists plpgsql_packagetype1 cascade;
+NOTICE:  drop cascades to 2 other objects
+--?.*
+drop cascades to function plpgsql_packagetype1.p1()

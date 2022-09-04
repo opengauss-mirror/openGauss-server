@@ -66,10 +66,12 @@ void UndoSpace::ExtendUndoLog(int zid, UndoLogOffset offset, uint32 dbId)
     while (tail < offset) {
         if ((!t_thrd.xlog_cxt.InRecovery) && (static_cast<int>(g_instance.undo_cxt.undoTotalSize) +
             static_cast<int>(g_instance.undo_cxt.undoMetaSize) >= u_sess->attr.attr_storage.undo_space_limit_size)) {
+            uint64 undoSize = (g_instance.undo_cxt.undoTotalSize + g_instance.undo_cxt.undoMetaSize) * BLCKSZ /
+                (1024 * 1024);
+            uint64 limitSize = u_sess->attr.attr_storage.undo_space_limit_size * BLCKSZ / (1024 * 1024);
             ereport(ERROR, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT(
-                "The undo space size %u > limit size %d. Please increase the undo_space_limit_size."),
-                g_instance.undo_cxt.undoTotalSize + g_instance.undo_cxt.undoMetaSize,
-                u_sess->attr.attr_storage.undo_space_limit_size)));
+                "undo space size %luM > limit size %luM. Please increase the undo_space_limit_size."),
+                undoSize, limitSize)));
         }
         blockno = (BlockNumber)(tail / BLCKSZ + 1);
         /* Create a new undo segment. */
@@ -110,7 +112,7 @@ void UndoSpace::UnlinkUndoLog(int zid, UndoLogOffset offset, uint32 dbId)
         pg_atomic_fetch_sub_u32(&g_instance.undo_cxt.undoTotalSize, segBlocks);
         head += segSize;
     }
-
+    smgrclose(reln);
     ereport(DEBUG1, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT(
         "unlink undo log, total blocks=%u, zid=%d, dbid=%u, head=%lu."),
         g_instance.undo_cxt.undoTotalSize, zid, dbId, offset)));
@@ -133,7 +135,7 @@ void UndoSpace::CreateNonExistsUndoFile(int zid, uint32 dbId)
         blockno = (BlockNumber)(offset / BLCKSZ + 1);
         if (!smgrexists(reln, MAIN_FORKNUM, blockno)) {
             smgrextend(reln, MAIN_FORKNUM, blockno, NULL, false);
-            ereport(LOG, (errmodule(MOD_UNDO), 
+            ereport(DEBUG1, (errmodule(MOD_UNDO), 
                 errmsg(UNDOFORMAT("undo file not exists, zid %d, blockno=%u."), zid, blockno)));
             pg_atomic_fetch_add_u32(&g_instance.undo_cxt.undoTotalSize, segBlocks);
         }
@@ -309,7 +311,7 @@ void UndoSpace::RecoveryUndoSpace(int fd, UndoSpaceType type)
     char *uspMetaBuffer = NULL;
     MemoryContext oldContext = MemoryContextSwitchTo(g_instance.undo_cxt.undoContext);
     char *persistBlock = (char *)palloc0(UNDO_META_PAGE_SIZE * PAGES_READ_NUM);
-    oldContext = MemoryContextSwitchTo(g_instance.undo_cxt.undoContext);
+    (void*)MemoryContextSwitchTo(oldContext);
     if (type == UNDO_LOG_SPACE) {
         UNDOSPACE_META_PAGE_COUNT(PERSIST_ZONE_COUNT, UNDOZONE_COUNT_PER_PAGE, totalPageCnt);
         lseek(fd, totalPageCnt * UNDO_META_PAGE_SIZE, SEEK_SET);
@@ -376,11 +378,8 @@ void UndoSpace::RecoveryUndoSpace(int fd, UndoSpaceType type)
             (g_instance.undo_cxt.uZones == NULL || g_instance.undo_cxt.uZones[zoneId] == NULL)) {
             continue;
         }
-        undo::UndoZoneGroup::InitUndoCxtUzones();
-        UndoZone *uzone = (UndoZone *)g_instance.undo_cxt.uZones[zoneId];
-        uzone = UndoZoneGroup::GetUndoZone(zoneId, true);
+        UndoZone *uzone = UndoZoneGroup::GetUndoZone(zoneId, true);
         UndoSpace *usp = uzone->GetSpace(type);
-        usp->LockInit();
         usp->MarkClean();
         usp->SetLSN(uspMetaInfo->lsn);
         usp->SetHead(uspMetaInfo->head);

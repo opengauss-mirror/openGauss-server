@@ -1,5 +1,5 @@
 #!/bin/sh
-# run all the test case of ha 
+# run all the test case of ha
 
 #init some variables
 loop_num=$1
@@ -22,7 +22,7 @@ if [ ! -z $2 ]; then
 	dcf_port=$2
 fi
 
-deploy_paxos ${dcf_port}> ./results/deploy_paxos_single.log 2>&1
+deploy_paxos ${dcf_port} 2>&1 | tee ./results/deploy_paxos_single.log
 
 for((i=1;i<=$loop_num;i++))
 do
@@ -31,10 +31,10 @@ do
 	for line in `cat paxos_schedule_single | grep -v ^#`
 	do
 		printf "%-50s" $line
-		starttime=`date +"%Y-%m-%d %H:%M:%S"` 
+		starttime=`date +"%Y-%m-%d %H:%M:%S"`
 		sh ./testcase/$line.sh ${dcf_port} > ./results/$line.log 2>&1
 		count=`expr $count + 1`
-		endtime=`date +"%Y-%m-%d %H:%M:%S"` 
+		endtime=`date +"%Y-%m-%d %H:%M:%S"`
 		starttime1=`date -d  "$starttime" +%s`
 		endtime1=`date -d  "$endtime" +%s`
 		interval=`expr $endtime1 - $starttime1`

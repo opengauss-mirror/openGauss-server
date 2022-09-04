@@ -1,0 +1,12 @@
+select count(*) > 0 as ok from pg_control_system();
+ ok 
+----
+ t
+(1 row)
+
+select count(*) > 0 as ok from pg_control_checkpoint();
+ ok 
+----
+ t
+(1 row)
+

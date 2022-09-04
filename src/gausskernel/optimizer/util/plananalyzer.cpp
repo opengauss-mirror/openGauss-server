@@ -978,14 +978,12 @@ List* PlanAnalyzerOperator(QueryDesc* querydesc, PlanState* planstate)
                 issueResults = issueResultsItem != NULL ? lappend(issueResults, issueResultsItem) : issueResults;
                 break;
             }
-            case T_CStoreScan:
-            case T_DfsScan: {
+            case T_CStoreScan: {
                 /* Check unsuitable seq scan for cstore */
                 issueResultsItem = CheckUnsuitableScanMethod(ps, dn_num, total_tuples, totalFiltereds, false, true);
                 issueResults = issueResultsItem != NULL ? lappend(issueResults, issueResultsItem) : issueResults;
                 break;
             }
-            case T_DfsIndexScan:
             case T_CStoreIndexScan: {
                 /* Check unsuitable index scan for cstore */
                 issueResultsItem = CheckUnsuitableScanMethod(ps, dn_num, total_tuples, totalFiltereds, true, true);

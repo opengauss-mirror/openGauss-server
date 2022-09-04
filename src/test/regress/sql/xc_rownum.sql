@@ -105,6 +105,11 @@ select rownum rn from distributors group by rn;
 select id from distributors group by rownum,id having rownum < 5;
 select rownum from distributors group by rownum having rownum < 5;
 select id from distributors group by id having rownum < 5;
+select id+id from distributors group by id+id having rownum < 5;
+select id, (select id from distributors where rownum <= 1) from distributors group by id;
+select id, (select id from distributors group by id having rownum <= 1) from distributors group by id;
+select id from (select id from distributors where rownum <= 1) group by id;
+select id from (select id from distributors group by id having rownum <= 1) group by id;
 --test alias name after where
 select rownum rn, name from distributors where rn<3;
 select rownum rowno2, * from (select rownum rowno1, * from distributors order by id desc) where rowno2 < 2;

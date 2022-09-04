@@ -24,6 +24,8 @@
 #include "access/ustore/knl_utuple.h"
 #include "lib/binaryheap.h"
 
+typedef struct LogicalDecodingContext LogicalDecodingContext;
+
 /* an individual tuple, stored in one chunk of memory */
 typedef struct ReorderBufferTupleBuf {
     /* position in preallocated list */
@@ -86,6 +88,9 @@ typedef struct ReorderBufferChange {
 
     /* The type of change. */
     enum ReorderBufferChangeType action;
+
+    /* Transaction this change belongs to. */
+    struct ReorderBufferTXN *txn;
 
     RepOriginId origin_id;
 
@@ -288,7 +293,7 @@ typedef struct ReorderBufferTXN {
      * ---
      */
     dlist_node node;
-
+    Size size;
 } ReorderBufferTXN;
 
 /* so we can define the callbacks used inside struct ReorderBuffer itself */
@@ -386,6 +391,8 @@ struct ReorderBuffer {
     /* buffer for disk<->memory conversions */
     char* outbuf;
     Size outbufsize;
+
+    Size size;
 };
 
 /* entry for a hash table we use to map from xid to our transaction state */
@@ -451,7 +458,7 @@ ReorderBufferChange* ReorderBufferGetChange(ReorderBuffer*);
 void ReorderBufferReturnChange(ReorderBuffer*, ReorderBufferChange*);
 ReorderBufferUTupleBuf *ReorderBufferGetUTupleBuf(ReorderBuffer*, Size tuple_len);
 
-void ReorderBufferQueueChange(ReorderBuffer*, TransactionId, XLogRecPtr lsn, ReorderBufferChange*);
+void ReorderBufferQueueChange(LogicalDecodingContext*, TransactionId, XLogRecPtr lsn, ReorderBufferChange*);
 void ReorderBufferCommit(ReorderBuffer*, TransactionId, XLogRecPtr commit_lsn, XLogRecPtr end_lsn,
     RepOriginId origin_id, XLogRecPtr origin_lsn, CommitSeqNo csn, TimestampTz commit_time);
 void ReorderBufferAssignChild(ReorderBuffer*, TransactionId, TransactionId, XLogRecPtr commit_lsn);
@@ -461,8 +468,8 @@ void ReorderBufferAbortOld(ReorderBuffer*, TransactionId xid, XLogRecPtr lsn);
 void ReorderBufferForget(ReorderBuffer*, TransactionId, XLogRecPtr lsn);
 
 void ReorderBufferSetBaseSnapshot(ReorderBuffer*, TransactionId, XLogRecPtr lsn, struct SnapshotData* snap);
-void ReorderBufferAddSnapshot(ReorderBuffer*, TransactionId, XLogRecPtr lsn, struct SnapshotData* snap);
-void ReorderBufferAddNewCommandId(ReorderBuffer*, TransactionId, XLogRecPtr lsn, CommandId cid);
+void ReorderBufferAddSnapshot(LogicalDecodingContext*, TransactionId, XLogRecPtr lsn, struct SnapshotData* snap);
+void ReorderBufferAddNewCommandId(LogicalDecodingContext*, TransactionId, XLogRecPtr lsn, CommandId cid);
 void ReorderBufferAddNewTupleCids(ReorderBuffer*, TransactionId, XLogRecPtr lsn, const RelFileNode& node,
     const ItemPointerData& pt, CommandId cmin, CommandId cmax, CommandId combocid);
 void ReorderBufferAddInvalidations(
@@ -479,5 +486,6 @@ ReorderBufferTXN* ReorderBufferGetOldestTXN(ReorderBuffer*);
 void ReorderBufferSetRestartPoint(ReorderBuffer*, XLogRecPtr ptr);
 
 void StartupReorderBuffer(void);
+void ReorderBufferClear(const char *slotname);
 
 #endif

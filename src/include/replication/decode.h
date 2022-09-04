@@ -29,8 +29,11 @@ void DecodeXLogTuple(const char *data, Size len, ReorderBufferTupleBuf *tuple, b
 extern Pointer UGetXlrec(XLogReaderState * record);
 size_t DecodeUndoMeta(const char* data);
 bool FilterRecord(LogicalDecodingContext *ctx, XLogReaderState *r, uint8 flags, RelFileNode* rnode);
-void UpdateUndoBody(Size* addLenPtr, uint8 flag);
-void UpdateOldTupleCalc(bool isInplaceUpdate, XLogReaderState *r, char **tupleOld, Size *tuplelenOld);
+void UpdateUndoBody(Size* addLenPtr, char* data, uint8 flag, uint32* toastLen);
+char *UpdateOldTupleCalc(bool isInplaceUpdate, XLogReaderState *r, char **tupleOld, Size *tuplelenOld,
+    uint32* toastLen);
+void DecodeUHeapToastTuple(const char * toastData, Size len, ReorderBufferTupleBuf *tuple);
+
 extern void ParallelDecodeWorkerMain(void* point);
 extern void LogicalReadWorkerMain(void* point);
 #endif

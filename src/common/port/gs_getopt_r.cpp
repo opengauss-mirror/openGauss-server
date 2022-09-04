@@ -101,7 +101,7 @@ int getopt_r(int nargc,         // number of argruments
             if (*ostr == ':')
                 return BADARG;
             if (pOptCtxt->opterr)
-                (void)fprintf(stderr, "option requires an argument -- %c\n", pOptCtxt->optopt);
+                (void)fprintf(stderr, "option requires an argument -- %d\n", pOptCtxt->optopt);
             return BADCH;
         } else
             /* white space */

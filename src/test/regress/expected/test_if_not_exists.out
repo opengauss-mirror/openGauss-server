@@ -6,8 +6,6 @@ ERROR:  database "db_testa" already exists
 create database if not exists db_testb;
 drop database if exists db_testa;
 drop database if exists db_testb;
-
-
 create user test_user with password 'Abcd.123';
 ALTER USER IF EXISTS test_user IDENTIFIED BY 'Abcd.1234';
 ALTER USER test_user IDENTIFIED BY 'Abcd.12345';
@@ -16,7 +14,6 @@ NOTICE:  role "test_user2" does not exist, skipping
 ALTER USER test_user2 IDENTIFIED BY 'Abcd.1234';
 ERROR:  role "test_user2" does not exist
 DROP USER test_user;
-
 CREATE SCHEMA sch_name;
 CREATE SCHEMA IF NOT EXISTS sch_name;
 NOTICE:  schema "sch_name" already exists,skipping
@@ -25,4 +22,3 @@ CREATE SCHEMA sch_name2;
 ERROR:  schema "sch_name2" already exists
 drop SCHEMA sch_name;
 drop SCHEMA sch_name2;
-

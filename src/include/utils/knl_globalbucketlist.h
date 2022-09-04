@@ -65,6 +65,8 @@ class GlobalBucketList : public BaseObject {
      *    GlobalSysDBCacheEntry: when use as GlobalSysDBCache:m_bucket_list
      *    RelationData: when use as GlobalTabDefCache:m_bucket_list
      *    PartitionData: when used as GlobalPartDefCache:m_bucket_list
+     *
+     * Note: CatCahe is still implemented in cc_buckets, cc_nbuckets its original style
      */
     BucketEntry *m_bucket_entry;    /* array of buckets */
     int          m_nbuckets;        /* array length */

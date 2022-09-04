@@ -139,7 +139,9 @@ bool shared_storage_xlog_read(int timeout, unsigned char *type, char **buffer, i
 
         ReadShareStorageCtlInfo(ctlInfo);
         uint32 lastTerm = pg_atomic_read_u32(&t_thrd.walreceiverfuncs_cxt.WalRcv->shareStorageTerm);
-        if (ctlInfo->term > lastTerm || ctlInfo->xlogFileSize != (uint64)g_instance.attr.attr_storage.xlog_file_size) {
+        if (ctlInfo->term > lastTerm ||
+            (ctlInfo->xlogFileSize != (uint64)g_instance.attr.attr_storage.xlog_file_size &&
+            IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE)) {
             t_thrd.walreceiver_cxt.termChanged = true;
             if (isStopping)
                 return false;
@@ -346,8 +348,15 @@ bool try_connect_libpq(LibpqrcvConnectParam *param, bool printError)
                 (errcode(ERRCODE_CONNECTION_TIMED_OUT), errmsg("try_connect_libpq timeout restart walreceiver")));
     }
 
-    if (libpgConnected)
+    if (libpgConnected) {
         first_fail_time = 0;
+        ShareStorageXLogCtl *ctlInfo = g_instance.xlog_cxt.shareStorageXLogCtl;
+        ReadShareStorageCtlInfo(ctlInfo);
+        if ((uint64)g_instance.attr.attr_storage.xlog_file_size != ctlInfo->xlogFileSize) {
+            ereport(FATAL, (errmsg("try_connect_libpq xlog file size not matched,guc:%ld, ctl info:%lu",
+                g_instance.attr.attr_storage.xlog_file_size, ctlInfo->xlogFileSize)));
+        }
+    }
     return libpgConnected;
 }
 

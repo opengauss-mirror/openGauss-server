@@ -31,11 +31,13 @@
 #include "access/xlog.h"
 #include "access/xloginsert.h"
 #include "miscadmin.h"
+#include "postmaster/autovacuum.h"
 #include "storage/freespace.h"
 #include "storage/indexfsm.h"
 #include "storage/lmgr.h"
 #include "storage/predicate.h"
 #include "storage/proc.h"
+#include "storage/procarray.h"
 #include "utils/inval.h"
 #include "utils/snapmgr.h"
 
@@ -369,7 +371,7 @@ bool UBTreePageRecyclable(Page page)
      * before it is able to make a WAL entry for adding the page. If we find a
      * zeroed page then reclaim it.
      */
-    TransactionId frozenXmin = g_instance.undo_cxt.oldestFrozenXid;
+    TransactionId frozenXmin = g_instance.undo_cxt.globalFrozenXid;
     if (PageIsNew(page)) {
         return true;
     }
@@ -588,7 +590,7 @@ int UBTreePageDel(Relation rel, Buffer buf)
                 ereport(LOG, (errcode(ERRCODE_INDEX_CORRUPTED),
                     errmsg("index \"%s\" contains a half-dead internal page", RelationGetRelationName(rel)),
                     errhint("This can be caused by an interrupted VACUUM in version 9.3 or older, before upgrade. "
-                    "Please REINDEX it.")));
+                            "Please REINDEX it.")));
             }
             _bt_relbuf(rel, buf);
             return ndeleted;
@@ -948,6 +950,64 @@ static bool UBTreeMarkPageHalfDead(Relation rel, Buffer leafbuf, BTStack stack)
     return true;
 }
 
+static void DoReserveDeletion(Page page)
+{
+    UBTPageOpaque opaque = (UBTPageOpaque)PageGetSpecialPointer(page);
+
+    bool isVacuumProcess = ((t_thrd.pgxact->vacuumFlags & PROC_IN_VACUUM) || IsAutoVacuumWorkerProcess());
+    if (isVacuumProcess && !TransactionIdIsValid(GetTopTransactionIdIfAny())) {
+        ((UBTPageOpaqueInternal)opaque)->btpo_flags |= BTP_VACUUM_DELETING;
+        opaque->xact = ReadNewTransactionId();
+    } else {
+        opaque->xact = GetTopTransactionId();
+    }
+}
+
+static bool ReserveForDeletion(Relation rel, Buffer buf)
+{
+    Page page = BufferGetPage(buf);
+    UBTPageOpaque opaque = (UBTPageOpaque)PageGetSpecialPointer(page);
+
+    const int MAX_RETRY_TIMES = 1000;
+    const int WAIT_TIME = 500;
+    int times = MAX_RETRY_TIMES;
+    while (times--) {
+        if (P_ISDELETED((UBTPageOpaqueInternal)opaque)) {
+            return false;
+        }
+
+        if (P_VACUUM_DELETING((UBTPageOpaqueInternal)opaque)) {
+            TransactionId oldestXmin = u_sess->utils_cxt.RecentGlobalXmin;
+            if (TransactionIdPrecedes(opaque->xact, oldestXmin)) {
+                opaque->xact = InvalidTransactionId;
+                ((UBTPageOpaqueInternal)opaque)->btpo_flags &= ~BTP_VACUUM_DELETING;
+            }
+        }
+
+        /* try to reserve for the deleteion */
+        if (!TransactionIdIsValid(opaque->xact)) {
+            DoReserveDeletion(page);
+            return true;
+        }
+        /* someone else is deleting, need wait for it */
+        TransactionId previousXact = opaque->xact;
+        if (TransactionIdIsCurrentTransactionId(previousXact)) {
+            /* already reserved by self, continue */
+            return true;
+        }
+        if (!TransactionIdIsInProgress(previousXact, NULL, true)) {
+            /* previous worker abort, we can still reserve for deletion */
+            DoReserveDeletion(page);
+            return true;
+        }
+
+        LockBuffer(buf, BUFFER_LOCK_UNLOCK);
+        pg_usleep(WAIT_TIME); /* 0.5 ms */
+        LockBuffer(buf, BT_WRITE);
+    }
+    return false;
+}
+
 /*
  * Unlink a page in a branch of half-dead pages from its siblings.
  *
@@ -988,6 +1048,11 @@ static bool UBTreeUnlinkHalfDeadPage(Relation rel, Buffer leafbuf, bool *rightsi
     BlockNumber nextchild;
 
     WHITEBOX_TEST_STUB("UBTreeUnlinkHalfDeadPage", WhiteboxDefaultErrorEmit);
+
+    if (!ReserveForDeletion(rel, leafbuf)) {
+        _bt_relbuf(rel, leafbuf);
+        return false; /* concurrent worker finished this deletion already */
+    }
 
     page = BufferGetPage(leafbuf);
     opaque = (UBTPageOpaqueInternal)PageGetSpecialPointer(page);
@@ -1051,7 +1116,7 @@ static bool UBTreeUnlinkHalfDeadPage(Relation rel, Buffer leafbuf, bool *rightsi
      * was deleted by someone else meanwhile; if so, give up.  (Right now,
      * that should never happen, since page deletion is only done in VACUUM
      * and there shouldn't be multiple VACUUMs concurrently on the same
-     * table.)
+     * table.) UPDATE: we surly have concurrent page deletion in UBTree.
      */
     if (target != leafblkno) {
         LockBuffer(leafbuf, BT_WRITE);
@@ -1061,19 +1126,24 @@ static bool UBTreeUnlinkHalfDeadPage(Relation rel, Buffer leafbuf, bool *rightsi
         page = BufferGetPage(lbuf);
         opaque = (UBTPageOpaqueInternal)PageGetSpecialPointer(page);
         while (P_ISDELETED(opaque) || opaque->btpo_next != target) {
-            /* step right one page */
+            /*
+             * Before we follow the link from the page that was the left
+             * sibling mere moments ago, validate its right link.  This
+             * reduces the opportunities for loop to fail to ever make any
+             * progress in the presence of index corruption.
+             *
+             * Note: we rely on the assumption that there can only be one
+             * vacuum process running at a time (against the same index).
+             */
+            bool leftSibValid = true;
+            if (P_RIGHTMOST(opaque) || P_ISDELETED(opaque) || leftsib == opaque->btpo_next) {
+                leftSibValid = false;
+            }
+
             leftsib = opaque->btpo_next;
             _bt_relbuf(rel, lbuf);
 
-            /*
-             * It'd be good to check for interrupts here, but it's not easy to
-             * do so because a lock is always held. This block isn't
-             * frequently reached, so hopefully the consequences of not
-             * checking interrupts aren't too bad.
-             */
-
-            if (leftsib == P_NONE) {
-                /* left sibling may deleted concurrently by another backend, which may happen in ubtree */
+            if (!leftSibValid) {
                 if (target != leafblkno) {
                     /* we have only a pin on target, but pin+lock on leafbuf */
                     ReleaseBuffer(buf);
@@ -1082,8 +1152,18 @@ static bool UBTreeUnlinkHalfDeadPage(Relation rel, Buffer leafbuf, bool *rightsi
                     /* we have only a pin on leafbuf */
                     ReleaseBuffer(leafbuf);
                 }
+
+                ereport(LOG, (errcode(ERRCODE_INDEX_CORRUPTED),
+                         errmsg_internal("valid left sibling for deletion target could not be located: "
+                                         "left sibling %u of target %u with leafblkno %u in index \"%s\"",
+                                         leftsib, target, leafblkno,
+                                         RelationGetRelationName(rel))));
                 return false;
             }
+
+            CHECK_FOR_INTERRUPTS();
+
+            /* step right one page */
             lbuf = _bt_getbuf(rel, leftsib, BT_WRITE);
             page = BufferGetPage(lbuf);
             opaque = (UBTPageOpaqueInternal)PageGetSpecialPointer(page);
@@ -1245,7 +1325,7 @@ static bool UBTreeUnlinkHalfDeadPage(Relation rel, Buffer leafbuf, bool *rightsi
     opaque = (UBTPageOpaqueInternal)PageGetSpecialPointer(page);
     opaque->btpo_flags &= ~BTP_HALF_DEAD;
     opaque->btpo_flags |= BTP_DELETED;
-    opaque->btpo.xact_old = ReadNewTransactionId();
+    ((UBTPageOpaque)opaque)->xact = ReadNewTransactionId();
 
     /* And update the metapage, if needed */
     if (BufferIsValid(metabuf)) {
@@ -1421,9 +1501,13 @@ out:
     Assert(BufferIsValid(buf));
 
     Page page = BufferGetPage(buf);
-    if (!_bt_page_recyclable(page)) {
+    if (!UBTreePageRecyclable(page)) {
         /* oops, failure due to concurrency, retry. */
         UnlockReleaseBuffer(buf);
+        if (BufferIsValid(addr->queueBuf)) {
+            ReleaseBuffer(addr->queueBuf);
+            addr->queueBuf = InvalidBuffer;
+        }
         goto restart;
     }
 

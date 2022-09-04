@@ -1,0 +1,96 @@
+drop database if exists test_primary_unique_a_dump;
+drop database if exists test_primary_unique_b_dump;
+drop database if exists test_primary_unique_a_restore;
+drop database if exists test_primary_unique_b_restore;
+
+create database test_primary_unique_a_dump;
+create database test_primary_unique_a_restore;
+create database test_primary_unique_b_dump dbcompatibility 'B';
+create database test_primary_unique_b_restore dbcompatibility 'B';
+
+-- test A mode gs_dump
+\c test_primary_unique_a_dump
+create table test_a_primary(f1 int, f2 varchar(20), constraint con_pri primary key(f1) with (storage_type = astore));
+create table test_a_unique(f1 int, f2 varchar(20), constraint con_unique unique(f1) with (storage_type = astore));
+
+create table test_a_par_primary
+(
+	f1 int,
+	f2 varchar(20),
+	constraint con_par_pri primary key(f1) with (storage_type = astore)
+)
+partition by range (f1)
+(
+    partition p_1 values less than(100),
+    partition p_2 values less than(200),
+    partition p_3 values less than(MAXVALUE)
+);
+
+create table test_a_par_unique
+(
+	f1 int,
+	f2 varchar(20),
+	constraint con_par_unique unique(f1) with (storage_type = astore)
+)
+partition by range (f1)
+(
+    partition p_1 values less than(100),
+    partition p_2 values less than(200),
+    partition p_3 values less than(MAXVALUE)
+);
+
+\! @abs_bindir@/gs_dump test_primary_unique_a_dump -p @portstring@ -f @abs_bindir@/dump_primary_unique_a.tar -F t >/dev/null 2>&1; echo $?
+\! @abs_bindir@/gs_restore -d test_primary_unique_a_restore -p @portstring@ @abs_bindir@/dump_primary_unique_a.tar >/dev/null 2>&1; echo $?
+
+\c test_primary_unique_a_restore
+\d+ test_a_primary
+\d+ test_a_unique
+\d+ test_a_par_primary
+\d+ test_a_par_unique
+
+
+-- test B mode gs_dump
+\c test_primary_unique_b_dump
+create table test_b_primary(f1 int, f2 varchar(20), constraint con_pri primary key using btree(f1 desc) with (storage_type = astore));
+create table test_b_unique(f1 int, f2 varchar(20), constraint con_unique unique u_unique using btree((f1 + 1) desc) with (storage_type = astore));
+
+create table test_b_par_primary
+(
+	f1 int,
+	f2 varchar(20),
+	constraint con_par_pri primary key using btree(f1 desc) with (storage_type = astore)
+)
+partition by range (f1)
+(
+    partition p_1 values less than(100),
+    partition p_2 values less than(200),
+    partition p_3 values less than(MAXVALUE)
+);
+
+create table test_b_par_unique
+(
+	f1 int,
+	f2 varchar(20),
+	constraint con_par_unique unique u_par_unique using btree(f1 desc) with (storage_type = astore)
+)
+partition by range (f1)
+(
+    partition p_1 values less than(100),
+    partition p_2 values less than(200),
+    partition p_3 values less than(MAXVALUE)
+);
+
+\! @abs_bindir@/gs_dump test_primary_unique_b_dump -p @portstring@ -f @abs_bindir@/dump_primary_unique_b.tar -F t >/dev/null 2>&1; echo $?
+\! @abs_bindir@/gs_restore -d test_primary_unique_b_restore -p @portstring@ @abs_bindir@/dump_primary_unique_b.tar >/dev/null 2>&1; echo $?
+
+\c test_primary_unique_b_restore
+\d+ test_b_primary
+\d+ test_b_unique
+\d+ test_b_par_primary
+\d+ test_b_par_unique
+
+\c regression
+drop database if exists test_primary_unique_a_dump;
+drop database if exists test_primary_unique_b_dump;
+drop database if exists test_primary_unique_a_restore;
+drop database if exists test_primary_unique_b_restore;

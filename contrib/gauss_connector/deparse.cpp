@@ -1015,7 +1015,7 @@ static void gcDeparseLockingClause(deparse_expr_cxt* context)
          * that DECLARE CURSOR ... FOR UPDATE is supported, which it isn't
          * before 8.3.
          */
-        if (relid == root->parse->resultRelation &&
+        if (relid == linitial2_int(root->parse->resultRelations) &&
             (root->parse->commandType == CMD_UPDATE || root->parse->commandType == CMD_DELETE)) {
             /* Relation is UPDATE/DELETE target, so use FOR UPDATE */
             appendStringInfoString(buf, " FOR UPDATE");

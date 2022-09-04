@@ -103,6 +103,7 @@ typedef struct GPCPlainEnv
     int qrw_inlist2join_optmode;// QUERY_TUNING_OTHER2
     int skew_strategy_store;// QUERY_TUNING_OTHER2
     unsigned int behavior_compat_flags;
+    unsigned int plsql_compile_behavior_compat_flags;
     int datestyle;
     int dateorder;
     int plancachemode; // QUERY_TUNING_OTHER
@@ -210,7 +211,6 @@ extern Datum GPCPlanClean(PG_FUNCTION_ARGS);
 extern void GPCResetAll();
 void GPCCleanDatanodeStatement(int dn_stmt_num, const char* stmt_name);
 void GPCReGplan(CachedPlanSource* plansource);
-void CNGPCCleanUpSession();
 void GPCCleanUpSessionSavedPlan();
 List* CopyLocalStmt(const List* stmt_list, const MemoryContext parent_cxt, MemoryContext* plan_context);
 bool SPIParseEnableGPC(const Node *node);

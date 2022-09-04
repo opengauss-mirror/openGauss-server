@@ -121,7 +121,7 @@ static void init_tsstore_relation(TsStoreScanState* node, EState* estate)
             Oid tablepartitionid = InvalidOid;
             int partSeq = lfirst_int(cell);
 
-            tablepartitionid = getPartitionOidFromSequence(currentRelation, partSeq);
+            tablepartitionid = getPartitionOidFromSequence(currentRelation, partSeq, plan->pruningInfo->partMap);
             part = partitionOpen(currentRelation, tablepartitionid, lockmode);
             node->partitions = lappend(node->partitions, part);
         }

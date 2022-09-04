@@ -19,9 +19,13 @@
 #include "access/xact.h"
 #include "access/transam.h"
 #include "access/tableam.h"
+#include "access/tuptoaster.h"
 #include "access/sysattr.h"
 #include "access/ustore/knl_utuple.h"
+#include "access/ustore/knl_uvisibility.h"
 #include "access/ustore/knl_whitebox_test.h"
+#include "access/tuptoaster.h"
+#include "utils/typcache.h"
 
 #define TUPLE_IS_HEAP_TUPLE(tup) (((HeapTuple)tup)->tupTableType == HEAP_TUPLE)
 #define TUPLE_IS_UHEAP_TUPLE(tup) (((UHeapTuple)tup)->tupTableType == UHEAP_TUPLE)
@@ -567,13 +571,15 @@ UHeapTuple UHeapFormTuple(TupleDesc tuple_desc, Datum *values, bool *is_nulls)
     bool enableReverseBitmap = NAttrsReserveSpace(attrNum);
     bool enableReserve = u_sess->attr.attr_storage.reserve_space_for_nullable_atts;
     UHeapDiskTupleData *diskTuple = NULL;
+    Form_pg_attribute *att = tuple_desc->attrs;
     int nullcount = 0;
 
     enableReserve = enableReserve && enableReverseBitmap;
 
     if (attrNum > MaxTupleAttributeNumber) {
         ereport(ERROR, (errcode(ERRCODE_TOO_MANY_COLUMNS),
-            errmsg("number of columns (%d) exceeds limit (%d)", attrNum, MaxTupleAttributeNumber)));
+                        errmsg("number of columns (%d) exceeds limit (%d), AM type (%d), type id (%u)", attrNum,
+                               MaxTupleAttributeNumber, tuple_desc->tdTableAmType, tuple_desc->tdtypeid)));
     }
 
     WHITEBOX_TEST_STUB(UHEAP_FORM_TUPLE_FAILED, WhiteboxDefaultErrorEmit);
@@ -582,6 +588,14 @@ UHeapTuple UHeapFormTuple(TupleDesc tuple_desc, Datum *values, bool *is_nulls)
     for (i = 0; i < attrNum; i++) {
         if (is_nulls[i]) {
             nullcount++;
+        } else if (att[i]->attlen == -1 && att[i]->attalign == 'd' && att[i]->attndims == 0 &&
+            !VARATT_IS_EXTENDED(DatumGetPointer(values[i]))) {
+            values[i] = toast_flatten_tuple_attribute(values[i], att[i]->atttypid, att[i]->atttypmod);
+        } else if (att[i]->attlen == -1 && att[i]->attalign == 'i' &&
+            VARATT_IS_HUGE_TOAST_POINTER(DatumGetPointer(values[i])) &&
+            !(att[i]->atttypid == CLOBOID || att[i]->atttypid == BLOBOID)) {
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("only suport type(clob/blob) for more than 1G toast")));
         }
     }
     diskTupleSize = SizeOfUHeapDiskTupleData;
@@ -620,7 +634,7 @@ UHeapTuple UHeapFormTuple(TupleDesc tuple_desc, Datum *values, bool *is_nulls)
     }
 
     uheapTuplePtr->disk_tuple_size = diskTupleSize;
-
+    FastVerifyUTuple(uheapTuplePtr->disk_tuple, InvalidBuffer);
     return uheapTuplePtr;
 }
 
@@ -741,7 +755,7 @@ void SlotDeformUTuple(TupleTableSlot *slot, UHeapTuple tuple, long *offp, int na
         }
 
         values[attnum] = fetchatt(thisatt, tp + off);
-        off = att_addlength_pointer(off, thisatt->attlen, tp + off);        
+        off = att_addlength_pointer(off, thisatt->attlen, tp + off);
     }
 
     /*
@@ -817,7 +831,6 @@ void UHeapDeformTupleGuts(UHeapTuple utuple, TupleDesc rowDesc, Datum *values, b
         }
 
         values[attnum] = fetchatt(thisatt, tupPtr + off);
-
         off = att_addlength_pointer(off, thisatt->attlen, tupPtr + off);
     }
 
@@ -871,39 +884,6 @@ HeapTuple UHeapToHeap(TupleDesc tuple_desc, UHeapTuple uheaptuple)
 }
 
 /*
- * This is similar to heap version's SetHintBits but handles Inplace tuples instead.
- */
-void UHeapTupleSetHintBits(UHeapDiskTuple tuple, Buffer buffer, uint16 infomask, TransactionId xid)
-{
-    // The following scenario may use local snapshot, so do not set hint bits.
-    // Notice: we don't support two or more bits within infomask.
-    //
-    Assert(infomask > 0);
-    Assert((infomask & (infomask - 1)) == 0);
-    if ((t_thrd.xact_cxt.useLocalSnapshot && !(infomask & UHEAP_XID_COMMITTED)) || RecoveryInProgress() ||
-        g_instance.attr.attr_storage.IsRoachStandbyCluster) {
-        ereport(DEBUG2, (errmsg("ignore setting tuple hint bits when local snapshot is used.")));
-        return;
-    }
-
-    if (XACT_READ_UNCOMMITTED == u_sess->utils_cxt.XactIsoLevel && !(infomask & UHEAP_XID_COMMITTED)) {
-        ereport(DEBUG2, (errmsg("ignore setting tuple hint bits when XACT_READ_UNCOMMITTED is used.")));
-        return;
-    }
-
-    if (TransactionIdIsValid(xid)) {
-        /* NB: xid must be known committed here! */
-        XLogRecPtr commitLSN = TransactionIdGetCommitLSN(xid);
-        if (BufferIsPermanent(buffer) && XLogNeedsFlush(commitLSN) && XLByteLT(BufferGetLSNAtomic(buffer), commitLSN)) {
-            /* not flushed and no LSN interlock, so don't set hint */
-            return;
-        }
-    }
-
-    MarkBufferDirtyHint(buffer, true);
-}
-
-/*
  * UHeapGetSysAttr
  * Fetch the value of a system attribute for a tuple.
  */
@@ -923,6 +903,62 @@ Datum UHeapGetSysAttr(UHeapTuple uhtup, Buffer buf, int attnum, TupleDesc tupleD
             result = PointerGetDatum(&(uhtup->ctid));
             break;
         case MinTransactionIdAttributeNumber:
+            {
+                UHeapTupleTransInfo uinfo;
+                bool releaseBuf = false;
+                OffsetNumber offnum = ItemPointerGetOffsetNumber(&uhtup->ctid);
+                OffsetNumber blockno = ItemPointerGetBlockNumber(&uhtup->ctid);
+
+                /*
+                 * For xmin we may need to fetch the information from the undo
+                 * record, so ensure we have a valid buffer.
+                 *
+                 * ZBORKED: It does not seem acceptable to call
+                 * relation_open() here. This is a very low-level function
+                 * which has no business touching the relcache.
+                 */
+                if (!BufferIsValid(buf)) {
+                    Relation rel = relation_open(uhtup->table_oid, NoLock);
+                    buf = ReadBuffer(rel, blockno);
+                    relation_close(rel, NoLock);
+                    releaseBuf = true;
+                }
+
+                TransactionId lastXid = InvalidTransactionId;
+                UndoRecPtr urp = INVALID_UNDO_REC_PTR;
+                UndoTraversalState state = UHeapTupleGetTransInfo(buf, offnum, &uinfo, NULL, &lastXid, &urp);
+                if (releaseBuf) {
+                    ReleaseBuffer(buf);
+                }
+
+                if (state == UNDO_TRAVERSAL_ABORT) {
+                    int zoneId = (int)UNDO_PTR_GET_ZONE_ID(urp);
+                    undo::UndoZone *uzone = undo::UndoZoneGroup::GetUndoZone(zoneId, false);
+                    ereport(ERROR, (errmodule(MOD_UNDO), errmsg(
+                        "snapshot too old! the undo record has been force discard. "
+                        "Reason: Need fetch transInfo. "
+                        "LogInfo: undo state %d, tuple flag %u. "
+                        "TDInfo: tdxid %lu, tdid %d, undoptr %lu. "
+                        "TransInfo: xid %lu, oid %u, tid(%u, %u), lastXid %lu"
+                        "globalRecycleXid %lu, globalFrozenXid %lu."
+                        "ZoneInfo: urp: %lu, zid %d, insertUrecPtr %lu, forceDiscardUrecPtr %lu, "
+                        "discardUrecPtr %lu, recycleXid %lu. ",
+                        state, PtrGetVal(PtrGetVal(uhtup, disk_tuple), flag),
+                        uinfo.xid, uinfo.td_slot, uinfo.urec_add,
+                        GetTopTransactionIdIfAny(), PtrGetVal(uhtup, table_oid), blockno, offnum, lastXid,
+                        pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid),
+                        pg_atomic_read_u64(&g_instance.undo_cxt.globalFrozenXid),
+                        urp, zoneId, PtrGetVal(uzone, GetInsertURecPtr()), PtrGetVal(uzone, GetForceDiscardURecPtr()),
+                        PtrGetVal(uzone, GetDiscardURecPtr()), PtrGetVal(uzone, GetRecycleXid()))));
+                }
+
+                if (!TransactionIdIsValid(uinfo.xid) || TransactionIdOlderThanAllUndo(uinfo.xid)) {
+                    uinfo.xid = FrozenTransactionId;
+                }
+
+                result = TransactionIdGetDatum(uinfo.xid);
+            }
+            break;
         case MaxTransactionIdAttributeNumber:
         case MinCommandIdAttributeNumber:
         case MaxCommandIdAttributeNumber:
@@ -1069,6 +1105,7 @@ void UHeapCopyTupleWithBuffer(UHeapTuple srcTup, UHeapTuple destTup)
     errno_t rc = memcpy_s((char *)destTup->disk_tuple, destTup->disk_tuple_size, (char *)srcTup->disk_tuple,
         srcTup->disk_tuple_size);
     securec_check(rc, "\0", "\0");
+    FastVerifyUTuple(destTup->disk_tuple, InvalidBuffer);
 }
 
 /*
@@ -1152,6 +1189,7 @@ Datum UHeapNoCacheGetAttr(UHeapTuple tuple, uint32 attnum, TupleDesc tupleDesc)
     bool slow = false;      /* do we have to walk attrs? */
     int off;                /* current offset within data */
     int hoff = tup->t_hoff; /* header length on tuple data */
+    bool hasnulls = UHeapDiskTupHasNulls(tup);
 
     /* ----------------
      * Three cases:
@@ -1265,12 +1303,11 @@ Datum UHeapNoCacheGetAttr(UHeapTuple tuple, uint32 attnum, TupleDesc tupleDesc)
         int nullcount = 0;
         int tupleAttrs = UHeapTupleHeaderGetNatts(tup);
         bool enableReverseBitmap = NAttrsReserveSpace(tupleAttrs);
-        for (uint32 i = 0;; i++) { /* loop exit is at "break" */
+        for (uint32 i = 0; i <= attnum; i++) { /* loop exit is at "break" */
+            Assert(i < (uint32)tupleDesc->natts);
             int attrLen = att[i]->attlen;
 
-            Assert(i < (uint32)tupleDesc->natts);
-
-            if (UHeapDiskTupHasNulls(tup) && att_isnull(i, bp)) {
+            if (hasnulls && att_isnull(i, bp)) {
                 if (enableReverseBitmap && !att_isnull(tupleAttrs + nullcount, bp))
                     off += att[i]->attlen;
 
@@ -1289,7 +1326,7 @@ Datum UHeapNoCacheGetAttr(UHeapTuple tuple, uint32 attnum, TupleDesc tupleDesc)
                 att[i]->attcacheoff = off - hoff;
             }
 
-            if (i == attnum)
+            if (i == (uint32)attnum)
                 break;
 
             off = att_addlength_pointer(off, att[i]->attlen, tp + off);

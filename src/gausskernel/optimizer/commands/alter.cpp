@@ -568,7 +568,7 @@ void ExecAlterOwnerStmt(AlterOwnerStmt* stmt)
 
         case OBJECT_TYPE:
         case OBJECT_DOMAIN: /* same as TYPE */
-            AlterTypeOwner(stmt->object, newowner, stmt->objectType);
+            AlterTypeOwner(stmt->object, newowner, stmt->objectType, true);
             break;
 
         case OBJECT_TSDICTIONARY:

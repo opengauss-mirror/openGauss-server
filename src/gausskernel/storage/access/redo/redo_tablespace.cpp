@@ -44,7 +44,6 @@
 #include "nodes/bitmapset.h"
 #include "nodes/makefuncs.h"
 #include "postmaster/bgwriter.h"
-#include "storage/dfs/dfs_connector.h"
 #include "storage/smgr/fd.h"
 #include "storage/standby.h"
 #include "utils/acl.h"

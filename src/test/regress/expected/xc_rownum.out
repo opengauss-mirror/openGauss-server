@@ -284,6 +284,32 @@ select id from distributors group by id having rownum < 5;
 ERROR:  ROWNUM must appear in the GROUP BY clause or be used in an aggregate function
 LINE 1: select id from distributors group by id having rownum < 5;
                                                        ^
+select id+id from distributors group by id+id having rownum < 5;
+ ?column? 
+----------
+        2
+(1 row)
+
+select id, (select id from distributors where rownum <= 1) from distributors group by id;
+ id | id 
+----+----
+  1 |  1
+(1 row)
+
+select id, (select id from distributors group by id having rownum <= 1) from distributors group by id;
+ERROR:  ROWNUM must appear in the GROUP BY clause or be used in an aggregate function
+LINE 1: ..., (select id from distributors group by id having rownum <= ...
+                                                             ^
+select id from (select id from distributors where rownum <= 1) group by id;
+ id 
+----
+  1
+(1 row)
+
+select id from (select id from distributors group by id having rownum <= 1) group by id;
+ERROR:  ROWNUM must appear in the GROUP BY clause or be used in an aggregate function
+LINE 1: ...m (select id from distributors group by id having rownum <= ...
+                                                             ^
 --test alias name after where
 select rownum rn, name from distributors where rn<3;
 ERROR:  Alias "rn" reference with ROWNUM included is invalid.

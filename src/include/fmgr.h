@@ -162,7 +162,7 @@ typedef struct FunctionCallInfoData {
     Oid* argTypes;                               /* Argument type */
     Datum prealloc_arg[FUNC_PREALLOCED_ARGS];    /* prealloced arguments.*/
     bool prealloc_argnull[FUNC_PREALLOCED_ARGS]; /* prealloced argument null flags.*/
-    Oid prealloc_argTypes[FUNC_PREALLOCED_ARGS]; /* prealloced argument type */
+    Oid prealloc_argTypes[FUNC_PREALLOCED_ARGS] = {InvalidOid}; /* prealloced argument type */
     ScalarVector* argVector;                     /* Scalar Vector */
     RefcusorInfoData refcursor_data;
     UDFInfoType udfInfo;
@@ -215,6 +215,7 @@ extern DynamicFileList* file_tail;
 
 #define EXTRA_NARGS 3
 
+extern bool directory_exists(const char* direct);
 extern bool file_exists(const char* name);
 /*
  * This routine fills a FmgrInfo struct, given the OID

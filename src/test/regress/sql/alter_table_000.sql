@@ -297,3 +297,1029 @@ drop table tt_row_rep_2;
 drop table tt_col_rep_1;
 drop table tt_col_rep_2;
 select pg_catalog.ledger_hist_repair('0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000', 65536);
+
+-- test primary key is only supported in B mode
+-- alter table
+create table test_primary(f11 int, f12 varchar(20), f13 bool);
+-- error
+alter table test_primary add constraint con_t_pri primary key using btree(f11, f12);
+alter table test_primary add constraint primary key using btree(f11, f12);
+alter table test_primary add primary key using btree(f11, f12);
+alter table test_primary add primary key((abs(f11)));
+alter table test_primary add primary key((f11 * 2 + 1));
+alter table test_primary add primary key(f11 desc, f12 asc);
+
+-- success
+alter table test_primary add primary key(f11, f12);
+\d+ test_primary
+drop table test_primary;
+
+-- alter table using index
+-- success
+create table test_primary(f11 int, f12 varchar(20), f13 bool);
+create unique index idx_pri on test_primary using btree(f11, f12);
+alter table test_primary add constraint con_t_pri primary key using index idx_pri;
+\d+ test_primary
+drop table test_primary;
+
+create table test_primary(f11 int, f12 varchar(20), f13 bool);
+create unique index idx_pri on test_primary using btree(f11);
+alter table test_primary add primary key using index idx_pri;
+\d+ test_primary
+drop table test_primary;
+
+-- error
+create table test_primary(f11 int, f12 varchar(20), f13 bool);
+create unique index idx_pri on test_primary using btree(f11, f12);
+alter table test_primary add constraint primary key using index idx_pri;
+\d+ test_primary
+drop table test_primary;
+
+create table test_primary(f11 int, f12 varchar(20), f13 bool);
+create unique index idx_pri on test_primary using btree(f11 desc, f12 asc);
+alter table test_primary add constraint con_t_pri primary key using index idx_pri;
+\d+ test_primary
+drop table test_primary;
+
+create table test_primary(f11 int, f12 varchar(20), f13 bool);
+create unique index idx_pri1 on test_primary using btree((abs(f11)));
+-- error
+alter table test_primary add primary key using index idx_pri1;
+\d+ test_primary
+create unique index idx_pri2 on test_primary using btree((f11 * 2 + 1));
+-- error
+alter table test_primary add primary key using index idx_pri2;
+\d+ test_primary
+drop table test_primary;
+
+-- test foreign key is only supported in B mode
+-- alter table 
+create table test_primary(f11 int, f12 varchar(20), f13 bool, primary key(f11));
+create table test_foreign(f21 int, f22 timestamp);
+-- error
+alter table test_foreign add constraint con_t_foreign foreign key f_t_foreign (f21) references test_primary(f11);
+alter table test_foreign add constraint foreign key f_t_foreign (f21) references test_primary(f11);
+alter table test_foreign add foreign key f_t_foreign (f21) references test_primary(f11);
+
+-- success
+alter table test_foreign add constraint con_t_foreign foreign key (f21) references test_primary(f11);
+\d+ test_foreign
+drop table test_foreign;
+
+create table test_foreign(f21 int, f22 timestamp);
+alter table test_foreign add foreign key (f21) references test_primary(f11);
+\d+ test_foreign
+drop table test_foreign;
+drop table test_primary;
+
+-- test unique key is only supported in B mode
+-- alter table
+create table test_unique(f31 int, f32 varchar(20));
+-- error
+alter table test_unique add constraint con_t_unique unique u_t_unique using btree(f31);
+alter table test_unique add constraint con_t_unique unique using btree(f31);
+alter table test_unique add constraint unique u_t_unique using btree(f31);
+alter table test_unique add unique using btree(f31);
+alter table test_unique add constraint con_t_unique unique u_t_unique using btree((abs(f31)) desc);
+alter table test_unique add constraint con_t_unique unique u_t_unique using btree((f31 * 2 + 1) desc);
+alter table test_unique add unique using btree(f31 desc);
+
+-- success
+alter table test_unique add constraint con_t_unique unique(f31);
+\d+ test_unique
+drop table test_unique;
+
+
+-- alter table using index
+-- error
+create table test_unique(f31 int, f32 varchar(20));
+create unique index idx_unique on test_unique using btree(f31 desc, f32 asc);
+alter table test_unique add constraint con_t_unique unique using index idx_unique;
+\d+ test_unique
+drop table test_unique;
+
+create table test_unique(f31 int, f32 varchar(20));
+create unique index idx_unique on test_unique using btree(f31 desc, f32 asc);
+alter table test_unique add unique using index idx_unique;
+\d+ test_unique
+drop table test_unique;
+
+create table test_unique(f31 int, f32 varchar(20));
+create unique index idx_unique on test_unique using btree(f31, f32);
+alter table test_unique add constraint unique using index idx_unique;
+\d+ test_unique
+drop table test_unique;
+
+create table test_unique(f31 int, f32 varchar(20));
+create unique index idx_unique on test_unique using btree((abs(f31)) desc, f32 asc);
+alter table test_unique add unique using index idx_unique;
+\d+ test_unique
+drop table test_unique;
+
+create table test_unique(f31 int, f32 varchar(20));
+create unique index idx_unique on test_unique using btree((f31 * 2 + 1) desc, f32 asc);
+alter table test_unique add unique using index idx_unique;
+\d+ test_unique
+drop table test_unique;
+
+-- success
+create table test_unique(f31 int, f32 varchar(20));
+create unique index idx_unique on test_unique using btree(f31, f32);
+alter table test_unique add constraint con_t_unique unique using index idx_unique;
+\d+ test_unique
+drop table test_unique;
+
+-- partition table
+-- test primary key is only supported in B mode
+-- alter table
+-- error
+CREATE TABLE test_p_primary
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+alter table test_p_primary add constraint con_t_pri primary key using btree(f1, f2, f3);
+alter table test_p_primary add constraint primary key using btree(f1 desc, f2 asc, f3);
+alter table test_p_primary add primary key using btree(f1 desc, f2 asc, f3);
+alter table test_p_primary add primary key using btree(f1 desc, f2 asc, f3);
+alter table test_p_primary add primary key using btree((abs(f1)) desc, (f2 * 2 + 1) asc, f3);
+
+-- success
+alter table test_p_primary add constraint con_t_pri primary key(f1, f2, f3);
+\d+ test_p_primary
+drop table test_p_primary;
+
+-- alter table using index
+-- error
+CREATE TABLE test_p_primary
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+create unique index idx_pri on test_p_primary using btree(f1 desc, f2 asc, f3);
+alter table test_p_primary add constraint con_t_pri primary key using index idx_pri;
+\d+ test_p_primary
+drop table test_p_primary;
+
+CREATE TABLE test_p_primary
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+create unique index idx_pri on test_p_primary using btree(f1, f2, f3);
+alter table test_p_primary add constraint primary key using index idx_pri;
+\d+ test_p_primary
+drop table test_p_primary;
+
+CREATE TABLE test_p_primary
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+create unique index idx_pri on test_p_primary using btree(f1 desc, f2 asc, f3);
+alter table test_p_primary add primary key using index idx_pri;
+\d+ test_p_primary
+drop table test_p_primary;
+
+CREATE TABLE test_p_primary
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+create unique index idx_pri on test_p_primary using btree((abs(f1)) desc, (f2 * 2 + 1) asc, f3);
+alter table test_p_primary add primary key using index idx_pri1;
+\d+ test_p_primary
+drop table test_p_primary;
+
+
+-- test foreign key in M mode
+-- alter table 
+CREATE TABLE test_p_primary
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER,
+    primary key (f1)
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+
+-- error
+CREATE TABLE test_p_foreign
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+alter table test_p_foreign add constraint con_t_foreign foreign key f_t_foreign (f1) references test_p_primary(f1);
+\d+ test_p_foreign
+drop table test_p_foreign;
+
+CREATE TABLE test_p_foreign
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+alter table test_p_foreign add constraint foreign key f_t_foreign(f1) references test_p_primary(f1);
+\d+ test_p_foreign
+drop table test_p_foreign;
+
+CREATE TABLE test_p_foreign
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+alter table test_p_foreign add foreign key f_t_foreign(f1) references test_p_primary(f1);
+\d+ test_p_foreign
+drop table test_p_foreign;
+
+
+-- success
+CREATE TABLE test_p_foreign
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+alter table test_p_foreign add constraint con_t_foreign foreign key(f1) references test_p_primary(f1);
+\d+ test_p_foreign
+drop table test_p_foreign;
+
+CREATE TABLE test_p_foreign
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+alter table test_p_foreign add foreign key(f1) references test_p_primary(f1);
+\d+ test_p_foreign
+drop table test_p_foreign;
+drop table test_p_primary;
+
+
+-- test unique key in M mode
+-- alter table
+-- error
+CREATE TABLE test_p_unique
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+alter table test_p_unique add constraint con_t_unique unique u_t_unique using btree(f1);
+alter table test_p_unique add constraint con_t_unique unique using btree(f1);
+alter table test_p_unique add constraint unique u_t_unique using btree(f1);
+alter table test_p_unique add unique using btree(f1);
+alter table test_p_unique add unique(f1 desc, f2 asc, f3);
+alter table test_p_unique add constraint con_t_unique unique ((abs(f1)) desc, (f2 * 2 + 1) asc, f3);
+
+
+-- success
+alter table test_p_unique add constraint con_t_unique unique(f1, f2, f3);
+\d+ test_p_unique
+drop table test_p_unique;
+
+
+-- alter table using index
+-- error
+CREATE TABLE test_p_unique
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+create unique index idx_unique on test_p_unique using btree(f1 desc, f2 asc);
+alter table test_p_unique add constraint con_t_unique unique using index idx_unique;
+\d+ test_p_unique
+drop table test_p_unique;
+
+
+CREATE TABLE test_p_unique
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+create unique index idx_unique on test_p_unique using btree(f1, f2);
+alter table test_p_unique add constraint unique using index idx_unique;
+\d+ test_p_unique
+drop table test_p_unique;
+
+CREATE TABLE test_p_unique
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+create unique index idx_unique on test_p_unique using btree(f1 desc, f2 asc);
+alter table test_p_unique add unique using index idx_unique;
+\d+ test_p_unique
+drop table test_p_unique;
+
+
+CREATE TABLE test_p_unique
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+create unique index idx_unique on test_p_unique using btree((abs(f1)) desc, (f2 * 2 + 1) asc, f3);
+alter table test_p_unique add unique using index idx_unique;
+\d+ test_p_unique
+drop table test_p_unique;
+
+
+-- b compatibility case
+drop database if exists b;
+create database b dbcompatibility 'b';
+
+\c b
+-- test primary key is only supported in B mode
+-- alter table
+create table test_primary(f11 int, f12 varchar(20), f13 bool);
+alter table test_primary add constraint con_t_pri primary key using btree(f11 desc, f12 asc);
+\d+ test_primary
+drop table test_primary;
+
+create table test_primary(f11 int, f12 varchar(20), f13 bool);
+alter table test_primary add constraint primary key(f11 desc, f12 asc);
+\d+ test_primary
+drop table test_primary;
+
+create table test_primary(f11 int, f12 varchar(20), f13 bool);
+alter table test_primary add primary key using btree(f11 desc, f12 asc);
+\d+ test_primary
+drop table test_primary;
+
+-- error
+create table test_primary(f11 int, f12 varchar(20), f13 bool);
+alter table test_primary add primary key((abs(f11)));
+alter table test_primary add primary key((f11 * 2 + 1));
+drop table test_primary;
+
+-- alter table using index
+create table test_primary(f11 int, f12 varchar(20), f13 bool);
+create unique index idx_pri on test_primary using btree(f11 desc, f12 asc);
+alter table test_primary add constraint con_t_pri primary key using index idx_pri;
+\d+ test_primary
+drop table test_primary;
+
+create table test_primary(f11 int, f12 varchar(20), f13 bool);
+create unique index idx_pri on test_primary using btree(f11 desc, f12 asc);
+alter table test_primary add constraint primary key using index idx_pri;
+\d+ test_primary
+drop table test_primary;
+
+create table test_primary(f11 int, f12 varchar(20), f13 bool);
+create unique index idx_pri on test_primary using btree(f11 desc);
+alter table test_primary add primary key using index idx_pri;
+\d+ test_primary
+drop table test_primary;
+
+create table test_primary(f11 int, f12 varchar(20), f13 bool);
+create unique index idx_pri1 on test_primary using btree((abs(f11)));
+-- error
+alter table test_primary add primary key using index idx_pri1;
+\d+ test_primary
+create unique index idx_pri2 on test_primary using btree((f11 * 2 + 1));
+-- error
+alter table test_primary add primary key using index idx_pri2;
+\d+ test_primary
+drop table test_primary;
+
+create table test_primary(f11 int, f12 varchar(20), f13 bool, primary key(f11));
+-- test foreign key in M mode
+-- alter table 
+create table test_foreign(f21 int, f22 timestamp);
+alter table test_foreign add constraint con_t_foreign foreign key f_t_foreign (f21) references test_primary(f11);
+\d+ test_foreign
+drop table test_foreign;
+
+create table test_foreign(f21 int, f22 timestamp);
+alter table test_foreign add constraint con_t_foreign foreign key (f21) references test_primary(f11);
+\d+ test_foreign
+drop table test_foreign;
+
+create table test_foreign(f21 int, f22 timestamp);
+alter table test_foreign add constraint foreign key f_t_foreign (f21) references test_primary(f11);
+\d+ test_foreign
+drop table test_foreign;
+
+create table test_foreign(f21 int, f22 timestamp);
+alter table test_foreign add foreign key f_t_foreign (f21) references test_primary(f11);
+\d+ test_foreign
+drop table test_foreign;
+
+create table test_foreign(f21 int, f22 timestamp);
+alter table test_foreign add foreign key (f21) references test_primary(f11);
+\d+ test_foreign
+drop table test_foreign;
+drop table test_primary;
+
+-- test unique key in M mode
+-- alter table
+create table test_unique(f31 int, f32 varchar(20));
+alter table test_unique add constraint con_t_unique unique u_t_unique using btree(f31);
+\d+ test_unique
+drop table test_unique;
+
+create table test_unique(f31 int, f32 varchar(20));
+alter table test_unique add constraint con_t_unique unique using btree(f31);
+\d+ test_unique
+drop table test_unique;
+
+create table test_unique(f31 int, f32 varchar(20));
+alter table test_unique add constraint unique u_t_unique using btree(f31);
+\d+ test_unique
+drop table test_unique;
+
+create table test_unique(f31 int, f32 varchar(20));
+alter table test_unique add unique using btree(f31);
+\d+ test_unique
+drop table test_unique;
+
+create table test_unique(f31 int, f32 varchar(20));
+alter table test_unique add constraint con_t_unique unique u_t_unique using btree((abs(f31)) desc);
+\d+ test_unique
+drop table test_unique;
+
+create table test_unique(f31 int, f32 varchar(20));
+alter table test_unique add constraint con_t_unique unique u_t_unique using btree((f31 * 2 + 1) desc);
+\d+ test_unique
+drop table test_unique;
+
+-- alter table using index
+create table test_unique(f31 int, f32 varchar(20));
+create unique index idx_unique on test_unique using btree(f31 desc, f32 asc);
+alter table test_unique add constraint con_t_unique unique using index idx_unique;
+\d+ test_unique
+drop table test_unique;
+
+create table test_unique(f31 int, f32 varchar(20));
+create unique index idx_unique on test_unique using btree(f31 desc, f32 asc);
+alter table test_unique add unique using index idx_unique;
+\d+ test_unique
+drop table test_unique;
+
+create table test_unique(f31 int, f32 varchar(20));
+create unique index idx_unique on test_unique using btree((abs(f31)) desc, f32 asc);
+alter table test_unique add unique using index idx_unique;
+\d+ test_unique
+drop table test_unique;
+
+create table test_unique(f31 int, f32 varchar(20));
+create unique index idx_unique on test_unique using btree((f31 * 2 + 1) desc, f32 asc);
+alter table test_unique add unique using index idx_unique;
+\d+ test_unique
+drop table test_unique;
+
+-- test primary key is only supported in B mode
+-- alter table
+CREATE TABLE test_p_primary
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+alter table test_p_primary add constraint con_t_pri primary key using btree(f1 desc, f2 asc, f3);
+\d+ test_p_primary
+drop table test_p_primary;
+
+CREATE TABLE test_p_primary
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+alter table test_p_primary add constraint primary key using btree(f1 desc, f2 asc, f3);
+\d+ test_p_primary
+drop table test_p_primary;
+
+CREATE TABLE test_p_primary
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+alter table test_p_primary add primary key using btree(f1 desc, f2 asc, f3);
+\d+ test_p_primary
+drop table test_p_primary;
+
+
+-- error
+CREATE TABLE test_p_primary
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+alter table test_p_primary add primary key using btree((abs(f1)) desc, (f2 * 2 + 1) asc, f3);
+drop table test_p_primary;
+
+
+-- alter table using index
+CREATE TABLE test_p_primary
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+create unique index idx_pri on test_p_primary using btree(f1 desc, f2 asc, f3);
+alter table test_p_primary add constraint con_t_pri primary key using index idx_pri;
+\d+ test_p_primary
+drop table test_p_primary;
+
+CREATE TABLE test_p_primary
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+create unique index idx_pri on test_p_primary using btree(f1 desc, f2 asc, f3);
+alter table test_p_primary add constraint primary key using index idx_pri;
+\d+ test_p_primary
+drop table test_p_primary;
+
+CREATE TABLE test_p_primary
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+create unique index idx_pri on test_p_primary using btree(f1 desc, f2 asc, f3);
+alter table test_p_primary add primary key using index idx_pri;
+\d+ test_p_primary
+drop table test_p_primary;
+
+CREATE TABLE test_p_primary
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+create unique index idx_pri on test_p_primary using btree((abs(f1)) desc, (f2 * 2 + 1) asc, f3);
+-- error
+alter table test_p_primary add primary key using index idx_pri1;
+\d+ test_p_primary
+drop table test_p_primary;
+
+CREATE TABLE test_p_primary
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER,
+    primary key (f1)
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+-- test foreign key in M mode
+-- alter table 
+CREATE TABLE test_p_foreign
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+alter table test_p_foreign add constraint con_t_foreign foreign key f_t_foreign (f1) references test_p_primary(f1);
+\d+ test_p_foreign
+drop table test_p_foreign;
+
+CREATE TABLE test_p_foreign
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+alter table test_p_foreign add constraint con_t_foreign foreign key(f1) references test_p_primary(f1);
+\d+ test_p_foreign
+drop table test_p_foreign;
+
+CREATE TABLE test_p_foreign
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+alter table test_p_foreign add constraint foreign key f_t_foreign(f1) references test_p_primary(f1);
+\d+ test_p_foreign
+drop table test_p_foreign;
+
+CREATE TABLE test_p_foreign
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+alter table test_p_foreign add foreign key f_t_foreign(f1) references test_p_primary(f1);
+\d+ test_p_foreign
+drop table test_p_foreign;
+
+CREATE TABLE test_p_foreign
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+alter table test_p_foreign add foreign key(f1) references test_p_primary(f1);
+\d+ test_p_foreign
+drop table test_p_foreign;
+
+-- test unique key in M mode
+-- alter table
+CREATE TABLE test_p_unique
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+
+alter table test_p_unique add constraint con_t_unique unique u_t_unique using btree(f1);
+\d+ test_p_unique
+drop table test_p_unique;
+
+CREATE TABLE test_p_unique
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+
+alter table test_p_unique add constraint con_t_unique unique using btree(f1);
+\d+ test_p_unique
+drop table test_p_unique;
+
+CREATE TABLE test_p_unique
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+
+alter table test_p_unique add constraint unique u_t_unique using btree(f1);
+\d+ test_p_unique
+drop table test_p_unique;
+
+
+CREATE TABLE test_p_unique
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+
+alter table test_p_unique add unique using btree(f1);
+\d+ test_p_unique
+drop table test_p_unique;
+
+CREATE TABLE test_p_unique
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+alter table test_p_unique add unique using btree(f1 desc, f2 asc, f3);
+\d+ test_p_unique
+drop table test_p_unique;
+
+CREATE TABLE test_p_unique
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+alter table test_p_unique add constraint con_t_unique unique u_t_unique using btree((abs(f1)) desc, (f2 * 2 + 1) asc, f3);
+\d+ test_p_unique
+drop table test_p_unique;
+
+-- alter table using index
+CREATE TABLE test_p_unique
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+create unique index idx_unique on test_p_unique using btree(f1 desc, f2 asc);
+alter table test_p_unique add constraint con_t_unique unique using index idx_unique;
+\d+ test_p_unique
+drop table test_p_unique;
+
+
+CREATE TABLE test_p_unique
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+create unique index idx_unique on test_p_unique using btree(f1 desc, f2 asc);
+alter table test_p_unique add constraint unique using index idx_unique;
+\d+ test_p_unique
+drop table test_p_unique;
+
+CREATE TABLE test_p_unique
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+create unique index idx_unique on test_p_unique using btree(f1 desc, f2 asc);
+alter table test_p_unique add unique using index idx_unique;
+\d+ test_p_unique
+drop table test_p_unique;
+
+
+CREATE TABLE test_p_unique
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+create unique index idx_unique on test_p_unique using btree((abs(f1)) desc, (f2 * 2 + 1) asc, f3);
+alter table test_p_unique add unique using index idx_unique;
+\d+ test_p_unique
+drop table test_p_unique;
+
+
+\c postgres

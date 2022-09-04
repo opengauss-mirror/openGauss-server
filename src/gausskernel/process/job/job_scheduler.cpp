@@ -164,6 +164,7 @@ NON_EXEC_STATIC void JobScheduleMain()
      * tcop/postgres.c.
      */
     (void)gspqsignal(SIGHUP, jobschd_sighup_handler);
+    (void)gspqsignal(SIGURG, print_stack);
     (void)gspqsignal(SIGINT, StatementCancelHandler);
     (void)gspqsignal(SIGTERM, jobschd_sigterm_handler);
 

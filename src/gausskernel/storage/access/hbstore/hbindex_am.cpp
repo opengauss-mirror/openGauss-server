@@ -629,7 +629,8 @@ HeapTuple scan_handler_idx_fetch_heap(IndexScanDesc scan)
     }
 }
 
-HeapTuple scan_handler_idx_getnext(IndexScanDesc scan, ScanDirection direction, Oid expect_partoid, int2 expect_bktid)
+HeapTuple scan_handler_idx_getnext(IndexScanDesc scan, ScanDirection direction, Oid expect_partoid,
+    int2 expect_bktid, bool* has_cur_xact_write)
 {
     Assert(scan != NULL);
 
@@ -640,7 +641,7 @@ HeapTuple scan_handler_idx_getnext(IndexScanDesc scan, ScanDirection direction, 
             return hbkt_idx_getnext(scan, direction, expect_bktid);
         }
     } else {
-        return (HeapTuple)index_getnext(scan, direction);
+        return (HeapTuple)index_getnext(scan, direction, has_cur_xact_write);
     }
 }
 

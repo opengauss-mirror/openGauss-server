@@ -34,7 +34,7 @@
 #include "libpq/libpq-int.h"
 
 /* global variables for con */
-char conninfo_global[MAX_REPLNODE_NUM][MAX_VALUE_LEN] = {{0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}};
+char conninfo_global[MAX_REPLNODE_NUM][MAX_VALUE_LEN] = {{0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}};
 static const char* config_para_build[MAX_REPLNODE_NUM] = {"",
     "replconninfo1",
     "replconninfo2",
@@ -42,7 +42,8 @@ static const char* config_para_build[MAX_REPLNODE_NUM] = {"",
     "replconninfo4",
     "replconninfo5",
     "replconninfo6",
-    "replconninfo7"};
+    "replconninfo7",
+    "replconninfo8"};
 static const char* config_para_cross_cluster_build[MAX_REPLNODE_NUM] = {
     "",
     "cross_cluster_replconninfo1",
@@ -51,7 +52,8 @@ static const char* config_para_cross_cluster_build[MAX_REPLNODE_NUM] = {
     "cross_cluster_replconninfo4",
     "cross_cluster_replconninfo5",
     "cross_cluster_replconninfo6",
-    "cross_cluster_replconninfo7"
+    "cross_cluster_replconninfo7",
+    "cross_cluster_replconninfo8"
 };
 
 /* Node name */
@@ -63,6 +65,8 @@ int conn_flag = 0;
 char g_buildapplication_name[MAX_VALUE_LEN] = {0};
 char g_buildprimary_slotname[MAX_VALUE_LEN] = {0};
 char g_str_replication_type[MAX_VALUE_LEN] = {0};
+char g_repl_auth_mode[MAX_VALUE_LEN] = {0};
+char g_repl_uuid[MAX_VALUE_LEN] = {0};
 int g_replconn_idx = -1;
 int g_replication_type = -1;
 bool is_cross_region_build = false;
@@ -70,6 +74,34 @@ bool is_cross_region_build = false;
 #define RT_WITH_MULTI_STANDBY 1
 
 static void walkdir(const char *path, int (*action) (const char *fname, bool isdir), bool process_symlinks);
+
+static void check_repl_uuid(char *repl_uuid)
+{
+#define IsAlNum(c) (((c) >= 'A' && (c) <= 'Z') || ((c) >= 'a' && (c) <= 'z') || ((c) >= '0' && (c) <= '9'))
+
+    if (repl_uuid == NULL) {
+        return;
+    }
+
+    int ptr = 0;
+
+    if (strlen(repl_uuid) >= NAMEDATALEN) {
+        pg_log(PG_PRINT, _("Max repl_uuid string length is 63.\n"));
+        exit(1);
+    }
+
+    while (repl_uuid[ptr] != '\0') {
+        if (!IsAlNum(repl_uuid[ptr])) {
+            pg_log(PG_PRINT, _("repl_uuid only accepts alphabetic or digital character, case insensitive.\n"));
+            exit(1);
+        }
+
+        repl_uuid[ptr] = tolower(repl_uuid[ptr]);
+        ptr++;
+    }
+
+    return;
+}
 
 int32 pg_atoi(const char* s, int size, int c)
 {
@@ -229,11 +261,11 @@ char** readfile(const char* path)
 
 /*
  * @@GaussDB@@
- * Brief            : CheckReplChannel
+ * Brief            : BuildCheckReplChannel
  * Description        :
  * Notes            :
  */
-static bool CheckReplChannel(const char* ChannelInfo)
+static bool BuildCheckReplChannel(const char* ChannelInfo)
 {
     char* iter = NULL;
     char* ReplStr = NULL;
@@ -343,7 +375,7 @@ int GetLengthAndCheckReplConn(const char* ConnInfoList)
         }
         token = strtok_r(ReplStr, ",", &p);
         while (token != NULL) {
-            if (CheckReplChannel(token)) {
+            if (BuildCheckReplChannel(token)) {
                 repl_len++;
             }
 
@@ -699,6 +731,27 @@ void get_conninfo(const char* filename)
             securec_check_c(rc, "", "");
         }
 
+        /* read repl_auth_mode */
+        lines_index = find_gucoption((const char**)optlines,
+            CONFIG_REPL_AUTH_MODE, NULL, NULL, &optvalue_off, &optvalue_len, '\'');
+        if (lines_index != INVALID_LINES_IDX) {
+            rc = strncpy_s(g_repl_auth_mode, MAX_VALUE_LEN, optlines[lines_index] + optvalue_off,
+                (size_t)Min(optvalue_len, MAX_VALUE_LEN - 1));
+            securec_check_c(rc, "", "");
+        }
+
+        /* read repl_uuid */
+        lines_index = find_gucoption((const char**)optlines,
+            CONFIG_REPL_UUID, NULL, NULL, &optvalue_off, &optvalue_len, '\'');
+        if (lines_index != INVALID_LINES_IDX) {
+            rc = strncpy_s(g_repl_uuid, MAX_VALUE_LEN, optlines[lines_index] + optvalue_off,
+                (size_t)Min(optvalue_len, MAX_VALUE_LEN - 1));
+            securec_check_c(rc, "", "");
+        }
+        check_repl_uuid(g_repl_uuid);
+
+        pg_log(PG_WARNING, "Get repl_auth_mode is %s and repl_uuid is %s\n", g_repl_auth_mode, g_repl_uuid);
+
         while (optlines[opt_index] != NULL) {
             free(optlines[opt_index]);
             optlines[opt_index] = NULL;
@@ -858,6 +911,13 @@ PGconn* check_and_conn(int conn_timeout, int recv_timeout, uint32 term)
     int i = 0;
     int parse_failed_num = 0;
     ReplConnInfo repl_conn_info;
+    bool is_uuid_auth = (strcmp(g_repl_auth_mode, REPL_AUTH_MODE_UUID) == 0 && strlen(g_repl_uuid) > 0);
+    char uuidOption[MAXPGPATH] = {0};
+
+    if (is_uuid_auth) {
+        tnRet = snprintf_s(uuidOption, sizeof(uuidOption), sizeof(uuidOption) - 1, "-c repl_uuid=%s", g_repl_uuid);
+        securec_check_ss_c(tnRet, "\0", "\0");
+    }
 
     for (i = 1; i < MAX_REPLNODE_NUM; i++) {
         bool parseOk = ParseReplConnInfo(conninfo_global[i - 1], &repl_arr_length, &repl_conn_info);
@@ -865,6 +925,7 @@ PGconn* check_and_conn(int conn_timeout, int recv_timeout, uint32 term)
             parse_failed_num++;
             continue;
         }
+        is_cross_region_build = repl_conn_info.isCrossRegion;
 
         tnRet = memset_s(repl_conninfo_str, MAXPGPATH, 0, MAXPGPATH);
         securec_check_ss_c(tnRet, "", "");
@@ -896,25 +957,39 @@ PGconn* check_and_conn(int conn_timeout, int recv_timeout, uint32 term)
                 "dbname=replication replication=true "
                 "fallback_application_name=gs_ctl "
                 "connect_timeout=%d rw_timeout=%d "
-                "options='-c remotetype=application'",
+                "options='-c remotetype=application %s'",
                 repl_conn_info.localhost,
                 repl_conn_info.localport,
                 repl_conn_info.remotehost,
                 repl_conn_info.remoteport,
                 conn_timeout,
-                recv_timeout);
+                recv_timeout,
+                uuidOption);
         }
         securec_check_ss_c(tnRet, "", "");
         con_get = check_and_get_primary_conn(repl_conninfo_str, term);
         tnRet = memset_s(repl_conninfo_str, MAXPGPATH, 0, MAXPGPATH);
         securec_check_ss_c(tnRet, "", "");
-        if (con_get != NULL) {
-            pg_log(PG_WARNING, "build try host(%s) port(%d) success\n", repl_conn_info.remotehost,
-                repl_conn_info.remoteport);
-            break;
+        if (is_cross_region_build) {
+            if (con_get != NULL && (g_replconn_idx == -1 || i == g_replconn_idx)) {
+                g_replconn_idx = i;
+                pg_log(PG_WARNING, "build try host(%s) port(%d) success\n", repl_conn_info.remotehost,
+                    repl_conn_info.remoteport);
+                break;
+            }
+        } else {
+            if (con_get != NULL) {
+                pg_log(PG_WARNING, "build try host(%s) port(%d) success\n", repl_conn_info.remotehost,
+                    repl_conn_info.remoteport);
+                break;
+            }
         }
         pg_log(PG_WARNING, "build try host(%s) port(%d) failed\n", repl_conn_info.remotehost,
             repl_conn_info.remoteport);
+        if (con_get != NULL) {
+            PQfinish(con_get);
+            con_get = NULL;
+        }
     }
 
     if (parse_failed_num == MAX_REPLNODE_NUM - 1) {
@@ -939,6 +1014,13 @@ PGconn* check_and_conn_for_standby(int conn_timeout, int recv_timeout, uint32 te
     int i = 0;
     int parse_failed_num = 0;
     ReplConnInfo repl_conn_info;
+    bool is_uuid_auth = (strcmp(g_repl_auth_mode, REPL_AUTH_MODE_UUID) == 0 && strlen(g_repl_uuid) > 0);
+    char uuidOption[MAXPGPATH] = {0};
+
+    if (is_uuid_auth) {
+        tnRet = snprintf_s(uuidOption, sizeof(uuidOption), sizeof(uuidOption) - 1, "-c repl_uuid=%s", g_repl_uuid);
+        securec_check_ss_c(tnRet, "\0", "\0");
+    }
 
     for (i = 1; i < MAX_REPLNODE_NUM; i++) {
         bool parseOk = ParseReplConnInfo(conninfo_global[i - 1], &repl_arr_length, &repl_conn_info);
@@ -957,13 +1039,14 @@ PGconn* check_and_conn_for_standby(int conn_timeout, int recv_timeout, uint32 te
             "dbname=replication replication=true "
             "fallback_application_name=gs_ctl "
             "connect_timeout=%d rw_timeout=%d "
-            "options='-c remotetype=application'",
+            "options='-c remotetype=application %s'",
             repl_conn_info.localhost,
             repl_conn_info.localport,
             repl_conn_info.remotehost,
             repl_conn_info.remoteport,
             conn_timeout,
-            recv_timeout);
+            recv_timeout,
+            uuidOption);
         securec_check_ss_c(tnRet, "", "");
 
 
@@ -976,6 +1059,9 @@ PGconn* check_and_conn_for_standby(int conn_timeout, int recv_timeout, uint32 te
                 pg_log(PG_WARNING, "standby build try host(%s) port(%d) success\n", repl_conn_info.remotehost,
                     repl_conn_info.remoteport);
                 break;
+            } else {
+                PQfinish(con_get);
+                con_get = NULL;
             }
         } else {
             if (con_get != NULL) {
@@ -1008,8 +1094,11 @@ PGconn* check_and_conn_for_standby(int conn_timeout, int recv_timeout, uint32 te
  * Notes            :
  */
 int find_gucoption(
-    const char** optlines, const char* opt_name, int* name_offset, int* name_len, int* value_offset, int* value_len)
+    const char** optlines, const char* opt_name, int* name_offset, int* name_len,
+    int* value_offset, int* value_len, unsigned char strip_char)
 {
+#define SKIP_CHAR(c, skip_c) (isspace((c)) || (c) == (skip_c))
+
     const char* p = NULL;
     const char* q = NULL;
     const char* tmp = NULL;
@@ -1042,12 +1131,12 @@ int find_gucoption(
             continue;
         }
         p++;
-        while (isspace((unsigned char)*p)) {
+        while (SKIP_CHAR(((unsigned char)*p), strip_char)) {
             p++;
         }
         q = p;
         while (*q && !(*q == '\n' || *q == '#')) {
-            if (!isspace((unsigned char)*q)) {
+            if (!(SKIP_CHAR(((unsigned char)*q), strip_char))) {
                 tmp = ++q;
             } else {
                 q++;
@@ -1552,7 +1641,7 @@ bool libpqRotateCbmFile(PGconn* connObj, XLogRecPtr lsn)
     bool ec = true;
 
     errorno = snprintf_s(sql, MAX_QUERY_LEN, MAX_QUERY_LEN - 1,
-        "select * from pg_cbm_rotate_file('%08X/%08X'); ",
+        "select * from pg_catalog.pg_cbm_rotate_file('%08X/%08X'); ",
         (uint32)(lsn >> 32), (uint32)(lsn));
     securec_check_ss_c(errorno, "\0", "\0");
     res = PQexec(connObj, sql);
@@ -1629,7 +1718,7 @@ void fsync_pgdata(const char *pg_data)
         struct stat st;
 
         if (lstat(pg_xlog, &st) < 0) {
-            pg_log(PG_WARNING, _("could not stat file \"%s\": %m\n"), pg_xlog);
+            pg_log(PG_WARNING, _("could not stat file \"%s\": %s\n"), pg_xlog, strerror(errno));
             exit(1);
         }
         else if (S_ISLNK(st.st_mode))
@@ -1677,7 +1766,7 @@ static void walkdir(const char *path, int (*action) (const char *fname, bool isd
 
     dir = opendir(path);
     if (dir == NULL) {
-        pg_log(PG_WARNING, _("could not open directory \"%s\": %m\n"), path);
+        pg_log(PG_WARNING, _("could not open directory \"%s\": %s\n"), path, strerror(errno));
         return;
     }
 
@@ -1700,7 +1789,7 @@ static void walkdir(const char *path, int (*action) (const char *fname, bool isd
         else
             sret = lstat(subpath, &fst);
         if (sret < 0) {
-            pg_log(PG_WARNING, _("could not stat file \"%s\": %m\n"), subpath);
+            pg_log(PG_WARNING, _("could not stat file \"%s\": %s\n"), subpath, strerror(errno));
             continue;
         }
 
@@ -1711,7 +1800,7 @@ static void walkdir(const char *path, int (*action) (const char *fname, bool isd
     }
 
     if (errno)
-        pg_log(PG_WARNING, _("could not read directory \"%s\": %m\n"), path);
+        pg_log(PG_WARNING, _("could not read directory \"%s\": %s\n"), path, strerror(errno));
 
     (void)closedir(dir);
 
@@ -1758,7 +1847,7 @@ int fsync_fname(const char *fname, bool isdir)
     if (fd < 0) {
         if (errno == EACCES || (isdir && errno == EISDIR))
             return 0;
-        pg_log(PG_WARNING, _("could not open file \"%s\": %m\n"), fname);
+        pg_log(PG_WARNING, _("could not open file \"%s\": %s\n"), fname, strerror(errno));
         return -1;
     }
 
@@ -1769,7 +1858,7 @@ int fsync_fname(const char *fname, bool isdir)
      * those errors. Anything else needs to be reported.
      */
     if (returncode != 0 && !(isdir && (errno == EBADF || errno == EINVAL))) {
-        pg_log(PG_WARNING, _("could not fsync file \"%s\": %m\n"), fname);
+        pg_log(PG_WARNING, _("could not fsync file \"%s\": %s\n"), fname, strerror(errno));
         (void) close(fd);
         exit(EXIT_FAILURE);
     }

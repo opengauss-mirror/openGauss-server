@@ -1328,6 +1328,7 @@ void DataSndSignals(void)
     (void)gspqsignal(SIGTTOU, SIG_DFL);
     (void)gspqsignal(SIGCONT, SIG_DFL);
     (void)gspqsignal(SIGWINCH, SIG_DFL);
+    (void)gspqsignal(SIGURG, print_stack);
 }
 
 /* Report shared-memory space needed by DataSndShmemInit */

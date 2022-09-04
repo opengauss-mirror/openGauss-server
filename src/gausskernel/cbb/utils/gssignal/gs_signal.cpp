@@ -366,6 +366,7 @@ void gs_signal_slots_init(unsigned long int size)
         tmp_sig_slot = &(g_instance.signal_base->slots[loop]);
         tmp_sig_slot->gssignal = gs_signal_init(cnt_nodes);
         tmp_sig_slot->thread_id = 0;
+        tmp_sig_slot->lwtid = 0;
         tmp_sig_slot->thread_name = NULL;
     }
 
@@ -391,6 +392,7 @@ static GsSignalSlot* gs_signal_alloc_slot_for_new_thread(char* name, ThreadId th
         if (slots_index->thread_id == 0) {
             slots_index->thread_id = thread_id;
             slots_index->thread_name = name;
+            slots_index->lwtid = syscall(SYS_gettid);
             break;
         }
         slots_index++;
@@ -528,6 +530,7 @@ GsSignalSlot* gs_signal_slot_release(ThreadId thread_id)
         if (slots_index->thread_id == thread_id) {
             slots_index->thread_id = 0;
             slots_index->thread_name = NULL;
+            slots_index->lwtid = 0;
             break;
         }
 
@@ -887,6 +890,7 @@ void* gs_signal_receiver_thread(void* args)
     sigaddset(&waitMask, SIGQUIT);
     sigaddset(&waitMask, SIGHUP);
     sigaddset(&waitMask, SIGUSR1);
+    sigaddset(&waitMask, SIGURG);
 
     gs_signal_block_sigusr2();
 

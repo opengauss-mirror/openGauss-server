@@ -43,6 +43,12 @@
 #include "pg_trace.h"
 #include "pgstat.h"
 
+#include "storage/cfs/cfs.h"
+#include "storage/cfs/cfs_converter.h"
+#include "storage/cfs/cfs_md.h"
+
+constexpr mode_t FILE_RW_PERMISSION = 0600;
+
 /* Populate a file tag describing an md.cpp segment file. */
 #define INIT_MD_FILETAG(tag, rNode, forkNum, segNo)                         \
     do                                                                      \
@@ -55,8 +61,6 @@
         (tag).rnode = (rNode);                                              \
         (tag).segno = (segNo);                                              \
     } while (false);
-
-constexpr mode_t FILE_RW_PERMISSION = 0600;
 
 inline static uint4 PageCompressChunkSize(SMgrRelation reln)
 {
@@ -103,13 +107,6 @@ inline static uint4 PageCompressChunkSize(SMgrRelation reln)
  *
  *  All MdfdVec objects are palloc'd in the MdCxt memory context.
  */
-typedef struct _MdfdVec {
-    File mdfd_vfd;               /* fd number in fd.c's pool */
-    File mdfd_vfd_pca;    /* page compression address file 's fd number in fd.cpp's pool */
-    File mdfd_vfd_pcd;    /* page compression data file 's fd number in fd.cpp's pool */
-    BlockNumber mdfd_segno;      /* segment number, from 0 */
-    struct _MdfdVec *mdfd_chain; /* next segment, or NULL */
-} MdfdVec;
 
 /* local routines */
 static void mdunlinkfork(const RelFileNodeBackend &rnode, ForkNumber forkNum, bool isRedo);
@@ -122,8 +119,6 @@ static BlockNumber _mdnblocks(SMgrRelation reln, ForkNumber forknum, const MdfdV
 static void register_dirty_segment(SMgrRelation reln, ForkNumber forknum, const MdfdVec *seg);
 static void register_unlink_segment(RelFileNodeBackend rnode, ForkNumber forknum, BlockNumber segno);
 
-/* function of compressed table */
-static int sync_pcmap(PageCompressHeader *pcMap, uint32 wait_event_info);
 
 bool check_unlink_rel_hashtbl(RelFileNode rnode, ForkNumber forknum)
 {
@@ -146,44 +141,6 @@ bool check_unlink_rel_hashtbl(RelFileNode rnode, ForkNumber forknum)
     return found;
 }
 
-static int OpenPcaFile(const char *path, const RelFileNodeBackend &node, const ForkNumber &forkNum, const uint32 &segNo, int oflags = 0)
-{
-    Assert(node.node.opt != 0 && forkNum == MAIN_FORKNUM);
-    char dst[MAXPGPATH];
-    CopyCompressedPath(dst, path, COMPRESSED_TABLE_PCA_FILE);
-    uint32 flags = O_RDWR | PG_BINARY | oflags;
-    return DataFileIdOpenFile(dst, RelFileNodeForkNumFill(node, PCA_FORKNUM, segNo), (int)flags, S_IRUSR | S_IWUSR);
-}
-
-static int OpenPcdFile(const char *path, const RelFileNodeBackend &node, const ForkNumber &forkNum, const uint32 &segNo, int oflags = 0)
-{
-    Assert(node.node.opt != 0 && forkNum == MAIN_FORKNUM);
-    char dst[MAXPGPATH];
-    CopyCompressedPath(dst, path, COMPRESSED_TABLE_PCD_FILE);
-    uint32 flags = O_RDWR | PG_BINARY | oflags;
-    return DataFileIdOpenFile(dst, RelFileNodeForkNumFill(node, PCD_FORKNUM, segNo), (int)flags, S_IRUSR | S_IWUSR);
-}
-
-static void RegisterCompressDirtySegment(SMgrRelation reln, ForkNumber forknum, const MdfdVec *seg)
-{
-    PageCompressHeader *pcMap = GetPageCompressMemoryMap(seg->mdfd_vfd_pca, PageCompressChunkSize(reln));
-    if (sync_pcmap(pcMap, WAIT_EVENT_COMPRESS_ADDRESS_FILE_SYNC) != 0) {
-        if (check_unlink_rel_hashtbl(reln->smgr_rnode.node, forknum)) {
-            ereport(DEBUG1, (errmsg("could not fsync file \"%s\": %m", FilePathName(seg->mdfd_vfd))));
-            return;
-        }
-        ereport(data_sync_elevel(ERROR), (errcode_for_file_access(), errmsg("could not msync file \"%s\": %m",
-                                                                            FilePathName(seg->mdfd_vfd_pca))));
-    }
-    if (FileSync(seg->mdfd_vfd_pcd, WAIT_EVENT_DATA_FILE_SYNC) < 0) {
-        if (check_unlink_rel_hashtbl(reln->smgr_rnode.node, forknum)) {
-            ereport(DEBUG1, (errmsg("could not fsync file \"%s\": %m", FilePathName(seg->mdfd_vfd))));
-            return;
-        }
-        ereport(data_sync_elevel(ERROR), (errcode_for_file_access(), errmsg("could not fsync file \"%s\": %m",
-                                                                            FilePathName(seg->mdfd_vfd_pcd))));
-    }
-}
 /*
  * register_dirty_segment() -- Mark a relation segment as needing fsync
  *
@@ -204,17 +161,10 @@ static void register_dirty_segment(SMgrRelation reln, ForkNumber forknum, const 
 
     if (!RegisterSyncRequest(&tag, SYNC_REQUEST, false /* retryOnError */)) {
         ereport(DEBUG1, (errmsg("could not forward fsync request because request queue is full")));
-
-        if (IS_COMPRESSED_MAINFORK(reln, forknum)) {
-            RegisterCompressDirtySegment(reln, forknum, seg);
-        } else {
-            if (FileSync(seg->mdfd_vfd, WAIT_EVENT_DATA_FILE_SYNC) < 0) {
-                if (check_unlink_rel_hashtbl(reln->smgr_rnode.node, forknum)) {
-                    ereport(DEBUG1, (errmsg("could not fsync file \"%s\": %m", FilePathName(seg->mdfd_vfd))));
-                    return;
-                }
-                ereport(data_sync_elevel(ERROR), (errcode_for_file_access(),
-                                                  errmsg("could not fsync file \"%s\": %m", FilePathName(seg->mdfd_vfd))));
+        if (FileSync(seg->mdfd_vfd, WAIT_EVENT_DATA_FILE_SYNC) < 0) {
+            if (check_unlink_rel_hashtbl(reln->smgr_rnode.node, forknum)) {
+                ereport(DEBUG1, (errmsg("could not fsync file \"%s\": %m", FilePathName(seg->mdfd_vfd))));
+                return;
             }
         }
     }
@@ -244,28 +194,6 @@ void md_register_forget_request(RelFileNode rnode, ForkNumber forknum, BlockNumb
     INIT_MD_FILETAG(tag, rnode, forknum, segno);
 
     RegisterSyncRequest(&tag, SYNC_FORGET_REQUEST, true /* retryOnError */);
-}
-
-static void allocate_chunk_check(PageCompressAddr *pcAddr, uint32 chunk_size, BlockNumber blocknum, MdfdVec *v)
-{
-    /* check allocated chunk number */
-    Assert(chunk_size == BLCKSZ / 2 || chunk_size == BLCKSZ / 4 || chunk_size == BLCKSZ / 8 ||
-           chunk_size == BLCKSZ / 16);
-    if (pcAddr->allocated_chunks > BLCKSZ / chunk_size) {
-        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("invalid chunks %u of block %u in file \"%s\"",
-                                                                pcAddr->allocated_chunks, blocknum,
-                                                                FilePathName(v->mdfd_vfd_pca))));
-    }
-
-    auto maxChunkNumbers = MAX_CHUNK_NUMBER(chunk_size);
-    for (auto i = 0; i < pcAddr->allocated_chunks; i++) {
-        if (pcAddr->chunknos[i] <= 0 || pcAddr->chunknos[i] > maxChunkNumbers) {
-            ereport(ERROR,
-                    (errcode(ERRCODE_DATA_CORRUPTED), errmsg("invalid chunk number %u of block %u in file \"%s\"",
-                                                             pcAddr->chunknos[i], blocknum,
-                                                             FilePathName(v->mdfd_vfd_pca))));
-        }
-    }
 }
 
 int openrepairfile(char* path, RelFileNodeForkNum filenode)
@@ -344,7 +272,7 @@ static int RetryDataFileIdOpenFile(bool isRedo, char* path, const RelFileNodeFor
         }
         ADIO_END();
 
-        fd = DataFileIdOpenFile(path, filenode, flags, FILE_RW_PERMISSION);
+        fd = DataFileIdOpenFile(path, filenode, (int)flags, (int)FILE_RW_PERMISSION);
     }
 
     if (fd < 0) {
@@ -353,7 +281,6 @@ static int RetryDataFileIdOpenFile(bool isRedo, char* path, const RelFileNodeFor
         ereport(ERROR, (errcode_for_file_access(), errmsg("could not create file \"%s\": %m", path)));
     }
     return fd;
-
 }
 
 /*
@@ -383,17 +310,26 @@ void mdcreate(SMgrRelation reln, ForkNumber forkNum, bool isRedo)
     }
     ADIO_END();
 
+    char* openFilePath = path;
+    char dst[MAXPGPATH];
+    if (IS_COMPRESSED_MAINFORK(reln, forkNum)) {
+        CopyCompressedPath(dst, path);
+        openFilePath = dst;
+    }
+
     if (isRedo && (AmStartupProcess() || AmPageRedoWorker() || AmPageWriterProcess() || AmCheckpointerProcess()) &&
         CheckFileRepairHashTbl(reln->smgr_rnode.node, forkNum, 0)) {
-        fd = openrepairfile(path, filenode);
+        fd = openrepairfile(openFilePath, filenode);
         if (fd >= 0) {
-            ereport(LOG, (errmsg("[file repair] open repair file %s.repair", path)));
+            ereport(LOG, (errmsg("[file repair] open repair file %s.repair", openFilePath)));
         }
     } else {
-        fd = DataFileIdOpenFile(path, filenode, flags, 0600);
+        fd = DataFileIdOpenFile(openFilePath, filenode, flags, 0600);
     }
 
     if (fd < 0) {
+        int save_errno = errno;
+
         /*
          * During bootstrap, there are cases where a system relation will be
          * accessed (by internal backend processes) before the bootstrap
@@ -405,43 +341,32 @@ void mdcreate(SMgrRelation reln, ForkNumber forkNum, bool isRedo)
          * new catalogs can by no means be used by other relations, we simply
          * truncate them.
          */
-        fd = RetryDataFileIdOpenFile(isRedo, path, filenode, flags);
-    }
+        if (isRedo || IsBootstrapProcessingMode() ||
+            (u_sess->attr.attr_common.IsInplaceUpgrade && filenode.rnode.node.relNode < FirstNormalObjectId)) {
+            ADIO_RUN() {
+                flags = O_RDWR | PG_BINARY | O_DIRECT | (u_sess->attr.attr_common.IsInplaceUpgrade ? O_TRUNC : 0);
+            }
+            ADIO_ELSE() {
+                flags = O_RDWR | PG_BINARY | (u_sess->attr.attr_common.IsInplaceUpgrade ? O_TRUNC : 0);
+            } ADIO_END();
 
-    File fd_pca = -1;
-    File fd_pcd = -1;
-    if (unlikely(IS_COMPRESSED_MAINFORK(reln, forkNum))) {
-        // close main fork file
-        FileClose(fd);
-        fd = -1;
-
-        /* open page compress address file */
-        char pcfile_path[MAXPGPATH];
-        errno_t rc = snprintf_s(pcfile_path, MAXPGPATH, MAXPGPATH - 1, PCA_SUFFIX, path);
-        securec_check_ss(rc, "\0", "\0");
-        RelFileNodeForkNum pcaFienode = RelFileNodeForkNumFill(reln->smgr_rnode, PCA_FORKNUM, 0);
-        fd_pca = DataFileIdOpenFile(pcfile_path, pcaFienode, flags, FILE_RW_PERMISSION);
-
-        if (fd_pca < 0) {
-            fd_pca = RetryDataFileIdOpenFile(isRedo, pcfile_path, pcaFienode, flags);
+            fd = DataFileIdOpenFile(openFilePath, filenode, flags, 0600);
         }
 
-        rc = snprintf_s(pcfile_path, MAXPGPATH, MAXPGPATH - 1, PCD_SUFFIX, path);
-        securec_check_ss(rc, "\0", "\0");
-        RelFileNodeForkNum pcdFileNode = RelFileNodeForkNumFill(reln->smgr_rnode, PCD_FORKNUM, 0);
-        fd_pcd = DataFileIdOpenFile(pcfile_path, pcdFileNode, flags, FILE_RW_PERMISSION);
-        if (fd_pcd < 0) {
-            fd_pcd = RetryDataFileIdOpenFile(isRedo, pcfile_path, pcdFileNode, flags);
+        if (fd < 0) {
+            /* be sure to report the error reported by create, not open */
+            errno = save_errno;
+            ereport(ERROR, (errcode_for_file_access(), errmsg("could not create file \"%s\": %m", openFilePath)));
         }
-        SetupPageCompressMemoryMap(fd_pca, reln->smgr_rnode.node, filenode);
     }
 
+    if (fd < 0) {
+        fd = RetryDataFileIdOpenFile(isRedo, openFilePath, filenode, flags);
+    }
     pfree(path);
 
     reln->md_fd[forkNum] = _fdvec_alloc();
 
-    reln->md_fd[forkNum]->mdfd_vfd_pca = fd_pca;
-    reln->md_fd[forkNum] ->mdfd_vfd_pcd = fd_pcd;
     reln->md_fd[forkNum]->mdfd_vfd = fd;
     reln->md_fd[forkNum]->mdfd_segno = 0;
     reln->md_fd[forkNum]->mdfd_chain = NULL;
@@ -541,108 +466,6 @@ void set_max_segno_delrel(int max_segno, RelFileNode rnode, ForkNumber forknum)
     return;
 }
 
-/**
- * set all zero  to pca file
- * @param fd pca file fd 
- * @param chunkSize chunkSize
- * @param path for errport
- * @return 0 for success and other for failed
- */
-static int ResetPcaFileInner(int fd, int chunkSize, char *path)
-{
-    bool ret = 0;
-    int mapRealSize = SIZE_OF_PAGE_COMPRESS_ADDR_FILE(chunkSize);
-    PageCompressHeader *map = pc_mmap_real_size(fd, mapRealSize, false);
-    if (map == MAP_FAILED) {
-        ereport(WARNING, (errcode(ERRCODE_INSUFFICIENT_RESOURCES), errmsg("Failed to mmap %s: %m", path)));
-        ret = -1;
-    } else {
-        pg_atomic_write_u32(&map->nblocks, 0);
-        pg_atomic_write_u32(&map->allocated_chunks, 0);
-        error_t rc =
-            memset_s((char *)map + SIZE_OF_PAGE_COMPRESS_HEADER_DATA, mapRealSize - SIZE_OF_PAGE_COMPRESS_HEADER_DATA,
-                     0, SIZE_OF_PAGE_COMPRESS_ADDR_FILE(chunkSize) - SIZE_OF_PAGE_COMPRESS_HEADER_DATA);
-        securec_check_c(rc, "\0", "\0");
-        map->sync = false;
-        if (sync_pcmap(map, WAIT_EVENT_COMPRESS_ADDRESS_FILE_SYNC) != 0) {
-            ret = -1;
-            ereport(WARNING, (errcode_for_file_access(), errmsg("could not msync file \"%s\": %m", path)));
-        }
-        /* if mmap is called then pc_munmap must be called too */
-        if (pc_munmap(map) != 0) {
-            ret = -1;
-            ereport(WARNING, (errcode_for_file_access(), errmsg("could not munmap file \"%s\": %m", path)));
-        }
-    }
-    return ret;
-}
-
-/**
- * 
- * @param fd pca_file fd
- * @param chunkSize chunkSize destination
- * @param path for ereport
- * @return success or not
- */
-static bool ReadChunkSizeFromFile(int fd, uint16 *chunkSize, char *path)
-{
-    off_t chunkSizeOffset = (off_t)offsetof(PageCompressHeader, chunk_size);
-    if (lseek(fd, chunkSizeOffset, SEEK_SET) != chunkSizeOffset && errno != ENOENT) {
-        ereport(WARNING, (errcode_for_file_access(), errmsg("could not lseek file \"%s\": %m", path)));
-        return false;
-    }
-    if (read(fd, chunkSize, sizeof(*chunkSize)) != sizeof(*chunkSize) && errno != ENOENT) {
-        ereport(WARNING, (errcode_for_file_access(), errmsg("could not read file \"%s\": %m", path)));
-        return false;
-    }
-    return true;
-}
-
-static int ResetPcMap(char *path, const RelFileNodeBackend &rnode)
-{
-    int ret = 0;
-    char pcfile_path[MAXPGPATH];
-    int rc = snprintf_s(pcfile_path, MAXPGPATH, MAXPGPATH - 1, PCA_SUFFIX, path);
-    securec_check_ss(rc, "\0", "\0");
-    int fd_pca = BasicOpenFile(pcfile_path, O_RDWR | PG_BINARY, 0);
-    if (fd_pca < 0) {
-        return -1;
-    }
-    uint16 chunkSize;
-    if (ReadChunkSizeFromFile(fd_pca, &chunkSize, pcfile_path)) {
-        ret = ResetPcaFileInner(fd_pca, chunkSize, pcfile_path);
-    } else {
-        ret = -1;
-    }
-    int save_errno = errno;
-    (void)close(fd_pca);
-    errno = save_errno;
-    
-    return ret;
-}
-
-static void UnlinkCompressedFile(const RelFileNode& node, ForkNumber forkNum, char* path)
-{
-    if (!IS_COMPRESSED_RNODE(node, forkNum)) {
-        return;
-    }
-    /* remove pca */
-    char pcfile_path[MAXPGPATH];
-    errno_t rc = snprintf_s(pcfile_path, MAXPGPATH, MAXPGPATH - 1, PCA_SUFFIX, path);
-    securec_check_ss(rc, "\0", "\0");
-    int ret = unlink(pcfile_path);
-    if (ret < 0 && errno != ENOENT) {
-        ereport(WARNING, (errcode_for_file_access(), errmsg("could not remove file \"%s\": %m", pcfile_path)));
-    }
-    /* remove pcd */
-    rc = snprintf_s(pcfile_path, MAXPGPATH, MAXPGPATH - 1, PCD_SUFFIX, path);
-    securec_check_ss(rc, "\0", "\0");
-    ret = unlink(pcfile_path);
-    if (ret < 0 && errno != ENOENT) {
-        ereport(WARNING, (errcode_for_file_access(), errmsg("could not remove file \"%s\": %m", pcfile_path)));
-    }
-}
-
 static void mdcleanrepairfile(char *segpath)
 {
     const int TEMPLEN = 8;
@@ -659,13 +482,21 @@ static void mdcleanrepairfile(char *segpath)
     pfree(temppath);
 }
 
+
 static void mdunlinkfork(const RelFileNodeBackend& rnode, ForkNumber forkNum, bool isRedo)
 {
     char* path = NULL;
     int ret;
 
     path = relpath(rnode, forkNum);
-    
+
+    char* openFilePath = path;
+    char dst[MAXPGPATH] = {0};
+    if (IS_COMPRESSED_RNODE(rnode.node, forkNum)) {
+        CopyCompressedPath(dst, path);
+        openFilePath = dst;
+    }
+
     /*
      * Delete or truncate the first segment.
      */
@@ -678,19 +509,18 @@ static void mdunlinkfork(const RelFileNodeBackend& rnode, ForkNumber forkNum, bo
         }
 
         /* Next unlink the file */
-        ret = unlink(path);
+        ret = unlink(openFilePath);
         if (ret < 0 && errno != ENOENT) {
-            ereport(WARNING, (errcode_for_file_access(), errmsg("could not remove file \"%s\": %m", path)));
+            ereport(WARNING, (errcode_for_file_access(), errmsg("could not remove file \"%s\": ", openFilePath)));
         }
         if (isRedo) {
-            mdcleanrepairfile(path);
+            mdcleanrepairfile(openFilePath);
         }
-        UnlinkCompressedFile(rnode.node, forkNum, path);
     } else {
         /* truncate(2) would be easier here, but Windows hasn't got it */
         int fd;
 
-        fd = BasicOpenFile(path, O_RDWR | PG_BINARY, 0);
+        fd = BasicOpenFile(openFilePath, O_RDWR | PG_BINARY, 0);
         if (fd >= 0) {
             int save_errno;
 
@@ -702,29 +532,7 @@ static void mdunlinkfork(const RelFileNodeBackend& rnode, ForkNumber forkNum, bo
             ret = -1;
         }
         if (ret < 0 && errno != ENOENT) {
-            ereport(WARNING, (errcode_for_file_access(), errmsg("could not truncate file \"%s\": %m", path)));
-        }
-        if (IS_COMPRESSED_RNODE(rnode.node, forkNum)) {
-            // dont truncate pca! pca may be occupied by other threads by mmap
-            ret = ResetPcMap(path, rnode);
-
-            // remove pcd
-            char dataPath[MAXPGPATH];
-            int rc = snprintf_s(dataPath, MAXPGPATH, MAXPGPATH - 1, PCD_SUFFIX, path);
-            securec_check_ss(rc, "\0", "\0");
-            int fd_pcd = BasicOpenFile(dataPath, O_RDWR | PG_BINARY, 0);
-            if (fd_pcd >= 0) {
-                int save_errno;
-                ret = ftruncate(fd_pcd, 0);
-                save_errno = errno;
-                (void)close(fd_pcd);
-                errno = save_errno;
-            } else {
-                ret = -1;
-            }
-            if (ret < 0 && errno != ENOENT) {
-                ereport(WARNING, (errcode_for_file_access(), errmsg("could not truncate file \"%s\": %m", dataPath)));
-            }
+            ereport(WARNING, (errcode_for_file_access(), errmsg("could not truncate file \"%s\": %m", openFilePath)));
         }
 
         /* Register request to unlink first segment later */
@@ -735,7 +543,7 @@ static void mdunlinkfork(const RelFileNodeBackend& rnode, ForkNumber forkNum, bo
      * Delete any additional segments.
      */
     if (ret >= 0) {
-        char *segpath = (char *)palloc(strlen(path) + 12);
+        char *segpath = (char *)palloc(strlen(path) + 12 + strlen(COMPRESS_STR));
         BlockNumber segno;
         BlockNumber nSegments;
         errno_t rc = EOK;
@@ -750,7 +558,8 @@ static void mdunlinkfork(const RelFileNodeBackend& rnode, ForkNumber forkNum, bo
         for (segno = 1;; segno++) {
             struct stat statBuf;
 
-            rc = sprintf_s(segpath, strlen(path) + 12, "%s.%u", path, segno);
+            rc = sprintf_s(segpath, strlen(path) + 12 + strlen(COMPRESS_STR),
+                           IS_COMPRESSED_RNODE(rnode.node, forkNum) ? "%s.%u" COMPRESS_STR : "%s.%u", path, segno);
             securec_check_ss(rc, "", "");
 
             if (stat(segpath, &statBuf) < 0) {
@@ -774,187 +583,22 @@ static void mdunlinkfork(const RelFileNodeBackend& rnode, ForkNumber forkNum, bo
          * it is safe to remove the files.
          */
         for (segno = 1; segno < nSegments; segno++) {
-            rc = sprintf_s(segpath, strlen(path) + 12, "%s.%u", path, segno);
+            rc = sprintf_s(segpath, strlen(path) + 12 + strlen(COMPRESS_STR),
+                           IS_COMPRESSED_RNODE(rnode.node, forkNum) ? "%s.%u" COMPRESS_STR :"%s.%u", path, segno);
             securec_check_ss(rc, "", "");
             if (unlink(segpath) < 0) {
                 ereport(WARNING, (errcode_for_file_access(),
-                    errmsg("could not remove file \"%s\": %m", segpath)));
-            }
-            if (IS_COMPRESSED_RNODE(rnode.node, forkNum)) {
-                char pcfile_segpath[MAXPGPATH];
-                errno_t rc = snprintf_s(pcfile_segpath, MAXPGPATH, MAXPGPATH - 1, PCA_SUFFIX, segpath);
-                securec_check_ss(rc, "\0", "\0");
-                if (unlink(pcfile_segpath) < 0) {
-                    ereport(WARNING,
-                            (errcode_for_file_access(), errmsg("could not remove file \"%s\": %m", pcfile_segpath)));
-                }
-
-                rc = snprintf_s(pcfile_segpath, MAXPGPATH, MAXPGPATH - 1, PCD_SUFFIX, segpath);
-                securec_check_ss(rc, "\0", "\0");
-                if (unlink(pcfile_segpath) < 0) {
-                    ereport(WARNING,
-                            (errcode_for_file_access(), errmsg("could not remove file \"%s\": %m", pcfile_segpath)));
-                }
+                    errmsg("could not remove file \"%s\": %m", openFilePath)));
             }
             /* try clean the repair file if exists */
             if (isRedo) {
-                mdcleanrepairfile(path);
+                mdcleanrepairfile(segpath);
             }
         }
         pfree(segpath);
     }
 
     pfree(path);
-}
-
-static inline void ExtendChunksOfBlock(PageCompressHeader* pcMap, PageCompressAddr* pcAddr, int needChunks, MdfdVec* v)
-{
-    if (pcAddr->allocated_chunks < needChunks) {
-        auto allocateNumber = needChunks - pcAddr->allocated_chunks;
-        int chunkno = (pc_chunk_number_t)pg_atomic_fetch_add_u32(&pcMap->allocated_chunks, allocateNumber) + 1;
-        for (int i = pcAddr->allocated_chunks; i < needChunks; ++i, ++chunkno) {
-            pcAddr->chunknos[i] = chunkno;
-        }
-        pcAddr->allocated_chunks = needChunks;
-
-        if (pg_atomic_read_u32(&pcMap->allocated_chunks) - pg_atomic_read_u32(&pcMap->last_synced_allocated_chunks) >
-            COMPRESS_ADDRESS_FLUSH_CHUNKS) {
-            pcMap->sync = false;
-            if (sync_pcmap(pcMap, WAIT_EVENT_COMPRESS_ADDRESS_FILE_FLUSH) != 0) {
-                ereport(data_sync_elevel(ERROR), (errcode_for_file_access(), errmsg("could not msync file \"%s\": %m",
-                                                                                    FilePathName(v->mdfd_vfd_pca))));
-            }
-        }
-    }
-}
-
-/*
- *	mdextend_pc() -- Add a block to the specified page compressed relation.
- *
- */
-static void mdextend_pc(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, const char* buffer, bool skipFsync)
-{
-#ifdef CHECK_WRITE_VS_EXTEND
-    Assert(blocknum >= mdnblocks(reln, forknum));
-#endif
-    Assert(IS_COMPRESSED_MAINFORK(reln, forknum));
-
-    MdfdVec* v = _mdfd_getseg(reln, MAIN_FORKNUM, blocknum, skipFsync, EXTENSION_CREATE);
-    RelFileCompressOption option;
-    TransCompressOptions(reln->smgr_rnode.node, &option);
-    uint32 chunk_size = CHUNK_SIZE_LIST[option.compressChunkSize];
-    uint8 algorithm = option.compressAlgorithm;
-    uint8 prealloc_chunk = option.compressPreallocChunks;
-    PageCompressHeader *pcMap = GetPageCompressMemoryMap(v->mdfd_vfd_pca, chunk_size);
-    Assert(blocknum % RELSEG_SIZE >= pg_atomic_read_u32(&pcMap->nblocks));
-
-    uint32 maxAllocChunkNum = (uint32)(BLCKSZ / chunk_size - 1);
-    PageCompressAddr* pcAddr = GET_PAGE_COMPRESS_ADDR(pcMap, chunk_size, blocknum);
-
-    prealloc_chunk = (prealloc_chunk > maxAllocChunkNum) ? maxAllocChunkNum : prealloc_chunk;
-
-    /* check allocated chunk number */
-    if (pcAddr->allocated_chunks > BLCKSZ / chunk_size) {
-        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("invalid chunks %u of block %u in file \"%s\"",
-                                                                pcAddr->allocated_chunks, blocknum,
-                                                                FilePathName(v->mdfd_vfd_pca))));
-    }
-
-    for (int i = 0; i < pcAddr->allocated_chunks; ++i) {
-        if (pcAddr->chunknos[i] <= 0 || pcAddr->chunknos[i] > (BLCKSZ / chunk_size) * RELSEG_SIZE) {
-            ereport(ERROR,
-                    (errcode(ERRCODE_DATA_CORRUPTED), errmsg("invalid chunk number %u of block %u in file \"%s\"",
-                                                             pcAddr->chunknos[i], blocknum,
-                                                             FilePathName(v->mdfd_vfd_pca))));
-        }
-    }
-
-    /* compress page only for initialized page */
-    char *work_buffer = NULL;
-    int nchunks = 0;
-    if (!PageIsNew(buffer)) {
-        int work_buffer_size = CompressPageBufferBound(buffer, algorithm);
-        if (work_buffer_size < 0) {
-            ereport(ERROR,
-                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("mdextend_pc unrecognized compression algorithm %d", algorithm)));
-        }
-        work_buffer = (char *) palloc(work_buffer_size);
-        int compressed_page_size = CompressPage(buffer, work_buffer, work_buffer_size, option);
-        if (compressed_page_size < 0) {
-            ereport(ERROR,
-                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("mdextend_pc unrecognized compression algorithm %d", algorithm)));
-        }
-        nchunks = (compressed_page_size - 1) / chunk_size + 1;
-        if (nchunks * chunk_size >= BLCKSZ) {
-            pfree(work_buffer);
-            work_buffer = (char *) buffer;
-            nchunks = BLCKSZ / chunk_size;
-        } else {
-            /* fill zero in the last chunk */
-            int storageSize = chunk_size * nchunks;
-            if (compressed_page_size < storageSize) {
-                error_t rc = memset_s(work_buffer + compressed_page_size, work_buffer_size - compressed_page_size, 0,
-                                      storageSize - compressed_page_size);
-                securec_check_c(rc, "\0", "\0");
-            }
-        }
-    }
-
-    int need_chunks = prealloc_chunk > nchunks ? prealloc_chunk : nchunks;
-    ExtendChunksOfBlock(pcMap, pcAddr, need_chunks, v);
-
-    /* write chunks of compressed page
-     * worker_buffer = NULL -> nchunks = 0
-     */
-    for (int i = 0; i < nchunks; i++) {
-        char* buffer_pos = work_buffer + chunk_size * i;
-        off_t seekpos = (off_t) OFFSET_OF_PAGE_COMPRESS_CHUNK(chunk_size, pcAddr->chunknos[i]);
-        // write continuous chunks
-        int range = 1;
-        while (i < nchunks - 1 && pcAddr->chunknos[i + 1] == pcAddr->chunknos[i] + 1) {
-            range++;
-            i++;
-        }
-        int write_amount = chunk_size * range;
-        int nbytes;
-        if ((nbytes = FileWrite(v->mdfd_vfd_pcd, buffer_pos, write_amount, seekpos)) != write_amount) {
-            if (nbytes < 0) {
-                ereport(ERROR, (errcode_for_file_access(), errmsg("could not extend file \"%s\": %m",
-                                                                  FilePathName(v->mdfd_vfd_pcd)), errhint(
-                    "Check free disk space.")));
-            }
-            /* short write: complain appropriately */
-            ereport(ERROR, (errcode(ERRCODE_DISK_FULL), errmsg(
-                "could not extend file \"%s\": wrote only %d of %d bytes at block %u", FilePathName(v->mdfd_vfd_pcd),
-                nbytes, write_amount, blocknum), errhint("Check free disk space.")));
-        }
-    }
-
-    /* finally update size of this page and global nblocks */
-    if (pcAddr->nchunks != nchunks) {
-        pcAddr->nchunks = nchunks;
-    }
-
-    /* write checksum */
-    pcAddr->checksum = AddrChecksum32(blocknum, pcAddr, chunk_size);
-
-
-    if (pg_atomic_read_u32(&pcMap->nblocks) < blocknum % RELSEG_SIZE + 1) {
-        pg_atomic_write_u32(&pcMap->nblocks, blocknum % RELSEG_SIZE + 1);
-    }
-
-    pcMap->sync = false;
-    if (work_buffer != NULL && work_buffer != buffer) {
-        pfree(work_buffer);
-    }
-
-    if (!skipFsync && !SmgrIsTemp(reln)) {
-        register_dirty_segment(reln, forknum, v);
-    }
-
-    Assert(_mdnblocks(reln, forknum, v) <= ((BlockNumber) RELSEG_SIZE));
 }
 
 /*
@@ -988,46 +632,46 @@ void mdextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
                         errmsg("cannot extend file \"%s\" beyond %u blocks", relpath(reln->smgr_rnode, forknum),
                                InvalidBlockNumber)));
     }
-    if (IS_COMPRESSED_MAINFORK(reln, forknum)) {
-        mdextend_pc(reln, forknum, blocknum, buffer, skipFsync);
-        return;
-    }
 
     v = _mdfd_getseg(reln, forknum, blocknum, skipFsync, EXTENSION_CREATE);
     if (v == NULL) {
         return;
     }
 
-    seekpos = (off_t)BLCKSZ * (blocknum % ((BlockNumber)RELSEG_SIZE));
+    if (unlikely((IS_COMPRESSED_MAINFORK(reln, forknum)))) {
+        CfsExtendExtent(reln, forknum, blocknum, buffer, COMMON_STORAGE);
+    } else {
+        seekpos = (off_t)BLCKSZ * (blocknum % ((BlockNumber)RELSEG_SIZE));
 
-    /*
-     * Note: because caller usually obtained blocknum by calling mdnblocks,
-     * which did a seek(SEEK_END), this seek is often redundant and will be
-     * optimized away by fd.c.	It's not redundant, however, if there is a
-     * partial page at the end of the file. In that case we want to try to
-     * overwrite the partial page with a full page.  It's also not redundant
-     * if bufmgr.c had to dump another buffer of the same file to make room
-     * for the new page's buffer.
-     */
-    if ((nbytes = FilePWrite(v->mdfd_vfd, buffer, BLCKSZ, seekpos, WAIT_EVENT_DATA_FILE_EXTEND)) != BLCKSZ) {
-        if (check_unlink_rel_hashtbl(reln->smgr_rnode.node, forknum)) {
-            ereport(DEBUG1,
-                    (errmsg("could not extend file \"%s\": %m, this relation has been removed",
-                    FilePathName(v->mdfd_vfd))));
-        } else {
-            if (nbytes < 0) {
-                ereport(ERROR,
-                        (errcode_for_file_access(), errmsg("could not extend file \"%s\": %m", FilePathName(v->mdfd_vfd)),
-                         errhint("Check free disk space.")));
+        /*
+        * Note: because caller usually obtained blocknum by calling mdnblocks,
+        * which did a seek(SEEK_END), this seek is often redundant and will be
+        * optimized away by fd.c.	It's not redundant, however, if there is a
+        * partial page at the end of the file. In that case we want to try to
+        * overwrite the partial page with a full page.  It's also not redundant
+        * if bufmgr.c had to dump another buffer of the same file to make room
+        * for the new page's buffer.
+        */
+        if ((nbytes = FilePWrite(v->mdfd_vfd, buffer, BLCKSZ, seekpos,
+                                 (uint32)WAIT_EVENT_DATA_FILE_EXTEND)) != BLCKSZ) {
+            if (check_unlink_rel_hashtbl(reln->smgr_rnode.node, forknum)) {
+                ereport(DEBUG1,
+                        (errmsg("could not extend file \"%s\": %m, this relation has been removed",
+                        FilePathName(v->mdfd_vfd))));
+            } else {
+                if (nbytes < 0) {
+                    ereport(ERROR,
+                            (errcode_for_file_access(), errmsg("could not extend file \"%s\": %m", FilePathName(v->mdfd_vfd)),
+                            errhint("Check free disk space.")));
+                }
+                /* short write: complain appropriately */
+                ereport(ERROR, (errcode(ERRCODE_DISK_FULL),
+                            errmsg("could not extend file \"%s\": wrote only %d of %d bytes at block %u",
+                                FilePathName(v->mdfd_vfd), nbytes, BLCKSZ, blocknum),
+                            errhint("Check free disk space.")));
             }
-            /* short write: complain appropriately */
-            ereport(ERROR, (errcode(ERRCODE_DISK_FULL),
-                        errmsg("could not extend file \"%s\": wrote only %d of %d bytes at block %u",
-                               FilePathName(v->mdfd_vfd), nbytes, BLCKSZ, blocknum),
-                        errhint("Check free disk space.")));
         }
     }
-
     if (!skipFsync && !SmgrIsTemp(reln)) {
         register_dirty_segment(reln, forknum, v);
     }
@@ -1059,12 +703,10 @@ static File mdopenagain(SMgrRelation reln, ForkNumber forknum, ExtensionBehavior
 
     if (fd < 0) {
         if (behavior == EXTENSION_RETURN_NULL && FILE_POSSIBLY_DELETED(errno)) {
-            pfree(path);
             return fd;
         }
         if (check_unlink_rel_hashtbl(reln->smgr_rnode.node, forknum)) {
             ereport(DEBUG1, (errmsg("\"%s\": %m, this relation has been removed", path)));
-            pfree(path);
             return fd;
         }
         if ((AmStartupProcess() || AmPageRedoWorker() || AmPageWriterProcess() || AmCheckpointerProcess()) &&
@@ -1082,32 +724,6 @@ static File mdopenagain(SMgrRelation reln, ForkNumber forknum, ExtensionBehavior
 
     return fd;
 }
-static int MdOpenRetryOpenFile(char* path, const RelFileNodeForkNum &filenode, ExtensionBehavior behavior, uint32 flags)
-{
-    int fd = -1;
-    /*
-    * During bootstrap, there are cases where a system relation will be
-    * accessed (by internal backend processes) before the bootstrap
-    * script nominally creates it.  Therefore, accept mdopen() as a
-    * substitute for mdcreate() in bootstrap mode only. (See mdcreate)
-    */
-    if (IsBootstrapProcessingMode()) {
-        flags |= (O_CREAT | O_EXCL);
-        fd = DataFileIdOpenFile(path, filenode, (int)flags, FILE_RW_PERMISSION);
-    }
-
-    if (fd < 0) {
-        if (behavior == EXTENSION_RETURN_NULL && FILE_POSSIBLY_DELETED(errno)) {
-            return -1;
-        }
-        if (check_unlink_rel_hashtbl(filenode.rnode.node, filenode.forknumber)) {
-            ereport(DEBUG1, (errmsg("\"%s\": %m, this relation has been removed", path)));
-            return -1;
-        }
-        ereport(ERROR, (errcode_for_file_access(), errmsg("could not open file \"%s\": %m", path)));
-    }
-    return fd;
-}
 
 /*
  *  mdopen() -- Open the specified relation.
@@ -1123,7 +739,7 @@ static MdfdVec *mdopen(SMgrRelation reln, ForkNumber forknum, ExtensionBehavior 
 {
     MdfdVec *mdfd = NULL;
     char *path = NULL;
-    File fd = -1;
+    File fd;
     RelFileNodeForkNum filenode;
     uint32 flags = O_RDWR | PG_BINARY;
 
@@ -1136,49 +752,25 @@ static MdfdVec *mdopen(SMgrRelation reln, ForkNumber forknum, ExtensionBehavior 
 
     filenode = RelFileNodeForkNumFill(reln->smgr_rnode, forknum, 0);
 
-    File fd_pca = -1;
-    File fd_pcd = -1;
+    ADIO_RUN()
+    {
+        flags |= O_DIRECT;
+    }
+    ADIO_END();
+
+    char* openFilePath = path;
+    char dst[MAXPGPATH];
     if (IS_COMPRESSED_MAINFORK(reln, forknum)) {
-        /* open page compression address file */
-        char pcfile_path[MAXPGPATH];
-        errno_t rc = snprintf_s(pcfile_path, MAXPGPATH, MAXPGPATH - 1, PCA_SUFFIX, path);
-        securec_check_ss(rc, "\0", "\0");
-        RelFileNodeForkNum pcaRelFileNode = RelFileNodeForkNumFill(reln->smgr_rnode, PCA_FORKNUM, 0);
-        fd_pca = DataFileIdOpenFile(pcfile_path, pcaRelFileNode, flags, FILE_RW_PERMISSION);
-        if (fd_pca < 0) {
-            fd_pca = MdOpenRetryOpenFile(pcfile_path, pcaRelFileNode, behavior, flags);
-            if (fd_pca < 0) {
-                pfree(path);
-                return NULL;
-            }
-        }
-        /* open page compression data file */
-        rc = snprintf_s(pcfile_path, MAXPGPATH, MAXPGPATH - 1, PCD_SUFFIX, path);
-        securec_check_ss(rc, "\0", "\0");
-        RelFileNodeForkNum pcdRelFileNode = RelFileNodeForkNumFill(reln->smgr_rnode, PCD_FORKNUM, 0);
-        fd_pcd = DataFileIdOpenFile(pcfile_path, pcdRelFileNode, flags, FILE_RW_PERMISSION);
-        if (fd_pcd < 0) {
-            fd_pcd = MdOpenRetryOpenFile(pcfile_path, pcdRelFileNode, behavior, flags);
-            if (fd_pcd < 0) {
-                pfree(path);
-                return NULL;
-            }
-        }
-        SetupPageCompressMemoryMap(fd_pca, reln->smgr_rnode.node, filenode);
-    } else {
+        CopyCompressedPath(dst, path);
+        openFilePath = dst;
+    }
 
-        ADIO_RUN()
-        {
-            flags |= O_DIRECT;
-        }
-        ADIO_END();
-
-        fd = DataFileIdOpenFile(path, filenode, (int)flags, 0600);
+    fd = DataFileIdOpenFile(openFilePath, filenode, (int)flags, 0600);
+    if (fd < 0) {
+        fd = mdopenagain(reln, forknum, behavior, openFilePath);
         if (fd < 0) {
-            fd = mdopenagain(reln, forknum, behavior, path);
-            if (fd < 0) {
-                return NULL;
-            }
+            pfree(path);
+            return NULL;
         }
     }
 
@@ -1188,8 +780,6 @@ static MdfdVec *mdopen(SMgrRelation reln, ForkNumber forknum, ExtensionBehavior 
 
     mdfd->mdfd_vfd = fd;
     mdfd->mdfd_segno = 0;
-    mdfd->mdfd_vfd_pca = fd_pca;
-    mdfd->mdfd_vfd_pcd = fd_pcd;
     mdfd->mdfd_chain = NULL;
     Assert(_mdnblocks(reln, forknum, mdfd) <= ((BlockNumber)RELSEG_SIZE));
 
@@ -1201,6 +791,7 @@ static MdfdVec *mdopen(SMgrRelation reln, ForkNumber forknum, ExtensionBehavior 
  */
 void mdclose(SMgrRelation reln, ForkNumber forknum, BlockNumber blockNum)
 {
+    /* unused blocknum */
     MdfdVec *v = reln->md_fd[forknum];
 
     /* No work if already closed */
@@ -1214,17 +805,8 @@ void mdclose(SMgrRelation reln, ForkNumber forknum, BlockNumber blockNum)
         MdfdVec *ov = v;
 
         /* if not closed already */
-        if (IS_COMPRESSED_MAINFORK(reln, forknum)) {
-            if (v->mdfd_vfd_pca >= 0) {
-                FileClose(v->mdfd_vfd_pca);
-            }
-            if (v->mdfd_vfd_pcd >= 0) {
-                FileClose(v->mdfd_vfd_pcd);
-            }
-        } else {
-            if (v->mdfd_vfd >= 0) {
-                FileClose(v->mdfd_vfd);
-            }
+        if (v->mdfd_vfd >= 0) {
+            FileClose(v->mdfd_vfd);
         }
 
         /* Now free vector */
@@ -1239,6 +821,10 @@ void mdclose(SMgrRelation reln, ForkNumber forknum, BlockNumber blockNum)
 void mdprefetch(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum)
 {
 #ifdef USE_PREFETCH
+    if (IS_COMPRESSED_MAINFORK(reln, forknum)) {
+        CfsMdPrefetch(reln, forknum, blocknum, false, COMMON_STORAGE);
+        return;
+    }
     off_t seekpos;
     MdfdVec *v = NULL;
 
@@ -1247,49 +833,13 @@ void mdprefetch(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum)
         return;
     }
 
-    if (IS_COMPRESSED_MAINFORK(reln, forknum)) {
-        int chunk_size = PageCompressChunkSize(reln);
-        PageCompressHeader *pcMap = GetPageCompressMemoryMap(v->mdfd_vfd_pca, chunk_size);
-        PageCompressAddr *pcAddr = GET_PAGE_COMPRESS_ADDR(pcMap, chunk_size, blocknum);
-        /* check chunk number */
-        if (pcAddr->nchunks < 0 || pcAddr->nchunks > BLCKSZ / chunk_size) {
-            if (u_sess->attr.attr_security.zero_damaged_pages || t_thrd.xlog_cxt.InRecovery) {
-                return;
-            } else {
-                ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
-                                errmsg("invalid chunks %u of block %u in file \"%s\"", pcAddr->nchunks, blocknum,
-                                       FilePathName(v->mdfd_vfd_pca))));
-            }
-        }
+    seekpos = (off_t)BLCKSZ * (blocknum % ((BlockNumber)RELSEG_SIZE));
 
-        for (uint8 i = 0; i < pcAddr->nchunks; i++) {
-            if (pcAddr->chunknos[i] <= 0 || pcAddr->chunknos[i] > (uint32)(BLCKSZ / chunk_size) * RELSEG_SIZE) {
-                if (u_sess->attr.attr_security.zero_damaged_pages || t_thrd.xlog_cxt.InRecovery) {
-                    return;
-                } else {
-                    ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
-                                    errmsg("invalid chunk number %u of block %u in file \"%s\"", pcAddr->chunknos[i],
-                                           blocknum, FilePathName(v->mdfd_vfd_pca))));
-                }
-            }
-            seekpos = (off_t)OFFSET_OF_PAGE_COMPRESS_CHUNK(chunk_size, pcAddr->chunknos[i]);
-            int range = 1;
-            while (i < pcAddr->nchunks - 1 && pcAddr->chunknos[i + 1] == pcAddr->chunknos[i] + 1) {
-                range++;
-                i++;
-            }
-            (void)FilePrefetch(v->mdfd_vfd_pcd, seekpos, chunk_size * range, WAIT_EVENT_DATA_FILE_PREFETCH);
-        }
-    } else {
-        seekpos = (off_t)BLCKSZ * (blocknum % ((BlockNumber)RELSEG_SIZE));
+    Assert(seekpos < (off_t)BLCKSZ * RELSEG_SIZE);
 
-        Assert(seekpos < (off_t)BLCKSZ * RELSEG_SIZE);
-
-        (void)FilePrefetch(v->mdfd_vfd, seekpos, BLCKSZ, WAIT_EVENT_DATA_FILE_PREFETCH);
-    }
+    (void)FilePrefetch(v->mdfd_vfd, seekpos, BLCKSZ, WAIT_EVENT_DATA_FILE_PREFETCH);
 #endif /* USE_PREFETCH */
 }
-
 /*
  * mdwriteback() -- Tell the kernel to write pages back to storage.
  *
@@ -1298,6 +848,10 @@ void mdprefetch(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum)
  */
 void mdwriteback(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, BlockNumber nblocks)
 {
+    if (IS_COMPRESSED_MAINFORK(reln, forknum)) {
+        CfsWriteBack(reln, forknum, blocknum, nblocks, COMMON_STORAGE);
+        return;
+    }
     /*
      * Issue flush requests in as few requests as possible; have to split at
      * segment boundaries though, since those are actually separate files.
@@ -1329,41 +883,10 @@ void mdwriteback(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, Bl
         Assert(nflush >= 1);
         Assert(nflush <= nblocks);
 
-        if (IS_COMPRESSED_MAINFORK(reln, forknum)) {
-            uint32 chunk_size = PageCompressChunkSize(reln);
-            PageCompressHeader *pcMap = GetPageCompressMemoryMap(v->mdfd_vfd_pca, chunk_size);
-            pc_chunk_number_t seekpos_chunk;
-            pc_chunk_number_t last_chunk;
-            bool firstEnter = true;
-            for (BlockNumber iblock = 0; iblock < nflush; ++iblock) {
-                PageCompressAddr *pcAddr = GET_PAGE_COMPRESS_ADDR(pcMap, chunk_size, blocknum + iblock);
-                // find continue chunk to write back
-                for (uint8 i = 0; i < pcAddr->nchunks; ++i) {
-                    if (firstEnter) {
-                        seekpos_chunk = pcAddr->chunknos[i];
-                        last_chunk = seekpos_chunk;
-                        firstEnter = false;
-                    } else if (pcAddr->chunknos[i] == last_chunk + 1) {
-                        last_chunk++;
-                    } else {
-                        seekpos = (off_t)OFFSET_OF_PAGE_COMPRESS_CHUNK(chunk_size, seekpos_chunk);
-                        pc_chunk_number_t nchunks = last_chunk - seekpos_chunk + 1;
-                        FileWriteback(v->mdfd_vfd_pcd, seekpos, (off_t)nchunks * chunk_size);
-                        seekpos_chunk = pcAddr->chunknos[i];
-                        last_chunk = seekpos_chunk;
-                    }
-                }
-            }
-            /* flush the rest chunks */
-            if (!firstEnter) {
-                seekpos = (off_t)OFFSET_OF_PAGE_COMPRESS_CHUNK(chunk_size, seekpos_chunk);
-                pc_chunk_number_t nchunks = last_chunk - seekpos_chunk + 1;
-                FileWriteback(v->mdfd_vfd_pcd, seekpos, (off_t)nchunks * chunk_size);
-            }
-        } else {
-            seekpos = (off_t) BLCKSZ * (blocknum % ((BlockNumber) RELSEG_SIZE));
-            FileWriteback(v->mdfd_vfd, seekpos, (off_t) BLCKSZ * nflush);
-        }
+        seekpos = (off_t)BLCKSZ * (blocknum % ((BlockNumber)RELSEG_SIZE));
+
+        FileWriteback(v->mdfd_vfd, seekpos, (off_t)BLCKSZ * nflush);
+
         nblocks -= nflush;
         blocknum += nflush;
     }
@@ -1386,6 +909,9 @@ void mdwriteback(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, Bl
 void mdasyncread(SMgrRelation reln, ForkNumber forkNum, AioDispatchDesc_t **dList, int32 dn)
 {
 #ifndef ENABLE_LITE_MODE
+    if (IS_COMPRESSED_MAINFORK(reln, forkNum)) {
+        return;
+    }
     for (int i = 0; i < dn; i++) {
         off_t offset;
         MdfdVec *v = NULL;
@@ -1489,6 +1015,9 @@ int CompltrReadReq(void *aioDesc, long res)
 void mdasyncwrite(SMgrRelation reln, ForkNumber forkNumber, AioDispatchDesc_t **dList, int32 dn)
 {
 #ifndef ENABLE_LITE_MODE
+    if (IS_COMPRESSED_MAINFORK(reln, forkNumber)) {
+        return;
+    }
     for (int i = 0; i < dn; i++) {
         off_t offset;
         MdfdVec *v = NULL;
@@ -1657,158 +1186,6 @@ static void check_file_stat(char *file_name)
 } while (0)
 
 /*
- *	mdread_pc() -- Read the specified block from a page compressed relation.
- */
-bool mdread_pc(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char *buffer)
-{
-    Assert(IS_COMPRESSED_MAINFORK(reln, forknum));
-
-    MdfdVec *v = _mdfd_getseg(reln, forknum, blocknum, false, EXTENSION_FAIL);
-
-    RelFileCompressOption option;
-    TransCompressOptions(reln->smgr_rnode.node, &option);
-    uint32 chunk_size = CHUNK_SIZE_LIST[option.compressChunkSize];
-    uint8 algorithm = option.compressAlgorithm;
-    PageCompressHeader *pcMap = GetPageCompressMemoryMap(v->mdfd_vfd_pca, chunk_size);
-    PageCompressAddr *pcAddr = GET_PAGE_COMPRESS_ADDR(pcMap, chunk_size, blocknum);
-    uint8 nchunks = pcAddr->nchunks;
-    if (nchunks == 0) {
-        MemSet(buffer, 0, BLCKSZ);
-        return true;
-    }
-
-    if (nchunks > BLCKSZ / chunk_size) {
-        if (u_sess->attr.attr_security.zero_damaged_pages || t_thrd.xlog_cxt.InRecovery) {
-            MemSet(buffer, 0, BLCKSZ);
-            return true;
-        } else {
-#ifndef ENABLE_MULTIPLE_NODES
-            if (RecoveryInProgress()) {
-                return false;
-            }
-#endif
-            ereport(ERROR,
-                    (errcode(ERRCODE_DATA_CORRUPTED), errmsg("invalid chunks %u of block %u in file \"%s\"", nchunks,
-                                                             blocknum, FilePathName(v->mdfd_vfd_pca))));
-        }
-    }
-
-    for (auto i = 0; i < nchunks; ++i) {
-        if (pcAddr->chunknos[i] <= 0 || pcAddr->chunknos[i] > MAX_CHUNK_NUMBER(chunk_size)) {
-            if (u_sess->attr.attr_security.zero_damaged_pages || t_thrd.xlog_cxt.InRecovery) {
-                MemSet(buffer, 0, BLCKSZ);
-                return true;
-            } else {
-                check_file_stat(FilePathName(v->mdfd_vfd_pcd));
-                force_backtrace_messages = true;
-#ifndef ENABLE_MULTIPLE_NODES
-                if (RecoveryInProgress()) {
-                    return false;
-                }
-#endif
-                ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("invalid chunks %u of block %u in file \"%s\"",
-                                                                        nchunks, blocknum,
-                                                                        FilePathName(v->mdfd_vfd_pca))));
-            }
-        }
-    }
-
-    // read chunk data
-    char *buffer_pos = NULL;
-    uint8 start;
-    int read_amount;
-    char *compress_buffer = (char*)palloc(chunk_size * nchunks);
-    for (uint8 i = 0; i < nchunks; ++i) {
-        buffer_pos = compress_buffer + chunk_size * i;
-        off_t seekpos = (off_t) OFFSET_OF_PAGE_COMPRESS_CHUNK(chunk_size, pcAddr->chunknos[i]);
-        start = i;
-        while (i < nchunks - 1 && pcAddr->chunknos[i + 1] == pcAddr->chunknos[i] + 1) {
-            i++;
-        }
-        read_amount = chunk_size * (i - start + 1);
-        TRACE_POSTGRESQL_SMGR_MD_READ_START(forknum, blocknum, reln->smgr_rnode.node.spcNode,
-                                            reln->smgr_rnode.node.dbNode, reln->smgr_rnode.node.relNode,
-                                            reln->smgr_rnode.backend);
-        int nbytes = FilePRead(v->mdfd_vfd_pcd, buffer_pos, read_amount, seekpos, WAIT_EVENT_DATA_FILE_READ);
-        TRACE_POSTGRESQL_SMGR_MD_READ_DONE(forknum, blocknum, reln->smgr_rnode.node.spcNode,
-                                           reln->smgr_rnode.node.dbNode, reln->smgr_rnode.node.relNode,
-                                           reln->smgr_rnode.backend, nbytes, BLCKSZ);
-
-        if (nbytes != read_amount) {
-            if (nbytes < 0) {
-#ifndef ENABLE_MULTIPLE_NODES
-                if (RecoveryInProgress()) {
-                    return false;
-                }
-#endif
-                ereport(ERROR,
-                        (errcode_for_file_access(), errmsg("could not read block %u in file \"%s\": %m", blocknum,
-                                                           FilePathName(v->mdfd_vfd_pcd))));
-            }
-            /*
-             * Short read: we are at or past EOF, or we read a partial block at
-             * EOF.  Normally this is an error; upper levels should never try to
-             * read a nonexistent block.  However, if zero_damaged_pages is ON or
-             * we are InRecovery, we should instead return zeroes without
-             * complaining.  This allows, for example, the case of trying to
-             * update a block that was later truncated away.
-             */
-            if (u_sess->attr.attr_security.zero_damaged_pages || t_thrd.xlog_cxt.InRecovery) {
-                MemSet(buffer, 0, BLCKSZ);
-                return true;
-            } else {
-                check_file_stat(FilePathName(v->mdfd_vfd_pcd));
-                force_backtrace_messages = true;
-
-#ifndef ENABLE_MULTIPLE_NODES
-                if (RecoveryInProgress()) {
-                    return false;
-                }
-#endif
-                ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg(
-                    "could not read block %u in file \"%s\": read only %d of %d bytes", blocknum,
-                    FilePathName(v->mdfd_vfd_pcd), nbytes, read_amount)));
-            }
-        }
-    }
-
-    /* decompress chunk data */
-    int nbytes;
-    if (pcAddr->nchunks == BLCKSZ / chunk_size) {
-        error_t rc = memcpy_s(buffer, BLCKSZ, compress_buffer, BLCKSZ);
-        securec_check(rc, "", "");
-    } else {
-        nbytes = DecompressPage(compress_buffer, buffer, algorithm);
-        if (nbytes != BLCKSZ) {
-            if (nbytes == -2) {
-                ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg(
-                    "could not recognized compression algorithm %d for file \"%s\"", algorithm,
-                    FilePathName(v->mdfd_vfd_pcd))));
-            }
-            if (u_sess->attr.attr_security.zero_damaged_pages || t_thrd.xlog_cxt.InRecovery) {
-                pfree(compress_buffer);
-                MemSet(buffer, 0, BLCKSZ);
-                return true;
-            } else {
-                check_file_stat(FilePathName(v->mdfd_vfd_pcd));
-                force_backtrace_messages = true;
-
-#ifndef ENABLE_MULTIPLE_NODES
-                if (RecoveryInProgress()) {
-                    return false;
-                }
-#endif
-                ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg(
-                    "could not decompress block %u in file \"%s\": decompress %d of %d bytes", blocknum,
-                    FilePathName(v->mdfd_vfd_pcd), nbytes, BLCKSZ)));
-            }
-        }
-    }
-    pfree(compress_buffer);
-    return true;
-}
-
-/*
  *	mdread() -- Read the specified block from a relation.
  */
 SMGR_READ_STATUS mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char *buffer)
@@ -1830,15 +1207,6 @@ SMGR_READ_STATUS mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber block
     static THR_LOCAL Oid lstDb = InvalidOid;
     static THR_LOCAL Oid lstSpc = InvalidOid;
 
-    if (IS_COMPRESSED_MAINFORK(reln, forknum)) {
-        bool success = mdread_pc(reln, forknum, blocknum, buffer);
-        if (success && PageIsVerified((Page)buffer, blocknum)) {
-            return SMGR_RD_OK;
-        } else {
-            return SMGR_RD_CRC_ERROR;
-        }
-    }
-
     (void)INSTR_TIME_SET_CURRENT(startTime);
 
     TRACE_POSTGRESQL_SMGR_MD_READ_START(forknum, blocknum, reln->smgr_rnode.node.spcNode, reln->smgr_rnode.node.dbNode,
@@ -1849,10 +1217,16 @@ SMGR_READ_STATUS mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber block
         return SMGR_RD_NO_BLOCK;
     }
 
-    seekpos = (off_t)BLCKSZ * (blocknum % ((BlockNumber)RELSEG_SIZE));
+    if (IS_COMPRESSED_MAINFORK(reln, forknum)) {
+        nbytes = CfsReadPage(reln, forknum, blocknum, buffer, COMMON_STORAGE);
+        if (nbytes < 0) {
+            return SMGR_RD_CRC_ERROR;
+        }
+    } else {
+        seekpos = (off_t)BLCKSZ * (blocknum % ((BlockNumber)RELSEG_SIZE));
 
-    nbytes = FilePRead(v->mdfd_vfd, buffer, BLCKSZ, seekpos, WAIT_EVENT_DATA_FILE_READ);
-
+        nbytes = FilePRead(v->mdfd_vfd, buffer, BLCKSZ, seekpos, WAIT_EVENT_DATA_FILE_READ);
+    }
     TRACE_POSTGRESQL_SMGR_MD_READ_DONE(forknum, blocknum, reln->smgr_rnode.node.spcNode, reln->smgr_rnode.node.dbNode,
                                        reln->smgr_rnode.node.relNode, reln->smgr_rnode.backend, nbytes, BLCKSZ);
 
@@ -1929,6 +1303,11 @@ SMGR_READ_STATUS mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber block
                                    FilePathName(v->mdfd_vfd), nbytes, BLCKSZ)));
         }
     }
+#ifndef ENABLE_MULTIPLE_NODES
+    if (u_sess->attr.attr_common.enable_seqscan_fusion) {
+        return SMGR_RD_OK;
+    }
+#endif
 
     if (PageIsVerified((Page) buffer, blocknum)) {
         return SMGR_RD_OK;
@@ -1936,136 +1315,6 @@ SMGR_READ_STATUS mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber block
         return SMGR_RD_CRC_ERROR;
     }
 }
-
-/*
- *	mdwrite_pc() -- Write the supplied block at the appropriate location for page compressed relation.
- *
- *		This is to be used only for updating already-existing blocks of a
- *		relation (ie, those before the current EOF).  To extend a relation,
- *		use mdextend().
- */
-static void mdwrite_pc(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, const char *buffer, bool skipFsync)
-{
-    /* This assert is too expensive to have on normally ... */
-#ifdef CHECK_WRITE_VS_EXTEND
-    Assert(blocknum < mdnblocks(reln, forknum));
-#endif
-    Assert(IS_COMPRESSED_MAINFORK(reln, forknum));
-    bool mmapSync = false;
-    MdfdVec *v = _mdfd_getseg(reln, forknum, blocknum, skipFsync, EXTENSION_FAIL);
-
-
-    if (check_unlink_rel_hashtbl(reln->smgr_rnode.node, forknum)) {
-        ereport(DEBUG1, (errmsg("could not write block %u in file \"%s\": %m, this relation has been removed",
-            blocknum, FilePathName(v->mdfd_vfd))));
-        /* this file need skip sync */
-        return;
-    }
-
-    RelFileCompressOption option;
-    TransCompressOptions(reln->smgr_rnode.node, &option);
-    uint32 chunk_size = CHUNK_SIZE_LIST[option.compressChunkSize];
-    uint8 algorithm = option.compressAlgorithm;
-    int8 level = option.compressLevelSymbol ? option.compressLevel : -option.compressLevel;
-    uint8 prealloc_chunk = option.compressPreallocChunks;
-
-    PageCompressHeader *pcMap = GetPageCompressMemoryMap(v->mdfd_vfd_pca, chunk_size);
-    PageCompressAddr *pcAddr = GET_PAGE_COMPRESS_ADDR(pcMap, chunk_size, blocknum);
-    Assert(blocknum % RELSEG_SIZE < pg_atomic_read_u32(&pcMap->nblocks));
-    auto maxChunkSize = BLCKSZ / chunk_size - 1;
-    if (prealloc_chunk > maxChunkSize) {
-        prealloc_chunk = maxChunkSize;
-    }
-
-    allocate_chunk_check(pcAddr, chunk_size, blocknum, v);
-
-    /* compress page */
-    auto work_buffer_size = CompressPageBufferBound(buffer, algorithm);
-    if (work_buffer_size < 0) {
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg(
-            "mdwrite_pc unrecognized compression algorithm %d,chunk_size:%ud,level:%d,prealloc_chunk:%ud", algorithm,
-            chunk_size, level, prealloc_chunk)));
-    }
-    char *work_buffer = (char *) palloc(work_buffer_size);
-    auto compress_buffer_size = CompressPage(buffer, work_buffer, work_buffer_size, option);
-    if (compress_buffer_size < 0) {
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg(
-            "mdwrite_pc unrecognized compression algorithm %d,chunk_size:%ud,level:%d,prealloc_chunk:%ud", algorithm,
-            chunk_size, level, prealloc_chunk)));
-    }
-
-    uint8 nchunks = (compress_buffer_size - 1) / chunk_size + 1;
-    auto bufferSize = chunk_size * nchunks;
-    if (bufferSize >= BLCKSZ) {
-        /* store original page if can not save space? */
-        pfree(work_buffer);
-        work_buffer = (char *) buffer;
-        nchunks = BLCKSZ / chunk_size;
-    } else {
-        /* fill zero in the last chunk */
-        if ((uint32) compress_buffer_size < bufferSize) {
-            auto leftSize = bufferSize - compress_buffer_size;
-            errno_t rc = memset_s(work_buffer + compress_buffer_size, leftSize, 0, leftSize);
-            securec_check(rc, "", "");
-        }
-    }
-
-    uint8 need_chunks = prealloc_chunk > nchunks ? prealloc_chunk : nchunks;
-    ExtendChunksOfBlock(pcMap, pcAddr, need_chunks, v);
-
-    // write chunks of compressed page
-    for (auto i = 0; i < nchunks; ++i) {
-        auto buffer_pos = work_buffer + chunk_size * i;
-        off_t seekpos = (off_t) OFFSET_OF_PAGE_COMPRESS_CHUNK(chunk_size, pcAddr->chunknos[i]);
-        auto start = i;
-        while (i < nchunks - 1 && pcAddr->chunknos[i + 1] == pcAddr->chunknos[i] + 1) {
-            i++;
-        }
-        int write_amount = chunk_size * (i - start + 1);
-
-        TRACE_POSTGRESQL_SMGR_MD_WRITE_START(forknum, blocknum, reln->smgr_rnode.node.spcNode,
-                                             reln->smgr_rnode.node.dbNode, reln->smgr_rnode.node.relNode,
-                                             reln->smgr_rnode.backend);
-        int nbytes = FilePWrite(v->mdfd_vfd_pcd, buffer_pos, write_amount, seekpos, WAIT_EVENT_DATA_FILE_WRITE);
-        TRACE_POSTGRESQL_SMGR_MD_WRITE_DONE(forknum, blocknum, reln->smgr_rnode.node.spcNode,
-                                            reln->smgr_rnode.node.dbNode, reln->smgr_rnode.node.relNode,
-                                            reln->smgr_rnode.backend, nbytes, BLCKSZ);
-
-        if (nbytes != write_amount) {
-            if (nbytes < 0) {
-                ereport(ERROR,
-                        (errcode_for_file_access(), errmsg("could not write block %u in file \"%s\": %m", blocknum,
-                                                           FilePathName(v->mdfd_vfd_pcd))));
-            }
-            /* short write: complain appropriately */
-            ereport(ERROR, (errcode(ERRCODE_DISK_FULL), errmsg(
-                "could not write block %u in file \"%s\": wrote only %d of %d bytes", blocknum,
-                FilePathName(v->mdfd_vfd_pcd), nbytes, BLCKSZ), errhint("Check free disk space.")));
-        }
-    }
-
-    /* finally update size of this page and global nblocks */
-    if (pcAddr->nchunks != nchunks) {
-        mmapSync = true;
-        pcAddr->nchunks = nchunks;
-    }
-
-    /* write checksum */
-    if (mmapSync) {
-        pcMap->sync = false;
-        pcAddr->checksum = AddrChecksum32(blocknum, pcAddr, chunk_size);
-    }
-
-    if (work_buffer != buffer) {
-        pfree(work_buffer);
-    }
-
-
-    if (!skipFsync && !SmgrIsTemp(reln)) {
-        register_dirty_segment(reln, forknum, v);
-    }
-}
-
 
 /*
  *  mdwrite() -- Write the supplied block at the appropriate location.
@@ -2080,8 +1329,6 @@ void mdwrite(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, const 
     int nbytes;
     MdfdVec *v = NULL;
 
-    instr_time start_time;
-    instr_time end_time;
     PgStat_Counter time_diff = 0;
     static THR_LOCAL PgStat_Counter msg_count = 1;
     static THR_LOCAL PgStat_Counter sum_page = 0;
@@ -2093,7 +1340,10 @@ void mdwrite(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, const 
     static THR_LOCAL Oid lst_db = InvalidOid;
     static THR_LOCAL Oid lst_spc = InvalidOid;
 
+#ifndef ENABLE_LITE_MODE
+    instr_time start_time;
     (void)INSTR_TIME_SET_CURRENT(start_time);
+#endif
 
     /* This assert is too expensive to have on normally ... */
 #ifdef CHECK_WRITE_VS_EXTEND
@@ -2110,23 +1360,28 @@ void mdwrite(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, const 
         return;
     }
 
+    seekpos = (off_t)BLCKSZ * (blocknum % ((BlockNumber)RELSEG_SIZE));
     bool compressed = IS_COMPRESSED_MAINFORK(reln, forknum);
     if (compressed) {
-        mdwrite_pc(reln, forknum, blocknum, buffer, skipFsync);
+        nbytes = (int)CfsWritePage(reln, forknum, blocknum, buffer, skipFsync, COMMON_STORAGE);
     } else {
         seekpos = (off_t)BLCKSZ * (blocknum % ((BlockNumber)RELSEG_SIZE));
 
         Assert(seekpos < (off_t)BLCKSZ * RELSEG_SIZE);
 
-        nbytes = FilePWrite(v->mdfd_vfd, buffer, BLCKSZ, seekpos, WAIT_EVENT_DATA_FILE_WRITE);
-
-        TRACE_POSTGRESQL_SMGR_MD_WRITE_DONE(forknum, blocknum, reln->smgr_rnode.node.spcNode,
-                                            reln->smgr_rnode.node.dbNode, reln->smgr_rnode.node.relNode,
-                                            reln->smgr_rnode.backend, nbytes, BLCKSZ);
+        nbytes = FilePWrite(v->mdfd_vfd, buffer, BLCKSZ, seekpos, (uint32)WAIT_EVENT_DATA_FILE_WRITE);
     }
+
+    TRACE_POSTGRESQL_SMGR_MD_WRITE_DONE(forknum, blocknum, reln->smgr_rnode.node.spcNode, reln->smgr_rnode.node.dbNode,
+                                        reln->smgr_rnode.node.relNode, reln->smgr_rnode.backend, nbytes, BLCKSZ);
+
+#ifndef ENABLE_LITE_MODE
+    instr_time end_time;
     (void)INSTR_TIME_SET_CURRENT(end_time);
     INSTR_TIME_SUBTRACT(end_time, start_time);
     time_diff = (PgStat_Counter)INSTR_TIME_GET_MICROSEC(end_time);
+#endif
+
     if (msg_count == 0) {
         lst_file = reln->smgr_rnode.node.relNode;
         lst_db = reln->smgr_rnode.node.dbNode;
@@ -2170,9 +1425,7 @@ void mdwrite(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, const 
     if (max_time < time_diff) {
         max_time = time_diff;
     }
-    if (compressed) {
-        return;
-    }
+
     if (nbytes != BLCKSZ) {
         if (check_unlink_rel_hashtbl(reln->smgr_rnode.node, forknum)) {
             ereport(DEBUG1, (errmsg("could not write block %u in file \"%s\": %m, this relation has been removed",
@@ -2231,15 +1484,15 @@ BlockNumber mdnblocks(SMgrRelation reln, ForkNumber forknum)
         segno++;
         v = v->mdfd_chain;
     }
-
+    BlockNumber relSegSize = IS_COMPRESSED_MAINFORK(reln, forknum) ? CFS_LOGIC_BLOCKS_PER_FILE: RELSEG_SIZE;
     for (;;) {
         nblocks = _mdnblocks(reln, forknum, v);
-        if (nblocks > ((BlockNumber)RELSEG_SIZE)) {
+        if (nblocks > relSegSize) {
             ereport(FATAL, (errmsg("segment too big")));
         }
 
-        if (nblocks < ((BlockNumber)RELSEG_SIZE)) {
-            return (segno * ((BlockNumber)RELSEG_SIZE)) + nblocks;
+        if (nblocks < relSegSize) {
+            return (segno * relSegSize) + nblocks;
         }
 
         /*
@@ -2270,6 +1523,7 @@ BlockNumber mdnblocks(SMgrRelation reln, ForkNumber forknum)
     }
 }
 
+
 /*
  *	mdtruncate() -- Truncate relation to specified number of blocks.
  */
@@ -2278,9 +1532,6 @@ void mdtruncate(SMgrRelation reln, ForkNumber forknum, BlockNumber nblocks)
     MdfdVec *v = NULL;
     BlockNumber curnblk;
     BlockNumber prior_blocks;
-    int chunk_size, i;
-    PageCompressHeader *pcMap = NULL;
-    PageCompressAddr *pcAddr = NULL;
 
     /*
      * NOTE: mdnblocks makes sure we have opened all active segments, so that
@@ -2304,7 +1555,7 @@ void mdtruncate(SMgrRelation reln, ForkNumber forknum, BlockNumber nblocks)
     }
 
     v = mdopen(reln, forknum, EXTENSION_FAIL);
-
+    BlockNumber relSegSize = IS_COMPRESSED_MAINFORK(reln, forknum) ? CFS_LOGIC_BLOCKS_PER_FILE: RELSEG_SIZE;
     prior_blocks = 0;
     while (v != NULL) {
         MdfdVec *ov = v;
@@ -2315,43 +1566,17 @@ void mdtruncate(SMgrRelation reln, ForkNumber forknum, BlockNumber nblocks)
              * from the mdfd_chain). We truncate the file, but do not delete
              * it, for reasons explained in the header comments.
              */
-             if (IS_COMPRESSED_MAINFORK(reln, forknum)) {
-                chunk_size = PageCompressChunkSize(reln);
-                pcMap = GetPageCompressMemoryMap(v->mdfd_vfd_pca, chunk_size);
-                pg_atomic_write_u32(&pcMap->nblocks, 0);
-                pg_atomic_write_u32(&pcMap->allocated_chunks, 0);
-                MemSet((char *)pcMap + SIZE_OF_PAGE_COMPRESS_HEADER_DATA, 0,
-                       SIZE_OF_PAGE_COMPRESS_ADDR_FILE(chunk_size) - SIZE_OF_PAGE_COMPRESS_HEADER_DATA);
-                pcMap->sync = false;
-                if (sync_pcmap(pcMap, WAIT_EVENT_COMPRESS_ADDRESS_FILE_SYNC) != 0) {
-                    ereport(data_sync_elevel(ERROR),
-                            (errcode_for_file_access(),
-                             errmsg("could not msync file \"%s\": %m", FilePathName(v->mdfd_vfd_pca))));
+            if (FileTruncate(v->mdfd_vfd, 0, WAIT_EVENT_DATA_FILE_TRUNCATE) < 0) {
+                if (check_unlink_rel_hashtbl(reln->smgr_rnode.node, forknum)) {
+                    ereport(DEBUG1, (errmsg("could not truncate file \"%s\": %m, this relation has been removed",
+                                FilePathName(v->mdfd_vfd))));
+                    FileClose(ov->mdfd_vfd);
+                    pfree(ov);
+                    break;
                 }
-                if (FileTruncate(v->mdfd_vfd_pcd, 0, WAIT_EVENT_DATA_FILE_TRUNCATE) < 0) {
-                    if (check_unlink_rel_hashtbl(reln->smgr_rnode.node, forknum)) {
-                        ereport(DEBUG1, (errmsg("could not truncate file \"%s\": %m, this relation has been removed",
-                                                FilePathName(v->mdfd_vfd_pcd))));
-                        FileClose(ov->mdfd_vfd_pcd);
-                        pfree(ov);
-                        break;
-                    }
-                    ereport(ERROR, (errcode_for_file_access(),
-                                    errmsg("could not truncate file \"%s\": %m", FilePathName(v->mdfd_vfd_pcd))));
-                }
-            } else {
-                 if (FileTruncate(v->mdfd_vfd, 0, WAIT_EVENT_DATA_FILE_TRUNCATE) < 0) {
-                     if (check_unlink_rel_hashtbl(reln->smgr_rnode.node, forknum)) {
-                         ereport(DEBUG1, (errmsg("could not truncate file \"%s\": %m, this relation has been removed",
-                                                 FilePathName(v->mdfd_vfd))));
-                         FileClose(ov->mdfd_vfd);
-                         pfree(ov);
-                         break;
-                     }
-                     ereport(ERROR, (errcode_for_file_access(),
-                                     errmsg("could not truncate file \"%s\": %m", FilePathName(v->mdfd_vfd))));
-                 }
-             }
+                ereport(ERROR, (errcode_for_file_access(),
+                                errmsg("could not truncate file \"%s\": %m", FilePathName(v->mdfd_vfd))));
+            }
 
             if (!SmgrIsTemp(reln)) {
                 register_dirty_segment(reln, forknum, v);
@@ -2359,14 +1584,9 @@ void mdtruncate(SMgrRelation reln, ForkNumber forknum, BlockNumber nblocks)
 
             v = v->mdfd_chain;
             Assert(ov != reln->md_fd[forknum]); /* we never drop the 1st segment */
-            if (IS_COMPRESSED_MAINFORK(reln, forknum)) {
-                FileClose(ov->mdfd_vfd_pca);
-                FileClose(ov->mdfd_vfd_pcd);
-            } else {
-                FileClose(ov->mdfd_vfd);
-            }
+            FileClose(ov->mdfd_vfd);
             pfree(ov);
-        } else if (prior_blocks + ((BlockNumber)RELSEG_SIZE) > nblocks) {
+        } else if (prior_blocks + ((BlockNumber)relSegSize) > nblocks) {
             /*
              * This is the last segment we want to keep. Truncate the file to
              * the right length, and clear chain link that points to any
@@ -2376,69 +1596,20 @@ void mdtruncate(SMgrRelation reln, ForkNumber forknum, BlockNumber nblocks)
              * given in the header comments.
              */
             BlockNumber last_seg_blocks = nblocks - prior_blocks;
+
+            auto truncateOffset = (off_t)last_seg_blocks * BLCKSZ;
             if (IS_COMPRESSED_MAINFORK(reln, forknum)) {
-                pc_chunk_number_t max_used_chunkno = (pc_chunk_number_t) 0;
-                uint32 allocated_chunks;
-                chunk_size = PageCompressChunkSize(reln);
-                pcMap = GetPageCompressMemoryMap(v->mdfd_vfd_pca, chunk_size);
+                truncateOffset = CfsMdTruncate(reln, forknum, nblocks, false, COMMON_STORAGE);
+            }
 
-                for (BlockNumber blk = last_seg_blocks; blk < RELSEG_SIZE; ++blk) {
-                    pcAddr = GET_PAGE_COMPRESS_ADDR(pcMap, chunk_size, blk);
-                    pcAddr->nchunks = 0;
-                    pcAddr->checksum = AddrChecksum32(blk, pcAddr, chunk_size);
+            if (FileTruncate(v->mdfd_vfd, truncateOffset, WAIT_EVENT_DATA_FILE_TRUNCATE) < 0) {
+                if (check_unlink_rel_hashtbl(reln->smgr_rnode.node, forknum)) {
+                    ereport(DEBUG1, (errmsg("could not truncate file \"%s\": %m, this relation has been removed",
+                                FilePathName(v->mdfd_vfd))));
+                    break;
                 }
-                pg_atomic_write_u32(&pcMap->nblocks, last_seg_blocks);
-                pcMap->sync = false;
-                if (sync_pcmap(pcMap, WAIT_EVENT_COMPRESS_ADDRESS_FILE_SYNC) != 0) {
-                    ereport(data_sync_elevel(ERROR),
-                        (errcode_for_file_access(), errmsg("could not msync file \"%s\": %m",
-                            FilePathName(v->mdfd_vfd_pca))));
-                }
-                allocated_chunks = pg_atomic_read_u32(&pcMap->allocated_chunks);
-                /* find the max used chunkno */
-                for (BlockNumber blk = (BlockNumber) 0; blk < (BlockNumber) last_seg_blocks; blk++) {
-                    pcAddr = GET_PAGE_COMPRESS_ADDR(pcMap, chunk_size, blk);
-                    /* check allocated_chunks for one page */
-                    if (pcAddr->allocated_chunks > BLCKSZ / chunk_size) {
-                        ereport(ERROR,
-                            (errcode(ERRCODE_DATA_CORRUPTED), errmsg("invalid chunks %u of block %u in file \"%s\"",
-                                pcAddr->allocated_chunks, blk,
-                                FilePathName(v->mdfd_vfd_pca))));
-                    }
-
-                    /* check chunknos for one page */
-                    for (i = 0; i < pcAddr->allocated_chunks; i++) {
-                        if (pcAddr->chunknos[i] == 0 || pcAddr->chunknos[i] > allocated_chunks) {
-                            ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg(
-                                "invalid chunk number %u of block %u in file \"%s\"", pcAddr->chunknos[i], blk,
-                                FilePathName(v->mdfd_vfd_pca))));
-                        }
-
-                        if (pcAddr->chunknos[i] > max_used_chunkno) {
-                            max_used_chunkno = pcAddr->chunknos[i];
-                        }
-                    }
-                }
-                off_t compressedOffset = (off_t)max_used_chunkno * chunk_size;
-                if (FileTruncate(v->mdfd_vfd_pcd, compressedOffset, WAIT_EVENT_DATA_FILE_TRUNCATE) < 0) {
-                    if (check_unlink_rel_hashtbl(reln->smgr_rnode.node, forknum)) {
-                        ereport(DEBUG1, (errmsg("could not truncate file \"%s\": %m, this relation has been removed",
-                                                FilePathName(v->mdfd_vfd))));
-                        break;
-                    }
-                    ereport(ERROR, (errcode_for_file_access(), errmsg("could not truncate file \"%s\" to %u blocks: %m",
-                                                                      FilePathName(v->mdfd_vfd), nblocks)));
-                }
-            } else {
-                if (FileTruncate(v->mdfd_vfd, (off_t)last_seg_blocks * BLCKSZ, WAIT_EVENT_DATA_FILE_TRUNCATE) < 0) {
-                    if (check_unlink_rel_hashtbl(reln->smgr_rnode.node, forknum)) {
-                        ereport(DEBUG1, (errmsg("could not truncate file \"%s\": %m, this relation has been removed",
-                                                FilePathName(v->mdfd_vfd))));
-                        break;
-                    }
-                    ereport(ERROR, (errcode_for_file_access(), errmsg("could not truncate file \"%s\" to %u blocks: %m",
-                                                                      FilePathName(v->mdfd_vfd), nblocks)));
-                }
+                ereport(ERROR, (errcode_for_file_access(), errmsg("could not truncate file \"%s\" to %u blocks: %m",
+                                                                  FilePathName(v->mdfd_vfd), nblocks)));
             }
 
             if (!SmgrIsTemp(reln)) {
@@ -2453,33 +1624,10 @@ void mdtruncate(SMgrRelation reln, ForkNumber forknum, BlockNumber nblocks)
              */
             v = v->mdfd_chain;
         }
-        prior_blocks += RELSEG_SIZE;
+        prior_blocks += relSegSize;
     }
 }
 
-static bool CompressMdImmediateSync(SMgrRelation reln, ForkNumber forknum, MdfdVec* v)
-{
-    PageCompressHeader* pcMap = GetPageCompressMemoryMap(v->mdfd_vfd_pca, PageCompressChunkSize(reln));
-    if (sync_pcmap(pcMap, WAIT_EVENT_COMPRESS_ADDRESS_FILE_SYNC) != 0) {
-        if (check_unlink_rel_hashtbl(reln->smgr_rnode.node, forknum)) {
-            ereport(DEBUG1, (errmsg("could not fsync file \"%s\": %m, this relation has been removed",
-                                    FilePathName(v->mdfd_vfd_pca))));
-            return false;
-        }
-        ereport(data_sync_elevel(ERROR),
-                (errcode_for_file_access(), errmsg("could not msync file \"%s\": %m", FilePathName(v->mdfd_vfd_pca))));
-    }
-    if (FileSync(v->mdfd_vfd_pcd, WAIT_EVENT_DATA_FILE_IMMEDIATE_SYNC) < 0) {
-        if (check_unlink_rel_hashtbl(reln->smgr_rnode.node, forknum)) {
-            ereport(DEBUG1, (errmsg("could not fsync file \"%s\": %m, this relation has been removed",
-                                    FilePathName(v->mdfd_vfd_pcd))));
-            return false;
-        }
-        ereport(data_sync_elevel(ERROR),
-                (errcode_for_file_access(), errmsg("could not fsync file \"%s\": %m", FilePathName(v->mdfd_vfd_pcd))));
-    }
-    return true;
-}
 /*
  *	mdimmedsync() -- Immediately sync a relation to stable storage.
  *
@@ -2499,25 +1647,19 @@ void mdimmedsync(SMgrRelation reln, ForkNumber forknum)
     v = mdopen(reln, forknum, EXTENSION_FAIL);
 
     while (v != NULL) {
-       if (IS_COMPRESSED_MAINFORK(reln, forknum)) {
-            if (!CompressMdImmediateSync(reln, forknum, v)) {
+        if (FileSync(v->mdfd_vfd, WAIT_EVENT_DATA_FILE_IMMEDIATE_SYNC) < 0) {
+            if (check_unlink_rel_hashtbl(reln->smgr_rnode.node, forknum)) {
+                ereport(DEBUG1,
+                    (errmsg("could not fsync file \"%s\": %m, this relation has been removed",
+                    FilePathName(v->mdfd_vfd))));
                 break;
             }
-        } else {
-           if (FileSync(v->mdfd_vfd, WAIT_EVENT_DATA_FILE_IMMEDIATE_SYNC) < 0) {
-               if (check_unlink_rel_hashtbl(reln->smgr_rnode.node, forknum)) {
-                   ereport(DEBUG1, (errmsg("could not fsync file \"%s\": %m, this relation has been removed",
-                                           FilePathName(v->mdfd_vfd))));
-                   break;
-               }
-               ereport(data_sync_elevel(ERROR), (errcode_for_file_access(),
-                                                 errmsg("could not fsync file \"%s\": %m", FilePathName(v->mdfd_vfd))));
-           }
-       }
+            ereport(data_sync_elevel(ERROR),
+                    (errcode_for_file_access(), errmsg("could not fsync file \"%s\": %m", FilePathName(v->mdfd_vfd))));
+        }
         v = v->mdfd_chain;
     }
 }
-
 /*
  * mdForgetDatabaseFsyncRequests -- forget any fsyncs and unlinks for a DB
  */
@@ -2528,6 +1670,7 @@ void mdForgetDatabaseFsyncRequests(Oid dbid)
     rnode.dbNode = dbid;
     rnode.spcNode = 0;
     rnode.relNode = 0;
+    rnode.opt = 0;
     rnode.bucketNode = InvalidBktId;
 
     FileTag tag;
@@ -2622,53 +1765,38 @@ static MdfdVec *_mdfd_openseg(SMgrRelation reln, ForkNumber forknum, BlockNumber
         oflags |= O_DIRECT;
     }
     ADIO_END();
+    char* openFilePath = fullpath;
+    char dst[MAXPGPATH];
+    if (IS_COMPRESSED_MAINFORK(reln, forknum)) {
+        CopyCompressedPath(dst, fullpath);
+        openFilePath = dst;
+    }
 
     /* open the file */
     if (RecoveryInProgress() && CheckFileRepairHashTbl(reln->smgr_rnode.node, forknum, segno) &&
         (AmStartupProcess() || AmPageRedoWorker() || AmPageWriterProcess() || AmCheckpointerProcess())) {
-        fd = openrepairfile(fullpath, filenode);
+        fd = openrepairfile(openFilePath, filenode);
         if (fd < 0) {
             pfree(fullpath);
             return NULL;
         } else {
-            ereport(LOG, (errmsg("[file repair] open repair file %s.repair", fullpath)));
+            ereport(LOG, (errmsg("[file repair] open repair file %s.repair", openFilePath)));
         }
     } else {
-        fd = DataFileIdOpenFile(fullpath, filenode, O_RDWR | PG_BINARY | oflags, 0600);
-    }
-
-    if (fd < 0) {
-        pfree(fullpath);
-        return NULL;
-    }
-    
-    int fd_pca = -1;
-    int fd_pcd = -1;
-    if (IS_COMPRESSED_MAINFORK(reln, forknum)) {
-        FileClose(fd);
-        fd = -1;
-        fd_pca = OpenPcaFile(fullpath, reln->smgr_rnode, MAIN_FORKNUM, segno, oflags);
-        if (fd_pca < 0) {
-            pfree(fullpath);
-            return NULL;
-        }
-        fd_pcd = OpenPcdFile(fullpath, reln->smgr_rnode, MAIN_FORKNUM, segno, oflags);
-        if (fd_pcd < 0) {
-            pfree(fullpath);
-            return NULL;
-        }
-        SetupPageCompressMemoryMap(fd_pca, reln->smgr_rnode.node, filenode);
+        fd = DataFileIdOpenFile(openFilePath, filenode, O_RDWR | PG_BINARY | oflags, 0600);
     }
 
     pfree(fullpath);
+
+    if (fd < 0) {
+        return NULL;
+    }
 
     /* allocate an mdfdvec entry for it */
     v = _fdvec_alloc();
 
     /* fill the entry */
     v->mdfd_vfd = fd;
-    v->mdfd_vfd_pca = fd_pca;
-    v->mdfd_vfd_pcd = fd_pcd;
     v->mdfd_segno = segno;
     v->mdfd_chain = NULL;
     Assert(_mdnblocks(reln, forknum, v) <= ((BlockNumber)RELSEG_SIZE));
@@ -2697,8 +1825,8 @@ static MdfdVec *_mdfd_getseg(SMgrRelation reln, ForkNumber forknum, BlockNumber 
     if (v == NULL) {
         return NULL; /* only possible if EXTENSION_RETURN_NULL */
     }
-
-    targetseg = blkno / ((BlockNumber)RELSEG_SIZE);
+    BlockNumber relSegSize = IS_COMPRESSED_MAINFORK(reln, forknum) ? CFS_LOGIC_BLOCKS_PER_FILE: RELSEG_SIZE;
+    targetseg = blkno / ((BlockNumber)relSegSize);
     for (nextsegno = 1; nextsegno <= targetseg; nextsegno++) {
         Assert(nextsegno == v->mdfd_segno + 1);
 
@@ -2718,7 +1846,7 @@ static MdfdVec *_mdfd_getseg(SMgrRelation reln, ForkNumber forknum, BlockNumber 
              * hash indexes.)
              */
             if (behavior == EXTENSION_CREATE || t_thrd.xlog_cxt.InRecovery) {
-                if (_mdnblocks(reln, forknum, v) < RELSEG_SIZE) {
+                if (_mdnblocks(reln, forknum, v) < relSegSize) {
                     char *zerobuf = NULL;
                     ADIO_RUN()
                     {
@@ -2732,7 +1860,7 @@ static MdfdVec *_mdfd_getseg(SMgrRelation reln, ForkNumber forknum, BlockNumber 
                     }
                     ADIO_END();
 
-                    mdextend(reln, forknum, nextsegno * ((BlockNumber)RELSEG_SIZE) - 1, zerobuf, skipFsync);
+                    mdextend(reln, forknum, nextsegno * ((BlockNumber)relSegSize) - 1, zerobuf, skipFsync);
 
                     ADIO_RUN()
                     {
@@ -2782,10 +1910,7 @@ static MdfdVec *_mdfd_getseg(SMgrRelation reln, ForkNumber forknum, BlockNumber 
 static BlockNumber _mdnblocks(SMgrRelation reln, ForkNumber forknum, const MdfdVec *seg)
 {
     off_t len;
-    if (IS_COMPRESSED_MAINFORK(reln, forknum)) {
-        PageCompressHeader *pcMap = GetPageCompressMemoryMap(seg->mdfd_vfd_pca, PageCompressChunkSize(reln));
-        return (BlockNumber) pg_atomic_read_u32(&pcMap->nblocks);
-    }
+
     len = FileSeek(seg->mdfd_vfd, 0L, SEEK_END);
     if (len < 0) {
         if (check_unlink_rel_hashtbl(reln->smgr_rnode.node, forknum)) {
@@ -2795,6 +1920,14 @@ static BlockNumber _mdnblocks(SMgrRelation reln, ForkNumber forknum, const MdfdV
         }
         ereport(ERROR, (errcode_for_file_access(),
                         errmsg("could not seek to end of file \"%s\": %m", FilePathName(seg->mdfd_vfd))));
+    }
+
+    if (len == 0) {
+        return (BlockNumber)len;
+    }
+
+    if (IS_COMPRESSED_MAINFORK(reln, forknum)) {
+        return CfsNBlock(reln->smgr_rnode.node, seg->mdfd_vfd, seg->mdfd_segno, len);
     }
 
     /* note that this calculation will ignore any partial block at EOF */
@@ -2812,9 +1945,7 @@ int SyncMdFile(const FileTag *ftag, char *path)
     SMgrRelation reln = smgropen(ftag->rnode, InvalidBackendId, GetColumnNum(ftag->forknum));
     MdfdVec    *v;
     char       *p;
-    File file = -1;
-    File pcaFd = -1;
-    File pcdFd = -1;
+    File file;
     int result;
     int savedErrno;
     bool  needClose = false;
@@ -2824,73 +1955,48 @@ int SyncMdFile(const FileTag *ftag, char *path)
     strlcpy(path, p, MAXPGPATH);
     pfree(p);
 
+    bool compressNode = IS_COMPRESSED_RNODE(ftag->rnode, ftag->forknum);
+    char* openFilePath = path;
+    char dst[MAXPGPATH];
+    if (compressNode) {
+        CopyCompressedPath(dst, path);
+        openFilePath = dst;
+    }
+    BlockNumber relSegSize = compressNode ? CFS_LOGIC_BLOCKS_PER_FILE : RELSEG_SIZE;
     /* Try to open the requested segment. */
-    v = _mdfd_getseg(reln, ftag->forknum, ftag->segno * (BlockNumber) RELSEG_SIZE,
+    v = _mdfd_getseg(reln, ftag->forknum, ftag->segno * (BlockNumber) relSegSize,
         false, EXTENSION_RETURN_NULL);
-    if (IS_COMPRESSED_RNODE(ftag->rnode, ftag->forknum)) {
-        if (v == NULL) {
-            pcaFd = OpenPcaFile(path, reln->smgr_rnode, ftag->forknum, ftag->segno);
-            if (pcaFd < 0) {
-                return -1;
-            }
-            pcdFd = OpenPcdFile(path, reln->smgr_rnode, ftag->forknum, ftag->segno);
-            if (pcdFd < 0) {
-                savedErrno = errno;
-                FileClose(pcaFd);
-                errno = savedErrno;
-                return -1;
-            }
-            needClose = true;
-        } else {
-            pcaFd = v->mdfd_vfd_pca;
-            pcdFd = v->mdfd_vfd_pcd;
-        }
-
-        PageCompressHeader *map = GetPageCompressMemoryMap(pcaFd, PageCompressChunkSize(reln));
-        result = sync_pcmap(map, WAIT_EVENT_COMPRESS_ADDRESS_FILE_SYNC);
-        if (result == 0) {
-            result = FileSync(pcdFd, WAIT_EVENT_DATA_FILE_SYNC);
-        } else {
-            ereport(data_sync_elevel(WARNING),
-                    (errcode_for_file_access(), errmsg("could not fsync pcmap \"%s\": %m", path)));
-        }
-    } else {
-        if (v == NULL) {
-            RelFileNodeForkNum filenode = RelFileNodeForkNumFill(reln->smgr_rnode, ftag->forknum, ftag->segno);
-            uint32 flags = O_RDWR | PG_BINARY;
-            file = DataFileIdOpenFile(path, filenode, (int)flags, S_IRUSR | S_IWUSR);
-            if (file < 0 &&
-                (AmStartupProcess() || AmPageRedoWorker() || AmPageWriterProcess() || AmCheckpointerProcess()) &&
-                CheckFileRepairHashTbl(reln->smgr_rnode.node, ftag->forknum, ftag->segno)) {
-                const int TEMPLEN = 8;
-                char *temppath = (char *)palloc(strlen(path) + TEMPLEN);
-                errno_t rc = sprintf_s(temppath, strlen(path) + TEMPLEN, "%s.repair", path);
-                securec_check_ss(rc, "", "");
-                file = DataFileIdOpenFile(temppath, filenode, (int)flags, S_IRUSR | S_IWUSR);
-                if (file < 0) {
-                    pfree(temppath);
-                    return -1;
-                }
+    if (v == NULL) {
+        RelFileNodeForkNum filenode = RelFileNodeForkNumFill(reln->smgr_rnode,
+            ftag->forknum, ftag->segno);
+        uint32 flags = O_RDWR | PG_BINARY;
+        file = DataFileIdOpenFile(openFilePath, filenode, (int)flags, S_IRUSR | S_IWUSR);
+        if (file < 0 &&
+            (AmStartupProcess() || AmPageRedoWorker() || AmPageWriterProcess() || AmCheckpointerProcess()) &&
+            CheckFileRepairHashTbl(reln->smgr_rnode.node, ftag->forknum, ftag->segno)) {
+            const int TEMPLEN = 8;
+            char *temppath = (char *)palloc(strlen(openFilePath) + TEMPLEN);
+            errno_t rc = sprintf_s(temppath, strlen(openFilePath) + TEMPLEN, "%s.repair", path);
+            securec_check_ss(rc, "", "");
+            file = DataFileIdOpenFile(temppath, filenode, (int)flags, S_IRUSR | S_IWUSR);
+            if (file < 0) {
                 pfree(temppath);
-            } else if (file < 0) {
                 return -1;
             }
-            needClose = true;
-        } else {
-            file = v->mdfd_vfd;
+            pfree(temppath);
+        } else if (file < 0) {
+            return -1;
         }
-        result = FileSync(file, WAIT_EVENT_DATA_FILE_SYNC);
+        needClose = true;
+    } else {
+        file = v->mdfd_vfd;
     }
 
     /* Try to fsync the file. */
+    result = FileSync(file, WAIT_EVENT_DATA_FILE_SYNC);
     savedErrno = errno;
     if (needClose) {
-        if (IS_COMPRESSED_RNODE(ftag->rnode, ftag->forknum)) {
-            FileClose(pcaFd);
-            FileClose(pcdFd);
-        } else {
-            FileClose(file);
-        }
+        FileClose(file);
     }
     errno = savedErrno;
     return result;
@@ -2912,8 +2018,13 @@ int UnlinkMdFile(const FileTag *ftag, char *path)
     pfree(p);
 
     /* Try to unlink the file. */
-    UnlinkCompressedFile(ftag->rnode, MAIN_FORKNUM, path);
-    return unlink(path);
+    char* openFilePath = path;
+    char dst[MAXPGPATH];
+    if (IS_COMPRESSED_RNODE(ftag->rnode, MAIN_FORKNUM)) {
+        CopyCompressedPath(dst, path);
+        openFilePath = dst;
+    }
+    return unlink(openFilePath);
 }
 
 /*
@@ -2932,27 +2043,49 @@ bool MatchMdFileTag(const FileTag *ftag, const FileTag *candidate)
     return ftag->rnode.dbNode == candidate->rnode.dbNode;
 }
 
-static int sync_pcmap(PageCompressHeader *pcMap, uint32 wait_event_info)
+ExtentLocation StorageConvert(SMgrRelation sRel, ForkNumber forknum, BlockNumber logicBlockNumber, bool skipSync,
+                              int type)
 {
-    if (pg_atomic_read_u32(&pcMap->sync) == true) {
-        return 0;
-    }
-    int returnCode;
-    uint32 nblocks, allocated_chunks, last_synced_nblocks, last_synced_allocated_chunks;
-    nblocks = pg_atomic_read_u32(&pcMap->nblocks);
-    allocated_chunks = pg_atomic_read_u32(&pcMap->allocated_chunks);
-    last_synced_nblocks = pg_atomic_read_u32(&pcMap->last_synced_nblocks);
-    last_synced_allocated_chunks = pg_atomic_read_u32(&pcMap->last_synced_allocated_chunks);
-    returnCode = pc_msync(pcMap);
-    if (returnCode == 0) {
-        if (last_synced_nblocks != nblocks) {
-            pg_atomic_write_u32(&pcMap->last_synced_nblocks, nblocks);
-        }
+    RelFileCompressOption option;
+    TransCompressOptions(sRel->smgr_rnode.node, &option);
 
-        if (last_synced_allocated_chunks != allocated_chunks) {
-            pg_atomic_write_u32(&pcMap->last_synced_allocated_chunks, allocated_chunks);
-        }
+    BlockNumber extentNumber = logicBlockNumber / CFS_LOGIC_BLOCKS_PER_EXTENT;
+    BlockNumber extentOffset = logicBlockNumber % CFS_LOGIC_BLOCKS_PER_EXTENT;
+    BlockNumber extentStart = (extentNumber * CFS_EXTENT_SIZE) % CFS_MAX_BLOCK_PER_FILE;  // 0   129      129*2 129*3
+    BlockNumber extentHeader = extentStart + CFS_LOGIC_BLOCKS_PER_EXTENT;  //              128 129+128  129*2+128
+    MdfdVec *v = NULL;
+    int fd = -1;
+    if (type == EXTENT_OPEN_FILE) {
+        v = _mdfd_getseg(sRel, forknum, logicBlockNumber, skipSync, EXTENSION_FAIL);
+    } else if (type == WRITE_BACK_OPEN_FILE) {
+        v = _mdfd_getseg(sRel, forknum, logicBlockNumber, skipSync, EXTENSION_RETURN_NULL);
+    } else if (type == EXTENT_CREATE_FILE) {
+        v = _mdfd_getseg(sRel, forknum, logicBlockNumber, skipSync, EXTENSION_CREATE);
     }
-    pcMap->sync = true;
-    return returnCode;
+    if (v != NULL) {
+        fd = v->mdfd_vfd;
+    } else {
+        RelFileNode node = sRel->smgr_rnode.node;
+        ereport(ERROR, (errmsg("could not find valid location: [%u/%u/%u/%u]", node.spcNode, node.dbNode, node.relNode,
+                               logicBlockNumber)));
+    }
+    return {.fd = fd,
+            .relFileNode = sRel->smgr_rnode.node,
+            .extentNumber = extentNumber,
+            .extentStart = extentStart,
+            .extentOffset = extentOffset,
+            .headerNum = extentHeader,
+            .chrunk_size = (uint16)CHUNK_SIZE_LIST[option.compressChunkSize],
+            .algorithm = (uint8)option.compressAlgorithm
+    };
+}
+
+MdfdVec *CfsMdOpenReln(SMgrRelation reln, ForkNumber forknum, ExtensionBehavior behavior)
+{
+    return mdopen(reln, forknum, behavior);
+}
+
+BlockNumber CfsGetBlocks(SMgrRelation reln, ForkNumber forknum, const MdfdVec *seg)
+{
+    return _mdnblocks(reln, forknum, seg);
 }

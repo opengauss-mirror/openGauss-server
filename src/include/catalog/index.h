@@ -160,7 +160,8 @@ extern void index_build(Relation heapRelation,
 			bool isprimary,
 			bool isreindex,
 			IndexCreatePartitionType partitionType,
-			bool parallel = true);
+			bool parallel = true,
+			bool isTruncGTT = false);
 
 extern double IndexBuildHeapScan(Relation heapRelation, Relation indexRelation, IndexInfo *indexInfo,
     bool allow_sync, IndexBuildCallback callback, void *callback_state, TableScanDesc scan = NULL);
@@ -196,7 +197,8 @@ extern void reindex_indexpart_internal(Relation heapRelation,
 extern void reindex_index(Oid indexId, Oid indexPartId,
                           bool skip_constraint_checks, AdaptMem *memInfo,
                           bool dbWide,
-                          void *baseDesc = NULL);
+                          void *baseDesc = NULL,
+                          bool isTruncGTT = false);
 extern void ReindexGlobalIndexInternal(Relation heapRelation, Relation iRel, IndexInfo* indexInfo, void* baseDesc);
 
 /* Flag bits for ReindexRelation(): */
@@ -206,8 +208,10 @@ extern void ReindexGlobalIndexInternal(Relation heapRelation, Relation iRel, Ind
 
 extern bool ReindexRelation(Oid relid, int flags, int reindexType,
     void *baseDesc = NULL,
-    AdaptMem* memInfo = NULL, bool dbWide = false,
-    IndexKind indexKind = ALL_KIND);
+    AdaptMem* memInfo = NULL,
+    bool dbWide = false,
+    IndexKind indexKind = ALL_KIND,
+    bool isTruncGTT = false);
 extern bool ReindexIsProcessingHeap(Oid heapOid);
 extern bool ReindexIsProcessingIndex(Oid indexOid);
 extern Oid IndexGetRelation(Oid indexId, bool missing_ok);

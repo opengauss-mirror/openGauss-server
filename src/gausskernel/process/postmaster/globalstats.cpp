@@ -49,12 +49,15 @@
 #include "storage/procarray.h"
 #include "storage/procsignal.h"
 #include "storage/sinvaladt.h"
+#include "utils/dynahash.h"
 #include "utils/postinit.h"
 #include "utils/ps_status.h"
 #include "utils/timestamp.h"
 #include "commands/user.h"
 #include "gssignal/gs_signal.h"
 
+static void PrepareStatsHashForSwitch();
+static void CompleteStatsHashSwitch();
 static void GlobalstatsSighupHandler(SIGNAL_ARGS);
 static void GlobalstatsSigusr2Handler(SIGNAL_ARGS);
 static void GlobalstatsSigtermHandler(SIGNAL_ARGS);
@@ -167,6 +170,19 @@ bool IsGlobalStatsTrackerProcess()
     return t_thrd.role == GLOBALSTATS_THREAD;
 }
 
+static void ShutdownGlobalstat(int code, Datum arg)
+{
+    PrepareStatsHashForSwitch();
+    MemoryContext oldCtx = NULL;
+    if (g_instance.stat_cxt.tableStat->global_stats_map) {
+        oldCtx = MemoryContextGetParent(g_instance.stat_cxt.tableStat->global_stats_map->hcxt);
+        MemoryContextDelete(oldCtx);
+        oldCtx = NULL;
+        g_instance.stat_cxt.tableStat->global_stats_map = NULL;
+    }
+    CompleteStatsHashSwitch();
+}
+
 NON_EXEC_STATIC void GlobalStatsTrackerMain()
 {
     sigjmp_buf localSigjmpBuf;
@@ -204,6 +220,7 @@ NON_EXEC_STATIC void GlobalStatsTrackerMain()
     gspqsignal(SIGUSR2, GlobalstatsSigusr2Handler);
     gspqsignal(SIGFPE, FloatExceptionHandler);
     gspqsignal(SIGCHLD, SIG_DFL);
+    gspqsignal(SIGURG, print_stack);
 
     /* Early initialization */
     BaseInit();
@@ -223,6 +240,8 @@ NON_EXEC_STATIC void GlobalStatsTrackerMain()
     /* Unblock signals (they were blocked when the postmaster forked us) */
     gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
     (void)gs_signal_unblock_sigusr2();
+
+    on_shmem_exit(ShutdownGlobalstat, 0);
 
     /*
      * If an exception is encountered, processing resumes here.
@@ -265,8 +284,8 @@ NON_EXEC_STATIC void GlobalStatsTrackerMain()
         MemoryContext oldStatLocalContext = u_sess->stat_cxt.pgStatLocalContext;
 
         u_sess->stat_cxt.pgStatLocalContext =
-            AllocSetContextCreate(u_sess->top_mem_cxt, "Global Statistics snapshot",
-                ALLOCSET_SMALL_MINSIZE, ALLOCSET_SMALL_INITSIZE, ALLOCSET_SMALL_MAXSIZE);
+            AllocSetContextCreate(g_instance.stat_cxt.tableStat->global_stats_cxt, "Global Statistics snapshot",
+                ALLOCSET_SMALL_MINSIZE, ALLOCSET_SMALL_INITSIZE, ALLOCSET_SMALL_MAXSIZE, SHARED_CONTEXT);
         
         pgstat_fetch_global();
 
@@ -286,13 +305,6 @@ NON_EXEC_STATIC void GlobalStatsTrackerMain()
     }
 
 shutdown:
-    /*
-     * Before the thread exits, set global_stats_map to NULL to prevent core dump when the
-     * backend thread accesses the released memory during the prune operation.
-     */
-    PrepareStatsHashForSwitch();
-    g_instance.stat_cxt.tableStat->global_stats_map = NULL;
-    CompleteStatsHashSwitch();
     ereport(LOG, (errmsg("global stats shutting down")));
     proc_exit(0);
 }
@@ -330,6 +342,13 @@ bool GetTableGstats(Oid dbid, Oid relid, Oid parentid, PgStat_StatTabEntry *tabl
     tabkey.statFlag = parentid;
     tabkey.tableid = relid;
 
+    if (g_instance.stat_cxt.tableStat->global_stats_map == NULL ||
+        (g_instance.stat_cxt.tableStat->global_stats_map != NULL &&
+        g_instance.stat_cxt.tableStat->global_stats_map->hctl == NULL)) {
+        pg_atomic_sub_fetch_u64(&g_instance.stat_cxt.tableStat->readers, 1);
+        return false;
+    }
+ 
     dbentry = (PgStat_StatDBEntry*)hash_search(g_instance.stat_cxt.tableStat->global_stats_map,
                                                (void*)&dbid, HASH_FIND, NULL);
     if (dbentry == NULL) {

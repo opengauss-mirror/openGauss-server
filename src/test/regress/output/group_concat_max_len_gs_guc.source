@@ -1,0 +1,30 @@
+--gs_guc set
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "group_concat_max_len=1234"
+--?.*
+--?.*
+--?gs_guc set: group_concat_max_len=1234: .*postgresql.conf.*
+
+Total instances: 1. Failed instances: 0.
+Success to perform gs_guc!
+
+--gs_guc reload
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "group_concat_max_len=12345"
+--?.*
+--?.*
+--?gs_guc reload: group_concat_max_len=12345: .*postgresql.conf.*
+server signaled
+
+Total instances: 1. Failed instances: 0.
+Success to perform gs_guc!
+
+--error cases
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "group_concat_max_len=9223372036854775808"
+--?.*
+ERROR: The parameter "group_concat_max_len" requires an integer value.
+ERROR: The value "9223372036854775808" for parameter "group_concat_max_len" is incorrect, requires a integer value
+Try "gs_guc --help" for more information.
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "group_concat_max_len=-1"
+--?.*
+ERROR: The value -1 is outside the valid range for parameter "group_concat_max_len" (0 .. 9223372036854775807).
+ERROR: The value "-1" for parameter "group_concat_max_len" is incorrect, requires a integer value
+Try "gs_guc --help" for more information.

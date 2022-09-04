@@ -1252,8 +1252,6 @@ unsigned int ng_get_dest_num_data_nodes(Plan* plan)
             case T_IndexScan:
             case T_IndexOnlyScan:
             case T_CStoreIndexScan:
-            case T_DfsScan:
-            case T_DfsIndexScan:
             case T_BitmapIndexScan:
             case T_BitmapHeapScan:
             case T_CStoreIndexCtidScan:

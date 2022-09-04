@@ -26,6 +26,34 @@
 #include "utils/sortsupport.h"
 
 /*
+ * Array giving the position of the left-most set bit for each possible
+ * byte value.  We count the right-most position as the 0th bit, and the
+ * left-most the 7th bit.  The 0th entry of the array should not be used.
+ *
+ * Note: this is not used by the functions in pg_bitutils.h when
+ * HAVE__BUILTIN_CLZ is defined, but we provide it anyway, so that
+ * extensions possibly compiled with a different compiler can use it.
+ */
+const uint8 pg_leftmost_one_pos[256] = {
+	0, 0, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3,
+	4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+	5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
+	5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
+	6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
+	6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
+	6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
+	6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
+	7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+	7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+	7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+	7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+	7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+	7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+	7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+	7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7
+};
+
+/*
  *		Defined in adt/
  */
 
@@ -186,6 +214,10 @@ extern Datum binary_decode(PG_FUNCTION_ARGS);
 extern unsigned hex_encode(const char* src, unsigned len, char* dst);
 extern unsigned hex_decode(const char* src, unsigned len, char* dst);
 
+/* encrypt_decrypt.c */
+extern Datum aes_encrypt(PG_FUNCTION_ARGS);
+extern Datum aes_decrypt(PG_FUNCTION_ARGS);
+
 /* enum.c */
 extern Datum enum_in(PG_FUNCTION_ARGS);
 extern Datum enum_out(PG_FUNCTION_ARGS);
@@ -204,6 +236,77 @@ extern Datum enum_first(PG_FUNCTION_ARGS);
 extern Datum enum_last(PG_FUNCTION_ARGS);
 extern Datum enum_range_bounds(PG_FUNCTION_ARGS);
 extern Datum enum_range_all(PG_FUNCTION_ARGS);
+
+/* set.c */
+extern Datum set_in(PG_FUNCTION_ARGS);
+extern Datum set_out(PG_FUNCTION_ARGS);
+extern Datum set_recv(PG_FUNCTION_ARGS);
+extern Datum set_send(PG_FUNCTION_ARGS);
+extern Datum setint2(PG_FUNCTION_ARGS);
+extern Datum setint4(PG_FUNCTION_ARGS);
+extern Datum setint8(PG_FUNCTION_ARGS);
+extern Datum settof(PG_FUNCTION_ARGS);
+extern Datum settod(PG_FUNCTION_ARGS);
+extern Datum settonumber(PG_FUNCTION_ARGS);
+extern Datum settobpchar(PG_FUNCTION_ARGS);
+extern Datum settovarchar(PG_FUNCTION_ARGS);
+extern Datum settotext(PG_FUNCTION_ARGS);
+extern Datum settonvarchar2(PG_FUNCTION_ARGS);
+extern Datum i8toset(PG_FUNCTION_ARGS);
+extern Datum i4toset(PG_FUNCTION_ARGS);
+extern Datum i2toset(PG_FUNCTION_ARGS);
+extern Datum ftoset(PG_FUNCTION_ARGS);
+extern Datum dtoset(PG_FUNCTION_ARGS);
+extern Datum numbertoset(PG_FUNCTION_ARGS);
+extern Datum bpchartoset(PG_FUNCTION_ARGS);
+extern Datum varchartoset(PG_FUNCTION_ARGS);
+extern Datum texttoset(PG_FUNCTION_ARGS);
+extern Datum nvarchar2toset(PG_FUNCTION_ARGS);
+extern Datum btsetcmp(PG_FUNCTION_ARGS);
+extern Datum seteq(PG_FUNCTION_ARGS);
+extern Datum setne(PG_FUNCTION_ARGS);
+extern Datum setlt(PG_FUNCTION_ARGS);
+extern Datum setgt(PG_FUNCTION_ARGS);
+extern Datum setle(PG_FUNCTION_ARGS);
+extern Datum setge(PG_FUNCTION_ARGS);
+extern Datum setint8eq(PG_FUNCTION_ARGS);
+extern Datum setint8ne(PG_FUNCTION_ARGS);
+extern Datum setint8lt(PG_FUNCTION_ARGS);
+extern Datum setint8gt(PG_FUNCTION_ARGS);
+extern Datum setint8le(PG_FUNCTION_ARGS);
+extern Datum setint8ge(PG_FUNCTION_ARGS);
+extern Datum setint2eq(PG_FUNCTION_ARGS);
+extern Datum setint2ne(PG_FUNCTION_ARGS);
+extern Datum setint2lt(PG_FUNCTION_ARGS);
+extern Datum setint2gt(PG_FUNCTION_ARGS);
+extern Datum setint2le(PG_FUNCTION_ARGS);
+extern Datum setint2ge(PG_FUNCTION_ARGS);
+extern Datum setint4eq(PG_FUNCTION_ARGS);
+extern Datum setint4ne(PG_FUNCTION_ARGS);
+extern Datum setint4lt(PG_FUNCTION_ARGS);
+extern Datum setint4gt(PG_FUNCTION_ARGS);
+extern Datum setint4le(PG_FUNCTION_ARGS);
+extern Datum setint4ge(PG_FUNCTION_ARGS);
+extern Datum int8seteq(PG_FUNCTION_ARGS);
+extern Datum int8setne(PG_FUNCTION_ARGS);
+extern Datum int8setlt(PG_FUNCTION_ARGS);
+extern Datum int8setgt(PG_FUNCTION_ARGS);
+extern Datum int8setle(PG_FUNCTION_ARGS);
+extern Datum int8setge(PG_FUNCTION_ARGS);
+extern Datum int2seteq(PG_FUNCTION_ARGS);
+extern Datum int2setne(PG_FUNCTION_ARGS);
+extern Datum int2setlt(PG_FUNCTION_ARGS);
+extern Datum int2setgt(PG_FUNCTION_ARGS);
+extern Datum int2setle(PG_FUNCTION_ARGS);
+extern Datum int2setge(PG_FUNCTION_ARGS);
+extern Datum int4seteq(PG_FUNCTION_ARGS);
+extern Datum int4setne(PG_FUNCTION_ARGS);
+extern Datum int4setlt(PG_FUNCTION_ARGS);
+extern Datum int4setgt(PG_FUNCTION_ARGS);
+extern Datum int4setle(PG_FUNCTION_ARGS);
+extern Datum int4setge(PG_FUNCTION_ARGS);
+extern Datum findinset(PG_FUNCTION_ARGS);
+extern Datum btint8sortsupport(PG_FUNCTION_ARGS);
 
 /* int.c */
 extern Datum int2in(PG_FUNCTION_ARGS);
@@ -665,6 +768,9 @@ extern Datum void_in(PG_FUNCTION_ARGS);
 extern Datum void_out(PG_FUNCTION_ARGS);
 extern Datum void_recv(PG_FUNCTION_ARGS);
 extern Datum void_send(PG_FUNCTION_ARGS);
+extern Datum anyset_in(PG_FUNCTION_ARGS);
+extern Datum anyset_out(PG_FUNCTION_ARGS);
+
 #ifdef PGXC
 extern Datum pgxc_node_str(PG_FUNCTION_ARGS);
 extern Datum pgxc_lock_for_backup(PG_FUNCTION_ARGS);
@@ -912,6 +1018,7 @@ extern Datum instr_3args(PG_FUNCTION_ARGS);
 extern Datum instr_4args(PG_FUNCTION_ARGS);
 extern Datum byteain(PG_FUNCTION_ARGS);
 extern void text_to_bktmap(text* gbucket, uint2* bktmap, int *bktlen);
+extern bytea* bytea_substring(Datum str, int S, int L, bool length_not_specified);
 
 #define CStringGetTextDatum(s) PointerGetDatum(cstring_to_text(s))
 #define TextDatumGetCString(d) text_to_cstring((text*)DatumGetPointer(d))
@@ -982,6 +1089,9 @@ extern Datum to_hex32(PG_FUNCTION_ARGS);
 extern Datum to_hex64(PG_FUNCTION_ARGS);
 extern Datum md5_text(PG_FUNCTION_ARGS);
 extern Datum md5_bytea(PG_FUNCTION_ARGS);
+extern Datum sha(PG_FUNCTION_ARGS);
+extern Datum sha1(PG_FUNCTION_ARGS);
+extern Datum sha2(PG_FUNCTION_ARGS);
 
 extern Datum unknownin(PG_FUNCTION_ARGS);
 extern Datum unknownout(PG_FUNCTION_ARGS);
@@ -996,6 +1106,9 @@ extern Datum bytea_string_agg_finalfn(PG_FUNCTION_ARGS);
 extern Datum string_agg_transfn(PG_FUNCTION_ARGS);
 extern Datum string_agg_finalfn(PG_FUNCTION_ARGS);
 extern Datum checksumtext_agg_transfn(PG_FUNCTION_ARGS);
+
+extern Datum group_concat_transfn(PG_FUNCTION_ARGS);
+extern Datum group_concat_finalfn(PG_FUNCTION_ARGS);
 
 extern Datum list_agg_transfn(PG_FUNCTION_ARGS);
 extern Datum list_agg_finalfn(PG_FUNCTION_ARGS);
@@ -1183,6 +1296,7 @@ extern Datum hashmacaddr(PG_FUNCTION_ARGS);
 /* numeric.c */
 extern Datum numeric_in(PG_FUNCTION_ARGS);
 extern Datum numeric_out(PG_FUNCTION_ARGS);
+extern Datum numeric_out_with_zero(PG_FUNCTION_ARGS);
 extern Datum numeric_recv(PG_FUNCTION_ARGS);
 extern Datum numeric_send(PG_FUNCTION_ARGS);
 extern Datum numerictypmodin(PG_FUNCTION_ARGS);
@@ -1347,6 +1461,9 @@ extern Datum pg_try_advisory_xact_lock_shared_int4(PG_FUNCTION_ARGS);
 extern Datum pg_advisory_unlock_int4(PG_FUNCTION_ARGS);
 extern Datum pg_advisory_unlock_shared_int4(PG_FUNCTION_ARGS);
 extern Datum pg_advisory_unlock_all(PG_FUNCTION_ARGS);
+
+/* pgstatfuncs.cpp */
+extern Datum gs_stack(PG_FUNCTION_ARGS);
 
 /* txid.c */
 extern Datum txid_snapshot_in(PG_FUNCTION_ARGS);
@@ -1636,6 +1753,13 @@ Datum gs_index_verify(PG_FUNCTION_ARGS);
 Datum gs_index_recycle_queue(PG_FUNCTION_ARGS);
 
 /* undo meta */
+extern Datum gs_undo_meta_dump_zone(PG_FUNCTION_ARGS);
+extern Datum gs_undo_meta_dump_spaces(PG_FUNCTION_ARGS);
+extern Datum gs_undo_meta_dump_slot(PG_FUNCTION_ARGS);
+extern Datum gs_undo_translot_dump_slot(PG_FUNCTION_ARGS);
+extern Datum gs_undo_translot_dump_xid(PG_FUNCTION_ARGS);
+extern Datum gs_undo_dump_record(PG_FUNCTION_ARGS);
+extern Datum gs_undo_dump_xid(PG_FUNCTION_ARGS);
 extern Datum gs_undo_meta(PG_FUNCTION_ARGS);
 extern Datum gs_stat_undo(PG_FUNCTION_ARGS);
 extern Datum gs_undo_translot(PG_FUNCTION_ARGS);
@@ -1689,6 +1813,76 @@ extern Datum pg_get_publication_tables(PG_FUNCTION_ARGS);
 /* launcher.cpp */
 extern Datum pg_stat_get_subscription(PG_FUNCTION_ARGS);
 
-#endif /* !FRONTEND_PARSER */
+/* sqlpatch.cpp */
+extern Datum create_sql_patch_by_id_hint(PG_FUNCTION_ARGS);
+extern Datum enable_sql_patch(PG_FUNCTION_ARGS);
+extern Datum disable_sql_patch(PG_FUNCTION_ARGS);
+extern Datum drop_sql_patch(PG_FUNCTION_ARGS);
+extern Datum create_abort_patch_by_id(PG_FUNCTION_ARGS);
+extern Datum show_sql_patch(PG_FUNCTION_ARGS);
+
+/* row-compression genfile.c */
+extern Datum compress_address_header(PG_FUNCTION_ARGS);
+extern Datum compress_address_details(PG_FUNCTION_ARGS);
+extern Datum compress_buffer_stat_info(PG_FUNCTION_ARGS);
+extern Datum compress_ratio_info(PG_FUNCTION_ARGS);
+extern Datum compress_statistic_info(PG_FUNCTION_ARGS);
+extern Datum pg_read_binary_file_blocks(PG_FUNCTION_ARGS);
+
+#else
+/*
+ * Array giving the position of the left-most set bit for each possible
+ * byte value.  We count the right-most position as the 0th bit, and the
+ * left-most the 7th bit.  The 0th entry of the array should not be used.
+ *
+ * Note: this is not used by the functions in pg_bitutils.h when
+ * HAVE__BUILTIN_CLZ is defined, but we provide it anyway, so that
+ * extensions possibly compiled with a different compiler can use it.
+ */
+PGDLLIMPORT const uint8 pg_leftmost_one_pos[256] = {
+	0, 0, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3,
+	4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+	5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
+	5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
+	6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
+	6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
+	6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
+	6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
+	7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+	7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+	7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+	7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+	7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+	7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+	7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+	7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7
+};
+#endif
+extern char *pg_ultostr(char *str, uint32 value);
+extern char *pg_ultostr_zeropad(char *str, uint32 value, int32 minwidth);
+
+
+/*
+ * pg_leftmost_one_pos32
+ *		Returns the position of the most significant set bit in "word",
+ *		measured from the least significant bit.  word must not be 0.
+ */
+static inline int pg_leftmost_one_pos32(uint32 word)
+{
+#ifdef HAVE__BUILTIN_CLZ
+    Assert(word != 0);
+
+    return 31 - __builtin_clz(word);
+#else
+    int shift = 32 - 8;
+
+    Assert(word != 0);
+
+    while ((word >> shift) == 0)
+        shift -= 8;
+
+    return shift + pg_leftmost_one_pos[(word >> shift) & 255];
+#endif /* HAVE__BUILTIN_CLZ */
+}
 
 #endif /* BUILTINS_H */

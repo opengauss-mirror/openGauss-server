@@ -26,7 +26,6 @@
 #include "access/psort.h"
 #include "access/cstore_am.h"
 #include "access/cstore_insert.h"
-#include "access/dfs/dfs_am.h"
 #include "access/reloptions.h"
 #include "access/sysattr.h"
 #include "access/tableam.h"
@@ -50,7 +49,6 @@ Datum psortbuild(PG_FUNCTION_ARGS)
 
     // 1. perpare for heap scan
     Snapshot snapshot;
-    DfsScanState *dfsScanState = NULL;
     CStoreScanDesc scanstate = NULL;
     VectorBatch *vecScanBatch = NULL;
     MemInfoArg memInfo;
@@ -85,33 +83,20 @@ Datum psortbuild(PG_FUNCTION_ARGS)
     VectorBatch *vecOutBatch = New(CurrentMemoryContext) VectorBatch(CurrentMemoryContext, psortRel->rd_att);
 
     // 3. scan heap
-    if (RelationIsDfsStore(heapRel)) {
-        // for dfs table
-        dfsScanState = dfs::reader::DFSBeginScan(heapRel, NIL, heapScanNumIndexAttrs, heapScanAttrNumbers, snapshot);
-        do {
-            vecScanBatch = dfs::reader::DFSGetNextBatch(dfsScanState);
-            insRows += InsertToPsort(vecScanBatch, vecOutBatch, indexInfo, cstoreInsert, scanRows);
-        } while (!BatchIsNull(vecScanBatch));
-    } else {
-        // for cstore table
-        scanstate = CStoreBeginScan(heapRel, heapScanNumIndexAttrs, heapScanAttrNumbers, snapshot, false);
+    // for cstore table
+    scanstate = CStoreBeginScan(heapRel, heapScanNumIndexAttrs, heapScanAttrNumbers, snapshot, false);
 
-        do {
-            vecScanBatch = CStoreGetNextBatch(scanstate);
-            insRows += InsertToPsort(vecScanBatch, vecOutBatch, indexInfo, cstoreInsert, scanRows);
-        } while (!CStoreIsEndScan(scanstate));
-    }
+    do {
+        vecScanBatch = CStoreGetNextBatch(scanstate);
+        insRows += InsertToPsort(vecScanBatch, vecOutBatch, indexInfo, cstoreInsert, scanRows);
+    } while (!CStoreIsEndScan(scanstate));
 
     // 6. end insert
     cstoreInsert->SetEndFlag();
     cstoreInsert->BatchInsert((VectorBatch*)NULL, TABLE_INSERT_FROZEN);
 
     // 7. end scan
-    if (RelationIsDfsStore(heapRel)) {
-        dfs::reader::DFSEndScan(dfsScanState);
-    } else {
-        CStoreEndScan(scanstate);
-    }
+    CStoreEndScan(scanstate);
 
     DELETE_EX(cstoreInsert);
     delete vecOutBatch;

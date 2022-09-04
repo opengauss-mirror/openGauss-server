@@ -18,8 +18,8 @@ set(resetxlog_LINK_LIBS libpgport.a -lcrypt -ldl -lm -lssl -lcrypto -l${SECURE_C
 add_bintarget(pg_resetxlog TGT_resetxlog_SRC TGT_resetxlog_INC "${resetxlog_DEF_OPTIONS}" "${resetxlog_COMPILE_OPTIONS}" "${resetxlog_LINK_OPTIONS}" "${resetxlog_LINK_LIBS}")
 add_dependencies(pg_resetxlog pgport_static)
 target_link_directories(pg_resetxlog PUBLIC
-    ${LIBOPENSSL_LIB_PATH} ${PROTOBUF_LIB_PATH} ${GRPC_LIB_PATH} ${LIBPARQUET_LIB_PATH} ${LIBCURL_LIB_PATH} ${KERBEROS_LIB_PATH} 
-    ${ZLIB_LIB_PATH} ${LIBOBS_LIB_PATH} ${LIBEDIT_LIB_PATH} ${LIBCGROUP_LIB_PATH} ${SECURE_LIB_PATH} ${CMAKE_BINARY_DIR}/lib
+    ${LIBOPENSSL_LIB_PATH} ${LIBCURL_LIB_PATH} ${KERBEROS_LIB_PATH} ${ZLIB_LIB_PATH} 
+    ${LIBOBS_LIB_PATH} ${LIBEDIT_LIB_PATH} ${LIBCGROUP_LIB_PATH} ${SECURE_LIB_PATH} ${CMAKE_BINARY_DIR}/lib
 )
 install(TARGETS pg_resetxlog RUNTIME DESTINATION bin)
 

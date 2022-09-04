@@ -97,7 +97,6 @@ typedef struct knl_instance_attr_storage {
     bool enable_gtm_free;
     bool comm_cn_dn_logic_conn;
     bool enable_adio_function;
-    bool enable_access_server_directory;
     bool enableIncrementalCheckpoint;
     bool enable_double_write;
     bool enable_delta_store;
@@ -110,6 +109,7 @@ typedef struct knl_instance_attr_storage {
     int DataQueueBufSize;
     int NBuffers;
     int NNvmBuffers;
+    int NPcaBuffers;
     int NSegBuffers;
     int cstore_buffers;
     int MaxSendSize;
@@ -165,6 +165,7 @@ typedef struct knl_instance_attr_storage {
     int wal_flush_delay;
     int max_logical_replication_workers;
     char *redo_bind_cpu_attr;
+    int max_active_gtt;
 } knl_instance_attr_storage;
 
 #endif /* SRC_INCLUDE_KNL_KNL_INSTANCE_ATTR_STORAGE_H_ */

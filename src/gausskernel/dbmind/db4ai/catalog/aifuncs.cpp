@@ -26,6 +26,8 @@
 #include "db4ai/gd.h"
 #include "db4ai/kmeans.h"
 #include "db4ai/xgboost.h"
+#include "db4ai/bayesnet.h"
+#include "db4ai/bayes.h"
 
 // when adding new prediction types make sure of changing the corresponding enum correctly (positions must match)
 const char *prediction_types_str[] = {[TYPE_BOOL] = "Boolean",
@@ -149,33 +151,27 @@ MetricML get_metric_ml(const char *str)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-
-extern KMeans kmeans;
-extern GradientDescent gd_pca;
-extern XGBoost xg_reg_logistic;
-extern XGBoost xg_bin_logistic;
-extern XGBoost xg_reg_sqe;
-extern XGBoost xg_reg_gamma;
-
-
 // when adding new algorithms make sure of changing the corresponding position
-static AlgorithmAPI *algorithm_apis[] = {&gd_logistic_regression.algo,
-                                         &gd_svm_classification.algo,
-                                         &gd_linear_regression.algo,
-                                         &gd_pca.algo,
-                                         &kmeans.algo,
-                                         &xg_reg_logistic.algo,  // xgboost_regression_logistic
-                                         &xg_bin_logistic.algo,  // xgboost_binary_logistic
-                                         &xg_reg_sqe.algo,       // xgboost_regression_squarederror
-                                         &xg_reg_gamma.algo,     // xgboost_regression_gamma
-                                         &gd_multiclass.algo};
+static AlgorithmAPI* algorithm_apis[] = {
+    &gd_logistic_regression.algo,
+    &gd_svm_classification.algo,
+    &gd_linear_regression.algo,
+    &gd_pca.algo,
+    &kmeans.algo,
+    &xg_reg_logistic.algo,// xgboost_regression_logistic
+    &xg_bin_logistic.algo,// xgboost_binary_logistic
+    &xg_reg_sqe.algo,     // xgboost_regression_squarederror
+    &xg_reg_gamma.algo,   // xgboost_regression_gamma
+    &gd_multiclass.algo,
+    &bayes_net_internal.algo,
+};
 
 AlgorithmAPI *get_algorithm_api(AlgorithmML algorithm)
 {
+    Assert(sizeof(algorithm_apis) > 0 && sizeof(algorithm_apis) / sizeof(algorithm_apis[0]) > algorithm);
     if (algorithm >= INVALID_ALGORITHM_ML || algorithm_apis[algorithm] == nullptr)
         ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                         errmsg("invalid ML algorithm: %d", algorithm)));
-
     return algorithm_apis[algorithm];
 }
 

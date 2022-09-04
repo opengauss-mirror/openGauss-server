@@ -23,6 +23,7 @@
 #include "access/xlog.h"
 #include "access/xloginsert.h"
 #include "access/genam.h"
+#include "access/ustore/knl_uverify.h"
 #include "catalog/index.h"
 #include "miscadmin.h"
 #include "storage/buf/bufmgr.h"
@@ -48,7 +49,7 @@ static Buffer UBTreeSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber fi
     Size newitemsz, IndexTuple newitem, bool newitemonleft, BTScanInsert itup_key);
 static bool UBTreePageAddTuple(Page page, Size itemsize, IndexTuple itup, OffsetNumber itup_off, bool isnew);
 static bool UBTreeIsEqual(Relation idxrel, Page page, OffsetNumber offnum, int keysz, ScanKey scankey);
-static void UBTreeDeleteOnPage(Relation rel, Buffer buf, OffsetNumber offset);
+static void UBTreeDeleteOnPage(Relation rel, Buffer buf, OffsetNumber offset, bool isRollbackIndex);
 static Buffer UBTreeNewRoot(Relation rel, Buffer lbuf, Buffer rbuf);
 
 /*
@@ -69,7 +70,6 @@ bool UBTreePagePruneOpt(Relation rel, Buffer buf, bool tryDelete)
 {
     Page page = BufferGetPage(buf);
     UBTPageOpaqueInternal opaque = (UBTPageOpaqueInternal)PageGetSpecialPointer(page);
-    TransactionId oldestXmin = InvalidTransactionId;
 
     WHITEBOX_TEST_STUB("UBTreePagePruneOpt", WhiteboxDefaultErrorEmit);
 
@@ -97,8 +97,7 @@ bool UBTreePagePruneOpt(Relation rel, Buffer buf, bool tryDelete)
         return false;
     }
 
-    GetOldestXminForUndo(&oldestXmin);
-
+    TransactionId oldestXmin = u_sess->utils_cxt.RecentGlobalDataXmin;
     Assert(TransactionIdIsValid(oldestXmin));
 
     /*
@@ -164,6 +163,7 @@ bool UBTreePagePrune(Relation rel, Buffer buf, TransactionId oldestXmin, OidRBTr
     UBTPageOpaqueInternal opaque;
     OffsetNumber offnum, maxoff;
     IndexPruneState prstate;
+    UBtreePageVerifyParams verifyParams;
 
     WHITEBOX_TEST_STUB("UBTreePagePruneOpt", WhiteboxDefaultErrorEmit);
 
@@ -225,7 +225,7 @@ bool UBTreePagePrune(Relation rel, Buffer buf, TransactionId oldestXmin, OidRBTr
         UBTreePagePruneExecute(page, prstate.previousdead, npreviousDead, &prstate);
         UBTreePagePruneExecute(page, prstate.nowdead, prstate.ndead, &prstate);
 
-        UBTreePageRepairFragmentation(page);
+        UBTreePageRepairFragmentation(rel, BufferGetBlockNumber(buf), page);
 
         has_pruned = true;
 
@@ -276,7 +276,10 @@ bool UBTreePagePrune(Relation rel, Buffer buf, TransactionId oldestXmin, OidRBTr
     }
 
     END_CRIT_SECTION();
-
+    if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UBTREE, USTORE_VERIFY_COMPLETE,
+        (char *) &verifyParams, rel, page, InvalidBlockNumber, NULL, NULL, InvalidXLogRecPtr))) {
+        ExecuteUstoreVerify(USTORE_VERIFY_MOD_UBTREE, (char *) &verifyParams);
+    }
     return has_pruned;
 }
 
@@ -360,7 +363,7 @@ static int ItemOffCompare(const void* itemIdp1, const void* itemIdp2)
  * On the basis of PageRepairFragmentation(Page page), we ignore redirected/unused, compact both
  * line pointers and index tuples.
  */
-void UBTreePageRepairFragmentation(Page page)
+void UBTreePageRepairFragmentation(Relation rel, BlockNumber blkno, Page page)
 {
     Offset pdLower = ((PageHeader)page)->pd_lower;
     Offset pdUpper = ((PageHeader)page)->pd_upper;
@@ -368,10 +371,12 @@ void UBTreePageRepairFragmentation(Page page)
 
     WHITEBOX_TEST_STUB("UBTreePageRepairFragmentation", WhiteboxDefaultErrorEmit);
 
+    const char *relName = (rel ? RelationGetRelationName(rel) : "Unknown During Redo");
     if ((unsigned int)(pdLower) < SizeOfPageHeaderData || pdLower > pdUpper || pdUpper > pdSpecial ||
         pdSpecial > BLCKSZ || (unsigned int)(pdSpecial) != MAXALIGN(pdSpecial))
         ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
-                errmsg("corrupted page pointers: lower = %d, upper = %d, special = %d", pdLower, pdUpper, pdSpecial)));
+                errmsg("corrupted page pointers: lower = %d, upper = %d, special = %d. rel \"%s\", blkno %u",
+                       pdLower, pdUpper, pdSpecial, relName, blkno)));
 
     UBTPageOpaqueInternal opaque = (UBTPageOpaqueInternal)PageGetSpecialPointer(page);
     int nline = PageGetMaxOffsetNumber(page);
@@ -390,8 +395,9 @@ void UBTreePageRepairFragmentation(Page page)
             itemidptr->itemoff = ItemIdGetOffset(lp);
             itemidptr->olditemid = *lp;
             if (itemidptr->itemoff < (int)pdUpper || itemidptr->itemoff >= (int)pdSpecial)
-                ereport(ERROR,
-                        (errcode(ERRCODE_DATA_CORRUPTED), errmsg("corrupted item pointer: %d", itemidptr->itemoff)));
+                ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                        errmsg("corrupted item pointer: %d. rel \"%s\", blkno %u",
+                               itemidptr->itemoff, relName, blkno)));
             itemidptr->alignedlen = MAXALIGN(ItemIdGetLength(lp));
             totallen += itemidptr->alignedlen;
             itemidptr++;
@@ -400,8 +406,8 @@ void UBTreePageRepairFragmentation(Page page)
 
     if (totallen > (Size)(pdSpecial - pdLower))
         ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
-                errmsg("corrupted item lengths: total %u, available space %d",
-                       (unsigned int)totallen, pdSpecial - pdLower)));
+                errmsg("corrupted item lengths: total %u, available space %d. rel \"%s\", blkno %u",
+                       (unsigned int)totallen, pdSpecial - pdLower, relName, blkno)));
 
     /* sort itemIdSortData array into decreasing itemoff order */
     qsort((char*)itemidbase, nstorage, sizeof(itemIdSortData), ItemOffCompare);
@@ -462,7 +468,6 @@ bool UBTreeDoInsert(Relation rel, IndexTuple itup, IndexUniqueCheck checkUnique,
     WHITEBOX_TEST_STUB("UBTreeDoInsert-begin", WhiteboxDefaultErrorEmit);
     if (rel == NULL || rel->rd_rel == NULL) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("relation or rd_rel is NULL")));
-        return false;
     }
     /* we need an insertion scan key to do our search, so build one */
     itupKey = UBTreeMakeScanKey(rel, itup);
@@ -628,8 +633,7 @@ top:
         }
     }
 
-    /* skip insertion when we just want to check existing or find a conflict when executing upsert */
-    if (checkUnique != UNIQUE_CHECK_EXISTING && !(checkUnique == UNIQUE_CHECK_UPSERT && !is_unique)) {
+    if (checkUnique != UNIQUE_CHECK_EXISTING) {
         /*
          * The only conflict predicate locking cares about for indexes is when
          * an index tuple insert conflicts with an existing lock.  We don't
@@ -695,6 +699,7 @@ static TransactionId UBTreeCheckUnique(Relation rel, IndexTuple itup, Relation h
     Buffer nbuf = InvalidBuffer;
     bool found = false;
     Relation tarRel = heapRel;
+    UBtreePageVerifyParams verifyParams;
 
     WHITEBOX_TEST_STUB("UBTreeCheckUnique", WhiteboxDefaultErrorEmit);
 
@@ -706,6 +711,10 @@ static TransactionId UBTreeCheckUnique(Relation rel, IndexTuple itup, Relation h
     page = BufferGetPage(buf);
     opaque = (UBTPageOpaqueInternal)PageGetSpecialPointer(page);
     maxoff = PageGetMaxOffsetNumber(page);
+    if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UBTREE, USTORE_VERIFY_COMPLETE, (char *) &verifyParams,
+        rel, page, InvalidBlockNumber, NULL, gpiScan, InvalidXLogRecPtr))) {
+        ExecuteUstoreVerify(USTORE_VERIFY_MOD_UBTREE, (char *) &verifyParams);
+    }
 
     /*
      * Scan over all equal tuples, looking for live conflicts.
@@ -788,10 +797,9 @@ static TransactionId UBTreeCheckUnique(Relation rel, IndexTuple itup, Relation h
                  */
                 if (checkUnique == UNIQUE_CHECK_EXISTING && ItemPointerCompare(&htid, &itup->t_tid) == 0) {
                     if (RelationIsGlobalIndex(rel) && curPartOid != heapRel->rd_id) {
-                        ereport(ERROR,
-                                (errcode(ERRCODE_INDEX_CORRUPTED),
-                                        errmsg("failed to re-find tuple within GPI \"%s\"",
-                                               RelationGetRelationName(rel))));
+                        ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                                errmsg("failed to re-find tuple within GPI \"%s\"",
+                                       RelationGetRelationName(rel))));
                     }
                     found = true;
                     /*
@@ -811,7 +819,7 @@ static TransactionId UBTreeCheckUnique(Relation rel, IndexTuple itup, Relation h
                                                    &xmin, &xmax, &xminCommitted, &xmaxCommitted);
 
                     /* here we guarantee the same semantics as UNIQUE_CHECK_PARTIAL */
-                    if (IndexUniqueCheckNoError(checkUnique)) {
+                    if (checkUnique == UNIQUE_CHECK_PARTIAL) {
                         if (TransactionIdIsValid(xmin) && !TransactionIdIsValid(xmax)) {
                             if (nbuf != InvalidBuffer)
                                 _bt_relbuf(rel, nbuf);
@@ -846,11 +854,10 @@ static TransactionId UBTreeCheckUnique(Relation rel, IndexTuple itup, Relation h
                          */
                         Assert(memcmp(NameStr(rel->rd_rel->relname), "pg_cudesc_", strlen("pg_cudesc_")) != 0);
 
-                        ereport(ERROR,
-                                (errcode(ERRCODE_UNIQUE_VIOLATION),
-                                        errmsg("duplicate key value violates unique constraint \"%s\"",
-                                               RelationGetRelationName(rel)),
-                                        key_desc ? errdetail("Key %s already exists.", key_desc) : 0));
+                        ereport(ERROR, (errcode(ERRCODE_UNIQUE_VIOLATION),
+                                errmsg("duplicate key value violates unique constraint \"%s\"",
+                                       RelationGetRelationName(rel)),
+                                       key_desc ? errdetail("Key %s already exists.", key_desc) : 0));
                     }
 
                     if (!TransactionIdIsValid(xmin) || (TransactionIdIsValid(xmax) && xmaxVisible))
@@ -888,7 +895,12 @@ static TransactionId UBTreeCheckUnique(Relation rel, IndexTuple itup, Relation h
                     break;
                 if (P_RIGHTMOST(opaque))
                     ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
-                            errmsg("fell off the end of index \"%s\"", RelationGetRelationName(rel))));
+                            errmsg("fell off the end of index \"%s\" at blkno %u",
+                                   RelationGetRelationName(rel), nblkno)));
+                if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UBTREE, USTORE_VERIFY_COMPLETE,
+                    (char *) &verifyParams, rel, page, InvalidBlockNumber, NULL, gpiScan, InvalidXLogRecPtr))) {
+                    ExecuteUstoreVerify(USTORE_VERIFY_MOD_UBTREE, (char *) &verifyParams);
+                }
             }
             maxoff = PageGetMaxOffsetNumber(page);
             offset = P_FIRSTDATAKEY(opaque);
@@ -965,6 +977,7 @@ static OffsetNumber UBTreeFindInsertLoc(Relation rel, Buffer *bufptr, OffsetNumb
     UBTPageOpaqueInternal lpageop;
     bool movedright = false;
     bool pruned = false;
+    UBtreePageVerifyParams verifyParams;
 
     lpageop = (UBTPageOpaqueInternal)PageGetSpecialPointer(page);
 
@@ -1004,6 +1017,10 @@ static OffsetNumber UBTreeFindInsertLoc(Relation rel, Buffer *bufptr, OffsetNumb
             for (;;) {
                 rbuf = _bt_relandgetbuf(rel, rbuf, rblkno, BT_WRITE);
                 page = BufferGetPage(rbuf);
+                if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UBTREE, USTORE_VERIFY_COMPLETE,
+                    (char *) &verifyParams, rel, page, InvalidBlockNumber, NULL, NULL, InvalidXLogRecPtr))) {
+                    ExecuteUstoreVerify(USTORE_VERIFY_MOD_UBTREE, (char *) &verifyParams);
+                }
                 lpageop = (UBTPageOpaqueInternal)PageGetSpecialPointer(page);
                 /*
                  * If this page was incompletely split, finish the split now.
@@ -1020,7 +1037,8 @@ static OffsetNumber UBTreeFindInsertLoc(Relation rel, Buffer *bufptr, OffsetNumb
                     break;
                 if (P_RIGHTMOST(lpageop))
                     ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
-                            errmsg("fell off the end of index \"%s\"", RelationGetRelationName(rel))));
+                            errmsg("fell off the end of index \"%s\" at blkno %u",
+                                   RelationGetRelationName(rel), rblkno)));
 
                 rblkno = lpageop->btpo_next;
             }
@@ -1157,9 +1175,9 @@ static void UBTreeInsertOnPage(Relation rel, BTScanInsert itup_key, Buffer buf, 
         /* Choose the split point */
         if (rel->rd_indexsplit == INDEXSPLIT_NO_INSERTPT) {
             /* Choose the split point */
-            firstright = UBTreeFindsplitlocInsertpt(rel, page, newitemoff, itemsz, &newitemonleft, itup);
+            firstright = UBTreeFindsplitlocInsertpt(rel, buf, newitemoff, itemsz, &newitemonleft, itup);
         } else {
-            firstright = UBTreeFindsplitloc(rel, page, newitemoff, itemsz, &newitemonleft);
+            firstright = UBTreeFindsplitloc(rel, buf, newitemoff, itemsz, &newitemonleft);
         }
 
         /* split the buffer into left and right halves */
@@ -1192,6 +1210,7 @@ static void UBTreeInsertOnPage(Relation rel, BTScanInsert itup_key, Buffer buf, 
         BTMetaPageData *metad = NULL;
         OffsetNumber itup_off;
         BlockNumber itup_blkno;
+        UBtreePageVerifyParams verifyParams;
 
         itup_off = newitemoff;
         itup_blkno = BufferGetBlockNumber(buf);
@@ -1220,9 +1239,9 @@ static void UBTreeInsertOnPage(Relation rel, BTScanInsert itup_key, Buffer buf, 
         START_CRIT_SECTION();
 
         if (!UBTreePageAddTuple(page, itemsz, itup, newitemoff, true))
-            ereport(PANIC,
-                    (errcode(ERRCODE_INDEX_CORRUPTED), errmsg("failed to add new item to block %u in index \"%s\"",
-                                                              itup_blkno, RelationGetRelationName(rel))));
+            ereport(PANIC, (errcode(ERRCODE_INDEX_CORRUPTED),
+                    errmsg("failed to add new item to block %u in index \"%s\"",
+                           itup_blkno, RelationGetRelationName(rel))));
 
         /* update active hint */
         lpageop->activeTupleCount++;
@@ -1310,7 +1329,10 @@ static void UBTreeInsertOnPage(Relation rel, BTScanInsert itup_key, Buffer buf, 
         }
 
         END_CRIT_SECTION();
-
+        if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UBTREE, USTORE_VERIFY_COMPLETE,
+            (char *) &verifyParams, rel, page, InvalidBlockNumber, NULL, NULL, InvalidXLogRecPtr))) {
+            ExecuteUstoreVerify(USTORE_VERIFY_MOD_UBTREE, (char *) &verifyParams);
+        }
         /* release buffers */
         if (BufferIsValid(metabuf)) {
             _bt_relbuf(rel, metabuf);
@@ -1581,11 +1603,9 @@ static Buffer UBTreeSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber fi
     if (PageAddItem(leftpage, (Item)lefthighkey, itemsz, leftoff, false, false) == InvalidOffsetNumber) {
         rc = memset_s(rightpage, BLCKSZ, 0, BufferGetPageSize(rbuf));
         securec_check(rc, "", "");
-        ereport(ERROR,
-                (errcode(ERRCODE_INDEX_CORRUPTED),
-                        errmsg("failed to add hikey to the left sibling while splitting block %u of index \"%s\"",
-                               origpagenumber,
-                               RelationGetRelationName(rel))));
+        ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                errmsg("failed to add hikey to the left sibling while splitting block %u of index \"%s\"",
+                       origpagenumber, RelationGetRelationName(rel))));
     }
     leftoff = OffsetNumberNext(leftoff);
 
@@ -1617,7 +1637,7 @@ static Buffer UBTreeSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber fi
                     securec_check(rc, "", "");
                     ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
                         errmsg("failed to add new item to the left sibling while splitting block %u of index \"%s\"",
-                            origpagenumber, RelationGetRelationName(rel))));
+                               origpagenumber, RelationGetRelationName(rel))));
                 }
                 leftoff = OffsetNumberNext(leftoff);
                 /* update active hint */
@@ -1628,7 +1648,7 @@ static Buffer UBTreeSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber fi
                     securec_check(rc, "", "");
                     ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
                         errmsg("failed to add new item to the right sibling while splitting block %u of index \"%s\"",
-                            origpagenumber, RelationGetRelationName(rel))));
+                               origpagenumber, RelationGetRelationName(rel))));
                 }
                 rightoff = OffsetNumberNext(rightoff);
                 /* update active hint */
@@ -1642,8 +1662,8 @@ static Buffer UBTreeSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber fi
                 rc = memset_s(rightpage, BLCKSZ, 0, BufferGetPageSize(rbuf));
                 securec_check(rc, "", "");
                 ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
-                    errmsg("failed to add old item to the left sibling while splitting block %u of index \"%s\"",
-                        origpagenumber, RelationGetRelationName(rel))));
+                        errmsg("failed to add old item to the left sibling while splitting block %u of index \"%s\"",
+                               origpagenumber, RelationGetRelationName(rel))));
             }
             leftoff = OffsetNumberNext(leftoff);
             if (isleaf && !TransactionIdIsValid(((UstoreIndexXid)UstoreIndexTupleGetXid(item))->xmax))
@@ -1653,8 +1673,8 @@ static Buffer UBTreeSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber fi
                 rc = memset_s(rightpage, BLCKSZ, 0, BufferGetPageSize(rbuf));
                 securec_check(rc, "", "");
                 ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
-                    errmsg("failed to add old item to the right sibling while splitting block %u of index \"%s\"",
-                        origpagenumber, RelationGetRelationName(rel))));
+                        errmsg("failed to add old item to the right sibling while splitting block %u of index \"%s\"",
+                               origpagenumber, RelationGetRelationName(rel))));
             }
             rightoff = OffsetNumberNext(rightoff);
             if (isleaf && !TransactionIdIsValid(((UstoreIndexXid)UstoreIndexTupleGetXid(item))->xmax))
@@ -1675,8 +1695,8 @@ static Buffer UBTreeSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber fi
             rc = memset_s(rightpage, BLCKSZ, 0, BufferGetPageSize(rbuf));
             securec_check(rc, "", "");
             ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
-                errmsg("failed to add new item to the right sibling while splitting block %u of index \"%s\"",
-                    origpagenumber, RelationGetRelationName(rel))));
+                    errmsg("failed to add new item to the right sibling while splitting block %u of index \"%s\"",
+                           origpagenumber, RelationGetRelationName(rel))));
         }
         rightoff = OffsetNumberNext(rightoff);
         /* update active hint */
@@ -1699,9 +1719,9 @@ static Buffer UBTreeSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber fi
             securec_check(rc, "", "");
 
             ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
-                errmsg("right sibling's left-link doesn't match: block %u links to %u instead of expected %u in "
-                    "index \"%s\"",
-                    oopaque->btpo_next, sopaque->btpo_prev, origpagenumber, RelationGetRelationName(rel))));
+                    errmsg("right sibling's left-link doesn't match: block %u links to %u instead of expected %u in "
+                           "index \"%s\"",
+                           oopaque->btpo_next, sopaque->btpo_prev, origpagenumber, RelationGetRelationName(rel))));
         }
 
         /*
@@ -1865,51 +1885,82 @@ static Buffer UBTreeSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber fi
     return rbuf;
 }
 
+static void ReportFailedToDelete(Relation rel, Buffer buf, IndexTuple itup, char* extraInfo)
+{
+    Datum values[INDEX_MAX_KEYS];
+    bool isnull[INDEX_MAX_KEYS];
+    index_deform_tuple(itup, RelationGetDescr(rel), values, isnull);
+    char *key_desc = BuildIndexValueDescription(rel, values, isnull);
+
+    Oid partOid = InvalidOid;
+    if (RelationIsGlobalIndex(rel)) {
+        bool ignore = false;
+        AttrNumber partitionOidAttr = IndexRelationGetNumberOfAttributes(rel);
+        TupleDesc tupdesc = RelationGetDescr(rel);
+        partOid = DatumGetUInt32(index_getattr(itup, partitionOidAttr, tupdesc, &ignore));
+    }
+    ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+            errmsg("xid %lu failed to delete index tuple %s in \"%s\" with TID (%u,%u) partOid %u. "
+                   "latest fetched index block is %u. extraInfo: \"%s\"",
+                   GetCurrentTransactionId(),
+                   key_desc ? key_desc : "(Unknown)",
+                   RelationGetRelationName(rel),
+                   ItemPointerGetBlockNumber(&itup->t_tid),
+                   ItemPointerGetOffsetNumber(&itup->t_tid),
+                   partOid, BufferGetBlockNumber(buf),
+                   extraInfo)));
+}
+
 /*
  * UBTreeDoDelete() -- Handle deletion of a single index tuple in the tree.
  */
-bool UBTreeDoDelete(Relation rel, IndexTuple itup)
+bool UBTreeDoDelete(Relation rel, IndexTuple itup, bool isRollbackIndex)
 {
     bool found = true;
-    bool retried = false;
     BTScanInsert itupKey;
     Buffer buf;
+    volatile Page page = NULL;
     OffsetNumber offset;
 
     /* we need an insertion scan key to do our search, so build one */
     itupKey = UBTreeMakeScanKey(rel, itup);
 
-    /* find the first page containing this key */
+    /* STEP 1: find the first page may containing this key */
     (void)UBTreeSearch(rel, itupKey, &buf, BT_WRITE, false);
 
-retry:
-    /* looking for the first item >= scankey */
-    offset = UBTreeBinarySearch(rel, itupKey, buf, true);
+    /*
+     * STEP 2: look for the exact itup that needs to be deleted.
+     *      Note: 1. the key, tid and partOid of the to-be-delete tuple must exactly matches.
+     *            2. we may need to try again because we prune the page when preparing xid-base.
+     */
+    bool retried = false;
+    while (true) {
+        /* looking for the first item >= scankey */
+        offset = UBTreeBinarySearch(rel, itupKey, buf, true);
 
-    WHITEBOX_TEST_STUB("UBTreeDoDelete-found", WhiteboxDefaultErrorEmit);
+        WHITEBOX_TEST_STUB("UBTreeDoDelete-found", WhiteboxDefaultErrorEmit);
 
-    /* looking for itup with the same ctid */
-    offset = UBTreeFindDeleteLoc(rel, &buf, offset, itupKey, itup);
-    if (offset == InvalidOffsetNumber) {
-        ereport(ERROR,
-            (errcode(ERRCODE_INDEX_CORRUPTED),
-                errmsg("failed to delete index tuple in \"%s\"", RelationGetRelationName(rel))));
-    }
-
-    /* shift xid-base if necessary */
-    Page page = BufferGetPage(buf);
-    bool pruned = IndexPagePrepareForXid(rel, page, GetCurrentTransactionId(), RelationNeedsWAL(rel), buf);
-    if (pruned) {
-        if (retried) {
-            ereport(ERROR,
-                    (errcode(ERRCODE_INDEX_CORRUPTED),
-                            errmsg("failed to delete index tuple in \"%s\"", RelationGetRelationName(rel))));
+        /* looking for itup with the same key, tid and partOid */
+        offset = UBTreeFindDeleteLoc(rel, &buf, offset, itupKey, itup);
+        page = BufferGetPage(buf); /* get the page now, and disable optimize */
+        if (offset == InvalidOffsetNumber) {
+            ReportFailedToDelete(rel, buf, itup, "can't find it");
         }
-        retried = true;
-        goto retry;
+        /* shift xid-base if necessary */
+        bool pruned = IndexPagePrepareForXid(rel, page, GetCurrentTransactionId(), RelationNeedsWAL(rel), buf);
+        if (!pruned) {
+            break; /* no page pruning, continue to delete */
+        } else if (!retried) {
+            /* pruned for the first time, we need to re-find the offset of this tuple */
+            retried = true;
+        } else {
+            ReportFailedToDelete(rel, buf, itup, "can't fit xid-base");
+        }
     }
 
-    UBTreeDeleteOnPage(rel, buf, offset);
+    /* STEP 3: mark xmax for the target tuple */
+    UBTreeDeleteOnPage(rel, buf, offset, isRollbackIndex);
+
     /* be tidy */
     pfree(itupKey);
 
@@ -1936,10 +1987,15 @@ static OffsetNumber UBTreeFindDeleteLoc(Relation rel, Buffer* bufP, OffsetNumber
     Page page;
     UBTPageOpaqueInternal opaque;
     TransactionId xmin, xmax;
+    UBtreePageVerifyParams verifyParams;
 
     WHITEBOX_TEST_STUB("UBTreeFindDeleteLoc", WhiteboxDefaultErrorEmit);
 
     page = BufferGetPage(*bufP);
+    if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UBTREE, USTORE_VERIFY_COMPLETE, (char *) &verifyParams,
+        rel, page, InvalidBlockNumber, NULL, NULL, InvalidXLogRecPtr))) {
+        ExecuteUstoreVerify(USTORE_VERIFY_MOD_UBTREE, (char *) &verifyParams);
+    }
     opaque = (UBTPageOpaqueInternal)PageGetSpecialPointer(page);
     maxoff = PageGetMaxOffsetNumber(page);
 
@@ -1972,7 +2028,7 @@ static OffsetNumber UBTreeFindDeleteLoc(Relation rel, Buffer* bufP, OffsetNumber
                  */
                 if (!UBTreeIsEqual(rel, page, offset, itup_key->keysz, itup_key->scankeys))
                     /* we've traversed all the equal tuples, but we haven't found itup */
-                    goto ret;
+                    return InvalidOffsetNumber;
 
                 curitup = (IndexTuple)PageGetItem(page, curitemid);
 
@@ -2020,22 +2076,23 @@ static OffsetNumber UBTreeFindDeleteLoc(Relation rel, Buffer* bufP, OffsetNumber
                 nblkno = opaque->btpo_next;
                 *bufP = _bt_relandgetbuf(rel, *bufP, nblkno, BT_WRITE);
                 page = BufferGetPage(*bufP);
+                if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UBTREE, USTORE_VERIFY_COMPLETE,
+                    (char *) &verifyParams, rel, page, InvalidBlockNumber, NULL, NULL, InvalidXLogRecPtr))) {
+                    ExecuteUstoreVerify(USTORE_VERIFY_MOD_UBTREE, (char *) &verifyParams);
+                }
                 opaque = (UBTPageOpaqueInternal)PageGetSpecialPointer(page);
                 if (!P_IGNORE(opaque))
                     break;
                 if (P_RIGHTMOST(opaque))
-                    ereport(ERROR,
-                            (errcode(ERRCODE_INDEX_CORRUPTED),
-                                    errmsg("fell off the end of index \"%s\"", RelationGetRelationName(rel))));
+                    ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                            errmsg("fell off the end of index \"%s\" at blkno %u",
+                                   RelationGetRelationName(rel), nblkno)));
             }
             maxoff = PageGetMaxOffsetNumber(page);
             offset = P_FIRSTDATAKEY(opaque);
         }
     }
     /* No corresponding itup was found, release buffer and return InvalidOffsetNumber */
-    ret:
-    if (*bufP != InvalidBuffer)
-        _bt_relbuf(rel, *bufP);
     return InvalidOffsetNumber;
 }
 
@@ -2154,25 +2211,29 @@ static bool UBTreeIsEqual(Relation idxrel, Page page, OffsetNumber offnum, int k
  *      become empty after the last transaction committed. So we record it as
  *      empty page for further page recycle logic.
  */
-static void UBTreeDeleteOnPage(Relation rel, Buffer buf, OffsetNumber offset)
+static void UBTreeDeleteOnPage(Relation rel, Buffer buf, OffsetNumber offset, bool isRollbackIndex)
 {
-    Page page;
-    UBTPageOpaqueInternal opaque;
-    IndexTuple itup;
-    UstoreIndexXid uxid;
-    TransactionId xid = GetCurrentTransactionId();
-
     WHITEBOX_TEST_STUB("UBTreeDeleteOnPage", WhiteboxDefaultErrorEmit);
 
-    page = BufferGetPage(buf);
-    opaque = (UBTPageOpaqueInternal)PageGetSpecialPointer(page);
-    itup = (IndexTuple)PageGetItem(page, PageGetItemId(page, offset));
-    uxid = (UstoreIndexXid)UstoreIndexTupleGetXid(itup);
+    Page page = BufferGetPage(buf);
+    UBTPageOpaqueInternal opaque = (UBTPageOpaqueInternal)PageGetSpecialPointer(page);
+    ItemId iid = PageGetItemId(page, offset);
+    IndexTuple itup = (IndexTuple)PageGetItem(page, iid);
+    UstoreIndexXid uxid = (UstoreIndexXid)UstoreIndexTupleGetXid(itup);
+    TransactionId xid = GetCurrentTransactionId();
+    UBtreePageVerifyParams verifyParams;
 
     /* Do the update.  No ereport(ERROR) until changes are logged */
     START_CRIT_SECTION();
 
     uxid->xmax = NormalTransactionIdToShort(opaque->xid_base, xid);
+    if (isRollbackIndex) {
+        /*
+         * Rollback before upsert statement retry.
+         * We need to mark this tuple as dead to avoid possible deadlock in the future unique check.
+         */
+        ItemIdMarkDead(iid);
+    }
 
     /* update active hint */
     opaque->activeTupleCount--;
@@ -2199,7 +2260,10 @@ static void UBTreeDeleteOnPage(Relation rel, Buffer buf, OffsetNumber offset)
     }
 
     END_CRIT_SECTION();
-
+    if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UBTREE, USTORE_VERIFY_COMPLETE, (char *) &verifyParams,
+        rel, page, InvalidBlockNumber, NULL, NULL, InvalidXLogRecPtr))) {
+        ExecuteUstoreVerify(USTORE_VERIFY_MOD_UBTREE, (char *) &verifyParams);
+    }
     bool needRecordEmpty = (opaque->activeTupleCount == 0);
     if (needRecordEmpty) {
         /*

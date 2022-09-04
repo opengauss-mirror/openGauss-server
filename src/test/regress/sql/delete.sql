@@ -23,3 +23,8 @@ DELETE FROM delete_test WHERE a > 25;
 SELECT id, a, char_length(b) FROM delete_test ORDER BY id;
 
 DROP TABLE delete_test;
+
+--multiple delete, report error except B format;
+create table t_t_mutil_t1(col1 int,col2 int);
+create table t_t_mutil_t2(col1 int,col2 int);
+delete from t_t_mutil_t1 a,t_t_mutil_t2 b where a.col1=b.col1;

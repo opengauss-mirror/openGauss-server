@@ -61,6 +61,7 @@ typedef struct CandidateList {
     pg_atomic_uint64 tail;
     volatile int buf_id_start;
     int32 next_scan_loc;
+    int32 next_scan_ratio_loc;
 } CandidateList;
 
 typedef struct PageWriterProc {
@@ -181,5 +182,8 @@ extern void RequestPgwrSync(void);
 extern void PageWriterSync(void);
 extern bool PgwrForwardSyncRequest(const FileTag *ftag, SyncRequestType type);
 extern void PageWriterSyncWithAbsorption(void);
+
+void crps_create_ctxs(knl_thread_role role);
+void crps_destory_ctxs();
 
 #endif /* _PAGEWRITER_H */

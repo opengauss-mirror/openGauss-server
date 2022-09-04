@@ -23,6 +23,7 @@
 #include "access/ustore/knl_uvisibility.h"
 #include "access/ustore/undo/knl_uundozone.h"
 #include "access/ustore/undo/knl_uundoapi.h"
+#include "access/ustore/knl_uverify.h"
 #include "access/ustore/knl_whitebox_test.h"
 #include "access/xlog_internal.h"
 #include "catalog/pg_partition_fn.h"
@@ -31,7 +32,7 @@
 #include "utils/rel_gs.h"
 #include "utils/relfilenodemap.h"
 
-static UHeapDiskTuple CopyTupleFromUndoRecord(Relation relation, UndoRecord *undorecord, Buffer buffer);
+static UHeapDiskTuple CopyTupleFromUndoRecord(UndoRecord *undorecord, Buffer buffer);
 static void RestoreXactFromUndoRecord(UndoRecord *undorecord, Buffer buffer, UHeapDiskTuple tuple);
 static void LogUHeapUndoActions(UHeapUndoActionWALInfo *walInfo, Relation rel);
 
@@ -59,8 +60,10 @@ void ExecuteUndoActions(TransactionId fullXid, UndoRecPtr fromUrecptr, UndoRecPt
     Assert(fullXid  != InvalidTransactionId);
     int undoApplySize = GetUndoApplySize();
     UndoRecPtr urecPtr = fromUrecptr;
+    VerifyMemoryContext();
     UndoRecord *urec = New(CurrentMemoryContext)UndoRecord();
     urec->SetUrp(toUrecptr);
+    urec->SetMemoryContext(CurrentMemoryContext);
 
     if (isTopTxn) {
         /*
@@ -76,7 +79,7 @@ void ExecuteUndoActions(TransactionId fullXid, UndoRecPtr fromUrecptr, UndoRecPt
          * point.
          */
         UndoTraversalState rc = FetchUndoRecord(urec, NULL, InvalidBlockNumber, InvalidOffsetNumber,
-            InvalidTransactionId);
+            InvalidTransactionId, false, NULL);
         /* already processed. */
         if (rc != UNDO_TRAVERSAL_COMPLETE) {
             DELETE_EX(urec);
@@ -91,6 +94,10 @@ void ExecuteUndoActions(TransactionId fullXid, UndoRecPtr fromUrecptr, UndoRecPt
      * them in order of reloid and block number then apply them together
      * page-wise. Repeat this until we get invalid undo record pointer.
      */
+     
+    int preRetCode = 0;
+    Oid preReloid = InvalidOid;
+    Oid prePartitionoid = InvalidOid;
     do {
         bool containsFullChain = false;
         int startIndex = 0;
@@ -132,8 +139,9 @@ void ExecuteUndoActions(TransactionId fullXid, UndoRecPtr fromUrecptr, UndoRecPt
 
             if (currRelfilenode != InvalidOid && (currTablespace != uur->Tablespace() ||
                 currRelfilenode != uur->Relfilenode() || currBlkno != uur->Blkno())) {
-                RmgrTable[RM_UHEAP_ID].rm_undo(urecvec, startIndex, i - 1, fullXid, currReloid, currPartitionoid,
-                    currBlkno, containsFullChain);
+                preRetCode = RmgrTable[RM_UHEAP_ID].rm_undo(urecvec, startIndex, i - 1, fullXid,
+                    currReloid, currPartitionoid, currBlkno, containsFullChain,
+                    preRetCode, &preReloid, &prePartitionoid);
                 startIndex = i;
             }
             currReloid = uur->Reloid();
@@ -144,8 +152,8 @@ void ExecuteUndoActions(TransactionId fullXid, UndoRecPtr fromUrecptr, UndoRecPt
         }
 
         /* Apply the remaining ones */
-        RmgrTable[RM_UHEAP_ID].rm_undo(urecvec, startIndex, i - 1, fullXid, currReloid, currPartitionoid,
-            currBlkno, containsFullChain);
+        preRetCode = RmgrTable[RM_UHEAP_ID].rm_undo(urecvec, startIndex, i - 1, fullXid, currReloid, currPartitionoid,
+            currBlkno, containsFullChain, preRetCode, &preReloid, &prePartitionoid);
 
         DELETE_EX(urecvec);
     } while (true);
@@ -176,6 +184,9 @@ void ExecuteUndoActionsPage(UndoRecPtr fromUrp, Relation rel, Buffer buffer, Tra
      * Fetch the multiple undo records which can fit into undoApplySize;
      * then apply them together.
      */
+    int preRetCode = 0;
+    Oid preReloid = InvalidOid;
+    Oid prePartitionoid = InvalidOid;
     do {
         if (!IS_VALID_UNDO_REC_PTR(urp))
             break;
@@ -190,8 +201,9 @@ void ExecuteUndoActionsPage(UndoRecPtr fromUrp, Relation rel, Buffer buffer, Tra
         Oid relOid = RelationIsPartition(rel) ? GetBaseRelOidOfParition(rel) : RelationGetRelid(rel);
         Oid partitionOid = RelationIsPartition(rel) ? RelationGetRelid(rel) : InvalidOid;
 
-        RmgrTable[RM_UHEAP_ID].rm_undo(urecvec, 0, urecvec->Size() - 1, xid, relOid, partitionOid,
-            BufferGetBlockNumber(buffer), IS_VALID_UNDO_REC_PTR(urp) ? false : true);
+        preRetCode = RmgrTable[RM_UHEAP_ID].rm_undo(urecvec, 0, urecvec->Size() - 1, xid, relOid, partitionOid,
+            BufferGetBlockNumber(buffer), IS_VALID_UNDO_REC_PTR(urp) ? false : true,
+            preRetCode, &preReloid, &prePartitionoid);
 
         DELETE_EX(urecvec);
     } while (true);
@@ -211,6 +223,12 @@ void ExecuteUndoActionsPage(UndoRecPtr fromUrp, Relation rel, Buffer buffer, Tra
      */
     if (tdSlotId != InvalidTDSlotId) {
         START_CRIT_SECTION();
+        ereport(PANIC, (errmodule(MOD_USTORE),
+            errmsg("Repeatedly set transaction information in tdSlot, "
+            "reloid(%u), partoid(%u), xid(%lu), block(%u), tdSlot(%d), fromurp(%lu), sloturp(%lu)",
+            RelationIsPartition(rel) ? GetBaseRelOidOfParition(rel) : RelationGetRelid(rel),
+            RelationIsPartition(rel) ? RelationGetRelid(rel) : InvalidOid, xid, BufferGetBlockNumber(buffer),
+            tdSlotId, fromUrp, slotUrecPtr)));
 
         /* Clear the xid from the slot */
         UHeapPageSetUndo(buffer, tdSlotId, InvalidTransactionId, slotUrecPtr);
@@ -238,13 +256,26 @@ void ExecuteUndoActionsPage(UndoRecPtr fromUrp, Relation rel, Buffer buffer, Tra
         END_CRIT_SECTION();
     }
 
+    UPageVerifyParams verifyParams;
+        if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UPAGE, USTORE_VERIFY_COMPLETE,
+            (char *) &verifyParams, rel, page, BufferGetBlockNumber(buffer), NULL, NULL, InvalidXLogRecPtr))) {
+            ExecuteUstoreVerify(USTORE_VERIFY_MOD_UPAGE, (char *) &verifyParams);
+    }
     LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
 }
 
 
-bool UHeapUndoActions(URecVector *urecvec, int startIdx, int endIdx, TransactionId xid, Oid reloid, Oid partitionoid,
-    BlockNumber blkno, bool isFullChain)
+int UHeapUndoActions(URecVector *urecvec, int startIdx, int endIdx, TransactionId xid, Oid reloid, Oid partitionoid,
+    BlockNumber blkno, bool isFullChain, int preRetCode, Oid *preReloid, Oid *prePartitionoid)
 {
+    if (preReloid != NULL && prePartitionoid != NULL) {
+        if (*preReloid == reloid && *prePartitionoid == partitionoid && preRetCode == ROLLBACK_OK_NOEXIST) {
+            return ROLLBACK_OK_NOEXIST;
+        }
+        *preReloid = reloid;
+        *prePartitionoid = partitionoid;
+    }
+
     UndoRelationData relationData = { 0 };
 
     UndoRecord *firstUndoRecord = (*urecvec)[startIdx];
@@ -263,7 +294,7 @@ bool UHeapUndoActions(URecVector *urecvec, int startIdx, int endIdx, Transaction
      */
     if (!UHeapUndoActionsOpenRelation(reloid, partitionoid, &relationData)) {
         elog(LOG, "Either the relation or the partition is dropped.");
-        return false;
+        return ROLLBACK_OK_NOEXIST;
     }
 
     /* 
@@ -289,13 +320,13 @@ bool UHeapUndoActions(URecVector *urecvec, int startIdx, int endIdx, Transaction
 
         if (!UHeapUndoActionsFindRelidByRelfilenode(&targetNode, &reloid, &partitionoid)) {
             elog(LOG, "The relation is dropped");
-            return false;
+            return ROLLBACK_OK_NOEXIST;
         }
 
         /* Now try opening the relation using the "correct" relid */
         if (!UHeapUndoActionsOpenRelation(reloid, partitionoid, &relationData)) {
             elog(LOG, "Either the relation or the partition is dropped after retry.");
-            return false;
+            return ROLLBACK_OK_NOEXIST;
         }
     }
 
@@ -306,9 +337,9 @@ bool UHeapUndoActions(URecVector *urecvec, int startIdx, int endIdx, Transaction
     if (RelationGetNumberOfBlocks(relationData.relation) <= blkno) {
         UHeapUndoActionsCloseRelation(&relationData);
         elog(LOG, "relation is already truncated.");
-        return false;
+        return ROLLBACK_OK_NOEXIST;
     }
-
+    
     Buffer buffer = ReadBuffer(relationData.relation, blkno);
     LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
     Page page = BufferGetPage(buffer);
@@ -333,7 +364,7 @@ bool UHeapUndoActions(URecVector *urecvec, int startIdx, int endIdx, Transaction
         UnlockReleaseBuffer(buffer);
         /* Close the relation. */
         UHeapUndoActionsCloseRelation(&relationData);
-        return false;
+        return ROLLBACK_ERR;
     }
 
     START_CRIT_SECTION();
@@ -353,19 +384,27 @@ bool UHeapUndoActions(URecVector *urecvec, int startIdx, int endIdx, Transaction
          * UndoRecPtr of the current undorecord, then it means this undorecord
          * has been applied.
          */
-        if (prevUrp < undorecord->Urp()) {
+
+        if (prevUrp == 0) {
+            slotPrevUrp = 0;
+            break;
+        }
+
+        if (prevUrp != undorecord->Urp()) {
+            slotPrevUrp = prevUrp;
             continue;
         }
 
         Assert(prevUrp == undorecord->Urp());
         prevUrp = undorecord->Blkprev();
+        slotPrevUrp = prevUrp;
 
         TransactionId oldestXid PG_USED_FOR_ASSERTS_ONLY =
-            pg_atomic_read_u64(&g_instance.undo_cxt.oldestXidInUndo);
+            pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid);
 
-        /* Either oldestXidInUndo is zero or it is always <= than aborting xid */
+        /* Either globalRecycleXid is zero or it is always <= than aborting xid */
         Assert(!TransactionIdIsValid(oldestXid) || TransactionIdPrecedesOrEquals(
-            pg_atomic_read_u64(&g_instance.undo_cxt.oldestXidInUndo), undorecord->Xid()));
+            pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid), undorecord->Xid()));
 
         /* Store the minimum and maximum LP offsets of all undorecords */
         if (undorecord->Offset() > InvalidOffsetNumber && undorecord->Offset() < xlogMinLPOffset) {
@@ -383,7 +422,7 @@ bool UHeapUndoActions(URecVector *urecvec, int startIdx, int endIdx, Transaction
                 needPageInit = true;
                 for (int offset = FirstOffsetNumber; offset <= nline; offset++) {
                     RowPtr *rp = UPageGetRowPtr(page, offset);
-                    if (RowPtrIsUsed(rp) || RowPtrHasPendingXact(rp)) {
+                    if (RowPtrIsUsed(rp)) {
                         needPageInit = false;
                         break;
                     }
@@ -419,7 +458,7 @@ bool UHeapUndoActions(URecVector *urecvec, int startIdx, int endIdx, Transaction
                 needPageInit = true;
                 for (i = FirstOffsetNumber; i <= nline; i++) {
                     RowPtr *rp = UPageGetRowPtr(page, i);
-                    if (RowPtrIsUsed(rp) || RowPtrHasPendingXact(rp)) {
+                    if (RowPtrIsUsed(rp)) {
                         needPageInit = false;
                         break;
                     }
@@ -431,7 +470,7 @@ bool UHeapUndoActions(URecVector *urecvec, int startIdx, int endIdx, Transaction
             case UNDO_DELETE:
             case UNDO_UPDATE:
             case UNDO_INPLACE_UPDATE: {
-                UHeapDiskTuple tuple = CopyTupleFromUndoRecord(relationData.relation, undorecord, buffer);
+                UHeapDiskTuple tuple = CopyTupleFromUndoRecord(undorecord, buffer);
                 RestoreXactFromUndoRecord(undorecord, buffer, tuple);
 
                 /* Store the page offsets where we start and end updating tuples */
@@ -449,7 +488,7 @@ bool UHeapUndoActions(URecVector *urecvec, int startIdx, int endIdx, Transaction
             }
             case UNDO_ITEMID_UNUSED:
             default:
-                ereport(ERROR, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE), errmsg("Unsupported Rollback Action")));
+                ereport(PANIC, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE), errmsg("Unsupported Rollback Action")));
         }
     }
 
@@ -464,13 +503,23 @@ bool UHeapUndoActions(URecVector *urecvec, int startIdx, int endIdx, Transaction
      * TD xid to InvalidTransactionId to indicate that the
      * "rollback of this xid on this block is complete."
      */
+    if (slotPrevUrp != lastUndoRecord->Blkprev()) {
+        ereport(LOG, (errcode(ERRCODE_DATA_CORRUPTED),
+            errmsg("rollback xid %lu, oid %u, blk %u. slotPrevUrp %lu != lastBlkprev %lu, "
+            "check whether subtransactions have been rolled back.",
+            lastUndoRecord->Xid(), lastUndoRecord->Reloid(), lastUndoRecord->Blkno(),
+            slotPrevUrp, lastUndoRecord->Blkprev())));
+    }
     if (isFullChain || !IS_VALID_UNDO_REC_PTR(slotPrevUrp)) {
         xid = InvalidTransactionId;
     } else if (IS_VALID_UNDO_REC_PTR(slotPrevUrp)) {
+        VerifyMemoryContext();
         UndoRecord *urec = New(CurrentMemoryContext)UndoRecord();
         urec->SetUrp(slotPrevUrp);
+        urec->SetMemoryContext(CurrentMemoryContext);
         UndoTraversalState rc =
-            FetchUndoRecord(urec, NULL, InvalidBlockNumber, InvalidOffsetNumber, InvalidTransactionId);
+            FetchUndoRecord(urec, NULL, InvalidBlockNumber, InvalidOffsetNumber, InvalidTransactionId,
+            false, NULL);
         if (rc != UNDO_TRAVERSAL_COMPLETE || urec->Xid() != xid) {
             xid = InvalidTransactionId;
         }
@@ -523,13 +572,18 @@ bool UHeapUndoActions(URecVector *urecvec, int startIdx, int endIdx, Transaction
     }
 
     END_CRIT_SECTION();
+    UPageVerifyParams verifyParams;
+    if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UPAGE, USTORE_VERIFY_COMPLETE,
+        (char *) &verifyParams, relationData.relation, page, blkno, NULL, NULL, InvalidXLogRecPtr))) {
+        ExecuteUstoreVerify(USTORE_VERIFY_MOD_UPAGE, (char *) &verifyParams);
+    }
 
     UnlockReleaseBuffer(buffer);
 
     /* Close the relation. */
     UHeapUndoActionsCloseRelation(&relationData);
 
-    return true;
+    return ROLLBACK_OK;
 }
 
 /*
@@ -601,7 +655,7 @@ void ExecuteUndoForInsertRecovery(Buffer buffer, OffsetNumber off, TransactionId
  * undorecord should contain the entire tuple and the offset on the page it
  * came from.
  */
-static UHeapDiskTuple CopyTupleFromUndoRecord(Relation relation, UndoRecord *undorecord, Buffer buffer)
+static UHeapDiskTuple CopyTupleFromUndoRecord(UndoRecord *undorecord, Buffer buffer)
 {
     Assert(undorecord != NULL);
 
@@ -610,7 +664,13 @@ static UHeapDiskTuple CopyTupleFromUndoRecord(Relation relation, UndoRecord *und
 
     Page page = BufferGetPage(buffer);
     RowPtr *rp = UPageGetRowPtr(page, offnum);
-    Assert(RowPtrIsNormal(rp));
+    if ((offnum == InvalidOffsetNumber) || !RowPtrIsNormal(rp)) {
+        ereport(PANIC, (errcode(ERRCODE_DATA_CORRUPTED),
+            errmsg("undorecord %lu xid %lu undotype %u need rollback but rp invalid: "
+            "reloid %u, blk %u, offnum %u, rpflag %u, rpoffset %u, rplen %u.",
+            undorecord->Urp(), undorecord->Xid(), undorecord->Utype(), undorecord->Reloid(),
+            undorecord->Blkno(), offnum, rp->flags, rp->offset, rp->len)));
+    }
 
     UHeapDiskTuple diskTuple = (UHeapDiskTuple)UPageGetRowData(page, rp);
 
@@ -708,8 +768,7 @@ static UHeapDiskTuple CopyTupleFromUndoRecord(Relation relation, UndoRecord *und
             int oldDataLen = oldlen - prefixlen - suffixlen;
 
             if (oldDataLen > 0) {
-                rc = memcpy_s(cur_old_disktuple_ptr, oldDataLen, cur_undo_data_p,
-                              oldDataLen);
+                rc = memcpy_s(cur_old_disktuple_ptr, oldDataLen, cur_undo_data_p, oldDataLen);
                 securec_check(rc, "", "");
                 cur_old_disktuple_ptr += (oldDataLen);
             }
@@ -729,11 +788,12 @@ static UHeapDiskTuple CopyTupleFromUndoRecord(Relation relation, UndoRecord *und
         case UNDO_ITEMID_UNUSED:
         case UNDO_INSERT:
         case UNDO_MULTI_INSERT: {
-            elog(ERROR, "invalid undo record type for restoring tuple");
+            ereport(PANIC, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+                errmsg("invalid undo record type for restoring tuple.")));
             break;
         }
         default:
-            ereport(ERROR, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE), errmsg("Unsupported Rollback Action")));
+            ereport(PANIC, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE), errmsg("Unsupported Rollback Action")));
     }
 
     return diskTuple;
@@ -762,8 +822,6 @@ static void RestoreXactFromUndoRecord(UndoRecord *undorecord, Buffer buffer, UHe
     } else if (prevXid != tdinfo.xid) {
         tuple->flag |= UHEAP_INVALID_XACT_SLOT;
     }
-
-    UHeapTupleHeaderSetLockerTDSlot(tuple, UHEAPTUP_SLOT_FROZEN);
 }
 
 int UpdateTupleHeaderFromUndoRecord(UndoRecord *urec, UHeapDiskTuple diskTuple, Page page)
@@ -777,6 +835,7 @@ int UpdateTupleHeaderFromUndoRecord(UndoRecord *urec, UHeapDiskTuple diskTuple, 
          * only flags set on it.
          */
         diskTuple->flag &= ~UHEAP_VIS_STATUS_MASK;
+        diskTuple->xid = (ShortTransactionId)FrozenTransactionId;
     } else if (urec->Utype() == UNDO_INPLACE_UPDATE) {
         Assert(urec->Rawdata() != NULL);
         Assert(urec->Rawdata()->len >= (int)SizeOfUHeapDiskTupleData);
@@ -809,20 +868,37 @@ static void LogUHeapUndoActions(UHeapUndoActionWALInfo *walInfo, Relation rel)
         }
     }
 
-    XLogBeginInsert();
-
-    XLogRegisterData((char *)&flags, sizeof(uint8));
-
     if (walInfo->potential_freespace > BLCKSZ) {
-        ereport(PANIC, (errcode(ERRCODE_DATA_CORRUPTED),
-            errmsg("potential_freespace invalid: %u", walInfo->potential_freespace)));
+        ereport(PANIC, (errmodule(MOD_USTORE), errmsg(
+            "Invalid potential freespace(%u)", walInfo->potential_freespace)));
     }
 
+    XLogBeginInsert();
+    XLogRegisterData((char *)&flags, sizeof(uint8));
+    UHeapPageHeaderData *uheappage = (UHeapPageHeaderData *)page;
     if (walInfo->needInit) {
-        UHeapPageHeaderData *uheappage = (UHeapPageHeaderData *)page;
         XLogRegisterData((char *)&uheappage->pd_xid_base, sizeof(TransactionId));
         XLogRegisterData((char *)&uheappage->td_count, sizeof(uint16));
     } else {
+        /* Check the fields written to the xlog in advance */
+        if (walInfo->xlogMinLPOffset <= (OffsetNumber) InvalidOffsetNumber ||
+            walInfo->xlogMaxLPOffset >= (OffsetNumber) MaxOffsetNumber) {
+            ereport(PANIC, (errmodule(MOD_USTORE), errmsg(
+                "Invalid lp offsetnumber, min(%u), max(%u).", walInfo->xlogMinLPOffset, walInfo->xlogMaxLPOffset)));
+        }
+        if (walInfo->tdSlotId == InvalidTDSlotId || walInfo->tdSlotId > uheappage->td_count) {
+            ereport(PANIC, (errmodule(MOD_USTORE), errmsg("Invalid rollback tdSlot(%d).", walInfo->tdSlotId)));
+        }
+        if (walInfo->xlogCopyStartOffset <= (Offset) (SizeOfUHeapPageHeaderData + SizeOfUHeapTDData(uheappage)) ||
+            walInfo->xlogCopyEndOffset < (Offset) 0 ||
+            walInfo->xlogCopyStartOffset > (Offset) BLCKSZ ||
+            walInfo->xlogCopyEndOffset > (Offset) BLCKSZ) {
+            ereport(PANIC, (errmodule(MOD_USTORE),
+                errmsg("Invalid rollback start and end offset in page, (start, end)=(%d, %d).",
+                walInfo->xlogCopyStartOffset,
+                walInfo->xlogCopyEndOffset)));
+        }
+
         /* Store updated line pointers data */
         XLogRegisterData((char *)&walInfo->xlogMinLPOffset, sizeof(OffsetNumber));
         XLogRegisterData((char *)&walInfo->xlogMaxLPOffset, sizeof(OffsetNumber));
@@ -915,11 +991,18 @@ bool UHeapUndoActionsFindRelidByRelfilenode(RelFileNode *relfilenode, Oid *reloi
      * for the correct partitionoid after we get the parent id.
     */
     Oid partitionId = InvalidOid;
-    Oid realRelid = UHeapRelidByRelfilenode(relfilenode->spcNode, relfilenode->relNode);
+    Oid realRelid = RelidByRelfilenodeCache(relfilenode->spcNode, relfilenode->relNode);
+    if (realRelid == InvalidOid) {
+        realRelid = RelidByRelfilenode(relfilenode->spcNode, relfilenode->relNode, false);
+    }
     if (realRelid == InvalidOid) {
         Oid partitionReltoastrelid = InvalidOid;
-        realRelid = UHeapPartitionRelidByRelfilenode(relfilenode->spcNode,
+        realRelid = PartitionRelidByRelfilenodeCache(relfilenode->spcNode,
             relfilenode->relNode, partitionReltoastrelid);
+        if (realRelid == InvalidOid) {
+            realRelid = PartitionRelidByRelfilenode(relfilenode->spcNode,
+                relfilenode->relNode, partitionReltoastrelid, NULL, false);
+        }
         if (realRelid == InvalidOid) {
             return false;
         }

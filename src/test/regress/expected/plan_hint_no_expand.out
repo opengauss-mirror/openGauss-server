@@ -604,9 +604,64 @@ create view ne_view2 as select /*+ no_expand */ * from t1 where t1.a = any (sele
          Output: t2.a, t2.b, t2.c
 (7 rows)
 
+create table sublink_expr_t1(a1 int, b1 int);
+set rewrite_rule = 'magicset, partialpush, uniquecheck, intargetlist, predpushforce';
+:EXP select a1 from sublink_expr_t1 t1 where t1.b1 = (select max(b1) from sublink_expr_t1 t2 where t2.a1 = t1.a1);
+                               QUERY PLAN                                
+-------------------------------------------------------------------------
+ Hash Join
+   Output: t1.a1
+   Hash Cond: ((t1.a1 = subquery."?column?") AND (t1.b1 = subquery.max))
+   ->  Seq Scan on schema_no_expand.sublink_expr_t1 t1
+         Output: t1.a1, t1.b1
+   ->  Hash
+         Output: subquery."?column?", subquery.max
+         ->  Subquery Scan on subquery
+               Output: subquery."?column?", subquery.max
+               ->  HashAggregate
+                     Output: max(t2.b1), t2.a1
+                     Group By Key: t2.a1
+                     ->  Seq Scan on schema_no_expand.sublink_expr_t1 t2
+                           Output: t2.a1, t2.b1
+(14 rows)
+
+set rewrite_rule = 'magicset, partialpush, uniquecheck, intargetlist, predpushforce, disable_pullup_expr_sublink';
+:EXP select a1 from sublink_expr_t1 t1 where t1.b1 = (select max(b1) from sublink_expr_t1 t2 where t2.a1 = t1.a1);
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Seq Scan on schema_no_expand.sublink_expr_t1 t1
+   Output: t1.a1
+   Filter: (t1.b1 = (SubPlan 1))
+   SubPlan 1
+     ->  Aggregate
+           Output: max(t2.b1)
+           ->  Seq Scan on schema_no_expand.sublink_expr_t1 t2
+                 Output: t2.a1, t2.b1
+                 Filter: (t2.a1 = t1.a1)
+(9 rows)
+
+:EXP select /*+ no rewrite_rule(disable_pullup_expr_sublink)*/ a1 from sublink_expr_t1 t1 where t1.b1 = (select max(b1) from sublink_expr_t1 t2 where t2.a1 = t1.a1);
+                               QUERY PLAN                                
+-------------------------------------------------------------------------
+ Hash Join
+   Output: t1.a1
+   Hash Cond: ((t1.a1 = subquery."?column?") AND (t1.b1 = subquery.max))
+   ->  Seq Scan on schema_no_expand.sublink_expr_t1 t1
+         Output: t1.a1, t1.b1
+   ->  Hash
+         Output: subquery."?column?", subquery.max
+         ->  Subquery Scan on subquery
+               Output: subquery."?column?", subquery.max
+               ->  HashAggregate
+                     Output: max(t2.b1), t2.a1
+                     Group By Key: t2.a1
+                     ->  Seq Scan on schema_no_expand.sublink_expr_t1 t2
+                           Output: t2.a1, t2.b1
+(14 rows)
+
 -- cleanup
 drop schema schema_no_expand cascade;
-NOTICE:  drop cascades to 8 other objects
+NOTICE:  drop cascades to 9 other objects
 DETAIL:  drop cascades to table t1
 drop cascades to table t2
 drop cascades to table t3
@@ -615,3 +670,4 @@ drop cascades to table sublink_pullup_t1
 drop cascades to table sublink_pullup_t2
 drop cascades to view ne_view1
 drop cascades to view ne_view2
+drop cascades to table sublink_expr_t1

@@ -22,6 +22,7 @@
 #include "access/tableam.h"
 #include "catalog/catalog.h"
 #include "catalog/dependency.h"
+#include "catalog/gs_db_privilege.h"
 #include "catalog/indexing.h"
 #include "catalog/objectaccess.h"
 #include "catalog/pg_constraint.h"
@@ -87,7 +88,7 @@
 /* Local function prototypes */
 static void ConvertTriggerToFK(CreateTrigStmt* stmt, Oid funcoid);
 static void SetTriggerFlags(TriggerDesc* trigdesc, const Trigger* trigger);
-static HeapTuple GetTupleForTrigger(EState* estate, EPQState* epqstate, ResultRelInfo* relinfo, Oid targetPartitionOid,
+HeapTuple GetTupleForTrigger(EState* estate, EPQState* epqstate, ResultRelInfo* relinfo, Oid targetPartitionOid,
     int2 bucketid, ItemPointer tid, LockTupleMode lockmode, TupleTableSlot** newSlot);
 static void ReleaseFakeRelation(Relation relation, Partition part, Relation* fakeRelation);
 static bool TriggerEnabled(EState* estate, ResultRelInfo* relinfo, Trigger* trigger, TriggerEvent event,
@@ -254,13 +255,17 @@ Oid CreateTrigger(CreateTrigStmt* stmt, const char* queryString, Oid relOid, Oid
 
     /* permission checks */
     if (!isInternal) {
+        bool anyResult = false;
+        if (!IsSysSchema(RelationGetNamespace(rel))) {
+            anyResult = HasSpecAnyPriv(GetUserId(), CREATE_ANY_TRIGGER, false);
+        }
         aclresult = pg_class_aclcheck(RelationGetRelid(rel), GetUserId(), ACL_TRIGGER);
-        if (aclresult != ACLCHECK_OK)
+        if (aclresult != ACLCHECK_OK && anyResult != true)
             aclcheck_error(aclresult, ACL_KIND_CLASS, RelationGetRelationName(rel));
 
         if (OidIsValid(constrrelid)) {
             aclresult = pg_class_aclcheck(constrrelid, GetUserId(), ACL_TRIGGER);
-            if (aclresult != ACLCHECK_OK)
+            if (aclresult != ACLCHECK_OK && anyResult != true)
                 aclcheck_error(aclresult, ACL_KIND_CLASS, get_rel_name(constrrelid));
         }
     }
@@ -1163,9 +1168,15 @@ static void RangeVarCallbackForRenameTrigger(
         form->relkind != RELKIND_CONTQUERY)
         ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("\"%s\" is not a table or view", rv->relname)));
 
-    /* you must own the table to rename one of its triggers */
-    if (!pg_class_ownercheck(relid, GetUserId()))
-        aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_CLASS, rv->relname);
+    /* you must own the table or have ALTER ANY TRIGGER to rename one of its triggers */
+    bool ownerResult = pg_class_ownercheck(relid, GetUserId());
+    bool anyResult = false;
+    if (!ownerResult && !IsSysSchema(form->relnamespace)) {
+        anyResult = HasSpecAnyPriv(GetUserId(), ALTER_ANY_TRIGGER, false);
+    }
+    if (!ownerResult && !anyResult) {
+        aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_CLASS, rv->relname);
+    }
     if (!g_instance.attr.attr_common.allowSystemTableMods && !u_sess->attr.attr_common.IsInplaceUpgrade &&
         IsSystemClass(form))
         ereport(ERROR,
@@ -1719,6 +1730,7 @@ static HeapTuple ExecCallTriggerFunc(
     PgStat_FunctionCallUsage fcusage;
     Datum result;
     Oid old_uesr = 0;
+    Oid save_old_uesr = 0;
     int save_sec_context = 0;
     bool saved_is_allow_commit_rollback = false;
     bool need_reset_err_msg;
@@ -1754,6 +1766,7 @@ static HeapTuple ExecCallTriggerFunc(
      * the tuple cycle.
      */
     MemoryContext oldContext = MemoryContextSwitchTo(per_tuple_context);
+    save_old_uesr = GetOldUserId(false);
 
     /* get trigger owner and make sure current user is trigger owner when execute trigger-func */
     GetUserIdAndSecContext(&old_uesr, &save_sec_context);
@@ -1761,7 +1774,9 @@ static HeapTuple ExecCallTriggerFunc(
     if (trigger_owner == InvalidTgOwnerId) {
         ereport(LOG, (errmsg("old system table pg_trigger does not have tgowner column, use old default permission")));
     } else {
-        SetUserIdAndSecContext(trigger_owner, (int)((uint32)save_sec_context | SECURITY_LOCAL_USERID_CHANGE));
+        SetOldUserId(old_uesr, false);
+        SetUserIdAndSecContext(trigger_owner,
+            (int)((uint32)save_sec_context | SECURITY_LOCAL_USERID_CHANGE | SENDER_LOCAL_USERID_CHANGE));
         u_sess->exec_cxt.is_exec_trigger_func = true;
     }
     /*
@@ -1780,6 +1795,10 @@ static HeapTuple ExecCallTriggerFunc(
     {
         stp_reset_xact_state_and_err_msg(saved_is_allow_commit_rollback, need_reset_err_msg);
         u_sess->tri_cxt.MyTriggerDepth--;
+
+        SetOldUserId(save_old_uesr, false);
+        /* reset current user */
+        SetUserIdAndSecContext(old_uesr, save_sec_context);
         PG_RE_THROW();
     }
     PG_END_TRY();
@@ -1789,6 +1808,7 @@ static HeapTuple ExecCallTriggerFunc(
 
     pgstat_end_function_usage(&fcusage, true);
 
+    SetOldUserId(save_old_uesr, false);
     /* reset current user */
     SetUserIdAndSecContext(old_uesr, save_sec_context);
     u_sess->exec_cxt.is_exec_trigger_func = false;
@@ -2659,7 +2679,7 @@ void ExecASTruncateTriggers(EState* estate, ResultRelInfo* relinfo)
             NULL);
 }
 
-static HeapTuple GetTupleForTrigger(EState* estate, EPQState* epqstate, ResultRelInfo* relinfo, Oid targetPartitionOid,
+HeapTuple GetTupleForTrigger(EState* estate, EPQState* epqstate, ResultRelInfo* relinfo, Oid targetPartitionOid,
     int2 bucketid, ItemPointer tid, LockTupleMode lockmode, TupleTableSlot** newSlot)
 {
     Relation relation = relinfo->ri_RelationDesc;

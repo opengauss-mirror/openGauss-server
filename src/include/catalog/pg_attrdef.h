@@ -39,6 +39,10 @@ CATALOG(pg_attrdef,2604) BKI_SCHEMA_MACRO
 	text		adsrc;			/* human-readable representation of default */
 #endif
     char adgencol; /* generated column setting */
+#ifdef CATALOG_VARLEN			/* variable-length fields start here */
+	pg_node_tree adbin_on_update    /* binrary format of on update express syntax */
+	text adsrc_on_update;        /* on update express syntax on Mysql Feature */
+#endif
 } FormData_pg_attrdef;
 
 /* ----------------
@@ -52,11 +56,13 @@ typedef FormData_pg_attrdef *Form_pg_attrdef;
  *		compiler constants for pg_attrdef
  * ----------------
  */
-#define Natts_pg_attrdef				5
+#define Natts_pg_attrdef				7
 #define Anum_pg_attrdef_adrelid			1
 #define Anum_pg_attrdef_adnum			2
 #define Anum_pg_attrdef_adbin			3
 #define Anum_pg_attrdef_adsrc			4
 #define Anum_pg_attrdef_adgencol		5
+#define Anum_pg_attrdef_adbin_on_update 6
+#define Anum_pg_attrdef_adsrc_on_update	7
 
 #endif   /* PG_ATTRDEF_H */

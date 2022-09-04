@@ -82,7 +82,7 @@ static void UBTreeChecksplitloc(FindSplitData* state, OffsetNumber firstoldonrig
  * where firstright == newitemoff.
  *
  */
-OffsetNumber UBTreeFindsplitloc(Relation rel, Page page, OffsetNumber newitemoff, Size newitemsz, bool* newitemonleft)
+OffsetNumber UBTreeFindsplitloc(Relation rel, Buffer buf, OffsetNumber newitemoff, Size newitemsz, bool* newitemonleft)
 {
     UBTPageOpaqueInternal opaque;
     OffsetNumber offnum;
@@ -91,6 +91,7 @@ OffsetNumber UBTreeFindsplitloc(Relation rel, Page page, OffsetNumber newitemoff
     FindSplitData state;
     int leftspace, rightspace, goodenough, olddataitemstotal, olddataitemstoleft;
     bool goodenoughfound = false;
+    Page page = BufferGetPage(buf);
 
     opaque = (UBTPageOpaqueInternal)PageGetSpecialPointer(page);
 
@@ -187,9 +188,10 @@ OffsetNumber UBTreeFindsplitloc(Relation rel, Page page, OffsetNumber newitemoff
      * in case ...
      */
     if (!state.have_split) {
-        ereport(ERROR,
-            (errcode(ERRCODE_INDEX_CORRUPTED),
-             errmsg("could not find a feasible split point for index \"%s\"", RelationGetRelationName(rel))));
+        ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                errmsg("could not find a feasible split point for index \"%s\" at blkno %u. "
+                       "newitemoff %u, newitemsize %lu",
+                       RelationGetRelationName(rel), BufferGetBlockNumber(buf), newitemoff, newitemsz)));
     }
 
     *newitemonleft = state.newitemonleft;

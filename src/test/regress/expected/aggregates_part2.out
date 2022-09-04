@@ -457,6 +457,11 @@ select count(*) from (select distinct(c*d) from t_agg1);
    343
 (1 row)
 
+-- group by with negative value
+SELECT ( 'x' , 'x' ) x GROUP BY -128 , ( );
+ERROR:  GROUP BY position -128 is not in select list
+LINE 1: SELECT ( 'x' , 'x' ) x GROUP BY -128 , ( );
+                                        ^
 reset current_schema;
 drop schema if exists distribute_aggregates_part2 cascade;
 NOTICE:  drop cascades to 3 other objects

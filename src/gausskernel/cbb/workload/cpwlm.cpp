@@ -1893,6 +1893,7 @@ NON_EXEC_STATIC void CPmonitorMain(void)
     (void)gspqsignal(SIGFPE, FloatExceptionHandler);
     (void)gspqsignal(SIGCHLD, SIG_DFL);
     (void)gspqsignal(SIGHUP, SIG_IGN);
+    (void)gspqsignal(SIGURG, print_stack);
     (void)gs_signal_unblock_sigusr2();
 
     if (IsUnderPostmaster) {

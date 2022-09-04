@@ -1,0 +1,842 @@
+set enable_seqscan to false;
+set enable_indexonlyscan to false;
+set enable_indexscan to false;
+set enable_bitmapscan to false;
+-- Test create index with parallel-1
+drop table if exists test1;
+NOTICE:  table "test1" does not exist, skipping
+create table test1(c1 int, c2 int, c3 int) with (storage_type=USTORE, parallel_workers=4);
+create index test1_idx0 on test1(c1, c2);
+insert into test1 values(generate_series(1, 100000), random()*10000, random()*10000);
+create index test1_idx1 on test1(c1, c2, c3);
+insert into test1 values(generate_series(1, 2500000), random()*10000, random()*10000);
+create index test1_idx2 on test1(c1, c2, c3);
+drop index test1_idx0;
+drop index test1_idx1;                                                                                                                          
+drop table test1;
+create table test1(c1 int, c2 int, c3 int) with (storage_type=USTORE);
+alter table test1 set (parallel_workers=1);
+alter table test1 set (parallel_workers=0);
+ERROR:  value 0 out of bounds for option "parallel_workers"
+DETAIL:  Valid values are between "1" and "32".
+alter table test1 set (parallel_workers=33);
+ERROR:  value 33 out of bounds for option "parallel_workers"
+DETAIL:  Valid values are between "1" and "32".
+alter table test1 set (parallel_workers=32);
+alter table test1 set (parallel_workers=3);
+insert into test1 values(generate_series(1, 100000), random()*10000, random()*10000);
+create index test1_idx1 on test1(c1, c2, c3);
+drop table test1;
+-- Test create index with parallel-2
+drop table if exists test1;
+NOTICE:  table "test1" does not exist, skipping
+create table test1(c1 int, c2 int, c3 int) with (storage_type=USTORE, parallel_workers=4);
+insert into test1 values(generate_series(1, 100000), random()*10000, random()*10000);
+create index test1_idx1 on test1(c1, c2, c3);
+explain (verbose, costs off) select /*+ tablescan(test1) */count(*) from test1;
+           QUERY PLAN           
+--------------------------------
+ Aggregate
+   Output: count(*)
+   ->  Seq Scan on public.test1
+         Output: c1, c2, c3
+(4 rows)
+
+explain (verbose, costs off) select /*+ indexscan(test1) */count(*) from test1;
+WARNING:  unused hint: IndexScan(test1)
+           QUERY PLAN           
+--------------------------------
+ Aggregate
+   Output: count(*)
+   ->  Seq Scan on public.test1
+         Output: c1, c2, c3
+(4 rows)
+
+explain (verbose, costs off) select /*+ indexonlyscan(test1) */count(*) from test1;
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Aggregate
+   Output: count(*)
+   ->  Index Only Scan using test1_idx1 on public.test1
+         Output: c1, c2, c3
+(4 rows)
+
+select /*+ tablescan(test1) */count(*) from test1;
+ count  
+--------
+ 100000
+(1 row)
+
+select /*+ indexscan(test1) */count(*) from test1;
+ count  
+--------
+ 100000
+(1 row)
+
+select /*+ indexonlyscan(test1) */count(*) from test1;
+ count  
+--------
+ 100000
+(1 row)
+
+explain (verbose, costs off) select /*+ tablescan(test1) */c1 from test1 where c1 < 1000 minus select /*+ indexonlyscan(test1) */c1 from test1 where c1 < 1000;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ HashSetOp Except
+   Output: "*SELECT* 1".c1, (0)
+   ->  Append
+         ->  Subquery Scan on "*SELECT* 1"
+               Output: "*SELECT* 1".c1, 0
+               ->  Seq Scan on public.test1
+                     Output: public.test1.c1
+                     Filter: (public.test1.c1 < 1000)
+         ->  Subquery Scan on "*SELECT* 2"
+               Output: "*SELECT* 2".c1, 1
+               ->  Index Only Scan using test1_idx1 on public.test1
+                     Output: public.test1.c1
+                     Index Cond: (public.test1.c1 < 1000)
+(13 rows)
+
+select /*+ tablescan(test1) */c1 from test1 where c1 < 1000 minus select /*+ indexonlyscan(test1) */c1 from test1 where c1 < 1000;
+ c1 
+----
+(0 rows)
+
+select /*+ tablescan(test1) */c2 from test1 where c2 < 1000 minus select /*+ indexonlyscan(test1) */c2 from test1 where c2 < 1000;
+ c2 
+----
+(0 rows)
+
+select /*+ tablescan(test1) */c3 from test1 where c3 < 1000 minus select /*+ indexonlyscan(test1) */c3 from test1 where c3 < 1000;
+ c3 
+----
+(0 rows)
+
+explain (verbose, costs off) select /*+ tablescan(test1) */c1 from test1 where c1 < 1000 minus select /*+ indexscan(test1) */c1 from test1 where c1 < 1000;
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ HashSetOp Except
+   Output: "*SELECT* 1".c1, (0)
+   ->  Append
+         ->  Subquery Scan on "*SELECT* 1"
+               Output: "*SELECT* 1".c1, 0
+               ->  Seq Scan on public.test1
+                     Output: public.test1.c1
+                     Filter: (public.test1.c1 < 1000)
+         ->  Subquery Scan on "*SELECT* 2"
+               Output: "*SELECT* 2".c1, 1
+               ->  Index Scan using test1_idx1 on public.test1
+                     Output: public.test1.c1
+                     Index Cond: (public.test1.c1 < 1000)
+(13 rows)
+
+select /*+ tablescan(test1) */c1 from test1 where c1 < 1000 minus select /*+ indexscan(test1) */c1 from test1 where c1 < 1000;
+ c1 
+----
+(0 rows)
+
+select /*+ tablescan(test1) */c2 from test1 where c2 < 1000 minus select /*+ indexscan(test1) */c2 from test1 where c2 < 1000;
+ c2 
+----
+(0 rows)
+
+select /*+ tablescan(test1) */c3 from test1 where c3 < 1000 minus select /*+ indexscan(test1) */c3 from test1 where c3 < 1000;
+ c3 
+----
+(0 rows)
+
+drop index test1_idx1;
+drop table test1;
+-- Test create index with parallel-3
+drop table if exists test1;
+NOTICE:  table "test1" does not exist, skipping
+create table test1(c1 int, c2 int, c3 int) with (storage_type=USTORE, parallel_workers=4);
+insert into test1 values(generate_series(1, 100000), random()*10000, random()*10000);
+create index test1_idx1 on test1(c1, c2, c3);
+explain (verbose, costs off) select /*+ tablescan(test1) */sum(c1) from test1;
+           QUERY PLAN           
+--------------------------------
+ Aggregate
+   Output: sum(c1)
+   ->  Seq Scan on public.test1
+         Output: c1, c2, c3
+(4 rows)
+
+explain (verbose, costs off) select /*+ indexscan(test1) */sum(c2) from test1;
+WARNING:  unused hint: IndexScan(test1)
+           QUERY PLAN           
+--------------------------------
+ Aggregate
+   Output: sum(c2)
+   ->  Seq Scan on public.test1
+         Output: c1, c2, c3
+(4 rows)
+
+explain (verbose, costs off) select /*+ indexonlyscan(test1) */sum(c3) from test1;
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Aggregate
+   Output: sum(c3)
+   ->  Index Only Scan using test1_idx1 on public.test1
+         Output: c1, c2, c3
+(4 rows)
+
+explain (verbose, costs off) select /*+ tablescan(test1) */sum(c1) from test1 where c1 < 1000 and c1 > 500 minus select /*+ indexonlyscan(test1) */sum(c1) from test1 where c1 < 1000 and c1 > 500;
+                                          QUERY PLAN                                          
+----------------------------------------------------------------------------------------------
+ HashSetOp Except
+   Output: "*SELECT* 1".sum, (0)
+   ->  Append
+         ->  Subquery Scan on "*SELECT* 1"
+               Output: "*SELECT* 1".sum, 0
+               ->  Aggregate
+                     Output: sum(public.test1.c1)
+                     ->  Seq Scan on public.test1
+                           Output: public.test1.c1, public.test1.c2, public.test1.c3
+                           Filter: ((public.test1.c1 < 1000) AND (public.test1.c1 > 500))
+         ->  Subquery Scan on "*SELECT* 2"
+               Output: "*SELECT* 2".sum, 1
+               ->  Aggregate
+                     Output: sum(public.test1.c1)
+                     ->  Index Only Scan using test1_idx1 on public.test1
+                           Output: public.test1.c1, public.test1.c2, public.test1.c3
+                           Index Cond: ((public.test1.c1 < 1000) AND (public.test1.c1 > 500))
+(17 rows)
+
+select /*+ tablescan(test1) */sum(c1) from test1 where c1 < 1000 and c1 > 500 minus select /*+ indexonlyscan(test1) */sum(c1) from test1 where c1 < 1000 and c1 > 500;
+ sum 
+-----
+(0 rows)
+
+select /*+ tablescan(test1) */sum(c2) from test1 where c2 < 1000 and c2 > 500 minus select /*+ indexonlyscan(test1) */sum(c2) from test1  where c2 < 1000 and c2 > 500;
+ sum 
+-----
+(0 rows)
+
+select /*+ tablescan(test1) */sum(c3) from test1 where c3 < 1000 and c3 > 500 minus select /*+ indexonlyscan(test1) */sum(c3) from test1 where c3 < 1000 and c3 > 500;
+ sum 
+-----
+(0 rows)
+
+explain (verbose, costs off) select /*+ tablescan(test1) */sum(c1) from test1 where c1 < 1000 minus select /*+ indexscan(test1) */sum(c1) from test1 where c1 < 1000;
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ HashSetOp Except
+   Output: "*SELECT* 1".sum, (0)
+   ->  Append
+         ->  Subquery Scan on "*SELECT* 1"
+               Output: "*SELECT* 1".sum, 0
+               ->  Aggregate
+                     Output: sum(public.test1.c1)
+                     ->  Seq Scan on public.test1
+                           Output: public.test1.c1, public.test1.c2, public.test1.c3
+                           Filter: (public.test1.c1 < 1000)
+         ->  Subquery Scan on "*SELECT* 2"
+               Output: "*SELECT* 2".sum, 1
+               ->  Aggregate
+                     Output: sum(public.test1.c1)
+                     ->  Index Scan using test1_idx1 on public.test1
+                           Output: public.test1.c1, public.test1.c2, public.test1.c3
+                           Index Cond: (public.test1.c1 < 1000)
+(17 rows)
+
+select /*+ tablescan(test1) */sum(c1) from test1 where c1 < 1000 minus select /*+ indexscan(test1) */sum(c1) from test1 where c1 < 1000;
+ sum 
+-----
+(0 rows)
+
+select /*+ tablescan(test1) */sum(c2) from test1 where c2 < 1000 minus select /*+ indexscan(test1) */sum(c2) from test1 where c2 < 1000;
+ sum 
+-----
+(0 rows)
+
+select /*+ tablescan(test1) */sum(c3) from test1 where c3 < 1000 minus select /*+ indexscan(test1) */sum(c3) from test1 where c3 < 1000;
+ sum 
+-----
+(0 rows)
+
+drop index test1_idx1;
+drop table test1;
+-- Test create index with parallel-4
+drop table if exists test1;
+NOTICE:  table "test1" does not exist, skipping
+create table test1(c1 int, c2 int, c3 int) with (storage_type=USTORE, parallel_workers=4);
+insert into test1 values(generate_series(1, 100000), random()*10000, random()*10000);
+create index test1_idx1 on test1(c1, c2, c3);
+explain (verbose, costs off) select /*+ tablescan(test1) */c1 from test1 minus select /*+ indexonlyscan(test1) */c1 from test1;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ HashSetOp Except
+   Output: "*SELECT* 1".c1, (0)
+   ->  Append
+         ->  Subquery Scan on "*SELECT* 1"
+               Output: "*SELECT* 1".c1, 0
+               ->  Seq Scan on public.test1
+                     Output: public.test1.c1
+         ->  Subquery Scan on "*SELECT* 2"
+               Output: "*SELECT* 2".c1, 1
+               ->  Index Only Scan using test1_idx1 on public.test1
+                     Output: public.test1.c1
+(11 rows)
+
+select /*+ tablescan(test1) */c1 from test1 minus select /*+ indexonlyscan(test1) */c1 from test1; 
+ c1 
+----
+(0 rows)
+
+select /*+ tablescan(test1) */c2 from test1 minus select /*+ indexonlyscan(test1) */c2 from test1;                                                                                                    
+ c2 
+----
+(0 rows)
+
+select /*+ tablescan(test1) */c3 from test1 minus select /*+ indexonlyscan(test1) */c3 from test1; 
+ c3 
+----
+(0 rows)
+
+drop index test1_idx1;
+drop table test1;
+-- Test create index with parallel-5
+drop table if exists test1;
+NOTICE:  table "test1" does not exist, skipping
+create table test1(c1 int, c2 int, c3 int) with (storage_type=USTORE, parallel_workers=4);
+begin;
+insert into test1 values(generate_series(1, 100000), random()*10000, random()*10000);
+create index test1_idx1 on test1(c1, c2, c3);
+rollback;
+drop table test1;
+create table test1(c1 int, c2 int, c3 int) with (storage_type=USTORE, parallel_workers=4);
+insert into test1 values(generate_series(1, 10), 2, 3);
+create index test1_idx1 on test1(c1, c2, c3);
+explain (verbose, costs off) select /*+ tablescan(test1) */* from test1;
+        QUERY PLAN        
+--------------------------
+ Seq Scan on public.test1
+   Output: c1, c2, c3
+(2 rows)
+
+explain (verbose, costs off) select /*+ indexonlyscan(test1) */* from test1;
+                    QUERY PLAN                    
+--------------------------------------------------
+ [Bypass]
+ Index Only Scan using test1_idx1 on public.test1
+   Output: c1, c2, c3
+(3 rows)
+
+select /*+ tablescan(test1) */* from test1;
+ c1 | c2 | c3 
+----+----+----
+  1 |  2 |  3
+  2 |  2 |  3
+  3 |  2 |  3
+  4 |  2 |  3
+  5 |  2 |  3
+  6 |  2 |  3
+  7 |  2 |  3
+  8 |  2 |  3
+  9 |  2 |  3
+ 10 |  2 |  3
+(10 rows)
+
+select /*+ indexonlyscan(test1) */* from test1;
+ c1 | c2 | c3 
+----+----+----
+  1 |  2 |  3
+  2 |  2 |  3
+  3 |  2 |  3
+  4 |  2 |  3
+  5 |  2 |  3
+  6 |  2 |  3
+  7 |  2 |  3
+  8 |  2 |  3
+  9 |  2 |  3
+ 10 |  2 |  3
+(10 rows)
+
+begin;
+insert into test1 values(generate_series(1, 100000), random()*10000, random()*10000);
+create index test1_idx2 on test1(c1, c2, c3);
+rollback;
+select /*+ tablescan(test1) */* from test1;
+ c1 | c2 | c3 
+----+----+----
+  1 |  2 |  3
+  2 |  2 |  3
+  3 |  2 |  3
+  4 |  2 |  3
+  5 |  2 |  3
+  6 |  2 |  3
+  7 |  2 |  3
+  8 |  2 |  3
+  9 |  2 |  3
+ 10 |  2 |  3
+(10 rows)
+
+select /*+ indexonlyscan(test1) */* from test1;
+ c1 | c2 | c3 
+----+----+----
+  1 |  2 |  3
+  2 |  2 |  3
+  3 |  2 |  3
+  4 |  2 |  3
+  5 |  2 |  3
+  6 |  2 |  3
+  7 |  2 |  3
+  8 |  2 |  3
+  9 |  2 |  3
+ 10 |  2 |  3
+(10 rows)
+
+drop index test1_idx1;
+drop table test1;
+-- Test create index with parallel-6
+drop table if exists test1;
+NOTICE:  table "test1" does not exist, skipping
+create table test1(c1 int, c2 int, c3 int) with (storage_type=USTORE, parallel_workers=4) partition by range(c2) (partition p1 values less than (5000), partition p2 values less than (MAXVALUE));
+insert into test1 values(generate_series(1, 100000), random()*10000, random()*10000);
+create index test1_idx1 on test1(c1, c2, c3);
+explain (verbose, costs off) select /*+ tablescan(test1) */count(*) from test1;
+                    QUERY PLAN                    
+--------------------------------------------------
+ Aggregate
+   Output: count(*)
+   ->  Partition Iterator
+         Output: c1, c2, c3
+         Iterations: 2
+         ->  Partitioned Seq Scan on public.test1
+               Output: c1, c2, c3
+               Selected Partitions:  1..2
+(8 rows)
+
+explain (verbose, costs off) select /*+ indexscan(test1) */count(*) from test1;
+WARNING:  unused hint: IndexScan(test1)
+                    QUERY PLAN                    
+--------------------------------------------------
+ Aggregate
+   Output: count(*)
+   ->  Partition Iterator
+         Output: c1, c2, c3
+         Iterations: 2
+         ->  Partitioned Seq Scan on public.test1
+               Output: c1, c2, c3
+               Selected Partitions:  1..2
+(8 rows)
+
+explain (verbose, costs off) select /*+ indexonlyscan(test1) */count(*) from test1;
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Aggregate
+   Output: count(*)
+   ->  Index Only Scan using test1_idx1 on public.test1
+         Output: c1, c2, c3, tableoid
+(4 rows)
+
+select /*+ tablescan(test1) */count(*) from test1;
+ count  
+--------
+ 100000
+(1 row)
+
+select /*+ indexscan(test1) */count(*) from test1;
+ count  
+--------
+ 100000
+(1 row)
+
+select /*+ indexonlyscan(test1) */count(*) from test1;
+ count  
+--------
+ 100000
+(1 row)
+
+explain (verbose, costs off) select /*+ tablescan(test1) */c1 from test1 where c1 < 1000 minus select /*+ indexonlyscan(test1) */c1 from test1 where c1 < 1000;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ HashSetOp Except
+   Output: "*SELECT* 1".c1, (0)
+   ->  Append
+         ->  Subquery Scan on "*SELECT* 1"
+               Output: "*SELECT* 1".c1, 0
+               ->  Partition Iterator
+                     Output: public.test1.c1
+                     Iterations: 2
+                     ->  Partitioned Seq Scan on public.test1
+                           Output: public.test1.c1
+                           Filter: (public.test1.c1 < 1000)
+                           Selected Partitions:  1..2
+         ->  Subquery Scan on "*SELECT* 2"
+               Output: "*SELECT* 2".c1, 1
+               ->  Index Only Scan using test1_idx1 on public.test1
+                     Output: public.test1.c1
+                     Index Cond: (public.test1.c1 < 1000)
+(17 rows)
+
+select /*+ tablescan(test1) */c1 from test1 where c1 < 1000 minus select /*+ indexonlyscan(test1) */c1 from test1 where c1 < 1000;
+ c1 
+----
+(0 rows)
+
+select /*+ tablescan(test1) */c2 from test1 where c2 < 1000 minus select /*+ indexonlyscan(test1) */c2 from test1 where c2 < 1000;
+ c2 
+----
+(0 rows)
+
+select /*+ tablescan(test1) */c3 from test1 where c3 < 1000 minus select /*+ indexonlyscan(test1) */c3 from test1 where c3 < 1000;
+ c3 
+----
+(0 rows)
+
+explain (verbose, costs off) select /*+ tablescan(test1) */c1 from test1 where c1 < 1000 minus select /*+ indexscan(test1) */c1 from test1 where c1 < 1000;
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ HashSetOp Except
+   Output: "*SELECT* 1".c1, (0)
+   ->  Append
+         ->  Subquery Scan on "*SELECT* 1"
+               Output: "*SELECT* 1".c1, 0
+               ->  Partition Iterator
+                     Output: public.test1.c1
+                     Iterations: 2
+                     ->  Partitioned Seq Scan on public.test1
+                           Output: public.test1.c1
+                           Filter: (public.test1.c1 < 1000)
+                           Selected Partitions:  1..2
+         ->  Subquery Scan on "*SELECT* 2"
+               Output: "*SELECT* 2".c1, 1
+               ->  Index Scan using test1_idx1 on public.test1
+                     Output: public.test1.c1
+                     Index Cond: (public.test1.c1 < 1000)
+(17 rows)
+
+select /*+ tablescan(test1) */c1 from test1 where c1 < 1000 minus select /*+ indexscan(test1) */c1 from test1 where c1 < 1000;
+ c1 
+----
+(0 rows)
+
+select /*+ tablescan(test1) */c2 from test1 where c2 < 1000 minus select /*+ indexscan(test1) */c2 from test1 where c2 < 1000;
+ c2 
+----
+(0 rows)
+
+select /*+ tablescan(test1) */c3 from test1 where c3 < 1000 minus select /*+ indexscan(test1) */c3 from test1 where c3 < 1000;
+ c3 
+----
+(0 rows)
+
+drop index test1_idx1;
+drop table test1;
+-- Test create index with parallel-7
+drop table if exists test1;
+NOTICE:  table "test1" does not exist, skipping
+create table test1(c1 int, c2 int, c3 int) with (storage_type=USTORE, parallel_workers=4) partition by range(c2) (partition p1 values less than (5000), partition p2 values less than (MAXVALUE));
+insert into test1 values(generate_series(1, 100000), random()*10000, random()*10000);
+create index test1_idx1 on test1(c1, c2, c3);
+explain (verbose, costs off) select /*+ tablescan(test1) */sum(c1) from test1;
+                    QUERY PLAN                    
+--------------------------------------------------
+ Aggregate
+   Output: sum(c1)
+   ->  Partition Iterator
+         Output: c1, c2, c3
+         Iterations: 2
+         ->  Partitioned Seq Scan on public.test1
+               Output: c1, c2, c3
+               Selected Partitions:  1..2
+(8 rows)
+
+explain (verbose, costs off) select /*+ indexscan(test1) */sum(c2) from test1;
+WARNING:  unused hint: IndexScan(test1)
+                    QUERY PLAN                    
+--------------------------------------------------
+ Aggregate
+   Output: sum(c2)
+   ->  Partition Iterator
+         Output: c1, c2, c3
+         Iterations: 2
+         ->  Partitioned Seq Scan on public.test1
+               Output: c1, c2, c3
+               Selected Partitions:  1..2
+(8 rows)
+
+explain (verbose, costs off) select /*+ indexonlyscan(test1) */sum(c3) from test1;
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Aggregate
+   Output: sum(c3)
+   ->  Index Only Scan using test1_idx1 on public.test1
+         Output: c1, c2, c3, tableoid
+(4 rows)
+
+explain (verbose, costs off) select /*+ tablescan(test1) */sum(c1) from test1 where c1 < 1000 and c1 > 500 minus select /*+ indexonlyscan(test1) */sum(c1) from test1 where c1 < 1000 and c1 > 500;
+                                                 QUERY PLAN                                                 
+------------------------------------------------------------------------------------------------------------
+ HashSetOp Except
+   Output: "*SELECT* 1".sum, (0)
+   ->  Append
+         ->  Subquery Scan on "*SELECT* 1"
+               Output: "*SELECT* 1".sum, 0
+               ->  Aggregate
+                     Output: sum(public.test1.c1)
+                     ->  Partition Iterator
+                           Output: public.test1.c1, public.test1.c2, public.test1.c3
+                           Iterations: 2
+                           ->  Partitioned Seq Scan on public.test1
+                                 Output: public.test1.c1, public.test1.c2, public.test1.c3
+                                 Filter: ((public.test1.c1 < 1000) AND (public.test1.c1 > 500))
+                                 Selected Partitions:  1..2
+         ->  Subquery Scan on "*SELECT* 2"
+               Output: "*SELECT* 2".sum, 1
+               ->  Aggregate
+                     Output: sum(public.test1.c1)
+                     ->  Index Only Scan using test1_idx1 on public.test1
+                           Output: public.test1.c1, public.test1.c2, public.test1.c3, public.test1.tableoid
+                           Index Cond: ((public.test1.c1 < 1000) AND (public.test1.c1 > 500))
+(21 rows)
+
+select /*+ tablescan(test1) */sum(c1) from test1 where c1 < 1000 and c1 > 500 minus select /*+ indexonlyscan(test1) */sum(c1) from test1 where c1 < 1000 and c1 > 500;
+ sum 
+-----
+(0 rows)
+
+select /*+ tablescan(test1) */sum(c2) from test1 where c2 < 1000 and c2 > 500 minus select /*+ indexonlyscan(test1) */sum(c2) from test1  where c2 < 1000 and c2 > 500;
+ sum 
+-----
+(0 rows)
+
+select /*+ tablescan(test1) */sum(c3) from test1 where c3 < 1000 and c3 > 500 minus select /*+ indexonlyscan(test1) */sum(c3) from test1 where c3 < 1000 and c3 > 500;
+ sum 
+-----
+(0 rows)
+
+explain (verbose, costs off) select /*+ tablescan(test1) */sum(c1) from test1 where c1 < 1000 minus select /*+ indexscan(test1) */sum(c1) from test1 where c1 < 1000;
+                                        QUERY PLAN                                         
+-------------------------------------------------------------------------------------------
+ HashSetOp Except
+   Output: "*SELECT* 1".sum, (0)
+   ->  Append
+         ->  Subquery Scan on "*SELECT* 1"
+               Output: "*SELECT* 1".sum, 0
+               ->  Aggregate
+                     Output: sum(public.test1.c1)
+                     ->  Partition Iterator
+                           Output: public.test1.c1, public.test1.c2, public.test1.c3
+                           Iterations: 2
+                           ->  Partitioned Seq Scan on public.test1
+                                 Output: public.test1.c1, public.test1.c2, public.test1.c3
+                                 Filter: (public.test1.c1 < 1000)
+                                 Selected Partitions:  1..2
+         ->  Subquery Scan on "*SELECT* 2"
+               Output: "*SELECT* 2".sum, 1
+               ->  Aggregate
+                     Output: sum(public.test1.c1)
+                     ->  Index Scan using test1_idx1 on public.test1
+                           Output: public.test1.c1, public.test1.c2, public.test1.c3
+                           Index Cond: (public.test1.c1 < 1000)
+(21 rows)
+
+select /*+ tablescan(test1) */sum(c1) from test1 where c1 < 1000 minus select /*+ indexscan(test1) */sum(c1) from test1 where c1 < 1000;
+ sum 
+-----
+(0 rows)
+
+select /*+ tablescan(test1) */sum(c2) from test1 where c2 < 1000 minus select /*+ indexscan(test1) */sum(c2) from test1 where c2 < 1000;
+ sum 
+-----
+(0 rows)
+
+select /*+ tablescan(test1) */sum(c3) from test1 where c3 < 1000 minus select /*+ indexscan(test1) */sum(c3) from test1 where c3 < 1000;
+ sum 
+-----
+(0 rows)
+
+drop index test1_idx1;
+drop table test1;
+-- Test create index with parallel-8
+drop table if exists test1;
+NOTICE:  table "test1" does not exist, skipping
+create table test1(c1 int, c2 int, c3 int) with (storage_type=USTORE, parallel_workers=4) partition by range(c2) (partition p1 values less than (5000), partition p2 values less than (MAXVALUE));
+insert into test1 values(generate_series(1, 100000), random()*10000, random()*10000);
+create index test1_idx1 on test1(c1, c2, c3);
+explain (verbose, costs off) select /*+ tablescan(test1) */c1 from test1 minus select /*+ indexonlyscan(test1) */c1 from test1;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ HashSetOp Except
+   Output: "*SELECT* 1".c1, (0)
+   ->  Append
+         ->  Subquery Scan on "*SELECT* 1"
+               Output: "*SELECT* 1".c1, 0
+               ->  Partition Iterator
+                     Output: public.test1.c1
+                     Iterations: 2
+                     ->  Partitioned Seq Scan on public.test1
+                           Output: public.test1.c1
+                           Selected Partitions:  1..2
+         ->  Subquery Scan on "*SELECT* 2"
+               Output: "*SELECT* 2".c1, 1
+               ->  Index Only Scan using test1_idx1 on public.test1
+                     Output: public.test1.c1
+(15 rows)
+
+select /*+ tablescan(test1) */c1 from test1 minus select /*+ indexonlyscan(test1) */c1 from test1; 
+ c1 
+----
+(0 rows)
+
+select /*+ tablescan(test1) */c2 from test1 minus select /*+ indexonlyscan(test1) */c2 from test1;                                                                                                    
+ c2 
+----
+(0 rows)
+
+select /*+ tablescan(test1) */c3 from test1 minus select /*+ indexonlyscan(test1) */c3 from test1; 
+ c3 
+----
+(0 rows)
+
+drop index test1_idx1;
+drop table test1;
+-- Test create index with parallel-9
+drop table if exists test1;
+NOTICE:  table "test1" does not exist, skipping
+create table test1(c1 int, c2 int, c3 int) with (storage_type=USTORE, parallel_workers=4) partition by range(c2) (partition p1 values less than (5000), partition p2 values less than (MAXVALUE));
+begin;
+insert into test1 values(generate_series(1, 100000), random()*10000, random()*10000);
+create index test1_idx1 on test1(c1, c2, c3);
+rollback;
+drop table test1;
+create table test1(c1 int, c2 int, c3 int) with (storage_type=USTORE, parallel_workers=4) partition by range(c2) (partition p1 values less than (5000), partition p2 values less than (MAXVALUE));
+insert into test1 values(generate_series(1, 10), 2, 3);
+create index test1_idx1 on test1(c1, c2, c3);
+explain (verbose, costs off) select /*+ tablescan(test1) */* from test1;
+                 QUERY PLAN                 
+--------------------------------------------
+ Partition Iterator
+   Output: c1, c2, c3
+   Iterations: 2
+   ->  Partitioned Seq Scan on public.test1
+         Output: c1, c2, c3
+         Selected Partitions:  1..2
+(6 rows)
+
+explain (verbose, costs off) select /*+ indexonlyscan(test1) */* from test1;
+                    QUERY PLAN                    
+--------------------------------------------------
+ Index Only Scan using test1_idx1 on public.test1
+   Output: c1, c2, c3
+(2 rows)
+
+select /*+ tablescan(test1) */* from test1;
+ c1 | c2 | c3 
+----+----+----
+  1 |  2 |  3
+  2 |  2 |  3
+  3 |  2 |  3
+  4 |  2 |  3
+  5 |  2 |  3
+  6 |  2 |  3
+  7 |  2 |  3
+  8 |  2 |  3
+  9 |  2 |  3
+ 10 |  2 |  3
+(10 rows)
+
+select /*+ indexonlyscan(test1) */* from test1;
+ c1 | c2 | c3 
+----+----+----
+  1 |  2 |  3
+  2 |  2 |  3
+  3 |  2 |  3
+  4 |  2 |  3
+  5 |  2 |  3
+  6 |  2 |  3
+  7 |  2 |  3
+  8 |  2 |  3
+  9 |  2 |  3
+ 10 |  2 |  3
+(10 rows)
+
+begin;
+insert into test1 values(generate_series(1, 100000), random()*10000, random()*10000);
+create index test1_idx2 on test1(c1, c2, c3);
+rollback;
+select /*+ tablescan(test1) */* from test1;
+ c1 | c2 | c3 
+----+----+----
+  1 |  2 |  3
+  2 |  2 |  3
+  3 |  2 |  3
+  4 |  2 |  3
+  5 |  2 |  3
+  6 |  2 |  3
+  7 |  2 |  3
+  8 |  2 |  3
+  9 |  2 |  3
+ 10 |  2 |  3
+(10 rows)
+
+select /*+ indexonlyscan(test1) */* from test1;
+ c1 | c2 | c3 
+----+----+----
+  1 |  2 |  3
+  2 |  2 |  3
+  3 |  2 |  3
+  4 |  2 |  3
+  5 |  2 |  3
+  6 |  2 |  3
+  7 |  2 |  3
+  8 |  2 |  3
+  9 |  2 |  3
+ 10 |  2 |  3
+(10 rows)
+
+drop index test1_idx1;
+drop table test1;
+CREATE TABLE range_range_1
+(
+    month_code integer NOT NULL ,
+    dept_code  integer NOT NULL ,
+    user_no    integer NOT NULL ,
+    sales_amt  integer NOT NULL
+) WITH (FILLFACTOR=90, STORAGE_TYPE=USTORE, parallel_workers=4, init_td=32)
+PARTITION BY RANGE (month_code) SUBPARTITION BY RANGE (dept_code)
+(
+  PARTITION p_201901 VALUES LESS THAN( 20 )
+  (
+    SUBPARTITION p_201901_a VALUES LESS THAN( 20 ),
+    SUBPARTITION p_201901_b VALUES LESS THAN( 40)
+  ),
+  PARTITION p_201902 VALUES LESS THAN( 40 )
+  (
+    SUBPARTITION p_201902_a VALUES LESS THAN( 20 ),
+    SUBPARTITION p_201902_b VALUES LESS THAN( 40 )
+  )
+);
+insert into range_range_1 values(random()*38, random()*38, random()*100, generate_series(1,100));
+create index range_range_1_idx_1 on range_range_1 (month_code, dept_code, user_no, sales_amt)local;
+select /*+ tablescan(range_range_1) */* from range_range_1 minus select /*+ indexonlyscan(range_range_1) */* from range_range_1;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+(0 rows)
+
+drop index range_range_1_idx_1;
+drop table range_range_1;
+CREATE TABLE range_1
+(
+    month_code integer NOT NULL ,
+    dept_code  integer NOT NULL ,
+    user_no    integer NOT NULL ,
+    sales_amt  integer NOT NULL
+) WITH (FILLFACTOR=90, STORAGE_TYPE=USTORE, parallel_workers=4, init_td=32)
+PARTITION BY RANGE (month_code) SUBPARTITION BY RANGE (dept_code)
+(
+  PARTITION p_201901 VALUES LESS THAN( 20 ),
+  PARTITION p_201902 VALUES LESS THAN( 40 )
+);
+insert into range_1 values(random()*38, random()*38, random()*100, generate_series(1,100));
+create index range_1_idx_1 on range_1 (month_code, dept_code, user_no, sales_amt)local;
+select /*+ tablescan(range_1) */* from range_1 minus select /*+ indexonlyscan(range_1) */* from range_1;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+(0 rows)
+
+drop index range_1_idx_1;
+drop table range_1;

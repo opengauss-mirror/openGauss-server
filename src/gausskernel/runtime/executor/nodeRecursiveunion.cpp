@@ -207,12 +207,8 @@ TupleTableSlot* ExecRecursiveUnion(RecursiveUnionState* node)
             slot = isSW ? ConvertRuScanOutputSlot(node, slot, false) : slot;
             swSlot = isSW ? GetStartWithSlot(node, slot) : NULL;
             if (isSW && swSlot == NULL) {
-                /*
-                 * SWCB terminal condition met. Time to stop.
-                 * Discarding the last tuple.
-                 */
-                markSWLevelEnd(node->swstate, node->swstate->sw_numtuples - 1);
-                break;
+                /* Not satisfy connect_by_level_qual，skip this tuple */
+                continue;
             }
 
             /* Each non-duplicate tuple goes to the working table ... */
@@ -392,12 +388,8 @@ TupleTableSlot* ExecRecursiveUnion(RecursiveUnionState* node)
             slot = ConvertRuScanOutputSlot(node, slot, true);
             swSlot = GetStartWithSlot(node, slot);
             if (isSW && swSlot == NULL) {
-                /*
-                 * SWCB terminal condition met. Time to stop.
-                 * Discarding the last tuple.
-                 */
-                markSWLevelEnd(node->swstate, node->swstate->sw_numtuples - 1);
-                break;
+                /* Not satisfy connect_by_level_qual，skip this tuple */
+                continue;
             }
 
             /*

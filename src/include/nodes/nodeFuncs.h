@@ -67,4 +67,6 @@ extern bool is_func_distinct_unshippable(Oid funcid);
 
 extern bool lockNextvalWalker(Node* node, void* context);
 
+extern void find_nextval_seqoid_walker(Node* node, Oid* seqoid);
+
 #endif /* NODEFUNCS_H */

@@ -862,7 +862,7 @@ PL/pgSQL function ldgr_tri_insert_func() line 4 at SQL statement
 DROP SCHEMA blockchain;
 ERROR:  DROP not supported for blockchain schema.
 ALTER SCHEMA blockchain RENAME TO blockchain_renamed;
-ERROR:  The schema blockchain doesn't allow to rename
+ERROR:  The schema 'blockchain' doesn't allow to rename
 CREATE SCHEMA blockchain;
 ERROR:  schema "blockchain" already exists
 CREATE USER test_normal_user PASSWORD 'Gauss_234';

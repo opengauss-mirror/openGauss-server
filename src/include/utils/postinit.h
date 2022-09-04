@@ -78,6 +78,8 @@ public:
 
     void InitCsnminSync();
 
+    void InitCfsShrinker();
+
     void InitTxnSnapCapturer();
 
     void InitTxnSnapWorker();
@@ -112,7 +114,7 @@ public:
 
     void InitUndoLauncher();
 
-    void InitUndoWorker();
+    bool InitUndoWorker();
 
     void InitBarrierCreator();
 
@@ -123,6 +125,7 @@ public:
     void InitApplyLauncher();
 
     void InitApplyWorker();
+    void InitStackPerfWorker();
 
 public:
     const char* m_indbname;
@@ -207,5 +210,7 @@ private:
 };
 
 void ShutdownPostgres(int code, Datum arg);
+
+extern HeapTuple GetDatabaseTupleByOid(Oid dboid);
 
 #endif /* UTILS_POSTINIT_H */

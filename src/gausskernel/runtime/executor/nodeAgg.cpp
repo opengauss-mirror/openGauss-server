@@ -470,8 +470,6 @@ static void advance_transition_function(
     /*
      * OK to call the transition function
      */
-    InitFunctionCallInfoData(
-        *fcinfo, &(peraggstate->transfn), numTransInputs + 1, peraggstate->aggCollation, (Node*)aggstate, NULL);
     fcinfo->arg[0] = pergroupstate->transValue;
     fcinfo->argnull[0] = pergroupstate->transValueIsNull;
     fcinfo->argTypes[0] = InvalidOid;
@@ -658,8 +656,13 @@ static void advance_aggregates(AggState* aggstate, AggStatePerGroup pergroup)
             /* We can apply the transition function immediately */
             FunctionCallInfoData fcinfo;
 
-            /* init the number of arguments to a function. */
-            InitFunctionCallInfoArgs(fcinfo, numTransInputs + 1, 1);
+            /* Init FunctionCallInfoData for transition function before loading argument values. */
+            InitFunctionCallInfoData(fcinfo,
+                                     &(peraggstate->transfn),
+                                     numTransInputs + 1,
+                                     peraggstate->aggCollation,
+                                     (Node*)aggstate,
+                                     NULL);
 
             /* Load values into fcinfo */
             /* Start from 1, since the 0th arg will be the transition value */
@@ -731,9 +734,13 @@ static void process_ordered_aggregate_single(
 
     tuplesort_performsort(peraggstate->sortstates[aggstate->current_set]);
 
-    /* init the number of arguments to a function. */
-    InitFunctionCallInfoArgs(fcinfo, peraggstate->numArguments + 1, 1);
-
+    /* Init FunctionCallInfoData for transition function before loading argument values. */
+    InitFunctionCallInfoData(fcinfo,
+                             &(peraggstate->transfn),
+                             peraggstate->numArguments + 1,
+                             peraggstate->aggCollation,
+                             (Node*)aggstate,
+                             NULL);
     /* Load the column into argument 1 (arg 0 will be transition value) */
     newVal = fcinfo.arg + 1;
     isNull = fcinfo.argnull + 1;
@@ -822,9 +829,13 @@ static void process_ordered_aggregate_multi(
         if (numDistinctCols == 0 || !haveOldValue || newAbbrevVal != oldAbbrevVal ||
             !execTuplesMatch(
                 slot1, slot2, numDistinctCols, peraggstate->sortColIdx, peraggstate->equalfns, workcontext)) {
-            /* init the number of arguments to a function. */
-            InitFunctionCallInfoArgs(fcinfo, numTransInputs + 1, 1);
-
+            /* Init FunctionCallInfoData for transition function before loading argument values. */
+            InitFunctionCallInfoData(fcinfo,
+                                     &(peraggstate->transfn),
+                                     numTransInputs + 1,
+                                     peraggstate->aggCollation,
+                                     (Node*)aggstate,
+                                     NULL);
             /* Load values into fcinfo */
             /* Start from 1, since the 0th arg will be the transition value */
             for (i = 0; i < numTransInputs; i++) {

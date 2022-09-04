@@ -155,7 +155,8 @@ int DoradoReadXLog(XLogRecPtr startLsn, char *buf, int expectReadLen)
             return static_cast<int>(actualBytes);
         }
 
-        actualBytes = pread(t_thrd.xlog_cxt.openLogFile, buf + firstReadSize, secondReadSize, GetXlogPos(0));
+        actualBytes = (ssize_t)pread(g_instance.xlog_cxt.shareStorageopCtl.fd, buf + firstReadSize, secondReadSize,
+            (off_t)GetXlogPos(0));
         if (actualBytes < 0) {
             uint32 shiftSize = 32;
             XLogRecPtr nextStartLsn = startLsn + firstReadSize;

@@ -92,16 +92,20 @@ UndoRecord::UndoRecord()
     SetBuff(InvalidBuffer);
     SetBufidx(-1);
     SetNeedInsert(false);
+    SetCopy(true);
+    SetMemoryContext(NULL);
 }
 
 UndoRecord::~UndoRecord()
 {
     Reset(INVALID_UNDO_REC_PTR);
+    SetMemoryContext(NULL);
 }
 
 void UndoRecord::Destroy()
 {
     Reset(INVALID_UNDO_REC_PTR);
+    SetMemoryContext(NULL);
 }
 
 void UndoRecord::Reset(UndoRecPtr urp)
@@ -117,21 +121,27 @@ void UndoRecord::Reset(UndoRecPtr urp)
     if (BufferIsValid(buff_)) {
         if (!IS_VALID_UNDO_REC_PTR(urp) || (UNDO_PTR_GET_ZONE_ID(urp) != UNDO_PTR_GET_ZONE_ID(urp_)) ||
             (UNDO_PTR_GET_BLOCK_NUM(urp) != BufferGetBlockNumber(buff_))) {
+            BufferDesc *buf_desc = GetBufferDescriptor(buff_ - 1);
+            if (LWLockHeldByMe(buf_desc->content_lock)) {
+                ereport(LOG, (errmodule(MOD_UNDO),
+                    errmsg("Release Buffer %d when Reset UndoRecord from %lu to %lu.", buff_, urp_, urp)));
+                LockBuffer(buff_, BUFFER_LOCK_UNLOCK);
+            }
             ReleaseBuffer(buff_);
             buff_ = InvalidBuffer;
         }
-    } else {
-        if (rawdata_.data != NULL) {
-            pfree(rawdata_.data);
-        }
+    }
+
+    if (IsCopy() && rawdata_.data != NULL) {
+        pfree(rawdata_.data);
     }
 
     rawdata_.data = NULL;
     rawdata_.len = 0;
-
     SetUrp(urp);
     SetBufidx(-1);
     SetNeedInsert(false);
+    SetCopy(true);
 }
 
 void UndoRecord::Reset2Blkprev()
@@ -183,22 +193,20 @@ UndoRecPtr UndoRecord::Prevurp(UndoRecPtr currUrp, Buffer *buffer)
 
 UndoRecordSize UndoRecord::GetPrevRecordLen(UndoRecPtr currUrp, Buffer *inputBuffer)
 {
-    int zoneId = UNDO_PTR_GET_ZONE_ID(currUrp);
     Buffer buffer = InvalidBuffer;
     bool releaseBuffer = false;
     BlockNumber blk = UNDO_PTR_GET_BLOCK_NUM(currUrp);
     RelFileNode rnode;
     UNDO_PTR_ASSIGN_REL_FILE_NODE(rnode, currUrp, UNDO_DB_OID);
-    DECLARE_NODE_COUNT();
-    GET_UPERSISTENCE_BY_ZONEID(zoneId, nodeCount);
     UndoRecordSize precRecLen = 0;
     UndoLogOffset pageOffset = UNDO_PTR_GET_PAGE_OFFSET(currUrp);
     Assert(pageOffset != 0);
 
     if (inputBuffer == NULL || !BufferIsValid(*inputBuffer)) {
         buffer =
-            ReadUndoBufferWithoutRelcache(rnode, UNDO_FORKNUM, blk, RBM_NORMAL, NULL, REL_PERSISTENCE(upersistence));
+            ReadUndoBufferWithoutRelcache(rnode, UNDO_FORKNUM, blk, RBM_NORMAL, NULL, RELPERSISTENCE_PERMANENT);
         releaseBuffer = true;
+        LockBuffer(buffer, BUFFER_LOCK_SHARE);
     } else {
         buffer = *inputBuffer;
     }
@@ -214,12 +222,16 @@ UndoRecordSize UndoRecord::GetPrevRecordLen(UndoRecPtr currUrp, Buffer *inputBuf
             byteToRead -= 1;
         } else {
             if (releaseBuffer) {
+                if (LWLockHeldByMeInMode(BufferDescriptorGetContentLock(GetBufferDescriptor(buffer - 1)), LW_SHARED)) {
+                    LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
+                }
                 ReleaseBuffer(buffer);
             }
             releaseBuffer = true;
             blk -= 1;
             buffer = ReadUndoBufferWithoutRelcache(rnode, UNDO_FORKNUM, blk, RBM_NORMAL, NULL,
-                REL_PERSISTENCE(upersistence));
+                RELPERSISTENCE_PERMANENT);
+            LockBuffer(buffer, BUFFER_LOCK_SHARE);
             pageOffset = BLCKSZ;
             page = (char *)BufferGetPage(buffer);
         }
@@ -231,6 +243,9 @@ UndoRecordSize UndoRecord::GetPrevRecordLen(UndoRecPtr currUrp, Buffer *inputBuf
         precRecLen += UNDO_LOG_BLOCK_HEADER_SIZE;
     }
     if (releaseBuffer) {
+        if (LWLockHeldByMeInMode(BufferDescriptorGetContentLock(GetBufferDescriptor(buffer - 1)), LW_SHARED)) {
+            LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
+        }
         ReleaseBuffer(buffer);
     }
     if (precRecLen == 0) {
@@ -325,21 +340,33 @@ void UndoRecord::Load(bool keepBuffer)
 
     /* Get Undo Persistence. Stored in the variable upersistence */
     int zoneId = UNDO_PTR_GET_ZONE_ID(urp_);
-    DECLARE_NODE_COUNT();
-    GET_UPERSISTENCE_BY_ZONEID(zoneId, nodeCount);
-
     if (!BufferIsValid(buffer)) {
 #ifdef DEBUG_UHEAP
         UHEAPSTAT_COUNT_UNDO_PAGE_VISITS();
 #endif
         buffer =
-            ReadUndoBufferWithoutRelcache(rnode, UNDO_FORKNUM, blk, RBM_NORMAL, NULL, REL_PERSISTENCE(upersistence));
+            ReadUndoBufferWithoutRelcache(rnode, UNDO_FORKNUM, blk, RBM_NORMAL, NULL, RELPERSISTENCE_PERMANENT);
+        LockBuffer(buffer, BUFFER_LOCK_SHARE);
         buff_ = buffer;
+    } else if (!keepBuffer) {
+        LockBuffer(buffer, BUFFER_LOCK_SHARE);
     }
 
     int alreadyRead = 0;
     do {
         Page page = BufferGetPage(buffer);
+        BufferDesc *bufDesc = GetBufferDescriptor(buffer - 1);
+        if (bufDesc->tag.blockNum != blk || bufDesc->tag.rnode.dbNode != UNDO_DB_OID ||
+            bufDesc->tag.rnode.relNode != (Oid)zoneId) {
+            ereport(PANIC,
+                (errmsg(UNDOFORMAT("undo buffer desc invalid, bufdesc: dbid=%u, relid=%u, blockno=%u. "
+                "expect: dbid=%u, zoneid=%u, blockno=%u."),
+                bufDesc->tag.rnode.dbNode, bufDesc->tag.rnode.relNode, bufDesc->tag.blockNum,
+                (Oid)UNDO_DB_OID, (Oid)zoneId, blk)));
+        }
+        if (alreadyRead > BLCKSZ) {
+            ereport(PANIC, (errmsg(UNDOFORMAT("undo record exceeds max size, readSize %d."), alreadyRead)));
+        }
         if (ReadUndoRecord(page, startingByte, &alreadyRead, copyData)) {
             break;
         }
@@ -349,18 +376,30 @@ void UndoRecord::Load(bool keepBuffer)
         isUndoRecSplit = true;
 
         if (!keepBuffer) {
+            if (LWLockHeldByMeInMode(BufferDescriptorGetContentLock(GetBufferDescriptor(buffer - 1)), LW_SHARED)) {
+                LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
+            }
             ReleaseBuffer(buffer);
+
             buff_ = InvalidBuffer;
         }
 #ifdef DEBUG_UHEAP
         UHEAPSTAT_COUNT_UNDO_PAGE_VISITS();
 #endif
         buffer =
-            ReadUndoBufferWithoutRelcache(rnode, UNDO_FORKNUM, blk, RBM_NORMAL, NULL, REL_PERSISTENCE(upersistence));
+            ReadUndoBufferWithoutRelcache(rnode, UNDO_FORKNUM, blk, RBM_NORMAL, NULL, RELPERSISTENCE_PERMANENT);
+        LockBuffer(buffer, BUFFER_LOCK_SHARE);
     } while (true);
 
     if (isUndoRecSplit) {
+        if (LWLockHeldByMeInMode(BufferDescriptorGetContentLock(GetBufferDescriptor(buffer - 1)), LW_SHARED)) {
+            LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
+        }
         ReleaseBuffer(buffer);
+    } else if (!keepBuffer) {
+        if (LWLockHeldByMeInMode(BufferDescriptorGetContentLock(GetBufferDescriptor(buffer - 1)), LW_SHARED)) {
+            LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
+        }
     }
 }
 
@@ -412,9 +451,11 @@ bool UndoRecord::ReadUndoRecord(_in_ Page page, _in_ int startingByte, __inout i
         if (rawdata_.len > 0) {
             if (!copyData && !isUndoSplited && rawdata_.len <= (endptr - readptr)) {
                 rawdata_.data = readptr;
+                SetCopy(false);
             } else {
                 if (rawdata_.len > 0 && rawdata_.data == NULL) {
-                    rawdata_.data = (char *)palloc0(rawdata_.len);
+                    rawdata_.data = (char *)MemoryContextAllocZero(
+                        CurrentMemoryContext, rawdata_.len);
                 }
                 if (!ReadUndoBytes((char *)rawdata_.data, rawdata_.len, &readptr, endptr, &myBytesRead, alreadyRead)) {
                     return false;
@@ -425,41 +466,54 @@ bool UndoRecord::ReadUndoRecord(_in_ Page page, _in_ int startingByte, __inout i
     return true;
 }
 
-static UndoRecordState LoadUndoRecord(UndoRecord *urec)
+static UndoRecordState LoadUndoRecord(UndoRecord *urec, TransactionId *lastXid)
 {
-    UndoRecordState state = undo::CheckUndoRecordValid(urec->Urp(), true);
+    UndoRecordState state = undo::CheckUndoRecordValid(urec->Urp(), true, lastXid);
     if (state != UNDO_RECORD_NORMAL) {
         return state;
     }
 
     int saveInterruptHoldoffCount = t_thrd.int_cxt.InterruptHoldoffCount;
+    MemoryContext currentContext = CurrentMemoryContext;
     PG_TRY();
     {
         t_thrd.undo_cxt.fetchRecord = true;
         urec->Load(false);
+        state = undo::CheckUndoRecordValid(urec->Urp(), true, NULL);
+        if (state == UNDO_RECORD_NORMAL) {
+            VerifyUndoRecordValid(urec, true);
+        }
     }
     PG_CATCH();
     {
-        state = undo::CheckUndoRecordValid(urec->Urp(), true);
-        if ((!t_thrd.undo_cxt.fetchRecord) && (state == UNDO_RECORD_DISCARD ||
-            state == UNDO_RECORD_FORCE_DISCARD)) {
+        MemoryContext oldContext = MemoryContextSwitchTo(currentContext);
+        state = undo::CheckUndoRecordValid(urec->Urp(), true, lastXid);
+        if (state == UNDO_RECORD_DISCARD || state == UNDO_RECORD_FORCE_DISCARD) {
+            t_thrd.undo_cxt.fetchRecord = false;
             t_thrd.int_cxt.InterruptHoldoffCount = saveInterruptHoldoffCount;
             if (BufferIsValid(urec->Buff())) {
+                if (LWLockHeldByMeInMode(BufferDescriptorGetContentLock(
+                    GetBufferDescriptor(urec->Buff() - 1)), LW_SHARED)) {
+                    LockBuffer(urec->Buff(), BUFFER_LOCK_UNLOCK);
+                }
                 ReleaseBuffer(urec->Buff());
                 urec->SetBuff(InvalidBuffer);
             }
+            FlushErrorState();
             return state;
         } else {
+            (void)MemoryContextSwitchTo(oldContext);
             PG_RE_THROW();
         }
     }
     PG_END_TRY();
     t_thrd.undo_cxt.fetchRecord = false;
-    return UNDO_RECORD_NORMAL;
+    return state;
 }
 
 UndoTraversalState FetchUndoRecord(__inout UndoRecord *urec, _in_ SatisfyUndoRecordCallback callback,
-    _in_ BlockNumber blkno, _in_ OffsetNumber offset, _in_ TransactionId xid, bool isNeedBypass)
+    _in_ BlockNumber blkno, _in_ OffsetNumber offset, _in_ TransactionId xid, bool isNeedBypass,
+    TransactionId *lastXid)
 {
     int64 undo_chain_len = 0; /* len of undo chain for one tuple */
 
@@ -467,7 +521,7 @@ UndoTraversalState FetchUndoRecord(__inout UndoRecord *urec, _in_ SatisfyUndoRec
 
     if (RecoveryInProgress()) {
         uint64 blockcnt = 0;
-        while (undo::CheckUndoRecordValid(urec->Urp(), false) == UNDO_RECORD_NOT_INSERT) {
+        while (undo::CheckUndoRecordValid(urec->Urp(), false, NULL) == UNDO_RECORD_NOT_INSERT) {
             ereport(LOG,
                 (errmsg(UNDOFORMAT("urp: %ld is not replayed yet. ROS waiting for UndoRecord replay."),
                 urec->Urp())));
@@ -477,21 +531,23 @@ UndoTraversalState FetchUndoRecord(__inout UndoRecord *urec, _in_ SatisfyUndoRec
                 CHECK_FOR_INTERRUPTS();
             }
         }
-        if (undo::CheckUndoRecordValid(urec->Urp(), false) == UNDO_RECORD_DISCARD) {
+        if (undo::CheckUndoRecordValid(urec->Urp(), false, NULL) == UNDO_RECORD_DISCARD) {
             return UNDO_TRAVERSAL_END;
         }
     }
 
     do {
-        UndoRecordState state = LoadUndoRecord(urec);
-        if (state == UNDO_RECORD_INVALID || state == UNDO_RECORD_DISCARD) {
+        UndoRecordState state = LoadUndoRecord(urec, lastXid);
+        if (state == UNDO_RECORD_DISCARD) {
             return UNDO_TRAVERSAL_END;
+        } else if (state == UNDO_RECORD_INVALID) {
+            return UNDO_TRAVERSAL_ENDCHAIN;
         } else if (state == UNDO_RECORD_FORCE_DISCARD) {
             return UNDO_TRAVERSAL_ABORT;
         }
 
-        if (isNeedBypass && TransactionIdPrecedes(urec->Xid(), g_instance.undo_cxt.oldestFrozenXid)) {
-            ereport(DEBUG1, (errmsg(UNDOFORMAT("Check visibility by oldestFrozenXid"))));
+        if (isNeedBypass && TransactionIdPrecedes(urec->Xid(), g_instance.undo_cxt.globalFrozenXid)) {
+            ereport(DEBUG1, (errmsg(UNDOFORMAT("Check visibility by globalFrozenXid"))));
             return UNDO_TRAVERSAL_STOP;
         }
 

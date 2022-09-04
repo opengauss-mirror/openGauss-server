@@ -446,3 +446,23 @@ Datum pg_node_tree_send(PG_FUNCTION_ARGS)
 {
     return textsend(fcinfo);
 }
+
+/*
+ * anyset_in		- input routine for pseudo-type ANYSET.
+ */
+Datum anyset_in(PG_FUNCTION_ARGS)
+{
+    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot accept a value of type anyset")));
+
+    PG_RETURN_VOID(); /* keep compiler quiet */
+}
+
+/*
+ * anyset_out		- output routine for pseudo-type ANYSET.
+ *
+ * We may as well allow this, since enum_out will in fact work.
+ */
+Datum anyset_out(PG_FUNCTION_ARGS)
+{
+    return set_out(fcinfo);
+}

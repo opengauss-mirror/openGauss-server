@@ -471,9 +471,9 @@ void XlogInsertSleep(void)
     if (g_instance.streaming_dr_cxt.rpoSleepTime > 0) {
         pgstat_report_waitevent(WAIT_EVENT_LOGCTRL_SLEEP);
         if (g_instance.streaming_dr_cxt.rpoSleepTime < MAX_RPO_SLEEP_TIME) {
-            pg_usleep(g_instance.streaming_dr_cxt.rpoSleepTime);
+            pg_usleep_retry(g_instance.streaming_dr_cxt.rpoSleepTime, 0);
         } else {
-            pg_usleep(MAX_RPO_SLEEP_TIME);
+            pg_usleep_retry(MAX_RPO_SLEEP_TIME, 0);
         }
         pgstat_report_waitevent(WAIT_EVENT_END);
     }
@@ -891,16 +891,14 @@ static XLogRecData *XLogRecordAssemble(RmgrId rmid, uint8 info, XLogFPWInfo fpw_
                 if (IsSegmentFileNode(regbuf->rnode)) {
                     XLOG_ASSEMBLE_ONE_ITEM(scratch, sizeof(RelFileNode), &regbuf->rnode, remained_size);
                     hashbucket_flag = true;
-                } else if (isCompressedTable) {
-                    if (t_thrd.proc->workingVersionNum < PAGE_COMPRESSION_VERSION) {
-                        Assert(!isCompressedTable);
-                        RelFileNodeV2 relFileNodeV2;
-                        RelFileNodeV2Copy(relFileNodeV2, regbuf->rnode);
-                        XLOG_ASSEMBLE_ONE_ITEM(scratch, sizeof(RelFileNodeV2), &regbuf->rnode, remained_size);
-                    } else {
-                        info |= XLR_REL_COMPRESS;
-                        XLOG_ASSEMBLE_ONE_ITEM(scratch, sizeof(RelFileNode), &regbuf->rnode, remained_size);
-                    }
+                } else if (t_thrd.proc->workingVersionNum < PAGE_COMPRESSION_VERSION) {
+                    Assert(!isCompressedTable);
+                    RelFileNodeV2 relFileNodeV2;
+                    RelFileNodeV2Copy(relFileNodeV2, regbuf->rnode);
+                    XLOG_ASSEMBLE_ONE_ITEM(scratch, sizeof(RelFileNodeV2), &regbuf->rnode, remained_size);
+                } else {
+                    info |= XLR_REL_COMPRESS;
+                    XLOG_ASSEMBLE_ONE_ITEM(scratch, sizeof(RelFileNode), &regbuf->rnode, remained_size);
                 }
             } else {
                 XLOG_ASSEMBLE_ONE_ITEM(scratch, sizeof(RelFileNodeOld), &regbuf->rnode, remained_size);
@@ -1037,9 +1035,6 @@ static XLogRecData *XLogRecordAssemble(RmgrId rmid, uint8 info, XLogFPWInfo fpw_
     }
     rechdr->xl_bucket_id = (uint2)(bucket_id + 1);
 
-#ifdef DEBUG_UHEAP
-#endif
-
     return t_thrd.xlog_cxt.ptr_hdr_rdt;
 }
 
@@ -1096,6 +1091,7 @@ XLogRecPtr XLogSaveBufferForHint(Buffer buffer, bool buffer_std)
     XLogRecPtr lsn;
     XLogRecPtr RedoRecPtr;
     errno_t rc = EOK;
+    uint8 pageHintType;
 
     /*
      * Ensure no checkpoint can change our view of RedoRecPtr.
@@ -1133,6 +1129,8 @@ XLogRecPtr XLogSaveBufferForHint(Buffer buffer, bool buffer_std)
             uint16 lower = ((PageHeader)page)->pd_lower;
             uint16 upper = ((PageHeader)page)->pd_upper;
             Assert(upper <= BLCKSZ);
+            pageHintType = (PG_UHEAP_PAGE_LAYOUT_VERSION == (uint16)PageGetPageLayoutVersion(page)) ?
+                XLOG_FPI_FOR_HINT_UHEAP : XLOG_FPI_FOR_HINT_HEAP;
 
             rc = memset_s(copied_buffer, BLCKSZ, 0, BLCKSZ);
             securec_check(rc, "", "");
@@ -1147,6 +1145,7 @@ XLogRecPtr XLogSaveBufferForHint(Buffer buffer, bool buffer_std)
         } else {
             rc = memcpy_s(copied_buffer, BLCKSZ, origdata, BLCKSZ);
             securec_check(rc, "", "");
+            pageHintType = XLOG_FPI_FOR_HINT_HEAP;
         }
 
         XLogBeginInsert();
@@ -1157,6 +1156,7 @@ XLogRecPtr XLogSaveBufferForHint(Buffer buffer, bool buffer_std)
 
         BufferGetTag(buffer, &rnode, &forkno, &blkno);
         XLogRegisterBlock(0, &rnode, forkno, blkno, copied_buffer, flags, NULL);
+        XLogRegisterData((char *) &pageHintType, sizeof(uint8));
 
         recptr = XLogInsert(RM_XLOG_ID, XLOG_FPI_FOR_HINT);
     }

@@ -15,7 +15,7 @@ set(TGT_rewind_INC
     ${PROJECT_SRC_DIR}/common/port
     ${PROJECT_SRC_DIR}/common/interfaces/libpq
     ${PROJECT_SRC_DIR}/include/libpq 
-    ${LIBOPENSSL_INCLUDE_PATH} 
+    ${LIBOPENSSL_INCLUDE_PATH}
     ${ZSTD_INCLUDE_PATH}
     ${PROJECT_SRC_DIR}/lib/page_compression
 )

@@ -6,9 +6,13 @@ create table t2(a int, b int);
 insert into t2 values(generate_series(1, 10), generate_series(1, 30));
 create table t3(a int, b int, c int);
 insert into t3 values(generate_series(1, 50), generate_series(1, 100), generate_series(1, 10));
+create table t4(id int, val text);
+insert into t4 values(generate_series(1,1000), random());
+create index on t4(id);
 analyze t1;
 analyze t2;
 analyze t3;
+analyze t4;
 set query_dop=1002;
 explain (costs off) select * from t2 order by 1,2;
                   QUERY PLAN                  
@@ -1161,10 +1165,50 @@ explain (costs off) select * from t1 order by 1 limit 1 offset 10;
                                  ->  Seq Scan on t1
 (9 rows)
 
+-- test subquery recursive
+explain (costs off) select (select max(id) from t4);
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Result
+   InitPlan 2 (returns $1)
+     ->  Result
+           InitPlan 1 (returns $0)
+             ->  Limit
+                   ->  Index Only Scan Backward using t4_id_idx on t4
+                         Index Cond: (id IS NOT NULL)
+(7 rows)
+
+select (select max(id) from t4);
+ max  
+------
+ 1000
+(1 row)
+
+explain (costs off) select * from (select a, rownum as row from (select a from t3) where rownum <= 10) where row >=5;
+                 QUERY PLAN                  
+---------------------------------------------
+ Subquery Scan on __unnamed_subquery__
+   Filter: (__unnamed_subquery__."row" >= 5)
+   ->  Limit
+         ->  Seq Scan on t3
+(4 rows)
+
+select * from (select a, rownum as row from (select a from t3) where rownum <= 10) where row >=5;
+ a  | row 
+----+-----
+  5 |   5
+  6 |   6
+  7 |   7
+  8 |   8
+  9 |   9
+ 10 |  10
+(6 rows)
+
 --clean
 set search_path=public;
 drop schema test_smp cascade;
-NOTICE:  drop cascades to 3 other objects
+NOTICE:  drop cascades to 4 other objects
 DETAIL:  drop cascades to table test_smp.t1
 drop cascades to table test_smp.t2
 drop cascades to table test_smp.t3
+drop cascades to table test_smp.t4

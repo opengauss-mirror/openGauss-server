@@ -102,7 +102,7 @@ endif()
 add_bintarget(createdb TGT_createdb_SRC TGT_scripts_INC "${scripts_DEF_OPTIONS}" "${scripts_COMPILE_OPTIONS}" "${scripts_LINK_OPTIONS}" "${scripts_LINK_LIBS}")
 add_dependencies(createdb elog_static pgport_static pq)
 target_link_directories(createdb PUBLIC
-    ${LIBOPENSSL_LIB_PATH} ${PROTOBUF_LIB_PATH} ${LIBPARQUET_LIB_PATH} ${LIBCURL_LIB_PATH} ${KERBEROS_LIB_PATH}
+    ${LIBOPENSSL_LIB_PATH} ${LIBCURL_LIB_PATH} ${KERBEROS_LIB_PATH}
     ${ZLIB_LIB_PATH} ${LIBOBS_LIB_PATH} ${LIBEDIT_LIB_PATH} ${LIBCGROUP_LIB_PATH} ${SECURE_LIB_PATH} ${CMAKE_BINARY_DIR}/lib
 )
 install(TARGETS createdb RUNTIME DESTINATION bin)
@@ -110,7 +110,7 @@ install(TARGETS createdb RUNTIME DESTINATION bin)
 add_bintarget(createlang TGT_createlang_SRC TGT_scripts_INC "${scripts_DEF_OPTIONS}" "${scripts_COMPILE_OPTIONS}" "${scripts_LINK_OPTIONS}" "${scripts_LINK_LIBS}")
 add_dependencies(createlang elog_static pgport_static pq)
 target_link_directories(createlang PUBLIC
-    ${LIBOPENSSL_LIB_PATH} ${PROTOBUF_LIB_PATH} ${LIBPARQUET_LIB_PATH} ${LIBCURL_LIB_PATH} ${KERBEROS_LIB_PATH}
+    ${LIBOPENSSL_LIB_PATH} ${LIBCURL_LIB_PATH} ${KERBEROS_LIB_PATH}
     ${ZLIB_LIB_PATH} ${LIBOBS_LIB_PATH} ${LIBEDIT_LIB_PATH} ${LIBCGROUP_LIB_PATH} ${SECURE_LIB_PATH} ${CMAKE_BINARY_DIR}/lib
 )
 install(TARGETS createlang RUNTIME DESTINATION bin)
@@ -118,7 +118,7 @@ install(TARGETS createlang RUNTIME DESTINATION bin)
 add_bintarget(createuser TGT_createuser_SRC TGT_scripts_INC "${scripts_DEF_OPTIONS}" "${scripts_COMPILE_OPTIONS}" "${scripts_LINK_OPTIONS}" "${scripts_LINK_LIBS}")
 add_dependencies(createuser elog_static pgport_static pq)
 target_link_directories(createuser PUBLIC
-    ${LIBOPENSSL_LIB_PATH} ${PROTOBUF_LIB_PATH} ${LIBPARQUET_LIB_PATH} ${LIBCURL_LIB_PATH} ${KERBEROS_LIB_PATH}
+    ${LIBOPENSSL_LIB_PATH} ${LIBCURL_LIB_PATH} ${KERBEROS_LIB_PATH}
     ${ZLIB_LIB_PATH} ${LIBOBS_LIB_PATH} ${LIBEDIT_LIB_PATH} ${LIBCGROUP_LIB_PATH} ${SECURE_LIB_PATH} ${CMAKE_BINARY_DIR}/lib
 )
 install(TARGETS createuser RUNTIME DESTINATION bin)
@@ -126,7 +126,7 @@ install(TARGETS createuser RUNTIME DESTINATION bin)
 add_bintarget(dropdb TGT_dropdb_SRC TGT_scripts_INC "${scripts_DEF_OPTIONS}" "${scripts_COMPILE_OPTIONS}" "${scripts_LINK_OPTIONS}" "${scripts_LINK_LIBS}")
 add_dependencies(dropdb elog_static pgport_static pq)
 target_link_directories(dropdb PUBLIC
-    ${LIBOPENSSL_LIB_PATH} ${PROTOBUF_LIB_PATH} ${LIBPARQUET_LIB_PATH} ${LIBCURL_LIB_PATH} ${KERBEROS_LIB_PATH}
+    ${LIBOPENSSL_LIB_PATH} ${LIBCURL_LIB_PATH} ${KERBEROS_LIB_PATH}
     ${ZLIB_LIB_PATH} ${LIBOBS_LIB_PATH} ${LIBEDIT_LIB_PATH} ${LIBCGROUP_LIB_PATH} ${SECURE_LIB_PATH} ${CMAKE_BINARY_DIR}/lib
 )
 install(TARGETS dropdb LIBRARY DESTINATION bin)
@@ -134,7 +134,7 @@ install(TARGETS dropdb LIBRARY DESTINATION bin)
 add_bintarget(droplang TGT_droplang_SRC TGT_scripts_INC "${scripts_DEF_OPTIONS}" "${scripts_COMPILE_OPTIONS}" "${scripts_LINK_OPTIONS}" "${scripts_LINK_LIBS}")
 add_dependencies(droplang elog_static pgport_static pq)
 target_link_directories(droplang PUBLIC
-    ${LIBOPENSSL_LIB_PATH} ${PROTOBUF_LIB_PATH} ${LIBPARQUET_LIB_PATH} ${LIBCURL_LIB_PATH} ${KERBEROS_LIB_PATH}
+    ${LIBOPENSSL_LIB_PATH} ${LIBCURL_LIB_PATH} ${KERBEROS_LIB_PATH}
     ${ZLIB_LIB_PATH} ${LIBOBS_LIB_PATH} ${LIBEDIT_LIB_PATH} ${LIBCGROUP_LIB_PATH} ${SECURE_LIB_PATH} ${CMAKE_BINARY_DIR}/lib
 )
 install(TARGETS droplang RUNTIME DESTINATION bin)
@@ -142,7 +142,7 @@ install(TARGETS droplang RUNTIME DESTINATION bin)
 add_bintarget(dropuser TGT_dropuser_SRC TGT_scripts_INC "${scripts_DEF_OPTIONS}" "${scripts_COMPILE_OPTIONS}" "${scripts_LINK_OPTIONS}" "${scripts_LINK_LIBS}")
 add_dependencies(dropuser elog_static pgport_static pq)
 target_link_directories(dropuser PUBLIC
-    ${LIBOPENSSL_LIB_PATH} ${PROTOBUF_LIB_PATH} ${LIBPARQUET_LIB_PATH} ${LIBCURL_LIB_PATH} ${KERBEROS_LIB_PATH}
+    ${LIBOPENSSL_LIB_PATH} ${LIBCURL_LIB_PATH} ${KERBEROS_LIB_PATH}
     ${ZLIB_LIB_PATH} ${LIBOBS_LIB_PATH} ${LIBEDIT_LIB_PATH} ${LIBCGROUP_LIB_PATH} ${SECURE_LIB_PATH} ${CMAKE_BINARY_DIR}/lib
 )
 install(TARGETS dropuser RUNTIME DESTINATION bin)
@@ -150,7 +150,7 @@ install(TARGETS dropuser RUNTIME DESTINATION bin)
 add_bintarget(clusterdb TGT_clusterdb_SRC TGT_scripts_INC "${scripts_DEF_OPTIONS}" "${scripts_COMPILE_OPTIONS}" "${scripts_LINK_OPTIONS}" "${scripts_LINK_LIBS}")
 add_dependencies(clusterdb elog_static pgport_static pq)
 target_link_directories(clusterdb PUBLIC
-    ${LIBOPENSSL_LIB_PATH} ${PROTOBUF_LIB_PATH} ${LIBPARQUET_LIB_PATH} ${LIBCURL_LIB_PATH} ${KERBEROS_LIB_PATH}
+    ${LIBOPENSSL_LIB_PATH} ${LIBCURL_LIB_PATH} ${KERBEROS_LIB_PATH}
     ${ZLIB_LIB_PATH} ${LIBOBS_LIB_PATH} ${LIBEDIT_LIB_PATH} ${LIBCGROUP_LIB_PATH} ${SECURE_LIB_PATH} ${CMAKE_BINARY_DIR}/lib
 )
 install(TARGETS clusterdb RUNTIME DESTINATION bin)
@@ -158,7 +158,7 @@ install(TARGETS clusterdb RUNTIME DESTINATION bin)
 add_bintarget(vacuumdb TGT_vacuumdb_SRC TGT_scripts_INC "${scripts_DEF_OPTIONS}" "${scripts_COMPILE_OPTIONS}" "${scripts_LINK_OPTIONS}" "${scripts_LINK_LIBS}")
 add_dependencies(vacuumdb elog_static pgport_static pq)
 target_link_directories(vacuumdb PUBLIC
-    ${LIBOPENSSL_LIB_PATH} ${PROTOBUF_LIB_PATH} ${LIBPARQUET_LIB_PATH} ${LIBCURL_LIB_PATH} ${KERBEROS_LIB_PATH}
+    ${LIBOPENSSL_LIB_PATH} ${LIBCURL_LIB_PATH} ${KERBEROS_LIB_PATH}
     ${ZLIB_LIB_PATH} ${LIBOBS_LIB_PATH} ${LIBEDIT_LIB_PATH} ${LIBCGROUP_LIB_PATH} ${SECURE_LIB_PATH} ${CMAKE_BINARY_DIR}/lib
 )
 install(TARGETS vacuumdb RUNTIME DESTINATION bin)
@@ -166,7 +166,7 @@ install(TARGETS vacuumdb RUNTIME DESTINATION bin)
 add_bintarget(reindexdb TGT_reindexdb_SRC TGT_scripts_INC "${scripts_DEF_OPTIONS}" "${scripts_COMPILE_OPTIONS}" "${scripts_LINK_OPTIONS}" "${scripts_LINK_LIBS}")
 add_dependencies(reindexdb elog_static pgport_static pq)
 target_link_directories(reindexdb PUBLIC
-    ${LIBOPENSSL_LIB_PATH} ${PROTOBUF_LIB_PATH} ${LIBPARQUET_LIB_PATH} ${LIBCURL_LIB_PATH} ${KERBEROS_LIB_PATH}
+    ${LIBOPENSSL_LIB_PATH} ${LIBCURL_LIB_PATH} ${KERBEROS_LIB_PATH}
     ${ZLIB_LIB_PATH} ${LIBOBS_LIB_PATH} ${LIBEDIT_LIB_PATH} ${LIBCGROUP_LIB_PATH} ${SECURE_LIB_PATH} ${CMAKE_BINARY_DIR}/lib
 )
 install(TARGETS reindexdb RUNTIME DESTINATION bin)

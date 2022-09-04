@@ -22,6 +22,7 @@
 
 #include "catalog/pg_collation.h"
 #include "catalog/pg_type.h"
+#include "catalog/pg_proc.h"
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
@@ -67,6 +68,9 @@ Oid exprType(const Node* expr)
             break;
         case T_Const:
             type = ((const Const*)expr)->consttype;
+            break;
+        case T_UserVar:
+            type = ((const Const*)(((UserVar*)expr)->value))->consttype;
             break;
         case T_Param:
             type = ((const Param*)expr)->paramtype;
@@ -225,6 +229,9 @@ Oid exprType(const Node* expr)
                 type = INT8OID;
             }
             break;
+        case T_PrefixKey:
+            type = exprType((Node*)((PrefixKey*)expr)->arg);
+            break;
         default:
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unrecognized node type: %d", (int)nodeTag(expr))));
@@ -250,6 +257,8 @@ int32 exprTypmod(const Node* expr)
             return ((const Var*)expr)->vartypmod;
         case T_Const:
             return ((const Const*)expr)->consttypmod;
+        case T_UserVar:
+            return ((const Const*)(((UserVar*)expr)->value))->consttypmod;
         case T_Param:
             return ((const Param*)expr)->paramtypmod;
         case T_ArrayRef:
@@ -460,6 +469,8 @@ int32 exprTypmod(const Node* expr)
             return ((const SetToDefault*)expr)->typeMod;
         case T_PlaceHolderVar:
             return exprTypmod((Node*)((const PlaceHolderVar*)expr)->phexpr);
+        case T_PrefixKey:
+            return exprTypmod((Node*)((const PrefixKey*)expr)->arg);
         default:
             break;
     }
@@ -706,6 +717,9 @@ Oid exprCollation(const Node* expr)
         case T_NamedArgExpr:
             coll = exprCollation((Node*)((const NamedArgExpr*)expr)->arg);
             break;
+        case T_UserVar:
+            coll = ((const Const*)(((UserVar*)expr)->value))->constcollid;
+            break;
         case T_OpExpr:
             coll = ((const OpExpr*)expr)->opcollid;
             break;
@@ -838,6 +852,9 @@ Oid exprCollation(const Node* expr)
         case T_PlaceHolderVar:
             coll = exprCollation((Node*)((const PlaceHolderVar*)expr)->phexpr);
             break;
+        case T_PrefixKey:
+            coll = exprCollation((Node*)((const PrefixKey*)expr)->arg);
+            break;
         default:
             ereport(
                 ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("unrecognized node type: %d", (int)nodeTag(expr))));
@@ -908,6 +925,9 @@ void exprSetCollation(Node* expr, Oid collation)
             break;
         case T_Const:
             ((Const*)expr)->constcollid = collation;
+            break;
+        case T_UserVar:
+            ((Const*)(((UserVar*)expr)->value))->constcollid = collation;
             break;
         case T_Rownum:
             ((Rownum*)expr)->rownumcollid = collation;
@@ -1035,6 +1055,8 @@ void exprSetCollation(Node* expr, Oid collation)
         case T_CurrentOfExpr:
             Assert(!OidIsValid(collation)); /* result is always boolean */
             break;
+        case T_PrefixKey:
+            return exprSetCollation((Node*)((const PrefixKey*)expr)->arg, collation);
         default:
             ereport(
                 ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("unrecognized node type: %d", (int)nodeTag(expr))));
@@ -1395,6 +1417,9 @@ int exprLocation(const Node* expr)
         case T_Rownum:
             loc = ((const Rownum*)expr)->location;
             break;
+        case T_PrefixKey:
+            loc = exprLocation((Node*)((const PrefixKey*)expr)->arg);
+            break;
         default:
             /* for any other node type it's just unknown... */
             loc = -1;
@@ -1550,6 +1575,7 @@ bool expression_tree_walker(Node* node, bool (*walker)(), void* context)
         case T_Null:
         case T_PgFdwRemoteInfo:
         case T_Rownum:
+        case T_UserVar:
             /* primitive node types with no expression subnodes */
             break;
         case T_Aggref: {
@@ -1864,9 +1890,13 @@ bool expression_tree_walker(Node* node, bool (*walker)(), void* context)
         } break;
         case T_PlaceHolderInfo:
             return p2walker(((PlaceHolderInfo*)node)->ph_var, context);
+        case T_AutoIncrement:
+            return p2walker(((AutoIncrement*)node)->expr, context);
+        case T_PrefixKey:
+            return p2walker(((PrefixKey*)node)->arg, context);
         default:
-            ereport(
-                ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("unrecognized node type: %d", (int)nodeTag(node))));
+            ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH),
+                            errmsg("expression_tree_walker:unrecognized node type: %d", (int)nodeTag(node))));
             break;
     }
     return false;
@@ -2190,6 +2220,14 @@ Node* expression_tree_mutator(Node* node, Node* (*mutator)(Node*, void*), void* 
             FLATCOPY(newnode, nexpr, NamedArgExpr, isCopy);
             MUTATE(newnode->arg, nexpr->arg, Expr*);
             return (Node*)newnode;
+        } break;
+        case T_UserVar: {
+            UserVar* oldnode = (UserVar *)node;
+            UserVar* newnode = NULL;
+
+            FLATCOPY(newnode, oldnode, UserVar, isCopy);
+            MUTATE(newnode->value, oldnode->value, Expr*);
+            return (Node *)newnode;
         } break;
         case T_OpExpr: {
             OpExpr* expr = (OpExpr*)node;
@@ -2589,6 +2627,14 @@ Node* expression_tree_mutator(Node* node, Node* (*mutator)(Node*, void*), void* 
             MUTATE(newnode->tvver, tcc->tvver, Node*);
             return (Node*)newnode;
         } break;
+        case T_PrefixKey: {
+            PrefixKey* pkey = (PrefixKey*)node;
+            PrefixKey* newnode = NULL;
+
+            FLATCOPY(newnode, pkey, PrefixKey, isCopy);
+            MUTATE(newnode->arg, pkey->arg, Expr*);
+            return (Node*)newnode;
+        } break;
         default:
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unrecognized node type: %d", (int)nodeTag(node))));
@@ -2921,6 +2967,9 @@ bool raw_expression_tree_walker(Node* node, bool (*walker)(), void* context)
             if (p2walker(stmt->limitClause, context)) {
                 return true;
             }
+            if (p2walker(stmt->relations, context)) {
+                return true;
+            }
         } break;
         case T_UpdateStmt: {
             UpdateStmt* stmt = (UpdateStmt*)node;
@@ -2941,6 +2990,9 @@ bool raw_expression_tree_walker(Node* node, bool (*walker)(), void* context)
                 return true;
             }
             if (p2walker(stmt->withClause, context)) {
+                return true;
+            }
+            if (p2walker(stmt->relationClause, context)) {
                 return true;
             }
         } break;
@@ -3221,4 +3273,18 @@ bool lockNextvalWalker(Node* node, void* context)
     /* lock nextval on cn when select nextval to avoid dead lock with alter sequence */
     lockSeqForNextvalFunc(node);
     return expression_tree_walker(node, (bool (*)())lockNextvalWalker, context);
+}
+
+void find_nextval_seqoid_walker(Node* node, Oid* seqoid)
+{
+    if (node != NULL && IsA(node, FuncExpr) && ((FuncExpr*)node)->funcid == NEXTVALFUNCOID) {
+        FuncExpr* funcexpr = (FuncExpr*)node;
+        Assert(funcexpr->args->length == 1);
+        if (IsA(linitial(funcexpr->args), Const)) {
+            Const* con = (Const*)linitial(funcexpr->args);
+            *seqoid = DatumGetObjectId(con->constvalue);
+            return;
+        }
+    }
+    (void)expression_tree_walker(node, (bool (*)())find_nextval_seqoid_walker, (void*)seqoid);
 }

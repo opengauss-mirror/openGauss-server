@@ -23,5 +23,7 @@ add_static_objtarget(gausskernel_storage_smgr TGT_smgr_SRC TGT_smgr_INC "${smgr_
 
 set(CMAKE_MODULE_PATH 
     ${CMAKE_CURRENT_SOURCE_DIR}/segment
+    ${CMAKE_CURRENT_SOURCE_DIR}/cfs
 )
 add_subdirectory(segment)
+add_subdirectory(cfs)

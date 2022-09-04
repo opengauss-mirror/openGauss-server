@@ -1,0 +1,3324 @@
+DROP SCHEMA row_partition_iterator_elimination CASCADE;
+ERROR:  schema "row_partition_iterator_elimination" does not exist
+CREATE SCHEMA row_partition_iterator_elimination;
+SET CURRENT_SCHEMA TO row_partition_iterator_elimination;
+drop table test_hash_ht;
+ERROR:  table "test_hash_ht" does not exist
+create table test_hash_ht ( a int,b int, c int, d int)
+partition by hash(a)
+(
+	partition p1, 
+	partition p2, 
+	partition p3,
+	partition p4,
+	partition p5,
+	partition p6,
+	partition p7,
+	partition p8,
+	partition p9,
+	partition p10,
+	partition p11,
+	partition p12,
+	partition p13,
+	partition p14,
+	partition p15,
+	partition p16,
+	partition p17,
+	partition p18,
+	partition p19,
+	partition p20
+);
+create index idx_hash_local on test_hash_ht(a) local;
+insert into test_hash_ht values(generate_series(0,49), generate_series(1,100));
+drop table test_range_pt;
+ERROR:  table "test_range_pt" does not exist
+create table test_range_pt (a int, b int, c int, d int)
+partition by range(a)
+(
+	partition p1 values less than (20),
+	partition p2 values less than (30),
+	partition p3 values less than (40),
+	partition p4 values less than (50)
+)ENABLE ROW MOVEMENT;
+create index idx_range_local on test_range_pt(a) local;
+insert into test_range_pt values(generate_series(0,49), generate_series(1,100));
+--base 验证数据结果
+select * from test_hash_ht where a = 30 order by 1,2,3,4;
+ a  | b  | c | d 
+----+----+---+---
+ 30 | 31 |   |  
+ 30 | 81 |   |  
+(2 rows)
+
+select count(a) from test_hash_ht where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select count(b) from test_hash_ht where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_range_pt where a = 30 order by 1,2,3,4;
+ a  | b  | c | d 
+----+----+---+---
+ 30 | 31 |   |  
+ 30 | 81 |   |  
+(2 rows)
+
+select count(a) from test_range_pt where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select count(b) from test_range_pt where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 order by 1,2,3,4;
+ a | b  | c | d | a | b  | c | d 
+---+----+---+---+---+----+---+---
+ 5 |  6 |   |   | 5 |  6 |   |  
+ 5 | 56 |   |   | 5 | 56 |   |  
+(2 rows)
+
+select count(t1.a) from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5 order by 1,2,3,4;
+ a | b  | c | d | a | b  | c | d 
+---+----+---+---+---+----+---+---
+ 5 |  6 |   |   | 5 |  6 |   |  
+ 5 | 56 |   |   | 5 | 56 |   |  
+(2 rows)
+
+select count(t1.b) from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5;
+ count 
+-------
+     2
+(1 row)
+
+--设置参数
+set partition_iterator_elimination = on;
+set enable_material = off;
+--seqscan + nestloop
+set enable_seqscan = on;
+set enable_indexscan = off;
+set enable_bitmapscan = off;
+set enable_nestloop = on;
+set enable_hashjoin = off;
+set enable_mergejoin = off;
+explain(costs off, verbose on) select * from test_hash_ht where a = 30 order by 1,2,3,4;
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
+ Sort
+   Output: a, b, c, d
+   Sort Key: test_hash_ht.b, test_hash_ht.c, test_hash_ht.d
+   ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_hash_ht
+         Output: a, b, c, d
+         Filter: (test_hash_ht.a = 30)
+         Selected Partitions:  4
+(7 rows)
+
+explain(costs off, verbose on) select count(a) from test_hash_ht where a = 30;
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
+ Aggregate
+   Output: count(a)
+   ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_hash_ht
+         Output: a, b, c, d
+         Filter: (test_hash_ht.a = 30)
+         Selected Partitions:  4
+(6 rows)
+
+explain(costs off, verbose on) select count(b) from test_hash_ht where a = 30;
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
+ Aggregate
+   Output: count(b)
+   ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_hash_ht
+         Output: a, b, c, d
+         Filter: (test_hash_ht.a = 30)
+         Selected Partitions:  4
+(6 rows)
+
+explain(costs off, verbose on) select * from test_range_pt where a = 30 order by 1,2,3,4;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Sort
+   Output: a, b, c, d
+   Sort Key: test_range_pt.b, test_range_pt.c, test_range_pt.d
+   ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_range_pt
+         Output: a, b, c, d
+         Filter: (test_range_pt.a = 30)
+         Selected Partitions:  3
+(7 rows)
+
+explain(costs off, verbose on) select count(a) from test_range_pt where a = 30;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Aggregate
+   Output: count(a)
+   ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_range_pt
+         Output: a, b, c, d
+         Filter: (test_range_pt.a = 30)
+         Selected Partitions:  3
+(6 rows)
+
+explain(costs off, verbose on) select count(b) from test_range_pt where a = 30;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Aggregate
+   Output: count(b)
+   ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_range_pt
+         Output: a, b, c, d
+         Filter: (test_range_pt.a = 30)
+         Selected Partitions:  3
+(6 rows)
+
+explain(costs off, verbose on) select * from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 order by 1,2,3,4;
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ Sort
+   Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+   Sort Key: t1.b, t1.c, t1.d
+   ->  Nested Loop
+         Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+         Join Filter: (t1.b = t2.b)
+         ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_hash_ht t1
+               Output: t1.a, t1.b, t1.c, t1.d
+               Filter: (t1.a = 5)
+               Selected Partitions:  9
+         ->  Partition Iterator
+               Output: t2.a, t2.b, t2.c, t2.d
+               Iterations: 4
+               ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_range_pt t2
+                     Output: t2.a, t2.b, t2.c, t2.d
+                     Selected Partitions:  1..4
+(16 rows)
+
+explain(costs off, verbose on) select count(t1.a) from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5;
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ Aggregate
+   Output: count(t1.a)
+   ->  Nested Loop
+         Output: t1.a
+         Join Filter: (t1.b = t2.b)
+         ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_hash_ht t1
+               Output: t1.a, t1.b, t1.c, t1.d
+               Filter: (t1.a = 5)
+               Selected Partitions:  9
+         ->  Partition Iterator
+               Output: t2.a, t2.b, t2.c, t2.d
+               Iterations: 4
+               ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_range_pt t2
+                     Output: t2.a, t2.b, t2.c, t2.d
+                     Selected Partitions:  1..4
+(15 rows)
+
+explain(costs off, verbose on) select * from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5 order by 1,2,3,4;
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
+ Sort
+   Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+   Sort Key: t1.b, t1.c, t1.d
+   ->  Nested Loop
+         Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+         Join Filter: (t1.b = t2.b)
+         ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_range_pt t2
+               Output: t2.a, t2.b, t2.c, t2.d
+               Filter: (t2.a = 5)
+               Selected Partitions:  1
+         ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_hash_ht t1
+               Output: t1.a, t1.b, t1.c, t1.d
+               Filter: (t1.a = 5)
+               Selected Partitions:  9
+(14 rows)
+
+explain(costs off, verbose on) select count(t1.b) from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5;
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
+ Aggregate
+   Output: count(t1.b)
+   ->  Nested Loop
+         Output: t1.b
+         Join Filter: (t1.b = t2.b)
+         ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_range_pt t2
+               Output: t2.a, t2.b, t2.c, t2.d
+               Filter: (t2.a = 5)
+               Selected Partitions:  1
+         ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_hash_ht t1
+               Output: t1.a, t1.b, t1.c, t1.d
+               Filter: (t1.a = 5)
+               Selected Partitions:  9
+(13 rows)
+
+select * from test_hash_ht where a = 30 order by 1,2,3,4;
+ a  | b  | c | d 
+----+----+---+---
+ 30 | 31 |   |  
+ 30 | 81 |   |  
+(2 rows)
+
+select count(a) from test_hash_ht where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select count(b) from test_hash_ht where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_range_pt where a = 30 order by 1,2,3,4;
+ a  | b  | c | d 
+----+----+---+---
+ 30 | 31 |   |  
+ 30 | 81 |   |  
+(2 rows)
+
+select count(a) from test_range_pt where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select count(b) from test_range_pt where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 order by 1,2,3,4;
+ a | b  | c | d | a | b  | c | d 
+---+----+---+---+---+----+---+---
+ 5 |  6 |   |   | 5 |  6 |   |  
+ 5 | 56 |   |   | 5 | 56 |   |  
+(2 rows)
+
+select count(t1.a) from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5 order by 1,2,3,4;
+ a | b  | c | d | a | b  | c | d 
+---+----+---+---+---+----+---+---
+ 5 |  6 |   |   | 5 |  6 |   |  
+ 5 | 56 |   |   | 5 | 56 |   |  
+(2 rows)
+
+select count(t1.b) from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5;
+ count 
+-------
+     2
+(1 row)
+
+--seqscan + hashjoin
+set enable_seqscan = on;
+set enable_indexscan = off;
+set enable_bitmapscan = off;
+set enable_nestloop = off;
+set enable_hashjoin = on;
+set enable_mergejoin = off;
+explain(costs off, verbose on) select * from test_hash_ht where a = 30 order by 1,2,3,4;
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
+ Sort
+   Output: a, b, c, d
+   Sort Key: test_hash_ht.b, test_hash_ht.c, test_hash_ht.d
+   ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_hash_ht
+         Output: a, b, c, d
+         Filter: (test_hash_ht.a = 30)
+         Selected Partitions:  4
+(7 rows)
+
+explain(costs off, verbose on) select count(a) from test_hash_ht where a = 30;
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
+ Aggregate
+   Output: count(a)
+   ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_hash_ht
+         Output: a, b, c, d
+         Filter: (test_hash_ht.a = 30)
+         Selected Partitions:  4
+(6 rows)
+
+explain(costs off, verbose on) select count(b) from test_hash_ht where a = 30;
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
+ Aggregate
+   Output: count(b)
+   ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_hash_ht
+         Output: a, b, c, d
+         Filter: (test_hash_ht.a = 30)
+         Selected Partitions:  4
+(6 rows)
+
+explain(costs off, verbose on) select * from test_range_pt where a = 30 order by 1,2,3,4;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Sort
+   Output: a, b, c, d
+   Sort Key: test_range_pt.b, test_range_pt.c, test_range_pt.d
+   ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_range_pt
+         Output: a, b, c, d
+         Filter: (test_range_pt.a = 30)
+         Selected Partitions:  3
+(7 rows)
+
+explain(costs off, verbose on) select count(a) from test_range_pt where a = 30;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Aggregate
+   Output: count(a)
+   ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_range_pt
+         Output: a, b, c, d
+         Filter: (test_range_pt.a = 30)
+         Selected Partitions:  3
+(6 rows)
+
+explain(costs off, verbose on) select count(b) from test_range_pt where a = 30;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Aggregate
+   Output: count(b)
+   ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_range_pt
+         Output: a, b, c, d
+         Filter: (test_range_pt.a = 30)
+         Selected Partitions:  3
+(6 rows)
+
+explain(costs off, verbose on) select * from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 order by 1,2,3,4;
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ Sort
+   Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+   Sort Key: t1.b, t1.c, t1.d
+   ->  Hash Join
+         Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+         Hash Cond: (t2.b = t1.b)
+         ->  Partition Iterator
+               Output: t2.a, t2.b, t2.c, t2.d
+               Iterations: 4
+               ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_range_pt t2
+                     Output: t2.a, t2.b, t2.c, t2.d
+                     Selected Partitions:  1..4
+         ->  Hash
+               Output: t1.a, t1.b, t1.c, t1.d
+               ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_hash_ht t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+                     Filter: (t1.a = 5)
+                     Selected Partitions:  9
+(18 rows)
+
+explain(costs off, verbose on) select count(t1.a) from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5;
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ Aggregate
+   Output: count(t1.a)
+   ->  Hash Join
+         Output: t1.a
+         Hash Cond: (t2.b = t1.b)
+         ->  Partition Iterator
+               Output: t2.a, t2.b, t2.c, t2.d
+               Iterations: 4
+               ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_range_pt t2
+                     Output: t2.a, t2.b, t2.c, t2.d
+                     Selected Partitions:  1..4
+         ->  Hash
+               Output: t1.a, t1.b
+               ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_hash_ht t1
+                     Output: t1.a, t1.b
+                     Filter: (t1.a = 5)
+                     Selected Partitions:  9
+(17 rows)
+
+explain(costs off, verbose on) select * from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5 order by 1,2,3,4;
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ Sort
+   Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+   Sort Key: t1.b, t1.c, t1.d
+   ->  Hash Join
+         Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+         Hash Cond: (t1.b = t2.b)
+         ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_hash_ht t1
+               Output: t1.a, t1.b, t1.c, t1.d
+               Filter: (t1.a = 5)
+               Selected Partitions:  9
+         ->  Hash
+               Output: t2.a, t2.b, t2.c, t2.d
+               ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_range_pt t2
+                     Output: t2.a, t2.b, t2.c, t2.d
+                     Filter: (t2.a = 5)
+                     Selected Partitions:  1
+(16 rows)
+
+explain(costs off, verbose on) select count(t1.b) from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5;
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ Aggregate
+   Output: count(t1.b)
+   ->  Hash Join
+         Output: t1.b
+         Hash Cond: (t1.b = t2.b)
+         ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_hash_ht t1
+               Output: t1.a, t1.b, t1.c, t1.d
+               Filter: (t1.a = 5)
+               Selected Partitions:  9
+         ->  Hash
+               Output: t2.b
+               ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_range_pt t2
+                     Output: t2.b
+                     Filter: (t2.a = 5)
+                     Selected Partitions:  1
+(15 rows)
+
+select * from test_hash_ht where a = 30 order by 1,2,3,4;
+ a  | b  | c | d 
+----+----+---+---
+ 30 | 31 |   |  
+ 30 | 81 |   |  
+(2 rows)
+
+select count(a) from test_hash_ht where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select count(b) from test_hash_ht where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_range_pt where a = 30 order by 1,2,3,4;
+ a  | b  | c | d 
+----+----+---+---
+ 30 | 31 |   |  
+ 30 | 81 |   |  
+(2 rows)
+
+select count(a) from test_range_pt where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select count(b) from test_range_pt where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 order by 1,2,3,4;
+ a | b  | c | d | a | b  | c | d 
+---+----+---+---+---+----+---+---
+ 5 |  6 |   |   | 5 |  6 |   |  
+ 5 | 56 |   |   | 5 | 56 |   |  
+(2 rows)
+
+select count(t1.a) from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5 order by 1,2,3,4;
+ a | b  | c | d | a | b  | c | d 
+---+----+---+---+---+----+---+---
+ 5 |  6 |   |   | 5 |  6 |   |  
+ 5 | 56 |   |   | 5 | 56 |   |  
+(2 rows)
+
+select count(t1.b) from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5;
+ count 
+-------
+     2
+(1 row)
+
+--seqscan + mergejoin
+set enable_seqscan = on;
+set enable_indexscan = off;
+set enable_bitmapscan = off;
+set enable_nestloop = off;
+set enable_hashjoin = off;
+set enable_mergejoin = on;
+explain(costs off, verbose on) select * from test_hash_ht where a = 30 order by 1,2,3,4;
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
+ Sort
+   Output: a, b, c, d
+   Sort Key: test_hash_ht.b, test_hash_ht.c, test_hash_ht.d
+   ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_hash_ht
+         Output: a, b, c, d
+         Filter: (test_hash_ht.a = 30)
+         Selected Partitions:  4
+(7 rows)
+
+explain(costs off, verbose on) select count(a) from test_hash_ht where a = 30;
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
+ Aggregate
+   Output: count(a)
+   ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_hash_ht
+         Output: a, b, c, d
+         Filter: (test_hash_ht.a = 30)
+         Selected Partitions:  4
+(6 rows)
+
+explain(costs off, verbose on) select count(b) from test_hash_ht where a = 30;
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
+ Aggregate
+   Output: count(b)
+   ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_hash_ht
+         Output: a, b, c, d
+         Filter: (test_hash_ht.a = 30)
+         Selected Partitions:  4
+(6 rows)
+
+explain(costs off, verbose on) select * from test_range_pt where a = 30 order by 1,2,3,4;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Sort
+   Output: a, b, c, d
+   Sort Key: test_range_pt.b, test_range_pt.c, test_range_pt.d
+   ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_range_pt
+         Output: a, b, c, d
+         Filter: (test_range_pt.a = 30)
+         Selected Partitions:  3
+(7 rows)
+
+explain(costs off, verbose on) select count(a) from test_range_pt where a = 30;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Aggregate
+   Output: count(a)
+   ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_range_pt
+         Output: a, b, c, d
+         Filter: (test_range_pt.a = 30)
+         Selected Partitions:  3
+(6 rows)
+
+explain(costs off, verbose on) select count(b) from test_range_pt where a = 30;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Aggregate
+   Output: count(b)
+   ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_range_pt
+         Output: a, b, c, d
+         Filter: (test_range_pt.a = 30)
+         Selected Partitions:  3
+(6 rows)
+
+explain(costs off, verbose on) select * from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 order by 1,2,3,4;
+                                             QUERY PLAN                                              
+-----------------------------------------------------------------------------------------------------
+ Sort
+   Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+   Sort Key: t1.b, t1.c, t1.d
+   ->  Merge Join
+         Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+         Merge Cond: (t1.b = t2.b)
+         ->  Sort
+               Output: t1.a, t1.b, t1.c, t1.d
+               Sort Key: t1.b
+               ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_hash_ht t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+                     Filter: (t1.a = 5)
+                     Selected Partitions:  9
+         ->  Sort
+               Output: t2.a, t2.b, t2.c, t2.d
+               Sort Key: t2.b
+               ->  Partition Iterator
+                     Output: t2.a, t2.b, t2.c, t2.d
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_range_pt t2
+                           Output: t2.a, t2.b, t2.c, t2.d
+                           Selected Partitions:  1..4
+(22 rows)
+
+explain(costs off, verbose on) select count(t1.a) from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5;
+                                             QUERY PLAN                                              
+-----------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: count(t1.a)
+   ->  Merge Join
+         Output: t1.a
+         Merge Cond: (t1.b = t2.b)
+         ->  Sort
+               Output: t1.a, t1.b
+               Sort Key: t1.b
+               ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_hash_ht t1
+                     Output: t1.a, t1.b
+                     Filter: (t1.a = 5)
+                     Selected Partitions:  9
+         ->  Sort
+               Output: t2.b
+               Sort Key: t2.b
+               ->  Partition Iterator
+                     Output: t2.b
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_range_pt t2
+                           Output: t2.b
+                           Selected Partitions:  1..4
+(21 rows)
+
+explain(costs off, verbose on) select * from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5 order by 1,2,3,4;
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ Sort
+   Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+   Sort Key: t1.b, t1.c, t1.d
+   ->  Merge Join
+         Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+         Merge Cond: (t1.b = t2.b)
+         ->  Sort
+               Output: t1.a, t1.b, t1.c, t1.d
+               Sort Key: t1.b
+               ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_hash_ht t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+                     Filter: (t1.a = 5)
+                     Selected Partitions:  9
+         ->  Sort
+               Output: t2.a, t2.b, t2.c, t2.d
+               Sort Key: t2.b
+               ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_range_pt t2
+                     Output: t2.a, t2.b, t2.c, t2.d
+                     Filter: (t2.a = 5)
+                     Selected Partitions:  1
+(20 rows)
+
+explain(costs off, verbose on) select count(t1.b) from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5;
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ Aggregate
+   Output: count(t1.b)
+   ->  Merge Join
+         Output: t1.b
+         Merge Cond: (t1.b = t2.b)
+         ->  Sort
+               Output: t1.b
+               Sort Key: t1.b
+               ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_hash_ht t1
+                     Output: t1.b
+                     Filter: (t1.a = 5)
+                     Selected Partitions:  9
+         ->  Sort
+               Output: t2.b
+               Sort Key: t2.b
+               ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_range_pt t2
+                     Output: t2.b
+                     Filter: (t2.a = 5)
+                     Selected Partitions:  1
+(19 rows)
+
+select * from test_hash_ht where a = 30 order by 1,2,3,4;
+ a  | b  | c | d 
+----+----+---+---
+ 30 | 31 |   |  
+ 30 | 81 |   |  
+(2 rows)
+
+select count(a) from test_hash_ht where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select count(b) from test_hash_ht where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_range_pt where a = 30 order by 1,2,3,4;
+ a  | b  | c | d 
+----+----+---+---
+ 30 | 31 |   |  
+ 30 | 81 |   |  
+(2 rows)
+
+select count(a) from test_range_pt where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select count(b) from test_range_pt where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 order by 1,2,3,4;
+ a | b  | c | d | a | b  | c | d 
+---+----+---+---+---+----+---+---
+ 5 |  6 |   |   | 5 |  6 |   |  
+ 5 | 56 |   |   | 5 | 56 |   |  
+(2 rows)
+
+select count(t1.a) from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5 order by 1,2,3,4;
+ a | b  | c | d | a | b  | c | d 
+---+----+---+---+---+----+---+---
+ 5 |  6 |   |   | 5 |  6 |   |  
+ 5 | 56 |   |   | 5 | 56 |   |  
+(2 rows)
+
+select count(t1.b) from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5;
+ count 
+-------
+     2
+(1 row)
+
+--indexscan/indexonlyscan + nestloop
+set enable_seqscan = off;
+set enable_indexscan = on;
+set enable_bitmapscan = off;
+set enable_nestloop = on;
+set enable_hashjoin = off;
+set enable_mergejoin = off;
+explain(costs off, verbose on) select * from test_hash_ht where a = 30 order by 1,2,3,4;
+                                              QUERY PLAN                                              
+------------------------------------------------------------------------------------------------------
+ Sort
+   Output: a, b, c, d
+   Sort Key: test_hash_ht.b, test_hash_ht.c, test_hash_ht.d
+   ->  Partitioned Index Scan using idx_hash_local on row_partition_iterator_elimination.test_hash_ht
+         Output: a, b, c, d
+         Index Cond: (test_hash_ht.a = 30)
+         Selected Partitions:  4
+(7 rows)
+
+explain(costs off, verbose on) select count(a) from test_hash_ht where a = 30;
+                                                QUERY PLAN                                                 
+-----------------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: count(a)
+   ->  Partitioned Index Only Scan using idx_hash_local on row_partition_iterator_elimination.test_hash_ht
+         Output: a
+         Index Cond: (test_hash_ht.a = 30)
+         Selected Partitions:  4
+(6 rows)
+
+explain(costs off, verbose on) select count(b) from test_hash_ht where a = 30;
+                                              QUERY PLAN                                              
+------------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: count(b)
+   ->  Partitioned Index Scan using idx_hash_local on row_partition_iterator_elimination.test_hash_ht
+         Output: a, b, c, d
+         Index Cond: (test_hash_ht.a = 30)
+         Selected Partitions:  4
+(6 rows)
+
+explain(costs off, verbose on) select * from test_range_pt where a = 30 order by 1,2,3,4;
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Sort
+   Output: a, b, c, d
+   Sort Key: test_range_pt.b, test_range_pt.c, test_range_pt.d
+   ->  Partitioned Index Scan using idx_range_local on row_partition_iterator_elimination.test_range_pt
+         Output: a, b, c, d
+         Index Cond: (test_range_pt.a = 30)
+         Selected Partitions:  3
+(7 rows)
+
+explain(costs off, verbose on) select count(a) from test_range_pt where a = 30;
+                                                 QUERY PLAN                                                  
+-------------------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: count(a)
+   ->  Partitioned Index Only Scan using idx_range_local on row_partition_iterator_elimination.test_range_pt
+         Output: a
+         Index Cond: (test_range_pt.a = 30)
+         Selected Partitions:  3
+(6 rows)
+
+explain(costs off, verbose on) select count(b) from test_range_pt where a = 30;
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: count(b)
+   ->  Partitioned Index Scan using idx_range_local on row_partition_iterator_elimination.test_range_pt
+         Output: a, b, c, d
+         Index Cond: (test_range_pt.a = 30)
+         Selected Partitions:  3
+(6 rows)
+
+explain(costs off, verbose on) select * from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 order by 1,2,3,4;
+                                                  QUERY PLAN                                                   
+---------------------------------------------------------------------------------------------------------------
+ Sort
+   Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+   Sort Key: t1.b, t1.c, t1.d
+   ->  Nested Loop
+         Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+         Join Filter: (t1.b = t2.b)
+         ->  Partition Iterator
+               Output: t2.a, t2.b, t2.c, t2.d
+               Iterations: 4
+               ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_range_pt t2
+                     Output: t2.a, t2.b, t2.c, t2.d
+                     Selected Partitions:  1..4
+         ->  Partitioned Index Scan using idx_hash_local on row_partition_iterator_elimination.test_hash_ht t1
+               Output: t1.a, t1.b, t1.c, t1.d
+               Index Cond: (t1.a = 5)
+               Selected Partitions:  9
+(16 rows)
+
+explain(costs off, verbose on) select count(t1.a) from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5;
+                                                  QUERY PLAN                                                   
+---------------------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: count(t1.a)
+   ->  Nested Loop
+         Output: t1.a
+         Join Filter: (t1.b = t2.b)
+         ->  Partition Iterator
+               Output: t2.a, t2.b, t2.c, t2.d
+               Iterations: 4
+               ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_range_pt t2
+                     Output: t2.a, t2.b, t2.c, t2.d
+                     Selected Partitions:  1..4
+         ->  Partitioned Index Scan using idx_hash_local on row_partition_iterator_elimination.test_hash_ht t1
+               Output: t1.a, t1.b, t1.c, t1.d
+               Index Cond: (t1.a = 5)
+               Selected Partitions:  9
+(15 rows)
+
+explain(costs off, verbose on) select * from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5 order by 1,2,3,4;
+                                                   QUERY PLAN                                                    
+-----------------------------------------------------------------------------------------------------------------
+ Sort
+   Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+   Sort Key: t1.b, t1.c, t1.d
+   ->  Nested Loop
+         Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+         Join Filter: (t1.b = t2.b)
+         ->  Partitioned Index Scan using idx_range_local on row_partition_iterator_elimination.test_range_pt t2
+               Output: t2.a, t2.b, t2.c, t2.d
+               Index Cond: (t2.a = 5)
+               Selected Partitions:  1
+         ->  Partitioned Index Scan using idx_hash_local on row_partition_iterator_elimination.test_hash_ht t1
+               Output: t1.a, t1.b, t1.c, t1.d
+               Index Cond: (t1.a = 5)
+               Selected Partitions:  9
+(14 rows)
+
+explain(costs off, verbose on) select count(t1.b) from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5;
+                                                   QUERY PLAN                                                    
+-----------------------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: count(t1.b)
+   ->  Nested Loop
+         Output: t1.b
+         Join Filter: (t1.b = t2.b)
+         ->  Partitioned Index Scan using idx_range_local on row_partition_iterator_elimination.test_range_pt t2
+               Output: t2.a, t2.b, t2.c, t2.d
+               Index Cond: (t2.a = 5)
+               Selected Partitions:  1
+         ->  Partitioned Index Scan using idx_hash_local on row_partition_iterator_elimination.test_hash_ht t1
+               Output: t1.a, t1.b, t1.c, t1.d
+               Index Cond: (t1.a = 5)
+               Selected Partitions:  9
+(13 rows)
+
+select * from test_hash_ht where a = 30 order by 1,2,3,4;
+ a  | b  | c | d 
+----+----+---+---
+ 30 | 31 |   |  
+ 30 | 81 |   |  
+(2 rows)
+
+select count(a) from test_hash_ht where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select count(b) from test_hash_ht where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_range_pt where a = 30 order by 1,2,3,4;
+ a  | b  | c | d 
+----+----+---+---
+ 30 | 31 |   |  
+ 30 | 81 |   |  
+(2 rows)
+
+select count(a) from test_range_pt where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select count(b) from test_range_pt where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 order by 1,2,3,4;
+ a | b  | c | d | a | b  | c | d 
+---+----+---+---+---+----+---+---
+ 5 |  6 |   |   | 5 |  6 |   |  
+ 5 | 56 |   |   | 5 | 56 |   |  
+(2 rows)
+
+select count(t1.a) from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5 order by 1,2,3,4;
+ a | b  | c | d | a | b  | c | d 
+---+----+---+---+---+----+---+---
+ 5 |  6 |   |   | 5 |  6 |   |  
+ 5 | 56 |   |   | 5 | 56 |   |  
+(2 rows)
+
+select count(t1.b) from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5;
+ count 
+-------
+     2
+(1 row)
+
+--indexscan/indexonlyscan + hashjoin
+set enable_seqscan = off;
+set enable_indexscan = on;
+set enable_bitmapscan = off;
+set enable_nestloop = off;
+set enable_hashjoin = on;
+set enable_mergejoin = off;
+explain(costs off, verbose on) select * from test_hash_ht where a = 30 order by 1,2,3,4;
+                                              QUERY PLAN                                              
+------------------------------------------------------------------------------------------------------
+ Sort
+   Output: a, b, c, d
+   Sort Key: test_hash_ht.b, test_hash_ht.c, test_hash_ht.d
+   ->  Partitioned Index Scan using idx_hash_local on row_partition_iterator_elimination.test_hash_ht
+         Output: a, b, c, d
+         Index Cond: (test_hash_ht.a = 30)
+         Selected Partitions:  4
+(7 rows)
+
+explain(costs off, verbose on) select count(a) from test_hash_ht where a = 30;
+                                                QUERY PLAN                                                 
+-----------------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: count(a)
+   ->  Partitioned Index Only Scan using idx_hash_local on row_partition_iterator_elimination.test_hash_ht
+         Output: a
+         Index Cond: (test_hash_ht.a = 30)
+         Selected Partitions:  4
+(6 rows)
+
+explain(costs off, verbose on) select count(b) from test_hash_ht where a = 30;
+                                              QUERY PLAN                                              
+------------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: count(b)
+   ->  Partitioned Index Scan using idx_hash_local on row_partition_iterator_elimination.test_hash_ht
+         Output: a, b, c, d
+         Index Cond: (test_hash_ht.a = 30)
+         Selected Partitions:  4
+(6 rows)
+
+explain(costs off, verbose on) select * from test_range_pt where a = 30 order by 1,2,3,4;
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Sort
+   Output: a, b, c, d
+   Sort Key: test_range_pt.b, test_range_pt.c, test_range_pt.d
+   ->  Partitioned Index Scan using idx_range_local on row_partition_iterator_elimination.test_range_pt
+         Output: a, b, c, d
+         Index Cond: (test_range_pt.a = 30)
+         Selected Partitions:  3
+(7 rows)
+
+explain(costs off, verbose on) select count(a) from test_range_pt where a = 30;
+                                                 QUERY PLAN                                                  
+-------------------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: count(a)
+   ->  Partitioned Index Only Scan using idx_range_local on row_partition_iterator_elimination.test_range_pt
+         Output: a
+         Index Cond: (test_range_pt.a = 30)
+         Selected Partitions:  3
+(6 rows)
+
+explain(costs off, verbose on) select count(b) from test_range_pt where a = 30;
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: count(b)
+   ->  Partitioned Index Scan using idx_range_local on row_partition_iterator_elimination.test_range_pt
+         Output: a, b, c, d
+         Index Cond: (test_range_pt.a = 30)
+         Selected Partitions:  3
+(6 rows)
+
+explain(costs off, verbose on) select * from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 order by 1,2,3,4;
+                                                     QUERY PLAN                                                      
+---------------------------------------------------------------------------------------------------------------------
+ Sort
+   Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+   Sort Key: t1.b, t1.c, t1.d
+   ->  Hash Join
+         Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+         Hash Cond: (t2.b = t1.b)
+         ->  Partition Iterator
+               Output: t2.a, t2.b, t2.c, t2.d
+               Iterations: 4
+               ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_range_pt t2
+                     Output: t2.a, t2.b, t2.c, t2.d
+                     Selected Partitions:  1..4
+         ->  Hash
+               Output: t1.a, t1.b, t1.c, t1.d
+               ->  Partitioned Index Scan using idx_hash_local on row_partition_iterator_elimination.test_hash_ht t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+                     Index Cond: (t1.a = 5)
+                     Selected Partitions:  9
+(18 rows)
+
+explain(costs off, verbose on) select count(t1.a) from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5;
+                                                     QUERY PLAN                                                      
+---------------------------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: count(t1.a)
+   ->  Hash Join
+         Output: t1.a
+         Hash Cond: (t2.b = t1.b)
+         ->  Partition Iterator
+               Output: t2.a, t2.b, t2.c, t2.d
+               Iterations: 4
+               ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_range_pt t2
+                     Output: t2.a, t2.b, t2.c, t2.d
+                     Selected Partitions:  1..4
+         ->  Hash
+               Output: t1.a, t1.b
+               ->  Partitioned Index Scan using idx_hash_local on row_partition_iterator_elimination.test_hash_ht t1
+                     Output: t1.a, t1.b
+                     Index Cond: (t1.a = 5)
+                     Selected Partitions:  9
+(17 rows)
+
+explain(costs off, verbose on) select * from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5 order by 1,2,3,4;
+                                                      QUERY PLAN                                                       
+-----------------------------------------------------------------------------------------------------------------------
+ Sort
+   Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+   Sort Key: t1.b, t1.c, t1.d
+   ->  Hash Join
+         Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+         Hash Cond: (t1.b = t2.b)
+         ->  Partitioned Index Scan using idx_hash_local on row_partition_iterator_elimination.test_hash_ht t1
+               Output: t1.a, t1.b, t1.c, t1.d
+               Index Cond: (t1.a = 5)
+               Selected Partitions:  9
+         ->  Hash
+               Output: t2.a, t2.b, t2.c, t2.d
+               ->  Partitioned Index Scan using idx_range_local on row_partition_iterator_elimination.test_range_pt t2
+                     Output: t2.a, t2.b, t2.c, t2.d
+                     Index Cond: (t2.a = 5)
+                     Selected Partitions:  1
+(16 rows)
+
+explain(costs off, verbose on) select count(t1.b) from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5;
+                                                      QUERY PLAN                                                       
+-----------------------------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: count(t1.b)
+   ->  Hash Join
+         Output: t1.b
+         Hash Cond: (t1.b = t2.b)
+         ->  Partitioned Index Scan using idx_hash_local on row_partition_iterator_elimination.test_hash_ht t1
+               Output: t1.a, t1.b, t1.c, t1.d
+               Index Cond: (t1.a = 5)
+               Selected Partitions:  9
+         ->  Hash
+               Output: t2.b
+               ->  Partitioned Index Scan using idx_range_local on row_partition_iterator_elimination.test_range_pt t2
+                     Output: t2.b
+                     Index Cond: (t2.a = 5)
+                     Selected Partitions:  1
+(15 rows)
+
+select * from test_hash_ht where a = 30 order by 1,2,3,4;
+ a  | b  | c | d 
+----+----+---+---
+ 30 | 31 |   |  
+ 30 | 81 |   |  
+(2 rows)
+
+select count(a) from test_hash_ht where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select count(b) from test_hash_ht where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_range_pt where a = 30 order by 1,2,3,4;
+ a  | b  | c | d 
+----+----+---+---
+ 30 | 31 |   |  
+ 30 | 81 |   |  
+(2 rows)
+
+select count(a) from test_range_pt where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select count(b) from test_range_pt where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 order by 1,2,3,4;
+ a | b  | c | d | a | b  | c | d 
+---+----+---+---+---+----+---+---
+ 5 |  6 |   |   | 5 |  6 |   |  
+ 5 | 56 |   |   | 5 | 56 |   |  
+(2 rows)
+
+select count(t1.a) from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5 order by 1,2,3,4;
+ a | b  | c | d | a | b  | c | d 
+---+----+---+---+---+----+---+---
+ 5 |  6 |   |   | 5 |  6 |   |  
+ 5 | 56 |   |   | 5 | 56 |   |  
+(2 rows)
+
+select count(t1.b) from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5;
+ count 
+-------
+     2
+(1 row)
+
+--indexscan/indexonlyscan + mergejoin
+set enable_seqscan = off;
+set enable_indexscan = on;
+set enable_bitmapscan = off;
+set enable_nestloop = off;
+set enable_hashjoin = off;
+set enable_mergejoin = on;
+explain(costs off, verbose on) select * from test_hash_ht where a = 30 order by 1,2,3,4;
+                                              QUERY PLAN                                              
+------------------------------------------------------------------------------------------------------
+ Sort
+   Output: a, b, c, d
+   Sort Key: test_hash_ht.b, test_hash_ht.c, test_hash_ht.d
+   ->  Partitioned Index Scan using idx_hash_local on row_partition_iterator_elimination.test_hash_ht
+         Output: a, b, c, d
+         Index Cond: (test_hash_ht.a = 30)
+         Selected Partitions:  4
+(7 rows)
+
+explain(costs off, verbose on) select count(a) from test_hash_ht where a = 30;
+                                                QUERY PLAN                                                 
+-----------------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: count(a)
+   ->  Partitioned Index Only Scan using idx_hash_local on row_partition_iterator_elimination.test_hash_ht
+         Output: a
+         Index Cond: (test_hash_ht.a = 30)
+         Selected Partitions:  4
+(6 rows)
+
+explain(costs off, verbose on) select count(b) from test_hash_ht where a = 30;
+                                              QUERY PLAN                                              
+------------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: count(b)
+   ->  Partitioned Index Scan using idx_hash_local on row_partition_iterator_elimination.test_hash_ht
+         Output: a, b, c, d
+         Index Cond: (test_hash_ht.a = 30)
+         Selected Partitions:  4
+(6 rows)
+
+explain(costs off, verbose on) select * from test_range_pt where a = 30 order by 1,2,3,4;
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Sort
+   Output: a, b, c, d
+   Sort Key: test_range_pt.b, test_range_pt.c, test_range_pt.d
+   ->  Partitioned Index Scan using idx_range_local on row_partition_iterator_elimination.test_range_pt
+         Output: a, b, c, d
+         Index Cond: (test_range_pt.a = 30)
+         Selected Partitions:  3
+(7 rows)
+
+explain(costs off, verbose on) select count(a) from test_range_pt where a = 30;
+                                                 QUERY PLAN                                                  
+-------------------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: count(a)
+   ->  Partitioned Index Only Scan using idx_range_local on row_partition_iterator_elimination.test_range_pt
+         Output: a
+         Index Cond: (test_range_pt.a = 30)
+         Selected Partitions:  3
+(6 rows)
+
+explain(costs off, verbose on) select count(b) from test_range_pt where a = 30;
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: count(b)
+   ->  Partitioned Index Scan using idx_range_local on row_partition_iterator_elimination.test_range_pt
+         Output: a, b, c, d
+         Index Cond: (test_range_pt.a = 30)
+         Selected Partitions:  3
+(6 rows)
+
+explain(costs off, verbose on) select * from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 order by 1,2,3,4;
+                                                     QUERY PLAN                                                      
+---------------------------------------------------------------------------------------------------------------------
+ Sort
+   Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+   Sort Key: t1.b, t1.c, t1.d
+   ->  Merge Join
+         Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+         Merge Cond: (t1.b = t2.b)
+         ->  Sort
+               Output: t1.a, t1.b, t1.c, t1.d
+               Sort Key: t1.b
+               ->  Partitioned Index Scan using idx_hash_local on row_partition_iterator_elimination.test_hash_ht t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+                     Index Cond: (t1.a = 5)
+                     Selected Partitions:  9
+         ->  Sort
+               Output: t2.a, t2.b, t2.c, t2.d
+               Sort Key: t2.b
+               ->  Partition Iterator
+                     Output: t2.a, t2.b, t2.c, t2.d
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_range_pt t2
+                           Output: t2.a, t2.b, t2.c, t2.d
+                           Selected Partitions:  1..4
+(22 rows)
+
+explain(costs off, verbose on) select count(t1.a) from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5;
+                                                     QUERY PLAN                                                      
+---------------------------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: count(t1.a)
+   ->  Merge Join
+         Output: t1.a
+         Merge Cond: (t1.b = t2.b)
+         ->  Sort
+               Output: t1.a, t1.b
+               Sort Key: t1.b
+               ->  Partitioned Index Scan using idx_hash_local on row_partition_iterator_elimination.test_hash_ht t1
+                     Output: t1.a, t1.b
+                     Index Cond: (t1.a = 5)
+                     Selected Partitions:  9
+         ->  Sort
+               Output: t2.b
+               Sort Key: t2.b
+               ->  Partition Iterator
+                     Output: t2.b
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_range_pt t2
+                           Output: t2.b
+                           Selected Partitions:  1..4
+(21 rows)
+
+explain(costs off, verbose on) select * from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5 order by 1,2,3,4;
+                                                      QUERY PLAN                                                       
+-----------------------------------------------------------------------------------------------------------------------
+ Sort
+   Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+   Sort Key: t1.b, t1.c, t1.d
+   ->  Merge Join
+         Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+         Merge Cond: (t1.b = t2.b)
+         ->  Sort
+               Output: t1.a, t1.b, t1.c, t1.d
+               Sort Key: t1.b
+               ->  Partitioned Index Scan using idx_hash_local on row_partition_iterator_elimination.test_hash_ht t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+                     Index Cond: (t1.a = 5)
+                     Selected Partitions:  9
+         ->  Sort
+               Output: t2.a, t2.b, t2.c, t2.d
+               Sort Key: t2.b
+               ->  Partitioned Index Scan using idx_range_local on row_partition_iterator_elimination.test_range_pt t2
+                     Output: t2.a, t2.b, t2.c, t2.d
+                     Index Cond: (t2.a = 5)
+                     Selected Partitions:  1
+(20 rows)
+
+explain(costs off, verbose on) select count(t1.b) from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5;
+                                                      QUERY PLAN                                                       
+-----------------------------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: count(t1.b)
+   ->  Merge Join
+         Output: t1.b
+         Merge Cond: (t1.b = t2.b)
+         ->  Sort
+               Output: t1.b
+               Sort Key: t1.b
+               ->  Partitioned Index Scan using idx_hash_local on row_partition_iterator_elimination.test_hash_ht t1
+                     Output: t1.b
+                     Index Cond: (t1.a = 5)
+                     Selected Partitions:  9
+         ->  Sort
+               Output: t2.b
+               Sort Key: t2.b
+               ->  Partitioned Index Scan using idx_range_local on row_partition_iterator_elimination.test_range_pt t2
+                     Output: t2.b
+                     Index Cond: (t2.a = 5)
+                     Selected Partitions:  1
+(19 rows)
+
+select * from test_hash_ht where a = 30 order by 1,2,3,4;
+ a  | b  | c | d 
+----+----+---+---
+ 30 | 31 |   |  
+ 30 | 81 |   |  
+(2 rows)
+
+select count(a) from test_hash_ht where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select count(b) from test_hash_ht where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_range_pt where a = 30 order by 1,2,3,4;
+ a  | b  | c | d 
+----+----+---+---
+ 30 | 31 |   |  
+ 30 | 81 |   |  
+(2 rows)
+
+select count(a) from test_range_pt where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select count(b) from test_range_pt where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 order by 1,2,3,4;
+ a | b  | c | d | a | b  | c | d 
+---+----+---+---+---+----+---+---
+ 5 |  6 |   |   | 5 |  6 |   |  
+ 5 | 56 |   |   | 5 | 56 |   |  
+(2 rows)
+
+select count(t1.a) from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5 order by 1,2,3,4;
+ a | b  | c | d | a | b  | c | d 
+---+----+---+---+---+----+---+---
+ 5 |  6 |   |   | 5 |  6 |   |  
+ 5 | 56 |   |   | 5 | 56 |   |  
+(2 rows)
+
+select count(t1.b) from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5;
+ count 
+-------
+     2
+(1 row)
+
+--bitmapscan + nestloop
+set enable_seqscan = off;
+set enable_indexscan = off;
+set enable_bitmapscan = on;
+set enable_nestloop = on;
+set enable_hashjoin = off;
+set enable_mergejoin = off;
+explain(costs off, verbose on) select * from test_hash_ht where a = 30 order by 1,2,3,4;
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Sort
+   Output: a, b, c, d
+   Sort Key: test_hash_ht.b, test_hash_ht.c, test_hash_ht.d
+   ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_hash_ht
+         Output: a, b, c, d
+         Recheck Cond: (test_hash_ht.a = 30)
+         Selected Partitions:  4
+         ->  Partitioned Bitmap Index Scan on idx_hash_local
+               Index Cond: (test_hash_ht.a = 30)
+               Selected Partitions:  4
+(10 rows)
+
+explain(costs off, verbose on) select count(a) from test_hash_ht where a = 30;
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Aggregate
+   Output: count(a)
+   ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_hash_ht
+         Output: a, b, c, d
+         Recheck Cond: (test_hash_ht.a = 30)
+         Selected Partitions:  4
+         ->  Partitioned Bitmap Index Scan on idx_hash_local
+               Index Cond: (test_hash_ht.a = 30)
+               Selected Partitions:  4
+(9 rows)
+
+explain(costs off, verbose on) select count(b) from test_hash_ht where a = 30;
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Aggregate
+   Output: count(b)
+   ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_hash_ht
+         Output: a, b, c, d
+         Recheck Cond: (test_hash_ht.a = 30)
+         Selected Partitions:  4
+         ->  Partitioned Bitmap Index Scan on idx_hash_local
+               Index Cond: (test_hash_ht.a = 30)
+               Selected Partitions:  4
+(9 rows)
+
+explain(costs off, verbose on) select * from test_range_pt where a = 30 order by 1,2,3,4;
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Sort
+   Output: a, b, c, d
+   Sort Key: test_range_pt.b, test_range_pt.c, test_range_pt.d
+   ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_range_pt
+         Output: a, b, c, d
+         Recheck Cond: (test_range_pt.a = 30)
+         Selected Partitions:  3
+         ->  Partitioned Bitmap Index Scan on idx_range_local
+               Index Cond: (test_range_pt.a = 30)
+               Selected Partitions:  3
+(10 rows)
+
+explain(costs off, verbose on) select count(a) from test_range_pt where a = 30;
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Aggregate
+   Output: count(a)
+   ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_range_pt
+         Output: a, b, c, d
+         Recheck Cond: (test_range_pt.a = 30)
+         Selected Partitions:  3
+         ->  Partitioned Bitmap Index Scan on idx_range_local
+               Index Cond: (test_range_pt.a = 30)
+               Selected Partitions:  3
+(9 rows)
+
+explain(costs off, verbose on) select count(b) from test_range_pt where a = 30;
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Aggregate
+   Output: count(b)
+   ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_range_pt
+         Output: a, b, c, d
+         Recheck Cond: (test_range_pt.a = 30)
+         Selected Partitions:  3
+         ->  Partitioned Bitmap Index Scan on idx_range_local
+               Index Cond: (test_range_pt.a = 30)
+               Selected Partitions:  3
+(9 rows)
+
+explain(costs off, verbose on) select * from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 order by 1,2,3,4;
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Sort
+   Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+   Sort Key: t1.b, t1.c, t1.d
+   ->  Nested Loop
+         Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+         Join Filter: (t1.b = t2.b)
+         ->  Partition Iterator
+               Output: t2.a, t2.b, t2.c, t2.d
+               Iterations: 4
+               ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_range_pt t2
+                     Output: t2.a, t2.b, t2.c, t2.d
+                     Selected Partitions:  1..4
+         ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_hash_ht t1
+               Output: t1.a, t1.b, t1.c, t1.d
+               Recheck Cond: (t1.a = 5)
+               Selected Partitions:  9
+               ->  Partitioned Bitmap Index Scan on idx_hash_local
+                     Index Cond: (t1.a = 5)
+                     Selected Partitions:  9
+(19 rows)
+
+explain(costs off, verbose on) select count(t1.a) from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5;
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: count(t1.a)
+   ->  Nested Loop
+         Output: t1.a
+         Join Filter: (t1.b = t2.b)
+         ->  Partition Iterator
+               Output: t2.a, t2.b, t2.c, t2.d
+               Iterations: 4
+               ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_range_pt t2
+                     Output: t2.a, t2.b, t2.c, t2.d
+                     Selected Partitions:  1..4
+         ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_hash_ht t1
+               Output: t1.a, t1.b, t1.c, t1.d
+               Recheck Cond: (t1.a = 5)
+               Selected Partitions:  9
+               ->  Partitioned Bitmap Index Scan on idx_hash_local
+                     Index Cond: (t1.a = 5)
+                     Selected Partitions:  9
+(18 rows)
+
+explain(costs off, verbose on) select * from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5 order by 1,2,3,4;
+                                           QUERY PLAN                                            
+-------------------------------------------------------------------------------------------------
+ Sort
+   Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+   Sort Key: t1.b, t1.c, t1.d
+   ->  Nested Loop
+         Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+         Join Filter: (t1.b = t2.b)
+         ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_range_pt t2
+               Output: t2.a, t2.b, t2.c, t2.d
+               Recheck Cond: (t2.a = 5)
+               Selected Partitions:  1
+               ->  Partitioned Bitmap Index Scan on idx_range_local
+                     Index Cond: (t2.a = 5)
+                     Selected Partitions:  1
+         ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_hash_ht t1
+               Output: t1.a, t1.b, t1.c, t1.d
+               Recheck Cond: (t1.a = 5)
+               Selected Partitions:  9
+               ->  Partitioned Bitmap Index Scan on idx_hash_local
+                     Index Cond: (t1.a = 5)
+                     Selected Partitions:  9
+(20 rows)
+
+explain(costs off, verbose on) select count(t1.b) from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5;
+                                           QUERY PLAN                                            
+-------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: count(t1.b)
+   ->  Nested Loop
+         Output: t1.b
+         Join Filter: (t1.b = t2.b)
+         ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_range_pt t2
+               Output: t2.a, t2.b, t2.c, t2.d
+               Recheck Cond: (t2.a = 5)
+               Selected Partitions:  1
+               ->  Partitioned Bitmap Index Scan on idx_range_local
+                     Index Cond: (t2.a = 5)
+                     Selected Partitions:  1
+         ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_hash_ht t1
+               Output: t1.a, t1.b, t1.c, t1.d
+               Recheck Cond: (t1.a = 5)
+               Selected Partitions:  9
+               ->  Partitioned Bitmap Index Scan on idx_hash_local
+                     Index Cond: (t1.a = 5)
+                     Selected Partitions:  9
+(19 rows)
+
+select * from test_hash_ht where a = 30 order by 1,2,3,4;
+ a  | b  | c | d 
+----+----+---+---
+ 30 | 31 |   |  
+ 30 | 81 |   |  
+(2 rows)
+
+select count(a) from test_hash_ht where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select count(b) from test_hash_ht where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_range_pt where a = 30 order by 1,2,3,4;
+ a  | b  | c | d 
+----+----+---+---
+ 30 | 31 |   |  
+ 30 | 81 |   |  
+(2 rows)
+
+select count(a) from test_range_pt where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select count(b) from test_range_pt where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 order by 1,2,3,4;
+ a | b  | c | d | a | b  | c | d 
+---+----+---+---+---+----+---+---
+ 5 |  6 |   |   | 5 |  6 |   |  
+ 5 | 56 |   |   | 5 | 56 |   |  
+(2 rows)
+
+select count(t1.a) from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5 order by 1,2,3,4;
+ a | b  | c | d | a | b  | c | d 
+---+----+---+---+---+----+---+---
+ 5 |  6 |   |   | 5 |  6 |   |  
+ 5 | 56 |   |   | 5 | 56 |   |  
+(2 rows)
+
+select count(t1.b) from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5;
+ count 
+-------
+     2
+(1 row)
+
+--bitmapscan + hashjoin
+set enable_seqscan = off;
+set enable_indexscan = off;
+set enable_bitmapscan = on;
+set enable_nestloop = off;
+set enable_hashjoin = on;
+set enable_mergejoin = off;
+explain(costs off, verbose on) select * from test_hash_ht where a = 30 order by 1,2,3,4;
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Sort
+   Output: a, b, c, d
+   Sort Key: test_hash_ht.b, test_hash_ht.c, test_hash_ht.d
+   ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_hash_ht
+         Output: a, b, c, d
+         Recheck Cond: (test_hash_ht.a = 30)
+         Selected Partitions:  4
+         ->  Partitioned Bitmap Index Scan on idx_hash_local
+               Index Cond: (test_hash_ht.a = 30)
+               Selected Partitions:  4
+(10 rows)
+
+explain(costs off, verbose on) select count(a) from test_hash_ht where a = 30;
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Aggregate
+   Output: count(a)
+   ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_hash_ht
+         Output: a, b, c, d
+         Recheck Cond: (test_hash_ht.a = 30)
+         Selected Partitions:  4
+         ->  Partitioned Bitmap Index Scan on idx_hash_local
+               Index Cond: (test_hash_ht.a = 30)
+               Selected Partitions:  4
+(9 rows)
+
+explain(costs off, verbose on) select count(b) from test_hash_ht where a = 30;
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Aggregate
+   Output: count(b)
+   ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_hash_ht
+         Output: a, b, c, d
+         Recheck Cond: (test_hash_ht.a = 30)
+         Selected Partitions:  4
+         ->  Partitioned Bitmap Index Scan on idx_hash_local
+               Index Cond: (test_hash_ht.a = 30)
+               Selected Partitions:  4
+(9 rows)
+
+explain(costs off, verbose on) select * from test_range_pt where a = 30 order by 1,2,3,4;
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Sort
+   Output: a, b, c, d
+   Sort Key: test_range_pt.b, test_range_pt.c, test_range_pt.d
+   ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_range_pt
+         Output: a, b, c, d
+         Recheck Cond: (test_range_pt.a = 30)
+         Selected Partitions:  3
+         ->  Partitioned Bitmap Index Scan on idx_range_local
+               Index Cond: (test_range_pt.a = 30)
+               Selected Partitions:  3
+(10 rows)
+
+explain(costs off, verbose on) select count(a) from test_range_pt where a = 30;
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Aggregate
+   Output: count(a)
+   ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_range_pt
+         Output: a, b, c, d
+         Recheck Cond: (test_range_pt.a = 30)
+         Selected Partitions:  3
+         ->  Partitioned Bitmap Index Scan on idx_range_local
+               Index Cond: (test_range_pt.a = 30)
+               Selected Partitions:  3
+(9 rows)
+
+explain(costs off, verbose on) select count(b) from test_range_pt where a = 30;
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Aggregate
+   Output: count(b)
+   ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_range_pt
+         Output: a, b, c, d
+         Recheck Cond: (test_range_pt.a = 30)
+         Selected Partitions:  3
+         ->  Partitioned Bitmap Index Scan on idx_range_local
+               Index Cond: (test_range_pt.a = 30)
+               Selected Partitions:  3
+(9 rows)
+
+explain(costs off, verbose on) select * from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 order by 1,2,3,4;
+                                              QUERY PLAN                                              
+------------------------------------------------------------------------------------------------------
+ Sort
+   Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+   Sort Key: t1.b, t1.c, t1.d
+   ->  Hash Join
+         Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+         Hash Cond: (t2.b = t1.b)
+         ->  Partition Iterator
+               Output: t2.a, t2.b, t2.c, t2.d
+               Iterations: 4
+               ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_range_pt t2
+                     Output: t2.a, t2.b, t2.c, t2.d
+                     Selected Partitions:  1..4
+         ->  Hash
+               Output: t1.a, t1.b, t1.c, t1.d
+               ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_hash_ht t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+                     Recheck Cond: (t1.a = 5)
+                     Selected Partitions:  9
+                     ->  Partitioned Bitmap Index Scan on idx_hash_local
+                           Index Cond: (t1.a = 5)
+                           Selected Partitions:  9
+(21 rows)
+
+explain(costs off, verbose on) select count(t1.a) from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5;
+                                              QUERY PLAN                                              
+------------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: count(t1.a)
+   ->  Hash Join
+         Output: t1.a
+         Hash Cond: (t2.b = t1.b)
+         ->  Partition Iterator
+               Output: t2.a, t2.b, t2.c, t2.d
+               Iterations: 4
+               ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_range_pt t2
+                     Output: t2.a, t2.b, t2.c, t2.d
+                     Selected Partitions:  1..4
+         ->  Hash
+               Output: t1.a, t1.b
+               ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_hash_ht t1
+                     Output: t1.a, t1.b
+                     Recheck Cond: (t1.a = 5)
+                     Selected Partitions:  9
+                     ->  Partitioned Bitmap Index Scan on idx_hash_local
+                           Index Cond: (t1.a = 5)
+                           Selected Partitions:  9
+(20 rows)
+
+explain(costs off, verbose on) select * from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5 order by 1,2,3,4;
+                                              QUERY PLAN                                               
+-------------------------------------------------------------------------------------------------------
+ Sort
+   Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+   Sort Key: t1.b, t1.c, t1.d
+   ->  Hash Join
+         Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+         Hash Cond: (t1.b = t2.b)
+         ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_hash_ht t1
+               Output: t1.a, t1.b, t1.c, t1.d
+               Recheck Cond: (t1.a = 5)
+               Selected Partitions:  9
+               ->  Partitioned Bitmap Index Scan on idx_hash_local
+                     Index Cond: (t1.a = 5)
+                     Selected Partitions:  9
+         ->  Hash
+               Output: t2.a, t2.b, t2.c, t2.d
+               ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_range_pt t2
+                     Output: t2.a, t2.b, t2.c, t2.d
+                     Recheck Cond: (t2.a = 5)
+                     Selected Partitions:  1
+                     ->  Partitioned Bitmap Index Scan on idx_range_local
+                           Index Cond: (t2.a = 5)
+                           Selected Partitions:  1
+(22 rows)
+
+explain(costs off, verbose on) select count(t1.b) from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5;
+                                              QUERY PLAN                                               
+-------------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: count(t1.b)
+   ->  Hash Join
+         Output: t1.b
+         Hash Cond: (t1.b = t2.b)
+         ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_hash_ht t1
+               Output: t1.a, t1.b, t1.c, t1.d
+               Recheck Cond: (t1.a = 5)
+               Selected Partitions:  9
+               ->  Partitioned Bitmap Index Scan on idx_hash_local
+                     Index Cond: (t1.a = 5)
+                     Selected Partitions:  9
+         ->  Hash
+               Output: t2.b
+               ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_range_pt t2
+                     Output: t2.b
+                     Recheck Cond: (t2.a = 5)
+                     Selected Partitions:  1
+                     ->  Partitioned Bitmap Index Scan on idx_range_local
+                           Index Cond: (t2.a = 5)
+                           Selected Partitions:  1
+(21 rows)
+
+select * from test_hash_ht where a = 30 order by 1,2,3,4;
+ a  | b  | c | d 
+----+----+---+---
+ 30 | 31 |   |  
+ 30 | 81 |   |  
+(2 rows)
+
+select count(a) from test_hash_ht where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select count(b) from test_hash_ht where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_range_pt where a = 30 order by 1,2,3,4;
+ a  | b  | c | d 
+----+----+---+---
+ 30 | 31 |   |  
+ 30 | 81 |   |  
+(2 rows)
+
+select count(a) from test_range_pt where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select count(b) from test_range_pt where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 order by 1,2,3,4;
+ a | b  | c | d | a | b  | c | d 
+---+----+---+---+---+----+---+---
+ 5 |  6 |   |   | 5 |  6 |   |  
+ 5 | 56 |   |   | 5 | 56 |   |  
+(2 rows)
+
+select count(t1.a) from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5 order by 1,2,3,4;
+ a | b  | c | d | a | b  | c | d 
+---+----+---+---+---+----+---+---
+ 5 |  6 |   |   | 5 |  6 |   |  
+ 5 | 56 |   |   | 5 | 56 |   |  
+(2 rows)
+
+select count(t1.b) from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5;
+ count 
+-------
+     2
+(1 row)
+
+--bitmapscan + mergejoin
+set enable_seqscan = off;
+set enable_indexscan = off;
+set enable_bitmapscan = on;
+set enable_nestloop = off;
+set enable_hashjoin = off;
+set enable_mergejoin = on;
+explain(costs off, verbose on) select * from test_hash_ht where a = 30 order by 1,2,3,4;
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Sort
+   Output: a, b, c, d
+   Sort Key: test_hash_ht.b, test_hash_ht.c, test_hash_ht.d
+   ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_hash_ht
+         Output: a, b, c, d
+         Recheck Cond: (test_hash_ht.a = 30)
+         Selected Partitions:  4
+         ->  Partitioned Bitmap Index Scan on idx_hash_local
+               Index Cond: (test_hash_ht.a = 30)
+               Selected Partitions:  4
+(10 rows)
+
+explain(costs off, verbose on) select count(a) from test_hash_ht where a = 30;
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Aggregate
+   Output: count(a)
+   ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_hash_ht
+         Output: a, b, c, d
+         Recheck Cond: (test_hash_ht.a = 30)
+         Selected Partitions:  4
+         ->  Partitioned Bitmap Index Scan on idx_hash_local
+               Index Cond: (test_hash_ht.a = 30)
+               Selected Partitions:  4
+(9 rows)
+
+explain(costs off, verbose on) select count(b) from test_hash_ht where a = 30;
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Aggregate
+   Output: count(b)
+   ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_hash_ht
+         Output: a, b, c, d
+         Recheck Cond: (test_hash_ht.a = 30)
+         Selected Partitions:  4
+         ->  Partitioned Bitmap Index Scan on idx_hash_local
+               Index Cond: (test_hash_ht.a = 30)
+               Selected Partitions:  4
+(9 rows)
+
+explain(costs off, verbose on) select * from test_range_pt where a = 30 order by 1,2,3,4;
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Sort
+   Output: a, b, c, d
+   Sort Key: test_range_pt.b, test_range_pt.c, test_range_pt.d
+   ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_range_pt
+         Output: a, b, c, d
+         Recheck Cond: (test_range_pt.a = 30)
+         Selected Partitions:  3
+         ->  Partitioned Bitmap Index Scan on idx_range_local
+               Index Cond: (test_range_pt.a = 30)
+               Selected Partitions:  3
+(10 rows)
+
+explain(costs off, verbose on) select count(a) from test_range_pt where a = 30;
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Aggregate
+   Output: count(a)
+   ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_range_pt
+         Output: a, b, c, d
+         Recheck Cond: (test_range_pt.a = 30)
+         Selected Partitions:  3
+         ->  Partitioned Bitmap Index Scan on idx_range_local
+               Index Cond: (test_range_pt.a = 30)
+               Selected Partitions:  3
+(9 rows)
+
+explain(costs off, verbose on) select count(b) from test_range_pt where a = 30;
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Aggregate
+   Output: count(b)
+   ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_range_pt
+         Output: a, b, c, d
+         Recheck Cond: (test_range_pt.a = 30)
+         Selected Partitions:  3
+         ->  Partitioned Bitmap Index Scan on idx_range_local
+               Index Cond: (test_range_pt.a = 30)
+               Selected Partitions:  3
+(9 rows)
+
+explain(costs off, verbose on) select * from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 order by 1,2,3,4;
+                                              QUERY PLAN                                              
+------------------------------------------------------------------------------------------------------
+ Sort
+   Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+   Sort Key: t1.b, t1.c, t1.d
+   ->  Merge Join
+         Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+         Merge Cond: (t1.b = t2.b)
+         ->  Sort
+               Output: t1.a, t1.b, t1.c, t1.d
+               Sort Key: t1.b
+               ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_hash_ht t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+                     Recheck Cond: (t1.a = 5)
+                     Selected Partitions:  9
+                     ->  Partitioned Bitmap Index Scan on idx_hash_local
+                           Index Cond: (t1.a = 5)
+                           Selected Partitions:  9
+         ->  Sort
+               Output: t2.a, t2.b, t2.c, t2.d
+               Sort Key: t2.b
+               ->  Partition Iterator
+                     Output: t2.a, t2.b, t2.c, t2.d
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_range_pt t2
+                           Output: t2.a, t2.b, t2.c, t2.d
+                           Selected Partitions:  1..4
+(25 rows)
+
+explain(costs off, verbose on) select count(t1.a) from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5;
+                                              QUERY PLAN                                              
+------------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: count(t1.a)
+   ->  Merge Join
+         Output: t1.a
+         Merge Cond: (t1.b = t2.b)
+         ->  Sort
+               Output: t1.a, t1.b
+               Sort Key: t1.b
+               ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_hash_ht t1
+                     Output: t1.a, t1.b
+                     Recheck Cond: (t1.a = 5)
+                     Selected Partitions:  9
+                     ->  Partitioned Bitmap Index Scan on idx_hash_local
+                           Index Cond: (t1.a = 5)
+                           Selected Partitions:  9
+         ->  Sort
+               Output: t2.b
+               Sort Key: t2.b
+               ->  Partition Iterator
+                     Output: t2.b
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_range_pt t2
+                           Output: t2.b
+                           Selected Partitions:  1..4
+(24 rows)
+
+explain(costs off, verbose on) select * from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5 order by 1,2,3,4;
+                                              QUERY PLAN                                               
+-------------------------------------------------------------------------------------------------------
+ Sort
+   Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+   Sort Key: t1.b, t1.c, t1.d
+   ->  Merge Join
+         Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+         Merge Cond: (t1.b = t2.b)
+         ->  Sort
+               Output: t1.a, t1.b, t1.c, t1.d
+               Sort Key: t1.b
+               ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_hash_ht t1
+                     Output: t1.a, t1.b, t1.c, t1.d
+                     Recheck Cond: (t1.a = 5)
+                     Selected Partitions:  9
+                     ->  Partitioned Bitmap Index Scan on idx_hash_local
+                           Index Cond: (t1.a = 5)
+                           Selected Partitions:  9
+         ->  Sort
+               Output: t2.a, t2.b, t2.c, t2.d
+               Sort Key: t2.b
+               ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_range_pt t2
+                     Output: t2.a, t2.b, t2.c, t2.d
+                     Recheck Cond: (t2.a = 5)
+                     Selected Partitions:  1
+                     ->  Partitioned Bitmap Index Scan on idx_range_local
+                           Index Cond: (t2.a = 5)
+                           Selected Partitions:  1
+(26 rows)
+
+explain(costs off, verbose on) select count(t1.b) from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5;
+                                              QUERY PLAN                                               
+-------------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: count(t1.b)
+   ->  Merge Join
+         Output: t1.b
+         Merge Cond: (t1.b = t2.b)
+         ->  Sort
+               Output: t1.b
+               Sort Key: t1.b
+               ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_hash_ht t1
+                     Output: t1.b
+                     Recheck Cond: (t1.a = 5)
+                     Selected Partitions:  9
+                     ->  Partitioned Bitmap Index Scan on idx_hash_local
+                           Index Cond: (t1.a = 5)
+                           Selected Partitions:  9
+         ->  Sort
+               Output: t2.b
+               Sort Key: t2.b
+               ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_range_pt t2
+                     Output: t2.b
+                     Recheck Cond: (t2.a = 5)
+                     Selected Partitions:  1
+                     ->  Partitioned Bitmap Index Scan on idx_range_local
+                           Index Cond: (t2.a = 5)
+                           Selected Partitions:  1
+(25 rows)
+
+select * from test_hash_ht where a = 30 order by 1,2,3,4;
+ a  | b  | c | d 
+----+----+---+---
+ 30 | 31 |   |  
+ 30 | 81 |   |  
+(2 rows)
+
+select count(a) from test_hash_ht where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select count(b) from test_hash_ht where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_range_pt where a = 30 order by 1,2,3,4;
+ a  | b  | c | d 
+----+----+---+---
+ 30 | 31 |   |  
+ 30 | 81 |   |  
+(2 rows)
+
+select count(a) from test_range_pt where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select count(b) from test_range_pt where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 order by 1,2,3,4;
+ a | b  | c | d | a | b  | c | d 
+---+----+---+---+---+----+---+---
+ 5 |  6 |   |   | 5 |  6 |   |  
+ 5 | 56 |   |   | 5 | 56 |   |  
+(2 rows)
+
+select count(t1.a) from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5 order by 1,2,3,4;
+ a | b  | c | d | a | b  | c | d 
+---+----+---+---+---+----+---+---
+ 5 |  6 |   |   | 5 |  6 |   |  
+ 5 | 56 |   |   | 5 | 56 |   |  
+(2 rows)
+
+select count(t1.b) from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5;
+ count 
+-------
+     2
+(1 row)
+
+--seqscan + RowToVec
+set enable_seqscan = on;
+set enable_indexscan = off;
+set enable_bitmapscan = off;
+set enable_nestloop = on;
+set enable_hashjoin = off;
+set enable_mergejoin = off;
+set try_vector_engine_strategy = force;
+explain(costs off, verbose on) select * from test_hash_ht where a = 30 order by 1,2,3,4;
+                                        QUERY PLAN                                         
+-------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c, d
+   ->  Vector Sort
+         Output: a, b, c, d
+         Sort Key: test_hash_ht.b, test_hash_ht.c, test_hash_ht.d
+         ->  Vector Adapter(type: BATCH MODE)
+               Output: a, b, c, d
+               Filter: (test_hash_ht.a = 30)
+               ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_hash_ht
+                     Output: a, b, c, d
+                     Selected Partitions:  4
+(11 rows)
+
+explain(costs off, verbose on) select count(a) from test_hash_ht where a = 30;
+                                        QUERY PLAN                                         
+-------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(a))
+   ->  Vector Aggregate
+         Output: count(a)
+         ->  Vector Adapter(type: BATCH MODE)
+               Output: a, b, c, d
+               Filter: (test_hash_ht.a = 30)
+               ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_hash_ht
+                     Output: a, b, c, d
+                     Selected Partitions:  4
+(10 rows)
+
+explain(costs off, verbose on) select count(b) from test_hash_ht where a = 30;
+                                        QUERY PLAN                                         
+-------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(b))
+   ->  Vector Aggregate
+         Output: count(b)
+         ->  Vector Adapter(type: BATCH MODE)
+               Output: a, b, c, d
+               Filter: (test_hash_ht.a = 30)
+               ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_hash_ht
+                     Output: a, b, c, d
+                     Selected Partitions:  4
+(10 rows)
+
+explain(costs off, verbose on) select * from test_range_pt where a = 30 order by 1,2,3,4;
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c, d
+   ->  Vector Sort
+         Output: a, b, c, d
+         Sort Key: test_range_pt.b, test_range_pt.c, test_range_pt.d
+         ->  Vector Adapter(type: BATCH MODE)
+               Output: a, b, c, d
+               Filter: (test_range_pt.a = 30)
+               ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_range_pt
+                     Output: a, b, c, d
+                     Selected Partitions:  3
+(11 rows)
+
+explain(costs off, verbose on) select count(a) from test_range_pt where a = 30;
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(a))
+   ->  Vector Aggregate
+         Output: count(a)
+         ->  Vector Adapter(type: BATCH MODE)
+               Output: a, b, c, d
+               Filter: (test_range_pt.a = 30)
+               ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_range_pt
+                     Output: a, b, c, d
+                     Selected Partitions:  3
+(10 rows)
+
+explain(costs off, verbose on) select count(b) from test_range_pt where a = 30;
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(b))
+   ->  Vector Aggregate
+         Output: count(b)
+         ->  Vector Adapter(type: BATCH MODE)
+               Output: a, b, c, d
+               Filter: (test_range_pt.a = 30)
+               ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_range_pt
+                     Output: a, b, c, d
+                     Selected Partitions:  3
+(10 rows)
+
+explain(costs off, verbose on) select * from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 order by 1,2,3,4;
+                                                QUERY PLAN                                                 
+-----------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+   ->  Vector Sort
+         Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+         Sort Key: t1.b, t1.c, t1.d
+         ->  Vector Nest Loop
+               Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+               Join Filter: (t1.b = t2.b)
+               ->  Vector Adapter(type: BATCH MODE)
+                     Output: t1.a, t1.b, t1.c, t1.d
+                     Filter: (t1.a = 5)
+                     ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_hash_ht t1
+                           Output: t1.a, t1.b, t1.c, t1.d
+                           Selected Partitions:  9
+               ->  Vector Partition Iterator
+                     Output: t2.a, t2.b, t2.c, t2.d
+                     Iterations: 4
+                     ->  Vector Adapter(type: BATCH MODE)
+                           Output: t2.a, t2.b, t2.c, t2.d
+                           ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_range_pt t2
+                                 Output: t2.a, t2.b, t2.c, t2.d
+                                 Selected Partitions:  1..4
+(22 rows)
+
+explain(costs off, verbose on) select count(t1.a) from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5;
+                                                QUERY PLAN                                                 
+-----------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(t1.a))
+   ->  Vector Aggregate
+         Output: count(t1.a)
+         ->  Vector Nest Loop
+               Output: t1.a
+               Join Filter: (t1.b = t2.b)
+               ->  Vector Adapter(type: BATCH MODE)
+                     Output: t1.a, t1.b, t1.c, t1.d
+                     Filter: (t1.a = 5)
+                     ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_hash_ht t1
+                           Output: t1.a, t1.b, t1.c, t1.d
+                           Selected Partitions:  9
+               ->  Vector Partition Iterator
+                     Output: t2.a, t2.b, t2.c, t2.d
+                     Iterations: 4
+                     ->  Vector Adapter(type: BATCH MODE)
+                           Output: t2.a, t2.b, t2.c, t2.d
+                           ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_range_pt t2
+                                 Output: t2.a, t2.b, t2.c, t2.d
+                                 Selected Partitions:  1..4
+(21 rows)
+
+explain(costs off, verbose on) select * from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5 order by 1,2,3,4;
+                                             QUERY PLAN                                              
+-----------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+   ->  Vector Sort
+         Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+         Sort Key: t1.b, t1.c, t1.d
+         ->  Vector Nest Loop
+               Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+               Join Filter: (t1.b = t2.b)
+               ->  Vector Adapter(type: BATCH MODE)
+                     Output: t2.a, t2.b, t2.c, t2.d
+                     Filter: (t2.a = 5)
+                     ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_range_pt t2
+                           Output: t2.a, t2.b, t2.c, t2.d
+                           Selected Partitions:  1
+               ->  Vector Adapter(type: BATCH MODE)
+                     Output: t1.a, t1.b, t1.c, t1.d
+                     Filter: (t1.a = 5)
+                     ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_hash_ht t1
+                           Output: t1.a, t1.b, t1.c, t1.d
+                           Selected Partitions:  9
+(20 rows)
+
+explain(costs off, verbose on) select count(t1.b) from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5;
+                                             QUERY PLAN                                              
+-----------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(t1.b))
+   ->  Vector Aggregate
+         Output: count(t1.b)
+         ->  Vector Nest Loop
+               Output: t1.b
+               Join Filter: (t1.b = t2.b)
+               ->  Vector Adapter(type: BATCH MODE)
+                     Output: t2.a, t2.b, t2.c, t2.d
+                     Filter: (t2.a = 5)
+                     ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_range_pt t2
+                           Output: t2.a, t2.b, t2.c, t2.d
+                           Selected Partitions:  1
+               ->  Vector Adapter(type: BATCH MODE)
+                     Output: t1.a, t1.b, t1.c, t1.d
+                     Filter: (t1.a = 5)
+                     ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_hash_ht t1
+                           Output: t1.a, t1.b, t1.c, t1.d
+                           Selected Partitions:  9
+(19 rows)
+
+select * from test_hash_ht where a = 30 order by 1,2,3,4;
+ a  | b  | c | d 
+----+----+---+---
+ 30 | 31 |   |  
+ 30 | 81 |   |  
+(2 rows)
+
+select count(a) from test_hash_ht where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select count(b) from test_hash_ht where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_range_pt where a = 30 order by 1,2,3,4;
+ a  | b  | c | d 
+----+----+---+---
+ 30 | 31 |   |  
+ 30 | 81 |   |  
+(2 rows)
+
+select count(a) from test_range_pt where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select count(b) from test_range_pt where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 order by 1,2,3,4;
+ a | b  | c | d | a | b  | c | d 
+---+----+---+---+---+----+---+---
+ 5 |  6 |   |   | 5 |  6 |   |  
+ 5 | 56 |   |   | 5 | 56 |   |  
+(2 rows)
+
+select count(t1.a) from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5 order by 1,2,3,4;
+ a | b  | c | d | a | b  | c | d 
+---+----+---+---+---+----+---+---
+ 5 |  6 |   |   | 5 |  6 |   |  
+ 5 | 56 |   |   | 5 | 56 |   |  
+(2 rows)
+
+select count(t1.b) from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5;
+ count 
+-------
+     2
+(1 row)
+
+--indexscan/indexonlyscan + RowToVec
+set enable_seqscan = off;
+set enable_indexscan = on;
+set enable_bitmapscan = off;
+set enable_nestloop = on;
+set enable_hashjoin = off;
+set enable_mergejoin = off;
+set try_vector_engine_strategy = force;
+explain(costs off, verbose on) select * from test_hash_ht where a = 30 order by 1,2,3,4;
+                                                    QUERY PLAN                                                    
+------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c, d
+   ->  Vector Sort
+         Output: a, b, c, d
+         Sort Key: test_hash_ht.b, test_hash_ht.c, test_hash_ht.d
+         ->  Vector Adapter
+               Output: a, b, c, d
+               ->  Partitioned Index Scan using idx_hash_local on row_partition_iterator_elimination.test_hash_ht
+                     Output: a, b, c, d
+                     Index Cond: (test_hash_ht.a = 30)
+                     Selected Partitions:  4
+(11 rows)
+
+explain(costs off, verbose on) select count(a) from test_hash_ht where a = 30;
+                                                      QUERY PLAN                                                       
+-----------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(a))
+   ->  Vector Aggregate
+         Output: count(a)
+         ->  Vector Adapter
+               Output: a
+               ->  Partitioned Index Only Scan using idx_hash_local on row_partition_iterator_elimination.test_hash_ht
+                     Output: a
+                     Index Cond: (test_hash_ht.a = 30)
+                     Selected Partitions:  4
+(10 rows)
+
+explain(costs off, verbose on) select count(b) from test_hash_ht where a = 30;
+                                                    QUERY PLAN                                                    
+------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(b))
+   ->  Vector Aggregate
+         Output: count(b)
+         ->  Vector Adapter
+               Output: a, b, c, d
+               ->  Partitioned Index Scan using idx_hash_local on row_partition_iterator_elimination.test_hash_ht
+                     Output: a, b, c, d
+                     Index Cond: (test_hash_ht.a = 30)
+                     Selected Partitions:  4
+(10 rows)
+
+explain(costs off, verbose on) select * from test_range_pt where a = 30 order by 1,2,3,4;
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c, d
+   ->  Vector Sort
+         Output: a, b, c, d
+         Sort Key: test_range_pt.b, test_range_pt.c, test_range_pt.d
+         ->  Vector Adapter
+               Output: a, b, c, d
+               ->  Partitioned Index Scan using idx_range_local on row_partition_iterator_elimination.test_range_pt
+                     Output: a, b, c, d
+                     Index Cond: (test_range_pt.a = 30)
+                     Selected Partitions:  3
+(11 rows)
+
+explain(costs off, verbose on) select count(a) from test_range_pt where a = 30;
+                                                       QUERY PLAN                                                        
+-------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(a))
+   ->  Vector Aggregate
+         Output: count(a)
+         ->  Vector Adapter
+               Output: a
+               ->  Partitioned Index Only Scan using idx_range_local on row_partition_iterator_elimination.test_range_pt
+                     Output: a
+                     Index Cond: (test_range_pt.a = 30)
+                     Selected Partitions:  3
+(10 rows)
+
+explain(costs off, verbose on) select count(b) from test_range_pt where a = 30;
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(b))
+   ->  Vector Aggregate
+         Output: count(b)
+         ->  Vector Adapter
+               Output: a, b, c, d
+               ->  Partitioned Index Scan using idx_range_local on row_partition_iterator_elimination.test_range_pt
+                     Output: a, b, c, d
+                     Index Cond: (test_range_pt.a = 30)
+                     Selected Partitions:  3
+(10 rows)
+
+explain(costs off, verbose on) select * from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 order by 1,2,3,4;
+                                                        QUERY PLAN                                                         
+---------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+   ->  Vector Sort
+         Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+         Sort Key: t1.b, t1.c, t1.d
+         ->  Vector Nest Loop
+               Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+               Join Filter: (t1.b = t2.b)
+               ->  Vector Partition Iterator
+                     Output: t2.a, t2.b, t2.c, t2.d
+                     Iterations: 4
+                     ->  Vector Adapter(type: BATCH MODE)
+                           Output: t2.a, t2.b, t2.c, t2.d
+                           ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_range_pt t2
+                                 Output: t2.a, t2.b, t2.c, t2.d
+                                 Selected Partitions:  1..4
+               ->  Vector Adapter
+                     Output: t1.a, t1.b, t1.c, t1.d
+                     ->  Partitioned Index Scan using idx_hash_local on row_partition_iterator_elimination.test_hash_ht t1
+                           Output: t1.a, t1.b, t1.c, t1.d
+                           Index Cond: (t1.a = 5)
+                           Selected Partitions:  9
+(22 rows)
+
+explain(costs off, verbose on) select count(t1.a) from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5;
+                                                        QUERY PLAN                                                         
+---------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(t1.a))
+   ->  Vector Aggregate
+         Output: count(t1.a)
+         ->  Vector Nest Loop
+               Output: t1.a
+               Join Filter: (t1.b = t2.b)
+               ->  Vector Partition Iterator
+                     Output: t2.a, t2.b, t2.c, t2.d
+                     Iterations: 4
+                     ->  Vector Adapter(type: BATCH MODE)
+                           Output: t2.a, t2.b, t2.c, t2.d
+                           ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_range_pt t2
+                                 Output: t2.a, t2.b, t2.c, t2.d
+                                 Selected Partitions:  1..4
+               ->  Vector Adapter
+                     Output: t1.a, t1.b, t1.c, t1.d
+                     ->  Partitioned Index Scan using idx_hash_local on row_partition_iterator_elimination.test_hash_ht t1
+                           Output: t1.a, t1.b, t1.c, t1.d
+                           Index Cond: (t1.a = 5)
+                           Selected Partitions:  9
+(21 rows)
+
+explain(costs off, verbose on) select * from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5 order by 1,2,3,4;
+                                                         QUERY PLAN                                                          
+-----------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+   ->  Vector Sort
+         Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+         Sort Key: t1.b, t1.c, t1.d
+         ->  Vector Nest Loop
+               Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+               Join Filter: (t1.b = t2.b)
+               ->  Vector Adapter
+                     Output: t2.a, t2.b, t2.c, t2.d
+                     ->  Partitioned Index Scan using idx_range_local on row_partition_iterator_elimination.test_range_pt t2
+                           Output: t2.a, t2.b, t2.c, t2.d
+                           Index Cond: (t2.a = 5)
+                           Selected Partitions:  1
+               ->  Vector Adapter
+                     Output: t1.a, t1.b, t1.c, t1.d
+                     ->  Partitioned Index Scan using idx_hash_local on row_partition_iterator_elimination.test_hash_ht t1
+                           Output: t1.a, t1.b, t1.c, t1.d
+                           Index Cond: (t1.a = 5)
+                           Selected Partitions:  9
+(20 rows)
+
+explain(costs off, verbose on) select count(t1.b) from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5;
+                                                         QUERY PLAN                                                          
+-----------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(t1.b))
+   ->  Vector Aggregate
+         Output: count(t1.b)
+         ->  Vector Nest Loop
+               Output: t1.b
+               Join Filter: (t1.b = t2.b)
+               ->  Vector Adapter
+                     Output: t2.a, t2.b, t2.c, t2.d
+                     ->  Partitioned Index Scan using idx_range_local on row_partition_iterator_elimination.test_range_pt t2
+                           Output: t2.a, t2.b, t2.c, t2.d
+                           Index Cond: (t2.a = 5)
+                           Selected Partitions:  1
+               ->  Vector Adapter
+                     Output: t1.a, t1.b, t1.c, t1.d
+                     ->  Partitioned Index Scan using idx_hash_local on row_partition_iterator_elimination.test_hash_ht t1
+                           Output: t1.a, t1.b, t1.c, t1.d
+                           Index Cond: (t1.a = 5)
+                           Selected Partitions:  9
+(19 rows)
+
+select * from test_hash_ht where a = 30 order by 1,2,3,4;
+ a  | b  | c | d 
+----+----+---+---
+ 30 | 31 |   |  
+ 30 | 81 |   |  
+(2 rows)
+
+select count(a) from test_hash_ht where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select count(b) from test_hash_ht where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_range_pt where a = 30 order by 1,2,3,4;
+ a  | b  | c | d 
+----+----+---+---
+ 30 | 31 |   |  
+ 30 | 81 |   |  
+(2 rows)
+
+select count(a) from test_range_pt where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select count(b) from test_range_pt where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 order by 1,2,3,4;
+ a | b  | c | d | a | b  | c | d 
+---+----+---+---+---+----+---+---
+ 5 |  6 |   |   | 5 |  6 |   |  
+ 5 | 56 |   |   | 5 | 56 |   |  
+(2 rows)
+
+select count(t1.a) from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5 order by 1,2,3,4;
+ a | b  | c | d | a | b  | c | d 
+---+----+---+---+---+----+---+---
+ 5 |  6 |   |   | 5 |  6 |   |  
+ 5 | 56 |   |   | 5 | 56 |   |  
+(2 rows)
+
+select count(t1.b) from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5;
+ count 
+-------
+     2
+(1 row)
+
+--bitmapscan + RowToVec
+set enable_seqscan = off;
+set enable_indexscan = off;
+set enable_bitmapscan = on;
+set enable_nestloop = on;
+set enable_hashjoin = off;
+set enable_mergejoin = off;
+set try_vector_engine_strategy = force;
+explain(costs off, verbose on) select * from test_hash_ht where a = 30 order by 1,2,3,4;
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c, d
+   ->  Vector Sort
+         Output: a, b, c, d
+         Sort Key: test_hash_ht.b, test_hash_ht.c, test_hash_ht.d
+         ->  Vector Adapter
+               Output: a, b, c, d
+               ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_hash_ht
+                     Output: a, b, c, d
+                     Recheck Cond: (test_hash_ht.a = 30)
+                     Selected Partitions:  4
+                     ->  Partitioned Bitmap Index Scan on idx_hash_local
+                           Index Cond: (test_hash_ht.a = 30)
+                           Selected Partitions:  4
+(14 rows)
+
+explain(costs off, verbose on) select count(a) from test_hash_ht where a = 30;
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(a))
+   ->  Vector Aggregate
+         Output: count(a)
+         ->  Vector Adapter
+               Output: a, b, c, d
+               ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_hash_ht
+                     Output: a, b, c, d
+                     Recheck Cond: (test_hash_ht.a = 30)
+                     Selected Partitions:  4
+                     ->  Partitioned Bitmap Index Scan on idx_hash_local
+                           Index Cond: (test_hash_ht.a = 30)
+                           Selected Partitions:  4
+(13 rows)
+
+explain(costs off, verbose on) select count(b) from test_hash_ht where a = 30;
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(b))
+   ->  Vector Aggregate
+         Output: count(b)
+         ->  Vector Adapter
+               Output: a, b, c, d
+               ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_hash_ht
+                     Output: a, b, c, d
+                     Recheck Cond: (test_hash_ht.a = 30)
+                     Selected Partitions:  4
+                     ->  Partitioned Bitmap Index Scan on idx_hash_local
+                           Index Cond: (test_hash_ht.a = 30)
+                           Selected Partitions:  4
+(13 rows)
+
+explain(costs off, verbose on) select * from test_range_pt where a = 30 order by 1,2,3,4;
+                                             QUERY PLAN                                             
+----------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: a, b, c, d
+   ->  Vector Sort
+         Output: a, b, c, d
+         Sort Key: test_range_pt.b, test_range_pt.c, test_range_pt.d
+         ->  Vector Adapter
+               Output: a, b, c, d
+               ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_range_pt
+                     Output: a, b, c, d
+                     Recheck Cond: (test_range_pt.a = 30)
+                     Selected Partitions:  3
+                     ->  Partitioned Bitmap Index Scan on idx_range_local
+                           Index Cond: (test_range_pt.a = 30)
+                           Selected Partitions:  3
+(14 rows)
+
+explain(costs off, verbose on) select count(a) from test_range_pt where a = 30;
+                                             QUERY PLAN                                             
+----------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(a))
+   ->  Vector Aggregate
+         Output: count(a)
+         ->  Vector Adapter
+               Output: a, b, c, d
+               ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_range_pt
+                     Output: a, b, c, d
+                     Recheck Cond: (test_range_pt.a = 30)
+                     Selected Partitions:  3
+                     ->  Partitioned Bitmap Index Scan on idx_range_local
+                           Index Cond: (test_range_pt.a = 30)
+                           Selected Partitions:  3
+(13 rows)
+
+explain(costs off, verbose on) select count(b) from test_range_pt where a = 30;
+                                             QUERY PLAN                                             
+----------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(b))
+   ->  Vector Aggregate
+         Output: count(b)
+         ->  Vector Adapter
+               Output: a, b, c, d
+               ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_range_pt
+                     Output: a, b, c, d
+                     Recheck Cond: (test_range_pt.a = 30)
+                     Selected Partitions:  3
+                     ->  Partitioned Bitmap Index Scan on idx_range_local
+                           Index Cond: (test_range_pt.a = 30)
+                           Selected Partitions:  3
+(13 rows)
+
+explain(costs off, verbose on) select * from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 order by 1,2,3,4;
+                                                 QUERY PLAN                                                 
+------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+   ->  Vector Sort
+         Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+         Sort Key: t1.b, t1.c, t1.d
+         ->  Vector Nest Loop
+               Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+               Join Filter: (t1.b = t2.b)
+               ->  Vector Partition Iterator
+                     Output: t2.a, t2.b, t2.c, t2.d
+                     Iterations: 4
+                     ->  Vector Adapter(type: BATCH MODE)
+                           Output: t2.a, t2.b, t2.c, t2.d
+                           ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_range_pt t2
+                                 Output: t2.a, t2.b, t2.c, t2.d
+                                 Selected Partitions:  1..4
+               ->  Vector Adapter
+                     Output: t1.a, t1.b, t1.c, t1.d
+                     ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_hash_ht t1
+                           Output: t1.a, t1.b, t1.c, t1.d
+                           Recheck Cond: (t1.a = 5)
+                           Selected Partitions:  9
+                           ->  Partitioned Bitmap Index Scan on idx_hash_local
+                                 Index Cond: (t1.a = 5)
+                                 Selected Partitions:  9
+(25 rows)
+
+explain(costs off, verbose on) select count(t1.a) from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5;
+                                                 QUERY PLAN                                                 
+------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(t1.a))
+   ->  Vector Aggregate
+         Output: count(t1.a)
+         ->  Vector Nest Loop
+               Output: t1.a
+               Join Filter: (t1.b = t2.b)
+               ->  Vector Partition Iterator
+                     Output: t2.a, t2.b, t2.c, t2.d
+                     Iterations: 4
+                     ->  Vector Adapter(type: BATCH MODE)
+                           Output: t2.a, t2.b, t2.c, t2.d
+                           ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_range_pt t2
+                                 Output: t2.a, t2.b, t2.c, t2.d
+                                 Selected Partitions:  1..4
+               ->  Vector Adapter
+                     Output: t1.a, t1.b, t1.c, t1.d
+                     ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_hash_ht t1
+                           Output: t1.a, t1.b, t1.c, t1.d
+                           Recheck Cond: (t1.a = 5)
+                           Selected Partitions:  9
+                           ->  Partitioned Bitmap Index Scan on idx_hash_local
+                                 Index Cond: (t1.a = 5)
+                                 Selected Partitions:  9
+(24 rows)
+
+explain(costs off, verbose on) select * from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5 order by 1,2,3,4;
+                                                 QUERY PLAN                                                  
+-------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+   ->  Vector Sort
+         Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+         Sort Key: t1.b, t1.c, t1.d
+         ->  Vector Nest Loop
+               Output: t1.a, t1.b, t1.c, t1.d, t2.a, t2.b, t2.c, t2.d
+               Join Filter: (t1.b = t2.b)
+               ->  Vector Adapter
+                     Output: t2.a, t2.b, t2.c, t2.d
+                     ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_range_pt t2
+                           Output: t2.a, t2.b, t2.c, t2.d
+                           Recheck Cond: (t2.a = 5)
+                           Selected Partitions:  1
+                           ->  Partitioned Bitmap Index Scan on idx_range_local
+                                 Index Cond: (t2.a = 5)
+                                 Selected Partitions:  1
+               ->  Vector Adapter
+                     Output: t1.a, t1.b, t1.c, t1.d
+                     ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_hash_ht t1
+                           Output: t1.a, t1.b, t1.c, t1.d
+                           Recheck Cond: (t1.a = 5)
+                           Selected Partitions:  9
+                           ->  Partitioned Bitmap Index Scan on idx_hash_local
+                                 Index Cond: (t1.a = 5)
+                                 Selected Partitions:  9
+(26 rows)
+
+explain(costs off, verbose on) select count(t1.b) from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5;
+                                                 QUERY PLAN                                                  
+-------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(t1.b))
+   ->  Vector Aggregate
+         Output: count(t1.b)
+         ->  Vector Nest Loop
+               Output: t1.b
+               Join Filter: (t1.b = t2.b)
+               ->  Vector Adapter
+                     Output: t2.a, t2.b, t2.c, t2.d
+                     ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_range_pt t2
+                           Output: t2.a, t2.b, t2.c, t2.d
+                           Recheck Cond: (t2.a = 5)
+                           Selected Partitions:  1
+                           ->  Partitioned Bitmap Index Scan on idx_range_local
+                                 Index Cond: (t2.a = 5)
+                                 Selected Partitions:  1
+               ->  Vector Adapter
+                     Output: t1.a, t1.b, t1.c, t1.d
+                     ->  Partitioned Bitmap Heap Scan on row_partition_iterator_elimination.test_hash_ht t1
+                           Output: t1.a, t1.b, t1.c, t1.d
+                           Recheck Cond: (t1.a = 5)
+                           Selected Partitions:  9
+                           ->  Partitioned Bitmap Index Scan on idx_hash_local
+                                 Index Cond: (t1.a = 5)
+                                 Selected Partitions:  9
+(25 rows)
+
+select * from test_hash_ht where a = 30 order by 1,2,3,4;
+ a  | b  | c | d 
+----+----+---+---
+ 30 | 31 |   |  
+ 30 | 81 |   |  
+(2 rows)
+
+select count(a) from test_hash_ht where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select count(b) from test_hash_ht where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_range_pt where a = 30 order by 1,2,3,4;
+ a  | b  | c | d 
+----+----+---+---
+ 30 | 31 |   |  
+ 30 | 81 |   |  
+(2 rows)
+
+select count(a) from test_range_pt where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select count(b) from test_range_pt where a = 30;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 order by 1,2,3,4;
+ a | b  | c | d | a | b  | c | d 
+---+----+---+---+---+----+---+---
+ 5 |  6 |   |   | 5 |  6 |   |  
+ 5 | 56 |   |   | 5 | 56 |   |  
+(2 rows)
+
+select count(t1.a) from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5;
+ count 
+-------
+     2
+(1 row)
+
+select * from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5 order by 1,2,3,4;
+ a | b  | c | d | a | b  | c | d 
+---+----+---+---+---+----+---+---
+ 5 |  6 |   |   | 5 |  6 |   |  
+ 5 | 56 |   |   | 5 | 56 |   |  
+(2 rows)
+
+select count(t1.b) from test_hash_ht t1 join test_range_pt t2 on t1.b = t2.b where t1.a = 5 and t2.a = 5;
+ count 
+-------
+     2
+(1 row)
+
+--tidscan + nestloop
+--base
+set partition_iterator_elimination = off;
+reset try_vector_engine_strategy;
+select * from test_hash_ht where a = 30 and ctid = (select ctid from test_hash_ht where a = 30 order by b limit 1);
+ a  | b  | c | d 
+----+----+---+---
+ 30 | 31 |   |  
+(1 row)
+
+select * from (select * from test_hash_ht where a = 5 and ctid = (select ctid from test_hash_ht where a = 5 order by b limit 1)) t1 join (select * from test_range_pt where a = 5 and ctid = (select ctid from test_range_pt where a = 5 order by b limit 1)) t2 on t1.a = t2.a where t1.a = 5;
+ a | b | c | d | a | b | c | d 
+---+---+---+---+---+---+---+---
+ 5 | 6 |   |   | 5 | 6 |   |  
+(1 row)
+
+set partition_iterator_elimination = on;
+set enable_seqscan = off;
+set enable_indexscan = off;
+set enable_bitmapscan = off;
+set enable_nestloop = on;
+set enable_hashjoin = off;
+set enable_mergejoin = off;
+explain(costs off, verbose on) select * from test_hash_ht where a = 30 and ctid = (select ctid from test_hash_ht where a = 30 limit 1);
+                                                                                                      QUERY PLAN                                                                                                      
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Partitioned Tid Scan on row_partition_iterator_elimination.test_hash_ht
+   Output: row_partition_iterator_elimination.test_hash_ht.a, row_partition_iterator_elimination.test_hash_ht.b, row_partition_iterator_elimination.test_hash_ht.c, row_partition_iterator_elimination.test_hash_ht.d
+   TID Cond: (row_partition_iterator_elimination.test_hash_ht.ctid = $2)
+   Filter: (row_partition_iterator_elimination.test_hash_ht.a = 30)
+   Selected Partitions:  4
+   InitPlan 1 (returns $2)
+     ->  Limit
+           Output: row_partition_iterator_elimination.test_hash_ht.ctid
+           ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_hash_ht
+                 Output: row_partition_iterator_elimination.test_hash_ht.ctid
+                 Filter: (row_partition_iterator_elimination.test_hash_ht.a = 30)
+                 Selected Partitions:  4
+(12 rows)
+
+explain(costs off, verbose on) select * from (select * from test_hash_ht where a = 5 and ctid = (select ctid from test_hash_ht where a = 5 limit 1)) t1 join (select * from test_range_pt where a = 5 and ctid = (select ctid from test_range_pt where a = 5 limit 1)) t2 on t1.a = t2.a where t1.a = 5;
+                                                                                                                                                                                                              QUERY PLAN                                                                                                                                                                                                              
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Nested Loop
+   Output: row_partition_iterator_elimination.test_hash_ht.a, row_partition_iterator_elimination.test_hash_ht.b, row_partition_iterator_elimination.test_hash_ht.c, row_partition_iterator_elimination.test_hash_ht.d, row_partition_iterator_elimination.test_range_pt.a, row_partition_iterator_elimination.test_range_pt.b, row_partition_iterator_elimination.test_range_pt.c, row_partition_iterator_elimination.test_range_pt.d
+   InitPlan 1 (returns $2)
+     ->  Limit
+           Output: row_partition_iterator_elimination.test_hash_ht.ctid
+           ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_hash_ht
+                 Output: row_partition_iterator_elimination.test_hash_ht.ctid
+                 Filter: (row_partition_iterator_elimination.test_hash_ht.a = 5)
+                 Selected Partitions:  9
+   InitPlan 2 (returns $5)
+     ->  Limit
+           Output: row_partition_iterator_elimination.test_range_pt.ctid
+           ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_range_pt
+                 Output: row_partition_iterator_elimination.test_range_pt.ctid
+                 Filter: (row_partition_iterator_elimination.test_range_pt.a = 5)
+                 Selected Partitions:  1
+   ->  Partitioned Tid Scan on row_partition_iterator_elimination.test_hash_ht
+         Output: row_partition_iterator_elimination.test_hash_ht.a, row_partition_iterator_elimination.test_hash_ht.b, row_partition_iterator_elimination.test_hash_ht.c, row_partition_iterator_elimination.test_hash_ht.d
+         TID Cond: (row_partition_iterator_elimination.test_hash_ht.ctid = $2)
+         Filter: (row_partition_iterator_elimination.test_hash_ht.a = 5)
+         Selected Partitions:  9
+   ->  Partitioned Tid Scan on row_partition_iterator_elimination.test_range_pt
+         Output: row_partition_iterator_elimination.test_range_pt.a, row_partition_iterator_elimination.test_range_pt.b, row_partition_iterator_elimination.test_range_pt.c, row_partition_iterator_elimination.test_range_pt.d
+         TID Cond: (row_partition_iterator_elimination.test_range_pt.ctid = $5)
+         Filter: (row_partition_iterator_elimination.test_range_pt.a = 5)
+         Selected Partitions:  1
+(26 rows)
+
+select * from test_hash_ht where a = 30 and ctid = (select ctid from test_hash_ht where a = 30 order by b limit 1);
+ a  | b  | c | d 
+----+----+---+---
+ 30 | 31 |   |  
+(1 row)
+
+select * from (select * from test_hash_ht where a = 5 and ctid = (select ctid from test_hash_ht where a = 5 order by b limit 1)) t1 join (select * from test_range_pt where a = 5 and ctid = (select ctid from test_range_pt where a = 5 order by b limit 1)) t2 on t1.a = t2.a where t1.a = 5;
+ a | b | c | d | a | b | c | d 
+---+---+---+---+---+---+---+---
+ 5 | 6 |   |   | 5 | 6 |   |  
+(1 row)
+
+--tidscan + hashjoin
+set enable_seqscan = off;
+set enable_indexscan = off;
+set enable_bitmapscan = off;
+set enable_nestloop = off;
+set enable_hashjoin = on;
+set enable_mergejoin = off;
+explain(costs off, verbose on) select * from test_hash_ht where a = 30 and ctid = (select ctid from test_hash_ht where a = 30 limit 1);
+                                                                                                      QUERY PLAN                                                                                                      
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Partitioned Tid Scan on row_partition_iterator_elimination.test_hash_ht
+   Output: row_partition_iterator_elimination.test_hash_ht.a, row_partition_iterator_elimination.test_hash_ht.b, row_partition_iterator_elimination.test_hash_ht.c, row_partition_iterator_elimination.test_hash_ht.d
+   TID Cond: (row_partition_iterator_elimination.test_hash_ht.ctid = $2)
+   Filter: (row_partition_iterator_elimination.test_hash_ht.a = 30)
+   Selected Partitions:  4
+   InitPlan 1 (returns $2)
+     ->  Limit
+           Output: row_partition_iterator_elimination.test_hash_ht.ctid
+           ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_hash_ht
+                 Output: row_partition_iterator_elimination.test_hash_ht.ctid
+                 Filter: (row_partition_iterator_elimination.test_hash_ht.a = 30)
+                 Selected Partitions:  4
+(12 rows)
+
+explain(costs off, verbose on) select * from (select * from test_hash_ht where a = 5 and ctid = (select ctid from test_hash_ht where a = 5 limit 1)) t1 join (select * from test_range_pt where a = 5 and ctid = (select ctid from test_range_pt where a = 5 limit 1)) t2 on t1.a = t2.a where t1.a = 5;
+                                                                                                                                                                                                              QUERY PLAN                                                                                                                                                                                                              
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Nested Loop
+   Output: row_partition_iterator_elimination.test_hash_ht.a, row_partition_iterator_elimination.test_hash_ht.b, row_partition_iterator_elimination.test_hash_ht.c, row_partition_iterator_elimination.test_hash_ht.d, row_partition_iterator_elimination.test_range_pt.a, row_partition_iterator_elimination.test_range_pt.b, row_partition_iterator_elimination.test_range_pt.c, row_partition_iterator_elimination.test_range_pt.d
+   InitPlan 1 (returns $2)
+     ->  Limit
+           Output: row_partition_iterator_elimination.test_hash_ht.ctid
+           ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_hash_ht
+                 Output: row_partition_iterator_elimination.test_hash_ht.ctid
+                 Filter: (row_partition_iterator_elimination.test_hash_ht.a = 5)
+                 Selected Partitions:  9
+   InitPlan 2 (returns $5)
+     ->  Limit
+           Output: row_partition_iterator_elimination.test_range_pt.ctid
+           ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_range_pt
+                 Output: row_partition_iterator_elimination.test_range_pt.ctid
+                 Filter: (row_partition_iterator_elimination.test_range_pt.a = 5)
+                 Selected Partitions:  1
+   ->  Partitioned Tid Scan on row_partition_iterator_elimination.test_hash_ht
+         Output: row_partition_iterator_elimination.test_hash_ht.a, row_partition_iterator_elimination.test_hash_ht.b, row_partition_iterator_elimination.test_hash_ht.c, row_partition_iterator_elimination.test_hash_ht.d
+         TID Cond: (row_partition_iterator_elimination.test_hash_ht.ctid = $2)
+         Filter: (row_partition_iterator_elimination.test_hash_ht.a = 5)
+         Selected Partitions:  9
+   ->  Partitioned Tid Scan on row_partition_iterator_elimination.test_range_pt
+         Output: row_partition_iterator_elimination.test_range_pt.a, row_partition_iterator_elimination.test_range_pt.b, row_partition_iterator_elimination.test_range_pt.c, row_partition_iterator_elimination.test_range_pt.d
+         TID Cond: (row_partition_iterator_elimination.test_range_pt.ctid = $5)
+         Filter: (row_partition_iterator_elimination.test_range_pt.a = 5)
+         Selected Partitions:  1
+(26 rows)
+
+select * from test_hash_ht where a = 30 and ctid = (select ctid from test_hash_ht where a = 30 order by b limit 1);
+ a  | b  | c | d 
+----+----+---+---
+ 30 | 31 |   |  
+(1 row)
+
+select * from (select * from test_hash_ht where a = 5 and ctid = (select ctid from test_hash_ht where a = 5 order by b limit 1)) t1 join (select * from test_range_pt where a = 5 and ctid = (select ctid from test_range_pt where a = 5 order by b limit 1)) t2 on t1.a = t2.a where t1.a = 5;
+ a | b | c | d | a | b | c | d 
+---+---+---+---+---+---+---+---
+ 5 | 6 |   |   | 5 | 6 |   |  
+(1 row)
+
+--tidscan + mergejoin
+set enable_seqscan = off;
+set enable_indexscan = off;
+set enable_bitmapscan = off;
+set enable_nestloop = off;
+set enable_hashjoin = off;
+set enable_mergejoin = on;
+explain(costs off, verbose on) select * from test_hash_ht where a = 30 and ctid = (select ctid from test_hash_ht where a = 30 limit 1);
+                                                                                                      QUERY PLAN                                                                                                      
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Partitioned Tid Scan on row_partition_iterator_elimination.test_hash_ht
+   Output: row_partition_iterator_elimination.test_hash_ht.a, row_partition_iterator_elimination.test_hash_ht.b, row_partition_iterator_elimination.test_hash_ht.c, row_partition_iterator_elimination.test_hash_ht.d
+   TID Cond: (row_partition_iterator_elimination.test_hash_ht.ctid = $2)
+   Filter: (row_partition_iterator_elimination.test_hash_ht.a = 30)
+   Selected Partitions:  4
+   InitPlan 1 (returns $2)
+     ->  Limit
+           Output: row_partition_iterator_elimination.test_hash_ht.ctid
+           ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_hash_ht
+                 Output: row_partition_iterator_elimination.test_hash_ht.ctid
+                 Filter: (row_partition_iterator_elimination.test_hash_ht.a = 30)
+                 Selected Partitions:  4
+(12 rows)
+
+explain(costs off, verbose on) select * from (select * from test_hash_ht where a = 5 and ctid = (select ctid from test_hash_ht where a = 5 limit 1)) t1 join (select * from test_range_pt where a = 5 and ctid = (select ctid from test_range_pt where a = 5 limit 1)) t2 on t1.a = t2.a where t1.a = 5;
+                                                                                                                                                                                                              QUERY PLAN                                                                                                                                                                                                              
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Nested Loop
+   Output: row_partition_iterator_elimination.test_hash_ht.a, row_partition_iterator_elimination.test_hash_ht.b, row_partition_iterator_elimination.test_hash_ht.c, row_partition_iterator_elimination.test_hash_ht.d, row_partition_iterator_elimination.test_range_pt.a, row_partition_iterator_elimination.test_range_pt.b, row_partition_iterator_elimination.test_range_pt.c, row_partition_iterator_elimination.test_range_pt.d
+   InitPlan 1 (returns $2)
+     ->  Limit
+           Output: row_partition_iterator_elimination.test_hash_ht.ctid
+           ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_hash_ht
+                 Output: row_partition_iterator_elimination.test_hash_ht.ctid
+                 Filter: (row_partition_iterator_elimination.test_hash_ht.a = 5)
+                 Selected Partitions:  9
+   InitPlan 2 (returns $5)
+     ->  Limit
+           Output: row_partition_iterator_elimination.test_range_pt.ctid
+           ->  Partitioned Seq Scan on row_partition_iterator_elimination.test_range_pt
+                 Output: row_partition_iterator_elimination.test_range_pt.ctid
+                 Filter: (row_partition_iterator_elimination.test_range_pt.a = 5)
+                 Selected Partitions:  1
+   ->  Partitioned Tid Scan on row_partition_iterator_elimination.test_hash_ht
+         Output: row_partition_iterator_elimination.test_hash_ht.a, row_partition_iterator_elimination.test_hash_ht.b, row_partition_iterator_elimination.test_hash_ht.c, row_partition_iterator_elimination.test_hash_ht.d
+         TID Cond: (row_partition_iterator_elimination.test_hash_ht.ctid = $2)
+         Filter: (row_partition_iterator_elimination.test_hash_ht.a = 5)
+         Selected Partitions:  9
+   ->  Partitioned Tid Scan on row_partition_iterator_elimination.test_range_pt
+         Output: row_partition_iterator_elimination.test_range_pt.a, row_partition_iterator_elimination.test_range_pt.b, row_partition_iterator_elimination.test_range_pt.c, row_partition_iterator_elimination.test_range_pt.d
+         TID Cond: (row_partition_iterator_elimination.test_range_pt.ctid = $5)
+         Filter: (row_partition_iterator_elimination.test_range_pt.a = 5)
+         Selected Partitions:  1
+(26 rows)
+
+select * from test_hash_ht where a = 30 and ctid = (select ctid from test_hash_ht where a = 30 limit 1);
+ a  | b  | c | d 
+----+----+---+---
+ 30 | 31 |   |  
+(1 row)
+
+select * from (select * from test_hash_ht where a = 5 and ctid = (select ctid from test_hash_ht where a = 5 limit 1)) t1 join (select * from test_range_pt where a = 5 and ctid = (select ctid from test_range_pt where a = 5 limit 1)) t2 on t1.a = t2.a where t1.a = 5;
+ a | b | c | d | a | b | c | d 
+---+---+---+---+---+---+---+---
+ 5 | 6 |   |   | 5 | 6 |   |  
+(1 row)
+
+DROP SCHEMA row_partition_iterator_elimination  CASCADE;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table test_hash_ht
+drop cascades to table test_range_pt

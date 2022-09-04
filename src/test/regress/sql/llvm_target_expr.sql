@@ -1,4 +1,4 @@
-﻿/* 
+/* 
  * This file is used to test the LLVM Optimization in target list expression.
  * It's purpose is to  cover the basic functionality about expressions.
  */

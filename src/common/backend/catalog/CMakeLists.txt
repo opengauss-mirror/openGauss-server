@@ -3,7 +3,7 @@ set(POSTGRES_BKI_SRCS_S
 "@pg_proc.h @pg_type.h @pg_attribute.h @pg_class.h @pg_partition.h @pg_attrdef.h @pg_constraint.h
 @pg_inherits.h @pg_index.h @pg_operator.data @pg_opfamily.h @pg_opclass.h @pg_am.h @pg_amop.data @pg_amproc.h
 @pg_language.h @pg_largeobject_metadata.h @pg_largeobject.h @pg_aggregate.h @pg_statistic.h @pg_rewrite.h
-@pg_trigger.h @pg_description.h @pg_cast.h @pg_enum.h @pg_namespace.h @pg_conversion.h @pg_depend.h @pg_database.h
+@pg_trigger.h @pg_description.h @pg_cast.h @pg_enum.h @pg_set.h @pg_namespace.h @pg_conversion.h @pg_depend.h @pg_database.h
 @pg_db_role_setting.h @pg_tablespace.h @pg_pltemplate.h @pg_authid.h @pg_auth_members.h @pg_shdepend.h @pg_shdescription.h
 @pg_ts_config.h @pg_ts_config_map.h @pg_ts_dict.h @pg_ts_parser.h @pg_ts_template.h @pg_auth_history.h @pg_user_status.h
 @pg_extension.h @pg_obsscaninfo.h @pg_foreign_data_wrapper.h @pg_foreign_server.h @pg_user_mapping.h @pgxc_class.h @pgxc_node.h
@@ -15,7 +15,7 @@ set(POSTGRES_BKI_SRCS_S
 @pg_object.h @pg_synonym.h @toasting.h @indexing.h @gs_obsscaninfo.h @pg_directory.h @pg_hashbucket.h @gs_global_chain.h @gs_global_config.h
 @pg_streaming_stream.h @pg_streaming_cont_query.h @pg_streaming_reaper_status.h @gs_matview.h @gs_matview_dependency.h @pgxc_slice.h 
 @gs_opt_model.h @pg_recyclebin.h @pg_snapshot.h @gs_model.h @gs_package.h @gs_job_argument.h @gs_job_attribute.h @pg_uid.h @gs_db_privilege.h
-@pg_replication_origin.h @pg_publication.h @pg_publication_rel.h @pg_subscription.h @pg_subscription_rel.h"
+@pg_replication_origin.h @pg_publication.h @pg_publication_rel.h @pg_subscription.h @gs_sql_patch.h @pg_subscription_rel.h"
 
 )
 
@@ -39,9 +39,7 @@ set(TGT_catalog_INC
     ${PROJECT_SRC_DIR}/lib/gstrace
     ${LZ4_INCLUDE_PATH}
     ${LIBCGROUP_INCLUDE_PATH}
-    ${LIBORC_INCLUDE_PATH}
     ${EVENT_INCLUDE_PATH}
-    ${PROTOBUF_INCLUDE_PATH}
     ${ZLIB_INCLUDE_PATH}
 )
 

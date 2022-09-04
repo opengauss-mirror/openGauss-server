@@ -49,9 +49,9 @@ int argv_num;
 static bool is_pipeline = false;
 static bool is_interactive = true;
 #ifndef ENABLE_MULTIPLE_NODES
-static const char *g_queryNodeState = "select local_role, db_state from pg_stat_get_stream_replications();";
-static const char *g_expectedLocalRole = "Primary";
-static const char *g_expectedDbState = "Normal";
+const char *g_queryNodeState = "select local_role, db_state from pg_catalog.pg_stat_get_stream_replications();";
+const char *g_expectedLocalRole = "Primary";
+const char *g_expectedDbState = "Normal";
 #endif
 /* The version of libpq */
 extern const char* libpqVersionString;
@@ -444,6 +444,7 @@ int main(int argc, char* argv[])
     pset.encoding = PQenv2encoding();
     pset.queryFout = stdout;
     pset.queryFoutPipe = false;
+    pset.copyStream = NULL;
     pset.cur_cmd_source = stdin;
     pset.cur_cmd_interactive = false;
 #if defined(USE_ASSERT_CHECKING) || defined(FASTCHECK)

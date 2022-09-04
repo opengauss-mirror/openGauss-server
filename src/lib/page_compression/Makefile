@@ -35,8 +35,8 @@ ifneq "$(MAKECMDGOALS)" "clean"
   endif
 endif
 
-override CPPFLAGS := $(filter-out -fPIE, $(CPPFLAGS)) -fPIC -DFRONTEND -I. # backend/utils/errcodes.h
-override CFLAGS := $(filter-out -fPIE, $(CFLAGS)) -fPIC -DFRONTEND -I. # backend/utils/errcodes.h
+override CPPFLAGS := $(filter-out -fPIE, $(CPPFLAGS)) -fPIC -DFRONTEND -I. -I$(LZ4_INCLUDE_PATH) -std=c++14 # backend/utils/errcodes.h
+override CFLAGS := $(filter-out -fPIE, $(CFLAGS)) -fPIC -DFRONTEND -I. -I$(LZ4_INCLUDE_PATH) -std=c++14 # backend/utils/errcodes.h
 
 OBJS = PageCompression.o
 
@@ -46,7 +46,7 @@ all: libpagecompression.so
 
 libpagecompression.so:
 	sh page_compression.sh $(top_builddir)/src .
-	$(CC) -fstack-protector-strong -Wl,-z,relro,-z,now -fPIC -shared $(CFLAGS) $(CPPFLAGS) PageCompression.cpp checksum_impl.cpp pg_lzcompress.cpp -o libpagecompression.so.$(VERSION)
+	$(CC) -fstack-protector-strong -Wl,-z,relro,-z,now -fPIC -shared $(CFLAGS) $(CPPFLAGS) PageCompression.cpp checksum_impl.cpp pg_lzcompress.cpp cfs_tools.cpp -o libpagecompression.so.$(VERSION)
 	rm -f libpagecompression.so && \
 	ln -s libpagecompression.so.$(VERSION) libpagecompression.so
 
@@ -60,6 +60,6 @@ installdirs:
 	$(MKDIR_P) '$(DESTDIR)$(libdir)'
 
 clean distclean maintainer-clean:
-	rm -f $(OBJS) libpagecompression.a pg_lzcompress.o checksum_impl.o libpagecompression.so libpagecompression.so.$(VERSION) *.depend
-	rm -f checksum_impl.cpp pg_lzcompress.cpp
+	rm -f $(OBJS) libpagecompression.a pg_lzcompress.o checksum_impl.o cfs_tools.o libpagecompression.so libpagecompression.so.$(VERSION) *.depend
+	rm -f checksum_impl.cpp pg_lzcompress.cpp cfs_tools.cpp
 	rm -rf utils storage

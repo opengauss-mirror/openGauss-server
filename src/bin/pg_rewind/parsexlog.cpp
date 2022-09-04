@@ -233,9 +233,8 @@ BuildErrorCode findCommonCheckpoint(const char* datadir, TimeLineID tli, XLogRec
                 CloseXlogFile();
                 return increment_return_code;
             }
-            current_time = localGetCurrentTimestamp();
         }
-
+        current_time = localGetCurrentTimestamp();
         /* Walk backwards to previous record. */
         searchptr = record->xl_prev;
     }
@@ -290,7 +289,7 @@ static void extractPageInfo(XLogReaderState* record)
             continue;
 
         pg_log(PG_DEBUG,
-            "; block%d: rel %u/%u/%u forknum %u blkno %u physical address[%u, %u]",
+            "; block%d: rel %u/%u/%u forknum %u blkno %u physical address[%u, %u]\n",
             block_id,
             rnode.spcNode,
             rnode.dbNode,

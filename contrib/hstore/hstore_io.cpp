@@ -397,6 +397,7 @@ Datum hstore_from_text(PG_FUNCTION_ARGS)
 
     p.needfree = false;
     key = PG_GETARG_TEXT_PP(0);
+    FUNC_CHECK_HUGE_POINTER(false, key, "tconvert()");
     p.key = VARDATA_ANY(key);
     p.keylen = hstoreCheckKeyLen(VARSIZE_ANY_EXHDR(key));
 
@@ -405,6 +406,7 @@ Datum hstore_from_text(PG_FUNCTION_ARGS)
         p.isnull = true;
     } else {
         val = PG_GETARG_TEXT_PP(1);
+        FUNC_CHECK_HUGE_POINTER(false, val, "tconvert()");
         p.val = VARDATA_ANY(val);
         p.vallen = hstoreCheckValLen(VARSIZE_ANY_EXHDR(val));
         p.isnull = false;

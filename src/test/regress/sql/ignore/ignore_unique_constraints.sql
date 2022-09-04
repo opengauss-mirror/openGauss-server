@@ -177,5 +177,14 @@ insert into t_ignore values(2);
 update /*+ ignore_error */ t_ignore set num = 1 where num = 2;
 select * from t_ignore;
 
+-- test for column orientation table: not supported
+drop table if exists t_column_orien cascade;
+create table t_column_orien(c1 int primary key) with (orientation=column);
+insert into t_column_orien values(1), (2);
+insert /*+ ignore_error */ into t_column_orien values(1);
+insert /*+ ignore_error */ into t_column_orien values(null);
+update /*+ ignore_error */ t_column_orien set c1 = null where c1 = 2;
+update /*+ ignore_error */ t_column_orien set c1 = 1 where c1 = 2;
+
 \c postgres
 drop database if exists sql_ignore_unique_test;

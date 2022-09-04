@@ -1137,9 +1137,9 @@ merge_files(void *arg)
                                                 arguments->full_external_prefix);
 
         done:
-            tmp_file->compressedFile = dest_file->compressedFile;
-            tmp_file->compressedAlgorithm = dest_file->compressedAlgorithm;
-            tmp_file->compressedChunkSize = dest_file->compressedChunkSize;
+            tmp_file->compressed_file = dest_file->compressed_file;
+            tmp_file->compressed_algorithm = dest_file->compressed_algorithm;
+            tmp_file->compressed_chunk_size = dest_file->compressed_chunk_size;
             parray_append(arguments->merge_filelist, tmp_file);
     }
 

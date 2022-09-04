@@ -45,6 +45,7 @@
 #define SLOWQUERY_LOG_TAG "sql_monitor"
 #define ASP_LOG_TAG "asp_data"
 #define PERF_JOB_TAG "pg_perf"
+#define MEMORY_LOG_TAG "mem_log"
 
 enum LogType {
     /* error log */

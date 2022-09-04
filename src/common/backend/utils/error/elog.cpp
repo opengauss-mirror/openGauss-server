@@ -168,6 +168,7 @@ static void eraseSingleQuotes(char* query_string);
 static int output_backtrace_to_log(StringInfoData* pOutBuf);
 static void write_asp_chunks(char *data, int len, bool end);
 static void write_asplog(char *data, int len, bool end);
+const char* password_mask = "********";
 
 #define MASK_OBS_PATH()                                                                                 \
     do {                                                                                                \
@@ -176,6 +177,7 @@ static void write_asplog(char *data, int len, bool end);
             if (mask_string == NULL) {                                                                  \
                 mask_string = MemoryContextStrdup(                                                      \
                     SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_SECURITY), query_string);                     \
+                vol_mask_string = mask_string;                                                          \
             }                                                                                           \
             if (unlikely(yyextra.literallen != (int)strlen(childStmt))) {                               \
                 ereport(ERROR,                                                                          \
@@ -272,7 +274,7 @@ bool errstart(int elevel, const char* filename, int lineno, const char* funcname
         if (elevel == ERROR) {
             if (t_thrd.log_cxt.PG_exception_stack == NULL ||
                 t_thrd.proc_cxt.proc_exit_inprogress ||
-                t_thrd.xact_cxt.applying_subxact_undo)
+                t_thrd.xact_cxt.executeSubxactUndo)
             {
                 elevel = FATAL;
             }
@@ -542,7 +544,7 @@ void errfinish(int dummy, ...)
     edata->backtrace_log = NULL;
 
     /* get backtrace info */
-    if (edata->elevel >= u_sess->attr.attr_common.backtrace_min_messages) {
+    if (edata->elevel >= u_sess->attr.attr_common.backtrace_min_messages && !t_thrd.log_cxt.output_backtrace_log) {
         StringInfoData buf;
         initStringInfo(&buf);
 
@@ -572,6 +574,7 @@ void errfinish(int dummy, ...)
         u_sess->catalog_cxt.setCurCreateSchema = false;
         u_sess->catalog_cxt.curCreateSchema = NULL;
         u_sess->exec_cxt.isLockRows = false;
+        u_sess->exec_cxt.isFlashBack = false;
     }
 
     /*
@@ -607,6 +610,11 @@ void errfinish(int dummy, ...)
          */
 
         t_thrd.log_cxt.recursion_depth--;
+
+        if (EnableLocalSysCache()) {
+            MemoryContextSwitchTo(oldcontext);
+        }
+
         PG_RE_THROW();
     }
 
@@ -2847,6 +2855,8 @@ int output_backtrace_to_log(StringInfoData* pOutBuf)
     AutoMutexLock btLock(&bt_lock);
 
     btLock.lock();
+    
+    t_thrd.log_cxt.output_backtrace_log = true;
 
     if (t_thrd.log_cxt.thd_bt_symbol) {
         free(t_thrd.log_cxt.thd_bt_symbol);
@@ -2862,6 +2872,7 @@ int output_backtrace_to_log(StringInfoData* pOutBuf)
 
     if (NULL == t_thrd.log_cxt.thd_bt_symbol) {
         appendStringInfoString(pOutBuf, "Failed to get backtrace symbols.\n");
+        t_thrd.log_cxt.output_backtrace_log = false;
         btLock.unLock();
         return -1;
     }
@@ -2878,7 +2889,7 @@ int output_backtrace_to_log(StringInfoData* pOutBuf)
      */
     free(t_thrd.log_cxt.thd_bt_symbol);
     t_thrd.log_cxt.thd_bt_symbol = NULL;
-
+    t_thrd.log_cxt.output_backtrace_log = false;
     btLock.unLock();
 
     return 0;
@@ -4157,6 +4168,12 @@ static bool is_execute_cmd(const char* query_string)
             pfree_ext(format_str);
             return true;
         }
+        encrypt = strstr(format_str, "aes_encrypt");
+        decrypt = strstr(format_str, "aes_decrypt");
+        if ((encrypt != NULL) || (decrypt != NULL)) {
+            pfree_ext(format_str);
+            return true;
+        }
     }
     pfree_ext(format_str);
     return false;
@@ -4254,7 +4271,6 @@ static int get_reallen_of_credential(char *param)
  * Mask the password in statment CREATE ROLE, CREATE USER, ALTER ROLE, ALTER USER, CREATE GROUP
  * SET ROLE, CREATE DATABASE LINK, and some function
  */
-
 static char* mask_Password_internal(const char* query_string)
 {
     int i = 0;
@@ -4265,8 +4281,16 @@ static char* mask_Password_internal(const char* query_string)
     int currToken = 59; /* initialize prevToken as ';' */
     bool isPassword = false;
     char* mask_string = NULL;
+    /*
+     * In the release version, the compiler optimizes 'mask_string' parameter.
+     * After siglongjump in PG_CATCH, the value of 'mask_string' may not be up-to-date.
+     * Therefore, the return value of mask_Password_internal maybe uncontrollable.
+     * We use a valatile copy of 'mask_string' named 'vol_mask_string' as the return value
+     * to void uncontrollable behavior caused by compiler optimizations.
+     */
+    volatile char* vol_mask_string = mask_string;
     /* the function list need mask */
-    const char* funcs[] = {"dblink_connect", "create_credential"};
+    const char* funcs[] = {"create_credential"};
     bool is_create_credential = false;
     bool is_create_credential_passwd = false;
     int funcNum = sizeof(funcs) / sizeof(funcs[0]);
@@ -4281,7 +4305,7 @@ static char* mask_Password_internal(const char* query_string)
 
     /* the functions need to mask all contents */
     const char* funCrypt[] = {"gs_encrypt_aes128", "gs_decrypt_aes128", "gs_encrypt", "gs_decrypt",
-        "pg_create_physical_replication_slot_extern"};
+        "aes_encrypt", "aes_decrypt", "pg_create_physical_replication_slot_extern", "dblink_connect"};
     int funCryptNum = sizeof(funCrypt) / sizeof(funCrypt[0]);
     bool isCryptFunc = false;
 
@@ -4331,6 +4355,8 @@ static char* mask_Password_internal(const char* query_string)
     yyscanner = scanner_init(query_string, &yyextra, ScanKeywords, NumScanKeywords);
     yyextra.warnOnTruncateIdent = false;
     u_sess->attr.attr_sql.escape_string_warning = false;
+    /* forbid password truncate */
+    u_sess->parser_cxt.isForbidTruncate = true;
 
     /*set t_thrd.log_cxt.recursion_depth to 0 for avoiding MemoryContextReset called*/
     t_thrd.log_cxt.recursion_depth = 0;
@@ -4374,6 +4400,7 @@ static char* mask_Password_internal(const char* query_string)
                         if (mask_string == NULL) {
                             mask_string = MemoryContextStrdup(
                                 SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_SECURITY), query_string);
+                            vol_mask_string = mask_string;
                         }
 
                         /*
@@ -4392,6 +4419,7 @@ static char* mask_Password_internal(const char* query_string)
                             securec_check(rc, "\0", "\0");
                             pfree_ext(mask_string);
                             mask_string = maskStrNew;
+                            vol_mask_string = mask_string;
                         }
 
                         /*
@@ -4428,9 +4456,6 @@ static char* mask_Password_internal(const char* query_string)
                 if (ch == '\'' || ch == '\"')
                     ++position[idx];
 
-                /* Calcute the difference between origin password length and mask password length */
-                position[idx] -= truncateLen;
-
                 if (!is_create_credential) {
                     length[idx] = strlen(yylval.str);
                 } else if (isPassword) {
@@ -4460,6 +4485,7 @@ static char* mask_Password_internal(const char* query_string)
                     if (mask_string == NULL) {
                         mask_string = MemoryContextStrdup(
                             SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_SECURITY), query_string);
+                        vol_mask_string = mask_string;
                     }
                     int maskLen = u_sess->attr.attr_security.Password_min_length;
                     for (i = 0; i < idx; ++i) {
@@ -4468,15 +4494,15 @@ static char* mask_Password_internal(const char* query_string)
                          *  the len of password may be shorter than actual, 
                          *  we need to find the start position of password word by looking forward.
                          */ 
-                        char wordHead = position[i] > 0 ? mask_string[position[i] - 1] : '\0';
+                        char wordHead = position[i] > 0 ? query_string[position[i] - 1] : '\0';
                         if (isPassword && wordHead != '\0' && wordHead != '\'' && wordHead != '\"') {
                             while (position[i] > 0 && !isspace(wordHead) && wordHead != '\'' && wordHead != '\"') {
                                 position[i]--;
-                                wordHead = mask_string[position[i] - 1];
+                                wordHead = query_string[position[i] - 1];
                             }
-                            length[i] = strlen(mask_string + position[i]);
+                            length[i] = strlen(query_string + position[i]);
                             /* if the last char is ';', we should keep it */
-                            if (mask_string[position[i] + length[i] - 1] == ';') {
+                            if (query_string[position[i] + length[i] - 1] == ';') {
                                 length[i]--;
                             }
                         }
@@ -4486,8 +4512,9 @@ static char* mask_Password_internal(const char* query_string)
                          * Calcute length of '\'' and double this length.
                          */
                         int lengthOfQuote = 0;
+                        int yyvalLen = (yylval.str != NULL) ? (int)strlen(yylval.str) : 0;
                         for (int len = 0; len < length[i]; len++) {
-                            if ((yylval.str != NULL) && (yylval.str[len] == '\'')) {
+                            if (len < yyvalLen && (yylval.str[len] == '\'')) {
                                 lengthOfQuote++;
                             }
                         }
@@ -4502,20 +4529,23 @@ static char* mask_Password_internal(const char* query_string)
                             securec_check(rc, "\0", "\0");
                             pfree_ext(mask_string);
                             mask_string = maskStrNew;
+                            vol_mask_string = mask_string;
                         }
 
-                        char* maskBegin = mask_string + position[i];
-                        int copySize = strlen(mask_string) - position[i] - length[i] + 1;
-                        rc = memmove_s(maskBegin + maskLen, copySize, maskBegin + length[i], copySize);
-                        securec_check(rc, "", "");
+                        char* maskBegin = mask_string + (position[i] - truncateLen);
+                        int copySize = strlen(mask_string) - (position[i] - truncateLen) - length[i] + 1;
+                        if (copySize > 0) {
+                            rc = memmove_s(maskBegin + maskLen, copySize, maskBegin + length[i], copySize);
+                            securec_check(rc, "", "");
+                            rc = memset_s(maskBegin, maskLen, '*', maskLen);
+                            securec_check(rc, "", "");
+                        }
                         /*
                          * After masking password, the origin password had been transformed to '*', which length equals
                          * to u_sess->attr.attr_security.Password_min_length.
                          * So we should record the difference between origin password length and mask password length.
                          */
                         truncateLen = strlen(query_string) - strlen(mask_string);
-                        rc = memset_s(maskBegin, maskLen, '*', maskLen);
-                        securec_check(rc, "", "");
 
                         need_clear_yylval = true;
                     }
@@ -4697,6 +4727,7 @@ static char* mask_Password_internal(const char* query_string)
                             if (mask_string == NULL) {
                                 mask_string = MemoryContextStrdup(
                                     SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_SECURITY), query_string);
+                                vol_mask_string = mask_string;
                             }
                             
                             if (yylloc > position_crypt) {
@@ -4732,9 +4763,10 @@ static char* mask_Password_internal(const char* query_string)
                         if (NULL == mask_string) {
                             mask_string = MemoryContextStrdup(
                                 SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_SECURITY), query_string);
+                            vol_mask_string = mask_string;
                         }
                         for (i = 0; i < idx; ++i) {
-                            rc = memset_s(mask_string + position[i], length[i], '*', length[i]);
+                            rc = memset_s(mask_string + (position[i] - truncateLen), length[i], '*', length[i]);
                             securec_check(rc, "", "");
                         }
                         idx = 0;
@@ -4833,7 +4865,8 @@ static char* mask_Password_internal(const char* query_string)
 
                     if ((prevToken[1] == SERVER && prevToken[2] == OPTIONS) ||
                         (prevToken[1] == FOREIGN && prevToken[2] == TABLE && prevToken[3] == OPTIONS)) {
-                        if (pg_strcasecmp(yylval.str, "secret_access_key") == 0) {
+                        if (pg_strcasecmp(yylval.str, "secret_access_key") == 0 ||
+                            pg_strcasecmp(yylval.str, "password") == 0) {
                             /* create/alter server  */
                             curStmtType = 10;
                         } else {
@@ -4843,9 +4876,11 @@ static char* mask_Password_internal(const char* query_string)
                     } else if (prevToken[1] == DATA_P && prevToken[2] == SOURCE_P && prevToken[3] == OPTIONS) {
                         /*
                          * For create/alter data source: sensitive opts are 'username' and 'password'.
-                         * 'username' is marked here, while 'password' is marked as a standard Token, not here.
+                         * 'username' is marked here, while 'password' is usually marked as a standard Token.
+                         * However, password will be taken as SCONST if wrapped around double-quote, which needs
+                         * to be handled here.
                          */
-                        if (pg_strcasecmp(yylval.str, "username") == 0) {
+                        if (pg_strcasecmp(yylval.str, "username") == 0 || pg_strcasecmp(yylval.str, "password") == 0) {
                             curStmtType = 11;
                         } else {
                             curStmtType = 0;
@@ -4875,10 +4910,36 @@ static char* mask_Password_internal(const char* query_string)
                             if (mask_string == NULL) {
                                 mask_string = MemoryContextStrdup(
                                     SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_SECURITY), query_string);
+                                vol_mask_string = mask_string;
                             }
+                            if (strstr(mask_string, "secret_access_key") != NULL) {
+                                int plen = strlen(mask_string) + strlen(password_mask) + 1;
+                                char* maskStrTmp = (char*)palloc(plen);
+                                rc = memset_s(maskStrTmp, plen, '\0', plen);
+                                securec_check(rc, "", "");
+                                rc = memcpy_s(maskStrTmp, plen, mask_string, strlen(mask_string));
+                                securec_check(rc, "", "");
+                                char* after_ak = pg_strdup(maskStrTmp + position[0] + length[0]);
+                                rc = memcpy_s(maskStrTmp + position[0], plen, password_mask, strlen(password_mask));
+                                securec_check(rc, "", "");
+                                rc = memcpy_s(maskStrTmp + position[0] + strlen(password_mask),
+                                    plen, after_ak, strlen(after_ak) + 1);
+                                securec_check(rc, "", "");
 
-                            rc = memset_s(mask_string + position[0], length[0], '*', length[0]);
-                            securec_check(rc, "", "");
+                                char* maskStrNew = MemoryContextStrdup(
+                                    SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_SECURITY), maskStrTmp);
+                                rc = memset_s(mask_string, strlen(mask_string), '\0', strlen(mask_string));
+                                securec_check(rc, "", "");
+                                pfree_ext(mask_string);
+                                pfree_ext(maskStrTmp);
+                                mask_string = maskStrNew;
+                                vol_mask_string = mask_string;
+                                free(after_ak);
+                                after_ak = NULL;
+                            } else {
+                                rc = memset_s(mask_string + position[0], length[0], '*', length[0]);
+                                securec_check(rc, "", "");
+                            }
                             idx = 0;
                             curStmtType = 0;
                         }
@@ -4897,6 +4958,7 @@ static char* mask_Password_internal(const char* query_string)
                         if (mask_string == NULL) {
                             mask_string = MemoryContextStrdup(
                                 SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_SECURITY), query_string);
+                            vol_mask_string = mask_string;
                         }
                         /*
                          * mask to the end of string, cause the length[0] may be shorter than actual.
@@ -4909,7 +4971,7 @@ static char* mask_Password_internal(const char* query_string)
                         if (query_string[position[0] + maskLen - 1] == ';') {
                             maskLen--;
                         }
-                        rc = memset_s(mask_string + position[0], maskLen, '*', maskLen);
+                        rc = memset_s(mask_string + (position[0] - truncateLen), maskLen, '*', maskLen);
                         securec_check(rc, "", "");
                         /* the yylval store the conninfo, so we clear it here */
                         ClearYylval(&yylval);
@@ -4940,6 +5002,7 @@ static char* mask_Password_internal(const char* query_string)
                         if (mask_string == NULL) {
                             mask_string = MemoryContextStrdup(
                                 SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_SECURITY), query_string);
+                            vol_mask_string = mask_string;
                         }
                         int maskLen = yylloc - conninfoStartPos;
                         rc = memset_s(mask_string + conninfoStartPos, maskLen, '*', maskLen);
@@ -4987,6 +5050,8 @@ static char* mask_Password_internal(const char* query_string)
     t_thrd.log_cxt.recursion_depth = saveRecursionDepth;
     t_thrd.int_cxt.InterruptHoldoffCount = saveInterruptHoldoffCount;
     u_sess->attr.attr_sql.escape_string_warning = saveEscapeStringWarning;
+    /* reset the forbid truncate flag */
+    u_sess->parser_cxt.isForbidTruncate = false;
 
     if (yyextra.scanbuflen > 0) {
         rc = memset_s(yyextra.scanbuf, yyextra.scanbuflen, 0, yyextra.scanbuflen);
@@ -4999,8 +5064,8 @@ static char* mask_Password_internal(const char* query_string)
         pfree_ext(yyextra.literalbuf);
     }
 
-    return mask_string;
-
+    /* return the valatile copy of mask_string to ensure that the latest value is returned. */
+    return (char *)vol_mask_string;
 }
 
 static void eraseSingleQuotes(char* query_string)

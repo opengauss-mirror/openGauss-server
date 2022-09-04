@@ -33,7 +33,6 @@ insert into list_list values('201902', '2', '1', 1);
 insert into list_list values('201902', '1', '1', 1);
 insert into list_list values('201903', '2', '1', 1);
 insert into list_list values('201903', '1', '1', 1);
-insert into list_list values('201903', '2', '1', 1);
 select * from list_list;
 drop table list_list;
 
@@ -59,10 +58,8 @@ PARTITION BY LIST (month_code) SUBPARTITION BY HASH (dept_code)
 );
 insert into list_hash values('201902', '1', '1', 1);
 insert into list_hash values('201902', '2', '1', 1);
-insert into list_hash values('201902', '3', '1', 1);
 insert into list_hash values('201903', '4', '1', 1);
 insert into list_hash values('201903', '5', '1', 1);
-insert into list_hash values('201903', '6', '1', 1);
 select * from list_hash;
 drop table list_hash;
 
@@ -88,103 +85,12 @@ PARTITION BY LIST (month_code) SUBPARTITION BY RANGE (dept_code)
 );
 insert into list_range values('201902', '1', '1', 1);
 insert into list_range values('201902', '2', '1', 1);
-insert into list_range values('201902', '3', '1', 1);
 insert into list_range values('201903', '4', '1', 1);
 insert into list_range values('201903', '5', '1', 1);
 insert into list_range values('201903', '6', '1', 1);
 
 select * from list_range;
 drop table list_range;
-
-CREATE TABLE range_list
-(
-    month_code VARCHAR2 ( 30 ) NOT NULL ,
-    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
-    user_no    VARCHAR2 ( 30 ) NOT NULL ,
-    sales_amt  int
-) WITH (STORAGE_TYPE=USTORE)
-PARTITION BY RANGE (month_code) SUBPARTITION BY LIST (dept_code)
-(
-  PARTITION p_201901 VALUES LESS THAN( '201903' )
-  (
-    SUBPARTITION p_201901_a values ('1'),
-    SUBPARTITION p_201901_b values ('2')
-  ),
-  PARTITION p_201902 VALUES LESS THAN( '201904' )
-  (
-    SUBPARTITION p_201902_a values ('1'),
-    SUBPARTITION p_201902_b values ('2')
-  )
-);
-insert into range_list values('201902', '1', '1', 1);
-insert into range_list values('201902', '2', '1', 1);
-insert into range_list values('201902', '1', '1', 1);
-insert into range_list values('201903', '2', '1', 1);
-insert into range_list values('201903', '1', '1', 1);
-insert into range_list values('201903', '2', '1', 1);
-
-select * from range_list;
-drop table range_list;
-
-CREATE TABLE range_hash
-(
-    month_code VARCHAR2 ( 30 ) NOT NULL ,
-    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
-    user_no    VARCHAR2 ( 30 ) NOT NULL ,
-    sales_amt  int
-) WITH (STORAGE_TYPE=USTORE)
-PARTITION BY RANGE (month_code) SUBPARTITION BY HASH (dept_code)
-(
-  PARTITION p_201901 VALUES LESS THAN( '201903' )
-  (
-    SUBPARTITION p_201901_a,
-    SUBPARTITION p_201901_b
-  ),
-  PARTITION p_201902 VALUES LESS THAN( '201904' )
-  (
-    SUBPARTITION p_201902_a,
-    SUBPARTITION p_201902_b
-  )
-);
-insert into range_hash values('201902', '1', '1', 1);
-insert into range_hash values('201902', '2', '1', 1);
-insert into range_hash values('201902', '1', '1', 1);
-insert into range_hash values('201903', '2', '1', 1);
-insert into range_hash values('201903', '1', '1', 1);
-insert into range_hash values('201903', '2', '1', 1);
-
-select * from range_hash;
-drop table range_hash;
-
-CREATE TABLE range_range
-(
-    month_code VARCHAR2 ( 30 ) NOT NULL ,
-    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
-    user_no    VARCHAR2 ( 30 ) NOT NULL ,
-    sales_amt  int
-) WITH (STORAGE_TYPE=USTORE)
-PARTITION BY RANGE (month_code) SUBPARTITION BY RANGE (dept_code)
-(
-  PARTITION p_201901 VALUES LESS THAN( '201903' )
-  (
-    SUBPARTITION p_201901_a VALUES LESS THAN( '2' ),
-    SUBPARTITION p_201901_b VALUES LESS THAN( '3' )
-  ),
-  PARTITION p_201902 VALUES LESS THAN( '201904' )
-  (
-    SUBPARTITION p_201902_a VALUES LESS THAN( '2' ),
-    SUBPARTITION p_201902_b VALUES LESS THAN( '3' )
-  )
-);
-insert into range_range values('201902', '1', '1', 1);
-insert into range_range values('201902', '2', '1', 1);
-insert into range_range values('201902', '1', '1', 1);
-insert into range_range values('201903', '2', '1', 1);
-insert into range_range values('201903', '1', '1', 1);
-insert into range_range values('201903', '2', '1', 1);
-
-select * from range_range;
-drop table range_range;
 
 CREATE TABLE hash_list
 (
@@ -211,7 +117,6 @@ insert into hash_list values('201901', '2', '1', 1);
 insert into hash_list values('201901', '1', '1', 1);
 insert into hash_list values('201903', '2', '1', 1);
 insert into hash_list values('201903', '1', '1', 1);
-insert into hash_list values('201903', '2', '1', 1);
 
 select * from hash_list;
 drop table hash_list;
@@ -241,7 +146,6 @@ insert into hash_hash values('201901', '2', '1', 1);
 insert into hash_hash values('201901', '1', '1', 1);
 insert into hash_hash values('201903', '2', '1', 1);
 insert into hash_hash values('201903', '1', '1', 1);
-insert into hash_hash values('201903', '2', '1', 1);
 
 select * from hash_hash;
 drop table hash_hash;
@@ -271,7 +175,6 @@ insert into hash_range values('201901', '2', '1', 1);
 insert into hash_range values('201901', '1', '1', 1);
 insert into hash_range values('201903', '2', '1', 1);
 insert into hash_range values('201903', '1', '1', 1);
-insert into hash_range values('201903', '2', '1', 1);
 
 select * from hash_range;
 drop table hash_range;
@@ -955,7 +858,6 @@ insert into list_list values('201902', '2', '1', 1);
 insert into list_list values('201902', '1', '1', 1);
 insert into list_list values('201903', '2', '1', 1);
 insert into list_list values('201903', '1', '1', 1);
-insert into list_list values('201903', '2', '1', 1);
 select  * from list_list partition (p_201901);
 select  * from list_list partition (p_201902);
 drop table list_list;

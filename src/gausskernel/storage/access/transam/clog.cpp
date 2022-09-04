@@ -748,6 +748,10 @@ void StartupCLOG(void)
  */
 void TrimCLOG(void)
 {
+    if (u_sess->attr.attr_storage.ustore_verify_level == USTORE_VERIFY_WHITEBOX) {
+        return;
+    }
+
     TransactionId xid = t_thrd.xact_cxt.ShmemVariableCache->nextXid;
     int64 pageno = (int64)TransactionIdToPage(xid);
 
@@ -1132,6 +1136,7 @@ void clog_redo(XLogReaderState *record)
 
 #ifdef USE_ASSERT_CHECKING
 
+#ifdef FAULT_INJECTION_TEST
 /*
  * @Description: read clog pages whose numbers are between clog_pgno and clog_pgno+count-1.
  *               clog_pgno must be >= 0.
@@ -1193,6 +1198,7 @@ int FIT_clog_extend_page(int64 clog_pgno, int count)
     }
     return 0;
 }
+#endif
 
 int FIT_lw_deadlock(int n_edges)
 {
@@ -1237,7 +1243,7 @@ static int gs_fault_inject_impl(int64 fit_type, text *arg1, text *arg2, text *ar
     switch (fit_type) {
 #ifdef FAULT_INJECTION_TEST
         case FIT_CLOG_EXTEND_PAGE:
-            ret = FIT_clgaog_extend_page(conv_text2int(arg1), conv_text2int(arg2));
+            ret = FIT_clog_extend_page(conv_text2int(arg1), conv_text2int(arg2));
             break;
         case FIT_CLOG_READ_PAGE:
             ret = FIT_clog_read_page(conv_text2int(arg1), conv_text2int(arg2));

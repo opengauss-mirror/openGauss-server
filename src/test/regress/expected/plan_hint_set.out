@@ -274,6 +274,14 @@ set plan_cache_mode = force_generic_plan;
    ->  Seq Scan on t1  (cost=0.00..1.01 rows=1000 width=12)
 (2 rows)
 
+prepare p4 as select/*+ set(default_limit_rows 100) rows(t1 #1000000) */ * from t1 limit $1,$2;
+:EXPC execute p4(100, 100);
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Limit  (cost=0.01..0.01 rows=100 width=12)
+   ->  Seq Scan on t1  (cost=0.00..1.01 rows=1000000 width=12)
+(2 rows)
+
 -- cplan/gplan
 set plan_cache_mode = force_custom_plan;
 prepare p2 as select /*+ use_cplan */ * from t1 where a = $1;
@@ -328,11 +336,55 @@ explain (verbose on, analyze on) create table t4 as select /*+ set(enable_seqsca
 (5 rows)
 
 rollback;
--- set hint in function execution (centralized does not support auto_explain for now)
+-- more on default_limit_rows
+create table tt1(c1 int, c2 int);
+create table tt2(c1 int, c2 int);
+insert into tt1 values(generate_series(1, 10), generate_series(1, 100));
+insert into tt2 values(generate_series(1, 10), generate_series(1, 100));
+analyze tt1;
+analyze tt2;
+prepare pd1 as select /*+ set(default_limit_rows -10) */* from tt1, tt2 where tt1.c1 = tt2.c1 limit $1;
+:EXPC execute pd1(1); -- hashjoin
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Limit  (cost=3.25..4.48 rows=100 width=16)
+   ->  Hash Join  (cost=3.25..15.56 rows=1000 width=16)
+         Hash Cond: (tt1.c1 = tt2.c1)
+         ->  Seq Scan on tt1  (cost=0.00..2.00 rows=100 width=8)
+         ->  Hash  (cost=2.00..2.00 rows=100 width=8)
+               ->  Seq Scan on tt2  (cost=0.00..2.00 rows=100 width=8)
+(6 rows)
+
+prepare pd2 as select /*+ set(default_limit_rows 1) */* from tt1, tt2 where tt1.c1 = tt2.c1 limit $1;
+:EXPC execute pd2(1); -- nestloop
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Limit  (cost=0.00..0.15 rows=1 width=16)
+   ->  Nested Loop  (cost=0.00..154.25 rows=1000 width=16)
+         Join Filter: (tt1.c1 = tt2.c1)
+         ->  Seq Scan on tt1  (cost=0.00..2.00 rows=100 width=8)
+         ->  Materialize  (cost=0.00..2.50 rows=100 width=8)
+               ->  Seq Scan on tt2  (cost=0.00..2.00 rows=100 width=8)
+(6 rows)
+
+prepare pd3 as select /*+ set (default_limit_rows 100) rows(tt1 tt2 #10000000) */* from tt1, tt2 where tt1.c1 = tt2.c1 limit 1 offset $1;
+:EXPC execute pd3(1); -- nestloop
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Limit  (cost=0.15..0.15 rows=1 width=16)
+   ->  Nested Loop  (cost=0.00..154.25 rows=10000000 width=16)
+         Join Filter: (tt1.c1 = tt2.c1)
+         ->  Seq Scan on tt1  (cost=0.00..2.00 rows=100 width=8)
+         ->  Materialize  (cost=0.00..2.50 rows=100 width=8)
+               ->  Seq Scan on tt2  (cost=0.00..2.00 rows=100 width=8)
+(6 rows)
+
 -- cleanup
 drop schema schema_plan_hint cascade;
-NOTICE:  drop cascades to 4 other objects
+NOTICE:  drop cascades to 6 other objects
 DETAIL:  drop cascades to table t1
 drop cascades to table t2
 drop cascades to table t3
 drop cascades to view hint_view
+drop cascades to table tt1
+drop cascades to table tt2

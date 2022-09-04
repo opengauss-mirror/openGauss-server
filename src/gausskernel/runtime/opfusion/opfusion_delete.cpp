@@ -71,7 +71,8 @@ void DeleteFusion::InitLocals(ParamListInfo params)
 
 void DeleteFusion::InitGlobals()
 {
-    m_global->m_reloid = getrelid(linitial_int(m_global->m_planstmt->resultRelations), m_global->m_planstmt->rtable);
+    m_global->m_reloid = getrelid(linitial_int((List*)linitial(m_global->m_planstmt->resultRelations)),
+                                  m_global->m_planstmt->rtable);
     Relation rel = heap_open(m_global->m_reloid, AccessShareLock);
     m_global->m_natts = RelationGetDescr(rel)->natts;
     m_global->m_tupDesc = CreateTupleDescCopy(RelationGetDescr(rel));
@@ -172,6 +173,7 @@ unsigned long DeleteFusion::ExecDelete(Relation rel, ResultRelInfo* resultRelInf
                 exec_index_tuples_state.targetPartRel = RELATION_IS_PARTITIONED(rel) ? partRel : NULL;
                 exec_index_tuples_state.p = RELATION_IS_PARTITIONED(rel) ? part : NULL;
                 exec_index_tuples_state.conflict = NULL;
+                exec_index_tuples_state.rollbackIndex = false;
                 tableam_tops_exec_delete_index_tuples(oldslot, bucket_rel == NULL ? destRel : bucket_rel, NULL,
                     &((HeapTuple)oldtup)->t_self, exec_index_tuples_state, modifiedIdxAttrs);
                 if (oldslot) {

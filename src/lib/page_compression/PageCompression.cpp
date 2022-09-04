@@ -1,46 +1,14 @@
 /*
  * Copyright (c) Huawei Technologies Co., Ltd. 2020-2020. All rights reserved.
  */
+#include "storage/cfs/cfs_converter.h"
 #include "PageCompression.h"
 #include "utils/pg_lzcompress.h"
 #include "storage/page_compression_impl.h"
 
 #include <memory>
 
-
-void FormatPathToPca(const char *path, char *dst, size_t len, const char *prefix)
-{
-    errno_t rc;
-    if (prefix) {
-        rc = snprintf_s(dst, len, len - 1, "%s/" PCA_SUFFIX, prefix, path);
-    } else {
-        rc = snprintf_s(dst, len, len - 1, PCA_SUFFIX, path);
-    }
-    securec_check_ss_c(rc, "\0", "\0");
-}
-
-void FormatPathToPcd(const char *path, char *dst, size_t len, const char *prefix)
-{
-    errno_t rc;
-    if (prefix) {
-        rc = snprintf_s(dst, len, len - 1, "%s/" PCD_SUFFIX, prefix, path);
-    } else {
-        rc = snprintf_s(dst, len, len - 1, PCD_SUFFIX, path);
-    }
-    securec_check_ss_c(rc, "\0", "\0");
-}
-
-template <typename T>
-COMPRESS_ERROR_STATE ReadCompressedInfo(T &t, off_t offset, FILE *file)
-{
-    if (fseeko(file, offset, SEEK_SET) != 0) {
-        return PCA_SEEK_ERROR;
-    }
-    if (fread((void *)(&t), sizeof(t), 1, file) <= 0) {
-        return PCA_READ_ERROR;
-    }
-    return SUCCESS;
-}
+#define PC_CUSTOM_VALUE_LARGESIZE 4096
 
 /**
  * write RewindCompressInfo
@@ -51,55 +19,48 @@ COMPRESS_ERROR_STATE ReadCompressedInfo(T &t, off_t offset, FILE *file)
  */
 static bool ReadRewindCompressedInfo(FILE *file, RewindCompressInfo *rewindCompressInfo)
 {
-    off_t offset = (off_t)offsetof(PageCompressHeader, chunk_size);
-    if (ReadCompressedInfo(rewindCompressInfo->chunkSize, offset, file) != SUCCESS) {
-        return false;
-    }
-    offset = (off_t)offsetof(PageCompressHeader, algorithm);
-    if (ReadCompressedInfo(rewindCompressInfo->algorithm, offset, file) != SUCCESS) {
-        return false;
-    }
-    offset = (off_t)offsetof(PageCompressHeader, nblocks);
-    if (ReadCompressedInfo(rewindCompressInfo->oldBlockNumber, offset, file) != SUCCESS) {
+    auto result = ReadBlockNumberOfCFile(file);
+    if (result >= MIN_COMPRESS_ERROR_RT) {
         return false;
     }
     rewindCompressInfo->compressed = true;
+    rewindCompressInfo->oldBlockNumber = (BlockNumber)result;
     return true;
 }
 
-bool FetchSourcePca(unsigned char *pageCompressHeader, size_t len, RewindCompressInfo *rewindCompressInfo)
+bool FetchSourcePca(unsigned char *header, size_t len, RewindCompressInfo *rewindCompressInfo, size_t fileSize)
 {
-    PageCompressHeader *ptr = (PageCompressHeader *)pageCompressHeader;
+    CfsExtentHeader *ptr = (CfsExtentHeader *)(void *)header;
     rewindCompressInfo->compressed = false;
-    if (len == sizeof(PageCompressHeader)) {
+    if (len == sizeof(CfsExtentHeader)) {
         rewindCompressInfo->compressed = true;
-        rewindCompressInfo->algorithm = ptr->algorithm;
-        rewindCompressInfo->newBlockNumber = ptr->nblocks;
+        BlockNumber fileBlockNum = (BlockNumber) fileSize / BLCKSZ;
+        BlockNumber extentCount = fileBlockNum / CFS_EXTENT_SIZE;
+        BlockNumber result = (extentCount - 1) * (CFS_EXTENT_SIZE - 1);
+        rewindCompressInfo->newBlockNumber = result + ptr->nblocks;
         rewindCompressInfo->oldBlockNumber = 0;
-        rewindCompressInfo->chunkSize = ptr->chunk_size;
     }
     return rewindCompressInfo->compressed;
 }
 
 bool ProcessLocalPca(const char *tablePath, RewindCompressInfo *rewindCompressInfo, const char *prefix)
 {
+    if (!PageCompression::SkipCompressedFile(tablePath, strlen(tablePath))) {
+        return false;
+    }
     rewindCompressInfo->compressed = false;
-    char pcaFilePath[MAXPGPATH];
-    FormatPathToPca(tablePath, pcaFilePath, MAXPGPATH, prefix);
-    FILE *file = fopen(pcaFilePath, "rb");
+    char dst[MAXPGPATH];
+    errno_t rc = snprintf_s(dst, MAXPGPATH, MAXPGPATH - 1, "%s/%s", prefix, tablePath);
+    securec_check_ss_c(rc, "\0", "\0");
+
+    FILE *file = fopen(dst, "rb");
     if (file == NULL) {
-        if (errno == ENOENT) {
-            return false;
-        }
         return false;
     }
     bool success = ReadRewindCompressedInfo(file, rewindCompressInfo);
-    fclose(file);
+    (void)fclose(file);
     return success;
 }
-
-constexpr int MAX_RETRY_LIMIT = 60;
-constexpr long RETRY_SLEEP_TIME = 1000000L;
 
 BlockNumber PageCompression::GetSegmentNo() const
 {
@@ -108,51 +69,26 @@ BlockNumber PageCompression::GetSegmentNo() const
 
 size_t PageCompression::ReadCompressedBuffer(BlockNumber blockNum, char *buffer, size_t bufferLen, bool zeroAlign)
 {
-    auto chunkSize = this->header->chunk_size;
-    PageCompressAddr *currentAddr = GET_PAGE_COMPRESS_ADDR(this->header, chunkSize, blockNum);
-    size_t tryCount = 0;
-    size_t actualSize = 0;
-    do {
-        auto chunkNum = currentAddr->nchunks;
-        actualSize = chunkSize * chunkNum;
-        for (uint8 i = 0; i < chunkNum; i++) {
-            off_t seekPos = (off_t)OFFSET_OF_PAGE_COMPRESS_CHUNK(chunkSize, currentAddr->chunknos[i]);
-            uint8 start = i;
-            while (i < chunkNum - 1 && currentAddr->chunknos[i + 1] == currentAddr->chunknos[i] + 1) {
-                i++;
-            }
-            if (fseeko(this->pcdFile, seekPos, SEEK_SET) != 0) {
-                return 0;
-            }
-            size_t readAmount = chunkSize * (i - start + 1);
-            if (fread(buffer + start * chunkSize, 1, readAmount, this->pcdFile) != readAmount &&
-                ferror(this->pcdFile)) {
-                return 0;
-            }
-        }
-        if (chunkNum == 0) {
-            return 0;
-        }
+    CfsExtentHeader *header = GetStruct(blockNum);
+    CfsReadStruct cfsReadStruct {
+        .fd = this->fd,
+        .header = header,
+        .extentCount =  blockNum / CFS_LOGIC_BLOCKS_PER_EXTENT
+    };
+    size_t actualSize = CfsReadCompressedPage(buffer, bufferLen,
+        blockNum % CFS_LOGIC_BLOCKS_PER_EXTENT, &cfsReadStruct, InvalidBlockNumber);
+    /* valid check */
+    if (actualSize == COMPRESS_FSEEK_ERROR) {
+        return 0;
+    } else if (actualSize == COMPRESS_FREAD_ERROR) {
+        return 0;
+    } else if (actualSize == COMPRESS_CHECKSUM_ERROR) {
+        return 0;
+    } else if (actualSize == COMPRESS_BLOCK_ERROR) {
+        return 0;
+    }
 
-        /* compressed chunk */
-        if (chunkNum * chunkSize < BLCKSZ) {
-            if (PageCompression::InnerPageCompressChecksum(buffer)) {
-                break;
-            }
-        } else if (PageIsNew(buffer) || pg_checksum_page(buffer, this->segmentNo * RELSEG_SIZE + blockNum) ==
-                                            (PageHeader(buffer))->pd_checksum) {
-            break;
-        }
-
-        if (tryCount < MAX_RETRY_LIMIT) {
-            ++tryCount;
-            pg_usleep(RETRY_SLEEP_TIME);
-        } else {
-            return 0;
-        }
-    } while (true);
-
-    if (zeroAlign) {
+    if (zeroAlign && actualSize != bufferLen) {
         error_t rc = memset_s(buffer + actualSize, bufferLen - actualSize, 0, bufferLen - actualSize);
         securec_check(rc, "\0", "\0");
         actualSize = bufferLen;
@@ -160,36 +96,45 @@ size_t PageCompression::ReadCompressedBuffer(BlockNumber blockNum, char *buffer,
     return actualSize;
 }
 
-PageCompression::~PageCompression()
+CfsExtentHeader* PageCompression::GetHeaderByExtentNumber(BlockNumber extentCount, CfsCompressOption *option)
 {
-    if (this->header) {
-        pc_munmap(this->header);
+    if (this->cfsHeaderMap.extentCount != extentCount || this->cfsHeaderMap.header == nullptr) {
+        MmapFree(&(cfsHeaderMap));
+        if (option) {
+            auto extentOffset = ((extentCount + 1) * CFS_EXTENT_SIZE - 1) * BLCKSZ;
+            if (fallocate(fileno(fd), 0, extentOffset, BLCKSZ) < 0) {
+                return nullptr;
+            }
+            auto extentStart = extentCount * CFS_EXTENT_SIZE * BLCKSZ;
+            auto allocateSize = CFS_LOGIC_BLOCKS_PER_EXTENT * BLCKSZ;
+            if (fallocate(fileno(fd), FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE, extentStart, allocateSize) < 0) {
+                return nullptr;
+            }
+        }
+        auto curHeader = MMapHeader(this->fd, extentCount);
+        if (option) {
+            curHeader.header->chunk_size = option->chunk_size;
+            curHeader.header->algorithm = option->algorithm;
+        }
+
+        this->cfsHeaderMap.header = curHeader.header;
+        this->cfsHeaderMap.extentCount = curHeader.extentCount;
+        this->cfsHeaderMap.pointer = curHeader.pointer;
+        this->cfsHeaderMap.mmapLen = curHeader.mmapLen;
     }
-    if (this->pcaFile) {
-        fclose(this->pcaFile);
-    }
-    if (this->pcdFile) {
-        fclose(this->pcdFile);
-    }
+    return this->cfsHeaderMap.header;
 }
 
-bool PageCompression::InnerPageCompressChecksum(const char *buffer)
+CfsExtentHeader* PageCompression::GetStruct(BlockNumber blockNum, CfsCompressOption *option)
 {
-    char *data = NULL;
-    size_t dataLen;
-    uint32 crc32;
-    if (PageIs8BXidHeapVersion(buffer)) {
-        HeapPageCompressData *heapPageData = (HeapPageCompressData *)buffer;
-        data = heapPageData->data;
-        dataLen = heapPageData->size;
-        crc32 = heapPageData->crc32;
-    } else {
-        PageCompressData *heapPageData = (PageCompressData *)buffer;
-        data = heapPageData->data;
-        dataLen = heapPageData->size;
-        crc32 = heapPageData->crc32;
+    return PageCompression::GetHeaderByExtentNumber(blockNum / CFS_LOGIC_BLOCKS_PER_EXTENT, option);
+}
+
+PageCompression::~PageCompression()
+{
+    if (this->fd) {
+        (void)fclose(this->fd);
     }
-    return DataBlockChecksum(data, dataLen, true) == crc32;
 }
 
 const char *PageCompression::GetInitPath() const
@@ -197,34 +142,50 @@ const char *PageCompression::GetInitPath() const
     return this->initPath;
 }
 
-COMPRESS_ERROR_STATE PageCompression::Init(const char *filePath, size_t len, BlockNumber inSegmentNo, uint16 chunkSize,
-                                           bool create)
+COMPRESS_ERROR_STATE PageCompression::Init(const char *filePath, BlockNumber inSegmentNo, bool create)
 {
-    errno_t rc = memcpy_s(this->initPath, MAXPGPATH, filePath, len);
-    securec_check(rc, "", "");
-
-    this->segmentNo = inSegmentNo;
-    char compressedFilePath[MAXPGPATH];
-    FormatPathToPca(filePath, compressedFilePath, MAXPGPATH);
-    if ((this->pcaFile = fopen(compressedFilePath, create ? "wb+" : "rb+")) == nullptr) {
+    if(!IsCompressedFile(filePath, strlen(filePath))){
         return PCA_OPEN_ERROR;
     }
 
-    FormatPathToPcd(filePath, compressedFilePath, MAXPGPATH);
-    if ((this->pcdFile = fopen(compressedFilePath, create ? "wb+" : "rb+")) == nullptr) {
-        return PCD_OPEN_ERROR;
+    auto file = fopen(filePath, create ? "wb+" : "rb+");
+    if (file == nullptr) {
+        return PCA_OPEN_ERROR;
     }
 
-    if (chunkSize == 0) {
-        /* read chunk size from pca file if chunk size is invalid */
-        auto state = ReadCompressedInfo(chunkSize, (off_t)offsetof(PageCompressHeader, chunk_size), this->pcaFile);
-        if (state != SUCCESS) {
-            return state;
-        }
+    this->segmentNo = inSegmentNo;
+    this->fd = file;
+    this->blockNumber = 0;
+    this->algorithm = 0;
+    this->chunkSize = 0;
+
+    errno_t rc = memset_s(&this->cfsHeaderMap, sizeof(CfsHeaderMap), 0, sizeof(CfsHeaderMap));
+    securec_check_ss_c(rc, "\0", "\0");
+
+    if (create) {
+        return SUCCESS;
     }
-    this->chunkSize = chunkSize;
-    if ((this->header = pc_mmap(fileno(this->pcaFile), chunkSize, false)) == MAP_FAILED) {
-        return PCA_MMAP_ERROR;
+
+    /* read file size of toFullPath */
+    if (fseek(this->fd, 0L, SEEK_END) < 0) {
+        (void)fclose(file);
+        return PCA_SEEK_ERROR;
+    }
+    off_t fileLen = ftell(this->fd);
+    if (fileLen > 0) {
+        BlockNumber fileBlockNum = (BlockNumber) fileLen / BLCKSZ;
+        BlockNumber extentCount = fileBlockNum / CFS_EXTENT_SIZE;
+        BlockNumber result = (extentCount - 1) * (CFS_EXTENT_SIZE - 1);
+
+        /* read header of last extent */
+        auto header = this->GetHeaderByExtentNumber(extentCount - 1);
+        if (header == nullptr) {
+            (void)fclose(file);
+            return NORMAL_READ_ERROR;
+        }
+        this->blockNumber = result + header->nblocks;
+        this->algorithm = header->algorithm;
+        this->chunkSize = header->chunk_size;
     }
     return SUCCESS;
 }
@@ -232,76 +193,72 @@ COMPRESS_ERROR_STATE PageCompression::Init(const char *filePath, size_t len, Blo
 bool PageCompression::SkipCompressedFile(const char *fileName, size_t len)
 {
     auto realSize = strlen(fileName);
-    auto fileType = IsCompressedFile((char *)fileName, realSize < len ? realSize : len);
-    return fileType != COMPRESSED_TYPE_UNKNOWN;
+    return IsCompressedFile(fileName, realSize < len ? realSize : len);
 }
 
-bool PageCompression::IsCompressedTableFile(const char *fileName, size_t len)
+FILE *PageCompression::GetCompressionFile()
 {
-    char pcdFilePath[MAXPGPATH];
-    errno_t rc = snprintf_s(pcdFilePath, MAXPGPATH, MAXPGPATH - 1, PCD_SUFFIX, fileName);
-    securec_check_ss_c(rc, "\0", "\0");
-    struct stat buf;
-    int result = stat(pcdFilePath, &buf);
-    return result == 0;
-}
-
-void PageCompression::ResetPcdFd()
-{
-    this->pcdFile = NULL;
-}
-
-FILE *PageCompression::GetPcdFile() const
-{
-    return this->pcdFile;
-}
-
-PageCompressHeader *PageCompression::GetPageCompressHeader() const
-{
-    return this->header;
+    return this->fd;
 }
 
 BlockNumber PageCompression::GetMaxBlockNumber() const
 {
-    return (BlockNumber)pg_atomic_read_u32(&header->nblocks);
+    return this->blockNumber;
 }
 
-bool PageCompression::WriteBufferToCurrentBlock(const char *buf, BlockNumber blockNumber, int32 size)
+bool PageCompression::WriteBufferToCurrentBlock(char *buf, BlockNumber blkNumber, int32 size,
+                                                CfsCompressOption *option)
 {
-    decltype(PageCompressHeader::chunk_size) curChunkSize = this->chunkSize;
-    int needChunks = size / curChunkSize;
+    CfsExtentHeader *cfsExtentHeader = this->GetStruct(blkNumber, option);
+    if (cfsExtentHeader == nullptr) {
+        return false;
+    }
+    uint16 chkSize = cfsExtentHeader->chunk_size;
 
-    PageCompressHeader *pcMap = this->header;
-    PageCompressAddr *pcAddr = GET_PAGE_COMPRESS_ADDR(pcMap, curChunkSize, blockNumber);
+    uint32 nchunks = (size - 1) / (int32)chkSize + 1;
+    /* fill zero in the last chunk */
+    uint64 realSize = nchunks * chkSize;
+    if ((uint64)size < realSize) {
+        uint64 leftSize = realSize - size;
+        errno_t rc = memset_s(buf + (uint32)size, (uint32)leftSize, 0, (uint32)leftSize);
+        securec_check(rc, "", "");
+    }
+    size = realSize;
+    BlockNumber extentOffset = blkNumber % CFS_LOGIC_BLOCKS_PER_EXTENT;
+    int needChunks = size / (int32)chkSize;
+
+    CfsExtentAddress *cfsExtentAddress = GetExtentAddress(cfsExtentHeader, (uint16)extentOffset);
 
     /* allocate chunks */
-    if (pcAddr->allocated_chunks < needChunks) {
-        auto chunkno = pg_atomic_fetch_add_u32(&pcMap->allocated_chunks, needChunks - pcAddr->allocated_chunks);
-        for (int i = pcAddr->allocated_chunks; i < needChunks; i++) {
-            pcAddr->chunknos[i] = ++chunkno;
+    if (cfsExtentAddress->allocated_chunks < needChunks) {
+        uint16 chunkno = (uint16)pg_atomic_fetch_add_u32(&cfsExtentHeader->allocated_chunks,
+                                                         (uint32)needChunks - cfsExtentAddress->allocated_chunks);
+        for (int i = cfsExtentAddress->allocated_chunks; i < needChunks; i++) {
+            cfsExtentAddress->chunknos[i] = ++chunkno;
         }
-        pcAddr->allocated_chunks = needChunks;
+        cfsExtentAddress->allocated_chunks = (uint8)needChunks;
     }
+    cfsExtentAddress->nchunks = (uint8)needChunks;
+    cfsExtentAddress->checksum = AddrChecksum32(cfsExtentAddress, cfsExtentAddress->allocated_chunks);
 
     for (int32 i = 0; i < needChunks; ++i) {
-        auto buffer_pos = buf + curChunkSize * i;
-        off_t seekpos = (off_t)OFFSET_OF_PAGE_COMPRESS_CHUNK(curChunkSize, pcAddr->chunknos[i]);
+        char *buffer_pos = buf + (long)chkSize * i;
+        off_t seekPos = OffsetOfPageCompressChunk(chkSize, cfsExtentAddress->chunknos[i]);
         int32 start = i;
         /* merge continuous write */
-        while (i < needChunks - 1 && pcAddr->chunknos[i + 1] == pcAddr->chunknos[i] + 1) {
+        while (i < needChunks - 1 && cfsExtentAddress->chunknos[i + 1] == cfsExtentAddress->chunknos[i] + 1) {
             i++;
         }
-        size_t write_amount = curChunkSize * (i - start + 1);
-        if (fseek(this->pcdFile, seekpos, SEEK_SET) < 0) {
+        size_t write_amount = (size_t)(chkSize * ((i - start) + 1));
+
+        if (fseek(this->fd, seekPos, SEEK_SET) < 0) {
             return false;
         }
-        if (fwrite(buffer_pos, 1, write_amount, this->pcdFile) != write_amount) {
+        if (fwrite(buffer_pos, 1, write_amount, this->fd) != write_amount) {
             return false;
         }
     }
     /* set other data of pcAddr */
-    pcAddr->nchunks = needChunks;
-    pcAddr->checksum = AddrChecksum32(blockNumber, pcAddr, curChunkSize);
     return true;
 }
 
@@ -314,208 +271,357 @@ bool PageCompression::WriteBufferToCurrentBlock(const char *buf, BlockNumber blo
 size_t CalRealWriteSize(char *buffer, BlockNumber segmentNo, BlockNumber blockNumber,
                         decltype(PageCompressHeader::chunk_size) chunkSize)
 {
+    /* todo wyc: normal page in comrpessed file. add some flag to reduce checksum */
+    if (PageIsNew(buffer) ||
+        pg_checksum_page(buffer, segmentNo * RELSEG_SIZE + blockNumber) == (PageHeader(buffer))->pd_checksum) {
+        return BLCKSZ;
+    }
     size_t compressedBufferSize;
-    uint32 crc32;
-    char *data;
-    if (PageIs8BXidHeapVersion(buffer)) {
-        HeapPageCompressData *heapPageData = (HeapPageCompressData *)buffer;
+    uint8 pagetype = PageGetPageLayoutVersion(buffer);
+    if (pagetype == PG_UHEAP_PAGE_LAYOUT_VERSION) {
+        UHeapPageCompressData *heapPageData = (UHeapPageCompressData *)(void *)buffer;
+        compressedBufferSize = heapPageData->size + offsetof(UHeapPageCompressData, data);
+    } else if (pagetype == PG_HEAP_PAGE_LAYOUT_VERSION) {
+        HeapPageCompressData *heapPageData = (HeapPageCompressData *)(void *)buffer;
         compressedBufferSize = heapPageData->size + offsetof(HeapPageCompressData, data);
-        crc32 = heapPageData->crc32;
-        data = heapPageData->data;
     } else {
-        PageCompressData *heapPageData = (PageCompressData *)buffer;
+        PageCompressData *heapPageData = (PageCompressData *)(void *)buffer;
         compressedBufferSize = heapPageData->size + offsetof(PageCompressData, data);
-        crc32 = heapPageData->crc32;
-        data = heapPageData->data;
     }
-    if (compressedBufferSize > 0 && compressedBufferSize <= ((size_t)chunkSize * (BLCKSZ / chunkSize - 1)) &&
-        DataBlockChecksum(data, compressedBufferSize, true) == crc32) {
-        return ((compressedBufferSize - 1) / chunkSize + 1) * chunkSize;
-    }
-    /* uncompressed page */
-    return BLCKSZ;
+
+    return compressedBufferSize;
 }
 
-template <typename T, typename... Args>
-std::unique_ptr<T> make_unique(Args &&...args)
+inline void PunchHoleForCnmpExt(CfsExtentHeader *pcaHead, BlockNumber extNo, FILE *destFd)
 {
-    return std::unique_ptr<T>(new T(std::forward<Args>(args)...));
+    uint32 usedSize = pcaHead->allocated_chunks * pcaHead->chunk_size;
+    usedSize = TYPEALIGN((PC_CUSTOM_VALUE_LARGESIZE), usedSize);
+    off_t punchSize = (off_t)(CFS_EXTENT_SIZE * BLCKSZ - BLCKSZ - usedSize);
+    off_t offset = (off_t)(extNo * CFS_EXTENT_SIZE * BLCKSZ + usedSize);
+    (void)fallocate(fileno(destFd), FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE, offset, punchSize);
+}
+
+inline void InitCompPcaHead(CfsExtentHeader *pcaHead, CfsCompressOption *option)
+{
+    pcaHead->chunk_size = option->chunk_size;
+    pcaHead->algorithm = option->algorithm;
+    pcaHead->nblocks = 0;
+    pcaHead->allocated_chunks = 0;
+    pcaHead->recycleInOrder = 1;
+}
+
+inline void SetCompPageAddrInfo(CfsExtentAddress *destExtAddr, uint8 chunkNum, uint32 chunkStart)
+{
+    for (uint8 i = 0; i < chunkNum; i++) {
+        destExtAddr->chunknos[i] = (uint16)(chunkStart + i);
+    }
+
+    destExtAddr->allocated_chunks = chunkNum;
+    destExtAddr->nchunks = chunkNum;
+    destExtAddr->checksum = AddrChecksum32(destExtAddr, chunkNum);
+}
+
+COMPRESS_ERROR_STATE TranferIntoCompFile(FILE *srcFile, BlockNumber segmentNo,
+    CfsCompressOption *option, FILE *destFd)
+{
+    BlockNumber extNo = 0;
+    BlockNumber blockNumber = 0;
+    char buffer[BLCKSZ] = {0};
+
+    /* read file size of toFullPath */
+    if (fseek(srcFile, 0L, SEEK_END) < 0) {
+        return NORMAL_SEEK_ERROR;
+    }
+    off_t size = ftell(srcFile);
+    BlockNumber maxBlockNumber = (BlockNumber)(size / BLCKSZ);
+
+    /* read file size of toFullPath */
+    if (fseek(srcFile, 0L, 0) < 0) {
+        return NORMAL_SEEK_ERROR;
+    }
+
+    char *unaligned_buf = (char *) palloc(CFS_EXTENT_SIZE * BLCKSZ + BLCKSZ);
+    if (unaligned_buf == NULL) {
+        return BUFFER_ALLOC_ERROR;
+    }
+
+    char *extBuf = (char *)TYPEALIGN(BLCKSZ, unaligned_buf);
+    errno_t rc = memset_s(extBuf, CFS_EXTENT_SIZE * BLCKSZ, 0, CFS_EXTENT_SIZE * BLCKSZ);
+    securec_check_ss_c(rc, "\0", "\0");
+
+    CfsExtentHeader *pcaHead = (CfsExtentHeader *)(void *)(extBuf + CFS_EXTENT_SIZE * BLCKSZ - BLCKSZ);
+    InitCompPcaHead(pcaHead, option);
+
+    /* read page by page */
+    for (blockNumber = 0; blockNumber < maxBlockNumber; blockNumber++) {
+        if (fread(buffer, 1, BLCKSZ, srcFile) != BLCKSZ) {
+            pfree(unaligned_buf);
+            return NORMAL_READ_ERROR;
+        }
+
+        pcaHead->nblocks++;
+        size_t compSize = CalRealWriteSize(buffer, segmentNo, blockNumber, option->chunk_size);
+        uint8 chunkNum = (uint8)((compSize + option->chunk_size - 1) / option->chunk_size);
+
+        CfsExtentAddress *destExtAddr = GetExtentAddress(pcaHead, (uint16)(blockNumber % CFS_LOGIC_BLOCKS_PER_EXTENT));
+        uint32 chunkStart = pcaHead->allocated_chunks + 1;
+        pcaHead->allocated_chunks += (uint32)chunkNum;
+        SetCompPageAddrInfo(destExtAddr, chunkNum, chunkStart);
+
+        rc = memcpy_s(extBuf + ((chunkStart - 1) * option->chunk_size),
+            compSize, buffer, compSize);
+        securec_check_ss_c(rc, "\0", "\0");
+
+        if ((blockNumber + 1) % CFS_LOGIC_BLOCKS_PER_EXTENT == 0) {
+            /* an ext includes 128 pages, enough to write down */
+            if (fwrite(extBuf, 1, CFS_EXTENT_SIZE * BLCKSZ, destFd) != CFS_EXTENT_SIZE * BLCKSZ) {
+                pfree(unaligned_buf);
+                return NORMAL_WRITE_ERROR;
+            }
+
+            /* punch hole */
+            PunchHoleForCnmpExt(pcaHead, extNo, destFd);
+            extNo++;
+
+            /* init extbuf for next 128 pages */
+            rc = memset_s(extBuf, CFS_EXTENT_SIZE * BLCKSZ, 0, CFS_EXTENT_SIZE * BLCKSZ);
+            securec_check_ss_c(rc, "\0", "\0");
+            InitCompPcaHead(pcaHead, option);
+        }
+    }
+
+    /* write last ext, which is not full */
+    if ((blockNumber + 1) % CFS_LOGIC_BLOCKS_PER_EXTENT != 0) {
+        /* an ext includes 128 pages, enough to write down */
+        if (fwrite(extBuf, 1, CFS_EXTENT_SIZE * BLCKSZ, destFd) != CFS_EXTENT_SIZE * BLCKSZ) {
+            pfree(unaligned_buf);
+            return NORMAL_WRITE_ERROR;
+        }
+
+        PunchHoleForCnmpExt(pcaHead, extNo, destFd);
+    }
+
+    pfree(unaligned_buf);
+    return SUCCESS;
 }
 
 COMPRESS_ERROR_STATE ConstructCompressedFile(const char *toFullPath, BlockNumber segmentNo, uint16 chunkSize,
                                              uint8 algorithm)
 {
-    std::unique_ptr<PageCompression> pageCompression = make_unique<PageCompression>();
-    auto result = pageCompression->Init(toFullPath, MAXPGPATH, segmentNo, chunkSize, true);
-    if (result != SUCCESS) {
-        return result;
+    /* create tmp file to transfer file of toFullPath into the file with format of compression */
+    char path[MAXPGPATH];
+    errno_t rc = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s_tmp", toFullPath);
+    securec_check_ss_c(rc, "\0", "\0");
+
+    CfsCompressOption option = {
+        .chunk_size = chunkSize,
+        .algorithm = algorithm
+    };
+
+    /* create tmp file */
+    FILE *destFd = fopen(path, "wb+");
+    if (destFd == NULL) {
+        return NORMAL_CREATE_ERROR;
     }
 
-    PageCompressHeader *header = pageCompression->GetPageCompressHeader();
-    header->chunk_size = chunkSize;
-    header->algorithm = algorithm;
-
-    /* read page by page */
-    FILE *dataFile = fopen(toFullPath, "rb+");
-    if (dataFile == NULL) {
+    FILE *srcFile = fopen(toFullPath, "rb+");
+    if (srcFile == NULL) {
+        (void)fclose(destFd);
         return NORMAL_OPEN_ERROR;
     }
-    if (fseek(dataFile, 0L, SEEK_END) < 0) {
-        return NORMAL_SEEK_ERROR;
-    }
-    /* read file size of toFullPath */
-    off_t size = ftell(dataFile);
-    if (fseek(dataFile, 0L, 0) < 0) {
-        return NORMAL_SEEK_ERROR;
+
+    COMPRESS_ERROR_STATE ret = TranferIntoCompFile(srcFile, segmentNo, &option, destFd);
+    if (fclose(srcFile) != 0 || fclose(destFd) != 0) {
+        (void)fclose(destFd);
+        (void)fclose(srcFile);
+        return FILE_CLOSE_ERROR;
     }
 
-    BlockNumber maxBlockNumber = size / BLCKSZ;
-    BlockNumber blockNumber = 0;
-    char buffer[BLCKSZ];
-    for (blockNumber = 0; blockNumber < maxBlockNumber; blockNumber++) {
-        if (fread(buffer, 1, BLCKSZ, dataFile) != BLCKSZ) {
-            return NORMAL_READ_ERROR;
-        }
-        size_t realSize = CalRealWriteSize(buffer, pageCompression->GetSegmentNo(), blockNumber, chunkSize);
-        pageCompression->WriteBufferToCurrentBlock(buffer, blockNumber, realSize);
+    if (ret != SUCCESS) {
+        return ret;
     }
-    header->nblocks = blockNumber;
-    /* truncate tmp oid file */
-    if (ftruncate(fileno(dataFile), 0L)) {
-        return PCD_TRUNCATE_ERROR;
+
+    /* delete toFullPath file */
+    if (unlink(toFullPath) != 0) {
+        (void)fclose(destFd);
+        (void)fclose(srcFile);
+        return NORMAL_UNLINK_ERROR;
     }
+
+    /* use path to take place of toFullPath */
+    if (rename(path, toFullPath) != 0) {
+        (void)fclose(destFd);
+        (void)fclose(srcFile);
+        return NORMAL_RENAME_ERROR;
+    }
+
     return SUCCESS;
 }
 
 bool PageCompression::DecompressedPage(const char *src, char *dest) const
 {
-    if (DecompressPage(src, dest, header->algorithm) == BLCKSZ) {
+    if (DecompressPage(src, dest) == BLCKSZ) {
+        return true;
+    }
+    return false;
+}
+
+bool PageCompression::IsIntegratedPage(const char *buffer, int segmentNo, BlockNumber blkNumber)
+{
+    if (PageIsNew(buffer) ||
+        pg_checksum_page((char *)buffer,
+                         (uint32)segmentNo * RELSEG_SIZE + blkNumber) == (PageHeader(buffer))->pd_checksum) {
         return true;
     }
     return false;
 }
 
 bool PageCompression::WriteBackUncompressedData(const char *compressed, size_t compressedLen, char *buffer, size_t size,
-                                                BlockNumber blockNumber)
+                                                BlockNumber blkNumber)
 {
     /* if compressed page is uncompressed, write back directly */
     if (compressedLen == BLCKSZ) {
-        return this->WriteBufferToCurrentBlock(buffer, blockNumber, size);
+        return this->WriteBufferToCurrentBlock(buffer, blkNumber, (int32)size);
     }
 
     bool byteConvert;
     bool diffConvert;
-    if (PageIs8BXidHeapVersion(compressed)) {
-        byteConvert = ((HeapPageCompressData *)compressed)->byte_convert;
-        diffConvert = ((HeapPageCompressData *)compressed)->diff_convert;
+    uint8 algorithm;
+    uint8 pagetype = PageGetPageLayoutVersion(compressed);
+    if (pagetype == PG_UHEAP_PAGE_LAYOUT_VERSION) {
+        byteConvert = (bool)((const UHeapPageCompressData *)(void *)compressed)->byte_convert;
+        diffConvert = (bool)((const UHeapPageCompressData *)(void *)compressed)->diff_convert;
+        algorithm = ((const UHeapPageCompressData *)(void *)compressed)->algorithm;
+    } else if (pagetype == PG_HEAP_PAGE_LAYOUT_VERSION) {
+        byteConvert = (bool)((const HeapPageCompressData *)(void *)compressed)->byte_convert;
+        diffConvert = (bool)((const HeapPageCompressData *)(void *)compressed)->diff_convert;
+        algorithm = ((const HeapPageCompressData *)(void *)compressed)->algorithm;
     } else {
-        byteConvert = ((PageCompressData *)compressed)->byte_convert;
-        diffConvert = ((PageCompressData *)compressed)->diff_convert;
+        byteConvert = (bool)((const PageCompressData *)(void *)compressed)->byte_convert;
+        diffConvert = (bool)((const PageCompressData *)(void *)compressed)->diff_convert;
+        algorithm = ((const PageCompressData *)(void *)compressed)->algorithm;
     }
 
-    auto algorithm = header->algorithm;
-    auto workBufferSize = CompressPageBufferBound(buffer, algorithm);
+    auto workBufferSize = CompressPageBufferBound(buffer, (uint8)algorithm);
     if (workBufferSize < 0) {
         return false;
     }
-    char *workBuffer = (char *)malloc(workBufferSize);
+    char *workBuffer = (char *)malloc((uint32)workBufferSize);
+    if (workBuffer == NULL) {
+        fprintf(stderr, "failed to malloc work buffer\n");
+        return false;
+    }
+
     RelFileCompressOption relFileCompressOption;
     relFileCompressOption.compressPreallocChunks = 0;
-    relFileCompressOption.compressLevelSymbol = true;
+    relFileCompressOption.compressLevelSymbol = (uint32)true;
     relFileCompressOption.compressLevel = 1;
     relFileCompressOption.compressAlgorithm = algorithm;
-    relFileCompressOption.byteConvert = byteConvert;
-    relFileCompressOption.diffConvert = diffConvert;
+    relFileCompressOption.byteConvert = (uint32)byteConvert;
+    relFileCompressOption.diffConvert = (uint32)diffConvert;
 
     auto compress_buffer_size = CompressPage(buffer, workBuffer, workBufferSize, relFileCompressOption);
     if (compress_buffer_size < 0) {
+        free(workBuffer);
         return false;
     }
-    uint8 nchunks = (compress_buffer_size - 1) / chunkSize + 1;
-    auto bufferSize = chunkSize * nchunks;
-    if (bufferSize >= BLCKSZ) {
+    if (compress_buffer_size >= BLCKSZ) {
         /* store original page if can not save space? */
         free(workBuffer);
         workBuffer = (char *)buffer;
-        nchunks = BLCKSZ / chunkSize;
-    } else {
-        /* fill zero in the last chunk */
-        if (compress_buffer_size < bufferSize) {
-            auto leftSize = bufferSize - compress_buffer_size;
-            errno_t rc = memset_s(workBuffer + compress_buffer_size, leftSize, 0, leftSize);
-            securec_check(rc, "", "");
-        }
+        compress_buffer_size = BLCKSZ;
     }
-    return this->WriteBufferToCurrentBlock(workBuffer, blockNumber, bufferSize > BLCKSZ ? BLCKSZ : bufferSize);
+    bool result = this->WriteBufferToCurrentBlock(workBuffer, blkNumber, compress_buffer_size);
+    if (workBuffer != nullptr && workBuffer != buffer) {
+        free(workBuffer);
+    }
+    return result;
 }
 
-COMPRESS_ERROR_STATE PageCompression::TruncateFile(BlockNumber oldBlockNumber, BlockNumber newBlockNumber)
+COMPRESS_ERROR_STATE PageCompression::TruncateFile(BlockNumber newBlockNumber)
 {
-    auto map = this->header;
-    /* write zero to truncated addr */
-    for (BlockNumber blockNumber = newBlockNumber; blockNumber < oldBlockNumber; ++blockNumber) {
-        PageCompressAddr *addr = GET_PAGE_COMPRESS_ADDR(map, this->chunkSize, blockNumber);
-        for (size_t i = 0; i < addr->allocated_chunks; ++i) {
-            addr->chunknos[i] = 0;
-        }
-        addr->nchunks = 0;
-        addr->allocated_chunks = 0;
-        addr->checksum = 0;
-    }
-    map->last_synced_nblocks = map->nblocks = newBlockNumber;
+    BlockNumber extentNumber = newBlockNumber / CFS_LOGIC_BLOCKS_PER_EXTENT;
+    BlockNumber extentOffset = newBlockNumber % CFS_LOGIC_BLOCKS_PER_EXTENT;
+    BlockNumber extentStart = (extentNumber * CFS_EXTENT_SIZE) % CFS_MAX_BLOCK_PER_FILE;  // 0   129      129*2 129*3
+    BlockNumber extentHeader = extentStart + CFS_LOGIC_BLOCKS_PER_EXTENT;  //              128 129+128  129*2+128
 
-    /* find the max used chunk number */
-    pc_chunk_number_t beforeUsedChunks = map->allocated_chunks;
-    pc_chunk_number_t max_used_chunkno = 0;
-    for (BlockNumber blockNumber = 0; blockNumber < newBlockNumber; ++blockNumber) {
-        PageCompressAddr *addr = GET_PAGE_COMPRESS_ADDR(map, this->chunkSize, blockNumber);
-        for (uint8 i = 0; i < addr->allocated_chunks; i++) {
-            if (addr->chunknos[i] > max_used_chunkno) {
-                max_used_chunkno = addr->chunknos[i];
-            }
-        }
-    }
-    map->allocated_chunks = map->last_synced_allocated_chunks = max_used_chunkno;
-
-    /* truncate pcd qfile */
-    if (beforeUsedChunks > max_used_chunkno) {
-        if (ftruncate(fileno(this->pcdFile), max_used_chunkno * chunkSize) != 0) {
+    if (newBlockNumber % CFS_LOGIC_BLOCKS_PER_EXTENT == 0) {
+        if (ftruncate(fileno(this->fd), extentStart * BLCKSZ) != 0) {
             return PCD_TRUNCATE_ERROR;
         }
     }
+
+    auto cfsExtentHeader = this->GetStruct(newBlockNumber);
+    for (uint16 i = (uint16)extentOffset; i < CFS_LOGIC_BLOCKS_PER_EXTENT; i++) {
+        auto cfsExtentAddress = GetExtentAddress(cfsExtentHeader, i);
+
+        cfsExtentAddress->nchunks = 0;
+        cfsExtentAddress->checksum = AddrChecksum32(cfsExtentAddress, cfsExtentAddress->allocated_chunks);
+    }
+    pg_atomic_write_u32(&cfsExtentHeader->nblocks, extentOffset);
+
+    uint16 max = 0;
+    for (uint16 i = 0; i < extentOffset; i++) {
+        auto cfsExtentAddress = GetExtentAddress(cfsExtentHeader, i);
+        for (int j = 0; j < cfsExtentAddress->allocated_chunks; j++) {
+            max = (max > cfsExtentAddress->chunknos[j]) ? max : cfsExtentAddress->chunknos[j];
+        }
+    }
+    uint32 start = extentStart * BLCKSZ + max * cfsExtentHeader->chunk_size;
+    uint32 len = (uint32)((CFS_MAX_LOGIC_CHRUNKS_NUMBER(cfsExtentHeader->chunk_size) - max) *
+                          cfsExtentHeader->chunk_size);
+    if (len >= PC_CUSTOM_VALUE_LARGESIZE) {
+        start += len % PC_CUSTOM_VALUE_LARGESIZE;
+        len -= len % PC_CUSTOM_VALUE_LARGESIZE;
+        if (fallocate(fileno(this->fd), FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE, start, len) < 0) {
+            return PCD_TRUNCATE_ERROR;
+        }
+    }
+    /* truncate pcd qfile */
+    if (ftruncate(fileno(this->fd), (extentHeader + 1) * BLCKSZ) != 0) {
+        return PCD_TRUNCATE_ERROR;
+    }
     return SUCCESS;
 }
 
-COMPRESS_ERROR_STATE PageCompression::RemoveCompressedFile(const char *path)
+void PunchHoleForCompressedFile(FILE* file, const char *filename)
 {
-    char dst[MAXPGPATH];
-    if (unlink(path) != 0) {
-        if (errno == ENOENT) {
-            return NORMAL_MISSING_ERROR;
-        }
-        return NORMAL_UNLINK_ERROR;
+    /* check if it is compressed file */
+    if (!IsCompressedFile(filename, strlen(filename))) {
+        return;
     }
-    FormatPathToPca(path, dst, MAXPGPATH);
-    if (unlink(dst) != 0) {
-        if (errno == ENOENT) {
-            return PCA_MISSING_ERROR;
-        }
-        return PCA_UNLINK_ERROR;
+    
+    /* punch hole ext by ext */
+    if (fseek(file, 0L, SEEK_END) < 0) {
+        return;
     }
-    FormatPathToPcd(path, dst, MAXPGPATH);
-    if (unlink(dst) != 0) {
-        if (errno == ENOENT) {
-            return PCD_MISSING_ERROR;
+
+    // read file size of toFullPath
+    off_t fileLen = ftell(file);
+    BlockNumber fileBlockNum = (BlockNumber) fileLen / BLCKSZ;
+    char unaligned_buf[BLCKSZ + BLCKSZ] = {0};
+    char *pcabuffer = (char *)TYPEALIGN(BLCKSZ, unaligned_buf);
+
+    for (BlockNumber block = 0; block < fileBlockNum; block += CFS_EXTENT_SIZE) {
+        off_t offset = (block + CFS_EXTENT_SIZE - 1) * BLCKSZ;
+        int32 total_size = (int32)pread64(fileno(file), pcabuffer, BLCKSZ, offset);
+        if (total_size != BLCKSZ) {
+            continue;
         }
-        return PCA_UNLINK_ERROR;
+
+        CfsExtentHeader *cfsExtentHeader = (CfsExtentHeader *)(void *)pcabuffer;
+        uint32 chunkSize = cfsExtentHeader->chunk_size;
+        uint32 freeChunk = CFS_MAX_LOGIC_CHRUNKS_NUMBER(chunkSize) - cfsExtentHeader->allocated_chunks;
+        uint32 freeSize = freeChunk * chunkSize;
+        if (freeSize < PC_CUSTOM_VALUE_LARGESIZE) {
+            continue;
+        }
+
+        // punch hole
+        off_t punchSize = (off_t)((freeSize / PC_CUSTOM_VALUE_LARGESIZE) * PC_CUSTOM_VALUE_LARGESIZE);
+        offset -= (off_t)punchSize;
+        if (fallocate(fileno(file), FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE, offset, punchSize) < 0) {
+            continue;
+        }
     }
-    return SUCCESS;
-}
-decltype(PageCompressHeader::chunk_size) PageCompression::GetChunkSize() const
-{
-    return this->chunkSize;
-}
-decltype(PageCompressHeader::algorithm) PageCompression::GetAlgorithm() const
-{
-    return this->header->algorithm;
 }

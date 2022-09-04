@@ -38,6 +38,7 @@
 #include "utils/memutils.h"
 #include "utils/ps_status.h"
 #include "utils/resowner.h"
+#include "instruments/gs_stack.h"
 #include "gssignal/gs_signal.h"
 
 #define MAX_DUMMY_DATA_FILE (RELSEG_SIZE * BLCKSZ)
@@ -101,7 +102,7 @@ void DataRcvWriterMain(void)
     (void)gspqsignal(SIGPIPE, SIG_IGN);
     (void)gspqsignal(SIGUSR1, SIG_IGN);
     (void)gspqsignal(SIGUSR2, SIG_IGN);
-
+    (void)gspqsignal(SIGURG, print_stack);
     /*
      * Reset some signals that are accepted by postmaster but not here
      */

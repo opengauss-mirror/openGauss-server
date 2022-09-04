@@ -25,7 +25,7 @@ subdir = src/gausskernel/storage
 top_builddir = ../../..
 include $(top_builddir)/src/Makefile.global
 
-SUBDIRS     = access  bulkload  replication  buffer  cmgr  cstore  dfs  nvm  file  freespace  ipc  large_object  lmgr page  remote  smgr tcap sync dorado_operation  xlog_share_storage
+SUBDIRS     = access  bulkload  replication  buffer  cmgr  cstore  file  freespace  ipc  large_object  lmgr page  remote  smgr nvm tcap sync dorado_operation  xlog_share_storage
 
 ifeq ($(enable_mot), yes)
 SUBDIRS     += mot

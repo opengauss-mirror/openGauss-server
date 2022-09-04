@@ -562,4 +562,35 @@ DATA(insert (4402 4301 0 e b _null_));
 DATA(insert ( 114 3802 0 e i _null_));
 DATA(insert ( 3802 114 0 e i _null_));
 
+/* set <-> int2 */
+DATA(insert ( 3272 21 3300 i f _null_));
+DATA(insert ( 21 3272 3307 i f _null_));
+/* set <-> int4 */
+DATA(insert ( 3272 23 3301 i f _null_));
+DATA(insert ( 23 3272 3310 i f _null_));
+/* set <-> int8 */
+DATA(insert ( 3272 20 3302 i f _null_));
+DATA(insert ( 20 3272 3309 i f _null_));
+/* set <-> float8 */
+DATA(insert ( 3272 701 3304 i f _null_));
+DATA(insert ( 701 3272 3311 i f _null_));
+/* set <-> float4 */
+DATA(insert ( 3272 700 3305 i f _null_));
+DATA(insert ( 700 3272 3312 i f _null_));
+/* set <-> numberic */
+DATA(insert ( 3272 1700 3306 i f _null_));
+DATA(insert ( 1700 3272 3313 i f _null_));
+/* set <-> text */
+DATA(insert ( 3272 25 3324 i f _null_));
+DATA(insert ( 25 3272 3320 i f _null_));
+/* set <-> varchar */
+DATA(insert ( 3272 1043 3325 i f _null_));
+DATA(insert ( 1043 3272 3315 i f _null_));
+/* set <-> bpchar */
+DATA(insert ( 3272 1042 3322 i f _null_));
+DATA(insert ( 1042 3272 3314 i f _null_));
+/* set <-> nvarchar2 */
+DATA(insert ( 3272 3969 3323 i f _null_));
+DATA(insert ( 3969 3272 3321 i f _null_));
+
 #endif   /* PG_CAST_H */

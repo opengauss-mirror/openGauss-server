@@ -137,7 +137,7 @@ static void add_train_model_to_plan(PlannedStmt *plan, AlgorithmML algorithm, Li
     dest->hyperparameters = prepare_model_hyperparameters(definitions, definitions_size, hyperp, dest->memcxt);
 
     optimize_train_model_subplan(plan, pnode, api);
-    
+
     add_operator_to_plan(plan, &pnode->plan);
 }
 
@@ -164,7 +164,10 @@ PlannedStmt *plan_create_model(CreateModelStmt *stmt, const char *query_string, 
     PlannedStmt *plan = NULL;
     
     query = setup_for_create_model(query, query_string, params);
-    
+#ifndef ENABLE_MULTIPLE_NODES
+    AutoDopControl dopControl;
+    dopControl.CloseSmp();
+#endif
     /* plan the query */
     plan = pg_plan_query(query, 0, params);
     

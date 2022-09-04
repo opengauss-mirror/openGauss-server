@@ -4,10 +4,9 @@ set(CMAKE_VERBOSE_MAKEFILE ON)
 set(CMAKE_RULE_MESSAGES OFF)
 set(CMAKE_SKIP_RPATH TRUE)
 
-INCLUDE_DIRECTORIES(${LIBTHRIFT_INCLUDE_PATH} ${SNAPPY_INCLUDE_PATH} ${CJSON_INCLUDE_PATH} ${BOOST_INCLUDE_PATH})
+INCLUDE_DIRECTORIES(${CJSON_INCLUDE_PATH} ${BOOST_INCLUDE_PATH})
 
-set(CMAKE_MODULE_PATH 
-    ${CMAKE_CURRENT_SOURCE_DIR}/carbondata
+set(CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/gsredistribute
     ${CMAKE_CURRENT_SOURCE_DIR}/hstore
     ${CMAKE_CURRENT_SOURCE_DIR}/test_decoding
@@ -21,7 +20,6 @@ set(CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/pagehack
     ${CMAKE_CURRENT_SOURCE_DIR}/pg_xlogdump
     ${CMAKE_CURRENT_SOURCE_DIR}/file_fdw
-    ${CMAKE_CURRENT_SOURCE_DIR}/hdfs_fdw
     ${CMAKE_CURRENT_SOURCE_DIR}/log_fdw
     ${CMAKE_CURRENT_SOURCE_DIR}/gc_fdw
 )
@@ -40,7 +38,6 @@ add_subdirectory(dummy_seclabel)
 add_subdirectory(pagehack)
 add_subdirectory(pg_xlogdump)
 add_subdirectory(file_fdw)
-add_subdirectory(hdfs_fdw)
 add_subdirectory(log_fdw)
 if("${ENABLE_MULTIPLE_NODES}" STREQUAL "OFF")
     add_subdirectory(gc_fdw)

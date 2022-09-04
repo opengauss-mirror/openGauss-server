@@ -5,19 +5,36 @@
 # By convention, we put no more than twenty tests in any one parallel group;
 # this limits the number of connections needed to run the tests.
 # ----------
+
+# This test case is used to monitor GUC parameter information.
+# If the GUC parameter is changed, please modify the Code/src/bin/gs_guc/cluster_guc.conf and Code/src/test/regress/output/recovery_2pc_tools.source files.
+#test: recovery_2pc_tools recovery_2pc_tools02
+test: recovery_2pc_tools
+
+test: sqlpatch_base
+test: sqlpatch_func
+
+test: spm_adaptive_gplan
+test: smp
 test: alter_hw_package
 test: hw_grant_package gsc_func gsc_db
-test: uppercase_attribute_name decode_compatible_with_o
+test: uppercase_attribute_name decode_compatible_with_o outerjoin_bugfix
 test: replace_func_with_two_args trunc_func_for_date nlssort_pinyin updatable_views
 
+# test multiple statistics
+test: functional_dependency
 test: pg_proc_test
-
 # parse xlog and page
-test: parse_page
-test: parse_xlog
+#test: parse_page
+#test: parse_xlog
+
+#test user_defined_variable
+test: set_user_defined_variables_test
 
 test: gs_dump_package
 test: out_param_func
+#test: sqlcode_cursor
+test: gs_dump_tableconstraint
 
 # test AI4DB
 test: plpgsql_override_out
@@ -41,11 +58,17 @@ test: hw_pwd_encryption_sm3
 
 test: sync_standy_names
 
+#test sha func
+test: single_node_sha
+
 # test subpartition
-test: hw_subpartition_createtable hw_subpartition_scan hw_subpartition_select hw_subpartition_split hw_subpartition_truncate hw_subpartition_update hw_subpartition_gpi hw_subpartition_analyze_vacuum hw_subpartition_alter_table hw_subpartition_index hw_subpartition_add_drop_partition hw_subpartition_tablespace hw_subpartition_ddl_index
+test: hw_subpartition_createtable hw_subpartition_scan hw_subpartition_select hw_subpartition_split hw_subpartition_truncate hw_subpartition_update hw_subpartition_gpi hw_subpartition_analyze_vacuum hw_subpartition_alter_table hw_subpartition_index hw_subpartition_add_drop_partition hw_subpartition_tablespace hw_subpartition_ddl_index hw_subpartition_size
 test: hw_subpartition_vacuum_partition
 test: gs_dump_subpartition
-test: partition_dml_operations
+test: partition_dml_operations partition_minmax
+test: partition_param_path
+#test: partition_cost_model
+test: row_partition_iterator_elimination col_partition_iterator_elimination
 
 # test subpartition with segment=on
 test: segment_subpartition_createtable segment_subpartition_scan segment_subpartition_select segment_subpartition_split segment_subpartition_truncate segment_subpartition_update segment_subpartition_gpi segment_subpartition_analyze_vacuum segment_subpartition_alter_table segment_subpartition_add_drop_partition segment_subpartition_tablespace segment_subpartition_ddl_index
@@ -62,6 +85,11 @@ test: single_node_tablespace
 test: sw_prepare
 test: sw_basic sw_icbc sw_siblings sw_bugfix-1 sw_bugfix-2 sw_by_rownum_level
 test: sw_clearup
+
+# test customer base environment hint
+test: hw_cbt_hint_prep
+test: hw_cbt_hint
+test: hw_cbt_hint_drop
 
 #--------------
 # any privilege
@@ -122,7 +150,7 @@ test: single_node_create_function_1
 # These depend on the above two
 #test: single_node_create_index 
 #test: single_node_create_view
-
+test: single_node_test_null_operator
 # ----------
 # Another group of parallel tests
 # ----------
@@ -161,6 +189,7 @@ test: single_node_random transactions_test
 #test: single_node_arrays 
 #test: single_node_btree_index single_node_hash_index single_node_update 
 
+test: prefixkey_index
 test: hash_index_001
 test: hash_index_002
 test: single_node_update 
@@ -244,9 +273,15 @@ test: hw_partition_list_truncate hw_partition_hash_truncate
 # add/drop partition
 test: hw_partition_add_drop_partition
 
+# create view on partition/subpartition
+test: hw_partition_create_view
+
 #test: hw_partition_start_end
 # To check min_max fuc support IP
 test: min_max_support_IP
+
+# encrypt decrypt
+test: encrypt_decrypt
 
 # interval partition 
 test: hw_partition_interval
@@ -337,6 +372,8 @@ test: create_table
 test: temp__4
 #test: copy#
 
+
+
 # ----------
 # More groups of parallel tests
 # duplicated create_misc
@@ -355,6 +392,8 @@ test: create_view1 create_view2 create_view3 create_view4 create_view5
 #dispatch from 13
 test: function
 test: aggregates_part1 aggregates_part2 aggregates_part3 count_distinct_part1 count_distinct_part2 count_distinct_part4
+test: aggregate_B_database
+test: group_concat_max_len_gs_guc
 #test: count_distinct_part3#
 
 test: hw_dfx_thread_status
@@ -373,8 +412,8 @@ test: hw_smp
 #test: insert_update_002 insert_update_003 insert_update_008 insert_update_009 insert_update_010
 #test: insert_update_001#
 test: delete update namespace case select_having select_implicit
-test: hw_test_operate_user
-test: hw_createtbl_llt
+test: hw_test_operate_user multi_update
+test: hw_createtbl_llt multi_delete
 #test: gsqlerr#
 test: sqlLLT
 #test: hw_sql_llt#
@@ -426,7 +465,7 @@ test: tpch01 tpch03 tpch04 libcomm_check_status tpch03_querymem
 test: tpch05 tpch06 tpch07 tpch08
 test: tpch09 tpch10 tpch11 tpch12
 test: tpch13 tpch14 tpch15 tpch16
-#test: tpch_vector_optimal
+test: tpch_vector_optimal
 test: tpch18 tpch19 tpch20 tpch18_querymem
 test: tpch21 tpch22 tpch11_pretty_performance vector_procedure
 #test: tpch02 tpch17 
@@ -546,6 +585,7 @@ test: interval tinterval macaddr tstypes comments
 # is concurrent safe.(duplicate)
 # ----------
 test: copyselect copy_error_log copy_support_transform copy_from_support_parallel
+test: copy_new_gram
 #test: copy_eol
 
 # ----------
@@ -585,6 +625,7 @@ test: alter_table_000 alter_table_002 alter_table_003
 test: resolve_unknown
 test: query_rewrite
 test: create_schema 
+test: create_schema2
 #test: view_dump
 test: hw_function_p_3 hw_function_p_4
 #test: hw_function_p_2
@@ -597,6 +638,7 @@ test: vec_append_part1 vec_append_part2 vec_append_part3
 test: vec_cursor_part1 vec_cursor_part2
 test: vec_delete_part1 vec_delete_part2
 test: vec_set_func
+test: hw_cursor_rollback hw_cursor_rollback_ustore
 
 test: alter_schema_db_rename_seq
 
@@ -664,7 +706,7 @@ test: arrayinterface_single
 test: plpgsql_table_opengauss  
 test: plpgsql_assign_value_to_array_attribute
 test: plpgsql_array_of_record 
-test: arrayinterface_indexby
+#test: plpgsql_nest_compile
 test: arrayinterface_ted
 test: plpgsql_inout_param
 test: plpgsql_cursor_rowtype
@@ -674,6 +716,7 @@ test: plpgsql_record_attrname
 test: plpgsql_insert_record
 test: hw_package_variable
 test: autonomous_cursor
+test: plpgsql_reset_session
 #test: plancache limit rangefuncs prepare
 test: returning largeobject
 test: hw_explain_pretty1 hw_explain_pretty2 hw_explain_pretty3
@@ -699,7 +742,7 @@ test: pmk
 # Test of changed data type compatible with Oracle
 
 test: hw_datatype_2 hw_datatype_3
-test: hw_datatype
+test: hw_datatype hw_datatype_set
 test: test_regex llt_atc
 
 # ----------
@@ -773,6 +816,7 @@ test: gin_test1 gin_test2 gin_test3
 # privilege test
 test: predefined_roles
 test: gs_db_privilege
+test: any_privs
 
 # ----------
 # src/test/regress/parallel_schedule.33
@@ -856,6 +900,8 @@ test: hw_cipher_sm4
 test: hw_cipher_aes128
 test: hw_pwd_encryption_sm3
 test: rule_test
+test: test_auto_increment
+#test: dump_auto_increment
 
 #delete limit
 test: delete_limit
@@ -881,14 +927,15 @@ test: leaky_function_operator
 # ----------
 #test: gs_guc
 
-test: smp
-
 test: cstore_unique_index
 
 test: cast_privileges_test
 
 #generated column test
 test: generated_col
+test: gen_col_pall_start
+test: gen_col_thread1 gen_col_thread2
+test: gen_col_pall_end
 
 # gs_ledger
 test: ledger_table_case
@@ -902,22 +949,26 @@ test: sequence_cache_test
 test: pg_buffercache_pages
 test: procedure_privilege_test
 
+# global temporary table: parallel truncate
+test: gtt_trunc_pre
+test: gtt_trunc_parallel_dml1 gtt_trunc_parallel_dml2 gtt_trunc_parallel_ddl1 gtt_trunc_parallel_ddl2
+#test: gtt_trunc_clean
 
 test: toomanyparams
 
 test: test_astore_multixact
-test: row_compression/pg_table_size row_compression/unsupported_feature row_compression/normal_test
-test: row_compression/row_compression_basebackup
+
+test: row_compression/pg_table_size row_compression/unsupported_feature row_compression/normal_test 
+# test: row_compression/pg_tablespace_size
 test: row_compression/twophase
-test: component_view_enhancements 
-test: single_node_user_mapping
-
+test: row_compression/row_compress_feature
+test: row_compression/row_compression_basebackup
+test: component_view_enhancements single_node_user_mapping
 # reindex concurrently
-test: reindex_concurrently
+#test: reindex_concurrently
 test: reindex_concurrently_parallel
-test: reindex_concurrently_partition
+#test: reindex_concurrently_partition
 test: reindex_concurrently_partition_parallel
-
 # publication and subscription, we need to record audit log for them, so seperate them into two test group
 test: publication
 test: subscription
@@ -929,3 +980,19 @@ test: composite_datum_record mysql_function b_comments
 
 test: join_test_alias alter_ctable_compress
 test: ignore/ignore_type_transform ignore/ignore_not_null_constraints ignore/ignore_unique_constraints ignore/ignore_no_matched_partition
+
+test: pg_ls_dir
+test: cost_model
+test: base_update
+test: seqscan_fusion
+
+# var selectivity
+test: var_eq_const_selectivity
+
+test: pg_controldata
+
+# syntax compatibility
+test: sytcomp_del_upt4orderby
+test: aioptimizer
+test: aioptimizer_small
+test: pgfincore

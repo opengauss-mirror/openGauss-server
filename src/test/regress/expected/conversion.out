@@ -6,30 +6,36 @@ SET bytea_output TO escape;
 CREATE USER conversion_test_user WITH NOCREATEDB NOSYSADMIN PASSWORD 'gauss@123';
 SET SESSION AUTHORIZATION conversion_test_user PASSWORD 'gauss@123';
 CREATE CONVERSION myconv FOR 'LATIN1' TO 'UTF8' FROM iso8859_1_to_utf8;
+ERROR:  user defined conversion is not yet supported.
 --
 -- cannot make same name conversion in same schema
 --
 CREATE CONVERSION myconv FOR 'LATIN1' TO 'UTF8' FROM iso8859_1_to_utf8;
-ERROR:  conversion "myconv" already exists
+ERROR:  user defined conversion is not yet supported.
 --
 -- create default conversion with qualified name
 --
 CREATE DEFAULT CONVERSION public.mydef FOR 'LATIN1' TO 'UTF8' FROM iso8859_1_to_utf8;
+ERROR:  user defined conversion is not yet supported.
 --
 -- cannot make default conversion with same shcema/for_encoding/to_encoding
 --
 CREATE DEFAULT CONVERSION public.mydef2 FOR 'LATIN1' TO 'UTF8' FROM iso8859_1_to_utf8;
-ERROR:  default conversion for LATIN1 to UTF8 already exists
+ERROR:  user defined conversion is not yet supported.
 -- test comments
 COMMENT ON CONVERSION myconv_bad IS 'foo';
 ERROR:  conversion "myconv_bad" does not exist
 COMMENT ON CONVERSION myconv IS 'bar';
+ERROR:  conversion "myconv" does not exist
 COMMENT ON CONVERSION myconv IS NULL;
+ERROR:  conversion "myconv" does not exist
 --
 -- drop user defined conversion
 --
 DROP CONVERSION myconv;
+ERROR:  conversion "myconv" does not exist
 DROP CONVERSION mydef;
+ERROR:  conversion "mydef" does not exist
 --
 -- make sure all pre-defined conversions are fine.
 -- SQL_ASCII --> MULE_INTERNAL

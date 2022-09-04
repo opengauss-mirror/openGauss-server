@@ -70,15 +70,19 @@ select c.relname,c.relpages > 0 as relpagesgtzero, c.reltuples > 0 as reltuplesg
 (1 row)
 
 explain (costs off) select * from partition_reindex_table3 where c3 = TO_DATE('2020-04-21', 'YYYY-MM-DD') and c2 = 8;
-                                          QUERY PLAN                                          
-----------------------------------------------------------------------------------------------
- Partition Iterator
-   Iterations: 1
-   ->  Partitioned Index Scan using partition_reindex_table3_ind3 on partition_reindex_table3
-         Index Cond: (c3 = to_date('2020-04-21'::text, 'YYYY-MM-DD'::text))
-         Filter: (c2 = 8)
-         Selected Partitions:  2
-(6 rows)
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Partitioned Bitmap Heap Scan on partition_reindex_table3
+   Recheck Cond: ((c3 = to_date('2020-04-21'::text, 'YYYY-MM-DD'::text)) AND (c2 = 8))
+   Selected Partitions:  2
+   ->  BitmapAnd
+         ->  Partitioned Bitmap Index Scan on partition_reindex_table3_ind3
+               Index Cond: (c3 = to_date('2020-04-21'::text, 'YYYY-MM-DD'::text))
+               Selected Partitions:  2
+         ->  Partitioned Bitmap Index Scan on partition_reindex_table3_ind2
+               Index Cond: (c2 = 8)
+               Selected Partitions:  2
+(10 rows)
 
 select * from partition_reindex_table3 where c3 = TO_DATE('2020-04-21', 'YYYY-MM-DD') and c2 = 8;
  c1 | c2 |            c3            
@@ -94,15 +98,19 @@ select c.relname,c.relpages > 0 as relpagesgtzero, c.reltuples > 0 as reltuplesg
 (1 row)
 
 explain (costs off) select * from partition_reindex_table3 where c3 = TO_DATE('2020-04-21', 'YYYY-MM-DD') and c2 = 8;
-                                          QUERY PLAN                                          
-----------------------------------------------------------------------------------------------
- Partition Iterator
-   Iterations: 1
-   ->  Partitioned Index Scan using partition_reindex_table3_ind3 on partition_reindex_table3
-         Index Cond: (c3 = to_date('2020-04-21'::text, 'YYYY-MM-DD'::text))
-         Filter: (c2 = 8)
-         Selected Partitions:  2
-(6 rows)
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Partitioned Bitmap Heap Scan on partition_reindex_table3
+   Recheck Cond: ((c3 = to_date('2020-04-21'::text, 'YYYY-MM-DD'::text)) AND (c2 = 8))
+   Selected Partitions:  2
+   ->  BitmapAnd
+         ->  Partitioned Bitmap Index Scan on partition_reindex_table3_ind3
+               Index Cond: (c3 = to_date('2020-04-21'::text, 'YYYY-MM-DD'::text))
+               Selected Partitions:  2
+         ->  Partitioned Bitmap Index Scan on partition_reindex_table3_ind2
+               Index Cond: (c2 = 8)
+               Selected Partitions:  2
+(10 rows)
 
 --the plan before reindex and after reindex should be same
 select * from partition_reindex_table3 where c3 = TO_DATE('2020-04-21', 'YYYY-MM-DD') and c2 = 8;
@@ -123,15 +131,19 @@ select c.relname,c.relpages > 0 as relpagesgtzero, c.reltuples > 0 as reltuplesg
 (1 row)
 
 explain (costs off) select * from partition_reindex_table3 where c3 = TO_DATE('2020-04-21', 'YYYY-MM-DD') and c2 = 8;
-                                          QUERY PLAN                                          
-----------------------------------------------------------------------------------------------
- Partition Iterator
-   Iterations: 1
-   ->  Partitioned Index Scan using partition_reindex_table3_ind3 on partition_reindex_table3
-         Index Cond: (c3 = to_date('2020-04-21'::text, 'YYYY-MM-DD'::text))
-         Filter: (c2 = 8)
-         Selected Partitions:  2
-(6 rows)
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Partitioned Bitmap Heap Scan on partition_reindex_table3
+   Recheck Cond: ((c3 = to_date('2020-04-21'::text, 'YYYY-MM-DD'::text)) AND (c2 = 8))
+   Selected Partitions:  2
+   ->  BitmapAnd
+         ->  Partitioned Bitmap Index Scan on partition_reindex_table3_ind3
+               Index Cond: (c3 = to_date('2020-04-21'::text, 'YYYY-MM-DD'::text))
+               Selected Partitions:  2
+         ->  Partitioned Bitmap Index Scan on partition_reindex_table3_ind2
+               Index Cond: (c2 = 8)
+               Selected Partitions:  2
+(10 rows)
 
 select * from partition_reindex_table3 where c3 = TO_DATE('2020-04-21', 'YYYY-MM-DD') and c2 = 8;
  c1 | c2 |            c3            
@@ -147,15 +159,19 @@ select c.relname,c.relpages > 0 as relpagesgtzero, c.reltuples > 0 as reltuplesg
 (1 row)
 
 explain (costs off) select * from partition_reindex_table3 where c3 = TO_DATE('2020-04-21', 'YYYY-MM-DD') and c2 = 8;
-                                          QUERY PLAN                                          
-----------------------------------------------------------------------------------------------
- Partition Iterator
-   Iterations: 1
-   ->  Partitioned Index Scan using partition_reindex_table3_ind3 on partition_reindex_table3
-         Index Cond: (c3 = to_date('2020-04-21'::text, 'YYYY-MM-DD'::text))
-         Filter: (c2 = 8)
-         Selected Partitions:  2
-(6 rows)
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Partitioned Bitmap Heap Scan on partition_reindex_table3
+   Recheck Cond: ((c3 = to_date('2020-04-21'::text, 'YYYY-MM-DD'::text)) AND (c2 = 8))
+   Selected Partitions:  2
+   ->  BitmapAnd
+         ->  Partitioned Bitmap Index Scan on partition_reindex_table3_ind3
+               Index Cond: (c3 = to_date('2020-04-21'::text, 'YYYY-MM-DD'::text))
+               Selected Partitions:  2
+         ->  Partitioned Bitmap Index Scan on partition_reindex_table3_ind2
+               Index Cond: (c2 = 8)
+               Selected Partitions:  2
+(10 rows)
 
 --the plan before reindex and after reindex should be same
 select * from partition_reindex_table3 where c3 = TO_DATE('2020-04-21', 'YYYY-MM-DD') and c2 = 8;

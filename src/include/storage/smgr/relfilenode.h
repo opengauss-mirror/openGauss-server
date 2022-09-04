@@ -31,9 +31,6 @@ typedef enum {
  */
 typedef int ForkNumber;
 
-/* used for delete forknum */
-#define COMPRESS_FORKNUM -9
-
 #define SEGMENT_EXT_8192_FORKNUM -8
 #define SEGMENT_EXT_1024_FORKNUM -7
 #define SEGMENT_EXT_128_FORKNUM -6
@@ -81,6 +78,10 @@ typedef int ForkNumber;
  * relation with heap disk storage type , 2) 0~BUCKETDATALEN-1 means bucketid 
  * of a bucket relation, 3) BUCKETDATALEN means a non-bucket segment storage 
  * relation. Both 2) and 3) representing segment storage type.
+ * 
+ * opt identifies compressed relation type, reference struct <RelFileCompressOption>.
+ * 1) zero means normal relation(non-compression),
+ * 2) otherwise means compressed relation.
  *
  * Note: spcNode must be GLOBALTABLESPACE_OID if and only if dbNode is
  * zero.  We support shared relations only in the "global" tablespace.
@@ -159,6 +160,7 @@ typedef struct RelFileNodeKey {
     RelFileNode relfilenode; /*relfilenode*/
     int columnid;            /*column for CU store*/
 } RelFileNodeKey;
+
 typedef struct RelFileNodeKeyEntry {
     RelFileNodeKey key;
     int number; /*Times the relfilenode occurence*/
@@ -257,6 +259,8 @@ typedef struct {
     Oid ownerid;
 } ColFileNodeRel;
 
+#define SIZE_OF_COLFILENODE(compress) ((compress) ? sizeof(ColFileNode) : sizeof(ColFileNodeRel))
+
 /*
  *  1) ForkNumber type must be 32-bit;
  *  2) forknum value occupies the lower 16-bit;
@@ -301,9 +305,20 @@ static inline StorageType forknum_get_storage_type(const ForkNumber& forknum)
         (colFileNode)->filenode.dbNode = (colFileNodeRel)->filenode.dbNode;                   \
         (colFileNode)->filenode.relNode = (colFileNodeRel)->filenode.relNode;                 \
         (colFileNode)->filenode.opt = 0;                                                      \
-        (colFileNode)->filenode.bucketNode = forknum_get_bucketid((colFileNodeRel)->forknum); \
+        (colFileNode)->filenode.bucketNode = (int2)forknum_get_bucketid((colFileNodeRel)->forknum); \
         (colFileNode)->forknum = forknum_get_forknum((colFileNodeRel)->forknum);              \
         (colFileNode)->ownerid = (colFileNodeRel)->ownerid;                                   \
+    } while (0)
+
+#define ColFileNodeFullCopy(colFileNode, colFileNode2)                                      \
+    do {                                                                                    \
+        (colFileNode)->filenode.spcNode = (colFileNode2)->filenode.spcNode;                 \
+        (colFileNode)->filenode.dbNode = (colFileNode2)->filenode.dbNode;                   \
+        (colFileNode)->filenode.relNode = (colFileNode2)->filenode.relNode;                 \
+        (colFileNode)->filenode.bucketNode = (int2)forknum_get_bucketid((colFileNode2)->forknum); \
+        (colFileNode)->forknum = forknum_get_forknum((colFileNode2)->forknum);              \
+        (colFileNode)->filenode.opt = (colFileNode2)->filenode.opt;                         \
+        (colFileNode)->ownerid = (colFileNode2)->ownerid;                                   \
     } while (0)
 
 #endif /* RELFILENODE_H */

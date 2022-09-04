@@ -262,7 +262,8 @@ void LocalSysTupCache::FlushGlobalByInvalidMsg(Oid db_id, uint32 hash_value)
         InitPhase2();
         Assert(db_id == m_db_id);
     }
-    if (!m_is_inited_phase2) {
+    if (m_global_systupcache == NULL) {
+        Assert(!m_is_inited_phase2);
         Assert(!m_is_inited);
         /* redoxact meand !m_is_inited_phase2 */
         GlobalSysDBCacheEntry *entry = g_instance.global_sysdbcache.FindTempGSCEntry(db_id);

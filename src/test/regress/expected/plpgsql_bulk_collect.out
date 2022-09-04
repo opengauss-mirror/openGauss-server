@@ -537,6 +537,132 @@ name(3): Alice
 name(4): Jim
 name(5): 
 name(6): 
+-- test bulk into when attribute exsist varchar withe '()'
+drop table t1;
+ERROR:  table "t1" does not exist
+create type o1 as (a int, b varchar);
+create table t1(a int, b o1, c varchar2, d number);
+insert into t1 values(1,(11,'sd（de）'),'as(swd)', 1.1);
+insert into t1 values(2,(22,'sd（de）'),'as(swd)(())', 2.2);
+insert into t1 values(3,(33,'sd(de)'),'as(swd)((', 3.3);
+insert into t1 values(4,(44,'sd（de）'),'as(swd)))', 4.4);
+insert into t1 values(5,(55,'sd（de）'),'as(swd))(', 5.5);
+-- a. normal use
+declare
+cursor c1 is select * from t1;
+va t1[];
+begin
+open c1;
+fetch c1 bulk collect into va;
+raise info '%',va;
+end;
+/
+INFO:  {"(1,\"(11,sd（de）)\",\"as(swd)\",1.1)","(2,\"(22,sd（de）)\",\"as(swd)(())\",2.2)","(3,\"(33,\"\"sd(de)\"\")\",\"as(swd)((\",3.3)","(4,\"(44,sd（de）)\",\"as(swd)))\",4.4)","(5,\"(55,sd（de）)\",\"as(swd))(\",5.5)"}
+-- b. use by row
+declare
+cursor c1 is select row(a,b,c,d) from t1;
+va t1[];
+begin
+open c1;
+fetch c1 bulk collect into va;
+raise info '%',va;
+end;
+/
+INFO:  {"(1,\"(11,sd（de）)\",\"as(swd)\",1.1)","(2,\"(22,sd（de）)\",\"as(swd)(())\",2.2)","(3,\"(33,\"\"sd(de)\"\")\",\"as(swd)((\",3.3)","(4,\"(44,sd（de）)\",\"as(swd)))\",4.4)","(5,\"(55,sd（de）)\",\"as(swd))(\",5.5)"}
+-- c. columns not match
+create or replace procedure p1() as
+declare
+cursor c1 is select * from t1;
+type r1 is record(a number, b text, d int);
+type a1 is varray(10) of r1;
+va a1;
+begin
+open c1;
+fetch c1 bulk collect into va;
+raise info '%',va;
+end;
+/
+call p1();
+ERROR:  bulk collect returned record type does not match expected record type
+DETAIL:  Number of returned columns (4) does not match expected column count (3).
+CONTEXT:  PL/pgSQL function p1() line 9 at FETCH
+-- c. columns not match with row
+create or replace procedure p1() as
+declare
+cursor c1 is select row(a,b,c,d) from t1;
+type r1 is record(a number, b text, d text);
+type a1 is varray(10) of r1;
+va a1;
+begin
+open c1;
+fetch c1 bulk collect into va;
+raise info '%',va;
+end;
+/
+call p1();
+ERROR:  malformed record literal: "(1,"(11,sd（de）)","as(swd)",1.1)"
+DETAIL:  Too many columns.
+CONTEXT:  PL/pgSQL function p1() line 9 at FETCH
+-- d. type not match
+create or replace procedure p1() as
+declare
+cursor c1 is select * from t1;
+type r1 is record(a number, b text, c int, d int);
+type a1 is varray(10) of r1;
+va a1;
+begin
+open c1;
+fetch c1 bulk collect into va;
+raise info '%',va;
+end;
+/
+call p1();
+ERROR:  invalid input syntax for integer: "as(swd)"
+CONTEXT:  PL/pgSQL function p1() line 9 at FETCH
+-- test tuple exsist attribute dropped
+drop type o1 cascade;
+NOTICE:  drop cascades to table t1 column b
+declare
+cursor c1 is select * from t1;
+va t1[];
+begin
+open c1;
+fetch c1 bulk collect into va;
+raise info '%',va;
+end;
+/
+INFO:  {"(1,\"as(swd)\",1.1)","(2,\"as(swd)(())\",2.2)","(3,\"as(swd)((\",3.3)","(4,\"as(swd)))\",4.4)","(5,\"as(swd))(\",5.5)"}
+declare
+cursor c1 is select row(a,c,d) from t1;
+va t1[];
+begin
+open c1;
+fetch c1 bulk collect into va;
+raise info '%',va;
+end;
+/
+INFO:  {"(1,\"as(swd)\",1.1)","(2,\"as(swd)(())\",2.2)","(3,\"as(swd)((\",3.3)","(4,\"as(swd)))\",4.4)","(5,\"as(swd))(\",5.5)"}
+create or replace procedure p1() as
+declare
+cursor c1 is select * from t1;
+type r1 is record(a number, b text, c int);
+type a1 is varray(10) of r1;
+va a1;
+begin
+open c1;
+fetch c1 bulk collect into va;
+raise info '%',va;
+end;
+/
+call p1();
+INFO:  {"(1,\"as(swd)\",1)","(2,\"as(swd)(())\",2)","(3,\"as(swd)((\",3)","(4,\"as(swd)))\",4)","(5,\"as(swd))(\",6)"}
+ p1 
+----
+ 
+(1 row)
+
+drop procedure p1();
+drop table t1;
 --------------------------------------------------
 ------------------ END OF TESTS ------------------
 --------------------------------------------------

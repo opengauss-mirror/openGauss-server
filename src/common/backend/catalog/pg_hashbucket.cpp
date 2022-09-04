@@ -649,6 +649,7 @@ Relation bucketGetRelation(Relation rel, Partition part, int2 bucketId)
     oldcxt = MemoryContextSwitchTo(u_sess->cache_mem_cxt);
     bucket = (Relation)palloc0(sizeof(RelationData));
     *bucket = *rel;
+    bucket->rd_att->tdrefcount++;
     /*
      * Init bucket relation to avoid double free in releaseDummyRelation()
      * for bucket relation is copied from main relation.

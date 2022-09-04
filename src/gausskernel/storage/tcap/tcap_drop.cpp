@@ -69,6 +69,7 @@
 #include "commands/directory.h"
 #include "commands/extension.h"
 #include "commands/proclang.h"
+#include "commands/publicationcmds.h"
 #include "commands/schemacmds.h"
 #include "commands/seclabel.h"
 #include "commands/sec_rls_cmds.h"
@@ -730,6 +731,17 @@ static void TrDoDropSynonym(TrObjDesc *baseDesc, ObjectAddress *object)
     return;
 }
 
+static void TrDoDropPublicationRel(TrObjDesc *baseDesc, ObjectAddress *object)
+{
+    if (TrNeedLogicDrop(object)) {
+        /* nothing to do as no name attribute in system catalog */
+    } else {
+        RemovePublicationRelById(object->objectId);
+    }
+
+    return;
+}
+
 /*
  * doDeletion: delete a single object
  * return false if logic deleted,
@@ -886,6 +898,10 @@ static void TrDoDrop(TrObjDesc *baseDesc, ObjectAddress *object)
 
         case OCLASS_SYNONYM:
             TrDoDropSynonym(baseDesc, object);
+            break;
+
+        case OCLASS_PUBLICATION_REL:
+            TrDoDropPublicationRel(baseDesc, object);
             break;
 
         default:
@@ -1164,7 +1180,7 @@ bool TrCheckRecyclebinDrop(const DropStmt *stmt, ObjectAddresses *objects)
     bool rbDrop = false;
 
     /* No work if no objects... */
-    if (objects->numrefs <= 0)
+    if (objects->numrefs != 1)
         return false;
 
     if (/*

@@ -299,19 +299,6 @@ public:
             return pg_pair(it_wrapper->m_iter, false);
         }
 
-        /*
-         * We must use the TopMostMemoryContext because the RB tree
-         * not bound to a thread and can outlive any of the thread specific
-         * contextes.
-         */
-        MemoryContext oldContext = MemoryContextSwitchTo(GetSetMemory());
-
-        /* allocate for key & value */
-        it_wrapper->m_iter.first = (Key *)palloc(key_size);
-        new (static_cast<void *>(it_wrapper->m_iter.first)) Key(val);
-
-        MemoryContextSwitchTo(oldContext);
-
         /* add this iterator to list of other iterators */
         it_wrapper->m_iter.m_next = m_begin_iter;
         m_begin_iter->m_prev = &it_wrapper->m_iter;

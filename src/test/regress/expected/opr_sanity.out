@@ -654,7 +654,12 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
   981 | diagonal
   992 | slope
   993 | lseg
+ 1000 | compress_address_header
+ 1001 | compress_address_details
+ 1002 | compress_buffer_stat_info
+ 1003 | compress_ratio_info
  1004 | lo_truncate
+ 1005 | compress_statistic_info
  1026 | timezone
  1030 | gist_point_compress
  1031 | aclitemin
@@ -2584,6 +2589,8 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  4704 | has_directory_privilege
  4705 | has_directory_privilege
  4767 | gs_read_block_from_remote
+ 4772 | gs_is_dw_io_blocked
+ 4773 | gs_block_dw_io
  4789 | remote_rto_stat
  4999 | remote_recovery_status
  5000 | get_instr_workload_info
@@ -2625,6 +2632,7 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  5254 | gs_get_session_memctx_detail
  5255 | gs_get_shared_memctx_detail
  5256 | gs_get_thread_memctx_detail
+ 5257 | gs_get_history_memory_detail
  5345 | pv_builtin_functions
  5519 | int1cmp
  5520 | hashint1
@@ -2676,6 +2684,10 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  5718 | isubmit_on_nodes
  5719 | capture_view_to_json
  5720 | get_node_stat_reset_time
+ 5843 | gs_read_block_from_remote
+ 5844 | gs_read_file_from_remote
+ 5845 | gs_read_file_size_from_remote
+ 5846 | pg_read_binary_file_blocks
  5999 | get_gtm_lite_status
  6000 | getbucket
  6001 | bucketuuid

@@ -1723,10 +1723,10 @@ Oid CStoreSetTableSpaceForColumnData(Relation colRel, Oid targetTableSpace)
 
     /* create CU replication relation */
     RelFileNode CUReplicationFile = {
-        ConvertToRelfilenodeTblspcOid(targetTableSpace), colRel->rd_node.dbNode, newrelfilenode, InvalidBktId
+        ConvertToRelfilenodeTblspcOid(targetTableSpace), colRel->rd_node.dbNode, newrelfilenode, InvalidBktId, 0
     };
     Relation CUReplicationRel = CreateCUReplicationRelation(
-                                    CUReplicationFile, colRel->rd_backend, colRel->rd_rel->relpersistence, RelationGetRelationName(colRel));
+        CUReplicationFile, colRel->rd_backend, colRel->rd_rel->relpersistence, RelationGetRelationName(colRel));
 
     int nattrs = RelationGetDescr(colRel)->natts;
     for (int i = 0; i < nattrs; ++i) {
@@ -1755,7 +1755,8 @@ void ATCheckPartitionNum(Relation partTableRel, int partNum)
 {
     if (partNum < ARRAY_2_LEN) {
         ereport(ERROR,
-                (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("source partitions must be at least two partitions")));
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                 errmsg("source partitions must be at least two partitions")));
     }
     if (partNum > MAX_CSTORE_MERGE_PARTITIONS) {
         ereport(ERROR,
@@ -1811,7 +1812,8 @@ bool ATCheckIfRenameNeeded(Relation relation, const char* oldPartName, char* des
     if (strcmp(oldPartName, destPartName) != 0) {
         /*  check partition new name does not exist. */
         if (InvalidOid != GetSysCacheOid3(PARTPARTOID, NameGetDatum(destPartName),
-                                          CharGetDatum(PART_OBJ_TYPE_TABLE_PARTITION), ObjectIdGetDatum(relation->rd_id))) {
+                                          CharGetDatum(PART_OBJ_TYPE_TABLE_PARTITION),
+                                          ObjectIdGetDatum(relation->rd_id))) {
             ereport(ERROR,
                     (errcode(ERRCODE_DUPLICATE_OBJECT),
                      errmsg("target partition's name \"%s\" already exists", destPartName)));

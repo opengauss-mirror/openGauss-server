@@ -28,6 +28,7 @@
 #include "utils/lsyscache.h"
 #include "commands/copy.h"
 #include "utils/elog.h"
+#include "mb/pg_wchar.h"
 
 static void RemoteCopy_QuoteStr(StringInfo query_buf, char* value);
 
@@ -296,10 +297,17 @@ void RemoteCopy_BuildStatement(
     if (options->rco_fill_missing_fields)
         appendStringInfoString(&state->query_buf, " FILL_MISSING_FIELDS");
 
+    if (options->rco_fixedEncoding != -1) {
+        appendStringInfoString(&state->query_buf, " ENCODING ");
+        char* encoding = const_cast<char *>(pg_encoding_to_char(options->rco_fixedEncoding));
+        RemoteCopy_QuoteStr(&state->query_buf, encoding);
+    }
+
     if (options->transform_query_string) {
         appendStringInfoChar(&state->query_buf, ' ');
         appendStringInfoString(&state->query_buf, options->transform_query_string);
     }
+
 }
 
 /*
@@ -331,6 +339,7 @@ RemoteCopyOptions* makeRemoteCopyOptions(void)
     res->rco_compatible_illegal_chars = false;
     res->rco_ignore_extra_data = false;
     res->rco_fill_missing_fields = false;
+    res->rco_fixedEncoding = -1;
     return res;
 #endif
 }

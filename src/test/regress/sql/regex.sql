@@ -67,3 +67,6 @@ select 'a' ~ '$()|^\1';
 select 'a' ~ '.. ()|\1';
 select 'a' ~ '()*\1';
 select 'a' ~ '()+\1';
+
+-- test {0}
+select 'xyz' ~ '((.)){0}(\2){0}' as t;

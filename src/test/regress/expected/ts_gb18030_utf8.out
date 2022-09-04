@@ -1,0 +1,41 @@
+create database gb18030 encoding='gb18030' LC_COLLATE='zh_CN.GB18030' LC_CTYPE ='zh_CN.GB18030' TEMPLATE=template0;
+\c gb18030
+show server_encoding;
+ server_encoding 
+-----------------
+ GB18030
+(1 row)
+
+create table tb_test(id int, content text);
+insert into tb_test values(1, 'abcdefghigkABCDEFGHIJK');
+insert into tb_test values(2, 'ܐ');
+insert into tb_test values(3, '中文汉字');
+insert into tb_test values(4, '😭😂😠');
+insert into tb_test values(5, '𫝆 𫝯 𫝢 𫞌 𫞏 𫝨 𫝩 𫝪');
+insert into tb_test values(5, '༁');
+select * from tb_test order by id;
+ id |         content         
+----+-------------------------
+  1 | abcdefghigkABCDEFGHIJK
+  2 | ܐ
+  3 | 中文汉字
+  4 | 😭😂😠
+  5 | 𫝆 𫝯 𫝢 𫞌 𫞏 𫝨 𫝩 𫝪
+  5 | ༁
+(6 rows)
+
+select convert_to(content, 'utf8') from tb_test order by id;
+                                    convert_to                                    
+----------------------------------------------------------------------------------
+ \x616263646566676869676b4142434445464748494a4b
+ \xdc90
+ \xe4b8ade69687e6b189e5ad97
+ \xf09f98adf09f9882f09f98a0
+ \xf0ab9d8620f0ab9daf20f0ab9da220f0ab9e8c20f0ab9e8f20f0ab9da820f0ab9da920f0ab9daa
+ \xe0bc81
+(6 rows)
+
+drop table tb_test;
+\c regression
+clean connection to all force for database gb18030;
+drop database gb18030;

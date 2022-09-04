@@ -45,9 +45,9 @@ extern bool tablespaceDataIsValid(const char* path);
 extern void copy_file(const char* fromfile, char* tofile);
 
 extern void CompressedFileTruncate(const char* path, const RewindCompressInfo* rewindCompressInfo);
-extern void FetchCompressedFile(char* buf, BlockNumber begin, int32 size);
+void FetchCompressedFile(char* buf, BlockNumber blockNumber, int32 size, uint16 chunkSize, uint8 algorithm);
 extern void CompressFileClose();
-extern void CompressedFileInit(const char* fileName, int32 chunkSize, int32 algorithm, bool rebuild);
+extern void CompressedFileInit(const char* fileName, bool rebuild);
 extern bool FileProcessErrorReport(const char *path, COMPRESS_ERROR_STATE errorState);
 #endif /* FILE_OPS_H */
 

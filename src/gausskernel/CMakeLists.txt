@@ -77,6 +77,7 @@ set(gaussdb_objects
     $<TARGET_OBJECTS:gausskernel_cbb_instruments_capture_view>
     $<TARGET_OBJECTS:gausskernel_cbb_instruments_statement>
     $<TARGET_OBJECTS:gausskernel_cbb_instruments_func_control>
+    $<TARGET_OBJECTS:gausskernel_cbb_instruments_gs_stack>
     $<TARGET_OBJECTS:gausskernel_cbb_communication_libcomm_core>
     $<TARGET_OBJECTS:gausskernel_cbb_communication_comm_proxy>
     $<TARGET_OBJECTS:gausskernel_cbb_communication_libcomm_utils>
@@ -99,9 +100,12 @@ set(gaussdb_objects
     $<TARGET_OBJECTS:gausskernel_optimizer_util_learn>
     $<TARGET_OBJECTS:gausskernel_optimizer_util>
     $<TARGET_OBJECTS:gausskernel_optimizer_rewrite>
+    $<TARGET_OBJECTS:gausskernel_optimizer_aioptimizer>
     $<TARGET_OBJECTS:gausskernel_optimizer_commands>
     $<TARGET_OBJECTS:gausskernel_optimizer_commands_sequence>
     $<TARGET_OBJECTS:gausskernel_optimizer_sqladvisor>
+    $<TARGET_OBJECTS:gausskernel_optimizer_sqlpatch>
+    $<TARGET_OBJECTS:gausskernel_optimizer_gplanmgr>
     $<TARGET_OBJECTS:gausskernel_process_datasource>
     $<TARGET_OBJECTS:gausskernel_process_job>
     $<TARGET_OBJECTS:gausskernel_process_main>
@@ -114,9 +118,9 @@ set(gaussdb_objects
     $<TARGET_OBJECTS:gausskernel_db4ai_commands>
     $<TARGET_OBJECTS:gausskernel_db4ai_catalog>
     $<TARGET_OBJECTS:gausskernel_db4ai_executor>
-    $<TARGET_OBJECTS:gausskernel_db4ai_executor_gd>
-    $<TARGET_OBJECTS:gausskernel_db4ai_executor_xgboost>
-    $<TARGET_OBJECTS:gausskernel_db4ai_executor_kmeans>
+    $<TARGET_OBJECTS:gausskernel_db4ai_executor_algorithms>
+    $<TARGET_OBJECTS:gausskernel_db4ai_executor_algorithm_bayes>
+    $<TARGET_OBJECTS:gausskernel_db4ai_executor_optimize_gd>
     $<TARGET_OBJECTS:gausskernel_runtime_executor>
     $<TARGET_OBJECTS:gausskernel_runtime_opfusion>
     $<TARGET_OBJECTS:gausskernel_runtime_vecexecutor_vecnode>
@@ -127,17 +131,9 @@ set(gaussdb_objects
     $<TARGET_OBJECTS:gausskernel_security_gs_policy>
     $<TARGET_OBJECTS:gausskernel_storage_access_cbtree>
     $<TARGET_OBJECTS:gausskernel_storage_access_common>
-    $<TARGET_OBJECTS:gausskernel_storage_access_dfs_text>
-    $<TARGET_OBJECTS:gausskernel_storage_access_dfs_csv>
     $<TARGET_OBJECTS:gausskernel_security_gs_ledger>
     $<TARGET_OBJECTS:gausskernel_security_tde_key_management>
 )
-
-if("${ENABLE_MULTIPLE_NODES}" STREQUAL "ON")
-list(APPEND gaussdb_objects
-    $<TARGET_OBJECTS:gausskernel_storage_access_dfs_carbondata>
-)
-endif()
 
 if("${ENABLE_MULTIPLE_NODES}" STREQUAL "OFF")
 list(APPEND gaussdb_objects
@@ -155,10 +151,15 @@ if("${ENABLE_MULTIPLE_NODES}" STREQUAL "OFF")
     )
 endif()
 
+if("${ENABLE_MULTIPLE_NODES}" STREQUAL "OFF")
+    list(APPEND gaussdb_objects
+    $<TARGET_OBJECTS:gausskernel_optimizer_statistics>
+    )
+endif()
+
 list(APPEND gaussdb_objects
     $<TARGET_OBJECTS:common_backend_pgxc_single_barrier>
     $<TARGET_OBJECTS:common_backend_pgxc_single_copy>
-    $<TARGET_OBJECTS:gausskernel_storage_access_dfs>
     $<TARGET_OBJECTS:gausskernel_storage_access_heap>
     $<TARGET_OBJECTS:gausskernel_storage_access_index>
     $<TARGET_OBJECTS:gausskernel_storage_access_nbtree>
@@ -185,7 +186,6 @@ list(APPEND gaussdb_objects
     $<TARGET_OBJECTS:gausskernel_storage_cmgr>
     $<TARGET_OBJECTS:gausskernel_storage_cstore_compression>
     $<TARGET_OBJECTS:gausskernel_storage_cstore>
-    $<TARGET_OBJECTS:gausskernel_storage_dfs>
     $<TARGET_OBJECTS:gausskernel_storage_file>
     $<TARGET_OBJECTS:gausskernel_storage_freespace>
     $<TARGET_OBJECTS:gausskernel_storage_ipc>
@@ -195,6 +195,7 @@ list(APPEND gaussdb_objects
     $<TARGET_OBJECTS:gausskernel_storage_remote>
     $<TARGET_OBJECTS:gausskernel_storage_smgr>
     $<TARGET_OBJECTS:gausskernel_storage_smgr_segment>
+    $<TARGET_OBJECTS:gausskernel_storage_smgr_cfs>
     $<TARGET_OBJECTS:gausskernel_storage_access_ustore>
     $<TARGET_OBJECTS:gausskernel_storage_access_ustore_undo>
     $<TARGET_OBJECTS:gausskernel_storage_access_ubtree>
@@ -204,7 +205,6 @@ list(APPEND gaussdb_objects
     $<TARGET_OBJECTS:gausskernel_storage_xlog_share_storage>
     $<TARGET_OBJECTS:common_timezone>
     $<TARGET_OBJECTS:contrib_file_fdw>
-    $<TARGET_OBJECTS:contrib_hdfs_fdw>
     $<TARGET_OBJECTS:contrib_log_fdw>
 )
 
@@ -244,10 +244,7 @@ endif()
 
 if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON")
     list(APPEND gaussdb_objects
-        $<TARGET_OBJECTS:gausskernel_storage_access_dfs_orc>
-        $<TARGET_OBJECTS:gausskernel_storage_access_dfs_parquet>
         $<TARGET_OBJECTS:gausskernel_storage_access_archive>
-        $<TARGET_OBJECTS:gausskernel_storage_dfs_obs>
         $<TARGET_OBJECTS:gausskernel_runtime_codegen_executor>
         $<TARGET_OBJECTS:gausskernel_runtime_codegen_vecexecutor>
         $<TARGET_OBJECTS:gausskernel_runtime_codegen_codegenutil>
@@ -266,14 +263,14 @@ set(gaussdb_LINK_OPTIONS ${BIN_LINK_OPTIONS} ${HOTPATCH_ATOMIC_LDS} -Wl,-E)
 set(gaussdb_LINK_DIRS "")
 message("******${gaussdb_server_lib}******")
 set(gaussdb_DEPEND_LIST config_static pgport_srv_static alarmclient_static plpgsql_static pq_static)
-set(gaussdb_LINK_LIBS libconfig.a libpgport_srv.a libalarmclient.a libpq.a libplpgsql.a)
+set(gaussdb_LINK_LIBS libconfig.a libpgport_srv.a libalarmclient.a libpq.a libplpgsql.a -l${SECURE_C_CHECK})
 if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON")
     if("${ENABLE_MULTIPLE_NODES}" STREQUAL "ON" OR "${ENABLE_PRIVATEGAUSS}" STREQUAL "ON")
         list(APPEND gaussdb_LINK_LIBS ${gaussdb_server_lib} libhotpatchclient.a)
         list(APPEND gaussdb_DEPEND_LIST ${gaussdb_server_target} hotpatchclient_static)
     endif()
 endif()
-list(APPEND gaussdb_LINK_LIBS -lcrypt -ldl -lm -lssl -lcrypto -l${SECURE_C_CHECK} -pthread -lrt)
+list(APPEND gaussdb_LINK_LIBS -lcrypt -ldl -lm -lssl -lcrypto -pthread -lrt)
 
 if(${ENABLE_MEMORY_CHECK})
     list(APPEND gaussdb_LINK_OPTIONS ${MEMCHECK_FLAGS})
@@ -281,9 +278,9 @@ if(${ENABLE_MEMORY_CHECK})
     list(APPEND gaussdb_LINK_DIRS ${MEMCHECK_LINK_DIRECTORIES})
 endif()
 if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON")
-    list(APPEND gaussdb_LINK_LIBS -lz -lminiunz -leSDKOBS -leSDKLogAPI -lpcre -liconv -lnghttp2 -llog4cpp -lcurl -llz4 -lcjson -l${JEMALLOC_LIB_NAME} -lcgroup -lorc -lparquet -larrow -lthrift -lsnappy -lzstd -lprotobuf -lcom_err_gauss -lgssapi_krb5_gauss -lkrb5_gauss -lgssrpc_gauss -lk5crypto_gauss -lkadm5clnt_mit -lkadm5srv_mit -lkdb5 -lkrb5support_gauss -lstdc++ -lboost_thread -lboost_chrono -lboost_system -lboost_atomic -lxml2 -laio -lncurses -ltinfo)
+    list(APPEND gaussdb_LINK_LIBS -lz -lminiunz -leSDKOBS -leSDKLogAPI -lpcre -liconv -lnghttp2 -llog4cpp -lcurl -llz4 -lcjson -l${JEMALLOC_LIB_NAME} -lcgroup -lzstd -lcom_err_gauss -lgssapi_krb5_gauss -lkrb5_gauss -lgssrpc_gauss -lk5crypto_gauss -lkadm5clnt_mit -lkadm5srv_mit -lkdb5 -lkrb5support_gauss -lstdc++ -lboost_thread -lboost_chrono -lboost_system -lboost_atomic -lxml2 -laio -lncurses -ltinfo)
 else()
-    list(APPEND gaussdb_LINK_LIBS -lz -lminiunz -lcurl -llz4 -lcjson -l${JEMALLOC_LIB_NAME} -lcgroup -lzstd -lprotobuf -lncurses -ltinfo -lboost_thread -lboost_chrono -lboost_system -lboost_atomic)
+    list(APPEND gaussdb_LINK_LIBS -lz -lminiunz -lcurl -llz4 -lcjson -l${JEMALLOC_LIB_NAME} -lcgroup -lzstd -lncurses -ltinfo -lboost_thread -lboost_chrono -lboost_system -lboost_atomic)
 endif()
 
 include_directories(
@@ -296,7 +293,6 @@ include_directories(
     ${CJSON_INCLUDE_PATH}
     ${JEMALLOC_INCLUDE_PATH}
     ${ZSTD_INCLUDE_PATH}
-    ${PROTOBUF_INCLUDE_PATH}
     ${DCF_INCLUDE_PATH}
     ${BOOST_INCLUDE_PATH}
     ${NUMA_INCLUDE_PATH}
@@ -308,7 +304,6 @@ include_directories(
     ${PROJECT_OPENGS_DIR}/contrib/gc_fdw
     ${PROJECT_OPENGS_DIR}/gausskernel/storage/replication/dcf
     ${PROJECT_OPENGS_DIR}/contrib/log_fdw
-    ${PROJECT_OPENGS_DIR}/contrib/hdfs_fdw/include
     ${PROJECT_SRC_DIR}/bin/gs_log
     ${PROJECT_SRC_DIR}/common/timezone
     ${PROJECT_SRC_DIR}/gausskernel/cbb/communication
@@ -321,10 +316,6 @@ include_directories(
 if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON")
     include_directories(
         ${LIBXML_INCLUDE_PATH}
-        ${LIBORC_INCLUDE_PATH}
-        ${LIBPARQUET_INCLUDE_PATH}
-        ${LIBTHRIFT_INCLUDE_PATH}
-        ${SNAPPY_INCLUDE_PATH}
         ${LIBOBS_INCLUDE_PATH}
         ${KERBEROS_INCLUDE_PATH}
     )
@@ -339,7 +330,6 @@ list(APPEND gaussdb_LINK_DIRS
     ${CJSON_LIB_PATH}
     ${JEMALLOC_LIB_PATH}
     ${ZSTD_LIB_PATH}
-    ${PROTOBUF_LIB_PATH}
     ${LIBCGROUP_LIB_PATH}
     ${NCURSES_LIB_PATH}
     ${CMAKE_BINARY_DIR}/lib
@@ -352,11 +342,6 @@ list(APPEND gaussdb_LINK_DIRS
 if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON")
     list(APPEND gaussdb_LINK_DIRS
         ${LIBXML_LIB_PATH}
-        ${LIBORC_LIB_PATH}
-        ${SNAPPY_LIB_PATH}
-        ${LIBPARQUET_LIB_PATH}
-        ${LIBPARQUET_ARROW_LIB_PATH}
-        ${LIBTHRIFT_LIB_PATH}
         ${LIBOBS_LIB_PATH}
         ${KERBEROS_LIB_PATH}
     )

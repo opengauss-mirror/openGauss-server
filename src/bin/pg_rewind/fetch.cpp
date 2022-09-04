@@ -29,6 +29,7 @@
 
 PGconn* conn = NULL;
 char source_slot_name[NAMEDATALEN] = {0};
+char log_directory[MAXPGPATH] = {0};
 
 /*
  * Files are fetched max CHUNKSIZE bytes at a time.
@@ -46,6 +47,8 @@ const uint64 MAX_FILE_SIZE = 0xFFFFFFFF;
 
 #define INVALID_LINES_IDX (int)(~0)
 #define MAX_PARAM_LEN 1024
+#define FH_CUSTOM_VALUE_FOUR 4
+#define FH_CUSTOM_VALUE_FIVE 5
 
 static BuildErrorCode receiveFileChunks(const char* sql, FILE* file);
 static BuildErrorCode execute_pagemap(file_entry_t* entry, FILE* file);
@@ -53,6 +56,7 @@ static char* run_simple_query(const char* sql);
 static BuildErrorCode recurse_dir(const char* datadir, const char* path, process_file_callback_t callback);
 static void get_slot_name_by_app_name(void);
 static BuildErrorCode CheckResultSet(PGresult* pgResult);
+static void get_log_directory_guc(void);
 BuildErrorCode libpqConnect(const char* connstr)
 {
     PGresult* res = NULL;
@@ -260,15 +264,13 @@ BuildErrorCode fetchSourceFileList()
           "SELECT path, size, isdir, pg_tablespace_location(pg_tablespace.oid) AS link_target \n"
           "FROM (SELECT * FROM pg_stat_file_recursive('.')) AS files \n"
           "LEFT OUTER JOIN pg_tablespace ON files.path ~ '^pg_tblspc/' AND oid :: text = files.filename\n"
-          "),compressed_address AS (SELECT path pca_path, substr(path, 0, length(path) - 4) AS table_path\n"
-          "FROM pg_stat_file_recursive('.') WHERE path ~ '_pca$' AND length(path) > 4)\n"
+          ")"
           "SELECT path, size, isdir, link_target,\n"
-          "CASE WHEN pca_path IS NOT NULL THEN pg_read_binary_file(pca_path, 0, %d, true)\n"
-          "ELSE NULL END AS pchdr\n"
-          "FROM tmp_table LEFT JOIN compressed_address\n"
-          "ON tmp_table.path = compressed_address.table_path\nWHERE path !~ '_pca$' AND path !~ '_pcd$'\n";
+          "CASE WHEN path ~ '" COMPRESS_STR "$' THEN pg_read_binary_file(path, size - %u, %d, true)\n"
+          "END AS pchdr\n"
+          "FROM tmp_table\n";
     char sqlbuf[1024];
-    int rc = snprintf_s(sqlbuf, sizeof(sqlbuf), sizeof(sqlbuf) - 1, sql, SIZE_OF_PAGE_COMPRESS_HEADER_DATA);
+    int rc = snprintf_s(sqlbuf, sizeof(sqlbuf), sizeof(sqlbuf) - 1, sql, BLCKSZ, sizeof(CfsExtentHeader));
     securec_check_ss_c(rc, "\0", "\0");
     res = PQexec(conn, (const char*)sqlbuf);
 
@@ -279,8 +281,9 @@ BuildErrorCode fetchSourceFileList()
 
     /* sanity check the result set */
     if (PQnfields(res) != 5) {
+        PQclear(res);
+        res = NULL;
         pg_fatal("unexpected result set while fetching file list\n");
-        PG_CHECKBUILD_AND_FREE_PGRESULT_RETURN(res);
     }
 
     /* wait for local stat */
@@ -323,10 +326,10 @@ BuildErrorCode fetchSourceFileList()
         }
         RewindCompressInfo rewindCompressInfo;
         RewindCompressInfo *pointer = NULL;
-        if (!PQgetisnull(res, i, 4)) {
+        if (!PQgetisnull(res, i, FH_CUSTOM_VALUE_FOUR)) {
             size_t length = 0;
-            auto ptr = PQunescapeBytea((const unsigned char*)PQgetvalue(res, i, 4), &length);
-            if (FetchSourcePca(ptr, length, &rewindCompressInfo)) {
+            unsigned char *ptr = PQunescapeBytea((const unsigned char*)PQgetvalue(res, i, 4), &length);
+            if (FetchSourcePca(ptr, length, &rewindCompressInfo, (size_t)filesize)) {
                 filesize = rewindCompressInfo.newBlockNumber * BLCKSZ;
                 pointer = &rewindCompressInfo;
             }
@@ -418,7 +421,7 @@ static BuildErrorCode receiveFileChunks(const char* sql, FILE* file)
             PG_CHECKBUILD_AND_FREE_PGRESULT_RETURN(res);
         }
         /* check compressed result set */
-        CheckResultSet(res);
+        (void)CheckResultSet(res);
 
         /* Read result set to local variables */
         errorno = memcpy_s(&chunkoff, sizeof(int32), PQgetvalue(res, 0, 1), sizeof(int32));
@@ -458,24 +461,26 @@ static BuildErrorCode receiveFileChunks(const char* sql, FILE* file)
         int32 algorithm;
         errorno = memcpy_s(&algorithm, sizeof(int32), PQgetvalue(res, 0, 4), sizeof(int32));
         securec_check_c(errorno, "\0", "\0");
-        algorithm = ntohl(algorithm);
+        pg_log(PG_DEBUG, "received chunk for file \"%s\", offset %d, size %d\n", filename, chunkoff, chunksize);
+        fprintf(file, "received chunk for file \"%s\", offset %d, size %d\n", filename, chunkoff, chunksize);
+        algorithm = (int32)ntohl((uint32)algorithm);
         if (algorithm == 0) {
-            pg_log(PG_DEBUG, "received chunk for file \"%s\", offset %d, size %d\n", filename, chunkoff, chunksize);
-            fprintf(file, "received chunk for file \"%s\", offset %d, size %d\n", filename, chunkoff, chunksize);
             open_target_file(filename, false);
             pg_free(filename);
+            filename = NULL;
             PG_CHECKBUILD_AND_FREE_PGRESULT_RETURN(res);
             write_target_range(chunk, chunkoff, chunksize, chunkspace);
         } else {
             int32 chunkSize;
-            int errorno = memcpy_s(&chunkSize, sizeof(int32), PQgetvalue(res, 0, 5), sizeof(int32));
+            errorno = memcpy_s(&chunkSize, sizeof(int32), PQgetvalue(res, 0, FH_CUSTOM_VALUE_FIVE), sizeof(int32));
             securec_check_c(errorno, "\0", "\0");
-            chunkSize = ntohl(chunkSize);
+            chunkSize = (int32)ntohl((uint32)chunkSize);
             bool rebuild = *PQgetvalue(res, 0, 6) != 0;
-            CompressedFileInit(filename, chunkSize, algorithm, rebuild);
+            CompressedFileInit(filename, rebuild);
             /* fetch result */
-            FetchCompressedFile(chunk, (BlockNumber)chunkoff, (size_t)chunkspace);
+            FetchCompressedFile(chunk, (uint32)chunkoff, (int32)chunkspace, (uint16)chunkSize, (uint8)algorithm);
         }
+        PG_CHECKBUILD_AND_FREE_PGRESULT_RETURN(res);
     }
     return BUILD_SUCCESS;
 }
@@ -570,15 +575,13 @@ static void CompressedFileCopy(const file_entry_t* entry, bool rebuild)
     int ret = snprintf_s(linebuf,
         sizeof(linebuf),
         sizeof(linebuf) - 1,
-        "%s\t%u\t%u\t%u\t%u\t%u\n",
+        "%s\t%u\t%u\t%u\n",
         entry->path,
         entry->rewindCompressInfo.oldBlockNumber,
         entry->rewindCompressInfo.newBlockNumber - entry->rewindCompressInfo.oldBlockNumber,
-        entry->rewindCompressInfo.algorithm,
-        entry->rewindCompressInfo.chunkSize,
         rebuild);
     securec_check_ss_c(ret, "\0", "\0");
-    if (PQputCopyData(conn, linebuf, strlen(linebuf)) != 1) {
+    if (PQputCopyData(conn, linebuf, (int)strlen(linebuf)) != 1) {
         pg_fatal("could not send COPY data: %s", PQerrorMessage(conn));
     }
     pg_log(PG_DEBUG, "CompressedFileCopy: %s", linebuf);
@@ -587,17 +590,17 @@ static void CompressedFileCopy(const file_entry_t* entry, bool rebuild)
 static void CompressedFileRemove(const file_entry_t* entry)
 {
     char path[MAXPGPATH];
-    error_t rc = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/%s", pg_data, entry->path);
-    securec_check_ss_c(rc, "\0", "\0");
-    COMPRESS_ERROR_STATE result = PageCompression::RemoveCompressedFile(path);
-    if (result == NORMAL_MISSING_ERROR || result == NORMAL_UNLINK_ERROR) {
-        pg_fatal("could not remove compress file \"%s\": %s\n", path, strerror(errno));
-    } else if (result == PCA_MISSING_ERROR || result == PCA_UNLINK_ERROR) {
-        pg_fatal("could not remove compress file \"%s_pca\": %s\n", path, strerror(errno));
-    } else if (result == PCD_MISSING_ERROR || result == PCD_UNLINK_ERROR) {
-        pg_fatal("could not remove compress file \"%s_pcd\": %s\n", path, strerror(errno));
-    }
     pg_log(PG_DEBUG, "CompressedFileRemove: %s\n", path);
+    error_t rc = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/" COMPRESS_SUFFIX, pg_data, entry->path);
+    securec_check_ss_c(rc, "\0", "\0");
+    pg_log(PG_DEBUG, "CompressedFileRemove: %s\n", path);
+    if (unlink(path) != 0) {
+        if (errno == ENOENT) {
+            return;
+        }
+        pg_fatal("could not remove compress file \"%s\": %s\n", path, strerror(errno));
+        return;
+    }
 }
 
 /*
@@ -622,7 +625,7 @@ static void fetch_file_range(const char* path, unsigned int begin, unsigned int 
             len = end - begin;
         }
         ss_c = snprintf_s(
-            linebuf, sizeof(linebuf), sizeof(linebuf) - 1, "%s\t%u\t%u\t%u\t%u\t%u\n", path, begin, len, 0, 0, 0);
+            linebuf, sizeof(linebuf), sizeof(linebuf) - 1, "%s\t%u\t%u\t%u\n", path, begin, len, 0);
         securec_check_ss_c(ss_c, "\0", "\0");
 
         if (PQputCopyData(conn, linebuf, strlen(linebuf)) != 1)
@@ -645,8 +648,7 @@ BuildErrorCode executeFileMap(filemap_t* map, FILE* file)
      * First create a temporary table, and load it with the blocks that we
      * need to fetch.
      */
-    sql = "CREATE TEMPORARY TABLE fetchchunks(path text, begin int4, len int4, "
-          "algorithm int4, chunksize int4, rebuild bool);";
+    sql = "CREATE TEMPORARY TABLE fetchchunks(path text, begin int4, len int4, rebuild bool);";
     res = PQexec(conn, sql);
     if (PQresultStatus(res) != PGRES_COMMAND_OK) {
         pg_fatal("could not create temporary table: %s", PQresultErrorMessage(res));
@@ -676,15 +678,16 @@ BuildErrorCode executeFileMap(filemap_t* map, FILE* file)
 
         /* report all the path to check whether it's correct */
         if (entry->rewindCompressInfo.compressed) {
-            pg_log(PG_PROGRESS, "path: %s, type: %d, action: %d\n", entry->path, entry->type, entry->action);
+            pg_log(PG_PROGRESS, "path: %s, type: %d, action: %d\n", entry->path, (int)entry->type, (int)entry->action);
 
         }
-        pg_log(PG_DEBUG, "path: %s, type: %d, action: %d\n", entry->path, entry->type, entry->action);
-        fprintf(file, "path: %s, type: %d, action: %d\n", entry->path, entry->type, entry->action);
+
+        pg_log(PG_DEBUG, "path: %s, type: %d, action: %d\n", entry->path, (int)entry->type, (int)entry->action);
+        (void)fprintf(file, "path: %s, type: %d, action: %d\n", entry->path, (int)entry->type, (int)entry->action);
 
         /* If this is a relation file, copy the modified blocks */
         bool compressed = entry->rewindCompressInfo.compressed;
-        execute_pagemap(entry, file);
+        (void)execute_pagemap(entry, file);
         PG_CHECKBUILD_AND_FREE_PGRESULT_RETURN(res);
 
         switch (entry->action) {
@@ -764,15 +767,18 @@ BuildErrorCode executeFileMap(filemap_t* map, FILE* file)
      * We've now copied the list of file ranges that we need to fetch to the
      * temporary table. Now, actually fetch all of those ranges.
      */
+
     sql = "SELECT path, begin, \n"
-          "  pg_read_binary_file(path, begin, len, true) AS chunk, len, algorithm, chunksize,rebuild \n"
-          "FROM fetchchunks where algorithm =0 \n"
+          "  pg_read_binary_file(path, begin, len, true) AS chunk, len, 0 as algorithm, 0 as chunksize,rebuild \n"
+          "FROM fetchchunks where path !~ '" COMPRESS_STR "$' \n"
           "union all \n"
-          "select (json->>'path')::text as path, (json->>'blocknum')::int4 as begin, (json->>'data')::bytea as chunk,\n"
-          "(json->>'len')::int4 as len, algorithm, chunksize,rebuild \n"
-          "from (select row_to_json(pg_read_binary_file_blocks(path,begin,len)) json, algorithm, chunksize,rebuild \n"
-          "from fetchchunks where algorithm !=0) \n"
-          "order by path, begin;";
+          "(select (json->>'path')::text as path, (json->>'blocknum')::int4 as begin,"
+          " (json->>'data')::bytea as chunk,\n"
+          "(json->>'len')::int4 as len, \n"
+          "(json->>'algorithm')::int4 as algorithm, (json->>'chunksize')::int4 as chunksize ,rebuild \n"
+          "from (select row_to_json(pg_read_binary_file_blocks(path,begin,len)) json,rebuild \n"
+          "from fetchchunks  where path ~ '" COMPRESS_STR "$') \n"
+          "order by path, begin);";
 
     fprintf(file, "fetch and write file based on temporary table fetchchunks.\n");
     return receiveFileChunks(sql, file);
@@ -882,7 +888,7 @@ static void CompressedFileCopy(file_entry_t* entry, FILE* file)
     int invalidNumber = -1;
     long int before = invalidNumber;
     while (datapagemap_next(iter, &blkno)) {
-        fprintf(file, "  block %u\n", blkno);
+        (void)fprintf(file, "  block %u\n", blkno);
         if (before == -1) {
             fileEntry.rewindCompressInfo.oldBlockNumber = blkno;
             before = blkno;
@@ -890,7 +896,7 @@ static void CompressedFileCopy(file_entry_t* entry, FILE* file)
             if (before == blkno - 1) {
                 before = blkno;
             } else {
-                fileEntry.rewindCompressInfo.newBlockNumber = before + 1;
+                fileEntry.rewindCompressInfo.newBlockNumber = (uint32)before + 1;
                 CompressedFileCopy(&fileEntry, false);
                 fileEntry.rewindCompressInfo.oldBlockNumber = blkno;
                 before = blkno;
@@ -898,9 +904,10 @@ static void CompressedFileCopy(file_entry_t* entry, FILE* file)
         }
     }
     if (before != invalidNumber) {
-        fileEntry.rewindCompressInfo.newBlockNumber = before + 1;
+        fileEntry.rewindCompressInfo.newBlockNumber = (uint32)before + 1;
         CompressedFileCopy(&fileEntry, false);
     }
+    pg_free(iter);
 }
 static BuildErrorCode execute_pagemap(file_entry_t* entry, FILE* file)
 {
@@ -931,6 +938,7 @@ static BuildErrorCode execute_pagemap(file_entry_t* entry, FILE* file)
  */
 BuildErrorCode traverse_datadir(const char* datadir, process_file_callback_t callback)
 {
+    get_log_directory_guc();
     recurse_dir(datadir, NULL, callback);
     PG_CHECKBUILD_AND_RETURN();
     return BUILD_SUCCESS;
@@ -974,6 +982,11 @@ static BuildErrorCode recurse_dir(const char* datadir, const char* parentpath, p
             continue;
         }
 
+        if (strcmp(xlde->d_name, log_directory) == 0) {
+            pg_log(PG_WARNING, "skip log directory %s during fetch target file list\n", xlde->d_name);
+            continue;
+        }
+
         ss_c = snprintf_s(fullpath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", fullparentpath, xlde->d_name);
         securec_check_ss_c(ss_c, "\0", "\0");
 
@@ -1006,7 +1019,8 @@ static BuildErrorCode recurse_dir(const char* datadir, const char* parentpath, p
             uint64 fileSize = (uint64)fst.st_size;
             RewindCompressInfo rewindCompressInfo;
             RewindCompressInfo *pointer = NULL;
-            if (ProcessLocalPca(path, &rewindCompressInfo, pg_data)) {
+            if (PageCompression::SkipCompressedFile(xlde->d_name, strlen(xlde->d_name)) &&
+                ProcessLocalPca(path, &rewindCompressInfo, pg_data)) {
                 fileSize = rewindCompressInfo.oldBlockNumber * BLCKSZ;
                 pointer = &rewindCompressInfo;
             }
@@ -1183,6 +1197,64 @@ static void get_slot_name_by_app_name(void)
 }
 
 /*
+ * get log_directory guc specified in postgresql.conf
+ */
+static void get_log_directory_guc(void)
+{
+    const char** optlines = NULL;
+    int lines_index = 0;
+    int optvalue_off;
+    int optvalue_len;
+    const char* config_para_build = "log_directory";
+    int rc = 0;
+    char conf_path[MAXPGPATH] = {0};
+    char* trim_name = NULL;
+
+    rc = snprintf_s(conf_path, MAXPGPATH, MAXPGPATH - 1, "%s/%s", datadir_target, "postgresql.conf");
+    securec_check_ss_c(rc, "\0", "\0");
+
+    if ((optlines = (const char**)readfile(conf_path)) != NULL) {
+        lines_index = find_gucoption(optlines, config_para_build, NULL, NULL, &optvalue_off, &optvalue_len, '\'');
+
+        if (lines_index != INVALID_LINES_IDX) {
+            rc = strncpy_s(log_directory, MAXPGPATH,
+                optlines[lines_index] + optvalue_off, (size_t)Min(optvalue_len, MAX_VALUE_LEN - 1));
+            securec_check_c(rc, "", "");
+        } else {
+            /* default log directory is pg_log under datadir */
+            rc = strcpy_s(log_directory, MAXPGPATH, "pg_log");
+            securec_check_c(rc, "", "");
+        }
+
+        /* first free one-dimensional array memory in case memory leak */
+        int i = 0;
+        while (optlines[i] != NULL) {
+            free(const_cast<char *>(optlines[i]));
+            optlines[i] = NULL;
+            i++;
+        }
+        free(optlines);
+        optlines = NULL;
+    } else {
+        write_stderr(_("%s cannot be opened.\n"), conf_path);
+        return;
+    }
+
+    trim_name = trim_str(log_directory, MAXPGPATH, '\'');
+    if (trim_name != NULL) {
+        rc = snprintf_s(log_directory, MAXPGPATH, MAXPGPATH - 1, "%s", trim_name);
+        securec_check_ss_c(rc, "", "");
+        free(trim_name);
+        trim_name = NULL;
+    }
+
+    pg_log(PG_WARNING, "Get log directory guc is %s\n", log_directory);
+
+    return;
+}
+
+
+/*
  * Check if source DN primary is connected to dummy standby.
  *
  * If not, build will exit, because the source may have wrong xlog records without
@@ -1224,3 +1296,4 @@ bool checkDummyStandbyConnection(void)
     res = NULL;
     return ret;
 }
+

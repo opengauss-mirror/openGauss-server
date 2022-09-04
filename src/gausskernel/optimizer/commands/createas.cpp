@@ -357,6 +357,7 @@ static void intorel_startup(DestReceiver* self, int operation, TupleDesc typeinf
         col->kvtype = attribute->attkvtype;
         col->cmprs_mode = attribute->attcmprmode;
         col->raw_default = NULL;
+        col->update_default = NULL;
         col->cooked_default = NULL;
         col->collClause = NULL;
         col->collOid = attribute->attcollation;

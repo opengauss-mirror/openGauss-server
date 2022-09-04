@@ -90,6 +90,5 @@ then
     else
         ./package_opengauss.sh -3rd ${build_binarylib_dir} -m ${build_version_mode} -f ${config_file}
     fi
-
 fi
 exit 0

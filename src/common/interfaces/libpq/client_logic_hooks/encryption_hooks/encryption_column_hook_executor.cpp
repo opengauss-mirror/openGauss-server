@@ -116,10 +116,10 @@ int EncryptionColumnHookExecutor::process_data_impl(const ICachedColumn *cached_
         securec_check_c(rc, "\0", "\0");
         if (!deprocess_column_encryption_key(encryption_global_hook_executor, encrypted_key,
             &decrypted_key_size, encrypted_key_value, &encrypted_key_value_size)) {
-            return DECRYPT_CEK_ERR;
+            return -1;
         }
         if (!set_cek_keys((unsigned char *)encrypted_key, decrypted_key_size)) {
-            return DECRYPT_CEK_ERR;
+            return -1;
         }
         errno_t res = memset_s(encrypted_key, MAX_CEK_LENGTH, 0, MAX_CEK_LENGTH);
         securec_check_c(res, "\0", "\0");

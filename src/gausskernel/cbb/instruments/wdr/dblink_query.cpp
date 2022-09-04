@@ -34,6 +34,7 @@
 #include "catalog/indexing.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_type.h"
+#include "catalog/pg_authid.h"
 #include "executor/spi.h"
 #include "foreign/foreign.h"
 #include "mb/pg_wchar.h"
@@ -332,9 +333,9 @@ void DBlink::remoteDatabaseConnect(const char* xdbname)
 Datum wdr_xdb_query(PG_FUNCTION_ARGS)
 {
     const int NUM_ARGS = 2;
-    if (!superuser()) {
+    if (GetUserId() != BOOTSTRAP_SUPERUSERID) {
         ereport(ERROR,
-            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("Superuser privilege is need to operate wdr_xdb_query")));
+            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("must be initial account to operate wdr_xdb_query")));
     }
     DBlink::prepTuplestoreResult(fcinfo);
 

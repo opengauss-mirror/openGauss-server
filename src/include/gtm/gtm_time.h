@@ -33,6 +33,7 @@
 #endif
 
 GTM_Timestamp GTM_TimestampGetCurrent(void);
+GTM_Timestamp GTM_TimestampGetCurrentInLinux(void);
 
 bool GTM_TimestampDifferenceExceeds(GTM_Timestamp start_time, GTM_Timestamp stop_time, int msec);
 #endif

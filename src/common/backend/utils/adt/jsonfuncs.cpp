@@ -2352,7 +2352,7 @@ static inline Datum populate_recordset_worker(FunctionCallInfo fcinfo, bool have
         if (PG_ARGISNULL(0)) {
             rec = NULL;
         } else {
-            /* using the arg tupdesc, because it may not be the same as the result tupdesc. */
+            /* using the arg tupdesc, becouse it may not be the same as the result tupdesc. */
             rec = PG_GETARG_HEAPTUPLEHEADER(0);
             tupdesc = lookup_rowtype_tupdesc(HeapTupleHeaderGetTypeId(rec), HeapTupleHeaderGetTypMod(rec));
             needforget = true;

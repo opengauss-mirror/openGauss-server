@@ -65,10 +65,11 @@
 #define NUM_UNIQUE_SQL_PARTITIONS 64
 #define UINT32_ACCESS_ONCE(var) ((uint32)(*((volatile uint32*)&(var))))
 #define UNIQUE_SQL_MAX_LEN (g_instance.attr.attr_common.pgstat_track_activity_query_size + 1)
-#define ATTR_NUM 27
+#define ATTR_NUM 30
 /* unique SQL max hash table size */
 const int UNIQUE_SQL_MAX_HASH_SIZE = 1000;
 extern Datum hash_uint32(uint32 k);
+
 typedef struct {
     UniqueSQLKey key; /* CN oid + user oid + unique sql id */
 
@@ -224,7 +225,7 @@ void InitAsp()
     ctl.keysize = sizeof(UniqueSQLKey);
 
     /* alloc extra space for normalized query(only CN stores sql string) */
-    if (IS_PGXC_COORDINATOR) {
+    if (need_normalize_unique_string()) {
         ctl.entrysize = sizeof(ASHUniqueSQL) + UNIQUE_SQL_MAX_LEN;
     } else {
         ctl.entrysize = sizeof(ASHUniqueSQL);
@@ -335,6 +336,7 @@ static void FormatClientInfo(cJSON * root, SessionHistEntry *beentry)
         }
     }
 }
+
 static void FormatSQLInfo(cJSON * root, SessionHistEntry *beentry)
 {
     char query_id[MAX_LEN_CHAR_TO_BIGINT_BUF] = {0};
@@ -351,7 +353,7 @@ static void FormatSQLInfo(cJSON * root, SessionHistEntry *beentry)
         cJSON_AddItemToObject(root, "user_id", cJSON_CreateNull());
         cJSON_AddItemToObject(root, "cn_id", cJSON_CreateNull());
     }
-    if (IS_PGXC_COORDINATOR && beentry->unique_sql_key.unique_sql_id != 0) {
+    if (need_normalize_unique_string() && beentry->unique_sql_key.unique_sql_id != 0) {
         /* add lock for hash table */
         uint32 hashCode = AspUniqueSQLHashCode(&beentry->unique_sql_key, sizeof(beentry->unique_sql_key));
         LockAspUniqueSQLHashPartition(hashCode, LW_SHARED);
@@ -366,6 +368,35 @@ static void FormatSQLInfo(cJSON * root, SessionHistEntry *beentry)
         cJSON_AddItemToObject(root, "unique_query", cJSON_CreateNull());
     }
 }
+
+static const char* SwitchStatusDesc(BackendState state)
+{
+    switch (state) {
+        case STATE_IDLE:
+            return "idle";
+        case STATE_RUNNING:
+            return "active";
+        case STATE_IDLEINTRANSACTION:
+            return "idle in transaction";
+        case STATE_FASTPATH:
+            return "fastpath function call";
+        case STATE_IDLEINTRANSACTION_ABORTED:
+            return "idle in transaction (aborted)";
+        case STATE_DISABLED:
+            return "disabled";
+        case STATE_RETRYING:
+            return "retrying";
+        case STATE_COUPLED:
+            return "coupled to session";
+        case STATE_DECOUPLED:
+            return "decoupled from session";
+        case STATE_UNDEFINED:
+            return "state_undefined";
+        default:
+            return "undefined";
+    }
+}
+
 static void FormatBasicInfo(cJSON * root, SessionHistEntry *beentry)
 {
     char sampleid[MAX_LEN_CHAR_TO_BIGINT_BUF] = {0};
@@ -385,11 +416,26 @@ static void FormatBasicInfo(cJSON * root, SessionHistEntry *beentry)
     char* gId = GetGlobalSessionStr(beentry->globalSessionId);
     cJSON_AddItemToObject(root, "global_sessionid", cJSON_CreateString(gId));
     pfree(gId);
+    pfree(timestamp);
     timestamp = Datum_to_string(TimestampGetDatum(beentry->start_time), TIMESTAMPTZOID, false);
     cJSON_AddItemToObject(root, "start_time", cJSON_CreateString(timestamp));
     pfree(timestamp);
+    if (beentry->xact_start_time != 0) {
+        timestamp = Datum_to_string(TimestampGetDatum(beentry->xact_start_time), TIMESTAMPTZOID, false);
+        cJSON_AddItemToObject(root, "xact_start_time", cJSON_CreateString(timestamp));
+        pfree(timestamp);
+    } else {
+        cJSON_AddItemToObject(root, "xact_start_time", cJSON_CreateNull());
+    }
+    if (beentry->query_start_time != 0) {
+        timestamp = Datum_to_string(TimestampGetDatum(beentry->query_start_time), TIMESTAMPTZOID, false);
+        cJSON_AddItemToObject(root, "query_start_time", cJSON_CreateString(timestamp));
+        pfree(timestamp);
+    } else {
+        cJSON_AddItemToObject(root, "query_start_time", cJSON_CreateNull());
+    }
+    cJSON_AddItemToObject(root, "state", cJSON_CreateString(SwitchStatusDesc(beentry->state)));
 }
-
 
 static void GetWaitstatusXid(const SessionHistEntry *beentry, StringInfo waitStatus)
 {    
@@ -721,7 +767,7 @@ static void GetQueryTuple(Datum* values, bool* nulls, SessionHistEntry *beentry)
         nulls[Anum_gs_asp_user_id - 1] = true;
         nulls[Anum_gs_asp_cn_id - 1] = true;
     }
-    if (IS_PGXC_COORDINATOR && beentry->unique_sql_key.unique_sql_id != 0) {
+    if (need_normalize_unique_string() && beentry->unique_sql_key.unique_sql_id != 0) {
         uint32 hashCode = AspUniqueSQLHashCode(&beentry->unique_sql_key, sizeof(beentry->unique_sql_key));
         LockAspUniqueSQLHashPartition(hashCode, LW_SHARED);
         /* add lock for hash table */
@@ -763,6 +809,15 @@ static void GetBlockInfo(Datum* values, bool* nulls, const SessionHistEntry *bee
     }
 }
 
+static void SwitchStatus(BackendState state, Datum* values, bool* nulls)
+{
+    if (state == STATE_UNDEFINED) {
+        nulls[Anum_gs_asp_state - 1] = true;
+        return;
+    }
+    values[Anum_gs_asp_state - 1] = CStringGetTextDatum(SwitchStatusDesc(state));
+}
+
 static void GetTuple(Datum* values, int val_len, bool* nulls, int null_len, SessionHistEntry *beentry)
 {
     Assert(val_len == Natts_gs_asp && null_len == Natts_gs_asp);
@@ -774,6 +829,18 @@ static void GetTuple(Datum* values, int val_len, bool* nulls, int null_len, Sess
     values[Anum_gs_asp_sessionid - 1] = Int64GetDatum(beentry->session_id);
     values[Anum_gs_asp_start_time - 1] = TimestampTzGetDatum(beentry->start_time);
 
+    if (beentry->xact_start_time != 0) {
+        values[Anum_gs_asp_xact_start_time - 1] = TimestampTzGetDatum(beentry->xact_start_time);
+    } else {
+        nulls[Anum_gs_asp_xact_start_time - 1] = true;
+    }
+
+    if (beentry->query_start_time != 0) {
+        values[Anum_gs_asp_query_start_time - 1] = TimestampTzGetDatum(beentry->query_start_time);
+    } else {
+        nulls[Anum_gs_asp_query_start_time - 1] = true;
+    }
+   
     /* waitEvent info */
     if (beentry->waitevent != 0) {
         uint32 raw_wait_event;
@@ -807,6 +874,8 @@ static void GetTuple(Datum* values, int val_len, bool* nulls, int null_len, Sess
     GetQueryTuple(values, nulls, beentry);
     char* gId = GetGlobalSessionStr(beentry->globalSessionId);
     values[Anum_gs_asp_global_sessionid - 1] = CStringGetTextDatum(gId);
+    SwitchStatus(beentry->state, values, nulls);
+
     pfree(gId);
 }
 
@@ -837,6 +906,7 @@ static void WriteToSysTable(SessionHistEntry *beentry)
  */
 static void WriteActiveSessInfo()
 {
+    PreventCommandIfReadOnly("ASP flushing");
     ActiveSessHistArrary *active_sess_hist_arrary = g_instance.stat_cxt.active_sess_hist_arrary;
     /* if the size of table is bigger, then delete older data in table */
     CleanAspTable();
@@ -901,7 +971,7 @@ static void UpdataAspUniqueSQL(UniqueSQLKey key)
  * copy_active_sess_entry - copy active session history from BackendStatusArray
  * @ return the stat of entry of BackendStatusArray
  */
-static BackendState CopyActiveSessInfo(uint64 sample_id, bool need_flush_sample,
+static void CopyActiveSessInfo(uint64 sample_id, bool need_flush_sample,
     PgBackendStatus* beentry, SessionHistEntry *ash_arrary_slot)
 {
     /* read session stat from BackendStatusArray */
@@ -937,23 +1007,52 @@ static BackendState CopyActiveSessInfo(uint64 sample_id, bool need_flush_sample,
     ash_arrary_slot->locallocktag = beentry->locallocktag;
     ash_arrary_slot->st_block_sessionid = beentry->st_block_sessionid;
     ash_arrary_slot->globalSessionId = beentry->globalSessionId;
-    return beentry->st_state;
+    ash_arrary_slot->xact_start_time = beentry->st_xact_start_timestamp;
+    ash_arrary_slot->query_start_time = beentry->st_activity_start_timestamp;
+    ash_arrary_slot->state = beentry->st_state;
+}
+static bool IsValidEntry(PgBackendStatus* entry)
+{
+    bool state = false;
+    if (entry->st_procpid > 0 || entry->st_sessionid > 0) {
+        switch (entry->st_state) {
+            case STATE_RUNNING:
+            case STATE_IDLEINTRANSACTION:
+            case STATE_FASTPATH:
+            case STATE_IDLEINTRANSACTION_ABORTED:
+            case STATE_DISABLED:
+            case STATE_RETRYING:
+                state = true;
+                break;
+            case STATE_UNDEFINED:
+            case STATE_IDLE:
+            case STATE_COUPLED:
+            case STATE_DECOUPLED:
+                state = false;
+                break;
+            default:
+                ereport(WARNING, (errmsg("Invalid session state:%d", entry->st_state)));
+                break;
+        }
+    } else {
+        return false;
+    }
+    return state;
 }
 
 static void CollectActiveSessionStatus(uint64 sample_id, bool need_flush_sample)
 {
     PgBackendStatus* beentry = NULL;
     errno_t rc = EOK;
-    BackendState sess_state;
-    beentry = t_thrd.shemem_ptr_cxt.BackendStatusArray;
+    beentry = t_thrd.shemem_ptr_cxt.BackendStatusArray + BackendStatusArray_size - 1;
     ActiveSessHistArrary *active_sess_hist_arrary = g_instance.stat_cxt.active_sess_hist_arrary;
 
     /* Insert data into rolling buff from the last position */
     SessionHistEntry *ash_arrary_slot =
         active_sess_hist_arrary->active_sess_hist_info +  active_sess_hist_arrary->curr_index;
+    PgBackendStatus* medium_beentry = (PgBackendStatus*)palloc(sizeof(PgBackendStatus));
     for (int i = 1; i <= BackendStatusArray_size; i++) {
         ash_arrary_slot->changCount++;
-        PgBackendStatus* medium_beentry = (PgBackendStatus*)palloc(sizeof(PgBackendStatus));
         for (;;) {
             /*
              * Follow the protocol of retrying if st_changecount changes while we
@@ -964,12 +1063,16 @@ static void CollectActiveSessionStatus(uint64 sample_id, bool need_flush_sample)
             */
             int save_changecount = beentry->st_changecount;
 
+            (void)memset_s(ash_arrary_slot->st_appname, NAMEDATALEN, 0, NAMEDATALEN);
             rc = strcpy_s(ash_arrary_slot->st_appname, NAMEDATALEN, (char*)beentry->st_appname);
             securec_check(rc, "", "");
+            (void)memset_s(ash_arrary_slot->clienthostname, NAMEDATALEN, 0, NAMEDATALEN);
             rc = strcpy_s(ash_arrary_slot->clienthostname, NAMEDATALEN, (char*)beentry->st_clienthostname);
             securec_check(rc, "", "");
+            (void)memset_s(ash_arrary_slot->relname, NAMEDATALEN, 0, NAMEDATALEN);
             rc = strcpy_s(ash_arrary_slot->relname, 2 * NAMEDATALEN, (char*)beentry->st_relname);
             securec_check(rc, "", "");
+            (void)memset_s(medium_beentry, sizeof(PgBackendStatus), 0, sizeof(PgBackendStatus));
             rc = memcpy_s(medium_beentry, sizeof(PgBackendStatus), beentry, sizeof(PgBackendStatus));
             securec_check_c(rc, "\0", "\0");
             medium_beentry->st_block_sessionid = beentry->st_block_sessionid;
@@ -979,15 +1082,15 @@ static void CollectActiveSessionStatus(uint64 sample_id, bool need_flush_sample)
             /* Make sure we can break out of loop if stuck... */
             CHECK_FOR_INTERRUPTS();
         }
-        sess_state = CopyActiveSessInfo(sample_id, need_flush_sample, medium_beentry, ash_arrary_slot);
-        pfree_ext(medium_beentry);
+
         ash_arrary_slot->changCount++;
         /* 
          * the active session history info will be copy to active_sess_hist_arrary
          * At the same time, the unique query will be recorded in the hash table
         */
-        if (sess_state != STATE_UNDEFINED && sess_state != STATE_IDLE && sess_state != STATE_DECOUPLED) {
-            if (IS_PGXC_COORDINATOR && ash_arrary_slot->unique_sql_key.unique_sql_id != 0) {
+        if (IsValidEntry(medium_beentry)) {
+            CopyActiveSessInfo(sample_id, need_flush_sample, medium_beentry, ash_arrary_slot);
+            if (need_normalize_unique_string() && ash_arrary_slot->unique_sql_key.unique_sql_id != 0) {
                 UpdataAspUniqueSQL(ash_arrary_slot->unique_sql_key);
             }
             /* the slot of arrary will ++, the active session history info be copy to arrary */
@@ -1003,8 +1106,9 @@ static void CollectActiveSessionStatus(uint64 sample_id, bool need_flush_sample)
                 (void)WriteActiveSessInfo();
             }
         }
-        beentry++;
+        beentry--;
     }
+    pfree_ext(medium_beentry);
 }
 static void ProcessSignal(void)
 {
@@ -1013,6 +1117,7 @@ static void ProcessSignal(void)
      * except SIGHUP, SIGTERM and SIGQUIT.
      */
     (void)gspqsignal(SIGHUP, asp_sighup_handler);
+    (void)gspqsignal(SIGURG, print_stack);
     (void)gspqsignal(SIGINT, SIG_IGN);
     (void)gspqsignal(SIGTERM, instr_asp_exit); /* cancel current query and exit */
     (void)gspqsignal(SIGQUIT, quickdie);
@@ -1176,6 +1281,9 @@ static void InitTupleAttr(FuncCallContext** funcctx)
     TupleDescInitEntry(tupdesc, (AttrNumber)++i, "block_sessionid", INT8OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)++i, "wait_status", TEXTOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)++i, "global_sessionid", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "xact_start_time", TIMESTAMPTZOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "query_start_time", TIMESTAMPTZOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "state", TEXTOID, -1, 0);
     Assert(i == ATTR_NUM);
     (*funcctx)->tuple_desc = BlessTupleDesc(tupdesc);
     (*funcctx)->user_fctx = palloc0(sizeof(int));

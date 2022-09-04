@@ -115,6 +115,7 @@ void write_target_range(char* buf, off_t begin, size_t size, int space, bool com
     if (dry_run)
         return;
 
+    /* The file start of the compressed table does not need to be an integer multiple of BlockSize. */
     if (!compressed && begin % BLOCKSIZE != 0) {
         (void)close(dstfd);
         dstfd = -1;
@@ -1236,9 +1237,7 @@ void CompressedFileTruncate(const char *path, const RewindCompressInfo *rewindCo
         return;
     }
     /* sanity check */
-    BlockNumber oldBlockNumber = rewindCompressInfo->oldBlockNumber;
-    BlockNumber newBlockNumber = rewindCompressInfo->newBlockNumber;
-    Assert(oldBlockNumber > newBlockNumber);
+    Assert(rewindCompressInfo->oldBlockNumber > rewindCompressInfo->newBlockNumber);
 
     /* construct full path */
     char fullPath[MAXPGPATH];
@@ -1247,19 +1246,22 @@ void CompressedFileTruncate(const char *path, const RewindCompressInfo *rewindCo
     /* call truncate of pageCompression */
     std::unique_ptr<PageCompression> pageCompression = std::make_unique<PageCompression>();
     /* segno is no used here */
-    auto result = pageCompression->Init(fullPath, MAXPGPATH, -1, rewindCompressInfo->chunkSize);
-    FileProcessErrorReport(fullPath, result);
-    result = pageCompression->TruncateFile(oldBlockNumber, newBlockNumber);
-    FileProcessErrorReport(fullPath, result);
+    COMPRESS_ERROR_STATE result = pageCompression->Init(fullPath, InvalidBlockNumber, false);
+    (void)FileProcessErrorReport(fullPath, result);
+    result = pageCompression->TruncateFile(rewindCompressInfo->newBlockNumber);
+    (void)FileProcessErrorReport(fullPath, result);
     pg_log(PG_DEBUG, "CompressedFileTruncate: %s\n", path);
 }
 
-void FetchCompressedFile(char* buf, BlockNumber blockNumber, int32 size)
+void FetchCompressedFile(char* buf, BlockNumber blockNumber, int32 size, uint16 chunkSize, uint8 algorithm)
 {
-    g_pageCompression->WriteBufferToCurrentBlock(buf, blockNumber, size);
+    CfsCompressOption cfsCompressOption{.chunk_size = chunkSize, .algorithm = algorithm};
+    if (!g_pageCompression->WriteBufferToCurrentBlock(buf, blockNumber, size, &cfsCompressOption)) {
+        pg_log(PG_ERROR, "FetchCompressedFile failed: \n");
+    }
 }
 
-void CompressedFileInit(const char* fileName, int32 chunkSize, int32 algorithm, bool rebuild)
+void CompressedFileInit(const char* fileName, bool rebuild)
 {
     if (dry_run) {
         return;
@@ -1274,16 +1276,13 @@ void CompressedFileInit(const char* fileName, int32 chunkSize, int32 algorithm, 
     char dstPath[MAXPGPATH];
     error_t rc = snprintf_s(dstPath, sizeof(dstPath), sizeof(dstPath) - 1, "%s/%s", pg_data, fileName);
     securec_check_ss_c(rc, "\0", "\0");
-
-    g_pageCompression = new PageCompression();
-    /* segment number only used for checksum */
-    auto state = g_pageCompression->Init(dstPath, strlen(dstPath), -1, chunkSize, rebuild);
-    FileProcessErrorReport(dstPath, state);
-    if (rebuild) {
-        PageCompressHeader* header = g_pageCompression->GetPageCompressHeader();
-        header->algorithm = algorithm;
-        header->chunk_size= chunkSize;
+    g_pageCompression = new(std::nothrow) PageCompression();
+    if (g_pageCompression == NULL) {
+        return;
     }
+    /* segment number only used for checksum */
+    auto state = g_pageCompression->Init(dstPath, InvalidBlockNumber, rebuild);
+    (void)FileProcessErrorReport(dstPath, state);
 }
 
 void CompressFileClose()

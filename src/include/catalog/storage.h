@@ -13,8 +13,6 @@
  */
 #ifndef STORAGE_H
 #define STORAGE_H
-#include "dfsdesc.h"
-#include "storage/dfs/dfs_connector.h"
 #include "storage/buf/block.h"
 #include "storage/smgr/relfilenode.h"
 #include "storage/lmgr.h"
@@ -55,14 +53,11 @@ extern void DfsStoreRelCreateStorage(RelFileNode* rnode, AttrNumber attrnum, cha
  * naming
  */
 extern void smgrDoPendingDeletes(bool isCommit);
-extern int smgrGetPendingDeletes(bool forCommit, ColFileNodeRel **ptr, bool skipTemp, int *numTempRel);
+extern int smgrGetPendingDeletes(bool forCommit, ColFileNode **ptr, bool skipTemp, int *numTempRel);
+extern ColFileNodeRel* ConvertToOldColFileNode(ColFileNode *colFileNodes, int size, bool freeNodes = true);
 extern void AtSubCommit_smgr(void);
 extern void AtSubAbort_smgr();
 extern void PostPrepare_smgr(void);
-
-extern void InsertIntoPendingDfsDelete(const char* filename, bool atCommit, Oid ownerid, uint64 filesize);
-extern void ResetPendingDfsDelete();
-extern void doPendingDfsDelete(bool isCommit, TransactionId *xid);
 
 extern void ColMainFileNodesCreate(void);
 extern void ColMainFileNodesDestroy(void);
@@ -76,29 +71,11 @@ extern uint64 GetSMgrRelSize(RelFileNode* relfilenode, BackendId backend, ForkNu
 /*
  * dfs storage api
  */
-extern void ClearDfsStorage(ColFileNode* pFileNode, int nrels, bool dropDir, bool cfgFromMapper);
-extern void DropMapperFiles(ColFileNode* pColFileNode, int nrels);
-extern void UnregisterDfsSpace(ColFileNode* pColFileNode, int rels);
-extern void CreateDfsStorage(Relation rel);
-extern void DropDfsStorage(Relation rel, bool isDfsTruncate = false);
-extern void DropDfsDirectory(ColFileNode *colFileNode, bool cfgFromMapper);
-extern void DropMapperFile(RelFileNode fNode);
-extern void ClearDfsDirectory(ColFileNode *colFileNode, bool cfgFromMapper);
-extern void DropDfsFilelist(RelFileNode fNode);
-extern int  ReadDfsFilelist(RelFileNode fNode, Oid ownerid, List** pendingList);
-extern void SaveDfsFilelist(Relation rel, DFSDescHandler *handler);
-extern uint64 GetDfsDelFileSize(List *dfsfilelist, bool isCommit);
 extern bool IsSmgrTruncate(const XLogReaderState *record);
 extern bool IsSmgrCreate(const XLogReaderState* record);
 
 extern void smgrApplyXLogTruncateRelation(XLogReaderState *record);
 extern void XLogBlockSmgrRedoTruncate(RelFileNode rnode, BlockNumber blkno);
-
-/*
- * to check whether is external storage 
- */
-#define IsDfsStor(flag) \
-	((bool) ((flag) == DFS_STOR_FLAG))
 
 #endif   /* STORAGE_H */
 

@@ -152,7 +152,7 @@ static Acl* ProcAclDefault(Oid ownerId)
  * @in c: character.
  * @return: True or false.
  */
-static bool check_special_character(char c)
+bool check_special_character(char c)
 {
     switch (c) {
         case ' ':
@@ -2669,7 +2669,7 @@ static void CheckInParameterConflicts(CatCList* catlist, const char* procedureNa
         }
     }
 }
- 
+
 /*
  * Due to procedure has no unique index on parameters, it maybe insert same data
  * and this function prevent insert procedure with same funcname and funcargs,

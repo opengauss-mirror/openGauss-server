@@ -619,6 +619,20 @@ void create_credential_internal(PG_FUNCTION_ARGS)
     }
     const Datum credential_name = PG_GETARG_DATUM(0);
     const Datum username = PG_GETARG_DATUM(1);
+
+    if (!PG_ARGISNULL(2)) {
+        char *passwdstr = TextDatumGetCString(PG_GETARG_DATUM(2));
+        bool is_valid_passwd = !isStrHasInvalidCharacter(passwdstr);
+        str_reset(passwdstr);
+        pfree_ext(passwdstr);
+        if (!is_valid_passwd) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PASSWORD),
+                errmsg("Password cannot contain characters except numbers, alphabetic characters and "
+                       "specified special characters."),
+                errcause("Password contain invalid characters."),
+                erraction("Use valid characters in password.")));
+        }
+    }
     const Datum database_role = (Datum)0;
     const Datum windows_domain = (Datum)0;
     if (!PG_ARGISNULL(3) || !PG_ARGISNULL(4)) {

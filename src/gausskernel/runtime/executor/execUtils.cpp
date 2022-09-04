@@ -70,11 +70,11 @@
 #include "utils/json.h"
 #include "utils/jsonb.h"
 #include "utils/xml.h"
+#include "commands/sequence.h"
 
 static bool get_last_attnums(Node* node, ProjectionInfo* projInfo);
 static bool index_recheck_constraint(
     Relation index, Oid* constr_procs, Datum* existing_values, const bool* existing_isnull, Datum* new_values);
-static void ShutdownExprContext(ExprContext* econtext, bool isCommit);
 static bool check_violation(Relation heap, Relation index, IndexInfo *indexInfo, ItemPointer tupleid, Datum *values,
                             const bool *isnull, EState *estate, bool newIndex, bool errorOK, CheckWaitMode waitMode,
                             ConflictInfoData *conflictInfo, Oid partoid = InvalidOid, int2 bucketid = InvalidBktId,
@@ -190,7 +190,7 @@ EState* CreateExecutorState(MemoryContext saveCxt)
     estate->es_recursive_next_iteration = false;
 
     estate->pruningResult = NULL;
-
+    estate->first_autoinc = 0;
     /*
      * Return the executor state structure
      */
@@ -293,6 +293,7 @@ ExprContext* CreateExprContext(EState* estate)
 
     econtext->ecxt_callbacks = NULL;
     econtext->plpgsql_estate = NULL;
+    econtext->hasSetResultStore = false;
 
     /*
      * Link the ExprContext into the EState to ensure it is shut down when the
@@ -1236,7 +1237,8 @@ void ExecCloseIndices(ResultRelInfo* resultRelInfo)
  * Copied from ExecInsertIndexTuples
  */
 void ExecDeleteIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* estate,
-    Relation targetPartRel, Partition p, const Bitmapset *modifiedIdxAttrs, const bool inplaceUpdated)
+    Relation targetPartRel, Partition p, const Bitmapset *modifiedIdxAttrs,
+    const bool inplaceUpdated, const bool isRollbackIndex)
 {
     ResultRelInfo* resultRelInfo = NULL;
     int numIndices;
@@ -1391,7 +1393,7 @@ void ExecDeleteIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* es
          */
         FormIndexDatum(indexInfo, slot, estate, values, isnull);
 
-        index_delete(actualindex, values, isnull, tupleid);
+        index_delete(actualindex, values, isnull, tupleid, isRollbackIndex);
     }
 
     list_free_ext(partitionIndexOidList);
@@ -1408,7 +1410,8 @@ void ExecUHeapDeleteIndexTuplesGuts(
                               exec_index_tuples_state.estate, exec_index_tuples_state.targetPartRel,
                               exec_index_tuples_state.p,
                               modifiedIdxAttrs,
-                              inplaceUpdated);
+                              inplaceUpdated,
+                              exec_index_tuples_state.rollbackIndex);
     } else {
         UHeapTuple tmpUtup = ExecGetUHeapTupleFromSlot(oldslot); // materialize the tuple
         tmpUtup->table_oid = RelationGetRelid(rel);
@@ -1417,7 +1420,106 @@ void ExecUHeapDeleteIndexTuplesGuts(
                               exec_index_tuples_state.estate, exec_index_tuples_state.targetPartRel,
                               exec_index_tuples_state.p,
                               modifiedIdxAttrs,
-                              inplaceUpdated);
+                              inplaceUpdated,
+                              exec_index_tuples_state.rollbackIndex);
+    }
+}
+
+static inline int128 datum2autoinc(ConstrAutoInc *cons_autoinc, Datum datum)
+{
+    if (cons_autoinc->datum2autoinc_func != NULL) {
+        return DatumGetInt128(DirectFunctionCall1((PGFunction)(uintptr_t)cons_autoinc->datum2autoinc_func, datum));
+    }
+    return DatumGetInt128(datum);
+}
+
+static inline Datum autoinc2datum(ConstrAutoInc *cons_autoinc, int128 autoinc)
+{
+    if (cons_autoinc->autoinc2datum_func != NULL) {
+        return DirectFunctionCall1((PGFunction)(uintptr_t)cons_autoinc->autoinc2datum_func, Int128GetDatum(autoinc));
+    }
+    return Int128GetDatum(autoinc);
+}
+
+static Tuple autoinc_modify_tuple(TupleDesc desc, EState* estate, TupleTableSlot* slot, Tuple tuple, int128 autoinc)
+{
+    uint32 natts = (uint32)desc->natts;
+    AttrNumber attnum = desc->constr->cons_autoinc->attnum;
+    MemoryContext oldContext = MemoryContextSwitchTo(GetPerTupleMemoryContext(estate));
+    Datum* values = (Datum *)palloc(sizeof(Datum) * natts);
+    bool* nulls = (bool *)palloc(sizeof(bool) * natts);
+    bool* replaces = (bool *)palloc0(sizeof(bool) * natts);
+    errno_t rc = memset_s(replaces, sizeof(bool) * natts, 0, sizeof(bool) * natts);
+    securec_check(rc, "\0", "\0");
+
+    values[attnum - 1] = autoinc2datum(desc->constr->cons_autoinc, autoinc);
+    nulls[attnum - 1] = false;
+    replaces[attnum - 1] = true;
+    tuple = tableam_tops_modify_tuple(tuple, desc, values, nulls, replaces);
+
+    (void)ExecStoreTuple(tuple, slot, InvalidBuffer, false);
+    (void)MemoryContextSwitchTo(oldContext);
+    return tuple;
+}
+
+Tuple ExecAutoIncrement(Relation rel, EState* estate, TupleTableSlot* slot, Tuple tuple)
+{
+    if (rel->rd_att->constr->cons_autoinc == NULL) {
+        return tuple;
+    }
+
+    ConstrAutoInc* cons_autoinc = rel->rd_att->constr->cons_autoinc;
+    int128 autoinc;
+    AttrNumber attnum = cons_autoinc->attnum;
+    bool is_null = false;
+    bool modify_tuple = false;
+    Datum datum = tableam_tops_tuple_getattr(tuple, attnum, rel->rd_att, &is_null);
+
+    if (is_null) {
+        autoinc = 0;
+        modify_tuple = rel->rd_att->attrs[attnum - 1]->attnotnull;
+    } else {
+        autoinc = datum2autoinc(cons_autoinc, datum);
+        modify_tuple = (autoinc == 0);
+    }
+    /* When datum is NULL/0, auto increase */
+    if (autoinc == 0) {
+        if (rel->rd_rel->relpersistence == RELPERSISTENCE_TEMP) {
+            autoinc = tmptable_autoinc_nextval(rel->rd_rel->relfilenode, cons_autoinc->next);
+        } else {
+            autoinc = nextval_internal(cons_autoinc->seqoid);
+        }
+        if (estate->first_autoinc == 0) {
+            estate->first_autoinc = autoinc;
+        }
+        if (modify_tuple) {
+            tuple = autoinc_modify_tuple(rel->rd_att, estate, slot, tuple, autoinc);
+        }
+    }
+    return tuple;
+}
+
+static void UpdateAutoIncrement(Relation rel, Tuple tuple, EState* estate)
+{
+    if (!RelHasAutoInc(rel)) {
+        return;
+    }
+
+    bool isnull = false;
+    ConstrAutoInc* cons_autoinc = rel->rd_att->constr->cons_autoinc;
+    Datum datum = tableam_tops_tuple_getattr(tuple, cons_autoinc->attnum, rel->rd_att, &isnull);
+
+    if (!isnull) {
+        int128 autoinc = datum2autoinc(cons_autoinc, datum);
+        if (rel->rd_rel->relpersistence == RELPERSISTENCE_TEMP) {
+            tmptable_autoinc_setval(rel->rd_rel->relfilenode, cons_autoinc->next, autoinc, true);
+        } else {
+            autoinc_setval(cons_autoinc->seqoid, autoinc, true);
+        }
+    }
+
+    if (estate->first_autoinc != 0 && u_sess->cmd_cxt.last_insert_id != estate->first_autoinc) {
+        u_sess->cmd_cxt.last_insert_id = estate->first_autoinc;
     }
 }
 
@@ -1551,6 +1653,7 @@ bool ExecCheckIndexConstraints(TupleTableSlot *slot, EState *estate, Relation ta
      * constraint.
      */
     for (i = 0; i < numIndices; i++) {
+        actualHeap = targetRel;
         Relation indexRelation = relationDescs[i];
         IndexInfo* indexInfo = NULL;
         bool satisfiesConstraint = false;
@@ -1832,7 +1935,7 @@ List* ExecInsertIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* e
         if (!indexRelation->rd_index->indisunique) {
             checkUnique = UNIQUE_CHECK_NO;
         } else if (conflict != NULL) {
-            checkUnique = UNIQUE_CHECK_UPSERT;
+            checkUnique = UNIQUE_CHECK_PARTIAL;
         } else if (indexRelation->rd_index->indimmediate) {
             checkUnique = UNIQUE_CHECK_YES;
         } else {
@@ -1863,7 +1966,7 @@ List* ExecInsertIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* e
                 actualheap, actualindex, indexInfo, tupleid, values, isnull, estate, false, errorOK);
         }
 
-        if ((IndexUniqueCheckNoError(checkUnique) || indexInfo->ii_ExclusionOps != NULL) && !satisfiesConstraint) {
+        if ((checkUnique == UNIQUE_CHECK_PARTIAL || indexInfo->ii_ExclusionOps != NULL) && !satisfiesConstraint) {
             /*
              * The tuple potentially violates the uniqueness or exclusion
              * constraint, so make a note of the index so that we can re-check
@@ -1875,6 +1978,10 @@ List* ExecInsertIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* e
                 *conflict = true;
             }
         }
+    }
+
+    if (result == NULL) {
+        UpdateAutoIncrement(heapRelation, slot->tts_tuple, estate);
     }
 
     list_free_ext(partitionIndexOidList);
@@ -2253,7 +2360,7 @@ void UnregisterExprContextCallback(ExprContext* econtext, ExprContextCallbackFun
  * If isCommit is false, just clean the callback list but don't call 'em.
  * (See comment for FreeExprContext.)
  */
-static void ShutdownExprContext(ExprContext* econtext, bool isCommit)
+void ShutdownExprContext(ExprContext* econtext, bool isCommit)
 {
     ExprContext_CB* ecxt_callback = NULL;
     MemoryContext oldcontext;

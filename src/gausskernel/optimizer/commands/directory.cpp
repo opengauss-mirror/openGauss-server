@@ -118,7 +118,7 @@ static void CheckCreateDirectoryPermission()
      * When enable_access_server_directory is on, sysadmin and the member of gs_role_directory_create role
      * can create directory.
      */
-    if (g_instance.attr.attr_storage.enable_access_server_directory) {
+    if (u_sess->attr.attr_storage.enable_access_server_directory) {
         if (!superuser() && !is_member_of_role(GetUserId(), DEFAULT_ROLE_DIRECTORY_CREATE)) {
             ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                 errmsg("permission denied to create directory"),
@@ -236,7 +236,7 @@ static void CheckDropDirectoryPermission(Oid directoryId, const char* directoryN
      * When enable_access_server_directory is on, directory owner or users have drop privileges of the directory or
      * the member of the gs_role_directory_drop role can drop directory.
      */
-    if (g_instance.attr.attr_storage.enable_access_server_directory) {
+    if (u_sess->attr.attr_storage.enable_access_server_directory) {
         AclResult aclresult = pg_directory_aclcheck(directoryId, GetUserId(), ACL_DROP);
         if (aclresult != ACLCHECK_OK && !superuser() && !pg_directory_ownercheck(directoryId, GetUserId())
             && !is_member_of_role(GetUserId(), DEFAULT_ROLE_DIRECTORY_DROP)) {
@@ -429,7 +429,7 @@ void AlterDirectoryOwner(const char* dirname, Oid newOwnerId)
         HeapTuple newtuple;
         errno_t rc;
 
-        if (g_instance.attr.attr_storage.enable_access_server_directory) {
+        if (u_sess->attr.attr_storage.enable_access_server_directory) {
             /* must be sysadmin or owner of the existing object */
             if (!superuser() && !pg_directory_ownercheck(HeapTupleGetOid(tuple), GetUserId())) {
                 aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_DIRECTORY, dirname);

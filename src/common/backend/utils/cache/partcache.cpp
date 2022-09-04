@@ -92,6 +92,8 @@ static HeapTuple ScanPgPartition(Oid targetPartId, bool indexOK, Snapshot snapsh
 static Partition AllocatePartitionDesc(Form_pg_partition relp);
 static void PartitionFlushPartition(Partition partition);
 
+bytea* merge_rel_part_reloption(Oid rel_oid, Oid part_oid);
+
 static void PartitionParseRelOptions(Partition partition, HeapTuple tuple);
 
 static HeapTuple ScanPgPartition(Oid targetPartId, bool indexOK, Snapshot snapshot)
@@ -295,11 +297,10 @@ Partition PartitionBuildDesc(Oid targetPartId, StorageType storage_type, bool in
         partition->pd_node.bucketNode = InvalidBktId;
     }
 
-    /* make sure relation is marked as having no open file yet */
-    partition->pd_smgr = NULL;
-
     /* make sure the partrel is empty yet */
     partition->partrel = NULL;
+    /* make sure relation is marked as having no open file yet */
+    partition->pd_smgr = NULL;
 
     /* Assign value in partitiongetrelation. */
     partition->partMap = NULL;
@@ -355,8 +356,8 @@ void PartitionInitPhysicalAddr(Partition partition)
 
     partition->pd_node.opt = 0;
     if (partition->rd_options) {
-        SetupPageCompressForRelation(&partition->pd_node, &((StdRdOptions*)(partition->rd_options))->compress,
-                                      PartitionGetPartitionName(partition));
+        SetupPageCompressForRelation(&partition->pd_node, &((StdRdOptions*)(void *)(partition->rd_options))->compress,
+                                     PartitionGetPartitionName(partition));
     }
 }
 
@@ -500,7 +501,7 @@ Partition PartitionBuildLocalPartition(const char *relname, Oid partid, Oid part
         PartitionInitPhysicalAddr(part);
         /* compressed option was set by PartitionInitPhysicalAddr if part->rd_options != NULL */
         if (part->rd_options == NULL && reloptions) {
-            StdRdOptions* options = (StdRdOptions*)default_reloptions(reloptions, false, RELOPT_KIND_HEAP);
+            StdRdOptions* options = (StdRdOptions*)(void *)default_reloptions(reloptions, false, RELOPT_KIND_HEAP);
             SetupPageCompressForRelation(&part->pd_node, &options->compress, PartitionGetPartitionName(part));
         }
     }
@@ -521,7 +522,7 @@ Partition PartitionBuildLocalPartition(const char *relname, Oid partid, Oid part
      * done building partcache entry.
      */
     (void)MemoryContextSwitchTo(oldcxt);
-    
+
     /*
      * Caller expects us to pin the returned entry.
      */
@@ -553,16 +554,14 @@ void PartitionDestroyPartition(Partition partition)
     pfree_ext(partition->pd_part);
     list_free_ext(partition->pd_indexlist);
     pfree_ext(partition->rd_options);
+
     if (partition->partrel) {
-        /* in function releaseDummyRelation, owner->nfakerelrefs decrease one due to ResourceOwnerForgetFakerelRef,
-         * which is not we expect, so we use ResourceOwnerRememberFakerelRef correspondingly */
-        if (!IsBootstrapProcessingMode()) {
-            ResourceOwnerRememberFakerelRef(t_thrd.utils_cxt.CurrentResourceOwner, partition->partrel);
-        }
-        releaseDummyRelation(&partition->partrel);
+        partition->partrel->rd_refcnt--;
+        partition->partrel = NULL;
     }
+
     if (partition->partMap != NULL) {
-        RelationDestroyPartitionMap(partition->partMap);
+        DestroyPartitionMap(partition->partMap);
         partition->partMap = NULL;
     }
     pfree_ext(partition);
@@ -758,7 +757,9 @@ void PartitionClearPartition(Partition partition, bool rebuild)
         }
 
         if (newpart->partMap) {
-            RebuildPartitonMap(newpart->partMap, partition->partMap);
+            if (!EqualPartitonMap(partition->partMap, newpart->partMap)) {
+                RebuildPartitonMap(newpart->partMap, partition->partMap);
+            }
             SWAPFIELD(PartitionMap*, partMap);
         }
 
@@ -914,6 +915,8 @@ void PartitionCacheInvalidate(void)
         if (PartitionHasReferenceCountZero(partition)) {
             /* Delete this entry immediately */
             PartitionClearPartition(partition, false);
+            hash_seq_term(&status);
+            hash_seq_init(&status, u_sess->cache_cxt.PartitionIdCache);
         } else {
             rebuildList = lappend(rebuildList, partition);
         }
@@ -953,6 +956,7 @@ void PartitionCloseSmgrByOid(Oid partitionId)
     PartitionCloseSmgr(partition);
 }
 
+static void AtEOXact_PartRelCache();
 /*
  * AtEOXact_PartitionCache
  *
@@ -972,6 +976,8 @@ void AtEOXact_PartitionCache(bool isCommit)
         t_thrd.lsc_cxt.lsc->partdefcache.AtEOXact_PartitionCache(isCommit);
         return;
     }
+    AtEOXact_PartRelCache();
+
     HASH_SEQ_STATUS status;
     PartIdCacheEnt* idhentry = NULL;
 
@@ -1029,6 +1035,8 @@ void AtEOXact_PartitionCache(bool isCommit)
                 partition->pd_createSubid = InvalidSubTransactionId;
             } else {
                 PartitionClearPartition(partition, false);
+                hash_seq_term(&status);
+                hash_seq_init(&status, u_sess->cache_cxt.PartitionIdCache);
                 continue;
             }
         }
@@ -1082,6 +1090,8 @@ void AtEOSubXact_PartitionCache(bool isCommit, SubTransactionId mySubid, SubTran
                 partition->pd_createSubid = parentSubid;
             else {
                 PartitionClearPartition(partition, false);
+                hash_seq_term(&status);
+                hash_seq_init(&status, u_sess->cache_cxt.PartitionIdCache);
                 continue;
             }
         }
@@ -1097,6 +1107,213 @@ void AtEOSubXact_PartitionCache(bool isCommit, SubTransactionId mySubid, SubTran
                 partition->pd_newRelfilenodeSubid = InvalidSubTransactionId;
         }
     }
+}
+
+typedef struct PartRelCacheEntry {
+    Oid pd_id; /* actually this is pd_id */
+    bool is_valid;
+    Relation reldesc;
+} PartRelCacheEntry;
+
+static void AtEOXact_PartRelCache()
+{
+    if (!u_sess->cache_cxt.PartRelCacheNeedEOXActWork) {
+        return;
+    }
+    u_sess->cache_cxt.PartRelCacheNeedEOXActWork = false;
+    if (u_sess->cache_cxt.PartRelCache == NULL) {
+        return;
+    }
+
+    HASH_SEQ_STATUS status;
+    hash_seq_init(&status, u_sess->cache_cxt.PartRelCache);
+    PartRelCacheEntry *idhentry;
+    while ((idhentry = (PartRelCacheEntry*)hash_seq_search(&status)) != NULL) {
+        if (!idhentry->is_valid || idhentry->reldesc == NULL) {
+            (void)hash_search(u_sess->cache_cxt.PartRelCache, (void *)&(idhentry->pd_id), HASH_REMOVE, NULL);
+
+            if (idhentry->reldesc != NULL) {
+                if (idhentry->reldesc->rd_refcnt > 0) {
+                    Assert(idhentry->reldesc->rd_refcnt == 1);
+                    /* destroy part first to release rd_refcnt */
+                    PartitionCacheInvalidateEntry(idhentry->pd_id);
+                    hash_seq_term(&status);
+                    hash_seq_init(&status, u_sess->cache_cxt.PartRelCache);
+                    PartRelCacheEntry *old_idhentry = idhentry;
+                    while ((idhentry = (PartRelCacheEntry*)hash_seq_search(&status)) != NULL) {
+                        if (old_idhentry == idhentry) {
+                            break;
+                        }
+                    }
+                    Assert(idhentry->reldesc->rd_refcnt == 0);
+                }
+                RelationDestroyRelation(idhentry->reldesc, false);
+            }
+            pfree(idhentry);
+        }
+    }
+}
+
+static void DeletePartRelCacheEntry(PartRelCacheEntry *idhentry, HTAB *PartRelCache, bool *PartRelCacheNeedEOXActWork)
+{
+    if (idhentry->reldesc != NULL && idhentry->reldesc->rd_refcnt > 0) {
+        Assert(idhentry->reldesc->rd_refcnt == 1);
+        /* destroy part first to release rd_refcnt */
+        PartitionCacheInvalidateEntry(idhentry->pd_id);
+        Assert(idhentry->reldesc->rd_refcnt == 0);
+        if (idhentry->reldesc->rd_refcnt != 0) {
+            idhentry->is_valid = false;
+            *PartRelCacheNeedEOXActWork = true;
+            return;
+        }
+    }
+
+    (void)hash_search(PartRelCache, (void *)&(idhentry->pd_id), HASH_REMOVE, NULL);
+    if (idhentry->reldesc != NULL) {
+        Assert(idhentry->reldesc->rd_refcnt == 0);
+        RelationDestroyRelation(idhentry->reldesc, false);
+    }
+    pfree(idhentry);
+}
+
+static void PartRelCachePdIdCallback(Datum arg, Oid partid)
+{
+    if (u_sess->cache_cxt.PartRelCache == NULL) {
+        return;
+    }
+    if (partid != InvalidOid) {
+        bool found = false;
+        PartRelCacheEntry *idhentry =
+            (PartRelCacheEntry *)hash_search(u_sess->cache_cxt.PartRelCache, (void *)&(partid), HASH_FIND, &found);
+        if (!found) {
+            return;
+        }
+        DeletePartRelCacheEntry(idhentry, u_sess->cache_cxt.PartRelCache,
+            &u_sess->cache_cxt.PartRelCacheNeedEOXActWork);
+        return;
+    }
+
+    HASH_SEQ_STATUS status;
+    hash_seq_init(&status, u_sess->cache_cxt.PartRelCache);
+    PartRelCacheEntry *idhentry;
+    while ((idhentry = (PartRelCacheEntry*)hash_seq_search(&status)) != NULL) {
+        DeletePartRelCacheEntry(idhentry, u_sess->cache_cxt.PartRelCache,
+            &u_sess->cache_cxt.PartRelCacheNeedEOXActWork);
+        if (hash_search(u_sess->cache_cxt.PartRelCache, (void *)&partid, HASH_FIND, NULL) != NULL) {
+            hash_seq_term(&status);
+            hash_seq_init(&status, u_sess->cache_cxt.PartRelCache);
+            PartRelCacheEntry *old_idhentry = idhentry;
+            while ((idhentry = (PartRelCacheEntry*)hash_seq_search(&status)) != NULL) {
+                if (old_idhentry == idhentry) {
+                    break;
+                }
+            }
+        }
+    }
+}
+
+static void PartRelCacheRdIdCallback(Datum arg, Oid relid)
+{
+    if (u_sess->cache_cxt.PartRelCache == NULL) {
+        return;
+    }
+
+    HASH_SEQ_STATUS status;
+    hash_seq_init(&status, u_sess->cache_cxt.PartRelCache);
+    PartRelCacheEntry *idhentry;
+    while ((idhentry = (PartRelCacheEntry*)hash_seq_search(&status)) != NULL) {
+        if (relid == InvalidOid || idhentry->reldesc == NULL || idhentry->reldesc->parentId == relid ||
+            idhentry->reldesc->grandparentId == relid) {
+            DeletePartRelCacheEntry(idhentry, u_sess->cache_cxt.PartRelCache,
+                &u_sess->cache_cxt.PartRelCacheNeedEOXActWork);
+            if (hash_search(u_sess->cache_cxt.PartRelCache, (void *)&idhentry->pd_id, HASH_FIND, NULL) != NULL) {
+                hash_seq_term(&status);
+                hash_seq_init(&status, u_sess->cache_cxt.PartRelCache);
+                PartRelCacheEntry *old_idhentry = idhentry;
+                while ((idhentry = (PartRelCacheEntry*)hash_seq_search(&status)) != NULL) {
+                    if (old_idhentry == idhentry) {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+}
+
+static void PartRelCacheInitialize(void)
+{
+    HASHCTL ctl;
+    errno_t rc;
+    Assert(u_sess->cache_cxt.PartRelCache == NULL);
+    if (u_sess->cache_cxt.PartRelCache == NULL) {
+        rc = memset_s(&ctl, sizeof(ctl), 0, sizeof(ctl));
+        securec_check(rc, "", "");
+        ctl.keysize = sizeof(Oid);
+        ctl.entrysize = sizeof(PartRelCacheEntry);
+        ctl.hash = oid_hash;
+        ctl.hcxt = u_sess->cache_mem_cxt;
+        const int INITPARTRELCACHESIZE = 128;
+        u_sess->cache_cxt.PartRelCache =
+            hash_create("PartRelcache by OID", INITPARTRELCACHESIZE, &ctl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
+        CacheRegisterSessionPartcacheCallback(PartRelCachePdIdCallback, (Datum)0);
+        CacheRegisterSessionRelcacheCallback(PartRelCacheRdIdCallback, (Datum)0);
+    }
+}
+
+void partitionInitPartRel(Relation rel, Partition part)
+{
+    Assert(part->partrel == NULL);
+    Relation relation;
+    Assert(PointerIsValid(rel) && PointerIsValid(part));
+    /*
+     * If the rel is subpartitiontable and the part is subpartition, we need open Level 1 partition to get subpartition
+     * relation. When the caller gets subpartition, The level-1 partition has been locked. Therefore, partitionOpen used
+     * NoLock here.
+     */
+    if (RelationIsSubPartitioned(rel) && rel->rd_id != part->pd_part->parentid) {
+        Assert(rel->rd_id == partid_get_parentid(part->pd_part->parentid));
+        Partition parentPart = partitionOpen(rel, part->pd_part->parentid, NoLock);
+        Relation parentPartRel = partitionGetRelation(rel, parentPart);
+        partitionInitPartRel(parentPartRel, part);
+        releaseDummyRelation(&parentPartRel);
+        partitionClose(rel, parentPart, NoLock);
+        return;
+    }
+
+    if (u_sess->cache_cxt.PartRelCache == NULL) {
+        PartRelCacheInitialize();
+    }
+    bool found = false;
+    PartRelCacheEntry *idhentry = (PartRelCacheEntry *)hash_search(u_sess->cache_cxt.PartRelCache,
+        (void *)&(part->pd_id), HASH_ENTER, &found);
+    if (found && idhentry->reldesc != NULL) {
+        part->partrel = idhentry->reldesc;
+        part->partrel->rd_refcnt++;
+        return;
+    }
+    idhentry->is_valid = false;
+    idhentry->reldesc = NULL;
+
+    bytea* merge_reloption = NULL;
+
+    Assert(rel->rd_id == part->pd_part->parentid);
+
+    /*
+     * Memory malloced in merge_rel_part_reloption cannot mount in CacheMemoryContext,
+     * the same is true for other memory in this function and these may be optimized later.
+     */
+    if (RelationInClusterResizing(rel)) {
+        /* tuple.column(datum) ==> list ==> datum ==> bytea * */
+        merge_reloption = merge_rel_part_reloption(RelationGetRelid(rel), PartitionGetPartid(part));
+    }
+
+    relation = BuildRelationFromPartRel(rel, part, merge_reloption);
+    idhentry->reldesc = relation;
+    idhentry->is_valid = true;
+    idhentry->reldesc->come_from_partrel = true;
+    part->partrel = idhentry->reldesc;
+    part->partrel->rd_refcnt++;
+    return;
 }
 
 /*
@@ -1240,61 +1457,7 @@ bytea* merge_rel_part_reloption(Oid rel_oid, Oid part_oid)
     return merged_rd_options;
 }
 
-void UpdatePartrelPointer(Relation partrel, Relation rel, Partition part)
-{
-    Assert(partrel->rd_refcnt == part->pd_refcnt);
-    Assert(partrel->rd_isvalid == part->pd_isvalid);
-    Assert(partrel->rd_indexvalid == part->pd_indexvalid);
-    Assert(partrel->rd_createSubid == part->pd_createSubid);
-    Assert(partrel->rd_newRelfilenodeSubid == part->pd_newRelfilenodeSubid);
-
-    Assert(partrel->rd_rel->reltoastrelid == part->pd_part->reltoastrelid);
-    Assert(partrel->rd_rel->reltablespace == part->pd_part->reltablespace);
-    Assert(partrel->rd_rel->relfilenode == part->pd_part->relfilenode);
-    Assert(partrel->rd_rel->relpages == part->pd_part->relpages);
-    Assert(partrel->rd_rel->reltuples == part->pd_part->reltuples);
-    Assert(partrel->rd_rel->relallvisible == part->pd_part->relallvisible);
-    Assert(partrel->rd_rel->relcudescrelid == part->pd_part->relcudescrelid);
-    Assert(partrel->rd_rel->relcudescidx == part->pd_part->relcudescidx);
-    Assert(partrel->rd_rel->reldeltarelid == part->pd_part->reldeltarelid);
-    Assert(partrel->rd_rel->reldeltaidx == part->pd_part->reldeltaidx);
-    Assert(partrel->rd_bucketoid == rel->rd_bucketoid);
-
-    partrel->rd_att = rel->rd_att;
-    Assert(partrel->rd_partHeapOid == part->pd_part->indextblid);
-    partrel->rd_index = rel->rd_index;
-    partrel->rd_indextuple = rel->rd_indextuple;
-    partrel->rd_am = rel->rd_am;
-    partrel->rd_indnkeyatts = rel->rd_indnkeyatts;
-    Assert(partrel->rd_tam_type == rel->rd_tam_type);
-
-    partrel->rd_aminfo = rel->rd_aminfo;
-    partrel->rd_opfamily = rel->rd_opfamily;
-    partrel->rd_opcintype = rel->rd_opcintype;
-    partrel->rd_support = rel->rd_support;
-    partrel->rd_supportinfo = rel->rd_supportinfo;
-
-    partrel->rd_indoption = rel->rd_indoption;
-    partrel->rd_indexprs = rel->rd_indexprs;
-    partrel->rd_indpred = rel->rd_indpred;
-    partrel->rd_exclops = rel->rd_exclops;
-    partrel->rd_exclprocs = rel->rd_exclprocs;
-    partrel->rd_exclstrats = rel->rd_exclstrats;
-
-    partrel->rd_amcache = rel->rd_amcache;
-    partrel->rd_indcollation = rel->rd_indcollation;
-    Assert(partrel->rd_id == part->pd_id);
-    partrel->rd_indexlist = part->pd_indexlist;
-    Assert(partrel->rd_oidindex == part->pd_oidindex);
-    Assert(partrel->rd_toastoid == part->pd_toastoid);
-    Assert(partrel->subpartitiontype == part->pd_part->parttype);
-    partrel->pgstat_info = part->pd_pgstat_info;
-    Assert(partrel->parentId == rel->rd_id);
-    Assert(partrel->rd_isblockchain == rel->rd_isblockchain);
-    Assert(partrel->storage_type == rel->storage_type);
-}
-
-static void SetRelationPartitionMap(Relation relation, Partition part)
+void SetRelationPartitionMap(Relation relation, Partition part)
 {
     if (!(PartitionHasSubpartition(part) && part->pd_part->parttype == PART_OBJ_TYPE_TABLE_PARTITION)) {
         return;
@@ -1386,6 +1549,7 @@ Relation partitionGetRelation(Relation rel, Partition part)
     else
         relation->rd_bucketkey = NULL;
     relation->rd_att = rel->rd_att;
+    relation->rd_att->tdrefcount++;
     relation->rd_partHeapOid = part->pd_part->indextblid;
     relation->rd_index = rel->rd_index;
     relation->rd_indextuple = rel->rd_indextuple;
@@ -1436,6 +1600,7 @@ Relation partitionGetRelation(Relation rel, Partition part)
     relation->rd_smgr = part->pd_smgr;
     relation->rd_isblockchain = rel->rd_isblockchain;
     relation->storage_type = rel->storage_type;
+    relation->relreplident = rel->relreplident;
 
     /*detach the binding between partition and SmgrRelation*/
     part->pd_smgr = NULL;
@@ -1474,6 +1639,7 @@ void releaseDummyRelation(Relation* relation)
         elog(LOG, "error parameter when release fake relation");
         return;
     }
+    Assert(!(*relation)->come_from_partrel);
     if (!IsBootstrapProcessingMode()) {
         ResourceOwnerForgetFakerelRef(t_thrd.utils_cxt.CurrentResourceOwner, *relation);
     }
@@ -1501,6 +1667,13 @@ void releaseDummyRelation(Relation* relation)
 
     if (NULL != (*relation)->rd_options) {
         pfree_ext((*relation)->rd_options);
+    }
+
+    if ((*relation)->rd_att != NULL) {
+        if (--(*relation)->rd_att->tdrefcount == 0) {
+            RememberToFreeTupleDescAtEOX((*relation)->rd_att);
+        }
+        (*relation)->rd_att = NULL;
     }
 
     pfree_ext(*relation);
@@ -1959,7 +2132,7 @@ void UpdateWaitCleanGpiRelOptions(Relation pgPartition, HeapTuple partTuple, boo
         CatalogUpdateIndexes(pgPartition, newTuple);
     }
 
-    ereport(LOG, (errmsg("partition %u set reloptions wait_clean_gpi success", HeapTupleGetOid(partTuple))));
+    ereport(DEBUG2, (errmsg("partition %u set reloptions wait_clean_gpi success", HeapTupleGetOid(partTuple))));
     heap_freetuple_ext(newTuple);
 }
 
@@ -1989,7 +2162,7 @@ void PartitionedSetWaitCleanGpi(const char* parentName, Oid parentPartOid, bool 
     /* Make changes visible */
     CommandCounterIncrement();
 
-    ereport(LOG, (errmsg("partition relation %s set reloptions wait_clean_gpi success", parentName)));
+    ereport(DEBUG2, (errmsg("partition relation %s set reloptions wait_clean_gpi success", parentName)));
 }
 
 /* Set one partition's reloptions wait_clean_gpi */
@@ -2014,7 +2187,7 @@ void PartitionSetWaitCleanGpi(Oid partOid, bool enable, bool inplace)
     /* Make changes visible */
     CommandCounterIncrement();
 
-    ereport(LOG, (errmsg("partition %u set reloptions wait_clean_gpi success", partOid)));
+    ereport(DEBUG2, (errmsg("partition %u set reloptions wait_clean_gpi success", partOid)));
 }
 
 /*
@@ -2026,14 +2199,14 @@ void PartitionSetWaitCleanGpi(Oid partOid, bool enable, bool inplace)
 bool PartitionLocalIndexSkipping(Datum datumPartType)
 {
     char parttype;
-    
+
     if (!PointerIsValid(datumPartType)) {
         return false;
     }
 
     parttype = DatumGetChar(datumPartType);
     if (parttype == PART_OBJ_TYPE_INDEX_PARTITION) {
-        return false; 
+        return false;
     } 
 
     return true;

@@ -22,6 +22,7 @@
  */
 
 #include "db4ai/db4ai_api.h"
+#include "catalog/gs_model.h"
 
 Model *model_fit(const char *name, AlgorithmML algorithm, const Hyperparameter *hyperparameters, int nhyperp,
                  Oid *typid, bool *typbyval, int16 *typlen, int ncolumns, callback_ml_fetch fetch,
@@ -73,7 +74,7 @@ Model *model_fit(const char *name, AlgorithmML algorithm, const Hyperparameter *
     model->memory_context = CurrentMemoryContext;
     model->algorithm = algorithm;
     model->model_name = name;
-    model->sql = nullptr;
+    model->sql = "DIRECT ML API";
     model->hyperparameters =
         prepare_model_hyperparameters(definitions, definitions_size, hyperp, model->memory_context);
 
@@ -107,12 +108,20 @@ Datum model_predict(ModelPredictor predictor, Datum *values, bool *isnull, Oid *
     return pred->palgo->predict(pred->palgo, pred->predictor, values, isnull, typid, num_columns);
 }
 
-void model_store(const Model *model)
-{
+void model_store(const Model *model) {
     store_model(model);
 }
 
 const Model *model_load(const char *model_name)
 {
     return get_model(model_name, false);
+}
+
+void model_drop(const char *model_name)
+{
+    Oid mid = get_model_oid(model_name, true);
+    if (OidIsValid(mid)) {
+        remove_model_by_oid(mid);
+        CommandCounterIncrement();
+    }
 }

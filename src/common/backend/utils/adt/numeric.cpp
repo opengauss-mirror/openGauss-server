@@ -203,6 +203,7 @@ static void trunc_var(NumericVar* var, int rscale);
 static void strip_var(NumericVar* var);
 static void compute_bucket(
     Numeric operand, Numeric bound1, Numeric bound2, NumericVar* count_var, NumericVar* result_var);
+static void remove_tail_zero(char *ascii);
 
 /*
  * @Description: call corresponding big integer operator functions.
@@ -317,12 +318,12 @@ Datum numeric_in(PG_FUNCTION_ARGS)
 }
 
 /*
- * numeric_out() -
+ * numeric_out_with_zero -
  *
  *	Output function for numeric data type.
  *	include bi64 and bi128 type
  */
-Datum numeric_out(PG_FUNCTION_ARGS)
+Datum numeric_out_with_zero(PG_FUNCTION_ARGS)
 {
     Numeric num = PG_GETARG_NUMERIC(0);
     NumericVar x;
@@ -363,6 +364,24 @@ Datum numeric_out(PG_FUNCTION_ARGS)
     PG_FREE_IF_COPY(num, 0);
 
     PG_RETURN_CSTRING(str);
+}
+
+/*
+ * numeric_out() -
+ *
+ *  Output function for numeric data type.
+ *  include bi64 and bi128 type
+ *  Call function numeric_out_with_zero with pg origin logic, and then check if need trunc tail zero or not.
+ */
+Datum numeric_out(PG_FUNCTION_ARGS)
+{
+    char* ans = DatumGetCString(numeric_out_with_zero(fcinfo));
+
+    if (TRUNC_NUMERIC_TAIL_ZERO) {
+        remove_tail_zero(ans);
+    }
+
+    PG_RETURN_CSTRING(ans);
 }
 
 /*
@@ -2125,7 +2144,7 @@ Datum numeric_add(PG_FUNCTION_ARGS)
     init_var_from_num(num1, &arg1);
     init_var_from_num(num2, &arg2);
 
-    init_var(&result);
+    quick_init_var(&result);
     add_var(&arg1, &arg2, &result);
 
     res = make_result(&result);
@@ -2174,7 +2193,7 @@ Datum numeric_sub(PG_FUNCTION_ARGS)
     init_var_from_num(num1, &arg1);
     init_var_from_num(num2, &arg2);
 
-    init_var(&result);
+    quick_init_var(&result);
     sub_var(&arg1, &arg2, &result);
 
     res = make_result(&result);
@@ -3144,7 +3163,7 @@ Datum numeric_float8(PG_FUNCTION_ARGS)
         }
     }
 
-    tmp = DatumGetCString(DirectFunctionCall1(numeric_out, NumericGetDatum(num)));
+    tmp = DatumGetCString(DirectFunctionCall1(numeric_out_with_zero, NumericGetDatum(num)));
 
     result = DirectFunctionCall1(float8in, CStringGetDatum(tmp));
 
@@ -3221,7 +3240,7 @@ Datum numeric_float4(PG_FUNCTION_ARGS)
         }
     }
 
-    tmp = DatumGetCString(DirectFunctionCall1(numeric_out, NumericGetDatum(num)));
+    tmp = DatumGetCString(DirectFunctionCall1(numeric_out_with_zero, NumericGetDatum(num)));
 
     if (fcinfo->can_ignore) {
         result = DirectFunctionCall1Coll(float4in, InvalidOid, CStringGetDatum(tmp), true);
@@ -4206,7 +4225,7 @@ init_var_from_var(const NumericVar *value, NumericVar *dest)
 
 static void remove_tail_zero(char *ascii)
 {
-    if (!HIDE_TAILING_ZERO || ascii == NULL) {
+    if (ascii == NULL) {
         return;
     }
     int len = 0;
@@ -4368,7 +4387,9 @@ static char* get_str_from_var(NumericVar* var)
      * terminate the string and return it
      */
     *cp = '\0';
-    remove_tail_zero(str);
+    if (HIDE_TAILING_ZERO) {
+        remove_tail_zero(str);
+    }
     return str;
 }
 
@@ -4757,7 +4778,7 @@ static double numeric_to_double_no_overflow(Numeric num)
     double val;
     char* endptr = NULL;
 
-    tmp = DatumGetCString(DirectFunctionCall1(numeric_out, NumericGetDatum(num)));
+    tmp = DatumGetCString(DirectFunctionCall1(numeric_out_with_zero, NumericGetDatum(num)));
 
     /* unlike float8in, we ignore ERANGE from strtod */
     val = strtod(tmp, &endptr);
@@ -6642,6 +6663,7 @@ static void add_abs(NumericVar* var1, NumericVar* var2, NumericVar* result)
     int var2ndigits = var2->ndigits;
     NumericDigit* var1digits = var1->digits;
     NumericDigit* var2digits = var2->digits;
+    NumericDigit tdig[NUMERIC_LOCAL_NDIG];
 
     res_weight = Max(var1->weight, var2->weight) + 1;
 
@@ -6657,7 +6679,10 @@ static void add_abs(NumericVar* var1, NumericVar* var2, NumericVar* result)
         res_ndigits = 1;
     }
 
-    res_buf = digitbuf_alloc(res_ndigits + 1);
+    res_buf = tdig;
+    if (res_ndigits > NUMERIC_LOCAL_NMAX) {
+        res_buf = digitbuf_alloc(res_ndigits + 1);
+    }
     res_buf[0] = 0; /* spare digit for later rounding */
     res_digits = res_buf + 1;
 
@@ -6684,8 +6709,17 @@ static void add_abs(NumericVar* var1, NumericVar* var2, NumericVar* result)
 
     digitbuf_free(result);
     result->ndigits = res_ndigits;
-    result->buf = res_buf;
-    result->digits = res_digits;
+    if (res_buf != tdig) {
+        result->buf = res_buf;
+        result->digits = res_digits;
+    } else {
+        result->buf = result->ndb;
+        result->digits = result->buf;
+        errno_t rc = memcpy_s(result->buf, sizeof(NumericDigit) * (res_ndigits + 1),
+                              res_buf, sizeof(NumericDigit) * (res_ndigits + 1));
+        securec_check(rc, "\0", "\0");
+        result->digits ++;
+    }
     result->weight = res_weight;
     result->dscale = res_dscale;
 
@@ -6718,6 +6752,7 @@ static void sub_abs(NumericVar* var1, NumericVar* var2, NumericVar* result)
     int var2ndigits = var2->ndigits;
     NumericDigit* var1digits = var1->digits;
     NumericDigit* var2digits = var2->digits;
+    NumericDigit tdig[NUMERIC_LOCAL_NDIG];
 
     res_weight = var1->weight;
 
@@ -6733,7 +6768,10 @@ static void sub_abs(NumericVar* var1, NumericVar* var2, NumericVar* result)
         res_ndigits = 1;
     }
 
-    res_buf = digitbuf_alloc(res_ndigits + 1);
+    res_buf = tdig;
+    if (res_ndigits > NUMERIC_LOCAL_NMAX) {
+        res_buf = digitbuf_alloc(res_ndigits + 1);
+    }
     res_buf[0] = 0; /* spare digit for later rounding */
     res_digits = res_buf + 1;
 
@@ -6760,8 +6798,18 @@ static void sub_abs(NumericVar* var1, NumericVar* var2, NumericVar* result)
 
     digitbuf_free(result);
     result->ndigits = res_ndigits;
-    result->buf = res_buf;
-    result->digits = res_digits;
+    if (res_buf != tdig)
+    {
+        result->buf = res_buf;
+        result->digits = res_digits;
+    } else {
+        result->buf = result->ndb;
+        result->digits = result->buf;
+        errno_t rc = memcpy_s(result->buf, sizeof(NumericDigit) * (res_ndigits + 1),
+                              res_buf, sizeof(NumericDigit) * (res_ndigits + 1));
+        securec_check(rc, "\0", "\0");
+        result->digits ++;
+    }
     result->weight = res_weight;
     result->dscale = res_dscale;
 
@@ -7061,7 +7109,7 @@ Datum numtodsinterval(PG_FUNCTION_ARGS)
 
     StringInfoData str;
     initStringInfo(&str);
-    appendStringInfoString(&str, DatumGetCString(CHECK_RETNULL_CALL1(numeric_out, collation, num)));
+    appendStringInfoString(&str, DatumGetCString(CHECK_RETNULL_CALL1(numeric_out_with_zero, collation, num)));
     appendStringInfoString(&str, " ");
     appendStringInfoString(&str, TextDatumGetCString(fmt));
     cp = str.data;
@@ -7103,7 +7151,7 @@ Datum numeric_interval(PG_FUNCTION_ARGS)
     CHECK_RETNULL_INIT();
 
     initStringInfo(&str);
-    appendStringInfoString(&str, DatumGetCString(CHECK_RETNULL_CALL1(numeric_out, collation, num)));
+    appendStringInfoString(&str, DatumGetCString(CHECK_RETNULL_CALL1(numeric_out_with_zero, collation, num)));
     appendStringInfoString(&str, " ");
     appendStringInfoString(&str, fmt);
     cp = str.data;
@@ -19001,7 +19049,7 @@ int32 get_ndigit_from_numeric(Numeric num)
         if (NUMERIC_IS_BI(num)) {
             num = makeNumericNormal(num);
         }
-        string_from_numeric = DatumGetCString(DirectFunctionCall1(numeric_out, NumericGetDatum(num)));
+        string_from_numeric = DatumGetCString(DirectFunctionCall1(numeric_out_with_zero, NumericGetDatum(num)));
         string_length_from_numeric = strlen(string_from_numeric);
         for (i = 0; i < string_length_from_numeric; i++) {
             if (string_from_numeric[i] == '.') {

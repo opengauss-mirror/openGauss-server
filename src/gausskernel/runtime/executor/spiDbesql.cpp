@@ -112,51 +112,51 @@ void GetColumnDescribe(SPIPlanPtr plan, ArrayType** resDescribe, MemoryContext m
     int rc;
 
     foreach (cell, plan->stmt_list) {
-        if (cell) {
-            columnList = ((Query*)lfirst(cell))->targetList;
-            foreach (columnCell, columnList){
-                if (columnCell) {
-                    columnsNum += 1;
-                    /* get SPIDescColumns from column_cell */
-                    SPIDescColumns *SPIDescColumn = (SPIDescColumns *)palloc(sizeof(SPIDescColumns));
-                    TargetEntry *descColumns = (TargetEntry*)columnCell->data.ptr_value;
-                    SPIDescColumn->resno = descColumns->resno;
-                    SPIDescColumn->resorigtbl = descColumns->resorigtbl;
-                    SPIDescColumn->resname = (char *)palloc(NAMEDATALEN);
-                    if (!descColumns->resname) {
-                        continue;
-                    }
-                    rc = strcpy_s(SPIDescColumn->resname, NAMEDATALEN, (char*)descColumns->resname);
-                    securec_check(rc, "", "");
-
-                    /* get tuple */
-                    HeapTuple attTuple;
-                    int attNum;
-                    Form_pg_attribute attForm;
-                    attTuple = SearchSysCache2(ATTNAME, ObjectIdGetDatum(SPIDescColumn->resorigtbl),
-                                               PointerGetDatum(SPIDescColumn->resname));
-                    if (!HeapTupleIsValid(attTuple)) {
-                        continue;
-                    }
+        if (cell == NULL) {
+            continue;
+        }
+        columnList = ((Query*)lfirst(cell))->targetList;
+        foreach (columnCell, columnList){
+            if (columnCell == NULL) {
+                continue;
+            }
+            columnsNum += 1;
+            /* get SPIDescColumns from column_cell */
+            SPIDescColumns *SPIDescColumn = (SPIDescColumns *)palloc(sizeof(SPIDescColumns));
+            TargetEntry *descColumns = (TargetEntry*)columnCell->data.ptr_value;
+            SPIDescColumn->resno = descColumns->resno;
+            SPIDescColumn->resorigtbl = descColumns->resorigtbl;
+            SPIDescColumn->resname = (char *)palloc(NAMEDATALEN);
+            if (!descColumns->resname) {
+                continue;
+            }
+            rc = strcpy_s(SPIDescColumn->resname, NAMEDATALEN, (char*)descColumns->resname);
+            securec_check(rc, "", "");
+            Oid typOid = exprType((Node*)descColumns->expr);
+            int typLen = get_typlen(typOid);
+            bool isNull = false;
+            if (unlikely(!OidIsValid(typOid))) {
+                ereport(ERROR, (errmodule(MOD_OPT), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                    errmsg("Get invalid type oid from column %s", SPIDescColumn->resname),
+                    errdetail("N/A"), errcause("invalid"), erraction("invalid")));
+            }
+            /* get tuple */
+            if (OidIsValid(SPIDescColumn->resorigtbl)) {
+                HeapTuple attTuple;
+                Form_pg_attribute attForm;
+                attTuple = SearchSysCache2(ATTNAME, ObjectIdGetDatum(SPIDescColumn->resorigtbl),
+                                           PointerGetDatum(SPIDescColumn->resname));
+                if (HeapTupleIsValid(attTuple)) {
                     attForm = ((Form_pg_attribute)GETSTRUCT(attTuple));
-                    attNum = attForm->attnum;
-                    if (attNum <= 0) {
-                        ReleaseSysCache(attTuple);
-                        ereport(ERROR, (errmodule(MOD_OPT), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                             errmsg("cannot rename system column \"%s\"", SPIDescColumn->resname),
-                             errdetail("N/A"), errcause("invalid"),
-                             erraction("invalid")));
-                    }
-                    /* set tuple result to array */
-                    
-                    MemoryContext oldcontext = MemoryContextSwitchTo(memctx);
-                    SetDescribeArray(resDescribe, columnsNum, attForm->attname.data, attForm->atttypid,
-                                     attForm->attlen, attForm->attnotnull);
-                    
-                    MemoryContextSwitchTo(oldcontext);
+                    isNull = attForm->attnotnull;
                     ReleaseSysCache(attTuple);
                 }
             }
+            /* set tuple result to array */
+            MemoryContext oldcontext = MemoryContextSwitchTo(memctx);
+            SetDescribeArray(resDescribe, columnsNum, SPIDescColumn->resname, typOid,
+                             typLen, isNull);
+            MemoryContextSwitchTo(oldcontext);
         }
     }
 }

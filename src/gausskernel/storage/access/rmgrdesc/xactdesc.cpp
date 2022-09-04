@@ -63,14 +63,13 @@ static void desc_library(StringInfo buf, char *filename, int nlibrary)
     }
 }
 
-static void xact_desc_commit(StringInfo buf, xl_xact_commit *xlrec, RepOriginId origin_id)
+static void xact_desc_commit(StringInfo buf, xl_xact_commit *xlrec, RepOriginId origin_id, bool compress)
 {
     int i;
     int nsubxacts = xlrec->nsubxacts;
     TransactionId *subxacts = NULL;
 
-    subxacts = (TransactionId *)&xlrec->xnodes[xlrec->nrels];
-
+    subxacts = GET_SUB_XACTS(xlrec->xnodes, xlrec->nrels, compress);
     appendStringInfoString(buf, timestamptz_to_str(xlrec->xact_time));
     appendStringInfo(buf, "; csn:%lu", xlrec->csn);
 
@@ -78,9 +77,13 @@ static void xact_desc_commit(StringInfo buf, xl_xact_commit *xlrec, RepOriginId 
         appendStringInfo(buf, "; rels:");
         for (i = 0; i < xlrec->nrels; i++) {
             ColFileNode colFileNode;
-            ColFileNodeRel *colFileNodeRel = xlrec->xnodes + i;
-
-            ColFileNodeCopy(&colFileNode, colFileNodeRel);
+            if (compress) {
+                ColFileNode *colFileNodeRel = ((ColFileNode *)(void *)xlrec->xnodes) + i;
+                ColFileNodeFullCopy(&colFileNode, colFileNodeRel);
+            } else {
+                ColFileNodeRel *colFileNodeRel = xlrec->xnodes + i;
+                ColFileNodeCopy(&colFileNode, colFileNodeRel);
+            }
             char *path = relpathperm(colFileNode.filenode, MAIN_FORKNUM);
 
             /*
@@ -142,7 +145,7 @@ static void xact_desc_commit(StringInfo buf, xl_xact_commit *xlrec, RepOriginId 
     if (xlrec->nlibrary > 0) {
         char *filename = NULL;
 
-        filename = (char *)xlrec->xnodes + (xlrec->nrels * sizeof(ColFileNodeRel)) +
+        filename = (char *)xlrec->xnodes + (xlrec->nrels * SIZE_OF_COLFILENODE(compress)) +
                    (nsubxacts * sizeof(TransactionId)) + (xlrec->nmsgs * sizeof(SharedInvalidationMessage));
 
         desc_library(buf, filename, xlrec->nlibrary);
@@ -150,7 +153,7 @@ static void xact_desc_commit(StringInfo buf, xl_xact_commit *xlrec, RepOriginId 
 
     if (xlrec->xinfo & XACT_HAS_ORIGIN) {
         xl_xact_origin *origin = (xl_xact_origin *)GetRepOriginPtr((char *)xlrec->xnodes, xlrec->xinfo,
-            xlrec->nsubxacts, xlrec->nmsgs, xlrec->nrels, xlrec->nlibrary);
+            xlrec->nsubxacts, xlrec->nmsgs, xlrec->nrels, xlrec->nlibrary, compress);
         appendStringInfo(buf, "; origin: node %u, lsn %X/%X, at %s", origin_id,
             (uint32)(origin->origin_lsn >> BITS_PER_INT),
             (uint32)origin->origin_lsn, timestamptz_to_str(origin->origin_timestamp));
@@ -175,7 +178,7 @@ static void xact_desc_commit_compact(StringInfo buf, xl_xact_commit_compact *xlr
 #endif
 }
 
-static void xact_desc_abort(StringInfo buf, xl_xact_abort *xlrec, bool abortXlogNewVersion)
+static void xact_desc_abort(StringInfo buf, xl_xact_abort *xlrec, bool abortXlogNewVersion, bool compress)
 {
     int i;
 
@@ -184,9 +187,13 @@ static void xact_desc_abort(StringInfo buf, xl_xact_abort *xlrec, bool abortXlog
         appendStringInfo(buf, "; rels:");
         for (i = 0; i < xlrec->nrels; i++) {
             ColFileNode colFileNode;
-            ColFileNodeRel *colFileNodeRel = xlrec->xnodes + i;
-
-            ColFileNodeCopy(&colFileNode, colFileNodeRel);
+            if (compress) {
+                ColFileNode *colFileNodeRel = ((ColFileNode *)(void *)xlrec->xnodes) + i;
+                ColFileNodeFullCopy(&colFileNode, colFileNodeRel);
+            } else {
+                ColFileNodeRel *colFileNodeRel = xlrec->xnodes + i;
+                ColFileNodeCopy(&colFileNode, colFileNodeRel);
+            }
             char *path = relpathperm(colFileNode.filenode, MAIN_FORKNUM);
 
             /*
@@ -206,8 +213,7 @@ static void xact_desc_abort(StringInfo buf, xl_xact_abort *xlrec, bool abortXlog
         }
     }
     if (xlrec->nsubxacts > 0) {
-        TransactionId *xacts = NULL;
-        xacts = (TransactionId *)&xlrec->xnodes[xlrec->nrels];
+        TransactionId *xacts = GET_SUB_XACTS(xlrec->xnodes, xlrec->nrels, compress);
 
         appendStringInfo(buf, "; subxacts:");
         for (i = 0; i < xlrec->nsubxacts; i++)
@@ -215,7 +221,7 @@ static void xact_desc_abort(StringInfo buf, xl_xact_abort *xlrec, bool abortXlog
     }
     if (xlrec->nlibrary > 0) {
         char *filename = NULL;
-        filename = (char *)xlrec->xnodes + (xlrec->nrels * sizeof(ColFileNodeRel)) +
+        filename = (char *)xlrec->xnodes + (xlrec->nrels * SIZE_OF_COLFILENODE(compress)) +
                    (xlrec->nsubxacts * sizeof(TransactionId));
         if (abortXlogNewVersion) {
             appendStringInfo(buf, "; current xact: %lu", *(TransactionId*)(filename));
@@ -223,8 +229,10 @@ static void xact_desc_abort(StringInfo buf, xl_xact_abort *xlrec, bool abortXlog
         }
         desc_library(buf, filename, xlrec->nlibrary);
     } else if (abortXlogNewVersion) {
-        appendStringInfo(buf, "; current xact: %lu", *(TransactionId*)((char *)xlrec->xnodes +
-            (xlrec->nrels * sizeof(ColFileNodeRel)) + (xlrec->nsubxacts * sizeof(TransactionId))));
+        appendStringInfo(buf, "; current xact: %lu",
+                         *(TransactionId *)(void *)((char *)xlrec->xnodes +
+                                                    (xlrec->nrels * SIZE_OF_COLFILENODE(compress)) +
+                                                    ((uint32)xlrec->nsubxacts * sizeof(TransactionId))));
     }
 }
 
@@ -257,6 +265,7 @@ void xact_desc(StringInfo buf, XLogReaderState *record)
 {
     char *rec = XLogRecGetData(record);
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
+    bool compress = (bool)(XLogRecGetInfo(record) & XLR_REL_COMPRESS);
     if (info == XLOG_XACT_COMMIT_COMPACT) {
         xl_xact_commit_compact *xlrec = (xl_xact_commit_compact *)rec;
 
@@ -266,16 +275,16 @@ void xact_desc(StringInfo buf, XLogReaderState *record)
         xl_xact_commit *xlrec = (xl_xact_commit *)rec;
 
         appendStringInfo(buf, "XLOG_XACT_COMMIT commit: ");
-        xact_desc_commit(buf, xlrec, XLogRecGetOrigin(record));
+        xact_desc_commit(buf, xlrec, XLogRecGetOrigin(record), compress);
     } else if (info == XLOG_XACT_ABORT) {
         xl_xact_abort *xlrec = (xl_xact_abort *)rec;
 
         appendStringInfo(buf, "abort: ");
-        xact_desc_abort(buf, xlrec, false);
+        xact_desc_abort(buf, xlrec, false, compress);
     } else if (info == XLOG_XACT_ABORT_WITH_XID) {
         xl_xact_abort *xlrec = (xl_xact_abort *)rec;
         appendStringInfo(buf, "abort_with_xid: ");
-        xact_desc_abort(buf, xlrec, true);
+        xact_desc_abort(buf, xlrec, true, compress);
     } else if (info == XLOG_XACT_PREPARE) {
         TwoPhaseFileHeader *hdr = (TwoPhaseFileHeader *)rec;
         appendStringInfo(buf, "prepare transaction, gid: %s", hdr->gid);
@@ -283,12 +292,12 @@ void xact_desc(StringInfo buf, XLogReaderState *record)
         xl_xact_commit_prepared *xlrec = (xl_xact_commit_prepared *)rec;
 
         appendStringInfo(buf, "commit prepared " XID_FMT ": ", xlrec->xid);
-        xact_desc_commit(buf, &xlrec->crec, XLogRecGetOrigin(record));
+        xact_desc_commit(buf, &xlrec->crec, XLogRecGetOrigin(record), compress);
     } else if (info == XLOG_XACT_ABORT_PREPARED) {
         xl_xact_abort_prepared *xlrec = (xl_xact_abort_prepared *)rec;
 
         appendStringInfo(buf, "abort prepared " XID_FMT ": ", xlrec->xid);
-        xact_desc_abort(buf, &xlrec->arec, false);
+        xact_desc_abort(buf, &xlrec->arec, false, compress);
     } else if (info == XLOG_XACT_ASSIGNMENT) {
         xl_xact_assignment *xlrec = (xl_xact_assignment *)rec;
 

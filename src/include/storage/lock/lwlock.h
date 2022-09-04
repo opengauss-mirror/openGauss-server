@@ -142,8 +142,8 @@ const struct LWLOCK_PARTITION_DESC LWLockPartInfo[] = {
 #define NUM_GPRC_PARTITIONS 2
 #endif
 
-/* 
- * WARNING---Please keep the order of LWLockTrunkOffset and BuiltinTrancheIds consistent!!! 
+/*
+ * WARNING---Please keep the order of LWLockTrunkOffset and BuiltinTrancheIds consistent!!!
 */
 
 /* Offsets for various chunks of preallocated lwlocks in main array. */
@@ -214,7 +214,7 @@ enum BuiltinTrancheIds
     LWTRANCHE_USPACE_TRANSGRP_MAPPING,
     LWTRANCHE_PROC_XACT_MAPPING,
     LWTRANCHE_ASP_MAPPING,
-    LWTRANCHE_GlobalSeq, 
+    LWTRANCHE_GlobalSeq,
     LWTRANCHE_GWC_MAPPING,
     LWTRANCHE_NORMALIZED_SQL,
     LWTRANCHE_START_BLOCK_MAPPING,
@@ -233,6 +233,7 @@ enum BuiltinTrancheIds
     LWTRANCHE_MULTIXACTMEMBER_CTL,
     LWTRANCHE_OLDSERXID_SLRU_CTL,
     LWTRANCHE_WAL_INSERT,
+    LWTRANCHE_IO_BLOCKED,
     LWTRANCHE_DOUBLE_WRITE,
     LWTRANCHE_DW_SINGLE_FIRST,   /* single flush dw file, first version pos lock */
     LWTRANCHE_DW_SINGLE_SECOND,   /* single flush dw file, second version pos lock */
@@ -246,7 +247,7 @@ enum BuiltinTrancheIds
     LWTRANCHE_MPFL,
     LWTRANCHE_GTT_CTL, // For GTT
     LWTRANCHE_PLDEBUG, // For Pldebugger
-    LWTRANCHE_NGROUP_MAPPING,    
+    LWTRANCHE_NGROUP_MAPPING,
     LWTRANCHE_MATVIEW_SEQNO,
     LWTRANCHE_IO_STAT,
     LWTRANCHE_WAL_FLUSH_WAIT,
@@ -262,6 +263,7 @@ enum BuiltinTrancheIds
     LWTRANCHE_FILE_REPAIR,
     LWTRANCHE_REPLICATION_ORIGIN,
     LWTRANCHE_AUDIT_INDEX_WAIT,
+    LWTRANCHE_PCA_BUFFER_CONTENT,
     /*
      * Each trancheId above should have a corresponding item in BuiltinTrancheNames;
      */

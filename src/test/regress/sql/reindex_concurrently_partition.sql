@@ -46,7 +46,19 @@ reindex index CONCURRENTLY idx2_t1 partition t1_1_index;
 reindex table CONCURRENTLY t1;
 reindex table CONCURRENTLY t1 partition t1_1;
 
--- Check handling of unusable partition index
+-- Check handling of unusable partitioned index
+alter index idx2_t1 UNUSABLE;
+\d t1
+reindex table concurrently t1;
+\d t1
+reindex table concurrently t1 partition t1_1;
+\d t1
+reindex index concurrently idx2_t1 partition t1_1_index;
+\d t1
+reindex index concurrently idx2_t1;
+\d t1
+
+-- Check handling of unusable index partition
 alter index idx2_t1 modify partition t1_2_index UNUSABLE;
 select indisusable from pg_partition where relname = 't1_2_index';
 reindex table CONCURRENTLY t1;

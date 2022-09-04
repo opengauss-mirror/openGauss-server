@@ -115,6 +115,7 @@ IndexScanDesc RelationGetIndexScan(Relation index_relation, int nkeys, int norde
     scan->xs_want_itup = false; /* may be set later */
     scan->xs_want_xid = false; /* may be set later */
     scan->xs_recheck_itup = false; /* may be set later */
+    scan->xs_sampling_scan = false; /* may be set later */
 
     /*
      * During recovery we ignore killed tuples and don't bother to kill them
@@ -489,7 +490,8 @@ SysScanDesc systable_beginscan_ordered(Relation heap_relation, Relation index_re
                         errmsg("cannot do ordered scan on index \"%s\", because it is being reindexed",
                                RelationGetRelationName(index_relation))));
     /* ... but we only throw a warning about violating IgnoreSystemIndexes */
-    if (u_sess->attr.attr_common.IgnoreSystemIndexes) {
+    if (u_sess->attr.attr_common.IgnoreSystemIndexes && t_thrd.role != WAL_DB_SENDER &&
+        t_thrd.role != LOGICAL_READ_RECORD && t_thrd.role != PARALLEL_DECODE) {
         elog(WARNING, "using index \"%s\" despite IgnoreSystemIndexes", RelationGetRelationName(index_relation));
     }
 
@@ -590,8 +592,9 @@ static void GPILookupFakeRelCache(GPIScanDesc gpiScan, PartRelIdCacheKey fakeRel
     FakeRelationIdCacheLookup(fakeRels, fakeRelKey, gpiScan->fakePartRelation, gpiScan->partition);
 }
 
-static void GPIInsertFakeParentRelCacheForSubpartition(GPIScanDesc gpiScan, MemoryContext cxt, LOCKMODE lmode)
+static bool GPIInsertFakeParentRelCacheForSubpartition(GPIScanDesc gpiScan, MemoryContext cxt, LOCKMODE lmode)
 {
+    bool res = true;
     HTAB* fakeRels = gpiScan->fakeRelationTable;
     Relation parentRel = gpiScan->parentRelation;
     Oid parentPartOid = partid_get_parentid(gpiScan->currPartOid);
@@ -603,29 +606,42 @@ static void GPIInsertFakeParentRelCacheForSubpartition(GPIScanDesc gpiScan, Memo
             /* add current parentRel into fakeRelationTable */
             Oid baseRelOid = partid_get_parentid(parentPartOid);
             Relation baseRel = relation_open(baseRelOid, lmode);
-            searchFakeReationForPartitionOid(fakeRels, cxt, baseRel, parentPartOid, parentRel, parentPartition, lmode);
+            res = trySearchFakeReationForPartitionOid(&fakeRels, cxt, baseRel, parentPartOid, &parentRel,
+                &parentPartition, lmode);
             relation_close(baseRel, NoLock);
         }
-        gpiScan->parentRelation = parentRel;
+        if (res) {
+            gpiScan->parentRelation = parentRel;
+        }
     }
+    return res;
 }
 
 /* Lookup partition information from hash table use key for global partition index scan */
-static void GPIInsertFakeRelCache(GPIScanDesc gpiScan, MemoryContext cxt, LOCKMODE lmode)
+static bool GPIInsertFakeRelCache(GPIScanDesc gpiScan, MemoryContext cxt, LOCKMODE lmode)
 {
     Oid currPartOid = gpiScan->currPartOid;
     HTAB* fakeRels = gpiScan->fakeRelationTable;
     Partition partition = NULL;
 
-    GPIInsertFakeParentRelCacheForSubpartition(gpiScan, cxt, lmode);
+    bool res = GPIInsertFakeParentRelCacheForSubpartition(gpiScan, cxt, lmode);
+    if (!res) {
+        return false;
+    }
 
     Relation parentRel = gpiScan->parentRelation;
     /* Save search fake relation in gpiScan->fakeRelation */
-    searchFakeReationForPartitionOid(
-        fakeRels, cxt, parentRel, currPartOid, gpiScan->fakePartRelation, partition, lmode);
+    res = trySearchFakeReationForPartitionOid(&fakeRels, cxt, parentRel, currPartOid, &gpiScan->fakePartRelation,
+        &partition, lmode);
 
-    /* save partition */
-    gpiScan->partition = partition;
+    if (res) {
+        /* save partition */
+        gpiScan->partition = partition;
+    } else {
+        ReportPartitionOpenError(parentRel, currPartOid);
+    }
+
+    return res;
 }
 
 /* destroy partition information from hash table */
@@ -731,9 +747,8 @@ bool GPIGetNextPartRelation(GPIScanDesc gpiScan, MemoryContext cxt, LOCKMODE lmo
             gpiScan->currPartOid = InvalidOid;
             result = false;
         } else {
-            /* If current partition metadata is invisible, add current partition oid into fakeRelationTable */
-            GPIInsertFakeRelCache(gpiScan, cxt, lmode);
-            result = true;
+            /* If current partition metadata is visible, add current partition oid into fakeRelationTable */
+            result = GPIInsertFakeRelCache(gpiScan, cxt, lmode);
         }
     }
 

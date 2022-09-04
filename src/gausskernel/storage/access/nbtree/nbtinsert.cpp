@@ -70,7 +70,7 @@ static Buffer _bt_newroot(Relation rel, Buffer lbuf, Buffer rbuf);
 static void _bt_findinsertloc(Relation rel, Buffer *bufptr, OffsetNumber *offsetptr, int keysz, ScanKey scankey,
                               IndexTuple newtup, BTStack stack, Relation heapRel);
 static void _bt_insertonpg(Relation rel, Buffer buf, Buffer cbuf, BTStack stack, IndexTuple itup,
-                           OffsetNumber newitemoff, bool split_only_page);
+                           OffsetNumber newitemoff, bool split_only_page, bool useFastPath);
 static Buffer _bt_split(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber firstright, OffsetNumber newitemoff,
                         Size newitemsz, IndexTuple newitem, bool newitemonleft);
 static OffsetNumber _bt_findsplitloc(Relation rel, Page page, OffsetNumber newitemoff, Size newitemsz,
@@ -151,8 +151,7 @@ bool _bt_doinsert(Relation rel, IndexTuple itup, IndexUniqueCheck checkUnique, R
     offset = element.offset;
     indnkeyatts = element.indnkeyatts;
 
-    /* skip insertion when we just want to check existing or find a conflict when executing upsert */
-    if (checkUnique != UNIQUE_CHECK_EXISTING && !(checkUnique == UNIQUE_CHECK_UPSERT && !is_unique)) {
+    if (checkUnique != UNIQUE_CHECK_EXISTING) {
         /*
          * The only conflict predicate locking cares about for indexes is when
          * an index tuple insert conflicts with an existing lock.  Since the
@@ -165,7 +164,7 @@ bool _bt_doinsert(Relation rel, IndexTuple itup, IndexUniqueCheck checkUnique, R
         CheckForSerializableConflictIn(rel, NULL, buf);
         /* do the insertion */
         _bt_findinsertloc(rel, &buf, &offset, indnkeyatts, itup_scankey, itup, stack, heapRel);
-        _bt_insertonpg(rel, buf, InvalidBuffer, stack, itup, offset, false);
+        _bt_insertonpg(rel, buf, InvalidBuffer, stack, itup, offset, false, element.useFastPath);
     } else {
         /* just release the buffer */
         _bt_relbuf(rel, buf);
@@ -364,7 +363,8 @@ top:
     element->buffer = buf;
     element->offset = offset;
     element->indnkeyatts = indnkeyatts;
-
+    element->useFastPath = fastpath;
+    element->targetBlock = RelationGetTargetBlock(rel);
 
     return is_unique;
 }
@@ -518,7 +518,7 @@ TransactionId _bt_check_unique(Relation rel, IndexTuple itup, Relation heapRel, 
                      * that it is a potential conflict and leave the full
                      * check till later.
                      */
-                    if (IndexUniqueCheckNoError(checkUnique)) {
+                    if (checkUnique == UNIQUE_CHECK_PARTIAL) {
                         if (nbuf != InvalidBuffer)
                             _bt_relbuf(rel, nbuf);
                         *is_unique = false;
@@ -869,7 +869,7 @@ static void _bt_findinsertloc(Relation rel, Buffer *bufptr, OffsetNumber *offset
  * insertion on internal pages.
  */
 static void _bt_insertonpg(Relation rel, Buffer buf, Buffer cbuf, BTStack stack, IndexTuple itup,
-                           OffsetNumber newitemoff, bool split_only_page)
+                           OffsetNumber newitemoff, bool split_only_page, bool useFastPath)
 {
     Page page;
     BTPageOpaqueInternal lpageop;
@@ -919,8 +919,7 @@ static void _bt_insertonpg(Relation rel, Buffer buf, Buffer cbuf, BTStack stack,
          * cached block. Checking for a valid cached block at this point is
          * enough to decide whether we're in a fastpath or not.
          */
-        Assert(!(P_ISLEAF(lpageop) &&
-            BlockNumberIsValid(RelationGetTargetBlock(rel))));
+        Assert(!useFastPath);
 
         /* Choose the split point */
         firstright = _bt_findsplitloc(rel, page, newitemoff, itemsz, &newitemonleft);
@@ -1899,7 +1898,7 @@ void _bt_insert_parent(Relation rel, Buffer buf, Buffer rbuf, BTStack stack, boo
                                    RelationGetRelationName(rel), bknum, rbknum)));
         }
         /* Recursively update the parent */
-        _bt_insertonpg(rel, pbuf, buf, stack->bts_parent, new_item, stack->bts_offset + 1, is_only);
+        _bt_insertonpg(rel, pbuf, buf, stack->bts_parent, new_item, stack->bts_offset + 1, is_only, false);
 
         /* be tidy */
         pfree(new_item);

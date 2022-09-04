@@ -255,12 +255,16 @@ select count(*) from test_gpi_more_invalid where a < 1500 and a >= 1000;
 (1 row)
 
 explain (costs off) select count(*) from test_gpi_more_invalid where a <= 1000;
-                                      QUERY PLAN                                      
---------------------------------------------------------------------------------------
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
  Aggregate
-   ->  Index Only Scan using global_index_gpi_more_invalid_b on test_gpi_more_invalid
-         Index Cond: (a <= 1000)
-(3 rows)
+   ->  Partitioned Bitmap Heap Scan on test_gpi_more_invalid
+         Recheck Cond: (a <= 1000)
+         Selected Partitions:  1
+         ->  Partitioned Bitmap Index Scan on local_index_gpi_more_invalid_a_b
+               Index Cond: (a <= 1000)
+               Selected Partitions:  1
+(7 rows)
 
 select count(*) from test_gpi_more_invalid where a <= 1000;
  count 

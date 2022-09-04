@@ -22,7 +22,7 @@
  * for view gs_get_shared_memctx_detail;
  */
 void gs_recursive_shared_memory_context(const MemoryContext context,
-    const char* ctx_name, StringInfoData* buf, bool isShared)
+    const char* ctx_name, StringInfoDataHuge* buf, bool isShared)
 {
     bool checkLock = false;
 
@@ -32,7 +32,6 @@ void gs_recursive_shared_memory_context(const MemoryContext context,
 
     PG_TRY();
     {
-        CHECK_FOR_INTERRUPTS();
         check_stack_depth();
 
         if (isShared) {
@@ -44,7 +43,6 @@ void gs_recursive_shared_memory_context(const MemoryContext context,
 #ifndef ENABLE_MEMORY_CHECK
             GetAllocBlockInfo((AllocSet)context, buf);
 #else
-            appendStringInfo(buf, "context : %s\n", context->name);
             GetAsanBlockInfo((AsanSet)context, buf);
 #endif
         }
@@ -76,7 +74,7 @@ void gs_recursive_shared_memory_context(const MemoryContext context,
  * for view gs_get_thread_memctx_detail and gs_get_session_memctx_detail;
  */
 void gs_recursive_unshared_memory_context(const MemoryContext context,
-    const char* ctx_name, StringInfoData* buf)
+    const char* ctx_name, StringInfoDataHuge* buf)
 {
     if (context == NULL) {
         return;
@@ -88,7 +86,6 @@ void gs_recursive_unshared_memory_context(const MemoryContext context,
     }
 #else
     if ((context->type == T_AsanSetContext) && strcmp(ctx_name, context->name) == 0) {
-        appendStringInfo(buf, "context : %s\n", context->name);
         GetAsanBlockInfo((AsanSet)context, buf);
     }
 #endif
@@ -139,10 +136,10 @@ static int gs_alloc_chunk_cmp(const void* cmp_a, const void* cmp_b)
 /*
  * file dictionary order, line number from small to large; the size of same file and line will be summation;
  */
-static void gs_sort_memctx_info(AllocChunk memctx_info_res, int memctx_info_cnt, int* res_len)
+static void gs_sort_memctx_info(AllocChunk memctx_info_res, int64 memctx_info_cnt, int* res_len)
 {
-    int i = 0;
-    int j = 1;
+    int64 i = 0;
+    int64 j = 1;
 
     qsort(memctx_info_res, memctx_info_cnt, sizeof(AllocChunkData), gs_alloc_chunk_cmp);
 
@@ -164,24 +161,24 @@ static void gs_sort_memctx_info(AllocChunk memctx_info_res, int memctx_info_cnt,
         chunk_i->size = chunk_j->size;
         ++j;
     }
-    *res_len = i + 1;
+    *res_len = (int)(i) + 1;
 }
 
 /*
  * collect the file and line info
  */
-static AllocChunk gs_collate_memctx_info(StringInfo mem_info, int* res_len)
+AllocChunk gs_collate_memctx_info(StringInfoHuge mem_info, int* res_len)
 {
     if (mem_info == NULL) {
         *res_len = 0;
         return NULL;
     }
 
-    int i = 0;
-    int memctx_info_cnt = 0;
+    int64 i = 0;
+    int64 memctx_info_cnt = 0;
 
     /* find alloc chunk info count */
-    for (int i = 0; i < mem_info->len; ++i) {
+    for (i = 0; i < mem_info->len; ++i) {
         if (mem_info->data[i] == ':') {
             ++memctx_info_cnt;
         }
@@ -193,7 +190,8 @@ static AllocChunk gs_collate_memctx_info(StringInfo mem_info, int* res_len)
     }
 
     /* Traverse memory application information */
-    AllocChunk memctx_info_res = (AllocChunk)palloc(sizeof(AllocChunkData) * memctx_info_cnt);
+    AllocChunk memctx_info_res =
+        (AllocChunk)palloc_huge(CurrentMemoryContext, sizeof(AllocChunkData) * memctx_info_cnt);
     char* file_name = mem_info->data;
     char* tmp_file_name = mem_info->data;
     char* line = NULL;
@@ -304,7 +302,7 @@ Datum gs_get_thread_memctx_detail(PG_FUNCTION_ARGS)
 #ifndef MEMORY_CONTEXT_TRACK
     FuncCallContext* funcctx = NULL;
     ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-        errmsg("unsupported view in lite mode or numa mode.")));
+        errmsg("unsupported view in lite mode.")));
     SRF_RETURN_DONE(funcctx);
 #else
 
@@ -329,8 +327,8 @@ Datum gs_get_thread_memctx_detail(PG_FUNCTION_ARGS)
     if (SRF_IS_FIRSTCALL()) {
         funcctx = SRF_FIRSTCALL_INIT();
         MemoryContext oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
-        StringInfoData mem_info;
-        initStringInfo(&mem_info);
+        StringInfoDataHuge mem_info;
+        initStringInfoHuge(&mem_info);
 
         if (tid == PostmasterPid) {
             if (!IsNormalProcessingMode()) {
@@ -378,7 +376,7 @@ Datum gs_get_thread_memctx_detail(PG_FUNCTION_ARGS)
         funcctx->max_calls = memctx_info_len;
         funcctx->user_fctx = memctx_info_res;
 
-        FreeStringInfo(&mem_info);
+        FreeStringInfoHuge(&mem_info);
         MemoryContextSwitchTo(oldcontext);
     }
 
@@ -405,7 +403,7 @@ Datum gs_get_session_memctx_detail(PG_FUNCTION_ARGS)
 #ifndef MEMORY_CONTEXT_TRACK
         FuncCallContext* funcctx = NULL;
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("unsupported view in lite mode or numa mode.")));
+            errmsg("unsupported view in lite mode.")));
         SRF_RETURN_DONE(funcctx);
 #else
 
@@ -432,8 +430,8 @@ Datum gs_get_session_memctx_detail(PG_FUNCTION_ARGS)
         funcctx = SRF_FIRSTCALL_INIT();
         MemoryContext oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-        StringInfoData mem_info;
-        initStringInfo(&mem_info);
+        StringInfoDataHuge mem_info;
+        initStringInfoHuge(&mem_info);
         g_threadPoolControler->GetSessionCtrl()->getSessionMemoryContextInfo(ctx_name, &mem_info, &sess);
 
         int memctx_info_len = 0;
@@ -443,7 +441,7 @@ Datum gs_get_session_memctx_detail(PG_FUNCTION_ARGS)
         funcctx->max_calls = memctx_info_len;
         funcctx->user_fctx = memctx_info_res;
 
-        FreeStringInfo(&mem_info);
+        FreeStringInfoHuge(&mem_info);
         MemoryContextSwitchTo(oldcontext);
     }
 
@@ -470,7 +468,7 @@ Datum gs_get_shared_memctx_detail(PG_FUNCTION_ARGS)
 #ifndef MEMORY_CONTEXT_TRACK
         FuncCallContext* funcctx = NULL;
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("unsupported view in lite mode or numa mode.")));
+            errmsg("unsupported view in lite mode.")));
         SRF_RETURN_DONE(funcctx);
 #else
 
@@ -490,8 +488,8 @@ Datum gs_get_shared_memctx_detail(PG_FUNCTION_ARGS)
         funcctx = SRF_FIRSTCALL_INIT();
         MemoryContext oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
-        StringInfoData mem_info;
-        initStringInfo(&mem_info);
+        StringInfoDataHuge mem_info;
+        initStringInfoHuge(&mem_info);
         gs_recursive_shared_memory_context(g_instance.instance_context, ctx_name, &mem_info, true);
 
         int memctx_info_len = 0;
@@ -501,7 +499,7 @@ Datum gs_get_shared_memctx_detail(PG_FUNCTION_ARGS)
         funcctx->max_calls = memctx_info_len;
         funcctx->user_fctx = memctx_info_res;
 
-        FreeStringInfo(&mem_info);
+        FreeStringInfoHuge(&mem_info);
         MemoryContextSwitchTo(oldcontext);
     }
 
@@ -518,5 +516,263 @@ Datum gs_get_shared_memctx_detail(PG_FUNCTION_ARGS)
     pfree_ext(ctx_name);
     SRF_RETURN_DONE(funcctx);
 #endif
+}
+
+
+/*
+ *------------------------------------------------------------------------
+ * Read memory snapshot information
+ *------------------------------------------------------------------------
+ */
+/*
+ * get memory history log directory;
+ */
+static char* get_history_memory_log_dir()
+{
+    errno_t ss_rc;
+    bool is_absolute = false;
+    if (g_instance.stat_cxt.memory_log_directory == NULL) {
+        return NULL;
+    }
+
+    char *dump_dir = (char*)palloc0(MAX_PATH_LEN);
+
+    // get the path of dump file
+    is_absolute = is_absolute_path(g_instance.stat_cxt.memory_log_directory);
+    if (is_absolute) {
+        ss_rc = snprintf_s(dump_dir, MAX_PATH_LEN, MAX_PATH_LEN - 1, "%s",
+            g_instance.stat_cxt.memory_log_directory);
+        securec_check_ss(ss_rc, "\0", "\0");
+    } else {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_NAME), errmsg("mem_log directory does exist")));
+    }
+
+    struct stat info;
+    if (stat(dump_dir, &info) == 0) {
+        if (!S_ISDIR(info.st_mode)) {
+            /* S_ISDIR() doesn't exist on current node */
+            ereport(ERROR, (errcode(ERRCODE_INVALID_NAME), errmsg("mem_log directory does exist")));
+        }
+    }
+
+    return dump_dir;
+}
+
+/*
+ * get memory history log file list;
+ */
+static void get_history_memory_log_list(StringInfoDataHuge* buf)
+{
+    char *dump_dir = NULL;
+    errno_t ss_rc;
+
+    /* get the path of dump file */
+    dump_dir = get_history_memory_log_dir();
+    if (dump_dir == NULL) {
+        return;
+    }
+
+    struct dirent* de = NULL;
+    DIR *dir = opendir(dump_dir);
+    char path_buf[MAXPGPATH] = {0};
+    struct stat st;
+    while ((de = readdir(dir)) != NULL) {
+        if ((strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0)) {
+            continue;
+        }
+        ss_rc = snprintf_s(path_buf, MAXPGPATH, MAXPGPATH - 1, "%s/%s", dump_dir, de->d_name);
+        securec_check_ss_c(ss_rc, "\0", "\0");
+        if (lstat(path_buf, &st) != 0) {
+            continue;
+        }
+        /* only find file */
+        if (S_ISREG(st.st_mode)) {
+            appendStringInfoHuge(buf, "%s\n", de->d_name);
+        } else {
+            continue;
+        }
+    }
+
+    (void)closedir(dir);
+}
+
+/*
+ * get special log info;
+ */
+static void get_history_memory_log_detail(StringInfoDataHuge* buf, char *file_name)
+{
+    char *dump_dir = NULL;
+    char dump_file_path[MAX_PATH_LEN] = {0};
+    errno_t ss_rc;
+
+    // get the path of dump file
+    dump_dir = get_history_memory_log_dir();
+    if (dump_dir == NULL) {
+        return;
+    }
+
+    ss_rc = snprintf_s(dump_file_path, sizeof(dump_file_path), sizeof(dump_file_path) - 1,
+                         "%s/%s", dump_dir, file_name);
+    securec_check_ss(ss_rc, "\0", "\0");
+
+    char line[1024] = { 0 };
+    int len = strlen(file_name);
+    if (len > 3 && (strcmp(file_name + (len - 3), ".gz") == 0)) {
+        gzFile gzfp = gzopen(dump_file_path, "r");
+        if (!gzfp) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_NAME), errmsg("failed to open file:%s", file_name)));
+        }
+        while (gzgets(gzfp, line, sizeof(line)) != NULL) {
+            appendStringInfoHuge(buf, "%s", line);
+        }
+        (void)gzclose(gzfp);
+    } else {
+        FILE* fp = NULL;
+        if ((fp = fopen(dump_file_path, "r")) == NULL) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_NAME), errmsg("failed to open file:%s", file_name)));
+        }
+
+        while (fgets(line, sizeof(line), fp) != NULL) {
+            appendStringInfoHuge(buf, "%s", line);
+        }
+        (void)fclose(fp);
+    }
+}
+
+/*
+ * insert log info per row;
+ */
+static void insert_memory_log_info(Tuplestorestate* tupStore, TupleDesc tupDesc, const char* meminfo)
+{
+    const int ATT_NUM = 1;
+    Datum values[ATT_NUM];
+    bool nulls[ATT_NUM];
+
+    errno_t rc = 0;
+    rc = memset_s(values, sizeof(values), 0, sizeof(values));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
+    securec_check(rc, "\0", "\0");
+
+    values[ARR_0] = CStringGetTextDatum(meminfo);
+
+    tuplestore_putvalues(tupStore, tupDesc, values, nulls);
+}
+
+/*
+ * encap memory history log info;
+ */
+static void encap_history_memory_info(Tuplestorestate* tupStore, TupleDesc tupDesc, StringInfoHuge buf,
+    void (* insert)(Tuplestorestate* tupStore, TupleDesc tupDesc, const char* meminfo))
+{
+    int64 i = 0;
+    int64 memctx_info_cnt = 0;
+    
+    /* find alloc chunk info count */
+    for (i = 0; i < buf->len; ++i) {
+        if (buf->data[i] == '\n') {
+            ++memctx_info_cnt;
+        }
+    }
+
+    if (memctx_info_cnt == 0) {
+        return;
+    }
+
+    char* mem_info = buf->data;
+    char* tmp_mem_info = buf->data;
+    for (i = 0; i < memctx_info_cnt; ++i) {
+        mem_info = tmp_mem_info;
+        tmp_mem_info = strchr(mem_info, '\n');
+        if (tmp_mem_info == NULL) {
+            continue;
+        }
+        *tmp_mem_info = '\0';
+        ++tmp_mem_info;
+        insert(tupStore, tupDesc, mem_info);
+    }
+}
+
+static void CheckFileNameValid(const char* filename)
+{
+    if (filename == NULL) {
+        return;
+    }
+
+    if (path_contains_parent_reference(filename)) {
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                (errmsg("reference to parent directory (\"..\") not allowed"))));
+    }
+
+    int len = strlen(filename);
+    if (len < MIN_FILE_NAME_LEN || len > MAX_FILE_NAME_LEN) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_NAME), errmsg("file name is invalid:%s", filename)));
+    }
+
+    int prefixLen = strlen("mem_log");
+    int suffixLogLen = strlen(".log");
+    int suffixLogGzLen = strlen(".log.gz");
+    if (strncmp(filename, "mem_log", prefixLen) != 0 ||
+        (strncmp(filename + (len - suffixLogLen), ".log", suffixLogLen) != 0 &&
+        strncmp(filename + (len - suffixLogGzLen), ".log.gz", suffixLogGzLen) != 0)) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_NAME), errmsg("file name is invalid:%s", filename)));
+    }
+
+    bool containOtherChar = false;
+    for (int i = 0; i < len; i++) {
+        if (filename[i] == '-' || filename[i] == '_' || filename[i] == '.' ||
+            (filename[i] >= '0' && filename[i] <= '9') ||
+            (filename[i] >= 'a' && filename[i] <= 'z')) {
+            continue;
+        }
+        containOtherChar = true;
+    }
+
+    if (containOtherChar) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_NAME), errmsg("file name is invalid:%s", filename)));
+    }
+}
+
+/*
+ * select gs_get_history_memory_detail(NULL) or select gs_get_history_memory_detail('meminfo_xxx.log')
+ */
+Datum gs_get_history_memory_detail(PG_FUNCTION_ARGS)
+{
+    if (!superuser() && !isMonitoradmin(GetUserId())) {
+        aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_PROC, "gs_get_history_memory_detail");
+    }
+
+    char* file_name = PG_GETARG_CSTRING(0);
+    CheckFileNameValid(file_name);
+
+    ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
+    MemoryContext oldcontext = MemoryContextSwitchTo(rsinfo->econtext->ecxt_per_query_memory);
+
+    /* need a tuple descriptor representing 4 columns */
+    TupleDesc tupdesc = CreateTemplateTupleDesc(1, false);
+
+    TupleDescInitEntry(tupdesc, (AttrNumber)ARG_1, "memory_info", TEXTOID, -1, 0);
+
+    rsinfo->returnMode = SFRM_Materialize;
+    rsinfo->setResult = tuplestore_begin_heap(true, false, u_sess->attr.attr_memory.work_mem);
+    rsinfo->setDesc = BlessTupleDesc(tupdesc);
+
+    (void)MemoryContextSwitchTo(oldcontext);
+
+    StringInfoDataHuge buf;
+    initStringInfoHuge(&buf);
+    if (file_name == NULL) {
+        get_history_memory_log_list(&buf);
+    } else {
+        get_history_memory_log_detail(&buf, file_name);
+    }
+
+    encap_history_memory_info(rsinfo->setResult, rsinfo->setDesc, &buf, insert_memory_log_info);
+
+    pfree_ext(buf.data);
+    /* clean up and return the tuplestore */
+    tuplestore_donestoring(rsinfo->setResult);
+
+    PG_RETURN_TEXT_P(NULL);
 }
 

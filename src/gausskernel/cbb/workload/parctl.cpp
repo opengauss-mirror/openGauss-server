@@ -562,7 +562,7 @@ void WLMReleaseGlobalActiveStatement(int toWakeUp)
 void WLMCheckReserveGlobalActiveStatement(ParctlManager* parctl)
 {
     if (u_sess->wlm_cxt->reserved_in_active_statements > 0) {
-        ereport(LOG,
+        ereport(DEBUG2,
             (errmsg("When new query is arriving, thread is reserved %d statement and "
                     "the reserved debug query is %s.",
                 u_sess->wlm_cxt->reserved_in_active_statements,
@@ -576,7 +576,7 @@ void WLMCheckReserveGlobalActiveStatement(ParctlManager* parctl)
     }
 
     if (u_sess->wlm_cxt->reserved_in_respool_waiting > 0) {
-        ereport(LOG,
+        ereport(DEBUG2,
             (errmsg("When new query is waiting in resource pool, thread is reserved %d statement and "
                     "the reserved debug query is %s.",
                 u_sess->wlm_cxt->reserved_in_respool_waiting,
@@ -591,14 +591,14 @@ void WLMCheckReserveGlobalActiveStatement(ParctlManager* parctl)
     }
 
     if (u_sess->wlm_cxt->reserved_in_group_statements != 0) {
-        ereport(LOG,
+        ereport(DEBUG2,
             (errmsg("When new query is arriving, resource pool is reserved %d statement and "
                     "the reserved respool debug query is %s.",
                 u_sess->wlm_cxt->reserved_in_group_statements,
                 u_sess->wlm_cxt->reserved_debug_query)));
     }
     if (u_sess->wlm_cxt->reserved_in_group_statements_simple != 0) {
-        ereport(LOG,
+        ereport(DEBUG2,
             (errmsg("When new query is arriving, resource pool is reserved %d simple statement and "
                     "the reserved respool debug query is %s.",
                 u_sess->wlm_cxt->reserved_in_group_statements_simple,
@@ -913,7 +913,7 @@ void WLMReserveGroupActiveStatement(void)
     }
     /* adjust the count in the resource pool */
     if (u_sess->wlm_cxt->reserved_in_group_statements > 0) {
-        ereport(LOG, (errmsg("When query is arriving, thread is reserved %d group statement and "
+        ereport(DEBUG2, (errmsg("When query is arriving, thread is reserved %d group statement and "
                     "the reserved debug query is %s.",
                     u_sess->wlm_cxt->reserved_in_group_statements, u_sess->wlm_cxt->reserved_debug_query)));
 
@@ -927,7 +927,7 @@ void WLMReserveGroupActiveStatement(void)
     }
 
     if (u_sess->wlm_cxt->reserved_in_group_statements_simple > 0) {
-        ereport(LOG, (errmsg("When query is arriving, thread is reserved %d simple group statement and "
+        ereport(DEBUG2, (errmsg("When query is arriving, thread is reserved %d simple group statement and "
                     "the reserved debug query is %s.",
                     u_sess->wlm_cxt->reserved_in_group_statements_simple, u_sess->wlm_cxt->reserved_debug_query)));
         if (respool_reserved != NULL) {
@@ -2075,13 +2075,16 @@ void WLMCheckDefaultXactReadOnly(void)
          * service the interrupt immediately
          */
         if (t_thrd.int_cxt.ImmediateInterruptOK && t_thrd.int_cxt.InterruptHoldoffCount == 0 &&
-            t_thrd.int_cxt.CritSectionCount == 0) {
+            t_thrd.int_cxt.CritSectionCount == 0 && !t_thrd.postgres_cxt.DoingCommandRead) {
             /* bump holdoff count to make ProcessInterrupts() a no-op */
             /* until we are done getting ready for it */
             t_thrd.int_cxt.InterruptHoldoffCount++;
             LockErrorCleanup(); /* prevent CheckDeadLock from running */
             t_thrd.int_cxt.InterruptHoldoffCount--;
             ProcessInterrupts();
+        }
+        if (t_thrd.postgres_cxt.DoingCommandRead) {
+            ereport(WARNING, (errmsg("WLMCheckDefaultXactReadOnly CheckDoingCommandRead is true and pass interrupt")));
         }
     }
 

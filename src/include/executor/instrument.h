@@ -68,6 +68,9 @@ typedef enum InstrumentOption {
     INSTRUMENT_TIMER = 1 << 0,   /* needs timer (and row counts) */
     INSTRUMENT_BUFFERS = 1 << 1, /* needs buffer usage */
     INSTRUMENT_ROWS = 1 << 2,    /* needs row count */
+#ifndef ENABLE_MULTIPLE_NODES
+    INSTRUMENT_CPUS = 1 << 3,
+#endif
     INSTRUMENT_ALL = 0x7FFFFFFF
 } InstrumentOption;
 
@@ -301,6 +304,9 @@ typedef struct Instrumentation {
     uint64 orcMetaLoadBlockCount;
     uint64 orcMetaLoadBlockSize;
     bool isLlvmOpt; /* Optimize plan by using llvm. */
+#ifndef ENABLE_MULTIPLE_NODES
+    bool need_cpu;
+#endif
     int dfsType;    /* Indicate the storage file system type */
     int width;      /* avg width for the in memory tuples */
     bool sysBusy;   /* if disk spill caused by system busy */

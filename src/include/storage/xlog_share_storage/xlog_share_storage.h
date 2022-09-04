@@ -32,7 +32,7 @@
 void SharedStorageXlogCopyBackendMain(void);
 void WakeUpXLogCopyerBackend();
 void CheckShareStorageCtlInfo(XLogRecPtr localEnd);
-bool XLogOverwriteFromLocal(bool force = false);
+bool XLogOverwriteFromLocal(bool force = false, XLogRecPtr setStart = InvalidXLogRecPtr);
 bool XLogOverwriteFromShare();
 Size CalShareStorageCtlSize();
 ShareStorageXLogCtl *AlignAllocShareStorageCtl();

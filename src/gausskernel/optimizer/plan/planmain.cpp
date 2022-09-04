@@ -441,6 +441,27 @@ void update_tuple_fraction(PlannerInfo* root,
     double limit_tuples = root->limit_tuples;
 
     /*
+     * re-process final limit/offset count estimation after the with final_rel
+     * skip if default_limit_rows is -10, which falls back to default behavior of preprocess_limit
+     */
+    if (u_sess->attr.attr_sql.default_limit_rows != -10 && (parse->limitCount || parse->limitOffset)) {
+        int64 offset_est = 0;
+        int64 count_est = 0;
+        bool fix_param = false;
+        estimate_limit_offset_count(root, &offset_est, &count_est, final_rel, &fix_param);
+        if (fix_param) {
+            tuple_fraction = (final_rel->rows <= 0) ?
+                (1.0) : ((offset_est + count_est) / final_rel->rows);
+            /* we need to keep tuple_fraction under 1.0, otherwise it will be considered as an absolute limit */
+            const double max_tuple_fraction = 1 - 1e-6;
+            tuple_fraction = Min(tuple_fraction, max_tuple_fraction);
+            ereport(DEBUG2,
+                (errmodule(MOD_OPT),
+                    errmsg("Modify tuple fraction to %lf, originally %lf", tuple_fraction, root->tuple_fraction)));
+        }
+    }
+
+    /*
      * If there's grouping going on, convert tuple_fraction to fractional 
      * form if it is absolute, and adjust it based on the knowledge that 
      * grouping_planner will be doing grouping or aggregation work with 

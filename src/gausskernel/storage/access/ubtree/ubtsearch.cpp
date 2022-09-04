@@ -19,6 +19,7 @@
 #include "access/nbtree.h"
 #include "access/ubtree.h"
 #include "access/relscan.h"
+#include "access/ustore/knl_uverify.h"
 #include "miscadmin.h"
 #include "pgstat.h"
 #include "storage/predicate.h"
@@ -63,6 +64,7 @@ BTStack UBTreeSearch(Relation rel, BTScanInsert key, Buffer *bufP, int access, b
 {
     BTStack stack_in = NULL;
     int pageAccess = BT_READ;
+    UBtreePageVerifyParams verifyParams;
 
     /* Get the root page to start with */
     *bufP = UBTreeGetRoot(rel, access);
@@ -141,7 +143,10 @@ BTStack UBTreeSearch(Relation rel, BTScanInsert key, Buffer *bufP, int access, b
          */
         if (opaque->btpo.level == 1 && access == BT_WRITE)
             pageAccess = BT_WRITE;
-
+        if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UBTREE, USTORE_VERIFY_COMPLETE,
+            (char *) &verifyParams, rel, page, InvalidBlockNumber, NULL, NULL, InvalidXLogRecPtr))) {
+            ExecuteUstoreVerify(USTORE_VERIFY_MOD_UBTREE, (char *) &verifyParams);
+        }
         /* drop the read lock on the parent page, acquire one on the child */
         *bufP = _bt_relandgetbuf(rel, *bufP, blkno, pageAccess);
 
@@ -268,7 +273,8 @@ Buffer UBTreeMoveRight(Relation rel, BTScanInsert itup_key, Buffer buf, bool for
 
     if (P_IGNORE(opaque))
         ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
-                errmsg("fell off the end of index \"%s\"", RelationGetRelationName(rel))));
+                errmsg("fell off the end of index \"%s\" at blkno %u",
+                       RelationGetRelationName(rel), BufferGetBlockNumber(buf))));
 
     return buf;
 }
@@ -379,8 +385,7 @@ static void UBTreeFixActiveTupleCount(Relation rel, Buffer buf, UBTPageOpaqueInt
 {
     UstoreIndexXid uxid = (UstoreIndexXid)UstoreIndexTupleGetXid(itup);
     TransactionId xmin = ShortTransactionIdToNormal(opaque->xid_base, uxid->xmin);
-    TransactionId oldestXmin = InvalidTransactionId;
-    GetOldestXminForUndo(&oldestXmin);
+    TransactionId oldestXmin = u_sess->utils_cxt.RecentGlobalDataXmin;
     if (TransactionIdPrecedes(xmin, oldestXmin)) {
         if (UBTreeCheckXid(xmin) == XID_ABORTED) {
             ItemIdMarkDead(iid);
@@ -998,8 +1003,9 @@ bool UBTreeFirst(IndexScanDesc scan, ScanDirection dir)
 
         default:
             /* can't get here, but keep compiler quiet */
-            ereport(ERROR,
-                    (errcode(ERRCODE_INDEX_CORRUPTED), errmsg("unrecognized strat_total: %d", (int)strat_total)));
+            ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                    errmsg("unrecognized strat_total: %d in index \"%s\"",
+                           (int)strat_total, RelationGetRelationName(scan->indexRelation))));
             return false;
     }
 
@@ -1168,6 +1174,108 @@ bool UBTreeNext(IndexScanDesc scan, ScanDirection dir)
     return true;
 }
 
+void UBTreeTraceTuple(IndexScanDesc scan, OffsetNumber offnum, bool isVisible, bool isHikey)
+{
+    Relation rel = scan->indexRelation;
+    BTScanOpaque so = (BTScanOpaque)scan->opaque;
+    if (scan->xs_sampling_scan) {
+        return; /* we don't trace tuple when sampling */
+    }
+
+    Buffer buf = so->currPos.buf;
+    Page page = BufferGetPage(buf);
+    ItemId iid = PageGetItemId(page, offnum);
+    IndexTuple itup = (IndexTuple)PageGetItem(page, iid);
+
+    if (!so->isPageInfoLogged) {
+        ereport(INFO, (errmsg("Index Trace Page: rel \"%s\", oid %u, blkno %u",
+                              RelationGetRelationName(rel), rel->rd_id, BufferGetBlockNumber(buf))));
+        so->isPageInfoLogged = true;
+    }
+
+    /* part 1: tuple info */
+    StringInfo tupleInfo = makeStringInfo();
+    if (u_sess->attr.attr_storage.enable_log_tuple && !isHikey) {
+        Datum values[INDEX_MAX_KEYS];
+        bool isnull[INDEX_MAX_KEYS];
+        index_deform_tuple(itup, RelationGetDescr(rel), values, isnull);
+        char *keyDesc = BuildIndexValueDescription(rel, values, isnull);
+
+        appendStringInfo(tupleInfo, "Tuple %s, ", keyDesc ? keyDesc : "(Unknown)");
+    }
+
+    /* part 2: state info */
+    char *stateStr = NULL;
+    if (isHikey) {
+        stateStr = "HIKEY";
+    } else if (ItemIdIsDead(iid)) {
+        stateStr = "DEAD";
+    } else if (IndexItemIdIsFrozen(iid)) {
+        stateStr = "XMIN_FROZEN";
+    } else {
+        stateStr = "NORMAL";
+    }
+
+    /* part 4: partOid */
+    Oid partOid = InvalidOid;
+    if (RelationIsGlobalIndex(rel)) {
+        bool isnull = false;
+        AttrNumber partitionOidAttr = IndexRelationGetNumberOfAttributes(rel);
+        TupleDesc tupdesc = RelationGetDescr(rel);
+        partOid = DatumGetUInt32(index_getattr(itup, partitionOidAttr, tupdesc, &isnull));
+        if (isnull) {
+            partOid = InvalidOid;
+        }
+    }
+
+    /* part 5: transaction info */
+    TransactionId xmin = InvalidTransactionId;
+    TransactionId xmax = InvalidTransactionId;
+    if (!UBTreeTupleIsPivot(itup)) {
+        UBTPageOpaqueInternal opaque = (UBTPageOpaqueInternal)PageGetSpecialPointer(page);
+        UstoreIndexXid uxid = (UstoreIndexXid)UstoreIndexTupleGetXid(itup);
+        xmin = ShortTransactionIdToNormal(opaque->xid_base, uxid->xmin);
+        xmax = ShortTransactionIdToNormal(opaque->xid_base, uxid->xmax);
+    }
+
+    ereport(INFO, (errmsg("%sOffset %u, State %s, TID (%u, %u), partOid %u, xmin/xmax %lu/%lu, %s",
+                          tupleInfo->data, offnum, stateStr, ItemPointerGetBlockNumber(&itup->t_tid),
+                          ItemPointerGetOffsetNumber(&itup->t_tid), partOid, xmin, xmax,
+                          isVisible ? "Visible" : "Invisible")));
+    DestroyStringInfo(tupleInfo);
+}
+
+static void UBTreeTraceTupleInRange(IndexScanDesc scan, ScanDirection dir, OffsetNumber startOff, OffsetNumber endOff)
+{
+    if (u_sess->attr.attr_storage.index_trace_level < TRACE_SHOWHIKEY) {
+        return;
+    }
+
+    BTScanOpaque so = (BTScanOpaque)scan->opaque;
+    Page page = BufferGetPage(so->currPos.buf);
+    UBTPageOpaqueInternal opaque = (UBTPageOpaqueInternal)PageGetSpecialPointer(page);
+    if (!P_RIGHTMOST(opaque) && startOff == P_HIKEY && startOff == endOff) {
+        UBTreeTraceTuple(scan, P_HIKEY, false, true);
+        return; /* we are done */
+    }
+
+    if (u_sess->attr.attr_storage.index_trace_level < TRACE_ALL) {
+        return;
+    }
+
+    bool ignore1 = false;
+    bool ignore2 = false;
+    if (ScanDirectionIsForward(dir)) {
+        for (OffsetNumber curOff = startOff; curOff <= endOff; curOff = OffsetNumberNext(curOff)) {
+            UBTreeCheckKeys(scan, page, curOff, dir, &ignore1, &ignore2);
+        }
+    } else {
+        for (OffsetNumber curOff = startOff; curOff >= endOff; curOff = OffsetNumberPrev(curOff)) {
+            UBTreeCheckKeys(scan, page, curOff, dir, &ignore1, &ignore2);
+        }
+    }
+}
+
 /*
  *	UBTreeReadPage() -- Load data from current index page into so->currPos
  *
@@ -1199,6 +1307,7 @@ static bool UBTreeReadPage(IndexScanDesc scan, ScanDirection dir, OffsetNumber o
     Oid heapOid = IndexScanGetPartHeapOid(scan);
     TransactionId xidBase;
     bool isnull = false;
+    UBtreePageVerifyParams verifyParams;
 
     tupdesc = RelationGetDescr(scan->indexRelation);
     PartitionOidAttr = IndexRelationGetNumberOfAttributes(scan->indexRelation);
@@ -1224,11 +1333,20 @@ static bool UBTreeReadPage(IndexScanDesc scan, ScanDirection dir, OffsetNumber o
 
     so->currPos.xid_base = xidBase;
 
+    so->isPageInfoLogged = false;
+
+    /* log the HIKEY before we scan tuples */
+    if (!P_RIGHTMOST(opaque)) {
+        UBTreeTraceTupleInRange(scan, dir, P_HIKEY, P_HIKEY);
+    }
     if (ScanDirectionIsForward(dir)) {
         /* load items[] in ascending order */
         itemIndex = 0;
 
         offnum = Max(offnum, minoff);
+
+        /* try to log front tuples */
+        UBTreeTraceTupleInRange(scan, dir, minoff, OffsetNumberPrev(offnum));
 
         while (offnum <= maxoff) {
             bool needRecheck = false;
@@ -1245,6 +1363,8 @@ static bool UBTreeReadPage(IndexScanDesc scan, ScanDirection dir, OffsetNumber o
                 itemIndex++;
             }
             if (!continuescan) {
+                /* try to log remain tuples */
+                UBTreeTraceTupleInRange(scan, dir, OffsetNumberNext(offnum), maxoff);
                 /* there can't be any more matches, so stop */
                 so->currPos.moreRight = false;
                 break;
@@ -1263,6 +1383,9 @@ static bool UBTreeReadPage(IndexScanDesc scan, ScanDirection dir, OffsetNumber o
 
         offnum = Min(offnum, maxoff);
 
+        /* try to log front tuples */
+        UBTreeTraceTupleInRange(scan, dir, maxoff, OffsetNumberNext(offnum));
+
         while (offnum >= minoff) {
             bool needRecheck = false;
             itup = UBTreeCheckKeys(scan, page, offnum, dir, &continuescan, &needRecheck);
@@ -1277,6 +1400,8 @@ static bool UBTreeReadPage(IndexScanDesc scan, ScanDirection dir, OffsetNumber o
                 UBTreeSaveItem(so, itemIndex, offnum, itup, partOid, scan->xs_want_itup, needRecheck);
             }
             if (!continuescan) {
+                /* try to log remain tuples */
+                UBTreeTraceTupleInRange(scan, dir, OffsetNumberPrev(offnum), minoff);
                 /* there can't be any more matches, so stop */
                 so->currPos.moreLeft = false;
                 break;
@@ -1290,7 +1415,10 @@ static bool UBTreeReadPage(IndexScanDesc scan, ScanDirection dir, OffsetNumber o
         so->currPos.lastItem = MaxIndexTuplesPerPage - 1;
         so->currPos.itemIndex = MaxIndexTuplesPerPage - 1;
     }
-
+    if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UBTREE, USTORE_VERIFY_COMPLETE,
+        (char *) &verifyParams, scan->indexRelation, page, InvalidBlockNumber, NULL, NULL, InvalidXLogRecPtr))) {
+        ExecuteUstoreVerify(USTORE_VERIFY_MOD_UBTREE, (char *) &verifyParams);
+    }
     return (so->currPos.firstItem <= so->currPos.lastItem);
 }
 
@@ -1519,7 +1647,8 @@ Buffer UBTreeGetEndPoint(Relation rel, uint32 level, bool rightmost)
             blkno = opaque->btpo_next;
             if (blkno == P_NONE)
                 ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
-                        errmsg("fell off the end of index \"%s\"", RelationGetRelationName(rel))));
+                        errmsg("fell off the end of index \"%s\" at blkno %u",
+                               RelationGetRelationName(rel), BufferGetBlockNumber(buf))));
             buf = _bt_relandgetbuf(rel, buf, blkno, BT_READ);
             page = BufferGetPage(buf);
             opaque = (UBTPageOpaqueInternal)PageGetSpecialPointer(page);
@@ -1530,7 +1659,8 @@ Buffer UBTreeGetEndPoint(Relation rel, uint32 level, bool rightmost)
             break;
         if (opaque->btpo.level < level)
             ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
-                    errmsg("btree level %u not found in index \"%s\"", level, RelationGetRelationName(rel))));
+                    errmsg("btree level %u not found in index \"%s\", max level is %u",
+                           level, RelationGetRelationName(rel), opaque->btpo.level)));
 
         /* Descend to leftmost or rightmost child page */
         if (rightmost)

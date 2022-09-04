@@ -104,13 +104,8 @@ PL/pgSQL function db4ai.purge_snapshot(name,name) line 71 at PERFORM%'
 
             EXECUTE 'DROP VIEW db4ai.v' || s_id::TEXT;
 
-            IF TRUE OR drop_cols IS NULL THEN
-                EXECUTE 'ALTER TABLE db4ai.t' || m_id::TEXT || ' DROP _' || s_id::TEXT;
-                RAISE NOTICE 'PURGE_SNAPSHOT: orphaned rows dropped: %, orphaned columns dropped: none', affected;
-            ELSE
-                EXECUTE 'ALTER TABLE db4ai.t' || m_id::TEXT || ' DROP _' || s_id::TEXT || ', DROP ' || pg_catalog.array_to_string(drop_cols, ', DROP ');
-                RAISE NOTICE 'PURGE_SNAPSHOT: orphaned rows dropped: %, orphaned columns dropped: %', affected, drop_cols;
-            END IF;
+            EXECUTE 'ALTER TABLE db4ai.t' || m_id::TEXT || ' DROP _' || s_id::TEXT;
+            RAISE NOTICE 'PURGE_SNAPSHOT: orphaned rows dropped: %, orphaned columns dropped: none', affected;
         END IF;
     END IF;
 
@@ -140,7 +135,7 @@ BEGIN
 
     -- obtain active message level
     BEGIN
-        EXECUTE 'SET LOCAL client_min_messages TO ' || pg_catalog.current_setting('db4ai.message_level');
+        EXECUTE 'SET LOCAL client_min_messages TO ' || pg_catalog.current_setting('db4ai.message_level')::TEXT;
         RAISE INFO 'effective client_min_messages is ''%''', pg_catalog.upper(pg_catalog.current_setting('db4ai.message_level'));
     EXCEPTION WHEN OTHERS THEN
     END;

@@ -110,5 +110,12 @@ create view ne_view1 as select * from t1 where t1.a = any (select /*+ no_expand*
 create view ne_view2 as select /*+ no_expand */ * from t1 where t1.a = any (select t2.a from t2);
 :EXP select * from ne_view2;
 
+create table sublink_expr_t1(a1 int, b1 int);
+set rewrite_rule = 'magicset, partialpush, uniquecheck, intargetlist, predpushforce';
+:EXP select a1 from sublink_expr_t1 t1 where t1.b1 = (select max(b1) from sublink_expr_t1 t2 where t2.a1 = t1.a1);
+set rewrite_rule = 'magicset, partialpush, uniquecheck, intargetlist, predpushforce, disable_pullup_expr_sublink';
+:EXP select a1 from sublink_expr_t1 t1 where t1.b1 = (select max(b1) from sublink_expr_t1 t2 where t2.a1 = t1.a1);
+:EXP select /*+ no rewrite_rule(disable_pullup_expr_sublink)*/ a1 from sublink_expr_t1 t1 where t1.b1 = (select max(b1) from sublink_expr_t1 t2 where t2.a1 = t1.a1);
+
 -- cleanup
 drop schema schema_no_expand cascade;

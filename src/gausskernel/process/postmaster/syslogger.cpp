@@ -45,7 +45,6 @@
 #include "utils/guc.h"
 #include "utils/ps_status.h"
 #include "utils/timestamp.h"
-
 #include "gssignal/gs_signal.h"
 
 #define PROFILE_LOG_ROTATE_SIZE ((long)20 * 1024 * 1024L)
@@ -234,7 +233,7 @@ NON_EXEC_STATIC void SysLoggerMain(int fd)
     (void)gspqsignal(SIGPIPE, SIG_IGN);
     (void)gspqsignal(SIGUSR1, sigUsr1Handler); /* request log rotation */
     (void)gspqsignal(SIGUSR2, SIG_IGN);
-
+    (void)gspqsignal(SIGURG, print_stack);
     /*
      * Reset some signals that are accepted by postmaster but not here
      */
@@ -1743,7 +1742,13 @@ static char* LogCtlGetFilenamePattern(const char* post_suffix)
  */
 static void PLogCtlInit(void)
 {
-    t_thrd.log_cxt.pLogCtl = (LogControlData*)palloc0(sizeof(LogControlData));
+    if (g_instance.comm_cxt.pLogCtl != NULL) {
+        t_thrd.log_cxt.pLogCtl = (LogControlData*)g_instance.comm_cxt.pLogCtl;
+    } else {
+        t_thrd.log_cxt.pLogCtl = (LogControlData*)palloc0(sizeof(LogControlData));
+    }
+    errno_t rc = memset_s(t_thrd.log_cxt.pLogCtl, sizeof(LogControlData), 0, sizeof(LogControlData));
+    securec_check(rc, "\0", "\0");
     t_thrd.log_cxt.pLogCtl->ver = PROFILE_LOG_VERSION;
     t_thrd.log_cxt.pLogCtl->rotation_requested = false;
     t_thrd.log_cxt.pLogCtl->flush_requested = false;
@@ -2074,6 +2079,8 @@ void init_instr_log_directory(bool include_nodename, const char* logid)
             g_instance.attr.attr_common.query_log_directory = logdir;
         } else if (strcmp(logid, PERF_JOB_TAG) == 0) {
             g_instance.attr.attr_common.Perf_directory = logdir;
+        } else if (strcmp(logid, MEMORY_LOG_TAG) == 0) {
+            g_instance.stat_cxt.memory_log_directory = logdir;
         }
     } else {
         pfree(logdir);

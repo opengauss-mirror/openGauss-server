@@ -27,6 +27,7 @@
 
 #include "access/tableam.h"
 #include "opfusion/opfusion_util.h"
+#include "utils/knl_partcache.h"
 
 IndexScanFusion::IndexScanFusion(IndexScan* node, PlannedStmt* planstmt, ParamListInfo params)
     : IndexFusion(params, planstmt)

@@ -146,6 +146,41 @@ explain (costs off, verbose on) select * from test_index_lt order by 1;
 select * from test_index_lt order by 1;
 drop table test_index_lt;
 
+create table test_list_int(
+  col1 int,
+  col2 int,
+  col3 varchar(10)
+)
+partition by list(col1)
+(
+  partition test_list_int_p0 values(100),
+  partition test_list_int_p1 values(200),
+  partition test_list_int_p2 values(default)
+);
+insert into test_list_int values(null, 1, 'a'), (100, 2, 'b'), (null, 3, 'c');
+
+select * from test_list_int where col1 is null order by col2;
+
+drop table test_list_int;
+
+create table test_list_char(id char, name char)
+partition by range(name)
+subpartition by list(id)
+(
+  partition p1 values less than ('e'),
+  partition p2 values less than ('k'),
+  partition p3 values less than (MAXVALUE)
+  (
+    subpartition sp5 values ('b'),
+    subpartition sp3 values ('z'),
+    subpartition sp4 values (DEFAULT)
+  )  
+);
+
+select * from test_list_char where name = 'z' and name is null and id = 'z' and id is null;
+
+drop table test_list_char;
+
 drop schema FVT_COMPRESS_QWER cascade;
 create schema fvt_other_cmd;
 CREATE TABLE FVT_OTHER_CMD.IDEX_LIST_PARTITION_TABLE_001(COL_INT int)

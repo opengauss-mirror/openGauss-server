@@ -84,7 +84,7 @@ XLogRecParseState *xact_redo_rmddl_parse_to_block(XLogReaderState *record, XLogR
                                                   uint32 *blocknum, ColFileNodeRel *xnodes, int nrels)
 {
     XLogRecParseState *blockstate = NULL;
-
+    bool compress = (bool)(XLogRecGetInfo(record) & XLR_REL_COMPRESS);
     Assert(nrels > 0);
     (*blocknum)++;
     XLogParseBufferAllocListStateFunc(record, &blockstate, &recordstatehead);
@@ -94,7 +94,7 @@ XLogRecParseState *xact_redo_rmddl_parse_to_block(XLogReaderState *record, XLogR
     RelFileNodeForkNum filenode = RelFileNodeForkNumFill(NULL, InvalidBackendId, MAIN_FORKNUM, InvalidBlockNumber);
     XLogRecSetBlockCommonState(record, BLOCK_DATA_DDL_TYPE, filenode, blockstate);
     XLogRecSetBlockDdlState(&(blockstate->blockparse.extra_rec.blockddlrec), BLOCK_DDL_DROP_RELNODE, (char *)xnodes,
-        nrels);
+        nrels, compress);
 
     return recordstatehead;
 }
@@ -102,6 +102,7 @@ XLogRecParseState *xact_redo_rmddl_parse_to_block(XLogReaderState *record, XLogR
 static XLogRecParseState *xact_xlog_commit_internal_parse(XLogReaderState *record, uint32 *blocknum)
 {
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
+    bool compress = (bool)(XLogRecGetInfo(record) & XLR_REL_COMPRESS);
     TransactionId xid = XLogRecGetXid(record);
     CommitSeqNo commitseql = COMMITSEQNO_INPROGRESS;
     TransactionId *sub_xids = NULL;
@@ -122,7 +123,7 @@ static XLogRecParseState *xact_xlog_commit_internal_parse(XLogReaderState *recor
             xid = xlrecpre->xid; /* prepare for special */
         }
 
-        sub_xids = (TransactionId *)&(xlrec->xnodes[xlrec->nrels]);
+        sub_xids = GET_SUB_XACTS(xlrec->xnodes, xlrec->nrels, compress);
         nsubxacts = xlrec->nsubxacts;
         csn = xlrec->csn;
     } else {
@@ -161,6 +162,7 @@ static XLogRecParseState *xact_xlog_commit_internal_parse(XLogReaderState *recor
 static XLogRecParseState *xact_xlog_abort_internal_parse(XLogReaderState *record, uint32 *blocknum)
 {
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
+    bool compress = (bool)(XLogRecGetInfo(record) & XLR_REL_COMPRESS);
     TransactionId xid = XLogRecGetXid(record);
     TransactionId *sub_xids = NULL;
     int nsubxacts;
@@ -178,7 +180,7 @@ static XLogRecParseState *xact_xlog_abort_internal_parse(XLogReaderState *record
         xid = xlrecpre->xid; /* prepare for special */
     }
 
-    sub_xids = (TransactionId *)&(xlrec->xnodes[xlrec->nrels]);
+    sub_xids = GET_SUB_XACTS(xlrec->xnodes, xlrec->nrels, compress);
     nsubxacts = xlrec->nsubxacts;
 
     max_xid = TransactionIdLatest(xid, nsubxacts, sub_xids);
@@ -213,8 +215,9 @@ static XLogRecParseState *xact_xlog_prepare_internal_parse(XLogReaderState *reco
 
     *blocknum = 0;
     if (TransactionIdIsNormal(hdr->xid)) {
-        int hdrSize = (hdr->magic == TWOPHASE_MAGIC_NEW) ?
-               sizeof(TwoPhaseFileHeaderNew) : sizeof(TwoPhaseFileHeader);
+        bool compressMagic = hdr->magic == TWOPHASE_MAGIC_COMPRESSION;
+        int hdrSize = (hdr->magic == TWOPHASE_MAGIC_NEW || compressMagic) ?
+            sizeof(TwoPhaseFileHeaderNew) : sizeof(TwoPhaseFileHeader);
         sub_xids = (TransactionId *)(recorddata + MAXALIGN(hdrSize));
         nsubxacts = hdr->nsubxacts;
 
@@ -280,6 +283,7 @@ XLogRecParseState *xact_xlog_commit_parse_to_block(XLogReaderState *record, XLog
     XLogRecPtr lsn = record->EndRecPtr;
     bool delayddlflag = false;
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
+    bool compress = (bool)(XLogRecGetInfo(record) & XLR_REL_COMPRESS);
     uint64 xrecinfo = 0;
     TimestampTz xact_time;
     uint8 updateminrecovery = false;
@@ -328,7 +332,7 @@ XLogRecParseState *xact_xlog_commit_parse_to_block(XLogReaderState *record, XLog
         }
 
         /* subxid array follows relfilenodes */
-        subxacts = (TransactionId *)&(xlrec->xnodes[xlrec->nrels]);
+        subxacts = GET_SUB_XACTS(xlrec->xnodes, xlrec->nrels, compress);
         nsubxacts = xlrec->nsubxacts;
         /* invalidation messages array follows subxids */
         inval_msgs = (SharedInvalidationMessage *)&(subxacts[xlrec->nsubxacts]);
@@ -336,8 +340,8 @@ XLogRecParseState *xact_xlog_commit_parse_to_block(XLogReaderState *record, XLog
         nlibrary = xlrec->nlibrary;
 
         if (nlibrary > 0) {
-            libfilename = (char *)xnodes + (nrels * sizeof(ColFileNode)) + (nsubxacts * sizeof(TransactionId)) +
-                          (invalidmsgnum * sizeof(SharedInvalidationMessage));
+            libfilename = (char *)xnodes + (nrels * SIZE_OF_COLFILENODE(compress)) +
+                          (nsubxacts * sizeof(TransactionId)) + (invalidmsgnum * sizeof(SharedInvalidationMessage));
         }
 
         relnode.dbNode = xlrec->dbId;
@@ -371,6 +375,7 @@ XLogRecParseState *xact_xlog_abort_parse_to_block(XLogReaderState *record, XLogR
     XLogRecPtr lsn = record->EndRecPtr;
     bool delayddlflag = false;
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
+    bool compress = (bool)(XLogRecGetInfo(record) & XLR_REL_COMPRESS);
     char *libfilename = NULL;
 
     (*blocknum)++;
@@ -401,7 +406,7 @@ XLogRecParseState *xact_xlog_abort_parse_to_block(XLogReaderState *record, XLogR
 
     int nlibrary = xlrec->nlibrary;
     if (nlibrary > 0) {
-        libfilename = (char *)xnodes + (nrels * sizeof(ColFileNode)) + (nsubxacts * sizeof(TransactionId));
+        libfilename = (char *)xnodes + (nrels * SIZE_OF_COLFILENODE(compress)) + (nsubxacts * sizeof(TransactionId));
     }
 
     if (info == XLOG_XACT_ABORT_WITH_XID) {

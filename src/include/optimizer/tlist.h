@@ -47,4 +47,5 @@ extern void get_tlist_group_vars_split(Query* parse, List* tlist, List** group_c
 extern List* get_dependency_var_list(Query* parse, List* group_cols, List* non_group_vars);
 extern bool var_from_dependency_rel(Query* parse, Var* var, List* dep_oids);
 extern bool var_from_sublink_pulluped(Query *parse, Var *var);
+extern bool var_from_subquery_pulluped(Query *parse, Var *var);
 #endif /* TLIST_H */

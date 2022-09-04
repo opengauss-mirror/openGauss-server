@@ -47,6 +47,7 @@ column_clause
     | FORCE ROW LEVEL SECURITY
     | NO FORCE ROW LEVEL SECURITY
     | ENCRYPTION KEY ROTATION
+    | AUTO_INCREMENT [ = ] value
 where column_clause can be:
 ADD [ COLUMN ] column_name data_type [ compress_mode ] [ COLLATE collation ] [ column_constraint [ ... ] ]
     | MODIFY column_name data_type
@@ -69,6 +70,7 @@ where column_constraint can be:
       CHECK ( expression ) |
       DEFAULT default_expr |
       GENERATED ALWAYS AS ( generation_expr ) STORED |
+      AUTO_INCREMENT |
       UNIQUE index_parameters |
       PRIMARY KEY index_parameters |
       ENCRYPTED WITH ( COLUMN_ENCRYPTION_KEY = column_encryption_key, ENCRYPTION_TYPE = encryption_type_value ) |
@@ -78,12 +80,12 @@ where column_constraint can be:
 where compress_mode can be:
 { DELTA | PREFIX | DICTIONARY | NUMSTR | NOCOMPRESS }
 where table_constraint can be:
-[ CONSTRAINT constraint_name ]
+[ CONSTRAINT [ constraint_name ] ]
     { CHECK ( expression ) |
-      UNIQUE ( column_name [, ... ] ) index_parameters |
-      PRIMARY KEY ( column_name [, ... ] ) index_parameters |
+      UNIQUE [ idx_name ] [ USING method ] ( { { column_name | ( expression ) } [ ASC | DESC ] } [, ... ] ) index_parameters |
+      PRIMARY KEY [ USING method ] ( { column_name [ ASC | DESC ] }[, ... ] ) index_parameters |
       PARTIAL CLUSTER KEY ( column_name [, ... ] ) |
-      FOREIGN KEY ( column_name [, ... ] ) REFERENCES reftable [ ( refcolumn [, ... ] ) ]
+      FOREIGN KEY [ idx_name ] ( column_name [, ... ] ) REFERENCES reftable [ ( refcolumn [, ... ] ) ]
         [ MATCH FULL | MATCH PARTIAL | MATCH SIMPLE ] [ ON DELETE action ] [ ON UPDATE action ] }
     [ DEFERRABLE | NOT DEFERRABLE | INITIALLY DEFERRED | INITIALLY IMMEDIATE ]
 where index_parameters can be:
@@ -93,6 +95,13 @@ where table_constraint_using_index can be:
 [ CONSTRAINT constraint_name ]
     { UNIQUE | PRIMARY KEY } USING INDEX index_name
     [ DEFERRABLE | NOT DEFERRABLE | INITIALLY DEFERRED | INITIALLY IMMEDIATE ]
+
+NOTICE: '[ constraint_name ]' in table_constraint is optional in CENTRALIZED mode and B-format database, it is mandatory in other scenarios.
+NOTICE: '[ index_name ]' in table_constraint is only avaliable in CENTRALIZED mode and B-format database!
+NOTICE: '[ USING method ]' in table_constraint is only avaliable in CENTRALIZED mode and B-format database!
+NOTICE: '[ ASC | DESC ]' in table_constraint is only avaliable in CENTRALIZED mode and B-format database!
+NOTICE: '( expression )' in 'UNIQUE' clause of table_constraint is only avaliable in CENTRALIZED mode and B-format database!
+NOTICE: 'AUTO_INCREMENT' is only avaliable in CENTRALIZED mode and B-format database!
 
 --custom script
 --create table
@@ -717,3 +726,1997 @@ drop table tt_col_rep_2;
 select pg_catalog.ledger_hist_repair('0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000', 65536);
 ERROR:  The schema name exceeds the maximum length.
 CONTEXT:  referenced column: ledger_hist_repair
+-- test primary key is only supported in B mode
+-- alter table
+create table test_primary(f11 int, f12 varchar(20), f13 bool);
+-- error
+alter table test_primary add constraint con_t_pri primary key using btree(f11, f12);
+ERROR:  PRIMARY KEY USING access_method is supported only in B-format database.
+LINE 1: alter table test_primary add constraint con_t_pri primary ke...
+                                                          ^
+alter table test_primary add constraint primary key using btree(f11, f12);
+ERROR:  PRIMARY KEY USING access_method is supported only in B-format database.
+LINE 1: alter table test_primary add constraint primary key using bt...
+                                                ^
+alter table test_primary add primary key using btree(f11, f12);
+ERROR:  PRIMARY KEY USING access_method is supported only in B-format database.
+LINE 1: alter table test_primary add primary key using btree(f11, f1...
+                                     ^
+alter table test_primary add primary key((abs(f11)));
+ERROR:  expression is supported only in B-format database.
+LINE 1: alter table test_primary add primary key((abs(f11)));
+                                                 ^
+alter table test_primary add primary key((f11 * 2 + 1));
+ERROR:  expression is supported only in B-format database.
+LINE 1: alter table test_primary add primary key((f11 * 2 + 1));
+                                                 ^
+alter table test_primary add primary key(f11 desc, f12 asc);
+ERROR:  ASC/DESC is supported only in B-format database.
+LINE 1: alter table test_primary add primary key(f11 desc, f12 asc);
+                                                 ^
+-- success
+alter table test_primary add primary key(f11, f12);
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "test_primary_pkey" for table "test_primary"
+\d+ test_primary
+                            Table "public.test_primary"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f11    | integer               | not null  | plain    |              | 
+ f12    | character varying(20) | not null  | extended |              | 
+ f13    | boolean               |           | plain    |              | 
+Indexes:
+    "test_primary_pkey" PRIMARY KEY, btree (f11, f12) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_primary;
+-- alter table using index
+-- success
+create table test_primary(f11 int, f12 varchar(20), f13 bool);
+create unique index idx_pri on test_primary using btree(f11, f12);
+alter table test_primary add constraint con_t_pri primary key using index idx_pri;
+NOTICE:  ALTER TABLE / ADD CONSTRAINT USING INDEX will rename index "idx_pri" to "con_t_pri"
+\d+ test_primary
+                            Table "public.test_primary"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f11    | integer               | not null  | plain    |              | 
+ f12    | character varying(20) | not null  | extended |              | 
+ f13    | boolean               |           | plain    |              | 
+Indexes:
+    "con_t_pri" PRIMARY KEY, btree (f11, f12) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_primary;
+create table test_primary(f11 int, f12 varchar(20), f13 bool);
+create unique index idx_pri on test_primary using btree(f11);
+alter table test_primary add primary key using index idx_pri;
+\d+ test_primary
+                            Table "public.test_primary"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f11    | integer               | not null  | plain    |              | 
+ f12    | character varying(20) |           | extended |              | 
+ f13    | boolean               |           | plain    |              | 
+Indexes:
+    "idx_pri" PRIMARY KEY, btree (f11) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_primary;
+-- error
+create table test_primary(f11 int, f12 varchar(20), f13 bool);
+create unique index idx_pri on test_primary using btree(f11, f12);
+alter table test_primary add constraint primary key using index idx_pri;
+ERROR:  CONSTRAINT without constraint_name is supported only in B-format database.
+LINE 1: alter table test_primary add constraint primary key using in...
+                                     ^
+\d+ test_primary
+                            Table "public.test_primary"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f11    | integer               |           | plain    |              | 
+ f12    | character varying(20) |           | extended |              | 
+ f13    | boolean               |           | plain    |              | 
+Indexes:
+    "idx_pri" UNIQUE, btree (f11, f12) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_primary;
+create table test_primary(f11 int, f12 varchar(20), f13 bool);
+create unique index idx_pri on test_primary using btree(f11 desc, f12 asc);
+alter table test_primary add constraint con_t_pri primary key using index idx_pri;
+ERROR:  index "idx_pri" does not have default sorting behavior
+LINE 1: alter table test_primary add constraint con_t_pri primary ke...
+                                     ^
+DETAIL:  Cannot create a primary key or unique constraint using such an index.
+\d+ test_primary
+                            Table "public.test_primary"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f11    | integer               |           | plain    |              | 
+ f12    | character varying(20) |           | extended |              | 
+ f13    | boolean               |           | plain    |              | 
+Indexes:
+    "idx_pri" UNIQUE, btree (f11 DESC, f12) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_primary;
+create table test_primary(f11 int, f12 varchar(20), f13 bool);
+create unique index idx_pri1 on test_primary using btree((abs(f11)));
+-- error
+alter table test_primary add primary key using index idx_pri1;
+ERROR:  index "idx_pri1" contains expressions
+LINE 1: alter table test_primary add primary key using index idx_pri...
+                                     ^
+DETAIL:  Cannot create a primary key or unique constraint using such an index.
+\d+ test_primary
+                            Table "public.test_primary"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f11    | integer               |           | plain    |              | 
+ f12    | character varying(20) |           | extended |              | 
+ f13    | boolean               |           | plain    |              | 
+Indexes:
+    "idx_pri1" UNIQUE, btree (abs(f11)) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+create unique index idx_pri2 on test_primary using btree((f11 * 2 + 1));
+-- error
+alter table test_primary add primary key using index idx_pri2;
+ERROR:  index "idx_pri2" contains expressions
+LINE 1: alter table test_primary add primary key using index idx_pri...
+                                     ^
+DETAIL:  Cannot create a primary key or unique constraint using such an index.
+\d+ test_primary
+                            Table "public.test_primary"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f11    | integer               |           | plain    |              | 
+ f12    | character varying(20) |           | extended |              | 
+ f13    | boolean               |           | plain    |              | 
+Indexes:
+    "idx_pri1" UNIQUE, btree (abs(f11)) TABLESPACE pg_default
+    "idx_pri2" UNIQUE, btree ((f11 * 2 + 1)) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_primary;
+-- test foreign key is only supported in B mode
+-- alter table 
+create table test_primary(f11 int, f12 varchar(20), f13 bool, primary key(f11));
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test_primary_pkey" for table "test_primary"
+create table test_foreign(f21 int, f22 timestamp);
+-- error
+alter table test_foreign add constraint con_t_foreign foreign key f_t_foreign (f21) references test_primary(f11);
+ERROR:  FOREIGN KEY name is supported only in B-format database.
+LINE 1: ...r table test_foreign add constraint con_t_foreign foreign ke...
+                                                             ^
+alter table test_foreign add constraint foreign key f_t_foreign (f21) references test_primary(f11);
+ERROR:  FOREIGN KEY name is supported only in B-format database.
+LINE 1: alter table test_foreign add constraint foreign key f_t_fore...
+                                                ^
+alter table test_foreign add foreign key f_t_foreign (f21) references test_primary(f11);
+ERROR:  FOREIGN KEY name is supported only in B-format database.
+LINE 1: alter table test_foreign add foreign key f_t_foreign (f21) r...
+                                     ^
+-- success
+alter table test_foreign add constraint con_t_foreign foreign key (f21) references test_primary(f11);
+\d+ test_foreign
+                               Table "public.test_foreign"
+ Column |            Type             | Modifiers | Storage | Stats target | Description 
+--------+-----------------------------+-----------+---------+--------------+-------------
+ f21    | integer                     |           | plain   |              | 
+ f22    | timestamp without time zone |           | plain   |              | 
+Foreign-key constraints:
+    "con_t_foreign" FOREIGN KEY (f21) REFERENCES test_primary(f11)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_foreign;
+create table test_foreign(f21 int, f22 timestamp);
+alter table test_foreign add foreign key (f21) references test_primary(f11);
+\d+ test_foreign
+                               Table "public.test_foreign"
+ Column |            Type             | Modifiers | Storage | Stats target | Description 
+--------+-----------------------------+-----------+---------+--------------+-------------
+ f21    | integer                     |           | plain   |              | 
+ f22    | timestamp without time zone |           | plain   |              | 
+Foreign-key constraints:
+    "test_foreign_f21_fkey" FOREIGN KEY (f21) REFERENCES test_primary(f11)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_foreign;
+drop table test_primary;
+-- test unique key is only supported in B mode
+-- alter table
+create table test_unique(f31 int, f32 varchar(20));
+-- error
+alter table test_unique add constraint con_t_unique unique u_t_unique using btree(f31);
+ERROR:  UNIQUE name is supported only in B-format database.
+LINE 1: ...ter table test_unique add constraint con_t_unique unique u_t...
+                                                             ^
+alter table test_unique add constraint con_t_unique unique using btree(f31);
+ERROR:  UNIQUE access_method_clause is supported only in B-format database.
+LINE 1: ...ter table test_unique add constraint con_t_unique unique usi...
+                                                             ^
+alter table test_unique add constraint unique u_t_unique using btree(f31);
+ERROR:  UNIQUE name is supported only in B-format database.
+LINE 1: alter table test_unique add constraint unique u_t_unique usi...
+                                               ^
+alter table test_unique add unique using btree(f31);
+ERROR:  UNIQUE access_method_clause is supported only in B-format database.
+LINE 1: alter table test_unique add unique using btree(f31);
+                                    ^
+alter table test_unique add constraint con_t_unique unique u_t_unique using btree((abs(f31)) desc);
+ERROR:  expression is supported only in B-format database.
+LINE 1: ...traint con_t_unique unique u_t_unique using btree((abs(f31))...
+                                                             ^
+alter table test_unique add constraint con_t_unique unique u_t_unique using btree((f31 * 2 + 1) desc);
+ERROR:  expression is supported only in B-format database.
+LINE 1: ...traint con_t_unique unique u_t_unique using btree((f31 * 2 +...
+                                                             ^
+alter table test_unique add unique using btree(f31 desc);
+ERROR:  ASC/DESC is supported only in B-format database.
+LINE 1: alter table test_unique add unique using btree(f31 desc);
+                                                       ^
+-- success
+alter table test_unique add constraint con_t_unique unique(f31);
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "con_t_unique" for table "test_unique"
+\d+ test_unique
+                             Table "public.test_unique"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f31    | integer               |           | plain    |              | 
+ f32    | character varying(20) |           | extended |              | 
+Indexes:
+    "con_t_unique" UNIQUE CONSTRAINT, btree (f31) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_unique;
+-- alter table using index
+-- error
+create table test_unique(f31 int, f32 varchar(20));
+create unique index idx_unique on test_unique using btree(f31 desc, f32 asc);
+alter table test_unique add constraint con_t_unique unique using index idx_unique;
+ERROR:  index "idx_unique" does not have default sorting behavior
+LINE 1: alter table test_unique add constraint con_t_unique unique u...
+                                    ^
+DETAIL:  Cannot create a primary key or unique constraint using such an index.
+\d+ test_unique
+                             Table "public.test_unique"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f31    | integer               |           | plain    |              | 
+ f32    | character varying(20) |           | extended |              | 
+Indexes:
+    "idx_unique" UNIQUE, btree (f31 DESC, f32) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_unique;
+create table test_unique(f31 int, f32 varchar(20));
+create unique index idx_unique on test_unique using btree(f31 desc, f32 asc);
+alter table test_unique add unique using index idx_unique;
+ERROR:  index "idx_unique" does not have default sorting behavior
+LINE 1: alter table test_unique add unique using index idx_unique;
+                                    ^
+DETAIL:  Cannot create a primary key or unique constraint using such an index.
+\d+ test_unique
+                             Table "public.test_unique"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f31    | integer               |           | plain    |              | 
+ f32    | character varying(20) |           | extended |              | 
+Indexes:
+    "idx_unique" UNIQUE, btree (f31 DESC, f32) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_unique;
+create table test_unique(f31 int, f32 varchar(20));
+create unique index idx_unique on test_unique using btree(f31, f32);
+alter table test_unique add constraint unique using index idx_unique;
+ERROR:  CONSTRAINT without constraint_name is supported only in B-format database.
+LINE 1: alter table test_unique add constraint unique using index id...
+                                    ^
+\d+ test_unique
+                             Table "public.test_unique"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f31    | integer               |           | plain    |              | 
+ f32    | character varying(20) |           | extended |              | 
+Indexes:
+    "idx_unique" UNIQUE, btree (f31, f32) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_unique;
+create table test_unique(f31 int, f32 varchar(20));
+create unique index idx_unique on test_unique using btree((abs(f31)) desc, f32 asc);
+alter table test_unique add unique using index idx_unique;
+ERROR:  index "idx_unique" contains expressions
+LINE 1: alter table test_unique add unique using index idx_unique;
+                                    ^
+DETAIL:  Cannot create a primary key or unique constraint using such an index.
+\d+ test_unique
+                             Table "public.test_unique"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f31    | integer               |           | plain    |              | 
+ f32    | character varying(20) |           | extended |              | 
+Indexes:
+    "idx_unique" UNIQUE, btree (abs(f31) DESC, f32) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_unique;
+create table test_unique(f31 int, f32 varchar(20));
+create unique index idx_unique on test_unique using btree((f31 * 2 + 1) desc, f32 asc);
+alter table test_unique add unique using index idx_unique;
+ERROR:  index "idx_unique" contains expressions
+LINE 1: alter table test_unique add unique using index idx_unique;
+                                    ^
+DETAIL:  Cannot create a primary key or unique constraint using such an index.
+\d+ test_unique
+                             Table "public.test_unique"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f31    | integer               |           | plain    |              | 
+ f32    | character varying(20) |           | extended |              | 
+Indexes:
+    "idx_unique" UNIQUE, btree ((f31 * 2 + 1) DESC, f32) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_unique;
+-- success
+create table test_unique(f31 int, f32 varchar(20));
+create unique index idx_unique on test_unique using btree(f31, f32);
+alter table test_unique add constraint con_t_unique unique using index idx_unique;
+NOTICE:  ALTER TABLE / ADD CONSTRAINT USING INDEX will rename index "idx_unique" to "con_t_unique"
+\d+ test_unique
+                             Table "public.test_unique"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f31    | integer               |           | plain    |              | 
+ f32    | character varying(20) |           | extended |              | 
+Indexes:
+    "con_t_unique" UNIQUE CONSTRAINT, btree (f31, f32) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_unique;
+-- partition table
+-- test primary key is only supported in B mode
+-- alter table
+-- error
+CREATE TABLE test_p_primary
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+alter table test_p_primary add constraint con_t_pri primary key using btree(f1, f2, f3);
+ERROR:  PRIMARY KEY USING access_method is supported only in B-format database.
+LINE 1: ...ter table test_p_primary add constraint con_t_pri primary ke...
+                                                             ^
+alter table test_p_primary add constraint primary key using btree(f1 desc, f2 asc, f3);
+ERROR:  ASC/DESC is supported only in B-format database.
+LINE 1: ..._p_primary add constraint primary key using btree(f1 desc, f...
+                                                             ^
+alter table test_p_primary add primary key using btree(f1 desc, f2 asc, f3);
+ERROR:  ASC/DESC is supported only in B-format database.
+LINE 1: ... table test_p_primary add primary key using btree(f1 desc, f...
+                                                             ^
+alter table test_p_primary add primary key using btree(f1 desc, f2 asc, f3);
+ERROR:  ASC/DESC is supported only in B-format database.
+LINE 1: ... table test_p_primary add primary key using btree(f1 desc, f...
+                                                             ^
+alter table test_p_primary add primary key using btree((abs(f1)) desc, (f2 * 2 + 1) asc, f3);
+ERROR:  expression is supported only in B-format database.
+LINE 1: ... table test_p_primary add primary key using btree((abs(f1)) ...
+                                                             ^
+-- success
+alter table test_p_primary add constraint con_t_pri primary key(f1, f2, f3);
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "con_t_pri" for table "test_p_primary"
+\d+ test_p_primary
+                    Table "public.test_p_primary"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ f1     | integer | not null  | plain   |              | 
+ f2     | integer | not null  | plain   |              | 
+ f3     | integer | not null  | plain   |              | 
+Indexes:
+    "con_t_pri" PRIMARY KEY, btree (f1, f2, f3) LOCAL TABLESPACE pg_default
+Partition By RANGE(f1)
+Number of partitions: 4 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_p_primary;
+-- alter table using index
+-- error
+CREATE TABLE test_p_primary
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+create unique index idx_pri on test_p_primary using btree(f1 desc, f2 asc, f3);
+alter table test_p_primary add constraint con_t_pri primary key using index idx_pri;
+ERROR:  index "idx_pri" does not have default sorting behavior
+LINE 1: alter table test_p_primary add constraint con_t_pri primary ...
+                                       ^
+DETAIL:  Cannot create a primary key or unique constraint using such an index.
+\d+ test_p_primary
+                    Table "public.test_p_primary"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ f1     | integer |           | plain   |              | 
+ f2     | integer |           | plain   |              | 
+ f3     | integer |           | plain   |              | 
+Indexes:
+    "idx_pri" UNIQUE, btree (f1 DESC, f2, f3) LOCAL TABLESPACE pg_default
+Partition By RANGE(f1)
+Number of partitions: 4 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_p_primary;
+CREATE TABLE test_p_primary
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+create unique index idx_pri on test_p_primary using btree(f1, f2, f3);
+alter table test_p_primary add constraint primary key using index idx_pri;
+ERROR:  CONSTRAINT without constraint_name is supported only in B-format database.
+LINE 1: alter table test_p_primary add constraint primary key using ...
+                                       ^
+\d+ test_p_primary
+                    Table "public.test_p_primary"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ f1     | integer |           | plain   |              | 
+ f2     | integer |           | plain   |              | 
+ f3     | integer |           | plain   |              | 
+Indexes:
+    "idx_pri" UNIQUE, btree (f1, f2, f3) LOCAL TABLESPACE pg_default
+Partition By RANGE(f1)
+Number of partitions: 4 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_p_primary;
+CREATE TABLE test_p_primary
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+create unique index idx_pri on test_p_primary using btree(f1 desc, f2 asc, f3);
+alter table test_p_primary add primary key using index idx_pri;
+ERROR:  index "idx_pri" does not have default sorting behavior
+LINE 1: alter table test_p_primary add primary key using index idx_p...
+                                       ^
+DETAIL:  Cannot create a primary key or unique constraint using such an index.
+\d+ test_p_primary
+                    Table "public.test_p_primary"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ f1     | integer |           | plain   |              | 
+ f2     | integer |           | plain   |              | 
+ f3     | integer |           | plain   |              | 
+Indexes:
+    "idx_pri" UNIQUE, btree (f1 DESC, f2, f3) LOCAL TABLESPACE pg_default
+Partition By RANGE(f1)
+Number of partitions: 4 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_p_primary;
+CREATE TABLE test_p_primary
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+create unique index idx_pri on test_p_primary using btree((abs(f1)) desc, (f2 * 2 + 1) asc, f3);
+ERROR:  Global partition index does not support EXPRESSION index
+alter table test_p_primary add primary key using index idx_pri1;
+ERROR:  index "idx_pri1" does not exist
+LINE 1: alter table test_p_primary add primary key using index idx_p...
+                                       ^
+\d+ test_p_primary
+                    Table "public.test_p_primary"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ f1     | integer |           | plain   |              | 
+ f2     | integer |           | plain   |              | 
+ f3     | integer |           | plain   |              | 
+Partition By RANGE(f1)
+Number of partitions: 4 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_p_primary;
+-- test foreign key in M mode
+-- alter table 
+CREATE TABLE test_p_primary
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER,
+    primary key (f1)
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test_p_primary_pkey" for table "test_p_primary"
+-- error
+CREATE TABLE test_p_foreign
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+alter table test_p_foreign add constraint con_t_foreign foreign key f_t_foreign (f1) references test_p_primary(f1);
+ERROR:  FOREIGN KEY name is supported only in B-format database.
+LINE 1: ...table test_p_foreign add constraint con_t_foreign foreign ke...
+                                                             ^
+\d+ test_p_foreign
+                    Table "public.test_p_foreign"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ f1     | integer |           | plain   |              | 
+ f2     | integer |           | plain   |              | 
+ f3     | integer |           | plain   |              | 
+Partition By RANGE(f1)
+Number of partitions: 4 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_p_foreign;
+CREATE TABLE test_p_foreign
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+alter table test_p_foreign add constraint foreign key f_t_foreign(f1) references test_p_primary(f1);
+ERROR:  FOREIGN KEY name is supported only in B-format database.
+LINE 1: alter table test_p_foreign add constraint foreign key f_t_fo...
+                                                  ^
+\d+ test_p_foreign
+                    Table "public.test_p_foreign"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ f1     | integer |           | plain   |              | 
+ f2     | integer |           | plain   |              | 
+ f3     | integer |           | plain   |              | 
+Partition By RANGE(f1)
+Number of partitions: 4 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_p_foreign;
+CREATE TABLE test_p_foreign
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+alter table test_p_foreign add foreign key f_t_foreign(f1) references test_p_primary(f1);
+ERROR:  FOREIGN KEY name is supported only in B-format database.
+LINE 1: alter table test_p_foreign add foreign key f_t_foreign(f1) r...
+                                       ^
+\d+ test_p_foreign
+                    Table "public.test_p_foreign"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ f1     | integer |           | plain   |              | 
+ f2     | integer |           | plain   |              | 
+ f3     | integer |           | plain   |              | 
+Partition By RANGE(f1)
+Number of partitions: 4 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_p_foreign;
+-- success
+CREATE TABLE test_p_foreign
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+alter table test_p_foreign add constraint con_t_foreign foreign key(f1) references test_p_primary(f1);
+\d+ test_p_foreign
+                    Table "public.test_p_foreign"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ f1     | integer |           | plain   |              | 
+ f2     | integer |           | plain   |              | 
+ f3     | integer |           | plain   |              | 
+Foreign-key constraints:
+    "con_t_foreign" FOREIGN KEY (f1) REFERENCES test_p_primary(f1)
+Partition By RANGE(f1)
+Number of partitions: 4 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_p_foreign;
+CREATE TABLE test_p_foreign
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+alter table test_p_foreign add foreign key(f1) references test_p_primary(f1);
+\d+ test_p_foreign
+                    Table "public.test_p_foreign"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ f1     | integer |           | plain   |              | 
+ f2     | integer |           | plain   |              | 
+ f3     | integer |           | plain   |              | 
+Foreign-key constraints:
+    "test_p_foreign_f1_fkey" FOREIGN KEY (f1) REFERENCES test_p_primary(f1)
+Partition By RANGE(f1)
+Number of partitions: 4 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_p_foreign;
+drop table test_p_primary;
+-- test unique key in M mode
+-- alter table
+-- error
+CREATE TABLE test_p_unique
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+alter table test_p_unique add constraint con_t_unique unique u_t_unique using btree(f1);
+ERROR:  UNIQUE name is supported only in B-format database.
+LINE 1: ...r table test_p_unique add constraint con_t_unique unique u_t...
+                                                             ^
+alter table test_p_unique add constraint con_t_unique unique using btree(f1);
+ERROR:  UNIQUE access_method_clause is supported only in B-format database.
+LINE 1: ...r table test_p_unique add constraint con_t_unique unique usi...
+                                                             ^
+alter table test_p_unique add constraint unique u_t_unique using btree(f1);
+ERROR:  UNIQUE name is supported only in B-format database.
+LINE 1: alter table test_p_unique add constraint unique u_t_unique u...
+                                                 ^
+alter table test_p_unique add unique using btree(f1);
+ERROR:  UNIQUE access_method_clause is supported only in B-format database.
+LINE 1: alter table test_p_unique add unique using btree(f1);
+                                      ^
+alter table test_p_unique add unique(f1 desc, f2 asc, f3);
+ERROR:  ASC/DESC is supported only in B-format database.
+LINE 1: alter table test_p_unique add unique(f1 desc, f2 asc, f3);
+                                             ^
+alter table test_p_unique add constraint con_t_unique unique ((abs(f1)) desc, (f2 * 2 + 1) asc, f3);
+ERROR:  expression is supported only in B-format database.
+LINE 1: ...test_p_unique add constraint con_t_unique unique ((abs(f1)) ...
+                                                             ^
+-- success
+alter table test_p_unique add constraint con_t_unique unique(f1, f2, f3);
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "con_t_unique" for table "test_p_unique"
+\d+ test_p_unique
+                    Table "public.test_p_unique"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ f1     | integer |           | plain   |              | 
+ f2     | integer |           | plain   |              | 
+ f3     | integer |           | plain   |              | 
+Indexes:
+    "con_t_unique" UNIQUE CONSTRAINT, btree (f1, f2, f3) LOCAL TABLESPACE pg_default
+Partition By RANGE(f1)
+Number of partitions: 4 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_p_unique;
+-- alter table using index
+-- error
+CREATE TABLE test_p_unique
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+create unique index idx_unique on test_p_unique using btree(f1 desc, f2 asc);
+alter table test_p_unique add constraint con_t_unique unique using index idx_unique;
+ERROR:  index "idx_unique" does not have default sorting behavior
+LINE 1: alter table test_p_unique add constraint con_t_unique unique...
+                                      ^
+DETAIL:  Cannot create a primary key or unique constraint using such an index.
+\d+ test_p_unique
+                    Table "public.test_p_unique"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ f1     | integer |           | plain   |              | 
+ f2     | integer |           | plain   |              | 
+ f3     | integer |           | plain   |              | 
+Indexes:
+    "idx_unique" UNIQUE, btree (f1 DESC, f2) LOCAL TABLESPACE pg_default
+Partition By RANGE(f1)
+Number of partitions: 4 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_p_unique;
+CREATE TABLE test_p_unique
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+create unique index idx_unique on test_p_unique using btree(f1, f2);
+alter table test_p_unique add constraint unique using index idx_unique;
+ERROR:  CONSTRAINT without constraint_name is supported only in B-format database.
+LINE 1: alter table test_p_unique add constraint unique using index ...
+                                      ^
+\d+ test_p_unique
+                    Table "public.test_p_unique"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ f1     | integer |           | plain   |              | 
+ f2     | integer |           | plain   |              | 
+ f3     | integer |           | plain   |              | 
+Indexes:
+    "idx_unique" UNIQUE, btree (f1, f2) LOCAL TABLESPACE pg_default
+Partition By RANGE(f1)
+Number of partitions: 4 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_p_unique;
+CREATE TABLE test_p_unique
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+create unique index idx_unique on test_p_unique using btree(f1 desc, f2 asc);
+alter table test_p_unique add unique using index idx_unique;
+ERROR:  index "idx_unique" does not have default sorting behavior
+LINE 1: alter table test_p_unique add unique using index idx_unique;
+                                      ^
+DETAIL:  Cannot create a primary key or unique constraint using such an index.
+\d+ test_p_unique
+                    Table "public.test_p_unique"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ f1     | integer |           | plain   |              | 
+ f2     | integer |           | plain   |              | 
+ f3     | integer |           | plain   |              | 
+Indexes:
+    "idx_unique" UNIQUE, btree (f1 DESC, f2) LOCAL TABLESPACE pg_default
+Partition By RANGE(f1)
+Number of partitions: 4 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_p_unique;
+CREATE TABLE test_p_unique
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+create unique index idx_unique on test_p_unique using btree((abs(f1)) desc, (f2 * 2 + 1) asc, f3);
+ERROR:  Global partition index does not support EXPRESSION index
+alter table test_p_unique add unique using index idx_unique;
+ERROR:  index "idx_unique" does not exist
+LINE 1: alter table test_p_unique add unique using index idx_unique;
+                                      ^
+\d+ test_p_unique
+                    Table "public.test_p_unique"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ f1     | integer |           | plain   |              | 
+ f2     | integer |           | plain   |              | 
+ f3     | integer |           | plain   |              | 
+Partition By RANGE(f1)
+Number of partitions: 4 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_p_unique;
+-- b compatibility case
+drop database if exists b;
+create database b dbcompatibility 'b';
+\c b
+-- test primary key is only supported in B mode
+-- alter table
+create table test_primary(f11 int, f12 varchar(20), f13 bool);
+alter table test_primary add constraint con_t_pri primary key using btree(f11 desc, f12 asc);
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "con_t_pri" for table "test_primary"
+\d+ test_primary
+                            Table "public.test_primary"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f11    | integer               | not null  | plain    |              | 
+ f12    | character varying(20) | not null  | extended |              | 
+ f13    | boolean               |           | plain    |              | 
+Indexes:
+    "con_t_pri" PRIMARY KEY, btree (f11 DESC, f12) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_primary;
+create table test_primary(f11 int, f12 varchar(20), f13 bool);
+alter table test_primary add constraint primary key(f11 desc, f12 asc);
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "test_primary_pkey" for table "test_primary"
+\d+ test_primary
+                            Table "public.test_primary"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f11    | integer               | not null  | plain    |              | 
+ f12    | character varying(20) | not null  | extended |              | 
+ f13    | boolean               |           | plain    |              | 
+Indexes:
+    "test_primary_pkey" PRIMARY KEY, btree (f11 DESC, f12) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_primary;
+create table test_primary(f11 int, f12 varchar(20), f13 bool);
+alter table test_primary add primary key using btree(f11 desc, f12 asc);
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "test_primary_pkey" for table "test_primary"
+\d+ test_primary
+                            Table "public.test_primary"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f11    | integer               | not null  | plain    |              | 
+ f12    | character varying(20) | not null  | extended |              | 
+ f13    | boolean               |           | plain    |              | 
+Indexes:
+    "test_primary_pkey" PRIMARY KEY, btree (f11 DESC, f12) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_primary;
+-- error
+create table test_primary(f11 int, f12 varchar(20), f13 bool);
+alter table test_primary add primary key((abs(f11)));
+ERROR:  primary keys cannot be expressions
+alter table test_primary add primary key((f11 * 2 + 1));
+ERROR:  primary keys cannot be expressions
+drop table test_primary;
+-- alter table using index
+create table test_primary(f11 int, f12 varchar(20), f13 bool);
+create unique index idx_pri on test_primary using btree(f11 desc, f12 asc);
+alter table test_primary add constraint con_t_pri primary key using index idx_pri;
+NOTICE:  ALTER TABLE / ADD CONSTRAINT USING INDEX will rename index "idx_pri" to "con_t_pri"
+\d+ test_primary
+                            Table "public.test_primary"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f11    | integer               | not null  | plain    |              | 
+ f12    | character varying(20) | not null  | extended |              | 
+ f13    | boolean               |           | plain    |              | 
+Indexes:
+    "con_t_pri" PRIMARY KEY, btree (f11 DESC, f12) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_primary;
+create table test_primary(f11 int, f12 varchar(20), f13 bool);
+create unique index idx_pri on test_primary using btree(f11 desc, f12 asc);
+alter table test_primary add constraint primary key using index idx_pri;
+\d+ test_primary
+                            Table "public.test_primary"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f11    | integer               | not null  | plain    |              | 
+ f12    | character varying(20) | not null  | extended |              | 
+ f13    | boolean               |           | plain    |              | 
+Indexes:
+    "idx_pri" PRIMARY KEY, btree (f11 DESC, f12) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_primary;
+create table test_primary(f11 int, f12 varchar(20), f13 bool);
+create unique index idx_pri on test_primary using btree(f11 desc);
+alter table test_primary add primary key using index idx_pri;
+\d+ test_primary
+                            Table "public.test_primary"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f11    | integer               | not null  | plain    |              | 
+ f12    | character varying(20) |           | extended |              | 
+ f13    | boolean               |           | plain    |              | 
+Indexes:
+    "idx_pri" PRIMARY KEY, btree (f11 DESC) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_primary;
+create table test_primary(f11 int, f12 varchar(20), f13 bool);
+create unique index idx_pri1 on test_primary using btree((abs(f11)));
+-- error
+alter table test_primary add primary key using index idx_pri1;
+ERROR:  primary keys cannot be expressions
+\d+ test_primary
+                            Table "public.test_primary"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f11    | integer               |           | plain    |              | 
+ f12    | character varying(20) |           | extended |              | 
+ f13    | boolean               |           | plain    |              | 
+Indexes:
+    "idx_pri1" UNIQUE, btree (abs(f11)) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+create unique index idx_pri2 on test_primary using btree((f11 * 2 + 1));
+-- error
+alter table test_primary add primary key using index idx_pri2;
+ERROR:  primary keys cannot be expressions
+\d+ test_primary
+                            Table "public.test_primary"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f11    | integer               |           | plain    |              | 
+ f12    | character varying(20) |           | extended |              | 
+ f13    | boolean               |           | plain    |              | 
+Indexes:
+    "idx_pri1" UNIQUE, btree (abs(f11)) TABLESPACE pg_default
+    "idx_pri2" UNIQUE, btree ((f11 * 2 + 1)) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_primary;
+create table test_primary(f11 int, f12 varchar(20), f13 bool, primary key(f11));
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test_primary_pkey" for table "test_primary"
+-- test foreign key in M mode
+-- alter table 
+create table test_foreign(f21 int, f22 timestamp);
+alter table test_foreign add constraint con_t_foreign foreign key f_t_foreign (f21) references test_primary(f11);
+\d+ test_foreign
+                               Table "public.test_foreign"
+ Column |            Type             | Modifiers | Storage | Stats target | Description 
+--------+-----------------------------+-----------+---------+--------------+-------------
+ f21    | integer                     |           | plain   |              | 
+ f22    | timestamp without time zone |           | plain   |              | 
+Foreign-key constraints:
+    "con_t_foreign" FOREIGN KEY (f21) REFERENCES test_primary(f11)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_foreign;
+create table test_foreign(f21 int, f22 timestamp);
+alter table test_foreign add constraint con_t_foreign foreign key (f21) references test_primary(f11);
+\d+ test_foreign
+                               Table "public.test_foreign"
+ Column |            Type             | Modifiers | Storage | Stats target | Description 
+--------+-----------------------------+-----------+---------+--------------+-------------
+ f21    | integer                     |           | plain   |              | 
+ f22    | timestamp without time zone |           | plain   |              | 
+Foreign-key constraints:
+    "con_t_foreign" FOREIGN KEY (f21) REFERENCES test_primary(f11)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_foreign;
+create table test_foreign(f21 int, f22 timestamp);
+alter table test_foreign add constraint foreign key f_t_foreign (f21) references test_primary(f11);
+\d+ test_foreign
+                               Table "public.test_foreign"
+ Column |            Type             | Modifiers | Storage | Stats target | Description 
+--------+-----------------------------+-----------+---------+--------------+-------------
+ f21    | integer                     |           | plain   |              | 
+ f22    | timestamp without time zone |           | plain   |              | 
+Foreign-key constraints:
+    "f_t_foreign" FOREIGN KEY (f21) REFERENCES test_primary(f11)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_foreign;
+create table test_foreign(f21 int, f22 timestamp);
+alter table test_foreign add foreign key f_t_foreign (f21) references test_primary(f11);
+\d+ test_foreign
+                               Table "public.test_foreign"
+ Column |            Type             | Modifiers | Storage | Stats target | Description 
+--------+-----------------------------+-----------+---------+--------------+-------------
+ f21    | integer                     |           | plain   |              | 
+ f22    | timestamp without time zone |           | plain   |              | 
+Foreign-key constraints:
+    "f_t_foreign" FOREIGN KEY (f21) REFERENCES test_primary(f11)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_foreign;
+create table test_foreign(f21 int, f22 timestamp);
+alter table test_foreign add foreign key (f21) references test_primary(f11);
+\d+ test_foreign
+                               Table "public.test_foreign"
+ Column |            Type             | Modifiers | Storage | Stats target | Description 
+--------+-----------------------------+-----------+---------+--------------+-------------
+ f21    | integer                     |           | plain   |              | 
+ f22    | timestamp without time zone |           | plain   |              | 
+Foreign-key constraints:
+    "test_foreign_f21_fkey" FOREIGN KEY (f21) REFERENCES test_primary(f11)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_foreign;
+drop table test_primary;
+-- test unique key in M mode
+-- alter table
+create table test_unique(f31 int, f32 varchar(20));
+alter table test_unique add constraint con_t_unique unique u_t_unique using btree(f31);
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "u_t_unique" for table "test_unique"
+\d+ test_unique
+                             Table "public.test_unique"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f31    | integer               |           | plain    |              | 
+ f32    | character varying(20) |           | extended |              | 
+Indexes:
+    "u_t_unique" UNIQUE CONSTRAINT, btree (f31) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_unique;
+create table test_unique(f31 int, f32 varchar(20));
+alter table test_unique add constraint con_t_unique unique using btree(f31);
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "con_t_unique" for table "test_unique"
+\d+ test_unique
+                             Table "public.test_unique"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f31    | integer               |           | plain    |              | 
+ f32    | character varying(20) |           | extended |              | 
+Indexes:
+    "con_t_unique" UNIQUE CONSTRAINT, btree (f31) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_unique;
+create table test_unique(f31 int, f32 varchar(20));
+alter table test_unique add constraint unique u_t_unique using btree(f31);
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "u_t_unique" for table "test_unique"
+\d+ test_unique
+                             Table "public.test_unique"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f31    | integer               |           | plain    |              | 
+ f32    | character varying(20) |           | extended |              | 
+Indexes:
+    "u_t_unique" UNIQUE CONSTRAINT, btree (f31) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_unique;
+create table test_unique(f31 int, f32 varchar(20));
+alter table test_unique add unique using btree(f31);
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "test_unique_f31_key" for table "test_unique"
+\d+ test_unique
+                             Table "public.test_unique"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f31    | integer               |           | plain    |              | 
+ f32    | character varying(20) |           | extended |              | 
+Indexes:
+    "test_unique_f31_key" UNIQUE CONSTRAINT, btree (f31) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_unique;
+create table test_unique(f31 int, f32 varchar(20));
+alter table test_unique add constraint con_t_unique unique u_t_unique using btree((abs(f31)) desc);
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "u_t_unique" for table "test_unique"
+\d+ test_unique
+                             Table "public.test_unique"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f31    | integer               |           | plain    |              | 
+ f32    | character varying(20) |           | extended |              | 
+Indexes:
+    "u_t_unique" UNIQUE CONSTRAINT, btree (abs(f31) DESC) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_unique;
+create table test_unique(f31 int, f32 varchar(20));
+alter table test_unique add constraint con_t_unique unique u_t_unique using btree((f31 * 2 + 1) desc);
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "u_t_unique" for table "test_unique"
+\d+ test_unique
+                             Table "public.test_unique"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f31    | integer               |           | plain    |              | 
+ f32    | character varying(20) |           | extended |              | 
+Indexes:
+    "u_t_unique" UNIQUE CONSTRAINT, btree ((f31 * 2 + 1) DESC) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_unique;
+-- alter table using index
+create table test_unique(f31 int, f32 varchar(20));
+create unique index idx_unique on test_unique using btree(f31 desc, f32 asc);
+alter table test_unique add constraint con_t_unique unique using index idx_unique;
+NOTICE:  ALTER TABLE / ADD CONSTRAINT USING INDEX will rename index "idx_unique" to "con_t_unique"
+\d+ test_unique
+                             Table "public.test_unique"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f31    | integer               |           | plain    |              | 
+ f32    | character varying(20) |           | extended |              | 
+Indexes:
+    "con_t_unique" UNIQUE CONSTRAINT, btree (f31 DESC, f32) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_unique;
+create table test_unique(f31 int, f32 varchar(20));
+create unique index idx_unique on test_unique using btree(f31 desc, f32 asc);
+alter table test_unique add unique using index idx_unique;
+\d+ test_unique
+                             Table "public.test_unique"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f31    | integer               |           | plain    |              | 
+ f32    | character varying(20) |           | extended |              | 
+Indexes:
+    "idx_unique" UNIQUE CONSTRAINT, btree (f31 DESC, f32) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_unique;
+create table test_unique(f31 int, f32 varchar(20));
+create unique index idx_unique on test_unique using btree((abs(f31)) desc, f32 asc);
+alter table test_unique add unique using index idx_unique;
+\d+ test_unique
+                             Table "public.test_unique"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f31    | integer               |           | plain    |              | 
+ f32    | character varying(20) |           | extended |              | 
+Indexes:
+    "idx_unique" UNIQUE CONSTRAINT, btree (abs(f31) DESC, f32) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_unique;
+create table test_unique(f31 int, f32 varchar(20));
+create unique index idx_unique on test_unique using btree((f31 * 2 + 1) desc, f32 asc);
+alter table test_unique add unique using index idx_unique;
+\d+ test_unique
+                             Table "public.test_unique"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f31    | integer               |           | plain    |              | 
+ f32    | character varying(20) |           | extended |              | 
+Indexes:
+    "idx_unique" UNIQUE CONSTRAINT, btree ((f31 * 2 + 1) DESC, f32) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_unique;
+-- test primary key is only supported in B mode
+-- alter table
+CREATE TABLE test_p_primary
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+alter table test_p_primary add constraint con_t_pri primary key using btree(f1 desc, f2 asc, f3);
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "con_t_pri" for table "test_p_primary"
+\d+ test_p_primary
+                    Table "public.test_p_primary"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ f1     | integer | not null  | plain   |              | 
+ f2     | integer | not null  | plain   |              | 
+ f3     | integer | not null  | plain   |              | 
+Indexes:
+    "con_t_pri" PRIMARY KEY, btree (f1 DESC, f2, f3) LOCAL TABLESPACE pg_default
+Partition By RANGE(f1)
+Number of partitions: 4 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_p_primary;
+CREATE TABLE test_p_primary
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+alter table test_p_primary add constraint primary key using btree(f1 desc, f2 asc, f3);
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "test_p_primary_pkey" for table "test_p_primary"
+\d+ test_p_primary
+                    Table "public.test_p_primary"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ f1     | integer | not null  | plain   |              | 
+ f2     | integer | not null  | plain   |              | 
+ f3     | integer | not null  | plain   |              | 
+Indexes:
+    "test_p_primary_pkey" PRIMARY KEY, btree (f1 DESC, f2, f3) LOCAL TABLESPACE pg_default
+Partition By RANGE(f1)
+Number of partitions: 4 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_p_primary;
+CREATE TABLE test_p_primary
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+alter table test_p_primary add primary key using btree(f1 desc, f2 asc, f3);
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "test_p_primary_pkey" for table "test_p_primary"
+\d+ test_p_primary
+                    Table "public.test_p_primary"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ f1     | integer | not null  | plain   |              | 
+ f2     | integer | not null  | plain   |              | 
+ f3     | integer | not null  | plain   |              | 
+Indexes:
+    "test_p_primary_pkey" PRIMARY KEY, btree (f1 DESC, f2, f3) LOCAL TABLESPACE pg_default
+Partition By RANGE(f1)
+Number of partitions: 4 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_p_primary;
+-- error
+CREATE TABLE test_p_primary
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+alter table test_p_primary add primary key using btree((abs(f1)) desc, (f2 * 2 + 1) asc, f3);
+ERROR:  Global partition index does not support EXPRESSION index
+drop table test_p_primary;
+-- alter table using index
+CREATE TABLE test_p_primary
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+create unique index idx_pri on test_p_primary using btree(f1 desc, f2 asc, f3);
+alter table test_p_primary add constraint con_t_pri primary key using index idx_pri;
+NOTICE:  ALTER TABLE / ADD CONSTRAINT USING INDEX will rename index "idx_pri" to "con_t_pri"
+\d+ test_p_primary
+                    Table "public.test_p_primary"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ f1     | integer | not null  | plain   |              | 
+ f2     | integer | not null  | plain   |              | 
+ f3     | integer | not null  | plain   |              | 
+Indexes:
+    "con_t_pri" PRIMARY KEY, btree (f1 DESC, f2, f3) LOCAL TABLESPACE pg_default
+Partition By RANGE(f1)
+Number of partitions: 4 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_p_primary;
+CREATE TABLE test_p_primary
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+create unique index idx_pri on test_p_primary using btree(f1 desc, f2 asc, f3);
+alter table test_p_primary add constraint primary key using index idx_pri;
+\d+ test_p_primary
+                    Table "public.test_p_primary"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ f1     | integer | not null  | plain   |              | 
+ f2     | integer | not null  | plain   |              | 
+ f3     | integer | not null  | plain   |              | 
+Indexes:
+    "idx_pri" PRIMARY KEY, btree (f1 DESC, f2, f3) LOCAL TABLESPACE pg_default
+Partition By RANGE(f1)
+Number of partitions: 4 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_p_primary;
+CREATE TABLE test_p_primary
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+create unique index idx_pri on test_p_primary using btree(f1 desc, f2 asc, f3);
+alter table test_p_primary add primary key using index idx_pri;
+\d+ test_p_primary
+                    Table "public.test_p_primary"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ f1     | integer | not null  | plain   |              | 
+ f2     | integer | not null  | plain   |              | 
+ f3     | integer | not null  | plain   |              | 
+Indexes:
+    "idx_pri" PRIMARY KEY, btree (f1 DESC, f2, f3) LOCAL TABLESPACE pg_default
+Partition By RANGE(f1)
+Number of partitions: 4 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_p_primary;
+CREATE TABLE test_p_primary
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+create unique index idx_pri on test_p_primary using btree((abs(f1)) desc, (f2 * 2 + 1) asc, f3);
+ERROR:  Global partition index does not support EXPRESSION index
+-- error
+alter table test_p_primary add primary key using index idx_pri1;
+ERROR:  index "idx_pri1" does not exist
+LINE 1: alter table test_p_primary add primary key using index idx_p...
+                                       ^
+\d+ test_p_primary
+                    Table "public.test_p_primary"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ f1     | integer |           | plain   |              | 
+ f2     | integer |           | plain   |              | 
+ f3     | integer |           | plain   |              | 
+Partition By RANGE(f1)
+Number of partitions: 4 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_p_primary;
+CREATE TABLE test_p_primary
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER,
+    primary key (f1)
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test_p_primary_pkey" for table "test_p_primary"
+-- test foreign key in M mode
+-- alter table 
+CREATE TABLE test_p_foreign
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+alter table test_p_foreign add constraint con_t_foreign foreign key f_t_foreign (f1) references test_p_primary(f1);
+\d+ test_p_foreign
+                    Table "public.test_p_foreign"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ f1     | integer |           | plain   |              | 
+ f2     | integer |           | plain   |              | 
+ f3     | integer |           | plain   |              | 
+Foreign-key constraints:
+    "con_t_foreign" FOREIGN KEY (f1) REFERENCES test_p_primary(f1)
+Partition By RANGE(f1)
+Number of partitions: 4 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_p_foreign;
+CREATE TABLE test_p_foreign
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+alter table test_p_foreign add constraint con_t_foreign foreign key(f1) references test_p_primary(f1);
+\d+ test_p_foreign
+                    Table "public.test_p_foreign"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ f1     | integer |           | plain   |              | 
+ f2     | integer |           | plain   |              | 
+ f3     | integer |           | plain   |              | 
+Foreign-key constraints:
+    "con_t_foreign" FOREIGN KEY (f1) REFERENCES test_p_primary(f1)
+Partition By RANGE(f1)
+Number of partitions: 4 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_p_foreign;
+CREATE TABLE test_p_foreign
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+alter table test_p_foreign add constraint foreign key f_t_foreign(f1) references test_p_primary(f1);
+\d+ test_p_foreign
+                    Table "public.test_p_foreign"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ f1     | integer |           | plain   |              | 
+ f2     | integer |           | plain   |              | 
+ f3     | integer |           | plain   |              | 
+Foreign-key constraints:
+    "f_t_foreign" FOREIGN KEY (f1) REFERENCES test_p_primary(f1)
+Partition By RANGE(f1)
+Number of partitions: 4 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_p_foreign;
+CREATE TABLE test_p_foreign
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+alter table test_p_foreign add foreign key f_t_foreign(f1) references test_p_primary(f1);
+\d+ test_p_foreign
+                    Table "public.test_p_foreign"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ f1     | integer |           | plain   |              | 
+ f2     | integer |           | plain   |              | 
+ f3     | integer |           | plain   |              | 
+Foreign-key constraints:
+    "f_t_foreign" FOREIGN KEY (f1) REFERENCES test_p_primary(f1)
+Partition By RANGE(f1)
+Number of partitions: 4 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_p_foreign;
+CREATE TABLE test_p_foreign
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+alter table test_p_foreign add foreign key(f1) references test_p_primary(f1);
+\d+ test_p_foreign
+                    Table "public.test_p_foreign"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ f1     | integer |           | plain   |              | 
+ f2     | integer |           | plain   |              | 
+ f3     | integer |           | plain   |              | 
+Foreign-key constraints:
+    "test_p_foreign_f1_fkey" FOREIGN KEY (f1) REFERENCES test_p_primary(f1)
+Partition By RANGE(f1)
+Number of partitions: 4 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_p_foreign;
+-- test unique key in M mode
+-- alter table
+CREATE TABLE test_p_unique
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+alter table test_p_unique add constraint con_t_unique unique u_t_unique using btree(f1);
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "u_t_unique" for table "test_p_unique"
+\d+ test_p_unique
+                    Table "public.test_p_unique"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ f1     | integer |           | plain   |              | 
+ f2     | integer |           | plain   |              | 
+ f3     | integer |           | plain   |              | 
+Indexes:
+    "u_t_unique" UNIQUE CONSTRAINT, btree (f1) LOCAL TABLESPACE pg_default
+Partition By RANGE(f1)
+Number of partitions: 4 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_p_unique;
+CREATE TABLE test_p_unique
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+alter table test_p_unique add constraint con_t_unique unique using btree(f1);
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "con_t_unique" for table "test_p_unique"
+\d+ test_p_unique
+                    Table "public.test_p_unique"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ f1     | integer |           | plain   |              | 
+ f2     | integer |           | plain   |              | 
+ f3     | integer |           | plain   |              | 
+Indexes:
+    "con_t_unique" UNIQUE CONSTRAINT, btree (f1) LOCAL TABLESPACE pg_default
+Partition By RANGE(f1)
+Number of partitions: 4 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_p_unique;
+CREATE TABLE test_p_unique
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+alter table test_p_unique add constraint unique u_t_unique using btree(f1);
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "u_t_unique" for table "test_p_unique"
+\d+ test_p_unique
+                    Table "public.test_p_unique"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ f1     | integer |           | plain   |              | 
+ f2     | integer |           | plain   |              | 
+ f3     | integer |           | plain   |              | 
+Indexes:
+    "u_t_unique" UNIQUE CONSTRAINT, btree (f1) LOCAL TABLESPACE pg_default
+Partition By RANGE(f1)
+Number of partitions: 4 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_p_unique;
+CREATE TABLE test_p_unique
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+alter table test_p_unique add unique using btree(f1);
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "test_p_unique_f1_key" for table "test_p_unique"
+\d+ test_p_unique
+                    Table "public.test_p_unique"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ f1     | integer |           | plain   |              | 
+ f2     | integer |           | plain   |              | 
+ f3     | integer |           | plain   |              | 
+Indexes:
+    "test_p_unique_f1_key" UNIQUE CONSTRAINT, btree (f1) LOCAL TABLESPACE pg_default
+Partition By RANGE(f1)
+Number of partitions: 4 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_p_unique;
+CREATE TABLE test_p_unique
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+alter table test_p_unique add unique using btree(f1 desc, f2 asc, f3);
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "test_p_unique_f1_f2_f3_key" for table "test_p_unique"
+\d+ test_p_unique
+                    Table "public.test_p_unique"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ f1     | integer |           | plain   |              | 
+ f2     | integer |           | plain   |              | 
+ f3     | integer |           | plain   |              | 
+Indexes:
+    "test_p_unique_f1_f2_f3_key" UNIQUE CONSTRAINT, btree (f1 DESC, f2, f3) LOCAL TABLESPACE pg_default
+Partition By RANGE(f1)
+Number of partitions: 4 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_p_unique;
+CREATE TABLE test_p_unique
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+alter table test_p_unique add constraint con_t_unique unique u_t_unique using btree((abs(f1)) desc, (f2 * 2 + 1) asc, f3);
+ERROR:  Global partition index does not support EXPRESSION index
+\d+ test_p_unique
+                    Table "public.test_p_unique"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ f1     | integer |           | plain   |              | 
+ f2     | integer |           | plain   |              | 
+ f3     | integer |           | plain   |              | 
+Partition By RANGE(f1)
+Number of partitions: 4 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_p_unique;
+-- alter table using index
+CREATE TABLE test_p_unique
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+create unique index idx_unique on test_p_unique using btree(f1 desc, f2 asc);
+alter table test_p_unique add constraint con_t_unique unique using index idx_unique;
+NOTICE:  ALTER TABLE / ADD CONSTRAINT USING INDEX will rename index "idx_unique" to "con_t_unique"
+\d+ test_p_unique
+                    Table "public.test_p_unique"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ f1     | integer |           | plain   |              | 
+ f2     | integer |           | plain   |              | 
+ f3     | integer |           | plain   |              | 
+Indexes:
+    "con_t_unique" UNIQUE CONSTRAINT, btree (f1 DESC, f2) LOCAL TABLESPACE pg_default
+Partition By RANGE(f1)
+Number of partitions: 4 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_p_unique;
+CREATE TABLE test_p_unique
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+create unique index idx_unique on test_p_unique using btree(f1 desc, f2 asc);
+alter table test_p_unique add constraint unique using index idx_unique;
+\d+ test_p_unique
+                    Table "public.test_p_unique"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ f1     | integer |           | plain   |              | 
+ f2     | integer |           | plain   |              | 
+ f3     | integer |           | plain   |              | 
+Indexes:
+    "idx_unique" UNIQUE CONSTRAINT, btree (f1 DESC, f2) LOCAL TABLESPACE pg_default
+Partition By RANGE(f1)
+Number of partitions: 4 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_p_unique;
+CREATE TABLE test_p_unique
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+create unique index idx_unique on test_p_unique using btree(f1 desc, f2 asc);
+alter table test_p_unique add unique using index idx_unique;
+\d+ test_p_unique
+                    Table "public.test_p_unique"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ f1     | integer |           | plain   |              | 
+ f2     | integer |           | plain   |              | 
+ f3     | integer |           | plain   |              | 
+Indexes:
+    "idx_unique" UNIQUE CONSTRAINT, btree (f1 DESC, f2) LOCAL TABLESPACE pg_default
+Partition By RANGE(f1)
+Number of partitions: 4 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_p_unique;
+CREATE TABLE test_p_unique
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+create unique index idx_unique on test_p_unique using btree((abs(f1)) desc, (f2 * 2 + 1) asc, f3);
+ERROR:  Global partition index does not support EXPRESSION index
+alter table test_p_unique add unique using index idx_unique;
+ERROR:  index "idx_unique" does not exist
+LINE 1: alter table test_p_unique add unique using index idx_unique;
+                                      ^
+\d+ test_p_unique
+                    Table "public.test_p_unique"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ f1     | integer |           | plain   |              | 
+ f2     | integer |           | plain   |              | 
+ f3     | integer |           | plain   |              | 
+Partition By RANGE(f1)
+Number of partitions: 4 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_p_unique;
+\c postgres

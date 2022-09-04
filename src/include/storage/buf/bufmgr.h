@@ -293,6 +293,8 @@ void InvalidateBuffer(BufferDesc *buf);
 void LockTwoLWLock(LWLock *new_partition_lock, LWLock *old_partition_lock);
 
 extern void InitBufferPool(void);
+extern void pca_buf_init_ctx();
+
 extern void InitBufferPoolAccess(void);
 extern void InitBufferPoolBackend(void);
 extern void AtEOXact_Buffers(bool isCommit);

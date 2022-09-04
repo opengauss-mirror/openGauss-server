@@ -34,12 +34,16 @@
 #include "access/tableam.h"
 #include "commands/tablespace.h"
 #include "storage/smgr/fd.h"
+#include "storage/smgr/segment.h"
+#include "storage/cfs/cfs_converter.h"
+#include "storage/cfs/cfs_repair.h"
 
 const int TIMEOUT_MIN = 60;
 const int TIMEOUT_MAX = 3600;
 static void checkUserPermission();
 static void checkInstanceType();
 static void checkSupUserOrOperaMode();
+void gs_tryrepair_compress_extent(SMgrRelation reln, BlockNumber logicBlockNumber);
 
 /*
  * Record a statistics of bad block:
@@ -71,22 +75,15 @@ void initRepairBadBlockStat()
     }
 }
 
-static void UnsupportedPageRepair(const char *path)
+bool getCompressedRelOpt(RelFileNode *relnode)
 {
-    char pcaPath[MAXPGPATH];
-    int rc = 0;
-    rc = snprintf_s(pcaPath, MAXPGPATH, MAXPGPATH - 1, "%s/%s_pca", t_thrd.proc_cxt.DataDir, path);
-    securec_check_ss(rc, "\0", "\0");
-
-    char pcdPath[MAXPGPATH];
-    rc = snprintf_s(pcdPath, MAXPGPATH, MAXPGPATH - 1, "%s/%s_pcd", t_thrd.proc_cxt.DataDir, path);
-    struct stat pcaStat;
-    struct stat pcdStat;
-    bool pcaState = stat(pcaPath, &pcaStat) == 0;
-    bool pcdState = stat(pcdPath, &pcdStat) == 0;
-    if (pcaState || pcdState) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), (errmsg("Compressed Table is not allowed here."))));
+    Relation relation = try_relation_open(relnode->relNode, AccessShareLock);
+    if (!RelationIsValid(relation)) {
+        return false;
     }
+    *relnode = relation->rd_node;
+    relation_close(relation, AccessShareLock);
+    return true;
 }
 
 /* BatchClearBadBlock
@@ -184,7 +181,7 @@ void UpdateRepairTime(const RelFileNode &rnode, ForkNumber forknum, BlockNumber 
     key.relfilenode.dbNode = rnode.dbNode;
     key.relfilenode.relNode = rnode.relNode;
     key.relfilenode.bucketNode = rnode.bucketNode;
-    key.relfilenode.opt = 0;
+    key.relfilenode.opt = rnode.opt;
     key.forknum = forknum;
     key.blocknum = blocknum;
 
@@ -226,7 +223,7 @@ void addGlobalRepairBadBlockStat(const RelFileNodeBackend &rnode, ForkNumber for
     key.relfilenode.dbNode = rnode.node.dbNode;
     key.relfilenode.relNode = rnode.node.relNode;
     key.relfilenode.bucketNode = rnode.node.bucketNode;
-    key.relfilenode.opt = 0;
+    key.relfilenode.opt = rnode.node.opt;
     key.forknum = forknum;
     key.blocknum = blocknum;
 
@@ -253,6 +250,10 @@ void addGlobalRepairBadBlockStat(const RelFileNodeBackend &rnode, ForkNumber for
             entry->key = key;
             entry->pblk.relNode = EXTENT_INVALID;
             entry->pblk.block = InvalidBlockNumber;
+        }
+        if (entry->repair_time != -1) {
+            entry->check_time = check_time;
+            entry->repair_time = -1;
         }
     }
     LWLockRelease(RepairBadBlockStatHashLock);
@@ -298,69 +299,128 @@ Buffer PageIsInMemory(SMgrRelation smgr, ForkNumber forkNum, BlockNumber blockNu
 
 
 // init RelFileNode and outputFilename
-void PrepForRead(char* path, int64 blocknum, bool is_segment, RelFileNode *relnode)
+void PrepForRead(char* path, uint blocknum, bool is_segment, RelFileNode *relnode)
 {
     char* pathFirstpart = (char*)palloc0(MAXFNAMELEN);
-    errno_t rc = 0;
-    bool flag = false;
 
     RelFileNodeForkNum relfilenode;
-    if (strlen(pathFirstpart) == 0) {
+    if (is_segment) {
+        char* bucketNodestr = strstr(path, "_b");
+        if (NULL != bucketNodestr) {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    (errmsg("Un-support feature"),
+                            errdetail("The repair do not support hashbucket."),
+                            errcause("The function is not implemented."),
+                            erraction("Do not repair hashbucket."))));
+        }
         relfilenode = relpath_to_filenode(path);
+        relfilenode.rnode.node.bucketNode = SegmentBktId;
+        if (!IsSegmentPhysicalRelNode(relfilenode.rnode.node)) {
+            Oid relation_oid = RelidByRelfilenodeCache(relfilenode.rnode.node.spcNode,
+                relfilenode.rnode.node.relNode);
+            if (!OidIsValid(relation_oid)) {
+                relation_oid = RelidByRelfilenode(relfilenode.rnode.node.spcNode,
+                    relfilenode.rnode.node.relNode, is_segment);
+            }
+            if (!OidIsValid(relation_oid)) {
+                ereport(ERROR,
+                        (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                                errmsg("Error parameter to get relation.")));
+            }
+
+            SMgrRelation reln = smgropen(relfilenode.rnode.node, InvalidBackendId);
+            if (reln->seg_desc == NULL ||
+                !(seg_exists(reln, MAIN_FORKNUM, blocknum) && reln->seg_desc[MAIN_FORKNUM] != NULL)) {
+                ereport(ERROR,
+                        (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                                errmsg("Error parameter to get smgr relation.")));
+            }
+
+            RelFileNode relFileNode = {
+                    .spcNode = reln->seg_space->spcNode,
+                    .dbNode = reln->seg_space->dbNode,
+                    .relNode = EXTENT_SIZE_TO_TYPE(LEVEL0_PAGE_EXTENT_SIZE),
+                    .bucketNode = SegmentBktId
+            };
+
+            Buffer buffer = ReadBufferFast((reln->seg_space), relFileNode, MAIN_FORKNUM,
+                                           (reln->seg_desc[MAIN_FORKNUM]->head_blocknum), RBM_NORMAL);
+            SegmentHead *head = (SegmentHead *)PageGetContents(BufferGetPage(buffer));
+            if (head->magic == BUCKET_SEGMENT_MAGIC) {
+                ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        (errmsg("Un-support feature"),
+                                errdetail("The repair do not support hashbucket."),
+                                errcause("The function is not implemented."),
+                                erraction("Do not repair hashbucket."))));
+            }
+        } else {
+            SegSpace *spc = spc_open(relfilenode.rnode.node.spcNode, relfilenode.rnode.node.dbNode, false, false);
+            if (!spc) {
+                ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        (errmsg("Spc open failed. spcNode is: %u, dbNode is %u",
+                                relfilenode.rnode.node.spcNode, relfilenode.rnode.node.dbNode))));
+            }
+            int egid = EXTENT_TYPE_TO_GROUPID(relfilenode.rnode.node.relNode);
+            SegExtentGroup *seg = &spc->extent_group[egid][MAIN_FORKNUM];
+            if (seg->segfile->total_blocks <= blocknum) {
+                ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        (errmsg("Total block is: %u, given block is %u",
+                                seg->segfile->total_blocks, blocknum))));
+            }
+            struct stat statBuf;
+            if (stat(path, &statBuf) < 0) {
+                ereport(ERROR,
+                        (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                                errmsg("Error parameter to open file.")));
+            }
+        }
     } else {
-        relfilenode = relpath_to_filenode(pathFirstpart);
+        relfilenode = relpath_to_filenode(path);
+        relfilenode.rnode.node.bucketNode = InvalidBktId;
     }
     if (relfilenode.forknumber != MAIN_FORKNUM) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                 (errmsg("Error forknum is: %d", relfilenode.forknumber))));
     }
-    if (is_segment) {
-        relfilenode.rnode.node.bucketNode = SegmentBktId;
-        // base/16604/4161_b10426
-        char* bucketNodestr = strstr(path, "_b");
-        if (NULL != bucketNodestr) {
-            bucketNodestr += 2; /* delete first two chars: _b */
-            int _bucketNode;
-            flag = StrToInt32(bucketNodestr, &_bucketNode);
-            if (!flag) {
-                ereport(ERROR, (errmsg("Can not covert %s to int32 type. \n", bucketNodestr)));
-            }
-            relfilenode.rnode.node.bucketNode = (int2)_bucketNode;
-            rc = strncpy_s(pathFirstpart, MAXFNAMELEN, path, strlen(path) - strlen(bucketNodestr));
-            securec_check(rc, "\0", "\0");
-        }
-        if (!IsSegmentPhysicalRelNode(relfilenode.rnode.node)) {
-            SMgrRelation reln = smgropen(relfilenode.rnode.node, InvalidBackendId);
-            bool exist = seg_exists(reln, MAIN_FORKNUM, blocknum);
-            bool found = false;
-            if (!(exist && reln->seg_desc[MAIN_FORKNUM] != NULL)) {
-                ereport(ERROR,
-                        (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                                errmsg("Error parameter to get smgr relation.")));
-            }
-            (void)SegBufferAlloc(reln->seg_space, relfilenode.rnode.node, MAIN_FORKNUM, blocknum, &found);
-            if (!found) {
-                ereport(ERROR,
-                        (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                                errmsg("Error parameter to find buffer")));
-            }
-        }
-    } else {
-        relfilenode.rnode.node.bucketNode = InvalidBktId;
-    }
     RelFileNodeCopy(*relnode, relfilenode.rnode.node, relfilenode.rnode.node.bucketNode);
     pfree(pathFirstpart);
 }
 
-bool tryRepairPage(int blocknum, bool is_segment, RelFileNode *relnode, int timeout)
+bool tryRepairPage(BlockNumber blocknum, bool is_segment, RelFileNode *relnode, int timeout)
 {
     char *buf = (char*)palloc0(BLCKSZ);
     XLogPhyBlock pblk;
     ForkNumber forknum = MAIN_FORKNUM;
     RelFileNode logicalRelNode = {0};
     int logicalBlocknum = 0;
+    BlockNumber checksumBlock = blocknum;
+
+    /* if it is compressed relation, fill the opt in RelFileNode */
+    if (!IsSegmentPhysicalRelNode(*relnode)) {
+        if (!getCompressedRelOpt(relnode)) {
+            relnode->opt = 0;
+        }
+    }
 
     SMgrRelation smgr = smgropen(*relnode, InvalidBackendId, GetColumnNum(forknum));
+    
+    /* we need check the pca header page first if the relation is compression relation,
+       and we need to try our best to repair this pca header page and the whole extent */
+    if (IS_COMPRESSED_RNODE(*relnode, MAIN_FORKNUM)) {
+        bool need_repair_pca = false;
+        if (!IsSegmentPhysicalRelNode(*relnode)) {
+            CfsHeaderPageCheckAndRepair(smgr, blocknum, NULL, ERR_MSG_LEN, &need_repair_pca);
+            if (need_repair_pca) {
+                /* clear local cache and smgr */
+                CacheInvalidateSmgr(smgr->smgr_rnode);
+
+                /* try repair the whole extent */
+                gs_tryrepair_compress_extent(smgr, blocknum);
+            }
+        } else {
+            ;
+        }
+    }
 
     RelFileNodeBackend relnodeBack;
     relnodeBack.node = *relnode;
@@ -386,11 +446,12 @@ bool tryRepairPage(int blocknum, bool is_segment, RelFileNode *relnode, int time
     // to repair page
     if (is_segment && !isSegmentPhysical) {
         RemoteReadBlock(relnodeBack, forknum, blocknum, buf, &pblk, timeout);
+        checksumBlock = logicalBlocknum;
     } else {
         RemoteReadBlock(relnodeBack, forknum, blocknum, buf, NULL, timeout);
     }
 
-    if (PageIsVerified((Page)buf, blocknum)) {
+    if (PageIsVerified((Page)buf, checksumBlock)) {
         if (is_segment) {
             SegSpace* spc = spc_open(relnode->spcNode, relnode->dbNode, false, false);
             if (!spc) {
@@ -459,6 +520,11 @@ bool repairPage(char* path, uint blocknum, bool is_segment, int timeout)
     t_thrd.storage_cxt.timeoutRemoteOpera = timeout;
 
     PrepForRead((char*)path, blocknum, is_segment, &relnode);
+
+    if (IsSegmentPhysicalRelNode(relnode)) {
+        repair_check_physical_type(relnode.spcNode, relnode.dbNode, MAIN_FORKNUM, &(relnode.relNode),
+                                   &blocknum);
+    }
 
     return tryRepairPage(blocknum, is_segment, &relnode, timeout);
 }
@@ -596,8 +662,6 @@ Datum gs_repair_page(PG_FUNCTION_ARGS)
     bool is_segment = PG_GETARG_BOOL(2);
     int32 timeout = PG_GETARG_INT32(3);
 
-    UnsupportedPageRepair(path);
-    
     bool result = repairPage(path, blockNum, is_segment, timeout);
     PG_RETURN_BOOL(result);
 }
@@ -624,8 +688,6 @@ Datum gs_repair_file(PG_FUNCTION_ARGS)
     char* path = text_to_cstring(PG_GETARG_TEXT_P(1));
     int32 timeout = PG_GETARG_INT32(2);
 
-    UnsupportedPageRepair(path);
-	
     if (!CheckRelDataFilePath(path)) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
             (errmsg("The input path(%s) is an incorrect relation file path input. \n", path))));
@@ -690,8 +752,8 @@ void splicMemPageMsg(bool isPageValid, bool isDirty, char* mem_page_res)
     }
 }
 
-bool isNeedRepairPageByMem(char* disk_page_res, int blockNum, char* mem_page_res,
-    XLogPhyBlock *pblk, RelFileNode relnode)
+bool isNeedRepairPageByMem(char* disk_page_res, BlockNumber blockNum, char* mem_page_res,
+    bool isSegment, RelFileNode relnode)
 {
     bool found = true;
     bool need_repair = false;
@@ -726,11 +788,6 @@ bool isNeedRepairPageByMem(char* disk_page_res, int blockNum, char* mem_page_res
 
     if (IsSegmentPhysicalRelNode(relnode)) {
         spc = spc_open(relnode.spcNode, relnode.dbNode, false, false);
-        if (!spc) {
-            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                    (errmsg("Spc open failed. spcNode is: %u, dbNode is %u",
-                            relnode.spcNode, relnode.dbNode))));
-        }
         seg_physical_read(spc, relnode, MAIN_FORKNUM, blockNum, buffer);
         if (PageIsVerified(buffer, blockNum)) {
             rdStatus = SMGR_RD_OK;
@@ -752,11 +809,11 @@ bool isNeedRepairPageByMem(char* disk_page_res, int blockNum, char* mem_page_res
     }
 
     if (!found && need_repair) {
-        if (IsSegmentPhysicalRelNode(relnode)) {
+        if (isSegment) {
             const int TIMEOUT = 1200;
             is_repair = tryRepairPage(blockNum, true, &relnode, TIMEOUT);
         } else {
-            buf = ReadBufferWithoutRelcache(relnode, MAIN_FORKNUM, blockNum, RBM_NORMAL, NULL, pblk);
+            buf = ReadBufferWithoutRelcache(relnode, MAIN_FORKNUM, blockNum, RBM_NORMAL, NULL, NULL);
             is_repair = true;
             UpdateRepairTime(relnode, MAIN_FORKNUM, blockNum);
         }
@@ -781,6 +838,63 @@ bool isNeedRepairPageByMem(char* disk_page_res, int blockNum, char* mem_page_res
     pfree(buffer);
     return is_repair;
 }
+    
+/* the extent is in compression relation,  */
+void gs_tryrepair_compress_extent(SMgrRelation reln, BlockNumber logicBlockNumber)
+{
+    errno_t rc = 0;
+    ExtentLocation location = cfsLocationConverts[COMMON_STORAGE](reln, MAIN_FORKNUM, logicBlockNumber, true,
+                                                                  EXTENT_OPEN_FILE);
+
+    char path[MAX_PATH];
+    rc = sprintf_s(path, MAX_PATH, "[RelFileNode:%u/%u/%u], extentNumber:%d, extentStart:%d,"
+                  "extentOffset:%d, headerNum:%d, chunk_size:%d",
+        location.relFileNode.spcNode, location.relFileNode.dbNode, location.relFileNode.relNode,
+        (int)location.extentNumber, (int)location.extentStart, (int)location.extentOffset,
+        (int)location.headerNum, (int)location.chrunk_size);
+    securec_check_ss(rc, "", "");
+
+    RemoteReadFileKey repairFileKey;
+    repairFileKey.relfilenode = reln->smgr_rnode.node;
+    repairFileKey.forknum = MAIN_FORKNUM;
+
+    /* read the remote size */
+    int64 size = RemoteReadFileSize(&repairFileKey, TIMEOUT_MIN);
+    if (size == -1) {
+        ereport(WARNING,
+            (errmsg("The file does not exist on the standby DN, don't need repair, path is %s", path)));
+        return;
+    }
+    if (size == 0) {
+        ereport(WARNING, (errmsg("standby size is zero, path is %s", path)));
+        return;
+    }
+
+    BlockNumber total = (BlockNumber)(size / BLCKSZ);
+    if (total <= logicBlockNumber) {
+        ereport(WARNING, (errmsg("Invalid Block Number, logicBlockNumber is %u, max number is %u.",
+                                 logicBlockNumber, total)));
+        return;
+    }
+    uint32 diff = (total - location.extentNumber * CFS_LOGIC_BLOCKS_PER_EXTENT);
+    uint32 read_size = (diff > CFS_LOGIC_BLOCKS_PER_EXTENT ? CFS_LOGIC_BLOCKS_PER_EXTENT : diff) * BLCKSZ;
+    repairFileKey.blockstart = location.extentNumber * CFS_LOGIC_BLOCKS_PER_EXTENT;
+    uint32 remote_size = 0;
+    char *buf = (char*)palloc0((Size)read_size);
+
+    /* read many pages from remote */
+    RemoteReadFile(&repairFileKey, buf, read_size, TIMEOUT_MIN, &remote_size);
+
+    /* write into extent */
+    rc = WriteRepairFile_Compress_extent(reln, logicBlockNumber, path, buf, location.extentStart * BLCKSZ,
+                                         (uint32)read_size / BLCKSZ);
+    if (rc != 0) {
+        pfree(buf);
+        ereport(ERROR, (errmsg("repair the whole extent failed, the information is %s", path)));
+    }
+
+    pfree(buf);
+}
 
 Datum gs_verify_and_tryrepair_page(PG_FUNCTION_ARGS)
 {
@@ -794,18 +908,16 @@ Datum gs_verify_and_tryrepair_page(PG_FUNCTION_ARGS)
     bool is_segment = PG_GETARG_BOOL(3);
     errno_t rc = 0;
     TupleDesc tupdesc = NULL;
-    Datum values[6];
-    bool nulls[6] = {false};
+    Datum values[REPAIR_BLOCK_STAT_NATTS];
+    bool nulls[REPAIR_BLOCK_STAT_NATTS] = {false};
     HeapTuple tuple = NULL;
     int i = 0;
     char* disk_page_res = (char*)palloc0(ERR_MSG_LEN);
     char* mem_page_res = (char*)palloc0(ERR_MSG_LEN);
+    char* pca_page_res = (char*)palloc0(ERR_MSG_LEN);
     bool is_repair = false;
     int j = 1;
-    XLogPhyBlock pblk = {0, 0, 0};
-
-    UnsupportedPageRepair(path);
-    
+  
     /* build tupdesc for result tuples */
     tupdesc = CreateTemplateTupleDesc(REPAIR_BLOCK_STAT_NATTS, false);
     TupleDescInitEntry(tupdesc, (AttrNumber)j++, "node_name", TEXTOID, -1, 0);
@@ -824,27 +936,50 @@ Datum gs_verify_and_tryrepair_page(PG_FUNCTION_ARGS)
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                 (errmsg("Blocknum should be between 0 and %u. \n", MaxBlockNumber))));
 
-    RelFileNode relnode = {0, 0, 0, -1};
-
+    RelFileNode relnode = {0, 0, 0, -1, 0};
     PrepForRead((char*)path, blockNum, is_segment, &relnode);
-    bool isSegmentPhysical = is_segment && IsSegmentPhysicalRelNode(relnode);
 
-    if (is_segment && !isSegmentPhysical) {
-        SegPageLocation loc = seg_get_physical_location(relnode, MAIN_FORKNUM, blockNum);
-        pblk.relNode = (uint8) EXTENT_SIZE_TO_TYPE(loc.extent_size);
-        pblk.block = loc.blocknum;
+    /* if it is compressed relation, fill the opt in RelFileNode */
+    if (!IsSegmentPhysicalRelNode(relnode)) {
+        if (!getCompressedRelOpt(&relnode)) {
+            relnode.opt = 0;
+        }
     }
 
     SMgrRelation smgr = smgropen(relnode, InvalidBackendId, GetColumnNum(MAIN_FORKNUM));
+    
+    /* we need check the pca header page first if the relation is compression relation,
+       and we need to try our best to repair this pca header page and the whole extent */
+    if (IS_COMPRESSED_RNODE(relnode, MAIN_FORKNUM)) {
+        bool need_repair_pca = false;
+        if (!IsSegmentPhysicalRelNode(relnode)) {
+            CfsHeaderPageCheckAndRepair(smgr, blockNum, pca_page_res, ERR_MSG_LEN, &need_repair_pca);
+            if (need_repair_pca) {
+                /* clear local cache and smgr */
+                CacheInvalidateSmgr(smgr->smgr_rnode);
 
+                /* try repair the whole extent */
+                gs_tryrepair_compress_extent(smgr, blockNum);
+            }
+        } else {
+            ;
+        }
+
+        if (pca_page_res != NULL) {
+            ereport(NOTICE, (errmsg("The relative pca page check result is %s.", pca_page_res)));
+        }
+    }
+
+    /* the single page check or repair */
     if (!verify_mem && !IsSegmentPhysicalRelNode(relnode)) { // only check disk
         gs_verify_page_by_disk(smgr, MAIN_FORKNUM, blockNum, disk_page_res);
     } else {
-        if (is_segment && !isSegmentPhysical) {
-            is_repair = isNeedRepairPageByMem(disk_page_res, blockNum, mem_page_res, &pblk, relnode);
-        } else {
-            is_repair = isNeedRepairPageByMem(disk_page_res, blockNum, mem_page_res, NULL, relnode);
+        BlockNumber logicBlockNum = blockNum;
+        if (IsSegmentPhysicalRelNode(relnode)) {
+            repair_check_physical_type(relnode.spcNode, relnode.dbNode, MAIN_FORKNUM, &(relnode.relNode),
+                                       &logicBlockNum);
         }
+        is_repair = isNeedRepairPageByMem(disk_page_res, logicBlockNum, mem_page_res, is_segment, relnode);
     }
 
     values[i++] = CStringGetTextDatum(g_instance.attr.attr_common.PGXCNodeName);
@@ -856,11 +991,13 @@ Datum gs_verify_and_tryrepair_page(PG_FUNCTION_ARGS)
     } else {
         nulls[i++] = true;   /* memory res is null */
     }
+
     values[i++] = BoolGetDatum(is_repair);
 
     tuple = heap_form_tuple(tupdesc, values, nulls);
     pfree(disk_page_res);
     pfree(mem_page_res);
+    pfree(pca_page_res);
     PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
 }
 
@@ -1047,16 +1184,24 @@ List* getPartitionBadFiles(Relation tableRel, List* badFileItems, Oid relOid)
         partitionClose(tableRel, ptmpRel, AccessShareLock);
 
         char* path = relpathperm(prnode, MAIN_FORKNUM);
+        char* openFilePath = path;
+        char dst[MAXPGPATH];
+        if (IS_COMPRESSED_RNODE(prnode, MAIN_FORKNUM)) {
+            CopyCompressedPath(dst, path);
+            openFilePath = dst;
+        }
 
         struct stat statBuf;
-        if (stat(path, &statBuf) < 0) {
-            badFileItems = appendBadFileItems(badFileItems, prelOid, partitionForm->relname.data, path);
+        if (stat(openFilePath, &statBuf) < 0) {
+            badFileItems = appendBadFileItems(badFileItems, prelOid, partitionForm->relname.data, openFilePath);
         }
 
         maxSegno = getMaxSegno(&prnode);
         if (maxSegno != 0) {
-            badFileItems = getSegnoBadFiles(path, maxSegno, prelOid, partitionForm->relname.data, badFileItems);
+            badFileItems = getSegnoBadFiles(path, maxSegno, prelOid, partitionForm->relname.data, badFileItems,
+                                            IS_COMPRESSED_RNODE(prnode, MAIN_FORKNUM));
         }
+        pfree(path);
     }
     systable_endscan(pscan);
     heap_close(prelation, AccessShareLock);
@@ -1100,6 +1245,7 @@ int getMaxSegno(RelFileNode* prnode)
         pdir = NULL;
     }
     pfree(oidStr);
+
     return maxSegno;
 }
 
@@ -1108,9 +1254,16 @@ List* getTableBadFiles(List* badFileItems, Oid relOid, Form_pg_class classForm, 
     int maxSegno = 0;
     RelFileNode rnode = tableRel->rd_node;
     char* path = relpathperm(rnode, MAIN_FORKNUM);
+    char* openFilePath = path;
+    char dst[MAXPGPATH];
+    if (IS_COMPRESSED_RNODE(rnode, MAIN_FORKNUM)) {
+        CopyCompressedPath(dst, path);
+        openFilePath = dst;
+    }
+    
     struct stat statBuf;
-    if (stat(path, &statBuf) < 0) {
-        badFileItems = appendBadFileItems(badFileItems, relOid, classForm->relname.data, path);
+    if (stat(openFilePath, &statBuf) < 0) {
+        badFileItems = appendBadFileItems(badFileItems, relOid, classForm->relname.data, openFilePath);
     }
 
     if (classForm->relpersistence == RELPERSISTENCE_UNLOGGED) {
@@ -1124,7 +1277,8 @@ List* getTableBadFiles(List* badFileItems, Oid relOid, Form_pg_class classForm, 
     maxSegno = getMaxSegno(&rnode);
 
     if (maxSegno != 0) {
-        badFileItems = getSegnoBadFiles(path, maxSegno, relOid, classForm->relname.data, badFileItems);
+        badFileItems = getSegnoBadFiles(path, maxSegno, relOid, classForm->relname.data, badFileItems,
+                                        IS_COMPRESSED_RNODE(rnode, MAIN_FORKNUM));
     }
     pfree(path);
     return badFileItems;
@@ -1143,7 +1297,7 @@ List* getSegmentBadFiles(List* spcList, List* badFileItems)
             .opt = 0
         };
         char* segmentDir = relSegmentDir(relFileNode, MAIN_FORKNUM);
-        List* segmentFiles = getSegmentMainFilesPath(segmentDir, '/', 5);
+        List* segmentFiles = getSegmentMainFilesPath(segmentDir, '/', 5, false);
         ListCell *currentCell = NULL;
         foreach(currentCell, segmentFiles) {
             if (stat((char*)lfirst(currentCell), &statBuf) < 0) {
@@ -1151,20 +1305,21 @@ List* getSegmentBadFiles(List* spcList, List* badFileItems)
             } else {
                 uint32 highWater =  getSegmentFileHighWater((char*)lfirst(currentCell));
                 int fileNum = highWater / (REGR_MCR_SIZE_1GB / BLCKSZ) + 1;
-                badFileItems = getSegnoBadFiles((char*)lfirst(currentCell), fileNum - 1, 0, "none", badFileItems);
+                badFileItems = getSegnoBadFiles((char*)lfirst(currentCell), fileNum - 1, 0, "none",
+                                                badFileItems, false);
             }
         }
     }
     return badFileItems;
 }
 
-List* getSegnoBadFiles(char* path, int maxSegno, Oid relOid, char* tabName, List* badFileItems)
+List* getSegnoBadFiles(char* path, int maxSegno, Oid relOid, char* tabName, List* badFileItems, bool isCompressed)
 {
     if (maxSegno < 1) {
         return badFileItems;
     }
     struct stat statBuf;
-    List* segmentFiles = getSegmentMainFilesPath(path, '.', maxSegno);
+    List* segmentFiles = getSegmentMainFilesPath(path, '.', maxSegno, isCompressed);
     ListCell *currentCell = NULL;
     foreach(currentCell, segmentFiles) {
         if (stat((char*)lfirst(currentCell), &statBuf) < 0) {
@@ -1236,7 +1391,7 @@ char* relSegmentDir(RelFileNode rnode, ForkNumber forknum)
     return pathDir;
 }
 
-List* getSegmentMainFilesPath(char* segmentDir, char split, int num)
+List* getSegmentMainFilesPath(char* segmentDir, char split, int num, bool isCompressed)
 {
     if (segmentDir == NULL) {
         return NULL;
@@ -1250,7 +1405,16 @@ List* getSegmentMainFilesPath(char* segmentDir, char split, int num)
         path = (char*)palloc0(pathlen);
         int rc = snprintf_s(path, pathlen, pathlen - 1, "%s%c%d", segmentDir, split, i);
         securec_check_ss(rc, "\0", "\0");
-        segmentMainFilesPath = lappend(segmentMainFilesPath, path);
+
+        char* openFilePath = path;
+        if (isCompressed) {
+            char* dst = (char*)palloc0(MAXPGPATH);
+            CopyCompressedPath(dst, path);
+            pfree(path);
+            openFilePath = dst;
+        }
+
+        segmentMainFilesPath = lappend(segmentMainFilesPath, openFilePath);
     }
     return segmentMainFilesPath;
 }
@@ -1325,14 +1489,15 @@ int getIntLength(uint32 intValue)
     return length;
 }
 
-static bool PrimaryRepairSegFile(RemoteReadFileKey *repairFileKey, char* path, int32 seg_no, int32 maxSegno,
+static bool PrimaryRepairSegFile_Segment(RemoteReadFileKey *repairFileKey, char* path, int32 seg_no, int32 maxSegno,
     int timeout, int64 size)
 {
     struct stat statBuf;
     errno_t rc;
     char* buf = NULL;
     char *segpath = (char *)palloc0(strlen(path) + SEGLEN);
-    uint32 seg_size  = (seg_no < maxSegno ? (RELSEG_SIZE * BLCKSZ) : (size % (RELSEG_SIZE * BLCKSZ)));
+    uint32 seg_size  = ((seg_no < maxSegno || (size % (RELSEG_SIZE * BLCKSZ)) == 0) ?
+                        (RELSEG_SIZE * BLCKSZ) : (size % (RELSEG_SIZE * BLCKSZ)));
 
     if (seg_no == 0) {
         rc = sprintf_s(segpath, strlen(path) + SEGLEN, "%s", path);
@@ -1356,16 +1521,19 @@ static bool PrimaryRepairSegFile(RemoteReadFileKey *repairFileKey, char* path, i
         RelFileNodeForkNum fileNode;
         fileNode.rnode = rnode;
         fileNode.forknumber = repairFileKey->forknum;
-        fileNode.segno = seg_no;
+        fileNode.segno = (BlockNumber)seg_no;
         fileNode.storage = ROW_STORE;
         if (!repair_deleted_file_check(fileNode, -1)) {
             ereport(WARNING, (errcode_for_file_access(),
-                    errmsg("could not repair file \"%s\" before deleted not closed: %m", segpath)));
+                    errmsg("could not repair file \"%s\" before deleted not closed: ", segpath)));
             pfree(segpath);
             return false;
         }
+
+        /* clear local cache and smgr */
         CacheInvalidateSmgr(rnode);
 
+        /* create temp repair file */
         int fd = CreateRepairFile(segpath);
         if (fd < 0) {
             ereport(WARNING, (errcode_for_file_access(),
@@ -1377,21 +1545,137 @@ static bool PrimaryRepairSegFile(RemoteReadFileKey *repairFileKey, char* path, i
 
         buf = (char*)palloc0(MAX_BATCH_READ_BLOCKNUM * BLCKSZ);
         int batch_size = MAX_BATCH_READ_BLOCKNUM * BLCKSZ;
-        int max_times = seg_size % batch_size == 0 ? seg_size / batch_size : (seg_size / batch_size + 1);
+        int max_times = (int)seg_size % batch_size == 0 ? (int)seg_size / batch_size : ((int)seg_size / batch_size + 1);
 
         for (int j = 0; j < max_times; j++) {
-            int read_size = 0;
+            uint32 read_size = 0;
             uint32 remote_size = 0;
             repairFileKey->blockstart = seg_no * RELSEG_SIZE + j * MAX_BATCH_READ_BLOCKNUM;
             if (seg_size % batch_size != 0) {
                 read_size = (j == max_times - 1 ? seg_size % batch_size : batch_size);
             } else {
+                read_size = (uint32)batch_size;
+            }
+
+            /* read many pages from remote */
+            RemoteReadFile(repairFileKey, buf, read_size, timeout, &remote_size);
+
+            /* write to local temp file */
+            rc = WriteRepairFile(fd, segpath, buf, (uint32)(j * batch_size), read_size);
+            if (rc != 0) {
+                (void)close(fd);
+                pfree(buf);
+                pfree(segpath);
+                ereport(WARNING, (errcode_for_file_access(),
+                        errmsg("could not write repair file \"%s\", segno is %d",
+                               relpathperm(repairFileKey->relfilenode, repairFileKey->forknum), seg_no)));
+                return false;
+            }
+        }
+
+        if (!repair_deleted_file_check(fileNode, fd)) {
+            (void)close(fd);
+        }
+        pfree(buf);
+        rc = CheckAndRenameFile(segpath);
+        if (rc != 0) {
+            pfree(segpath);
+            ereport(WARNING, (errcode_for_file_access(),
+                    errmsg("could not rename file \"%s\", segno is %d",
+                           relpathperm(repairFileKey->relfilenode, repairFileKey->forknum), seg_no)));
+            return false;
+        }
+        BatchUpdateRepairTime(repairFileKey->relfilenode, repairFileKey->forknum, (BlockNumber)seg_no);
+    }
+    pfree(segpath);
+    return true;
+}
+
+static bool PrimaryRepairSegFile_NonSegment(const RelFileNode &rd_node, RemoteReadFileKey *repairFileKey, char* path,
+                                            int32 seg_no, int32 maxSegno, int timeout, int64 size)
+{
+    struct stat statBuf;
+    errno_t rc;
+    char* buf = NULL;
+    int64 segpathlen = strlen(path) + SEGLEN + strlen(COMPRESS_STR);
+    char *segpath = (char *)palloc0((Size)segpathlen);
+    BlockNumber relSegSize = IS_COMPRESSED_RNODE(rd_node, MAIN_FORKNUM) ? CFS_LOGIC_BLOCKS_PER_FILE: RELSEG_SIZE;
+    uint32 seg_size  = (uint32)((seg_no < maxSegno || ((uint32)size % (relSegSize * BLCKSZ)) == 0) ?
+                        (relSegSize * BLCKSZ) : ((uint32)size % (relSegSize * BLCKSZ)));
+
+    if (seg_no == 0) {
+        rc = sprintf_s(segpath, (uint64)segpathlen, "%s%s", path,
+            IS_COMPRESSED_RNODE(rd_node, MAIN_FORKNUM) ? COMPRESS_STR : "");
+    } else {
+        rc = sprintf_s(segpath, (uint64)segpathlen, "%s.%d%s", path, seg_no,
+            IS_COMPRESSED_RNODE(rd_node, MAIN_FORKNUM) ? COMPRESS_STR : "");
+    }
+    securec_check_ss(rc, "", "");
+
+    if (stat(segpath, &statBuf) < 0) {
+        /* ENOENT is expected after the last segment... */
+        if (errno != ENOENT) {
+            ereport(WARNING, (errcode_for_file_access(),
+                    errmsg("could not stat file \"%s\" before repair: ", segpath)));
+            pfree(segpath);
+            return false;
+        }
+
+        RelFileNodeBackend rnode;
+        rnode.node = repairFileKey->relfilenode;
+        rnode.backend = InvalidBackendId;
+        RelFileNodeForkNum fileNode;
+        fileNode.rnode = rnode;
+        fileNode.forknumber = repairFileKey->forknum;
+        fileNode.segno = seg_no;
+        fileNode.storage = ROW_STORE;
+        if (!repair_deleted_file_check(fileNode, -1)) {
+            ereport(WARNING, (errcode_for_file_access(),
+                    errmsg("could not repair file \"%s\" before deleted not closed: %m", segpath)));
+            pfree(segpath);
+            return false;
+        }
+
+        /* clear local cache and smgr */
+        CacheInvalidateSmgr(rnode);
+
+        /* create temp repair file */
+        int fd = CreateRepairFile(segpath);
+        if (fd < 0) {
+            ereport(WARNING, (errcode_for_file_access(),
+                              errmsg("could not create repair file \"%s\", segno is %d",
+                                     relpathperm(repairFileKey->relfilenode, repairFileKey->forknum),
+                                     seg_no)));
+            pfree(segpath);
+            return false;
+        }
+
+        int batch_size = MAX_BATCH_READ_BLOCKNUM * BLCKSZ;
+        buf = (char*)palloc0((uint32)batch_size);
+        int max_times = (int)(seg_size % batch_size == 0 ? (int)seg_size / batch_size :
+                                                         ((int)seg_size / batch_size + 1));
+
+        for (int j = 0; j < max_times; j++) {
+            int read_size = 0;
+            uint32 remote_size = 0;
+            repairFileKey->blockstart = (uint32)(seg_no * (int)relSegSize + j * MAX_BATCH_READ_BLOCKNUM);
+            if ((int)seg_size % batch_size != 0) {
+                read_size = (j == max_times - 1 ? (int)seg_size % batch_size : batch_size);
+            } else {
                 read_size = batch_size;
             }
 
+            /* read many pages from remote */
             RemoteReadFile(repairFileKey, buf, read_size, timeout, &remote_size);
 
-            rc = WriteRepairFile(fd, segpath, buf, j * batch_size, read_size);
+            /* write to local temp file */
+            if (IS_COMPRESSED_RNODE(rd_node, MAIN_FORKNUM)) {
+                rc = WriteRepairFile_Compress(rd_node, fd, segpath, buf,
+                                              (BlockNumber)(j * MAX_BATCH_READ_BLOCKNUM),
+                                              (uint32)read_size / BLCKSZ);
+            } else {
+                rc = WriteRepairFile(fd, segpath, buf, j * batch_size, read_size);
+            }
             if (rc != 0) {
                 (void)close(fd);
                 pfree(buf);
@@ -1417,6 +1701,7 @@ static bool PrimaryRepairSegFile(RemoteReadFileKey *repairFileKey, char* path, i
         }
         BatchUpdateRepairTime(repairFileKey->relfilenode, repairFileKey->forknum, seg_no);
     }
+
     pfree(segpath);
     return true;
 }
@@ -1487,6 +1772,9 @@ bool gsRepairFile(Oid tableOid, char* path, int timeout)
 
     repairFileKey.relfilenode = relFileNodeForkNum.rnode.node;
     repairFileKey.forknum = relFileNodeForkNum.forknumber;
+    if (!isSegment && IS_COMPRESSED_RNODE(relation->rd_node, MAIN_FORKNUM)) {
+        repairFileKey.relfilenode.opt = relation->rd_node.opt;
+    }
     char* firstPath = relpathperm(repairFileKey.relfilenode, repairFileKey.forknum);
 
     int64 size = RemoteReadFileSize(&repairFileKey, timeout);
@@ -1508,18 +1796,19 @@ bool gsRepairFile(Oid tableOid, char* path, int timeout)
         return true;
     }
 
-    int maxSegno = size / (RELSEG_SIZE * BLCKSZ);
-
-    for (int i = 0; i <= maxSegno; i++) {
-        bool repair = PrimaryRepairSegFile(&repairFileKey, firstPath, i, maxSegno, timeout, size);
-        if (!repair) {
-            ereport(WARNING, (errmsg("repair file %s seg_no is %d, failed", path, i)));
-            pfree(firstPath);
-            return false;
-        }
-    }
-
     if (isSegment) {
+        int maxSegno = (size % (RELSEG_SIZE * BLCKSZ)) != 0 ? size / (RELSEG_SIZE * BLCKSZ) :
+                        (size / (RELSEG_SIZE * BLCKSZ)) - 1;
+
+        for (int i = 0; i <= maxSegno; i++) {
+            bool repair = PrimaryRepairSegFile_Segment(&repairFileKey, firstPath, i, maxSegno, timeout, size);
+            if (!repair) {
+                ereport(WARNING, (errmsg("repair file %s seg_no is %d, failed", path, i)));
+                pfree(firstPath);
+                return false;
+            }
+        }
+
         RepairFileKey key;
         key.relfilenode = repairFileKey.relfilenode;
         key.forknum = repairFileKey.forknum;
@@ -1527,8 +1816,25 @@ bool gsRepairFile(Oid tableOid, char* path, int timeout)
         df_close_all_file(key, maxSegno);
         df_open_all_file(key, maxSegno);
     } else {
+        BlockNumber relSegSize = IS_COMPRESSED_RNODE(relation->rd_node,
+                                                     MAIN_FORKNUM) ? CFS_LOGIC_BLOCKS_PER_FILE: RELSEG_SIZE;
+        int32 maxSegno = ((int32)size % ((int64)relSegSize * BLCKSZ)) != 0
+                         ? (int32)size / ((int64)relSegSize * BLCKSZ)
+                         : ((int32)size / ((int64)relSegSize * BLCKSZ)) - 1;
+
+        for (int32 i = 0; i <= maxSegno; i++) {
+            bool repair = PrimaryRepairSegFile_NonSegment(relation->rd_node, &repairFileKey, firstPath, i, maxSegno,
+                                                          timeout, size);
+            if (!repair) {
+                ereport(WARNING, (errmsg("repair file %s seg_no is %d, failed", path, i)));
+                pfree(firstPath);
+                return false;
+            }
+        }
+
         heap_close(relation, AccessExclusiveLock);
     }
+
     pfree(firstPath);
     return true;
 }

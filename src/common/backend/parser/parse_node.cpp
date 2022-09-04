@@ -97,8 +97,9 @@ void free_parsestate(ParseState* pstate)
             (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
                 errmsg("target lists can have at most %d entries", MaxTupleAttributeNumber)));
     }
-    if (pstate->p_target_relation != NULL) {
-        heap_close(pstate->p_target_relation, NoLock);
+    foreach_cell (l, pstate->p_target_relation) {
+        Relation r = (Relation)lfirst(l);
+        heap_close(r, NoLock);
     }
     pfree_ext(pstate);
 }
@@ -340,6 +341,7 @@ ArrayRef* transformArraySubscripts(ParseState* pstate, Node* arrayBase, Oid arra
     /*
      * Transform the subscript expressions.
      */
+    int i = 0;
     foreach (idx, indirection) {
         A_Indices* ai = (A_Indices*)lfirst(idx);
         Node* subexpr = NULL;
@@ -368,11 +370,13 @@ ArrayRef* transformArraySubscripts(ParseState* pstate, Node* arrayBase, Oid arra
         if (get_typecategory(arrayType) == TYPCATEGORY_TABLEOF_VARCHAR) {
             isIndexByVarchar = true;
         }
-        if ((nodeTag(arrayBase) == T_Param && ((Param*)arrayBase)->tableOfIndexType == VARCHAROID)
+        if ((nodeTag(arrayBase) == T_Param && list_length(((Param*)arrayBase)->tableOfIndexTypeList) > i
+             && list_nth_oid(((Param*)arrayBase)->tableOfIndexTypeList, i) == VARCHAROID)
             || isIndexByVarchar) {
             /* subcript type is varchar */
             subexpr = coerce_to_target_type(pstate, subexpr, exprType(subexpr),
-                ((Param*)arrayBase)->tableOfIndexType, -1, COERCION_ASSIGNMENT, COERCE_IMPLICIT_CAST, -1);
+                                            list_nth_oid(((Param*)arrayBase)->tableOfIndexTypeList, i),
+                                            -1, COERCION_ASSIGNMENT, COERCE_IMPLICIT_CAST, -1);
         } else {
              /* If it's not int4 already, try to coerce */
             subexpr = coerce_to_target_type(
@@ -386,6 +390,7 @@ ArrayRef* transformArraySubscripts(ParseState* pstate, Node* arrayBase, Oid arra
                     parser_errposition(pstate, exprLocation(ai->uidx))));
         }
         upperIndexpr = lappend(upperIndexpr, subexpr);
+        i++;
     }
 
     /*

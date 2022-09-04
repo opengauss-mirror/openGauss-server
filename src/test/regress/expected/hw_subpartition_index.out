@@ -51,19 +51,15 @@ CREATE INDEX range_list_idx ON range_list(month_code) LOCAL
 );
 -- test subpartition index scan
 explain (costs off) select * from range_list where month_code = '201902';
-                           QUERY PLAN                            
------------------------------------------------------------------
+                      QUERY PLAN                       
+-------------------------------------------------------
  Partition Iterator
    Iterations: 1, Sub Iterations: 2
-   ->  Partitioned Bitmap Heap Scan on range_list
-         Recheck Cond: ((month_code)::text = '201902'::text)
+   ->  Partitioned Seq Scan on range_list
+         Filter: ((month_code)::text = '201902'::text)
          Selected Partitions:  1
          Selected Subpartitions:  ALL
-         ->  Partitioned Bitmap Index Scan on range_list_idx
-               Index Cond: ((month_code)::text = '201902'::text)
-               Selected Partitions:  1
-               Selected Subpartitions:  ALL
-(10 rows)
+(6 rows)
 
 select * from range_list where month_code = '201902' order by 1,2,3,4;
  month_code | dept_code | user_no | sales_amt 
@@ -233,5 +229,187 @@ CREATE INDEX range_list_idxx ON range_list(month_code) LOCAL
 ERROR:  Cannot match subpartitions when create subpartition indexes.
 drop table source;
 drop table range_list;
+drop table if exists partition_range_pbe_tbl_001;
+NOTICE:  table "partition_range_pbe_tbl_001" does not exist, skipping
+create table partition_range_pbe_tbl_001(
+c_id int,c_d_id int,c_w_id int,c_first varchar2(20),c_middle char(2),c_last varchar2(30),
+c_date date,c_timestamp timestamp,c_clob clob,c_blob blob,c_text text)
+partition by range(c_id) subpartition by list (c_d_id)(
+partition p1 values less than(10)
+(
+    SUBPARTITION p1_a values (1,2,3,4),
+    SUBPARTITION p1_b values (5,6),
+    SUBPARTITION p1_c values (7),
+    SUBPARTITION p1_d values (8,9),
+    SUBPARTITION p1_e values (10)
+),
+partition p2 values less than(20)
+(
+    SUBPARTITION p2_a values (1,2,3,4),
+    SUBPARTITION p2_b values (5,6),
+    SUBPARTITION p2_c values (7),
+    SUBPARTITION p2_d values (8,9),
+    SUBPARTITION p2_e values (10)
+),
+partition p3 values less than(30)
+(
+    SUBPARTITION p3_a values (1,2,3,4),
+    SUBPARTITION p3_b values (5,6),
+    SUBPARTITION p3_c values (7),
+    SUBPARTITION p3_d values (8,9),
+    SUBPARTITION p3_e values (10)
+),
+partition p4 values less than(40)
+(
+    SUBPARTITION p4_a values (1,2,3,4),
+    SUBPARTITION p4_b values (5,6),
+    SUBPARTITION p4_c values (7),
+    SUBPARTITION p4_d values (8,9),
+    SUBPARTITION p4_e values (10)
+),
+partition p5 values less than(maxvalue)
+(
+    SUBPARTITION p5_a values (1,2,3,4),
+    SUBPARTITION p5_b values (5,6),
+    SUBPARTITION p5_c values (7),
+    SUBPARTITION p5_d values (8,9),
+    SUBPARTITION p5_e values (10)
+));
+insert into partition_range_pbe_tbl_001 values(generate_series(1,100),generate_series(1,10));
+create index partition_range_pbe_idx_001 on partition_range_pbe_tbl_001(c_id) local;
+prepare p1 as select * from partition_range_pbe_tbl_001 where c_id=$1;
+explain(costs off, verbose on)  execute p1(50);
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Partition Iterator
+   Output: c_id, c_d_id, c_w_id, c_first, c_middle, c_last, c_date, c_timestamp, c_clob, c_blob, c_text
+   Iterations: PART
+   ->  Partitioned Bitmap Heap Scan on subpartition_index.partition_range_pbe_tbl_001
+         Output: c_id, c_d_id, c_w_id, c_first, c_middle, c_last, c_date, c_timestamp, c_clob, c_blob, c_text
+         Recheck Cond: (partition_range_pbe_tbl_001.c_id = $1)
+         Selected Partitions:  PART
+         ->  Partitioned Bitmap Index Scan on partition_range_pbe_idx_001
+               Index Cond: (partition_range_pbe_tbl_001.c_id = $1)
+               Selected Partitions:  PART
+(10 rows)
+
+execute p1(50);
+ c_id | c_d_id | c_w_id | c_first | c_middle | c_last | c_date | c_timestamp | c_clob | c_blob | c_text 
+------+--------+--------+---------+----------+--------+--------+-------------+--------+--------+--------
+   50 |     10 |        |         |          |        |        |             |        |        | 
+(1 row)
+
+alter index partition_range_pbe_idx_001 MODIFY PARTITION  p5_b_c_id_idx unusable; 
+explain(costs off, verbose on)  execute p1(50);
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Partition Iterator
+   Output: c_id, c_d_id, c_w_id, c_first, c_middle, c_last, c_date, c_timestamp, c_clob, c_blob, c_text
+   Iterations: PART
+   ->  Partitioned Seq Scan on subpartition_index.partition_range_pbe_tbl_001
+         Output: c_id, c_d_id, c_w_id, c_first, c_middle, c_last, c_date, c_timestamp, c_clob, c_blob, c_text
+         Filter: (partition_range_pbe_tbl_001.c_id = $1)
+         Selected Partitions:  PART
+(7 rows)
+
+execute p1(50);
+ c_id | c_d_id | c_w_id | c_first | c_middle | c_last | c_date | c_timestamp | c_clob | c_blob | c_text 
+------+--------+--------+---------+----------+--------+--------+-------------+--------+--------+--------
+   50 |     10 |        |         |          |        |        |             |        |        | 
+(1 row)
+
+deallocate p1;
+drop table partition_range_pbe_tbl_001;
+drop table test_range_pt;
+ERROR:  table "test_range_pt" does not exist
+create table test_range_pt (a int, b int, c int)
+partition by range(a)
+(
+	partition p1 values less than (20),
+	partition p2 values less than (30),
+	partition p3 values less than (40),
+	partition p4 values less than (50),
+	partition p5 values less than (maxvalue)
+)ENABLE ROW MOVEMENT;
+insert into test_range_pt values(generate_series(1,100),generate_series(1,100));
+create index idx_range_a on test_range_pt(a) local;
+prepare p1 as select * from test_range_pt where a = $1;
+explain(costs off, verbose on)  execute p1(25);
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Partitioned Bitmap Heap Scan on subpartition_index.test_range_pt
+   Output: a, b, c
+   Recheck Cond: (test_range_pt.a = $1)
+   Selected Partitions:  PART
+   ->  Partitioned Bitmap Index Scan on idx_range_a
+         Index Cond: (test_range_pt.a = $1)
+         Selected Partitions:  PART
+(7 rows)
+
+execute p1(25);
+ a  | b  | c 
+----+----+---
+ 25 | 25 |  
+(1 row)
+
+alter index idx_range_a MODIFY PARTITION  p2_a_idx unusable; 
+explain(costs off, verbose on)  execute p1(25);
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Partitioned Seq Scan on subpartition_index.test_range_pt
+   Output: a, b, c
+   Filter: (test_range_pt.a = $1)
+   Selected Partitions:  PART
+(4 rows)
+
+execute p1(25);
+ a  | b  | c 
+----+----+---
+ 25 | 25 |  
+(1 row)
+
+deallocate p1;
+drop table test_range_pt;
+drop table test_range_pt;
+ERROR:  table "test_range_pt" does not exist
+create table test_range_pt (a int, b int, c int)
+partition by range(a, b)
+(
+partition p1 values less than (100,100),
+partition p2 values less than (200,200),
+partition p3 values less than (300,300),
+partition p4 values less than (maxvalue,maxvalue)
+)ENABLE ROW MOVEMENT;
+--部分索引失效
+create index idx_range_a on test_range_pt(a) local;
+alter index idx_range_a modify partition p3_a_idx unusable; --部分失效
+--插入数据
+insert into test_range_pt values(199, 100 ,1); --P2
+insert into test_range_pt values(199, 200 ,1); --P2
+insert into test_range_pt values(200, 300 ,1);
+insert into test_range_pt values(200, 400 ,1);
+insert into test_range_pt values(generate_series(1,400), random()*1000 ,1);
+set enable_seqscan=off;
+set enable_pbe_optimization = on;
+prepare p1 as select max(a) from test_range_pt where a>$1;
+execute p1(10);
+ max 
+-----
+ 400
+(1 row)
+
+explain execute p1(10);
+                                                 QUERY PLAN                                                  
+-------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=93.21..93.22 rows=1 width=8)
+   ->  Partition Iterator  (cost=0.00..91.59 rows=648 width=4)
+         Iterations: PART
+         ->  Partitioned Seq Scan on test_range_pt  (cost=10000000000.00..1000000003431.25 rows=648 width=4)
+               Filter: (a > $1)
+               Selected Partitions:  PART
+(6 rows)
+
+deallocate p1;
+drop table test_range_pt;
 reset current_schema;
 DROP SCHEMA subpartition_index CASCADE;

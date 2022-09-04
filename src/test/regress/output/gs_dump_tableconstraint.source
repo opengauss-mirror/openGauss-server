@@ -1,0 +1,187 @@
+drop database if exists test_primary_unique_a_dump;
+NOTICE:  database "test_primary_unique_a_dump" does not exist, skipping
+drop database if exists test_primary_unique_b_dump;
+NOTICE:  database "test_primary_unique_b_dump" does not exist, skipping
+drop database if exists test_primary_unique_a_restore;
+NOTICE:  database "test_primary_unique_a_restore" does not exist, skipping
+drop database if exists test_primary_unique_b_restore;
+NOTICE:  database "test_primary_unique_b_restore" does not exist, skipping
+create database test_primary_unique_a_dump;
+create database test_primary_unique_a_restore;
+create database test_primary_unique_b_dump dbcompatibility 'B';
+create database test_primary_unique_b_restore dbcompatibility 'B';
+-- test A mode gs_dump
+\c test_primary_unique_a_dump
+create table test_a_primary(f1 int, f2 varchar(20), constraint con_pri primary key(f1) with (storage_type = astore));
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "con_pri" for table "test_a_primary"
+create table test_a_unique(f1 int, f2 varchar(20), constraint con_unique unique(f1) with (storage_type = astore));
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "con_unique" for table "test_a_unique"
+create table test_a_par_primary
+(
+	f1 int,
+	f2 varchar(20),
+	constraint con_par_pri primary key(f1) with (storage_type = astore)
+)
+partition by range (f1)
+(
+    partition p_1 values less than(100),
+    partition p_2 values less than(200),
+    partition p_3 values less than(MAXVALUE)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "con_par_pri" for table "test_a_par_primary"
+create table test_a_par_unique
+(
+	f1 int,
+	f2 varchar(20),
+	constraint con_par_unique unique(f1) with (storage_type = astore)
+)
+partition by range (f1)
+(
+    partition p_1 values less than(100),
+    partition p_2 values less than(200),
+    partition p_3 values less than(MAXVALUE)
+);
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "con_par_unique" for table "test_a_par_unique"
+\! @abs_bindir@/gs_dump test_primary_unique_a_dump -p @portstring@ -f @abs_bindir@/dump_primary_unique_a.tar -F t >/dev/null 2>&1; echo $?
+0
+\! @abs_bindir@/gs_restore -d test_primary_unique_a_restore -p @portstring@ @abs_bindir@/dump_primary_unique_a.tar >/dev/null 2>&1; echo $?
+0
+\c test_primary_unique_a_restore
+\d+ test_a_primary
+                           Table "public.test_a_primary"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f1     | integer               | not null  | plain    |              | 
+ f2     | character varying(20) |           | extended |              | 
+Indexes:
+    "con_pri" PRIMARY KEY, btree (f1) WITH (storage_type=astore) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+\d+ test_a_unique
+                            Table "public.test_a_unique"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f1     | integer               |           | plain    |              | 
+ f2     | character varying(20) |           | extended |              | 
+Indexes:
+    "con_unique" UNIQUE CONSTRAINT, btree (f1) WITH (storage_type=astore) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+\d+ test_a_par_primary
+                         Table "public.test_a_par_primary"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f1     | integer               | not null  | plain    |              | 
+ f2     | character varying(20) |           | extended |              | 
+Indexes:
+    "con_par_pri" PRIMARY KEY, btree (f1) LOCAL WITH (storage_type=astore) TABLESPACE pg_default
+Partition By RANGE(f1)
+Number of partitions: 3 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+\d+ test_a_par_unique
+                          Table "public.test_a_par_unique"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f1     | integer               |           | plain    |              | 
+ f2     | character varying(20) |           | extended |              | 
+Indexes:
+    "con_par_unique" UNIQUE CONSTRAINT, btree (f1) LOCAL WITH (storage_type=astore) TABLESPACE pg_default
+Partition By RANGE(f1)
+Number of partitions: 3 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+-- test B mode gs_dump
+\c test_primary_unique_b_dump
+create table test_b_primary(f1 int, f2 varchar(20), constraint con_pri primary key using btree(f1 desc) with (storage_type = astore));
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "con_pri" for table "test_b_primary"
+create table test_b_unique(f1 int, f2 varchar(20), constraint con_unique unique u_unique using btree((f1 + 1) desc) with (storage_type = astore));
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "u_unique" for table "test_b_unique"
+create table test_b_par_primary
+(
+	f1 int,
+	f2 varchar(20),
+	constraint con_par_pri primary key using btree(f1 desc) with (storage_type = astore)
+)
+partition by range (f1)
+(
+    partition p_1 values less than(100),
+    partition p_2 values less than(200),
+    partition p_3 values less than(MAXVALUE)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "con_par_pri" for table "test_b_par_primary"
+create table test_b_par_unique
+(
+	f1 int,
+	f2 varchar(20),
+	constraint con_par_unique unique u_par_unique using btree(f1 desc) with (storage_type = astore)
+)
+partition by range (f1)
+(
+    partition p_1 values less than(100),
+    partition p_2 values less than(200),
+    partition p_3 values less than(MAXVALUE)
+);
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "u_par_unique" for table "test_b_par_unique"
+\! @abs_bindir@/gs_dump test_primary_unique_b_dump -p @portstring@ -f @abs_bindir@/dump_primary_unique_b.tar -F t >/dev/null 2>&1; echo $?
+0
+\! @abs_bindir@/gs_restore -d test_primary_unique_b_restore -p @portstring@ @abs_bindir@/dump_primary_unique_b.tar >/dev/null 2>&1; echo $?
+0
+\c test_primary_unique_b_restore
+\d+ test_b_primary
+                           Table "public.test_b_primary"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f1     | integer               | not null  | plain    |              | 
+ f2     | character varying(20) |           | extended |              | 
+Indexes:
+    "con_pri" PRIMARY KEY, btree (f1 DESC) WITH (storage_type=astore) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+\d+ test_b_unique
+                            Table "public.test_b_unique"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f1     | integer               |           | plain    |              | 
+ f2     | character varying(20) |           | extended |              | 
+Indexes:
+    "u_unique" UNIQUE CONSTRAINT, btree ((f1 + 1) DESC) WITH (storage_type=astore) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+\d+ test_b_par_primary
+                         Table "public.test_b_par_primary"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f1     | integer               | not null  | plain    |              | 
+ f2     | character varying(20) |           | extended |              | 
+Indexes:
+    "con_par_pri" PRIMARY KEY, btree (f1 DESC) LOCAL WITH (storage_type=astore) TABLESPACE pg_default
+Partition By RANGE(f1)
+Number of partitions: 3 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+\d+ test_b_par_unique
+                          Table "public.test_b_par_unique"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f1     | integer               |           | plain    |              | 
+ f2     | character varying(20) |           | extended |              | 
+Indexes:
+    "u_par_unique" UNIQUE CONSTRAINT, btree (f1 DESC) LOCAL WITH (storage_type=astore) TABLESPACE pg_default
+Partition By RANGE(f1)
+Number of partitions: 3 (View pg_partition to check each partition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+\c regression
+drop database if exists test_primary_unique_a_dump;
+drop database if exists test_primary_unique_b_dump;
+drop database if exists test_primary_unique_a_restore;
+drop database if exists test_primary_unique_b_restore;

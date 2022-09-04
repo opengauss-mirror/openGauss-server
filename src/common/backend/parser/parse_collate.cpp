@@ -508,6 +508,8 @@ static bool assign_collations_walker(Node* node, assign_collations_context* cont
         case T_CaseTestExpr:
         case T_SetToDefault:
         case T_CurrentOfExpr:
+        case T_PrefixKey:
+        case T_UserVar:
 
             /*
              * General case for childless expression nodes.  These should

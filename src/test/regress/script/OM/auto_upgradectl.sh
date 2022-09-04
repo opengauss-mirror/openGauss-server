@@ -1,4 +1,4 @@
-﻿#pengass om 自动化升级测试脚本
+#pengass om 自动化升级测试脚本
 # username:omm  usergroup:dbgrp 工具脚本路径：/usr1/opengaussautomattest/script xml文件路径：/usr1/clusterconfig.xml
 
 workdir=$1

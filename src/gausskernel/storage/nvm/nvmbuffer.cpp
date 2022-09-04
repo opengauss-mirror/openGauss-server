@@ -36,6 +36,7 @@ static BufferDesc *NvmStrategyGetBuffer(uint32 *buf_state);
 extern PrivateRefCountEntry *GetPrivateRefCountEntry(Buffer buffer, bool create, bool do_move);
 
 static const int MILLISECOND_TO_MICROSECOND = 1000;
+static const int TEN_MILLISECOND = 10;
 
 static inline bool BypassNvm()
 {
@@ -120,22 +121,22 @@ static bool NvmPinBufferFast(BufferDesc *buf)
  * backend thread B has pinned nvm buf2 and want to migrate nvm buf1,
  * it will result in deadlock.
  */
-static bool WaitUntilUnPin(BufferDesc *buf, int *waits)
+static bool WaitUntilUnPin(BufferDesc *buf)
 {
     uint32 old_buf_state;
+    int waits = 0;
     for (;;) {
         old_buf_state = pg_atomic_read_u32(&buf->state);
         if (BUF_STATE_GET_REFCOUNT(old_buf_state) == 1) {
             return true;
         } else {
             pg_usleep(MILLISECOND_TO_MICROSECOND);
-            (*waits)++;
-            if ((*waits) >= 100) {
+            waits++;
+            if (waits >= TEN_MILLISECOND) {
                 return false;
             }
         }
     }
-
 }
 
 /*
@@ -169,7 +170,6 @@ static bool SetBufferMigrateFlag(Buffer buffer)
     uint32 oldBufState;
     for (;;) {
         oldBufState = pg_atomic_read_u32(&buf->state);
-
         if (oldBufState & BM_LOCKED) {
             oldBufState = WaitBufHdrUnlocked(buf);
         }
@@ -296,7 +296,6 @@ restart:
          */
 
         buf_id = pg_atomic_read_u32((volatile uint32*)&entry->id);
-
         if (IsNormalBufferID(buf_id)) {
             buf = GetBufferDescriptor(buf_id);
 
@@ -327,7 +326,6 @@ restart:
 
         if (IsNvmBufferID(buf_id)) {
             nvmBuf = GetBufferDescriptor(buf_id);
-
             /* Return buffer immediately if I have pinned the buffer before */
             if (NvmPinBufferFast(nvmBuf)) {
                 LWLockRelease(new_partition_lock);
@@ -365,7 +363,7 @@ restart:
                     return nvmBuf;
                 }
             } else {
-                // wanna migrate
+                /* wanna migrate */
                 if (SetBufferMigrateFlag(buf_id + 1)) {
                     buf_id = pg_atomic_read_u32((volatile uint32 *)&entry->id);
 
@@ -387,8 +385,7 @@ restart:
 
                     LWLockRelease(new_partition_lock);
 
-                    int waits = 0;
-                    if (!WaitUntilUnPin(nvmBuf, &waits)) {
+                    if (!WaitUntilUnPin(nvmBuf)) {
                         UnSetBufferMigrateFlag(buf_id + 1);
                         return nvmBuf;
                     }
@@ -417,12 +414,6 @@ restart:
                                 old_hash = BufTableHashCode(&old_tag);
                                 old_partition_lock = BufMappingPartitionLock(old_hash);
 
-                                if (old_partition_lock == new_partition_lock) {
-                                    UnpinBuffer(buf, true);
-                                    (void)sched_yield();
-                                    continue;
-                                }
-
                                 (void)LWLockAcquire(old_partition_lock, LW_EXCLUSIVE);
 
                                 buf_state = LockBufHdr(buf);
@@ -439,6 +430,7 @@ restart:
                                         buf_state |= BM_VALID | BM_TAG_VALID | BUF_USAGECOUNT_ONE;
                                     }
 
+                                    UnlockBufHdr(buf, buf_state);
                                     BufTableDelete(&old_tag, old_hash);
 
                                     /* immediately after deleteing old_hash to avoid ABA Problem */
@@ -454,7 +446,6 @@ restart:
 
                                     /* Assert nvmBuf is not dirty \ cas without buffer header lock */
                                     nvm_buf_state &= ~(BM_TAG_VALID);
-                                    UnlockBufHdr(buf, buf_state);
                                     UnlockBufHdr(nvmBuf, nvm_buf_state);
 
                                     UnpinBuffer(nvmBuf, true);
@@ -480,8 +471,8 @@ restart:
 
                                 PinBuffer_Locked(buf);
 
-                                rc = memcpy_s(BufferGetBlock(buf->buf_id + 1), BLCKSZ, BufferGetBlock(nvmBuf->buf_id + 1),
-                                    BLCKSZ);
+                                rc = memcpy_s(BufferGetBlock(buf->buf_id + 1), BLCKSZ,
+                                    BufferGetBlock(nvmBuf->buf_id + 1), BLCKSZ);
                                 securec_check(rc, "\0", "\0");
                                 buf->tag = nvmBuf->tag;
                                 buf->seg_fileno = nvmBuf->seg_fileno;
@@ -506,8 +497,6 @@ restart:
                     goto restart;
                 }
             }
-        } else {
-            Assert(false);
         }
     }
 
@@ -719,7 +708,7 @@ restart:
          * over with a new victim buffer.
          */
         old_flags = buf_state & BUF_FLAG_MASK;
-        if (BUF_STATE_GET_REFCOUNT(buf_state) == 1 && !(old_flags & BM_DIRTY) 
+        if (BUF_STATE_GET_REFCOUNT(buf_state) == 1 && !(old_flags & BM_DIRTY)
             && !(old_flags & BM_IS_META)) {
             break;
         }

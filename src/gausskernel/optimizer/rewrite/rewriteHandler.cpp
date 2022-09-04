@@ -20,8 +20,10 @@
 #include "catalog/gs_matview.h"
 #include "catalog/pg_type.h"
 #include "catalog/pg_class.h"
+#include "catalog/pg_proc.h"
 #include "commands/trigger.h"
 #include "commands/matview.h"
+#include "commands/sequence.h"
 #include "commands/tablecmds.h"
 #include "executor/executor.h"
 #include "foreign/fdwapi.h"
@@ -42,6 +44,8 @@
 #include "catalog/pg_constraint.h"
 #include "catalog/namespace.h"
 #include "client_logic/client_logic.h"
+#include "catalog/pg_proc.h"
+#include "commands/sqladvisor.h"
 
 #ifdef PGXC
 #include "pgxc/locator.h"
@@ -67,13 +71,14 @@ static bool acquireLocksOnSubLinks(Node* node, void* context);
 static Query* rewriteRuleAction(
     Query* parsetree, Query* rule_action, Node* rule_qual, int rt_index, CmdType event, bool* returning_flag);
 static List* adjustJoinTreeList(Query* parsetree, bool removert, int rt_index);
-static List* rewriteTargetListIU(List* targetList, CmdType commandType,
-                                      Relation target_relation, int result_rtindex,
-                                      List** attrno_list);
+static List *rewriteTargetListIU(List *targetList, CmdType commandType, Relation target_relation, int result_rtindex,
+    List **attrno_list, bool *hasGenCol);
 static TargetEntry* process_matched_tle(TargetEntry* src_tle, TargetEntry* prior_tle, const char* attrName);
 static Node* get_assignment_input(Node* node);
 static void rewriteValuesRTE(RangeTblEntry* rte, Relation target_relation, List* attrnos);
-static void rewriteTargetListUD(Query* parsetree, RangeTblEntry* target_rte, Relation target_relation);
+static void rewriteTargetListUD(Query* parsetree, RangeTblEntry* target_rte, Relation target_relation, int rtindex);
+static void rewriteTargetListMutilUD(Query* parsetree, List* rtable, List* resultRelations);
+static void rewriteTargetListMutilUpdate(Query* parsetree, List* rtable, List* resultRelations);
 static void markQueryForLocking(Query* qry, Node* jtnode, LockClauseStrength strength, bool noWait, bool pushedDown,
                                 int waitSec);
 static List* matchLocks(CmdType event, RuleLock* rulelocks, int varno, Query* parsetree);
@@ -159,7 +164,7 @@ void AcquireRewriteLocks(Query* parsetree, bool forUpdatePushedDown)
                  * be trying to upgrade the lock, leading to possible
                  * deadlocks.
                  */
-                if (rt_index == parsetree->resultRelation)
+                if (rt_index == linitial2_int(parsetree->resultRelations))
                     lockmode = RowExclusiveLock;
                 else if (forUpdatePushedDown || get_parse_rowmark(parsetree, rt_index) != NULL)
                     lockmode = RowShareLock;
@@ -536,9 +541,9 @@ static Query* rewriteRuleAction(
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot have RETURNING lists in multiple rules")));
         *returning_flag = true;
         rule_action->returningList = (List*)ResolveNew((Node*)parsetree->returningList,
-            parsetree->resultRelation,
+            linitial_int(parsetree->resultRelations),
             0,
-            rt_fetch(parsetree->resultRelation, parsetree->rtable),
+            rt_fetch(linitial_int(parsetree->resultRelations), parsetree->rtable),
             rule_action->returningList,
             CMD_SELECT,
             0,
@@ -626,7 +631,7 @@ static List* adjustJoinTreeList(Query* parsetree, bool removert, int rt_index)
  * processing VALUES RTEs.
  */
 static List* rewriteTargetListIU(List* targetList, CmdType commandType, Relation target_relation,
-    int result_rtindex, List** attrno_list)
+    int result_rtindex, List** attrno_list, bool* hasGenCol)
 {
     TargetEntry** new_tles;
     List* new_tlist = NIL;
@@ -730,6 +735,7 @@ static List* rewriteTargetListIU(List* targetList, CmdType commandType, Relation
              * stored generated column will be fixed in executor
              */
             new_tle = NULL;
+            *hasGenCol = true;
         } else if (applyDefault) {
             Node* new_expr = NULL;
 
@@ -788,6 +794,164 @@ static List* rewriteTargetListIU(List* targetList, CmdType commandType, Relation
 
     targetList = list_concat(new_tlist, junk_tlist);
     return targetList;
+}
+
+static void rewriteTargetListMutilUpdate(Query* parsetree, List* rtable, List* resultRelations)
+{
+    TargetEntry** new_tles;
+    List* new_tlist = NIL;
+    List* junk_tlist = NIL;
+    Form_pg_attribute att_tup;
+    int attrno, numattrs;
+    ListCell* l = NULL;
+    int result_relation;
+
+    /*
+     * We process the normal (non-junk) attributes by scanning the input tlist
+     * once and transferring TLEs into an array, then scanning the array to
+     * build an output tlist.  This avoids O(N^2) behavior for large numbers
+     * of attributes.
+     *
+     * Junk attributes are tossed into a separate list during the same tlist
+     * scan, then appended to the reconstructed tlist.
+     */
+    ListCell* temp = list_head(parsetree->targetList);
+    TargetEntry* old_tle = (TargetEntry*)lfirst(temp);
+
+    foreach (l, resultRelations) {
+        result_relation = lfirst_int(l);
+        Assert(((TargetEntry*)lfirst(temp))->rtindex == (Index)result_relation);
+
+        RangeTblEntry* rt_entry = rt_fetch(result_relation, rtable);
+        Relation target_relation = heap_open(rt_entry->relid, NoLock);
+        numattrs = RelationGetNumberOfAttributes(target_relation);
+
+        new_tles = (TargetEntry**)palloc0(numattrs * sizeof(TargetEntry*));
+        
+        while (temp != NULL) {
+            old_tle = (TargetEntry*)lfirst(temp);
+            /*
+             * For multi-relations update, old_tle has been sorted according to the order of each result relation.
+             * So when old_tle->rtindex != (Index)result_relation, break and process the next step.
+             */
+            if (old_tle->rtindex != (Index)result_relation)
+                break;
+
+            if (!old_tle->resjunk) {
+                /* Normal attr: stash it into new_tles[] */
+                attrno = old_tle->resno;
+                if (attrno < 1 || attrno > numattrs) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE), errmsg("bogus resno %d in targetlist",
+                                                                               attrno)));
+                }
+                att_tup = target_relation->rd_att->attrs[attrno - 1];
+
+                /* We can (and must) ignore deleted attributes */
+                if (att_tup->attisdropped) {
+                    temp = lnext(temp);
+                    continue;
+                }
+                /* Merge with any prior assignment to same attribute */
+                new_tles[attrno - 1] = process_matched_tle(old_tle, new_tles[attrno - 1], NameStr(att_tup->attname));
+            } else {
+                /*
+                * Copy all resjunk tlist entries to junk_tlist, and assign them
+                * resnos above the last real resno.
+                *
+                * Typical junk entries include ORDER BY or GROUP BY expressions
+                * (are these actually possible in an INSERT or UPDATE?), system
+                * attribute references, etc.
+                *
+                * Get the resno right, but don't copy unnecessarily
+                */
+                old_tle = flatCopyTargetEntry(old_tle);
+                junk_tlist = lappend(junk_tlist, old_tle);
+            }
+            temp = lnext(temp);
+        }
+
+        for (attrno = 1; attrno <= numattrs; attrno++) {
+            TargetEntry* new_tle = new_tles[attrno - 1];
+            /*
+            * We need to insert a default expression when the
+            * tlist entry is a DEFAULT placeholder node.
+            */
+            bool applyDefault = new_tle != NULL && new_tle->expr != NULL && IsA(new_tle->expr, SetToDefault);
+            bool generateCol = ISGENERATEDCOL(target_relation->rd_att, attrno - 1);
+
+            att_tup = target_relation->rd_att->attrs[attrno - 1];
+
+            /* We can (and must) ignore deleted attributes */
+            if (att_tup->attisdropped)
+                continue;
+
+            if (generateCol && !applyDefault && new_tle) {
+                    ereport(ERROR, (errmodule(MOD_GEN_COL), errcode(ERRCODE_SYNTAX_ERROR),
+                        errmsg("column \"%s\" can only be updated to DEFAULT", NameStr(att_tup->attname)),
+                        errdetail("Column \"%s\" is a generated column.", NameStr(att_tup->attname))));
+            }
+
+            if (generateCol) {
+                /*
+                * stored generated column will be fixed in executor
+                */
+                new_tle = NULL;
+            } else if (applyDefault) {
+                Node* new_expr = build_column_default(target_relation, attrno, true);
+                if (new_expr == NULL) {
+                    new_expr = (Node*)makeConst(att_tup->atttypid,
+                        -1,
+                        att_tup->attcollation,
+                        att_tup->attlen,
+                        (Datum)0,
+                        true, /* isnull */
+                        att_tup->attbyval);
+                    /* this is to catch a NOT NULL domain constraint */
+                    new_expr = coerce_to_domain(
+                        new_expr, InvalidOid, -1, att_tup->atttypid, COERCE_IMPLICIT_CAST, -1, false, false);
+                }
+                new_tle = makeTargetEntry((Expr*)new_expr, attrno, pstrdup(NameStr(att_tup->attname)), false);
+                new_tle->rtindex = result_relation;
+            }
+
+            /*
+            * For an UPDATE on a view, provide a dummy entry whenever there is no
+            * explicit assignment.
+            */
+            if (new_tle == NULL && (target_relation->rd_rel->relkind == RELKIND_VIEW
+                || target_relation->rd_rel->relkind == RELKIND_CONTQUERY)) {
+                Node* new_expr = NULL;
+
+                new_expr = (Node*)makeVar(
+                    result_relation, attrno, att_tup->atttypid, att_tup->atttypmod, att_tup->attcollation, 0);
+                new_tle = makeTargetEntry((Expr*)new_expr, attrno, pstrdup(NameStr(att_tup->attname)), false);
+                new_tle->rtindex = result_relation;
+            }
+
+            if (new_tle != NULL)
+                new_tlist = lappend(new_tlist, new_tle);
+        }
+    
+        heap_close(target_relation, NoLock);
+        pfree_ext(new_tles);
+    }
+
+    int next_junk_attrno = list_length(new_tlist) + 1;
+
+    foreach (l, junk_tlist) {
+        old_tle = (TargetEntry*)lfirst(l);
+        if (old_tle->resno != next_junk_attrno) {
+            old_tle = flatCopyTargetEntry(old_tle);
+            old_tle->resno = next_junk_attrno;
+        }
+        new_tlist = lappend(new_tlist, old_tle);
+        next_junk_attrno++;
+    }
+
+    parsetree->targetList = new_tlist;
+
+    rewriteTargetListMutilUD(parsetree, rtable, resultRelations);
 }
 
 /*
@@ -920,6 +1084,35 @@ static Node* get_assignment_input(Node* node)
     return NULL;
 }
 
+static bool check_sequence_return_numeric_walker(Node *node, int *ret)
+{
+    /* Traverse through the expression tree and check requence related function return type */
+    if (node == NULL) {
+        *ret = NDE_UNKNOWN;
+        return false;
+    }
+
+    if (IsA(node, Query)) {
+        return (Node *)query_tree_walker((Query *)node, (bool (*)())check_sequence_return_numeric_walker,
+            (void *)ret, 0);
+    }
+
+    if (IsA(node, FuncExpr)) {
+        FuncExpr *func = (FuncExpr *)node;
+        if (func->funcid == NEXTVALFUNCOID || func->funcid == CURRVALFUNCOID || func->funcid == LASTVALFUNCOID) {
+            if (func->funcresulttype == NUMERICOID) {
+                *ret = NDE_NUMERIC;
+                return true;
+            } else {
+                *ret = NDE_BIGINT;
+                return true;
+            }
+        }
+    }
+
+    return expression_tree_walker(node, (bool (*)())check_sequence_return_numeric_walker, (void *)ret);
+}
+
 /*
  * Make an expression tree for the default value for a column.
  *
@@ -928,7 +1121,7 @@ static Node* get_assignment_input(Node* node)
  * If auto truncation function enabled and it is insert statement then
  * we use this arg to determin if default should be casted explict.
  */
-Node* build_column_default(Relation rel, int attrno, bool isInsertCmd)
+Node* build_column_default(Relation rel, int attrno, bool isInsertCmd, bool needOnUpdate)
 {
     TupleDesc rd_att = rel->rd_att;
     Form_pg_attribute att_tup = rd_att->attrs[attrno - 1];
@@ -948,8 +1141,23 @@ Node* build_column_default(Relation rel, int attrno, bool isInsertCmd)
             if (attrno == defval[ndef].adnum) {
                 /*
                  * Found it, convert string representation to node tree.
+                 *
+                 * isInsertCmd is false, has_on_update is true and adbin_on_update is not null character string,
+                 * then doing convert adbin_on_update to expression.
+                 * if adbin is not null character string, then doing convert adbin to expression.
                  */
-                expr = (Node*)stringToNode_skip_extern_fields(defval[ndef].adbin);
+                
+                if (needOnUpdate && (!isInsertCmd) && defval[ndef].has_on_update &&
+                    pg_strcasecmp(defval[ndef].adbin_on_update, "") != 0) {
+                    expr = (Node*)stringToNode_skip_extern_fields(defval[ndef].adbin_on_update);
+                } else {
+                    if (pg_strcasecmp(defval[ndef].adbin, "") != 0) {
+                        expr = (Node*)stringToNode_skip_extern_fields(defval[ndef].adbin);                      
+                    }
+                }
+                if (t_thrd.proc->workingVersionNum < LARGE_SEQUENCE_VERSION_NUM) {
+                    (void)check_sequence_return_numeric_walker(expr, &(u_sess->opt_cxt.nextval_default_expr_type));
+                }
                 break;
             }
         }
@@ -965,6 +1173,10 @@ Node* build_column_default(Relation rel, int attrno, bool isInsertCmd)
 
     if (expr == NULL)
         return NULL; /* No default anywhere */
+
+    if (IsA(expr, AutoIncrement)) {
+        expr = (Node*)makeConst(INT4OID, -1, InvalidOid, sizeof(int32), Int32GetDatum(0), !att_tup->attnotnull, true);
+    }
 
     /*
      * Make sure the value is coerced to the target column type; this will
@@ -1031,6 +1243,34 @@ static bool searchForDefault(RangeTblEntry* rte)
     return false;
 }
 
+static void checkGenDefault(RangeTblEntry* rte, Relation target_relation, List* attrnos, bool hasGenCol)
+{
+    ListCell* lc = NULL;
+
+    if (!hasGenCol) {
+        return ;
+    }
+
+    foreach (lc, rte->values_lists) {
+        List* sublist = (List*)lfirst(lc);
+        ListCell* lc2 = NULL;
+        ListCell* lc3 = NULL;
+
+        forboth (lc2, sublist, lc3, attrnos) {
+            Node* col = (Node*)lfirst(lc2);
+            int attrno = lfirst_int(lc3);
+            Form_pg_attribute att_tup = target_relation->rd_att->attrs[attrno - 1];
+            bool generatedCol = ISGENERATEDCOL(target_relation->rd_att, attrno - 1);
+            bool applyDefault = IsA(col, SetToDefault);
+
+            if (!applyDefault && generatedCol)
+                ereport(ERROR, (errmodule(MOD_GEN_COL), errcode(ERRCODE_SYNTAX_ERROR),
+                    errmsg("cannot insert into column \"%s\"", NameStr(att_tup->attname)),
+                    errdetail("Column \"%s\" is a generated column.", NameStr(att_tup->attname))));
+        }
+    }
+}
+
 /*
  * When processing INSERT ... VALUES with a VALUES RTE (ie, multiple VALUES
  * lists), we have to replace any DEFAULT items in the VALUES lists with
@@ -1072,12 +1312,6 @@ static void rewriteValuesRTE(RangeTblEntry* rte, Relation target_relation, List*
             Form_pg_attribute att_tup = target_relation->rd_att->attrs[attrno - 1];
             bool generatedCol = ISGENERATEDCOL(target_relation->rd_att, attrno - 1);
             bool applyDefault = IsA(col, SetToDefault);
-
-            if (generatedCol && !applyDefault) {
-                ereport(ERROR, (errmodule(MOD_GEN_COL), errcode(ERRCODE_SYNTAX_ERROR),
-                    errmsg("cannot insert into column \"%s\"", NameStr(att_tup->attname)),
-                    errdetail("Column \"%s\" is a generated column.", NameStr(att_tup->attname))));
-            }
 
             if (applyDefault) {
                 Node *new_expr = NULL;
@@ -1193,7 +1427,7 @@ static bool pull_qual_vars_walker(Node* node, pull_qual_vars_context* context)
  * For UPDATE queries, this is applied after rewriteTargetListIU.  The
  * ordering isn't actually critical at the moment.
  */
-static void rewriteTargetListUD(Query* parsetree, RangeTblEntry* target_rte, Relation target_relation)
+static void rewriteTargetListUD(Query* parsetree, RangeTblEntry* target_rte, Relation target_relation, int rtindex)
 {
     Var* var = NULL;
     const char* attrname = NULL;
@@ -1215,7 +1449,7 @@ static void rewriteTargetListUD(Query* parsetree, RangeTblEntry* target_rte, Rel
      * vars using Coordinator Quals.
      */
     if (IS_PGXC_COORDINATOR && parsetree->jointree)
-        var_list = pull_qual_vars((Node*)parsetree->jointree, parsetree->resultRelation);
+        var_list = pull_qual_vars((Node*)parsetree->jointree, rtindex);
 
     foreach (elt, var_list) {
         Form_pg_attribute att_tup;
@@ -1238,11 +1472,12 @@ static void rewriteTargetListUD(Query* parsetree, RangeTblEntry* target_rte, Rel
         att_tup = target_relation->rd_att->attrs[var->varattno - 1];
         tle = makeTargetEntry(
             (Expr*)var, list_length(parsetree->targetList) + 1, pstrdup(NameStr(att_tup->attname)), true);
+        tle->rtindex = rtindex;
 
         parsetree->targetList = lappend(parsetree->targetList, tle);
     }
     parsetree->equalVars = list_concat(
-        parsetree->equalVars, pull_qual_vars((Node*)parsetree->targetList, parsetree->resultRelation, 0, true));
+        parsetree->equalVars, pull_qual_vars((Node*)parsetree->targetList, rtindex, 0, true));
 
     if (IS_PGXC_COORDINATOR && RelationGetLocInfo(target_relation) &&
         IsRelationReplicated(RelationGetLocInfo(target_relation)) && RelationIsRelation(target_relation)) {
@@ -1256,17 +1491,33 @@ static void rewriteTargetListUD(Query* parsetree, RangeTblEntry* target_rte, Rel
 
         for (counter = 0; counter < index_col_count; counter++) {
             AttrNumber att_no = indexed_col[counter];
+            HeapTuple heaptuple = NULL;
             Form_pg_attribute att_tup = NULL;
             Node* new_expr = NULL;
             TargetEntry* new_tle = NULL;
 
-            att_tup = target_relation->rd_att->attrs[att_no - 1];
+            if (att_no > 0) {
+                att_tup = target_relation->rd_att->attrs[att_no - 1];
+            } else {
+                heaptuple =
+                    SearchSysCache2(ATTNUM, ObjectIdGetDatum(RelationGetRelid(target_relation)), Int16GetDatum(att_no));
+                if (!HeapTupleIsValid(heaptuple))
+                    ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                        errmsg("cache lookup failed for attribute %d of relation %u", att_no,
+                        RelationGetRelid(target_relation))));
+                att_tup = (Form_pg_attribute)GETSTRUCT(heaptuple);
+            }
 
             new_expr = (Node*)makeVar(
-                parsetree->resultRelation, att_no, att_tup->atttypid, att_tup->atttypmod, att_tup->attcollation, 0);
+                rtindex, att_no, att_tup->atttypid, att_tup->atttypmod, att_tup->attcollation, 0);
             new_tle = makeTargetEntry((Expr*)new_expr, list_length(parsetree->targetList) + 1, "xc_primary_key", true);
+            new_tle->rtindex = rtindex;
 
             parsetree->targetList = lappend(parsetree->targetList, new_tle);
+
+            if (att_no <= 0) {
+                ReleaseSysCache(heaptuple);
+            }
         }
     }
 #endif
@@ -1275,7 +1526,7 @@ static void rewriteTargetListUD(Query* parsetree, RangeTblEntry* target_rte, Rel
         /*
          * Emit CTID so that executor can find the row to update or delete.
          */
-        var = makeVar(parsetree->resultRelation, SelfItemPointerAttributeNumber, TIDOID, -1, InvalidOid, 0);
+        var = makeVar(rtindex, SelfItemPointerAttributeNumber, TIDOID, -1, InvalidOid, 0);
 
         attrname = "ctid";
     } else if (target_relation->rd_rel->relkind == RELKIND_FOREIGN_TABLE 
@@ -1296,7 +1547,7 @@ static void rewriteTargetListUD(Query* parsetree, RangeTblEntry* target_rte, Rel
          * Emit whole-row Var so that executor will have the "old" view row to
          * pass to the INSTEAD OF trigger.
          */
-        var = makeWholeRowVar(target_rte, parsetree->resultRelation, 0, false);
+        var = makeWholeRowVar(target_rte, rtindex, 0, false);
         if (var == NULL) {
             ereport(ERROR,(errcode(ERRCODE_UNDEFINED_FILE),
                     errmsg("Fail to get  the previous view row.")));
@@ -1306,6 +1557,7 @@ static void rewriteTargetListUD(Query* parsetree, RangeTblEntry* target_rte, Rel
     }
 
     tle = makeTargetEntry((Expr*)var, list_length(parsetree->targetList) + 1, pstrdup(attrname), true);
+    tle->rtindex = rtindex;
 
     parsetree->targetList = lappend(parsetree->targetList, tle);
 
@@ -1313,18 +1565,21 @@ static void rewriteTargetListUD(Query* parsetree, RangeTblEntry* target_rte, Rel
     if (target_relation->rd_rel->relkind == RELKIND_RELATION &&
         (RELATION_IS_PARTITIONED(target_relation) || RelationIsCUFormat(target_relation))) {
 
-        var = makeVar(parsetree->resultRelation, TableOidAttributeNumber, OIDOID, -1, InvalidOid, 0);
+        var = makeVar(rtindex, TableOidAttributeNumber, OIDOID, -1, InvalidOid, 0);
         attrname = "tableoid";
 
         tle = makeTargetEntry((Expr*)var, list_length(parsetree->targetList) + 1, pstrdup(attrname), true);
+        tle->rtindex = rtindex;
 
         parsetree->targetList = lappend(parsetree->targetList, tle);
     }
 
     if (target_relation->rd_rel->relkind == RELKIND_RELATION && RELATION_HAS_BUCKET(target_relation)) {
-        var = makeVar(parsetree->resultRelation, BucketIdAttributeNumber, INT2OID, -1, InvalidBktId, 0);
+        var = makeVar(rtindex, BucketIdAttributeNumber, INT2OID, -1, InvalidBktId, 0);
         attrname = "tablebucketid";
         tle = makeTargetEntry((Expr*)var, list_length(parsetree->targetList) + 1, pstrdup(attrname), true);
+        tle->rtindex = rtindex;
+
         parsetree->targetList = lappend(parsetree->targetList, tle);
     }
 #ifdef PGXC
@@ -1336,22 +1591,42 @@ static void rewriteTargetListUD(Query* parsetree, RangeTblEntry* target_rte, Rel
          * from where tuple is fetched.
          */
         if (!IsRelationReplicated(RelationGetLocInfo(target_relation))) {
-            var = makeVar(parsetree->resultRelation, XC_NodeIdAttributeNumber, INT4OID, -1, InvalidOid, 0);
+            var = makeVar(rtindex, XC_NodeIdAttributeNumber, INT4OID, -1, InvalidOid, 0);
 
             tle = makeTargetEntry((Expr*)var, list_length(parsetree->targetList) + 1, pstrdup("xc_node_id"), true);
+            tle->rtindex = rtindex;
 
             parsetree->targetList = lappend(parsetree->targetList, tle);
         }
 
         /* For non-shippable triggers, we need OLD row. */
         if (pgxc_trig_oldrow_reqd(target_relation, parsetree->commandType)) {
-            var = makeWholeRowVar(target_rte, parsetree->resultRelation, 0, false);
+            var = makeWholeRowVar(target_rte, rtindex, 0, false);
 
             tle = makeTargetEntry((Expr*)var, list_length(parsetree->targetList) + 1, pstrdup("wholerow"), true);
+            tle->rtindex = rtindex;
+
             parsetree->targetList = lappend(parsetree->targetList, tle);
         }
     }
 #endif
+}
+
+static void rewriteTargetListMutilUD(Query* parsetree, List* rtable, List* resultRelations)
+{
+    ListCell* lc;
+    int result_relation;
+    RangeTblEntry* rt_entry = NULL;
+    Relation rt_entry_relation;
+
+    foreach (lc, resultRelations) {
+        result_relation = lfirst_int(lc);
+        rt_entry = rt_fetch(result_relation, rtable);
+        AssertEreport(rt_entry->rtekind == RTE_RELATION, MOD_OPT, "");
+        rt_entry_relation = heap_open(rt_entry->relid, NoLock);
+        rewriteTargetListUD(parsetree, rt_entry, rt_entry_relation, result_relation);
+        heap_close(rt_entry_relation, NoLock);
+    }
 }
 
 void rewriteTargetListMerge(Query* parsetree, Index result_relation, List* range_table)
@@ -1435,7 +1710,7 @@ static List* matchLocks(CmdType event, RuleLock* rulelocks, int varno, Query* pa
         return NIL;
 
     if (parsetree->commandType != CMD_SELECT) {
-        if (parsetree->resultRelation != varno)
+        if (linitial2_int(parsetree->resultRelations) != varno)
             return NIL;
     }
 
@@ -1496,7 +1771,7 @@ static Query* ApplyRetrieveRule(Query* parsetree, RewriteRule* rule, int rt_inde
             (errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE), errmsg("cannot handle per-attribute ON SELECT rule")));
     }
 
-    if (rt_index == parsetree->resultRelation) {
+    if (rt_index == linitial2_int(parsetree->resultRelations)) {
         /*
          * We have a view as the result relation of the query, and it wasn't
          * rewritten by any rule.  This case is supported if there is an
@@ -1522,8 +1797,8 @@ static Query* ApplyRetrieveRule(Query* parsetree, RewriteRule* rule, int rt_inde
             rte = rt_fetch(rt_index, parsetree->rtable);
             newrte = (RangeTblEntry*)copyObject(rte);
             parsetree->rtable = (List*)lappend(parsetree->rtable, newrte);
-            parsetree->resultRelation = list_length(parsetree->rtable);
-
+            linitial_int(parsetree->resultRelations) = list_length(parsetree->rtable);
+            parsetree->resultRelation = linitial_int(parsetree->resultRelations);
             /*
              * There's no need to do permissions checks twice, so wipe out the
              * permissions info for the original RTE (we prefer to keep the
@@ -1546,7 +1821,7 @@ static Query* ApplyRetrieveRule(Query* parsetree, RewriteRule* rule, int rt_inde
              * RETURNING list first for safety.
              */
             parsetree->returningList = (List*)copyObject(parsetree->returningList);
-            ChangeVarNodes((Node*)parsetree->returningList, rt_index, parsetree->resultRelation, 0);
+            ChangeVarNodes((Node*)parsetree->returningList, rt_index, linitial2_int(parsetree->resultRelations), 0);
 
             /* Now, continue with expanding the original view RTE */
         } else {
@@ -1715,7 +1990,7 @@ static bool fireRIRonSubLink(Node* node, List* activeRIRs)
  */
 static Query* fireRIRrules(Query* parsetree, List* activeRIRs, bool forUpdatePushedDown)
 {
-    int origResultRelation = parsetree->resultRelation;
+    int origResultRelation = linitial2_int(parsetree->resultRelations);
     int rt_index;
     ListCell* lc = NULL;
 
@@ -1775,7 +2050,8 @@ static Query* fireRIRrules(Query* parsetree, List* activeRIRs, bool forUpdatePus
          * part of the join set (a source table), or is referenced by any Var
          * nodes, or is the result table.
          */
-        if (rt_index != parsetree->resultRelation && !rangeTableEntry_used((Node*)parsetree, rt_index, 0)) {
+        if (rt_index != linitial2_int(parsetree->resultRelations) &&
+            !rangeTableEntry_used((Node*)parsetree, rt_index, 0)) {
             continue;
         }
 
@@ -1783,7 +2059,7 @@ static Query* fireRIRrules(Query* parsetree, List* activeRIRs, bool forUpdatePus
          * Also, if this is a new result relation introduced by
          * ApplyRetrieveRule, we don't want to do anything more with it.
          */
-        if (rt_index == parsetree->resultRelation && rt_index != origResultRelation) {
+        if (rt_index == linitial2_int(parsetree->resultRelations) && rt_index != origResultRelation) {
             continue;
         }
 
@@ -1922,7 +2198,7 @@ static Query* fireRIRrules(Query* parsetree, List* activeRIRs, bool forUpdatePus
             }
 
             /* For case CMD_MERGE, add securityQuals to MergeAction */
-            if (rt_index == parsetree->resultRelation && parsetree->commandType == CMD_MERGE &&
+            if (rt_index == linitial2_int(parsetree->resultRelations) && parsetree->commandType == CMD_MERGE &&
                 rte->securityQuals != NIL) {
                 ListCell *lc = NULL;
                 ListCell *next = NULL;
@@ -2370,8 +2646,9 @@ static List* RewriteQuery(Query* parsetree, List* rewrite_events)
         RangeTblEntry* rt_entry = NULL;
         Relation rt_entry_relation;
         List* locks = NIL;
+        bool hasGenCol = false;
 
-        result_relation = parsetree->resultRelation;
+        result_relation = linitial_int(parsetree->resultRelations);
 
         if (result_relation == 0)
             return rewritten;
@@ -2412,27 +2689,42 @@ static List* RewriteQuery(Query* parsetree, List* rewrite_events)
                 /* Process the main targetlist ... */
                 parsetree->targetList =
                     rewriteTargetListIU(parsetree->targetList, parsetree->commandType,
-                                        rt_entry_relation, parsetree->resultRelation, &attrnos);
+                                        rt_entry_relation, result_relation, &attrnos,
+                                        &hasGenCol);
+                checkGenDefault(values_rte, rt_entry_relation, attrnos, hasGenCol);
                 /* ... and the VALUES expression lists */
                 rewriteValuesRTE(values_rte, rt_entry_relation, attrnos);
             } else {
                 /* Process just the main targetlist */
                 parsetree->targetList =
                     rewriteTargetListIU(parsetree->targetList, parsetree->commandType,
-                                        rt_entry_relation, parsetree->resultRelation, NULL);
+                                        rt_entry_relation, result_relation, NULL,
+                                        &hasGenCol);
             }
 
             if (parsetree->upsertClause != NULL &&
                 parsetree->upsertClause->upsertAction == UPSERT_UPDATE) {
                 parsetree->upsertClause->updateTlist =
                     rewriteTargetListIU(parsetree->upsertClause->updateTlist, CMD_UPDATE,
-                                        rt_entry_relation, parsetree->resultRelation, NULL);
+                                        rt_entry_relation, result_relation, NULL,
+                                        &hasGenCol);
             }
         } else if (event == CMD_UPDATE) {
-            parsetree->targetList =
-                rewriteTargetListIU(parsetree->targetList, parsetree->commandType,
-                                    rt_entry_relation, parsetree->resultRelation, NULL);
-            rewriteTargetListUD(parsetree, rt_entry, rt_entry_relation);
+            if (list_length(parsetree->resultRelations) > 1) {
+                rewriteTargetListMutilUpdate(parsetree, parsetree->rtable, parsetree->resultRelations);
+            } else {
+                parsetree->targetList =
+                    rewriteTargetListIU(parsetree->targetList, parsetree->commandType,
+                                        rt_entry_relation, result_relation, NULL,
+                                        &hasGenCol);
+                rewriteTargetListUD(parsetree, rt_entry, rt_entry_relation, result_relation);
+            }
+        } else if (event == CMD_DELETE) {
+            if (list_length(parsetree->resultRelations) > 1) {
+                rewriteTargetListMutilUD(parsetree, parsetree->rtable, parsetree->resultRelations);
+            } else {
+                rewriteTargetListUD(parsetree, rt_entry, rt_entry_relation, result_relation);
+            }
         } else if (event == CMD_MERGE) {
             /*
              * Rewrite each action targetlist separately
@@ -2447,14 +2739,14 @@ static List* RewriteQuery(Query* parsetree, List* rewrite_events)
                         action->targetList = rewriteTargetListMergeInto(action->targetList,
                             action->commandType,
                             rt_entry_relation,
-                            parsetree->resultRelation,
+                            result_relation,
                             NULL);
                         break;
                     case CMD_INSERT: {
                         action->targetList = rewriteTargetListMergeInto(action->targetList,
                             action->commandType,
                             rt_entry_relation,
-                            parsetree->resultRelation,
+                            result_relation,
                             NULL);
                     } break;
                     default: {
@@ -2471,8 +2763,6 @@ static List* RewriteQuery(Query* parsetree, List* rewrite_events)
                 }
                 parsetree->upsertQuery = (Query*)linitial(querytree_list);
             }
-        } else if (event == CMD_DELETE) {
-            rewriteTargetListUD(parsetree, rt_entry, rt_entry_relation);
         } else {
             ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION), errmsg("unrecognized commandType: %d", (int)event)));
         }
@@ -2911,6 +3201,7 @@ char* GetCreateTableStmt(Query* parsetree, CreateTableAsStmt* stmt)
         coldef->cmprs_mode = ATT_CMPR_UNDEFINED;
         coldef->raw_default = NULL;
         coldef->cooked_default = NULL;
+        coldef->update_default = NULL;
         coldef->constraints = NIL;
 
         /*
@@ -3204,53 +3495,47 @@ List* QueryRewriteCTAS(Query* parsetree)
     /* Get the target table */
     stmt = (CreateTableAsStmt*)parsetree->utilityStmt;
 
-    if (!t_thrd.postgres_cxt.table_created_in_CTAS) {
-        /* CREATE TABLE AS */
-        Query* cparsetree = (Query*)copyObject(parsetree);
-        char* create_sql = GetCreateTableStmt(cparsetree, stmt);
+    /* CREATE TABLE AS */
+    Query* cparsetree = (Query*)copyObject(parsetree);
+    char* create_sql = GetCreateTableStmt(cparsetree, stmt);
 
-        if (stmt->relkind == OBJECT_MATVIEW) {
-            zparsetree = (Query*)copyObject(cparsetree);
-            view_sql = GetCreateViewStmt(zparsetree, stmt);
+    if (stmt->relkind == OBJECT_MATVIEW) {
+        zparsetree = (Query*)copyObject(cparsetree);
+        view_sql = GetCreateViewStmt(zparsetree, stmt);
 
-            ViewStmt *mvStmt = (ViewStmt *)zparsetree->utilityStmt;
-            mvStmt->mv_stmt = cparsetree->utilityStmt;
-            mvStmt->mv_sql = create_sql;
-        }
-
-        /* If MATILIZED VIEW exists, cannot send create table to DNs. */
-        if (stmt->relkind != OBJECT_MATVIEW) {
-            ProcessUtility(cparsetree->utilityStmt,
-                           create_sql,
-                           NULL, true, NULL, false, NULL);
-        }
-
-        /* CREATE MATILIZED VIEW AS*/
-        if (stmt->relkind == OBJECT_MATVIEW) {
-            Query *query = (Query *)stmt->query;
-
-            ProcessUtility(zparsetree->utilityStmt,
-                           view_sql,
-                           NULL, true, NULL, false, NULL);
-
-            create_matview_meta(query, stmt->into->rel, stmt->into->ivm);
-
-            /* for ivm should not execute insert into ... select just return. */
-            if (stmt->into->ivm) {
-                return NIL;
-            }
-
-            if (IS_PGXC_COORDINATOR && IsConnFromCoord()) {
-                return NIL;
-            }
-        }
-
-        /*
-         * Now fold the CTAS statement into an INSERT INTO statement. The
-         * utility is no more required.
-         */
-        parsetree->utilityStmt = NULL;
+        ViewStmt *mvStmt = (ViewStmt *)zparsetree->utilityStmt;
+        mvStmt->mv_stmt = cparsetree->utilityStmt;
+        mvStmt->mv_sql = create_sql;
     }
+
+    /* If MATILIZED VIEW exists, cannot send create table to DNs. */
+    if (stmt->relkind != OBJECT_MATVIEW) {
+        ProcessUtility(cparsetree->utilityStmt, create_sql, NULL, true, NULL, false, NULL);
+    }
+
+    /* CREATE MATILIZED VIEW AS*/
+    if (stmt->relkind == OBJECT_MATVIEW) {
+        Query *query = (Query *)stmt->query;
+
+        ProcessUtility(zparsetree->utilityStmt, view_sql, NULL, true, NULL, false, NULL);
+
+        create_matview_meta(query, stmt->into->rel, stmt->into->ivm);
+
+        /* for ivm should not execute insert into ... select just return. */
+        if (stmt->into->ivm) {
+            return NIL;
+        }
+
+        if (IS_PGXC_COORDINATOR && IsConnFromCoord()) {
+            return NIL;
+        }
+    }
+
+    /*
+        * Now fold the CTAS statement into an INSERT INTO statement. The
+        * utility is no more required.
+        */
+    parsetree->utilityStmt = NULL;
 
     char* insert_into_sqlstr = GetInsertIntoStmt(stmt);
 
@@ -3274,4 +3559,127 @@ List* QueryRewriteCTAS(Query* parsetree)
         }
     }
 }
+
+/*
+ * User_defined variables is a string in prepareStmt.
+ * Get selectStmt/insertStmt/updateStmt/deleteStmt/mergeStmt from user_defined variables by pg_parse_query.
+ * Then, execute SQL: PREPARE stmt AS selectStmt/insertStmt/updateStmt/deleteStmt/mergeStmt.
+ */
+List* QueryRewritePrepareStmt(Query* parsetree)
+{
+    char *sqlstr = NULL;
+    List* raw_parsetree_list = NIL;
+    List* querytree_list = NULL;
+
+    PrepareStmt *stmt = (PrepareStmt *)parsetree->utilityStmt;
+    UserVar *uservar = (UserVar *)stmt->query;
+    Const* value = (Const *)uservar->value;
+
+    if (value->consttype != TEXTOID) {
+        ereport(ERROR,
+            (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                errmsg("userdefined variable in prepate statement must be text type.")));
+    }
+
+    sqlstr = TextDatumGetCString(value->constvalue);
+
+    raw_parsetree_list = pg_parse_query(sqlstr);
+
+    if (raw_parsetree_list->length != 1) {
+        ereport(ERROR,
+            (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                errmsg("prepare user_defined variable can contain only one SQL statement.")));
+    }
+
+    switch (nodeTag(linitial(raw_parsetree_list))) {
+        case T_SelectStmt:
+        case T_InsertStmt:
+        case T_UpdateStmt:
+        case T_DeleteStmt:
+        case T_MergeStmt:
+            stmt->query = (Node *)copyObject((Node *)linitial(raw_parsetree_list));
+            break;
+        default:
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("the statement in prepate is not supported.")));
+            break;
+    }
+
+    querytree_list = pg_analyze_and_rewrite((Node*)stmt, sqlstr, NULL, 0);
+    return querytree_list;
+}
+
+/*
+ * Get value from a subquery or non-constant expression by constructing SQL.
+ * input:
+         node: a subquery expression or non-constant expression.
+ * return: Const expression.
+ */
+Node* QueryRewriteNonConstant(Node *node)
+{
+    Query* cparsetree = NULL;
+    Const* con = NULL;
+    List *p_target = NIL;
+    Node *res = NULL;
+    SelectStmt* select_stmt = makeNode(SelectStmt);
+
+    /* get targetList. */
+    TargetEntry* target = makeTargetEntry((Expr*)node, (AttrNumber)1, NULL, false);
+    p_target = list_make1(target);
+    select_stmt->targetList = list_copy(p_target);
+
+    /* construct Query node for subquery. */
+    cparsetree = (Query *)makeNode(Query);
+    cparsetree->commandType = CMD_SELECT;
+    cparsetree->utilityStmt = (Node *)select_stmt;
+    cparsetree->hasSubLinks = true;
+    cparsetree->canSetTag = true;
+    cparsetree->jointree = makeFromExpr(NULL, NULL);
+    cparsetree->targetList = list_copy(p_target);
+
+    StringInfo select_sql = makeStringInfo();
+
+    /* deparse the SQL statement from the subquery. */
+    deparse_query(cparsetree, select_sql, NIL, false, false);
+
+    StmtResult *result = execute_stmt(select_sql->data, true);
+
+    DestroyStringInfo(select_sql);
+
+    bool isnull = result->isnulls[0];
+    if (isnull) {
+        /* return a null const */
+        con = makeConst(UNKNOWNOID, -1, InvalidOid, -2, (Datum)0, true, false);
+        (*result->pub.rDestroy)((DestReceiver *)result);
+        return (Node *)con;
+    }
+
+    char* value = (char *)linitial((List *)linitial(result->tuples));
+    uint len = strlen(value);
+    char* str_value = (char *)palloc(len + 1);
+    errno_t rc = strncpy_s(str_value, len + 1, value, len + 1);
+    securec_check(rc, "\0", "\0");
+    str_value[len] = '\0';
+    Datum str_datum = CStringGetDatum(str_value);
+    Oid atttypid = result->atttypids[0];
+    
+    /* convert value to const expression. */
+    if (atttypid == BOOLOID) {
+        if (strcmp(str_value, "t") == 0) {
+            con = makeConst(BOOLOID, -1, InvalidOid, sizeof(bool), BoolGetDatum(true), false, true);
+        } else {
+            con = makeConst(BOOLOID, -1, InvalidOid, sizeof(bool), BoolGetDatum(false), false, true);
+        }
+        res = (Node *)con;
+    } else {
+        con = makeConst(UNKNOWNOID, -1, InvalidOid, -2, str_datum, false, false);
+        res = type_transfer((Node *)con, atttypid, true);
+    }
+
+    (*result->pub.rDestroy)((DestReceiver *)result);
+
+    return res;
+}
+
 #endif

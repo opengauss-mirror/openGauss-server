@@ -368,7 +368,7 @@ typedef struct TableAmRoutine {
 
     void (*scan_index_fetch_end)(IndexFetchTableData *scan);
 
-    Tuple (*scan_index_fetch_tuple)(IndexScanDesc scan, bool *all_dead);
+    Tuple (*scan_index_fetch_tuple)(IndexScanDesc scan, bool *all_dead, bool* has_cur_xact_write);
 
     /*
      * begin relation scan
@@ -386,6 +386,8 @@ typedef struct TableAmRoutine {
      */
     TableScanDesc (*scan_begin_sampling)(Relation relation, Snapshot snapshot, int nkeys, ScanKey key, bool allow_strat,
         bool allow_sync, RangeScanInRedis rangeScanInRedis);
+
+    TableScanDesc (*scan_begin_parallel)(Relation relation, ParallelHeapScanDesc parallel_scan);
 
     /*
      * Re scan
@@ -411,7 +413,7 @@ typedef struct TableAmRoutine {
      * Get next tuple
      * Will return a Generic "Tuple" type
      */
-    Tuple (*scan_getnexttuple)(TableScanDesc sscan, ScanDirection direction);
+    Tuple (*scan_getnexttuple)(TableScanDesc sscan, ScanDirection direction, bool* has_cur_xact_write);
 
     bool (*scan_GetNextBatch)(TableScanDesc scan, ScanDirection direction);
 
@@ -609,13 +611,14 @@ extern void tableam_tuple_abort_speculative(Relation relation, Tuple tuple);
 extern IndexFetchTableData *tableam_scan_index_fetch_begin(Relation rel);
 extern void tableam_scan_index_fetch_reset(IndexFetchTableData *scan);
 extern void tableam_scan_index_fetch_end(IndexFetchTableData *scan);
-extern Tuple tableam_scan_index_fetch_tuple(IndexScanDesc scan, bool *all_dead);
+extern Tuple tableam_scan_index_fetch_tuple(IndexScanDesc scan, bool *all_dead, bool* has_cur_xact_write = NULL);
 extern TableScanDesc tableam_scan_begin(Relation relation, Snapshot snapshot, int nkeys, ScanKey key,
     RangeScanInRedis rangeScanInRedis = { false, 0, 0 });
 extern TableScanDesc tableam_scan_begin_bm(Relation relation, Snapshot snapshot, int nkeys, ScanKey key);
 extern TableScanDesc tableam_scan_begin_sampling(Relation relation, Snapshot snapshot, int nkeys, ScanKey key,
     bool allow_strat, bool allow_sync, RangeScanInRedis rangeScanInRedis = { false, 0, 0 });
-extern Tuple tableam_scan_getnexttuple(TableScanDesc sscan, ScanDirection direction);
+extern TableScanDesc tableam_scan_begin_parallel(Relation relation, ParallelHeapScanDesc parallel_scan);
+extern Tuple tableam_scan_getnexttuple(TableScanDesc sscan, ScanDirection direction, bool* has_cur_xact_write = NULL);
 extern bool tableam_scan_gettuplebatchmode(TableScanDesc sscan, ScanDirection direction);
 extern void tableam_scan_getpage(TableScanDesc sscan, BlockNumber page);
 extern Tuple tableam_scan_gettuple_for_verify(TableScanDesc sscan, ScanDirection direction, bool isValidRelationPage);

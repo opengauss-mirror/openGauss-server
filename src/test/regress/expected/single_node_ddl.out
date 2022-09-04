@@ -30,8 +30,10 @@ ERROR:  Un-support feature
 DETAIL:  The distributed capability is not supported currently.
 create table table1 (id int);
 select /*+ redistribute(table1) +*/ * from table1;
-ERROR:  Un-support feature
-DETAIL:  The distributed capability is not supported currently.
+ id 
+----
+(0 rows)
+
 drop table table1;
 create barrier;
 ERROR:  Un-support feature

@@ -424,6 +424,77 @@ static List *ExtractSubPartitionIdf(IndexStmt* stmt, List *partitionList,
     return subPartitionIdf;
 }
 
+static bool CheckIndexIncludingParams(IndexStmt* stmt)
+{
+    if (!PointerIsValid(stmt)) {
+        return false;
+    }
+
+    int nparams = list_length(stmt->indexIncludingParams);
+    ListCell* cell = NULL;
+    /* For global partition index, tableoid will be added automatically in AddIndexColumnForGpi, so remove the count */
+    if (stmt->isGlobal) {
+        foreach (cell, stmt->indexIncludingParams) {
+            IndexElem* param = (IndexElem*)lfirst(cell);
+            if (strcmp(param->name, "tableoid") == 0) {
+                nparams--;
+                break;
+            }
+        }
+    }
+    /* For crossbucket index, tablebucketid will be added automatically in AddIndexColumnForCbi, so remove the count */
+    if (stmt->crossbucket) {
+        foreach (cell, stmt->indexIncludingParams) {
+            IndexElem* param = (IndexElem*)lfirst(cell);
+            if (strcmp(param->name, "tablebucketid") == 0) {
+                nparams--;
+                break;
+            }
+        }
+    }
+
+    return (nparams > 0);
+}
+
+void SetPartionIndexType(IndexStmt* stmt, Relation rel, bool is_alter_table)
+{
+    if (!RELATION_IS_PARTITIONED(rel)) {
+        return;
+    }
+
+    if (stmt->unique && (!stmt->isPartitioned || is_alter_table)) {
+        /*
+         * If index key of unique or primary key index include the partition key,
+         * default index is set to local index. Otherwise, set to global index.
+         */
+        if (RelationIsSubPartitioned(rel)) {
+            List *partOidList = relationGetPartitionOidList(rel);
+            Assert(list_length(partOidList) != 0);
+            Partition part = partitionOpen(rel, linitial_oid(partOidList), NoLock);
+            Relation partRel = partitionGetRelation(rel, part);
+            stmt->isGlobal = !(CheckIdxParamsOwnPartKey(rel, stmt->indexParams) &&
+                                CheckIdxParamsOwnPartKey(partRel, stmt->indexParams));
+            releaseDummyRelation(&partRel);
+            partitionClose(rel, part, NoLock);
+            if (partOidList != NULL) {
+                releasePartitionOidList(&partOidList);
+            }
+        } else {
+            stmt->isGlobal = !CheckIdxParamsOwnPartKey(rel, stmt->indexParams);
+        }
+    } else if (!stmt->isPartitioned) {
+        /* default partition index is set to Global index */
+        stmt->isGlobal = (!DEFAULT_CREATE_LOCAL_INDEX ? true : stmt->isGlobal);
+    }
+    stmt->isPartitioned = true;
+#ifndef ENABLE_MULTIPLE_NODES
+    if (stmt->unique && stmt->isPartitioned && RelationIsCUFormat(rel)) {
+        /* CStore unique index must include the partition key and set to local index */
+        stmt->isGlobal = false;
+    }
+#endif
+}
+
 /*
  * WaitForOlderSnapshots
  *
@@ -556,6 +627,11 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
     List *subPartitionTupleList = NULL;
     List *subPartitionOidList = NULL;
     List *partitionOidList = NULL;
+    Oid root_save_userid;
+    int root_save_sec_context;
+    int root_save_nestlevel;
+
+    root_save_nestlevel = NewGUCNestLevel();
 
     /*
      * Force non-concurrent build on temporary relations, even if CONCURRENTLY
@@ -596,7 +672,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
     lockmode = concurrent ? ShareUpdateExclusiveLock : ShareLock;
     rel = heap_open(relationId, lockmode);
 
-    TableCreateSupport indexCreateSupport{COMPRESS_TYPE_NONE, false, false, false, false, false};
+    TableCreateSupport indexCreateSupport{(int)COMPRESS_TYPE_NONE, false, false, false, false, false, true, false};
     ListCell *cell = NULL;
     foreach (cell, stmt->options) {
         DefElem *defElem = (DefElem *)lfirst(cell);
@@ -605,6 +681,14 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
 
     CheckCompressOption(&indexCreateSupport);
 
+    /*
+     * Switch to the table owner's userid, so that any index functions are run
+     * as that user.  Also lock down security-restricted operations.  We
+     * already arranged to make GUC variable changes local to this command.
+     */
+    GetUserIdAndSecContext(&root_save_userid, &root_save_sec_context);
+    SetUserIdAndSecContext(rel->rd_rel->relowner,
+        root_save_sec_context | SECURITY_RESTRICTED_OPERATION);
     /* Forbidden to create gin index on ustore table. */
     if (rel->rd_tam_type == TAM_USTORE) {
         if (strcmp(stmt->accessMethod, "btree") == 0) {
@@ -648,39 +732,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
                 errmsg("not supported to create a functional index on this table.")));
     }
 
-    if (RELATION_IS_PARTITIONED(rel)) {
-        if (stmt->unique && (!stmt->isPartitioned || is_alter_table)) {
-            /*
-             * If index key of unique or primary key index include the partition key,
-             * default index is set to local index. Otherwise, set to global index.
-             */
-            if (RelationIsSubPartitioned(rel)) {
-                List *partOidList = relationGetPartitionOidList(rel);
-                Assert(list_length(partOidList) != 0);
-                Partition part = partitionOpen(rel, linitial_oid(partOidList), NoLock);
-                Relation partRel = partitionGetRelation(rel, part);
-                stmt->isGlobal = !(CheckIdxParamsOwnPartKey(rel, stmt->indexParams) &&
-                                   CheckIdxParamsOwnPartKey(partRel, stmt->indexParams));
-                releaseDummyRelation(&partRel);
-                partitionClose(rel, part, NoLock);
-                if (partOidList != NULL) {
-                    releasePartitionOidList(&partOidList);
-                }
-            } else {
-                stmt->isGlobal = !CheckIdxParamsOwnPartKey(rel, stmt->indexParams);
-            }
-        } else if (!stmt->isPartitioned) {
-            /* default partition index is set to Global index */
-            stmt->isGlobal = (!DEFAULT_CREATE_LOCAL_INDEX ? true : stmt->isGlobal);
-        }
-        stmt->isPartitioned = true;
-#ifndef ENABLE_MULTIPLE_NODES
-        if (stmt->unique && stmt->isPartitioned && RelationIsCUFormat(rel)) {
-            /* CStore unique index must include the partition key and set to local index */
-            stmt->isGlobal = false;
-        }
-#endif
-    }
+    SetPartionIndexType(stmt, rel, is_alter_table);
 
     if (stmt->isGlobal && DISABLE_MULTI_NODES_GPI) {
         ereport(ERROR,
@@ -696,6 +748,14 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
     if (RELATION_HAS_BUCKET(rel)) {
         /* determine the crossbucket option */
         stmt->crossbucket = get_crossbucket_option(&stmt->options, stmt->isGlobal, stmt->accessMethod, &crossbucketopt);
+        if (concurrent) {
+            ereport(ERROR, (errmodule(MOD_INDEX), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("cannot CREATE INDEX CONCURRENTLY on hash bucket table."),
+                errdetail("CREATE INDEX CONCURRENTLY on hash bucket table is not supported on the current version."),
+                errcause("CREATE INDEX CONCURRENTLY on hash bucket table on the current version."),
+                erraction("Do not CREATE INDEX CONCURRENTLY on hash bucket table on the current version.")));
+        }
+
     }
 
     if (stmt->crossbucket) {
@@ -741,12 +801,6 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
         }
     }
 
-    if (list_length(stmt->indexIncludingParams) > 0 && strcmp(stmt->accessMethod, "ubtree") != 0) {
-        ereport(ERROR,
-            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("create a index with include columns is only supported in ubtree")));
-    }
-
     /*
      * partitioned index not is not support concurrent index
      */
@@ -765,6 +819,12 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
     /* Add special index columns tablebucketid to crossbucket index. */
     if (stmt->crossbucket) {
         AddIndexColumnForCbi(stmt);
+    }
+
+    if (strcmp(stmt->accessMethod, "ubtree") != 0 && CheckIndexIncludingParams(stmt)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("create a index with include columns is only supported in ubtree")));
     }
 
     if (list_intersection(stmt->indexParams, stmt->indexIncludingParams) != NIL) {
@@ -819,7 +879,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
      * bootstrapping, since permissions machinery may not be working yet.
      */
     if (check_rights && !IsBootstrapProcessingMode()) {
-        (void)CheckCreatePrivilegeInNamespace(namespaceId, GetUserId(), CREATE_ANY_INDEX);
+        (void)CheckCreatePrivilegeInNamespace(namespaceId, root_save_userid, CREATE_ANY_INDEX);
     }
 
     /*
@@ -845,7 +905,9 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
         /* LOCAL partition index check */
         ListCell* cell = NULL;
 
-        partitionTableList = searchPgPartitionByParentId(PART_OBJ_TYPE_TABLE_PARTITION, relationId);
+        /* Get the partition tuples in order by inserted time. */
+        partitionTableList =
+            searchPgPartitionByParentId(PART_OBJ_TYPE_TABLE_PARTITION, relationId, BackwardScanDirection);
 
         if (!PointerIsValid(partitionTableList)) {
             ereport(ERROR,
@@ -854,8 +916,8 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
         }
 
         if (RelationIsSubPartitioned(rel)) {
-            subPartitionTupleList =
-                searchPgSubPartitionByParentId(PART_OBJ_TYPE_TABLE_SUB_PARTITION, partitionTableList);
+            subPartitionTupleList = searchPgSubPartitionByParentId(PART_OBJ_TYPE_TABLE_SUB_PARTITION,
+                partitionTableList, BackwardScanDirection);
         }
 
         if (PointerIsValid(stmt->partClause)) {
@@ -977,7 +1039,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
     if (!stmt->isPartitioned && OidIsValid(tablespaceId) && tablespaceId != u_sess->proc_cxt.MyDatabaseTableSpace) {
         AclResult aclresult;
 
-        aclresult = pg_tablespace_aclcheck(tablespaceId, GetUserId(), ACL_CREATE);
+        aclresult = pg_tablespace_aclcheck(tablespaceId, root_save_userid, ACL_CREATE);
         if (aclresult != ACLCHECK_OK)
             aclcheck_error(aclresult, ACL_KIND_TABLESPACE, get_tablespace_name(tablespaceId));
     } else if (stmt->isPartitioned) {
@@ -990,7 +1052,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
             foreach (tspcell, partitiontspList) {
                 tablespaceOid = lfirst_oid(tspcell);
                 if (OidIsValid(tablespaceOid) && tablespaceOid != u_sess->proc_cxt.MyDatabaseTableSpace) {
-                    aclresult = pg_tablespace_aclcheck(tablespaceOid, GetUserId(), ACL_CREATE);
+                    aclresult = pg_tablespace_aclcheck(tablespaceOid, root_save_userid, ACL_CREATE);
                     if (aclresult != ACLCHECK_OK) {
                         aclcheck_error(aclresult, ACL_KIND_TABLESPACE, get_tablespace_name(tablespaceOid));
                     }
@@ -1004,7 +1066,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
             }
         } else {
             if (OidIsValid(tablespaceId) && tablespaceId != u_sess->proc_cxt.MyDatabaseTableSpace) {
-                aclresult = pg_tablespace_aclcheck(tablespaceId, GetUserId(), ACL_CREATE);
+                aclresult = pg_tablespace_aclcheck(tablespaceId, root_save_userid, ACL_CREATE);
                 if (aclresult != ACLCHECK_OK) {
                     aclcheck_error(aclresult, ACL_KIND_TABLESPACE, get_tablespace_name(tablespaceId));
                 }
@@ -1146,13 +1208,9 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
     }
 
     if (indexCreateSupport.compressType || HasCompressOption(&indexCreateSupport)) {
+        ListCell* cell = NULL;
         foreach (cell, stmt->options) {
             DefElem *defElem = (DefElem *)lfirst(cell);
-            if (pg_strcasecmp(defElem->defname, "storage_type") == 0 &&
-                pg_strcasecmp(defGetString(defElem), "ustore") == 0) {
-                ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                                errmsg("Can not use compress option in ustore index.")));
-            }
             if (pg_strcasecmp(defElem->defname, "segment") == 0 && ReadBoolFromDefElem(defElem)) {
                 ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                                 errmsg("Can not use compress option in segment storage.")));
@@ -1378,6 +1436,13 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
                     true,
                     concurrent,
                     &extra);
+
+                /* Roll back any GUC changes executed by index functions. */
+                AtEOXact_GUC(false, root_save_nestlevel);
+
+                /* Restore userid and security context */
+                SetUserIdAndSecContext(root_save_userid, root_save_sec_context);
+
                 heap_close(rel, NoLock);
 
                 if (stmt->idxname == NULL) {
@@ -1393,9 +1458,21 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
                 return indexRelationId;
             }
 
+            /* Roll back any GUC changes executed by index functions. */
+            AtEOXact_GUC(false, root_save_nestlevel);
+
+            /* Restore userid and security context */
+            SetUserIdAndSecContext(root_save_userid, root_save_sec_context);
+
             return buildInformationalConstraint(stmt, indexRelationId, indexRelationName, rel, indexInfo, namespaceId);
         }
 #endif
+        /* Roll back any GUC changes executed by index functions. */
+        AtEOXact_GUC(false, root_save_nestlevel);
+
+        /* Restore userid and security context */
+        SetUserIdAndSecContext(root_save_userid, root_save_sec_context);
+
         return buildInformationalConstraint(stmt, indexRelationId, indexRelationName, rel, indexInfo, namespaceId);
     }
 
@@ -1438,6 +1515,28 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
         &extra,
         false,
         indexsplitMethod);
+
+    /*
+     * Roll back any GUC changes executed by index functions, and keep
+     * subsequent changes local to this command.  It's barely possible that
+     * some index function changed a behavior-affecting GUC, e.g. xmloption,
+     * that affects subsequent steps.
+     */
+    AtEOXact_GUC(false, root_save_nestlevel);
+    root_save_nestlevel = NewGUCNestLevel();
+
+
+        /* index options */
+    List *indexOptions = stmt->indexOptions;
+    foreach (cell, indexOptions) {
+        void *pointer = lfirst(cell);
+        if (IsA(pointer, CommentStmt)) {
+            CommentStmt *commentStmt = (CommentStmt *)pointer;
+            CreateComments(indexRelationId, RelationRelationId, 0, commentStmt->comment);
+            break;
+        }
+    }
+
     /* Add any requested comment */
     if (stmt->idxcomment != NULL)
         CreateComments(indexRelationId, RelationRelationId, 0, stmt->idxcomment);
@@ -1663,11 +1762,23 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
             ereport(ERROR, (errcode(ERRCODE_INVALID_OBJECT_DEFINITION), errmsg("unsupport partitioned strategy")));
         }
 
+        /* Roll back any GUC changes executed by index functions. */
+        AtEOXact_GUC(false, root_save_nestlevel);
+
+        /* Restore userid and security context */
+        SetUserIdAndSecContext(root_save_userid, root_save_sec_context);
+
         heap_close(partitionedIndex, NoLock);
         heap_close(rel, NoLock);
 
         return indexRelationId;
     }
+
+    /* Roll back any GUC changes executed by index functions. */
+    AtEOXact_GUC(false, root_save_nestlevel);
+
+    /* Restore userid and security context */
+    SetUserIdAndSecContext(root_save_userid, root_save_sec_context);
 
     if (!concurrent) {
         /* Close the heap and we're done, in the non-concurrent case */
@@ -2907,6 +3018,29 @@ void PartitionNameCallbackForIndexPartition(Oid partitionedRelationOid, const ch
 }
 
 /*
+ * Check permissions for index.
+ */
+static void PermissionCheckForReindexIndex(const RangeVar* relation, Oid relId)
+{
+    if (pg_class_ownercheck(relId, GetUserId())) {
+        return;
+    }
+
+    Oid tableoid = IndexGetRelation(relId, false);
+    if (pg_class_aclcheck(tableoid, GetUserId(), ACL_INDEX) == ACLCHECK_OK) {
+        return;
+    }
+
+    if (!IsSysSchema(GetNamespaceIdbyRelId(tableoid))) {
+        if (HasSpecAnyPriv(GetUserId(), ALTER_ANY_INDEX, false)) {
+            return;
+        }
+    }
+
+    aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_CLASS, relation->relname);
+}
+
+/*
  * Check permissions on table before acquiring relation lock; also lock
  * the heap before the RangeVarGetRelidExtended takes the index lock, to avoid
  * deadlocks.
@@ -2956,11 +3090,7 @@ static void RangeVarCallbackForReindexIndex(
     }
 
     /* Check permissions */
-    Oid tableoid = IndexGetRelation(relId, false);
-    AclResult aclresult = pg_class_aclcheck(tableoid, GetUserId(), ACL_INDEX);
-    if (aclresult != ACLCHECK_OK && !pg_class_ownercheck(relId, GetUserId())) {
-        aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_CLASS, relation->relname);
-    }
+    PermissionCheckForReindexIndex(relation, relId);
 
     /* Lock heap before index to avoid deadlock. */
     if (relId != oldRelId) {
@@ -4441,6 +4571,10 @@ static bool ReindexRelationConcurrently(Oid relationOid, Oid relationPartOid, Ad
                 CommandCounterIncrement();
             }
 
+            // call the internal function, if index is unusable, set it usable
+            ATExecSetIndexUsableState(IndexRelationId, oldIndexId, true);
+            CacheInvalidateRelcacheByRelid(heapId);
+
             /* 
              * swap index id for drop new partitioned index, because this new partitioned 
              * index has old index partitions.
@@ -5335,7 +5469,7 @@ void mark_indisvalid_all_cns(char* schname, char* idxname)
         ParallelFunctionState* state = NULL;
         StringInfoData buf;
         initStringInfo(&buf);
-        appendStringInfo(&buf, "select gs_mark_indisvalid(");
+        appendStringInfo(&buf, "select pg_catalog.gs_mark_indisvalid(");
         if (schname == NULL || strlen(schname) == 0) {
             appendStringInfo(&buf, "'', %s)", quote_literal_cstr(idxname));
         } else {

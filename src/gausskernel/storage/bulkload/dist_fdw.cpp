@@ -233,8 +233,6 @@ static void assignTaskToDataNodeInNormalMode(List *urllist, List **totalTask, Li
 
 extern void decryptOBSForeignTableOption(List **options);
 
-extern BlockNumber getPageCountForFt(void *additionalData);
-
 List *getOBSFileList(List *urllist, bool encrypt, const char *access_key, const char *secret_access_key,
                      bool isAnalyze);
 #ifndef ENABLE_LITE_MODE
@@ -1504,6 +1502,7 @@ void InitDistImport(DistImportExecutionState *importstate, Relation rel, const c
     initStringInfo(&importstate->attribute_buf);
     initStringInfo(&importstate->sequence_buf);
     initStringInfo(&importstate->line_buf);
+    initStringInfo(&importstate->fieldBuf);
     importstate->line_buf_converted = false;
     importstate->raw_buf = (char *)palloc(RAW_BUF_SIZE + 1);
     importstate->raw_buf_index = importstate->raw_buf_len = 0;
@@ -2150,3 +2149,64 @@ bool is_obs_protocol(const char *locations)
 
     return result;
 }
+
+/*
+ * @dist_fdw
+ * brief: Calculate the foreign table size.
+ * input param @fileName: the file names of the foreign table;
+ */
+int64 GetForeignTableTotalSize(List *const fileName)
+{
+    int64 totalSize = 0;
+    ListCell *fileCell = NULL;
+
+    Assert(fileName != NULL);
+
+    /* Iterate the fileName list to get each file size and add them one by one. */
+    foreach (fileCell, fileName) {
+        int64 size = 0;
+        void *data = lfirst(fileCell);
+        if (IsA(data, SplitInfo)) {
+            SplitInfo *fileInfo = (SplitInfo *)data;
+            size = fileInfo->ObjectSize;
+        } else {
+            /* for txt/csv format obs foreign table. */
+            DistFdwFileSegment *fileSegment = (DistFdwFileSegment *)data;
+            size = fileSegment->ObjectSize;
+        }
+
+        totalSize += size < 0 ? 0 : size;
+    }
+    return totalSize;
+}
+
+BlockNumber getPageCountForFt(void *additionalData)
+{
+    BlockNumber totalPageCount = 0;
+
+    /*
+     * Get table total size. The table may have many files. We add each file size together. File list in additionalData
+     * comes from CN scheduler.
+     */
+    List *fileList = NIL;
+    if (IsA(additionalData, SplitMap)) {
+        SplitMap *splitMap = (SplitMap *)additionalData;
+        fileList = splitMap->splits;
+    } else {
+        /* for dist obs foreign table. */
+        DistFdwDataNodeTask *dnTask = (DistFdwDataNodeTask *)additionalData;
+        fileList = dnTask->task;
+    }
+    double totalSize = GetForeignTableTotalSize(fileList);
+
+    /*
+     * description: BLSCKZ value may change
+     */
+    totalPageCount = (uint32)(totalSize + (BLCKSZ - 1)) / BLCKSZ;
+    if (totalPageCount < 1) {
+        totalPageCount = 1;
+    }
+
+    return totalPageCount;
+}
+

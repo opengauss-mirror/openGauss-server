@@ -38,7 +38,6 @@
 #include "gssignal/gs_signal.h"
 #include "storage/pmsignal.h"
 #include "access/gtm.h"
-#include "access/dfs/dfs_am.h"
 #include "access/ustore/undo/knl_uundoapi.h"
 #include "workload/workload.h"
 #include "postmaster/syslogger.h"
@@ -85,7 +84,6 @@ static const pg_on_exit_callback on_sess_exit_list[] = {
     ShutdownPostgres,
     PGXCNodeCleanAndRelease,
     PlDebugerCleanUp,
-    cleanGPCPlanProcExit,
 #ifdef ENABLE_MOT
     /*
      * 1. Must come after ShutdownPostgres(), in case there is abort/rollback callback.
@@ -250,9 +248,6 @@ void proc_exit(int code)
         DecreaseUserCount(u_sess->proc_cxt.MyRoleId);
     }
     RemoveFromDnHashTable();
-
-    /* Clean up Dfs Reader stuffs */
-    CleanupDfsHandlers(true);
 
     BgworkerListSyncQuit();
 

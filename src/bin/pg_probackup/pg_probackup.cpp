@@ -811,6 +811,7 @@ int main(int argc, char *argv[])
 
     pfree(command_name);
 
+    /* compress_init */
     compress_init();
 
     /* do actual operation */

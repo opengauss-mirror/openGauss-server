@@ -1102,9 +1102,18 @@ static FuncCandidateList FuncnameAddCandidates(FuncCandidateList resultList, Hea
     int* argNumbers = NULL;
     FuncCandidateList newResult;
     bool isNull = false;
-
 #ifndef ENABLE_MULTIPLE_NODES
-    if (enable_outparam_override) {
+    Oid schema_oid = get_func_namespace(HeapTupleGetOid(procTup));
+    (void)SysCacheGetAttr(PROCOID, procTup, Anum_pg_proc_proallargtypes, &isNull);
+    if (IsAformatStyleFunctionOid(schema_oid) && isNull) {
+        includeOut = false;
+    }
+    if (enable_outparam_override && includeOut) {
+        if (isNull) {
+            proNargs = procForm->pronargs;
+            allArgTypes = NULL;
+            includeOut = false;
+        }
         Datum argTypes = ProcedureGetAllArgTypes(procTup, &isNull);
         if (!isNull) {
             allArgTypes = (oidvector *)PG_DETOAST_DATUM(argTypes);
@@ -1539,7 +1548,7 @@ FuncCandidateList FuncnameGetCandidates(List* names, int nargs, List* argnames, 
     bool isNull;
     Oid funcoid;
     Oid caller_pkg_oid = InvalidOid;
-    Oid initNamesapceId = InvalidOid;
+    Oid initNamespaceId = InvalidOid;
     bool enable_outparam_override = false;
 
 #ifndef ENABLE_MULTIPLE_NODES
@@ -1573,7 +1582,7 @@ FuncCandidateList FuncnameGetCandidates(List* names, int nargs, List* argnames, 
         namespaceId = InvalidOid;
         recomputeNamespacePath();
     }
-    initNamesapceId = namespaceId;
+    initNamespaceId = namespaceId;
 
     /* Step1. search syscache by name only and add candidates from pg_proc */
     CatCList* catlist = NULL;
@@ -1588,7 +1597,7 @@ FuncCandidateList FuncnameGetCandidates(List* names, int nargs, List* argnames, 
 #endif
 
     for (i = 0; i < catlist->n_members; i++) {
-        namespaceId = initNamesapceId;
+        namespaceId = initNamespaceId;
         HeapTuple proctup = t_thrd.lsc_cxt.FetchTupleFromCatCList(catlist, i);
         if (!OidIsValid(HeapTupleGetOid(proctup)) || !HeapTupleIsValid(proctup)) {
             continue;
@@ -2061,7 +2070,6 @@ bool FunctionIsVisible(Oid funcid)
     Form_pg_proc procform;
     Oid pronamespace;
     bool visible = false;
-
     proctup = SearchSysCache1(PROCOID, ObjectIdGetDatum(funcid));
     if (!HeapTupleIsValid(proctup))
         ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for function %u", funcid)));
@@ -2093,11 +2101,12 @@ bool FunctionIsVisible(Oid funcid)
         oidvector* proargs = ProcedureGetArgTypes(proctup);
 
 #ifndef ENABLE_MULTIPLE_NODES
+        Oid prolang = procform->prolang;
         bool enable_outparam_override = false;
         enable_outparam_override = enable_out_param_override();
-        if (enable_outparam_override) {
+        if (enable_outparam_override && strcasecmp(get_language_name((Oid)prolang), "plpgsql") == 0) {
             bool isNull = false;
-            Datum argTypes = ProcedureGetAllArgTypes(proctup, &isNull);
+            Datum argTypes = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_proallargtypes, &isNull);
             if (!isNull) {
                 oidvector* allArgTypes = (oidvector *)PG_DETOAST_DATUM(argTypes);
                 int proNargs = allArgTypes->dim1;
@@ -4600,6 +4609,14 @@ void AtEOXact_Namespace(bool isCommit)
         u_sess->catalog_cxt.myTempNamespaceSubID = InvalidSubTransactionId;
     }
 
+    if (u_sess->catalog_cxt.myLobTempNamespaceSubID != InvalidSubTransactionId) {
+        if (!isCommit) {
+            u_sess->catalog_cxt.myLobTempToastNamespace = InvalidOid;
+            u_sess->catalog_cxt.ActiveLobToastOid = InvalidOid;
+        }
+        u_sess->catalog_cxt.myLobTempNamespaceSubID = InvalidSubTransactionId;
+    }
+
     /*
      * Clean up if someone failed to do PopOverrideSearchPath
      */
@@ -4651,6 +4668,16 @@ void AtEOSubXact_Namespace(bool isCommit, SubTransactionId mySubid, SubTransacti
             u_sess->catalog_cxt.myTempNamespace = InvalidOid;
             u_sess->catalog_cxt.myTempToastNamespace = InvalidOid;
             u_sess->catalog_cxt.baseSearchPathValid = false; /* need to rebuild list */
+        }
+    }
+
+    if (u_sess->catalog_cxt.myLobTempNamespaceSubID == mySubid) {
+        if (isCommit) {
+            u_sess->catalog_cxt.myLobTempNamespaceSubID = parentSubid;
+        } else {
+            u_sess->catalog_cxt.myLobTempNamespaceSubID = InvalidSubTransactionId;
+            u_sess->catalog_cxt.myLobTempToastNamespace = InvalidOid;
+            u_sess->catalog_cxt.ActiveLobToastOid = InvalidOid;
         }
     }
 
@@ -5155,8 +5182,13 @@ void SetTempNamespace(Node* stmt, Oid namespaceOid)
         u_sess->catalog_cxt.myTempNamespaceSubID = GetCurrentSubTransactionId();
     } else if (((CreateSchemaStmt*)stmt)->temptype == Temp_Toast) {
         u_sess->catalog_cxt.myTempToastNamespace = namespaceOid;
+    } else if (((CreateSchemaStmt*)stmt)->temptype == Temp_Lob_Toast) {
+        /* save xact id incase rollback and delete this schema */
+        u_sess->catalog_cxt.myLobTempNamespaceSubID = GetCurrentSubTransactionId();
+        u_sess->catalog_cxt.myLobTempToastNamespace = namespaceOid;
     }
 }
+
 void setTempToastNspName()
 {
     Assert(u_sess->catalog_cxt.myTempNamespace != InvalidOid);

@@ -169,7 +169,7 @@ THR_LOCAL ResourceOwner IsolatedResourceOwner = NULL;
 #ifdef MEMORY_CONTEXT_CHECKING
 #define PrintGlobalSysCacheLeakWarning(owner, strinfo) \
 do { \
-    if (EnableLocalSysCache() && LOCAL_SYSDB_RESOWNER != (owner)) { \
+    if (EnableLocalSysCache()) { \
         ereport(WARNING, (errmsg("global syscache reference leak %s %s %d", strinfo, __FILE__, __LINE__))); \
     } \
 } while(0)
@@ -188,9 +188,6 @@ static void PrintPlanCacheLeakWarning(CachedPlan* plan);
 static void PrintTupleDescLeakWarning(TupleDesc tupdesc);
 static void PrintSnapshotLeakWarning(Snapshot snapshot);
 static void PrintFileLeakWarning(File file);
-
-extern void PrintMetaCacheBlockLeakWarning(CacheSlotId_t slot);
-extern void ReleaseMetaBlock(CacheSlotId_t slot);
 
 /*****************************************************************************
  *	  EXPORTED ROUTINES														 *
@@ -293,8 +290,8 @@ static void ResourceOwnerReleaseInternal(
 
     if (phase == RESOURCE_RELEASE_BEFORE_LOCKS) {
         if (owner == t_thrd.utils_cxt.TopTransactionResourceOwner) {
-            if (u_sess->ustore_cxt.urecvec) {
-                u_sess->ustore_cxt.urecvec->Reset(false);
+            if (t_thrd.ustore_cxt.urecvec) {
+                t_thrd.ustore_cxt.urecvec->Reset(false);
             }
             ReleaseUndoBuffers();
             undo::ReleaseSlotBuffer();
@@ -321,11 +318,6 @@ static void ResourceOwnerReleaseInternal(
             if (isCommit)
                 CUCache->PrintDataCacheSlotLeakWarning(owner->dataCacheSlots[owner->nDataCacheSlots - 1]);
             CUCache->UnPinDataBlock(owner->dataCacheSlots[owner->nDataCacheSlots - 1]);
-        }
-        while (owner->nMetaCacheSlots > 0) {
-            if (isCommit)
-                PrintMetaCacheBlockLeakWarning(owner->metaCacheSlots[owner->nMetaCacheSlots - 1]);
-            ReleaseMetaBlock(owner->metaCacheSlots[owner->nMetaCacheSlots - 1]);
         }
 
         while (owner->nfakerelrefs > 0) {
@@ -525,6 +517,7 @@ void ResourceOwnerDelete(ResourceOwner owner)
      */
     if (IsolatedResourceOwner == owner)
         IsolatedResourceOwner = NULL;
+    Assert(t_thrd.lsc_cxt.local_sysdb_resowner != owner);
 
     while (owner->firstchild != NULL)
         ResourceOwnerDelete(owner->firstchild);
@@ -549,66 +542,64 @@ void ResourceOwnerDelete(ResourceOwner owner)
  */
 static void ResourceOwnerConcatPart1(ResourceOwner target, ResourceOwner source)
 {
-    int i;
-
-    for (i = 0; i < source->nbuffers; i++) {
+    while (source->nbuffers > 0) {
         ResourceOwnerEnlargeBuffers(target);
-        ResourceOwnerRememberBuffer(target, source->buffers[i]);
+        ResourceOwnerRememberBuffer(target, source->buffers[--source->nbuffers]);
     }
 
-    for (i = 0; i < source->nlocalcatclist; i++) {
+    while (source->nlocalcatclist > 0) {
         ResourceOwnerEnlargeLocalCatCList(target);
-        ResourceOwnerRememberLocalCatCList(target, source->localcatclists[i]);
+        ResourceOwnerRememberLocalCatCList(target, source->localcatclists[--source->nlocalcatclist]);
     }
 
-    for (i = 0; i < source->nlocalcatctup; i++) {
+    while (source->nlocalcatctup > 0) {
         ResourceOwnerEnlargeLocalCatCTup(target);
-        ResourceOwnerRememberLocalCatCTup(target, source->localcatctups[i]);
+        ResourceOwnerRememberLocalCatCTup(target, source->localcatctups[--source->nlocalcatctup]);
     }
 
-    for (i = 0; i < source->nglobalcatctup; i++) {
+    while (source->nglobalcatctup > 0) {
         ResourceOwnerEnlargeGlobalCatCTup(target);
-        ResourceOwnerRememberGlobalCatCTup(target, source->globalcatctups[i]);
+        ResourceOwnerRememberGlobalCatCTup(target, source->globalcatctups[--source->nglobalcatctup]);
     }
 
-    for (i = 0; i < source->nglobalcatclist; i++) {
+    while (source->nglobalcatclist > 0) {
         ResourceOwnerEnlargeGlobalCatCList(target);
-        ResourceOwnerRememberGlobalCatCList(target, source->globalcatclists[i]);
+        ResourceOwnerRememberGlobalCatCList(target, source->globalcatclists[--source->nglobalcatclist]);
     }
 
-    for (i = 0; i < source->nglobalbaseentry; i++) {
+    while (source->nglobalbaseentry > 0) {
         ResourceOwnerEnlargeGlobalBaseEntry(target);
-        ResourceOwnerRememberGlobalBaseEntry(target, source->globalbaseentries[i]);
+        ResourceOwnerRememberGlobalBaseEntry(target, source->globalbaseentries[--source->nglobalbaseentry]);
     }
 
-    for (i = 0; i < source->nglobaldbentry; i++) {
+    while (source->nglobaldbentry > 0) {
         ResourceOwnerEnlargeGlobalDBEntry(target);
-        ResourceOwnerRememberGlobalDBEntry(target, source->globaldbentries[i]);
+        ResourceOwnerRememberGlobalDBEntry(target, source->globaldbentries[--source->nglobaldbentry]);
     }
 
-    for (i = 0; i < source->nglobalisexclusive; i++) {
+    while (source->nglobalisexclusive > 0) {
         ResourceOwnerEnlargeGlobalIsExclusive(target);
-        ResourceOwnerRememberGlobalIsExclusive(target, source->globalisexclusives[i]);
+        ResourceOwnerRememberGlobalIsExclusive(target, source->globalisexclusives[--source->nglobalisexclusive]);
     }
 
-    for (i = 0; i < source->ncatrefs; i++) {
+    while (source->ncatrefs > 0) {
         ResourceOwnerEnlargeCatCacheRefs(target);
-        ResourceOwnerRememberCatCacheRef(target, source->catrefs[i]);
+        ResourceOwnerRememberCatCacheRef(target, source->catrefs[--source->ncatrefs]);
     }
 
-    for (i = 0; i < source->ncatlistrefs; i++) {
+    while (source->ncatlistrefs > 0) {
         ResourceOwnerEnlargeCatCacheListRefs(target);
-        ResourceOwnerRememberCatCacheListRef(target, source->catlistrefs[i]);
+        ResourceOwnerRememberCatCacheListRef(target, source->catlistrefs[--source->ncatlistrefs]);
     }
 
-    for (i = 0; i < source->nrelrefs; i++) {
+    while (source->nrelrefs > 0) {
         ResourceOwnerEnlargeRelationRefs(target);
-        ResourceOwnerRememberRelationRef(target, source->relrefs[i]);
+        ResourceOwnerRememberRelationRef(target, source->relrefs[--source->nrelrefs]);
     }
 
-    for (i = 0; i < source->npartrefs; i++) {
+    while (source->npartrefs > 0) {
         ResourceOwnerEnlargePartitionRefs(target);
-        ResourceOwnerRememberPartitionRef(target, source->partrefs[i]);
+        ResourceOwnerRememberPartitionRef(target, source->partrefs[--source->npartrefs]);
     }
 }
 
@@ -617,66 +608,65 @@ static void ResourceOwnerConcatPart1(ResourceOwner target, ResourceOwner source)
  */
 static void ResourceOwnerConcatPart2(ResourceOwner target, ResourceOwner source)
 {
-    int i;
-
-    for (i = 0; i < source->nfakerelrefs; i++) {
+    while (source->nfakerelrefs > 0) {
         dlist_push_tail(&(target->fakerelrefs_list), dlist_pop_head_node(&(source->fakerelrefs_list)));
         target->nfakerelrefs++;
+        source->nfakerelrefs--;
     }
 
-    for (i = 0; i < source->nfakepartrefs; i++) {
+    while (source->nfakepartrefs > 0) {
         ResourceOwnerEnlargeFakepartRefs(target);
-        ResourceOwnerRememberFakepartRef(target, source->fakepartrefs[i]);
+        ResourceOwnerRememberFakepartRef(target, source->fakepartrefs[--source->nfakepartrefs]);
     }
 
-    for (i = 0; i < source->nplanrefs; i++) {
+    while (source->nplanrefs > 0) {
         ResourceOwnerEnlargePlanCacheRefs(target);
-        ResourceOwnerRememberPlanCacheRef(target, source->planrefs[i]);
+        ResourceOwnerRememberPlanCacheRef(target, source->planrefs[--source->nplanrefs]);
     }
 
-    for (i = 0; i < source->ntupdescs; i++) {
+    while (source->ntupdescs > 0) {
         ResourceOwnerEnlargeTupleDescs(target);
-        ResourceOwnerRememberTupleDesc(target, source->tupdescs[i]);
+        ResourceOwnerRememberTupleDesc(target, source->tupdescs[--source->ntupdescs]);
     }
 
-    for (i = 0; i < source->nsnapshots; i++) {
+    while (source->nsnapshots > 0) {
         ResourceOwnerEnlargeSnapshots(target);
-        ResourceOwnerRememberSnapshot(target, source->snapshots[i]);
+        ResourceOwnerRememberSnapshot(target, source->snapshots[--source->nsnapshots]);
     }
 
-    for (i = 0; i < source->nfiles; i++) {
+    while (source->nfiles > 0) {
         ResourceOwnerEnlargeFiles(target);
-        ResourceOwnerRememberFile(target, source->files[i]);
+        ResourceOwnerRememberFile(target, source->files[--source->nfiles]);
     }
 
-    for (i = 0; i < source->nDataCacheSlots; i++) {
+    while (source->nDataCacheSlots > 0) {
         ResourceOwnerEnlargeDataCacheSlot(target);
-        ResourceOwnerRememberDataCacheSlot(target, source->dataCacheSlots[i]);
+        ResourceOwnerRememberDataCacheSlot(target, source->dataCacheSlots[--source->nDataCacheSlots]);
     }
 
-    for (i = 0; i < source->nMetaCacheSlots; i++) {
+    while (source->nMetaCacheSlots > 0) {
         ResourceOwnerEnlargeMetaCacheSlot(target);
-        ResourceOwnerRememberMetaCacheSlot(target, source->metaCacheSlots[i]);
+        ResourceOwnerRememberMetaCacheSlot(target, source->metaCacheSlots[--source->nMetaCacheSlots]);
     }
 
-    for (i = 0; i < source->nPthreadMutex; i++) {
+    while (source->nPthreadMutex > 0) {
         ResourceOwnerEnlargePthreadMutex(target);
-        ResourceOwnerRememberPthreadMutex(target, source->pThdMutexs[i]);
+        ResourceOwnerRememberPthreadMutex(target, source->pThdMutexs[--source->nPthreadMutex]);
     }
 
-    for (i = 0; i < source->nPthreadRWlock; i++) {
+    while (source->nPthreadRWlock > 0) {
         ResourceOwnerEnlargePthreadRWlock(target);
-        ResourceOwnerRememberPthreadRWlock(target, source->pThdRWlocks[i]);
+        ResourceOwnerRememberPthreadRWlock(target, source->pThdRWlocks[--source->nPthreadRWlock]);
     }
 
-    for (i = 0; i < source->npartmaprefs; i++) {
+    while (source->npartmaprefs > 0) {
         ResourceOwnerEnlargePartitionMapRefs(target);
-        ResourceOwnerRememberPartitionMapRef(target, source->partmaprefs[i]);
+        ResourceOwnerRememberPartitionMapRef(target, source->partmaprefs[--source->npartmaprefs]);
     }
 
-    for (i = 0; i < source->nglobalMemContext; i++) {
+    while (source->nglobalMemContext > 0) {
         ResourceOwnerEnlargeGMemContext(target);
-        ResourceOwnerRememberGMemContext(target, source->globalMemContexts[i]);
+        ResourceOwnerRememberGMemContext(target, source->globalMemContexts[--source->nglobalMemContext]);
     }
 }
 
@@ -693,6 +683,8 @@ static void ResourceOwnerConcatPart2(ResourceOwner target, ResourceOwner source)
  */
 void ResourceOwnerConcat(ResourceOwner target, ResourceOwner source)
 {
+    ResourceOwner child;
+
     Assert(target && source);
     /*
      * When modifying the structure of ResourceOwnerData, note that the ResourceOwnerConcat
@@ -700,8 +692,9 @@ void ResourceOwnerConcat(ResourceOwner target, ResourceOwner source)
      */
     Assert(sizeof(ResourceOwnerData) == 448); /* The current size of ResourceOwnerData is 448 */
 
-    while (source->firstchild != NULL) {
-        ResourceOwnerConcat(target, source->firstchild);
+    /* Recurse to handle descendants */
+    for (child = source->firstchild; child != NULL; child = child->nextchild) {
+        ResourceOwnerConcat(target, child);
     }
 
     /*
@@ -735,14 +728,6 @@ ResourceOwner ResourceOwnerGetNextChild(ResourceOwner owner)
 const char* ResourceOwnerGetName(ResourceOwner owner)
 {
     return owner->name;
-}
-
-/*
- * Fetch firstchild of a ResourceOwner
- */
-ResourceOwner ResourceOwnerGetFirstChild(ResourceOwner owner)
-{
-    return owner->firstchild;
 }
 
 /*
@@ -1497,14 +1482,14 @@ void ResourceOwnerRememberTupleDesc(ResourceOwner owner, TupleDesc tupdesc)
 /*
  * Forget that a tupdesc reference is owned by a ResourceOwner
  */
-void ResourceOwnerForgetTupleDesc(ResourceOwner owner, TupleDesc tupdesc)
+bool ResourceOwnerForgetTupleDesc(ResourceOwner owner, TupleDesc tupdesc)
 {
     TupleDesc* tupdescs = owner->tupdescs;
     int nt1 = owner->ntupdescs - 1;
     int i;
 
     if (!owner->valid)
-        return;
+        return false;
 
     for (i = nt1; i >= 0; i--) {
         if (tupdescs[i] == tupdesc) {
@@ -1513,12 +1498,14 @@ void ResourceOwnerForgetTupleDesc(ResourceOwner owner, TupleDesc tupdesc)
                 i++;
             }
             owner->ntupdescs = nt1;
-            return;
+            return true;
         }
     }
     ereport(ERROR,
         (errcode(ERRCODE_WARNING_PRIVILEGE_NOT_GRANTED),
             errmsg("tupdesc is not owned by resource owner %s", owner->name)));
+
+    return false;
 }
 
 /*
@@ -2278,9 +2265,7 @@ void ResourceOwnerReleaseRelationRef(ResourceOwner owner, bool isCommit)
         Relation rel = owner->relrefs[owner->nrelrefs - 1];
         if (isCommit) {
             PrintGlobalSysCacheLeakWarning(owner, "Relation");
-            if (!EnableLocalSysCache()) {
-                PrintRelCacheLeakWarning(rel);
-            }
+            PrintRelCacheLeakWarning(rel);
         }
         /* close do -- */
         RelationClose(rel);
@@ -2510,4 +2495,29 @@ void ResourceOwnerReleaseAllPlanCacheRefs(ResourceOwner owner)
     t_thrd.utils_cxt.CurrentResourceOwner = owner;
     ResourceOwnerDecrementNPlanRefs(owner, true);
     t_thrd.utils_cxt.CurrentResourceOwner = save;
+}
+void ReleaseResownerOutOfTransaction()
+{
+    if (likely(t_thrd.utils_cxt.CurrentResourceOwner == NULL)) {
+        return;
+    }
+    if (unlikely(IsTransactionOrTransactionBlock())) {
+        return;
+    }
+    ResourceOwner root = t_thrd.utils_cxt.CurrentResourceOwner;
+    while (root->parent != NULL) {
+        root = root->parent;
+    }
+    Assert(t_thrd.utils_cxt.TopTransactionResourceOwner != root);
+    if (unlikely(t_thrd.utils_cxt.TopTransactionResourceOwner == root)) {
+        return;
+    }
+    Assert(strcmp(root->name, "TopTransaction") != 0);
+    if (unlikely(strcmp(root->name, "TopTransaction") == 0)) {
+        return;
+    }
+
+    ResourceOwnerRelease(root, RESOURCE_RELEASE_BEFORE_LOCKS, false, true);
+    ResourceOwnerRelease(root, RESOURCE_RELEASE_LOCKS, false, true);
+    ResourceOwnerRelease(root, RESOURCE_RELEASE_AFTER_LOCKS, false, true);
 }

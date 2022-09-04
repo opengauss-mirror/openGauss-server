@@ -67,5 +67,18 @@ extern void DropDbPrivByOid(Oid roleID);
 #define CREATE_ANY_TYPE      "create any type"
 #define CREATE_ANY_SEQUENCE  "create any sequence"
 #define CREATE_ANY_INDEX     "create any index"
+#define ALTER_ANY_TYPE       "alter any type"
+#define DROP_ANY_TYPE        "drop any type"
+#define ALTER_ANY_SEQUENCE   "alter any sequence"
+#define DROP_ANY_SEQUENCE    "drop any sequence"
+#define SELECT_ANY_SEQUENCE  "select any sequence"
+#define ALTER_ANY_INDEX      "alter any index"
+#define DROP_ANY_INDEX       "drop any index"
+#define CREATE_ANY_SYNONYM   "create any synonym"
+#define DROP_ANY_SYNONYM     "drop any synonym"
+#define CREATE_ANY_TRIGGER   "create any trigger"
+#define ALTER_ANY_TRIGGER    "alter any trigger"
+#define DROP_ANY_TRIGGER     "drop any trigger"
+
 
 #endif /* GS_DB_PRIVILEGE_H */

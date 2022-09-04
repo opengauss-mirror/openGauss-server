@@ -32,18 +32,10 @@ insert into list_list values('201903', '1', '1', 1);
 insert into list_list values('201903', '2', '1', 1);
 select * from list_list;
 
-select * from list_list partition (p_201901);
-alter table list_list truncate partition p_201901;
-select * from list_list partition (p_201901);
-
 select * from list_list partition (p_201902);
 alter table list_list truncate partition p_201902;
 select * from list_list partition (p_201902);
-select * from list_list;
 
-insert into list_list values('201902', '1', '1', 1);
-insert into list_list values('201902', '2', '1', 1);
-insert into list_list values('201902', '1', '1', 1);
 insert into list_list values('201903', '2', '1', 1);
 insert into list_list values('201903', '1', '1', 1);
 insert into list_list values('201903', '2', '1', 1);
@@ -52,19 +44,9 @@ select * from list_list subpartition (p_201901_a);
 alter table list_list truncate subpartition p_201901_a;
 select * from list_list subpartition (p_201901_a);
 
-select * from list_list subpartition (p_201901_b);
-alter table list_list truncate subpartition p_201901_b;
-select * from list_list subpartition (p_201901_b);
-
-select * from list_list subpartition (p_201902_a);
-alter table list_list truncate subpartition p_201902_a;
-select * from list_list subpartition (p_201902_a);
-
 select * from list_list subpartition (p_201902_b);
 alter table list_list truncate subpartition p_201902_b;
 select * from list_list subpartition (p_201902_b);
-
-select * from list_list;
 
 drop table list_list;
 DROP SCHEMA ustore_subpartition_truncate CASCADE;

@@ -24,8 +24,6 @@
 declare SCRIPT_DIR=$(cd $(dirname "${BASH_SOURCE[0]}"); pwd)
 declare ROOT_DIR=$(dirname "${SCRIPT_DIR}")
 declare ROOT_DIR=$(dirname "${ROOT_DIR}")
-
-
 declare package_type='server'
 declare product_mode='opengauss'
 declare version_mode='release'
@@ -34,8 +32,6 @@ declare om_dir='None'
 declare cm_dir='None'
 declare show_package='false'
 declare install_package_format='tar'
-
-
 
 function print_help()
 {
@@ -47,7 +43,6 @@ function print_help()
     -pm|--product_mode     this values of paramenter is opengauss or lite, the default value is opengauss.
 "
 }
-
 
 if [ $# = 0 ] ; then
     echo "missing option"
@@ -126,10 +121,18 @@ fi
 declare BUILD_DIR="${ROOT_DIR}/mppdb_temp_install"
 declare PKG_TMP_DIR="${BUILD_DIR}/temp"
 
-if [ -e "$SCRIPT_DIR/utils/internal_packages.sh" ];then
-    source $SCRIPT_DIR/utils/internal_packages.sh
+if [ "${product_mode}" == "lite" ]; then
+    if [ -e "$SCRIPT_DIR/utils/internal_packages_lite.sh" ];then
+        source $SCRIPT_DIR/utils/internal_packages_lite.sh
+    else
+        exit 1
+    fi
 else
-    exit 1
+    if [ -e "$SCRIPT_DIR/utils/internal_packages.sh" ];then
+        source $SCRIPT_DIR/utils/internal_packages.sh
+    else
+        exit 1
+    fi
 fi
 
 function main()

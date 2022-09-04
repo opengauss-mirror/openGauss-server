@@ -424,7 +424,7 @@ static Node* sql_fn_make_param(SQLFunctionParseInfoPtr p_info, int param_no, int
     param->paramtypmod = -1;
     param->paramcollid = get_typcollation(param->paramtype);
     param->location = location;
-    param->tableOfIndexType = InvalidOid;
+    param->tableOfIndexTypeList = NULL;
 
     /*
      * If we have a function input collation, allow it to override the
@@ -948,6 +948,8 @@ static void postquel_sub_params(SQLFunctionCachePtr fcache, FunctionCallInfo fci
             param_li->parserSetup = NULL;
             param_li->parserSetupArg = NULL;
             param_li->params_need_process = false;
+            param_li->uParamInfo = DEFUALT_INFO;
+            param_li->params_lazy_bind = false;
             param_li->numParams = nargs;
             fcache->paramLI = param_li;
         } else {

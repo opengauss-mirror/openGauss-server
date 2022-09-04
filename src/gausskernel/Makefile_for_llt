@@ -26,13 +26,13 @@ ifeq ($(enable_llt), yes)
 SUBDIRS = access bootstrap catalog parser commands gs_policy executor distributelayer vectorsonic vecexecutor foreign job lib libpq libcomm\
 	pgxc main nodes optimizer port postmaster iprange regex replication rewrite extension datasource \
 	service storage tcop tsearch keymanagement utils $(top_builddir)/src/timezone $(top_builddir)/src/interfaces/libpq \
-	bulkload $(top_builddir)/contrib/file_fdw workload $(top_builddir)/contrib/hdfs_fdw $(top_builddir)/contrib/gc_fdw codegen \
+	bulkload $(top_builddir)/contrib/file_fdw workload $(top_builddir)/contrib/gc_fdw codegen \
 	$(top_builddir)/contrib/roach_api $(top_builddir)/contrib/bbox $(top_builddir)/contrib/log_fdw $(top_builddir)/contrib/dimsearch/main
 else
 SUBDIRS = access bootstrap catalog parser commands gs_policy executor distributelayer vectorsonic vecexecutor foreign job lib libpq libcomm\
 	pgxc main nodes optimizer port postmaster iprange regex replication rewrite extension datasource \
 	service storage tcop tsearch keymanagement utils $(top_builddir)/src/timezone $(top_builddir)/src/interfaces/libpq \
-	bulkload $(top_builddir)/contrib/file_fdw workload $(top_builddir)/contrib/hdfs_fdw $(top_builddir)/contrib/gc_fdw codegen \
+	bulkload $(top_builddir)/contrib/file_fdw workload $(top_builddir)/contrib/gc_fdw codegen \
 	$(top_builddir)/contrib/roach_api $(top_builddir)/contrib/bbox $(top_builddir)/contrib/log_fdw $(top_builddir)/contrib/dimsearch/main
 endif
 
@@ -131,54 +131,6 @@ CXXFLAGS+= -I$(XGBOOST_INCLUDE_PATH)
 LDFLAGS += -L$(LIBCGROUP_LIB_PATH)
 LIBS += -lcgroup
 LIBCGROUP=libcgroup.so
-
-############################################################################
-# link orc for gaussdb
-############################################################################
-LDFLAGS += -L$(LIBORC_LIB_PATH)
-ORC_LIB_NAME=
-ifeq ($(enable_llt), yes)
- ORC_LIB_NAME=orc_pic
-else
- ifeq ($(enable_ut), yes)
-  ORC_LIB_NAME=orc_pic
- else
-  ORC_LIB_NAME=orc	
- endif
-endif
-LIBS += -l${ORC_LIB_NAME}
-
-############################################################################
-# link snappy for gaussdb
-############################################################################
-LDFLAGS += -L$(SNAPPY_LIB_PATH)
-SNAPPY_LIB_NAME=
-ifeq ($(enable_llt), yes)
- SNAPPY_LIB_NAME=snappy_pic
-else
- ifeq ($(enable_ut), yes)
-  SNAPPY_LIB_NAME=snappy_pic
- else
-  SNAPPY_LIB_NAME=snappy	
- endif
-endif
-LIBS += -l${SNAPPY_LIB_NAME}
-
-################################################################################
-# protobuf
-################################################################################
-LDFLAGS += -L$(PROTOBUF_LIB_PATH)
-PROTOBUF_LIB_NAME=
-ifeq ($(enable_llt), yes)
- PROTOBUF_LIB_NAME=protobuf_pic
-else
- ifeq ($(enable_ut), yes)
-  PROTOBUF_LIB_NAME=protobuf_pic
- else
-  PROTOBUF_LIB_NAME=protobuf
- endif
-endif
-LIBS += -l${PROTOBUF_LIB_NAME}
 
 ##################################################################################
 # kerberos
@@ -315,7 +267,7 @@ endif
 endif # aix
 
 # Update the commonly used headers before building the subdirectories
-$(SUBDIRS:%=%-recursive): $(top_builddir)/src/include/parser/gram.hpp $(top_builddir)/src/include/catalog/schemapg.h $(top_builddir)/src/include/utils/fmgroids.h $(top_builddir)/src/include/utils/errcodes.h $(top_builddir)/src/include/utils/probes.h $(top_builddir)/src/include/parser/hint_gram.hpp $(top_builddir)/src/include/storage/lwlocknames.h $(top_builddir)/contrib/carbondata/libcarbondata.a
+$(SUBDIRS:%=%-recursive): $(top_builddir)/src/include/parser/gram.hpp $(top_builddir)/src/include/catalog/schemapg.h $(top_builddir)/src/include/utils/fmgroids.h $(top_builddir)/src/include/utils/errcodes.h $(top_builddir)/src/include/utils/probes.h $(top_builddir)/src/include/parser/hint_gram.hpp $(top_builddir)/src/include/storage/lwlocknames.h
 
 # run this unconditionally to avoid needing to know its dependencies here:
 submake-schemapg:
@@ -330,10 +282,6 @@ submake-lwlocknames: $(top_builddir)/src/include/storage/lwlocknames.h
 # run this to build pljava
 submake-libpljava:
 	$(top_builddir)/../open_source/pljava/build.sh -m only_so
-
-# run this to build carbondata-sdk
-$(top_builddir)/contrib/carbondata/libcarbondata.a: 
-	$(MAKE) -C $(top_builddir)/contrib/carbondata all
 
 .PHONY: submake-schemapg submake-errcodes
 
@@ -461,7 +409,6 @@ endif
 	$(MAKE) -C tsearch install-data
 	$(MAKE) -C bulkload install-data
 	$(MAKE) -C $(top_builddir)/contrib/file_fdw install
-	$(MAKE) -C $(top_builddir)/contrib/hdfs_fdw install
 	$(MAKE) -C $(top_builddir)/contrib/log_fdw install
 	$(MAKE) -C $(top_builddir)/contrib/pg_upgrade_support install
 	$(MAKE) -C $(top_builddir)/contrib/roach_api install
@@ -512,7 +459,6 @@ endif
 #todo: need to use pg_config to create etc directory
 installdirs:
 	$(MKDIR_P) '$(DESTDIR)$(bindir)' '$(DESTDIR)$(datadir)' '$(DESTDIR)$(bindir)/../etc'
-	cp '$(top_builddir)/src/backend/access/dfs/region_map'  '$(DESTDIR)$(bindir)/../etc/'
 	$(MKDIR_P) '$(DESTDIR)$(llvmirdir)'
 	$(MKDIR_P) '$(DESTDIR)$(libdir)/postgresql/pg_plugin'
 	$(MKDIR_P) '$(DESTDIR)$(libdir)/libsimsearch'
@@ -568,7 +514,6 @@ endif
 	$(MAKE) -C tsearch uninstall-data
 	$(MAKE) -C bulkload uninstall-data
 	$(MAKE) -C $(top_builddir)/contrib/file_fdw uninstall
-	$(MAKE) -C $(top_builddir)/contrib/hdfs_fdw uninstall
 	$(MAKE) -C $(top_builddir)/contrib/log_fdw uninstall
 	$(MAKE) -C $(top_builddir)/contrib/pg_upgrade_support clean
 	$(MAKE) -C $(top_builddir)/contrib/roach_api uninstall

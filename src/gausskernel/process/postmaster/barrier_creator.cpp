@@ -54,22 +54,23 @@ const char* CSN_SWITCHOVER_BARRIER_PATTREN_STR = "csn_%021lu_dr_switchover";
 
 void GetCsnBarrierName(char* barrierRet, bool isSwitchoverBarrier)
 {
-    struct timeval tv;
     int rc;
     CommitSeqNo csn;
+    GTM_Timestamp timestamp;
 
-    if (GTM_MODE)
-        csn = GetCSNGTM();
-    else
-        csn = CommitCSNGTM(false);
-
-    gettimeofday(&tv, NULL);
+    if (t_thrd.proc->workingVersionNum >= CSN_TIME_BARRIER_VERSION) {
+        csn = CommitCSNGTM(false, &timestamp);
+    } else {
+        csn = CommitCSNGTM(false, NULL);
+        struct timeval tv;
+        gettimeofday(&tv, NULL);
+        timestamp = TIME_GET_MILLISEC(tv);
+    }
 
     if (isSwitchoverBarrier) {
         rc = snprintf_s(barrierRet, BARRIER_NAME_LEN, BARRIER_NAME_LEN - 1, CSN_SWITCHOVER_BARRIER_PATTREN_STR, csn);
     } else {
-        rc = snprintf_s(barrierRet, BARRIER_NAME_LEN, BARRIER_NAME_LEN - 1, CSN_BARRIER_PATTREN_STR, csn,
-                TIME_GET_MILLISEC(tv));
+        rc = snprintf_s(barrierRet, BARRIER_NAME_LEN, BARRIER_NAME_LEN - 1, CSN_BARRIER_PATTREN_STR, csn, timestamp);
     }
     securec_check_ss_c(rc, "\0", "\0");
     elog(DEBUG1, "GetCsnBarrierName csn = %lu, barrier_name = %s", csn, barrierRet);
@@ -152,10 +153,13 @@ static uint64_t read_barrier_id_from_obs(const char *slotName, long *currBarrier
     int ret;
     uint64_t barrier_id;
 
+    LWLockAcquire(DropArchiveSlotLock, LW_SHARED);
     if (ArchiveReplicationReadFile(BARRIER_FILE, (char *)barrier_name, MAX_BARRIER_ID_LENGTH, slotName)) {
+        LWLockRelease(DropArchiveSlotLock);
         barrier_name[BARRIER_NAME_LEN - 1] = '\0';
         ereport(LOG, (errmsg("[BarrierCreator] read barrier id from obs %s", barrier_name)));
     } else {
+        LWLockRelease(DropArchiveSlotLock);
         ereport(LOG, (errmsg("[BarrierCreator] failed to read barrier id from obs, start barrier from 0")));
         return 0;
     }
@@ -201,7 +205,9 @@ uint64 GetObsFirstCNBarrierTimeline(const List *archiveSlotNames)
         if (slotName == NULL || strlen(slotName) == 0) {
             continue;
         }
+        LWLockAcquire(DropArchiveSlotLock, LW_SHARED);
         timeline = ReadBarrierTimelineRecordFromObs(slotName);
+        LWLockRelease(DropArchiveSlotLock);
         break;
     }
     return timeline;
@@ -274,6 +280,7 @@ void barrier_creator_main(void)
     bool startCsnBarrier = g_instance.attr.attr_storage.auto_csn_barrier;
     // use InnerMaintenanceTools mode to avoid deadlock with thread pool
     u_sess->proc_cxt.IsInnerMaintenanceTools  = true;
+    u_sess->proc_cxt.IsNoMaskingInnerTools = true;
     ereport(LOG, (errmsg("[BarrierCreator] barrier creator started")));
     g_instance.archive_obs_cxt.max_node_cnt = 0;
     SetProcessingMode(InitProcessing);
@@ -289,7 +296,13 @@ void barrier_creator_main(void)
     barrier_creator_setup_signal_hook();
 
     BaseInit();
-    
+
+    /*
+     * Unblock signals (they were blocked when the postmaster forked us)
+     */
+    gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
+    (void)gs_signal_unblock_sigusr2();
+
     t_thrd.proc_cxt.PostInit->SetDatabaseAndUser(dbname, InvalidOid, username);
     t_thrd.proc_cxt.PostInit->InitBarrierCreator();
 
@@ -352,14 +365,10 @@ void barrier_creator_main(void)
     oldTryCounter = gstrace_tryblock_entry(&curTryCounter);
     /* We can now handle ereport(ERROR) */
     t_thrd.log_cxt.PG_exception_stack = &local_sigjmp_buf;
-    /*
-     * Unblock signals (they were blocked when the postmaster forked us)
-     */
-    gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
-    (void)gs_signal_unblock_sigusr2();
+
     SetProcessingMode(NormalProcessing);
     exec_init_poolhandles();
-    
+
 #ifdef ENABLE_MULTIPLE_NODES
     /*
      * Ensure all barrier commond execuet on first coordinator
@@ -410,7 +419,9 @@ void barrier_creator_main(void)
         } while (1);
         if (t_thrd.barrier_creator_cxt.is_first_barrier) {
             gettimeofday(&tv, NULL);
+            LWLockAcquire(DropArchiveSlotLock, LW_SHARED);
             WriteGlobalBarrierListStartTimeOnMedia(TIME_GET_MILLISEC(tv));
+            LWLockRelease(DropArchiveSlotLock);
         }
 #ifdef ENABLE_MULTIPLE_NODES
         while (!START_AUTO_CSN_BARRIER) {
@@ -424,6 +435,7 @@ void barrier_creator_main(void)
     CleanupBarrierLock();
 #endif
 
+    TimestampTz preCreatedTime = GetCurrentTimestamp();
     while (!g_instance.barrier_creator_cxt.stop) {
         if (t_thrd.barrier_creator_cxt.got_SIGHUP) {
             t_thrd.barrier_preparse_cxt.got_SIGHUP = false;
@@ -455,21 +467,31 @@ void barrier_creator_main(void)
                 ereport(WARNING, (errmsg("[BarrierCreator] could not get archive slot name when barrier start")));
                 return;
             }
-            if (t_thrd.barrier_creator_cxt.archive_slot_names == NULL) {
+            if (t_thrd.barrier_creator_cxt.archive_slot_names == NIL) {
                 t_thrd.barrier_creator_cxt.archive_slot_names = archiveSlotNames;
                 t_thrd.barrier_creator_cxt.first_cn_timeline =
                     GetObsFirstCNBarrierTimeline(t_thrd.barrier_creator_cxt.archive_slot_names);
             }
             if (archiveSlotNames->length > t_thrd.barrier_creator_cxt.archive_slot_names->length) {
+                list_free_deep(t_thrd.barrier_creator_cxt.archive_slot_names);
                 t_thrd.barrier_creator_cxt.archive_slot_names = archiveSlotNames;
                 t_thrd.barrier_creator_cxt.is_first_barrier = true;
                 gettimeofday(&tv, NULL);
+                LWLockAcquire(DropArchiveSlotLock, LW_SHARED);
                 WriteGlobalBarrierListStartTimeOnMedia(TIME_GET_MILLISEC(tv));
+                LWLockRelease(DropArchiveSlotLock);
             } else if (archiveSlotNames->length < t_thrd.barrier_creator_cxt.archive_slot_names->length) {
+                list_free_deep(t_thrd.barrier_creator_cxt.archive_slot_names);
                 t_thrd.barrier_creator_cxt.archive_slot_names = archiveSlotNames;
+            } else if (t_thrd.barrier_creator_cxt.archive_slot_names != archiveSlotNames) {
+                list_free_deep(archiveSlotNames);
             }
         }
-        pg_usleep_retry(500000L, 0);
+        long timeDiff = GetCurrentTimestamp() - preCreatedTime;
+        if (timeDiff <= 500000L) {
+            pg_usleep_retry(500000L - timeDiff, 0);
+        }
+        preCreatedTime = GetCurrentTimestamp();
         if (!startCsnBarrier && g_instance.archive_obs_cxt.archive_slot_num == 0) {
             g_instance.barrier_creator_cxt.stop = true;
             for (int i = 0; i < g_instance.attr.attr_storage.max_replication_slots; i++) {
@@ -519,5 +541,5 @@ void barrier_creator_main(void)
     }
     destroy_handles();
     FreeBarrierLsnInfo();
-    proc_exit(0);
+    return;
 }

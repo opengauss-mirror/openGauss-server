@@ -57,7 +57,7 @@ BEGIN
 
     -- obtain active message level
     BEGIN
-        EXECUTE 'SET LOCAL client_min_messages TO ' || pg_catalog.current_setting('db4ai.message_level');
+        EXECUTE 'SET LOCAL client_min_messages TO ' || pg_catalog.current_setting('db4ai.message_level')::TEXT;
         RAISE INFO 'effective client_min_messages is %', pg_catalog.upper(pg_catalog.current_setting('db4ai.message_level'));
     EXCEPTION WHEN OTHERS THEN
     END;
@@ -202,8 +202,8 @@ BEGIN
             RAISE EXCEPTION 'sample ratio must be between 0 and 1';
         END IF;
 
-        -- SELECT pg_catalog.nextval('db4ai.snapshot_sequence') INTO STRICT s_id;
-        SELECT MAX(id)+1 FROM db4ai.snapshot INTO STRICT s_id; -- openGauss BUG: cannot create sequences in initdb
+        --SELECT nextval('db4ai.snapshot_sequence') ==> -1 at first time fetch
+        SELECT nextval('db4ai.snapshot_sequence') + 1 INTO STRICT s_id;
 
         -- check for duplicate snapshot
         IF 0 < (SELECT COUNT(*) FROM db4ai.snapshot WHERE schema = s_name.schema AND name = s_name.name) THEN
@@ -219,7 +219,7 @@ BEGIN
             exec_cmds := ARRAY [
                 -- extract and propagate DISTRIBUTE BY from root MSS snapshot
                 [ 'O','CREATE TABLE db4ai.t' || s_id::TEXT || ' WITH (orientation = column, compression = low)' || s_bt_dist
-                || ' AS SELECT ' || pg_catalog.rtrim(s_bt_proj, ',') || ' FROM db4ai.v' || p_id::TEXT || ' WHERE pg_catalog.random() <= ' || i_sample_ratios[i] ],
+                || ' AS SELECT ' || pg_catalog.rtrim(s_bt_proj, ',') || ' FROM db4ai.v' || p_id::TEXT || ' WHERE pg_catalog.random() <= ' || i_sample_ratios[i]::TEXT ],
              -- || ' AS SELECT ' || rtrim(s_bt_proj, ',') || ' FROM db4ai.v' || p_id || ' WHERE dbms_random.value(0, 1) <= ' || i_sample_ratios[i],
                 [ 'O', 'COMMENT ON TABLE db4ai.t' || s_id::TEXT || ' IS ''snapshot backing table, root is ' || qual_name || '''' ],
                 [ 'O', 'CREATE VIEW db4ai.v' || s_id::TEXT || ' WITH(security_barrier) AS SELECT ' || s_sv_proj || ' xc_node_id, ctid FROM db4ai.t' || s_id::TEXT ]];
@@ -256,7 +256,7 @@ BEGIN
         RAISE NOTICE E'accumulated commands:\n%', pg_catalog.array_to_string(exec_cmds, E'\n');
         IF 1 + pg_catalog.array_length(exec_cmds, 1) <> (db4ai.prepare_snapshot_internal(
                 s_id, p_id, m_id, r_id, s_name.schema, s_name.name,
-                ARRAY [ 'SAMPLE ' || i_sample_infixes[i] || ' ' || i_sample_ratios[i] ||
+                ARRAY [ 'SAMPLE ' || i_sample_infixes[i] || ' ' || i_sample_ratios[i]::TEXT ||
                 CASE WHEN i_stratify IS NULL THEN '' ELSE ' ' || i_stratify::TEXT END ],
                 i_sample_comments[i], CURRENT_USER, 1, exec_cmds)).i_idx THEN
             RAISE EXCEPTION 'sample snapshot internal error1';

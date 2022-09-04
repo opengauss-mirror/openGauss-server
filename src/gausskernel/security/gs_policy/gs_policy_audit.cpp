@@ -569,14 +569,10 @@ void create_audit_policy(CreateAuditPolicyStmt *stmt)
         return;
     }
 
-    /* no more than MAX_POLICIES_NUM is allowed */
+    /* less than MAX_POLICIES_NUM is recommended */
     if (get_num_of_existing_policies<Form_gs_auditing_policy>(policy_relation) >= MAX_POLICIES_NUM) {
-        heap_close(policy_relation, RowExclusiveLock);
-        /* generate an error */
-        send_manage_message(AUDIT_FAILED);
-        ereport(ERROR,
-            (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("%s", "too many policies, adding new policiy is restricted")));
-        return;
+        ereport(WARNING,
+            (errmsg("%s", "Too many policies, adding new policy is not recommended")));
     }
 
     /* check whether such policy exists */

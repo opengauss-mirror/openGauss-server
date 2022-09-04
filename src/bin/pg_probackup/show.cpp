@@ -567,7 +567,7 @@ show_instance_plain(const char *instance_name, parray *backup_list, bool show_na
                       " %*s ", " %-*s ", " %-*s ", " %-*s "};
     uint32        widths[SHOW_FIELDS_COUNT];
     uint32        widths_sum = 0;
-    ShowBackendRow *rows;
+    ShowBackendRow *rows = NULL;
     TimeLineID parent_tli = 0;
 
     for (i = 0; i < SHOW_FIELDS_COUNT; i++)
@@ -575,6 +575,9 @@ show_instance_plain(const char *instance_name, parray *backup_list, bool show_na
 
     rows = (ShowBackendRow *) palloc(parray_num(backup_list) *
                                      sizeof(ShowBackendRow));
+    if (rows == NULL) {
+        elog(ERROR, "Out of memory");
+    }
 
     /*
      * Fill row values and calculate maximum width of each field.

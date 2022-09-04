@@ -75,6 +75,4 @@ extern int errdetail_busy_db(int notherbackends, int npreparedxacts);
 extern void PreCleanAndCheckConns(const char* dbname, bool missing_ok);
 #endif
 
-extern List* HDFSTablespaceDirExistDatabase(Oid db_id);
-
 #endif /* DBCOMMANDS_H */

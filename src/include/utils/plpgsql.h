@@ -1134,6 +1134,7 @@ typedef struct PLpgSQL_execstate { /* Runtime execution data	*/
 
     int64 stack_entry_start;    /* ExprContext's starting number for eval simple expression */
     Oid curr_nested_table_type;
+    int curr_nested_table_layers;
     bool is_exception;
 } PLpgSQL_execstate;
 
@@ -1156,6 +1157,16 @@ typedef struct PLpgSQL_func_tableof_index {
     Oid tableOfIndexType;
     HTAB* tableOfIndex;
 } PLpgSQL_func_tableof_index;
+
+typedef struct ExecTableOfIndexInfo {
+    ExprContext* econtext;
+    HTAB* tableOfIndex;
+    Oid tableOfIndexType;
+    bool isnestedtable;
+    int tableOfLayers;
+    int paramid;
+    Oid paramtype;
+} ExecTableOfIndexInfo;
 
 /*
  * A PLpgSQL_plugin structure represents an instrumentation plugin.
@@ -1199,9 +1210,10 @@ typedef struct PLpgSQL_plugin {
     /* Function pointers set by PL/pgSQL itself */
     void (*error_callback)(void* arg);
     void (*assign_expr)(PLpgSQL_execstate* estate, PLpgSQL_datum* target, PLpgSQL_expr* expr);
-    Datum (*eval_expr)(PLpgSQL_execstate* estate, PLpgSQL_expr* expr, bool* isNull, Oid* rettype, HTAB** tableOfIndex);
+    Datum (*eval_expr)(PLpgSQL_execstate* estate, PLpgSQL_expr* expr, bool* isNull, Oid* rettype,
+                       HTAB** tableOfIndex, ExecTableOfIndexInfo* tableOfIndexInfo);
     void (*assign_value)(PLpgSQL_execstate* estate, PLpgSQL_datum* target, Datum value,
-        Oid valtype, bool* isNull, HTAB* tableOfIndex);
+        Oid valtype, bool* isNull, HTAB* tableOfIndex, ExecTableOfIndexInfo* tableOfIndexInfo);
     void (*eval_cleanup)(PLpgSQL_execstate* estate);
     int (*validate_line)(PLpgSQL_stmt_block* block, int linenum);
 } PLpgSQL_plugin;
@@ -1287,15 +1299,6 @@ typedef struct PLpgSQL_package { /* Complete compiled package   */
     bool isInit;
 } PLpgSQL_package;
 
-typedef struct ExecTableOfIndexInfo {
-    ExprContext* econtext;
-    HTAB* tableOfIndex;
-    Oid tableOfIndexType;
-    bool isnestedtable;
-    int tableOfLayers;
-    int paramid;
-    Oid paramtype;
-} ExecTableOfIndexInfo;
 
 /**********************************************************************
  * Pl debugger
@@ -1636,7 +1639,7 @@ extern void plpgsql_subxact_cb(SubXactEvent event, SubTransactionId mySubid, Sub
 
 extern Oid exec_get_datum_type(PLpgSQL_execstate* estate, PLpgSQL_datum* datum);
 extern void exec_get_datum_type_info(PLpgSQL_execstate* estate, PLpgSQL_datum* datum, Oid* typid, int32* typmod,
-    Oid* collation, Oid* tableOfIndexType, PLpgSQL_function* func = NULL);
+    Oid* collation, List** tableOfIndexType, PLpgSQL_function* func = NULL);
 extern Datum exec_simple_cast_datum(
     PLpgSQL_execstate* estate, Datum value, Oid valtype, Oid reqtype, int32 reqtypmod, bool isnull);
 extern void ResetCursorOption(Portal portal, bool reset);
@@ -1646,7 +1649,8 @@ extern void ResetCursorAtrribute(Portal portal);
 #endif
 extern void exec_assign_value(PLpgSQL_execstate *estate,
 				  PLpgSQL_datum *target,
-				  Datum value, Oid valtype, bool *isNull, HTAB* tableOfIndex = NULL);
+				  Datum value, Oid valtype, bool *isNull, HTAB* tableOfIndex = NULL,
+				  ExecTableOfIndexInfo* tableOfIndexInfo = NULL);
 extern void exec_eval_datum(PLpgSQL_execstate *estate,
 				PLpgSQL_datum *datum,
 				Oid *typeId,
@@ -1666,6 +1670,7 @@ extern void CheckCurrCompileDependOnPackage(Oid pkgOid);
 #ifndef ENABLE_MULTIPLE_NODES
 extern void estate_cursor_set(FormatCallStack* plcallstack);
 #endif
+extern Datum ExecEvalArrayRef(ArrayRefExprState* astate, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone);
 
 /* ----------
  * Functions for namespace handling in pl_funcs.c
@@ -1683,6 +1688,9 @@ extern void plpgsql_ns_additem(
 extern PLpgSQL_nsitem* plpgsql_ns_lookup(
     PLpgSQL_nsitem* ns_cur, bool localmode, const char* name1, const char* name2, const char* name3, int* names_used);
 extern PLpgSQL_nsitem* plpgsql_ns_lookup_label(PLpgSQL_nsitem* ns_cur, const char* name);
+extern void free_func_tableof_index();
+extern void free_temp_func_tableof_index(List* temp_tableof_index);
+
 
 /* ----------
  * Other functions in pl_funcs.c
@@ -1854,5 +1862,6 @@ extern void stp_reset_xact();
 extern void stp_reset_stmt();
 extern void stp_reserve_subxact_resowner(ResourceOwner resowner);
 extern void stp_cleanup_subxact_resowner(int64 minStackId);
-
+extern void stp_cleanup_subxact_resource(int64 stackId);
+extern void InsertGsSource(Oid objId, Oid nspid, const char* name, const char* type, bool status);
 #endif /* PLPGSQL_H */

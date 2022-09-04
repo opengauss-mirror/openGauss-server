@@ -48,7 +48,7 @@ declare
     rd INTEGER;
     size INTEGER := pg_catalog.length(col);
     tmp text := col;
-    res text;
+    res text := '';
 begin
     while size > 0 loop 
         rd := pg_catalog.floor(pg_catalog.random() * pg_catalog.length(tmp) + 1);

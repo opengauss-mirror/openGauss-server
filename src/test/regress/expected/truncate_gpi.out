@@ -47,8 +47,8 @@ select relname, reloptions, boundaries from pg_partition
 ----------+---------------------------------------------------+-------------------------
  tg_range | {orientation=row,compression=no,wait_clean_gpi=y} | 
  p3       | {orientation=row,compression=no}                  | {"2022-03-31 00:00:00"}
- p1       |                                                   | {"2022-01-31 00:00:00"}
- p2       |                                                   | {"2022-02-28 00:00:00"}
+ p1       | {orientation=row,compression=no}                  | {"2022-01-31 00:00:00"}
+ p2       | {orientation=row,compression=no}                  | {"2022-02-28 00:00:00"}
 (4 rows)
 
 select * from check_truncate_results where tablename = 'tg_range';
@@ -273,9 +273,9 @@ select relname, reloptions, boundaries from pg_partition
  relname |                    reloptions                     | boundaries 
 ---------+---------------------------------------------------+------------
  tg_list | {orientation=row,compression=no,wait_clean_gpi=y} | 
- p1      |                                                   | {0,3,6}
- p2      |                                                   | {1,4,7}
- p3      |                                                   | {NULL}
+ p1      | {orientation=row,compression=no}                  | {0,3,6}
+ p2      | {orientation=row,compression=no}                  | {1,4,7}
+ p3      | {orientation=row,compression=no}                  | {NULL}
 (4 rows)
 
 select * from check_truncate_results where tablename = 'tg_list';
@@ -657,8 +657,8 @@ select relname, reloptions, boundaries from pg_partition
 ---------+---------------------------------------------------+------------
  tg_hash | {orientation=row,compression=no,wait_clean_gpi=y} | 
  p3      | {orientation=row,compression=no}                  | {2}
- p1      |                                                   | {0}
- p2      |                                                   | {1}
+ p1      | {orientation=row,compression=no}                  | {0}
+ p2      | {orientation=row,compression=no}                  | {1}
 (4 rows)
 
 select * from check_truncate_results where tablename = 'tg_hash';

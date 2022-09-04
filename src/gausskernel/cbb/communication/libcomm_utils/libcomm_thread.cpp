@@ -916,6 +916,8 @@ int gs_set_basic_info(const char* local_host,  // ip of local host
         u_sess->attr.attr_common.tcp_keepalives_interval,
         u_sess->attr.attr_common.tcp_keepalives_count);
 
+    mc_tcp_set_user_timeout(u_sess->attr.attr_common.tcp_user_timeout);
+
     // set kerberos parameter
     gs_set_kerberos_keyfile();
 

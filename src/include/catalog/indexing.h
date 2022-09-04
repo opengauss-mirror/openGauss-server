@@ -174,6 +174,13 @@ DECLARE_UNIQUE_INDEX(pg_enum_typid_label_index, 3503, on pg_enum using btree(enu
 DECLARE_UNIQUE_INDEX(pg_enum_typid_sortorder_index, 3534, on pg_enum using btree(enumtypid oid_ops, enumsortorder float4_ops));
 #define EnumTypIdSortOrderIndexId 3534
 
+DECLARE_UNIQUE_INDEX(pg_set_oid_index, 3517, on pg_set using btree(oid oid_ops));
+#define SetOidIndexId	3517
+DECLARE_UNIQUE_INDEX(pg_set_typid_label_index, 3518, on pg_set using btree(settypid oid_ops, setlabel text_ops));
+#define SetTypIdLabelIndexId 3518
+DECLARE_UNIQUE_INDEX(pg_set_typid_order_index, 3519, on pg_set using btree(settypid oid_ops, setsortorder int1_ops));
+#define SetTypIdOrderIndexId 3519
+
 /* This following index is not used for a cache and is not unique */
 DECLARE_INDEX(pg_index_indrelid_index, 2678, on pg_index using btree(indrelid oid_ops));
 #define IndexIndrelidIndexId  2678
@@ -650,6 +657,12 @@ DECLARE_UNIQUE_INDEX(pg_replication_origin_roident_index, 6136, on pg_replicatio
 
 DECLARE_UNIQUE_INDEX(pg_replication_origin_roname_index, 6137, on pg_replication_origin using btree(roname text_pattern_ops));
 #define ReplicationOriginNameIndex 6137
+
+DECLARE_UNIQUE_INDEX(gs_sql_patch_patch_name_index, 9053, on gs_sql_patch using btree(patch_name name_ops));
+#define GsSqlPatchPatchNameIndex 9053
+
+DECLARE_INDEX(gs_sql_patch_unique_sql_id_index, 9054, on gs_sql_patch using btree(unique_sql_id int8_ops));
+#define GsSqlPatchUniqueSqlIdIndex 9054
 
 DECLARE_UNIQUE_INDEX(pg_subscription_rel_srrelid_srsubid_index, 6138, on pg_subscription_rel using btree(srrelid oid_ops, srsubid oid_ops));
 #define SubscriptionRelSrrelidSrsubidIndexId 6138

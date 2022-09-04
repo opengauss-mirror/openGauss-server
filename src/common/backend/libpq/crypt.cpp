@@ -728,18 +728,25 @@ int get_stored_iteration(const char* role)
         pfree_ext(pass_info.shadow_pass);
         return -1;
     }
+    iteration_count = get_iteration_by_password(pass_info.shadow_pass);
 
-    if (isCOMBINED(pass_info.shadow_pass)) {
-        iteration_count = decode_iteration(&pass_info.shadow_pass[SHA256_PASSWD_LEN + MD5_PASSWD_LEN]);
-    } else if (isSHA256(pass_info.shadow_pass)) {
-        iteration_count = decode_iteration(&pass_info.shadow_pass[SHA256_PASSWD_LEN]);
-    } else if (isSM3(pass_info.shadow_pass)) {
-        iteration_count = decode_iteration(&pass_info.shadow_pass[SM3_PASSWD_LEN]);
+    pfree_ext(pass_info.shadow_pass);
+    return iteration_count;
+}
+
+/* get iteration from the encrypted password */
+int get_iteration_by_password(char* encrypted_password)
+{
+    int iteration_count = 0;
+    if (isCOMBINED(encrypted_password)) {
+        iteration_count = decode_iteration(&encrypted_password[SHA256_PASSWD_LEN + MD5_PASSWD_LEN]);
+    } else if (isSHA256(encrypted_password)) {
+        iteration_count = decode_iteration(&encrypted_password[SHA256_PASSWD_LEN]);
+    } else if (isSM3(encrypted_password)) {
+        iteration_count = decode_iteration(&encrypted_password[SM3_PASSWD_LEN]);
     } else {
         iteration_count = ITERATION_COUNT;
     }
-
-    pfree_ext(pass_info.shadow_pass);
     return iteration_count;
 }
 

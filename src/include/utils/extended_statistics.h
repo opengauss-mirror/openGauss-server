@@ -34,6 +34,10 @@
 #include "utils/catcache.h"
 #include "utils/relcache.h"
 
+#ifndef ENABLE_MULTIPLE_NODES
+#include "optimizer/func_dependency.h"
+#endif
+#include "optimizer/aioptimizer.h"
 #define ES_LOGLEVEL DEBUG3
 #define ES_COMMIT_VERSION 91112
 
@@ -49,7 +53,9 @@ typedef enum ES_STATISTIC_KIND {
     ES_DNDISTINCT = 0x08u,
     ES_MCV = 0x10u,
     ES_NULL_MCV = 0x20u,
-    ES_ALL = 0x3fu
+    ES_DEPENDENCY = 0x40u,
+    ES_AI = 0x80u,
+    ES_ALL = 0xFFu
 } ES_STATISTIC_KIND;
 
 typedef enum ES_COLUMN_NAME_ALIAS { ES_COLUMN_NAME = 0x01u, ES_COLUMN_ALIAS = 0x02u } ES_COLUMN_NAME_ALIAS;
@@ -67,6 +73,11 @@ typedef struct ExtendedStats {
     int mcv_nnumbers;
     float4* other_mcv_numbers = NULL;
     int other_mcv_nnumbers;
+
+#ifndef ENABLE_MULTIPLE_NODES
+    MVDependencies* dependencies = NULL;
+#endif
+    char* bayesnet_model = NULL;
 } ExtendedStats;
 
 extern void es_free_extendedstats(ExtendedStats* es);
@@ -105,6 +116,8 @@ extern bool es_is_distributekey_contained_in_multi_column(Oid relid, VacAttrStat
  */
 extern char* es_get_column_name_alias(AnalyzeSampleTableSpecInfo* spec, uint32 name_alias_flag,
     const char* separator = ", ", const char* prefix = "", const char* postfix = "");
+extern char* get_column_name_alias(AnalyzeSampleTableSpecInfo* spec, uint32 name_alias_flag,
+    const uint32 *indexes, int num_index);
 
 /*
  * System table
@@ -117,6 +130,10 @@ extern VacAttrStats** es_build_vacattrstats_array(
     Relation rel, List* bmslist_multicolumn, bool add_or_delete, int* array_length, bool inh);
 extern ArrayType* es_construct_mcv_value_array(VacAttrStats* stats, int mcv_slot_index);
 extern bool es_is_multicolumn_stats_exists(Oid relid, char relkind, bool inh, Bitmapset* bms_attnums);
+
+#ifndef ENABLE_MULTIPLE_NODES
+extern ArrayType* es_construct_dependency_value_array(const VacAttrStats* stats, int dependency_slot_index);
+#endif
 
 /*
  * Interfaces for optimizer

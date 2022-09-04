@@ -10,15 +10,6 @@
 #define Max(x, y) ((x) > (y) ? (x) : (y))
 #define Min(x, y) ((x) < (y) ? (x) : (y))
 
-#define init_var(v) memset(v, 0, sizeof(numeric))
-
-#define digitbuf_alloc(size) ((NumericDigit*)pgtypes_alloc(size))
-#define digitbuf_free(buf) \
-    do {                   \
-        if ((buf) != NULL) \
-            free(buf);     \
-    } while (0)
-
 #include "pgtypes_numeric.h"
 
 /* ----------
@@ -29,8 +20,8 @@
  */
 static int alloc_var(numeric* var, int ndigits)
 {
-    digitbuf_free(var->buf);
-    var->buf = digitbuf_alloc(ndigits + 1);
+    digitbuf_free(var);
+    init_alloc_numeric(var, ndigits + 1);
     if (var->buf == NULL)
         return -1;
     var->buf[0] = 0;
@@ -335,7 +326,7 @@ char* PGTYPESnumeric_to_asc(numeric* num, int dscale)
  */
 static void zero_var(numeric* var)
 {
-    digitbuf_free(var->buf);
+    digitbuf_free(var);
     var->buf = NULL;
     var->digits = NULL;
     var->ndigits = 0;
@@ -345,7 +336,7 @@ static void zero_var(numeric* var)
 
 void PGTYPESnumeric_free(numeric* var)
 {
-    digitbuf_free(var->buf);
+    digitbuf_free(var);
     free(var);
 }
 
@@ -470,7 +461,7 @@ static int add_abs(numeric* var1, numeric* var2, numeric* result)
     if (res_ndigits == 0)
         res_weight = 0;
 
-    digitbuf_free(result->buf);
+    digitbuf_free(result);
     result->ndigits = res_ndigits;
     result->buf = res_buf;
     result->digits = res_digits;
@@ -549,7 +540,7 @@ static int sub_abs(numeric* var1, numeric* var2, numeric* result)
     if (res_ndigits == 0)
         res_weight = 0;
 
-    digitbuf_free(result->buf);
+    digitbuf_free(result);
     result->ndigits = res_ndigits;
     result->buf = res_buf;
     result->digits = res_digits;
@@ -862,7 +853,7 @@ int PGTYPESnumeric_mul(numeric* var1, numeric* var2, numeric* result)
         res_weight = 0;
     }
 
-    digitbuf_free(result->buf);
+    digitbuf_free(result);
     result->buf = res_buf;
     result->digits = res_digits;
     result->ndigits = res_ndigits;
@@ -995,34 +986,30 @@ int PGTYPESnumeric_div(numeric* var1, numeric* var2, numeric* result)
     /*
      * Initialize local variables
      */
-    init_var(&dividend);
-    for (i = 1; i < 10; i++)
-        init_var(&divisor[i]);
+    init_numeric(&dividend);
+    for (i = 1; i < 10; i++) {
+        init_numeric(&divisor[i]);
+    }
 
     /*
      * Make a copy of the divisor which has one leading zero digit
      */
-    divisor[1].ndigits = ndigits_tmp;
+    init_alloc_numeric(&divisor[1], ndigits_tmp);
     divisor[1].rscale = var2->ndigits;
     divisor[1].sign = NUMERIC_POS;
-    divisor[1].buf = digitbuf_alloc(ndigits_tmp);
     if (divisor[1].buf == NULL)
         goto done;
-    divisor[1].digits = divisor[1].buf;
-    divisor[1].digits[0] = 0;
     MemCpy(&(divisor[1].digits[1]), var2->digits, ndigits_tmp - 1);
 
     /*
      * Make a copy of the dividend
      */
-    dividend.ndigits = var1->ndigits;
+    init_alloc_numeric(&dividend, var1->ndigits);
     dividend.weight = 0;
     dividend.rscale = var1->ndigits;
     dividend.sign = NUMERIC_POS;
-    dividend.buf = digitbuf_alloc(var1->ndigits);
     if (dividend.buf == NULL)
         goto done;
-    dividend.digits = dividend.buf;
     MemCpy(dividend.digits, var1->digits, var1->ndigits);
 
     /*
@@ -1033,7 +1020,7 @@ int PGTYPESnumeric_div(numeric* var1, numeric* var2, numeric* result)
     tmp_buf = digitbuf_alloc(res_ndigits + 2);
     if (tmp_buf == NULL)
         goto done;
-    digitbuf_free(result->buf);
+    digitbuf_free(result);
     result->buf = tmp_buf;
     res_digits = result->buf;
     result->digits = res_digits;
@@ -1144,12 +1131,14 @@ done:
     /*
      * Tidy up
      */
-    if (dividend.buf != NULL)
-        digitbuf_free(dividend.buf);
+    if (dividend.buf != NULL) {
+        digitbuf_free(&dividend);
+    }
 
     for (i = 1; i < 10; i++) {
-        if (divisor[i].buf != NULL)
-            digitbuf_free(divisor[i].buf);
+        if (divisor[i].buf != NULL) {
+            digitbuf_free(&divisor[i]);
+        }
     }
 
     return err;

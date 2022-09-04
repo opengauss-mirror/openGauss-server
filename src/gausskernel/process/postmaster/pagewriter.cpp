@@ -45,6 +45,8 @@
 #include "gstrace/gstrace_infra.h"
 #include "gstrace/postmaster_gstrace.h"
 
+#include <zstd.h>
+
 #define MIN(A, B) ((B) < (A) ? (B) : (A))
 #define MAX(A, B) ((B) > (A) ? (B) : (A))
 #define FULL_CKPT g_instance.ckpt_cxt_ctl->flush_all_dirty_page
@@ -411,7 +413,7 @@ bool is_dirty_page_queue_full(BufferDesc* buf)
     return false;
 }
 
-bool atomic_push_pending_flush_queue(Buffer buffer, XLogRecPtr* queue_head_lsn, uint64* new_tail_loc)
+bool atomic_push_pending_flush_queue(XLogRecPtr* queue_head_lsn, uint64* new_tail_loc)
 {
     uint128_u compare;
     uint128_u exchange;
@@ -454,7 +456,7 @@ bool push_pending_flush_queue(Buffer buffer)
 
     Assert(XLogRecPtrIsInvalid(pg_atomic_read_u64(&buf_desc->rec_lsn)));
 #if defined(__x86_64__) || defined(__aarch64__)
-    push_finish = atomic_push_pending_flush_queue(buffer, &queue_head_lsn, &new_tail_loc);
+    push_finish = atomic_push_pending_flush_queue(&queue_head_lsn, &new_tail_loc);
     if (!push_finish) {
         return false;
     }
@@ -644,6 +646,7 @@ static void wakeup_sub_thread()
 
         if (pgwr->proc != NULL) {
             (void)pg_atomic_add_fetch_u32(&g_instance.ckpt_cxt_ctl->pgwr_procs.running_num, 1);
+            g_instance.ckpt_cxt_ctl->is_standby_mode = RecoveryInProgress();
             pg_write_barrier();
             g_instance.ckpt_cxt_ctl->pgwr_procs.writer_proc[thread_loc].need_flush = true;
             pg_write_barrier();
@@ -654,21 +657,10 @@ static void wakeup_sub_thread()
 
 static void prepare_dirty_page_applied_state(uint32 requested_flush_num, bool is_new_relfilenode)
 {
-    int thread_loc;
-    int thread_num;
-
     pg_atomic_init_u32(&g_instance.ckpt_cxt_ctl->CkptBufferIdsCompletedPages, 0);
     pg_atomic_init_u32(&g_instance.ckpt_cxt_ctl->CkptBufferIdsTail, 0);
     g_instance.ckpt_cxt_ctl->CkptBufferIdsFlushPages = requested_flush_num;
-    thread_num = g_instance.ckpt_cxt_ctl->pgwr_procs.num;
-    PageWriterProc* pgwr;
-
     g_instance.dw_batch_cxt.is_new_relfilenode = is_new_relfilenode;
-    for (thread_loc = 1; thread_loc < thread_num; thread_loc++) {
-        pgwr = &g_instance.ckpt_cxt_ctl->pgwr_procs.writer_proc[thread_loc];
-    }
-
-    pg_write_barrier();
     pg_atomic_init_u32(&g_instance.ckpt_cxt_ctl->prepared, 1);
     pg_write_barrier();
 }
@@ -1247,6 +1239,28 @@ static void HandlePageWriterMainInterrupts()
         PageWriterSyncWithAbsorption();
         t_thrd.pagewriter_cxt.sync_retry = false;
     }
+
+    /* main thread should finally exit. */
+    while (t_thrd.pagewriter_cxt.shutdown_requested && g_instance.ckpt_cxt_ctl->page_writer_can_exit) {
+        if (pg_atomic_read_u32(&g_instance.ckpt_cxt_ctl->current_page_writer_count) == 1) {
+            ereport(LOG,
+                (errmodule(MOD_INCRE_CKPT),
+                    errmsg("pagewriter thread shut down, id is %d", t_thrd.pagewriter_cxt.pagewriter_id)));
+
+            /*
+             * From here on, elog(ERROR) should end with exit(1), not send
+             * control back to the sigsetjmp block above.
+             */
+            u_sess->attr.attr_common.ExitOnAnyError = true;
+
+            /* release compression ctx */
+            crps_destory_ctxs();
+
+            /* Normal exit from the pagewriter is here */
+            proc_exit(0); /* done */
+        }
+    }
+    return;
 }
 
 static void ckpt_pagewriter_main_thread_loop(void)
@@ -1264,6 +1278,9 @@ static void ckpt_pagewriter_main_thread_loop(void)
         !t_thrd.pagewriter_cxt.shutdown_requested) {
         rc = WaitLatch(&t_thrd.proc->procLatch, WL_TIMEOUT | WL_POSTMASTER_DEATH, (long)TEN_MILLISECOND);
         if (rc & WL_POSTMASTER_DEATH) {
+            /* release compression ctx */
+            crps_destory_ctxs();
+
             gs_thread_exit(1);
         }
 
@@ -1271,7 +1288,7 @@ static void ckpt_pagewriter_main_thread_loop(void)
 
         candidate_num = get_curr_candidate_nums(CAND_LIST_NORMAL) + get_curr_candidate_nums(CAND_LIST_NVM) +
             get_curr_candidate_nums(CAND_LIST_SEG);
-        if (candidate_num == 0) {
+        if (candidate_num == 0 && !t_thrd.pagewriter_cxt.shutdown_requested) {
             /* wakeup sub thread scan the buffer pool, init the candidate list */
             wakeup_sub_thread();
         }
@@ -1476,6 +1493,9 @@ static void ckpt_pagewriter_handle_exception(MemoryContext pagewriter_context)
     AtEOXact_Files();
     AtEOXact_HashTables(false);
 
+    /* release compression ctx */
+    crps_destory_ctxs();
+
     /*
      * Now return to normal top-level context and clear ErrorContext for
      * next time.
@@ -1515,6 +1535,9 @@ static void pagewriter_kill(int code, Datum arg)
     }
     pg_atomic_fetch_sub_u32(&g_instance.ckpt_cxt_ctl->current_page_writer_count, 1);
     g_instance.ckpt_cxt_ctl->pgwr_procs.writer_proc[id].proc = NULL;
+
+    /* release compression ctx */
+    crps_destory_ctxs();
 }
 
 int get_pagewriter_thread_id(void)
@@ -1565,7 +1588,7 @@ static void SetupPageWriterSignalHook(void)
     (void)gspqsignal(SIGPIPE, SIG_IGN);
     (void)gspqsignal(SIGUSR1, ckpt_pagewriter_sigusr1_handler);
     (void)gspqsignal(SIGUSR2, SIG_IGN);
-
+    (void)gspqsignal(SIGURG, print_stack);
     /*
      * Reset some signals that are accepted by postmaster but not here
      */
@@ -1588,6 +1611,26 @@ static void logSnapshotForLogicalDecoding()
             g_last_snapshot_lsn = LogStandbySnapshot();
             g_last_snapshot_ts = currentTime;
         }
+    }
+}
+
+void crps_create_ctxs(knl_thread_role role)
+{
+    t_thrd.page_compression_cxt.thrd_role = role;
+    t_thrd.page_compression_cxt.zstd_cctx = (void *)ZSTD_createCCtx();
+    t_thrd.page_compression_cxt.zstd_dctx = (void *)ZSTD_createDCtx();
+}
+
+void crps_destory_ctxs()
+{
+    if (t_thrd.page_compression_cxt.zstd_cctx != NULL) {
+        (void)ZSTD_freeCCtx((ZSTD_CCtx*)t_thrd.page_compression_cxt.zstd_cctx);
+        t_thrd.page_compression_cxt.zstd_cctx = NULL;
+    }
+
+    if (t_thrd.page_compression_cxt.zstd_dctx != NULL) {
+        (void)ZSTD_freeDCtx((ZSTD_DCtx*)t_thrd.page_compression_cxt.zstd_dctx);
+        t_thrd.page_compression_cxt.zstd_dctx = NULL;
     }
 }
 
@@ -1674,6 +1717,9 @@ void ckpt_pagewriter_main(void)
     t_thrd.pagewriter_cxt.next_flush_time = now + u_sess->attr.attr_storage.pageWriterSleep;
     t_thrd.pagewriter_cxt.next_scan_time = now +
             MAX(u_sess->attr.attr_storage.BgWriterDelay, u_sess->attr.attr_storage.pageWriterSleep);
+
+    /* init compression ctx for page compression */
+    crps_create_ctxs(t_thrd.role);
 
     /*
      * Loop forever
@@ -2150,26 +2196,64 @@ const int MAX_SCAN_BATCH_NUM = 131072 * 10; /* 10GB buffers */
 
 static void incre_ckpt_pgwr_scan_candidate_list(WritebackContext *wb_context, CandidateList *list, CandListType type)
 {
+    int ratio_buf_id_start;
+    int ratio_cand_list_size;
+    int ratio_avg_num;
+    int ratio_shared_buffers;
+    int thread_num = g_instance.ckpt_cxt_ctl->pgwr_procs.sub_num;
+    int thread_id = t_thrd.pagewriter_cxt.pagewriter_id;
     uint32 need_flush_num = 0;
     int start = 0;
     int end = 0;
     bool is_new_relfilenode = false;
     int batch_scan_num = 0;
     uint32 max_flush_num = 0;
+    bool am_standby = g_instance.ckpt_cxt_ctl->is_standby_mode;
+    int shared_buffers;
+
+    if (type == CAND_LIST_NVM) {
+        shared_buffers = NVM_BUFFER_NUM;
+    } else if (type == CAND_LIST_NORMAL) {
+        shared_buffers = NORMAL_SHARED_BUFFER_NUM;
+    }
 
     if (get_thread_candidate_nums(list) < list->cand_list_size) {
-        start = MAX(list->buf_id_start, list->next_scan_loc);
-        end = list->buf_id_start + list->cand_list_size;
-        batch_scan_num = MIN(list->cand_list_size, MAX_SCAN_BATCH_NUM);
+        if (am_standby && type != CAND_LIST_SEG) {
+            ratio_shared_buffers = int(shared_buffers * u_sess->attr.attr_storage.shared_buffers_fraction);
+            ratio_avg_num = ratio_shared_buffers / thread_num;
+            ratio_buf_id_start = ratio_avg_num * (thread_id - 1);
+            ratio_cand_list_size = ratio_avg_num;
+            if (thread_id == thread_num) {
+                ratio_cand_list_size += ratio_shared_buffers % thread_num;
+            }
+
+            start = MAX(ratio_buf_id_start, list->next_scan_ratio_loc);
+            end = ratio_buf_id_start + ratio_cand_list_size;
+            batch_scan_num = MIN(ratio_cand_list_size, MAX_SCAN_BATCH_NUM);
+        } else {
+            start = MAX(list->buf_id_start, list->next_scan_loc);
+            end = list->buf_id_start + list->cand_list_size;
+            batch_scan_num = MIN(list->cand_list_size, MAX_SCAN_BATCH_NUM);
+        }
+
         end = MIN(start + batch_scan_num, end);
         max_flush_num = get_list_flush_num(type);
-
         need_flush_num = get_candidate_buf_and_flush_list(start, end, max_flush_num, &is_new_relfilenode);
-        if (end >= list->buf_id_start + list->cand_list_size) {
-            list->next_scan_loc = list->buf_id_start;
+
+        if (am_standby && type != CAND_LIST_SEG) {
+            if (end >= ratio_buf_id_start + ratio_cand_list_size) {
+                list->next_scan_ratio_loc = ratio_buf_id_start;
+            } else {
+                list->next_scan_ratio_loc = end;
+            }
         } else {
-            list->next_scan_loc = end;
+            if (end >= list->buf_id_start + list->cand_list_size) {
+                list->next_scan_loc = list->buf_id_start;
+            } else {
+                list->next_scan_loc = end;
+            }
         }
+
         if (need_flush_num > 0) {
             incre_ckpt_pgwr_flush_dirty_list(wb_context, need_flush_num, is_new_relfilenode);
         }
@@ -2340,7 +2424,6 @@ static void candidate_buf_push(CandidateList *list, int buf_id)
     volatile uint64 tail = pg_atomic_read_u64(&list->tail);
 
     if (unlikely(tail - head >= list_size)) {
-        Assert(0);
         return;
     }
     tail_loc = tail % list_size;

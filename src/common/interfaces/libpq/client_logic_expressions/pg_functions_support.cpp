@@ -65,7 +65,7 @@ bool handle_func_call(const FuncCall *funccall, ExprPartsList *expr_parts_list, 
             count = 0;
         }
 
-        size_t total_len = strlen(data) * count;
+        size_t total_len = strlen(data) * (size_t)count;
         char *result = (char *)malloc((total_len + 1) * sizeof(char));
         if (result == NULL) {
             return false;

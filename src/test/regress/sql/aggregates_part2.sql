@@ -76,5 +76,8 @@ select count(*) from (select distinct(c) from t_agg1);
 explain (costs off) select count(*) from (select distinct(c*d) from t_agg1);
 select count(*) from (select distinct(c*d) from t_agg1);
 
+-- group by with negative value
+SELECT ( 'x' , 'x' ) x GROUP BY -128 , ( );
+
 reset current_schema;
 drop schema if exists distribute_aggregates_part2 cascade;

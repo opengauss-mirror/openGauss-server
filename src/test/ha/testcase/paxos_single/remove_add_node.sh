@@ -2,6 +2,21 @@
 
 source ./util_paxos.sh
 source ./deploy_paxos_single.sh
+function test_change_majority_groups() {
+  check_primary
+  if [ -z $primary_port ];then
+    echo "${failed_keyword}, get primary port failed"
+    exit 1
+  fi
+  
+  # Check reload guc param dcf_majority_groups
+  gs_guc reload -D ${data_dir}/datanode1 -c "dcf_majority_groups = '0'"
+  gsql -d $db -p $primary_port -c "show dcf_majority_groups;"
+  gs_guc reload -D ${data_dir}/datanode1 -c "dcf_majority_groups = ''"
+  gsql -d $db -p $primary_port -c "show dcf_majority_groups;"
+
+}
+
 #replace node case
 function remove_and_add_member() {
   dcf_port=$1
@@ -93,5 +108,6 @@ function test_1()
   sleep 5s
   echo "cluster setup completed----------------"
   remove_and_add_member $1
+  test_change_majority_groups
 }
 test_1 $1

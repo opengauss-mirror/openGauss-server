@@ -94,7 +94,8 @@ extern off_t FileSeek(File file, off_t offset, int whence);
 extern int FileTruncate(File file, off_t offset, uint32 wait_event_info = 0);
 extern void FileWriteback(File file, off_t offset, off_t nbytes);
 extern char* FilePathName(File file);
-
+extern void FileAllocate(File file, uint32 offset, uint32 size);
+extern void FileAllocateDirectly(int fd, char* path, uint32 offset, uint32 size);
 extern void FileAsyncCUClose(File* vfdList, int32 vfdnum);
 extern int FileAsyncRead(AioDispatchDesc_t** dList, int32 dn);
 extern int FileAsyncWrite(AioDispatchDesc_t** dList, int32 dn);
@@ -103,6 +104,9 @@ extern int FileAsyncCUWrite(AioDispatchCUDesc_t** dList, int32 dn);
 extern void FileFastExtendFile(File file, uint32 offset, uint32 size, bool keep_size);
 extern int FileRead(File file, char* buffer, int amount);
 extern int FileWrite(File file, const char* buffer, int amount, off_t offset, int fastExtendSize = 0);
+
+/* todo delete */
+extern void* MmapExtentAddress(File fd, int pc_memory_map_size, off_t offset);
 
 // Threading virtual files IO interface, using pread() / pwrite()
 //
@@ -132,6 +136,7 @@ extern void UnlinkCacheFile(const char* pathname);
 /* Operations to allow use of the <dirent.h> library routines */
 extern DIR* AllocateDir(const char* dirname);
 extern struct dirent* ReadDir(DIR* dir, const char* dirname);
+extern struct dirent *ReadDirExtended(DIR *dir, const char *dirname, int elevel);
 extern int FreeDir(DIR* dir);
 /* Operations to allow use of a plain kernel FD, with automatic cleanup */
 extern int OpenTransientFile(FileName fileName, int fileFlags, int fileMode);
@@ -186,8 +191,6 @@ extern FileExistStatus CheckFileExists(const char* path);
 extern bool repair_deleted_file_check(RelFileNodeForkNum fileNode, int fd);
 
 /* Page compression support routines */
-extern void SetupPageCompressMemoryMap(File file, RelFileNode node, const RelFileNodeForkNum& relFileNodeForkNum);
-extern PageCompressHeader *GetPageCompressMemoryMap(File file, uint32 chunk_size);
 
 /* Filename components for OpenTemporaryFile */
 // Note that this macro must be the same to macro in initdb.cpp

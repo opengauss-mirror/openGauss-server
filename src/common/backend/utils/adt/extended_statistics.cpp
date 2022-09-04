@@ -111,6 +111,20 @@ void es_free_extendedstats(ExtendedStats* es)
     if (es->other_mcv_numbers) {
         pfree_ext(es->other_mcv_numbers);
     }
+    if (es->bayesnet_model) {
+        pfree_ext(es->bayesnet_model);
+    }
+
+#ifndef ENABLE_MULTIPLE_NODES
+    if (es->dependencies) {
+        for (int i = 0; i < es->dependencies->ndeps; i++) {
+            if (es->dependencies->deps[i]) {
+                pfree_ext(es->dependencies->deps[i]);
+            }
+        }
+        pfree_ext(es->dependencies);
+    }
+#endif
 
     pfree_ext(es);
 }
@@ -815,6 +829,95 @@ bool es_is_distributekey_contained_in_multi_column(Oid relid, VacAttrStats* stat
 }
 
 /*
+ * get_column_name_alias_item
+ *     to generate column name or column alias when construct statistics collection query
+ *
+ * @param (out) final_alias:
+ *     the final string
+ * @param (in) spec:
+ *     the AnalyzeSampleTableSpecInfo to get column name or alias
+ * @param (in) name_alias_flag:
+ *     to mark we need column name or alias or both of them
+ * @param (in) index:
+ *     the column index
+ * @param (in) separator:
+ *     separator in multi-columns
+ * @param (in) prefix:
+ *     prefix of each column
+ * @param (in) postfix:
+ *     postfix of each column
+ * @param (in) is_first:
+ *     the first column
+ */
+static void get_column_name_alias_item(StringInfoData* final_alias, AnalyzeSampleTableSpecInfo* spec,
+    uint32 name_alias_flag, unsigned int index, const char* separator, const char* prefix,
+    const char* postfix, bool is_first)
+{
+    /* For ", " */
+    if (!is_first) {
+        appendStringInfo(final_alias, "%s", separator);
+    }
+ 
+    /* For prefix */
+    appendStringInfo(final_alias, "%s", prefix);
+ 
+    /* For column name */
+    if (ES_COLUMN_NAME & name_alias_flag) {
+        char* name = NameStr(spec->stats->attrs[index]->attname);
+        appendStringInfo(final_alias, "%s", quote_identifier(name));
+    }
+ 
+    if (ES_COLUMN_ALIAS & name_alias_flag) {
+        /* For " AS " */
+        if (ES_COLUMN_NAME & name_alias_flag) {
+            appendStringInfo(final_alias, " as ");
+        }
+ 
+        /* For alias */
+        const char* quote_alias = quote_identifier(spec->v_alias[index]);
+        appendStringInfo(final_alias, "%s", quote_alias);
+    }
+ 
+    /* For postfix */
+    appendStringInfo(final_alias, "%s", postfix);
+}
+ 
+/*
+ * get_column_name_alias
+ *     to generate column name or column alias when construct statistics collection query
+ *
+ * @param (in) spec:
+ *     the AnalyzeSampleTableSpecInfo to get column name or alias
+ * @param (in) name_alias_flag:
+ *     to mark we need column name or alias or both of them
+ * @param (in) indexes:
+ *     indexes in multi-columns
+ * @param (in) num_index:
+ *     number of columns
+ *
+ * @return:
+ *     the result string
+ */
+char* get_column_name_alias(AnalyzeSampleTableSpecInfo* spec, uint32 name_alias_flag,
+    const uint32 *indexes, int num_index)
+{
+    if (num_index == 0) {
+        return "";
+    }
+    const char* separator = ", ";
+    const char* prefix = "";
+    const char* postfix = "";
+    StringInfoData final_alias;
+    initStringInfo(&final_alias);
+    get_column_name_alias_item(&final_alias, spec, name_alias_flag, indexes[0], separator, prefix, postfix, true);
+    for (int i = 1; i < num_index; ++i) {
+        get_column_name_alias_item(&final_alias, spec, name_alias_flag, indexes[i], separator, prefix, postfix, false);
+    }
+ 
+    return final_alias.data;
+}
+
+/*
  * es_get_column_name_alias
  *     to generate column name or column alias when construct statistics collection query
  *
@@ -1218,6 +1321,18 @@ static List* es_search_extended_statistics(
                     &(estats->other_mcv_nnumbers));
             }
 
+#ifndef ENABLE_MULTIPLE_NODES
+            /* dependencies_flag is used to decide if to get dependencies */
+            bool dependencies_flag = u_sess->attr.attr_sql.enable_functional_dependency;
+            dependencies_flag = dependencies_flag && (ES_DEPENDENCY & statistic_kind_flag);
+            (void)get_attmultistatsslot_dependencies(dependencies_flag,
+                tuple,
+                STATISTIC_EXT_DEPENDENCIES,
+                &(estats->dependencies));
+#endif
+            if (u_sess->attr.attr_sql.enable_ai_stats && (ES_AI & statistic_kind_flag)) {
+                get_attmultistatsslot_ai(tuple, estats->bms_attnum, &estats->bayesnet_model);
+            }
             es_list = lappend(es_list, estats);
         }
     }
@@ -1300,6 +1415,85 @@ ArrayType* es_construct_mcv_value_array(VacAttrStats* stats, int mcv_slot_index)
 
     return array;
 }
+
+#ifndef ENABLE_MULTIPLE_NODES
+/*
+ * es_construct_dependency_value_array
+ *     to construct dependency value for the target VacAttrStats
+ *     when we write it to system catalog
+ *
+ * @param (in) stats:
+ *     the VacAttrStats we have all information in it
+ * @param (in) dependency_slot_index:
+ *     the dependency slot index
+ *
+ * @return:
+ *     the ArrayType of dependency to be wrote to system catalog
+ */
+ArrayType* es_construct_dependency_value_array(const VacAttrStats *stats, int dependency_slot_index)
+{
+    /* Variables */
+    int32 nbytes = 0;
+    int elmlen = get_typlen(INT4OID);
+
+    Datum deps = stats->stavalues[dependency_slot_index][0];
+    MVDependencies* dependencies = statext_dependencies_deserialize(DatumGetByteaPP(deps));
+
+    /* Step : construct array for each column */
+    ArrayType** array_columns = (ArrayType**)palloc0(sizeof(ArrayType *) * dependencies->ndeps);
+
+    for (int j = 0; j < dependencies->ndeps; ++j) {
+        Datum* dependency_index_array = (Datum*)palloc0(sizeof(Datum) * dependencies->deps[j]->nattributes);
+        for (int i = 0; i < dependencies->deps[j]->nattributes; i++) {
+            dependency_index_array[i] = Int32GetDatum((int)dependencies->deps[j]->attributes[i]);
+        }
+
+        int dims[1] = {0};
+        int lbs[1] = {0};
+
+        dims[0] = (int)(dependencies->deps[j]->nattributes);
+        lbs[0] = 1;
+
+        array_columns[j] = construct_md_array(dependency_index_array,
+            NULL,
+            1,
+            dims,
+            lbs,
+            INT4OID,
+            elmlen,
+            true,
+            'i');
+    }
+
+    /* Step : compute required space */
+    for (int j = 0; j < dependencies->ndeps; ++j) {
+        Datum datum = PointerGetDatum(array_columns[j]);
+        datum = PointerGetDatum(PG_DETOAST_DATUM(datum));
+        nbytes = att_addlength_datum(nbytes, -1, datum);
+        nbytes = att_align_nominal(nbytes, 'd');
+    }
+    nbytes += ARR_OVERHEAD_NONULLS(1);
+
+    /* Step : allocate and initialize */
+    ArrayType* array = (ArrayType *)palloc0(nbytes);
+    SET_VARSIZE(array, nbytes);
+    array->ndim = 1;
+    array->dataoffset = 0;
+    array->elemtype = ANYARRAYOID;
+    *(ARR_DIMS(array)) = dependencies->ndeps;
+    *(ARR_LBOUND(array)) = 1;
+
+    /* Step : copy elements */
+    char* p = ARR_DATA_PTR(array);
+    for (int j = 0; j < dependencies->ndeps; ++j) {
+        Datum datum = PointerGetDatum(array_columns[j]);
+        datum = PointerGetDatum(PG_DETOAST_DATUM(datum));
+        p += ArrayCastAndSet(datum, -1, false, 'd', p);
+    }
+
+    return array;
+}
+#endif
 
 /*
  * es_is_multicolumn_stats_exists

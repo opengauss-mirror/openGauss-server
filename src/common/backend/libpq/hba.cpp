@@ -1365,7 +1365,6 @@ static void check_hba_replication(hbaPort* port)
     ListCell* line = NULL;
     HbaLine* hba = NULL;
     bool gotRepl = false;
-    int ret;
 
     hba = (HbaLine*)palloc0(sizeof(HbaLine));
     /* we do not bother local connection with GSS authentification */
@@ -1373,17 +1372,9 @@ static void check_hba_replication(hbaPort* port)
         goto DIRECT_TRUST;
     }
 
-    /* get replication method */
-    ret = pthread_rwlock_rdlock(&hba_rwlock);
-    if (ret != 0) {
-        pfree_ext(hba);
-        ereport(ERROR,
-            (errcode(ERRCODE_CONFIG_FILE_ERROR),
-                errmsg("get hba rwlock failed when check hba replication, return value:%d", ret)));
-    }
-
     /* hba_rwlock will be released when ereport ERROR or FATAL. */
     PG_ENSURE_ERROR_CLEANUP(hba_rwlock_cleanup, (Datum)0);
+    (void)pthread_rwlock_rdlock(&hba_rwlock);
     foreach (line, g_instance.libpq_cxt.comm_parsed_hba_lines) {
         /* 
          * memory copy here will not copy pointer types like List* and char*, 
@@ -1412,8 +1403,8 @@ static void check_hba_replication(hbaPort* port)
     }
 
     copy_hba_line(hba);
-    PG_END_ENSURE_ERROR_CLEANUP(hba_rwlock_cleanup, (Datum)0);
     (void)pthread_rwlock_unlock(&hba_rwlock);
+    PG_END_ENSURE_ERROR_CLEANUP(hba_rwlock_cleanup, (Datum)0);
 
 DIRECT_TRUST:
     /* cannot get invalid method, trust as default. */
@@ -1538,16 +1529,9 @@ static void check_hba(hbaPort* port)
     }
 #endif
     hba = (HbaLine*)palloc0(sizeof(HbaLine));
-    int ret = pthread_rwlock_rdlock(&hba_rwlock);
-    if (ret != 0) {
-        pfree_ext(hba);
-        ereport(ERROR,
-            (errcode(ERRCODE_CONFIG_FILE_ERROR),
-                errmsg("get hba rwlock failed when check hba config, return value:%d", ret)));
-    }
-
     /* hba_rwlock will be released when ereport ERROR or FATAL. */
     PG_ENSURE_ERROR_CLEANUP(hba_rwlock_cleanup, (Datum)0);
+    (void)pthread_rwlock_rdlock(&hba_rwlock);
     foreach (line, g_instance.libpq_cxt.comm_parsed_hba_lines) {
         /* the value of char* types in HbaLine will be copied to session memctx by copy_hba_line() in the end */
         errno_t rc = memcpy_s(hba, sizeof(HbaLine), lfirst(line), sizeof(HbaLine));
@@ -1711,8 +1695,8 @@ static void check_hba(hbaPort* port)
     }
     copy_hba_line(hba);
     port->hba = hba;
-    PG_END_ENSURE_ERROR_CLEANUP(hba_rwlock_cleanup, (Datum)0);
     (void)pthread_rwlock_unlock(&hba_rwlock);
+    PG_END_ENSURE_ERROR_CLEANUP(hba_rwlock_cleanup, (Datum)0);
 }
 
 /*
@@ -1734,6 +1718,7 @@ bool load_hba(void)
     ListCell *line = NULL, *line_num = NULL;
     List* new_parsed_lines = NIL;
     bool ok = true;
+    bool retVal = false;
     MemoryContext linecxt;
     MemoryContext oldcxt;
     MemoryContext hbacxt;
@@ -1804,28 +1789,29 @@ bool load_hba(void)
         return false;
     }
 
-    /* Any ERROR will become PANIC errors when holding rwlock of hba_rwlock. */
+    /* hba_rwlock will be released when ereport ERROR or FATAL. */
+    PG_ENSURE_ERROR_CLEANUP(hba_rwlock_cleanup, (Datum)0);
     int ret = pthread_rwlock_wrlock(&hba_rwlock);
     if (ret == 0) {
-        /* hba_rwlock will be released when ereport ERROR or FATAL. */
-        PG_ENSURE_ERROR_CLEANUP(hba_rwlock_cleanup, (Datum)0);
         /* Loaded new file successfully, replace the one we use */
         if (g_instance.libpq_cxt.parsed_hba_context != NULL) {
             MemoryContextDelete(g_instance.libpq_cxt.parsed_hba_context);
         }
         g_instance.libpq_cxt.parsed_hba_context = hbacxt;
         g_instance.libpq_cxt.comm_parsed_hba_lines = new_parsed_lines;
-        PG_END_ENSURE_ERROR_CLEANUP(hba_rwlock_cleanup, (Datum)0);
         (void)pthread_rwlock_unlock(&hba_rwlock);
         check_old_hba(false);
-        return true;
+        retVal = true;
     } else {
         MemoryContextDelete(hbacxt);
         ereport(WARNING,
             (errcode(ERRCODE_CONFIG_FILE_ERROR),
                 errmsg("get hba rwlock failed when load hba config, return value:%d", ret)));
-        return false;
+        retVal = false;
     }
+
+    PG_END_ENSURE_ERROR_CLEANUP(hba_rwlock_cleanup, (Datum)0);
+    return retVal;
 }
 
 void check_old_hba(bool need_old_hba)
@@ -2314,20 +2300,11 @@ bool is_cluster_internal_IP(sockaddr peer_addr)
     rc = memcpy_s(&raddr->addr, sizeof(sockaddr_storage), &peer_addr, sizeof(sockaddr));
     securec_check(rc, "\0", "\0");
 
-    ListCell* line = NULL;
-    HbaLine* hba = NULL;
-
-    int ret = pthread_rwlock_rdlock(&hba_rwlock);
-    if (ret != 0) {
-        ereport(LOG,
-            (errcode(ERRCODE_CONFIG_FILE_ERROR),
-                errmsg("get hba rwlock failed when check cluster internal ip, return value:%d", ret)));
-        free(raddr);
-        return false;
-    }
-
     /* hba_rwlock will be released when ereport ERROR or FATAL. */
     PG_ENSURE_ERROR_CLEANUP(hba_rwlock_cleanup, (Datum)0);
+    ListCell* line = NULL;
+    HbaLine* hba = NULL;
+    (void)pthread_rwlock_rdlock(&hba_rwlock);
     foreach (line, g_instance.libpq_cxt.comm_parsed_hba_lines) {
         hba = (HbaLine*)lfirst(line);
         /* check connection type */
@@ -2339,8 +2316,8 @@ bool is_cluster_internal_IP(sockaddr peer_addr)
         }
     }
 
-    PG_END_ENSURE_ERROR_CLEANUP(hba_rwlock_cleanup, (Datum)0);
     (void)pthread_rwlock_unlock(&hba_rwlock);
+    PG_END_ENSURE_ERROR_CLEANUP(hba_rwlock_cleanup, (Datum)0);
     free(raddr);
     return isInternalIP;
 }
@@ -2374,18 +2351,11 @@ bool check_ip_whitelist(hbaPort* port, char* ip, unsigned int ip_len)
         return true;
     }
 
-    ListCell* line = NULL;
-    HbaLine* hba = NULL;
-    int ret = pthread_rwlock_rdlock(&hba_rwlock);
-    if (ret != 0) {
-        ereport(LOG,
-            (errcode(ERRCODE_CONFIG_FILE_ERROR),
-                errmsg("get hba rwlock failed when check ip whitelist, return value:%d", ret)));
-        return false;
-    }
-
     /* hba_rwlock will be released when ereport ERROR or FATAL. */
     PG_ENSURE_ERROR_CLEANUP(hba_rwlock_cleanup, (Datum)0);
+    ListCell* line = NULL;
+    HbaLine* hba = NULL;
+    (void)pthread_rwlock_rdlock(&hba_rwlock);
     foreach (line, g_instance.libpq_cxt.comm_parsed_hba_lines) {
         hba = (HbaLine*)lfirst(line);
         if (hba->auth_method != uaReject) {
@@ -2396,8 +2366,8 @@ bool check_ip_whitelist(hbaPort* port, char* ip, unsigned int ip_len)
         }
     }
 
-    PG_END_ENSURE_ERROR_CLEANUP(hba_rwlock_cleanup, (Datum)0);
     (void)pthread_rwlock_unlock(&hba_rwlock);
+    PG_END_ENSURE_ERROR_CLEANUP(hba_rwlock_cleanup, (Datum)0);
     return isWhitelistIP;
 }
 
