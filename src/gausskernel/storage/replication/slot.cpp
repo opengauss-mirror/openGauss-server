@@ -328,6 +328,8 @@ void ReplicationSlotCreate(const char *name, ReplicationSlotPersistency persiste
      * can be doing that.  So it's safe to initialize the slot.
      */
     Assert(!slot->in_use);
+    rc = memset_s(&slot->data, sizeof(ReplicationSlotPersistentData), 0, sizeof(ReplicationSlotPersistentData));
+    securec_check(rc, "\0", "\0");
     SET_SLOT_PERSISTENCY(slot->data, persistency);
     slot->data.xmin = InvalidTransactionId;
     slot->effective_xmin = InvalidTransactionId;
