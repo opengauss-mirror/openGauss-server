@@ -34,6 +34,7 @@
 #include "utils/ps_status.h"
 #include "utils/timestamp.h"
 #include "utils/snapmgr.h"
+#include "pgxc/poolutils.h"
 #include "replication/walreceiver.h"
 static void ResolveRecoveryConflictWithVirtualXIDs(VirtualTransactionId* waitlist, TransactionId* xminArray,
                                                    ProcSignalReason reason);
@@ -385,14 +386,21 @@ void ResolveRecoveryConflictWithDatabase(Oid dbid)
      * block during InitPostgres() and then disconnect when they see the
      * database has been removed.
      */
-    while (CountDBActiveBackends(dbid) > 0) {
-        CancelDBBackends(dbid, PROCSIG_RECOVERY_CONFLICT_DATABASE, true);
-
-        /*
-         * Wait awhile for them to die so that we avoid flooding an
-         * unresponsive backend when system is heavily loaded.
-         */
-        pg_usleep(10000);
+    if (ENABLE_THREAD_POOL) {
+        ThreadPoolSessControl *sess_ctrl = g_threadPoolControler->GetSessionCtrl();
+        while (sess_ctrl->CountDBSessionsNotCleaned(dbid, InvalidOid) > 0) {
+            sess_ctrl->CleanDBSessions(dbid, InvalidOid);
+            pg_usleep(10000);
+        }
+    } else {
+        while (CountDBBackends(dbid) > 0) {
+            CancelDBBackends(dbid, PROCSIG_RECOVERY_CONFLICT_DATABASE, true);
+            /*
+             * Wait awhile for them to die so that we avoid flooding an
+             * unresponsive backend when system is heavily loaded.
+             */
+            pg_usleep(10000);
+        }
     }
 }
 
