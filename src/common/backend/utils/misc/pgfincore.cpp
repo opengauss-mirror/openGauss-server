@@ -139,7 +139,7 @@ static bool pgfadvise_file(char *filename, int advice, pgfadviseStruct *pgfdv);
 extern Datum pgfadvise_loader(PG_FUNCTION_ARGS);
 static bool pgfadvise_loader_file(char *filename, bool willneed, 
     bool dontneed, VarBit *databit, pgfloaderStruct *pgfloader);
-
+static char *getRelpath(ListCell *partitionCell, Relation rel, bool isSubPartition, text *forkName);
 extern Datum pgfincore(PG_FUNCTION_ARGS);
 static bool pgfincore_file(char *filename, pgfincoreStruct *pgfncr);
 
@@ -387,19 +387,13 @@ Datum pgfadvise(PG_FUNCTION_ARGS)
         } else if (fctx->isSubPartitionTable) {
             fctx->subPartitionIdList = RelationGetSubPartitionList(fctx->rel, AccessShareLock);
             fctx->subPartitionCell = list_head(fctx->subPartitionIdList);
-            Partition subPartition = (Partition)lfirst(fctx->subPartitionCell);
-            Relation subPartionRel = SubPartitionGetRelation(fctx->rel, subPartition, AccessShareLock);
-            fctx->relationpath = relpathpg(subPartionRel, forkName);
+            fctx->relationpath = getRelpath(fctx->subPartitionCell, fctx->rel, true, forkName);
             fctx->segcount = 0;
-            releaseDummyRelation(&subPartionRel);
         } else if (fctx->isPartitionTable) {
             fctx->partitionIdList = relationGetPartitionList(fctx->rel, AccessShareLock);
             fctx->partitionCell = list_head(fctx->partitionIdList);
-            Partition partition = (Partition)lfirst(fctx->partitionCell);
-            Relation partitionRel = partitionGetRelation(fctx->rel, partition);
-            fctx->relationpath = relpathpg(partitionRel, forkName);
+            fctx->relationpath = getRelpath(fctx->partitionCell, fctx->rel, false, forkName);
             fctx->segcount = 0;
-            releaseDummyRelation(&partitionRel);
         }
 
 
@@ -431,20 +425,14 @@ Datum pgfadvise(PG_FUNCTION_ARGS)
         if (fctx->isPartitionTable || fctx->isSubPartitionTable) {
             if (fctx->isSubPartitionTable && lnext(fctx->subPartitionCell)) {
                 fctx->subPartitionCell = lnext(fctx->subPartitionCell);
-                Partition subPartition = (Partition)lfirst(fctx->subPartitionCell);
-                Relation subPartionRel = SubPartitionGetRelation(fctx->rel,subPartition,AccessShareLock);
-                fctx->relationpath = relpathpg(subPartionRel, fctx->forkName);
+                fctx->relationpath = getRelpath(fctx->subPartitionCell, fctx->rel, true, fctx->forkName);
                 fctx->segcount = 0;
-                releaseDummyRelation(&subPartionRel);
                 errno_t rc = snprintf_s(filename, MAXPGPATH, MAXPGPATH-1, "%s", fctx->relationpath);
                 securec_check_ss(rc, "\0", "\0");
             } else if (fctx->isPartitionTable && lnext(fctx->partitionCell)) {
                 fctx->partitionCell = lnext(fctx->partitionCell);
-                Partition partition = (Partition)lfirst(fctx->partitionCell);
-                Relation partitionRel = partitionGetRelation(fctx->rel,partition);
-                fctx->relationpath = relpathpg(partitionRel, fctx->forkName);
+                fctx->relationpath = getRelpath(fctx->partitionCell, fctx->rel, false, fctx->forkName);
                 fctx->segcount = 0;
-                releaseDummyRelation(&partitionRel);
                 errno_t rc = snprintf_s(filename, MAXPGPATH, MAXPGPATH-1, "%s", fctx->relationpath);
                 securec_check_ss(rc, "\0", "\0");
             } else {
@@ -500,6 +488,8 @@ Datum pgfadvise(PG_FUNCTION_ARGS)
                 }
             }
         }
+    } else {
+        FreeFile(fp);
     }
     
     ereport(DEBUG1, (errmsg("pgfadvise: about to work with %s, current advice : %d",
@@ -687,11 +677,16 @@ Datum pgfadvise_loader(PG_FUNCTION_ARGS)
 {
     Oid relOid = PG_GETARG_OID(0);
     text *forkName = PG_GETARG_TEXT_P(1);
-    int segmentNumber = PG_GETARG_INT32(2);
+    char relType = PG_GETARG_CHAR(2);
+    text *partitionName = NULL; 
+    if (!PG_ARGISNULL(3)) {
+        partitionName = PG_GETARG_TEXT_P(3);
+    }
+    int segmentNumber = PG_GETARG_INT32(4);
     /* if this variable is set to false, no page will be set to willneed */
-    bool willneed = PG_GETARG_BOOL(3);
+    bool willneed = PG_GETARG_BOOL(5);
     /* if this variable is set to false, no page will be set to dontneed */
-    bool dontneed = PG_GETARG_BOOL(4);
+    bool dontneed = PG_GETARG_BOOL(6);
     /*
      * if the variable willneed and dontneed is set to true, the pages 
      * corresponding to 1 will be set WILLNEED, and the pages corresponding
@@ -703,7 +698,7 @@ Datum pgfadvise_loader(PG_FUNCTION_ARGS)
     pgfloaderStruct	*pgfloader;
 
     Relation rel;
-    char *relationpath;
+    char *relationpath = NULL;
     char filename[MAXPGPATH];
 
     /* our return value, true for success */
@@ -717,10 +712,10 @@ Datum pgfadvise_loader(PG_FUNCTION_ARGS)
     Datum values[PGFADVISE_LOADER_COLS];
     bool nulls[PGFADVISE_LOADER_COLS];
 
-    if (PG_ARGISNULL(5))
+    if (PG_ARGISNULL(7))
         ereport(ERROR, (errmsg("pgfadvise_loader: databit argument shouldn't be NULL")));
 
-    databit	= PG_GETARG_VARBIT_P(5);
+    databit	= PG_GETARG_VARBIT_P(7);
 
     /* initialize nulls array to build the tuple */
     int ret = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
@@ -746,8 +741,48 @@ Datum pgfadvise_loader(PG_FUNCTION_ARGS)
             errdetail("segment-page tables doesn't support pgfadvise_loader yet")));
     }
 
-    /* we get the common part of the filename of each segment of a relation */
-    relationpath = relpathpg(rel, forkName);
+    /* we get the relationpath */
+    if(relType == 'p' || relType == 'P') {
+        ListCell* cell = NULL;
+        Partition partition = NULL;
+        Relation partRel = NULL;
+        List *partitionList = NIL;
+        if (RelationIsSubPartitioned(rel)) {
+            partitionList = RelationGetSubPartitionList(rel, AccessShareLock);
+        } else if (RELATION_IS_PARTITIONED(rel)) {
+            partitionList = relationGetPartitionList(rel, AccessShareLock);
+        } else {
+            ereport(ERROR, (errmsg("The relation is not partition")));
+        }
+        foreach(cell, partitionList) {
+            partition = (Partition)lfirst(cell);
+            char* partName = PartitionGetPartitionName(partition);
+            if (strcmp(partName,text_to_cstring(partitionName)) != 0) {
+                continue;
+            } else {
+                if (RelationIsSubPartitioned(rel)) {
+                    partRel = SubPartitionGetRelation(rel, partition, AccessShareLock);
+                } else if (RELATION_IS_PARTITIONED(rel)) {
+                    partRel = partitionGetRelation(rel, partition);
+                }
+                relationpath = relpathpg(partRel, forkName);
+                releaseDummyRelation(&partRel);
+                break;
+            }
+        }
+        releasePartitionList(rel, &partitionList, AccessShareLock);
+        if (relationpath == NULL) {
+            if (RelationIsSubPartitioned(rel)) {
+                ereport(ERROR, (errmsg("The subpartition %s isn't exist", text_to_cstring(partitionName))));
+            } else if (RELATION_IS_PARTITIONED(rel)) {
+                ereport(ERROR, (errmsg("The partition %s isn't exist", text_to_cstring(partitionName))));    
+            }
+        }
+    } else if (relType == 'r' || relType == 'R') {
+        relationpath = relpathpg(rel, forkName);
+    } else {
+        ereport(ERROR, (errmsg("The relType must be 'r', 'R', 'p' or 'P'.")));
+    }
 
     /*
      * If we are looking the first segment,
@@ -869,11 +904,11 @@ static bool pgfincore_file(char *filename, pgfincoreStruct *pgfncr)
         }
 
         /* Prepare our vector containing all blocks information */
-        vec = (unsigned char * ) calloc(1, (st.st_size+pgfncr->pageSize-1)/pgfncr->pageSize);
+        vec = (unsigned char *) palloc0((st.st_size+pgfncr->pageSize-1)/pgfncr->pageSize);
         if ((void *)0 == vec) {
             munmap(pa, st.st_size);
             FreeFile(fp);
-            ereport(ERROR, (errmsg("Can not calloc object file : %s", filename)));
+            ereport(ERROR, (errmsg("Can not palloc object file : %s", filename)));
             return false;
         }
 
@@ -883,7 +918,9 @@ static bool pgfincore_file(char *filename, pgfincoreStruct *pgfncr)
             munmap(pa, st.st_size);
             ereport(ERROR, (errmsg("mincore(%p, %lld, %p): %s\n",
                  pa, (long long int)st.st_size, vec, strerror(save_errno))));
-            free(vec);
+            if (vec != NULL) {
+                pfree(vec);
+            }
             FreeFile(fp);
             return false;
         }
@@ -945,7 +982,9 @@ static bool pgfincore_file(char *filename, pgfincoreStruct *pgfncr)
     /*
      * free and close
      */
-    free(vec);
+    if (vec != NULL) {
+        pfree(vec);
+    }
     munmap(pa, st.st_size);
     FreeFile(fp);
 
@@ -955,6 +994,19 @@ static bool pgfincore_file(char *filename, pgfincoreStruct *pgfncr)
     pgfncr->pagesFree = sysconf(_SC_AVPHYS_PAGES);
 
     return true;
+}
+
+static char *getRelpath(ListCell *partitionCell, Relation rel, bool isSubPartition, text *forkName) {
+    Partition partition = (Partition)lfirst(partitionCell);
+    Relation partitionRel = NULL;
+    if (isSubPartition) {
+        partitionRel = SubPartitionGetRelation(rel, partition, AccessShareLock);
+    } else {
+        partitionRel = partitionGetRelation(rel, partition);
+    }
+    char *relationpath = relpathpg(partitionRel,forkName);
+    releaseDummyRelation(&partitionRel);
+    return relationpath;
 }
 
 /*
@@ -1001,7 +1053,7 @@ Datum pgfincore(PG_FUNCTION_ARGS)
         /* allocate memory for user context */
         fctx = (pgfincore_fctx *) palloc(sizeof(pgfincore_fctx));
 
-        fctx->forkName = (text*)palloc(VARSIZE(forkName));
+        fctx->forkName = (text*) palloc(VARSIZE(forkName));
         SET_VARSIZE(fctx->forkName, VARSIZE(forkName));
         errno_t ret = memcpy_s((void*)VARDATA(fctx->forkName), VARSIZE(forkName) - VARHDRSZ, (void*)VARDATA(forkName), VARSIZE(forkName) - VARHDRSZ);
         securec_check(ret, "\0", "\0");
@@ -1067,19 +1119,13 @@ Datum pgfincore(PG_FUNCTION_ARGS)
         } else if (fctx->isSubPartitionTable) {
             fctx->subPartitionIdList = RelationGetSubPartitionList(fctx->rel, AccessShareLock);
             fctx->subPartitionCell = list_head(fctx->subPartitionIdList);
-            Partition subPartition = (Partition)lfirst(fctx->subPartitionCell);
-            Relation subPartionRel = SubPartitionGetRelation(fctx->rel, subPartition, AccessShareLock);
-            fctx->relationpath = relpathpg(subPartionRel, forkName);
+            fctx->relationpath = getRelpath(fctx->subPartitionCell, fctx->rel, true, forkName);
             fctx->segcount = 0;
-            releaseDummyRelation(&subPartionRel);
         } else if (fctx->isPartitionTable) {
             fctx->partitionIdList = relationGetPartitionList(fctx->rel, AccessShareLock);
             fctx->partitionCell = list_head(fctx->partitionIdList);
-            Partition partition = (Partition)lfirst(fctx->partitionCell);
-            Relation partitionRel = partitionGetRelation(fctx->rel, partition);
-            fctx->relationpath = relpathpg(partitionRel, forkName);
+            fctx->relationpath = getRelpath(fctx->partitionCell, fctx->rel, false, forkName);
             fctx->segcount = 0;
-            releaseDummyRelation(&partitionRel);
         }
 
         /* And finally we keep track of our initialization */
@@ -1110,20 +1156,14 @@ Datum pgfincore(PG_FUNCTION_ARGS)
         if (fctx->isPartitionTable || fctx->isSubPartitionTable) {
             if (fctx->isSubPartitionTable && lnext(fctx->subPartitionCell)) {
                 fctx->subPartitionCell = lnext(fctx->subPartitionCell);
-                Partition subPartition = (Partition)lfirst(fctx->subPartitionCell);
-                Relation subPartionRel = SubPartitionGetRelation(fctx->rel,subPartition,AccessShareLock);
-                fctx->relationpath = relpathpg(subPartionRel, fctx->forkName);
+                fctx->relationpath = getRelpath(fctx->subPartitionCell, fctx->rel, true, fctx->forkName);
                 fctx->segcount = 0;
-                releaseDummyRelation(&subPartionRel);
                 errno_t rc = snprintf_s(filename, MAXPGPATH, MAXPGPATH-1, "%s", fctx->relationpath);
                 securec_check_ss(rc, "\0", "\0");
             } else if (fctx->isPartitionTable && lnext(fctx->partitionCell)) {
-                fctx->partitionCell = lnext(fctx->partitionCell);
-                Partition partition = (Partition)lfirst(fctx->partitionCell);
-                Relation partitionRel = partitionGetRelation(fctx->rel,partition);
-                fctx->relationpath = relpathpg(partitionRel, fctx->forkName);
+                fctx->partitionCell = lnext(fctx->partitionCell);                
+                fctx->relationpath = getRelpath(fctx->partitionCell, fctx->rel, false, fctx->forkName);
                 fctx->segcount = 0;
-                releaseDummyRelation(&partitionRel);
                 errno_t rc = snprintf_s(filename, MAXPGPATH, MAXPGPATH-1, "%s", fctx->relationpath);
                 securec_check_ss(rc, "\0", "\0");
             } else {
@@ -1179,6 +1219,8 @@ Datum pgfincore(PG_FUNCTION_ARGS)
                 }
             }
         }
+    } else {
+        FreeFile(fp);
     }
 
     ereport(DEBUG1, (errmsg("pgfincore: about to work with %s", filename)));

@@ -24,39 +24,39 @@ CREATE TEMP TABLE test AS SELECT generate_series(1,256) as a;
 --
 -- test fadvise_loader
 --
-select true from pgfadvise_loader('test', 0, true, true, B'1010');
+select true from pgfadvise_loader('test', 'r', NULL, 0, true, true, B'1010');
  bool 
 ------
  t
 (1 row)
 
-select true from pgfadvise_loader('test', 0, true, false, B'1010');
+select true from pgfadvise_loader('test', 'r', NULL, 0, true, false, B'1010');
  bool 
 ------
  t
 (1 row)
 
-select true from pgfadvise_loader('test', 0, false, true, B'1010');
+select true from pgfadvise_loader('test', 'r', NULL, 0, false, true, B'1010');
  bool 
 ------
  t
 (1 row)
 
-select true from pgfadvise_loader('test', 0, false, false, B'1010');
+select true from pgfadvise_loader('test', 'r', NULL, 0, false, false, B'1010');
  bool 
 ------
  t
 (1 row)
 
 -- must not fail on empty databit input
-select true from pgfadvise_loader('test', 0, false, false, B'');
+select true from pgfadvise_loader('test', 'r', NULL, 0, false, false, B'');
  bool 
 ------
  t
 (1 row)
 
 -- ERROR on NULL databit input
-select true from pgfadvise_loader('test', 0, false, false, NULL);
+select true from pgfadvise_loader('test', 'r', NULL, 0, false, false, NULL);
 ERROR:  pgfadvise_loader: databit argument shouldn't be NULL
 CONTEXT:  referenced column: pgfadvise_loader
 SQL function "pgfadvise_loader" statement 1
