@@ -3154,9 +3154,11 @@ HeapTuple heap_lock_updated(CommandId cid, Relation relation, int lockmode, Item
  * that might need to invoke EPQ processing.
  *
  * Note: subplan/auxrowmarks can be NULL/NIL if they will be set later
- * with EvalPlanQualSetPlan.
+ * with EvalPlanQualSetPlan. projInfos is used for Multiple-Modify to
+ * fetch the slot corresponding to the target table.
  */
-void EvalPlanQualInit(EPQState *epqstate, EState *estate, Plan *subplan, List *auxrowmarks, int epqParam)
+void EvalPlanQualInit(EPQState *epqstate, EState *estate, Plan *subplan, List *auxrowmarks, int epqParam,
+    ProjectionInfo** projInfos)
 {
     /* Mark the EPQ state inactive */
     epqstate->estate = NULL;
@@ -3167,6 +3169,7 @@ void EvalPlanQualInit(EPQState *epqstate, EState *estate, Plan *subplan, List *a
     epqstate->arowMarks = auxrowmarks;
     epqstate->epqParam = epqParam;
     epqstate->parentestate = estate;
+    epqstate->projInfos = projInfos;
 }
 
 /*
@@ -3564,7 +3567,7 @@ void EvalPlanQualFetchRowMarks(EPQState *epqstate)
 TupleTableSlot *EvalPlanQualNext(EPQState *epqstate)
 {
     MemoryContext old_context = MemoryContextSwitchTo(epqstate->estate->es_query_cxt);
-    TupleTableSlot *slot = ExecProcNode(epqstate->planstate);
+    TupleTableSlot *slot = FetchPlanSlot(epqstate->planstate, epqstate->projInfos);
     (void)MemoryContextSwitchTo(old_context);
 
     return slot;
@@ -3790,4 +3793,15 @@ void EvalPlanQualEnd(EPQState *epqstate)
     epqstate->estate = NULL;
     epqstate->planstate = NULL;
     epqstate->origslot = NULL;
+}
+
+TupleTableSlot* FetchPlanSlot(PlanState* subPlanState, ProjectionInfo** projInfos)
+{
+    int result_rel_index = subPlanState->state->result_rel_index;
+
+    if (result_rel_index > 0) {
+        return ExecProject(projInfos[result_rel_index], NULL);
+    } else {
+        return ExecProcNode(subPlanState);
+    }
 }

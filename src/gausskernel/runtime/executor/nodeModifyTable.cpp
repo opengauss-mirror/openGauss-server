@@ -3120,17 +3120,6 @@ uint64 GetDeleteLimitCount(ExprContext* econtext, PlanState* scan, Limit *limitP
     return (uint64)iCount;
 }
 
-static TupleTableSlot* FetchPlanSlot(ModifyTableState* node, PlanState* subPlanState)
-{
-    EState* estate = node->ps.state;
-
-    if (estate->result_rel_index > 0) {
-        return ExecProject(node->mt_ProjInfos[estate->result_rel_index], NULL);
-    } else {
-        return ExecProcNode(subPlanState);
-    }
-}
-
 /* ----------------------------------------------------------------
  *	   ExecModifyTable
  *
@@ -3287,7 +3276,7 @@ TupleTableSlot* ExecModifyTable(ModifyTableState* node)
          */
         ResetPerTupleExprContext(estate);
         t_thrd.xact_cxt.ActiveLobRelid = result_rel_info->ri_RelationDesc->rd_id;
-        plan_slot = FetchPlanSlot(node, subPlanState);
+        plan_slot = FetchPlanSlot(subPlanState, node->mt_ProjInfos);
         t_thrd.xact_cxt.ActiveLobRelid = InvalidOid;
         if (TupIsNull(plan_slot)) {
             record_first_time();
@@ -3662,8 +3651,6 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
     upsertState->us_updateWhere = NIL;
     mt_state->mt_upsert = upsertState;
 
-    /* set up epqstate with dummy subplan data for the moment */
-    EvalPlanQualInit(&mt_state->mt_epqstate, estate, NULL, NIL, node->epqParam);
     mt_state->fireBSTriggers = true;
 
     /*
@@ -3809,6 +3796,8 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
         i++;
     }
 #endif
+    /* set up epqstate with dummy subplan data for the moment */
+    EvalPlanQualInit(&mt_state->mt_epqstate, estate, NULL, NIL, node->epqParam);
 
     estate->es_result_relation_info = saved_result_rel_info;
 #ifdef PGXC
