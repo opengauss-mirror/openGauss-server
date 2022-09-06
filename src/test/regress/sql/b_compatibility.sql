@@ -518,6 +518,525 @@ drop function if exists labeltest;
 
 \c regression
 
+create or replace procedure func_zzm(num1 in int, num2 inout int, res out int)
+as begin
+num2 := num2 + 1;
+res := num1 + 1;
+end;
+/
+
+--success
+declare
+n1 int;
+n2 int;
+begin
+n1 := 10;
+n2 := 100;
+func_zzm(1,n1,n2);
+raise notice '%,%',n1,n2;
+end;
+/
+
+--error
+declare
+n1 int;
+n2 int;
+begin
+n1 := 10;
+n2 := 100;
+call func_zzm(1,n1,n2);
+raise notice '%,%',n1,n2;
+end;
+/
+
+CREATE OR REPLACE FUNCTION func1(num1 in int, num2 inout int, res out int) RETURNS record
+AS $$
+DECLARE
+BEGIN
+num2 := num2 + 1;
+res := num1 + 1;
+return;
+END
+$$
+LANGUAGE plpgsql;
+
+--success
+declare
+n1 int;
+n2 int;
+begin
+n1 := 10;
+n2 := 100;
+raise notice '%,%',n1,n2;
+func1(1,n1,n2);
+raise notice '%,%',n1,n2;
+end;
+/
+
+--error
+declare
+n1 int;
+n2 int;
+begin
+n1 := 10;
+n2 := 100;
+raise notice '%,%',n1,n2;
+call func1(1,n1,n2);
+raise notice '%,%',n1,n2;
+end;
+/
+
+create or replace procedure debug(num1 in int, num2 inout int, res out int)
+as begin
+num2 := num2 + 1;
+res := num1 + 1;
+end;
+/
+--success
+declare
+n1 int;
+n2 int;
+begin
+n1 := 10;
+n2 := 100;
+debug(1,n1,n2);
+raise notice '%,%',n1,n2;
+end;
+/
+--error
+declare
+n1 int;
+n2 int;
+begin
+n1 := 10;
+n2 := 100;
+call debug(1,n1,n2);
+raise notice '%,%',n1,n2;
+end;
+/
+
+
+create or replace procedure call(num1 in int, num2 inout int, res out int)
+as begin
+num2 := num2 + 1;
+res := num1 + 1;
+end;
+/
+--success
+declare
+n1 int;
+n2 int;
+begin
+n1 := 10;
+n2 := 100;
+call(1,n1,n2);
+raise notice '%,%',n1,n2;
+end;
+/
+
+--error
+declare
+n1 int;
+n2 int;
+begin
+n1 := 10;
+n2 := 100;
+call call(1,n1,n2);
+raise notice '%,%',n1,n2;
+end;
+/
+drop procedure call;
+CREATE OR REPLACE FUNCTION call() RETURNS int
+AS $$
+DECLARE
+n int;
+BEGIN
+n := 1;
+return 1;
+END
+$$
+LANGUAGE plpgsql;
+
+--success
+declare
+begin
+call();
+end;
+/
+
+--error
+declare
+begin
+call;
+end;
+/
+
+--error
+declare
+begin
+call call();
+end;
+/
+
+--error
+declare
+begin
+call call;
+end;
+/
+
+create schema test;
+CREATE OR REPLACE FUNCTION test.func1() RETURNS int
+AS $$
+DECLARE
+n int;
+BEGIN
+n := 1;
+return 1;
+END
+$$
+LANGUAGE plpgsql;
+
+--success
+declare
+begin
+test.func1();
+end;
+/
+
+--error
+declare
+begin
+call test.func1();
+end;
+/
+
+create or replace procedure test.debug(num1 in int, num2 inout int, res out int)
+as begin
+num2 := num2 + 1;
+res := num1 + 1;
+end;
+/
+--success
+declare
+n1 int;
+n2 int;
+begin
+n1 := 10;
+n2 := 100;
+test.debug(1,n1,n2);
+raise notice '%,%',n1,n2;
+end;
+/
+--error
+declare
+n1 int;
+n2 int;
+begin
+n1 := 10;
+n2 := 100;
+call test.debug(1,n1,n2);
+raise notice '%,%',n1,n2;
+end;
+/
+
+create or replace procedure test.call(num1 in int, num2 inout int, res out int)
+as begin
+num2 := num2 + 1;
+res := num1 + 1;
+end;
+/
+--success
+declare
+n1 int;
+n2 int;
+begin
+n1 := 10;
+n2 := 100;
+test.call(1,n1,n2);
+raise notice '%,%',n1,n2;
+end;
+/
+
+--error
+declare
+n1 int;
+n2 int;
+begin
+n1 := 10;
+n2 := 100;
+call test.call(1,n1,n2);
+raise notice '%,%',n1,n2;
+end;
+/
+
+drop procedure func_zzm;
+drop function func1;
+drop procedure debug;
+drop procedure call;
+drop schema test CASCADE;
+\c b
+
+create or replace procedure func_zzm(num1 in int, num2 inout int, res out int)
+as begin
+num2 := num2 + 1;
+res := num1 + 1;
+end;
+/
+
+--success
+declare
+n1 int;
+n2 int;
+begin
+n1 := 10;
+n2 := 100;
+func_zzm(1,n1,n2);
+raise notice '%,%',n1,n2;
+end;
+/
+
+--success
+declare
+n1 int;
+n2 int;
+begin
+n1 := 10;
+n2 := 100;
+call func_zzm(1,n1,n2);
+raise notice '%,%',n1,n2;
+end;
+/
+
+CREATE OR REPLACE FUNCTION func1(num1 in int, num2 inout int, res out int) RETURNS record
+AS $$
+DECLARE
+BEGIN
+num2 := num2 + 1;
+res := num1 + 1;
+return;
+END
+$$
+LANGUAGE plpgsql;
+
+--success
+declare
+n1 int;
+n2 int;
+begin
+n1 := 10;
+n2 := 100;
+raise notice '%,%',n1,n2;
+func1(1,n1,n2);
+raise notice '%,%',n1,n2;
+end;
+/
+
+--success
+declare
+n1 int;
+n2 int;
+begin
+n1 := 10;
+n2 := 100;
+raise notice '%,%',n1,n2;
+call func1(1,n1,n2);
+raise notice '%,%',n1,n2;
+end;
+/
+
+create or replace procedure debug(num1 in int, num2 inout int, res out int)
+as begin
+num2 := num2 + 1;
+res := num1 + 1;
+end;
+/
+--success
+declare
+n1 int;
+n2 int;
+begin
+n1 := 10;
+n2 := 100;
+debug(1,n1,n2);
+raise notice '%,%',n1,n2;
+end;
+/
+--success
+declare
+n1 int;
+n2 int;
+begin
+n1 := 10;
+n2 := 100;
+call debug(1,n1,n2);
+raise notice '%,%',n1,n2;
+end;
+/
+
+
+create or replace procedure call(num1 in int, num2 inout int, res out int)
+as begin
+num2 := num2 + 1;
+res := num1 + 1;
+end;
+/
+--success
+declare
+n1 int;
+n2 int;
+begin
+n1 := 10;
+n2 := 100;
+call(1,n1,n2);
+raise notice '%,%',n1,n2;
+end;
+/
+
+--success
+declare
+n1 int;
+n2 int;
+begin
+n1 := 10;
+n2 := 100;
+call call(1,n1,n2);
+raise notice '%,%',n1,n2;
+end;
+/
+drop procedure call;
+CREATE OR REPLACE FUNCTION call() RETURNS int
+AS $$
+DECLARE
+n int;
+BEGIN
+n := 1;
+return 1;
+END
+$$
+LANGUAGE plpgsql;
+
+--success
+declare
+begin
+call();
+end;
+/
+
+--error
+declare
+begin
+call;
+end;
+/
+
+--success
+declare
+begin
+call call();
+end;
+/
+
+--error
+declare
+begin
+call call;
+end;
+/
+
+create schema test;
+CREATE OR REPLACE FUNCTION test.func1() RETURNS int
+AS $$
+DECLARE
+n int;
+BEGIN
+n := 1;
+return 1;
+END
+$$
+LANGUAGE plpgsql;
+
+--success
+declare
+begin
+test.func1();
+end;
+/
+
+--success
+declare
+begin
+call test.func1();
+end;
+/
+
+create or replace procedure test.debug(num1 in int, num2 inout int, res out int)
+as begin
+num2 := num2 + 1;
+res := num1 + 1;
+end;
+/
+--success
+declare
+n1 int;
+n2 int;
+begin
+n1 := 10;
+n2 := 100;
+test.debug(1,n1,n2);
+raise notice '%,%',n1,n2;
+end;
+/
+--success
+declare
+n1 int;
+n2 int;
+begin
+n1 := 10;
+n2 := 100;
+call test.debug(1,n1,n2);
+raise notice '%,%',n1,n2;
+end;
+/
+
+create or replace procedure test.call(num1 in int, num2 inout int, res out int)
+as begin
+num2 := num2 + 1;
+res := num1 + 1;
+end;
+/
+--success
+declare
+n1 int;
+n2 int;
+begin
+n1 := 10;
+n2 := 100;
+test.call(1,n1,n2);
+raise notice '%,%',n1,n2;
+end;
+/
+
+--success
+declare
+n1 int;
+n2 int;
+begin
+n1 := 10;
+n2 := 100;
+call test.call(1,n1,n2);
+raise notice '%,%',n1,n2;
+end;
+/
+
+drop procedure func_zzm;
+drop function func1;
+drop procedure debug;
+drop procedure call;
+drop schema test CASCADE;
+
+\c regression
+
 drop database b;
 DROP USER test_c;
 DROP USER test_d;
