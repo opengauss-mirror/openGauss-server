@@ -329,6 +329,17 @@ extern void GUC_check_errcode(int sqlerrcode);
         }                \
     } while (0)
 
+#define IsGlobalGuc(context)        \
+    ((context) == PGC_INTERNAL ||   \
+     (context) == PGC_POSTMASTER || \
+     (context) == PGC_SIGHUP ||     \
+     (context) == PGC_BACKEND) 
+
+
+#define IsSessionGuc(context)        \
+    ((context) == PGC_SUSET ||       \
+     (context) == PGC_USERSET)
+
 /*
  * The following functions are not in guc.c, but are declared here to avoid
  * having to include guc.h in some widely used headers that it really doesn't
@@ -354,6 +365,7 @@ extern void assign_xlog_sync_method(int new_sync_method, void* extra);
 /* in tcop/stmt_retry.cpp */
 extern bool check_errcode_list(char** newval, void** extra, GucSource source);
 
+extern struct config_generic* find_option(const char* name, bool create_placeholders, int elevel);
 /*
  * Error code for config file
  */
@@ -516,7 +528,7 @@ extern void logging_module_guc_assign(const char* newval, void* extra);
 extern bool check_directory(char** newval, void** extra, GucSource source);
 extern bool transparent_encrypt_kms_url_region_check(char** newval, void** extra, GucSource source);
 extern bool check_canonical_path(char** newval, void** extra, GucSource source);
-
+extern char* SetVariableExprGetConfigOption(SetVariableExpr* set);
 #ifdef ENABLE_MULTIPLE_NODES
 extern const char* show_nodegroup_mode(void);
 #endif

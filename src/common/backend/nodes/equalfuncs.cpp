@@ -586,6 +586,16 @@ static bool _equalNullTest(const NullTest* a, const NullTest* b)
     return true;
 }
 
+static bool _equalSetVariableExpr(const SetVariableExpr *a, const SetVariableExpr *b)
+{
+    COMPARE_STRING_FIELD(name);
+    COMPARE_NODE_FIELD(value);
+    COMPARE_SCALAR_FIELD(is_session);
+    COMPARE_SCALAR_FIELD(is_global);
+
+    return true;
+}
+
 static bool _equalHashFilter(const HashFilter* a, const HashFilter* b)
 {
     COMPARE_NODE_FIELD(arg);
@@ -3416,6 +3426,9 @@ bool equal(const void* a, const void* b)
             break;
         case T_NullTest:
             retval = _equalNullTest((NullTest*)a, (NullTest*)b);
+            break;
+        case T_SetVariableExpr:
+            retval = _equalSetVariableExpr((SetVariableExpr*)a, (SetVariableExpr*)b);
             break;
         case T_HashFilter:
             retval = _equalHashFilter((HashFilter*)a, (HashFilter*)b);

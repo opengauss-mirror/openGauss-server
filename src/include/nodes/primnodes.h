@@ -1175,6 +1175,18 @@ typedef struct CurrentOfExpr {
     int cursor_param;  /* refcursor parameter number, or 0 */
 } CurrentOfExpr;
 
+/* 
+ * SetVariableExpr used for getting guc variable's value
+ * only support while dbcompability is B and enable_set_variable_b_format is on
+ */
+typedef struct {
+    Expr xpr;
+    char* name;
+    Expr* value;
+    bool is_session;    /* true is session, only used in B compability */
+    bool is_global;     /* true is global, only used in B compability */
+} SetVariableExpr;
+
 /* --------------------
  * TargetEntry -
  *	   a target entry (used in query target lists)

@@ -32,6 +32,9 @@
 #include "utils/syscache.h"
 #include "utils/typcache.h"
 #include "optimizer/clauses.h"
+#include "utils/numeric.h"
+#include "utils/guc.h"
+#include "utils/guc_tables.h"
 #ifdef PGXC
 #include "pgxc/pgxc.h"
 #endif
@@ -58,6 +61,7 @@ static bool check_numeric_type_in_blacklist(Oid type);
 static bool meet_decode_compatibility(List* exprs, const char* context);
 static bool meet_c_format_compatibility(List* exprs, const char* context);
 static bool meet_set_type_compatibility(List* exprs, const char* context, Oid *retOid);
+extern Node* makeAConst(Value* v, int location);
 /*
  * @Description: same as get_element_type() except this reports error
  * when the result is invalid.
@@ -2749,4 +2753,157 @@ void expression_error_callback(void* arg)
     if (colname != NULL && strcmp(colname, "?column?")) {
         errcontext("referenced column: %s", colname);
     }
+}
+ 
+Node *transferConstToAconst(Node *node)
+{
+    Node *result = NULL;
+ 
+    if(!IsA(node, Const)) {
+        ereport(ERROR, 
+            (errcode(ERRCODE_INVALID_OPERATION),
+                errmsg("The variable value expr must be convertible to a constant.")));
+    }
+ 
+    Datum constval = ((Const*)node)->constvalue;
+    Oid consttype = ((Const*)node)->consttype;
+    Value* val = NULL;
+
+    if (((Const*)node)->constisnull) {
+        ereport(ERROR, 
+            (errcode(ERRCODE_INVALID_OPERATION),
+                errmsg("The variable value expr can't be a null value.")));
+    }
+    switch(consttype) {
+        case INT1OID:
+        case INT2OID:
+        case INT4OID:
+        case INT8OID:
+            {
+                int64 val_int64 = DatumGetInt64(constval);
+                val = makeInteger(val_int64);
+            } break;
+        case TEXTOID:
+            {
+                char* constr = TextDatumGetCString(constval);
+                val = makeString(constr);
+            }  break;
+        case FLOAT4OID:
+        case FLOAT8OID:
+            {
+                float8 value = DatumGetFloat8(constval);
+                char *value_str = DatumGetCString(DirectFunctionCall1(float8out, Float8GetDatum(value)));
+                val = makeFloat(value_str);
+            } break;
+        case NUMERICOID:
+            {
+                Numeric value =  DatumGetNumeric(constval);
+                char* str_val = DatumGetCString(DirectFunctionCall1(numeric_out, NumericGetDatum(value)));
+                val = makeFloat(str_val);
+            } break;
+        case BOOLOID:
+            {
+                bool value = DatumGetBool(constval);
+                const char *constr = value ? "t" : "f";
+                val = makeString((char*)constr);
+            } break;
+        case UNKNOWNOID:
+            {
+                Const* con = (Const *)node;
+                Node* expr = coerce_type(NULL,(Node*)con , con->consttype, TEXTOID, -1, COERCION_IMPLICIT, COERCE_IMPLICIT_CAST, -1);
+                char* constr = TextDatumGetCString(((Const*)expr)->constvalue);
+                val = makeString(constr);
+            } break;
+        default:
+            {
+                char* constr = TextDatumGetCString(constval);
+                val = makeString(constr);
+            }  break;
+    }
+ 
+    result = makeAConst(val, -1);
+    return result;
+}
+
+Const* setValueToConstExpr(SetVariableExpr* set)
+{
+    Const* result = NULL;
+    Value* value;
+    Datum val;
+    Oid typid;
+    int typelen;
+    bool typebyval = false;
+
+    struct config_generic* record = NULL;
+    record = find_option(set->name, false, ERROR);
+    char* variable_str = SetVariableExprGetConfigOption(set);
+
+    switch (record->vartype) {
+        case PGC_BOOL:
+            {
+                bool variable_bool = false;
+                if (strcmp(variable_str,"true") || strcmp(variable_str,"on")) {
+                    variable_bool = true;
+                }
+                val = BoolGetDatum(variable_bool);
+                typid = BOOLOID;
+                typelen = 1;
+                typebyval = true;
+            } break;
+        case PGC_INT: 
+            {
+                int variable = (int32)strtol((const char*)variable_str, (char**)NULL,10);
+                value = makeInteger(variable);
+                val = Int64GetDatum(intVal(value));
+                typid = INT8OID;
+                typelen = sizeof(int64);
+                typebyval = true;
+            } break;
+        case PGC_INT64:
+            {
+                int variable = (int64)strtol((const char*)variable_str, (char**)NULL,10);
+                value = makeInteger(variable);
+                val = Int64GetDatum(intVal(value));
+                typid = INT8OID;
+                typelen = sizeof(int64);
+                typebyval = true;
+            } break;
+        case PGC_REAL:
+            {
+                value = makeFloat(variable_str);
+                val = Float8GetDatum(floatVal(value));
+                typid = FLOAT8OID;
+                typelen = sizeof(float8);
+                typebyval = true;
+            } break;
+        case PGC_STRING:
+            {
+                value = makeString(variable_str);
+                val = CStringGetDatum(strVal(value));
+                typid = UNKNOWNOID; /* will be coerced later */
+                typelen = -2;       /* cstring-style varwidth type */
+                typebyval = false;
+            } break;
+        case PGC_ENUM:
+            {
+                value = makeString(variable_str);
+                val = CStringGetDatum(strVal(value));
+                typid = UNKNOWNOID; /* will be coerced later */
+                typelen = -2;       /* cstring-style varwidth type */
+                typebyval = false;
+            } break;
+        default:
+            break;
+    }
+ 
+    result = makeConst(typid,
+        -1,         /* typmod -1 is OK for all cases */
+        InvalidOid, /* all cases are uncollatable types */
+        typelen,
+        val,
+        false,
+        typebyval);
+ 
+    result->location = -1;
+    return result;
 }

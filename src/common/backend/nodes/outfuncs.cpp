@@ -2740,6 +2740,16 @@ static void _outNullTest(StringInfo str, NullTest* node)
     WRITE_BOOL_FIELD(argisrow);
 }
 
+static void _outSetVariableExpr(StringInfo str, SetVariableExpr* node)
+{
+    WRITE_NODE_TYPE("SetVariableExpr");
+    
+    WRITE_STRING_FIELD(name);
+    WRITE_NODE_FIELD(value);
+    WRITE_BOOL_FIELD(is_session);
+    WRITE_BOOL_FIELD(is_global);
+}
+
 static void _outHashFilter(StringInfo str, HashFilter* node)
 {
     WRITE_NODE_TYPE("HASHFILTER");
@@ -5998,6 +6008,9 @@ static void _outNode(StringInfo str, const void* obj)
                 break;
             case T_NullTest:
                 _outNullTest(str, (NullTest*)obj);
+                break;
+            case T_SetVariableExpr:
+                _outSetVariableExpr(str, (SetVariableExpr*)obj);
                 break;
             case T_HashFilter:
                 _outHashFilter(str, (HashFilter*)obj);

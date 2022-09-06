@@ -2362,6 +2362,7 @@ Node *eval_const_expression_value(PlannerInfo* root, Node* node, ParamListInfo b
     context.active_fns = NIL; /* nothing being recursively simplified */
     context.case_val = NULL;  /* no CASE being examined */
     context.estimate = true; /* unsafe transformations OK */
+
     return eval_const_expressions_mutator(node, &context);
 }
 

@@ -73,4 +73,7 @@ extern CoercionPathType find_typmod_coercion_function(Oid typeId, Oid* funcid);
 
 extern void expression_error_callback(void* arg);
 
+extern Node *transferConstToAconst(Node *node);
+
+extern Const* setValueToConstExpr(SetVariableExpr* set);
 #endif /* PARSE_COERCE_H */

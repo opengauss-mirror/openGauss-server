@@ -1,0 +1,211 @@
+
+-- dbcompatibility is A Format
+set codegen_cost_threshold = default;
+set codegen_cost_threshold = 10000;
+
+set @@codegen_cost_threshold = 10000;
+set @@session.codegen_cost_threshold = 10000;
+set @@session.codegen_cost_threshold = default;
+
+select @@session.codegen_cost_threshold;
+select @@session.codegen_cost_threshold  = 1001;
+
+set @@global.dcf_connect_timeout = 6000;
+select  @@global.dcf_connect_timeout;
+
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "enable_set_variable_b_format=on" >/dev/null 2>&1
+\! sleep 1
+
+-- dbcompatibility is B Format
+create database test_set dbcompatibility 'b';
+\c test_set
+
+-- test integer params, e.g. codegen_cost_threshold 
+set codegen_cost_threshold = default;
+set codegen_cost_threshold = 10000;
+set codegen_cost_threshold = 10000 + 1;
+set codegen_cost_threshold = @@session.codegen_cost_threshold + 1;
+set @@codegen_cost_threshold = 10000;
+set @@session.codegen_cost_threshold = 10000;
+set @@session.codegen_cost_threshold = '10000';
+set @@session.codegen_cost_threshold = '10000' + 1;
+set @@session.codegen_cost_threshold = default;
+set @@session.codegen_cost_threshold = 10000*2;
+set @@session.codegen_cost_threshold = @@session.codegen_cost_threshold * 2;
+set @@session.codegen_cost_threshold = abs(1000 + 1);
+set @@session.codegen_cost_threshold = (select abs(1000 + 1));
+
+select @@session.codegen_cost_threshold;
+select @@session.codegen_cost_threshold  = 1001;
+select @@session.codegen_cost_threshold  = 1002;
+select @@session.codegen_cost_threshold * 2;
+select abs(@@session.codegen_cost_threshold) + 1;
+
+set @@global.dcf_connect_timeout = '6000';
+set @@global.dcf_connect_timeout = 6000 + 1;
+set @@global.dcf_connect_timeout = @@global.dcf_connect_timeout * 2;
+set @@global.dcf_connect_timeout = (select 6000 + 1);
+set @@global.dcf_connect_timeout = 6000;
+
+select pg_sleep(1);
+select @@global.dcf_connect_timeout;
+select @@global.dcf_connect_timeout = 6000;
+select @@global.dcf_connect_timeout = 6001;
+select @@global.dcf_connect_timeout * 2;
+select @@global.dcf_connect_timeout + 1;
+select 1 + @@global.dcf_connect_timeout;
+select abs(@@global.dcf_connect_timeout) + 1;
+
+-- fail example
+set @@session.codegen_cost_threshold = 'aaa';
+set dcf_connect_timeout = 6000;
+set @@dcf_connect_timeout = 6000;
+
+-- test bool params, e.g. enable_broadcast
+set enable_broadcast = default;
+set enable_broadcast = (true = true);
+set session enable_broadcast = @@enable_broadcast;
+set @@enable_broadcast = on;
+set @@enable_broadcast = 'on';
+set @@enable_broadcast = off;
+set @@enable_broadcast = true;
+set @@enable_broadcast = 'true';
+set @@enable_broadcast = false;
+set @@enable_broadcast = t;
+set @@enable_broadcast = f;
+set @@enable_broadcast = default;
+set @@session.enable_broadcast = on;
+set @@session.enable_broadcast = default;
+set @@enable_broadcast = (1 = 1);
+set @@enable_broadcast = (true = true);
+set @@enable_broadcast = (true = false);
+
+select @@enable_broadcast;
+select @@session.enable_broadcast;
+select @@session.enable_broadcast = 'true';
+
+set global most_available_sync = t;
+set @@global.most_available_sync = t;
+set @@global.most_available_sync = true;
+set @@global.most_available_sync = 'true';
+set @@global.most_available_sync = false;
+set @@global.most_available_sync = on;
+set @@global.most_available_sync = off;
+
+-- fail example
+set enable_broadcast = 10000;
+set most_available_sync = t;
+set global most_available_sync = default;
+
+-- test string params, e.g. application_name
+set application_name = default;
+set application_name = gsql;
+set application_name = (select 'gsql');
+set session application_name = (select 'gsql');
+set @@application_name = '';
+set @@application_name = default;
+set @@session.application_name = aaa;
+set @@session.application_name = default;
+set @@session.application_name = 'aaa';
+set @@session.application_name = ('aaa' = 'aaa');
+
+select @@application_name;
+select @@session.application_name;
+select (@@session.application_name = 'gsql');
+select char_length(@@application_name);
+select char_length(@@session.application_name);
+
+set @@global.syslog_ident = 'postgres1';
+set global syslog_ident = 'postgres1';
+set global syslog_ident = left('postgres1',8);
+set @@global.syslog_ident = ('postgres1' = 'postgres1');
+set @@global.syslog_ident = 'postgres';
+
+select pg_sleep(1);
+select @@global.syslog_ident;
+select char_length(@@global.syslog_ident);
+select (@@global.syslog_ident = 'postgres1');
+
+-- fail example
+set @@session.application_name = (aaa = aaa);
+set syslog_ident = 'postgres';
+
+-- test enum params, e.g. explain_perf_mode
+set explain_perf_mode = default;
+set explain_perf_mode = normal;
+set explain_perf_mode = @@explain_perf_mode;
+set session explain_perf_mode = (select @@explain_perf_mode);
+set @@explain_perf_mode = normal;
+set @@explain_perf_mode = default;
+set @@session.explain_perf_mode = normal;
+set @@session.explain_perf_mode = default;
+
+select @@session.explain_perf_mode;
+select @@explain_perf_mode;
+select char_length(@@session.explain_perf_mode);
+select @@session.explain_perf_mode = 'normal';
+
+set global trace_recovery_messages = log;
+set @@global.trace_recovery_messages = info;
+set @@global.trace_recovery_messages = log;
+
+select pg_sleep(1);
+select @@global.trace_recovery_messages;
+select char_length(@@global.trace_recovery_messages);
+
+-- fail example
+set @@session.explain_perf_mode = 'aa';
+
+-- test enum params, e.g. explain_perf_mode
+set cpu_index_tuple_cost = default;
+set cpu_index_tuple_cost = 0.006;
+set cpu_index_tuple_cost = 0.006 +1;
+set session cpu_index_tuple_cost = (select @@cpu_index_tuple_cost);
+set @@cpu_index_tuple_cost = 0.006;
+set @@cpu_index_tuple_cost = default;
+set @@session.cpu_index_tuple_cost = 0.006;
+set @@session.cpu_index_tuple_cost = default;
+
+set @@session.cpu_index_tuple_cost = 0.006 +1;
+set @@session.cpu_index_tuple_cost = @@session.cpu_index_tuple_cost;
+set @@session.cpu_index_tuple_cost = @@session.cpu_index_tuple_cost * 2;
+
+select @@session.cpu_index_tuple_cost;
+select @@cpu_index_tuple_cost;
+select @@cpu_index_tuple_cost * 2;
+select abs(@@cpu_index_tuple_cost);
+
+set global checkpoint_completion_target = 0.3;
+set global checkpoint_completion_target = 0.3 * 1;
+set global checkpoint_completion_target = abs(0.3);
+set @@global.checkpoint_completion_target = abs(0.3);
+
+select pg_sleep(1);
+select @@global.checkpoint_completion_target;
+select @@global.checkpoint_completion_target * 2;
+select @@global.checkpoint_completion_target + 1;
+
+-- test expr
+set role = 'root';
+set @@session.codegen_cost_threshold = 20000 / 2;
+set @@session.codegen_cost_threshold = 20000 % 10001;
+
+set @@session.enable_broadcast = (1 < 2);
+set @@session.enable_broadcast = (1 = 2);
+set @@session.enable_broadcast = (1 IS NOT DISTINCT FROM (select 2));
+set @@session.enable_broadcast = (1 IS OF (INT));
+
+set @@session.backwrite_quantity = generate_series(1024,20000);
+create table t1(f1 int);
+insert into t1 values (1024);
+set @@session.backwrite_quantity = (select * from t1);
+insert into t1 values (1025);
+set @@session.backwrite_quantity = (select * from t1);
+
+\c regression
+drop database if exists test_set;
+
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "enable_set_variable_b_format=off" >/dev/null 2>&1
+\! sleep 1
+
+show enable_set_variable_b_format;
