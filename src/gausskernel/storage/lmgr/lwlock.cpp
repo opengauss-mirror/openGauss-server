@@ -188,6 +188,8 @@ static const char *BuiltinTrancheNames[] = {
     "SegmentHeadPartitionLock",
     "TwoPhaseStatePartLock",
     "RoleIdPartLock",
+    "GPRCMappingLock",
+    "StandbyStmtHistLock",
     "PgwrSyncQueueLock",
     "BarrierHashTblLock",
     "PageRepairHashTblLock",
@@ -627,6 +629,15 @@ static void InitializeLWLocks(int numLocks)
     for (id = 0; id < NUM_SESSION_ROLEID_PARTITIONS; id++, lock++) {
         LWLockInitialize(&lock->lock, LWTRANCHE_ROLEID_PARTITION);
     }
+
+    for (id = 0; id < NUM_GPRC_PARTITIONS; id++, lock++) {
+        LWLockInitialize(&lock->lock, LWTRANCHE_GPRC_MAPPING);
+    }
+
+    for (id = 0; id < NUM_STANDBY_STMTHIST_PARTITIONS; id++, lock++) {
+        LWLockInitialize(&lock->lock, LWTRANCHE_STANDBY_STMTHIST);
+    }
+
     Assert((lock - t_thrd.shemem_ptr_cxt.mainLWLockArray) == NumFixedLWLocks);
 
     for (id = NumFixedLWLocks; id < numLocks; id++, lock++) {

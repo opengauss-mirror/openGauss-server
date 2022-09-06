@@ -142,6 +142,9 @@ const struct LWLOCK_PARTITION_DESC LWLockPartInfo[] = {
 #define NUM_GPRC_PARTITIONS 2
 #endif
 
+/* Number of standby statement hsitory needed */
+#define NUM_STANDBY_STMTHIST_PARTITIONS 2
+
 /* 
  * WARNING---Please keep the order of LWLockTrunkOffset and BuiltinTrancheIds consistent!!! 
 */
@@ -183,9 +186,12 @@ const struct LWLOCK_PARTITION_DESC LWLockPartInfo[] = {
 #define FirstTwoPhaseStateLock (FirstSegmentHeadLock + NUM_SEGMENT_HEAD_PARTITIONS)
 /* session roleid */
 #define FirstSessRoleIdLock (FirstTwoPhaseStateLock + NUM_TWOPHASE_PARTITIONS)
+/* autonomous transaction package value */
 #define FirstGPRCMappingLock (FirstSessRoleIdLock + NUM_SESSION_ROLEID_PARTITIONS)
+/* standby statement history */
+#define FirstStandbyStmtHistLock (FirstGPRCMappingLock + NUM_GPRC_PARTITIONS)
 /* must be last: */
-#define NumFixedLWLocks (FirstSessRoleIdLock + NUM_SESSION_ROLEID_PARTITIONS)
+#define NumFixedLWLocks (FirstStandbyStmtHistLock + NUM_STANDBY_STMTHIST_PARTITIONS)
 /*
  * WARNING----Please keep BuiltinTrancheIds and BuiltinTrancheNames consistent!!!
  *
@@ -254,6 +260,8 @@ enum BuiltinTrancheIds
     LWTRANCHE_SEGHEAD_PARTITION,
     LWTRANCHE_TWOPHASE_STATE,
     LWTRANCHE_ROLEID_PARTITION,
+    LWTRANCHE_GPRC_MAPPING,
+    LWTRANCHE_STANDBY_STMTHIST,
     LWTRANCHE_PGWR_SYNC_QUEUE,
     LWTRANCHE_BARRIER_TBL,
     LWTRANCHE_PAGE_REPAIR,
