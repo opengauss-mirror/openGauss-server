@@ -551,7 +551,7 @@ function decompress()
 {
     cd $root_path
     # get OS distributed version.
-    declare -c kernel=""
+    kernel=""
     if [ -f "/etc/euleros-release" ]
     then
         kernel=$(cat /etc/euleros-release | awk -F ' ' '{print $1}' | tr a-z A-Z)
