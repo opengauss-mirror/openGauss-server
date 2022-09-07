@@ -1193,7 +1193,8 @@ void dw_upgrade_single()
     return;
 }
 
-static void HandlePageWriterExit() {
+static void HandlePageWriterExit()
+{
     /* Let the pagewriter sub thread exit, then main pagewriter thread exits */
     if (t_thrd.pagewriter_cxt.shutdown_requested && g_instance.ckpt_cxt_ctl->page_writer_can_exit) {
         g_instance.ckpt_cxt_ctl->page_writer_sub_can_exit = true;
@@ -1215,6 +1216,10 @@ static void HandlePageWriterExit() {
                  * control back to the sigsetjmp block above.
                  */
                 u_sess->attr.attr_common.ExitOnAnyError = true;
+
+                /* release compression ctx */
+                crps_destory_ctxs();
+
                 /* Normal exit from the pagewriter is here */
                 proc_exit(0); /* done */
             }
@@ -1239,28 +1244,6 @@ static void HandlePageWriterMainInterrupts()
         PageWriterSyncWithAbsorption();
         t_thrd.pagewriter_cxt.sync_retry = false;
     }
-
-    /* main thread should finally exit. */
-    while (t_thrd.pagewriter_cxt.shutdown_requested && g_instance.ckpt_cxt_ctl->page_writer_can_exit) {
-        if (pg_atomic_read_u32(&g_instance.ckpt_cxt_ctl->current_page_writer_count) == 1) {
-            ereport(LOG,
-                (errmodule(MOD_INCRE_CKPT),
-                    errmsg("pagewriter thread shut down, id is %d", t_thrd.pagewriter_cxt.pagewriter_id)));
-
-            /*
-             * From here on, elog(ERROR) should end with exit(1), not send
-             * control back to the sigsetjmp block above.
-             */
-            u_sess->attr.attr_common.ExitOnAnyError = true;
-
-            /* release compression ctx */
-            crps_destory_ctxs();
-
-            /* Normal exit from the pagewriter is here */
-            proc_exit(0); /* done */
-        }
-    }
-    return;
 }
 
 static void ckpt_pagewriter_main_thread_loop(void)
@@ -1288,7 +1271,7 @@ static void ckpt_pagewriter_main_thread_loop(void)
 
         candidate_num = get_curr_candidate_nums(CAND_LIST_NORMAL) + get_curr_candidate_nums(CAND_LIST_NVM) +
             get_curr_candidate_nums(CAND_LIST_SEG);
-        if (candidate_num == 0 && !t_thrd.pagewriter_cxt.shutdown_requested) {
+        if (candidate_num == 0) {
             /* wakeup sub thread scan the buffer pool, init the candidate list */
             wakeup_sub_thread();
         }

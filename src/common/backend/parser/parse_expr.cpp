@@ -48,6 +48,8 @@
 #include "utils/plpgsql.h"
 #include "utils/xml.h"
 #include "funcapi.h"
+#include "utils/guc.h"
+#include "utils/guc_tables.h"
 
 extern Node* makeAConst(Value* v, int location);
 extern Value* makeStringValue(char* str);
@@ -80,6 +82,7 @@ static Node* transformWholeRowRef(ParseState* pstate, RangeTblEntry* rte, int lo
 static Node* transformIndirection(ParseState* pstate, Node* basenode, List* indirection);
 static Node* transformTypeCast(ParseState* pstate, TypeCast* tc);
 static Node* transformCollateClause(ParseState* pstate, CollateClause* c);
+static Node* transformSetVariableExpr(SetVariableExpr* set);
 static Node* make_row_comparison_op(ParseState* pstate, List* opname, List* largs, List* rargs, int location);
 static Node* make_row_distinct_op(ParseState* pstate, List* opname, RowExpr* lrow, RowExpr* rrow, int location);
 static Node* convertStarToCRef(RangeTblEntry* rte, char* catname, char* nspname, char* relname, int location);
@@ -315,6 +318,10 @@ Node* transformExpr(ParseState* pstate, Node* expr)
             break;
         case T_PrefixKey:
             result = transformPrefixKey(pstate, (PrefixKey*)expr);
+            break;
+
+        case T_SetVariableExpr:
+            result = transformSetVariableExpr((SetVariableExpr*)expr);
             break;
 
             /*********************************************
@@ -1838,6 +1845,23 @@ static Node* transformCaseExpr(ParseState* pstate, CaseExpr* c)
     newc->location = c->location;
     pstate->p_is_case_when = saved_is_case_when;
     return (Node*)newc;
+}
+
+/*
+* transformSetVariableExpr gets variable's value according to name and saves it in ConstExpr
+*/
+static Node* transformSetVariableExpr(SetVariableExpr* set)
+{
+    SetVariableExpr *result = makeNode(SetVariableExpr);
+    result->name = set->name;
+    result->is_session = set->is_session;
+    result->is_global = set->is_global;
+
+    Const *values = setValueToConstExpr(set);
+
+    result->value = (Expr*)copyObject(values);
+
+    return (Node *)result;
 }
 
 static Node* transformSubLink(ParseState* pstate, SubLink* sublink)

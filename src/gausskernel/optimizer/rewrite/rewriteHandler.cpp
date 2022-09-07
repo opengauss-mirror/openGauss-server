@@ -3351,6 +3351,46 @@ char* GetInsertIntoStmt(CreateTableAsStmt* stmt)
     return cquery->data;
 }
 
+List *query_rewrite_set_stmt(Query *query)
+{
+    List* querytree_list = NIL;
+    VariableSetStmt *stmt;
+
+    if(IsA(query->utilityStmt, AlterSystemStmt)) {
+        AlterSystemStmt* alter_sys_stmt = (AlterSystemStmt*)query->utilityStmt;
+        stmt = alter_sys_stmt->setstmt;
+    } else {
+        stmt = (VariableSetStmt *)query->utilityStmt;
+    }
+
+    if(DB_IS_CMPT(B_FORMAT) && stmt->kind == VAR_SET_VALUE && u_sess->attr.attr_common.enable_set_variable_b_format) {
+        List *resultlist = NIL;
+        ListCell *l = NULL;
+
+        foreach(l, stmt->args) {
+            Node* expr = (Node*)lfirst(l);
+            Node* node = NULL;
+            if(nodeTag(expr) == T_A_Const) {
+                node = expr;
+            } else {
+                node = eval_const_expression_value(NULL, expr, NULL);
+
+                if(nodeTag(node) != T_Const) {
+                    node = QueryRewriteNonConstant(expr);
+                }
+                node = transferConstToAconst(node);
+            }
+            resultlist = lappend(resultlist, (A_Const*)node);
+        }
+        list_free(stmt->args);
+        stmt->args = resultlist;
+    } 
+    
+    querytree_list = list_make1(query);
+    return querytree_list;
+}
+
+
 List *QueryRewriteRefresh(Query *parse_tree)
 {
     RefreshMatViewStmt* stmt = NULL;

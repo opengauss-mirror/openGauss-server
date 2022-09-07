@@ -9289,6 +9289,10 @@ static void get_rule_expr(Node* node, deparse_context* context, bool showimplici
             appendStringInfo(buf, "%s", ((UserVar*)node)->name);
             break;
 
+        case T_SetVariableExpr:
+            get_const_expr((Const*)(((SetVariableExpr*)node)->value), context, 0);
+            break;
+
         case T_Param:
             get_parameter((Param*)node, context);
             break;

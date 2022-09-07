@@ -117,6 +117,7 @@ static Query* transformExplainStmt(ParseState* pstate, ExplainStmt* stmt);
 static Query* transformCreateTableAsStmt(ParseState* pstate, CreateTableAsStmt* stmt);
 static void CheckDeleteRelation(Relation targetrel);
 static void CheckUpdateRelation(Relation targetrel);
+static Query* transformVariableSetValueStmt(ParseState* pstate, VariableSetStmt* stmt, bool is_alter_sys);
 #ifdef PGXC
 static Query* transformExecDirectStmt(ParseState* pstate, ExecDirectStmt* stmt);
 static bool IsExecDirectUtilityStmt(const Node* node);
@@ -446,17 +447,6 @@ Query* transformStmt(ParseState* pstate, Node* parseTree, bool isFirstNode, bool
             result = transformCreateModelStmt(pstate, (CreateModelStmt*) parseTree);
             break;
 
-        case T_VariableSetStmt: {
-            VariableSetStmt* n = (VariableSetStmt*)parseTree;
-            if (n->kind == VAR_SET_DEFINED) {
-                result = transformVariableSetStmt(pstate, n);
-            } else {
-                result = makeNode(Query);
-                result->commandType = CMD_UTILITY;
-                result->utilityStmt = (Node*)parseTree;
-            }
-        } break;
-
         case T_PrepareStmt: {
             PrepareStmt* n = (PrepareStmt *)parseTree;
             if (IsA(n->query, UserVar)) {
@@ -467,6 +457,30 @@ Query* transformStmt(ParseState* pstate, Node* parseTree, bool isFirstNode, bool
             result->commandType = CMD_UTILITY;
             result->utilityStmt = (Node*)parseTree;
         } break;
+
+        case T_AlterSystemStmt:
+        case T_VariableSetStmt: {
+                VariableSetStmt* stmt;
+                bool is_alter_sys = false;
+
+                if (nodeTag(parseTree) == T_AlterSystemStmt) {
+                    AlterSystemStmt* alter_sys_stmt = (AlterSystemStmt*)parseTree;
+                    stmt = alter_sys_stmt->setstmt;
+                    is_alter_sys = true;
+                } else {
+                    stmt = (VariableSetStmt*)parseTree;
+                }
+
+                if (DB_IS_CMPT(B_FORMAT) && u_sess->attr.attr_common.enable_set_variable_b_format && stmt->kind == VAR_SET_VALUE) {
+                    result = transformVariableSetValueStmt(pstate, stmt, is_alter_sys);
+                } else if (stmt->kind == VAR_SET_DEFINED) {
+                    result = transformVariableSetStmt(pstate, stmt);
+                } else {
+                    result = makeNode(Query);
+                    result->commandType = CMD_UTILITY;
+                    result->utilityStmt = (Node*)parseTree;
+                }
+            } break;
 
         default:
 
@@ -2474,6 +2488,48 @@ static Query* transformVariableSetStmt(ParseState* pstate, VariableSetStmt* stmt
 
     query->commandType = CMD_UTILITY;
     query->utilityStmt = (Node*)stmt;
+
+    return query;
+}
+
+/*
+ * transformVariableSetValueStmt - 
+ *    transforms a VariableSetStmt
+ */
+static Query* transformVariableSetValueStmt(ParseState* pstate, VariableSetStmt* stmt, bool is_alter_sys)
+{
+    Query *query = makeNode(Query);
+
+    List *resultlist = NIL;
+    ListCell* l = NULL;
+
+    foreach(l, stmt->args) {
+        Node* expr = (Node*)lfirst(l);
+
+        /* 
+         * The expression will eventually be converted to A_Const, 
+         * so the current A_Const expr does not need to be converted.
+         */
+        Node *node = NULL;
+        if (IsA(expr, A_Const)) {
+            node = expr;
+        } else {
+            node = transformExpr(pstate, expr);
+        }
+
+        resultlist = lappend(resultlist, (Expr *)node);
+    }
+    list_free(stmt->args);
+    stmt->args = resultlist;
+
+    query->commandType = CMD_UTILITY;
+    if (is_alter_sys) {
+        AlterSystemStmt* alter_sys_stmt = makeNode(AlterSystemStmt);
+        alter_sys_stmt->setstmt = stmt;
+        query->utilityStmt = (Node*)alter_sys_stmt;
+    } else {
+        query->utilityStmt = (Node*)stmt;
+    }
 
     return query;
 }

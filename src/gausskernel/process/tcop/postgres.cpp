@@ -72,6 +72,7 @@
 #include "parser/analyze.h"
 #include "parser/parse_hint.h"
 #include "parser/parser.h"
+#include "parser/parse_coerce.h"
 #ifdef PGXC
 #include "parser/parse_type.h"
 #endif /* PGXC */
@@ -1180,6 +1181,8 @@ static List* pg_rewrite_query(Query* query)
             } else {
                 querytree_list = list_make1(query);
             }
+        } else if (IsA(query->utilityStmt, VariableSetStmt) || IsA(query->utilityStmt, AlterSystemStmt)) {
+            querytree_list = query_rewrite_set_stmt(query);
         } else {
             querytree_list = list_make1(query);
         }

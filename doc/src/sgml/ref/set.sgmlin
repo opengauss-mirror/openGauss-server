@@ -18,9 +18,12 @@ SET [ SESSION | LOCAL ]
     {CURRENT_SCHEMA { TO | = } { schema | DEFAULT }
     | SCHEMA 'schema'};
 SET [ SESSION | LOCAL ] XML OPTION { DOCUMENT | CONTENT };
+SET { GLOBAL | @@GLOBAL.}
+    { {config_parameter = { expr | DEFAULT }}};
+SET [ SESSION | @@SESSION. | @@]
+    { {config_parameter = { expr | DEFAULT }}};
 SET @var_name := expr [, @var_name := expr] ...
 SET @var_name = expr [, @var_name = expr] ...
-NOTICE: '@var_name' is only avaiable in CENTRALIZED mode and B-format database, and enable_set_variable_b_format = on.
+NOTICE: '@var_name','{ GLOBAL | @@GLOBAL.}', '[ SESSION | @@SESSION. | @@]' are only avaiable in CENTRALIZED mode and B-format database, and enable_set_variable_b_format = on.
 </synopsis>
 </refsynopsisdiv>
-</refentry>

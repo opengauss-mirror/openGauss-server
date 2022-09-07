@@ -253,6 +253,7 @@ typedef enum NodeTag {
     T_Rownum,
     T_PseudoTargetEntry,
     T_PrefixKey,
+    T_SetVariableExpr,
 
     /*
      * TAGS FOR EXPRESSION STATE NODES (execnodes.h)

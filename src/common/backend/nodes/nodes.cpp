@@ -594,7 +594,8 @@ static const TagStr g_tagStrArr[] = {{T_Invalid, "Invalid"},
     {T_CentroidPoint, "CentroidPoint"},
     {T_AdvanceCatalogXminCmd, "AdvanceCatalogXminCmd"},
     {T_UserSetElem, "UserSetElem"},
-    {T_UserVar, "UserVar"}
+    {T_UserVar, "UserVar"},
+    {T_SetVariableExpr, "SetVariableExpr"}
 };
 
 char* nodeTagToString(NodeTag tag)

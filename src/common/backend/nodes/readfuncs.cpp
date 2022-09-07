@@ -2669,6 +2669,21 @@ static NullTest* _readNullTest(void)
 }
 
 /*
+ * _readSetVariableExpr
+ */
+static SetVariableExpr* _readSetVariableExpr(void)
+{
+    READ_LOCALS(SetVariableExpr);
+
+    READ_NODE_FIELD(value);
+    READ_STRING_FIELD(name);
+    READ_BOOL_FIELD(is_session);
+    READ_BOOL_FIELD(is_global);
+
+    READ_DONE();
+}
+
+/*
  * _readHashFilter
  */
 static HashFilter* _readHashFilter(void)
@@ -5896,6 +5911,8 @@ Node* parseNodeString(void)
         return_value = _readXmlExpr();
     } else if (MATCH("NULLTEST", 8)) {
         return_value = _readNullTest();
+    } else if (MATCH("SETVARIABLEEXPR", 15)) {
+        return_value = _readSetVariableExpr();
     } else if (MATCH("HASHFILTER", 10)) {
         return_value = _readHashFilter();
     } else if (MATCH("BOOLEANTEST", 11)) {
