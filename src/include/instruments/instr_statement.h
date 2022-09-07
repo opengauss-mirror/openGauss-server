@@ -140,16 +140,20 @@ struct StatementDetail {
 };
 
 /* increment this version if more detail is supported. */
-#define STATEMENT_DETAIL_VERSION 1
+#define STATEMENT_DETAIL_VERSION_v1  1
+#define STATEMENT_DETAIL_VERSION 2
 
 /* flag for detail content's integrity, CAUTION: modify is_valid_detail_record() if add new flag */
-#define STATEMENT_DETAIL_NOT_TRUNCATED 0
-#define STATEMENT_DETAIL_TRUNCATED 1
-#define STATEMENT_DETAIL_MISSING_OOM 2
+#define STATEMENT_DETAIL_LOCK_STATUS_LEN 1
+#define STATEMENT_DETAIL_LOCK_NOT_TRUNCATED 0
+#define STATEMENT_DETAIL_LOCK_TRUNCATED 1
+#define STATEMENT_DETAIL_LOCK_MISSING_OOM 2
 
 #define STATEMENT_DETAIL_FORMAT_STRING "plaintext"
 #define STATEMENT_DETAIL_FORMAT_JSON "json"
 #define STATEMENT_DETAIL_TYPE_PRETTY "pretty"
+
+#define Anum_statement_history_finish_time 12
 
 /* entry for full/slow sql stat */
 typedef struct StatementStatContext {
@@ -186,6 +190,10 @@ typedef struct StatementStatContext {
     uint64 plan_size;
     LockSummaryStat lock_summary;
     StatementDetail details;
+
+    /* wait events */
+    WaitEventEntry *wait_events;
+    Bitmapset      *wait_events_bitmap;
 } StatementStatContext;
 extern void StatementFlushMain();
 extern void CleanStatementMain();
@@ -195,7 +203,8 @@ extern bool check_statement_stat_level(char** newval, void** extra, GucSource so
 extern void assign_statement_stat_level(const char* newval, void* extra);
 extern bool check_statement_retention_time(char** newval, void** extra, GucSource source);
 extern void assign_statement_retention_time(const char* newval, void* extra);
-
+extern bool check_standby_statement_chain_size(char** newval, void** extra, GucSource source);
+extern void assign_standby_statement_chain_size(const char* newval, void* extra);
 extern void instr_stmt_report_lock(
     StmtDetailType type, int lockmode = -1, const LOCKTAG *locktag = NULL, uint16 lwlockId = 0);
 
@@ -215,6 +224,10 @@ extern void instr_stmt_report_returned_rows(uint64 returned_rows);
 extern void instr_stmt_report_soft_parse(uint64 soft_parse);
 extern void instr_stmt_report_hard_parse(uint64 hard_parse);
 extern void instr_stmt_dynamic_change_level();
+extern void instr_stmt_set_wait_events_bitmap(uint32 class_id, uint32 event_id);
+extern void instr_stmt_copy_wait_events();
+extern void instr_stmt_diff_wait_events();
+extern void init_full_sql_wait_events();
 
 #endif
 

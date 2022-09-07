@@ -632,6 +632,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  track_stmt_parameter                             | bool    |      |           | 
  track_stmt_retention_time                        | string  |      |           | 
  track_stmt_session_slot                          | integer |      | 0         | 2147483647
+ track_stmt_standby_chain_size                    | string  |      |           | 
  track_stmt_stat_level                            | string  |      |           | 
  track_thread_wait_status_interval                | integer | min  | 0         | 1440
  transaction_deferrable                           | bool    |      |           | 
