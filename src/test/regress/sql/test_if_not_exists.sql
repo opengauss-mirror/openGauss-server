@@ -20,3 +20,7 @@ CREATE SCHEMA sch_name2;
 drop SCHEMA sch_name;
 drop SCHEMA sch_name2;
 
+create user test_user_002 password 'test@1234';
+create schema if not exists test_schema_002 authorization test_user_002;
+drop schema test_schema_002;
+drop user test_user_002;

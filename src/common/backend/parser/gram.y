@@ -1948,6 +1948,20 @@ CreateSchemaStmt:
 					n->hasBlockChain = $7;
 					n->schemaElts = $8;
 					$$ = (Node *)n;
+				}
+			| CREATE SCHEMA IF_P NOT EXISTS OptSchemaName AUTHORIZATION RoleId OptBlockchainWith OptSchemaEltList
+				{
+					CreateSchemaStmt *n = makeNode(CreateSchemaStmt);
+					n->missing_ok = TRUE;
+					/* One can omit the schema name or the authorization id. */
+					if ($6 != NULL)
+						n->schemaname = $6;
+					else
+						n->schemaname = $8;
+					n->authid = $8;
+					n->hasBlockChain = $9;
+					n->schemaElts = $10;
+					$$ = (Node *)n;
 				}                
 		;
 
