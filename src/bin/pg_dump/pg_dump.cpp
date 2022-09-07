@@ -9338,13 +9338,11 @@ void getTableAttrs(Archive* fout, TableInfo* tblinfo, int numTables)
                 attrdefs[j].adnum = adnum;
                 attrdefs[j].generatedCol = *(PQgetvalue(res, j, 4));
                 attrdefs[j].adef_expr = gs_strdup(PQgetvalue(res, j, 3));
-                tbinfo->autoinc_attnum = (strcmp(attrdefs[j].adef_expr, "AUTO_INCREMENT") == 0) ? adnum : 0;
-                if (hasOnUpdateFeature) {
-                    attrdefs[j].adupd_expr = gs_strdup(PQgetvalue(res, j, 5));
-                }
-
                 if (tbinfo->autoinc_attnum == 0) {
                     tbinfo->autoinc_attnum = (strcmp(attrdefs[j].adef_expr, "AUTO_INCREMENT") == 0) ? adnum : 0;
+                }
+                if (hasOnUpdateFeature) {
+                    attrdefs[j].adupd_expr = gs_strdup(PQgetvalue(res, j, 5));
                 }
                 attrdefs[j].dobj.name = gs_strdup(tbinfo->dobj.name);
                 attrdefs[j].dobj.nmspace = tbinfo->dobj.nmspace;

@@ -903,7 +903,7 @@ test: hw_cipher_aes128
 test: hw_pwd_encryption_sm3
 test: rule_test
 test: test_auto_increment
-#test: dump_auto_increment
+test: dump_auto_increment
 
 #delete limit
 test: delete_limit
