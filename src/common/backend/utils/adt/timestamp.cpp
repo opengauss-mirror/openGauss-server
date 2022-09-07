@@ -35,6 +35,7 @@
 #include "utils/builtins.h"
 #include "utils/datetime.h"
 #include "utils/formatting.h"
+#include "common/int.h"
 
 #ifdef PGXC
 #include "pgxc/pgxc.h"
@@ -2600,9 +2601,7 @@ Datum interval_justify_interval(PG_FUNCTION_ARGS)
 #else
     TMODULO(result->time, wholeday, (double)SECS_PER_DAY);
 #endif
-    if (MAX_INT32 - result->day > wholeday) {
-        result->day += wholeday;
-    } else {
+    if (pg_add_s32_overflow(result->day, wholeday, &result->day)) {
         ereport(ERROR, (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE), errmsg("timestamp out of range")));
     }
 

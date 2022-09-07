@@ -122,6 +122,14 @@ SELECT justify_days(interval '6 months 36 days 5 hours 4 minutes 3 seconds') as 
 
 SELECT justify_interval(interval '1 month -1 hour') as "1 month -1 hour";
 
+SELECT justify_interval('5 mon -50 days'::interval);
+SELECT justify_interval('1 mon -47 days'::interval);
+SELECT justify_interval('1 mon -48 days'::interval);
+SELECT justify_interval('1 mon -48 days'::interval);
+select justify_interval('5 mon -2147483648 days'::interval);
+select justify_interval('5 mon -2147483648 days -128 hours'::interval);
+select justify_interval('5 mon -2147483649 days'::interval);
+
 -- test fractional second input, and detection of duplicate units
 SET DATESTYLE = 'ISO';
 SET IntervalStyle TO postgres;
