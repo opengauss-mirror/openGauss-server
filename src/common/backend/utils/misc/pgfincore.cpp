@@ -23,6 +23,7 @@
 #include "catalog/namespace.h"
 #include "catalog/pg_partition_fn.h"
 #include "catalog/pg_partition.h"
+#include "catalog/pg_class.h"
 #include "utils/builtins.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
@@ -679,6 +680,12 @@ Datum pgfadvise_loader(PG_FUNCTION_ARGS)
     text *forkName = PG_GETARG_TEXT_P(1);
     char relType = PG_GETARG_CHAR(2);
     text *partitionName = NULL; 
+    if (PARTTYPE_SUBPARTITIONED_RELATION == relType || 
+        PARTTYPE_PARTITIONED_RELATION == relType) { 
+        if (PG_ARGISNULL(3)) {
+            ereport(ERROR, (errmsg("pgfadvise_loader: partitionName argument shouldn't be NULL if the relation is partition or subpartition")));
+        }
+    }
     if (!PG_ARGISNULL(3)) {
         partitionName = PG_GETARG_TEXT_P(3);
     }
@@ -742,19 +749,28 @@ Datum pgfadvise_loader(PG_FUNCTION_ARGS)
     }
 
     /* we get the relationpath */
-    if(relType == 'p' || relType == 'P') {
+    if (PARTTYPE_SUBPARTITIONED_RELATION == relType || 
+        PARTTYPE_PARTITIONED_RELATION == relType ) {
         ListCell* cell = NULL;
         Partition partition = NULL;
         Relation partRel = NULL;
         List *partitionList = NIL;
-        if (RelationIsSubPartitioned(rel)) {
+
+        if (PARTTYPE_SUBPARTITIONED_RELATION == relType) {
+            if (!RelationIsSubPartitioned(rel)) {
+                ereport(ERROR, (errmsg("The %s isn't subpartition", text_to_cstring(partitionName))));
+            }
             partitionList = RelationGetSubPartitionList(rel, AccessShareLock);
-        } else if (RELATION_IS_PARTITIONED(rel)) {
+        } else if (PARTTYPE_PARTITIONED_RELATION == relType) {
+            if (RelationIsSubPartitioned(rel)) {
+                ereport(ERROR, (errmsg("The %s is subpartition, however the relType is 'p'", text_to_cstring(partitionName))));
+            } else if(!RELATION_IS_PARTITIONED(rel)) {
+                ereport(ERROR, (errmsg("The %s isn't partition", text_to_cstring(partitionName))));
+            }
             partitionList = relationGetPartitionList(rel, AccessShareLock);
-        } else {
-            ereport(ERROR, (errmsg("The relation is not partition")));
         }
-        foreach(cell, partitionList) {
+
+        foreach (cell, partitionList) {
             partition = (Partition)lfirst(cell);
             char* partName = PartitionGetPartitionName(partition);
             if (strcmp(partName,text_to_cstring(partitionName)) != 0) {
@@ -778,10 +794,15 @@ Datum pgfadvise_loader(PG_FUNCTION_ARGS)
                 ereport(ERROR, (errmsg("The partition %s isn't exist", text_to_cstring(partitionName))));    
             }
         }
-    } else if (relType == 'r' || relType == 'R') {
+    } else if (RELKIND_RELATION == relType) {
+        if (RelationIsSubPartitioned(rel)) {
+            ereport(ERROR, (errmsg("The %s is subpartition", text_to_cstring(partitionName))));
+        } else if (RELATION_IS_PARTITIONED(rel)) {
+            ereport(ERROR, (errmsg("The %s is partition", text_to_cstring(partitionName))));    
+        }
         relationpath = relpathpg(rel, forkName);
     } else {
-        ereport(ERROR, (errmsg("The relType must be 'r', 'R', 'p' or 'P'.")));
+        ereport(ERROR, (errmsg("The relType must be 'r', 'p' or 's'")));
     }
 
     /*
