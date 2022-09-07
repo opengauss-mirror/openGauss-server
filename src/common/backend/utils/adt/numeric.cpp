@@ -6160,10 +6160,9 @@ static void ln_var(NumericVar* arg, NumericVar* result, int rscale)
     init_var(&xx);
     init_var(&ni);
     init_var(&elem);
-    init_var(&fact);
 
     init_var_from_var(arg, &x);
-    init_var_from_var(&const_two, &fact);
+    init_ro_var_from_var(&const_two, &fact);
 
     /*
      * Reduce input into range 0.9 < x < 1.1 with repeated sqrt() operations.
