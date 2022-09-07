@@ -1324,7 +1324,8 @@ typedef struct EPQState {
     /*
      * We need its memory context to palloc es_epqTupleSlot if needed
      */
-    EState                  *parentestate;
+    EState *parentestate;
+    ProjectionInfo** projInfos; /* for multiple modifying to fetch slot. */
 } EPQState;
 
 /* ----------------

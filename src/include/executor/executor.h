@@ -237,7 +237,8 @@ extern TupleTableSlot* EvalPlanQualUHeap(EState* estate, EPQState* epqstate, Rel
 extern TupleTableSlot *EvalPlanQualUSlot(EPQState *epqstate, Relation relation, Index rti);
 extern HeapTuple EvalPlanQualFetch(
     EState* estate, Relation relation, int lockmode, ItemPointer tid, TransactionId priorXmax);
-extern void EvalPlanQualInit(EPQState* epqstate, EState* estate, Plan* subplan, List* auxrowmarks, int epqParam);
+extern void EvalPlanQualInit(EPQState* epqstate, EState* estate, Plan* subplan, List* auxrowmarks, int epqParam,
+    ProjectionInfo** projInfos = NULL);
 extern void EvalPlanQualSetPlan(EPQState* epqstate, Plan* subplan, List* auxrowmarks);
 extern void EvalPlanQualSetTuple(EPQState* epqstate, Index rti, Tuple tuple);
 extern Tuple EvalPlanQualGetTuple(EPQState* epqstate, Index rti);
@@ -257,6 +258,7 @@ extern TupleTableSlot* ExecProcNode(PlanState* node);
 extern Node* MultiExecProcNode(PlanState* node);
 extern void ExecEndNode(PlanState* node);
 extern bool NeedStubExecution(Plan* plan);
+extern TupleTableSlot* FetchPlanSlot(PlanState* subPlanState, ProjectionInfo** projInfos);
 
 extern long ExecGetPlanMemCost(Plan* node);
 
