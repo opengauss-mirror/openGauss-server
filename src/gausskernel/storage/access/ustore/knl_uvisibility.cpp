@@ -172,7 +172,7 @@ static TransactionId UHeapTupleGetModifiedXid(UHeapTuple tup)
  * Notes: Assumes uheap tuple is valid, and buffer at least share locked.
  *
  */
-bool UHeapTupleSatisfiesVisibility(UHeapTuple uhtup, Snapshot snapshot, Buffer buffer)
+bool UHeapTupleSatisfiesVisibility(UHeapTuple uhtup, Snapshot snapshot, Buffer buffer, TransactionId *tdXmin)
 {
     Assert(uhtup != NULL);
     if (snapshot->satisfies == SNAPSHOT_DIRTY) {
@@ -348,6 +348,9 @@ bool UHeapTupleSatisfiesVisibility(UHeapTuple uhtup, Snapshot snapshot, Buffer b
                 snapshot->satisfies, snapshot->xmin)));
         }
         uheapselect = UHeapCheckCID(op, tdinfo.cid, snapshot->curcid);
+    }
+    if (tdXmin != NULL) {
+        *tdXmin = tdinfo.xid;
     }
     if (uheapselect == UVERSION_OLDER || uheapselect == UVERSION_NONE) {
         return false;
@@ -2390,10 +2393,13 @@ void UHeapTupleCheckVisible(Snapshot snapshot, UHeapTuple tuple, Buffer buffer)
     if (!IsolationUsesXactSnapshot())
         return;
     LockBuffer(buffer, BUFFER_LOCK_SHARE);
-    if (!UHeapTupleSatisfiesVisibility(tuple, snapshot, buffer)) {
-        LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
-        ereport(ERROR, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
-            errmsg("could not serialize access due to concurrent update")));
+    TransactionId tdXmin = InvalidTransactionId;
+    if (!UHeapTupleSatisfiesVisibility(tuple, snapshot, buffer, &tdXmin)) {
+        if (!TransactionIdIsCurrentTransactionId(tdXmin)) {
+            LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
+            ereport(ERROR, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+                errmsg("could not serialize access due to concurrent update")));
+        }
     }
     LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
 }
