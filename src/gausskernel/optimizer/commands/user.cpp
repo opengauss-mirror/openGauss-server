@@ -1233,7 +1233,7 @@ void CreateRole(CreateRoleStmt* stmt)
         int pwd_type = PASSWORD_TYPE_PLAINTEXT;
         if (isMD5(password)) {
             pwd_type = PASSWORD_TYPE_MD5;
-        } else if (!isSHA256(password)) {
+        } else if (isSHA256(password)) {
             pwd_type = PASSWORD_TYPE_SHA256;
         }
 
@@ -2521,7 +2521,7 @@ void AlterRole(AlterRoleStmt* stmt)
         int pwd_type = PASSWORD_TYPE_PLAINTEXT;
         if (isMD5(password)) {
             pwd_type = PASSWORD_TYPE_MD5;
-        } else if (!isSHA256(password)) {
+        } else if (isSHA256(password)) {
             pwd_type = PASSWORD_TYPE_SHA256;
         }
 
