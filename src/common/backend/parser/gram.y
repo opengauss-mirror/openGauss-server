@@ -19653,10 +19653,62 @@ InsertStmt: opt_with_clause INSERT hint_string INTO insert_target insert_rest re
 				$6->relation = $5;
 				$6->returningList = $7;
 				$6->withClause = $1;
+				$6->isReplace = false;
 				$6->hintState = create_hintstate($3);
 				$6->hasIgnore = ($6->hintState != NULL && $6->hintState->sql_ignore_hint && DB_IS_CMPT(B_FORMAT));
 				$$ = (Node *) $6;
 			}
+            | REPLACE hint_string INTO insert_target insert_rest returning_clause
+            {
+#ifndef ENABLE_MULTIPLE_NODES
+                if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
+                {
+                    $5->relation = $4;
+                    $5->returningList = $6;
+                    $5->hintState = create_hintstate($2);
+                    $5->isReplace = true;
+                    $$ = (Node *) $5;
+                }
+                else
+#endif
+                {
+                    const char* message = "REPLACE INTO syntax is not supported.";
+                    InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+                    ereport(errstate,
+                            (errmodule(MOD_PARSER),
+                            errcode(ERRCODE_SYNTAX_ERROR),
+                            errmsg("REPLACE INTO syntax is not supported."),
+                            parser_errposition(@1)));
+                    $$ = NULL;/* not reached */
+                }
+
+            }
+            | REPLACE hint_string INTO insert_target SET set_clause_list
+            {
+#ifndef ENABLE_MULTIPLE_NODES
+                if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
+                {
+                     InsertStmt* n = makeNode(InsertStmt);
+                     n->relation = $4;
+                     n->targetList = $6;
+                     n->hintState = create_hintstate($2);
+                     n->isReplace = true;
+                     $$ = (Node*)n;
+                }
+                else
+#endif
+                {
+                    const char* message = "REPLACE INTO syntax is not supported.";
+                    InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+                    ereport(errstate,
+                            (errmodule(MOD_PARSER),
+                            errcode(ERRCODE_SYNTAX_ERROR),
+                            errmsg("REPLACE INTO syntax is not supported."),
+                            parser_errposition(@1)));
+                    $$ = NULL;/* not reached */
+                }
+
+            }
 			| opt_with_clause INSERT hint_string INTO insert_target insert_rest upsert_clause returning_clause
 				{
 					if ($8 != NIL) {
@@ -19708,6 +19760,7 @@ InsertStmt: opt_with_clause INSERT hint_string INTO insert_target insert_rest re
 						/* for UPSERT, keep the INSERT statement as well */
 						$6->relation = $5;
 						$6->returningList = $8;
+						$6->isReplace = false;
 						$6->withClause = $1;
 						$6->hintState = create_hintstate($3);
 						$6->hasIgnore = ($6->hintState != NULL && $6->hintState->sql_ignore_hint && DB_IS_CMPT(B_FORMAT));
@@ -19752,7 +19805,8 @@ InsertStmt: opt_with_clause INSERT hint_string INTO insert_target insert_rest re
 						$6->returningList = $8;
 						$6->withClause = $1;
 						$6->upsertClause = (UpsertClause *)$7;
-						$6->hintState = create_hintstate($3);
+						$6->isReplace = false;
+						$6->hintState = create_hintstate($3);   
 						$6->hasIgnore = ($6->hintState != NULL && $6->hintState->sql_ignore_hint && DB_IS_CMPT(B_FORMAT));
 						$$ = (Node *) $6;
 					}

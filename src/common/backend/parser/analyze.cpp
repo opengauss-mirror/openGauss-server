@@ -1567,6 +1567,32 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
     /* set io state for backend status for the thread, we will use it to check user space */
     pgstat_set_io_state(IOSTATE_WRITE);
 
+    qry->isReplace = stmt->isReplace;
+    if (stmt->isReplace) {
+        targetPerms |= ACL_DELETE;
+        /* transform set clause in REPLACE INTO stmt */
+        if (selectStmt == NULL && stmt->cols == NULL && stmt->targetList != NULL) {
+            stmt->selectStmt = (Node *)makeNode(SelectStmt);
+            selectStmt = (SelectStmt *)stmt->selectStmt;
+            ListCell* o_target = NULL;
+            List *ctext_expr_list = NULL;
+            
+            foreach (o_target, stmt->targetList) {
+                ResTarget* res = (ResTarget*)lfirst(o_target);
+
+                ctext_expr_list = lappend(ctext_expr_list, res->val);
+            }
+            selectStmt->valuesLists = list_make1(ctext_expr_list);
+
+            stmt->cols = (List *)copyObject(stmt->targetList);
+            foreach (o_target, stmt->cols) {
+                ResTarget* res = (ResTarget*)lfirst(o_target);
+                res->val = NULL;
+            }
+
+        }
+    }
+
     /*
      * Insert into relation pg_auth_history is not allowed.
      * We update it only when some user's password has been changed.

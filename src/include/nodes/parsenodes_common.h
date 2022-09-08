@@ -454,7 +454,9 @@ typedef struct InsertStmt {
     WithClause *withClause;     /* WITH clause */
     UpsertClause *upsertClause; /* DUPLICATE KEY UPDATE clause */
     HintState *hintState;
-    bool isRewritten;           /* is this Stmt created by rewritter or end user? */
+    bool isReplace;
+    List *targetList;
+    bool isRewritten;           /* is this Stmt created by rewritter or end user? */  
     bool hasIgnore;             /* is this Stmt containing ignore keyword? */
 } InsertStmt;
 
@@ -1960,7 +1962,7 @@ typedef struct Query {
     List* mergeActionList; /* list of actions for MERGE (only) */
     Query* upsertQuery;    /* insert query for INSERT ON DUPLICATE KEY UPDATE (only) */
     UpsertExpr* upsertClause; /* DUPLICATE KEY UPDATE [NOTHING | ...] */
-
+    bool isReplace;
     bool isRowTriggerShippable; /* true if all row triggers are shippable. */
     bool use_star_targets;      /* true if use * for targetlist. */
 

@@ -3996,6 +3996,9 @@ static ModifyTable* _readModifyTable(ModifyTable* local_node)
     READ_NODE_FIELD(rowMarks);
     READ_INT_FIELD(epqParam);
     READ_BOOL_FIELD(partKeyUpdated);
+    if (t_thrd.proc->workingVersionNum >= REPLACE_INTO_VERSION_NUM) {
+        READ_BOOL_FIELD(isReplace);
+    }
 #ifdef PGXC
     READ_NODE_FIELD(remote_plans);
     READ_NODE_FIELD(remote_insert_plans);

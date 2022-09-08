@@ -313,12 +313,17 @@ static void ProcessQuery(
                     lastOid = queryDesc->estate->es_lastoid;
                 else
                     lastOid = InvalidOid;
-                ret = snprintf_s(completionTag,
-                    COMPLETION_TAG_BUFSIZE,
-                    COMPLETION_TAG_BUFSIZE - 1,
-                    "INSERT %u %lu",
-                    lastOid,
-                    queryDesc->estate->es_processed);
+                if (((ModifyTableState*)queryDesc->planstate)->isReplace) {
+                    ret = snprintf_s(completionTag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1,
+                    "REPLACE %u %lu", lastOid, queryDesc->estate->es_processed);
+                } else {
+                    ret = snprintf_s(completionTag,
+                        COMPLETION_TAG_BUFSIZE,
+                        COMPLETION_TAG_BUFSIZE - 1,
+                        "INSERT %u %lu",
+                        lastOid,
+                        queryDesc->estate->es_processed);
+                }
                 securec_check_ss(ret, "\0", "\0");
                 break;
             case CMD_UPDATE:

@@ -773,6 +773,9 @@ static void _outModifyTable(StringInfo str, ModifyTable* node)
     WRITE_NODE_FIELD(rowMarks);
     WRITE_INT_FIELD(epqParam);
     WRITE_BOOL_FIELD(partKeyUpdated);
+    if (t_thrd.proc->workingVersionNum >= REPLACE_INTO_VERSION_NUM) {
+        WRITE_BOOL_FIELD(isReplace);
+    }
 #ifdef PGXC
     WRITE_NODE_FIELD(remote_plans);
     WRITE_NODE_FIELD(remote_insert_plans);
@@ -3693,6 +3696,9 @@ static void _outInsertStmt(StringInfo str, InsertStmt* node)
     WRITE_NODE_FIELD(selectStmt);
     WRITE_NODE_FIELD(returningList);
     WRITE_NODE_FIELD(withClause);
+    if (t_thrd.proc->workingVersionNum >= REPLACE_INTO_VERSION_NUM) {
+        WRITE_NODE_FIELD(targetList);
+    }
 #ifdef ENABLE_MULTIPLE_NODES
     if (t_thrd.proc->workingVersionNum >= UPSERT_ROW_STORE_VERSION_NUM) {
         WRITE_NODE_FIELD(upsertClause);

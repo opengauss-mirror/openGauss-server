@@ -1377,6 +1377,8 @@ typedef struct ModifyTableState {
     CmdType operation;    /* INSERT, UPDATE, or DELETE */
     bool canSetTag;       /* do we set the command tag/es_processed? */
     bool mt_done;         /* are we done? */
+    bool isReplace;
+    bool isConflict;
     PlanState** mt_plans; /* subplans (one per target rel) */
 #ifdef PGXC
     PlanState** mt_remoterels;        /* per-target remote query node */
