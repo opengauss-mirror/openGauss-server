@@ -2132,6 +2132,11 @@ static bool _equalCreateTrigStmt(const CreateTrigStmt* a, const CreateTrigStmt* 
     COMPARE_SCALAR_FIELD(deferrable);
     COMPARE_SCALAR_FIELD(initdeferred);
     COMPARE_NODE_FIELD(constrrel);
+    COMPARE_NODE_FIELD(funcSource);
+    COMPARE_STRING_FIELD(definer);
+    COMPARE_SCALAR_FIELD(if_not_exists);
+    COMPARE_STRING_FIELD(trgordername);
+    COMPARE_SCALAR_FIELD(is_follows);
 
     return true;
 }

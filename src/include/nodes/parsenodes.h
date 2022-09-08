@@ -1037,7 +1037,13 @@ typedef struct CreateTrigStmt {
     bool deferrable;     /* [NOT] DEFERRABLE */
     bool initdeferred;   /* INITIALLY {DEFERRED|IMMEDIATE} */
     RangeVar* constrrel; /* opposite relation, if RI trigger */
+    FunctionSources* funcSource; /*mysql compatibility function body in begin... end */
+    char* definer;       /*mysql compatibility define user */
+    char* trgordername; /* mysql compatibility trigger order {follows|precedes}*/
+    bool is_follows; 
+    bool if_not_exists;
 } CreateTrigStmt;
+
 
 /* ----------------------
  *		Create PROCEDURAL LANGUAGE Statements

@@ -139,6 +139,12 @@ typedef struct PrivTarget
 	List	   *objs;
 } PrivTarget;
 
+typedef struct TrgCharacter {
+	bool is_follows;
+	char* trigger_name;
+} TrgCharacter;
+
+
 /* ConstraintAttributeSpec yields an integer bitmask of these flags: */
 #define CAS_NOT_DEFERRABLE			0x01
 #define CAS_DEFERRABLE				0x02
@@ -302,6 +308,7 @@ static int errstate;
 	A_Indices			*aind;
 	ResTarget			*target;
 	struct PrivTarget	*privtarget;
+	struct TrgCharacter *trgcharacter;
 	AccessPriv			*accesspriv;
 	DbPriv				*dbpriv;
 	InsertStmt			*istmt;
@@ -777,7 +784,7 @@ static int errstate;
 %type <list>    load_column_expr_list copy_column_sequence_list copy_column_filler_list copy_column_constant_list 
 %type <typnam>  load_col_data_type
 %type <ival64>  load_col_sequence_item_sart column_sequence_item_step column_sequence_item_sart
-
+%type <trgcharacter> trigger_order
 /*
  * Non-keyword token types.  These are hard-wired into the "flex" lexer.
  * They must be listed first so that their numeric codes do not depend on
@@ -828,7 +835,7 @@ static int errstate;
 	EXCLUDE EXCLUDED EXCLUDING EXCLUSIVE EXECUTE EXISTS EXPIRED_P EXPLAIN
 	EXTENSION EXTERNAL EXTRACT
 
-	FALSE_P FAMILY FAST FENCED FETCH FIELDS FILEHEADER_P FILL_MISSING_FIELDS FILLER FILTER FIRST_P FIXED_P FLOAT_P FOLLOWING FOR FORCE FOREIGN FORMATTER FORWARD
+	FALSE_P FAMILY FAST FENCED FETCH FIELDS FILEHEADER_P FILL_MISSING_FIELDS FILLER FILTER FIRST_P FIXED_P FLOAT_P FOLLOWING FOLLOWS_P FOR FORCE FOREIGN FORMATTER FORWARD
 	FEATURES // DB4AI
 	FREEZE FROM FULL FUNCTION FUNCTIONS
 
@@ -865,7 +872,7 @@ static int errstate;
 /* PGXC_BEGIN */
 	PREFERRED PREFIX PRESERVE PREPARE PREPARED PRIMARY
 /* PGXC_END */
-	PRIVATE PRIOR PRIORER PRIVILEGES PRIVILEGE PROCEDURAL PROCEDURE PROFILE PUBLICATION PUBLISH PURGE
+	PRECEDES_P PRIVATE PRIOR PRIORER PRIVILEGES PRIVILEGE PROCEDURAL PROCEDURE PROFILE PUBLICATION PUBLISH PURGE
 
 	QUERY QUOTE
 
@@ -6576,6 +6583,7 @@ columnOptions:	ColId WithOptions ColQualList
 WithOptions:
 			WITH OPTIONS							{$$ = NIL; }
 			| /*EMPTY*/								{$$ = NIL; }
+		;
 
 ColQualList:
 			ColQualList ColConstraint				{ $$ = lappend($1, $2); }
@@ -10599,24 +10607,37 @@ DropDataSourceStmt: DROP DATA_P SOURCE_P name opt_drop_behavior
  *****************************************************************************/
 
 CreateTrigStmt:
-			CREATE TRIGGER name TriggerActionTime TriggerEvents ON
+			CREATE opt_or_replace definer_user TRIGGER name TriggerActionTime TriggerEvents ON
 			qualified_name TriggerForSpec TriggerWhen
 			EXECUTE PROCEDURE func_name '(' TriggerFuncArgs ')'
 				{
+					if ($2 != false)
+					{
+						parser_yyerror("syntax error found");
+					}
+					if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT && $3 != NULL)
+					{
+						parser_yyerror("only support definer in mysql compatibility database");
+					}
 					CreateTrigStmt *n = makeNode(CreateTrigStmt);
-					n->trigname = $3;
-					n->relation = $7;
-					n->funcname = $12;
-					n->args = $14;
-					n->row = $8;
-					n->timing = $4;
-					n->events = intVal(linitial($5));
-					n->columns = (List *) lsecond($5);
-					n->whenClause = $9;
+					n->definer = $3;
+					n->if_not_exists = false;
+					n->trigname = $5;
+					n->relation = $9;
+					n->funcname = $14;
+					n->args = $16;
+					n->row = $10;
+					n->timing = $6;
+					n->events = intVal(linitial($7));
+					n->columns = (List *) lsecond($7);
+					n->whenClause = $11;
 					n->isconstraint  = FALSE;
 					n->deferrable	 = FALSE;
 					n->initdeferred  = FALSE;
 					n->constrrel = NULL;
+					n->funcSource = NULL;
+					n->trgordername = NULL;
+					n->is_follows = NULL;
 					$$ = (Node *)n;
 				}
 			| CREATE CONSTRAINT TRIGGER name AFTER TriggerEvents ON
@@ -10626,6 +10647,8 @@ CreateTrigStmt:
 				{
 					CreateTrigStmt *n = makeNode(CreateTrigStmt);
 					n->trigname = $4;
+					n->definer = NULL;
+					n->if_not_exists  = false;
 					n->relation = $8;
 					n->funcname = $17;
 					n->args = $19;
@@ -10639,9 +10662,88 @@ CreateTrigStmt:
 								   &n->deferrable, &n->initdeferred, NULL,
 								   NULL, yyscanner);
 					n->constrrel = $9;
+					n->funcSource = NULL;
+					n->trgordername = NULL;
+					n->is_follows = NULL;
 					$$ = (Node *)n;
 				}
-		;
+			| CREATE opt_or_replace definer_user TRIGGER name TriggerActionTime TriggerEvents ON
+			qualified_name TriggerForSpec TriggerWhen
+			trigger_order
+			{
+				u_sess->parser_cxt.eaten_declare = false;
+				u_sess->parser_cxt.eaten_begin = false;
+				pg_yyget_extra(yyscanner)->core_yy_extra.include_ora_comment = true;
+				u_sess->parser_cxt.isCreateFuncOrProc = true;
+			} subprogram_body
+				{
+					if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT || $2 != false)
+					{
+						parser_yyerror("only support definer, trigger_order, subprogram_body in mysql compatibility database");
+					}
+					CreateTrigStmt *n = makeNode(CreateTrigStmt);
+					if ($2 != false)
+					{
+						parser_yyerror("syntax error found");
+					}
+					n->definer = $3;
+					n->if_not_exists = false;
+					n->trigname = $5;
+					n->timing = $6;
+					n->events = intVal(linitial($7));
+					n->columns = (List *) lsecond($7);
+					n->relation = $9;
+					n->row = $10;
+					n->whenClause = $11;
+					n->trgordername = $12->trigger_name;
+					n->is_follows = $12->is_follows;
+					FunctionSources *funSource = (FunctionSources *)$14;
+					n->funcSource = funSource;
+					n->isconstraint  = FALSE;
+					n->deferrable	 = FALSE;
+					n->initdeferred  = FALSE;
+					n->constrrel = NULL;
+					$$ = (Node *)n;
+				}
+			| CREATE opt_or_replace definer_user TRIGGER IF_P NOT EXISTS name TriggerActionTime TriggerEvents ON
+			qualified_name TriggerForSpec TriggerWhen
+			trigger_order
+			{
+				u_sess->parser_cxt.eaten_declare = false;
+				u_sess->parser_cxt.eaten_begin = false;
+				pg_yyget_extra(yyscanner)->core_yy_extra.include_ora_comment = true;
+				u_sess->parser_cxt.isCreateFuncOrProc = true;
+			} subprogram_body
+				{
+					if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT)
+					{
+						parser_yyerror("only support definer, if not exists, trigger_order, subprogram_body in mysql compatibility database");
+					}
+					CreateTrigStmt *n = makeNode(CreateTrigStmt);
+					if ($2 != false)
+					{
+						parser_yyerror("syntax error");
+					}
+					n->definer = $3;
+					n->if_not_exists = true;
+					n->trigname = $8;
+					n->timing = $9;
+					n->events = intVal(linitial($10));
+					n->columns = (List *) lsecond($10);
+					n->relation = $12;
+					n->row = $13;
+					n->whenClause = $14;
+					n->trgordername = $15->trigger_name;
+					n->is_follows = $15->is_follows;
+					FunctionSources *funSource = (FunctionSources *)$17;
+					n->funcSource = funSource;
+					n->isconstraint  = FALSE;
+					n->deferrable	 = FALSE;
+					n->initdeferred  = FALSE;
+					n->constrrel = NULL;
+					$$ = (Node *)n;
+				}
+			;
 
 TriggerActionTime:
 			BEFORE								{ $$ = TRIGGER_TYPE_BEFORE; }
@@ -10732,6 +10834,30 @@ TriggerFuncArg:
 			| FCONST								{ $$ = makeString($1); }
 			| Sconst								{ $$ = makeString($1); }
 			| ColLabel								{ $$ = makeString($1); }
+		;
+
+trigger_order:
+			/* NULL */
+			{
+				TrgCharacter *n = (TrgCharacter *)palloc(sizeof(TrgCharacter));
+				n->is_follows = false;
+				n->trigger_name = NULL;
+				$$ = n;
+			}
+			| FOLLOWS_P ColId
+			{
+				TrgCharacter *n = (TrgCharacter *)palloc(sizeof(TrgCharacter));
+				n->is_follows = true;
+				n->trigger_name = $2;
+				$$ = n;
+			}
+			| PRECEDES_P ColId
+			{
+				TrgCharacter *n = (TrgCharacter *)palloc(sizeof(TrgCharacter));
+				n->is_follows = false;
+				n->trigger_name = $2;
+				$$ = n;
+			}
 		;
 
 OptConstrFromTable:
@@ -25670,6 +25796,7 @@ unreserved_keyword:
 			| FIRST_P
 			| FIXED_P
 			| FOLLOWING
+			| FOLLOWS_P
 			| FORCE
 			| FORMATTER
 			| FORWARD
@@ -25796,6 +25923,7 @@ unreserved_keyword:
 			| PLANS
 			| POLICY
 			| POOL
+			| PRECEDES_P
 			| PRECEDING
 			| PREDICT   // DB4AI
 /* PGXC_BEGIN */
@@ -25806,7 +25934,7 @@ unreserved_keyword:
 			| PREPARED
 			| PRESERVE
 			| PRIOR
-                        | PRIVATE
+			| PRIVATE
 			| PRIVILEGE
 			| PRIVILEGES
 			| PROCEDURAL
