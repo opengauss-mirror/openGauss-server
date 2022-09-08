@@ -463,7 +463,7 @@ typedef struct TableAmRoutine {
         bool allow_inplace_update);
 
     TM_Result (*tuple_lock)(Relation relation, Tuple tuple, Buffer *buffer, CommandId cid, LockTupleMode mode,
-        bool nowait, TM_FailureData *tmfd, bool allow_lock_self, bool follow_updates, bool eval, Snapshot snapshot,
+        LockWaitPolicy waitPolic, TM_FailureData *tmfd, bool allow_lock_self, bool follow_updates, bool eval, Snapshot snapshot,
         ItemPointer tid, bool isSelectForUpdate, bool isUpsert, TransactionId conflictXid,
         int waitSec);
 
@@ -595,7 +595,7 @@ extern TM_Result tableam_tuple_update(Relation relation, Relation parentRelation
     bool *update_indexes, Bitmapset **modifiedIdxAttrs, bool allow_update_self = false,
     bool allow_inplace_update = true, LockTupleMode *lockmode = NULL);
 extern TM_Result tableam_tuple_lock(Relation relation, Tuple tuple, Buffer *buffer, CommandId cid,
-    LockTupleMode mode, bool nowait, TM_FailureData *tmfd, bool allow_lock_self, bool follow_updates, bool eval,
+    LockTupleMode mode, LockWaitPolicy waitPolicy, TM_FailureData *tmfd, bool allow_lock_self, bool follow_updates, bool eval,
     Snapshot snapshot, ItemPointer tid, bool isSelectForUpdate, bool isUpsert = false, 
     TransactionId conflictXid = InvalidTransactionId, int waitSec = 0);
 extern Tuple tableam_tuple_lock_updated(CommandId cid, Relation relation, int lockmode, ItemPointer tid,

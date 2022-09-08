@@ -34,6 +34,7 @@
 #include "nodes/value.h"
 #include "catalog/pg_attribute.h"
 #include "access/tupdesc.h"
+#include "storage/lock/waitpolicy.h"
 #include "client_logic/client_logic_enums.h"
 
 /* Sort ordering options for ORDER BY and CREATE INDEX */
@@ -1673,7 +1674,7 @@ typedef struct LockingClause {
     NodeTag type;
     List *lockedRels; /* FOR [KEY] UPDATE/SHARE relations */
     bool forUpdate;   /* for compatibility, we reserve this field but don't use it */
-    bool noWait;      /* NOWAIT option */
+    LockWaitPolicy waitPolicy;	/* NOWAIT and SKIP LOCKED */
     LockClauseStrength strength;
     int waitSec;      /* WAIT time Sec */
 } LockingClause;

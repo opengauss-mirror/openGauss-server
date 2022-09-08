@@ -587,7 +587,7 @@ static bool ExecConflictUpdate(ModifyTableState* mtstate, ResultRelInfo* resultR
     ItemPointer conflictTid = &conflictInfo->conflictTid;
     Tuple tuple = tableam_tops_new_tuple(targetRel, conflictTid);
     test = tableam_tuple_lock(relation, tuple, &buffer,
-                              estate->es_output_cid, LockTupleExclusive, false, &tmfd,
+                              estate->es_output_cid, LockTupleExclusive, LockWaitBlock, &tmfd,
                               false, false, false, GetActiveSnapshot(), &conflictInfo->conflictTid, 
                               false, true, conflictInfo->conflictXid);
 
@@ -631,7 +631,7 @@ checktest:
             }
 #endif
             test = tableam_tuple_lock(relation, tuple, &buffer,
-                                      estate->es_output_cid, LockTupleExclusive, false, &tmfd, 
+                                      estate->es_output_cid, LockTupleExclusive, LockWaitBlock, &tmfd, 
                                       true, false, false, estate->es_snapshot, &conflictInfo->conflictTid, 
                                       false, true, conflictInfo->conflictXid);
 

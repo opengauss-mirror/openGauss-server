@@ -79,6 +79,7 @@
 #include "parser/parser.h"
 #include "storage/lmgr.h"
 #include "storage/tcap.h"
+#include "storage/lock/waitpolicy.h"
 #include "utils/builtins.h"
 #include "utils/date.h"
 #include "utils/datetime.h"
@@ -416,6 +417,7 @@ static int errstate;
 %type <boolean>	opt_check opt_force opt_or_replace
 				opt_grant_grant_option opt_grant_admin_option
 				opt_nowait opt_if_exists opt_with_data opt_large_seq opt_cancelable
+%type <ival>	opt_nowait_or_skip
 
 %type <list>	OptRoleList AlterOptRoleList
 %type <defelt>	CreateOptRoleElem AlterOptRoleElem
@@ -855,7 +857,7 @@ static int errstate;
 
 	LABEL LANGUAGE LARGE_P LAST_P LC_COLLATE_P LC_CTYPE_P LEADING LEAKPROOF
 	LEAST LESS LEFT LEVEL LIKE LIMIT LIST LISTEN LOAD LOCAL LOCALTIME LOCALTIMESTAMP
-	LOCATION LOCK_P LOG_P LOGGING LOGIN_ANY LOGIN_FAILURE LOGIN_SUCCESS LOGOUT LOOP
+	LOCATION LOCK_P LOCKED LOG_P LOGGING LOGIN_ANY LOGIN_FAILURE LOGIN_SUCCESS LOGOUT LOOP
 	MAPPING MASKING MASTER MATCH MATERIALIZED MATCHED MAXEXTENTS MAXSIZE MAXTRANS MAXVALUE MERGE MINUS_P MINUTE_P MINVALUE MINEXTENTS MODE MODIFY_P MONTH_P MOVE MOVEMENT
 	MODEL // DB4AI
 	NAME_P NAMES NATIONAL NATURAL NCHAR NEXT NO NOCOMPRESS NOCYCLE NODE NOLOGGING NOMAXVALUE NOMINVALUE NONE
@@ -20179,6 +20181,10 @@ opt_cancelable: CANCELABLE                                              { $$ = T
                 ;
 
 opt_wait:	WAIT Iconst						{ $$ = $2; }
+opt_nowait_or_skip:
+			NOWAIT							{ $$ = LockWaitError; }
+			| SKIP LOCKED					{ $$ = LockWaitSkip; }
+			| /*EMPTY*/						{ $$ = LockWaitBlock; }
 		;
 
 /*****************************************************************************
@@ -21198,7 +21204,7 @@ for_locking_items:
 		;
 
 for_locking_item:
-			FOR UPDATE hint_string locked_rels_list opt_nowait
+			FOR UPDATE hint_string locked_rels_list opt_nowait_or_skip
 				{
                     if (u_sess->parser_cxt.isTimeCapsule) {
 						u_sess->parser_cxt.isTimeCapsule = false;
@@ -21209,8 +21215,13 @@ for_locking_item:
 					n->lockedRels = $4;
 					n->forUpdate = TRUE;
 					n->strength = LCS_FORUPDATE;
-					n->noWait = $5;
+					n->waitPolicy = (LockWaitPolicy)$5;
 					n->waitSec = 0;
+#ifdef ENABLE_MULTIPLE_NODES
+					if (n->waitPolicy == LockWaitSkip) {
+						DISTRIBUTED_FEATURE_NOT_SUPPORTED();
+					}
+#endif
 					$$ = (Node *) n;
 				}
 			| FOR UPDATE hint_string locked_rels_list opt_wait
@@ -21222,13 +21233,13 @@ for_locking_item:
 					n->waitSec = $5;
 					/* When the delay time is 0, the processing is based on the nowait logic. */
 					if (n->waitSec == 0) {
-						n->noWait = true;
+						n->waitPolicy = LockWaitError;
 					} else {
-						n->noWait = false;
+						n->waitPolicy = LockWaitBlock;
 					}
 					$$ = (Node *) n;
 				}
-			| for_locking_strength locked_rels_list opt_nowait
+			| for_locking_strength locked_rels_list opt_nowait_or_skip
 				{
 					LockingClause *n = makeNode(LockingClause);
 					n->lockedRels = $2;
@@ -21237,8 +21248,13 @@ for_locking_item:
 					if (n->strength == LCS_FORUPDATE) {
 						n->forUpdate = true;
 					}
-					n->noWait = $3;
+					n->waitPolicy = (LockWaitPolicy)$3;
                     n->waitSec = 0;
+#ifdef ENABLE_MULTIPLE_NODES
+					if (n->waitPolicy == LockWaitSkip) {
+						DISTRIBUTED_FEATURE_NOT_SUPPORTED();
+					}
+#endif
 					$$ = (Node *) n;
 				}
 		;
@@ -25909,6 +25925,7 @@ unreserved_keyword:
 			| LOCAL
 			| LOCATION
 			| LOCK_P
+			| LOCKED
 			| LOG_P
 			| LOGGING
 			| LOGIN_ANY

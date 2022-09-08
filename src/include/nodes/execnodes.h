@@ -669,7 +669,7 @@ typedef struct ExecRowMark {
     Index prti;              /* parent range table index, if child */
     Index rowmarkId;         /* unique identifier for resjunk columns */
     RowMarkType markType;    /* see enum in nodes/plannodes.h */
-    bool noWait;             /* NOWAIT option */
+    LockWaitPolicy waitPolicy;           /* NOWAIT option */
     int waitSec;      /* WAIT time Sec */
     ItemPointerData curCtid; /* ctid of currently locked tuple, if any */
     int numAttrs;            /* number of attributes in subplan */
