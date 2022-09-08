@@ -905,7 +905,10 @@ static bool _equalInsertStmt(const InsertStmt* a, const InsertStmt* b)
     COMPARE_NODE_FIELD(selectStmt);
     COMPARE_NODE_FIELD(returningList);
     COMPARE_NODE_FIELD(withClause);
-    COMPARE_NODE_FIELD(upsertClause);
+    if (t_thrd.proc->workingVersionNum >= REPLACE_INTO_VERSION_NUM) {
+        COMPARE_NODE_FIELD(targetList);
+    }
+    COMPARE_NODE_FIELD(upsertClause);   
     COMPARE_SCALAR_FIELD(hasIgnore);
 
     return true;

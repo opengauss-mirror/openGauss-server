@@ -222,6 +222,11 @@ const char* getBypassReason(FusionType result)
             return "Bypass not executed because it's Var type allowed for target in sort query";
             break;
         }
+
+        case NOBYPASS_REPLACE_NOT_SUPPORT: {
+            return "Bypass not support REPLACE INTO statement";
+            break;
+        }
 		
         case NOBYPASS_UPSERT_NOT_SUPPORT: {
             return "Bypass not support INSERT INTO ... ON DUPLICATE KEY UPDATE statement";
@@ -903,6 +908,9 @@ FusionType checkBaseResult(Plan* top_plan)
     }
     if (node->upsertAction != UPSERT_NONE) {
         return NOBYPASS_UPSERT_NOT_SUPPORT;
+    }
+    if (node->isReplace) {
+        return NOBYPASS_REPLACE_NOT_SUPPORT;
     }
     return result;
 }

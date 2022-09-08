@@ -1838,6 +1838,7 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
 #ifdef PGXC
             plan = pgxc_make_modifytable(root, plan);
 #endif
+            ((ModifyTable*)plan)->isReplace = parse->isReplace;
         }
     }
 

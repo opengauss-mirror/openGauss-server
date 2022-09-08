@@ -1,0 +1,30 @@
+<refentry id="SQL-REPLACE">
+<refmeta>
+<refentrytitle>REPLACE</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>REPLACE</refname>
+<refpurpose>insert new row or replace rows in a table</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+[NOTICE:REPLACE only has gained support in MySQL compatibility!]
+REPLACE [LOW_PRIORITY | DELAYED]
+    [INTO] tbl_name [(col_name,...)]
+    {VALUES | VALUE ({expr},...),...},...
+OR:
+REPLACE [LOW_PRIORITY | DELAYED]
+    [INTO] tbl_name
+    SET col_name={expr},...
+OR:
+REPLACE [LOW_PRIORITY | DELAYED]
+    [INTO] tbl_name [(col_name,...)]
+    SELECT...
+
+REPLACE works exactly like INSERT, except that if an old row in the table has the same value as a new row for a PRIMARY KEY or a UNIQUE index, the old row is deleted before the new row is inserted.
+
+</synopsis>
+</refsynopsisdiv>
+</refentry>

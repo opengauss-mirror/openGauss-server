@@ -12473,3 +12473,75 @@ static void replace_cl_types_in_argtypes(Oid func_id, int numargs, Oid* argtypes
         ReleaseSysCache(gs_oldtup);
     }
 }
+
+Oid pg_get_serial_sequence_oid(text* tablename, text* columnname)
+{
+    RangeVar* tablerv = NULL;
+    Oid tableOid;
+    char* column = NULL;
+    AttrNumber attnum;
+    Oid sequenceId = InvalidOid;
+    Relation depRel;
+    ScanKeyData key[3];
+    SysScanDesc scan;
+    HeapTuple tup;
+    List* names = NIL;
+
+    /* Look up table name. */
+    names = textToQualifiedNameList(tablename);
+    tablerv = makeRangeVarFromNameList(names);
+    tableOid = RangeVarGetRelid(tablerv, NoLock, false);
+
+    /* Get the number of the column */
+    column = text_to_cstring(columnname);
+    attnum = get_attnum(tableOid, column);
+    if (attnum == InvalidAttrNumber)
+        ereport(ERROR,
+            (errcode(ERRCODE_UNDEFINED_COLUMN),
+                errmsg("column \"%s\" of relation \"%s\" does not exist", column, tablerv->relname)));
+
+    /* Search the dependency table for the dependent sequence */
+    depRel = heap_open(DependRelationId, AccessShareLock);
+
+    ScanKeyInit(
+        &key[0], Anum_pg_depend_refclassid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(RelationRelationId));
+    ScanKeyInit(&key[1], Anum_pg_depend_refobjid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(tableOid));
+    ScanKeyInit(&key[2], Anum_pg_depend_refobjsubid, BTEqualStrategyNumber, F_INT4EQ, Int32GetDatum(attnum));
+
+    scan = systable_beginscan(depRel, DependReferenceIndexId, true, NULL, 3, key);
+
+    while (HeapTupleIsValid(tup = systable_getnext(scan))) {
+        Form_pg_depend deprec = (Form_pg_depend)GETSTRUCT(tup);
+        
+        if (deprec->classid == RelationRelationId && deprec->objsubid == 0 && deprec->deptype == DEPENDENCY_AUTO &&
+            get_rel_relkind(deprec->objid) == RELKIND_SEQUENCE) {
+            sequenceId = deprec->objid;
+            break;
+        }
+    }
+    systable_endscan(scan);
+    heap_close(depRel, AccessShareLock);
+
+    if (OidIsValid(sequenceId)) {
+        HeapTuple classtup;
+        Form_pg_class classtuple;
+        char* nspname = NULL;
+
+        classtup = SearchSysCache1(RELOID, ObjectIdGetDatum(sequenceId));
+        if (!HeapTupleIsValid(classtup))
+            return InvalidOid;
+
+        classtuple = (Form_pg_class)GETSTRUCT(classtup);
+
+        nspname = get_namespace_name(classtuple->relnamespace);
+
+        if (nspname == NULL) {
+            ReleaseSysCache(classtup);
+            return InvalidOid;
+        }
+
+        ReleaseSysCache(classtup);
+        return sequenceId;
+    }
+    return InvalidOid;
+}

@@ -299,6 +299,9 @@ static ModifyTable* _copyModifyTable(const ModifyTable* from)
     COPY_NODE_FIELD(rowMarks);
     COPY_SCALAR_FIELD(epqParam);
     COPY_SCALAR_FIELD(partKeyUpdated);
+    if (t_thrd.proc->workingVersionNum >= REPLACE_INTO_VERSION_NUM) {
+        COPY_SCALAR_FIELD(isReplace);
+    }
 #ifdef PGXC
     COPY_NODE_FIELD(remote_plans);
     COPY_NODE_FIELD(remote_insert_plans);
@@ -4618,7 +4621,11 @@ static InsertStmt* _copyInsertStmt(const InsertStmt* from)
     COPY_NODE_FIELD(withClause);
     COPY_NODE_FIELD(upsertClause);
     COPY_NODE_FIELD(hintState);
-    COPY_SCALAR_FIELD(isRewritten);
+    if (t_thrd.proc->workingVersionNum >= REPLACE_INTO_VERSION_NUM) {
+        COPY_NODE_FIELD(targetList);
+        COPY_SCALAR_FIELD(isReplace);
+    }
+    COPY_SCALAR_FIELD(isRewritten);   
     COPY_SCALAR_FIELD(hasIgnore);
     return newnode;
 }
