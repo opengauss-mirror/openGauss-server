@@ -12,7 +12,6 @@ set(CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/cstore
     ${CMAKE_CURRENT_SOURCE_DIR}/replication
     ${CMAKE_CURRENT_SOURCE_DIR}/sync
-
     ${CMAKE_CURRENT_SOURCE_DIR}/file
     ${CMAKE_CURRENT_SOURCE_DIR}/freespace
     ${CMAKE_CURRENT_SOURCE_DIR}/ipc
@@ -21,6 +20,7 @@ set(CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/page
     ${CMAKE_CURRENT_SOURCE_DIR}/remote
     ${CMAKE_CURRENT_SOURCE_DIR}/smgr
+    ${CMAKE_CURRENT_SOURCE_DIR}/nvm
     ${CMAKE_CURRENT_SOURCE_DIR}/tcap
     ${CMAKE_CURRENT_SOURCE_DIR}/xlog_share_storage
     ${CMAKE_CURRENT_SOURCE_DIR}/dorado_operation
@@ -49,6 +49,7 @@ add_subdirectory(lmgr)
 add_subdirectory(page)
 add_subdirectory(remote)
 add_subdirectory(smgr)
+add_subdirectory(nvm)
 add_subdirectory(tcap)
 add_subdirectory(xlog_share_storage)
 add_subdirectory(dorado_operation)

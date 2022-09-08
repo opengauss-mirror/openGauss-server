@@ -84,18 +84,16 @@ static void ckpt_try_prune_dirty_page_queue();
 
 /* candidate buffer list handle function */
 static uint32 calculate_pagewriter_flush_num();
-static void candidate_buf_push(int buf_id, int thread_id);
-static void seg_candidate_buf_push(int buf_id, int thread_id);
+static void candidate_buf_push(CandidateList *list, int buf_id);
 static void init_candidate_list();
-static uint32 incre_ckpt_pgwr_flush_dirty_page(WritebackContext wb_context,
+static uint32 incre_ckpt_pgwr_flush_dirty_page(WritebackContext *wb_context,
     const CkptSortItem *dirty_buf_list, int start, int batch_num);
-static void incre_ckpt_pgwr_flush_dirty_queue(WritebackContext wb_context);
-static void incre_ckpt_pgwr_scan_buf_pool(WritebackContext wb_context);
+static void incre_ckpt_pgwr_flush_dirty_queue(WritebackContext *wb_context);
+static void incre_ckpt_pgwr_scan_buf_pool(WritebackContext *wb_context);
 static void push_to_candidate_list(BufferDesc *buf_desc);
 static uint32 get_candidate_buf_and_flush_list(uint32 start, uint32 end, uint32 max_flush_num,
     bool *contain_hashbucket);
-static int64 get_thread_candidate_nums(int thread_id);
-static int64 get_thread_seg_candidate_nums(int thread_id);
+static int64 get_thread_candidate_nums(CandidateList *list);
 
 const int XLOG_LSN_SWAP = 32;
 Datum ckpt_view_get_node_name()
@@ -210,7 +208,7 @@ Datum ckpt_view_get_twophase_flush_num()
 
 Datum ckpt_view_get_candidate_nums()
 {
-    int candidate_num = get_curr_candidate_nums(false);
+    int candidate_num = get_curr_candidate_nums(CAND_LIST_NORMAL);
     return Int32GetDatum(candidate_num);
 }
 
@@ -226,7 +224,7 @@ Datum ckpt_view_get_num_clock_sweep()
 
 Datum ckpt_view_get_seg_candidate_nums()
 {
-    int candidate_num = get_curr_candidate_nums(true);
+    int candidate_num = get_curr_candidate_nums(CAND_LIST_SEG);
     return Int32GetDatum(candidate_num);
 }
 
@@ -354,45 +352,38 @@ void candidate_buf_init(void)
 static void init_candidate_list()
 {
     int thread_num = g_instance.ckpt_cxt_ctl->pgwr_procs.sub_num;
-    int normal_avg_num = SharedBufferNumber / thread_num;
-    int seg_avr_num = SEGMENT_BUFFER_NUM / thread_num;
+    int normal_avg_num = NORMAL_SHARED_BUFFER_NUM / thread_num;
+    int nvm_avg_num = NVM_BUFFER_NUM / thread_num;
+    int seg_avg_num = SEGMENT_BUFFER_NUM / thread_num;
     PageWriterProc *pgwr = NULL;
+    Buffer *cand_buffers = g_instance.ckpt_cxt_ctl->candidate_buffers;
 
     /* Init main thread, the candidate list only store segment buffer */
     pgwr = &g_instance.ckpt_cxt_ctl->pgwr_procs.writer_proc[0];
-    pgwr->cand_buf_list = NULL;
-    pgwr->cand_list_size = 0;
-    pgwr->head = 0;
-    pgwr->tail = 0;
-    pgwr->seg_head = 0;
-    pgwr->seg_tail = 0;
-    pgwr->seg_cand_list_size = 0;
-    pgwr->seg_cand_buf_list = NULL;
+    INIT_CANDIDATE_LIST(pgwr->normal_list, NULL, 0, 0, 0);
+    INIT_CANDIDATE_LIST(pgwr->nvm_list, NULL, 0, 0, 0);
+    INIT_CANDIDATE_LIST(pgwr->seg_list, NULL, 0, 0, 0);
 
     for (int i = 1; i <= thread_num; i++) {
         pgwr = &g_instance.ckpt_cxt_ctl->pgwr_procs.writer_proc[i];
         int start = normal_avg_num * (i - 1);
         int end = start + normal_avg_num;
-        int seg_start = SegmentBufferStartID + seg_avr_num * (i - 1);
-        int seg_end = seg_start + seg_avr_num;
+        int nvm_start = NvmBufferStartID + nvm_avg_num * (i - 1);
+        int nvm_end = nvm_start + nvm_avg_num;
+        int seg_start = SegmentBufferStartID + seg_avg_num * (i - 1);
+        int seg_end = seg_start + seg_avg_num;
         if (i == thread_num) {
-            end += SharedBufferNumber % thread_num;
+            end += NORMAL_SHARED_BUFFER_NUM % thread_num;
+            nvm_end += NVM_BUFFER_NUM % thread_num;
             seg_end += SEGMENT_BUFFER_NUM % thread_num;
         }
 
-        /* init normal candidat list */
-        pgwr->head = 0;
-        pgwr->tail = 0;
-        pgwr->buf_id_start = start;
-        pgwr->cand_list_size = end - start;
-        pgwr->cand_buf_list = &g_instance.ckpt_cxt_ctl->candidate_buffers[start];
-
-        /* init segment candidat list */
-        pgwr->seg_head = 0;
-        pgwr->seg_tail = 0;
-        pgwr->seg_cand_list_size = seg_end - seg_start;
-        pgwr->seg_cand_buf_list = &g_instance.ckpt_cxt_ctl->candidate_buffers[seg_start];
-        pgwr->seg_id_start = seg_start;
+        INIT_CANDIDATE_LIST(pgwr->normal_list, &cand_buffers[start], end - start, 0, 0);
+        INIT_CANDIDATE_LIST(pgwr->nvm_list, &cand_buffers[nvm_start], nvm_end - nvm_start, 0, 0);
+        INIT_CANDIDATE_LIST(pgwr->seg_list, &cand_buffers[seg_start], seg_end - seg_start, 0, 0);
+        pgwr->normal_list.buf_id_start = start;
+        pgwr->nvm_list.buf_id_start = nvm_start;
+        pgwr->seg_list.buf_id_start = seg_start;
     }
 }
 
@@ -992,7 +983,7 @@ static uint32 calculate_pagewriter_flush_num()
         counter = 0;
     }
 
-    dirty_page_pct = g_instance.ckpt_cxt_ctl->actual_dirty_page_num / (float)(g_instance.attr.attr_storage.NBuffers);
+    dirty_page_pct = g_instance.ckpt_cxt_ctl->actual_dirty_page_num / (float)(SegmentBufferStartID);
     dirty_slot_pct = get_dirty_page_num() / (float)(g_instance.ckpt_cxt_ctl->dirty_page_queue_size);
     dirty_percent = MAX(dirty_page_pct, dirty_slot_pct) / u_sess->attr.attr_storage.dirty_page_percent_max;
 
@@ -1264,7 +1255,8 @@ static void ckpt_pagewriter_main_thread_loop(void)
 
     HandlePageWriterMainInterrupts();
 
-    candidate_num = get_curr_candidate_nums(false) + get_curr_candidate_nums(true);
+    candidate_num = get_curr_candidate_nums(CAND_LIST_NORMAL) + get_curr_candidate_nums(CAND_LIST_NVM) +
+        get_curr_candidate_nums(CAND_LIST_SEG);
     while (get_dirty_page_num() == 0 && candidate_num == (uint32)TOTAL_BUFFER_NUM &&
         !t_thrd.pagewriter_cxt.shutdown_requested) {
         rc = WaitLatch(&t_thrd.proc->procLatch, WL_TIMEOUT | WL_POSTMASTER_DEATH, (long)TEN_MILLISECOND);
@@ -1277,7 +1269,8 @@ static void ckpt_pagewriter_main_thread_loop(void)
 
         HandlePageWriterMainInterrupts();
 
-        candidate_num = get_curr_candidate_nums(false) + get_curr_candidate_nums(true);
+        candidate_num = get_curr_candidate_nums(CAND_LIST_NORMAL) + get_curr_candidate_nums(CAND_LIST_NVM) +
+            get_curr_candidate_nums(CAND_LIST_SEG);
         if (candidate_num == 0) {
             /* wakeup sub thread scan the buffer pool, init the candidate list */
             wakeup_sub_thread();
@@ -1390,7 +1383,7 @@ static void ckpt_pagewriter_sub_thread_loop()
         /* scan buffer pool, get flush list and candidate list */
         now = get_time_ms();
         if (t_thrd.pagewriter_cxt.next_scan_time <= now) {
-            incre_ckpt_pgwr_scan_buf_pool(wb_context);
+            incre_ckpt_pgwr_scan_buf_pool(&wb_context);
             now = get_time_ms();
             t_thrd.pagewriter_cxt.next_scan_time = now +
                 MAX(u_sess->attr.attr_storage.BgWriterDelay, u_sess->attr.attr_storage.pageWriterSleep);
@@ -1412,7 +1405,7 @@ static void ckpt_pagewriter_sub_thread_loop()
 
             /* flush one batch dirty pages */
             ResourceOwnerEnlargeBuffers(t_thrd.utils_cxt.CurrentResourceOwner);
-            incre_ckpt_pgwr_flush_dirty_queue(wb_context);
+            incre_ckpt_pgwr_flush_dirty_queue(&wb_context);
 
             /* add up completed pages */
             completed_pages = pg_atomic_add_fetch_u32(
@@ -1952,7 +1945,7 @@ static void ckpt_try_skip_invalid_elem_in_queue_head()
     return;
 }
 
-static uint32 incre_ckpt_pgwr_flush_dirty_page(WritebackContext wb_context,
+static uint32 incre_ckpt_pgwr_flush_dirty_page(WritebackContext *wb_context,
     const CkptSortItem *dirty_buf_list, int start, int batch_num)
 {
     uint32 num_actual_flush = 0;
@@ -1972,7 +1965,7 @@ static uint32 incre_ckpt_pgwr_flush_dirty_page(WritebackContext wb_context,
         if ((buf_state & BM_CHECKPOINT_NEEDED) && (buf_state & BM_DIRTY)) {
             UnlockBufHdr(buf_desc, buf_state);
 
-            sync_state = SyncOneBuffer(buf_id, false, &wb_context, true);
+            sync_state = SyncOneBuffer(buf_id, false, wb_context, true);
             if ((sync_state & BUF_WRITTEN)) {
                 num_actual_flush++;
             }
@@ -1983,7 +1976,7 @@ static uint32 incre_ckpt_pgwr_flush_dirty_page(WritebackContext wb_context,
     return num_actual_flush;
 }
 
-static void incre_ckpt_pgwr_flush_dirty_queue(WritebackContext wb_context)
+static void incre_ckpt_pgwr_flush_dirty_queue(WritebackContext *wb_context)
 {
     int thread_id = t_thrd.pagewriter_cxt.pagewriter_id;
     PageWriterProc* pgwr = &g_instance.ckpt_cxt_ctl->pgwr_procs.writer_proc[thread_id];
@@ -2022,7 +2015,7 @@ static void incre_ckpt_pgwr_flush_dirty_queue(WritebackContext wb_context)
     return;
 }
 
-static void incre_ckpt_pgwr_flush_dirty_list(WritebackContext wb_context, uint32 need_flush_num,
+static void incre_ckpt_pgwr_flush_dirty_list(WritebackContext *wb_context, uint32 need_flush_num,
     bool is_new_relfilenode)
 {
     int thread_id = t_thrd.pagewriter_cxt.pagewriter_id;
@@ -2111,15 +2104,18 @@ static bool check_buffer_dirty_flag(BufferDesc* buf_desc)
     return false;
 }
 
-static uint32 get_list_flush_max_num(bool is_segment)
+static uint32 get_list_flush_max_num(CandListType type)
 {
     int thread_num = g_instance.ckpt_cxt_ctl->pgwr_procs.sub_num;
     uint32 max_io = g_instance.ckpt_cxt_ctl->pgwr_procs.list_flush_max / thread_num;
     uint32 dirty_list_size = MAX_DIRTY_LIST_FLUSH_NUM / thread_num;
 
-    if (is_segment) {
+    if (type == CAND_LIST_SEG) {
         double seg_percent = ((double)(SEGMENT_BUFFER_NUM) / (double)(TOTAL_BUFFER_NUM));
         max_io = max_io * seg_percent;
+    } else if (type == CAND_LIST_NVM) {
+        double nvm_percent = ((double)(NVM_BUFFER_NUM) / (double)(TOTAL_BUFFER_NUM));
+        max_io = max_io * nvm_percent;
     } else {
         double buffer_percent = ((double)(NORMAL_SHARED_BUFFER_NUM) / (double)(TOTAL_BUFFER_NUM));
         max_io = max_io * buffer_percent;
@@ -2131,7 +2127,7 @@ static uint32 get_list_flush_max_num(bool is_segment)
 }
 
 const float GAP_PERCENT = 0.15;
-static uint32 get_list_flush_num(bool is_segment)
+static uint32 get_list_flush_num(CandListType type)
 {
     double percent_target = u_sess->attr.attr_storage.candidate_buf_percent_target;
     uint32 cur_candidate_num;
@@ -2139,11 +2135,18 @@ static uint32 get_list_flush_num(bool is_segment)
     uint32 high_water_mark;
     uint32 flush_num = 0;
     uint32 min_io = DW_DIRTY_PAGE_MAX_FOR_NOHBK;
-    uint32 max_io = get_list_flush_max_num(is_segment);
-    uint32 buffer_num = (is_segment ? SEGMENT_BUFFER_NUM : NORMAL_SHARED_BUFFER_NUM);
+    uint32 max_io = get_list_flush_max_num(type);
+    uint32 buffer_num;
+    if (type == CAND_LIST_SEG) {
+        buffer_num = SEGMENT_BUFFER_NUM;
+    } else if (type == CAND_LIST_NVM) {
+        buffer_num = NVM_BUFFER_NUM;
+    } else {
+        buffer_num = NORMAL_SHARED_BUFFER_NUM;
+    }
     total_target = buffer_num * percent_target;
     high_water_mark = buffer_num * (percent_target / HIGH_WATER);
-    cur_candidate_num = get_curr_candidate_nums(is_segment);
+    cur_candidate_num = get_curr_candidate_nums(type);
 
     /* If the slots are sufficient, the standby DN does not need to flush too many pages. */
     if (RecoveryInProgress() && cur_candidate_num >= total_target / 2) {
@@ -2173,7 +2176,8 @@ static uint32 get_list_flush_num(bool is_segment)
  *            then scan the segment buffer pool.
  */
 const int MAX_SCAN_BATCH_NUM = 131072 * 10; /* 10GB buffers */
-static void incre_ckpt_pgwr_scan_buf_pool(WritebackContext wb_context)
+
+static void incre_ckpt_pgwr_scan_candidate_list(WritebackContext *wb_context, CandidateList *list, CandListType type)
 {
     int ratio_buf_id_start;
     int ratio_cand_list_size;
@@ -2181,7 +2185,6 @@ static void incre_ckpt_pgwr_scan_buf_pool(WritebackContext wb_context)
     int ratio_shared_buffers;
     int thread_num = g_instance.ckpt_cxt_ctl->pgwr_procs.sub_num;
     int thread_id = t_thrd.pagewriter_cxt.pagewriter_id;
-    PageWriterProc *pgwr = &g_instance.ckpt_cxt_ctl->pgwr_procs.writer_proc[thread_id];
     uint32 need_flush_num = 0;
     int start = 0;
     int end = 0;
@@ -2189,12 +2192,17 @@ static void incre_ckpt_pgwr_scan_buf_pool(WritebackContext wb_context)
     int batch_scan_num = 0;
     uint32 max_flush_num = 0;
     bool am_standby = g_instance.ckpt_cxt_ctl->is_standby_mode;
-    int normal_shared_buffers = SharedBufferNumber;
+    int shared_buffers;
 
-    /* handle the normal buffer pool */
-    if (get_thread_candidate_nums(thread_id) < pgwr->cand_list_size) {
-        if (am_standby) {
-            ratio_shared_buffers = int(normal_shared_buffers * u_sess->attr.attr_storage.shared_buffers_fraction);
+    if (type == CAND_LIST_NVM) {
+        shared_buffers = NVM_BUFFER_NUM;
+    } else if (type == CAND_LIST_NORMAL) {
+        shared_buffers = NORMAL_SHARED_BUFFER_NUM;
+    }
+
+    if (get_thread_candidate_nums(list) < list->cand_list_size) {
+        if (am_standby && type != CAND_LIST_SEG) {
+            ratio_shared_buffers = int(shared_buffers * u_sess->attr.attr_storage.shared_buffers_fraction);
             ratio_avg_num = ratio_shared_buffers / thread_num;
             ratio_buf_id_start = ratio_avg_num * (thread_id - 1);
             ratio_cand_list_size = ratio_avg_num;
@@ -2202,30 +2210,30 @@ static void incre_ckpt_pgwr_scan_buf_pool(WritebackContext wb_context)
                 ratio_cand_list_size += ratio_shared_buffers % thread_num;
             }
 
-            start = MAX(ratio_buf_id_start, pgwr->next_scan_ratio_loc);
+            start = MAX(ratio_buf_id_start, list->next_scan_ratio_loc);
             end = ratio_buf_id_start + ratio_cand_list_size;
             batch_scan_num = MIN(ratio_cand_list_size, MAX_SCAN_BATCH_NUM);
         } else {
-            start = MAX(pgwr->buf_id_start, pgwr->next_scan_normal_loc);
-            end = pgwr->buf_id_start + pgwr->cand_list_size;
-            batch_scan_num = MIN(pgwr->cand_list_size, MAX_SCAN_BATCH_NUM);
+            start = MAX(list->buf_id_start, list->next_scan_loc);
+            end = list->buf_id_start + list->cand_list_size;
+            batch_scan_num = MIN(list->cand_list_size, MAX_SCAN_BATCH_NUM);
         }
 
         end = MIN(start + batch_scan_num, end);
-        max_flush_num = get_list_flush_num(false);
+        max_flush_num = get_list_flush_num(type);
         need_flush_num = get_candidate_buf_and_flush_list(start, end, max_flush_num, &is_new_relfilenode);
 
-        if (am_standby) {
+        if (am_standby && type != CAND_LIST_SEG) {
             if (end >= ratio_buf_id_start + ratio_cand_list_size) {
-                pgwr->next_scan_ratio_loc = ratio_buf_id_start;
+                list->next_scan_ratio_loc = ratio_buf_id_start;
             } else {
-                pgwr->next_scan_ratio_loc = end;
+                list->next_scan_ratio_loc = end;
             }
         } else {
-            if (end >= pgwr->buf_id_start + pgwr->cand_list_size) {
-                pgwr->next_scan_normal_loc = pgwr->buf_id_start;
+            if (end >= list->buf_id_start + list->cand_list_size) {
+                list->next_scan_loc = list->buf_id_start;
             } else {
-                pgwr->next_scan_normal_loc = end;
+                list->next_scan_loc = end;
             }
         }
 
@@ -2233,25 +2241,17 @@ static void incre_ckpt_pgwr_scan_buf_pool(WritebackContext wb_context)
             incre_ckpt_pgwr_flush_dirty_list(wb_context, need_flush_num, is_new_relfilenode);
         }
     }
+}
 
-    /* handle the segment buffer pool */
-    if (get_thread_seg_candidate_nums(thread_id) < pgwr->seg_cand_list_size) {
-        start = MAX(pgwr->seg_id_start, pgwr->next_scan_seg_loc);
-        end = pgwr->seg_id_start + pgwr->seg_cand_list_size;
-        batch_scan_num = MIN(pgwr->seg_cand_list_size, MAX_SCAN_BATCH_NUM);
-        end = MIN(start + batch_scan_num, end);
-        max_flush_num = get_list_flush_num(true);
+static void incre_ckpt_pgwr_scan_buf_pool(WritebackContext *wb_context)
+{
+    int thread_id = t_thrd.pagewriter_cxt.pagewriter_id;
+    PageWriterProc *pgwr = &g_instance.ckpt_cxt_ctl->pgwr_procs.writer_proc[thread_id];
 
-        need_flush_num = get_candidate_buf_and_flush_list(start, end, max_flush_num, &is_new_relfilenode);
-        if (end >= pgwr->seg_id_start + pgwr->seg_cand_list_size) {
-            pgwr->next_scan_seg_loc = pgwr->seg_id_start;
-        } else {
-            pgwr->next_scan_seg_loc = end;
-        }
-        if (need_flush_num > 0) {
-            incre_ckpt_pgwr_flush_dirty_list(wb_context, need_flush_num, is_new_relfilenode);
-        }
-    }
+    /* handle the normal\nvm\segment buffer pool */
+    incre_ckpt_pgwr_scan_candidate_list(wb_context, &pgwr->normal_list, CAND_LIST_NORMAL);
+    incre_ckpt_pgwr_scan_candidate_list(wb_context, &pgwr->nvm_list, CAND_LIST_NVM);
+    incre_ckpt_pgwr_scan_candidate_list(wb_context, &pgwr->seg_list, CAND_LIST_SEG);
     return;
 }
 
@@ -2314,10 +2314,12 @@ static uint32 get_candidate_buf_and_flush_list(uint32 start, uint32 end, uint32 
         /* Not dirty, put directly into flushed candidates */
         if (!(local_buf_state & BM_DIRTY)) {
             if (g_instance.ckpt_cxt_ctl->candidate_free_map[buf_id] == false) {
-                if (buf_id < (uint32)SegmentBufferStartID) {
-                    candidate_buf_push(buf_id, thread_id);
+                if (buf_id < (uint32)NvmBufferStartID) {
+                    candidate_buf_push(&pgwr->normal_list, buf_id);
+                } else if (buf_id < (uint32)SegmentBufferStartID) {
+                    candidate_buf_push(&pgwr->nvm_list, buf_id);
                 } else {
-                    seg_candidate_buf_push(buf_id, thread_id);
+                    candidate_buf_push(&pgwr->seg_list, buf_id);
                 }
                 g_instance.ckpt_cxt_ctl->candidate_free_map[buf_id] = true;
                 candidates++;
@@ -2359,6 +2361,7 @@ UNLOCK:
 static void push_to_candidate_list(BufferDesc *buf_desc)
 {
     uint32 thread_id = t_thrd.pagewriter_cxt.pagewriter_id;
+    PageWriterProc *pgwr = &g_instance.ckpt_cxt_ctl->pgwr_procs.writer_proc[thread_id];
     int buf_id = buf_desc->buf_id;
     uint32 buf_state = pg_atomic_read_u32(&buf_desc->state);
     bool emptyUsageCount = (!NEED_CONSIDER_USECOUNT || BUF_STATE_GET_USAGECOUNT(buf_state) == 0);
@@ -2372,10 +2375,12 @@ static void push_to_candidate_list(BufferDesc *buf_desc)
         if (g_instance.ckpt_cxt_ctl->candidate_free_map[buf_id] == false) {
             emptyUsageCount = (!NEED_CONSIDER_USECOUNT || BUF_STATE_GET_USAGECOUNT(buf_state) == 0);
             if (BUF_STATE_GET_REFCOUNT(buf_state) == 0 && emptyUsageCount && !(buf_state & BM_DIRTY)) {
-                if (buf_id < SegmentBufferStartID) {
-                    candidate_buf_push(buf_id, thread_id);
+                if (buf_id < NvmBufferStartID) {
+                    candidate_buf_push(&pgwr->normal_list, buf_id);
+                } else if (buf_id < SegmentBufferStartID) {
+                    candidate_buf_push(&pgwr->nvm_list, buf_id);
                 } else {
-                    seg_candidate_buf_push(buf_id, thread_id);
+                    candidate_buf_push(&pgwr->seg_list, buf_id);
                 }
                 g_instance.ckpt_cxt_ctl->candidate_free_map[buf_id] = true;
             }
@@ -2391,42 +2396,22 @@ static void push_to_candidate_list(BufferDesc *buf_desc)
  * @in: buf_id, buffer id which need push to the list
  * @in: thread_id, pagewriter thread id.
  */
-static void candidate_buf_push(int buf_id, int thread_id)
+static void candidate_buf_push(CandidateList *list, int buf_id)
 {
-    PageWriterProc *pgwr = &g_instance.ckpt_cxt_ctl->pgwr_procs.writer_proc[thread_id];
-    uint32 list_size = pgwr->cand_list_size;
+    uint32 list_size = list->cand_list_size;
     uint32 tail_loc;
 
     pg_memory_barrier();
-    volatile uint64 head = pg_atomic_read_u64(&pgwr->head);
+    volatile uint64 head = pg_atomic_read_u64(&list->head);
     pg_memory_barrier();
-    volatile uint64 tail = pg_atomic_read_u64(&pgwr->tail);
+    volatile uint64 tail = pg_atomic_read_u64(&list->tail);
 
     if (unlikely(tail - head >= list_size)) {
         return;
     }
     tail_loc = tail % list_size;
-    pgwr->cand_buf_list[tail_loc] = buf_id;
-    (void)pg_atomic_fetch_add_u64(&pgwr->tail, 1);
-}
-
-static void seg_candidate_buf_push(int buf_id, int thread_id)
-{
-    PageWriterProc *pgwr = &g_instance.ckpt_cxt_ctl->pgwr_procs.writer_proc[thread_id];
-    uint32 list_size = pgwr->seg_cand_list_size;
-    uint32 tail_loc;
-
-    pg_memory_barrier();
-    volatile uint64 head = pg_atomic_read_u64(&pgwr->seg_head);
-    pg_memory_barrier();
-    volatile uint64 tail = pg_atomic_read_u64(&pgwr->seg_tail);
-
-    if (unlikely(tail - head >= list_size)) {
-        return;
-    }
-    tail_loc = tail % list_size;
-    pgwr->seg_cand_buf_list[tail_loc] = buf_id;
-    (void)pg_atomic_fetch_add_u64(&pgwr->seg_tail, 1);
+    list->cand_buf_list[tail_loc] = buf_id;
+    (void)pg_atomic_fetch_add_u64(&list->tail, 1);
 }
 
 /**
@@ -2434,71 +2419,34 @@ static void seg_candidate_buf_push(int buf_id, int thread_id)
  * @in: buf_id, store the buffer id from the list.
  * @in: thread_id, pagewriter thread id
  */
-bool candidate_buf_pop(int *buf_id, int thread_id)
+bool candidate_buf_pop(CandidateList *list, int *buf_id)
 {
-    PageWriterProc *pgwr = &g_instance.ckpt_cxt_ctl->pgwr_procs.writer_proc[thread_id];
-    uint32 list_size = pgwr->cand_list_size;
+    uint32 list_size = list->cand_list_size;
     uint32 head_loc;
 
     while (true) {
         pg_memory_barrier();
-        uint64 head = pg_atomic_read_u64(&pgwr->head);
+        uint64 head = pg_atomic_read_u64(&list->head);
         pg_memory_barrier();
-        volatile uint64 tail = pg_atomic_read_u64(&pgwr->tail);
+        volatile uint64 tail = pg_atomic_read_u64(&list->tail);
 
         if (unlikely(head >= tail)) {
             return false;       /* candidate list is empty */
         }
 
         head_loc = head % list_size;
-        *buf_id = pgwr->cand_buf_list[head_loc];
-        if (pg_atomic_compare_exchange_u64(&pgwr->head, &head, head + 1)) {
+        *buf_id = list->cand_buf_list[head_loc];
+        if (pg_atomic_compare_exchange_u64(&list->head, &head, head + 1)) {
             return true;
         }
     }
 }
 
-bool seg_candidate_buf_pop(int *buf_id, int thread_id)
+static int64 get_thread_candidate_nums(CandidateList *list)
 {
-    PageWriterProc *pgwr = &g_instance.ckpt_cxt_ctl->pgwr_procs.writer_proc[thread_id];
-    uint32 list_size = pgwr->seg_cand_list_size;
-    uint32 head_loc;
-
-    while (true) {
-        pg_memory_barrier();
-        uint64 head = pg_atomic_read_u64(&pgwr->seg_head);
-        pg_memory_barrier();
-        volatile uint64 tail = pg_atomic_read_u64(&pgwr->seg_tail);
-
-        if (unlikely(head >= tail)) {
-            return false;       /* candidate list is empty */
-        }
-
-        head_loc = head % list_size;
-        *buf_id = pgwr->seg_cand_buf_list[head_loc];
-        if (pg_atomic_compare_exchange_u64(&pgwr->seg_head, &head, head + 1)) {
-            return true;
-        }
-    }
-}
-
-static int64 get_thread_candidate_nums(int thread_id)
-{
-    PageWriterProc *pgwr = &g_instance.ckpt_cxt_ctl->pgwr_procs.writer_proc[thread_id];
-    volatile uint64 head = pg_atomic_read_u64(&pgwr->head);
+    volatile uint64 head = pg_atomic_read_u64(&list->head);
     pg_memory_barrier();
-    volatile uint64 tail = pg_atomic_read_u64(&pgwr->tail);
-    int64 curr_cand_num = tail - head;
-    Assert(curr_cand_num >= 0);
-    return curr_cand_num;
-}
-
-static int64 get_thread_seg_candidate_nums(int thread_id)
-{
-    PageWriterProc *pgwr = &g_instance.ckpt_cxt_ctl->pgwr_procs.writer_proc[thread_id];
-    volatile uint64 head = pg_atomic_read_u64(&pgwr->seg_head);
-    pg_memory_barrier();
-    volatile uint64 tail = pg_atomic_read_u64(&pgwr->seg_tail);
+    volatile uint64 tail = pg_atomic_read_u64(&list->tail);
     int64 curr_cand_num = tail - head;
     Assert(curr_cand_num >= 0);
     return curr_cand_num;
@@ -2507,25 +2455,25 @@ static int64 get_thread_seg_candidate_nums(int thread_id)
 /**
  * @Description: Return a rough estimate of the current number of buffers in the candidate list.
  */
-uint32 get_curr_candidate_nums(bool segment)
+uint32 get_curr_candidate_nums(CandListType type)
 {
     uint32 currCandidates = 0;
     PageWriterProc *pgwr = NULL;
-
-    if (segment) {
-        for (int i = 1; i < g_instance.ckpt_cxt_ctl->pgwr_procs.num; i++) {
-            pgwr = &g_instance.ckpt_cxt_ctl->pgwr_procs.writer_proc[i];
-            if (pgwr->proc != NULL) {
-                currCandidates += get_thread_seg_candidate_nums(i);
-            }
-        }
-        return currCandidates;
-    }
+    CandidateList *list = NULL;
 
     for (int i = 1; i < g_instance.ckpt_cxt_ctl->pgwr_procs.num; i++) {
         pgwr = &g_instance.ckpt_cxt_ctl->pgwr_procs.writer_proc[i];
+
+        if (type == CAND_LIST_NORMAL) {
+            list = &pgwr->normal_list;
+        } else if (type == CAND_LIST_NVM) {
+            list = &pgwr->nvm_list;
+        } else {
+            list = &pgwr->seg_list;
+        }
+
         if (pgwr->proc != NULL) {
-            currCandidates += get_thread_candidate_nums(i);
+            currCandidates += get_thread_candidate_nums(list);
         }
     }
     return currCandidates;

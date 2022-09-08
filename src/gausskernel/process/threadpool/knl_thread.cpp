@@ -1309,6 +1309,7 @@ static void knl_t_storage_init(knl_t_storage_context* storage_cxt)
 
     storage_cxt->BufferDescriptors = NULL;
     storage_cxt->BufferBlocks = NULL;
+    storage_cxt->NvmBufferBlocks = NULL;
     storage_cxt->BackendWritebackContext = (WritebackContext*)palloc0(sizeof(WritebackContext));
     storage_cxt->SharedBufHash = NULL;
     storage_cxt->InProgressBuf = NULL;

@@ -30,11 +30,6 @@
 #include "gstrace/storage_gstrace.h"
 
 extern uint32 hashquickany(uint32 seed, register const unsigned char *data, register int len);
-/* entry for buffer lookup hashtable */
-typedef struct {
-    BufferTag key; /* Tag of a disk page */
-    int id;        /* Associated buffer ID */
-} BufferLookupEnt;
 
 /*
  * Estimate space needed for mapping hashtable

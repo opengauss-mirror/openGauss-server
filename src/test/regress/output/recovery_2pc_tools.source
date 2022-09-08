@@ -89,6 +89,8 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  block_size                                       | integer |      | 8192      | 8192
  bulk_read_ring_size                              | integer | kB   | 256       | 2147483647
  bulk_write_ring_size                             | integer | kB   | 16384     | 2147483647
+ bypass_dram                                      | real    |      | 0         | 1
+ bypass_nvm                                       | real    |      | 0         | 1
  bytea_output                                     | enum    |      |           | 
  cache_connection                                 | bool    |      |           | 
  candidate_buf_percent_target                     | real    |      | 0.1       | 0.85
@@ -276,6 +278,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  enable_mix_replication                           | bool    |      |           | 
  enable_nestloop                                  | bool    |      |           | 
  enable_nonsysadmin_execute_direct                | bool    |      |           | 
+ enable_nvm                                       | bool    |      |           | 
  enable_online_ddl_waitlock                       | bool    |      |           | 
  enable_opfusion                                  | bool    |      |           | 
  enable_orc_cache                                 | bool    |      |           | 
@@ -474,6 +477,8 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  nls_timestamp_format                             | string  |      |           | 
  numa_distribute_mode                             | string  |      |           | 
  num_internal_lock_partitions                     | string  |      |           | 
+ nvm_buffers                                      | integer | 8kB  | 0         | 1073741823
+ nvm_file_path                                    | string  |      |           | 
  omit_encoding_error                              | bool    |      |           | 
  operation_mode                                   | bool    |      |           | 
  opfusion_debug_mode                              | enum    |      |           | 

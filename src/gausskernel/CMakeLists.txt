@@ -182,6 +182,7 @@ list(APPEND gaussdb_objects
     $<TARGET_OBJECTS:gausskernel_storage_replication_heartbeat>
     $<TARGET_OBJECTS:gausskernel_storage_replication>
     $<TARGET_OBJECTS:gausskernel_storage_buffer>
+    $<TARGET_OBJECTS:gausskernel_storage_nvm>
     $<TARGET_OBJECTS:gausskernel_storage_cmgr>
     $<TARGET_OBJECTS:gausskernel_storage_cstore_compression>
     $<TARGET_OBJECTS:gausskernel_storage_cstore>

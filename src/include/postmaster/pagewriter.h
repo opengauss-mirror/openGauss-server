@@ -31,6 +31,12 @@
 #define ENABLE_INCRE_CKPT g_instance.attr.attr_storage.enableIncrementalCheckpoint
 #define NEED_CONSIDER_USECOUNT u_sess->attr.attr_storage.enable_candidate_buf_usage_count
 
+#define INIT_CANDIDATE_LIST(L, list, size, xx_head, xx_tail) \
+    ((L).cand_buf_list = (list), \
+        (L).cand_list_size = (size), \
+        (L).head = (xx_head), \
+        (L).tail = (xx_tail))
+
 typedef struct PGPROC PGPROC;
 typedef struct BufferDesc BufferDesc;
 typedef struct CkptSortItem CkptSortItem;
@@ -41,6 +47,22 @@ typedef struct ThrdDwCxt {
     volatile int dw_page_idx;      /* -1 means data files have been flushed. */
     bool is_new_relfilenode;
 } ThrdDwCxt;
+
+typedef enum CandListType {
+    CAND_LIST_NORMAL,
+    CAND_LIST_NVM,
+    CAND_LIST_SEG
+} CandListType;
+
+typedef struct CandidateList {
+    Buffer *cand_buf_list;
+    volatile int cand_list_size;
+    pg_atomic_uint64 head;
+    pg_atomic_uint64 tail;
+    volatile int buf_id_start;
+    int32 next_scan_loc;
+    int32 next_scan_ratio_loc;
+} CandidateList;
 
 typedef struct PageWriterProc {
     PGPROC* proc;
@@ -56,24 +78,10 @@ typedef struct PageWriterProc {
     CkptSortItem *dirty_buf_list;
     uint32 dirty_list_size;
 
-    volatile int buf_id_start;     /* buffer id start loc */
-    int32 next_scan_normal_loc;
-    int32 next_scan_ratio_loc;
-
     /* thread candidate list, main thread store the segment buffer information */
-    Buffer *cand_buf_list;   /* thread candidate buffer list */
-    volatile int cand_list_size;    /* thread candidate list max size, */
-    pg_atomic_uint64 head;
-    pg_atomic_uint64 tail;
-
-    /* thread seg buffer information */
-    Buffer *seg_cand_buf_list;
-    volatile int seg_cand_list_size;
-    pg_atomic_uint64 seg_head;
-    pg_atomic_uint64 seg_tail;
-
-    volatile int seg_id_start;     /* buffer id start loc */
-    int32 next_scan_seg_loc;
+    CandidateList normal_list;
+    CandidateList nvm_list;
+    CandidateList seg_list;
 } PageWriterProc;
 
 typedef struct PageWriterProcs {
@@ -163,11 +171,10 @@ extern const incre_ckpt_view_col g_ckpt_view_col[INCRE_CKPT_VIEW_COL_NUM];
 extern const incre_ckpt_view_col g_pagewriter_view_col[PAGEWRITER_VIEW_COL_NUM];
 extern const incre_ckpt_view_col g_pagewirter_view_two_col[CANDIDATE_VIEW_COL_NUM];
 
-extern bool candidate_buf_pop(int *buf_id, int thread_id);
-extern bool seg_candidate_buf_pop(int *buf_id, int thread_id);
+extern bool candidate_buf_pop(CandidateList *list, int *buf_id);
 extern void candidate_buf_init(void);
 
-extern uint32 get_curr_candidate_nums(bool segment);
+extern uint32 get_curr_candidate_nums(CandListType type);
 extern void PgwrAbsorbFsyncRequests(void);
 extern Size PageWriterShmemSize(void);
 extern void PageWriterSyncShmemInit(void);

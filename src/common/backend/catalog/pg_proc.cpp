@@ -152,7 +152,7 @@ static Acl* ProcAclDefault(Oid ownerId)
  * @in c: character.
  * @return: True or false.
  */
-static bool check_special_character(char c)
+bool check_special_character(char c)
 {
     switch (c) {
         case ' ':

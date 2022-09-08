@@ -113,7 +113,7 @@ static void setup_bgwriter_signalhook(void)
     sigdelset(&t_thrd.libpq_cxt.BlockSig, SIGQUIT);
 }
 
-static void bgwriter_handle_exceptions(WritebackContext wb_context, MemoryContext bgwriter_cxt)
+static void bgwriter_handle_exceptions(WritebackContext *wb_context, MemoryContext bgwriter_cxt)
 {
     /*
      * Close all open files after any error.  This is helpful on Windows,
@@ -168,7 +168,7 @@ static void bgwriter_handle_exceptions(WritebackContext wb_context, MemoryContex
     MemoryContextResetAndDeleteChildren(bgwriter_cxt);
 
     /* re-initialize to avoid repeated errors causing problems */
-    WritebackContextInit(&wb_context, &u_sess->attr.attr_storage.bgwriter_flush_after);
+    WritebackContextInit(wb_context, &u_sess->attr.attr_storage.bgwriter_flush_after);
 
     /* Now we can allow interrupts again */
     RESUME_INTERRUPTS();
@@ -237,7 +237,7 @@ void BackgroundWriterMain(void)
     int* oldTryCounter = NULL;
     if (sigsetjmp(local_sigjmp_buf, 1) != 0) {
         gstrace_tryblock_exit(true, oldTryCounter);
-        bgwriter_handle_exceptions(wb_context, bgwriter_context);
+        bgwriter_handle_exceptions(&wb_context, bgwriter_context);
 
         /* Report wait end here, when there is no further possibility of wait */
         pgstat_report_waitevent(WAIT_EVENT_END);
@@ -530,7 +530,8 @@ Datum bgwriter_view_get_last_flush_num()
 
 Datum bgwriter_view_get_candidate_nums()
 {
-    int candidate_num = get_curr_candidate_nums(true) + get_curr_candidate_nums(false);
+    int candidate_num = get_curr_candidate_nums(CAND_LIST_NORMAL) + get_curr_candidate_nums(CAND_LIST_NVM) +
+        get_curr_candidate_nums(CAND_LIST_SEG);
     return Int32GetDatum(candidate_num);
 }
 
@@ -586,7 +587,7 @@ void invalid_buffer_bgwriter_main()
 
     if (sigsetjmp(localSigjmpBuf, 1) != 0) {
         ereport(WARNING, (errmsg("invalidate buffer bgwriter exception occured.")));
-        bgwriter_handle_exceptions(wb_context, bgwriter_context);
+        bgwriter_handle_exceptions(&wb_context, bgwriter_context);
     }
 
     /* We can now handle ereport(ERROR) */

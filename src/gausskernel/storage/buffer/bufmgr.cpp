@@ -61,6 +61,7 @@
 #include "storage/ipc.h"
 #include "storage/proc.h"
 #include "storage/smgr/segment.h"
+#include "storage/nvm/nvm.h"
 #include "storage/standby.h"
 #include "utils/aiomem.h"
 #include "utils/guc.h"
@@ -353,8 +354,6 @@ void ForgetPrivateRefCountEntry(PrivateRefCountEntry *ref)
 }
 
 static void BufferSync(int flags);
-static uint32 WaitBufHdrUnlocked(BufferDesc* buf);
-static void WaitIO(BufferDesc* buf);
 static void TerminateBufferIO_common(BufferDesc* buf, bool clear_dirty, uint32 set_flag_bits);
 void shared_buffer_write_error_callback(void* arg);
 static BufferDesc* BufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumber forkNum, BlockNumber blockNum,
@@ -654,15 +653,7 @@ static volatile BufferDesc *PageListBufferAlloc(SMgrRelation smgr, char relpersi
             old_hash = BufTableHashCode(&old_tag);
             old_partition_lock = BufMappingPartitionLock(old_hash);
             /* Must lock the lower-numbered partition first to avoid deadlocks. */
-            if (old_partition_lock < new_partition_lock) {
-                (void)LWLockAcquire(old_partition_lock, LW_EXCLUSIVE);
-                (void)LWLockAcquire(new_partition_lock, LW_EXCLUSIVE);
-            } else if (old_partition_lock > new_partition_lock) {
-                (void)LWLockAcquire(new_partition_lock, LW_EXCLUSIVE);
-                (void)LWLockAcquire(old_partition_lock, LW_EXCLUSIVE);
-            } else {
-                (void)LWLockAcquire(new_partition_lock, LW_EXCLUSIVE);
-            }
+            LockTwoLWLock(new_partition_lock, old_partition_lock);
         } else {
             /* if it wasn't valid, we need only the new partition */
             (void)LWLockAcquire(new_partition_lock, LW_EXCLUSIVE);
@@ -2378,7 +2369,7 @@ void SimpleMarkBufDirty(BufferDesc *buf)
 
 }
 
-static void PageCheckIfCanEliminate(BufferDesc *buf, uint32 *oldFlags, bool *needGetLock)
+void PageCheckIfCanEliminate(BufferDesc *buf, uint32 *oldFlags, bool *needGetLock)
 {
     Block tmpBlock = BufHdrGetBlock(buf);
 
@@ -2402,7 +2393,7 @@ static void PageCheckIfCanEliminate(BufferDesc *buf, uint32 *oldFlags, bool *nee
 }
 
 #ifdef USE_ASSERT_CHECKING
-static void PageCheckWhenChosedElimination(const BufferDesc *buf, uint32 oldFlags)
+void PageCheckWhenChosedElimination(const BufferDesc *buf, uint32 oldFlags)
 {
     if ((oldFlags & BM_TAG_VALID) && RecoveryInProgress()) {
         if (!XLByteEQ(buf->lsn_dirty, InvalidXLogRecPtr)) {
@@ -2435,6 +2426,10 @@ static void PageCheckWhenChosedElimination(const BufferDesc *buf, uint32 oldFlag
 static BufferDesc *BufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumber fork_num, BlockNumber block_num,
                                BufferAccessStrategy strategy, bool *found, const XLogPhyBlock *pblk)
 {
+    if (g_instance.attr.attr_storage.nvm_attr.enable_nvm) {
+        return NvmBufferAlloc(smgr, relpersistence, fork_num, block_num, strategy, found, pblk);
+    }
+
     Assert(!IsSegmentPhysicalRelNode(smgr->smgr_rnode.node));
 
     BufferTag new_tag;                 /* identity of requested block */
@@ -2635,16 +2630,7 @@ static BufferDesc *BufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumbe
              * Must lock the lower-numbered partition first to avoid
              * deadlocks.
              */
-            if (old_partition_lock < new_partition_lock) {
-                (void)LWLockAcquire(old_partition_lock, LW_EXCLUSIVE);
-                (void)LWLockAcquire(new_partition_lock, LW_EXCLUSIVE);
-            } else if (old_partition_lock > new_partition_lock) {
-                (void)LWLockAcquire(new_partition_lock, LW_EXCLUSIVE);
-                (void)LWLockAcquire(old_partition_lock, LW_EXCLUSIVE);
-            } else {
-                /* only one partition, only one lock */
-                (void)LWLockAcquire(new_partition_lock, LW_EXCLUSIVE);
-            }
+            LockTwoLWLock(new_partition_lock, old_partition_lock);
         } else {
             /* if it wasn't valid, we need only the new partition */
             (void)LWLockAcquire(new_partition_lock, LW_EXCLUSIVE);
@@ -4651,7 +4637,7 @@ XLogRecPtr BufferGetLSNAtomic(Buffer buffer)
 
 void DropSegRelNodeSharedBuffer(RelFileNode node, ForkNumber forkNum)
 {
-    for (int i = 0; i < g_instance.attr.attr_storage.NBuffers; i++) {
+    for (int i = 0; i < SegmentBufferStartID; i++) {
         BufferDesc *buf_desc = GetBufferDescriptor(i);
         uint32 buf_state;
 
@@ -4696,7 +4682,7 @@ void DropSegRelNodeSharedBuffer(RelFileNode node, ForkNumber forkNum)
 void RangeForgetBuffer(RelFileNode node, ForkNumber forkNum, BlockNumber firstDelBlock,
     BlockNumber endDelBlock)
 {
-    for (int i = 0; i < g_instance.attr.attr_storage.NBuffers; i++) {
+    for (int i = 0; i < SegmentBufferStartID; i++) {
         BufferDesc *buf_desc = GetBufferDescriptor(i);
         uint32 buf_state;
 
@@ -4716,7 +4702,7 @@ void DropRelFileNodeShareBuffers(RelFileNode node, ForkNumber forkNum, BlockNumb
 {
     int i;
 
-    for (i = 0; i < g_instance.attr.attr_storage.NBuffers; i++) {
+    for (i = 0; i < SegmentBufferStartID; i++) {
         BufferDesc *buf_desc = GetBufferDescriptor(i);
         uint32 buf_state;
         /*
@@ -4817,7 +4803,7 @@ void DropRelFileNodeAllBuffersUsingHash(HTAB *relfilenode_hashtbl)
 {
     int i;
 
-    for (i = 0; i < g_instance.attr.attr_storage.NBuffers; i++) {
+    for (i = 0; i < SegmentBufferStartID; i++) {
         BufferDesc *buf_desc = GetBufferDescriptor(i);
         uint32 buf_state;
         bool found = false;
@@ -4869,7 +4855,7 @@ void DropRelFileNodeAllBuffersUsingHash(HTAB *relfilenode_hashtbl)
 void DropRelFileNodeOneForkAllBuffersUsingHash(HTAB *relfilenode_hashtbl)
 {
     int i;
-    for (i = 0; i < g_instance.attr.attr_storage.NBuffers; i++) {
+    for (i = 0; i < SegmentBufferStartID; i++) {
         BufferDesc *buf_desc = GetBufferDescriptor(i);
         uint32 buf_state;
         bool found = false;
@@ -5005,9 +4991,9 @@ void DropRelFileNodeAllBuffersUsingScan(RelFileNode *rnodes, int rnode_len)
 
     pg_qsort(rnodes, (size_t)rnode_len, sizeof(RelFileNode), compare_rnode_func);
 
-    Assert((g_instance.attr.attr_storage.NBuffers % 4) == 0);
+    Assert((SegmentBufferStartID % 4) == 0);
     int i;
-    for (i = 0; i < g_instance.attr.attr_storage.NBuffers; i += 4) {
+    for (i = 0; i < SegmentBufferStartID; i += 4) {
         ScanCompareAndInvalidateBuffer(rnodes, rnode_len, i);
 
         ScanCompareAndInvalidateBuffer(rnodes, rnode_len, i + 1);
@@ -5144,7 +5130,7 @@ void flush_all_buffers(Relation rel, Oid db_id, HTAB *hashtbl)
     // @Temp Table. no relation use local buffer. Temp table now use shared buffer.
     /* Make sure we can handle the pin inside the loop */
     ResourceOwnerEnlargeBuffers(t_thrd.utils_cxt.CurrentResourceOwner);
-    for (i = 0; i < NORMAL_SHARED_BUFFER_NUM; i++) {
+    for (i = 0; i < SegmentBufferStartID; i++) {
         buf_desc = GetBufferDescriptor(i);
         /*
          * As in DropRelFileNodeBuffers, an unlocked precheck should be safe
@@ -5852,7 +5838,7 @@ bool IsBufferCleanupOK(Buffer buffer)
 /*
  * WaitIO -- Block until the IO_IN_PROGRESS flag on 'buf' is cleared.
  */
-static void WaitIO(BufferDesc *buf)
+void WaitIO(BufferDesc *buf)
 {
     /*
      * Changed to wait until there's no IO - Inoue 01/13/2000
@@ -6299,7 +6285,7 @@ bool retryLockBufHdr(BufferDesc *desc, uint32 *buf_state)
  * Obviously the buffer could be locked by the time the value is returned, so
  * this is primarily useful in CAS style loops.
  */
-static uint32 WaitBufHdrUnlocked(BufferDesc *buf)
+uint32 WaitBufHdrUnlocked(BufferDesc *buf)
 {
 #ifndef ENABLE_THREAD_CHECK
     SpinDelayStatus delay_status = init_spin_delay(buf);
@@ -6833,3 +6819,16 @@ void PartitionInsertTdeInfoToCache(Relation reln, Partition p)
     }
 }
 
+void LockTwoLWLock(LWLock *new_partition_lock, LWLock *old_partition_lock)
+{
+    if (old_partition_lock < new_partition_lock) {
+        (void)LWLockAcquire(old_partition_lock, LW_EXCLUSIVE);
+        (void)LWLockAcquire(new_partition_lock, LW_EXCLUSIVE);
+    } else if (old_partition_lock > new_partition_lock) {
+        (void)LWLockAcquire(new_partition_lock, LW_EXCLUSIVE);
+        (void)LWLockAcquire(old_partition_lock, LW_EXCLUSIVE);
+    } else {
+        /* only one partition, only one lock */
+        (void)LWLockAcquire(new_partition_lock, LW_EXCLUSIVE);
+    }
+}

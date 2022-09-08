@@ -540,8 +540,10 @@ typedef struct knl_g_ckpt_context {
     /* pagewriter thread view information */
     uint64 page_writer_actual_flush;
     volatile uint64 get_buf_num_candidate_list;
+    volatile uint64 nvm_get_buf_num_candidate_list;
     volatile uint64 seg_get_buf_num_candidate_list;
     volatile uint64 get_buf_num_clock_sweep;
+    volatile uint64 nvm_get_buf_num_clock_sweep;
     volatile uint64 seg_get_buf_num_clock_sweep;
 
     /* checkpoint view information */

@@ -81,6 +81,14 @@ typedef struct knl_instance_attr_dcf {
     int dcf_mec_batch_size;
 } knl_instance_attr_dcf;
 
+typedef struct knl_instance_attr_nvm {
+    bool enable_nvm;
+    char* nvm_file_path;
+    char *nvmBlocks;
+    double bypassDram;
+    double bypassNvm;
+} knl_instance_attr_nvm;
+
 typedef struct knl_instance_attr_storage {
     bool wal_log_hints;
     bool EnableHotStandby;
@@ -100,6 +108,7 @@ typedef struct knl_instance_attr_storage {
     int WalReceiverBufSize;
     int DataQueueBufSize;
     int NBuffers;
+    int NNvmBuffers;
     int NPcaBuffers;
     int NSegBuffers;
     int cstore_buffers;
@@ -144,6 +153,7 @@ typedef struct knl_instance_attr_storage {
     int max_concurrent_autonomous_transactions;
     char* available_zone;
     knl_instance_attr_dcf dcf_attr;
+    knl_instance_attr_nvm nvm_attr;
     int num_internal_lock_partitions[LWLOCK_PART_KIND];
     char* num_internal_lock_partitions_str;
     int wal_insert_status_entries_power;

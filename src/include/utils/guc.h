@@ -365,6 +365,9 @@ extern void assign_xlog_sync_method(int new_sync_method, void* extra);
 /* in tcop/stmt_retry.cpp */
 extern bool check_errcode_list(char** newval, void** extra, GucSource source);
 
+/* in nvm.cpp */
+extern bool check_nvm_path(char** newval, void** extra, GucSource source);
+
 extern struct config_generic* find_option(const char* name, bool create_placeholders, int elevel);
 /*
  * Error code for config file

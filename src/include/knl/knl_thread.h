@@ -2549,6 +2549,7 @@ typedef struct knl_t_storage_context {
     TransactionId* xminArray;
     union BufferDescPadded* BufferDescriptors;
     char* BufferBlocks;
+    char* NvmBufferBlocks;
     struct WritebackContext* BackendWritebackContext;
     struct HTAB* SharedBufHash;
     struct HTAB* BufFreeListHash;
