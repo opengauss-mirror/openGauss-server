@@ -477,16 +477,16 @@ bool ExecComputeStoredUpdateExpr(ResultRelInfo *resultRelInfo, EState *estate, T
     int attnum;
     uint32 updated_colnum_resno;
     Bitmapset* updatedCols = GetUpdatedColumns(node->resultRelInfo, node->ps.state);
+
+    HeapTuple oldtup = GetTupleForTrigger(estate, NULL, resultRelInfo, oldPartitionOid, bucketid, otid, LockTupleShared, NULL);
+    RecoredUpdateExpr(resultRelInfo, estate, cmdtype);
+
     /*
      * If no generated columns have been affected by this change, then skip
      * the rest.
      */
     if (resultRelInfo->ri_NumUpdatedNeeded == 0)
         return true;
-
-    HeapTuple oldtup = GetTupleForTrigger(estate, NULL, resultRelInfo, oldPartitionOid, bucketid, otid, LockTupleShared, NULL);
-
-    RecoredUpdateExpr(resultRelInfo, estate, cmdtype);
 
     /* compare update operator whether the newtuple is equal to the oldtuple, 
      * if equal, so update don't fix the default column value  */
