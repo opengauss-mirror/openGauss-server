@@ -82,7 +82,6 @@ static Node* transformWholeRowRef(ParseState* pstate, RangeTblEntry* rte, int lo
 static Node* transformIndirection(ParseState* pstate, Node* basenode, List* indirection);
 static Node* transformTypeCast(ParseState* pstate, TypeCast* tc);
 static Node* transformCollateClause(ParseState* pstate, CollateClause* c);
-static Node* transformSetVariableExpr(SetVariableExpr* set);
 static Node* make_row_comparison_op(ParseState* pstate, List* opname, List* largs, List* rargs, int location);
 static Node* make_row_distinct_op(ParseState* pstate, List* opname, RowExpr* lrow, RowExpr* rrow, int location);
 static Node* convertStarToCRef(RangeTblEntry* rte, char* catname, char* nspname, char* relname, int location);
@@ -1850,7 +1849,7 @@ static Node* transformCaseExpr(ParseState* pstate, CaseExpr* c)
 /*
 * transformSetVariableExpr gets variable's value according to name and saves it in ConstExpr
 */
-static Node* transformSetVariableExpr(SetVariableExpr* set)
+Node* transformSetVariableExpr(SetVariableExpr* set)
 {
     SetVariableExpr *result = makeNode(SetVariableExpr);
     result->name = set->name;

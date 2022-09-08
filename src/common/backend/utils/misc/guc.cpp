@@ -8706,6 +8706,10 @@ void AlterSystemSetConfigFile(AlterSystemStmt * altersysstmt)
     release_file_lock(&filelock);
     /* release thread lock for config file */
     LWLockRelease(ConfigFileLock);
+
+    if (altersysstmt->setstmt->is_multiset) {
+        ereport(NOTICE, (errmsg("global parameter %s has been set", name)));
+    }
 }
 #endif
 

@@ -73,6 +73,7 @@
 #include "db4ai/gd.h"
 #include "catalog/pg_proc_fn.h"
 #include "access/tuptoaster.h"
+#include "parser/parse_expr.h"
 
 /* static function decls */
 static bool isAssignmentIndirectionExpr(ExprState* exprstate);
@@ -1072,6 +1073,9 @@ static Datum ExecEvalConst(ExprState* exprstate, ExprContext* econtext, bool* is
 
         /* if not found, return a null const */
         con = found ? entry->value : makeConst(UNKNOWNOID, -1, InvalidOid, -2, (Datum)0, true, false);
+    } else if (IsA(exprstate->expr, SetVariableExpr)) {
+        SetVariableExpr* setvar = (SetVariableExpr*)transformSetVariableExpr((SetVariableExpr*)exprstate->expr);
+        con = (Const*)setvar->value;
     } else {
         con = (Const*)exprstate->expr;
     }
@@ -5290,6 +5294,7 @@ ExprState* ExecInitExpr(Expr* node, PlanState* parent)
             break;
         case T_Const:
         case T_UserVar:
+        case T_SetVariableExpr:
             state = (ExprState*)makeNode(ExprState);
             state->evalfunc = ExecEvalConst;
             break;

@@ -394,7 +394,7 @@ static void processFunctionRecordOutParam(int varno, Oid funcoid, int* outparam)
  */
 %token <str>	IDENT FCONST SCONST BCONST VCONST XCONST Op CmpOp CmpNullOp COMMENTSTRING SET_USER_IDENT SET_IDENT
 %token <ival>	ICONST PARAM
-%token			TYPECAST ORA_JOINOP DOT_DOT COLON_EQUALS PARA_EQUALS
+%token			TYPECAST ORA_JOINOP DOT_DOT COLON_EQUALS PARA_EQUALS SET_IDENT_SESSION SET_IDENT_GLOBAL
 
 /*
  * Other tokens recognized by plpgsql's lexer interface layer (pl_scanner.c).

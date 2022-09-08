@@ -1805,6 +1805,14 @@ static bool _equalVariableSetStmt(const VariableSetStmt* a, const VariableSetStm
     COMPARE_NODE_FIELD(args);
     COMPARE_SCALAR_FIELD(is_local);
     COMPARE_NODE_FIELD(defined_args);
+    COMPARE_SCALAR_FIELD(is_multiset);
+
+    return true;
+}
+
+static bool _equalVariableMultiSetStmt(const VariableMultiSetStmt* a, const VariableMultiSetStmt* b)
+{
+    COMPARE_NODE_FIELD(args);
 
     return true;
 }
@@ -3767,6 +3775,9 @@ bool equal(const void* a, const void* b)
             break;
         case T_VariableSetStmt:
             retval = _equalVariableSetStmt((VariableSetStmt*)a, (VariableSetStmt*)b);
+            break;
+        case T_VariableMultiSetStmt:
+            retval = _equalVariableMultiSetStmt((VariableMultiSetStmt*)a, (VariableMultiSetStmt*)b);
             break;
         case T_VariableShowStmt:
             retval = _equalVariableShowStmt((VariableShowStmt*)a, (VariableShowStmt*)b);

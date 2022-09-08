@@ -5637,15 +5637,22 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
 		
 #ifndef ENABLE_MULTIPLE_NODES
         case T_AlterSystemStmt:
+        {
             /*
              * 1.AlterSystemSet don't care whether the node is PRIMARY or STANDBY as same as gs_guc.
              * 2.AlterSystemSet don't care whether the database is read-only, as same as gs_guc.
              * 3.It cannot be executed in a transaction because it is not rollbackable.
              */
-            PreventTransactionChain(is_top_level, "ALTER SYSTEM SET");
+            
+            AlterSystemStmt* stmt = (AlterSystemStmt*)parse_tree;
+            if (stmt->setstmt->is_multiset) {
+                PreventTransactionChain(true, "ALTER SYSTEM SET");
+            } else {
+                PreventTransactionChain(is_top_level, "ALTER SYSTEM SET");
+            }
 
             AlterSystemSetConfigFile((AlterSystemStmt*)parse_tree);
-            break;
+        } break;
 #endif
 
         case T_VariableSetStmt:
@@ -5715,6 +5722,24 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
             }
 #endif
             break;
+
+        case T_VariableMultiSetStmt: {
+            VariableMultiSetStmt* n = (VariableMultiSetStmt*)parse_tree;
+            List* stmts = n->args;
+            ListCell* l = NULL;
+
+            foreach (l, stmts) {
+                Node* stmt = (Node*)lfirst(l);
+
+                ProcessUtility(stmt,
+                            query_string,
+                            params,
+                            false,
+                            None_Receiver,
+                            true,
+                            NULL);
+            }
+        } break;
 
         case T_VariableShowStmt: {
             VariableShowStmt* n = (VariableShowStmt*)parse_tree;
@@ -7196,6 +7221,7 @@ static bool is_stmt_allowed_in_locked_mode(Node* parse_tree, const char* query_s
         case T_ClusterStmt:
         case T_ExplainStmt:
         case T_VariableSetStmt:
+        case T_VariableMultiSetStmt:
         case T_VariableShowStmt:
         case T_DiscardStmt:
         case T_LockStmt:
@@ -8596,6 +8622,11 @@ const char* CreateCommandTag(Node* parse_tree)
             }
             break;
 
+        case T_VariableMultiSetStmt:
+            {
+                tag = "Set";
+            } break;
+
         case T_VariableShowStmt:
             tag = "SHOW";
             break;
@@ -9564,6 +9595,10 @@ LogStmtLevel GetCommandLogLevel(Node* parse_tree)
             break;
 
         case T_VariableSetStmt:
+            lev = LOGSTMT_ALL;
+            break;
+
+        case T_VariableMultiSetStmt:
             lev = LOGSTMT_ALL;
             break;
 

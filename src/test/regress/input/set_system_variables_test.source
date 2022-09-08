@@ -13,12 +13,38 @@ select @@session.codegen_cost_threshold  = 1001;
 set @@global.dcf_connect_timeout = 6000;
 select  @@global.dcf_connect_timeout;
 
+set global dcf_connect_timeout = 6000;
+set global dcf_connect_timeout = abs(6000);
+set session codegen_cost_threshold = 10000 * 1;
+set codegen_cost_threshold = 10000 * 1;
+set codegen_cost_threshold = (select 10000);
+
+create database test_set dbcompatibility 'b';
+\c test_set
+-- dbcompatibility is B Format, enable_set_variable_b_format=off
+set codegen_cost_threshold = default;
+set codegen_cost_threshold = 10000;
+
+set @@codegen_cost_threshold = 10000;
+set @@session.codegen_cost_threshold = 10000;
+set @@session.codegen_cost_threshold = default;
+
+select @@session.codegen_cost_threshold;
+select @@session.codegen_cost_threshold  = 1001;
+
+set @@global.dcf_connect_timeout = 6000;
+select  @@global.dcf_connect_timeout;
+
+set global dcf_connect_timeout = 6000;
+set global dcf_connect_timeout = abs(6000);
+set session codegen_cost_threshold = 10000 * 1;
+set codegen_cost_threshold = 10000 * 1;
+set codegen_cost_threshold = (select 10000);
+
 \! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "enable_set_variable_b_format=on" >/dev/null 2>&1
 \! sleep 1
 
--- dbcompatibility is B Format
-create database test_set dbcompatibility 'b';
-\c test_set
+-- dbcompatibility is B Format, enable_set_variable_b_format=on
 
 -- test integer params, e.g. codegen_cost_threshold 
 set codegen_cost_threshold = default;
@@ -201,6 +227,50 @@ insert into t1 values (1024);
 set @@session.backwrite_quantity = (select * from t1);
 insert into t1 values (1025);
 set @@session.backwrite_quantity = (select * from t1);
+
+-- test multiset
+set global log_destination = 'stderr,syslog', @v1:=@v2:='aaa' ,@@codegen_cost_threshold = 10000, @v3:= 1, @@session.cpu_index_tuple_cost = default, @@application_name = (select 'gsql');
+set global log_destination = 'stderr,syslog', @@codegen_cost_threshold = 10000, @v1:= 1;
+set global log_destination = 'stderr', @@codegen_cost_threshold = abs(10000), @v1:= @@codegen_cost_threshold;
+set @@session.codegen_cost_threshold = 10000, @v2:=@v1:= 1;
+set global log_destination = 'stderr,syslog', @@codegen_cost_threshold = 10000, @v1:= 1, global checkpoint_completion_target = 0.3 * 1;
+set @v1 := 10000;
+set @v2:=@v1:= 9999,@@session.codegen_cost_threshold = @v1 ;
+
+-- fail e.g.
+set global log_destination = stderr,syslog;
+set global log_destination = stderr,syslog , @v1:= 1, @@codegen_cost_threshold = 10000;
+set global log_destination = stderr,syslog , @v1:= 1, @@codegen_cost_threshold = aa;
+set global log_destination = 'stderr', @v1:= 1, @@codegen_cost_threshold = 'aa';
+
+-- test procedure
+create table test_pro(a int);
+
+create or replace procedure pro1()
+as
+begin
+    insert into test_pro values(@@session_timeout);
+end;
+/
+call pro1();
+set @@session_timeout = 700;
+call pro1();
+set @@session_timeout = 800;
+call pro1();
+select * from test_pro;
+
+create or replace procedure proc1 as
+declare
+v1 integer;
+v2 integer;
+begin
+set @@session.session_timeout = 240;
+set @@global.dcf_connect_timeout = 60000;
+select @@session.session_timeout, @@global.dcf_connect_timeout into v1,v2;
+raise info 'v1:%', v1;
+raise info 'v2:%', v2;
+end;
+/
 
 \c regression
 drop database if exists test_set;
