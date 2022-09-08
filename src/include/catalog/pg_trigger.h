@@ -21,7 +21,6 @@
 #define PG_TRIGGER_H
 
 #include "catalog/genbki.h"
-
 /* ----------------
  *        pg_trigger definition.    cpp turns this into
  *        typedef struct FormData_pg_trigger
@@ -51,17 +50,19 @@ CATALOG(pg_trigger,2620) BKI_SCHEMA_MACRO
     bool           tgdeferrable;      /* constraint trigger is deferrable */
     bool           tginitdeferred;    /* constraint trigger is deferred initially */
     int2           tgnargs;           /* # of extra arguments in tgargs */
-
+    int2vector     tgattr;            /* column numbers, if trigger is on columns */
     /*
      * Variable-length fields start here, but we allow direct access to
      * tgattr. Note: tgattr and tgargs must not be null.
      */
-    int2vector    tgattr;            /* column numbers, if trigger is on columns */
 
 #ifdef CATALOG_VARLEN
-    bytea        tgargs;             /* first\000second\000tgnargs\000 */
-    pg_node_tree tgqual;             /* WHEN expression, or NULL if none */
-    Oid          tgowner;            /* trigger owner's oid */
+    bytea         tgargs;             /* first\000second\000tgnargs\000 */
+    pg_node_tree  tgqual;             /* WHEN expression, or NULL if none */
+    Oid           tgowner;            /* trigger owner's oid */
+    NameData      tgordername;        /* trigger_order name */
+    NameData      tgorder;            /* follows| precedes */
+    NameData      tgtime;             /* create trigger time */
 #endif
 } FormData_pg_trigger;
 
@@ -76,7 +77,7 @@ typedef FormData_pg_trigger *Form_pg_trigger;
  *        compiler constants for pg_trigger
  * ----------------
  */
-#define Natts_pg_trigger                   16
+#define Natts_pg_trigger                   19
 #define Anum_pg_trigger_tgrelid            1
 #define Anum_pg_trigger_tgname             2
 #define Anum_pg_trigger_tgfoid             3
@@ -93,6 +94,11 @@ typedef FormData_pg_trigger *Form_pg_trigger;
 #define Anum_pg_trigger_tgargs             14
 #define Anum_pg_trigger_tgqual             15
 #define Anum_pg_trigger_tgowner            16
+#define Anum_pg_trigger_tgordername        17
+#define Anum_pg_trigger_tgorder            18
+#define Anum_pg_trigger_tgtime             19
+
+
 
 
 /* Bits within tgtype */

@@ -6028,6 +6028,11 @@ static CreateTrigStmt* _copyCreateTrigStmt(const CreateTrigStmt* from)
     COPY_SCALAR_FIELD(deferrable);
     COPY_SCALAR_FIELD(initdeferred);
     COPY_NODE_FIELD(constrrel);
+    COPY_NODE_FIELD(funcSource);
+    COPY_STRING_FIELD(definer);
+    COPY_SCALAR_FIELD(if_not_exists);
+    COPY_STRING_FIELD(trgordername);
+    COPY_SCALAR_FIELD(is_follows);
 
     return newnode;
 }

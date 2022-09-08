@@ -978,7 +978,7 @@ test: fdw_audit
 test: gs_global_config_audit
 test: detail declare_multiple_variable
 test: gs_dump_encrypt substr
-test: composite_datum_record mysql_function b_comments
+test: composite_datum_record mysql_function b_comments mysql_syntax
 
 test: join_test_alias alter_ctable_compress
 test: ignore/ignore_type_transform ignore/ignore_not_null_constraints ignore/ignore_unique_constraints ignore/ignore_no_matched_partition
