@@ -24,7 +24,7 @@ SELECT [/*+ plan_hint */] [ ALL | DISTINCT [ ON ( expression [, ...] ) ] ]
     [ LIMIT { [offset,] count | ALL } ]
     [ OFFSET start [ ROW | ROWS ] ]
     [ FETCH { FIRST | NEXT } [ count ] { ROW | ROWS } ONLY ]
-    [ {FOR { UPDATE | NO KEY UPDATE | SHARE | KEY SHARE } [ OF table_name [, ...] ] [ NOWAIT | WAIT N ]} [...] ]
+    [ {FOR { UPDATE | NO KEY UPDATE | SHARE | KEY SHARE } [ OF table_name [, ...] ] [ NOWAIT | WAIT N | SKIP LOCKED]} [...] ]
 TABLE { ONLY { (table_name) | table_name } | table_name [ * ]};
 
 where from_item can be:

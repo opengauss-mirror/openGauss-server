@@ -1600,7 +1600,7 @@ static void expand_inherited_rtentry(PlannerInfo* root, RangeTblEntry* rte, Inde
             newrc->prti = rti;
             newrc->rowmarkId = oldrc->rowmarkId;
             newrc->markType = oldrc->markType;
-            newrc->noWait = oldrc->noWait;
+            newrc->waitPolicy = oldrc->waitPolicy;
             newrc->waitSec = oldrc->waitSec;
             newrc->isParent = false;
 

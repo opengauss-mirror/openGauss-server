@@ -401,11 +401,11 @@ TM_Result tableam_tuple_update(Relation relation, Relation parentRelation, ItemP
 }
 
 TM_Result tableam_tuple_lock(Relation relation, Tuple tuple, Buffer *buffer, CommandId cid,
-    LockTupleMode mode, bool nowait, TM_FailureData *tmfd, bool allow_lock_self, bool follow_updates, bool eval,
+    LockTupleMode mode, LockWaitPolicy waitPolicy, TM_FailureData *tmfd, bool allow_lock_self, bool follow_updates, bool eval,
     Snapshot snapshot, ItemPointer tid, bool isSelectForUpdate, bool isUpsert, TransactionId conflictXid,
     int waitSec)
 {
-    return g_tableam_routines[relation->rd_tam_type]->tuple_lock(relation, tuple, buffer, cid, mode, nowait, tmfd,
+    return g_tableam_routines[relation->rd_tam_type]->tuple_lock(relation, tuple, buffer, cid, mode, waitPolicy, tmfd,
         allow_lock_self, follow_updates, eval, snapshot, tid, isSelectForUpdate, isUpsert, conflictXid,
         waitSec);
 }
@@ -884,12 +884,12 @@ TM_Result HeapamTupleUpdate(Relation relation, Relation parentRelation, ItemPoin
 }
 
 TM_Result HeapamTupleLock(Relation relation, Tuple tuple, Buffer *buffer,
-    CommandId cid, LockTupleMode mode, bool nowait, TM_FailureData *tmfd,
+    CommandId cid, LockTupleMode mode, LockWaitPolicy waitPolicy, TM_FailureData *tmfd,
     bool allow_lock_self, bool follow_updates, bool eval, Snapshot snapshot,
     ItemPointer tid, bool isSelectForUpdate, bool isUpsert, TransactionId conflictXid,
     int waitSec)
 {
-    return heap_lock_tuple(relation, (HeapTuple)tuple, buffer, cid, mode, nowait, follow_updates, tmfd,
+    return heap_lock_tuple(relation, (HeapTuple)tuple, buffer, cid, mode, waitPolicy, follow_updates, tmfd,
                            allow_lock_self, waitSec);
 }
 
@@ -1685,10 +1685,10 @@ TM_Result UHeapamTupleUpdate(Relation relation, Relation parentRelation, ItemPoi
 
 
 TM_Result UHeapamTupleLock(Relation relation, Tuple tuple, Buffer *buffer, CommandId cid, LockTupleMode mode,
-    bool nowait, TM_FailureData *tmfd, bool allow_lock_self, bool follow_updates, bool eval, Snapshot snapshot,
+    LockWaitPolicy waitPolicy, TM_FailureData *tmfd, bool allow_lock_self, bool follow_updates, bool eval, Snapshot snapshot,
     ItemPointer tid, bool isSelectForUpdate, bool isUpsert, TransactionId conflictXid, int waitSec)
 {
-    return UHeapLockTuple(relation, (UHeapTuple)tuple, buffer, cid, mode, nowait, tmfd, follow_updates, eval, snapshot,
+    return UHeapLockTuple(relation, (UHeapTuple)tuple, buffer, cid, mode, waitPolicy, tmfd, follow_updates, eval, snapshot,
         isSelectForUpdate, allow_lock_self, isUpsert, conflictXid, waitSec);
 }
 

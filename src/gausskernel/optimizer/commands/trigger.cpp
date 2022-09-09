@@ -2985,7 +2985,7 @@ HeapTuple GetTupleForTrigger(EState* estate, EPQState* epqstate, ResultRelInfo* 
              * lock inplacetuple for update
              */
             inplacetest = tableam_tuple_lock(RELATION_IS_PARTITIONED(relation) ? fakeRelation : relation, utuple,
-                &buffer, estate->es_output_cid, LockTupleExclusive, false, &tmfd, false, false, false,
+                &buffer, estate->es_output_cid, LockTupleExclusive, LockWaitBlock, &tmfd, false, false, false,
                 estate->es_snapshot, tid, false);
 
             switch (inplacetest) {
@@ -3101,7 +3101,7 @@ ltrmark:;
                 &buffer,
                 estate->es_output_cid,
                 lockmode,
-                false,
+                LockWaitBlock,
                 &tmfd,
                 false,       // fake params below are for uheap implementation
                 false, false, NULL, NULL, false);

@@ -205,7 +205,7 @@ lnext:
 
         /* Need to merge the ustore logic with AM logic */
         test = tableam_tuple_lock(bucket_rel, &tuple, &buffer, 
-                                  estate->es_output_cid, lock_mode, erm->noWait, &tmfd,
+                                      estate->es_output_cid, lock_mode, erm->waitPolicy, &tmfd,
 #ifdef ENABLE_MULTIPLE_NODES
                                   false, false, false, estate->es_snapshot, NULL, true,
 #else
@@ -216,6 +216,10 @@ lnext:
         ReleaseBuffer(buffer);
 
         switch (test) {
+            case TM_WouldBlock:
+                /* couldn't lock tuple in SKIP LOCKED mode */
+                goto lnext;
+
             case TM_SelfCreated:
                 ereport(ERROR, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
                     errmsg("attempted to lock invisible tuple")));

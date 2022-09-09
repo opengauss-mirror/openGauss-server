@@ -303,6 +303,11 @@ static inline int8 get_indexsplit_from_reloptions(bytea *reloptions, Oid amoid)
       RELKIND_TOASTVALUE == relation->rd_rel->relkind) && \
         relation->rd_tam_type == TAM_USTORE)
 
+#define RelationIsAstoreFormat(relation) \
+    ((RELKIND_RELATION == relation->rd_rel->relkind || \
+      RELKIND_TOASTVALUE == relation->rd_rel->relkind) && \
+        relation->rd_tam_type == TAM_HEAP)
+
 #define RelationIsUBTree(relation) (relation->rd_rel->relam == UBTREE_AM_OID)
 #define RelationIsUstoreIndex(relation) (RelationIsUBTree(relation))
 
