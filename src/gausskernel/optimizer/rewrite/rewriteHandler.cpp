@@ -79,7 +79,7 @@ static void rewriteValuesRTE(RangeTblEntry* rte, Relation target_relation, List*
 static void rewriteTargetListUD(Query* parsetree, RangeTblEntry* target_rte, Relation target_relation, int rtindex);
 static void rewriteTargetListMutilUD(Query* parsetree, List* rtable, List* resultRelations);
 static void rewriteTargetListMutilUpdate(Query* parsetree, List* rtable, List* resultRelations);
-static void markQueryForLocking(Query* qry, Node* jtnode, LockClauseStrength strength, bool noWait, bool pushedDown,
+static void markQueryForLocking(Query* qry, Node* jtnode, LockClauseStrength strength, LockWaitPolicy waitPolicy, bool pushedDown,
                                 int waitSec);
 static List* matchLocks(CmdType event, RuleLock* rulelocks, int varno, Query* parsetree);
 static Query* fireRIRrules(Query* parsetree, List* activeRIRs, bool forUpdatePushedDown);
@@ -1855,7 +1855,7 @@ static Query* ApplyRetrieveRule(Query* parsetree, RewriteRule* rule, int rt_inde
      * made by recursing from the upper level in markQueryForLocking.
      */
     if (rc != NULL)
-        markQueryForLocking(rule_action, (Node*)rule_action->jointree, rc->strength, rc->noWait, true,
+        markQueryForLocking(rule_action, (Node*)rule_action->jointree, rc->strength, rc->waitPolicy, true,
                             rc->waitSec);
 
     /*
@@ -1901,6 +1901,18 @@ static Query* ApplyRetrieveRule(Query* parsetree, RewriteRule* rule, int rt_inde
     rte->updatedCols = NULL;
     rte->extraUpdatedCols = NULL;
 
+    /*
+     * If FOR [KEY] UPDATE/SHARE of view, mark all the contained tables as implicit
+     * FOR [KEY] UPDATE/SHARE, the same as the parser would have done if the view's
+     * subquery had been written out explicitly.
+     *
+     * Note: we don't consider forUpdatePushedDown here; such marks will be
+     * made by recursing from the upper level in markQueryForLocking.
+     */
+    if (rc != NULL)
+        markQueryForLocking(rule_action, (Node*)rule_action->jointree, rc->strength, rc->waitPolicy, true,
+            rc->waitSec);
+
     return parsetree;
 }
 
@@ -1915,7 +1927,7 @@ static Query* ApplyRetrieveRule(Query* parsetree, RewriteRule* rule, int rt_inde
  * OLD and NEW rels for updating.  The best way to handle that seems to be
  * to scan the jointree to determine which rels are used.
  */
-static void markQueryForLocking(Query* qry, Node* jtnode, LockClauseStrength strength, bool noWait, bool pushedDown,
+static void markQueryForLocking(Query* qry, Node* jtnode, LockClauseStrength strength, LockWaitPolicy waitPolicy, bool pushedDown,
                                 int waitSec)
 {
     if (jtnode == NULL)
@@ -1925,12 +1937,12 @@ static void markQueryForLocking(Query* qry, Node* jtnode, LockClauseStrength str
         RangeTblEntry* rte = rt_fetch(rti, qry->rtable);
 
         if (rte->rtekind == RTE_RELATION) {
-            applyLockingClause(qry, rti, strength, noWait, pushedDown, waitSec);
+            applyLockingClause(qry, rti, strength, waitPolicy, pushedDown, waitSec);
             rte->requiredPerms |= ACL_SELECT_FOR_UPDATE;
         } else if (rte->rtekind == RTE_SUBQUERY) {
-            applyLockingClause(qry, rti, strength, noWait, pushedDown, waitSec);
+            applyLockingClause(qry, rti, strength, waitPolicy, pushedDown, waitSec);
             /* FOR UPDATE/SHARE of subquery is propagated to subquery's rels */
-            markQueryForLocking(rte->subquery, (Node*)rte->subquery->jointree, strength, noWait, true,
+            markQueryForLocking(rte->subquery, (Node*)rte->subquery->jointree, strength, waitPolicy, true,
                                 waitSec);
         }
         /* other RTE types are unaffected by FOR UPDATE */
@@ -1939,12 +1951,12 @@ static void markQueryForLocking(Query* qry, Node* jtnode, LockClauseStrength str
         ListCell* l = NULL;
 
         foreach (l, f->fromlist)
-            markQueryForLocking(qry, (Node*)lfirst(l), strength, noWait, pushedDown, waitSec);
+            markQueryForLocking(qry, (Node*)lfirst(l), strength, waitPolicy, pushedDown, waitSec);
     } else if (IsA(jtnode, JoinExpr)) {
         JoinExpr* j = (JoinExpr*)jtnode;
 
-        markQueryForLocking(qry, j->larg, strength, noWait, pushedDown, waitSec);
-        markQueryForLocking(qry, j->rarg, strength, noWait, pushedDown, waitSec);
+        markQueryForLocking(qry, j->larg, strength, waitPolicy, pushedDown, waitSec);
+        markQueryForLocking(qry, j->rarg, strength, waitPolicy, pushedDown, waitSec);
     } else
         ereport(ERROR,
             (errmodule(MOD_OPT_REWRITE),

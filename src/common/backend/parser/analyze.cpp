@@ -4850,7 +4850,6 @@ static void transformLockingClause(ParseState* pstate, Query* qry, LockingClause
         lc->strength = lc->forUpdate ? LCS_FORUPDATE : LCS_FORSHARE;
     }
     allrels->strength = lc->strength;
-    allrels->noWait = lc->noWait;
     allrels->waitSec = lc->waitSec;
 
     /* The processing delay of the ProcSleep function is in milliseconds. Set the delay to int_max/1000. */
@@ -4864,6 +4863,7 @@ static void transformLockingClause(ParseState* pstate, Query* qry, LockingClause
                 erraction("Modify SQL statement according to the manual.")));
     }
 
+    allrels->waitPolicy = lc->waitPolicy;
 
     if (lockedRels == NIL) {
         /* all regular tables used in query */
@@ -4879,17 +4879,24 @@ static void transformLockingClause(ParseState* pstate, Query* qry, LockingClause
                         heap_close(rel, AccessShareLock);
                         ereport(ERROR,
                             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                                errmsg("SELECT FOR UPDATE/SHARE%s cannot be used with "
-                                       "column table \"%s\"", NOKEYUPDATE_KEYSHARE_ERRMSG, rte->eref->aliasname)));
+                                errmsg("SELECT FOR UPDATE/SHARE/NO KEY UPDATE/KEY SHARE cannot be used with "
+                                       "column table \"%s\"", rte->eref->aliasname)));
+                    } else {
+                        if (!RelationIsAstoreFormat(rel) && lc->waitPolicy == LockWaitSkip) {
+                            ereport(ERROR,
+                                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                    errmsg("SELECT FOR UPDATE/SHARE/NO KEY UPDATE/KEY SHARE with skip locked "
+                                        "only be used with AStore table \"%s\"", rte->eref->aliasname)));
+                        }
                     }
 
                     heap_close(rel, AccessShareLock);
 
-                    applyLockingClause(qry, i, lc->strength, lc->noWait, pushedDown, lc->waitSec);
+                    applyLockingClause(qry, i, lc->strength, lc->waitPolicy, pushedDown, lc->waitSec);
                     rte->requiredPerms |= ACL_SELECT_FOR_UPDATE;
                     break;
                 case RTE_SUBQUERY:
-                    applyLockingClause(qry, i, lc->strength, lc->noWait, pushedDown, lc->waitSec);
+                    applyLockingClause(qry, i, lc->strength, lc->waitPolicy, pushedDown, lc->waitSec);
 
                     /*
                      * FOR [KEY] UPDATE/SHARE of subquery is propagated to all of
@@ -4940,15 +4947,23 @@ static void transformLockingClause(ParseState* pstate, Query* qry, LockingClause
                                         errmsg("SELECT FOR UPDATE/SHARE%s cannot be used with column table \"%s\"",
                                                NOKEYUPDATE_KEYSHARE_ERRMSG, rte->eref->aliasname),
                                         parser_errposition(pstate, thisrel->location)));
+                            }else {
+                                if (!RelationIsAstoreFormat(rel) && lc->waitPolicy == LockWaitSkip) {
+                                    ereport(ERROR,
+                                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                            errmsg("SELECT FOR UPDATE/SHARE/NO KEY UPDATE/KEY SHARE with skip locked "
+                                                "only be used with row table \"%s\"", rte->eref->aliasname),
+                                            parser_errposition(pstate, thisrel->location)));
+                                }
                             }
 
                             heap_close(rel, AccessShareLock);
-                            applyLockingClause(qry, i, lc->strength, lc->noWait, pushedDown,
+                            applyLockingClause(qry, i, lc->strength, lc->waitPolicy, pushedDown,
                                                lc->waitSec);
                             rte->requiredPerms |= ACL_SELECT_FOR_UPDATE;
                             break;
                         case RTE_SUBQUERY:
-                            applyLockingClause(qry, i, lc->strength, lc->noWait, pushedDown,
+                            applyLockingClause(qry, i, lc->strength, lc->waitPolicy, pushedDown,
                                                lc->waitSec);
                             /* see comment above */
                             transformLockingClause(pstate, rte->subquery, allrels, true);
@@ -5004,7 +5019,7 @@ static void transformLockingClause(ParseState* pstate, Query* qry, LockingClause
 /*
  * Record locking info for a single rangetable item
  */
-void applyLockingClause(Query* qry, Index rtindex, LockClauseStrength strength, bool noWait, bool pushedDown,
+void applyLockingClause(Query* qry, Index rtindex, LockClauseStrength strength, LockWaitPolicy waitPolicy, bool pushedDown,
                         int waitSec)
 {
     RowMarkClause* rc = NULL;
@@ -5022,16 +5037,21 @@ void applyLockingClause(Query* qry, Index rtindex, LockClauseStrength strength, 
          * shared and exclusive lock at the same time; it'll end up being
          * exclusive anyway.)
          *
-         * We also consider that NOWAIT wins if it's specified both ways. This
-         * is a bit more debatable but raising an error doesn't seem helpful.
-         * (Consider for instance SELECT FOR UPDATE NOWAIT from a view that
-         * internally contains a plain FOR UPDATE spec.)
+         * Similarly, if the same RTE is specified with more than one lock wait
+         * policy, consider that NOWAIT wins over SKIP LOCKED, which in turn
+         * wins over waiting for the lock (the default).  This is a bit more
+         * debatable but raising an error doesn't seem helpful.  (Consider for
+         * instance SELECT FOR UPDATE NOWAIT from a view that internally
+         * contains a plain FOR UPDATE spec.)  Having NOWAIT win over SKIP
+         * LOCKED is reasonable since the former throws an error in case of
+         * coming across a locked tuple, which may be undesirable in some cases
+         * but it seems better than silently returning inconsistent results.
          *
          * And of course pushedDown becomes false if any clause is explicit.
          */
         rc->strength = Max(rc->strength, strength);
         rc->forUpdate = rc->strength == LCS_FORUPDATE;
-        rc->noWait = rc->noWait || noWait;
+        rc->waitPolicy = Max(rc->waitPolicy, waitPolicy);
         rc->waitSec = Max(rc->waitSec, waitSec);
         rc->pushedDown = rc->pushedDown && pushedDown;
         return;
@@ -5042,7 +5062,7 @@ void applyLockingClause(Query* qry, Index rtindex, LockClauseStrength strength, 
     rc->rti = rtindex;
     rc->forUpdate = strength == LCS_FORUPDATE;
     rc->strength = strength;
-    rc->noWait = noWait;
+    rc->waitPolicy = waitPolicy;
     rc->waitSec = waitSec;
     rc->pushedDown = pushedDown;
     qry->rowMarks = lappend(qry->rowMarks, rc);

@@ -1,0 +1,49 @@
+select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+set enable_opfusion = off;
+select * from skiplocked_t1 order by id for update nowait;
+ERROR:  could not obtain lock on row in relation "skiplocked_t1"
+select * from skiplocked_t1 order by id for update skip locked;
+ id | info  
+----+-------
+  1 | one
+  3 | three
+  4 | four
+  5 | five
+(4 rows)
+
+explain select * from skiplocked_t1 order by id for update skip locked;
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ LockRows  (cost=0.00..79.20 rows=1238 width=42)
+   ->  Index Scan using skiplocked_t1_pkey on skiplocked_t1  (cost=0.00..66.82 rows=1238 width=42)
+(2 rows)
+
+select * from skiplocked_t1 order by id for update;
+ id | info  
+----+-------
+  1 | one
+  2 | two2
+  3 | three
+  4 | four
+  5 | five
+(5 rows)
+
+select * from skiplocked_t2 order by id for update nowait;
+ id | info 
+----+------
+  1 | one
+(1 row)
+
+select * from skiplocked_t2 order by id for update skip locked;
+ERROR:  SELECT FOR UPDATE/SHARE/NO KEY UPDATE/KEY SHARE with skip locked only be used with AStore table "skiplocked_t2"
+select * from skiplocked_t2 order by id for update;
+ id | info 
+----+------
+  1 | one
+(1 row)
+

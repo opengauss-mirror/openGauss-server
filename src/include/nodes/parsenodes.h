@@ -488,7 +488,7 @@ typedef struct RowMarkClause {
     NodeTag type;
     Index rti;       /* range table index of target relation */
     bool forUpdate;  /* for compatibility, we reserve this filed but don't use it */
-    bool noWait;     /* NOWAIT option */
+    LockWaitPolicy waitPolicy;     /* NOWAIT option */
     int waitSec;      /* WAIT time Sec */
     bool pushedDown; /* pushed down from higher query level? */
     LockClauseStrength strength;

@@ -297,7 +297,8 @@ typedef enum TM_Result
      */
     TM_BeingModified,
     TM_SelfCreated,
-    TM_SelfUpdated
+    TM_SelfUpdated,
+    TM_WouldBlock /* can be returned by heap_tuple_lock */
 } TM_Result;
 
 #endif /* SNAPSHOT_H */

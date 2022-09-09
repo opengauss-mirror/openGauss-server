@@ -5956,8 +5956,10 @@ static void get_select_query_def(Query* query, deparse_context* context, TupleDe
                 -PRETTYINDENT_STD, PRETTYINDENT_STD, 0);
 #endif
             appendStringInfo(buf, " OF %s", quote_identifier(rte->eref->aliasname));
-            if (rc->noWait)
+            if (rc->waitPolicy == LockWaitError) 
                 appendStringInfo(buf, " NOWAIT");
+            else if (rc->waitPolicy == LockWaitSkip) 
+                appendStringInfo(buf, " SKIP LOCKED");
             if (rc->waitSec > 0)
                 appendStringInfo(buf, " WAIT %d", rc->waitSec);
         }

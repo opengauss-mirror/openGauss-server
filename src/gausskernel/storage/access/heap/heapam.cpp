@@ -6205,7 +6205,7 @@ static void CheckInfomaskCompatilibilty(TransactionId xid, uint16 infomask)
  * See README.tuplock for a thorough explanation of this mechanism.
  */
 TM_Result heap_lock_tuple(Relation relation, HeapTuple tuple, Buffer* buffer, 
-    CommandId cid, LockTupleMode mode, bool nowait, bool follow_updates, TM_FailureData *tmfd, bool allow_lock_self,
+    CommandId cid, LockTupleMode mode, LockWaitPolicy waitPolicy, bool follow_updates, TM_FailureData *tmfd, bool allow_lock_self,
     int waitSec)
 {
     TM_Result result;
@@ -6227,7 +6227,7 @@ TM_Result heap_lock_tuple(Relation relation, HeapTuple tuple, Buffer* buffer,
 
     /* Not support tuple concurrent update to avoid distributed deadlock. */
     if (!u_sess->attr.attr_common.allow_concurrent_tuple_update) {
-        nowait = true;
+        waitPolicy = LockWaitError;
     }
 
     if (t_thrd.proc->workingVersionNum < ENHANCED_TUPLE_LOCK_VERSION_NUM) {
@@ -6273,7 +6273,7 @@ TM_Result heap_lock_tuple(Relation relation, HeapTuple tuple, Buffer* buffer,
     if (RELATION_HAS_UIDS(relation) && HeapTupleHeaderHasUid(tuple->t_data)) {
         uint64 tupleUid = HeapTupleGetUid(tuple);
         LockBuffer(*buffer, BUFFER_LOCK_UNLOCK);
-        LockTupleUid(relation, tupleUid, TupleLockExtraInfo[mode].hwlock, !nowait, true);
+        LockTupleUid(relation, tupleUid, TupleLockExtraInfo[mode].hwlock, waitPolicy == LockWaitBlock, true);
         LockBuffer(*buffer, BUFFER_LOCK_EXCLUSIVE);
     }
 l3:
@@ -6542,14 +6542,26 @@ l3:
              * tuple state.
              */
             if (!have_tuple_lock) {
-                if (nowait) {
-                    if (!ConditionalLockTupleTuplock(relation, tid, mode)) {
-                        ereport(ERROR, (errcode(ERRCODE_LOCK_NOT_AVAILABLE),
-                                        errmsg("could not obtain lock on row in relation \"%s\"",
+                switch (waitPolicy) {
+                    case LockWaitBlock:
+                        LockTuple(relation, tid, TupleLockExtraInfo[mode].hwlock, true, waitSec);
+                        break;
+                    case LockWaitSkip:
+                        if (!ConditionalLockTupleTuplock(relation, tid, mode))
+                        {
+                            result = TM_WouldBlock;
+                            /* recovery code expects to have buffer lock held */
+                            LockBuffer(*buffer, BUFFER_LOCK_EXCLUSIVE);
+                            goto failed;
+                        }
+                        break;
+                    case LockWaitError:
+                        if (!ConditionalLockTupleTuplock(relation, tid, mode))
+                            ereport(ERROR,
+                                    (errcode(ERRCODE_LOCK_NOT_AVAILABLE),
+                                     errmsg("could not obtain lock on row in relation \"%s\"",
                                             RelationGetRelationName(relation))));
-                    }
-                } else {
-                    LockTuple(relation, tid, TupleLockExtraInfo[mode].hwlock, true, waitSec);
+                        break;
                 }
                 have_tuple_lock = true;
             }
@@ -6560,13 +6572,27 @@ l3:
                 if (status >= MultiXactStatusNoKeyUpdate)
                     ereport(ERROR, (errmsg("invalid lock mode in heap_lock_tuple")));
 
-                /* wait for multixact to end */
-                if (nowait) {
-                    if (!ConditionalMultiXactIdWait((MultiXactId)xwait, status, NULL))
-                        ereport(ERROR, (errcode(ERRCODE_LOCK_NOT_AVAILABLE), errmsg(
-                            "could not obtain lock on row in relation \"%s\"", RelationGetRelationName(relation))));
-                } else {
-                    MultiXactIdWait((MultiXactId)xwait, status, NULL, waitSec);
+                /* wait for multixact to end, or die trying */
+                switch (waitPolicy) {
+                    case LockWaitBlock:
+                        MultiXactIdWait((MultiXactId) xwait, status, NULL, waitSec);
+                        break;
+                    case LockWaitSkip:
+                        if (!ConditionalMultiXactIdWait((MultiXactId)xwait, status, NULL)) {
+                            result = TM_WouldBlock;
+                            /* recovery code expects to have buffer lock held */
+                            LockBuffer(*buffer, BUFFER_LOCK_EXCLUSIVE);
+                            goto failed;
+                        }
+                        break;
+                    case LockWaitError:
+                        if (!ConditionalMultiXactIdWait((MultiXactId)xwait, status, NULL))
+                            ereport(ERROR,
+                                    (errcode(ERRCODE_LOCK_NOT_AVAILABLE),
+                                     errmsg("could not obtain lock on row in relation \"%s\"",
+                                            RelationGetRelationName(relation))));
+                        break;
+                    
                 }
 
                 /*
@@ -6579,13 +6605,27 @@ l3:
                  * is simpler.
                  */
             } else {
-                /* wait for regular transaction to end */
-                if (nowait) {
-                    if (!ConditionalXactLockTableWait(xwait))
-                        ereport(ERROR, (errcode(ERRCODE_LOCK_NOT_AVAILABLE), errmsg(
-                            "could not obtain lock on row in relation \"%s\"", RelationGetRelationName(relation))));
-                } else {
-                    XactLockTableWait(xwait, true, waitSec);
+                /* wait for regular transaction to end, or die trying */
+                switch (waitPolicy) {
+                    case LockWaitBlock:
+                        XactLockTableWait(xwait, true, waitSec);
+                        break;
+                    case LockWaitSkip:
+                        if (!ConditionalXactLockTableWait(xwait))
+                        {
+                            result = TM_WouldBlock;
+                            /* recovery code expects to have buffer lock held */
+                            LockBuffer(*buffer, BUFFER_LOCK_EXCLUSIVE);
+                            goto failed;
+                        }
+                        break;
+                    case LockWaitError:
+                        if (!ConditionalXactLockTableWait(xwait))
+                            ereport(ERROR,
+                                    (errcode(ERRCODE_LOCK_NOT_AVAILABLE),
+                                     errmsg("could not obtain lock on row in relation \"%s\"",
+                                            RelationGetRelationName(relation))));
+                        break;
                 }
             }
 
@@ -6645,7 +6685,7 @@ l3:
 
 failed:
     if (result != TM_Ok) {
-        Assert(result == TM_SelfModified || result == TM_Updated || result == TM_Deleted);
+        Assert(result == TM_SelfModified || result == TM_Updated || result == TM_Deleted || result == TM_WouldBlock);
         Assert(!(tuple->t_data->t_infomask & HEAP_XMAX_INVALID));
         Assert(result != TM_Updated ||
             !ItemPointerEquals(&tuple->t_self, &tuple->t_data->t_ctid));

@@ -88,6 +88,7 @@ extern const uint32 HASUID_VERSION_NUM;
 extern const uint32 CREATE_INDEX_CONCURRENTLY_DIST_VERSION_NUM;
 extern const uint32 WAIT_N_TUPLE_LOCK_VERSION_NUM;
 extern const uint32 DISASTER_READ_VERSION_NUM;
+extern const uint32 SKIP_LOCKED_VERSION_NUM;
 extern const uint32 SUPPORT_DATA_REPAIR;
 extern const uint32 SCAN_BATCH_MODE_VERSION_NUM;
 extern const uint32 RELMAP_4K_VERSION_NUM;

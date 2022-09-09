@@ -1363,7 +1363,7 @@ typedef struct PlanRowMark {
     Index prti;           /* range table index of parent relation */
     Index rowmarkId;      /* unique identifier for resjunk columns */
     RowMarkType markType; /* see enum above */
-    bool noWait;          /* NOWAIT option */
+    LockWaitPolicy waitPolicy;	/* NOWAIT and SKIP LOCKED */
     int waitSec;      /* WAIT time Sec */
     bool isParent;        /* true if this is a "dummy" parent entry */
     int numAttrs;         /* number of attributes in subplan */

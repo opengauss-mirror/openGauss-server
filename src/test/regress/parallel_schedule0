@@ -942,6 +942,12 @@ test: gen_col_pall_end
 # gs_ledger
 test: ledger_table_case
 
+# select ... for update skip locked
+test: skiplocked_prep
+test: skiplocked_test1_1 skiplocked_test1_2
+test: skiplocked_test1_1 skiplocked_test1_3
+test: skiplocked_post
+
 # store and restore comment on ora function and procedure
 test: comment_proc
 test: hw_package

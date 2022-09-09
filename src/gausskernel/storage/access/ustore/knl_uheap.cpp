@@ -54,7 +54,7 @@ static void LogUHeapUpdate(UHeapWALInfo *oldTupWalinfo, UHeapWALInfo *newTupWali
     bool isBlockInplaceUpdate);
 static void LogUHeapMultiInsert(UHeapMultiInsertWALInfo *multiWalinfo, bool skipUndo, char *scratch,
     UndoRecPtr *urpvec, _in_ URecVector *urecvec);
-static bool UHeapWait(Relation relation, Buffer buffer, UHeapTuple utuple, LockTupleMode mode, bool nowait,
+static bool UHeapWait(Relation relation, Buffer buffer, UHeapTuple utuple, LockTupleMode mode, LockWaitPolicy waitPolicy,
     TransactionId updateXid, TransactionId lockerXid, SubTransactionId updateSubXid, SubTransactionId lockerSubXid,
     bool *hasTupLock, bool *multixidIsMySelf, int waitSec = 0);
 
@@ -1212,7 +1212,7 @@ UHeapTuple UHeapLockUpdated(CommandId cid, Relation relation,
             // 4. try to lock it
             result = UHeapLockTuple(relation, &utuple, &buffer,
                 cid, // estate->es_output_cid,
-                lock_mode, false, &tmfd, true, eval,
+                lock_mode, LockWaitBlock, &tmfd, true, eval,
                 snapshot, // estate->es_snapshot,
                 isSelectForUpdate);
 
@@ -1319,11 +1319,12 @@ out:
  * So if the lockerXid is valid, that means the updateXid is meaningless for us to wait. The only active
  * modifier can only be the locker.
  */
-static bool UHeapWait(Relation relation, Buffer buffer, UHeapTuple utuple, LockTupleMode mode, bool nowait,
+static bool UHeapWait(Relation relation, Buffer buffer, UHeapTuple utuple, LockTupleMode mode, LockWaitPolicy waitPolicy,
     TransactionId updateXid, TransactionId lockerXid, SubTransactionId updateSubXid, SubTransactionId lockerSubXid,
     bool *hasTupLock, bool *multixidIsMySelf, int waitSec)
 {
     Assert(utuple->tupTableType == UHEAP_TUPLE);
+    Assert(waitPolicy == LockWaitBlock || waitPolicy == LockWaitError);
     uint16 flag = utuple->disk_tuple->flag;
 
     LockTupleMode curMode = UHEAP_XID_IS_EXCL_LOCKED(flag) ? LockTupleExclusive : LockTupleShared;
@@ -1348,7 +1349,7 @@ static bool UHeapWait(Relation relation, Buffer buffer, UHeapTuple utuple, LockT
 
         LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
         if (!(*hasTupLock)) {
-            if (nowait) {
+            if (waitPolicy == LockWaitError) {
                 if (!ConditionalLockTuple(relation, &(utuple->ctid), tupleLockType)) {
                     ereport(ERROR, (errcode(ERRCODE_LOCK_NOT_AVAILABLE),
                         errmsg("could not obtain lock on row in relation \"%s\"", RelationGetRelationName(relation))));
@@ -1360,8 +1361,8 @@ static bool UHeapWait(Relation relation, Buffer buffer, UHeapTuple utuple, LockT
             *hasTupLock = true;
         }
 
-        // wait multixid
-        if (nowait) {
+        /* wait multixid */
+        if (waitPolicy == LockWaitError) {
             if (!ConditionalMultiXactIdWait((MultiXactId)xwait, GetMXactStatusForLock(mode, false), NULL)) {
                 ereport(ERROR, (errcode(ERRCODE_LOCK_NOT_AVAILABLE),
                     errmsg("could not obtain lock on row in relation \"%s\"", RelationGetRelationName(relation))));
@@ -1422,7 +1423,7 @@ static bool UHeapWait(Relation relation, Buffer buffer, UHeapTuple utuple, LockT
              * Hence we need to tell them we acquired the lock tuple here.
              */
             if (!(*hasTupLock)) {
-                if (nowait) {
+                if (waitPolicy == LockWaitError) {
                     if (!ConditionalLockTuple(relation, &(utuple->ctid), tupleLockType)) {
                         ereport(ERROR, (errcode(ERRCODE_LOCK_NOT_AVAILABLE), errmsg(
                             "could not obtain lock on row in relation \"%s\"", RelationGetRelationName(relation))));
@@ -1441,7 +1442,7 @@ static bool UHeapWait(Relation relation, Buffer buffer, UHeapTuple utuple, LockT
                 GetTopTransactionId(), infomask, ItemPointerGetBlockNumber(&utuple->ctid),
                 ItemPointerGetOffsetNumber(&utuple->ctid), topXid, subXid);
 
-            if (nowait) {
+            if (waitPolicy == LockWaitError) {
                 if (InvalidSubTransactionId != subXid) {
                     if (!ConditionalSubXactLockTableWait(topXid, subXid)) {
                         ereport(ERROR, (errcode(ERRCODE_LOCK_NOT_AVAILABLE), errmsg(
@@ -1607,7 +1608,7 @@ static bool IsTupleLockedByUs(UHeapTuple utuple, TransactionId xid, LockTupleMod
 }
 
 TM_Result UHeapLockTuple(Relation relation, UHeapTuple tuple, Buffer* buffer,
-    CommandId cid, LockTupleMode mode, bool nowait, TM_FailureData *tmfd,
+    CommandId cid, LockTupleMode mode, LockWaitPolicy waitPolicy, TM_FailureData *tmfd,
     bool follow_updates, bool eval, Snapshot snapshot,
     bool isSelectForUpdate, bool allowLockSelf, bool isUpsert, TransactionId conflictXid,
     int waitSec)
@@ -1630,6 +1631,7 @@ TM_Result UHeapLockTuple(Relation relation, UHeapTuple tuple, Buffer* buffer,
     bool multixidIsMyself = false;
     int retryTimes = 0;
 
+    Assert(waitPolicy == LockWaitBlock || waitPolicy == LockWaitError);
     if (mode == LockTupleShared && !isSelectForUpdate) {
         ereport(ERROR, (errmsg("UStore only supports share lock from select-for-share statement.")));
     }
@@ -1695,8 +1697,8 @@ check_tup_satisfies_update:
         }
 
         if (result != TM_Ok) {
-            // wait for remaining updater/locker to terminate
-            if (!UHeapWait(relation, *buffer, &utuple, mode, nowait, updateXid, lockerXid, updateSubXid, lockerSubXid,
+            /* wait for remaining updater/locker to terminate */
+            if (!UHeapWait(relation, *buffer, &utuple, mode, waitPolicy, updateXid, lockerXid, updateSubXid, lockerSubXid,
                 &hasTupLock, &multixidIsMyself, waitSec)) {
                 LimitRetryTimes(retryTimes++);
                 goto check_tup_satisfies_update;
@@ -2051,7 +2053,7 @@ check_tup_satisfies_update:
         ereport(WARNING, (errmsg("UHeapDelete returned %d", result)));
 #endif
 
-        if (!UHeapWait(relation, buffer, &utuple, LockTupleExclusive, false, updateXid, lockerXid,
+        if (!UHeapWait(relation, buffer, &utuple, LockTupleExclusive, LockWaitBlock, updateXid, lockerXid,
             updateSubXid, lockerSubXid, &hasTupLock, &multixidIsMyself)) {
             LimitRetryTimes(retryTimes++);
             goto check_tup_satisfies_update;
@@ -2547,7 +2549,7 @@ check_tup_satisfies_update:
         // Check if tuple has already been locked by us in the required mode
         alreadyLocked = IsTupleLockedByUs(&oldtup, xwait, lockmode);
 
-        if (!UHeapWait(relation, buffer, &oldtup, lockmode, false, txactinfo.xid, lockerXid, updateSubXid,
+        if (!UHeapWait(relation, buffer, &oldtup, lockmode, LockWaitBlock, txactinfo.xid, lockerXid, updateSubXid,
             lockerSubXid, &haveTupleLock, &multixidIsMyself)) {
             goto check_tup_satisfies_update;
         }

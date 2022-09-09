@@ -1535,7 +1535,7 @@ static PlanRowMark* _copyPlanRowMark(const PlanRowMark* from)
     COPY_SCALAR_FIELD(prti);
     COPY_SCALAR_FIELD(rowmarkId);
     COPY_SCALAR_FIELD(markType);
-    COPY_SCALAR_FIELD(noWait);
+    COPY_SCALAR_FIELD(waitPolicy);
     if (t_thrd.proc->workingVersionNum >= WAIT_N_TUPLE_LOCK_VERSION_NUM) {
         COPY_SCALAR_FIELD(waitSec);
     }
@@ -3637,7 +3637,7 @@ static RowMarkClause* _copyRowMarkClause(const RowMarkClause* from)
 
     COPY_SCALAR_FIELD(rti);
     COPY_SCALAR_FIELD(forUpdate);
-    COPY_SCALAR_FIELD(noWait);
+    COPY_SCALAR_FIELD(waitPolicy);
     if (t_thrd.proc->workingVersionNum >= WAIT_N_TUPLE_LOCK_VERSION_NUM) {
         COPY_SCALAR_FIELD(waitSec);
     }
@@ -4187,7 +4187,7 @@ static LockingClause* _copyLockingClause(const LockingClause* from)
 
     COPY_NODE_FIELD(lockedRels);
     COPY_SCALAR_FIELD(forUpdate);
-    COPY_SCALAR_FIELD(noWait);
+    COPY_SCALAR_FIELD(waitPolicy);
     if (t_thrd.proc->workingVersionNum >= ENHANCED_TUPLE_LOCK_VERSION_NUM) {
         COPY_SCALAR_FIELD(strength);
     }

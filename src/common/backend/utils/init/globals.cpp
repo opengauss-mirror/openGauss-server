@@ -59,7 +59,7 @@ bool open_join_children = true;
 bool will_shutdown = false;
 
 /* hard-wired binary version number */
-const uint32 GRAND_VERSION_NUM = 92778;
+const uint32 GRAND_VERSION_NUM = 92779;
 
 const uint32 SQL_PATCH_VERSION_NUM = 92625;
 const uint32 PREDPUSH_SAME_LEVEL_VERSION_NUM = 92522;
@@ -135,6 +135,7 @@ const uint32 CREATE_FUNCTION_DEFINER_VERSION = 92608;
 const uint32 TWOPHASE_FILE_VERSION = 92414;
 const uint32 HASUID_VERSION_NUM = 92550;
 const uint32 WAIT_N_TUPLE_LOCK_VERSION_NUM = 92573;
+const uint32 SKIP_LOCKED_VERSION_NUM = 92779;
 
 const uint32 PARALLEL_DECODE_VERSION_NUM = 92556;
 
