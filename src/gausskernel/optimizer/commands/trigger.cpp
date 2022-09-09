@@ -1591,13 +1591,12 @@ void RelationBuildTriggers(Relation relation)
         if (numtrigs >= maxtrigs) {
             maxtrigs *= 2;
             triggers = (Trigger*)repalloc(triggers, maxtrigs * sizeof(Trigger));
+            if (DB_IS_CMPT(B_FORMAT)) {
+                tgNameInfos = (TriggerNameInfo *)repalloc(tgNameInfos, maxtrigs * sizeof(TriggerNameInfo));
+            }
         }
         if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) {
-            TriggerNameInfo* tgNameInfo = NULL;
-            tgNameInfo = &(tgNameInfos[numtrigs]);
-            if (numtrigs >= maxtrigs) {
-                tgNameInfos = (TriggerNameInfo*)repalloc(tgNameInfos, maxtrigs * sizeof(TriggerNameInfo));
-            }
+            TriggerNameInfo *tgNameInfo = &(tgNameInfos[numtrigs]);
 
             char* trigname = DatumGetCString(DirectFunctionCall1(nameout, NameGetDatum(&pg_trigger->tgname)));
             char* tgordername = DatumGetCString(fastgetattr(htup, Anum_pg_trigger_tgordername, tgrel->rd_att, &isnull));
