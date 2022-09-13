@@ -16,6 +16,7 @@
 
 #include "storage/backendid.h"
 #include "storage/lock/lwlock.h"
+#include "storage/lock/waitpolicy.h"
 #include "storage/shmem.h"
 #include "gs_thread.h"
 
@@ -524,21 +525,6 @@ typedef enum {
     DS_BLOCKED_BY_AUTOVACUUM,    /* no deadlock; queue blocked by autovacuum worker */
     DS_BLOCKED_BY_REDISTRIBUTION /* no deadlock; queue blocked by data redistribution */
 } DeadLockState;
-
-/*
- * This enum controls how to deal with rows being locked by FOR UPDATE/SHARE
- * clauses (i.e., it represents the NOWAIT and SKIP LOCKED options).
- * The ordering here is important, because the highest numerical value takes
- * precedence when a RTE is specified multiple ways.  See applyLockingClause.
- */
-typedef enum LockWaitPolicy {
-        /* Wait for the lock to become available (default behavior) */
-        LockWaitBlock,
-        /* Skip rows that can't be locked (SKIP LOCKED) */
-        LockWaitSkip,
-        /* Raise an error if a row cannot be locked (NOWAIT) */
-        LockWaitError
-} LockWaitPolicy;
 
 /*
  * The lockmgr's shared hash tables are partitioned to reduce contention.

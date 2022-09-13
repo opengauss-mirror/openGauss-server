@@ -88,6 +88,9 @@
 /* Write a boolean field */
 #define WRITE_BOOL_FIELD(fldname) appendStringInfo(str, " :" CppAsString(fldname) " %s", booltostr(node->fldname))
 
+/* Write a boolean expr */
+#define WRITE_BOOL_EXPR(fldname, expr) appendStringInfo(str, " :" CppAsString(fldname) " %s", booltostr(expr))
+
 /* Write a character-string (possibly NULL) field */
 #define WRITE_STRING_FIELD(fldname) \
     (appendStringInfo(str, " :" CppAsString(fldname) " "), _outToken(str, node->fldname))
@@ -773,6 +776,9 @@ static void _outModifyTable(StringInfo str, ModifyTable* node)
     WRITE_NODE_FIELD(rowMarks);
     WRITE_INT_FIELD(epqParam);
     WRITE_BOOL_FIELD(partKeyUpdated);
+    if (t_thrd.proc->workingVersionNum >= REPLACE_INTO_VERSION_NUM) {
+        WRITE_BOOL_FIELD(isReplace);
+    }
 #ifdef PGXC
     WRITE_NODE_FIELD(remote_plans);
     WRITE_NODE_FIELD(remote_insert_plans);
@@ -1979,7 +1985,11 @@ static void _outPlanRowMark(StringInfo str, PlanRowMark* node)
     WRITE_UINT_FIELD(prti);
     WRITE_UINT_FIELD(rowmarkId);
     WRITE_ENUM_FIELD(markType, RowMarkType);
-    WRITE_BOOL_FIELD(noWait);
+    if (t_thrd.proc->workingVersionNum >= SKIP_LOCKED_VERSION_NUM) {
+        WRITE_ENUM_FIELD(waitPolicy, LockWaitPolicy);
+    } else {
+        WRITE_BOOL_EXPR(noWait, (node->waitPolicy == LockWaitError ? true: false));
+    }
     if (t_thrd.proc->workingVersionNum >= WAIT_N_TUPLE_LOCK_VERSION_NUM) {
         WRITE_INT_FIELD(waitSec);
     }
@@ -3693,6 +3703,9 @@ static void _outInsertStmt(StringInfo str, InsertStmt* node)
     WRITE_NODE_FIELD(selectStmt);
     WRITE_NODE_FIELD(returningList);
     WRITE_NODE_FIELD(withClause);
+    if (t_thrd.proc->workingVersionNum >= REPLACE_INTO_VERSION_NUM) {
+        WRITE_NODE_FIELD(targetList);
+    }
 #ifdef ENABLE_MULTIPLE_NODES
     if (t_thrd.proc->workingVersionNum >= UPSERT_ROW_STORE_VERSION_NUM) {
         WRITE_NODE_FIELD(upsertClause);
@@ -3785,7 +3798,11 @@ static void _outLockingClause(StringInfo str, LockingClause* node)
 
     WRITE_NODE_FIELD(lockedRels);
     WRITE_BOOL_FIELD(forUpdate);
-    WRITE_BOOL_FIELD(noWait);
+    if (t_thrd.proc->workingVersionNum >= SKIP_LOCKED_VERSION_NUM) {
+        WRITE_ENUM_FIELD(waitPolicy, LockWaitPolicy);
+    } else {
+        WRITE_BOOL_EXPR(noWait, (node->waitPolicy == LockWaitError ? true: false));
+    }
     if (t_thrd.proc->workingVersionNum >= ENHANCED_TUPLE_LOCK_VERSION_NUM) {
         WRITE_ENUM_FIELD(strength, LockClauseStrength);
     }
@@ -4489,7 +4506,11 @@ static void _outRowMarkClause(StringInfo str, RowMarkClause* node)
 
     WRITE_UINT_FIELD(rti);
     WRITE_BOOL_FIELD(forUpdate);
-    WRITE_BOOL_FIELD(noWait);
+    if (t_thrd.proc->workingVersionNum >= SKIP_LOCKED_VERSION_NUM) {
+        WRITE_ENUM_FIELD(waitPolicy, LockWaitPolicy);
+    } else {
+        WRITE_BOOL_EXPR(noWait, (node->waitPolicy == LockWaitError ? true: false));
+    }
     if (t_thrd.proc->workingVersionNum >= WAIT_N_TUPLE_LOCK_VERSION_NUM) {
         WRITE_INT_FIELD(waitSec);
     }

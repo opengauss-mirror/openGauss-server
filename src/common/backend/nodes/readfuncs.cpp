@@ -291,6 +291,15 @@ THR_LOCAL bool skip_read_extern_fields = false;
         local_node->fldname = token[0];                        \
     } while (0);
 
+/* Read an enumerated-type field which is converted from an expression */
+#define READ_ENUM_EXPR(fldname, enumtype, expr)           \
+    do {                                                  \
+        token = pg_strtok(&length); /* skip :fldname */   \
+        token = pg_strtok(&length); /* get field value */ \
+        local_node->fldname = (enumtype)(expr);               \
+    } while (0);
+
+
 /* Read an enumerated-type field that was written as an integer code */
 #define READ_ENUM_FIELD(fldname, enumtype)                \
     do {                                                  \
@@ -1672,11 +1681,17 @@ static RowMarkClause* _readRowMarkClause(void)
 
     READ_UINT_FIELD(rti);
     READ_BOOL_FIELD(forUpdate);
-    READ_BOOL_FIELD(noWait);
     IF_EXIST(waitSec) {
         READ_INT_FIELD(waitSec);
     }
 
+    IF_EXIST(waitPolicy) {
+        READ_ENUM_FIELD(waitPolicy, LockWaitPolicy);
+    }
+    /* convert noWait (true/false) to LockWaitPolicy (LockWaitError/LockWaitBlock) */
+    IF_EXIST(noWait) {
+        READ_ENUM_EXPR(waitPolicy, LockWaitPolicy, (strtobool(token) ? LockWaitError : LockWaitBlock));
+    }
     READ_BOOL_FIELD(pushedDown);
     IF_EXIST(strength) {
         READ_ENUM_FIELD(strength, LockClauseStrength);
@@ -3996,6 +4011,9 @@ static ModifyTable* _readModifyTable(ModifyTable* local_node)
     READ_NODE_FIELD(rowMarks);
     READ_INT_FIELD(epqParam);
     READ_BOOL_FIELD(partKeyUpdated);
+    if (t_thrd.proc->workingVersionNum >= REPLACE_INTO_VERSION_NUM) {
+        READ_BOOL_FIELD(isReplace);
+    }
 #ifdef PGXC
     READ_NODE_FIELD(remote_plans);
     READ_NODE_FIELD(remote_insert_plans);
@@ -4384,11 +4402,17 @@ static PlanRowMark* _readPlanRowMark(void)
     READ_UINT_FIELD(prti);
     READ_UINT_FIELD(rowmarkId);
     READ_ENUM_FIELD(markType, RowMarkType);
-    READ_BOOL_FIELD(noWait);
     IF_EXIST(waitSec) {
         READ_INT_FIELD(waitSec);
     }
 
+    IF_EXIST(waitPolicy) {
+        READ_ENUM_FIELD(waitPolicy, LockWaitPolicy);
+    }
+    /* convert noWait (true/false) to LockWaitPolicy (LockWaitError/LockWaitBlock) */
+    IF_EXIST(noWait) {
+        READ_ENUM_EXPR(waitPolicy, LockWaitPolicy, (strtobool(token) ? LockWaitError : LockWaitBlock));
+    }
     READ_BOOL_FIELD(isParent);
     READ_INT_FIELD(numAttrs);
     READ_BITMAPSET_FIELD(bms_nodeids);

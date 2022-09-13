@@ -1336,7 +1336,7 @@ void InitPlan(QueryDesc *queryDesc, int eflags)
         erm->prti = rc->prti;
         erm->rowmarkId = rc->rowmarkId;
         erm->markType = rc->markType;
-        erm->noWait = rc->noWait;
+        erm->waitPolicy = rc->waitPolicy;
         erm->waitSec = rc->waitSec;
         erm->numAttrs = rc->numAttrs;
         ItemPointerSetInvalid(&(erm->curCtid));
@@ -3046,7 +3046,7 @@ HeapTuple heap_lock_updated(CommandId cid, Relation relation, int lockmode, Item
              * This is a live tuple, so now try to lock it.
              */
             test = tableam_tuple_lock(relation, &tuple, &buffer, 
-                                      cid, (LockTupleMode)lockmode, false, &tmfd,
+                                      cid, (LockTupleMode)lockmode, LockWaitBlock, &tmfd,
                                       false, false, false,InvalidSnapshot, NULL, false);
             /* We now have two pins on the buffer, get rid of one */
             ReleaseBuffer(buffer);

@@ -369,7 +369,7 @@ static bool RelationFindReplTupleByIndex(EState *estate, Relation rel, Relation 
 
             PushActiveSnapshot(GetLatestSnapshot());
             res = tableam_tuple_lock(targetRel,
-                locktup, &buf, GetCurrentCommandId(false), lockmode, false, &hufd,
+                locktup, &buf, GetCurrentCommandId(false), lockmode, LockWaitBlock, &hufd,
                 false, false,             /* don't follow updates */
                 false,                    /* eval */
                 GetLatestSnapshot(), tid, /* ItemPointer */
@@ -535,7 +535,7 @@ static bool RelationFindReplTupleSeq(Relation rel, LockTupleMode lockmode, Tuple
 
             PushActiveSnapshot(GetLatestSnapshot());
             res = tableam_tuple_lock(targetRel, locktup, &buf, GetCurrentCommandId(false),
-                lockmode, false, &hufd, false,
+                lockmode, LockWaitBlock, &hufd, false,
                 false,                    /* don't follow updates */
                 false,                    /* eval */
                 GetLatestSnapshot(), tid, /* ItemPointer */

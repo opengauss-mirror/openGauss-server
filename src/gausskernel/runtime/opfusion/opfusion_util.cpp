@@ -222,6 +222,11 @@ const char* getBypassReason(FusionType result)
             return "Bypass not executed because it's Var type allowed for target in sort query";
             break;
         }
+
+        case NOBYPASS_REPLACE_NOT_SUPPORT: {
+            return "Bypass not support REPLACE INTO statement";
+            break;
+        }
 		
         case NOBYPASS_UPSERT_NOT_SUPPORT: {
             return "Bypass not support INSERT INTO ... ON DUPLICATE KEY UPDATE statement";
@@ -754,10 +759,15 @@ FusionType getSelectFusionType(List *stmt_list, ParamListInfo params)
     if (IsA(top_plan, LockRows)) {
         LockRows *lockrows = (LockRows *)top_plan;
         bool is_select_for_update =
-            (list_length(lockrows->rowMarks) == 1 && IsA(linitial(lockrows->rowMarks), PlanRowMark) &&
-            ((PlanRowMark *)linitial(lockrows->rowMarks))->markType == ROW_MARK_EXCLUSIVE &&
-            ((PlanRowMark *)linitial(lockrows->rowMarks))->noWait == false &&
-            ((PlanRowMark *)linitial(lockrows->rowMarks))->waitSec == 0);
+            (
+                list_length(lockrows->rowMarks) == 1 && IsA(linitial(lockrows->rowMarks), PlanRowMark) &&
+                ((PlanRowMark *)linitial(lockrows->rowMarks))->markType == ROW_MARK_EXCLUSIVE &&
+                (
+                    ((PlanRowMark *)linitial(lockrows->rowMarks))->waitPolicy == LockWaitBlock ||
+                    ((PlanRowMark *)linitial(lockrows->rowMarks))->waitPolicy == LockWaitSkip
+                ) &&
+                ((PlanRowMark *)linitial(lockrows->rowMarks))->waitSec == 0
+            );
         if (is_select_for_update) {
             top_plan = top_plan->lefttree;
             ftype = SELECT_FOR_UPDATE_FUSION;
@@ -903,6 +913,9 @@ FusionType checkBaseResult(Plan* top_plan)
     }
     if (node->upsertAction != UPSERT_NONE) {
         return NOBYPASS_UPSERT_NOT_SUPPORT;
+    }
+    if (node->isReplace) {
+        return NOBYPASS_REPLACE_NOT_SUPPORT;
     }
     return result;
 }

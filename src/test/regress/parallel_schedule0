@@ -942,6 +942,12 @@ test: gen_col_pall_end
 # gs_ledger
 test: ledger_table_case
 
+# select ... for update skip locked
+test: skiplocked_prep
+test: skiplocked_test1_1 skiplocked_test1_2
+test: skiplocked_test1_1 skiplocked_test1_3
+test: skiplocked_post
+
 # store and restore comment on ora function and procedure
 test: comment_proc
 test: hw_package
@@ -978,7 +984,7 @@ test: fdw_audit
 test: gs_global_config_audit
 test: detail declare_multiple_variable
 test: gs_dump_encrypt substr
-test: composite_datum_record mysql_function b_comments
+test: composite_datum_record mysql_function b_comments mysql_syntax
 
 test: join_test_alias alter_ctable_compress
 test: ignore/ignore_type_transform ignore/ignore_not_null_constraints ignore/ignore_unique_constraints ignore/ignore_no_matched_partition

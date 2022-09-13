@@ -422,6 +422,7 @@ typedef struct ModifyTable {
     List* updateTlist;			/* List of UPDATE target */
     List* exclRelTlist;		   /* target list of the EXECLUDED pseudo relation */
     Index exclRelRTIndex;			 /* RTI of the EXCLUDED pseudo relation */
+    bool isReplace;
     Node* upsertWhere;          /* Qualifiers for upsert's update clause to check */
 
     OpMemInfo mem_info;    /*  Memory info for modify node */
@@ -1362,7 +1363,7 @@ typedef struct PlanRowMark {
     Index prti;           /* range table index of parent relation */
     Index rowmarkId;      /* unique identifier for resjunk columns */
     RowMarkType markType; /* see enum above */
-    bool noWait;          /* NOWAIT option */
+    LockWaitPolicy waitPolicy;	/* NOWAIT and SKIP LOCKED */
     int waitSec;      /* WAIT time Sec */
     bool isParent;        /* true if this is a "dummy" parent entry */
     int numAttrs;         /* number of attributes in subplan */

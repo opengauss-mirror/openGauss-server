@@ -488,7 +488,7 @@ typedef struct RowMarkClause {
     NodeTag type;
     Index rti;       /* range table index of target relation */
     bool forUpdate;  /* for compatibility, we reserve this filed but don't use it */
-    bool noWait;     /* NOWAIT option */
+    LockWaitPolicy waitPolicy;     /* NOWAIT option */
     int waitSec;      /* WAIT time Sec */
     bool pushedDown; /* pushed down from higher query level? */
     LockClauseStrength strength;
@@ -1037,7 +1037,13 @@ typedef struct CreateTrigStmt {
     bool deferrable;     /* [NOT] DEFERRABLE */
     bool initdeferred;   /* INITIALLY {DEFERRED|IMMEDIATE} */
     RangeVar* constrrel; /* opposite relation, if RI trigger */
+    FunctionSources* funcSource; /*mysql compatibility function body in begin... end */
+    char* definer;       /*mysql compatibility define user */
+    char* trgordername; /* mysql compatibility trigger order {follows|precedes}*/
+    bool is_follows; 
+    bool if_not_exists;
 } CreateTrigStmt;
+
 
 /* ----------------------
  *		Create PROCEDURAL LANGUAGE Statements

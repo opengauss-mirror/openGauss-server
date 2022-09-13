@@ -905,7 +905,10 @@ static bool _equalInsertStmt(const InsertStmt* a, const InsertStmt* b)
     COMPARE_NODE_FIELD(selectStmt);
     COMPARE_NODE_FIELD(returningList);
     COMPARE_NODE_FIELD(withClause);
-    COMPARE_NODE_FIELD(upsertClause);
+    if (t_thrd.proc->workingVersionNum >= REPLACE_INTO_VERSION_NUM) {
+        COMPARE_NODE_FIELD(targetList);
+    }
+    COMPARE_NODE_FIELD(upsertClause);   
     COMPARE_SCALAR_FIELD(hasIgnore);
 
     return true;
@@ -2132,6 +2135,11 @@ static bool _equalCreateTrigStmt(const CreateTrigStmt* a, const CreateTrigStmt* 
     COMPARE_SCALAR_FIELD(deferrable);
     COMPARE_SCALAR_FIELD(initdeferred);
     COMPARE_NODE_FIELD(constrrel);
+    COMPARE_NODE_FIELD(funcSource);
+    COMPARE_STRING_FIELD(definer);
+    COMPARE_SCALAR_FIELD(if_not_exists);
+    COMPARE_STRING_FIELD(trgordername);
+    COMPARE_SCALAR_FIELD(is_follows);
 
     return true;
 }
@@ -2660,7 +2668,9 @@ static bool _equalLockingClause(const LockingClause* a, const LockingClause* b)
 {
     COMPARE_NODE_FIELD(lockedRels);
     COMPARE_SCALAR_FIELD(forUpdate);
-    COMPARE_SCALAR_FIELD(noWait);
+    if (t_thrd.proc->workingVersionNum >= SKIP_LOCKED_VERSION_NUM) {
+        COMPARE_SCALAR_FIELD(waitPolicy);
+    }
     if (t_thrd.proc->workingVersionNum >= ENHANCED_TUPLE_LOCK_VERSION_NUM) {
         COMPARE_SCALAR_FIELD(strength);
     }
@@ -2813,7 +2823,9 @@ static bool _equalRowMarkClause(const RowMarkClause* a, const RowMarkClause* b)
 {
     COMPARE_SCALAR_FIELD(rti);
     COMPARE_SCALAR_FIELD(forUpdate);
-    COMPARE_SCALAR_FIELD(noWait);
+    if (t_thrd.proc->workingVersionNum >= SKIP_LOCKED_VERSION_NUM) {
+        COMPARE_SCALAR_FIELD(waitPolicy);
+    }
     if (t_thrd.proc->workingVersionNum >= WAIT_N_TUPLE_LOCK_VERSION_NUM) {
         COMPARE_SCALAR_FIELD(waitSec);
     }

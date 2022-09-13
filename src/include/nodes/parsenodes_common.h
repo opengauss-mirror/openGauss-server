@@ -34,6 +34,7 @@
 #include "nodes/value.h"
 #include "catalog/pg_attribute.h"
 #include "access/tupdesc.h"
+#include "storage/lock/waitpolicy.h"
 #include "client_logic/client_logic_enums.h"
 
 /* Sort ordering options for ORDER BY and CREATE INDEX */
@@ -454,7 +455,9 @@ typedef struct InsertStmt {
     WithClause *withClause;     /* WITH clause */
     UpsertClause *upsertClause; /* DUPLICATE KEY UPDATE clause */
     HintState *hintState;
-    bool isRewritten;           /* is this Stmt created by rewritter or end user? */
+    bool isReplace;
+    List *targetList;
+    bool isRewritten;           /* is this Stmt created by rewritter or end user? */  
     bool hasIgnore;             /* is this Stmt containing ignore keyword? */
 } InsertStmt;
 
@@ -1671,7 +1674,7 @@ typedef struct LockingClause {
     NodeTag type;
     List *lockedRels; /* FOR [KEY] UPDATE/SHARE relations */
     bool forUpdate;   /* for compatibility, we reserve this field but don't use it */
-    bool noWait;      /* NOWAIT option */
+    LockWaitPolicy waitPolicy;	/* NOWAIT and SKIP LOCKED */
     LockClauseStrength strength;
     int waitSec;      /* WAIT time Sec */
 } LockingClause;
@@ -1960,7 +1963,7 @@ typedef struct Query {
     List* mergeActionList; /* list of actions for MERGE (only) */
     Query* upsertQuery;    /* insert query for INSERT ON DUPLICATE KEY UPDATE (only) */
     UpsertExpr* upsertClause; /* DUPLICATE KEY UPDATE [NOTHING | ...] */
-
+    bool isReplace;
     bool isRowTriggerShippable; /* true if all row triggers are shippable. */
     bool use_star_targets;      /* true if use * for targetlist. */
 

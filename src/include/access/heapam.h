@@ -340,7 +340,7 @@ extern TM_Result heap_update(Relation relation, Relation parentRelation, ItemPoi
     CommandId cid, Snapshot crosscheck, bool wait, TM_FailureData *tmfd, LockTupleMode *lockmode,
     bool allow_delete_self = false);
 extern TM_Result heap_lock_tuple(Relation relation, HeapTuple tuple, Buffer* buffer, 
-    CommandId cid, LockTupleMode mode, bool nowait, bool follow_updates, TM_FailureData *tmfd,
+    CommandId cid, LockTupleMode mode, LockWaitPolicy waitPolicy, bool follow_updates, TM_FailureData *tmfd,
     bool allow_lock_self = false, int waitSec = 0);
 void FixInfomaskFromInfobits(uint8 infobits, uint16 *infomask, uint16 *infomask2);
 

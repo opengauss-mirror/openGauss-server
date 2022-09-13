@@ -299,6 +299,9 @@ static ModifyTable* _copyModifyTable(const ModifyTable* from)
     COPY_NODE_FIELD(rowMarks);
     COPY_SCALAR_FIELD(epqParam);
     COPY_SCALAR_FIELD(partKeyUpdated);
+    if (t_thrd.proc->workingVersionNum >= REPLACE_INTO_VERSION_NUM) {
+        COPY_SCALAR_FIELD(isReplace);
+    }
 #ifdef PGXC
     COPY_NODE_FIELD(remote_plans);
     COPY_NODE_FIELD(remote_insert_plans);
@@ -1532,7 +1535,7 @@ static PlanRowMark* _copyPlanRowMark(const PlanRowMark* from)
     COPY_SCALAR_FIELD(prti);
     COPY_SCALAR_FIELD(rowmarkId);
     COPY_SCALAR_FIELD(markType);
-    COPY_SCALAR_FIELD(noWait);
+    COPY_SCALAR_FIELD(waitPolicy);
     if (t_thrd.proc->workingVersionNum >= WAIT_N_TUPLE_LOCK_VERSION_NUM) {
         COPY_SCALAR_FIELD(waitSec);
     }
@@ -3634,7 +3637,7 @@ static RowMarkClause* _copyRowMarkClause(const RowMarkClause* from)
 
     COPY_SCALAR_FIELD(rti);
     COPY_SCALAR_FIELD(forUpdate);
-    COPY_SCALAR_FIELD(noWait);
+    COPY_SCALAR_FIELD(waitPolicy);
     if (t_thrd.proc->workingVersionNum >= WAIT_N_TUPLE_LOCK_VERSION_NUM) {
         COPY_SCALAR_FIELD(waitSec);
     }
@@ -4184,7 +4187,7 @@ static LockingClause* _copyLockingClause(const LockingClause* from)
 
     COPY_NODE_FIELD(lockedRels);
     COPY_SCALAR_FIELD(forUpdate);
-    COPY_SCALAR_FIELD(noWait);
+    COPY_SCALAR_FIELD(waitPolicy);
     if (t_thrd.proc->workingVersionNum >= ENHANCED_TUPLE_LOCK_VERSION_NUM) {
         COPY_SCALAR_FIELD(strength);
     }
@@ -4618,7 +4621,11 @@ static InsertStmt* _copyInsertStmt(const InsertStmt* from)
     COPY_NODE_FIELD(withClause);
     COPY_NODE_FIELD(upsertClause);
     COPY_NODE_FIELD(hintState);
-    COPY_SCALAR_FIELD(isRewritten);
+    if (t_thrd.proc->workingVersionNum >= REPLACE_INTO_VERSION_NUM) {
+        COPY_NODE_FIELD(targetList);
+        COPY_SCALAR_FIELD(isReplace);
+    }
+    COPY_SCALAR_FIELD(isRewritten);   
     COPY_SCALAR_FIELD(hasIgnore);
     return newnode;
 }
@@ -6028,6 +6035,11 @@ static CreateTrigStmt* _copyCreateTrigStmt(const CreateTrigStmt* from)
     COPY_SCALAR_FIELD(deferrable);
     COPY_SCALAR_FIELD(initdeferred);
     COPY_NODE_FIELD(constrrel);
+    COPY_NODE_FIELD(funcSource);
+    COPY_STRING_FIELD(definer);
+    COPY_SCALAR_FIELD(if_not_exists);
+    COPY_STRING_FIELD(trgordername);
+    COPY_SCALAR_FIELD(is_follows);
 
     return newnode;
 }

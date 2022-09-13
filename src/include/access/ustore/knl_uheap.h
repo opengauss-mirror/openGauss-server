@@ -110,7 +110,7 @@ TM_Result UHeapUpdate(Relation relation, Relation parentRelation, ItemPointer ot
 extern void PutLinkUpdateTuple(Page page, Item item, RowPtr *lp, Size size);
 
 TM_Result UHeapLockTuple(Relation relation, UHeapTuple tuple, Buffer* buffer,
-                           CommandId cid, LockTupleMode mode, bool nowait, TM_FailureData *tmfd,
+                           CommandId cid, LockTupleMode mode, LockWaitPolicy waitPolicy, TM_FailureData *tmfd,
                            bool follow_updates, bool eval, Snapshot snapshot,
                            bool isSelectForUpdate = false, bool allowLockSelf = false, bool isUpsert = false, 
                            TransactionId conflictXid = InvalidTransactionId, int waitSec = 0);

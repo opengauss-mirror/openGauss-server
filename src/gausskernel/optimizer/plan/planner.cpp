@@ -1838,6 +1838,7 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
 #ifdef PGXC
             plan = pgxc_make_modifytable(root, plan);
 #endif
+            ((ModifyTable*)plan)->isReplace = parse->isReplace;
         }
     }
 
@@ -4957,8 +4958,8 @@ static void preprocess_rowmarks(PlannerInfo* root)
                 ereport(ERROR, (errmsg("unknown lock type: %d", rc->strength)));
                 break;
         }
-        newrc->noWait = rc->noWait;
         newrc->waitSec = rc->waitSec;
+        newrc->waitPolicy = rc->waitPolicy;
         newrc->isParent = false;
         newrc->bms_nodeids = ng_get_baserel_data_nodeids(rte->relid, rte->relkind);
 
@@ -4985,7 +4986,7 @@ static void preprocess_rowmarks(PlannerInfo* root)
             newrc->markType = ROW_MARK_REFERENCE;
         else
             newrc->markType = ROW_MARK_COPY;
-        newrc->noWait = false; /* doesn't matter */
+        newrc->waitPolicy = LockWaitError; /* doesn't matter */
         newrc->waitSec = 0;
         newrc->isParent = false;
         newrc->bms_nodeids = (RTE_RELATION == rte->rtekind && RELKIND_FOREIGN_TABLE != rte->relkind 

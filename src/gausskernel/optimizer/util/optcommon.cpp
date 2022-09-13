@@ -42,7 +42,10 @@ void GetPlanNodePlainText(
             *pt_operation = "MODIFY TABLE";
             switch (((ModifyTable*)plan)->operation) {
                 case CMD_INSERT:
-                    *pname = *operation = *pt_options = "Insert";
+                    if (((ModifyTable*)plan)->isReplace)
+                        *pname = *operation = *pt_options = "Replace";
+                    else
+                        *pname = *operation = *pt_options = "Insert";
                     break;
                 case CMD_UPDATE:
                     *pname = *operation = *pt_options = "Update";

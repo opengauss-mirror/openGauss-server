@@ -79,6 +79,7 @@
 #include "parser/parser.h"
 #include "storage/lmgr.h"
 #include "storage/tcap.h"
+#include "storage/lock/waitpolicy.h"
 #include "utils/builtins.h"
 #include "utils/date.h"
 #include "utils/datetime.h"
@@ -138,6 +139,12 @@ typedef struct PrivTarget
 	GrantObjectType objtype;
 	List	   *objs;
 } PrivTarget;
+
+typedef struct TrgCharacter {
+	bool is_follows;
+	char* trigger_name;
+} TrgCharacter;
+
 
 /* ConstraintAttributeSpec yields an integer bitmask of these flags: */
 #define CAS_NOT_DEFERRABLE			0x01
@@ -302,6 +309,7 @@ static int errstate;
 	A_Indices			*aind;
 	ResTarget			*target;
 	struct PrivTarget	*privtarget;
+	struct TrgCharacter *trgcharacter;
 	AccessPriv			*accesspriv;
 	DbPriv				*dbpriv;
 	InsertStmt			*istmt;
@@ -409,6 +417,7 @@ static int errstate;
 %type <boolean>	opt_check opt_force opt_or_replace
 				opt_grant_grant_option opt_grant_admin_option
 				opt_nowait opt_if_exists opt_with_data opt_large_seq opt_cancelable
+%type <ival>	opt_nowait_or_skip
 
 %type <list>	OptRoleList AlterOptRoleList
 %type <defelt>	CreateOptRoleElem AlterOptRoleElem
@@ -777,7 +786,7 @@ static int errstate;
 %type <list>    load_column_expr_list copy_column_sequence_list copy_column_filler_list copy_column_constant_list 
 %type <typnam>  load_col_data_type
 %type <ival64>  load_col_sequence_item_sart column_sequence_item_step column_sequence_item_sart
-
+%type <trgcharacter> trigger_order
 /*
  * Non-keyword token types.  These are hard-wired into the "flex" lexer.
  * They must be listed first so that their numeric codes do not depend on
@@ -828,7 +837,7 @@ static int errstate;
 	EXCLUDE EXCLUDED EXCLUDING EXCLUSIVE EXECUTE EXISTS EXPIRED_P EXPLAIN
 	EXTENSION EXTERNAL EXTRACT
 
-	FALSE_P FAMILY FAST FENCED FETCH FIELDS FILEHEADER_P FILL_MISSING_FIELDS FILLER FILTER FIRST_P FIXED_P FLOAT_P FOLLOWING FOR FORCE FOREIGN FORMATTER FORWARD
+	FALSE_P FAMILY FAST FENCED FETCH FIELDS FILEHEADER_P FILL_MISSING_FIELDS FILLER FILTER FIRST_P FIXED_P FLOAT_P FOLLOWING FOLLOWS_P FOR FORCE FOREIGN FORMATTER FORWARD
 	FEATURES // DB4AI
 	FREEZE FROM FULL FUNCTION FUNCTIONS
 
@@ -848,7 +857,7 @@ static int errstate;
 
 	LABEL LANGUAGE LARGE_P LAST_P LC_COLLATE_P LC_CTYPE_P LEADING LEAKPROOF
 	LEAST LESS LEFT LEVEL LIKE LIMIT LIST LISTEN LOAD LOCAL LOCALTIME LOCALTIMESTAMP
-	LOCATION LOCK_P LOG_P LOGGING LOGIN_ANY LOGIN_FAILURE LOGIN_SUCCESS LOGOUT LOOP
+	LOCATION LOCK_P LOCKED LOG_P LOGGING LOGIN_ANY LOGIN_FAILURE LOGIN_SUCCESS LOGOUT LOOP
 	MAPPING MASKING MASTER MATCH MATERIALIZED MATCHED MAXEXTENTS MAXSIZE MAXTRANS MAXVALUE MERGE MINUS_P MINUTE_P MINVALUE MINEXTENTS MODE MODIFY_P MONTH_P MOVE MOVEMENT
 	MODEL // DB4AI
 	NAME_P NAMES NATIONAL NATURAL NCHAR NEXT NO NOCOMPRESS NOCYCLE NODE NOLOGGING NOMAXVALUE NOMINVALUE NONE
@@ -865,7 +874,7 @@ static int errstate;
 /* PGXC_BEGIN */
 	PREFERRED PREFIX PRESERVE PREPARE PREPARED PRIMARY
 /* PGXC_END */
-	PRIVATE PRIOR PRIORER PRIVILEGES PRIVILEGE PROCEDURAL PROCEDURE PROFILE PUBLICATION PUBLISH PURGE
+	PRECEDES_P PRIVATE PRIOR PRIORER PRIVILEGES PRIVILEGE PROCEDURAL PROCEDURE PROFILE PUBLICATION PUBLISH PURGE
 
 	QUERY QUOTE
 
@@ -6576,6 +6585,7 @@ columnOptions:	ColId WithOptions ColQualList
 WithOptions:
 			WITH OPTIONS							{$$ = NIL; }
 			| /*EMPTY*/								{$$ = NIL; }
+		;
 
 ColQualList:
 			ColQualList ColConstraint				{ $$ = lappend($1, $2); }
@@ -10599,24 +10609,37 @@ DropDataSourceStmt: DROP DATA_P SOURCE_P name opt_drop_behavior
  *****************************************************************************/
 
 CreateTrigStmt:
-			CREATE TRIGGER name TriggerActionTime TriggerEvents ON
+			CREATE opt_or_replace definer_user TRIGGER name TriggerActionTime TriggerEvents ON
 			qualified_name TriggerForSpec TriggerWhen
 			EXECUTE PROCEDURE func_name '(' TriggerFuncArgs ')'
 				{
+					if ($2 != false)
+					{
+						parser_yyerror("syntax error found");
+					}
+					if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT && $3 != NULL)
+					{
+						parser_yyerror("only support definer in mysql compatibility database");
+					}
 					CreateTrigStmt *n = makeNode(CreateTrigStmt);
-					n->trigname = $3;
-					n->relation = $7;
-					n->funcname = $12;
-					n->args = $14;
-					n->row = $8;
-					n->timing = $4;
-					n->events = intVal(linitial($5));
-					n->columns = (List *) lsecond($5);
-					n->whenClause = $9;
+					n->definer = $3;
+					n->if_not_exists = false;
+					n->trigname = $5;
+					n->relation = $9;
+					n->funcname = $14;
+					n->args = $16;
+					n->row = $10;
+					n->timing = $6;
+					n->events = intVal(linitial($7));
+					n->columns = (List *) lsecond($7);
+					n->whenClause = $11;
 					n->isconstraint  = FALSE;
 					n->deferrable	 = FALSE;
 					n->initdeferred  = FALSE;
 					n->constrrel = NULL;
+					n->funcSource = NULL;
+					n->trgordername = NULL;
+					n->is_follows = NULL;
 					$$ = (Node *)n;
 				}
 			| CREATE CONSTRAINT TRIGGER name AFTER TriggerEvents ON
@@ -10626,6 +10649,8 @@ CreateTrigStmt:
 				{
 					CreateTrigStmt *n = makeNode(CreateTrigStmt);
 					n->trigname = $4;
+					n->definer = NULL;
+					n->if_not_exists  = false;
 					n->relation = $8;
 					n->funcname = $17;
 					n->args = $19;
@@ -10639,9 +10664,88 @@ CreateTrigStmt:
 								   &n->deferrable, &n->initdeferred, NULL,
 								   NULL, yyscanner);
 					n->constrrel = $9;
+					n->funcSource = NULL;
+					n->trgordername = NULL;
+					n->is_follows = NULL;
 					$$ = (Node *)n;
 				}
-		;
+			| CREATE opt_or_replace definer_user TRIGGER name TriggerActionTime TriggerEvents ON
+			qualified_name TriggerForSpec TriggerWhen
+			trigger_order
+			{
+				u_sess->parser_cxt.eaten_declare = false;
+				u_sess->parser_cxt.eaten_begin = false;
+				pg_yyget_extra(yyscanner)->core_yy_extra.include_ora_comment = true;
+				u_sess->parser_cxt.isCreateFuncOrProc = true;
+			} subprogram_body
+				{
+					if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT || $2 != false)
+					{
+						parser_yyerror("only support definer, trigger_order, subprogram_body in mysql compatibility database");
+					}
+					CreateTrigStmt *n = makeNode(CreateTrigStmt);
+					if ($2 != false)
+					{
+						parser_yyerror("syntax error found");
+					}
+					n->definer = $3;
+					n->if_not_exists = false;
+					n->trigname = $5;
+					n->timing = $6;
+					n->events = intVal(linitial($7));
+					n->columns = (List *) lsecond($7);
+					n->relation = $9;
+					n->row = $10;
+					n->whenClause = $11;
+					n->trgordername = $12->trigger_name;
+					n->is_follows = $12->is_follows;
+					FunctionSources *funSource = (FunctionSources *)$14;
+					n->funcSource = funSource;
+					n->isconstraint  = FALSE;
+					n->deferrable	 = FALSE;
+					n->initdeferred  = FALSE;
+					n->constrrel = NULL;
+					$$ = (Node *)n;
+				}
+			| CREATE opt_or_replace definer_user TRIGGER IF_P NOT EXISTS name TriggerActionTime TriggerEvents ON
+			qualified_name TriggerForSpec TriggerWhen
+			trigger_order
+			{
+				u_sess->parser_cxt.eaten_declare = false;
+				u_sess->parser_cxt.eaten_begin = false;
+				pg_yyget_extra(yyscanner)->core_yy_extra.include_ora_comment = true;
+				u_sess->parser_cxt.isCreateFuncOrProc = true;
+			} subprogram_body
+				{
+					if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT)
+					{
+						parser_yyerror("only support definer, if not exists, trigger_order, subprogram_body in mysql compatibility database");
+					}
+					CreateTrigStmt *n = makeNode(CreateTrigStmt);
+					if ($2 != false)
+					{
+						parser_yyerror("syntax error");
+					}
+					n->definer = $3;
+					n->if_not_exists = true;
+					n->trigname = $8;
+					n->timing = $9;
+					n->events = intVal(linitial($10));
+					n->columns = (List *) lsecond($10);
+					n->relation = $12;
+					n->row = $13;
+					n->whenClause = $14;
+					n->trgordername = $15->trigger_name;
+					n->is_follows = $15->is_follows;
+					FunctionSources *funSource = (FunctionSources *)$17;
+					n->funcSource = funSource;
+					n->isconstraint  = FALSE;
+					n->deferrable	 = FALSE;
+					n->initdeferred  = FALSE;
+					n->constrrel = NULL;
+					$$ = (Node *)n;
+				}
+			;
 
 TriggerActionTime:
 			BEFORE								{ $$ = TRIGGER_TYPE_BEFORE; }
@@ -10732,6 +10836,30 @@ TriggerFuncArg:
 			| FCONST								{ $$ = makeString($1); }
 			| Sconst								{ $$ = makeString($1); }
 			| ColLabel								{ $$ = makeString($1); }
+		;
+
+trigger_order:
+			/* NULL */
+			{
+				TrgCharacter *n = (TrgCharacter *)palloc(sizeof(TrgCharacter));
+				n->is_follows = false;
+				n->trigger_name = NULL;
+				$$ = n;
+			}
+			| FOLLOWS_P ColId
+			{
+				TrgCharacter *n = (TrgCharacter *)palloc(sizeof(TrgCharacter));
+				n->is_follows = true;
+				n->trigger_name = $2;
+				$$ = n;
+			}
+			| PRECEDES_P ColId
+			{
+				TrgCharacter *n = (TrgCharacter *)palloc(sizeof(TrgCharacter));
+				n->is_follows = false;
+				n->trigger_name = $2;
+				$$ = n;
+			}
 		;
 
 OptConstrFromTable:
@@ -19653,10 +19781,62 @@ InsertStmt: opt_with_clause INSERT hint_string INTO insert_target insert_rest re
 				$6->relation = $5;
 				$6->returningList = $7;
 				$6->withClause = $1;
+				$6->isReplace = false;
 				$6->hintState = create_hintstate($3);
 				$6->hasIgnore = ($6->hintState != NULL && $6->hintState->sql_ignore_hint && DB_IS_CMPT(B_FORMAT));
 				$$ = (Node *) $6;
 			}
+            | REPLACE hint_string INTO insert_target insert_rest returning_clause
+            {
+#ifndef ENABLE_MULTIPLE_NODES
+                if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
+                {
+                    $5->relation = $4;
+                    $5->returningList = $6;
+                    $5->hintState = create_hintstate($2);
+                    $5->isReplace = true;
+                    $$ = (Node *) $5;
+                }
+                else
+#endif
+                {
+                    const char* message = "REPLACE INTO syntax is not supported.";
+                    InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+                    ereport(errstate,
+                            (errmodule(MOD_PARSER),
+                            errcode(ERRCODE_SYNTAX_ERROR),
+                            errmsg("REPLACE INTO syntax is not supported."),
+                            parser_errposition(@1)));
+                    $$ = NULL;/* not reached */
+                }
+
+            }
+            | REPLACE hint_string INTO insert_target SET set_clause_list
+            {
+#ifndef ENABLE_MULTIPLE_NODES
+                if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
+                {
+                     InsertStmt* n = makeNode(InsertStmt);
+                     n->relation = $4;
+                     n->targetList = $6;
+                     n->hintState = create_hintstate($2);
+                     n->isReplace = true;
+                     $$ = (Node*)n;
+                }
+                else
+#endif
+                {
+                    const char* message = "REPLACE INTO syntax is not supported.";
+                    InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+                    ereport(errstate,
+                            (errmodule(MOD_PARSER),
+                            errcode(ERRCODE_SYNTAX_ERROR),
+                            errmsg("REPLACE INTO syntax is not supported."),
+                            parser_errposition(@1)));
+                    $$ = NULL;/* not reached */
+                }
+
+            }
 			| opt_with_clause INSERT hint_string INTO insert_target insert_rest upsert_clause returning_clause
 				{
 					if ($8 != NIL) {
@@ -19708,6 +19888,7 @@ InsertStmt: opt_with_clause INSERT hint_string INTO insert_target insert_rest re
 						/* for UPSERT, keep the INSERT statement as well */
 						$6->relation = $5;
 						$6->returningList = $8;
+						$6->isReplace = false;
 						$6->withClause = $1;
 						$6->hintState = create_hintstate($3);
 						$6->hasIgnore = ($6->hintState != NULL && $6->hintState->sql_ignore_hint && DB_IS_CMPT(B_FORMAT));
@@ -19752,7 +19933,8 @@ InsertStmt: opt_with_clause INSERT hint_string INTO insert_target insert_rest re
 						$6->returningList = $8;
 						$6->withClause = $1;
 						$6->upsertClause = (UpsertClause *)$7;
-						$6->hintState = create_hintstate($3);
+						$6->isReplace = false;
+						$6->hintState = create_hintstate($3);   
 						$6->hasIgnore = ($6->hintState != NULL && $6->hintState->sql_ignore_hint && DB_IS_CMPT(B_FORMAT));
 						$$ = (Node *) $6;
 					}
@@ -19999,6 +20181,10 @@ opt_cancelable: CANCELABLE                                              { $$ = T
                 ;
 
 opt_wait:	WAIT Iconst						{ $$ = $2; }
+opt_nowait_or_skip:
+			NOWAIT							{ $$ = LockWaitError; }
+			| SKIP LOCKED					{ $$ = LockWaitSkip; }
+			| /*EMPTY*/						{ $$ = LockWaitBlock; }
 		;
 
 /*****************************************************************************
@@ -21018,7 +21204,7 @@ for_locking_items:
 		;
 
 for_locking_item:
-			FOR UPDATE hint_string locked_rels_list opt_nowait
+			FOR UPDATE hint_string locked_rels_list opt_nowait_or_skip
 				{
                     if (u_sess->parser_cxt.isTimeCapsule) {
 						u_sess->parser_cxt.isTimeCapsule = false;
@@ -21029,8 +21215,13 @@ for_locking_item:
 					n->lockedRels = $4;
 					n->forUpdate = TRUE;
 					n->strength = LCS_FORUPDATE;
-					n->noWait = $5;
+					n->waitPolicy = (LockWaitPolicy)$5;
 					n->waitSec = 0;
+#ifdef ENABLE_MULTIPLE_NODES
+					if (n->waitPolicy == LockWaitSkip) {
+						DISTRIBUTED_FEATURE_NOT_SUPPORTED();
+					}
+#endif
 					$$ = (Node *) n;
 				}
 			| FOR UPDATE hint_string locked_rels_list opt_wait
@@ -21042,13 +21233,13 @@ for_locking_item:
 					n->waitSec = $5;
 					/* When the delay time is 0, the processing is based on the nowait logic. */
 					if (n->waitSec == 0) {
-						n->noWait = true;
+						n->waitPolicy = LockWaitError;
 					} else {
-						n->noWait = false;
+						n->waitPolicy = LockWaitBlock;
 					}
 					$$ = (Node *) n;
 				}
-			| for_locking_strength locked_rels_list opt_nowait
+			| for_locking_strength locked_rels_list opt_nowait_or_skip
 				{
 					LockingClause *n = makeNode(LockingClause);
 					n->lockedRels = $2;
@@ -21057,8 +21248,13 @@ for_locking_item:
 					if (n->strength == LCS_FORUPDATE) {
 						n->forUpdate = true;
 					}
-					n->noWait = $3;
+					n->waitPolicy = (LockWaitPolicy)$3;
                     n->waitSec = 0;
+#ifdef ENABLE_MULTIPLE_NODES
+					if (n->waitPolicy == LockWaitSkip) {
+						DISTRIBUTED_FEATURE_NOT_SUPPORTED();
+					}
+#endif
 					$$ = (Node *) n;
 				}
 		;
@@ -25670,6 +25866,7 @@ unreserved_keyword:
 			| FIRST_P
 			| FIXED_P
 			| FOLLOWING
+			| FOLLOWS_P
 			| FORCE
 			| FORMATTER
 			| FORWARD
@@ -25728,6 +25925,7 @@ unreserved_keyword:
 			| LOCAL
 			| LOCATION
 			| LOCK_P
+			| LOCKED
 			| LOG_P
 			| LOGGING
 			| LOGIN_ANY
@@ -25796,6 +25994,7 @@ unreserved_keyword:
 			| PLANS
 			| POLICY
 			| POOL
+			| PRECEDES_P
 			| PRECEDING
 			| PREDICT   // DB4AI
 /* PGXC_BEGIN */
@@ -25806,7 +26005,7 @@ unreserved_keyword:
 			| PREPARED
 			| PRESERVE
 			| PRIOR
-                        | PRIVATE
+			| PRIVATE
 			| PRIVILEGE
 			| PRIVILEGES
 			| PROCEDURAL
