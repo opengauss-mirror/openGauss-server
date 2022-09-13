@@ -2532,10 +2532,11 @@ void PostgresInitializer::SetDatabaseByName()
         ereport(FATAL, (errcode(ERRCODE_UNDEFINED_DATABASE), errmsg("database \"%s\" does not exist", m_indbname)));
     }
     dbform = (Form_pg_database)GETSTRUCT(tuple);
-    u_sess->proc_cxt.MyDatabaseId = HeapTupleGetOid(tuple);
+    // Do not set u_sess->proc_cxt.MyDatabaseId before LockDatabase. 
+    // Other processes will assume that the session is connected to this database.
+    m_dboid = HeapTupleGetOid(tuple);
     u_sess->proc_cxt.MyDatabaseTableSpace = dbform->dattablespace;
     /* take database name from the caller, just for paranoia */
-    m_dboid = u_sess->proc_cxt.MyDatabaseId;
     strlcpy(m_dbname, m_indbname, sizeof(m_dbname));
     if (EnableLocalSysCache()) {
         t_thrd.lsc_cxt.lsc->InitSessionDatabase(m_dboid, m_dbname, dbform->dattablespace);
@@ -2560,9 +2561,9 @@ void PostgresInitializer::SetDatabaseByOid()
         ereport(FATAL, (errcode(ERRCODE_UNDEFINED_DATABASE), errmsg("database %u does not exist", m_dboid)));
     }
     dbform = (Form_pg_database)GETSTRUCT(tuple);
-    u_sess->proc_cxt.MyDatabaseId = HeapTupleGetOid(tuple);
+    // Do not set u_sess->proc_cxt.MyDatabaseId before LockDatabase. 
+    // Other processes will assume that the session is connected to this database.
     u_sess->proc_cxt.MyDatabaseTableSpace = dbform->dattablespace;
-    Assert(u_sess->proc_cxt.MyDatabaseId == m_dboid);
     strlcpy(m_dbname, NameStr(dbform->datname), sizeof(m_dbname));
     if (EnableLocalSysCache()) {
         t_thrd.lsc_cxt.lsc->InitSessionDatabase(m_dboid, m_dbname, dbform->dattablespace);
@@ -2593,7 +2594,9 @@ void PostgresInitializer::LockDatabase()
      * CREATE DATABASE.
      */
 
-    LockSharedObject(DatabaseRelationId, u_sess->proc_cxt.MyDatabaseId, 0, RowExclusiveLock);
+    LockSharedObject(DatabaseRelationId, m_dboid, 0, RowExclusiveLock);
+    // Set u_sess->proc_cxt.MyDatabaseId here. It's safe. 
+    u_sess->proc_cxt.MyDatabaseId = m_dboid;
     /*
      * Now we can mark our PGPROC entry with the database ID.
      *
