@@ -360,7 +360,7 @@ bool InsertFusion::execute(long max_rows, char* completionTag)
 
     init_gtt_storage(CMD_INSERT, result_rel_info);
     m_c_local.m_estate->es_result_relation_info = result_rel_info;
-
+    m_c_local.m_estate->es_plannedstmt = m_global->m_planstmt;
     refreshParameterIfNecessary();
 
     /************************

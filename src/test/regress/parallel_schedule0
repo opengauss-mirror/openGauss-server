@@ -656,7 +656,7 @@ test: agg
 test: bypass_simplequery_support
 test: bypass_preparedexecute_support
 test: sqlbypass_partition
-#test: sqlbypass_partition_prepare
+test: sqlbypass_partition_prepare
 
 test: string_digit_to_numeric
 # Another group of parallel tests
