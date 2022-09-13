@@ -79,8 +79,12 @@ ERROR:  invalid connection string syntax
 CREATE SUBSCRIPTION testsub CONNECTION 'dbname=doesnotexist' PUBLICATION testpub WITH (create_slot=false);
 ERROR:  unrecognized subscription parameter: create_slot
 CREATE SUBSCRIPTION testsub CONNECTION 'dbname=doesnotexist' PUBLICATION testpub WITH (ENABLED=false, slot_name='testsub', synchronous_commit=off);
+ERROR:  invalid connection string syntax, missing host and port
+CREATE SUBSCRIPTION testsub CONNECTION 'dbname=doesnotexist' PUBLICATION testpub WITH (CONNECT=false, slot_name='testsub', synchronous_commit=off);
 -- create SUBSCRIPTION with conninfo in two single quote, used to check mask string bug
 CREATE SUBSCRIPTION testsub_maskconninfo CONNECTION 'host=''1.2.3.4'' port=''12345'' user=''username'' dbname=''postgres'' password=''password_1234''' PUBLICATION testpub WITH (ENABLED=false, slot_name='testsub', synchronous_commit=off);
+ERROR:  Failed to connect to publisher.
+CREATE SUBSCRIPTION testsub_maskconninfo CONNECTION 'host=''1.2.3.4'' port=''12345'' user=''username'' dbname=''postgres'' password=''password_1234''' PUBLICATION testpub WITH (CONNECT=false, slot_name='testsub', synchronous_commit=off);
 -- fail - The number of host and port are inconsistent
 create subscription sub1 connection 'dbname=postgres user=pubusr password=Huawei@123 host=192.168.0.38,192.168.0.38,192.168.0.38 port=14001,14501' publication pub1;
 ERROR:  The number of host and port are inconsistent.
@@ -297,8 +301,8 @@ SELECT object_name,detail_info FROM pg_query_audit('2022-01-13 9:30:00', '2031-1
      object_name      |                                                                                                                  detail_info                                                                                                                  
 ----------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  testsub              | DROP SUBSCRIPTION IF EXISTS testsub;
- testsub              | CREATE SUBSCRIPTION testsub CONNECTION **********************PUBLICATION testpub WITH (ENABLED=false, slot_name='testsub', synchronous_commit=off);
- testsub_maskconninfo | CREATE SUBSCRIPTION testsub_maskconninfo CONNECTION ***************************************************************************************************PUBLICATION testpub WITH (ENABLED=false, slot_name='testsub', synchronous_commit=off);
+ testsub              | CREATE SUBSCRIPTION testsub CONNECTION **********************PUBLICATION testpub WITH (CONNECT=false, slot_name='testsub', synchronous_commit=off);
+ testsub_maskconninfo | CREATE SUBSCRIPTION testsub_maskconninfo CONNECTION ***************************************************************************************************PUBLICATION testpub WITH (CONNECT=false, slot_name='testsub', synchronous_commit=off);
  testsub              | ALTER SUBSCRIPTION testsub CONNECTION '*************************************************************************************************;
  testsub              | ALTER SUBSCRIPTION testsub CONNECTION '**********************;
  testsub              | ALTER SUBSCRIPTION testsub SET PUBLICATION testpub2, testpub3;
