@@ -886,17 +886,18 @@ void MdRecoveryPcaPage(SMgrRelation reln, ForkNumber forknum, BlockNumber blockn
     if (ctrl->load_status == CTRL_PAGE_LOADED_ERROR) {
         pca_buf_free_page(ctrl, location, false);
         ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
-            errmsg("Failed to MdRecoveryPcaPage %s, headerNum: %u.", FilePathName(location.fd), location.headerNum)));
+            errmsg("Failed in MdRecoveryPcaPage %s, headerNum: %u.", FilePathName(location.fd), location.headerNum)));
     }
 
     extHeader = ctrl->pca_page;
-    // traverse pca_page to correct allocated_chunks
+    /* traverse pca_page to correct allocated_chunks */
     uint32 maxChkId = 0;
     for (uint32 blkno = 0; blkno < extHeader->nblocks; blkno++) {
         extAddr = GetExtentAddress(extHeader, (uint16)blkno);
         for (uint32 chunkNum = 0; chunkNum < extAddr->allocated_chunks; chunkNum++) {
+            /* make sure that each chunknos is valid */
             Assert((extAddr->chunknos[chunkNum] != 0) &&
-                (extAddr->chunknos[chunkNum] < (BLCKSZ / extHeader->chunk_size * CFS_LOGIC_BLOCKS_PER_EXTENT)));
+                (extAddr->chunknos[chunkNum] <= (BLCKSZ / extHeader->chunk_size * CFS_LOGIC_BLOCKS_PER_EXTENT)));
             maxChkId = (extAddr->chunknos[chunkNum] > maxChkId) ? extAddr->chunknos[chunkNum] : maxChkId;
         }
     }
@@ -946,11 +947,14 @@ void MdAssistFileProcess(SMgrRelation relation, const char *assistInfo, int assi
     nbytes = FilePWrite(location.fd, aligned_buf, CFS_EXTENT_SIZE * BLCKSZ,
                         location.extentStart * BLCKSZ, (uint32)WAIT_EVENT_DATA_FILE_WRITE);
     if (nbytes != CFS_EXTENT_SIZE * BLCKSZ) {
+        pfree(unaligned_buf);
+        pca_buf_free_page(ctrl, location, false);
         ereport(ERROR, (errcode_for_file_access(), errmsg("Failed to write the %d ext to file %s",
             (int)extInfo->extentNumber, FilePathName(location.fd))));
     }
 
     /* pca is changed, so pca buffer need to be reloaded in next use */
+    pfree(unaligned_buf);
     PCA_SET_NO_READ(ctrl);
     pca_buf_free_page(ctrl, location, false);
 }
@@ -1010,7 +1014,7 @@ void CfsSortOutChunk(const ExtentLocation &location, CfsExtentHeader *srcExtPca,
         for (uint32 j = 0; j < srcExtAddr->nchunks; j++) {
             chunknum++;
             assistExtAddr->chunknos[j] = chunknum;
-            Assert(srcExtAddr->chunknos[j] <= (BLCKSZ / srcExtPca->chunk_size * (CFS_EXTENT_SIZE - 1)));
+            Assert(srcExtAddr->chunknos[j] <= (BLCKSZ / srcExtPca->chunk_size * CFS_LOGIC_BLOCKS_PER_EXTENT));
 
             /* copy seperate chunk together */
             rc = memcpy_s((void*)(assistBuf + (long)(assistExtAddr->chunknos[j] - 1) * srcExtPca->chunk_size),
@@ -1080,6 +1084,7 @@ void CfsRecycleChunkInExt(ExtentLocation location, int assistfd, char *alignbuf)
     int nbytes = FilePWrite(location.fd, assistBuf, CFS_EXTENT_SIZE * BLCKSZ, location.extentStart * BLCKSZ,
                             (uint32)WAIT_EVENT_DATA_FILE_WRITE);
     if (nbytes != CFS_EXTENT_SIZE * BLCKSZ) {
+        pca_buf_free_page(ctrl, location, false);
         ereport(ERROR, (errcode_for_file_access(), errmsg("Failed to write the %d ext to file %s",
             (int)extInfo->extentNumber, FilePathName(location.fd))));
     }
