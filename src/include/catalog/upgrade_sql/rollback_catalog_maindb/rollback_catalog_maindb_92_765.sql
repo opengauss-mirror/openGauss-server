@@ -8,6 +8,18 @@ DROP FUNCTION IF EXISTS pg_catalog.gs_read_block_from_remote(oid, oid, oid, smal
 DROP FUNCTION IF EXISTS pg_catalog.gs_read_file_from_remote(oid, oid, oid, smallint, smallint, integer, integer, integer, xid, integer, OUT bytea, OUT xid) CASCADE;
 DROP FUNCTION IF EXISTS pg_catalog.gs_read_file_size_from_remote(oid, oid, oid, smallint, smallint, integer, xid, integer, OUT bigint) CASCADE;
 DROP FUNCTION IF EXISTS pg_catalog.pg_read_binary_file_blocks(IN input text, IN blocknum bigint, IN blockcount bigint, OUT path text, OUT blocknum integer, OUT len integer, OUT algorithm integer, OUT chunk_size integer, OUT data bytea) CASCADE;
+DROP FUNCTION IF EXISTS pg_catalog.gs_read_block_from_remote
+(  int4,
+   int4,
+   int4,
+   int2,
+   int2,
+   int4,
+   xid,
+   int4,
+   xid,
+   boolean,
+   int4) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 5843;
 CREATE OR REPLACE FUNCTION pg_catalog.gs_read_block_from_remote
 (  int4,
