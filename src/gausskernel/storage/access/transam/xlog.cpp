@@ -7709,6 +7709,10 @@ static bool recoveryStopsHere(XLogReaderState *record, bool *includeThis)
                             (uint32)(t_thrd.xlog_cxt.recoveryStopLSN >> 32), (uint32)t_thrd.xlog_cxt.recoveryStopLSN)));
         }
 
+        if (stopsHere) {
+            TruncateAndRemoveXLogForRoachRestore(record);
+        }
+
         return true;
     }
 
@@ -7744,6 +7748,7 @@ static bool recoveryStopsHere(XLogReaderState *record, bool *includeThis)
          */
         stopsHere = (XLogRecGetXid(record) == t_thrd.xlog_cxt.recoveryTargetXid);
         if (stopsHere) {
+            TruncateAndRemoveXLogForRoachRestore(record);
             *includeThis = t_thrd.xlog_cxt.recoveryTargetInclusive;
         }
     } else if (t_thrd.xlog_cxt.recoveryTarget == RECOVERY_TARGET_TIME_OBS) {
@@ -7864,6 +7869,10 @@ static bool recoveryStopsHere(XLogReaderState *record, bool *includeThis)
          */
         stopsHere = (strcmp(recordRPName, t_thrd.xlog_cxt.recoveryTargetName) == 0);
 
+        if (stopsHere) {
+            TruncateAndRemoveXLogForRoachRestore(record);
+        }
+
         // Ignore recoveryTargetInclusive because this is not a transaction record
         *includeThis = false;
 #ifdef ENABLE_MULTIPLE_NODES
@@ -7882,6 +7891,7 @@ static bool recoveryStopsHere(XLogReaderState *record, bool *includeThis)
             stopsHere = (recordXtime >= t_thrd.xlog_cxt.recoveryTargetTime);
         }
         if (stopsHere) {
+            TruncateAndRemoveXLogForRoachRestore(record);
             *includeThis = false;
         }
     }
