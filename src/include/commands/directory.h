@@ -35,5 +35,6 @@ extern Oid get_directory_oid(const char* directoryname, bool missing_ok);
 extern char* get_directory_name(Oid dir_oid);
 extern void RemoveDirectoryById(Oid dirOid);
 extern void AlterDirectoryOwner(const char* dirname, Oid newOwnerId);
+extern void AlterPgDirectoryOwner_oid(Oid dirOid, Oid newOwnerId);
 
 #endif /* DIRECTORY_H*/

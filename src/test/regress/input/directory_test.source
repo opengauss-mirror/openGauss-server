@@ -133,5 +133,19 @@ DROP DIRECTORY test_dir2;
 \! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "enable_access_server_directory=off" >/dev/null 2>&1
 
 RESET ROLE;
+
+alter system set enable_access_server_directory=on;
+create user u_reassign_owned_0008_1 sysadmin password 'test@123';
+create user u_reassign_owned_0008_2 sysadmin password 'test@123';
+SET ROLE u_reassign_owned_0008_1 PASSWORD 'test@123';
+show enable_access_server_directory;
+create or replace directory dir_object_reassign_owned_0008 as '/tmp';
+select t1.dirname, t2.usename, t1.dirpath from pg_directory t1 inner join pg_user t2 on t2.usesysid=t1.owner where t1.dirname='dir_object_reassign_owned_0008';
+reassign owned by u_reassign_owned_0008_1 to u_reassign_owned_0008_2;
+
+RESET ROLE;
+alter system set enable_access_server_directory=off;
+
 DROP USER test_user1,test_user2,test_user3;
 DROP USER test_sysadmin,test_create,test_drop;
+DROP USER u_reassign_owned_0008_1, u_reassign_owned_0008_2 cascade;
