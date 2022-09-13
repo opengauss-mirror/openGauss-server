@@ -5184,6 +5184,8 @@ static CreatePackageStmt* _copyCreatePackageStmt(const CreatePackageStmt* from)
     COPY_NODE_FIELD(pkgname);
     COPY_SCALAR_FIELD(pkgsecdef);
     COPY_STRING_FIELD(pkgspec);
+    COPY_SCALAR_FIELD(pkgspec_location);
+    COPY_SCALAR_FIELD(pkgspec_prefix_len);
 
     return newnode;
 }
