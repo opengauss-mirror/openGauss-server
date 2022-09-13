@@ -9520,6 +9520,12 @@ static void check_record_nest_tableof_index(PLpgSQL_datum* datum)
         PLpgSQL_row* row = (PLpgSQL_row*)datum;
         for (int i = 0; i < row->nfields; i++) {
             PLpgSQL_datum* row_element = NULL; 
+
+            /* check wether attisdropped */
+            if (row->varnos[i] == -1 && row->fieldnames[i] == NULL) {
+                continue;
+            }
+
             if (row->ispkg) {
                 row_element = (PLpgSQL_datum*)(row->pkg->datums[row->varnos[i]]);
             } else {
