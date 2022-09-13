@@ -249,6 +249,8 @@ static int get_nest_tableof_layer(PLpgSQL_var *var, const char *typname, int err
 static void SetErrorState();
 static void CheckDuplicateFunctionName(List* funcNameList);
 static void check_autonomous_nest_tablevar(PLpgSQL_var* var);
+static bool is_unreserved_keyword_func(const char *name);
+static PLpgSQL_stmt *funcname_is_call(const char* name, int location);
 #ifndef ENABLE_MULTIPLE_NODES
 static PLpgSQL_type* build_type_from_cursor_var(PLpgSQL_var* var);
 static bool checkAllAttrName(TupleDesc tupleDesc);
@@ -433,6 +435,7 @@ static void processFunctionRecordOutParam(int varno, Oid funcoid, int* outparam)
 %token <keyword>	K_BEGIN
 %token <keyword>	K_BULK
 %token <keyword>	K_BY
+%token <keyword>        K_CALL
 %token <keyword>	K_CASE
 %token <keyword>	K_CLOSE
 %token <keyword>	K_COLLATE
@@ -3860,6 +3863,80 @@ stmt_execsql			: K_ALTER
 		    {
 		    	$$ = make_execsql_stmt(K_MERGE, @1);
 		    }
+        | K_CALL
+            {
+                if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
+                {
+                    if(plpgsql_is_token_match2(T_CWORD,'(')
+                       || plpgsql_is_token_match2(T_CWORD,';')
+                       || plpgsql_is_token_match(T_WORD))
+                    {
+                        $$ = NULL;
+                    }
+                    else if(plpgsql_is_token_match2(K_CALL,'(') || plpgsql_is_token_match2(K_CALL,';'))
+                    {
+                        int    tok = yylex();
+                        char*  funcname = yylval.word.ident;
+                        PLpgSQL_stmt *stmt = funcname_is_call(funcname, @1);
+                        if(stmt != NULL)
+                        {
+                            $$ = stmt;
+                        }
+                        else
+                        {
+                            plpgsql_push_back_token(tok);
+                            $$ = make_execsql_stmt(K_CALL, @1);
+                        }
+                    }
+                    else if(plpgsql_is_token_match('(') || plpgsql_is_token_match(';'))
+                    {
+                        char*  funcname = (char*) $1;
+                        PLpgSQL_stmt *stmt = funcname_is_call(funcname, @1);
+                        if(stmt != NULL)
+                        {
+                            $$ = stmt;
+                        }
+                        else
+                        {
+                            $$ = make_execsql_stmt(K_CALL, @1);
+                        }
+                    }
+                    else
+                    {
+                        int    tok = yylex();
+                        if(yylval.str != NULL && is_unreserved_keyword_func(yylval.str))
+                        {
+                            plpgsql_push_back_token(tok);
+                            $$ = NULL;
+                        }
+                        else
+                        {
+                            plpgsql_push_back_token(tok);
+                            $$ = make_execsql_stmt(K_CALL, @1);
+                        }
+                    }
+                }
+                else
+                {
+                    if(plpgsql_is_token_match('(') || plpgsql_is_token_match(';'))
+                    {
+                        char*  funcname = (char*) $1;
+                        PLpgSQL_stmt *stmt = funcname_is_call(funcname, @1);
+                        if(stmt != NULL)
+                        {
+                            $$ = stmt;
+                        }
+                        else
+                        {
+                            $$ = make_execsql_stmt(K_CALL, @1);
+                        }
+                    }
+                    else
+                    {
+                        $$ = make_execsql_stmt(K_CALL, @1);
+                    }
+                }
+            }
         | T_WORD    /*C-style function call */
             {
                 int tok = -1;
@@ -5218,6 +5295,7 @@ unreserved_keyword	:
                 | K_ALTER
                 | K_ARRAY
                 | K_BACKWARD
+                | K_CALL
                 | K_COMMIT
                 | K_CONSTANT
                 | K_CONTINUE
@@ -8741,11 +8819,14 @@ make_execsql_stmt(int firsttoken, int location)
                         else
                             break;
                     }
-                    if(count > 0)
+                    if(count > 0 && lb.len-count > 0)
                     {
-                        char*  name = (char*)palloc(lb.len-count+1);
-                        strncpy(name, lb.data, lb.len-count);
-                        name[lb.len-count] = '\0';
+                        char*  name = NULL;
+                        errno_t rc = 0;
+
+                        name = (char*)palloc(lb.len-count+1);
+                        rc = strncpy_s(name, lb.len-count+1, lb.data, lb.len-count);
+                        securec_check_c(rc, "\0", "\0");
                         plpgsql_ns_additem(PLPGSQL_NSTYPE_LABEL, 0, pg_strtolower(name));
                         pfree(name);
                     }
@@ -12443,6 +12524,40 @@ static void BuildForQueryVariable(PLpgSQL_expr* expr, PLpgSQL_row **row, PLpgSQL
     }
 }
 #endif
+
+static PLpgSQL_stmt *
+funcname_is_call(const char* name, int location)
+{
+    PLpgSQL_stmt *stmt = NULL;
+    bool isCallFunc = false;
+    bool FuncNoarg = false;
+    if(plpgsql_is_token_match(';'))
+    {
+        FuncNoarg = true;
+    }
+    isCallFunc = is_function(name, false, FuncNoarg);
+    if(isCallFunc)
+    {
+        if(FuncNoarg)
+        {
+            stmt = make_callfunc_stmt_no_arg(name, location);
+        }
+        else
+        {
+            stmt = make_callfunc_stmt(name, location, false, false);
+            if (stmt->cmd_type == PLPGSQL_STMT_PERFORM)
+            {
+                ((PLpgSQL_stmt_perform *)stmt)->expr->is_funccall = true;
+            }
+            else if (stmt->cmd_type == PLPGSQL_STMT_EXECSQL)
+            {
+                ((PLpgSQL_stmt_execsql *)stmt)->sqlstmt->is_funccall = true;
+            }
+        }
+    }
+
+    return stmt;
+}
 
 static void processFunctionRecordOutParam(int varno, Oid funcoid, int* outparam)
 {
