@@ -31,7 +31,7 @@ Builds a Docker Image for openGauss
 Parameters:
    -v: version to build
        Choose one of: $(for i in $(ls -d */); do echo -n "${i%%/}  "; done)
-   -i: ignores the MD5 checksums
+   -i: ignores the SHA256 checksums
 
 LICENSE UPL 1.0
 
@@ -43,20 +43,20 @@ EOF
 # Validate packages
 checksum_packages() {
 if [ "${arch}" = "amd64" ]; then
-    md5_file="md5_file_amd64"
+    sha256_file="sha256_file_amd64"
     else
-    md5_file="md5_file_arm64"
+    sha256_file="sha256_file_arm64"
 fi
 
-  if hash md5sum 2>/dev/null; then
+  if hash sha256sum 2>/dev/null; then
     echo "Checking if required packages are present and valid..."   
-    if ! md5sum -c "$md5_file"; then
-      echo "MD5 for required packages to build this image did not match!"
+    if ! sha256sum -c "$sha256_file"; then
+      echo "SHA256 for required packages to build this image did not match!"
       echo "Make sure to download missing files in folder $VERSION."
       exit 1;
     fi
   else
-    echo "Ignored MD5 sum, 'md5sum' command not available.";
+    echo "Ignored SHA256 sum, 'sha256sum' command not available.";
   fi
 }
 
@@ -85,7 +85,7 @@ check_docker_version() {
 
 # Parameters
 VERSION="1.0.0"
-SKIPMD5=0
+SKIPCHECKSUM=0
 DOCKEROPS=""
 MIN_DOCKER_VERSION="17.09"
 arch=$(case $(uname -m) in i386)   echo "386" ;; i686)   echo "386" ;; x86_64) echo "amd64";; aarch64)echo "arm64";; esac)
@@ -107,7 +107,7 @@ while getopts "hesxiv:o:" optname; do
       exit 0;
       ;;
     "i")
-      SKIPMD5=1
+      SKIPCHECKSUM=1
       ;;
     "v")
       VERSION="$OPTARG"
@@ -144,10 +144,10 @@ cd "$VERSION" || {
   exit 1;
 }
 
-if [ ! "$SKIPMD5" -eq 1 ]; then
+if [ ! "$SKIPCHECKSUM" -eq 1 ]; then
   checksum_packages
 else
-  echo "Ignored MD5 checksum."
+  echo "Ignored SHA256 checksum."
 fi
 echo "=========================="
 echo "DOCKER info:"
