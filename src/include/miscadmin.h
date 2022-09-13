@@ -40,6 +40,7 @@
 
 extern const uint32 LARGE_SEQUENCE_VERSION_NUM;
 extern const uint32 GRAND_VERSION_NUM;
+extern const uint32 DOLPHIN_ENABLE_DROP_NUM;
 extern const uint32 SQL_PATCH_VERSION_NUM;
 extern const uint32 PREDPUSH_SAME_LEVEL_VERSION_NUM;
 extern const uint32 UPSERT_WHERE_VERSION_NUM;

@@ -58,6 +58,10 @@
 #include "utils/snapmgr.h"
 #include "access/heapam.h"
 
+#if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
+extern void InitBSqlPluginHookIfNeeded();
+#endif
+
 /* Globally visible state variables */
 THR_LOCAL bool creating_extension = false;
 
@@ -1175,6 +1179,7 @@ void CreateExtension(CreateExtensionStmt* stmt)
         FEATURE_NOT_PUBLIC_ERROR("EXTENSION is not yet supported.");
     }
 
+#if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
     if (pg_strcasecmp(stmt->extname, "dolphin") == 0 && !DB_IS_CMPT(B_FORMAT)) {
         ereport(ERROR,
             (errmsg("please create extension \"%s\" with B type DBCOMPATIBILITY", stmt->extname)));
@@ -1182,6 +1187,8 @@ void CreateExtension(CreateExtensionStmt* stmt)
         ereport(ERROR,
             (errmsg("please create extension \"%s\" with A type DBCOMPATIBILITY", stmt->extname)));
     }
+#endif
+
     /* Check extension name validity before any filesystem access */
     check_valid_extension_name(stmt->extname);
 
@@ -1421,12 +1428,13 @@ void CreateExtension(CreateExtensionStmt* stmt)
 
     u_sess->exec_cxt.extension_is_valid = true;
 
+#if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
     if (pg_strcasecmp(stmt->extname, "dolphin") == 0) {
          u_sess->attr.attr_sql.dolphin = true;
     } else if (pg_strcasecmp(stmt->extname, "whale") == 0) {
          u_sess->attr.attr_sql.whale = true;
     }
-
+#endif
     /*
      * Insert new tuple into pg_extension, and create dependency entries.
      */
@@ -1458,6 +1466,11 @@ void CreateExtension(CreateExtensionStmt* stmt)
     ApplyExtensionUpdates(extensionOid, pcontrol, versionName, updateVersions);
 
     u_sess->exec_cxt.extension_is_valid = false;
+#if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
+    if (pg_strcasecmp(stmt->extname, "dolphin") == 0) {
+        InitBSqlPluginHookIfNeeded();
+    }
+#endif
 }
 
 /*

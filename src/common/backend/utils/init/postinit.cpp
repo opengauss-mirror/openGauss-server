@@ -2783,10 +2783,13 @@ void PostgresInitializer::InitExtensionVariable()
     /* check whether the extension has been created 
     *  at most one will be true.
     */
+#if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
     const char* whale = "whale";
     const char* dolphin = "dolphin";
     u_sess->attr.attr_sql.dolphin = CheckIfExtensionExists(dolphin);
     u_sess->attr.attr_sql.whale = CheckIfExtensionExists(whale);
+#endif
+
 }
 
 void PostgresInitializer::FinishInit()

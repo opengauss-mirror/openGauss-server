@@ -805,7 +805,7 @@ static void init_session_share_memory()
 #endif
 }
 
-#ifndef ENABLE_MULTIPLE_NODES
+#if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
 extern void InitASqlPluginHookIfNeeded();
 extern void InitBSqlPluginHookIfNeeded();
 #endif
@@ -890,7 +890,7 @@ static bool InitSession(knl_session_context* session)
 
     SetProcessingMode(NormalProcessing);
 
-#ifndef ENABLE_MULTIPLE_NODES
+#if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
     LoadSqlPlugin();
 #endif
 
