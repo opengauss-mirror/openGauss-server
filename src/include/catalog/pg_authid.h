@@ -76,6 +76,9 @@ CATALOG(pg_authid,1260) BKI_SHARED_RELATION BKI_ROWTYPE_OID(2842) BKI_SCHEMA_MAC
 	bool        rolmonitoradmin;
 	bool        roloperatoradmin;
 	bool        rolpolicyadmin;
+#ifdef CATALOG_VARLEN
+	text		rolpasswordext;	/* passwordext, if any for other database encrypt rule, dolphin etc. */	
+#endif
 } FormData_pg_authid;
 
 #undef timestamptz
@@ -92,7 +95,7 @@ typedef FormData_pg_authid *Form_pg_authid;
  *		compiler constants for pg_authid
  * ----------------
  */
-#define Natts_pg_authid					26
+#define Natts_pg_authid					27
 #define Anum_pg_authid_rolname			1
 #define Anum_pg_authid_rolsuper			2
 #define Anum_pg_authid_rolinherit		3
@@ -119,6 +122,7 @@ typedef FormData_pg_authid *Form_pg_authid;
 #define Anum_pg_authid_rolmonitoradmin  24
 #define Anum_pg_authid_roloperatoradmin 25
 #define Anum_pg_authid_rolpolicyadmin	26
+#define Anum_pg_authid_rolpasswordext	27
 
 /* ----------------
  *		initial contents of pg_authid
@@ -127,15 +131,15 @@ typedef FormData_pg_authid *Form_pg_authid;
  * user choices.
  * ----------------
  */
-DATA(insert OID = 10 ( "POSTGRES" t t t t t t t t t -1 _null_ _null_ _null_ "default_pool" t 0 _null_ n 0 _null_ _null_ _null_ t t t));
-DATA(insert OID = 1044 ( "gs_role_copy_files" f t f f f f f f f -1 _null_ _null_ _null_ "default_pool" f 0 _null_ n 0 _null_ _null_ _null_ f f f));
-DATA(insert OID = 1045 ( "gs_role_signal_backend" f t f f f f f f f -1 _null_ _null_ _null_ "default_pool" f 0 _null_ n 0 _null_ _null_ _null_ f f f));
-DATA(insert OID = 1046 ( "gs_role_tablespace" f t f f f f f f f -1 _null_ _null_ _null_ "default_pool" f 0 _null_ n 0 _null_ _null_ _null_ f f f));
-DATA(insert OID = 1047 ( "gs_role_replication" f t f f f f f f f -1 _null_ _null_ _null_ "default_pool" f 0 _null_ n 0 _null_ _null_ _null_ f f f));
-DATA(insert OID = 1048 ( "gs_role_account_lock" f t f f f f f f f -1 _null_ _null_ _null_ "default_pool" f 0 _null_ n 0 _null_ _null_ _null_ f f f));
-DATA(insert OID = 1055 ( "gs_role_pldebugger" f t f f f f f f f -1 _null_ _null_ _null_ "default_pool" f 0 _null_ n 0 _null_ _null_ _null_ f f f));
-DATA(insert OID = 1056 ( "gs_role_directory_create" f t f f f f f f f -1 _null_ _null_ _null_ "default_pool" f 0 _null_ n 0 _null_ _null_ _null_ f f f));
-DATA(insert OID = 1059 ( "gs_role_directory_drop" f t f f f f f f f -1 _null_ _null_ _null_ "default_pool" f 0 _null_ n 0 _null_ _null_ _null_ f f f));
+DATA(insert OID = 10 ( "POSTGRES" t t t t t t t t t -1 _null_ _null_ _null_ "default_pool" t 0 _null_ n 0 _null_ _null_ _null_ t t t _null_));
+DATA(insert OID = 1044 ( "gs_role_copy_files" f t f f f f f f f -1 _null_ _null_ _null_ "default_pool" f 0 _null_ n 0 _null_ _null_ _null_ f f f _null_));
+DATA(insert OID = 1045 ( "gs_role_signal_backend" f t f f f f f f f -1 _null_ _null_ _null_ "default_pool" f 0 _null_ n 0 _null_ _null_ _null_ f f f _null_));
+DATA(insert OID = 1046 ( "gs_role_tablespace" f t f f f f f f f -1 _null_ _null_ _null_ "default_pool" f 0 _null_ n 0 _null_ _null_ _null_ f f f _null_));
+DATA(insert OID = 1047 ( "gs_role_replication" f t f f f f f f f -1 _null_ _null_ _null_ "default_pool" f 0 _null_ n 0 _null_ _null_ _null_ f f f _null_));
+DATA(insert OID = 1048 ( "gs_role_account_lock" f t f f f f f f f -1 _null_ _null_ _null_ "default_pool" f 0 _null_ n 0 _null_ _null_ _null_ f f f _null_));
+DATA(insert OID = 1055 ( "gs_role_pldebugger" f t f f f f f f f -1 _null_ _null_ _null_ "default_pool" f 0 _null_ n 0 _null_ _null_ _null_ f f f _null_));
+DATA(insert OID = 1056 ( "gs_role_directory_create" f t f f f f f f f -1 _null_ _null_ _null_ "default_pool" f 0 _null_ n 0 _null_ _null_ _null_ f f f _null_));
+DATA(insert OID = 1059 ( "gs_role_directory_drop" f t f f f f f f f -1 _null_ _null_ _null_ "default_pool" f 0 _null_ n 0 _null_ _null_ _null_ f f f _null_));
 
 #define BOOTSTRAP_SUPERUSERID 10
 #define DEFAULT_ROLE_COPY_FILES 1044

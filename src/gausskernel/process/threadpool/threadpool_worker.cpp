@@ -915,7 +915,7 @@ static bool InitSession(knl_session_context* session)
                     (unsigned int)maxChunksPerProcess << (chunkSizeInBits - BITS_IN_MB))));
     }
 
-    ReadyForQuery((CommandDest)t_thrd.postgres_cxt.whereToSendOutput);
+    session->proc_cxt.MyProcPort->protocol_config->fn_send_ready_for_query((CommandDest)t_thrd.postgres_cxt.whereToSendOutput);
 
     return true;
 }
@@ -945,12 +945,12 @@ static void SendSessionIdxToClient()
     GenerateCancelKey(true);
 
     if (t_thrd.postgres_cxt.whereToSendOutput == DestRemote && PG_PROTOCOL_MAJOR(FrontendProtocol) >= 2) {
-        StringInfoData buf;
-
-        pq_beginmessage(&buf, 'K');
-        pq_sendint32(&buf, (uint32)u_sess->session_ctr_index);
-        pq_sendint32(&buf, (uint32)u_sess->cancel_key);
-        pq_endmessage(&buf);
+        
+        Port* MyProcPort = u_sess->proc_cxt.MyProcPort;
+        if (MyProcPort && MyProcPort->protocol_config->fn_send_cancel_key) {
+            MyProcPort->protocol_config->fn_send_cancel_key((uint32)u_sess->session_ctr_index,
+                                                            (uint32)u_sess->cancel_key);
+        }
     }
 }
 

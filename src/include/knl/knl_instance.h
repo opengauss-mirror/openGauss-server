@@ -1124,6 +1124,17 @@ typedef struct knl_g_streaming_dr_context {
     slock_t mutex; /* locks shared variables shown above */
 } knl_g_streaming_dr_context;
 
+typedef struct knl_g_listen_context {
+    #define MAXLISTEN 64
+    #define IP_LEN 64
+    /* The socket(s) we're listening to. */
+    pgsocket ListenSocket[MAXLISTEN];
+    char LocalAddrList[MAXLISTEN][IP_LEN];
+    int LocalIpNum;
+    int listen_sock_type[MAXLISTEN]; /* ori type: enum ListenSocketType */
+    bool reload_fds;
+} knl_g_listen_context;
+
 typedef struct knl_g_startup_context {
     uint32 remoteReadPageNum;
     HTAB *badPageHashTbl;
@@ -1275,6 +1286,7 @@ typedef struct knl_instance_context {
     knl_g_audit_context audit_cxt;
 
     knl_g_abo_context abo_cxt;
+    knl_g_listen_context listen_cxt;
 } knl_instance_context;
 
 extern long random();

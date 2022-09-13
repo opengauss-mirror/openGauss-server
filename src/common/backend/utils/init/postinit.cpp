@@ -118,7 +118,6 @@ static void AlterPgxcNodePort(void);
 bool ConnAuthMethodCorrect = true;
 Alarm alarmItemTooManyDatabaseConn[1] = {ALM_AI_Unknown, ALM_AS_Normal, 0, 0, 0, 0, {0}, {0}, NULL};
 
-static HeapTuple GetDatabaseTuple(const char* dbname);
 static void PerformAuthentication(Port* port);
 static void CheckMyDatabase(const char* name, bool am_superuser);
 static void InitCommunication(void);
@@ -309,7 +308,7 @@ static void PerformAuthentication(Port* port)
     /*
      * Now perform authentication exchange.
      */
-    ClientAuthentication(port); /* might not return, if failure */
+    port->protocol_config->fn_authenticate(port);
 
     /*
      * recover the signal mask before call ClientAuthentication.

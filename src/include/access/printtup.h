@@ -55,6 +55,9 @@ typedef struct {
     int nattrs;
     PrinttupAttrInfo* myinfo; /* Cached info about each attr */
     int16* formats;     /* format code for each column */
+#ifndef ENABLE_MULTIPLE_NODES
+    List* target_list; /* output target list item */
+#endif
 } DR_printtup;
 
 typedef struct {

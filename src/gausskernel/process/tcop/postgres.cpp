@@ -266,7 +266,7 @@ static XLogRecPtr xlogCopyStart = InvalidXLogRecPtr;
  */
 static int InteractiveBackend(StringInfo inBuf);
 static int interactive_getc(void);
-static int SocketBackend(StringInfo inBuf);
+extern int SocketBackend(StringInfo inBuf);
 static int ReadCommand(StringInfo inBuf);
 static List* pg_rewrite_query(Query* query);
 bool check_log_statement(List* stmt_list);
@@ -497,7 +497,7 @@ static int interactive_getc(void)
  *	EOF is returned if the connection is lost.
  * ----------------
  */
-static int SocketBackend(StringInfo inBuf)
+int SocketBackend(StringInfo inBuf)
 {
     int qtype;
 #ifdef ENABLE_MULTIPLE_NODES
@@ -761,7 +761,7 @@ static int ReadCommand(StringInfo inBuf)
 #endif
 
     if (t_thrd.postgres_cxt.whereToSendOutput == DestRemote)
-        result = SocketBackend(inBuf);
+        result = u_sess->proc_cxt.MyProcPort->protocol_config->fn_read_command(inBuf);
     else if (t_thrd.postgres_cxt.whereToSendOutput == DestDebug)
         result = InteractiveBackend(inBuf);
     else
@@ -7836,12 +7836,12 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
      */
     if (t_thrd.postgres_cxt.whereToSendOutput == DestRemote && PG_PROTOCOL_MAJOR(FrontendProtocol) >= 2 &&
         !IS_THREAD_POOL_WORKER) {
-        StringInfoData buf;
 
-        pq_beginmessage(&buf, 'K');
-        pq_sendint32(&buf, (int32)t_thrd.proc_cxt.MyPMChildSlot);
-        pq_sendint32(&buf, (int32)t_thrd.proc_cxt.MyCancelKey);
-        pq_endmessage(&buf);
+        Port* MyProcPort = u_sess->proc_cxt.MyProcPort;
+        if (MyProcPort && MyProcPort->protocol_config->fn_send_cancel_key) {
+            MyProcPort->protocol_config->fn_send_cancel_key((int32)t_thrd.proc_cxt.MyPMChildSlot,
+                                                            (int32)t_thrd.proc_cxt.MyCancelKey);
+        }
 
         /* DN send thread pid to CN */
         if (IsConnFromCoord() && IS_PGXC_DATANODE && (t_thrd.proc && t_thrd.proc->workingVersionNum >= 92060)) {
@@ -8010,8 +8010,11 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         t_thrd.postgres_cxt.DoingCommandRead = false;
 
         /* Make sure libpq is in a good state */
-        pq_comm_reset();
-
+        Port* MyProcPort = u_sess->proc_cxt.MyProcPort;
+        if (MyProcPort && MyProcPort->protocol_config->fn_comm_reset) {
+            MyProcPort->protocol_config->fn_comm_reset();
+        }
+            
         /* statement retry phase : long jump */
         if (IsStmtRetryEnabled()) {
             bool is_extended_query = u_sess->postgres_cxt.doing_extended_query_message;
@@ -8374,7 +8377,8 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
             /*
              * If connection to client is lost, we do not need to send message to client.
              */
-            if (IS_CLIENT_CONN_VALID(u_sess->proc_cxt.MyProcPort) && (!t_thrd.int_cxt.ClientConnectionLost)) {
+            Port* MyProcPort = u_sess->proc_cxt.MyProcPort;
+            if (IS_CLIENT_CONN_VALID(MyProcPort) && (!t_thrd.int_cxt.ClientConnectionLost)) {
                 /*
                  * before send 'Z' to frontend, we should check if INTERRUPTS happends or not.
                  * In SyncRepWaitForLSN() function, take HOLD_INTERRUPTS() to prevent interrupt happending and set
@@ -8383,7 +8387,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                  * interrupt. So frontend will be reveiving message forever and do nothing, which is wrong.
                  */
                 CHECK_FOR_INTERRUPTS();
-                ReadyForQuery((CommandDest)t_thrd.postgres_cxt.whereToSendOutput);
+                MyProcPort->protocol_config->fn_send_ready_for_query((CommandDest)t_thrd.postgres_cxt.whereToSendOutput);
             }
 #ifdef ENABLE_MULTIPLE_NODES
             /*
@@ -8548,6 +8552,16 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
             !IsTransactionOrTransactionBlock() && !IsConnFromGTMTool()) {
             processPoolerReload();
             ResetGotPoolReload(false);
+        }
+
+        /*
+         * call the protocol hook to process the request.
+         */
+        if (firstchar != EOF && u_sess->proc_cxt.MyProcPort &&
+            u_sess->proc_cxt.MyProcPort->protocol_config->fn_process_command) {
+            firstchar = u_sess->proc_cxt.MyProcPort->protocol_config->fn_process_command(&input_message);
+            send_ready_for_query = true;
+            continue;
         }
 
         /*

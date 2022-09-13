@@ -363,7 +363,7 @@ static void getInstallationPaths(const char* argv0);
 static void checkDataDir(void);
 static void CheckGUCConflicts(void);
 static Port* ConnCreateToRecvGssock(pollfd* ufds, int idx, int* nSockets);
-static Port* ConnCreate(int serverFd);
+static Port* ConnCreate(int serverFd, int idx);
 static void reset_shared(int port);
 static void SIGHUP_handler(SIGNAL_ARGS);
 static void pmdie(SIGNAL_ARGS);
@@ -485,7 +485,6 @@ typedef struct {
     Port port;
     pgsocket portsocket;
     char DataDir[MAXPGPATH];
-    pgsocket ListenSocket[MAXLISTEN];
     long MyCancelKey;
     int MyPMChildSlot;
 #ifndef WIN32
@@ -499,8 +498,6 @@ typedef struct {
     LWLock* mainLWLockArray;
     PMSignalData* PMSignalState;
 
-    char LocalAddrList[MAXLISTEN][IP_LEN];
-    int LocalIpNum;
     HaShmemData* HaShmData;
 
     TimestampTz PgStartTime;
@@ -535,6 +532,32 @@ static bool save_backend_variables(BackendParameters* param, Port* port, HANDLE 
 
 static void BackendArrayAllocation(void);
 static void BackendArrayRemove(Backend* bn);
+
+extern void libpq_send_cancel_key(int32 pid, int32 key);
+extern void libpq_report_param_status(const char *name, char *val);
+
+extern int ClientConnInitilize(Port* port);
+extern void send_message_to_frontend(ErrorData* edata);
+extern int SocketBackend(StringInfo inBuf);
+extern DestReceiver* printtup_create_DR(CommandDest dest);
+
+ProtocolExtensionConfig* ListenConfig[MAXLISTEN];
+
+ProtocolExtensionConfig default_protocol_config = {
+    false,
+    pq_init,
+    StartupPacketInitialize,
+    ClientAuthentication,
+    send_message_to_frontend,
+    libpq_send_cancel_key,
+    pq_comm_reset,
+    ReadyForQuery,
+    SocketBackend,
+    printtup_create_DR, /* use libpq defaults for printtup*() */
+    NULL,
+    NULL,
+    libpq_report_param_status
+};
 
 PMStateInfo pmStateDescription[] = {{PM_INIT, "PM_INIT"},
     {PM_STARTUP, "PM_STARTUP"},
@@ -1068,7 +1091,7 @@ static void SetListenSocket(ReplConnInfo **replConnArray, bool *listen_addr_save
                 replConnArray[i]->localhost,
                 (unsigned short)replConnArray[i]->localport,
                 g_instance.attr.attr_network.UnixSocketDir,
-                t_thrd.postmaster_cxt.ListenSocket,
+                g_instance.listen_cxt.ListenSocket,
                 MAXLISTEN,
                 false,
                 false,
@@ -1691,15 +1714,15 @@ int PostmasterMain(int argc, char* argv[])
     ledger_hook_init();
 
     /*
-        * process any libraries that should be preloaded at postmaster start
-        */
+    * process any libraries that should be preloaded at postmaster start
+    */
     process_shared_preload_libraries();
 
     /*
-        * Establish input sockets.
-        */
+    * Establish input sockets.
+    */
     for (i = 0; i < MAXLISTEN; i++)
-        t_thrd.postmaster_cxt.ListenSocket[i] = PGINVALID_SOCKET;
+        g_instance.listen_cxt.ListenSocket[i] = PGINVALID_SOCKET;
 
     if (g_instance.attr.attr_network.ListenAddresses && !dummyStandbyMode) {
         char* rawstring = NULL;
@@ -1708,8 +1731,8 @@ int PostmasterMain(int argc, char* argv[])
         int success = 0;
 
         /*
-            * start commproxy if needed
-            */
+        * start commproxy if needed
+        */
         if (CommProxyNeedSetup()) {
             CommProxyStartUp();
         }
@@ -1746,7 +1769,7 @@ int PostmasterMain(int argc, char* argv[])
                     NULL,
                     (unsigned short)g_instance.attr.attr_network.PostPortNumber,
                     g_instance.attr.attr_network.UnixSocketDir,
-                    t_thrd.postmaster_cxt.ListenSocket,
+                    g_instance.listen_cxt.ListenSocket,
                     MAXLISTEN,
                     true,
                     true,
@@ -1756,7 +1779,7 @@ int PostmasterMain(int argc, char* argv[])
                     curhost,
                     (unsigned short)g_instance.attr.attr_network.PostPortNumber,
                     g_instance.attr.attr_network.UnixSocketDir,
-                    t_thrd.postmaster_cxt.ListenSocket,
+                    g_instance.listen_cxt.ListenSocket,
                     MAXLISTEN,
                     true,
                     true,
@@ -1785,7 +1808,7 @@ int PostmasterMain(int argc, char* argv[])
                         NULL,
                         (unsigned short)g_instance.attr.attr_network.PoolerPort,
                         g_instance.attr.attr_network.UnixSocketDir,
-                        t_thrd.postmaster_cxt.ListenSocket,
+                        g_instance.listen_cxt.ListenSocket,
                         MAXLISTEN,
                         false,
                         false,
@@ -1795,7 +1818,7 @@ int PostmasterMain(int argc, char* argv[])
                         curhost,
                         (unsigned short)g_instance.attr.attr_network.PoolerPort,
                         g_instance.attr.attr_network.UnixSocketDir,
-                        t_thrd.postmaster_cxt.ListenSocket,
+                        g_instance.listen_cxt.ListenSocket,
                         MAXLISTEN,
                         false,
                         false,
@@ -1835,7 +1858,7 @@ int PostmasterMain(int argc, char* argv[])
 #ifdef USE_BONJOUR
 
     /* Register for Bonjour only if we opened TCP socket(s) */
-    if (g_instance.attr.attr_common.enable_bonjour && t_thrd.postmaster_cxt.ListenSocket[0] != PGINVALID_SOCKET) {
+    if (g_instance.attr.attr_common.enable_bonjour && g_instance.listen_cxt.ListenSocket[0] != PGINVALID_SOCKET) {
         DNSServiceErrorType err;
 
         /*
@@ -1878,7 +1901,7 @@ int PostmasterMain(int argc, char* argv[])
             NULL,
             (unsigned short)g_instance.attr.attr_network.PostPortNumber,
             g_instance.attr.attr_network.UnixSocketDir,
-            t_thrd.postmaster_cxt.ListenSocket,
+            g_instance.listen_cxt.ListenSocket,
             MAXLISTEN,
             false,
             true,
@@ -1895,7 +1918,7 @@ int PostmasterMain(int argc, char* argv[])
             NULL,
             (unsigned short)g_instance.attr.attr_network.PoolerPort,
             g_instance.attr.attr_network.UnixSocketDir,
-            t_thrd.postmaster_cxt.ListenSocket,
+            g_instance.listen_cxt.ListenSocket,
             MAXLISTEN,
             false,
             false,
@@ -1919,7 +1942,7 @@ int PostmasterMain(int argc, char* argv[])
                 NULL,
                 (unsigned short)g_instance.attr.attr_network.comm_sctp_port,
                 g_instance.attr.attr_network.UnixSocketDir,
-                t_thrd.postmaster_cxt.ListenSocket,
+                g_instance.listen_cxt.ListenSocket,
                 MAXLISTEN,
                 false,
                 true,
@@ -1932,9 +1955,9 @@ int PostmasterMain(int argc, char* argv[])
 #endif
 
     /*
-        * check that we have some socket to listen on
-        */
-    if (t_thrd.postmaster_cxt.ListenSocket[0] == PGINVALID_SOCKET) {
+    * check that we have some socket to listen on
+    */
+    if (g_instance.listen_cxt.ListenSocket[0] == PGINVALID_SOCKET) {
         ereport(FATAL, (errmsg("no socket created for listening")));
     }
 
@@ -2348,6 +2371,26 @@ int PostmasterMain(int argc, char* argv[])
     ExitPostmaster(status != STATUS_OK);
 
     return 0; /* not reached */
+}
+
+void libpq_send_cancel_key(int32 pid, int32 key)
+{
+    StringInfoData buf;
+
+    pq_beginmessage(&buf, 'K');
+    pq_sendint32(&buf, pid);
+    pq_sendint32(&buf, key);
+    pq_endmessage(&buf);
+}
+
+void libpq_report_param_status(const char *name, char *val)
+{
+    StringInfoData msgbuf;
+
+    pq_beginmessage(&msgbuf, 'S');
+    pq_sendstring(&msgbuf, name);
+    pq_sendstring(&msgbuf, val);
+    pq_endmessage(&msgbuf);
 }
 
 /*
@@ -2818,6 +2861,15 @@ static int ServerLoop(void)
 #endif
         }
 
+        if (g_instance.listen_cxt.reload_fds) {
+#ifdef HAVE_POLL
+            nSockets = initPollfd(ufds);
+#else
+            nSockets = initMasks(&readmask);
+#endif
+            g_instance.listen_cxt.reload_fds = false;
+        }
+
         /*
          * Wait for a connection request to arrive.
          *
@@ -2919,7 +2971,7 @@ static int ServerLoop(void)
                     ufds[i].revents = 0;
 #else
 
-                if (FD_ISSET(t_thrd.postmaster_cxt.ListenSocket[i], &rmask)) {
+                if (FD_ISSET(g_instance.listen_cxt.ListenSocket[i], &rmask)) {
 #endif
                     Port* port = NULL;
 
@@ -2928,16 +2980,16 @@ static int ServerLoop(void)
                     if (IS_FD_TO_RECV_GSSOCK(ufds[i].fd)) {
                         port = ConnCreateToRecvGssock(ufds, i, &nSockets);
                     } else {
-                        port = ConnCreate(ufds[i].fd);
+                        port = ConnCreate(ufds[i].fd, i);
                     }
 
                     if (port != NULL) {
                         int result = STATUS_OK;
                         bool isConnectHaPort =
-                            (i < MAXLISTEN) && (t_thrd.postmaster_cxt.listen_sock_type[i] == HA_LISTEN_SOCKET);
+                            (i < MAXLISTEN) && (g_instance.listen_cxt.listen_sock_type[i] == HA_LISTEN_SOCKET);
                         /*
                          * Since at present, HA only uses TCP sockets, we can directly compare
-                         * the corresponding enty in t_thrd.postmaster_cxt.listen_sock_type, even
+                         * the corresponding enty in g_instance.listen_cxt.listen_sock_type, even
                          * though ufds are not one-to-one mapped to tcp and sctp socket array.
                          * If HA adopts STCP sockets later, we will need to maintain socket type
                          * array for ufds in initPollfd.
@@ -3383,7 +3435,7 @@ static int initPollfd(struct pollfd* ufds)
     }
 
     for (i = 0; i < MAXLISTEN; i++) {
-        fd = t_thrd.postmaster_cxt.ListenSocket[i];
+        fd = g_instance.listen_cxt.ListenSocket[i];
 
         if (fd == PGINVALID_SOCKET)
             break;
@@ -3412,7 +3464,7 @@ static int initMasks(fd_set* rmask)
     FD_ZERO(rmask);
 
     for (i = 0; i < MAXLISTEN; i++) {
-        int fd = t_thrd.postmaster_cxt.ListenSocket[i];
+        int fd = g_instance.listen_cxt.ListenSocket[i];
 
         if (fd == PGINVALID_SOCKET) {
             continue;
@@ -4284,7 +4336,7 @@ static Port* ConnCreateToRecvGssock(pollfd* ufds, int idx, int* nSockets)
      * so receiver flow ctrl make connection and listening fd is polled up
      */
     if (ufds[idx].fd == t_thrd.libpq_cxt.listen_fd_for_recv_flow_ctrl) {
-        port = ConnCreate(ufds[idx].fd);
+        port = ConnCreate(ufds[idx].fd, idx);
 
         if (port == NULL)
             return port;
@@ -4345,7 +4397,7 @@ static Port* ConnCreateToRecvGssock(pollfd* ufds, int idx, int* nSockets)
  *
  * Returns NULL on failure, other than out-of-memory which is fatal.
  */
-static Port* ConnCreate(int serverFd)
+static Port* ConnCreate(int serverFd, int idx)
 {
     Port* port = NULL;
 
@@ -4359,6 +4411,11 @@ static Port* ConnCreate(int serverFd)
 
     port->sock = PGINVALID_SOCKET;
     port->gs_sock = GS_INVALID_GSOCK;
+
+    ProtocolExtensionConfig* protocol = ListenConfig[idx];
+
+    Assert(protocol != NULL);
+    port->protocol_config = protocol;
 
     if (StreamConnection(serverFd, port) != STATUS_OK) {
         if (port->sock >= 0)
@@ -4462,9 +4519,9 @@ void ClosePostmasterPorts(bool am_syslogger)
 
     /* Close the listen sockets */
     for (i = 0; i < MAXLISTEN; i++) {
-        if (t_thrd.postmaster_cxt.ListenSocket[i] != PGINVALID_SOCKET) {
-            StreamClose(t_thrd.postmaster_cxt.ListenSocket[i]);
-            t_thrd.postmaster_cxt.ListenSocket[i] = PGINVALID_SOCKET;
+        if (g_instance.listen_cxt.ListenSocket[i] != PGINVALID_SOCKET) {
+            StreamClose(g_instance.listen_cxt.ListenSocket[i]);
+            g_instance.listen_cxt.ListenSocket[i] = PGINVALID_SOCKET;
         }
     }
     /* If using syslogger, close the read side of the pipe */
@@ -4509,9 +4566,9 @@ static void CloseServerPorts(int status, Datum arg)
      * condition if a new postmaster wants to re-use the TCP port number.
      */
     for (i = 0; i < MAXLISTEN; i++) {
-        if (t_thrd.postmaster_cxt.ListenSocket[i] != PGINVALID_SOCKET) {
-            StreamClose(t_thrd.postmaster_cxt.ListenSocket[i]);
-            t_thrd.postmaster_cxt.ListenSocket[i] = PGINVALID_SOCKET;
+        if (g_instance.listen_cxt.ListenSocket[i] != PGINVALID_SOCKET) {
+            StreamClose(g_instance.listen_cxt.ListenSocket[i]);
+            g_instance.listen_cxt.ListenSocket[i] = PGINVALID_SOCKET;
         }
     }
 
@@ -4525,13 +4582,13 @@ void socket_close_on_exec(void)
 {
     /* Close the listen sockets */
     for (int i = 0; i < MAXLISTEN; i++) {
-        if (t_thrd.postmaster_cxt.ListenSocket[i] != PGINVALID_SOCKET) {
-            int flags = comm_fcntl(t_thrd.postmaster_cxt.ListenSocket[i], F_GETFD);
+        if (g_instance.listen_cxt.ListenSocket[i] != PGINVALID_SOCKET) {
+            int flags = comm_fcntl(g_instance.listen_cxt.ListenSocket[i], F_GETFD);
             if (flags < 0)
                 ereport(ERROR, (errcode(ERRCODE_SYSTEM_ERROR), errmsg("fcntl F_GETFD failed!")));
 
             flags |= FD_CLOEXEC;
-            if (comm_fcntl(t_thrd.postmaster_cxt.ListenSocket[i], F_SETFD, flags) < 0)
+            if (comm_fcntl(g_instance.listen_cxt.ListenSocket[i], F_SETFD, flags) < 0)
                 ereport(ERROR, (errcode(ERRCODE_SYSTEM_ERROR), errmsg("fcntl F_SETFD failed!")));
         }
     }
@@ -7802,7 +7859,11 @@ static void BackendInitialize(Port* port)
      * to the client. Must do this now because authentication uses libpq to
      * send messages.
      */
-    pq_init();
+    if (port->protocol_config && port->protocol_config->fn_init) {
+        port->protocol_config->fn_init(); 
+    } else {
+        pq_init();
+    }
 
     /* now safe to ereport to client */
     t_thrd.postgres_cxt.whereToSendOutput = DestRemote;
@@ -7822,7 +7883,6 @@ static void BackendInitialize(Port* port)
         return;
 
     int status = ClientConnInitilize(port);
-
     if (status == STATUS_EOF)
         return;
     else if (status == STATUS_ERROR)
@@ -7865,7 +7925,7 @@ int ClientConnInitilize(Port* port)
         ereport(FATAL, (errmsg("could not set timer for startup packet timeout")));
     }
 #endif
-    int status = StartupPacketInitialize(port);
+    int status = port->protocol_config->fn_start(port);
 
     /*
      * Stop here if it was bad or a cancel packet.	ProcessStartupPacket
@@ -8074,7 +8134,7 @@ void CheckClientIp(Port* port)
     /* Check whether the client ip is configured in pg_hba.conf */
     char ip[IP_LEN] = {'\0'};
     if (!check_ip_whitelist(port, ip, IP_LEN)) {
-        pq_init();                                          /* initialize libpq to talk to client */
+        port->protocol_config->fn_init();                   /* initialize libpq to talk to client */
         t_thrd.postgres_cxt.whereToSendOutput = DestRemote; /* now safe to ereport to client */
         ereport(FATAL,
             (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
@@ -9978,12 +10038,6 @@ static bool save_backend_variables(BackendParameters* param, Port* port, HANDLE 
 
     strlcpy(param->DataDir, t_thrd.proc_cxt.DataDir, MAXPGPATH);
 
-    ss_rc = memcpy_s(&param->ListenSocket,
-        sizeof(param->ListenSocket),
-        &t_thrd.postmaster_cxt.ListenSocket,
-        sizeof(t_thrd.postmaster_cxt.ListenSocket));
-    securec_check(ss_rc, "\0", "\0");
-
     param->MyCancelKey = t_thrd.proc_cxt.MyCancelKey;
     param->MyPMChildSlot = t_thrd.proc_cxt.MyPMChildSlot;
 
@@ -9996,9 +10050,6 @@ static bool save_backend_variables(BackendParameters* param, Port* port, HANDLE 
     param->mainLWLockArray = (LWLock*)t_thrd.shemem_ptr_cxt.mainLWLockArray;
     param->PMSignalState = t_thrd.shemem_ptr_cxt.PMSignalState;
 
-    param->LocalIpNum = t_thrd.postmaster_cxt.LocalIpNum;
-    int rc = memcpy_s(param->LocalAddrList, (MAXLISTEN * IP_LEN), t_thrd.postmaster_cxt.LocalAddrList, (MAXLISTEN * IP_LEN));
-    securec_check(rc, "", "");
     param->HaShmData = t_thrd.postmaster_cxt.HaShmData;
 
     param->PgStartTime = t_thrd.time_cxt.pg_start_time;
@@ -10138,12 +10189,6 @@ static void restore_backend_variables(BackendParameters* param, Port* port)
 
     SetDataDir(param->DataDir);
 
-    int ss_rc = memcpy_s(&t_thrd.postmaster_cxt.ListenSocket,
-        sizeof(t_thrd.postmaster_cxt.ListenSocket),
-        &param->ListenSocket,
-        sizeof(t_thrd.postmaster_cxt.ListenSocket));
-    securec_check(ss_rc, "\0", "\0");
-
     t_thrd.proc_cxt.MyCancelKey = param->MyCancelKey;
     t_thrd.proc_cxt.MyPMChildSlot = param->MyPMChildSlot;
 
@@ -10156,9 +10201,6 @@ static void restore_backend_variables(BackendParameters* param, Port* port)
     t_thrd.shemem_ptr_cxt.mainLWLockArray = (LWLockPadded*)param->mainLWLockArray;
     t_thrd.shemem_ptr_cxt.PMSignalState = param->PMSignalState;
 
-    t_thrd.postmaster_cxt.LocalIpNum = param->LocalIpNum;
-    rc = memcpy_s(t_thrd.postmaster_cxt.LocalAddrList, (MAXLISTEN * IP_LEN), param->LocalAddrList, (MAXLISTEN * IP_LEN));
-    securec_check(rc, "", "");
     t_thrd.postmaster_cxt.HaShmData = param->HaShmData;
     t_thrd.time_cxt.pg_start_time = param->PgStartTime;
     t_thrd.time_cxt.pg_reload_time = param->PgReloadTime;
@@ -10174,7 +10216,7 @@ static void restore_backend_variables(BackendParameters* param, Port* port)
     PostmasterHandle = param->PostmasterHandle;
     pgwin32_initial_signal_pipe = param->initial_signal_pipe;
 #endif
-    ss_rc = memcpy_s(&t_thrd.postmaster_cxt.syslogPipe,
+    int ss_rc = memcpy_s(&t_thrd.postmaster_cxt.syslogPipe,
         sizeof(t_thrd.postmaster_cxt.syslogPipe),
         &param->syslogPipe,
         sizeof(t_thrd.postmaster_cxt.syslogPipe));
@@ -10481,10 +10523,10 @@ bool IsLocalAddr(Port* port)
     if (AF_UNIX == laddr->sa_family) {
         return true;
     }
-    for (i = 0; i != t_thrd.postmaster_cxt.LocalIpNum; ++i) {
-        if (0 == strcmp(local_ip, t_thrd.postmaster_cxt.LocalAddrList[i]) ||
-            (AF_INET == laddr->sa_family && 0 == strcmp("0.0.0.0", t_thrd.postmaster_cxt.LocalAddrList[i])) ||
-            (AF_INET6 == laddr->sa_family && 0 == strcmp("::", t_thrd.postmaster_cxt.LocalAddrList[i]))) {
+    for (i = 0; i != g_instance.listen_cxt.LocalIpNum; ++i) {
+        if (0 == strcmp(local_ip, g_instance.listen_cxt.LocalAddrList[i]) ||
+            (AF_INET == laddr->sa_family && 0 == strcmp("0.0.0.0", g_instance.listen_cxt.LocalAddrList[i])) ||
+            (AF_INET6 == laddr->sa_family && 0 == strcmp("::", g_instance.listen_cxt.LocalAddrList[i]))) {
 
             return true;
         }
@@ -10494,8 +10536,8 @@ bool IsLocalAddr(Port* port)
     }
     return false;
 #else
-    for (i = 0; i != t_thrd.postmaster_cxt.LocalIpNum; ++i) {
-        ereport(DEBUG1, (errmsg("LocalAddrIP %s\n", t_thrd.postmaster_cxt.LocalAddrList[i])));
+    for (i = 0; i != g_instance.listen_cxt.LocalIpNum; ++i) {
+        ereport(DEBUG1, (errmsg("LocalAddrIP %s\n", g_instance.listen_cxt.LocalAddrList[i])));
     }
     return true;
 #endif
@@ -10735,7 +10777,7 @@ static bool IsAlreadyListen(const char* ip, int port)
     }
 
     for (listen_index = 0; listen_index != MAXLISTEN; ++listen_index) {
-        if (t_thrd.postmaster_cxt.ListenSocket[listen_index] != PGINVALID_SOCKET) {
+        if (g_instance.listen_cxt.ListenSocket[listen_index] != PGINVALID_SOCKET) {
             struct sockaddr_storage saddr;
             socklen_t slen = 0;
             char* result = NULL;
@@ -10743,7 +10785,7 @@ static bool IsAlreadyListen(const char* ip, int port)
             securec_check(rc, "\0", "\0");
 
             slen = sizeof(saddr);
-            if (comm_getsockname(t_thrd.postmaster_cxt.ListenSocket[listen_index],
+            if (comm_getsockname(g_instance.listen_cxt.ListenSocket[listen_index],
                     (struct sockaddr*)&saddr,
                     (socklen_t*)&slen) < 0) {
                 ereport(LOG, (errmsg("Error in getsockname int IsAlreadyListen()")));
@@ -10900,7 +10942,7 @@ void CreateServerSocket(
                 NULL,
                 (unsigned short)portNumber,
                 g_instance.attr.attr_network.UnixSocketDir,
-                t_thrd.postmaster_cxt.ListenSocket,
+                g_instance.listen_cxt.ListenSocket,
                 MAXLISTEN,
                 add_localaddr_flag,
                 is_create_psql_sock,
@@ -10910,7 +10952,7 @@ void CreateServerSocket(
                 ipaddr,
                 (unsigned short)portNumber,
                 g_instance.attr.attr_network.UnixSocketDir,
-                t_thrd.postmaster_cxt.ListenSocket,
+                g_instance.listen_cxt.ListenSocket,
                 MAXLISTEN,
                 add_localaddr_flag,
                 is_create_psql_sock,
@@ -10991,13 +11033,13 @@ static void CreateHaListenSocket(void)
      * if already has been created, just set the createmodel and continue.
      */
     for (i = 0; i < MAXLISTEN; i++) {
-        if (PGINVALID_SOCKET == t_thrd.postmaster_cxt.ListenSocket[i] ||
-            t_thrd.postmaster_cxt.listen_sock_type[i] != HA_LISTEN_SOCKET) {
+        if (PGINVALID_SOCKET == g_instance.listen_cxt.ListenSocket[i] ||
+            g_instance.listen_cxt.listen_sock_type[i] != HA_LISTEN_SOCKET) {
             continue;
         }
 
         s_len = sizeof(sock_addr);
-        if (comm_getsockname(t_thrd.postmaster_cxt.ListenSocket[i], (struct sockaddr*)&sock_addr, (socklen_t*)&s_len) < 0) {
+        if (comm_getsockname(g_instance.listen_cxt.ListenSocket[i], (struct sockaddr*)&sock_addr, (socklen_t*)&s_len) < 0) {
             ereport(LOG, (errmsg("Error in getsockname int IsAlreadyListen()")));
         }
         success = 0;
@@ -11027,9 +11069,9 @@ static void CreateHaListenSocket(void)
 
         /* if the socket is not match all the IP-Port pair in newListenAddrs, close it and set listen_sock_type */
         if (!success) {
-            (void)comm_closesocket(t_thrd.postmaster_cxt.ListenSocket[i]);
-            t_thrd.postmaster_cxt.ListenSocket[i] = PGINVALID_SOCKET;
-            t_thrd.postmaster_cxt.listen_sock_type[i] = UNUSED_LISTEN_SOCKET;
+            (void)comm_closesocket(g_instance.listen_cxt.ListenSocket[i]);
+            g_instance.listen_cxt.ListenSocket[i] = PGINVALID_SOCKET;
+            g_instance.listen_cxt.listen_sock_type[i] = UNUSED_LISTEN_SOCKET;
         }
     }
 
@@ -11089,9 +11131,9 @@ static void IntArrayRegulation(int array[], int len, int def)
  */
 static void ListenSocketRegulation(void)
 {
-    IntArrayRegulation((int*)t_thrd.postmaster_cxt.ListenSocket, MAXLISTEN, (int)PGINVALID_SOCKET);
+    IntArrayRegulation((int*)g_instance.listen_cxt.ListenSocket, MAXLISTEN, (int)PGINVALID_SOCKET);
 
-    IntArrayRegulation((int*)t_thrd.postmaster_cxt.listen_sock_type, MAXLISTEN, UNUSED_LISTEN_SOCKET);
+    IntArrayRegulation((int*)g_instance.listen_cxt.listen_sock_type, MAXLISTEN, UNUSED_LISTEN_SOCKET);
 }
 
 DbState get_local_dbstate_sub(WalRcvData* walrcv, ServerMode mode)

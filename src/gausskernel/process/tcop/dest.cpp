@@ -109,7 +109,7 @@ DestReceiver* CreateDestReceiver(CommandDest dest)
     switch (dest) {
         case DestRemote:
         case DestRemoteExecute:
-            return printtup_create_DR(dest);
+            return u_sess->proc_cxt.MyProcPort->protocol_config->fn_printtup_create_DR(dest);
 
         case DestNone:
             return &donothingDR;

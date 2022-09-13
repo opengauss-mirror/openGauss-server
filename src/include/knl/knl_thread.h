@@ -2821,8 +2821,6 @@ typedef enum {
 typedef struct knl_t_postmaster_context {
 /* Notice: the value is same sa GUC_MAX_REPLNODE_NUM */
 #define MAX_REPLNODE_NUM 9
-#define MAXLISTEN 64
-#define IP_LEN 64
 
     /* flag when process startup packet for logic conn */
     bool ProcessStartupPacketForLogicConn;
@@ -2846,11 +2844,6 @@ typedef struct knl_t_postmaster_context {
     bool CrossClusterReplConnChanged[MAX_REPLNODE_NUM];
     struct hashmemdata* HaShmData;
 
-    /* The socket(s) we're listening to. */
-    pgsocket ListenSocket[MAXLISTEN];
-    char LocalAddrList[MAXLISTEN][IP_LEN];
-    int LocalIpNum;
-    int listen_sock_type[MAXLISTEN]; /* ori type: enum ListenSocketType */
     gs_thread_t CurExitThread;
 
     bool IsRPCWorkerThread;

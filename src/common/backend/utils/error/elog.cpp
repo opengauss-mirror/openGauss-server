@@ -146,7 +146,7 @@ static const int CREATE_ALTER_SUBSCRIPTION = 16;
 
 static void log_line_prefix(StringInfo buf, ErrorData* edata);
 static void send_message_to_server_log(ErrorData* edata);
-static void send_message_to_frontend(ErrorData* edata);
+extern void send_message_to_frontend(ErrorData* edata);
 static char* expand_fmt_string(const char* fmt, ErrorData* edata);
 static const char* useful_strerror(int errnum);
 static const char* error_severity(int elevel);
@@ -1639,7 +1639,9 @@ void EmitErrorReport(void)
         if (can_skip && need_skip_by_retry) {
             /* skip sending messsage to front, do noting for now */
         } else {
-            send_message_to_frontend(edata);
+            if (u_sess->proc_cxt.MyProcPort) {
+                u_sess->proc_cxt.MyProcPort->protocol_config->fn_send_message(edata);
+            }
         }
     }
 
@@ -3451,7 +3453,7 @@ int combiner_errdata(RemoteErrorData* pErrData)
 /*
  * Write error report to client
  */
-static void send_message_to_frontend(ErrorData* edata)
+void send_message_to_frontend(ErrorData* edata)
 {
     StringInfoData msgbuf;
 
