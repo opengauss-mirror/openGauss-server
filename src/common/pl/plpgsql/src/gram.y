@@ -10730,7 +10730,7 @@ check_sql_expr(const char *stmt, int location, int leaderlen)
     oldCxt = MemoryContextSwitchTo(u_sess->plsql_cxt.curr_compile_context->compile_tmp_cxt);
     u_sess->plsql_cxt.plpgsql_yylloc = plpgsql_yylloc;
     RawParserHook parser_hook= raw_parser;
-#ifndef ENABLE_MULTIPLE_NODES
+#if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
     if (u_sess->attr.attr_sql.whale || u_sess->attr.attr_sql.dolphin) {
         int id = GetCustomParserId();
         if (id >= 0 && g_instance.raw_parser_hook[id] != NULL) {

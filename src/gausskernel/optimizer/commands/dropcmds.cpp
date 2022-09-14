@@ -92,6 +92,21 @@ static void DropExtensionInListIsSupported(List* objname)
     int len = lengthof(supportList);
     const char* name = strVal(linitial(objname));
 
+#if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
+    static const char *unsupportList[] = {
+        "dolphin"
+    };
+    int len_unsupport = lengthof(unsupportList);
+    for (int i = 0; i < len_unsupport; i++) {
+        if (pg_strcasecmp(name, unsupportList[i]) == 0) {
+            if (u_sess->attr.attr_common.IsInplaceUpgrade && t_thrd.proc->workingVersionNum < DOLPHIN_ENABLE_DROP_NUM) {
+                return;
+            }
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("EXTENSION is not yet supported.")));
+        }
+    }
+#endif
+
     for (int i = 0; i < len; i++) {
         if (pg_strcasecmp(name, supportList[i]) == 0) {
             return;

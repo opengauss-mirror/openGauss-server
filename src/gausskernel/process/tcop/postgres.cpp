@@ -865,7 +865,7 @@ void client_read_ended(void)
     }
 }
 
-#ifndef ENABLE_MULTIPLE_NODES
+#if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
 
 void ExecuteFunctionIfExisted(const char *filename, char *funcname)
 {
@@ -896,13 +896,11 @@ void InitBSqlPluginHookIfNeeded()
 }
 
 #define LOAD_DOLPHIN "create_dolphin_extension"
-bool LoadDolphinIfNeeded()
+void LoadDolphinIfNeeded()
 {
     if (IsFileExisted(DOLPHIN)) {
         ExecuteFunctionIfExisted(DOLPHIN, LOAD_DOLPHIN);
-        return true;
     }
-    return false;
 }
 #endif
 
@@ -934,7 +932,7 @@ List* pg_parse_query(const char* query_string, List** query_string_locationlist,
 
     if (parser_hook == NULL) {
         parser_hook = raw_parser;
-#ifndef ENABLE_MULTIPLE_NODES
+#if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
         if (u_sess->attr.attr_sql.whale || u_sess->attr.attr_sql.dolphin) {
             int id = GetCustomParserId();
             if (id >= 0 && g_instance.raw_parser_hook[id] != NULL) {
@@ -7403,13 +7401,19 @@ void RemoveTempNamespace()
     }
 }
 
-#ifndef ENABLE_MULTIPLE_NODES
+#if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
+#define INITIAL_USER_ID 10
 void LoadSqlPlugin()
 {
-    if (u_sess->proc_cxt.MyDatabaseId != InvalidOid && DB_IS_CMPT(B_FORMAT)) {
-        bool loaded = true;
-
-        if (!u_sess->attr.attr_sql.dolphin) {
+    if (strcmp(u_sess->attr.attr_common.application_name, "gs_clean") == 0)
+        return;
+    if (u_sess->proc_cxt.MyDatabaseId != InvalidOid && DB_IS_CMPT(B_FORMAT) && IsFileExisted(DOLPHIN)) {
+        if (!u_sess->attr.attr_sql.dolphin && !u_sess->attr.attr_common.IsInplaceUpgrade) {
+            Oid userId = GetUserId();
+            if (userId != INITIAL_USER_ID && !has_privs_of_role(userId, INITIAL_USER_ID)) {
+                ereport(WARNING, (errmsg("Use the original role or get original role's privilege to load extension dolphin")));
+                return;
+            }
             /* recheck and load dolphin within lock */
             pthread_mutex_lock(&g_instance.loadPluginLock[DB_CMPT_B]);
 
@@ -7418,12 +7422,10 @@ void LoadSqlPlugin()
             finish_xact_command();
 
             if (!u_sess->attr.attr_sql.dolphin) {
-                loaded = LoadDolphinIfNeeded();
+                LoadDolphinIfNeeded();
             }
             pthread_mutex_unlock(&g_instance.loadPluginLock[DB_CMPT_B]);
-        }
-
-        if (loaded) {
+        } else if (u_sess->attr.attr_sql.dolphin) {
             InitBSqlPluginHookIfNeeded();
         }
     } else if (u_sess->proc_cxt.MyDatabaseId != InvalidOid && DB_IS_CMPT(A_FORMAT) && u_sess->attr.attr_sql.whale) {
