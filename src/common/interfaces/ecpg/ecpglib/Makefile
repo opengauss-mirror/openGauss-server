@@ -53,6 +53,10 @@ ifeq ($(PORTNAME), win32)
 SHLIB_LINK += -lshfolder
 endif
 
+execute.o: gram.hpp
+gram.hpp:
+	$(MAKE) -C $(top_builddir)/src/common/interfaces/libpq/frontend_parser gram.hpp
+
 all: all-lib
 
 .PHONY: submake-pgtypeslib

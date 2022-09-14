@@ -33,10 +33,6 @@
 
 #define UTOAST_TUPLE_TARGET UTOAST_TUPLE_THRESHOLD
 
-#define UTOAST_TUPLE_TARGET_MAIN \
-    MAXALIGN_DOWN(BLCKSZ -       \
-        MAXALIGN(SizeOfUHeapPageHeaderData + (UHEAP_DEFAULT_TOAST_TD_COUNT * sizeof(TD)) + sizeof(ItemIdData)))
-
 #define EXTERN_UHEAP_TUPLE_MAX_SIZE UHeapMaximumBytesPerTuple(EXTERN_UHEAP_TUPLES_PER_PAGE)
 
 #define UTOAST_MAX_CHUNK_SIZE                                                                                   \

@@ -15,6 +15,8 @@ extern bool need_copy_upgrade_file;
 extern char* basedir;
 extern int bgpipe[2];
 extern pid_t bgchild;
+extern char remotelsn[MAXPGPATH];
+extern char remotenodename[MAXPGPATH];
 
 extern char* formatLogTime();
 bool backup_main(const char* dir, uint32 term, bool isFromStandby);
@@ -24,5 +26,6 @@ void get_xlog_location(char (&xlog_location)[MAXPGPATH]);
 bool CreateBuildtagFile(const char* fulltagname);
 bool StartLogStreamer(
     char* startpos, uint32 timeline, char* sysidentifier, const char* xloglocation, uint primaryTerm = 0);
+bool RenameTblspcDir(char* dataDir);
 
 #endif /* BACKUP_H */

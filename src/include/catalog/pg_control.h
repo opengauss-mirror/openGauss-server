@@ -75,7 +75,7 @@ typedef struct CheckPointUndo
     CommitSeqNo next_csn;
     uint64 length;
     TransactionId recent_global_xmin;
-    uint64 oldestXidInUndo;
+    uint64 globalRecycleXid;
     /* you can add more attributes here */
 } CheckPointUndo;
 

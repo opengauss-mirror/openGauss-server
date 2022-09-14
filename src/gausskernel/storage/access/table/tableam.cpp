@@ -401,11 +401,11 @@ TM_Result tableam_tuple_update(Relation relation, Relation parentRelation, ItemP
 }
 
 TM_Result tableam_tuple_lock(Relation relation, Tuple tuple, Buffer *buffer, CommandId cid,
-    LockTupleMode mode, bool nowait, TM_FailureData *tmfd, bool allow_lock_self, bool follow_updates, bool eval,
+    LockTupleMode mode, LockWaitPolicy waitPolicy, TM_FailureData *tmfd, bool allow_lock_self, bool follow_updates, bool eval,
     Snapshot snapshot, ItemPointer tid, bool isSelectForUpdate, bool isUpsert, TransactionId conflictXid,
     int waitSec)
 {
-    return g_tableam_routines[relation->rd_tam_type]->tuple_lock(relation, tuple, buffer, cid, mode, nowait, tmfd,
+    return g_tableam_routines[relation->rd_tam_type]->tuple_lock(relation, tuple, buffer, cid, mode, waitPolicy, tmfd,
         allow_lock_self, follow_updates, eval, snapshot, tid, isSelectForUpdate, isUpsert, conflictXid,
         waitSec);
 }
@@ -447,9 +447,10 @@ void tableam_scan_index_fetch_end(IndexFetchTableData *scan)
     HeapamScanIndexFetchEnd(scan);
 }
 
-Tuple tableam_scan_index_fetch_tuple(IndexScanDesc scan, bool *all_dead)
+Tuple tableam_scan_index_fetch_tuple(IndexScanDesc scan, bool *all_dead, bool* has_cur_xact_write)
 {
-    return g_tableam_routines[scan->heapRelation->rd_tam_type]->scan_index_fetch_tuple(scan, all_dead);
+    return g_tableam_routines[scan->heapRelation->rd_tam_type]->scan_index_fetch_tuple(scan, all_dead,
+                                                                                       has_cur_xact_write);
 }
 
 TableScanDesc tableam_scan_begin(Relation relation, Snapshot snapshot, int nkeys, ScanKey key,
@@ -470,9 +471,15 @@ TableScanDesc tableam_scan_begin_sampling(Relation relation, Snapshot snapshot, 
         allow_sync, rangeScanInRedis);
 }
 
-Tuple tableam_scan_getnexttuple(TableScanDesc sscan, ScanDirection direction)
+
+TableScanDesc tableam_scan_begin_parallel(Relation relation, ParallelHeapScanDesc parallel_scan)
 {
-    return g_tableam_routines[sscan->rs_rd->rd_tam_type]->scan_getnexttuple(sscan, direction);
+    return g_tableam_routines[relation->rd_tam_type]->scan_begin_parallel(relation, parallel_scan);
+}
+
+Tuple tableam_scan_getnexttuple(TableScanDesc sscan, ScanDirection direction, bool* has_cur_xact_write)
+{
+    return g_tableam_routines[sscan->rs_rd->rd_tam_type]->scan_getnexttuple(sscan, direction, has_cur_xact_write);
 }
 
 bool tableam_scan_gettuplebatchmode(TableScanDesc sscan, ScanDirection direction)
@@ -877,12 +884,12 @@ TM_Result HeapamTupleUpdate(Relation relation, Relation parentRelation, ItemPoin
 }
 
 TM_Result HeapamTupleLock(Relation relation, Tuple tuple, Buffer *buffer,
-    CommandId cid, LockTupleMode mode, bool nowait, TM_FailureData *tmfd,
+    CommandId cid, LockTupleMode mode, LockWaitPolicy waitPolicy, TM_FailureData *tmfd,
     bool allow_lock_self, bool follow_updates, bool eval, Snapshot snapshot,
     ItemPointer tid, bool isSelectForUpdate, bool isUpsert, TransactionId conflictXid,
     int waitSec)
 {
-    return heap_lock_tuple(relation, (HeapTuple)tuple, buffer, cid, mode, nowait, follow_updates, tmfd,
+    return heap_lock_tuple(relation, (HeapTuple)tuple, buffer, cid, mode, waitPolicy, follow_updates, tmfd,
                            allow_lock_self, waitSec);
 }
 
@@ -917,9 +924,9 @@ void HeapamScanIndexFetchEnd(IndexFetchTableData *scan)
     return heapam_index_fetch_end(scan);
 }
 
-Tuple HeapamScanIndexFetchTuple(IndexScanDesc scan, bool *all_dead)
+Tuple HeapamScanIndexFetchTuple(IndexScanDesc scan, bool *all_dead, bool* has_cur_xact_write = NULL)
 {
-    return (Tuple)heapam_index_fetch_tuple(scan, all_dead);
+    return (Tuple)heapam_index_fetch_tuple(scan, all_dead, has_cur_xact_write);
 }
 
 TableScanDesc HeapamScanBegin(Relation relation, Snapshot snapshot, int nkeys, ScanKey key, RangeScanInRedis rangeScanInRedis)
@@ -937,10 +944,19 @@ TableScanDesc HeapamScanBeginSampling(Relation relation, Snapshot snapshot, int 
     return heap_beginscan_sampling(relation, snapshot, nkeys, key, allow_strat, allow_sync, rangeScanInRedis);
 }
 
-// The heap am implementation of abstract method scan_getnexttuple
-Tuple HeapamScanGetnexttuple(TableScanDesc sscan, ScanDirection direction)
+TableScanDesc HeapamBeginscanParallel(Relation relation, ParallelHeapScanDesc parallel_scan)
 {
-    return (Tuple) heap_getnext(sscan, direction);
+    uint32 flags = SO_ALLOW_STRAT | SO_ALLOW_SYNC;
+
+    Assert(RelationGetRelid(relation) == parallel_scan->phs_relid);
+
+    return heap_beginscan_internal(relation, SnapshotAny, 0, NULL, flags, parallel_scan);
+}
+
+// The heap am implementation of abstract method scan_getnexttuple
+Tuple HeapamScanGetnexttuple(TableScanDesc sscan, ScanDirection direction, bool* has_cur_xact_write = NULL)
+{
+    return (Tuple) heap_getnext(sscan, direction, has_cur_xact_write);
 }
 
 void HeapamScanGetpage(TableScanDesc sscan, BlockNumber page)
@@ -1092,6 +1108,7 @@ const TableAmRoutine g_heapam_methods = {
     scan_begin : HeapamScanBegin,
     scan_begin_bm : HeapamScanBeginBm,
     scan_begin_sampling : HeapamScanBeginSampling,
+    scan_begin_parallel: HeapamBeginscanParallel,
     scan_rescan : HeapamScanRescan,
     scan_restrpos : HeapamScanRestrpos,
     scan_markpos : HeapamScanMarkpos,
@@ -1459,12 +1476,12 @@ void UHeapamTopsCopyFromInsertBatch(Relation rel, EState* estate, CommandId myci
 TableScanDesc UHeapamScanBegin(Relation relation, Snapshot snapshot, int nkeys, ScanKey key,
     RangeScanInRedis rangeScanInRedis)
 {
-    return UHeapBeginScan(relation, snapshot, nkeys);
+    return UHeapBeginScan(relation, snapshot, nkeys, NULL);
 }
 
 TableScanDesc UHeapamScanBeginBm(Relation relation, Snapshot snapshot, int nkeys, ScanKey key)
 {
-    return UHeapBeginScan(relation, snapshot, nkeys);
+    return UHeapBeginScan(relation, snapshot, nkeys, NULL);
 }
 
 TableScanDesc UHeapBeginScanSampling(Relation relation, Snapshot snapshot, int nkeys, ScanKey key, 
@@ -1472,6 +1489,13 @@ TableScanDesc UHeapBeginScanSampling(Relation relation, Snapshot snapshot, int n
 {
     ereport(ERROR, (errcode(ERRCODE_UNDEFINED_FUNCTION), errmsg("Ustore not support table sampling yet")));
     return NULL;
+}
+
+TableScanDesc UHeapamBeginscanParallel(Relation relation, ParallelHeapScanDesc parallel_scan)
+{
+    Assert(RelationGetRelid(relation) == parallel_scan->phs_relid);
+
+    return UHeapBeginScan(relation, SnapshotNow, 0, parallel_scan);
 }
 
 IndexFetchTableData * UHeapamScanIndexFetchBegin(Relation rel)
@@ -1490,9 +1514,9 @@ void UHeapamScanIndexFetchEnd(IndexFetchTableData *scan)
     ereport(ERROR, (errcode(ERRCODE_UNDEFINED_FUNCTION), errmsg("not supported in ustore yet")));
 }
 
-Tuple UHeapamScanIndexFetchTuple(IndexScanDesc scan, bool *all_dead)
+Tuple UHeapamScanIndexFetchTuple(IndexScanDesc scan, bool *all_dead, bool* has_cur_xact_write = NULL)
 {
-    return (Tuple)UHeapamIndexFetchTuple(scan, all_dead);
+    return (Tuple)UHeapamIndexFetchTuple(scan, all_dead, has_cur_xact_write);
 }
 
 void UHeapamScanRescan(TableScanDesc sscan, ScanKey key)
@@ -1517,9 +1541,9 @@ void UHeapamScanEndscan(TableScanDesc sscan)
 }
 
 /* uheap implementation of the scan_getnexttuple abstract method */
-Tuple UHeapamScanGetnexttuple(TableScanDesc sscan, ScanDirection direction)
+Tuple UHeapamScanGetnexttuple(TableScanDesc sscan, ScanDirection direction, bool* has_cur_xact_write = NULL)
 {
-    return (Tuple)UHeapGetNext(sscan, direction);
+    return (Tuple)UHeapGetNext(sscan, direction, has_cur_xact_write);
 }
 
 bool UHeapamGetNextBatchMode(TableScanDesc sscan, ScanDirection direction)
@@ -1661,10 +1685,10 @@ TM_Result UHeapamTupleUpdate(Relation relation, Relation parentRelation, ItemPoi
 
 
 TM_Result UHeapamTupleLock(Relation relation, Tuple tuple, Buffer *buffer, CommandId cid, LockTupleMode mode,
-    bool nowait, TM_FailureData *tmfd, bool allow_lock_self, bool follow_updates, bool eval, Snapshot snapshot,
+    LockWaitPolicy waitPolicy, TM_FailureData *tmfd, bool allow_lock_self, bool follow_updates, bool eval, Snapshot snapshot,
     ItemPointer tid, bool isSelectForUpdate, bool isUpsert, TransactionId conflictXid, int waitSec)
 {
-    return UHeapLockTuple(relation, (UHeapTuple)tuple, buffer, cid, mode, nowait, tmfd, follow_updates, eval, snapshot,
+    return UHeapLockTuple(relation, (UHeapTuple)tuple, buffer, cid, mode, waitPolicy, tmfd, follow_updates, eval, snapshot,
         isSelectForUpdate, allow_lock_self, isUpsert, conflictXid, waitSec);
 }
 
@@ -1788,6 +1812,7 @@ const TableAmRoutine g_ustoream_methods = {
     scan_begin : UHeapamScanBegin,
     scan_begin_bm : UHeapamScanBeginBm,
     scan_begin_sampling : UHeapBeginScanSampling,
+    scan_begin_parallel: UHeapamBeginscanParallel,
     scan_rescan : UHeapamScanRescan,
     scan_restrpos : UHeapamScanRestrpos,
     scan_markpos : UHeapamScanMarkpos,

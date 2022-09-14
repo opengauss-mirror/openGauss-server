@@ -29,7 +29,6 @@
 #include <cstring>
 
 #include "postgres.h"
-#include "access/dfs/dfs_query.h"
 #include "access/sysattr.h"
 #include "nodes/parsenodes.h"
 #include "nodes/pg_list.h"
@@ -41,6 +40,7 @@
 #include "storage/ipc.h"
 #include "commands/dbcommands.h"
 #include "knl/knl_session.h"
+#include "utils/date.h"
 
 #include "mot_internal.h"
 #include "row.h"

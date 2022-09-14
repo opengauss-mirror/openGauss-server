@@ -161,7 +161,8 @@ enum SysCacheIdentifier {
     UIDRELID,
     DBPRIVOID,
     DBPRIVROLE,
-    DBPRIVROLEPRIV
+    DBPRIVROLEPRIV,
+    SETTYPOIDNAME
 };
 struct cachedesc {
     Oid reloid;   /* OID of the relation being cached */

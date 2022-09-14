@@ -45,54 +45,27 @@ struct PredictionByData {
     ModelPredictor model_predictor;
     AlgorithmAPI *algorithm;
 };
-typedef enum funcType {
-    INVAILD_FUNC_TYPE = 0,
-    BOOL,
-    FLOAT4,
-    FLOAT8,
-    FLOAT8ARRAY,
-    INT32,
-    INT64,
-    NUMERIC,
-    TEXT
-} funcType;
  
-static void check_func_oid(Oid model_retype, funcType func)
+static void check_func_oid(Oid model_retype, Oid func)
 {
-    funcType mft = INVAILD_FUNC_TYPE;
+    Oid mft = UNKNOWNOID;
     switch(model_retype){
-        case BOOLOID:
-            mft = BOOL;
-            break;
-        case FLOAT4OID:
-            mft = FLOAT4;
-            break;
-        case FLOAT8OID:
-            mft = FLOAT8;
-            break;
-        case FLOAT8ARRAYOID:
-            mft = FLOAT8ARRAY;
-            break;
         case INT1OID:
         case INT2OID:
         case INT4OID:
-            mft = INT32;
-            break;
-        case INT8OID:
-            mft = INT64;
-            break;
-        case NUMERICOID:
-            mft = NUMERIC;
+            mft = INT4OID;
             break;
         case VARCHAROID:
         case BPCHAROID:
         case CHAROID:
         case TEXTOID:
-            mft = TEXT;
+            mft = TEXTOID;
             break;
+        case FLOAT4ARRAYOID:
+        case FLOAT8ARRAYOID:
+            mft = FLOAT8ARRAYOID;
         default:
-            ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                    errmsg("Cannot trigger prediction for model with oid %u",  model_retype)));
+            mft = model_retype;
     }
     if (mft != func)
         ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_DATATYPE_MISMATCH),
@@ -117,7 +90,7 @@ static PredictionByData *initialize_predict_by_data(const Model *model)
     return result;
 }
 
-template <funcType ft>
+template <Oid ft>
 Datum db4ai_predict_by(PG_FUNCTION_ARGS)
 {
     // First argument is the model, the following ones are the inputs to the model predictor
@@ -143,6 +116,9 @@ Datum db4ai_predict_by(PG_FUNCTION_ARGS)
         char *model_name = text_to_cstring(model_name_text);
 
         const Model *model = get_model(model_name, false);
+        if (!model)
+            ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                    errmsg("There is no model called \"%s\".", model_name)));
         prediction_by_data = initialize_predict_by_data(model);
         fcinfo->flinfo->fn_extra = prediction_by_data;
         pfree(model_name);
@@ -160,41 +136,41 @@ Datum db4ai_predict_by(PG_FUNCTION_ARGS)
 // to be compliant with openGauss type system that specifies the return type
 Datum db4ai_predict_by_bool(PG_FUNCTION_ARGS)
 {
-    return db4ai_predict_by<BOOL>(fcinfo);
+    return db4ai_predict_by<BOOLOID>(fcinfo);
 }
 
 Datum db4ai_predict_by_int32(PG_FUNCTION_ARGS)
 {
-    return db4ai_predict_by<INT32>(fcinfo);
+    return db4ai_predict_by<INT4OID>(fcinfo);
 }
 
 Datum db4ai_predict_by_int64(PG_FUNCTION_ARGS)
 {
-    return db4ai_predict_by<INT64>(fcinfo);
+    return db4ai_predict_by<INT8OID>(fcinfo);
 }
 
 Datum db4ai_predict_by_float4(PG_FUNCTION_ARGS)
 {
-    return db4ai_predict_by<FLOAT4>(fcinfo);
+    return db4ai_predict_by<FLOAT4OID>(fcinfo);
 }
 
 Datum db4ai_predict_by_float8(PG_FUNCTION_ARGS)
 {
-    return db4ai_predict_by<FLOAT8>(fcinfo);
+    return db4ai_predict_by<FLOAT8OID>(fcinfo);
 }
 
 Datum db4ai_predict_by_float8_array(PG_FUNCTION_ARGS)
 {
-    return db4ai_predict_by<FLOAT8ARRAY>(fcinfo);
+    return db4ai_predict_by<FLOAT8ARRAYOID>(fcinfo);
 }
 
 
 Datum db4ai_predict_by_numeric(PG_FUNCTION_ARGS)
 {
-    return db4ai_predict_by<NUMERIC>(fcinfo);
+    return db4ai_predict_by<NUMERICOID>(fcinfo);
 }
 
 Datum db4ai_predict_by_text(PG_FUNCTION_ARGS)
 {
-    return db4ai_predict_by<TEXT>(fcinfo);
+    return db4ai_predict_by<TEXTOID>(fcinfo);
 }

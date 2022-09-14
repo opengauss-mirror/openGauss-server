@@ -1,3 +1,4 @@
+set enable_ai_stats=0;
 create schema analyze_commands;
 set search_path to analyze_commands;
 drop table if exists t1;

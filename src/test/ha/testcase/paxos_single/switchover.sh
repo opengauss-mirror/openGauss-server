@@ -1,7 +1,7 @@
 #!/bin/sh
 # switchover when primary-standby-dummystandby all ready
 
-source ./util.sh
+source ./util_paxos.sh
 source ./deploy_paxos_single.sh
 function test_1()
 {

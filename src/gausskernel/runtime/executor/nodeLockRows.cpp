@@ -50,6 +50,8 @@ TupleTableSlot* ExecLockRows(LockRowsState* node)
     Relation target_rel = NULL;
     Partition target_part = NULL;
     Relation bucket_rel = NULL;
+    bool orig_early_free = false;
+    bool orig_early_deinit = false;
 
     /*
      * get information from the node
@@ -58,19 +60,20 @@ TupleTableSlot* ExecLockRows(LockRowsState* node)
     outer_plan = outerPlanState(node);
 
     /*
+     * Get next tuple from subplan, if any.
+     */
+lnext:
+
+    /*
      * EvalPlanQual is called when concurrent lockrows or update or delete
      * we should skip early free.
      */
-    bool orig_early_free = outer_plan->state->es_skip_early_free;
-    bool orig_early_deinit = outer_plan->state->es_skip_early_deinit_consumer;
+    orig_early_free = outer_plan->state->es_skip_early_free;
+    orig_early_deinit = outer_plan->state->es_skip_early_deinit_consumer;
 
     outer_plan->state->es_skip_early_free = true;
     outer_plan->state->es_skip_early_deinit_consumer = true;
 
-    /*
-     * Get next tuple from subplan, if any.
-     */
-lnext:
     /*
      * We must reset the targetPart and targetRel to NULL for correct used
      * searchFakeReationForPartitionOid in goto condition.
@@ -202,7 +205,7 @@ lnext:
 
         /* Need to merge the ustore logic with AM logic */
         test = tableam_tuple_lock(bucket_rel, &tuple, &buffer, 
-                                  estate->es_output_cid, lock_mode, erm->noWait, &tmfd,
+                                      estate->es_output_cid, lock_mode, erm->waitPolicy, &tmfd,
 #ifdef ENABLE_MULTIPLE_NODES
                                   false, false, false, estate->es_snapshot, NULL, true,
 #else
@@ -213,6 +216,10 @@ lnext:
         ReleaseBuffer(buffer);
 
         switch (test) {
+            case TM_WouldBlock:
+                /* couldn't lock tuple in SKIP LOCKED mode */
+                goto lnext;
+
             case TM_SelfCreated:
                 ereport(ERROR, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
                     errmsg("attempted to lock invisible tuple")));
@@ -292,7 +299,6 @@ lnext:
                         errmsg("partition table update conflict"),
                         errdetail("disable row movement of table can avoid this conflict")));
                 }
-
                 goto lnext;
 
             default:
@@ -390,11 +396,19 @@ lnext:
          */
         EvalPlanQualSetSlot(&node->lr_epqstate, slot);
         EvalPlanQualFetchRowMarks(&node->lr_epqstate);
+        orig_early_free = node->lr_epqstate.estate->es_skip_early_free;
+        orig_early_deinit = node->lr_epqstate.estate->es_skip_early_deinit_consumer;
 
+        node->lr_epqstate.estate->es_skip_early_free = true;
+        node->lr_epqstate.estate->es_skip_early_deinit_consumer = true;
         /*
          * And finally we can re-evaluate the tuple.
          */
         slot = EvalPlanQualNext(&node->lr_epqstate);
+
+        node->lr_epqstate.estate->es_skip_early_free = orig_early_free;
+        node->lr_epqstate.estate->es_skip_early_deinit_consumer = orig_early_deinit;
+
         if (TupIsNull(slot)) {
             /* Updated tuple fails qual, so ignore it and go on */
             goto lnext;

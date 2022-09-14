@@ -1,11 +1,11 @@
 create schema unsupported_feature;
--- unspport compressType: 3
-CREATE TABLE unsupported_feature.compressed_table_1024(id int) WITH(compresstype=3, compress_chunk_size=1024);
-ERROR:  value 3 out of bounds for option "compresstype"
-DETAIL:  Valid values are between "0" and "2".
+-- unspport compressType: 4
+CREATE TABLE unsupported_feature.compressed_table_1024(id int) WITH(compresstype=4, compress_chunk_size=1024);
+ERROR:  value 4 out of bounds for option "compresstype"
+DETAIL:  Valid values are between "0" and "3".
 -- unspport compress_chunk_size: 2000
 CREATE TABLE unsupported_feature.compressed_table_1024(id int) WITH(compresstype=2, compress_chunk_size=2000);
-ERROR:  invalid compress_chunk_size 2000 , must be one of 512, 1024, 2048 or 4096 for compressed_table_1024
+ERROR:  invalid compress_chunk_size 2000, must be one of 512, 1024, 2048 or 4096 for compressed_table_1024
 -- unspport compress_prealloc_chunks: -1
 CREATE TABLE unsupported_feature.compressed_table_1024(id int) WITH(compresstype=2, compress_prealloc_chunks=-1);
 ERROR:  value -1 out of bounds for option "compress_prealloc_chunks"
@@ -20,13 +20,13 @@ ERROR:  value 128 out of bounds for option "compress_level"
 DETAIL:  Valid values are between "-31" and "31".
 -- compresstype cant be used with column table
 CREATE TABLE unsupported_feature.compressed_table_1024(id int) WITH(ORIENTATION = 'column', compresstype=2);
-ERROR:  compresstype can not be used in ustore table, segment table, column table, view, unlogged table or temp table.
+ERROR:  compresstype can not be used in segment table, column table, view, unlogged table or temp table.
 -- compresstype cant be used with temp table
 CREATE TEMP TABLE compressed_temp_table_1024(id int) WITH(compresstype=2);
-ERROR:  compresstype can not be used in ustore table, segment table, column table, view, unlogged table or temp table.
+ERROR:  compresstype can not be used in segment table, column table, view, unlogged table or temp table.
 -- compresstype cant be used with unlogged table
 CREATE unlogged TABLE compressed_unlogged_table_1024(id int) WITH(compresstype=2);
-ERROR:  compresstype can not be used in ustore table, segment table, column table, view, unlogged table or temp table.
+ERROR:  compresstype can not be used in segment table, column table, view, unlogged table or temp table.
 -- use compress_prealloc_chunks\compress_chunk_size\compress_level without compresstype
 CREATE TABLE unsupported_feature.compressed_table_1024(id int) WITH(compress_prealloc_chunks=5);
 ERROR:  compress_chunk_size/compress_prealloc_chunks/compress_level/compress_byte_convert/compress_diff_convert should be used with compresstype.
@@ -81,14 +81,9 @@ create table unsupported_feature.t_rowcompress_pglz_compresslevel(id int) with (
 ERROR:  compress_level should be used with ZSTD algorithm.
 create table unsupported_feature.t_rowcompress_pglz_compresslevel(id int) with (compresstype=2,compress_level=2); -- success
 CREATE TABLE unsupported_feature.index_test(id int, c1 text);
--- ustore
-CREATE TABLE unsupported_feature.ustore_table(id int, c1 text) WITH(compresstype=2, storage_type=ustore); --failed
-ERROR:  compresstype can not be used in ustore table, segment table, column table, view, unlogged table or temp table.
-CREATE INDEX tbl_pc_idx1 on unsupported_feature.index_test(c1) WITH(compresstype=2, storage_type=ustore); --failed
-ERROR:  Can not use compress option in ustore index.
 -- segment
 CREATE TABLE unsupported_feature.segment_table(id int, c1 text) WITH(compresstype=2, segment=on);  --failed
-ERROR:  compresstype can not be used in ustore table, segment table, column table, view, unlogged table or temp table.
+ERROR:  compresstype can not be used in segment table, column table, view, unlogged table or temp table.
 CREATE INDEX on unsupported_feature.index_test(c1) WITH(compresstype=2, segment=on); --failed
 ERROR:  Can not use compress option in segment storage.
 -- set compress_diff_convert

@@ -85,7 +85,7 @@ void UndoRecordSetUInfo(URecVector *uvec)
 
 URecVector::URecVector() :     ubuffers_(NULL), urecs_(NULL), size_(0),
                                capacity_(0), ubuffersIdx_(0),
-                               isPrepared_(false), isInited_(false)
+                               isPrepared_(false), isInited_(false), mem_context_(NULL)
 {
     // Intended left blank.
 }
@@ -93,13 +93,15 @@ URecVector::URecVector() :     ubuffers_(NULL), urecs_(NULL), size_(0),
 void URecVector::Initialize(int capacity, bool isPrepared)
 {
     Assert(!isInited_);
+    Assert(mem_context_);
 
     isPrepared_ = isPrepared;
     isInited_ = true;
     NewCapacity(capacity);
+    
     if (isPrepared) {
-        ubuffers_ = (UndoBuffer*)palloc0(
-            capacity * MAX_BUFFER_PER_UNDO * sizeof(UndoBuffer));
+        ubuffers_ = (UndoBuffer*)MemoryContextAllocZero(
+            mem_context_, capacity * MAX_BUFFER_PER_UNDO * sizeof(UndoBuffer));
     }
 }
 
@@ -125,6 +127,7 @@ void URecVector::Destroy()
         pfree(ubuffers_);
         ubuffers_ = NULL;
     }
+    mem_context_ = NULL;
 }
 
 void URecVector::Reset(bool needUnlockBuffer)
@@ -134,7 +137,6 @@ void URecVector::Reset(bool needUnlockBuffer)
     for (auto i = 0; i < size_; i++) {
         UndoRecord *urec = urecs_[i];
         urec->Reset(INVALID_UNDO_REC_PTR);
-        urec->SetNeedInsert(false);
     }
 
     if (needUnlockBuffer) {
@@ -153,19 +155,31 @@ void URecVector::Reset(bool needUnlockBuffer)
 
 void ReleaseUndoBuffers()
 {
-    for (int i = 0; i < u_sess->ustore_cxt.undo_buffer_idx; i++) {
-        if (BufferIsValid(u_sess->ustore_cxt.undo_buffers[i].buf)) {
-            ReleaseBuffer(u_sess->ustore_cxt.undo_buffers[i].buf);
+    for (int i = 0; i < t_thrd.ustore_cxt.undo_buffer_idx; i++) {
+        if (BufferIsValid(t_thrd.ustore_cxt.undo_buffers[i].buf)) {
+            uint32 saveHoldoff = t_thrd.int_cxt.InterruptHoldoffCount;
+            MemoryContext currentContext = CurrentMemoryContext;
+            PG_TRY();
+            {
+                ReleaseBuffer(t_thrd.ustore_cxt.undo_buffers[i].buf);
+            }
+            PG_CATCH();
+            {
+                (void)MemoryContextSwitchTo(currentContext);
+                t_thrd.int_cxt.InterruptHoldoffCount = saveHoldoff;
+                FlushErrorState();
+            }
+            PG_END_TRY();
         }
     }
 
-    u_sess->ustore_cxt.undo_buffer_idx = 0;
+    t_thrd.ustore_cxt.undo_buffer_idx = 0;
 }
 
 static void CacheUndoBuffer(UndoBuffer* buffer)
 {
-    int bufidx = u_sess->ustore_cxt.undo_buffer_idx;
-    UndoBuffer* undobuf = &u_sess->ustore_cxt.undo_buffers[bufidx];
+    int bufidx = t_thrd.ustore_cxt.undo_buffer_idx;
+    UndoBuffer* undobuf = &t_thrd.ustore_cxt.undo_buffers[bufidx];
 
     undobuf->buf = buffer->buf;
     undobuf->blk = buffer->blk;
@@ -173,7 +187,7 @@ static void CacheUndoBuffer(UndoBuffer* buffer)
     undobuf->zero = buffer->zero;
     undobuf->inUse = buffer->inUse;
 
-    u_sess->ustore_cxt.undo_buffer_idx++;
+    t_thrd.ustore_cxt.undo_buffer_idx++;
 
     ResourceOwnerEnlargeBuffers(t_thrd.utils_cxt.TopTransactionResourceOwner);
     ResourceOwnerRememberBuffer(t_thrd.utils_cxt.TopTransactionResourceOwner, undobuf->buf);
@@ -181,8 +195,7 @@ static void CacheUndoBuffer(UndoBuffer* buffer)
 }
 
 // zf: UndoGetBufferSlot
-int URecVector::GetUndoBufidx(RelFileNode rnode, BlockNumber blk, 
-    ReadBufferMode rbm, UndoPersistence upersistence)
+int URecVector::GetUndoBufidx(RelFileNode rnode, BlockNumber blk, ReadBufferMode rbm)
 {
     Assert(isInited_);
 
@@ -191,22 +204,22 @@ int URecVector::GetUndoBufidx(RelFileNode rnode, BlockNumber blk,
 
     if (!t_thrd.xlog_cxt.InRecovery) {
         /* Don't do anything, if we already have a buffer pinned for the block */
-        for (i = 0; i < u_sess->ustore_cxt.undo_buffer_idx; i++) {
+        for (i = 0; i < t_thrd.ustore_cxt.undo_buffer_idx; i++) {
             /* We can only allocate one undo log, so it's enough to only check block number */
-            if ((blk == u_sess->ustore_cxt.undo_buffers[i].blk) &&
-                (rnode.relNode == (unsigned int)u_sess->ustore_cxt.undo_buffers[i].zoneId)) {
-                buffer = u_sess->ustore_cxt.undo_buffers[i].buf;
+            if ((blk == t_thrd.ustore_cxt.undo_buffers[i].blk) &&
+                (rnode.relNode == (unsigned int)t_thrd.ustore_cxt.undo_buffers[i].zoneId)) {
+                buffer = t_thrd.ustore_cxt.undo_buffers[i].buf;
 
-                if (!u_sess->ustore_cxt.undo_buffers[i].inUse) {
+                if (!t_thrd.ustore_cxt.undo_buffers[i].inUse) {
                     LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
-                    u_sess->ustore_cxt.undo_buffers[i].inUse = true;
+                    t_thrd.ustore_cxt.undo_buffers[i].inUse = true;
                 }
                 Assert(BufferIsValid(buffer));
                 break;
             }
         }
 
-        bool newBuffer = i == u_sess->ustore_cxt.undo_buffer_idx;
+        bool newBuffer = i == t_thrd.ustore_cxt.undo_buffer_idx;
 
         for (i = 0; i < ubuffersIdx_; i++) {
             if (blk == ubuffers_[i].blk) {
@@ -221,7 +234,7 @@ int URecVector::GetUndoBufidx(RelFileNode rnode, BlockNumber blk,
 
         if (newBuffer) {
             buffer = ReadUndoBufferWithoutRelcache(rnode, UNDO_FORKNUM, blk, rbm, NULL,
-                REL_PERSISTENCE(upersistence));
+                RELPERSISTENCE_PERMANENT);
             LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
         }
 
@@ -256,7 +269,7 @@ int URecVector::GetUndoBufidx(RelFileNode rnode, BlockNumber blk,
         Buffer buffer = InvalidBuffer;
         if (i == ubuffersIdx_) {
             buffer = ReadUndoBufferWithoutRelcache(rnode, UNDO_FORKNUM, blk, rbm, NULL,
-                REL_PERSISTENCE(upersistence));
+                RELPERSISTENCE_PERMANENT);
             LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
             ubuffers_[ubuffersIdx_].buf = buffer;
             ubuffers_[ubuffersIdx_].blk = blk;
@@ -281,6 +294,7 @@ bool URecVector::PushBack(UndoRecord *urec)
         NewCapacity(capacity_ * UNDO_VECTOR_EXPANSION_COEFFICIENT);
     }
     urec->SetIndex(size_);
+    urec->SetMemoryContext(mem_context_);
     urecs_[size_++] = urec;
     return true;
 }
@@ -295,10 +309,13 @@ void URecVector::SortByBlkNo()
 void URecVector::NewCapacity(int newCapacity)
 {
     Assert(isInited_);
+    Assert(mem_context_);
 
     int newCapacityBytes = sizeof(UndoRecord*) * newCapacity;
+
     if (urecs_ == NULL) {
-        urecs_ = (UndoRecord**)palloc(newCapacityBytes);
+        urecs_ = (UndoRecord**)MemoryContextAlloc(
+            mem_context_, newCapacityBytes);
     } else {
         urecs_ = (UndoRecord**)repalloc(urecs_, newCapacityBytes);
     }
@@ -313,6 +330,12 @@ void URecVector::SetUrecsZero(int start, int end)
     for (auto i = start; i < end; i++) {
         *(urecs_ + i) = NULL;
     }
+}
+
+void URecVector::SetMemoryContext(MemoryContext mem_cxt)
+{
+    Assert(!isInited_);
+    mem_context_ = mem_cxt;
 }
 
 uint64 URecVector::TotalSize()
@@ -362,29 +385,43 @@ static bool LoadUndoRecordRange(UndoRecord *urec, Buffer *buffer)
      * discard worker from discarding undo data while we are reading it.
      * On the other word, we need copy data to avoid discarded.
      */
-    UndoRecordState state = undo::CheckUndoRecordValid(urec->Urp(), false);
+    UndoRecordState state = undo::CheckUndoRecordValid(urec->Urp(), false, NULL);
     if (state != UNDO_RECORD_NORMAL) {
         return false;
     }
-
+    int saveInterruptHoldoffCount = t_thrd.int_cxt.InterruptHoldoffCount;
+    MemoryContext currentContext = CurrentMemoryContext;
     PG_TRY();
     {
         t_thrd.undo_cxt.fetchRecord = true;
         urec->Load(true);
+        state = undo::CheckUndoRecordValid(urec->Urp(), true, NULL);
+        if (state == UNDO_RECORD_NORMAL) {
+            VerifyUndoRecordValid(urec, true);
+        }
     }
     PG_CATCH();
     {
+        MemoryContext oldContext = MemoryContextSwitchTo(currentContext);
         if (BufferIsValid(urec->Buff())) {
             if (urec->Buff() == *buffer) {
                 *buffer = InvalidBuffer;
             }
+            if (LWLockHeldByMeInMode(BufferDescriptorGetContentLock(
+                GetBufferDescriptor(urec->Buff() - 1)), LW_SHARED)) {
+                LockBuffer(urec->Buff(), BUFFER_LOCK_UNLOCK);
+            }
             ReleaseBuffer(urec->Buff());
             urec->SetBuff(InvalidBuffer);
         }
-        state = undo::CheckUndoRecordValid(urec->Urp(), false);
-        if ((!t_thrd.undo_cxt.fetchRecord) && state == UNDO_RECORD_DISCARD) {
+        state = undo::CheckUndoRecordValid(urec->Urp(), false, NULL);
+        if (state == UNDO_RECORD_DISCARD || state == UNDO_RECORD_FORCE_DISCARD) {
+            t_thrd.undo_cxt.fetchRecord = false;
+            t_thrd.int_cxt.InterruptHoldoffCount = saveInterruptHoldoffCount;
+            FlushErrorState();
             return false;
         } else {
+            (void)MemoryContextSwitchTo(oldContext);
             PG_RE_THROW();
         }
     }
@@ -392,7 +429,7 @@ static bool LoadUndoRecordRange(UndoRecord *urec, Buffer *buffer)
     t_thrd.undo_cxt.fetchRecord = false;
     *buffer = urec->Buff();
     urec->SetBuff(InvalidBuffer);
-    return true;
+    return (state == UNDO_RECORD_NORMAL);
 }
 
 /*
@@ -414,16 +451,19 @@ URecVector* FetchUndoRecordRange(    __inout UndoRecPtr *startUrp,
     UndoRecPtr currUrp = *startUrp;
     UndoRecPtr prevUrp = INVALID_UNDO_REC_PTR;
     *startUrp = INVALID_UNDO_REC_PTR;
-
+    VerifyMemoryContext();
     URecVector *urecvec = New(CurrentMemoryContext) URecVector();
+    urecvec->SetMemoryContext(CurrentMemoryContext);
     urecvec->Initialize(urecSize, false);
 
     do {
         startBlk = UNDO_PTR_GET_BLOCK_NUM(currUrp);
         endBlk = UNDO_PTR_GET_BLOCK_NUM(endUrp);
 
+        VerifyMemoryContext();
         UndoRecord *urec = New(CurrentMemoryContext) UndoRecord();
         urec->SetUrp(currUrp);
+        urec->SetMemoryContext(CurrentMemoryContext);
 
         /* Get Undo Persistence. Stored in the variable upersistence */
         int zoneId = UNDO_PTR_GET_ZONE_ID(currUrp);
@@ -435,6 +475,10 @@ URecVector* FetchUndoRecordRange(    __inout UndoRecPtr *startUrp,
         if (!IS_VALID_UNDO_REC_PTR(prevUrp) || UNDO_PTR_GET_ZONE_ID(prevUrp) != UNDO_PTR_GET_ZONE_ID(currUrp) ||
             UNDO_PTR_GET_BLOCK_NUM(prevUrp) != UNDO_PTR_GET_BLOCK_NUM(currUrp)) {
             if (BufferIsValid(buffer)) {
+                if (LWLockHeldByMeInMode(BufferDescriptorGetContentLock(
+                    GetBufferDescriptor((buffer) - 1)), LW_SHARED)) {
+                    LockBuffer((buffer), BUFFER_LOCK_UNLOCK);
+                }
                 ReleaseBuffer(buffer);
                 buffer = InvalidBuffer;
             }
@@ -488,6 +532,10 @@ URecVector* FetchUndoRecordRange(    __inout UndoRecPtr *startUrp,
     } while (true);
 
     if (BufferIsValid(buffer)) {
+        if (LWLockHeldByMeInMode(BufferDescriptorGetContentLock(
+            GetBufferDescriptor((buffer) - 1)), LW_SHARED)) {
+            LockBuffer((buffer), BUFFER_LOCK_UNLOCK);
+        }
         ReleaseBuffer(buffer);
     }
 
@@ -499,7 +547,7 @@ static bool CheckLastRecordSize(UndoRecordSize lastRecordSize, undo::XlogUndoMet
     WHITEBOX_TEST_STUB(UNDO_CHECK_LAST_RECORD_SIZE_FAILED, WhiteboxDefaultErrorEmit);
 
     if (t_thrd.xlog_cxt.InRecovery && (lastRecordSize != xlundometa->lastRecordSize)) {
-        ereport(WARNING, (errmsg(UNDOFORMAT("last record size %u != xlog last record size %u."), 
+        ereport(PANIC, (errmsg(UNDOFORMAT("last record size %u != xlog last record size %u."), 
             lastRecordSize, xlundometa->lastRecordSize)));
         return false;
     } else {
@@ -586,7 +634,7 @@ int PrepareUndoRecord(_in_ URecVector *urecvec, _in_ UndoPersistence upersistenc
                 if (curBlk % UNDOSEG_SIZE == 0) {
                     rbm = RBM_NORMAL;
                 }
-                int bufidx = urecvec->GetUndoBufidx(rnode, curBlk, rbm, upersistence);
+                int bufidx = urecvec->GetUndoBufidx(rnode, curBlk, rbm);
                 if (urec->Bufidx() == -1) {
                     urec->SetBufidx(bufidx);
                 }
@@ -612,6 +660,29 @@ int PrepareUndoRecord(_in_ URecVector *urecvec, _in_ UndoPersistence upersistenc
     return UNDO_RET_SUCC;
 }
 
+void VerifyUndoRecordValid(UndoRecord *urec, bool needCheckXidInvalid)
+{
+    if (u_sess->attr.attr_storage.ustore_verify_level < (int) USTORE_VERIFY_DEFAULT) {
+        return;
+    }
+
+    bool undoRecordNotValid = TransactionIdFollowsOrEquals(urec->Xid(),
+        t_thrd.xact_cxt.ShmemVariableCache->nextXid) || urec->Utype() == UNDO_UNKNOWN;
+    if (needCheckXidInvalid) {
+        undoRecordNotValid = undoRecordNotValid && TransactionIdIsValid(urec->Xid());
+    }
+    if (undoRecordNotValid) {
+        ereport(PANIC, (errmodule(MOD_UNDO),
+            errmsg(UNDOFORMAT(
+                "undorec xid invalid %lu,nextXid xid %lu:"
+                "global recycle xid %lu, globalFrozenXid %lu, utype %d, urp_ %lu, uinfo %d "),
+                urec->Xid(), t_thrd.xact_cxt.ShmemVariableCache->nextXid,
+                pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid),
+                pg_atomic_read_u64(&g_instance.undo_cxt.globalFrozenXid),
+                urec->Utype(), urec->Urp(), urec->Uinfo())));
+    }
+}
+
 void InsertPreparedUndo(_in_ URecVector *urecvec, _in_ XLogRecPtr lsn)
 {
     if (urecvec == NULL) {
@@ -631,45 +702,73 @@ void InsertPreparedUndo(_in_ URecVector *urecvec, _in_ XLogRecPtr lsn)
 
         int startingByte = UNDO_PTR_GET_PAGE_OFFSET(urec->Urp());
         int alreadyWritten = 0;
+        int lastPageWritten = 0;
         int bufIdx = urec->Bufidx();
         Page page = NULL;
+        bool diffpage = false;
+        bool newpage = false;
+        PageHeader phdr;
         do {
             UndoBuffer *ubuffer = urecvec->GetUBuffer(bufIdx);
             Buffer buffer = ubuffer->buf;
             if (BufferIsValid(buffer)) {
+                BufferDesc *buf_desc = GetBufferDescriptor(buffer - 1);
+                if (!LWLockHeldByMe(buf_desc->content_lock)) {
+                    LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
+                }
                 page = BufferGetPage(buffer);
-                if (((PageHeader)page)->pd_upper == 0) {
-                    ereport(DEBUG1, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT("INIT UNDO PAGE: urp=%lu, blockno=%u"),
-                        urec->Urp(), GetBufferDescriptor(buffer - 1)->tag.blockNum)));
+                phdr = (PageHeader)page;
+                if (PageIsNew(page)) {
+                    int zid = UNDO_PTR_GET_ZONE_ID(urec->Urp());
                     PageInit(page, BLCKSZ, 0);
+                    phdr->pd_prune_xid = (uint32)zid;
+                    phdr->pd_upper = (uint16)startingByte;
+                    newpage = true;
+                }
+                if (alreadyWritten == 0 && phdr->pd_lower == SizeOfPageHeaderData) {
+                    phdr->pd_lower = startingByte;
+                    diffpage = true;
                 }
                 if (!t_thrd.xlog_cxt.InRecovery || PageGetLSN(page) < lsn) {
+                    if (startingByte != phdr->pd_upper) {
+                        ereport(LOG, (errmsg("undo record discontinuous,zid %u, buffer %d, startingByte %u, "
+                            "page start %u, page end %u, alreadyWritten %d, lastPageWritten %d, diffpage %s, urp %lu, "
+                            "newpage %s.", phdr->pd_prune_xid, buffer, startingByte, phdr->pd_lower, phdr->pd_upper,
+                            alreadyWritten, lastPageWritten, diffpage ? "true" : "false", urec->Urp(),
+                            newpage ? "true" : "false")));
+                    }
                     if (urec->Append(page, startingByte, &alreadyWritten, undoLen)) {
                         MarkBufferDirty(buffer);
                         if (t_thrd.xlog_cxt.InRecovery) {
                             PageSetLSN(page, lsn);
                         }
+                        Assert(alreadyWritten >= lastPageWritten);
+                        phdr->pd_upper = (uint16)(startingByte + alreadyWritten - lastPageWritten);
                         break;
                     }
                     MarkBufferDirty(buffer);
                     if (t_thrd.xlog_cxt.InRecovery) {
                         PageSetLSN(page, lsn);
                     }
-                }else {
+                } else {
                     urec->Append(page, startingByte, &alreadyWritten, undoLen);
                 }
+                Assert(alreadyWritten >= lastPageWritten);
+                phdr->pd_upper = (uint16)(startingByte + alreadyWritten - lastPageWritten);
             } else {
                 ereport(PANIC, (errmsg(UNDOFORMAT("unknow buffer: %d"), buffer)));
                 break;
             }
             startingByte = UNDO_LOG_BLOCK_HEADER_SIZE;
             bufIdx++;
+            lastPageWritten = alreadyWritten;
         } while (bufIdx < urecvec->UbufferIdx());
     }
 }
 
 void SetUndoPageLSN(_in_ URecVector *urecvec, _in_ XLogRecPtr lsn)
 {
+    Assert(urecvec->UbufferIdx() != 0);
     for (int idx = 0; idx < urecvec->UbufferIdx(); idx++) {
         if (urecvec->GetUBuffer(idx)->inUse) {
             Page page = BufferGetPage(urecvec->GetUBuffer(idx)->buf);

@@ -281,6 +281,7 @@ CStoreIndexScanState* ExecInitCstoreIndexScan(CStoreIndexScan* node, EState* est
     cstoreScan->partScanDirection = node->scan.partScanDirection;
     cstoreScan->selectionRatio = 0.01;  // description: need optimizer to tell
     cstoreScan->cstorequal = node->baserelcstorequal;
+    cstoreScan->partition_iterator_elimination = node->scan.partition_iterator_elimination;
 
     // we don't need preload cudesc when use tid scan
     // here we set 'codegenInUplevel' to true to disable codegen in ExecInitCStoreScan
@@ -362,6 +363,7 @@ CStoreIndexScanState* ExecInitCstoreIndexScan(CStoreIndexScan* node, EState* est
         indexScan->partScanDirection = node->scan.partScanDirection;
         indexScan->selectionRatio = 0.01;  // description: need optimizer to tell
         indexScan->cstorequal = node->cstorequal;
+        indexScan->partition_iterator_elimination = node->scan.partition_iterator_elimination;
 
         indexstate->m_indexScan = ExecInitCStoreScan(indexScan, indexstate->ss_partition_parent, estate, eflags, true);
         indexstate->part_id = indexstate->m_indexScan->part_id;
@@ -508,7 +510,7 @@ void ExecReScanCStoreIndexScan(CStoreIndexScanState* node)
         /* psort index rescan */
         indexNodeState->ps.plan->paramno = node->ps.plan->paramno;
 
-        if (indexNodeState->isPartTbl) {
+        if (indexNodeState->isPartTbl && !(((Scan *)node->ps.plan)->partition_iterator_elimination)) {
             if (PointerIsValid(indexNodeState->partitions)) {
                 /* finally init Scan for the next partition */
                 ExecInitNextPartitionForCStoreIndexScan(indexNodeState);

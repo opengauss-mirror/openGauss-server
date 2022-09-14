@@ -210,7 +210,7 @@ PTHREAD_LIBS		= @PTHREAD_LIBS@
 # set globle paremeters about all depend libs                               #
 # including:                                                                #
 # jemalloc                                                                  #
-# event, libcgroup, kerberos, libxml and protobuf                           #
+# event, libcgroup, kerberos, libxml                                        #
 # libedit, zlib1.2.11, boost, ssl                                           #
 # if a new lib will be used, please add it here                             #
 #############################################################################
@@ -218,16 +218,10 @@ PTHREAD_LIBS		= @PTHREAD_LIBS@
 #############################################################################
 
 #############################################################################
-# get  string from script get_PlatForm_str.sh
-#############################################################################
-PLAT_FORM_STR = $(shell sh $(top_builddir)/src/get_PlatForm_str.sh)
-ifeq ($(PLAT_FORM_STR), Failed)
-	exit 1;
-endif
 
-BINARYPATH = binarylibs/$(PLAT_FORM_STR)
-PLATFORMPATH = Platform/$(PLAT_FORM_STR)
-BUILD_TOOLS_PATH = buildtools/$(PLAT_FORM_STR)
+BINARYPATH = kernel/dependency
+PLATFORMPATH = kernel/platform
+BUILD_TOOLS_PATH = buildtools
 
 ##############################################################################
 # jemalloc component 
@@ -253,7 +247,7 @@ else
             JEMALLOC_BUILD_TYPE = debug_llt
             JEMALLOC_LIB_NAME = jemalloc_pic
         else
-            ifeq ($(enable_ut), yes)	
+            ifeq ($(enable_ut), yes)
                 JEMALLOC_BUILD_TYPE = debug_llt
                 JEMALLOC_LIB_NAME = jemalloc_pic
             else
@@ -304,7 +298,7 @@ MEMCHECK_LIB_PATH = $(MEMCHECK_HOME)/lib
 #############################################################################
 # get the depend lib path
 #    1. libedit, event, libcgroup, kerberos, zlib1.2.11, boost,
-#	libxml and protobuf are support parameter --enable-llt and --enable-ut;
+#	libxml are support parameter --enable-llt and --enable-ut;
 #    	$(LIB_SUPPORT_LLT)
 #    2. gtest, mockcpp, unixodbc, libstd
 #       and ssl not support parameter --enable-llt and --enable-ut;
@@ -333,14 +327,7 @@ LIBOBS_LIB_PATH = $(LIBOBS_HOME)/lib
 #############################################################################
 # libodbc component
 #############################################################################
-INSTALL_TOOLS_PATH = binarylibs/dependency/install_tools_$(PLAT_FORM_STR)
-ifeq ($(PLAT_FORM_STR), euleros2.0_sp2_x86_64)
-  INSTALL_TOOLS_PATH = binarylibs/dependency/install_tools_euleros2.0_sp5_x86_64
-  LIBODBC_HOME = $(top_builddir)/../$(INSTALL_TOOLS_PATH)/unixodbc
-else
-  LIBODBC_HOME = $(top_builddir)/../$(INSTALL_TOOLS_PATH)/unixodbc
-endif
-
+LIBODBC_HOME = $(top_builddir)/../$(BINARYPATH)/unixodbc
 
 LIBODBC_INCLUDE_PATH = $(LIBODBC_HOME)/include
 LIBODBC_LIB_PATH = $(LIBODBC_HOME)/lib
@@ -412,12 +399,6 @@ CJSON_HOME = $(top_builddir)/../$(BINARYPATH)/cjson/$(LIB_SUPPORT_LLT)
 CJSON_INCLUDE_PATH = $(CJSON_HOME)/include
 CJSON_LIB_PATH = $(CJSON_HOME)/lib
 
-# protobuf component
-############################################################################# 
-PROTOBUF_HOME = $(top_builddir)/../$(BINARYPATH)/protobuf/$(LIB_SUPPORT_LLT)
-PROTOBUF_INCLUDE_PATH = $(PROTOBUF_HOME)/include
-PROTOBUF_LIB_PATH = $(PROTOBUF_HOME)/lib
-
 #############################################################################
 # kerberos component
 #############################################################################
@@ -438,20 +419,6 @@ BOOST_LIB_PATH = $(BOOST_HOME)/lib
 LIBXML_HOME = $(top_builddir)/../$(BINARYPATH)/libxml2/$(LIB_SUPPORT_LLT)
 LIBXML_INCLUDE_PATH = $(LIBXML_HOME)/include
 LIBXML_LIB_PATH = $(LIBXML_HOME)/lib
-
-#############################################################################
-# liborc component
-#############################################################################
-LIBORC_HOME = $(top_builddir)/../$(BINARYPATH)/liborc/$(LIB_SUPPORT_LLT)
-LIBORC_INCLUDE_PATH = $(LIBORC_HOME)/include
-LIBORC_LIB_PATH = $(LIBORC_HOME)/lib
-
-#############################################################################
-# snappy component
-#############################################################################
-SNAPPY_HOME = $(top_builddir)/../$(BINARYPATH)/snappy/$(LIB_SUPPORT_LLT)
-SNAPPY_INCLUDE_PATH = $(SNAPPY_HOME)/include
-SNAPPY_LIB_PATH = $(SNAPPY_HOME)/lib
 
 #############################################################################
 # ssl component
@@ -516,16 +483,16 @@ endif
 
 ifdef PGXS
 
-override CPPFLAGS := -I$(includedir_server) -I$(includedir_internal) -I$(LIBODBC_INCLUDE_PATH) -I$(LIBOBS_INCLUDE_PATH) -I$(LIBCGROUP_INCLUDE_PATH) -I$(LICENSE_INCLUDE_PATH) -I${LIBORC_INCLUDE_PATH} -I${PROTOBUF_INCLUDE_PATH} -I${BOOST_INCLUDE_PATH} -I$(LIBLLVM_INCLUDE_PATH) -I$(KERBEROS_INCLUDE_PATH) -I$(LIBEDIT_INCLUDE_PATH) -I$(EVENT_INCLUDE_PATH) $(CPPFLAGS)
+override CPPFLAGS := -I$(includedir_server) -I$(includedir_internal) -I$(LIBODBC_INCLUDE_PATH) -I$(LIBOBS_INCLUDE_PATH) -I$(LIBCGROUP_INCLUDE_PATH) -I$(LICENSE_INCLUDE_PATH) -I${BOOST_INCLUDE_PATH} -I$(LIBLLVM_INCLUDE_PATH) -I$(KERBEROS_INCLUDE_PATH) -I$(LIBEDIT_INCLUDE_PATH) -I$(EVENT_INCLUDE_PATH) $(CPPFLAGS)
 
 
 else # not PGXS
 
-override CPPFLAGS := -I$(top_srcdir)/src/include -I$(LIBODBC_INCLUDE_PATH) -I$(LIBOBS_INCLUDE_PATH) -I$(LIBCGROUP_INCLUDE_PATH) -I$(LICENSE_INCLUDE_PATH) -I${LIBORC_INCLUDE_PATH} -I${PROTOBUF_INCLUDE_PATH} -I${BOOST_INCLUDE_PATH} -I$(LIBLLVM_INCLUDE_PATH) -I$(KERBEROS_INCLUDE_PATH) -I$(LIBEDIT_INCLUDE_PATH) -I$(EVENT_INCLUDE_PATH) $(CPPFLAGS)
+override CPPFLAGS := -I$(top_srcdir)/src/include -I$(LIBODBC_INCLUDE_PATH) -I$(LIBOBS_INCLUDE_PATH) -I$(LIBCGROUP_INCLUDE_PATH) -I$(LICENSE_INCLUDE_PATH) -I${BOOST_INCLUDE_PATH} -I$(LIBLLVM_INCLUDE_PATH) -I$(KERBEROS_INCLUDE_PATH) -I$(LIBEDIT_INCLUDE_PATH) -I$(EVENT_INCLUDE_PATH) $(CPPFLAGS)
 
 ifdef VPATH
 
-override CPPFLAGS := -I$(top_builddir)/src/include -I$(LIBODBC_INCLUDE_PATH) -I$(LIBOBS_INCLUDE_PATH) -I$(LIBCGROUP_INCLUDE_PATH) -I$(LICENSE_INCLUDE_PATH) -I${LIBORC_INCLUDE_PATH} -I${PROTOBUF_INCLUDE_PATH} -I${BOOST_INCLUDE_PATH} -I$(LIBLLVM_INCLUDE_PATH) -I$(KERBEROS_INCLUDE_PATH) -I$(EVENT_INCLUDE_PATH) $(CPPFLAGS)
+override CPPFLAGS := -I$(top_builddir)/src/include -I$(LIBODBC_INCLUDE_PATH) -I$(LIBOBS_INCLUDE_PATH) -I$(LIBCGROUP_INCLUDE_PATH) -I$(LICENSE_INCLUDE_PATH) -I${BOOST_INCLUDE_PATH} -I$(LIBLLVM_INCLUDE_PATH) -I$(KERBEROS_INCLUDE_PATH) -I$(EVENT_INCLUDE_PATH) $(CPPFLAGS)
 
 endif
 endif # not PGXS
@@ -891,10 +858,7 @@ submake-libplpgsql:
 submake-libalarmclient:
 	$(MAKE) -C $(top_builddir)/src/alarm/client
 
-submake-libcarbondata:
-	$(MAKE) -C $(top_builddir)/contrib/carbondata all
-
-.PHONY: submake-libpq submake-libpgport  submake-libplpgsql submake-libalarmclient  submake-libcarbondata
+.PHONY: submake-libpq submake-libpgport  submake-libplpgsql submake-libalarmclient
 
 
 ##########################################################################

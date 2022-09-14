@@ -136,7 +136,6 @@ typedef struct OpMemInfo {
 
 /* the min memory for sort is 16MB,  the unit is kb. Don't sort in memory when we don't have engough memory. */
 #define SORT_MIM_MEM 16 * 1024
-#define DFSSCAN_MIN_MEM 12 * 1024 /* the min memory for dfsscan is 12MB,  the unit is kb. */
 #define MEM_KB 1024L              /* 1024kb for caculating mem info */
 
 /* PSORT_SPREAD_MAXMEM_RATIO can increase 20% for partition table's one part on extended limit. */
@@ -629,6 +628,11 @@ typedef struct RelOptInfo {
     List* lateral_vars;  /* LATERAL Vars and PHVs referenced by rel */
     Relids lateral_relids; /* minimum parameterization of rel */
     List* indexlist;     /* list of IndexOptInfo */
+
+#ifndef ENABLE_MULTIPLE_NODES
+    List* statlist;      /* list of ExtendedStats */
+#endif
+
     RelPageType pages;   /* local size estimates derived from pg_class */
     double tuples;       /* global size estimates derived from pg_class */
     double multiple;     /* how many dn skewed and biased be influenced by distinct. */
@@ -1054,6 +1058,7 @@ typedef struct PartIteratorPath {
     List* upperboundary;
     /* the lower boundary list for the partitions in pruning_result, it is meanless unless it is a partitionwise join */
     List* lowerboundary;
+    bool needSortNode; /* for min/max Optimization, need to add sort node. */
 } PartIteratorPath;
 
 /*

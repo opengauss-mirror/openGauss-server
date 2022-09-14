@@ -440,7 +440,262 @@ not_1:='202208';
 end;
 /
 
+
+create or replace function f1(a out text) return text
+is
+b text;
+begin
+return b;
+end;
+/
+ 
+create or replace function f3() return text
+as
+declare
+buf text;
+ddd text;
+b text;
+begin
+return buf;
+end;
+/
+ 
+call f3();
+ 
+create or replace function f1(a out text) return text
+is
+b text;
+begin
+a :='aaa';
+return b;
+end;
+/
+ 
+create or replace function f3() return text
+as
+declare
+buf text;
+ddd text;
+b text;
+begin
+perform f1(buf);
+return buf;
+end;
+/
+ 
+call f3();
+ 
+create or replace function f1(c int, a out text) return text
+is
+b text;
+begin
+c:=1;
+a :='aaa';
+return b;
+end;
+/
+ 
+create or replace function f3() return text
+as
+declare
+buf text;
+ddd text;
+b text;
+begin
+perform f1(1,buf);
+return buf;
+end;
+/
+ 
+call f3();
+create or replace procedure pro2(i_col1 out int)
+is
+a int;
+begin
+a := 9;
+end;
+/
+
+declare
+a int;
+begin
+perform pro2(a);
+end;
+/
+
 call proc_test();
 drop procedure proc_test;
 
+set behavior_compat_options='proc_outparam_override';
+set plsql_compile_check_options='outparam';
+create procedure p11(a out int) package is
+begin
+a:=12;
+end;
+/
+create procedure p11(a out varchar2) package is
+begin
+a:='12aa';
+end;
+/
+create procedure p11(a out int[]) package is
+begin
+a:=12;
+end;
+/
+create procedure p11(a in int, b out int) package is
+begin
+a:=12;
+b:=66;
+end;
+/
+
+drop procedure if exists p112(out int);
+create procedure p112(a out int) is
+declare
+aa varchar2;
+a varchar2;
+begin
+aa := p11(p11(p11('2aaa')));--常量报错
+raise info 'aa=%',aa;
+end;
+/
+
+
+drop procedure if exists p112(out int);
+create procedure p112(a out int) is
+declare
+aa varchar2;
+a varchar2;
+begin
+aa := p11(p11('2aaa'));--常量报错
+raise info 'aa=%',aa;
+end;
+/
+
+drop procedure if exists p112(out int);
+create procedure p112(a out int) is
+declare
+aa varchar2;
+a varchar2;
+begin
+aa := p11('2aaa');--常量报错
+raise info 'aa=%',aa;
+end;
+/
+
+drop procedure if exists p112(out int);
+create procedure p112(a out int) is
+declare
+aa varchar2;
+a varchar2;
+begin
+aa := p11(1+1);--常量报错
+raise info 'aa=%',aa;
+end;
+/
+
+drop procedure if exists p112(out int);
+create procedure p112(a out int) is
+declare
+aa varchar2;
+a varchar2;
+begin
+aa := p11(a);--常量不报错
+raise info 'aa=%',aa;
+end;
+/
+
+drop procedure if exists p112(out int);
+create procedure p112(a out int) is
+declare
+aa varchar2;
+a int[];
+begin
+aa := p11(a);--常量不报错
+raise info 'aa=%',aa;
+end;
+/
+
+drop procedure if exists p112(out int);
+create procedure p112(a out int) is
+declare
+aa varchar2;
+bb int;
+begin
+aa := p11(p11('2aaa'),bb);--常量报错
+raise info 'aa=%',aa;
+end;
+/
+
+drop package if exists pck1;
+create or replace package pck1 is
+type tp_1 is record(v01 number, v03 varchar2, v02 number);
+procedure p1(a out int);
+procedure p1(b out tp_1);
+end pck1;
+/
+
+create or replace package body pck1 is
+procedure p1(a out int) is
+begin
+a:=12;
+end;
+procedure p1(b out tp_1) is
+begin
+b.v01:=13;
+raise info 'b:%', b;
+end;
+end pck1;
+/
+
+declare
+begin
+perform pck1.p1(2);--常量报错
+end;
+/
+
+drop package if exists pck1;
+create or replace package pck1 is
+type tp_1 is record(v01 number, v03 varchar2, v02 number);
+type tp_2 is varray(10) of int;
+procedure p1(a in tp_1,c inout tp_2,b out varchar2);
+procedure p1(a in tp_2,c inout tp_1,b out tp_1);
+end pck1;
+/
+
+create or replace package body pck1 is
+procedure p1(a in tp_1,c inout tp_2,b out varchar2) is
+begin
+c(1):=a.v01;
+b:=a.v03;
+raise info 'b:%',b;
+end;
+procedure p1(a in tp_2,c inout tp_1,b out tp_1) is
+begin
+c.v03:=a(1);
+b:=(a(1),c.v03,a(2));
+raise info 'b:%',b;
+end;
+end pck1;
+/
+
+declare
+var1 pck1.tp_2;
+var2 varchar2;
+begin
+perform pck1.p1((1,'bb','11'),array[2,3,4],var2);--报错
+end;
+/
+
+declare
+var1 pck1.tp_2;
+var2 varchar2;
+begin
+perform pck1.p1(a=>(1,'bb','11'),c=>var1,b=>'aa');--报错
+end;
+/
+
+set plsql_compile_check_options='';
+drop package if exists pck1;
 drop schema if exists plpgsql_override_out cascade;

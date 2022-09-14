@@ -356,6 +356,9 @@ DATA(insert ( 4383		hll_add_trans4 hll_union_collect hll_pack 0 4370 _null_ _nul
 DATA(insert ( 4367		hll_union_trans hll_union_collect hll_pack 0 4370 _null_ _null_ 	n	0));
 #define HLL_UNION_TRANS_OID 4367
 
+/* concat with separator */
+DATA(insert ( 4097	group_concat_transfn			-	group_concat_finalfn			0	2281	_null_ _null_	n	0));
+
 /* list */
 #ifdef PGXC
 DATA(insert ( 3552	list_agg_transfn			-	list_agg_finalfn			0	2281	_null_ _null_	n	0));

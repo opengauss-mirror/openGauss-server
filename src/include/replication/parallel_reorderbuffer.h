@@ -35,7 +35,9 @@ enum LogicalLogType {
     LOGICAL_LOG_EMPTY,
     LOGICAL_LOG_RUNNING_XACTS,
     LOGICAL_LOG_CONFIRM_FLUSH,
-    LOGICAL_LOG_NEW_CID
+    LOGICAL_LOG_NEW_CID,
+    LOGICAL_LOG_MISSING_CHUNK,
+    LOGICAL_LOG_ASSIGNMENT
 };
 
 typedef struct logicalLog {
@@ -51,6 +53,8 @@ typedef struct logicalLog {
     int nsubxacts;
     TransactionId *subXids;
     TimestampTz commitTime;
+    HTAB* toast_hash;
+    ParallelReorderBufferTXN *txn;
     logicalLog *freeNext;
 } logicalLog;
 #endif
@@ -72,7 +76,8 @@ enum ParallelReorderBufferChangeType {
     PARALLEL_REORDER_BUFFER_CHANGE_UDELETE,
     PARALLEL_REORDER_BUFFER_INVALIDATIONS_MESSAGE,
     PARALLEL_REORDER_BUFFER_CHANGE_CONFIRM_FLUSH,
-    PARALLEL_REORDER_BUFFER_NEW_CID
+    PARALLEL_REORDER_BUFFER_NEW_CID,
+    PARALLEL_REORDER_BUFFER_ASSIGNMENT
 };
 
 
@@ -113,7 +118,7 @@ typedef struct ParallelReorderBufferChange {
     SharedInvalidationMessage *invalidations;
     enum ParallelReorderBufferChangeType action;
     HTAB* toast_hash;
-
+    bool missingChunk;
     /*
      * Context data for the change, which part of the union is valid depends
      * on action/action_internal.
@@ -254,7 +259,7 @@ typedef struct ParallelReorderBufferTXN {
      * tuples have been found for the current change.
      */
     HTAB* toast_hash;
-
+    bool missingChunk;
     /*
      * On-demand built hash for looking up the above values.
      */
@@ -283,6 +288,10 @@ typedef struct ParallelReorderBufferTXN {
      */
     dlist_node node;
 
+    /*
+     * Size of current transaction (changes currently in memory, in bytes).
+     */
+    Size size;
 } ParallelReorderBufferTXN;
 
 struct ParallelReorderBuffer {
@@ -358,6 +367,9 @@ struct ParallelReorderBuffer {
     /* buffer for disk<->memory conversions */
     char* outbuf;
     Size outbufsize;
+
+    /* memory accounting */
+    Size size;
 };
 
 /* Disk serialization support datastructures */
@@ -367,14 +379,19 @@ typedef struct ParallelReorderBufferDiskChange {
     /* data follows */
 } ParallelReorderBufferDiskChange;
 
-ParallelReorderBuffer* ParallelReorderBufferAllocate(int slotId);
+extern ParallelReorderBuffer* ParallelReorderBufferAllocate(int slotId);
+
 extern void ParallelFreeTuple(ReorderBufferTupleBuf *tuple, int slotId);
 extern void ParallelFreeChange(ParallelReorderBufferChange *change, int slotId);
 extern ParallelReorderBufferChange* ParallelReorderBufferGetChange(ParallelReorderBuffer *rb, int slotId);
 extern ReorderBufferTupleBuf *ParallelReorderBufferGetTupleBuf(ParallelReorderBuffer *rb, Size tuple_len,
     ParallelDecodeReaderWorker *worker, bool isHeapTuple);
-extern void ParallelReorderBufferToastReset(ParallelReorderBufferChange *change, int slotId);
+extern void ParallelReorderBufferToastReset(HTAB** toastHash, int slotId);
 extern void WalSndWriteDataHelper(StringInfo out, XLogRecPtr lsn, TransactionId xid, bool last_write);
 extern void WalSndPrepareWriteHelper(StringInfo out, XLogRecPtr lsn, TransactionId xid, bool last_write);
-const uint32 max_decode_cache_num = 1000000;
+extern void ParallelReorderBufferUpdateMemory(ParallelReorderBuffer *rb, logicalLog *change, int slotId, bool add);
+extern void CheckNewTupleMissingToastChunk(ParallelReorderBufferChange *change, bool isHeap);
+extern void ParallelReorderBufferChildAssignment(ParallelReorderBuffer *prb, logicalLog *logChange);
+
+const uint32 max_decode_cache_num = 100000;
 #endif

@@ -2,6 +2,7 @@
 drop table if exists t1;
 NOTICE:  table "t1" does not exist, skipping
 create table t1(c1 integer, c2 integer default 200) with (storage_type=USTORE);
+create index idx1 on t1(c1);
 start transaction;
 insert into t1 values(10, 20);
 insert into t1 values(20, 30);
@@ -11,21 +12,6 @@ insert into t1 values(50, 60);
 insert into t1 values(60, 70);
 insert into t1 values(70, 80);
 insert into t1 values(80, 90);
-commit;
-select * from t1;
- c1 | c2 
-----+----
- 10 | 20
- 20 | 30
- 30 | 40
- 40 | 50
- 50 | 60
- 60 | 70
- 70 | 80
- 80 | 90
-(8 rows)
-
-start transaction;
 update t1 set c2 = 100 where c1 > 60;
 commit;
 select * from t1;
@@ -41,10 +27,16 @@ select * from t1;
  80 | 100
 (8 rows)
 
+select /*+ indexonlyscan(t1) */ sum(c1), count(*) from t1 union select /*+ tablescan(t1) */ sum(c1),count(*) from t1;
+ sum | count 
+-----+-------
+ 360 |     8
+(1 row)
+
 start transaction;
-update t1 set c2 = DEFAULT where c1 > 60;
+update t1 set c2 = 100 where c1 > 60;
 commit;
-select * from t1;
+select * from t1 order by c1;
  c1 | c2  
 ----+-----
  10 |  20
@@ -53,58 +45,15 @@ select * from t1;
  40 |  50
  50 |  60
  60 |  70
- 70 | 200
- 80 | 200
+ 70 | 100
+ 80 | 100
 (8 rows)
 
--- Try with a larger column value. Pruning logic will shuffle all the rows to make space for the larger rows
-drop table if exists t2;
-NOTICE:  table "t2" does not exist, skipping
-create table t2(c1 integer, c2 varchar(64)) with (storage_type=USTORE);
-start transaction;
-insert into t2 values(10, 'abc');
-insert into t2 values(20, 'bbc');
-insert into t2 values(30, 'cbc');
-insert into t2 values(40, 'dbc');
-insert into t2 values(50, 'ebc');
-insert into t2 values(60, 'fbc');
-insert into t2 values(70, 'gbc');
-insert into t2 values(80, 'hbc');
-insert into t2 values(90, 'ibc');
-insert into t2 values(100, 'jbc');
-commit;
-select * from t2;
- c1  | c2  
------+-----
-  10 | abc
-  20 | bbc
-  30 | cbc
-  40 | dbc
-  50 | ebc
-  60 | fbc
-  70 | gbc
-  80 | hbc
-  90 | ibc
- 100 | jbc
-(10 rows)
-
-start transaction;
-update t2 set c2 = 'abcabcabc' where c1 > 60;
-commit;
-select * from t2;
- c1  |    c2     
------+-----------
-  10 | abc
-  20 | bbc
-  30 | cbc
-  40 | dbc
-  50 | ebc
-  60 | fbc
-  70 | abcabcabc
-  80 | abcabcabc
-  90 | abcabcabc
- 100 | abcabcabc
-(10 rows)
+select /*+ indexonlyscan(t1) */ sum(c1), count(*) from t1 union select /*+ tablescan(t1) */ sum(c1),count(*) from t1;
+ sum | count 
+-----+-------
+ 360 |     8
+(1 row)
 
 -- Rollback of inplace update
 drop table if exists t3;
@@ -117,7 +66,8 @@ insert into t3 values(5, 6);
 insert into t3 values(7, 8);
 insert into t3 values(9, 10);
 commit;
-select * from t3;
+create index idx3 on t3(c1);
+select * from t3 order by c1;
  c1 | c2 
 ----+----
   1 |  2
@@ -127,10 +77,16 @@ select * from t3;
   9 | 10
 (5 rows)
 
+select /*+ indexonlyscan(t3) */ sum(c1), count(*) from t3 union select /*+ tablescan(t3) */ sum(c1),count(*) from t3;
+ sum | count 
+-----+-------
+  25 |     5
+(1 row)
+
 start transaction;
 update t3 set c2 = 20 where c1 = 5;
 update t3 set c2 = 30 where c1 = 7;
-select * from t3;
+select * from t3 order by c1;
  c1 | c2 
 ----+----
   1 |  2
@@ -141,7 +97,7 @@ select * from t3;
 (5 rows)
 
 rollback;
-select * from t3;
+select * from t3 order by c1;
  c1 | c2 
 ----+----
   1 |  2
@@ -151,6 +107,12 @@ select * from t3;
   9 | 10
 (5 rows)
 
+select /*+ indexonlyscan(t3) */ sum(c1), count(*) from t3 union select /*+ tablescan(t3) */ sum(c1),count(*) from t3;
+ sum | count 
+-----+-------
+  25 |     5
+(1 row)
+
 -- Rollback of non-inplace update
 -- Note that the first update statement causes 
 -- page to be pruned and re-arranged so the update is done inplace.
@@ -158,47 +120,96 @@ select * from t3;
 -- we do not prune a data page with open transaction on a tuple. 
 drop table if exists t4;
 NOTICE:  table "t4" does not exist, skipping
-create table t4(c1 integer, c2 varchar(128)) with (storage_type=USTORE);
+create table t4(c1 integer primary key, c2 varchar(128)) with (storage_type=USTORE);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t4_pkey" for table "t4"
 start transaction;
 insert into t4 values(1, 'abc');
 insert into t4 values(2, 'bcd');
 insert into t4 values(3, 'cde');
-insert into t4 values(4, 'def');
-insert into t4 values(5, 'efg');
+insert into t4 values(generate_series(4, 500), 'defdewjhdlsahdlsa');
+update t4 set c2 = 'aaaabbbb' where c1 < 10;
+update t4 set c2 = 'aaaabbbbhjhjjhjhjhjhjhjhjhj' where c1 < 10;
 commit;
-select * from t4 order by c1;
- c1 | c2  
-----+-----
-  1 | abc
-  2 | bcd
-  3 | cde
-  4 | def
-  5 | efg
-(5 rows)
+create index idx4 on t4(c1);
+select * from t4 order by c1 limit 10;
+ c1 |             c2              
+----+-----------------------------
+  1 | aaaabbbbhjhjjhjhjhjhjhjhjhj
+  2 | aaaabbbbhjhjjhjhjhjhjhjhjhj
+  3 | aaaabbbbhjhjjhjhjhjhjhjhjhj
+  4 | aaaabbbbhjhjjhjhjhjhjhjhjhj
+  5 | aaaabbbbhjhjjhjhjhjhjhjhjhj
+  6 | aaaabbbbhjhjjhjhjhjhjhjhjhj
+  7 | aaaabbbbhjhjjhjhjhjhjhjhjhj
+  8 | aaaabbbbhjhjjhjhjhjhjhjhjhj
+  9 | aaaabbbbhjhjjhjhjhjhjhjhjhj
+ 10 | defdewjhdlsahdlsa
+(10 rows)
+
+select /*+ indexonlyscan(t4) */ sum(c1), count(*) from t4 union select /*+ tablescan(t4) */ sum(c1),count(*) from t4;
+  sum   | count 
+--------+-------
+ 125250 |   500
+(1 row)
 
 start transaction;
 update t4 set c2 = 'aaaabbbbccccdddd' where c1 = 3;
-update t4 set c2 = 'aaaabbbbccccdddd' where c1 = 2;
-select * from t4 order by c1;
- c1 |        c2        
-----+------------------
-  1 | abc
-  2 | aaaabbbbccccdddd
-  3 | aaaabbbbccccdddd
-  4 | def
-  5 | efg
-(5 rows)
+update t4 set c2 = 'aa';
+update t4 set c2 = 'aaaaa';
+update t4 set c2 = 'aaaaaaaaaaaaaaaahdkjdsd';
+select /*+ indexonlyscan(t4) */ sum(c1), count(*) from t4 union select /*+ tablescan(t4) */ sum(c1),count(*) from t4;
+  sum   | count 
+--------+-------
+ 125250 |   500
+(1 row)
 
 rollback;
-select * from t4 order by c1;
- c1 | c2  
-----+-----
-  1 | abc
-  2 | bcd
-  3 | cde
-  4 | def
-  5 | efg
-(5 rows)
+select * from t4 order by c1 limit 10;
+ c1 |             c2              
+----+-----------------------------
+  1 | aaaabbbbhjhjjhjhjhjhjhjhjhj
+  2 | aaaabbbbhjhjjhjhjhjhjhjhjhj
+  3 | aaaabbbbhjhjjhjhjhjhjhjhjhj
+  4 | aaaabbbbhjhjjhjhjhjhjhjhjhj
+  5 | aaaabbbbhjhjjhjhjhjhjhjhjhj
+  6 | aaaabbbbhjhjjhjhjhjhjhjhjhj
+  7 | aaaabbbbhjhjjhjhjhjhjhjhjhj
+  8 | aaaabbbbhjhjjhjhjhjhjhjhjhj
+  9 | aaaabbbbhjhjjhjhjhjhjhjhjhj
+ 10 | defdewjhdlsahdlsa
+(10 rows)
+
+select /*+ indexonlyscan(t4) */ sum(c1), count(*) from t4 union select /*+ tablescan(t4) */ sum(c1),count(*) from t4;
+  sum   | count 
+--------+-------
+ 125250 |   500
+(1 row)
+
+start transaction;
+update t4 set c2 = 'aa';
+update t4 set c2 = 'aaaaa';
+update t4 set c2 = 'aaaaaaaaaaaaaaaahdkjdsd';
+commit;
+select * from t4 order by c1 limit 10;
+ c1 |           c2            
+----+-------------------------
+  1 | aaaaaaaaaaaaaaaahdkjdsd
+  2 | aaaaaaaaaaaaaaaahdkjdsd
+  3 | aaaaaaaaaaaaaaaahdkjdsd
+  4 | aaaaaaaaaaaaaaaahdkjdsd
+  5 | aaaaaaaaaaaaaaaahdkjdsd
+  6 | aaaaaaaaaaaaaaaahdkjdsd
+  7 | aaaaaaaaaaaaaaaahdkjdsd
+  8 | aaaaaaaaaaaaaaaahdkjdsd
+  9 | aaaaaaaaaaaaaaaahdkjdsd
+ 10 | aaaaaaaaaaaaaaaahdkjdsd
+(10 rows)
+
+select /*+ indexonlyscan(t4) */ sum(c1), count(*) from t4 union select /*+ tablescan(t4) */ sum(c1),count(*) from t4;
+  sum   | count 
+--------+-------
+ 125250 |   500
+(1 row)
 
 -- Test updates involving mixed table types
 drop table if exists t5;
@@ -217,7 +228,6 @@ select count(*) from t5 where b = 999;
 (1 row)
 
 drop table t1;
-drop table t2;
 drop table t3;
 drop table t4;
 drop table t5;

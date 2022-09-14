@@ -85,6 +85,8 @@ Datum quote_literal(PG_FUNCTION_ARGS)
     char* cp2 = NULL;
     int len;
 
+    FUNC_CHECK_HUGE_POINTER(false, t, "quote_literal()");
+
     len = VARSIZE(t) - VARHDRSZ;
     if (unlikely(len < 0)) {
         ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("The length should not be nagative: %d.\n", len)));

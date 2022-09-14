@@ -142,6 +142,9 @@ const struct LWLOCK_PARTITION_DESC LWLockPartInfo[] = {
 #define NUM_GPRC_PARTITIONS 2
 #endif
 
+/* Number of standby statement hsitory needed */
+#define NUM_STANDBY_STMTHIST_PARTITIONS 2
+
 /* 
  * WARNING---Please keep the order of LWLockTrunkOffset and BuiltinTrancheIds consistent!!! 
 */
@@ -185,8 +188,10 @@ const struct LWLOCK_PARTITION_DESC LWLockPartInfo[] = {
 #define FirstSessRoleIdLock (FirstTwoPhaseStateLock + NUM_TWOPHASE_PARTITIONS)
 /* autonomous transaction package value */
 #define FirstGPRCMappingLock (FirstSessRoleIdLock + NUM_SESSION_ROLEID_PARTITIONS)
+/* standby statement history */
+#define FirstStandbyStmtHistLock (FirstGPRCMappingLock + NUM_GPRC_PARTITIONS)
 /* must be last: */
-#define NumFixedLWLocks (FirstGPRCMappingLock + NUM_GPRC_PARTITIONS)
+#define NumFixedLWLocks (FirstStandbyStmtHistLock + NUM_STANDBY_STMTHIST_PARTITIONS)
 /*
  * WARNING----Please keep BuiltinTrancheIds and BuiltinTrancheNames consistent!!!
  *
@@ -214,7 +219,7 @@ enum BuiltinTrancheIds
     LWTRANCHE_USPACE_TRANSGRP_MAPPING,
     LWTRANCHE_PROC_XACT_MAPPING,
     LWTRANCHE_ASP_MAPPING,
-    LWTRANCHE_GlobalSeq, 
+    LWTRANCHE_GlobalSeq,
     LWTRANCHE_GWC_MAPPING,
     LWTRANCHE_NORMALIZED_SQL,
     LWTRANCHE_START_BLOCK_MAPPING,
@@ -233,6 +238,7 @@ enum BuiltinTrancheIds
     LWTRANCHE_MULTIXACTMEMBER_CTL,
     LWTRANCHE_OLDSERXID_SLRU_CTL,
     LWTRANCHE_WAL_INSERT,
+    LWTRANCHE_IO_BLOCKED,
     LWTRANCHE_DOUBLE_WRITE,
     LWTRANCHE_DW_SINGLE_FIRST,   /* single flush dw file, first version pos lock */
     LWTRANCHE_DW_SINGLE_SECOND,   /* single flush dw file, second version pos lock */
@@ -246,7 +252,7 @@ enum BuiltinTrancheIds
     LWTRANCHE_MPFL,
     LWTRANCHE_GTT_CTL, // For GTT
     LWTRANCHE_PLDEBUG, // For Pldebugger
-    LWTRANCHE_NGROUP_MAPPING,    
+    LWTRANCHE_NGROUP_MAPPING,
     LWTRANCHE_MATVIEW_SEQNO,
     LWTRANCHE_IO_STAT,
     LWTRANCHE_WAL_FLUSH_WAIT,
@@ -256,12 +262,14 @@ enum BuiltinTrancheIds
     LWTRANCHE_TWOPHASE_STATE,
     LWTRANCHE_ROLEID_PARTITION,
     LWTRANCHE_GPRC_MAPPING,
+    LWTRANCHE_STANDBY_STMTHIST,
     LWTRANCHE_PGWR_SYNC_QUEUE,
     LWTRANCHE_BARRIER_TBL,
     LWTRANCHE_PAGE_REPAIR,
     LWTRANCHE_FILE_REPAIR,
     LWTRANCHE_REPLICATION_ORIGIN,
     LWTRANCHE_AUDIT_INDEX_WAIT,
+    LWTRANCHE_PCA_BUFFER_CONTENT,
     /*
      * Each trancheId above should have a corresponding item in BuiltinTrancheNames;
      */

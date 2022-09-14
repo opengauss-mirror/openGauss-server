@@ -1,12 +1,6 @@
 #!/bin/bash
-#######################################################################
-# Copyright (c): 2020-2025, Huawei Tech. Co., Ltd.
+# Copyright (c) Huawei Technologies Co., Ltd. 2020-2025. All rights reserved.
 # descript: Compile and pack openGauss
-#           Return 0 means OK.
-#           Return 1 means failed.
-# version:  2.0
-# date:     2020-08-08
-#######################################################################
 #######################################################################
 ##  Check the installation package production environment
 #######################################################################
@@ -27,15 +21,13 @@ function gaussdb_pkg_pre_clean()
 function read_gaussdb_version()
 {
     cd ${SCRIPT_DIR}
-    echo "${gaussdb_name_for_package}-${version_number}" > version.cfg
+    echo "${product_name}-${version_number}" > version.cfg
     #auto read the number from kernal globals.cpp, no need to change it here
 }
-
 
 PG_REG_TEST_ROOT="${ROOT_DIR}"
 ROACH_DIR="${ROOT_DIR}/distribute/bin/roach"
 MPPDB_DECODING_DIR="${ROOT_DIR}/contrib/mppdb_decoding"
-
 
 ###################################
 # get version number from globals.cpp
@@ -63,7 +55,6 @@ function read_gaussdb_number()
     fi
 }
 
-
 #######################################################################
 ##insert the commitid to version.cfg as the upgrade app path specification
 #######################################################################
@@ -75,7 +66,6 @@ function get_kernel_commitid()
     echo "${commitid}" >>${SCRIPT_DIR}/version.cfg
     echo "End insert commitid into version.cfg" >> "$LOG_FILE" 2>&1
 }
-
 
 #######################################################################
 ## generate the version file.
@@ -104,7 +94,6 @@ function make_license_control()
         die "modify '$gaussdb_version_file' failed."
     fi
 }
-
 
 #######################################################################
 ##back to separate_debug_symbol.sh dir
@@ -142,8 +131,8 @@ function install_gaussdb()
         echo "WARNING: do not separate symbol in debug mode!"
     fi
 
-    if [ "$product_mode" != "opengauss" ]; then
-        die "the product mode can only be opengauss!"
+    if [ "$product_mode" != "opengauss" -a "$product_mode" != "lite" ]; then
+        die "the product mode can only be opengauss, lite!"
     fi
 
     #configure
@@ -175,6 +164,20 @@ function install_gaussdb()
             ./configure $shared_opt CFLAGS="-O0 ${GAUSSDB_EXTRA_FLAGS}" --enable-mot --enable-debug --enable-cassert --disable-jemalloc CC=g++ $extra_config_opt >> "$LOG_FILE" 2>&1
         else
             ./configure $shared_opt CFLAGS="-O0 ${GAUSSDB_EXTRA_FLAGS}" --enable-mot --enable-debug --enable-cassert CC=g++ $extra_config_opt >> "$LOG_FILE" 2>&1
+        fi
+    elif [ "$product_mode"x == "lite"x ]; then
+        shared_opt="--gcc-version=${gcc_version}.0 --prefix="${BUILD_DIR}" --3rd=${binarylib_dir} --enable-thread-safety ${enable_readline} --without-zlib  --without-gssapi --without-krb5"
+        if [ "$version_mode"x == "release"x ]; then
+            # configure -D__USE_NUMA -D__ARM_LSE with arm single mode
+            if [ "$PLATFORM_ARCH"X == "aarch64"X ] ; then
+                echo "configure -D__USE_NUMA -D__ARM_LSE with arm single mode"
+                GAUSSDB_EXTRA_FLAGS=" -D__USE_NUMA -D__ARM_LSE"
+            fi
+            ./configure $shared_opt CFLAGS="-O2 -g3 ${GAUSSDB_EXTRA_FLAGS}" CC=g++  $extra_config_opt --enable-lite-mode >> "$LOG_FILE" 2>&1
+        elif [ "$version_mode"x == "memcheck"x ]; then
+            ./configure $shared_opt CFLAGS='-O0' --enable-debug --enable-cassert --enable-memory-check CC=g++ $extra_config_opt --enable-lite-mode >> "$LOG_FILE" 2>&1
+        else
+            ./configure $shared_opt CFLAGS="-O0 ${GAUSSDB_EXTRA_FLAGS}" --enable-debug --enable-cassert CC=g++ $extra_config_opt  --enable-lite-mode>> "$LOG_FILE" 2>&1
         fi
     fi
 
@@ -258,12 +261,8 @@ function install_gaussdb()
 
     chmod 444 ${BUILD_DIR}/bin/cluster_guc.conf
     dos2unix ${BUILD_DIR}/bin/cluster_guc.conf > /dev/null 2>&1
-
-    separate_symbol
-    
     get_kernel_commitid
 }
-
 
 #######################################################################
 ##install gaussdb database and others

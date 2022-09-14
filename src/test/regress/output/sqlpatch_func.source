@@ -1,0 +1,431 @@
+create schema sqlpatch_func;
+set search_path = sqlpatch_func;
+set rewrite_rule = 'magicset, partialpush, uniquecheck, disablerep, intargetlist, predpushforce';
+-- create funciton to generate unique sql id for debug usage
+CREATE FUNCTION query_get_unique_sql_id(text)
+    RETURNS bigint
+   AS '@libdir@/regress@DLSUFFIX@','query_get_unique_sql_id'
+   LANGUAGE C IMMUTABLE STRICT not fenced;
+-- create tables
+create table src(a int);
+insert into src values(1);
+create table hint_t1(a int, b int, c int);
+insert into hint_t1 select generate_series(1, 2000), generate_series(1, 1000), generate_series(1, 500) from src;
+create index on hint_t1(a);
+create table hint_t2(a int, b int, c int);
+insert into hint_t2 select generate_series(1, 1000), generate_series(1, 500), generate_series(1, 100) from src;
+create index on hint_t2(a);
+create table hint_t3(a int, b int, c int);
+insert into hint_t3 select generate_series(1, 100), generate_series(1, 50), generate_series(1, 25) from src;
+create index on hint_t3(a);
+create table hint_t4(a int, b int, c int);
+insert into hint_t4 select generate_series(1, 10), generate_series(1, 5), generate_series(1, 2) from src;
+create index on hint_t4(a);
+create table hint_t5(a int, b int, c int);
+insert into hint_t5 select generate_series(1, 5), generate_series(1, 5), generate_series(1, 2) from src;
+create index on hint_t5(a);
+analyze hint_t1;
+analyze hint_t2;
+analyze hint_t3;
+analyze hint_t4;
+analyze hint_t5;
+create sequence seq;
+CREATE OR REPLACE FUNCTION create_hint_by_query(query text, hint text) RETURNS name AS
+$BODY$
+DECLARE
+    id bigint;
+    patch_name name;
+BEGIN
+    select query_get_unique_sql_id(query) into id;
+    select 'hint_'||nextval('seq') into patch_name;
+    perform dbe_sql_util.create_hint_sql_patch(patch_name, id, hint);
+    RETURN patch_name;
+END
+$BODY$
+LANGUAGE plpgsql;
+CREATE OR REPLACE FUNCTION create_abort_by_query(query text) RETURNS name AS
+$BODY$
+DECLARE
+    id bigint;
+    patch_name name;
+BEGIN
+    select query_get_unique_sql_id(query) into id;
+    select 'abort_'||nextval('seq') into patch_name;
+    perform dbe_sql_util.create_abort_sql_patch(patch_name, id);
+    RETURN patch_name;
+END;
+$BODY$
+LANGUAGE plpgsql;
+----
+-- abort patch
+----
+-- dml
+select * from create_abort_by_query('select * from hint_t1 where a = 1');
+ create_abort_by_query 
+-----------------------
+ abort_1
+(1 row)
+
+select * from hint_t1 where a = 1; --abort
+--?ERROR:  Statement .* canceled by abort patch abort_1
+select     *   from  hint_t1 t1 where a = 2; --abort ignore blank space and parameter change
+--?ERROR:  Statement .* canceled by abort patch abort_1
+select * from hint_t1 where b = 1;
+  a   | b | c 
+------+---+---
+    1 | 1 | 1
+ 1001 | 1 | 1
+(2 rows)
+
+select * from create_abort_by_query('insert into hint_t1 values (0,0,0)');
+ create_abort_by_query 
+-----------------------
+ abort_2
+(1 row)
+
+insert into hint_t1 values (0,0,0); --abort
+--?ERROR:  Statement .* canceled by abort patch abort_2
+insert into hint_t1 values (default); --unaffected
+insert /*+ set(enable_seqscan off) */ into hint_t1 values (1,2,3); --abort ignore hint
+--?ERROR:  Statement .* canceled by abort patch abort_2
+select * from create_abort_by_query('insert into hint_t3 select * from hint_t4 where a = 1');
+ create_abort_by_query 
+-----------------------
+ abort_3
+(1 row)
+
+insert into hint_t3 select * from hint_t4 where a = 1; --abort
+--?ERROR:  Statement .* canceled by abort patch abort_3
+insert into hint_t3 select * from hint_t4 where b = 1; --unaffected
+select * from create_abort_by_query('insert into hint_t1 values (0,0,0) on duplicate key update b = 1');
+ create_abort_by_query 
+-----------------------
+ abort_4
+(1 row)
+
+insert into hint_t1 values (5,6,7) on    duplicate key update b = 100; --abort
+--?ERROR:  Statement .* canceled by abort patch abort_4
+insert into hint_t1 values (5,6,7) on    duplicate key update a = 100; --abort by mistake
+--?ERROR:  Statement .* canceled by abort patch abort_4
+select * from create_abort_by_query('update hint_t1 set b = 100');
+ create_abort_by_query 
+-----------------------
+ abort_5
+(1 row)
+
+update hint_t1 set b = 200; --abort
+--?ERROR:  Statement .* canceled by abort patch abort_5
+begin;
+update hint_t1 set c = 200; --good to go
+rollback;
+select * from create_abort_by_query('delete from hint_t1 where a = 1');
+ create_abort_by_query 
+-----------------------
+ abort_6
+(1 row)
+
+delete from hint_t1 where a = 1001; --abort
+--?ERROR:  Statement .* canceled by abort patch abort_6
+delete hint_t1 t1 where t1.a = 123;
+--?ERROR:  Statement .* canceled by abort patch abort_6
+select * from create_abort_by_query('merge into hint_t1 t1 using hint_t2 t2 on t2.a = t1.a when matched then update set t1.b = t2.b;');
+ create_abort_by_query 
+-----------------------
+ abort_7
+(1 row)
+
+merge into hint_t1 t1 using hint_t2 t2 on t2.a = t1.a when matched then update set t1.b = t2.b; --abort
+--?ERROR:  Statement .* canceled by abort patch abort_7
+merge into hint_t1 t1 using hint_t2 t2 on t2.a = t1.a when matched then update set t1.b = t2.b + 1; --abort by mistake
+--?ERROR:  Statement .* canceled by abort patch abort_7
+merge into hint_t1 t1 using hint_t2 t2 on t2.a = t1.a when matched then update set t1.b = t2.b + t2.c; --abort by mistake
+--?ERROR:  Statement .* canceled by abort patch abort_7
+-- ddl
+select * from create_abort_by_query('create table test_abort(a int);');
+ create_abort_by_query 
+-----------------------
+ abort_8
+(1 row)
+
+create table test_abort(a int); --abort
+--?ERROR:  Statement .* canceled by abort patch abort_8
+create table  test_abort(a int); --ok for now
+select * from create_abort_by_query('create sequence s2'); -- this won't work
+ create_abort_by_query 
+-----------------------
+ abort_9
+(1 row)
+
+create sequence s2;
+drop sequence s2;
+select * from create_abort_by_query('create sequence s2;'); -- this will work
+ create_abort_by_query 
+-----------------------
+ abort_10
+(1 row)
+
+create sequence s2;
+--?ERROR:  Statement .* canceled by abort patch abort_10
+select * from create_abort_by_query('set search_path = p1;');
+ create_abort_by_query 
+-----------------------
+ abort_11
+(1 row)
+
+set search_path = p1; -- abort
+--?ERROR:  Statement .* canceled by abort patch abort_11
+-- other utilities falls into to the same branch, no need to expand here
+----
+-- hint patch
+----
+select setval('seq', 1);
+ setval 
+--------
+      1
+(1 row)
+
+-- leading hint
+select * from create_hint_by_query('select * from hint_t1 t1 join hint_t2 t2 on t1.a = t2.a', 'leading((t1 t2))');
+ create_hint_by_query 
+----------------------
+ hint_2
+(1 row)
+
+explain(costs off) select * from hint_t1 t1 join hint_t2 t2 on t1.a = t2.a;
+NOTICE:  Plan influenced by SQL hint patch
+             QUERY PLAN             
+------------------------------------
+ Hash Join
+   Hash Cond: (t1.a = t2.a)
+   ->  Seq Scan on hint_t1 t1
+   ->  Hash
+         ->  Seq Scan on hint_t2 t2
+(5 rows)
+
+select * from dbe_sql_util.drop_sql_patch('hint_2');
+ drop_sql_patch 
+----------------
+ t
+(1 row)
+
+select * from create_hint_by_query('select * from hint_t1 t1 join hint_t2 t2 on t1.a = t2.a', 'leading((t2 t1))');
+ create_hint_by_query 
+----------------------
+ hint_3
+(1 row)
+
+explain(costs off) select /*+ leading((t1 t2)) */* from hint_t1 t1 join hint_t2 t2 on t1.a = t2.a;
+NOTICE:  Plan influenced by SQL hint patch
+                     QUERY PLAN                     
+----------------------------------------------------
+ Merge Join
+   Merge Cond: (t2.a = t1.a)
+   ->  Index Scan using hint_t2_a_idx on hint_t2 t2
+   ->  Index Scan using hint_t1_a_idx on hint_t1 t1
+(4 rows)
+
+-- join hint
+select * from create_hint_by_query('select * from hint_t1 t1 join hint_t2 t2 on t1.a = t2.a where t1.a < 50', 'mergejoin(t1 t2)');
+ create_hint_by_query 
+----------------------
+ hint_4
+(1 row)
+
+explain(costs off) select * from hint_t1 t1 join hint_t2 t2 on t1.a = t2.a where t1.a < 50;
+NOTICE:  Plan influenced by SQL hint patch
+                     QUERY PLAN                     
+----------------------------------------------------
+ Merge Join
+   Merge Cond: (t1.a = t2.a)
+   ->  Index Scan using hint_t1_a_idx on hint_t1 t1
+         Index Cond: (a < 50)
+   ->  Index Scan using hint_t2_a_idx on hint_t2 t2
+         Index Cond: (a < 50)
+(6 rows)
+
+select * from dbe_sql_util.drop_sql_patch('hint_4');
+ drop_sql_patch 
+----------------
+ t
+(1 row)
+
+select * from create_hint_by_query('select * from hint_t1 t1 join hint_t2 t2 on t1.a = t2.a where t1.a < 50', 'hashjoin(t1 t2)');
+ create_hint_by_query 
+----------------------
+ hint_5
+(1 row)
+
+explain(costs off) select /*+ set(enable_hashjoin off) */ * from hint_t1 t1 join hint_t2 t2 on t1.a = t2.a where t1.a < 50;
+NOTICE:  Plan influenced by SQL hint patch
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Hash Join
+   Hash Cond: (t1.a = t2.a)
+   ->  Index Scan using hint_t1_a_idx on hint_t1 t1
+         Index Cond: (a < 50)
+   ->  Hash
+         ->  Index Scan using hint_t2_a_idx on hint_t2 t2
+               Index Cond: (a < 50)
+(7 rows)
+
+-- scan hint
+select * from create_hint_by_query('select * from hint_t5 t5 where t5.a = 1', 'tablescan(t5)');
+ create_hint_by_query 
+----------------------
+ hint_6
+(1 row)
+
+explain(costs off) select * from hint_t5 t5 where t5.a = 3;
+NOTICE:  Plan influenced by SQL hint patch
+       QUERY PLAN       
+------------------------
+ Seq Scan on hint_t5 t5
+   Filter: (a = 3)
+(2 rows)
+
+select * from dbe_sql_util.drop_sql_patch('hint_6');
+ drop_sql_patch 
+----------------
+ t
+(1 row)
+
+select * from create_hint_by_query('select * from hint_t5 t5 where t5.a = 1', 'indexscan (t5) tablescan(t6)'); -- with invalid hint
+ create_hint_by_query 
+----------------------
+ hint_7
+(1 row)
+
+explain(costs off) select * from hint_t5 t5 where t5.a = 100;
+NOTICE:  Plan influenced by SQL hint patch
+WARNING:  Error hint: TableScan(t6), relation name "t6" is not found.
+                  QUERY PLAN                  
+----------------------------------------------
+ [Bypass]
+ Index Scan using hint_t5_a_idx on hint_t5 t5
+   Index Cond: (a = 100)
+(3 rows)
+
+-- set hint
+explain(costs off) select distinct(c) from hint_t2 where a < 30;
+                   QUERY PLAN                    
+-------------------------------------------------
+ HashAggregate
+   Group By Key: c
+   ->  Index Scan using hint_t2_a_idx on hint_t2
+         Index Cond: (a < 30)
+(4 rows)
+
+select * from create_hint_by_query('select distinct(c) from hint_t2 where a < 20', 'set(enable_hashagg off)');
+ create_hint_by_query 
+----------------------
+ hint_8
+(1 row)
+
+explain(costs off) select distinct(c) from hint_t2 where a < 20;
+NOTICE:  Plan influenced by SQL hint patch
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Unique
+   ->  Sort
+         Sort Key: c
+         ->  Index Scan using hint_t2_a_idx on hint_t2
+               Index Cond: (a < 20)
+(5 rows)
+
+-- rewrite hint
+set rewrite_rule = '';
+explain(costs off) select a from hint_t3 t1 where t1.b = (select max(b) from hint_t3 t2 where t2.a = t1.a);
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Hash Join
+   Hash Cond: ((t1.a = subquery."?column?") AND (t1.b = subquery.max))
+   ->  Seq Scan on hint_t3 t1
+   ->  Hash
+         ->  Subquery Scan on subquery
+               ->  HashAggregate
+                     Group By Key: t2.a
+                     ->  Seq Scan on hint_t3 t2
+(8 rows)
+
+select * from create_hint_by_query('select a from hint_t3 t1 where t1.b = (select max(b) from hint_t3 t2 where t2.a = t1.a);', 'set (rewrite_rule "magicset,disable_pullup_expr_sublink")');
+ create_hint_by_query 
+----------------------
+ hint_9
+(1 row)
+
+explain(costs off) select a from hint_t3 t1 where t1.b = (select max(b) from hint_t3 t2 where t2.a = t1.a);
+NOTICE:  Plan influenced by SQL hint patch
+              QUERY PLAN              
+--------------------------------------
+ Seq Scan on hint_t3 t1
+   Filter: (b = (SubPlan 1))
+   SubPlan 1
+     ->  Aggregate
+           ->  Seq Scan on hint_t3 t2
+                 Filter: (a = t1.a)
+(6 rows)
+
+select * from dbe_sql_util.drop_sql_patch('hint_9');
+ drop_sql_patch 
+----------------
+ t
+(1 row)
+
+set rewrite_rule = 'disable_pullup_expr_sublink';
+select * from create_hint_by_query('select a from hint_t3 t1 where t1.b = (select max(b) from hint_t3 t2 where t2.a = t1.a);', 'set (rewrite_rule magicset)');
+ create_hint_by_query 
+----------------------
+ hint_10
+(1 row)
+
+explain(costs off) select a from hint_t3 t1 where t1.b = (select max(b) from hint_t3 t2 where t2.a = t1.a);
+NOTICE:  Plan influenced by SQL hint patch
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Hash Join
+   Hash Cond: ((t1.a = subquery."?column?") AND (t1.b = subquery.max))
+   ->  Seq Scan on hint_t3 t1
+   ->  Hash
+         ->  Subquery Scan on subquery
+               ->  HashAggregate
+                     Group By Key: t2.a
+                     ->  Seq Scan on hint_t3 t2
+(8 rows)
+
+----
+-- cleanup
+----
+select dbe_sql_util.drop_sql_patch(patch_name) from gs_sql_patch;
+ drop_sql_patch 
+----------------
+ t
+ t
+ t
+ t
+ t
+ t
+ t
+ t
+ t
+ t
+ t
+ t
+ t
+ t
+ t
+ t
+(16 rows)
+
+drop schema sqlpatch_func cascade;
+NOTICE:  drop cascades to 11 other objects
+DETAIL:  drop cascades to function query_get_unique_sql_id(text)
+drop cascades to table src
+drop cascades to table hint_t1
+drop cascades to table hint_t2
+drop cascades to table hint_t3
+drop cascades to table hint_t4
+drop cascades to table hint_t5
+drop cascades to sequence seq
+drop cascades to function create_hint_by_query(text,text)
+drop cascades to function create_abort_by_query(text)
+drop cascades to table test_abort

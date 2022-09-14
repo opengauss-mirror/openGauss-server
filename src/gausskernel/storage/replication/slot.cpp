@@ -64,6 +64,7 @@ static void RecoverReplSlotFile(const ReplicationSlotOnDisk &cp, const char *nam
 static void SaveSlotToPath(ReplicationSlot *slot, const char *path, int elevel);
 static char *trim_str(char *str, int str_len, char sep);
 static char *get_application_name(void);
+static void ReleaseArchiveSlotInfo(ReplicationSlot *slot);
 static int cmp_slot_lsn(const void *a, const void *b);
 
 /*
@@ -125,13 +126,8 @@ bool ReplicationSlotValidateName(const char *name, int elevel)
 {
     const char *cp = NULL;
 
-    if (name == NULL) {
+    if (name == NULL || strlen(name) == 0) {
         ereport(elevel, (errcode(ERRCODE_INVALID_NAME), errmsg("replication slot name should not be NULL.")));
-        return false;
-    }
-
-    if (strlen(name) == 0) {
-        ereport(elevel, (errcode(ERRCODE_INVALID_NAME), errmsg("replication slot name \"%s\" is too short", name)));
         return false;
     }
 
@@ -140,14 +136,21 @@ bool ReplicationSlotValidateName(const char *name, int elevel)
         return false;
     }
 
+    if ((strlen(name) == 1 && name[0] == '.') ||
+        (strlen(name) == strlen("..") && strncmp(name, "..", strlen("..")) == 0)) {
+        ereport(elevel, (errcode(ERRCODE_INVALID_NAME),
+            errmsg("'.' and '..' are not allowed to be slot names independently.")));
+    }
+
     for (cp = name; *cp; cp++) {
         if (!((*cp >= 'a' && *cp <= 'z') || (*cp >= '0' && *cp <= '9') || (*cp == '_') || (*cp == '?') ||
-              (*cp == '<') || (*cp == '!') || (*cp == '-') || (*cp == '.'))) {
+            (*cp == '.') || (*cp == '-'))) {
             ereport(elevel,
                     (errcode(ERRCODE_INVALID_NAME),
                      errmsg("replication slot name \"%s\" contains invalid character", name),
                      errhint("Replication slot names may only contain lower letters, "
-                             "numbers and the underscore character.")));
+                             "numbers and the 4 following special characters: '_', '?', '.', '-'.\n"
+                             "'.' and '..' are also not allowed to be slot names independently.")));
             return false;
         }
     }
@@ -163,40 +166,31 @@ bool ReplicationSlotValidateName(const char *name, int elevel)
 }
 
 /*
- * Check whether the passed slot name is valid and report errors at elevel.
- *
- * Slot names may consist out of [a-z0-9_]{1,NAMEDATALEN-1} which should allow
- * the name to be used as a directory name on every supported OS.
- *
- * Returns whether the directory name is valid or not if elevel < ERROR.
+ * Check whether the passed string contains danerous characters and report errors.
  */
-void ValidateName(const char* name)
+void ValidateInputString(const char* inputString)
 {
-    if (name == NULL) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_NAME), errmsg("replication slot name should not be NULL.")));
+    if (inputString == NULL || strlen(inputString) == 0) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_NAME), errmsg("inputString should not be NULL.")));
     }
 
-    if (strlen(name) == 0) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_NAME), errmsg("replication slot name \"%s\" is too short", name)));
+    if (strlen(inputString) >= NAMEDATALEN) {
+        ereport(ERROR, (errcode(ERRCODE_NAME_TOO_LONG), errmsg("inputString \"%s\" is too long", inputString)));
     }
 
-    if (strlen(name) >= NAMEDATALEN) {
-        ereport(ERROR, (errcode(ERRCODE_NAME_TOO_LONG), errmsg("replication slot name \"%s\" is too long", name)));
-    }
     const char *danger_character_list[] = { ";", "`", "\\", "'", "\"", ">", "<", "&", "|", "!", "\n", NULL };
     int i = 0;
 
     for (i = 0; danger_character_list[i] != NULL; i++) {
-        if (strstr(name, danger_character_list[i]) != NULL) {
+        if (strstr(inputString, danger_character_list[i]) != NULL) {
             ereport(ERROR,
                     (errcode(ERRCODE_INVALID_NAME),
-                     errmsg("replication slot name \"%s\" contains invalid character", name),
-                     errhint("Replication slot names may only contain lower letters, "
-                             "numbers and the underscore character.")));
+                     errmsg("inputString \"%s\" contains dangerous character", inputString),
+                     errhint("the dangerous character is %s", danger_character_list[i])));
         }
     }
 
-    if (strncmp(name, "gs_roach", strlen("gs_roach")) == 0 &&
+    if (strncmp(inputString, "gs_roach", strlen("gs_roach")) == 0 &&
         strcmp(u_sess->attr.attr_common.application_name, "gs_roach") != 0 && !RecoveryInProgress()) {
         ereport(ERROR,
                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
@@ -264,6 +258,10 @@ static void DropOldHadrReplicationSlot(const char *name)
     LWLockAcquire(ReplicationSlotControlLock, LW_SHARED);
     for (int i = 0; i < g_instance.attr.attr_storage.max_replication_slots; i++) {
         slot = &t_thrd.slot_cxt.ReplicationSlotCtl->replication_slots[i];
+        if (slot->active && strstr(NameStr(slot->data.name), "_hadr") != NULL) {
+            ereport(ERROR, (errmsg("only one replication slot for main standby is allowed, "
+                "failed to create \"%s\"", name)));
+        }
         if (slot->in_use && !slot->active &&
             strcmp(name, NameStr(slot->data.name)) != 0 &&
             strstr(NameStr(slot->data.name), "_hadr") != NULL) {
@@ -277,6 +275,22 @@ static void DropOldHadrReplicationSlot(const char *name)
     if (strlen(dropSlotName) > 0) {
         ReplicationSlotDrop(dropSlotName);
     }
+}
+
+static void ReleaseArchiveSlotInfo(ReplicationSlot *slot)
+{
+    pfree_ext(slot->extra_content);
+    if (slot->archive_config != NULL) {
+        if (slot->archive_config->conn_config != NULL) {
+            pfree_ext(slot->archive_config->conn_config->obs_address);
+            pfree_ext(slot->archive_config->conn_config->obs_bucket);
+            pfree_ext(slot->archive_config->conn_config->obs_ak);
+            pfree_ext(slot->archive_config->conn_config->obs_sk);
+            pfree_ext(slot->archive_config->conn_config);
+        }
+        pfree_ext(slot->archive_config->archive_prefix);
+    }
+    pfree_ext(slot->archive_config);
 }
 
 static bool HasArchiveSlot()
@@ -377,6 +391,10 @@ void ReplicationSlotCreate(const char *name, ReplicationSlotPersistency persiste
      * can be doing that.  So it's safe to initialize the slot.
      */
     Assert(!slot->in_use);
+    /* first initialize persistent data */
+    rc = memset_s(&slot->data, sizeof(ReplicationSlotPersistentData), 0, sizeof(ReplicationSlotPersistentData));
+    securec_check(rc, "\0", "\0");
+
     SET_SLOT_PERSISTENCY(slot->data, persistency);
     slot->data.xmin = InvalidTransactionId;
     slot->effective_xmin = InvalidTransactionId;
@@ -390,8 +408,7 @@ void ReplicationSlotCreate(const char *name, ReplicationSlotPersistency persiste
     if (extra_content != NULL && strlen(extra_content) != 0) {
         MemoryContext curr;
         curr = MemoryContextSwitchTo(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
-        pfree_ext(slot->extra_content);
-        pfree_ext(slot->archive_config);
+        ReleaseArchiveSlotInfo(slot);
         slot->archive_config = formArchiveConfigFromStr(extra_content, encrypted);
         slot->extra_content = formArchiveConfigStringFromStruct(slot->archive_config);
         if (slot->extra_content == NULL) {
@@ -612,6 +629,7 @@ void ReplicationSlotRelease(void)
     t_thrd.slot_cxt.MyReplicationSlot = NULL;
     /* might not have been set when we've been a plain slot */
     LWLockAcquire(ProcArrayLock, LW_EXCLUSIVE);
+    t_thrd.pgxact->xmin = InvalidTransactionId;
     t_thrd.pgxact->vacuumFlags &= ~PROC_IN_LOGICAL_DECODING;
     LWLockRelease(ProcArrayLock);
 }
@@ -650,7 +668,9 @@ void ReplicationSlotDrop(const char *name, bool for_backup)
     }
     if (is_archive_slot) {
         MarkArchiveSlotOperate();
+        LWLockAcquire(DropArchiveSlotLock, LW_EXCLUSIVE);
         remove_archive_slot_from_instance_list(name);
+        LWLockRelease(DropArchiveSlotLock);
     }
 }
 /*
@@ -661,6 +681,7 @@ static void ReplicationSlotDropAcquired(void)
 {
     char path[MAXPGPATH];
     char tmppath[MAXPGPATH];
+    bool is_archive_slot = (t_thrd.slot_cxt.MyReplicationSlot->archive_config != NULL);
     ReplicationSlot *slot = t_thrd.slot_cxt.MyReplicationSlot;
 
     Assert(t_thrd.slot_cxt.MyReplicationSlot != NULL);
@@ -725,6 +746,9 @@ static void ReplicationSlotDropAcquired(void)
     LWLockAcquire(ReplicationSlotControlLock, LW_EXCLUSIVE);
     slot->active = false;
     slot->in_use = false;
+    if (is_archive_slot) {
+        ReleaseArchiveSlotInfo(slot);
+    }
     LWLockRelease(ReplicationSlotControlLock);
 
     /*
@@ -1324,8 +1348,34 @@ void CreateSlotOnDisk(ReplicationSlot *slot)
 
     END_CRIT_SECTION();
 
-    if (!RecoveryInProgress())
-        ereport(LOG, (errcode_for_file_access(), errmsg("create slot \"%s\" on disk successfully", path)));
+    ereport(LOG, (errcode_for_file_access(), errmsg("create slot \"%s\" on disk successfully", path)));
+}
+
+static bool CheckAndWriteSlotExtra(ReplicationSlot *slot, ReplicationSlotOnDisk cp, char* tmppath, int fd, int elevel)
+{
+    if (slot->extra_content == NULL || strlen(slot->extra_content) == 0) {
+        return true;
+    }
+    if ((uint32)GET_SLOT_EXTRA_DATA_LENGTH(cp.slotdata) != (uint32)strlen(slot->extra_content)) {
+        LWLockRelease(slot->io_in_progress_lock);
+        ereport(elevel, (errcode_for_file_access(),
+            errmsg("update archive slot info to file \"%s\" fail, because extra content length incorrect", tmppath)));
+        return false;
+    }
+    if ((write(fd, slot->extra_content, (uint32)strlen(slot->extra_content)) !=
+        ((uint32)strlen(slot->extra_content)))) {
+        int save_errno = errno;
+        pgstat_report_waitevent(WAIT_EVENT_END);
+        if (close(fd)) {
+            ereport(elevel, (errcode_for_file_access(), errmsg("could not close file \"%s\": %m", tmppath)));
+        }
+        /* if write didn't set errno, assume problem is no disk space */
+        errno = save_errno ? save_errno : ENOSPC;
+        LWLockRelease(slot->io_in_progress_lock);
+        ereport(elevel, (errcode_for_file_access(), errmsg("could not write to file \"%s\": %m", tmppath)));
+        return false;
+    }
+    return true;
 }
 
 /*
@@ -1413,18 +1463,7 @@ static void SaveSlotToPath(ReplicationSlot *slot, const char *dir, int elevel)
             ereport(elevel, (errcode_for_file_access(), errmsg("could not write to file \"%s\": %m", tmppath)));
             return;
         }
-        if (slot->extra_content != NULL && strlen(slot->extra_content) != 0 
-            && (write(fd, slot->extra_content, (uint32)strlen(slot->extra_content)) 
-                != ((uint32)strlen(slot->extra_content)))) {
-            int save_errno = errno;
-            pgstat_report_waitevent(WAIT_EVENT_END);
-            if (close(fd)) {
-                ereport(elevel, (errcode_for_file_access(), errmsg("could not close file \"%s\": %m", tmppath)));
-            }
-            /* if write didn't set errno, assume problem is no disk space */
-            errno = save_errno ? save_errno : ENOSPC;
-            LWLockRelease(slot->io_in_progress_lock);
-            ereport(elevel, (errcode_for_file_access(), errmsg("could not write to file \"%s\": %m", tmppath)));
+        if (!CheckAndWriteSlotExtra(slot, cp, tmppath, fd, elevel)) {
             return;
         }
         pgstat_report_waitevent(WAIT_EVENT_END);
@@ -1568,7 +1607,7 @@ loop:
     if (GET_SLOT_EXTRA_DATA_LENGTH(cp.slotdata) != 0) {
         MemoryContext curr;
         curr = MemoryContextSwitchTo(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
-        extra_content = (char*)palloc0(GET_SLOT_EXTRA_DATA_LENGTH(cp.slotdata) + 1);
+        extra_content = (char*)palloc0((uint32)GET_SLOT_EXTRA_DATA_LENGTH(cp.slotdata) + 1);
         readBytes = read(fd, extra_content, (uint32)GET_SLOT_EXTRA_DATA_LENGTH(cp.slotdata));
         if (readBytes != GET_SLOT_EXTRA_DATA_LENGTH(cp.slotdata)) {
             MemoryContextSwitchTo(curr);
@@ -1672,6 +1711,10 @@ loop:
         rc = memcpy_s(&slot->data, sizeof(ReplicationSlotPersistentData), &cp.slotdata,
                       sizeof(ReplicationSlotPersistentData));
         securec_check(rc, "\0", "\0");
+        /* reset physical slot catalog xmin to invalid transaction id */
+        if (slot->data.database == InvalidOid) {
+            slot->data.catalog_xmin = InvalidTransactionId;
+        }
 
         /* initialize in memory state */
         slot->effective_xmin = slot->data.xmin;
@@ -1980,6 +2023,9 @@ ArchiveConfig* formArchiveConfigFromStr(char *content, bool encrypted)
         conn_config->obs_ak = pstrdup((char*)list_nth(elemlist, elem_index++));
         if (encrypted == false) {
             conn_config->obs_sk = pstrdup((char*)list_nth(elemlist, elem_index++));
+            if (strlen(conn_config->obs_sk) >= DEST_CIPHER_LENGTH || strlen(conn_config->obs_sk) == 0) {
+                goto FAILURE;
+            }
         } else {
             decryptKeyString((char*)list_nth(elemlist, elem_index++), decryptSecretAccessKeyStr, DEST_CIPHER_LENGTH,
                 NULL);
@@ -2015,7 +2061,7 @@ FAILURE:
     pfree_ext(media_type);
     list_free_ext(elemlist);
     ereport(ERROR,
-        (errcode_for_file_access(), errmsg("message is inleagel  \"%s\"", content)));
+        (errcode_for_file_access(), errmsg("message is inleagel, please check the extra content for archive")));
 
     return NULL;
 }

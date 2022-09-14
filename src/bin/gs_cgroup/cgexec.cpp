@@ -2532,7 +2532,7 @@ static int cgexec_update_remain_cgroup_cpuset(int cls, char* cpuset, unsigned ch
                     MOUNT_CPUSET_NAME,
                     GSCGROUP_REMAIN_WORKLOAD,
                     i,
-                    update,
+                    (int)update,
                     cpuset);
                 return -1;
             }

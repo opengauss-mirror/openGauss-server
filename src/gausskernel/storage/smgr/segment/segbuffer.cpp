@@ -31,7 +31,6 @@
 #include "storage/smgr/segment.h"
 #include "storage/smgr/smgr.h"
 #include "utils/resowner.h"
-#include "tsan_annotation.h"
 #include "pgstat.h"
 
 /* 
@@ -60,23 +59,6 @@ void AbortSegBufferIO(void)
     if (InProgressBuf != NULL) {
         LWLockAcquire(InProgressBuf->io_in_progress_lock, LW_EXCLUSIVE);
         SegTerminateBufferIO(InProgressBuf, false, BM_IO_ERROR);
-    }
-}
-
-static void WaitIO(BufferDesc *buf)
-{
-    while (true) {
-        uint32 buf_state;
-
-        buf_state = LockBufHdr(buf);
-        UnlockBufHdr(buf, buf_state);
-
-        if (!(buf_state & BM_IO_IN_PROGRESS)) {
-            break;
-        }
-
-        LWLockAcquire(buf->io_in_progress_lock, LW_SHARED);
-        LWLockRelease(buf->io_in_progress_lock);
     }
 }
 
@@ -157,32 +139,6 @@ static void SegTerminateBufferIO(BufferDesc *buf, bool clear_dirty, uint32 set_f
     LWLockRelease(buf->io_in_progress_lock);
 }
 
-static uint32 SegWaitBufHdrUnlocked(BufferDesc *buf)
-{
-#ifndef ENABLE_THREAD_CHECK
-    SpinDelayStatus delayStatus = init_spin_delay(buf);
-#endif
-    uint32 buf_state;
-
-    buf_state = pg_atomic_read_u32(&buf->state);
-
-    while (buf_state & BM_LOCKED) {
-#ifndef ENABLE_THREAD_CHECK
-        perform_spin_delay(&delayStatus);
-#endif
-        buf_state = pg_atomic_read_u32(&buf->state);
-    }
-
-#ifndef ENABLE_THREAD_CHECK
-    finish_spin_delay(&delayStatus);
-#endif
-
-    /* ENABLE_THREAD_CHECK only, acqurie semantic */
-    TsAnnotateHappensAfter(&buf->state);
-
-    return buf_state;
-}
-
 bool SegPinBuffer(BufferDesc *buf)
 {
     ereport(DEBUG5, (errmodule(MOD_SEGMENT_PAGE),
@@ -198,7 +154,7 @@ bool SegPinBuffer(BufferDesc *buf)
 
         for (;;) {
             if (old_buf_state & BM_LOCKED) {
-                old_buf_state = SegWaitBufHdrUnlocked(buf);
+                old_buf_state = WaitBufHdrUnlocked(buf);
             }
             buf_state = old_buf_state;
 
@@ -263,7 +219,7 @@ void SegUnpinBuffer(BufferDesc *buf)
         old_buf_state = pg_atomic_read_u32(&buf->state);
         for (;;) {
             if (old_buf_state & BM_LOCKED) {
-                old_buf_state = SegWaitBufHdrUnlocked(buf);
+                old_buf_state = WaitBufHdrUnlocked(buf);
             }
 
             buf_state = old_buf_state;
@@ -459,20 +415,6 @@ Buffer ReadBufferFast(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum, Bloc
     return BufferDescriptorGetBuffer(bufHdr);
 }
 
-void LockTwoLWLock(LWLock *new_partition_lock, LWLock *old_partition_lock)
-{
-    if (old_partition_lock < new_partition_lock) {
-        (void)LWLockAcquire(old_partition_lock, LW_EXCLUSIVE);
-        (void)LWLockAcquire(new_partition_lock, LW_EXCLUSIVE);
-    } else if (old_partition_lock > new_partition_lock) {
-        (void)LWLockAcquire(new_partition_lock, LW_EXCLUSIVE);
-        (void)LWLockAcquire(old_partition_lock, LW_EXCLUSIVE);
-    } else {
-        /* only one partition, only one lock */
-        (void)LWLockAcquire(new_partition_lock, LW_EXCLUSIVE);
-    }
-}
-
 BufferDesc * FoundBufferInHashTable(int buf_id, LWLock *new_partition_lock, bool *foundPtr)
 {
     BufferDesc *buf = GetBufferDescriptor(buf_id);
@@ -626,7 +568,7 @@ static BufferDesc* get_segbuf_from_candidate_list(uint32* buf_state)
             /* the pagewriter sub thread store normal buffer pool, sub thread starts from 1 */
             int thread_id = (list_id + i) % list_num + 1;
             Assert(thread_id > 0 && thread_id <= list_num);
-            while (seg_candidate_buf_pop(&buf_id, thread_id)) {
+            while (candidate_buf_pop(&g_instance.ckpt_cxt_ctl->pgwr_procs.writer_proc[thread_id].seg_list, &buf_id)) {
                 buf = GetBufferDescriptor(buf_id);
                 local_buf_state = LockBufHdr(buf);
                 SegmentCheck(buf_id >= SegmentBufferStartID);
@@ -698,7 +640,7 @@ void SegDropSpaceMetaBuffers(Oid spcNode, Oid dbNode)
          * As in DropRelFileNodeBuffers, an unlocked precheck should be safe
          * and saves some cycles.
          */
-        if (buf_desc->tag.rnode.spcNode != spcNode) {
+        if (buf_desc->tag.rnode.spcNode != spcNode || buf_desc->tag.rnode.dbNode != dbNode) {
             continue;
         }
 

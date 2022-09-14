@@ -39,8 +39,7 @@ static void memcnxt_pfree(voidp p)
  */
 void pm_set_unzip_memfuncs(void)
 {
-    unz_memfunc funcs = {memcnxt_palloc, memcnxt_pfree};
-    unz_set_memfuncs(&funcs);
+    setUnzipMemoryFunc(memcnxt_palloc, memcnxt_pfree);
 }
 
 /* open a log file using vfd method */

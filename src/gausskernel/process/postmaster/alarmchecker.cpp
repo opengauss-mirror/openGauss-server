@@ -139,6 +139,7 @@ NON_EXEC_STATIC void AlarmCheckerMain()
      * want to wait for the backends to exit, whereupon the postmaster will
      * tell us it's okay to shut down (via SIGUSR2).
      */
+    (void)gspqsignal(SIGURG, print_stack);
     (void)gspqsignal(SIGHUP, acSighupHandler); /* set flag to read config file */
     (void)gspqsignal(SIGINT, SIG_IGN);
     (void)gspqsignal(SIGTERM, SIG_IGN);

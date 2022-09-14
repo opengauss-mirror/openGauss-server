@@ -963,6 +963,158 @@ select usename from pg_user where usesysid = (select typowner from pg_type where
 drop function alt_user_1.func1();
 drop user alt_user_1 cascade;
 drop user alt_user_2 cascade;
+set search_path=plpgsql_packagetype1;
+
+-- test record with table of to be nested
+  -- a. nested table, should error
+create or replace package pck1 as
+type t1 is table of int index by int;
+type t2 is table of t1;
+type r1 is record (a t2, b int);
+end pck1;
+/
+  -- b. table with index by, should error
+create or replace package pck1 as
+type t1 is table of int index by int;
+type r1 is record (a t1, b int);
+type r2 is record (a r1, b int);
+end pck1;
+/
+
+  -- c. table without index by, should success
+create or replace package pck1 as
+type t1 is table of int;
+type r1 is record (a t1, b int);
+type r2 is record (a r1, b int);
+end pck1;
+/
+
+  -- d. table with index by, should error
+create or replace package pck1 as
+type t1 is table of int index by int;
+type r1 is record (a t1, b int);
+type r2 is varray(10) of r1;
+end pck1;
+/
+drop package pck1;
+
+-- test pck.r1 ref record with table of, should error
+-- a, self ref
+create or replace package pck1 as
+type t1 is table of int index by int;
+type r1 is record (a t1, b int);
+va pck1.r1;
+procedure p1;
+end pck1;
+/
+
+create or replace package pck1 as
+type t1 is table of int index by int;
+type r1 is record (a t1, b int);
+procedure p1;
+end pck1;
+/
+create or replace package body pck1 as
+procedure p1 as
+vb pck1.r1;
+begin
+null;
+end;
+end pck1;
+/
+drop package pck1;
+-- b, another ref
+create or replace package pck1 as
+type t1 is table of int index by int;
+type r1 is record (a t1, b int);
+end pck1;
+/
+
+create or replace procedure p1 as
+va pck1.r1;
+begin
+null;
+end;
+/
+drop package pck1;
+drop procedure p1;
+-- test pck1.va%type ref table of
+-- a. var ref
+create or replace package pck2 as
+type t1 is table of int index by varchar2;
+va t1;
+end pck2;
+/
+
+create or replace procedure p1 as
+type t1 is table of int index by varchar2;
+va t1;
+vb pck2.va%type;
+begin
+va('aa') := 1;
+vb('bb') := 1;
+end;
+/
+call p1();
+drop procedure p1;
+drop package pck2;
+
+-- b. procedure ref
+create or replace package pck2 as
+type t1 is table of int index by varchar2;
+va t1;
+procedure p1(vb pck2.va%type);
+end pck2;
+/
+
+create or replace package pck2 as
+type t1 is table of int index by varchar2;
+va t1;
+procedure p1(vb va%type);
+end pck2;
+/
+-- test va.col%type ref table of
+-- a. var ref
+create or replace package pck1 as
+type t1 is table of int index by varchar;
+type r1 is record (a t1, b int);
+va r1;
+procedure p1;
+end pck1;
+/
+create or replace package body pck1 as
+procedure p1 as
+vb va.a%type;
+begin
+vb('aa') := 1;
+end;
+end pck1;
+/
+call pck1.p1();
+drop package pck1;
+
+-- b. procedure ref
+create or replace package pck1 as
+type t1 is table of int index by varchar;
+type r1 is record (a t1, b int);
+va r1;
+procedure p1(vb va.a%type);
+end pck1;
+/
+
+-- test record.col%type ref table of
+create or replace package pck1 as
+type t1 is table of int index by varchar;
+type r1 is record (a t1, b int);
+va pck1.r1.a%type;
+procedure p1;
+end pck1;
+/
+
+-- test pck1.record.col%type ref table of
+
+-- test pck1.va.col%type ref table of
+
 
 
 --------------------------------------------------

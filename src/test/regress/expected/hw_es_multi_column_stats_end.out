@@ -1,3 +1,4 @@
+set enable_ai_stats=0;
 drop table if exists test_range_gist;
 NOTICE:  table "test_range_gist" does not exist, skipping
 create table test_range_gist(ir int4range) ;

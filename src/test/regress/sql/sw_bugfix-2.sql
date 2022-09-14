@@ -506,3 +506,120 @@ create table t123(id int, lid int, name text);
 insert into t123 values(1,null,'A'),(2,1,'B'),(3,2,'C');
 with t2 as (select * from t123 where id!=10) select level,t.* from (select * from t2 where id!=10 order by id) t start with t.id=2 connect by prior t.id=t.lid;
 drop table t123;
+
+-- test order siblings's unnamed expr, alias case
+-- test case for subquery with order siblings by colIndex
+create table test_place as select id, name, tex from test_hcb_ptb;
+explain
+select (
+    select id
+    from test_place
+    where id=test_hcb_ptb.id) as siblings,
+    pid,level
+from test_hcb_ptb start with id=141 connect by prior pid=id order siblings by 1;
+
+select (
+    select id
+    from test_place
+    where id=test_hcb_ptb.id) as siblings,
+    pid,level
+from test_hcb_ptb start with id=141 connect by prior pid=id order siblings by 1;
+
+-- test case for subquery with order siblings by alias
+explain
+select (
+    select id
+    from test_place
+    where id=test_hcb_ptb.id) as siblings,
+    pid,level
+from test_hcb_ptb start with id=141 connect by prior pid=id order siblings by siblings;
+
+select (
+    select id
+    from test_place
+    where id=test_hcb_ptb.id) as siblings,
+    pid,level
+from test_hcb_ptb start with id=141 connect by prior pid=id order siblings by siblings;
+
+
+---  test case for unnamed expr with order siblings by colIndex
+explain
+select id*2, pid from test_hcb_ptb start with id=141 connect by prior pid=id order siblings by 1;
+select id*2, pid from test_hcb_ptb start with id=141 connect by prior pid=id order siblings by 1;
+
+explain
+select id*2 as a, pid from test_hcb_ptb start with id=141 connect by prior pid=id order siblings by a;
+select id*2 as a, pid from test_hcb_ptb start with id=141 connect by prior pid=id order siblings by a;
+
+--  test case for mix alias and colname in order siblings by calause
+explain
+select id as a,pid from test_hcb_ptb start with id=141 connect by prior pid=id order siblings by a;
+select id as a,pid from test_hcb_ptb start with id=141 connect by prior pid=id order siblings by a;
+
+explain
+select id as a,pid from test_hcb_ptb start with id=141 connect by prior pid=id order siblings by pid,a;
+select id as a,pid from test_hcb_ptb start with id=141 connect by prior pid=id order siblings by pid,a;
+drop table test_place;
+
+--  test case for expression with none-var in order siblings
+create table item_inventory_start_3 (
+    LOCATION_ID number(15,0) primary key,
+    ITEM_INV_DT DATE,
+    ITEM_ID number(38,5),
+    ON_HAND_COST_AMT NUMBER(38,24)
+);
+
+create table item_inventory_plan_start_3 (
+    item_inventory_plan_dt date  primary key,
+    location_id number(35,0),
+    item_id number(20,5),
+    plan_on_hand_qty decimal(18,4) null,
+    plan_on_hand_retail_amt number(18,4) null
+);
+
+INSERT INTO ITEM_INVENTORY_PLAN_start_3 VALUES (DATE '1970-01-01', 1, 0.12, 0.30 , NULL);
+INSERT INTO ITEM_INVENTORY_PLAN_start_3 VALUES (DATE '1973-01-01', 1, 0.12, NULL, 1.0);
+INSERT INTO ITEM_INVENTORY_start_3 VALUES ( 38, DATE '1970-01-01',  0.12, 0.70);
+INSERT INTO ITEM_INVENTORY_start_3 VALUES ( 1, DATE '1973-01-01',  1.3, 178787.0);
+
+EXPLAIN
+SELECT 1 /* none-var entry */
+FROM item_inventory_start_3 ,item_inventory_plan_start_3
+WHERE PRIOR on_hand_cost_amt=PRIOR plan_on_hand_retail_amt
+START WITH plan_on_hand_qty<>on_hand_cost_amt
+CONNECT BY PRIOR on_hand_cost_amt  LIKE '_P%'
+ORDER SIBLINGS BY 1;
+
+SELECT 1
+FROM item_inventory_start_3 ,item_inventory_plan_start_3
+WHERE PRIOR on_hand_cost_amt=PRIOR plan_on_hand_retail_amt
+START WITH plan_on_hand_qty<>on_hand_cost_amt
+CONNECT BY PRIOR on_hand_cost_amt  LIKE '_P%'
+ORDER SIBLINGS BY 1;
+
+EXPLAIN
+SELECT 1 as siblings
+FROM item_inventory_start_3 ,item_inventory_plan_start_3
+WHERE PRIOR on_hand_cost_amt=PRIOR plan_on_hand_retail_amt
+START WITH plan_on_hand_qty<>on_hand_cost_amt
+CONNECT BY PRIOR on_hand_cost_amt  LIKE '_P%'
+ORDER SIBLINGS BY siblings;
+
+SELECT 1 as siblings
+FROM item_inventory_start_3 ,item_inventory_plan_start_3
+WHERE PRIOR on_hand_cost_amt=PRIOR plan_on_hand_retail_amt
+START WITH plan_on_hand_qty<>on_hand_cost_amt
+CONNECT BY PRIOR on_hand_cost_amt  LIKE '_P%'
+ORDER SIBLINGS BY siblings;
+
+DROP TABLE item_inventory_start_3;
+DROP TABLE item_inventory_plan_start_3;
+
+-- test prior as target
+drop table if exists dts_t1;
+create table dts_t1(c1 int,c2 int,c3 int);
+insert into dts_t1 values(1,1,1);
+insert into dts_t1 values(2,2,2);
+select c1,prior c2,c2 from dts_t1 start with c1=1 connect by prior c2+1=c2 ;
+select c1,c2 from dts_t1 start with c1=1 connect by prior c2+1=c2 ;
+drop table dts_t1;

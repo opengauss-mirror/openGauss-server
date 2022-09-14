@@ -19,6 +19,7 @@
 #include "access/htup.h"
 #include "nodes/relation.h"
 #include "optimizer/nodegroups.h"
+#include "parser/parse_oper.h"
 
 /*
  * Note: the default selectivity estimates are not chosen entirely at random.
@@ -167,6 +168,19 @@ extern double get_global_rows(double local_rows, double multiple, unsigned int n
         IsLocatorReplicated((idx)->rel->locator_type), \
         ng_get_dest_num_data_nodes((root), (idx)->rel))
 
+#ifndef ENABLE_MULTIPLE_NODES
+/* get probe for binary search*/
+#define MID(low, high) (low + high) / 2
+
+/* get previous bound index */
+#define PREVIOUS_BOUND(i) i - 2
+
+/* get previous bound index */
+#define NEXT_BOUND(i) i + 1
+
+/* The number of distincts allocated to each bucket must be >= 1.0 */
+#define CHECK_DISTINCT_HIST(distinct) distinct < 1.0 ? 1.0 : distinct
+#endif
 /* Functions in selfuncs.c */
 
 extern void examine_variable(PlannerInfo* root, Node* node, int varRelid, VariableStatData* vardata);

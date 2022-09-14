@@ -42,6 +42,7 @@ typedef struct UHeapScanDescData {
     UHeapTuple rs_visutuples[MaxPossibleUHeapTuplesPerPage]; /* visible tuples */
     UHeapTuple rs_cutup;                             /* current tuple in scan, if any */
     UHeapTuple* rs_ctupBatch;	/* current tuples in scan */
+    ParallelHeapScanDesc rs_parallel; /* parallel scan information */
 } UHeapScanDescData;
 
 typedef struct UHeapScanDescData *UHeapScanDesc;
@@ -49,22 +50,24 @@ typedef struct UHeapScanDescData *UHeapScanDesc;
 const int UHEAP_SCAN_FALLBACK = -1;
 const uint32 BULKSCAN_BLOCKS_PER_BUFFER = 4;
 
-UHeapTuple UHeapGetTupleFromPage(UHeapScanDesc scan, ScanDirection dir);
+UHeapTuple UHeapGetTupleFromPage(UHeapScanDesc scan, ScanDirection dir, bool* has_cur_xact_write = NULL);
 UHeapTuple UHeapGetNextForVerify(TableScanDesc sscan, ScanDirection direction, bool& isValidRelationPage);
-TableScanDesc UHeapBeginScan(Relation relation, Snapshot snapshot, int nkeys);
+TableScanDesc UHeapBeginScan(Relation relation, Snapshot snapshot, int nkeys, ParallelHeapScanDesc parallel_scan);
+
 void UHeapMarkPos(TableScanDesc uscan);
 void UHeapRestRpos(TableScanDesc sscan);
 void UHeapEndScan(TableScanDesc uscan);
 void UHeapRescan(TableScanDesc uscan, ScanKey key);
-HeapTuple UHeapGetNextSlot(TableScanDesc sscan, ScanDirection direction, TupleTableSlot *slot);
 UHeapTuple UHeapGetNextSlotGuts(TableScanDesc sscan, ScanDirection direction, TupleTableSlot *slot);
 UHeapTuple UHeapIndexBuildGetNextTuple(UHeapScanDesc scan, TupleTableSlot *slot);
 UHeapTuple UHeapSearchBuffer(ItemPointer tid, Relation relation, Buffer buffer,
-                             Snapshot snapshot, bool *all_dead, UHeapTuple freebuf = NULL);
+                             Snapshot snapshot, bool *all_dead, UHeapTuple freebuf = NULL,
+                             bool* has_cur_xact_write = NULL);
 bool UHeapScanBitmapNextTuple(TableScanDesc sscan, TBMIterateResult *tbmres, TupleTableSlot *slot);
-bool UHeapScanBitmapNextBlock(TableScanDesc sscan, const TBMIterateResult *tbmres);
-bool UHeapGetPage(TableScanDesc sscan, BlockNumber page);
+bool UHeapScanBitmapNextBlock(TableScanDesc sscan, const TBMIterateResult *tbmres,
+                                     bool* has_cur_xact_write = NULL);
+bool UHeapGetPage(TableScanDesc sscan, BlockNumber page, bool* has_cur_xact_write = NULL);
 
-UHeapTuple UHeapGetNext(TableScanDesc sscan, ScanDirection dir);
+UHeapTuple UHeapGetNext(TableScanDesc sscan, ScanDirection dir, bool* has_cur_xact_write = NULL);
 extern bool UHeapGetTupPageBatchmode(UHeapScanDesc scan, ScanDirection dir);
 #endif

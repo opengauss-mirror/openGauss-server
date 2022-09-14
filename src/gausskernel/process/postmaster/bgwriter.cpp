@@ -85,8 +85,6 @@ extern void write_term_log(uint32 term);
 
 /* incremental checkpoint bgwriter thread function */
 const int MAX_THREAD_NAME_LEN = 128;
-static void drop_rel_all_forks_buffers();
-static void drop_rel_one_fork_buffers();
 
 static void setup_bgwriter_signalhook(void)
 {
@@ -101,7 +99,7 @@ static void setup_bgwriter_signalhook(void)
     (void)gspqsignal(SIGPIPE, SIG_IGN);
     (void)gspqsignal(SIGUSR1, bgwriter_sigusr1_handler);
     (void)gspqsignal(SIGUSR2, SIG_IGN);
-
+    (void)gspqsignal(SIGURG, print_stack);
     /*
      * Reset some signals that are accepted by postmaster but not here
      */
@@ -115,7 +113,7 @@ static void setup_bgwriter_signalhook(void)
     sigdelset(&t_thrd.libpq_cxt.BlockSig, SIGQUIT);
 }
 
-static void bgwriter_handle_exceptions(WritebackContext wb_context, MemoryContext bgwriter_cxt)
+static void bgwriter_handle_exceptions(WritebackContext *wb_context, MemoryContext bgwriter_cxt)
 {
     /*
      * Close all open files after any error.  This is helpful on Windows,
@@ -156,6 +154,9 @@ static void bgwriter_handle_exceptions(WritebackContext wb_context, MemoryContex
     AtEOXact_Files();
     AtEOXact_HashTables(false);
 
+    /* release compression ctx */
+    crps_destory_ctxs();
+
     /*
      * Now return to normal top-level context and clear ErrorContext for
      * next time.
@@ -167,7 +168,7 @@ static void bgwriter_handle_exceptions(WritebackContext wb_context, MemoryContex
     MemoryContextResetAndDeleteChildren(bgwriter_cxt);
 
     /* re-initialize to avoid repeated errors causing problems */
-    WritebackContextInit(&wb_context, &u_sess->attr.attr_storage.bgwriter_flush_after);
+    WritebackContextInit(wb_context, &u_sess->attr.attr_storage.bgwriter_flush_after);
 
     /* Now we can allow interrupts again */
     RESUME_INTERRUPTS();
@@ -236,7 +237,7 @@ void BackgroundWriterMain(void)
     int* oldTryCounter = NULL;
     if (sigsetjmp(local_sigjmp_buf, 1) != 0) {
         gstrace_tryblock_exit(true, oldTryCounter);
-        bgwriter_handle_exceptions(wb_context, bgwriter_context);
+        bgwriter_handle_exceptions(&wb_context, bgwriter_context);
 
         /* Report wait end here, when there is no further possibility of wait */
         pgstat_report_waitevent(WAIT_EVENT_END);
@@ -262,6 +263,9 @@ void BackgroundWriterMain(void)
      * Reset hibernation state after any error.
      */
     prev_hibernate = false;
+
+    /* init compression ctx for page compression */
+    crps_create_ctxs(t_thrd.role);
 
     pgstat_report_appname("Background writer");
     pgstat_report_activity(STATE_IDLE, NULL);
@@ -299,6 +303,10 @@ void BackgroundWriterMain(void)
              */
             u_sess->attr.attr_common.ExitOnAnyError = true;
             /* Normal exit from the bgwriter is here */
+
+            /* release compression ctx */
+            crps_destory_ctxs();
+
             proc_exit(0); /* done */
         }
 
@@ -406,8 +414,13 @@ void BackgroundWriterMain(void)
          * Emergency bailout if postmaster has died.  This is to avoid the
          * necessity for manual cleanup of all postmaster children.
          */
-        if (rc & WL_POSTMASTER_DEATH)
+        if (rc & WL_POSTMASTER_DEATH) {
+
+            /* release compression ctx */
+            crps_destory_ctxs();
+
             gs_thread_exit(1);
+        }
 
         prev_hibernate = can_hibernate;
     }
@@ -445,6 +458,10 @@ static void bgwriter_quickdie(SIGNAL_ARGS)
      * should ensure the postmaster sees this as a crash, too, but no harm in
      * being doubly sure.)
      */
+
+    /* release compression ctx */
+    crps_destory_ctxs();
+
     exit(2);
 }
 
@@ -513,7 +530,8 @@ Datum bgwriter_view_get_last_flush_num()
 
 Datum bgwriter_view_get_candidate_nums()
 {
-    int candidate_num = get_curr_candidate_nums(true) + get_curr_candidate_nums(false);
+    int candidate_num = get_curr_candidate_nums(CAND_LIST_NORMAL) + get_curr_candidate_nums(CAND_LIST_NVM) +
+        get_curr_candidate_nums(CAND_LIST_SEG);
     return Int32GetDatum(candidate_num);
 }
 
@@ -569,7 +587,7 @@ void invalid_buffer_bgwriter_main()
 
     if (sigsetjmp(localSigjmpBuf, 1) != 0) {
         ereport(WARNING, (errmsg("invalidate buffer bgwriter exception occured.")));
-        bgwriter_handle_exceptions(wb_context, bgwriter_context);
+        bgwriter_handle_exceptions(&wb_context, bgwriter_context);
     }
 
     /* We can now handle ereport(ERROR) */
@@ -669,7 +687,7 @@ HTAB *relfilenode_fork_hashtbl_create(const char* name, bool use_heap_mem)
     return hashtbl;
 }
 
-static void drop_rel_all_forks_buffers()
+void drop_rel_all_forks_buffers()
 {
     HASH_SEQ_STATUS status;
     DelFileTag *entry = NULL;
@@ -704,16 +722,19 @@ static void drop_rel_all_forks_buffers()
                         temp_entry->rnode.bucketNode)));
                 continue;
             }
+
             for (int32 i = 0; i < temp_entry->maxSegNo; i++) {
                 for (int fork_num = 0; fork_num <= (int)MAX_FORKNUM; fork_num++) {
                     md_register_forget_request(temp_entry->rnode, fork_num, i);
                 }
             }
+
             LWLockAcquire(g_instance.bgwriter_cxt.rel_hashtbl_lock, LW_EXCLUSIVE);
             if (hash_search(unlink_rel_hashtbl, (void *)&temp_entry->rnode, HASH_REMOVE, NULL) == NULL) {
-                LWLockRelease(g_instance.bgwriter_cxt.rel_hashtbl_lock);
-                hash_destroy(rel_bak);
-                ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("unlink rel hash table corrupted")));
+                ereport(DEBUG1, (errmodule(MOD_INCRE_BG),
+                    errmsg("rel %u/%u/%u, bucketNode is %d has already been invalidated",
+                        temp_entry->rnode.spcNode, temp_entry->rnode.dbNode, temp_entry->rnode.relNode,
+                        temp_entry->rnode.bucketNode)));
             } else {
                 ereport(DEBUG1, (errmodule(MOD_INCRE_BG),
                     errmsg("invalidate buffer has been finished for rel %u/%u/%u, bucketNode is %d",
@@ -727,7 +748,7 @@ static void drop_rel_all_forks_buffers()
     hash_destroy(rel_bak);
 }
 
-static void drop_rel_one_fork_buffers()
+void drop_rel_one_fork_buffers()
 {
     HASH_SEQ_STATUS status;
     DelForkFileTag *entry = NULL;
@@ -769,11 +790,13 @@ static void drop_rel_one_fork_buffers()
             }
             LWLockAcquire(g_instance.bgwriter_cxt.rel_one_fork_hashtbl_lock, LW_EXCLUSIVE);
             if (hash_search(unlink_rel_fork_hashtbl, (void *)temp_entry, HASH_REMOVE, NULL) == NULL) {
-                LWLockRelease(g_instance.bgwriter_cxt.rel_one_fork_hashtbl_lock);
-                hash_destroy(rel_bak);
-                ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("unlink rel one fork hash table corrupted")));
+                ereport(LOG, (errcode(ERRCODE_DATA_CORRUPTED),
+                    errmsg("%u/%u/%u, bucketNode is %d, forkNum is %d has been invalidated",
+                    temp_entry->forkrnode.rnode.spcNode, temp_entry->forkrnode.rnode.dbNode,
+                    temp_entry->forkrnode.rnode.relNode, temp_entry->forkrnode.rnode.bucketNode,
+                    temp_entry->forkrnode.forkNum)));
             } else {
-                ereport(LOG, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("invalidate buffer has been finished for rel "
+                ereport(LOG, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("invaslidate buffer has been finished for rel "
                     "%u/%u/%u, bucketNode is %d, forkNum is %d",
                     temp_entry->forkrnode.rnode.spcNode, temp_entry->forkrnode.rnode.dbNode,
                     temp_entry->forkrnode.rnode.relNode, temp_entry->forkrnode.rnode.bucketNode,

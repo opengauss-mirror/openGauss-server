@@ -381,6 +381,21 @@ end;
 end pck1;
 /
 
+create or replace package pck2 as
+procedure p2 (c1 out pck1.r2);
+end pck2;
+/
+
+create or replace package body pck2 as
+procedure p2 (c1 out pck1.r2) as
+PRAGMA AUTONOMOUS_TRANSACTION;
+va int;
+begin
+null;
+end;
+end pck2;
+/
+
 drop package pck1;
 
 declare
@@ -985,89 +1000,444 @@ create or replace package pkg067067
 is
 type type000 is table of pkgtbl067067%rowtype index by integer;
 type type001 is record(c1 int,c2 number,c3 varchar2(30),c4 clob,c5 blob,c6 type000);
-procedure proc067067_1(col3 type001,col4 out type001);
-procedure proc067067_1(col3 type001,col4 out type001,col5 out type001);
 procedure proc067067_2(col5 int);
 end pkg067067;
 /
-
 create or replace package body pkg067067
 is
-procedure proc067067_1(col3 type001,col4 out type001)
-is
-cursor cor is select c1,c2,c3,c4,c5 from pkgtbl067067 order by 1;
-begin
-open cor;
-loop
-fetch cor into col3.c1,col3.c2,col3.c3,col3.c4,col3.c5;
-if col3.c1=1 then
-col3.c6(1):=(col3.c1,col3.c2,col3.c3,col3.c4,col3.c5);
-else
-col3.c6(2):=(col3.c1,col3.c2,col3.c3,col3.c4,col3.c5);
-end if;
-exit when cor%notfound;
-end loop;
-raise info 'col3 is %',col3;
-raise info 'col3.c5 is %',col3.c5;
-raise info 'col3.c6.count is %',col3.c6.count;
-col4:=col3;
---raise info 'col3.c6.first is %',col3.c6.first;
-end;
-procedure proc067067_1(col3 type001,col4 out type001,col5 out type001)
-is
-begin
-col3.c1:=3441;
-col3.c2:=3441;
-col3.c3:='col344c3';
-col3.c4:='col344c4';
-col3.c5:='3c44c5';
-col3.c6(1):=(3441,3441,'col344c3','col344c4','3c44c5');
-col3.c6(2):=(23441,23441,'col2344c3','col2344c4','3c2344c5');
-col4.c1:=441;
-col4.c2:=441;
-col4.c3:='col44c3';
-col4.c4:='col44c4';
-col4.c5:='3c44c5';
-col4.c6(1):=(441,441,'col44c3','col44c4','3c44c5');
-col5.c1:=555;
-col5.c2:=555;
-col5.c3:='var555';
-col5.c4:='clob555';
-col5.c5:='b555';
-col5.c6(1):=(555,555,'var555','clob555','b555');
-end;
 procedure proc067067_2(col5 int)
 as
 c1 type001;
 c2 type001;
 c3 type001;
 begin
-c1.c1:=1;
-c1.c2:=1;
-c1.c3:='c1c3';
-c1.c4:='c1c4';
-c1.c5:='c1c5';
-c1.c6(1):=(66,66,'66var','66clob','66bb');
-c2.c1:=1;
-c2.c2:=1;
-c2.c3:='c1c3';
-c2.c4:='c1c4';
-c2.c5:='c1c5';
-c2.c6(1):=(66,66,'66var','66clob','66bb');
-c3.c1:=22;
-c3.c2:=22;
-c3.c3:='varc3';
-c3.c4:='clobc4';
-c3.c5:='bbc5';
-c3.c6(2):=(2222,2222,'nest22','nestclob','bb22');
-proc067067_1(col3=>c1,col4=>c2,col5=>c3);
-proc067067_1(col3=>c2,col4=>c3);
+c1 = c2;
 end;
 end pkg067067;
 /
 
 drop package pkg067067;
+
+-- record nest table of index 
+create or replace package pkg067067
+is
+type type000 is table of pkgtbl067067%rowtype index by integer;
+type type001 is record(c1 int,c2 number,c3 varchar2(30),c4 clob,c5 blob,c6 type000);
+procedure proc067067_1(col3 type001);
+end pkg067067;
+/
+
+create or replace package pkg067067
+is
+type type000 is table of pkgtbl067067%rowtype index by integer;
+type type001 is record(c1 int,c2 number,c3 varchar2(30),c4 clob,c5 blob,c6 type000);
+procedure proc067067_1(out col3 type001);
+end pkg067067;
+/
+
+create or replace package pkg067067
+is
+type type000 is table of pkgtbl067067%rowtype index by integer;
+type type001 is record(c1 int,c2 number,c3 varchar2(30),c4 clob,c5 blob,c6 type000);
+procedure proc067067_1(col3 pkg067067.type001);
+end pkg067067;
+/
+
+create or replace package pkg067067
+is
+type type000 is table of pkgtbl067067%rowtype index by integer;
+type type001 is record(c1 int,c2 number,c3 varchar2(30),c4 clob,c5 blob,c6 type000);
+procedure proc067067_1(out col3 pkg067067.type001);
+end pkg067067;
+/
+
+create or replace package pkg067067
+is
+type type000 is table of pkgtbl067067%rowtype index by integer;
+type type001 is record(c1 int,c2 number,c3 varchar2(30),c4 clob,c5 blob,c6 type000);
+end pkg067067;
+/
+
+create or replace package pck10086 is
+procedure p1(in_var pkg067067.type001);
+end pck10086;
+/
+
+create or replace package pck10086 is
+procedure p1(out in_var pkg067067.type001);
+end pck10086;
+/
+
+create schema record_nest_tableof;
+create table record_nest_tableof.pkgtbl1 (c1 int,c2 number,c3 varchar2(30),c4 clob,c5 blob);
+create or replace package record_nest_tableof.pkg067068
+is
+type type000 is table of pkgtbl1%rowtype index by integer;
+type type001 is record(c1 int,c2 number,c3 varchar2(30),c4 clob,c5 blob,c6 type000);
+end pkg067068;
+/
+
+create or replace package pkg067067
+is
+procedure p1(in_var record_nest_tableof.pkg067068.type001);
+end pkg067067;
+/
+
+create or replace package pkg067067
+is
+procedure p1(out in_var record_nest_tableof.pkg067068.type001);
+end pkg067067;
+/
+
+create or replace procedure p156(in_var record_nest_tableof.pkg067068.type001) as
+v int;
+begin
+null;
+end;
+/
+
+create or replace procedure p156(in_var record_nest_tableof.pkg067068.type001) as
+PRAGMA AUTONOMOUS_TRANSACTION;
+v int;
+begin
+null;
+end;
+/
+
+drop schema record_nest_tableof cascade;
+
+create or replace package pkg067069
+is
+end pkg067069;
+/
+
+create or replace package body pkg067069
+as
+type type000 is table of integer index by integer;
+type type001 is record(c1 int,c2 number,c3 varchar2(30),c4 clob,c5 blob,c6 type000);
+procedure p1(in_var type001)
+is
+
+begin
+
+end;
+end pkg067069;
+/
+
 drop table pkgtbl067067;
+create or replace package pkgnest004 
+as
+type ty0 is table of integer index by integer;
+type ty1 is table of ty0;
+procedure p1;
+end pkgnest004;
+/
+
+create or replace package body pkgnest004
+as
+procedure p1
+is
+v1  ty0;
+v2  ty1;
+i int;
+begin
+v1(1):=1;
+v2(1):=v1;
+
+  if v1(0) is null then
+  raise info 'v2 %',v2(0)(0);
+    v1(0):=0;
+   end if;
+  if v2(1)(0) is null then
+  raise info 'v2 %',v2(0)(0);
+    v1(0):=0;
+   end if;
+end;
+end pkgnest004;
+/
+
+call pkgnest004.p1();
+
+
+create or replace package pkgnest005 
+as
+type ty0 is table of varchar2(20) index by varchar2(20);
+type ty1 is table of ty0;
+procedure p1;
+end pkgnest005;
+/
+
+create or replace package body pkgnest005
+as
+procedure p1
+is
+v1  ty0;
+v2  ty1;
+i int;
+begin
+v1('aaa'):='aaa';
+v1('ddd'):='ddd';
+v1('eee'):='eee';
+v2(1):=v1;
+v2(2):=v1;
+v2(4):=v1;
+v2(5):=v1;
+v2(4)('bbb'):=41;
+v2(4)('ccc'):=44;
+for i in v2.first .. v2.last loop
+if v2.exists(i) then
+raise info 'v2 % is %',i,v2(i);
+  if v2(i)(i) is null then
+    v1(i):=i;
+   end if;
+end if;
+end loop;
+end;
+end pkgnest005;
+/
+create or replace package pkgnest005 
+as
+type ty0 is table of varchar2(20) index by varchar2(20);
+type ty1 is table of ty0;
+procedure p1;
+end pkgnest005;
+/
+
+create or replace package body pkgnest005
+as
+procedure p1
+is
+v1  ty0;
+v2  ty1;
+i int;
+begin
+v1('aaa'):='aaa';
+v1('ddd'):='ddd';
+v1('eee'):='eee';
+v2(1):=v1;
+v2(2):=v1;
+v2(4):=v1;
+v2(5):=v1;
+raise info 'v1 is %',v1;
+raise info 'v2(1) is %',v2(1);
+raise info 'v2(2) is %',v2(2);
+raise info 'v2(4) is %',v2(4);
+raise info 'v2(5) is %',v2(5);
+raise info 'v2.first is %',v2.first;
+raise info 'v2.first.next is %',v2.next(v2.first);
+raise info 'v2.first.next2 is %',v2.next(v2.next(v2.first));
+raise info 'v2.last is %',v2.last;
+raise info 'v2(v2.first) is %',v2(v2.first);
+v2.delete(4);
+raise info 'after delete v2.count is %',v2.count;
+raise info 'after delete v2.first is %',v2.first;
+raise info 'after delete v2.first.next is %',v2.next(v2.first);
+raise info 'after delete v2.first.next2 is %',v2.next(v2.next(v2.first));
+raise info 'after delete v2.last is %',v2.last;
+raise info 'after delete v2(v2.last) is %',v2(v2.last);
+v2(4)('bbb'):=41;
+v2(4)('ccc'):=44;
+if v2(1)('ccc') is null then
+    raise info 'v2 bbb % ',v2(1)('bbb');
+end if;
+raise info 'v2 bbb % ',v2(4)('bbb');
+for i in v2.first .. v2.last loop
+if v2.exists(i) then
+raise info 'v2 % is %',i,v2(i);
+  if v2(i)(i) is null then
+    v1(i):=i;
+   end if;
+end if;
+end loop;
+end;
+end pkgnest005;
+/
+
+call pkgnest005.p1();
+
+drop package pkgnest005;
+drop package pkgnest004;
+
+create or replace package pkgnest019
+as
+type ty0 is table of varchar2(20) index by varchar2(20);
+type ty1 is table of ty0 index by varchar2(20);
+procedure p1;
+pv1 ty1;
+pv0 ty0;
+end pkgnest019;
+/
+
+create or replace package body pkgnest019
+as
+procedure p1
+is
+v1 ty1;
+begin
+v1(1)(1):=1;
+v1(2)(2):=2;
+v1(3)(3):=3;
+pv1(4):=v1(1);
+raise info 'pv1(4) is %',pv1(4);
+pv1(4):=v1;
+end;
+end pkgnest019;
+/
+call pkgnest019.p1();
+
+call pkgnest019.p1();
+
+create or replace package pkgnest019_1
+as
+type ty0 is table of varchar2(20) index by varchar2(20);
+type ty1 is table of ty0 index by varchar2(20);
+procedure p1;
+end pkgnest019_1;
+/
+create or replace package body pkgnest019_1
+as
+procedure p1
+is
+v1 ty1;
+begin
+v1(1)(1):=1;
+v1(2)(2):=2;
+v1(3)(3):=3;
+raise info 'v1(1) is %',v1(1);
+pkgnest019.p1();
+raise notice 'aa';
+pkgnest019.pv0(6):='bb';
+raise notice 'bb';
+pkgnest019.pv1(8):=v1(1);
+pkgnest019.pv1(8):=v1;
+raise info 'pkgnest019.pv1(-1) is %',pkgnest019.pv1(8);
+
+pkgnest019.pv1.delete(0);
+pkgnest019.pv0.delete(3);
+end;
+end pkgnest019_1;
+/
+
+call pkgnest019_1.p1();
+drop package pkgnest019_1;
+drop package pkgnest019;
+create table tytblnest007(c1 int,c2 number(8,1),c3 varchar2(20),c4 date,c5 clob,c6 blob);
+insert into tytblnest007 values(1,1,'aa',to_date('2022-01-01 12:34:56','yyyy-mm-dd hh:mi:ss'),'aaaaa','00123');
+insert into tytblnest007 values(2,2.0,'bb',to_date('2022-01-01 12:34:56','yyyy-mm-dd hh:mi:ss'),'bbbbb','00123');
+insert into tytblnest007 values(3,3.5,'cc',to_date('2022-01-01 12:34:56','yyyy-mm-dd hh:mi:ss'),'ccccc','00123');
+
+create or replace package pkgnest007
+as
+type ty00 is record(c1 int,c2 varchar2(20));
+type ty0 is table of ty00 ;
+type ty1 is table of ty0 index by integer;
+procedure p2();
+end pkgnest007;
+/
+
+create or replace package body pkgnest007
+as
+procedure p2()
+is
+v0  ty00;
+v1 ty0;
+v2  ty1;
+i int;
+begin
+v1(4):=(4,'baba');
+v1(5):=(5,'mama');
+raise info 'v1 is %',v1;
+raise info 'before: v2.count is %',v2.count;
+v2(1):=v1;
+v2(2):=v2(1);
+v2(-1):=v2(1);
+v2(3):=v2(-1);
+raise info 'v2(2) is %',v2(2);
+raise info 'v2(-1) is %',v2(-1);
+raise info 'v2(3) is %',v2(3);
+
+raise info 'v2.count is %',v2.count;
+raise info 'v2.last is %',v2.last;
+raise info 'v2.prior(v2.last) is %',v2.prior(v2.last);
+end;
+end pkgnest007;
+/
+
+call pkgnest007.p2();
+
+drop package pkgnest007;
+drop table tytblnest007;
+
+-- test cross package table var
+create schema pkgnestsch019;
+create schema pkgnestsch019_1;
+set current_schema=pkgnestsch019;
+create or replace package pkgnest019 as 
+type ty0 is table of varchar2(60) index by varchar2(20); 
+type ty1 is table of ty0 index by integer; 
+procedure p1; 
+pv1 ty1; 
+pv0 ty0; 
+end pkgnest019;
+/
+create or replace package body pkgnest019 as 
+procedure p1 is 
+begin 
+pv0(-1):='Li Bai'; 
+pv0(2):='Du Fu'; 
+pv0(4):='Du Mu'; 
+pv1(-1):=pv0; 
+pv1(0):=pv0; 
+pv1(2):=pv0; 
+raise info 'pv0(-1) is %',pv0(-1); 
+raise info 'pv1(-1) is %',pv1(-1); 
+raise info 'pv1(0) is %',pv1(0); 
+raise info 'pv1(1) is %',pv1(1); 
+raise info 'pv1(2) is %',pv1(2); 
+raise info 'pv1.first is %',pv1.first; 
+raise info 'pv1.last is %',pv1.last; 
+raise info 'pv1.first.next is %',pv1.next(pv1.first); 
+end; 
+end pkgnest019;
+/
+set current_schema=pkgnestsch019_1;
+create or replace package pkgnest019_1 as 
+type ty0 is table of varchar2(60) index by varchar2(20); 
+type ty1 is table of ty0 index by integer; 
+procedure p1; 
+end pkgnest019_1;
+/
+create or replace package body pkgnest019_1 as 
+procedure p1 is v1 ty1; 
+begin pkgnestsch019.pkgnest019.p1(); 
+pkgnestsch019.pkgnest019.pv1(-1)(-1):='Negetive'; 
+pkgnestsch019.pkgnest019.pv1(-1)(0):='Zero'; 
+pkgnestsch019.pkgnest019.pv1(1)(0):='More'; 
+v1:=pkgnestsch019.pkgnest019.pv1; 
+raise info 'v1(-1) is %',v1(-1); 
+raise info 'v1(0) is %',v1(0); 
+raise info 'v1(1) is %',v1(1); 
+raise info 'v1.first is %',v1.first; 
+raise info 'v1.last is %',v1.last; 
+raise info 'v1.first.next is %',v1.next(v1.first); 
+v1.delete(1); 
+raise info 'after delete pkgnestsch019.pkgnest019.count is %',v1.count; 
+raise info 'after delete v1(-1) is %',v1(-1); 
+raise info 'after delete v1(0) is %',v1(0); 
+raise info 'after delete v1(1) is %',v1(1); 
+raise info 'after delete v1.first is %',v1.first; 
+raise info 'after delete v1.last is %',v1.last; 
+raise info 'after delete v1.first.next is %',v1.next(v1.first); 
+end; 
+end pkgnest019_1;
+/
+call pkgnest019_1.p1();
+
+set current_schema = plpgsql_tableofindex;
+drop package pkgnestsch019_1.pkgnest019_1;
+drop package pkgnestsch019.pkgnest019;
+drop schema pkgnestsch019_1 cascade;
+drop schema pkgnestsch019 cascade;
 
 set behavior_compat_options='';
 

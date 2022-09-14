@@ -126,8 +126,8 @@ create index on normal_test.tbl_partition(id) local WITH (compresstype=2,compres
  id     | integer |           | plain   |              | 
 Indexes:
     "tbl_partition_id_idx" btree (id) LOCAL WITH (compresstype=2, compress_chunk_size=1024) TABLESPACE pg_default
---?.*
---?.*
+Partition By RANGE(id)
+Number of partitions: 9 (View pg_partition to check each partition range.)
 Has OIDs: no
 Options: orientation=row, compresstype=2, compress_chunk_size=1024
 
@@ -155,30 +155,9 @@ ERROR:  change partition compress_prealloc_chunks OPTION is not supported
 create index rolcompress_index on normal_test.tbl_pc(id) with (compress_chunk_size=4096);
 ERROR:  compress_chunk_size/compress_prealloc_chunks/compress_level/compress_byte_convert/compress_diff_convert should be used with compresstype.
 create table rolcompress_table_001(a int) with (compresstype=2, compress_prealloc_chunks=3);
-ERROR:  invalid compress_prealloc_chunks 3 , must be less than 2 for rolcompress_table_001
+ERROR:  invalid compress_prealloc_chunks 3, must be less than 2 for rolcompress_table_001
 -- support
 alter table normal_test.tbl_pc set (compress_prealloc_chunks=1);
--- new testcase
-set search_path=normal_test;
-\d+
---?.*
---?.*
---?.*
---?.*
---?.*
---?.*
-(3 rows)
-
-reset search_path;
-CREATE TABLE normal_test.pre_handle(id int) WITH(compresstype=2, compress_chunk_size=512, compress_byte_convert=true, compress_diff_convert=true);
-insert into normal_test.pre_handle select generate_series(1,1000);
-checkpoint;
-select count(*) from normal_test.pre_handle;
- count 
--------
-  1000
-(1 row)
-
 -- create table like test
 create table normal_test.including_all(id int) with (compresstype=2);
 create table normal_test.including_all_new(like normal_test.including_all including all); --success
@@ -244,11 +223,10 @@ drop table if exists normal_test.t_bool_value;
 create table normal_test.t_bool_value (c_int int, c_bool boolean) with (segment = no);
 drop table if exists normal_test.t_bool_value;
 drop schema normal_test cascade;
-NOTICE:  drop cascades to 8 other objects
+NOTICE:  drop cascades to 7 other objects
 DETAIL:  drop cascades to table normal_test.tbl_pc
 drop cascades to table normal_test.tbl_partition
 drop cascades to table normal_test.exchange_table
-drop cascades to table normal_test.pre_handle
 drop cascades to table normal_test.including_all
 drop cascades to table normal_test.including_all_new
 drop cascades to table normal_test.including_all_new2

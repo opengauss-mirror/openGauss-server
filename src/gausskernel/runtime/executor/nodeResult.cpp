@@ -96,6 +96,16 @@ TupleTableSlot* ExecResult(ResultState* node)
     ResetExprContext(econtext);
 
     /*
+     * Reset per-tuple memory context to free any expression evaluation
+     * storage allocated in the previous tuple cycle.  Note this can't happen
+     * until we're done projecting out tuples from a scan tuple.
+     */
+    if (!econtext->hasSetResultStore) {
+        /* return value one by one, just free early one */
+        ResetExprContext(econtext);
+    }
+
+    /*
      * Check to see if we're still projecting out tuples from a previous scan
      * tuple (because there is a function-returning-set in the projection
      * expressions).  If so, try to project another one.
@@ -107,6 +117,11 @@ TupleTableSlot* ExecResult(ResultState* node)
         }
         /* Done with that source tuple... */
         node->ps.ps_TupFromTlist = false;
+    }
+
+    if (econtext->hasSetResultStore) {
+        /* return values all store in ResultStore, could not free early one */
+        
     }
 
     /*

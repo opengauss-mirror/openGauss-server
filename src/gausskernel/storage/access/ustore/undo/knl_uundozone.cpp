@@ -32,17 +32,40 @@ namespace undo {
 
 const int MAX_REALLOCATE_TIMES = 10;
 
-UndoZone::UndoZone() : attached_(UNDO_ZONE_DETACHED), pLevel_(UNDO_PERSISTENT_BUTT),
-    lsn_(0), dirty_(UNDOZONE_CLEAN) {}
-
-bool UndoZone::Full(void)
+UndoZone::UndoZone()
 {
-    return insertUndoPtr_ == UNDO_LOG_MAX_SIZE;
+    MarkClean();
+    InitLock();
+    SetAttach(0);
+    SetPersitentLevel(UNDO_PERSISTENT_BUTT);
+    SetLSN(0);
+    SetInsertURecPtr(UNDO_LOG_BLOCK_HEADER_SIZE);
+    SetDiscardURecPtr(UNDO_LOG_BLOCK_HEADER_SIZE);
+    SetForceDiscardURecPtr(UNDO_LOG_BLOCK_HEADER_SIZE);
+    SetAllocateTSlotPtr(UNDO_LOG_BLOCK_HEADER_SIZE);
+    SetRecycleTSlotPtr(UNDO_LOG_BLOCK_HEADER_SIZE);
+    SetFrozenSlotPtr(INVALID_UNDO_SLOT_PTR);
+    SetRecycleXid(InvalidTransactionId);
+    SetFrozenXid(InvalidTransactionId);
+    InitSlotBuffer();
+    SetAttachPid(0);
+
+    undoSpace_.MarkClean();
+    undoSpace_.LockInit();
+    undoSpace_.SetLSN(0);
+    undoSpace_.SetHead(0);
+    undoSpace_.SetTail(0);
+
+    slotSpace_.MarkClean();
+    slotSpace_.LockInit();
+    slotSpace_.SetLSN(0);
+    slotSpace_.SetHead(0);
+    slotSpace_.SetTail(0);
 }
 
 bool UndoZone::CheckNeedSwitch(UndoRecordSize size)
 {
-    UndoLogOffset newInsert = UNDO_LOG_OFFSET_PLUS_USABLE_BYTES(insertUndoPtr_, size);
+    UndoLogOffset newInsert = UNDO_LOG_OFFSET_PLUS_USABLE_BYTES(insertURecPtr_, size);
     if (unlikely(newInsert > UNDO_LOG_MAX_SIZE)) {
         return true;
     }
@@ -55,28 +78,13 @@ bool UndoZone::CheckRecycle(UndoRecPtr starturp, UndoRecPtr endurp)
     int endZid = UNDO_PTR_GET_ZONE_ID(endurp);
     UndoLogOffset start = UNDO_PTR_GET_OFFSET(starturp);
     UndoLogOffset end = UNDO_PTR_GET_OFFSET(endurp);
-
-    if (start != forceDiscard_) {
-        ereport(WARNING, (errmsg(
-            UNDOFORMAT("Check undo recycle_ fail, insert(%lu), discard(%lu), forceDiscard(%lu), start(%lu), end(%lu)."),
-            insertUndoPtr_, discardUndoPtr_, forceDiscard_, start, end)));
-    }
-
+    Assert(start == forceDiscardURecPtr_);
     WHITEBOX_TEST_STUB(UNDO_CHECK_RECYCLE_FAILED, WhiteboxDefaultErrorEmit);
 
-    if (unlikely(startZid != endZid)) {
-        ereport(PANIC, (errmsg(UNDOFORMAT("Check undo recycle_ fail(switch), startZid(%d), endZid(%d), insert(%lu), "
-                                          "discard(%lu), forceDiscard(%lu), start(%lu), end(%lu)."),
-            startZid, endZid, insertUndoPtr_, discardUndoPtr_, forceDiscard_, start, end)));
-        return false;
-    }
-
-    if ((forceDiscard_ <= insertUndoPtr_) && (end <= insertUndoPtr_) && (start < end)) {
+    if ((startZid == endZid) && (forceDiscardURecPtr_ <= insertURecPtr_) && (end <= insertURecPtr_)
+        && (start < end)) {
         return true;
     }
-    ereport(PANIC, (errmsg(UNDOFORMAT(
-        "Check undo recycle_ fail, zid(%d), insert(%lu), discard(%lu), forceDiscard(%lu), start(%lu), end(%lu)."),
-        startZid, insertUndoPtr_, discardUndoPtr_, forceDiscard_, start, end)));
     return false;
 }
 
@@ -84,32 +92,37 @@ bool UndoZone::CheckRecycle(UndoRecPtr starturp, UndoRecPtr endurp)
  * Check whether the undo record is discarded or not. If it's already discarded
  * return false otherwise return true. Caller must hold the space discardLock_.
  */
-UndoRecordState UndoZone::CheckUndoRecordValid(UndoLogOffset offset, bool checkForceRecycle)
+UndoRecordState UndoZone::CheckUndoRecordValid(UndoLogOffset offset, bool checkForceRecycle,
+    TransactionId *lastXid)
 {
     Assert((offset < UNDO_LOG_MAX_SIZE) && (offset >= UNDO_LOG_BLOCK_HEADER_SIZE));
-    Assert(forceDiscard_ <= insertUndoPtr_);
+    Assert(forceDiscardURecPtr_ <= insertURecPtr_);
 
-    if (offset > this->insertUndoPtr_) {
+    if (offset >= this->insertURecPtr_) {
         ereport(DEBUG1, (errmsg(UNDOFORMAT("The undo record not insert yet: zid=%d, insert=%lu, offset=%lu."),
-            this->zid_, this->insertUndoPtr_, offset)));
+            this->zid_, this->insertURecPtr_, offset)));
         return UNDO_RECORD_NOT_INSERT;
     }
-    if (offset >= this->forceDiscard_) {
+    if (offset >= this->forceDiscardURecPtr_) {
         return UNDO_RECORD_NORMAL;
     }
-    if (offset >= this->discardUndoPtr_ && checkForceRecycle) {
+    if (lastXid != NULL) {
+        *lastXid = recycleXid_;
+    }
+    if (offset >= this->discardURecPtr_ && checkForceRecycle) {
         TransactionId recycleXmin;
         TransactionId oldestXmin = GetOldestXminForUndo(&recycleXmin);
         if (TransactionIdPrecedes(recycleXid_, recycleXmin)) {
             ereport(DEBUG1, (errmsg(
                 UNDOFORMAT("oldestxmin %lu, recycleXmin %lu > recyclexid %lu: zid=%d,"
-                "forceDiscard=%lu, discard=%lu, offset=%lu."),
-                oldestXmin, recycleXmin, recycleXid_, this->zid_, this->forceDiscard_,
-                this->discardUndoPtr_, offset)));
+                "forceDiscardURecPtr=%lu, discardURecPtr=%lu, offset=%lu."),
+                oldestXmin, recycleXmin, recycleXid_, this->zid_, this->forceDiscardURecPtr_,
+                this->discardURecPtr_, offset)));
             return UNDO_RECORD_DISCARD;
         }
-        ereport(LOG, (errmsg(UNDOFORMAT("The record has been force recycled: zid=%d, forceDiscard=%lu, "
-            "discard=%lu, offset=%lu."), this->zid_, this->forceDiscard_, this->discardUndoPtr_, offset)));
+        ereport(DEBUG1, (errmsg(UNDOFORMAT("The record has been force recycled: zid=%d, forceDiscardURecPtr=%lu, "
+            "discardURecPtr=%lu, offset=%lu."),
+            this->zid_, this->forceDiscardURecPtr_, this->discardURecPtr_, offset)));
         return UNDO_RECORD_FORCE_DISCARD;
     }
     return UNDO_RECORD_DISCARD;
@@ -137,23 +150,21 @@ void UndoZone::ForgetUndoBuffer(UndoLogOffset start, UndoLogOffset end, uint32 d
 
 TransactionSlot *UndoZone::AllocTransactionSlot(UndoSlotPtr slotPtr, TransactionId xid, Oid dbid)
 {
+    if  (!TransactionIdEquals(xid, GetTopTransactionId())) {
+        ereport(PANIC, (errmsg(UNDOFORMAT("init slot %lu xid %lu but not topxid %lu."),
+            slotPtr, xid, GetTopTransactionId())));
+    }
     TransactionSlot *slot = buf_.FetchTransactionSlot(slotPtr);
     slot->Init(xid, dbid);
-    Assert(slot->DbId() == u_sess->proc_cxt.MyDatabaseId);
-    allocate_ = UNDO_PTR_GET_OFFSET(undo::GetNextSlotPtr(slotPtr));
-    Assert(allocate_ >= recycle_);
-    ereport(DEBUG1, (errmodule(MOD_UNDO),
-        errmsg(UNDOFORMAT("zone %d allocate_ transaction slot %lu xid %lu dbid %u."),
-            zid_, slotPtr, xid, dbid)));
-#ifdef DEBUG_UHEAP
-    UHEAPSTAT_COUNT_UNDO_SLOTS_ALLOCATE();
-#endif
+    Assert(slot->DbId() == u_sess->proc_cxt.MyDatabaseId && TransactionIdIsValid(slot->XactId()));
+    allocateTSlotPtr_ = UNDO_PTR_GET_OFFSET(undo::GetNextSlotPtr(slotPtr));
+    Assert(allocateTSlotPtr_ >= recycleTSlotPtr_);
     return slot;
 }
 
 UndoRecPtr UndoZone::AllocateSpace(uint64 size)
 {
-    UndoLogOffset oldInsert = insertUndoPtr_;
+    UndoLogOffset oldInsert = insertURecPtr_;
     UndoLogOffset newInsert = UNDO_LOG_OFFSET_PLUS_USABLE_BYTES(oldInsert, size);
     Assert(newInsert % UNDO_LOG_SEGMENT_SIZE != 0);
     if (unlikely(newInsert > undoSpace_.Tail())) {
@@ -178,7 +189,7 @@ UndoRecPtr UndoZone::AllocateSpace(uint64 size)
 
 UndoSlotPtr UndoZone::AllocateSlotSpace(void)
 {
-    UndoSlotOffset oldInsert = allocate_;
+    UndoSlotOffset oldInsert = allocateTSlotPtr_;
     UndoSlotOffset newInsert = UNDO_LOG_OFFSET_PLUS_USABLE_BYTES(oldInsert, sizeof(TransactionSlot));
     Assert(newInsert % UNDO_META_SEGMENT_SIZE != 0);
     if (unlikely(newInsert > slotSpace_.Tail())) {
@@ -199,19 +210,17 @@ UndoSlotPtr UndoZone::AllocateSlotSpace(void)
         slotSpace_.UnlockSpace();
     }
     UndoSlotPtr slotPtr = MAKE_UNDO_PTR(zid_, oldInsert);
-    buf_.PrepareTransactionSlot(slotPtr, UNDOSLOTBUFFER_KEEP | UNDOSLOTBUFFER_RBM);
+    buf_.PrepareTransactionSlot(slotPtr, UNDOSLOTBUFFER_KEEP);
     return slotPtr;
 }
 
 /* Release undo space from starturp to endurp and advance discard. */
 void UndoZone::ReleaseSpace(UndoRecPtr starturp, UndoRecPtr endurp, int *forceRecycleSize)
 {
-    UndoLogOffset start = UNDO_PTR_GET_OFFSET(starturp);
     UndoLogOffset end = UNDO_PTR_GET_OFFSET(endurp);
     int startSegno = (int)(undoSpace_.Head() / UNDO_LOG_SEGMENT_SIZE);
     int endSegno = (int)(end / UNDO_LOG_SEGMENT_SIZE);
 
-    ForgetUndoBuffer(start, end, UNDO_DB_OID);
     if (unlikely(startSegno < endSegno)) {
         if (unlikely(*forceRecycleSize > 0)) {
             *forceRecycleSize -= (int)(endSegno - startSegno) * UNDOSEG_SIZE;
@@ -220,7 +229,7 @@ void UndoZone::ReleaseSpace(UndoRecPtr starturp, UndoRecPtr endurp, int *forceRe
         undoSpace_.LockSpace();
         UndoRecPtr prevHead = MAKE_UNDO_PTR(zid_, undoSpace_.Head());
         undoSpace_.UnlinkUndoLog(zid_, endSegno * UNDO_LOG_SEGMENT_SIZE, UNDO_DB_OID);
-        Assert(undoSpace_.Head() <= insertUndoPtr_);
+        Assert(undoSpace_.Head() <= insertURecPtr_);
         if (pLevel_ == UNDO_PERMANENT) {
             START_CRIT_SECTION();
             undoSpace_.MarkDirty();
@@ -239,12 +248,10 @@ void UndoZone::ReleaseSpace(UndoRecPtr starturp, UndoRecPtr endurp, int *forceRe
 /* Release slot space from starturp to endurp and advance discard. */
 void UndoZone::ReleaseSlotSpace(UndoRecPtr startSlotPtr, UndoRecPtr endSlotPtr, int *forceRecycleSize)
 {
-    UndoLogOffset start = UNDO_PTR_GET_OFFSET(startSlotPtr);
     UndoLogOffset end = UNDO_PTR_GET_OFFSET(endSlotPtr);
     int startSegno = (int)(slotSpace_.Head() / UNDO_META_SEGMENT_SIZE);
     int endSegno = (int)(end / UNDO_META_SEGMENT_SIZE);
 
-    ForgetUndoBuffer(start, end, UNDO_SLOT_DB_OID);
     if (unlikely(startSegno < endSegno)) {
         if (unlikely(*forceRecycleSize > 0)) {
             *forceRecycleSize -= (int)(endSegno - startSegno) * UNDO_META_SEG_SIZE;
@@ -253,7 +260,7 @@ void UndoZone::ReleaseSlotSpace(UndoRecPtr startSlotPtr, UndoRecPtr endSlotPtr, 
         slotSpace_.LockSpace();
         UndoRecPtr prevHead = MAKE_UNDO_PTR(zid_, slotSpace_.Head());
         slotSpace_.UnlinkUndoLog(zid_, endSegno * UNDO_META_SEGMENT_SIZE, UNDO_SLOT_DB_OID);
-        Assert(slotSpace_.Head() <= allocate_);
+        Assert(slotSpace_.Head() <= allocateTSlotPtr_);
         if (pLevel_ == UNDO_PERMANENT) {
             START_CRIT_SECTION();
             slotSpace_.MarkDirty();
@@ -273,115 +280,17 @@ void UndoZone::PrepareSwitch(void)
 {
     WHITEBOX_TEST_STUB(UNDO_PREPARE_SWITCH_FAILED, WhiteboxDefaultErrorEmit);
 
-    if (attached_ == UNDO_ZONE_DETACHED || undoSpace_.Tail() != UNDO_LOG_MAX_SIZE) {
+    if (undoSpace_.Tail() != UNDO_LOG_MAX_SIZE) {
         ereport(PANIC, (errmsg(UNDOFORMAT(
-            "Undo space switch fail, expect tail(%lu), real tail(%lu), attached(%d)."),
-            UNDO_LOG_MAX_SIZE, undoSpace_.Tail(), attached_)));
+            "Undo space switch fail, expect tail(%lu), real tail(%lu)."),
+            UNDO_LOG_MAX_SIZE, undoSpace_.Tail())));
     }
     if (pLevel_ == UNDO_PERMANENT) {
         LockUndoZone();
         MarkDirty();
-        insertUndoPtr_ = UNDO_LOG_MAX_SIZE;
+        insertURecPtr_ = UNDO_LOG_MAX_SIZE;
         UnlockUndoZone();
     }
-    return;
-}
-
-/* Clean undo space from head to tail. */
-void UndoZone::CleanUndoSpace(void)
-{
-    WHITEBOX_TEST_STUB(UNDO_CLEAN_SPACE_FAILED, WhiteboxDefaultErrorEmit);
-    
-    LockUndoZone();
-
-    if (!NeedCleanUndoSpace()) {
-        UnlockUndoZone();
-        return;
-    }
-
-    if (insertUndoPtr_ != forceDiscard_) {
-        ereport(PANIC, (errmsg(UNDOFORMAT("zone %d not used but insert %lu != discard %lu."),
-            zid_, insertUndoPtr_, discardUndoPtr_)));
-    }
-
-    undoSpace_.LockSpace();
-    if (undoSpace_.Head() == undoSpace_.Tail()) {
-        undoSpace_.UnlockSpace();
-        return;
-    } else if (undoSpace_.Head() + UNDO_LOG_SEGMENT_SIZE != undoSpace_.Tail()) {
-        ereport(PANIC, (errmsg(UNDOFORMAT("zone %d not used but head %lu + segment size != tail %lu."),
-            zid_, undoSpace_.Head(), undoSpace_.Tail())));
-    }
-    Assert(forceDiscard_ % UNDO_LOG_SEGMENT_SIZE != 0);
-    UndoLogOffset newTail = undoSpace_.Head();
-    undoSpace_.UnlinkUndoLog(zid_, undoSpace_.Tail(), UNDO_DB_OID);
-    undoSpace_.SetHead(newTail);
-    undoSpace_.SetTail(newTail);
-    if (undoSpace_.Head() > insertUndoPtr_) {
-        ereport(PANIC, (errmsg(UNDOFORMAT("zone %d head %lu > insert %lu."),
-            zid_, undoSpace_.Head(), insertUndoPtr_)));
-    }
-    if (pLevel_ == UNDO_PERMANENT) {
-        START_CRIT_SECTION();
-        undoSpace_.MarkDirty();
-        XlogUndoClean undoClean;
-        undoClean.tail = MAKE_UNDO_PTR(zid_, undoSpace_.Tail());
-        XLogRecPtr lsn = WriteUndoXlog(&undoClean, XLOG_UNDO_CLEAN);
-        undoSpace_.SetLSN(lsn);
-        END_CRIT_SECTION();
-    }
-    undoSpace_.UnlockSpace();
-    UnlockUndoZone();
-
-    return;
-}
-
-/* Clean slot space from head to tail. */
-void UndoZone::CleanSlotSpace(void)
-{
-    WHITEBOX_TEST_STUB(UNDO_CLEAN_SLOT_SPACE_FAILED, WhiteboxDefaultErrorEmit);
-
-    LockUndoZone();
-
-    if (!NeedCleanSlotSpace()) {
-        UnlockUndoZone();
-        return;
-    }
-
-    if (insertUndoPtr_ != forceDiscard_) {
-        ereport(PANIC, (errmsg(UNDOFORMAT("zone %d not used but insert %lu != discard %lu."),
-            zid_, insertUndoPtr_, discardUndoPtr_)));
-    }
-
-    slotSpace_.LockSpace();
-    if (slotSpace_.Head() == slotSpace_.Tail()) {
-        slotSpace_.UnlockSpace();
-        return;
-    } else if (slotSpace_.Head() + UNDO_META_SEGMENT_SIZE != slotSpace_.Tail()) {
-        ereport(PANIC, (errmsg(UNDOFORMAT("zone %d not used but head %lu + segment size != tail %lu."),
-            zid_, slotSpace_.Head(), slotSpace_.Tail())));
-    }
-    Assert(forceDiscard_ % UNDO_META_SEGMENT_SIZE != 0);
-    UndoLogOffset newTail = slotSpace_.Head();
-    slotSpace_.UnlinkUndoLog(zid_, slotSpace_.Tail(), UNDO_SLOT_DB_OID);
-    slotSpace_.SetHead(newTail);
-    slotSpace_.SetTail(newTail);
-    if (slotSpace_.Head() > insertUndoPtr_) {
-        ereport(PANIC, (errmsg(UNDOFORMAT("zone %d head %lu > insert %lu."),
-            zid_, slotSpace_.Head(), insertUndoPtr_)));
-    }
-    if (pLevel_ == UNDO_PERMANENT) {
-        START_CRIT_SECTION();
-        slotSpace_.MarkDirty();
-        XlogUndoClean undoClean;
-        undoClean.tail = MAKE_UNDO_PTR(zid_, slotSpace_.Tail());
-        XLogRecPtr lsn = WriteUndoXlog(&undoClean, XLOG_SLOT_CLEAN);
-        slotSpace_.SetLSN(lsn);
-        END_CRIT_SECTION();
-    }
-    slotSpace_.UnlockSpace();
-    UnlockUndoZone();
-
     return;
 }
 
@@ -390,12 +299,12 @@ static void InitUndoMeta(UndoZoneMetaInfo *uspMetaPointer)
 {
     uspMetaPointer->version = UNDO_ZONE_META_VERSION;
     uspMetaPointer->lsn = 0;
-    uspMetaPointer->insert = UNDO_LOG_BLOCK_HEADER_SIZE;
-    uspMetaPointer->discard = UNDO_LOG_BLOCK_HEADER_SIZE;
-    uspMetaPointer->forceDiscard = UNDO_LOG_BLOCK_HEADER_SIZE;
+    uspMetaPointer->insertURecPtr = UNDO_LOG_BLOCK_HEADER_SIZE;
+    uspMetaPointer->discardURecPtr = UNDO_LOG_BLOCK_HEADER_SIZE;
+    uspMetaPointer->forceDiscardURecPtr = UNDO_LOG_BLOCK_HEADER_SIZE;
     uspMetaPointer->recycleXid = 0;
-    uspMetaPointer->allocate = UNDO_LOG_BLOCK_HEADER_SIZE;
-    uspMetaPointer->recycle = UNDO_LOG_BLOCK_HEADER_SIZE;
+    uspMetaPointer->allocateTSlotPtr = UNDO_LOG_BLOCK_HEADER_SIZE;
+    uspMetaPointer->recycleTSlotPtr = UNDO_LOG_BLOCK_HEADER_SIZE;
 }
 
 /* Get undo meta info from undo zone. */
@@ -403,12 +312,12 @@ static void GetMetaFromUzone(UndoZone *uzone, UndoZoneMetaInfo *uspMetaPointer)
 {
     uspMetaPointer->version = UNDO_ZONE_META_VERSION;
     uspMetaPointer->lsn = uzone->GetLSN();
-    uspMetaPointer->insert = UNDO_PTR_GET_OFFSET(uzone->GetInsert());
-    uspMetaPointer->discard = UNDO_PTR_GET_OFFSET(uzone->GetDiscard());
-    uspMetaPointer->forceDiscard = UNDO_PTR_GET_OFFSET(uzone->GetForceDiscard());
+    uspMetaPointer->insertURecPtr = UNDO_PTR_GET_OFFSET(uzone->GetInsertURecPtr());
+    uspMetaPointer->discardURecPtr = UNDO_PTR_GET_OFFSET(uzone->GetDiscardURecPtr());
+    uspMetaPointer->forceDiscardURecPtr = UNDO_PTR_GET_OFFSET(uzone->GetForceDiscardURecPtr());
     uspMetaPointer->recycleXid = uzone->GetRecycleXid();
-    uspMetaPointer->allocate = UNDO_PTR_GET_OFFSET(uzone->GetAllocate());
-    uspMetaPointer->recycle = UNDO_PTR_GET_OFFSET(uzone->GetRecycle());
+    uspMetaPointer->allocateTSlotPtr = UNDO_PTR_GET_OFFSET(uzone->GetAllocateTSlotPtr());
+    uspMetaPointer->recycleTSlotPtr = UNDO_PTR_GET_OFFSET(uzone->GetRecycleTSlotPtr());
 }
 
 /*
@@ -485,13 +394,14 @@ void UndoZone::CheckPointUndoZone(int fd)
                     }
                     uzone->MarkClean();
                     /* Non-null uzone means it's used, whose bitmap is 0. Set meta info with a fake one. */
-                    if (UNDO_PTR_GET_OFFSET(uzone->GetInsert()) == UNDO_LOG_MAX_SIZE &&
-                        uzone->GetAllocate() == uzone->GetRecycle()) {
+                    if (UNDO_PTR_GET_OFFSET(uzone->GetInsertURecPtr()) == UNDO_LOG_MAX_SIZE &&
+                        uzone->GetAllocateTSlotPtr() == uzone->GetRecycleTSlotPtr()) {
                         GetMetaFromUzone(uzone, uspMetaPointer);
                         uzone->NotKeepBuffer();
                         uzone->UnlockUndoZone();
                         ereport(LOG, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT("release zone memory %d."), cycle)));
                         delete(uzone);
+                        g_instance.undo_cxt.uZones[cycle] = NULL;
                         pg_atomic_fetch_sub_u32(&g_instance.undo_cxt.uZoneCount, 1);
                         /* False equals to 0, which means zone is used; true is 1, which means zone is unused. */
                         bool isZoneFree = bms_is_member(cycle, g_instance.undo_cxt.uZoneBitmap[UNDO_PERMANENT]);
@@ -502,6 +412,7 @@ void UndoZone::CheckPointUndoZone(int fd)
                                 bms_del_member(g_instance.undo_cxt.uZoneBitmap[UNDO_PERMANENT], cycle);
                             LWLockRelease(UndoZoneLock);
                         }
+                        Assert(bms_num_members(g_instance.undo_cxt.uZoneBitmap[UNDO_PERMANENT]) != 0);
                     } else {
                         uzone->UnlockUndoZone();
                     }
@@ -550,7 +461,22 @@ void UndoZone::CheckPointUndoZone(int fd)
     }
 }
 
-static void AllocateZoneMemory(UndoZone **uzone, UndoPersistence upersistence, int zid, bool needCheckZone)
+bool UndoZoneGroup::UndoZoneInUse(int zid, UndoPersistence upersistence)
+{
+    bool isZoneFree = true;
+    int tmpZid = zid - (int)upersistence * PERSIST_ZONE_COUNT;
+    if (!IS_VALID_ZONE_ID(tmpZid)) {
+        ereport(PANIC, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT("zoneid %d invalid."), zid)));
+    }
+    isZoneFree = bms_is_member(tmpZid, g_instance.undo_cxt.uZoneBitmap[upersistence]);
+    if (isZoneFree) {
+        ereport(PANIC, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT("allocate zone fail."))));
+        return false;
+    }
+    return true;
+}
+
+static void AllocateZoneMemory(UndoZone **uzone, UndoPersistence upersistence, int zid)
 {
     if (*uzone == NULL) {
         int reallocateTimes = 1;
@@ -568,19 +494,11 @@ REALLOCATE:
         }
         pg_atomic_fetch_add_u32(&g_instance.undo_cxt.uZoneCount, 1);
         InitZone(*uzone, zid, upersistence);
-        InitUndoSpace(*uzone, UNDO_LOG_SPACE);
-        InitUndoSpace(*uzone, UNDO_SLOT_SPACE);
         ereport(DEBUG1, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT("attached free zone %d."), zid)));
+    } else {
+        ereport(PANIC, (errmsg(UNDOFORMAT("zone reallocate."))));
     }
 
-    if (needCheckZone) {
-        bool isZoneFree = true;
-        ZONEID_IS_USED(zid, upersistence);
-        if (isZoneFree) {
-            ereport(PANIC, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT("allocate zone fail."))));
-        }
-    }
-    (*uzone)->InitSlotBuffer();
     pg_write_barrier();
     g_instance.undo_cxt.uZones[zid] = *uzone;
 }
@@ -588,40 +506,39 @@ REALLOCATE:
 static void RecoveryZone(UndoZone *uzone,
     const UndoZoneMetaInfo *uspMetaInfo, const int zoneId)
 {
-    uzone->InitLock();
     uzone->SetZoneId(zoneId);
     uzone->SetPersitentLevel(UNDO_PERMANENT);
     uzone->SetLSN(uspMetaInfo->lsn);
-    uzone->SetInsert(uspMetaInfo->insert);
-    uzone->SetDiscard(uspMetaInfo->discard);
-    uzone->SetForceDiscard(uspMetaInfo->forceDiscard);
-    uzone->SetAllocate(uspMetaInfo->allocate);
-    uzone->SetRecycle(uspMetaInfo->recycle);
+    uzone->SetInsertURecPtr(uspMetaInfo->insertURecPtr);
+    uzone->SetDiscardURecPtr(uspMetaInfo->discardURecPtr);
+    uzone->SetForceDiscardURecPtr(uspMetaInfo->forceDiscardURecPtr);
+    uzone->SetAllocateTSlotPtr(uspMetaInfo->allocateTSlotPtr);
+    uzone->SetRecycleTSlotPtr(uspMetaInfo->recycleTSlotPtr);
     uzone->SetRecycleXid(uspMetaInfo->recycleXid);
 }
 
 /* Initialize parameters in the undo zone. */
 void InitZone(UndoZone *uzone, const int zoneId, UndoPersistence upersistence)
 {
-    uzone->InitLock();
     uzone->SetZoneId(zoneId);
+    uzone->SetAttach(0);
     uzone->SetPersitentLevel(upersistence);
     uzone->SetLSN(0);
-    uzone->SetInsert(UNDO_LOG_BLOCK_HEADER_SIZE);
-    uzone->SetDiscard(UNDO_LOG_BLOCK_HEADER_SIZE);
-    uzone->SetForceDiscard(UNDO_LOG_BLOCK_HEADER_SIZE);
-    uzone->SetAllocate(UNDO_LOG_BLOCK_HEADER_SIZE);
-    uzone->SetRecycle(UNDO_LOG_BLOCK_HEADER_SIZE);
+    uzone->SetInsertURecPtr(UNDO_LOG_BLOCK_HEADER_SIZE);
+    uzone->SetDiscardURecPtr(UNDO_LOG_BLOCK_HEADER_SIZE);
+    uzone->SetForceDiscardURecPtr(UNDO_LOG_BLOCK_HEADER_SIZE);
+    uzone->SetAllocateTSlotPtr(UNDO_LOG_BLOCK_HEADER_SIZE);
+    uzone->SetRecycleTSlotPtr(UNDO_LOG_BLOCK_HEADER_SIZE);
     uzone->SetFrozenSlotPtr(INVALID_UNDO_SLOT_PTR);
     uzone->SetRecycleXid(InvalidTransactionId);
-    uzone->SetAttachPid(u_sess->attachPid);
+    uzone->SetFrozenXid(InvalidTransactionId);
+    uzone->SetAttachPid(0);
 }
 
 /* Initialize parameters in the undo space. */
 void InitUndoSpace(UndoZone *uzone, UndoSpaceType type)
 {
     UndoSpace *usp = uzone->GetSpace(type);
-    usp->LockInit();
     usp->MarkClean();
     usp->SetLSN(0);
     usp->SetHead(0);
@@ -640,7 +557,7 @@ void UndoZone::RecoveryUndoZone(int fd)
     char *uspMetaBuffer = NULL;
     MemoryContext oldContext = MemoryContextSwitchTo(g_instance.undo_cxt.undoContext);
     char *persistBlock = (char *)palloc0(UNDO_META_PAGE_SIZE * PAGES_READ_NUM);
-    oldContext = MemoryContextSwitchTo(g_instance.undo_cxt.undoContext);
+    (void*)MemoryContextSwitchTo(oldContext);
 
     UNDOZONE_META_PAGE_COUNT(PERSIST_ZONE_COUNT, UNDOZONE_COUNT_PER_PAGE, totalPageCnt);
     zoneMetaSize = totalPageCnt * UNDO_META_PAGE_SIZE / BLCKSZ;
@@ -648,6 +565,21 @@ void UndoZone::RecoveryUndoZone(int fd)
 
     /* Ensure read at start posistion of file. */
     lseek(fd, 0, SEEK_SET);
+
+    if (g_instance.undo_cxt.uZones != NULL) {
+        for (uint32 idx = PERSIST_ZONE_COUNT; idx < UNDO_ZONE_COUNT; idx++) {
+            if (g_instance.undo_cxt.uZones[idx] != NULL) {
+                UndoZone *uzone = (UndoZone *)g_instance.undo_cxt.uZones[idx];
+                uzone->ForgetUndoBuffer(uzone->GetUndoSpace()->Head(), uzone->GetUndoSpace()->Tail(), UNDO_DB_OID);
+                uzone->ForgetUndoBuffer(uzone->GetSlotSpace()->Head(), uzone->GetSlotSpace()->Tail(), UNDO_SLOT_DB_OID);
+                UndoPersistence upersistence = UNDO_PERMANENT;
+                GET_UPERSISTENCE(idx, upersistence);
+                InitZone(uzone, idx, upersistence);
+                InitUndoSpace(uzone, UNDO_LOG_SPACE);
+                InitUndoSpace(uzone, UNDO_SLOT_SPACE);
+            }
+        }
+    }
 
     for (int i = 0; i < UNDO_PERSISTENCE_LEVELS; i++) {
         UndoPersistence persistence = (UndoPersistence)i;
@@ -702,21 +634,44 @@ void UndoZone::RecoveryUndoZone(int fd)
         int offset = zoneId % UNDOZONE_COUNT_PER_PAGE;
         uspMetaInfo = (UndoZoneMetaInfo *)(uspMetaBuffer + offset * sizeof(UndoZoneMetaInfo));
         Assert(uspMetaInfo != NULL);
-        if (uspMetaInfo->insert == UNDO_LOG_MAX_SIZE && uspMetaInfo->allocate == uspMetaInfo->recycle) {
-            LWLockAcquire(UndoZoneLock, LW_EXCLUSIVE);
-            g_instance.undo_cxt.uZoneBitmap[UNDO_PERMANENT] =
-                bms_del_member(g_instance.undo_cxt.uZoneBitmap[UNDO_PERMANENT], zoneId);
-            LWLockRelease(UndoZoneLock);
-            continue;
-        }
-        if (uspMetaInfo->insert != UNDO_LOG_BLOCK_HEADER_SIZE) {
-            undo::UndoZoneGroup::InitUndoCxtUzones();
-            UndoZone *uzone = (UndoZone *)g_instance.undo_cxt.uZones[zoneId];
-            AllocateZoneMemory(&uzone, UNDO_PERMANENT, zoneId, false);
+        if (uspMetaInfo->insertURecPtr != UNDO_LOG_BLOCK_HEADER_SIZE) {
+            UndoZone *uzone = UndoZoneGroup::GetUndoZone(zoneId, true);
             RecoveryZone(uzone, uspMetaInfo, zoneId);
         }
     }
     pfree(persistBlock);
+}
+
+static int AllocateUndoZoneId (UndoPersistence upersistence)
+{
+    int retZid = -1;
+    retZid = bms_first_member(g_instance.undo_cxt.uZoneBitmap[upersistence]);
+    if (retZid >= 0 && retZid < PERSIST_ZONE_COUNT) {
+        retZid += (int)upersistence * PERSIST_ZONE_COUNT;
+    } else {
+        retZid = INVALID_ZONE_ID;
+    }
+    return retZid;
+}
+
+static int ReleaseUndoZoneId(int zid, UndoPersistence upersistence)
+{
+    int tempZid = zid - (int)upersistence * PERSIST_ZONE_COUNT;
+    if (tempZid < 0 || tempZid > PERSIST_ZONE_COUNT) {
+        ereport(PANIC, (errmsg(UNDOFORMAT("release zone %d plevel %d invalid."),
+            zid, (int)upersistence)));
+    }
+    LWLockAcquire(UndoZoneLock, LW_EXCLUSIVE);
+    g_instance.undo_cxt.uZoneBitmap[upersistence] =
+        bms_add_member(g_instance.undo_cxt.uZoneBitmap[upersistence], tempZid);
+    if (bms_num_members(g_instance.undo_cxt.uZoneBitmap[upersistence]) == 0) {
+        ereport(WARNING,
+            (errmsg(UNDOFORMAT("bitmap invalid, bitmap num %d."),
+            bms_num_members(g_instance.undo_cxt.uZoneBitmap[upersistence]))));
+        RebuildUndoZoneBitmap();
+    }
+    LWLockRelease(UndoZoneLock);
+    return tempZid;
 }
 
 void UndoZoneGroup::ReleaseZone(int zid, UndoPersistence upersistence)
@@ -727,78 +682,72 @@ void UndoZoneGroup::ReleaseZone(int zid, UndoPersistence upersistence)
         return;
     }
     UndoZone *uzone = (UndoZone *)g_instance.undo_cxt.uZones[zid];
-
-    bool isZoneFree = true;
-    ZONEID_IS_USED(zid, upersistence);
-    if (isZoneFree) {
-        ereport(PANIC, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT("release zone fail."))));
+    Assert(undo::UndoZoneGroup::UndoZoneInUse(zid, upersistence));
+    Assert(uzone != NULL);
+    if (!UndoZoneGroup::UndoZoneInUse(zid, upersistence)) {
+        ereport(PANIC, (errmodule(MOD_UNDO),
+            errmsg(UNDOFORMAT("used zone %d detached, bitmap num %d."),
+            zid, bms_num_members(g_instance.undo_cxt.uZoneBitmap[upersistence]))));
     }
     if (uzone != NULL) {
+        if (!uzone->Attached()) {
+            ereport(PANIC, (errmodule(MOD_UNDO),
+                errmsg(UNDOFORMAT("used zone %d detached."), zid)));
+        }
+        uzone->Detach();
         uzone->NotKeepBuffer();
+        uzone->InitSlotBuffer();
         uzone->SetAttachPid(0);
     }
+
     pg_write_barrier();
     DECLARE_NODE_NO();
-    RELEASE_ZONEID(upersistence, zid);
+    ReleaseUndoZoneId(zid, upersistence);
 }
 
 UndoZone *UndoZoneGroup::SwitchZone(int zid, UndoPersistence upersistence)
 {
     if (g_instance.undo_cxt.uZoneCount > g_instance.undo_cxt.undoCountThreshold) {
-        ereport(FATAL, (errmsg(UNDOFORMAT("Too many undo zones are requested, max count is %d, now is %d"),
+        ereport(ERROR, (errmsg(UNDOFORMAT("Too many undo zones are requested, max count is %d, now is %d"),
             g_instance.undo_cxt.undoCountThreshold, g_instance.undo_cxt.uZoneCount)));
     }
-    InitUndoCxtUzones();
-    UndoZone *uzone = (UndoZone *)g_instance.undo_cxt.uZones[zid];
+
+    UndoZone *uzone = UndoZoneGroup::GetUndoZone(zid, true);
     int retZid = -1;
     uzone->PrepareSwitch();
-
-    DECLARE_NODE_NO();
-    DECLARE_NODE_COUNT();
-    ALLOCATE_ZONEID(upersistence, retZid);
+    LWLockAcquire(UndoZoneLock, LW_EXCLUSIVE);
+    retZid = AllocateUndoZoneId(upersistence);
     if (!IS_VALID_ZONE_ID(retZid)) {
         ereport(ERROR, (errmsg("SwitchZone: zone id is invalid, there're too many working threads.")));
     }
-    uzone = (UndoZone *)g_instance.undo_cxt.uZones[retZid];
-    if (uzone == NULL) {
-        MemoryContext oldContext = MemoryContextSwitchTo(g_instance.undo_cxt.undoContext);
-        uzone = New(g_instance.undo_cxt.undoContext) UndoZone();
-        MemoryContextSwitchTo(oldContext);
-        if (uzone == NULL) {
-            RELEASE_ZONEID(upersistence, retZid);
-            ereport(ERROR, (errmsg(UNDOFORMAT("failed to allocate memory for zone: %d."), retZid)));
-        }
-        pg_atomic_fetch_add_u32(&g_instance.undo_cxt.uZoneCount, 1);
-        InitZone(uzone, retZid, UNDO_PERMANENT);
-        InitUndoSpace(uzone, UNDO_LOG_SPACE);
-        InitUndoSpace(uzone, UNDO_SLOT_SPACE);
-        uzone->InitSlotBuffer();
-        pg_write_barrier();
-        g_instance.undo_cxt.uZones[retZid] = uzone;
+
+    UndoZone *newUzone = UndoZoneGroup::GetUndoZone(retZid, true);
+    if (newUzone == NULL || newUzone->GetUndoSpace()->Tail() != 0) {
+        ereport(PANIC,
+            (errmsg(UNDOFORMAT("can not palloc undo zone memory, tail = %lu."),
+            newUzone->GetUndoSpace()->Tail())));
     }
 
     WHITEBOX_TEST_STUB(UNDO_SWITCH_ZONE_FAILED, WhiteboxDefaultErrorEmit);
+    newUzone->Attach();
+    LWLockRelease(UndoZoneLock);
+    newUzone->InitSlotBuffer();
+    Assert(newUzone->GetAttachPid() == 0);
+    newUzone->SetAttachPid(u_sess->attachPid);
+    pg_write_barrier();
+    t_thrd.undo_cxt.zids[upersistence] = retZid;
 
-    if (IS_VALID_ZONE_ID(retZid)) {
-        if (uzone->GetUndoSpace()->Tail() != 0) {
-            ereport(PANIC, (errmsg(UNDOFORMAT("new zone is not empty, tail=%lu."), uzone->GetUndoSpace()->Tail())));
-        }
-        uzone->InitSlotBuffer();
-        t_thrd.undo_cxt.zids[upersistence] = retZid;
-    } else {
-        ereport(ERROR, (errmsg(UNDOFORMAT("failed to switch a new zone."))));
-    }
     ereport(LOG, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT("old zone %d switch to new zone %d."), zid, retZid)));
-    return uzone;
+    return newUzone;
 }
 
-void UndoZoneGroup:: InitUndoCxtUzones()
+void UndoZoneGroup::InitUndoCxtUzones()
 {
     if (g_instance.undo_cxt.uZones == NULL) {
         LWLockAcquire(UndoZoneLock, LW_EXCLUSIVE);
         if (g_instance.undo_cxt.uZones == NULL) {
             MemoryContext oldContext = MemoryContextSwitchTo(g_instance.undo_cxt.undoContext);
-                g_instance.undo_cxt.uZones = (void **)palloc0(UNDO_ZONE_COUNT * sizeof(void*));
+            g_instance.undo_cxt.uZones = (void **)palloc0(UNDO_ZONE_COUNT * sizeof(void*));
             MemoryContextSwitchTo(oldContext);
         }
         if (g_instance.undo_cxt.uZones == NULL) {
@@ -808,62 +757,118 @@ void UndoZoneGroup:: InitUndoCxtUzones()
     }
 }
 
-UndoZone* UndoZoneGroup::GetUndoZone(int zid, bool isNeedInitZone, UndoPersistence upersistence)
+UndoZone* UndoZoneGroup::GetUndoZone(int zid, bool isNeedInitZone)
 {
     WHITEBOX_TEST_STUB(UNDO_GET_ZONE_FAILED, WhiteboxDefaultErrorEmit);
-
-    if (!IS_VALID_ZONE_ID(zid)) {
-        ereport(PANIC, (errmsg(UNDOFORMAT("zone id %d invalid."), zid)));
-    }
     InitUndoCxtUzones();
+    if (!IS_VALID_ZONE_ID(zid)) {
+        ereport(PANIC, (errmsg(UNDOFORMAT("zoneid %d invalid."), zid)));
+    }
 
-    UndoPersistence upersistenceFromZoneid = UNDO_PERMANENT;
-    GET_UPERSISTENCE(zid, upersistenceFromZoneid);
     UndoZone *uzone = (UndoZone *)g_instance.undo_cxt.uZones[zid];
     if (uzone == NULL) {
-        if (RecoveryInProgress()) {
-            /* False equals to 0, which means zone is used; true is 1, which means zone is unused. */
-            bool isZoneFree = bms_is_member(zid, g_instance.undo_cxt.uZoneBitmap[upersistenceFromZoneid]);
-            if (!isZoneFree) {
-                /* If the zone is full, return NULL to skip redo process. */
-                return NULL;
+        UndoPersistence upersistence = UNDO_PERMANENT;
+        GET_UPERSISTENCE(zid, upersistence);
+        if (RecoveryInProgress() || t_thrd.xlog_cxt.InRecovery) {
+            AllocateZoneMemory(&uzone, upersistence, zid);
+        } else if (isNeedInitZone) {
+            if (!UndoZoneGroup::UndoZoneInUse(zid, upersistence)) {
+                ereport(PANIC, (errmodule(MOD_UNDO),
+                    errmsg(UNDOFORMAT("used zone %d detached, bitmap num %d."),
+                    zid, bms_num_members(g_instance.undo_cxt.uZoneBitmap[upersistence]))));
             }
-            AllocateZoneMemory(&uzone, upersistenceFromZoneid, zid, false);
-        } else {
-            if (isNeedInitZone) {
-                AllocateZoneMemory(&uzone, upersistenceFromZoneid, zid, true);
-            }
+            Assert(undo::UndoZoneGroup::UndoZoneInUse(zid, upersistence));
+            AllocateZoneMemory(&uzone, upersistence, zid);
         }
-    }
-    if (uzone != NULL && uzone->GetAttachPid() == 0) {
-        uzone->SetAttachPid(u_sess->attachPid);
     }
     return uzone;
 }
 
 void AllocateZonesBeforXid()
 {
+    const int MAX_RETRY_TIMES = 3;
+    int retry_times = 0;
     WHITEBOX_TEST_STUB(UNDO_ALLOCATE_ZONE_BEFO_XID_FAILED, WhiteboxDefaultErrorEmit);
+    if (RecoveryInProgress()) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_TRANSACTION_INITIATION),
+            errmsg("cannot assign TransactionIds during recovery")));
+    }
 
     for (auto i = 0; i < UNDO_PERSISTENCE_LEVELS; i++) {
         UndoPersistence upersistence = static_cast<UndoPersistence>(i);
         int zid = -1;
-        if (IS_VALID_ZONE_ID(t_thrd.undo_cxt.zids[upersistence]))
+        if (IS_VALID_ZONE_ID(t_thrd.undo_cxt.zids[upersistence])) {
             continue;
+        }
         DECLARE_NODE_NO();
-        ALLOCATE_ZONEID(upersistence, zid);
-        if (!IS_VALID_ZONE_ID(zid)) {
-            ereport(ERROR, (errmsg(UNDOFORMAT("failed to allocate a zone"))));
-            return;
+        UndoZoneGroup::InitUndoCxtUzones();
+        LWLockAcquire(UndoZoneLock, LW_EXCLUSIVE);
+reallocate_zone:
+        zid = AllocateUndoZoneId(upersistence);
+        if (!IS_VALID_ZONE_ID(zid) || (bms_num_members(g_instance.undo_cxt.uZoneBitmap[i])) == 0) {
+            ereport(WARNING,
+                (errmsg(UNDOFORMAT("failed to allocate a undo zone, bitmap num %d."),
+                bms_num_members(g_instance.undo_cxt.uZoneBitmap[i]))));
+            RebuildUndoZoneBitmap();
+            goto reallocate_zone;
         }
-        if (g_instance.undo_cxt.uZones != NULL) {
-            UndoZone *uzone = (UndoZone *)g_instance.undo_cxt.uZones[zid];
-            if (uzone != NULL) {
-                uzone->InitSlotBuffer();
+        int bitMapIdx = (zid - (int)upersistence * PERSIST_ZONE_COUNT) / BITS_PER_BITMAPWORD;
+        if (!UndoZoneGroup::UndoZoneInUse(zid, upersistence)) {
+            ereport(PANIC, (errmsg(UNDOFORMAT("undo zone %d not inuse, bitmap word %u."),
+                zid, g_instance.undo_cxt.uZoneBitmap[i]->words[bitMapIdx])));
+        }
+        UndoZone *uzone = UndoZoneGroup::GetUndoZone(zid, true);
+        if (uzone == NULL) {
+            ereport(PANIC, (errmsg(UNDOFORMAT("can not palloc undo zone memory."))));
+        }
+        if (uzone->GetPersitentLevel() != upersistence) {
+            ereport(PANIC, (errmodule(MOD_UNDO),
+                errmsg(UNDOFORMAT("zone %d uzonePersistence %d, upersistance %d, bitmap word %u"),
+                    zid, uzone->GetPersitentLevel(), upersistence,
+                    g_instance.undo_cxt.uZoneBitmap[i]->words[bitMapIdx])));
+        }
+        if (!uzone->Detached()) {
+            ereport(WARNING, (errmodule(MOD_UNDO),
+                errmsg(UNDOFORMAT("zone %d attached pid %lu, cur pid %lu, bitmap word %u"),
+                    zid, uzone->GetAttachPid(), u_sess->attachPid,
+                    g_instance.undo_cxt.uZoneBitmap[i]->words[bitMapIdx])));
+            retry_times++;
+            if (retry_times >= MAX_RETRY_TIMES) {
+                RebuildUndoZoneBitmap();
             }
+            goto reallocate_zone;
         }
+        uzone->Attach();
+        LWLockRelease(UndoZoneLock);
+        uzone->InitSlotBuffer();
+        Assert(uzone->GetAttachPid() == 0);
+        uzone->SetAttachPid(u_sess->attachPid);
+        pg_write_barrier();
         t_thrd.undo_cxt.zids[upersistence] = zid;
     }
     return;
+}
+
+bool VerifyUndoZone(UndoZone *uzone)
+{
+    if (u_sess->attr.attr_storage.ustore_verify_level <= USTORE_VERIFY_DEFAULT) {
+        return true;
+    }
+
+    if (uzone->GetAllocateTSlotPtr() < uzone->GetRecycleTSlotPtr() ||
+        uzone->GetInsertURecPtr() < uzone->GetForceDiscardURecPtr() ||
+        uzone->GetForceDiscardURecPtr() < uzone->GetDiscardURecPtr() ||
+        (TransactionIdIsValid(uzone->GetFrozenXid()) &&
+        (TransactionIdFollows(uzone->GetRecycleXid(), uzone->GetFrozenXid()) ||
+        TransactionIdFollows(g_instance.undo_cxt.globalFrozenXid, uzone->GetFrozenXid()))) ||
+        (TransactionIdIsValid(uzone->GetRecycleXid() &&
+        TransactionIdFollows(g_instance.undo_cxt.globalRecycleXid, uzone->GetRecycleXid())))) {
+            ereport(PANIC, (errcode(ERRCODE_DATA_CORRUPTED),
+                "Invalid zone: allocateTSlotPtr %lu, recycleTSlotPtr %lu, frozenxid %lu, recyclexid %lu.",
+                uzone->GetAllocateTSlotPtr(), uzone->GetRecycleTSlotPtr(), uzone->GetFrozenXid(),
+                uzone->GetRecycleXid()));
+    }
+
+    return true;
 }
 } // namespace undo

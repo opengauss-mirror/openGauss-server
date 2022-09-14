@@ -38,24 +38,34 @@ function extract_libname() {
 ABSPATH="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 DBMIND_PATH=${ABSPATH}/dbmind
 
-if [[ ! -d $DBMIND_PATH && -d "$ABSPATH/tools" ]]; then
-    die "Not found the subdirectory 'dbmind' but found 'tools'. Maybe you are in the source code directory.\n
-If you want to debug DBMind in this directory, you should rename the name of subdirectory 'tools' to 'dbmind', as follows: \n
-> mv tools dbmind
-  "
-fi
+ORIGIN_PATH=$(pwd)
+cd $ABSPATH
 
+cd $ABSPATH
 # Check whether Python has been installed onto the OS.
-PYTHON=$(which python)
+source constant
+
+PYTHON=$(which python3)
 if [[ "$?" != "0" ]]; then
     die "Not found the Python environment."
 fi
 
 # Check for the Python version.
-$PYTHON -c 'import sys; exit(sys.version_info[:2] >= (3, 6))'
+$PYTHON -c "import sys; exit(${MIN_PYTHON_VERSION} <= sys.version_info[:2] <= ${MAX_PYTHON_VERSION})"
+
 if [[ "$?" != "1" ]]; then
-    die "Not supported Python (${PYTHON}) version: at least Python 3.6."
+    die "Not supported Python (${PYTHON}) version. At least Python ${MIN_PYTHON_VERSION}"
 fi
+
+# Run set command
+if [[ $1 == "set" ]]; then
+    cd $ORIGIN_PATH
+    echo "The SET operation will not detect the integrity of the module, please install the module in advance"
+    $PYTHON $DBMIND_PATH/ $@ &
+    exit $?
+fi
+
+cd $ABSPATH
 
 # Check for dependencies
 ## Firstly, get the machine architecture so that determine different requirement files.
@@ -73,6 +83,7 @@ else
 fi
 
 ## Secondly, check whether each library has been installed.
+export PYTHONPATH=${ABSPATH}/3rd:$PYTHONPATH
 installed_list=$($PYTHON -m pip list --disable-pip-version-check)
 while read line; do
     libname=$(extract_libname $line)
@@ -114,4 +125,6 @@ for arg in "${@}" ; do
     _args=$_args" "$arg
 done
 
+cd $ORIGIN_PATH
 eval $PYTHON $DBMIND_PATH/ $_args
+

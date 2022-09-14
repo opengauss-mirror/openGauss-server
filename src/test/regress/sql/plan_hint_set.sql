@@ -89,6 +89,8 @@ set enable_hashagg              = on;
 prepare p1 as select /*+ set(default_limit_rows 100) rows(t1 #1000) */ * from t1 limit $1;
 set plan_cache_mode = force_generic_plan;
 :EXPC execute p1(100);
+prepare p4 as select/*+ set(default_limit_rows 100) rows(t1 #1000000) */ * from t1 limit $1,$2;
+:EXPC execute p4(100, 100);
 
 -- cplan/gplan
 set plan_cache_mode = force_custom_plan;
@@ -112,7 +114,20 @@ begin;
 explain (verbose on, analyze on) create table t4 as select /*+ set(enable_seqscan off) */* from t1 where t1.a = 1;
 rollback;
 
--- set hint in function execution (centralized does not support auto_explain for now)
+-- more on default_limit_rows
+create table tt1(c1 int, c2 int);
+create table tt2(c1 int, c2 int);
+insert into tt1 values(generate_series(1, 10), generate_series(1, 100));
+insert into tt2 values(generate_series(1, 10), generate_series(1, 100));
+analyze tt1;
+analyze tt2;
+
+prepare pd1 as select /*+ set(default_limit_rows -10) */* from tt1, tt2 where tt1.c1 = tt2.c1 limit $1;
+:EXPC execute pd1(1); -- hashjoin
+prepare pd2 as select /*+ set(default_limit_rows 1) */* from tt1, tt2 where tt1.c1 = tt2.c1 limit $1;
+:EXPC execute pd2(1); -- nestloop
+prepare pd3 as select /*+ set (default_limit_rows 100) rows(tt1 tt2 #10000000) */* from tt1, tt2 where tt1.c1 = tt2.c1 limit 1 offset $1;
+:EXPC execute pd3(1); -- nestloop
 
 -- cleanup
 drop schema schema_plan_hint cascade;

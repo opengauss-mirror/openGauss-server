@@ -84,6 +84,12 @@ typedef void (*ParamFetchHook)(ParamListInfo params, int paramid);
 
 typedef void (*ParserSetupHook)(struct ParseState* pstate, void* arg);
 
+typedef enum {
+    PARAM_SELECTIVITY_INFO,
+    PARAM_VAL_SELECTIVITY_INFO,
+    DEFUALT_INFO
+}UsedParamInfo;
+
 typedef struct ParamListInfoData {
     ParamFetchHook paramFetch; /* parameter fetch hook */
     void* paramFetchArg;
@@ -91,6 +97,15 @@ typedef struct ParamListInfoData {
     void* parserSetupArg;
     int numParams; /* number of ParamExternDatas following */
     bool params_need_process;
+
+    /*
+     * To obtain a generic plan considering the data skew of different 
+     * params, we delay the param binding after the logical rewriting step.
+     * This strategy can avoid the value-specific optimization and utilize
+     * the real data distribution to pick the best physic plan.
+     */
+    UsedParamInfo uParamInfo;
+    bool params_lazy_bind;
     ParamExternData params[FLEXIBLE_ARRAY_MEMBER];
 } ParamListInfoData;
 

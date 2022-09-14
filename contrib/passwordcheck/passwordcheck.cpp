@@ -30,7 +30,7 @@ PG_MODULE_MAGIC;
 /* passwords shorter than this will be rejected */
 #define MIN_PWD_LENGTH 8
 
-extern void _PG_init(void);
+extern "C" void _PG_init(void);
 
 /*
  * check_password

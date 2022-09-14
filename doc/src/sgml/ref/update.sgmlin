@@ -10,12 +10,22 @@
 </refnamediv>
 <refsynopsisdiv>
 <synopsis>
+UPDATE Single-Relation Syntax：
+[ WITH [ RECURSIVE ] with_query [, ...] ]
 UPDATE [/*+ plan_hint */] [ ONLY ] table_name [ partition_clause ] [ * ] [ [ AS ] alias ]
-    SET {column_name = { expression | DEFAULT } |
-          ( column_name [, ...] ) = {( { expression | DEFAULT } [, ...] ) |sub_query }
-          }[, ...]
+SET {column_name = { expression | DEFAULT } 
+    |( column_name [, ...] ) = {( { expression | DEFAULT } [, ...] ) |sub_query }}[, ...]
     [ FROM from_list] [ WHERE condition ]
+    [ ORDER BY {expression [ [ ASC | DESC | USING operator ]
+    [ LIMIT { count } ]
     [ RETURNING {* | {output_expression [ [ AS ] output_name ]} [, ...] }];
+
+UPDATE Multiple-Relation Syntax：
+[ WITH [ RECURSIVE ] with_query [, ...] ]
+UPDATE [/*+ plan_hint */] table_list
+SET {column_name = { expression | DEFAULT } 
+    |( column_name [, ...] ) = {( { expression | DEFAULT } [, ...] ) |sub_query }}[, ...]
+    [ FROM from_list] [ WHERE condition ];
 
 where sub_query can be:
 SELECT [ ALL | DISTINCT [ ON ( expression [, ...] ) ] ]
@@ -27,6 +37,7 @@ SELECT [ ALL | DISTINCT [ ON ( expression [, ...] ) ] ]
 where partition_clause can be:
 PARTITION { ( partition_name ) | FOR ( partition_value [, ...] ) } |
 SUBPARTITION { ( subpartition_name ) | FOR ( subpartition_value [, ...] ) }
+NOTICE: UPDATE Multiple-Relation Syntax is only avaliable in CENTRALIZED mode and B-format database!
 NOTICE: 'partition_clause' is only avaliable in CENTRALIZED mode!
 </synopsis>
 </refsynopsisdiv>

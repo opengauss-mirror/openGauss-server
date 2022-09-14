@@ -280,6 +280,12 @@ SELECT proname, prorettype::regtype, proargtypes::regtype[]
  int2le                                | boolean    | [0:1]={smallint,smallint}
  int2lt                                | boolean    | [0:1]={smallint,smallint}
  int2ne                                | boolean    | [0:1]={smallint,smallint}
+ int2seteq                             | boolean    | [0:1]={smallint,anyset}
+ int2setge                             | boolean    | [0:1]={smallint,anyset}
+ int2setgt                             | boolean    | [0:1]={smallint,anyset}
+ int2setle                             | boolean    | [0:1]={smallint,anyset}
+ int2setlt                             | boolean    | [0:1]={smallint,anyset}
+ int2setne                             | boolean    | [0:1]={smallint,anyset}
  int42eq                               | boolean    | [0:1]={integer,smallint}
  int42ge                               | boolean    | [0:1]={integer,smallint}
  int42gt                               | boolean    | [0:1]={integer,smallint}
@@ -298,6 +304,12 @@ SELECT proname, prorettype::regtype, proargtypes::regtype[]
  int4le                                | boolean    | [0:1]={integer,integer}
  int4lt                                | boolean    | [0:1]={integer,integer}
  int4ne                                | boolean    | [0:1]={integer,integer}
+ int4seteq                             | boolean    | [0:1]={integer,anyset}
+ int4setge                             | boolean    | [0:1]={integer,anyset}
+ int4setgt                             | boolean    | [0:1]={integer,anyset}
+ int4setle                             | boolean    | [0:1]={integer,anyset}
+ int4setlt                             | boolean    | [0:1]={integer,anyset}
+ int4setne                             | boolean    | [0:1]={integer,anyset}
  int82eq                               | boolean    | [0:1]={bigint,smallint}
  int82ge                               | boolean    | [0:1]={bigint,smallint}
  int82gt                               | boolean    | [0:1]={bigint,smallint}
@@ -316,6 +328,12 @@ SELECT proname, prorettype::regtype, proargtypes::regtype[]
  int8le                                | boolean    | [0:1]={bigint,bigint}
  int8lt                                | boolean    | [0:1]={bigint,bigint}
  int8ne                                | boolean    | [0:1]={bigint,bigint}
+ int8seteq                             | boolean    | [0:1]={bigint,anyset}
+ int8setge                             | boolean    | [0:1]={bigint,anyset}
+ int8setgt                             | boolean    | [0:1]={bigint,anyset}
+ int8setle                             | boolean    | [0:1]={bigint,anyset}
+ int8setlt                             | boolean    | [0:1]={bigint,anyset}
+ int8setne                             | boolean    | [0:1]={bigint,anyset}
  interval_eq                           | boolean    | [0:1]={interval,interval}
  interval_ge                           | boolean    | [0:1]={interval,interval}
  interval_gt                           | boolean    | [0:1]={interval,interval}
@@ -358,6 +376,30 @@ SELECT proname, prorettype::regtype, proargtypes::regtype[]
  reltimele                             | boolean    | [0:1]={reltime,reltime}
  reltimelt                             | boolean    | [0:1]={reltime,reltime}
  reltimene                             | boolean    | [0:1]={reltime,reltime}
+ seteq                                 | boolean    | [0:1]={anyset,anyset}
+ setge                                 | boolean    | [0:1]={anyset,anyset}
+ setgt                                 | boolean    | [0:1]={anyset,anyset}
+ setint2eq                             | boolean    | [0:1]={anyset,smallint}
+ setint2ge                             | boolean    | [0:1]={anyset,smallint}
+ setint2gt                             | boolean    | [0:1]={anyset,smallint}
+ setint2le                             | boolean    | [0:1]={anyset,smallint}
+ setint2lt                             | boolean    | [0:1]={anyset,smallint}
+ setint2ne                             | boolean    | [0:1]={anyset,smallint}
+ setint4eq                             | boolean    | [0:1]={anyset,integer}
+ setint4ge                             | boolean    | [0:1]={anyset,integer}
+ setint4gt                             | boolean    | [0:1]={anyset,integer}
+ setint4le                             | boolean    | [0:1]={anyset,integer}
+ setint4lt                             | boolean    | [0:1]={anyset,integer}
+ setint4ne                             | boolean    | [0:1]={anyset,integer}
+ setint8eq                             | boolean    | [0:1]={anyset,bigint}
+ setint8ge                             | boolean    | [0:1]={anyset,bigint}
+ setint8gt                             | boolean    | [0:1]={anyset,bigint}
+ setint8le                             | boolean    | [0:1]={anyset,bigint}
+ setint8lt                             | boolean    | [0:1]={anyset,bigint}
+ setint8ne                             | boolean    | [0:1]={anyset,bigint}
+ setle                                 | boolean    | [0:1]={anyset,anyset}
+ setlt                                 | boolean    | [0:1]={anyset,anyset}
+ setne                                 | boolean    | [0:1]={anyset,anyset}
  smalldatetime_eq                      | boolean    | [0:1]={smalldatetime,smalldatetime}
  smalldatetime_ge                      | boolean    | [0:1]={smalldatetime,smalldatetime}
  smalldatetime_gt                      | boolean    | [0:1]={smalldatetime,smalldatetime}
@@ -424,7 +466,7 @@ SELECT proname, prorettype::regtype, proargtypes::regtype[]
  xideq4                                | boolean    | [0:1]={xid32,xid32}
  xidlt                                 | boolean    | [0:1]={xid,xid}
  xidlt4                                | boolean    | [0:1]={xid32,xid32}
-(258 rows)
+(300 rows)
 
 --
 -- CALLED ON NULL INPUT | RETURNS NULL ON NULL INPUT | STRICT

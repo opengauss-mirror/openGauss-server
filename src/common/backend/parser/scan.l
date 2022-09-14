@@ -325,6 +325,10 @@ dot_dot			\.\.
 colon_equals	":="
 para_equals	"=>"
 
+set_ident_start	"@@"
+set_ident_cont	[A-Za-z\200-\377_0-9\$\#]
+set_identifier	{set_ident_start}{set_ident_cont}*
+
 /*
  * "self" is the set of chars that should be returned as single-character
  * tokens.  "op_chars" is the set of chars that can make up "Op" tokens,
@@ -362,6 +366,12 @@ param			\${integer}
 newParam		:({identifier}|{integer})
 
 newArray		:({identifier}|{integer}){space}*\]
+
+set_user_cont			[A-Za-z\377_0-9\$\.]
+set_user_escape_quote		[^']
+set_user_escape_dquote		[^"]
+set_user_escape_bquote		[^`]	
+setUserIdentifier		@(({set_user_cont}+)|(\'{set_user_escape_quote}+\')|(\"{set_user_escape_dquote}+\")|(\`{set_user_escape_bquote}+\`))
 
 other			.
 
@@ -747,7 +757,7 @@ other			.
 					if (yyextra->literallen == 0)
 						yyerror("zero-length delimited identifier");
 					ident = litbufdup(yyscanner);
-					if (yyextra->literallen >= NAMEDATALEN && u_sess->parser_cxt.is_load_copy == false)
+					if (yyextra->literallen >= NAMEDATALEN && u_sess->parser_cxt.is_load_copy == false && u_sess->parser_cxt.isForbidTruncate == false)
 						truncate_identifier(ident, yyextra->literallen, yyextra->warnOnTruncateIdent);
 					yylval->str = ident;
 					yyextra->ident_quoted = true;
@@ -763,7 +773,7 @@ other			.
 						yyerror("zero-length delimited identifier");
 					ident = litbuf_udeescape('\\', yyscanner);
 					identlen = strlen(ident);
-					if (identlen >= NAMEDATALEN && u_sess->parser_cxt.is_load_copy == false)
+					if (identlen >= NAMEDATALEN && u_sess->parser_cxt.is_load_copy == false && u_sess->parser_cxt.isForbidTruncate == false)
 						truncate_identifier(ident, identlen, yyextra->warnOnTruncateIdent);
 					yylval->str = ident;
 					/* throw back all but the quote */
@@ -781,7 +791,7 @@ other			.
 						yyerror("zero-length delimited identifier");
 					ident = litbuf_udeescape(yytext[yyleng - 2], yyscanner);
 					identlen = strlen(ident);
-					if (identlen >= NAMEDATALEN && u_sess->parser_cxt.is_load_copy == false)
+					if (identlen >= NAMEDATALEN && u_sess->parser_cxt.is_load_copy == false && u_sess->parser_cxt.isForbidTruncate == false)
 						truncate_identifier(ident, identlen, yyextra->warnOnTruncateIdent);
 					yylval->str = ident;
 					yyextra->ident_quoted = false;
@@ -950,6 +960,12 @@ other			.
 						yyextra->is_hint_str = false;
 						return CmpOp;
 					}
+					else if (strcmp(yytext, "<=>") == 0 && (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT))
+					{
+						yylval->str = pstrdup(yytext);
+						yyextra->is_hint_str = false;
+						return CmpNullOp;
+					}
 					else
 						yylval->str = pstrdup(yytext);
 					yyextra->is_hint_str = false;
@@ -1032,6 +1048,35 @@ other			.
 					return VCONST;
 				}
 
+{set_identifier} {
+					if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT && u_sess->attr.attr_common.enable_set_variable_b_format) {
+						char		   *set_ident;
+						SET_YYLLOC();
+ 
+						/*
+						* No.  Convert the identifier to lower case, and truncate
+						* if necessary.
+						*/
+						set_ident = downcase_truncate_identifier(yytext, yyleng, yyextra->warnOnTruncateIdent);
+						if (strcmp(set_ident, "@@session") == 0) {
+							yyextra->is_hint_str = false;
+							return SET_IDENT_SESSION;
+						} else if (strcmp(set_ident, "@@global") == 0) {
+							yyextra->is_hint_str = false;
+							return SET_IDENT_GLOBAL;
+						} else {
+							yylval->str = set_ident;
+							yyextra->ident_quoted = false;
+							return SET_IDENT;
+						}
+					} else {
+						SET_YYLLOC();
+						yyless(2);
+						yylval->str = pstrdup(yytext);
+						yyextra->is_hint_str = false;
+						return Op;
+					}
+				}
 
 {identifier}	{
 					const ScanKeyword *keyword;
@@ -1100,6 +1145,20 @@ other			.
 					yylval->str = ident;
 					yyextra->ident_quoted = false;
 					return IDENT;
+				}
+
+{setUserIdentifier}	{
+					if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT && u_sess->attr.attr_common.enable_set_variable_b_format) {
+						SET_YYLLOC();
+						yylval->str = pstrdup(yytext + 1);
+						yyextra->is_hint_str = false;
+						return SET_USER_IDENT;
+					} else {
+						yyless(1);
+						yylval->str = pstrdup(yytext);
+						yyextra->is_hint_str = false;
+						return yytext[0];
+					}
 				}
 
 {other}			{

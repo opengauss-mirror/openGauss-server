@@ -316,11 +316,9 @@ LogicalRepRelMapEntry *logicalrep_rel_open(LogicalRepRelId remoteid, LOCKMODE lo
         while ((i = bms_next_member(idkey, i)) >= 0) {
             int attnum = i + FirstLowInvalidHeapAttributeNumber;
 
-            if (!AttrNumberIsForUserDefinedAttr(attnum))
-                ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                    errmsg("logical replication target relation \"%s.%s\" uses "
-                    "system columns in REPLICA IDENTITY index",
-                    remoterel->nspname, remoterel->relname)));
+            if (!AttrNumberIsForUserDefinedAttr(attnum)) {
+                continue;
+            }
 
             attnum = AttrNumberGetAttrOffset(attnum);
             if (entry->attrmap[attnum] < 0 || !bms_is_member(entry->attrmap[attnum], remoterel->attkeys)) {

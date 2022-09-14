@@ -41,6 +41,7 @@
 #include "utils/sortsupport.h"
 #include "executor/node/nodeSort.h"
 #include "pgxc/groupmgr.h"
+#include "openssl/evp.h"
 
 #define SUBSTR_WITH_LEN_OFFSET 2
 #define SUBSTR_A_CMPT_OFFSET 4
@@ -118,7 +119,6 @@ static text* text_catenate(text* t1, text* t2);
 static text* text_overlay(text* t1, text* t2, int sp, int sl);
 static void appendStringInfoText(StringInfo str, const text* t);
 static bytea* bytea_catenate(bytea* t1, bytea* t2);
-static bytea* bytea_substring(Datum str, int S, int L, bool length_not_specified);
 static bytea* bytea_substring_orclcompat(Datum str, int S, int L, bool length_not_specified);
 static bytea* bytea_overlay(bytea* t1, bytea* t2, int sp, int sl);
 static StringInfo makeStringAggState(FunctionCallInfo fcinfo);
@@ -636,12 +636,18 @@ Datum textin(PG_FUNCTION_ARGS)
 Datum textout(PG_FUNCTION_ARGS)
 {
     Datum txt = PG_GETARG_DATUM(0);
-    if (VARATT_IS_HUGE_TOAST_POINTER(DatumGetPointer(txt))) {
-        int len = strlen("<CLOB>") + 1;
-        char *res = (char *)palloc(len);
-        errno_t rc = strcpy_s(res, len, "<CLOB>");
-        securec_check_c(rc, "\0", "\0");
-        PG_RETURN_CSTRING(res);
+    if (unlikely(VARATT_IS_HUGE_TOAST_POINTER(DatumGetPointer(txt)))) {
+        if (t_thrd.xact_cxt.callPrint) {
+            int len = strlen("<CLOB>") + 1;
+            char *res = (char *)palloc(len);
+            errno_t rc = strcpy_s(res, len, "<CLOB>");
+            securec_check_c(rc, "\0", "\0");
+            PG_RETURN_CSTRING(res);
+        } else {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("textout() could not support larger than 1GB clob/blob data"),
+                    errcause("parameter larger than 1GB"), erraction("parameter must less than 1GB")));
+        }
     }
     PG_RETURN_CSTRING(TextDatumGetCString(txt));
 }
@@ -999,7 +1005,11 @@ static int charlen_to_bytelen(const char* p, int n)
 Datum text_substr(PG_FUNCTION_ARGS)
 {
     text* result = NULL;
-
+    
+    if (!PG_ARGISNULL(0)  &&VARATT_IS_HUGE_TOAST_POINTER(PG_GETARG_TEXT_PP(0))) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("text_substr could not support more than 1GB clob/blob data")));
+    }
     result = text_substring(PG_GETARG_DATUM(0), PG_GETARG_INT32(1), PG_GETARG_INT32(2), false);
 
     PG_RETURN_TEXT_P(result);
@@ -2335,6 +2345,9 @@ static int varstrfastcmp_locale(Datum x, Datum y, SortSupport ssup)
     VarStringSortSupport* sss = (VarStringSortSupport*)ssup->ssup_extra;
     errno_t rc = EOK;
 
+    FUNC_CHECK_HUGE_POINTER(false, arg1, "sort()");
+    FUNC_CHECK_HUGE_POINTER(false, arg2, "sort()");
+
     /* working state */
     char *a1p = NULL, *a2p = NULL;
     int len1, len2, result;
@@ -3042,7 +3055,7 @@ Datum bytea_substr_no_len(PG_FUNCTION_ARGS)
     PG_RETURN_BYTEA_P(bytea_substring(PG_GETARG_DATUM(0), PG_GETARG_INT32(1), -1, true));
 }
 
-static bytea* bytea_substring(Datum str, int S, int L, bool length_not_specified)
+bytea* bytea_substring(Datum str, int S, int L, bool length_not_specified)
 {
     int S1; /* adjusted start position */
     int L1; /* adjusted substring length */
@@ -4484,6 +4497,8 @@ Datum split_text(PG_FUNCTION_ARGS)
     int end_posn;
     text* result_text = NULL;
 
+    FUNC_CHECK_HUGE_POINTER(false, inputstring, "split_part()");
+
     /* field number is 1 based */
     if (fldnum < 1)
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("field position must be greater than zero")));
@@ -4966,6 +4981,8 @@ Datum md5_text(PG_FUNCTION_ARGS)
     size_t len;
     char hexsum[MD5_HASH_LEN + 1];
 
+    FUNC_CHECK_HUGE_POINTER(false, in_text, "md5()");
+
     /* Calculate the length of the buffer using varlena metadata */
     len = VARSIZE_ANY_EXHDR(in_text);
 
@@ -4992,6 +5009,230 @@ Datum md5_bytea(PG_FUNCTION_ARGS)
         ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of memory")));
 
     PG_RETURN_TEXT_P(cstring_to_text(hexsum));
+}
+
+/*
+ * Create an sha/sha1/sha2 hash of a text string and return it as hex
+ */
+
+/* SHA-1 Various Length Definitions */
+#define SHA1_ALG_TYPE 160
+#define SHA1_DIGEST_LENGTH 20
+
+/* SHA-224 / SHA-256 /SHA-384 / SHA-512 Various Length Definitions */
+#define SHA224_ALG_TYPE 224
+#define SHA224_DIGEST_LENGTH 28
+#define SHA256_ALG_TYPE 256
+#define SHA256_DIGEST_LENGTH 32
+#define SHA384_ALG_TYPE 384
+#define SHA384_DIGEST_LENGTH 48
+#define SHA512_ALG_TYPE 512
+#define SHA512_DIGEST_LENGTH 64
+
+#define SHA_ERROR_LENGTH (GS_UINT32)(-1)
+
+const char hex_map[] = { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f' };
+
+/* Converts binary character streams to hexadecimal return */
+static void bin2text(GS_UCHAR* bin_val, char* str, GS_UINT32* size)
+{
+    GS_UINT32 bin_size = *size;
+    int pos = 0;
+ 
+    for (GS_UINT32 i = 0; i < bin_size; i++) {
+        str[pos] = hex_map[(bin_val[i] & 0xF0) >> 4];
+        pos++;
+        str[pos] = hex_map[bin_val[i] & 0x0F];
+        pos++;
+    }
+    str[pos] = '\0';
+}
+
+/* get_hash_digest_length: choose the unsigned char sha length by secure hash algorithm */
+static GS_UINT32 get_hash_digest_length(int64 alg_type)
+{
+    GS_UINT32 hash_digest_length;
+    switch (alg_type) {
+        case SHA1_ALG_TYPE:
+            hash_digest_length = SHA1_DIGEST_LENGTH;
+            break;
+        case SHA224_ALG_TYPE:
+            hash_digest_length = SHA224_DIGEST_LENGTH;
+            break;
+        case 0:
+        case SHA256_ALG_TYPE:
+            hash_digest_length = SHA256_DIGEST_LENGTH;
+            break;
+        case SHA384_ALG_TYPE:
+            hash_digest_length = SHA384_DIGEST_LENGTH;
+            break;
+        case SHA512_ALG_TYPE:
+            hash_digest_length = SHA512_DIGEST_LENGTH;
+            break;
+        default:
+            hash_digest_length = SHA_ERROR_LENGTH;
+            break;
+    }
+    return hash_digest_length;
+}
+
+/* get_evp_md: choose EVP_MD value by secure hash algorithm */
+const EVP_MD* get_evp_md(int64 alg_type)
+{
+    const EVP_MD* md = NULL;
+    switch (alg_type) {
+        case SHA1_ALG_TYPE:
+            md = EVP_sha1();
+            break;
+        case SHA224_ALG_TYPE:
+            md = EVP_sha224();
+            break;
+        case 0:
+        case SHA256_ALG_TYPE:
+            md = EVP_sha256();
+            break;
+        case SHA384_ALG_TYPE:
+            md = EVP_sha384();
+            break;
+        case SHA512_ALG_TYPE:
+            md = EVP_sha512();
+            break;
+        default:
+            break;
+    }
+    return md;
+}
+
+/* function to generate sha /sha1 /sha2 */
+static void generate_sha(char* src_str, GS_UINT32 src_len, char* result, int64 alg_type)
+{
+    GS_UINT32 sha_digest_len = get_hash_digest_length(alg_type);
+    GS_UINT32 save_digest_len = sha_digest_len;
+    GS_UCHAR* hash_val = (GS_UCHAR*)palloc((sha_digest_len + 1) * (sizeof(GS_UCHAR)));
+    const EVP_MD *evp_type = get_evp_md(alg_type);
+
+    /*
+     * use openssl to calculate the hash result, hash_val stores the result in binary format.
+     * char_hash_len stores the result length. error occurs will free temp storage.
+     */
+    if (!EVP_Digest(src_str, src_len, hash_val, &sha_digest_len, evp_type, NULL)) {
+        pfree(hash_val);
+        pfree(src_str);
+        pfree(result);
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_STATUS),
+             errmsg("generate sha failed")));
+    }
+
+    /* verify sha_digest_len value after EVP_Digest, incorrect free temp storage */
+    if (sha_digest_len != save_digest_len) {
+        pfree(hash_val);
+        pfree(src_str);
+        pfree(result);
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_STATUS),
+             errmsg("generate sha failed")));
+    }
+
+    /* convert binary to hexadecimal */
+    bin2text(hash_val, result, &sha_digest_len);
+    pfree(hash_val);
+}
+
+/*
+ * Create an sha1 hash of a bytea field and return it as a hex string:
+ * 20-byte sha1 digest is represented in 40 hex characters.
+ */
+Datum sha1(PG_FUNCTION_ARGS)
+{
+    /* In B format,  characters need to be escaped */
+    if (!DB_IS_CMPT(B_FORMAT)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_STATUS),
+             errmsg("sha/sha1 is supported only in B-format database")));
+    }
+
+    if (PG_ARGISNULL(ARG_0)) {
+        PG_RETURN_NULL();
+    }
+
+    text* source_text = NULL;
+    source_text = PG_GETARG_TEXT_PP(ARG_0);
+ 
+    char* text_str = text_to_cstring(source_text);
+    char* source_str = text_str;
+    GS_UINT32 source_len = strlen(source_str);
+ 
+    /* calculate the hash result */
+    char* result = (char*)palloc((SHA1_DIGEST_LENGTH * 2 + 1) * (sizeof(char)));
+    generate_sha(source_str, source_len, result, SHA1_ALG_TYPE);
+    text* ret = cstring_to_text(result);
+
+    /* clean up temp storage */
+    pfree(text_str);
+    pfree(result);
+ 
+    PG_RETURN_TEXT_P(ret);
+}
+
+/*
+ * the calculation of sha and sha1 is the same.
+ */
+
+Datum sha(PG_FUNCTION_ARGS)
+{
+    return sha1(fcinfo);
+}
+
+/*
+ * Create an sha2 hash of a bytea field and return it as a hex string:
+ * 28-byte sha224 digest is represented in 56 hex characters.
+ * 32-byte sha256 or sha0 digest is represented in 64 hex characters.
+ * 48-byte sha384 digest is represented in 96s hex characters.
+ * 64-byte sha512 digest is represented in 96s hex characters.
+ */
+Datum sha2(PG_FUNCTION_ARGS)
+{
+    /* In B format,  characters need to be escaped */
+    if (!DB_IS_CMPT(B_FORMAT)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_STATUS),
+             errmsg("sha2 is supported only in B-format database")));
+    }
+ 
+    if (PG_ARGISNULL(ARG_0)) {
+        PG_RETURN_NULL();
+    }
+    
+    text* src_text = NULL;
+    src_text = PG_GETARG_TEXT_PP(ARG_0);
+ 
+    int64 alg_type = -1;
+    if (PG_ARGISNULL(ARG_1)) {
+        PG_RETURN_NULL();
+    }
+    alg_type = PG_GETARG_INT64(ARG_1);
+ 
+    char* text_str = text_to_cstring(src_text);
+    char* source_str = text_str;
+    GS_UINT32 source_len = strlen(source_str);
+ 
+    GS_UINT32 digest_length = get_hash_digest_length(alg_type);
+    if ((digest_length == SHA_ERROR_LENGTH) || (digest_length == SHA1_DIGEST_LENGTH)) {
+        PG_RETURN_NULL();
+    }
+    GS_UINT32 hex_len = digest_length * 2;
+
+    /* calculate the hash result */
+    char* result = (char*)palloc((hex_len + 1) * (sizeof(char)));
+    generate_sha(source_str, source_len, result, alg_type);
+    text* ret = cstring_to_text(result);
+
+    /* clean up temp storage */
+    pfree(text_str);
+    pfree(result);
+
+    PG_RETURN_TEXT_P(ret);
 }
 
 /*
@@ -5903,6 +6144,65 @@ static text* concat_internal(const char* sepstr, int seplen, int argidx, Functio
 }
 
 /*
+ * Concatenate all arguments with separator. NULL arguments are ignored.
+ */
+Datum group_concat_transfn(PG_FUNCTION_ARGS)
+{
+    const int64 maxlength = u_sess->attr.attr_common.group_concat_max_len;
+    StringInfo state = PG_ARGISNULL(0) ? NULL : (StringInfo)PG_GETARG_POINTER(0);
+    /*
+     * The first argument is transValue, and the second is separator.
+     * Concat all the other arguments without separator.
+     */
+    if (state != NULL && state->len == maxlength) {
+        PG_RETURN_POINTER(state);
+    }
+    const text *argsconcat = concat_internal("", 0, 2, fcinfo, false);
+    /* Append the value unless null. */
+    if (argsconcat) {
+        /* On the first time through, we ignore the separator. */
+        if (state == NULL) {
+            state = makeStringAggState(fcinfo);
+        } else if (!PG_ARGISNULL(1)) {
+            appendStringInfoText(state, (const text*)PG_GETARG_TEXT_PP(1)); /* delimiter */
+        }
+        appendStringInfoText(state, argsconcat); /* value */
+        if (state->len > maxlength) {
+            state->len = maxlength;
+            state->data[state->len] = '\0';
+        }
+    } else {
+        /*
+         * When argsconcat is NULL, fcinfo->isnull has been set as true in concat_internal.
+         * The value of fcinfo->isnull should depend on the transValue.
+         */
+        fcinfo->isnull = PG_ARGISNULL(0);
+    }
+
+    /*
+     * The transition type for group_concat() is declared to be "internal",
+     * which is a pass-by-value type the same size as a pointer.
+     */
+    PG_RETURN_POINTER(state);
+}
+/*
+ * Concatenate all arguments with separator. NULL arguments are ignored.
+ */
+Datum group_concat_finalfn(PG_FUNCTION_ARGS)
+{
+    StringInfo state;
+
+    /* cannot be called directly because of internal-type argument */
+    Assert(AggCheckCallContext(fcinfo, NULL));
+
+    if (!PG_ARGISNULL(0)) { /* result not null */
+        state = (StringInfo)PG_GETARG_POINTER(0);
+        PG_RETURN_TEXT_P(cstring_to_text_with_len(state->data, state->len));
+    } else
+        PG_RETURN_NULL();
+}
+
+/*
  * Concatenate all arguments. NULL arguments are ignored.
  */
 Datum text_concat(PG_FUNCTION_ARGS)
@@ -6083,6 +6383,8 @@ Datum text_format(PG_FUNCTION_ARGS)
     if (PG_ARGISNULL(0))
         PG_RETURN_NULL();
 
+    FUNC_CHECK_HUGE_POINTER(false, PG_GETARG_TEXT_PP(0), "text_format()");
+
     /* If argument is marked VARIADIC, expand array into elements */
     if (get_fn_expr_variadic(fcinfo->flinfo)) {
         ArrayType* arr = NULL;
@@ -6109,6 +6411,7 @@ Datum text_format(PG_FUNCTION_ARGS)
 
             /* OK, safe to fetch the array value */
             arr = PG_GETARG_ARRAYTYPE_P(1);
+            FUNC_CHECK_HUGE_POINTER(false, PG_GETARG_TEXT_PP(1), "text_format()");
 
             /* Get info about array element type */
             element_type = ARR_ELEMTYPE(arr);
@@ -6621,6 +6924,8 @@ Datum instr_3args(PG_FUNCTION_ARGS)
     text* text_str_to_search = PG_GETARG_TEXT_P(1);
     int32 beg_index = PG_GETARG_INT32(2);
 
+    FUNC_CHECK_HUGE_POINTER(false, text_str, "instr()");
+
     return (Int32GetDatum(text_instr_3args(text_str, text_str_to_search, beg_index)));
 }
 Datum instr_4args(PG_FUNCTION_ARGS)
@@ -6652,6 +6957,8 @@ Datum substrb_with_lenth(PG_FUNCTION_ARGS)
     int32 start = PG_GETARG_INT32(1);
     int32 length = PG_GETARG_INT32(2);
 
+    FUNC_CHECK_HUGE_POINTER(PG_ARGISNULL(0), PG_GETARG_TEXT_PP(0), "regexp()");
+
     int32 total = 0;
     total = toast_raw_datum_size(str) - VARHDRSZ;
     if ((length < 0) || (total == 0) || (start > total) || (start + total < 0)) {
@@ -6675,6 +6982,7 @@ Datum substrb_without_lenth(PG_FUNCTION_ARGS)
     text* result = NULL;
     Datum str = PG_GETARG_DATUM(0);
     int32 start = PG_GETARG_INT32(1);
+    FUNC_CHECK_HUGE_POINTER(PG_ARGISNULL(0), PG_GETARG_TEXT_PP(0), "regexp()");
 
     int32 total = 0;
     total = toast_raw_datum_size(str) - VARHDRSZ;

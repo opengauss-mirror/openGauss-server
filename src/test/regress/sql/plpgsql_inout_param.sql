@@ -1315,5 +1315,207 @@ end;
 drop package pck1;
 drop table tb_test;
 
+-- test => with const
+-- a. array
+create or replace package pck1 is
+type tp_1 is record(v01 number, v03 varchar2, v02 number);
+type tp_2 is varray(10) of int;
+procedure p1(a tp_1,b out varchar2);
+procedure p1(a2 tp_2, b2 out varchar2);
+end pck1;
+/
+
+
+create or replace package body pck1 is
+procedure p1(a tp_1,b out varchar2) is
+begin
+b:=a.v01;
+raise info 'b:%',b;
+end;
+procedure p1(a2 tp_2, b2 out varchar2) is
+begin
+b2:=a2(2);
+raise info 'b2:%',b2;
+end;
+end pck1;
+/
+
+declare
+var varchar2;
+begin
+pck1.p1(a2=>array[1,3],b2=>var);
+raise info 'var:%', var;
+end;
+/
+drop package pck1;
+
+-- b. record
+create or replace package pck1 is
+type tp_1 is record(v01 number, v03 varchar2, v02 number);
+end pck1;
+/
+create or replace package pck2 is
+type tp_1 is record(v01 number, v03 varchar2, v02 number);
+end pck2;
+/
+create or replace package pck3 is
+procedure p1(a out pck1.tp_1);
+procedure p1(a2 out pck2.tp_1);
+end pck3;
+/
+create or replace package body pck3 is
+procedure p1(a out pck1.tp_1) is
+begin
+a:=(1,'a',2);
+raise info 'a:%',a;
+end;
+procedure p1(a2 out pck2.tp_1) is 
+begin
+a2:=(3,'aa',4);
+raise info 'a2:%',a2;
+end;
+end pck3;
+/
+declare
+begin
+pck3.p1(a2=>(1,2,3)::pck2.tp_1);
+end;
+/
+drop package pck3;
+drop package pck2;
+drop package pck1;
+
+-- test => out const with out proc_outparam_override
+set behavior_compat_options='';
+-- a. procedure
+create or replace package pck1 is
+procedure p1(a out varchar2,b int,c inout varchar2);
+end pck1;
+/
+create or replace package body pck1 is
+procedure p1(a out varchar2,b int,c inout varchar2) is
+begin
+a:=c||b;
+c:=a||b;
+end;
+end pck1;
+/
+declare
+var varchar2;
+begin
+pck1.p1(a=>var,b=>1,c=>'c');
+raise info 'var:%',var;
+end;
+/
+drop package pck1;
+-- b. function no assign
+create or replace function f1(in a int, in out b int) return int
+as
+declare
+c int;
+begin
+c := a + b - 1;
+b := a + b + 1;
+return c;
+end;
+/
+declare
+begin
+f1(a => 10, b => 20);
+end;
+/
+drop function f1();
+
+-- test => with varray or package variable
+create or replace package pck1 is
+type tp1 is table of int;
+function f1(in a int, inout c tp1) return int;
+va tp1;
+end pck1;
+/
+
+create or replace package body pck1 is
+function f1(in a int, inout c tp1) return int
+as
+declare
+begin
+raise info 'c:%',c;
+c(1):=a;
+return a;
+end;
+end pck1;
+/
+
+declare
+x int := 10;
+z pck1.tp1;
+res int;
+begin
+pck1.va(1) := 3;
+res := pck1.f1(a => x,c=> pck1.va);
+raise info 'res:%',res;
+raise info 'z:%',z;
+end;
+/
+
+declare
+x int := 10;
+z pck1.tp1;
+res int;
+begin
+res := pck1.f1(a => x,c=> z);
+raise info 'res:%',res;
+raise info 'z:%',z;
+end;
+/
+
+drop package pck1;
+
+-- test custom type as in param
+create type myint;
+create function myintin(cstring) returns myint strict immutable language
+  internal as 'int4in';
+create function myintout(myint) returns cstring strict immutable language
+  internal as 'int4out';
+create function myinthash(myint) returns integer strict immutable language
+  internal as 'hashint4';
+
+create type myint (input = myintin, output = myintout, like = int4);
+
+create cast (int4 as myint) without function;
+create cast (myint as int4) without function;
+
+create function myinteq(myint, myint) returns bool as $$
+begin
+  if $1 is null and $2 is null then
+    return true;
+  else
+    return $1::int = $2::int;
+  end if;
+end;
+$$ language plpgsql immutable;
+
+create operator = (
+  leftarg    = myint,
+  rightarg   = myint,
+  commutator = =,
+  negator    = <>,
+  procedure  = myinteq,
+  restrict   = eqsel,
+  join       = eqjoinsel,
+  merges
+);
+
+create operator class myint_ops
+default for type myint using hash as
+  operator    1   =  (myint, myint),
+  function    1   myinthash(myint);
+
+
+create table inttest (a myint);
+insert into inttest values(1::myint),(null);
+
+select * from inttest where a in (1::myint,2::myint,3::myint,4::myint,5::myint,6::myint,7::myint,8::myint,9::myint, null);
+
 -- clean
 drop schema if exists plpgsql_inout cascade;

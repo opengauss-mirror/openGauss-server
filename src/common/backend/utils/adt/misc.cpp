@@ -100,11 +100,11 @@ Datum current_query(PG_FUNCTION_ARGS)
 #define SIGNAL_BACKEND_SUCCESS 0
 #define SIGNAL_BACKEND_ERROR 1
 #define SIGNAL_BACKEND_NOPERMISSION 2
-static int pg_signal_backend(ThreadId pid, int sig)
+static int pg_signal_backend(ThreadId pid, int sig, bool checkPermission)
 {
     PGPROC* proc = NULL;
 
-    if (!superuser()) {
+    if (checkPermission && !superuser()) {
         /*
          * Since the user is not superuser, check for matching roles. Trust
          * that BackendPidGetProc will return NULL if the pid isn't valid,
@@ -215,7 +215,7 @@ Datum pg_cancel_backend(PG_FUNCTION_ARGS)
         ereport(ERROR,
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), (errmsg("kill backend is prohibited during online expansion."))));
 
-    r = pg_signal_backend(tid, SIGINT);
+    r = pg_signal_backend(tid, SIGINT, true);
 
     if (r == SIGNAL_BACKEND_NOPERMISSION) {
         ereport(ERROR,
@@ -242,7 +242,7 @@ Datum pg_cancel_session(PG_FUNCTION_ARGS)
                 (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                     (errmsg("kill backend is prohibited during online expansion."))));
 
-        r = pg_signal_backend(tid, SIGINT);
+        r = pg_signal_backend(tid, SIGINT, true);
 
         if (r == SIGNAL_BACKEND_NOPERMISSION)
             ereport(ERROR,
@@ -285,7 +285,7 @@ Datum pg_cancel_invalid_query(PG_FUNCTION_ARGS)
 #endif
 }
 
-static int kill_backend(ThreadId tid)
+int kill_backend(ThreadId tid, bool checkPermission)
 {
     /*
      * It is forbidden to kill backend in the online expansion to protect
@@ -294,8 +294,8 @@ static int kill_backend(ThreadId tid)
     if (u_sess->attr.attr_sql.enable_online_ddl_waitlock && !u_sess->attr.attr_common.xc_maintenance_mode)
         ereport(ERROR,
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), (errmsg("kill backend is prohibited during online expansion."))));
-
-    int r = pg_signal_backend(tid, SIGTERM);
+ 
+    int r = pg_signal_backend(tid, SIGTERM, checkPermission);
     if (r == SIGNAL_BACKEND_NOPERMISSION) {
         ereport(ERROR,
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
@@ -319,7 +319,7 @@ static int kill_backend(ThreadId tid)
 Datum pg_terminate_backend(PG_FUNCTION_ARGS)
 {
     ThreadId tid = PG_GETARG_INT64(0);
-    int r = kill_backend(tid);
+    int r = kill_backend(tid, true);
     PG_RETURN_BOOL(r == SIGNAL_BACKEND_SUCCESS);
 }
 
@@ -330,7 +330,7 @@ Datum pg_terminate_session(PG_FUNCTION_ARGS)
     int r = -1;
 
     if (tid == sid) {
-        r = kill_backend(tid);
+        r = kill_backend(tid, true);
     } else if (ENABLE_THREAD_POOL) {
         ThreadPoolSessControl *sess_ctrl = g_threadPoolControler->GetSessionCtrl();
         int ctrl_idx = sess_ctrl->FindCtrlIdxBySessId(sid);
@@ -997,7 +997,7 @@ void cancel_backend(ThreadId       pid)
 {
     int sig_return = 0;
 
-    sig_return = pg_signal_backend(pid, SIGINT);
+    sig_return = pg_signal_backend(pid, SIGINT, true);
 
     if (sig_return == SIGNAL_BACKEND_NOPERMISSION) {
         ereport(ERROR,

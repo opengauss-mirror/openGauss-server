@@ -154,7 +154,7 @@ int process_copy_chunk(PGconn *conn, const char *in_buffer, int msg_length, char
                 Assert(false);
                 return -1;
             }
-            size_t new_size = entry->partial_csv_column_size + msg_length;
+            size_t new_size = entry->partial_csv_column_size + (size_t)msg_length;
             full_chunk = (char *)malloc(new_size);
             if (full_chunk == NULL) {
                 Assert(false);

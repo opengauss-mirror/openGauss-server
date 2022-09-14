@@ -24,6 +24,7 @@
 #include "optimizer/paths.h"
 #include "optimizer/planmain.h"
 #include "optimizer/prep.h"
+#include "optimizer/subselect.h"
 #include "optimizer/tlist.h"
 #include "optimizer/var.h"
 #include "parser/parse_coerce.h"
@@ -706,6 +707,11 @@ static void generate_base_implied_quality_clause(PlannerInfo* root, RelOptInfo* 
 
             if (list_member(src_list, em->em_expr))
                 continue;
+
+            if (IsA((Node*)rinfo->clause, NullTest) && ((NullTest*)rinfo->clause)->nulltesttype == IS_NOT_NULL &&
+                check_var_nonnullable(root->parse, (Node*)em->em_expr)) {
+                continue;
+            }
 
             new_clause = replace_node_clause_for_equality((Node*)rinfo->clause, src_list, (Node*)em->em_expr);
             relids = pull_varnos(new_clause);

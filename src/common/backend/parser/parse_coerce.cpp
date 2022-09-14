@@ -31,6 +31,10 @@
 #include "utils/lsyscache.h"
 #include "utils/syscache.h"
 #include "utils/typcache.h"
+#include "optimizer/clauses.h"
+#include "utils/numeric.h"
+#include "utils/guc.h"
+#include "utils/guc_tables.h"
 #ifdef PGXC
 #include "pgxc/pgxc.h"
 #endif
@@ -56,7 +60,8 @@ static bool check_category_in_whitelist(TYPCATEGORY category, Oid type);
 static bool check_numeric_type_in_blacklist(Oid type);
 static bool meet_decode_compatibility(List* exprs, const char* context);
 static bool meet_c_format_compatibility(List* exprs, const char* context);
-
+static bool meet_set_type_compatibility(List* exprs, const char* context, Oid *retOid);
+extern Node* makeAConst(Value* v, int location);
 /*
  * @Description: same as get_element_type() except this reports error
  * when the result is invalid.
@@ -166,6 +171,71 @@ Node* coerce_to_target_type(ParseState* pstate, Node* expr, Oid exprtype, Oid ta
         }
 
     return result;
+}
+
+/*
+ * user_defined variables only store integer, float, bit, string and null,
+ * therefor, we convert the constant to the corresponding type.
+ * atttypid: datatype
+ * isSelect: subquery flag
+ */
+Node *type_transfer(Node *node, Oid atttypid, bool isSelect)
+{
+    Node *result = NULL;
+    Const *con = (Const *)node;
+    if (con->constisnull) {
+        return node;
+    }
+
+    switch (atttypid) {
+        case BOOLOID:
+        case INT1OID:
+        case INT2OID:
+        case INT4OID:
+        case INT8OID:
+            result = coerce_type(NULL, node, con->consttype,
+                INT8OID, -1, COERCION_IMPLICIT, COERCE_IMPLICIT_CAST, -1);
+            break;
+        case FLOAT4OID:
+        case FLOAT8OID:
+        case NUMERICOID:
+            result = coerce_type(NULL, node, con->consttype,
+                FLOAT8OID, -1, COERCION_IMPLICIT, COERCE_IMPLICIT_CAST, -1);
+            break;
+        case BITOID:
+            result = coerce_type(NULL, node, con->consttype,
+                BITOID, -1, COERCION_IMPLICIT, COERCE_IMPLICIT_CAST, -1);
+            break;
+        case VARBITOID:
+            result = coerce_type(NULL, node, con->consttype,
+                VARBITOID, -1, COERCION_IMPLICIT, COERCE_IMPLICIT_CAST, -1);
+            break;
+        default:
+            result = isSelect ? node :
+                coerce_type(NULL, node, con->consttype, TEXTOID, -1, COERCION_IMPLICIT, COERCE_IMPLICIT_CAST, -1);
+            break;
+    }
+
+    return result;
+}
+
+/*
+ * convert expression to const.
+ */
+Node *const_expression_to_const(Node *node)
+{
+    Node *result = NULL;
+    Const *con = (Const *)node;
+
+    if (nodeTag(node) != T_Const) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_OPERATION),
+                errmsg("The value of a user_defined variable must be convertible to a constant.")));
+    }
+
+    /* user_defined varibale only stores integer, float, bit, string, null. */
+    result = type_transfer(node, con->consttype, false);
+    return eval_const_expression_value(NULL, result, NULL);
 }
 
 /*
@@ -471,6 +541,15 @@ Node* coerce_type(ParseState* pstate, Node* node, Oid inputTypeId, Oid targetTyp
         r->location = location;
         return (Node*)r;
     }
+
+    if (targetTypeId == ANYSETOID && type_is_set(inputTypeId)) {
+        return node;
+    }
+
+    if (type_is_set(inputTypeId) && type_is_set(targetTypeId)) {
+        return node;
+    }
+
     /* If we get here, caller blew it */
     ereport(ERROR,
         (errcode(ERRCODE_UNDEFINED_FUNCTION),
@@ -569,6 +648,19 @@ bool can_coerce_type(int nargs, Oid* input_typeids, Oid* target_typeids, Coercio
          * If input is a class type that inherits from target, accept
          */
         if (typeInheritsFrom(inputTypeId, targetTypeId) || typeIsOfTypedTable(inputTypeId, targetTypeId)) {
+            continue;
+        }
+
+        /*
+         * If input or target type is a actual set type, accept if the other is of number or char type value.
+         */
+        if (targetTypeId == ANYSETOID && type_is_set(inputTypeId)) {
+            continue;
+        }
+        /*
+         * If input and target type are different actual set type, accept
+         */
+        if (type_is_set(targetTypeId) && type_is_set(inputTypeId)) {
             continue;
         }
 
@@ -800,8 +892,13 @@ static Node* build_coercion_expression(Node* node, CoercionPathType pathtype, Oi
         args = list_make1(node);
 
         if (nargs >= 2) {
-            /* Pass target typmod as an int4 constant */
-            cons = makeConst(INT4OID, -1, InvalidOid, sizeof(int32), Int32GetDatum(targetTypMod), false, true);
+            if (type_is_set(targetTypeId)) {
+                /* Pass actual set id as Oid type */
+                cons = makeConst(OIDOID, -1, InvalidOid, sizeof(Oid), ObjectIdGetDatum(targetTypeId), false, true);
+            } else {
+                /* Pass target typmod as an int4 constant */
+                cons = makeConst(INT4OID, -1, InvalidOid, sizeof(int32), Int32GetDatum(targetTypMod), false, true);
+            }
 
             args = lappend(args, cons);
         }
@@ -1538,6 +1635,13 @@ Oid select_common_type(ParseState* pstate, List* exprs, const char* context, Nod
     lc = lnext(list_head(exprs));
     ptype = exprType(pexpr);
 
+    if (meet_set_type_compatibility(exprs, context, &ptype)) {
+        if (which_expr != NULL)
+            *which_expr = pexpr;
+        /* need return textoid even all the set types are the same */
+        return ptype;
+    }
+
     /*
      * If all input types are valid and exactly the same, just pick that type.
      * This is the only way that we will resolve the result as being a domain
@@ -1626,6 +1730,33 @@ static bool meet_c_format_compatibility(List* exprs, const char* context)
         (ENABLE_SQL_BETA_FEATURE(A_STYLE_COERCE) && context != NULL &&
         (0 == strncmp(context, "CASE", sizeof("CASE"))));
     return res;
+}
+
+/*
+ * Check the expression list contains set type or not.
+ * If true, common type is text for CASE/GREATEST/LEAST/NVL/COALESCE/VALUES/DECODE,
+ * but we do not need common type for IN/NOT IN expression, left expression compares
+ * each in list.
+ */
+static bool meet_set_type_compatibility(List* exprs, const char* context, Oid *retOid)
+{
+    Node* expr = NULL;
+    ListCell* lc = NULL;
+    Oid typOid = UNKNOWNOID;
+
+    bool inCtx = (context != NULL && strcmp(context, "IN") == 0);
+
+    foreach (lc, exprs) {
+        expr = (Node*)lfirst(lc);
+
+        typOid = getBaseType(exprType(expr));
+        if (type_is_set(typOid)) {
+            *retOid = inCtx ? InvalidOid : TEXTOID;
+            return true;
+        }
+    }
+
+    return false;
 }
 
 /*
@@ -1720,6 +1851,7 @@ bool check_generic_type_consistency(Oid* actual_arg_types, Oid* declared_arg_typ
     bool have_anyelement = false;
     bool have_anynonarray = false;
     bool have_anyenum = false;
+    bool have_anyset = false;
 
     /*
      * Loop through the arguments to see if we have any that are polymorphic.
@@ -1729,12 +1861,15 @@ bool check_generic_type_consistency(Oid* actual_arg_types, Oid* declared_arg_typ
         Oid decl_type = declared_arg_types[j];
         Oid actual_type = actual_arg_types[j];
 
-        if (decl_type == ANYELEMENTOID || decl_type == ANYNONARRAYOID || decl_type == ANYENUMOID) {
+        if (decl_type == ANYELEMENTOID || decl_type == ANYNONARRAYOID ||
+            decl_type == ANYENUMOID || decl_type == ANYSETOID) {
             have_anyelement = true;
             if (decl_type == ANYNONARRAYOID) {
                 have_anynonarray = true;
             } else if (decl_type == ANYENUMOID) {
                 have_anyenum = true;
+            } else if (decl_type == ANYSETOID) {
+                have_anyset = true;
             }
             if (actual_type == UNKNOWNOID) {
                 continue;
@@ -1818,6 +1953,13 @@ bool check_generic_type_consistency(Oid* actual_arg_types, Oid* declared_arg_typ
     if (have_anyenum) {
         /* require the element type to be an enum */
         if (!type_is_enum(elem_typeid)) {
+            return false;
+        }
+    }
+
+    if (have_anyset) {
+        /* require the element type to be an set */
+        if (!type_is_set(elem_typeid)) {
             return false;
         }
     }
@@ -2111,7 +2253,7 @@ Oid enforce_generic_type_consistency(
     }
 
     /* if we return ANYELEMENT use the appropriate argument type */
-    if (rettype == ANYELEMENTOID || rettype == ANYNONARRAYOID || rettype == ANYENUMOID) {
+    if (rettype == ANYELEMENTOID || rettype == ANYNONARRAYOID || rettype == ANYENUMOID || rettype == ANYSETOID) {
         return elem_typeid;
     }
 
@@ -2298,6 +2440,13 @@ bool IsBinaryCoercible(Oid srctype, Oid targettype)
         }
     }
 
+    /* Also accept any set type as coercible to ANYSET */
+    if (targettype == ANYSETOID) {
+        if (type_is_set(srctype)) {
+            return true;
+        }
+    }
+
     /* Also accept any range type as coercible to ANYRANGE */
     if (targettype == ANYRANGEOID) {
         if (type_is_range(srctype)) {
@@ -2378,6 +2527,15 @@ CoercionPathType find_coercion_pathway(Oid targetTypeId, Oid sourceTypeId, Coerc
     /* Domains are always coercible to and from their base type */
     if (sourceTypeId == targetTypeId) {
         return COERCION_PATH_RELABELTYPE;
+    }
+
+    /* target is an actual set type, change it to anyset to find the path */
+    if (targetTypeId != ANYSETOID && type_is_set(targetTypeId)) {
+        targetTypeId = ANYSETOID;
+    }
+
+    if (sourceTypeId != ANYSETOID && type_is_set(sourceTypeId)) {
+        sourceTypeId = ANYSETOID;
     }
 
     /* Look in pg_cast */
@@ -2596,4 +2754,156 @@ void expression_error_callback(void* arg)
         errcontext("referenced column: %s", colname);
     }
 }
+ 
+Node *transferConstToAconst(Node *node)
+{
+    Node *result = NULL;
+ 
+    if(!IsA(node, Const)) {
+        ereport(ERROR, 
+            (errcode(ERRCODE_INVALID_OPERATION),
+                errmsg("The variable value expr must be convertible to a constant.")));
+    }
+ 
+    Datum constval = ((Const*)node)->constvalue;
+    Oid consttype = ((Const*)node)->consttype;
+    Value* val = NULL;
 
+    if (((Const*)node)->constisnull) {
+        ereport(ERROR, 
+            (errcode(ERRCODE_INVALID_OPERATION),
+                errmsg("The variable value expr can't be a null value.")));
+    }
+    switch(consttype) {
+        case INT1OID:
+        case INT2OID:
+        case INT4OID:
+        case INT8OID:
+            {
+                int64 val_int64 = DatumGetInt64(constval);
+                val = makeInteger(val_int64);
+            } break;
+        case TEXTOID:
+            {
+                char* constr = TextDatumGetCString(constval);
+                val = makeString(constr);
+            }  break;
+        case FLOAT4OID:
+        case FLOAT8OID:
+            {
+                float8 value = DatumGetFloat8(constval);
+                char *value_str = DatumGetCString(DirectFunctionCall1(float8out, Float8GetDatum(value)));
+                val = makeFloat(value_str);
+            } break;
+        case NUMERICOID:
+            {
+                Numeric value =  DatumGetNumeric(constval);
+                char* str_val = DatumGetCString(DirectFunctionCall1(numeric_out, NumericGetDatum(value)));
+                val = makeFloat(str_val);
+            } break;
+        case BOOLOID:
+            {
+                bool value = DatumGetBool(constval);
+                const char *constr = value ? "t" : "f";
+                val = makeString((char*)constr);
+            } break;
+        case UNKNOWNOID:
+            {
+                Const* con = (Const *)node;
+                Node* expr = coerce_type(NULL,(Node*)con , con->consttype, TEXTOID, -1, COERCION_IMPLICIT, COERCE_IMPLICIT_CAST, -1);
+                char* constr = TextDatumGetCString(((Const*)expr)->constvalue);
+                val = makeString(constr);
+            } break;
+        default:
+            {
+                char* constr = TextDatumGetCString(constval);
+                val = makeString(constr);
+            }  break;
+    }
+ 
+    result = makeAConst(val, -1);
+    return result;
+}
+
+Const* setValueToConstExpr(SetVariableExpr* set)
+{
+    Const* result = NULL;
+    Value* value;
+    Datum val;
+    Oid typid;
+    int typelen;
+    bool typebyval = false;
+
+    struct config_generic* record = NULL;
+    record = find_option(set->name, false, ERROR);
+    char* variable_str = SetVariableExprGetConfigOption(set);
+
+    switch (record->vartype) {
+        case PGC_BOOL:
+            {
+                bool variable_bool = false;
+                if (strcmp(variable_str,"true") || strcmp(variable_str,"on")) {
+                    variable_bool = true;
+                }
+                val = BoolGetDatum(variable_bool);
+                typid = BOOLOID;
+                typelen = 1;
+                typebyval = true;
+            } break;
+        case PGC_INT: 
+            {
+                int variable = (int32)strtol((const char*)variable_str, (char**)NULL,10);
+                value = makeInteger(variable);
+                val = Int64GetDatum(intVal(value));
+                typid = INT8OID;
+                typelen = sizeof(int64);
+                typebyval = true;
+            } break;
+        case PGC_INT64:
+            {
+                int variable = (int64)strtol((const char*)variable_str, (char**)NULL,10);
+                value = makeInteger(variable);
+                val = Int64GetDatum(intVal(value));
+                typid = INT8OID;
+                typelen = sizeof(int64);
+                typebyval = true;
+            } break;
+        case PGC_REAL:
+            {
+                value = makeFloat(variable_str);
+                val = Float8GetDatum(floatVal(value));
+                typid = FLOAT8OID;
+                typelen = sizeof(float8);
+                typebyval = true;
+            } break;
+        case PGC_STRING:
+            {
+                value = makeString(variable_str);
+                val = CStringGetDatum(strVal(value));
+                typid = UNKNOWNOID; /* will be coerced later */
+                typelen = -2;       /* cstring-style varwidth type */
+                typebyval = false;
+            } break;
+        case PGC_ENUM:
+            {
+                value = makeString(variable_str);
+                val = CStringGetDatum(strVal(value));
+                typid = UNKNOWNOID; /* will be coerced later */
+                typelen = -2;       /* cstring-style varwidth type */
+                typebyval = false;
+            } break;
+        default:
+            break;
+    }
+ 
+    result = makeConst(typid,
+        -1,         /* typmod -1 is OK for all cases */
+        InvalidOid, /* all cases are uncollatable types */
+        typelen,
+        val,
+        false,
+        typebyval);
+ 
+    result->location = -1;
+    return result;
+}

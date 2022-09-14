@@ -28,13 +28,9 @@ namespace undo {
 /* xlog type of unlink undo */
 #define XLOG_UNDO_UNLINK 0x10
 /* xlog type of clean undo */
-#define XLOG_UNDO_CLEAN 0x20
-/* xlog type of clean undo */
 #define XLOG_SLOT_EXTEND 0x30
 /* xlog type of clean undo */
 #define XLOG_SLOT_UNLINK 0x40
-/* xlog type of clean undo */
-#define XLOG_SLOT_CLEAN 0x50
 /* xlog type of discard undo */
 #define XLOG_UNDO_DISCARD 0x60
 
@@ -102,12 +98,6 @@ typedef struct XlogUndoUnlink {
     UndoRecPtr head;
     UndoRecPtr prevhead;
 } XlogUndoUnlink;
-
-/* Clean undo log info. */
-typedef struct XlogUndoClean {
-    XlogUndoClean() : tail(INVALID_UNDO_REC_PTR) {}
-    UndoRecPtr tail;
-} XlogUndoClean;
 
 typedef struct XlogRollbackFinish {
     UndoSlotPtr slotPtr;

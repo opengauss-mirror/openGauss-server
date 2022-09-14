@@ -263,6 +263,71 @@ PARTITION BY list (col_1) SUBPARTITION BY list (col_2)
 
 alter table list_list_02 split PARTITION for (5) at (8) into ( PARTITION add_p_01 , PARTITION add_p_02 );
 drop table list_list_02;
+
+drop table if exists col_com_alt_tbl_019_hash_range;
+create table col_com_alt_tbl_019_hash_range (
+col_tinyint		     tinyint,
+col_smallint	     smallint,
+col_int			     integer,
+col_bigint		     bigint,
+col_money            money,
+col_numeric		     numeric,
+col_real		     real,
+col_double		     double precision,
+col_decimal          decimal,
+col_char		     char(30),
+col_timestamp		 timestamp with time zone,
+col_timestamptz		 timestamp without time zone,
+col_date		     date,
+col_time		     time without time zone,
+col_timetz		     time with time zone,
+col_smalldatetime	 smalldatetime,
+col_boolean			 boolean,
+col_varchar  	     varchar,
+col_nvarchar2	     nvarchar2,
+col_text		     text,
+col_interval	     interval,
+col_bytea			 bytea,
+col_bit				 bit(20),
+col_varbit			 varbit(10),
+col_inet			 inet,
+col_cidr			 cidr
+) with (storage_type = ustore)
+partition by hash(col_tinyint) 
+subpartition by range (col_smallint)
+(
+	partition p1 
+    (
+      subpartition p1_1 values less than(20),
+      subpartition p1_2 values less than(maxvalue)
+    ),
+    partition p2 ,
+    partition p3 ,
+    partition p54 ,
+    partition p55 ,
+    partition p56 ,
+    partition p57
+    (
+      subpartition p57_1 values less than(50),
+      subpartition p57_2 values less than(maxvalue)
+    ) ,
+    partition p58 ,
+    partition p59 ,
+    partition p60 ,
+    partition p61 ,
+    partition p62 ,
+    partition p63 ,
+    partition pd 
+) enable row movement;
+
+insert into col_com_alt_tbl_019_hash_range values(generate_series(1,100),generate_series(1,100));
+
+begin;
+alter table col_com_alt_tbl_019_hash_range split subpartition p1_2 at (40) into (subpartition p1_2_x, subpartition p1_2_y);
+rollback;
+
+drop table if exists col_com_alt_tbl_019_hash_range;
+
 --clean
 DROP SCHEMA ustore_subpartition_split CASCADE;
 RESET CURRENT_SCHEMA;

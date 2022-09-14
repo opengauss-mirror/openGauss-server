@@ -234,6 +234,11 @@
      </row>
 
      <row>
+      <entry><link linkend="catalog-pg-set"><structname>pg_set</structname></link></entry>
+      <entry>set label and value definitions</entry>
+     </row>
+
+     <row>
       <entry><link linkend="catalog-pg-shdepend"><structname>pg_shdepend</structname></link></entry>
       <entry>dependencies on shared objects</entry>
      </row>

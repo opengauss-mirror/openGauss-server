@@ -712,12 +712,12 @@ SELECT schema_name, synonym_name, table_schema_name, table_name FROM USER_SYNONY
  rt_priv     | tt1          | syn_ot            | t1_row
 (1 row)
 
-REVOKE CREATE ON SCHEMA rt_priv FROM u_tmp;
+REVOKE USAGE ON SCHEMA rt_priv FROM u_tmp;
 DROP SYNONYM IF EXISTS rt_priv.t1;
 ERROR:  permission denied for schema rt_priv
 DROP SYNONYM rt_priv.tt1;
 ERROR:  permission denied for schema rt_priv
-GRANT CREATE ON SCHEMA rt_priv TO u_tmp;
+GRANT USAGE ON SCHEMA rt_priv TO u_tmp;
 DROP SYNONYM rt_priv.tt1;
 DROP SYNONYM IF EXISTS rt_priv.t1;
 NOTICE:  synonym "t1" does not exist, skipping
@@ -820,7 +820,7 @@ ERROR:  permission denied for relation ut1
 CREATE SYNONYM su1.uut2 for su1.ut1;
 ERROR:  permission denied for schema su1
 DROP SYNONYM pablic.uut1;
-ERROR:  must be owner of relation uut1
+ERROR:  permission denied for relation uut1
 SELECT schema_name, synonym_name, table_schema_name, table_name FROM USER_SYNONYMS ORDER BY 1,2;
  schema_name | synonym_name | table_schema_name | table_name 
 -------------+--------------+-------------------+------------

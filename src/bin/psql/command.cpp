@@ -1089,18 +1089,8 @@ static backslashResult exec_command(const char* cmd, PsqlScanState scan_state, P
             success = true;
         } else {
             /* Set variable to the value of the next argument */
-            int len = strlen(envvar) + strlen(envval) + 1;
-            char* newval = (char*)pg_malloc(len + 1);
-
-            check_sprintf_s(sprintf_s(newval, len + 1, "%s=%s", envvar, envval));
-            (void)putenv(newval);
+            (void)setenv(envvar, envval, 1);
             success = true;
-
-            /*
-             * Do not free newval here, it will screw up the environment if
-             * you do. See putenv man page for details. That means we leak a
-             * bit of memory here, but not enough to worry about.
-             */
         }
         free(envvar);
         envvar = NULL;
@@ -2309,7 +2299,7 @@ bool do_pset(const char* param, const char* value, printQueryOpt* popt, bool qui
             popt->topt.border = atoi(value);
 
         if (!quiet)
-            printf(_("Border style is %d.\n"), popt->topt.border);
+            printf(_("Border style is %d.\n"), (int)popt->topt.border);
     }
 
     /* set expanded/vertical mode */
@@ -2723,10 +2713,10 @@ static void minimal_error_message(PGresult* res)
 /* Show notice message when the password expired time will come. */
 static void show_password_notify(PGconn* conn)
 {
-    static const char* stmt1 = "SELECT intervaltonum(gs_password_deadline())";
-    static const char* stmt2 = "SELECT gs_password_notifytime()";
-    static const char* date1 = NULL;
-    static const char* date2 = NULL;
+    const char* stmt1 = "SELECT pg_catalog.intervaltonum(pg_catalog.gs_password_deadline())";
+    const char* stmt2 = "SELECT pg_catalog.gs_password_notifytime()";
+    char* date1 = NULL;
+    char* date2 = NULL;
     double day1 = 0;
     int day2 = 0;
     int leftday = 0;

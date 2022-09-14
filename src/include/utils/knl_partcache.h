@@ -122,4 +122,8 @@ inline void SetPartCacheNeedEOXActWork(bool value)
         u_sess->cache_cxt.PartCacheNeedEOXActWork = value;
     }
 }
+
+extern Relation BuildRelationFromPartRel(Relation rel, Partition part, bytea* merge_reloption);
+extern void partitionInitPartRel(Relation rel, Partition part);
+extern void SetRelationPartitionMap(Relation relation, Partition part);
 #endif

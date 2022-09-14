@@ -193,16 +193,18 @@ drop table if exists test6;
 create table ttt1 (a int4, b text);
 create table ttt2 (a int4, b text);
 
+-- 'on select' will transform table to view
 create rule "_RETURN" as on select to ttt1 do instead (
 	select * from ttt2;
 	);
 
 -- test
-insert into ttt1 values (1, 'hello');
+insert into ttt1 values (1, 'hello'); --error
 insert into ttt2 values (10, 'world');
 select * from ttt1;
 
-drop table if exists ttt1;
+drop table if exists ttt1; --error
+drop view if exists ttt1;
 drop table if exists ttt2;
 
 -- 
@@ -224,5 +226,28 @@ select * from test_statement;
 drop rule if exists r1 on escapetest;
 drop table if exists test_statement;
 drop table if exists escapetest;
+
+--
+-- check for rules on view and table
+--
+drop view if exists rules_fooview;
+create view rules_fooview as select 'rules_foo'::text;
+drop rule "_RETURN" on rules_fooview;
+drop view rules_fooview;
+
+drop table if exists rules_fooview;
+create table rules_fooview (x int, y text);
+select xmin, * from rules_fooview;
+create rule "_RETURN" as on select to rules_fooview do instead select 1 as x, 'aaa'::text as y;
+select * from rules_fooview;
+select xmin, * from rules_fooview;
+drop table rules_fooview;
+drop view rules_fooview;
+
+-- unsupported rule
+create table t1 (id int, name varchar(10));
+create view v1 as select * from t1;
+create rule r1 as on update to v1 do also alter table t1 modify name varchar(20);
+drop table t1 cascade;
 
 drop schema schema_rule_test cascade;

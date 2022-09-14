@@ -18,6 +18,8 @@
 
 #include "access/ustore/undo/knl_uundotype.h"
 
+#define MAX_UNDO_WORKERS 100
+
 typedef struct UndoWorkInfoData {
     TransactionId xid;
     UndoRecPtr startUndoPtr;
@@ -28,6 +30,13 @@ typedef struct UndoWorkInfoData {
 
 typedef UndoWorkInfoData *UndoWorkInfo;
 
+typedef struct UndoWorkerItem {
+    ThreadId pid;
+    TransactionId xid;
+    UndoRecPtr startUndoPtr;
+    TimestampTz rollbackStartTime;
+} UndoWorkerItem;
+
 /* -------------
  * This main purpose of this shared memory is for the undo launcher and
  * undo worker to communicate.
@@ -35,12 +44,9 @@ typedef UndoWorkInfoData *UndoWorkInfo;
  * undo_launcher_pid   - Thread Id of the Undo launcher
  * rollback_request    - Current rollback request that needs to be picked up
  * by an Undo worker
- * request_is_launched - The rollback_request has been picked up by a worker
- * so it can be overwritten by a new request.
  * active_undo_workers - Current active Undo workers. The launcher cannot launch
  * a new undo worker if active_undo_workers is maxed out.
  *
- * We try to keep this shared struct lock-free hence the use of request_is_launched.
  * -------------
  */
 typedef struct UndoWorkerShmemStruct {
@@ -49,8 +55,8 @@ typedef struct UndoWorkerShmemStruct {
 
     ThreadId undo_launcher_pid;
     UndoWorkInfo rollback_request;
-    uint32 request_is_launched;
     uint32 active_undo_workers;
+    UndoWorkerItem undo_worker_status[MAX_UNDO_WORKERS];
 } UndoWorkerShmemStruct;
 
 

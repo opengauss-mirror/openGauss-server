@@ -1446,7 +1446,7 @@ XLogRecPtr FindMaxLSN(char *workingPath, char *returnMsg, int msgLen, pg_crc32 *
         curLsn = InvalidXLogRecPtr;
         *maxLsnCrc = record->xl_crc;
         if (maxLsnLen != NULL) {
-            *maxLsnLen = record->xl_tot_len;
+            *maxLsnLen = (uint32)(xlogReader->EndRecPtr - xlogReader->ReadRecPtr);
         }
     } while (true);
 
@@ -1691,7 +1691,7 @@ int read_library(char *bufptr, int nlibrary)
     return over_length;
 }
 
-char *GetRepOriginPtr(char *xnodes, uint64 xinfo, int nsubxacts, int nmsgs, int nrels, int nlibrary)
+char *GetRepOriginPtr(char *xnodes, uint64 xinfo, int nsubxacts, int nmsgs, int nrels, int nlibrary, bool compress)
 {
     if (!(xinfo & XACT_HAS_ORIGIN)) {
         return NULL;
@@ -1700,7 +1700,7 @@ char *GetRepOriginPtr(char *xnodes, uint64 xinfo, int nsubxacts, int nmsgs, int 
     /* One more recent_xmin for single node */
     nsubxacts++;
 #endif
-    char *libPtr = xnodes + (nrels * sizeof(ColFileNodeRel)) +
+    char *libPtr = xnodes + (nrels * SIZE_OF_COLFILENODE(compress)) +
                    (nsubxacts * sizeof(TransactionId)) + (nmsgs * sizeof(SharedInvalidationMessage));
     int libLen = read_library(libPtr, nlibrary);
     return (libPtr + libLen);

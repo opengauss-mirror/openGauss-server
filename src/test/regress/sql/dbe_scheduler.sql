@@ -276,3 +276,5 @@ select dbe_scheduler.drop_job('jobdb1');
 select DBE_SCHEDULER.drop_program('programdb1', true);
 select dbname, node_name, interval, nspname, job_name, end_date, enable from pg_job;
 select * from gs_job_attribute where attribute_name <> 'owner';
+
+select DBE_SCHEDULER.create_credential('cre_1', 'scheduler_user1', '''''passwd''');

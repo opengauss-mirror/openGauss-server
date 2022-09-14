@@ -215,6 +215,9 @@ void model_store(const Model *model);
 // returns a trained model stored into the model warehouse
 const Model *model_load(const char *model_name);
 
+// delete a trained model from the model warehouse
+void model_drop(const char *model_name);
+
 // prepares a predictor for a trained model
 ModelPredictor model_prepare_predict(const Model* model);
 
@@ -225,6 +228,8 @@ Datum model_predict(ModelPredictor predictor,
                     Oid *typid,
                     int num_columns
                     );
+
+const char* model_explain(const Model *model, ExplainFormat format);
 
 #endif  // DB4AI_H
 

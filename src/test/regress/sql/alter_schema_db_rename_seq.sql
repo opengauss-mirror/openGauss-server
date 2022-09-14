@@ -18,6 +18,10 @@ select nextval('seq1');
 select nextval('seq2');
 select nextval('seq3');
 
+alter schema test_rename_not_exist_schema rename to test_rename_not_exist_schema_new;
+alter schema public rename to public_new;
+alter schema pg_catalog rename to pg_catalog_new;
+
 ----clean-----
 drop sequence seq1;
 drop sequence seq2;

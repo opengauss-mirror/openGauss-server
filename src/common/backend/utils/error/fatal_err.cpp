@@ -37,6 +37,7 @@
 #include "utils/elf_parser.h"
 #include "utils/guc_tables.h"
 #include "knl/knl_session.h"
+#include "knl/knl_thread.h"
 
 #define handle_sig_error(msg) \
         do { \
@@ -148,7 +149,7 @@ static void print_header(int fd, uintptr_t pc)
 {
     output(fd, "A fatal error occurred at pc = %p\n", (void *)pc);
     output(fd, "pid = %d, tid = %d\n\n", getpid(), (pid_t)syscall(SYS_gettid));
-    output(fd, "GaussDB Version:\n");
+    output(fd, "====== GaussDB Version ======\n ");
     output(fd, "%s\n", PG_VERSION_STR);
     output(fd, "\n");
 }
@@ -158,7 +159,7 @@ static void print_header(int fd, uintptr_t pc)
  */
 static void print_siginfo(int fd, int sig, siginfo_t *si)
 {
-    output(fd, "Fatal signal info: \n");
+    output(fd, "====== Fatal signal info ====== \n");
 
     const char *sig_name = NULL;
     const struct sig_unit *su = sig_table;
@@ -232,7 +233,7 @@ static void print_call_stack(int fd, uintptr_t pc)
     int nptrs;
     void *buf[STACK_PRINT_LIMIT];
 
-    output(fd, "Call stack:\n");
+    output(fd, "======= Call stack ====== \n");
     nptrs = backtrace(buf, STACK_PRINT_LIMIT);
 
     int i = 0;
@@ -263,7 +264,7 @@ static void print_call_stack(int fd, uintptr_t pc)
  */
 static void print_registers(int fd, const ucontext_t *uc)
 {
-    output(fd, "Registers:\n");
+    output(fd, "====== Registers ======\n");
 
 #ifdef __x86_64__
     output(fd, "RDI = 0x%016lx\n", (uint64)uc->uc_mcontext.gregs[REG_RDI]);
@@ -300,7 +301,7 @@ static void print_registers(int fd, const ucontext_t *uc)
  */
 static void print_top_stack(int fd, uintptr_t sp)
 {
-    output(fd, "Top of stack: (sp = 0x016%lx)\n", sp);
+    output(fd, "====== Top of stack ======\nsp = 0x016%lx\n", sp);
 
     uint64 *start = (uint64 *)sp;
     uint64 *end = start + 64;
@@ -342,6 +343,17 @@ static void print_inst_ctx(int fd, uintptr_t pc)
     output(fd, "\n");
 }
 
+static void print_statement_info(int fd)
+{
+    output(fd, "====== Statememt info ======\n");
+    output(fd, "[statement] unique SQL key - sql id: %lu, cn id: %u, user id: %u\n",
+        u_sess->unique_sql_cxt.unique_sql_id,
+        u_sess->unique_sql_cxt.unique_sql_cn_id,
+        u_sess->unique_sql_cxt.unique_sql_user_id);
+    output(fd, "[statement] debug query id: %lu\n", u_sess->debug_query_id);
+    output(fd, "\n");
+}
+
 /*
  * Print an entire text file
  */
@@ -354,7 +366,7 @@ static void print_text_file(int fd, const char *fname)
         return;
     }
 
-    output(fd, "%s\n", fname);
+    output(fd, "====== %s ======\n", fname);
 
     char buf[128];
     int res;
@@ -519,7 +531,7 @@ static void print_guc_enum(int fd, const struct config_enum *conf)
  */
 static void print_guc_info(int fd)
 {
-    output(fd, "GUC info:\n");
+    output(fd, "====== GUC info ======\n");
 
     for (int i = 0; i < u_sess->num_guc_variables; i++) {
         struct config_generic* base = u_sess->guc_variables[i];
@@ -594,6 +606,7 @@ bool gen_err_msg(int sig, siginfo_t *si, ucontext_t *uc)
     print_header(fd, get_pc(uc));
     print_siginfo(fd, sig, si);
     print_call_stack(fd, get_pc(uc));
+    print_statement_info(fd);
     print_registers(fd, uc);
     print_top_stack(fd, get_sp(uc));
     print_inst_ctx(fd, get_pc(uc));

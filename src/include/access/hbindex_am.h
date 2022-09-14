@@ -58,7 +58,7 @@ extern void scan_handler_idx_markpos(IndexScanDesc scan);
 extern void scan_handler_idx_restrpos(IndexScanDesc scan);
 extern HeapTuple scan_handler_idx_fetch_heap(IndexScanDesc scan);
 extern HeapTuple scan_handler_idx_getnext(IndexScanDesc scan, ScanDirection direction, Oid expect_partoid = InvalidOid,
-    int2 expect_bktid = InvalidBktId);
+    int2 expect_bktid = InvalidBktId, bool* has_cur_xact_write = NULL);
 extern ItemPointer scan_handler_idx_getnext_tid(IndexScanDesc scan, ScanDirection direction, bool *bktchg = NULL);
 extern int64 scan_handler_idx_getbitmap(IndexScanDesc scan, TIDBitmap* bitmap);
 

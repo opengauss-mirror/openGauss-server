@@ -29,6 +29,7 @@ typedef struct RawColumnDefault {
     AttrNumber attnum;         /* attribute to attach default to */
     Node      *raw_default;    /* default value (untransformed parse tree) */
     char       generatedCol;   /* generated column setting */
+    Node      *update_expr;
 } RawColumnDefault;
 
 typedef struct CookedConstraint {
@@ -41,6 +42,7 @@ typedef struct CookedConstraint {
 	int			inhcount;        /* number of times constraint is inherited */
 	bool		is_no_inherit;   /* constraint has local def and cannot be
 								 * inherited */
+    Node        *update_expr;
 } CookedConstraint;
 
 typedef struct CeHeapInfo {
@@ -180,7 +182,7 @@ extern void InsertPgClassTuple(Relation pg_class_desc, Relation new_rel_desc, Oi
 extern List *AddRelationNewConstraints(Relation rel, List *newColDefaults, List *newConstraints, bool allow_merge, bool is_local);
 
 extern List *AddRelClusterConstraints(Relation rel, List *clusterKeys);
-extern void StoreAttrDefault(Relation rel, AttrNumber attnum, Node *expr,  char generatedCol);
+extern void StoreAttrDefault(Relation rel, AttrNumber attnum, Node *expr,  char generatedCol, Node* update_expr);
 extern Node *cookDefault(ParseState *pstate, Node *raw_default, Oid atttypid, int32 atttypmod, char *attname,
     char generatedCol);
 extern void DeleteRelationTuple(Oid relid);
@@ -241,6 +243,7 @@ extern char* make_column_map(TupleDesc tuple_desc);
  * @Notes: remember to pfree the array.
  */
 extern bool* CheckPartkeyHasTimestampwithzone(Relation partTableRel, bool isForSubPartition = false);
+extern bool *CheckSubPartkeyHasTimestampwithzone(Relation partTableRel, List *subpartKeyPosList);
 
 extern Oid AddNewIntervalPartition(Relation rel, void* insertTuple, bool isDDL = false);
 

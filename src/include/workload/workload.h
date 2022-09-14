@@ -490,7 +490,11 @@ extern void perm_space_decrease(Oid ownerID, uint64 size, DataSpaceType type);
 extern void perm_space_value_reset(void);
 extern bool SearchUsedSpace(Oid userID, int64* permSpace, int64* tempSpace);
 extern void UpdateUsedSpace(Oid userID, int64 permSpace, int64 tempSpace);
-
+extern int128* find_tmptable_cache_autoinc(Oid relNode);
+extern int128 tmptable_autoinc_nextval(Oid relnode, int128 *autoinc_next);
+extern void tmptable_autoinc_setval(Oid relnode, int128 *autoinc_next, int128 value, bool iscalled);
+extern void tmptable_autoinc_reset(Oid relnode, int128 value);
+extern void make_tmptable_cache_key(Oid relNode);
 extern void CheckUserInfoHash();
 extern void UpdateWlmCatalogInfoHash(void);
 extern void ResetWlmCatalogFlag(void);

@@ -804,7 +804,8 @@ DATA(insert OID = 4406 ( TdigestData		PGNSP PGUID -1 f b U f t \054 0 0 4407 tdi
 
 DATA(insert OID = 4407 ( _TdigestData		PGNSP PGUID -1 f b A f t \054 0 4406 0 array_in array_out array_recv array_send - - array_typanalyze i x f 0 -1 0 0 _null_ _null_ _null_ ));
 #define TDIGESTGARRAYOID		4407
-
+DATA(insert OID = 3272 ( anyset		PGNSP PGUID  -1 f s H t t \054 0 0 0 anyset_in anyset_out - - - - - i p f 0 -1 0 0 _null_ _null_ _null_ ));
+#define ANYSETOID		3272
 /*
  * macros
  */
@@ -815,6 +816,7 @@ DATA(insert OID = 4407 ( _TdigestData		PGNSP PGUID -1 f b A f t \054 0 4406 0 ar
 #define  TYPTYPE_PSEUDO		'p' /* pseudo-type */
 #define  TYPTYPE_RANGE		'r' /* range type */
 #define  TYPTYPE_TABLEOF    'o' /* table of type */
+#define  TYPTYPE_SET		's' /* set type */
 
 #define  TYPCATEGORY_INVALID	'\0'	/* not an allowed category */
 #define  TYPCATEGORY_ARRAY		'A'
@@ -835,6 +837,7 @@ DATA(insert OID = 4407 ( _TdigestData		PGNSP PGUID -1 f b A f t \054 0 4406 0 ar
 #define  TYPCATEGORY_TABLEOF    'O'     /* table of type */
 #define  TYPCATEGORY_TABLEOF_VARCHAR  'Q' /* table of type, index by varchar */
 #define  TYPCATEGORY_TABLEOF_INTEGER  'F' /* table of type, index by integer */
+#define  TYPCATEGORY_SET		'H' 	/* for set type */
 
 /* Is a type OID a polymorphic pseudotype?	(Beware of multiple evaluation) */
 #define IsPolymorphicType(typid)  \

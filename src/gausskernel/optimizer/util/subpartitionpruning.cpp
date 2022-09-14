@@ -28,6 +28,7 @@
 #include "optimizer/pruning.h"
 #include "utils/partitionmap_gs.h"
 #include "utils/rel_gs.h"
+#include "commands/tablecmds.h"
 
 SubPartitionPruningResult* getSubPartitionFullPruningResult(Relation relation)
 {
@@ -191,8 +192,15 @@ bool checkPartitionIndexUnusable(Oid indexOid, int partItrs, PruningResult* prun
         int partSeq = lfirst_int(cell);
         Relation tablepartrel = NULL;
 
-        tablepartitionid = getPartitionOidFromSequence(heapRel, partSeq);
-        tablepart = partitionOpen(heapRel, tablepartitionid, AccessShareLock);
+        tablepartitionid = getPartitionOidFromSequence(heapRel, partSeq, pruning_result->partMap);
+        tablepart = tryPartitionOpen(heapRel, tablepartitionid, AccessShareLock);
+        if (!tablepart) {
+            PartStatus currStatus = PartitionGetMetadataStatus(tablepartitionid, false);
+            if (currStatus != PART_METADATA_INVISIBLE) {
+                ReportPartitionOpenError(heapRel, tablepartitionid);
+            }
+            continue;
+        }
 
         /* get index partition and add it to a list for following scan */
         if (RelationIsSubPartitioned(heapRel)) {
@@ -313,7 +321,7 @@ static IndexesUsableType eliminate_subpartition_index_unusable(Relation heapRel,
         List* partitionIndexOidList = NIL;
         int partSeq = lfirst_int(cell);
 
-        tablepartitionid = getPartitionOidFromSequence(heapRel, partSeq);
+        tablepartitionid = getPartitionOidFromSequence(heapRel, partSeq, inputPruningResult->partMap);
         tablepart = partitionOpen(heapRel, tablepartitionid, AccessShareLock);
         tablepartrel = partitionGetRelation(heapRel, tablepart);
 
@@ -415,8 +423,15 @@ IndexesUsableType eliminate_partition_index_unusable(Relation heapRel, Relation 
         List* partitionIndexOidList = NIL;
         int partSeq = lfirst_int(cell);
 
-        tablepartitionid = getPartitionOidFromSequence(heapRel, partSeq);
-        tablepart = partitionOpen(heapRel, tablepartitionid, AccessShareLock);
+        tablepartitionid = getPartitionOidFromSequence(heapRel, partSeq, inputPruningResult->partMap);
+        tablepart = tryPartitionOpen(heapRel, tablepartitionid, AccessShareLock);
+        if (!tablepart) {
+            PartStatus currStatus = PartitionGetMetadataStatus(tablepartitionid, false);
+            if (currStatus != PART_METADATA_INVISIBLE) {
+                ReportPartitionOpenError(heapRel, tablepartitionid);
+            }
+            continue;
+        }
 
         /* get index partition and add it to a list for following scan */
         partitionIndexOidList = PartitionGetPartIndexList(tablepart);
@@ -539,5 +554,159 @@ IndexesUsableType eliminate_partition_index_unusable(Oid indexOid, PruningResult
                     inputPruningResult,
                     indexUsablePruningResult,
                     indexUnusablePruningResult);
+    }
+}
+
+static int GetSubPartitionSeq(Relation rel, Oid partOid, Oid subpartOid)
+{
+    Partition part = partitionOpen(rel, partOid, NoLock);
+    Relation partRel = partitionGetRelation(rel, part);
+    int subPartitionSeq = getPartitionElementsIndexByOid(partRel, subpartOid);
+    releaseDummyRelation(&partRel);
+    partitionClose(rel, part, NoLock);
+    return subPartitionSeq;
+}
+
+static List* list_insert_ordered_int(List* list, int datum)
+{
+    ListCell* prev = NULL;
+
+    /* Does the datum belong at the front? */
+    if (list == NIL || datum < linitial_int(list))
+        return lcons_int(datum, list);
+    /* No, so find the entry it belongs after */
+    prev = list_head(list);
+    for (;;) {
+        ListCell* curr = lnext(prev);
+
+        if (curr == NULL || datum < lfirst_int(curr))
+            break; /* it belongs after 'prev', before 'curr' */
+
+        prev = curr;
+    }
+    /* Insert datum into list after 'prev' */
+    (void)lappend_cell_int(list, prev, datum);
+    return list;
+}
+
+static bool TryEnrichSubPartitionPruningResult(
+    PruningResult* pruningRes, Relation rel, Oid partOid, int partSeq, Oid subpartOid)
+{
+    SubPartitionPruningResult *sppr = NULL;
+    ListCell* selectedSubPart = NULL;
+    List* subpartList = RelationGetSubPartitionOidListList(rel);
+    int selectedCount;
+    int subpartCount = list_length((List*)list_nth(subpartList, partSeq));
+
+    /* search SubPartitionPruningResult from list */
+    foreach(selectedSubPart, pruningRes->ls_selectedSubPartitions) {
+        sppr = (SubPartitionPruningResult*)lfirst(selectedSubPart);
+        if (sppr->partSeq == partSeq) {
+            break;
+        }
+        sppr = NULL;
+    }
+    /* not found */
+    if (sppr == NULL) {
+        return false;
+    }
+
+    selectedCount = list_length(sppr->ls_selectedSubPartitions);
+    if (selectedCount == subpartCount) {
+        /*
+         * All subpartitions of this partition have been selected.
+         * No need to add new subpartitions.
+         */
+        return true;
+    }
+
+    if (OidIsValid(subpartOid)) {
+        /* Add new subpartition to original SubPartitionPruningResult in order if not exists. */
+        int subpartSeq = GetSubPartitionSeq(rel, partOid, subpartOid);
+        if (!bms_is_member(subpartSeq, sppr->bm_selectedSubPartitions)) {
+            sppr->bm_selectedSubPartitions = bms_add_member(sppr->bm_selectedSubPartitions, subpartSeq);
+            sppr->ls_selectedSubPartitions = list_insert_ordered_int(sppr->ls_selectedSubPartitions, subpartSeq);
+        }
+    } else {
+        /* InvalidOid means all subpartitiongs, replace original SubPartitionPruningResult. */
+        sppr = PreGetSubPartitionFullPruningResult(rel, partOid);
+        if (sppr == NULL) {
+            return true;
+        }
+        sppr->partSeq = partSeq;
+        lfirst(selectedSubPart) = sppr;
+    }
+
+    return true;
+}
+
+static List* list_insert_ordered_sppr(List* list, SubPartitionPruningResult* sppr)
+{
+    ListCell* prev = NULL;
+
+    /* Does the sppr->partSeq belong at the front? */
+    if (list == NIL || sppr->partSeq < linitial_node(SubPartitionPruningResult, list)->partSeq)
+        return lcons(sppr, list);
+    /* No, so find the entry it belongs after */
+    prev = list_head(list);
+    for (;;) {
+        ListCell* curr = lnext(prev);
+
+        if (curr == NULL || sppr->partSeq < lfirst_node(SubPartitionPruningResult, curr)->partSeq)
+            break; /* it belongs after 'prev', before 'curr' */
+
+        prev = curr;
+    }
+    /* Insert sppr->partSeq into list after 'prev' */
+    (void)lappend_cell(list, prev, sppr);
+    return list;
+}
+
+void MergePartitionListsForPruning(RangeTblEntry* rte, Relation rel, PruningResult* pruningRes)
+{
+    int partitionSeq = 0;
+    int subPartitionSeq = 0;
+    Oid partOid;
+    Oid subpartOid;
+    ListCell* partCell = NULL;
+    ListCell* subpartCell = NULL;
+    SubPartitionPruningResult* sppr = NULL;
+
+    forboth(partCell, rte->partitionOidList, subpartCell, rte->subpartitionOidList) {
+        partOid = lfirst_oid(partCell);
+        subpartOid = lfirst_oid(subpartCell);
+        partitionSeq = getPartitionElementsIndexByOid(rel, partOid);
+        /* If partition have been specified, add current subpartition to SubPartitionPruningResult. */
+        if (bms_is_member(partitionSeq, pruningRes->bm_rangeSelectedPartitions)) {
+            if (!RelationIsSubPartitioned(rel) ||
+                TryEnrichSubPartitionPruningResult(pruningRes, rel, partOid, partitionSeq, subpartOid)) {
+                continue;
+            }
+        } else {
+            /* add new partition in order */
+            pruningRes->ls_rangeSelectedPartitions =
+                list_insert_ordered_int(pruningRes->ls_rangeSelectedPartitions, partitionSeq);
+            pruningRes->bm_rangeSelectedPartitions =
+                bms_add_member(pruningRes->bm_rangeSelectedPartitions, partitionSeq);
+        }
+
+        if (!RelationIsSubPartitioned(rel)) {
+            continue;
+        }
+        /* add new subpartition in order */
+        if (OidIsValid(subpartOid)) {
+            subPartitionSeq = GetSubPartitionSeq(rel, partOid, subpartOid);
+            sppr = makeNode(SubPartitionPruningResult);
+            sppr->bm_selectedSubPartitions = bms_add_member(sppr->bm_selectedSubPartitions, subPartitionSeq);
+            sppr->ls_selectedSubPartitions = list_insert_ordered_int(sppr->ls_selectedSubPartitions, subPartitionSeq);
+        } else {
+            sppr = PreGetSubPartitionFullPruningResult(rel, partOid);
+            if (sppr == NULL) {
+                continue;
+            }
+        }
+        sppr->partSeq = partitionSeq;
+        /* add SubPartitionPruningResult in order */
+        pruningRes->ls_selectedSubPartitions = list_insert_ordered_sppr(pruningRes->ls_selectedSubPartitions, sppr);
     }
 }

@@ -28,6 +28,7 @@
 #include "parser/parse_relation.h"
 #include "parser/parse_target.h"
 #include "parser/parse_type.h"
+#include "nodes/parsenodes_common.h"
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
 #include "utils/rel.h"
@@ -365,14 +366,14 @@ static void markTargetListOrigin(ParseState* pstate, TargetEntry* tle, Var* var,
  * omits the column name list.	So we should usually prefer to use
  * exprLocation(expr) for errors that can happen in a default INSERT.
  */
-Expr* transformAssignedExpr(ParseState* pstate, Expr* expr, char* colname, int attrno, List* indirection, int location)
+Expr* transformAssignedExpr(ParseState* pstate, Expr* expr, char* colname, int attrno, List* indirection, int location,
+                            Relation rd, RangeTblEntry* rte)
 {
     Oid type_id;    /* type of value provided */
     int32 type_mod; /* typmod of value provided */
     Oid attrtype;   /* type of target column */
     int32 attrtypmod;
     Oid attrcollation; /* collation of target column */
-    Relation rd = pstate->p_target_relation;
 
     AssertEreport(rd != NULL, MOD_OPT, "");
     /*
@@ -447,7 +448,7 @@ Expr* transformAssignedExpr(ParseState* pstate, Expr* expr, char* colname, int a
             /*
              * Build a Var for the column to be updated.
              */
-            colVar = (Node*)make_var(pstate, pstate->p_target_rangetblentry, attrno, location);
+            colVar = (Node*)make_var(pstate, rte, attrno, location);
         }
 
         expr = (Expr*)transformAssignmentIndirection(pstate,
@@ -554,11 +555,11 @@ Expr* transformAssignedExpr(ParseState* pstate, Expr* expr, char* colname, int a
  * indirection	subscripts/field names for target column, if any
  * location		error cursor position (should point at column name), or -1
  */
-void updateTargetListEntry(
-    ParseState* pstate, TargetEntry* tle, char* colname, int attrno, List* indirection, int location)
+void updateTargetListEntry(ParseState* pstate, TargetEntry* tle, char* colname, int attrno,
+    List* indirection, int location, Relation rd, RangeTblEntry* rte)
 {
     /* Fix up expression as needed */
-    tle->expr = transformAssignedExpr(pstate, tle->expr, colname, attrno, indirection, location);
+    tle->expr = transformAssignedExpr(pstate, tle->expr, colname, attrno, indirection, location, rd, rte);
 
     /*
      * Set the resno to identify the target column --- the rewriter and
@@ -839,22 +840,23 @@ List* checkInsertTargets(ParseState* pstate, List* cols, List** attrnos)
 {
     *attrnos = NIL;
     bool is_blockchain_rel = false;
+    Relation targetrel = (Relation)linitial(pstate->p_target_relation);
 
     if (cols == NIL) {
         /*
          * Generate default column list for INSERT.
          */
-        if (pstate->p_target_relation == NULL) {
+        if (targetrel == NULL) {
             ereport(ERROR,
                 (errmodule(MOD_OPT),
                     errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
-                    errmsg("pstate->p_target_relation is NULL unexpectedly")));
+                    errmsg("targetrel is NULL unexpectedly")));
         }
 
-        Form_pg_attribute* attr = pstate->p_target_relation->rd_att->attrs;
-        int numcol = RelationGetNumberOfAttributes(pstate->p_target_relation);
+        Form_pg_attribute* attr = targetrel->rd_att->attrs;
+        int numcol = RelationGetNumberOfAttributes(targetrel);
         int i;
-        is_blockchain_rel = pstate->p_target_relation->rd_isblockchain;
+        is_blockchain_rel = targetrel->rd_isblockchain;
 
         for (i = 0; i < numcol; i++) {
             ResTarget* col = NULL;
@@ -863,7 +865,7 @@ List* checkInsertTargets(ParseState* pstate, List* cols, List** attrnos)
                 continue;
             }
             /* If the hidden column in timeseries relation, skip it */
-            if (TsRelWithImplDistColumn(attr, i) && RelationIsTsStore(pstate->p_target_relation)) {
+            if (TsRelWithImplDistColumn(attr, i) && RelationIsTsStore(targetrel)) {
                 continue;
             }
 
@@ -892,13 +894,13 @@ List* checkInsertTargets(ParseState* pstate, List* cols, List** attrnos)
             int attrno;
 
             /* Lookup column name, ereport on failure */
-            attrno = attnameAttNum(pstate->p_target_relation, name, false);
+            attrno = attnameAttNum(targetrel, name, false);
             if (attrno == InvalidAttrNumber) {
                 ereport(ERROR,
                     (errcode(ERRCODE_UNDEFINED_COLUMN),
                         errmsg("column \"%s\" of relation \"%s\" does not exist",
                             name,
-                            RelationGetRelationName(pstate->p_target_relation)),
+                            RelationGetRelationName(targetrel)),
                         parser_errposition(pstate, col->location)));
             }
             /*
@@ -1249,7 +1251,7 @@ static List* ExpandRowReference(ParseState* pstate, Node* expr, bool targetlist)
 	}
 
     if (unlikely(tupleDesc == NULL)) {
-        ereport(ERROR, 
+        ereport(ERROR,
             (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), 
                 errmsg("tupleDesc should not be null")));
     }
@@ -1670,6 +1672,15 @@ static int FigureColnameInternal(Node* node, char** name)
         case T_XmlSerialize:
             *name = "xmlserialize";
             return 2;
+        /* get name of user_defined variables. */
+        case T_UserVar: {
+            size_t len = strlen(((UserVar *)node)->name) + strlen("@") + 1;
+            char *colname = (char *)palloc0(len);
+            errno_t rc = snprintf_s(colname, len, len - 1, "@%s", ((UserVar *)node)->name);
+            securec_check_ss(rc, "\0", "\0");
+            *name = colname;
+            return 1;
+        } break;
         default:
             break;
     }

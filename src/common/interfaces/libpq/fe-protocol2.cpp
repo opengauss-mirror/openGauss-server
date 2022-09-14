@@ -286,7 +286,7 @@ PostgresPollingStatusType pqSetenvPoll(PGconn* conn)
                 if (conn->sversion >= 70300 && conn->sversion < 70400)
                     query = "start transaction; select pg_catalog.pg_client_encoding(); end";
                 else
-                    query = "select pg_client_encoding()";
+                    query = "select pg_catalog.pg_client_encoding()";
                 if (!PQsendQuery(conn, query))
                     goto error_return;
 

@@ -16,7 +16,9 @@
 #include "knl/knl_variable.h"
 #include "storage/checksum_impl.h"
 
-void ChecksumForZeroPadding(uint32 *sums, const uint32 *dataArr, uint32 currentLeft, uint32 alignSize);
+#define CSI_DT_TWO 2
+
+void ChecksumForZeroPadding(uint32 *sums, const uint32 *dataArr, uint32 currentLeft);
 
 static inline uint32 pg_checksum_init(uint32 seed, uint32 value)
 {
@@ -34,7 +36,9 @@ uint32 DataBlockChecksum(char* data, uint32 size, bool zeroing)
 
     /* ensure that the size is compatible with the algorithm */
     uint32 alignSize = sizeof(uint32) * N_SUMS;
+#ifndef ROACH_COMMON
     Assert(zeroing || (size % alignSize == 0));
+#endif
 
     /* initialize partial checksums to their corresponding offsets */
     auto realSize = size < alignSize ? size : alignSize;
@@ -43,7 +47,11 @@ uint32 DataBlockChecksum(char* data, uint32 size, bool zeroing)
     char usedForInit[sizeof(uint32) * N_SUMS] = {0};
     if (zeroing && size < alignSize) {
         errno_t rc = memcpy_s(usedForInit, alignSize, (char *) dataArr, realSize);
+#ifndef ROACH_COMMON
         securec_check(rc, "", "");
+#else
+        (void)rc;
+#endif
         currentLeft -= realSize;
         initUint32 = (uint32*)usedForInit;
     } else {
@@ -51,7 +59,8 @@ uint32 DataBlockChecksum(char* data, uint32 size, bool zeroing)
         currentLeft -= alignSize;
     }
 
-    for (j = 0; j < N_SUMS; j += 2) {
+    uint8 step = 2;
+    for (j = 0; j < N_SUMS; j += step) {
         sums[j] = pg_checksum_init(g_checksumBaseOffsets[j], initUint32[j]);
         sums[j + 1] = pg_checksum_init(g_checksumBaseOffsets[j + 1], initUint32[j + 1]);
     }
@@ -59,7 +68,7 @@ uint32 DataBlockChecksum(char* data, uint32 size, bool zeroing)
 
     /* main checksum calculation */
     for (i = 1; i < size / alignSize; i++) {
-        for (j = 0; j < N_SUMS; j += 2) {
+        for (j = 0; j < N_SUMS; j += step) {
             CHECKSUM_COMP(sums[j], dataArr[j]);
             CHECKSUM_COMP(sums[j + 1], dataArr[j + 1]);
         }
@@ -69,7 +78,7 @@ uint32 DataBlockChecksum(char* data, uint32 size, bool zeroing)
     /* checksum for zero padding */
     currentLeft -= alignSize * (i - 1);
     if (currentLeft > 0 && currentLeft < alignSize && zeroing) {
-        ChecksumForZeroPadding(sums, dataArr, currentLeft, alignSize);
+        ChecksumForZeroPadding(sums, dataArr, currentLeft);
     }
 
     /* finally add in two rounds of zeroes for additional mixing */
@@ -84,13 +93,17 @@ uint32 DataBlockChecksum(char* data, uint32 size, bool zeroing)
     return result;
 }
 
-void ChecksumForZeroPadding(uint32 *sums, const uint32 *dataArr, uint32 currentLeft, uint32 alignSize)
+void ChecksumForZeroPadding(uint32 *sums, const uint32 *dataArr, uint32 currentLeft)
 {
     auto maxLen = sizeof(uint32) * N_SUMS;
     char currentLeftChars[maxLen] = {0};
     errno_t rc = memcpy_s(currentLeftChars, maxLen, (char *)dataArr, currentLeft);
+#ifndef ROACH_COMMON
     securec_check(rc, "", "");
-    for (int j = 0; j < N_SUMS; j += 2) {
+#else
+    (void)rc;
+#endif
+    for (int j = 0; j < N_SUMS; j += CSI_DT_TWO) {
         CHECKSUM_COMP(sums[j], ((uint32 *)currentLeftChars)[j]);
         CHECKSUM_COMP(sums[j + 1], ((uint32 *)currentLeftChars)[j + 1]);
     }
@@ -108,8 +121,9 @@ uint32 pg_checksum_block(char* data, uint32 size)
     Assert((size % (sizeof(uint32) * N_SUMS)) == 0);
 #endif
 
+    uint8 step = 2;
     /* initialize partial checksums to their corresponding offsets */
-    for (j = 0; j < N_SUMS; j += 2) {
+    for (j = 0; j < N_SUMS; j += step) {
         sums[j] = pg_checksum_init(g_checksumBaseOffsets[j], dataArr[j]);
         sums[j + 1] = pg_checksum_init(g_checksumBaseOffsets[j + 1], dataArr[j + 1]);
     }
@@ -117,7 +131,7 @@ uint32 pg_checksum_block(char* data, uint32 size)
 
     /* main checksum calculation */
     for (i = 1; i < size / (sizeof(uint32) * N_SUMS); i++) {
-        for (j = 0; j < N_SUMS; j += 2) {
+        for (j = 0; j < N_SUMS; j += step) {
             CHECKSUM_COMP(sums[j], dataArr[j]);
             CHECKSUM_COMP(sums[j + 1], dataArr[j + 1]);
         }

@@ -1,0 +1,411 @@
+a: 1
+b: abc
+d: 1.2340000000
+e: 127
+f: false
+g: 123456
+k: ["2010-01-01 14:30:00","2010-01-01 15:30:00"]
+a: 2
+b: abc
+d: 1.2340000000
+e: 127
+f: true
+g: 223456
+k: ["2010-01-01 14:30:00","2010-01-01 15:30:00"]
+********************Integer Datatype********************
+----------result is golang string----------
+F1:255, F2:32767, F3:2147483647, F4:2147483647, F5:9223372036854775807, F6:123
+F1:0, F2:0, F3:0, F4:0, F5:0, F6:123
+F1:0, F2:-32768, F3:-2147483648, F4:-2147483648, F5:-9223372036854775808, F6:123
+
+----------result is golang interface{}----------
+F1:[50 53 53], F2:32767, F3:2147483647, F4:2147483647, F5:9223372036854775807, F6:123
+F1:[48], F2:0, F3:0, F4:0, F5:0, F6:123
+F1:[48], F2:-32768, F3:-2147483648, F4:-2147483648, F5:-9223372036854775808, F6:123
+
+----------result is golang []byte----------
+F1:[50 53 53], F2:[51 50 55 54 55], F3:[50 49 52 55 52 56 51 54 52 55], F4:[50 49 52 55 52 56 51 54 52 55], F5:[57 50 50 51 51 55 50 48 51 54 56 53 52 55 55 53 56 48 55], F6:[49 50 51]
+F1:[48], F2:[48], F3:[48], F4:[48], F5:[48], F6:[49 50 51]
+F1:[48], F2:[45 51 50 55 54 56], F3:[45 50 49 52 55 52 56 51 54 52 56], F4:[45 50 49 52 55 52 56 51 54 52 56], F5:[45 57 50 50 51 51 55 50 48 51 54 56 53 52 55 55 53 56 48 56], F6:[49 50 51]
+
+----------result is golang sql.RawBytes----------
+F1:[50 53 53], F2:[51 50 55 54 55], F3:[50 49 52 55 52 56 51 54 52 55], F4:[50 49 52 55 52 56 51 54 52 55], F5:[57 50 50 51 51 55 50 48 51 54 56 53 52 55 55 53 56 48 55], F6:[49 50 51]
+F1:[48], F2:[48], F3:[48], F4:[48], F5:[48], F6:[49 50 51]
+F1:[48], F2:[45 51 50 55 54 56], F3:[45 50 49 52 55 52 56 51 54 52 56], F4:[45 50 49 52 55 52 56 51 54 52 56], F5:[45 57 50 50 51 51 55 50 48 51 54 56 53 52 55 55 53 56 48 56], F6:[49 50 51]
+
+----------result is golang bool----------
+sql: Scan error on column index 0, name "f1": sql/driver: couldn't convert "255" into type bool
+sql: Scan error on column index 5, name "i1toi2": sql/driver: couldn't convert 123 into type bool
+sql: Scan error on column index 1, name "f2": sql/driver: couldn't convert -32768 into type bool
+
+----------result is golang integer----------
+F1:255, F2:32767, F3:2147483647, F4:2147483647, F5:9223372036854775807, F6:123
+F1:0, F2:0, F3:0, F4:0, F5:0, F6:123
+F1:0, F2:-32768, F3:-2147483648, F4:-2147483648, F5:-9223372036854775808, F6:123
+
+----------result is golang float----------
+F1:255, F2:32767, F3:2.147483647e+09, F4:2.147483647e+09, F5:9.223372036854776e+18, F6:123
+F1:0, F2:0, F3:0, F4:0, F5:0, F6:123
+F1:0, F2:-32768, F3:-2.147483648e+09, F4:-2.147483648e+09, F5:-9.223372036854776e+18, F6:123
+
+----------result is golang others----------
+sql: Scan error on column index 0, name "f1": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+sql: Scan error on column index 0, name "f1": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+sql: Scan error on column index 0, name "f1": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+
+********************Numeric Datatype********************
+----------result is golang string----------
+F1:437164.41907403710, F2:71.6149, F3:34819647147, F4:437164.41907403710, F5:71.6149, F6:34819647147
+
+----------result is golang interface{}----------
+F1:[52 51 55 49 54 52 46 52 49 57 48 55 52 48 51 55 49 48], F2:[55 49 46 54 49 52 57], F3:[51 52 56 49 57 54 52 55 49 52 55], F4:[52 51 55 49 54 52 46 52 49 57 48 55 52 48 51 55 49 48], F5:[55 49 46 54 49 52 57], F6:[51 52 56 49 57 54 52 55 49 52 55]
+
+----------result is golang []byte----------
+F1:[52 51 55 49 54 52 46 52 49 57 48 55 52 48 51 55 49 48], F2:[55 49 46 54 49 52 57], F3:[51 52 56 49 57 54 52 55 49 52 55], F4:[52 51 55 49 54 52 46 52 49 57 48 55 52 48 51 55 49 48], F5:[55 49 46 54 49 52 57], F6:[51 52 56 49 57 54 52 55 49 52 55]
+
+----------result is golang sql.RawBytes----------
+F1:[52 51 55 49 54 52 46 52 49 57 48 55 52 48 51 55 49 48], F2:[55 49 46 54 49 52 57], F3:[51 52 56 49 57 54 52 55 49 52 55], F4:[52 51 55 49 54 52 46 52 49 57 48 55 52 48 51 55 49 48], F5:[55 49 46 54 49 52 57], F6:[51 52 56 49 57 54 52 55 49 52 55]
+
+----------result is golang bool----------
+sql: Scan error on column index 0, name "f1": sql/driver: couldn't convert "437164.41907403710" into type bool
+
+----------result is golang integer----------
+sql: Scan error on column index 0, name "f1": converting driver.Value type []uint8 ("437164.41907403710") to a int64: invalid syntax
+
+----------result is golang float----------
+F1:437164.4190740371, F2:71.6149, F3:3.4819647147e+10, F4:437164.4190740371, F5:71.6149, F6:3.4819647147e+10
+
+----------result is golang others----------
+sql: Scan error on column index 0, name "f1": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+
+********************Float Datatype********************
+----------result is golang string----------
+F1:4164.52, F2:34847.0438321, F3:437164.41940371, F4:71.6149329, F5:71.6933, F6:34819647147.04
+
+----------result is golang interface{}----------
+F1:4164.52, F2:34847.0438321, F3:437164.41940371, F4:71.6149329, F5:[55 49 46 54 57 51 51], F6:[51 52 56 49 57 54 52 55 49 52 55 46 48 52]
+
+----------result is golang []byte----------
+F1:[52 49 54 52 46 53 50], F2:[51 52 56 52 55 46 48 52 51 56 51 50 49], F3:[52 51 55 49 54 52 46 52 49 57 52 48 51 55 49], F4:[55 49 46 54 49 52 57 51 50 57], F5:[55 49 46 54 57 51 51], F6:[51 52 56 49 57 54 52 55 49 52 55 46 48 52]
+
+----------result is golang sql.RawBytes----------
+F1:[52 49 54 52 46 53 50], F2:[51 52 56 52 55 46 48 52 51 56 51 50 49], F3:[52 51 55 49 54 52 46 52 49 57 52 48 51 55 49], F4:[55 49 46 54 49 52 57 51 50 57], F5:[55 49 46 54 57 51 51], F6:[51 52 56 49 57 54 52 55 49 52 55 46 48 52]
+
+----------result is golang bool----------
+sql: Scan error on column index 0, name "f1": sql/driver: couldn't convert 4164.52 (float64) into type bool
+
+----------result is golang integer----------
+sql: Scan error on column index 0, name "f1": converting driver.Value type float64 ("4164.52") to a int64: invalid syntax
+
+----------result is golang float----------
+F1:4164.52, F2:34847.0438321, F3:437164.41940371, F4:71.6149329, F5:71.6933, F6:3.481964714704e+10
+
+----------result is golang others----------
+sql: Scan error on column index 0, name "f1": unsupported Scan, storing driver.Value type float64 into type *time.Time
+
+********************Serial Datatype********************
+----------result is golang string----------
+F1:1, F2:1, F3:1, F4:1, F5:1, F6:1
+
+----------result is golang interface{}----------
+F1:1, F2:1, F3:1, F4:1, F5:1, F6:1
+
+----------result is golang []byte----------
+F1:[49], F2:[49], F3:[49], F4:[49], F5:[49], F6:[49]
+
+----------result is golang sql.RawBytes----------
+F1:[49], F2:[49], F3:[49], F4:[49], F5:[49], F6:[49]
+
+----------result is golang bool----------
+F1:true, F2:true, F3:true, F4:true, F5:true, F6:true
+
+----------result is golang integer----------
+F1:1, F2:1, F3:1, F4:1, F5:1, F6:1
+
+----------result is golang float----------
+F1:1, F2:1, F3:1, F4:1, F5:1, F6:1
+
+----------result is golang others----------
+sql: Scan error on column index 0, name "f1": unsupported Scan, storing driver.Value type int64 into type *time.Time
+********************Datetime Datatype********************
+----------result is golang string----------
+F1:2022-01-28T00:00:00Z, F2:0000-01-01T14:56:38.687146Z, F3:0000-01-01T14:56:38.687146Z, F4:2022-01-28T14:56:38.687146Z, F5:2022-01-28T23:01:28.382264+08:00
+
+----------result is golang interface{}----------
+F1:2022-01-28 00:00:00 +0000 +0000, F2:0000-01-01 14:56:38.687146 +0000 UTC, F3:0000-01-01 14:56:38.687146 +0000 +0000, F4:2022-01-28 14:56:38.687146 +0000 +0000, F5:2022-01-28 23:01:28.382264 +0800 CST
+
+----------result is golang []byte----------
+F1:[50 48 50 50 45 48 49 45 50 56 84 48 48 58 48 48 58 48 48 90], F2:[48 48 48 48 45 48 49 45 48 49 84 49 52 58 53 54 58 51 56 46 54 56 55 49 52 54 90], F3:[48 48 48 48 45 48 49 45 48 49 84 49 52 58 53 54 58 51 56 46 54 56 55 49 52 54 90], F4:[50 48 50 50 45 48 49 45 50 56 84 49 52 58 53 54 58 51 56 46 54 56 55 49 52 54 90], F5:[50 48 50 50 45 48 49 45 50 56 84 50 51 58 48 49 58 50 56 46 51 56 50 50 54 52 43 48 56 58 48 48]
+
+----------result is golang sql.RawBytes----------
+F1:[50 48 50 50 45 48 49 45 50 56 84 48 48 58 48 48 58 48 48 90], F2:[48 48 48 48 45 48 49 45 48 49 84 49 52 58 53 54 58 51 56 46 54 56 55 49 52 54 90], F3:[48 48 48 48 45 48 49 45 48 49 84 49 52 58 53 54 58 51 56 46 54 56 55 49 52 54 90], F4:[50 48 50 50 45 48 49 45 50 56 84 49 52 58 53 54 58 51 56 46 54 56 55 49 52 54 90], F5:[50 48 50 50 45 48 49 45 50 56 84 50 51 58 48 49 58 50 56 46 51 56 50 50 54 52 43 48 56 58 48 48]
+
+----------result is golang time.Time----------
+F1:2022-01-28 00:00:00 +0000 +0000, F2:0000-01-01 14:56:38.687146 +0000 UTC, F3:0000-01-01 14:56:38.687146 +0000 +0000, F4:2022-01-28 14:56:38.687146 +0000 +0000, F5:2022-01-28 23:01:28.382264 +0800 CST
+
+----------result is golang others----------
+sql: Scan error on column index 0, name "f1": converting driver.Value type time.Time ("2022-01-28 00:00:00 +0000 +0000") to a int64: invalid syntax
+
+********************Interval Datatype********************
+----------result is golang string----------
+F1:2022-01-28 15:01:00, F2:3 days, F3:2 years, F4:-19 years -4 mons -04:04:00, F5:2022-01-28 23:00:00+08
+
+----------result is golang interface{}----------
+F1:[50 48 50 50 45 48 49 45 50 56 32 49 53 58 48 49 58 48 48], F2:[51 32 100 97 121 115], F3:[50 32 121 101 97 114 115], F4:[45 49 57 32 121 101 97 114 115 32 45 52 32 109 111 110 115 32 45 48 52 58 48 52 58 48 48], F5:[50 48 50 50 45 48 49 45 50 56 32 50 51 58 48 48 58 48 48 43 48 56]
+
+----------result is golang []byte----------
+F1:[50 48 50 50 45 48 49 45 50 56 32 49 53 58 48 49 58 48 48], F2:[51 32 100 97 121 115], F3:[50 32 121 101 97 114 115], F4:[45 49 57 32 121 101 97 114 115 32 45 52 32 109 111 110 115 32 45 48 52 58 48 52 58 48 48], F5:[50 48 50 50 45 48 49 45 50 56 32 50 51 58 48 48 58 48 48 43 48 56]
+
+----------result is golang sql.RawBytes----------
+F1:[50 48 50 50 45 48 49 45 50 56 32 49 53 58 48 49 58 48 48], F2:[51 32 100 97 121 115], F3:[50 32 121 101 97 114 115], F4:[45 49 57 32 121 101 97 114 115 32 45 52 32 109 111 110 115 32 45 48 52 58 48 52 58 48 48], F5:[50 48 50 50 45 48 49 45 50 56 32 50 51 58 48 48 58 48 48 43 48 56]
+
+----------result is golang time.Time----------
+sql: Scan error on column index 0, name "f1": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+
+----------result is golang others----------
+sql: Scan error on column index 0, name "f1": converting driver.Value type []uint8 ("2022-01-28 15:01:00") to a int64: invalid syntax
+********************Money Datatype********************
+----------result is golang string----------
+F1:$100.00
+F1:$2,090.11
+F1:$12.43
+
+----------result is golang interface{}----------
+F1:[36 49 48 48 46 48 48]
+F1:[36 50 44 48 57 48 46 49 49]
+F1:[36 49 50 46 52 51]
+
+----------result is golang []byte----------
+F1:[36 49 48 48 46 48 48]
+F1:[36 50 44 48 57 48 46 49 49]
+F1:[36 49 50 46 52 51]
+
+----------result is golang sql.RawBytes----------
+F1:[36 49 48 48 46 48 48]
+F1:[36 50 44 48 57 48 46 49 49]
+F1:[36 49 50 46 52 51]
+
+----------result is golang bool----------
+sql: Scan error on column index 0, name "f1": sql/driver: couldn't convert "$100.00" into type bool
+sql: Scan error on column index 0, name "f1": sql/driver: couldn't convert "$2,090.11" into type bool
+sql: Scan error on column index 0, name "f1": sql/driver: couldn't convert "$12.43" into type bool
+
+----------result is golang others----------
+sql: Scan error on column index 0, name "f1": converting driver.Value type []uint8 ("$100.00") to a int64: invalid syntax
+sql: Scan error on column index 0, name "f1": converting driver.Value type []uint8 ("$2,090.11") to a int64: invalid syntax
+sql: Scan error on column index 0, name "f1": converting driver.Value type []uint8 ("$12.43") to a int64: invalid syntax
+
+********************Bool Datatype********************
+----------result is golang string----------
+F1:true
+F1:false
+F1:true
+
+----------result is golang interface{}----------
+F1:true
+F1:false
+F1:true
+
+----------result is golang []byte----------
+F1:[116 114 117 101]
+F1:[102 97 108 115 101]
+F1:[116 114 117 101]
+
+----------result is golang sql.RawBytes----------
+F1:[116 114 117 101]
+F1:[102 97 108 115 101]
+F1:[116 114 117 101]
+
+----------result is golang bool----------
+F1:true
+F1:false
+F1:true
+
+----------result is golang others----------
+sql: Scan error on column index 0, name "f1": converting driver.Value type bool ("true") to a int64: invalid syntax
+sql: Scan error on column index 0, name "f1": converting driver.Value type bool ("false") to a int64: invalid syntax
+sql: Scan error on column index 0, name "f1": converting driver.Value type bool ("true") to a int64: invalid syntax
+********************Character Datatype********************
+----------result is golang string----------
+F1:a, F2:你 , F3:bbb, F4:2090.11, F5:中国, F6:dgjqgdgfakgfekikgqif, F7:dgjqgdgfakgfekikgqif
+F1:1, F2:true, F3:0, F4:false, F5:f, F6:TRUE, F7:FALSE
+F1:1, F2:2000, F3:0, F4:4, F5:5, F6:6, F7:7
+
+----------result is golang interface{}----------
+F1:[97], F2:[228 189 160 32], F3:bbb, F4:2090.11, F5:[228 184 173 229 155 189], F6:dgjqgdgfakgfekikgqif, F7:[100 103 106 113 103 100 103 102 97 107 103 102 101 107 105 107 103 113 105 102]
+F1:[49], F2:[116 114 117 101], F3:0, F4:false, F5:[102], F6:TRUE, F7:[70 65 76 83 69]
+F1:[49], F2:[50 48 48 48], F3:0, F4:4, F5:[53], F6:6, F7:[55]
+
+----------result is golang []byte----------
+F1:[97], F2:[228 189 160 32], F3:[98 98 98], F4:[50 48 57 48 46 49 49], F5:[228 184 173 229 155 189], F6:[100 103 106 113 103 100 103 102 97 107 103 102 101 107 105 107 103 113 105 102], F7:[100 103 106 113 103 100 103 102 97 107 103 102 101 107 105 107 103 113 105 102]
+F1:[49], F2:[116 114 117 101], F3:[48], F4:[102 97 108 115 101], F5:[102], F6:[84 82 85 69], F7:[70 65 76 83 69]
+F1:[49], F2:[50 48 48 48], F3:[48], F4:[52], F5:[53], F6:[54], F7:[55]
+
+----------result is golang sql.RawBytes----------
+F1:[97], F2:[228 189 160 32], F3:[98 98 98], F4:[50 48 57 48 46 49 49], F5:[228 184 173 229 155 189], F6:[100 103 106 113 103 100 103 102 97 107 103 102 101 107 105 107 103 113 105 102], F7:[100 103 106 113 103 100 103 102 97 107 103 102 101 107 105 107 103 113 105 102]
+F1:[49], F2:[116 114 117 101], F3:[48], F4:[102 97 108 115 101], F5:[102], F6:[84 82 85 69], F7:[70 65 76 83 69]
+F1:[49], F2:[50 48 48 48], F3:[48], F4:[52], F5:[53], F6:[54], F7:[55]
+
+----------result is golang bool----------
+sql: Scan error on column index 0, name "f1": sql/driver: couldn't convert "a" into type bool
+F1:true, F2:true, F3:false, F4:false, F5:false, F6:true, F7:false
+sql: Scan error on column index 1, name "f2": sql/driver: couldn't convert "2000" into type bool
+
+----------result is golang integer----------
+sql: Scan error on column index 0, name "f1": converting driver.Value type []uint8 ("a") to a int64: invalid syntax
+sql: Scan error on column index 1, name "f2": converting driver.Value type []uint8 ("true") to a int64: invalid syntax
+F1:1, F2:2000, F3:0, F4:4, F5:5, F6:6, F7:7
+
+----------result is golang float----------
+sql: Scan error on column index 0, name "f1": converting driver.Value type []uint8 ("a") to a float64: invalid syntax
+sql: Scan error on column index 1, name "f2": converting driver.Value type []uint8 ("true") to a float64: invalid syntax
+F1:1, F2:2000, F3:0, F4:4, F5:5, F6:6, F7:7
+
+----------result is golang others----------
+sql: Scan error on column index 0, name "f1": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+sql: Scan error on column index 0, name "f1": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+sql: Scan error on column index 0, name "f1": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+
+********************Binary Datatype********************
+----------result is golang string----------
+F1:0123, F2:0ABC, F3:deqde, F4:0123, F5:0ABC, F6:deqde, F7:0123
+
+----------result is golang interface{}----------
+F1:[48 49 50 51], F2:[48 65 66 67], F3:[100 101 113 100 101], F4:[48 49 50 51], F5:[48 65 66 67], F6:[100 101 113 100 101], F7:[48 49 50 51]
+
+----------result is golang []byte----------
+F1:[48 49 50 51], F2:[48 65 66 67], F3:[100 101 113 100 101], F4:[48 49 50 51], F5:[48 65 66 67], F6:[100 101 113 100 101], F7:[48 49 50 51]
+
+----------result is golang sql.RawBytes----------
+F1:[48 49 50 51], F2:[48 65 66 67], F3:[100 101 113 100 101], F4:[48 49 50 51], F5:[48 65 66 67], F6:[100 101 113 100 101], F7:[48 49 50 51]
+
+----------result is golang bool----------
+sql: Scan error on column index 0, name "f1": sql/driver: couldn't convert "0123" into type bool
+
+----------result is golang integer----------
+sql: Scan error on column index 1, name "f2": converting driver.Value type []uint8 ("0ABC") to a int64: invalid syntax
+
+----------result is golang float----------
+sql: Scan error on column index 1, name "f2": converting driver.Value type []uint8 ("0ABC") to a float64: invalid syntax
+
+----------result is golang others----------
+sql: Scan error on column index 0, name "f1": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+********************Geometry Datatype********************
+----------result is golang string----------
+F1:(1,2), F2:[(1,2),(3,4)], F3:(2,2),(1,1), F4:((1,0),(2,0),(3,4)), F5:((1,0),(2,0),(3,4)), F6:<(0,0),2>
+
+----------result is golang interface{}----------
+F1:[40 49 44 50 41], F2:[91 40 49 44 50 41 44 40 51 44 52 41 93], F3:[40 50 44 50 41 44 40 49 44 49 41], F4:[40 40 49 44 48 41 44 40 50 44 48 41 44 40 51 44 52 41 41], F5:[40 40 49 44 48 41 44 40 50 44 48 41 44 40 51 44 52 41 41], F6:[60 40 48 44 48 41 44 50 62]
+
+----------result is golang []byte----------
+F1:[40 49 44 50 41], F2:[91 40 49 44 50 41 44 40 51 44 52 41 93], F3:[40 50 44 50 41 44 40 49 44 49 41], F4:[40 40 49 44 48 41 44 40 50 44 48 41 44 40 51 44 52 41 41], F5:[40 40 49 44 48 41 44 40 50 44 48 41 44 40 51 44 52 41 41], F6:[60 40 48 44 48 41 44 50 62]
+
+----------result is golang sql.RawBytes----------
+F1:[40 49 44 50 41], F2:[91 40 49 44 50 41 44 40 51 44 52 41 93], F3:[40 50 44 50 41 44 40 49 44 49 41], F4:[40 40 49 44 48 41 44 40 50 44 48 41 44 40 51 44 52 41 41], F5:[40 40 49 44 48 41 44 40 50 44 48 41 44 40 51 44 52 41 41], F6:[60 40 48 44 48 41 44 50 62]
+
+----------result is golang others----------
+sql: Scan error on column index 0, name "f1": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+********************NetAddr Datatype********************
+----------result is golang string----------
+F1:192.168.0.0/24, F2:192.168.1.5/8, F3:08:00:2b:01:02:03
+F1:192.1.0.0/24, F2:192.1.2.1, F3:08:00:2b:01:02:03
+
+----------result is golang interface{}----------
+F1:[49 57 50 46 49 54 56 46 48 46 48 47 50 52], F2:[49 57 50 46 49 54 56 46 49 46 53 47 56], F3:[48 56 58 48 48 58 50 98 58 48 49 58 48 50 58 48 51]
+F1:[49 57 50 46 49 46 48 46 48 47 50 52], F2:[49 57 50 46 49 46 50 46 49], F3:[48 56 58 48 48 58 50 98 58 48 49 58 48 50 58 48 51]
+
+----------result is golang []byte----------
+F1:[49 57 50 46 49 54 56 46 48 46 48 47 50 52], F2:[49 57 50 46 49 54 56 46 49 46 53 47 56], F3:[48 56 58 48 48 58 50 98 58 48 49 58 48 50 58 48 51]
+F1:[49 57 50 46 49 46 48 46 48 47 50 52], F2:[49 57 50 46 49 46 50 46 49], F3:[48 56 58 48 48 58 50 98 58 48 49 58 48 50 58 48 51]
+
+----------result is golang sql.RawBytes----------
+F1:[49 57 50 46 49 54 56 46 48 46 48 47 50 52], F2:[49 57 50 46 49 54 56 46 49 46 53 47 56], F3:[48 56 58 48 48 58 50 98 58 48 49 58 48 50 58 48 51]
+F1:[49 57 50 46 49 46 48 46 48 47 50 52], F2:[49 57 50 46 49 46 50 46 49], F3:[48 56 58 48 48 58 50 98 58 48 49 58 48 50 58 48 51]
+
+----------result is golang others----------
+sql: Scan error on column index 0, name "f1": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+sql: Scan error on column index 0, name "f1": unsupported Scan, storing driver.Value type []uint8 into type *time.Time
+
+********************BitStr Datatype********************
+----------result is golang string----------
+F1:1, F2:101, F3:1011
+F1:2, F2:100, F3:01
+
+----------result is golang interface{}----------
+F1:1, F2:[49 48 49], F3:[49 48 49 49]
+F1:2, F2:[49 48 48], F3:[48 49]
+
+----------result is golang []byte----------
+F1:[49], F2:[49 48 49], F3:[49 48 49 49]
+F1:[50], F2:[49 48 48], F3:[48 49]
+
+----------result is golang sql.RawBytes----------
+F1:[49], F2:[49 48 49], F3:[49 48 49 49]
+F1:[50], F2:[49 48 48], F3:[48 49]
+
+----------result is golang others----------
+sql: Scan error on column index 0, name "f1": unsupported Scan, storing driver.Value type int64 into type *time.Time
+sql: Scan error on column index 0, name "f1": unsupported Scan, storing driver.Value type int64 into type *time.Time
+
+********************TextSearch Datatype********************
+----------result is golang string----------
+F1:1, F2:'a' 'and' 'ate' 'cat' 'fat' 'mat' 'on' 'rat' 'sat', F3:'fat' & 'rat'
+
+----------result is golang interface{}----------
+F1:1, F2:[39 97 39 32 39 97 110 100 39 32 39 97 116 101 39 32 39 99 97 116 39 32 39 102 97 116 39 32 39 109 97 116 39 32 39 111 110 39 32 39 114 97 116 39 32 39 115 97 116 39], F3:[39 102 97 116 39 32 38 32 39 114 97 116 39]
+
+----------result is golang []byte----------
+F1:[49], F2:[39 97 39 32 39 97 110 100 39 32 39 97 116 101 39 32 39 99 97 116 39 32 39 102 97 116 39 32 39 109 97 116 39 32 39 111 110 39 32 39 114 97 116 39 32 39 115 97 116 39], F3:[39 102 97 116 39 32 38 32 39 114 97 116 39]
+
+----------result is golang sql.RawBytes----------
+F1:[49], F2:[39 97 39 32 39 97 110 100 39 32 39 97 116 101 39 32 39 99 97 116 39 32 39 102 97 116 39 32 39 109 97 116 39 32 39 111 110 39 32 39 114 97 116 39 32 39 115 97 116 39], F3:[39 102 97 116 39 32 38 32 39 114 97 116 39]
+
+----------result is golang others----------
+sql: Scan error on column index 0, name "f1": unsupported Scan, storing driver.Value type int64 into type *time.Time
+********************Range Datatype********************
+----------result is golang string----------
+F1:[-1,11), F2:[-2910,7738), F3:(367.431,731.431], F4:("2010-01-01 14:30:00","2010-01-04 15:30:00"), F5:["2022-01-28 23:01:28.382264+08","2022-01-30 23:01:28.382264+08"], F6:[2022-01-28,2022-02-01)
+
+----------result is golang interface{}----------
+F1:[91 45 49 44 49 49 41], F2:[91 45 50 57 49 48 44 55 55 51 56 41], F3:[40 51 54 55 46 52 51 49 44 55 51 49 46 52 51 49 93], F4:[40 34 50 48 49 48 45 48 49 45 48 49 32 49 52 58 51 48 58 48 48 34 44 34 50 48 49 48 45 48 49 45 48 52 32 49 53 58 51 48 58 48 48 34 41], F5:[91 34 50 48 50 50 45 48 49 45 50 56 32 50 51 58 48 49 58 50 56 46 51 56 50 50 54 52 43 48 56 34 44 34 50 48 50 50 45 48 49 45 51 48 32 50 51 58 48 49 58 50 56 46 51 56 50 50 54 52 43 48 56 34 93], F6:[91 50 48 50 50 45 48 49 45 50 56 44 50 48 50 50 45 48 50 45 48 49 41]
+
+----------result is golang []byte----------
+F1:[91 45 49 44 49 49 41], F2:[91 45 50 57 49 48 44 55 55 51 56 41], F3:[40 51 54 55 46 52 51 49 44 55 51 49 46 52 51 49 93], F4:[40 34 50 48 49 48 45 48 49 45 48 49 32 49 52 58 51 48 58 48 48 34 44 34 50 48 49 48 45 48 49 45 48 52 32 49 53 58 51 48 58 48 48 34 41], F5:[91 34 50 48 50 50 45 48 49 45 50 56 32 50 51 58 48 49 58 50 56 46 51 56 50 50 54 52 43 48 56 34 44 34 50 48 50 50 45 48 49 45 51 48 32 50 51 58 48 49 58 50 56 46 51 56 50 50 54 52 43 48 56 34 93], F6:[91 50 48 50 50 45 48 49 45 50 56 44 50 48 50 50 45 48 50 45 48 49 41]
+
+----------result is golang sql.RawBytes----------
+F1:[91 45 49 44 49 49 41], F2:[91 45 50 57 49 48 44 55 55 51 56 41], F3:[40 51 54 55 46 52 51 49 44 55 51 49 46 52 51 49 93], F4:[40 34 50 48 49 48 45 48 49 45 48 49 32 49 52 58 51 48 58 48 48 34 44 34 50 48 49 48 45 48 49 45 48 52 32 49 53 58 51 48 58 48 48 34 41], F5:[91 34 50 48 50 50 45 48 49 45 50 56 32 50 51 58 48 49 58 50 56 46 51 56 50 50 54 52 43 48 56 34 44 34 50 48 50 50 45 48 49 45 51 48 32 50 51 58 48 49 58 50 56 46 51 56 50 50 54 52 43 48 56 34 93], F6:[91 50 48 50 50 45 48 49 45 50 56 44 50 48 50 50 45 48 50 45 48 49 41]
+
+----------result is golang others----------
+sql: Scan error on column index 0, name "f1": sql/driver: couldn't convert "[-1,11)" into type bool
+
+********************Json Datatype********************
+----------result is golang string----------
+F1:   [1, " a ", {"a"   :1    }]  , F2:[1, " a ", {"a": 1}], F3:{"a" : 1, "a" : 2}, F4:{"a": 2}, F5:{"aa" : 1, "b" : 2, "a" : 3}, F6:{"a": 3, "b": 2, "aa": 1}
+
+----------result is golang interface{}----------
+F1:[32 32 32 91 49 44 32 34 32 97 32 34 44 32 123 34 97 34 32 32 32 58 49 32 32 32 32 125 93 32 32], F2:[91 49 44 32 34 32 97 32 34 44 32 123 34 97 34 58 32 49 125 93], F3:[123 34 97 34 32 58 32 49 44 32 34 97 34 32 58 32 50 125], F4:[123 34 97 34 58 32 50 125], F5:[123 34 97 97 34 32 58 32 49 44 32 34 98 34 32 58 32 50 44 32 34 97 34 32 58 32 51 125], F6:[123 34 97 34 58 32 51 44 32 34 98 34 58 32 50 44 32 34 97 97 34 58 32 49 125]
+
+----------result is golang []byte----------
+F1:[32 32 32 91 49 44 32 34 32 97 32 34 44 32 123 34 97 34 32 32 32 58 49 32 32 32 32 125 93 32 32], F2:[91 49 44 32 34 32 97 32 34 44 32 123 34 97 34 58 32 49 125 93], F3:[123 34 97 34 32 58 32 49 44 32 34 97 34 32 58 32 50 125], F4:[123 34 97 34 58 32 50 125], F5:[123 34 97 97 34 32 58 32 49 44 32 34 98 34 32 58 32 50 44 32 34 97 34 32 58 32 51 125], F6:[123 34 97 34 58 32 51 44 32 34 98 34 58 32 50 44 32 34 97 97 34 58 32 49 125]
+
+----------result is golang sql.RawBytes----------
+F1:[32 32 32 91 49 44 32 34 32 97 32 34 44 32 123 34 97 34 32 32 32 58 49 32 32 32 32 125 93 32 32], F2:[91 49 44 32 34 32 97 32 34 44 32 123 34 97 34 58 32 49 125 93], F3:[123 34 97 34 32 58 32 49 44 32 34 97 34 32 58 32 50 125], F4:[123 34 97 34 58 32 50 125], F5:[123 34 97 97 34 32 58 32 49 44 32 34 98 34 32 58 32 50 44 32 34 97 34 32 58 32 51 125], F6:[123 34 97 34 58 32 51 44 32 34 98 34 58 32 50 44 32 34 97 97 34 58 32 49 125]
+
+----------result is golang others----------
+sql: Scan error on column index 0, name "f1": sql/driver: couldn't convert "   [1, \" a \", {\"a\"   :1    }]  " into type bool
+********************Other Datatype********************
+----------result is golang string----------
+F1:a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11, F2:e697da2eaa3a775b, F3:685847ed1fe38e18f6b0e2b18c00edee, F4:\x484c4c00000000002b05000000000000000000000000000000000000
+
+----------result is golang interface{}----------
+F1:[97 48 101 101 98 99 57 57 45 57 99 48 98 45 52 101 102 56 45 98 98 54 100 45 54 98 98 57 98 100 51 56 48 97 49 49], F2:[101 54 57 55 100 97 50 101 97 97 51 97 55 55 53 98], F3:[54 56 53 56 52 55 101 100 49 102 101 51 56 101 49 56 102 54 98 48 101 50 98 49 56 99 48 48 101 100 101 101], F4:[92 120 52 56 52 99 52 99 48 48 48 48 48 48 48 48 48 48 50 98 48 53 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48]
+
+----------result is golang []byte----------
+F1:[97 48 101 101 98 99 57 57 45 57 99 48 98 45 52 101 102 56 45 98 98 54 100 45 54 98 98 57 98 100 51 56 48 97 49 49], F2:[101 54 57 55 100 97 50 101 97 97 51 97 55 55 53 98], F3:[54 56 53 56 52 55 101 100 49 102 101 51 56 101 49 56 102 54 98 48 101 50 98 49 56 99 48 48 101 100 101 101], F4:[92 120 52 56 52 99 52 99 48 48 48 48 48 48 48 48 48 48 50 98 48 53 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48]
+
+----------result is golang sql.RawBytes----------
+F1:[97 48 101 101 98 99 57 57 45 57 99 48 98 45 52 101 102 56 45 98 98 54 100 45 54 98 98 57 98 100 51 56 48 97 49 49], F2:[101 54 57 55 100 97 50 101 97 97 51 97 55 55 53 98], F3:[54 56 53 56 52 55 101 100 49 102 101 51 56 101 49 56 102 54 98 48 101 50 98 49 56 99 48 48 101 100 101 101], F4:[92 120 52 56 52 99 52 99 48 48 48 48 48 48 48 48 48 48 50 98 48 53 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48 48]
+
+----------result is golang others----------
+sql: Scan error on column index 0, name "f1": sql/driver: couldn't convert "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11" into type bool
+PASS

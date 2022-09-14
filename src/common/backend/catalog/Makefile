@@ -19,10 +19,10 @@ ifneq "$(MAKECMDGOALS)" "clean"
 endif
 OBJS = catalog.o dependency.o heap.o index.o indexing.o namespace.o aclchk.o \
        objectaddress.o pg_aggregate.o pg_collation.o pg_constraint.o pg_conversion.o \
-       pg_depend.o pg_enum.o pg_inherits.o pg_largeobject.o pg_namespace.o pg_object.o\
+       pg_depend.o pg_enum.o pg_set.o pg_inherits.o pg_largeobject.o pg_namespace.o pg_object.o\
        pg_operator.o gs_package.o pg_proc.o pg_range.o pg_db_role_setting.o pg_shdepend.o pg_synonym.o\
        pg_type.o pgxc_class.o storage.o storage_gtt.o toasting.o pg_job.o pg_partition.o\
-       pg_hashbucket.o cstore_ctlg.o dfsstore_ctlg.o pg_builtin_proc.o streaming_stream.o\
+       pg_hashbucket.o cstore_ctlg.o pg_builtin_proc.o streaming_stream.o\
        gs_matview.o pgxc_slice.o pg_job_proc.o gs_job_argument.o gs_job_attribute.o pg_uid.o gs_global_config.o\
        gs_db_privilege.o pg_publication.o pg_subscription.o
 
@@ -42,7 +42,7 @@ POSTGRES_BKI_SRCS = $(addprefix $(top_srcdir)/src/include/catalog/,\
 	pg_opfamily.h pg_opclass.h pg_am.h pg_amop.data pg_amproc.h \
 	pg_language.h pg_largeobject_metadata.h pg_largeobject.h pg_aggregate.h \
 	pg_statistic.h pg_rewrite.h pg_trigger.h pg_description.h \
-	pg_cast.h pg_enum.h pg_namespace.h pg_conversion.h pg_depend.h \
+	pg_cast.h pg_enum.h pg_set.h pg_namespace.h pg_conversion.h pg_depend.h \
 	pg_database.h pg_db_role_setting.h pg_tablespace.h pg_pltemplate.h \
 	pg_authid.h pg_auth_members.h pg_shdepend.h pg_shdescription.h \
 	pg_ts_config.h pg_ts_config_map.h pg_ts_dict.h \
@@ -60,7 +60,7 @@ POSTGRES_BKI_SRCS = $(addprefix $(top_srcdir)/src/include/catalog/,\
 	pg_streaming_stream.h pg_streaming_cont_query.h pg_streaming_reaper_status.h gs_matview.h\
 	gs_matview_dependency.h pgxc_slice.h gs_opt_model.h gs_model.h\
 	pg_recyclebin.h pg_snapshot.h gs_job_argument.h gs_job_attribute.h pg_uid.h gs_db_privilege.h\
-	pg_replication_origin.h pg_publication.h pg_publication_rel.h pg_subscription.h\
+	pg_replication_origin.h pg_publication.h pg_publication_rel.h pg_subscription.h gs_sql_patch.h\
 	pg_subscription_rel.h \
     )
 

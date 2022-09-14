@@ -18,14 +18,15 @@
 #include "nodes/relation.h"
 #include "parser/parse_node.h"
 
-extern void transformFromClause(ParseState* pstate, List* frmList, bool isFirstNode = true, bool isCreateView = false);
-extern int setTargetTable(ParseState* pstate, RangeVar* relation, bool inh, bool alsoSource, AclMode requiredPerms);
+extern void transformFromClause(ParseState* pstate, List* frmList, bool isFirstNode = true, bool isCreateView = false,
+    bool isUpdate = false);
+extern List* setTargetTables(ParseState* pstate, List* relation, bool expandInh, bool alsoSource, AclMode requiredPerms);
 extern bool interpretInhOption(InhOption inhOpt);
 extern bool interpretOidsOption(List* defList);
 
 extern Node* transformFromClauseItem(ParseState* pstate, Node* n, RangeTblEntry** top_rte, int* top_rti,
     RangeTblEntry** right_rte, int* right_rti, List** relnamespace, bool isFirstNode = true,
-    bool isCreateView = false, bool isMergeInto = false);
+    bool isCreateView = false, bool isMergeInto = false, bool isUpdate = false);
 
 extern Node* transformJoinOnClause(ParseState* pstate, JoinExpr* j, RangeTblEntry* l_rte, RangeTblEntry* r_rte,
     List* relnamespace);

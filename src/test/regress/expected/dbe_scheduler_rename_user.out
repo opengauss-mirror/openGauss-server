@@ -28,7 +28,7 @@ select count(*) from pg_job where log_user = 'scheduler_user' and nspname = 'sch
      1
 (1 row)
 
-select count(*) from pg_job where log_user = priv_user;
+select count(*) from pg_job where log_user = priv_user and priv_user = 'scheduler_user';
  count 
 -------
      1
@@ -51,7 +51,7 @@ select count(*) from pg_job where log_user = 'scheduler_new_user' and nspname = 
      1
 (1 row)
 
-select count(*) from pg_job where log_user != priv_user;
+select count(*) from pg_job where log_user = priv_user and priv_user = 'scheduler_new_user';
  count 
 -------
      1

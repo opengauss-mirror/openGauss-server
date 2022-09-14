@@ -339,3 +339,8 @@ explain (verbose on, costs off) update test set a[1:2]='{10,20}' where c='7';
 update test set a[1:2]='{10,20}' where c='7';
 select * from test order by 3;
 drop table test;
+
+--multiple update, report error except B format;
+create table t_t_mutil_t1(col1 int,col2 int);
+create table t_t_mutil_t2(col1 int,col2 int);
+update t_t_mutil_t1 a,t_t_mutil_t2 b set b.col2=5,a.col2=4 where a.col1=b.col1;

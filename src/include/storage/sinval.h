@@ -106,7 +106,7 @@ typedef struct {
 
 typedef struct {
     /* note: field layout chosen to pack into 16 bytes */
-    int8 id;           /* type field --- must be first */
+    int8 id;            /* type field --- must be first */
     int16 bucketId;     /* bucketId */
     RelFileNodeOld rnode; /* spcNode, dbNode, relNode */
 } SharedInvalHbktSmgrMsg;
@@ -114,7 +114,7 @@ typedef struct {
 #define SHAREDINVALFUNC_ID (-7)
 
 typedef struct {
-    int8 id;           /* type field --- must be first */
+    int8 id;          /* type field --- must be first */
     Oid dbId;   /* database ID */
     int cacheId;
     Oid objId; /* function ID or package ID */

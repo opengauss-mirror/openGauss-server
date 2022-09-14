@@ -426,6 +426,7 @@ typedef FormData_pg_proc *Form_pg_proc;
 #define DB4AI_EXPLAIN_MODEL_OID 7110
 #define JSONAGGFUNCOID 3124
 #define JSONOBJECTAGGFUNCOID 3403
+#define GROUPCONCATFUNCOID 4097
 
 /*
  * Symbolic values for prokind column

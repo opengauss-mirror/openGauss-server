@@ -44,7 +44,7 @@
 #include "utils/aiomem.h"
 
 const int DEFAULT_WAIT_TIMES = 60;
-int ReadFileForRemote(RemoteReadFileKey *key, XLogRecPtr lsn, bytea** fileData, int timeout);
+int ReadFileForRemote(RemoteReadFileKey *key, XLogRecPtr lsn, bytea** fileData, int timeout, int32 read_size);
 
 int ReadCOrCsnFileForRemote(RelFileNode rnode, bytea** fileData);
 
@@ -88,49 +88,45 @@ int XLogWaitForReplay(uint64 primary_insert_lsn, int timeout = DEFAULT_WAIT_TIME
 
 /*
  * Read block from buffer from primary, returning it as bytea
+ * RelFileNode has changed, add a opt to compress relation.
  */
+const int GS_READ_BLOK_PARMS_V1 = 10;
+const int GS_READ_BLOK_PARMS_V2 = 11;
 Datum gs_read_block_from_remote(PG_FUNCTION_ARGS)
 {
-    uint32 spcNode;
-    uint32 dbNode;
-    uint32 relNode;
-    int16 bucketNode;
-    int32 forkNum;
-    uint64 blockNum;
+    RepairBlockKey key;
     uint32 blockSize;
     uint64 lsn;
-    bool isForCU = false;
-    bytea* result = NULL;
     int timeout = 0;
+    bool isForCU = false;
+    int parano = 0;
+    bytea* result = NULL;
 
     if (GetUserId() != BOOTSTRAP_SUPERUSERID) {
         ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), (errmsg("must be initial account to read files"))));
     }
     /* handle optional arguments */
-    spcNode = PG_GETARG_UINT32(0);
-    dbNode = PG_GETARG_UINT32(1);
-    relNode = PG_GETARG_UINT32(2);
-    bucketNode = PG_GETARG_INT16(3);
-    forkNum = PG_GETARG_INT32(4);
-    blockNum = (uint64)PG_GETARG_TRANSACTIONID(5);
-    blockSize = PG_GETARG_UINT32(6);
-    lsn = (uint64)PG_GETARG_TRANSACTIONID(7);
-    isForCU = PG_GETARG_BOOL(8);
-    timeout = PG_GETARG_INT32(9);
-
-    RepairBlockKey key;
-    key.relfilenode.spcNode = spcNode;
-    key.relfilenode.dbNode = dbNode;
-    key.relfilenode.relNode = relNode;
-    key.relfilenode.bucketNode = bucketNode;
-    key.relfilenode.opt = 0;
-    key.forknum = forkNum;
-    key.blocknum = blockNum;
-
+    key.relfilenode.spcNode = PG_GETARG_UINT32(parano++);
+    key.relfilenode.dbNode = PG_GETARG_UINT32(parano++);
+    key.relfilenode.relNode = PG_GETARG_UINT32(parano++);
+    key.relfilenode.bucketNode = PG_GETARG_INT16(parano++);
+    if (PG_NARGS() == GS_READ_BLOK_PARMS_V2) {
+        key.relfilenode.opt = (uint2)PG_GETARG_INT16(parano++);
+    } else if (PG_NARGS() == GS_READ_BLOK_PARMS_V1) {
+        key.relfilenode.opt = 0;
+    } else {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), (errmsg("Invalid parameters count."))));
+    }
+    key.forknum = PG_GETARG_INT32(parano++);
+    key.blocknum = (uint64)PG_GETARG_TRANSACTIONID(parano++);
+    blockSize = PG_GETARG_UINT32(parano++);
+    lsn = (uint64)PG_GETARG_TRANSACTIONID(parano++);
+    isForCU = PG_GETARG_BOOL(parano++);
+    timeout = PG_GETARG_INT32(parano++);
     /* get block from local buffer */
     if (isForCU) {
         /* if request to read CU block, we use forkNum column to replace colid. */
-        (void)StandbyReadCUforPrimary(key, blockNum, blockSize, lsn, timeout, &result);
+        (void)StandbyReadCUforPrimary(key, key.blocknum, (int)blockSize, lsn, timeout, &result);
     } else {
         (void)StandbyReadPageforPrimary(key, blockSize, lsn, &result, timeout, NULL);
     }
@@ -141,6 +137,7 @@ Datum gs_read_block_from_remote(PG_FUNCTION_ARGS)
         PG_RETURN_NULL();
     }
 }
+
 
 /*
  * Read block from buffer from primary, returning it as bytea
@@ -214,7 +211,7 @@ int StandbyReadCUforPrimary(RepairBlockKey key, uint64 offset, int32 size, uint6
         }
     }
 
-    RelFileNode relfilenode {key.relfilenode.spcNode, key.relfilenode.dbNode, key.relfilenode.relNode, InvalidBktId};
+    RelFileNode relfilenode {key.relfilenode.spcNode, key.relfilenode.dbNode, key.relfilenode.relNode, InvalidBktId, 0};
 
     {
         /* read from disk */
@@ -272,6 +269,7 @@ int StandbyReadPageforPrimary(RepairBlockKey key, uint32 blocksize, uint64 lsn, 
         return REMOTE_READ_BLCKSZ_NOT_SAME;
 
     int ret_code = REMOTE_READ_OK;
+    BlockNumber checksum_block = key.blocknum;
 
     /* wait request lsn for replay */
     if (RecoveryInProgress()) {
@@ -286,9 +284,10 @@ int StandbyReadPageforPrimary(RepairBlockKey key, uint32 blocksize, uint64 lsn, 
                             key.relfilenode.bucketNode, key.relfilenode.opt};
 
     if (NULL != pblk) {
-        SegPageLocation loc = seg_get_physical_location(relfilenode, key.forknum, key.blocknum);
+        SegPageLocation loc = seg_get_physical_location(relfilenode, key.forknum, key.blocknum, false);
         uint8 standby_relNode = (uint8) EXTENT_SIZE_TO_TYPE(loc.extent_size);
         BlockNumber standby_block = loc.blocknum;
+        checksum_block = loc.blocknum;
         if (standby_relNode != pblk->relNode || standby_block != pblk->block) {
             ereport(ERROR, (errmodule(MOD_REMOTE),
                     errmsg("Standby page file is invalid! Standby relnode is %u, "
@@ -351,19 +350,24 @@ int StandbyReadPageforPrimary(RepairBlockKey key, uint32 blocksize, uint64 lsn, 
 
     if (ret_code == REMOTE_READ_OK) {
         *pagedata = pageData;
-        PageSetChecksumInplace((Page) VARDATA(*pagedata), key.blocknum);
+        PageSetChecksumInplace((Page) VARDATA(*pagedata), checksum_block);
     }
 
     return ret_code;
 }
 
+/* RelFileNode has changed, add a opt to compress relation. */
 const int RES_COL_NUM = 2;
+const int GS_READ_FILE_PARMS_V1 = 8;
+const int GS_READ_FILE_PARMS_V2 = 10;
+#define REMOTE_READ_FILE_SIZE_INVALID (-1)
 Datum gs_read_file_from_remote(PG_FUNCTION_ARGS)
 {
     RelFileNode rnode;
     RemoteReadFileKey key;
     int32 forknum;
     uint32 blockstart;
+    int read_size = REMOTE_READ_FILE_SIZE_INVALID;
     uint64 lsn;
     bytea* result = NULL;
     Datum values[RES_COL_NUM];
@@ -382,10 +386,22 @@ Datum gs_read_file_from_remote(PG_FUNCTION_ARGS)
     rnode.spcNode = PG_GETARG_UINT32(parano++);
     rnode.dbNode = PG_GETARG_UINT32(parano++);
     rnode.relNode = PG_GETARG_UINT32(parano++);
-    rnode.bucketNode = PG_GETARG_INT32(parano++);
-    rnode.opt = 0;
+    rnode.bucketNode = PG_GETARG_INT16(parano++);
+    if (PG_NARGS() == GS_READ_FILE_PARMS_V2) {
+        rnode.opt = (uint2)PG_GETARG_INT16(parano++);
+        read_size = PG_GETARG_INT32(parano++);
+    } else if (PG_NARGS() == GS_READ_FILE_PARMS_V1) {
+        rnode.opt = 0;
+    } else {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), (errmsg("Invalid parameters count."))));
+    }
+
+    if (rnode.opt == 0) {
+        read_size = REMOTE_READ_FILE_SIZE_INVALID;
+    }
+
     forknum = PG_GETARG_INT32(parano++);
-    blockstart = PG_GETARG_INT32(parano++);
+    blockstart = (uint32)PG_GETARG_INT32(parano++);
     lsn = (uint64)PG_GETARG_TRANSACTIONID(parano++);
     timeout = PG_GETARG_INT32(parano++);
 
@@ -399,7 +415,7 @@ Datum gs_read_file_from_remote(PG_FUNCTION_ARGS)
                 (errmsg("Forknum should be 0. Now is %d. \n", forknum))));
             PG_RETURN_NULL();
         }
-        ret_code = ReadFileForRemote(&key, lsn, &result, timeout);
+        ret_code = ReadFileForRemote(&key, lsn, &result, timeout, read_size);
     } else {
         ret_code = ReadCOrCsnFileForRemote(rnode, &result);
     }
@@ -426,6 +442,9 @@ Datum gs_read_file_from_remote(PG_FUNCTION_ARGS)
     PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
 }
 
+/* RelFileNode has changed, add a opt to compress relation. */
+const int GS_READ_FILE_SIZE_PARMS_V1 = 7;
+const int GS_READ_FILE_SIZE_PARMS_V2 = 8;
 Datum gs_read_file_size_from_remote(PG_FUNCTION_ARGS)
 {
     RelFileNode rnode;
@@ -443,8 +462,14 @@ Datum gs_read_file_size_from_remote(PG_FUNCTION_ARGS)
     rnode.spcNode = PG_GETARG_UINT32(parano++);
     rnode.dbNode = PG_GETARG_UINT32(parano++);
     rnode.relNode = PG_GETARG_UINT32(parano++);
-    rnode.bucketNode = PG_GETARG_INT32(parano++);
-    rnode.opt = 0;
+    rnode.bucketNode = PG_GETARG_INT16(parano++);
+    if (PG_NARGS() == GS_READ_FILE_SIZE_PARMS_V2) {
+        rnode.opt = (uint2)PG_GETARG_INT16(parano++);
+    } else if (PG_NARGS() == GS_READ_FILE_SIZE_PARMS_V1) {
+        rnode.opt = 0;
+    } else {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), (errmsg("Invalid parameters count."))));
+    }
     forknum = PG_GETARG_INT32(parano++);
     lsn = (uint64)PG_GETARG_TRANSACTIONID(parano++);
     timeout = PG_GETARG_INT32(parano++);
@@ -478,7 +503,13 @@ int ReadFileSizeForRemote(RelFileNode rnode, int32 forknum, XLogRecPtr lsn, int6
     /* check whether the file exists. not exist, return size -1 */
     struct stat statBuf;
     char* path = relpathperm(rnode, forknum);
-    if (stat(path, &statBuf) < 0 && errno == ENOENT) {
+    char* openFilePath = path;
+    char dst[MAXPGPATH];
+    if (IS_COMPRESSED_RNODE(rnode, MAIN_FORKNUM)) {
+        CopyCompressedPath(dst, path);
+        openFilePath = dst;
+    }
+    if (stat(openFilePath, &statBuf) < 0 && errno == ENOENT) {
         *res = -1;
         pfree(path);
         return ret_code;
@@ -500,20 +531,14 @@ int ReadFileSizeForRemote(RelFileNode rnode, int32 forknum, XLogRecPtr lsn, int6
     return ret_code;
 }
 
-int ReadFileByReadBufferComom(RemoteReadFileKey *key, bytea* pageData, uint32 nblock)
+int ReadFileByReadBufferComom(RemoteReadFileKey *key, bytea* pageData, uint32 blk_start, uint32 blk_end)
 {
     int ret_code = REMOTE_READ_OK;
     uint32 i = 0;
     uint32 j = 0;
-    uint32 blk_start;
-    uint32 blk_end;
     bool hit = false;
     char* bufBlock = NULL;
     errno_t rc;
-
-    /* get the segno file block start and block end */
-    blk_start = key->blockstart;
-    blk_end = (nblock >= blk_start + MAX_BATCH_READ_BLOCKNUM ? blk_start + MAX_BATCH_READ_BLOCKNUM : nblock);
 
     for (i = blk_start, j = 0; i < blk_end; i++, j++) {
         /* read page, if PageIsVerified failed will long jump */
@@ -601,7 +626,7 @@ SEG_RETRY:
     return ret_code;
 }
 
-int ReadFileForRemote(RemoteReadFileKey *key, XLogRecPtr lsn, bytea** fileData, int timeout)
+int ReadFileForRemote(RemoteReadFileKey *key, XLogRecPtr lsn, bytea** fileData, int timeout, int32 read_size)
 {
     int ret_code = REMOTE_READ_OK;
     SMgrRelation smgr = NULL;
@@ -628,36 +653,55 @@ int ReadFileForRemote(RemoteReadFileKey *key, XLogRecPtr lsn, bytea** fileData, 
     }
 
     /* get block num */
-    if (!IsSegmentFileNode(key->relfilenode)) {
-        smgr = smgropen(key->relfilenode, InvalidBackendId);
-        nblock = smgrnblocks(smgr, key->forknum);
-        smgrclose(smgr);
-    } else {
-        spc = spc_open(key->relfilenode.spcNode, key->relfilenode.dbNode, false, false);
-        if (!spc) {
-            ereport(WARNING, (errmodule(MOD_REMOTE),
-                    errmsg("Spc open failed. spcNode is: %u, dbNode is %u",
-                    key->relfilenode.spcNode, key->relfilenode.dbNode)));
-            return REMOTE_READ_IO_ERROR;
+    if (read_size == REMOTE_READ_FILE_SIZE_INVALID) {
+        if (!IsSegmentFileNode(key->relfilenode)) {
+            smgr = smgropen(key->relfilenode, InvalidBackendId);
+            nblock = smgrnblocks(smgr, key->forknum);
+            smgrclose(smgr);
+        } else {
+            spc = spc_open(key->relfilenode.spcNode, key->relfilenode.dbNode, false, false);
+            if (!spc) {
+                ereport(WARNING, (errmodule(MOD_REMOTE),
+                        errmsg("Spc open failed. spcNode is: %u, dbNode is %u",
+                        key->relfilenode.spcNode, key->relfilenode.dbNode)));
+                return REMOTE_READ_IO_ERROR;
+            }
+            nblock = spc_size(spc, key->relfilenode.relNode, key->forknum);
         }
-        nblock = spc_size(spc, key->relfilenode.relNode, key->forknum);
+
+        if (nblock <= key->blockstart) {
+            ret_code = REMOTE_READ_SIZE_ERROR;
+            return ret_code;
+        }
+
+        /* get the segno file block start and block end */
+        blk_start = key->blockstart;
+        blk_end = (nblock >= blk_start + MAX_BATCH_READ_BLOCKNUM ? blk_start + MAX_BATCH_READ_BLOCKNUM : nblock);
+
+        pageData = (bytea*)palloc((blk_end - blk_start) * BLCKSZ + VARHDRSZ);
+        SET_VARSIZE(pageData, ((blk_end - blk_start) * BLCKSZ + VARHDRSZ));
+    } else {
+        if (IsSegmentFileNode(key->relfilenode)) {
+            spc = spc_open(key->relfilenode.spcNode, key->relfilenode.dbNode, false, false);
+            if (!spc) {
+                ereport(WARNING, (errmodule(MOD_REMOTE),
+                        errmsg("Spc open failed. spcNode is: %u, dbNode is %u",
+                        key->relfilenode.spcNode, key->relfilenode.dbNode)));
+                return REMOTE_READ_IO_ERROR;
+            }
+        }
+
+        /* get the segno file block start and block end */
+        blk_start = key->blockstart;
+        blk_end = key->blockstart + (uint32)read_size / BLCKSZ;
+
+        pageData = (bytea*)palloc((uint32)(read_size + VARHDRSZ));
+        SET_VARSIZE(pageData, (read_size + VARHDRSZ));
     }
-
-    if (nblock <= key->blockstart) {
-        ret_code = REMOTE_READ_SIZE_ERROR;
-        return ret_code;
-    }
-
-    /* get the segno file block start and block end */
-    blk_start = key->blockstart;
-    blk_end = (nblock >= blk_start + MAX_BATCH_READ_BLOCKNUM ? blk_start + MAX_BATCH_READ_BLOCKNUM : nblock);
-
-    pageData = (bytea*)palloc((blk_end - blk_start) * BLCKSZ + VARHDRSZ);
-    SET_VARSIZE(pageData, ((blk_end - blk_start) * BLCKSZ + VARHDRSZ));
 
     /* primary read page, need read page by ReadBuffer_common */
     if (!IsSegmentFileNode(key->relfilenode) && !RecoveryInProgress()) {
-        ret_code = ReadFileByReadBufferComom(key, pageData, nblock);
+        ret_code = ReadFileByReadBufferComom(key, pageData, blk_start, blk_end);
         if (ret_code != REMOTE_READ_OK) {
             pfree(pageData);
             ereport(ERROR, (errmodule(MOD_REMOTE), errmsg("read file failed!")));
@@ -676,7 +720,6 @@ int ReadFileForRemote(RemoteReadFileKey *key, XLogRecPtr lsn, bytea** fileData, 
         for (i = blk_start, j = 0; i < blk_end; i++, j++) {
             ret_code = ReadFileByReadDisk(spc, key, bufBlock, i);
             if (ret_code != REMOTE_READ_OK) {
-                pfree(bufBlock);
                 pfree(pageData);
                 ereport(ERROR, (errmodule(MOD_REMOTE), errmsg("repair file failed, read block %u error, retcode=%d",
                     i, rc)));

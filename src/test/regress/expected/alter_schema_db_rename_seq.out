@@ -44,6 +44,12 @@ select nextval('seq3');
        2
 (1 row)
 
+alter schema test_rename_not_exist_schema rename to test_rename_not_exist_schema_new;
+ERROR:  schema "test_rename_not_exist_schema" does not exist
+alter schema public rename to public_new;
+ERROR:  The schema 'public' doesn't allow to rename
+alter schema pg_catalog rename to pg_catalog_new;
+ERROR:  The schema 'pg_catalog' doesn't allow to rename
 ----clean-----
 drop sequence seq1;
 drop sequence seq2;

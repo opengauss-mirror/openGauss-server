@@ -8,10 +8,10 @@ INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR}/include ${MOCKCPP_INCLUDE_PATH} 
 # -L
 link_directories(${CMAKE_BINARY_DIR}/lib ${GTEST_LIB_PATH} ${MOCKCPP_LIB_PATH} 
 ${CJSON_LIB_PATH} ${DCF_LIB_PATH} ${XGBOOST_LIB_PATH}  ${ZSTD_LIB_PATH} 
-${LIBPARQUET_LIB_PATH} ${ARROW_LIB_PATH} ${LIBOBS_LIB_PATH} ${LZ4_LIB_PATH})
+${LIBOBS_LIB_PATH} ${LZ4_LIB_PATH})
 
 # -l
-set(UNIT_TEST_BASE_LIB_LIST pthread gtest_main gtest mockcpp cjson dcf xgboost zstd nghttp2 iconv eSDKOBS eSDKLogAPI log4cpp parquet arrow lz4 db)
+set(UNIT_TEST_BASE_LIB_LIST pthread gtest_main gtest mockcpp cjson dcf xgboost zstd nghttp2 iconv eSDKOBS eSDKLogAPI log4cpp lz4 db)
 
 add_subdirectory(demo)
 add_subdirectory(db4ai)

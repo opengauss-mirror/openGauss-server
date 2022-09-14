@@ -35,6 +35,18 @@ select * from list_list order by 1,2,3,4;
 
 select * from list_list subpartition (p_201901_a) order by 1,2,3,4;
 select * from list_list subpartition (p_201901_b) order by 1,2,3,4;
+--error, conflict with subpartition name
+alter table list_list split subpartition p_201901_b values (2) into
+(
+	subpartition p_201902_a,
+	subpartition p_201901_c
+);
+--error, conflict with partition name
+alter table list_list split subpartition p_201901_b values (2) into
+(
+	subpartition p_201902,
+	subpartition p_201901_c
+);
 alter table list_list split subpartition p_201901_b values (2) into
 (
 	subpartition p_201901_b,
@@ -97,6 +109,18 @@ select * from range_range order by 1,2,3,4;
 
 select * from range_range subpartition (p_201901_a) order by 1,2,3,4;
 select * from range_range subpartition (p_201901_b) order by 1,2,3,4;
+--error, conflict with subpartition name
+alter table range_range split subpartition p_201901_b at (3) into
+(
+	subpartition p_201902_a,
+	subpartition p_201901_d
+);
+--error, conflict with partition name
+alter table range_range split subpartition p_201901_b at (3) into
+(
+	subpartition p_201902,
+	subpartition p_201901_d
+);
 alter table range_range split subpartition p_201901_b at (3) into
 (
 	subpartition p_201901_c,

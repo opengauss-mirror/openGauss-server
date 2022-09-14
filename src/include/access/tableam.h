@@ -368,7 +368,7 @@ typedef struct TableAmRoutine {
 
     void (*scan_index_fetch_end)(IndexFetchTableData *scan);
 
-    Tuple (*scan_index_fetch_tuple)(IndexScanDesc scan, bool *all_dead);
+    Tuple (*scan_index_fetch_tuple)(IndexScanDesc scan, bool *all_dead, bool* has_cur_xact_write);
 
     /*
      * begin relation scan
@@ -386,6 +386,8 @@ typedef struct TableAmRoutine {
      */
     TableScanDesc (*scan_begin_sampling)(Relation relation, Snapshot snapshot, int nkeys, ScanKey key, bool allow_strat,
         bool allow_sync, RangeScanInRedis rangeScanInRedis);
+
+    TableScanDesc (*scan_begin_parallel)(Relation relation, ParallelHeapScanDesc parallel_scan);
 
     /*
      * Re scan
@@ -411,7 +413,7 @@ typedef struct TableAmRoutine {
      * Get next tuple
      * Will return a Generic "Tuple" type
      */
-    Tuple (*scan_getnexttuple)(TableScanDesc sscan, ScanDirection direction);
+    Tuple (*scan_getnexttuple)(TableScanDesc sscan, ScanDirection direction, bool* has_cur_xact_write);
 
     bool (*scan_GetNextBatch)(TableScanDesc scan, ScanDirection direction);
 
@@ -461,7 +463,7 @@ typedef struct TableAmRoutine {
         bool allow_inplace_update);
 
     TM_Result (*tuple_lock)(Relation relation, Tuple tuple, Buffer *buffer, CommandId cid, LockTupleMode mode,
-        bool nowait, TM_FailureData *tmfd, bool allow_lock_self, bool follow_updates, bool eval, Snapshot snapshot,
+        LockWaitPolicy waitPolic, TM_FailureData *tmfd, bool allow_lock_self, bool follow_updates, bool eval, Snapshot snapshot,
         ItemPointer tid, bool isSelectForUpdate, bool isUpsert, TransactionId conflictXid,
         int waitSec);
 
@@ -593,7 +595,7 @@ extern TM_Result tableam_tuple_update(Relation relation, Relation parentRelation
     bool *update_indexes, Bitmapset **modifiedIdxAttrs, bool allow_update_self = false,
     bool allow_inplace_update = true, LockTupleMode *lockmode = NULL);
 extern TM_Result tableam_tuple_lock(Relation relation, Tuple tuple, Buffer *buffer, CommandId cid,
-    LockTupleMode mode, bool nowait, TM_FailureData *tmfd, bool allow_lock_self, bool follow_updates, bool eval,
+    LockTupleMode mode, LockWaitPolicy waitPolicy, TM_FailureData *tmfd, bool allow_lock_self, bool follow_updates, bool eval,
     Snapshot snapshot, ItemPointer tid, bool isSelectForUpdate, bool isUpsert = false, 
     TransactionId conflictXid = InvalidTransactionId, int waitSec = 0);
 extern Tuple tableam_tuple_lock_updated(CommandId cid, Relation relation, int lockmode, ItemPointer tid,
@@ -609,13 +611,14 @@ extern void tableam_tuple_abort_speculative(Relation relation, Tuple tuple);
 extern IndexFetchTableData *tableam_scan_index_fetch_begin(Relation rel);
 extern void tableam_scan_index_fetch_reset(IndexFetchTableData *scan);
 extern void tableam_scan_index_fetch_end(IndexFetchTableData *scan);
-extern Tuple tableam_scan_index_fetch_tuple(IndexScanDesc scan, bool *all_dead);
+extern Tuple tableam_scan_index_fetch_tuple(IndexScanDesc scan, bool *all_dead, bool* has_cur_xact_write = NULL);
 extern TableScanDesc tableam_scan_begin(Relation relation, Snapshot snapshot, int nkeys, ScanKey key,
     RangeScanInRedis rangeScanInRedis = { false, 0, 0 });
 extern TableScanDesc tableam_scan_begin_bm(Relation relation, Snapshot snapshot, int nkeys, ScanKey key);
 extern TableScanDesc tableam_scan_begin_sampling(Relation relation, Snapshot snapshot, int nkeys, ScanKey key,
     bool allow_strat, bool allow_sync, RangeScanInRedis rangeScanInRedis = { false, 0, 0 });
-extern Tuple tableam_scan_getnexttuple(TableScanDesc sscan, ScanDirection direction);
+extern TableScanDesc tableam_scan_begin_parallel(Relation relation, ParallelHeapScanDesc parallel_scan);
+extern Tuple tableam_scan_getnexttuple(TableScanDesc sscan, ScanDirection direction, bool* has_cur_xact_write = NULL);
 extern bool tableam_scan_gettuplebatchmode(TableScanDesc sscan, ScanDirection direction);
 extern void tableam_scan_getpage(TableScanDesc sscan, BlockNumber page);
 extern Tuple tableam_scan_gettuple_for_verify(TableScanDesc sscan, ScanDirection direction, bool isValidRelationPage);

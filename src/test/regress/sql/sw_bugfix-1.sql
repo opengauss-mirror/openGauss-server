@@ -41,6 +41,9 @@ select pid x,id,CONNECT_BY_ROOT ID alias_id from test_hcb_ptbc t1 start with id 
 select pid x,id,CONNECT_BY_ROOT t1.ID from test_hcb_ptbc t1 start with id = 11 connect by prior id = pid;
 select pid x,id,CONNECT_BY_ROOT t1.ID alias_id from test_hcb_ptbc t1 start with id = 11 connect by prior id = pid;
 
+/* connect by union */
+explain(costs off) select level as le,t.* from test_hcb_ptb t start with id=141 connect by prior pid=id union (select 1 as lv,t2.* from test_hcb_ptb t2);
+
 /* infinite loop issues */
 SELECT LEVEL,NAME,CONNECT_BY_ISLEAF,SYS_CONNECT_BY_PATH(NAME, '/'),CONNECT_BY_ROOT(ID)
 FROM test_swcb_a
@@ -441,3 +444,46 @@ select * from xt2,xt1 where xt1.id=xt2.idd and xt1.id!=2 start with id=2 connect
 select * from xt2,xt1 where xt1.id=xt2.idd and xt1.id=3 start with id=2 connect by prior id=lid;
 drop table if exists xt1;
 drop table if exists xt2;
+
+-- test NVL support
+CREATE TABLE T_CLOB_SUBSELECT(ID CLOB);
+INSERT INTO T_CLOB_SUBSELECT VALUES('abc');
+INSERT INTO T_CLOB_SUBSELECT VALUES('abc');
+SELECT ID FROM T_CLOB_SUBSELECT CONNECT BY NVL(id,'000')='123';
+DROP TABLE T_CLOB_SUBSELECT;
+create table a(a1 int, a2 int);
+create table b(b1 int, b2 int);
+insert into a values(1,3),(2,4);
+insert into b values(2,1),(3,1);
+select * from a, b where a1+1=b1 and a1<10 start with a1=1 connect by a1=prior b1;
+drop table a;
+drop table b;
+
+-- test array expr support
+create table t_test_array_base (id int,c_int int[],c_bigint bigint[],c_varchar varchar(200)[],c_char char(5)[],c_bool bool[],c_date date[],c_iym interval year to month[]) WITH (STORAGE_TYPE=USTORE);
+insert into t_test_array_base values(2,array[1,2,null,10,11],array[1001,1002,1003,null,1004],array['abce','efgg','1233'],array['abcc','efgf','1233'],array[TRUE,FALSE,'f','t'],
+array['2013-10-01 10:10:10','2014-10-01 10:10:10'],array[age(timestamp '2001-04-10', timestamp '1957-06-13')]);
+insert into t_test_array_base values(2,array[1,2,2,10],array[2001,2002,1003,null,1004],array['abc','efg','123'],array['abc','efg','123'],
+array[TRUE,FALSE,'f','t'],array['2011-10-01 10:10:10','2012-10-01 10:10:10'],array[age(timestamp '2001-04-10', timestamp '1957-06-13')]);
+insert into t_test_array_base values(2,array[1,2,2,10],array[2001,2002,1003,null,1004],array['abc','efg','123'],array['abc','efg','123'],
+array[TRUE,FALSE,'f','t'],array['2011-10-01 10:10:10','2012-10-01 10:10:10'],array[age(timestamp '2001-04-10', timestamp '1957-06-13')]);
+
+select c_int from t_test_array_base connect by c_int[1:2]=array[1,2] and rownum < 5;
+drop table t_test_array_base;
+
+-- test invalid columnref
+create table test2(id int,pid int);
+create table test1(a int not null primary key, b text, c int);
+insert into test1(a, b, c) values (generate_series(1,10), repeat('x',(generate_series(1,10))), generate_series(1,10));
+explain select t2.id, t2.pid
+from test2 t2
+where exists(select id from test1 start with id = 1 connect by prior id = t2.id);
+
+--test connectby level bug
+select * from (select 'test111' col from sys_dummy) connect by rownum < length(translate(col, '$' || col, '$'));
+
+--test find siblings target name bug
+select test1.a, cast (min(1) OVER (PARTITION BY test1.a ORDER BY test1.b) as integer) from test1 where test1.b is NULL connect by exists(select test2.id from test2 where false limit 40) order siblings by test1.ctid;
+
+drop table test2;
+drop table test1;

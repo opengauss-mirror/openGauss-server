@@ -291,7 +291,9 @@ Oid TypeCreate(Oid newTypeOid, const char* typname, Oid typeNamespace, Oid relat
     /* During inplace upgrade, we may need type forms other than base type. */
     if (u_sess->attr.attr_common.IsInplaceUpgrade && u_sess->cmd_cxt.TypeCreateType) {
         /* So far, we support explicitly assigned pseudo type during inplace upgrade. */
-        Assert(u_sess->cmd_cxt.TypeCreateType == TYPTYPE_PSEUDO || u_sess->cmd_cxt.TypeCreateType == TYPTYPE_BASE);
+        Assert(u_sess->cmd_cxt.TypeCreateType == TYPTYPE_PSEUDO ||
+               u_sess->cmd_cxt.TypeCreateType == TYPTYPE_BASE ||
+               u_sess->cmd_cxt.TypeCreateType == TYPTYPE_SET);
 
         typeType = u_sess->cmd_cxt.TypeCreateType;
         u_sess->cmd_cxt.TypeCreateType = '\0';

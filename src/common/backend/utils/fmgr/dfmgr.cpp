@@ -541,6 +541,21 @@ bool file_exists(const char* name)
     return false;
 }
 
+bool directory_exists(const char* direct)
+{
+    struct stat st;
+
+    AssertArg(direct != NULL);
+
+    if (stat(direct, &st) == 0) {
+        return S_ISDIR(st.st_mode) ? true : false;
+    } else if (!(errno == ENOENT || errno == ENOTDIR || errno == EACCES)) {
+        ereport(ERROR, (errcode_for_file_access(), errmsg("could not access directory \"%s\": ", direct)));
+    }
+
+    return false;
+}
+
 /* Example format: ".so" */
 #ifndef DLSUFFIX
 #error "DLSUFFIX must be defined to compile this file."

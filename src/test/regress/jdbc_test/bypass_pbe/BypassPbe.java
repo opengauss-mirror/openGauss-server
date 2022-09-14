@@ -76,6 +76,10 @@ public
                 }
             }
             pstmt.close();
+            // check null sql
+            pstmt = conn.prepareStatement(";");
+            int i = pstmt.executeUpdate();
+            pstmt.close();
         } catch (PSQLException exception2) {
             if (pstmt != null) {
                 try {
@@ -119,7 +123,6 @@ public
             String selectSql = "select name from jdbcpbebypass where class=?;";
             String selectSql2 = "select id from jdbcpbebypass where class=?;";
             String selectSql3 = "select name from jdbcpbebypass where class=? offset 1 limit 10;";
-
             conn.setAutoCommit(false);
             pstmt = conn.prepareStatement(selectSql);
             pstmt2 = conn.prepareStatement(selectSql2);

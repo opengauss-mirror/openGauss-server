@@ -36,7 +36,7 @@
             <repoType>Generic</repoType>
             <id>
                 <offering>DOPRA SSP</offering>
-                <version>DOPRA SSP V300R021C10SPC010B100</version>
+                <version>DOPRA SSP V300R021C10SPC120B500</version>
             </id>
             <copies>
                 <copy>
@@ -50,7 +50,7 @@
             <repoType>Generic</repoType>
             <id>
                 <offering>BiSheng JDK Enterprise</offering>
-                <version>BiSheng JDK Enterprise 2.1.0.320.B001</version>
+                <version>BiSheng JDK Enterprise 2.1.0.330.B003</version>
             </id>
             <copies>
                 <copy>

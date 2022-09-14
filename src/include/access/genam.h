@@ -108,14 +108,11 @@ struct ScanState;
  * check for conflicting live tuples (possibly blocking).
  */
 typedef enum IndexUniqueCheck {
-    UNIQUE_CHECK_NO,            /* Don't do any uniqueness checking */
-    UNIQUE_CHECK_YES,           /* Enforce uniqueness at insertion time */
-    UNIQUE_CHECK_PARTIAL,       /* Test uniqueness, but no error */
-    UNIQUE_CHECK_EXISTING,      /* Check if existing tuple is unique */
-    UNIQUE_CHECK_UPSERT         /* Test uniqueness, but no error and no insertion when a conflict is found */
+    UNIQUE_CHECK_NO,      /* Don't do any uniqueness checking */
+    UNIQUE_CHECK_YES,     /* Enforce uniqueness at insertion time */
+    UNIQUE_CHECK_PARTIAL, /* Test uniqueness, but no error */
+    UNIQUE_CHECK_EXISTING /* Check if existing tuple is unique */
 } IndexUniqueCheck;
-
-#define IndexUniqueCheckNoError(unique) ((unique) == UNIQUE_CHECK_PARTIAL || (unique) == UNIQUE_CHECK_UPSERT)
 
 /*
  * generalized index_ interface routines (in indexam.c)
@@ -130,7 +127,8 @@ typedef enum IndexUniqueCheck {
 extern Relation index_open(Oid relationId, LOCKMODE lockmode, int2 bucketId=-1);
 extern void index_close(Relation relation, LOCKMODE lockmode);
 
-extern void index_delete(Relation index_relation, Datum* values, const bool* isnull, ItemPointer heap_t_ctid);
+extern void index_delete(Relation index_relation, Datum* values, const bool* isnull, ItemPointer heap_t_ctid,
+                         bool isRollbackIndex);
 extern bool index_insert(Relation indexRelation, Datum* values, const bool* isnull, ItemPointer heap_t_ctid,
     Relation heapRelation, IndexUniqueCheck checkUnique);
 
@@ -142,15 +140,17 @@ extern void index_endscan(IndexScanDesc scan);
 extern void index_markpos(IndexScanDesc scan);
 extern void index_restrpos(IndexScanDesc scan);
 extern ItemPointer index_getnext_tid(IndexScanDesc scan, ScanDirection direction);
-extern Tuple IndexFetchTuple(IndexScanDesc scan);
-extern bool IndexFetchSlot(IndexScanDesc scan, TupleTableSlot *slot, bool isUHeap);
-extern Tuple index_getnext(IndexScanDesc scan, ScanDirection direction);
-extern bool IndexFetchUHeap(IndexScanDesc scan, TupleTableSlot *slot);
-extern UHeapTuple UHeapamIndexFetchTuple(IndexScanDesc scan, bool *all_dead);
+extern Tuple IndexFetchTuple(IndexScanDesc scan, bool* has_cur_xact_write = NULL);
+extern bool IndexFetchSlot(IndexScanDesc scan, TupleTableSlot *slot, bool isUHeap, bool* has_cur_xact_write = NULL);
+extern Tuple index_getnext(IndexScanDesc scan, ScanDirection direction, bool* has_cur_xact_write = NULL);
+extern bool IndexFetchUHeap(IndexScanDesc scan, TupleTableSlot *slot, bool* has_cur_xact_write = NULL);
+extern UHeapTuple UHeapamIndexFetchTuple(IndexScanDesc scan, bool *all_dead, bool* has_cur_xact_write = NULL);
 extern bool UHeapamIndexFetchTupleInSlot(IndexScanDesc scan, ItemPointer tid, Snapshot snapshot,
-                                        TupleTableSlot *slot, bool *callAgain, bool *allDead);
+                                        TupleTableSlot *slot, bool *callAgain, bool *allDead,
+                                        bool* has_cur_xact_write = NULL);
 extern bool UHeapSysIndexGetnextSlot(SysScanDesc scan, ScanDirection direction, TupleTableSlot *slot);
-extern bool IndexGetnextSlot(IndexScanDesc scan, ScanDirection direction, TupleTableSlot *slot);
+extern bool IndexGetnextSlot(IndexScanDesc scan, ScanDirection direction, TupleTableSlot *slot,
+    bool* has_cur_xact_write = NULL);
 extern int64 index_getbitmap(IndexScanDesc scan, TIDBitmap* bitmap);
 extern int64 index_column_getbitmap(IndexScanDesc scandesc, const void* sort, VectorBatch* tids);
 

@@ -276,7 +276,7 @@
  */
 #ifndef MEMORY_CONTEXT_CHECKING
 #ifndef ENABLE_LITE_MODE
-#ifndef __USE_NUMA
+#ifndef USE_LIBNET
 #define MEMORY_CONTEXT_TRACK
 #endif
 #endif

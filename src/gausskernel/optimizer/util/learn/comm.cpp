@@ -530,12 +530,12 @@ Datum check_engine_status(PG_FUNCTION_ARGS)
     conninfo->request_api = pstrdup("/check");
     char** buf = NULL;
     if (TryConnectRemoteServer(conninfo, buf)) {
-        DestroyConnInfo(conninfo);
         ereport(INFO, (errmsg("AI engine @%s:%s is running", ipAddress, portNumber)));
+        DestroyConnInfo(conninfo);
         PG_RETURN_TEXT_P(cstring_to_text("Success"));
     } else {
-        DestroyConnInfo(conninfo);
         ereport(INFO, (errmsg("AI engine @%s:%s is not running", ipAddress, portNumber)));
+        DestroyConnInfo(conninfo);
         PG_RETURN_TEXT_P(cstring_to_text("Failed"));
     }
 }

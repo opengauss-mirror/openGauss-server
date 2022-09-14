@@ -24,17 +24,12 @@
 #include "utils/knl_partcache.h"
 #include "utils/memutils.h"
 
-static uint64 GetBitmapSetSize(int nwords)
-{
-    return (offsetof(Bitmapset, words) + (nwords) * sizeof(bitmapword));
-}
-
 static uint64 GetRelEstimateSize(GlobalRelationEntry *entry)
 {
     uint64 rel_size =
-        ((AllocSet)entry->rel_mem_manager)->totalSpace +    /* memcxt total space */
-        sizeof(GlobalRelationEntry) + CHUNK_ALGIN_PAD +     /* palloc GlobalRelationEntry with chunk head */
-        sizeof(AllocSetContext) + CHUNK_ALGIN_PAD;          /* create MemoryContext with chunk head */
+        ((AllocSet)entry->rel_mem_manager)->totalSpace +        /* memcxt total space */
+        GetMemoryChunkSpace(entry) +                            /* palloc GlobalRelationEntry with chunk head */
+        GetMemoryChunkSpace(entry->rel_mem_manager);            /* create MemoryContext with chunk head */
     return rel_size;
 }
 
@@ -42,16 +37,17 @@ static uint64 GetPartEstimateSize(GlobalPartitionEntry *entry)
 {
     /* every palloc attached with a chunk head */
     uint64 part_size =
-        sizeof(GlobalPartitionEntry) + CHUNK_ALGIN_PAD +    /* palloc GlobalPartitionEntry with chunk head */
-        sizeof(PartitionData) + CHUNK_ALGIN_PAD +           /* palloc PartitionData with chunk head */
-        PARTITION_TUPLE_SIZE + CHUNK_ALGIN_PAD +            /* palloc pd_part with chunk head */
-        (entry->part->rd_options == NULL ? 0 : (VARSIZE(entry->part->rd_options) + CHUNK_ALGIN_PAD)) +
-                                                            /* palloc rd_options with chunk head */
-        (entry->part->pd_indexattr == NULL ? 0 :            /* palloc pd_indexattr with chunk head */
-            (GetBitmapSetSize(entry->part->pd_indexattr->nwords) + CHUNK_ALGIN_PAD)) +
-        (entry->part->pd_indexlist == NULL ? 0 :            /* palloc pd_indexlist with chunk head, and its elements */
-            sizeof(List) + CHUNK_ALGIN_PAD +
-                (sizeof(ListCell) + CHUNK_ALGIN_PAD) * entry->part->pd_indexlist->length);
+        GetMemoryChunkSpace(entry) +                            /* palloc GlobalPartitionEntry with chunk head */
+        GetMemoryChunkSpace(entry->part) +                      /* palloc PartitionData with chunk head */
+        GetMemoryChunkSpace(entry->part->pd_part) +             /* palloc pd_part with chunk head */
+        (entry->part->rd_options == NULL ? 0 : GetMemoryChunkSpace(entry->part->rd_options)) +
+                                                                /* palloc rd_options with chunk head */
+        (entry->part->pd_indexattr == NULL ? 0 :                /* palloc pd_indexattr with chunk head */
+            GetMemoryChunkSpace(entry->part->pd_indexattr)) +
+        (entry->part->pd_indexlist == NULL ? 0 :
+            (sizeof(List) + CHUNK_ALGIN_PAD +                   /* palloc pd_indexlist with chunk head */
+                (sizeof(ListCell) + CHUNK_ALGIN_PAD) * entry->part->pd_indexlist->length));
+                                                                /* and its elements */
     return part_size;
 }
 
@@ -77,7 +73,7 @@ void GlobalBaseDefCache::AddHeadToBucket(Index hash_index, GlobalBaseEntry *base
     if (is_relation) {
         GlobalRelationEntry *entry = (GlobalRelationEntry *)base;
         uint64 rel_size = GetRelEstimateSize(entry);
-        pg_atomic_fetch_add_u64(&m_base_space, AllocSetContextUsedSpace(((AllocSet)entry->rel_mem_manager)));
+        pg_atomic_fetch_add_u64(&m_base_space,  AllocSetContextUsedSpace(((AllocSet)entry->rel_mem_manager)));
         m_db_entry->MemoryEstimateAdd(rel_size);
     } else {
         GlobalPartitionEntry *entry = (GlobalPartitionEntry *)base;

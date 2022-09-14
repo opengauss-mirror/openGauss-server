@@ -30,6 +30,7 @@
 #include "parser/parse_node.h"
 #include "tcop/dest.h"
 #include "utils/guc.h"
+#include "utils/plancache.h"
 
 /* hint keywords */
 #define HINT_NESTLOOP "NestLoop"
@@ -57,6 +58,8 @@
 #define HINT_SET "Set"
 #define HINT_CPLAN "Use_cplan"
 #define HINT_GPLAN "Use_gplan"
+#define HINT_CHOOSE_ADAPTIVE_GPLAN "Choose_adaptive_gplan"
+
 #define HINT_NO_GPC "No_gpc"
 #define HINT_SQL_IGNORE "Ignore_error"
 
@@ -106,6 +109,7 @@ typedef enum HintKeyword {
     HINT_KEYWORD_CPLAN,
     HINT_KEYWORD_GPLAN,
     HINT_KEYWORD_IGNORE,
+    HINT_KEYWORD_CHOOSE_ADAPTIVE_GPLAN,
     HINT_KEYWORD_NO_GPC,
 } HintKeyword;
 
@@ -278,6 +282,7 @@ typedef struct SetHint {
 typedef struct PlanCacheHint {
     Hint base; /* base hint */
     bool chooseCustomPlan;
+    GplanSelectionMethod method;
 } PlanCacheHint;
 
 /* Avoid saving global plan with hint */
@@ -298,6 +303,7 @@ typedef struct hintKeyword {
 
 extern HintState* HintStateCreate();
 extern HintState* create_hintstate(const char* hints);
+extern HintState* create_hintstate_worker(const char* hint_str);
 extern List* find_specific_join_hint(
     HintState* hstate, Relids joinrelids, Relids innerrelids, HintKeyword keyWord, bool leading = true);
 extern List* find_specific_scan_hint(HintState* hstate, Relids relids, HintKeyword keyWord);

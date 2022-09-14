@@ -29,6 +29,7 @@ GRANT USAGE ON SCHEMA db4ai TO PUBLIC;
 
 CREATE TYPE db4ai.snapshot_name AS ("schema" NAME, "name" NAME); -- openGauss BUG: array type not created during initdb
 
+CREATE SEQUENCE db4ai.snapshot_sequence;
 CREATE TABLE IF NOT EXISTS db4ai.snapshot
 (
     id BIGINT UNIQUE,                           -- snapshot id (surrogate key)
@@ -72,3 +73,4 @@ COMMENT ON COLUMN db4ai.snapshot.created IS       'timestamp of snapshot creatio
 -- public read-only access to snapshot catalog
 REVOKE ALL PRIVILEGES ON db4ai.snapshot FROM PUBLIC;
 GRANT SELECT ON db4ai.snapshot TO PUBLIC;
+GRANT UPDATE ON db4ai.snapshot_sequence TO PUBLIC;

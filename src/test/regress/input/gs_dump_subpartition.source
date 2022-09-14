@@ -2,7 +2,7 @@ drop database if exists dump_subpartition_db;
 drop database if exists restore_subpartition_db;
 
 create database dump_subpartition_db with dbcompatibility = 'B';
-create database restore_subpartition_db;
+create database restore_subpartition_db with dbcompatibility = 'B';
 
 \c dump_subpartition_db
 
@@ -35,6 +35,7 @@ PARTITION BY RANGE (id) SUBPARTITION BY RANGE (birthday)
 insert into range_range values(198,'boy','2010-02-15'),(33,'boy','2003-08-11'),(78,'girl','2014-06-24');
 insert into range_range values(233,'girl','2010-01-01'),(360,'boy','2007-05-14'),(146,'girl','2005-03-08');
 insert into range_range values(111,'girl','2013-11-19'),(15,'girl','2009-01-12'),(156,'boy','2011-05-21');
+alter index range_range_pkey unusable;
 
 CREATE TABLE range_list
 (
@@ -63,6 +64,7 @@ create index on range_list(birthday) local;
 insert into range_list values(198,'boy','2010-02-15'),(33,'boy','2003-08-11'),(78,'girl','2014-06-24');
 insert into range_list values(233,'girl','2010-01-01'),(360,'boy','2007-05-14'),(146,'girl','2005-03-08');
 insert into range_list values(111,'girl','2013-11-19'),(15,'girl','2009-01-12'),(156,'boy','2011-05-21');
+alter index range_list_pkey unusable;
 
 CREATE TABLE list_list
 (
@@ -99,4 +101,29 @@ select relname, parttype, partstrategy, partkey, boundaries from pg_partition wh
 \c regression
 drop database if exists restore_subpartition_db;
 drop database if exists dump_subpartition_db;
+
+drop database if exists testconstraint;
+create database testconstraint with dbcompatibility 'b';
+
+drop database if exists test_restoreconstraint;
+create database test_restoreconstraint with dbcompatibility 'b';
+
+\c testconstraint
+
+CREATE TABLE test_pk(f11 int, f12 varchar(20), f13 bool, constraint con_pk primary key using btree(f11 asc, f12 desc));
+create table test_p(fp11 int, fp12 varchar(20), fp13 bool, primary key (fp11));
+CREATE TABLE test_fk(f21 int, f22 timestamp, constraint con_fk foreign key idx_fk (f21) references test_p(fp11));
+CREATE TABLE test_u(f31 int, f32 varchar(20), constraint con_u unique idx_u using btree((f31 * 2 + 1) desc, (lower(f32)) asc));
+
+\! @abs_bindir@/gs_dump testconstraint -p @portstring -f @abs_bindir@/dump_testconstraint.tar -F t >/dev/null 2>&1; echo $?
+\! @abs_bindir@/gs_restore -d test_restoreconstraint -p @portstring@ @abs_bindir@/dump_testconstraint.tar  >/dev/null 2>&1; echo $?
+
+\d+ test_pk
+\d+ test_fk
+\d+ test_u
+
+\c regression
+
+drop database if exists testconstraint;
+drop database if exists test_restoreconstraint;
 

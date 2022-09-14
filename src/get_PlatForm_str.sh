@@ -142,11 +142,7 @@ fi
 # the result form like this: kylin_aarch64
 ##################################################################################
 if [ "$kernel"x = "kylin"x ];then
-    if [ "$cpu_bit"x = "aarch64"x ];then
-        plat_form_str=kylinv10_sp1_"$cpu_bit"
-    else
-        plat_form_str=kylinv10_sp1_"$cpu_bit"_intel
-    fi
+    plat_form_str=kylinv10_sp1_"$cpu_bit"
 fi
 
 ##################################################################################

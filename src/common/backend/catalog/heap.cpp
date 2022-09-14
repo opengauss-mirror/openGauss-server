@@ -119,6 +119,7 @@
 #include "catalog/pgxc_class.h"
 #include "catalog/pgxc_node.h"
 #include "catalog/pgxc_slice.h"
+#include "commands/comment.h"
 #include "pgxc/locator.h"
 #include "pgxc/groupmgr.h"
 #include "pgxc/nodemgr.h"
@@ -156,7 +157,7 @@ static void heapDropPartitionTable(Relation relation);
 static Oid AddNewRelationType(const char* typeName, Oid typeNamespace, Oid new_rel_oid, char new_rel_kind, Oid ownerid,
     Oid new_row_type, Oid new_array_type);
 static void RelationRemoveInheritance(Oid relid);
-static void StoreRelCheck(
+static Oid StoreRelCheck(
     Relation rel, const char* ccname, Node* expr, bool is_validated, bool is_local, int inhcount, bool is_no_inherit);
 static void StoreConstraints(Relation rel, List* cooked_constraints);
 static bool MergeWithExistingConstraint(
@@ -532,7 +533,7 @@ Relation heap_create(const char* relname, Oid relnamespace, Oid reltablespace, O
      */
     if (!allow_system_table_mods && 
         (IsSystemNamespace(relnamespace) || IsToastNamespace(relnamespace) || IsCStoreNamespace(relnamespace) || 
-        IsPackageSchemaOid(relnamespace)) && IsNormalProcessingMode()) {
+        IsPackageSchemaOid(relnamespace) || IsPldeveloper(relnamespace)) && IsNormalProcessingMode()) {
         ereport(ERROR,
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                 errmsg("permission denied to create \"%s.%s\"", get_namespace_name(relnamespace), relname),
@@ -619,22 +620,21 @@ Relation heap_create(const char* relname, Oid relnamespace, Oid reltablespace, O
      * build the relcache entry.
      */
     rel = RelationBuildLocalRelation(relname,
-        relnamespace,
-        tupDesc,
-        relid,
-        relfilenode,
-        reltablespace,
-        shared_relation,
-        mapped_relation,
-        relpersistence,
-        relkind,
-        row_compress,
-        reloptions,
-        tam_type,
-        relindexsplit,
-        storage_type,
-        accessMethodObjectId
-    );
+                                     relnamespace,
+                                     tupDesc,
+                                     relid,
+                                     relfilenode,
+                                     reltablespace,
+                                     shared_relation,
+                                     mapped_relation,
+                                     relpersistence,
+                                     relkind,
+                                     row_compress,
+                                     reloptions,
+                                     tam_type,
+                                     relindexsplit,
+                                     storage_type,
+                                     accessMethodObjectId);
 
     if (partitioned_relation) {
         rel->rd_rel->parttype = PARTTYPE_PARTITIONED_RELATION;
@@ -3625,10 +3625,12 @@ void heap_drop_with_catalog(Oid relid)
 /*
  * Store a default expression for column attnum of relation rel.
  */
-void StoreAttrDefault(Relation rel, AttrNumber attnum, Node* expr, char generatedCol)
+void StoreAttrDefault(Relation rel, AttrNumber attnum, Node* expr, char generatedCol, Node* update_expr)
 {
     char* adbin = NULL;
+    char* adbin_on_update = NULL;
     char* adsrc = NULL;
+    char* update_src = NULL;
     Relation adrel;
     HeapTuple tuple;
     Datum values[Natts_pg_attrdef];
@@ -3637,11 +3639,39 @@ void StoreAttrDefault(Relation rel, AttrNumber attnum, Node* expr, char generate
     Form_pg_attribute attStruct;
     Oid attrdefOid;
     ObjectAddress colobject, defobject;
+    ScanKeyData skey[2];
+    HeapTuple htup = NULL;
+    bool isnull = false;
+    bool on_update_exist = false;
+    bool adin_on_update_exist = false;
 
     /*
      * Flatten expression to string form for storage.
      */
-    adbin = nodeToString(expr);
+    if (update_expr != NULL) {
+        adbin_on_update = nodeToString(update_expr);
+        update_src = deparse_expression(
+            update_expr, deparse_context_for(RelationGetRelationName(rel), RelationGetRelid(rel)), false, false);
+    } else {
+        Relation adrel_temp = heap_open(AttrDefaultRelationId, RowExclusiveLock);
+        ScanKeyInit(&skey[0], Anum_pg_attrdef_adrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(RelationGetRelid(rel)));
+        ScanKeyInit(&skey[1], Anum_pg_attrdef_adnum, BTEqualStrategyNumber, F_INT2EQ, Int16GetDatum(attnum));
+        SysScanDesc adscan = systable_beginscan(adrel_temp, AttrDefaultIndexId, true, NULL, 2, skey);
+        if (HeapTupleIsValid(htup = systable_getnext(adscan))) {
+            Datum val = heap_getattr(htup, Anum_pg_attrdef_adbin_on_update, adrel_temp->rd_att, &isnull);
+            if (val && pg_strcasecmp(TextDatumGetCString(val), "") != 0) {
+                adbin_on_update = TextDatumGetCString(val);
+                on_update_exist = true;
+            }
+            val = heap_getattr(htup, Anum_pg_attrdef_adsrc_on_update, adrel_temp->rd_att, &isnull);
+            if (val && pg_strcasecmp(TextDatumGetCString(val), "") != 0) {
+                update_src = TextDatumGetCString(val);
+                adin_on_update_exist = true;
+            }
+        }
+        systable_endscan(adscan);
+        heap_close(adrel_temp, RowExclusiveLock);
+    }
 
     /*
      * Also deparse it to form the mostly-obsolete adsrc field.
@@ -3654,8 +3684,16 @@ void StoreAttrDefault(Relation rel, AttrNumber attnum, Node* expr, char generate
      */
     values[Anum_pg_attrdef_adrelid - 1] = RelationGetRelid(rel);
     values[Anum_pg_attrdef_adnum - 1] = attnum;
-    values[Anum_pg_attrdef_adbin - 1] = CStringGetTextDatum(adbin);
-    values[Anum_pg_attrdef_adsrc - 1] = CStringGetTextDatum(adsrc);
+    if (expr != NULL) {
+        adbin = nodeToString(expr);
+    }
+    values[Anum_pg_attrdef_adbin - 1] = adbin ? CStringGetTextDatum(adbin) : CStringGetTextDatum("");
+    values[Anum_pg_attrdef_adsrc - 1] = adsrc ? CStringGetTextDatum(adsrc) : CStringGetTextDatum("");
+    values[Anum_pg_attrdef_adbin_on_update - 1] = (update_expr != NULL || (on_update_exist && adin_on_update_exist)) ?
+        CStringGetTextDatum(adbin_on_update) : CStringGetTextDatum("");
+    values[Anum_pg_attrdef_adsrc_on_update - 1] = (update_expr != NULL || (on_update_exist && adin_on_update_exist)) ?
+        CStringGetTextDatum(update_src) : CStringGetTextDatum("");
+
     if (t_thrd.proc->workingVersionNum >= GENERATED_COL_VERSION_NUM) {
         values[Anum_pg_attrdef_adgencol - 1] = CharGetDatum(generatedCol);
     }
@@ -3663,6 +3701,9 @@ void StoreAttrDefault(Relation rel, AttrNumber attnum, Node* expr, char generate
     adrel = heap_open(AttrDefaultRelationId, RowExclusiveLock);
 
     tuple = heap_form_tuple(adrel->rd_att, values, u_sess->catalog_cxt.nulls);
+    if (on_update_exist) {
+        RemoveAttrDefault(RelationGetRelid(rel), attnum, DROP_RESTRICT, false, true);
+    }
     attrdefOid = simple_heap_insert(adrel, tuple);
 
     CatalogUpdateIndexes(adrel, tuple);
@@ -3676,9 +3717,19 @@ void StoreAttrDefault(Relation rel, AttrNumber attnum, Node* expr, char generate
     /* now can free some of the stuff allocated above */
     pfree(DatumGetPointer(values[Anum_pg_attrdef_adbin - 1]));
     pfree(DatumGetPointer(values[Anum_pg_attrdef_adsrc - 1]));
+    pfree(DatumGetPointer(values[Anum_pg_attrdef_adbin_on_update - 1]));
+    pfree(DatumGetPointer(values[Anum_pg_attrdef_adsrc_on_update - 1]));
     heap_freetuple(tuple);
-    pfree(adbin);
     pfree(adsrc);
+    if (adbin) {
+        pfree(adbin);
+    }
+    if (adbin_on_update) {
+        pfree(adbin_on_update);
+    }
+    if (update_src) {
+        pfree(update_src);
+    }
 
     /*
      * Update the pg_attribute entry for the column to show that a default
@@ -3739,7 +3790,7 @@ void StoreAttrDefault(Relation rel, AttrNumber attnum, Node* expr, char generate
  * Caller is responsible for updating the count of constraints
  * in the pg_class entry for the relation.
  */
-static void StoreRelCheck(
+static Oid StoreRelCheck(
     Relation rel, const char* ccname, Node* expr, bool is_validated, bool is_local, int inhcount, bool is_no_inherit)
 {
     char* ccbin = NULL;
@@ -3791,7 +3842,7 @@ static void StoreRelCheck(
     /*
      * Create the Check Constraint
      */
-    (void)CreateConstraintEntry(ccname, /* Constraint Name */
+    Oid oid = CreateConstraintEntry(ccname, /* Constraint Name */
         RelationGetNamespace(rel),      /* namespace */
         CONSTRAINT_CHECK,               /* Constraint Type */
         false,                          /* Is Deferrable */
@@ -3823,6 +3874,7 @@ static void StoreRelCheck(
 
     pfree(ccbin);
     pfree(ccsrc);
+    return oid;
 }
 
 /*
@@ -3853,10 +3905,10 @@ static void StoreConstraints(Relation rel, List* cooked_constraints)
 
         switch (con->contype) {
             case CONSTR_DEFAULT:
-                StoreAttrDefault(rel, con->attnum, con->expr, 0);
+                StoreAttrDefault(rel, con->attnum, con->expr, 0, con->update_expr);
                 break;
             case CONSTR_GENERATED:
-                StoreAttrDefault(rel, con->attnum, con->expr, ATTRIBUTE_GENERATED_STORED);
+                StoreAttrDefault(rel, con->attnum, con->expr, ATTRIBUTE_GENERATED_STORED, NULL);
                 break;
             case CONSTR_CHECK:
                 StoreRelCheck(
@@ -3872,6 +3924,62 @@ static void StoreConstraints(Relation rel, List* cooked_constraints)
 
     if (numchecks > 0)
         SetRelationNumChecks(rel, numchecks);
+}
+
+static void CheckAutoIncrementDataType(Form_pg_attribute attr)
+{
+    switch (attr->atttypid) {
+        case BOOLOID:
+        case INT1OID:
+        case INT2OID:
+        case INT4OID:
+        case INT8OID:
+        case FLOAT4OID:
+        case FLOAT8OID:
+            break;
+        default:
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("The datatype of column '%s' does not support auto_increment", attr->attname.data)));
+            break;
+    };
+}
+
+static Node* CookAutoIncDefault(ParseState* pstate, Relation rel, RawColumnDefault* colDef, Form_pg_attribute atp)
+{
+    AutoIncrement *autoinc = NULL;
+
+    CheckAutoIncrementDataType(atp);
+    if (RelHasAutoInc(rel)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                (errmsg("Incorrect column definition, there can be only one auto_increment column"))));
+    }
+
+    autoinc = makeNode(AutoIncrement);
+    (void)find_coercion_pathway(INT16OID, atp->atttypid, COERCION_ASSIGNMENT, &autoinc->autoincin_funcid);
+    (void)find_coercion_pathway(atp->atttypid, INT16OID, COERCION_ASSIGNMENT, &autoinc->autoincout_funcid);
+    autoinc->expr = cookDefault(pstate, ((AutoIncrement*)colDef->raw_default)->expr, atp->atttypid,
+        atp->atttypmod, NameStr(atp->attname), colDef->generatedCol);
+
+    /* If relation is temp table, cooked default must be a constant of the auto increment start value. */
+    if (rel->rd_rel->relpersistence == RELPERSISTENCE_TEMP) {
+        Const* con = (Const*)((AutoIncrement*)colDef->raw_default)->expr;
+        tmptable_autoinc_reset(rel->rd_rel->relfilenode, DatumGetInt128(con->constvalue));
+    }
+    return (Node*)autoinc;
+}
+
+static void CheckAutoIncrementCheckExpr(Node* expr, AttrNumber attrnum)
+{
+    if (attrnum == 0) {
+        return;
+    }
+    Bitmapset *checkattrs = NULL;
+
+    pull_varattnos(expr, 1, &checkattrs);
+    if (bms_is_member(attrnum - FirstLowInvalidHeapAttributeNumber, checkattrs)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    (errmsg("check constraint cannot refer to an auto_increment column"))));
+    }
 }
 
 /*
@@ -3913,6 +4021,8 @@ List* AddRelationNewConstraints(
     ListCell* cell = NULL;
     Node* expr = NULL;
     CookedConstraint* cooked = NULL;
+    AttrNumber autoinc_attnum = RelAutoIncAttrNum(rel);
+    Node* update_expr = NULL;
 
     /*
      * Get info about existing constraints.
@@ -3940,9 +4050,21 @@ List* AddRelationNewConstraints(
     foreach (cell, newColDefaults) {
         RawColumnDefault* colDef = (RawColumnDefault*)lfirst(cell);
         Form_pg_attribute atp = rel->rd_att->attrs[colDef->attnum - 1];
+        
+        if (colDef->raw_default != NULL) {
+            if (IsA(colDef->raw_default, AutoIncrement)) {
+                autoinc_attnum = colDef->attnum;
+                expr = CookAutoIncDefault(pstate, rel, colDef, atp);
+            } else {
+                expr = cookDefault(pstate, colDef->raw_default, atp->atttypid, atp->atttypmod, NameStr(atp->attname),
+                colDef->generatedCol);
+            }
+        }
 
-        expr = cookDefault(pstate, colDef->raw_default, atp->atttypid, atp->atttypmod, NameStr(atp->attname),
-            colDef->generatedCol);
+        if (colDef->update_expr != NULL) {
+            update_expr = cookDefault(pstate, colDef->update_expr, atp->atttypid, atp->atttypmod, NameStr(atp->attname),
+                colDef->generatedCol);
+        }
 
         /*
          * If the expression is just a NULL constant, we do not bother to make
@@ -3956,10 +4078,10 @@ List* AddRelationNewConstraints(
          * critical because the column default needs to be retained to
          * override any default that the domain might have.
          */
-        if (expr == NULL || (!colDef->generatedCol && IsA(expr, Const) && ((Const *)expr)->constisnull))
+        if (expr != NULL && !colDef->generatedCol && IsA(expr, Const) && ((Const *)expr)->constisnull)
             continue;
 
-        StoreAttrDefault(rel, colDef->attnum, expr, colDef->generatedCol);
+        StoreAttrDefault(rel, colDef->attnum, expr, colDef->generatedCol, update_expr);
 
         cooked = (CookedConstraint*)palloc(sizeof(CookedConstraint));
         cooked->contype = CONSTR_DEFAULT;
@@ -3971,6 +4093,8 @@ List* AddRelationNewConstraints(
         cooked->inhcount = is_local ? 0 : 1;
         cooked->is_no_inherit = false;
         cookedConstraints = lappend(cookedConstraints, cooked);
+        expr = NULL;
+        update_expr = NULL;
     }
 
     pstate->p_rawdefaultlist = NIL;
@@ -4004,6 +4128,10 @@ List* AddRelationNewConstraints(
             expr = (Node*)stringToNode(cdef->cooked_expr);
         }
 
+        /*
+         * Check constraint expressions cannot contain auto_increment column.
+         */
+        CheckAutoIncrementCheckExpr(expr, autoinc_attnum);
         /*
          * Check name uniqueness, or generate a name if none was given.
          */
@@ -4066,8 +4194,16 @@ List* AddRelationNewConstraints(
         /*
          * OK, store it.
          */
-        StoreRelCheck(rel, ccname, expr, !cdef->skip_validation, is_local, is_local ? 0 : 1, cdef->is_no_inherit);
-
+        Oid oid = StoreRelCheck(rel, ccname, expr, !cdef->skip_validation, is_local, is_local ? 0 : 1, cdef->is_no_inherit);
+        ListCell *cell = NULL;
+        foreach (cell, cdef->constraintOptions) {
+            void *pointer = lfirst(cell);
+            if (IsA(pointer, CommentStmt)) {
+                CommentStmt *commentStmt = (CommentStmt *)pointer;
+                CreateComments(oid, ConstraintRelationId, 0, commentStmt->comment);
+                break;
+            }
+        }
         numchecks++;
 
         cooked = (CookedConstraint*)palloc(sizeof(CookedConstraint));
@@ -6202,8 +6338,8 @@ Oid HeapAddListPartition(Relation pgPartRel, Oid partTableOid, Oid partTablespac
         forPartitionTable = false;
     }
     newListPartition = heapCreatePartition(newListPartDef->partitionName, forPartitionTable, newPartitionTableSpaceOid,
-                                           newListPartitionOid, partrelfileOid, bucketOid, ownerid, storage_type,false,
-        reloptions);
+                                           newListPartitionOid, partrelfileOid, bucketOid, ownerid, storage_type,
+                                           false, reloptions);
 
     Assert(newListPartitionOid == PartitionGetPartid(newListPartition));
 
@@ -7722,6 +7858,25 @@ bool* CheckPartkeyHasTimestampwithzone(Relation partTableRel, bool isForSubParti
 
     relation_close(pgPartRel, AccessShareLock);
     return isTimestamptz;
+}
+
+bool *CheckSubPartkeyHasTimestampwithzone(Relation partTableRel, List *subpartKeyPosList)
+{
+    Assert(RelationIsSubPartitioned(partTableRel));
+
+    int subPartKeyNum = list_length(subpartKeyPosList);
+    bool *isTimestamptzForSubPartKey = (bool *)palloc0(sizeof(bool) * subPartKeyNum);
+    ListCell *subpartKeyCell = NULL;
+    int partKeyIdx = 0;
+    foreach (subpartKeyCell, subpartKeyPosList) {
+        int pos = lfirst_int(subpartKeyCell);
+        if ((RelationGetDescr(partTableRel))->attrs[pos]->atttypid == TIMESTAMPTZOID) {
+            isTimestamptzForSubPartKey[partKeyIdx] = true;
+        }
+        partKeyIdx++;
+    }
+
+    return isTimestamptzForSubPartKey;
 }
 
 /*

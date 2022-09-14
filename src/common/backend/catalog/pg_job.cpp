@@ -422,7 +422,7 @@ void update_pg_job_dbname(Oid jobid, const char* dbname)
     securec_check_c(rc, "\0", "\0");
 
     replaces[Anum_pg_job_dbname - 1] = true;
-    values[Anum_pg_job_dbname - 1] = CStringGetDatum(dbname);
+    values[Anum_pg_job_dbname - 1] = DirectFunctionCall1(namein, CStringGetDatum(dbname));
 
     job_relation = heap_open(PgJobRelationId, RowExclusiveLock);
 
@@ -436,7 +436,7 @@ void update_pg_job_dbname(Oid jobid, const char* dbname)
     ReleaseSysCache(tup);
     heap_freetuple_ext(newtuple);
 
-    heap_close(job_relation, RowExclusiveLock);
+    heap_close(job_relation, NoLock);
 }
 
 void update_pg_job_username(Oid jobid, const char* username)
@@ -458,11 +458,13 @@ void update_pg_job_username(Oid jobid, const char* username)
     rc = memset_s(replaces, sizeof(replaces), false, sizeof(replaces));
     securec_check_c(rc, "\0", "\0");
 
+    Assert(username != NULL);
     replaces[Anum_pg_job_log_user - 1] = true;
-    values[Anum_pg_job_log_user - 1] = CStringGetDatum(username);
-
+    replaces[Anum_pg_job_priv_user - 1] = true;
     replaces[Anum_pg_job_nspname - 1] = true;
-    values[Anum_pg_job_nspname - 1] = CStringGetDatum(username);
+    values[Anum_pg_job_log_user - 1] = DirectFunctionCall1(namein, CStringGetDatum(username));
+    values[Anum_pg_job_priv_user - 1] = DirectFunctionCall1(namein, CStringGetDatum(username));
+    values[Anum_pg_job_nspname - 1] = DirectFunctionCall1(namein, CStringGetDatum(username));
 
     job_relation = heap_open(PgJobRelationId, RowExclusiveLock);
 
@@ -2189,7 +2191,7 @@ static char* query_with_update_job(int4 job_id, Datum job_status, int64 pid, Dat
     initStringInfo(&queryString);
     if (t_thrd.proc->workingVersionNum >= 92473) {
         appendStringInfo(&queryString,
-            "select * from update_pgjob(%d, \'%c\', %ld, %s, %s, %s, %s, %s, %d , %s);",
+            "select * from  pg_catalog.update_pgjob(%d, \'%c\', %ld, %s, %s, %s, %s, %s, %d , %s);",
             job_id,
             DatumGetChar(job_status),
             pid,
@@ -2215,7 +2217,7 @@ static char* query_with_update_job(int4 job_id, Datum job_status, int64 pid, Dat
                 : quote_literal_cstr(DatumGetCString(fail_msg)));
     } else {
         appendStringInfo(&queryString,
-            "select * from update_pgjob(%d, \'%c\', %ld, %s, %s, %s, %s, %s, %d);",
+            "select * from  pg_catalog.update_pgjob(%d, \'%c\', %ld, %s, %s, %s, %s, %s, %d);",
             job_id,
             DatumGetChar(job_status),
             pid,

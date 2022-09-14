@@ -48,8 +48,10 @@ ParamListInfo copyParamList(ParamListInfo from)
     retval->parserSetup = NULL;
     retval->parserSetupArg = NULL;
     retval->params_need_process = false;
+    retval->uParamInfo = DEFUALT_INFO;
+    retval->params_lazy_bind = false;
     retval->numParams = from->numParams;
-    
+
     for (i = 0; i < from->numParams; i++) {
         ParamExternData* oprm = &from->params[i];
         ParamExternData* nprm = &retval->params[i];

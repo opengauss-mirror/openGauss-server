@@ -228,6 +228,7 @@ typedef enum {
     GUC_PARA_BOOL,  /* bool    */
     GUC_PARA_ENUM,  /* enum    */
     GUC_PARA_INT,   /* int     */
+    GUC_PARA_INT64, /* int64   */
     GUC_PARA_REAL,  /* real    */
     GUC_PARA_STRING /* string  */
 } GucParaType;
@@ -270,6 +271,7 @@ const char *value_type_list[] = {
 const char* unit_eight_kB_parameter_list[] = {
     "backwrite_quantity",
     "effective_cache_size",
+    "pca_shared_buffers",
     "prefetch_quantity",
     "segment_size",
     "shared_buffers",
@@ -546,7 +548,7 @@ static char* form_commandline_options(const char* instance_name, const char* ind
     /* find length required for options */
     for (i = 0; i < config_param_number; i++) {
         if (!is_hba_conf) {
-            buflen += (ALLIG_POSTGRES_CONF_LEN + strlen(config_param[i]));
+            buflen += (int)(ALLIG_POSTGRES_CONF_LEN + strlen(config_param[i]));
             if (config_value[i] != NULL) {
                 buflen += strlen(config_value[i]);
             }
@@ -3288,6 +3290,8 @@ GucParaType get_guc_type(const char* type)
         return GUC_PARA_ENUM;
     else if (0 == strncmp(type, "string", strlen("string")))
         return GUC_PARA_STRING;
+    else if (0 == strncmp(type, "int64", strlen("int64")))
+        return GUC_PARA_INT64;
     else
         return GUC_PARA_ERROR;
 }

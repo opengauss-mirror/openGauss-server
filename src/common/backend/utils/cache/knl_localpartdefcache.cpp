@@ -262,7 +262,8 @@ void LocalPartDefCache::InvalidateAll(void)
             if (PartitionHasReferenceCountZero(part)) {
                 /* Delete this entry immediately */
                 PartitionClearPartition(part, false);
-            } else {
+                elt = DLGetHead(&bucket_entry->cc_bucket);
+            } else if (!list_member_ptr(rebuildList, part)) {
                 rebuildList = lappend(rebuildList, part);
             }
         }
@@ -344,6 +345,7 @@ void LocalPartDefCache::AtEOXact_PartitionCache(bool isCommit)
                     part->pd_createSubid = InvalidSubTransactionId;
                 } else {
                     PartitionClearPartition(part, false);
+                    elt = DLGetHead(&bucket_entry->cc_bucket);
                     continue;
                 }
             }
@@ -388,6 +390,7 @@ void LocalPartDefCache::AtEOSubXact_PartitionCache(bool isCommit, SubTransaction
                     part->pd_createSubid = parentSubid;
                 else {
                     PartitionClearPartition(part, false);
+                    elt = DLGetHead(&bucket_entry->cc_bucket);
                     continue;
                 }
             }

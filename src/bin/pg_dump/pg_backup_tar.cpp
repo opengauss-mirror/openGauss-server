@@ -527,13 +527,18 @@ static size_t _tarReadRaw(ArchiveHandle* AH, void* buf, size_t len, TAR_MEMBER* 
 
     /* Read the file if len > 0 */
     if (len > 0) {
-        if (fh != NULL)
-            res = fread(&((char*)buf)[used], 1, len, fh);
-        else if (th != NULL) {
-            if ((th->zFH) != NULL)
-                res = GZREAD(&((char*)buf)[used], 1, len, th->zFH);
-            else
-                res = fread(&((char*)buf)[used], 1, len, th->nFH);
+        if (fh != NULL) {
+            res = fread_file(&((char*)buf)[used], 1, len, fh);
+        } else if (th != NULL) {
+            if ((th->zFH) != NULL) {
+#ifdef HAVE_LIBZ
+                res = gzread_file(&((char*)buf)[used], len, th->zFH);
+#else
+                res = fread_file(&((char*)buf)[used], 1, len, th->zFH);
+#endif
+            } else {
+                res = fread_file(&((char*)buf)[used], 1, len, th->nFH);
+            }
         } else
             exit_horribly(modulename, "internal error -- neither th nor fh specified in tarReadRaw()\n");
     }

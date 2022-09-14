@@ -50,6 +50,10 @@ typedef struct BgWorkerContext {
     char        *databaseName;
     char        *userName;
     bool        enable_cluster_resize;
+    uint64      parent_query_id;
+    uint64      parent_session_id;
+    Oid         myTempNamespace;
+    Oid         myTempToastNamespace;
     bgworker_main main_entry;
     bgworker_exit exit_entry;
 } BgWorkerContext;

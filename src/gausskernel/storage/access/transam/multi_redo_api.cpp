@@ -45,7 +45,7 @@ void StartUpMultiRedo(XLogReaderState *xlogreader, uint32 privateLen)
     if (IsExtremeRedo()) {
         extreme_rto::StartRecoveryWorkers(xlogreader, privateLen);
     } else if (IsParallelRedo()) {
-        parallel_recovery::StartRecoveryWorkers();
+        parallel_recovery::StartRecoveryWorkers(xlogreader->ReadRecPtr);
     }
 }
 
@@ -133,6 +133,13 @@ void MultiRedoUpdateStandbyState(HotStandbyState newState)
         extreme_rto::UpdateStandbyState(newState);
     } else if (IsParallelRedo()) {
         parallel_recovery::UpdateStandbyState(newState);
+    }
+}
+
+void MultiRedoUpdateMinRecovery(XLogRecPtr newMinRecoveryPoint)
+{
+    if (IsExtremeRedo()) {
+        extreme_rto::UpdateMinRecoveryForTrxnRedoThd(newMinRecoveryPoint);
     }
 }
 
@@ -356,9 +363,10 @@ void CountXLogNumbers(XLogReaderState *record)
         (void)pg_atomic_add_fetch_u64(&g_instance.comm_cxt.predo_cxt.xlogStatics[rm_id][info].extra_num,
             record->readblocks);
     } else if (rm_id == RM_XACT_ID) {
-        ColFileNodeRel *xnodes = NULL;
+        ColFileNode *xnodes = NULL;
+        bool compress = false;
         int nrels = 0;
-        XactGetRelFiles(record, &xnodes, &nrels);
+        XactGetRelFiles(record, &xnodes, &nrels, &compress);
         if (nrels > 0) {
             (void)pg_atomic_add_fetch_u64(&g_instance.comm_cxt.predo_cxt.xlogStatics[rm_id][info].extra_num, nrels);
         }

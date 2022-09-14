@@ -722,6 +722,8 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  3073 | pg_is_xlog_replay_paused
  3080 | pg_sequence_last_value
  3097 | varchar_transform
+ 3118 | standby_statement_history
+ 3119 | standby_statement_history
  3122 | oidvectorrecv_extend
  3123 | oidvectorsend_extend
  3124 | json_agg
@@ -1527,6 +1529,7 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  7893 | gs_stat_ustore
  7998 | set_working_grand_version_num_manually
  8001 | get_paxos_replication_info
+ 8413 | pg_read_binary_file_blocks 
  8050 | datalength
  8413 | pg_read_binary_file_blocks
  8642 | gs_txid_oldestxmin
@@ -1586,6 +1589,7 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  9988 | tdigest_merge_to_one
  9989 | tdigest_merge
  9990 | percentile_of_value
+ 9998 | gs_stack
  9999 | pg_test_err_contain_err
 --?.*
 

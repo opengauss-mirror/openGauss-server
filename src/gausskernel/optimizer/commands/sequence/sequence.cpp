@@ -22,6 +22,7 @@
 #include "access/multixact.h"
 #include "access/tableam.h"
 #include "access/transam.h"
+#include "access/sysattr.h"
 #include "access/xlog.h"
 #include "access/xloginsert.h"
 #include "access/xlogutils.h"
@@ -66,7 +67,6 @@
 
 #endif
 
-static int128 nextval_internal(Oid relid);
 template<typename T_Form>
 static T_Form read_seq_tuple(SeqTable elm, Relation rel, Buffer* buf, HeapTuple seqtuple, GTM_UUID* uuid);
 template<typename T_FormData, typename T_Int, bool large>
@@ -761,9 +761,13 @@ static Datum GetIntDefVal(TypeName* name, T value)
     }
 }
 
-void DefineSequenceWrapper(CreateSeqStmt* seq)
+void DefineSequenceWrapper(CreateSeqStmt *seq)
 {
     if (seq->is_large) {
+        if (t_thrd.proc->workingVersionNum < LARGE_SEQUENCE_VERSION_NUM) {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("It is not supported to create large sequence during upgrade.")));
+        }
         DefineSequence<FormData_pg_large_sequence, int128, true>(seq);
     } else {
         DefineSequence<FormData_pg_sequence, int64, false>(seq);
@@ -854,9 +858,11 @@ static void DefineSequence(CreateSeqStmt* seq)
 
     if (notSupportTmpSeq)
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("Temporary sequences are not supported")));
+#ifdef ENABLE_MULTIPLE_NODES
     if (!IS_SINGLE_NODE && seq->uuid == INVALIDSEQUUID)
         ereport(ERROR,
             (errcode(ERRCODE_DATA_CORRUPTED), errmsg("Invaild UUID for CREATE SEQUENCE %s.", seq->sequence->relname)));
+#endif
 
     /* Check and set all option values */
 #ifdef PGXC
@@ -1027,6 +1033,40 @@ static void DefineSequence(CreateSeqStmt* seq)
 #endif
 }
 
+template<typename T_Form>
+static HeapTuple ResetSequenceTuple(Relation seq_rel, SeqTable elm, bool restart)
+{
+    T_Form seq = NULL;
+    Buffer buf;
+    HeapTupleData seqtuple;
+    HeapTuple result;
+    GTM_UUID uuid;
+    errno_t rc = memset_s(&seqtuple, sizeof(seqtuple), 0, sizeof(seqtuple));
+    securec_check_c(rc, "\0", "\0");
+    seqtuple.tupTableType = HEAP_TUPLE;
+
+    (void)read_seq_tuple<T_Form>(elm, seq_rel, &buf, &seqtuple, &uuid);
+
+    /*
+     * Copy the existing sequence tuple.
+     */
+    result = (HeapTuple)tableam_tops_copy_tuple(&seqtuple);
+
+    /* Now we're done with the old page */
+    UnlockReleaseBuffer(buf);
+
+    /*
+     * Modify the copied tuple to execute the restart (compare the RESTART
+     * action in AlterSequence)
+     */
+    seq = (T_Form)GETSTRUCT(result);
+    seq->last_value = restart ? seq->min_value : -1; /* if restart, set a valid last_value */
+    seq->is_called = false;
+    seq->log_cnt = 0;
+
+    return result;
+}
+
 /*
  * Reset a sequence to its initial value.
  *
@@ -1039,17 +1079,11 @@ static void DefineSequence(CreateSeqStmt* seq)
  * which must not be released until end of transaction.  Caller is also
  * responsible for permissions checking.
  */
-void ResetSequence(Oid seq_relid)
+void ResetSequence(Oid seq_relid, bool restart)
 {
     Relation seq_rel;
     SeqTable elm = NULL;
-    Form_pg_sequence seq;
-    Buffer buf;
-    HeapTupleData seqtuple;
     HeapTuple tuple;
-    errno_t rc;
-    rc = memset_s(&seqtuple, sizeof(seqtuple), 0, sizeof(seqtuple));
-    securec_check_c(rc, "\0", "\0");
 
     /*
      * Read the old sequence.  This does a bit more work than really
@@ -1057,25 +1091,11 @@ void ResetSequence(Oid seq_relid)
      * indeed a sequence.
      */
     init_sequence(seq_relid, &elm, &seq_rel);
-    GTM_UUID uuid;
-    (void)read_seq_tuple<Form_pg_sequence>(elm, seq_rel, &buf, &seqtuple, &uuid);
-
-    /*
-     * Copy the existing sequence tuple.
-     */
-    tuple = (HeapTuple)tableam_tops_copy_tuple(&seqtuple);
-
-    /* Now we're done with the old page */
-    UnlockReleaseBuffer(buf);
-
-    /*
-     * Modify the copied tuple to execute the restart (compare the RESTART
-     * action in AlterSequence)
-     */
-    seq = (Form_pg_sequence)GETSTRUCT(tuple);
-    seq->last_value = -1; /* disable the unreliable last_value */
-    seq->is_called = false;
-    seq->log_cnt = 0;
+    if (RelationGetRelkind(seq_rel) == RELKIND_SEQUENCE) {
+        tuple = ResetSequenceTuple<Form_pg_sequence>(seq_rel, elm, restart);
+    } else {
+        tuple = ResetSequenceTuple<Form_pg_large_sequence>(seq_rel, elm, restart);
+    }
 
     /*
      * Create a new storage file for the sequence.	We want to keep the
@@ -1091,6 +1111,9 @@ void ResetSequence(Oid seq_relid)
     /* Clear local cache so that we don't think we have cached numbers */
     /* Note that we do not change the currval() state */
     AssignInt<int128, true>(&(elm->cached), elm->last);
+    if (restart) {
+        elm->last_valid = false;
+    }
 
     relation_close(seq_rel, NoLock);
 }
@@ -1102,6 +1125,25 @@ void AlterSequenceWrapper(AlterSeqStmt* stmt)
     } else {
         AlterSequence<Form_pg_sequence, int64, false>(stmt);
     }
+}
+
+bool CheckSeqOwnedByAutoInc(Oid seqoid)
+{
+    Oid relid;
+    int32 attrnum;
+    Relation rel;
+    if (!DB_IS_CMPT(B_FORMAT)) {
+        return false;
+    }
+    if (sequenceIsOwned(seqoid, &relid, &attrnum)) {
+        rel = relation_open(relid, NoLock);
+        if (seqoid == RelAutoIncSeqOid(rel)) {
+            relation_close(rel, NoLock);
+            return true;
+        }
+        relation_close(rel, NoLock);
+    }
+    return false;
 }
 
 /*
@@ -1148,7 +1190,10 @@ static void AlterSequence(const AlterSeqStmt* stmt)
             errcode(ERRCODE_WRONG_OBJECT_TYPE),
             errmsg("%s is not a sequence, please use ALTER LARGE SEQUENCE instead.", stmt->sequence->relname)));
     }
-
+    if (CheckSeqOwnedByAutoInc(relid)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("cannot alter sequence owned by auto_increment column")));
+    }
     /* Must be owner or have alter privilege of the sequence. */
     AclResult aclresult = pg_class_aclcheck(relid, GetUserId(), ACL_ALTER);
     if (aclresult != ACLCHECK_OK && !pg_class_ownercheck(relid, GetUserId())) {
@@ -1281,19 +1326,81 @@ Datum nextval(PG_FUNCTION_ARGS)
      */
     relid = RangeVarGetRelid(sequence, NoLock, false);
     list_free_deep(nameList);
+    if (CheckSeqOwnedByAutoInc(relid)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("cannot change sequence owned by auto_increment column")));
+    }
     PG_RETURN_INT64(nextval_internal(relid));
+}
+
+Oid get_nextval_rettype()
+{
+    /*
+     * deliberately scan systable instead of search in syscache so that the
+     * influence of hard-coded pg_proc is eliminated.
+     */
+    HeapTuple tup = NULL;
+    ScanKeyData entry;
+    SysScanDesc scanDesc = NULL;
+    Relation rel = heap_open(ProcedureRelationId, NoLock);
+    ScanKeyInit(&entry, ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(NEXTVALFUNCOID));
+    scanDesc = systable_beginscan(rel, ProcedureOidIndexId, true, SnapshotNow, 1, &entry);
+    tup = systable_getnext(scanDesc);
+    if (!HeapTupleIsValid(tup)) {
+        ereport(ERROR, (errmsg("catalog lookup failed for proc %u", NEXTVALFUNCOID)));
+    }
+    Form_pg_proc form = (Form_pg_proc)GETSTRUCT(tup);
+    Oid ret = form->prorettype;
+    systable_endscan(scanDesc);
+    heap_close(rel, NoLock);
+
+    return ret;
+}
+
+bool shouldReturnNumeric()
+{
+    /*
+     * The return type is controled because the binary may mismatch that of system catalog.
+     * Sequence functions should always return the desired type that is determined during
+     * optimizer stage.
+     * During inplace upgrade, if the nextval function is called by default value, I.E.
+     * u_sess->opt_cxt.nextval_default_expr_type != NDE_UNKNOWN, we return the required type
+     * in build_column_default.
+     * Otherwise, we scan the systable for current return type.
+     */
+    if (t_thrd.proc->workingVersionNum >= LARGE_SEQUENCE_VERSION_NUM) {
+        return true;
+    }
+
+    switch (u_sess->opt_cxt.nextval_default_expr_type) {
+        case NDE_NUMERIC:
+            return true;
+        case NDE_BIGINT:
+            return false;
+        default:
+            break;
+    }
+
+    return get_nextval_rettype() == NUMERICOID;
 }
 
 Datum nextval_oid(PG_FUNCTION_ARGS)
 {
     Oid relid = PG_GETARG_OID(0);
-
+    if (CheckSeqOwnedByAutoInc(relid)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("cannot change sequence owned by auto_increment column")));
+    }
     int128 result = nextval_internal(relid);
 
-    PG_RETURN_NUMERIC(convert_int128_to_numeric(result, 0));
+    if (shouldReturnNumeric()) {
+        PG_RETURN_NUMERIC(convert_int128_to_numeric(result, 0));
+    } else {
+        PG_RETURN_INT64(int64(result));
+    }
 }
 
-static int128 nextval_internal(Oid relid)
+int128 nextval_internal(Oid relid)
 {
     SeqTable elm = NULL;
     Relation seqrel;
@@ -1398,7 +1505,11 @@ Datum currval_oid(PG_FUNCTION_ARGS)
     result = elm->last;
     relation_close(seqrel, NoLock);
 
-    PG_RETURN_NUMERIC(convert_int128_to_numeric(result, 0));
+    if (shouldReturnNumeric()) {
+        PG_RETURN_NUMERIC(convert_int128_to_numeric(result, 0));
+    } else {
+        PG_RETURN_INT64(int64(result));
+    }
 }
 
 Datum lastval(PG_FUNCTION_ARGS)
@@ -1434,7 +1545,131 @@ Datum lastval(PG_FUNCTION_ARGS)
     result = u_sess->cmd_cxt.last_used_seq->last;
     relation_close(seqrel, NoLock);
 
-    PG_RETURN_NUMERIC(convert_int128_to_numeric(result, 0));
+    if (shouldReturnNumeric()) {
+        PG_RETURN_NUMERIC(convert_int128_to_numeric(result, 0));
+    } else {
+        PG_RETURN_INT64(int64(result));
+    }
+}
+
+Datum last_insert_id_no_args(PG_FUNCTION_ARGS)
+{
+#ifdef ENABLE_MULTIPLE_NODES
+    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("last_insert_id is not supported for distributed system")));
+#endif
+    if (!DB_IS_CMPT(B_FORMAT)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("last_insert_id is supported only in B-format database")));
+    }
+    PG_RETURN_INT128(u_sess->cmd_cxt.last_insert_id);
+}
+
+Datum last_insert_id(PG_FUNCTION_ARGS)
+{
+#ifdef ENABLE_MULTIPLE_NODES
+    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("last_insert_id is not supported for distributed system")));
+#endif
+    if (!DB_IS_CMPT(B_FORMAT)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("last_insert_id is supported only in B-format database")));
+    }
+    if (PG_ARGISNULL(0)) {
+        u_sess->cmd_cxt.last_insert_id = (int128)0;
+        PG_RETURN_NULL();
+    }
+    u_sess->cmd_cxt.last_insert_id = PG_GETARG_INT128(0);
+    PG_RETURN_INT128(u_sess->cmd_cxt.last_insert_id);
+}
+/*
+ * Set sequence last value for auto_increment column.
+ */
+void autoinc_setval(Oid relid, int128 next, bool iscalled)
+{
+    SeqTable elm = NULL;
+    Relation seqrel;
+    Buffer buf;
+    HeapTupleData seqtuple;
+
+    init_sequence(relid, &elm, &seqrel);
+    /* no need to set a small value */
+    if (elm->last_valid && next < elm->last) {
+        relation_close(seqrel, NoLock);
+        return;
+    }
+
+    GTM_UUID uuid;
+    Form_pg_large_sequence seq = read_seq_tuple<Form_pg_large_sequence>(elm, seqrel, &buf, &seqtuple, &uuid);
+
+    next = (next > seq->max_value) ? seq->max_value : next;
+    /* no need to set a small value */
+    if (seq->last_value > next || (seq->last_value == next && seq->is_called)) {
+        if (seq->is_called) {
+            AssignInt<int128, true>(&(elm->last), (int128)seq->last_value);
+            elm->last_valid = true;
+        }
+        AssignInt<int128, true>(&(elm->cached), elm->last);
+        UnlockReleaseBuffer(buf);
+        relation_close(seqrel, NoLock);
+        return;
+    }
+
+    if (iscalled) {
+        AssignInt<int128, true>(&(elm->last), (int128)next);
+        elm->last_valid = true;
+    }
+    AssignInt<int128, true>(&(elm->cached), elm->last);
+
+    START_CRIT_SECTION();
+    AssignInt<int128, true>(&(seq->last_value), next);
+    seq->is_called = iscalled;
+    seq->log_cnt = 0;
+
+    MarkBufferDirty(buf);
+
+    if (RelationNeedsWAL(seqrel)) {
+        xl_seq_rec xlrec;
+        XLogRecPtr recptr;
+        Page page = BufferGetPage(buf);
+
+        RelFileNodeRelCopy(xlrec.node, seqrel->rd_node);
+
+        XLogBeginInsert();
+        XLogRegisterBuffer(0, buf, REGBUF_WILL_INIT);
+        XLogRegisterData((char *)&xlrec, sizeof(xl_seq_rec));
+        XLogRegisterData((char *)seqtuple.t_data, (int)seqtuple.t_len);
+
+        recptr = XLogInsert(RM_SEQ_ID, XLOG_SEQ_LOG, seqrel->rd_node.bucketNode);
+
+        PageSetLSN(page, recptr);
+    }
+
+    END_CRIT_SECTION();
+    UnlockReleaseBuffer(buf);
+    relation_close(seqrel, NoLock);
+}
+
+int128 autoinc_get_nextval(Oid relid)
+{
+    SeqTable elm = NULL;
+    Relation seqrel;
+    Buffer buf;
+    HeapTupleData seqtuple;
+    GTM_UUID uuid;
+    Form_pg_large_sequence seq;
+    int128 result;
+
+    init_sequence(relid, &elm, &seqrel);
+    seq = read_seq_tuple<Form_pg_large_sequence>(elm, seqrel, &buf, &seqtuple, &uuid);
+    if (seq->is_called) {
+        result = (seq->last_value < seq->max_value) ? seq->last_value + 1 : seq->max_value;
+    } else {
+        result = seq->last_value;
+    }
+    UnlockReleaseBuffer(buf);
+    relation_close(seqrel, NoLock);
+    return result;
 }
 
 /*
@@ -1599,7 +1834,10 @@ Datum setval_oid(PG_FUNCTION_ARGS)
     Relation rel = relation_open(relid, NoLock);
     char relkind = RelationGetRelkind(rel);
     relation_close(rel, NoLock);
-
+    if (CheckSeqOwnedByAutoInc(relid)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("cannot change sequence owned by auto_increment column")));
+    }
     if (relkind == RELKIND_SEQUENCE) {
         do_setval<Form_pg_sequence, int64, false>(relid, next, true);
     } else if (relkind == RELKIND_LARGE_SEQUENCE) {
@@ -1623,7 +1861,10 @@ Datum setval3_oid(PG_FUNCTION_ARGS)
     Relation rel = relation_open(relid, NoLock);
     char relkind = RelationGetRelkind(rel);
     relation_close(rel, NoLock);
-
+    if (CheckSeqOwnedByAutoInc(relid)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("cannot change sequence owned by auto_increment column")));
+    }
     if (relkind == RELKIND_SEQUENCE) {
         do_setval<Form_pg_sequence, int64, false>(relid, next, iscalled);
     } else if (relkind == RELKIND_LARGE_SEQUENCE) {
@@ -1715,7 +1956,6 @@ static T_Form read_seq_tuple(SeqTable elm, Relation rel, Buffer* buf, HeapTuple 
     page = BufferGetPage(*buf);
 
     sm = (sequence_magic*)PageGetSpecialPointer(page);
-
     if (sm->magic != SEQ_MAGIC)
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),

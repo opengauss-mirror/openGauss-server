@@ -191,16 +191,6 @@ static pthread_mutex_t VFDLockArray[NUM_VFD_PARTITIONS];
 #define VFDMappingPartitionLock(hashcode) \
     (&VFDLockArray[VFDTableHashPartition(hashcode)])
 
-/*
- * pc_munmap
- */
-#define SAFE_MUNMAP(vfdP)                                  \
-    do {                                                   \
-        if ((vfdP)->with_pcmap && (vfdP)->pcmap != NULL) { \
-            UnReferenceAddrFile((vfdP));                   \
-            (vfdP)->pcmap = NULL;                          \
-        }                                                  \
-    } while (0)
 /* --------------------
  *
  * Private Routines
@@ -595,7 +585,7 @@ void InitFileAccess(void)
         t_thrd.lsc_cxt.lsc->VfdCache->fd = VFD_CLOSED;
         t_thrd.lsc_cxt.lsc->SizeVfdCache = 1;
         /* register proc-exit hook to ensure temp files are dropped at exit */
-        
+
         on_proc_exit(AtProcExit_Files, 0);
     } else {
         Assert(u_sess->storage_cxt.SizeVfdCache == 0); /* call me only once */
@@ -927,7 +917,6 @@ static void LruDelete(File file)
 
     vfdP = &vfdcache[file];
 
-    SAFE_MUNMAP(vfdP);
     /* delete the vfd record from the LRU ring */
     Delete(file);
 
@@ -1717,8 +1706,6 @@ void FileCloseWithThief(File file)
 {
     Vfd* vfdP = &GetVfdCache()[file];
     if (!FileIsNotOpen(file)) {
-        SAFE_MUNMAP(vfdP);
-
         /* remove the file from the lru ring */
         Delete(file);
         /* the thief has close the real fd */
@@ -1858,8 +1845,6 @@ void FileClose(File file)
     vfdP = &vfdcache[file];
 
     if (!FileIsNotOpen(file)) {
-        SAFE_MUNMAP(vfdP);
-
         /* remove the file from the lru ring */
         Delete(file);
 
@@ -2081,7 +2066,7 @@ int FileWrite(File file, const char* buffer, int amount, off_t offset, int fastE
             /* fast allocate large disk space for this heap file each 8MB */
             fastExtendSize = (int)(u_sess->attr.attr_storage.fast_extend_file_size * 1024LL);
         }
-    
+
         /* fast allocate large disk space for this file each 8MB */
         if ((offset % fastExtendSize) == 0) {
             returnCode = fallocate(vfdcache[file].fd, FALLOC_FL_KEEP_SIZE, offset, fastExtendSize);
@@ -3521,7 +3506,7 @@ void RemovePgTempFiles(void)
                         sizeof(temp_path),
                         sizeof(temp_path) - 1,
                         "pg_tblspc/%s/%s_%s/%s",
-                        curSubDir,
+                        spc_de->d_name,
                         TABLESPACE_VERSION_DIRECTORY,
                         g_instance.attr.attr_common.PGXCNodeName,
                         PG_TEMP_FILES_DIR);
@@ -3544,7 +3529,7 @@ void RemovePgTempFiles(void)
                         sizeof(temp_path),
                         sizeof(temp_path) - 1,
                         "pg_tblspc/%s/%s_%s",
-                        curSubDir,
+                        spc_de->d_name,
                         TABLESPACE_VERSION_DIRECTORY,
                         g_instance.attr.attr_common.PGXCNodeName);
         securec_check_ss(rc, "", "");
@@ -3919,7 +3904,7 @@ void InitializeVFDLocks(void)
  * Alternate version that allows caller to specify the elevel for any
  * error report.  If elevel < ERROR, returns NULL on any error.
  */
-static struct dirent *ReadDirExtended(DIR *dir, const char *dirname, int elevel)
+struct dirent *ReadDirExtended(DIR *dir, const char *dirname, int elevel)
 {
     struct dirent *dent;
 
@@ -4014,48 +3999,18 @@ static void UnlinkIfExistsFname(const char *fname, bool isdir, int elevel)
     }
 }
 
-/*
- * initialize page compress memory map.
- *
- */
-void SetupPageCompressMemoryMap(File file, RelFileNode node, const RelFileNodeForkNum& relFileNodeForkNum)
+void FileAllocate(File file, uint32 offset, uint32 size)
 {
-    Vfd *vfdP = &GetVfdCache()[file];
-    auto chunk_size = CHUNK_SIZE_LIST[GET_COMPRESS_CHUNK_SIZE(node.opt)];
-    int returnCode = FileAccess(file);
-    if (returnCode < 0) {
-        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_RESOURCES), errmsg("Failed to open file %s: %m", vfdP->fileName)));
+    vfd *vfdcache = GetVfdCache();
+    if (fallocate(vfdcache[file].fd, FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE, offset, size) < 0) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("fallocate failed on relation: \"%s\": ", FilePathName(file))));
     }
-    RelFileNodeForkNum newOne(relFileNodeForkNum);
-    newOne.forknumber = PCA_FORKNUM;
-    PageCompressHeader *map = GetPageCompressHeader(vfdP, chunk_size, newOne);
-    vfdP->with_pcmap = true;
-    vfdP->pcmap = map;
 }
 
-/*
- * Return the page compress memory map.
- *
- */
-PageCompressHeader *GetPageCompressMemoryMap(File file, uint32 chunk_size)
+void FileAllocateDirectly(int fd, char* path, uint32 offset, uint32 size)
 {
-    int returnCode;
-    Vfd *vfdP = &GetVfdCache()[file];
-    PageCompressHeader *map = NULL;
-
-    Assert(FileIsValid(file));
-
-    returnCode = FileAccess(file);
-    if (returnCode < 0) {
-        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_RESOURCES), errmsg("Failed to open file %s: %m", vfdP->fileName)));
+    if (fallocate(fd, FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE, offset, size) < 0) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("fallocate failed on relation: \"%s\"", path)));
     }
-
-    Assert(vfdP->with_pcmap);
-    if (vfdP->pcmap == NULL) {
-        map = GetPageCompressHeader(vfdP, chunk_size, vfdP->fileNode);
-        vfdP->with_pcmap = true;
-        vfdP->pcmap = map;
-    }
-
-    return vfdP->pcmap;
 }

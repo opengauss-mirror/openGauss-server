@@ -24,6 +24,7 @@
 #include "utils/resowner.h"
 #include "utils/partitionmap_gs.h"
 #include "utils/plpgsql.h"
+#include "utils/guc.h"
 
 /*
  * The "eflags" argument to ExecutorStart and the various ExecInitNode
@@ -192,6 +193,7 @@ extern TupleHashEntry FindTupleHashEntry(
  * prototypes from functions in execJunk.c
  */
 extern JunkFilter* ExecInitJunkFilter(List* targetList, bool hasoid, TupleTableSlot* slot, TableAmType tam = TAM_HEAP);
+extern void ExecInitJunkAttr(EState* estate, CmdType operation, List* targetlist, ResultRelInfo* result_rel_info);
 extern JunkFilter* ExecInitJunkFilterConversion(List* targetList, TupleDesc cleanTupType, TupleTableSlot* slot);
 extern AttrNumber ExecFindJunkAttribute(JunkFilter* junkfilter, const char* attrName);
 extern AttrNumber ExecFindJunkAttributeInTlist(List* targetlist, const char* attrName);
@@ -224,7 +226,7 @@ extern void InitResultRelInfo(
     ResultRelInfo* resultRelInfo, Relation resultRelationDesc, Index resultRelationIndex, int instrument_options);
 extern ResultRelInfo* ExecGetTriggerResultRel(EState* estate, Oid relid);
 extern bool ExecContextForcesOids(PlanState* planstate, bool* hasoids);
-extern bool ExecConstraints(ResultRelInfo* resultRelInfo, TupleTableSlot* slot, EState* estate);
+extern bool ExecConstraints(ResultRelInfo* resultRelInfo, TupleTableSlot* slot, EState* estate, bool skipAutoInc = false);
 extern ExecRowMark* ExecFindRowMark(EState* estate, Index rti);
 extern ExecAuxRowMark* ExecBuildAuxRowMark(ExecRowMark* erm, List* targetlist);
 extern TupleTableSlot* EvalPlanQual(EState* estate, EPQState* epqstate, Relation relation, Index rti,
@@ -235,7 +237,8 @@ extern TupleTableSlot* EvalPlanQualUHeap(EState* estate, EPQState* epqstate, Rel
 extern TupleTableSlot *EvalPlanQualUSlot(EPQState *epqstate, Relation relation, Index rti);
 extern HeapTuple EvalPlanQualFetch(
     EState* estate, Relation relation, int lockmode, ItemPointer tid, TransactionId priorXmax);
-extern void EvalPlanQualInit(EPQState* epqstate, EState* estate, Plan* subplan, List* auxrowmarks, int epqParam);
+extern void EvalPlanQualInit(EPQState* epqstate, EState* estate, Plan* subplan, List* auxrowmarks, int epqParam,
+    ProjectionInfo** projInfos = NULL);
 extern void EvalPlanQualSetPlan(EPQState* epqstate, Plan* subplan, List* auxrowmarks);
 extern void EvalPlanQualSetTuple(EPQState* epqstate, Index rti, Tuple tuple);
 extern Tuple EvalPlanQualGetTuple(EPQState* epqstate, Index rti);
@@ -255,6 +258,7 @@ extern TupleTableSlot* ExecProcNode(PlanState* node);
 extern Node* MultiExecProcNode(PlanState* node);
 extern void ExecEndNode(PlanState* node);
 extern bool NeedStubExecution(Plan* plan);
+extern TupleTableSlot* FetchPlanSlot(PlanState* subPlanState, ProjectionInfo** projInfos);
 
 extern long ExecGetPlanMemCost(Plan* node);
 
@@ -305,6 +309,7 @@ typedef struct ExecIndexTuplesState {
     Relation targetPartRel;
     Partition p;
     bool* conflict;
+    bool rollbackIndex;
 } ExecIndexTuplesState;
 
 typedef struct ConflictInfoData {
@@ -342,6 +347,7 @@ extern ExprContext* CreateExprContext(EState* estate);
 extern ExprContext* CreateStandaloneExprContext(void);
 extern void FreeExprContext(ExprContext* econtext, bool isCommit);
 extern void ReScanExprContext(ExprContext* econtext);
+extern void ShutdownExprContext(ExprContext* econtext, bool isCommit);
 
 #define ResetExprContext(econtext) MemoryContextReset((econtext)->ecxt_per_tuple_memory)
 
@@ -407,7 +413,8 @@ extern bool ExecCheckIndexConstraints(TupleTableSlot *slot, EState *estate, Rela
                                       Oid *conflictPartOid = NULL, int2 *conflictBucketId = NULL);
 
 extern void ExecDeleteIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* estate,
-    Relation targetPartRel, Partition p, const Bitmapset *modifiedIdxAttrs, const bool inplaceUpdated);
+    Relation targetPartRel, Partition p, const Bitmapset *modifiedIdxAttrs,
+    const bool inplaceUpdated, const bool isRollbackIndex);
 
 extern void ExecUHeapDeleteIndexTuplesGuts(
     TupleTableSlot* oldslot, Relation rel, ModifyTableState* node, ItemPointer tupleid,
@@ -444,6 +451,8 @@ extern void ExplainNodeFinish(PlanState* result_plan, PlannedStmt* pstmt, Timest
 extern void ExecCopyDataFromDatum(PLpgSQL_datum** datums, int dno, Cursor_Data* target_cursor);
 extern void ExecCopyDataToDatum(PLpgSQL_datum** datums, int dno, Cursor_Data* target_cursor);
 
+extern Tuple ExecAutoIncrement(Relation rel, EState* estate, TupleTableSlot* slot, Tuple tuple);
+
 /*
  * prototypes from functions in execReplication.cpp
  */
@@ -468,6 +477,8 @@ extern void CheckCmdReplicaIdentity(Relation rel, CmdType cmd);
 extern void GetFakeRelAndPart(EState *estate, Relation rel, TupleTableSlot *slot, FakeRelationPartition *relAndPart);
 extern Datum GetTypeZeroValue(Form_pg_attribute att_tup);
 extern Tuple ReplaceTupleNullCol(TupleDesc tupleDesc, TupleTableSlot* slot);
+
+extern Datum ExecEvalArrayRef(ArrayRefExprState* astate, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone);
 
 // AutoMutexLock
 //		Auto object for non-recursive pthread_mutex_t lock
@@ -547,6 +558,35 @@ private:
     bool m_fLocked;
     bool m_trace;
     ResourceOwner m_owner;
+};
+
+class AutoDopControl {
+public:
+    AutoDopControl()
+    {
+        if (likely(u_sess != NULL)) {
+            m_smpEnabled = u_sess->opt_cxt.smp_enabled;
+        } else {
+            m_smpEnabled = true;
+        }
+    }
+
+    ~AutoDopControl()
+    {
+        if (u_sess != NULL) {
+            u_sess->opt_cxt.smp_enabled = m_smpEnabled;
+        }
+    }
+
+    void CloseSmp()
+    {
+        if (likely(u_sess != NULL)) {
+            u_sess->opt_cxt.smp_enabled = false;
+        }
+    }
+
+private:
+    bool m_smpEnabled;
 };
 
 #endif /* EXECUTOR_H  */

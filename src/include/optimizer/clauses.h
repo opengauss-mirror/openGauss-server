@@ -19,6 +19,13 @@
 #include "parser/parse_node.h"
 #include "nodes/nodeFuncs.h"
 
+#ifndef ENABLE_MULTIPLE_NODES
+#define is_orclause(clause) \
+    ((clause) != NULL && IsA(clause, BoolExpr) && (((const BoolExpr *)(clause))->boolop) == OR_EXPR)
+#define is_notclause(clause) \
+    ((clause) != NULL && IsA(clause, BoolExpr) && (((const BoolExpr *)(clause))->boolop) == NOT_EXPR)
+#endif /* ENABLE_MULTIPLE_NODES */
+
 #define is_opclause(clause) ((clause) != NULL && IsA(clause, OpExpr))
 #define is_funcclause(clause) ((clause) != NULL && IsA(clause, FuncExpr))
 
@@ -93,7 +100,11 @@ extern Node* strip_implicit_coercions(Node* node);
 
 extern Node* eval_const_expressions(PlannerInfo* root, Node* node);
 
+extern Node* eval_const_expression_value(PlannerInfo* root, Node* node);
+
 extern Node* eval_const_expressions_params(PlannerInfo* root, Node* node, ParamListInfo boundParams);
+
+extern Node *eval_const_expression_value(PlannerInfo* root, Node* node, ParamListInfo boundParams);
 
 extern Node* estimate_expression_value(PlannerInfo* root, Node* node, EState* estate = NULL);
 

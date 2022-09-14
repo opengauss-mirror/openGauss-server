@@ -202,6 +202,84 @@ AttrNumber ExecFindJunkAttribute(JunkFilter* junkfilter, const char* attrName)
     return ExecFindJunkAttributeInTlist(junkfilter->jf_targetList, attrName);
 }
 
+void ExecInitJunkAttr(EState* estate, CmdType operation, List* targetlist, ResultRelInfo* result_rel_info)
+{
+    JunkFilter* j = NULL;
+
+    j = ExecInitJunkFilter(targetlist,
+        result_rel_info->ri_RelationDesc->rd_att->tdhasoid,
+        ExecInitExtraTupleSlot(estate, result_rel_info->ri_RelationDesc->rd_tam_type));
+
+    if (operation == CMD_UPDATE || operation == CMD_DELETE || operation == CMD_MERGE) {
+        /* For UPDATE/DELETE, find the appropriate junk attr now */
+        char relkind;
+
+        relkind = result_rel_info->ri_RelationDesc->rd_rel->relkind;
+        if (relkind == RELKIND_RELATION) {
+            j->jf_junkAttNo = ExecFindJunkAttribute(j, "ctid");
+            if (!AttributeNumberIsValid(j->jf_junkAttNo)) {
+                ereport(ERROR,
+                    (errmodule(MOD_EXECUTOR),
+                        (errcode(ERRCODE_INVALID_ATTRIBUTE), errmsg("could not find junk ctid column"))));
+            }
+
+            /* if the table is partitioned table ,give a paritionOidJunkOid junk */
+            if (RELATION_IS_PARTITIONED(result_rel_info->ri_RelationDesc) ||
+                RelationIsCUFormat(result_rel_info->ri_RelationDesc)) {
+                AttrNumber tableOidAttNum = ExecFindJunkAttribute(j, "tableoid");
+                if (!AttributeNumberIsValid(tableOidAttNum)) {
+                    ereport(ERROR,
+                        (errmodule(MOD_EXECUTOR),
+                            (errcode(ERRCODE_INVALID_ATTRIBUTE),
+                                errmsg("could not find junk tableoid column for partition table."))));
+                }
+
+                result_rel_info->ri_partOidAttNum = tableOidAttNum;
+                j->jf_xc_part_id = result_rel_info->ri_partOidAttNum;
+            }
+
+            if (RELATION_HAS_BUCKET(result_rel_info->ri_RelationDesc)) {
+                AttrNumber bucketIdAttNum = ExecFindJunkAttribute(j, "tablebucketid");
+                if (!AttributeNumberIsValid(bucketIdAttNum)) {
+                    ereport(ERROR,
+                        (errmodule(MOD_EXECUTOR),
+                            (errcode(ERRCODE_INVALID_ATTRIBUTE),
+                                errmsg("could not find junk bucketid column for bucketed table."))));
+                }
+
+                result_rel_info->ri_bucketIdAttNum = bucketIdAttNum;
+                j->jf_xc_bucket_id = result_rel_info->ri_bucketIdAttNum;
+            }
+#ifdef PGXC
+            if (IS_PGXC_COORDINATOR && RelationGetLocInfo(result_rel_info->ri_RelationDesc)) {
+                /*
+                    * We may or may not need these attributes depending upon
+                    * the exact kind of trigger. We defer the check; instead throw
+                    * error only at the point when we need but don't find one.
+                    */
+                j->jf_xc_node_id = ExecFindJunkAttribute(j, "xc_node_id");
+                j->jf_xc_wholerow = ExecFindJunkAttribute(j, "wholerow");
+                j->jf_primary_keys = ExecFindJunkPrimaryKeys(targetlist);
+            } else if (IS_PGXC_DATANODE && !IS_SINGLE_NODE) {
+                j->jf_xc_node_id = ExecFindJunkAttribute(j, "xc_node_id");
+            }
+#endif
+        } else if (relkind == RELKIND_FOREIGN_TABLE || relkind == RELKIND_STREAM) {
+            /* FDW must fetch any junk attrs it wants */
+        } else {
+            j->jf_junkAttNo = ExecFindJunkAttribute(j, "wholerow");
+            if (!AttributeNumberIsValid(j->jf_junkAttNo)) {
+                ereport(ERROR,
+                    (errmodule(MOD_EXECUTOR),
+                        (errcode(ERRCODE_INVALID_ATTRIBUTE),
+                            errmsg("could not find junk wholerow column"))));
+            }
+        }
+    }
+
+    result_rel_info->ri_junkFilter = j;
+}
+
 /*
  * ExecFindJunkPrimaryKeys
  *

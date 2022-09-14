@@ -56,6 +56,7 @@
 #include "executor/executor.h"
 
 #include "communication/commproxy_interface.h"
+#include "utils/mem_snapshot.h"
 
 #ifdef HAVE_POLL_H
 #include <poll.h>
@@ -115,6 +116,7 @@ void ThreadPoolControler::Init(bool enableNumaDistribute)
     int expectThreadNum = 0;
     int maxStreamNum = 0;
     int numaId = 0;
+    int tmpNumaId = 0;
     int cpuNum = 0;
     int *cpuArr = NULL;
 
@@ -143,16 +145,18 @@ void ThreadPoolControler::Init(bool enableNumaDistribute)
             cpuNum = m_cpuInfo.cpuArrSize[numaId];
             cpuArr = m_cpuInfo.cpuArr[numaId];
 
+            tmpNumaId = numaId;
             numaId++;
         } else {
             expectThreadNum = m_threadNum / m_groupNum;
             maxThreadNum = m_maxPoolSize / m_groupNum;
             maxStreamNum = m_maxPoolSize / m_groupNum;
             numaId = -1;
+            tmpNumaId = numaId;
         }
 
         m_groups[i] = New(CurrentMemoryContext)ThreadPoolGroup(maxThreadNum, expectThreadNum,
-                                                    maxStreamNum, i, numaId, cpuNum, cpuArr, bindCpuNuma);
+                                                    maxStreamNum, i, tmpNumaId, cpuNum, cpuArr, bindCpuNuma);
         m_groups[i]->Init(enableNumaDistribute);
     }
 
@@ -797,6 +801,7 @@ void ThreadPoolControler::ShutDownScheduler(bool forceWait, bool noAdjust)
     if (noAdjust) {
         pg_memory_barrier();
         m_scheduler->m_canAdjustPool = false;
+        pg_memory_barrier();
     }
 
     m_scheduler->ShutDown();

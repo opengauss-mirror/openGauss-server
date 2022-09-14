@@ -39,7 +39,6 @@
 #include "utils/hsearch.h"
 #include "utils/memutils.h"
 #include "utils/resowner.h"
-
 #include "gssignal/gs_signal.h"
 
 /* Signal handlers */
@@ -84,7 +83,7 @@ void WalWriterAuxiliaryMain(void)
     (void)gspqsignal(SIGTTOU, SIG_DFL);
     (void)gspqsignal(SIGCONT, SIG_DFL);
     (void)gspqsignal(SIGWINCH, SIG_DFL);
-
+    (void)gspqsignal(SIGURG, print_stack);
     /* We allow SIGQUIT (quickdie) at all times */
     (void)sigdelset(&t_thrd.libpq_cxt.BlockSig, SIGQUIT);
 

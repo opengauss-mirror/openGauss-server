@@ -29,6 +29,7 @@
 #include "access/sysattr.h"
 #include "lib/stringinfo.h"
 #include "catalog/dependency.h"
+#include "catalog/gs_db_privilege.h"
 #include "catalog/indexing.h"
 #include "catalog/pg_database.h"
 #include "catalog/pg_synonym.h"
@@ -49,6 +50,31 @@
 static Oid SynonymCreate(
     Oid synNamespace, const char* synName, Oid synOwner, const char* objSchema, const char* objName, bool replace);
 static void SynonymDrop(Oid synNamespace, char* synName, DropBehavior behavior, bool missing);
+
+void CheckCreateSynonymPrivilege(Oid synNamespace, const char* synName)
+{
+    if (!isRelSuperuser() &&
+        (synNamespace == PG_CATALOG_NAMESPACE ||
+        synNamespace == PG_PUBLIC_NAMESPACE ||
+        synNamespace == PG_DB4AI_NAMESPACE)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                errmsg("permission denied to create synonym \"%s\"", synName),
+                errhint("must be %s to create a synonym in %s schema.",
+                    g_instance.attr.attr_security.enablePrivilegesSeparate ? "initial user" : "sysadmin",
+                    get_namespace_name(synNamespace))));
+    }
+
+    if (!IsInitdb && !u_sess->attr.attr_common.IsInplaceUpgrade &&
+        !g_instance.attr.attr_common.allow_create_sysobject &&
+        IsSysSchema(synNamespace)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                errmsg("permission denied to create synonym \"%s\"", synName),
+                errhint("not allowd to create a synonym in %s schema when allow_create_sysobject is off.",
+                    get_namespace_name(synNamespace))));
+    }
+}
 
 /*
  * CREATE SYNONYM
@@ -73,19 +99,15 @@ void CreateSynonym(CreateSynonymStmt* stmt)
 
     /* Check we have creation rights in namespace. */
     aclResult = pg_namespace_aclcheck(synNamespace, GetUserId(), ACL_CREATE);
-
-    if (aclResult != ACLCHECK_OK) {
+    bool anyResult = false;
+    if (aclResult != ACLCHECK_OK && !IsSysSchema(synNamespace)) {
+        anyResult = HasSpecAnyPriv(GetUserId(), CREATE_ANY_SYNONYM, false);
+    }
+    if (aclResult != ACLCHECK_OK && !anyResult) {
         aclcheck_error(aclResult, ACL_KIND_NAMESPACE, get_namespace_name(synNamespace));
     }
 
-    if (synNamespace == PG_PUBLIC_NAMESPACE && !isRelSuperuser()) {
-        ereport(ERROR,
-            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-                errmsg("permission denied to create synonym \"%s\"", synName),
-                errhint("must be %s to create a synonym in public schema.",
-                    g_instance.attr.attr_security.enablePrivilegesSeparate  ? "initial user" : "sysadmin")));
-    }
-
+    CheckCreateSynonymPrivilege(synNamespace, synName);
     /* Deconstruct the referenced qualified-name. */
     DeconstructQualifiedName(stmt->objName, &objSchema, &objName);
 
@@ -111,8 +133,8 @@ void DropSynonym(DropSynonymStmt* stmt)
     synNamespace = QualifiedNameGetCreationNamespace(stmt->synName, &synName);
     Assert(OidIsValid(synNamespace));
 
-    /* Check we have drop privilege in namespace */
-    aclResult = pg_namespace_aclcheck(synNamespace, GetUserId(), ACL_CREATE);
+    /* Check we have usage privilege in namespace */
+    aclResult = pg_namespace_aclcheck(synNamespace, GetUserId(), ACL_USAGE);
     if (aclResult != ACLCHECK_OK) {
         aclcheck_error(aclResult, ACL_KIND_NAMESPACE, get_namespace_name(synNamespace));
     }
@@ -249,9 +271,15 @@ static void SynonymDrop(Oid synNamespace, char* synName, DropBehavior behavior, 
 
     Oid synOid = HeapTupleGetOid(tuple);
     Form_pg_synonym synForm = (Form_pg_synonym)GETSTRUCT(tuple);
-    /* Allow DROP to either synonym owner or schema owner. */
-    if (!pg_synonym_ownercheck(synOid, GetUserId()) && !pg_namespace_ownercheck(synForm->synnamespace, GetUserId())) {
-        aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_CLASS, NameStr(synForm->synname));
+    /* Allow DROP to either synonym owner or schema owner or user having DROP ANY SYNONYM privilege. */
+    bool ownerResult = pg_synonym_ownercheck(synOid, GetUserId()) ||
+        pg_namespace_ownercheck(synForm->synnamespace, GetUserId());
+    bool anyResult = false;
+    if (!ownerResult && !IsSysSchema(synForm->synnamespace)) {
+        anyResult = HasSpecAnyPriv(GetUserId(), DROP_ANY_SYNONYM, false);
+    }
+    if (!ownerResult && !anyResult) {
+        aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_CLASS, NameStr(synForm->synname));
     }
     ReleaseSysCache(tuple);
 

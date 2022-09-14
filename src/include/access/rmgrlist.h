@@ -78,3 +78,6 @@ PG_RMGR(RM_SEGPAGE_ID, "SegpageStorage", segpage_smgr_redo, segpage_smgr_desc, N
     segpage_smgr_type_name)
 PG_RMGR(RM_REPLORIGIN_ID, "ReplicationOrigin", replorigin_redo, replorigin_desc, NULL, NULL, NULL, NULL, NULL, \
     replorigin_type_name)
+PG_RMGR(RM_COMPRESSION_REL_ID, "CompressionRelation", CfsShrinkRedo, CfsShrinkDesc, NULL, NULL, NULL, NULL, NULL, \
+    CfsShrinkTypeName)
+

@@ -32,13 +32,13 @@ extern void PrepForRead(char *path, int64 blocknum, char *relation_type, char *o
 
 extern void ValidateParameterPath(RelFileNode rnode, char *str);
 
-extern char *ParsePage(char *path, int64 blocknum, char *relation_type, bool read_memory);
+extern char *ParsePage(char *path, int64 blocknum, char *relation_type, bool read_memory, bool dumpUndo = false);
 
 extern void CheckOpenFile(FILE *outputfile, char *outputFilename);
 
-extern void CheckWriteFile(int result, int cnt_len, char *outputFilename);
+extern void CheckWriteFile(FILE *outputfile, char *outputFilename, char *strOutput);
 
-extern void CheckCloseFile(int result, char *outputFilename);
+extern void CheckCloseFile(FILE *outputfile, char *outputFilename, bool is_error);
 
 extern void validate_xlog_location(char *str);
 
@@ -50,5 +50,6 @@ extern void validate_xlog_location(char *str);
 #define TWO 2
 #define FIVE 5
 #define SHORTOUTPUTLEN 200
+#define MAXUNDOFILENAMELEN 512
 
 #endif /* OPENGAUSS_PAGEPARSE_H */

@@ -44,7 +44,7 @@ CREATE SNAPSHOT abalone@test FROM @1.0.0 USING (
 SELECT COUNT(*),SUM(rings) FROM abalone@test;
 -- SELECT * FROM abalone@test ORDER BY id LIMIT 10;
 
-SELECT id, parent_id, matrix_id, root_id, schema, name, commands,
+SELECT schema, name, commands,
        comment, published, archived, row_count
   FROM db4ai.snapshot;
 

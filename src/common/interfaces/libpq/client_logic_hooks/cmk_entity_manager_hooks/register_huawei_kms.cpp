@@ -337,6 +337,10 @@ void free_kms_cache(size_t cache_id)
         return;
     }
 
+    if (kms_cache_tbl[cache_id] == NULL) {
+        return;
+    }
+    
     errno_t rc = memset_s(kms_cache_tbl[cache_id], sizeof(CachedAuthInfo), 0, sizeof(CachedAuthInfo));
     securec_check_c(rc, "", "");
 
@@ -405,7 +409,7 @@ CmkemErrCode set_kms_cache_auth_info(size_t cache_id, const char *key, const cha
 static void set_kms_cache_auth_token(CachedAuthInfo *cache, const char *token)
 {
     if (cache != NULL) {
-        errno_t rc = sprintf_s(cache->req_header_token, MAX_TOKEN_BUF_LEN, "X-Auth-Token:%s", token);
+        errno_t rc = sprintf_s(cache->req_header_token, MAX_TOKEN_BUF_LEN, "X-Auth-Token:%s ", token);
         securec_check_ss_c(rc, "", "");
         cache->has_get_token = true;
     }
@@ -632,13 +636,15 @@ CmkemErrCode select_cmk_entity_from_huaweikms(size_t cache_id, const char *cmk_i
         return CMKEM_SET_CJSON_VALUE_ERR;
     }
 
-    const char *http_resheader_list[] = {"Content-Type:application/json", req_header_token, NULL};
+    char *contlen = make_content_length(http_reqbody);
+    const char *http_resheader_list[] = {"Content-Type:application/json", req_header_token, contlen, NULL};
     HttpReqMsg http_req_msg = {HTTP_POST, url, NULL, http_reqbody, http_resheader_list};
     HttpConfig http_config = {DEFAULT_HTTP_TIME_OUT, HTTP_RESBODY};
     CmkemStrList *http_resbody = NULL;
     HttpStatusCode http_stat_code;
     
     ret = http_request(&http_req_msg, &http_config, &http_resbody, &http_stat_code);
+    cmkem_free(contlen);
     if (ret != CMKEM_SUCCEED) {
         cmkem_free(http_reqbody);
         return ret;
@@ -651,8 +657,12 @@ CmkemErrCode select_cmk_entity_from_huaweikms(size_t cache_id, const char *cmk_i
         return ret;
     }
 
-    *huaweikms_resbody = cmkem_list_val(http_resbody, 0);
-    free_cmkem_list_with_skip(http_resbody, 0);
+    *huaweikms_resbody = cmkem_list_merge(http_resbody);
+    cmkem_list_free(http_resbody);
+    if (*huaweikms_resbody == NULL) {
+        return CMKEM_MALLOC_MEM_ERR;
+    }
+
     return CMKEM_SUCCEED;
 }
 
@@ -676,13 +686,15 @@ CmkemErrCode encrypt_cek_plain_by_huaweikms(size_t cache_id, CmkemStr *hex_cek_p
         return CMKEM_SET_CJSON_VALUE_ERR;
     }
 
-    const char *http_resheader_list[] = {"Content-Type:application/json", req_header_token, NULL};
+    char *contlen = make_content_length(http_reqbody);
+    const char *http_resheader_list[] = {"Content-Type:application/json", req_header_token, contlen, NULL};
     HttpReqMsg http_req_msg = {HTTP_POST, url, NULL, http_reqbody, http_resheader_list};
     HttpConfig http_config = {DEFAULT_HTTP_TIME_OUT, HTTP_RESBODY};
     CmkemStrList *http_resbody = NULL;
     HttpStatusCode http_stat_code;
 
     ret = http_request(&http_req_msg, &http_config, &http_resbody, &http_stat_code);
+    cmkem_free(contlen);
     if (ret != CMKEM_SUCCEED) {
         cmkem_free(http_reqbody);
         return ret;
@@ -695,8 +707,12 @@ CmkemErrCode encrypt_cek_plain_by_huaweikms(size_t cache_id, CmkemStr *hex_cek_p
         return ret;
     }
 
-    *huaweikms_resbody = cmkem_list_val(http_resbody, 0);
-    free_cmkem_list_with_skip(http_resbody, 0);
+    *huaweikms_resbody = cmkem_list_merge(http_resbody);
+    cmkem_list_free(http_resbody);
+    if (*huaweikms_resbody == NULL) {
+        return CMKEM_MALLOC_MEM_ERR;
+    }
+
     return CMKEM_SUCCEED;
 }
 
@@ -708,11 +724,11 @@ CmkemErrCode decrypt_cek_plain_by_huaweikms(size_t cache_id, CmkemStr *hex_cek_c
     char *req_header_token = NULL;
     ret = get_kms_cache_token(cache_id, &req_header_token);
     check_cmkem_ret(ret);
-    
+
     char url[MAX_URL_BUF_LEN] = {0};
     ret = get_kms_url(cache_id, KMS_DEC_CEK_REQ, url, MAX_URL_BUF_LEN);
     check_cmkem_ret(ret);
-    
+
     char *http_reqbody = get_dec_cek_cipher_jsontemp(cmk_id,
         hex_cek_cipher_join_hash->str_val,
         get_rawcek_len_from_hex_cek_cipher_len(hex_cek_cipher_join_hash->str_len));
@@ -720,13 +736,15 @@ CmkemErrCode decrypt_cek_plain_by_huaweikms(size_t cache_id, CmkemStr *hex_cek_c
         return CMKEM_SET_CJSON_VALUE_ERR;
     }
 
-    const char *http_resheader_list[] = {"Content-Type:application/json", req_header_token, NULL};
+    char *contlen = make_content_length(http_reqbody);
+    const char *http_resheader_list[] = {"Content-Type:application/json", req_header_token, contlen, NULL};
     HttpReqMsg http_req_msg = {HTTP_POST, url, NULL, http_reqbody, http_resheader_list};
     HttpConfig http_config = {DEFAULT_HTTP_TIME_OUT, HTTP_RESBODY};
     CmkemStrList *http_resbody = NULL;
     HttpStatusCode http_stat_code;
 
     ret = http_request(&http_req_msg, &http_config, &http_resbody, &http_stat_code);
+    cmkem_free(contlen);
     if (ret != CMKEM_SUCCEED) {
         cmkem_free(http_reqbody);
         return ret;
@@ -739,8 +757,13 @@ CmkemErrCode decrypt_cek_plain_by_huaweikms(size_t cache_id, CmkemStr *hex_cek_c
         return ret;
     }
 
-    *huaweikms_resbody = cmkem_list_val(http_resbody, 0);
-    free_cmkem_list_with_skip(http_resbody, 0);
+    *huaweikms_resbody = cmkem_list_merge(http_resbody);
+    cmkem_list_free(http_resbody);
+
+    if (*huaweikms_resbody == NULL) {
+        return CMKEM_MALLOC_MEM_ERR;
+    }
+
     return CMKEM_SUCCEED;
 }
 
@@ -913,7 +936,7 @@ static ProcessPolicy encrypt_cek_plain_hookfunc(CmkemUStr *cek_plain, CmkIdentit
 
 static ProcessPolicy decrypt_cek_cipher_hookfunc(CmkemUStr *cek_cipher, CmkIdentity *cmk_identity,
     CmkemUStr **cek_plain)
-{ 
+{
     CmkemErrCode ret = CMKEM_SUCCEED;
     char *huaweikms_resbody = NULL;
     const char *key_list[] = {"data_key", "datakey_length", NULL};

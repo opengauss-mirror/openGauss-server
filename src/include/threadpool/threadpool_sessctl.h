@@ -60,10 +60,16 @@ public:
     void SigHupHandler();
     void HandlePoolerReload();
     void CheckSessionTimeout();
+#ifndef ENABLE_MULTIPLE_NODES
+    void CheckIdleInTransactionSessionTimeout();
+#endif
     void CheckPermissionForSendSignal(knl_session_context* sess, sig_atomic_t* lock);
     void getSessionMemoryDetail(Tuplestorestate* tupStore, TupleDesc tupDesc, knl_sess_control** sess);
     void getSessionClientInfo(Tuplestorestate* tupStore, TupleDesc tupDesc);
-    void getSessionMemoryContextInfo(const char* ctx_name, StringInfoData* buf, knl_sess_control** sess);
+    void getSessionMemoryContextInfo(const char* ctx_name, StringInfoDataHuge* buf, knl_sess_control** sess);
+    void getSessionMemoryContextSpace(StringInfoDataHuge* buf, knl_sess_control** sess);
+    bool CheckSessionCanTerminate(const Oid roleId);
+    SessMemoryUsage* getSessionMemoryUsage(int* num);
     knl_session_context* GetSessionByIdx(int idx);
     int FindCtrlIdxBySessId(uint64 id);
     TransactionId ListAllSessionGttFrozenxids(int maxSize, ThreadId *pids, TransactionId *xids, int *n);

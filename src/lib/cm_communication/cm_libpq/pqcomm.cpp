@@ -155,7 +155,7 @@ int StreamServerPort(int family, char* hostName, unsigned short portNumber, int 
     hint.ai_socktype = SOCK_STREAM;
 
     {
-        rc = snprintf_s(portNumberStr, sizeof(portNumberStr), sizeof(portNumberStr) - 1, "%d", portNumber);
+        rc = snprintf_s(portNumberStr, sizeof(portNumberStr), sizeof(portNumberStr) - 1, "%d", (int)portNumber);
         securec_check_intval(rc, );
         service = portNumberStr;
     }

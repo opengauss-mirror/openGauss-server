@@ -61,6 +61,7 @@ typedef struct KMeans {
     AlgorithmAPI algo;
 } KMeans;
 
+extern KMeans kmeans;
 /*
  * internal representation of a centroid
  */

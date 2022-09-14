@@ -191,4 +191,9 @@ extern bool remove_local_plan(Plan* stream_plan, Plan* parent, ListCell* lc, boo
                     errmsg("%s : LZ4_compress_default destination buffer couldn't hold all the information", hint))); \
         }                                                                                                             \
     } while (0)
+
+#if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
+typedef bool (*aggSmpFunc)(Oid funcId);
+#endif
+
 #endif /* STREAMPLAN_H */

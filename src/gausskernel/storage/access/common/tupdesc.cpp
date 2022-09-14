@@ -218,10 +218,17 @@ TupleConstr *TupleConstrCopy(const TupleDesc tupdesc)
             if (constr->defval[i].adbin) {
                 cpy->defval[i].adbin = pstrdup(constr->defval[i].adbin);
             }
+            if (constr->defval[i].adbin_on_update) {
+                cpy->defval[i].adbin_on_update = pstrdup(constr->defval[i].adbin_on_update);
+            }
         }
         uint32 genColsLen = (uint32)tupdesc->natts * sizeof(char);
         cpy->generatedCols = (char *)palloc(genColsLen);
         rc = memcpy_s(cpy->generatedCols, genColsLen, constr->generatedCols, genColsLen);
+        securec_check(rc, "\0", "\0");
+        uint32 updateColsLen = (uint32)tupdesc->natts * sizeof(bool);
+        cpy->has_on_update = (bool *)palloc(updateColsLen);
+        rc = memcpy_s(cpy->has_on_update, updateColsLen, constr->has_on_update, updateColsLen);
         securec_check(rc, "\0", "\0");
     }
 
@@ -240,6 +247,12 @@ TupleConstr *TupleConstrCopy(const TupleDesc tupdesc)
             cpy->check[i].ccvalid = constr->check[i].ccvalid;
             cpy->check[i].ccnoinherit = constr->check[i].ccnoinherit;
         }
+    }
+
+    if (constr->cons_autoinc) {
+        cpy->cons_autoinc = (ConstrAutoInc *)palloc(sizeof(ConstrAutoInc));
+        rc = memcpy_s(cpy->cons_autoinc, sizeof(ConstrAutoInc), constr->cons_autoinc, sizeof(ConstrAutoInc));
+        securec_check(rc, "\0", "\0");
     }
     return cpy;
 }
@@ -286,11 +299,46 @@ char GetGeneratedCol(TupleDesc tupdesc, int atti)
     return tupdesc->constr->generatedCols[atti];
 }
 
+
+static bool IsTupdescRemembered(TupleDesc tupdesc)
+{
+    bool found = false;
+    if (unlikely(tupdesc->tdrefcount > 0)) {
+        ereport(ERROR,
+            (errmsg("TupleDesc reference leak: TupleDesc (%u,%d) still referenced with refcount %d",
+                tupdesc->tdtypeid,
+                tupdesc->tdtypmod,
+                tupdesc->tdrefcount)));
+    }
+    if (tupdesc->tdrefcount == 0) {
+        int NextEOXactTupleDescNum = t_thrd.lsc_cxt.lsc->tabdefcache.NextEOXactTupleDescNum;
+        TupleDesc *EOXactTupleDescArray = t_thrd.lsc_cxt.lsc->tabdefcache.EOXactTupleDescArray;
+        for (int i = 0; i < NextEOXactTupleDescNum; i++) {
+            if (EOXactTupleDescArray[i] == tupdesc) {
+                Assert(false);
+                found = true;
+                break;
+            }
+        }
+        if (found) {
+            ereport(LOG,
+                (errmsg("TupleDesc reference leak: TupleDesc (%u,%d) still referenced by lsc",
+                    tupdesc->tdtypeid,
+                    tupdesc->tdtypmod)));
+        }
+    }
+    
+    return found;
+}
+
 /*
  * Free a TupleDesc including all substructure
  */
-void FreeTupleDesc(TupleDesc tupdesc)
+void FreeTupleDesc(TupleDesc tupdesc, bool need_check)
 {
+    if (unlikely(tupdesc->tdrefcount >= 0) && EnableLocalSysCache() && need_check && IsTupdescRemembered(tupdesc)) {
+        return;
+    }
     int i;
 
     /*
@@ -309,6 +357,7 @@ void FreeTupleDesc(TupleDesc tupdesc)
             }
             pfree(attrdef);
             pfree(tupdesc->constr->generatedCols);
+            pfree(tupdesc->constr->has_on_update);
         }
         if (tupdesc->constr->num_check > 0) {
             ConstrCheck *check = tupdesc->constr->check;
@@ -366,9 +415,10 @@ void DecrTupleDescRefCount(TupleDesc tupdesc)
 {
     Assert(tupdesc->tdrefcount > 0);
 
-    ResourceOwnerForgetTupleDesc(t_thrd.utils_cxt.CurrentResourceOwner, tupdesc);
-    if (--tupdesc->tdrefcount == 0)
-        FreeTupleDesc(tupdesc);
+    if (ResourceOwnerForgetTupleDesc(t_thrd.utils_cxt.CurrentResourceOwner, tupdesc)) {
+        if (--tupdesc->tdrefcount == 0)
+            FreeTupleDesc(tupdesc);
+    }
 }
 
 /* compare the attinitdefval */
@@ -924,15 +974,6 @@ static void BlockColumnRelOption(const char *tableFormat, const Oid atttypid, co
     }
 }
 
-static void BlockORCRelOption(const char *tableFormat, const Oid atttypid, const int32 atttypmod)
-{
-    if ((pg_strcasecmp(ORIENTATION_ORC, tableFormat) == 0) && !IsTypeSupportedByORCRelation(atttypid)) {
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("type \"%s\" is not supported in DFS ORC format column store",
-                               format_type_with_typemod(atttypid, atttypmod))));
-    }
-}
-
 /*
  * BuildDescForRelation
  *
@@ -1033,7 +1074,6 @@ TupleDesc BuildDescForRelation(List *schema, Node *orientedFrom, char relkind)
         attdim = UpgradeAdaptAttr(atttypid, entry);
 
         BlockColumnRelOption(tableFormat, atttypid, atttypmod);
-        BlockORCRelOption(tableFormat, atttypid, atttypmod);
 
         if (entry->typname->setof)
             ereport(ERROR, (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
@@ -1072,6 +1112,7 @@ TupleDesc BuildDescForRelation(List *schema, Node *orientedFrom, char relkind)
         constr->check = NULL;
         constr->num_check = 0;
         constr->generatedCols = NULL;
+        constr->has_on_update = NULL;
         desc->constr = constr;
     } else {
         desc->constr = NULL;

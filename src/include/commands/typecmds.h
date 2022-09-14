@@ -26,6 +26,7 @@ extern void DefineDomain(CreateDomainStmt* stmt);
 extern void DefineEnum(CreateEnumStmt* stmt);
 extern void DefineRange(CreateRangeStmt* stmt);
 extern void AlterEnum(AlterEnumStmt* stmt);
+extern void DefineSet(CreateSetStmt* stmt);
 extern Oid DefineCompositeType(RangeVar* typevar, List* coldeflist);
 extern void DefineTableOfType(const TableOfTypeStmt* stmt);
 extern Oid AssignTypeArrayOid(void);
@@ -41,7 +42,7 @@ extern void checkDomainOwner(HeapTuple tup);
 extern List* GetDomainConstraints(Oid typeOid);
 
 extern void RenameType(RenameStmt* stmt);
-extern void AlterTypeOwner(List* names, Oid newOwnerId, ObjectType objecttype);
+extern void AlterTypeOwner(List* names, Oid newOwnerId, ObjectType objecttype, bool altertype);
 extern void AlterTypeOwnerInternal(Oid typeOid, Oid newOwnerId, bool hasDependEntry);
 extern void AlterTypeNamespace(List* names, const char* newschema, ObjectType objecttype);
 extern Oid AlterTypeNamespace_oid(Oid typeOid, Oid nspOid, ObjectAddresses* objsMoved);

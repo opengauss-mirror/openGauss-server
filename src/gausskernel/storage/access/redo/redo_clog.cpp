@@ -44,6 +44,7 @@
 XLogRecParseState *ClogXlogDdlParseToBlock(XLogReaderState *record, uint32 *blocknum)
 {
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
+    bool compress = (bool)(XLogRecGetInfo(record) & XLR_REL_COMPRESS);
     errno_t rc = EOK;
     int64 pageno = 0;
     ForkNumber forknum = MAIN_FORKNUM;
@@ -76,7 +77,7 @@ XLogRecParseState *ClogXlogDdlParseToBlock(XLogReaderState *record, uint32 *bloc
     XLogRecSetBlockCommonState(record, BLOCK_DATA_DDL_TYPE, filenode, recordstatehead);
 
     XLogRecSetBlockDdlState(&(recordstatehead->blockparse.extra_rec.blockddlrec), ddltype,
-                            (char *)XLogRecGetData(record));
+                            (char *)XLogRecGetData(record), 1, compress);
 
     return recordstatehead;
 }

@@ -352,7 +352,7 @@ void GsCodeGen::loadIRFile()
         char* exec_path_r = realpath(exec_path, NULL);
         if (exec_path_r) {
             char *llvmIrFilePath = "share/llvmir/GaussDB_expr.ir";
-#ifndef ENABLE_MULTIPLE_NODES
+#if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
             if (u_sess->attr.attr_sql.whale || u_sess->attr.attr_sql.dolphin) {
                 int id = GetCustomParserId();
                 if (id >= 0 && g_instance.llvmIrFilePath[id] != NULL) {

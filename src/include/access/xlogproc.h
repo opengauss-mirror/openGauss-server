@@ -219,6 +219,7 @@ typedef struct {
     uint32 blockddltype;
     int rels;
     char *mainData;
+    bool compress;
 } XLogBlockDdlParse;
 
 /* ********BLOCK DDL END ***************** */
@@ -1080,7 +1081,7 @@ void SegPageRedoDataBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdat
 extern void xlog_redo_data_block(
     XLogBlockHead* blockhead, XLogBlockDataParse* blockdatarec, RedoBufferInfo* bufferinfo);
 extern void XLogRecSetBlockDdlState(XLogBlockDdlParse* blockddlstate, uint32 blockddltype, char *mainData,
-    int rels = 1);
+    int rels = 1, bool compress = false);
 XLogRedoAction XLogCheckBlockDataRedoAction(XLogBlockDataParse* datadecode, RedoBufferInfo* bufferinfo);
 
 void BtreeRedoDataBlock(XLogBlockHead* blockhead, XLogBlockDataParse* blockdatarec, RedoBufferInfo* bufferinfo);

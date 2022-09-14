@@ -49,9 +49,7 @@ elif [ X"$kernel" == X"centos" ]; then
 elif [ X"$kernel" == X"openeuler" ]; then
     dist_version="openEuler"
 else
-    echo "Only support EulerOS|Centos|openEuler platform."
-    echo "Kernel is $kernel"
-    exit 1
+    dist_version="Platform"
 fi
 
 show_package=false
@@ -291,12 +289,6 @@ declare symbol_package_name="${package_pre_name}-symbol.${install_package_format
 echo "[makemppdb] $(date +%y-%m-%d' '%T): script dir : ${SCRIPT_DIR}"
 ROOT_DIR=$(dirname "$SCRIPT_DIR")
 ROOT_DIR=$(dirname "$ROOT_DIR")
-PLAT_FORM_STR=$(sh "${ROOT_DIR}/src/get_PlatForm_str.sh")
-if [ "${PLAT_FORM_STR}"x == "Failed"x ]
-then
-    echo "Only support EulerOS openEuler platform."
-    exit 1
-fi
 
 CMAKE_BUILD_DIR=${ROOT_DIR}/tmp_build
 declare LOG_FILE="${ROOT_DIR}/build/script/makemppdb_pkg.log"
@@ -304,12 +296,12 @@ declare BUILD_DIR="${ROOT_DIR}/mppdb_temp_install"
 declare ERR_MKGS_FAILED=1
 declare MKGS_OK=0
 if [ "${binarylib_dir}" != 'None' ] && [ -d "${binarylib_dir}" ]; then
-    BUILD_TOOLS_PATH="${binarylib_dir}/buildtools/${PLAT_FORM_STR}"
-    PLATFORM_PATH="${binarylib_dir}/platform/${PLAT_FORM_STR}"
-    BINARYLIBS_PATH="${binarylib_dir}/dependency"
+    BUILD_TOOLS_PATH="${binarylib_dir}/buildtools/"
+    PLATFORM_PATH="${binarylib_dir}/kernel/platform/"
+    BINARYLIBS_PATH="${binarylib_dir}/kernel/dependency"
 else
-    BUILD_TOOLS_PATH="${ROOT_DIR}/buildtools/${PLAT_FORM_STR}"
-    PLATFORM_PATH="${ROOT_DIR}/platform/${PLAT_FORM_STR}"
+    BUILD_TOOLS_PATH="${ROOT_DIR}/buildtools/"
+    PLATFORM_PATH="${ROOT_DIR}/kernel/platform/"
     BINARYLIBS_PATH="${ROOT_DIR}/binarylibs"
 fi
 
@@ -319,9 +311,9 @@ export CC="$BUILD_TOOLS_PATH/gcc$gcc_version/gcc/bin/gcc"
 export CXX="$BUILD_TOOLS_PATH/gcc$gcc_version/gcc/bin/g++"
 export LD_LIBRARY_PATH=$BUILD_TOOLS_PATH/gcc$gcc_version/gcc/lib64:$BUILD_TOOLS_PATH/gcc$gcc_version/isl/lib:$BUILD_TOOLS_PATH/gcc$gcc_version/mpc/lib/:$BUILD_TOOLS_PATH/gcc$gcc_version/mpfr/lib/:$BUILD_TOOLS_PATH/gcc$gcc_version/gmp/lib/:$LD_LIBRARY_PATH
 export PATH=$BUILD_TOOLS_PATH/gcc$gcc_version/gcc/bin:$PATH
-jdkpath=${binarylib_dir}/platform/huaweijdk8/${PLATFORM_ARCH}/jdk
+jdkpath=${binarylib_dir}/kernel/platform/huaweijdk8/${PLATFORM_ARCH}/jdk
 if [ ! -d "${jdkpath}" ]; then
-    jdkpath=${binarylib_dir}/platform/openjdk8/${PLATFORM_ARCH}/jdk
+    jdkpath=${binarylib_dir}/kernel/platform/openjdk8/${PLATFORM_ARCH}/jdk
 fi
 export JAVA_HOME=${jdkpath}
 
@@ -515,21 +507,6 @@ function install_gaussdb()
     commitid=$(LD_PRELOAD=''  ${BUILD_DIR}/bin/gaussdb -V | cut -d ")" -f 1 | awk '{print $NF}')
     echo "${commitid}" >>${SCRIPT_DIR}/version.cfg
     echo "End insert commitid into version.cfg" >> "$LOG_FILE" 2>&1
-
-    cp ${BINARYLIBS_PATH}/${PLAT_FORM_STR}/iperf/comm/bin/iperf3 ${BUILD_DIR}/bin
-    if [ $? -ne 0 ]; then
-        die "cp ${BINARYLIBS_PATH}/${PLAT_FORM_STR}/iperf/comm/bin/iperf3 ${BUILD_DIR}/bin failed"
-    fi
-
-    cp ${BINARYLIBS_PATH}/${PLAT_FORM_STR}/iperf/comm/lib/libiperf.so.0 ${BUILD_DIR}/lib
-    if [ $? -ne 0 ]; then
-        die "cp ${BINARYLIBS_PATH}/${PLAT_FORM_STR}/iperf/comm/lib/libiperf.so.0 ${BUILD_DIR}/lib failed"
-    fi
-
-    cp ${BINARYLIBS_PATH}/${PLAT_FORM_STR}/fio/comm/bin/fio ${BUILD_DIR}/bin
-    if [ $? -ne 0 ]; then
-        die "cp ${BINARYLIBS_PATH}/${PLAT_FORM_STR}/fio/comm/bin/fio ${BUILD_DIR}/bin failed"
-    fi
 }
 
 #######################################################################

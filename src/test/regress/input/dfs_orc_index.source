@@ -1,4 +1,4 @@
-﻿drop schema index_test cascade;
+drop schema index_test cascade;
 create schema index_test;
 set current_schema=index_test;
 set enable_hashjoin=off;

@@ -368,7 +368,7 @@ begin
 end;
 /
 call test_clob_write();
-select * from test_clob;
+select * from test_clob order by 1;
 
 create or replace procedure test_lob_write_nodyna
 as
@@ -383,7 +383,7 @@ end;
 /
 
 call test_lob_write_nodyna();
-select * from test_clob;
+select * from test_clob order by 1;
 
 create or replace procedure test_blob_write
 as
@@ -397,7 +397,7 @@ begin
 end;
 /
 call test_blob_write();
-select * from test_blob;
+select * from test_blob order by 1;
 
 --test append+update
 create or replace procedure test_clob_append
@@ -413,7 +413,7 @@ end;
 /
 
 call test_clob_append();
-select * from test_clob;
+select * from test_clob order by 1;
 
 create or replace procedure test_blob_append
 as
@@ -428,7 +428,7 @@ end;
 /
 
 call test_blob_append();
-select * from test_blob;
+select * from test_blob order by 1;
 
 --test read
 create or replace procedure test_clob_read
@@ -448,7 +448,6 @@ end;
 call test_clob_read();
 
 drop table if exists test_clob;
-
 \c regression;
 drop database IF EXISTS pl_test_pkg_single;
 

@@ -368,6 +368,12 @@ DATA(insert ( 403     jsonb_ops        PGNSP    PGUID  4033  3802 t 0 ));
 DATA(insert ( 405     jsonb_ops        PGNSP    PGUID  4034  3802 t 0 ));
 DATA(insert ( 2742    jsonb_ops        PGNSP    PGUID  4036  3802 t 25 ));
 DATA(insert ( 2742    jsonb_hash_ops   PGNSP    PGUID  4037  3802 f 23 ));
+/* set */
+DATA(insert ( 403  setasint_ops PGNSP PGUID 1976  3272 t 0 ));
+DATA(insert ( 405  setasint_ops PGNSP PGUID 1977  3272 f 0 ));
+DATA(insert ( 405  settext_ops  PGNSP PGUID 1995  3272 f 0 ));
+DATA(insert ( 4439 setasint_ops PGNSP PGUID 6976  3272 t 0 ));
+DATA(insert ( 405  set_ops      PGNSP PGUID 8646  3272 t 0 ));
 
 #endif   /* PG_OPCLASS_H */
 

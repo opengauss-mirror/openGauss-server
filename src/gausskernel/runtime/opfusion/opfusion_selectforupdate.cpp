@@ -195,6 +195,10 @@ bool SelectForUpdateFusion::execute(long max_rows, char *completionTag)
     securec_check_ss(errorno, "\0", "\0");
 
     (void)MemoryContextSwitchTo(oldContext);
+
+    /* instr unique sql - we assume that this is no nesting calling of Fusion::execute */
+    UniqueSQLStatCountReturnedRows(nprocessed);
+
     return success;
 }
 
@@ -269,11 +273,22 @@ unsigned long SelectForUpdateFusion::ExecSelectForUpdate(Relation rel, ResultRel
                 InvalidBuffer,           /* TO DO: survey */
                 false);                  /* don't pfree this pointer */
 
+            List* planRowMarkList = m_global->m_planstmt->rowMarks;
+            ListCell* planRowMarkCell = NULL;
+            LockWaitPolicy waitPolicy = LockWaitBlock;
+            foreach (planRowMarkCell, planRowMarkList) {
+                Node* planRowMarkNode = (Node*)lfirst(planRowMarkCell);
+                if (nodeTag(planRowMarkNode) == T_PlanRowMark) {
+                    waitPolicy = ((PlanRowMark*)planRowMarkNode)->waitPolicy;
+                    break;
+                }
+            }
+
             Relation destRel = RELATION_IS_PARTITIONED(rel) ? partRel : rel;
             tableam_tslot_getsomeattrs(m_local.m_reslot, m_global->m_tupDesc->natts);
             newtuple.t_self = ((HeapTuple)tuple)->t_self;
             result = tableam_tuple_lock(bucket_rel == NULL ? destRel : bucket_rel, &newtuple, &buffer,
-                GetCurrentCommandId(true), LockTupleExclusive, LockWaitBlock, &tmfd,
+                GetCurrentCommandId(true), LockTupleExclusive, waitPolicy, &tmfd,
                 false, // allow_lock_self (heap implementation)
 #ifdef ENABLE_MULTIPLE_NODES
                 false,
@@ -286,6 +301,9 @@ unsigned long SelectForUpdateFusion::ExecSelectForUpdate(Relation rel, ResultRel
             ReleaseBuffer(buffer);
 
             if (result == TM_SelfModified || result == TM_SelfUpdated) {
+                continue;
+            }
+            if(result == TM_WouldBlock && waitPolicy == LockWaitSkip) {
                 continue;
             }
 

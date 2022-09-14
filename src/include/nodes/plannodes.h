@@ -422,9 +422,11 @@ typedef struct ModifyTable {
     List* updateTlist;			/* List of UPDATE target */
     List* exclRelTlist;		   /* target list of the EXECLUDED pseudo relation */
     Index exclRelRTIndex;			 /* RTI of the EXCLUDED pseudo relation */
+    bool isReplace;
     Node* upsertWhere;          /* Qualifiers for upsert's update clause to check */
 
     OpMemInfo mem_info;    /*  Memory info for modify node */
+    List* targetlists;     /* For multi-relation modifying */
 } ModifyTable;
 
 /* ----------------
@@ -591,6 +593,7 @@ typedef struct Scan {
     bool is_inplace;
     bool scanBatchMode;
     double tableRows;
+    bool partition_iterator_elimination;
 } Scan;
 
 /* ----------------
@@ -612,18 +615,6 @@ typedef struct CStoreScan : public Scan {
     RelstoreType relStoreLocation; /* The store position information. */
     bool is_replica_table;         /* Is a replication table? */
 } CStoreScan;
-
-/*
- * ==========
- * Dfs Store Scan nodes. When the relation is CU format, we use CstoreScan
- * to scan data.
- * ==========
- */
-typedef struct DfsScan : public Scan {
-    RelstoreType relStoreLocation;
-    char* storeFormat; /* The store format, the ORC format only is supported for dfsScan. */
-    List* privateData; /* Private data. */
-} DfsScan;
 
 /*
  * ==========
@@ -694,6 +685,8 @@ typedef struct IndexScan {
     List* targetlist;            /* Hack for column store index, target list to be computed at this node */
     bool index_only_scan;
     bool is_ustore;
+    double selectivity;
+    bool is_partial;
 } IndexScan;
 
 /* ----------------
@@ -717,9 +710,12 @@ typedef struct IndexOnlyScan {
     Scan scan;
     Oid indexid;                 /* OID of index to scan */
     List* indexqual;             /* list of index quals (usually OpExprs) */
+    List* indexqualorig;         /* the same in original form */
     List* indexorderby;          /* list of index ORDER BY exprs */
     List* indextlist;            /* TargetEntry list describing index's cols */
     ScanDirection indexorderdir; /* forward or backward or don't care */
+    double selectivity;
+    bool is_partial;
 } IndexOnlyScan;
 
 /* ----------------
@@ -746,6 +742,8 @@ typedef struct BitmapIndexScan {
     List* indexqual;     /* list of index quals (OpExprs) */
     List* indexqualorig; /* the same in original form */
     bool is_ustore;
+    double selectivity;
+    bool is_partial;
 } BitmapIndexScan;
 
 /* ----------------
@@ -796,25 +794,6 @@ typedef struct CStoreIndexAnd : public BitmapAnd {
 
 typedef struct CStoreIndexOr : public BitmapOr {
 } CStoreIndexOr;
-
-/* ----------------
- *		DFS Store index scan node
- */
-typedef struct DfsIndexScan {
-    Scan scan;
-    Oid indexid;                   /* OID of index to scan */
-    List* indextlist;              /* list of index target entry which represents the column of base-relation */
-    List* indexqual;               /* list of index quals (usually OpExprs) */
-    List* indexqualorig;           /* the same in original form */
-    List* indexorderby;            /* list of index ORDER BY exprs */
-    List* indexorderbyorig;        /* the same in original form */
-    ScanDirection indexorderdir;   /* forward or backward or don't care */
-    RelstoreType relStoreLocation; /* The store position information. */
-    List* cstorequal;              /* quals that can be pushdown to cstore base table */
-    List* indexScantlist;          /* list of target column for scanning on index table */
-    DfsScan* dfsScan;              /* the inner object for scanning the base-relation */
-    bool indexonly;                /* flag indicates index only scan */
-} DfsIndexScan;
 
 /* ----------------
  *		tid scan node
@@ -1384,7 +1363,7 @@ typedef struct PlanRowMark {
     Index prti;           /* range table index of parent relation */
     Index rowmarkId;      /* unique identifier for resjunk columns */
     RowMarkType markType; /* see enum above */
-    bool noWait;          /* NOWAIT option */
+    LockWaitPolicy waitPolicy;	/* NOWAIT and SKIP LOCKED */
     int waitSec;      /* WAIT time Sec */
     bool isParent;        /* true if this is a "dummy" parent entry */
     int numAttrs;         /* number of attributes in subplan */

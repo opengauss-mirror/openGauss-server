@@ -5,7 +5,6 @@
 # By convention, we put no more than twenty tests in any one parallel group;
 # this limits the number of connections needed to run the tests.
 # ----------
-
 test: memory_check
 
 test: directory_test
@@ -58,6 +57,9 @@ test: create_enumtype enum select_nest_views
 #test add_views
 test: add_views
 
+#test replace into
+test: replaceinto
+
 test: udf_crem
 test: create_c_function
 # test on inplace upgrade
@@ -71,6 +73,11 @@ test: create_c_function
 #test: plan_table02
 #test: plan_table03
 #test: plan_table04
+
+# test customer base environment hint
+test: hw_cbt_hint_prep
+test: hw_cbt_hint
+test: hw_cbt_hint_drop
 
 #test with recursive
 test: recursive_ref_recursive

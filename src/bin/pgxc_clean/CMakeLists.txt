@@ -23,7 +23,7 @@ endif()
 add_bintarget(gs_clean TGT_clean_SRC TGT_clean_INC "${clean_DEF_OPTIONS}" "${clean_COMPILE_OPTIONS}" "${clean_LINK_OPTIONS}" "${clean_LINK_LIBS}")
 add_dependencies(gs_clean elog_static pgport_static pq)
 target_link_directories(gs_clean PUBLIC
-    ${LIBOPENSSL_LIB_PATH} ${PROTOBUF_LIB_PATH} ${LIBPARQUET_LIB_PATH} ${LIBCURL_LIB_PATH} ${KERBEROS_LIB_PATH}
+    ${LIBOPENSSL_LIB_PATH} ${LIBCURL_LIB_PATH} ${KERBEROS_LIB_PATH}
     ${ZLIB_LIB_PATH} ${LIBOBS_LIB_PATH} ${LIBEDIT_LIB_PATH} ${LIBCGROUP_LIB_PATH} ${SECURE_LIB_PATH} ${CMAKE_BINARY_DIR}/lib
 )
 install(TARGETS gs_clean RUNTIME DESTINATION bin)

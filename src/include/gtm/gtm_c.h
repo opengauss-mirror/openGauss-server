@@ -160,6 +160,12 @@ typedef GTM_DBNameData* GTM_DBName;
 #define HOST2FLAG(h) ((uint32)((h) + GTM_HOST_FLAG_BASE))
 #define FLAG2HOST(f) ((GtmHostIndex)((f) - GTM_HOST_FLAG_BASE))
 
+#ifndef HAVE_INT64_TIMESTAMP
+#define GTM_TIMESTAMTP_TO_MILLISEC(ts) ((long)(ts) * 1000)
+#else
+#define GTM_TIMESTAMTP_TO_MILLISEC(ts) ((long)(ts) / 1000)
+#endif
+
 #ifndef FREE_AND_RESET
 #define FREE_AND_RESET(ptr) do { \
     if (NULL != (ptr)) { \

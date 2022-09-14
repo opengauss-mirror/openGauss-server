@@ -275,9 +275,23 @@ static List* GetNasFileList(const char* prefix, ArchiveConfig *nas_config)
         ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
                 errmsg("The parameter cannot be NULL")));
     }
-
-    ret = snprintf_s(file_path, MAXPGPATH, MAXPGPATH - 1, "%s/%s", nas_config->archive_prefix, prefix);
-    securec_check_ss(ret, "\0", "\0");
+    if (strncmp(prefix, "global_barrier_records", headerLen) != 0) {
+        ret = snprintf_s(file_path, MAXPGPATH, MAXPGPATH - 1, "%s/%s", nas_config->archive_prefix, prefix);
+        securec_check_ss(ret, "\0", "\0");
+    } else {
+        char pathPrefix[MAXPGPATH] = {0};
+        ret = strcpy_s(pathPrefix, MAXPGPATH, nas_config->archive_prefix);
+        securec_check_ss(ret, "\0", "\0");
+        if (!IS_PGXC_COORDINATOR) {
+            char *p = strrchr(pathPrefix, '/');
+            if (p == NULL) {
+                ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Obs path prefix is invalid")));
+            }
+            *p = '\0';
+        }
+        ret = snprintf_s(file_path, MAXPGPATH, MAXPGPATH - 1, "%s/%s", pathPrefix, prefix);
+        securec_check_ss(ret, "\0", "\0");
+    }
 
     canonicalize_path(file_path);
 

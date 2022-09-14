@@ -81,7 +81,8 @@ declare init_parameters=""
 declare init_show_parameters=""
 declare config_parameters=""
 declare password_check=""
-declare nodename=""
+declare nodename="opengauss"
+declare applicationname=""
 declare action="start"
 declare mode="-Z single_node"
 declare -i replconninfo_flag=1
@@ -385,7 +386,7 @@ function check_conf_paramters()
                     then
                         die "the port number must be between 1024 and 65535."
                     fi
-                    netstat | grep "${value}"
+                    netstat -tunl | grep -w "${value}"
                     if [ $? -eq 0 ]
                     then
                         die "the port ${value} is already in use"
@@ -398,7 +399,7 @@ function check_conf_paramters()
                     then
                         die "the port number must be between 1024 and 65535."
                     fi
-                    netstat | grep "${value}"
+                    netstat -tunl | grep -w "${value}"
                     if [ $? -eq 0 ]
                     then
                         die "the port ${value} is already in use"
@@ -411,7 +412,6 @@ function check_conf_paramters()
     then
         parameter=$1
         parameter_array=(${parameter//=/ })
-
         if [ ${#parameter_array[*]} -eq 2 ]
         then
             value=${parameter_array[1]}
@@ -419,7 +419,7 @@ function check_conf_paramters()
             then
                 die "the port number must be between 1024 and 65535."
             fi
-            netstat | grep "${value}"
+            netstat -tunl | grep -w "${value}"
             if [ $? -eq 0 ]
             then
                 die "the port ${value} is already in use"
@@ -534,6 +534,19 @@ function check()
     fi
 }
 
+function permission_process_bin()
+{
+    chmod 500 "$1"
+    for bin_file in $(ls "$1")
+	do
+	    if [ "${bin_file##*.}" = "conf" ];then
+	        chmod 400 "$1/${bin_file}"
+	    elif [ ! -L $1"/"${bin_file} ];then
+	        chmod 500 "$1/${bin_file}"
+	    fi
+	done
+}
+
 function decompress()
 {
     cd $root_path
@@ -542,9 +555,9 @@ function decompress()
     if [ -f "/etc/euleros-release" ]
     then
         kernel=$(cat /etc/euleros-release | awk -F ' ' '{print $1}' | tr a-z A-Z)
-        if [ "${kernel}" = "EULEROS" ]
+        if [ "${kernel}" = "Euleros" ]
         then
-            kernel="EULER"
+            kernel="Euler"
         fi
     elif [ -f "/etc/openEuler-release" ]
     then
@@ -603,6 +616,18 @@ function decompress()
 	then
 		die "decompress binary files (*.bin) error"
 	fi
+    permission_process_bin "${app_path}/bin"
+    chmod 500 "${app_path}/lib"
+    find "${app_path}/lib/" -type d | xargs chmod 500
+    find "${app_path}/lib/" -type f | xargs chmod 500
+    chmod 700 "${app_path}/share"
+    find "${app_path}/share/" -type d | xargs chmod 700
+    find "${app_path}/share/" -type f | xargs chmod 600
+    chmod -R 500 "${app_path}/include"
+    find "${app_path}/include/" -type d | xargs chmod 500
+    find "${app_path}/include/" -type f | xargs chmod 400
+    chmod -R 500 "${app_path}/etc"
+    chmod 400 "${app_path}/version.cfg"
 	rm -rf ./*.bin
 }
 
@@ -611,27 +636,30 @@ function set_environment()
     if [ "$2" = "app" ]
     then
         # set GAUSSHOME
+        gausshome=$(cd ${app_path}; pwd)
         sed -i "/.*export\\s*GAUSSHOME=/d" ${env_file}
-        echo "export GAUSSHOME=${app_path}" >> ${env_file}
+        echo "export GAUSSHOME=${gausshome}" >> ${env_file}
         # set PATH and LD_LIBRARY_PATH
         sed -i "/.*export\\s*PATH=/d" ${env_file}
-        echo "export PATH=${app_path}/bin:"'$PATH' >> ${env_file}
-        log "export PATH=${app_path}/bin:$PATH >> ${env_file}"
+        echo "export PATH=${gausshome}/bin:"'$PATH' >> ${env_file}
+        log "export PATH=${gausshome}/bin:$PATH >> ${env_file}"
         sed -i "/.*export\\s*LD_LIBRARY_PATH=/d" ${env_file}
-        echo "export LD_LIBRARY_PATH=${app_path}/lib:"'$LD_LIBRARY_PATH' >> ${env_file}
-        log "export LD_LIBRARY_PATH=${app_path}/lib:$LD_LIBRARY_PATH >> ${env_file}"
+        echo "export LD_LIBRARY_PATH=${gausshome}/lib:"'$LD_LIBRARY_PATH' >> ${env_file}
+        log "export LD_LIBRARY_PATH=${gausshome}/lib:$LD_LIBRARY_PATH >> ${env_file}"
         info "[set GAUSSHOME environment variables success.]"
     elif [ "$2" = "data" ]
     then
         # set GAUSSDATA
+        gaussdata=$(cd ${data_path}; pwd)
         sed -i "/.*export\\s*GAUSSDATA=/d" ${env_file}
-        echo "export GAUSSDATA=${data_path}" >> ${env_file}
+        echo "export GAUSSDATA=${gaussdata}" >> ${env_file}
         info "[set GAUSSDATA environment variables success.]"
     elif [ "$2" = "log" ]
     then
         # set GAUSSLOG
+        gausslog=$(cd ${log_path}; pwd)
         sed -i "/.*export\\s*GAUSSLOG=/d" ${env_file}
-        echo "export GAUSSLOG=${log_path}" >> ${env_file}
+        echo "export GAUSSLOG=${gausslog}" >> ${env_file}
         info "[set GAUSSLOG environment variables success.]"
     fi
 }
@@ -661,7 +689,7 @@ function config_db()
     then
         die "no gauss installation file is found in app-path. check the installation directory."
     fi
-	cmd="./gs_guc set -D ${data_path} ${config_parameters} -c \"application_name='${nodename}'\" "
+	cmd="./gs_guc set -D ${data_path} ${config_parameters} -c \"application_name='${applicationname}'\" "
 	info "cmd : ${cmd}"
 	eval ${cmd} | tee -a ${log_file}
 	if [ ${PIPESTATUS[0]} -ne 0 ]
@@ -1022,6 +1050,8 @@ function app()
     if [ "${app_path}" != "" ]
     then
         check_path "${app_path}" "install"
+        cd ${app_path}
+        app_path=$(pwd | sed 's#[/][/]*#/#g')
         set_environment "${app_path}" "app"
         if [ ${install_path_full_flag} -eq 1 ]
         then
@@ -1042,6 +1072,8 @@ function data()
     if [ "${data_path}" != "" ]
     then
         check_path "${data_path}" "data"
+        cd ${data_path}
+        data_path=$(pwd | sed 's#[/][/]*#/#g')
         set_environment "${data_path}" "data"
     fi
 }
@@ -1050,10 +1082,6 @@ function cert()
 {
     if [ "${cert_path}" != "" ]
     then
-        if [ ! -e "${cert_path}" ]
-        then
-            die "the certificate path does not exist."
-        fi
         check_path "${cert_path}" "cert"
         if [ -z $(ls -A "${cert_path}" | grep server.crt) ]
         then
@@ -1080,6 +1108,8 @@ function log_file_set()
     if [ "${log_path}" != "" ]
     then
         check_path "${log_path}" "log"
+        cd ${log_path}
+        log_path=$(pwd | sed 's#[/][/]*#/#g')
         data_contain_log_flag=$(echo ${data_path} | grep "${log_path}")
         if [ "${data_contain_log_flag}" != "" ]
         then
@@ -1094,39 +1124,18 @@ function start()
     if [ "${mode_type}" = "primary" ]
     then
         mode="-M primary"
-        if [ "${nodename}" = "" ]
-        then
-            nodename="master"
-        fi
+        applicationname="master"
     elif [ "${mode_type}" = "standby" ]
     then
         mode="-b full"
         action="build"
-        if [ "${nodename}" = "" ]
-        then
-            nodename="slave"
-        fi
+        applicationname="slave"
     else
         mode="-Z single_node"
-        if [ "${nodename}" = "" ]
-        then
-            nodename="single"
-        fi
+        applicationname="single"
     fi
     log "mode_type is ${mode_type} and mode is ${mode}, node name is ${nodename}"
     # check whether the app-path and data-path paths are contained.
-    cd ${app_path}
-    if [ $? -ne 0 ]
-    then
-        die "cd app-path failed, no such file or directory."
-    fi
-    app_path=$(pwd)
-    cd ${data_path}
-    if [ $? -ne 0 ]
-    then
-        die "cd data-path failed, no such file or directory."
-    fi
-    data_path=$(pwd)
     app_contain_data_flag=$(echo ${app_path} | grep "${data_path}")
     data_contain_app_flag=$(echo ${data_path} | grep "${app_path}")
     if [ "${app_contain_data_flag}" != "" ]

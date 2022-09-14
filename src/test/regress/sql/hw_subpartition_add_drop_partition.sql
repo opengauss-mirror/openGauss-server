@@ -68,10 +68,14 @@ ALTER TABLE range_range_sales ADD PARTITION customer5 VALUES LESS THAN (1500)
 ALTER TABLE range_range_sales ADD PARTITION customer_temp2 VALUES LESS THAN (1100);
 --fail, invalid format
 ALTER TABLE range_range_sales ADD PARTITION customer_temp3 VALUES (1300);
+--fail, name conflict
+ALTER TABLE range_range_sales ADD PARTITION customer1 VALUES LESS THAN (MAXVALUE);
 --success, add 1 default subpartition
 ALTER TABLE range_range_sales ADD PARTITION customer6 VALUES LESS THAN (MAXVALUE);
 --fail, out of range
 ALTER TABLE range_range_sales ADD PARTITION customer_temp4 VALUES LESS THAN (1800);
+--fail, name conflict
+ALTER TABLE range_range_sales MODIFY PARTITION customer1 ADD SUBPARTITION customer5_2008 VALUES LESS THAN ('2013-01-01');
 --success, add 1 subpartition
 ALTER TABLE range_range_sales MODIFY PARTITION customer1 ADD SUBPARTITION customer1_2012 VALUES LESS THAN ('2013-01-01');
 --fail, out of range

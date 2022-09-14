@@ -57,7 +57,10 @@ BlacklistItem g_blacklist_items[] = {
     {DATA_WRITER_QUEUE, "DATA_WRITER_QUEUE", false}
 };
 
-static void coredump_handler(int sig, siginfo_t *si, void *uc)
+/*
+ * do FFIC and return whether is or not the first crash.
+ */
+static bool do_ffic(int sig, siginfo_t *si, void *uc)
 {
     static volatile int64 first_tid = INVALID_TID;
     int64 cur_tid = (int64)pthread_self();
@@ -69,6 +72,8 @@ static void coredump_handler(int sig, siginfo_t *si, void *uc)
         if (g_instance.attr.attr_common.enable_ffic_log) {
             (void)gen_err_msg(sig, si, (ucontext_t *)uc);
         }
+
+        return true;
     } else {
         /*
          * Subsequent fatal error will go to here. If it comes from different thread,
@@ -77,8 +82,16 @@ static void coredump_handler(int sig, siginfo_t *si, void *uc)
         if (first_tid != cur_tid) {
             (void)pause();
         }
+        return false;
     }
+}
 
+/*
+ * crash handler - handle signal depends on system kernel configuration
+ */
+static void coredump_handler(int sig, siginfo_t *si, void *uc)
+{
+    (void)do_ffic(sig, si, uc);
     (void)pqsignal(sig, SIG_DFL);
     (void)raise(sig);
 }
@@ -88,16 +101,7 @@ static void coredump_handler(int sig, siginfo_t *si, void *uc)
  */
 static void bbox_handler(int sig, siginfo_t *si, void *uc)
 {
-    static volatile int64 first_tid = INVALID_TID;
-    int64 cur_tid = (int64)pthread_self();
-
-    if (first_tid == INVALID_TID &&
-            __sync_bool_compare_and_swap(&first_tid, INVALID_TID, cur_tid)) {
-        (void)SetDBStateFileState(COREDUMP_STATE, false);
-        if (g_instance.attr.attr_common.enable_ffic_log) {
-            (void)gen_err_msg(sig, si, (ucontext_t *)uc);
-        }
-
+    if (do_ffic(sig, si, uc)) {
 #ifndef ENABLE_MEMORY_CHECK
         sigset_t intMask;
         sigset_t oldMask;
@@ -117,10 +121,6 @@ static void bbox_handler(int sig, siginfo_t *si, void *uc)
         if (bbox_handler_exit == 0)
 #endif
             _exit(0);
-    } else {
-        if (first_tid != cur_tid) {
-            (void)pause();
-        }
     }
 }
 

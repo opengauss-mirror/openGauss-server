@@ -21,8 +21,6 @@
  *
  * -------------------------------------------------------------------------
  */
-#include "storage/dfs/dfscache_mgr.h"
-
 #include "postgres.h"
 #include "knl/knl_variable.h"
 #include "storage/cache_mgr.h"
@@ -542,57 +540,7 @@ void CacheMgr::FreeCacheBlockMem(CacheSlotId_t slot)
 {
     Assert(slot >= 0 && slot < m_CacheSlotsNum);
 
-    if (m_CacheDesc[slot].m_cache_tag.type == CACHE_ORC_INDEX) {
-        OrcMetadataValue *value = (OrcMetadataValue *)(&m_CacheSlots[slot * m_slot_length]);
-        if (value->postScript != NULL) {
-            delete value->postScript;
-            value->postScript = NULL;
-        }
-        if (value->fileFooter != NULL) {
-            delete value->fileFooter;
-            value->fileFooter = NULL;
-        }
-        if (value->stripeFooter != NULL) {
-            delete value->stripeFooter;
-            value->stripeFooter = NULL;
-        }
-        if (value->rowIndex != NULL) {
-            delete value->rowIndex;
-            value->rowIndex = NULL;
-        }
-        if (value->fileName != NULL) {
-            free(value->fileName);
-            value->fileName = NULL;
-        }
-        if (value->dataDNA != NULL) {
-            free(value->dataDNA);
-            value->dataDNA = NULL;
-        }
-        value->footerStart = 0;
-        value->size = 0;
-    } else if (m_CacheDesc[slot].m_cache_tag.type == CACHE_CARBONDATA_METADATA) {
-        CarbonMetadataValue* value = (CarbonMetadataValue*)(&m_CacheSlots[slot * m_slot_length]);
-        if (NULL != value->fileHeader) {
-            free(value->fileHeader);
-            value->fileHeader = NULL;
-        }
-        if (NULL != value->fileFooter) {
-            free(value->fileFooter);
-            value->fileFooter = NULL;
-        }
-        if (NULL != value->fileName) {
-            free(value->fileName);
-            value->fileName = NULL;
-        }
-        if (NULL != value->dataDNA) {
-            free(value->dataDNA);
-            value->dataDNA = NULL;
-        }
-
-        value->headerSize = 0;
-        value->footerSize = 0;
-        value->size = 0;
-    } else if (m_CacheDesc[slot].m_cache_tag.type == CACHE_COlUMN_DATA) {
+    if (m_CacheDesc[slot].m_cache_tag.type == CACHE_COlUMN_DATA) {
         /* Important: the memory with the same slot may be hold and used by CACHE_ORC_DATA,
          * CACHE_COlUMN_DATA and CACHE_ORC_INDEX, so we must confirm that the memory should
          * be set to 0 after the slot is released. at least memory of
@@ -600,8 +548,7 @@ void CacheMgr::FreeCacheBlockMem(CacheSlotId_t slot)
         CU *cu = (CU *)(&m_CacheSlots[slot * m_slot_length]);
         cu->FreeMem<true>();
         cu->Reset();
-    } else if (m_CacheDesc[slot].m_cache_tag.type == CACHE_ORC_DATA ||
-               m_CacheDesc[slot].m_cache_tag.type == CACHE_OBS_DATA) {
+    } else if (m_CacheDesc[slot].m_cache_tag.type == CACHE_OBS_DATA) {
         OrcDataValue *orc_data = (OrcDataValue *)(&m_CacheSlots[slot * m_slot_length]);
         if (orc_data->value != NULL) {
             CStoreMemAlloc::Pfree(orc_data->value, false);
@@ -625,21 +572,14 @@ int CacheMgr::GetCacheBlockMemSize(CacheSlotId_t slot)
     Assert(slot >= 0 && slot <= m_CaccheSlotMax && slot < m_CacheSlotsNum);
 
     int slot_size = 0;
-    if (m_CacheDesc[slot].m_cache_tag.type == CACHE_ORC_INDEX) {
-        OrcMetadataValue *value = (OrcMetadataValue *)(&m_CacheSlots[slot * m_slot_length]);
-        slot_size = value->size;
-    } else if (m_CacheDesc[slot].m_cache_tag.type == CACHE_CARBONDATA_METADATA) {
-        CarbonMetadataValue* value = (CarbonMetadataValue*)(&m_CacheSlots[slot * m_slot_length]);
-        return value->size;
-    } else if (m_CacheDesc[slot].m_cache_tag.type == CACHE_COlUMN_DATA) {
+    if (m_CacheDesc[slot].m_cache_tag.type == CACHE_COlUMN_DATA) {
         CU *cu = (CU *)(&m_CacheSlots[slot * m_slot_length]);
         if (!cu->m_cache_compressed) {
             slot_size = cu->GetUncompressBufSize();
         } else {
             slot_size = cu->GetCompressBufSize();
         }
-    } else if (m_CacheDesc[slot].m_cache_tag.type == CACHE_ORC_DATA ||
-               m_CacheDesc[slot].m_cache_tag.type == CACHE_OBS_DATA) {
+    } else if (m_CacheDesc[slot].m_cache_tag.type == CACHE_OBS_DATA) {
         OrcDataValue *orc_data = (OrcDataValue *)(&m_CacheSlots[slot * m_slot_length]);
         slot_size = orc_data->size;
     } else {
@@ -1588,3 +1528,4 @@ bool CacheMgr::CompressLockHeldByMe(CacheSlotId_t slotId)
     Assert(slotId >= 0 && slotId <= m_CaccheSlotMax && slotId < m_CacheSlotsNum);
     return LWLockHeldByMe(m_CacheDesc[slotId].m_compress_lock);
 }
+

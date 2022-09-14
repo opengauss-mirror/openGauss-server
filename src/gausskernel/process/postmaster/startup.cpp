@@ -82,6 +82,10 @@ static void startupproc_quickdie(SIGNAL_ARGS)
      * should ensure the postmaster sees this as a crash, too, but no harm in
      * being doubly sure.)
      */
+
+    /* release compression ctx */
+    crps_destory_ctxs();
+
     exit(2);
 }
 
@@ -188,6 +192,9 @@ static void StartupProcShutdownHandler(SIGNAL_ARGS)
 {
     int save_errno = errno;
 
+    /* release compression ctx */
+    crps_destory_ctxs();
+
     if (t_thrd.startup_cxt.in_restore_command)
         proc_exit(1);
     else
@@ -228,6 +235,9 @@ void HandleStartupProcInterrupts(void)
      * Check if we were requested to exit without finishing recovery.
      */
     if (t_thrd.startup_cxt.shutdown_requested && SmartShutdown != g_instance.status) {
+        /* release compression ctx */
+        crps_destory_ctxs();
+
         proc_exit(1);
     }
 
@@ -235,8 +245,12 @@ void HandleStartupProcInterrupts(void)
      * Emergency bailout if postmaster has died.  This is to avoid the
      * necessity for manual cleanup of all postmaster children.
      */
-    if (IsUnderPostmaster && !PostmasterIsAlive())
+    if (IsUnderPostmaster && !PostmasterIsAlive()) {
+        /* release compression ctx */
+        crps_destory_ctxs();
+
         gs_thread_exit(1);
+    }
 }
 
 static void StartupReleaseAllLocks(int code, Datum arg)
@@ -305,7 +319,7 @@ void StartupProcessMain(void)
     (void)gspqsignal(SIGINT, StartupProcSigIntHandler);    /* check repair page and file */
     (void)gspqsignal(SIGTERM, StartupProcShutdownHandler); /* request shutdown */
     (void)gspqsignal(SIGQUIT, startupproc_quickdie);       /* hard crash time */
-
+    (void)gspqsignal(SIGURG, print_stack);
     if (g_instance.attr.attr_storage.EnableHotStandby)
         (void)gspqsignal(SIGALRM, handle_standby_sig_alarm); /* ignored unless
 
@@ -343,6 +357,8 @@ void StartupProcessMain(void)
     pgstat_report_appname("Startup");
     pgstat_report_activity(STATE_IDLE, NULL);
 
+    /* init compression ctx for page compression */
+    crps_create_ctxs(STARTUP);
     if (dummyStandbyMode) {
         StartupDummyStandby();
     } else {
@@ -366,6 +382,9 @@ void StartupProcessMain(void)
 
         StartupXLOG();
     }
+
+    /* release compression ctx */
+    crps_destory_ctxs();
 
     /*
      * Exit normally. Exit code 0 tells postmaster that we completed recovery

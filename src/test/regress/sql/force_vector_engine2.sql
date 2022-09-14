@@ -18,7 +18,15 @@ analyze force_vector_partition;
 explain (analyze on, timing off) select /*+ set(try_vector_engine_strategy force) */ id, val1*2, val2+val1 as val3 from force_vector_test where id < 5000 and val1 < 500 order by id limit 10;
 explain (analyze on, timing off) select /*+ set(try_vector_engine_strategy force) */ id, avg(val1), sum(val2) from force_vector_partition group by id order by id limit 10;
 
+create table t1(id int, val1 name, val2 macaddr, val3 uuid, val4 unknown);
+insert into t1 values(1, 'abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd123', '08:01:04:03:05:01', 'A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11', 'abcd'),(2, 'abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd124', '08:01:04:03:05:02', 'A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A12', 'abcc');
+
 set try_vector_engine_strategy=force;
+select val1, count(id) from t1 group by val1;
+select val2, count(id) from t1 group by val2;
+select val3, count(id) from t1 group by val3;
+select val4, count(id) from t1 group by val4;
+
 create table force_tb1(c1 int,c2 int);
 insert into force_tb1 values(1,1);
 insert into force_tb1 values(2,2);

@@ -64,6 +64,21 @@ typedef struct MultiXactMember {
 #define GET_SLRU_XID_FROM_MULTIXACT_MEMBER(member) \
     (((TransactionId)((member)->status) << 61) | (((member)->xid) & MULTIXACT_MEMBER_XID_MASK))
 
+/*
+ * Defines for MultiXactOffset page sizes.	A page is the same BLCKSZ as is
+ * used everywhere else in openGauss.
+ *
+ * We need four bytes per offset and also four bytes per member
+ */
+#define MULTIXACT_OFFSETS_PER_PAGE (BLCKSZ / sizeof(MultiXactOffset))
+#define MULTIXACT_MEMBERS_PER_PAGE (BLCKSZ / sizeof(TransactionId))
+
+#define MultiXactIdToOffsetPage(xid) ((xid) / (MultiXactOffset)MULTIXACT_OFFSETS_PER_PAGE)
+#define MultiXactIdToOffsetEntry(xid) ((xid) % (MultiXactOffset)MULTIXACT_OFFSETS_PER_PAGE)
+
+#define MXOffsetToMemberPage(xid) ((xid) / (TransactionId)MULTIXACT_MEMBERS_PER_PAGE)
+#define MXOffsetToMemberEntry(xid) ((xid) % (TransactionId)MULTIXACT_MEMBERS_PER_PAGE)
+
 
 /* ----------------
  *		multixact-related XLOG entries
@@ -124,5 +139,6 @@ extern void multixact_twophase_postabort(TransactionId xid, uint16 info, void* r
 extern void multixact_redo(XLogReaderState* record);
 extern void multixact_desc(StringInfo buf, XLogReaderState* record);
 extern const char* multixact_type_name(uint8 subtype);
+extern void get_multixact_pageno(uint8 info, int64 *pageno, XLogReaderState *record);
 
 #endif /* MULTIXACT_H */

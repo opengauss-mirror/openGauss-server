@@ -93,7 +93,6 @@
 #include "access/xloginsert.h"
 #include "access/xlogutils.h"
 #include "access/cstore_am.h"
-#include "access/dfs/dfs_insert.h"
 #include "catalog/pg_type.h"
 #include "catalog/storage.h"
 #include "commands/tablespace.h"
@@ -165,10 +164,10 @@ int PendingPreparedXactsCount = 0;
  * twophase.h
  */
 static void RecordTransactionCommitPrepared(TransactionId xid, int nchildren, TransactionId *children, int nrels,
-                                            ColFileNodeRel *rels, int ninvalmsgs, SharedInvalidationMessage *invalmsgs,
+                                            ColFileNode *rels, int ninvalmsgs, SharedInvalidationMessage *invalmsgs,
                                             int nlibrary, char *librarys, int libraryLen, bool initfileinval);
 static void RecordTransactionAbortPrepared(TransactionId xid, int nchildren, TransactionId *children, int nrels,
-                                           ColFileNodeRel *rels, int nlibrary, char *library, int libraryLen);
+                                           ColFileNode *rels, int nlibrary, char *library, int libraryLen);
 static void ProcessRecords(char *bufptr, TransactionId xid, const TwoPhaseCallback callbacks[]);
 static void RemoveGXact(GlobalTransaction gxact);
 static int CopyPreparedTransactionList(TransactionId **prepared_xid_list, int partId);
@@ -1776,8 +1775,8 @@ void StartPrepare(GlobalTransaction gxact)
     TransactionId xid = pgxact->xid;
     TwoPhaseFileHeaderNew hdr_new;
     TransactionId *children = NULL;
-    ColFileNodeRel *commitrels = NULL;
-    ColFileNodeRel *abortrels = NULL;
+    ColFileNode *commitrels = NULL;
+    ColFileNode *abortrels = NULL;
     char *commitLibrary = NULL;
     char *abortLibrary = NULL;
     int commitLibraryLen = 0;
@@ -1817,7 +1816,10 @@ void StartPrepare(GlobalTransaction gxact)
     securec_check(errorno, "", "");
 
     /* Create header */
-    if (t_thrd.proc->workingVersionNum >= TWOPHASE_FILE_VERSION) {
+    if (t_thrd.proc->workingVersionNum >= PAGE_COMPRESSION_VERSION) {
+        hdr_new.hdr.magic = TWOPHASE_MAGIC_COMPRESSION;
+        save_state_data(&hdr_new, sizeof(TwoPhaseFileHeaderNew));
+    } else if (t_thrd.proc->workingVersionNum >= TWOPHASE_FILE_VERSION) {
         hdr_new.hdr.magic = TWOPHASE_MAGIC_NEW;
         save_state_data(&hdr_new, sizeof(TwoPhaseFileHeaderNew));
     } else {
@@ -1835,13 +1837,27 @@ void StartPrepare(GlobalTransaction gxact)
         GXactLoadSubxactData(gxact, hdr_new.hdr.nsubxacts, children);
     }
     if (hdr_new.hdr.ncommitrels > 0) {
-        save_state_data(commitrels, hdr_new.hdr.ncommitrels * sizeof(ColFileNodeRel));
-        pfree(commitrels);
+        void *registerData = commitrels;
+        uint32 size = (uint32)(hdr_new.hdr.ncommitrels * sizeof(ColFileNode));
+        if (unlikely((long)(t_thrd.proc->workingVersionNum < PAGE_COMPRESSION_VERSION))) {
+            /* commitrels will be free in ConvertToOldColFileNode */
+            registerData = (void *)ConvertToOldColFileNode(commitrels, hdr_new.hdr.ncommitrels);
+            size = hdr_new.hdr.ncommitrels * sizeof(ColFileNodeRel);
+        }
+        save_state_data(registerData, size);
+        pfree(registerData);
         commitrels = NULL;
     }
     if (hdr_new.hdr.nabortrels > 0) {
-        save_state_data(abortrels, hdr_new.hdr.nabortrels * sizeof(ColFileNodeRel));
-        pfree(abortrels);
+        void *registerData = abortrels;
+        uint32 size = (uint32)(hdr_new.hdr.nabortrels * sizeof(ColFileNode));
+        if (unlikely((long)(t_thrd.proc->workingVersionNum < PAGE_COMPRESSION_VERSION))) {
+            /* commitrels will be free in ConvertToOldColFileNode */
+            registerData = (void *)ConvertToOldColFileNode(abortrels, hdr_new.hdr.ncommitrels);
+            size = hdr_new.hdr.nabortrels * sizeof(ColFileNodeRel);
+        }
+        save_state_data(registerData, size);
+        pfree(registerData);
         abortrels = NULL;
     }
     if (hdr_new.hdr.ninvalmsgs > 0) {
@@ -1874,7 +1890,8 @@ void EndPrepare(GlobalTransaction gxact)
 
     /* Go back and fill in total_len in the file header record */
     hdr = (TwoPhaseFileHeader *)t_thrd.xact_cxt.records.head->data;
-    Assert(hdr->magic == TWOPHASE_MAGIC || hdr->magic == TWOPHASE_MAGIC_NEW);
+    Assert(hdr->magic == TWOPHASE_MAGIC || hdr->magic == TWOPHASE_MAGIC_NEW ||
+               hdr->magic == TWOPHASE_MAGIC_COMPRESSION);
     hdr->total_len = t_thrd.xact_cxt.records.total_len + sizeof(pg_crc32);
 
     /*
@@ -1993,7 +2010,20 @@ void EndPrepare(GlobalTransaction gxact)
         if (g_instance.attr.attr_storage.dcf_attr.enable_dcf) {
             SyncPaxosWaitForLSN(gxact->prepare_end_lsn);
         } else {
-            SyncRepWaitForLSN(gxact->prepare_end_lsn);
+            SyncWaitRet stopWatiRes = SyncRepWaitForLSN(gxact->prepare_end_lsn, false);
+#ifdef ENABLE_MULTIPLE_NODES
+            /* In distribute prepare phase, repsync failed participant rasie error to coordinator */
+            if (stopWatiRes == STOP_WAIT) {
+                ereport(ERROR, (errmodule(MODE_REPSYNC), errmsg("Fail to sync prepare transaction to standbys.")));
+            }
+#endif
+            if (module_logging_is_on(MODE_REPSYNC) && IS_PGXC_DATANODE) {
+                ereport(LOG, (errmodule(MODE_REPSYNC), errmsg("prepare xid: %lu, gxid: %s, end_lsn: %lu,"
+                    " sync_commit_guc: %d, sync_names: %s, stop wait reason: %s",
+                    gxact->xid, gxact->gid, gxact->prepare_end_lsn, u_sess->attr.attr_storage.guc_synchronous_commit,
+                    (SyncStandbysDefined() ? u_sess->attr.attr_storage.SyncRepStandbyNames : "not defined"),
+                    SyncWaitRetDesc[stopWatiRes])));
+            }
             g_instance.comm_cxt.localinfo_cxt.set_term = true;
         }
     }
@@ -2100,7 +2130,9 @@ static char *ReadTwoPhaseFile(TransactionId xid, bool give_warnings)
     close(fd);
 
     hdr = (TwoPhaseFileHeader *)buf;
-    if ((hdr->magic != TWOPHASE_MAGIC && hdr->magic != TWOPHASE_MAGIC_NEW) || hdr->total_len != stat.st_size) {
+    if ((hdr->magic != TWOPHASE_MAGIC && hdr->magic != TWOPHASE_MAGIC_NEW &&
+        hdr->magic != TWOPHASE_MAGIC_COMPRESSION) ||
+        hdr->total_len != stat.st_size) {
         pfree(buf);
         buf = NULL;
         return NULL;
@@ -2204,7 +2236,7 @@ bool StandbyTransactionIdIsPrepared(TransactionId xid)
     return result;
 }
 
-void DropBufferForDelRelinXlogUsingScan(ColFileNodeRel *delrels, int ndelrels)
+void DropBufferForDelRelinXlogUsingScan(ColFileNode *delrels, int ndelrels)
 {
     if (SECUREC_LIKELY(ndelrels <= 0)) {
         return;
@@ -2216,8 +2248,8 @@ void DropBufferForDelRelinXlogUsingScan(ColFileNodeRel *delrels, int ndelrels)
     Assert(ndelrels <= DROP_BUFFER_USING_HASH_DEL_REL_NUM_THRESHOLD);
     for (i = 0; i < ndelrels; ++i) {
         ColFileNode colFileNode;
-        ColFileNodeRel *colFileNodeRel = delrels + i;
-        ColFileNodeCopy(&colFileNode, colFileNodeRel);
+        ColFileNode *colFileNodeRel = delrels + i;
+        ColFileNodeFullCopy(&colFileNode, colFileNodeRel);
         if (!IsValidColForkNum(colFileNode.forknum)&& IsSegmentFileNode(colFileNode.filenode)) {
             rnodes[rnode_len++] = colFileNode.filenode;
         }
@@ -2226,7 +2258,7 @@ void DropBufferForDelRelinXlogUsingScan(ColFileNodeRel *delrels, int ndelrels)
     DropRelFileNodeAllBuffersUsingScan(rnodes, rnode_len);
 }
 
-void DropBufferForDelRelsinXlogUsingHash(ColFileNodeRel *delrels, int ndelrels)
+void DropBufferForDelRelsinXlogUsingHash(ColFileNode *delrels, int ndelrels)
 {
     HTAB *relfilenode_hashtbl = relfilenode_hashtbl_create();
 
@@ -2235,8 +2267,8 @@ void DropBufferForDelRelsinXlogUsingHash(ColFileNodeRel *delrels, int ndelrels)
     int i;
     for (i = 0; i < ndelrels; ++i) {
         ColFileNode colFileNode;
-        ColFileNodeRel *colFileNodeRel = delrels + i;
-        ColFileNodeCopy(&colFileNode, colFileNodeRel);
+        ColFileNode *colFileNodeRel = delrels + i;
+        ColFileNodeFullCopy(&colFileNode, colFileNodeRel);
         if (!IsValidColForkNum(colFileNode.forknum) && IsSegmentFileNode(colFileNode.filenode)) {
             if (relfilenode_hashtbl != NULL) {
                 hash_search(relfilenode_hashtbl, &(colFileNode.filenode), HASH_ENTER, &found);
@@ -2255,19 +2287,32 @@ void DropBufferForDelRelsinXlogUsingHash(ColFileNodeRel *delrels, int ndelrels)
     relfilenode_hashtbl = NULL;
 }
 
-bool relsContainsSegmentTable(ColFileNodeRel *delrels, int ndelrels)
+bool relsContainsSegmentTable(ColFileNode *delrels, int ndelrels)
 {
     bool found = false;
     for (int i = 0; i < ndelrels; ++i) {
         ColFileNode colFileNode;
-        ColFileNodeRel *colFileNodeRel = delrels + i;
-        ColFileNodeCopy(&colFileNode, colFileNodeRel);
+        ColFileNode *colFileNodeRel = delrels + i;
+        ColFileNodeFullCopy(&colFileNode, colFileNodeRel);
         if (!IsValidColForkNum(colFileNode.forknum) && IsSegmentFileNode(colFileNode.filenode)) {
             found = true;
             return found;
         }
     }
     return found;
+}
+
+inline void FreeOldColFileNode(bool compression, ColFileNode *commitRels, int32 commitRelCount, ColFileNode *abortRels,
+                               int32 abortRelCount)
+{
+    if (unlikely((long)!compression)) {
+        if (commitRelCount > 0 && commitRels != NULL) {
+            pfree(commitRels);
+        }
+        if (abortRelCount > 0 && abortRels != NULL) {
+            pfree(abortRels);
+        }
+    }
 }
 
 /*
@@ -2280,8 +2325,8 @@ void FinishPreparedTransaction(const char *gid, bool isCommit)
     TwoPhaseFileHeader *hdr = NULL;
     char *bufptr = NULL;
     TransactionId *children = NULL;
-    ColFileNodeRel *commitrels = NULL;
-    ColFileNodeRel *abortrels = NULL;
+    ColFileNode *commitrels = NULL;
+    ColFileNode *abortrels = NULL;
     char *commitLibrary = NULL;
     char *abortLibrary = NULL;
     SharedInvalidationMessage *invalmsgs = NULL;
@@ -2294,7 +2339,7 @@ void FinishPreparedTransaction(const char *gid, bool isCommit)
     int ndelrels;
     int ndelrels_temp = 0;
     int i;
-    ColFileNodeRel *delrels = NULL;
+    ColFileNode *delrels = NULL;
     bool need_remove = false;
     MemoryContext current_context = CurrentMemoryContext;
 
@@ -2380,7 +2425,7 @@ void FinishPreparedTransaction(const char *gid, bool isCommit)
      * Disassemble the header area
      */
     hdr = (TwoPhaseFileHeader *)buf;
-    if (hdr->magic == TWOPHASE_MAGIC_NEW) {
+    if (hdr->magic == TWOPHASE_MAGIC_NEW || hdr->magic == TWOPHASE_MAGIC_COMPRESSION) {
         /* get num of deleted temp table */
         if (isCommit) {
             ndelrels_temp = ((TwoPhaseFileHeaderNew*)hdr)->ncommitrels_temp;
@@ -2392,13 +2437,28 @@ void FinishPreparedTransaction(const char *gid, bool isCommit)
         bufptr = buf + MAXALIGN(sizeof(TwoPhaseFileHeader));
     }
 
+    bool compression = hdr->magic == TWOPHASE_MAGIC_COMPRESSION;
     Assert(TransactionIdEquals(hdr->xid, xid));
     children = (TransactionId *)bufptr;
     bufptr += MAXALIGN(hdr->nsubxacts * sizeof(TransactionId));
-    commitrels = (ColFileNodeRel *)bufptr;
-    bufptr += MAXALIGN(hdr->ncommitrels * sizeof(ColFileNodeRel));
-    abortrels = (ColFileNodeRel *)bufptr;
-    bufptr += MAXALIGN(hdr->nabortrels * sizeof(ColFileNodeRel));
+    commitrels = (ColFileNode *)bufptr;
+    if (unlikely((long)((!compression) && (hdr->ncommitrels > 0)))) {
+        ColFileNodeRel *colFileNodeRel = (ColFileNodeRel *)(void *)bufptr;
+        commitrels = (ColFileNode *)palloc0((uint32)hdr->ncommitrels * (uint32)sizeof(ColFileNode));
+        for (int j = 0; j < hdr->ncommitrels; j++) {
+            ColFileNodeCopy(&commitrels[j], &colFileNodeRel[j]);
+        }
+    }
+    bufptr += MAXALIGN(hdr->ncommitrels * (int32)SIZE_OF_COLFILENODE(compression));
+    abortrels = (ColFileNode *)bufptr;
+    if (unlikely((long)((!compression) && (hdr->nabortrels > 0)))) {
+        ColFileNodeRel *colFileNodeRel = (ColFileNodeRel *)(void *)bufptr;
+        abortrels = (ColFileNode *)palloc0((uint32)hdr->nabortrels * (uint32)sizeof(ColFileNode));
+        for (int j = 0; j < hdr->nabortrels; j++) {
+            ColFileNodeCopy(&abortrels[j], &colFileNodeRel[j]);
+        }
+    }
+    bufptr += MAXALIGN(hdr->nabortrels * (int32)SIZE_OF_COLFILENODE(compression));
     invalmsgs = (SharedInvalidationMessage *)bufptr;
     bufptr += MAXALIGN(hdr->ninvalmsgs * sizeof(SharedInvalidationMessage));
 
@@ -2547,19 +2607,14 @@ void FinishPreparedTransaction(const char *gid, bool isCommit)
         /* first loop to handle commitrels */
         for (i = 0; i < hdr->ncommitrels; i++) {
             ColFileNode colFileNode;
-            ColFileNodeRel *colFileNodeRel = commitrels + i;
-
-            ColFileNodeCopy(&colFileNode, colFileNodeRel);
-            /* dfs table is not supported */
-            Assert(!IsValidPaxDfsForkNum(colFileNode.forknum));
-            Assert(!IsTruncateDfsForkNum(colFileNode.forknum));
+            ColFileNode *colFileNodeRel = commitrels + i;
+            ColFileNodeFullCopy(&colFileNode, colFileNodeRel);
         }
         /* second loop to handle abortrels */
         for (i = 0; i < hdr->nabortrels; i++) {
             ColFileNode colFileNode;
-            ColFileNodeRel *colFileNodeRel = abortrels + i;
-
-            ColFileNodeCopy(&colFileNode, colFileNodeRel);
+            ColFileNode *colFileNodeRel = abortrels + i;
+            ColFileNodeFullCopy(&colFileNode, colFileNodeRel);
             Assert(!IsValidPaxDfsForkNum(colFileNode.forknum));
         }
     }
@@ -2608,14 +2663,9 @@ void FinishPreparedTransaction(const char *gid, bool isCommit)
 
     for (i = 0; i < ndelrels; i++) {
         ColFileNode colFileNode;
-        ColFileNodeRel *colFileNodeRel = delrels + i;
+        ColFileNode *colFileNodeRel = delrels + i;
+        ColFileNodeFullCopy(&colFileNode, colFileNodeRel);
 
-        ColFileNodeCopy(&colFileNode, colFileNodeRel);
-
-        if (IS_COMPRESS_DELETE_FORK(colFileNode.forknum)) {
-            SET_OPT_BY_NEGATIVE_FORK(colFileNode.filenode, colFileNode.forknum);
-            colFileNode.forknum = MAIN_FORKNUM;
-        }
         if (!IsValidColForkNum(colFileNode.forknum)) {
             RowRelationDoDeleteFiles(colFileNode.filenode, InvalidBackendId, colFileNode.ownerid);
         } else {
@@ -2666,9 +2716,6 @@ void FinishPreparedTransaction(const char *gid, bool isCommit)
 
     END_CRIT_SECTION();
 
-    /* clean the pending delete files of which transaction is prepared after we release locks */
-    doPendingDfsDelete(isCommit, &xid);
-
     /* Count the prepared xact as committed or aborted */
     AtEOXact_PgStat(isCommit);
 
@@ -2701,7 +2748,7 @@ void FinishPreparedTransaction(const char *gid, bool isCommit)
     closeAllVfds();
 
     RESUME_INTERRUPTS();
-
+    FreeOldColFileNode(compression, commitrels, hdr->ncommitrels, abortrels, hdr->nabortrels);
     pfree(buf);
     buf = NULL;
 }
@@ -3201,14 +3248,15 @@ void RecoverPreparedTransactions(void)
 
             hdr = (TwoPhaseFileHeader *)buf;
             Assert(TransactionIdEquals(hdr->xid, xid));
-            int hdrSize = (hdr->magic == TWOPHASE_MAGIC_NEW) ?
+            bool compressMagic = hdr->magic == TWOPHASE_MAGIC_COMPRESSION;
+            int hdrSize = (hdr->magic == TWOPHASE_MAGIC_NEW || compressMagic) ?
                 sizeof(TwoPhaseFileHeaderNew) : sizeof(TwoPhaseFileHeader);
             bufptr = buf + MAXALIGN(hdrSize);
             subxids = (TransactionId *)bufptr;
             bufptr += MAXALIGN(hdr->nsubxacts * sizeof(TransactionId));
-            bufptr += MAXALIGN(hdr->ncommitrels * sizeof(ColFileNodeRel));
-            bufptr += MAXALIGN(hdr->nabortrels * sizeof(ColFileNodeRel));
-            bufptr += MAXALIGN(hdr->ninvalmsgs * sizeof(SharedInvalidationMessage));
+            bufptr += MAXALIGN((uint32)hdr->ncommitrels * SIZE_OF_COLFILENODE(compressMagic));
+            bufptr += MAXALIGN((uint32)hdr->nabortrels * SIZE_OF_COLFILENODE(compressMagic));
+            bufptr += MAXALIGN((uint32)hdr->ninvalmsgs * sizeof(SharedInvalidationMessage));
 
             if (hdr->ncommitlibrarys > 0) {
                 int commitLibraryLen = read_library(bufptr, hdr->ncommitlibrarys);
@@ -3367,8 +3415,9 @@ static char *ProcessTwoPhaseBuffer(TransactionId xid, XLogRecPtr prepare_start_l
      * Examine subtransaction XIDs ... they should all follow main
      * XID, and they may force us to advance nextXid.
      */
-    int hdrSize = (hdr->magic == TWOPHASE_MAGIC_NEW) ?
-                sizeof(TwoPhaseFileHeaderNew) : sizeof(TwoPhaseFileHeader);
+    bool compressMagic = hdr->magic == TWOPHASE_MAGIC_COMPRESSION;
+    int hdrSize = (hdr->magic == TWOPHASE_MAGIC_NEW || compressMagic) ?
+        sizeof(TwoPhaseFileHeaderNew) : sizeof(TwoPhaseFileHeader);
     subxids = (TransactionId *)(buf + MAXALIGN(hdrSize));
     for (i = 0; i < hdr->nsubxacts; i++) {
         TransactionId subxid = subxids[i];
@@ -3408,7 +3457,7 @@ static char *ProcessTwoPhaseBuffer(TransactionId xid, XLogRecPtr prepare_start_l
  * so it is never possible to optimize out the commit record.
  */
 static void RecordTransactionCommitPrepared(TransactionId xid, int nchildren, TransactionId *children, int nrels,
-                                            ColFileNodeRel *rels, int ninvalmsgs, SharedInvalidationMessage *invalmsgs,
+                                            ColFileNode *rels, int ninvalmsgs, SharedInvalidationMessage *invalmsgs,
                                             int nlibrary, char *librarys, int libraryLen, bool initfileinval)
 {
     xl_xact_commit_prepared xlrec;
@@ -3452,7 +3501,12 @@ static void RecordTransactionCommitPrepared(TransactionId xid, int nchildren, Tr
 
     /* dump rels to delete */
     if (nrels > 0) {
-        XLogRegisterData((char *)rels, nrels * sizeof(ColFileNodeRel));
+        if (unlikely((long)(t_thrd.proc->workingVersionNum < PAGE_COMPRESSION_VERSION))) {
+            XLogRegisterData((char *)ConvertToOldColFileNode(rels, nrels, false),
+                             (int)(nrels * sizeof(ColFileNodeRel)));
+        } else {
+            XLogRegisterData((char *)rels, nrels * sizeof(ColFileNode));
+        }
         LWLockAcquire(DelayDDLLock, LW_SHARED);
     }
 
@@ -3477,7 +3531,11 @@ static void RecordTransactionCommitPrepared(TransactionId xid, int nchildren, Tr
     /* we allow filtering by xacts */
     XLogIncludeOrigin();
 
-    recptr = XLogInsert(RM_XACT_ID, XLOG_XACT_COMMIT_PREPARED);
+    int1 info = XLOG_XACT_COMMIT_PREPARED;
+    if (t_thrd.proc->workingVersionNum >= PAGE_COMPRESSION_VERSION) {
+        info |= XLR_REL_COMPRESS;
+    }
+    recptr = XLogInsert(RM_XACT_ID, (uint8)info);
 
     if (nrels > 0) {
         globalDelayDDLLSN = GetDDLDelayStartPtr();
@@ -3525,7 +3583,7 @@ static void RecordTransactionCommitPrepared(TransactionId xid, int nchildren, Tr
  * so it is never possible to optimize out the abort record.
  */
 static void RecordTransactionAbortPrepared(TransactionId xid, int nchildren, TransactionId *children, int nrels,
-                                           ColFileNodeRel *rels, int nlibrary, char *library, int libraryLen)
+                                           ColFileNode *rels, int nlibrary, char *library, int libraryLen)
 {
     xl_xact_abort_prepared xlrec;
     XLogRecPtr recptr;
@@ -3553,7 +3611,12 @@ static void RecordTransactionAbortPrepared(TransactionId xid, int nchildren, Tra
 
     /* dump rels to delete */
     if (nrels > 0) {
-        XLogRegisterData((char *)rels, nrels * sizeof(ColFileNodeRel));
+        if (unlikely((long)(t_thrd.proc->workingVersionNum < PAGE_COMPRESSION_VERSION))) {
+            XLogRegisterData((char *)ConvertToOldColFileNode(rels, nrels, false),
+                             (int)(nrels * sizeof(ColFileNodeRel)));
+        } else {
+            XLogRegisterData((char *)rels, nrels * sizeof(ColFileNode));
+        }
         LWLockAcquire(DelayDDLLock, LW_SHARED);
     }
 
@@ -3566,7 +3629,11 @@ static void RecordTransactionAbortPrepared(TransactionId xid, int nchildren, Tra
         XLogRegisterData((char *)library, libraryLen);
     }
 
-    recptr = XLogInsert(RM_XACT_ID, XLOG_XACT_ABORT_PREPARED);
+    int1 info = XLOG_XACT_ABORT_PREPARED;
+    if (t_thrd.proc->workingVersionNum >= PAGE_COMPRESSION_VERSION) {
+        info |= XLR_REL_COMPRESS;
+    }
+    recptr = XLogInsert(RM_XACT_ID, (uint8)info);
 
     if (nrels > 0) {
         globalDelayDDLLSN = GetDDLDelayStartPtr();
@@ -3727,8 +3794,9 @@ void RecoverPrepareTransactionCSNLog(char *buf)
     TwoPhaseFileHeader *hdr = (TwoPhaseFileHeader *)buf;
 
     if (TransactionIdIsNormal(hdr->xid)) {
-        int hdrSize = (hdr->magic == TWOPHASE_MAGIC_NEW) ?
-                   sizeof(TwoPhaseFileHeaderNew) : sizeof(TwoPhaseFileHeader);
+        bool compressMagic = hdr->magic == TWOPHASE_MAGIC_COMPRESSION;
+        int hdrSize = (hdr->magic == TWOPHASE_MAGIC_NEW || compressMagic) ?
+            sizeof(TwoPhaseFileHeaderNew) : sizeof(TwoPhaseFileHeader);
         TransactionId *sub_xids = (TransactionId *)(buf + MAXALIGN(hdrSize));
         ExtendCsnlogForSubtrans(hdr->xid, hdr->nsubxacts, sub_xids);
         CSNLogSetCommitSeqNo(hdr->xid, hdr->nsubxacts, sub_xids,

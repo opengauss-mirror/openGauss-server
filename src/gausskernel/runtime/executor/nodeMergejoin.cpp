@@ -420,7 +420,7 @@ static TupleTableSlot* MJFillOuter(MergeJoinState* node)
         ExprDoneCond isDone;
 
         MJ_printf("ExecMergeJoin: returning outer fill tuple\n");
-
+                        
         TupleTableSlot* result = ExecProject(node->js.ps.ps_ProjInfo, &isDone);
 
         if (isDone != ExprEndResult) {
@@ -555,6 +555,7 @@ TupleTableSlot* ExecMergeJoin(MergeJoinState* node)
     int compare_result;
     TupleTableSlot* inner_tuple_slot = NULL;
     TupleTableSlot* outer_tuple_slot = NULL;
+    ExprDoneCond isDone;
 
     /*
      * get information from node
@@ -574,7 +575,6 @@ TupleTableSlot* ExecMergeJoin(MergeJoinState* node)
      */
     if (node->js.ps.ps_TupFromTlist) {
         TupleTableSlot* result = NULL;
-        ExprDoneCond isDone;
 
         result = ExecProject(node->js.ps.ps_ProjInfo, &isDone);
         if (isDone == ExprMultipleResult)
@@ -797,7 +797,6 @@ TupleTableSlot* ExecMergeJoin(MergeJoinState* node)
                          * qualification succeeded.  now form the desired
                          * projection tuple and return the slot containing it.
                          */
-                        ExprDoneCond isDone;
 
                         MJ_printf("ExecMergeJoin: returning tuple\n");
 
@@ -1426,7 +1425,8 @@ MergeJoinState* ExecInitMergeJoin(MergeJoin* node, EState* estate, int eflags)
     /*
      * initialize child expressions
      */
-    merge_state->js.ps.targetlist = (List*)ExecInitExpr((Expr*)node->join.plan.targetlist, (PlanState*)merge_state);
+    merge_state->js.ps.targetlist =
+        (List*)ExecInitExpr((Expr*)node->join.plan.targetlist, (PlanState*)merge_state);
     merge_state->js.ps.qual = (List*)ExecInitExpr((Expr*)node->join.plan.qual, (PlanState*)merge_state);
     merge_state->js.jointype = node->join.jointype;
     merge_state->js.joinqual = (List*)ExecInitExpr((Expr*)node->join.joinqual, (PlanState*)merge_state);
@@ -1525,9 +1525,7 @@ MergeJoinState* ExecInitMergeJoin(MergeJoin* node, EState* estate, int eflags)
      * default tableAm type is set to HEAP.
      */
     ExecAssignResultTypeFromTL(&merge_state->js.ps, TAM_HEAP);
-
     ExecAssignProjectionInfo(&merge_state->js.ps, NULL);
-
     /*
      * preprocess the merge clauses
      */
@@ -1567,7 +1565,6 @@ MergeJoinState* ExecInitMergeJoin(MergeJoin* node, EState* estate, int eflags)
 void ExecEndMergeJoin(MergeJoinState* node)
 {
     MJ1_printf("ExecEndMergeJoin: %s\n", "ending node processing");
-
     /*
      * Free the exprcontext
      */
@@ -1576,6 +1573,7 @@ void ExecEndMergeJoin(MergeJoinState* node)
     /*
      * clean out the tuple table
      */
+
     (void)ExecClearTuple(node->js.ps.ps_ResultTupleSlot);
     (void)ExecClearTuple(node->mj_MarkedTupleSlot);
 

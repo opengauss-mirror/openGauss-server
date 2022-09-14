@@ -344,7 +344,7 @@ int StrategySyncStart(uint32 *complete_passes, uint32 *num_buf_alloc)
 
     SpinLockAcquire(&t_thrd.storage_cxt.StrategyControl->buffer_strategy_lock);
     next_victim_buffer = pg_atomic_read_u32(&t_thrd.storage_cxt.StrategyControl->nextVictimBuffer);
-    result = next_victim_buffer % TOTAL_BUFFER_NUM;
+    result = ((int) next_victim_buffer) % NORMAL_SHARED_BUFFER_NUM;
 
     if (complete_passes != NULL) {
         *complete_passes = t_thrd.storage_cxt.StrategyControl->completePasses;
@@ -608,7 +608,7 @@ RETRY:
     if (pg_atomic_read_u32(&buf->state) & (BM_DIRTY | BM_IS_META)) {
         if (retry_times < Min(MAX_RETRY_RING_TIMES, strategy->ring_size * MAX_RETRY_RING_PCT)) {
             goto RETRY;
-        } else if (get_curr_candidate_nums(false) >= (uint32)g_instance.attr.attr_storage.NBuffers *
+        } else if (get_curr_candidate_nums(CAND_LIST_NORMAL) >= (uint32)g_instance.attr.attr_storage.NBuffers *
             u_sess->attr.attr_storage.candidate_buf_percent_target){
             strategy->current_was_in_ring = false;
             return NULL;
@@ -731,7 +731,7 @@ static BufferDesc* get_buf_from_candidate_list(BufferAccessStrategy strategy, ui
         /* the pagewriter sub thread store normal buffer pool, sub thread starts from 1 */
         int thread_id = (list_id + i) % list_num + 1;
         Assert(thread_id > 0 && thread_id <= list_num);
-        while (candidate_buf_pop(&buf_id, thread_id)) {
+        while (candidate_buf_pop(&g_instance.ckpt_cxt_ctl->pgwr_procs.writer_proc[thread_id].normal_list, &buf_id)) {
             Assert(buf_id < SegmentBufferStartID);
             buf = GetBufferDescriptor(buf_id);
             local_buf_state = LockBufHdr(buf);

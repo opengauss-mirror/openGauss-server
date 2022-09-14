@@ -42,8 +42,6 @@
 
 const int BARRIER_NAME_LEN = 40;
 
-#define BARRIER_PATH "global_barrier_records/hadr_end_barrier"
-
 static char *path_skip_prefix(char *path);
 static bool GetOBSArchiveLastStartTime(ArchiveSlotConfig* obsArchiveSlot);
 static char* FindGlobalBarrierRecordForPITR(ArchiveConfig *archive_config);
@@ -422,6 +420,9 @@ static char *archive_replication_get_xlog_prefix(XLogRecPtr recptr, bool onlyPat
 static char *path_skip_prefix(char *path)
 {
     char *key = path;
+    if (key == NULL) {
+        return NULL;
+    }
     /* Skip path prefix, prefix format:'xxxx/cn/' */
     key = strrchr(key, '/');
     if (key == NULL) {
@@ -436,6 +437,17 @@ static char *get_last_filename_from_list(const List *object_list)
 {
     // The list returned from OBS is in lexicographic order.
     ListCell* cell = list_tail(object_list);
+    int matchNum = 0;
+    TimeLineID timeLine;
+    uint32 xlogSegId;
+    uint32 xlogSegOffset;
+    int version;
+    uint term;
+    int sub_term;
+    uint slice;
+    uint32 tli;
+    char suffix[MAXPGPATH] = {0};
+
     if (cell == NULL || (lfirst(cell) == NULL)) {
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_FILE),
                         errmsg("The xlog file on obs is not exist")));
@@ -443,6 +455,13 @@ static char *get_last_filename_from_list(const List *object_list)
 
     /* Skip path prefix, prefix format:'xxxx/cn/' */
     char *key = strstr((char *)lfirst(cell), XLOGDIR);
+    /* Skip xxx.bak in filename */
+    matchNum = sscanf_s(basename(key), "%8X%8X%8X_%2u_%02d_%08u_%08u_%08d.%s", &timeLine, &xlogSegId,
+        &xlogSegOffset, &slice, &version, &term, &tli, &sub_term, suffix, sizeof(suffix));
+    if (matchNum == 9) {
+        char* p = strrchr(key, '.');
+        *p = '\0';
+    }
 
     return pstrdup(key);
 }
@@ -452,7 +471,7 @@ static char *get_last_filename_from_list(const List *object_list)
  * samples: obs://{bucket}/xxxx/cn/pg_xlog/000000010000000000000003_08_00000002_00000005
  */
 static char *archive_replication_get_last_xlog_slice(XLogRecPtr startPtr, bool onlyPath,
-    bool needUpdateDBState, ArchiveConfig* archive_obs)
+    bool needUpdateDBState, ArchiveConfig* archive_obs, bool reportError = true)
 {
     char *fileNamePrefix = NULL;
     char *fileName = NULL;
@@ -475,7 +494,7 @@ static char *archive_replication_get_last_xlog_slice(XLogRecPtr startPtr, bool o
         securec_check_ss_c(rc, "", "");
     }
 
-    object_list = ArchiveList(fileNamePrefix, archive_obs);
+    object_list = ArchiveList(fileNamePrefix, archive_obs, reportError);
     if (object_list == NIL || object_list->length <= 0) {
         ereport(LOG, (errmsg("The OBS objects with the prefix %s cannot be found.", fileNamePrefix)));
         pfree(fileNamePrefix);
@@ -539,7 +558,8 @@ int archive_replication_receive(XLogRecPtr startPtr, char **buffer, int *bufferL
     if (g_instance.comm_cxt.lastArchiveRcvTime == 0) {
         g_instance.comm_cxt.lastArchiveRcvTime = currTime.tv_sec;
     }
-    fileName = archive_replication_get_last_xlog_slice(startPtr, false, true, &walrcv->archive_slot->archive_config);
+    fileName = archive_replication_get_last_xlog_slice(startPtr, false, true, &walrcv->archive_slot->archive_config,
+        false);
     if (fileName == NULL || strlen(fileName) == 0) {
         if (currTime.tv_sec - g_instance.comm_cxt.lastArchiveRcvTime > TIMEOUT_FOR_ARCHIVE_RECEIVER) {
             ereport(PANIC, (errmsg("Cannot find xlog file with LSN: %lu and timeout is reached", startPtr)));
@@ -639,6 +659,7 @@ int ArchiveReplicationAchiver(const ArchiveXlogMessage *xlogInfo)
     canonicalize_path(xlogfpath);
     xlogreadfd = open(xlogfpath, O_RDONLY | PG_BINARY, 0);
     if (xlogreadfd < 0) {
+        pg_usleep(1000000);
         ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_RESOURCES),
                         errmsg("Can not open file \"%s\": %s", xlogfpath, strerror(errno))));
     }
@@ -646,6 +667,7 @@ int ArchiveReplicationAchiver(const ArchiveXlogMessage *xlogInfo)
     /* Align down to 4M */
     offset = TYPEALIGN_DOWN(OBS_XLOG_SLICE_BLOCK_SIZE, ((xlogInfo->targetLsn) % XLogSegSize));
     if (lseek(xlogreadfd, (off_t)offset, SEEK_SET) < 0) {
+        close(xlogreadfd);
         ereport(ERROR, (errcode(ERRCODE_FILE_READ_FAILED),
                         errmsg("Can not locate to offset[%u] of xlog file \"%s\": %s",
                                offset, xlogfpath, strerror(errno))));
@@ -653,6 +675,7 @@ int ArchiveReplicationAchiver(const ArchiveXlogMessage *xlogInfo)
 
     if (read(xlogreadfd, xlogBuff + OBS_XLOG_SLICE_HEADER_SIZE, OBS_XLOG_SLICE_BLOCK_SIZE)
         != OBS_XLOG_SLICE_BLOCK_SIZE) {
+        close(xlogreadfd);
         ereport(ERROR, (errcode(ERRCODE_FILE_READ_FAILED),
                         errmsg("Can not read local xlog file \"%s\": %s", xlogfpath, strerror(errno))));
     }
@@ -827,11 +850,13 @@ int archive_replication_cleanup(XLogRecPtr recptr, ArchiveConfig *archive_config
     List *object_list = NIL;
     ListCell *cell = NULL;
     char *key = NULL;
-
+    char lastCleanFile[MAXPGPATH] = {0};
     errno_t rc = EOK;
     int ret = 0;
     char xlogfname[MAXFNAMELEN];
     char obsXlogPath[MAXPGPATH] = {0};
+    char buffer[MAXPGPATH] = {0};
+    int bufLen = 0;
     int maxDelNum = 0;
     size_t len = 0;
     XLogSegNo xlogSegno = 0;
@@ -843,6 +868,14 @@ int archive_replication_cleanup(XLogRecPtr recptr, ArchiveConfig *archive_config
                     (uint32)((recptr / OBS_XLOG_SLICE_BLOCK_SIZE) & OBS_XLOG_SLICE_NUM_MAX));
     securec_check_ss_c(rc, "", "");
     len = strlen(xlogfname);
+    if (IS_PGXC_COORDINATOR) {
+        rc = snprintf_s(lastCleanFile, MAXPGPATH, MAXPGPATH - 1, "%s/%s",
+            g_instance.attr.attr_common.PGXCNodeName, OBS_LAST_CLEAN_RECORD);
+        securec_check_ss(rc, "\0", "\0");
+    } else {
+        rc = snprintf_s(lastCleanFile, MAXPGPATH, MAXPGPATH - 1, "%s", OBS_LAST_CLEAN_RECORD);
+        securec_check_ss(rc, "\0", "\0");
+    }
 
     if (reverse) {
         fileNamePrefix = archive_replication_get_xlog_prefix(recptr, true, true);
@@ -919,6 +952,12 @@ int archive_replication_cleanup(XLogRecPtr recptr, ArchiveConfig *archive_config
             /* Reach the target lsn */
             break;
         }
+    }
+    if (!reverse) {
+        rc = snprintf_s(buffer, MAXPGPATH, MAXPGPATH - 1, "%lu", recptr);
+        securec_check_ss(rc, "\0", "\0");
+        bufLen = strlen(buffer);
+        ArchiveWrite(lastCleanFile, buffer, bufLen, archive_config);
     }
 
     /* release result list */
@@ -1031,7 +1070,6 @@ static void WriteOneBarrierRecordToBarrierList(const char* barrierFileName, cons
 {
     char barrierRecordBuff[OBS_XLOG_SLICE_FILE_SIZE] = {0};
     char buffer[MAXPGPATH] = {0};
-    char endBuffer[MAXPGPATH] = {0};
     size_t readLen = 0;
     errno_t rc = EOK;
     int ret = 0;
@@ -1045,30 +1083,24 @@ static void WriteOneBarrierRecordToBarrierList(const char* barrierFileName, cons
             t_thrd.barrier_creator_cxt.first_cn_timeline);
         securec_check_ss_c(rc, "", "");
     }
-    rc = snprintf_s(endBuffer, MAXPGPATH, MAXPGPATH - 1, "%s-%s_%08lu", id, availableCNName,
-        t_thrd.barrier_creator_cxt.first_cn_timeline);
-    securec_check_ss_c(rc, "", "");
+
     int messageLen = strlen(buffer);
-    int endBufLen = strlen(endBuffer);
     if (ArchiveFileExist(barrierFileName, archive_config) == false) {
         ret = ArchiveWrite(barrierFileName, buffer, messageLen, archive_config);
         if (ret != 0) {
-            ereport(ERROR, (errcode(ERRCODE_NO_DATA_FOUND),
+            ereport(WARNING, (errcode(ERRCODE_NO_DATA_FOUND),
                 (errmsg("The barrier list file: %s could not been write now, and record is %s.",
                 barrierFileName, buffer))));
+            return;
         }
         ereport(LOG, (errmsg("create new hadr barrier list file: %s.", barrierFileName)));
-        ret = ArchiveWrite(BARRIER_PATH, endBuffer, endBufLen, archive_config);
-        if (ret != 0) {
-            ereport(ERROR, (errcode(ERRCODE_NO_DATA_FOUND),
-                (errmsg("The barrier list file: hadr_end_barrier could not been write now."))));
-        }
     } else {
         readLen = 0;
         readLen = ArchiveRead(barrierFileName, 0, barrierRecordBuff, OBS_XLOG_SLICE_FILE_SIZE, archive_config);
-        if (readLen <= 0) {
-            ereport(ERROR, (errcode(ERRCODE_NO_DATA_FOUND),
+        if (readLen < 0) {
+            ereport(WARNING, (errcode(ERRCODE_NO_DATA_FOUND),
                 (errmsg("The barrier list file: %s could not been read now.", barrierFileName))));
+            return;
         }
         ret = strcat_s(barrierRecordBuff, OBS_XLOG_SLICE_FILE_SIZE, buffer);
         securec_check_c(ret, "\0", "\0");
@@ -1080,11 +1112,6 @@ static void WriteOneBarrierRecordToBarrierList(const char* barrierFileName, cons
             ereport(WARNING, (errcode(ERRCODE_NO_DATA_FOUND),
                 (errmsg("The hadr barrier list file:%s, could not been write now, now record is %s.",
                 barrierFileName, buffer))));
-        }
-        ret = ArchiveWrite(BARRIER_PATH, endBuffer, endBufLen, archive_config);
-        if (ret != 0) {
-            ereport(ERROR, (errcode(ERRCODE_NO_DATA_FOUND),
-                (errmsg("The barrier list file: hadr_end_barrier could not been write now."))));
         }
     }
 }
@@ -1151,11 +1178,11 @@ static void WriteGlobalBarrierListRecordsOnMedia(const char* id, const char* ava
     rc = memset_s(buffer, MAXPGPATH, 0, MAXPGPATH);
     securec_check_ss_c(rc, "", "");
 
-    if (ArchiveFileExist("global_barrier_records/hadr_start_barrier", archive_config) != true) {
-        ereport(ERROR, (errcode(ERRCODE_NO_DATA_FOUND),
-            (errmsg("The file name hadr_start_barrier cannot be find when write global barrier records."))));
-    }
     if (t_thrd.barrier_creator_cxt.is_first_barrier) {
+        if (ArchiveFileExist("global_barrier_records/hadr_start_barrier", archive_config) != true) {
+            ereport(ERROR, (errcode(ERRCODE_NO_DATA_FOUND),
+                (errmsg("The file name hadr_start_barrier cannot be find when write global barrier records."))));
+        }
         rc = snprintf_s(startFileName, MAXPGPATH, MAXPGPATH - 1, "global_barrier_records/hadr_start_barrier");
         securec_check_ss_c(rc, "", "");
         readLen = ArchiveRead(startFileName, 0, startTimeBuff, 24, archive_config);
@@ -1174,7 +1201,7 @@ static void WriteGlobalBarrierListRecordsOnMedia(const char* id, const char* ava
             ereport(ERROR, (errmsg("the start time write in hadr_start_barrier file is bigger than "
                 "current barrier time, may recover old records.")));
         } else {
-            int fileCnt = (curBarrierTimeStamp - startTimeStamp) / FILE_TIME_INTERVAL;
+            long fileCnt = (curBarrierTimeStamp - startTimeStamp) / FILE_TIME_INTERVAL;
             if (fileCnt == 0) {
                 rc = snprintf_s(barrierFileName, MAXPGPATH, MAXPGPATH - 1,
                     "global_barrier_records/hadr_barrier_%013ld", startTimeStamp);
@@ -1226,11 +1253,13 @@ void UpdateGlobalBarrierListOnMedia(const char* id, const char* availableCNName)
         if (slotName == NULL || strlen(slotName) == 0) {
             continue;
         }
+        LWLockAcquire(DropArchiveSlotLock, LW_SHARED);
         archive_conf = getArchiveReplicationSlotWithName(slotName);
         if (archive_conf != NULL) {
             WriteGlobalBarrierListRecordsOnMedia(id, availableCNName, slotName, startTimestamp,
                 &archive_conf->archive_config);
         }
+        LWLockRelease(DropArchiveSlotLock);
     }
     if (t_thrd.barrier_creator_cxt.is_first_barrier) {
         t_thrd.barrier_creator_cxt.is_first_barrier = false;
@@ -1331,17 +1360,18 @@ static char* FindGlobalBarrierRecordForPITR(ArchiveConfig *archive_config)
     char barrierRecordBuff[OBS_XLOG_SLICE_FILE_SIZE] = {0};
     char startTimeBuff[MAXPGPATH] = {0};
     long startTimeStamp = 0;
+    long startMsecTimeStamp = 0;
     long targetTimeInPITR = 0;
     const int msec = 1000;
     char* targetGlobalBarrier = NULL;
-    int cntFile = 0;
+    long cntFile = 0;
     size_t readLen = 0;
     errno_t rc = EOK;
 
     if (g_instance.roach_cxt.targetTimeInPITR == NULL) {
         ereport(ERROR, (errcode(ERRCODE_NO_DATA_FOUND), (errmsg("The target PITR time is null."))));
     }
-    targetTimeInPITR = atol(g_instance.roach_cxt.targetTimeInPITR) * msec;
+    targetTimeInPITR = atol(g_instance.roach_cxt.targetTimeInPITR);
     if (ArchiveFileExist("global_barrier_records/hadr_start_barrier", archive_config) != true) {
         ereport(ERROR, (errcode(ERRCODE_NO_DATA_FOUND),
             (errmsg("The file name hadr_start_barrier cannot be find when recovery"
@@ -1359,14 +1389,19 @@ static char* FindGlobalBarrierRecordForPITR(ArchiveConfig *archive_config)
             (errmsg("parse first barrier time failed when find correct pitr record from barrier list."))));
     }
     startTimeStr = startTimeStr + 1;
-    startTimeStamp = atol(startTimeStr);
+    startMsecTimeStamp = strtol(startTimeStr, NULL, 10);
+    if (startMsecTimeStamp == 0) {
+        ereport(ERROR, (errcode(ERRCODE_NO_DATA_FOUND),
+            (errmsg("parse first barrier time failed because result is 0."))));
+    }
+    startTimeStamp = startMsecTimeStamp / msec;
     if (targetTimeInPITR - startTimeStamp < 0) {
         ereport(PANIC, (errmsg("The target time for PITR is less than global barrier start time,"
             " could not recovery.")));
     }
-    cntFile = (targetTimeInPITR - startTimeStamp) / FILE_TIME_INTERVAL;
+    cntFile = (targetTimeInPITR - startTimeStamp) / (FILE_TIME_INTERVAL / msec);
     rc = snprintf_s(barrierFileName, MAXPGPATH, MAXPGPATH - 1, "global_barrier_records/hadr_barrier_%013ld",
-        startTimeStamp + cntFile * FILE_TIME_INTERVAL);
+        startMsecTimeStamp + cntFile * FILE_TIME_INTERVAL);
     securec_check_ss_c(rc, "", "");
     if (ArchiveFileExist(barrierFileName, archive_config) == false) {
         ereport(ERROR, (errcode(ERRCODE_NO_DATA_FOUND),
@@ -1387,15 +1422,150 @@ static char* FindGlobalBarrierRecordForPITR(ArchiveConfig *archive_config)
     return targetGlobalBarrier;
 }
 
+static char* GetLastBarrierRecord(ArchiveConfig *archive_obs)
+{
+    List *object_list = NIL;
+    char barrierListDir[MAXPGPATH] = {0};
+    char lastBarrierFile[MAXPGPATH] = {0};
+    char* startBarrierFile = NULL;
+    char barrierRecordBuff[OBS_XLOG_SLICE_FILE_SIZE] = {0};
+    ListCell *cell = NULL;
+    char* tempFileName = NULL;
+    char* key = NULL;
+    char* token = NULL;
+    char* outerPtr = NULL;
+    char* fileToken = NULL;
+    char* fileOuterPtr = NULL;
+    char* lastRecord = NULL;
+    const int matchNum = 3;
+    long maxFileNum = 0;
+    long fileCnt = 0;
+    int readLen = 0;
+    int nMatch = 0;
+    char barrierHeader[MAXPGPATH] = {0};
+    char barrierStr[MAXPGPATH] = {0};
+    long barrierStartTimestamp = 0;
+    long barrierTimestamp = 0;
+    errno_t rc = EOK;
+
+    rc = snprintf_s(barrierListDir, MAXPGPATH, MAXPGPATH - 1, "global_barrier_records");
+    securec_check_ss(rc, "\0", "\0");
+    object_list = ArchiveList(barrierListDir, archive_obs);
+    if (object_list == NIL || object_list->length <= 0) {
+        ereport(ERROR, (errmsg("The OBS objects global_barrier_records cannot be found.")));
+    }
+    foreach (cell, object_list) {
+        if (strcmp(basename((char *)lfirst(cell)), "hadr_start_barrier") == 0) {
+            break;
+        }
+        if (strcmp(basename((char *)lfirst(cell)), "archive_start_records") == 0) {
+            continue;
+        }
+        tempFileName = (char *)lfirst(cell);
+        if (startBarrierFile == NULL) {
+            startBarrierFile = tempFileName;
+        }
+    }
+    key = path_skip_prefix(tempFileName);
+    if (key == NULL) {
+        ereport(WARNING, (errmsg("There is no one barrier record file on media.")));
+        list_free_deep(object_list);
+        object_list = NIL;
+        return NULL;
+    }
+    fileToken = strtok_s(key, ".", &fileOuterPtr);
+    if (fileToken == NULL) {
+        ereport(WARNING, (errmsg("Parse barrier record file name failed.")));
+        list_free_deep(object_list);
+        object_list = NIL;
+        return NULL;
+    }
+
+    nMatch = sscanf_s(basename(startBarrierFile), "%[a-z]_%[a-z]_%ld", barrierHeader, sizeof(barrierHeader),
+        barrierStr, sizeof(barrierStr), &barrierStartTimestamp);
+    if (nMatch != matchNum) {
+        list_free_deep(object_list);
+        object_list = NIL;
+        ereport(ERROR, (errcode(ERRCODE_NO_DATA_FOUND),
+            (errmsg("The barrier list file could not be parsed: %s.", startBarrierFile))));
+        return NULL;
+    }
+    nMatch = sscanf_s(fileToken, "%[a-z]_%[a-z]_%ld", barrierHeader, sizeof(barrierHeader),
+        barrierStr, sizeof(barrierStr), &barrierTimestamp);
+    if (nMatch == matchNum) {
+        rc = snprintf_s(lastBarrierFile, MAXPGPATH, MAXPGPATH - 1, "global_barrier_records/%s_%s_%ld",
+            barrierHeader, barrierStr, (barrierTimestamp - fileCnt * FILE_TIME_INTERVAL));
+        securec_check_ss(rc, "\0", "\0");
+    } else {
+        list_free_deep(object_list);
+        object_list = NIL;
+        ereport(ERROR, (errcode(ERRCODE_NO_DATA_FOUND),
+            (errmsg("The barrier list file could not be parsed: %s.", fileToken))));
+        return NULL;
+    }
+    maxFileNum = (barrierTimestamp - barrierStartTimestamp) / FILE_TIME_INTERVAL;
+    while (fileCnt <= maxFileNum) {
+        if (ArchiveFileExist(lastBarrierFile, archive_obs) != true) {
+            rc = memset_s(lastBarrierFile, sizeof(lastBarrierFile), 0, sizeof(lastBarrierFile));
+            securec_check(rc, "\0", "\0");
+            rc = memset_s(barrierRecordBuff, sizeof(barrierRecordBuff), 0, sizeof(barrierRecordBuff));
+            securec_check(rc, "\0", "\0");
+            rc = snprintf_s(lastBarrierFile, MAXPGPATH, MAXPGPATH - 1, "global_barrier_records/%s_%s_%ld",
+                barrierHeader, barrierStr, (barrierTimestamp - (++fileCnt * FILE_TIME_INTERVAL)));
+            securec_check_ss(rc, "\0", "\0");
+            continue;
+        }
+        readLen = ArchiveRead(lastBarrierFile, 0, barrierRecordBuff, OBS_XLOG_SLICE_FILE_SIZE, archive_obs);
+        if (readLen < 0) {
+            list_free_deep(object_list);
+            object_list = NIL;
+            ereport(ERROR, (errcode(ERRCODE_NO_DATA_FOUND),
+                (errmsg("The barrier list file: %s could not been read now.", lastBarrierFile))));
+            return NULL;
+        } else if (readLen > 0) {
+            break;
+        } else {
+            ereport(WARNING, (errmsg("On media, barrier list file %s is empty, skip it.", lastBarrierFile)));
+        }
+        rc = memset_s(lastBarrierFile, sizeof(lastBarrierFile), 0, sizeof(lastBarrierFile));
+        securec_check(rc, "\0", "\0");
+        rc = memset_s(barrierRecordBuff, sizeof(barrierRecordBuff), 0, sizeof(barrierRecordBuff));
+        securec_check(rc, "\0", "\0");
+        rc = snprintf_s(lastBarrierFile, MAXPGPATH, MAXPGPATH - 1, "global_barrier_records/%s_%s_%ld",
+            barrierHeader, barrierStr, (barrierTimestamp - (++fileCnt * FILE_TIME_INTERVAL)));
+        securec_check_ss(rc, "\0", "\0");
+    }
+
+    token = strtok_s(barrierRecordBuff, "\n", &outerPtr);
+    lastRecord = token;
+    if (outerPtr == NULL) {
+        list_free_deep(object_list);
+        object_list = NIL;
+        ereport(ERROR, (errcode(ERRCODE_NO_DATA_FOUND),
+            (errmsg("The barrier list file parse failed when get last record from %s.", lastBarrierFile))));
+        return token;
+    }
+    while (token != NULL) {
+        token = strtok_s(NULL, "\n", &outerPtr);
+        if (token != NULL) {
+            lastRecord = token;
+        } else {
+            break;
+        }
+    }
+    list_free_deep(object_list);
+    object_list = NIL;
+    return lastRecord;
+}
+
 uint64 ReadBarrierTimelineRecordFromObs(const char* archiveSlotName)
 {
     ArchiveConfig* archiveConfig = NULL;
+    char* lastStoppedBarrier = NULL;
     ArchiveSlotConfig* archiveSlot = getArchiveReplicationSlotWithName(archiveSlotName);
-    int readLen = 0;
     uint64 lastTimeline = 0;
     char* token = NULL;
     char* outerPtr = NULL;
-    char endbarrierRecordBuff[MAXPGPATH] = {0};
 
     if (archiveSlot == NULL) {
         ereport(ERROR, (errmsg("Cannot get archive config from replication slots when read barrier cn timeline")));
@@ -1405,23 +1575,18 @@ uint64 ReadBarrierTimelineRecordFromObs(const char* archiveSlotName)
         ereport(LOG, (errmsg("this is the first time we make a barrier")));
         return 0;
     } else {
-        if (ArchiveFileExist(BARRIER_PATH, archiveConfig) == true) {
-            readLen = ArchiveRead(BARRIER_PATH, 0, endbarrierRecordBuff,
-                MAXPGPATH, archiveConfig);
-            if (readLen <= 0) {
-                ereport(ERROR, (errcode(ERRCODE_NO_DATA_FOUND),
-                    (errmsg("The hadr_end_barrier file could not been read."))));
-            }
-            token = strtok_s(endbarrierRecordBuff, "_", &outerPtr);
+        lastStoppedBarrier = GetLastBarrierRecord(archiveConfig);
+        if (lastStoppedBarrier != NULL) {
+            token = strtok_s(lastStoppedBarrier, "_", &outerPtr);
             token = strtok_s(NULL, "_", &outerPtr);
             token = strtok_s(NULL, "-", &outerPtr);
             if (outerPtr == NULL) {
-                ereport(ERROR, (errcode(ERRCODE_NO_DATA_FOUND), (errmsg("parse barrier end file record failed."))));
+                ereport(ERROR, (errcode(ERRCODE_NO_DATA_FOUND), (errmsg("parse last stopped barrier record failed"))));
             }
             char* timelineStr = strrchr(outerPtr, '_');
             if (timelineStr == NULL) {
                 ereport(ERROR, (errcode(ERRCODE_NO_DATA_FOUND),
-                    (errmsg("parse cn names from barrier end file record failed."))));
+                    (errmsg("parse cn names from last stopped barrier record failed."))));
             }
             timelineStr += 1;
             lastTimeline = strtoul(timelineStr, NULL, 10);
@@ -1431,10 +1596,8 @@ uint64 ReadBarrierTimelineRecordFromObs(const char* archiveSlotName)
             } else {
                 return lastTimeline + 1;
             }
-        } else {
-            ereport(LOG, (errmsg("could not read hadr end barrier file, timeline set to 0")));
-            return 0;
         }
+        return 0;
     }
 }
 
@@ -1442,6 +1605,7 @@ int GetArchiveXLogFileTotalNum(ArchiveConfig *archiverConfig, XLogRecPtr endLsn)
 {
     char buffer[MAXPGPATH] = {0};
     char statusFile[MAXPGPATH] = {0};
+    char lastCleanFile[MAXPGPATH] = {0};
     int readLen = 0;
     char* lastPtr = NULL;
     char* token = NULL;
@@ -1456,7 +1620,24 @@ int GetArchiveXLogFileTotalNum(ArchiveConfig *archiverConfig, XLogRecPtr endLsn)
         rc = snprintf_s(statusFile, MAXPGPATH, MAXPGPATH - 1, "%s", OBS_ARCHIVE_STATUS_FILE);
         securec_check_ss(rc, "\0", "\0");
     }
-
+    if (IS_PGXC_COORDINATOR) {
+        rc = snprintf_s(lastCleanFile, MAXPGPATH, MAXPGPATH - 1, "%s/%s",
+            g_instance.attr.attr_common.PGXCNodeName, OBS_LAST_CLEAN_RECORD);
+        securec_check_ss(rc, "\0", "\0");
+    } else {
+        rc = snprintf_s(lastCleanFile, MAXPGPATH, MAXPGPATH - 1, "%s", OBS_LAST_CLEAN_RECORD);
+        securec_check_ss(rc, "\0", "\0");
+    }
+    if (ArchiveFileExist(lastCleanFile, archiverConfig)) {
+        readLen = ArchiveRead(lastCleanFile, 0, buffer, MAXPGPATH, archiverConfig);
+        if (readLen < 0) {
+            ereport(ERROR, (errcode(ERRCODE_NO_DATA_FOUND),
+                (errmsg("Could not read obs_last_clean_record file when get total xlog files."))));
+        }
+        XLogRecPtr startLsn = (XLogRecPtr)strtoul(buffer, NULL, 10);
+        result = (endLsn / XLogSegSize) - (startLsn / XLogSegSize);
+        return result;
+    }
     readLen = ArchiveRead(statusFile, 0, buffer, MAXPGPATH, archiverConfig);
     if (readLen < 0) {
         ereport(ERROR, (errcode(ERRCODE_NO_DATA_FOUND),
@@ -1477,6 +1658,8 @@ int GetArchiveXLogFileTotalNum(ArchiveConfig *archiverConfig, XLogRecPtr endLsn)
 static char* DeleteBarrierRecordAndUpdateOnMedia(char* globalBarrierRecords, long stopBarrierTimestamp,
     char* barrierFileName, ArchiveConfig* currSlotArchConfig, bool reverse)
 {
+    char newRecords[OBS_XLOG_SLICE_FILE_SIZE] = {0};
+    char record[MAXPGPATH] = {0};
     char* token = NULL;
     char* outerPtr = NULL;
     char* outputStr = NULL;
@@ -1512,15 +1695,19 @@ static char* DeleteBarrierRecordAndUpdateOnMedia(char* globalBarrierRecords, lon
             }
             break;
         }
-        messageLen = strlen(outerPtr);
-        ret = ArchiveWrite(barrierFileName, outerPtr, messageLen, currSlotArchConfig);
+        rc = snprintf_s(record, MAXPGPATH, MAXPGPATH - 1, "%s\n", outputStr);
+        securec_check_ss(rc, "\0", "\0");
+        ret = strcat_s(newRecords, OBS_XLOG_SLICE_FILE_SIZE, record);
+        securec_check(ret, "\0", "\0");
+        ret = strcat_s(newRecords, OBS_XLOG_SLICE_FILE_SIZE, outerPtr);
+        securec_check(ret, "\0", "\0");
+        messageLen = strlen(newRecords);
+        ret = ArchiveWrite(barrierFileName, newRecords, messageLen, currSlotArchConfig);
         if (ret != 0) {
             ereport(ERROR, (errcode(ERRCODE_NO_DATA_FOUND),
                 (errmsg("The %s file could not been update when delete old barrier records.", barrierFileName))));
         }
     } else {
-        char newRecords[OBS_XLOG_SLICE_FILE_SIZE] = {0};
-        char record[MAXPGPATH] = {0};
         while (token != NULL) {
             char* tmptoken = NULL;
             char* lastPtr = NULL;
@@ -1535,11 +1722,13 @@ static char* DeleteBarrierRecordAndUpdateOnMedia(char* globalBarrierRecords, lon
             }
             if (atol(tmptoken) <= stopBarrierTimestamp) {
                 rc = snprintf_s(record, MAXPGPATH, MAXPGPATH - 1, "%s\n", outputStr);
-                securec_check_ss_c(rc, "", "");
-                strcat_s(newRecords, OBS_XLOG_SLICE_FILE_SIZE, record);
-                securec_check_c(ret, "\0", "\0");
+                securec_check_ss(rc, "\0", "\0");
+                ret = strcat_s(newRecords, OBS_XLOG_SLICE_FILE_SIZE, record);
+                securec_check(ret, "\0", "\0");
                 token = strtok_s(NULL, "\n", &outerPtr);
                 pfree_ext(outputStr);
+                rc = memset_s(record, MAXPGPATH, 0, MAXPGPATH);
+                securec_check(rc, "\0", "\0");
                 continue;
             }
             break;
@@ -1562,8 +1751,8 @@ char* DeleteStopBarrierRecordsOnMedia(long stopBarrierTimestamp, long endBarrier
     char barrierRecordBuff[OBS_XLOG_SLICE_FILE_SIZE] = {0};
     long startTimeStamp = 0;
     int readLen = 0;
-    int totalFiles = 0;
-    int startFilesNum = 0;
+    long totalFiles = 0;
+    long startFilesNum = 0;
     const int msecPerSec = 1000;
     char* currOldestRecord = NULL;
     errno_t rc = EOK;
@@ -1610,7 +1799,7 @@ char* DeleteStopBarrierRecordsOnMedia(long stopBarrierTimestamp, long endBarrier
                     currSlotArchConfig);
                 (void)DeleteBarrierRecordAndUpdateOnMedia(barrierRecordBuff, endBarrierTimestamp,
                     barrierFileName, currSlotArchConfig, true);
-                int currFileCnt = 1;
+                long currFileCnt = 1;
                 while (currFileCnt < totalFiles) {
                     CHECK_FOR_INTERRUPTS();
                     rc = snprintf_s(barrierFileName, MAXPGPATH, MAXPGPATH - 1,
@@ -1624,27 +1813,10 @@ char* DeleteStopBarrierRecordsOnMedia(long stopBarrierTimestamp, long endBarrier
                     ArchiveDelete(barrierFileName, currSlotArchConfig);
                     currFileCnt++;
                 }
-                rc = snprintf_s(barrierFileName, MAXPGPATH, MAXPGPATH - 1,
-                    "global_barrier_records/hadr_barrier_%013ld",
-                    startTimeStamp + ((startFilesNum + currFileCnt) * FILE_TIME_INTERVAL));
-                securec_check_ss_c(rc, "", "");
-                if (!ArchiveFileExist(barrierFileName, currSlotArchConfig)) {
-                    return NULL;
-                }
-                readLen = 0;
-                readLen = ArchiveRead(barrierFileName, 0, barrierRecordBuff, OBS_XLOG_SLICE_FILE_SIZE,
-                currSlotArchConfig);
-                if (readLen <= 0) {
-                    ereport(ERROR, (errcode(ERRCODE_NO_DATA_FOUND),
-                        (errmsg("The file name %s cannot be read when delete old barrier records.",
-                        barrierFileName))));
-                }
-                currOldestRecord = DeleteBarrierRecordAndUpdateOnMedia(barrierRecordBuff, stopBarrierTimestamp,
-                barrierFileName, currSlotArchConfig, false);
                 return currOldestRecord;
             }
             totalFiles = (stopBarrierTimestamp - startTimeStamp) / FILE_TIME_INTERVAL;
-            int currFileCnt = 0;
+            long currFileCnt = 0;
             while (currFileCnt < totalFiles) {
                 CHECK_FOR_INTERRUPTS();
                 rc = snprintf_s(barrierFileName, MAXPGPATH, MAXPGPATH - 1,

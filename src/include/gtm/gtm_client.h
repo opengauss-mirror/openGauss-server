@@ -215,6 +215,7 @@ GTM_Conn* connect_gtm(const char* connect_string);
 int get_node_list(GTM_Conn*, GTM_PGXCNodeInfo*, size_t);
 GlobalTransactionId get_next_gxid(GTM_Conn*);
 CommitSeqNo get_next_csn(GTM_Conn* conn, bool is_gtm_lite);
+void get_next_csn_time(GTM_Conn* conn, bool is_gtm_lite, CommitSeqNo* csn, GTM_Timestamp* timestamp);
 TransactionId get_global_xmin(GTM_Conn* conn);
 GTM_Timeline get_gtm_timeline(GTM_Conn* conn);
 int32 get_txn_gxid_list(GTM_Conn*, GTM_Transactions*);

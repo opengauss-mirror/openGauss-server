@@ -45700,3 +45700,7 @@ SQLSTATE:
 CAUSE: "invalid"
 ACTION: "invalid"
 
+GAUSS-08614: "group_concat does not support window function"
+SQLSTATE: 42601
+CAUSE: "invalid"
+ACTION: "invalid"

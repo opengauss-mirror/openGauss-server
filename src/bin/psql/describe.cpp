@@ -68,7 +68,6 @@ static bool* generateTranslateColumns(int n, int truesz, int* trues);
     do {                        \
         if ((x) != NULL)        \
             free(x);            \
-        (x) = NULL;             \
     } while (0)
 
 const char* ORIENTATION_TIMESERIES = "timeseries";
@@ -527,8 +526,19 @@ bool describeTypes(const char* pattern, bool verbose, bool showSystem)
             gettext_noop("Size"));
     if (verbose && pset.sversion >= 80300) {
         appendPQExpBuffer(&buf,
-            "  pg_catalog.array_to_string(\n"
-            "      ARRAY(\n"
+            "  CASE WHEN t.typtype = 's'\n"
+            "      THEN pg_catalog.array_to_string(\n"
+            "          ARRAY(\n"
+            "		     SELECT s.setlabel\n"
+            "          FROM pg_catalog.pg_set s\n"
+            "          WHERE s.settypid = t.oid\n"
+            "          ORDER BY s.setsortorder\n"
+            "          ),\n"
+            "        E'\\n'\n)"
+            "      ELSE\n");
+        appendPQExpBuffer(&buf,
+            "      pg_catalog.array_to_string(\n"
+            "        ARRAY(\n"
             "		     SELECT e.enumlabel\n"
             "          FROM pg_catalog.pg_enum e\n"
             "          WHERE e.enumtypid = t.oid\n");
@@ -541,7 +551,8 @@ bool describeTypes(const char* pattern, bool verbose, bool showSystem)
         appendPQExpBuffer(&buf,
             "      ),\n"
             "      E'\\n'\n"
-            "  ) AS \"%s\",\n",
+            "  ) END\n"
+            "  AS \"%s\",\n",
             gettext_noop("Elements"));
     }
     if (verbose && pset.sversion >= 90200) {
@@ -1301,10 +1312,11 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
     bool retval = false;
     bool hasreplident = is_column_exists(pset.db, RelationRelationId, "relreplident");
     bool hasGenColFeature = is_column_exists(pset.db, AttrDefaultRelationId, "adgencol");
+    bool hasOnUpdateFeature = is_column_exists(pset.db, AttrDefaultRelationId, "adbin_on_update");
 
     bool has_rlspolicy = false;
     const char* has_rlspolicy_sql =
-        "(select count(1) as haspolicy from pg_catalog.pg_class WHERE relname = 'pg_rlspolicy')";
+        "(select pg_catalog.count(1) as haspolicy from pg_catalog.pg_class WHERE relname = 'pg_rlspolicy')";
 
     retval = false;
 
@@ -1503,12 +1515,24 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
 #endif
 
     printfPQExpBuffer(&buf, "SELECT a.attname,");
-    appendPQExpBuffer(&buf,
-        "\n  pg_catalog.format_type(a.atttypid, a.atttypmod),"
-        "\n  (SELECT substring(pg_catalog.pg_get_expr(d.adbin, d.adrelid) for %d)"
-        "\n   FROM pg_catalog.pg_attrdef d"
-        "\n   WHERE d.adrelid = a.attrelid AND d.adnum = a.attnum AND a.atthasdef),"
-        "\n  a.attnotnull, a.attnum,", exprForNum);
+    if (!hasOnUpdateFeature) {
+        appendPQExpBuffer(&buf,
+            "\n  pg_catalog.format_type(a.atttypid, a.atttypmod),"
+            "\n  (SELECT substring(pg_catalog.pg_get_expr(d.adbin, d.adrelid) for %d)"
+            "\n   FROM pg_catalog.pg_attrdef d"
+            "\n   WHERE d.adrelid = a.attrelid AND d.adnum = a.attnum AND a.atthasdef),"
+            "\n  a.attnotnull, a.attnum,", exprForNum);
+    } else {
+        appendPQExpBuffer(&buf,
+            "\n  pg_catalog.format_type(a.atttypid, a.atttypmod),"
+            "\n  (SELECT substring(pg_catalog.pg_get_expr(d.adbin, d.adrelid) for %d)"
+            "\n   FROM pg_catalog.pg_attrdef d"
+            "\n   WHERE d.adrelid = a.attrelid AND d.adnum = a.attnum AND a.atthasdef),"
+            "\n  (SELECT substring(pg_catalog.pg_get_expr(d.adbin_on_update, d.adrelid) for %d)"
+            "\n   FROM pg_catalog.pg_attrdef d"
+            "\n   WHERE d.adrelid = a.attrelid AND d.adnum = a.attnum AND a.atthasdef),"
+            "\n  a.attnotnull, a.attnum,", exprForNum, exprForNum);
+    }
     if (pset.sversion >= 90100) {
         appendPQExpBuffer(&buf,
             "\n  (SELECT c.collname FROM pg_catalog.pg_collation c, pg_catalog.pg_type t\n"
@@ -1525,9 +1549,9 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
     if (tableinfo.relkind == 'f' && pset.sversion >= 90200) {
         appendPQExpBuffer(&buf,
             ",\n  CASE WHEN attfdwoptions IS NULL THEN '' ELSE "
-            "  '(' || array_to_string(ARRAY(SELECT quote_ident(option_name) ||  ' ' || quote_literal(option_value)  "
-            "FROM "
-            "  pg_options_to_table(attfdwoptions)), ', ') || ')' END AS attfdwoptions");
+            "  '(' || pg_catalog.array_to_string(ARRAY(SELECT pg_catalog.quote_ident(option_name) "
+            "||  ' ' || pg_catalog.quote_literal(option_value)  FROM "
+            "  pg_catalog.pg_options_to_table(attfdwoptions)), ', ') || ')' END AS attfdwoptions");
     } else {
         appendPQExpBuffer(&buf, ",\n  NULL AS attfdwoptions");
     }
@@ -1714,17 +1738,35 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
         if (show_modifiers) {
             resetPQExpBuffer(&tmpbuf);
 
+
+        if (hasOnUpdateFeature) {
+            if (!PQgetisnull(res, i, 6)) {
+                if (tmpbuf.len > 0)
+                    appendPQExpBufferStr(&tmpbuf, " ");
+                appendPQExpBuffer(&tmpbuf, _("collate %s"), PQgetvalue(res, i, 6));
+            }
+        } else {
             if (!PQgetisnull(res, i, 5)) {
                 if (tmpbuf.len > 0)
                     appendPQExpBufferStr(&tmpbuf, " ");
                 appendPQExpBuffer(&tmpbuf, _("collate %s"), PQgetvalue(res, i, 5));
             }
+        }
 
+
+        if (hasOnUpdateFeature) {
+            if (strcmp(PQgetvalue(res, i, 4), "t") == 0) {
+                if (tmpbuf.len > 0)
+                    appendPQExpBufferStr(&tmpbuf, " ");
+                appendPQExpBufferStr(&tmpbuf, _("not null"));
+            }
+        } else {
             if (strcmp(PQgetvalue(res, i, 3), "t") == 0) {
                 if (tmpbuf.len > 0)
                     appendPQExpBufferStr(&tmpbuf, " ");
                 appendPQExpBufferStr(&tmpbuf, _("not null"));
             }
+        }
 
             /* handle "default" here */
             /* (note: above we cut off the 'default' string at 128) */
@@ -1750,8 +1792,22 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
                 /* translator: default values of column definitions */
                 if (strlen(PQgetvalue(res, i, PQfnumber(res, "generated_column"))) > 0) {
                     appendPQExpBuffer(&tmpbuf, _("generated always as (%s) stored"), default_value);
+                } else if (strcmp(default_value, "AUTO_INCREMENT") == 0) {
+                    appendPQExpBuffer(&tmpbuf, _("%s"), default_value);
                 } else {
                     appendPQExpBuffer(&tmpbuf, _("default %s"), default_value);
+                }
+            }
+
+
+            if (hasOnUpdateFeature) {
+                char *on_update_value = PQgetvalue(res, i, 3);
+                if (strlen(on_update_value) > 0) {
+                    if (tmpbuf.len > 0) {
+                        appendPQExpBufferStr(&tmpbuf, " ");
+                    }
+                    /* translator: on_update values of column definitions */
+                    appendPQExpBuffer(&tmpbuf, _("on update %s"), on_update_value);
                 }
             }
 #ifdef HAVE_CE
@@ -1774,20 +1830,33 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
             printTableAddCell(&cont, seq_values[i], false, false);
 
         /* Expression for index column */
-        if (tableinfo.relkind == 'i' || tableinfo.relkind == 'I')
-            printTableAddCell(&cont, PQgetvalue(res, i, 6), false, false);
+        if (tableinfo.relkind == 'i' || tableinfo.relkind == 'I') {
+            if (hasOnUpdateFeature) {
+                printTableAddCell(&cont, PQgetvalue(res, i, 7), false, false);
+            } else {
+                printTableAddCell(&cont, PQgetvalue(res, i, 6), false, false);
+            }
+        }
 
         /* FDW options for foreign table column, only for 9.2 or later */
-        if ((tableinfo.relkind == 'f' || tableinfo.relkind == 'e') && pset.sversion >= 90200)
-            printTableAddCell(&cont, PQgetvalue(res, i, 7), false, false);
+        if ((tableinfo.relkind == 'f' || tableinfo.relkind == 'e') && pset.sversion >= 90200) {
+            if (hasOnUpdateFeature) {
+                printTableAddCell(&cont, PQgetvalue(res, i, 8), false, false);
+            } else {
+                printTableAddCell(&cont, PQgetvalue(res, i, 7), false, false);
+            }
+        }
 
         /* Storage and Description */
         if (verbose) {
 #ifdef HAVE_CE
-            const int firstvcol = (hasFullEncryptFeature ? 10 : 8);
+            int firstvcol = (hasFullEncryptFeature ? 10 : 8);
 #else
-            const int firstvcol = 8;
+            int firstvcol = 8;
 #endif
+            if (hasOnUpdateFeature) {
+                firstvcol++;
+            }
             char* storage = PQgetvalue(res, i, firstvcol);
 
             /* these strings are literal in our syntax, so not translated. */
@@ -2486,10 +2555,10 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
             /* Footer information about foreign table */
             printfPQExpBuffer(&buf,
                 "SELECT s.srvname,\n"
-                "       array_to_string(ARRAY(SELECT "
-                "       quote_ident(option_name) ||  ' ' || "
-                "       quote_literal(option_value)  FROM "
-                "       pg_options_to_table(ftoptions)),  ', ') "
+                "       pg_catalog.array_to_string(ARRAY(SELECT "
+                "       pg_catalog.quote_ident(option_name) ||  ' ' || "
+                "       pg_catalog.quote_literal(option_value)  FROM "
+                "       pg_catalog.pg_options_to_table(ftoptions)),  ', ') "
                 " , f.ftwriteonly \n"
                 " , w.fdwname     \n"
                 "FROM pg_catalog.pg_foreign_table f,\n"
@@ -2804,15 +2873,16 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
                     "WHEN '%c' THEN 'REPLICATION' \n"
                     "WHEN '%c' THEN 'HASH' \n"
                     "WHEN '%c' THEN 'MODULO' END as distriute_type\n"
-                    ", getdistributekey(%s) as distributekey"
-                    ", CASE array_length(nodeoids, 1) \n"
+                    ", pg_catalog.getdistributekey(%s) as distributekey"
+                    ", CASE pg_catalog.array_length(nodeoids, 1) \n"
                     "WHEN nc.dn_cn THEN 'ALL DATANODES' \n"
-                    "ELSE array_to_string(ARRAY( \n"
+                    "ELSE pg_catalog.array_to_string(ARRAY( \n"
                     "SELECT node_name FROM pg_catalog.pgxc_node \n"
-                    "WHERE oid in (SELECT unnest(nodeoids) FROM pg_catalog.pgxc_class WHERE pcrelid = '%s') \n"
+                    "WHERE oid in (SELECT pg_catalog.unnest(nodeoids) FROM "
+                    "pg_catalog.pgxc_class WHERE pcrelid = '%s') \n"
                     "), ', ') END as loc_nodes \n"
-                    "from pgxc_class, (SELECT count(*) AS dn_cn FROM pg_catalog.pgxc_node WHERE node_type = 'D') as nc "
-                    "\n"
+                    "from pgxc_class, (SELECT pg_catalog.count(*) AS dn_cn FROM "
+                    "pg_catalog.pgxc_node WHERE node_type = 'D') as nc \n"
                     " where pcrelid = '%s'",
                     LOCATOR_TYPE_RANGE,
                     LOCATOR_TYPE_LIST,
@@ -2832,14 +2902,15 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
                     "WHEN '%c' THEN 'REPLICATION' \n"
                     "WHEN '%c' THEN 'HASH' \n"
                     "WHEN '%c' THEN 'MODULO' END as distriute_type\n"
-                    ", CASE array_length(nodeoids, 1) \n"
+                    ", CASE pg_catalog.array_length(nodeoids, 1) \n"
                     "WHEN nc.dn_cn THEN 'ALL DATANODES' \n"
-                    "ELSE array_to_string(ARRAY( \n"
+                    "ELSE pg_catalog.array_to_string(ARRAY( \n"
                     "SELECT node_name FROM pg_catalog.pgxc_node \n"
-                    "WHERE oid in (SELECT unnest(nodeoids) FROM pg_catalog.pgxc_class WHERE pcrelid = '%s') \n"
+                    "WHERE oid in (SELECT pg_catalog.unnest(nodeoids) FROM pg_catalog.pgxc_class "
+                    "WHERE pcrelid = '%s') \n"
                     "), ', ') END as loc_nodes \n"
-                    "from pgxc_class, (SELECT count(*) AS dn_cn FROM pg_catalog.pgxc_node WHERE node_type = 'D') as nc "
-                    "\n"
+                    "from pgxc_class, (SELECT pg_catalog.count(*) AS dn_cn "
+                    "FROM pg_catalog.pgxc_node WHERE node_type = 'D') as nc \n"
                     " where pcrelid = '%s'",
                     LOCATOR_TYPE_RANGE,
                     LOCATOR_TYPE_LIST,
@@ -4210,8 +4281,11 @@ static bool describeOneTSParser(const char* oid, const char* nspname, const char
 
     res = PSQLexec(buf.data, false);
     termPQExpBuffer(&buf);
-    if (res == NULL)
+    if (res == NULL) {
+        freeTranslateColumns(translate_columns);
+        myopt.translate_columns = NULL;
         return false;
+    }
 
     myopt.nullPrint = NULL;
     if (nspname != NULL) {
@@ -4621,10 +4695,10 @@ bool listForeignDataWrappers(const char* pattern, bool verbose)
         printACLColumn(&buf, "fdwacl");
         appendPQExpBuffer(&buf,
             ",\n CASE WHEN fdwoptions IS NULL THEN '' ELSE "
-            "  '(' || array_to_string(ARRAY(SELECT "
-            "  quote_ident(option_name) ||  ' ' || "
-            "  quote_literal(option_value)  FROM "
-            "  pg_options_to_table(fdwoptions)),  ', ') || ')' "
+            "  '(' || pg_catalog.array_to_string(ARRAY(SELECT "
+            "  pg_catalog.quote_ident(option_name) ||  ' ' || "
+            "  pg_catalog.quote_literal(option_value)  FROM "
+            "  pg_catalog.pg_options_to_table(fdwoptions)),  ', ') || ')' "
             "  END AS \"%s\"",
             gettext_noop("FDW Options"));
 
@@ -4696,10 +4770,10 @@ bool listForeignServers(const char* pattern, bool verbose)
             "  s.srvtype AS \"%s\",\n"
             "  s.srvversion AS \"%s\",\n"
             "  CASE WHEN srvoptions IS NULL THEN '' ELSE "
-            "  '(' || array_to_string(ARRAY(SELECT "
-            "  quote_ident(option_name) ||  ' ' || "
-            "  quote_literal(option_value)  FROM "
-            "  pg_options_to_table(srvoptions)),  ', ') || ')' "
+            "  '(' || pg_catalog.array_to_string(ARRAY(SELECT "
+            "  pg_catalog.quote_ident(option_name) ||  ' ' || "
+            "  pg_catalog.quote_literal(option_value)  FROM "
+            "  pg_catalog.pg_options_to_table(srvoptions)),  ', ') || ')' "
             "  END AS \"%s\",\n"
             "  d.description AS \"%s\"",
             gettext_noop("Type"),
@@ -4767,10 +4841,10 @@ bool listUserMappings(const char* pattern, bool verbose)
     if (verbose) {
         appendPQExpBuffer(&buf,
             ",\n CASE WHEN umoptions IS NULL THEN '' ELSE "
-            "  '(' || array_to_string(ARRAY(SELECT "
-            "  quote_ident(option_name) ||  ' ' || "
-            "  quote_literal(option_value)  FROM "
-            "  pg_options_to_table(umoptions)),  ', ') || ')' "
+            "  '(' || pg_catalog.array_to_string(ARRAY(SELECT "
+            "  pg_catalog.quote_ident(option_name) ||  ' ' || "
+            "  pg_catalog.quote_literal(option_value)  FROM "
+            "  pg_catalog.pg_options_to_table(umoptions)),  ', ') || ')' "
             "  END AS \"%s\"",
             gettext_noop("FDW Options"));
     }
@@ -4827,10 +4901,10 @@ bool listForeignTables(const char* pattern, bool verbose)
     if (verbose) {
         appendPQExpBuffer(&buf,
             ",\n CASE WHEN ftoptions IS NULL THEN '' ELSE "
-            "  '(' || array_to_string(ARRAY(SELECT "
-            "  quote_ident(option_name) ||  ' ' || "
-            "  quote_literal(option_value)  FROM "
-            "  pg_options_to_table(ftoptions)),  ', ') || ')' "
+            "  '(' || pg_catalog.array_to_string(ARRAY(SELECT "
+            "  pg_catalog.quote_ident(option_name) ||  ' ' || "
+            "  pg_catalog.quote_literal(option_value)  FROM "
+            "  pg_catalog.pg_options_to_table(ftoptions)),  ', ') || ')' "
             "  END AS \"%s\",\n"
             "  d.description AS \"%s\"",
             gettext_noop("FDW Options"),

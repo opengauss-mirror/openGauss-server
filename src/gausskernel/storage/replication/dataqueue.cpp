@@ -1005,7 +1005,7 @@ static void BCMArrayDropBlock(uint32 first, uint32 end, const RelFileNode &dropn
 
         RelFileNode tmp_node;
         int bucket_id = GETBUCKETID(t_thrd.dataqueue_cxt.BCMElementArray[first].attid);
-        RelFileNodeCopy(tmp_node, t_thrd.dataqueue_cxt.BCMElementArray[first].rnode, bucket_id);
+        RelFileNodeCopy(tmp_node, t_thrd.dataqueue_cxt.BCMElementArray[first].rnode, (int2)bucket_id);
 
         if (RelFileNodeEquals(dropnode, tmp_node))
             t_thrd.dataqueue_cxt.BCMElementArray[first].is_vaild = false;

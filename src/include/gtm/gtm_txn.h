@@ -297,8 +297,8 @@ void ProcessGetGXIDTransactionCommand(Port* myport, StringInfo message, bool is_
 
 void ProcessGXIDListCommand(Port* myport, StringInfo message);
 void ProcessGetNextGXIDTransactionCommand(Port* myport, StringInfo message);
-void ProcessGetNextCSNTransactionCommand(Port* myport, StringInfo message);
-void ProcessGetNextCSNTransactionLiteCommand(Port* myport, StringInfo message);
+void ProcessGetNextCSNTransactionCommand(Port* myport, StringInfo message, bool send_timestamp);
+void ProcessGetNextCSNTransactionLiteCommand(Port* myport, StringInfo message, bool send_timestamp);
 void ProcessSetConsistencyPointTransactionCommand(Port* myport, StringInfo message);
 void ProcessGetGlobalXminTransactionCommand(Port* myport, StringInfo message);
 void ProcessGetTimelineTransactionCommand(Port* myport, StringInfo message);

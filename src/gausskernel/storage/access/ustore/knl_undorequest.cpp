@@ -17,6 +17,7 @@
 #include "access/ustore/knl_undorequest.h"
 #include "access/ustore/knl_undoworker.h"
 #include "utils/dynahash.h"
+#include "utils/postinit.h"
 
 Size AsyncRollbackHashShmemSize(void)
 {
@@ -99,7 +100,7 @@ out:
 }
 
 
-bool RemoveRollbackRequest(TransactionId xid, UndoRecPtr startAddr)
+bool RemoveRollbackRequest(TransactionId xid, UndoRecPtr startAddr, ThreadId pid)
 {
     bool found PG_USED_FOR_ASSERTS_ONLY = false;
     RollbackRequestsHashEntry *entry PG_USED_FOR_ASSERTS_ONLY = NULL;
@@ -108,14 +109,13 @@ bool RemoveRollbackRequest(TransactionId xid, UndoRecPtr startAddr)
     key.startUndoPtr = startAddr;
 
     LWLockAcquire(RollbackReqHashLock, LW_EXCLUSIVE);
-
     entry = (RollbackRequestsHashEntry *)hash_search(t_thrd.rollback_requests_cxt.rollback_requests_hash, &key,
         HASH_REMOVE, &found);
-
+    if (!found || !entry->launched) {
+        ereport(LOG, (errmsg("UndoWorkerMain start longer than 10s, StartUndoWorker signal sent more than once. "
+            "xid %lu, startAddr %lu, pid %lu.", xid, startAddr, pid)));
+    }
     LWLockRelease(RollbackReqHashLock);
-
-    Assert(found == true);
-    Assert(entry->launched == true);
 
     return true;
 }

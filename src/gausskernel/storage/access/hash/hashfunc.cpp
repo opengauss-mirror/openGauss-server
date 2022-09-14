@@ -165,6 +165,8 @@ Datum hashtext(PG_FUNCTION_ARGS)
     text *key = PG_GETARG_TEXT_PP(0);
     Datum result;
 
+    FUNC_CHECK_HUGE_POINTER(false, key, "hashtext()");
+
 #ifdef PGXC
     if (g_instance.attr.attr_sql.string_hash_compatible) {
         result = hash_any((unsigned char *)VARDATA_ANY(key), bcTruelen(key));
@@ -708,6 +710,9 @@ Datum compute_hash(Oid type, Datum value, char locator)
             return DirectFunctionCall1(uuid_hash, value);
 
         default:
+            if (u_sess->hook_cxt.computeHashHook != NULL) {
+                return ((computeHashFunc)(u_sess->hook_cxt.computeHashHook))(type, value, locator);
+            }
             ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                             errmsg("Unhandled datatype for modulo or hash distribution\n")));
     }

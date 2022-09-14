@@ -32,6 +32,8 @@
 #include "replication/walsender_private.h"
 #include "replication/slot.h"
 #include "access/xlog.h"
+#include "storage/cfs/cfs_converter.h"
+#include "storage/cfs/cfs_buffers.h"
 #include "storage/smgr/fd.h"
 #include "storage/ipc.h"
 #include "storage/page_compression.h"
@@ -45,6 +47,7 @@
 #include "utils/memutils.h"
 #include "utils/ps_status.h"
 #include "utils/timestamp.h"
+#include "storage/cfs/cfs_tools.h"
 #include "postmaster/syslogger.h"
 #include "pgxc/pgxc.h"
 
@@ -116,6 +119,8 @@ static void send_xlog_location();
 static void send_xlog_header(const char *linkpath);
 static void save_xlogloc(const char *xloglocation);
 static XLogRecPtr GetMinArchiveSlotLSN(void);
+static XLogRecPtr GetMinLogicalSlotLSN(void);
+static XLogRecPtr UpdateStartPtr(XLogRecPtr minLsn, XLogRecPtr curStartPtr);
 
 /* compressed Function */
 static void SendCompressedFile(char* readFileName, int basePathLen, struct stat& statbuf, bool missingOk, int64* size);
@@ -362,6 +367,18 @@ static void SendSecureFileToDisasterCluster(basebackup_options *opt)
     pfree(ti);
 }
 
+static XLogRecPtr UpdateStartPtr(XLogRecPtr minLsn, XLogRecPtr curStartPtr)
+{
+    XLogRecPtr resStartPtr = curStartPtr;
+    if (!XLByteEQ(minLsn, InvalidXLogRecPtr) && (minLsn < resStartPtr)) {
+        /* If xlog file has been recycled, don't use this minlsn */
+        if (XlogFileIsExisted(t_thrd.proc_cxt.DataDir, minLsn, DEFAULT_TIMELINE_ID) == true) {
+            resStartPtr = minLsn;
+        }
+    }
+    return resStartPtr;
+}
+
 /*
  * Actually do a base backup for the specified tablespaces.
  *
@@ -393,26 +410,31 @@ static void perform_base_backup(basebackup_options *opt, DIR *tblspcdir)
     ReplicationSlotsComputeRequiredXmin(false);
     ReplicationSlotsComputeRequiredLSN(NULL);
 
+    /*
+     * If force recycle has been triggered, archive slot min lsn may be the smallest one, but its xlog is gone.
+     * In result, we fail to use minlsn to update startptr. But we need keep some needed xlogs which are smaller
+     * than startptr but bigger than archive slot min lsn. So calculate the specific restart lsn one by one.
+     */
+    /* consider min lsn in all slots, but we should fail to keep minlsn if force recycle happen, see detail above. */
     XLogRecPtr minlsn = XLogGetReplicationSlotMinimumLSNByOther();
-    if (!XLByteEQ(minlsn, InvalidXLogRecPtr) && (minlsn < startptr)) {
-        /* If xlog file has been recycled, don't use this minlsn */
-        if (XlogFileIsExisted(t_thrd.proc_cxt.DataDir, minlsn, DEFAULT_TIMELINE_ID) == true) {
-            startptr = minlsn;
-        }
-    }
+    startptr = UpdateStartPtr(minlsn, startptr);
+    /* only consider min lsn in archive slots */
     disasterSlotRestartPtr = GetMinArchiveSlotLSN();
-    if (disasterSlotRestartPtr != InvalidXLogRecPtr && XLByteLT(disasterSlotRestartPtr, startptr)) {
-        if (XlogFileIsExisted(t_thrd.proc_cxt.DataDir, disasterSlotRestartPtr, DEFAULT_TIMELINE_ID) == true) {
-            startptr = disasterSlotRestartPtr;
-        }
-    }
+    startptr = UpdateStartPtr(disasterSlotRestartPtr, startptr);
+    /* only consider min lsn in logical slots */
+    XLogRecPtr logicalMinLsn = GetMinLogicalSlotLSN();
+    startptr = UpdateStartPtr(logicalMinLsn, startptr);
+
     LWLockAcquire(FullBuildXlogCopyStartPtrLock, LW_EXCLUSIVE);
     XlogCopyStartPtr = startptr;
     LWLockRelease(FullBuildXlogCopyStartPtrLock);
-    ereport(
-        INFO,
-        (errmsg("The starting position of the xlog copy of the full build is: %X/%X. The slot minimum LSN is: %X/%X.",
-                (uint32)(startptr >> 32), (uint32)startptr, (uint32)(minlsn >> 32), (uint32)minlsn)));
+    ereport(INFO,
+        (errmsg("The starting position of the xlog copy of the full build is: %X/%X. The slot minimum LSN is: %X/%X."
+        " The disaster slot minimum LSN is: %X/%X. The logical slot minimum LSN is: %X/%X.",
+        (uint32)(startptr >> 32), (uint32)startptr, (uint32)(minlsn >> 32), (uint32)minlsn,
+        (uint32)(disasterSlotRestartPtr >> 32), (uint32)disasterSlotRestartPtr,
+        (uint32)(logicalMinLsn >> 32), (uint32)logicalMinLsn)));
+
 #ifdef ENABLE_MULTIPLE_NODES
     cbm_rotate_file(startptr);
 #endif
@@ -1183,7 +1205,6 @@ int IsBeginWith(const char *str1, char *str2)
     return 1;
 }
 
-
 bool IsSkipPath(const char * pathName)
 {
     /* Skip pg_control here to back up it last */
@@ -1269,17 +1290,16 @@ static bool IsDCFPath(const char *pathname)
  * send file or compressed file
  * @param sizeOnly send or not
  * @param pathbuf path
- * @param pathBufLen pathLen
  * @param basepathlen subfix of path
  * @param statbuf path stat
  */
-static void SendRealFile(bool sizeOnly, char* pathbuf, size_t pathBufLen, int basepathlen, struct stat* statbuf)
+static void SendRealFile(bool sizeOnly, char* pathbuf, int basepathlen, struct stat* statbuf)
 {
     int64 size = 0;
     // we must ensure the page integrity when in IncrementalCheckpoint
     if (!sizeOnly && g_instance.attr.attr_storage.enableIncrementalCheckpoint &&
-        IsCompressedFile(pathbuf, strlen(pathbuf)) != COMPRESSED_TYPE_UNKNOWN) {
-        SendCompressedFile(pathbuf, basepathlen, (*statbuf), false, &size);
+        IsCompressedFile(pathbuf, strlen(pathbuf))) {
+        SendCompressedFile(pathbuf, basepathlen, (*statbuf), true, &size);
     } else {
         bool sent = false;
         if (!sizeOnly) {
@@ -1590,7 +1610,7 @@ static int64 sendDir(const char *path, int basepathlen, bool sizeonly, List *tab
             if (!skip_this_dir)
                 size += sendDir(pathbuf, basepathlen, sizeonly, tablespaces, sendtblspclinks);
         } else if (S_ISREG(statbuf.st_mode)) {
-            SendRealFile(sizeonly, pathbuf, strlen(pathbuf), basepathlen, &statbuf);
+            SendRealFile(sizeonly, pathbuf, basepathlen, &statbuf);
         } else
             ereport(WARNING, (errmsg("skipping special file \"%s\"", pathbuf)));
     }
@@ -1710,6 +1730,14 @@ bool is_row_data_file(const char *path, int *segNo, UndoFileType *undoFileType)
         return false;
     } else if (S_ISDIR(path_st.st_mode)) {
         return false;
+    }
+    
+    /* memcpy path without "_compress" for row data file judge */
+    char tablePath[MAXPGPATH] = {0};
+    if (IsCompressedFile(path, strlen(path))) {
+        auto rc = memcpy_s(tablePath, MAXPGPATH, path, strlen(path) - strlen(COMPRESS_STR));
+        securec_check_c(rc, "", "");
+        path = tablePath;
     }
 
     char buf[FILE_NAME_MAX_LEN];
@@ -1894,193 +1922,127 @@ static FILE *SizeCheckAndAllocate(char *readFileName, const struct stat &statbuf
 
 }
 
-static void TransferPcaFile(const char *readFileName, int basePathLen, const struct stat &statbuf,
-                            PageCompressHeader *transfer,
-                            size_t len)
-{
-    const char *tarfilename = readFileName + basePathLen + 1;
-    _tarWriteHeader(tarfilename, NULL, (struct stat*)(&statbuf));
-    char *data = (char *) transfer;
-    size_t lenBuffer = len;
-    while (lenBuffer > 0) {
-        size_t transferLen = Min(TAR_SEND_SIZE, lenBuffer);
-        if (pq_putmessage_noblock('d', data, transferLen)) {
-            ereport(ERROR, (errcode_for_file_access(), errmsg("base backup could not send data, aborting backup")));
-        }
-        data = data + transferLen;
-        lenBuffer -= transferLen;
-    }
-    size_t pad = ((len + 511) & ~511) - len;
-    if (pad > 0) {
-        securec_check(memset_s(t_thrd.basebackup_cxt.buf_block, pad, 0, pad), "", "");
-        (void) pq_putmessage_noblock('d', t_thrd.basebackup_cxt.buf_block, pad);
-    }
-}
-
-static void FileStat(char* path, struct stat* fileStat)
-{
-    if (stat(path, fileStat) != 0) {
-        if (errno != ENOENT) {
-            ereport(ERROR, (errcode_for_file_access(), errmsg("could not stat file or directory \"%s\": %m", path)));
-        }
-    }
-}
-
 static void SendCompressedFile(char* readFileName, int basePathLen, struct stat& statbuf, bool missingOk, int64* size)
 {
     char* tarfilename = readFileName + basePathLen + 1;
     SendFilePreInit();
-    FILE* fp = SizeCheckAndAllocate(readFileName, statbuf, missingOk);
-    if (fp == NULL) {
+    FILE* compressFd = SizeCheckAndAllocate(readFileName, statbuf, missingOk);
+    if (compressFd == NULL) {
         return;
     }
 
-    size_t readFileNameLen = strlen(readFileName);
-    /* dont send pca file */
-    if (readFileNameLen < 4 || strncmp(readFileName + readFileNameLen - 4, "_pca", 4) == 0 ||
-        strncmp(readFileName + readFileNameLen - 4, "_pcd", 4) != 0) {
-        FreeFile(fp);
-        return;
+    struct stat fileStat;
+    if (fstat(fileno(compressFd), &fileStat) != 0) {
+        if (errno != ENOENT) {
+            ereport(ERROR, (errcode_for_file_access(),
+                            errmsg("could not stat file or directory \"%s\": ", readFileName)));
+        }
     }
 
-    char tablePath[MAXPGPATH] = {0};
-    securec_check_c(memcpy_s(tablePath, MAXPGPATH, readFileName, readFileNameLen - 4), "", "");
     int segmentNo = 0;
     UndoFileType undoFileType = UNDO_INVALID;
-    if (!is_row_data_file(tablePath, &segmentNo, &undoFileType)) {
-        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_RESOURCES), errmsg("%s is not a relation file.", tablePath)));
+    if (!is_row_data_file(readFileName, &segmentNo, &undoFileType)) {
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_RESOURCES), errmsg("%s is not a relation file.", readFileName)));
     }
-
-    char pcaFilePath[MAXPGPATH];
-    securec_check(strcpy_s(pcaFilePath, MAXPGPATH, readFileName), "", "");
-    /* change pcd => pca */
-    pcaFilePath[readFileNameLen - 1] = 'a';
-
-    FILE* pcaFile = AllocateFile(pcaFilePath, "rb");
-    if (pcaFile == NULL) {
-        if (errno == ENOENT && missingOk) {
-            FreeFile(fp);
-            return;
-        }
-        ereport(ERROR, (errcode_for_file_access(), errmsg("could not open file \"%s\": %m", pcaFilePath)));
-    }
-
-    uint16 chunkSize = ReadChunkSize(pcaFile, pcaFilePath, MAXPGPATH);
-
-    struct stat pcaStruct;
-    FileStat((char*)pcaFilePath, &pcaStruct);
-
-    size_t pcaFileLen = SIZE_OF_PAGE_COMPRESS_ADDR_FILE(chunkSize);
-    PageCompressHeader* map = pc_mmap_real_size(fileno(pcaFile), pcaFileLen, true);
-    if (map == MAP_FAILED) {
-        ereport(ERROR,
-            (errcode(ERRCODE_INSUFFICIENT_RESOURCES),
-                errmsg("Failed to mmap page compression address file %s: %m", pcaFilePath)));
-    }
-
-    PageCompressHeader* transfer = (PageCompressHeader*)palloc0(pcaFileLen);
-    /* decompressed page buffer, avoid frequent allocation */
-    BlockNumber blockNum = 0;
-    size_t chunkIndex = 1;
-    off_t totalLen = 0;
-    off_t sendLen = 0;
+    
     /* send the pkg header containing msg like file size */
-    BlockNumber totalBlockNum = (BlockNumber)pg_atomic_read_u32(&map->nblocks);
-
-    /* some chunks may have been allocated but not used.
-     * Reserve 160kb for avoiding the error when the size of a compressed block extends */
-    int reservedChunks = (BLCKSZ / chunkSize) * 20;
-    securec_check(memcpy_s(transfer, pcaFileLen, map, pcaFileLen), "", "");
-    decltype(statbuf.st_size) realSize = (map->allocated_chunks + reservedChunks)  * chunkSize;
-    statbuf.st_size = statbuf.st_size >= realSize ? statbuf.st_size : realSize;
     _tarWriteHeader(tarfilename, NULL, (struct stat*)(&statbuf));
-    bool* onlyExtend = (bool*)palloc0(totalBlockNum * sizeof(bool));
 
-    /* allocated in advance to prevent repeated allocated */
-    ReadBlockChunksStruct rbStruct{map, fp, segmentNo, readFileName};
-    for (blockNum = 0; blockNum < totalBlockNum; blockNum++) {
-        PageCompressAddr* addr = GET_PAGE_COMPRESS_ADDR(transfer, chunkSize, blockNum);
-        /* skip some blocks which only extends. The size of blocks is 0. */
-        if (addr->nchunks == 0) {
-            onlyExtend[blockNum] = true;
-            continue;
-        }
-        /* read block to t_thrd.basebackup_cxt.buf_block */
-        size_t bufferSize = TAR_SEND_SIZE - sendLen;
-        size_t len = ReadAllChunkOfBlock(t_thrd.basebackup_cxt.buf_block + sendLen, bufferSize, blockNum, rbStruct);
-        /* merge Blocks */
-        sendLen += len;
-        if (totalLen + (off_t)len > statbuf.st_size) {
-            ReleaseMap(map, readFileName);
-            ereport(ERROR,
-                (errcode_for_file_access(),
-                    errmsg("some blocks in %s had been changed. Retry backup please. PostBlocks:%u, currentReadBlocks "
-                           ":%u, transferSize: %lu. totalLen: %lu, len: %lu",
-                        readFileName,
-                        totalBlockNum,
-                        blockNum,
-                        statbuf.st_size,
-                        totalLen,
-                        len)));
-        }
-        if (sendLen > TAR_SEND_SIZE - BLCKSZ) {
-            if (pq_putmessage_noblock('d', t_thrd.basebackup_cxt.buf_block, sendLen)) {
-                ReleaseMap(map, readFileName);
-                ereport(ERROR, (errcode_for_file_access(), errmsg("base backup could not send data, aborting backup")));
+    off_t totalLen = 0;
+    auto maxExtent = (fileStat.st_size / BLCKSZ) / CFS_EXTENT_SIZE;
+
+    CfsReadStruct cfsReadStruct{compressFd, NULL, 0};
+    for (int extentIndex = 0; extentIndex < maxExtent; extentIndex++) {
+        cfsReadStruct.extentCount = (BlockNumber)extentIndex;
+        size_t extentLen = 0;
+        auto mmapHeaderResult = MMapHeader(compressFd, (BlockNumber)extentIndex, true);
+
+        cfsReadStruct.header = mmapHeaderResult.header;
+        cfsReadStruct.extentCount = (BlockNumber)extentIndex;
+        off_t sendLen = 0;
+        size_t bufferSize = (size_t)(TAR_SEND_SIZE - sendLen);
+        char extentHeaderPage[BLCKSZ] = {0};
+        CfsExtentHeader *header = (CfsExtentHeader*)extentHeaderPage;
+        header->chunk_size = cfsReadStruct.header->chunk_size;
+        header->algorithm = cfsReadStruct.header->algorithm;
+
+        uint16 chunkIndex = 1;
+        BlockNumber blockNumber;
+        for (blockNumber = 0; blockNumber < cfsReadStruct.header->nblocks; ++blockNumber) {
+            size_t len = CfsReadCompressedPage(t_thrd.basebackup_cxt.buf_block + sendLen, bufferSize, blockNumber,
+                                               &cfsReadStruct,
+                                               (CFS_LOGIC_BLOCKS_PER_FILE * segmentNo +
+                                               extentIndex * CFS_LOGIC_BLOCKS_PER_EXTENT + blockNumber));
+            /* valid check */
+            if (len == COMPRESS_FSEEK_ERROR) {
+                ereport(ERROR, (errcode_for_file_access(), errmsg("fseek error")));
+            } else if (len == COMPRESS_FREAD_ERROR) {
+                ereport(ERROR, (errcode_for_file_access(), errmsg("fread error")));
+            } else if (len == COMPRESS_CHECKSUM_ERROR) {
+                ereport(ERROR, (errcode_for_file_access(), errmsg("checksum error")));
+            } else if (len == COMPRESS_BLOCK_ERROR) {
+                ereport(ERROR, (ERRCODE_INVALID_PARAMETER_VALUE, errmsg("blocknum \"%u\" exceeds max block number",
+                    blockNumber)));
             }
-            sendLen = 0;
+            sendLen += (off_t)len;
+            if (sendLen > TAR_SEND_SIZE - BLCKSZ) {
+                if (pq_putmessage_noblock('d', t_thrd.basebackup_cxt.buf_block, (size_t)sendLen)) {
+                    MmapFree(&mmapHeaderResult);
+                    ereport(ERROR,
+                            (errcode_for_file_access(), errmsg("base backup could not send data, aborting backup")));
+                }
+                sendLen = 0;
+            }
+            CfsExtentAddress *cfsExtentAddress = GetExtentAddress(header, (uint16)blockNumber);
+            uint8 nchunks = (uint8)(len / header->chunk_size);
+            for (size_t i = 0; i  < nchunks; i++) {
+                cfsExtentAddress->chunknos[i] = chunkIndex++;
+            }
+            cfsExtentAddress->nchunks = nchunks;
+            cfsExtentAddress->allocated_chunks = nchunks;
+            cfsExtentAddress->checksum = AddrChecksum32(cfsExtentAddress, nchunks);
+            extentLen += len;
         }
-        uint8 nchunks = len / chunkSize;
-        addr->nchunks = addr->allocated_chunks = nchunks;
-        for (size_t i = 0; i < nchunks; i++) {
-            addr->chunknos[i] = chunkIndex++;
+        if (sendLen != 0) {
+            if (pq_putmessage_noblock('d', t_thrd.basebackup_cxt.buf_block, (size_t)sendLen)) {
+                MmapFree(&mmapHeaderResult);
+                ereport(ERROR,
+                    (errcode_for_file_access(), errmsg("base backup could not send data, aborting backup")));
+            }
         }
-        addr->checksum = AddrChecksum32(blockNum, addr, chunkSize);
-        totalLen += len;
-    }
-    ReleaseMap(map, readFileName);
+        header->nblocks = blockNumber;
+        header->allocated_chunks = (pg_atomic_uint32)(chunkIndex - 1);
 
-    if (sendLen != 0) {
-        if (pq_putmessage_noblock('d', t_thrd.basebackup_cxt.buf_block, sendLen)) {
+        /* send zero chunks to remote */
+        size_t extentSize = CFS_LOGIC_BLOCKS_PER_EXTENT * BLCKSZ;
+        if (extentLen < extentSize) {
+            auto rc = memset_s(t_thrd.basebackup_cxt.buf_block, TAR_SEND_SIZE, 0, TAR_SEND_SIZE);
+            securec_check(rc, "\0", "\0");
+            int left = extentSize - extentLen;
+            while (left > 0) {
+                auto currentSendLen = TAR_SEND_SIZE < left ? TAR_SEND_SIZE : left;
+                if (pq_putmessage_noblock('d', t_thrd.basebackup_cxt.buf_block, (size_t)currentSendLen)) {
+                    MmapFree(&mmapHeaderResult);
+                    ereport(ERROR,
+                        (errcode_for_file_access(), errmsg("base backup could not send data, aborting backup")));
+                }
+                left -= TAR_SEND_SIZE;
+            }
+        }
+        /* send CfsHeader Page */
+        if (pq_putmessage_noblock('d', extentHeaderPage, BLCKSZ)) {
+            MmapFree(&mmapHeaderResult);
             ereport(ERROR, (errcode_for_file_access(), errmsg("base backup could not send data, aborting backup")));
         }
+        totalLen += (off_t)(extentSize + BLCKSZ);
+        MmapFree(&mmapHeaderResult);
     }
-
-    /* If the file was truncated while we were sending it, pad it with zeros */
-    if (totalLen < statbuf.st_size) {
-        securec_check(memset_s(t_thrd.basebackup_cxt.buf_block, TAR_SEND_SIZE, 0, TAR_SEND_SIZE), "", "");
-        while (totalLen < statbuf.st_size) {
-            size_t cnt = Min(TAR_SEND_SIZE, statbuf.st_size - totalLen);
-            (void)pq_putmessage_noblock('d', t_thrd.basebackup_cxt.buf_block, cnt);
-            totalLen += cnt;
-        }
-    }
-
-    size_t pad = ((totalLen + 511) & ~511) - totalLen;
+    size_t pad = (size_t)(((totalLen + 511) & ~511) - totalLen);
     if (pad > 0) {
         securec_check(memset_s(t_thrd.basebackup_cxt.buf_block, pad, 0, pad), "", "");
         (void)pq_putmessage_noblock('d', t_thrd.basebackup_cxt.buf_block, pad);
     }
     SEND_DIR_ADD_SIZE(*size, statbuf);
-
-    // allocate chunks of some pages which only extend
-    for (size_t blockNum = 0; blockNum < totalBlockNum; ++blockNum) {
-        if (onlyExtend[blockNum]) {
-            PageCompressAddr* addr = GET_PAGE_COMPRESS_ADDR(transfer, chunkSize, blockNum);
-            for (size_t i = 0; i < addr->allocated_chunks; i++) {
-                addr->chunknos[i] = chunkIndex++;
-            }
-        }
-    }
-    transfer->nblocks = transfer->last_synced_nblocks = blockNum;
-    transfer->last_synced_allocated_chunks = transfer->allocated_chunks = chunkIndex;
-    TransferPcaFile(pcaFilePath, basePathLen, pcaStruct, transfer, pcaFileLen);
-
-    SEND_DIR_ADD_SIZE(*size, pcaStruct);
-    FreeFile(pcaFile);
-    FreeFile(fp);
-    pfree(transfer);
-    pfree(onlyExtend);
 }
 
 /*
@@ -2103,10 +2065,10 @@ static bool sendFile(char *readfilename, char *tarfilename, struct stat *statbuf
     uint16 checksum = 0;
     bool isNeedCheck = false;
     int segNo = 0;
-    const int MAX_RETRY_LIMIT = 60;
+    const int MAX_RETRY_LIMITA = 60;
     int retryCnt = 0;
     UndoFileType undoFileType = UNDO_INVALID;
-    
+
     SendFilePreInit();
     fp = SizeCheckAndAllocate(readfilename, *statbuf, missing_ok);
     if (fp == NULL) {
@@ -2159,11 +2121,11 @@ static bool sendFile(char *readfilename, char *tarfilename, struct stat *statbuf
                                 (errcode_for_file_access(), errmsg("could not seek in file \"%s\": %m", readfilename)));
                     }
                     cnt = fread(t_thrd.basebackup_cxt.buf_block, 1, Min(TAR_SEND_SIZE, statbuf->st_size - len), fp);
-                    if (cnt > 0 && retryCnt < MAX_RETRY_LIMIT) {
+                    if (cnt > 0 && retryCnt < MAX_RETRY_LIMITA) {
                         retryCnt++;
                         pg_usleep(1000000);
                         goto recheck;
-                    } else if (cnt > 0 && retryCnt == MAX_RETRY_LIMIT) {
+                    } else if (cnt > 0 && retryCnt == MAX_RETRY_LIMITA) {
                         ereport(
                             ERROR,
                             (errcode_for_file_access(),
@@ -2308,6 +2270,27 @@ static XLogRecPtr GetMinArchiveSlotLSN(void)
     }
     return minArchSlotPtr;
 }
+
+static XLogRecPtr GetMinLogicalSlotLSN(void)
+{
+    XLogRecPtr minLogicalSlotPtr = InvalidXLogRecPtr;
+
+    for (int slotno = 0; slotno < g_instance.attr.attr_storage.max_replication_slots; slotno++) {
+        XLogRecPtr restart_lsn;
+        ReplicationSlot *slot = &t_thrd.slot_cxt.ReplicationSlotCtl->replication_slots[slotno];
+        SpinLockAcquire(&slot->mutex);
+        if (slot->in_use == true && slot->data.database != InvalidOid) {
+            restart_lsn = slot->data.restart_lsn;
+            if ((!XLByteEQ(restart_lsn, InvalidXLogRecPtr)) &&
+                (XLByteEQ(minLogicalSlotPtr, InvalidXLogRecPtr) || XLByteLT(restart_lsn, minLogicalSlotPtr))) {
+                minLogicalSlotPtr = restart_lsn;
+            }
+        }
+        SpinLockRelease(&slot->mutex);
+    }
+    return minLogicalSlotPtr;
+}
+
 void ut_save_xlogloc(const char *xloglocation)
 {
     save_xlogloc(xloglocation);

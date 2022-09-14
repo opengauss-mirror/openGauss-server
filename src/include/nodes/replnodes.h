@@ -132,5 +132,13 @@ typedef struct SQLCmd
 {
     NodeTag type;
 } SQLCmd;
-
+/* ----------------------
+ *		ADVANCE_CATALOG_XMIN command
+ * ----------------------
+ */
+typedef struct AdvanceCatalogXminCmd {
+    NodeTag type;
+    char* slotname;
+    TransactionId catalogXmin;
+} AdvanceCatalogXminCmd;
 #endif /* REPLNODES_H */

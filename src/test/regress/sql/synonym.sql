@@ -261,11 +261,11 @@ CREATE SYNONYM rt_priv.tt1 FOR syn_ot.t1_row;
 SELECT synname, synobjschema, synobjname FROM pg_synonym ORDER BY 1, 2, 3;
 SELECT schema_name, synonym_name, table_schema_name, table_name FROM USER_SYNONYMS ORDER BY 1,2;
 
-REVOKE CREATE ON SCHEMA rt_priv FROM u_tmp;
+REVOKE USAGE ON SCHEMA rt_priv FROM u_tmp;
 DROP SYNONYM IF EXISTS rt_priv.t1;
 DROP SYNONYM rt_priv.tt1;
 
-GRANT CREATE ON SCHEMA rt_priv TO u_tmp;
+GRANT USAGE ON SCHEMA rt_priv TO u_tmp;
 DROP SYNONYM rt_priv.tt1;
 DROP SYNONYM IF EXISTS rt_priv.t1;
 DROP SCHEMA rt_priv CASCADE;

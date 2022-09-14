@@ -88,6 +88,9 @@
 /* Write a boolean field */
 #define WRITE_BOOL_FIELD(fldname) appendStringInfo(str, " :" CppAsString(fldname) " %s", booltostr(node->fldname))
 
+/* Write a boolean expr */
+#define WRITE_BOOL_EXPR(fldname, expr) appendStringInfo(str, " :" CppAsString(fldname) " %s", booltostr(expr))
+
 /* Write a character-string (possibly NULL) field */
 #define WRITE_STRING_FIELD(fldname) \
     (appendStringInfo(str, " :" CppAsString(fldname) " "), _outToken(str, node->fldname))
@@ -619,12 +622,15 @@ static void _outPlanInfo(StringInfo str, Plan* node)
     WRITE_INT_FIELD(plan_node_id);
     WRITE_INT_FIELD(parent_node_id);
     WRITE_ENUM_FIELD(exec_type, RemoteQueryExecType);
-    WRITE_FLOAT_FIELD(startup_cost, "%.2f");
-    WRITE_FLOAT_FIELD(total_cost, "%.2f");
-    /* When sending rows to dn, transfer to local rows before output */
-    appendStringInfo(str, " :plan_rows %.0f", PLAN_LOCAL_ROWS(node));
-    WRITE_FLOAT_FIELD(multiple, "%.0f");
-    WRITE_INT_FIELD(plan_width);
+    /* eliminate the statistics for plan hashkey generation. */
+    if (u_sess->opt_cxt.out_plan_stat) {
+        WRITE_FLOAT_FIELD(startup_cost, "%.2f");
+        WRITE_FLOAT_FIELD(total_cost, "%.2f");
+        /* When sending rows to dn, transfer to local rows before output. */
+        appendStringInfo(str, " :plan_rows %.0f", PLAN_LOCAL_ROWS(node));
+        WRITE_FLOAT_FIELD(multiple, "%.0f");
+        WRITE_INT_FIELD(plan_width);
+    }
     WRITE_NODE_FIELD(targetlist);
     WRITE_NODE_FIELD(qual);
     WRITE_NODE_FIELD(lefttree);
@@ -684,6 +690,7 @@ static void _outPruningResult(StringInfo str, PruningResult* node)
     if (t_thrd.proc->workingVersionNum >= PBESINGLEPARTITION_VERSION_NUM) {
         WRITE_BOOL_FIELD(isPbeSinlePartition);
     }
+    /* skip PartitionMap */
 }
 
 static void _outSubPartitionPruningResult(StringInfo str, SubPartitionPruningResult* node)
@@ -717,6 +724,9 @@ static void _outScanInfo(StringInfo str, Scan* node)
     out_mem_info(str, &node->mem_info);
     if (t_thrd.proc->workingVersionNum >= SCAN_BATCH_MODE_VERSION_NUM) {
         WRITE_BOOL_FIELD(scanBatchMode);
+    }
+    if (t_thrd.proc->workingVersionNum >= 92753) {
+        WRITE_BOOL_FIELD(partition_iterator_elimination);
     }
 }
 
@@ -766,6 +776,9 @@ static void _outModifyTable(StringInfo str, ModifyTable* node)
     WRITE_NODE_FIELD(rowMarks);
     WRITE_INT_FIELD(epqParam);
     WRITE_BOOL_FIELD(partKeyUpdated);
+    if (t_thrd.proc->workingVersionNum >= REPLACE_INTO_VERSION_NUM) {
+        WRITE_BOOL_FIELD(isReplace);
+    }
 #ifdef PGXC
     WRITE_NODE_FIELD(remote_plans);
     WRITE_NODE_FIELD(remote_insert_plans);
@@ -794,6 +807,9 @@ static void _outModifyTable(StringInfo str, ModifyTable* node)
     WRITE_NODE_FIELD(exclRelTlist);
     WRITE_INT_FIELD(exclRelRTIndex);
     WRITE_NODE_FIELD(upsertWhere);
+    if (t_thrd.proc->workingVersionNum >= MULTI_MODIFY_VERSION_NUM) {
+        WRITE_NODE_FIELD(targetlists);
+    }
 #endif		
 }
 
@@ -1035,6 +1051,10 @@ static void _outIndexScan(StringInfo str, IndexScan* node)
     if (t_thrd.proc->workingVersionNum >= INPLACE_UPDATE_VERSION_NUM) {
         WRITE_BOOL_FIELD(is_ustore);
     }
+    if (t_thrd.proc->workingVersionNum >= PLAN_SELECT_VERSION_NUM) {
+        WRITE_FLOAT_FIELD(selectivity, "%.4f");
+        WRITE_BOOL_FIELD(is_partial);
+    }
 }
 
 static void _outCStoreIndexScan(StringInfo str, CStoreIndexScan* node)
@@ -1046,34 +1066,6 @@ static void _outCStoreIndexScan(StringInfo str, CStoreIndexScan* node)
     WRITE_NODE_FIELD(cstorequal);
     WRITE_NODE_FIELD(indextlist);
     WRITE_ENUM_FIELD(relStoreLocation, RelstoreType);
-    WRITE_BOOL_FIELD(indexonly);
-}
-
-static void _outDfsIndexScan(StringInfo str, DfsIndexScan* node)
-{
-    WRITE_NODE_TYPE("DFSINDEXSCAN");
-
-    _outScanInfo(str, (Scan*)node);
-
-    WRITE_OID_FIELD(indexid);
-#ifdef STREAMPLAN
-    if (node->indexid >= FirstBootstrapObjectId && IsStatisfyUpdateCompatibility(node->indexid)) {
-        appendStringInfo(str, " :indexname ");
-        _outToken(str, get_rel_name(node->indexid));
-        appendStringInfo(str, " :indexnamespace ");
-        _outToken(str, get_namespace_name(get_rel_namespace(node->indexid)));
-    }
-#endif  // STREAMPLAN
-    WRITE_NODE_FIELD(indextlist);
-    WRITE_NODE_FIELD(indexqual);
-    WRITE_NODE_FIELD(indexqualorig);
-    WRITE_NODE_FIELD(indexorderby);
-    WRITE_NODE_FIELD(indexorderbyorig);
-    WRITE_ENUM_FIELD(indexorderdir, ScanDirection);
-    WRITE_ENUM_FIELD(relStoreLocation, RelstoreType);
-    WRITE_NODE_FIELD(cstorequal);
-    WRITE_NODE_FIELD(indexScantlist);
-    WRITE_NODE_FIELD(dfsScan);
     WRITE_BOOL_FIELD(indexonly);
 }
 
@@ -1303,6 +1295,10 @@ static void _outIndexOnlyScan(StringInfo str, IndexOnlyScan* node)
     WRITE_NODE_FIELD(indexorderby);
     WRITE_NODE_FIELD(indextlist);
     WRITE_ENUM_FIELD(indexorderdir, ScanDirection);
+    if (t_thrd.proc->workingVersionNum >= PLAN_SELECT_VERSION_NUM) {
+        WRITE_FLOAT_FIELD(selectivity, "%.4f");
+        WRITE_BOOL_FIELD(is_partial);
+    }
 }
 
 static void _outBitmapIndexScan(StringInfo str, BitmapIndexScan* node)
@@ -1324,6 +1320,10 @@ static void _outBitmapIndexScan(StringInfo str, BitmapIndexScan* node)
 #endif  // STREAMPLAN
     if (t_thrd.proc->workingVersionNum >= INPLACE_UPDATE_VERSION_NUM) {
         WRITE_BOOL_FIELD(is_ustore);
+    }
+    if (t_thrd.proc->workingVersionNum >= PLAN_SELECT_VERSION_NUM) {
+        WRITE_FLOAT_FIELD(selectivity, "%.4f");
+        WRITE_BOOL_FIELD(is_partial);
     }
 }
 
@@ -1985,7 +1985,11 @@ static void _outPlanRowMark(StringInfo str, PlanRowMark* node)
     WRITE_UINT_FIELD(prti);
     WRITE_UINT_FIELD(rowmarkId);
     WRITE_ENUM_FIELD(markType, RowMarkType);
-    WRITE_BOOL_FIELD(noWait);
+    if (t_thrd.proc->workingVersionNum >= SKIP_LOCKED_VERSION_NUM) {
+        WRITE_ENUM_FIELD(waitPolicy, LockWaitPolicy);
+    } else {
+        WRITE_BOOL_EXPR(noWait, (node->waitPolicy == LockWaitError ? true: false));
+    }
     if (t_thrd.proc->workingVersionNum >= WAIT_N_TUPLE_LOCK_VERSION_NUM) {
         WRITE_INT_FIELD(waitSec);
     }
@@ -2045,6 +2049,9 @@ static void _outRangeVar(StringInfo str, RangeVar* node)
     }
     if (TcapFeatureAvail()) {
         WRITE_BOOL_FIELD(withVerExpr);
+    }
+    if (t_thrd.proc->workingVersionNum >= MULTI_PARTITIONS_VERSION_NUM) {
+        WRITE_NODE_FIELD(partitionNameList);
     }
 }
 
@@ -2160,13 +2167,16 @@ static void _outParam(StringInfo str, Param* node)
     WRITE_LOCATION_FIELD(location);
     WRITE_TYPEINFO_FIELD(paramtype);
     
-    if (t_thrd.proc->workingVersionNum >= COMMENT_ROWTYPE_TABLEOF_VERSION_NUM)
-    {
+    if (t_thrd.proc->workingVersionNum >= COMMENT_ROWTYPE_TABLEOF_VERSION_NUM) {
         WRITE_OID_FIELD(tableOfIndexType);
     }
-    if (t_thrd.proc->workingVersionNum >= COMMENT_RECORD_PARAM_VERSION_NUM)
-    {
+
+    if (t_thrd.proc->workingVersionNum >= COMMENT_RECORD_PARAM_VERSION_NUM) {
         WRITE_OID_FIELD(recordVarTypOid);
+    }
+
+    if (t_thrd.proc->workingVersionNum >= COMMENT_ROWTYPE_NEST_TABLEOF_VERSION_NUM) {
+        WRITE_NODE_FIELD(tableOfIndexTypeList);
     }
 
 }
@@ -2740,6 +2750,16 @@ static void _outNullTest(StringInfo str, NullTest* node)
     WRITE_BOOL_FIELD(argisrow);
 }
 
+static void _outSetVariableExpr(StringInfo str, SetVariableExpr* node)
+{
+    WRITE_NODE_TYPE("SetVariableExpr");
+    
+    WRITE_STRING_FIELD(name);
+    WRITE_NODE_FIELD(value);
+    WRITE_BOOL_FIELD(is_session);
+    WRITE_BOOL_FIELD(is_global);
+}
+
 static void _outHashFilter(StringInfo str, HashFilter* node)
 {
     WRITE_NODE_TYPE("HASHFILTER");
@@ -2817,6 +2837,9 @@ static void _outTargetEntry(StringInfo str, TargetEntry* node)
     WRITE_OID_FIELD(resorigtbl);
     WRITE_INT_FIELD(resorigcol);
     WRITE_BOOL_FIELD(resjunk);
+    if (t_thrd.proc->workingVersionNum >= MULTI_MODIFY_VERSION_NUM) {
+        WRITE_UINT_FIELD(rtindex);
+    }
 }
 
 static void _outPseudoTargetEntry(StringInfo str, PseudoTargetEntry* node)
@@ -3003,6 +3026,7 @@ static void _outPartIteratorPath(StringInfo str, PartIteratorPath* node)
     WRITE_BOOL_FIELD(ispwj);
     WRITE_NODE_FIELD(upperboundary);
     WRITE_NODE_FIELD(lowerboundary);
+    WRITE_BOOL_FIELD(needSortNode);
 }
 
 static void _outForeignPath(StringInfo str, ForeignPath* node)
@@ -3236,6 +3260,9 @@ static void _outRelOptInfo(StringInfo str, RelOptInfo* node)
     WRITE_NODE_FIELD(lateral_vars);
     WRITE_BITMAPSET_FIELD(lateral_relids);
     WRITE_NODE_FIELD(indexlist);
+#ifndef ENABLE_MULTIPLE_NODES
+    WRITE_NODE_FIELD(statlist);
+#endif
     WRITE_FLOAT_FIELD(pages, "%.0f");
     WRITE_FLOAT_FIELD(tuples, "%.0f");
     WRITE_FLOAT_FIELD(multiple, "%.0f");
@@ -3479,6 +3506,7 @@ static void _outCreateStmtInfo(StringInfo str, const CreateStmt* node)
     if (t_thrd.proc->workingVersionNum >= MATVIEW_VERSION_NUM) {
         WRITE_CHAR_FIELD(relkind);
     }
+    WRITE_NODE_FIELD(autoIncStart);
 }
 
 static void _outRangePartitionDefState(StringInfo str, RangePartitionDefState* node)
@@ -3675,6 +3703,9 @@ static void _outInsertStmt(StringInfo str, InsertStmt* node)
     WRITE_NODE_FIELD(selectStmt);
     WRITE_NODE_FIELD(returningList);
     WRITE_NODE_FIELD(withClause);
+    if (t_thrd.proc->workingVersionNum >= REPLACE_INTO_VERSION_NUM) {
+        WRITE_NODE_FIELD(targetList);
+    }
 #ifdef ENABLE_MULTIPLE_NODES
     if (t_thrd.proc->workingVersionNum >= UPSERT_ROW_STORE_VERSION_NUM) {
         WRITE_NODE_FIELD(upsertClause);
@@ -3702,6 +3733,9 @@ static void _outUpdateStmt(StringInfo str, UpdateStmt* node)
     if (t_thrd.proc->workingVersionNum >= KEYWORD_IGNORE_COMPART_VERSION_NUM) {
         WRITE_BOOL_FIELD(hasIgnore);
     }
+    WRITE_NODE_FIELD(sortClause);
+    WRITE_NODE_FIELD(limitClause);
+    WRITE_NODE_FIELD(relationClause);
 }
 
 static void _outSelectStmt(StringInfo str, SelectStmt* node)
@@ -3764,7 +3798,11 @@ static void _outLockingClause(StringInfo str, LockingClause* node)
 
     WRITE_NODE_FIELD(lockedRels);
     WRITE_BOOL_FIELD(forUpdate);
-    WRITE_BOOL_FIELD(noWait);
+    if (t_thrd.proc->workingVersionNum >= SKIP_LOCKED_VERSION_NUM) {
+        WRITE_ENUM_FIELD(waitPolicy, LockWaitPolicy);
+    } else {
+        WRITE_BOOL_EXPR(noWait, (node->waitPolicy == LockWaitError ? true: false));
+    }
     if (t_thrd.proc->workingVersionNum >= ENHANCED_TUPLE_LOCK_VERSION_NUM) {
         WRITE_ENUM_FIELD(strength, LockClauseStrength);
     }
@@ -3817,6 +3855,9 @@ static void _outColumnDef(StringInfo str, ColumnDef* node)
     if (t_thrd.proc->workingVersionNum >= GENERATED_COL_VERSION_NUM) {
         if (node->generatedCol)
             WRITE_CHAR_FIELD(generatedCol);
+    }
+    if (t_thrd.proc->workingVersionNum >= ON_UPDATE_TIMESTAMP_VERSION_NUM) {
+        WRITE_NODE_FIELD(update_default);
     }
 }
 
@@ -3914,6 +3955,23 @@ static void _outIndexElem(StringInfo str, IndexElem* node)
     WRITE_ENUM_FIELD(ordering, SortByDir);
     WRITE_ENUM_FIELD(nulls_ordering, SortByNulls);
 }
+
+static void _outUserSetElem(StringInfo str, UserSetElem* node)
+{
+    WRITE_NODE_TYPE("USERSETELEM");
+
+    WRITE_NODE_FIELD(name);
+    WRITE_NODE_FIELD(val);
+}
+
+static void _outUserVar(StringInfo str, UserVar* node)
+{
+    WRITE_NODE_TYPE("USERVAR");
+
+    WRITE_STRING_FIELD(name);
+    WRITE_NODE_FIELD(value);
+}
+
 static void _outDefElem(StringInfo str, DefElem* node)
 {
     WRITE_NODE_TYPE("DEFELEM");
@@ -4016,6 +4074,10 @@ static void _outPlanCacheHint(StringInfo str, const PlanCacheHint* node)
     WRITE_NODE_TYPE("PLANCACHEHINT");
     _outBaseHint(str, (Hint*)node);
     WRITE_BOOL_FIELD(chooseCustomPlan);
+    /* Not write locator_type in accordance with old version. */
+    if (t_thrd.proc->workingVersionNum >= PLAN_SELECT_VERSION_NUM) {
+        WRITE_ENUM_FIELD(method, GplanSelectionMethod);
+    }
 }
 
 /*
@@ -4285,6 +4347,9 @@ static void _outHintState(StringInfo str, HintState* node)
     if (t_thrd.proc->workingVersionNum >= PREDPUSH_SAME_LEVEL_VERSION_NUM) {
         WRITE_NODE_FIELD(predpush_same_level_hint);
     }
+    if (t_thrd.proc->workingVersionNum >= SQL_PATCH_VERSION_NUM) {
+        WRITE_BOOL_FIELD(from_sql_patch);
+    }
 }
 
 static void _outQuery(StringInfo str, Query* node)
@@ -4391,6 +4456,9 @@ static void _outQuery(StringInfo str, Query* node)
     if (t_thrd.proc->workingVersionNum >= SUBLINKPULLUP_VERSION_NUM) {
         WRITE_BOOL_FIELD(unique_check);
     }
+    if (t_thrd.proc->workingVersionNum >= MULTI_MODIFY_VERSION_NUM) {
+        WRITE_NODE_FIELD(resultRelations);
+    }
 }
 
 static void _outSortGroupClause(StringInfo str, SortGroupClause* node)
@@ -4438,7 +4506,11 @@ static void _outRowMarkClause(StringInfo str, RowMarkClause* node)
 
     WRITE_UINT_FIELD(rti);
     WRITE_BOOL_FIELD(forUpdate);
-    WRITE_BOOL_FIELD(noWait);
+    if (t_thrd.proc->workingVersionNum >= SKIP_LOCKED_VERSION_NUM) {
+        WRITE_ENUM_FIELD(waitPolicy, LockWaitPolicy);
+    } else {
+        WRITE_BOOL_EXPR(noWait, (node->waitPolicy == LockWaitError ? true: false));
+    }
     if (t_thrd.proc->workingVersionNum >= WAIT_N_TUPLE_LOCK_VERSION_NUM) {
         WRITE_INT_FIELD(waitSec);
     }
@@ -4700,6 +4772,11 @@ static void _outRangeTblEntry(StringInfo str, RangeTblEntry* node)
 
     if (t_thrd.proc->workingVersionNum >= GENERATED_COL_VERSION_NUM) {
         WRITE_BITMAPSET_FIELD(extraUpdatedCols);
+    }
+
+    if (t_thrd.proc->workingVersionNum >= MULTI_PARTITIONS_VERSION_NUM) {
+        WRITE_NODE_FIELD(partitionOidList);
+        WRITE_NODE_FIELD(subpartitionOidList);
     }
 }
 
@@ -4999,6 +5076,9 @@ static void _outConstraint(StringInfo str, Constraint* node)
         case CONSTR_DEFAULT:
             appendStringInfo(str, "DEFAULT");
             WRITE_NODE_FIELD(raw_expr);
+            if (t_thrd.proc->workingVersionNum >= ON_UPDATE_TIMESTAMP_VERSION_NUM) {
+                WRITE_NODE_FIELD(update_expr);
+            }
             WRITE_STRING_FIELD(cooked_expr);
             break;
 
@@ -5084,6 +5164,9 @@ static void _outConstraint(StringInfo str, Constraint* node)
         default:
             appendStringInfo(str, "<unrecognized_constraint %d>", (int)node->contype);
             break;
+    }
+    if (t_thrd.proc->workingVersionNum >= COMMENT_SUPPORT_VERSION_NUM) {
+        WRITE_NODE_FIELD(constraintOptions);
     }
 }
 
@@ -5224,17 +5307,6 @@ static void _outCStoreScan(StringInfo str, CStoreScan* node)
     WRITE_NODE_FIELD(minMaxInfo);
     WRITE_ENUM_FIELD(relStoreLocation, RelstoreType);
     WRITE_BOOL_FIELD(is_replica_table);
-}
-
-static void _outDfsScan(StringInfo str, DfsScan* node)
-{
-    WRITE_NODE_TYPE("DFSSCAN");
-
-    _outScanInfo(str, (Scan*)node);
-
-    WRITE_ENUM_FIELD(relStoreLocation, RelstoreType);
-    WRITE_NODE_FIELD(privateData);
-    WRITE_STRING_FIELD(storeFormat);
 }
 
 #ifdef ENABLE_MULTIPLE_NODES
@@ -5634,6 +5706,21 @@ static void _outTrainModel(StringInfo str, TrainModel* node)
     }
 }
 
+static void _outAutoIncrement(StringInfo str, AutoIncrement* node)
+{
+    WRITE_NODE_TYPE("AUTO_INCREMENT");
+    WRITE_NODE_FIELD(expr);
+    WRITE_OID_FIELD(autoincin_funcid);
+    WRITE_OID_FIELD(autoincout_funcid);
+}
+
+static void _outPrefixKey(StringInfo str, PrefixKey* node)
+{
+    WRITE_NODE_TYPE("PREFIXKEY");
+    WRITE_NODE_FIELD(arg);
+    WRITE_INT_FIELD(length);
+}
+
 /*
  * _outNode -
  *	  converts a Node into ascii string and append it to 'str'
@@ -5723,9 +5810,6 @@ static void _outNode(StringInfo str, const void* obj)
                 break;
             case T_CStoreIndexScan:
                 _outCStoreIndexScan(str, (CStoreIndexScan*)obj);
-                break;
-            case T_DfsIndexScan:
-                _outDfsIndexScan(str, (DfsIndexScan*)obj);
                 break;
             case T_BitmapIndexScan:
                 _outBitmapIndexScan(str, (BitmapIndexScan*)obj);
@@ -5945,6 +6029,9 @@ static void _outNode(StringInfo str, const void* obj)
                 break;
             case T_NullTest:
                 _outNullTest(str, (NullTest*)obj);
+                break;
+            case T_SetVariableExpr:
+                _outSetVariableExpr(str, (SetVariableExpr*)obj);
                 break;
             case T_HashFilter:
                 _outHashFilter(str, (HashFilter*)obj);
@@ -6317,6 +6404,9 @@ static void _outNode(StringInfo str, const void* obj)
             case T_DfsPrivateItem:
                 _outDfsPrivateItem(str, (DfsPrivateItem*)obj);
                 break;
+            case T_PrefixKey:
+                _outPrefixKey(str, (PrefixKey*)obj);
+                break;
             /*
              * Vector Nodes
              */
@@ -6340,9 +6430,6 @@ static void _outNode(StringInfo str, const void* obj)
                 _outCStoreScan(str, (CStoreScan*)obj);
                 break;
 
-            case T_DfsScan:
-                _outDfsScan(str, (DfsScan*)obj);
-                break;
 #ifdef ENABLE_MULTIPLE_NODES
             case T_TsStoreScan:
                 _outTsStoreScan(str, (TsStoreScan*)obj);
@@ -6504,6 +6591,12 @@ static void _outNode(StringInfo str, const void* obj)
             case T_TrainModel:
                 _outTrainModel(str, (TrainModel*)obj);
                 break;
+            case T_UserSetElem:
+                _outUserSetElem(str, (UserSetElem *) obj);
+                break;
+            case T_UserVar:
+                _outUserVar(str, (UserVar *) obj);
+                break;
             case T_PLDebug_variable:
                 _outPLDebug_variable(str, (PLDebug_variable*) obj);
                 break;
@@ -6512,6 +6605,9 @@ static void _outNode(StringInfo str, const void* obj)
                 break;
             case T_PLDebug_frame:
                 _outPLDebug_frame(str, (PLDebug_frame*) obj);
+                break;
+            case T_AutoIncrement:
+                _outAutoIncrement(str, (AutoIncrement*)obj);
                 break;
             default:
 

@@ -28,4 +28,4 @@ GAUSS_TMP_PATH=""
 GAUSS_UPGRADE_BIN_PATH=""
 
 #需要同步的cluster config 列表
-GAUSS_UPGRADE_SYNC_CONFIG_LIST="lib/postgresql/pg_plugin"
+GAUSS_UPGRADE_SYNC_CONFIG_LIST=""

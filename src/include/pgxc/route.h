@@ -40,6 +40,15 @@
 
 extern bool check_router_attr(char** newval, void** extra, GucSource source);
 extern void assign_router_attr(const char* newval, void* extra);
+/*
+ * Convert a char* to Datum according to the data type oid.
+ *
+ * @_in param typeOid: The oid of the type in pg_type catalog.
+ * @_in param typeMod: The mod of data type.
+ * @_in param value: The string value which need to be converted to datum.
+ * @return Return the datum converted from String.
+ */
+Datum GetDatumFromString(Oid typeOid, int4 typeMod, char *value);
 
 typedef struct RouteMsg {
     char* table_name;

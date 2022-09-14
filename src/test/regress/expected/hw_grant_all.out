@@ -22,3 +22,33 @@ DROP USER user2;
 RESET ROLE;
 REVOKE ALL PRIVILEGES FROM user1;
 DROP USER user1 ;
+create user non_superuser password 'Gauss@123';
+GRANT CREATE ON SCHEMA public TO non_superuser;
+set role non_superuser password 'Gauss@123';
+ 
+create or replace function myfunc(a varchar, b varchar) return varchar
+as
+begin
+    return 'myfunc';
+end;
+/
+create operator public.|| (procedure = non_superuser.myfunc, LEFTARG = varchar, RIGHTARG = varchar);
+ERROR:  permission denied to create operator "||"
+HINT:  must be initial user to create an operator in public schema.
+create aggregate public.myagg(varchar)(sfunc = non_superuser.myfunc, stype = varchar);
+ERROR:  permission denied to create aggregate "myagg"
+HINT:  must be sysadmin to create a aggregate in public schema.
+create operator non_superuser.|| (procedure = non_superuser.myfunc, LEFTARG = varchar, RIGHTARG = varchar);
+alter operator non_superuser.|| (varchar,varchar) set schema public;
+ERROR:  permission denied to alter operator ||(character varying,character varying)
+HINT:  must be initial user to alter a operator to public schema.
+drop operator non_superuser.||(varchar,varchar);
+  
+reset role;
+   
+create operator public.|| (procedure = non_superuser.myfunc, LEFTARG = varchar, RIGHTARG = varchar);
+create aggregate public.myagg(varchar)(sfunc = non_superuser.myfunc, stype = varchar);
+drop operator public.||(varchar,varchar);
+drop aggregate public.myagg(varchar);
+REVOKE CREATE ON SCHEMA public FROM non_superuser;
+DROP USER non_superuser CASCADE;

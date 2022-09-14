@@ -90,6 +90,10 @@ explain (costs off) select * from t1, (select * from t2) as test where t1.id = t
 
 explain (costs off) select id, (select id from t2 start with t2.id = t1.id connect by t2.id = t1.id limit 1) from t1 where id = 1;
 
+--not support pseudo column in order siblings by
+explain (costs off) select *, level from t1 start with id = 1 connect by prior id = pid order siblings by 4;
+explain (costs off) select *, connect_by_root id from t1 start with id = 1 connect by prior id = pid order siblings by 4;
+
 --unsupport case
 select prior id cc from t1 start with id = 1 connect by prior id = pid;
 

@@ -701,6 +701,37 @@ bool check_mix_replication_param(bool* newval, void** extra, GucSource source)
     return true;
 }
 
+static void check_danger_character(const char *inputEnvValue)
+{
+    if (inputEnvValue == NULL) {
+        return;
+    }
+
+    const char *dangerCharacterList[] = { ";", "`", "\\", "'", "\"", ">", "<", "&", "|", "!", NULL };
+    int i = 0;
+
+    for (i = 0; dangerCharacterList[i] != NULL; i++) {
+        if (strstr(inputEnvValue, dangerCharacterList[i]) != NULL) {
+            ereport(ERROR, (errmsg("Failed to check input value: invalid token \"%s\".\n", dangerCharacterList[i])));
+        }
+    }
+}
+
+bool check_security_path(char **newval, void **extra, GucSource source)
+{
+    if (*newval == NULL) {
+        return true;
+    }
+    // judge length
+    if (strlen(*newval) > PATH_MAX) {
+        ereport(ERROR, (errmsg("The length of path cannot be more than \"%d\".\n", PATH_MAX)));
+        return false;
+    }
+    // danger character
+    check_danger_character(*const_cast<const char **>(newval));
+    return true;
+}
+
 /*
  * SET CLIENT_ENCODING
  */

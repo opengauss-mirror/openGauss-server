@@ -74,6 +74,7 @@ void TpoolSchedulerMain(ThreadPoolScheduler *scheduler)
 {
     int gpc_count = 0;
 
+    (void)gspqsignal(SIGURG, print_stack);
     (void)gspqsignal(SIGKILL, SchedulerSIGKILLHandler);
     gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
     (void)gs_signal_unblock_sigusr2();
@@ -95,6 +96,9 @@ void TpoolSchedulerMain(ThreadPoolScheduler *scheduler)
         scheduler->DynamicAdjustThreadPool();
         scheduler->GPCScheduleCleaner(&gpc_count);
         g_threadPoolControler->GetSessionCtrl()->CheckSessionTimeout();
+#ifndef ENABLE_MULTIPLE_NODES
+        g_threadPoolControler->GetSessionCtrl()->CheckIdleInTransactionSessionTimeout();
+#endif
     }
     proc_exit(0);
 }
@@ -128,6 +132,7 @@ int ThreadPoolScheduler::StartUp()
 void ThreadPoolScheduler::DynamicAdjustThreadPool()
 {
     for (int i = 0; i < m_groupNum; i++) {
+        pg_memory_barrier();
         if (pmState == PM_RUN && m_canAdjustPool) {
             AdjustWorkerPool(i);
             AdjustStreamPool(i);

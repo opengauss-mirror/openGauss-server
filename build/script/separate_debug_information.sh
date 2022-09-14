@@ -1,12 +1,6 @@
 #!/bin/bash
-#######################################################################
-# Copyright (c): 2012-2019, Huawei Tech. Co., Ltd.
+# Copyright (c) Huawei Technologies Co., Ltd. 2020-2025. All rights reserved.
 # descript: Separate debug information
-#           Return 0 means OK.
-#           Return 1 means failed.
-# version:  2.0
-# date:     2019-1-6
-#######################################################################
 
 DEPTH=$(pwd)
 INSTALL_DIR=$DEPTH/../../mppdb_temp_install
@@ -119,7 +113,7 @@ separate_symbol()
 					chmod 755 "$INSTALL_DIR/${symbol_name}.symbol"
 					mv $INSTALL_DIR/${symbol_name}.symbol $CPTODEST
 				fi
-			elif [[ "$x" = *".so" ]]; then
+			elif [[ "$x" = *".so" || "$x" = *".so."* ]]; then
 			        if [[ "$platformname" = "Redhat" ]] || [[ "$platformname" = "Euler" ]]; then
 				    if [[ "$x" = "libkadm5clnt.so" ]]; then
 				    	    echo "$x is not a dynamically linked or not stripped, do not separate symbol"

@@ -1341,7 +1341,6 @@ void CStoreInsert::SaveAll(int options, _in_ const char* delBitmap)
     /* step 1: Lock relation for extension */
     LockRelationForExtension(m_relation, ExclusiveLock);
     uint32 curCUID = CStoreAllocator::GetNextCUID(m_relation);
-    
     for (col = 0; col < attno; ++col) {
         if (m_relation->rd_att->attrs[col]->attisdropped)
             continue;

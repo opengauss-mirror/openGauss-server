@@ -855,7 +855,7 @@ void gen_policy_labelitem(PolicyLabelItem &item, const ListCell *rel, int objtyp
     switch (objtype) {
         case O_VIEW:
         case O_TABLE: {
-            Oid relid = RangeVarGetRelid((RangeVar *)rel, NoLock, false);
+            Oid relid = RangeVarGetRelid((const RangeVar *)rel, NoLock, true);
             if (!OidIsValid(relid)) {
                 return;
             }
@@ -865,7 +865,7 @@ void gen_policy_labelitem(PolicyLabelItem &item, const ListCell *rel, int objtyp
         }
         case O_FUNCTION: {
             FuncWithArgs *func = (FuncWithArgs *)(rel);
-            Oid funcid = LookupFuncNameTypeNames(func->funcname, func->funcargs, false);
+            Oid funcid = LookupFuncNameTypeNames(func->funcname, func->funcargs, true);
             if (!OidIsValid(funcid)) {
                 return;
             }

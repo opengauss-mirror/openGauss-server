@@ -18,7 +18,6 @@
 
 #include "access/clog.h"
 #include "access/csnlog.h"
-#include "access/dfs/dfs_insert.h"
 #include "access/xlog.h"
 #include "access/heapam.h"
 #include "access/multixact.h"
@@ -48,6 +47,7 @@
 #include "postmaster/pagerepair.h"
 #include "postmaster/postmaster.h"
 #include "postmaster/snapcapturer.h"
+#include "postmaster/cfs_shrinker.h"
 #include "postmaster/rbcleaner.h"
 #include "replication/slot.h"
 #include "postmaster/startup.h"
@@ -65,14 +65,12 @@
 #include "storage/pg_shmem.h"
 #include "storage/pmsignal.h"
 #include "storage/predicate.h"
-#include "storage/procarray.h"
 #include "storage/procsignal.h"
 #include "storage/smgr/segment.h"
 #include "storage/sinvaladt.h"
 #include "storage/spin.h"
 #include "storage/cstore/cstorealloc.h"
 #include "storage/cucache_mgr.h"
-#include "storage/dfs/dfs_connector.h"
 #include "storage/xlog_share_storage/xlog_share_storage.h"
 #include "utils/memprot.h"
 #include "pgaudit.h"
@@ -82,6 +80,7 @@
 
 #include "replication/dcf_replication.h"
 #include "commands/verify.h"
+#include "storage/cfs/cfs_buffers.h"
 
 /* we use semaphore not LWLOCK, because when thread InitGucConfig, it does not get a t_thrd.proc */
 pthread_mutex_t gLocaleMutex = PTHREAD_MUTEX_INITIALIZER;
@@ -190,6 +189,12 @@ Size ComputeTotalSizeOfShmem()
 
         /* might as well round it off to a multiple of a typical page size */
         size = add_size(size, 8192 - (size % 8192));
+
+        /* pca buffer size */
+        size = add_size(size, pca_buffer_size());
+
+        /* csf shrinker backend shared memory */
+        size = add_size(size, CfsShrinkerShmemSize());
         return size;
 }
 
@@ -297,6 +302,7 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
         CSNLOGShmemInit();
         MultiXactShmemInit();
         InitBufferPool();
+        pca_buf_init_ctx();
         /* global temporay table */
         active_gtt_shared_hash_init();
         /*
@@ -346,6 +352,7 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
         CBMShmemInit();
         AutoVacuumShmemInit();
         TxnSnapCapShmemInit();
+        CfsShrinkerShmemInit();
         RbCleanerShmemInit();
     }
     ReplicationSlotsShmemInit();
@@ -428,20 +435,8 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
     }
 #endif   /* ENABLE_MULTIPLE_NODES */
 
-#ifndef ENABLE_LITE_MODE
-    /*
-     * Set up DfsConnector cache
-     */
-    dfs::InitOBSConnectorCacheLock();
-#endif
-
     /* set up Dummy server cache */
     InitDummyServrCache();
-
-    /*
-     * Set up dfs space cache hash table.
-     */
-    DfsInsert::InitDfsSpaceCache();
 
     LsnXlogFlushChkShmInit();
 

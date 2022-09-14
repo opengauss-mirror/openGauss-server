@@ -71,8 +71,8 @@ static THR_LOCAL BufferAccessStrategy vac_strategy;
 static int LazyVacuumUPage(Relation onerel, BlockNumber blkno, Buffer buffer, int tupindex, LVRelStats *vacrelstats,
     TransactionId oldestXmin);
 static void LazySpaceUalloc(LVRelStats *vacrelstats, BlockNumber relblocks, Relation onerel);
-static IndexBulkDeleteResult **LazyScanUHeap(Relation onerel, LVRelStats *vacrelstats, Relation *Irel,
-    int nindexes, TransactionId oldestXmin);
+static IndexBulkDeleteResult **LazyScanUHeap(Relation onerel, LVRelStats *vacrelstats, VacuumStmt *vacstmt,
+    Relation *Irel, int nindexes, TransactionId oldestXmin);
 static void LazyVacuumUHeap(Relation onerel, LVRelStats *vacrelstats, TransactionId oldestXmin);
 
 /*
@@ -108,7 +108,7 @@ static int LazyVacuumUPage(Relation onerel, BlockNumber blkno, Buffer buffer, in
         unused[uncnt++] = toff;
     }
 
-    UPageRepairFragmentation(buffer, InvalidOffsetNumber, 0, &pruned, false);
+    UPageRepairFragmentation(onerel, buffer, InvalidOffsetNumber, 0, &pruned, false);
 
     /*
      * Mark buffer dirty before we write WAL.
@@ -116,8 +116,8 @@ static int LazyVacuumUPage(Relation onerel, BlockNumber blkno, Buffer buffer, in
     MarkBufferDirty(buffer);
 
     if (RelationNeedsWAL(onerel)) {
-        XLogRecPtr recptr = LogUHeapClean(onerel, buffer, InvalidOffsetNumber, 0, NULL, 0, NULL, 0, unused, uncnt,
-            vacrelstats->latestRemovedXid, pruned);
+        XLogRecPtr recptr = LogUHeapClean(onerel, buffer, InvalidOffsetNumber, 0, NULL, 0, NULL, 0, unused,
+            uncnt, NULL, NULL, 0, vacrelstats->latestRemovedXid, pruned);
         PageSetLSN(page, recptr);
     }
 
@@ -194,8 +194,8 @@ static void LazyVacuumUHeap(Relation onerel, LVRelStats *vacrelstats, Transactio
  * 		If there are no indexes then we can reclaim line pointers without
  * 		writing any undo;
  */
-static IndexBulkDeleteResult **LazyScanUHeap(Relation onerel, LVRelStats *vacrelstats, Relation *Irel,
-    int nindexes, TransactionId oldestXmin)
+static IndexBulkDeleteResult **LazyScanUHeap(Relation onerel, LVRelStats *vacrelstats, VacuumStmt *vacstmt,
+    Relation *Irel, int nindexes, TransactionId oldestXmin)
 {
     UHeapTupleData tuple;
     BlockNumber emptyPages;
@@ -213,6 +213,7 @@ static IndexBulkDeleteResult **LazyScanUHeap(Relation onerel, LVRelStats *vacrel
     BlockNumber blkno = InvalidBlockNumber;
     BlockNumber scanStartingBlock = 0;
     RelationBuffer relbuf = {onerel, InvalidBuffer};
+    bool gpiVacuumed = false;
 
     pg_rusage_init(&ru0);
 
@@ -266,7 +267,12 @@ static IndexBulkDeleteResult **LazyScanUHeap(Relation onerel, LVRelStats *vacrel
 
             /* Remove index entries. */
             for (i = 0; i < nindexes; i++) {
-                lazy_vacuum_index(Irel[i], &indstats[i], vacrelstats, vac_strategy);
+                if (!RelationIsGlobalIndex(Irel[i])) {
+                    lazy_vacuum_index(Irel[i], &indstats[i], vacrelstats, vac_strategy);
+                } else if (!vacstmt->gpi_vacuumed) {
+                    lazy_vacuum_index(Irel[i], &indstats[i], vacrelstats, vac_strategy);
+                    gpiVacuumed = true;
+                }
             }
 
             /* Remove tuples from heap */
@@ -331,7 +337,7 @@ static IndexBulkDeleteResult **LazyScanUHeap(Relation onerel, LVRelStats *vacrel
          * We count tuples removed by the pruning step as removed by VACUUM.
          */
         relbuf.buffer = buf;
-        tupsVacuumed += UHeapPagePruneGuts(&relbuf, oldestXmin, InvalidOffsetNumber, 0, false, false,
+        tupsVacuumed += UHeapPagePruneGuts(onerel, &relbuf, oldestXmin, InvalidOffsetNumber, 0, false, false,
             &vacrelstats->latestRemovedXid, NULL);
 
         /* Now scan the page to collect vacuumable items. */
@@ -376,7 +382,8 @@ static IndexBulkDeleteResult **LazyScanUHeap(Relation onerel, LVRelStats *vacrel
             tuple.xc_node_id = u_sess->pgxc_cxt.PGXCNodeIdentifier;
             tupgone = false;
 
-            switch (UHeapTupleSatisfiesOldestXmin(&tuple, oldestXmin, buf, false, NULL, &xid, NULL)) { // UHeapPruneItem
+            switch (UHeapTupleSatisfiesOldestXmin(&tuple, oldestXmin, buf, false, NULL, &xid,
+                NULL, onerel)) { // UHeapPruneItem
                 case UHEAPTUPLE_DEAD:
                     /*
                      * Ordinarily, DEAD tuples would have been removed by
@@ -475,15 +482,27 @@ static IndexBulkDeleteResult **LazyScanUHeap(Relation onerel, LVRelStats *vacrel
 
         /* Remove index entries. */
         for (i = 0; i < nindexes; i++) {
-            lazy_vacuum_index(Irel[i], &indstats[i], vacrelstats, vac_strategy);
+            if (!RelationIsGlobalIndex(Irel[i])) {
+                lazy_vacuum_index(Irel[i], &indstats[i], vacrelstats, vac_strategy);
+            } else if (!vacstmt->gpi_vacuumed) {
+                lazy_vacuum_index(Irel[i], &indstats[i], vacrelstats, vac_strategy);
+                gpiVacuumed = true;
+            }
         }
         /* Remove tuples from heap */
         LazyVacuumUHeap(onerel, vacrelstats, oldestXmin);
         vacrelstats->num_index_scans++;
     }
 
+    if (gpiVacuumed) {
+        vacstmt->gpi_vacuumed = true;
+    }
+
     /* Do post-vacuum cleanup and statistics update for each index */
     for (i = 0; i < nindexes; i++) {
+        if (RelationIsGlobalIndex(Irel[i]) && !gpiVacuumed) {
+            continue;
+        }
         /* IO collector and IO scheduler for vacuum */
 #ifdef ENABLE_MULTIPLE_NODES
         if (ENABLE_WORKLOAD_CONTROL) {
@@ -525,7 +544,7 @@ static void LazyScanURel(Relation onerel, LVRelStats *vacrelstats, VacuumStmt *v
         vacrelstats->idx_estimated = (bool*)palloc0(nindexes * sizeof(bool));
     }
 
-    indstats = LazyScanUHeap(onerel, vacrelstats, irel, nindexes, oldestXmin);
+    indstats = LazyScanUHeap(onerel, vacrelstats, vacstmt, irel, nindexes, oldestXmin);
 
     /* Vacuum the Free Space Map */
     FreeSpaceMapVacuum(onerel);
@@ -541,6 +560,110 @@ static void LazyScanURel(Relation onerel, LVRelStats *vacrelstats, VacuumStmt *v
     }
 
     pfree_ext(indstats);
+}
+
+
+/*
+ * ForceVacuumUHeapRelBypass() -- deal with force AutoVacuum for UStore
+ *
+ *  AutoVacuum will only apply to UStore by force vacuum for recycle clog
+ *
+ *  we just need to get a FrozenXid for this relation that all clog of xid less than
+ *  that FrozenXid can be safely recycled.
+ *
+ *  Note: UStore with undo module can use oldestXidInUndo to ensure that every xid we
+ *        found in heap page less than that value is already committed, otherwise we
+ *        won't find it (rollback is already performed).
+ */
+static void ForceVacuumUHeapRelBypass(Relation onerel, VacuumStmt *vacstmt, BufferAccessStrategy bstrategy)
+{
+    Assert(IsAutoVacuumWorkerProcess());
+    TransactionId newFrozenXid = pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid);
+
+    /* now we only need to vacuum all indexes to make sure we won't have old xid remain there */
+    /* STEP 1: construct fake vacrelstats context for index vacuum */
+    LVRelStats* vacrelstats = (LVRelStats *)palloc0(sizeof(LVRelStats));
+
+    vacrelstats->scanned_pages = 0;
+    /* we won't vacuum heap, just set new pages and tuples to old values */
+    if (RelationIsPartition(onerel)) {
+        Assert(vacstmt->onepart != NULL);
+        vacrelstats->rel_pages = vacstmt->onepart->pd_part->relpages;
+        vacrelstats->new_rel_tuples = vacstmt->onepart->pd_part->reltuples;
+    } else {
+        vacrelstats->rel_pages = onerel->rd_rel->relpages;
+        vacrelstats->new_rel_tuples = onerel->rd_rel->reltuples;
+    }
+
+    /* STEP 2: open all indexes of the relation */
+    int nindexes = 0;
+    int nindexesGlobal = 0;
+    Relation *irel = NULL;
+    Relation *indexrel = NULL;
+    Partition *indexpart = NULL;
+    if (RelationIsPartition(onerel)) {
+        vac_open_part_indexes(vacstmt, RowExclusiveLock, &nindexes, &nindexesGlobal, &irel, &indexrel, &indexpart);
+    } else {
+        vac_open_indexes(onerel, RowExclusiveLock, &nindexes, &irel);
+    }
+
+    /* STEP 3: vacuum indexes */
+    /* Do post-vacuum cleanup and statistics update for each index */
+    bool gpiVacuumed = false;
+    IndexBulkDeleteResult** indstats = (IndexBulkDeleteResult **)palloc0(nindexes * sizeof(IndexBulkDeleteResult *));
+    for (int i = 0; i < nindexes; i++) {
+        /* IO collector and IO scheduler for vacuum */
+#ifdef ENABLE_MULTIPLE_NODES
+        if (ENABLE_WORKLOAD_CONTROL) {
+            IOSchedulerAndUpdate(IO_TYPE_WRITE, 1, IO_TYPE_ROW);
+        }
+#endif
+        if (!RelationIsGlobalIndex(irel[i])) {
+            indstats[i] = lazy_cleanup_index(irel[i], indstats[i], vacrelstats, vac_strategy);
+        } else if (!vacstmt->gpi_vacuumed) {
+            indstats[i] = lazy_cleanup_index(irel[i], indstats[i], vacrelstats, vac_strategy);
+            gpiVacuumed = true;
+        }
+    }
+    if (gpiVacuumed) {
+        vacstmt->gpi_vacuumed = true;
+    }
+
+    /* STEP 4: update FrozenXid for this relation */
+    BlockNumber newRelAllvisible = 0; /* UStore don't have VisibilityMap */
+    if (RelationIsPartition(onerel)) {
+        vac_update_partstats(vacstmt->onepart, vacrelstats->rel_pages, vacrelstats->new_rel_tuples,
+                             newRelAllvisible, newFrozenXid, InvalidMultiXactId);
+        if (!vacstmt->issubpartition) {
+            vac_update_pgclass_partitioned_table(vacstmt->onepartrel, vacstmt->onepartrel->rd_rel->relhasindex,
+                                                 newFrozenXid, InvalidMultiXactId);
+        } else {
+            vac_update_pgclass_partitioned_table(vacstmt->parentpartrel, vacstmt->parentpartrel->rd_rel->relhasindex,
+                                                 newFrozenXid, InvalidMultiXactId);
+        }
+    } else {
+        Relation classRel = heap_open(RelationRelationId, RowExclusiveLock);
+        vac_update_relstats(onerel, classRel, vacrelstats->rel_pages, vacrelstats->new_rel_tuples,
+                            newRelAllvisible, nindexes > 0, newFrozenXid, InvalidMultiXactId);
+        heap_close(classRel, RowExclusiveLock);
+    }
+
+    /* STEP 5: done with indexes */
+    if (RelationIsPartition(onerel)) {
+        vac_close_part_indexes(nindexes, nindexesGlobal, irel, indexrel, indexpart, NoLock);
+    } else {
+        vac_close_indexes(nindexes, irel, NoLock);
+    }
+
+    /* SETP 6: cleanup */
+    for (int i = 0; i < nindexes; i++) {
+        /* summarize the index status information */
+        if (indstats[i] != NULL) {
+            pfree_ext(indstats[i]);
+        }
+    }
+    pfree_ext(indstats);
+    pfree_ext(vacrelstats);
 }
 
 /*
@@ -564,6 +687,14 @@ void LazyVacuumUHeapRel(Relation onerel, VacuumStmt *vacstmt, BufferAccessStrate
     Relation *indexrel = NULL;
     Partition *indexpart = NULL;
 
+    /* the statFlag is used in PgStat_StatTabEntry, seen in pgstat_report_vacuum and pgstat_recv_vacuum */
+    uint32 statFlag = InvalidOid;
+    if (RelationIsSubPartitionOfSubPartitionTable(onerel)) {
+        statFlag = onerel->grandparentId;
+    } else if (RelationIsPartition(onerel)) {
+        statFlag = onerel->parentId;
+    }
+
     WHITEBOX_TEST_STUB(UHEAP_LAZY_VACUUM_REL_FAILED, WhiteboxDefaultErrorEmit);
 
     /* measure elapsed time iff autovacuum logging requires it */
@@ -575,7 +706,7 @@ void LazyVacuumUHeapRel(Relation onerel, VacuumStmt *vacstmt, BufferAccessStrate
     if (vacstmt->options & VACOPT_VERBOSE) {
         elevel = INFO;
     } else {
-        elevel = LOG;
+        elevel = GetVacuumLogLevel();
     }
 
     vac_strategy = bstrategy;
@@ -585,16 +716,22 @@ void LazyVacuumUHeapRel(Relation onerel, VacuumStmt *vacstmt, BufferAccessStrate
      * because like other backends operating on uheap, lazy vacuum also
      * reserves a transaction slot in the page for pruning purpose.
      */
-    TransactionId oldestXmin = pg_atomic_read_u64(&g_instance.undo_cxt.oldestXidInUndo);
+    TransactionId oldestXmin = pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid);
     if (!TransactionIdIsNormal(oldestXmin)) {
         ereport(WARNING,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                 errmodule(MOD_VACUUM),
-                errmsg("oldestXidInUndo(%lu) is abnormal.", oldestXmin),
+                errmsg("globalRecycleXid(%lu) is abnormal.", oldestXmin),
                 errdetail("N/A"),
                 errcause("There is a high probability that the DML operation "
                 "has not been performed on any ustore table. "),
-                erraction("Check the value of oldestXidInUndo in undo_cxt.")));
+                erraction("Check the value of globalRecycleXid in undo_cxt.")));
+        return;
+    }
+
+    if (IsAutoVacuumWorkerProcess()) {
+        /* must be force recycle, use another bypass */
+        ForceVacuumUHeapRelBypass(onerel, vacstmt, bstrategy);
         return;
     }
 
@@ -754,7 +891,7 @@ void LazyVacuumUHeapRel(Relation onerel, VacuumStmt *vacstmt, BufferAccessStrate
         pfree_ext(vacrelstats->idx_estimated);
     }
 
-    pgstat_report_vacuum(RelationGetRelid(onerel), onerel->parentId, onerel->rd_rel->relisshared,
+    pgstat_report_vacuum(RelationGetRelid(onerel), statFlag, onerel->rd_rel->relisshared,
         vacrelstats->tuples_deleted);
 
     /* and log the action if appropriate */

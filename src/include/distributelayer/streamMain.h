@@ -28,10 +28,12 @@
 extern int StreamMain();
 extern void SetStreamWorkerInfo(class StreamProducer* proObj);
 extern void ResetStreamEnv();
+extern void ResetSessionEnv();
 extern void ExtractProduerInfo();
 extern ThreadId ApplyStreamThread(StreamProducer *producer);
 extern void RestoreStream();
 extern void StreamExit();
 extern void RestoreStreamSyncParam(struct StreamSyncParam *syncParam);
 extern void WLMReleaseNodeFromHash(void);
+
 #endif

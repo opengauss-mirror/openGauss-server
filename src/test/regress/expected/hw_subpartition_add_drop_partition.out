@@ -71,11 +71,19 @@ ERROR:  upper boundary of adding partition MUST overtop last existing partition
 --fail, invalid format
 ALTER TABLE range_range_sales ADD PARTITION customer_temp3 VALUES (1300);
 ERROR:  can not add none-range partition to range partition table
+--fail, name conflict
+ALTER TABLE range_range_sales ADD PARTITION customer1 VALUES LESS THAN (MAXVALUE);
+ERROR:  The partition name "customer1" is duplicated with existing partition name
+DETAIL:  N/A
 --success, add 1 default subpartition
 ALTER TABLE range_range_sales ADD PARTITION customer6 VALUES LESS THAN (MAXVALUE);
 --fail, out of range
 ALTER TABLE range_range_sales ADD PARTITION customer_temp4 VALUES LESS THAN (1800);
 ERROR:  upper boundary of adding partition MUST overtop last existing partition
+--fail, name conflict
+ALTER TABLE range_range_sales MODIFY PARTITION customer1 ADD SUBPARTITION customer5_2008 VALUES LESS THAN ('2013-01-01');
+ERROR:  The partition name "customer5_2008" is duplicated with existing partition name
+DETAIL:  N/A
 --success, add 1 subpartition
 ALTER TABLE range_range_sales MODIFY PARTITION customer1 ADD SUBPARTITION customer1_2012 VALUES LESS THAN ('2013-01-01');
 --fail, out of range

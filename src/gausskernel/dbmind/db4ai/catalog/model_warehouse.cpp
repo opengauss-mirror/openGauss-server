@@ -376,15 +376,17 @@ const Model *get_model(const char *model_name, bool only_model)
     AlgorithmML algorithm;
 
     if (t_thrd.proc->workingVersionNum < 92366) {
-        ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+        ereport(WARNING, (errmodule(MOD_DB4AI), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
             errmsg("Before GRAND VERSION NUM 92366, we do not support gs_model_warehouse.")));
+        return NULL;
     }
 
     HeapTuple tuple = SearchSysCache1(DB4AI_MODEL, CStringGetDatum(model_name));
-    if (!HeapTupleIsValid(tuple)) 
-        ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+    if (!HeapTupleIsValid(tuple)) {
+        ereport(WARNING, (errmodule(MOD_DB4AI), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
             errmsg("There is no model called \"%s\".", model_name)));
-    
+        return NULL;
+    }
 
     Form_gs_model_warehouse tuplePointer = (Form_gs_model_warehouse)GETSTRUCT(tuple);
     const char *modelType = TextDatumGetCString(SysCacheGetAttr(DB4AI_MODEL, tuple, Anum_gs_model_model_type, &isnull));

@@ -76,6 +76,7 @@ extern void insertPartitionEntry(Relation pg_partition_desc, Partition new_part_
                                  int2vector *pkey, const oidvector *inttablespace, Datum interval,
                                  Datum maxValues, Datum transitionPoint, Datum reloptions, char parttype);
 extern bool isPartitionedObject(Oid relid, char relkind, bool missing_ok);
+extern bool isSubPartitionedObject(Oid relid, char relkind, bool missing_ok);
 extern bool isPartitionObject(Oid partid, char partkind, bool missing_ok);
 extern Oid getPartitionIndexOid(Oid indexid, Oid partitionid);
 extern Oid getPartitionIndexTblspcOid(Oid indexid, Oid partitionid);
@@ -83,12 +84,13 @@ extern char* getPartitionIndexName(Oid indexid, Oid partitionid);
 extern Oid indexPartGetHeapPart(Oid indexPart, bool missing_ok);
 extern Oid searchPartitionIndexOid(Oid partitionedIndexid, List *pindex);
 extern List *getPartitionObjectIdList(Oid relid, char relkind);
+extern List* getSubPartitionObjectIdList(Oid relid);
 extern Oid partitionNameGetPartitionOid (Oid partitionedTableOid, 
                                          const char *partitionName,
                                          char objectType,
                                          LOCKMODE lockMode,
                                          bool missingOk, 
-                                         bool nowWait,
+                                         bool noWait,
                                          PartitionNameGetPartidCallback callback, 
                                          void *callback_arg,
                                          LOCKMODE callbackobj_lockMode,
@@ -98,15 +100,16 @@ extern Oid partitionValuesGetPartitionOid(Relation rel, List *partKeyValueList, 
 extern Oid subpartitionValuesGetSubpartitionOid(Relation rel, List *partKeyValueList, List *subpartKeyValueList,
     LOCKMODE lockMode, bool topClosed, bool missingOk, bool noWait, Oid *partOidForSubPart);
 extern List *searchPartitionIndexesByblid(Oid blid);
-extern List *searchPgPartitionByParentId(char parttype, Oid parentId);
-extern List* searchPgSubPartitionByParentId(char parttype, List *parentOids);
+extern List *searchPgPartitionByParentId(char parttype, Oid parentId, ScanDirection direction = ForwardScanDirection);
+extern List *searchPgSubPartitionByParentId(char parttype, List *parentOids,
+    ScanDirection direction = ForwardScanDirection);
 extern void freePartList(List *l);
 extern void freeSubPartList(List* plist);
 extern HeapTuple searchPgPartitionByParentIdCopy(char parttype, Oid parentId);
 extern Oid GetBaseRelOidOfParition(Relation relation);
 
 extern List* relationGetPartitionOidList(Relation rel);
-extern List* RelationGetSubPartitionOidList(Relation rel, LOCKMODE lockmode = AccessShareLock);
+extern List* RelationGetSubPartitionOidList(Relation rel, LOCKMODE lockmode = AccessShareLock, bool estimate = false);
 extern List* RelationGetSubPartitionOidListList(Relation rel);
 extern List* relationGetPartitionList(Relation relation, LOCKMODE lockmode);
 extern List* RelationGetPartitionNameList(Relation relation);

@@ -34,6 +34,7 @@ endif
 OBJS = autovacuum.o bgwriter.o fork_process.o pgarch.o pgstat.o postmaster.o gaussdb_version.o\
 	startup.o syslogger.o walwriter.o walwriterauxiliary.o checkpointer.o pgaudit.o alarmchecker.o \
 	twophasecleaner.o fencedudf.o lwlockmonitor.o cbmwriter.o pagewriter.o pagerepair.o snapcapturer.o rbcleaner.o globalstats.o \
+	cfs_shrinker.o \
 	bgworker.o $(top_builddir)/src/lib/config/libconfig.a
 
 ifeq ($(enable_lite_mode), no)

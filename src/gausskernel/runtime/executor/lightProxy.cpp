@@ -135,8 +135,8 @@ static void report_iud_time_for_lightproxy(const Query* query)
     if (query->rtable == NULL)
         return;
 
-    if (query->resultRelation <= list_length(query->rtable)) {
-        RangeTblEntry* rte = (RangeTblEntry*)list_nth(query->rtable, query->resultRelation - 1);
+    if (linitial_int(query->resultRelations) <= list_length(query->rtable)) {
+        RangeTblEntry* rte = (RangeTblEntry*)list_nth(query->rtable, linitial_int(query->resultRelations) - 1);
         if (RTE_RELATION != rte->rtekind)
             return;
 
@@ -1040,7 +1040,7 @@ void lightProxy::runSimpleQuery(StringInfo exec_message)
 
     /* update unique sql stat */
     if (is_unique_sql_enabled() && is_local_unique_sql()) {
-        UpdateUniqueSQLStat(NULL, NULL, GetCurrentStatementLocalStartTimestamp());
+        instr_unique_sql_report_elapse_time(GetCurrentStatementLocalStartTimestamp());
     }
     pgstate_update_percentile_responsetime();
     // no more proxy
@@ -1055,6 +1055,9 @@ int lightProxy::runBatchMsg(StringInfo batch_message, bool sendDMsg, int batch_c
 
     SetUniqueSQLIdFromCachedPlanSource(this->m_cplan);
 
+    /* Must set snapshot before starting executor. */
+    PushActiveSnapshot(GetTransactionSnapshot(GTM_LITE_MODE));
+
     connect();
 
     LPROXY_DEBUG(ereport(DEBUG2,(errmodule(MOD_LIGHTPROXY),
@@ -1062,9 +1065,6 @@ int lightProxy::runBatchMsg(StringInfo batch_message, bool sendDMsg, int batch_c
         m_handle->nodeoid,
         m_stmtName,
         m_cplan->query_string))));
-
-    /* Must set snapshot before starting executor. */
-    PushActiveSnapshot(GetTransactionSnapshot(GTM_LITE_MODE));
 
     proxyNodeBegin(m_cplan->is_read_only);
 
@@ -1140,6 +1140,15 @@ void lightProxy::runMsg(StringInfo exec_message)
                     "commands ignored until end of transaction block, firstChar[%c]",
                     u_sess->proc_cxt.firstChar), 0));
 
+    /* Must set snapshot before starting executor, unless it is a MOT tables transaction. */
+#ifdef ENABLE_MOT
+    if (!IsMOTEngineUsed()) {
+#endif
+        PushActiveSnapshot(GetTransactionSnapshot(GTM_LITE_MODE));
+#ifdef ENABLE_MOT
+    }
+#endif
+
     connect();
 
     LPROXY_DEBUG(ereport(DEBUG2,(errmodule(MOD_LIGHTPROXY),
@@ -1160,15 +1169,6 @@ void lightProxy::runMsg(StringInfo exec_message)
 
     /* Set after start transaction in case there is no CurrentResourceOwner */
     SetUniqueSQLIdFromCachedPlanSource(this->m_cplan);
-
-    /* Must set snapshot before starting executor, unless it is a MOT tables transaction. */
-#ifdef ENABLE_MOT
-    if (!IsMOTEngineUsed()) {
-#endif
-        PushActiveSnapshot(GetTransactionSnapshot(GTM_LITE_MODE));
-#ifdef ENABLE_MOT
-    }
-#endif
 
     proxyNodeBegin(m_cplan->is_read_only);
     /* check if we need to send parse or not */
@@ -1249,7 +1249,7 @@ void lightProxy::runMsg(StringInfo exec_message)
 
     /* update unique sql stat */
     if (is_unique_sql_enabled() && is_local_unique_sql()) {
-        UpdateUniqueSQLStat(NULL, NULL, GetCurrentStatementLocalStartTimestamp());
+        instr_unique_sql_report_elapse_time(GetCurrentStatementLocalStartTimestamp());
     }
     pgstate_update_percentile_responsetime();
     setCurrentProxy(NULL);

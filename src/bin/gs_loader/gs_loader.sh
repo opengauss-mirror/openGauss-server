@@ -26,7 +26,7 @@ cmd_param_passwd=""
 cmd_param_db=""
 
 cmd_param_create="true"
-cmd_param_clean="true"
+cmd_param_clean="false"
 
 cmd_param_ctl=""
 cmd_param_data=""
@@ -229,7 +229,7 @@ function exec_sql()
 
     if res=$(gsql $host $port $user $passwd $db -t -c "$sql" 2>&1)
     then
-        echo -e "$res"
+        echo -e "$res" | sed -r 's/^Connect primary node.*//g' | sed -r 's/^total time.*//g'
     else
         echo "ERROR: function exec_sql"
     fi
@@ -267,7 +267,7 @@ function exec_sql_file()
     # delete last line: total time: 10ms
     if res=$(gsql $host $port $user $passwd $db -t -f "$sql_file" 2>&1)
     then
-        echo -e "$res" | sed '$ d'
+        echo -e "$res" | sed -r 's/^Connect primary node.*//g' | sed -r 's/^total time.*//g'
     else
         echo "ERROR: function exec_sql_file"
     fi
@@ -423,29 +423,29 @@ function loader_stat_summary()
     echo "" >> $logfile
     echo "Table $gs_loader_table_name:" >> $logfile
 
-    sql="select sum(loadrows)||' Rows successfully loaded.'  from gs_copy_summary where id in $txids_array"
+    sql="select pg_catalog.sum(loadrows)||' Rows successfully loaded.'  from gs_copy_summary where id in $txids_array"
     res=$(exec_sql "$sql")
     gs_loader_check_res "query gs_copy_summary failed: $sql" "$res"
     echo " "$res >> $logfile
 
-    sql="select sum(errorrows)||' Rows not loaded due to data errors.'  from gs_copy_summary where id in $txids_array"
+    sql="select pg_catalog.sum(errorrows)||' Rows not loaded due to data errors.'  from gs_copy_summary where id in $txids_array"
     res=$(exec_sql "$sql")
     gs_loader_check_res "query gs_copy_summary failed: $sql" "$res"
     echo " "$res >> $logfile
 
-    sql="select sum(whenrows)||' Rows not loaded because all WHEN clauses were failed.'  from gs_copy_summary where id in $txids_array"
+    sql="select pg_catalog.sum(whenrows)||' Rows not loaded because all WHEN clauses were failed.'  from gs_copy_summary where id in $txids_array"
     res=$(exec_sql "$sql")
     gs_loader_check_res "query gs_copy_summary failed: $sql" "$res"
     echo " "$res >> $logfile
 
-    sql="select sum(allnullrows)||' Rows not loaded because all fields were null.'  from gs_copy_summary where id in $txids_array"
+    sql="select pg_catalog.sum(allnullrows)||' Rows not loaded because all fields were null.'  from gs_copy_summary where id in $txids_array"
     res=$(exec_sql "$sql")
     gs_loader_check_res "query gs_copy_summary failed: $sql" "$res"
     echo " "$res >> $logfile
 
     echo "" >> $logfile
 
-    sql="select 'Total logical records skipped:    ' || sum(skiprows) from gs_copy_summary where id in $txids_array"
+    sql="select 'Total logical records skipped:    ' || pg_catalog.sum(skiprows) from gs_copy_summary where id in $txids_array"
     res=$(exec_sql "$sql")
     gs_loader_check_res "query gs_copy_summary failed: $sql" "$res"
     echo " "$res >> $logfile
@@ -529,7 +529,7 @@ function gen_full_copy_sql()
 
     echo "BEGIN;"
     echo "$copy_sql"
-    echo "select 'copy_txid:'||txid_current();"
+    echo "select 'copy_txid:'||pg_catalog.txid_current();"
     echo "COMMIT;"
 }
 
@@ -752,20 +752,16 @@ function clean_copy_tables()
 }
 
 function exit_with_clean_file() {
-    if [ "$cmd_param_clean" == "true" ]; then
-        rm -f ${gs_loader_file_tmp}
-    fi
+    rm -f ${gs_loader_file_tmp}
     exit $EXIT_CODE_FAIL
 }
 
 function clean_and_get_exit_code()
 {
-    if [ "$cmd_param_clean" == "true" ]; then
-        rm -f ${gs_loader_file_tmp}
-    fi
+    rm -f ${gs_loader_file_tmp}
 
     txids_array=$(get_txids_array)
-    sql="select 'not_load_lines:'||sum(errorrows)+sum(whenrows)+sum(allnullrows) from gs_copy_summary where id in $txids_array"
+    sql="select 'not_load_lines:'||pg_catalog.sum(errorrows)+pg_catalog.sum(whenrows)+pg_catalog.sum(allnullrows) from gs_copy_summary where id in $txids_array"
     res=$(exec_sql "$sql")
     gs_loader_check_res "query gs_copy_summary failed: $sql" "$res"
     not_load_lines=$(echo $res | grep 'not_load_lines:' | sed 's/[^0-9]*//g')

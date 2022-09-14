@@ -3344,8 +3344,31 @@ LINE 2: ALTER OPERATOR FAMILY integer_ops USING btree ADD
               ^
 ALTER TEXT SEARCH DICTIONARY my_dict ( StopWords = newrussian ); 
 ERROR:  text search dictionary "my_dict" does not exist
-drop table t1 CASCADE;
+-- Test constants as join keys for full join
+drop table t1 cascade;
 NOTICE:  drop cascades to function test(t1)
+drop table t2 cascade;
+ERROR:  table "t2" does not exist
+CREATE TABLE t1 (name TEXT, n INTEGER);
+CREATE TABLE t2 (name TEXT, n INTEGER);
+INSERT INTO t1 VALUES ( 'bb', 11 );
+INSERT INTO t2 VALUES ( 'bb', 12 );
+INSERT INTO t2 VALUES ( 'cc', 22 );
+INSERT INTO t2 VALUES ( 'ee', 42 );
+SELECT * FROM
+  (SELECT name, n as s1_n FROM t1) as s1
+FULL JOIN
+  (SELECT name, 2 as s2_n FROM t2) as s2
+ON (s1_n = s2_n) order by 1, 2;
+ name | s1_n | name | s2_n 
+------+------+------+------
+ bb   |   11 |      |     
+      |      | ee   |    2
+      |      | cc   |    2
+      |      | bb   |    2
+(4 rows)
+
+drop table t1 CASCADE;
 drop table test_raw cascade;
 \c regression;
 drop database IF EXISTS pl_test_llt;

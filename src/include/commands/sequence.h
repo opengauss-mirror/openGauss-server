@@ -158,14 +158,19 @@ extern Datum currval_oid(PG_FUNCTION_ARGS);
 extern Datum setval_oid(PG_FUNCTION_ARGS);
 extern Datum setval3_oid(PG_FUNCTION_ARGS);
 extern Datum lastval(PG_FUNCTION_ARGS);
-
+extern Datum last_insert_id(PG_FUNCTION_ARGS);
+extern Datum last_insert_id_no_args(PG_FUNCTION_ARGS);
 extern Datum pg_sequence_parameters(PG_FUNCTION_ARGS);
 extern Datum pg_sequence_last_value(PG_FUNCTION_ARGS);
 
+extern int128 nextval_internal(Oid relid);
+extern void autoinc_setval(Oid relid, int128 next, bool iscalled);
+extern int128 autoinc_get_nextval(Oid relid);
+extern bool CheckSeqOwnedByAutoInc(Oid seqoid);
 extern void DefineSequenceWrapper(CreateSeqStmt* stmt);
 extern void AlterSequenceWrapper(AlterSeqStmt* stmt);
 extern void PreventAlterSeqInTransaction(bool isTopLevel, AlterSeqStmt* stmt);
-extern void ResetSequence(Oid seq_relid);
+extern void ResetSequence(Oid seq_relid, bool restart);
 
 extern void seq_redo(XLogReaderState* rptr);
 extern void seq_desc(StringInfo buf, XLogReaderState* record);
@@ -200,6 +205,12 @@ typedef struct rename_sequence_callback_arg {
     char* newseqname;
     char* oldseqname;
 } rename_sequence_callback_arg;
+
+typedef enum {
+    NDE_UNKNOWN = 0,
+    NDE_NUMERIC, /* expected numeric nextval */
+    NDE_BIGINT /* expected bigint nextval */
+} nextval_default_expr_type_enum;
 
 extern void delete_global_seq(Oid relid, Relation seqrel);
 /* Sequence callbacks on GTM */

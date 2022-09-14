@@ -420,7 +420,6 @@ private:
     void append_roughcheck_info(int node_idx, int plan_idx, bool from_datanode);
     void append_llvm_info(int node_idx, int plan_idx, bool from_datanode);
     void append_bloomfilter_info(int node_idx, int plan_idx, bool from_datanode);
-    void append_dfs_block_info(int node_idx, int plan_idx, bool from_datanode);
 
     void write_memory();
     void append_peak_memory_info(int node_idx, int plan_idx, bool from_datanode);

@@ -35,21 +35,10 @@
 #include "register_gram_check.h"
 
 static bool has_reg_hookfunc = false;
-static pthread_mutex_t reg_lock = {0};
+static pthread_mutex_t reg_lock = PTHREAD_MUTEX_INITIALIZER;
 
 CmkemErrCode reg_all_cmk_entity_manager()
 {
-    static bool has_init_lock = false;
-    
-    if (!has_init_lock) {
-        if (pthread_mutex_init(&reg_lock, NULL) != 0) {
-            cmkem_errmsg("failed to init the lock of cmk entity manager register.");
-            return CMKEM_REG_CMK_MANAGER_ERR;
-        }
-
-        has_init_lock = true;
-    }
-
     if (pthread_mutex_lock(&reg_lock) != 0) {
         return CMKEM_REG_CMK_MANAGER_ERR;
     }

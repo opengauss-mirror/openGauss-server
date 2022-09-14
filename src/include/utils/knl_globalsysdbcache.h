@@ -124,7 +124,7 @@ public:
         MAX_GSC_MEMORY_SPACE = (uint64)(REAL_GSC_MEMORY_SPACE * 1.5);
         EXPECT_MAX_DB_COUNT = REAL_GSC_MEMORY_SPACE / (GLOBAL_DB_MEMORY_MIN) + 1;
 #ifdef ENABLE_LIET_MODE
-        /* since gsc_rough_used_space is an esitmate of memory, reduce the upperlimit in lite mode
+        /* since db_rough_used_space is an esitmate of memory, reduce the upperlimit in lite mode
             * 1.5 * 0.7 = 1.05. it is the upperlimit */
         REAL_GSC_MEMORY_SPACE = REAL_GSC_MEMORY_SPACE * 0.7;
         SAFETY_GSC_MEMORY_SPACE = SAFETY_GSC_MEMORY_SPACE * 0.7;
@@ -134,19 +134,21 @@ public:
 
     inline bool StopInsertGSC()
     {
-        return gsc_rough_used_space > REAL_GSC_MEMORY_SPACE;
+        return GetGSCUsedMemorySpace() > REAL_GSC_MEMORY_SPACE;
     }
 
     inline bool MemoryUnderControl()
     {
-        return gsc_rough_used_space < SAFETY_GSC_MEMORY_SPACE;
+        return GetGSCUsedMemorySpace() < SAFETY_GSC_MEMORY_SPACE;
     }
 
-    void Refresh(GlobalSysDBCacheEntry *entry);
+    void Refresh();
 
     List* GetGlobalDBStatDetail(Oid dbOid, Oid relOid, GscStatDetail stat_detail);
-    void Clean(Oid dbOid);
+    template <bool force>
+    void ResetCache(Oid db_id);
     void InvalidAllRelations();
+    void InvalidateAllRelationNodeList();
 
     /* in standby mode, and wal_level is less than hot_standby, then gsc is unusable */
     bool hot_standby;
@@ -159,14 +161,16 @@ public:
       * it doesnt include the head of blocks belong to memcxt
       * for example: 1GB memcxt, and block size is 1kb, then there are 1000,000 blocks, and head of block is 64 bytes,
       *              64MB is out of estimating */
-    pg_atomic_uint64 gsc_rough_used_space;
+    pg_atomic_uint64 db_rough_used_space;
+    pg_atomic_uint64 GetGSCUsedMemorySpace()
+    {
+        return db_rough_used_space + AllocSetContextUsedSpace((AllocSet)m_global_sysdb_mem_cxt);
+    }
     void GSCMemThresholdCheck();
 private:
     void FreeDeadDBs();
     void HandleDeadDB(GlobalSysDBCacheEntry *exist_db);
-    void SwapOutDBEntry(Index hash_index);
-    void SwapOutTailBucket();
-    void UpdateBucketSpace(Index hash_index);
+    void FixDBName(GlobalSysDBCacheEntry *entry);
 
     void CalcDynamicHashBucketStrategy();
     DynamicGSCMemoryLevel CalcDynamicGSCMemoryLevel(uint64 total_space);
@@ -211,6 +215,7 @@ private:
     /* Global memory control fields */
     MemoryContext m_global_sysdb_mem_cxt;
 
+    /* variables to control memory-swapping for SysDB entry */
     volatile uint32 m_is_memorychecking;
     Index m_swapout_hash_index;
 
@@ -227,10 +232,15 @@ private:
     bool m_rel_store_in_shared[FirstBootstrapObjectId];
     bool m_rel_for_init_syscache[FirstNormalObjectId];
     bool m_syscache_relids[FirstNormalObjectId];
-
+    pthread_rwlock_t *m_special_lock;
 };
+
 void NotifyGscRecoveryStarted();
 void NotifyGscRecoveryFinished();
+void NotifyGscSigHup();
+void NotifyGscHotStandby();
+void NotifyGscPgxcPoolReload();
+void NotifyGscDropDB(Oid db_id, bool need_clear);
 extern Datum gs_gsc_dbstat_info(PG_FUNCTION_ARGS);
 extern Datum gs_gsc_clean(PG_FUNCTION_ARGS);
 extern Datum gs_gsc_catalog_detail(PG_FUNCTION_ARGS);

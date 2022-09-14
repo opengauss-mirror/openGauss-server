@@ -138,13 +138,6 @@ PlannedStmt* pgxc_planner(Query* query, int cursorOptions, ParamListInfo boundPa
         set_stream_off();
     }
 
-    if (u_sess->SPI_cxt._connected >= 0) {
-        errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
-            NOTPLANSHIPPING_LENGTH,
-            "queries in procedure and function do not support stream.");
-        securec_check_ss_c(sprintf_rc, "\0", "\0");
-        set_stream_off();
-    }
 #endif
     /*
      * we will create plan with stream first, and if it is not support stream,

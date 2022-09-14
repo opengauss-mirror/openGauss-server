@@ -37,7 +37,8 @@ ES_SELECTIVITY::ES_SELECTIVITY()
       sjinfo(NULL),
       origin_clauses(NULL),
       path(NULL),
-      bucketsize_list(NULL)
+      bucketsize_list(NULL),
+      statlist(NULL)
 {}
 
 ES_SELECTIVITY::~ES_SELECTIVITY()
@@ -132,11 +133,20 @@ Selectivity ES_SELECTIVITY::calculate_selectivity(PlannerInfo* root_input, List*
 
     /* calculate selectivity */
     ListCell* l = NULL;
+    Selectivity prob;
     foreach(l, es_candidate_list) {
         es_candidate* temp = (es_candidate*)lfirst(l);
         switch (temp->tag) {
             case ES_EQSEL:
-                result *= cal_eqsel(temp);
+                if (u_sess->attr.attr_sql.enable_ai_stats &&
+                    u_sess->attr.attr_sql.multi_stats_type != MCV_OPTION) {
+                    prob = cal_eqsel_ai(temp);
+                    if (prob >= 0) {
+                        result *= prob;
+                    }
+                } else {
+                    result *= cal_eqsel(temp);
+                }
                 break;
             case ES_EQJOINSEL:
                 /* compute hash bucket size */
@@ -157,9 +167,6 @@ Selectivity ES_SELECTIVITY::calculate_selectivity(PlannerInfo* root_input, List*
     }
 
     es_candidate_list = es_candidate_saved;
-
-    /* free memory, but unmatched_clause_group need to be free manually */
-    clear();
 
     return result;
 }
@@ -332,11 +339,13 @@ void ES_SELECTIVITY::clear()
         temp->right_rte = NULL;
         list_free_ext(temp->clause_group);
         list_free_deep(temp->clause_map);
-        clear_extended_stats(temp->left_extended_stats);
-        clear_extended_stats(temp->right_extended_stats);
+        temp->left_extended_stats = NULL;
+        temp->right_extended_stats = NULL;
         list_free_ext(temp->pseudo_clause_list);
     }
     list_free_deep(es_candidate_list);
+
+    clear_extended_stats_list(statlist);
 
     /*
      * unmatched_clause_group need to be free manually after
@@ -353,6 +362,18 @@ void ES_SELECTIVITY::clear()
  */
 void ES_SELECTIVITY::clear_extended_stats(ExtendedStats* extended_stats) const
 {
+#ifndef ENABLE_MULTIPLE_NODES
+    if (extended_stats && extended_stats->dependencies) {
+        MVDependencies* dependencies = extended_stats->dependencies;
+        for (int i = 0; i < dependencies->ndeps; i++) {
+            if (dependencies->deps[i]) {
+                pfree_ext(dependencies->deps[i]);
+            }
+        }
+        pfree_ext(dependencies);
+    }
+#endif
+
     if (extended_stats) {
         bms_free_ext(extended_stats->bms_attnum);
         if (extended_stats->mcv_numbers)
@@ -363,6 +384,8 @@ void ES_SELECTIVITY::clear_extended_stats(ExtendedStats* extended_stats) const
             pfree_ext(extended_stats->mcv_nulls);
         if (extended_stats->other_mcv_numbers)
             pfree_ext(extended_stats->other_mcv_numbers);
+        if (extended_stats->bayesnet_model)
+            pfree_ext(extended_stats->bayesnet_model);
         pfree_ext(extended_stats);
         extended_stats = NULL;
     }
@@ -547,6 +570,7 @@ void ES_SELECTIVITY::match_extended_stats(es_candidate* es, List* stats_list, bo
                     es->left_extended_stats = other_side_extended_stats;
                 }
                 clear_extended_stats((ExtendedStats*)lfirst(best_matched_stats));
+                lfirst(best_matched_stats) = NULL;
                 break;
             } else if (other_side_extended_stats != NULL && matched > max_matched) {
                 /* not all attnums have extended stats, find the first maximum match */
@@ -1268,8 +1292,8 @@ void ES_SELECTIVITY::read_statistic_eqsel(es_candidate* es)
 {
     int num_stats = 0;
     char starelkind = OidIsValid(es->left_rte->partitionOid) ? STARELKIND_PARTITION : STARELKIND_CLASS;
-    /* read all multi-column statistic from pg_statistic if possible */
-    List* stats_list =
+    /* read all multi-column statistic from pg_statistic_ext if possible */
+    statlist =
         es_get_multi_column_stats(es->left_rte->relid, starelkind, es->left_rte->inh, &num_stats, es->has_null_clause);
     /* no multi-column statistic */
     if (num_stats == 0) {
@@ -1278,18 +1302,20 @@ void ES_SELECTIVITY::read_statistic_eqsel(es_candidate* es)
         return;
     }
 
+    es->left_extended_stats = NULL;
     /* return with multi-column statistic list */
     if (num_stats <= ES_MAX_FETCH_NUM_OF_INSTANCE) {
         ListCell* l = NULL;
         int max_matched = 0;
         int num_members = bms_num_members(es->left_attnums);
         ListCell* best_matched_stat_ptr = NULL;
-        foreach(l, stats_list) {
+        foreach(l, statlist) {
             ExtendedStats* extended_stats = (ExtendedStats*)lfirst(l);
             if (bms_is_subset(extended_stats->bms_attnum, es->left_attnums)) {
                 int matched = bms_num_members(extended_stats->bms_attnum);
                 if (matched == num_members) {
-                    es->left_extended_stats = copy_stats_ptr(l);
+                    best_matched_stat_ptr = l;
+                    max_matched = matched;
                     break;
                 } else if (matched > max_matched) {
                     best_matched_stat_ptr = l;
@@ -1298,8 +1324,8 @@ void ES_SELECTIVITY::read_statistic_eqsel(es_candidate* es)
             }
         }
 
-        if (best_matched_stat_ptr != NULL) {
-            es->left_extended_stats = copy_stats_ptr(best_matched_stat_ptr);
+        if (es->left_extended_stats == NULL && best_matched_stat_ptr != NULL) {
+            es->left_extended_stats = (ExtendedStats *)lfirst(best_matched_stat_ptr);
             /* remove members not in the multi-column stats */
             remove_members_without_es_stats(max_matched, num_members, es);
         }
@@ -1329,8 +1355,6 @@ void ES_SELECTIVITY::read_statistic_eqsel(es_candidate* es)
     }
 
     cal_stadistinct_eqsel(es);
-
-    clear_extended_stats_list(stats_list);
 
     return;
 }

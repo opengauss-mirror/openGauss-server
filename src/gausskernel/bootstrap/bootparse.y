@@ -224,7 +224,7 @@ Boot_CreateStmt:
 												   shared_relation ? GLOBALTABLESPACE_OID : 0,
 												   $3,
 												   InvalidOid,
-                                                                                                   InvalidOid,						
+												   InvalidOid,
 												   tupdesc,
 												   RELKIND_RELATION,
 												   RELPERSISTENCE_PERMANENT,

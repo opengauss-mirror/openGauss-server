@@ -1,0 +1,222 @@
+drop database if exists dump_autoinc_db;
+NOTICE:  database "dump_autoinc_db" does not exist, skipping
+drop database if exists restore_autoinc_db;
+NOTICE:  database "restore_autoinc_db" does not exist, skipping
+create database dump_autoinc_db with dbcompatibility = 'B';
+create database restore_autoinc_db with dbcompatibility = 'B';
+\c dump_autoinc_db
+-- create auto_increment table
+CREATE TABLE test_dump_autoinc_pk(col1 int auto_increment PRIMARY KEY, col2 int) AUTO_INCREMENT = 1;
+NOTICE:  CREATE TABLE will create implicit sequence "test_dump_autoinc_pk_col1_seq" for serial column "test_dump_autoinc_pk.col1"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test_dump_autoinc_pk_pkey" for table "test_dump_autoinc_pk"
+INSERT INTO test_dump_autoinc_pk VALUES(0,0);
+INSERT INTO test_dump_autoinc_pk VALUES(0,0);
+CREATE TABLE test_dump_autoinc_null(col1 int auto_increment NULL UNIQUE, col2 int default 1) AUTO_INCREMENT = 10;
+NOTICE:  CREATE TABLE will create implicit sequence "test_dump_autoinc_null_col1_seq" for serial column "test_dump_autoinc_null.col1"
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "test_dump_autoinc_null_col1_key" for table "test_dump_autoinc_null"
+INSERT INTO test_dump_autoinc_null VALUES(0,0);
+INSERT INTO test_dump_autoinc_null VALUES(0,0);
+CREATE TEMPORARY TABLE test_dump_autoinc_ltmp(col1 int auto_increment UNIQUE, col2 int) AUTO_INCREMENT = 1000;
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "test_dump_autoinc_ltmp_col1_key" for table "test_dump_autoinc_ltmp"
+INSERT INTO test_dump_autoinc_ltmp VALUES(0,0);
+INSERT INTO test_dump_autoinc_ltmp VALUES(0,0);
+CREATE GLOBAL TEMPORARY TABLE test_dump_autoinc_gtmp(col1 int, col2 int  auto_increment PRIMARY KEY) AUTO_INCREMENT = 10000;
+NOTICE:  CREATE TABLE will create implicit sequence "test_dump_autoinc_gtmp_col2_seq" for serial column "test_dump_autoinc_gtmp.col2"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test_dump_autoinc_gtmp_pkey" for table "test_dump_autoinc_gtmp"
+INSERT INTO test_dump_autoinc_gtmp VALUES(0,0);
+INSERT INTO test_dump_autoinc_gtmp VALUES(0,0);
+CREATE UNLOGGED TABLE test_dump_autoinc_unlog(col1 int auto_increment NULL UNIQUE, col2 int) AUTO_INCREMENT = 100000;
+NOTICE:  CREATE TABLE will create implicit sequence "test_dump_autoinc_unlog_col1_seq" for serial column "test_dump_autoinc_unlog.col1"
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "test_dump_autoinc_unlog_col1_key" for table "test_dump_autoinc_unlog"
+INSERT INTO test_dump_autoinc_unlog VALUES(0,0);
+INSERT INTO test_dump_autoinc_unlog VALUES(0,0);
+CREATE TABLE test_dump_autoinc_pk_gencol(col1 int auto_increment PRIMARY KEY, col2 int generated always as(2*col1) stored) AUTO_INCREMENT = 1000000;
+NOTICE:  CREATE TABLE will create implicit sequence "test_dump_autoinc_pk_gencol_col1_seq" for serial column "test_dump_autoinc_pk_gencol.col1"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test_dump_autoinc_pk_gencol_pkey" for table "test_dump_autoinc_pk_gencol"
+INSERT INTO test_dump_autoinc_pk_gencol VALUES(0);
+INSERT INTO test_dump_autoinc_pk_gencol VALUES(0);
+CREATE TABLE test_dump_autoinc_range_list
+(
+    col_1 int  auto_increment primary key,
+    col_2 int  NOT NULL ,
+    col_3 VARCHAR2 ( 30 ) NOT NULL ,
+    col_4 int  generated always as(2*col_2) stored  ,
+    check (col_4 >= col_2)
+)
+with(FILLFACTOR=80)
+PARTITION BY RANGE (col_1) SUBPARTITION BY list (col_2)
+(
+  PARTITION p_range_1 VALUES LESS THAN( -10 )
+  (
+    SUBPARTITION p_list_1_1 VALUES ( '-1','-2','-3','-4','-5'),
+    SUBPARTITION p_list_1_2 VALUES ( default )
+  ),
+    PARTITION p_range_2 VALUES LESS THAN( 10 )
+  (
+    SUBPARTITION p_list_2_1 VALUES ( '6','7','8','9','10'),
+    SUBPARTITION p_list_2_2 VALUES ( '16','17','18','19','20'),
+    SUBPARTITION p_list_2_3 VALUES ( '26','27','28','29','30'),
+    SUBPARTITION p_list_2_4 VALUES ( default )
+  ),
+    PARTITION p_range_3 VALUES LESS THAN( 20 )
+  (
+    SUBPARTITION p_list_3_1 VALUES ( '1','2','3','4','5'),
+    SUBPARTITION p_list_3_2 VALUES ( default )
+  ),
+   PARTITION p_range_4 VALUES LESS THAN( 30 )
+   (
+    SUBPARTITION p_list_4_1 VALUES ( default )
+  ),
+   PARTITION p_range_5 VALUES LESS THAN( 40 ),
+   PARTITION p_range_6 VALUES LESS THAN( 90 )
+  (
+    SUBPARTITION p_list_6_1 VALUES ( '6','7','8','9','10'),
+    SUBPARTITION p_list_6_2 VALUES ( '16','17','18','19','20'),
+    SUBPARTITION p_list_6_3 VALUES ( '26','27','28','29','30'),
+    SUBPARTITION p_list_6_4 VALUES ( default )
+  ),
+   PARTITION p_range_7 VALUES LESS THAN( 100)
+   (
+   SUBPARTITION p_list_7_1 VALUES ( '6','7','8','9','10')
+   )
+) ENABLE ROW MOVEMENT;
+NOTICE:  CREATE TABLE will create implicit sequence "test_dump_autoinc_range_list_col_1_seq" for serial column "test_dump_autoinc_range_list.col_1"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test_dump_autoinc_range_list_pkey" for table "test_dump_autoinc_range_list"
+INSERT INTO test_dump_autoinc_range_list VALUES(0,1,'1');
+INSERT INTO test_dump_autoinc_range_list VALUES(0,6,'6');
+\! @abs_bindir@/gs_dump dump_autoinc_db -p @portstring@ -f @abs_bindir@/dump_autoinc_test.tar -F t >/dev/null 2>&1; echo $?
+0
+\! @abs_bindir@/gs_restore -d restore_autoinc_db -p @portstring@ @abs_bindir@/dump_autoinc_test.tar >/dev/null 2>&1; echo $?
+0
+\c restore_autoinc_db
+-- local temp table was not dumped
+\d+ test_dump_autoinc_ltmp
+-- check restored tables
+\d+ test_dump_autoinc_pk
+                        Table "public.test_dump_autoinc_pk"
+ Column |  Type   |        Modifiers        | Storage | Stats target | Description 
+--------+---------+-------------------------+---------+--------------+-------------
+ col1   | integer | not null AUTO_INCREMENT | plain   |              | 
+ col2   | integer |                         | plain   |              | 
+Indexes:
+    "test_dump_autoinc_pk_pkey" PRIMARY KEY, btree (col1) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+INSERT INTO test_dump_autoinc_pk VALUES(0,0);
+select col1,col2 from test_dump_autoinc_pk order by 1,2;
+ col1 | col2 
+------+------
+    1 |    0
+    2 |    0
+    3 |    0
+(3 rows)
+
+\d+ test_dump_autoinc_null
+                       Table "public.test_dump_autoinc_null"
+ Column |  Type   |        Modifiers        | Storage | Stats target | Description 
+--------+---------+-------------------------+---------+--------------+-------------
+ col1   | integer | not null AUTO_INCREMENT | plain   |              | 
+ col2   | integer | default 1               | plain   |              | 
+Indexes:
+    "test_dump_autoinc_null_col1_key" UNIQUE CONSTRAINT, btree (col1) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+INSERT INTO test_dump_autoinc_null VALUES(0,0);
+select col1,col2 from test_dump_autoinc_null order by 1,2;
+ col1 | col2 
+------+------
+   10 |    0
+   11 |    0
+   12 |    0
+(3 rows)
+
+\d+ test_dump_autoinc_gtmp
+                       Table "public.test_dump_autoinc_gtmp"
+ Column |  Type   |        Modifiers        | Storage | Stats target | Description 
+--------+---------+-------------------------+---------+--------------+-------------
+ col1   | integer |                         | plain   |              | 
+ col2   | integer | not null AUTO_INCREMENT | plain   |              | 
+Indexes:
+    "test_dump_autoinc_gtmp_pkey" PRIMARY KEY, btree (col2) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no, on_commit_delete_rows=false
+
+INSERT INTO test_dump_autoinc_gtmp VALUES(0,0);
+select col1,col2 from test_dump_autoinc_gtmp order by 1,2;
+ col1 | col2 
+------+------
+    0 |    1
+(1 row)
+
+\d+ test_dump_autoinc_unlog
+                  Unlogged table "public.test_dump_autoinc_unlog"
+ Column |  Type   |        Modifiers        | Storage | Stats target | Description 
+--------+---------+-------------------------+---------+--------------+-------------
+ col1   | integer | not null AUTO_INCREMENT | plain   |              | 
+ col2   | integer |                         | plain   |              | 
+Indexes:
+    "test_dump_autoinc_unlog_col1_key" UNIQUE CONSTRAINT, btree (col1) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+INSERT INTO test_dump_autoinc_unlog VALUES(0,0);
+select col1,col2 from test_dump_autoinc_unlog order by 1,2;
+  col1  | col2 
+--------+------
+ 100000 |    0
+ 100001 |    0
+ 100002 |    0
+(3 rows)
+
+\d+ test_dump_autoinc_pk_gencol
+                            Table "public.test_dump_autoinc_pk_gencol"
+ Column |  Type   |                Modifiers                | Storage | Stats target | Description 
+--------+---------+-----------------------------------------+---------+--------------+-------------
+ col1   | integer | not null AUTO_INCREMENT                 | plain   |              | 
+ col2   | integer | generated always as ((2 * col1)) stored | plain   |              | 
+Indexes:
+    "test_dump_autoinc_pk_gencol_pkey" PRIMARY KEY, btree (col1) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+INSERT INTO test_dump_autoinc_pk_gencol VALUES(0);
+select col1,col2 from test_dump_autoinc_pk_gencol order by 1,2;
+  col1   |  col2   
+---------+---------
+ 1000000 | 2000000
+ 1000001 | 2000002
+ 1000002 |       0
+(3 rows)
+
+\d+ test_dump_autoinc_range_list
+                                    Table "public.test_dump_autoinc_range_list"
+ Column |         Type          |                Modifiers                 | Storage  | Stats target | Description 
+--------+-----------------------+------------------------------------------+----------+--------------+-------------
+ col_1  | integer               | not null AUTO_INCREMENT                  | plain    |              | 
+ col_2  | integer               | not null                                 | plain    |              | 
+ col_3  | character varying(30) | not null                                 | extended |              | 
+ col_4  | integer               | generated always as ((2 * col_2)) stored | plain    |              | 
+Indexes:
+    "test_dump_autoinc_range_list_pkey" PRIMARY KEY, btree (col_1) TABLESPACE pg_default
+Check constraints:
+    "test_dump_autoinc_range_list_check" CHECK (col_4 >= col_2)
+Partition By RANGE(col_1) Subpartition By LIST(col_2)
+Number of partitions: 7 (View pg_partition to check each partition range.)
+Number of subpartitions: 15 (View pg_partition to check each subpartition range.)
+Has OIDs: no
+Options: orientation=row, fillfactor=80, compression=no
+
+INSERT INTO test_dump_autoinc_range_list VALUES(0,16,'16');
+select col_1,col_2,col_3,col_4 from test_dump_autoinc_range_list order by 1,2,3,4;
+ col_1 | col_2 | col_3 | col_4 
+-------+-------+-------+-------
+     1 |     1 | 1     |     2
+     2 |     6 | 6     |    12
+     3 |    16 | 16    |    32
+(3 rows)
+
+\c regression
+drop database if exists restore_autoinc_db;
+drop database if exists dump_autoinc_db;

@@ -75,13 +75,17 @@ int ThreadPoolStream::StartUp(int idx, StreamProducer* producer, ThreadPoolGroup
 
 void ThreadPoolStream::WaitMission()
 {
+    struct timespec ts;
     PreventSignal();
     pthread_mutex_lock(m_mutex);
     while (m_producer == NULL) {
         if (m_threadStatus == THREAD_EXIT) {
             break;
         }
-        pthread_cond_wait(m_cond, m_mutex);
+        clock_gettime(CLOCK_REALTIME, &ts);
+        ts.tv_sec += 10;  // 10s
+        ts.tv_nsec = 0;
+        pthread_cond_timedwait(m_cond, m_mutex, &ts);
     }
     pthread_mutex_unlock(m_mutex);
     Assert(t_thrd.proc->pid == t_thrd.proc_cxt.MyProcPid);
@@ -139,7 +143,6 @@ void ThreadPoolStream::InitStream()
     read_nondefault_variables();
 
     /* Do local initialization of file, storage and buffer managers */
-    ReBuildLSC();
     InitFileAccess();
     smgrinit();
 

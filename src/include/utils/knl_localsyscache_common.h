@@ -27,17 +27,22 @@
 #define KNL_LOCALSYSCACHE_COMMON_H
 #include "utils/knl_globalsyscache_common.h"
 
-struct LocalBaseEntry {
+/*
+ * element entry for LSC's RelCache/PartCache
+ */
+typedef struct LocalBaseEntry {
     Oid oid;
     Dlelem cache_elem;
     bool obj_is_nailed;
-};
-struct LocalPartitionEntry : LocalBaseEntry {
+} LocalBaseEntry;
+
+typedef struct LocalPartitionEntry : LocalBaseEntry {
     Partition part;
-};
-struct LocalRelationEntry : LocalBaseEntry {
+} LocalPartitionEntry;
+
+typedef struct LocalRelationEntry : LocalBaseEntry {
     Relation rel;
-};
+} LocalRelationEntry;
 
 struct InvalidBaseEntry {
     int count;

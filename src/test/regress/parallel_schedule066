@@ -1,0 +1,2 @@
+# dt coverage test
+test: conversion ts_gb18030_utf8

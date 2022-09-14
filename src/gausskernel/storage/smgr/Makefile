@@ -9,8 +9,8 @@ ifneq "$(MAKECMDGOALS)" "clean"
     endif
   endif
 endif
-OBJS = md.o smgr.o smgrtype.o knl_uundofile.o segstore.o page_compression.o mmap_shared.o
+OBJS = md.o smgr.o smgrtype.o knl_uundofile.o segstore.o page_compression.o
 
-SUBDIRS = segment
+SUBDIRS = segment cfs
 
 include $(top_srcdir)/src/gausskernel/common.mk

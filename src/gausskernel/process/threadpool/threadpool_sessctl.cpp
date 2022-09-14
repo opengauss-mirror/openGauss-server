@@ -57,7 +57,7 @@
 #ifdef MEMORY_CONTEXT_TRACK
 #include "memory_func.h"
 #endif
-
+#include "utils/mem_snapshot.h"
 
 ThreadPoolSessControl::ThreadPoolSessControl(MemoryContext context)
 {
@@ -628,7 +628,7 @@ void ThreadPoolSessControl::getSessionClientInfo(Tuplestorestate* tupStore, Tupl
 }
 
 void ThreadPoolSessControl::getSessionMemoryContextInfo(const char* ctx_name,
-    StringInfoData* buf, knl_sess_control** sess)
+    StringInfoDataHuge* buf, knl_sess_control** sess)
 {
 #ifdef MEMORY_CONTEXT_TRACK
     AutoMutexLock alock(&m_sessCtrlock);
@@ -670,6 +670,95 @@ void ThreadPoolSessControl::getSessionMemoryContextInfo(const char* ctx_name,
 #endif
 }
 
+void ThreadPoolSessControl::getSessionMemoryContextSpace(StringInfoDataHuge* buf, knl_sess_control** sess)
+{
+    AutoMutexLock alock(&m_sessCtrlock);
+    knl_sess_control* ctrl = NULL;
+    Dlelem* elem = NULL;
+
+    PG_TRY();
+    {
+        HOLD_INTERRUPTS();
+        alock.lock();
+
+        /* collect all the Memory Context status, put in data */
+        elem = DLGetHead(&m_activelist);
+
+        while (elem != NULL) {
+            ctrl = (knl_sess_control*)DLE_VAL(elem);
+            *sess = ctrl;
+            if (ctrl->sess) {
+                (void)syscalllockAcquire(&ctrl->sess->utils_cxt.deleMemContextMutex);
+                RecursiveUnSharedMemoryContext(ctrl->sess->top_mem_cxt, buf);
+                (void)syscalllockRelease(&ctrl->sess->utils_cxt.deleMemContextMutex);
+            }
+            elem = DLGetSucc(elem);
+        }
+        alock.unLock();
+
+        RESUME_INTERRUPTS();
+    }
+    PG_CATCH();
+    {
+        if (*sess != NULL) {
+            ctrl = *sess;
+            (void)syscalllockRelease(&ctrl->sess->utils_cxt.deleMemContextMutex);
+        }
+        alock.unLock();
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+}
+
+bool ThreadPoolSessControl::CheckSessionCanTerminate(const Oid roleId)
+{
+    if (superuser_arg(roleId) || systemDBA_arg(roleId)) {
+        return false;
+    }
+
+    if (isMonitoradmin(roleId)) {
+        return false;
+    }
+
+    return true;
+}
+SessMemoryUsage* ThreadPoolSessControl::getSessionMemoryUsage(int* num)
+{
+    AutoMutexLock alock(&m_sessCtrlock);
+    knl_sess_control* ctrl = NULL;
+    Dlelem* elem = NULL;
+
+    HOLD_INTERRUPTS();
+    alock.lock();
+
+    SessMemoryUsage* result = (SessMemoryUsage*)palloc(m_activeSessionCount * sizeof(SessMemoryUsage));
+    int index = 0;
+
+    elem = DLGetHead(&m_activelist);
+    while (elem != NULL) {
+        ctrl = (knl_sess_control*)DLE_VAL(elem);
+        knl_session_context* sess = ctrl->sess;
+        if (sess && CheckSessionCanTerminate(sess->proc_cxt.MyRoleId)) {
+            result[index].sessid = sess->session_id;
+            result[index].usedSize = sess->stat_cxt.trackedBytes;
+            /* BackendStatusArray may not assigned while new connection init */
+            if (t_thrd.shemem_ptr_cxt.BackendStatusArray != NULL) {
+                result[index].state = (int)t_thrd.shemem_ptr_cxt.BackendStatusArray[sess->session_ctr_index].st_state;
+            } else {
+                result[index].state = STATE_IDLE;
+            }
+            index++;
+        }
+        elem = DLGetSucc(elem);
+    }
+
+    alock.unLock();
+    RESUME_INTERRUPTS();
+
+    *num = index;
+    return result;
+}
+
 knl_session_context* ThreadPoolSessControl::GetSessionByIdx(int idx)
 {
     if (IsValidCtrlIndex(idx)) {
@@ -701,26 +790,57 @@ void ThreadPoolSessControl::CheckSessionTimeout()
     for (cidx = 0; cidx < m_maxActiveSessionCount; cidx++) {
         knl_sess_control* ctrl = &m_base[cidx];
         knl_session_context* sess = ctrl->sess;
-        if (sess != NULL && sess->attr.attr_common.SessionTimeout != 0) {
-            if (sess->storage_cxt.session_timeout_active) {
-                if (now >= sess->storage_cxt.session_fin_time && sess->attr.attr_common.SessionTimeoutCount < 10) {
+        if (sess != NULL && sess->attr.attr_common.SessionTimeout != 0 &&
+            sess->storage_cxt.session_timeout_active) {
+            if (now >= sess->storage_cxt.session_fin_time && sess->attr.attr_common.SessionTimeoutCount < 10) {
 #ifdef HAVE_INT64_TIMESTAMP
-                    elog(LOG, "close session : %lu for %d times due to session timeout : %d, max finish time is %ld. But now is:%ld",
-                         sess->session_id, sess->attr.attr_common.SessionTimeoutCount + 1,
-                         sess->attr.attr_common.SessionTimeout, sess->storage_cxt.session_fin_time, now);
+                elog(LOG, "close session : %lu for %d times due to session timeout : %d, max finish time is %ld. But now is:%ld",
+                        sess->session_id, sess->attr.attr_common.SessionTimeoutCount + 1,
+                        sess->attr.attr_common.SessionTimeout, sess->storage_cxt.session_fin_time, now);
 #else
-                    elog(LOG, "close session : %lu for %d times due to session timeout : %d, max finish time is %lf. But now is:%lf",
-                         sess->session_id, sess->attr.attr_common.SessionTimeoutCount + 1,
-                         sess->attr.attr_common.SessionTimeout, sess->storage_cxt.session_fin_time, now);
+                elog(LOG, "close session : %lu for %d times due to session timeout : %d, max finish time is %lf. But now is:%lf",
+                        sess->session_id, sess->attr.attr_common.SessionTimeoutCount + 1,
+                        sess->attr.attr_common.SessionTimeout, sess->storage_cxt.session_fin_time, now);
 #endif
-                    sess->attr.attr_common.SessionTimeoutCount++;
-                    CloseClientSocket(sess, false);
-                }
+                sess->attr.attr_common.SessionTimeoutCount++;
+                CloseClientSocket(sess, false);
             }
         }
     }
     alock.unLock();
 }
+
+#ifndef ENABLE_MULTIPLE_NODES
+void ThreadPoolSessControl::CheckIdleInTransactionSessionTimeout()
+{
+    AutoMutexLock alock(&m_sessCtrlock);
+    alock.lock();
+    int cidx;
+    TimestampTz now = GetCurrentTimestamp();
+    for (cidx = 0; cidx < m_maxActiveSessionCount; cidx++) {
+        knl_sess_control* ctrl = &m_base[cidx];
+        knl_session_context* sess = ctrl->sess;
+        if (sess != NULL && sess->attr.attr_common.IdleInTransactionSessionTimeout > 0 &&
+            sess->storage_cxt.idle_in_transaction_session_timeout_active) {
+            if (now >= sess->storage_cxt.idle_in_transaction_session_fin_time &&
+                sess->attr.attr_common.IdleInTransactionSessionTimeoutCount < 10) {
+#ifdef HAVE_INT64_TIMESTAMP
+                elog(LOG, "close session : %lu for %d times due to idle in transaction timeout : %d, max finish time is %ld. But now is:%ld",
+                        sess->session_id, sess->attr.attr_common.IdleInTransactionSessionTimeoutCount + 1,
+                        sess->attr.attr_common.IdleInTransactionSessionTimeout, sess->storage_cxt.idle_in_transaction_session_fin_time, now);
+#else
+                elog(LOG, "close session : %lu for %d times due to idle in transaction session timeout : %d, max finish time is %lf. But now is:%lf",
+                        sess->session_id, sess->attr.attr_common.IdleInTransactionSessionTimeoutCount + 1,
+                        sess->attr.attr_common.IdleInTransactionSessionTimeout, sess->storage_cxt.idle_in_transaction_session_fin_time, now);
+#endif
+                sess->attr.attr_common.IdleInTransactionSessionTimeout++;
+                CloseClientSocket(sess, false);
+            }
+        }
+    }
+    alock.unLock();
+}
+#endif
 
 TransactionId ThreadPoolSessControl::ListAllSessionGttFrozenxids(int maxSize,
     ThreadId *pids, TransactionId *xids, int *n)
@@ -728,7 +848,7 @@ TransactionId ThreadPoolSessControl::ListAllSessionGttFrozenxids(int maxSize,
     TransactionId result = InvalidTransactionId;
     int           i = 0;
 
-    if (u_sess->attr.attr_storage.max_active_gtt <= 0) {
+    if (g_instance.attr.attr_storage.max_active_gtt <= 0) {
         return 0;
     }
 
@@ -737,10 +857,6 @@ TransactionId ThreadPoolSessControl::ListAllSessionGttFrozenxids(int maxSize,
         Assert(xids);
         Assert(n);
         *n = 0;
-    }
-
-    if (u_sess->attr.attr_storage.max_active_gtt <= 0) {
-        return InvalidTransactionId;
     }
 
     if (RecoveryInProgress()) {

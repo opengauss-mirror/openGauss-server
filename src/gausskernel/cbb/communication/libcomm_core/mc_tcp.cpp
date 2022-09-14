@@ -45,6 +45,11 @@ void mc_tcp_set_keepalive_param(int idle, int intvl, int count)
     g_instance.comm_cxt.mctcp_cxt.mc_tcp_keepalive_count = (count > 0) ? count : 0;
 }
 
+void mc_tcp_set_user_timeout(int timeout)
+{
+    g_instance.comm_cxt.mctcp_cxt.mc_tcp_user_timeout = (timeout > 0) ? timeout : 0;
+}
+
 void mc_tcp_set_timeout_param(int conn_timeout, int send_timeout)
 {
     g_instance.comm_cxt.mctcp_cxt.mc_tcp_connect_timeout = (conn_timeout > 0) ? conn_timeout : 0;
@@ -74,11 +79,15 @@ void mc_tcp_set_keepalive(int fd)
     int idle = g_instance.comm_cxt.mctcp_cxt.mc_tcp_keepalive_idle;
     int interval = g_instance.comm_cxt.mctcp_cxt.mc_tcp_keepalive_interval;
     int count = g_instance.comm_cxt.mctcp_cxt.mc_tcp_keepalive_count;
+    int tcp_user_timeout = g_instance.comm_cxt.mctcp_cxt.mc_tcp_user_timeout;
 
     mc_tcp_setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, (char*)&on, sizeof(on));
     mc_tcp_setsockopt(fd, IPPROTO_TCP, TCP_KEEPIDLE, (char*)&idle, sizeof(idle));
     mc_tcp_setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, (char*)&interval, sizeof(interval));
     mc_tcp_setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, (char*)&count, sizeof(count));
+#ifdef TCP_USER_TIMEOUT
+    mc_tcp_setsockopt(fd, IPPROTO_TCP, TCP_USER_TIMEOUT, (char*)&tcp_user_timeout, sizeof(tcp_user_timeout));
+#endif
 }
 
 int mc_tcp_get_peer_name(int fd, char* host, int* port)

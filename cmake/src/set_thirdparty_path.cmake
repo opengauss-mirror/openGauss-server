@@ -5,12 +5,10 @@ option(ENABLE_LLT "enable llt, current value is --enable-llt" OFF)
 option(ENABLE_UT "enable ut, current value is --enable-ut" OFF)
 option(WITH_OPENEULER_OS "Build openGauss rpm package on openEuler os" OFF)
 
-execute_process(COMMAND sh ${PROJECT_SRC_DIR}/get_PlatForm_str.sh OUTPUT_VARIABLE PLAT_FORM_STR OUTPUT_STRIP_TRAILING_WHITESPACE)
-
 #############################################################################
 # get the depend lib path
 #    1. libedit, event, libcgroup, kerberos, zlib1.2.11, boost,
-#       libxml and protobuf are support parameter --enable-llt and --enable-ut;
+#       libxml are support parameter --enable-llt and --enable-ut;
 #       $(LIB_SUPPORT_LLT)
 #    2. Huawei_Secure_C, gtest, mockcpp, unixodbc, libstd
 #       and openssl not support parameter --enable-llt and --enable-ut;
@@ -37,12 +35,11 @@ endif()
 
 set(LIB_UNIFIED_SUPPORT comm)
 set(MEMCHECK_BUILD_TYPE debug)
-set(DEPENDENCY_PATH ${3RD_PATH}/dependency/${PLAT_FORM_STR})
-set(PLATFORM_PATH ${3RD_PATH}/platform/${PLAT_FORM_STR})
-set(BUILDTOOLS_PATH ${3RD_PATH}/buildtools/${PLAT_FORM_STR})
-set(COMPONENT_PATH ${3RD_PATH}/component/${PLAT_FORM_STR})
+set(DEPENDENCY_PATH ${3RD_PATH}/kernel/dependency)
+set(PLATFORM_PATH ${3RD_PATH}/kernel/platform)
+set(BUILDTOOLS_PATH ${3RD_PATH}/buildtools)
+set(COMPONENT_PATH ${3RD_PATH}/kernel/component)
 
-set(MEMCHECK_HOME ${DEPENDENCY_PATH}/memcheck/${MEMCHECK_BUILD_TYPE})
 set(CJSON_HOME ${DEPENDENCY_PATH}/cjson/${SUPPORT_LLT})
 set(ETCD_HOME ${DEPENDENCY_PATH}/etcd/${LIB_UNIFIED_SUPPORT})
 set(EVENT_HOME ${DEPENDENCY_PATH}/event/${LIB_UNIFIED_SUPPORT})
@@ -59,23 +56,18 @@ set(CGROUP_HOME ${DEPENDENCY_PATH}/libcgroup/${SUPPORT_LLT})
 set(CURL_HOME ${DEPENDENCY_PATH}/libcurl/${SUPPORT_LLT})
 set(EDIT_HOME ${DEPENDENCY_PATH}/libedit/${SUPPORT_LLT})
 set(OBS_HOME ${DEPENDENCY_PATH}/libobs/${LIB_UNIFIED_SUPPORT})
-set(ORC_HOME ${DEPENDENCY_PATH}/liborc/${SUPPORT_LLT})
-set(PARQUET_HOME ${DEPENDENCY_PATH}/libparquet/${SUPPORT_LLT})
 set(XML2_HOME ${DEPENDENCY_PATH}/libxml2/${SUPPORT_LLT})
 set(LLVM_HOME ${DEPENDENCY_PATH}/llvm/${LIB_UNIFIED_SUPPORT})
 set(LZ4_HOME ${DEPENDENCY_PATH}/lz4/${SUPPORT_LLT})
-set(NANOMSG_HOME ${DEPENDENCY_PATH}/nanomsg/${LIB_UNIFIED_SUPPORT})
+set(NANOMSG_HOME ${DEPENDENCY_PATH}/nng/${LIB_UNIFIED_SUPPORT})
 set(NCURSES_HOME ${DEPENDENCY_PATH}/ncurses/${SUPPORT_LLT})
 set(OPENSSL_HOME ${DEPENDENCY_PATH}/openssl/${LIB_UNIFIED_SUPPORT})
 set(PLJAVA_HOME ${DEPENDENCY_PATH}/pljava/${LIB_UNIFIED_SUPPORT})
-if (EXISTS "${3RD_PATH}/platform/openjdk8/${BUILD_TUPLE}/jdk")
-  set(JAVA_HOME ${3RD_PATH}/platform/openjdk8/${BUILD_TUPLE}/jdk)
+if (EXISTS "${PLATFORM_PATH}/openjdk8/${BUILD_TUPLE}/jdk")
+  set(JAVA_HOME ${PLATFORM_PATH}/openjdk8/${BUILD_TUPLE}/jdk)
 else()
-  set(JAVA_HOME ${3RD_PATH}/platform/huaweijdk8/${BUILD_TUPLE}/jdk)
+  set(JAVA_HOME ${PLATFORM_PATH}/huaweijdk8/${BUILD_TUPLE}/jdk)
 endif()
-set(PROTOBUF_HOME ${DEPENDENCY_PATH}/protobuf/${SUPPORT_LLT})
-set(THRIFT_HOME ${DEPENDENCY_PATH}/thrift)
-set(SNAPPY_HOME ${DEPENDENCY_PATH}/snappy/${LIB_UNIFIED_SUPPORT})
 set(ZLIB_HOME ${DEPENDENCY_PATH}/zlib1.2.11/${SUPPORT_LLT})
 set(XGBOOST_HOME ${DEPENDENCY_PATH}/xgboost/${SUPPORT_LLT})
 set(ZSTD_HOME ${DEPENDENCY_PATH}/zstd)
@@ -87,19 +79,19 @@ set(DCF_HOME ${COMPONENT_PATH}/dcf)
 
 set(MOCKCPP_HOME ${BUILDTOOLS_PATH}/mockcpp/${LIB_UNIFIED_SUPPORT})
 set(GTEST_HOME ${BUILDTOOLS_PATH}/gtest/${LIB_UNIFIED_SUPPORT})
-set(LIBSTD_HOME ${BUILDTOOLS_PATH}/gcc${GCC_VERSION_LIT}/${LIB_UNIFIED_SUPPORT})
 set(MASSTREE_HOME ${BUILDTOOLS_PATH}/masstree/${LIB_UNIFIED_SUPPORT})
 set(NUMA_HOME ${DEPENDENCY_PATH}/numactl/${SUPPORT_LLT})
-set(ARROW_HOME ${DEPENDENCY_PATH}/libparquet/${SUPPORT_LLT})
 set(BOOST_HOME ${DEPENDENCY_PATH}/boost/${SUPPORT_LLT})
-set(ODBC_HOME ${3RD_PATH}/dependency/${PLAT_FORM_STR}/unixodbc)
+set(ODBC_HOME ${DEPENDENCY_PATH}/unixodbc)
 set(MASSTREE_HOME ${DEPENDENCY_PATH}/masstree/${LIB_UNIFIED_SUPPORT})
 set(LCOV_HOME ${BUILDTOOLS_PATH}/gcc${GCC_VERSION_LIT}/gcc/lib/gcc/${HOST_TUPLE})
-
-#############################################################################
-# memcheck
-#############################################################################
-set(MEMCHECK_LIB_PATH ${MEMCHECK_HOME}/gcc${GCC_VERSION}/lib/)
+set(GCC_LIB_PATH $ENV{GCC_INSTALL_HOME})
+set(MEMCHECK_LIB_PATH $ENV{GCC_INSTALL_HOME}/lib64/)
+if("${GCC_LIB_PATH}" STREQUAL "")
+    set(GCC_LIB_PATH ${BUILDTOOLS_PATH}/gcc${GCC_VERSION_LIT}/gcc)
+    set(MEMCHECK_HOME ${DEPENDENCY_PATH}/memcheck/${MEMCHECK_BUILD_TYPE})
+    set(MEMCHECK_LIB_PATH ${MEMCHECK_HOME}/gcc${GCC_VERSION}/lib/)
+endif()
 
 #############################################################################
 # lcov
@@ -207,18 +199,6 @@ set(LIBOBS_INCLUDE_PATH ${OBS_HOME}/include)
 set(LIBOBS_LIB_PATH ${OBS_HOME}/lib)
 
 #############################################################################
-# orc component
-#############################################################################
-set(LIBORC_INCLUDE_PATH ${ORC_HOME}/include)
-set(LIBORC_LIB_PATH ${ORC_HOME}/lib)
-
-#############################################################################
-# parquet component
-#############################################################################
-set(LIBPARQUET_INCLUDE_PATH ${PARQUET_HOME}/include)
-set(LIBPARQUET_LIB_PATH ${PARQUET_HOME}/lib)
-
-#############################################################################
 # xml2 component
 #############################################################################
 set(LIBXML_INCLUDE_PATH ${XML2_HOME}/include)
@@ -258,25 +238,6 @@ set(LIBOPENSSL_BIN_PATH ${OPENSSL_HOME}/bin)
 set(LIBOPENSSL_LIB_PATH ${OPENSSL_HOME}/lib)
 set(LIBOPENSSL_SSL_PATH ${OPENSSL_HOME}/ssl)
 set(LIBOPENSSL_INCLUDE_PATH ${OPENSSL_HOME}/include)
-
-#############################################################################
-# protobuf component
-#############################################################################
-set(PROTOBUF_INCLUDE_PATH ${PROTOBUF_HOME}/include)
-set(PROTOBUF_LIB_PATH ${PROTOBUF_HOME}/lib)
-
-#############################################################################
-# thrift component
-#############################################################################
-set(LIBTHRIFT_INCLUDE_PATH ${THRIFT_HOME}/include)
-set(LIBTHRIFT_LIB_PATH ${THRIFT_HOME}/lib)
-set(LIBTHRIFT_BIN_PATH ${THRIFT_HOME}/bin)
-
-#############################################################################
-# snappy component
-#############################################################################
-set(SNAPPY_INCLUDE_PATH ${SNAPPY_HOME}/include)
-set(SNAPPY_LIB_PATH ${SNAPPY_HOME}/lib)
 
 #############################################################################
 # zlib component
@@ -327,12 +288,6 @@ set(SECURE_LIB_PATH ${SECURE_HOME}/lib)
 #############################################################################
 set(NUMA_INCLUDE_PATH ${NUMA_HOME}/include)
 set(NUMA_LIB_PATH ${NUMA_HOME}/lib)
-
-#############################################################################
-# arrow component
-#############################################################################
-set(ARROW_INCLUDE_PATH ${ARROW_HOME}/include)
-set(ARROW_LIB_PATH ${ARROW_HOME}/lib)
 
 #############################################################################
 # odbc component

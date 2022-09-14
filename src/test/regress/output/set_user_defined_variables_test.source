@@ -1,0 +1,1017 @@
+-- error
+set @v1 := 1;
+ERROR:  syntax error at or near "set @"
+LINE 1: set @v1 := 1;
+        ^
+select @v1;
+ERROR:  column "v1" does not exist
+LINE 1: select @v1;
+                ^
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "enable_set_variable_b_format=on" >/dev/null 2>&1
+\! sleep 1
+-- error
+set @v1 := 1;
+ERROR:  syntax error at or near "set @"
+LINE 1: set @v1 := 1;
+        ^
+select @v1;
+ERROR:  column "v1" does not exist
+LINE 1: select @v1;
+                ^
+\c regression
+create database test_set dbcompatibility 'b';
+\c test_set
+show enable_set_variable_b_format;
+ enable_set_variable_b_format 
+------------------------------
+ on
+(1 row)
+
+-- test var_name
+set @v1 := 1;
+set @1a_b.2$3 := 2;
+set @a_b.2$3 := 3;
+set @_ab.2$3 := 4;
+set @.ab_2$3 := 5;
+set @$ab.2_3 := 6;
+select @v1, @1a_b.2$3, @a_b.2$3, @_ab.2$3, @.ab_2$3, @$ab.2_3;
+ @v1 | @1a_b.2$3 | @a_b.2$3 | @_ab.2$3 | @.ab_2$3 | @$ab.2_3 
+-----+-----------+----------+----------+----------+----------
+   1 |         2 |        3 |        4 |        5 |        6
+(1 row)
+
+-- error
+set @gdas()^& := 1;
+ERROR:  syntax error at or near "("
+LINE 1: set @gdas()^& := 1;
+                 ^
+select lengthb('abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabca');
+ lengthb 
+---------
+      64
+(1 row)
+
+set @abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabca := 64;
+NOTICE:  identifier "abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabca" will be truncated to "abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc"
+select @abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabca as value1, 
+@abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc as value2, 
+@abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcab as value3;
+NOTICE:  identifier "abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabca" will be truncated to "abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc"
+ value1 | value2 | value3 
+--------+--------+--------
+     64 |     64 | 
+(1 row)
+
+\c test_set
+set @'v1' := 1;
+set @'1a_b.2$3' := 2;
+set @'a_b.2$3' := 3;
+set @'_ab.2$3' := 4;
+set @'.ab_2$3' := 5;
+set @'$ab.2_3' := 6;
+set @'gdas()^&?<>cs' := 7;
+select @v1, @1a_b.2$3, @a_b.2$3, @_ab.2$3, @.ab_2$3, @$ab.2_3, @'v1', @'1a_b.2$3', @'a_b.2$3', @'_ab.2$3', @'.ab_2$3', @'$ab.2_3';
+ @v1 | @1a_b.2$3 | @a_b.2$3 | @_ab.2$3 | @.ab_2$3 | @$ab.2_3 | @v1 | @1a_b.2$3 | @a_b.2$3 | @_ab.2$3 | @.ab_2$3 | @$ab.2_3 
+-----+-----------+----------+----------+----------+----------+-----+-----------+----------+----------+----------+----------
+   1 |         2 |        3 |        4 |        5 |        6 |   1 |         2 |        3 |        4 |        5 |        6
+(1 row)
+
+select @'gdas()^&?<>cs';
+ @gdas()^&?<>cs 
+----------------
+              7
+(1 row)
+
+-- error
+select @gdas()^&?<>cs;
+ERROR:  syntax error at or near "("
+LINE 1: select @gdas()^&?<>cs;
+                    ^
+set @'abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabca' := 64;
+NOTICE:  identifier "abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabca" will be truncated to "abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc"
+select @'abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabca' as value1, 
+@'abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc' as value2, 
+@'abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcab' as value3, 
+@abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabca as value4, 
+@abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc as value5, 
+@abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcab as value6;
+NOTICE:  identifier "abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabca" will be truncated to "abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc"
+NOTICE:  identifier "abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabca" will be truncated to "abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc"
+ value1 | value2 | value3 | value4 | value5 | value6 
+--------+--------+--------+--------+--------+--------
+     64 |     64 |        |     64 |     64 | 
+(1 row)
+
+\c test_set;
+set @"v1" := 1;
+set @"1a_b.2$3" := 2;
+set @"a_b.2$3" := 3;
+set @"_ab.2$3" := 4;
+set @".ab_2$3" := 5;
+set @"$ab.2_3" := 6;
+set @"gdas()^&?<>cs" := 7;
+select @v1, @1a_b.2$3, @a_b.2$3, @_ab.2$3, @.ab_2$3, @$ab.2_3, 
+@'v1', @'1a_b.2$3', @'a_b.2$3', @'_ab.2$3', @'.ab_2$3', @'$ab.2_3',
+@"v1", @"1a_b.2$3", @"a_b.2$3", @"_ab.2$3", @".ab_2$3", @"$ab.2_3";
+ @v1 | @1a_b.2$3 | @a_b.2$3 | @_ab.2$3 | @.ab_2$3 | @$ab.2_3 | @v1 | @1a_b.2$3 | @a_b.2$3 | @_ab.2$3 | @.ab_2$3 | @$ab.2_3 | @v1 | @1a_b.2$3 | @a_b.2$3 | @_ab.2$3 | @.ab_2$3 | @$ab.2_3 
+-----+-----------+----------+----------+----------+----------+-----+-----------+----------+----------+----------+----------+-----+-----------+----------+----------+----------+----------
+   1 |         2 |        3 |        4 |        5 |        6 |   1 |         2 |        3 |        4 |        5 |        6 |   1 |         2 |        3 |        4 |        5 |        6
+(1 row)
+
+select @"gdas()^&?<>cs", @'gdas()^&?<>cs';
+ @gdas()^&?<>cs | @gdas()^&?<>cs 
+----------------+----------------
+              7 |              7
+(1 row)
+
+-- error
+select @gdas()^&?<>cs;
+ERROR:  syntax error at or near "("
+LINE 1: select @gdas()^&?<>cs;
+                    ^
+set @"abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabca" := 64;
+NOTICE:  identifier "abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabca" will be truncated to "abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc"
+select @"abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabca" as value1, 
+@"abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc" as value2, 
+@"abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcab" as value3, 
+@abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabca as value4, 
+@abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc as value5, 
+@abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcab as value6,
+@'abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabca' as value7, 
+@'abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc' as value8, 
+@'abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcab' as value9;
+NOTICE:  identifier "abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabca" will be truncated to "abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc"
+NOTICE:  identifier "abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabca" will be truncated to "abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc"
+NOTICE:  identifier "abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabca" will be truncated to "abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc"
+ value1 | value2 | value3 | value4 | value5 | value6 | value7 | value8 | value9 
+--------+--------+--------+--------+--------+--------+--------+--------+--------
+     64 |     64 |        |     64 |     64 |        |     64 |     64 | 
+(1 row)
+
+\c test_set;
+set @`v1` := 1;
+set @`1a_b.2$3` := 2;
+set @`a_b.2$3` := 3;
+set @`_ab.2$3` := 4;
+set @`.ab_2$3` := 5;
+set @`$ab.2_3` := 6;
+set @`gdas()^&?<>cs` := 7;
+select @v1, @1a_b.2$3, @a_b.2$3, @_ab.2$3, @.ab_2$3, @$ab.2_3, 
+@'v1', @'1a_b.2$3', @'a_b.2$3', @'_ab.2$3', @'.ab_2$3', @'$ab.2_3',
+@"v1", @"1a_b.2$3", @"a_b.2$3", @"_ab.2$3", @".ab_2$3", @"$ab.2_3",
+@`v1`, @`1a_b.2$3`, @`a_b.2$3`, @`_ab.2$3`, @`.ab_2$3`, @`$ab.2_3`;
+ @v1 | @1a_b.2$3 | @a_b.2$3 | @_ab.2$3 | @.ab_2$3 | @$ab.2_3 | @v1 | @1a_b.2$3 | @a_b.2$3 | @_ab.2$3 | @.ab_2$3 | @$ab.2_3 | @v1 | @1a_b.2$3 | @a_b.2$3 | @_ab.2$3 | @.ab_2$3 | @$ab.2_3 | @v1 | @1a_b.2$3 | @a_b.2$3 | @_ab.2$3 | @.ab_2$3 | @$ab.2_3 
+-----+-----------+----------+----------+----------+----------+-----+-----------+----------+----------+----------+----------+-----+-----------+----------+----------+----------+----------+-----+-----------+----------+----------+----------+----------
+   1 |         2 |        3 |        4 |        5 |        6 |   1 |         2 |        3 |        4 |        5 |        6 |   1 |         2 |        3 |        4 |        5 |        6 |   1 |         2 |        3 |        4 |        5 |        6
+(1 row)
+
+select @`gdas()^&?<>cs`, @"gdas()^&?<>cs", @'gdas()^&?<>cs';
+ @gdas()^&?<>cs | @gdas()^&?<>cs | @gdas()^&?<>cs 
+----------------+----------------+----------------
+              7 |              7 |              7
+(1 row)
+
+-- error
+select @gdas()^&?<>cs;
+ERROR:  syntax error at or near "("
+LINE 1: select @gdas()^&?<>cs;
+                    ^
+set @`abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabca` := 64;
+NOTICE:  identifier "abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabca" will be truncated to "abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc"
+select @`abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabca` as value1, 
+@`abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc` as value2, 
+@`abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcab` as value3, 
+@abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabca as value4, 
+@abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc as value5, 
+@abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcab as value6,
+@'abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabca' as value7, 
+@'abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc' as value8, 
+@'abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcab' as value9,
+@"abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabca" as value10, 
+@"abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc" as value11, 
+@"abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcab" as value12;
+NOTICE:  identifier "abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabca" will be truncated to "abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc"
+NOTICE:  identifier "abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabca" will be truncated to "abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc"
+NOTICE:  identifier "abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabca" will be truncated to "abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc"
+NOTICE:  identifier "abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabca" will be truncated to "abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc"
+ value1 | value2 | value3 | value4 | value5 | value6 | value7 | value8 | value9 | value10 | value11 | value12 
+--------+--------+--------+--------+--------+--------+--------+--------+--------+---------+---------+---------
+     64 |     64 |        |     64 |     64 |        |     64 |     64 |        |      64 |      64 | 
+(1 row)
+
+-- test expression
+\c test_set
+set @v1 := 10, @v2 := 10.3, @v3 := 'abc', @v4 := true, @v5 := date '12-10-2022';
+drop table if exists t_const;
+NOTICE:  table "t_const" does not exist, skipping
+create table t_const as select @v1, @v2, @v3, @v4, @v5;
+\d+ t_const
+                            Table "public.t_const"
+ Column |       Type       | Modifiers | Storage  | Stats target | Description 
+--------+------------------+-----------+----------+--------------+-------------
+ @v1    | bigint           |           | plain    |              | 
+ @v2    | double precision |           | plain    |              | 
+ @v3    | text             |           | extended |              | 
+ @v4    | bigint           |           | plain    |              | 
+ @v5    | text             |           | extended |              | 
+Has OIDs: no
+Options: orientation=row, compression=no
+
+select * from t_const;
+ @v1 | @v2  | @v3 | @v4 |    @v5     
+-----+------+-----+-----+------------
+  10 | 10.3 | abc |   1 | 12-10-2022
+(1 row)
+
+drop table if exists t_bit;
+NOTICE:  table "t_bit" does not exist, skipping
+drop table if exists t_bit2;
+NOTICE:  table "t_bit2" does not exist, skipping
+create table t_bit(f1 bit(8), f2 bit varying(20));
+insert into t_bit values(x'41', x'41');
+set @b1 := x'41', @b2 := x'41':: bit varying, @b3 := (select x'41'), @b4 := (select x'41' :: bit varying), @b5 := (select f1 from t_bit), @b6 := (select f2 from t_bit);
+create table t_bit2 as select @b1, @b2, @b3, @b4, @b5, @b6, x'41', x'41'::bit varying;
+\d+ t_bit2
+                           Table "public.t_bit2"
+  Column  |    Type     | Modifiers | Storage  | Stats target | Description 
+----------+-------------+-----------+----------+--------------+-------------
+ @b1      | "bit"       |           | extended |              | 
+ @b2      | bit varying |           | extended |              | 
+ @b3      | "bit"       |           | extended |              | 
+ @b4      | bit varying |           | extended |              | 
+ @b5      | "bit"       |           | extended |              | 
+ @b6      | bit varying |           | extended |              | 
+ ?column? | "bit"       |           | extended |              | 
+ varbit   | bit varying |           | extended |              | 
+Has OIDs: no
+Options: orientation=row, compression=no
+
+select * from t_bit2;
+   @b1    |   @b2    |   @b3    |   @b4    |   @b5    |   @b6    | ?column? |  varbit  
+----------+----------+----------+----------+----------+----------+----------+----------
+ 01000001 | 01000001 | 01000001 | 01000001 | 01000001 | 01000001 | 01000001 | 01000001
+(1 row)
+
+set @v7 := '52093.89'::money;
+ERROR:  failed to find conversion function from money to text
+set @v8 := box '((0,0),(1,1))';
+ERROR:  failed to find conversion function from box to text
+set @v9 := '52093.89'::money::number;
+select @v9;
+   @v9    
+----------
+ 52093.89
+(1 row)
+
+set @abs := abs(-1), @concat := concat('hello', 'world'), @diameter := diameter(circle '((0,0),2.0)');
+set @time := timestamp '2001-09-28 01:00' + interval '23 hours', @age := age(timestamp '2001-04-10', timestamp '1957-06-13');
+select @abs, @concat, @diameter, @time, @age;
+ @abs |  @concat   | @diameter |          @time           |           @age            
+------+------------+-----------+--------------------------+---------------------------
+    1 | helloworld |         4 | Sat Sep 29 00:00:00 2001 | @ 43 years 9 mons 27 days
+(1 row)
+
+-- error
+set @center := center(box '((0,0),(1,2))');
+ERROR:  failed to find conversion function from point to text
+set @value := 10;
+set @v_and := 1 and 4, @v_or := 1 or 4, @v_not := not 1;
+set @v_all := not ((1 and @value) or @value);
+select @value, @v_and, @v_or, @v_not, @v_all;
+ @value | @v_and | @v_or | @v_not | @v_all 
+--------+--------+-------+--------+--------
+     10 |      1 |     1 |      0 |      0
+(1 row)
+
+set @v2 := 1 + 1, @v3 := 2 - 8, @v4 := 2 * 10, @v5 := @v1 / 2, @v6 := @v1 = 10;
+select @v2, @v3, @v4, @v5, @v6;
+ @v2 | @v3 | @v4 | @v5 | @v6 
+-----+-----+-----+-----+-----
+   2 |  -6 |  20 |   5 |   1
+(1 row)
+
+set @between := 2 BETWEEN 1 AND 3, @not_between := 2 NOT BETWEEN 1 AND 3;
+set @is_null := 2 + NULL IS NULL, @is_not_null := 2 + 2 IS NOT NULL;
+set @isnull := @is_null ISNULL, @notnull := @is_not_null NOTNULL;
+set @distinct := @between or @not_between IS DISTINCT FROM NULL, @not_distinct := @between + @not_between * NULL IS NOT DISTINCT FROM NULL;
+select @between, @not_between, @is_null, @is_not_null, @isnull, @notnull, @distinct, @not_distinct;
+ @between | @not_between | @is_null | @is_not_null | @isnull | @notnull | @distinct | @not_distinct 
+----------+--------------+----------+--------------+---------+----------+-----------+---------------
+        1 |            0 |        1 |            1 |       0 |        1 |         1 |             1
+(1 row)
+
+set @rownum := rownum;
+select @rownum;
+ @rownum 
+---------
+       1
+(1 row)
+
+-- condition expression
+set @v1 := 1, @v2 := 0;
+set @v_case := CASE WHEN @v1 = 1 THEN 'one' WHEN @v2 = 2 THEN 'two' ELSE 'other' END;
+select @v_case;
+ @v_case 
+---------
+ one
+(1 row)
+
+set @v1 := 0, @v2 := 2;
+set @v_case := CASE WHEN @v1 = 1 THEN 'one' WHEN @v2 = 2 THEN 'two' ELSE 'other' END;
+select @v_case;
+ @v_case 
+---------
+ two
+(1 row)
+
+set @v1 := 0, @v2 := 0;
+set @v_case := CASE WHEN @v1 = 1 THEN 'one' WHEN @v2 = 2 THEN 'two' ELSE 'other' END;
+select @v_case;
+ @v_case 
+---------
+ other
+(1 row)
+
+set @v_decode := DECODE('A','A',1,'B',2,0);
+set @v_coalesce1 := COALESCE('abc','Hello World'), @v_coalesce2 := COALESCE(NULL,'Hello World'), @v_coalesce3 := COALESCE(NULL, NULL, 'dajd');
+select @v_decode, @v_coalesce1, @v_coalesce2, @v_coalesce3;
+ @v_decode | @v_coalesce1 | @v_coalesce2 | @v_coalesce3 
+-----------+--------------+--------------+--------------
+         1 | abc          | Hello World  | dajd
+(1 row)
+
+set @v_nullif := NULLIF('Hello','Hello World'), @v_greatest := greatest(9000,155555,2.01), @v_least := least(9000,2), @v_nvl := nvl(null,1);
+select @v_nullif, @v_greatest, @v_least, @v_nvl;
+ @v_nullif | @v_greatest | @v_least | @v_nvl 
+-----------+-------------+----------+--------
+ Hello     |      155555 |        2 | 1
+(1 row)
+
+-- subLink
+drop table if exists select_tt1;
+NOTICE:  table "select_tt1" does not exist, skipping
+drop table if exists res_select1;
+NOTICE:  table "res_select1" does not exist, skipping
+drop table if exists res_select2;
+NOTICE:  table "res_select2" does not exist, skipping
+drop table if exists select_tt2;
+NOTICE:  table "select_tt2" does not exist, skipping
+drop table if exists select_tt3;
+NOTICE:  table "select_tt3" does not exist, skipping
+create table select_tt1(f1 int, f2 bool, f3 float, f4 number, f5 text, f6 bit(8), f7 bit varying(20), f8 timestamp);
+insert into select_tt1 values(1, false, 12.5, 18.888888888888888888888, NULL, x'41', x'41', timestamp '2001-09-29 03:00');
+set @v_select_bool1 := (select true), @v_select_bool2 := (select f2 from select_tt1);
+set @v_select_int1 := (select 1), @v_select_int2 := (select f1 from select_tt1);
+set @v_select_float1 := (select -14.4564), @v_select_float2 := (select f3 from select_tt1);
+set @v_select_number1 := (select 436721.2321::number), @v_select_number2 := (select f4 from select_tt1);
+set @v_select_text1 := (select 'dadsa'), @v_select_text2 := (select f5 from select_tt1);
+set @v_select_bit1 := (select x'42'), @v_select_bit2 := (select f6 from select_tt1);
+set @v_select_bitvaryng1 := (select x'42' :: bit varying), @v_select_bitvaryng2 := (select f7 from select_tt1);
+set @v_select_time1 := timestamp '2021-10-10 01:21:10', @v_select_time2 := (select f8 from select_tt1);
+create table res_select1 as select @v_select_bool1, @v_select_int1, @v_select_float1, @v_select_number1, @v_select_text1, @v_select_bit1, @v_select_bitvaryng1, @v_select_time1;
+\d+ res_select1
+                                 Table "public.res_select1"
+        Column        |       Type       | Modifiers | Storage  | Stats target | Description 
+----------------------+------------------+-----------+----------+--------------+-------------
+ @v_select_bool1      | bigint           |           | plain    |              | 
+ @v_select_int1       | bigint           |           | plain    |              | 
+ @v_select_float1     | double precision |           | plain    |              | 
+ @v_select_number1    | double precision |           | plain    |              | 
+ @v_select_text1      | text             |           | extended |              | 
+ @v_select_bit1       | "bit"            |           | extended |              | 
+ @v_select_bitvaryng1 | bit varying      |           | extended |              | 
+ @v_select_time1      | text             |           | extended |              | 
+Has OIDs: no
+Options: orientation=row, compression=no
+
+select * from res_select1;
+ @v_select_bool1 | @v_select_int1 | @v_select_float1 | @v_select_number1 | @v_select_text1 | @v_select_bit1 | @v_select_bitvaryng1 |     @v_select_time1      
+-----------------+----------------+------------------+-------------------+-----------------+----------------+----------------------+--------------------------
+               1 |              1 |         -14.4564 |       436721.2321 | dadsa           | 01000010       | 01000010             | Sun Oct 10 01:21:10 2021
+(1 row)
+
+create table res_select2 as select @v_select_bool2, @v_select_int2, @v_select_float2, @v_select_number2, @v_select_text2, @v_select_bit2, @v_select_bitvaryng2, @v_select_time2;
+\d+ res_select2
+                                 Table "public.res_select2"
+        Column        |       Type       | Modifiers | Storage  | Stats target | Description 
+----------------------+------------------+-----------+----------+--------------+-------------
+ @v_select_bool2      | bigint           |           | plain    |              | 
+ @v_select_int2       | bigint           |           | plain    |              | 
+ @v_select_float2     | double precision |           | plain    |              | 
+ @v_select_number2    | double precision |           | plain    |              | 
+ @v_select_text2      | text             |           | extended |              | 
+ @v_select_bit2       | "bit"            |           | extended |              | 
+ @v_select_bitvaryng2 | bit varying      |           | extended |              | 
+ @v_select_time2      | text             |           | extended |              | 
+Has OIDs: no
+Options: orientation=row, compression=no
+
+select * from res_select2;
+ @v_select_bool2 | @v_select_int2 | @v_select_float2 | @v_select_number2 | @v_select_text2 | @v_select_bit2 | @v_select_bitvaryng2 |     @v_select_time2      
+-----------------+----------------+------------------+-------------------+-----------------+----------------+----------------------+--------------------------
+               0 |              1 |             12.5 |  18.8888888888889 |                 | 01000001       | 01000001             | Sat Sep 29 03:00:00 2001
+(1 row)
+
+create table select_tt2(f1 int, f2 bool);
+insert into select_tt2 values(10, true);
+-- error
+set @v := (select * from select_tt2);
+ERROR:  subquery must return only one column
+LINE 1: set @v := (select * from select_tt2);
+                  ^
+create table select_tt3(f1 int);
+insert into select_tt3 values(10), (11);
+-- error
+set @v := (select * from select_tt3);
+ERROR:  more than one row returned by a subquery used as an expression
+CONTEXT:  referenced column: f1
+set @v_exists := exists (select 10), @v_notexists := not exists (select 10);
+select @v_exists, @v_notexists;
+ @v_exists | @v_notexists 
+-----------+--------------
+         1 |            0
+(1 row)
+
+set @v := 1;
+set @v_in := @v in (select 1), @v_notin := @v not in (select 2), @v_any := @v < any (select 3), @v_some := @v < some (select 1), @v_all := @v < all (select 2);
+select @v_in, @v_notin, @v_any, @v_some, @v_all;
+ @v_in | @v_notin | @v_any | @v_some | @v_all 
+-------+----------+--------+---------+--------
+     1 |        1 |      1 |       0 |      1
+(1 row)
+
+-- array expression
+set @v_in := 8000 + 500 IN (10000, 9000), @v_notin := 8000 + 500 NOT IN (10000, 9000);
+set @v_some := 8000 + 500 < SOME (array[10000, 9000]), @v_any := 8000 + 500 < ANY (array[10000, 9000]);
+set @v_all := 8000 + 500 < ALL (array[10000, 9000]);
+select @v_in, @v_notin, @v_any, @v_some, @v_all;
+ @v_in | @v_notin | @v_any | @v_some | @v_all 
+-------+----------+--------+---------+--------
+     0 |        1 |      1 |       1 |      1
+(1 row)
+
+-- row expression
+set @v_row := ROW(1,2,NULL) < ROW(1,3,0);
+select @v_row;
+ @v_row 
+--------
+      1
+(1 row)
+
+-- test multi-variable
+\c test_set
+set @v1 := @v2 := @v3 := @v4 := 10;
+select @v1, @v2, @v3, @v4;
+ @v1 | @v2 | @v3 | @v4 
+-----+-----+-----+-----
+  10 |  10 |  10 |  10
+(1 row)
+
+set @v1 = @v2 := @v3 := @v4 := 20;
+select @v1, @v2, @v3, @v4;
+ @v1 | @v2 | @v3 | @v4 
+-----+-----+-----+-----
+  20 |  20 |  20 |  20
+(1 row)
+
+-- error
+set @v1 = @v2 := (@v3) = @v4 := v5 := 30;
+ERROR:  syntax error at or near ":="
+LINE 1: set @v1 = @v2 := (@v3) = @v4 := v5 := 30;
+                                           ^
+set @vx := 40;
+set @v1 := @v2 := @v3 := @v4 := @vx = 40;  
+select @v1, @v2, @v3, @v4, @vx;
+ @v1 | @v2 | @v3 | @v4 | @vx 
+-----+-----+-----+-----+-----
+   1 |   1 |   1 |   1 |  40
+(1 row)
+
+\c test_set
+set @v1 := 1, @v2 := 2, @v3 := 3;
+select @v1, @v2, @v3;
+ @v1 | @v2 | @v3 
+-----+-----+-----
+   1 |   2 |   3
+(1 row)
+
+set @v1 = 11, @v2 = 22, @v3 = 33;
+select @v1, @v2, @v3;
+ @v1 | @v2 | @v3 
+-----+-----+-----
+  11 |  22 |  33
+(1 row)
+
+set @v1 := -1, @v2 := -2, @v3 = -3, @v4 := -4;
+select @v1, @v2, @v3, @v4;
+ @v1 | @v2 | @v3 | @v4 
+-----+-----+-----+-----
+  -1 |  -2 |  -3 |  -4
+(1 row)
+
+-- test in application scenario
+\c test_set
+set @v1 := -1, @v2 := 'hello';
+select @v1 + 1, abs(@v1), concat(@v2, ' world!');
+ ?column? | abs |    concat    
+----------+-----+--------------
+        0 |   1 | hello world!
+(1 row)
+
+drop table if exists test1;
+NOTICE:  table "test1" does not exist, skipping
+drop table if exists test2;
+NOTICE:  table "test2" does not exist, skipping
+create table test1(f1 int, f2 int, f3 varchar(20));
+insert into test1 values(@v1 + 1, abs(@v1), concat(@v2, ' world!'));
+select * from test1;
+ f1 | f2 |      f3      
+----+----+--------------
+  0 |  1 | hello world!
+(1 row)
+
+create table test2 as select @v1 + 1, abs(@v1), concat(@v2, ' world!');
+select * from test2;
+ ?column? | abs |    concat    
+----------+-----+--------------
+        0 |   1 | hello world!
+(1 row)
+
+update test1 set f3 = left(@v2, @v1 :: int);
+select * from test1;
+ f1 | f2 |  f3  
+----+----+------
+  0 |  1 | hell
+(1 row)
+
+-- test prepare
+-- selectStmt
+\c test_set
+set @v1 := 'select * from test1';
+prepare stmt1 as @v1;
+execute stmt1;
+ f1 | f2 |  f3  
+----+----+------
+  0 |  1 | hell
+(1 row)
+
+-- insertStmt
+set @v2 := 'insert into test1 values(1, 2, 123)';
+prepare stmt2 as @v2;
+execute stmt2;
+select * from test1;
+ f1 | f2 |  f3  
+----+----+------
+  0 |  1 | hell
+  1 |  2 | 123
+(2 rows)
+
+-- updateStmt
+set @vx := 2, @vy := 'world';
+set @v3 := 'update test1 set f3 = left(@vy, (@vx) :: int)';
+prepare stmt3 as @v3;
+execute stmt3;
+select * from test1;
+ f1 | f2 | f3 
+----+----+----
+  0 |  1 | wo
+  1 |  2 | wo
+(2 rows)
+
+-- deleteStmt
+set @v4 := 'delete from test1 where f1 = 1';
+prepare stmt4 as @v4;
+execute stmt4;
+select * from test1;
+ f1 | f2 | f3 
+----+----+----
+  0 |  1 | wo
+(1 row)
+
+-- mergeStmt
+set @v5 := 'merge into test1 using test2 on (test2.abs = test1.f2) WHEN MATCHED THEN update set test1.f3 = test2.concat';
+prepare stmt5 as @v5;
+execute stmt5;
+select * from test1;
+ f1 | f2 |      f3      
+----+----+--------------
+  0 |  1 | hello world!
+(1 row)
+
+-- otherStmt
+set @v6 := 'drop table test2';
+-- error
+prepare stmt6 as @v6;
+ERROR:  the statement in prepate is not supported.
+-- multiStmt
+set @v7 := 'select 1; select 2;';
+-- error
+prepare stmt6 as @v7;
+ERROR:  prepare user_defined variable can contain only one SQL statement.
+-- other scenario
+\c test_set
+select @ 1;
+ ?column? 
+----------
+        1
+(1 row)
+
+drop table if exists test_opr;
+NOTICE:  table "test_opr" does not exist, skipping
+create table test_opr(f1 int);
+insert into test_opr(-1), (-2);
+ERROR:  syntax error at or near "-"
+LINE 1: insert into test_opr(-1), (-2);
+                             ^
+select @ f1 from test_opr;
+ ?column? 
+----------
+(0 rows)
+
+select @v1;
+ @v1 
+-----
+ 
+(1 row)
+
+set @v1 := -10;
+select @ @v1;
+ ?column? 
+----------
+       10
+(1 row)
+
+set @v1 := 10, @v2 := 'abc';
+drop table if exists test_pro;
+NOTICE:  table "test_pro" does not exist, skipping
+create table test_pro(f1 int, f2 varchar(20));
+create or replace procedure pro_insert()
+as
+begin
+    insert into test_pro values(@v1, @v2);
+end;
+/
+call pro_insert();
+ pro_insert 
+------------
+ 
+(1 row)
+
+select * from test_pro;
+ f1 | f2  
+----+-----
+ 10 | abc
+(1 row)
+
+set @v1 := 11, @v2 := 'xxx';
+call pro_insert();
+ pro_insert 
+------------
+ 
+(1 row)
+
+select * from test_pro;
+ f1 | f2  
+----+-----
+ 10 | abc
+ 11 | xxx
+(2 rows)
+
+\c test_set
+call pro_insert();
+ pro_insert 
+------------
+ 
+(1 row)
+
+select * from test_pro;
+ f1 | f2  
+----+-----
+ 10 | abc
+ 11 | xxx
+    | 
+(3 rows)
+
+set @v1 := 10, @v2 := 20;
+set @in1 := -2, @in2 := -5;
+create or replace function func_add_sql(num1 bigint, num2 bigint) return bigint
+as
+begin
+    return num1 - num2 + @v1;
+end;
+/
+call func_add_sql(-2, -5);
+ func_add_sql 
+--------------
+           13
+(1 row)
+
+call func_add_sql(num1 => @in1, num2 => @in2);
+ func_add_sql 
+--------------
+           13
+(1 row)
+
+call func_add_sql(num2 := @in2, num1 := @in1);
+ func_add_sql 
+--------------
+           13
+(1 row)
+
+call func_add_sql(@in1, @in2);
+ func_add_sql 
+--------------
+           13
+(1 row)
+
+create or replace function func_test() return bigint
+as
+declare
+    v1 bigint := 5;
+begin
+    v1 := -5;
+    return @v1 + @v2 + v1;
+end;
+/
+call func_test();
+ func_test 
+-----------
+        25
+(1 row)
+
+\c test_set
+drop table if exists t2;
+NOTICE:  table "t2" does not exist, skipping
+create table t2(a int, b int);
+insert into t2 values(1,2);
+select * from t2;
+ a | b 
+---+---
+ 1 | 2
+(1 row)
+
+create or replace procedure autonomous_4(a int, b int) as
+declare
+	num3 int := a;
+	num4 int := b;
+	pragma autonomous_transaction;
+begin
+	insert into t2 values(num3, num4);
+	insert into t2 values(@v1, @v2);
+end;
+/
+create or replace procedure autonomous_5(a int, b int) as
+declare
+begin
+	insert into t2 values(111, 222);
+	autonomous_4(a,b);
+	rollback;
+end;
+/
+set @v1 = 1111, @v2 = 2222;
+select autonomous_5(11, 22);
+ autonomous_5 
+--------------
+ 
+(1 row)
+
+select * from t2;
+ a  | b  
+----+----
+  1 |  2
+ 11 | 22
+    |   
+(3 rows)
+
+-- AUTONOMOUS TRANSACTION will start a new session, so user_defined_variable is null.
+\c test_set
+drop table if exists tt;
+NOTICE:  table "tt" does not exist, skipping
+create table tt(f1 int, f2 text, f3 float, f4 bool);
+create or replace procedure pro_test1(in a int, in b text, in c float, in d bool) as
+declare
+    num1 int := a;
+    num2 text := b;
+    num3 float := c;
+    num4 bool := d;
+begin
+    set @v1 := num1, @v2 := num2, @v3 := num3, @v4 := num4;
+    insert into tt values(@v1, @v2, @v3, @v4);
+    insert into tt values(@v1 + 1, concat(@v2, ' world'), @v3 / 2, @v4);
+end;
+/
+call pro_test1(1, 'hello', 12.12, true);
+ pro_test1 
+-----------
+ 
+(1 row)
+
+select * from tt;
+ f1 |     f2      |  f3   | f4 
+----+-------------+-------+----
+  1 | hello       | 12.12 | t
+  2 | hello world |  6.06 | t
+(2 rows)
+
+call pro_test1((select 1) + 1, (select 'hello'), 12.12, exists (select 10));
+ pro_test1 
+-----------
+ 
+(1 row)
+
+select * from tt;
+ f1 |     f2      |  f3   | f4 
+----+-------------+-------+----
+  1 | hello       | 12.12 | t
+  2 | hello world |  6.06 | t
+  2 | hello       | 12.12 | t
+  3 | hello world |  6.06 | t
+(4 rows)
+
+delete tt;
+\c test_set
+call pro_test1(1, 'hello', 12.12, true);
+ pro_test1 
+-----------
+ 
+(1 row)
+
+select * from tt;
+ f1 |     f2      |  f3   | f4 
+----+-------------+-------+----
+  1 | hello       | 12.12 | t
+  2 | hello world |  6.06 | t
+(2 rows)
+
+call pro_test1((select 1) + 1, (select 'hello'), 12.12, exists (select 10));
+ pro_test1 
+-----------
+ 
+(1 row)
+
+select * from tt;
+ f1 |     f2      |  f3   | f4 
+----+-------------+-------+----
+  1 | hello       | 12.12 | t
+  2 | hello world |  6.06 | t
+  2 | hello       | 12.12 | t
+  3 | hello world |  6.06 | t
+(4 rows)
+
+delete tt;
+set @v := 0;
+create or replace procedure pro_test2(in a int, in b text, in c float, in d bool)
+is
+begin
+    set @v1 := a, @v2 := b, @v3 := c, @v4 := d;
+    insert into tt values(@v1, @v2, @v3, @v4);
+    set @v1 := a + (select 1), @v2 := concat(b, (select ' world')), @v3 := abs(c / 2), @v4 := @v in (select 1) or d;
+    insert into tt values(@v1, @v2, @v3, @v4);
+    insert into tt values(@v1 + 1, concat(@v2, ' world'), @v3 / 2, @v4);
+    set @v5 := @v1 + 1, @v6 := concat(@v2, '123'), @v7 := @v3 * 2, @v8 := @v4 and @v;
+    insert into tt values(@v5, @v6, @v7, @v8);
+end;
+/
+call pro_test2(1, 'hello', 12.12, true);
+ pro_test2 
+-----------
+ 
+(1 row)
+
+select * from tt;
+ f1 |        f2         |  f3   | f4 
+----+-------------------+-------+----
+  1 | hello             | 12.12 | t
+  2 | hello world       |  6.06 | t
+  3 | hello world world |  3.03 | t
+  3 | hello world123    | 12.12 | f
+(4 rows)
+
+call pro_test2((select 1) + 1, (select 'hello'), 12.12, exists (select 10));
+ pro_test2 
+-----------
+ 
+(1 row)
+
+select * from tt;
+ f1 |        f2         |  f3   | f4 
+----+-------------------+-------+----
+  1 | hello             | 12.12 | t
+  2 | hello world       |  6.06 | t
+  3 | hello world world |  3.03 | t
+  3 | hello world123    | 12.12 | f
+  2 | hello             | 12.12 | t
+  3 | hello world       |  6.06 | t
+  4 | hello world world |  3.03 | t
+  4 | hello world123    | 12.12 | f
+(8 rows)
+
+delete tt;
+\c test_set
+set @v := 0;
+call pro_test2(1, 'hello', 12.12, true);
+ pro_test2 
+-----------
+ 
+(1 row)
+
+select * from tt;
+ f1 |        f2         |  f3   | f4 
+----+-------------------+-------+----
+  1 | hello             | 12.12 | t
+  2 | hello world       |  6.06 | t
+  3 | hello world world |  3.03 | t
+  3 | hello world123    | 12.12 | f
+(4 rows)
+
+call pro_test2((select 1) + 1, (select 'hello'), 12.12, exists (select 10));
+ pro_test2 
+-----------
+ 
+(1 row)
+
+select * from tt;
+ f1 |        f2         |  f3   | f4 
+----+-------------------+-------+----
+  1 | hello             | 12.12 | t
+  2 | hello world       |  6.06 | t
+  3 | hello world world |  3.03 | t
+  3 | hello world123    | 12.12 | f
+  2 | hello             | 12.12 | t
+  3 | hello world       |  6.06 | t
+  4 | hello world world |  3.03 | t
+  4 | hello world123    | 12.12 | f
+(8 rows)
+
+delete tt;
+\c test_set
+start TRANSACTION;
+set @v1 := 1;
+select @v1;
+ @v1 
+-----
+   1
+(1 row)
+
+set client_encoding = SQL_ASCII;
+ROLLBACK;
+show client_encoding;
+ client_encoding 
+-----------------
+ UTF8
+(1 row)
+
+select @v1;
+ @v1 
+-----
+   1
+(1 row)
+
+-- exception scenario
+\c test_set
+set @v2 := 2;
+select 100>@v2;
+ERROR:  column "v2" does not exist
+LINE 1: select 100>@v2;
+                    ^
+select 100<@v2;
+ERROR:  column "v2" does not exist
+LINE 1: select 100<@v2;
+                    ^
+select 100=@v2;
+ERROR:  column "v2" does not exist
+LINE 1: select 100=@v2;
+                    ^
+set @v1=@v2+1;
+ERROR:  syntax error at or near "=@"
+LINE 1: set @v1=@v2+1;
+               ^
+select 100> @v2, 100< @v2, 100= @v2;
+ ?column? | ?column? | ?column? 
+----------+----------+----------
+ t        | f        | f
+(1 row)
+
+set @v1= @v2+1;
+select @v1;
+ @v1 
+-----
+   3
+(1 row)
+
+set @ v1:=10;
+ERROR:  syntax error at or near "@"
+LINE 1: set @ v1:=10;
+            ^
+select @v1:=10;
+ERROR:  unrecognized node type: 5014
+\c regression
+drop database if exists test_set;
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "enable_set_variable_b_format=off" >/dev/null 2>&1
+\! sleep 1
+show enable_set_variable_b_format;
+ enable_set_variable_b_format 
+------------------------------
+ off
+(1 row)
+

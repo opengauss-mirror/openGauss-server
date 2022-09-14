@@ -125,15 +125,6 @@ static const AuditFuncMap g_auditFuncMap[] = {
 static const int g_auditFuncMapNum = sizeof(g_auditFuncMap) / sizeof(AuditFuncMap);
 
 /*
- * This function is used for setting prev_ProcessUtility to rewrite
- * standard_ProcessUtility by extension.
- */
-void set_pgaudit_prehook(ProcessUtility_hook_type func)
-{
-    prev_ProcessUtility = func;
-}
-
-/*
  * Brief		    : perfstat_agent_init()
  * Description	: Module load callback.
  * Notes		    : Called from postmaster.
@@ -146,7 +137,7 @@ void pgaudit_agent_init(void)
     }
     prev_ExecutorEnd = ExecutorEnd_hook;
     ExecutorEnd_hook = pgaudit_ExecutorEnd;
-    set_pgaudit_prehook(ProcessUtility_hook);
+    prev_ProcessUtility = ProcessUtility_hook;
     ProcessUtility_hook = (ProcessUtility_hook_type)pgaudit_ProcessUtility;
     u_sess->exec_cxt.g_pgaudit_agent_attached = true;
 }
@@ -384,6 +375,7 @@ static void pgaudit_ddl_database_object(
         case AUDIT_DDL_MODEL:
         case AUDIT_DDL_PUBLICATION_SUBSCRIPTION:
         case AUDIT_DDL_FOREIGN_DATA_WRAPPER:
+        case AUDIT_DDL_SQL_PATCH:
             pgaudit_store_auditstat(audit_type, audit_result, objectname, mask_string);
             break;
         default:
@@ -1020,6 +1012,15 @@ static void pgaudit_ddl_fdw(const char* objectname, const char* cmdtext)
     return;
 }
 
+void pgaudit_ddl_sql_patch(const char* objectname, const char* cmdtext)
+{
+    if (!CHECK_AUDIT_DDL(DDL_SQL_PATCH)) {
+        return;
+    }
+
+    pgaudit_ddl_database_object(AUDIT_DDL_SQL_PATCH, AUDIT_OK, objectname, cmdtext);
+}
+
 /*
  * @Description: audit the operation of set parameter.
  * @in objectname : the object name need audited.
@@ -1487,6 +1488,11 @@ static void pgaudit_ProcessUtility(Node* parsetree, const char* queryString, Par
             CompositeTypeStmt* stmt = (CompositeTypeStmt*)(parsetree);
 
             pgaudit_ddl_type(stmt->typevar->relname, queryString);
+        } break;
+        case T_CreateSetStmt: {
+            CreateSetStmt* setstmt = (CreateSetStmt*)parsetree;
+            object_name_pointer = NameListToString(setstmt->typname->names);
+            pgaudit_ddl_type(object_name_pointer, queryString);
         } break;
         case T_CreateFunctionStmt: { /* Audit  procedure */
             CreateFunctionStmt* createfunctionstmt = (CreateFunctionStmt*)(parsetree);

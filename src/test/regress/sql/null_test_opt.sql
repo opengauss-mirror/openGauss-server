@@ -30,4 +30,6 @@ explain (costs off) select * from t tt1 join t tt2 on tt1.a = tt2.b where tt1.a 
 
 select * from t tt1 join t tt2 on tt1.a = tt2.b where tt1.a is null;
 
+explain select * from t tt1 join t tt2 on tt1.a = tt2.b where tt1.a is not null;
+
 drop schema null_test_opt_nsp cascade;

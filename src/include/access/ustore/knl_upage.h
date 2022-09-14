@@ -17,8 +17,10 @@
 #define KNL_UPAGE_H
 
 #include "storage/buf/bufpage.h"
+#include "access/genam.h"
 #include "access/ustore/knl_utype.h"
 #include "access/ustore/knl_utuple.h"
+#include "access/ustore/knl_uverify.h"
 #include "utils/rel.h"
 
 #define TD_SLOT_INCREMENT_SIZE 2
@@ -47,9 +49,12 @@
 
 #define UPageGetRowPtrOffset(_page) (SizeOfUHeapPageHeaderData + SizeOfUHeapTDData((UHeapPageHeaderData *)_page))
 
-#define UPageGetRowPtr(_upage, _offsetNumber)                                                                      \
+#define UPageGetRowPtr(_upage, _offsetNumber) \
+    FastVerifyUPageRowPtr(UPageGenerateRowPtr(_upage, _offsetNumber), (UHeapPageHeaderData *)_upage, _offsetNumber)
+
+#define UPageGenerateRowPtr(_upage, _offsetNumber)                                                                \
     ((RowPtr *)(((char *)_upage) + SizeOfUHeapPageHeaderData + SizeOfUHeapTDData((UHeapPageHeaderData *)_upage) + \
-        ((_offsetNumber - 1) * sizeof(RowPtr))))
+                ((_offsetNumber - 1) * sizeof(RowPtr))))
 
 #define SetNormalRowPointer(_rowptr, _off, _size) \
     ((_rowptr)->flags = RP_NORMAL, (_rowptr)->offset = (_off), (_rowptr)->len = (_size))
@@ -106,13 +111,10 @@
  */
 #define ROWPTR_DELETED 0x0001      /* Row is deleted */
 #define ROWPTR_XACT_INVALID 0x0002 /* TD slot on tuple got reused */
-#define ROWPTR_XACT_PENDING 0x0003 /* transaction that has marked item as \
-                                    * unused is pending */
 #define VISIBILTY_MASK 0x007F      /* 7 bits (1..7) for visibility mask */
 #define XACT_SLOT 0x7F80           /* 8 bits (8..15) of offset for transaction \
                                     * slot */
 #define XACT_SLOT_MASK 0x0007      /* 7 - mask to retrieve transaction slot */
-
 
 /*
  * RowPtrIsUsed
@@ -144,7 +146,14 @@
  * ItemIdChangeLen
  * Change the length of itemid.
  */
-#define RowPtrChangeLen(_rowptr, _length) (_rowptr)->len = (_length)
+#define RowPtrChangeLen(_rowptr, _length)                                                                             \
+    do {                                                                                                              \
+        if (RowPtrGetOffset(_rowptr) + _length > BLCKSZ) {                                                            \
+            elog(PANIC, "row pointer error, offset:%u, flags:%u, len:%u", RowPtrGetOffset(_rowptr), (_rowptr)->flags, \
+                 (_length));                                                                                          \
+        }                                                                                                             \
+        (_rowptr)->len = (_length);                                                                                   \
+    } while (0)
 
 /*
  * RowPtrIsDead
@@ -164,8 +173,6 @@
  * least significant 7 bits.
  */
 #define RowPtrGetVisibilityInfo(_rowptr) ((_rowptr)->offset & VISIBILTY_MASK)
-
-#define RowPtrHasPendingXact(_rowptr) (((_rowptr)->offset & VISIBILTY_MASK) & ROWPTR_XACT_PENDING)
 
 #define RowPtrSetInvalidXact(_rowptr) ((_rowptr)->offset = ((_rowptr)->offset & ~VISIBILTY_MASK) | ROWPTR_XACT_INVALID)
 
@@ -286,6 +293,13 @@ typedef struct UHeapBufferPage {
     Page page;
 } UHeapBufferPage;
 
+typedef struct {
+    uint16 start;
+    uint16 end;
+    uint16 offset;
+} RpSortData;
+typedef RpSortData* RpSort;
+
 template<UPageType pagetype> 
 void UPageInit(Page page, Size pageSize, Size specialSize, uint8 tdSlots = UHEAP_DEFAULT_TD);
 
@@ -302,7 +316,10 @@ Size PageGetUHeapFreeSpace(Page page);
 Size PageGetExactUHeapFreeSpace(Page page);
 extern UHeapFreeOffsetRanges *UHeapGetUsableOffsetRanges(Buffer buffer, UHeapTuple *tuples, int ntuples,
     Size saveFreeSpace);
-
+extern bool VerifyUPageValid(UPageVerifyParams *verifyParams);
+extern bool VerifyRedoUPageValid(URedoVerifyParams *verifyParams);
+extern bool VerifyPageHeader(Page page);
+extern void FastVerifyUTuple(UHeapDiskTuple diskTup, Buffer buffer);
 void UHeapRecordPotentialFreeSpace(Buffer buffer, int delta);
 
 /*
@@ -326,4 +343,7 @@ inline OffsetNumber UHeapPageGetMaxOffsetNumber(char *upage)
 
     return maxoff;
 }
+
+extern RowPtr *FastVerifyUPageRowPtr(RowPtr *rp, UHeapPageHeader uphdr, OffsetNumber offsetNumber);
+
 #endif

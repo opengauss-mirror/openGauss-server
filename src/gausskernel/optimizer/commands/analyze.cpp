@@ -14,7 +14,6 @@
  *
  * -------------------------------------------------------------------------
  */
-#include "access/dfs/dfs_query.h"
 #include "access/nbtree.h"
 #include "postgres.h"
 #include "knl/knl_variable.h"
@@ -45,6 +44,7 @@
 #include "commands/tablecmds.h"
 #include "commands/tablespace.h"
 #include "commands/vacuum.h"
+#include "db4ai/db4ai_api.h"
 #include "executor/executor.h"
 #include "executor/spi.h"
 #include "foreign/fdwapi.h"
@@ -82,6 +82,7 @@
 #include "tcop/utility.h"
 #include "tcop/dest.h"
 #include "access/multixact.h"
+#include "optimizer/aioptimizer.h"
 #ifdef PGXC
 #include "pgxc/pgxc.h"
 #endif
@@ -146,12 +147,6 @@ THR_LOCAL int default_statistics_target = 100;
 #define MAX_ATTR_MCV_STAT_TARGET ((int)(100))
 #define MAX_ATTR_HIST_STAT_TARGET ((int)(301))
 
-/*
- * Decide if execute the query to get samples or not for hdfs table.
- * we need not execute query for delta/dfs table if the ratio of total row count
- * for dfs/delta table with complex table less or equal than 0.01 as default.
- */
-#define DFS_DELTA_WITH_COMPLEX_MIN_RATIO ((double)(0.01))
 /* The minimum count of most common value. */
 #define MIN_MCV_COUNT 2
 #define DEFAULT_ATTR_TARGET 100
@@ -188,17 +183,13 @@ const char* const ANALYZE_TEMP_TABLE_PREFIX = "pg_analyze";
 /* We need do the second sampling for sample rows when sample rate more than 0. */
 #define NEED_DO_SECOND_ANALYZE(analyzemode, vacstmt)                                                           \
     (IS_PGXC_DATANODE && IsConnFromCoord() &&                                                                  \
-        ((ANALYZENORMAL == (analyzemode) && (vacstmt)->pstGlobalStatEx[(vacstmt)->tableidx].sampleRate > 0) || \
-            (ANALYZENORMAL != (analyzemode) && ((vacstmt)->pstGlobalStatEx[ANALYZEMAIN - 1].sampleRate > 0 ||  \
-                                                   (vacstmt)->pstGlobalStatEx[ANALYZEDELTA - 1].sampleRate > 0))))
+        ((ANALYZENORMAL == (analyzemode) && (vacstmt)->pstGlobalStatEx[(vacstmt)->tableidx].sampleRate > 0)))
 /* We should send real total row count to original coordinator if the count more than 0 on datanode. */
 #define NEED_SEND_TOTALROWCNT_TO_CN(analyzemode, vacstmt, totalrows)                                      \
-    ((ANALYZENORMAL == (analyzemode) && (totalrows) > 0) ||                                               \
-        (ANALYZEMAIN == (analyzemode) && ((vacstmt)->pstGlobalStatEx[ANALYZEMAIN - 1].totalRowCnts > 0 || \
-                                             (vacstmt)->pstGlobalStatEx[ANALYZEDELTA - 1].totalRowCnts > 0)))
+    (ANALYZENORMAL == (analyzemode) && (totalrows) > 0)
 
 static void do_analyze_rel(Relation onerel, VacuumStmt* vacstmt, BlockNumber relpages, bool inh, int elevel,
-    AnalyzeMode mode = ANALYZENORMAL, GBLSTAT_HDFS_SAMPLE_ROWS* pstHdfsSampleRows = NULL);
+    AnalyzeMode mode = ANALYZENORMAL);
 int compare_rows(const void* a, const void* b);
 static void compute_index_stats(Relation onerel, double totalrows, AnlIndexData* indexdata, int nindexes,
     HeapTuple* rows, int numrows, MemoryContext col_context);
@@ -209,9 +200,6 @@ static int64 acquire_sample_rows(
 template <bool estimate_table_rownum>
 static int64 acquire_inherited_sample_rows(
     Relation onerel, int elevel, HeapTuple* rows, int64 targrows, double* totalrows, double* totaldeadrows);
-template <bool estimate_table_rownum>
-static int64 acquire_dfsstored_sample_rows(Relation onerel, int elevel, HeapTuple* rows, int64 targrows,
-    double* totalrows, double* totaldeadrows, bool onerel_isReplication);
 template <bool estimate_table_rownum>
 static int64 acquirePartitionedSampleRows(Relation onerel, VacuumStmt* vacstmt, int elevel, HeapTuple* rows,
     int64 targrows, double* totalrows, double* totaldeadrows, VacAttrStats** vacattrstats, int attrAnalyzeNum);
@@ -226,24 +214,16 @@ template <bool estimate_table_rownum>
 static int64 AcquireSampleCStoreRows(Relation onerel, int elevel, HeapTuple* rows, int64 targrows, double* totalrows,
     double* totaldeadrows, VacAttrStats** vacattrstats, int attrAnalyzeNum);
 
-template <bool estimate_table_rownum>
-static int64 AcquireSampleDfsStoreRows(Relation onerel, int elevel, HeapTuple* rows, int64 targrows, double* totalrows,
-    double* totaldeadrows, bool onerel_isReplication);
-
 static void send_totalrowcnt_to_cn(VacuumStmt* vacstmt, AnalyzeMode analyzemode, double totalrows);
 static void do_sampling_normal_second(
     Relation onerel, VacuumStmt* vacstmt, int64 numrows, double totalrows, HeapTuple* rows);
-static void do_sampling_hdfs_second(Relation onerel, VacuumStmt* vacstmt, AnalyzeMode analyzemode, int64 numrows,
-    double totalrows, HeapTuple* rows, GBLSTAT_HDFS_SAMPLE_ROWS* pstHdfsSampleRows);
-static void do_sampling_complex_first(GBLSTAT_HDFS_SAMPLE_ROWS* pstHdfsSampleRows, int64 targetRows);
-static void do_sampling_complex_third(
-    Relation onerel, VacuumStmt* vacstmt, GBLSTAT_HDFS_SAMPLE_ROWS* pstHdfsSampleRows);
 static bool equalTupleDescAttrsTypeid(TupleDesc tupdesc1, TupleDesc tupdesc2);
 void CstoreAnalyzePrefetch(
     CStoreScanDesc cstoreScan, BlockNumber* cuidList, int32 cuidListCount, int analyzeAttrNum, int32* attrSeq);
 
 static void get_sample_rows_for_query(
     MemoryContext speccontext, Relation rel, VacuumStmt* vacstmt, int64* num_sample_rows, HeapTuple** samplerows);
+static ArrayType* es_construct_extended_statistics(VacAttrStats* stats, int k);
 template <bool isSingleColumn>
 static void update_stats_catalog(
     Relation pgstat, MemoryContext oldcontext, Oid relid, char relkind, bool inh, VacAttrStats* stats, int natts,
@@ -274,12 +254,12 @@ typedef struct {
 
 static bool do_analyze_samplerows(Relation onerel, VacuumStmt* vacstmt, int attr_cnt, VacAttrStats** vacattrstats,
     bool hasindex, int nindexes, AnlIndexData* indexdata, bool inh, Relation* Irel, double* totalrows, int64* numrows,
-    HeapTuple* rows, AnalyzeMode analyzemode, GBLSTAT_HDFS_SAMPLE_ROWS* pstHdfsSampleRows, MemoryContext caller_context,
+    HeapTuple* rows, AnalyzeMode analyzemode, MemoryContext caller_context,
     Oid save_userid, int save_sec_context, int save_nestlevel);
 
 static void do_analyze_sampletable(Relation onerel, VacuumStmt* vacstmt, int attr_cnt, VacAttrStats** vacattrstats,
     bool hasindex, int nindexes, AnlIndexData* indexdata, bool inh, Relation* Irel, double totalrows, int64 numrows,
-    AnalyzeMode analyzemode, GBLSTAT_HDFS_SAMPLE_ROWS* pstHdfsSampleRows);
+    AnalyzeMode analyzemode);
 
 static void do_analyze_compute_attr_stats(bool inh, Relation onerel, VacuumStmt* vacstmt, VacAttrStats* stats,
     double numTotalRows, int64 numSampleRows, AnalyzeMode analyzemode);
@@ -288,17 +268,20 @@ static void set_stats_dndistinct(VacAttrStats* stats, VacuumStmt* vacstmt, int t
 static void update_pages_and_tuples_pgclass(Relation onerel, VacuumStmt* vacstmt, int attr_cnt,
     VacAttrStats** vacattrstats, bool hasindex, int nindexes, AnlIndexData* indexdata, Relation* Irel,
     BlockNumber relpages, double totalrows, double totaldeadrows, int64 numrows, bool inh);
-static void set_doquery_flag(GlobalStatInfoEx* pstGlobalStatEx);
 static bool analyze_index_sample_rows(MemoryContext speccontext, Relation rel, VacuumStmt* vacstmt, int nindexes,
     AnlIndexData* indexdata, int64* num_sample_rows, HeapTuple** samplerows);
 static void compute_histgram_final(int* slot_idx, HistgramInfo* hist_list, VacAttrStats* stats);
 static void compute_histgram_internal(AnalyzeResultMultiColAsArraySpecInfo* spec);
 static void analyze_rel_internal(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy bstrategy,
-    AnalyzeMode analyzemode = ANALYZENORMAL, GBLSTAT_HDFS_SAMPLE_ROWS* pstHdfsSampleRows = NULL);
+    AnalyzeMode analyzemode = ANALYZENORMAL);
 static void analyze_tmptbl_debug_dn(AnalyzeTempTblDebugStage type, AnalyzeMode analyzemode, List* tmpSampleTblNameList,
     Oid* sampleTableOid, Relation* tmpRelation, HeapTuple tuple, TupleConversionMap* tupmap);
 static TupleConversionMap* check_tmptbl_tupledesc(Relation onerel, TupleDesc temptbl_desc);
 static double compute_com_size(VacuumStmt* vacstmt, Relation rel, int tableidx);
+
+#ifndef ENABLE_MULTIPLE_NODES
+static void update_numSamplerows(int attr_cnt, VacAttrStats** vacattrstats, HeapTuple* rows, int64 numrows);
+#endif
 
 /*
  *	analyze_get_relation() -- get one relation by relid before do analyze.
@@ -380,40 +363,7 @@ void analyze_rel(Oid relid, VacuumStmt* vacstmt, BufferAccessStrategy bstrategy)
      */
     if (onerel) {
         /* do analyze for normal table. */
-        if (!RelationIsDfsStore(onerel)) {
-            analyze_rel_internal(onerel, vacstmt, bstrategy, ANALYZENORMAL);
-        } else {
-            /* analyze delta table of hdfs table during analyzing entire DB. */
-            GBLSTAT_HDFS_SAMPLE_ROWS stHdfsSampleRows = {0};
-            RangeVar* oldRelVar = vacstmt->relation;
-            Relation deltaRel;
-
-            stHdfsSampleRows.hdfs_sample_context = AllocSetContextCreate(t_thrd.vacuum_cxt.vac_context,
-                "AnalyzeHDFSSample",
-                ALLOCSET_DEFAULT_MINSIZE,
-                ALLOCSET_DEFAULT_INITSIZE,
-                ALLOCSET_DEFAULT_MAXSIZE);
-
-            AssertEreport(OidIsValid(onerel->rd_rel->reldeltarelid), MOD_OPT, "Delta table's oid must be valid.");
-            deltaRel = analyze_get_relation(onerel->rd_rel->reldeltarelid, vacstmt);
-            if (deltaRel != NULL) {
-                /* do analyze for delta table. */
-                vacstmt->relation = NULL;
-                analyze_rel_internal(deltaRel, vacstmt, bstrategy, ANALYZEDELTA, &stHdfsSampleRows);
-
-                /* do analyze for dfs table. */
-                vacstmt->relation = oldRelVar;
-                analyze_rel_internal(onerel, vacstmt, bstrategy, ANALYZEMAIN, &stHdfsSampleRows);
-            } else {
-                /* reset and close dfs table */
-                LOCKMODE lockmode = NEED_EST_TOTAL_ROWS_DN(vacstmt) ? AccessShareLock : ShareUpdateExclusiveLock;
-                vacstmt->relation = oldRelVar;
-                relation_close(onerel, lockmode);
-            }
-
-            MemoryContextDelete(stHdfsSampleRows.hdfs_sample_context);
-            stHdfsSampleRows.hdfs_sample_context = NULL;
-        }
+        analyze_rel_internal(onerel, vacstmt, bstrategy, ANALYZENORMAL);
 
         /* 
          * Reset attcacheoff values in the tupleDesc of the relation 
@@ -494,10 +444,9 @@ BlockNumber GetSubPartitionNumberOfBlocks(Relation rel, Partition part, LOCKMODE
  *	@in vacstmt: the statment for analyze or vacuum command
  *	@in bstrategy: buffer access strategy objects
  *	@in analyzemode - identify which type the table, dfs table or delta table
- *	@in pstHdfsSampleRows - the sample rows information for dfs table/delta table/complex table
  */
 static void analyze_rel_internal(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy bstrategy,
-    AnalyzeMode analyzemode, GBLSTAT_HDFS_SAMPLE_ROWS* pstHdfsSampleRows)
+    AnalyzeMode analyzemode)
 {
     AcquireSampleRowsFunc acquirefunc = NULL;
     int elevel;
@@ -672,13 +621,7 @@ static void analyze_rel_internal(Relation onerel, VacuumStmt* vacstmt, BufferAcc
     /*
      * Do the normal non-recursive ANALYZE.
      */
-    do_analyze_rel(onerel, vacstmt, relpages, false, elevel, analyzemode, pstHdfsSampleRows);
-
-    /*
-     * If there are child tables, do recursive ANALYZE.
-     */
-    if (RelationIsPAXFormat(onerel))
-        do_analyze_rel(onerel, vacstmt, relpages, true, elevel, ANALYZECOMPLEX, pstHdfsSampleRows);
+    do_analyze_rel(onerel, vacstmt, relpages, false, elevel, analyzemode);
 
     /*
      * Close source relation now, but keep lock so that no one deletes it
@@ -904,8 +847,8 @@ static int get_one_tuplesize(Relation onerel, int total_width)
  */
 template <bool estimate_table_rownum>
 HeapTuple* get_total_rows(Relation onerel, VacuumStmt* vacstmt, BlockNumber relpages, bool inh, int elevel,
-    VacAttrStats** vacattrstats, int attr_cnt, int64 targrows, double* totalrows, double* totaldeadrows, int64* numrows,
-    GBLSTAT_HDFS_SAMPLE_ROWS* pstHdfsSampleRows, AnalyzeMode analyzemode)
+    VacAttrStats** vacattrstats, int attr_cnt, int64 targrows, double* totalrows, double* totaldeadrows,
+    int64* numrows)
 {
 #define DEFAULT_PARTITION_EST_TARGET_ROWS 3
     HeapTuple* rows = NULL;
@@ -917,7 +860,6 @@ HeapTuple* get_total_rows(Relation onerel, VacuumStmt* vacstmt, BlockNumber relp
     Oid foreignTableId = 0;
     bool isForeignTable = false;
     DEBUG_MOD_START_TIMER(MOD_AUTOVAC);
-    bool onerel_isReplication = (DISTTYPE_REPLICATION == vacstmt->disttype);
     int64 bufferRead = 0;
     int64 bufferHit = 0;
 
@@ -956,16 +898,6 @@ HeapTuple* get_total_rows(Relation onerel, VacuumStmt* vacstmt, BlockNumber relp
         if (onerel->rd_rel->relhassubclass) {
             *numrows = acquire_inherited_sample_rows<estimate_table_rownum>(
                 onerel, elevel, rows, target_rows, totalrows, totaldeadrows);
-        } else if (RelationIsPAXFormat(onerel)) {
-            if (!u_sess->attr.attr_sql.enable_global_stats || estimate_table_rownum) {
-                *numrows = acquire_dfsstored_sample_rows<estimate_table_rownum>(
-                    onerel, elevel, rows, target_rows, totalrows, totaldeadrows, onerel_isReplication);
-            } else {
-                do_sampling_complex_first(pstHdfsSampleRows, targrows);
-                *totalrows = pstHdfsSampleRows->stHdfsSampleRows[ANALYZECOMPLEX - 1].totalrows;
-                *numrows = pstHdfsSampleRows->stHdfsSampleRows[ANALYZECOMPLEX - 1].samplerows;
-                rows = pstHdfsSampleRows->stHdfsSampleRows[ANALYZECOMPLEX - 1].rows;
-            }
         }
     } else if (RELATION_IS_PARTITIONED(onerel) && !isForeignTable) {
         /* Table is partitioned but not a foreign table */
@@ -1013,11 +945,7 @@ HeapTuple* get_total_rows(Relation onerel, VacuumStmt* vacstmt, BlockNumber relp
 
     } else {
         if (RelationIsColStore(onerel)) {
-            if (RelationIsPAXFormat(onerel)) {
-                /* analyze orc on hdfs table */
-                *numrows = AcquireSampleDfsStoreRows<estimate_table_rownum>(
-                    onerel, elevel, rows, target_rows, totalrows, totaldeadrows, onerel_isReplication);
-            } else if (RelationIsCUFormat(onerel)) {
+            if (RelationIsCUFormat(onerel)) {
                 /* analyze cu format table */
                 *numrows = AcquireSampleCStoreRows<estimate_table_rownum>(
                     onerel, elevel, rows, target_rows, totalrows, totaldeadrows, vacattrstats, attr_cnt);
@@ -1062,11 +990,6 @@ HeapTuple* get_total_rows(Relation onerel, VacuumStmt* vacstmt, BlockNumber relp
         pfree_ext(rows);
         return NULL;
     } else {
-        /* If hdfs table have sample rows on datanode, we should do the second sampling. */
-        if (IS_PGXC_DATANODE && *numrows > 0 && (ANALYZEMAIN == analyzemode || ANALYZEDELTA == analyzemode)) {
-            do_sampling_hdfs_second(onerel, vacstmt, analyzemode, *numrows, *totalrows, rows, pstHdfsSampleRows);
-        }
-
         return rows;
     }
 }
@@ -1455,7 +1378,7 @@ static VacAttrStats** get_vacattrstats_by_vacstmt(Relation onerel, VacuumStmt* v
  * Set up a working context before analyze
  */
 static MemoryContext do_analyze_preprocess(Oid relowner, PGRUsage* ru0, TimestampTz* starttime, Oid* save_userid,
-    int* save_sec_context, int* save_nestlevel, AnalyzeMode analyzemode, GBLSTAT_HDFS_SAMPLE_ROWS* pstHdfsSampleRows)
+    int* save_sec_context, int* save_nestlevel, AnalyzeMode analyzemode)
 {
     MemoryContext caller_context = NULL;
 
@@ -1469,9 +1392,6 @@ static MemoryContext do_analyze_preprocess(Oid relowner, PGRUsage* ru0, Timestam
             ALLOCSET_DEFAULT_MINSIZE,
             ALLOCSET_DEFAULT_INITSIZE,
             ALLOCSET_DEFAULT_MAXSIZE);
-    } else {
-        AssertEreport(pstHdfsSampleRows != NULL, MOD_OPT, "pstHdfsSampleRows can not be NULL when analyze hdfs table.");
-        u_sess->analyze_cxt.analyze_context = pstHdfsSampleRows->hdfs_sample_context;
     }
 
     caller_context = MemoryContextSwitchTo(u_sess->analyze_cxt.analyze_context);
@@ -1580,6 +1500,19 @@ static inline void cleanup_indexes(int nindexes, Relation* Irel, const Relation 
     }
 }
 
+#ifndef ENABLE_MULTIPLE_NODES
+static void update_numSamplerows(int attr_cnt, VacAttrStats** vacattrstats, HeapTuple* rows, int64 numrows)
+{
+    if (u_sess->attr.attr_sql.enable_functional_dependency) {
+        for (int i = 0; i < attr_cnt; i++) {
+            vacattrstats[i]->rows = rows;
+            vacattrstats[i]->numSamplerows = numrows;
+        }
+    }
+    return;
+}
+#endif
+
 static void do_analyze_rel_start_log(bool inh, int elevel, Relation onerel)
 {
     char* namespace_name =  get_namespace_name(RelationGetNamespace(onerel));
@@ -1648,7 +1581,7 @@ static void do_analyze_rel_end_log(TimestampTz starttime, Relation onerel, PGRUs
  * acquirefunc for each child table.
  */
 static void do_analyze_rel(Relation onerel, VacuumStmt* vacstmt, BlockNumber relpages, bool inh, int elevel,
-    AnalyzeMode analyzemode, GBLSTAT_HDFS_SAMPLE_ROWS* pstHdfsSampleRows)
+    AnalyzeMode analyzemode)
 {
     int attr_cnt = 0;
     int i = 0;
@@ -1691,8 +1624,7 @@ static void do_analyze_rel(Relation onerel, VacuumStmt* vacstmt, BlockNumber rel
         &save_userid,
         &save_sec_context,
         &save_nestlevel,
-        analyzemode,
-        pstHdfsSampleRows);
+        analyzemode);
 
     /* Ready and construct for all attributes info in order to compute statistic. */
     vacattrstats =
@@ -1706,7 +1638,7 @@ static void do_analyze_rel(Relation onerel, VacuumStmt* vacstmt, BlockNumber rel
     if (attr_cnt <= 0) {
         vac_close_indexes(nindexes, Irel, NoLock);
         do_analyze_finalize(caller_context, save_userid, save_sec_context, save_nestlevel, analyzemode);
-        if (analyzemode <= ANALYZEMAIN) {
+        if (analyzemode <= ANALYZENORMAL) {
             if (default_statistics_target >= 0)
                 elog(INFO, "Please set default_statistics_target to a negative value to collect extended statistics.");
             else
@@ -1748,9 +1680,7 @@ static void do_analyze_rel(Relation onerel, VacuumStmt* vacstmt, BlockNumber rel
                     targrows,
                     &totalrows,
                     &totaldeadrows,
-                    &numrows,
-                    pstHdfsSampleRows,
-                    analyzemode);
+                    &numrows);
                 vacstmt->pstGlobalStatEx[vacstmt->tableidx].totalRowCnts = totalrows;
             }
 
@@ -1772,40 +1702,32 @@ static void do_analyze_rel(Relation onerel, VacuumStmt* vacstmt, BlockNumber rel
             targrows,
             &totalrows,
             &totaldeadrows,
-            &numrows,
-            pstHdfsSampleRows,
-            analyzemode);
+            &numrows);
     }
 
     /*
      *  If sampleRate is -1, it means DN send estimate total row count to CN.
      */
     if (NEED_EST_TOTAL_ROWS_DN(vacstmt)) {
-        /* We should send estimate total row count to CN except hdfs and delta complex mode. */
-        if (analyzemode < ANALYZECOMPLEX) {
-            /* get estimate total row count. */
-            rows = get_total_rows<true>(onerel,
-                vacstmt,
-                relpages,
-                inh,
-                elevel,
-                vacattrstats,
-                attr_cnt,
-                targrows,
-                &totalrows,
-                &totaldeadrows,
-                &numrows,
-                pstHdfsSampleRows,
-                analyzemode);
-
-            vacstmt->pstGlobalStatEx[vacstmt->tableidx].totalRowCnts = totalrows;
-            /* compute memory size (KB) for dn to send to cn */
-            vacstmt->pstGlobalStatEx[vacstmt->tableidx].topMemSize =
-                compute_com_size(vacstmt, onerel, vacstmt->tableidx) * GetOneTupleSize(vacstmt, onerel) / 1024;
-            if ((analyzemode == ANALYZENORMAL) || (analyzemode == ANALYZEMAIN)) {
-                /* send estimate total row count to cn. */
-                send_totalrowcnt_to_cn(vacstmt, analyzemode, totalrows);
-            }
+        /* get estimate total row count. */
+        rows = get_total_rows<true>(onerel,
+            vacstmt,
+            relpages,
+            inh,
+            elevel,
+            vacattrstats,
+            attr_cnt,
+            targrows,
+            &totalrows,
+            &totaldeadrows,
+            &numrows);
+        vacstmt->pstGlobalStatEx[vacstmt->tableidx].totalRowCnts = totalrows;
+        /* compute memory size (KB) for dn to send to cn */
+        vacstmt->pstGlobalStatEx[vacstmt->tableidx].topMemSize =
+            compute_com_size(vacstmt, onerel, vacstmt->tableidx) * GetOneTupleSize(vacstmt, onerel) / 1024;
+        if (analyzemode == ANALYZENORMAL) {
+            /* send estimate total row count to cn. */
+            send_totalrowcnt_to_cn(vacstmt, analyzemode, totalrows);
         }
 
         if (!inh) {
@@ -1843,7 +1765,6 @@ static void do_analyze_rel(Relation onerel, VacuumStmt* vacstmt, BlockNumber rel
             &numrows,
             rows,
             analyzemode,
-            pstHdfsSampleRows,
             caller_context,
             save_userid,
             save_sec_context,
@@ -1865,15 +1786,14 @@ static void do_analyze_rel(Relation onerel, VacuumStmt* vacstmt, BlockNumber rel
              * The sampleRate is not match with the final totalRowCnts, it will result to compute
              * error samplerows and error statistics. So we should compute right sampleRate again.
              */
+#ifndef ENABLE_MULTIPLE_NODES
+            /* Only available in single node mode */
+            update_numSamplerows(attr_cnt, vacattrstats, rows, numrows);
+#endif
             (void)compute_sample_size(vacstmt, 0, NULL, onerel->rd_id, vacstmt->tableidx);
             numrows = ceil(vacstmt->pstGlobalStatEx[vacstmt->tableidx].totalRowCnts *
                            vacstmt->pstGlobalStatEx[vacstmt->tableidx].sampleRate);
             totalrows = vacstmt->pstGlobalStatEx[vacstmt->tableidx].totalRowCnts;
-
-            /* Decide analyze each column with execute query for dfs/delta table.  */
-            if (analyzemode == ANALYZEMAIN || analyzemode == ANALYZEDELTA) {
-                set_doquery_flag(vacstmt->pstGlobalStatEx);
-            }
 
             /*
              * We need do analyze to compute statistic for sample table only
@@ -1895,8 +1815,7 @@ static void do_analyze_rel(Relation onerel, VacuumStmt* vacstmt, BlockNumber rel
                     Irel,
                     totalrows,
                     numrows,
-                    analyzemode,
-                    pstHdfsSampleRows);
+                    analyzemode);
             }
         } else {
             /*
@@ -2693,7 +2612,7 @@ retry:
                 targTuple = UHeapGetTuple(onerel, targbuffer, targoffset);
 
                 switch (UHeapTupleSatisfiesOldestXmin(targTuple, OldestXmin,
-                    targbuffer, true, &targTuple, &xid, NULL)) {
+                    targbuffer, true, &targTuple, &xid, NULL, onerel)) {
                     case UHEAPTUPLE_LIVE:
                         sampleIt = true;
                         liverows += 1;
@@ -2855,10 +2774,6 @@ retry:
             targtuple.t_data = (HeapTupleHeader)PageGetItem(targpage, itemid);
             targtuple.t_len = ItemIdGetLength(itemid);
 
-            if (u_sess->attr.attr_storage.enable_debug_vacuum)
-                t_thrd.utils_cxt.pRelatedRel = onerel;
-
-
             switch (HeapTupleSatisfiesVacuum(&targtuple, OldestXmin, targbuffer, isAnalyzing)) {
                 case HEAPTUPLE_LIVE:
                     sample_it = true;
@@ -2988,9 +2903,6 @@ retry:
         }
 
 uheap_end:
-        if (u_sess->attr.attr_storage.enable_debug_vacuum)
-            t_thrd.utils_cxt.pRelatedRel = NULL;
-
         /* Now release the lock and pin on the page */
         UnlockReleaseBuffer(targbuffer);
 
@@ -3855,211 +3767,6 @@ static int64 AcquireSampleCStoreRows(Relation onerel, int elevel, HeapTuple* row
     return numrows + delta_numrows;
 }
 
-/*
- * Brief:
- *      acquire a random sample of rows from the orc on hdfs table
- * Selected rows are returned in the caller-allocated array rows[], which
- * must have at least targrows entries.
- * The actual number of rows selected is returned as the function result.
- * We also estimate the total number of live and dead rows in the table,
- * and return them into *totalrows and *totaldeadrows, respectively.
- *
- * The returned list of tuples is in order by physical position in the table.
- * (We will rely on this later to derive correlation estimates.)
- *
- * Input:
- *   @onerel: To be analyzed relation
- *   @elevel: ELOG level used in this function
- *   @targrows: target number of rows to be sampled
- *   @analyzeAttrNum: number of columns to be analyzed
- * Output
- *   @rows: selected rows in HeapTuple format
- *   @totalrows: total number of live rows that estimated
- *   @totaldeadrows: total number of dead rows that estimated
- * Return Value : The actual number of rows selected is returned
- * Notes        : None.
- */
-template <bool estimate_table_rownum>
-static int64 AcquireSampleDfsStoreRows(Relation onerel, int elevel, HeapTuple* rows, int64 targrows, double* totalrows,
-    double* totaldeadrows, bool onerel_isReplication)
-{
-#define MAX_SKIP_FACTOR 100
-    /* if it is CN, don't get sample rows and return 0 */
-    if (IS_PGXC_COORDINATOR) {
-        return 0;
-    }
-    AssertEreport(targrows > 0, MOD_OPT, "target rows should be greater than 0 when sampling.");
-
-    int numrows = 0;        /* # rows now in reservoir */
-    double samplerows = 0;  /* total # rows collected */
-    double rowstoskip = -1; /* -1 means not set yet */
-    BlockNumber totalblocks;
-    BlockSamplerData bs;
-    double rstate;
-
-    List* fileList = NIL;
-    TupleDesc tupdesc = onerel->rd_att;
-    int colTotalNum = onerel->rd_att->natts;
-    DfsScanState* scanState = NULL;
-    SplitInfo* fileInfo = NULL;
-    StringInfo rootDir;
-    TupleTableSlot* scanTupleSlot = NULL;
-    Datum* columnValues = (Datum*)palloc0(colTotalNum * sizeof(Datum));
-    bool* columnNulls = (bool*)palloc0(colTotalNum * sizeof(bool));
-    int skip_factor;
-    int64 deadrows;
-
-    /*
-     * It represents that we need to scan average tuple number for each ORC file.
-     */
-    int64 scanAvgNum = 0;
-
-    /* get filelist. */
-    rootDir = getDfsStorePath(onerel);
-    fileList = BuildSplitList(onerel, rootDir);
-    totalblocks = list_length(fileList);
-
-    /* create tuple slot for scanning */
-    scanTupleSlot = MakeTupleTableSlot(true, tupdesc->tdTableAmType);
-    scanTupleSlot->tts_tupleDescriptor = tupdesc;
-    scanTupleSlot->tts_values = columnValues;
-    scanTupleSlot->tts_isnull = columnNulls;
-
-    DFSDescHandler* m_handler = New(CurrentMemoryContext) DFSDescHandler(100, 1, onerel);
-    *totalrows = (double)m_handler->GetLivedRowNumbers(&deadrows);
-    *totaldeadrows = (double)deadrows;
-
-    delete (m_handler);
-
-    if (!estimate_table_rownum) {
-        if (totalblocks != 0)
-            scanAvgNum = (int64)ceil((double)targrows / totalblocks);
-    } else {
-        pfree_ext(scanTupleSlot);
-        pfree_ext(columnValues);
-        pfree_ext(columnNulls);
-        list_free_ext(fileList);
-
-        return 0;
-    }
-
-    /*
-     * Init blocksampler, this function will help us decide which file to be
-     * sampled.
-     */
-    BlockSampler_Init(&bs, totalblocks, totalblocks);
-
-    /*
-     * prepare for sampling rows.
-     */
-    rstate = anl_init_selection_state(targrows);
-    skip_factor = Max(floor((*totalrows) / targrows) - 1, 0);
-    skip_factor = Min(skip_factor, MAX_SKIP_FACTOR);
-
-    /* If still have file to be sampled, we will be into while loop */
-    while (BlockSampler_HasMore(&bs)) {
-        /* Get File number. */
-        unsigned int targFile = BlockSampler_Next(&bs);
-        List* fileWorkList = NIL;
-        int64 tupleCnt = 0;
-        int randomskip = 0;
-        SplitInfo* targSplitInfo = (SplitInfo*)list_nth(fileList, targFile);
-
-        /* create splitinfo */
-        fileInfo = makeNode(SplitInfo);
-        fileInfo->filePath = targSplitInfo->filePath;
-        fileInfo->ObjectSize = targSplitInfo->ObjectSize;
-        fileInfo->eTag = targSplitInfo->eTag;
-        fileWorkList = lappend(fileWorkList, (void*)fileInfo);
-
-        scanState = dfs::reader::DFSBeginScan(onerel, fileWorkList, 0, NULL);
-        scanState->ss_ScanTupleSlot = scanTupleSlot;
-
-        for (;;) {
-            /*
-             * check for user-requested abort or sleep.
-             */
-            vacuum_delay_point();
-
-            /*
-             * read the next tuple.
-             */
-            randomskip = (int)(skip_factor * anl_random_fract());
-            do {
-                dfs::reader::DFSGetNextTuple(scanState, scanTupleSlot);
-            } while (randomskip-- > 0 && !scanTupleSlot->tts_isempty);
-
-            /*
-             * if there are no more records to read, break.
-             */
-            if (scanTupleSlot->tts_isempty) {
-                (void)ExecClearTuple(scanTupleSlot);
-                break;
-            }
-
-            /*
-             * The first targetRowCount sample rows are simply copied into the
-             * reservoir. Then we start replacing tuples in the sample until we
-             * reach the end of the relation.
-             */
-            if (numrows < targrows) {
-
-                rows[numrows++] = (HeapTuple)tableam_tops_form_tuple(tupdesc, columnValues, columnNulls,  HEAP_TUPLE);
-
-            } else {
-                /*
-                 * If we need to compute a new S value, we must use the "not yet
-                 * incremented" value of rowCount as t.
-                 */
-                if (rowstoskip < 0) {
-                    rowstoskip = anl_get_next_S(samplerows, targrows, &rstate);
-                }
-
-                if (rowstoskip <= 0) {
-                    /*
-                     * Found a suitable tuple, so save it, replacing one old tuple
-                     * at random.
-                     */
-                    int rowIndex = (int)(targrows * anl_random_fract());
-                    AssertEreport(
-                        rowIndex >= 0 && rowIndex < targrows, MOD_OPT, "index out of range when replacing tuple.");
-
-                    tableam_tops_free_tuple(rows[rowIndex]);
-                    rows[rowIndex] = (HeapTuple)tableam_tops_form_tuple(tupdesc, columnValues, columnNulls, HEAP_TUPLE);
-
-                }
-                rowstoskip -= 1;
-            }
-            samplerows += 1;
-            /* For multiple orc files, only the first orc file is fully sampled. But for the replicated table, all orc
-             * files are fully sampled. */
-            if ((++tupleCnt == scanAvgNum) && (BlockSampler_HasMore(&bs)) && !onerel_isReplication) {
-                (void)ExecClearTuple(scanTupleSlot);
-                break;
-            }
-        }
-
-        dfs::reader::DFSEndScan(scanState);
-        pfree_ext(scanState);
-    }
-
-    /*
-     * free list.
-     */
-    list_free_ext(fileList);
-
-    /*
-     * emit some interesting relation info.
-     */
-    ereport(elevel,
-        (errmsg("ANALYZE INFO : \"%s\": scanned %.0f tuples and sampled %d tuples",
-            RelationGetRelationName(onerel),
-            samplerows,
-            numrows)));
-
-    return numrows;
-}
-
 /* Select a random value R uniformly distributed in (0 - 1) */
 double anl_random_fract(void)
 {
@@ -4305,119 +4012,6 @@ static int64 acquire_inherited_sample_rows(
          * pointers to their TOAST tables in the sampled rows.
          */
         heap_close(childrel, NoLock);
-    }
-
-    return numrows;
-}
-
-/*
- * Brief:
- *   acquire sample rows from both HDFS table and delta table
- * This has the same API as acquire_sample_rows, except that rows are
- * collected from delta table as well as the specified dfs table.
- * We fail and return zero if there are no delta table.
- *
- * Input:
- *    @onerel: To be analyzed relation
- *    @elevel: ELOG level used in this function
- *    @targrows: target number of rows to be sampled
- * Output:
- *    @rows: selected rows in HeapTuple format
- *    @totalrows: total number of live rows that estimated
- *    @totaldeadrows: total number of dead rows that estimated
- * Return Value : The actual number of rows selected is returned
- * Notes        : None.
- */
-template <bool estimate_table_rownum>
-static int64 acquire_dfsstored_sample_rows(Relation onerel, int elevel, HeapTuple* rows, int64 targrows,
-    double* totalrows, double* totaldeadrows, bool onerel_isReplication)
-{
-    double totalRowCnts = 0;
-    double deltarows = 0;
-    double dfsrows = 0;
-    int64 numrows = 0;
-    int64 deadrows = 0;
-
-    if (!OidIsValid(onerel->rd_rel->reldeltarelid))
-        return 0;
-
-    /* Count the rows in delta table as well as the specified dfs table. */
-    totalRowCnts = 0;
-    deadrows = 0;
-
-    Relation deltarel;
-    /* Open the delta table.  We only need AccessShareLock on the it. */
-    deltarel = relation_open((onerel->rd_rel->reldeltarelid), AccessShareLock);
-
-    numrows = acquire_sample_rows<true>(deltarel, elevel, rows, targrows, &deltarows, totaldeadrows);
-    for (int i = 0; i < numrows; i++) {
-        if (rows[i]) {
-            pfree_ext(rows[i]);
-            rows[i] = NULL;
-        }
-    }
-    totalRowCnts += deltarows;
-
-    DFSDescHandler* m_handler = New(CurrentMemoryContext) DFSDescHandler(100, 1, onerel);
-    dfsrows = (double)m_handler->GetLivedRowNumbers(&deadrows);
-    delete (m_handler);
-    totalRowCnts += dfsrows;
-    *totaldeadrows += (double)deadrows;
-
-    if (estimate_table_rownum) {
-        *totalrows = totalRowCnts;
-        relation_close(deltarel, AccessShareLock);
-
-        return 0;
-    }
-
-    /* Now sample rows from each relation, proportionally to its fraction of the total row count. */
-    numrows = 0;
-    *totalrows = 0;
-    *totaldeadrows = 0;
-
-    if (deltarows > 0) {
-        int64 deltatargrows = 0;
-
-        deltatargrows = (int)rint(targrows * deltarows / totalRowCnts);
-        /* Make sure we don't overrun due to roundoff error */
-        deltatargrows = Min(deltatargrows, targrows - numrows);
-        if (deltatargrows > 0) {
-            int64 sprows = 0;
-            double trows = 0;
-            double tdrows = 0;
-
-            /* Fetch a random sample of the delta table's rows */
-            sprows = acquire_sample_rows<false>(deltarel, elevel, rows + numrows, deltatargrows, &trows, &tdrows);
-
-            /* And add to counts */
-            numrows += sprows;
-            *totalrows += trows;
-            *totaldeadrows += tdrows;
-        }
-    }
-    relation_close(deltarel, AccessShareLock);
-
-    if (dfsrows > 0) {
-        int64 dfstargrows = 0;
-
-        dfstargrows = (int)rint(targrows * dfsrows / totalRowCnts);
-        /* Make sure we don't overrun due to roundoff error */
-        dfstargrows = Min(dfstargrows, targrows - numrows);
-        if (dfstargrows > 0) {
-            int64 sprows = 0;
-            double trows = 0;
-            double tdrows = 0;
-
-            /* Fetch a random sample of the dfs table's rows */
-            sprows = AcquireSampleDfsStoreRows<false>(
-                onerel, elevel, rows + numrows, dfstargrows, &trows, &tdrows, onerel_isReplication);
-
-            /* And add to counts */
-            numrows += sprows;
-            *totalrows += dfsrows;
-            *totaldeadrows += deadrows;
-        }
     }
 
     return numrows;
@@ -4744,6 +4338,23 @@ void update_attstats(Oid relid, char relkind, bool inh, int natts, VacAttrStats*
     releaseSourceAfterDelteOrUpdateAttStats(asOwner, oldOwner1, pgstat, pgstat_ext);
 }
 
+static ArrayType* es_construct_extended_statistics(VacAttrStats* stats, int k)
+{
+    ArrayType *array = NULL;
+    if (STATISTIC_KIND_MCV == stats->stakind[k] || STATISTIC_KIND_NULL_MCV == stats->stakind[k]) {
+        /* construct MCV/NULL-MCV for extended statistics */
+        array = es_construct_mcv_value_array(stats, k);
+#ifndef ENABLE_MULTIPLE_NODES
+    } else if (STATISTIC_EXT_DEPENDENCIES == stats->stakind[k]) {
+        /* construct functional dependency for extended statistics */
+        array = es_construct_dependency_value_array(stats, k);
+#endif
+    } else {
+        array = NULL;
+    }
+    return array;
+}
+
 /*
  * update_single_column_attrstats --- insert a single-column statistic entry into pg_statistic
  *
@@ -4873,11 +4484,9 @@ static void update_stats_catalog(
                     stats->statypalign[k]);
                 values[i++] = PointerGetDatum(array); /* stavaluesN */
             } else {
-                ArrayType* array = NULL;
-                if (STATISTIC_KIND_MCV == stats->stakind[k] || STATISTIC_KIND_NULL_MCV == stats->stakind[k]) {
-                    /* construct MCV/NULL-MCV for estended statistics */
-                    array = es_construct_mcv_value_array(stats, k);
-                    values[i++] = PointerGetDatum(array); /* stavaluesN */
+                ArrayType* array = es_construct_extended_statistics(stats, k);
+                if (array) {
+                    values[i++] = PointerGetDatum(array);
                 } else {
                     nulls[i] = true;
                     values[i++] = (Datum)0;
@@ -5037,6 +4646,19 @@ void delete_attstats(
                 BoolGetDatum(inh),
                 PointerGetDatum(stakey)); /* multi column statistics */
 
+            if (stats->num_attrs > 0) {
+                Bitmapset* bms_attnums = bms_make_singleton(stats->attrs[0]->attnum);
+                for (unsigned int i = 1; i < stats->num_attrs; i++) {
+                    bms_attnums = bms_add_member(bms_attnums, stats->attrs[i]->attnum);
+                }
+                const char* model_name_base = "BAYESNET_MODEL_STATS";
+                StringInfoData model_name;
+                initStringInfo(&model_name);
+                appendStringInfo(&model_name, "%s_%d_%d", model_name_base, relid, bms_hash_value(bms_attnums));
+                remove_model_from_cache_and_disk(model_name.data);
+                pfree_ext(model_name.data);
+            }
+
             pfree_ext(stakey);
         } else {
             if (!pgstat) {
@@ -5114,8 +4736,7 @@ void delete_attstats_replication(Oid relid, VacuumStmt* stmt)
      * we should delete statistic of complex table
      * if statistic of hdfs has deleted and all the table's totalrows are 0.
      */
-    if ((stmt->pstGlobalStatEx[ANALYZEMAIN - 1].totalRowCnts) == 0 &&
-        (stmt->pstGlobalStatEx[ANALYZEDELTA - 1].totalRowCnts) == 0 &&
+    if ((stmt->pstGlobalStatEx[ANALYZEDELTA - 1].totalRowCnts) == 0 &&
         (rel->rd_rel->relhassubclass || RelationIsPAXFormat(rel)))
         delete_attstats(relid, STARELKIND_CLASS, true, attr_cnt, vacattrstats);
 
@@ -6163,13 +5784,6 @@ static void send_totalrowcnt_to_cn(VacuumStmt* vacstmt, AnalyzeMode analyzemode,
     if (analyzemode == ANALYZENORMAL) {
         pq_sendint64(&buf, totalrows);
         pq_sendint64(&buf, vacstmt->pstGlobalStatEx[ANALYZENORMAL].topMemSize);
-    } else { /* Example:ANALYZEMAIN == analyzemode */
-        pq_sendint64(&buf, vacstmt->pstGlobalStatEx[ANALYZEMAIN - 1].totalRowCnts);
-        pq_sendint64(&buf, vacstmt->pstGlobalStatEx[ANALYZEDELTA - 1].totalRowCnts);
-        /* for HDFS, context is deleted after finishing delta and main */
-        pq_sendint64(&buf,
-            vacstmt->pstGlobalStatEx[ANALYZEMAIN - 1].topMemSize +
-                vacstmt->pstGlobalStatEx[ANALYZEDELTA - 1].topMemSize);
     }
 
     pq_endmessage(&buf);
@@ -6300,403 +5914,6 @@ static void do_sampling_normal_second(
         vacstmt->num_samples);
 
     return;
-}
-
-/*
- * @global stats
- * @Description: do sampling for hdfs table(include dfs table and delta table) the second times.
- * @in onerel - the relation for analyze
- * @in vacstmt - the statment for analyze or vacuum command
- * @in numrows - the first sample row num
- * @in totalrows - the total row num which using for comput the second sample num
- * @in rows - the first sample rows
- * @in pstHdfsSampleRows - the sample rows information for dfs table/delta table/complex table
- * @return: void
- */
-static void do_sampling_hdfs_second(Relation onerel, VacuumStmt* vacstmt, AnalyzeMode analyzemode, int64 numrows,
-    double totalrows, HeapTuple* rows, GBLSTAT_HDFS_SAMPLE_ROWS* pstHdfsSampleRows)
-{
-    bool* require_samp = NULL;
-    int8 flag = (analyzemode == ANALYZEMAIN) ? SAMPLEFLAG_DFS : SAMPLEFLAG_DELTA;
-
-    AssertEreport(pstHdfsSampleRows != NULL, MOD_OPT, "");
-    /* Sample the sampled rows from DN before sending them back to CN */
-    vacstmt->tableidx = analyzemode - 1;
-    vacstmt->pstGlobalStatEx[vacstmt->tableidx].totalRowCnts = totalrows;
-    /* compute the second sample row num for dfs table and delta table. */
-    vacstmt->num_samples = compute_sample_size(vacstmt, numrows, &require_samp, onerel->rd_id, vacstmt->tableidx);
-
-    pstHdfsSampleRows->stHdfsSampleRows[vacstmt->tableidx].flag = (int8*)palloc0(numrows * sizeof(int8));
-    if (vacstmt->num_samples > 0) {
-        for (int i = 0; i < numrows; i++) {
-            if (require_samp[i]) {
-                /* identify which sample blong to dfs table, which belong to delta table by flag. */
-                pstHdfsSampleRows->stHdfsSampleRows[vacstmt->tableidx].flag[i] = flag;
-            }
-        }
-    }
-
-    /* set some information of dfs table or delta table using for compute sample rows for the complex table. */
-    pstHdfsSampleRows->stHdfsSampleRows[vacstmt->tableidx].samplerows = numrows;
-    pstHdfsSampleRows->stHdfsSampleRows[vacstmt->tableidx].secsamplerows = vacstmt->num_samples;
-    pstHdfsSampleRows->stHdfsSampleRows[vacstmt->tableidx].rows = rows;
-    pstHdfsSampleRows->stHdfsSampleRows[vacstmt->tableidx].totalrows = totalrows;
-    pstHdfsSampleRows->totalSampleRowCnt += numrows;
-}
-
-/*
- * @Description: The method of complex statistic information is the followings:
- * 1. compute the tuple counts of hdfs and delta table.
- * 2. If the tuple counts less than or equal to targetRows, the hdfs tuples and the delta
- *    tuples will be as first sampling results.
- * 3. If the tuple counts more then to targetRows, must select one table that is most tuples
- *    as big table.  x marks as tuple counts of Big table. y marks as tuple counts of small
- *    table. x' marks as sampling tuple counts of Big table. y' marks as sampling tuple
- *    counts of small table.
- *   If the x' = targetRows, the count of replacing tuple is y/(x+y)*targetRows.
- *   otherwise, the big table keeps x/(x+y)*targetRows tuples, the small table keeps targetRows -
- *   (x/(x+y)*targetRows).
- * @in pstHdfsSampleRows, all sample rows of HDFS table for global stats.
- * @in targetRows, estimate rows to be sampled.
- * @return none.
- */
-static void do_sampling_complex_first(GBLSTAT_HDFS_SAMPLE_ROWS* pstHdfsSampleRows, int64 targetRows)
-{
-    int64 realMainCnt = pstHdfsSampleRows->stHdfsSampleRows[ANALYZEMAIN - 1].totalrows;
-    int64 realDeltaCnt = pstHdfsSampleRows->stHdfsSampleRows[ANALYZEDELTA - 1].totalrows;
-    int64 sampleMainCnt = pstHdfsSampleRows->stHdfsSampleRows[ANALYZEMAIN - 1].samplerows;
-    int64 sampleDeltaCnt = pstHdfsSampleRows->stHdfsSampleRows[ANALYZEDELTA - 1].samplerows;
-
-    HDFS_SAMPLE_ROWS* pstMainRows = &pstHdfsSampleRows->stHdfsSampleRows[ANALYZEMAIN - 1];
-    HDFS_SAMPLE_ROWS* pstDeltaRows = &pstHdfsSampleRows->stHdfsSampleRows[ANALYZEDELTA - 1];
-    HDFS_SAMPLE_ROWS* pstComplexRows = &pstHdfsSampleRows->stHdfsSampleRows[ANALYZECOMPLEX - 1];
-
-    pstComplexRows->totalrows = realMainCnt + realDeltaCnt;
-
-    if (sampleMainCnt + sampleDeltaCnt <= targetRows) {
-        /*
-         * If the sampled tuple numbers which includes main tuples and delta tuples
-         * less than or equal to targetRows, the all sampled tupes will be needed.
-         */
-        int tupleCounter;
-
-        pstComplexRows->samplerows = sampleMainCnt + sampleDeltaCnt;
-        pstComplexRows->rows = (HeapTuple*)palloc0(pstComplexRows->samplerows * sizeof(HeapTuple));
-        for (tupleCounter = 0; tupleCounter < sampleMainCnt; tupleCounter++) {
-            pstComplexRows->rows[tupleCounter] = (HeapTuple) tableam_tops_copy_tuple(pstMainRows->rows[tupleCounter]);
-        }
-
-        for (; tupleCounter < pstComplexRows->samplerows; tupleCounter++) {
-            pstComplexRows->rows[tupleCounter] = (HeapTuple) tableam_tops_copy_tuple(pstDeltaRows->rows[tupleCounter - sampleMainCnt]);
-        }
-    } else {
-        /*
-         * If the sampled tuple numbers which includes main tuples and delta tuples
-         * greater than targetRows, need to eliminate some tuples.
-         */
-        int64 keepMainCnt = ceil((double)realMainCnt / (realMainCnt + realDeltaCnt) * targetRows);
-        int64 keepDeltaCnt = targetRows - keepMainCnt;
-        int64 k;
-        HeapTuple tempTup;
-        keepMainCnt = Min(sampleMainCnt, keepMainCnt);
-        keepDeltaCnt = Min(sampleDeltaCnt, keepDeltaCnt);
-
-        pstComplexRows->samplerows = keepMainCnt + keepDeltaCnt;
-        pstComplexRows->rows = (HeapTuple*)palloc0(pstComplexRows->samplerows * sizeof(HeapTuple));
-        int64 eliminateCountor = 0;
-        int64 keepCountor = 0;
-        for (; eliminateCountor < sampleMainCnt - keepMainCnt; eliminateCountor++) {
-            /*
-             * Eliminate the sampleMainCnt - keepMainCnt tuples in main tuple set.
-             * The eliminated tuples will be filled the end of arrary.
-             */
-            k = (int64)((sampleMainCnt - eliminateCountor - 1) * anl_random_fract());
-            tempTup = pstMainRows->rows[sampleMainCnt - eliminateCountor - 1];
-            pstMainRows->rows[sampleMainCnt - eliminateCountor - 1] = pstMainRows->rows[k];
-            pstMainRows->rows[k] = tempTup;
-        }
-
-        for (eliminateCountor = 0; eliminateCountor < sampleDeltaCnt - keepDeltaCnt; eliminateCountor++) {
-            /*
-             * Eliminate the sampleDeltaCnt - keepDeltaCnt tuples in delta tuple set.
-             * The eliminated tuples will be filled the end of arrary.
-             */
-            k = (int64)((sampleDeltaCnt - eliminateCountor - 1) * anl_random_fract());
-            tempTup = pstDeltaRows->rows[sampleDeltaCnt - eliminateCountor - 1];
-            pstDeltaRows->rows[sampleDeltaCnt - eliminateCountor - 1] = pstDeltaRows->rows[k];
-            pstDeltaRows->rows[k] = tempTup;
-        }
-
-        for (; keepCountor < keepMainCnt; keepCountor++) {
-            pstComplexRows->rows[keepCountor] = (HeapTuple) tableam_tops_copy_tuple(pstMainRows->rows[keepCountor]);
-        }
-
-        for (; keepCountor < pstComplexRows->samplerows; keepCountor++) {
-            pstComplexRows->rows[keepCountor] = (HeapTuple) tableam_tops_copy_tuple(pstDeltaRows->rows[keepCountor - keepMainCnt]);
-        }
-    }
-}
-
-/*
- * @global stats
- * @Description: do sampling for hdfs complex table the second times
- * 			from the second sample rows which include dfs table and delta table.
- * @in onerel - the relation for analyze
- * @in vacstmt - the statment for analyze or vacuum command
- * @in analyzemode - identify which type the table, dfs table or delta table
- * @in hdfs_sample_rows - the sample row num include in dfs table or delta table
- *						which identify how many sample rows belong to complex table.
- * @in pstHdfsSampleRows - the sample rows information for dfs table/delta table/complex table
- * @return: void
- */
-static void do_sampling_complex_by_secsample(Relation onerel, VacuumStmt* vacstmt, AnalyzeMode analyzemode,
-    double hdfs_sample_rows, GBLSTAT_HDFS_SAMPLE_ROWS* pstHdfsTotalSampleRows)
-{
-    bool* require_samp = NULL;
-    int i, j;
-    uint8 flag;
-    double remain_sample_rows;
-    double need_sample_rows;
-    double send_sample_rows = 0;
-    TupOutputState* tstate = NULL;
-    TupleDesc tupdesc = NULL;
-    HDFS_SAMPLE_ROWS* pstHdfsSampleRows = NULL;
-    HDFS_SAMPLE_ROWS* pstDfsSampleRows = &pstHdfsTotalSampleRows->stHdfsSampleRows[ANALYZEMAIN - 1];
-    HDFS_SAMPLE_ROWS* pstDeltaSampleRows = &pstHdfsTotalSampleRows->stHdfsSampleRows[ANALYZEDELTA - 1];
-    Oid tmpRelid = InvalidOid;
-    Relation tmpRelation = NULL;
-    TupleConversionMap* tupmap = NULL;
-
-    if (analyzemode == ANALYZEMAIN) {
-        flag = SAMPLEFLAG_DFS;
-        pstHdfsSampleRows = pstDfsSampleRows;
-    } else {
-        flag = SAMPLEFLAG_DELTA;
-        pstHdfsSampleRows = pstDeltaSampleRows;
-    }
-
-    (void)do_analyze_sampling_begin(onerel, vacstmt, analyzemode, tmpRelation, tmpRelid, tupmap, tupdesc, tstate);
-
-    /* send sample rows include dfs or delta rows back to CN. */
-    for (i = 0; i < pstHdfsSampleRows->samplerows; i++) {
-        if (flag & (uint8)pstHdfsSampleRows->flag[i]) {
-            if (!vacstmt->sampleTableRequired) {
-                /* convert heaptuple into table tuple slot, then send back */
-                (void)ExecStoreTuple(pstHdfsSampleRows->rows[i], tstate->slot, InvalidBuffer, false);
-
-                (vacstmt->dest->receiveSlot)(tstate->slot, vacstmt->dest);
-                (void)ExecClearTuple(tstate->slot);
-            }
-
-            analyze_tmptbl_debug_dn(DebugStage_Execute,
-                analyzemode,
-                vacstmt->tmpSampleTblNameList,
-                &tmpRelid,
-                &tmpRelation,
-                pstHdfsSampleRows->rows[i],
-                tupmap);
-
-            send_sample_rows++;
-        }
-    }
-
-    /* the third sampling complex rows from the second sample rows in dfs or delta table. */
-    if (hdfs_sample_rows > pstHdfsSampleRows->secsamplerows) {
-        /* the sample rows which identify as 000 after second sampling in dfs or delta table. */
-        remain_sample_rows = pstHdfsSampleRows->samplerows - pstHdfsSampleRows->secsamplerows;
-        need_sample_rows = hdfs_sample_rows - pstHdfsSampleRows->secsamplerows;
-
-        get_sampling_rows(&require_samp, remain_sample_rows, need_sample_rows);
-        if (need_sample_rows > 0) {
-            i = 0;
-            for (j = 0; j < pstHdfsSampleRows->samplerows; j++) {
-                if ((pstHdfsSampleRows->flag[j]) == 0 && require_samp[i]) {
-                    if (!vacstmt->sampleTableRequired) {
-                        /*
-                         * get sample rows which blong to dfs table, which belong to delta table, and send to cn.
-                         * convert heaptuple into table tuple slot, then send back.
-                         */
-                        (void)ExecStoreTuple(pstHdfsSampleRows->rows[j], tstate->slot, InvalidBuffer, false);
-
-                        (vacstmt->dest->receiveSlot)(tstate->slot, vacstmt->dest);
-                        (void)ExecClearTuple(tstate->slot);
-                    }
-
-                    analyze_tmptbl_debug_dn(DebugStage_Execute,
-                        analyzemode,
-                        vacstmt->tmpSampleTblNameList,
-                        &tmpRelid,
-                        &tmpRelation,
-                        pstHdfsSampleRows->rows[j],
-                        tupmap);
-
-                    send_sample_rows++;
-
-                    /* all sampled rows has sent. */
-                    if (send_sample_rows >= need_sample_rows)
-                        break;
-                }
-
-                /* get next available sample row. */
-                if (pstHdfsSampleRows->flag[j] == 0)
-                    i++;
-            }
-        }
-    }
-
-    analyze_tmptbl_debug_dn(
-        DebugStage_End, analyzemode, vacstmt->tmpSampleTblNameList, &tmpRelid, &tmpRelation, NULL, NULL);
-
-    if (!vacstmt->sampleTableRequired) {
-        /* clear tuple desc. */
-        end_tup_output(tstate);
-    }
-
-    if (analyzemode == ANALYZEMAIN) {
-        elog(DEBUG1,
-            "%s insert %lf sample rows into temp table for dfs table in queryid:%lu. "
-            "detail: totalrows[%lf], samplerows[%lf], sampleRate[%lf], secsamplerows[%lf], dfs_sample_rows[%lf]",
-            g_instance.attr.attr_common.PGXCNodeName,
-            send_sample_rows,
-            u_sess->debug_query_id,
-            pstHdfsSampleRows->totalrows,
-            pstHdfsSampleRows->samplerows,
-            vacstmt->pstGlobalStatEx[ANALYZEMAIN - 1].sampleRate,
-            pstHdfsSampleRows->secsamplerows,
-            hdfs_sample_rows);
-    } else {
-        elog(DEBUG1,
-            "%s insert %lf sample rows into temp table for delta table in queryid:%lu. "
-            "detail: totalrows[%lf], samplerows[%lf], sampleRate[%lf], secsamplerows[%lf], delta_sample_rows[%lf]",
-            g_instance.attr.attr_common.PGXCNodeName,
-            send_sample_rows,
-            u_sess->debug_query_id,
-            pstHdfsSampleRows->totalrows,
-            pstHdfsSampleRows->samplerows,
-            vacstmt->pstGlobalStatEx[ANALYZEDELTA - 1].sampleRate,
-            pstHdfsSampleRows->secsamplerows,
-            hdfs_sample_rows);
-    }
-
-    if (!vacstmt->sampleTableRequired && analyzemode == ANALYZEMAIN) {
-        /*
-         * send the second sample rows num to cn,
-         * because cn will identify which rows belong dfs or delta from complex sample rows.
-         */
-        tupdesc = CreateTemplateTupleDesc(2, false, TAM_HEAP);
-        TupleDescInitEntry(tupdesc, (AttrNumber)1, "DfsSecSampleRows", FLOAT8OID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber)2, "DeltaSecSampleRows", FLOAT8OID, -1, 0);
-        tstate = begin_tup_output_tupdesc(vacstmt->dest, tupdesc);
-        tstate->slot->tts_values[0] = pstDfsSampleRows->secsamplerows;
-        tstate->slot->tts_isnull[0] = false;
-        tstate->slot->tts_values[1] = pstDeltaSampleRows->secsamplerows;
-        tstate->slot->tts_isnull[1] = false;
-        tstate->slot->tts_tuple = (HeapTuple)tableam_tops_form_tuple(tupdesc, tstate->slot->tts_values, tstate->slot->tts_isnull, HEAP_TUPLE);
-        (vacstmt->dest->receiveSlot)(tstate->slot, vacstmt->dest);
-
-        /* Send sample rows to CN is end after delta table sampling the third times. */
-        end_tup_output(tstate);
-    }
-}
-
-/*
- * @global stats
- * @Description: compute dfs sample rows and delta sample rows seperately
- * 			ccording to sampleRate of complex table and the each rate of total rows.
- *			then sampling for complex table base on the second sample rows and send to cn.
- * @in onerel - the relation for analyze
- * @in vacstmt - the statment for analyze or vacuum command
- * @in pstHdfsSampleRows - the sample rows information for dfs table/delta table/complex table
- * @return: void
- */
-static void do_sampling_complex_third(Relation onerel, VacuumStmt* vacstmt, GBLSTAT_HDFS_SAMPLE_ROWS* pstHdfsSampleRows)
-{
-    double dfs_sample_rows, delta_sample_rows, dfs_delta_sample_rows, dfs_total_rows, delta_total_rows,
-        dfs_delta_total_rows;
-    HDFS_SAMPLE_ROWS* pstDfsSampleRows = &pstHdfsSampleRows->stHdfsSampleRows[ANALYZEMAIN - 1];
-    HDFS_SAMPLE_ROWS* pstDeltaSampleRows = &pstHdfsSampleRows->stHdfsSampleRows[ANALYZEDELTA - 1];
-
-    dfs_total_rows = pstDfsSampleRows->totalrows;
-    delta_total_rows = pstDeltaSampleRows->totalrows;
-    dfs_delta_total_rows = dfs_total_rows + delta_total_rows;
-    /* compute the sample rows num of complex table with dfs table and delta table according to the sample rate. */
-    dfs_delta_sample_rows = rint(dfs_delta_total_rows * vacstmt->pstGlobalStatEx[ANALYZECOMPLEX - 1].sampleRate);
-
-    /* compute the third sample rows num for dfs table and delta table according to each rate of total rows. */
-    dfs_sample_rows = rint(dfs_delta_sample_rows * (dfs_total_rows / dfs_delta_total_rows));
-    delta_sample_rows = rint(dfs_delta_sample_rows * (delta_total_rows / dfs_delta_total_rows));
-
-    /* the third sampling complex rows from the second sample rows in dfs table. */
-    do_sampling_complex_by_secsample(onerel, vacstmt, ANALYZEDELTA, delta_sample_rows, pstHdfsSampleRows);
-    do_sampling_complex_by_secsample(onerel, vacstmt, ANALYZEMAIN, dfs_sample_rows, pstHdfsSampleRows);
-}
-
-/*
- * @global stats
- * @Description: malloc sample memory for complex table and copy sample rows from dfs table and delta table.
- * @in pStmt - the statment for analyze or vacuum command
- * @return: void
- */
-void set_complex_sample(VacuumStmt* pStmt)
-{
-    double dfs_sample_rows, delta_sample_rows, dfs_delta_sample_rows, dfs_total_rows, delta_total_rows,
-        dfs_delta_total_rows;
-    GBLSTAT_HDFS_SAMPLE_ROWS stHdfsSampleRows = {0};
-    HDFS_SAMPLE_ROWS* pstMainRows = &stHdfsSampleRows.stHdfsSampleRows[ANALYZEMAIN - 1];
-    HDFS_SAMPLE_ROWS* pstDeltaRows = &stHdfsSampleRows.stHdfsSampleRows[ANALYZEDELTA - 1];
-    HDFS_SAMPLE_ROWS* pstComplexRows = &stHdfsSampleRows.stHdfsSampleRows[ANALYZECOMPLEX - 1];
-    GlobalStatInfoEx* pstDfsGblStatsInfo = &pStmt->pstGlobalStatEx[ANALYZEMAIN - 1];
-    GlobalStatInfoEx* pstDeltaGblStatsInfo = &pStmt->pstGlobalStatEx[ANALYZEDELTA - 1];
-    GlobalStatInfoEx* pstComplexGblStatsInfo = &pStmt->pstGlobalStatEx[ANALYZECOMPLEX - 1];
-
-    dfs_total_rows = pstDfsGblStatsInfo->totalRowCnts;
-    delta_total_rows = pstDeltaGblStatsInfo->totalRowCnts;
-    dfs_delta_total_rows = dfs_total_rows + delta_total_rows;
-
-    /* we need not set sample rows for complex table if total row count is 0. */
-    if (dfs_delta_total_rows == 0) {
-        return;
-    }
-
-    /* compute the sample rows num of complex table with dfs table and delta table according to the sample rate. */
-    dfs_delta_sample_rows = ceil(dfs_delta_total_rows * pstComplexGblStatsInfo->sampleRate);
-
-    /* compute the third sample rows num for dfs table and delta table according to each rate of total rows. */
-    dfs_sample_rows = rint(dfs_delta_sample_rows * (dfs_total_rows / dfs_delta_total_rows));
-    delta_sample_rows = rint(dfs_delta_sample_rows - dfs_sample_rows);
-
-    elog(DEBUG1,
-        "%s receive %d sample rows for dfs table and %d sample rows for delta table in queryid:%lu. "
-        "detail: totalrows[%lf], sampleRate[%lf], secsamplerows[%lf], dfs_sample_rows[%lf], delta_sample_rows[%lf]",
-        g_instance.attr.attr_common.PGXCNodeName,
-        pstDfsGblStatsInfo->num_samples,
-        pstDeltaGblStatsInfo->num_samples,
-        u_sess->debug_query_id,
-        dfs_delta_total_rows,
-        pstComplexGblStatsInfo->sampleRate,
-        dfs_delta_sample_rows,
-        dfs_sample_rows,
-        delta_sample_rows);
-    /*
-     * be sure that the sample num of received from all datanodes more or equal than
-     * compute in local according to the sample rate for complex table.
-     */
-    dfs_sample_rows = Min(dfs_sample_rows, pstDfsGblStatsInfo->num_samples);
-    delta_sample_rows = Min(delta_sample_rows, pstDeltaGblStatsInfo->num_samples);
-    dfs_delta_sample_rows = dfs_sample_rows + delta_sample_rows;
-
-    /* set totalrows/samplerows/rows in order to get sample for complex table. */
-    pstMainRows->totalrows = pstDfsGblStatsInfo->totalRowCnts;
-    pstMainRows->samplerows = pstDfsGblStatsInfo->num_samples;
-    pstMainRows->rows = pstDfsGblStatsInfo->sampleRows;
-    pstDeltaRows->totalrows = pstDeltaGblStatsInfo->totalRowCnts;
-    pstDeltaRows->samplerows = pstDeltaGblStatsInfo->num_samples;
-    pstDeltaRows->rows = pstDeltaGblStatsInfo->sampleRows;
-
-    /* get sample rows the second times for complex table according to hdfs table and delta table. */
-    do_sampling_complex_first(&stHdfsSampleRows, dfs_delta_sample_rows);
-    pstComplexGblStatsInfo->num_samples = pstComplexRows->samplerows;
-    pstComplexGblStatsInfo->sampleRows = pstComplexRows->rows;
 }
 
 /*
@@ -6922,21 +6139,10 @@ static void update_pages_and_tuples_pgclass(Relation onerel, VacuumStmt* vacstmt
 }
 
 void switch_memory_context(MemoryContext& col_context, MemoryContext& old_context,
-    GBLSTAT_HDFS_SAMPLE_ROWS*& pstHdfsSampleRows, AnalyzeMode analyzemode)
+    AnalyzeMode analyzemode)
 {
     if (ANALYZENORMAL == analyzemode) {
         col_context = AllocSetContextCreate(u_sess->analyze_cxt.analyze_context,
-            "Analyze Column",
-            ALLOCSET_DEFAULT_MINSIZE,
-            ALLOCSET_DEFAULT_INITSIZE,
-            ALLOCSET_DEFAULT_MAXSIZE);
-        old_context = MemoryContextSwitchTo(col_context);
-    } else {
-        /*
-         * we must use hdfs_sample_context for hdfs table,
-         * because we should save two tables(dfs and delta) sample rows when the function is return.
-         */
-        col_context = AllocSetContextCreate(pstHdfsSampleRows->hdfs_sample_context,
             "Analyze Column",
             ALLOCSET_DEFAULT_MINSIZE,
             ALLOCSET_DEFAULT_INITSIZE,
@@ -6964,7 +6170,6 @@ void switch_memory_context(MemoryContext& col_context, MemoryContext& old_contex
  *	@in numrows: the num of sample rows
  *	@in rows: sample tuples for compute statistics
  *	@in analyzemode: identify the relation type for analyze
- *	@in pstHdfsSampleRows: sample row info for hdfs table
  *	@in caller_context: analyze memory context
  *	@in save_userid: saved current userId using for finalize to restore
  *	@in save_sec_context: saved for SecurityRestrictionContext
@@ -6974,7 +6179,7 @@ void switch_memory_context(MemoryContext& col_context, MemoryContext& old_contex
  */
 static bool do_analyze_samplerows(Relation onerel, VacuumStmt* vacstmt, int attr_cnt, VacAttrStats** vacattrstats,
     bool hasindex, int nindexes, AnlIndexData* indexdata, bool inh, Relation* Irel, double* totalrows, int64* numrows,
-    HeapTuple* rows, AnalyzeMode analyzemode, GBLSTAT_HDFS_SAMPLE_ROWS* pstHdfsSampleRows, MemoryContext caller_context,
+    HeapTuple* rows, AnalyzeMode analyzemode, MemoryContext caller_context,
     Oid save_userid, int save_sec_context, int save_nestlevel)
 {
     int64 num_samplerows = *numrows;
@@ -6992,9 +6197,6 @@ static bool do_analyze_samplerows(Relation onerel, VacuumStmt* vacstmt, int attr
         switch (analyzemode) {
             case ANALYZENORMAL:
                 do_sampling_normal_second(onerel, vacstmt, num_samplerows, num_total_rows, rows);
-                break;
-            case ANALYZEMAIN:
-                do_sampling_complex_third(onerel, vacstmt, pstHdfsSampleRows);
                 break;
             default:
                 break;
@@ -7072,7 +6274,7 @@ static bool do_analyze_samplerows(Relation onerel, VacuumStmt* vacstmt, int attr
     int i;
     MemoryContext col_context, old_context;
     /* we use u_sess.analyze_cxt.analyze_context for normal table. */
-    switch_memory_context(col_context, old_context, pstHdfsSampleRows, analyzemode);
+    switch_memory_context(col_context, old_context, analyzemode);
 
     for (i = 0; i < attr_cnt; i++) {
         VacAttrStats* stats = vacattrstats[i];
@@ -7196,13 +6398,12 @@ static void init_sample_table_spec_info(
  *	@in totalrows: total rows for the relation
  *	@in numrows: the num of sample rows
  *	@in analyzemode: identify the relation type for analyze
- *	@in pstHdfsSampleRows: sample row info for hdfs table
  *
  * Returns: void
  */
 static void do_analyze_sampletable(Relation onerel, VacuumStmt* vacstmt, int attr_cnt, VacAttrStats** vacattrstats,
     bool hasindex, int nindexes, AnlIndexData* indexdata, bool inh, Relation* Irel, double totalrows, int64 numrows,
-    AnalyzeMode analyzemode, GBLSTAT_HDFS_SAMPLE_ROWS* pstHdfsSampleRows)
+    AnalyzeMode analyzemode)
 {
     int i;
     MemoryContext col_context, old_context;
@@ -7210,7 +6411,7 @@ static void do_analyze_sampletable(Relation onerel, VacuumStmt* vacstmt, int att
     HeapTuple* samplerows = NULL;
 
     /* we use u_sess.analyze_cxt.analyze_context for normal table. */
-    switch_memory_context(col_context, old_context, pstHdfsSampleRows, analyzemode);
+    switch_memory_context(col_context, old_context, analyzemode);
 
     for (i = 0; i < attr_cnt; i++) {
         VacAttrStats* stats = vacattrstats[i];
@@ -7263,20 +6464,6 @@ static void do_analyze_sampletable(Relation onerel, VacuumStmt* vacstmt, int att
      */
     update_attstats(RelationGetRelid(onerel), STARELKIND_CLASS, inh, attr_cnt, vacattrstats,
                     RelationGetRelPersistence(onerel));
-
-    /*
-     * Update stats of dfs table or delta table using statistic of complex table
-     * if the ratio of delta's rows or dfs's rows with complex's rows less than 0.01.
-     */
-    if (analyzemode == ANALYZECOMPLEX) {
-        if (!vacstmt->pstGlobalStatEx[ANALYZEMAIN - 1].exec_query)
-            update_attstats(RelationGetRelid(onerel), STARELKIND_CLASS, false,
-                            attr_cnt, vacattrstats, RelationGetRelPersistence(onerel));
-
-        if (!vacstmt->pstGlobalStatEx[ANALYZEDELTA - 1].exec_query)
-            update_attstats(onerel->rd_rel->reldeltarelid, STARELKIND_CLASS, false,
-                            attr_cnt, vacattrstats, RelationGetRelPersistence(onerel));
-    }
 
     /*
      * If exist index and there is no sample rows, we don't need compute statistic for index any more.
@@ -7466,33 +6653,6 @@ static double compute_mcv_mincount(int64 samplerows, double ndistinct, double at
 }
 
 /*
- * set_doquery_flag: Decide if execute the query to get samples or not for hdfs table.
- *				we need not execute query for delta/dfs table if the ratio of total row count
- *				for dfs/delta table with complex table less or equal than 0.01.
- *
- * Parameters:
- *	@in pstGlobalStatEx: the auxiliary info for global stats, it extend to identify hdfs table
- *
- * Returns: void
- */
-static void set_doquery_flag(GlobalStatInfoEx* pstGlobalStatEx)
-{
-    GlobalStatInfoEx* pstDfsGblStatsInfo = &pstGlobalStatEx[ANALYZEMAIN - 1];
-    GlobalStatInfoEx* pstDeltaGblStatsInfo = &pstGlobalStatEx[ANALYZEDELTA - 1];
-    GlobalStatInfoEx* pstComplexGblStatsInfo = &pstGlobalStatEx[ANALYZECOMPLEX - 1];
-    double delta_ratio = pstDeltaGblStatsInfo->totalRowCnts / pstComplexGblStatsInfo->totalRowCnts,
-           dfs_ratio = pstDfsGblStatsInfo->totalRowCnts / pstComplexGblStatsInfo->totalRowCnts;
-
-    if (dfs_ratio <= DFS_DELTA_WITH_COMPLEX_MIN_RATIO) {
-        pstDeltaGblStatsInfo->exec_query = false;
-    }
-
-    if (delta_ratio <= DFS_DELTA_WITH_COMPLEX_MIN_RATIO) {
-        pstDfsGblStatsInfo->exec_query = false;
-    }
-}
-
-/*
  * spi_callback_get_sample_rows: A callback function for use to	copy each tuple for index sample rows.
  *
  * Parameters:
@@ -7573,7 +6733,7 @@ static void get_sample_rows_utility(
      * the histogram.
      */
     appendStringInfo(&str,
-        "select * from %s.%s where random() <= %.2f",
+        "select * from %s.%s where pg_catalog.random() <= %.2f",
         quote_identifier(sampleSchemaName),
         quote_identifier(sampleTableName),
         sampleRate);
@@ -7827,6 +6987,208 @@ static char* temporarySampleTableName(Oid relationOid, AnalyzeSampleTableSpecInf
 
 /*
  * Description: This method builds a sampled version of the given relation. The sampled
+ *      version is created in a temp namespace. Note that ANALYZE can be
+ *      executed only by the database or table user. It is safe to assume that the database
+ *      user has permissions to create temp tables. The sampling is done by
+ *      using the random() built-in function.
+ *
+ * Parameters:
+ *  @in relid: relation to be sampled
+ *  @in spec: the sample info of special attribute for compute statistic
+ *  @in indexes: indexes of columns
+ *  @in twocol_tmptable_name: temp table name of P(x1, x2) table
+ *  @in left_tmptable_name: temp table name of P(x1) table
+ *  @in right_tmptable_name: temp table name of P(x2) table
+ *
+ * Returns: temp table name (char*)
+ */
+char* build_temptable_sample_agg_joined(Oid relid, AnalyzeSampleTableSpecInfo* spec,
+    const uint32 *indexes, const char *twocol_tmptable_name, const char *leftcol_tmptable_name,
+    const char *rightcol_tmptable_name, int num_index)
+{
+    StringInfoData str;
+    initStringInfo(&str);
+    char* sampleTableName = NULL;
+    sampleTableName = temporarySampleTableName(relid, NULL);
+
+#ifdef ENABLE_MULTIPLE_NODES
+    appendStringInfo(&str,
+        "set query_dop = 4; create temp table %s ",
+        quote_identifier(sampleTableName));
+#else
+    appendStringInfo(&str,
+        " create temp table %s ",
+        quote_identifier(sampleTableName));
+#endif /* ENABLE_MULTIPLE_NODES */
+ 
+    if (es_is_type_supported_by_cstore(spec->stats)) {
+        if (g_instance.attr.attr_storage.enable_mix_replication || (!IS_DN_MULTI_STANDYS_MODE())) {
+            appendStringInfo(&str, "with(orientation=column) ");
+        }
+    }
+    appendStringInfo(&str, "as (select ");
+    appendStringInfo(&str,
+        "%s.v_count x1x2, %s.v_count x1, %s.v_count x2 from %s, %s, %s where %s.%s=%s.%s and %s.%s=%s.%s);",
+        quote_identifier(twocol_tmptable_name),
+        quote_identifier(leftcol_tmptable_name),
+        quote_identifier(rightcol_tmptable_name),
+        quote_identifier(twocol_tmptable_name),
+        quote_identifier(leftcol_tmptable_name),
+        quote_identifier(rightcol_tmptable_name),
+        quote_identifier(twocol_tmptable_name),
+        get_column_name_alias(spec, ES_COLUMN_ALIAS, indexes, 1),
+        quote_identifier(leftcol_tmptable_name),
+        get_column_name_alias(spec, ES_COLUMN_ALIAS, indexes, 1),
+        quote_identifier(twocol_tmptable_name),
+        get_column_name_alias(spec, ES_COLUMN_ALIAS, indexes+1, 1),
+        quote_identifier(rightcol_tmptable_name),
+        get_column_name_alias(spec, ES_COLUMN_ALIAS, indexes+1, 1));
+    
+#ifdef ENABLE_MULTIPLE_NODES
+    int saved_query_dop = u_sess->opt_cxt.query_dop;
+    appendStringInfo(&str, "set query_dop = %d", saved_query_dop);
+#endif /* ENABLE_MULTIPLE_NODES */
+    elog(ES_LOGLEVEL, "[Sample Table Query] %s", str.data);
+ 
+    spi_exec_with_callback(DestSPI, str.data, false, 0, false, (void (*)(void*))NULL, NULL);
+    pfree_ext(str.data);
+    return sampleTableName;
+}
+ 
+/*
+ * Description: This method builds a sampled version of the given relation. The sampled
+ *      version is created in a temp namespace. Note that ANALYZE can be
+ *      executed only by the database or table user. It is safe to assume that the database
+ *      user has permissions to create temp tables. The sampling is done by
+ *      using the random() built-in function.
+ *
+ * Parameters:
+ *  @in relid: relation to be sampled
+ *  @in analyzemode: the table type which collect statistics information
+ *  @in inh: is inherit table or not
+ *  @in vacstmt: the statment for analyze or vacuum command
+ *  @in spec: the sample info of special attribute for compute statistic
+ *  @in indexes: indexes of columns
+ *  @in num_index: number of columns
+ *
+ * Returns: temp table name (char*)
+ */
+char* build_temptable_sample_agg(Oid relid, AnalyzeMode analyzemode, bool inh,
+    VacuumStmt* vacstmt, AnalyzeSampleTableSpecInfo* spec, const uint32 *indexes,
+    int num_index)
+{
+    StringInfoData str;
+    const char* schemaName = NULL;
+    const char* tableName = NULL;
+    char* sampleTableName = NULL;
+    Relation onerel = NULL;
+    Relation mianrel = NULL;
+ 
+    DEBUG_MOD_START_TIMER(MOD_AUTOVAC);
+    onerel = relation_open(relid, AccessShareLock);
+ 
+    schemaName = get_namespace_name(get_rel_namespace(relid));
+    tableName = get_rel_name(relid);
+ 
+    initStringInfo(&str);
+ 
+    /* Generate temporary sample table name. */
+    /* Spec alias has been set before */
+    sampleTableName = temporarySampleTableName(relid, NULL);
+ 
+    /*
+        * This query orders the table by rank on the value and chooses values that occur every
+        * 'bucketSize' interval. It also chooses the maximum value from the relation. It then
+        * removes duplicate values and orders the values in ascending order. This corresponds to
+        * the histogram.
+        * We should set hashagg_table_size before query because distinct value of current attribute
+        * may be not accurate which result in the performance of query degread.
+        */
+#ifdef ENABLE_MULTIPLE_NODES
+    appendStringInfo(&str,
+        "set query_dop = 4; create temp table %s ",
+        quote_identifier(sampleTableName));
+#else
+    appendStringInfo(&str,
+        " create temp table %s ",
+        quote_identifier(sampleTableName));
+#endif   /* ENABLE_MULTIPLE_NODES */
+
+    if (es_is_type_supported_by_cstore(spec->stats)) {
+        if (g_instance.attr.attr_storage.enable_mix_replication || (!IS_DN_MULTI_STANDYS_MODE())) {
+            appendStringInfo(&str, "with(orientation=column) ");
+        }
+    }
+ 
+#ifdef ENABLE_MULTIPLE_NODES
+    if (es_is_type_distributable(spec->stats)) {
+        appendStringInfo(
+            &str, "distribute by hash(%s) as (select ",
+            get_column_name_alias(spec, ES_COLUMN_ALIAS, indexes, num_index));
+    } else {
+        /* We should add a new column for distribute if the attribute is not support hash. */
+        appendStringInfo(&str, "distribute by hash(i) as (select (random()*32767)::int2 as i, ");
+    }
+#else
+    appendStringInfo(&str, "as (select ");
+#endif   /* ENABLE_MULTIPLE_NODES */
+ 
+    if (vacstmt->tmpSampleTblNameList) {
+        Relation temp_relation;
+ 
+        const char* tmpSampleTableName = get_sample_tblname(analyzemode, vacstmt->tmpSampleTblNameList);
+        temp_relation = relation_open(RelnameGetRelid(tmpSampleTableName), AccessShareLock);
+
+        appendStringInfo(&str,
+            "%s, count(*) as v_count "
+            "from %s %s group by %s);",
+            get_column_name_alias(spec, ES_COLUMN_NAME | ES_COLUMN_ALIAS, indexes, num_index),
+            (!inh && RelationIsPAXFormat(onerel)) ? "only" : "",
+            quote_identifier(tmpSampleTableName),
+            get_column_name_alias(spec, ES_COLUMN_ALIAS, indexes, num_index));
+ 
+        /* Switch to relowner of temp table. */
+        SetUserIdAndSecContext(temp_relation->rd_rel->relowner, 0);
+        relation_close(temp_relation, AccessShareLock);
+    } else {
+        appendStringInfo(&str,
+            "%s, count(*) as v_count "
+            "from %s %s.%s where random() <= %.2f group by %s);",
+            get_column_name_alias(spec, ES_COLUMN_NAME | ES_COLUMN_ALIAS, indexes, num_index),
+            (!inh && RelationIsPAXFormat(onerel)) ? "only" : "",
+            quote_identifier(schemaName),
+            quote_identifier(tableName),
+            vacstmt->pstGlobalStatEx[vacstmt->tableidx].sampleRate,
+            get_column_name_alias(spec, ES_COLUMN_ALIAS, indexes, num_index));
+ 
+        SetUserIdAndSecContext(onerel->rd_rel->relowner, 0);
+    }
+ 
+#ifdef ENABLE_MULTIPLE_NODES
+    int saved_query_dop = u_sess->opt_cxt.query_dop;
+    appendStringInfo(&str, "set query_dop = %d", saved_query_dop);
+#endif
+
+    if (mianrel)
+        relation_close(mianrel, AccessShareLock);
+    relation_close(onerel, AccessShareLock);
+ 
+    elog(ES_LOGLEVEL, "[Sample Table Query] %s", str.data);
+ 
+    spi_exec_with_callback(DestSPI, str.data, false, 0, false, (void (*)(void*))NULL, NULL);
+ 
+    DEBUG_MOD_STOP_TIMER(MOD_AUTOVAC, "Created sample table %s success. querystring: %s", sampleTableName, str.data);
+ 
+    pfree_ext(str.data);
+    pfree_ext(tableName);
+    pfree_ext(schemaName);
+ 
+    return sampleTableName;
+}
+
+
+/*
+ * Description: This method builds a sampled version of the given relation. The sampled
  * 		version is created in a temp namespace. Note that ANALYZE can be
  * 		executed only by the database or table user. It is safe to assume that the database
  * 		user has permissions to create temp tables. The sampling is done by
@@ -7897,50 +7259,29 @@ char* buildTempSampleTable(Oid relid, Oid mian_relid, TempSmpleTblType type, Ana
                 &str, "distribute by hash(%s) as (select ", es_get_column_name_alias(spec, ES_COLUMN_ALIAS));
         } else {
             /* We should add a new column for distribute if the attribute is not support hash. */
-            appendStringInfo(&str, "distribute by hash(i) as (select (random()*32767)::int2 as i, ");
+            appendStringInfo(&str, "distribute by hash(i) as (select (pg_catalog.random()*32767)::int2 as i, ");
         }
 
         if (vacstmt->tmpSampleTblNameList) {
             Relation temp_relation;
+            const char* tmpSampleTableName = get_sample_tblname(analyzemode, vacstmt->tmpSampleTblNameList);
+            temp_relation = relation_open(RelnameGetRelid(tmpSampleTableName), AccessShareLock);
 
-            if (analyzemode != ANALYZECOMPLEX) {
-                const char* tmpSampleTableName = get_sample_tblname(analyzemode, vacstmt->tmpSampleTblNameList);
-                temp_relation = relation_open(RelnameGetRelid(tmpSampleTableName), AccessShareLock);
-
-                appendStringInfo(&str,
-                    "%s, count(*) as v_count "
-                    "from %s %s group by %s);",
-                    es_get_column_name_alias(spec, ES_COLUMN_NAME | ES_COLUMN_ALIAS),
-                    (!inh && RelationIsPAXFormat(onerel)) ? "only" : "",
-                    quote_identifier(tmpSampleTableName),
-                    es_get_column_name_alias(spec, ES_COLUMN_ALIAS));
-            } else {
-                const char* dfsTmpSampleTblName = NULL;
-                const char* deltaTmpSampleTblName = NULL;
-
-                dfsTmpSampleTblName = get_sample_tblname(ANALYZEMAIN, vacstmt->tmpSampleTblNameList);
-                deltaTmpSampleTblName = get_sample_tblname(ANALYZEDELTA, vacstmt->tmpSampleTblNameList);
-                temp_relation = relation_open(RelnameGetRelid(dfsTmpSampleTblName), AccessShareLock);
-
-                /* For complex table, we should union sample rows of dfs and delta table. */
-                appendStringInfo(&str,
-                    "%s, count(*) as v_count from "
-                    "(select %s from %s union all (select %s from %s)) group by %s);",
-                    es_get_column_name_alias(spec, ES_COLUMN_NAME | ES_COLUMN_ALIAS),
-                    es_get_column_name_alias(spec, ES_COLUMN_NAME),
-                    quote_identifier(dfsTmpSampleTblName),
-                    es_get_column_name_alias(spec, ES_COLUMN_NAME),
-                    quote_identifier(deltaTmpSampleTblName),
-                    es_get_column_name_alias(spec, ES_COLUMN_ALIAS));
-            }
+            appendStringInfo(&str,
+                "%s, count(*) as v_count "
+                "from %s %s group by %s);",
+                es_get_column_name_alias(spec, ES_COLUMN_NAME | ES_COLUMN_ALIAS),
+                (!inh && RelationIsPAXFormat(onerel)) ? "only" : "",
+                quote_identifier(tmpSampleTableName),
+                es_get_column_name_alias(spec, ES_COLUMN_ALIAS));
 
             /* Switch to relowner of temp table. */
             SetUserIdAndSecContext(temp_relation->rd_rel->relowner, 0);
             relation_close(temp_relation, AccessShareLock);
         } else {
             appendStringInfo(&str,
-                "%s, count(*) as v_count "
-                "from %s %s.%s where random() <= %.2f group by %s);",
+                "%s, pg_catalog.count(*) as v_count "
+                "from %s %s.%s where pg_catalog.random() <= %.2f group by %s);",
                 es_get_column_name_alias(spec, ES_COLUMN_NAME | ES_COLUMN_ALIAS),
                 (!inh && RelationIsPAXFormat(onerel)) ? "only" : "",
                 quote_identifier(schemaName),
@@ -8160,7 +7501,7 @@ static void analyze_compute_samplerows(const char* tableName, AnalyzeSampleTable
     int64 samplerows = 0;
     StringInfoData str;
     initStringInfo(&str);
-    appendStringInfo(&str, "select sum(v_count)::int8 as samplerows from %s;", quote_identifier(tableName));
+    appendStringInfo(&str, "select pg_catalog.sum(v_count)::int8 as samplerows from %s;", quote_identifier(tableName));
 
     elog(ES_LOGLEVEL, "[Query to compute samplerows] : %s", str.data);
 
@@ -8198,7 +7539,7 @@ static void analyze_compute_nullcount(const char* tableName, AnalyzeSampleTableS
          * elements are NULL, and also use this result to compute nullfrac
          */
         appendStringInfo(&str,
-            "select sum(v_count)::int8 from %s where %s limit 1;",
+            "select pg_catalog.sum(v_count)::int8 from %s where %s limit 1;",
             quote_identifier(tableName),
             es_get_column_name_alias(spec, ES_COLUMN_ALIAS, " and ", "", " is null "));
 
@@ -8242,9 +7583,9 @@ static void analyze_compute_avgwidth(const char* tableName, AnalyzeSampleTableSp
             StringInfoData str;
             initStringInfo(&str);
             appendStringInfo(&str,
-                "select (sum((%s) * v_count)::int8 / sum(v_count)::int8)::int8 "
+                "select (pg_catalog.sum((%s) * v_count)::int8 / pg_catalog.sum(v_count)::int8)::int8 "
                 "from %s where %s;",
-                es_get_column_name_alias(spec, ES_COLUMN_ALIAS, " + ", "pg_column_size(", ")"),
+                es_get_column_name_alias(spec, ES_COLUMN_ALIAS, " + ", "pg_catalog.pg_column_size(", ")"),
                 quote_identifier(tableName),
                 es_get_column_name_alias(spec, ES_COLUMN_ALIAS, " and ", "", " is not null "));
 
@@ -8284,8 +7625,8 @@ static void analyze_distinct(const char* tableName, AnalyzeSampleTableSpecInfo* 
     DEBUG_MOD_START_TIMER(MOD_AUTOVAC);
     initStringInfo(&str);
     appendStringInfo(&str,
-        "select count(*) as ndistinct, "
-        "(select count(*) from %s where v_count > 1) as nmultiple "
+        "select pg_catalog.count(*) as ndistinct, "
+        "(select pg_catalog.count(*) from %s where v_count > 1) as nmultiple "
         "from %s where NOT (%s);",
         quote_identifier(tableName),
         quote_identifier(tableName),
@@ -8671,7 +8012,7 @@ static void analyze_compute_histgram(int* slot_idx, const char* tableName, Analy
                 quote_identifier(tableName));
         } else {
             appendStringInfo(&str,
-                "select substr(%s,1,20) as sub_v, v_count from %s ",
+                "select pg_catalog.substr(%s,1,20) as sub_v, v_count from %s ",
                 es_get_column_name_alias(spec, ES_COLUMN_ALIAS),
                 quote_identifier(tableName));
         }
@@ -8767,6 +8108,7 @@ static void analyze_compute_histgram(int* slot_idx, const char* tableName, Analy
  *	@in stats: statistics for one attribute
  *	@in numTotalRows: total rows for the relation
  *	@in numSampleRows: the num of sample rows
+ *	@in analyzemode: identify the relation type for analyze
  *
  * Returns: void
  */
@@ -8827,7 +8169,8 @@ static void do_analyze_compute_attr_stats(bool inh, Relation onerel, VacuumStmt*
         computeHist = false;
     }
 
-    if (computeMCV) {
+    if (computeMCV && !(u_sess->attr.attr_sql.enable_ai_stats &&
+                        u_sess->attr.attr_sql.multi_stats_type == BAYESNET_OPTION)) {
         analyze_compute_mcv(&slot_idx, tableName, &spec);
     }
 
@@ -8864,9 +8207,28 @@ static void do_analyze_compute_attr_stats(bool inh, Relation onerel, VacuumStmt*
      * in order to support better selectivity estimation of NULL-filtering with other
      * predicates, we need collect another type of MCV that created with null values.
      */
-    if (computeMCV && spec.stats->num_attrs > 1) {
+    if (computeMCV && spec.stats->num_attrs > 1 && !(u_sess->attr.attr_sql.enable_ai_stats &&
+                                                     u_sess->attr.attr_sql.multi_stats_type == BAYESNET_OPTION)) {
         analyze_compute_mcv(&slot_idx, tableName, &spec, true);
     }
+
+    if (spec.stats->num_attrs > 1 && u_sess->attr.attr_sql.enable_ai_stats &&
+        u_sess->attr.attr_sql.multi_stats_type != MCV_OPTION) {
+        bool bayesnet_success = analyze_compute_bayesnet(&slot_idx, onerel, analyzemode, inh,
+                                                         vacstmt, &spec, tableName);
+        if (!bayesnet_success && computeMCV &&
+            u_sess->attr.attr_sql.multi_stats_type != (int)ALL_OPTION) {
+            ereport(WARNING, (errmodule(MOD_AUTOVAC),
+                    errmsg("Only NDV of multi-column statistics is created.")));
+        }
+    }
+    
+#ifndef ENABLE_MULTIPLE_NODES
+    /* Functional dependency statistics is only available in single node */
+    if (u_sess->attr.attr_sql.enable_functional_dependency && spec.stats->num_attrs > 1) {
+        analyze_compute_dependencies(onerel, &slot_idx, tableName, &spec, stats);
+    }
+#endif
 
     if (log_min_messages > DEBUG1) {
         dropSampleTable(tableName);
@@ -8899,7 +8261,7 @@ const char* get_sample_tblname(AnalyzeMode analyzemode, List* tmpSampleTblNameLi
 {
     const char* tmpSampleTableName = NULL;
 
-    if ((analyzemode == ANALYZENORMAL) || (analyzemode == ANALYZEMAIN)) {
+    if (analyzemode == ANALYZENORMAL) {
         tmpSampleTableName = ((Value*)linitial(tmpSampleTblNameList))->val.str;
     } else {
         tmpSampleTableName = ((Value*)lsecond(tmpSampleTblNameList))->val.str;

@@ -2,587 +2,715 @@
 -- check the CATALOG_VERSION_NO value which from "src/bin/catalog/catversion.h"
 -- If changed, please inform the OM tools team. The scripts of OM tools need to be modified together
 --
-\! @abs_bindir@/pg_controldata @abs_srcdir@/tmp_check/coordinator1/ | grep "Catalog version number"
-Catalog version number:               201611171
 --
 -- check GUC parameter
 --
 select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_case_number'  order by name;
-               name                | vartype | unit | min_val |      max_val       
------------------------------------+---------+------+---------+--------------------
- acceleration_with_compute_pool    | bool    |      |         | 
- acce_min_datasize_per_thread      | integer | kB   | 0       | 2147483647
- advance_xlog_file_num             | integer |      | 0       | 100
- alarm_component                   | string  |      |         | 
- alarm_report_interval             | integer |      | 0       | 2147483647
- allocate_mem_cost                 | real    |      | 0       | 1.79769e+308
- allow_concurrent_tuple_update     | bool    |      |         | 
- allow_system_table_mods           | bool    |      |         | 
- analysis_options                  | string  |      |         | 
- application_name                  | string  |      |         | 
- application_type                  | enum    |      |         | 
- archive_command                   | string  |      |         | 
- archive_interval                  | integer | s    | 1       | 1000
- archive_mode                      | bool    |      |         | 
- archive_timeout                   | integer | s    | 0       | 1073741823
- array_nulls                       | bool    |      |         |
- asp_flush_mode                    | string  |      |         |
- asp_flush_rate                    | integer |      | 1       | 10
- asp_log_directory                 | string  |      |         |
- asp_log_filename                  | string  |      |         |
- asp_retention_days                | integer |      | 1       | 7
- asp_sample_interval               | integer | s    | 1       | 10
- asp_sample_num                    | integer |      | 10000   | 100000
- audit_copy_exec                   | integer |      | 0       | 1
- audit_database_process            | integer |      | 0       | 1
- audit_data_format                 | string  |      |         | 
- audit_directory                   | string  |      |         | 
- audit_dml_state                   | integer |      | 0       | 1
- audit_dml_state_select            | integer |      | 0       | 1
- audit_xid_info                    | integer |      | 0       | 1
- audit_enabled                     | bool    |      |         | 
- audit_file_remain_threshold       | integer |      | 1       | 1048576
- audit_file_remain_time            | integer |      | 0       | 730
- audit_function_exec               | integer |      | 0       | 1
- audit_grant_revoke                | integer |      | 0       | 1
- audit_login_logout                | integer |      | 0       | 7
- audit_resource_policy             | bool    |      |         | 
- audit_rotation_interval           | integer | min  | 1       | 35791394
- audit_rotation_size               | integer | kB   | 1024    | 1048576
- audit_set_parameter               | integer |      | 0       | 1
- audit_space_limit                 | integer | kB   | 1024    | 1073741824
- audit_system_object               | integer |      | 0       | 524287
- audit_user_locked                 | integer |      | 0       | 1
- audit_user_violation              | integer |      | 0       | 1
- authentication_timeout            | integer | s    | 1       | 600
- auto_csn_barrier                  | bool    |      |         | 
- auth_iteration_count              | integer |      | 2048    | 134217728
- autoanalyze                       | bool    |      |         | 
- autoanalyze_timeout               | integer | s    | 0       | 2147483
- autovacuum                        | bool    |      |         | 
- autovacuum_analyze_scale_factor   | real    |      | 0       | 100
- autovacuum_analyze_threshold      | integer |      | 0       | 2147483647
- autovacuum_freeze_max_age         | int64   |      | 100000  | 576460752303423487
- autovacuum_io_limits              | integer |      | -1      | 1073741823
- autovacuum_max_workers            | integer |      | 0       | 262143
- autovacuum_mode                   | enum    |      |         | 
- autovacuum_naptime                | integer | s    | 1       | 2147483
- autovacuum_vacuum_cost_delay      | integer | ms   | -1      | 100
- autovacuum_vacuum_cost_limit      | integer |      | -1      | 10000
- autovacuum_vacuum_scale_factor    | real    |      | 0       | 100
- autovacuum_vacuum_threshold       | integer |      | 0       | 2147483647
- backend_flush_after               | integer | 8kB  | 0       | 256
- backslash_quote                   | enum    |      |         |
- backtrace_min_messages            | enum    |      |         | 
- backwrite_quantity                | integer | 8kB  | 128     | 131072
- bbox_dump_count                   | integer |      | 1       | 20
- bbox_dump_path                    | string  |      |         | 
- behavior_compat_options           | string  |      |         | 
- bgwriter_delay                    | integer | ms   | 10      | 10000
- bgwriter_flush_after              | integer | 8kB  | 0       | 256
- bgwriter_lru_maxpages             | integer |      | 0       | 1000
- bgwriter_lru_multiplier           | real    |      | 0       | 10
- block_size                        | integer |      | 8192    | 8192
- bulk_read_ring_size               | integer | kB   | 256     | 2147483647
- bulk_write_ring_size              | integer | kB   | 16384   | 2147483647
- bytea_output                      | enum    |      |         | 
- cache_connection                  | bool    |      |         | 
- cgroup_name                       | string  |      |         | 
- check_function_bodies             | bool    |      |         | 
- check_implicit_conversions        | bool    |      |         | 
- checkpoint_completion_target      | real    |      | 0       | 1
- checkpoint_flush_after            | integer | 8kB  | 0       | 256
- checkpoint_segments               | integer |      | 1       | 2147483646
- checkpoint_timeout                | integer | s    | 30      | 3600
- checkpoint_wait_timeout           | integer | s    | 2       | 3600
- checkpoint_warning                | integer | s    | 0       | 2147483647
- client_encoding                   | string  |      |         | 
- client_min_messages               | enum    |      |         | 
- cn_send_buffer_size               | integer | kB   | 8       | 128
- codegen_cost_threshold            | integer |      | 0       | 2147483647
- codegen_strategy                  | enum    |      |         | 
- comm_ackchk_time                  | integer | ms   | 0       | 20000
- comm_debug_mode                   | bool    |      |         | 
- commit_delay                      | integer |      | 0       | 100000
- commit_siblings                   | integer |      | 0       | 1000
- comm_max_receiver                 | integer |      | 1       | 50
- comm_memory_pool                  | integer | kB   | 102400  | 1073741823
- comm_memory_pool_percent          | integer |      | 0       | 100
- comm_no_delay                     | bool    |      |         | 
- comm_quota_size                   | integer | kB   | 0       | 2048000
- comm_stat_mode                    | bool    |      |         | 
- comm_tcp_mode                     | bool    |      |         | 
- comm_timer_mode                   | bool    |      |         | 
- comm_usable_memory                | integer | kB   | 102400  | 1073741823
- config_file                       | string  |      |         | 
- connection_alarm_rate             | real    |      | 0       | 1
- connection_info                   | string  |      |         | 
- constraint_exclusion              | enum    |      |         | 
- convert_string_to_digit           | bool    |      |         | 
- cost_param                        | integer |      | 0       | 2147483647
- cpu_collect_timer                 | integer |      | 1       | 2147483647
- cpu_index_tuple_cost              | real    |      | 0       | 1.79769e+308
- cpu_operator_cost                 | real    |      | 0       | 1.79769e+308
- cpu_tuple_cost                    | real    |      | 0       | 1.79769e+308
- cstore_backwrite_max_threshold    | integer | kB   | 4096    | 1073741823
- cstore_backwrite_quantity         | integer | kB   | 1024    | 1048576
- cstore_buffers                    | integer | kB   | 16384   | 1073741823
- cstore_insert_mode                | enum    |      |         | 
- cstore_prefetch_quantity          | integer | kB   | 1024    | 1048576
- current_logic_cluster             | string  |      |         | 
- current_schema                    | string  |      |         | 
- cursor_tuple_fraction             | real    |      | 0       | 1
- data_directory                    | string  |      |         | 
- datanode_heartbeat_interval       | integer | ms   | 1000    | 60000
- data_replicate_buffer_size        | integer | kB   | 4096    | 1072693248
- data_sync_retry                   | bool    |      |         | 
- DateStyle                         | string  |      |         | 
- deadlock_timeout                  | integer | ms   | 1       | 2147483647
- debug_assertions                  | bool    |      |         | 
- debug_pretty_print                | bool    |      |         | 
- debug_print_parse                 | bool    |      |         | 
- debug_print_plan                  | bool    |      |         | 
- debug_print_rewritten             | bool    |      |         | 
- default_limit_rows                | real    |      | -100    | 1.79769e+308
- default_statistics_target         | integer |      | -100    | 10000
- default_storage_nodegroup         | string  |      |         | 
- default_tablespace                | string  |      |         | 
- default_text_search_config        | string  |      |         | 
- default_transaction_deferrable    | bool    |      |         | 
- default_transaction_isolation     | enum    |      |         | 
- default_transaction_read_only     | bool    |      |         | 
- default_with_oids                 | bool    |      |         | 
- dfs_partition_directory_length    | integer |      | 92      | 7999
- disable_memory_protect            | bool    |      |         | 
- dw_file_num                       | integer |      | 1       | 16
- dw_file_size                      | integer |      | 32      | 256
- dynamic_library_path              | string  |      |         | 
- effective_cache_size              | integer | 8kB  | 1       | 2147483647
- effective_io_concurrency          | integer |      | 0       | 1000
- enable_absolute_tablespace        | bool    |      |         | 
- enable_access_server_directory    | bool    |      |         | 
- enable_adio_debug                 | bool    |      |         | 
- enable_adio_function              | bool    |      |         | 
- enable_alarm                      | bool    |      |         | 
- enable_analyze_check              | bool    |      |         | 
- enable_asp                        | bool    |      |         | 
- enable_backend_control            | bool    |      |         | 
- enable_bbox_dump                  | bool    |      |         | 
- enable_beta_features              | bool    |      |         | 
- enable_beta_opfusion              | bool    |      |         | 
- enable_bitmapscan                 | bool    |      |         | 
- enable_bloom_filter               | bool    |      |         | 
- enable_broadcast                  | bool    |      |         | 
- enable_cbm_tracking               | bool    |      |         | 
- enable_change_hjcost              | bool    |      |         | 
- enable_codegen                    | bool    |      |         | 
- enable_codegen_print              | bool    |      |         | 
- enable_compress_hll               | bool    |      |         | 
- enable_compress_spill             | bool    |      |         | 
- enable_constraint_optimization    | bool    |      |         | 
- enable_copy_server_files          | bool    |      |         | 
- enable_csqual_pushdown            | bool    |      |         | 
- enable_data_replicate             | bool    |      |         | 
- enable_debug_vacuum               | bool    |      |         | 
- enable_delta_store                | bool    |      |         | 
- enable_double_write               | bool    |      |         | 
- enable_early_free                 | bool    |      |         | 
- enable_extrapolation_stats        | bool    |      |         | 
- enable_fast_allocate              | bool    |      |         | 
- enable_fast_numeric               | bool    |      |         | 
- enable_force_vector_engine        | bool    |      |         | 
- enable_global_plancache           | bool    |      |         | 
- enable_global_stats               | bool    |      |         | 
- enable_hadoop_env                 | bool    |      |         | 
- enable_hashagg                    | bool    |      |         | 
- enable_hashjoin                   | bool    |      |         | 
- enable_hdfs_predicate_pushdown    | bool    |      |         | 
- enable_incremental_catchup        | bool    |      |         | 
- enable_incremental_checkpoint     | bool    |      |         | 
- enable_index_nestloop             | bool    |      |         | 
- enable_indexonlyscan              | bool    |      |         | 
- enable_indexscan                  | bool    |      |         | 
- enable_instance_metric_persistent | bool    |      |         | 
- enable_instr_rt_percentile        | bool    |      |         | 
- enable_instr_track_wait           | bool    |      |         | 
- enable_kill_query                 | bool    |      |         | 
- enable_light_proxy                | bool    |      |         | 
- enable_logical_io_statistics      | bool    |      |         | 
- enable_material                   | bool    |      |         | 
- enable_memory_context_check_debug | bool    |      |         | 
- enable_memory_context_control     | bool    |      |         | 
- enable_memory_limit               | bool    |      |         | 
- enable_mergejoin                  | bool    |      |         | 
- enable_mix_replication            | bool    |      |         | 
- enable_nestloop                   | bool    |      |         | 
- enable_nodegroup_debug            | bool    |      |         | 
- enable_nonsysadmin_execute_direct | bool    |      |         | 
- enable_online_ddl_waitlock        | bool    |      |         | 
- enable_opfusion                   | bool    |      |         | 
- enable_orc_cache                  | bool    |      |         | 
- enable_page_lsn_check             | bool    |      |         | 
- enable_parallel_ddl               | bool    |      |         | 
- enable_partition_opfusion         | bool    |      |         | 
- enable_partitionwise              | bool    |      |         | 
- enable_pbe_optimization           | bool    |      |         | 
- enable_prevent_job_task_startup   | bool    |      |         | 
- enable_resource_record            | bool    |      |         | 
- enable_resource_track             | bool    |      |         | 
- enable_save_datachanged_timestamp | bool    |      |         | 
- enableSeparationOfDuty            | bool    |      |         | 
- enable_seqscan                    | bool    |      |         | 
- enable_show_any_tuples            | bool    |      |         | 
- enable_slot_log                   | bool    |      |         | 
- enable_sonic_hashagg              | bool    |      |         | 
- enable_sonic_hashjoin             | bool    |      |         | 
- enable_sonic_optspill             | bool    |      |         | 
- enable_sort                       | bool    |      |         | 
- enable_stream_replication         | bool    |      |         | 
- enable_thread_pool                | bool    |      |         | 
- enable_tidscan                    | bool    |      |         | 
- enable_trigger_shipping           | bool    |      |         | 
- enable_tsdb                       | bool    |      |         | 
- enable_twophase_commit            | bool    |      |         | 
- enable_upgrade_merge_lock_mode    | bool    |      |         | 
- enable_user_metric_persistent     | bool    |      |         | 
- enable_valuepartition_pruning     | bool    |      |         | 
- enable_vector_engine              | bool    |      |         | 
- enable_wdr_snapshot               | bool    |      |         | 
- enable_xlog_prune                 | bool    |      |         | 
- enforce_a_behavior                | bool    |      |         | 
- escape_string_warning             | bool    |      |         | 
- event_source                      | string  |      |         | 
- exit_on_error                     | bool    |      |         | 
- expected_computing_nodegroup      | string  |      |         | 
- explain_dna_file                  | string  |      |         | 
- explain_perf_mode                 | enum    |      |         | 
- external_pid_file                 | string  |      |         | 
- extra_float_digits                | integer |      | -15     | 3
- failed_login_attempts             | integer |      | 0       | 1000
- fast_extend_file_size             | integer | kB   | 1024    | 1048576
- fault_mon_timeout                 | integer | min  | 0       | 1440
- FencedUDFMemoryLimit              | integer | kB   | 0       | 2147483647
- force_bitmapand                   | bool    |      |         | 
- force_promote                     | integer |      | 0       | 1
- from_collapse_limit               | integer |      | 1       | 2147483647
- fsync                             | bool    |      |         | 
- full_page_writes                  | bool    |      |         | 
- gds_debug_mod                     | bool    |      |         | 
- geqo                              | bool    |      |         | 
- geqo_effort                       | integer |      | 1       | 10
- geqo_generations                  | integer |      | 0       | 2147483647
- geqo_pool_size                    | integer |      | 0       | 2147483647
- geqo_seed                         | real    |      | 0       | 1
- geqo_selection_bias               | real    |      | 1.5     | 2
- geqo_threshold                    | integer |      | 2       | 2147483647
- gin_fuzzy_search_limit            | integer |      | 0       | 2147483647
- gin_pending_list_limit            | integer | kB   | 64      | 2147483647
- hadr_max_size_for_xlog_receiver   | integer | kB   | 0       | 2147483647
- hadr_recovery_time_target         | integer |      | 0       | 3600
- hadr_recovery_point_target        | integer |      | 0       | 3600
- hadr_super_user_record_path       | string  |      |         |
- ha_module_debug                   | bool    |      |         | 
- hashagg_table_size                | integer |      | 0       | 1073741823
- hba_file                          | string  |      |         | 
- hll_default_expthresh             | int64   |      | -1      | 7
- hll_default_log2m                 | integer |      | 10      | 16
- hll_default_regwidth              | integer |      | 1       | 5
- hll_default_sparseon              | integer |      | 0       | 1
- hll_max_sparse                    | integer |      | -1      | 2147483647
- hot_standby                       | bool    |      |         | 
- hot_standby_feedback              | bool    |      |         | 
- ident_file                        | string  |      |         | 
- ignore_checksum_failure           | bool    |      |         | 
- ignore_system_indexes             | bool    |      |         | 
- incremental_checkpoint_timeout    | integer | s    | 1       | 3600
- instance_metric_retention_time    | integer |      | 0       | 3650
- instr_rt_percentile_interval      | integer | s    | 0       | 3600
- instr_unique_sql_count            | integer |      | 0       | 2147483647
- instr_unique_sql_track_type       | enum    |      |         | 
- integer_datetimes                 | bool    |      |         | 
- IntervalStyle                     | enum    |      |         | 
- io_control_unit                   | integer |      | 1000    | 1000000
- io_limits                         | integer |      | 0       | 1073741823
- io_priority                       | enum    |      |         | 
- job_queue_processes               | integer |      | 0       | 1000
- join_collapse_limit               | integer |      | 1       | 2147483647
- krb_caseins_users                 | bool    |      |         | 
- krb_server_keyfile                | string  |      |         | 
- krb_srvname                       | string  |      |         | 
- lastval_supported                 | bool    |      |         | 
- lc_collate                        | string  |      |         | 
- lc_ctype                          | string  |      |         | 
- lc_messages                       | string  |      |         | 
- lc_monetary                       | string  |      |         | 
- lc_numeric                        | string  |      |         | 
- lc_time                           | string  |      |         | 
- listen_addresses                  | string  |      |         | 
- local_bind_address                | string  |      |         | 
- local_preload_libraries           | string  |      |         | 
- lockwait_timeout                  | integer | ms   | 0       | 2147483647
- lo_compat_privileges              | bool    |      |         | 
- log_autovacuum_min_duration       | integer | ms   | -1      | 2147483647
- log_checkpoints                   | bool    |      |         | 
- log_connections                   | bool    |      |         | 
- log_destination                   | string  |      |         | 
- log_directory                     | string  |      |         | 
- log_disconnections                | bool    |      |         | 
- log_duration                      | bool    |      |         | 
- log_error_verbosity               | enum    |      |         | 
- log_executor_stats                | bool    |      |         | 
- log_file_mode                     | integer |      | 0       | 511
- log_filename                      | string  |      |         | 
- logging_collector                 | bool    |      |         | 
- logging_module                    | string  |      |         | 
- log_hostname                      | bool    |      |         | 
- log_line_prefix                   | string  |      |         | 
- log_lock_waits                    | bool    |      |         | 
- log_min_duration_statement        | integer | ms   | -1      | 2147483647
- log_min_error_statement           | enum    |      |         | 
- log_min_messages                  | enum    |      |         | 
- log_pagewriter                    | bool    |      |         | 
- log_parser_stats                  | bool    |      |         | 
- log_planner_stats                 | bool    |      |         | 
- log_rotation_age                  | integer | min  | 0       | 35791394
- log_rotation_size                 | integer | kB   | 0       | 2097151
- log_statement                     | enum    |      |         | 
- log_statement_stats               | bool    |      |         | 
- log_temp_files                    | integer | kB   | -1      | 2147483647
- log_timezone                      | string  |      |         | 
- log_truncate_on_rotation          | bool    |      |         | 
- maintenance_work_mem              | integer | kB   | 1024    | 2147483647
- max_cached_tuplebufs              | integer |      | 1       | 2147483647
- max_changes_in_memory             | integer |      | 1       | 2147483647
- max_cn_temp_file_size             | integer | kB   | 0       | 10485760
- max_compile_functions             | integer |      | 1       | 2147483647
- max_connections                   | integer |      | 10      | 262143
- max_files_per_process             | integer |      | 25      | 2147483647
- max_function_args                 | integer |      | 8192    | 8192
- max_identifier_length             | integer |      | 63      | 63
- max_index_keys                    | integer |      | 32      | 32
- max_loaded_cudesc                 | integer |      | 100     | 1073741823
- max_locks_per_transaction         | integer |      | 10      | 2147483647
- max_pred_locks_per_transaction    | integer |      | 10      | 2147483647
- max_prepared_transactions         | integer |      | 0       | 262143
- max_process_memory                | integer | kB   | 2097152 | 2147483647
- max_query_retry_times             | integer |      | 0       | 20
- max_recursive_times               | integer |      | 0       | 2147483647
- max_replication_slots             | integer |      | 0       | 262143
- max_resource_package              | integer |      | 0       | 2147483647
- max_size_for_xlog_prune           | integer |      | 0       | 2147483647
- max_stack_depth                   | integer | kB   | 100     | 2147483647
- max_standby_archive_delay         | integer | ms   | -1      | 2147483647
- max_standby_streaming_delay       | integer | ms   | -1      | 2147483647
- max_user_defined_exception        | integer |      | 1000    | 1000
- max_wal_senders                   | integer |      | 0       | 262143
- memory_detail_tracking            | string  |      |         | 
- memory_fault_percent              | integer |      | 0       | 2147483647
- memorypool_enable                 | bool    |      |         | 
- memorypool_size                   | integer | kB   | 131072  | 1073741823
- memory_tracking_mode              | enum    |      |         | 
- minimum_pool_size                 | integer |      | 1       | 65535
- modify_initial_password           | bool    |      |         | 
- most_available_sync               | bool    |      |         | 
- ngram_gram_size                   | integer |      | 1       | 4
- ngram_grapsymbol_ignore           | bool    |      |         | 
- ngram_punctuation_ignore          | bool    |      |         | 
- nls_timestamp_format              | string  |      |         | 
- numa_distribute_mode              | string  |      |         | 
- omit_encoding_error               | bool    |      |         | 
- operation_mode                    | bool    |      |         | 
- opfusion_debug_mode               | enum    |      |         | 
- pagewriter_sleep                  | integer | ms   | 0       | 3600000
- pagewriter_thread_num             | integer |      | 1       | 8
- partition_lock_upgrade_timeout    | integer |      | -1      | 3000
- partition_max_cache_size          | integer | kB   | 4096    | 1073741823
- partition_mem_batch               | integer |      | 1       | 65535
- password_effect_time              | real    |      | 0       | 999
- password_encryption_type          | integer |      | 0       | 2
- password_lock_time                | real    | d    | 0       | 365
- password_max_length               | integer |      | 6       | 999
- password_min_digital              | integer |      | 0       | 999
- password_min_length               | integer |      | 6       | 999
- password_min_lowercase            | integer |      | 0       | 999
- password_min_special              | integer |      | 0       | 999
- password_min_uppercase            | integer |      | 0       | 999
- password_notify_time              | integer |      | 0       | 999
- password_policy                   | integer |      | 0       | 1
- password_reuse_max                | integer |      | 0       | 1000
- password_reuse_time               | real    |      | 0       | 3650
- percentile                        | string  |      |         | 
- perf_directory                    | string  |      |         | 
- pgxc_node_name                    | string  |      |         | 
- plan_cache_mode                   | enum    |      |         | 
- plan_mode_seed                    | integer |      | -1      | 2147483647
- pljava_vmoptions                  | string  |      |         | 
- plog_merge_age                    | integer | ms   | 0       | 2147483647
- pooler_connect_interval_time      | integer | s    | 0       | 7200
- pooler_connect_max_loops          | integer |      | 0       | 20
- pooler_maximum_idle_time          | integer | min  | 0       | 2147483647
- port                              | integer |      | 1       | 65535
- post_auth_delay                   | integer | s    | 0       | 2147
- pre_auth_delay                    | integer | s    | 0       | 60
- prefetch_quantity                 | integer | 8kB  | 128     | 131072
- primary_slotname                  | string  |      |         | 
- psort_work_mem                    | integer | kB   | 64      | 2147483647
- qrw_inlist2join_optmode           | string  |      |         | 
- query_band                        | string  |      |         | 
- query_dop                         | integer |      | -64     | 2147483647
- query_max_mem                     | integer | kB   | 0       | 2147483647
- query_mem                         | integer | kB   | 0       | 2147483647
- quote_all_identifiers             | bool    |      |         | 
- raise_errors_if_no_files          | bool    |      |         | 
- random_page_cost                  | real    |      | 0       | 1.79769e+308
- recovery_max_workers              | integer |      | 0       | 20
- recovery_parallelism              | integer |      | 1       | 2147483647
- recovery_time_target              | integer |      | 0       | 3600
- remote_read_mode                  | enum    |      |         | 
- remotetype                        | enum    |      |         | 
- replconninfo1                     | string  |      |         | 
- replconninfo2                     | string  |      |         | 
- replconninfo3                     | string  |      |         | 
- replconninfo4                     | string  |      |         | 
- replconninfo5                     | string  |      |         | 
- replconninfo6                     | string  |      |         | 
- replconninfo7                     | string  |      |         | 
- replconninfo8                     | string  |      |         |
- replconninfo9                     | string  |      |         |
- replconninfo10                    | string  |      |         |
- replconninfo11                    | string  |      |         |
- replconninfo12                    | string  |      |         |
- replconninfo13                    | string  |      |         |
- replconninfo14                    | string  |      |         |
- replconninfo15                    | string  |      |         |
- replconninfo16                    | string  |      |         |
- replconninfo17                    | string  |      |         |
- replconninfo18                    | string  |      |         |
- replication_type                  | integer |      | 0       | 3
- RepOriginId                       | integer |      | 0       | 2147483647
- require_ssl                       | bool    |      |         | 
- resource_track_cost               | integer |      | -1      | 2147483647
- resource_track_duration           | integer | s    | 0       | 2147483647
- resource_track_level              | enum    |      |         | 
- resource_track_log                | enum    |      |         | 
- restart_after_crash               | bool    |      |         | 
- retry_ecode_list                  | string  |      |         | 
- rewrite_rule                      | enum    |      |         | 
- schedule_splits_threshold         | integer |      | 1       | 2147483647
- search_path                       | string  |      |         | 
- segment_size                      | integer | 8kB  | 131072  | 131072
- seq_page_cost                     | real    |      | 0       | 1.79769e+308
- server_encoding                   | string  |      |         | 
- server_version                    | string  |      |         | 
- server_version_num                | integer |      | 90204   | 90204
- session_history_memory            | integer | kB   | 10240   | 2147483647
- session_replication_role          | enum    |      |         | 
- session_respool                   | string  |      |         | 
- session_statistics_memory         | integer | kB   | 5120    | 2147483647
- session_timeout                   | integer | s    | 0       | 86400
- shared_buffers                    | integer | 8kB  | 16      | 1073741823
- shared_preload_libraries          | string  |      |         | 
- show_acce_estimate_detail         | bool    |      |         | 
- skew_option                       | enum    |      |         | 
- sql_beta_feature                  | enum    |      |         | 
- sql_compatibility                 | enum    |      |         | 
- sql_inheritance                   | bool    |      |         | 
- sql_use_spacelimit                | integer | kB   | -1      | 2147483647
- ssl                               | bool    |      |         | 
- ssl_ca_file                       | string  |      |         | 
- ssl_cert_file                     | string  |      |         | 
- ssl_cert_notify_time              | integer |      | 7       | 180
- ssl_ciphers                       | string  |      |         | 
- ssl_crl_file                      | string  |      |         | 
- ssl_key_file                      | string  |      |         | 
- ssl_renegotiation_limit           | integer | kB   | 0       | 2147483647
- standard_conforming_strings       | bool    |      |         | 
- standby_shared_buffers_fraction   | real    |      | 0.1     | 1
- statement_timeout                 | integer | ms   | 0       | 2147483647
- stats_temp_directory              | string  |      |         | 
- string_hash_compatible            | bool    |      |         | 
- support_batch_bind                | bool    |      |         | 
- support_extended_features         | bool    |      |         | 
- synchronize_seqscans              | bool    |      |         | 
- synchronous_commit                | enum    |      |         | 
- synchronous_standby_names         | string  |      |         | 
- sysadmin_reserved_connections     | integer |      | 0       | 262143
- syslog_facility                   | enum    |      |         | 
- syslog_ident                      | string  |      |         | 
- table_skewness_warning_rows       | integer |      | 0       | 2147483647
- table_skewness_warning_threshold  | real    |      | 0       | 1
- tcp_keepalives_count              | integer |      | 0       | 100
- tcp_keepalives_idle               | integer | s    | 0       | 3600
- tcp_keepalives_interval           | integer | s    | 0       | 180
- td_compatible_truncation          | bool    |      |         | 
- temp_buffers                      | integer | 8kB  | 100     | 1073741823
- temp_file_limit                   | integer | kB   | -1      | 2147483647
- temp_tablespaces                  | string  |      |         | 
- thread_pool_attr                  | string  |      |         | 
- thread_pool_stream_attr           | string  |      |         | 
- TimeZone                          | string  |      |         | 
- timezone_abbreviations            | string  |      |         | 
- topsql_retention_time             | integer |      | 0       | 3650
- trace_notify                      | bool    |      |         | 
- trace_recovery_messages           | enum    |      |         | 
- trace_sort                        | bool    |      |         | 
- track_activities                  | bool    |      |         | 
- track_activity_query_size         | integer |      | 100     | 102400
- track_counts                      | bool    |      |         | 
- track_functions                   | enum    |      |         | 
- track_io_timing                   | bool    |      |         | 
- track_sql_count                   | bool    |      |         | 
- track_thread_wait_status_interval | integer | min  | 0       | 1440
- transaction_deferrable            | bool    |      |         | 
- transaction_isolation             | string  |      |         | 
- transaction_pending_time          | integer |      | -1      | 1073741823
- transaction_read_only             | bool    |      |         |
- transform_null_equals             | bool    |      |         | 
- transparent_encrypted_string      | string  |      |         | 
- transparent_encrypt_kms_region    | string  |      |         | 
- transparent_encrypt_kms_url       | string  |      |         |
- udf_memory_limit                  | integer | kB   | 204800  | 2147483647
- UDFWorkerMemHardLimit             | integer | kB   | 0       | 2147483647
- uncontrolled_memory_context       | string  |      |         | 
- unix_socket_directory             | string  |      |         | 
- unix_socket_group                 | string  |      |         | 
- unix_socket_permissions           | integer |      | 0       | 511
- update_lockwait_timeout           | integer | ms   | 0       | 2147483647
- update_process_title              | bool    |      |         | 
- upgrade_mode                      | integer |      | 0       | 2147483647
- uppercase_attribute_name          | bool    |      |         | 
- user_metric_retention_time        | integer |      | 0       | 3650
- use_workload_manager              | bool    |      |         | 
- vacuum_cost_delay                 | integer | ms   | 0       | 100
- vacuum_cost_limit                 | integer |      | 1       | 10000
- vacuum_cost_page_dirty            | integer |      | 0       | 10000
- vacuum_cost_page_hit              | integer |      | 0       | 10000
- vacuum_cost_page_miss             | integer |      | 0       | 10000
- vacuum_defer_cleanup_age          | int64   |      | 0       | 1000000
- vacuum_freeze_min_age             | int64   |      | 0       | 576460752303423487
- vacuum_freeze_table_age           | int64   |      | 0       | 576460752303423487
- wait_dummy_time                   | integer |      | 1       | 2147483647
- wal_block_size                    | integer |      | 8192    | 8192
- wal_buffers                       | integer | 8kB  | -1      | 262143
- wal_keep_segments                 | integer |      | 2       | 2147483647
- wal_level                         | enum    |      |         | 
- wal_log_hints                     | bool    |      |         | 
- wal_receiver_buffer_size          | integer | kB   | 4096    | 1047552
- wal_receiver_connect_retries      | integer |      | 1       | 2147483647
- wal_receiver_connect_timeout      | integer | s    | 0       | 2147483
- wal_receiver_status_interval      | integer | s    | 0       | 2147483
- wal_receiver_timeout              | integer | ms   | 0       | 2147483647
- wal_segment_size                  | integer | 8kB  | 2048    | 2048
- walsender_max_send_size           | integer | kB   | 8       | 2147483647
- wal_sender_timeout                | integer | ms   | 0       | 2147483647
- wal_sync_method                   | enum    |      |         | 
- wal_writer_delay                  | integer | ms   | 1       | 10000
- wdr_snapshot_interval             | integer | min  | 10      | 60
- wdr_snapshot_query_timeout        | integer | s    | 100     | 2147483647
- wdr_snapshot_retention_days       | integer |      | 1       | 8
- work_mem                          | integer | kB   | 64      | 2147483647
- xc_maintenance_mode               | bool    |      |         | 
- xloginsert_locks                  | integer |      | 1       | 1000
- xmlbinary                         | enum    |      |         | 
- xmloption                         | enum    |      |         | 
- zero_damaged_pages                | bool    |      |         | 
+                       name                       | vartype | unit |  min_val  |       max_val       
+--------------------------------------------------+---------+------+-----------+---------------------
+ acceleration_with_compute_pool                   | bool    |      |           | 
+ acce_min_datasize_per_thread                     | integer | kB   | 0         | 2147483647
+ advance_xlog_file_num                            | integer |      | 0         | 1000000
+ alarm_component                                  | string  |      |           | 
+ alarm_report_interval                            | integer |      | 0         | 2147483647
+ allocate_mem_cost                                | real    |      | 0         | 1.79769e+308
+ allow_concurrent_tuple_update                    | bool    |      |           | 
+ allow_create_sysobject                           | bool    |      |           | 
+ allow_system_table_mods                          | bool    |      |           | 
+ analysis_options                                 | string  |      |           | 
+ application_name                                 | string  |      |           | 
+ archive_command                                  | string  |      |           | 
+ archive_dest                                     | string  |      |           | 
+ archive_interval                                 | integer | s    | 1         | 1000
+ archive_mode                                     | bool    |      |           | 
+ archive_timeout                                  | integer | s    | 0         | 1073741823
+ array_nulls                                      | bool    |      |           | 
+ asp_flush_mode                                   | string  |      |           | 
+ asp_flush_rate                                   | integer |      | 1         | 10
+ asp_log_directory                                | string  |      |           | 
+ asp_log_filename                                 | string  |      |           | 
+ asp_retention_days                               | integer |      | 1         | 7
+ asp_sample_interval                              | integer | s    | 1         | 10
+ asp_sample_num                                   | integer |      | 10        | 100000
+ audit_copy_exec                                  | integer |      | 0         | 1
+ audit_database_process                           | integer |      | 0         | 1
+ audit_data_format                                | string  |      |           | 
+ audit_directory                                  | string  |      |           | 
+ audit_dml_state                                  | integer |      | 0         | 1
+ audit_dml_state_select                           | integer |      | 0         | 1
+ audit_enabled                                    | bool    |      |           | 
+ audit_file_remain_threshold                      | integer |      | 100       | 1048576
+ audit_file_remain_time                           | integer |      | 0         | 730
+ audit_function_exec                              | integer |      | 0         | 1
+ audit_grant_revoke                               | integer |      | 0         | 1
+ audit_login_logout                               | integer |      | 0         | 7
+ audit_resource_policy                            | bool    |      |           | 
+ audit_rotation_interval                          | integer | min  | 1         | 35791394
+ audit_rotation_size                              | integer | kB   | 1024      | 1048576
+ audit_set_parameter                              | integer |      | 0         | 1
+ audit_space_limit                                | integer | kB   | 1024      | 1073741824
+ audit_system_object                              | integer |      | 0         | 134217727
+ audit_thread_num                                 | integer |      | 1         | 48
+ audit_user_locked                                | integer |      | 0         | 1
+ audit_user_violation                             | integer |      | 0         | 1
+ audit_xid_info                                   | integer |      | 0         | 1
+ authentication_timeout                           | integer | s    | 1         | 600
+ auth_iteration_count                             | integer |      | 2048      | 134217728
+ autoanalyze                                      | bool    |      |           | 
+ autoanalyze_timeout                              | integer | s    | 0         | 2147483
+ auto_explain_level                               | enum    |      |           | 
+ autovacuum                                       | bool    |      |           | 
+ autovacuum_analyze_scale_factor                  | real    |      | 0         | 100
+ autovacuum_analyze_threshold                     | integer |      | 0         | 2147483647
+ autovacuum_freeze_max_age                        | int64   |      | 100000    | 576460752303423487
+ autovacuum_io_limits                             | integer |      | -1        | 1073741823
+ autovacuum_max_workers                           | integer |      | 0         | 262143
+ autovacuum_mode                                  | enum    |      |           | 
+ autovacuum_naptime                               | integer | s    | 1         | 2147483
+ autovacuum_vacuum_cost_delay                     | integer | ms   | -1        | 100
+ autovacuum_vacuum_cost_limit                     | integer |      | -1        | 10000
+ autovacuum_vacuum_scale_factor                   | real    |      | 0         | 100
+ autovacuum_vacuum_threshold                      | integer |      | 0         | 2147483647
+ available_zone                                   | string  |      |           | 
+ backend_flush_after                              | integer | 8kB  | 0         | 256
+ backslash_quote                                  | enum    |      |           | 
+ backtrace_min_messages                           | enum    |      |           | 
+ backwrite_quantity                               | integer | 8kB  | 128       | 131072
+ basebackup_timeout                               | integer | s    | 0         | 2147483647
+ bbox_blanklist_items                             | string  |      |           | 
+ bbox_dump_count                                  | integer |      | 1         | 20
+ bbox_dump_path                                   | string  |      |           | 
+ behavior_compat_options                          | string  |      |           | 
+ bgwriter_delay                                   | integer | ms   | 10        | 10000
+ bgwriter_flush_after                             | integer | 8kB  | 0         | 256
+ bgwriter_lru_maxpages                            | integer |      | 0         | 1000
+ bgwriter_lru_multiplier                          | real    |      | 0         | 10
+ block_encryption_mode                            | enum    |      |           | 
+ block_size                                       | integer |      | 8192      | 8192
+ bulk_read_ring_size                              | integer | kB   | 256       | 2147483647
+ bulk_write_ring_size                             | integer | kB   | 16384     | 2147483647
+ bypass_dram                                      | real    |      | 0         | 1
+ bypass_nvm                                       | real    |      | 0         | 1
+ bytea_output                                     | enum    |      |           | 
+ cache_connection                                 | bool    |      |           | 
+ candidate_buf_percent_target                     | real    |      | 0.1       | 0.85
+ catchup2normal_wait_time                         | integer | ms   | -1        | 10000
+ cgroup_name                                      | string  |      |           | 
+ check_function_bodies                            | bool    |      |           | 
+ check_implicit_conversions                       | bool    |      |           | 
+ checkpoint_completion_target                     | real    |      | 0         | 1
+ checkpoint_flush_after                           | integer | 8kB  | 0         | 256
+ checkpoint_segments                              | integer |      | 1         | 2147483646
+ checkpoint_timeout                               | integer | s    | 30        | 3600
+ checkpoint_wait_timeout                          | integer | s    | 2         | 3600
+ checkpoint_warning                               | integer | s    | 0         | 2147483647
+ client_encoding                                  | string  |      |           | 
+ client_min_messages                              | enum    |      |           | 
+ cluster_run_mode                                 | enum    |      |           | 
+ cn_send_buffer_size                              | integer | kB   | 8         | 128
+ codegen_cost_threshold                           | integer |      | 0         | 2147483647
+ codegen_strategy                                 | enum    |      |           | 
+ commit_delay                                     | integer |      | 0         | 100000
+ commit_siblings                                  | integer |      | 0         | 1000
+ comm_proxy_attr                                  | string  |      |           | 
+ config_file                                      | string  |      |           | 
+ connection_alarm_rate                            | real    |      | 0         | 1
+ connection_info                                  | string  |      |           | 
+ constraint_exclusion                             | enum    |      |           | 
+ convert_string_to_digit                          | bool    |      |           | 
+ cost_param                                       | integer |      | 0         | 2147483647
+ cost_weight_index                                | real    |      | 1e-10     | 1e+10
+ cpu_collect_timer                                | integer |      | 1         | 2147483647
+ cpu_index_tuple_cost                             | real    |      | 0         | 1.79769e+308
+ cpu_operator_cost                                | real    |      | 0         | 1.79769e+308
+ cpu_tuple_cost                                   | real    |      | 0         | 1.79769e+308
+ cross_cluster_replconninfo1                      | string  |      |           | 
+ cross_cluster_replconninfo2                      | string  |      |           | 
+ cross_cluster_replconninfo3                      | string  |      |           | 
+ cross_cluster_replconninfo4                      | string  |      |           | 
+ cross_cluster_replconninfo5                      | string  |      |           | 
+ cross_cluster_replconninfo6                      | string  |      |           | 
+ cross_cluster_replconninfo7                      | string  |      |           | 
+ cross_cluster_replconninfo8                      | string  |      |           | 
+ cstore_backwrite_max_threshold                   | integer | kB   | 4096      | 1073741823
+ cstore_backwrite_quantity                        | integer | kB   | 1024      | 1048576
+ cstore_buffers                                   | integer | kB   | 16384     | 1073741823
+ cstore_insert_mode                               | enum    |      |           | 
+ cstore_prefetch_quantity                         | integer | kB   | 1024      | 1048576
+ current_logic_cluster                            | string  |      |           | 
+ current_schema                                   | string  |      |           | 
+ cursor_tuple_fraction                            | real    |      | 0         | 1
+ data_directory                                   | string  |      |           | 
+ datanode_heartbeat_interval                      | integer | ms   | 1000      | 60000
+ data_replicate_buffer_size                       | integer | kB   | 4096      | 1072693248
+ data_sync_retry                                  | bool    |      |           | 
+ DateStyle                                        | string  |      |           | 
+ db4ai_snapshot_mode                              | string  |      |           | 
+ db4ai_snapshot_version_delimiter                 | string  |      |           | 
+ db4ai_snapshot_version_separator                 | string  |      |           | 
+ dcf_compress_algorithm                           | integer |      | 0         | 2
+ dcf_compress_level                               | integer |      | 1         | 22
+ dcf_config                                       | string  |      |           | 
+ dcf_connect_timeout                              | integer |      | 10        | 600000
+ dcf_data_path                                    | string  |      |           | 
+ dcf_election_switch_threshold                    | integer |      | 0         | 2147483647
+ dcf_election_timeout                             | integer |      | 1         | 600
+ dcf_enable_auto_election_priority                | integer |      | 0         | 1
+ dcf_flow_control_cpu_threshold                   | integer |      | 0         | 2147483647
+ dcf_flow_control_disk_rawait_threshold           | integer |      | 0         | 2147483647
+ dcf_flow_control_net_queue_message_num_threshold | integer |      | 0         | 2147483647
+ dcf_log_backup_file_count                        | integer |      | 1         | 100
+ dcf_log_file_permission                          | enum    |      |           | 
+ dcf_log_level                                    | string  |      |           | 
+ dcf_log_path                                     | string  |      |           | 
+ dcf_log_path_permission                          | enum    |      |           | 
+ dcf_majority_groups                              | string  |      |           | 
+ dcf_max_log_file_size                            | integer |      | 1         | 1000
+ dcf_max_workers                                  | integer |      | 10        | 262143
+ dcf_mec_agent_thread_num                         | integer |      | 1         | 1000
+ dcf_mec_batch_size                               | integer |      | 0         | 1024
+ dcf_mec_channel_num                              | integer |      | 1         | 64
+ dcf_mec_fragment_size                            | integer |      | 32        | 10240
+ dcf_mec_pool_max_size                            | integer |      | 32        | 2147483647
+ dcf_mec_reactor_thread_num                       | integer |      | 1         | 100
+ dcf_mem_pool_init_size                           | integer |      | 32        | 2147483647
+ dcf_mem_pool_max_size                            | integer |      | 32        | 2147483647
+ dcf_node_id                                      | integer |      | 1         | 2147483647
+ dcf_rep_append_thread_num                        | integer |      | 1         | 1000
+ dcf_run_mode                                     | enum    |      |           | 
+ dcf_socket_timeout                               | integer |      | 10        | 600000
+ dcf_ssl                                          | bool    |      |           | 
+ dcf_stg_pool_init_size                           | integer |      | 32        | 2147483647
+ dcf_stg_pool_max_size                            | integer |      | 32        | 2147483647
+ dcf_truncate_threshold                           | integer |      | 1         | 2147483647
+ deadlock_timeout                                 | integer | ms   | 1         | 2147483647
+ debug_assertions                                 | bool    |      |           | 
+ debug_pretty_print                               | bool    |      |           | 
+ debug_print_parse                                | bool    |      |           | 
+ debug_print_plan                                 | bool    |      |           | 
+ debug_print_rewritten                            | bool    |      |           | 
+ default_limit_rows                               | real    |      | -100      | 1.79769e+308
+ default_statistics_target                        | integer |      | -100      | 10000
+ default_tablespace                               | string  |      |           | 
+ default_text_search_config                       | string  |      |           | 
+ default_transaction_deferrable                   | bool    |      |           | 
+ default_transaction_isolation                    | enum    |      |           | 
+ default_transaction_read_only                    | bool    |      |           | 
+ default_with_oids                                | bool    |      |           | 
+ defer_csn_cleanup_time                           | integer | ms   | 0         | 2147483647
+ dfs_partition_directory_length                   | integer |      | 92        | 7999
+ dirty_page_percent_max                           | real    |      | 0.1       | 1
+ disable_memory_protect                           | bool    |      |           | 
+ dw_file_num                                      | integer |      | 1         | 16
+ dw_file_size                                     | integer |      | 32        | 256
+ dynamic_library_path                             | string  |      |           | 
+ effective_cache_size                             | integer | 8kB  | 1         | 2147483647
+ effective_io_concurrency                         | integer |      | 0         | 1000
+ elastic_search_ip_addr                           | string  |      |           | 
+ enable_absolute_tablespace                       | bool    |      |           | 
+ enable_access_server_directory                   | bool    |      |           | 
+ enable_adio_debug                                | bool    |      |           | 
+ enable_adio_function                             | bool    |      |           | 
+ enable_ai_stats                                  | bool    |      |           | 
+ enable_alarm                                     | bool    |      |           | 
+ enable_analyze_check                             | bool    |      |           | 
+ enable_asp                                       | bool    |      |           | 
+ enable_auto_clean_unique_sql                     | bool    |      |           | 
+ enable_auto_explain                              | bool    |      |           | 
+ enable_bbox_dump                                 | bool    |      |           | 
+ enable_beta_features                             | bool    |      |           | 
+ enable_beta_opfusion                             | bool    |      |           | 
+ enable_bitmapscan                                | bool    |      |           | 
+ enable_bloom_filter                              | bool    |      |           | 
+ enable_broadcast                                 | bool    |      |           | 
+ enable_cachedplan_mgr                            | bool    |      |           | 
+ enable_cbm_tracking                              | bool    |      |           | 
+ enable_change_hjcost                             | bool    |      |           | 
+ enable_codegen                                   | bool    |      |           | 
+ enable_codegen_print                             | bool    |      |           | 
+ enable_compress_hll                              | bool    |      |           | 
+ enable_compress_spill                            | bool    |      |           | 
+ enable_consider_usecount                         | bool    |      |           | 
+ enable_constraint_optimization                   | bool    |      |           | 
+ enable_copy_server_files                         | bool    |      |           | 
+ enable_csqual_pushdown                           | bool    |      |           | 
+ enable_custom_parser                             | bool    |      |           | 
+ enable_data_replicate                            | bool    |      |           | 
+ enable_dcf                                       | bool    |      |           | 
+ enable_debug_vacuum                              | bool    |      |           | 
+ enable_default_cfunc_libpath                     | bool    |      |           | 
+ enable_default_ustore_table                      | bool    |      |           | 
+ enable_defer_calculate_snapshot                  | bool    |      |           | 
+ enable_delta_store                               | bool    |      |           | 
+ enable_double_write                              | bool    |      |           | 
+ enable_early_free                                | bool    |      |           | 
+ enable_extrapolation_stats                       | bool    |      |           | 
+ enable_fast_allocate                             | bool    |      |           | 
+ enable_fast_numeric                              | bool    |      |           | 
+ enable_ffic_log                                  | bool    |      |           | 
+ enable_force_vector_engine                       | bool    |      |           | 
+ enable_functional_dependency                     | bool    |      |           | 
+ enable_global_plancache                          | bool    |      |           | 
+ enable_global_stats                              | bool    |      |           | 
+ enable_global_syscache                           | bool    |      |           | 
+ enable_gtt_concurrent_truncate                   | bool    |      |           | 
+ enable_hadoop_env                                | bool    |      |           | 
+ enable_hashagg                                   | bool    |      |           | 
+ enable_hashjoin                                  | bool    |      |           | 
+ enable_hdfs_predicate_pushdown                   | bool    |      |           | 
+ enable_hypo_index                                | bool    |      |           | 
+ enable_incremental_catchup                       | bool    |      |           | 
+ enable_incremental_checkpoint                    | bool    |      |           | 
+ enable_index_nestloop                            | bool    |      |           | 
+ enable_indexonlyscan                             | bool    |      |           | 
+ enable_indexscan                                 | bool    |      |           | 
+ enable_instance_metric_persistent                | bool    |      |           | 
+ enable_instr_cpu_timer                           | bool    |      |           | 
+ enable_instr_rt_percentile                       | bool    |      |           | 
+ enable_instr_track_wait                          | bool    |      |           | 
+ enable_kill_query                                | bool    |      |           | 
+ enable_logical_io_statistics                     | bool    |      |           | 
+ enable_material                                  | bool    |      |           | 
+ enable_memory_context_check_debug                | bool    |      |           | 
+ enable_memory_context_control                    | bool    |      |           | 
+ enable_memory_limit                              | bool    |      |           | 
+ enable_mergejoin                                 | bool    |      |           | 
+ enable_mix_replication                           | bool    |      |           | 
+ enable_nestloop                                  | bool    |      |           | 
+ enable_nonsysadmin_execute_direct                | bool    |      |           | 
+ enable_nvm                                       | bool    |      |           | 
+ enable_online_ddl_waitlock                       | bool    |      |           | 
+ enable_opfusion                                  | bool    |      |           | 
+ enable_orc_cache                                 | bool    |      |           | 
+ enable_page_lsn_check                            | bool    |      |           | 
+ enable_partition_opfusion                        | bool    |      |           | 
+ enable_partitionwise                             | bool    |      |           | 
+ enable_pbe_optimization                          | bool    |      |           | 
+ enable_prevent_job_task_startup                  | bool    |      |           | 
+ enable_recyclebin                                | bool    |      |           | 
+ enable_resource_record                           | bool    |      |           | 
+ enable_resource_track                            | bool    |      |           | 
+ enable_save_datachanged_timestamp                | bool    |      |           | 
+ enable_security_policy                           | bool    |      |           | 
+ enable_segment                                   | bool    |      |           | 
+ enableSeparationOfDuty                           | bool    |      |           | 
+ enable_seqscan                                   | bool    |      |           | 
+ enable_seqscan_fusion                            | bool    |      |           | 
+ enable_set_variable_b_format                     | bool    |      |           | 
+ enable_show_any_tuples                           | bool    |      |           | 
+ enable_slot_log                                  | bool    |      |           | 
+ enable_slow_query_log                            | bool    |      |           | 
+ enable_sonic_hashagg                             | bool    |      |           | 
+ enable_sonic_hashjoin                            | bool    |      |           | 
+ enable_sonic_optspill                            | bool    |      |           | 
+ enable_sort                                      | bool    |      |           | 
+ enable_startwith_debug                           | bool    |      |           | 
+ enable_stmt_track                                | bool    |      |           | 
+ enable_stream_replication                        | bool    |      |           | 
+ enable_tde                                       | bool    |      |           | 
+ enable_thread_pool                               | bool    |      |           | 
+ enable_tidscan                                   | bool    |      |           | 
+ enable_upgrade_merge_lock_mode                   | bool    |      |           | 
+ enable_user_metric_persistent                    | bool    |      |           | 
+ enable_ustore                                    | bool    |      |           | 
+ enable_valuepartition_pruning                    | bool    |      |           | 
+ enable_vector_engine                             | bool    |      |           | 
+ enable_wal_shipping_compression                  | bool    |      |           | 
+ enable_wdr_snapshot                              | bool    |      |           | 
+ enable_xlog_prune                                | bool    |      |           | 
+ enforce_a_behavior                               | bool    |      |           | 
+ escape_string_warning                            | bool    |      |           | 
+ event_source                                     | string  |      |           | 
+ exit_on_error                                    | bool    |      |           | 
+ explain_dna_file                                 | string  |      |           | 
+ explain_perf_mode                                | enum    |      |           | 
+ external_pid_file                                | string  |      |           | 
+ extra_float_digits                               | integer |      | -15       | 3
+ failed_login_attempts                            | integer |      | 0         | 1000
+ fast_extend_file_size                            | integer | kB   | 1024      | 1048576
+ fault_mon_timeout                                | integer | min  | 0         | 1440
+ FencedUDFMemoryLimit                             | integer | kB   | 0         | 2147483647
+ force_bitmapand                                  | bool    |      |           | 
+ force_promote                                    | integer |      | 0         | 1
+ from_collapse_limit                              | integer |      | 1         | 2147483647
+ fsync                                            | bool    |      |           | 
+ full_page_writes                                 | bool    |      |           | 
+ geqo                                             | bool    |      |           | 
+ geqo_effort                                      | integer |      | 1         | 10
+ geqo_generations                                 | integer |      | 0         | 2147483647
+ geqo_pool_size                                   | integer |      | 0         | 2147483647
+ geqo_seed                                        | real    |      | 0         | 1
+ geqo_selection_bias                              | real    |      | 1.5       | 2
+ geqo_threshold                                   | integer |      | 2         | 2147483647
+ gin_fuzzy_search_limit                           | integer |      | 0         | 2147483647
+ gin_pending_list_limit                           | integer | kB   | 64        | 2147483647
+ global_syscache_threshold                        | integer | kB   | 16384     | 1073741824
+ gpc_clean_timeout                                | integer | s    | 300       | 86400
+ group_concat_max_len                             | int64   |      | 0         | 9223372036854775807
+ gs_clean_timeout                                 | integer | s    | 0         | 2147483
+ hadr_max_size_for_xlog_receiver                  | integer | kB   | 0         | 2147483647
+ hadr_recovery_point_target                       | integer |      | 0         | 3600
+ hadr_recovery_time_target                        | integer |      | 0         | 3600
+ hadr_super_user_record_path                      | string  |      |           | 
+ ha_module_debug                                  | bool    |      |           | 
+ hashagg_table_size                               | integer |      | 0         | 1073741823
+ hba_file                                         | string  |      |           | 
+ hll_default_expthresh                            | int64   |      | -1        | 7
+ hll_default_log2explicit                         | integer |      | 0         | 12
+ hll_default_log2m                                | integer |      | 10        | 16
+ hll_default_log2sparse                           | integer |      | 0         | 14
+ hll_default_regwidth                             | integer |      | 1         | 5
+ hll_default_sparseon                             | integer |      | 0         | 1
+ hll_duplicate_check                              | integer |      | 0         | 1
+ hll_max_sparse                                   | integer |      | -1        | 2147483647
+ hot_standby                                      | bool    |      |           | 
+ hot_standby_feedback                             | bool    |      |           | 
+ ident_file                                       | string  |      |           | 
+ idle_in_transaction_session_timeout              | integer | s    | 0         | 86400
+ ignore_checksum_failure                          | bool    |      |           | 
+ ignore_system_indexes                            | bool    |      |           | 
+ incremental_checkpoint_timeout                   | integer | s    | 1         | 3600
+ instance_metric_retention_time                   | integer |      | 0         | 3650
+ instr_rt_percentile_interval                     | integer | s    | 0         | 3600
+ instr_unique_sql_count                           | integer |      | 0         | 2147483647
+ instr_unique_sql_track_type                      | enum    |      |           | 
+ integer_datetimes                                | bool    |      |           | 
+ IntervalStyle                                    | enum    |      |           | 
+ io_control_unit                                  | integer |      | 1000      | 1000000
+ io_limits                                        | integer |      | 0         | 1073741823
+ io_priority                                      | enum    |      |           | 
+ job_queue_processes                              | integer |      | 0         | 1000
+ join_collapse_limit                              | integer |      | 1         | 2147483647
+ keep_sync_window                                 | integer | s    | 0         | 2147483647
+ krb_caseins_users                                | bool    |      |           | 
+ krb_server_keyfile                               | string  |      |           | 
+ krb_srvname                                      | string  |      |           | 
+ lastval_supported                                | bool    |      |           | 
+ lc_collate                                       | string  |      |           | 
+ lc_ctype                                         | string  |      |           | 
+ lc_messages                                      | string  |      |           | 
+ lc_monetary                                      | string  |      |           | 
+ lc_numeric                                       | string  |      |           | 
+ lc_time                                          | string  |      |           | 
+ listen_addresses                                 | string  |      |           | 
+ local_bind_address                               | string  |      |           | 
+ local_preload_libraries                          | string  |      |           | 
+ local_syscache_threshold                         | integer | kB   | 1024      | 524288
+ lockwait_timeout                                 | integer | ms   | 0         | 2147483647
+ lo_compat_privileges                             | bool    |      |           | 
+ log_autovacuum_min_duration                      | integer | ms   | -1        | 2147483647
+ log_checkpoints                                  | bool    |      |           | 
+ log_connections                                  | bool    |      |           | 
+ log_destination                                  | string  |      |           | 
+ log_directory                                    | string  |      |           | 
+ log_disconnections                               | bool    |      |           | 
+ log_duration                                     | bool    |      |           | 
+ log_error_verbosity                              | enum    |      |           | 
+ log_executor_stats                               | bool    |      |           | 
+ log_file_mode                                    | integer |      | 0         | 511
+ log_filename                                     | string  |      |           | 
+ logging_collector                                | bool    |      |           | 
+ logging_module                                   | string  |      |           | 
+ log_hostname                                     | bool    |      |           | 
+ logical_decode_options_default                   | string  |      |           | 
+ logical_sender_timeout                           | integer | ms   | 0         | 2147483647
+ log_line_prefix                                  | string  |      |           | 
+ log_lock_waits                                   | bool    |      |           | 
+ log_min_duration_statement                       | integer | ms   | -1        | 2147483647
+ log_min_error_statement                          | enum    |      |           | 
+ log_min_messages                                 | enum    |      |           | 
+ log_pagewriter                                   | bool    |      |           | 
+ log_parser_stats                                 | bool    |      |           | 
+ log_planner_stats                                | bool    |      |           | 
+ log_rotation_age                                 | integer | min  | 0         | 35791394
+ log_rotation_size                                | integer | kB   | 0         | 2097151
+ log_statement                                    | enum    |      |           | 
+ log_statement_stats                              | bool    |      |           | 
+ log_temp_files                                   | integer | kB   | -1        | 2147483647
+ log_timezone                                     | string  |      |           | 
+ log_truncate_on_rotation                         | bool    |      |           | 
+ maintenance_work_mem                             | integer | kB   | 1024      | 2147483647
+ max_active_global_temporary_table                | integer |      | 0         | 1000000
+ max_cached_tuplebufs                             | integer |      | 1         | 2147483647
+ max_changes_in_memory                            | integer |      | 1         | 2147483647
+ max_compile_functions                            | integer |      | 1         | 2147483647
+ max_concurrent_autonomous_transactions           | integer |      | 0         | 1024
+ max_connections                                  | integer |      | 10        | 262143
+ max_files_per_process                            | integer |      | 25        | 2147483647
+ max_function_args                                | integer |      | 8192      | 8192
+ max_identifier_length                            | integer |      | 63        | 63
+ max_index_keys                                   | integer |      | 32        | 32
+ max_inner_tool_connections                       | integer |      | 1         | 262143
+ max_io_capacity                                  | integer | kB   | 30720     | 10485760
+ max_keep_log_seg                                 | integer |      | 0         | 2147483647
+ max_loaded_cudesc                                | integer |      | 100       | 1073741823
+ max_locks_per_transaction                        | integer |      | 10        | 2147483647
+ max_logical_replication_workers                  | integer |      | 0         | 262143
+ max_pred_locks_per_transaction                   | integer |      | 10        | 2147483647
+ max_prepared_transactions                        | integer |      | 0         | 262143
+ max_process_memory                               | integer | kB   | 2097152   | 2147483647
+ max_query_retry_times                            | integer |      | 0         | 20
+ max_recursive_times                              | integer |      | 0         | 2147483647
+ max_redo_log_size                                | integer | kB   | 163840    | 2147483647
+ max_replication_slots                            | integer |      | 0         | 1024
+ max_resource_package                             | integer |      | 0         | 2147483647
+ max_size_for_xlog_prune                          | integer | kB   | 0         | 2147483647
+ max_stack_depth                                  | integer | kB   | 100       | 2147483647
+ max_standby_archive_delay                        | integer | ms   | -1        | 2147483647
+ max_standby_streaming_delay                      | integer | ms   | -1        | 2147483647
+ max_sync_workers_per_subscription                | integer |      | 0         | 262143
+ max_undo_workers                                 | integer |      | 1         | 100
+ max_user_defined_exception                       | integer |      | 1000      | 1000
+ max_wal_senders                                  | integer |      | 0         | 1024
+ memory_detail_tracking                           | string  |      |           | 
+ memory_fault_percent                             | integer |      | 0         | 2147483647
+ memorypool_enable                                | bool    |      |           | 
+ memorypool_size                                  | integer | kB   | 131072    | 1073741823
+ memory_trace_level                               | enum    |      |           | 
+ memory_tracking_mode                             | enum    |      |           | 
+ modify_initial_password                          | bool    |      |           | 
+ most_available_sync                              | bool    |      |           | 
+ multi_stats_type                                 | enum    |      |           | 
+ ngram_gram_size                                  | integer |      | 1         | 4
+ ngram_grapsymbol_ignore                          | bool    |      |           | 
+ ngram_punctuation_ignore                         | bool    |      |           | 
+ nls_timestamp_format                             | string  |      |           | 
+ numa_distribute_mode                             | string  |      |           | 
+ num_internal_lock_partitions                     | string  |      |           | 
+ nvm_buffers                                      | integer | 8kB  | 0         | 1073741823
+ nvm_file_path                                    | string  |      |           | 
+ omit_encoding_error                              | bool    |      |           | 
+ operation_mode                                   | bool    |      |           | 
+ opfusion_debug_mode                              | enum    |      |           | 
+ pagewriter_sleep                                 | integer | ms   | 0         | 3600000
+ pagewriter_thread_num                            | integer |      | 1         | 16
+ partition_iterator_elimination                   | bool    |      |           | 
+ partition_lock_upgrade_timeout                   | integer |      | -1        | 3000
+ partition_max_cache_size                         | integer | kB   | 4096      | 1073741823
+ partition_mem_batch                              | integer |      | 1         | 65535
+ partition_page_estimation                        | bool    |      |           | 
+ password_effect_time                             | real    |      | 0         | 999
+ password_encryption_type                         | integer |      | 0         | 3
+ password_lock_time                               | real    | d    | 0         | 365
+ password_max_length                              | integer |      | 6         | 999
+ password_min_digital                             | integer |      | 0         | 999
+ password_min_length                              | integer |      | 6         | 999
+ password_min_lowercase                           | integer |      | 0         | 999
+ password_min_special                             | integer |      | 0         | 999
+ password_min_uppercase                           | integer |      | 0         | 999
+ password_notify_time                             | integer |      | 0         | 999
+ password_policy                                  | integer |      | 0         | 1
+ password_reuse_max                               | integer |      | 0         | 1000
+ password_reuse_time                              | real    |      | 0         | 3650
+ pca_shared_buffers                               | integer | 8kB  | 8         | 1073741823
+ percentile                                       | string  |      |           | 
+ perf_directory                                   | string  |      |           | 
+ pgxc_node_name                                   | string  |      |           | 
+ plan_cache_mode                                  | enum    |      |           | 
+ plan_mode_seed                                   | integer |      | -1        | 2147483647
+ pldebugger_timeout                               | integer | s    | 1         | 86400
+ pljava_vmoptions                                 | string  |      |           | 
+ plog_merge_age                                   | integer | ms   | 0         | 2147483647
+ plsql_compile_check_options                      | string  |      |           | 
+ plsql_show_all_error                             | bool    |      |           | 
+ port                                             | integer |      | 1         | 65535
+ post_auth_delay                                  | integer | s    | 0         | 2147
+ pre_auth_delay                                   | integer | s    | 0         | 60
+ prefetch_quantity                                | integer | 8kB  | 128       | 131072
+ primary_slotname                                 | string  |      |           | 
+ psort_work_mem                                   | integer | kB   | 64        | 2147483647
+ qrw_inlist2join_optmode                          | string  |      |           | 
+ query_band                                       | string  |      |           | 
+ query_dop                                        | integer |      | -64       | 2147483647
+ query_log_directory                              | string  |      |           | 
+ query_log_file                                   | string  |      |           | 
+ query_max_mem                                    | integer | kB   | 0         | 2147483647
+ query_mem                                        | integer | kB   | 0         | 2147483647
+ quote_all_identifiers                            | bool    |      |           | 
+ raise_errors_if_no_files                         | bool    |      |           | 
+ random_page_cost                                 | real    |      | 0         | 1.79769e+308
+ recovery_max_workers                             | integer |      | 0         | 20
+ recovery_min_apply_delay                         | integer | ms   | 0         | 2147483647
+ recovery_parallelism                             | integer |      | 1         | 2147483647
+ recovery_parse_workers                           | integer |      | 1         | 16
+ recovery_redo_workers                            | integer |      | 1         | 8
+ recovery_time_target                             | integer |      | 0         | 3600
+ recyclebin_retention_time                        | integer | s    | 1         | 2147483647
+ redo_bind_cpu_attr                               | string  |      |           | 
+ remote_read_mode                                 | enum    |      |           | 
+ remotetype                                       | enum    |      |           | 
+ repl_auth_mode                                   | enum    |      |           | 
+ replconninfo1                                    | string  |      |           | 
+ replconninfo2                                    | string  |      |           | 
+ replconninfo3                                    | string  |      |           | 
+ replconninfo4                                    | string  |      |           | 
+ replconninfo5                                    | string  |      |           | 
+ replconninfo6                                    | string  |      |           | 
+ replconninfo7                                    | string  |      |           | 
+ replconninfo8                                    | string  |      |           | 
+ replication_type                                 | integer |      | 0         | 3
+ repl_uuid                                        | string  |      |           | 
+ RepOriginId                                      | integer |      | 0         | 2147483647
+ require_ssl                                      | bool    |      |           | 
+ reserve_space_for_nullable_atts                  | bool    |      |           | 
+ resilience_memory_reject_percent                 | string  |      |           | 
+ resilience_threadpool_reject_cond                | string  |      |           | 
+ resource_track_cost                              | integer |      | -1        | 2147483647
+ resource_track_duration                          | integer | s    | 0         | 2147483647
+ resource_track_level                             | enum    |      |           | 
+ resource_track_log                               | enum    |      |           | 
+ restart_after_crash                              | bool    |      |           | 
+ retry_ecode_list                                 | string  |      |           | 
+ rewrite_rule                                     | enum    |      |           | 
+ safe_data_path                                   | string  |      |           | 
+ schedule_splits_threshold                        | integer |      | 1         | 2147483647
+ search_path                                      | string  |      |           | 
+ segment_buffers                                  | integer | 8kB  | 16        | 1073741823
+ segment_size                                     | integer | 8kB  | 131072    | 131072
+ seq_page_cost                                    | real    |      | 0         | 1.79769e+308
+ server_encoding                                  | string  |      |           | 
+ server_version                                   | string  |      |           | 
+ server_version_num                               | integer |      | 90204     | 90204
+ session_history_memory                           | integer | kB   | 10240     | 2147483647
+ session_replication_role                         | enum    |      |           | 
+ session_respool                                  | string  |      |           | 
+ session_statistics_memory                        | integer | kB   | 5120      | 2147483647
+ session_timeout                                  | integer | s    | 0         | 86400
+ shared_buffers                                   | integer | 8kB  | 16        | 1073741823
+ shared_preload_libraries                         | string  |      |           | 
+ show_acce_estimate_detail                        | bool    |      |           | 
+ skew_option                                      | enum    |      |           | 
+ sql_beta_feature                                 | enum    |      |           | 
+ sql_compatibility                                | enum    |      |           | 
+ sql_ignore_strategy                              | string  |      |           | 
+ sql_inheritance                                  | bool    |      |           | 
+ sql_use_spacelimit                               | integer | kB   | -1        | 2147483647
+ ssl                                              | bool    |      |           | 
+ ssl_ca_file                                      | string  |      |           | 
+ ssl_cert_file                                    | string  |      |           | 
+ ssl_cert_notify_time                             | integer |      | 7         | 180
+ ssl_ciphers                                      | string  |      |           | 
+ ssl_crl_file                                     | string  |      |           | 
+ ssl_key_file                                     | string  |      |           | 
+ ssl_renegotiation_limit                          | integer | kB   | 0         | 2147483647
+ standard_conforming_strings                      | bool    |      |           | 
+ standby_shared_buffers_fraction                  | real    |      | 0.1       | 1
+ statement_timeout                                | integer | ms   | 0         | 2147483647
+ stats_temp_directory                             | string  |      |           | 
+ string_hash_compatible                           | bool    |      |           | 
+ support_batch_bind                               | bool    |      |           | 
+ support_extended_features                        | bool    |      |           | 
+ sync_config_strategy                             | enum    |      |           | 
+ synchronize_seqscans                             | bool    |      |           | 
+ synchronous_commit                               | enum    |      |           | 
+ synchronous_standby_names                        | string  |      |           | 
+ sysadmin_reserved_connections                    | integer |      | 0         | 262143
+ syslog_facility                                  | enum    |      |           | 
+ syslog_ident                                     | string  |      |           | 
+ table_skewness_warning_rows                      | integer |      | 0         | 2147483647
+ table_skewness_warning_threshold                 | real    |      | 0         | 1
+ tcp_keepalives_count                             | integer |      | 0         | 100
+ tcp_keepalives_idle                              | integer | s    | 0         | 3600
+ tcp_keepalives_interval                          | integer | s    | 0         | 180
+ tcp_user_timeout                                 | integer | ms   | 0         | 3600000
+ td_compatible_truncation                         | bool    |      |           | 
+ tde_cmk_id                                       | string  |      |           | 
+ temp_buffers                                     | integer | 8kB  | 100       | 1073741823
+ temp_file_limit                                  | integer | kB   | -1        | 2147483647
+ temp_tablespaces                                 | string  |      |           | 
+ thread_pool_attr                                 | string  |      |           | 
+ thread_pool_stream_attr                          | string  |      |           | 
+ time_to_target_rpo                               | integer |      | 0         | 3600
+ TimeZone                                         | string  |      |           | 
+ timezone_abbreviations                           | string  |      |           | 
+ topsql_retention_time                            | integer |      | 0         | 3650
+ trace_notify                                     | bool    |      |           | 
+ trace_recovery_messages                          | enum    |      |           | 
+ trace_sort                                       | bool    |      |           | 
+ track_activities                                 | bool    |      |           | 
+ track_activity_query_size                        | integer |      | 100       | 102400
+ track_counts                                     | bool    |      |           | 
+ track_functions                                  | enum    |      |           | 
+ track_io_timing                                  | bool    |      |           | 
+ track_sql_count                                  | bool    |      |           | 
+ track_stmt_details_size                          | int64   |      | 0         | 100000000
+ track_stmt_parameter                             | bool    |      |           | 
+ track_stmt_retention_time                        | string  |      |           | 
+ track_stmt_session_slot                          | integer |      | 0         | 2147483647
+ track_stmt_standby_chain_size                    | string  |      |           | 
+ track_stmt_stat_level                            | string  |      |           | 
+ track_thread_wait_status_interval                | integer | min  | 0         | 1440
+ transaction_deferrable                           | bool    |      |           | 
+ transaction_isolation                            | string  |      |           | 
+ transaction_pending_time                         | integer |      | -1        | 1073741823
+ transaction_read_only                            | bool    |      |           | 
+ transform_null_equals                            | bool    |      |           | 
+ transparent_encrypted_string                     | string  |      |           | 
+ transparent_encrypt_kms_region                   | string  |      |           | 
+ transparent_encrypt_kms_url                      | string  |      |           | 
+ try_vector_engine_strategy                       | enum    |      |           | 
+ udf_memory_limit                                 | integer | kB   | 204800    | 2147483647
+ UDFWorkerMemHardLimit                            | integer | kB   | 0         | 2147483647
+ uncontrolled_memory_context                      | string  |      |           | 
+ undo_limit_size_per_transaction                  | integer | 8kB  | 256       | 2147483647
+ undo_retention_time                              | integer | s    | 0         | 259200
+ undo_space_limit_size                            | integer | 8kB  | 102400    | 2147483647
+ undo_zone_count                                  | integer |      | 0         | 1048576
+ unique_sql_retention_time                        | integer | min  | 1         | 3650
+ unix_socket_directory                            | string  |      |           | 
+ unix_socket_group                                | string  |      |           | 
+ unix_socket_permissions                          | integer |      | 0         | 511
+ update_lockwait_timeout                          | integer | ms   | 0         | 2147483647
+ update_process_title                             | bool    |      |           | 
+ upgrade_mode                                     | integer |      | 0         | 2147483647
+ uppercase_attribute_name                         | bool    |      |           | 
+ use_elastic_search                               | bool    |      |           | 
+ user_metric_retention_time                       | integer |      | 0         | 3650
+ use_workload_manager                             | bool    |      |           | 
+ ustore_attr                                      | string  |      |           | 
+ vacuum_cost_delay                                | integer | ms   | 0         | 100
+ vacuum_cost_limit                                | integer |      | 1         | 10000
+ vacuum_cost_page_dirty                           | integer |      | 0         | 10000
+ vacuum_cost_page_hit                             | integer |      | 0         | 10000
+ vacuum_cost_page_miss                            | integer |      | 0         | 10000
+ vacuum_defer_cleanup_age                         | int64   |      | 0         | 1000000
+ vacuum_freeze_min_age                            | int64   |      | 0         | 576460752303423487
+ vacuum_freeze_table_age                          | int64   |      | 0         | 576460752303423487
+ vacuum_gtt_defer_check_age                       | integer |      | 0         | 1000000
+ var_eq_const_selectivity                         | bool    |      |           | 
+ version_retention_age                            | int64   |      | 0         | 576460752303423487
+ wait_dummy_time                                  | integer |      | 1         | 2147483647
+ wal_block_size                                   | integer |      | 8192      | 8192
+ wal_buffers                                      | integer | 8kB  | -1        | 262144
+ wal_file_init_num                                | integer |      | 0         | 1000000
+ wal_flush_delay                                  | integer |      | 0         | 90000000
+ wal_flush_timeout                                | integer |      | 0         | 90000000
+ wal_keep_segments                                | integer |      | 2         | 2147483647
+ wal_level                                        | enum    |      |           | 
+ wal_log_hints                                    | bool    |      |           | 
+ wal_receiver_buffer_size                         | integer | kB   | 4096      | 1047552
+ wal_receiver_connect_retries                     | integer |      | 1         | 2147483647
+ wal_receiver_connect_timeout                     | integer | s    | 0         | 2147483
+ wal_receiver_status_interval                     | integer | s    | 0         | 2147483
+ wal_receiver_timeout                             | integer | ms   | 0         | 2147483647
+ wal_segment_size                                 | integer | 8kB  | 2048      | 2048
+ walsender_max_send_size                          | integer | kB   | 8         | 2147483647
+ wal_sender_timeout                               | integer | ms   | 0         | 2147483647
+ wal_sync_method                                  | enum    |      |           | 
+ walwriter_cpu_bind                               | integer |      | -1        | 2147483647
+ wal_writer_delay                                 | integer | ms   | 1         | 10000
+ walwriter_sleep_threshold                        | int64   |      | 1         | 50000
+ wdr_snapshot_interval                            | integer | min  | 10        | 60
+ wdr_snapshot_query_timeout                       | integer | s    | 100       | 2147483647
+ wdr_snapshot_retention_days                      | integer |      | 1         | 8
+ work_mem                                         | integer | kB   | 64        | 2147483647
+ xc_maintenance_mode                              | bool    |      |           | 
+ xlog_file_path                                   | string  |      |           | 
+ xlog_file_size                                   | int64   |      | 134217728 | 576460752303423487
+ xloginsert_locks                                 | integer |      | 1         | 1000
+ xlog_lock_file_path                              | string  |      |           | 
+ xmlbinary                                        | enum    |      |           | 
+ xmloption                                        | enum    |      |           | 
+ zero_damaged_pages                               | bool    |      |           | 
 --?.*
 

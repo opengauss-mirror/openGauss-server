@@ -4,7 +4,7 @@ set(CMAKE_VERBOSE_MAKEFILE ON)
 set(CMAKE_RULE_MESSAGES OFF)
 set(CMAKE_SKIP_RPATH TRUE)
 
-INCLUDE_DIRECTORIES(${LIBTHRIFT_INCLUDE_PATH} ${SNAPPY_INCLUDE_PATH} ${CJSON_INCLUDE_PATH} ${BOOST_INCLUDE_PATH})
+INCLUDE_DIRECTORIES(${CJSON_INCLUDE_PATH} ${BOOST_INCLUDE_PATH})
 
 set(CMAKE_MODULE_PATH 
     ${PROJECT_OPENGS_DIR}/src/gausskernel/cbb/instruments/ash
@@ -19,6 +19,7 @@ set(CMAKE_MODULE_PATH
     ${PROJECT_OPENGS_DIR}/src/gausskernel/cbb/instruments/workload
     ${PROJECT_OPENGS_DIR}/src/gausskernel/cbb/instruments/percentile
     ${PROJECT_OPENGS_DIR}/src/gausskernel/cbb/instruments/func_control
+    ${PROJECT_OPENGS_DIR}/src/gausskernel/cbb/instruments/gs_stack
 
 )
 
@@ -34,4 +35,4 @@ add_subdirectory(wdr)
 add_subdirectory(workload)
 add_subdirectory(percentile)
 add_subdirectory(func_control)
-
+add_subdirectory(gs_stack)

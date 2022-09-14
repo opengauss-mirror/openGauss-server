@@ -75,64 +75,6 @@ void XlogUndoUnlinkReplay(const XlogUndoUnlink *xlrec, XLogRecPtr unlinkLsn)
     return;
 }
 
-void XlogCleanUndoSpaceReplay(const XlogUndoClean *xlrec, XLogRecPtr cleanLsn)
-{
-    Assert(xlrec != NULL);
-
-    int zoneId = UNDO_PTR_GET_ZONE_ID(xlrec->tail);
-    Assert(IS_VALID_ZONE_ID(zoneId));
-    UndoLogOffset newTail = UNDO_PTR_GET_OFFSET(xlrec->tail);
-    UndoZone *zone = UndoZoneGroup::GetUndoZone(zoneId);
-    if (zone == NULL) {
-        return;
-    }
-    UndoSpace *usp = zone->GetUndoSpace();
-
-    if (usp->LSN() < cleanLsn) {
-        usp->LockSpace();
-        if ((usp->Head() + UNDO_LOG_SEGMENT_SIZE != usp->Tail()) || (usp->Head() != newTail)) {
-            ereport(PANIC, (errmsg(UNDOFORMAT("zone %d not used but head %lu + segment size != tail %lu, newTail=%lu."),
-                zoneId, usp->Head(), usp->Tail(), newTail)));
-        }
-        usp->MarkDirty();
-        usp->UnlinkUndoLog(zoneId, usp->Tail(), UNDO_DB_OID);
-        usp->SetHead(newTail);
-        usp->SetTail(newTail);
-        usp->SetLSN(cleanLsn);
-        usp->UnlockSpace();
-    }
-    return;
-}
-
-void XlogCleanSlotSpaceReplay(const XlogUndoClean *xlrec, XLogRecPtr cleanLsn)
-{
-    Assert(xlrec != NULL);
-
-    int zoneId = UNDO_PTR_GET_ZONE_ID(xlrec->tail);
-    Assert(IS_VALID_ZONE_ID(zoneId));
-    UndoLogOffset newTail = UNDO_PTR_GET_OFFSET(xlrec->tail);
-    UndoZone *zone = UndoZoneGroup::GetUndoZone(zoneId);
-    if (zone == NULL) {
-        return;
-    }
-    UndoSpace *usp = zone->GetSlotSpace();
-
-    if (usp->LSN() < cleanLsn) {
-        usp->LockSpace();
-        if ((usp->Head() + UNDO_META_SEGMENT_SIZE != usp->Tail()) || (usp->Head() != newTail)) {
-            ereport(PANIC, (errmsg(UNDOFORMAT("zone %d not used but head %lu + segment size != tail %lu, newTail=%lu."),
-                zoneId, usp->Head(), usp->Tail(), newTail)));
-        }
-        usp->MarkDirty();
-        usp->UnlinkUndoLog(zoneId, usp->Tail(), UNDO_SLOT_DB_OID);
-        usp->SetHead(newTail);
-        usp->SetTail(newTail);
-        usp->SetLSN(cleanLsn);
-        usp->UnlockSpace();
-    }
-    return;
-}
-
 void XlogExtendSlotSpaceReplay(const XlogUndoExtend *xlrec, XLogRecPtr extendLsn)
 {
     Assert(xlrec != NULL);
@@ -201,12 +143,7 @@ void XlogUndoDiscardReplay(const XlogUndoDiscard *xlrec, XLogRecPtr lsn)
                 UndoSlotPtr recycle = xlrec->startSlot;
                 while (recycle < xlrec->endSlot) {
                     TransactionSlot *slot = buf.FetchTransactionSlot(recycle);
-                    if (!TransactionIdIsValid(slot->XactId()) || slot->DbId() == InvalidOid) {
-                        ereport(WARNING, (errmodule(MOD_UNDO),
-                            errmsg(UNDOFORMAT("zone %d transaction slot %lu dbid %u xid %lu invalid."),
-                                zone->GetZoneId(), xlrec->startSlot, slot->DbId(), slot->XactId())));
-                    }
-                    ResolveRecoveryConflictWithSnapshotOid(slot->XactId(), slot->DbId());
+                    ResolveRecoveryConflictWithSnapshotOid(slot->XactId(), slot->DbId(), lsn);
                     recycle = GetNextSlotPtr(recycle);
                 }
             }
@@ -215,17 +152,10 @@ void XlogUndoDiscardReplay(const XlogUndoDiscard *xlrec, XLogRecPtr lsn)
     }
     if (zone->GetLSN() < lsn) {
         zone->LockUndoZone();
-        Assert(xlrec->startSlot == zone->GetRecycle());
-        zone->ForgetUndoBuffer(UNDO_PTR_GET_OFFSET(zone->GetForceDiscard()),
-            UNDO_PTR_GET_OFFSET(xlrec->endUndoPtr), UNDO_DB_OID);
-        zone->ForgetUndoBuffer(UNDO_PTR_GET_OFFSET(xlrec->startSlot), 
-            UNDO_PTR_GET_OFFSET(xlrec->endSlot), UNDO_SLOT_DB_OID);
-        ereport(DEBUG1, (errmodule(MOD_UNDO),
-            errmsg(UNDOFORMAT("recovery:zone %d, discard=%lu, ndiscard=%lu, nxid=%lu, nrecycle=%lu."),
-                zone->GetZoneId(), zone->GetDiscard(), xlrec->endUndoPtr, xlrec->recycledXid, xlrec->endSlot)));
-        zone->SetRecycle(xlrec->endSlot);
-        zone->SetDiscard(xlrec->endUndoPtr);
-        zone->SetForceDiscard(xlrec->endUndoPtr);
+        Assert(xlrec->startSlot == zone->GetRecycleTSlotPtr());
+        zone->SetRecycleTSlotPtr(xlrec->endSlot);
+        zone->SetDiscardURecPtr(xlrec->endUndoPtr);
+        zone->SetForceDiscardURecPtr(xlrec->endUndoPtr);
         zone->SetRecycleXid(xlrec->recycledXid);
         zone->MarkDirty();
         zone->SetLSN(lsn);
@@ -247,12 +177,6 @@ void UndoXlogRedo(XLogReaderState *record)
             break;
         case XLOG_UNDO_EXTEND:
             XlogExtendUndoSpaceReplay((XlogUndoExtend *)xlrec, record->EndRecPtr);
-            break;
-        case XLOG_UNDO_CLEAN:
-            XlogCleanUndoSpaceReplay((XlogUndoClean *)xlrec, record->EndRecPtr);
-            break;
-        case XLOG_SLOT_CLEAN:
-            XlogCleanSlotSpaceReplay((XlogUndoClean *)xlrec, record->EndRecPtr);
             break;
         case XLOG_SLOT_UNLINK:
             XlogSlotUnlinkReplay((XlogUndoUnlink *)xlrec, record->EndRecPtr);
@@ -284,11 +208,6 @@ XLogRecPtr WriteUndoXlog(void *xlrec, uint8 type)
             XLogRegisterData((char *)xlrec, sizeof(XlogUndoUnlink));
             xlogRecPtr = XLogInsert(RM_UNDOLOG_ID, XLOG_UNDO_UNLINK);
             break;
-        case XLOG_UNDO_CLEAN:
-            XLogBeginInsert();
-            XLogRegisterData((char *)xlrec, sizeof(XlogUndoClean));
-            xlogRecPtr = XLogInsert(RM_UNDOLOG_ID, XLOG_UNDO_CLEAN);
-            break;
         case XLOG_SLOT_EXTEND:
             XLogBeginInsert();
             XLogRegisterData((char *)xlrec, sizeof(XlogUndoExtend));
@@ -298,11 +217,6 @@ XLogRecPtr WriteUndoXlog(void *xlrec, uint8 type)
             XLogBeginInsert();
             XLogRegisterData((char *)xlrec, sizeof(XlogUndoUnlink));
             xlogRecPtr = XLogInsert(RM_UNDOLOG_ID, XLOG_SLOT_UNLINK);
-            break;
-        case XLOG_SLOT_CLEAN:
-            XLogBeginInsert();
-            XLogRegisterData((char *)xlrec, sizeof(XlogUndoClean));
-            xlogRecPtr = XLogInsert(RM_UNDOLOG_ID, XLOG_SLOT_CLEAN);
             break;
         case XLOG_UNDO_DISCARD:
             XLogBeginInsert();

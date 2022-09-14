@@ -97,7 +97,7 @@ void GlobalSysDBCache::AddHeadToBucket(Index hash_index, GlobalSysDBCacheEntry *
     m_bucket_list.AddHeadToBucket(hash_index, &entry->m_cache_elem);
 
     /* add this for hashtable */
-    entry->MemoryEstimateAdd(GLOBAL_DB_MEMORY_MIN);
+    entry->MemoryEstimateAdd(entry->GetDBUsedSpace());
     m_dbstat_manager.ThreadHoldDB(entry);
 }
 
@@ -194,7 +194,7 @@ GlobalSysDBCacheEntry *GlobalSysDBCache::GetGSCEntry(Oid db_id, char *db_name)
     Index hash_index = HASH_INDEX(hash_value, m_nbuckets);
     GlobalSysDBCacheEntry *entry = SearchGSCEntry(db_id, hash_index, db_name);
 
-    Refresh(entry);
+    Refresh();
     return entry;
 }
 
@@ -364,6 +364,7 @@ GlobalSysDBCacheEntry *GlobalSysDBCache::CreateSharedGSCEntry()
     InitGlobalSysDBCacheEntry(entry, m_global_sysdb_mem_cxt, db_id, hash_index, "");
 
     DLInitElem(&entry->m_cache_elem, (void *)entry);
+    entry->MemoryEstimateAdd(entry->GetDBUsedSpace());
     return entry;
 }
 
@@ -421,12 +422,16 @@ void GlobalSysDBCache::GSCMemThresholdCheck()
     ResourceOwnerRememberGlobalIsExclusive(LOCAL_SYSDB_RESOWNER, &m_is_memorychecking);
 
     CalcDynamicHashBucketStrategy();
-    DynamicGSCMemoryLevel memory_level = CalcDynamicGSCMemoryLevel(gsc_rough_used_space);
+    DynamicGSCMemoryLevel memory_level = CalcDynamicGSCMemoryLevel(GetGSCUsedMemorySpace());
 
     Index last_hash_index = m_swapout_hash_index;
     switch (memory_level) {
         /* clean all to recycle memory */
         case DynamicGSCMemoryOutOfControl:
+            /* swapout once per cycle */
+            if (last_hash_index == 0) {
+                m_global_shared_db_entry->ResetDBCache<false>();
+            }
             while (last_hash_index < (Index)m_nbuckets) {
                 SwapoutGivenDBInstance(last_hash_index, ALL_DB_OID);
                 SwapOutGivenDBContent(last_hash_index, ALL_DB_OID, memory_level);
@@ -444,6 +449,10 @@ void GlobalSysDBCache::GSCMemThresholdCheck()
         
         /* swapout one to recycle memory */
         case DynamicGSCMemoryHigh:
+            /* swapout once per cycle */
+            if (last_hash_index == 0) {
+                m_global_shared_db_entry->RemoveTailElements();
+            }
             while (last_hash_index < (Index)m_nbuckets) {
 #ifdef ENABLE_LITE_MODE
                 SwapoutGivenDBInstance(last_hash_index, ALL_DB_OID);
@@ -469,6 +478,20 @@ void GlobalSysDBCache::GSCMemThresholdCheck()
     FreeDeadDBs();
 }
 
+void GlobalSysDBCache::InvalidateAllRelationNodeList()
+{
+    for (Index hash_index = 0; hash_index < (Index)m_nbuckets; hash_index++) {
+        PthreadRWlockRdlock(LOCAL_SYSDB_RESOWNER, &m_db_locks[hash_index]);
+        for (Dlelem *elt = DLGetTail(m_bucket_list.GetBucket(hash_index)); elt != NULL;) {
+            GlobalSysDBCacheEntry *entry = (GlobalSysDBCacheEntry *)DLE_VAL(elt);
+            elt = DLGetPred(elt);
+            entry->m_tabdefCache->InvalidateRelationNodeList();
+        }
+        PthreadRWlockUnlock(LOCAL_SYSDB_RESOWNER, &m_db_locks[hash_index]);
+    }
+    /* shared relations don't contain locatorinfo */
+}
+
 void GlobalSysDBCache::InvalidAllRelations()
 {
     for (Index hash_index = 0; hash_index < (Index)m_nbuckets; hash_index++) {
@@ -492,7 +515,6 @@ void GlobalSysDBCache::SwapOutGivenDBContent(Index hash_index, Oid db_id, Dynami
         if (db_id != (Oid)ALL_DB_OID && entry->m_dbOid != db_id) {
             continue;
         }
-
         if (mem_level == DynamicGSCMemoryOutOfControl) {
             /* we need drop the element, but dbentry is special, we clean it instead */
             entry->ResetDBCache<false>();
@@ -659,27 +681,76 @@ void GlobalSysDBCache::InitSysCacheRelIds()
  */
 void GlobalSysDBCache::RefreshHotStandby()
 {
-    if (!EnableGlobalSysCache()) {
-	    return;
-    }
+    Assert(EnableGlobalSysCache());
     hot_standby = (t_thrd.postmaster_cxt.HaShmData->current_mode != STANDBY_MODE || XLogStandbyInfoActive());
     if (hot_standby || !m_is_inited) {
-	    return;
+        return;
     }
-    /* clean all */
-    for (int hash_index = 0; hash_index < m_nbuckets; hash_index ++) {
-        PthreadRWlockRdlock(LOCAL_SYSDB_RESOWNER, &m_db_locks[hash_index]);
-	for (Dlelem * elt = DLGetTail(m_bucket_list.GetBucket(hash_index)); elt != NULL;) {
-            GlobalSysDBCacheEntry *entry = (GlobalSysDBCacheEntry *)DLE_VAL(elt);
-	    elt = DLGetPred(elt);
-	    entry->ResetDBCache<true>();
-	}
-        PthreadRWlockUnlock(LOCAL_SYSDB_RESOWNER, &m_db_locks[hash_index]);
+    ResetCache<true>(ALL_DB_OID);
+}
+
+static List *GetHashIndexList(Oid db_id, int nbucket)
+{
+    List *hash_index_list = NIL;
+    if (db_id != ALL_DB_OID) {
+        uint32 hash_value = oid_hash((void *)&(db_id), sizeof(Oid));
+        Index hash_index = HASH_INDEX(hash_value, nbucket);
+        hash_index_list = lappend_int(hash_index_list, (int)hash_index);
+    } else {
+        for (int hash_index = 0; hash_index < nbucket; hash_index++) {
+            hash_index_list = lappend_int(hash_index_list, hash_index);
+        }
     }
+    return hash_index_list;
+}
+
+/* @param db_id 0 means clean shared db, >0 means clean given db and shared db, ALL_DB_OID/null means clean all dbs
+ * @param force mean reset or swapout */
+template <bool force>
+void GlobalSysDBCache::ResetCache(Oid db_id)
+{
     if (m_global_shared_db_entry != NULL) {
-        m_global_shared_db_entry->ResetDBCache<true>();
+        m_global_shared_db_entry->ResetDBCache<force>();
+        if (force && m_global_shared_db_entry->m_dbstat != NULL) {
+            m_global_shared_db_entry->m_dbstat->CleanStat();
+        }
+    }
+    if (db_id == InvalidOid) {
+        return;
     }
 
+    List *hash_index_list = GetHashIndexList(db_id, m_nbuckets);
+
+    ListCell *lc;
+    /* try to delete db entry first */
+    foreach(lc, hash_index_list) {
+        Index hash_index = lfirst_oid(lc);
+        SwapoutGivenDBInstance(hash_index, db_id);
+    }
+    /* delete failed, clean all */
+    foreach(lc, hash_index_list) {
+        Index hash_index = lfirst_oid(lc);
+        PthreadRWlockRdlock(LOCAL_SYSDB_RESOWNER, &m_db_locks[hash_index]);
+        for (Dlelem *elt = DLGetTail(m_bucket_list.GetBucket(hash_index)); elt != NULL;) {
+            GlobalSysDBCacheEntry *entry = (GlobalSysDBCacheEntry *)DLE_VAL(elt);
+            elt = DLGetPred(elt);
+            if (db_id != (Oid)ALL_DB_OID && entry->m_dbOid != db_id) {
+                continue;
+            }
+            entry->ResetDBCache<force>();
+            if (force && entry->m_dbstat != NULL) {
+                entry->m_dbstat->CleanStat();
+            }
+            /* clean dbstat info too */
+            m_dbstat_manager.DropDB(entry->m_dbOid, hash_index);
+            /* clean given db only */
+            if (db_id != (Oid)ALL_DB_OID) {
+                break;
+            }
+        }
+        PthreadRWlockUnlock(LOCAL_SYSDB_RESOWNER, &m_db_locks[hash_index]);
+    }
+    FreeDeadDBs();
 }
 
 void GlobalSysDBCache::Init(MemoryContext parent)
@@ -708,6 +779,8 @@ void GlobalSysDBCache::Init(MemoryContext parent)
     for (int i = 0; i < m_nbuckets; i++) {
         PthreadRwLockInit(&m_db_locks[i], NULL);
     }
+    m_special_lock = (pthread_rwlock_t *)palloc0(sizeof(pthread_rwlock_t));
+    PthreadRwLockInit(m_special_lock, NULL);
     m_dbstat_manager.InitDBStat(m_nbuckets, m_global_sysdb_mem_cxt);
     Assert(g_instance.attr.attr_memory.global_syscache_threshold != 0);
     /* the conf file dont have value of gsc threshold, so we need init it by default value */
@@ -732,14 +805,35 @@ GlobalSysDBCache::GlobalSysDBCache()
     recovery_finished = false;
     m_swapout_hash_index = 0;
     m_is_inited = false;
+    m_special_lock = NULL;
 }
 
-void GlobalSysDBCache::Refresh(GlobalSysDBCacheEntry *entry)
+void GlobalSysDBCache::Refresh()
 {
-    if (unlikely(gsc_rough_used_space > MAX_GSC_MEMORY_SPACE)) {
+    if (unlikely(GetGSCUsedMemorySpace() > MAX_GSC_MEMORY_SPACE)) {
         GSCMemThresholdCheck();
     }
     FreeDeadDBs();
+}
+
+void GlobalSysDBCache::FixDBName(GlobalSysDBCacheEntry *entry)
+{
+    HeapTuple tup = SearchSysCache1(DATABASEOID, ObjectIdGetDatum(entry->m_dbOid));
+    if (!HeapTupleIsValid(tup)) {
+        return;
+    }
+    Form_pg_database dbform = (Form_pg_database)GETSTRUCT(tup);
+    if (strcmp(entry->m_dbName, NameStr(dbform->datname)) == 0) {
+        ReleaseSysCache(tup);
+        return;
+    }
+    char *old_db_name = entry->m_dbName;
+    char *new_db_name = MemoryContextStrdup(entry->m_mem_cxt_groups[0], NameStr(dbform->datname));
+    PthreadRWlockWrlock(LOCAL_SYSDB_RESOWNER, m_special_lock);
+    entry->m_dbName = new_db_name;
+    PthreadRWlockUnlock(LOCAL_SYSDB_RESOWNER, m_special_lock);
+    ReleaseSysCache(tup);
+    pfree_ext(old_db_name);
 }
 
 struct GlobalDBStatInfo : GlobalSysCacheStat {
@@ -820,18 +914,17 @@ List *GlobalSysDBCache::GetGlobalDBStatDetail(Oid db_id, Oid rel_id, GscStatDeta
     if (db_id == InvalidOid) {
         return stat_list;
     }
-    Index given_hash_index = ALL_DB_INDEX;
-    if (db_id != ALL_DB_OID) {
-        uint32 hash_value = oid_hash((void *)&(db_id), sizeof(Oid));
-        given_hash_index = HASH_INDEX(hash_value, m_nbuckets);
-    }
-    for (int hash_index = 0; hash_index < m_nbuckets; hash_index++) {
+
+    List *given_hash_index_list = GetHashIndexList(db_id, m_nbuckets);
+
+    ListCell *lc;
+    /* try to delete db entry first */
+    foreach(lc, given_hash_index_list) {
+        Index hash_index = lfirst_oid(lc);
         if (DLIsNIL(m_bucket_list.GetBucket(hash_index))) {
             continue;
         }
-        if (given_hash_index != ALL_DB_INDEX && given_hash_index != (Index)hash_index) {
-            continue;
-        }
+
         CHECK_FOR_INTERRUPTS();
         PthreadRWlockRdlock(LOCAL_SYSDB_RESOWNER, &m_db_locks[hash_index]);
         for (Dlelem *elt = DLGetHead(m_bucket_list.GetBucket(hash_index)); elt != NULL; elt = DLGetSucc(elt)) {
@@ -839,6 +932,7 @@ List *GlobalSysDBCache::GetGlobalDBStatDetail(Oid db_id, Oid rel_id, GscStatDeta
             if (db_id != ALL_DB_OID && db_id != entry->m_dbOid) {
                 continue;
             }
+            FixDBName(entry);
             if (stat_detail == GscStatDetailDBInfo) {
                 stat_list = lappend(stat_list, ConstructGlobalDBStatInfo(entry, &m_dbstat_manager));
             } else if (stat_detail == GscStatDetailTuple) {
@@ -976,32 +1070,6 @@ Datum gs_gsc_dbstat_info(PG_FUNCTION_ARGS)
     SRF_RETURN_NEXT(funcctx, result);
 }
 
-/* @param db_id 0 means clean shared db, >0 means clean given db and shared db, ALL_DB_OID/null means clean all dbs */
-void GlobalSysDBCache::Clean(Oid db_id)
-{
-    m_global_shared_db_entry->ResetDBCache<false>();
-    if (db_id == InvalidOid) {
-        return;
-    }
-    Index hash_index = ALL_DB_INDEX;
-    if (db_id != ALL_DB_OID) {
-        uint32 hash_value = oid_hash((void *)&(db_id), sizeof(Oid));
-        hash_index = HASH_INDEX(hash_value, m_nbuckets);
-    }
-    /* skip m_is_swappingout check here */
-    if (hash_index == ALL_DB_INDEX) {
-        Assert(db_id == ALL_DB_OID);
-        for (Index hash_index = 0; hash_index < (Index)m_nbuckets; hash_index++) {
-            SwapoutGivenDBInstance(hash_index, ALL_DB_OID);
-            SwapOutGivenDBContent(hash_index, ALL_DB_OID, DynamicGSCMemoryOutOfControl);
-        }
-    } else {
-        SwapoutGivenDBInstance(hash_index, ALL_DB_OID);
-        SwapOutGivenDBContent(hash_index, ALL_DB_OID, DynamicGSCMemoryOutOfControl);
-    }
-    FreeDeadDBs();
-}
-
 Datum gs_gsc_clean(PG_FUNCTION_ARGS)
 {
     if (!superuser()) {
@@ -1010,13 +1078,17 @@ Datum gs_gsc_clean(PG_FUNCTION_ARGS)
             errdetail("Insufficient privilege to clean gsc."), errcause("N/A"),
             erraction("Please login in with superuser or sysdba role or contact database administrator.")));
     }
+    if (!EnableGlobalSysCache()) {
+        PG_RETURN_BOOL(false);
+    }
     Oid dbOid = PG_ARGISNULL(0) ? ALL_DB_OID : PG_GETARG_OID(0);
     CheckDbOidValid(dbOid);
-    if (EnableGlobalSysCache()) {
-        g_instance.global_sysdbcache.Clean(dbOid);
-        PG_RETURN_BOOL(true);
+    if (dbOid == ALL_DB_OID) {
+        g_instance.global_sysdbcache.ResetCache<true>(dbOid);
+    } else {
+        g_instance.global_sysdbcache.ResetCache<false>(dbOid);
     }
-    PG_RETURN_BOOL(false);
+    PG_RETURN_BOOL(true);
 }
 
 static const int GLOBAL_CATALOG_INFO_NUM = 11;
@@ -1261,7 +1333,6 @@ Datum gs_gsc_table_detail(PG_FUNCTION_ARGS)
     SRF_RETURN_NEXT(funcctx, result);
 }
 
-
 int ResizeHashBucket(int origin_nbucket, DynamicHashBucketStrategy strategy)
 {
     int cc_nbuckets = origin_nbucket;
@@ -1295,15 +1366,51 @@ int ResizeHashBucket(int origin_nbucket, DynamicHashBucketStrategy strategy)
 void NotifyGscRecoveryStarted()
 {
     if (!EnableGlobalSysCache()) {
-	    return;
+        return;
     }
     g_instance.global_sysdbcache.recovery_finished = false;
-
 }
-
 void NotifyGscRecoveryFinished()
 {
-    if (EnableGlobalSysCache()) {
-        g_instance.global_sysdbcache.recovery_finished = true;
+    if (!EnableGlobalSysCache()) {
+        return;
     }
+    g_instance.global_sysdbcache.recovery_finished = true;
+}
+
+void NotifyGscPgxcPoolReload()
+{
+    if (!EnableGlobalSysCache()) {
+        return;
+    }
+    g_instance.global_sysdbcache.InvalidateAllRelationNodeList();
+}
+
+/*
+ * whenever you change server_mode, call RefreshHotStandby plz
+ * we need know current_mode to support gsc feature
+ */
+void NotifyGscHotStandby()
+{
+    if (!EnableGlobalSysCache()) {
+        return;
+    }
+    g_instance.global_sysdbcache.ResetCache<true>(ALL_DB_OID);
+    g_instance.global_sysdbcache.RefreshHotStandby();
+}
+
+void NotifyGscSigHup()
+{
+    if (!EnableGlobalSysCache()) {
+        return;
+    }
+    g_instance.global_sysdbcache.UpdateGSCConfig(g_instance.attr.attr_memory.global_syscache_threshold);
+}
+
+void NotifyGscDropDB(Oid db_id, bool need_clear)
+{
+    if (!EnableGlobalSysCache()) {
+        return;
+    }
+    g_instance.global_sysdbcache.DropDB(db_id, need_clear);
 }

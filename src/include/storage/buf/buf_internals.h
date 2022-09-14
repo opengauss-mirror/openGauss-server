@@ -39,7 +39,7 @@
  * The definition of buffer state components is below.
  */
 #define BUF_REFCOUNT_ONE 1
-#define BUF_REFCOUNT_MASK ((1U << 17) - 1)
+#define BUF_REFCOUNT_MASK ((1U << 16) - 1)
 #define BUF_USAGECOUNT_MASK 0x003C0000U
 #define BUF_USAGECOUNT_ONE (1U << 18)
 #define BUF_USAGECOUNT_SHIFT 18
@@ -55,6 +55,7 @@
  * Note: TAG_VALID essentially means that there is a buffer hashtable
  * entry associated with the buffer's tag.
  */
+#define BM_IN_MIGRATE (1U << 16)        /* buffer is migrating */
 #define BM_IS_META (1U << 17)
 #define BM_LOCKED (1U << 22)            /* buffer header is locked */
 #define BM_DIRTY (1U << 23)             /* data needs writing */
@@ -109,6 +110,11 @@ typedef struct buftagnohbkt {
     BlockNumber blockNum; /* blknum relative to begin of reln */
 } BufferTagFirstVer;
 
+/* entry for buffer lookup hashtable */
+typedef struct {
+    BufferTag key; /* Tag of a disk page */
+    int id;        /* Associated buffer ID */
+} BufferLookupEnt;
 
 #define CLEAR_BUFFERTAG(a)               \
     ((a).rnode.spcNode = InvalidOid,     \

@@ -190,6 +190,16 @@ drop package autonomous_pkg_a;
 drop type ct1;
 drop type ct;
 
+-- test select into syntax error
+declare
+va int;
+vb varchar2;
+vc varchar2;
+begin
+select 1,'a','b' into va,vb vc;
+end;
+/
+
 --------------------------------------------------
 ------------------ END OF TESTS ------------------
 --------------------------------------------------

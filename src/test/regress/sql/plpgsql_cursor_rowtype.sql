@@ -583,6 +583,9 @@ end pck_for;
 call pck_for.p1();
 drop package pck_for;
 
+set behavior_compat_options='';
+set plsql_compile_check_options='for_loop';
+
 -- (b) definde as scarlar
 create or replace package pck_for is
 temp_result int;
@@ -634,6 +637,7 @@ drop package pck_for;
 drop table t1;
 drop table t2;
 set behavior_compat_options='';
+set plsql_compile_check_options='';
 
 ----  clean  ----
 drop package pck1;

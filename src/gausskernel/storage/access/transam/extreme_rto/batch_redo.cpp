@@ -216,14 +216,15 @@ void PRTrackDatabaseDrop(XLogRecParseState *recordBlockState, HTAB *hashMap)
 void PRTrackDropFiles(HTAB *redoItemHash, XLogBlockDdlParse *ddlParse, XLogRecPtr lsn)
 {
     ColFileNodeRel *xnodes = (ColFileNodeRel *)ddlParse->mainData;
+    bool compress = ddlParse->compress;
     for (int i = 0; i < ddlParse->rels; ++i) {
         ColFileNode colFileNode;
-        ColFileNodeRel *colFileNodeRel = xnodes + i;
-        ColFileNodeCopy(&colFileNode, colFileNodeRel);
-
-        if (IS_COMPRESS_DELETE_FORK(colFileNode.forknum)) {
-            SET_OPT_BY_NEGATIVE_FORK(colFileNode.filenode, colFileNode.forknum);
-            colFileNode.forknum = MAIN_FORKNUM;
+        if (compress) {
+            ColFileNode *colFileNodeRel = ((ColFileNode *)(void *)xnodes) + i;
+            ColFileNodeFullCopy(&colFileNode, colFileNodeRel);
+        } else {
+            ColFileNodeRel *colFileNodeRel = xnodes + i;
+            ColFileNodeCopy(&colFileNode, colFileNodeRel);
         }
 
         if (!IsValidColForkNum(colFileNode.forknum)) {

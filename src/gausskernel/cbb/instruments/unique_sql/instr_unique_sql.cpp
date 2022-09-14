@@ -100,6 +100,8 @@ static int KeyUpdatedtimeCmp(const void* a, const void* b);
 static bool AutoRecycleUniqueSQLEntry();
 #endif
 
+void instr_unique_sql_reset_start_time();
+
 static uint32 uniqueSQLHashCode(const void* key, Size size)
 {
     const UniqueSQLKey* k = (const UniqueSQLKey*)key;
@@ -169,7 +171,7 @@ static void resetUniqueSQLEntry(UniqueSQL* entry)
         gs_lock_test_and_set_64(&(entry->sort_state.used_work_mem), 0);
         pg_atomic_write_u64(&(entry->sort_state.spill_counts), 0);
         pg_atomic_write_u64(&(entry->sort_state.spill_size), 0);
-        
+
         pg_atomic_write_u64(&(entry->hash_state.counts), 0);
         gs_lock_test_and_set_64(&(entry->hash_state.total_time), 0);
         gs_lock_test_and_set_64(&(entry->hash_state.used_work_mem), 0);
@@ -565,7 +567,8 @@ void UpdateSingleNodeByPassUniqueSQLStat(bool isTopLevel)
 {
     if (IS_SINGLE_NODE && is_unique_sql_enabled() && isTopLevel) {
         if (IS_UNIQUE_SQL_TRACK_TOP && IsTopUniqueSQL()) {
-            UpdateUniqueSQLStat(NULL, NULL, u_sess->unique_sql_cxt.unique_sql_start_time);
+            instr_unique_sql_report_elapse_time(u_sess->unique_sql_cxt.unique_sql_start_time);
+            instr_unique_sql_reset_start_time();
         }
 
         if (u_sess->unique_sql_cxt.unique_sql_start_time != 0) {
@@ -706,7 +709,7 @@ void UpdateUniqueSQLStat(Query* query, const char* sql, int64 elapse_start_time,
     }
     /* parse info(CN & DN) */
     UpdateUniqueSQLParse(entry);
-    
+
     /* Sort&Hash info */
     UpdateUniqueSQLSortHashInfo(entry);
 
@@ -1213,7 +1216,7 @@ static int do_copy_entry(const List *unique_sql_batch_list, int num)
 {
     UniqueSQL *unique_sql_array = NULL;
     HASH_SEQ_STATUS hash_seq;
-    ListCell *tmp_unique_sql_cell = NULL; 
+    ListCell *tmp_unique_sql_cell = NULL;
     UniqueSQL* entry = NULL;
     int i = 0;
 
@@ -1229,7 +1232,7 @@ static int do_copy_entry(const List *unique_sql_batch_list, int num)
                     tmp_unique_sql_cell = lnext(tmp_unique_sql_cell);
                 }
 
-                unique_sql_array = (UniqueSQL *)lfirst(tmp_unique_sql_cell); 
+                unique_sql_array = (UniqueSQL *)lfirst(tmp_unique_sql_cell);
             }
 
             copy_unique_sql_entry(unique_sql_array, (int)MAX_MEM_UNIQUE_SQL_ENTRY_COUNT, curr_idx, entry);
@@ -1696,7 +1699,15 @@ void GenerateUniqueSQLInfo(const char* sql, Query* query)
         return;
     }
 
-    if (IS_UNIQUE_SQL_TRACK_TOP && IsTopUniqueSQL()) {
+    if (u_sess->pbe_message == BIND_MESSAGE_QUERY || u_sess->pbe_message == EXECUTE_MESSAGE_QUERY ||
+        u_sess->pbe_message == EXECUTE_BATCH_MESSAGE_QUERY) {
+        query->uniqueSQLId = u_sess->unique_sql_cxt.unique_sql_id;
+        ereport(DEBUG1, (errmodule(MOD_INSTR), errmsg("[UniqueSQL] unique id: %lu, will not be reproduced when binding",
+            u_sess->unique_sql_cxt.unique_sql_id)));
+    }
+    bool checkHasTopSQL = IS_UNIQUE_SQL_TRACK_TOP &&
+        IsTopUniqueSQL() && (u_sess->unique_sql_cxt.force_generate_unique_sql == false);
+    if (checkHasTopSQL) {
         ereport(DEBUG1,
             (errmodule(MOD_INSTR),
                 errmsg("[UniqueSQL] unique id: %lu, already has top SQL", u_sess->unique_sql_cxt.unique_sql_id)));
@@ -1757,7 +1768,7 @@ void UniqueSq::unique_sql_post_parse_analyze(ParseState* pstate, Query* query)
     Assert(IS_PGXC_COORDINATOR || IS_SINGLE_NODE);
 
     if (pstate != NULL) {
-        /* generate unique sql id */        
+        /* generate unique sql id */
         if (is_unique_sql_enabled()) {
             GenerateUniqueSQLInfo(pstate->p_sourcetext, query);
         }
@@ -1819,17 +1830,15 @@ static void SetLocalUniqueSQLId(List* query_list)
     }
 }
 
-/* Set parameters from portal */
-void SetParamsFromPortal(Portal portal)
+/* Set parameters from params */
+void SetParamsFromParams(ParamListInfo params)
 {
     CHECK_STMT_HANDLE();
-    Assert(portal);
 
     if (!u_sess->attr.attr_common.track_stmt_parameter || CURRENT_STMT_METRIC_HANDLE->params) {
         return;
     }
-    
-    ParamListInfo params = portal->portalParams;
+
     /* We mustn't call user-defined I/O functions when in an aborted xact */
     if (params && params->numParams > 0 && !IsAbortedTransactionBlockState()) {
         StringInfoData param_str;
@@ -1884,7 +1893,6 @@ void SetParamsFromPortal(Portal portal)
             CURRENT_STMT_METRIC_HANDLE->query = tmpstr;
         }
 
-
         MemoryContextSwitchTo(oldcontext);
     }
 }
@@ -1906,7 +1914,7 @@ void SetUniqueSQLIdFromPortal(Portal portal, CachedPlanSource* unnamed_psrc)
         return;
     }
 
-    SetParamsFromPortal(portal);
+    SetParamsFromParams(portal->portalParams);
 
     List* query_list = NULL;
     if (portal->prepStmtName && portal->prepStmtName[0] != '\0') {
@@ -1940,6 +1948,28 @@ void SetUniqueSQLIdFromCachedPlanSource(CachedPlanSource* cplan)
     ereport(DEBUG1,
         (errmodule(MOD_INSTR),
             errmsg("[UniqueSQL] unique id: %lu, set unique sql id for PBE", u_sess->unique_sql_cxt.unique_sql_id)));
+}
+
+/* set unique sql id from exec_batch_bind_execute */
+void SetUniqueSQLIdInBatchBindExecute(CachedPlanSource* cplan, const ParamListInfo* params_set, int batch_count)
+{
+    if (!is_unique_sql_enabled() || !is_local_unique_sql() || cplan == NULL) {
+        return;
+    }
+
+    if (!u_sess->attr.attr_common.track_stmt_parameter) {
+        SetLocalUniqueSQLId(cplan->query_list);
+    } else {
+        for (int i = 0; i < batch_count; i++) {
+            pfree_ext(CURRENT_STMT_METRIC_HANDLE->query);
+            SetParamsFromParams(params_set[i]);
+            SetLocalUniqueSQLId(cplan->query_list);
+        }
+    }
+
+    ereport(DEBUG1,
+        (errmodule(MOD_INSTR),
+            errmsg("[UniqueSQL] unique id: %lu, set unique sql id for batch bind execute", u_sess->unique_sql_cxt.unique_sql_id)));
 }
 
 static void package_unique_sql_msg_on_remote(StringInfoData* buf, UniqueSQL* entry, uint32 recv_slot_index,
@@ -2646,6 +2676,12 @@ void ResetCurrentUniqueSQL(bool need_reset_cn_id)
     u_sess->unique_sql_cxt.unique_sql_text = NULL;
 #endif
     u_sess->unique_sql_cxt.skipUniqueSQLCount = 0;
+ 
+    /* used in open cursor case, open cursor will generate sub sqls,
+     * but fetch's select SQL may not be the first child, so we
+     * generate all sql's unique sql id
+     */
+    u_sess->unique_sql_cxt.force_generate_unique_sql = false;
 }
 
 void FindUniqueSQL(UniqueSQLKey key, char* unique_sql)
@@ -2775,4 +2811,23 @@ void instr_unique_sql_handle_multi_sql(bool is_first_parsetree)
             UniqueSQLStatCountResetParseCounter();
         }
     }
+}
+
+/* report unique sql elapse time and n_calls */
+void instr_unique_sql_report_elapse_time(int64 elapse_start_time)
+{
+    UpdateUniqueSQLStat(NULL, NULL, elapse_start_time);
+}
+
+/* If condition is true, set u_sess->unique_sql_cxt.unique_sql_start_time to val1, else to val2. */
+void instr_unique_sql_set_start_time(bool condition, int64 val1, int64 val2)
+{
+    if (is_local_unique_sql() && is_unique_sql_enabled()) {
+        u_sess->unique_sql_cxt.unique_sql_start_time = condition ? val1 : val2;
+    }
+}
+
+void instr_unique_sql_reset_start_time()
+{
+    u_sess->unique_sql_cxt.unique_sql_start_time = 0;
 }

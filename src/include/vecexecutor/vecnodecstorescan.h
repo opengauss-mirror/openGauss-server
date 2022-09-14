@@ -36,13 +36,8 @@ typedef enum { BTREE_INDEX, BTREE_INDEX_ONLY, PSORT_INDEX, PSORT_INDEX_ONLY } In
 
 extern CStoreScanState* ExecInitCStoreScan(CStoreScan* node, Relation parentHeapRel, EState* estate, int eflags,
     bool indexFlag = false, bool codegenInUplevel = false);
-extern DfsScanState* ExecInitDfsScan(
-    DfsScan* node, Relation parentHeapRel, EState* estate, int eflags, bool indexFlag = false);
 extern VectorBatch* ExecCStoreScan(CStoreScanState* node);
-extern VectorBatch* ExecDfsScan(DfsScanState* node);
-extern void ExecReScanDfsScan(DfsScanState* node);
 extern void ExecEndCStoreScan(CStoreScanState* node, bool indexFlag);
-extern void ExecEndDfsScan(DfsScanState* node);
 extern void ExecReSetRuntimeKeys(CStoreScanState* node);
 extern void ExecReScanCStoreScan(CStoreScanState* node);
 extern void ExecCStoreBuildScanKeys(CStoreScanState* state, List* quals, CStoreScanKey* scankeys, int* numScanKeys);
@@ -67,5 +62,5 @@ extern void FetchBatchFromSorter(IndexSortState* sort, VectorBatch* tids);
 extern void FetchTids(IndexScanDesc scandesc, List* indexScanTargetList, PlanState* ps, IndexSortState* sort,
     VectorBatch* tids, bool indexOnly);
 
-#endif /* NODECSTORESCAN_H */
+#endif /* NODECSTORESCAN_H  */
 

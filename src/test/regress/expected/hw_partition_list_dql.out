@@ -104,9 +104,7 @@ DETAIL:  N/A.
 alter table select_list_partition_table_000_3 rename partition for (NULL) to select_list_partition_table_000_3_p1;
 ERROR:  The partition number is invalid or out-of-range
 alter table select_list_partition_table_000_3 drop partition for (NULL);
-ERROR:  Cannot perform this operation because There are views or rules that depend on table select_list_partition_table_000_3.
-DETAIL:  N/A
-HINT:  drop the views or rules first. Use pg_rules to find rules. Use pg_class, pg_rewrite, pg_depend, pg_namespacesql to find views
+ERROR:  The partition number is invalid or out-of-range
 CREATE TABLE partition_wise_join_table_001_1 (ID INT NOT NULL,NAME VARCHAR(50) NOT NULL,SCORE NUMERIC(4,1),BIRTHDAY TIMESTAMP WITHOUT TIME ZONE,ADDRESS TEXT,SALARY double precision,RANK SMALLINT) 
 partition  by  list(ID) 
 ( 

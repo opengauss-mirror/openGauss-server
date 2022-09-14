@@ -39,6 +39,7 @@
 #include "utils/dynahash.h"
 #include "utils/lsyscache.h"
 #include "utils/snapmgr.h"
+#include "utils/knl_partcache.h"
 
 const char* getBypassReason(FusionType result)
 {
@@ -221,6 +222,11 @@ const char* getBypassReason(FusionType result)
             return "Bypass not executed because it's Var type allowed for target in sort query";
             break;
         }
+
+        case NOBYPASS_REPLACE_NOT_SUPPORT: {
+            return "Bypass not support REPLACE INTO statement";
+            break;
+        }
 		
         case NOBYPASS_UPSERT_NOT_SUPPORT: {
             return "Bypass not support INSERT INTO ... ON DUPLICATE KEY UPDATE statement";
@@ -263,6 +269,11 @@ const char* getBypassReason(FusionType result)
 
         case NOBYPASS_VERSION_SCAN_PLAN: {
             return "Bypass not executed because the plan contains version table scan.";
+            break;
+        }
+
+        case NOBYPASS_GPC_NOT_SUPPORT_PARTITION_BYPASS: {
+            return "Bypass not executed because GPC not support partition table bypass.";
             break;
         }
 
@@ -748,10 +759,15 @@ FusionType getSelectFusionType(List *stmt_list, ParamListInfo params)
     if (IsA(top_plan, LockRows)) {
         LockRows *lockrows = (LockRows *)top_plan;
         bool is_select_for_update =
-            (list_length(lockrows->rowMarks) == 1 && IsA(linitial(lockrows->rowMarks), PlanRowMark) &&
-            ((PlanRowMark *)linitial(lockrows->rowMarks))->markType == ROW_MARK_EXCLUSIVE &&
-            ((PlanRowMark *)linitial(lockrows->rowMarks))->noWait == false &&
-            ((PlanRowMark *)linitial(lockrows->rowMarks))->waitSec == 0);
+            (
+                list_length(lockrows->rowMarks) == 1 && IsA(linitial(lockrows->rowMarks), PlanRowMark) &&
+                ((PlanRowMark *)linitial(lockrows->rowMarks))->markType == ROW_MARK_EXCLUSIVE &&
+                (
+                    ((PlanRowMark *)linitial(lockrows->rowMarks))->waitPolicy == LockWaitBlock ||
+                    ((PlanRowMark *)linitial(lockrows->rowMarks))->waitPolicy == LockWaitSkip
+                ) &&
+                ((PlanRowMark *)linitial(lockrows->rowMarks))->waitSec == 0
+            );
         if (is_select_for_update) {
             top_plan = top_plan->lefttree;
             ftype = SELECT_FOR_UPDATE_FUSION;
@@ -772,7 +788,7 @@ FusionType getSelectFusionType(List *stmt_list, ParamListInfo params)
             ftype = AGG_INDEX_FUSION;
             top_plan = top_plan->lefttree;
         }
-    
+
         /* check select for sort */
         if (u_sess->attr.attr_sql.enable_beta_opfusion && !limitplan && IsA(top_plan, Sort) &&
             ftype == SELECT_FUSION) {
@@ -782,7 +798,7 @@ FusionType getSelectFusionType(List *stmt_list, ParamListInfo params)
             if (ttype > BYPASS_OK) {
                 return ttype;
             }
-    
+
             ftype = SORT_INDEX_FUSION;
             top_plan = top_plan->lefttree;
         }
@@ -790,10 +806,13 @@ FusionType getSelectFusionType(List *stmt_list, ParamListInfo params)
 
     /* check for partition table */
     if (IsA(top_plan, PartIterator)) {
-        if (u_sess->attr.attr_sql.enable_partition_opfusion)
-            top_plan = top_plan->lefttree;
-        else
+        if (!u_sess->attr.attr_sql.enable_partition_opfusion) {
             return NOBYPASS_PARTITION_BYPASS_NOT_OPEN;
+        } else if (ENABLE_GPC) {
+            return NOBYPASS_GPC_NOT_SUPPORT_PARTITION_BYPASS;
+        } else {
+            top_plan = top_plan->lefttree;
+        }
     }
 
     /* check for indexscan or indexonlyscan */
@@ -816,6 +835,18 @@ FusionType getSelectFusionType(List *stmt_list, ParamListInfo params)
         }
     } else {
         return NOBYPASS_NO_INDEXSCAN;
+    }
+
+    /*
+     * recheck partition, when set partition_iterator_elimination,
+     * PartIterator may be eliminated.
+     */
+    if (isPartTbl) {
+        if (!u_sess->attr.attr_sql.enable_partition_opfusion) {
+            return NOBYPASS_PARTITION_BYPASS_NOT_OPEN;
+        } else if (ENABLE_GPC) {
+            return NOBYPASS_GPC_NOT_SUPPORT_PARTITION_BYPASS;
+        }
     }
 
     Oid relid = getrelid(res_rel_idx, plannedstmt->rtable);
@@ -883,6 +914,9 @@ FusionType checkBaseResult(Plan* top_plan)
     if (node->upsertAction != UPSERT_NONE) {
         return NOBYPASS_UPSERT_NOT_SUPPORT;
     }
+    if (node->isReplace) {
+        return NOBYPASS_REPLACE_NOT_SUPPORT;
+    }
     return result;
 }
 
@@ -892,7 +926,7 @@ FusionType getInsertFusionType(List *stmt_list, ParamListInfo params)
 
     /* check result relaiton */
     PlannedStmt *plannedstmt = (PlannedStmt *)linitial(stmt_list);
-    if (plannedstmt->resultRelations == NULL || list_length(plannedstmt->resultRelations) != 1) {
+    if (plannedstmt->resultRelations == NULL || list_length((List*)linitial(plannedstmt->resultRelations)) != 1) {
         return NOBYPASS_DML_RELATION_NUM_INVALID;
     }
 
@@ -916,7 +950,7 @@ FusionType getInsertFusionType(List *stmt_list, ParamListInfo params)
     BaseResult *base = (BaseResult *)linitial(node->plans);
 
     /* check relation */
-    Index res_rel_idx = linitial_int(plannedstmt->resultRelations);
+    Index res_rel_idx = linitial_int((List*)linitial(plannedstmt->resultRelations));
     Oid relid = getrelid(res_rel_idx, plannedstmt->rtable);
     Relation rel = heap_open(relid, AccessShareLock);
 
@@ -946,6 +980,10 @@ FusionType getInsertFusionType(List *stmt_list, ParamListInfo params)
         heap_close(rel, AccessShareLock);
         return NOBYPASS_PARTITION_BYPASS_NOT_OPEN;
     }
+    if (RELATION_IS_PARTITIONED(rel) && ENABLE_GPC) {
+        heap_close(rel, AccessShareLock);
+        return NOBYPASS_GPC_NOT_SUPPORT_PARTITION_BYPASS;
+    }
     if (checkPartitionType(rel)) {
         heap_close(rel, AccessShareLock);
         return NOBYPASS_PARTITION_TYPE_NOT_SUPPORT;
@@ -966,7 +1004,7 @@ FusionType getUpdateFusionType(List *stmt_list, ParamListInfo params)
 
     /* check result relaiton */
     PlannedStmt *plannedstmt = (PlannedStmt *)linitial(stmt_list);
-    if (plannedstmt->resultRelations == NULL || list_length(plannedstmt->resultRelations) != 1) {
+    if (plannedstmt->resultRelations == NULL || list_length((List*)linitial(plannedstmt->resultRelations)) != 1) {
         return NOBYPASS_DML_RELATION_NUM_INVALID;
     }
 
@@ -990,10 +1028,12 @@ FusionType getUpdateFusionType(List *stmt_list, ParamListInfo params)
     Plan *updatePlan = (Plan *)linitial(node->plans);
     
     if (IsA(updatePlan, PartIterator)) {
-        if (u_sess->attr.attr_sql.enable_partition_opfusion) {
-            updatePlan = updatePlan->lefttree;
-        } else {
+        if (!u_sess->attr.attr_sql.enable_partition_opfusion) {
             return NOBYPASS_PARTITION_BYPASS_NOT_OPEN;
+        } else if (ENABLE_GPC) {
+            return NOBYPASS_GPC_NOT_SUPPORT_PARTITION_BYPASS;
+        } else {
+            updatePlan = updatePlan->lefttree;
         }
     }
     if (!IsA(updatePlan, IndexScan)) {
@@ -1009,7 +1049,7 @@ FusionType getUpdateFusionType(List *stmt_list, ParamListInfo params)
 
     /* check relation */
     IndexScan *indexscan = (IndexScan *)updatePlan;
-    Index res_rel_idx = linitial_int(plannedstmt->resultRelations);
+    Index res_rel_idx = linitial_int((List*)linitial(plannedstmt->resultRelations));
     Oid relid = getrelid(res_rel_idx, plannedstmt->rtable);
     Relation rel = heap_open(relid, AccessShareLock);
     if (checkDMLRelation(rel, plannedstmt, false, indexscan->scan.isPartTbl)) {
@@ -1045,7 +1085,7 @@ FusionType getDeleteFusionType(List *stmt_list, ParamListInfo params)
 
     /* check result relaiton */
     PlannedStmt *plannedstmt = (PlannedStmt *)linitial(stmt_list);
-    if (plannedstmt->resultRelations == NULL || list_length(plannedstmt->resultRelations) != 1) {
+    if (plannedstmt->resultRelations == NULL || list_length((List*)linitial(plannedstmt->resultRelations)) != 1) {
         return NOBYPASS_DML_RELATION_NUM_INVALID;
     }
 
@@ -1068,10 +1108,12 @@ FusionType getDeleteFusionType(List *stmt_list, ParamListInfo params)
 
     Plan *deletePlan = (Plan *)linitial(node->plans);
     if (IsA(deletePlan, PartIterator)) {
-        if (u_sess->attr.attr_sql.enable_partition_opfusion) {
-            deletePlan = deletePlan->lefttree;
-        } else {
+        if (!u_sess->attr.attr_sql.enable_partition_opfusion) {
             return NOBYPASS_PARTITION_BYPASS_NOT_OPEN;
+        } else if (ENABLE_GPC) {
+            return NOBYPASS_GPC_NOT_SUPPORT_PARTITION_BYPASS;
+        } else {
+            deletePlan = deletePlan->lefttree;
         }
     }
     if (!IsA(deletePlan, IndexScan)) {
@@ -1086,7 +1128,7 @@ FusionType getDeleteFusionType(List *stmt_list, ParamListInfo params)
 
     IndexScan* indexscan = (IndexScan *)deletePlan;
     /* check relation */
-    Index res_rel_idx = linitial_int(plannedstmt->resultRelations);
+    Index res_rel_idx = linitial_int((List*)linitial(plannedstmt->resultRelations));
     Oid relid = getrelid(res_rel_idx, plannedstmt->rtable);
     Relation rel = heap_open(relid, AccessShareLock);
     if (checkDMLRelation(rel, plannedstmt, false, indexscan->scan.isPartTbl)) {
@@ -1193,11 +1235,12 @@ Oid GetRelOidForPartitionTable(Scan scan, const Relation rel, ParamListInfo para
     Oid relOid = InvalidOid;
     if (params != NULL) {
         Param* paramArg = scan.pruningInfo->paramArg;
-        relOid = GetPartitionOidByParam(rel, paramArg, &(params->params[paramArg->paramid - 1]));
+        PartitionMap *partmap = scan.pruningInfo->partMap ? scan.pruningInfo->partMap : rel->partMap;
+        relOid = GetPartitionOidByParam(partmap, paramArg, &(params->params[paramArg->paramid - 1]));
     } else {
         Assert((list_length(scan.pruningInfo->ls_rangeSelectedPartitions) != 0));
         int partId = lfirst_int(list_head(scan.pruningInfo->ls_rangeSelectedPartitions));
-        relOid = getPartitionOidFromSequence(rel, partId);
+        relOid = getPartitionOidFromSequence(rel, partId, scan.pruningInfo->partMap);
     }
     return relOid;
 }
@@ -1218,15 +1261,9 @@ Relation InitPartitionIndexInFusion(Oid parentIndexOid, Oid partOid, Partition *
     Relation index;
     if (PARTITION_ENABLE_CACHE_OPFUSION) {
         if (!(*partIndex)->partrel) {
-            (*partIndex)->partrel = partitionGetRelation(*parentIndex, *partIndex);
-            /* in function partitionGetRelation, owner->nfakerelrefs plus one due to ResourceOwnerRememberFakerelRef,
-             * which is not we expect, so we use ResourceOwnerForgetFakerelRef correspondingly */
-            if (!IsBootstrapProcessingMode()) {
-                ResourceOwnerForgetFakerelRef(t_thrd.utils_cxt.CurrentResourceOwner, (*partIndex)->partrel);
-            }
-        } else {
-            UpdatePartrelPointer((*partIndex)->partrel, *parentIndex, *partIndex);
+            partitionInitPartRel(*parentIndex, *partIndex);
         }
+        (*partIndex)->partrel->pgstat_info = (*partIndex)->pd_pgstat_info;
         index = (*partIndex)->partrel;
     } else {
         index = partitionGetRelation(*parentIndex, *partIndex);
@@ -1242,15 +1279,9 @@ void InitPartitionRelationInFusion(Oid partOid, Relation parentRel, Partition* p
 
     if (PARTITION_ENABLE_CACHE_OPFUSION) {
         if (!(*partRel)->partrel) {
-            (*partRel)->partrel = partitionGetRelation(parentRel, *partRel);
-            /* in function partitionGetRelation, owner->nfakerelrefs plus one due to ResourceOwnerRememberFakerelRef,
-             * which is not we expect, so we use ResourceOwnerForgetFakerelRef correspondingly */
-            if (!IsBootstrapProcessingMode()) {
-                ResourceOwnerForgetFakerelRef(t_thrd.utils_cxt.CurrentResourceOwner, (*partRel)->partrel);
-            }
-        } else {
-            UpdatePartrelPointer((*partRel)->partrel, parentRel, *partRel);
+            partitionInitPartRel(parentRel, *partRel);
         }
+        (*partRel)->partrel->pgstat_info = (*partRel)->pd_pgstat_info;
         *rel = (*partRel)->partrel;
     } else {
         *rel = partitionGetRelation(parentRel, *partRel);
@@ -1262,8 +1293,6 @@ void ExeceDoneInIndexFusionConstruct(bool isPartTbl, Relation* parentRel, Partit
                                             Relation* index, Relation* rel)
 {
     if (isPartTbl) {
-        partitionClose(*parentRel, *part, AccessShareLock);
-        *part = NULL;
         if (*index != NULL) {
             if (!PARTITION_ENABLE_CACHE_OPFUSION) {
                 releaseDummyRelation(index);
@@ -1273,8 +1302,10 @@ void ExeceDoneInIndexFusionConstruct(bool isPartTbl, Relation* parentRel, Partit
         if (!PARTITION_ENABLE_CACHE_OPFUSION) {
             releaseDummyRelation(rel);
         }
+        partitionClose(*parentRel, *part, AccessShareLock);
         heap_close(*parentRel, AccessShareLock);
         *parentRel = NULL;
+        *part = NULL;
         *rel = NULL;
     } else {
         heap_close((*index == NULL) ? *rel : *index, AccessShareLock);

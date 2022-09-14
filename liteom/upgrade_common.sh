@@ -26,10 +26,10 @@ function check_and_init() {
 function check_config() {
   #check and init GAUSS_LOG_FILE
   if [[ X"$GAUSS_LOG_PATH" = X ]]; then
-    GAUSS_LOG_FILE="$upgrade_path"/upgrade.log
+    GAUSS_LOG_FILE="$upgrade_path"/upgrade_GAUSSV5.log
   else
     check_config_path "$GAUSS_LOG_PATH"
-    GAUSS_LOG_FILE="$GAUSS_LOG_PATH"/upgrade.log
+    GAUSS_LOG_FILE="$GAUSS_LOG_PATH"/upgrade_GAUSSV5.log
   fi
   log_dir=$(dirname "$GAUSS_LOG_FILE")
   if [[ ! -d "$log_dir" ]]; then
@@ -118,8 +118,8 @@ function usage() {
 Usage: $0 [OPTION]
 Arguments:
    -h|--help                   show this help, then exit
-   -t                          upgrade_pre,upgrade_bin,upgrade_post,rollback_pre,rollback_bin,rollback_post,upgrade_commit
-                               query_start_mode,switch_over
+   -t                          upgrade_pre,upgrade_bin,upgrade_post,rollback_pre
+                               rollback_bin,rollback_post,upgrade_commit,switch_over
    --min_disk                  reserved upgrade disk space in MB, default 2048
    -m|--mode                   normal、primary、standby and cascade_standby
    "
@@ -173,10 +173,10 @@ function parse_cmd_line() {
         die "the parameter -t cannot be empty." ${err_parameter}
       fi
       action=$2
-      action_list="upgrade_pre upgrade_bin upgrade_post rollback_pre rollback_bin rollback_post upgrade_commit query_start_mode switch_over"
+      action_list="upgrade_pre upgrade_bin upgrade_post rollback_pre rollback_bin rollback_post upgrade_commit switch_over"
       if ! echo "$action_list"|grep -wq "$action"; then
         die "only these actions are supported: upgrade_pre, upgrade_bin, upgrade_post, rollback_pre, \
-rollback_bin, rollback_post, upgrade_commit and query_start_mode switch_over" ${err_parameter}
+rollback_bin, rollback_post, upgrade_commit and switch_over" ${err_parameter}
       fi
       shift 2
       ;;
@@ -231,6 +231,10 @@ function check_env() {
   check_config_path "$GAUSSHOME"
   check_config_path "$GAUSSDATA"
   check_config_path "$PGDATA"
+  # ensure GAUSSDATA not contain GAUSSHOME
+  if echo "$GAUSSDATA"|grep -wq "^$GAUSSHOME";then
+    die "GAUSSDATA cannot be in GAUSSHOME!" ${err_check_init}
+  fi
   log "Current env value: GAUSSHOME is $GAUSSHOME, PGDATA is $PGDATA."
 }
 
@@ -336,7 +340,7 @@ function check_disk() {
     min_disk=2048
   fi
   if [[ ${avail_disk} -lt ${min_disk} ]]; then
-    die "avail disk must be >= ${min_disk}MB, check with cmd: df -BM $GAUSSHOME!" ${err_check_init}
+    die "avail disk must be >= ${min_disk}MB, check with cmd: df -BM $GAUSS_UPGRADE_BASE_PATH!" ${err_check_init}
   fi
   log "Check available disk space successfully."
 }
@@ -382,8 +386,8 @@ function check_pkg() {
   kernel=""
   if [[ -f "/etc/euleros-release" ]]; then
     kernel=$(cat /etc/euleros-release | awk -F ' ' '{print $1}' | tr a-z A-Z)
-    if [[ "${kernel}" = "EULEROS" ]]; then
-      kernel="EULER"
+    if [[ "${kernel}" = "Euleros" ]]; then
+      kernel="Euler"
     fi
   elif [[ -f "/etc/openEuler-release" ]]; then
     kernel=$(cat /etc/openEuler-release | awk -F ' ' '{print $1}')
@@ -418,7 +422,7 @@ function check_pkg() {
 function bak_gauss() {
   ##bak app & postgresql.conf & pg_hba.conf
   if [[ -d "$GAUSS_BACKUP_BASE_PATH"/bak_bin_"$old_version" ]];then
-    rm -rf "$GAUSS_BACKUP_BASE_PATH"/bak_bin_"$old_version"
+    chmod -R 700 "$GAUSS_BACKUP_BASE_PATH"/bak_bin_"$old_version" && rm -rf "$GAUSS_BACKUP_BASE_PATH"/bak_bin_"$old_version"
   fi
   if cp -rf "${GAUSSHOME}" "$GAUSS_BACKUP_BASE_PATH"/bak_bin_"$old_version"; then
     log "Bak gausshome successfully."
@@ -445,7 +449,7 @@ function decompress_pkg() {
     return 0
   fi
   if [[ -d "$GAUSS_TMP_PATH"/install_bin_"$new_version" ]];then
-    rm -rf "$GAUSS_TMP_PATH"/install_bin_"$new_version"
+    chmod -R 700 "$GAUSS_TMP_PATH"/install_bin_"$new_version" && rm -rf "$GAUSS_TMP_PATH"/install_bin_"$new_version"
   fi
   if mkdir -p -m 700 "$GAUSS_TMP_PATH"/install_bin_"$new_version"; then
     log "begin decompress pkg in $GAUSS_TMP_PATH/install_bin_$new_version"
@@ -481,15 +485,29 @@ function cp_pkg() {
   else
     new_bin_path="$GAUSS_TMP_PATH"/install_bin_"$new_version"
   fi
+  if find "${new_bin_path}"/* -type f|xargs chmod 500 \
+  && find "${new_bin_path}"/* -type f -regextype posix-extended -regex ".*\.(conf|sql|cfg|txt)"|xargs chmod 400 \
+  && find "${new_bin_path}"/* -type d|xargs chmod 500 && find "${new_bin_path}"/include  -type f|xargs chmod 400 \
+  && find "${new_bin_path}"/share -type d|xargs chmod 700 && find "${new_bin_path}"/share -type f|xargs chmod 600 ; then
+    debug "chmod files and dirs successfully"
+  else
+    die "chmod files or dirs failed" ${err_upgrade_bin}
+  fi
   #check pkg's version.cfg is equal to version_flag
   temppkg_version=$(tail -n 1 "$new_bin_path"/version.cfg)
   if [[ "$new_version" != "$temppkg_version" ]]; then
     die "pkg's version.cfg is not correct!" ${err_upgrade_bin}
   fi
   if [[ -d "$GAUSSHOME" ]];then
-    rm -rf "$GAUSSHOME"/*
+    tmp_upgrade_dir="$GAUSSHOME"_tmp_upgrade
+    if mv "$GAUSSHOME" "$tmp_upgrade_dir" && chmod -R 700 "$tmp_upgrade_dir" && rm -rf "$tmp_upgrade_dir";then
+        debug "remove $GAUSSHOME successfully"
+    else
+        die "remove $GAUSSHOME failed" ${err_upgrade_bin}
+    fi
   fi
-  if cp -rf "$new_bin_path"/* "$GAUSSHOME"; then
+
+  if mkdir -m 700 "$GAUSSHOME" && cp -rfp "$new_bin_path"/* "$GAUSSHOME"; then
     log "Binfile upgrade to new version successfully."
   else
     die "Binfile upgrade to new version failed" ${err_upgrade_bin}
@@ -683,19 +701,13 @@ function start_dbnode() {
   if [[ X"$dn_role" != X"normal" ]]; then
     start_cmd="$start_cmd""-M $dn_role "
   fi
-  if [[ X"$1" != X ]]; then
-    start_option="-o '-u $1' --single_node"
-  else
-    start_option="-o --single_node"
-  fi
-
-  log "start gaussdb by cmd: $start_cmd $start_option"
-  ${start_cmd} "$start_option" >>"${GAUSS_LOG_FILE}" 2>&1
+  log "start gaussdb by cmd: $start_cmd"
+  ${start_cmd} >>"${GAUSS_LOG_FILE}" 2>&1
 
 }
 
 function query_dn_role() {
-  gs_ctl query -D ${PGDATA} >"${GAUSS_TMP_PATH}/temp_dn_role"
+  timeout 1 gs_ctl query -D ${PGDATA} >"${GAUSS_TMP_PATH}/temp_dn_role"
   dn_role_temp=$(grep local_role "${GAUSS_TMP_PATH}/temp_dn_role" | head -1 | awk '{print $3}')
   rm -f "${GAUSS_TMP_PATH}/temp_dn_role"
 
@@ -734,6 +746,16 @@ function reload_upgrade_config() {
   if check_upgrade_config "$1" "$2"; then
     return 0
   fi
+  # only primary need to reload upgrade_mode, standby wait sync from primary
+  query_dn_role
+  if [[ X"$dn_role" == X"standby" || X"$dn_role" == X"cascade_standby" ]]; then
+    return 0
+  fi
+  # ensure value of sync_config_strategy is all_node or default
+  if ! check_upgrade_config "sync_config_strategy" "all_node"; then
+    return 1
+  fi
+
   local current_time=$(date +"%Y-%m-%d %H:%M:%S")
   echo -n \[${current_time}\] "  " >>"${GAUSS_LOG_FILE}"
   for i in $(seq 1 3);do
@@ -763,13 +785,17 @@ function set_upgrade_config() {
 
 function check_upgrade_config() {
   local tempfile="$GAUSS_TMP_PATH"/".temp_check_guc_value"
+  # guc output from opengauss or gauss is diff
   if gs_guc check -D ${PGDATA} -c "$1" > "$tempfile" 2>&1 ;then
-      tempvalue=$(cat "$tempfile"|tail -2|head -1|sed 's/[[:space:]]//g'|awk -F= '{print $2}')
+      tempvalue=$(cat "$tempfile"|tail -2|head -1|sed 's/\[[^][]*\]//g'|sed 's/[[:space:]]//g'|awk -F= '{print $2}')
       if ! rm -f ${tempfile}; then
         log "rm -f $tempfile failed"
         return 1
       fi
       if [[ "$tempvalue" == "$2" ]]; then
+        debug "guc check $1=$2 successfully"
+        return 0
+      elif [[ "$1" == "sync_config_strategy" && "$tempvalue" == "NULL" ]];then
         debug "guc check $1=$2 successfully"
         return 0
       else
@@ -852,6 +878,8 @@ function rollback_pre() {
       fi
     fi
     record_step 0
+    # need rm back dir and tempdir
+    delete_tmp_files
     log "The rollback_pre step is executed successfully. "
   fi
 }
@@ -878,10 +906,15 @@ function rollback_bin() {
     fi
     cp_gauss_home_config_to_temp ${err_rollback_bin}
     if [[ -d "$GAUSSHOME" ]];then
-      rm -rf "$GAUSSHOME"/*
+      tmp_upgrade_dir="$GAUSSHOME"_tmp_upgrade
+      if mv "$GAUSSHOME"  "$tmp_upgrade_dir" && chmod -R 700 "$tmp_upgrade_dir" && rm -rf "$tmp_upgrade_dir";then
+        debug "remove $GAUSSHOME successfully"
+      else
+        die "remove $GAUSSHOME failed" ${err_rollback_bin}
+      fi
     fi
-    if cp -r bak_bin_"$old_version"/* "$GAUSSHOME";then
-      log "Restore gausshome sucessfully!"
+    if mkdir -m 700 "$GAUSSHOME" && cp -rpf bak_bin_"$old_version"/* "$GAUSSHOME";then
+      log "Restore gausshome successfully!"
     else
       die "Restore gausshome failed!" ${err_rollback_bin}
     fi
@@ -953,6 +986,7 @@ function upgrade_pre() {
     upgrade_pre_step2
   elif [[ "$current_step" -eq 1 ]]; then
     rollback_pre
+    upgrade_pre_step1
     upgrade_pre_step2
   else
     log "no need do upgrade_pre step"
@@ -1023,16 +1057,16 @@ function upgrade_bin_step4() {
     old_cfg=$(grep old_cfg "$GAUSS_TMP_PATH"/version_flag | awk -F= '{print $2}')
   fi
   if [[ "$big_cfg" == "True" ]]; then
-    if ! echo " -u $old_cfg" > "$GAUSSHOME"/bin/start_flag;then
-      die "Create $GAUSSHOME/bin/start_flag file failed" ${err_upgrade_bin}
+    old_version=$(grep old_version "$GAUSS_TMP_PATH"/version_flag | awk -F= '{print $2}')
+    if cp ${GAUSS_BACKUP_BASE_PATH}/bak_bin_"$old_version"/version.cfg "$GAUSSHOME"/old_upgrade_version \
+    && chmod 400 "$GAUSSHOME"/old_upgrade_version;then
+      debug "Create $GAUSSHOME/old_upgrade_version successfully"
+    else
+      die "Create $GAUSSHOME/old_upgrade_version failed" ${err_upgrade_bin}
     fi
-    if ! start_dbnode "$old_cfg"; then
+  fi
+  if ! start_dbnode; then
       die "Start gaussdb failed" ${err_upgrade_bin}
-    fi
-  else
-    if ! start_dbnode; then
-      die "Start gaussdb failed" ${err_upgrade_bin}
-    fi
   fi
   record_step 4
   log "The upgrade_bin step is executed successfully. "
@@ -1124,14 +1158,22 @@ function upgrade_commit() {
   if [[ "$current_step" -ne 6 ]]; then
     die "Now you can't commit because the steps are wrong" ${err_upgrade_commit}
   fi
-  if ! rm -f  "$GAUSSHOME"/bin/start_flag;then
-    die "rm $GAUSSHOME/bin/start_flag file failed" ${err_upgrade_commit}
+  if ! rm -f  "$GAUSSHOME"/old_upgrade_version;then
+    die "rm $GAUSSHOME/old_upgrade_version file failed" ${err_upgrade_commit}
   fi
   if ! reload_upgrade_config upgrade_mode 0; then
     die "set upgrade_mode to 0 failed" ${err_upgrade_commit}
   fi
+  if [[ X"$old_cfg" == X ]]; then
+    old_cfg=$(grep old_cfg "$GAUSS_TMP_PATH"/version_flag | awk -F= '{print $2}')
+  fi
+  if ! sed -i  "s/\"-u\"\ \"$old_cfg\"\ //g" "$GAUSSDATA"/postmaster.opts; then
+    die "modify postmaster.opts failed, please check." ${err_upgrade_commit}
+  fi
   # after commit, need to reset step to 0
   record_step 0
+  # need rm back dir and tempdir
+  delete_tmp_files
   log "The upgrade_commit step is executed successfully. "
 }
 function record_step() {
@@ -1142,7 +1184,6 @@ function record_step() {
     die "Write step file failed" ${err_inner_sys}
   fi
 }
-
 
 function parses_step() {
   if [[ ! -f "$GAUSS_TMP_PATH"/record_step.txt ]]; then
@@ -1155,31 +1196,6 @@ function parses_step() {
     fi
   fi
   debug "current_step is $current_step"
-}
-
-function query_start_mode() {
-  parses_step
-  if [[ "$current_step" -lt 3 ]]; then
-    log "Start directly"
-    return 0
-  fi
-  if [[ ! -f "$GAUSS_TMP_PATH"/version_flag ]]; then
-    log "Start directly"
-    return 0
-  fi
-
-  if grep -Ewq "new_version=\w{8}" "$GAUSS_TMP_PATH"/version_flag ; then
-    new_version=$(grep new_version "$GAUSS_TMP_PATH"/version_flag | awk -F= '{print $2}')
-    if gaussdb -V|grep -wq "$new_version";then
-      if grep -q "^big_cfg=True" "$GAUSS_TMP_PATH"/version_flag;then
-        old_cfg=$(grep old_cfg "$GAUSS_TMP_PATH"/version_flag | awk -F= '{print $2}')
-        log "You must start with -u $old_cfg"
-        return 0
-      fi
-    fi
-  fi
-  log "Start directly"
-  return 0
 }
 
 function switch_over() {
@@ -1203,4 +1219,24 @@ function switch_over() {
   else
     log "no need do switchover"
   fi
+}
+
+function delete_tmp_files() {
+    # need rm back dir and tempdir
+    new_version=$(grep new_version "$GAUSS_TMP_PATH"/version_flag | awk -F= '{print $2}')
+    old_version=$(grep old_version "$GAUSS_TMP_PATH"/version_flag | awk -F= '{print $2}')
+    if [[ -d "$GAUSS_BACKUP_BASE_PATH"/bak_bin_"$old_version" ]];then
+      chmod -R 700 "$GAUSS_BACKUP_BASE_PATH"/bak_bin_"$old_version" && rm -rf "$GAUSS_BACKUP_BASE_PATH"/bak_bin_"$old_version"
+    fi
+    rm -f "$GAUSS_BACKUP_BASE_PATH"/postgresql.conf_"$old_version"
+    rm -f "$GAUSS_BACKUP_BASE_PATH"/pg_hba.conf_"$old_version"
+
+    if [[ -d "$GAUSS_TMP_PATH"/temp_sql ]];then
+      rm -rf "$GAUSS_TMP_PATH"/temp_sql
+    fi
+    if [[ -d "$GAUSS_TMP_PATH"/install_bin_"$new_version" ]];then
+      chmod -R 700 "$GAUSS_TMP_PATH"/install_bin_"$new_version" && rm -rf "$GAUSS_TMP_PATH"/install_bin_"$new_version"
+    fi
+    rm -f "$GAUSS_TMP_PATH"/version_flag
+    rm -f "$GAUSS_TMP_PATH"/record_step.txt
 }

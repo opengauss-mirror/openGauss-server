@@ -25,49 +25,28 @@ function change_leader_role_case() {
 }
 
 function change_follower_role_case() {
-  standby_dir=""
-  data_dir=$g_data_path
-  str_arr=(`check_paxos | grep -o -E "Standby|Primary"`)
-  for((i=0;i<=${node_num};i++))
-  do
+    standby_dir=""
+    data_dir=$g_data_path
+    str_arr=(`check_paxos | grep -o -E "Standby|Primary"`)
+    nodes=($primary_data_dir $standby_data_dir $standby2_data_dir $standby3_data_dir $standby4_data_dir)
+    for((i=0;i<=${node_num};i++))
+    do
     if [ "${str_arr[$i]}" != "Primary" ];then
-      if [ $i == 0 ]; then
-        standby_dir=$primary_data_dir
+        standby_dir=${nodes[$i]}
         break
-      fi
-      if [ $i == 1 ]; then
-        standby_dir=$standby_data_dir
-        break
-      fi
-      if [ $i == 1 ]; then
-        standby_dir=$standby_data_dir
-        break
-      fi
-      if [ $i == 2 ]; then
-              standby_dir=$standby2_data_dir
-        break
-      fi
-      if [ $i == 3 ]; then
-              standby_dir=$standby3_data_dir
-        break
-      fi
-      if [ $i == 4 ]; then
-              standby_dir=$standby4_data_dir
-        break
-      fi
     fi
-  done
-  if [ ${node_num} -gt 3 ]; then
+    done
+    if [ ${node_num} -gt 3 ]; then
     run_change_role passive ${standby_dir}
     if [ $? != 0 ]; then
-      echo "${failed_keyword}, change role failed!"
-      exit 1
+        echo "${failed_keyword}, change role failed!"
+        exit 1
     else
-      # Resume status to change passive to follower
-      run_change_role follower ${standby_dir}
-      echo "Change role successfully...........pass"
+        # Resume status to change passive to follower
+        run_change_role follower ${standby_dir}
+        echo "Change role successfully...........pass"
     fi
-  fi
+    fi
 }
 
 function test_1()

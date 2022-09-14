@@ -34,4 +34,8 @@ typedef struct XGBoost {
     AlgorithmAPI algo;
 } XGBoost;
 
+extern XGBoost xg_reg_logistic;
+extern XGBoost xg_bin_logistic;
+extern XGBoost xg_reg_sqe;
+extern XGBoost xg_reg_gamma;
 #endif 

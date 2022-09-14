@@ -113,10 +113,11 @@ static int SSL_CTX_set_cipher_list_ex(SSL_CTX* ctx, const char* ciphers[], const
 
 static THR_LOCAL bool pq_init_ssl_lib = true;
 static THR_LOCAL bool pq_init_crypto_lib = true;
+static THR_LOCAL bool g_crl_invalid = false;
 #ifdef ENABLE_UT
 #define static
 #endif
-static THR_LOCAL bool g_client_crl_err = false;
+
 #ifndef ENABLE_UT
 static bool set_client_ssl_ciphers(); /* set client security cipherslist*/
 #else
@@ -882,6 +883,31 @@ ssize_t pgfdw_pqsecure_write(PGconn* conn, const void* ptr, size_t len)
 /* ------------------------------------------------------------ */
 #ifdef USE_SSL
 
+static bool is_crl_invalid(int errcode)
+{
+    const int err_scenarios[] = {
+        X509_V_ERR_UNABLE_TO_GET_CRL,
+        X509_V_ERR_UNABLE_TO_DECRYPT_CRL_SIGNATURE,
+        X509_V_ERR_CRL_SIGNATURE_FAILURE,
+        X509_V_ERR_CRL_NOT_YET_VALID,
+        X509_V_ERR_ERROR_IN_CRL_LAST_UPDATE_FIELD,
+        X509_V_ERR_ERROR_IN_CRL_NEXT_UPDATE_FIELD,
+        X509_V_ERR_UNABLE_TO_GET_CRL_ISSUER,
+        X509_V_ERR_KEYUSAGE_NO_CRL_SIGN,
+        X509_V_ERR_UNHANDLED_CRITICAL_CRL_EXTENSION,
+        X509_V_ERR_DIFFERENT_CRL_SCOPE,
+        X509_V_ERR_CRL_PATH_VALIDATION_ERROR
+    };
+
+    for (size_t i = 0; i < sizeof(err_scenarios) / sizeof(err_scenarios[0]); i++) {
+        if (errcode == err_scenarios[i]) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 /*
  *  Certificate verification callback
  *
@@ -906,37 +932,32 @@ static
     * When the CRL is abnormal, it won't be used to check whether the certificate is revoked,
     * and the services shouldn't be affected due to the CRL exception.
     */
-    const int crl_err_scenarios[] = {
-        X509_V_ERR_CRL_HAS_EXPIRED,
-        X509_V_ERR_UNABLE_TO_GET_CRL,
-        X509_V_ERR_UNABLE_TO_DECRYPT_CRL_SIGNATURE,
-        X509_V_ERR_CRL_SIGNATURE_FAILURE,
-        X509_V_ERR_CRL_NOT_YET_VALID,
-        X509_V_ERR_ERROR_IN_CRL_LAST_UPDATE_FIELD,
-        X509_V_ERR_ERROR_IN_CRL_NEXT_UPDATE_FIELD,
-        X509_V_ERR_UNABLE_TO_GET_CRL_ISSUER,
-        X509_V_ERR_KEYUSAGE_NO_CRL_SIGN,
-        X509_V_ERR_UNHANDLED_CRITICAL_CRL_EXTENSION,
-        X509_V_ERR_DIFFERENT_CRL_SCOPE,
-        X509_V_ERR_CRL_PATH_VALIDATION_ERROR
-    };
     bool ignore_crl_err = false;
     int err_code = X509_STORE_CTX_get_error(ctx);
-
-    if (!g_client_crl_err) {
-        for (size_t i = 0; i < sizeof(crl_err_scenarios) / sizeof(crl_err_scenarios[0]); i++) {
-            if (err_code == crl_err_scenarios[i]) {
-                g_client_crl_err = true;
-                ignore_crl_err = true;
-                break;
-            }
-        }
-    } else {
-        if (err_code == X509_V_ERR_CERT_REVOKED) {
-            g_client_crl_err = false; /* reset */
+    /*
+     * while openssl check the cert with crl, the logic is:
+     *      if crl is expired:
+     *          verify_cb(X509_V_ERR_CRL_HAS_EXPIRED)
+     *      if crl is invalid:
+     *          verify_cb(other crl invalid err code)
+     *      if cert in crl:
+     *          verify_cb(X509_V_ERR_CERT_REVOKED)
+     * so, the verify_cb() may be called more than once
+     * for crl expired or invalid, we just ignore the error and return 1 (means succeed)
+     */
+    if (err_code == X509_V_ERR_CRL_HAS_EXPIRED) {
+        ignore_crl_err = true;
+        (void)printf("WARNING: the crl file '$PGSSLCRL' in client has expired, but we are still using it, "
+            "please update it.\n");
+    } else if (is_crl_invalid(err_code)) {
+        g_crl_invalid = true;
+        ignore_crl_err = true;
+        (void)printf("WARNING: the crl file '$PGSSLCRL' in client is invalid, for toughness, we just ignore it.\n");
+    } else if (err_code == X509_V_ERR_CERT_REVOKED) {
+        if (g_crl_invalid) { /* only when crl is invalid, ignore the cert revoke error */
             ignore_crl_err = true;
         }
-    }
+    } /* else: do not process other error */
 
     if (ignore_crl_err) {
         X509_STORE_CTX_set_error(ctx, X509_V_OK);
@@ -1563,7 +1584,6 @@ int initialize_SSL(PGconn* conn)
     errno_t rc = 0;
     int retval = 0;
 
-    g_client_crl_err = false;
     /*
      * We'll need the home directory if any of the relevant parameters are
      * defaulted.  If pqGetHomeDirectory fails, act as though none of the
@@ -1581,6 +1601,7 @@ int initialize_SSL(PGconn* conn)
     if (retval == -1) {
         return retval;
     }
+    g_crl_invalid = false;
     retval = LoadSslKeyFile(conn, have_homedir, &homedir, have_cert);
     if (retval == -1) {
         return retval;

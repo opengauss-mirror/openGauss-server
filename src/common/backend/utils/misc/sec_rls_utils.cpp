@@ -217,15 +217,6 @@ void SupportRlsForRel(const Relation relation)
                          errcause("The function is not implemented."), erraction("Use other actions instead."))));
     }
 
-    /* Do not support dfs table */
-    if (RelationIsDfsStore(relation)) {
-        ReleaseSysCache(tuple);
-        ereport(ERROR,
-            (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                errmsg("do not support row level security policy on dfs table \"%s\"",
-                    RelationGetRelationName(relation))));
-    }
-
     /* relase sys cache tuple */
     ReleaseSysCache(tuple);
 }

@@ -2005,8 +2005,303 @@ call pck1.proc();
 
 --退出会话，重连调用 xx不应该是20，应该在定义时或者调用时就报函数不存在
 call pck1.proc();
+set behavior_compat_options='proc_outparam_override';
+
+create or replace package pck1 is
+type tp1 is record(v01 number, v03 varchar2, v02 number);
+function f1(in a int, out c tp1) return int;
+end pck1;
+/
+
+create or replace package body pck1 is
+function f1(in a int, out c tp1) return int
+as
+declare
+begin
+c.v01:=a;
+return a;
+end;
+end pck1;
+/
+declare
+x int := 10;
+z pck1.tp1;
+res int;
+begin
+res := pck1.f1(x,z); -- 变量
+raise info 'res:%',res;
+raise info 'z:%',z;
+end;
+/
+
+declare
+x int := 10;
+z pck1.tp1;
+begin
+pck1.f1(a => x, c => z); -- 箭头变量
+raise info 'z:%',z;
+end;
+/
+
+declare
+x int := 10;
+z pck1.tp1;
+begin
+pck1.f1(x,z); -- 变量
+raise info 'z:%',z;
+end;
+/
+
+declare
+x int := 10;
+z pck1.tp1;
+res int;
+begin
+select pck1.f1(x,z) into res; -- 变量
+raise info 'res:%',res;
+raise info 'z:%',z;
+end;
+/
+
+create or replace package pck1 is
+type tp1 is record(v01 number, v03 varchar2, v02 number);
+type tp2 is record(v01 tp1, v03 varchar2, v02 number);
+function f1(in a int, out c tp2) return int;
+end pck1;
+/
+
+create or replace package body pck1 is
+function f1(in a int, out c tp2) return int
+as
+declare
+begin
+c.v01.v01:=a;
+return a;
+end;
+end pck1;
+/
+
+--调用报错
+declare
+x int := 10;
+z pck1.tp2;
+begin
+pck1.f1(a => x, c => z); -- 箭头变量
+raise info 'z:%',z;
+end;
+/
+
+--调用结果不正确
+declare
+x int := 10;
+z pck1.tp2;
+res int;
+begin
+res := pck1.f1(a => x,c=>z); -- 箭头变量
+raise info 'res:%',res;
+raise info 'z:%',z;
+end;
+/
+
+declare
+x int := 10;
+z pck1.tp2;
+res int;
+begin
+select pck1.f1(x,z) into res; -- 变量
+raise info 'res:%',res;
+raise info 'z:%',z;--应该返回null
+end;
+/
+
+create or replace package pck1 is
+type tp1 is varray(10) of int;
+type tp2 is record(v01 tp1, v03 varchar2, v02 number);
+function f1(in a int, inout c tp2) return int;
+end pck1;
+/
+
+create or replace package body pck1 is
+function f1(in a int, inout c tp2) return int
+as
+declare
+begin
+c.v01:=array[a];
+return a;
+end;
+end pck1;
+/
+
+declare
+x int := 10;
+z pck1.tp2;
+res int;
+begin
+res := pck1.f1(x,z); -- 变量
+raise info 'res:%',res;
+raise info 'z:%',z;
+end;
+/
+
+declare
+x int := 10;
+z pck1.tp2;
+begin
+pck1.f1(a => x, c => z); -- 箭头变量
+raise info 'z:%',z;
+end;
+/
+
+declare
+x int := 10;
+z pck1.tp2;
+begin
+pck1.f1(x,z); -- 变量
+raise info 'z:%',z;
+end;
+/
+
+declare
+x int := 10;
+z pck1.tp2;
+res int;
+begin
+select pck1.f1(x,z) into res; -- 变量
+raise info 'res:%',res;
+raise info 'z:%',z;--应该返回null
+end;
+/
+
+declare
+res int;
+x int := 10;
+z pck1.tp2;
+begin
+select * into res from pck1.f1(a => x, c => z); -- 箭头变量
+raise info 'res:%',res;
+raise info 'z:%',z;--应该返回null
+end;
+/
+
+create or replace package pck1 is
+type tp1 is table of int;
+type tp2 is record(v01 tp1, v03 varchar2, v02 number);
+function f1(in a int, inout c tp2) return int;
+end pck1;
+/
+
+create or replace package body pck1 is
+function f1(in a int, inout c tp2) return int
+as
+declare
+begin
+c.v01:=array[a];
+return a;
+end;
+end pck1;
+/
+
+declare
+x int := 10;
+z pck1.tp2;
+res int;
+begin
+res := pck1.f1(a => x,c=>z); -- 箭头变量
+raise info 'res:%',res;
+raise info 'z:%',z;
+end;
+/
+
+declare
+x int := 10;
+z pck1.tp2;
+begin
+pck1.f1(a => x, c => z); -- 箭头变量
+raise info 'z:%',z;
+end;
+/
+
+declare
+x int := 10;
+z pck1.tp2;
+begin
+pck1.f1(x,z); -- 变量
+raise info 'z:%',z;
+end;
+/
+
+declare
+x int := 10;
+z pck1.tp2;
+res int;
+begin
+select pck1.f1(x,z) into res; -- 变量
+raise info 'res:%',res;
+raise info 'z:%',z;
+end;
+/
+
+--inout参数是table%rowtype类型
+drop table if exists test_tb;
+create table test_tb(c1 int,c2 varchar2);
+
+
+create or replace package pck1 is
+function f1(in a int, inout c test_tb%rowtype) return int;
+end pck1;
+/
+
+create or replace package body pck1 is
+function f1(in a int, inout c test_tb%rowtype) return int
+as
+declare
+begin
+c.c1:=a+1;
+return a;
+end;
+end pck1;
+/
+
+declare
+x int := 10;
+z test_tb%rowtype;
+begin
+pck1.f1(a => x, c => z); -- 箭头变量
+raise info 'z:%',z;--赋值错误
+end;
+/
+
+set behavior_compat_options = 'allow_procedure_compile_check';
+create or replace function f_1(i varchar2) return varchar2 is
+begin
+ return i;
+end;
+/
+
+create or replace package pck3 as
+procedure p1;
+function f_1(i varchar2) return varchar2;
+end pck3;
+/
+
+create or replace package body pck3 as
+procedure p1 as
+va varchar2;
+c1 sys_refcursor;
+begin
+--open c1 for select f_1('0') DATA_SOURCE from np_due_bill a limit 1;
+open c1 for select f_1('0') DATA_SOURCE;
+end;
+function f_1(i varchar2) return varchar2 is
+begin
+ return i;
+end;
+end pck3;
+/
+
 drop package pck1;
 drop package pck2;
+drop package pck3;
 drop procedure p1;
 drop procedure p2;
 drop procedure p3;

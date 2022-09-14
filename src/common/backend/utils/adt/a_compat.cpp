@@ -13,6 +13,7 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
+#include "catalog/pg_proc.h"
 #include "common/int.h"
 #include "utils/builtins.h"
 #include "utils/formatting.h"
@@ -656,7 +657,8 @@ Datum rtrim1(PG_FUNCTION_ARGS)
     text* ret = NULL;
     FUNC_CHECK_HUGE_POINTER(false, string, "rtrim1");
 
-    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && CHAR_COERCE_COMPAT) {
+    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && CHAR_COERCE_COMPAT
+        && fcinfo->flinfo && fcinfo->flinfo->fn_oid == RTRIM1FUNCOID) {
         /*
          * char(n) will not ignore the tailing blanks in A_FORMAT compatibility.
          * here, we just return original input.

@@ -13,6 +13,13 @@ select * from t1;
   2
 (2 rows)
 
+-- UHeapFetchRowVersion
+select * from t1 where ctid='(0,1)';
+ c1 
+----
+  1
+(1 row)
+
 -- Data type variants
 drop table if exists t2;
 NOTICE:  table "t2" does not exist, skipping

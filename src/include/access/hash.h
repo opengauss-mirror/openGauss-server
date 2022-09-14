@@ -319,6 +319,8 @@ extern Datum hashint4(PG_FUNCTION_ARGS);
 extern Datum hashint8(PG_FUNCTION_ARGS);
 extern Datum hashoid(PG_FUNCTION_ARGS);
 extern Datum hashenum(PG_FUNCTION_ARGS);
+extern Datum hashsetint(PG_FUNCTION_ARGS);
+extern Datum hashsettext(PG_FUNCTION_ARGS);
 extern Datum hashfloat4(PG_FUNCTION_ARGS);
 extern Datum hashfloat8(PG_FUNCTION_ARGS);
 extern Datum hashoidvector(PG_FUNCTION_ARGS);
@@ -439,5 +441,7 @@ typedef struct MultiHashKey
 extern uint32 hash_multikey(MultiHashKey* mkeys);
 
 #define GetBucketID(hashval, hashmapsize)  (compute_modulo(abs((int)hashval), hashmapsize))
+
+typedef Datum (*computeHashFunc)(Oid type, Datum value, char locator);
 
 #endif   /* HASH_H */

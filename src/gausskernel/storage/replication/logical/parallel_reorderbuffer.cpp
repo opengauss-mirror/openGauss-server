@@ -75,6 +75,8 @@ static Size ParallelReorderBufferRestoreChanges(ParallelReorderBuffer *rb, Paral
     XLogSegNo *segno, int slotId);
 static void ParallelReorderBufferRestoreChange(ParallelReorderBuffer *rb, ParallelReorderBufferTXN *txn, char *data,
     int slotId);
+void ParallelReorderBufferCleanupTXN(ParallelReorderBuffer *rb, ParallelReorderBufferTXN *txn,
+    XLogRecPtr lsn = InvalidXLogRecPtr);
 
 
 /* Parallel decoding batch sending unit length is set to 1MB. */
@@ -83,15 +85,35 @@ static const int g_batch_unit_length = 1 * 1024 * 1024;
 /* Parallel decoding caches at most 512 transactions. */
 static const Size g_max_cached_txns = 512;
 
+static const Size sizeMB = 1024L * 1024L;
+static const Size sizeGB = 1024L * 1024L * 1024L;
+
+void ParallelReorderBufferUpdateMemory(ParallelReorderBuffer *rb, logicalLog *change, int slotId, bool add)
+{
+    Size sz = sizeof(logicalLog) + sizeof(StringInfoData) + change->out->maxlen;
+    if (add) {
+        rb->size += sz;
+        change->txn->size += sz;
+    } else {
+        Assert(rb->size >= sz);
+        rb->size -= sz;
+        change->txn->size -= sz;
+    }
+    g_Logicaldispatcher[slotId].workingTxnMemory = (int64)rb->size;
+}
+
 void ParallelReorderBufferQueueChange(ParallelReorderBuffer *rb, logicalLog *change, int slotId)
 {
-    ParallelReorderBufferTXN *txn = NULL;
-    txn = ParallelReorderBufferTXNByXid(rb, change->xid, true, NULL, change->lsn, true);
-
+    bool isNew = false;
+    ParallelReorderBufferTXN *txn = ParallelReorderBufferTXNByXid(rb, change->xid, true, &isNew, change->lsn, true);
     dlist_push_tail(&txn->changes, &change->node);
     txn->nentries++;
     txn->nentries_mem++;
-
+    change->txn = txn;
+    if (isNew) {
+        g_Logicaldispatcher[slotId].workingTxnCnt = hash_get_num_entries(rb->by_txn);
+    }
+    ParallelReorderBufferUpdateMemory(rb, change, slotId, true);
     ParallelReorderBufferCheckSerializeTXN(rb, txn, slotId);
 }
 
@@ -105,9 +127,10 @@ void ParallelFreeTuple(ReorderBufferTupleBuf *tuple, int slotId)
         return;
     }
 
-    ReorderBufferTupleBuf *oldHead =
-        (ReorderBufferTupleBuf *)pg_atomic_read_uintptr((uintptr_t *)&g_Logicaldispatcher[slotId].freeTupleHead);
+    ReorderBufferTupleBuf *oldHead = NULL;
     do {
+        oldHead =
+            (ReorderBufferTupleBuf *)pg_atomic_read_uintptr((uintptr_t *)&g_Logicaldispatcher[slotId].freeTupleHead);
         tuple->freeNext = oldHead;
     } while (!pg_atomic_compare_exchange_uintptr((uintptr_t *)&g_Logicaldispatcher[slotId].freeTupleHead,
         (uintptr_t *)&oldHead, (uintptr_t)tuple));
@@ -115,7 +138,14 @@ void ParallelFreeTuple(ReorderBufferTupleBuf *tuple, int slotId)
 
 void ParallelFreeChange(ParallelReorderBufferChange *change, int slotId)
 {
-    ParallelReorderBufferToastReset(change, slotId);
+    if (change->toast_hash != NULL) {
+        ParallelReorderBufferToastReset(&change->toast_hash, slotId);
+    }
+    if (change->nsubxacts != 0 && change->subXids != NULL) {
+        pfree_ext(change->subXids);
+        change->nsubxacts = 0;
+    }
+    change->missingChunk = false;
     uint32 curChangeNum = g_Logicaldispatcher[slotId].curChangeNum;
 
     if (change->data.tp.newtuple) {
@@ -131,10 +161,11 @@ void ParallelFreeChange(ParallelReorderBufferChange *change, int slotId)
         return;
     }
 
-    ParallelReorderBufferChange *oldHead =
-        (ParallelReorderBufferChange *)pg_atomic_read_uintptr((uintptr_t *)&g_Logicaldispatcher[slotId].freeChangeHead);
+    ParallelReorderBufferChange *oldHead = NULL;
 
     do {
+        oldHead = (ParallelReorderBufferChange *)
+            pg_atomic_read_uintptr((uintptr_t *)&g_Logicaldispatcher[slotId].freeChangeHead);
         change->freeNext = oldHead;
     } while (!pg_atomic_compare_exchange_uintptr((uintptr_t *)&g_Logicaldispatcher[slotId].freeChangeHead,
         (uintptr_t *)&oldHead, (uintptr_t)change));
@@ -176,6 +207,9 @@ ParallelReorderBufferChange* ParallelReorderBufferGetChange(ParallelReorderBuffe
     change->ninvalidations = 0;
     change->invalidations = NULL;
     change->toast_hash = NULL;
+    change->nsubxacts = 0;
+    change->subXids = NULL;
+    change->missingChunk = false;
     return change;
 }
 
@@ -312,8 +346,20 @@ static void parallelReorderBufferToastInitHash(ParallelReorderBuffer *rb, Parall
         HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT | HASH_SHRCTX);
 }
 
+void LogRelationName(Relation relation)
+{
+    Form_pg_class classForm = RelationGetForm(relation);
+    char *schema = get_namespace_name(classForm->relnamespace);
+    char *table = NameStr(classForm->relname);
+    ereport(LOG, (errmodule(MOD_LOGICAL_DECODE),
+        errmsg("Current relation is %s.%s, oid = %u", schema, table, relation->rd_id)));
+    if (schema != NULL) {
+        pfree(schema);
+    }
+}
+
 void ToastTupleAppendChunk(ParallelReorderBuffer *rb, Relation relation,
-    ParallelReorderBufferChange *change)
+    ParallelReorderBufferChange *change, int slotId)
 {
     ReorderBufferToastEnt *ent = NULL;
     ReorderBufferTupleBuf *newtup = NULL;
@@ -323,8 +369,12 @@ void ToastTupleAppendChunk(ParallelReorderBuffer *rb, Relation relation,
     Pointer chunk = NULL;
     TupleDesc desc = RelationGetDescr(relation);
     Oid chunk_id = InvalidOid;
-    Oid chunk_seq = InvalidOid;
+    int32 chunk_seq = InvalidOid;
     ParallelReorderBufferTXN *txn = ParallelReorderBufferTXNByXid(rb, change->xid, true, NULL, change->lsn, true);
+    if (txn->missingChunk == true) {
+        ParallelFreeChange(change, slotId);
+        return;
+    }
     if (txn->toast_hash == NULL) {
         parallelReorderBufferToastInitHash(rb, txn);
     }
@@ -341,9 +391,9 @@ void ToastTupleAppendChunk(ParallelReorderBuffer *rb, Relation relation,
         chunk_seq = DatumGetInt32(fastgetattr(&newtup->tuple, chunkSeqIndex, desc, &isnull));
         Assert(!isnull);
     } else {
-        chunk_id = DatumGetObjectId(UHeapFastGetAttr((UHeapTuple)&newtup->tuple, 1, desc, &isnull));
+        chunk_id = DatumGetObjectId(UHeapFastGetAttr((UHeapTuple)&newtup->tuple, chunkIdIndex, desc, &isnull));
         Assert(!isnull);
-        chunk_seq = DatumGetInt32(UHeapFastGetAttr((UHeapTuple)&newtup->tuple, 2, desc, &isnull));
+        chunk_seq = DatumGetInt32(UHeapFastGetAttr((UHeapTuple)&newtup->tuple, chunkSeqIndex, desc, &isnull));
         Assert(!isnull);
     }
 
@@ -358,14 +408,19 @@ void ToastTupleAppendChunk(ParallelReorderBuffer *rb, Relation relation,
         dlist_init(&ent->chunks);
 
         if (chunk_seq != 0) {
-            ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("got sequence entry %u for toast chunk %u instead of seq 0", chunk_seq, chunk_id),
+            LogRelationName(relation);
+            ereport(LOG, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("got sequence entry %d for toast chunk %u instead of seq 0", chunk_seq, chunk_id),
                 errdetail("N/A"), errcause("Toast file damaged."),
                 erraction("Contact engineer to recover toast files.")));
+            txn->missingChunk = true;
+            ParallelFreeChange(change, slotId);
+            return;
         }
-    } else if (found && chunk_seq != (Oid)ent->last_chunk_seq + 1) {
+    } else if (found && chunk_seq != ent->last_chunk_seq + 1) {
+        LogRelationName(relation);
         ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("got sequence entry %u for toast chunk %u instead of seq %d", chunk_seq, chunk_id,
+            errmsg("got sequence entry %d for toast chunk %u instead of seq %d", chunk_seq, chunk_id,
                 ent->last_chunk_seq + 1),
             errdetail("N/A"), errcause("Toast file damaged."),
             erraction("Contact engineer to recover toast files.")));
@@ -377,6 +432,7 @@ void ToastTupleAppendChunk(ParallelReorderBuffer *rb, Relation relation,
      }
     Assert(!isnull);
     if (isnull) {
+        LogRelationName(relation);
         ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
             errmsg("fail to get toast chunk"),
             errdetail("N/A"), errcause("Toast file damaged."),
@@ -390,6 +446,7 @@ void ToastTupleAppendChunk(ParallelReorderBuffer *rb, Relation relation,
         /* could happen due to heap_form_tuple doing its thing */
         chunksize = VARSIZE_SHORT(chunk) - VARHDRSZ_SHORT;
     } else {
+        LogRelationName(relation);
         ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
             errmsg("unexpected type of toast chunk"),
             errdetail("N/A"), errcause("Toast file damaged."),
@@ -399,25 +456,22 @@ void ToastTupleAppendChunk(ParallelReorderBuffer *rb, Relation relation,
     ent->size += chunksize;
     ent->last_chunk_seq = chunk_seq;
     ent->num_chunks++;
-    ereport(LOG, (errmsg("applying mapping: %lX %lX %lX %lX", uint64(ent), change->xid, change->lsn,
-        uint64(change->data.tp.newtuple))));
+    ereport(DEBUG1, (errmodule(MOD_LOGICAL_DECODE),
+        errmsg("applying mapping: %lX %lX %lX %lX", uint64(ent), change->xid, change->lsn,
+               uint64(change->data.tp.newtuple))));
     dlist_push_tail(&ent->chunks, &change->node);
 }
 
 /*
  * Free all resources allocated for toast reconstruction.
  */
-void ParallelReorderBufferToastReset(ParallelReorderBufferChange *change, int slotId)
+void ParallelReorderBufferToastReset(HTAB**          toastHash, int slotId)
 {
     HASH_SEQ_STATUS hstat;
     ReorderBufferToastEnt *ent = NULL;
 
-    if (change->toast_hash == NULL) {
-        return;
-    }
-
     /* sequentially walk over the hash and free everything */
-    hash_seq_init(&hstat, change->toast_hash);
+    hash_seq_init(&hstat, *toastHash);
     while ((ent = (ReorderBufferToastEnt *)hash_seq_search(&hstat)) != NULL) {
         dlist_mutable_iter it;
 
@@ -429,21 +483,20 @@ void ParallelReorderBufferToastReset(ParallelReorderBufferChange *change, int sl
         dlist_foreach_modify(it, &ent->chunks)
         {
             ParallelReorderBufferChange *change = dlist_container(ParallelReorderBufferChange, node, it.cur);
-
             dlist_delete(&change->node);
             ParallelFreeChange(change, slotId);
         }
     }
 
-    hash_destroy(change->toast_hash);
-    change->toast_hash = NULL;
+    hash_destroy(*toastHash);
+    *toastHash = NULL;
 }
 
 /*
  * Splice toast tuple.
  */
 void ToastTupleSplicing(Datum *attrs, TupleDesc desc, bool *isnull, TupleDesc toast_desc, ParallelReorderBufferTXN *txn,
-    bool isHeap, bool *free)
+    bool isHeap, bool *free, bool *missingChunk, int slotId)
 {
     int rc = 0;
     int natt = 0;
@@ -491,9 +544,10 @@ void ToastTupleSplicing(Datum *attrs, TupleDesc desc, bool *isnull, TupleDesc to
          * Check whether the toast tuple changed, replace if so.
          */
         ent = (ReorderBufferToastEnt *)hash_search(txn->toast_hash, (void *)&toast_pointer.va_valueid, HASH_FIND, NULL);
-        if (ent == NULL)
+        if (ent == NULL) {
+            *missingChunk = true;
             continue;
-
+        }
         new_datum = (struct varlena *)palloc0(INDIRECT_POINTER_SIZE);
 
         free[natt] = true;
@@ -530,6 +584,14 @@ void ToastTupleSplicing(Datum *attrs, TupleDesc desc, bool *isnull, TupleDesc to
         }
         Assert(data_done == (Size)toast_pointer.va_extsize);
 
+        dlist_mutable_iter dit;
+        dlist_foreach_modify(dit, &ent->chunks)
+        {
+            ParallelReorderBufferChange *change = dlist_container(ParallelReorderBufferChange, node, dit.cur);
+            dlist_delete(&change->node);
+            ParallelFreeChange(change, slotId);
+        }
+
         /* make sure its marked as compressed or not */
         if (VARATT_EXTERNAL_IS_COMPRESSED(toast_pointer)) {
             SET_VARSIZE_COMPRESSED(reconstructed, data_done + VARHDRSZ);
@@ -549,13 +611,35 @@ void ToastTupleSplicing(Datum *attrs, TupleDesc desc, bool *isnull, TupleDesc to
         attrs[natt] = PointerGetDatum(new_datum);
     }
 }
+
+static bool NewTupleHasExternalFlag(ReorderBufferTupleBuf *newTup, bool isHeap)
+{
+    if (newTup == NULL) {
+        return false;
+    }
+    if (isHeap) {
+        return HeapTupleHasExternal(&newTup->tuple);
+    } else {
+        return UHeapTupleHasExternal((UHeapTuple)(&newTup->tuple));
+    }
+}
+
+void CheckNewTupleMissingToastChunk(ParallelReorderBufferChange *change, bool isHeap)
+{
+    if (NewTupleHasExternalFlag(change->data.tp.newtuple, isHeap)) {
+        change->missingChunk = true;
+        ereport(LOG, (errmodule(MOD_LOGICAL_DECODE),
+            errmsg("toast chunk missing, change xid %lu, lsn %lX ", change->xid, change->lsn)));
+    }
+}
+
 /*
  * Query whether toast tuples have been stored in the current Txn->toast_hash before.
  * If so, merge the tuples previously stored in the current Txn->toast_hash with the toast tuples
  * in the current table into a complete toast tuple
  */
-void ToastTupleReplace(ParallelReorderBuffer *rb, Relation relation, ParallelReorderBufferChange *change,
-    Oid partationReltoastrelid, ParallelDecodeReaderWorker *worker, bool isHeap)
+bool ToastTupleReplace(ParallelReorderBuffer *rb, Relation relation, ParallelReorderBufferChange *change,
+    Oid partationReltoastrelid, bool isHeap, bool freeNow, int slotId)
 {
     TupleDesc desc = NULL;
     Datum *attrs = NULL;
@@ -567,15 +651,24 @@ void ToastTupleReplace(ParallelReorderBuffer *rb, Relation relation, ParallelReo
     MemoryContext oldcontext = NULL;
     ReorderBufferTupleBuf *newtup = NULL;
     ParallelReorderBufferTXN *txn;
+    bool missingChunk = false;
     int rc = 0;
 
     txn = ParallelReorderBufferTXNByXid(rb, change->xid, false, NULL, change->lsn, true);
-    if (txn == NULL) {
-        return;
+    /* no txn or no toast tuples changed */
+    if (txn == NULL || txn->toast_hash == NULL) {
+        CheckNewTupleMissingToastChunk(change, isHeap);
+        return true;
     }
-    /* no toast tuples changed */
-    if (txn->toast_hash == NULL)
-        return;
+
+    /* If meet toast chunk missing, only put the last change to queue. */
+    if (txn->missingChunk == true) {
+        if (!freeNow) {
+            return false;
+        }
+        goto FREE_TOAST_TXN;
+    }
+
     oldcontext = MemoryContextSwitchTo(rb->context);
 
     /* we should only have toast tuples in an INSERT or UPDATE */
@@ -587,7 +680,7 @@ void ToastTupleReplace(ParallelReorderBuffer *rb, Relation relation, ParallelReo
     else
         toast_rel = RelationIdGetRelation(partationReltoastrelid);
     if (toast_rel == NULL) {
-        ereport(ERROR, (errcode(ERRCODE_LOGICAL_DECODE_ERROR), errmodule(MOD_MEM),
+        ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_LOGICAL_DECODE_ERROR),
             errmsg("toast_rel should not be NULL!"),
             errdetail("N/A"), errcause("Toast file damaged."),
             erraction("Contact engineer to recover toast files.")));
@@ -606,48 +699,57 @@ void ToastTupleReplace(ParallelReorderBuffer *rb, Relation relation, ParallelReo
     } else {
         UHeapDeformTuple((UHeapTuple)&newtup->tuple, desc, attrs, isnull);
     }
+    ToastTupleSplicing(attrs, desc, isnull, toast_desc, txn, isHeap, free, &missingChunk, slotId);
 
-    ToastTupleSplicing(attrs, desc, isnull, toast_desc, txn, isHeap, free);
-
-    /*
-     * Build tuple in separate memory & copy tuple back into the tuplebuf
-     * passed to the output plugin. We can't directly heap_fill_tuple() into
-     * the tuplebuf because attrs[] will point back into the current content.
-     */
-    if (isHeap) {
-        tmphtup = heap_form_tuple(desc, attrs, isnull);
+    if (!missingChunk) {
+        /*
+         * Build tuple in separate memory & copy tuple back into the tuplebuf
+         * passed to the output plugin. We can't directly heap_fill_tuple() into
+         * the tuplebuf because attrs[] will point back into the current content.
+         */
+        if (isHeap) {
+            tmphtup = heap_form_tuple(desc, attrs, isnull);
+        } else {
+            tmphtup = (HeapTuple)UHeapFormTuple(desc, attrs, isnull);
+        }
+    
+        Assert(ReorderBufferTupleBufData(newtup) == newtup->tuple.t_data);
+    
+        rc = memcpy_s(newtup->tuple.t_data, newtup->alloc_tuple_size, tmphtup->t_data, tmphtup->t_len);
+        securec_check(rc, "", "");
+        newtup->tuple.t_len = tmphtup->t_len;
     } else {
-        tmphtup = (HeapTuple)UHeapFormTuple(desc, attrs, isnull);
+        change->missingChunk = true;
+        txn->missingChunk = true;
+        ereport(LOG, (errmodule(MOD_LOGICAL_DECODE),
+            errmsg("can not found toast chunk when reconstruct, change xid %lu, lsn %lX ",
+            change->xid, change->lsn)));
     }
-
-    Assert(ReorderBufferTupleBufData(newtup) == newtup->tuple.t_data);
-
-    rc = memcpy_s(newtup->tuple.t_data, newtup->alloc_tuple_size, tmphtup->t_data, tmphtup->t_len);
-    securec_check(rc, "", "");
-    newtup->tuple.t_len = tmphtup->t_len;
 
     /*
      * free resources we won't further need, more persistent stuff will be
      * free'd in ReorderBufferToastReset().
      */
     RelationClose(toast_rel);
-    pfree(tmphtup);
-    tmphtup = NULL;
+    pfree_ext(tmphtup);
     for (int natt = 0; natt < desc->natts; natt++) {
         if (free[natt]) {
             pfree(DatumGetPointer(attrs[natt]));
         }
     }
-    pfree(attrs);
-    attrs = NULL;
-    pfree(isnull);
-    isnull = NULL;
-    pfree(free);
-    free = NULL;
+    pfree_ext(attrs);
+    pfree_ext(isnull);
+    pfree_ext(free);
 
     (void)MemoryContextSwitchTo(oldcontext);
-    change->toast_hash = txn->toast_hash;
-    txn->toast_hash = NULL;
+FREE_TOAST_TXN:
+    if (freeNow) {
+        change->toast_hash = txn->toast_hash;
+        change->missingChunk = txn->missingChunk;
+        txn->toast_hash = NULL;
+        ParallelReorderBufferCleanupTXN(rb, txn);
+    }
+    return true;
 }
 
 /*
@@ -672,7 +774,8 @@ static void ParallelReorderBufferRestoreCleanup(ParallelReorderBufferTXN *txn, X
             t_thrd.walsender_cxt.slotname, txn->xid, (uint32)(recptr >> 32), uint32(recptr));
         securec_check_ss(rc, "", "");
         if (unlink(path) != 0 && errno != ENOENT) {
-            ereport(ERROR, (errcode_for_file_access(), errmsg("could not unlink file \"%s\": %m", path)));
+            ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode_for_file_access(),
+                errmsg("could not unlink file \"%s\": %m", path)));
         }
     }
 }
@@ -681,7 +784,7 @@ static void ParallelReorderBufferRestoreCleanup(ParallelReorderBufferTXN *txn, X
  * Parallel decoding cleanup txn.
  */
 void ParallelReorderBufferCleanupTXN(ParallelReorderBuffer *rb, ParallelReorderBufferTXN *txn,
-    XLogRecPtr lsn = InvalidXLogRecPtr)
+    XLogRecPtr lsn)
 {
     bool found = false;
     dlist_mutable_iter iter;
@@ -747,8 +850,13 @@ static void ParallelReorderBufferSerializeReserve(ParallelReorderBuffer *rb, Siz
  */
 static void ParallelReorderBufferCheckSerializeTXN(ParallelReorderBuffer *rb, ParallelReorderBufferTXN *txn, int slotId)
 {
-    if (txn->nentries_mem >= (unsigned)g_instance.attr.attr_common.max_changes_in_memory) {
+    if (txn->nentries_mem >= (unsigned)g_instance.attr.attr_common.max_changes_in_memory ||
+        (g_Logicaldispatcher[slotId].pOptions.max_txn_in_memory > 0 &&
+        txn->size >= (Size)g_Logicaldispatcher[slotId].pOptions.max_txn_in_memory * sizeMB) ||
+        (g_Logicaldispatcher[slotId].pOptions.max_reorderbuffer_in_memory > 0 &&
+        rb->size >= (Size)g_Logicaldispatcher[slotId].pOptions.max_reorderbuffer_in_memory * sizeGB)) {
         ParallelReorderBufferSerializeTXN(rb, txn, slotId);
+        Assert(txn->size == 0);
         Assert(txn->nentries_mem == 0);
     }
 }
@@ -756,8 +864,7 @@ static void ParallelReorderBufferCheckSerializeTXN(ParallelReorderBuffer *rb, Pa
 /*
  * Spill data of a large transaction (and its subtransactions) to disk.
  */
-
-static void ParallelReorderBufferSerializeTXN(ParallelReorderBuffer *rb, ParallelReorderBufferTXN *txn, int slotId)
+static void ParallelReorderBufferSerializeTXN(ParallelReorderBuffer *prb, ParallelReorderBufferTXN *txn, int slotId)
 {
     dlist_iter subtxn_i;
     dlist_mutable_iter change_i;
@@ -767,21 +874,23 @@ static void ParallelReorderBufferSerializeTXN(ParallelReorderBuffer *rb, Paralle
     Size spilled = 0;
     char path[MAXPGPATH];
     int nRet = 0;
+    Size currentPrbSize = prb->size;
+    Size currentTxnSize = txn->size;
 
-    if (!RecoveryInProgress()) {
-        ereport(DEBUG2, (errmsg("spill %u changes in tx %lu to disk", (uint32)txn->nentries_mem, txn->xid)));
-    }
+    ereport(DEBUG2, (errmodule(MOD_LOGICAL_DECODE),
+        errmsg("spill %u changes in tx %lu to disk", (uint32)txn->nentries_mem, txn->xid)));
 
     /* do the same to all child TXs */
     if (&txn->subtxns == NULL) {
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("txn->subtxns is illegal point")));
+        ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("txn->subtxns is illegal point")));
     }
     dlist_foreach(subtxn_i, &txn->subtxns)
     {
         ParallelReorderBufferTXN *subtxn = NULL;
 
         subtxn = dlist_container(ParallelReorderBufferTXN, node, subtxn_i.cur);
-        ParallelReorderBufferSerializeTXN(rb, subtxn, slotId);
+        ParallelReorderBufferSerializeTXN(prb, subtxn, slotId);
     }
 
     /* serialize changestream */
@@ -817,18 +926,29 @@ static void ParallelReorderBufferSerializeTXN(ParallelReorderBuffer *rb, Paralle
             /* open segment, create it if necessary */
             fd = OpenTransientFile(path, O_CREAT | O_WRONLY | O_APPEND | PG_BINARY, S_IRUSR | S_IWUSR);
             if (fd < 0) {
-                ereport(ERROR, (errcode_for_file_access(), errmsg("could not open file \"%s\": %m", path)));
+                ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode_for_file_access(),
+                    errmsg("could not open file \"%s\": %m", path)));
             }
         }
 
-        ParallelReorderBufferSerializeChange(rb, txn, fd, change);
+        ParallelReorderBufferSerializeChange(prb, txn, fd, change);
         dlist_delete(&change->node);
-        FreeLogicalLog(change, slotId);
+        FreeLogicalLog(prb, change, slotId, true);
         spilled++;
     }
 
     Assert(spilled == txn->nentries_mem);
     Assert(dlist_is_empty(&txn->changes));
+    if (txn->serialized == false) {
+        ereport(DEBUG5, (errmodule(MOD_LOGICAL_DECODE),
+            errmsg("ParallelReorderBufferSerializeTXN for xid = %lu. "
+            "Serialization threshold: max_reorderbuffer_in_memory(in Byte) = %lu, max_txn_in_memory(in Byte) = %lu. "
+            "Before serialization: prb->size = %lu, txn->size = %lu. "
+            "After serialization: prb->size = %lu, txn->size = %lu.",
+            txn->xid, (Size)g_Logicaldispatcher[slotId].pOptions.max_reorderbuffer_in_memory * sizeGB,
+            (Size)g_Logicaldispatcher[slotId].pOptions.max_txn_in_memory * sizeMB,
+            currentPrbSize, currentTxnSize, prb->size, txn->size)));
+    }
     txn->serialized = true;
     txn->nentries_mem = 0;
 
@@ -843,13 +963,17 @@ static void ParallelReorderBufferSerializeTXN(ParallelReorderBuffer *rb, Paralle
 static void ParallelReorderBufferSerializeChange(ParallelReorderBuffer *rb, ParallelReorderBufferTXN *txn, int fd,
     logicalLog *change)
 {
-    Size sz = sizeof(sz) + sizeof(XLogRecPtr) + change->out->len;
+    Size sz = sizeof(Size) + sizeof(LogicalLogType) + sizeof(XLogRecPtr) + change->out->len;
     ParallelReorderBufferSerializeReserve(rb, sz);
 
     char* tmp = rb->outbuf;
     errno_t rc = memcpy_s(tmp, sizeof(Size), &sz, sizeof(Size));
     securec_check(rc, "", "");
     tmp += sizeof(Size);
+
+    rc = memcpy_s(tmp, sizeof(LogicalLogType), &change->type, sizeof(LogicalLogType));
+    securec_check(rc, "", "");
+    tmp += sizeof(LogicalLogType);
 
     rc = memcpy_s(tmp, sizeof(XLogRecPtr), &change->lsn, sizeof(XLogRecPtr));
     securec_check(rc, "", "");
@@ -861,20 +985,25 @@ static void ParallelReorderBufferSerializeChange(ParallelReorderBuffer *rb, Para
 
     if ((Size)(write(fd, rb->outbuf, sz)) != sz) {
         (void)CloseTransientFile(fd);
-        ereport(ERROR, (errcode_for_file_access(), errmsg("could not write to xid %lu's data file: %m", txn->xid)));
+        ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode_for_file_access(),
+            errmsg("could not write to xid %lu's data file: %m", txn->xid)));
+    }
+    if (txn->final_lsn < change->lsn) {
+        txn->final_lsn = change->lsn;
     }
 }
 
 /*
  * Restore changes from disk.
  */
-static Size ParallelReorderBufferRestoreChanges(ParallelReorderBuffer *rb, ParallelReorderBufferTXN *txn, int *fd,
+static Size ParallelReorderBufferRestoreChanges(ParallelReorderBuffer *prb, ParallelReorderBufferTXN *txn, int *fd,
     XLogSegNo *segno, int slotId)
 {
     Size restored = 0;
     XLogSegNo last_segno;
     int rc = 0;
     dlist_mutable_iter cleanup_iter;
+    Size changeHeaderSize = sizeof(Size) + sizeof(LogicalLogType) + sizeof(XLogRecPtr);
 
     Assert(!XLByteEQ(txn->first_lsn, InvalidXLogRecPtr));
     Assert(!XLByteEQ(txn->final_lsn, InvalidXLogRecPtr));
@@ -885,13 +1014,17 @@ static Size ParallelReorderBufferRestoreChanges(ParallelReorderBuffer *rb, Paral
         logicalLog *cleanup = dlist_container(logicalLog, node, cleanup_iter.cur);
 
         dlist_delete(&cleanup->node);
-        FreeLogicalLog(cleanup, slotId);
+        FreeLogicalLog(prb, cleanup, slotId, true);
     }
     txn->nentries_mem = 0;
     Assert(dlist_is_empty(&txn->changes));
 
     last_segno = (txn->final_lsn) / XLogSegSize;
     while (restored < (unsigned)g_instance.attr.attr_common.max_changes_in_memory && *segno <= last_segno) {
+        if (restored > 0 && g_Logicaldispatcher[slotId].pOptions.max_reorderbuffer_in_memory > 0 &&
+            prb->size >= (Size)g_Logicaldispatcher[slotId].pOptions.max_reorderbuffer_in_memory * sizeGB) {
+            break;
+        }
         int readBytes = 0;
 
         if (*fd == -1) {
@@ -923,7 +1056,8 @@ static Size ParallelReorderBufferRestoreChanges(ParallelReorderBuffer *rb, Paral
                 (*segno)++;
                 continue;
             } else if (*fd < 0)
-                ereport(ERROR, (errcode_for_file_access(), errmsg("could not open file \"%s\": %m", path)));
+                ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode_for_file_access(),
+                    errmsg("could not open file \"%s\": %m", path)));
         }
 
         /*
@@ -931,8 +1065,8 @@ static Size ParallelReorderBufferRestoreChanges(ParallelReorderBuffer *rb, Paral
          * about the total size. If we couldn't read a record, we're at the
          * end of this file.
          */
-        ParallelReorderBufferSerializeReserve(rb, sizeof(Size) + sizeof(XLogRecPtr));
-        readBytes = read(*fd, rb->outbuf, sizeof(Size) + sizeof(XLogRecPtr));
+        ParallelReorderBufferSerializeReserve(prb, changeHeaderSize);
+        readBytes = read(*fd, prb->outbuf, changeHeaderSize);
         /* eof */
         if (readBytes == 0) {
             (void)CloseTransientFile(*fd);
@@ -940,36 +1074,32 @@ static Size ParallelReorderBufferRestoreChanges(ParallelReorderBuffer *rb, Paral
             (*segno)++;
             continue;
         } else if (readBytes < 0) {
-            ereport(ERROR, (errcode_for_file_access(), errmsg("could not read from reorderbuffer spill file: %m")));
-        } else if (readBytes != sizeof(Size) + sizeof(XLogRecPtr)) {
-            ereport(ERROR, (errcode_for_file_access(),
+            ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode_for_file_access(),
+                errmsg("could not read from reorderbuffer spill file: %m")));
+        } else if (INT2SIZET(readBytes) != changeHeaderSize) {
+            ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode_for_file_access(),
                             errmsg("incomplete read from reorderbuffer spill file: read %d instead of %lu", readBytes,
-                                   sizeof(Size) + sizeof(XLogRecPtr))));
+                                   changeHeaderSize)));
         }
 
-        Size ondiskSize = *(Size *)rb->outbuf;
-        ParallelReorderBufferSerializeReserve(rb, ondiskSize);
+        Size ondiskSize = *(Size *)prb->outbuf;
+        ParallelReorderBufferSerializeReserve(prb, ondiskSize);
 
-        if (ondiskSize == sizeof(Size) + sizeof(XLogRecPtr)) {
-            /* Nothing serialized on disk, so skip it */
-            restored++;
-            continue;
-        }
-        readBytes = read(*fd, rb->outbuf + sizeof(Size) + sizeof(XLogRecPtr),
-            ondiskSize - sizeof(Size) - sizeof(XLogRecPtr));
+        readBytes = read(*fd, prb->outbuf + changeHeaderSize, ondiskSize - changeHeaderSize);
         if (readBytes < 0) {
-            ereport(ERROR, (errcode_for_file_access(), errmsg("could not read from reorderbuffer spill file: %m")));
-        } else if (INT2SIZET(readBytes) != ondiskSize - sizeof(Size) - sizeof(XLogRecPtr)) {
-            ereport(ERROR, (errcode_for_file_access(),
-                            errmsg("could not read from reorderbuffer spill file: read %d instead of %lu", readBytes,
-                                   ondiskSize - sizeof(Size) - sizeof(XLogRecPtr))));
+            ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode_for_file_access(),
+                errmsg("could not read from reorderbuffer spill file: %m")));
+        } else if (INT2SIZET(readBytes) != ondiskSize - changeHeaderSize) {
+            ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode_for_file_access(),
+                errmsg("could not read from reorderbuffer spill file: read %d instead of %lu",
+                       readBytes, ondiskSize - changeHeaderSize)));
         }
 
         /*
          * ok, read a full change from disk, now restore it into proper
          * in-memory format
          */
-        ParallelReorderBufferRestoreChange(rb, txn, rb->outbuf, slotId);
+        ParallelReorderBufferRestoreChange(prb, txn, prb->outbuf, slotId);
         restored++;
     }
 
@@ -984,7 +1114,7 @@ static Size ParallelReorderBufferRestoreChanges(ParallelReorderBuffer *rb, Paral
 logicalLog* RestoreLogicalLog(int slotId) {
     logicalLog *logChange = NULL;
     MemoryContext oldCtx;
-    oldCtx = MemoryContextSwitchTo(g_instance.comm_cxt.pdecode_cxt[slotId].parallelDecodeCtx);
+    oldCtx = MemoryContextSwitchTo(g_instance.comm_cxt.pdecode_cxt[slotId].logicalLogCtx);
 
     do {
         if (t_thrd.walsender_cxt.restoreLogicalLogHead != NULL) {
@@ -997,17 +1127,21 @@ logicalLog* RestoreLogicalLog(int slotId) {
                 logChange = head;
                 t_thrd.walsender_cxt.restoreLogicalLogHead = head->freeNext;
             } else {
-                logChange = (logicalLog *)palloc(sizeof(logicalLog));
+                (void)pg_atomic_add_fetch_u32(&g_Logicaldispatcher[slotId].curLogNum, 1);
+                logChange = (logicalLog *)palloc0(sizeof(logicalLog));
                 logChange->out = NULL;
                 logChange->freeNext = NULL;
             }
         }
     } while (logChange == NULL);
 
-    logChange->type = LOGICAL_LOG_EMPTY;
+    logChange->type = LOGICAL_LOG_DML;
+    logChange->toast_hash = NULL;
 
-    if (logChange->out) {
+    if (logChange->out != NULL && logChange->out->data != NULL) {
         resetStringInfo(logChange->out);
+    } else if (logChange->out != NULL && logChange->out->data == NULL) {
+        initStringInfo(logChange->out);
     } else {
         logChange->out = makeStringInfo();
     }
@@ -1033,6 +1167,10 @@ static void ParallelReorderBufferRestoreChange(ParallelReorderBuffer *rb, Parall
     securec_check(rc, "", "");
     data += sizeof(Size);
 
+    rc = memcpy_s(&change->type, sizeof(LogicalLogType), data, sizeof(LogicalLogType));
+    securec_check(rc, "", "");
+    data += sizeof(LogicalLogType);
+
     rc = memcpy_s(&change->lsn, sizeof(XLogRecPtr), data, sizeof(XLogRecPtr));
     securec_check(rc, "", "");
     data += sizeof(XLogRecPtr);
@@ -1040,9 +1178,14 @@ static void ParallelReorderBufferRestoreChange(ParallelReorderBuffer *rb, Parall
     /* copy static part */
     MemoryContext oldCtx = MemoryContextSwitchTo(pdata->context);
     change->freeNext = NULL;
-    appendBinaryStringInfo(change->out, data, changeSize - sizeof(Size) - sizeof(XLogRecPtr));
+    if (changeSize > sizeof(Size) + sizeof(LogicalLogType) + sizeof(XLogRecPtr)) {
+        appendBinaryStringInfo(change->out, data,
+            changeSize - sizeof(Size) - sizeof(LogicalLogType) - sizeof(XLogRecPtr));
+    }
     dlist_push_tail(&txn->changes, &change->node);
     txn->nentries_mem++;
+    change->txn = txn;
+    ParallelReorderBufferUpdateMemory(rb, change, slotId, true);
     MemoryContextSwitchTo(oldCtx);
 }
 
@@ -1140,7 +1283,7 @@ static ParallelReorderBufferIterTXNState *ParallelReorderBufferIterTXNInit
                     &state->entries[off].segno, slotId);
             }
 
-            if (!dlist_is_empty(&txn->changes)) {
+            if (!dlist_is_empty(&cur_txn->changes)) {
                 cur_change = dlist_head_element(logicalLog, node, &cur_txn->changes);
 
                 state->entries[off].lsn = cur_change->lsn;
@@ -1164,7 +1307,7 @@ static ParallelReorderBufferIterTXNState *ParallelReorderBufferIterTXNInit
  *
  * Returns NULL when no further changes exist.
  */
-static logicalLog *ParallelReorderBufferIterTXNNext(ParallelReorderBuffer *rb,
+static logicalLog *ParallelReorderBufferIterTXNNext(ParallelReorderBuffer *prb,
     ParallelReorderBufferIterTXNState *state, int slotId)
 {
     logicalLog *change = NULL;
@@ -1180,7 +1323,7 @@ static logicalLog *ParallelReorderBufferIterTXNNext(ParallelReorderBuffer *rb,
 
     if (!dlist_is_empty(&state->old_change)) {
         change = dlist_container(logicalLog, node,  dlist_pop_head_node(&state->old_change));
-        FreeLogicalLog(change, slotId);
+        FreeLogicalLog(prb, change, slotId, false);
         /* We should find atmost one old_change here */
         Assert(dlist_is_empty(&state->old_change));
     }
@@ -1214,13 +1357,12 @@ static logicalLog *ParallelReorderBufferIterTXNNext(ParallelReorderBuffer *rb,
         dlist_delete(&change->node);
         dlist_push_tail(&state->old_change, &change->node);
 
-        if (ParallelReorderBufferRestoreChanges(rb, entry->txn, &entry->fd, &state->entries[off].segno, slotId)) {
+        if (ParallelReorderBufferRestoreChanges(prb, entry->txn, &entry->fd, &state->entries[off].segno, slotId)) {
             /* successfully restored changes from disk */
             logicalLog *next_change = dlist_head_element(logicalLog, node, &entry->txn->changes);
 
-            if (!RecoveryInProgress())
-                ereport(DEBUG2, (errmsg("restored %u/%u changes from disk", (uint32)entry->txn->nentries_mem,
-                                        (uint32)entry->txn->nentries)));
+            ereport(DEBUG2, (errmodule(MOD_LOGICAL_DECODE), errmsg("restored %u/%u changes from disk",
+                (uint32)entry->txn->nentries_mem, (uint32)entry->txn->nentries)));
 
             Assert(entry->txn->nentries_mem);
             /* txn stays the same */
@@ -1241,7 +1383,8 @@ static logicalLog *ParallelReorderBufferIterTXNNext(ParallelReorderBuffer *rb,
 /*
  * Deallocate the iterator
  */
-static void ParallelReorderBufferIterTXNFinish(ParallelReorderBufferIterTXNState *state, int slotId)
+static void ParallelReorderBufferIterTXNFinish(ParallelReorderBuffer *prb, ParallelReorderBufferIterTXNState *state,
+    int slotId)
 {
     for (Size off = 0; off < state->nr_txns; off++) {
         if (state->entries[off].fd != -1) {
@@ -1253,7 +1396,7 @@ static void ParallelReorderBufferIterTXNFinish(ParallelReorderBufferIterTXNState
     if (!dlist_is_empty(&state->old_change)) {
         logicalLog *change = NULL;
         change = dlist_container(logicalLog, node, dlist_pop_head_node(&state->old_change));
-        FreeLogicalLog(change, slotId);
+        FreeLogicalLog(prb, change, slotId, false);
         Assert(dlist_is_empty(&state->old_change));
     }
 
@@ -1266,20 +1409,21 @@ static void ParallelReorderBufferIterTXNFinish(ParallelReorderBufferIterTXNState
  * contents. Needs to be first called for subtransactions and then for the
  * toplevel xid.
  */
-void ParallelReorderBufferForget(ParallelReorderBuffer *rb, int slotId, ParallelReorderBufferTXN *txn)
+void ParallelReorderBufferForget(ParallelReorderBuffer *prb, int slotId, ParallelReorderBufferTXN *txn)
 {
     logicalLog *logChange = NULL;
     if (txn == NULL)
         return;
     ParallelReorderBufferIterTXNState *volatile iterstate = NULL;
 
-    iterstate = ParallelReorderBufferIterTXNInit(rb, txn, slotId);
-    while ((logChange = ParallelReorderBufferIterTXNNext(rb, iterstate, slotId)) != NULL) {
+    iterstate = ParallelReorderBufferIterTXNInit(prb, txn, slotId);
+    while ((logChange = ParallelReorderBufferIterTXNNext(prb, iterstate, slotId)) != NULL) {
         dlist_delete(&logChange->node);
-        FreeLogicalLog(logChange, slotId);
+        FreeLogicalLog(prb, logChange, slotId, false);
     }
-    ParallelReorderBufferCleanupTXN(rb, txn);
-    ParallelReorderBufferIterTXNFinish(iterstate, slotId);
+    ParallelReorderBufferCleanupTXN(prb, txn);
+    g_Logicaldispatcher[slotId].workingTxnCnt = hash_get_num_entries(prb->by_txn);
+    ParallelReorderBufferIterTXNFinish(prb, iterstate, slotId);
 }
 
 /*
@@ -1297,26 +1441,37 @@ static void ParallelCheckPrepare(StringInfo out, logicalLog *change, ParallelDec
 /*
  * Parallel decoding check whether this batch should be sent.
  */
-static void ParallelCheckBatch(StringInfo out, ParallelDecodingData *pdata, int slotId,
+static void ParallelCheckBatch(ParallelLogicalDecodingContext *ctx, ParallelDecodingData *pdata, int slotId,
     MemoryContext *oldCtxPtr, bool emptyXact)
 {
     if (emptyXact) {
         MemoryContextSwitchTo(*oldCtxPtr);
         return;
     }
-    if (out->len > g_Logicaldispatcher[slotId].pOptions.sending_batch * g_batch_unit_length) {
+    if (ctx->out->len > g_Logicaldispatcher[slotId].pOptions.sending_batch * g_batch_unit_length) {
         if (pdata->pOptions.decode_style == 'b') {
-            appendStringInfoChar(out, 'F'); // the finishing char
+            appendStringInfoChar(ctx->out, 'F'); // the finishing char
         } else if (g_Logicaldispatcher[slotId].pOptions.sending_batch > 0) {
-            pq_sendint32(out, 0);
+            pq_sendint32(ctx->out, 0);
         }
         MemoryContextSwitchTo(*oldCtxPtr);
-        WalSndWriteDataHelper(out, 0, 0, false);
+        resetStringInfo(ctx->writeLocationBuffer);
+        if (XLogRecPtrIsValid(ctx->write_location)) {
+            pq_sendint64(ctx->writeLocationBuffer, ctx->write_location);
+            /* ctx->out->data[0] is msgtype 'w', skip it */
+            errno_t rc = memcpy_s(&(ctx->out->data[1]), sizeof(uint64), ctx->writeLocationBuffer->data, sizeof(uint64));
+            securec_check(rc, "\0", "\0");
+            rc = memcpy_s(&(ctx->out->data[1 + sizeof(uint64)]), sizeof(uint64), ctx->writeLocationBuffer->data,
+                sizeof(uint64));
+            securec_check(rc, "\0", "\0");
+        }
+
+        WalSndWriteDataHelper(ctx->out, 0, 0, false);
         g_Logicaldispatcher[slotId].decodeTime = GetCurrentTimestamp();
         g_Logicaldispatcher[slotId].remainPatch = false;
     } else {
         if (pdata->pOptions.decode_style == 'b') {
-            appendStringInfoChar(out, 'P');
+            appendStringInfoChar(ctx->out, 'P');
         }
         g_Logicaldispatcher[slotId].remainPatch = true;
         MemoryContextSwitchTo(*oldCtxPtr);
@@ -1326,11 +1481,11 @@ static void ParallelCheckBatch(StringInfo out, ParallelDecodingData *pdata, int 
 /*
  * Parallel decoding deal with batch sending.
  */
-static inline void ParallelHandleBatch(StringInfo out, logicalLog *change, ParallelDecodingData *pdata, int slotId,
-    MemoryContext *oldCtxPtr)
+static inline void ParallelHandleBatch(ParallelLogicalDecodingContext *ctx, logicalLog *change,
+    ParallelDecodingData *pdata, int slotId, MemoryContext *oldCtxPtr)
 {
-    ParallelCheckBatch(out, pdata, slotId, oldCtxPtr, false);
-    ParallelCheckPrepare(out, change, pdata, slotId, oldCtxPtr);
+    ParallelCheckBatch(ctx, pdata, slotId, oldCtxPtr, false);
+    ParallelCheckPrepare(ctx->out, change, pdata, slotId, oldCtxPtr);
 }
 
 /*
@@ -1364,7 +1519,7 @@ static void ParallelOutputBegin(StringInfo out, logicalLog *change, ParallelDeco
             pq_sendint64(out, txn->first_lsn);
         }
         const uint32 upperPart = 32;
-        appendStringInfo(out, "BEGIN CSN: %lu commit_lsn: %X/%X", change->csn, (uint32)(txn->first_lsn >> upperPart),
+        appendStringInfo(out, "BEGIN CSN: %lu first_lsn: %X/%X", change->csn, (uint32)(txn->first_lsn >> upperPart),
             (uint32)(txn->first_lsn));
         if (pdata->pOptions.include_timestamp) {
             const char *timeStamp = timestamptz_to_str(txn->commit_time);
@@ -1430,10 +1585,18 @@ static void ParallelOutputCommit(StringInfo out, logicalLog *change, ParallelDec
     }
 }
 
+static void ReportToastChunkMissing(void)
+{
+    ereport(ERROR, (errmodule(MOD_LOGICAL_DECODE), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+        errmsg("parallel decode toast chunk missing"),
+        errdetail("N/A"), errcause("Toast file damaged."),
+        erraction("Contact engineer to recover toast files.")));
+}
+
 /*
  * Get and send all the logical logs in the ParallelReorderBufferTXN linked list.
  */
-void ParallelReorderBufferCommit(ParallelReorderBuffer *rb, logicalLog *change, int slotId,
+void ParallelReorderBufferCommit(ParallelReorderBuffer *prb, logicalLog *change, int slotId,
     ParallelReorderBufferTXN *txn)
 {
     logicalLog *logChange = NULL;
@@ -1443,7 +1606,7 @@ void ParallelReorderBufferCommit(ParallelReorderBuffer *rb, logicalLog *change, 
         return;
     }
 
-    ParallelLogicalDecodingContext *ctx = (ParallelLogicalDecodingContext *)rb->private_data;
+    ParallelLogicalDecodingContext *ctx = (ParallelLogicalDecodingContext *)prb->private_data;
     ParallelDecodingData* pdata = (ParallelDecodingData*)t_thrd.walsender_cxt.
         parallel_logical_decoding_ctx->output_plugin_private;
     pdata->pOptions.xact_wrote_changes = false;
@@ -1451,41 +1614,53 @@ void ParallelReorderBufferCommit(ParallelReorderBuffer *rb, logicalLog *change, 
     MemoryContext oldCtx = NULL;
     ParallelCheckPrepare(ctx->out, change, pdata, slotId, &oldCtx);
 
+    ParallelReorderBufferIterTXNState *volatile iterstate = NULL;
+    iterstate = ParallelReorderBufferIterTXNInit(prb, txn, slotId);
+
     if (!pdata->pOptions.skip_empty_xacts) {
         ParallelOutputBegin(ctx->out, change, pdata, txn, g_Logicaldispatcher[slotId].pOptions.sending_batch > 0);
-        ParallelHandleBatch(ctx->out, change, pdata, slotId, &oldCtx);
+        ParallelHandleBatch(ctx, change, pdata, slotId, &oldCtx);
     }
 
-    ParallelReorderBufferIterTXNState *volatile iterstate = NULL;
-    iterstate = ParallelReorderBufferIterTXNInit(rb, txn, slotId);
     bool stopDecode = false;
-    while ((logChange = ParallelReorderBufferIterTXNNext(rb, iterstate, slotId)) != NULL) {
+    while ((logChange = ParallelReorderBufferIterTXNNext(prb, iterstate, slotId)) != NULL) {
         if (logChange->type == LOGICAL_LOG_NEW_CID && !stopDecode) {
+            LogicalDecodeReportLostChanges<ParallelReorderBufferIterTXNState>(iterstate);
             stopDecode = true;
         }
+        if (logChange->type == LOGICAL_LOG_MISSING_CHUNK && !stopDecode) {
+            ReportToastChunkMissing();
+        }
         if (!stopDecode && logChange->out != NULL && logChange->out->len != 0) {
+            if (XLByteLT(ctx->write_location, logChange->lsn)) {
+                ctx->write_location = logChange->lsn;
+            }
             if (pdata->pOptions.skip_empty_xacts && !pdata->pOptions.xact_wrote_changes) {
                 ParallelOutputBegin(ctx->out, change, pdata, txn,
                     g_Logicaldispatcher[slotId].pOptions.sending_batch > 0);
-                ParallelHandleBatch(ctx->out, change, pdata, slotId, &oldCtx);
+                ParallelHandleBatch(ctx, change, pdata, slotId, &oldCtx);
                 pdata->pOptions.xact_wrote_changes = true;
             }
             appendBinaryStringInfo(ctx->out, logChange->out->data, logChange->out->len);
-            ParallelHandleBatch(ctx->out, change, pdata, slotId, &oldCtx);
+            ParallelHandleBatch(ctx, change, pdata, slotId, &oldCtx);
         }
         dlist_delete(&logChange->node);
 
-        FreeLogicalLog(logChange, slotId);
+        FreeLogicalLog(prb, logChange, slotId, false);
     }
 
+    if (XLByteLT(ctx->write_location, change->lsn)) {
+        ctx->write_location = change->lsn;
+    }
     if (!pdata->pOptions.skip_empty_xacts || pdata->pOptions.xact_wrote_changes) {
         ParallelOutputCommit(ctx->out, change, pdata, txn,
             g_Logicaldispatcher[slotId].pOptions.sending_batch > 0);
     }
-    ParallelReorderBufferCleanupTXN(rb, txn);
-    ParallelReorderBufferIterTXNFinish(iterstate, slotId);
+    ParallelReorderBufferCleanupTXN(prb, txn);
+    g_Logicaldispatcher[slotId].workingTxnCnt = hash_get_num_entries(prb->by_txn);
+    ParallelReorderBufferIterTXNFinish(prb, iterstate, slotId);
 
-    ParallelCheckBatch(ctx->out, pdata, slotId, &oldCtx,
+    ParallelCheckBatch(ctx, pdata, slotId, &oldCtx,
         (pdata->pOptions.skip_empty_xacts && !pdata->pOptions.xact_wrote_changes));
     MemoryContextReset(pdata->context);
 }
@@ -1549,6 +1724,7 @@ ParallelReorderBufferTXN *ParallelReorderBufferTXNByXid(ParallelReorderBuffer *r
         txn->first_lsn = lsn;
         txn->restart_decoding_lsn = rb->current_restart_decoding_lsn;
         txn->oldestXid = rb->lastRunningXactOldestXmin;
+        txn->missingChunk = false;
 
         if (create_as_top) {
             dlist_push_tail(&rb->toplevel_by_lsn, &txn->node);
@@ -1602,12 +1778,43 @@ ParallelReorderBuffer *ParallelReorderBufferAllocate(int slotId)
     buffer->current_restart_decoding_lsn = InvalidXLogRecPtr;
     buffer->outbuf = NULL;
     buffer->outbufsize = 0;
+    buffer->size = 0;
 
     dlist_init(&buffer->toplevel_by_lsn);
     dlist_init(&buffer->txns_by_base_snapshot_lsn);
     dlist_init(&buffer->cached_changes);
     slist_init(&buffer->cached_tuplebufs);
 
+    if (t_thrd.role == LOGICAL_READ_RECORD && t_thrd.slot_cxt.MyReplicationSlot != NULL) {
+        ReorderBufferClear(NameStr(t_thrd.slot_cxt.MyReplicationSlot->data.name));
+    }
     return buffer;
+}
+
+void ParallelReorderBufferAssignChild(ParallelReorderBuffer *prb, TransactionId xid, TransactionId subxid,
+    XLogRecPtr lsn)
+{
+    bool new_top = false;
+    bool new_sub = false;
+    ParallelReorderBufferTXN *txn = ParallelReorderBufferTXNByXid(prb, xid, true, &new_top, lsn, true);
+    ParallelReorderBufferTXN *subtxn = ParallelReorderBufferTXNByXid(prb, subxid, true, &new_sub, lsn, false);
+    if (!new_sub) {
+        if (subtxn->is_known_as_subxact) {
+            return;
+        } else {
+            dlist_delete(&subtxn->node);
+        }
+    }
+    subtxn->is_known_as_subxact = true;
+    subtxn->toplevel_xid = xid;
+    dlist_push_tail(&txn->subtxns, &subtxn->node);
+    txn->nsubtxns++;
+}
+ 
+void ParallelReorderBufferChildAssignment(ParallelReorderBuffer *prb, logicalLog *logChange)
+{
+    for (int i = 0; i < logChange->nsubxacts; i++) {
+        ParallelReorderBufferAssignChild(prb, logChange->xid, logChange->subXids[i], logChange->lsn);
+    }
 }
 

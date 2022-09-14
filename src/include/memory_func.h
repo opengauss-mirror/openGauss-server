@@ -32,17 +32,28 @@
 #include "utils/builtins.h"
 #include "utils/elog.h"
 #include "utils/acl.h"
+#include "postmaster/fork_process.h"
+#include "postmaster/postmaster.h"
+#include "postmaster/syslogger.h"
+#include "zlib.h"
+
+#define MIN_FILE_NAME_LEN 16
+#define MAX_FILE_NAME_LEN 64
 
 #ifdef MEMORY_CONTEXT_TRACK
-extern void GetAllocBlockInfo(AllocSet set, StringInfoData* buf);
-extern void GetAsanBlockInfo(AsanSet set, StringInfoData* buf);
+extern void GetAllocBlockInfo(AllocSet set, StringInfoDataHuge* buf);
+extern void GetAsanBlockInfo(AsanSet set, StringInfoDataHuge* buf);
 void gs_recursive_unshared_memory_context(const MemoryContext context,
-    const char* ctx_name, StringInfoData* buf);
+    const char* ctx_name, StringInfoDataHuge* buf);
+void gs_recursive_shared_memory_context(const MemoryContext context,
+    const char* ctx_name, StringInfoDataHuge* buf, bool isShared);
+AllocChunk gs_collate_memctx_info(StringInfoHuge mem_info, int* res_len);
 #endif
 
 Datum gs_get_shared_memctx_detail(PG_FUNCTION_ARGS);
 Datum gs_get_session_memctx_detail(PG_FUNCTION_ARGS);
 Datum gs_get_thread_memctx_detail(PG_FUNCTION_ARGS);
+Datum gs_get_history_memory_detail(PG_FUNCTION_ARGS);
 
 extern void check_stack_depth(void);
 

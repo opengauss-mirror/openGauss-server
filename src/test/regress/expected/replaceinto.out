@@ -1,0 +1,421 @@
+replace into replace_test values(1,'aaaaa','aaaaa');
+ERROR:  REPLACE INTO syntax is not supported.
+LINE 1: replace into replace_test values(1,'aaaaa','aaaaa');
+        ^
+create database db_replaceinto dbcompatibility='B';
+\c db_replaceinto
+CREATE TABLE replace_test(
+    id int NOT NULL,
+    name varchar(20) DEFAULT NULL,
+	key varchar(20) DEFAULT NULL,
+    PRIMARY KEY(id)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "replace_test_pkey" for table "replace_test"
+create unique index reidx on replace_test(key);
+create or replace function before_tri() returns trigger as $$
+begin
+    if TG_OP = 'INSERT' then
+        raise notice 'before insert trigger';
+    end if;
+    if TG_OP = 'DELETE' then
+        raise notice 'before delete trigger';
+    end if;
+    return new;
+end $$ language plpgsql;
+create trigger replace_before before insert or delete on
+replace_test for each row execute procedure before_tri();
+create or replace function after_tri() returns trigger as $$
+begin
+    if TG_OP = 'INSERT' then
+        raise notice 'after insert trigger';
+    end if;
+    if TG_OP = 'DELETE' then
+        raise notice 'after delete trigger';
+    end if;
+    return new;
+end $$ language plpgsql;
+create trigger replace_after after insert or delete on
+replace_test for each row execute procedure after_tri();
+select * from replace_test;
+ id | name | key 
+----+------+-----
+(0 rows)
+
+replace into replace_test values(1,'aaaaa','aaaaa');
+NOTICE:  before insert trigger
+NOTICE:  after insert trigger
+select * from replace_test;
+ id | name  |  key  
+----+-------+-------
+  1 | aaaaa | aaaaa
+(1 row)
+
+replace into replace_test values(2,'bbbbb','bbbbb');
+NOTICE:  before insert trigger
+NOTICE:  after insert trigger
+select * from replace_test;
+ id | name  |  key  
+----+-------+-------
+  1 | aaaaa | aaaaa
+  2 | bbbbb | bbbbb
+(2 rows)
+
+replace into replace_test values(3,'ccccc','ccccc'),(4,'ddddd','ddddd'),(5,'eeeee','eeeee');
+NOTICE:  before insert trigger
+NOTICE:  before insert trigger
+NOTICE:  before insert trigger
+NOTICE:  after insert trigger
+NOTICE:  after insert trigger
+NOTICE:  after insert trigger
+select * from replace_test;
+ id | name  |  key  
+----+-------+-------
+  1 | aaaaa | aaaaa
+  2 | bbbbb | bbbbb
+  3 | ccccc | ccccc
+  4 | ddddd | ddddd
+  5 | eeeee | eeeee
+(5 rows)
+
+replace into replace_test values(1,'aaaaa','ddddd');
+NOTICE:  before delete trigger
+NOTICE:  before delete trigger
+NOTICE:  before insert trigger
+NOTICE:  after delete trigger
+NOTICE:  after delete trigger
+NOTICE:  after insert trigger
+select * from replace_test;
+ id | name  |  key  
+----+-------+-------
+  2 | bbbbb | bbbbb
+  3 | ccccc | ccccc
+  5 | eeeee | eeeee
+  1 | aaaaa | ddddd
+(4 rows)
+
+truncate replace_test;
+select * from replace_test;
+ id | name | key 
+----+------+-----
+(0 rows)
+
+replace into replace_test set id=1,name='aaaaa', key='bbbbb';
+NOTICE:  before insert trigger
+NOTICE:  after insert trigger
+select * from replace_test;
+ id | name  |  key  
+----+-------+-------
+  1 | aaaaa | bbbbb
+(1 row)
+
+replace into replace_test set id=2,name=default, key='bbbbb';
+NOTICE:  before delete trigger
+NOTICE:  before insert trigger
+NOTICE:  after delete trigger
+NOTICE:  after insert trigger
+select * from replace_test;
+ id | name |  key  
+----+------+-------
+  2 |      | bbbbb
+(1 row)
+
+replace into replace_test values(3,default,'ccccc'),(4,'ddddd','ddddd'),(5,'eeeee','eeeee');
+NOTICE:  before insert trigger
+NOTICE:  before insert trigger
+NOTICE:  before insert trigger
+NOTICE:  after insert trigger
+NOTICE:  after insert trigger
+NOTICE:  after insert trigger
+select * from replace_test;
+ id | name  |  key  
+----+-------+-------
+  2 |       | bbbbb
+  3 |       | ccccc
+  4 | ddddd | ddddd
+  5 | eeeee | eeeee
+(4 rows)
+
+replace into replace_test values(1,'aaaaa','ddddd');
+NOTICE:  before delete trigger
+NOTICE:  before insert trigger
+NOTICE:  after delete trigger
+NOTICE:  after insert trigger
+select * from replace_test;
+ id | name  |  key  
+----+-------+-------
+  2 |       | bbbbb
+  3 |       | ccccc
+  5 | eeeee | eeeee
+  1 | aaaaa | ddddd
+(4 rows)
+
+replace into replace_test select * from replace_test;
+NOTICE:  before delete trigger
+NOTICE:  before insert trigger
+NOTICE:  before delete trigger
+NOTICE:  before insert trigger
+NOTICE:  before delete trigger
+NOTICE:  before insert trigger
+NOTICE:  before delete trigger
+NOTICE:  before insert trigger
+NOTICE:  after delete trigger
+NOTICE:  after insert trigger
+NOTICE:  after delete trigger
+NOTICE:  after insert trigger
+NOTICE:  after delete trigger
+NOTICE:  after insert trigger
+NOTICE:  after delete trigger
+NOTICE:  after insert trigger
+select * from replace_test;
+ id | name  |  key  
+----+-------+-------
+  2 |       | bbbbb
+  3 |       | ccccc
+  5 | eeeee | eeeee
+  1 | aaaaa | ddddd
+(4 rows)
+
+replace into replace_test set id=1,name = (select name from replace_test where id=1);
+NOTICE:  before delete trigger
+NOTICE:  before insert trigger
+NOTICE:  after delete trigger
+NOTICE:  after insert trigger
+drop table replace_test;
+CREATE TABLE replace_partition_test(
+    id int NOT NULL,
+    name varchar(20) DEFAULT NULL,
+	key varchar(20) DEFAULT NULL,
+    PRIMARY KEY(id)
+)
+partition by range(id)
+(
+	partition replace_p1 values less than (5),
+	partition replace_p2 values less than (10),
+	partition replace_p3 values less than (20)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "replace_partition_test_pkey" for table "replace_partition_test"
+create unique index repartidx on replace_partition_test(key);
+replace into replace_partition_test values(1,'aaaaa','aaaaa');
+replace into replace_partition_test values(6,'bbbbb','bbbbb');
+replace into replace_partition_test values(15,'ccccc','ccccc');
+select * from replace_partition_test;
+ id | name  |  key  
+----+-------+-------
+  1 | aaaaa | aaaaa
+  6 | bbbbb | bbbbb
+ 15 | ccccc | ccccc
+(3 rows)
+
+replace into replace_partition_test values(7,'ddddd','ddddd');
+select * from replace_partition_test;
+ id | name  |  key  
+----+-------+-------
+  1 | aaaaa | aaaaa
+  6 | bbbbb | bbbbb
+  7 | ddddd | ddddd
+ 15 | ccccc | ccccc
+(4 rows)
+
+replace into replace_partition_test values(7,'ddddd','aaaaa');
+select * from replace_partition_test;
+ id | name  |  key  
+----+-------+-------
+  6 | bbbbb | bbbbb
+  7 | ddddd | aaaaa
+ 15 | ccccc | ccccc
+(3 rows)
+
+select * from replace_partition_test partition(replace_p1);
+ id | name | key 
+----+------+-----
+(0 rows)
+
+select * from replace_partition_test partition(replace_p2);
+ id | name  |  key  
+----+-------+-------
+  6 | bbbbb | bbbbb
+  7 | ddddd | aaaaa
+(2 rows)
+
+drop table replace_partition_test;
+create table replace_test1(a serial primary key, b int);
+NOTICE:  CREATE TABLE will create implicit sequence "replace_test1_a_seq" for serial column "replace_test1.a"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "replace_test1_pkey" for table "replace_test1"
+replace into replace_test1 values(1,2);
+ERROR:  REPLACE can not work on sequence!
+select * from replace_test1;
+ a | b 
+---+---
+(0 rows)
+
+drop table replace_test1;
+create table replace_test2(id int, name char(20));
+replace into replace_test2 values(1,'aaaaa');
+replace into replace_test2 values(1,'aaaaa');
+replace into replace_test2 values(2,'bbbbb');
+select * from replace_test2;
+ id |         name         
+----+----------------------
+  1 | aaaaa               
+  1 | aaaaa               
+  2 | bbbbb               
+(3 rows)
+
+drop table replace_test2;
+create table t_range_list
+( id number PRIMARY KEY not null,
+partition_key int,
+subpartition_key int,
+col2 varchar2(10) )
+partition by range(partition_key)
+subpartition by list(subpartition_key)(
+partition p1 values less than (100)
+(subpartition sub_1_1 values (10),
+subpartition sub_1_2 values (20)),
+partition p2 values less than(200)
+(subpartition sub_2_1 values (10),
+subpartition sub_2_2 values (20)),
+partition p3 values less than (300)
+(subpartition sub_3_1 values (10),
+subpartition sub_3_2 values (20)));
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_range_list_pkey" for table "t_range_list"
+REPLACE INTO t_range_list VALUES(1,50,10,'sub_1_1');
+REPLACE INTO t_range_list VALUES(2,150,20,'sub_2_2');
+REPLACE INTO t_range_list VALUES(3,250,10,'sub_3_1');
+select * from t_range_list partition(p1);
+ id | partition_key | subpartition_key |  col2   
+----+---------------+------------------+---------
+  1 |            50 |               10 | sub_1_1
+(1 row)
+
+select * from t_range_list partition(p2);
+ id | partition_key | subpartition_key |  col2   
+----+---------------+------------------+---------
+  2 |           150 |               20 | sub_2_2
+(1 row)
+
+select * from t_range_list partition(p3);
+ id | partition_key | subpartition_key |  col2   
+----+---------------+------------------+---------
+  3 |           250 |               10 | sub_3_1
+(1 row)
+
+CREATE TABLE t1(id int,p int,sub int);
+INSERT INTO t1 VALUES(2,60,10);
+select * from t_range_list;
+ id | partition_key | subpartition_key |  col2   
+----+---------------+------------------+---------
+  1 |            50 |               10 | sub_1_1
+  2 |           150 |               20 | sub_2_2
+  3 |           250 |               10 | sub_3_1
+(3 rows)
+
+REPLACE INTO t_range_list VALUES(1,210,20,'sub_3_2');
+REPLACE INTO t_range_list(id,partition_key,subpartition_key )  SELECT * FROM t1;
+REPLACE INTO t_range_list SET id=3,partition_key=190,subpartition_key=20,col2='sub_2_2';
+select * from t_range_list;
+ id | partition_key | subpartition_key |  col2   
+----+---------------+------------------+---------
+  2 |            60 |               10 | 
+  3 |           190 |               20 | sub_2_2
+  1 |           210 |               20 | sub_3_2
+(3 rows)
+
+REPLACE INTO t_range_list partition(p2) VALUES(1,50,10,'fail');
+ERROR:  inserted partition key does not map to the table partition
+DETAIL:  N/A.
+select * from t_range_list;
+ id | partition_key | subpartition_key |  col2   
+----+---------------+------------------+---------
+  2 |            60 |               10 | 
+  3 |           190 |               20 | sub_2_2
+  1 |           210 |               20 | sub_3_2
+(3 rows)
+
+REPLACE INTO t_range_list subpartition(sub_2_1) VALUES(2,150,20,'fail');
+ERROR:  inserted subpartition key does not map to the table subpartition
+DETAIL:  N/A.
+select * from t_range_list;
+ id | partition_key | subpartition_key |  col2   
+----+---------------+------------------+---------
+  2 |            60 |               10 | 
+  3 |           190 |               20 | sub_2_2
+  1 |           210 |               20 | sub_3_2
+(3 rows)
+
+REPLACE INTO t_range_list subpartition(sub_3_1) VALUES(3,250,10,'new');
+select * from t_range_list;
+ id | partition_key | subpartition_key |  col2   
+----+---------------+------------------+---------
+  2 |            60 |               10 | 
+  1 |           210 |               20 | sub_3_2
+  3 |           250 |               10 | new
+(3 rows)
+
+drop table t_range_list;
+drop table t1;
+CREATE TABLE ustore_test (col1 int PRIMARY KEY, col2 INT) with(storage_type=ustore);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "ustore_test_pkey" for table "ustore_test"
+REPLACE INTO ustore_test values(1,2);
+REPLACE INTO ustore_test values(2,3);
+REPLACE INTO ustore_test values(3,4);
+REPLACE INTO ustore_test values(4,5);
+select * from ustore_test;
+ col1 | col2 
+------+------
+    1 |    2
+    2 |    3
+    3 |    4
+    4 |    5
+(4 rows)
+
+REPLACE INTO ustore_test values(1,5);
+REPLACE INTO ustore_test values(2,6);
+select * from ustore_test;
+ col1 | col2 
+------+------
+    3 |    4
+    4 |    5
+    1 |    5
+    2 |    6
+(4 rows)
+
+drop table ustore_test;
+CREATE TABLE replace_segment_test(
+    id int NOT NULL,
+    name varchar(20) DEFAULT NULL,
+        key varchar(20) DEFAULT NULL,
+    PRIMARY KEY(id)
+)with (parallel_workers=10, SEGMENT=ON)
+partition by range(id)
+(
+        partition replace_p1 values less than (5),
+        partition replace_p2 values less than (10),
+        partition replace_p3 values less than (20)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "replace_segment_test_pkey" for table "replace_segment_test"
+create unique index repartidx on replace_segment_test(key);
+replace into replace_segment_test values(1,'aaaaa','aaaaa');
+replace into replace_segment_test values(6,'bbbbb','bbbbb');
+replace into replace_segment_test values(15,'ccccc','ccccc');
+select * from replace_segment_test;
+ id | name  |  key  
+----+-------+-------
+  1 | aaaaa | aaaaa
+  6 | bbbbb | bbbbb
+ 15 | ccccc | ccccc
+(3 rows)
+
+replace into replace_segment_test values(7,'ddddd','ddddd');
+select * from replace_segment_test;
+ id | name  |  key  
+----+-------+-------
+  1 | aaaaa | aaaaa
+  6 | bbbbb | bbbbb
+  7 | ddddd | ddddd
+ 15 | ccccc | ccccc
+(4 rows)
+
+drop table replace_segment_test;
+\c postgres
+drop database db_replaceinto;

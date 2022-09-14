@@ -13,13 +13,12 @@
  *
  * -------------------------------------------------------------------------
  */
-#include "storage/dfs/dfscache_mgr.h"
-
 #include "postgres.h"
 #include "knl/knl_variable.h"
 #include "gs_bbox.h"
 #include "storage/buf/bufmgr.h"
 #include "storage/buf/buf_internals.h"
+#include "storage/nvm/nvm.h"
 #include "storage/ipc.h"
 #include "storage/cucache_mgr.h"
 #include "pgxc/pgxc.h"
@@ -82,13 +81,17 @@ void InitBufferPool(void)
     candidate_buf_init();
 
 #ifdef __aarch64__
-    buffer_size = TOTAL_BUFFER_NUM * (Size)BLCKSZ + PG_CACHE_LINE_SIZE;
+    buffer_size = (TOTAL_BUFFER_NUM - NVM_BUFFER_NUM) * (Size)BLCKSZ + PG_CACHE_LINE_SIZE;
     t_thrd.storage_cxt.BufferBlocks =
         (char *)CACHELINEALIGN(ShmemInitStruct("Buffer Blocks", buffer_size, &found_bufs));
 #else
-    buffer_size = TOTAL_BUFFER_NUM * (Size)BLCKSZ;
+    buffer_size = (TOTAL_BUFFER_NUM - NVM_BUFFER_NUM) * (Size)BLCKSZ;
     t_thrd.storage_cxt.BufferBlocks = (char *)ShmemInitStruct("Buffer Blocks", buffer_size, &found_bufs);
 #endif
+
+    if (g_instance.attr.attr_storage.nvm_attr.enable_nvm) {
+        nvm_init();
+    }
 
     if (BBOX_BLACKLIST_SHARE_BUFFER) {
         /* Segment Buffer is exclued from the black list, as it contains many critical information for debug */
@@ -105,6 +108,11 @@ void InitBufferPool(void)
     g_instance.ckpt_cxt_ctl->CkptBufferIds =
         (CkptSortItem *)ShmemInitStruct("Checkpoint BufferIds",
                                         TOTAL_BUFFER_NUM * sizeof(CkptSortItem), &found_buf_ckpt);
+
+    /* Init the snapshotBlockLock to block all the io in the process of snapshot of standy */
+    if (g_instance.ckpt_cxt_ctl->snapshotBlockLock == NULL) {
+        g_instance.ckpt_cxt_ctl->snapshotBlockLock = LWLockAssign(LWTRANCHE_IO_BLOCKED);
+    }
 
     if (ENABLE_INCRE_CKPT && g_instance.ckpt_cxt_ctl->dirty_page_queue == NULL) {
         g_instance.ckpt_cxt_ctl->dirty_page_queue_size = TOTAL_BUFFER_NUM *
@@ -163,9 +171,6 @@ void InitBufferPool(void)
     /* Init Vector Buffer management stuff */
     DataCacheMgr::NewSingletonInstance();
 
-    /* Init Meta data cache management stuff */
-    MetaCacheMgr::NewSingletonInstance();
-
     /* Initialize per-backend file flush context */
     WritebackContextInit(t_thrd.storage_cxt.BackendWritebackContext, &u_sess->attr.attr_common.backend_flush_after);
 }
@@ -185,7 +190,7 @@ Size BufferShmemSize(void)
     size = add_size(size, PG_CACHE_LINE_SIZE);
 
     /* size of data pages */
-    size = add_size(size, mul_size(TOTAL_BUFFER_NUM, BLCKSZ));
+    size = add_size(size, mul_size((NORMAL_SHARED_BUFFER_NUM + SEGMENT_BUFFER_NUM), BLCKSZ));
 #ifdef __aarch64__
     size = add_size(size, PG_CACHE_LINE_SIZE);
 #endif

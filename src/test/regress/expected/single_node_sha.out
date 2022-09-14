@@ -1,0 +1,684 @@
+-- A format database not support <=>
+select sha(null);
+ERROR:  sha/sha1 is supported only in B-format database
+CONTEXT:  referenced column: sha
+select sha('');
+ERROR:  sha/sha1 is supported only in B-format database
+CONTEXT:  referenced column: sha
+select sha('test sha AAA 123 + 中文测试');
+ERROR:  sha/sha1 is supported only in B-format database
+CONTEXT:  referenced column: sha
+select sha1(null);
+ERROR:  sha/sha1 is supported only in B-format database
+CONTEXT:  referenced column: sha1
+select sha1('');
+ERROR:  sha/sha1 is supported only in B-format database
+CONTEXT:  referenced column: sha1
+select sha1('test sha AAA 123 + 中文测试');
+ERROR:  sha/sha1 is supported only in B-format database
+CONTEXT:  referenced column: sha1
+select sha2(null,224);
+ERROR:  sha2 is supported only in B-format database
+CONTEXT:  referenced column: sha2
+select sha2('',224);
+ERROR:  sha2 is supported only in B-format database
+CONTEXT:  referenced column: sha2
+select sha2('test sha AAA 123 + 中文测试',224);
+ERROR:  sha2 is supported only in B-format database
+CONTEXT:  referenced column: sha2
+select sha2(null,256);
+ERROR:  sha2 is supported only in B-format database
+CONTEXT:  referenced column: sha2
+select sha2('',256);
+ERROR:  sha2 is supported only in B-format database
+CONTEXT:  referenced column: sha2
+select sha2('test sha AAA 123 + 中文测试',256);
+ERROR:  sha2 is supported only in B-format database
+CONTEXT:  referenced column: sha2
+select sha2(null,384);
+ERROR:  sha2 is supported only in B-format database
+CONTEXT:  referenced column: sha2
+select sha2('',384);
+ERROR:  sha2 is supported only in B-format database
+CONTEXT:  referenced column: sha2
+select sha2('test sha AAA 123 + 中文测试',384);
+ERROR:  sha2 is supported only in B-format database
+CONTEXT:  referenced column: sha2
+select sha2(null,512);
+ERROR:  sha2 is supported only in B-format database
+CONTEXT:  referenced column: sha2
+select sha2('',512);
+ERROR:  sha2 is supported only in B-format database
+CONTEXT:  referenced column: sha2
+select sha2('test sha AAA 123 + 中文测试',512);
+ERROR:  sha2 is supported only in B-format database
+CONTEXT:  referenced column: sha2
+select sha2(null,160);
+ERROR:  sha2 is supported only in B-format database
+CONTEXT:  referenced column: sha2
+select sha2('test',160);
+ERROR:  sha2 is supported only in B-format database
+CONTEXT:  referenced column: sha2
+select sha2('test sha AAA 123 + 中文测试',160);
+ERROR:  sha2 is supported only in B-format database
+CONTEXT:  referenced column: sha2
+DROP DATABASE IF EXISTS test_sha;
+NOTICE:  database "test_sha" does not exist, skipping
+CREATE DATABASE test_sha dbcompatibility = 'B';
+\c test_sha
+ 
+-- test sha
+select sha(null);
+ sha 
+-----
+ 
+(1 row)
+
+select sha('');
+                   sha                    
+------------------------------------------
+ da39a3ee5e6b4b0d3255bfef95601890afd80709
+(1 row)
+
+select sha('      ');
+                   sha                    
+------------------------------------------
+ 08e02d827446f7fe647672cbc95dab2c71f3d0ee
+(1 row)
+
+select sha('abcfsasfasgagasgagas');
+                   sha                    
+------------------------------------------
+ 46b1b2293383e1214c4caf36d1301083c6a886fb
+(1 row)
+
+select sha('ABCFAFASFASFAFASSFSASFSAFASFA');
+                   sha                    
+------------------------------------------
+ 0ee7de6645fa13010ab96db225e25627804bdbff
+(1 row)
+
+select sha('4123421341265262547472562562');
+                   sha                    
+------------------------------------------
+ 2387407c339251a3d9e4ffa144a476255a35d1af
+(1 row)
+
+select sha('test sha ABC 123');
+                   sha                    
+------------------------------------------
+ c59019eba196ade18c17766426178d3d1e647521
+(1 row)
+
+select sha('中文测试');
+                   sha                    
+------------------------------------------
+ cf8a8e8f68b4e267920dba0a5f3037180cc1afd9
+(1 row)
+
+select sha('-=!@#$%^&*";./?<>|:[]{}+\,*.');
+                   sha                    
+------------------------------------------
+ 88c7105d83a984838f8d4e736fd5887fd61637ff
+(1 row)
+
+select sha('test sha AAA 123 + 中文测试');
+                   sha                    
+------------------------------------------
+ ef1fd8697b5d0c0735161c1e50f5222a246fc54c
+(1 row)
+
+--test sha fail example
+select sha();
+ERROR:  function sha() does not exist
+LINE 1: select sha();
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: sha
+select sha(abc);
+ERROR:  column "abc" does not exist
+LINE 1: select sha(abc);
+                   ^
+CONTEXT:  referenced column: sha
+select sha1('abc',0);
+ERROR:  function sha1(unknown, integer) does not exist
+LINE 1: select sha1('abc',0);
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: sha1
+-- test sha1
+select sha1(null);
+ sha1 
+------
+ 
+(1 row)
+
+select sha1('');
+                   sha1                   
+------------------------------------------
+ da39a3ee5e6b4b0d3255bfef95601890afd80709
+(1 row)
+
+select sha1('      ');
+                   sha1                   
+------------------------------------------
+ 08e02d827446f7fe647672cbc95dab2c71f3d0ee
+(1 row)
+
+select sha1('abcfsasfasgagasgagas');
+                   sha1                   
+------------------------------------------
+ 46b1b2293383e1214c4caf36d1301083c6a886fb
+(1 row)
+
+select sha1('ABCFAFASFASFAFASSFSASFSAFASFA');
+                   sha1                   
+------------------------------------------
+ 0ee7de6645fa13010ab96db225e25627804bdbff
+(1 row)
+
+select sha1('4123421341265262547472562562');
+                   sha1                   
+------------------------------------------
+ 2387407c339251a3d9e4ffa144a476255a35d1af
+(1 row)
+
+select sha1('test sha ABC 123');
+                   sha1                   
+------------------------------------------
+ c59019eba196ade18c17766426178d3d1e647521
+(1 row)
+
+select sha1('中文测试');
+                   sha1                   
+------------------------------------------
+ cf8a8e8f68b4e267920dba0a5f3037180cc1afd9
+(1 row)
+
+select sha1('-=!@#$%^&*";./?<>|:[]{}+\,*.');
+                   sha1                   
+------------------------------------------
+ 88c7105d83a984838f8d4e736fd5887fd61637ff
+(1 row)
+
+select sha1('test sha AAA 123 + 中文测试');
+                   sha1                   
+------------------------------------------
+ ef1fd8697b5d0c0735161c1e50f5222a246fc54c
+(1 row)
+
+--test sha1 fail example
+select sha1();
+ERROR:  function sha1() does not exist
+LINE 1: select sha1();
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: sha1
+select sha1(abc);
+ERROR:  column "abc" does not exist
+LINE 1: select sha1(abc);
+                    ^
+CONTEXT:  referenced column: sha1
+select sha1('abc',1);
+ERROR:  function sha1(unknown, integer) does not exist
+LINE 1: select sha1('abc',1);
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: sha1
+ 
+-- test sha224
+select sha2(null,224);
+ sha2 
+------
+ 
+(1 row)
+
+select sha2('',224);
+                           sha2                           
+----------------------------------------------------------
+ d14a028c2a3a2bc9476102bb288234c415a2b01f828ea62ac5b3e42f
+(1 row)
+
+select sha2('      ',224);
+                           sha2                           
+----------------------------------------------------------
+ 1d487fee6a160da1c0b16a9223952e15babbd84e9090308427a43be3
+(1 row)
+
+select sha2('abcfsasfasgagasgagas',224);
+                           sha2                           
+----------------------------------------------------------
+ 8663e6e5397efe85544976c4ccd4d08cbc5d5dfb1a06d59bdc9e0756
+(1 row)
+
+select sha2('ABCFAFASFASFAFASSFSASFSAFASFA',224);
+                           sha2                           
+----------------------------------------------------------
+ 0157a53a34c3b84bfe72c1e2c5efaf993ef0674457396ce647908a3a
+(1 row)
+
+select sha2('4123421341265262547472562562',224);
+                           sha2                           
+----------------------------------------------------------
+ a766e1503574b75834f58878e74435a6b4d418fa884aa8a145224408
+(1 row)
+
+select sha2('test sha ABC 123',224);
+                           sha2                           
+----------------------------------------------------------
+ e51a982381b77eff032b7aadbd53181ab0ffd6e232c2e0880078bd18
+(1 row)
+
+select sha2('中文测试',224);
+                           sha2                           
+----------------------------------------------------------
+ 478e6f38b3608293936d9c426b4d6a6aac3c7d5e84bdad3677b0396d
+(1 row)
+
+select sha2('-=!@#$%^&*";./?<>|:[]{}+\,*.',224);
+                           sha2                           
+----------------------------------------------------------
+ f2a14dadf745c4c6324b37e362d713074ac68d53c9a97f5be0ba78ca
+(1 row)
+
+select sha2('test sha AAA 123 + 中文测试',224);
+                           sha2                           
+----------------------------------------------------------
+ 22820d248b57de8a6e04b1fb1b1a7887c9d3bd9119ee7c033b30c101
+(1 row)
+
+-- test sha256
+select sha2(null,256);
+ sha2 
+------
+ 
+(1 row)
+
+select sha2('',256);
+                               sha2                               
+------------------------------------------------------------------
+ e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+(1 row)
+
+select sha2('      ',256);
+                               sha2                               
+------------------------------------------------------------------
+ 399141be1d30ac2656d89eedcf0d8dcedaa72d6c29bf959cae243dc7b1442cf6
+(1 row)
+
+select sha2('abcfsasfasgagasgagas',256);
+                               sha2                               
+------------------------------------------------------------------
+ f8f37114c466e92cccaf8ab90e8e5fe25aa05e7d8c95442cba44051ddf82ffd7
+(1 row)
+
+select sha2('ABCFAFASFASFAFASSFSASFSAFASFA',256);
+                               sha2                               
+------------------------------------------------------------------
+ efbd758c129737386972b94c94e3f6f0c552bc381f7eb15d11af5fb0748124d7
+(1 row)
+
+select sha2('4123421341265262547472562562',256);
+                               sha2                               
+------------------------------------------------------------------
+ 3aa7c723617cf8477b656da4eb5cb9d1f057c69064a2a6a6172837ecf0180fb5
+(1 row)
+
+select sha2('test sha ABC 123',256);
+                               sha2                               
+------------------------------------------------------------------
+ 1fbe53376f58417a77e704a2c89928482fd0885e90ea1f4c8c68defaca78ceaf
+(1 row)
+
+select sha2('中文测试',256);
+                               sha2                               
+------------------------------------------------------------------
+ e350545d18735c5dd2dec50dcb971f3eb4cdda24b95a79bdb6b553f6a01ceb87
+(1 row)
+
+select sha2('-=!@#$%^&*";./?<>|:[]{}+\,*.',256);
+                               sha2                               
+------------------------------------------------------------------
+ 0dd91e5cf01d36ec4e5ea46f6742fd135f5a78c6895421f389f7f2287f50cd69
+(1 row)
+
+select sha2('test sha AAA 123 + 中文测试',256);
+                               sha2                               
+------------------------------------------------------------------
+ 414441f79a00fffeb3abba1b92e73cb258a07c62e04e105decc1466d9f1518c9
+(1 row)
+
+-- test sha0
+select sha2(null,0);
+ sha2 
+------
+ 
+(1 row)
+
+select sha2('',0);
+                               sha2                               
+------------------------------------------------------------------
+ e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+(1 row)
+
+select sha2('      ',0);
+                               sha2                               
+------------------------------------------------------------------
+ 399141be1d30ac2656d89eedcf0d8dcedaa72d6c29bf959cae243dc7b1442cf6
+(1 row)
+
+select sha2('abcfsasfasgagasgagas',0);
+                               sha2                               
+------------------------------------------------------------------
+ f8f37114c466e92cccaf8ab90e8e5fe25aa05e7d8c95442cba44051ddf82ffd7
+(1 row)
+
+select sha2('ABCFAFASFASFAFASSFSASFSAFASFA',0);
+                               sha2                               
+------------------------------------------------------------------
+ efbd758c129737386972b94c94e3f6f0c552bc381f7eb15d11af5fb0748124d7
+(1 row)
+
+select sha2('4123421341265262547472562562',0);
+                               sha2                               
+------------------------------------------------------------------
+ 3aa7c723617cf8477b656da4eb5cb9d1f057c69064a2a6a6172837ecf0180fb5
+(1 row)
+
+select sha2('test sha ABC 123',0);
+                               sha2                               
+------------------------------------------------------------------
+ 1fbe53376f58417a77e704a2c89928482fd0885e90ea1f4c8c68defaca78ceaf
+(1 row)
+
+select sha2('中文测试',0);
+                               sha2                               
+------------------------------------------------------------------
+ e350545d18735c5dd2dec50dcb971f3eb4cdda24b95a79bdb6b553f6a01ceb87
+(1 row)
+
+select sha2('-=!@#$%^&*";./?<>|:[]{}+\,*.',0);
+                               sha2                               
+------------------------------------------------------------------
+ 0dd91e5cf01d36ec4e5ea46f6742fd135f5a78c6895421f389f7f2287f50cd69
+(1 row)
+
+select sha2('test sha AAA 123 + 中文测试',0);
+                               sha2                               
+------------------------------------------------------------------
+ 414441f79a00fffeb3abba1b92e73cb258a07c62e04e105decc1466d9f1518c9
+(1 row)
+
+-- test sha384
+select sha2(null,384);
+ sha2 
+------
+ 
+(1 row)
+
+select sha2('',384);
+                                               sha2                                               
+--------------------------------------------------------------------------------------------------
+ 38b060a751ac96384cd9327eb1b1e36a21fdb71114be07434c0cc7bf63f6e1da274edebfe76f65fbd51ad2f14898b95b
+(1 row)
+
+select sha2('      ',384);
+                                               sha2                                               
+--------------------------------------------------------------------------------------------------
+ 42ec851c0fd808c5c498fd1017808e523028d7d1dd0243dfd544ac92937408d289e94e080a057af1cbb59ea3ccddadc9
+(1 row)
+
+select sha2('abcfsasfasgagasgagas',384);
+                                               sha2                                               
+--------------------------------------------------------------------------------------------------
+ 264754745d55b2ceaa16628cdf32e0a86e057b4e88bc0ac4fe543f2c01789158823afdd487ef955e356a65f2b6f3a5f8
+(1 row)
+
+select sha2('ABCFAFASFASFAFASSFSASFSAFASFA',384);
+                                               sha2                                               
+--------------------------------------------------------------------------------------------------
+ af604ffb410806b198dc8bbfcfcccf6e430251957f2eaeb23c012658bb3673a8f359769bf5b82ee4c7eedfdda089bd6b
+(1 row)
+
+select sha2('4123421341265262547472562562',384);
+                                               sha2                                               
+--------------------------------------------------------------------------------------------------
+ ccdde707e1d58b328d09cfb7bfc04aba3e17fd0df1be64f1fd1f3b14107e43b5854388dee96d0c0ca709eb1009021931
+(1 row)
+
+select sha2('test sha ABC 123',384);
+                                               sha2                                               
+--------------------------------------------------------------------------------------------------
+ c380d4c87a32f16d2010114e597021b1ac224c83dfec734238265e98b7d9475dba107cd52175e4c0b54416050afc2736
+(1 row)
+
+select sha2('中文测试',384);
+                                               sha2                                               
+--------------------------------------------------------------------------------------------------
+ eb03ed8f9f58cdb87ed21387776a6033e0f45b914232f2e193a1a52b42ca2126490d18cd9c0f068d6c7cd8a415e54829
+(1 row)
+
+select sha2('-=!@#$%^&*";./?<>|:[]{}+\,*.',384);
+                                               sha2                                               
+--------------------------------------------------------------------------------------------------
+ 91a68a5a85075e32efe658f4627c80d853845fe6c127ed55df25d24a23ae9f4d9b384def85426679ab80b701f3f69349
+(1 row)
+
+select sha2('test sha AAA 123 + 中文测试',384);
+                                               sha2                                               
+--------------------------------------------------------------------------------------------------
+ e472742f3bb6a52e60c61a2d4ac36ec5a712b9a10fc9027d2e680b9a31a7fc7905c15d34010716d7c7f84fee90a99f59
+(1 row)
+
+-- test sha512
+select sha2(null,512);
+ sha2 
+------
+ 
+(1 row)
+
+select sha2('',512);
+                                                               sha2                                                               
+----------------------------------------------------------------------------------------------------------------------------------
+ cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e
+(1 row)
+
+select sha2('      ',512);
+                                                               sha2                                                               
+----------------------------------------------------------------------------------------------------------------------------------
+ 9b864f19e1475420bf04efaafc338515ed4c1ab12e5e8a04785643088934ba7014f983d9e8e67b8292a19de55691e400a014e64881993f69858b586e8d90cea0
+(1 row)
+
+select sha2('abcfsasfasgagasgagas',512);
+                                                               sha2                                                               
+----------------------------------------------------------------------------------------------------------------------------------
+ 8569d63dbc0878bf8d82a6196ec408c396c7803091a4ccaa5933e972153cea2b1d8c993ba339d37e928fa6fbddf067f13f04b519db7978717f464d6a6ddb4c6a
+(1 row)
+
+select sha2('ABCFAFASFASFAFASSFSASFSAFASFA',512);
+                                                               sha2                                                               
+----------------------------------------------------------------------------------------------------------------------------------
+ 64da10ec8d322dcedcc5d358c1ea03eea17b27bd2466902b7fce7efab8d5c34449351a1a39c8ff1f13b4a1898c77aee0e95877676566a9a76b7fec1b7ba0596b
+(1 row)
+
+select sha2('4123421341265262547472562562',512);
+                                                               sha2                                                               
+----------------------------------------------------------------------------------------------------------------------------------
+ ef590a1aa00f137bd64d616973130f821fcde8584c786f5f694e3b5e9a8e09a3a86e9cd6d16c7cbd8a708e3d1fa814884f9f89e2cd3aae1e86fdcf88f4a13b3c
+(1 row)
+
+select sha2('test sha ABC 123',512);
+                                                               sha2                                                               
+----------------------------------------------------------------------------------------------------------------------------------
+ 787f9f4f49bf8dea7a38330b463d0bf288a7c2eaa1acf55a21738761241ba72efe3ff2c72213503bd90cc29094f57befcc437efc0b60544ff83173ec95871647
+(1 row)
+
+select sha2('中文测试',512);
+                                                               sha2                                                               
+----------------------------------------------------------------------------------------------------------------------------------
+ 1fea9aee07bd0ab66604ef4f079d6b109a0e625c3bc38fe8f850111a9ee6b4a689f3cb454dfd8a16cbd35963382f4ca5d91cdcff2dd473028e6cfee256812eec
+(1 row)
+
+select sha2('-=!@#$%^&*";./?<>|:[]{}+\,*.',512);
+                                                               sha2                                                               
+----------------------------------------------------------------------------------------------------------------------------------
+ 11c16532fb2febb35bf2c8eeabeb2f9f46b665c284d5e33d9dbed842a9bc4e762bcb4ef83469e3ae799e70ec88ba94ebf6bed15e1f5908ed3b1f4ce8c45fce9d
+(1 row)
+
+select sha2('test sha AAA 123 + 中文测试',512);
+                                                               sha2                                                               
+----------------------------------------------------------------------------------------------------------------------------------
+ 0517feb2fa70486bb73a4090201850459bff5b9a149bcc585c41467bef4a12c34c499cbd73b606c21a76a8143dbfe0305375c092ff0528d17332e4ee898f531f
+(1 row)
+
+-- test null input param
+select sha2('aasdfghj',null);
+ sha2 
+------
+ 
+(1 row)
+
+select sha2(null,null);
+ sha2 
+------
+ 
+(1 row)
+
+-- test input param is 160
+select sha2(null,160);
+ sha2 
+------
+ 
+(1 row)
+
+select sha2('test',160);
+ sha2 
+------
+ 
+(1 row)
+
+select sha2('test sha AAA 123 + 中文测试',160);
+ sha2 
+------
+ 
+(1 row)
+
+ 
+-- test test sha2 fail example
+select sha2();
+ERROR:  function sha2() does not exist
+LINE 1: select sha2();
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: sha2
+select sha2(abc);
+ERROR:  column "abc" does not exist
+LINE 1: select sha2(abc);
+                    ^
+CONTEXT:  referenced column: sha2
+select sha2('abc');
+ERROR:  function sha2(unknown) does not exist
+LINE 1: select sha2('abc');
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: sha2
+select sha2('abc',128);
+ sha2 
+------
+ 
+(1 row)
+
+select sha2('abc',-1);
+ sha2 
+------
+ 
+(1 row)
+
+--test sha/sha2 as column
+create table test(a int, b varchar(10));
+insert into test values(1111,'adaAFG');
+insert into test values(2222,'abcFGSF');
+insert into test values(3333,'dsadaWE');
+insert into test values(4444,'sdafQW');
+select sha(a), sha(b) from test;
+                   sha                    |                   sha                    
+------------------------------------------+------------------------------------------
+ 011c945f30ce2cbafc452f39840f025693339c42 | 1b4b1b8d90315f7abb878831ee4a3dfe12483eda
+ fea7f657f56a2a448da7d4b535ee5e279caf3d9a | ca212b1c32f3215b4d3127a3c1d8416d506745be
+ f56d6351aa71cff0debea014d13525e42036187a | 0d3154808d936a984f2a15fe102a475500f308be
+ 92f2fd99879b0c2466ab8648afb63c49032379c1 | 125af9724e07c77f64ac2470a46c579e6b310d92
+(4 rows)
+
+select sha1(a), sha1(b) from test;
+                   sha1                   |                   sha1                   
+------------------------------------------+------------------------------------------
+ 011c945f30ce2cbafc452f39840f025693339c42 | 1b4b1b8d90315f7abb878831ee4a3dfe12483eda
+ fea7f657f56a2a448da7d4b535ee5e279caf3d9a | ca212b1c32f3215b4d3127a3c1d8416d506745be
+ f56d6351aa71cff0debea014d13525e42036187a | 0d3154808d936a984f2a15fe102a475500f308be
+ 92f2fd99879b0c2466ab8648afb63c49032379c1 | 125af9724e07c77f64ac2470a46c579e6b310d92
+(4 rows)
+
+select sha2(a,0), sha2(b,0) from test;
+                               sha2                               |                               sha2                               
+------------------------------------------------------------------+------------------------------------------------------------------
+ 0ffe1abd1a08215353c233d6e009613e95eec4253832a761af28ff37ac5a150c | 5b3e803b1efbdb3bdb7af5e7c5163d7a353e9e1388933d77ddc52f63a5b13778
+ edee29f882543b956620b26d0ee0e7e950399b1c4222f5de05e06425b4c995e9 | b48b6785cf85e7d0a926c4907f74dc419474dd1cea6fd27b1db404fb0734892a
+ 318aee3fed8c9d040d35a7fc1fa776fb31303833aa2de885354ddf3d44d8fb69 | 051a7340159340df0df66b20d4969d49a241299babaae97c0f382672779cfd66
+ 79f06f8fde333461739f220090a23cb2a79f6d714bee100d0e4b4af249294619 | 1f0d6ebbcc323904094e0a89abe2af24f0ecbd43b4076e2fdacc8203722716a1
+(4 rows)
+
+select sha2(a,224), sha2(b,224) from test;
+                           sha2                           |                           sha2                           
+----------------------------------------------------------+----------------------------------------------------------
+ 9cb7b5b974b6df070cb60bbeb134ea461541b92187d54372f4b144de | cba5ab5b4e574195bc36940a842556438aa11fb89391f60a27538aa0
+ cce54f1ae2a54b7c3ac10d67ce99e2784b17c62a97273b7ac5258922 | 9b8b0a4a22203558cacdbbce0b8f63019649242867bb6ac6fc28fde2
+ 43d224bdbfacb1f3ee29c279887388ef3cb0730b5ad0dd08aca25a35 | a79cfe130e0f0a6b524bafc4c3cb999d6694a50770872c5c5f260747
+ aea93ae2ec154498984050a299ec80aed6536f0454f9b0b54b5e15c9 | f6bf2d5383cf561aded58836b3aaa5363180088619902cc04ff183a8
+(4 rows)
+
+select sha2(a,256), sha2(b,256) from test;
+                               sha2                               |                               sha2                               
+------------------------------------------------------------------+------------------------------------------------------------------
+ 0ffe1abd1a08215353c233d6e009613e95eec4253832a761af28ff37ac5a150c | 5b3e803b1efbdb3bdb7af5e7c5163d7a353e9e1388933d77ddc52f63a5b13778
+ edee29f882543b956620b26d0ee0e7e950399b1c4222f5de05e06425b4c995e9 | b48b6785cf85e7d0a926c4907f74dc419474dd1cea6fd27b1db404fb0734892a
+ 318aee3fed8c9d040d35a7fc1fa776fb31303833aa2de885354ddf3d44d8fb69 | 051a7340159340df0df66b20d4969d49a241299babaae97c0f382672779cfd66
+ 79f06f8fde333461739f220090a23cb2a79f6d714bee100d0e4b4af249294619 | 1f0d6ebbcc323904094e0a89abe2af24f0ecbd43b4076e2fdacc8203722716a1
+(4 rows)
+
+select sha2(a,384), sha2(b,384) from test;
+                                               sha2                                               |                                               sha2                                               
+--------------------------------------------------------------------------------------------------+--------------------------------------------------------------------------------------------------
+ 7318735a5559d423f7706bbb8b6f10a610cb1b74b308a0e17849ace4bb3a34db34b3b126aa3a8d73b117f98be0e4af67 | 74563c4c0359d2c163c3c48f45ae0c096c8f3522195b4ebe14e2d8e4854fef97b71f789ffbf1539de96a655ff4a0e16d
+ 340cf197b38cefb4d11c6cb751420d74c8b024c3cdd01d40834d5e6111abfebfbf7ceb932ce625a7d5598fe3ab4c366f | b3b6a9a110628f4357a6ca200b0fed05f1670d5c5989df2bef947b7d13687053ad34750b3c49159fb8d8128e30defd0f
+ f1124b596e84663d2aadebe9f27f27f5756275816316396186b54d8ba79f14cf15401564a7908a4d46eabb9045f32986 | 7f068dda386c1f664110b7254f1dea67286ac73da0f13e9645d0e86d1b4a7f650c0e3ee07e1639e24c1985f981d2a07e
+ cb0411632e41564c194dec57021ccad1f066661dfa882fe49c8c3d56b1a0506f7f123190520719651477ba44a9d1fe5f | 6c35fee57ce67dcbb393206752879ed3c024c4560a37f679b3c73fc596196f4bbd17ac7c8a74c54ead7444c29f868fbe
+(4 rows)
+
+select sha2(a,512), sha2(b,512) from test;
+                                                               sha2                                                               |                                                               sha2                                                               
+----------------------------------------------------------------------------------------------------------------------------------+----------------------------------------------------------------------------------------------------------------------------------
+ 33275a8aa48ea918bd53a9181aa975f15ab0d0645398f5918a006d08675c1cb27d5c645dbd084eee56e675e25ba4019f2ecea37ca9e2995b49fcb12c096a032e | faf30b9dd91694e07756cd0922c54f7f8bd42f145d17800ff84420d615a670688767a3c03eaa28ba66c3ed7566e342f722f2c7f1f7ae4b3c2f899cc8169ddf84
+ a8cebf1698dc14282c507b1e1cfb7f2c9d5216aa7bd0854b50561e02c2b99d9a38945ec0f81e55f9699062b1eac6d0083411c839ba2b27c6a15b494463bc5c73 | bff68565b6e5e588aca4b80beb4901971abdee1d89bf37e28c79ed85aed07bfce388881398235c0756fdf9a7bd23a7b4afd83de7e1d37df9cb4f1d108ffd8ff0
+ 2f116a908cf26341547be5d4eec5d9e325fa75f1b6bfd6ba1618d9283b9aeb60cfb00a6a8508e0bcff4e673a52abf31cad6d7b26ba3994c087a0566ead3b2330 | 11cc119d7f39b22429d0e91ef17ad10cc883d62b8c56d2904faa41c931194ddb793610e7a1dbf4fa622106389aca790023b765fc79bb1a59dadc63da6e9b62a0
+ c3e47544d233ab0c129605b325a5edfd8ad0a2b58e2ea910ffef872876139407c578d06ff4b9400332d0c438f5dcba9ff5ecbca372167322c73da291c1cef670 | b2c8fa5487e733f8227de5b9b0eae846e583601f84ccb8c3d2b0b3d97a6217684011fb6eba8c03ef4939a7de7df58c24ddaf3e23287719d3f63f35a023a6f065
+(4 rows)
+
+DROP TABLE IF EXISTS test;
+-- test bigint
+select sha2('aa',123123131212312313212312123132121313);
+ERROR:  bigint out of range
+CONTEXT:  referenced column: sha2
+select sha2('aa',4294967680);
+ sha2 
+------
+ 
+(1 row)
+
+select sha2('aaaa', 66048);
+ sha2 
+------
+ 
+(1 row)
+
+\c regression
+DROP DATABASE IF EXISTS test_sha;

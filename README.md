@@ -413,7 +413,8 @@ https://opengauss.org/zh/
 | 2.0.0 2.0.1  |   https://opengauss.obs.cn-south-1.myhuaweicloud.com/2.0.0/openGauss-third_party_binarylibs.tar.gz    |
 | 2.1.0  |   https://opengauss.obs.cn-south-1.myhuaweicloud.com/2.1.0/openGauss-third_party_binarylibs.tar.gz    |
 | 3.0.0  |    https://opengauss.obs.cn-south-1.myhuaweicloud.com/3.0.0/openGauss-third_party_binarylibs.tar.gz   |
-| master |    https://opengauss.obs.cn-south-1.myhuaweicloud.com/latest/openGauss-third_party_binarylibs.tar.gz   |
+| 3.1.0  |    **openEuler_arm:** https://opengauss.obs.cn-south-1.myhuaweicloud.com/latest/binarylibs/openGauss-third_party_binarylibs_openEuler_arm.tar.gz <br/> **openEuler_x86:** https://opengauss.obs.cn-south-1.myhuaweicloud.com/latest/binarylibs/openGauss-third_party_binarylibs_openEuler_x86_64.tar.gz<br/> **Centos_x86:** https://opengauss.obs.cn-south-1.myhuaweicloud.com/latest/binarylibs/openGauss-third_party_binarylibs_Centos7.6_x86_64.tar.gz   |
+| master |    **openEuler_arm:** https://opengauss.obs.cn-south-1.myhuaweicloud.com/latest/binarylibs/openGauss-third_party_binarylibs_openEuler_arm.tar.gz <br/> **openEuler_x86:** https://opengauss.obs.cn-south-1.myhuaweicloud.com/latest/binarylibs/openGauss-third_party_binarylibs_openEuler_x86_64.tar.gz<br/> **Centos_x86:** https://opengauss.obs.cn-south-1.myhuaweicloud.com/latest/binarylibs/openGauss-third_party_binarylibs_Centos7.6_x86_64.tar.gz   |
 
 现在我们已经拥有完整的openGauss代码，把它存储在以下目录中（以sda为例）。
 

@@ -198,4 +198,7 @@ extern void InvalidRelcacheForTriggerFunction(Oid funcoid, Oid returnType);
 
 extern void ResetTrigShipFlag();
 
+extern HeapTuple GetTupleForTrigger(EState* estate, EPQState* epqstate, ResultRelInfo* relinfo, Oid targetPartitionOid,
+    int2 bucketid, ItemPointer tid, LockTupleMode lockmode, TupleTableSlot** newSlot);
+
 #endif /* TRIGGER_H */

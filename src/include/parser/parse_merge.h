@@ -15,6 +15,7 @@
 #define PARSE_MERGE_H
 
 #include "parser/parse_node.h"
+extern bool contain_subquery_walker(Node* node, void* context);
 extern Query* transformMergeStmt(ParseState* pstate, MergeStmt* stmt);
 extern List* expandTargetTL(List* te_list, Query* parsetree);
 extern List* expandActionTL(List* te_list, Query* parsetree);
