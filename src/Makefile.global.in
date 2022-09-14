@@ -295,6 +295,7 @@ ifeq ($(with_3rd), NONE)
   PLJAVA_HOME = $(top_builddir)/$(BINARYPATH)/pljava/$(LIB_SUPPORT_LLT)
   MASSTREE_HOME = $(top_builddir)/$(BINARYPATH)/masstree/comm
   MYFDW_HOME    = $(top_builddir)/dependency/mysql_fdw
+  ORCFDW_HOME   = $(top_builddir)/dependency/oracle_fdw
   DCF_HOME = $(top_builddir)/$(COMPONENTPATH)/dcf
 else
   BINARYPATH = kernel/dependency
@@ -342,6 +343,7 @@ endif
   endif
   MASSTREE_HOME = $(with_3rd)/$(BINARYPATH)/masstree/comm
   MYFDW_HOME = $(with_3rd)/$(BINARYPATH)/mysql_fdw
+  ORCFDW_HOME = $(with_3rd)/$(BINARYPATH)/oracle_fdw
   DCF_HOME = $(with_3rd)/kernel/component/dcf
 endif
 

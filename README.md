@@ -480,24 +480,18 @@ openGauss-server中的build.sh是编译过程中的重要脚本工具。该工�
 
 ##### 使用命令编译代码
 
-1.执行以下脚本获取系统版本号：
+1.获取对应的开源三方库二进制文件：
 
-   ```
-   [user@linux openGauss-server]$ sh src/get_PlatForm_str.sh
-   ```
+   从3.1.0版本开始，对于不同的环境提供不同的开源三方库二进制文件。 目前社区提供Centos_x86_64, openEuler_aarch64, openEuler_x86_64三种平台的三方库二进制。
+   可以从对应地址下载 [下载openGauss](#下载opengauss)
 
-   > **注意** 
-   >
-   > - 命令回显信息即为openGauss支持的操作系统。目前openGauss支持的操作系统为centos7.6_x86_64和openeuler_aarch64。
-   > - 如果显示**Failed**或其他版本，表示openGauss不支持当前操作系统。
-
-2.配置环境变量，根据代码下载位置添加**____**，并将***替换为上一步的结果。
+2.配置环境变量
 
    ```
    export CODE_BASE=________     # Path of the openGauss-server file
    export BINARYLIBS=________    # Path of the binarylibs file
    export GAUSSHOME=$CODE_BASE/dest/
-   export GCC_PATH=$BINARYLIBS/buildtools/***/gcc7.3/
+   export GCC_PATH=$BINARYLIBS/buildtools/gcc7.3/
    export CC=$GCC_PATH/gcc/bin/gcc
    export CXX=$GCC_PATH/gcc/bin/g++
    export LD_LIBRARY_PATH=$GAUSSHOME/lib:$GCC_PATH/gcc/lib64:$GCC_PATH/isl/lib:$GCC_PATH/mpc/lib/:$GCC_PATH/mpfr/lib/:$GCC_PATH/gmp/lib/:$LD_LIBRARY_PATH
@@ -505,20 +499,6 @@ openGauss-server中的build.sh是编译过程中的重要脚本工具。该工�
 
    ```
 
-   例如，在CENTOS X86-64平台上，binarylibs目录被作为openGauss-server目录的兄弟目录。
-   在openGauss-server目录下执行以下命令。
-
-   ```
-   export CODE_BASE=`pwd`
-   export BINARYLIBS=`pwd`/../binarylibs
-   export GAUSSHOME=$CODE_BASE/dest/
-   export GCC_PATH=$BINARYLIBS/buildtools/centos7.6_x86_64/gcc7.3/
-   export CC=$GCC_PATH/gcc/bin/gcc
-   export CXX=$GCC_PATH/gcc/bin/g++
-   export LD_LIBRARY_PATH=$GAUSSHOME/lib:$GCC_PATH/gcc/lib64:$GCC_PATH/isl/lib:$GCC_PATH/mpc/lib/:$GCC_PATH/mpfr/lib/:$GCC_PATH/gmp/lib/:$LD_LIBRARY_PATH
-   export PATH=$GAUSSHOME/bin:$GCC_PATH/gcc/bin:$PATH
-
-   ```
 3.选择一个版本进行配置。
 
    **debug**版本：
