@@ -75,7 +75,7 @@ void DevectorizeOneColumn(VecToRowState* state, ScalarVector* pColumn, int rows,
                 break;
             }
             case NAMEOID: {
-                state->m_ttsvalues[k] = PointerGetDatum(val);
+                state->m_ttsvalues[k] = PointerGetDatum(VARDATA_ANY(val));
                 break;
             }
             case UNKNOWNOID: {
