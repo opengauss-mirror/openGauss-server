@@ -400,7 +400,6 @@ void ThreadPoolWorker::WaitNextSession()
     /* Return worker to pool unless we can get a task right now. */
     ThreadPoolListener* lsn = m_group->GetListener();
     Assert(lsn != NULL);
-    struct timespec ts;
 
     while (true) {
         /* Wait if the thread was turned into pending mode. */
@@ -435,14 +434,11 @@ void ThreadPoolWorker::WaitNextSession()
             WaitState oldStatus = pgstat_report_waitstatus(STATE_WAIT_COMM);
 
             pthread_mutex_lock(m_mutex);
-            while (!m_currentSession && lsn->hasNoReadySession()) {
+            while (!m_currentSession) {
                 if (unlikely(m_threadStatus == THREAD_PENDING || m_threadStatus == THREAD_EXIT)) {
                     break;
                 }
-                clock_gettime(CLOCK_REALTIME, &ts);
-                ts.tv_sec += 10;  // 10s
-                ts.tv_nsec = 0;
-                pthread_cond_timedwait(m_cond, m_mutex, &ts);
+                pthread_cond_wait(m_cond, m_mutex);
             }
             pthread_mutex_unlock(m_mutex);
             m_group->GetListener()->RemoveWorkerFromList(this);
@@ -460,14 +456,10 @@ void ThreadPoolWorker::WaitNextSession()
 
 void ThreadPoolWorker::Pending()
 {
-    struct timespec ts;
     pg_atomic_fetch_sub_u32((volatile uint32*)&m_group->m_workerNum, 1);
     pthread_mutex_lock(m_mutex);
     while (m_threadStatus == THREAD_PENDING) {
-        clock_gettime(CLOCK_REALTIME, &ts);
-        ts.tv_sec += 10;  // 10s
-        ts.tv_nsec = 0;
-        pthread_cond_timedwait(m_cond, m_mutex, &ts);
+        pthread_cond_wait(m_cond, m_mutex);
     }
     pthread_mutex_unlock(m_mutex);
     pg_atomic_fetch_add_u32((volatile uint32*)&m_group->m_workerNum, 1);
