@@ -871,7 +871,7 @@ test: tpchcol03 tpchcol04
 test: tpchcol12 tpchcol13 tpchcol14 tpchcol16 tpchcol18 tpchcol19 tpchcol21
 
 test: vec_partition vec_partition_1 vec_material_001
-
+test: vec_m_file
 test: llvm_vecsort llvm_vecsort2
 
 test: udf_crem create_c_function
