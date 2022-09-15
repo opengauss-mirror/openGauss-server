@@ -19065,11 +19065,45 @@ static void dumpTableSchema(Archive* fout, TableInfo* tbinfo)
                                           default_value);
                     else if (j + 1 == tbinfo->autoinc_attnum)
                         appendPQExpBuffer(q, " %s", default_value);
-                    else
+                    else if (pg_strcasecmp(default_value, "") != 0)
                         appendPQExpBuffer(q, " DEFAULT %s", default_value);
+
                     if (hasOnUpdateFeature) {
                         if (pg_strcasecmp(onUpdate_value, "") != 0) {
-                            appendPQExpBuffer(q, " ON UPDATE %s", onUpdate_value);
+                            if (pg_strcasecmp(onUpdate_value, "pg_systimestamp()") == 0) {
+                                appendPQExpBuffer(q, " ON UPDATE CURRENT_TIMESTAMP");
+                            } else if (pg_strcasecmp(onUpdate_value, "('now'::text)::time with time zone") == 0) {
+                                appendPQExpBuffer(q, " ON UPDATE CURRENT_TIME");
+                            } else if (pg_strcasecmp(onUpdate_value, "text_date('now'::text)") == 0) {
+                                appendPQExpBuffer(q, " ON UPDATE CURRENT_DATE");
+                            } else if (pg_strcasecmp(onUpdate_value, "('now'::text)::time without time zone") == 0) {
+                                appendPQExpBuffer(q, " ON UPDATE LOCALTIME");
+                            } else if (pg_strcasecmp(onUpdate_value, "('now'::text)::timestamp without time zone") == 0) {
+                                appendPQExpBuffer(q, " ON UPDATE LOCALTIMESTAMP");
+                            } else {
+                                char* size_start = NULL;
+                                char* size_end = NULL;
+                                int number_size = 0;
+                                size_start = strstr(onUpdate_value, "timestamp(");
+                                if (size_start != NULL) {
+                                    size_start = size_start + 10;
+                                    size_end = strstr(size_start, ")");
+                                    number_size = size_end - size_start;
+                                    char num[number_size + 1] = {0};
+                                    strncpy(num, size_start, number_size);
+                                    appendPQExpBuffer(q, " ON UPDATE CURRENT_TIMESTAMP(%s)", num);
+                                } else {
+                                    size_start = strstr(onUpdate_value, "time(");
+                                    if (size_start != NULL) {
+                                        size_start = size_start + 5;
+                                        size_end = strstr(size_start, ")");
+                                        number_size = size_end - size_start;
+                                        char num[number_size + 1] = {0};
+                                        strncpy(num, size_start, number_size);
+                                        appendPQExpBuffer(q, " ON UPDATE CURRENT_TIME(%s)", num);
+                                    }
+                                }
+                            }
                         }
                     }
 #ifdef HAVE_CE
