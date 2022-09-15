@@ -52,7 +52,7 @@
 #include "storage/procarray.h"
 #include "postmaster/postmaster.h"
 #include "utils/builtins.h"
-
+#include "replication/walsender_private.h"
 
 extern bool PMstateIsRun(void);
 
@@ -304,6 +304,7 @@ void ReplicationSlotCreate(const char *name, ReplicationSlotPersistency persiste
     ReplicationSlot *slot = NULL;
     int i;
     errno_t rc = 0;
+    int slot_idx = -1;
 
     Assert(t_thrd.slot_cxt.MyReplicationSlot == NULL);
 
@@ -349,8 +350,10 @@ void ReplicationSlotCreate(const char *name, ReplicationSlotPersistency persiste
             }
             return;
         }
-        if (!s->in_use && slot == NULL)
+        if (!s->in_use && slot == NULL) {
             slot = s;
+            slot_idx = i;
+        }
     }
     /* If all slots are in use, we're out of luck. */
     if (slot == NULL) {
@@ -427,6 +430,9 @@ void ReplicationSlotCreate(const char *name, ReplicationSlotPersistency persiste
         vslot->active = true;
         SpinLockRelease(&slot->mutex);
         t_thrd.slot_cxt.MyReplicationSlot = slot;
+        if (t_thrd.walsender_cxt.MyWalSnd != NULL && t_thrd.walsender_cxt.MyWalSnd->pid != 0) {
+            t_thrd.walsender_cxt.MyWalSnd->slot_idx = slot_idx;
+        }
     }
 
     LWLockRelease(ReplicationSlotControlLock);
@@ -447,6 +453,7 @@ void ReplicationSlotAcquire(const char *name, bool isDummyStandby, bool allowDro
     ReplicationSlot *slot = NULL;
     int i;
     bool active = false;
+    int slot_idx = -1;
 
     Assert(t_thrd.slot_cxt.MyReplicationSlot == NULL);
 
@@ -465,6 +472,7 @@ void ReplicationSlotAcquire(const char *name, bool isDummyStandby, bool allowDro
             vslot->active = true;
             SpinLockRelease(&s->mutex);
             slot = s;
+            slot_idx = i;
             break;
         }
     }
@@ -495,6 +503,9 @@ void ReplicationSlotAcquire(const char *name, bool isDummyStandby, bool allowDro
 
     /* We made this slot active, so it's ours now. */
     t_thrd.slot_cxt.MyReplicationSlot = slot;
+    if (t_thrd.walsender_cxt.MyWalSnd != NULL && t_thrd.walsender_cxt.MyWalSnd->pid != 0) {
+        t_thrd.walsender_cxt.MyWalSnd->slot_idx = slot_idx;
+    }
 }
 
 /*
@@ -734,6 +745,11 @@ static void ReplicationSlotDropAcquired(void)
     ReplicationSlotsComputeRequiredXmin(false);
     ReplicationSlotsComputeRequiredLSN(NULL);
 
+    /* reset the slot_idx to invalid */
+    if (t_thrd.walsender_cxt.MyWalSnd != NULL && t_thrd.walsender_cxt.MyWalSnd->slot_idx != -1) {
+        t_thrd.walsender_cxt.MyWalSnd->slot_idx = -1;
+    }
+
     /*
      * If removing the directory fails, the worst thing that will happen is
      * that the user won't be able to create a new slot with the same name
@@ -925,6 +941,7 @@ void ReplicationSlotsComputeRequiredLSN(ReplicationSlotState *repl_slt_state)
     XLogRecPtr max_required = InvalidXLogRecPtr;
     XLogRecPtr standby_slots_list[g_instance.attr.attr_storage.max_replication_slots];
     XLogRecPtr min_archive_restart_lsn = InvalidXLogRecPtr;
+    XLogRecPtr max_confirmed_lsn = InvalidXLogRecPtr;
     bool in_use = false;
     errno_t rc = EOK;
 
@@ -963,6 +980,14 @@ void ReplicationSlotsComputeRequiredLSN(ReplicationSlotState *repl_slt_state)
         SpinLockRelease(&s->mutex);
         CalculateMinAndMaxRequiredPtr(s, standby_slots_list, i, restart_lsn, &min_tools_required, &min_required,
             &min_archive_restart_lsn, &max_required);
+#ifndef ENABLE_MULTIPLE_NODES
+        if (g_instance.attr.attr_storage.enable_save_confirmed_lsn &&
+            GET_SLOT_PERSISTENCY(s->data) == RS_PERSISTENT &&
+            XLogRecPtrIsValid(s->data.confirmed_flush) &&
+            XLByteLT(max_confirmed_lsn, s->data.confirmed_flush)) {
+            max_confirmed_lsn = s->data.confirmed_flush;
+        }
+#endif
         continue;
     lock_release:
         SpinLockRelease(&s->mutex);
@@ -991,6 +1016,13 @@ void ReplicationSlotsComputeRequiredLSN(ReplicationSlotState *repl_slt_state)
                 }
             }
         }
+#ifndef ENABLE_MULTIPLE_NODES
+        if (g_instance.attr.attr_storage.enable_save_confirmed_lsn &&
+            XLogRecPtrIsValid(max_confirmed_lsn) &&
+            XLByteLT(max_confirmed_lsn, repl_slt_state->quorum_min_required)) {
+            repl_slt_state->quorum_min_required = max_confirmed_lsn;
+        }
+#endif
         repl_slt_state->min_tools_required = min_tools_required;
         repl_slt_state->min_archive_slot_required = min_archive_restart_lsn;
         repl_slt_state->exist_in_use = in_use;

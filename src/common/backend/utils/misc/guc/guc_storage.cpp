@@ -981,6 +981,19 @@ static void InitStorageConfigureNamesBool()
             NULL,
             NULL},
 #endif
+#ifndef ENABLE_MULTIPLE_NODES
+        {{"enable_save_confirmed_lsn",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            UNGROUPED,
+            gettext_noop("Enable save confirmed lsn at xact commit."),
+            NULL},
+            &g_instance.attr.attr_storage.enable_save_confirmed_lsn,
+            false,
+            NULL,
+            NULL,
+            NULL},
+#endif
         /* End-of-list marker */
         {{NULL,
             (GucContext)0,
