@@ -32,8 +32,10 @@ CREATE SUBSCRIPTION testsub CONNECTION 'testconn' PUBLICATION testpub;
 -- fail - unrecognized subscription parameter: create_slot
 CREATE SUBSCRIPTION testsub CONNECTION 'dbname=doesnotexist' PUBLICATION testpub WITH (create_slot=false);
 CREATE SUBSCRIPTION testsub CONNECTION 'dbname=doesnotexist' PUBLICATION testpub WITH (ENABLED=false, slot_name='testsub', synchronous_commit=off);
+CREATE SUBSCRIPTION testsub CONNECTION 'dbname=doesnotexist' PUBLICATION testpub WITH (CONNECT=false, slot_name='testsub', synchronous_commit=off);
 -- create SUBSCRIPTION with conninfo in two single quote, used to check mask string bug
 CREATE SUBSCRIPTION testsub_maskconninfo CONNECTION 'host=''1.2.3.4'' port=''12345'' user=''username'' dbname=''postgres'' password=''password_1234''' PUBLICATION testpub WITH (ENABLED=false, slot_name='testsub', synchronous_commit=off);
+CREATE SUBSCRIPTION testsub_maskconninfo CONNECTION 'host=''1.2.3.4'' port=''12345'' user=''username'' dbname=''postgres'' password=''password_1234''' PUBLICATION testpub WITH (CONNECT=false, slot_name='testsub', synchronous_commit=off);
 -- fail - The number of host and port are inconsistent
 create subscription sub1 connection 'dbname=postgres user=pubusr password=Huawei@123 host=192.168.0.38,192.168.0.38,192.168.0.38 port=14001,14501' publication pub1;
 -- fail - a maximum of 9 servers are supported
