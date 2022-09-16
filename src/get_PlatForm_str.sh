@@ -23,6 +23,9 @@ then
 elif [ -f "/etc/openEuler-release" ]
 then
     kernel=$(cat /etc/openEuler-release | awk -F ' ' '{print $1}' | tr A-Z a-z)
+elif [ -f "/etc/FusionOS-release" ]
+then
+    kernel=$(cat /etc/FusionOS-release | awk -F ' ' '{print $1}' | tr A-Z a-z)
 elif [ -f "/etc/centos-release" ]
 then
     kernel=$(cat /etc/centos-release | awk -F ' ' '{print $1}' | tr A-Z a-z)
@@ -121,6 +124,16 @@ fi
 if [ "$kernel"x = "openeuler"x ]
 then
     plat_form_str=openeuler_"$cpu_bit"
+fi
+
+
+##################################################################################
+# fusionos platform
+# the result form like this: fusionos_x86_64
+##################################################################################
+if [ "$kernel"x = "fusionos"x ]
+then
+    plat_form_str=fusionos_"$cpu_bit"
 fi
 
 
