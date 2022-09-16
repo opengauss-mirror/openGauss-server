@@ -467,6 +467,17 @@ select @v1;
 set @ v1:=10;
 select @v1:=10;
 
+\c test_set
+show enable_set_variable_b_format;
+set enable_set_variable_b_format = off;
+set @v1 := 1, @v2 := 2, @v3 := @v4 := 3;
+
+\c test_set
+show enable_set_variable_b_format;
+set enable_set_variable_b_format = on;
+set @v1 := 1, @v2 := 2, @v3 := @v4 := 3;
+select @v1, @v2, @v3, @v4;
+
 \c regression
 drop database if exists test_set;
 

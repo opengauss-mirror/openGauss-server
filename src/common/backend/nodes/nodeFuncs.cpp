@@ -235,6 +235,12 @@ Oid exprType(const Node* expr)
         case T_SetVariableExpr:
             type = ((const Const*)(((SetVariableExpr*)expr)->value))->consttype;
             break;
+        case T_UserSetElem:
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("user_defined variables cannot be set, such as @var_name := expr is not supported.")));
+            type = InvalidOid; /* keep compiler quiet */
+            break;
         default:
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unrecognized node type: %d", (int)nodeTag(expr))));
@@ -863,6 +869,12 @@ Oid exprCollation(const Node* expr)
         case T_SetVariableExpr:
             coll = ((const Const*)(((SetVariableExpr*)expr)->value))->constcollid;
             break;
+        case T_UserSetElem:
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("user_defined variables cannot be set, such as @var_name := expr is not supported.")));
+            coll = InvalidOid; /* keep compiler quiet */
+            break;
         default:
             ereport(
                 ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("unrecognized node type: %d", (int)nodeTag(expr))));
@@ -1067,6 +1079,11 @@ void exprSetCollation(Node* expr, Oid collation)
             return exprSetCollation((Node*)((const PrefixKey*)expr)->arg, collation);
         case T_SetVariableExpr:
             ((Const*)(((SetVariableExpr*)expr)->value))->constcollid = collation;
+            break;
+        case T_UserSetElem:
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("user_defined variables cannot be set, such as @var_name := expr is not supported.")));
             break;
         default:
             ereport(
@@ -1906,6 +1923,11 @@ bool expression_tree_walker(Node* node, bool (*walker)(), void* context)
             return p2walker(((AutoIncrement*)node)->expr, context);
         case T_PrefixKey:
             return p2walker(((PrefixKey*)node)->arg, context);
+        case T_UserSetElem:
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("user_defined variables cannot be set, such as @var_name := expr is not supported.")));
+            break;
         default:
             ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH),
                             errmsg("expression_tree_walker:unrecognized node type: %d", (int)nodeTag(node))));
@@ -2653,6 +2675,11 @@ Node* expression_tree_mutator(Node* node, Node* (*mutator)(Node*, void*), void* 
             FLATCOPY(newnode, (Const *)(oldnode->value), Const, isCopy);
             return (Node*)newnode;
         } break;
+        case T_UserSetElem:
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("user_defined variables cannot be set, such as @var_name := expr is not supported.")));
+            break;
         default:
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unrecognized node type: %d", (int)nodeTag(node))));
