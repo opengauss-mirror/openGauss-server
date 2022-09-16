@@ -595,7 +595,8 @@ static const TagStr g_tagStrArr[] = {{T_Invalid, "Invalid"},
     {T_AdvanceCatalogXminCmd, "AdvanceCatalogXminCmd"},
     {T_UserSetElem, "UserSetElem"},
     {T_UserVar, "UserVar"},
-    {T_SetVariableExpr, "SetVariableExpr"}
+    {T_SetVariableExpr, "SetVariableExpr"},
+    {T_VariableMultiSetStmt, "VariableMultiSetStmt"}
 };
 
 char* nodeTagToString(NodeTag tag)

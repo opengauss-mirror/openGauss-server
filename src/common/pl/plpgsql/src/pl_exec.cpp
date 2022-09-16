@@ -12665,11 +12665,8 @@ static bool needRecompilePlan(SPIPlanPtr plan)
         /*
          * if stmt is user_defined variables, recompile the query.
          */
-        if (plansource->raw_parse_tree != NULL && IsA(plansource->raw_parse_tree, VariableSetStmt)) {
-            VariableSetStmt *stmt = (VariableSetStmt *)plansource->raw_parse_tree;
-            if (stmt->kind == VAR_SET_DEFINED) {
-                return true;
-            }
+        if (plansource->raw_parse_tree != NULL && IsA(plansource->raw_parse_tree, VariableMultiSetStmt)) {
+            return true;
         }
 
         ret_val = checkRecompileCondition(plansource);

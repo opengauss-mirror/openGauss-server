@@ -2648,9 +2648,10 @@ Node* expression_tree_mutator(Node* node, Node* (*mutator)(Node*, void*), void* 
             return (Node*)newnode;
         } break;
         case T_SetVariableExpr: {
-            SetVariableExpr* oldnode = (SetVariableExpr *)node;
-            Const* newnode = NULL;
-            FLATCOPY(newnode, (Const *)(oldnode->value), Const, isCopy);
+            SetVariableExpr* oldnode = (SetVariableExpr*)node;
+            SetVariableExpr* newnode = NULL;
+            FLATCOPY(newnode, oldnode, SetVariableExpr, isCopy);
+            MUTATE(newnode->value, oldnode->value, Expr*);
             return (Node*)newnode;
         } break;
         default:

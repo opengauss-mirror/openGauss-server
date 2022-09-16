@@ -1179,7 +1179,9 @@ static List* pg_rewrite_query(Query* query)
             } else {
                 querytree_list = list_make1(query);
             }
-        } else if (IsA(query->utilityStmt, VariableSetStmt) || IsA(query->utilityStmt, AlterSystemStmt)) {
+        } else if (IsA(query->utilityStmt, VariableMultiSetStmt)) {
+            querytree_list = query_rewrite_multiset_stmt(query);
+        } else if (IsA(query->utilityStmt, VariableSetStmt)) {
             querytree_list = query_rewrite_set_stmt(query);
         } else {
             querytree_list = list_make1(query);
