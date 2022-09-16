@@ -134,8 +134,6 @@ extern ProtocolExtensionConfig default_protocol_config;
 
 void pq_close(int code, Datum arg);
 
-extern int internal_putbytes(const char* s, size_t len);
-
 /* Internal functions */
 static int internal_flush(void);
 static void pq_set_nonblocking(bool nonblocking);

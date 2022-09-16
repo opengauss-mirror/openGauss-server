@@ -266,7 +266,6 @@ static XLogRecPtr xlogCopyStart = InvalidXLogRecPtr;
  */
 static int InteractiveBackend(StringInfo inBuf);
 static int interactive_getc(void);
-extern int SocketBackend(StringInfo inBuf);
 static int ReadCommand(StringInfo inBuf);
 static List* pg_rewrite_query(Query* query);
 bool check_log_statement(List* stmt_list);

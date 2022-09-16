@@ -54,6 +54,7 @@
 #include "utils/elog.h"
 #include "utils/palloc.h"
 #include "storage/spin.h"
+#include "lib/stringinfo.h"
 
 #ifndef WIN32
 #include <cxxabi.h>
@@ -970,6 +971,9 @@ extern long codegenIRloadProcessCount;
 
 extern pthread_mutex_t nodeDefCopyLock;
 
+/* 	Returns the message type code, and loads message body data into inBuf */
+extern int SocketBackend(StringInfo inBuf);
+
 /* Job worker Process, execute procedure */
 extern void execute_simple_query(const char* query_string);
 
@@ -1017,7 +1021,6 @@ typedef enum {
 } ClusterRunMode;
 
 #ifdef ENABLE_UT
-#include "lib/stringinfo.h"
 extern void exec_describe_statement_message(const char* stmt_name);
 extern void exec_get_ddl_params(StringInfo input_message);
 #endif

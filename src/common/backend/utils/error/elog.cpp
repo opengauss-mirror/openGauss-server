@@ -146,7 +146,6 @@ static const int CREATE_ALTER_SUBSCRIPTION = 16;
 
 static void log_line_prefix(StringInfo buf, ErrorData* edata);
 static void send_message_to_server_log(ErrorData* edata);
-extern void send_message_to_frontend(ErrorData* edata);
 static char* expand_fmt_string(const char* fmt, ErrorData* edata);
 static const char* useful_strerror(int errnum);
 static const char* error_severity(int elevel);
