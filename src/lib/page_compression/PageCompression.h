@@ -17,6 +17,8 @@
 #define pfree(ptr) free(ptr)
 #endif
 
+#define COMP_ASIGNMENT 0x8000
+
 enum COMPRESS_ERROR_STATE {
     SUCCESS,
     NORMAL_OPEN_ERROR,
@@ -45,7 +47,7 @@ enum COMPRESS_ERROR_STATE {
     BUFFER_ALLOC_ERROR,
     FILE_CLOSE_ERROR
 };
-COMPRESS_ERROR_STATE ConstructCompressedFile(const char *toFullPath, BlockNumber segmentNo, uint16 chunkSize,
+COMPRESS_ERROR_STATE ConstructCompressedFile(const char *toFullPath, uint16 chunkSize,
                                              uint8 algorithm);
 extern bool FetchSourcePca(unsigned char* header, size_t len, RewindCompressInfo* info, size_t fileSize);
 bool ProcessLocalPca(const char *tablePath, RewindCompressInfo *rewindCompressInfo, const char *prefix = NULL);

@@ -1440,6 +1440,9 @@ static void fio_send_pages_impl(int out, char* buf)
                 rc = validate_one_page(read_buffer, req->segmentno + blknum,
                                                         InvalidXLogRecPtr, &page_st,
                                                         req->checksumVersion);
+                if (rc == PAGE_MAYBE_COMPRESSED && pageCompression != NULL) {
+                    rc = PAGE_IS_VALID;
+                }
 
                 /* TODO: optimize copy of zeroed page */
                 if (rc == PAGE_IS_ZEROED)
@@ -2276,7 +2279,7 @@ void fio_communicate(int in, int out)
                 break;
             case FIO_COSTRUCT_COMPRESSED: {
                 CompressCommunicate *cm = (CompressCommunicate *)(void *)buf;
-                COMPRESS_ERROR_STATE result = ConstructCompressedFile(cm->path, cm->segmentNo,
+                COMPRESS_ERROR_STATE result = ConstructCompressedFile(cm->path,
                                                                       (uint16)cm->chunkSize,
                                                                       (uint8)cm->algorithm);
                 IO_CHECK((int)result, (int)SUCCESS);

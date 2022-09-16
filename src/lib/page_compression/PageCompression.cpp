@@ -268,14 +268,19 @@ bool PageCompression::WriteBufferToCurrentBlock(char *buf, BlockNumber blkNumber
  * @param chunkSize chunk size
  * @return return chunk-aligned size of buffer
  */
-size_t CalRealWriteSize(char *buffer, BlockNumber segmentNo, BlockNumber blockNumber,
-                        decltype(PageCompressHeader::chunk_size) chunkSize)
+size_t CalRealWriteSize(char *buffer)
 {
-    /* todo wyc: normal page in comrpessed file. add some flag to reduce checksum */
-    if (PageIsNew(buffer) ||
-        pg_checksum_page(buffer, segmentNo * RELSEG_SIZE + blockNumber) == (PageHeader(buffer))->pd_checksum) {
+    PageHeader phdr = (PageHeader)buffer;
+    /* blank page */
+    if (PageIsNew(buffer)) {
         return BLCKSZ;
     }
+
+    /* check the assignment made during backup */
+    if ((phdr->pd_lower & COMP_ASIGNMENT) == 0) {
+        return BLCKSZ;
+    }
+
     size_t compressedBufferSize;
     uint8 pagetype = PageGetPageLayoutVersion(buffer);
     if (pagetype == PG_UHEAP_PAGE_LAYOUT_VERSION) {
@@ -321,8 +326,7 @@ inline void SetCompPageAddrInfo(CfsExtentAddress *destExtAddr, uint8 chunkNum, u
     destExtAddr->checksum = AddrChecksum32(destExtAddr, chunkNum);
 }
 
-COMPRESS_ERROR_STATE TranferIntoCompFile(FILE *srcFile, BlockNumber segmentNo,
-    CfsCompressOption *option, FILE *destFd)
+COMPRESS_ERROR_STATE TranferIntoCompFile(FILE *srcFile, CfsCompressOption *option, FILE *destFd)
 {
     BlockNumber extNo = 0;
     BlockNumber blockNumber = 0;
@@ -360,8 +364,12 @@ COMPRESS_ERROR_STATE TranferIntoCompFile(FILE *srcFile, BlockNumber segmentNo,
         }
 
         pcaHead->nblocks++;
-        size_t compSize = CalRealWriteSize(buffer, segmentNo, blockNumber, option->chunk_size);
+        size_t compSize = CalRealWriteSize(buffer);
         uint8 chunkNum = (uint8)((compSize + option->chunk_size - 1) / option->chunk_size);
+
+        /* remove compressed flag to recover original page */
+        PageHeader phdr = (PageHeader)buffer;
+        phdr->pd_lower &= (COMP_ASIGNMENT - 1);
 
         CfsExtentAddress *destExtAddr = GetExtentAddress(pcaHead, (uint16)(blockNumber % CFS_LOGIC_BLOCKS_PER_EXTENT));
         uint32 chunkStart = pcaHead->allocated_chunks + 1;
@@ -391,7 +399,7 @@ COMPRESS_ERROR_STATE TranferIntoCompFile(FILE *srcFile, BlockNumber segmentNo,
     }
 
     /* write last ext, which is not full */
-    if ((blockNumber + 1) % CFS_LOGIC_BLOCKS_PER_EXTENT != 0) {
+    if (blockNumber % CFS_LOGIC_BLOCKS_PER_EXTENT != 0) {
         /* an ext includes 128 pages, enough to write down */
         if (fwrite(extBuf, 1, CFS_EXTENT_SIZE * BLCKSZ, destFd) != CFS_EXTENT_SIZE * BLCKSZ) {
             pfree(unaligned_buf);
@@ -405,7 +413,7 @@ COMPRESS_ERROR_STATE TranferIntoCompFile(FILE *srcFile, BlockNumber segmentNo,
     return SUCCESS;
 }
 
-COMPRESS_ERROR_STATE ConstructCompressedFile(const char *toFullPath, BlockNumber segmentNo, uint16 chunkSize,
+COMPRESS_ERROR_STATE ConstructCompressedFile(const char *toFullPath, uint16 chunkSize,
                                              uint8 algorithm)
 {
     /* create tmp file to transfer file of toFullPath into the file with format of compression */
@@ -430,7 +438,7 @@ COMPRESS_ERROR_STATE ConstructCompressedFile(const char *toFullPath, BlockNumber
         return NORMAL_OPEN_ERROR;
     }
 
-    COMPRESS_ERROR_STATE ret = TranferIntoCompFile(srcFile, segmentNo, &option, destFd);
+    COMPRESS_ERROR_STATE ret = TranferIntoCompFile(srcFile, &option, destFd);
     if (fclose(srcFile) != 0 || fclose(destFd) != 0) {
         (void)fclose(destFd);
         (void)fclose(srcFile);
