@@ -342,6 +342,44 @@ SELECT justify_interval(interval '1 month -1 hour') as "1 month -1 hour";
  @ 29 days 23 hours
 (1 row)
 
+SELECT justify_interval('5 mon -50 days'::interval);
+ justify_interval 
+------------------
+ @ 3 mons 10 days
+(1 row)
+
+SELECT justify_interval('1 mon -47 days'::interval);
+ justify_interval 
+------------------
+ @ 17 days ago
+(1 row)
+
+SELECT justify_interval('1 mon -48 days'::interval);
+ justify_interval 
+------------------
+ @ 18 days ago
+(1 row)
+
+SELECT justify_interval('1 mon -48 days'::interval);
+ justify_interval 
+------------------
+ @ 18 days ago
+(1 row)
+
+select justify_interval('5 mon -2147483648 days'::interval);
+          justify_interval          
+------------------------------------
+ @ 5965231 years 11 mons 8 days ago
+(1 row)
+
+select justify_interval('5 mon -2147483648 days -128 hours'::interval);
+ERROR:  timestamp out of range
+CONTEXT:  referenced column: justify_interval
+select justify_interval('5 mon -2147483649 days'::interval);
+ERROR:  interval field value out of range: "5 mon -2147483649 days"
+LINE 1: select justify_interval('5 mon -2147483649 days'::interval);
+                                ^
+CONTEXT:  referenced column: justify_interval
 -- test fractional second input, and detection of duplicate units
 SET DATESTYLE = 'ISO';
 SET IntervalStyle TO postgres;
