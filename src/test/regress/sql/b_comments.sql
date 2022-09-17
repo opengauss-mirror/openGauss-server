@@ -135,7 +135,41 @@ where objoid = (
     select oid
     from pg_constraint
     where conname = 'partial');
+create table t_comment_0032
+(
+    id   int,
+    name varchar(50)
+);
+create unique index idx_0032 on t_comment_0032 (id);
 
+alter table t_comment_0032
+    add constraint pk_0032 primary key
+    using index idx_0032 comment 'pk_index';
+
+select description
+from pg_description
+where objoid = (
+    select oid
+    from pg_class
+    where relname = 'pk_0032');
+drop table if exists t_comment_0034;
+create table t_comment_0034
+(
+    id   int,
+    name varchar(50)
+);
+
+create unique index idx_0034 on t_comment_0034 (id);
+
+alter table t_comment_0034
+    add constraint uq_0034 unique
+    using index idx_0034 comment 'uq_index';
+
+select description
+from pg_description pd
+         join pg_class pc
+              on pd.objoid = pc.oid
+where pc.relname = 'uq_0034';
 drop schema b_comments cascade;
 reset search_path;
 \c postgres
