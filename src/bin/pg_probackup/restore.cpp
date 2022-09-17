@@ -1109,8 +1109,7 @@ inline void RestoreCompressFile(FILE *out, char *to_fullpath, pgFile *dest_file)
     if (dest_file->is_datafile && dest_file->compressed_file && !dest_file->is_cfs) {
         if (!fio_is_remote_file(out)) {
             COMPRESS_ERROR_STATE result = ConstructCompressedFile(
-                to_fullpath, (uint32)dest_file->segno,
-                dest_file->compressed_chunk_size, dest_file->compressed_algorithm);
+                to_fullpath, dest_file->compressed_chunk_size, dest_file->compressed_algorithm);
             if (result != SUCCESS) {
                 elog(ERROR, "Cannot copy compressed file \"%s\": %s", to_fullpath, strerror(errno));
             }

@@ -171,6 +171,7 @@ extern int validate_one_page(Page page, BlockNumber absolute_blkno,
 #define PAGE_HEADER_IS_INVALID (-4)
 #define PAGE_CHECKSUM_MISMATCH (-5)
 #define PAGE_LSN_FROM_FUTURE (-6)
+#define PAGE_MAYBE_COMPRESSED (-7)
 
 /* in catalog.c */
 extern pgBackup *read_backup(const char *root_dir);

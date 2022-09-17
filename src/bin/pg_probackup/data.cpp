@@ -342,15 +342,15 @@ bool
 parse_page(Page page, XLogRecPtr *lsn)
 {
     PageHeader	phdr = (PageHeader) page;
-
+    uint16 lower = phdr->pd_lower & (COMP_ASIGNMENT - 1);
     /* Get lsn from page header */
     *lsn = PageXLogRecPtrGet(phdr->pd_lsn);
 
     if (PageGetPageSize(phdr) == BLCKSZ &&
         //  ageGetPageLayoutVersion(phdr) == PG_PAGE_LAYOUT_VERSION &&
         (phdr->pd_flags & ~PD_VALID_FLAG_BITS) == 0 &&
-        phdr->pd_lower >= SizeOfPageHeaderData &&
-        phdr->pd_lower <= phdr->pd_upper &&
+        lower >= SizeOfPageHeaderData &&
+        lower <= phdr->pd_upper &&
         phdr->pd_upper <= phdr->pd_special &&
         phdr->pd_special <= BLCKSZ &&
         phdr->pd_special == MAXALIGN(phdr->pd_special))
@@ -464,7 +464,7 @@ prepare_page(ConnectionArgs *conn_arg,
                             Page page, bool strict,
                             uint32 checksum_version,
                             const char *from_fullpath,
-                            PageState *page_st, PageCompression *pageCompression)
+                            PageState *page_st, PageCompression *pageCompression, int &read_len)
 {
     int     try_again = PAGE_READ_ATTEMPTS;
     bool        page_is_valid = false;
@@ -484,7 +484,7 @@ prepare_page(ConnectionArgs *conn_arg,
     while (!page_is_valid && try_again--)
     {
         /* read the block */
-        int read_len = fio_pread(in, page, blknum * BLCKSZ, pageCompression);
+        read_len = fio_pread(in, page, blknum * BLCKSZ, pageCompression);
 
         /* The block could have been truncated. It is fine. */
         if (read_len == 0)
@@ -523,6 +523,14 @@ prepare_page(ConnectionArgs *conn_arg,
                 case PAGE_CHECKSUM_MISMATCH:
                     elog(VERBOSE, "File: \"%s\" blknum %u have wrong checksum, try again",
                     from_fullpath, blknum);
+                    break;
+                case PAGE_MAYBE_COMPRESSED:
+                    if (file->compressed_file) {
+                        return PageIsOk;
+                    } else {
+                        elog(VERBOSE, "File: \"%s\" blknum %u have wrong page header, try again",
+                        from_fullpath, blknum);
+                    }
                     break;
                 default:
                     Assert(false);
@@ -1608,6 +1616,11 @@ validate_one_page(Page page, BlockNumber absolute_blkno,
             return PAGE_LSN_FROM_FUTURE;
     }
 
+    /* if page compressed, pd_lower will be added with COMP_ASIGNMENT, bigger than pd_upper */
+    if (((PageHeader) page)->pd_lower > ((PageHeader) page)->pd_upper) {
+         return PAGE_MAYBE_COMPRESSED;
+    }
+
     return PAGE_IS_VALID;
 }
 
@@ -1659,10 +1672,11 @@ check_data_file(ConnectionArgs *arguments, pgFile *file,
     for (blknum = 0; blknum < nblocks; blknum++)
     {
         PageState page_st;
+        int read_len = -1;
         page_state = prepare_page(NULL, file, InvalidXLogRecPtr,
-                                                    blknum, in, BACKUP_MODE_FULL,
-                                                    curr_page, false, checksum_version,
-                                                    from_fullpath, &page_st, NULL);
+                                  blknum, in, BACKUP_MODE_FULL,
+                                  curr_page, false, checksum_version,
+                                  from_fullpath, &page_st, NULL, read_len);
 
         if (page_state == PageIsTruncated)
             break;
@@ -1881,7 +1895,12 @@ validate_file_pages(pgFile *file, const char *fullpath, XLogRecPtr stop_lsn,
                         (uint32) (page_st.lsn >> 32), (uint32) page_st.lsn,
                         (uint32) (stop_lsn >> 32), (uint32) stop_lsn);
                 break;
-
+            case PAGE_MAYBE_COMPRESSED:
+                if (!file->compressed_file) {
+                    elog(WARNING, "Page header is looking insane: %s, block %i", file->rel_path, blknum);
+                    is_valid = false;
+                }
+                break;
             default:
                 break;
         }
@@ -1946,6 +1965,9 @@ get_checksum_map(const char *fullpath, uint32 checksum_version,
             int rc = validate_one_page(read_buffer, segmentno + blknum,
             dest_stop_lsn, &page_st,
             checksum_version);
+            if (rc == PAGE_MAYBE_COMPRESSED && IsCompressedFile(fullpath, strlen(fullpath))) {
+                rc = PAGE_IS_VALID;
+            }
 
             if (rc == PAGE_IS_VALID)
             {
@@ -2017,6 +2039,9 @@ get_lsn_map(const char *fullpath, uint32 checksum_version,
         {
             int rc = validate_one_page(read_buffer, segmentno + blknum,
             shift_lsn, &page_st, checksum_version);
+            if (rc == PAGE_MAYBE_COMPRESSED && IsCompressedFile(fullpath, strlen(fullpath))) {
+                rc = PAGE_IS_VALID;
+            }
 
             if (rc == PAGE_IS_VALID)
                 datapagemap_add(lsn_map, blknum);
@@ -2187,10 +2212,11 @@ send_pages(ConnectionArgs* conn_arg, const char *to_fullpath, const char *from_f
     while (blknum < (BlockNumber)file->n_blocks)
     {
         PageState page_st;
+        int read_len = -1;
         int rc = prepare_page(conn_arg, file, prev_backup_start_lsn,
                                             blknum, in, backup_mode, curr_page,
                                             true, checksum_version,
-                                            from_fullpath, &page_st, pageCompression);
+                                            from_fullpath, &page_st, pageCompression, read_len);
         if (rc == PageIsTruncated)
             break;
 
@@ -2213,6 +2239,12 @@ send_pages(ConnectionArgs* conn_arg, const char *to_fullpath, const char *from_f
             (*headers)[hdr_num].pos = cur_pos_out;
             (*headers)[hdr_num].lsn = page_st.lsn;
             (*headers)[hdr_num].checksum = page_st.checksum;
+
+            /* make an assignment in page for judgement */
+            if (file->compressed_file && read_len == BLCKSZ) {
+                PageHeader phdr = (PageHeader)curr_page;
+                phdr->pd_lower |= COMP_ASIGNMENT;
+            }
 
             compressed_size = compress_and_backup_page(file, blknum, in, out, &(file->crc),
             rc, curr_page, calg, clevel,
