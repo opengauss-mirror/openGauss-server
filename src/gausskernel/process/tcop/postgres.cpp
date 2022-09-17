@@ -7410,8 +7410,8 @@ void LoadSqlPlugin()
     if (u_sess->proc_cxt.MyDatabaseId != InvalidOid && DB_IS_CMPT(B_FORMAT) && IsFileExisted(DOLPHIN)) {
         if (!u_sess->attr.attr_sql.dolphin && !u_sess->attr.attr_common.IsInplaceUpgrade) {
             Oid userId = GetUserId();
-            if (userId != INITIAL_USER_ID && !has_privs_of_role(userId, INITIAL_USER_ID)) {
-                ereport(WARNING, (errmsg("Use the original role or get original role's privilege to load extension dolphin")));
+            if (userId != INITIAL_USER_ID) {
+                ereport(WARNING, (errmsg("Use the original role to load extension dolphin")));
                 return;
             }
             /* recheck and load dolphin within lock */
