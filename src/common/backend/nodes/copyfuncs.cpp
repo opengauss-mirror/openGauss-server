@@ -5627,6 +5627,16 @@ static VariableSetStmt* _copyVariableSetStmt(const VariableSetStmt* from)
     COPY_NODE_FIELD(args);
     COPY_SCALAR_FIELD(is_local);
     COPY_NODE_FIELD(defined_args);
+    COPY_SCALAR_FIELD(is_multiset);
+
+    return newnode;
+}
+
+static VariableMultiSetStmt* _copyVariableMultiSetStmt(const VariableMultiSetStmt* from)
+{
+    VariableMultiSetStmt* newnode = makeNode(VariableMultiSetStmt);
+
+    COPY_NODE_FIELD(args);
 
     return newnode;
 }
@@ -7741,6 +7751,9 @@ void* copyObject(const void* from)
             break;
         case T_VariableSetStmt:
             retval = _copyVariableSetStmt((VariableSetStmt*)from);
+            break;
+        case T_VariableMultiSetStmt:
+            retval = _copyVariableMultiSetStmt((VariableMultiSetStmt*)from);
             break;
         case T_VariableShowStmt:
             retval = _copyVariableShowStmt((VariableShowStmt*)from);

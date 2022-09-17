@@ -3363,17 +3363,63 @@ char* GetInsertIntoStmt(CreateTableAsStmt* stmt)
     return cquery->data;
 }
 
+List *query_rewrite_multiset_stmt(Query *query)
+{
+    List* querytree_list = NIL;
+    VariableMultiSetStmt* muti_stmt = (VariableMultiSetStmt*)query->utilityStmt;
+    List* stmts = muti_stmt->args;
+    ListCell* cell = NULL;
+    VariableSetStmt *set_stmt;
+
+    foreach(cell, stmts) {
+        Node* stmt = (Node*)lfirst(cell);
+
+        if (nodeTag(stmt) == T_AlterSystemStmt) {
+            AlterSystemStmt* alter_sys_stmt = (AlterSystemStmt *)stmt;
+            set_stmt = alter_sys_stmt->setstmt;
+        } else {
+            set_stmt = (VariableSetStmt*)stmt;
+        }
+
+        if (list_length(set_stmt->args) > 1) {
+            ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("set %s takes only one argument", set_stmt->name)));
+        }
+
+        if(set_stmt->kind == VAR_SET_VALUE) {
+            List *resultlist = NIL;
+            ListCell *l = NULL;
+
+            foreach(l, set_stmt->args) {
+                Node* expr = (Node*)lfirst(l);
+                Node* node = NULL;
+
+                if(IsA(expr, A_Const)) {
+                    node = expr;
+                } else {
+                    node = eval_const_expression_value(NULL, expr, NULL);
+
+                    if(nodeTag(node) != T_Const) {
+                        node = QueryRewriteNonConstant(expr);
+                    }
+                    node = transferConstToAconst(node);
+                }
+                resultlist = lappend(resultlist, (A_Const*)node);
+            }
+            list_free(set_stmt->args);
+            set_stmt->args = resultlist;
+        }
+    }
+
+    querytree_list = list_make1(query);
+    return querytree_list;
+}
+
 List *query_rewrite_set_stmt(Query *query)
 {
     List* querytree_list = NIL;
-    VariableSetStmt *stmt;
-
-    if(IsA(query->utilityStmt, AlterSystemStmt)) {
-        AlterSystemStmt* alter_sys_stmt = (AlterSystemStmt*)query->utilityStmt;
-        stmt = alter_sys_stmt->setstmt;
-    } else {
-        stmt = (VariableSetStmt *)query->utilityStmt;
-    }
+    VariableSetStmt *stmt = (VariableSetStmt *)query->utilityStmt;
 
     if(DB_IS_CMPT(B_FORMAT) && stmt->kind == VAR_SET_VALUE && u_sess->attr.attr_common.enable_set_variable_b_format) {
         List *resultlist = NIL;
@@ -3401,7 +3447,6 @@ List *query_rewrite_set_stmt(Query *query)
     querytree_list = list_make1(query);
     return querytree_list;
 }
-
 
 List *QueryRewriteRefresh(Query *parse_tree)
 {

@@ -3253,17 +3253,6 @@ static TupleTableSlot* ExecReplace(EState* estate, ModifyTableState* node, Tuple
 
 }
 
-static TupleTableSlot* FetchPlanSlot(ModifyTableState* node, PlanState* subPlanState)
-{
-    EState* estate = node->ps.state;
-
-    if (estate->result_rel_index > 0) {
-        return ExecProject(node->mt_ProjInfos[estate->result_rel_index], NULL);
-    } else {
-        return ExecProcNode(subPlanState);
-    }
-}
-
 /* ----------------------------------------------------------------
  *	   ExecModifyTable
  *

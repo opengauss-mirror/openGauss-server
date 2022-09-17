@@ -545,7 +545,13 @@ typedef struct VariableSetStmt {
     List *args;    /* List of A_Const nodes */
     bool is_local; /* SET LOCAL? */
     List *defined_args;   /* List of user_defined variable */
+    bool is_multiset;    /* VariableMultiSetStmt ? */
 } VariableSetStmt;
+
+typedef struct VariableMultiSetStmt {
+    NodeTag type;
+    List *args;    /* List of VariableSetStmt nodes */
+} VariableMultiSetStmt;
 
 typedef struct UserVar {
     Expr xpr;

@@ -52,7 +52,6 @@ public:
     void ReaperAllSession();
     void ShutDown() const;
     bool GetSessIshang(instr_time* current_time, uint64* sessionId);
-    bool hasNoReadySession();
 
     inline ThreadPoolGroup* GetGroup()
     {

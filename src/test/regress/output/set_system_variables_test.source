@@ -29,11 +29,70 @@ select  @@global.dcf_connect_timeout;
 ERROR:  missing FROM-clause entry for table "global"
 LINE 1: select  @@global.dcf_connect_timeout;
                   ^
-\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "enable_set_variable_b_format=on" >/dev/null 2>&1
-\! sleep 1
--- dbcompatibility is B Format
+set global dcf_connect_timeout = 6000;
+ERROR:  SET UserVar/GLOBAL/SESSION is supported only in B-format database, and enable_set_variable_b_format = on.
+LINE 1: set global dcf_connect_timeout = 6000;
+        ^
+set global dcf_connect_timeout = abs(6000);
+ERROR:  SET UserVar/GLOBAL/SESSION is supported only in B-format database, and enable_set_variable_b_format = on.
+LINE 1: set global dcf_connect_timeout = abs(6000);
+        ^
+set session codegen_cost_threshold = 10000 * 1;
+ERROR:  SET supported expr value only in B_FORMAT and enable_set_variable_b_format is on.
+set codegen_cost_threshold = 10000 * 1;
+ERROR:  SET supported expr value only in B_FORMAT and enable_set_variable_b_format is on.
+set codegen_cost_threshold = (select 10000);
+ERROR:  SET supported expr value only in B_FORMAT and enable_set_variable_b_format is on.
 create database test_set dbcompatibility 'b';
 \c test_set
+-- dbcompatibility is B Format, enable_set_variable_b_format=off
+set codegen_cost_threshold = default;
+set codegen_cost_threshold = 10000;
+set @@codegen_cost_threshold = 10000;
+ERROR:  syntax error at or near "@@"
+LINE 1: set @@codegen_cost_threshold = 10000;
+            ^
+set @@session.codegen_cost_threshold = 10000;
+ERROR:  syntax error at or near "@@"
+LINE 1: set @@session.codegen_cost_threshold = 10000;
+            ^
+set @@session.codegen_cost_threshold = default;
+ERROR:  syntax error at or near "@@"
+LINE 1: set @@session.codegen_cost_threshold = default;
+            ^
+select @@session.codegen_cost_threshold;
+ERROR:  missing FROM-clause entry for table "session"
+LINE 1: select @@session.codegen_cost_threshold;
+                 ^
+select @@session.codegen_cost_threshold  = 1001;
+ERROR:  missing FROM-clause entry for table "session"
+LINE 1: select @@session.codegen_cost_threshold  = 1001;
+                 ^
+set @@global.dcf_connect_timeout = 6000;
+ERROR:  syntax error at or near "@@"
+LINE 1: set @@global.dcf_connect_timeout = 6000;
+            ^
+select  @@global.dcf_connect_timeout;
+ERROR:  missing FROM-clause entry for table "global"
+LINE 1: select  @@global.dcf_connect_timeout;
+                  ^
+set global dcf_connect_timeout = 6000;
+ERROR:  SET UserVar/GLOBAL/SESSION is supported only in B-format database, and enable_set_variable_b_format = on.
+LINE 1: set global dcf_connect_timeout = 6000;
+        ^
+set global dcf_connect_timeout = abs(6000);
+ERROR:  SET UserVar/GLOBAL/SESSION is supported only in B-format database, and enable_set_variable_b_format = on.
+LINE 1: set global dcf_connect_timeout = abs(6000);
+        ^
+set session codegen_cost_threshold = 10000 * 1;
+ERROR:  SET supported expr value only in B_FORMAT and enable_set_variable_b_format is on.
+set codegen_cost_threshold = 10000 * 1;
+ERROR:  SET supported expr value only in B_FORMAT and enable_set_variable_b_format is on.
+set codegen_cost_threshold = (select 10000);
+ERROR:  SET supported expr value only in B_FORMAT and enable_set_variable_b_format is on.
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "enable_set_variable_b_format=on" >/dev/null 2>&1
+\! sleep 1
+-- dbcompatibility is B Format, enable_set_variable_b_format=on
 -- test integer params, e.g. codegen_cost_threshold 
 set codegen_cost_threshold = default;
 set codegen_cost_threshold = 10000;
@@ -80,14 +139,19 @@ select abs(@@session.codegen_cost_threshold) + 1;
 
 set @@global.dcf_connect_timeout = '6000';
 NOTICE:  please restart the database for the POSTMASTER level parameter to take effect.
+NOTICE:  global parameter dcf_connect_timeout has been set
 set @@global.dcf_connect_timeout = 6000 + 1;
 NOTICE:  please restart the database for the POSTMASTER level parameter to take effect.
+NOTICE:  global parameter dcf_connect_timeout has been set
 set @@global.dcf_connect_timeout = @@global.dcf_connect_timeout * 2;
 NOTICE:  please restart the database for the POSTMASTER level parameter to take effect.
+NOTICE:  global parameter dcf_connect_timeout has been set
 set @@global.dcf_connect_timeout = (select 6000 + 1);
 NOTICE:  please restart the database for the POSTMASTER level parameter to take effect.
+NOTICE:  global parameter dcf_connect_timeout has been set
 set @@global.dcf_connect_timeout = 6000;
 NOTICE:  please restart the database for the POSTMASTER level parameter to take effect.
+NOTICE:  global parameter dcf_connect_timeout has been set
 select pg_sleep(1);
  pg_sleep 
 ----------
@@ -180,12 +244,19 @@ select @@session.enable_broadcast = 'true';
 (1 row)
 
 set global most_available_sync = t;
+NOTICE:  global parameter most_available_sync has been set
 set @@global.most_available_sync = t;
+NOTICE:  global parameter most_available_sync has been set
 set @@global.most_available_sync = true;
+NOTICE:  global parameter most_available_sync has been set
 set @@global.most_available_sync = 'true';
+NOTICE:  global parameter most_available_sync has been set
 set @@global.most_available_sync = false;
+NOTICE:  global parameter most_available_sync has been set
 set @@global.most_available_sync = on;
+NOTICE:  global parameter most_available_sync has been set
 set @@global.most_available_sync = off;
+NOTICE:  global parameter most_available_sync has been set
 -- fail example
 set enable_broadcast = 10000;
 ERROR:  parameter "enable_broadcast" requires a Boolean value
@@ -235,10 +306,15 @@ select char_length(@@session.application_name);
 (1 row)
 
 set @@global.syslog_ident = 'postgres1';
+NOTICE:  global parameter syslog_ident has been set
 set global syslog_ident = 'postgres1';
+NOTICE:  global parameter syslog_ident has been set
 set global syslog_ident = left('postgres1',8);
+NOTICE:  global parameter syslog_ident has been set
 set @@global.syslog_ident = ('postgres1' = 'postgres1');
+NOTICE:  global parameter syslog_ident has been set
 set @@global.syslog_ident = 'postgres';
+NOTICE:  global parameter syslog_ident has been set
 select pg_sleep(1);
  pg_sleep 
 ----------
@@ -304,8 +380,11 @@ select @@session.explain_perf_mode = 'normal';
 (1 row)
 
 set global trace_recovery_messages = log;
+NOTICE:  global parameter trace_recovery_messages has been set
 set @@global.trace_recovery_messages = info;
+NOTICE:  global parameter trace_recovery_messages has been set
 set @@global.trace_recovery_messages = log;
+NOTICE:  global parameter trace_recovery_messages has been set
 select pg_sleep(1);
  pg_sleep 
 ----------
@@ -365,9 +444,13 @@ select abs(@@cpu_index_tuple_cost);
 (1 row)
 
 set global checkpoint_completion_target = 0.3;
+NOTICE:  global parameter checkpoint_completion_target has been set
 set global checkpoint_completion_target = 0.3 * 1;
+NOTICE:  global parameter checkpoint_completion_target has been set
 set global checkpoint_completion_target = abs(0.3);
+NOTICE:  global parameter checkpoint_completion_target has been set
 set @@global.checkpoint_completion_target = abs(0.3);
+NOTICE:  global parameter checkpoint_completion_target has been set
 select pg_sleep(1);
  pg_sleep 
 ----------
@@ -410,6 +493,83 @@ insert into t1 values (1025);
 set @@session.backwrite_quantity = (select * from t1);
 ERROR:  more than one row returned by a subquery used as an expression
 CONTEXT:  referenced column: f1
+-- test multiset
+set global log_destination = 'stderr,syslog', @v1:=@v2:='aaa' ,@@codegen_cost_threshold = 10000, @v3:= 1, @@session.cpu_index_tuple_cost = default, @@application_name = (select 'gsql');
+NOTICE:  global parameter log_destination has been set
+set global log_destination = 'stderr,syslog', @@codegen_cost_threshold = 10000, @v1:= 1;
+NOTICE:  global parameter log_destination has been set
+set global log_destination = 'stderr', @@codegen_cost_threshold = abs(10000), @v1:= @@codegen_cost_threshold;
+NOTICE:  global parameter log_destination has been set
+set @@session.codegen_cost_threshold = 10000, @v2:=@v1:= 1;
+set global log_destination = 'stderr,syslog', @@codegen_cost_threshold = 10000, @v1:= 1, global checkpoint_completion_target = 0.3 * 1;
+NOTICE:  global parameter log_destination has been set
+NOTICE:  global parameter checkpoint_completion_target has been set
+set @v1 := 10000;
+set @v2:=@v1:= 9999,@@session.codegen_cost_threshold = @v1 ;
+-- fail e.g.
+set global log_destination = stderr,syslog;
+ERROR:  syntax error at or near "syslog"
+LINE 1: set global log_destination = stderr,syslog;
+                                            ^
+set global log_destination = stderr,syslog , @v1:= 1, @@codegen_cost_threshold = 10000;
+ERROR:  syntax error at or near "syslog"
+LINE 1: set global log_destination = stderr,syslog , @v1:= 1, @@code...
+                                            ^
+set global log_destination = stderr,syslog , @v1:= 1, @@codegen_cost_threshold = aa;
+ERROR:  syntax error at or near "syslog"
+LINE 1: set global log_destination = stderr,syslog , @v1:= 1, @@code...
+                                            ^
+set global log_destination = 'stderr', @v1:= 1, @@codegen_cost_threshold = 'aa';
+NOTICE:  global parameter log_destination has been set
+ERROR:  invalid value for parameter "codegen_cost_threshold": "aa"
+-- test procedure
+create table test_pro(a int);
+create or replace procedure pro1()
+as
+begin
+    insert into test_pro values(@@session_timeout);
+end;
+/
+call pro1();
+ pro1 
+------
+ 
+(1 row)
+
+set @@session_timeout = 700;
+call pro1();
+ pro1 
+------
+ 
+(1 row)
+
+set @@session_timeout = 800;
+call pro1();
+ pro1 
+------
+ 
+(1 row)
+
+select * from test_pro;
+  a  
+-----
+ 600
+ 700
+ 800
+(3 rows)
+
+create or replace procedure proc1 as
+declare
+v1 integer;
+v2 integer;
+begin
+set @@session.session_timeout = 240;
+set @@global.dcf_connect_timeout = 60000;
+select @@session.session_timeout, @@global.dcf_connect_timeout into v1,v2;
+raise info 'v1:%', v1;
+raise info 'v2:%', v2;
+end;
+/
 \c regression
 drop database if exists test_set;
 \! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "enable_set_variable_b_format=off" >/dev/null 2>&1

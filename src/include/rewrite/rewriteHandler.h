@@ -22,6 +22,7 @@ extern void AcquireRewriteLocks(Query* parsetree, bool forUpdatePushedDown);
 extern Node* build_column_default(Relation rel, int attrno, bool isInsertCmd = false, bool needOnUpdate = false);
 extern List* pull_qual_vars(Node* node, int varno = 0, int flags = 0, bool nonRepeat = false);
 extern void rewriteTargetListMerge(Query* parsetree, Index result_relation, List* range_table);
+extern List *query_rewrite_multiset_stmt(Query* parse_tree);
 extern List *query_rewrite_set_stmt(Query* parse_tree);
 
 #ifdef PGXC

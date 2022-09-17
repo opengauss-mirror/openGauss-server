@@ -22,6 +22,7 @@ extern Oid getMultiFuncInfo(char* fun_expr, PLpgSQL_expr* expr, bool isoutparamc
 extern void CheckOutParamIsConst(PLpgSQL_expr* expr);
 
 extern void lockSeqForNextvalFunc(Node* node);
+extern Node* transformSetVariableExpr(SetVariableExpr* set);
 
 /* start with ... connect by related output routines */
 extern bool IsPseudoReturnColumn(const char *colname);
