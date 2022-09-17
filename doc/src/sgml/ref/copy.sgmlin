@@ -36,7 +36,7 @@ COPY query
     | [ FIXED FORMATTER ( { column_name( offset, length ) } [, ...] ) ];
 
 where option can be:
-FORMAT 'format_name'
+FORMAT format_name
 | OIDS [ boolean ]
 | DELIMITER 'delimiter_character'
 | NULL 'null_string'
