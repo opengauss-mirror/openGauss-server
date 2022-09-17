@@ -449,3 +449,16 @@ char* GetComment(Oid oid, Oid classoid, int32 subid)
 
     return comment;
 }
+
+void CreateNonColumnComment(Oid oid, List *options, Oid objectType)
+{
+    ListCell *cell = NULL;
+    foreach (cell, options) {
+        void *pointer = lfirst(cell);
+        if (IsA(pointer, CommentStmt)) {
+            CommentStmt *commentStmt = (CommentStmt *)pointer;
+            CreateComments(oid, objectType, 0, commentStmt->comment);
+            break;
+        }
+    }
+}

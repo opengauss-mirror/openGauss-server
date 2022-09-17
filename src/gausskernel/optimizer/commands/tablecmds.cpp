@@ -1,4 +1,4 @@
-/* -------------------------------------------------------------------------
+ /* -------------------------------------------------------------------------
  *
  * tablecmds.cpp
  *	  Commands for creating and altering table structures and settings
@@ -11719,6 +11719,9 @@ static void ATAddForeignKeyConstraint(AlteredTableInfo* tab, Relation rel, Const
         true,                           /* isnoinherit */
         fkconstraint->inforConstraint); /* @hdfs informational constraint */
 
+    /* foreign key constraint */
+    CreateNonColumnComment(constrOid, fkconstraint->constraintOptions, ConstraintRelationId);
+    
     /*
      * Create the triggers that will enforce the constraint.
      */

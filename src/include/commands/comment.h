@@ -41,4 +41,5 @@ extern void CreateSharedComments(Oid oid, Oid classoid, const char* comment);
 
 extern char* GetComment(Oid oid, Oid classoid, int32 subid);
 
+extern void CreateNonColumnComment(Oid oid, List *options, Oid objectType);
 #endif /* COMMENT_H */

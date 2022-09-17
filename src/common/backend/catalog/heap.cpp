@@ -7653,7 +7653,7 @@ List* AddRelClusterConstraints(Relation rel, List* clusterKeys)
         /*
          * Create the Check Constraint
          */
-        CreateConstraintEntry(conname, /* Constraint Name */
+        Oid constraintOid = CreateConstraintEntry(conname, /* Constraint Name */
             RelationGetNamespace(rel), /* namespace */
             CONSTRAINT_CLUSTER,        /* Constraint Type */
             false,                     /* Is Deferrable */
@@ -7682,7 +7682,7 @@ List* AddRelClusterConstraints(Relation rel, List* clusterKeys)
             0,                      /* coninhcount */
             true,                   /* connoinherit */
             cdef->inforConstraint); /* @hdfs informational constraint */
-
+        CreateNonColumnComment(constraintOid, cdef->constraintOptions, ConstraintRelationId);
         pfree(attNums);
     }
 
