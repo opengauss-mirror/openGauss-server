@@ -2829,9 +2829,10 @@ Const* setValueToConstExpr(SetVariableExpr* set)
 {
     Const* result = NULL;
     Value* value;
-    Datum val;
-    Oid typid;
-    int typelen;
+    /* initial value is null Const */
+    Datum val = (Datum)0;
+    Oid typid = UNKNOWNOID;
+    int typelen = -2;
     bool typebyval = false;
 
     struct config_generic* record = NULL;
