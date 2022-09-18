@@ -3250,7 +3250,7 @@ static TupleTableSlot* ExecReplace(EState* estate, ModifyTableState* node, Tuple
             slot = ExecInsert(node, slot, plan_slot, estate, node->canSetTag, hi_options, &partition_list);
         }
     }
-
+    return slot;
 }
 
 /* ----------------------------------------------------------------
