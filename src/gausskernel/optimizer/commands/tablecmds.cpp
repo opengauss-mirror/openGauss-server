@@ -11089,7 +11089,9 @@ static void ATExecAddIndexConstraint(AlteredTableInfo* tab, Relation rel, IndexS
         true, /* update pg_index */
         true, /* remove old dependencies */
         (g_instance.attr.attr_common.allowSystemTableMods || u_sess->attr.attr_common.IsInplaceUpgrade));
-
+    /* index constraint */
+    CreateNonColumnComment(index_oid, stmt->indexOptions, RelationRelationId);
+  
     index_close(indexRel, NoLock);
 }
 
@@ -11719,6 +11721,9 @@ static void ATAddForeignKeyConstraint(AlteredTableInfo* tab, Relation rel, Const
         true,                           /* isnoinherit */
         fkconstraint->inforConstraint); /* @hdfs informational constraint */
 
+    /* foreign key constraint */
+    CreateNonColumnComment(constrOid, fkconstraint->constraintOptions, ConstraintRelationId);
+    
     /*
      * Create the triggers that will enforce the constraint.
      */

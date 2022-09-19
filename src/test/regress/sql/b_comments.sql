@@ -86,6 +86,90 @@ where objoid in (select relfilenode
                  from pg_class
                  where relnamespace in (select oid from pg_catalog.pg_namespace where nspname = 'b_comments'))
 order by description;
+/* foreign key */
+create table t_comment_0026
+(
+    pid  int,
+    name varchar(50),
+    sid  int,
+    constraint pk_0026 primary key (pid)
+);
+alter table t_comment_0026
+    add constraint fk_0026 foreign key (sid) references t_comment_0026 (pid) comment 'fk_index';
+select description
+from pg_description
+where objoid = (
+    select oid
+    from pg_constraint
+    where conname = 'fk_0026');
+create table t_comment_0058_01
+(
+    col1 int,
+    col2 varchar(50),
+    col3 int,
+    constraint pk_0058_01 primary key (col1),
+    constraint fk_0058_01 foreign key (col3)
+        references t_comment_0058_01 (col1) comment 'pk_0058_01'
+);
+select description
+from pg_description
+where objoid = (
+    select oid
+    from pg_constraint
+    where conname = 'fk_0058_01');
+
+create table fvt_distribute_query_tables_02
+(
+    c_id       varchar,
+    c_street_1 varchar(20),
+    c_city     text,
+    c_zip      varchar(9),
+    c_d_id     numeric,
+    c_w_id     text
+) with (orientation = column);
+alter table fvt_distribute_query_tables_02
+    add constraint partial partial cluster key(c_id) comment 'partial key';
+select description
+from pg_description
+where objoid = (
+    select oid
+    from pg_constraint
+    where conname = 'partial');
+create table t_comment_0032
+(
+    id   int,
+    name varchar(50)
+);
+create unique index idx_0032 on t_comment_0032 (id);
+
+alter table t_comment_0032
+    add constraint pk_0032 primary key
+    using index idx_0032 comment 'pk_index';
+
+select description
+from pg_description
+where objoid = (
+    select oid
+    from pg_class
+    where relname = 'pk_0032');
+drop table if exists t_comment_0034;
+create table t_comment_0034
+(
+    id   int,
+    name varchar(50)
+);
+
+create unique index idx_0034 on t_comment_0034 (id);
+
+alter table t_comment_0034
+    add constraint uq_0034 unique
+    using index idx_0034 comment 'uq_index';
+
+select description
+from pg_description pd
+         join pg_class pc
+              on pd.objoid = pc.oid
+where pc.relname = 'uq_0034';
 drop schema b_comments cascade;
 reset search_path;
 \c postgres

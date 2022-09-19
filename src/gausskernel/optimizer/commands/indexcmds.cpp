@@ -1524,19 +1524,10 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
      */
     AtEOXact_GUC(false, root_save_nestlevel);
     root_save_nestlevel = NewGUCNestLevel();
-
-
-        /* index options */
-    List *indexOptions = stmt->indexOptions;
-    foreach (cell, indexOptions) {
-        void *pointer = lfirst(cell);
-        if (IsA(pointer, CommentStmt)) {
-            CommentStmt *commentStmt = (CommentStmt *)pointer;
-            CreateComments(indexRelationId, RelationRelationId, 0, commentStmt->comment);
-            break;
-        }
-    }
-
+    
+    /* index options */
+    CreateNonColumnComment(indexRelationId, stmt->indexOptions, RelationRelationId);
+    
     /* Add any requested comment */
     if (stmt->idxcomment != NULL)
         CreateComments(indexRelationId, RelationRelationId, 0, stmt->idxcomment);
