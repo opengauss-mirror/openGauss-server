@@ -1085,7 +1085,7 @@ static void InitConfigureNamesBool()
             NULL},
 #endif
         {{"enable_set_variable_b_format",
-            PGC_SIGHUP,
+            PGC_USERSET,
             NODE_ALL,
             INSTRUMENTS_OPTIONS,
             gettext_noop("enable set variable in b format."),

@@ -1004,7 +1004,34 @@ ERROR:  syntax error at or near "@"
 LINE 1: set @ v1:=10;
             ^
 select @v1:=10;
-ERROR:  unrecognized node type: 5014
+ERROR:  user_defined variables cannot be set, such as @var_name := expr is not supported.
+\c test_set
+show enable_set_variable_b_format;
+ enable_set_variable_b_format 
+------------------------------
+ on
+(1 row)
+
+set enable_set_variable_b_format = off;
+set @v1 := 1, @v2 := 2, @v3 := @v4 := 3;
+ERROR:  syntax error at or near "set @"
+LINE 1: set @v1 := 1, @v2 := 2, @v3 := @v4 := 3;
+        ^
+\c test_set
+show enable_set_variable_b_format;
+ enable_set_variable_b_format 
+------------------------------
+ on
+(1 row)
+
+set enable_set_variable_b_format = on;
+set @v1 := 1, @v2 := 2, @v3 := @v4 := 3;
+select @v1, @v2, @v3, @v4;
+ @v1 | @v2 | @v3 | @v4 
+-----+-----+-----+-----
+   1 |   2 |   3 |   3
+(1 row)
+
 \c regression
 drop database if exists test_set;
 \! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "enable_set_variable_b_format=off" >/dev/null 2>&1
