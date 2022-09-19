@@ -6937,13 +6937,15 @@ int main(int argc, char** argv)
             } else {
                 pg_log(PG_PROGRESS, _("Another gs_ctl command is still running, restore failed.\n"));
             }
+            break;
         case COPY_COMMAND:
             if (-1 != pg_ctl_lock(pg_ctl_lockfile, &lockfile)) {
                 do_xlog_copy();
                 (void)pg_ctl_unlock(lockfile);
             } else {
-                pg_log(PG_PROGRESS, _("Another gs_ctl command is still running, restore failed.\n"));
+                pg_log(PG_PROGRESS, _("Another gs_ctl command is still running, copy failed.\n"));
             }
+            break;
         default:
             break;
     }
