@@ -216,7 +216,7 @@ EOSQL
 
 docker_setup_rep_user() {
         if [ -n "$SERVER_MODE" ] && [ "$SERVER_MODE" = "primary" ]; then
-                GS_DB= docker_process_sql --dbname postgres --set passwd="RepUser@2020" --set user="repuser" <<-'EOSQL'
+                GS_DB= docker_process_sql --dbname postgres --set passwd="$GS_PASSWORD" --set user="repuser" <<-'EOSQL'
                         create user :"user" SYSADMIN REPLICATION password :"passwd" ;
 EOSQL
         else
