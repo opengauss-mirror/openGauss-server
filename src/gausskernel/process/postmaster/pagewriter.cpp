@@ -2192,7 +2192,7 @@ static void incre_ckpt_pgwr_scan_candidate_list(WritebackContext *wb_context, Ca
     int batch_scan_num = 0;
     uint32 max_flush_num = 0;
     bool am_standby = g_instance.ckpt_cxt_ctl->is_standby_mode;
-    int shared_buffers;
+    int shared_buffers = NORMAL_SHARED_BUFFER_NUM;
 
     if (type == CAND_LIST_NVM) {
         shared_buffers = NVM_BUFFER_NUM;
