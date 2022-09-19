@@ -521,6 +521,7 @@ static void processFunctionRecordOutParam(int varno, Oid funcoid, int* outparam)
 %token <keyword>	K_REF
 %token <keyword>	K_RELATIVE
 %token <keyword>	K_RELEASE
+%token <keyword>	K_REPLACE
 %token <keyword>	K_RESULT_OID
 %token <keyword>	K_RETURN
 %token <keyword>	K_RETURNED_SQLSTATE
@@ -3829,6 +3830,10 @@ stmt_execsql			: K_ALTER
                 | K_INSERT
                     {
                         $$ = make_execsql_stmt(K_INSERT, @1);
+                    }
+                | K_REPLACE
+                    {
+                        $$ = make_execsql_stmt(K_REPLACE, @1);
                     }
                 | K_SELECT		/* DML:select */
                     {
@@ -8771,7 +8776,7 @@ make_execsql_stmt(int firsttoken, int location)
 
         if (tok == K_INTO)
         {
-            if (prev_tok == K_INSERT || (prev_tok == COMMENTSTRING && prev_prev_tok == K_INSERT)) {
+            if (prev_tok == K_INSERT || prev_tok == K_REPLACE || (prev_tok == COMMENTSTRING && (prev_prev_tok == K_INSERT || prev_prev_tok == K_REPLACE))) {
                 insert_stmt = true;
                 continue;	/* INSERT INTO is not an INTO-target */
             }

@@ -261,6 +261,26 @@ select * from replace_test2;
   2 | bbbbb               
 (3 rows)
 
+create or replace procedure  replace_p() as 
+begin
+replace into replace_test2 values(1,'ccccc');
+end;
+/
+call replace_p();
+ replace_p 
+-----------
+ 
+(1 row)
+
+select * from replace_test2;
+ id |         name         
+----+----------------------
+  1 | aaaaa               
+  1 | aaaaa               
+  2 | bbbbb               
+  1 | ccccc               
+(4 rows)
+
 drop table replace_test2;
 create table t_range_list
 ( id number PRIMARY KEY not null,

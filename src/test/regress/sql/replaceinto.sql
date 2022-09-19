@@ -106,6 +106,15 @@ replace into replace_test2 values(1,'aaaaa');
 replace into replace_test2 values(1,'aaaaa');
 replace into replace_test2 values(2,'bbbbb');
 select * from replace_test2;
+
+create or replace procedure  replace_p() as 
+begin
+replace into replace_test2 values(1,'ccccc');
+end;
+/
+
+call replace_p();
+select * from replace_test2;
 drop table replace_test2;
 
 create table t_range_list
