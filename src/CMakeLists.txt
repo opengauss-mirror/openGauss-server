@@ -114,6 +114,7 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/catalog DESTINATION includ
     PATTERN "pg_proc.h_for_llt" EXCLUDE
     PATTERN "duplicate_oids" EXCLUDE
 )
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/include/access/ustore/knl_uverify.h DESTINATION include/postgresql/server/access/ustore)
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/client_logic DESTINATION include/postgresql/server)
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/nodes DESTINATION include/postgresql/server)
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/hotpatch DESTINATION include/postgresql/server)
@@ -122,6 +123,8 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/datatype DESTINATION inclu
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/regex DESTINATION include/postgresql/server)
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/include/instruments/list.h DESTINATION include/postgresql/server/instruments)
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/include/instruments/instr_event.h DESTINATION include/postgresql/server/instruments)
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/include/instruments/gs_stack.h DESTINATION include/postgresql/server/instruments)
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/include/instruments/instr_mfchain.h DESTINATION include/postgresql/server/instruments)
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/include/tde_key_management/data_common.h DESTINATION include/postgresql/server/tde_key_management)
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/bulkload DESTINATION include/postgresql/server)
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/gstrace DESTINATION include/postgresql/server)

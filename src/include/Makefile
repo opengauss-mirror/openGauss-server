@@ -115,6 +115,7 @@ endif
 	$(INSTALL_DATA) access/ustore/knl_uredo.h '$(DESTDIR)$(includedir_server)/access/ustore/knl_uredo.h'
 	$(INSTALL_DATA) access/ustore/knl_uundovec.h '$(DESTDIR)$(includedir_server)/access/ustore/knl_uundovec.h'
 	$(INSTALL_DATA) access/ustore/knl_uundorecord.h '$(DESTDIR)$(includedir_server)/access/ustore/knl_uundorecord.h'
+	$(INSTALL_DATA) access/ustore/knl_uverify.h '$(DESTDIR)$(includedir_server)/access/ustore/knl_uverify.h'
 	$(INSTALL_DATA) access/ustore/undo/knl_uundoxlog.h '$(DESTDIR)$(includedir_server)/access/ustore/undo/knl_uundoxlog.h'
 	$(INSTALL_DATA) access/ustore/undo/knl_uundotxn.h '$(DESTDIR)$(includedir_server)/access/ustore/undo/knl_uundotxn.h'
 	$(INSTALL_DATA) access/ustore/undo/knl_uundozone.h '$(DESTDIR)$(includedir_server)/access/ustore/undo/knl_uundozone.h'
@@ -125,6 +126,9 @@ endif
 	$(INSTALL_DATA) executor/exec/execdesc.h '$(DESTDIR)$(includedir_server)/executor/exec/execdesc.h'
 	$(INSTALL_DATA) db4ai/matrix.h '$(DESTDIR)$(includedir_server)/db4ai/matrix.h'
 	$(INSTALL_DATA) db4ai/scores.h '$(DESTDIR)$(includedir_server)/db4ai/scores.h'
+	$(INSTALL_DATA) db4ai/db4ai.h '$(DESTDIR)$(includedir_server)/db4ai/db4ai.h'
+	$(INSTALL_DATA) instruments/gs_stack.h '$(DESTDIR)$(includedir_server)/instruments/gs_stack.h'
+	$(INSTALL_DATA) instruments/instr_mfchain.h '$(DESTDIR)$(includedir_server)/instruments/instr_mfchain.h'
 # We don't use INSTALL_DATA for performance reasons --- there are a lot of files
 	cp $(srcdir)/*.h '$(DESTDIR)$(includedir_server)'/ || exit; \
 	chmod $(INSTALL_DATA_MODE) '$(DESTDIR)$(includedir_server)'/*.h  || exit; \

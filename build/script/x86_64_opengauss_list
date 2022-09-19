@@ -1003,6 +1003,7 @@
 ./include/postgresql/server/knl/knl_guc/knl_instance_attr_resource.h
 ./include/postgresql/server/knl/knl_guc/knl_session_attr_common.h
 ./include/postgresql/server/knl/knl_guc/knl_instance_attr_common.h
+./include/postgresql/server/access/ustore/knl_uverify.h
 ./include/postgresql/server/lib/circularqueue.h
 ./include/postgresql/server/access/double_write_basic.h
 ./include/postgresql/server/knl/knl_thread.h
@@ -1113,6 +1114,8 @@
 ./include/postgresql/server/commands/trigger.h
 ./include/postgresql/server/executor/spi.h
 ./include/postgresql/server/db4ai/db4ai.h
+./include/postgresql/server/instruments/gs_stack.h
+./include/postgresql/server/instruments/instr_mfchain.h
 ./jre/ASSEMBLY_EXCEPTION
 ./jre/bin/java
 ./jre/bin/jjs
