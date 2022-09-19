@@ -389,6 +389,72 @@ void RemoveDirectoryById(Oid dirOid)
     heap_close(relation, RowExclusiveLock);
 }
 
+static void AlterPgDirectoryOwner_internal(Relation rel, HeapTuple tuple, Oid newOwnerId)
+{
+    Form_pg_directory dirForm = (Form_pg_directory)GETSTRUCT(tuple);
+    /*
+     * If the new owner is the same as the existing owner, consider the
+     * command to have succeeded.  This is to be consistent with other
+     * objects.
+     */
+    if (dirForm->owner == newOwnerId) {
+        return;
+    }
+
+    Datum repl_val[Natts_pg_directory];
+    bool repl_null[Natts_pg_directory];
+    bool repl_repl[Natts_pg_directory];
+    Acl* newAcl = NULL;
+    Datum aclDatum;
+    bool isNull = false;
+    HeapTuple newtuple;
+    errno_t rc;
+
+    if (u_sess->attr.attr_storage.enable_access_server_directory) {
+        /* must be sysadmin or owner of the existing object */
+        if (!superuser() && !pg_directory_ownercheck(HeapTupleGetOid(tuple), GetUserId())) {
+            aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_DIRECTORY, NameStr(dirForm->dirname));
+        }
+    } else {
+        if (!initialuser()) {
+            ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                errmsg("permission denied to change owner of directory"),
+                    errhint("must be initial user to change owner of a directory")));
+        }
+    }
+
+    /* Must be able to become new owner */
+    check_is_member_of_role(GetUserId(), newOwnerId);
+
+    rc = memset_s(repl_null, sizeof(repl_null), false, sizeof(repl_null));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(repl_repl, sizeof(repl_repl), false, sizeof(repl_repl));
+    securec_check(rc, "\0", "\0");
+
+    repl_repl[Anum_pg_directory_owner - 1] = true;
+    repl_val[Anum_pg_directory_owner - 1] = ObjectIdGetDatum(newOwnerId);
+
+    /*
+     * Determine the modified ACL for the new owner.  This is only
+     * necessary when the ACL is non-null.
+     */
+    aclDatum = tableam_tops_tuple_getattr(tuple, Anum_pg_directory_directory_acl, RelationGetDescr(rel), &isNull);
+    if (!isNull) {
+        newAcl = aclnewowner(DatumGetAclP(aclDatum), dirForm->owner, newOwnerId);
+        repl_repl[Anum_pg_directory_directory_acl - 1] = true;
+        repl_val[Anum_pg_directory_directory_acl - 1] = PointerGetDatum(newAcl);
+    }
+
+    newtuple = (HeapTuple) tableam_tops_modify_tuple(tuple, RelationGetDescr(rel), repl_val, repl_null, repl_repl);
+    simple_heap_update(rel, &newtuple->t_self, newtuple);
+    CatalogUpdateIndexes(rel, newtuple);
+
+    tableam_tops_free_tuple(newtuple);
+
+    /* Update owner dependency reference */
+    changeDependencyOnOwner(PgDirectoryRelationId, HeapTupleGetOid(tuple), newOwnerId);
+}
+
 /*
  * ALTER Directory name OWNER TO newowner
  */
@@ -398,7 +464,6 @@ void AlterDirectoryOwner(const char* dirname, Oid newOwnerId)
     Relation rel;
     ScanKeyData scankey;
     SysScanDesc scan = NULL;
-    Form_pg_directory dirForm = NULL;
 
     /*
      * Get the old tuple.  We don't need a lock on the directory per se,
@@ -413,69 +478,30 @@ void AlterDirectoryOwner(const char* dirname, Oid newOwnerId)
         heap_close(rel, RowExclusiveLock);
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("directory \"%s\" does not exist", dirname)));
     }
-    dirForm = (Form_pg_directory)GETSTRUCT(tuple);
-    /*
-     * If the new owner is the same as the existing owner, consider the
-     * command to have succeeded.  This is to be consistent with other
-     * objects.
-     */
-    if (dirForm->owner != newOwnerId) {
-        Datum repl_val[Natts_pg_directory];
-        bool repl_null[Natts_pg_directory];
-        bool repl_repl[Natts_pg_directory];
-        Acl* newAcl = NULL;
-        Datum aclDatum;
-        bool isNull = false;
-        HeapTuple newtuple;
-        errno_t rc;
 
-        if (u_sess->attr.attr_storage.enable_access_server_directory) {
-            /* must be sysadmin or owner of the existing object */
-            if (!superuser() && !pg_directory_ownercheck(HeapTupleGetOid(tuple), GetUserId())) {
-                aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_DIRECTORY, dirname);
-            }
-        } else {
-            if (!initialuser()) {
-                ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-                    errmsg("permission denied to change owner of directory"),
-                        errhint("must be initial user to change owner of a directory")));
-            }
-        }
-
-        /* Must be able to become new owner */
-        check_is_member_of_role(GetUserId(), newOwnerId);
-
-        rc = memset_s(repl_null, sizeof(repl_null), false, sizeof(repl_null));
-        securec_check(rc, "\0", "\0");
-        rc = memset_s(repl_repl, sizeof(repl_repl), false, sizeof(repl_repl));
-        securec_check(rc, "\0", "\0");
-
-        repl_repl[Anum_pg_directory_owner - 1] = true;
-        repl_val[Anum_pg_directory_owner - 1] = ObjectIdGetDatum(newOwnerId);
-
-        /*
-         * Determine the modified ACL for the new owner.  This is only
-         * necessary when the ACL is non-null.
-         */
-        aclDatum = tableam_tops_tuple_getattr(tuple, Anum_pg_directory_directory_acl, RelationGetDescr(rel), &isNull);
-        if (!isNull) {
-            newAcl = aclnewowner(DatumGetAclP(aclDatum), dirForm->owner, newOwnerId);
-            repl_repl[Anum_pg_directory_directory_acl - 1] = true;
-            repl_val[Anum_pg_directory_directory_acl - 1] = PointerGetDatum(newAcl);
-        }
-
-        newtuple = (HeapTuple) tableam_tops_modify_tuple(tuple, RelationGetDescr(rel), repl_val, repl_null, repl_repl);
-        simple_heap_update(rel, &newtuple->t_self, newtuple);
-        CatalogUpdateIndexes(rel, newtuple);
-
-        tableam_tops_free_tuple(newtuple);
-
-        /* Update owner dependency reference */
-        changeDependencyOnOwner(PgDirectoryRelationId, HeapTupleGetOid(tuple), newOwnerId);
-    }
+    AlterPgDirectoryOwner_internal(rel, tuple, newOwnerId);
 
     systable_endscan(scan);
 
     /* Close pg_database, but keep lock till commit */
     heap_close(rel, NoLock);
 }
+
+
+void AlterPgDirectoryOwner_oid(Oid dirOid, Oid newOwnerId)
+{
+    Relation rel;
+    HeapTuple tup = NULL;
+
+    rel = heap_open(PgDirectoryRelationId, RowExclusiveLock);
+
+    tup = SearchSysCacheCopy1(DIRECTORYOID, ObjectIdGetDatum(dirOid));
+    if (!HeapTupleIsValid(tup)) /* should not happen */
+        ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for directory %u", dirOid)));
+
+    AlterPgDirectoryOwner_internal(rel, tup, newOwnerId);
+
+    heap_freetuple(tup);
+    heap_close(rel, NoLock);
+}
+

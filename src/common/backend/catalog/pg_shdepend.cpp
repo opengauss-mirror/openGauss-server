@@ -57,6 +57,7 @@
 #include "commands/sec_rls_cmds.h"
 #include "commands/tablecmds.h"
 #include "commands/typecmds.h"
+#include "commands/directory.h"
 #include "storage/lmgr.h"
 #include "miscadmin.h"
 #include "utils/acl.h"
@@ -1410,6 +1411,10 @@ void shdepReassignOwned(List* roleids, Oid newrole)
 
                 case SubscriptionRelationId:
                     AlterSubscriptionOwner_oid(sdepForm->objid, newrole);
+                    break;
+
+                case PgDirectoryRelationId:
+                    AlterPgDirectoryOwner_oid(sdepForm->objid, newrole);
                     break;
 
                 default:
