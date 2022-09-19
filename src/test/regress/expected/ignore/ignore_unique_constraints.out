@@ -365,6 +365,48 @@ select * from t_ignore;
    2
 (2 rows)
 
+-- test for update table with primary key
+drop table if exists t_pri_key_update;
+NOTICE:  table "t_pri_key_update" does not exist, skipping
+create table t_pri_key_update(c1 int primary key, c2 int);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_pri_key_update_pkey" for table "t_pri_key_update"
+insert into t_pri_key_update values(1, 101), (2, 201);
+update /*+ ignore_error */ t_pri_key_update set c2 = 999 where c1 = 2;
+select * from t_pri_key_update;
+ c1 | c2  
+----+-----
+  1 | 101
+  2 | 999
+(2 rows)
+
+drop table t_pri_key_update;
+create table t_pri_key_update_partition (c1 int primary key, c2 int)
+    partition by list(c2)
+(
+partition p1 values (1),
+partition p2 values (10),
+partition p3 values (100),
+partition p4 values (500)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_pri_key_update_partition_pkey" for table "t_pri_key_update_partition"
+insert into t_pri_key_update_partition values (1, 1), (10, 10), (100, 100);
+select * from t_pri_key_update_partition;
+ c1  | c2  
+-----+-----
+ 100 | 100
+  10 |  10
+   1 |   1
+(3 rows)
+
+update /*+ ignore_error */ t_pri_key_update_partition set c2 = 500 where c1 = 10;
+select * from t_pri_key_update_partition;
+ c1  | c2  
+-----+-----
+  10 | 500
+ 100 | 100
+   1 |   1
+(3 rows)
+
 -- test for column orientation table: not supported
 drop table if exists t_column_orien cascade;
 NOTICE:  table "t_column_orien" does not exist, skipping
