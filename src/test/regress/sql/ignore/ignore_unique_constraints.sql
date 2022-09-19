@@ -177,6 +177,27 @@ insert into t_ignore values(2);
 update /*+ ignore_error */ t_ignore set num = 1 where num = 2;
 select * from t_ignore;
 
+-- test for update table with primary key
+drop table if exists t_pri_key_update;
+create table t_pri_key_update(c1 int primary key, c2 int);
+insert into t_pri_key_update values(1, 101), (2, 201);
+update /*+ ignore_error */ t_pri_key_update set c2 = 999 where c1 = 2;
+select * from t_pri_key_update;
+drop table t_pri_key_update;
+
+create table t_pri_key_update_partition (c1 int primary key, c2 int)
+    partition by list(c2)
+(
+partition p1 values (1),
+partition p2 values (10),
+partition p3 values (100),
+partition p4 values (500)
+);
+insert into t_pri_key_update_partition values (1, 1), (10, 10), (100, 100);
+select * from t_pri_key_update_partition;
+update /*+ ignore_error */ t_pri_key_update_partition set c2 = 500 where c1 = 10;
+select * from t_pri_key_update_partition;
+
 -- test for column orientation table: not supported
 drop table if exists t_column_orien cascade;
 create table t_column_orien(c1 int primary key) with (orientation=column);

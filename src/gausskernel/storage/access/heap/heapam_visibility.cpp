@@ -1945,10 +1945,12 @@ void HeapTupleCheckVisible(Snapshot snapshot, HeapTuple tuple, Buffer buffer)
         return;
     LockBuffer(buffer, BUFFER_LOCK_SHARE);
     if (!HeapTupleSatisfiesVisibility(tuple, snapshot, buffer)) {
-        LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
-        ereport(ERROR,
-                (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+        TransactionId tupleXmin = HeapTupleHeaderGetXmin(BufferGetPage(buffer), tuple->t_data);
+        if (!TransactionIdIsCurrentTransactionId(tupleXmin)) {
+            LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
+            ereport(ERROR, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
                  errmsg("could not serialize access due to concurrent update")));
+        }
     }
     LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
 }

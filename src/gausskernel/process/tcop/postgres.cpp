@@ -750,8 +750,12 @@ static int ReadCommand(StringInfo inBuf)
 #ifndef ENABLE_MULTIPLE_NODES
     /* if idle_in_transaction_session_timeout > 0 and it is in a transaction in idle,
      * then start a timer for idle_in_transaction_session.
+     * In addition, if u_sess->attr.attr_common.SessionTimeout > 0 and
+     * u_sess->attr.attr_common.SessionTimeout > u_sess->attr.attr_common.IdleInTransactionSessionTimeout,
+     * we will select the smaller one as timeout, that is to say, only start the timer for session timeout.
      */
     if (u_sess->attr.attr_common.IdleInTransactionSessionTimeout > 0 &&
+        u_sess->attr.attr_common.SessionTimeout > u_sess->attr.attr_common.IdleInTransactionSessionTimeout &&
         (IsAbortedTransactionBlockState() || IsTransactionOrTransactionBlock())) {
         if (!enable_idle_in_transaction_session_sig_alarm(
             u_sess->attr.attr_common.IdleInTransactionSessionTimeout * 1000)) {
@@ -775,9 +779,11 @@ static int ReadCommand(StringInfo inBuf)
 #ifndef ENABLE_MULTIPLE_NODES
     /* Disable a timer for idle_in_transaction_session. */
     if (u_sess->attr.attr_common.IdleInTransactionSessionTimeout > 0 &&
-        (IsAbortedTransactionBlockState() || IsTransactionOrTransactionBlock()) &&
-        !disable_idle_in_transaction_session_sig_alarm()) {
-        ereport(FATAL, (errcode(ERRCODE_SYSTEM_ERROR), errmsg("could not disable timer for idle-in-transaction timeout")));
+        u_sess->attr.attr_common.SessionTimeout > u_sess->attr.attr_common.IdleInTransactionSessionTimeout &&
+        (IsAbortedTransactionBlockState() || IsTransactionOrTransactionBlock())) {
+        if (!disable_idle_in_transaction_session_sig_alarm()) {
+            ereport(FATAL, (errcode(ERRCODE_SYSTEM_ERROR), errmsg("could not disable timer for idle-in-transaction timeout")));
+        }
     }
 #endif
 
