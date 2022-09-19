@@ -52,7 +52,8 @@ bool UHeapTupleFetch(Relation rel, Buffer buffer, OffsetNumber offnum, Snapshot 
     ItemPointer newCtid, bool keepTup, UHeapTupleTransInfo *savedUinfo = NULL, bool *gotTdInfo = NULL,
     const UHeapTuple *saved_tuple = NULL, int16 lastVar = -1, bool *boolArr = NULL, bool *has_cur_xact_write = NULL);
 
-bool UHeapTupleSatisfiesVisibility(UHeapTuple uhtup, Snapshot snapshot, Buffer buffer);
+bool UHeapTupleSatisfiesVisibility(UHeapTuple uhtup, Snapshot snapshot, Buffer buffer,
+    TransactionId *tdXmin = NULL);
 extern TransactionId UDiskTupleGetModifiedXid(UHeapDiskTuple diskTup, Page page);
 
 TM_Result UHeapTupleSatisfiesUpdate(Relation rel, Snapshot snapshot, ItemPointer tid, UHeapTuple utuple,
