@@ -475,10 +475,10 @@ LINE 1: SELECT mgrno, ename, job, group_concat(ename,job) OVER(PARTI...
 -- test for plan changes, dfx
 SET explain_perf_mode=pretty;
 EXPLAIN verbose SELECT deptno, group_concat(ename ORDER BY ename SEPARATOR ',') AS employees_order_by_ename_varchar FROM emp GROUP BY deptno;
-                                QUERY PLAN                                
---------------------------------------------------------------------------
+                               QUERY PLAN                               
+------------------------------------------------------------------------
  GroupAggregate  (cost=1.41..1.55 rows=3 width=8203)
-   Output: deptno, group_concat(ename ORDER BY ename SEPARATOR ','::text)
+   Output: deptno, group_concat(ename ORDER BY ename SEPARATOR ',')
    Group By Key: emp.deptno
    ->  Sort  (cost=1.41..1.44 rows=14 width=11)
          Output: deptno, ename
@@ -488,10 +488,10 @@ EXPLAIN verbose SELECT deptno, group_concat(ename ORDER BY ename SEPARATOR ',') 
 (8 rows)
 
 EXPLAIN verbose SELECT deptno, group_concat(sign ORDER BY email SEPARATOR '##') AS email_order_by_email_text_en FROM emp GROUP BY deptno;
-                                QUERY PLAN                                
---------------------------------------------------------------------------
+                               QUERY PLAN                               
+------------------------------------------------------------------------
  GroupAggregate  (cost=1.41..1.55 rows=3 width=8217)
-   Output: deptno, group_concat(sign ORDER BY email SEPARATOR '##'::text)
+   Output: deptno, group_concat(sign ORDER BY email SEPARATOR '##')
    Group By Key: emp.deptno
    ->  Sort  (cost=1.41..1.44 rows=14 width=25)
          Output: deptno, sign, email
@@ -501,10 +501,10 @@ EXPLAIN verbose SELECT deptno, group_concat(sign ORDER BY email SEPARATOR '##') 
 (8 rows)
 
 EXPLAIN verbose SELECT deptno, group_concat(VARIADIC ARRAY[ename,':',job]  ORDER BY ename) AS bonus_order_by_bonus_numeric FROM emp GROUP BY deptno;
-                                                            QUERY PLAN                                                             
------------------------------------------------------------------------------------------------------------------------------------
+                                                              QUERY PLAN                                                              
+--------------------------------------------------------------------------------------------------------------------------------------
  GroupAggregate  (cost=1.41..1.58 rows=3 width=8214)
-   Output: deptno, group_concat(ARRAY[ename, ':'::character varying, (job)::character varying] ORDER BY ename SEPARATOR ','::text)
+   Output: deptno, group_concat(VARIADIC ARRAY[ename, ':'::character varying, (job)::character varying] ORDER BY ename SEPARATOR ',')
    Group By Key: emp.deptno
    ->  Sort  (cost=1.41..1.44 rows=14 width=22)
          Output: deptno, ename, job
@@ -697,6 +697,14 @@ create database t dbcompatibility 'B';
 \c t;
 CREATE TABLE t(id int, v text);
 INSERT INTO t(id, v) VALUES(1, 'A'),(2, 'B'),(1, 'C'),(2, 'DDDDDDDDDDDDDDDDDDDDDDDDDDDDD');
+--select into statement
+select group_concat(id,v separator ';') into tmp_table from t;
+select * from tmp_table;
+              group_concat               
+-----------------------------------------
+ 1A;2B;1C;2DDDDDDDDDDDDDDDDDDDDDDDDDDDDD
+(1 row)
+
 --show default value (current session)
 show group_concat_max_len;
  group_concat_max_len 
