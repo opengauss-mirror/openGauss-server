@@ -774,6 +774,7 @@ drop table test_primary;
 drop table test_primary1;
 drop table test_us; 
 drop database if exists mysql;
+NOTICE:  database "mysql" does not exist, skipping
 create database mysql dbcompatibility 'B';
 \c mysql
 create table if not exists test(
