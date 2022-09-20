@@ -56,6 +56,7 @@
 #include "utils/combocid.h"
 #include "vecexecutor/vecstream.h"
 #include "access/hash.h"
+#include "access/nbtree.h"
 #include "pgstat.h"
 #include "tcop/tcopprot.h"
 #include "distributelayer/streamCore.h"
@@ -1902,6 +1903,68 @@ void StreamNodeGroup::MarkRecursiveVfdInvalid()
         u_sess->stream_cxt.global_obj->SetRecursiveVfdInvalid();
         recursiveLock.unLock();
     }
+}
+
+void StreamNodeGroup::BuildStreamDesc(const uint64& queryId, Plan* node)
+{
+    StreamKey streamKey;
+    streamKey.queryId = queryId;
+    streamKey.planNodeId = node->plan_node_id;
+
+    void* parallelDesc = NULL;
+
+    switch (nodeTag(node)) {
+        case T_IndexScan:
+            parallelDesc = palloc0(sizeof(ParallelIndexScanDescData));
+            ((ParallelIndexScanDescData*)parallelDesc)->ps_indexid = ((IndexScan*)node)->indexid;
+            ((ParallelIndexScanDescData*)parallelDesc)->ps_relid = ((IndexScan*)node)->scan.scanrelid;
+            ((ParallelIndexScanDescData*)parallelDesc)->ps_btpscan = btbuildparallelscan();
+            break;
+        default:
+            break;
+    }
+
+    if (!parallelDesc) {
+        return;
+    }
+
+    m_streamDesc.insert({streamKey, parallelDesc});
+}
+
+void StreamNodeGroup::DestroyStreamDesc(const uint64& queryId, Plan* node)
+{
+    StreamKey streamKey;
+    streamKey.queryId = queryId;
+    streamKey.planNodeId = node->plan_node_id;
+
+    std::unordered_map<StreamKey, void*, KeyHash, KeyEqual>::iterator iter;
+
+    switch (nodeTag(node)) {
+        case T_IndexScan:
+            iter = m_streamDesc.find(streamKey);
+            if (m_streamDesc.end() == iter) {
+                return;
+            }
+            if (iter->second) {
+                if (((ParallelIndexScanDescData*)iter->second)->ps_btpscan) {
+                    delete ((ParallelIndexScanDescData*)iter->second)->ps_btpscan;
+                }
+                pfree(iter->second);
+            }
+            m_streamDesc.erase(streamKey);
+            break;
+        default:
+            break;
+    }
+}
+
+void* StreamNodeGroup::GetParalleDesc(const uint64& queryId, const uint64& planNodeId)
+{
+    StreamKey key;
+    key.queryId = queryId;
+    key.planNodeId = planNodeId;
+    std::unordered_map<StreamKey, void*, KeyHash, KeyEqual>::iterator iter = m_streamDesc.find(key);
+    return (m_streamDesc.end() == iter) ? NULL : iter->second;
 }
 
 #ifndef ENABLE_MULTIPLE_NODES

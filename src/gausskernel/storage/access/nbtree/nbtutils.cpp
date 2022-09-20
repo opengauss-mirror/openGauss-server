@@ -554,6 +554,10 @@ bool _bt_advance_array_keys(IndexScanDesc scan, ScanDirection dir)
         }
     }
 
+    /* advance parallel scan */
+    if (scan->parallel_scan != NULL)
+        _bt_parallel_advance_array_keys(scan);
+
     return found;
 }
 

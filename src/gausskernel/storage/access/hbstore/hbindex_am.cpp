@@ -545,13 +545,18 @@ static HeapTuple cross_level_index_getnext(IndexScanDesc scan, ScanDirection dir
  * ------------------------------------------------------------------------
  */
 
-IndexScanDesc scan_handler_idx_beginscan(Relation heap_relation, Relation index_relation, Snapshot snapshot, int nkeys, int norderbys, ScanState* scan_state)
+IndexScanDesc scan_handler_idx_beginscan(Relation heap_relation, Relation index_relation, Snapshot snapshot, int nkeys, int norderbys, ScanState* scan_state,
+        ParallelIndexScanDesc pscan)
 {
     if (unlikely(RELATION_OWN_BUCKET(heap_relation))) {
         return hbkt_idx_beginscan(heap_relation, index_relation, snapshot, nkeys, norderbys, scan_state);
     } else {
-        return index_beginscan(heap_relation, index_relation, snapshot, nkeys, norderbys, scan_state);
+        return index_beginscan(heap_relation, index_relation, snapshot, nkeys, norderbys, scan_state, pscan);
     }
+}
+
+void scan_handler_idx_parallelscan_initialize(Relation heap_relation, Relation index_relation, ParallelIndexScanDesc p_index_scan) {
+    index_parallelscan_initialize(heap_relation, index_relation, p_index_scan);
 }
 
 IndexScanDesc scan_handler_idx_beginscan_bitmap(Relation indexRelation, Snapshot snapshot, int nkeys, ScanState* scan_state)
@@ -572,6 +577,12 @@ void scan_handler_idx_rescan(IndexScanDesc scan, ScanKey key, int nkeys, ScanKey
     } else {
         index_rescan(scan, key, nkeys, orderbys, norderbys);
     }
+}
+
+void scan_handler_idx_rescan_parallel(IndexScanDesc scan)
+{
+    Assert(scan != NULL);
+    index_rescan_parallel(scan);
 }
 
 void scan_handler_idx_rescan_local(IndexScanDesc scan, ScanKey key, int nkeys, ScanKey orderbys, int norderbys)

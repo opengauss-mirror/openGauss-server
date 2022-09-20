@@ -722,6 +722,8 @@ typedef struct pathData {
  *		True iff pointer is properly aligned to point to the given type.
  */
 #define PointerIsAligned(pointer, type) (((intptr_t)(pointer) % (sizeof(type))) == 0)
+#define OffsetToPointer(base, offset) \
+        ((void *)((char *) base + offset))
 
 #define OidIsValid(objectId) ((bool)((objectId) != InvalidOid))
 

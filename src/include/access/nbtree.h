@@ -107,6 +107,7 @@ typedef struct UBTPageOpaqueData {
 } UBTPageOpaqueData;
 
 typedef UBTPageOpaqueData* UBTPageOpaque;
+#define BTPageGetOpaqueInternal(page) ((BTPageOpaqueInternal) PageGetSpecialPointer(page))
 
 typedef struct BTDedupIntervalData {
     OffsetNumber base_off;
@@ -961,6 +962,8 @@ typedef struct BTScanOpaqueData {
     ScanKey arrayKeyData;       /* modified copy of scan->keyData */
     int numArrayKeys;           /* number of equality-type array keys (-1 if
                                  * there are any unsatisfiable array keys) */
+    int arrayKeyCount;  /* count indicating number of array scan keys
+                                 * processed */
     BTArrayKeyInfo* arrayKeys;  /* info about each equality-type array key */
     MemoryContext arrayContext; /* scan-lifespan context for array data */
 
@@ -1282,6 +1285,8 @@ extern Datum btbuild(PG_FUNCTION_ARGS);
 extern Datum btbuildempty(PG_FUNCTION_ARGS);
 extern Datum btinsert(PG_FUNCTION_ARGS);
 extern Datum btbeginscan(PG_FUNCTION_ARGS);
+extern void* btbuildparallelscan(void);
+extern void btinitparallelscan(void *target);
 extern Datum btgettuple(PG_FUNCTION_ARGS);
 extern Datum btgetbitmap(PG_FUNCTION_ARGS);
 extern Datum cbtreegetbitmap(PG_FUNCTION_ARGS);
@@ -1293,6 +1298,16 @@ extern Datum btbulkdelete(PG_FUNCTION_ARGS);
 extern Datum btvacuumcleanup(PG_FUNCTION_ARGS);
 extern Datum btcanreturn(PG_FUNCTION_ARGS);
 extern Datum btoptions(PG_FUNCTION_ARGS);
+
+extern void btparallelrescan(IndexScanDesc scan);
+extern void btinitparallelscan(void *target);
+/*
+ * prototypes for internal functions in nbtree.c
+ */
+extern bool _bt_parallel_seize(IndexScanDesc scan, BlockNumber *pageno);
+extern void _bt_parallel_release(IndexScanDesc scan, BlockNumber scan_page);
+extern void _bt_parallel_done(IndexScanDesc scan);
+extern void _bt_parallel_advance_array_keys(IndexScanDesc scan);
 
 extern inline IndexBuildResult *btbuild_internal(Relation heap, Relation index, IndexInfo *index_info);
 
@@ -1326,7 +1341,6 @@ extern inline IndexBuildResult *btmerge_internal(Relation dstIdxRel, List *srcId
  * thought, we are not going to implement them right now.
  */
 extern Datum btmerge(PG_FUNCTION_ARGS);
-
 /*
  * prototypes for functions in nbtinsert.c
  */

@@ -17,6 +17,9 @@
  *
  * -------------------------------------------------------------------------
  */
+#include <mutex>
+#include <condition_variable>
+
 #include "postgres.h"
 #include "knl/knl_variable.h"
 #include "access/nbtree.h"
@@ -25,6 +28,7 @@
 #include "access/xlog.h"
 #include "catalog/index.h"
 #include "commands/vacuum.h"
+#include "pgstat.h"
 #include "storage/indexfsm.h"
 #include "storage/ipc.h"
 #include "storage/lmgr.h"
@@ -49,6 +53,46 @@ typedef struct {
     BlockNumber totFreePages;      /* true total # of free pages */
     MemoryContext pagedelcontext;
 } BTVacState;
+
+/*
+ * BTPARALLEL_NOT_INITIALIZED indicates that the scan has not started.
+ *
+ * BTPARALLEL_ADVANCING indicates that some process is advancing the scan to
+ * a new page; others must wait.
+ *
+ * BTPARALLEL_IDLE indicates that no backend is currently advancing the scan
+ * to a new page; some process can start doing that.
+ *
+ * BTPARALLEL_DONE indicates that the scan is complete (including error exit).
+ * We reach this state once for every distinct combination of array keys.
+ */
+typedef enum
+{
+    BTPARALLEL_NOT_INITIALIZED,
+    BTPARALLEL_ADVANCING,
+    BTPARALLEL_IDLE,
+    BTPARALLEL_DONE
+} BTPS_State;
+
+/*
+ * BTParallelScanDescData contains btree specific shared information required
+ * for parallel scan.
+ */
+typedef struct BTParallelScanDescData
+{
+    BlockNumber btps_scanPage;  /* latest or next page to be scanned */
+    BTPS_State  btps_pageStatus;/* indicates whether next page is available
+                                 * for scan. see above for possible states of
+                                 * parallel scan. */
+    int         btps_arrayKeyCount;     /* count indicating number of array
+                                         * scan keys processed by parallel
+                                         * scan */
+
+    std::mutex btps_mutex;    /* protects above variables */
+    std::condition_variable btps_cv;  /* used to synchronize parallel scan */
+} BTParallelScanDescData;
+
+typedef struct BTParallelScanDescData *BTParallelScanDesc;
 
 static void btvacuumscan(IndexVacuumInfo *info, IndexBulkDeleteResult *stats, IndexBulkDeleteCallback callback,
                          void *callback_state, BTCycleId cycleid);
@@ -480,6 +524,7 @@ IndexScanDesc btbeginscan_internal(Relation rel, int nkeys, int norderbys)
     so->arrayContext = NULL;
     so->killedItems = NULL; /* until needed */
     so->numKilled = 0;
+    so->arrayKeyCount = 0;
 
     /*
      * We don't know yet whether the scan will be index-only, so we do not
@@ -700,6 +745,201 @@ void btrestrpos_internal(IndexScanDesc scan)
                 securec_check(rc, "", "");
             }
         }
+    }
+}
+
+
+/*
+ * btinitparallelscan -- initialize BTParallelScanDesc for parallel btree scan
+ */
+void
+btinitparallelscan(void *target)
+{
+    BTParallelScanDesc bt_target = (BTParallelScanDesc) target;
+
+    std::unique_lock<std::mutex> lck(bt_target->btps_mutex);
+    bt_target->btps_scanPage = InvalidBlockNumber;
+    bt_target->btps_pageStatus = BTPARALLEL_NOT_INITIALIZED;
+    bt_target->btps_arrayKeyCount = 0;
+}
+
+/*
+ *  btparallelrescan() -- reset parallel scan
+ */
+void
+btparallelrescan(IndexScanDesc scan)
+{
+    BTParallelScanDesc btscan;
+    ParallelIndexScanDesc parallel_scan = scan->parallel_scan;
+
+    Assert(parallel_scan);
+
+    btscan = (BTParallelScanDesc) parallel_scan->ps_btpscan;
+
+    /*
+     * In theory, we don't need to acquire the spinlock here, because there
+     * shouldn't be any other workers running at this point, but we do so for
+     * consistency.
+     */
+    std::unique_lock<std::mutex> lck(btscan->btps_mutex);
+    btscan->btps_scanPage = InvalidBlockNumber;
+    btscan->btps_pageStatus = BTPARALLEL_NOT_INITIALIZED;
+    btscan->btps_arrayKeyCount = 0;
+}
+
+/*
+ * _bt_parallel_seize() -- Begin the process of advancing the scan to a new
+ *      page.  Other scans must wait until we call bt_parallel_release() or
+ *      bt_parallel_done().
+ *
+ * The return value is true if we successfully seized the scan and false
+ * if we did not.  The latter case occurs if no pages remain for the current
+ * set of scankeys.
+ *
+ * If the return value is true, *pageno returns the next or current page
+ * of the scan (depending on the scan direction).  An invalid block number
+ * means the scan hasn't yet started, and P_NONE means we've reached the end.
+ * The first time a participating process reaches the last page, it will return
+ * true and set *pageno to P_NONE; after that, further attempts to seize the
+ * scan will return false.
+ *
+ * Callers should ignore the value of pageno if the return value is false.
+ */
+bool
+_bt_parallel_seize(IndexScanDesc scan, BlockNumber *pageno)
+{
+    BTScanOpaque so = (BTScanOpaque) scan->opaque;
+    BTPS_State  pageStatus;
+    bool        exit_loop = false;
+    bool        status = true;
+    ParallelIndexScanDesc parallel_scan = scan->parallel_scan;
+    BTParallelScanDesc btscan;
+
+    *pageno = P_NONE;
+
+    btscan = (BTParallelScanDesc) (parallel_scan->ps_btpscan);
+
+    while (1)
+    {
+        std::unique_lock<std::mutex> lck(btscan->btps_mutex);
+        pageStatus = btscan->btps_pageStatus;
+
+        if (so->arrayKeyCount < btscan->btps_arrayKeyCount)
+        {
+            /* Parallel scan has already advanced to a new set of scankeys. */
+            status = false;
+        }
+        else if (pageStatus == BTPARALLEL_DONE)
+        {
+            /*
+             * We're done with this set of scankeys.  This may be the end, or
+             * there could be more sets to try.
+             */
+            status = false;
+        }
+        else if (pageStatus != BTPARALLEL_ADVANCING)
+        {
+            /*
+             * We have successfully seized control of the scan for the purpose
+             * of advancing it to a new page!
+             */
+            btscan->btps_pageStatus = BTPARALLEL_ADVANCING;
+            *pageno = btscan->btps_scanPage;
+            exit_loop = true;
+        }
+        if (exit_loop || !status)
+            break;
+
+        btscan->btps_cv.wait(lck);
+    }
+
+    return status;
+}
+
+/*
+ * _bt_parallel_release() -- Complete the process of advancing the scan to a
+ *      new page.  We now have the new value btps_scanPage; some other backend
+ *      can now begin advancing the scan.
+ */
+void
+_bt_parallel_release(IndexScanDesc scan, BlockNumber scan_page)
+{
+    ParallelIndexScanDesc parallel_scan = scan->parallel_scan;
+    BTParallelScanDesc btscan;
+
+    btscan = (BTParallelScanDesc) (parallel_scan->ps_btpscan);
+
+    {
+        std::unique_lock<std::mutex> lck(btscan->btps_mutex);
+        btscan->btps_scanPage = scan_page;
+        btscan->btps_pageStatus = BTPARALLEL_IDLE;
+    }
+    btscan->btps_cv.notify_one();
+}
+
+/*
+ * _bt_parallel_done() -- Mark the parallel scan as complete.
+ *
+ * When there are no pages left to scan, this function should be called to
+ * notify other workers.  Otherwise, they might wait forever for the scan to
+ * advance to the next page.
+ */
+void
+_bt_parallel_done(IndexScanDesc scan)
+{
+    BTScanOpaque so = (BTScanOpaque) scan->opaque;
+    ParallelIndexScanDesc parallel_scan = scan->parallel_scan;
+    BTParallelScanDesc btscan;
+    bool        status_changed = false;
+
+    /* Do nothing, for non-parallel scans */
+    if (parallel_scan == NULL)
+        return;
+
+    btscan = (BTParallelScanDesc) (parallel_scan->ps_btpscan);
+
+    /*
+     * Mark the parallel scan as done for this combination of scan keys,
+     * unless some other process already did so.  See also
+     * _bt_advance_array_keys.
+     */
+    {
+        std::unique_lock<std::mutex> lck(btscan->btps_mutex);
+        if (so->arrayKeyCount >= btscan->btps_arrayKeyCount
+                && btscan->btps_pageStatus != BTPARALLEL_DONE) {
+            btscan->btps_pageStatus = BTPARALLEL_DONE;
+            status_changed = true;
+        }
+    }
+
+    /* wake up all the workers associated with this parallel scan */
+    if (status_changed)
+        btscan->btps_cv.notify_all();
+}
+
+/*
+ * _bt_parallel_advance_array_keys() -- Advances the parallel scan for array
+ *          keys.
+ *
+ * Updates the count of array keys processed for both local and parallel
+ * scans.
+ */
+void
+_bt_parallel_advance_array_keys(IndexScanDesc scan)
+{
+    BTScanOpaque so = (BTScanOpaque) scan->opaque;
+    ParallelIndexScanDesc parallel_scan = scan->parallel_scan;
+    BTParallelScanDesc btscan;
+
+    btscan = (BTParallelScanDesc) (parallel_scan->ps_btpscan);
+
+    so->arrayKeyCount++;
+    std::unique_lock<std::mutex> lck(btscan->btps_mutex);
+    if (btscan->btps_pageStatus == BTPARALLEL_DONE)
+    {
+        btscan->btps_scanPage = InvalidBlockNumber;
+        btscan->btps_pageStatus = BTPARALLEL_NOT_INITIALIZED;
+        btscan->btps_arrayKeyCount++;
     }
 }
 
@@ -1395,4 +1635,14 @@ static BTVacuumPosting btree_vacuum_posting(BTVacState *vac_state, IndexTuple po
 
     *num_remaining = num_live;
     return vacposting;
+}
+
+/*
+ * btestimateparallelscan -- estimate storage for BTParallelScanDescData
+ */
+void*
+btbuildparallelscan(void)
+{
+    void *bt_pscan = (void*)new BTParallelScanDescData;
+	return bt_pscan;
 }
