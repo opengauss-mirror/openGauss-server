@@ -723,8 +723,26 @@ static int ReadCommand(StringInfo inBuf)
     u_sess->postgres_cxt.doing_extended_query_message = false;
 
     /* Start a timer for session timeout. */
-    if (!enable_session_sig_alarm(u_sess->attr.attr_common.SessionTimeout * 1000))
+    if (!enable_session_sig_alarm(u_sess->attr.attr_common.SessionTimeout * 1000)) {
         ereport(FATAL, (errcode(ERRCODE_SYSTEM_ERROR), errmsg("could not set timer for session timeout")));
+    }
+
+#ifndef ENABLE_MULTIPLE_NODES
+    /* if idle_in_transaction_session_timeout > 0 and it is in a transaction in idle,
+     * then start a timer for idle_in_transaction_session.
+     * In addition, if u_sess->attr.attr_common.SessionTimeout > 0 and
+     * u_sess->attr.attr_common.SessionTimeout > u_sess->attr.attr_common.IdleInTransactionSessionTimeout,
+     * we will select the smaller one as timeout, that is to say, only start the timer for session timeout.
+     */
+    if (u_sess->attr.attr_common.IdleInTransactionSessionTimeout > 0 &&
+        u_sess->attr.attr_common.SessionTimeout > u_sess->attr.attr_common.IdleInTransactionSessionTimeout &&
+        (IsAbortedTransactionBlockState() || IsTransactionOrTransactionBlock())) {
+        if (!enable_idle_in_transaction_session_sig_alarm(
+            u_sess->attr.attr_common.IdleInTransactionSessionTimeout * 1000)) {
+            ereport(FATAL, (errcode(ERRCODE_SYSTEM_ERROR), errmsg("could not set timer for idle-in-transaction timeout")));
+        }
+    }
+#endif
 
     if (t_thrd.postgres_cxt.whereToSendOutput == DestRemote)
         result = SocketBackend(inBuf);
@@ -734,8 +752,20 @@ static int ReadCommand(StringInfo inBuf)
         result = EOF;
 
     /* Disable a timer for session timeout. */
-    if (!disable_session_sig_alarm())
+    if(!disable_session_sig_alarm()) {
         ereport(FATAL, (errcode(ERRCODE_SYSTEM_ERROR), errmsg("could not disable timer for session timeout")));
+    }
+
+#ifndef ENABLE_MULTIPLE_NODES
+    /* Disable a timer for idle_in_transaction_session. */
+    if (u_sess->attr.attr_common.IdleInTransactionSessionTimeout > 0 &&
+        u_sess->attr.attr_common.SessionTimeout > u_sess->attr.attr_common.IdleInTransactionSessionTimeout &&
+        (IsAbortedTransactionBlockState() || IsTransactionOrTransactionBlock())) {
+        if (!disable_idle_in_transaction_session_sig_alarm()) {
+            ereport(FATAL, (errcode(ERRCODE_SYSTEM_ERROR), errmsg("could not disable timer for idle-in-transaction timeout")));
+        }
+    }
+#endif
 
     u_sess->proc_cxt.firstChar = (char)result;
     return result;

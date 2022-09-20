@@ -701,26 +701,57 @@ void ThreadPoolSessControl::CheckSessionTimeout()
     for (cidx = 0; cidx < m_maxActiveSessionCount; cidx++) {
         knl_sess_control* ctrl = &m_base[cidx];
         knl_session_context* sess = ctrl->sess;
-        if (sess != NULL && sess->attr.attr_common.SessionTimeout != 0) {
-            if (sess->storage_cxt.session_timeout_active) {
-                if (now >= sess->storage_cxt.session_fin_time && sess->attr.attr_common.SessionTimeoutCount < 10) {
+        if (sess != NULL && sess->attr.attr_common.SessionTimeout != 0 &&
+            sess->storage_cxt.session_timeout_active) {
+            if (now >= sess->storage_cxt.session_fin_time && sess->attr.attr_common.SessionTimeoutCount < 10) {
 #ifdef HAVE_INT64_TIMESTAMP
-                    elog(LOG, "close session : %lu for %d times due to session timeout : %d, max finish time is %ld. But now is:%ld",
-                         sess->session_id, sess->attr.attr_common.SessionTimeoutCount + 1,
-                         sess->attr.attr_common.SessionTimeout, sess->storage_cxt.session_fin_time, now);
+                elog(LOG, "close session : %lu for %d times due to session timeout : %d, max finish time is %ld. But now is:%ld",
+                        sess->session_id, sess->attr.attr_common.SessionTimeoutCount + 1,
+                        sess->attr.attr_common.SessionTimeout, sess->storage_cxt.session_fin_time, now);
 #else
-                    elog(LOG, "close session : %lu for %d times due to session timeout : %d, max finish time is %lf. But now is:%lf",
-                         sess->session_id, sess->attr.attr_common.SessionTimeoutCount + 1,
-                         sess->attr.attr_common.SessionTimeout, sess->storage_cxt.session_fin_time, now);
+                elog(LOG, "close session : %lu for %d times due to session timeout : %d, max finish time is %lf. But now is:%lf",
+                        sess->session_id, sess->attr.attr_common.SessionTimeoutCount + 1,
+                        sess->attr.attr_common.SessionTimeout, sess->storage_cxt.session_fin_time, now);
 #endif
-                    sess->attr.attr_common.SessionTimeoutCount++;
-                    CloseClientSocket(sess, false);
-                }
+                sess->attr.attr_common.SessionTimeoutCount++;
+                CloseClientSocket(sess, false);
             }
         }
     }
     alock.unLock();
 }
+
+#ifndef ENABLE_MULTIPLE_NODES
+void ThreadPoolSessControl::CheckIdleInTransactionSessionTimeout()
+{
+    AutoMutexLock alock(&m_sessCtrlock);
+    alock.lock();
+    int cidx;
+    TimestampTz now = GetCurrentTimestamp();
+    for (cidx = 0; cidx < m_maxActiveSessionCount; cidx++) {
+        knl_sess_control* ctrl = &m_base[cidx];
+        knl_session_context* sess = ctrl->sess;
+        if (sess != NULL && sess->attr.attr_common.IdleInTransactionSessionTimeout > 0 &&
+            sess->storage_cxt.idle_in_transaction_session_timeout_active) {
+            if (now >= sess->storage_cxt.idle_in_transaction_session_fin_time &&
+                sess->attr.attr_common.IdleInTransactionSessionTimeoutCount < 10) {
+#ifdef HAVE_INT64_TIMESTAMP
+                elog(LOG, "close session : %lu for %d times due to idle in transaction timeout : %d, max finish time is %ld. But now is:%ld",
+                        sess->session_id, sess->attr.attr_common.IdleInTransactionSessionTimeoutCount + 1,
+                        sess->attr.attr_common.IdleInTransactionSessionTimeout, sess->storage_cxt.idle_in_transaction_session_fin_time, now);
+#else
+                elog(LOG, "close session : %lu for %d times due to idle in transaction session timeout : %d, max finish time is %lf. But now is:%lf",
+                        sess->session_id, sess->attr.attr_common.IdleInTransactionSessionTimeoutCount + 1,
+                        sess->attr.attr_common.IdleInTransactionSessionTimeout, sess->storage_cxt.idle_in_transaction_session_fin_time, now);
+#endif
+                sess->attr.attr_common.IdleInTransactionSessionTimeout++;
+                CloseClientSocket(sess, false);
+            }
+        }
+    }
+    alock.unLock();
+}
+#endif
 
 TransactionId ThreadPoolSessControl::ListAllSessionGttFrozenxids(int maxSize,
     ThreadId *pids, TransactionId *xids, int *n)
