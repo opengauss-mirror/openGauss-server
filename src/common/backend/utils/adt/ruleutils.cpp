@@ -10392,6 +10392,7 @@ static void get_agg_expr(Aggref* aggref, deparse_context* context)
             /* the first argument of group_concat() is separator, skip it */
             if (pg_strcasecmp(funcname, "group_concat") == 0) {
                 init = init->next;
+                narg++;
                 start++;
             }
             for_each_cell (l, init) {
@@ -10420,10 +10421,18 @@ static void get_agg_expr(Aggref* aggref, deparse_context* context)
         }
 
         if (pg_strcasecmp(funcname, "group_concat") == 0) {
+            Oid typoutput;
+            char* extval = NULL;
+            bool typIsVarlena = false;
             /* parse back the first argument as separator */
             TargetEntry* tle = (TargetEntry*)lfirst(list_head(aggref->args));
-            appendStringInfoString(buf, " SEPARATOR ");
-            get_rule_expr((Node*)tle->expr, context, true);
+            getTypeOutputInfo(((Const*)tle->expr)->consttype, &typoutput, &typIsVarlena);
+            extval = OidOutputFunctionCall(typoutput, ((Const*)tle->expr)->constvalue);
+
+            appendStringInfoString(buf, " SEPARATOR '");
+            appendStringInfoString(buf, extval);
+            appendStringInfoChar(buf, '\'');
+            pfree_ext(extval);
         }
     }
 

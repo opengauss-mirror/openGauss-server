@@ -193,6 +193,10 @@ create database t dbcompatibility 'B';
 CREATE TABLE t(id int, v text);
 INSERT INTO t(id, v) VALUES(1, 'A'),(2, 'B'),(1, 'C'),(2, 'DDDDDDDDDDDDDDDDDDDDDDDDDDDDD');
 
+--select into statement
+select group_concat(id,v separator ';') into tmp_table from t;
+select * from tmp_table;
+
 --show default value (current session)
 show group_concat_max_len;
 select id, group_concat(v separator ';') from t group by id order by id asc;
