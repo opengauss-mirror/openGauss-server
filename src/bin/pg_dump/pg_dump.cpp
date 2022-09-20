@@ -19090,7 +19090,8 @@ static void dumpTableSchema(Archive* fout, TableInfo* tbinfo)
                                     size_end = strstr(size_start, ")");
                                     number_size = size_end - size_start;
                                     char num[number_size + 1] = {0};
-                                    strncpy(num, size_start, number_size);
+                                    errno_t rc = strncpy_s(num, sizeof(num), size_start, number_size);
+                                    securec_check_c(rc, "\0", "\0");
                                     appendPQExpBuffer(q, " ON UPDATE CURRENT_TIMESTAMP(%s)", num);
                                 } else {
                                     size_start = strstr(onUpdate_value, "time(");
@@ -19099,7 +19100,8 @@ static void dumpTableSchema(Archive* fout, TableInfo* tbinfo)
                                         size_end = strstr(size_start, ")");
                                         number_size = size_end - size_start;
                                         char num[number_size + 1] = {0};
-                                        strncpy(num, size_start, number_size);
+                                        errno_t rc = strncpy_s(num, sizeof(num), size_start, number_size);
+                                        securec_check_c(rc, "\0", "\0");
                                         appendPQExpBuffer(q, " ON UPDATE CURRENT_TIME(%s)", num);
                                     }
                                 }

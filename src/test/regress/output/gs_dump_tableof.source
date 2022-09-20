@@ -20,6 +20,37 @@ NOTICE:  database "restore_type_db" does not exist, skipping
 create database restore_type_db;
 \! @abs_bindir@/gs_restore -d restore_type_db -p @portstring@ @abs_bindir@/dump_type.tar >/dev/null 2>&1; echo $?
 0
+drop database if exists dump_mysql;
+NOTICE:  database "dump_mysql" does not exist, skipping
+create database dump_mysql dbcompatibility 'B';
+\c dump_mysql
+create table mysql_on_update_timestamp_tab_08(
+    c1 timestamptz on update current_timestamp,
+    c2 timestamptz on update current_timestamp(1),
+    c3 timestamptz on update current_timestamp(5),
+    c4 int);
+insert into mysql_on_update_timestamp_tab_08 values(NULL,NULL,NULL,1);
+insert into mysql_on_update_timestamp_tab_08 values(now(),now(),now(),2);
+insert into mysql_on_update_timestamp_tab_08 values(NULL,now(),NULL,3);
+\! @abs_bindir@/gs_dump dump_mysql -p @portstring@ -f @abs_bindir@/dump_timestamp.tar -F t >/dev/null 2>&1; echo $?
+0
+drop database if exists restore_timestamp;
+NOTICE:  database "restore_timestamp" does not exist, skipping
+create database restore_timestamp dbcompatibility 'B';
+\! @abs_bindir@/gs_restore -d restore_timestamp -p @portstring@ @abs_bindir@/dump_timestamp.tar >/dev/null 2>&1; echo $?
+0
+\c restore_timestamp
+\d mysql_on_update_timestamp_tab_08
+                     Table "public.mysql_on_update_timestamp_tab_08"
+ Column |           Type           |                      Modifiers                       
+--------+--------------------------+------------------------------------------------------
+ c1     | timestamp with time zone | on update pg_systimestamp()
+ c2     | timestamp with time zone | on update ('now'::text)::timestamp(1) with time zone
+ c3     | timestamp with time zone | on update ('now'::text)::timestamp(5) with time zone
+ c4     | integer                  | 
+
 \c regression
 drop database if exists restore_type_db;
 drop database if exists dump_type_db;
+drop database if exists dump_mysql;
+drop database if exists restore_timestamp;
