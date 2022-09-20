@@ -25758,16 +25758,16 @@ unreserved_keyword:
 			| AT
 			| ATTRIBUTE
 			| AUDIT
-			| AUTO_INCREMENT
 			| AUTOEXTEND
 			| AUTOMAPPED
+			| AUTO_INCREMENT
 			| BACKWARD
 /* PGXC_BEGIN */
 			| BARRIER
 /* PGXC_END */
 			| BEFORE
-			| BEGIN_NON_ANOYBLOCK
 			| BEGIN_P
+			| BEGIN_NON_ANOYBLOCK
 			| BLANKS
 			| BLOB_P
 			| BLOCKCHAIN
@@ -25809,9 +25809,10 @@ unreserved_keyword:
 			| CONSTRAINTS
 			| CONTENT_P
 			| CONTINUE_P
+			| CONTVIEW
 			| CONVERSION_P
-            | CONTVIEW
 			| COORDINATOR
+			| COORDINATORS
 			| COPY
 			| COST
 			| CSV
@@ -25825,8 +25826,8 @@ unreserved_keyword:
 			| DATANODE
 			| DATANODES
 			| DATATYPE_CL
-			| DAY_P
 			| DATE_FORMAT_P
+			| DAY_P
 			| DBCOMPATIBILITY_P
 			| DEALLOCATE
 			| DECLARE
@@ -25854,6 +25855,7 @@ unreserved_keyword:
 			| DROP
 			| DUPLICATE
 			| EACH
+			| ELASTIC
 			| ENABLE_P
 			| ENCLOSED
 			| ENCODING
@@ -25880,10 +25882,11 @@ unreserved_keyword:
 			| FAMILY
 			| FAST
 			| FEATURES 			// DB4AI
+			| FENCED
 			| FIELDS
 			| FILEHEADER_P
-			| FILL_MISSING_FIELDS
 			| FILLER
+			| FILL_MISSING_FIELDS
 			| FILTER
 			| FIRST_P
 			| FIXED_P
@@ -25921,10 +25924,10 @@ unreserved_keyword:
 			| INITRANS
 			| INLINE_P
 			| INPUT_P
-			| INTERNAL
 			| INSENSITIVE
 			| INSERT
 			| INSTEAD
+			| INTERNAL
 			| INVOKER
 			| IP
 			| ISNULL
@@ -25951,8 +25954,8 @@ unreserved_keyword:
 			| LOG_P
 			| LOGGING
 			| LOGIN_ANY
-			| LOGIN_SUCCESS
 			| LOGIN_FAILURE
+			| LOGIN_SUCCESS
 			| LOGOUT
 			| LOOP
 			| MAPPING
@@ -26027,6 +26030,7 @@ unreserved_keyword:
 			| PREPARED
 			| PRESERVE
 			| PRIOR
+			| PRIORER
 			| PRIVATE
 			| PRIVILEGE
 			| PRIVILEGES
@@ -26075,6 +26079,7 @@ unreserved_keyword:
 			| ROLLUP
 			| ROTATION
 			| ROWS
+			| ROWTYPE_P
 			| RULE
 			| SAMPLE
 			| SAVEPOINT
@@ -26083,6 +26088,7 @@ unreserved_keyword:
 			| SEARCH
 			| SECOND_P
 			| SECURITY
+			| SEPARATOR_P
 			| SEQUENCE
 			| SEQUENCES
 			| SERIALIZABLE
@@ -26090,7 +26096,6 @@ unreserved_keyword:
 			| SESSION
 			| SET
 			| SETS
-			| SEPARATOR_P
 			| SHARE
 			| SHIPPABLE
 			| SHOW
@@ -26124,8 +26129,8 @@ unreserved_keyword:
 			| SUBPARTITION
 			| SUBSCRIPTION
 			| SYNONYM
-			| SYS_REFCURSOR					{ $$ = "refcursor"; }
 			| SYSID
+			| SYS_REFCURSOR					{ $$ = "refcursor"; }
 			| SYSTEM_P
 			| TABLES
 			| TABLESPACE
@@ -26136,8 +26141,8 @@ unreserved_keyword:
 			| TERMINATED
 			| TEXT_P
 			| THAN
-			| TIME_FORMAT_P
 			| TIMESTAMP_FORMAT_P
+			| TIME_FORMAT_P
 			| TRANSACTION
 			| TRANSFORM
 			| TRIGGER
@@ -26168,6 +26173,7 @@ unreserved_keyword:
 			| VALUE_P
 			| VARIABLES
 			| VARYING
+			| VCGROUP
 			| VERSION_P
 			| VIEW
 			| VOLATILE
@@ -26418,8 +26424,8 @@ reserved_keyword:
 			| MAXVALUE
 			| MINUS_P
 			| MODIFY_P
+			| NOCYCLE
 			| NOT
-                        | NOCYCLE
 			| NULL_P
 			| OFFSET
 			| ON
