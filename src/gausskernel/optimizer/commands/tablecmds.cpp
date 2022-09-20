@@ -5925,7 +5925,8 @@ void RenameConstraint(RenameStmt* stmt)
         0 /* expected inhcount */);
 }
 
-static bool FindSynonymExist(char* relname, char* relnamespace){
+static bool FindSynonymExist(char* relname, char* relnamespace)
+{
     HeapTuple htup = NULL;
     bool isnull = false;
     bool result = false;
