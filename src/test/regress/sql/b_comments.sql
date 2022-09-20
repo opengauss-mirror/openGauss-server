@@ -38,6 +38,11 @@ create database b_comments dbcompatibility 'B';
 \c b_comments
 create schema b_comments;
 set search_path to 'b_comments';
+/* unsupported */
+create table test_unsupported(id int);
+alter table test_unsupported modify column id;
+alter table test_unsupported modify id;
+
 /* sanity check */
 create table test_row(a int not null comment 'test_row.a', b int not null comment 'test_row.b') comment 'test_row';
 create index on test_row(a,b) comment 'test_row_index';
