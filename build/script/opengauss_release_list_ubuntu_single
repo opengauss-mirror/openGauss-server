@@ -1048,12 +1048,16 @@
 ./include/postgresql/server/access/ustore/undo/knl_uundotxn.h
 ./include/postgresql/server/access/ustore/undo/knl_uundozone.h
 ./include/postgresql/server/access/ustore/undo/knl_uundospace.h
+./include/postgresql/server/access/ustore/knl_uverify.h
 ./include/postgresql/server/communication/commproxy_basic.h
 ./include/postgresql/server/access/parallel_recovery/page_redo.h
 ./include/postgresql/server/access/parallel_recovery/spsc_blocking_queue.h
 ./include/postgresql/server/executor/exec/execdesc.h
 ./include/postgresql/server/db4ai/matrix.h
 ./include/postgresql/server/db4ai/scores.h
+./include/postgresql/server/db4ai/db4ai.h
+./include/postgresql/server/instruments/gs_stack.h
+./include/postgresql/server/instruments/instr_mfchain.h
 ./jre/ASSEMBLY_EXCEPTION
 ./jre/bin/java
 ./jre/bin/jjs
