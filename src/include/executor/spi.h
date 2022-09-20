@@ -69,6 +69,19 @@ typedef List* (*parse_query_func)(const char *query_string, List **query_string_
 /* in postgres.cpp, avoid include tcopprot.h */
 extern List* raw_parser(const char* query_string, List** query_string_locationlist);
 
+static inline parse_query_func GetRawParser()
+{
+#ifndef ENABLE_MULTIPLE_NODES
+    if (u_sess->attr.attr_sql.dolphin) {
+        int id = GetCustomParserId();
+        if (id >= 0 && g_instance.raw_parser_hook[id] != NULL) {
+            return (parse_query_func)g_instance.raw_parser_hook[id];
+        }
+    }
+#endif
+    return raw_parser;
+}
+
 extern THR_LOCAL PGDLLIMPORT uint32 SPI_processed;
 extern THR_LOCAL PGDLLIMPORT SPITupleTable* SPI_tuptable;
 extern THR_LOCAL PGDLLIMPORT int SPI_result;
@@ -82,18 +95,18 @@ extern void SPI_pop(void);
 extern bool SPI_push_conditional(void);
 extern void SPI_pop_conditional(bool pushed);
 extern void SPI_restore_connection(void);
-extern int SPI_execute(const char* src, bool read_only, long tcount, bool isCollectParam = false, parse_query_func parser = raw_parser);
+extern int SPI_execute(const char* src, bool read_only, long tcount, bool isCollectParam = false, parse_query_func parser = GetRawParser());
 extern int SPI_execute_plan(SPIPlanPtr plan, Datum* Values, const char* Nulls, bool read_only, long tcount);
 extern int SPI_execute_plan_with_paramlist(SPIPlanPtr plan, ParamListInfo params, bool read_only, long tcount);
-extern int SPI_exec(const char* src, long tcount, parse_query_func parser = raw_parser);
+extern int SPI_exec(const char* src, long tcount, parse_query_func parser = GetRawParser());
 extern int SPI_execp(SPIPlanPtr plan, Datum* Values, const char* Nulls, long tcount);
 extern int SPI_execute_snapshot(SPIPlanPtr plan, Datum* Values, const char* Nulls, Snapshot snapshot,
     Snapshot crosscheck_snapshot, bool read_only, bool fire_triggers, long tcount);
 extern int SPI_execute_with_args(const char* src, int nargs, Oid* argtypes, Datum* Values, const char* Nulls,
-    bool read_only, long tcount, Cursor_Data* cursor_data, parse_query_func parser = raw_parser);
-extern SPIPlanPtr SPI_prepare(const char* src, int nargs, Oid* argtypes, parse_query_func parser = raw_parser);
-extern SPIPlanPtr SPI_prepare_cursor(const char* src, int nargs, Oid* argtypes, int cursorOptions, parse_query_func parser = raw_parser);
-extern SPIPlanPtr SPI_prepare_params(const char* src, ParserSetupHook parserSetup, void* parserSetupArg, int cursorOptions, parse_query_func parser = raw_parser);
+    bool read_only, long tcount, Cursor_Data* cursor_data, parse_query_func parser = GetRawParser());
+extern SPIPlanPtr SPI_prepare(const char* src, int nargs, Oid* argtypes, parse_query_func parser = GetRawParser());
+extern SPIPlanPtr SPI_prepare_cursor(const char* src, int nargs, Oid* argtypes, int cursorOptions, parse_query_func parser = GetRawParser());
+extern SPIPlanPtr SPI_prepare_params(const char* src, ParserSetupHook parserSetup, void* parserSetupArg, int cursorOptions, parse_query_func parser = GetRawParser());
 extern int SPI_keepplan(SPIPlanPtr plan);
 extern SPIPlanPtr SPI_saveplan(SPIPlanPtr plan);
 extern int SPI_freeplan(SPIPlanPtr plan);
@@ -127,7 +140,7 @@ extern void SPI_freetuptable(SPITupleTable* tuptable);
 
 extern Portal SPI_cursor_open(const char* name, SPIPlanPtr plan, Datum* Values, const char* Nulls, bool read_only);
 extern Portal SPI_cursor_open_with_args(const char* name, const char* src, int nargs, Oid* argtypes, Datum* Values,
-    const char* Nulls, bool read_only, int cursorOptions, parse_query_func parser = raw_parser);
+    const char* Nulls, bool read_only, int cursorOptions, parse_query_func parser = GetRawParser());
 extern Portal SPI_cursor_open_with_paramlist(const char* name, SPIPlanPtr plan, ParamListInfo params,
                                              bool read_only, bool isCollectParam = false);
 extern Portal SPI_cursor_find(const char* name);
@@ -155,23 +168,23 @@ extern void ReleaseSpiPlanRef(TransactionId mysubid);
 
 /* SPI execution helpers */
 extern void spi_exec_with_callback(CommandDest dest, const char* src, bool read_only, long tcount, bool direct_call,
-    void (*callbackFn)(void*), void* clientData, parse_query_func parser = raw_parser);
+    void (*callbackFn)(void*), void* clientData, parse_query_func parser = GetRawParser());
 
 extern void _SPI_error_callback(void *arg);
 
 extern List* _SPI_get_querylist(SPIPlanPtr plan);
 #ifdef PGXC
-extern int SPI_execute_direct(const char* src, char* nodename, parse_query_func parser = raw_parser);
+extern int SPI_execute_direct(const char* src, char* nodename, parse_query_func parser = GetRawParser());
 #endif
 extern int _SPI_begin_call(bool execmem);
 extern int _SPI_end_call(bool procmem);
 extern void _SPI_hold_cursor(bool is_rollback = false);
-extern void _SPI_prepare_oneshot_plan_for_validator(const char* src, SPIPlanPtr plan, parse_query_func parser = raw_parser);
+extern void _SPI_prepare_oneshot_plan_for_validator(const char* src, SPIPlanPtr plan, parse_query_func parser = GetRawParser());
 extern void InitSPIPlanCxt();
-extern void _SPI_prepare_plan(const char *src, SPIPlanPtr plan, parse_query_func parser = raw_parser);
+extern void _SPI_prepare_plan(const char *src, SPIPlanPtr plan, parse_query_func parser = GetRawParser());
 extern ParamListInfo _SPI_convert_params(int nargs, Oid *argtypes, Datum *Values, const char *Nulls,
     Cursor_Data *cursor_data = NULL);
-extern void _SPI_prepare_oneshot_plan(const char *src, SPIPlanPtr plan, parse_query_func parser = raw_parser);
+extern void _SPI_prepare_oneshot_plan(const char *src, SPIPlanPtr plan, parse_query_func parser = GetRawParser());
 extern int _SPI_execute_plan(SPIPlanPtr plan, ParamListInfo paramLI, Snapshot snapshot, Snapshot crosscheck_snapshot,
     bool read_only, bool fire_triggers, long tcount, bool from_lock = false);
 
