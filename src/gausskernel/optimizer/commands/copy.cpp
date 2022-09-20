@@ -3197,28 +3197,30 @@ void CopyOneRowTo(CopyState cstate, Oid tupleOid, Datum* values, const bool* nul
                 if (!IS_BINARY(cstate)) {
                     bool use_quote = cstate->force_quote_flags[attnum - 1];
                     string = OutputFunctionCall(&out_functions[attnum - 1], value);
-                    if (out_functions[attnum -1].fn_oid == F_NUMERIC_OUT ||
-                        out_functions[attnum -1].fn_oid == F_INT4OUT ||
-                        out_functions[attnum -1].fn_oid == F_INT8OUT ||
-                        out_functions[attnum -1].fn_oid == F_INT2OUT ||
-                        out_functions[attnum -1].fn_oid == F_INT1OUT ||
-                        out_functions[attnum -1].fn_oid == F_FLOAT4OUT ||
-                        out_functions[attnum -1].fn_oid == F_FLOAT8OUT) {
-                        CopyNonEncodingAttributeOut(cstate, string, use_quote);
-                    } else {
-                        switch (cstate->fileformat) {
-                            case FORMAT_CSV:
-                                CopyAttributeOutCSV(cstate,
-                                    string,
-                                    use_quote,
-                                    list_length(cstate->attnumlist) == 1);
-                                break;
-                            case FORMAT_TEXT:
-                                CopyAttributeOutText(cstate, string);
-                                break;
-                            default:
-                                ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("Invalid file format")));
-                        }
+                    switch (out_functions[attnum -1].fn_oid) {
+                        case F_NUMERIC_OUT:
+                        case F_INT4OUT:
+                        case F_INT8OUT:
+                        case F_INT2OUT:
+                        case F_INT1OUT:
+                        case F_FLOAT4OUT:
+                        case F_FLOAT8OUT:
+                            CopyNonEncodingAttributeOut(cstate, string, use_quote);
+                            break;
+                        default:
+                            switch (cstate->fileformat) {
+                                case FORMAT_CSV:
+                                    CopyAttributeOutCSV(cstate,
+                                        string,
+                                        use_quote,
+                                        list_length(cstate->attnumlist) == 1);
+                                    break;
+                                case FORMAT_TEXT:
+                                    CopyAttributeOutText(cstate, string);
+                                    break;
+                                default:
+                                    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("Invalid file format")));
+                            }
                     }
                 } else {
                     bytea* outputbytes = NULL;
