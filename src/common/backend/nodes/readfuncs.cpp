@@ -2799,6 +2799,9 @@ static SetToDefault* _readSetToDefault(void)
     READ_INT_FIELD(typeMod);
     READ_OID_FIELD(collation);
     READ_LOCATION_FIELD(location);
+    if (t_thrd.proc->workingVersionNum >= UNION_NULL_VERSION_NUM) {
+        READ_BOOL_FIELD(lrchild_unknown);
+    }
 
     READ_TYPEINFO_FIELD(typeId);
 

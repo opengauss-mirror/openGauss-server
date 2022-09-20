@@ -2837,6 +2837,9 @@ static void _outSetToDefault(StringInfo str, SetToDefault* node)
     WRITE_INT_FIELD(typeMod);
     WRITE_OID_FIELD(collation);
     WRITE_LOCATION_FIELD(location);
+    if (t_thrd.proc->workingVersionNum >= UNION_NULL_VERSION_NUM) {
+        WRITE_BOOL_FIELD(lrchild_unknown);
+    }
 
     WRITE_TYPEINFO_FIELD(typeId);
 }

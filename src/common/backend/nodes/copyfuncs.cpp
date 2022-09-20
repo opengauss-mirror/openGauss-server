@@ -3099,6 +3099,9 @@ static SetToDefault* _copySetToDefault(const SetToDefault* from)
     COPY_SCALAR_FIELD(typeMod);
     COPY_SCALAR_FIELD(collation);
     COPY_LOCATION_FIELD(location);
+    if (t_thrd.proc->workingVersionNum >= UNION_NULL_VERSION_NUM) {
+        COPY_SCALAR_FIELD(lrchild_unknown);
+    }
 
     return newnode;
 }

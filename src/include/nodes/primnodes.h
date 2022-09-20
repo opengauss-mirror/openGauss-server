@@ -1148,6 +1148,7 @@ typedef struct SetToDefault {
     int32 typeMod; /* typemod for substituted value */
     Oid collation; /* collation for the substituted value */
     int location;  /* token location, or -1 if unknown */
+    bool lrchild_unknown;
 } SetToDefault;
 
 /* value expressions (changed for client_logic feature) */
