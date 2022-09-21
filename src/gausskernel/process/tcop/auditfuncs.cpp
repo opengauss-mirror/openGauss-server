@@ -1269,7 +1269,12 @@ static void pgaudit_process_rename_object(Node* node, const char* querystring)
         case OBJECT_INDEX:
         case OBJECT_FOREIGN_TABLE:
         case OBJECT_STREAM:
-            objectname = stmt->relation->relname;
+            if (stmt->renameTableflag && PointerIsValid(stmt->renameTargetList) &&
+                    PointerIsValid(stmt->renameTargetList->head)) {
+                objectname = ((RenameCell*)stmt->renameTargetList->head->data.ptr_value)->original_name->relname;
+            } else {
+                objectname = stmt->relation->relname;
+            }
             break;
         default:
             break;

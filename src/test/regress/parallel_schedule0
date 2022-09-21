@@ -1004,3 +1004,4 @@ test: sytcomp_del_upt4orderby
 test: aioptimizer
 test: aioptimizer_small
 test: pgfincore
+test: rename_table

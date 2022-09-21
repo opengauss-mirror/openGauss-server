@@ -58,6 +58,7 @@
 #include "catalog/pg_partition_fn.h"
 #include "catalog/pg_hashbucket.h"
 #include "catalog/pg_hashbucket_fn.h"
+#include "catalog/pg_synonym.h"
 #include "catalog/pg_tablespace.h"
 #include "catalog/pg_trigger.h"
 #include "catalog/pg_type.h"
@@ -409,6 +410,11 @@ struct ChunkIdHashKey {
 struct OldToNewChunkIdMappingData {
     ChunkIdHashKey key;
     Oid newChunkId;
+};
+
+struct RenameTableNameData {
+    char* schemaname;
+    char* relname;
 };
 
 typedef OldToNewChunkIdMappingData* OldToNewChunkIdMapping;
@@ -5919,50 +5925,273 @@ void RenameConstraint(RenameStmt* stmt)
         0 /* expected inhcount */);
 }
 
+static bool FindSynonymExist(char* relname, char* relnamespace)
+{
+    HeapTuple htup = NULL;
+    bool isnull = false;
+    bool result = false;
+    Relation rel_synonym = heap_open(PgSynonymRelationId, RowExclusiveLock);
+    SysScanDesc adscan = systable_beginscan(rel_synonym, InvalidOid, false, NULL, 0, NULL);
+    while (HeapTupleIsValid(htup = systable_getnext(adscan))) {
+        Datum val = heap_getattr(htup, Anum_pg_synonym_synobjschema, rel_synonym->rd_att, &isnull);
+        if (val && pg_strcasecmp(DatumGetCString(val), relnamespace) == 0) {
+            val = heap_getattr(htup, Anum_pg_synonym_synobjname, rel_synonym->rd_att, &isnull);
+            if (val && pg_strcasecmp(DatumGetCString(val), relname) == 0) {
+                result = true;
+            }
+        }
+    }
+    systable_endscan(adscan);
+    heap_close(rel_synonym, RowExclusiveLock);
+    return result;
+}
+
+static int Compare_RenameTableNameData_func(const void* a, const void* b)
+{
+    if (strcmp(((const RenameTableNameData*)a)->schemaname, ((const RenameTableNameData*)b)->schemaname) == 0) {
+        return strcmp(((const RenameTableNameData*)a)->relname, ((const RenameTableNameData*)b)->relname);
+    } else {
+        return strcmp(((const RenameTableNameData*)a)->schemaname, ((const RenameTableNameData*)b)->schemaname);
+    }
+}
+
+static void RenameTableFeature(RenameStmt* stmt)
+{
+    char *orgiSchema = NULL, *orgitable = NULL, *modfySchema = NULL, *modfytable = NULL;
+    Oid orgiNameSpace = InvalidOid, modfyNameSpace = InvalidOid;
+    List* search_path = fetch_search_path(false);
+    Oid relnamespace = InvalidOid;
+    RangeVar* temp_name = NULL;
+    Oid relid = InvalidOid;
+    Relation rel_pg_class;
+    HeapTuple tup;
+    HeapTuple newtup;
+    Form_pg_class relform;
+
+    Datum values[Natts_pg_class] = { 0 };
+    bool nulls[Natts_pg_class] = { false };
+    bool replaces[Natts_pg_class] = { false };
+
+    if (stmt->renameTargetList == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_TABLE_DEFINITION), errmsg("Cannot get rename table name and modify name")));
+    }
+
+    RenameTableNameData storageTable[stmt->renameTargetList->length];
+    Relation lockRelation[stmt->renameTargetList->length];
+    int tableName_Count = 0;
+    ListCell* rename_Cell = NULL;
+    foreach(rename_Cell, stmt->renameTargetList) {
+        RenameCell* renameInfo = (RenameCell*)lfirst(rename_Cell);
+        temp_name = renameInfo->original_name;
+        orgiSchema = temp_name->schemaname;
+        /* if schema name don't assign */
+        if (orgiSchema == NULL && search_path != NIL) {
+            relnamespace = linitial_oid(search_path);
+            if (!OidIsValid(relnamespace)) {
+                ereport(ERROR, (errcode(ERRCODE_INVALID_TABLE_DEFINITION), errmsg("Cannot get current namespace on Rename Table.")));
+            }
+            orgiSchema = get_namespace_name(relnamespace);
+        }
+        orgitable = temp_name->relname;
+        storageTable[tableName_Count].schemaname = pstrdup(orgiSchema);
+        storageTable[tableName_Count].relname = pstrdup(orgitable);
+        tableName_Count++;
+    }
+
+    if (stmt->renameTargetList->length >= 2) {
+        qsort((void*)storageTable, (size_t)stmt->renameTargetList->length, sizeof(RenameTableNameData), Compare_RenameTableNameData_func);
+    }
+    for (int num = 0; num < stmt->renameTargetList->length; num++) {
+        orgiNameSpace = get_namespace_oid(storageTable[num].schemaname, false);
+        relid = get_relname_relid(storageTable[num].relname, orgiNameSpace);
+
+        if (!OidIsValid(relid) && OidIsValid(u_sess->catalog_cxt.myTempNamespace)) {
+            relid = get_relname_relid(storageTable[num].relname, u_sess->catalog_cxt.myTempNamespace);
+        }
+
+        if(!OidIsValid(relid)) {
+            lockRelation[num] = NULL;
+            continue;
+        } else {
+            /* Don't support Tempporary Table */
+            if (IsTempTable(relid)) {
+                ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("relation %s is temporary table, Rename table don't support.", get_rel_name(relid))));
+            }
+            lockRelation[num] = relation_open(relid, AccessExclusiveLock);
+        }
+    }
+
+    foreach(rename_Cell, stmt->renameTargetList) {
+    /* acquire the schema and table name in renameTargetList */
+        RenameCell* renameInfo = (RenameCell*)lfirst(rename_Cell);
+        temp_name = renameInfo->original_name;
+        orgiSchema = temp_name->schemaname;
+        if (orgiSchema != NULL) {
+            orgiNameSpace = get_namespace_oid(orgiSchema, false);
+        }
+        orgitable = temp_name->relname;
+        temp_name = renameInfo->modify_name;
+        modfySchema = temp_name->schemaname;
+        if (modfySchema != NULL) {
+            modfyNameSpace = get_namespace_oid(modfySchema, false);
+        }
+        modfytable = temp_name->relname;
+
+        /* obtain search_path, get schema name */
+        if (orgiSchema == NULL && search_path != NIL) {
+            relnamespace = linitial_oid(search_path);
+            if (!OidIsValid(relnamespace)) {
+                ereport(ERROR, (errcode(ERRCODE_INVALID_TABLE_DEFINITION), errmsg("Cannot get current namespace on Rename Table.")));
+            } else if (orgiSchema == NULL) {
+                orgiNameSpace = relnamespace;
+            }
+        } else if (search_path == NIL && (orgiSchema == NULL || modfySchema == NULL)) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_TABLE_DEFINITION), errmsg("Rename Table search_path get NIL in error.")));
+        }
+
+        /* Check whether exist Synonym on old table name and new table name */
+        if (orgiSchema == NULL) {
+            orgiSchema = get_namespace_name(relnamespace);
+        }
+        if (FindSynonymExist(orgitable, orgiSchema)) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_TABLE_DEFINITION), errmsg("Rename Table \"%s.%s\" exist Synonym, so Rename table can't execute.",
+                orgiSchema, orgitable)));
+        } else if (modfySchema != NULL && SearchSysCacheExists2(SYNONYMNAMENSP, PointerGetDatum(modfytable), ObjectIdGetDatum(modfyNameSpace))) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_TABLE_DEFINITION), errmsg("Rename Table \"%s.%s\" exist Synonym, so Rename table can't execute.",
+                modfySchema, modfytable)));
+        } else if ((orgiSchema != NULL && modfySchema == NULL) &&
+            SearchSysCacheExists2(SYNONYMNAMENSP, PointerGetDatum(modfytable), ObjectIdGetDatum(orgiNameSpace))) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_TABLE_DEFINITION), errmsg("Rename Table \"%s.%s\" exist Synonym, so Rename table can't execute.",
+                orgiSchema, modfytable)));
+        } else if((orgiSchema == NULL && modfySchema == NULL) &&
+            SearchSysCacheExists2(SYNONYMNAMENSP, PointerGetDatum(modfytable), ObjectIdGetDatum(relnamespace))) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_TABLE_DEFINITION), errmsg("Rename Table \"%s.%s\" exist Synonym, so Rename table can't execute.",
+                get_namespace_name(relnamespace), modfytable)));
+        }
+
+        /* check a user's access privileges to a namespace */
+        if (pg_namespace_aclcheck(orgiNameSpace, GetUserId(), ACL_CREATE) == ACLCHECK_NO_PRIV) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_TABLE_DEFINITION), errmsg("User %s don't have creat privileges on Schema %s.",
+                GetUserNameFromId(GetUserId()), get_namespace_name(orgiNameSpace))));
+        }
+        if (pg_namespace_aclcheck(modfyNameSpace, GetUserId(), ACL_CREATE) == ACLCHECK_NO_PRIV) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_TABLE_DEFINITION), errmsg("User %s don't have creat privileges on Schema %s.",
+                GetUserNameFromId(GetUserId()), get_namespace_name(modfyNameSpace))));
+        }
+
+        /* Do rename table work */
+        rel_pg_class = heap_open(RelationRelationId, RowExclusiveLock);
+
+        relid = get_relname_relid(orgitable, orgiNameSpace);
+
+        /* Support view but cannot span schemaes */
+        if (IsRelaionView(relid) && modfyNameSpace != orgiNameSpace) {
+            ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("relation %s is view, Rename table don't support span schemaes.", get_rel_name(relid))));
+        } else if (!OidIsValid(relid)) {
+            ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("relation \"%s.%s\" does not exist, skipping", get_namespace_name(orgiNameSpace), orgitable)));
+        }
+
+        /* Rename regular table */
+        replaces[Anum_pg_class_relname - 1] = true;
+        values[Anum_pg_class_relname - 1] = CStringGetDatum(modfytable);
+        if (modfySchema != NULL) {
+            replaces[Anum_pg_class_relnamespace - 1] = true;
+            values[Anum_pg_class_relnamespace - 1] = ObjectIdGetDatum(modfyNameSpace);
+        }
+
+        tup = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
+        if (!HeapTupleIsValid(tup)) {
+            ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for relation %s", get_rel_name(relid))));
+        }
+
+        relform = (Form_pg_class)GETSTRUCT(tup);
+        if (relform->relkind == RELKIND_RELATION && relform->parttype == PARTTYPE_PARTITIONED_RELATION) {
+            renamePartitionedTable(relid, modfytable);
+        }
+
+        newtup = heap_modify_tuple(tup, RelationGetDescr(rel_pg_class), values, nulls, replaces);
+        simple_heap_update(rel_pg_class, &newtup->t_self, newtup);
+        CatalogUpdateIndexes(rel_pg_class, newtup);
+        ReleaseSysCache(tup);
+        tableam_tops_free_tuple(newtup);
+        heap_close(rel_pg_class, RowExclusiveLock);
+        CommandCounterIncrement();
+
+        /* revoke table privileges */
+        InternalGrant istmt;
+        istmt.is_grant = false;
+        istmt.objtype = ACL_OBJECT_RELATION;
+        istmt.objects = list_make1_oid(relid);
+        istmt.all_privs= true;
+        istmt.privileges = ACL_NO_RIGHTS;
+        istmt.ddl_privileges = ACL_NO_DDL_RIGHTS;
+        istmt.col_privs = NIL;
+        istmt.col_ddl_privs = NIL;
+        istmt.grantees = list_make1_oid(ACL_ID_PUBLIC);
+        istmt.grant_option = false;
+        istmt.behavior = DROP_CASCADE;
+
+        ExecGrant_Relation(&istmt);
+    }
+    for (int num = stmt->renameTargetList->length - 1; num >= 0; num--) {
+        if (lockRelation[num] != NULL) {
+            relation_close(lockRelation[num], AccessExclusiveLock);
+        }
+    }
+    for (int num = 0; num < stmt->renameTargetList->length; num++) {
+        pfree(storageTable[num].schemaname);
+        pfree(storageTable[num].relname);
+    }
+}
+
 /*
  * Execute ALTER TABLE/INDEX/SEQUENCE/VIEW/FOREIGN TABLE RENAME
  */
 void RenameRelation(RenameStmt* stmt)
 {
-    Oid relid;
+    if (stmt->renameTableflag) {
+        RenameTableFeature(stmt);
+    } else {
+        Oid relid;
 
-    /*
-     * Grab an exclusive lock on the target table, index, sequence or view,
-     * which we will NOT release until end of transaction.
-     *
-     * Lock level used here should match RenameRelationInternal, to avoid lock
-     * escalation.
-     */
-    relid = RangeVarGetRelidExtended(stmt->relation,
-        AccessExclusiveLock,
-        stmt->missing_ok,
-        false,
-        false,
-        false,
-        RangeVarCallbackForAlterRelation,
-        (void*)stmt);
+        /*
+         * Grab an exclusive lock on the target table, index, sequence or view,
+         * which we will NOT release until end of transaction.
+         *
+         * Lock level used here should match RenameRelationInternal, to avoid lock
+         * escalation.
+         */
+        relid = RangeVarGetRelidExtended(stmt->relation,
+            AccessExclusiveLock,
+            stmt->missing_ok,
+            false,
+            false,
+            false,
+            RangeVarCallbackForAlterRelation,
+            (void*)stmt);
 
-    if (!OidIsValid(relid)) {
-        ereport(NOTICE, (errmsg("relation \"%s\" does not exist, skipping", stmt->relation->relname)));
-        return;
-    }
+        if (!OidIsValid(relid)) {
+            ereport(NOTICE, (errmsg("relation \"%s\" does not exist, skipping", stmt->relation->relname)));
+            return;
+        }
 
-    TrForbidAccessRbObject(RelationRelationId, relid, stmt->relation->relname);
-    /* If table has history table, we need rename corresponding history table */
-    if (is_ledger_usertable(relid)) {
-        rename_hist_by_usertable(relid, stmt->newname);
-    }
+        TrForbidAccessRbObject(RelationRelationId, relid, stmt->relation->relname);
+        /* If table has history table, we need rename corresponding history table */
+        if (is_ledger_usertable(relid)) {
+            rename_hist_by_usertable(relid, stmt->newname);
+        }
 
-    /* Do the work */
-    RenameRelationInternal(relid, stmt->newname);
-    /*
-     * Record the changecsn of the table that defines the index
-     */
-    if (stmt->renameType == OBJECT_INDEX) {
-        Oid relOid = IndexGetRelation(relid, false);
-        Relation userRelaiton = RelationIdGetRelation(relOid);
-        UpdatePgObjectChangecsn(relOid, userRelaiton->rd_rel->relkind);
-        RelationClose(userRelaiton);
+        /* Do the work */
+        RenameRelationInternal(relid, stmt->newname);
+        /*
+         * Record the changecsn of the table that defines the index
+         */
+        if (stmt->renameType == OBJECT_INDEX) {
+            Oid relOid = IndexGetRelation(relid, false);
+            Relation userRelaiton = RelationIdGetRelation(relOid);
+            UpdatePgObjectChangecsn(relOid, userRelaiton->rd_rel->relkind);
+            RelationClose(userRelaiton);
+        }
     }
 }
 

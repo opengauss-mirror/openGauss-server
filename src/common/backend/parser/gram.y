@@ -487,7 +487,7 @@ static int errstate;
 				name_list from_clause from_list opt_array_bounds
 				qualified_name_list any_name any_name_list
 				any_operator expr_list attrs callfunc_args
-				target_list insert_column_list set_target_list
+				target_list insert_column_list set_target_list rename_clause_list rename_clause
 				set_clause_list set_clause multiple_set_clause
 				ctext_expr_list ctext_row def_list tsconf_def_list indirection opt_indirection
 				reloption_list tblspc_option_list cfoption_list group_clause TriggerFuncArgs select_limit
@@ -15614,7 +15614,53 @@ RenameStmt: ALTER AGGREGATE func_name aggr_args RENAME TO name
 					n->missing_ok = false;
 					$$ = (Node *)n;
 				}
+			| RENAME TABLE rename_clause_list
+				{
+#ifndef ENABLE_MULTIPLE_NODES
+					if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) {
+						RenameStmt *n = makeNode(RenameStmt);
+						n->renameType = OBJECT_TABLE;
+						n->renameTargetList = $3;
+						n->renameTableflag = true;
+						n->missing_ok = false;
+						$$ = (Node *)n;
+					} else {
+						const char* message = "rename table syntax is supported on dbcompatibility B.";
+						InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+						ereport(errstate,
+							(errmodule(MOD_PARSER),
+                                                        errcode(ERRCODE_SYNTAX_ERROR),
+                                                        errmsg("rename table syntax is supported on dbcompatibility B."),
+                                                        parser_errposition(@1)));
+						$$ = NULL;
+					}
+#else
+                                        const char* message = "rename table syntax don't supported on distributed database.";
+                                        InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+                                        ereport(errstate,
+                                                (errmodule(MOD_PARSER),
+                                                errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                                errmsg("rename table syntax don't supported on distributed database."),
+                                                parser_errposition(@1)));
+                                        $$ = NULL;
+#endif
+				}
 		;
+
+rename_clause_list:
+		rename_clause					{ $$ = $1; }
+		| rename_clause_list ',' rename_clause		{ $$ = list_concat($1, $3); }
+	;
+
+rename_clause:
+		qualified_name TO qualified_name
+		{
+			RenameCell* n = makeNode(RenameCell);
+			n->original_name = $1;
+			n->modify_name = $3;
+			$$ = list_make1(n);
+		}
+	;
 
 opt_column: COLUMN									{ $$ = COLUMN; }
 			| /*EMPTY*/								{ $$ = 0; }
