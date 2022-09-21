@@ -1309,12 +1309,8 @@ HeapTuple FindPkgVariableType(ParseState* pstate, const TypeName* typname, int32
     }
 
     /* handle var.col%TYPE firsr */
-    tup = FindRowVarColType(typname->names);
+    tup = FindRowVarColType(typname->names, NULL, NULL, typmod_p);
     if (tup != NULL) {
-        typmod = typenameTypeMod(pstate, typname, (Type)tup);
-        if (typmod_p != NULL) {
-            *typmod_p = typmod;
-        }
         return tup;
     }
 

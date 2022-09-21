@@ -71,5 +71,6 @@ extern List* GetPackageListName(const char* pkgName, const Oid nspOid);
 
 extern HeapTuple getPLpgsqlVarTypeTup(char* word);
 
-extern HeapTuple FindRowVarColType(List* nameList, int* collectionType = NULL, Oid* tableofIndexType = NULL);
+extern HeapTuple FindRowVarColType(List* nameList, int* collectionType = NULL, Oid* tableofIndexType = NULL,
+                                    int32* typMod = NULL);
 #endif

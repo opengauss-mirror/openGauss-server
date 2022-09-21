@@ -13,6 +13,7 @@
  *
  * -------------------------------------------------------------------------
  */
+#include "utils/builtins.h"
 #include "utils/plpgsql.h"
 #include "utils/pl_package.h"
 #include "catalog/pg_type.h"
@@ -24,6 +25,7 @@
 
 #define PG_KEYWORD(a, b, c) {a, b, c},
 #define LENGTH_OF_DOT_AND_STR_END 4
+#define INT32_STRING_SIZE 12
 /*
  * A word about keywords:
  *
@@ -552,6 +554,9 @@ void plpgsql_append_object_typename(StringInfo buf, PLpgSQL_type *var_type)
 {
     errno_t ret;
     char* typcast = "::";
+    char* left = "(";
+    char* right = ")";
+    char* dot = ",";
     appendBinaryStringInfo(buf, typcast, 2);
 
     int len = strlen(var_type->typname) + strlen(var_type->typnamespace) + LENGTH_OF_DOT_AND_STR_END;
@@ -565,6 +570,24 @@ void plpgsql_append_object_typename(StringInfo buf, PLpgSQL_type *var_type)
     ret = strcat_s(typname, len, "\"");
     securec_check(ret, "\0", "\0");
     appendBinaryStringInfo(buf, typname, strlen(typname));
+    if (var_type->atttypmod != -1) {
+        appendBinaryStringInfo(buf, left, 1);
+        if (var_type->typoid == NUMERICOID) {
+            int32 typmod = var_type->atttypmod - VARHDRSZ;
+            char* precision = (char*)palloc(INT32_STRING_SIZE);
+            char* scale = (char*)palloc(INT32_STRING_SIZE);
+            pg_ltoa((int32)(((uint32)(typmod) >> 16) & 0xffff), precision);
+            pg_ltoa((int32)(((uint32)typmod) & 0xffff), scale);
+            appendBinaryStringInfo(buf, precision, strlen(precision));
+            appendBinaryStringInfo(buf, dot, 1);
+            appendBinaryStringInfo(buf, scale, strlen(scale));
+        } else {
+            char* typMod = (char*)palloc(INT32_STRING_SIZE);
+            pg_ltoa(var_type->atttypmod, typMod);
+            appendBinaryStringInfo(buf, typMod, strlen(typMod));
+        }
+        appendBinaryStringInfo(buf, right, 1);
+    }
     pfree_ext(typname);
 }
 
