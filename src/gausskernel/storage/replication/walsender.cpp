@@ -1876,7 +1876,6 @@ static XLogRecPtr WalSndWaitForWal(XLogRecPtr loc)
             if (XLByteLT(t_thrd.walsender_cxt.MyWalSnd->flush, t_thrd.walsender_cxt.sentPtr) &&
                 !t_thrd.walsender_cxt.waiting_for_ping_response) {
                 WalSndKeepalive(false);
-                t_thrd.walsender_cxt.waiting_for_ping_response = true;
             }
         }
 
@@ -6130,9 +6129,12 @@ Datum pg_stat_get_wal_senders(PG_FUNCTION_ARGS)
 }
 
 /*
- * This function is used to send keepalive message to standby.
- * If requestReply is set, sets a flag in the message requesting the standby
- * to send a message back to us, for heartbeat purposes.
+ * Send a keepalive message to standby.
+ *
+ * If requestReply is set, the message requests the other party to send
+ * a message back to us, for heartbeat purposes.  We also set a flag to
+ * let nearby code know that we're waiting for that response, to avoid
+ * repeated requests.
  */
 static void WalSndKeepalive(bool requestReply)
 {
@@ -6162,6 +6164,11 @@ static void WalSndKeepalive(bool requestReply)
     /* Flush the keepalive message to standby immediately. */
     if (pq_flush_if_writable() != 0)
         WalSndShutdown();
+
+    /* Set local flag */
+    if (requestReply) {
+        t_thrd.walsender_cxt.waiting_for_ping_response = true;
+    }
 }
 
 /*
@@ -6246,7 +6253,6 @@ static void WalSndKeepaliveIfNecessary(TimestampTz now)
                                             u_sess->attr.attr_storage.wal_sender_timeout / 2);
     if (now >= ping_time) {
         WalSndKeepalive(true);
-        t_thrd.walsender_cxt.waiting_for_ping_response = true;
     }
 }
 
