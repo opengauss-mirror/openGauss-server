@@ -3424,7 +3424,7 @@ modify_column_cmd:
 					$$ = (Node *)n;
 				}
 			/* modify column comments start */
-			| COLUMN ColId opt_column_options
+			| COLUMN ColId column_options
 				{
 					AlterTableCmd *n = makeNode(AlterTableCmd);
 					ColumnDef *def = makeNode(ColumnDef);
@@ -3436,7 +3436,7 @@ modify_column_cmd:
 					$$ = (Node *)n;
 				}
 			;
-			| ColId opt_column_options
+			| ColId column_options
 				{
 					AlterTableCmd *n = makeNode(AlterTableCmd);
 					ColumnDef *def = makeNode(ColumnDef);
