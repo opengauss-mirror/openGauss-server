@@ -303,8 +303,12 @@ drop table test_primary;
 drop table test_primary1;
 drop table test_us; 
 
+drop database if exists mysql;
 create database mysql dbcompatibility 'B';
 \c mysql
-create table if not exists test(a int, b timestamp default now() on update current_timestamp);
+create table if not exists test(
+    a int,
+    b timestamp default now() on update current_timestamp,
+    c timestamptz on update current_timestamp(5));
 select * from pg_get_tabledef('test');
 \c regression

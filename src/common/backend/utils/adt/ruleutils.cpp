@@ -1645,7 +1645,42 @@ static int get_table_attribute(
                             appendStringInfo(buf, " DEFAULT %s", adsrc);
                         }
                         if (isOnUpdate) {
-                            appendStringInfo(buf, " ON UPDATE %s", TextDatumGetCString(onUpdateExpr));
+                            if (pg_strcasecmp(TextDatumGetCString(onUpdateExpr), "pg_systimestamp()") == 0) {
+                                appendStringInfo(buf, " ON UPDATE CURRENT_TIMESTAMP");
+                            } else if (pg_strcasecmp(TextDatumGetCString(onUpdateExpr), "('now'::text)::time with time zone") == 0) {
+                                appendStringInfo(buf, " ON UPDATE CURRENT_TIME");
+                            } else if (pg_strcasecmp(TextDatumGetCString(onUpdateExpr), "text_date('now'::text)") == 0) {
+                                appendStringInfo(buf, " ON UPDATE CURRENT_DATE");
+                            } else if (pg_strcasecmp(TextDatumGetCString(onUpdateExpr), "('now'::text)::time without time zone") == 0) {
+                                appendStringInfo(buf, " ON UPDATE LOCALTIME");
+                            } else if (pg_strcasecmp(TextDatumGetCString(onUpdateExpr), "('now'::text)::timestamp without time zone") == 0) {
+                                appendStringInfo(buf, " ON UPDATE LOCALTIMESTAMP");
+                            } else {
+                                char* size_start = NULL;
+                                char* size_end = NULL;
+                                int number_size = 0;
+                                size_start = strstr(TextDatumGetCString(onUpdateExpr), "timestamp(");
+                                if (size_start != NULL) {
+                                    size_start = size_start + 10;
+                                    size_end = strstr(size_start, ")");
+                                    number_size = size_end - size_start;
+                                    char num[number_size + 1] = {0};
+                                    errno_t rc = strncpy_s(num, sizeof(num), size_start, number_size);
+                                    securec_check_c(rc, "\0", "\0");
+                                    appendStringInfo(buf, " ON UPDATE CURRENT_TIMESTAMP(%s)", num);
+                                } else {
+                                    size_start = strstr(TextDatumGetCString(onUpdateExpr), "time(");
+                                    if (size_start != NULL) {
+                                        size_start = size_start + 5;
+                                        size_end = strstr(size_start, ")");
+                                        number_size = size_end - size_start;
+                                        char num[number_size + 1] = {0};
+                                        errno_t rc = strncpy_s(num, sizeof(num), size_start, number_size);
+                                        securec_check_c(rc, "\0", "\0");
+                                        appendStringInfo(buf, " ON UPDATE CURRENT_TIME(%s)", num);
+                                    }
+                                }
+                            }
                         }
                         break;
                     }
