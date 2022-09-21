@@ -1129,6 +1129,13 @@ int SyncRepWakeQueue(bool all, int mode)
         thisproc = proc;
         thisproc->syncRepInCompleteQueue = true;
 #ifndef ENABLE_MULTIPLE_NODES
+        /*
+         * Set confirmed LSN at primary node during sync wait for LSN.
+         * Confirmed LSN is the start LSN of last xact of proc which all qurom stanby nodes had met with primary.
+         * With saving the confirmed LSN at primary node during sync wait process and validating it during build 
+         * process, it can avoid the primary node lost data if it will be built as new standby while an async 
+         * standby node is running as new primary.
+         */
         if (g_instance.attr.attr_storage.enable_save_confirmed_lsn &&
             XLogRecPtrIsValid(thisproc->syncSetConfirmedLSN)) {
             confirmedLSN =
