@@ -2,7 +2,6 @@ FROM centos:7.6.1810
 
 COPY openGauss-3.0.0-CentOS-64bit.tar.bz2 .
 COPY gosu-amd64 /usr/local/bin/gosu
-COPY wal2json.so /tmp
 
 ENV LANG en_US.utf8
 
@@ -16,7 +15,6 @@ RUN set -eux; \
     mkdir -p /usr/local/opengauss && \
     mkdir -p /var/run/opengauss  && \
     mkdir /docker-entrypoint-initdb.d && \
-    cp /tmp/wal2json.so /usr/local/opengauss && \
     tar -jxf openGauss-3.0.0-CentOS-64bit.tar.bz2 -C /usr/local/opengauss && \
     chown -R omm:omm /var/run/opengauss && chown -R omm:omm /usr/local/opengauss && chown -R omm:omm /var/lib/opengauss &&  chown -R omm:omm /docker-entrypoint-initdb.d && \
     chmod 2777 /var/run/opengauss && \
