@@ -41,3 +41,17 @@ CREATE TABLE cstore_cmpr_delta_macaddr
 	a1 macaddr
 ) with ( orientation = column, compression = low )  ;
 ERROR:  type "macaddr" is not supported in column store
+create table t_1093961(id int) with (orientation = column);
+alter table t_1093961 add column score varchar prefix;
+select attcmprmode from pg_attribute where attname = 'score' and attrelid in (select relfilenode from pg_class where relname = 't_1093961');
+ attcmprmode 
+-------------
+ 3
+(1 row)
+
+select attcmprmode from pg_attribute where attname = 'score' and attrelid in (select relfilenode from pg_class where relname in (select concat('pg_delta_', relfilenode) from (select relfilenode from pg_class where relname = 't_1093961')));
+ attcmprmode 
+-------------
+ 0
+(1 row)
+

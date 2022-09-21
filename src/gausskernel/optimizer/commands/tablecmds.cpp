@@ -9827,6 +9827,8 @@ static void ATExecAddColumn(List** wqueue, AlteredTableInfo* tab, Relation rel, 
     }
 #endif
 
+    bool isDelta = RELATION_IS_DELTA(rel);
+    
     /* construct new attribute's pg_attribute entry */
     attribute.attrelid = myrelid;
     (void)namestrcpy(&(attribute.attname), colDef->colname);
@@ -9845,14 +9847,18 @@ static void ATExecAddColumn(List** wqueue, AlteredTableInfo* tab, Relation rel, 
     attribute.attisdropped = false;
     attribute.attislocal = colDef->is_local;
     attribute.attkvtype = colDef->kvtype;
-    VerifyAttrCompressMode(colDef->cmprs_mode, attribute.attlen, colDef->colname);
-    attribute.attcmprmode = colDef->cmprs_mode;
+    if (!isDelta) {
+        VerifyAttrCompressMode(colDef->cmprs_mode, attribute.attlen, colDef->colname);
+        attribute.attcmprmode = colDef->cmprs_mode;
+    } else {
+        attribute.attcmprmode = ATT_CMPR_NOCOMPRESS;
+    }
     attribute.attinhcount = colDef->inhcount;
     attribute.attcollation = collOid;
     /* attribute.attacl is handled by InsertPgAttributeTuple */
     ReleaseSysCache(typeTuple);
 
-    if (RelationIsRowFormat(rel) &&  ATT_CMPR_NOCOMPRESS < colDef->cmprs_mode
+    if (!isDelta && RelationIsRowFormat(rel) &&  ATT_CMPR_NOCOMPRESS < colDef->cmprs_mode
         && colDef->cmprs_mode <= ATT_CMPR_NUMSTR) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
