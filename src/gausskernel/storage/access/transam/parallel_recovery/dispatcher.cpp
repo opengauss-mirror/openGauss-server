@@ -977,6 +977,7 @@ static bool DispatchSmgrRecord(XLogReaderState *record, List *expectedTLIs, Time
             xl_smgr_create *xlrec = (xl_smgr_create *)XLogRecGetData(record);
             RelFileNode rnode;
             RelFileNodeCopy(rnode, xlrec->rnode, XLogRecGetBucketId(record));
+            rnode.opt = GetCreateXlogFileNodeOpt(record);
 
             DispatchToOnePageWorker(record, rnode, expectedTLIs);
         } else {
@@ -996,6 +997,7 @@ static bool DispatchSmgrRecord(XLogReaderState *record, List *expectedTLIs, Time
             xl_smgr_truncate *xlrec = (xl_smgr_truncate *)XLogRecGetData(record);
             RelFileNode rnode;
             RelFileNodeCopy(rnode, xlrec->rnode, XLogRecGetBucketId(record));
+            rnode.opt = GetTruncateXlogFileNodeOpt(record);
             id = GetWorkerId(rnode, 0, 0);
             AddWorkerToSet(id);
         } else {

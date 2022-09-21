@@ -70,13 +70,14 @@ BlockNumber PageCompression::GetSegmentNo() const
 size_t PageCompression::ReadCompressedBuffer(BlockNumber blockNum, char *buffer, size_t bufferLen, bool zeroAlign)
 {
     CfsExtentHeader *header = GetStruct(blockNum);
+    BlockNumber globalBlockNumber = (this->segmentNo * CFS_LOGIC_BLOCKS_PER_FILE) + blockNum;
     CfsReadStruct cfsReadStruct {
         .fd = this->fd,
         .header = header,
         .extentCount =  blockNum / CFS_LOGIC_BLOCKS_PER_EXTENT
     };
     size_t actualSize = CfsReadCompressedPage(buffer, bufferLen,
-        blockNum % CFS_LOGIC_BLOCKS_PER_EXTENT, &cfsReadStruct, InvalidBlockNumber);
+        blockNum % CFS_LOGIC_BLOCKS_PER_EXTENT, &cfsReadStruct, globalBlockNumber);
     /* valid check */
     if (actualSize == COMPRESS_FSEEK_ERROR) {
         return 0;

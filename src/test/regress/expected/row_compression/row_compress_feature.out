@@ -267,9 +267,9 @@ ERROR:  the specified file(relation) is non-compression relation.
 select * from compress_statistic_info(compress_func_findpath('row_noncompression_test_tbl1_kkk'), 1);
 ERROR:  the specified file(relation) is non-compression relation.
 select * from compress_address_header(compress_func_findoid('row_noncompression_test_tbl1_kkk'), 0);
-ERROR:  the specified file(relation) is non-compression relation.
+ERROR:  compress File: can not find file
 select * from compress_address_details(compress_func_findoid('row_noncompression_test_tbl1_kkk'), 0);
-ERROR:  the specified file(relation) is non-compression relation.
+ERROR:  compress File: can not find file
 drop table if exists row_noncompression_test_tbl1_kkk cascade;
 --compression table
 drop table if exists row_compression_test_tbl1_kkk cascade;
