@@ -22,6 +22,7 @@
 #include <sys/un.h>
 #endif
 #include <netinet/in.h>
+#include <lib/stringinfo.h>
 
 #ifdef HAVE_STRUCT_SOCKADDR_STORAGE
 
@@ -244,5 +245,7 @@ typedef struct StopRequestPacket {
     uint32 query_id_first;   /* query id of front 4 bytes */
     uint32 query_id_end;     /* query id of back 4 bytes */
 } StopRequestPacket;
+
+extern int internal_putbytes(const char* s, size_t len);
 
 #endif /* PQCOMM_H */

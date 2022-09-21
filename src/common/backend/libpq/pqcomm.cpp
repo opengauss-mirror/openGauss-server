@@ -111,6 +111,9 @@
 
 extern GlobalNodeDefinition* global_node_definition;
 
+extern ProtocolExtensionConfig* ListenConfig[MAXLISTEN];
+extern ProtocolExtensionConfig default_protocol_config;
+
 /*
  * Buffers for low-level I/O.
  *
@@ -132,7 +135,6 @@ extern GlobalNodeDefinition* global_node_definition;
 void pq_close(int code, Datum arg);
 
 /* Internal functions */
-static int internal_putbytes(const char* s, size_t len);
 static int internal_flush(void);
 static void pq_set_nonblocking(bool nonblocking);
 static void pq_disk_generate_checking_header(
@@ -561,8 +563,8 @@ static void StreamDoUnlink(int code, Datum arg)
  */
 int StreamServerPort(int family, char* hostName, unsigned short portNumber, const char* unixSocketName,
     pgsocket ListenSocket[], int MaxListen, bool add_localaddr_flag,
-    bool is_create_psql_sock, bool is_create_libcomm_sock)
-{
+    bool is_create_psql_sock, bool is_create_libcomm_sock, 
+    ProtocolExtensionConfig* protocol_config) {
 #define RETRY_SLEEP_TIME 1000000L
     pgsocket fd = PGINVALID_SOCKET;
     int err;
@@ -802,6 +804,7 @@ int StreamServerPort(int family, char* hostName, unsigned short portNumber, cons
             goto errhandle;
         }
         ListenSocket[listen_index] = fd;
+        ListenConfig[listen_index] = protocol_config;
         added++;
         if (add_localaddr_flag == true) {
             struct sockaddr* sinp = NULL;
@@ -812,25 +815,25 @@ int StreamServerPort(int family, char* hostName, unsigned short portNumber, cons
                 result = inet_net_ntop(AF_INET6,
                     &((struct sockaddr_in6*)sinp)->sin6_addr,
                     128,
-                    t_thrd.postmaster_cxt.LocalAddrList[t_thrd.postmaster_cxt.LocalIpNum],
+                    g_instance.listen_cxt.LocalAddrList[g_instance.listen_cxt.LocalIpNum],
                     IP_LEN);
             } else if (addr->ai_family == AF_INET) {
                 result = inet_net_ntop(AF_INET,
                     &((struct sockaddr_in*)sinp)->sin_addr,
                     32,
-                    t_thrd.postmaster_cxt.LocalAddrList[t_thrd.postmaster_cxt.LocalIpNum],
+                    g_instance.listen_cxt.LocalAddrList[g_instance.listen_cxt.LocalIpNum],
                     IP_LEN);
             }
             if (result == NULL) {
                 ereport(WARNING, (errmsg("inet_net_ntop failed, error: %d", EAFNOSUPPORT)));
             } else {
-                t_thrd.postmaster_cxt.LocalIpNum++;
+                g_instance.listen_cxt.LocalIpNum++;
             }
         }
         if (is_create_psql_sock) {
-            t_thrd.postmaster_cxt.listen_sock_type[listen_index] = PSQL_LISTEN_SOCKET;
+            g_instance.listen_cxt.listen_sock_type[listen_index] = PSQL_LISTEN_SOCKET;
         } else {
-            t_thrd.postmaster_cxt.listen_sock_type[listen_index] = HA_LISTEN_SOCKET;
+            g_instance.listen_cxt.listen_sock_type[listen_index] = HA_LISTEN_SOCKET;
         }
 
         continue;
@@ -1339,7 +1342,7 @@ int pq_getbytes(char* s, size_t len)
  *		returns 0 if OK, EOF if trouble
  * --------------------------------
  */
-static int pq_discardbytes(size_t len)
+int pq_discardbytes(size_t len)
 {
     size_t amount;
 
@@ -1524,7 +1527,7 @@ int pq_putbytes(const char* s, size_t len)
     return res;
 }
 
-static int internal_putbytes(const char* s, size_t len)
+int internal_putbytes(const char* s, size_t len)
 {
     size_t amount;
 

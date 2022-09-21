@@ -6381,15 +6381,12 @@ void BeginReportingGUCOptions(void)
 static void ReportGUCOption(struct config_generic* record)
 {
     if (u_sess->utils_cxt.reporting_enabled && (record->flags & GUC_REPORT)) {
-        char* val = _ShowOption(record, false, true);
-        StringInfoData msgbuf;
-
-        pq_beginmessage(&msgbuf, 'S');
-        pq_sendstring(&msgbuf, record->name);
-        pq_sendstring(&msgbuf, val);
-        pq_endmessage(&msgbuf);
-
-        pfree(val);
+        Port* MyProcPort = u_sess->proc_cxt.MyProcPort;
+        if (MyProcPort && MyProcPort->protocol_config->fn_report_param_status) {
+            char* val = _ShowOption(record, false, true);
+            (MyProcPort->protocol_config->fn_report_param_status)(record->name, val);
+            pfree(val);
+        }
     }
 }
 

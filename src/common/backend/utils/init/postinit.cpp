@@ -309,7 +309,7 @@ static void PerformAuthentication(Port* port)
     /*
      * Now perform authentication exchange.
      */
-    ClientAuthentication(port); /* might not return, if failure */
+    port->protocol_config->fn_authenticate(port);
 
     /*
      * recover the signal mask before call ClientAuthentication.

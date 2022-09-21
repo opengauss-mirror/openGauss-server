@@ -213,6 +213,13 @@ void ThreadPoolListener::AddEpoll(knl_session_context* session)
      * we find an input event of the socket, so we use one_shot mode.
      */
     ev.events = EPOLLRDHUP | EPOLLIN | EPOLLET | EPOLLONESHOT;
+
+#ifndef ENABLE_MULTIPLE_NODES
+    if (session->proc_cxt.MyProcPort->protocol_config->server_handshake_first && session->status == KNL_SESS_UNINIT) {
+        ev.events |= EPOLLOUT;
+    } 
+#endif
+    
     ev.data.ptr = (void*)session;
     if (session->status != KNL_SESS_UNINIT) {
         /* CommProxy Support */
@@ -404,7 +411,11 @@ knl_session_context* ThreadPoolListener::GetSessionBaseOnEvent(struct epoll_even
             session->status = KNL_SESS_CLOSE;
         }
         return session;
-    } else if (ev->events & EPOLLIN) {
+#ifndef ENABLE_MULTIPLE_NODES
+    } else if (ev->events & (EPOLLIN | EPOLLOUT)) {
+#else
+    } else if (ev->events & EPOLLIN) { 
+#endif
         return session;
     }
     return NULL;

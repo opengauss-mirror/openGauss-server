@@ -2704,7 +2704,11 @@ static int _SPI_execute_plan0(SPIPlanPtr plan, ParamListInfo paramLI, Snapshot s
                         my_res = SPI_ERROR_COPY;
                         goto fail;
                     }
-                } else if (IsA(stmt, TransactionStmt)) {
+                } else if (IsA(stmt, TransactionStmt)
+#ifndef ENABLE_MULTIPLE_NODES
+                            && !u_sess->attr.attr_sql.dolphin
+#endif
+                ) {
                     my_res = SPI_ERROR_TRANSACTION;
                     goto fail;
                 } 
@@ -2730,6 +2734,13 @@ static int _SPI_execute_plan0(SPIPlanPtr plan, ParamListInfo paramLI, Snapshot s
             if (IsA(stmt, PlannedStmt) && ((PlannedStmt *)stmt)->utilityStmt == NULL) {
                 QueryDesc *qdesc = NULL;
                 Snapshot snap = ActiveSnapshotSet() ? GetActiveSnapshot() : InvalidSnapshot;
+
+#ifndef ENABLE_MULTIPLE_NODES
+                Port *MyPort = u_sess->proc_cxt.MyProcPort; 
+                if (MyPort && MyPort->protocol_config->fn_set_DR_params) {
+                    MyPort->protocol_config->fn_set_DR_params(dest, ((PlannedStmt *)stmt)->planTree->targetlist);
+                }
+#endif
 
                 qdesc = CreateQueryDesc((PlannedStmt *)stmt, plansource->query_string, snap, crosscheck_snapshot, dest,
                     paramLI, 0);
@@ -3063,7 +3074,11 @@ static int _SPI_pquery(QueryDesc *queryDesc, bool fire_triggers, long tcount, bo
     switch (operation) {
         case CMD_SELECT:
             Assert(queryDesc->plannedstmt->utilityStmt == NULL);
-            if (queryDesc->dest->mydest != DestSPI) {
+            if (queryDesc->dest->mydest != DestSPI 
+#ifndef ENABLE_MULTIPLE_NODES
+                && queryDesc->dest->mydest != DestRemote
+#endif
+            ) {
                 /* Don't return SPI_OK_SELECT if we're discarding result */
                 res = SPI_OK_UTILITY;
             } else

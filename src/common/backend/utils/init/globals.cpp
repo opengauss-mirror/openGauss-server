@@ -114,6 +114,7 @@ const uint32 LOGICAL_DECODE_FLATTEN_TOAST_VERSION_NUM = 92614;
 const uint32 SWITCH_ROLE_VERSION_NUM = 92618;
 const uint32 PLAN_SELECT_VERSION_NUM = 92776;
 const uint32 REPLACE_INTO_VERSION_NUM = 92778;
+const uint32 PG_AUTHID_PASSWORDEXT_VERSION_NUM = 92780;
 
 
 /* Version number of the guc parameter backend_version added in V500R001C20 */

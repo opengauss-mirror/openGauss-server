@@ -1387,6 +1387,16 @@
       <entry>Password expiry time (only used for password authentication);
        null if no expiration</entry>
      </row>
+
+     <row>
+      <entry><structfield>rolpasswordext</structfield></entry>
+      <entry><type>text</type></entry>
+      <entry>
+       Password for other database encrypt rule if exists.
+       If we created a B compatibility database, sha1(sha1(password)) will
+       be stored here according to mysql_native_password strategy.
+      </entry>
+     </row>
     </tbody>
    </tgroup>
   </table>

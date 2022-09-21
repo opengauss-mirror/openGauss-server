@@ -1386,6 +1386,7 @@ void CreateRole(CreateRoleStmt* stmt)
     }
 
     new_record_nulls[Anum_pg_authid_rolexcpdata - 1] = true;
+    new_record_nulls[Anum_pg_authid_rolpasswordext - 1] = true;
 
     HeapTuple tuple = heap_form_tuple(pg_authid_dsc, new_record, new_record_nulls);
 

@@ -35,6 +35,8 @@ typedef struct {
     } u;
 } PQArgBlock;
 
+extern ProtocolExtensionConfig default_protocol_config;
+
 /*
  * External functions.
  */
@@ -44,13 +46,15 @@ typedef struct {
  */
 extern int StreamServerPort(int family, char* hostName, unsigned short portNumber, const char* unixSocketName,
     pgsocket ListenSocket[], int MaxListen, bool add_localaddr_flag,
-    bool is_create_psql_sock, bool is_create_libcomm_sock);
+    bool is_create_psql_sock, bool is_create_libcomm_sock, 
+    ProtocolExtensionConfig* protocol_config = &default_protocol_config);
 extern int StreamConnection(pgsocket server_fd, Port* port);
 extern void StreamClose(pgsocket sock);
 extern void TouchSocketFile(void);
 extern void pq_init(void);
 extern void pq_comm_reset(void);
 extern int pq_getbytes(char* s, size_t len);
+extern int pq_discardbytes(size_t len);
 extern int pq_getstring(StringInfo s);
 extern int pq_getmessage(StringInfo s, int maxlen);
 extern int pq_getbyte(void);
