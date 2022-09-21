@@ -170,6 +170,8 @@ static void deinit_optimizer_context(PlannerGlobal* glob);
 static void check_index_column();
 static bool check_sort_for_upsert(PlannerInfo* root);
 
+static bool IsSupportMakeSort(List* pathkeys);
+
 extern void PushDownFullPseudoTargetlist(PlannerInfo *root, Plan *topNode, Plan *botNode,
             List *fullEntryList);
 
@@ -8088,8 +8090,9 @@ static Plan* mark_windowagg_stream(
         Plan* gatherPlan = NULL;
         Sort* sortPlan = NULL;
         SimpleSort* streamSort = NULL;
+        bool isSupportMakeSort = IsSupportMakeSort(pathkeys);
 
-        if (pathkeys != NIL) {
+        if (isSupportMakeSort) {
             sortPlan = make_sort_from_pathkeys(root, bottomPlan, pathkeys, -1.0);
 
             streamSort = makeNode(SimpleSort);
@@ -8107,7 +8110,7 @@ static Plan* mark_windowagg_stream(
              * If have pathkeys, we can push down Sort to Datanode and then merge partial
              * sorted results in RemoteQuery.
              */
-            if (pathkeys != NIL) {
+            if (isSupportMakeSort) {
                 gatherPlan = make_simple_RemoteQuery((Plan*)sortPlan, root, false);
                 if (IsA(gatherPlan, RemoteQuery)) {
                     ((RemoteQuery*)gatherPlan)->sort = streamSort;
@@ -8121,7 +8124,7 @@ static Plan* mark_windowagg_stream(
             if (((unsigned int)u_sess->attr.attr_sql.cost_param & COST_ALTERNATIVE_MERGESORT) ||
                 root->is_under_recursive_cte) {
                 gatherPlan = make_stream_plan(root, bottomPlan, NIL, 1.0);
-                if (pathkeys != NIL)
+                if (isSupportMakeSort)
                     gatherPlan = (Plan*)make_sort_from_pathkeys(root, gatherPlan, pathkeys, -1.0);
             } else {
                 bool single_node =
@@ -8164,7 +8167,7 @@ static Plan* mark_windowagg_stream(
                 if (!single_node) {
                     gatherPlan = make_stream_plan(root, bottomPlan, NIL, 1.0);
                     pick_single_node_plan_for_replication(gatherPlan);
-                    if (pathkeys != NIL)
+                    if (isSupportMakeSort)
                         ((Stream*)gatherPlan)->sort = streamSort;
                 } else
                     gatherPlan = bottomPlan;
@@ -14674,5 +14677,17 @@ bool check_stream_for_loop_fetch(Portal portal)
     }
     portal->hasStreamForPlpgsql = has_stream;
     return has_stream;
+}
+
+static bool IsSupportMakeSort(List* pathkeys)
+{
+    ListCell* i = NULL;
+    foreach (i, pathkeys) {
+        PathKey* pathkey = (PathKey*)lfirst(i);
+        if (pathkey != NULL && pathkey->pk_eclass->ec_members != NIL) {
+            return true;
+        }
+    }
+    return false;
 }
 
