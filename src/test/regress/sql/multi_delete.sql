@@ -17,6 +17,26 @@ select * from t_t_mutil_t1;
 select * from t_t_mutil_t2;
 select * from t_t_mutil_t3;
 rollback;
+-- delete xx from xxx;
+begin;
+delete t_t_mutil_t1 a from t_t_mutil_t2 b,t_t_mutil_t3 c where a.col2=b.col2 and b.col2=c.col2;
+rollback;
+begin;
+delete a from t_t_mutil_t1 a,t_t_mutil_t2 b,t_t_mutil_t3 c where a.col2=b.col2 and b.col2=c.col2;
+rollback;
+begin;
+delete t_t_mutil_t1 a,t_t_mutil_t2 b from t_t_mutil_t3 c where a.col2=b.col2 and b.col2=c.col2;
+rollback;
+begin;
+delete a,b from t_t_mutil_t1 a,t_t_mutil_t2 b,t_t_mutil_t3 c where a.col2=b.col2 and b.col2=c.col2;
+rollback;
+begin;
+delete a from t_t_mutil_t1 a left join t_t_mutil_t2 b on a.col2=b.col2;
+rollback;
+delete a from t_t_mutil_t1 a left join t_t_mutil_t2 b on a.col2=b.col2 limit 1; -- error
+delete a from t_t_mutil_t1 a left join t_t_mutil_t2 b on a.col2=b.col2 order by a.col2; -- error
+delete a from t_t_mutil_t1 a left join t_t_mutil_t2 b on a.col2=b.col2 returning *; -- error
+delete t_t_mutil_t1 a from t_t_mutil_t1 a left join t_t_mutil_t2 b on a.col2=b.col2 limit 1; -- error
 -- condition is false
 delete from t_t_mutil_t1 a,t_t_mutil_t2 b where a.col1 = 1 and a.col1=2;
 -- different plan
