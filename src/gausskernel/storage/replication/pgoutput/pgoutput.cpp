@@ -158,15 +158,15 @@ static void pgoutput_startup(LogicalDecodingContext *ctx, OutputPluginOptions *o
         parse_output_parameters(ctx->output_plugin_options, data);
 
         /* Check if we support requested protol */
-        if (data->protocol_version > LOGICALREP_PROTO_MAX_VERSION_NUM)
+        if (data->protocol_version >= LOGICALREP_PROTO_MAX_VERSION_NUM)
             ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("client sent proto_version=%d but we only support protocol %d or lower", data->protocol_version,
-                LOGICALREP_PROTO_MAX_VERSION_NUM)));
+                LOGICALREP_PROTO_MAX_VERSION_NUM - 1)));
 
-        if (data->protocol_version < LOGICALREP_PROTO_MIN_VERSION_NUM)
+        if (data->protocol_version <= LOGICALREP_PROTO_MIN_VERSION_NUM)
             ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("client sent proto_version=%d but we only support protocol %d or higher", data->protocol_version,
-                LOGICALREP_PROTO_MIN_VERSION_NUM)));
+                LOGICALREP_PROTO_MIN_VERSION_NUM + 1)));
 
         if (list_length(data->publication_names) < 1)
             ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("publication_names parameter missing")));
@@ -174,6 +174,9 @@ static void pgoutput_startup(LogicalDecodingContext *ctx, OutputPluginOptions *o
         /* Init publication state. */
         data->publications = NIL;
         t_thrd.publication_cxt.publications_valid = false;
+        if (data->protocol_version >= LOGICALREP_CONNINFO_PROTO_VERSION_NUM) {
+            t_thrd.publication_cxt.updateConninfoNeeded = true;
+        }
         CacheRegisterThreadSyscacheCallback(PUBLICATIONOID, publication_invalidation_cb, (Datum)0);
 
         /* Initialize relation schema cache. */
@@ -231,7 +234,7 @@ static void pgoutput_commit_txn(LogicalDecodingContext *ctx, ReorderBufferTXN *t
      * Send the newest connecttion information to the subscriber,
      * when the connection information about the standby changes.
      */
-    if (ReplconninfoChanged()) {
+    if (t_thrd.publication_cxt.updateConninfoNeeded && ReplconninfoChanged()) {
         StringInfoData standbysInfo;
         initStringInfo(&standbysInfo);
 

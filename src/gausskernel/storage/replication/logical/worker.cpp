@@ -1601,7 +1601,7 @@ void ApplyWorkerMain()
     options.logical = true;
     options.startpoint = origin_startpos;
     options.slotname = myslotname;
-    options.protoVersion = LOGICALREP_PROTO_VERSION_NUM;
+    options.protoVersion = LOGICALREP_CONNINFO_PROTO_VERSION_NUM;
     options.publicationNames = t_thrd.applyworker_cxt.mySubscription->publications;
     options.binary = t_thrd.applyworker_cxt.mySubscription->binary;
     options.useSnapshot = AM_TABLESYNC_WORKER;
