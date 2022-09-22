@@ -2050,7 +2050,7 @@ void getTableofTypeFromVar(PLpgSQL_var* var, int* collectionType, Oid* tableofIn
     }
 }
 
-HeapTuple FindRowVarColType(List* nameList, int* collectionType, Oid* tableofIndexType)
+HeapTuple FindRowVarColType(List* nameList, int* collectionType, Oid* tableofIndexType, int32* typMod)
 {
     if (u_sess->plsql_cxt.curr_compile_context == NULL) {
         return NULL;
@@ -2110,10 +2110,16 @@ HeapTuple FindRowVarColType(List* nameList, int* collectionType, Oid* tableofInd
             if (datum->dtype == PLPGSQL_DTYPE_VAR) {
                 /* scalar variable, just return the datatype */
                 typOid = ((PLpgSQL_var*)datum)->datatype->typoid;
+                if (typMod != NULL) {
+                    *typMod =  ((PLpgSQL_var*)datum)->datatype->atttypmod;
+                }
                 getTableofTypeFromVar((PLpgSQL_var*)datum, collectionType, tableofIndexType);
             } else if (datum->dtype == PLPGSQL_DTYPE_ROW) {
                 /* row variable, need to build a new one */
                 typOid = ((PLpgSQL_row*)datum)->rowtupdesc->tdtypeid;
+                if (typMod != NULL) {
+                    *typMod = ((PLpgSQL_row*)datum)->rowtupdesc->tdtypmod;
+                }
             }
             break;
         }

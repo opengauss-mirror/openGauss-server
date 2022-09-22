@@ -8546,11 +8546,12 @@ read_datatype(int tok)
                 HeapTuple tup = NULL;
                 int collectionType = PLPGSQL_COLLECTION_NONE;
                 Oid tableOfIndexType = InvalidOid;
-                tup = FindRowVarColType(dtnames, &collectionType, &tableOfIndexType);
+                int32 typMod = -1;
+                tup = FindRowVarColType(dtnames, &collectionType, &tableOfIndexType, &typMod);
                 if (tup != NULL) {
                     Oid typOid = typeTypeId(tup);
                     ReleaseSysCache(tup);
-                    PLpgSQL_type* type = plpgsql_build_datatype(typOid, -1, InvalidOid);
+                    PLpgSQL_type* type = plpgsql_build_datatype(typOid, typMod, InvalidOid);
                     if (OidIsValid(tableOfIndexType)) {
                         type->collectionType = collectionType;
                         type->tableOfIndexType = tableOfIndexType;

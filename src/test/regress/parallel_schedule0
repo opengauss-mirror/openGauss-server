@@ -716,7 +716,7 @@ test: plpgsql_assign_list
 test: plpgsql_package_type plpgsql_package_param
 test: plpgsql_record_attrname
 test: plpgsql_insert_record
-test: hw_package_variable
+test: hw_package_variable package_typmod_test
 test: autonomous_cursor
 test: plpgsql_reset_session
 #test: plancache limit rangefuncs prepare
