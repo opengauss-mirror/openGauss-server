@@ -890,6 +890,13 @@ alter table test_unique add unique using index idx_unique;
 \d+ test_unique
 drop table test_unique;
 
+-- test unreserved_keyword index and key
+create table test_unique(f31 int, f32 varchar(20));
+-- error
+alter table test_unique add constraint con_t_unique unique key using btree(f31);
+alter table test_unique add constraint con_t_unique unique index using btree(f31);
+drop table test_unique;
+
 -- test primary key is only supported in B mode
 -- alter table
 CREATE TABLE test_p_primary
@@ -1302,7 +1309,6 @@ alter table test_p_unique add unique using index idx_unique;
 \d+ test_p_unique
 drop table test_p_unique;
 
-
 CREATE TABLE test_p_unique
 (
     f1  INTEGER,
@@ -1321,5 +1327,23 @@ alter table test_p_unique add unique using index idx_unique;
 \d+ test_p_unique
 drop table test_p_unique;
 
+-- test unreserved_keyword index and key
+CREATE TABLE test_p_unique
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+-- error
+alter table test_p_unique add constraint con_t_unique unique key using btree(f1);
+alter table test_p_unique add constraint con_t_unique unique index using btree(f1);
+drop table test_p_unique;
 
 \c postgres
