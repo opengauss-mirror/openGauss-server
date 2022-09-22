@@ -3235,7 +3235,8 @@ static void relation_needs_vacanalyze(Oid relid, AutoVacOpts* relopts, bytea* ra
     AUTOVAC_LOG(DEBUG2, "vac \"%s\": need freeze is %s", NameStr(classForm->relname), force_vacuum ? "true" : "false");
 
     /* Is time to move rows from delta to main cstore table by vacuum? */
-    if (rawRelopts != NULL && StdRelOptIsColStore(rawRelopts) && g_instance.attr.attr_storage.enable_delta_store) {
+    if (rawRelopts != NULL && StdRelOptIsColStore(rawRelopts) &&
+        g_instance.attr.attr_storage.enable_delta_store && DO_VACUUM) {
         PgStat_StatDBEntry *dbentry = pgstat_fetch_stat_dbentry(u_sess->proc_cxt.MyDatabaseId);;
         PgStat_StatDBEntry *shared = pgstat_fetch_stat_dbentry(InvalidOid);
 
