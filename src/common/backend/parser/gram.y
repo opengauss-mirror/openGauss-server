@@ -264,6 +264,8 @@ static bool CheckWhetherInColList(char *colname, List *col_list);
 static int GetFillerColIndex(char *filler_col_name, List *col_list);
 static void RemoveFillerCol(List *filler_list, List *col_list);
 static int errstate;
+
+static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStmt*n);
 %}
 
 %define api.pure
@@ -372,7 +374,7 @@ static int errstate;
 		CreateWeakPasswordDictionaryStmt DropWeakPasswordDictionaryStmt
 		AlterGlobalConfigStmt DropGlobalConfigStmt
 		CreatePublicationStmt AlterPublicationStmt
-		CreateSubscriptionStmt AlterSubscriptionStmt DropSubscriptionStmt
+		CreateSubscriptionStmt AlterSubscriptionStmt DropSubscriptionStmt DelimiterStmt
 		ShrinkStmt
 
 /* <DB4AI> */
@@ -788,8 +790,7 @@ static int errstate;
 %type <typnam>  load_col_data_type
 %type <ival64>  load_col_sequence_item_sart column_sequence_item_step column_sequence_item_sart
 %type <trgcharacter> trigger_order
-
-
+%type <str> delimiter_str_name delimiter_str_names
 /*
  * Non-keyword token types.  These are hard-wired into the "flex" lexer.
  * They must be listed first so that their numeric codes do not depend on
@@ -930,6 +931,9 @@ static int errstate;
 			VALID_BEGIN
 			DECLARE_CURSOR ON_UPDATE_TIME
 			START_WITH CONNECT_BY
+			END_OF_INPUT
+			END_OF_INPUT_COLON
+			END_OF_PROC
 
 /* Precedence: lowest to highest */
 %nonassoc   COMMENT
@@ -1017,6 +1021,38 @@ stmtblock:	stmtmulti
 
 /* the thrashing around here is to discard "empty" statements... */
 stmtmulti:	stmtmulti ';' stmt
+				{
+					if ($3 != NULL)
+					{
+						if (IsA($3, List))
+						{
+							$$ = list_concat($1, (List*)$3);
+						}
+						else
+						{
+						$$ = lappend($1, $3);
+						}
+					}
+					else
+						$$ = $1;
+				}
+			| stmtmulti ';' END_OF_INPUT stmt
+				{
+					if ($4 != NULL)
+					{
+						if (IsA($4, List))
+						{
+							$$ = list_concat($1, (List*)$4);
+						}
+						else
+						{
+						$$ = lappend($1, $4);
+						}
+					}
+					else
+						$$ = $1;
+				}
+			| stmtmulti END_OF_INPUT_COLON stmt
 				{
 					if ($3 != NULL)
 					{
@@ -1249,6 +1285,7 @@ stmt :
 			| ShrinkStmt
 			| /*EMPTY*/
 				{ $$ = NULL; }
+			| DelimiterStmt
 		;
 
 /*****************************************************************************
@@ -14399,7 +14436,7 @@ subprogram_body: 	{
 						tok = YYLEX;
 
 						/* adapt A db's label */
-						if (!(tok == ';' || tok == 0)
+						if (!(tok == ';'  || (tok == 0 || tok == END_OF_PROC))
 							&& tok != IF_P
 							&& tok != CASE
 							&& tok != LOOP)
@@ -14410,7 +14447,7 @@ subprogram_body: 	{
 
 					 	if (blocklevel == 1
 							&& (pre_tok == ';' || pre_tok == BEGIN_P)
-							&& (tok == ';' || tok == 0))
+							&& (tok == ';' || (tok == 0 || tok == END_OF_PROC)))
 						{
 							/* Save the end of procedure body. */
 							proc_e = yylloc;
@@ -25774,6 +25811,43 @@ ColLabel:	IDENT									{ $$ = $1; }
 				}
 		;
 
+DelimiterStmt: DELIMITER delimiter_str_names END_OF_INPUT
+			   {
+					VariableSetStmt *n = makeNode(VariableSetStmt);
+					setDelimiterName(yyscanner, $2, n);
+					$$ = (Node *)n;
+				}
+			|	DELIMITER delimiter_str_names END_OF_INPUT_COLON
+				{
+					VariableSetStmt *n = makeNode(VariableSetStmt);
+					setDelimiterName(yyscanner, $2, n);
+					$$ = (Node *)n;
+				}
+			;
+
+delimiter_str_names: delimiter_str_names delimiter_str_name
+					{
+						$$ = $1 ;
+					}
+                |    delimiter_str_name
+					{
+						$$ = $1;
+					}
+				;
+
+delimiter_str_name: ColId_or_Sconst 
+					{
+						$$ = $1;
+					}
+				|   all_Op
+				    {
+						$$ = $1;
+					}
+				|   ';'
+				    {
+						$$ = ";";
+					}
+				;
 
 /*
  * Keyword category lists.  Generally, every keyword present in
@@ -28536,6 +28610,22 @@ static void RemoveFillerCol(List *filler_list, List *col_list)
 
 	return;
 }
+
+static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStmt*n)
+{
+	errno_t rc = 0;
+	base_yy_extra_type *yyextra = pg_yyget_extra(yyscanner);
+	if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) {
+		if (strlen(input) >= DELIMITER_LENGTH) {
+			parser_yyerror("syntax error");
+		}
+		n->is_local = false;
+		n->kind = VAR_SET_VALUE;
+		n->name = "delimiter_name";
+		n->args = list_make1(makeStringConst(input, -1));
+	}
+}
+
 
 static FuncCall* MakePriorAsFunc()
 {

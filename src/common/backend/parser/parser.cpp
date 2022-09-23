@@ -155,6 +155,7 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
     int next_token;
     core_YYSTYPE cur_yylval;
     YYLTYPE cur_yylloc;
+    errno_t rc = 0;
 
     /* Get next token --- we might already have it */
     if (yyextra->lookahead_num != 0) {
@@ -166,6 +167,32 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
         cur_token = core_yylex(&(lvalp->core_yystype), llocp, yyscanner);
     }
 
+    if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT && yyextra->lookahead_num == 0) {
+        bool is_last_colon;
+        if (cur_token == int(';')) {
+            is_last_colon = true;
+        } else {
+            is_last_colon = false;
+        }
+        if (yyextra->core_yy_extra.is_delimiter_name == true) {
+            if (strcmp(";",u_sess->attr.attr_common.delimiter_name) == 0) {
+                cur_token = END_OF_INPUT_COLON;
+            } else {
+                if (yyextra->core_yy_extra.is_last_colon == false ) {
+                    cur_token = END_OF_INPUT_COLON;
+                } else {
+                    cur_token = END_OF_INPUT;
+                }
+            }
+        }
+        if (yyextra->core_yy_extra.is_proc_end == true) {
+            cur_token = END_OF_PROC;
+        }
+        yyextra->core_yy_extra.is_proc_end = false;
+        yyextra->core_yy_extra.is_delimiter_name = false;
+        yyextra->core_yy_extra.is_last_colon = is_last_colon;
+    }
+    
     /* Do we need to look ahead for a possible multiword token? */
     switch (cur_token) {
         case NULLS_P:

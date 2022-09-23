@@ -93,6 +93,7 @@ static bool is_utf16_surrogate_first(pg_wchar c);
 static bool is_utf16_surrogate_second(pg_wchar c);
 static pg_wchar surrogate_pair_to_codepoint(pg_wchar first, pg_wchar second);
 static void addunicode(pg_wchar c, yyscan_t yyscanner);
+static void set_is_delimiter_name(char* text, core_yyscan_t yyscanner );
 
 #define yyerror(msg)  scanner_yyerror(msg, yyscanner)
 
@@ -598,6 +599,7 @@ other			.
 					BEGIN(INITIAL);
 					yylval->str = litbuf_udeescape('\\', yyscanner);
 					yyextra->is_hint_str = false;
+					set_is_delimiter_name(yytext,yyscanner);
 					return SCONST;
 		}
 <xus>{xusstop2} {
@@ -867,6 +869,7 @@ other			.
                             /* reset is_createstmt to parse next sql */
                             yyextra->is_createstmt = false;
                         }
+						set_is_delimiter_name(yytext,yyscanner);
 					}
 					yyextra->is_hint_str = false;
 					return yytext[0];
@@ -919,6 +922,7 @@ other			.
 					}
 
 					SET_YYLLOC();
+					set_is_delimiter_name(yytext,yyscanner);
 
 					if (nchars < (int)yyleng)
 					{
@@ -1144,6 +1148,7 @@ other			.
 					ident = downcase_truncate_identifier(yytext, yyleng, yyextra->warnOnTruncateIdent);
 					yylval->str = ident;
 					yyextra->ident_quoted = false;
+					set_is_delimiter_name(yytext,yyscanner);
 					return IDENT;
 				}
 
@@ -1339,6 +1344,9 @@ scanner_init(const char *str,
     /* plpgsql keyword params */
     yyext->isPlpgsqlKeyWord = false;
     yyext->plKeywordValue = NULL;
+	yyext->is_delimiter_name = false;
+	yyext->is_last_colon = false;
+	yyext->is_proc_end = false;
 
 	// Added CALL for procedure and function
 	getDynaParamSeq("init", true, true, NULL);
@@ -1418,6 +1426,24 @@ addlitchar(unsigned char ychar, core_yyscan_t yyscanner)
 	/* append new data */
 	yyextra->literalbuf[yyextra->literallen] = ychar;
 	yyextra->literallen += 1;
+}
+
+static void set_is_delimiter_name(char* text, core_yyscan_t yyscanner)
+{ 
+	if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) {
+		if (strcmp(text,u_sess->attr.attr_common.delimiter_name) == 0 && yyextra->paren_depth == 0 && !yyextra->in_slash_proc_body) {
+			if (strcmp(text,";") != 0) {
+				yyextra->query_string_locationlist = lappend_int(yyextra->query_string_locationlist, *yylloc);
+				yyextra->is_createstmt = false;
+			}
+			yyextra->is_delimiter_name = true;
+		} else {
+			yyextra->is_delimiter_name = false;
+		}
+		if (strcmp(text,u_sess->attr.attr_common.delimiter_name) == 0 && strcmp(text,";") != 0 && yyextra->in_slash_proc_body) {
+			yyextra->is_proc_end = true;
+		}
+	}
 }
 
 

@@ -198,6 +198,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  default_transaction_read_only                    | bool    |      |           | 
  default_with_oids                                | bool    |      |           | 
  defer_csn_cleanup_time                           | integer | ms   | 0         | 2147483647
+ delimiter_name                                   | string  |      |           | 
  dfs_partition_directory_length                   | integer |      | 92        | 7999
  dirty_page_percent_max                           | real    |      | 0.1       | 1
  disable_memory_protect                           | bool    |      |           | 

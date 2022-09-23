@@ -39,7 +39,8 @@ extern void psql_scan_destroy(PsqlScanState state);
 extern void psql_scan_setup(PsqlScanState state, const char* line, int line_len);
 extern void psql_scan_finish(PsqlScanState state);
 
-extern PsqlScanResult psql_scan(PsqlScanState state, PQExpBuffer query_buf, promptStatus_t* prompt);
+extern PsqlScanResult psql_scan(PsqlScanState state, PQExpBuffer query_buf, promptStatus_t* prompt, 
+                                    bool is_b_format,char* delimiter_name);
 
 extern void psql_scan_reset(PsqlScanState state);
 

@@ -49,6 +49,8 @@ typedef union core_YYSTYPE {
  */
 #define YYLTYPE int
 
+#define DELIMITER_LENGTH 16
+
 /*
  * Another important component of the scanner's API is the token code numbers.
  * However, those are not defined in this file, because bison insists on
@@ -117,6 +119,9 @@ typedef struct core_yy_extra_type {
     int func_param_end;              /* function and procedure param string end pos,exclude right parenthesis */
     bool isPlpgsqlKeyWord;
     const PlpgsqlKeywordValue* plKeywordValue;
+    bool is_delimiter_name;
+    bool is_last_colon;
+    bool is_proc_end;
 } core_yy_extra_type;
 
 #ifdef FRONTEND_PARSER
