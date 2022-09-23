@@ -998,6 +998,11 @@ create table test_unique(f31 int, f32 varchar(20), unique ((f31 * 2 + 1) desc, (
 \d+ test_unique
 drop table test_unique;
 
+-- test unreserved_keyword index and key
+-- error
+create table test_unique(f31 int, f32 varchar(20), constraint con_t_unique unique key using btree(f31));
+create table test_unique(f31 int, f32 varchar(20), constraint con_t_unique unique index using btree(f31));
+
 -- partition table
 -- test primary key in M mode
 -- test [index_type]
@@ -1407,5 +1412,38 @@ PARTITION BY RANGE(f1)
 );
 \d+ test_p_unique
 drop table test_p_unique;
+
+
+-- test unreserved_keyword index and key
+-- error
+CREATE TABLE test_p_unique
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER,
+    constraint con_t_unique unique key using btree(f1)
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+
+CREATE TABLE test_p_unique
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER,
+    constraint con_t_unique unique index using btree(f1)
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
 
 \c postgres

@@ -2019,6 +2019,18 @@ Has OIDs: no
 Options: orientation=row, compression=no
 
 drop table test_unique;
+-- test unreserved_keyword index and key
+create table test_unique(f31 int, f32 varchar(20));
+-- error
+alter table test_unique add constraint con_t_unique unique key using btree(f31);
+ERROR:  index/key cannot be used as unique name.
+LINE 1: ...ter table test_unique add constraint con_t_unique unique key...
+                                                             ^
+alter table test_unique add constraint con_t_unique unique index using btree(f31);
+ERROR:  index/key cannot be used as unique name.
+LINE 1: ...ter table test_unique add constraint con_t_unique unique ind...
+                                                             ^
+drop table test_unique;
 -- test primary key is only supported in B mode
 -- alter table
 CREATE TABLE test_p_primary
@@ -2718,5 +2730,29 @@ Number of partitions: 4 (View pg_partition to check each partition range.)
 Has OIDs: no
 Options: orientation=row, compression=no
 
+drop table test_p_unique;
+-- test unreserved_keyword index and key
+CREATE TABLE test_p_unique
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+-- error
+alter table test_p_unique add constraint con_t_unique unique key using btree(f1);
+ERROR:  index/key cannot be used as unique name.
+LINE 1: ...r table test_p_unique add constraint con_t_unique unique key...
+                                                             ^
+alter table test_p_unique add constraint con_t_unique unique index using btree(f1);
+ERROR:  index/key cannot be used as unique name.
+LINE 1: ...r table test_p_unique add constraint con_t_unique unique ind...
+                                                             ^
 drop table test_p_unique;
 \c postgres

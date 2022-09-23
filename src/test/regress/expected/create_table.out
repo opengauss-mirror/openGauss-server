@@ -1427,6 +1427,16 @@ Has OIDs: no
 Options: orientation=row, compression=no
 
 drop table test_unique;
+-- test unreserved_keyword index and key
+-- error
+create table test_unique(f31 int, f32 varchar(20), constraint con_t_unique unique key using btree(f31));
+ERROR:  index/key cannot be used as unique name.
+LINE 1: ...f31 int, f32 varchar(20), constraint con_t_unique unique key...
+                                                             ^
+create table test_unique(f31 int, f32 varchar(20), constraint con_t_unique unique index using btree(f31));
+ERROR:  index/key cannot be used as unique name.
+LINE 1: ...f31 int, f32 varchar(20), constraint con_t_unique unique ind...
+                                                             ^
 -- partition table
 -- test primary key in M mode
 -- test [index_type]
@@ -2057,4 +2067,40 @@ ERROR:  partition table does not support expression index
 \d+ test_p_unique
 drop table test_p_unique;
 ERROR:  table "test_p_unique" does not exist
+-- test unreserved_keyword index and key
+-- error
+CREATE TABLE test_p_unique
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER,
+    constraint con_t_unique unique key using btree(f1)
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+ERROR:  index/key cannot be used as unique name.
+LINE 6:     constraint con_t_unique unique key using btree(f1)
+                                    ^
+CREATE TABLE test_p_unique
+(
+    f1  INTEGER,
+    f2  INTEGER,
+    f3  INTEGER,
+    constraint con_t_unique unique index using btree(f1)
+)
+PARTITION BY RANGE(f1)
+(
+        PARTITION P1 VALUES LESS THAN(2450815),
+        PARTITION P2 VALUES LESS THAN(2451179),
+        PARTITION P3 VALUES LESS THAN(2451544),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+);
+ERROR:  index/key cannot be used as unique name.
+LINE 6:     constraint con_t_unique unique index using btree(f1)
+                                    ^
 \c postgres

@@ -7298,6 +7298,15 @@ ConstraintElem:
 							errmsg("UNIQUE name is not yet supported in distributed database.")));
 #endif	
 					if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) {
+						if (strcasecmp($2, "index") == 0 || strcasecmp($2, "key") == 0) {
+							const char* message = "index/key cannot be used as unique name.";
+							InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+							ereport(errstate,
+									(errmodule(MOD_PARSER),
+										errcode(ERRCODE_SYNTAX_ERROR),
+										errmsg("index/key cannot be used as unique name."),
+										parser_errposition(@1)));
+						}
 						Constraint *n = makeNode(Constraint);
 						n->contype = CONSTR_UNIQUE;
 						n->location = @1;
