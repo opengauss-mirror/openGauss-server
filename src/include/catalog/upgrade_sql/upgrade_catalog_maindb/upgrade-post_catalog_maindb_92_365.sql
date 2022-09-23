@@ -15,4 +15,4 @@ RETURNS SETOF record LANGUAGE INTERNAL VOLATILE STRICT as 'pg_get_variable_info'
 DROP VIEW IF EXISTS pg_catalog.pg_variable_info CASCADE;
 CREATE VIEW pg_catalog.pg_variable_info AS
     SELECT * FROM pg_catalog.pg_get_variable_info();
-
+GRANT SELECT ON pg_catalog.pg_variable_info TO PUBLIC;
