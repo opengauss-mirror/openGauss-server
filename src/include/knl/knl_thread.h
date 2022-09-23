@@ -3306,6 +3306,7 @@ typedef struct knl_t_publication_context {
     bool publications_valid;
     /* Map used to remember which relation schemas we sent. */
     HTAB* RelationSyncCache;
+    bool updateConninfoNeeded;
 } knl_t_publication_context;
 
 /* thread context. */

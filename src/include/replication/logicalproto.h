@@ -21,14 +21,18 @@
  * Protocol capabilities
  *
  * LOGICALREP_PROTO_VERSION_NUM is our native protocol.
- * LOGICALREP_PROTO_MAX_VERSION_NUM is the greatest version we can support.
+ * LOGICALREP_CONNINFO_PROTO_VERSION_NUM is the version that need to handle changed conninfo.
+ * LOGICALREP_PROTO_MAX_VERSION_NUM is the greatest version we can support + 1.
  * LOGICALREP_PROTO_MIN_VERSION_NUM is the oldest version we
- * have backwards compatibility for. The client requests protocol version at
+ * have backwards compatibility for - 1. The client requests protocol version at
  * connect time.
  */
-#define LOGICALREP_PROTO_MIN_VERSION_NUM 1
-#define LOGICALREP_PROTO_VERSION_NUM 1
-#define LOGICALREP_PROTO_MAX_VERSION_NUM LOGICALREP_PROTO_VERSION_NUM
+typedef enum {
+    LOGICALREP_PROTO_MIN_VERSION_NUM = 0,
+    LOGICALREP_PROTO_VERSION_NUM,
+    LOGICALREP_CONNINFO_PROTO_VERSION_NUM,
+    LOGICALREP_PROTO_MAX_VERSION_NUM
+} LOGICALREP_VERSION_NUM;
 
 /*
  * This struct stores a tuple received via logical replication.
