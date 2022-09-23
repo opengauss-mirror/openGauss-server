@@ -692,6 +692,7 @@ SELECT
 FROM
 	pg_shseclabel l
 	JOIN pg_authid rol ON l.classoid = rol.tableoid AND l.objoid = rol.oid;
+GRANT SELECT ON pg_catalog.pg_seclabels TO PUBLIC;
 
 CREATE OR REPLACE VIEW pg_catalog.pg_statio_all_sequences AS
     SELECT
@@ -704,17 +705,21 @@ CREATE OR REPLACE VIEW pg_catalog.pg_statio_all_sequences AS
     FROM pg_class C
             LEFT JOIN pg_namespace N ON (N.oid = C.relnamespace)
     WHERE C.relkind = 'S' or C.relkind = 'L';
+GRANT SELECT ON pg_catalog.pg_statio_all_sequences TO PUBLIC;
 
 CREATE OR REPLACE VIEW pg_catalog.pg_statio_sys_sequences AS
     SELECT * FROM pg_statio_all_sequences
     WHERE schemaname IN ('pg_catalog', 'information_schema') OR
           schemaname ~ '^pg_toast';
+GRANT SELECT ON pg_catalog.pg_statio_sys_sequences TO PUBLIC;
 
 CREATE OR REPLACE VIEW pg_catalog.pg_statio_user_sequences AS
     SELECT * FROM pg_statio_all_sequences
     WHERE schemaname NOT IN ('pg_catalog', 'information_schema') AND
           schemaname !~ '^pg_toast';DROP FUNCTION IF EXISTS pg_catalog.gs_hadr_local_rto_and_rpo_stat();
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 5077;
+GRANT SELECT ON pg_catalog.pg_statio_user_sequences TO PUBLIC;
+
 CREATE FUNCTION pg_catalog.gs_hadr_local_rto_and_rpo_stat
 (
 OUT hadr_sender_node_name pg_catalog.text,

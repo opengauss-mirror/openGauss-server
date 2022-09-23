@@ -3641,7 +3641,7 @@ static void exec_parse_message(const char* query_string, /* string to execute */
         * executed in sql rewrite. For PBE, if the plan is cached, then we will not do PARSE anymore. So we just not
         * call rewrite in PARSE. This work will be done in BIND.
         */
-        if (IsA(raw_parse_tree, CreateTableAsStmt)) {
+        if (query->utilityStmt != NULL && IsA(query->utilityStmt, CreateTableAsStmt)) {
             querytree_list = list_make1(query);
         } else {
             querytree_list = pg_rewrite_query(query);
