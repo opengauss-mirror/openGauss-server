@@ -9,16 +9,19 @@ CREATE OR REPLACE VIEW pg_catalog.pg_statio_all_sequences AS
     FROM pg_class C
             LEFT JOIN pg_namespace N ON (N.oid = C.relnamespace)
     WHERE C.relkind = 'S';
+GRANT SELECT ON pg_catalog.pg_statio_all_sequences TO PUBLIC;
 
 CREATE OR REPLACE VIEW pg_catalog.pg_statio_sys_sequences AS
     SELECT * FROM pg_statio_all_sequences
     WHERE schemaname IN ('pg_catalog', 'information_schema') OR
           schemaname ~ '^pg_toast';
+GRANT SELECT ON pg_catalog.pg_statio_sys_sequences TO PUBLIC;
 
 CREATE OR REPLACE VIEW pg_catalog.pg_statio_user_sequences AS
     SELECT * FROM pg_statio_all_sequences
     WHERE schemaname NOT IN ('pg_catalog', 'information_schema') AND
           schemaname !~ '^pg_toast';
+GRANT SELECT ON pg_catalog.pg_statio_user_sequences TO PUBLIC;
 
 do $$DECLARE ans boolean;
 BEGIN
@@ -178,6 +181,8 @@ SELECT
 FROM
     pg_shseclabel l
     JOIN pg_authid rol ON l.classoid = rol.tableoid AND l.objoid = rol.oid;DROP INDEX IF EXISTS pg_catalog.gs_job_attribute_name_index;
+GRANT SELECT ON pg_catalog.pg_seclabels TO PUBLIC;
+
 DROP INDEX IF EXISTS pg_catalog.gs_job_attribute_oid_index;
 DROP TYPE IF EXISTS pg_catalog.gs_job_attribute;
 DROP TABLE IF EXISTS pg_catalog.gs_job_attribute;
