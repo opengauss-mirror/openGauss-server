@@ -270,6 +270,7 @@ void logicalrep_worker_launch(Oid dbid, Oid subid, const char *subname, Oid user
     }
 
     /* Prepare the worker info. */
+    worker->generation++;
     worker->proc = NULL;
     worker->dbid = dbid;
     worker->userid = userid;
@@ -299,6 +300,7 @@ void logicalrep_worker_launch(Oid dbid, Oid subid, const char *subname, Oid user
 void logicalrep_worker_stop(Oid subid, Oid relid)
 {
     LogicalRepWorker *worker;
+    uint16 generation;
 
     (void)LWLockAcquire(LogicalRepWorkerLock, LW_SHARED);
 
@@ -308,6 +310,12 @@ void logicalrep_worker_stop(Oid subid, Oid relid)
         LWLockRelease(LogicalRepWorkerLock);
         return;
     }
+
+    /*
+     * Remember which generation was our worker so we can check if what we see
+     * is still the same one.
+     */
+    generation = worker->generation;
 
     /*
      * If we found a worker but it does not have proc set then it is still
@@ -333,9 +341,10 @@ void logicalrep_worker_stop(Oid subid, Oid relid)
 
         /*
          * Worker is no longer associated with subscription.  It must have
-         * exited, nothing more for us to do.
+         * exited, nothing more for us to do. Or whether the worker generation
+         * is different, meaning that a different worker has taken the slot.
          */
-        if (worker->subid == InvalidOid) {
+        if (worker->subid == InvalidOid || worker->generation != generation) {
             LWLockRelease(LogicalRepWorkerLock);
             return;
         }
@@ -353,7 +362,7 @@ void logicalrep_worker_stop(Oid subid, Oid relid)
         int rc;
 
         /* is it gone? */
-        if (!worker->proc) {
+        if (!worker->proc || worker->generation != generation) {
             break;
         }
         LWLockRelease(LogicalRepWorkerLock);
