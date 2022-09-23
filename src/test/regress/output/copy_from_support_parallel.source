@@ -180,8 +180,8 @@ LINE 1: COPY  copy_from_parallel_test FROM STDIN  csv (parallel) 4;
 \copy: parse error at "2)"
 ----abnormal cases: execution error
 \copy copy_from_parallel_test from '@abs_srcdir@/data/copy_from_parallel_data' parallel 4;
-ERROR:  invalid input syntax for integer: "1,books"
-CONTEXT:  COPY copy_from_parallel_test, line 1, column id: "1,books"
+--?ERROR:  invalid input syntax for integer: .*
+--?CONTEXT:  COPY copy_from_parallel_test, line 1, column id: .*
 \copy copy_from_parallel_test from '@abs_srcdir@/data/copy_from_parallel_data_1' csv parallel 4;
 @abs_srcdir@/data/copy_from_parallel_data_1: No such file or directory
 \copy copy_from_parallel_tes from '@abs_srcdir@/data/copy_from_parallel_data' csv parallel 4;
