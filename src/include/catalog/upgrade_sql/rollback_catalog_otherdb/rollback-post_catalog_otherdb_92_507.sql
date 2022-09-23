@@ -2042,7 +2042,7 @@ comment on function PG_CATALOG.xidsend(xid) is '';
 END
 $do$;
 ALTER INDEX pg_proc_proname_args_nsp_index rebuild;
-DROP INDEX IF EXISTS pg_catalog.pg_proc_proname_all_args_nsp_index;
+
 -- ----------------------------------------------------------------
 -- rollback array interface of pg_catalog
 -- ----------------------------------------------------------------
