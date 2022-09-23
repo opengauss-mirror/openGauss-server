@@ -2139,8 +2139,8 @@ static bool append_table_info(tableInfo tableinfo, const char* srvname, StringIn
         char locator_type = GetLocatorType(tableoid);
         if (IsLocatorColumnDistributed(locator_type) || IsLocatorReplicated(locator_type)) {
             appendStringInfo(buf, "\nDISTRIBUTE BY");
-
-            if (IsHideTagDistribute(tableoid)) {
+            Relation rel = heap_open(tableoid, NoLock);
+            if (RelationIsTsStore(rel) && IsHideTagDistribute(tableoid)) {
                 appendStringInfo(buf, " hidetag");
             } else if (locator_type == LOCATOR_TYPE_HASH) {
                 char* distribute_key = printDistributeKey(tableoid);
@@ -2162,6 +2162,7 @@ static bool append_table_info(tableInfo tableinfo, const char* srvname, StringIn
                 appendStringInfo(buf, " LIST(%s)", distribute_key);
                 GetListDistributionDef(query, buf, tableoid);
             }
+            heap_close(rel, NoLock);
         }
 
         if (!isHDFSTbl && IS_PGXC_COORDINATOR) {

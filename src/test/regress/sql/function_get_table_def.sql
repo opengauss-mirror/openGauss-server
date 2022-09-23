@@ -214,5 +214,7 @@ create table generated_test(a int, b int generated always as (length((a)::text))
 select * from pg_get_tabledef('generated_test');
 drop table generated_test;
 
+select * from pg_get_tabledef('pg_class');
+
 reset current_schema;
 drop schema test_get_table_def cascade;
