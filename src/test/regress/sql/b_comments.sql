@@ -62,6 +62,7 @@ create table partition_test(c1 int, c2 int, logdate date not null) comment 'part
     PARTITION partition_test_p1 VALUES LESS THAN ('2020-04-01'),
     PARTITION partition_test_p2 VALUES LESS THAN ('2020-05-01')
 );
+alter table partition_test add partition p4 values LESS THAN ('2020-06-01') comment 'p4';
 create  index partition_test_index on partition_test (logdate) local
 (
     partition sip1_index_local,

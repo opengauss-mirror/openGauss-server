@@ -33,6 +33,11 @@ static void resetIsTimeCapsuleFlag()
     u_sess->parser_cxt.isTimeCapsule = false;
 }
 
+static void resetHasPartitionComment()
+{
+    u_sess->parser_cxt.hasPartitionComment = false;
+}
+
 static void resetCreateFuncFlag()
 {
     u_sess->parser_cxt.isCreateFuncOrProc = false;
@@ -57,7 +62,10 @@ List* raw_parser(const char* str, List** query_string_locationlist)
 
     /* reset u_sess->parser_cxt.stmt_contains_operator_plus */
     resetOperatorPlusFlag();
-
+    
+    /* reset u_sess->parser_cxt.hasPartitionComment */
+    resetHasPartitionComment();
+    
     /* reset u_sess->parser_cxt.isTimeCapsule */
     resetIsTimeCapsuleFlag();
 
