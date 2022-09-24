@@ -2737,7 +2737,7 @@ static int _SPI_execute_plan0(SPIPlanPtr plan, ParamListInfo paramLI, Snapshot s
 
 #ifndef ENABLE_MULTIPLE_NODES
                 Port *MyPort = u_sess->proc_cxt.MyProcPort; 
-                if (MyPort && MyPort->protocol_config->fn_set_DR_params) {
+                if (MyPort && MyPort->protocol_config && MyPort->protocol_config->fn_set_DR_params) {
                     MyPort->protocol_config->fn_set_DR_params(dest, ((PlannedStmt *)stmt)->planTree->targetlist);
                 }
 #endif
