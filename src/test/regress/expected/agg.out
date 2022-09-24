@@ -20,5 +20,135 @@ select a , count(distinct  generate_series(1,2)) from t1 group by a;
                Output: a
 (8 rows)
 
+--test const-false agg
+CREATE TABLE bmsql_item (
+i_id int4 NoT NULL,i_name varchar(24),i_price numeric(5,2),i_data varchar( 50),i_im_id int4,
+coNSTRAINT bmsql_item_pkey PRIMARY KEY (i_id)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "bmsql_item_pkey" for table "bmsql_item"
+insert into bmsql_item values ('1','sqltest_varchar_1','0.01','sqltest_varchar_1','1');
+insert into bmsql_item values ('2','sqltest_varchar_2','0.02','sqltest_varchar_2','2');
+insert into bmsql_item values ('3','sqltest_varchar_3','0.03','sqltest_varchar_3','3');
+insert into bmsql_item values ('4','sqltest_varchar_4','0.04','sqltest_varchar_4','4');
+insert into bmsql_item values ('5');
+CREATE TABLE bmsql_new_order (
+no_w_id int4 NOT NULL,
+no_d_id int4 NOT NULL,no_o_id int4 NOT NULL
+);
+insert into bmsql_new_order values('1','1','1');
+insert into bmsql_new_order values('2','2','2');
+insert into bmsql_new_order values('3','3','3');
+insert into bmsql_new_order values('4','4','4');
+insert into bmsql_new_order values('5','5','5');
+SELECT
+   (avg(alias24.alias17)>2) AS alias32
+FROM
+    bmsql_item,
+    (
+        SELECT alias12.alias5 AS alias17
+		FROM ( SELECT sin(bmsql_new_order.no_o_id)alias5 FROM bmsql_new_order )alias12
+	)alias24
+	GROUP BY bmsql_item.i_im_id HAVING 1>2
+UNION
+SELECT TRUE FROM  bmsql_item;
+ alias32 
+---------
+ t
+(1 row)
+
+explain (verbose,costs off)
+SELECT
+   (avg(alias24.alias17)>2) AS alias32
+FROM
+    bmsql_item,
+    (
+        SELECT alias12.alias5 AS alias17
+		FROM ( SELECT sin(bmsql_new_order.no_o_id)alias5 FROM bmsql_new_order )alias12
+	)alias24
+	GROUP BY bmsql_item.i_im_id HAVING 1>2
+UNION
+SELECT TRUE FROM  bmsql_item;
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
+ Unique
+   Output: (NULL::boolean)
+   ->  Sort
+         Output: (NULL::boolean)
+         Sort Key: (NULL::boolean)
+         ->  Append
+               ->  Subquery Scan on "*SELECT* 1"
+                     Output: NULL::boolean
+                     ->  Result
+                           Output: NULL::boolean, aggregate.bmsql_item.i_im_id
+                           One-Time Filter: false
+               ->  Seq Scan on aggregate.bmsql_item
+                     Output: true
+(13 rows)
+
+create table test_agg_false(a int, b varchar(20),c text, d numeric(5,2));
+explain (verbose ,costs off) select sum(a),sum(b) , d from test_agg_false where 0=1 group by d;
+                 QUERY PLAN                 
+--------------------------------------------
+ Result
+   Output: NULL::bigint, NULL::numeric, d
+   One-Time Filter: false
+   ->  Seq Scan on aggregate.test_agg_false
+         Output: a, b, c, d
+(5 rows)
+
+select sum(a),sum(b) , d from test_agg_false where 0=1 group by d;
+ sum | sum | d 
+-----+-----+---
+(0 rows)
+
+explain (verbose, costs off) select sum(a)+sum(b) , d from test_agg_false where 0=1 group by d;
+                 QUERY PLAN                 
+--------------------------------------------
+ Result
+   Output: NULL::numeric, d
+   One-Time Filter: false
+   ->  Seq Scan on aggregate.test_agg_false
+         Output: a, b, c, d
+(5 rows)
+
+select sum(a)+sum(b) , d from test_agg_false where 0=1 group by d;
+ ?column? | d 
+----------+---
+(0 rows)
+
+explain (verbose, costs off) select sin(sum(a)+sum(b)) , d from test_agg_false where 0=1 group by d;
+                 QUERY PLAN                 
+--------------------------------------------
+ Result
+   Output: NULL::double precision, d
+   One-Time Filter: false
+   ->  Seq Scan on aggregate.test_agg_false
+         Output: a, b, c, d
+(5 rows)
+
+select sin(sum(a)+sum(b)) , d from test_agg_false where 0=1 group by d;
+ sin | d 
+-----+---
+(0 rows)
+
+explain (verbose ,costs off) select sum(a)+sum(b) , d , 1 from test_agg_false where 0=1 group by d;
+                 QUERY PLAN                 
+--------------------------------------------
+ Result
+   Output: NULL::numeric, d, 1
+   One-Time Filter: false
+   ->  Seq Scan on aggregate.test_agg_false
+         Output: a, b, c, d
+(5 rows)
+
+select sum(a)+sum(b) , d ,1 from test_agg_false where 0=1 group by d;
+ ?column? | d | ?column? 
+----------+---+----------
+(0 rows)
+
 drop table t1;
-drop schema aggregate;
+drop schema aggregate CASCADE;
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to table bmsql_item
+drop cascades to table bmsql_new_order
+drop cascades to table test_agg_false
