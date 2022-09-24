@@ -4904,6 +4904,7 @@ static PQconninfoOption* conninfo_parse(const char* conninfo, PQExpBuffer errorM
         PQconninfoFree(options);
         return NULL;
     }
+    size_t bufLen = strlen(buf);
     cp = buf;
 
     while (*cp) {
@@ -4935,6 +4936,7 @@ static PQconninfoOption* conninfo_parse(const char* conninfo, PQExpBuffer errorM
             printfPQExpBuffer(
                 errorMessage, libpq_gettext("missing \"=\" after \"%s\" in connection info string\n"), pname);
             PQconninfoFree(options);
+            check_memset_s(memset_s(buf, bufLen, 0, bufLen));
             libpq_free(buf);
             return NULL;
         }
@@ -4973,6 +4975,7 @@ static PQconninfoOption* conninfo_parse(const char* conninfo, PQExpBuffer errorM
                     printfPQExpBuffer(
                         errorMessage, libpq_gettext("unterminated quoted string in connection info string\n"));
                     PQconninfoFree(options);
+                    check_memset_s(memset_s(buf, bufLen, 0, bufLen));
                     libpq_free(buf);
                     return NULL;
                 }
@@ -4996,12 +4999,14 @@ static PQconninfoOption* conninfo_parse(const char* conninfo, PQExpBuffer errorM
          */
         if (conninfo_storeval(options, pname, pval, errorMessage, false, false) == NULL) {
             PQconninfoFree(options);
+            check_memset_s(memset_s(buf, bufLen, 0, bufLen));
             libpq_free(buf);
             return NULL;
         }
     }
 
     /* Done with the modifiable input string */
+    check_memset_s(memset_s(buf, bufLen, 0, bufLen));
     libpq_free(buf);
 
     /*
