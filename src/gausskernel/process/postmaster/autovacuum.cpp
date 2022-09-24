@@ -3606,6 +3606,8 @@ static void partition_needs_vacanalyze(Oid partid, AutoVacOpts* relopts, Form_pg
     bool found = false;
     bool av_enabled = false;
     bool force_vacuum = false;
+    bool delta_vacuum = false;
+    bytea* partoptions = NULL;
     /* pg_partition.reltuples */
     float4 reltuples;
 
@@ -3662,10 +3664,26 @@ static void partition_needs_vacanalyze(Oid partid, AutoVacOpts* relopts, Form_pg
         force_vacuum = (MultiXactIdIsValid(relminmxid) && MultiXactIdPrecedes(relminmxid, multiForceLimit));
     }
 #endif
+    Datum partoptsdatum = fastgetattr(partTuple, Anum_pg_partition_reloptions, RelationGetDescr(rel), &isNull);
     heap_close(rel, AccessShareLock);
 
     force_vacuum = (TransactionIdIsNormal(relfrozenxid) && TransactionIdPrecedes(relfrozenxid, xidForceLimit));
     *need_freeze = force_vacuum;
+
+    /* Is time to move rows from delta to main cstore table by vacuum? */
+    partoptions = heap_reloptions(RELKIND_RELATION, partoptsdatum, false);
+    if (partoptions != NULL && StdRelOptIsColStore(partoptions) &&
+        g_instance.attr.attr_storage.enable_delta_store && DO_VACUUM) {
+        PgStat_StatDBEntry *dbentry = pgstat_fetch_stat_dbentry(u_sess->proc_cxt.MyDatabaseId);;
+        PgStat_StatDBEntry *shared = pgstat_fetch_stat_dbentry(InvalidOid);
+
+        /* Every partition table is local */
+        PgStat_StatTabEntry *deltaTabentry = get_pgstat_tabentry_relid(partForm->reldeltarelid, false,
+            InvalidOid, shared, dbentry);
+        if (deltaTabentry != NULL) {
+            delta_vacuum = (deltaTabentry->n_live_tuples >= ((StdRdOptions*)partoptions)->delta_rows_threshold);
+        }
+    }
 
     /* User disabled it in pg_class.reloptions?  (But ignore if at risk) */
     if (!force_vacuum && (!av_enabled || !u_sess->attr.attr_storage.autovacuum_start_daemon)) {
@@ -3680,7 +3698,7 @@ static void partition_needs_vacanalyze(Oid partid, AutoVacOpts* relopts, Form_pg
     if (!force_vacuum && (!ap_entry->at_allowvacuum || ap_entry->at_dovacuum)) {
 #endif
         *doanalyze = false;
-        *dovacuum = false;
+        *dovacuum = delta_vacuum;
         return;
     }
 
@@ -3708,7 +3726,7 @@ static void partition_needs_vacanalyze(Oid partid, AutoVacOpts* relopts, Form_pg
 
     if ((avwentry == NULL) && (tabentry == NULL)) {
         *doanalyze = false;
-        *dovacuum = force_vacuum;
+        *dovacuum = force_vacuum || delta_vacuum;
     } else {
         if (tabentry && (tabentry->changes_since_analyze || tabentry->n_dead_tuples)) {
             vactuples = tabentry->n_dead_tuples;
@@ -3735,7 +3753,7 @@ static void partition_needs_vacanalyze(Oid partid, AutoVacOpts* relopts, Form_pg
         }
 
         /* Determine if this partition needs vacuum. */
-        *dovacuum = force_vacuum;
+        *dovacuum = force_vacuum || delta_vacuum;
         if (false == *dovacuum)
             *dovacuum = (vactuples > vacthresh);
 
