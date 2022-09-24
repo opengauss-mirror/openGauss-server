@@ -589,5 +589,57 @@ select * from pg_get_tabledef('generated_test');
 (1 row)
 
 drop table generated_test;
+select * from pg_get_tabledef('pg_class');
+                                                      pg_get_tabledef                                                       
+----------------------------------------------------------------------------------------------------------------------------
+ SET search_path = pg_catalog;                                                                                             +
+ CREATE TABLE pg_class (                                                                                                   +
+     relname name NOT NULL,                                                                                                +
+     relnamespace oid NOT NULL,                                                                                            +
+     reltype oid NOT NULL,                                                                                                 +
+     reloftype oid NOT NULL,                                                                                               +
+     relowner oid NOT NULL,                                                                                                +
+     relam oid NOT NULL,                                                                                                   +
+     relfilenode oid NOT NULL,                                                                                             +
+     reltablespace oid NOT NULL,                                                                                           +
+     relpages double precision NOT NULL,                                                                                   +
+     reltuples double precision NOT NULL,                                                                                  +
+     relallvisible integer NOT NULL,                                                                                       +
+     reltoastrelid oid NOT NULL,                                                                                           +
+     reltoastidxid oid NOT NULL,                                                                                           +
+     reldeltarelid oid NOT NULL,                                                                                           +
+     reldeltaidx oid NOT NULL,                                                                                             +
+     relcudescrelid oid NOT NULL,                                                                                          +
+     relcudescidx oid NOT NULL,                                                                                            +
+     relhasindex boolean NOT NULL,                                                                                         +
+     relisshared boolean NOT NULL,                                                                                         +
+     relpersistence "char" NOT NULL,                                                                                       +
+     relkind "char" NOT NULL,                                                                                              +
+     relnatts smallint NOT NULL,                                                                                           +
+     relchecks smallint NOT NULL,                                                                                          +
+     relhasoids boolean NOT NULL,                                                                                          +
+     relhaspkey boolean NOT NULL,                                                                                          +
+     relhasrules boolean NOT NULL,                                                                                         +
+     relhastriggers boolean NOT NULL,                                                                                      +
+     relhassubclass boolean NOT NULL,                                                                                      +
+     relcmprs tinyint NOT NULL,                                                                                            +
+     relhasclusterkey boolean NOT NULL,                                                                                    +
+     relrowmovement boolean NOT NULL,                                                                                      +
+     parttype "char" NOT NULL,                                                                                             +
+     relfrozenxid xid32 NOT NULL,                                                                                          +
+     relacl aclitem[],                                                                                                     +
+     reloptions text[],                                                                                                    +
+     relreplident "char",                                                                                                  +
+     relfrozenxid64 xid,                                                                                                   +
+     relbucket oid,                                                                                                        +
+     relbucketkey int2vector,                                                                                              +
+     relminmxid xid                                                                                                        +
+ )                                                                                                                         +
+ DISTRIBUTE BY REPLICATION;                                                                                                +
+ CREATE UNIQUE INDEX pg_class_oid_index ON pg_class USING btree (oid) TABLESPACE pg_default;                               +
+ CREATE UNIQUE INDEX pg_class_relname_nsp_index ON pg_class USING btree (relname, relnamespace) TABLESPACE pg_default;     +
+ CREATE INDEX pg_class_tblspc_relfilenode_index ON pg_class USING btree (reltablespace, relfilenode) TABLESPACE pg_default;
+(1 row)
+
 reset current_schema;
 drop schema test_get_table_def cascade;
