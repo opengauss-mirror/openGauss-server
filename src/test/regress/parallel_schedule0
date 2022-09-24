@@ -999,6 +999,8 @@ test: var_eq_const_selectivity
 
 test: pg_controldata
 
+test: describe_index_with_tablespace
+
 # syntax compatibility
 test: sytcomp_del_upt4orderby
 test: aioptimizer
