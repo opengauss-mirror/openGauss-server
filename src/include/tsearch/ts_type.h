@@ -186,6 +186,14 @@ typedef struct {
 #define OP_NOT 1
 #define OP_AND 2
 #define OP_OR 3
+#define OP_COUNT 3
+
+extern PGDLLIMPORT const int tsearch_op_priority[OP_COUNT];
+
+/* get operation priority by its code */
+#define OP_PRIORITY(x)	( tsearch_op_priority[(x) - 1] )
+/* get QueryOperator priority */
+#define QO_PRIORITY(x)	OP_PRIORITY(((QueryOperator *) (x))->oper)
 
 typedef struct {
     QueryItemType type;

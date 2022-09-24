@@ -464,9 +464,9 @@ SELECT to_tsvector('ispell_tst', 'Booking the skies after rebookings for footbal
 (1 row)
 
 SELECT to_tsquery('ispell_tst', 'footballklubber');
-                                  to_tsquery                                  
-------------------------------------------------------------------------------
- ( 'footballklubber' | 'foot' & 'ball' & 'klubber' ) | 'football' & 'klubber'
+                                to_tsquery                                
+--------------------------------------------------------------------------
+ 'footballklubber' | 'foot' & 'ball' & 'klubber' | 'football' & 'klubber'
 (1 row)
 
 SELECT to_tsquery('ispell_tst', 'footballyklubber:b & rebookings:A & sky');
@@ -488,9 +488,9 @@ SELECT to_tsvector('hunspell_tst', 'Booking the skies after rebookings for footb
 (1 row)
 
 SELECT to_tsquery('hunspell_tst', 'footballklubber');
-                                  to_tsquery                                  
-------------------------------------------------------------------------------
- ( 'footballklubber' | 'foot' & 'ball' & 'klubber' ) | 'football' & 'klubber'
+                                to_tsquery                                
+--------------------------------------------------------------------------
+ 'footballklubber' | 'foot' & 'ball' & 'klubber' | 'football' & 'klubber'
 (1 row)
 
 SELECT to_tsquery('hunspell_tst', 'footballyklubber:b & rebookings:A & sky');
@@ -509,9 +509,9 @@ SELECT to_tsvector('hunspell_tst', 'Booking the skies after rebookings for footb
 (1 row)
 
 SELECT to_tsquery('hunspell_tst', 'footballklubber');
-                                  to_tsquery                                  
-------------------------------------------------------------------------------
- ( 'footballklubber' | 'foot' & 'ball' & 'klubber' ) | 'football' & 'klubber'
+                                to_tsquery                                
+--------------------------------------------------------------------------
+ 'footballklubber' | 'foot' & 'ball' & 'klubber' | 'football' & 'klubber'
 (1 row)
 
 SELECT to_tsquery('hunspell_tst', 'footballyklubber:b & rebookings:A & sky');
@@ -530,9 +530,9 @@ SELECT to_tsvector('hunspell_tst', 'Booking the skies after rebookings for footb
 (1 row)
 
 SELECT to_tsquery('hunspell_tst', 'footballklubber');
-                                  to_tsquery                                  
-------------------------------------------------------------------------------
- ( 'footballklubber' | 'foot' & 'ball' & 'klubber' ) | 'football' & 'klubber'
+                                to_tsquery                                
+--------------------------------------------------------------------------
+ 'footballklubber' | 'foot' & 'ball' & 'klubber' | 'football' & 'klubber'
 (1 row)
 
 SELECT to_tsquery('hunspell_tst', 'footballyklubber:b & rebookings:A & sky');

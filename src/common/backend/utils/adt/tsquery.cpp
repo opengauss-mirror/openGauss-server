@@ -22,6 +22,10 @@
 #include "utils/builtins.h"
 #include "utils/memutils.h"
 
+
+/* FTS operator priorities, see ts_type.h */
+const int tsearch_op_priority[OP_COUNT] = {3, 2, 1};
+
 struct TSQueryParserStateData {
     /* State for gettoken_query */
     char* buffer; /* entire string we are scanning */
@@ -533,7 +537,7 @@ typedef struct {
  * recursive walk on tree and print it in
  * infix (human-readable) view
  */
-static void infix(INFIX* in, bool first)
+static void infix(INFIX *in, int parentPriority, bool rightPhraseOp)
 {
     /* since this function recurses, it could be driven to stack overflow. */
     check_stack_depth();
@@ -591,35 +595,35 @@ static void infix(INFIX* in, bool first)
         *(in->cur) = '\0';
         in->curpol++;
     } else if (in->curpol->qoperator.oper == OP_NOT) {
-        bool isopr = false;
+        int priority = QO_PRIORITY(in->curpol);
 
+        if (priority < parentPriority) {
+            RESIZEBUF(in, 2);
+            sprintf(in->cur, "( ");
+            in->cur = strchr(in->cur, '\0');
+        }
         RESIZEBUF(in, 1);
         *(in->cur) = '!';
         in->cur++;
         *(in->cur) = '\0';
         in->curpol++;
 
-        if (in->curpol->type == QI_OPR) {
-            isopr = true;
-            RESIZEBUF(in, 2);
-            rc = sprintf_s(in->cur, in->buflen - (in->cur - in->buf), "( ");
-            securec_check_ss(rc, "\0", "\0");
-            in->cur = strchr(in->cur, '\0');
-        }
-
-        infix(in, isopr);
-        if (isopr) {
+        infix(in, priority, false);
+        if (priority < parentPriority) {
             RESIZEBUF(in, 2);
             rc = sprintf_s(in->cur, in->buflen - (in->cur - in->buf), " )");
             securec_check_ss(rc, "\0", "\0");
             in->cur = strchr(in->cur, '\0');
         }
     } else {
-        int8 op = in->curpol->qoperator.oper;
+        int8  op = in->curpol->qoperator.oper;
+        int priority = QO_PRIORITY(in->curpol);
         INFIX nrm;
+        bool needParenthesis = false;
 
         in->curpol++;
-        if (op == OP_OR && !first) {
+        if (priority < parentPriority || rightPhraseOp) {
+            needParenthesis = true;
             RESIZEBUF(in, 2);
             rc = sprintf_s(in->cur, in->buflen - (in->cur - in->buf), "( ");
             securec_check_ss(rc, "\0", "\0");
@@ -632,11 +636,11 @@ static void infix(INFIX* in, bool first)
         nrm.cur = nrm.buf = (char*)palloc(sizeof(char) * nrm.buflen);
 
         /* get right operand */
-        infix(&nrm, false);
+        infix(&nrm, priority, false);
 
         /* get & print left operand */
         in->curpol = nrm.curpol;
-        infix(in, false);
+        infix(in, priority, false);
 
         /* print operator & right operand */
         RESIZEBUF(in, 3 + (nrm.cur - nrm.buf));
@@ -656,7 +660,7 @@ static void infix(INFIX* in, bool first)
         in->cur = strchr(in->cur, '\0');
         pfree_ext(nrm.buf);
 
-        if (op == OP_OR && !first) {
+        if (needParenthesis) {
             RESIZEBUF(in, 2);
             rc = sprintf_s(in->cur, in->buflen - (in->cur - in->buf), " )");
             securec_check_ss(rc, "\0", "\0");
@@ -681,7 +685,7 @@ Datum tsqueryout(PG_FUNCTION_ARGS)
     nrm.cur = nrm.buf = (char*)palloc(sizeof(char) * nrm.buflen);
     *(nrm.cur) = '\0';
     nrm.op = GETOPERAND(query);
-    infix(&nrm, true);
+    infix(&nrm, -1, false);
 
     PG_FREE_IF_COPY(query, 0);
     PG_RETURN_CSTRING(nrm.buf);
@@ -900,7 +904,7 @@ Datum tsquerytree(PG_FUNCTION_ARGS)
         nrm.cur = nrm.buf = (char*)palloc(sizeof(char) * nrm.buflen);
         *(nrm.cur) = '\0';
         nrm.op = GETOPERAND(query);
-        infix(&nrm, true);
+        infix(&nrm, -1, false);
         res = cstring_to_text_with_len(nrm.buf, nrm.cur - nrm.buf);
         pfree_ext(nrm.buf);
         pfree_ext(q);
