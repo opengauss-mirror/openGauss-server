@@ -234,11 +234,11 @@ int main(int argc, char* argv[])
         {"with-key", required_argument, NULL, 7},
         {"dont-overwrite-file", no_argument, NULL, 8},
         {"use-set-session-authorization", no_argument, &use_setsessauth, 1},
-#if !defined(ENABLE_MULTIPLE_NODES) && !defined(ENABLE_LITE_MODE)
+#if !defined(ENABLE_MULTIPLE_NODES)
         {"no-publications", no_argument, &no_publications, 1},
 #endif
         {"no-security-labels", no_argument, &no_security_labels, 1},
-#if !defined(ENABLE_MULTIPLE_NODES) && !defined(ENABLE_LITE_MODE)
+#if !defined(ENABLE_MULTIPLE_NODES)
         {"no-subscriptions", no_argument, &no_subscriptions, 1},
 #endif
         {"no-unlogged-table-data", no_argument, &no_unlogged_table_data, 1},
@@ -1226,12 +1226,12 @@ void help(void)
     printf(_("  --disable-dollar-quoting                    disable dollar quoting, use SQL standard quoting\n"));
     printf(_("  --disable-triggers                          disable triggers during data-only restore\n"));
     printf(_("  --inserts                                   dump data as INSERT commands, rather than COPY\n"));
-#if !defined(ENABLE_MULTIPLE_NODES) && !defined(ENABLE_LITE_MODE)
+#if !defined(ENABLE_MULTIPLE_NODES)
     printf(_("  --no-publications                           do not dump publications\n"));
 #endif
     printf(_("  --no-security-labels                        do not dump security label assignments\n"));
     printf(_("  --no-tablespaces                            do not dump tablespace assignments\n"));
-#if !defined(ENABLE_MULTIPLE_NODES) && !defined(ENABLE_LITE_MODE)
+#if !defined(ENABLE_MULTIPLE_NODES)
     printf(_("  --no-subscriptions                          do not dump subscriptions\n"));
 #endif
     printf(_("  --no-unlogged-table-data                    do not dump unlogged table data\n"));
