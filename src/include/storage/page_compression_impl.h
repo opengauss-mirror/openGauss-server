@@ -120,8 +120,9 @@ void CompressConvertRows(char *buf, char *aux_buf, int16 *real_order, uint16 max
     errno_t ret;
     HeapPageHeaderData *page = (HeapPageHeaderData *)buf;
     uint16 row_cnt = real_row_cnt;
-    uint32 total_size = page->pd_special - page->pd_upper;
-    char *copy_begin = buf + page->pd_upper;
+    uint16 min_offset = GET_ITEMID_BY_IDX(buf, real_order[0])->lp_off;
+    uint32 total_size = page->pd_special - min_offset;
+    char *copy_begin = buf + min_offset;
     char *row;
     uint16 i, j, k, cur, up, row_size;
 
@@ -489,8 +490,9 @@ void DecompressDeconvertRows(char *buf, char *aux_buf, int16 *real_order, uint16
     errno_t ret;
     HeapPageHeaderData *page = (HeapPageHeaderData *)buf;
     uint16 row_cnt = real_row_cnt;
-    uint32 total_size = page->pd_special - page->pd_upper;
-    char *copy_begin = buf + page->pd_upper;
+    uint16 min_offset = GET_ITEMID_BY_IDX(buf, real_order[0])->lp_off;
+    uint32 total_size = page->pd_special - min_offset;
+    char *copy_begin = buf + min_offset;
     char *row;
     uint16 i, j, k, cur, up, row_size;
 
@@ -516,7 +518,7 @@ void DecompressDeconvertRows(char *buf, char *aux_buf, int16 *real_order, uint16
     }
 
     // cp aux_buf to page_buf
-    ret = memcpy_sp(copy_begin, total_size, aux_buf + page->pd_upper, total_size);
+    ret = memcpy_sp(copy_begin, total_size, aux_buf + min_offset, total_size);
     securec_check(ret, "", "");
     return ;
 }
