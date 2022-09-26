@@ -15,9 +15,15 @@ DELETE [/*+ plan_hint */] [FROM] [ ONLY ] table_name [ * ] [ [ [partition_clause
 
 DELETE Multiple-Relation Syntax：
 [ WITH [ RECURSIVE ] with_query [, ...] ]
-DELETE [/*+ plan_hint */] [FROM] 
+DELETE [/*+ plan_hint */] [FROM]
     {[ ONLY ] table_name [ * ] [ [ [partition_clause]  [ [ AS ] alias ] ] | [ [ [ AS ] alias ] [partitions_clause] ] ]} [, ...]
     [ USING using_list ]
+    [ WHERE condition | WHERE CURRENT OF cursor_name ];
+or
+[ WITH [ RECURSIVE ] with_query [, ...] ]
+DELETE [/*+ plan_hint */]
+    {[ ONLY ] table_name [ * ] [ [ [partition_clause]  [ [ AS ] alias ] ] | [ [ [ AS ] alias ] [partitions_clause] ] ]} [, ...]
+    [ FROM using_list ]
     [ WHERE condition | WHERE CURRENT OF cursor_name ];
 
 where with_query can be:
@@ -65,6 +71,38 @@ select * from t_t_mutil_t3;
 (1 row)
 
 rollback;
+-- delete xx from xxx;
+begin;
+delete t_t_mutil_t1 a from t_t_mutil_t2 b,t_t_mutil_t3 c where a.col2=b.col2 and b.col2=c.col2;
+rollback;
+begin;
+delete a from t_t_mutil_t1 a,t_t_mutil_t2 b,t_t_mutil_t3 c where a.col2=b.col2 and b.col2=c.col2;
+rollback;
+begin;
+delete t_t_mutil_t1 a,t_t_mutil_t2 b from t_t_mutil_t3 c where a.col2=b.col2 and b.col2=c.col2;
+rollback;
+begin;
+delete a,b from t_t_mutil_t1 a,t_t_mutil_t2 b,t_t_mutil_t3 c where a.col2=b.col2 and b.col2=c.col2;
+rollback;
+begin;
+delete a from t_t_mutil_t1 a left join t_t_mutil_t2 b on a.col2=b.col2;
+rollback;
+delete a from t_t_mutil_t1 a left join t_t_mutil_t2 b on a.col2=b.col2 limit 1; -- error
+ERROR:  syntax error at or near "limit"
+LINE 1: ...util_t1 a left join t_t_mutil_t2 b on a.col2=b.col2 limit 1;
+                                                               ^
+delete a from t_t_mutil_t1 a left join t_t_mutil_t2 b on a.col2=b.col2 order by a.col2; -- error
+ERROR:  syntax error at or near "order"
+LINE 1: ...il_t1 a left join t_t_mutil_t2 b on a.col2=b.col2 order by a...
+                                                             ^
+delete a from t_t_mutil_t1 a left join t_t_mutil_t2 b on a.col2=b.col2 returning *; -- error
+ERROR:  syntax error at or near "returning"
+LINE 1: ...il_t1 a left join t_t_mutil_t2 b on a.col2=b.col2 returning ...
+                                                             ^
+delete t_t_mutil_t1 a from t_t_mutil_t1 a left join t_t_mutil_t2 b on a.col2=b.col2 limit 1; -- error
+ERROR:  syntax error at or near "limit"
+LINE 1: ...util_t1 a left join t_t_mutil_t2 b on a.col2=b.col2 limit 1;
+                                                               ^
 -- condition is false
 delete from t_t_mutil_t1 a,t_t_mutil_t2 b where a.col1 = 1 and a.col1=2;
 -- different plan

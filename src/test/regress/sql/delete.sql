@@ -28,3 +28,5 @@ DROP TABLE delete_test;
 create table t_t_mutil_t1(col1 int,col2 int);
 create table t_t_mutil_t2(col1 int,col2 int);
 delete from t_t_mutil_t1 a,t_t_mutil_t2 b where a.col1=b.col1;
+delete a from t_t_mutil_t1 a,t_t_mutil_t2 b where a.col1=b.col1;
+delete a,b from t_t_mutil_t1 a,t_t_mutil_t2 b where a.col1=b.col1;

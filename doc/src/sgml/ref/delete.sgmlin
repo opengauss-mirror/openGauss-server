@@ -21,9 +21,15 @@ DELETE [/*+ plan_hint */] [FROM] [ ONLY ] table_name [ * ] [ [ [partition_clause
 
 DELETE Multiple-Relation Syntax：
 [ WITH [ RECURSIVE ] with_query [, ...] ]
-DELETE [/*+ plan_hint */] [FROM] 
+DELETE [/*+ plan_hint */] [FROM]
     {[ ONLY ] table_name [ * ] [ [ [partition_clause]  [ [ AS ] alias ] ] | [ [ [ AS ] alias ] [partitions_clause] ] ]} [, ...]
     [ USING using_list ]
+    [ WHERE condition | WHERE CURRENT OF cursor_name ];
+or
+[ WITH [ RECURSIVE ] with_query [, ...] ]
+DELETE [/*+ plan_hint */]
+    {[ ONLY ] table_name [ * ] [ [ [partition_clause]  [ [ AS ] alias ] ] | [ [ [ AS ] alias ] [partitions_clause] ] ]} [, ...]
+    [ FROM using_list ]
     [ WHERE condition | WHERE CURRENT OF cursor_name ];
 
 where with_query can be:

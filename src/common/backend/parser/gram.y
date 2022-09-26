@@ -246,6 +246,7 @@ static Node *make_node_from_scanbuf(int start_pos, int end_pos, core_yyscan_t yy
 static int64 SequenceStrGetInt64(const char *str);
 static int GetLoadType(int load_type_f, int load_type_s);
 static Node *MakeSqlLoadNode(char *colname);
+static void checkDeleteRelationError();
 
 /* start with .. connect by related utilities */
 static bool IsConnectByRootIdent(Node* node);
@@ -20201,15 +20202,7 @@ DeleteStmt: opt_with_clause DELETE_P hint_string FROM relation_expr_opt_alias_li
 					DeleteStmt *n = makeNode(DeleteStmt);
 					n->relations = $5;
 					if (list_length(n->relations) > 1) {
-#ifdef ENABLE_MULTIPLE_NODES
-						ereport(errstate, 
-							    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-								 errmsg("multi-relation delete is not yet supported.")));
-#endif
-						if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT)						
-							ereport(errstate, 
-									(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-									 errmsg("multi-relation delete only support in B-format database")));
+						checkDeleteRelationError();
 					}
 					n->usingClause = $6;
 					n->whereClause = $7;
@@ -20226,21 +20219,26 @@ DeleteStmt: opt_with_clause DELETE_P hint_string FROM relation_expr_opt_alias_li
 					DeleteStmt *n = makeNode(DeleteStmt);
 					n->relations = $4;
 					if (list_length(n->relations) > 1) {
-#ifdef ENABLE_MULTIPLE_NODES
-						ereport(errstate, 
-							    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-								 errmsg("multi-relation delete is not yet supported.")));
-#endif
-						if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT)						
-							ereport(errstate, 
-									(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-									 errmsg("multi-relation delete only support in B-format database")));
+						checkDeleteRelationError();
 					}
 					n->usingClause = $5;
 					n->whereClause = $6;
 					n->sortClause = $7;
 					n->limitClause = (Node*)list_nth($8, 1);
 					n->returningList = $9;
+					n->withClause = $1;
+					n->hintState = create_hintstate($3);				
+					$$ = (Node *)n;
+				}
+		/* this is only used in multi-relation DELETE for compatibility B database. */
+		| opt_with_clause DELETE_P hint_string relation_expr_opt_alias_list
+			FROM from_list where_or_current_clause
+				{
+					DeleteStmt *n = makeNode(DeleteStmt);
+					n->relations = $4;
+					checkDeleteRelationError();
+					n->usingClause = $6;
+					n->whereClause = $7;
 					n->withClause = $1;
 					n->hintState = create_hintstate($3);				
 					$$ = (Node *)n;
@@ -28640,6 +28638,19 @@ static FuncCall* MakePriorAsFunc()
     n->over = NULL;
     n->call_func = false;
     return n;
+}
+
+static void checkDeleteRelationError()
+{
+#ifdef ENABLE_MULTIPLE_NODES
+	ereport(errstate, 
+			(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				errmsg("multi-relation delete is not yet supported.")));
+#endif
+	if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT)						
+		ereport(errstate, 
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					errmsg("multi-relation delete only support in B-format database")));
 }
 
 /*
