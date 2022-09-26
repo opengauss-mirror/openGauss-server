@@ -155,7 +155,6 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
     int next_token;
     core_YYSTYPE cur_yylval;
     YYLTYPE cur_yylloc;
-    errno_t rc = 0;
 
     /* Get next token --- we might already have it */
     if (yyextra->lookahead_num != 0) {

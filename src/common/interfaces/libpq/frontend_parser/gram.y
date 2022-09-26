@@ -291,7 +291,6 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
 
 %type <typnam>	func_type
 
-%type <boolean>  opt_nowait
 %type <ival>	 OptTemp opt_wait
 %type <ival>	 opt_nowait_or_skip
 %type <oncommit> OnCommitOption
@@ -7384,11 +7383,7 @@ for_locking_item:
 					$$ = (Node *) n;
 				}
 		;
-
-opt_nowait: NOWAIT                          { $$ = TRUE; }
-            | /*EMPTY*/                     { $$ = FALSE; }
-        ;
-
+		
 opt_wait:	WAIT Iconst						{ $$ = $2; }
 opt_nowait_or_skip:
 			NOWAIT							{ $$ = LockWaitError; }
