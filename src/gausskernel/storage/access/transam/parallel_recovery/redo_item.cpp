@@ -75,7 +75,6 @@ RedoItem *CreateRedoItem(XLogReaderState *record, uint32 shareCount, uint32 desi
     item->expectedTLIs = expectedTLIs;
     item->recordXTime = recordXTime;
     item->freeNext = NULL;
-    item->contextUpdateOp.inUse = false;
     item->syncXLogReceiptTime = t_thrd.xlog_cxt.XLogReceiptTime;
     item->syncXLogReceiptSource = t_thrd.xlog_cxt.XLogReceiptSource;
     item->RecentXmin = u_sess->utils_cxt.RecentXmin;
@@ -107,7 +106,6 @@ RedoItem *CreateLSNMarker(XLogReaderState *record, List *expectedTLIs, bool buse
     item->shareCount = LSN_MARKER;
     item->expectedTLIs = expectedTLIs;
     item->freeNext = NULL;
-    item->contextUpdateOp.inUse = false;
     item->syncXLogReceiptTime = t_thrd.xlog_cxt.XLogReceiptTime;
     item->syncXLogReceiptSource = t_thrd.xlog_cxt.XLogReceiptSource;
     item->RecentXmin = u_sess->utils_cxt.RecentXmin;

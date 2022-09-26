@@ -633,9 +633,6 @@ static void DispatchSyncTxnRecord(XLogReaderState *record, List *expectedTLIs, T
     for (uint32 i = 0; i < g_dispatcher->pageWorkerCount; ++i) {
         if (g_dispatcher->chosedWorkerIds[i] > 0) {
             AddPageRedoItem(g_dispatcher->pageWorkers[i], item);
-        } else {
-            RedoItem *lsnMarker = CreateLSNMarker(record, expectedTLIs, false);
-            AddPageRedoItem(g_dispatcher->pageWorkers[i], lsnMarker);
         }
     }
 
@@ -667,11 +664,6 @@ static void DispatchToOnePageWorker(XLogReaderState *record, const RelFileNode &
 */
 static void DispatchTxnRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime, bool imcheckpoint)
 {
-    for (uint32 i = 0; i < g_dispatcher->pageWorkerCount; i++) {
-        RedoItem *item = CreateLSNMarker(record, expectedTLIs, false);
-        AddPageRedoItem(g_dispatcher->pageWorkers[i], item);
-    }
-
     RedoItem *trxnItem = CreateRedoItem(record, 1, ANY_WORKER, expectedTLIs, recordXTime, true);
     trxnItem->imcheckpoint = imcheckpoint; /* immdiate checkpoint set imcheckpoint  */
     AddTxnRedoItem(g_dispatcher->txnWorker, trxnItem);
@@ -1228,10 +1220,6 @@ static void DispatchToSpecPageWorker(XLogReaderState *record, List *expectedTLIs
     for (uint32 i = 0; i < g_dispatcher->pageWorkerCount; i++) {
         if (g_dispatcher->chosedWorkerIds[i] > 0) {
             AddPageRedoItem(g_dispatcher->pageWorkers[i], item);
-        } else {
-            /* add LSN Marker to pageworker */
-            RedoItem *lsnItem = CreateLSNMarker(record, expectedTLIs, false);
-            AddPageRedoItem(g_dispatcher->pageWorkers[i], lsnItem);
         }
     }
 
