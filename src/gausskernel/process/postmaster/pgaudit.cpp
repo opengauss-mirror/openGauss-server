@@ -2422,11 +2422,17 @@ static void pgaudit_indextbl_init_new(void)
     }
 
     /* audit threads are writing files in range [earliest_idx, latest_idx) */
-    uint32 earliest_idx = g_instance.audit_cxt.audit_indextbl->latest_idx - g_instance.audit_cxt.thread_num;
-
+    uint32 earliest_idx = 0;
+    if (g_instance.audit_cxt.audit_indextbl->latest_idx >= g_instance.audit_cxt.thread_num) {
+        earliest_idx = g_instance.audit_cxt.audit_indextbl->latest_idx - g_instance.audit_cxt.thread_num;
+        index = g_instance.audit_cxt.audit_indextbl->begidx;
+    } else {
+        earliest_idx = g_instance.audit_cxt.audit_indextbl->maxnum + g_instance.audit_cxt.audit_indextbl->latest_idx -
+            g_instance.audit_cxt.thread_num;
+        index = g_instance.audit_cxt.audit_indextbl->latest_idx;
+    }
     /* calculate total space of all audit files */
     g_instance.audit_cxt.pgaudit_totalspace = 0;
-    index = g_instance.audit_cxt.audit_indextbl->begidx;
     do {
         item = g_instance.audit_cxt.audit_indextbl->data + index;
         g_instance.audit_cxt.pgaudit_totalspace += item->filesize;
