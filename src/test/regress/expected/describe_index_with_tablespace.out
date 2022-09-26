@@ -1,0 +1,87 @@
+drop user if exists user_index_with_tablespace;
+NOTICE:  role "user_index_with_tablespace" does not exist, skipping
+create user user_index_with_tablespace password 'Gauss_234';
+create tablespace lm_tablespace_1 owner user_index_with_tablespace relative location 'my_location';
+--1.建表
+drop table if exists tem;
+NOTICE:  table "tem" does not exist, skipping
+create table tem(c1 int,score number,primary key(c1));
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "tem_pkey" for table "tem"
+insert into tem select generate_series(1,100);
+drop table if exists lm_pre_index_022;
+NOTICE:  table "lm_pre_index_022" does not exist, skipping
+create table lm_pre_index_022 (
+c1 int,
+c2 varchar2 default 'xiaomimg',
+c3 number,
+c4 money,
+c5 CHAR(20),
+c6 CLOB,
+c7 blob,
+c8 DATE,
+c9 BOOLEAN,
+c10 TIMESTAMP,
+c11 point,
+columns12 cidr,primary key(c1),foreign key(c1) references tem(c1),check(c3>0),unique(c1))
+with(segment=on,fillfactor=70,orientation=row) tablespace lm_tablespace_1;
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "lm_pre_index_022_pkey" for table "lm_pre_index_022"
+--2.建索引
+create index lm_pre_index_022_idx_03 on lm_pre_index_022(c7);
+--3.
+\d+ lm_pre_index_022
+                                              Table "public.lm_pre_index_022"
+  Column   |              Type              |               Modifiers               | Storage  | Stats target | Description 
+-----------+--------------------------------+---------------------------------------+----------+--------------+-------------
+ c1        | integer                        | not null                              | plain    |              | 
+ c2        | character varying              | default 'xiaomimg'::character varying | extended |              | 
+ c3        | numeric                        |                                       | main     |              | 
+ c4        | money                          |                                       | plain    |              | 
+ c5        | character(20)                  |                                       | extended |              | 
+ c6        | clob                           |                                       | extended |              | 
+ c7        | blob                           |                                       | extended |              | 
+ c8        | timestamp(0) without time zone |                                       | plain    |              | 
+ c9        | boolean                        |                                       | plain    |              | 
+ c10       | timestamp without time zone    |                                       | plain    |              | 
+ c11       | point                          |                                       | plain    |              | 
+ columns12 | cidr                           |                                       | main     |              | 
+Indexes:
+    "lm_pre_index_022_pkey" PRIMARY KEY, btree (c1) TABLESPACE pg_default
+    "lm_pre_index_022_idx_03" btree (c7) TABLESPACE pg_default
+Check constraints:
+    "lm_pre_index_022_c3_check" CHECK (c3 > 0::numeric)
+Foreign-key constraints:
+    "lm_pre_index_022_c1_fkey" FOREIGN KEY (c1) REFERENCES tem(c1)
+Has OIDs: no
+Tablespace: "lm_tablespace_1"
+Options: segment=on, fillfactor=70, orientation=row, compression=no
+
+--4.
+alter index lm_pre_index_022_idx_03 set tablespace lm_tablespace_1;
+--5.
+\d+ lm_pre_index_022
+                                              Table "public.lm_pre_index_022"
+  Column   |              Type              |               Modifiers               | Storage  | Stats target | Description 
+-----------+--------------------------------+---------------------------------------+----------+--------------+-------------
+ c1        | integer                        | not null                              | plain    |              | 
+ c2        | character varying              | default 'xiaomimg'::character varying | extended |              | 
+ c3        | numeric                        |                                       | main     |              | 
+ c4        | money                          |                                       | plain    |              | 
+ c5        | character(20)                  |                                       | extended |              | 
+ c6        | clob                           |                                       | extended |              | 
+ c7        | blob                           |                                       | extended |              | 
+ c8        | timestamp(0) without time zone |                                       | plain    |              | 
+ c9        | boolean                        |                                       | plain    |              | 
+ c10       | timestamp without time zone    |                                       | plain    |              | 
+ c11       | point                          |                                       | plain    |              | 
+ columns12 | cidr                           |                                       | main     |              | 
+Indexes:
+    "lm_pre_index_022_pkey" PRIMARY KEY, btree (c1) TABLESPACE pg_default
+    "lm_pre_index_022_idx_03" btree (c7) TABLESPACE lm_tablespace_1
+Check constraints:
+    "lm_pre_index_022_c3_check" CHECK (c3 > 0::numeric)
+Foreign-key constraints:
+    "lm_pre_index_022_c1_fkey" FOREIGN KEY (c1) REFERENCES tem(c1)
+Has OIDs: no
+Tablespace: "lm_tablespace_1"
+Options: segment=on, fillfactor=70, orientation=row, compression=no
+

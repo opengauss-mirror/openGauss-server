@@ -2148,9 +2148,6 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
 
                 printTableAddFooter(&cont, buf.data);
 
-                /* Print tablespace of the index on the same line */
-                if (pset.sversion >= 80000)
-                    add_tablespace_footer(&cont, 'i', atooid(PQgetvalue(result, i, 11)), false);
             }
         }
         PQclear(result);
