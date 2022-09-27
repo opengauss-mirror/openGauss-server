@@ -583,11 +583,11 @@ int main(int argc, char** argv)
         {"serializable-deferrable", no_argument, &serializable_deferrable, 1},
         {"use-set-session-authorization", no_argument, &use_setsessauth, 1},
         {"no-security-labels", no_argument, &no_security_labels, 1},
-#if !defined(ENABLE_MULTIPLE_NODES) && !defined(ENABLE_LITE_MODE)
+#if !defined(ENABLE_MULTIPLE_NODES)
         {"no-publications", no_argument, &no_publications, 1},
 #endif
         {"no-unlogged-table-data", no_argument, &no_unlogged_table_data, 1},
-#if !defined(ENABLE_MULTIPLE_NODES) && !defined(ENABLE_LITE_MODE)
+#if !defined(ENABLE_MULTIPLE_NODES)
         {"no-subscriptions", no_argument, &no_subscriptions, 1},
 #endif
         {"include-alter-table", no_argument, &include_alter_table, 1},
@@ -1758,11 +1758,11 @@ void help(const char* pchProgname)
     printf(_("  --exclude-table-data=TABLE                  do NOT dump data for the named table(s)\n"));
     printf(_("  --exclude-with                              do NOT dump WITH() of table(s)\n"));
     printf(_("  --inserts                                   dump data as INSERT commands, rather than COPY\n"));
-#if !defined(ENABLE_MULTIPLE_NODES) && !defined(ENABLE_LITE_MODE)
+#if !defined(ENABLE_MULTIPLE_NODES)
     printf(_("  --no-publications                           do not dump publications\n"));
 #endif
     printf(_("  --no-security-labels                        do not dump security label assignments\n"));
-#if !defined(ENABLE_MULTIPLE_NODES) && !defined(ENABLE_LITE_MODE)
+#if !defined(ENABLE_MULTIPLE_NODES)
     printf(_("  --no-subscriptions                          do not dump subscriptions\n"));
 #endif
     printf(_("  --no-tablespaces                            do not dump tablespace assignments\n"));
