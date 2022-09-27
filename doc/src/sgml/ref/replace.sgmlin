@@ -23,7 +23,7 @@ REPLACE [LOW_PRIORITY | DELAYED]
     [INTO] tbl_name [(col_name,...)]
     SELECT...
 
-REPLACE works exactly like INSERT, except that if an old row in the table has the same value as a new row for a PRIMARY KEY or a UNIQUE index, the old row is deleted before the new row is inserted.
+REPLACE delete the old rows when the new row conflict with the old row which contains PRIMARY KEY or a UNIQUE index, and then insert the new row.
 
 </synopsis>
 </refsynopsisdiv>
