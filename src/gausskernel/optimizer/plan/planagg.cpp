@@ -603,7 +603,8 @@ static Plan* make_agg_subplan(PlannerInfo* root, MinMaxAggInfo* mminfo)
         plan->lefttree->targetlist = plan->targetlist;
 
     plan = (Plan*)make_limit(root, plan, subparse->limitOffset, subparse->limitCount, 0, 1);
-#ifdef STREAMPLAN
+#ifdef ENABLE_MULTIPLE_NODES
+    /* there is only one result, single node will not choose smp, no need to add agg */
     if (IS_STREAM_PLAN) {
         if (is_execute_on_coordinator(plan) || is_execute_on_allnodes(plan)) {
             // local case or should we assert
@@ -674,9 +675,7 @@ static Plan* make_agg_subplan(PlannerInfo* root, MinMaxAggInfo* mminfo)
             }
         }
     }
-#endif
 
-#ifdef ENABLE_MULTIPLE_NODES
     if (g_instance.attr.attr_common.enable_tsdb) {
         plan = tsdb_modifier(root, plan->targetlist, plan, subroot);
     }
