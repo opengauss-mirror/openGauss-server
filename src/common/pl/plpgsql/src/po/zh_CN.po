@@ -23,6 +23,11 @@ msgstr ""
 msgid "block label must be placed before DECLARE, not after"
 msgstr "代码块标签必须放在DECLARE的前面，而不是后面"
 
+#: gram.y:8844
+#, c-format
+msgid "The label name is invalid"
+msgstr "label名无效"
+
 #: gram.y:459
 #, c-format
 msgid "collations are not supported by type %s"
