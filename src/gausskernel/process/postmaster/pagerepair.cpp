@@ -1175,17 +1175,19 @@ void CheckIsStopRecovery(void)
     HASH_SEQ_STATUS status;
     RepairFileEntry *entry = NULL;
     HTAB *file_hash = g_instance.repair_cxt.file_repair_hashtbl;
-    XLogRecPtr repaly = GetXLogReplayRecPtr(NULL, NULL);
-    XLogRecPtr flush = GetStandbyFlushRecPtr(NULL);
 
     if (file_hash == NULL) {
         return;
     }
 
     if (LWLockConditionalAcquire(FILE_REPAIR_LOCK, LW_EXCLUSIVE)) {
+        if (hash_get_num_entries(file_hash) == 0) {
+            LWLockRelease(FILE_REPAIR_LOCK);
+            return;
+        }
+        XLogRecPtr repaly = GetXLogReplayRecPtr(NULL, NULL);
         hash_seq_init(&status, file_hash);
         while ((entry = (RepairFileEntry *)hash_seq_search(&status)) != NULL) {
-            flush = GetStandbyFlushRecPtr(NULL);
             if (!XLogRecPtrIsInvalid(entry->min_recovery_point) && XLByteLT(entry->min_recovery_point, repaly)
                 && entry->file_state == WAIT_FILE_CHECK_REPAIR) {
                 entry->file_state = WAIT_FILE_REMOTE_READ;
@@ -1223,8 +1225,6 @@ void CheckIsStopRecovery(void)
             }
         }
     }
-
-    return;
 }
 
 const int REPAIR_LEN = 8;

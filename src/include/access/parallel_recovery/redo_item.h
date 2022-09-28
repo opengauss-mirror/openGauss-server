@@ -38,64 +38,6 @@
 
 namespace parallel_recovery {
 
-
-typedef struct BTreeIncompleteAction {
-    RelFileNode node;
-    BlockNumber block;
-    bool is_root;
-} BTreeIncompleteAction;
-
-typedef struct XLogInvalidPage {
-    RelFileNode node;
-    ForkNumber fork;
-    BlockNumber minBlock;
-    Oid dbid;
-} XLogInvalidPage;
-
-typedef union ContextUpdateData {
-    BTreeIncompleteAction btree;
-    XLogInvalidPage xlog;
-} ContextUpdateData;
-
-typedef enum ContextUpdateType {
-    BTREE_FORGET_SPLIT,
-    BTREE_FORGET_DELETE,
-    XLOG_FORGET_PAGES,
-    XLOG_FORGET_PAGES_DB
-} ContextUpdateType;
-
-typedef void (*ContextUpdateFunc)(const ContextUpdateData* data);
-
-/*
- * Btree's incomplete_actions and XLog's invalid_page_tab need special
- * treatment.  Both use log_xxx() and forget_xxx() functions to maintain
- * inconsistent states during log replay.  Each of the log_xxx() functions
- * remembers an inconsistent condition, and each of the forget_xxx()
- * functions removes some inconsistent conditions.  Because the two
- * variables are thread local, the key to make it work under parallel log
- * replay is to make sure the log_xxx() and the forget_xxx() for matching
- * conditions are called in the same thread so they can correctly cancel
- * each other.  A ContextUpdateOp can be used to send a request to call
- * log_xxx() or forget_xxx() from one worker to another worker.  The
- * protocol is to set up the ContextUpdateOp during the redo function, and
- * after the record has been replayed each of the other workers checks
- * the ContextUpdateOp and calls the ContextUpdateFunc if it is the
- * ContextUpdateOp's designatedWorker.  See comments on incomplete_actions
- * and invalid_page_tab for detailed descriptions.
- */
-typedef struct ContextUpdateOp {
-    /* The type of the operation. */
-    ContextUpdateType type;
-    /* The data for the operation. */
-    ContextUpdateData data;
-    /* The function that performs the operation. */
-    ContextUpdateFunc func;
-    /* The id of the worker who needs to perform the operation. */
-    uint32 designatedWorker;
-    /* If the operation is valid. */
-    bool inUse;
-} ContextUpdateOp;
-
 typedef struct RedoItem {
     bool sharewithtrxn; /* if ture when designatedWorker is trxn or all and need sync with pageworker */
     bool blockbytrxn;   /* if ture when designatedWorker is pagerworker and need sync with trxn */
@@ -116,8 +58,6 @@ typedef struct RedoItem {
     RedoItem** nextByWorker;
     /* Next item on the free list. */
     RedoItem* freeNext;
-    /* Operation to update thread-local variables after replay. */
-    ContextUpdateOp contextUpdateOp;
     /* Number of workers holding a reference to this item. */
     pg_atomic_uint32 refCount;
     /* If this item has been replayed. */
