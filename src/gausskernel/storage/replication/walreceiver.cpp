@@ -203,6 +203,9 @@ static void ProcessArchiveXlogMessage(const ArchiveXlogMessage* archive_xlog_mes
 static void WalRecvSendArchiveXlogResponse(ArchiveTaskStatus *archive_status);
 static void ProcessHadrSwitchoverRequest(HadrSwitchoverMessage *hadrSwitchoverMessage);
 static void WalRecvHadrSwitchoverResponse();
+#ifndef ENABLE_MULTIPLE_NODES
+static void ResetConfirmedLSNOnDisk();
+#endif
 #ifdef ENABLE_MULTIPLE_NODES
 static void WalRecvHadrSendReply();
 #endif
@@ -671,6 +674,9 @@ void WalReceiverMain(void)
     if(walrcv->conn_target != REPCONNTARGET_OBS && !g_instance.attr.attr_storage.dcf_attr.enable_dcf) {
         firstSynchStandbyFile();
         set_disable_conn_mode();
+#ifndef ENABLE_MULTIPLE_NODES
+        ResetConfirmedLSNOnDisk();
+#endif
     }
 
     knl_g_set_redo_finish_status(REDO_FINISH_STATUS_LOCAL);
@@ -2799,3 +2805,33 @@ static void WalRecvHadrSendReply()
 }
 #endif
 
+#ifndef ENABLE_MULTIPLE_NODES
+static void ResetConfirmedLSNOnDisk()
+{
+    if (!g_instance.attr.attr_storage.enable_save_confirmed_lsn ||
+        !IsServerModeStandby()) {
+        return;
+    }
+
+    int i;
+    bool modified = false;
+
+    ereport(DEBUG1, (errmsg("Reset the confirmed LSN info of replication slot.")));
+    for (i = 0; i < g_instance.attr.attr_storage.max_replication_slots; i++) {
+        ReplicationSlot *s = &t_thrd.slot_cxt.ReplicationSlotCtl->replication_slots[i];
+        if (!s->in_use || GET_SLOT_PERSISTENCY(s->data) != RS_PERSISTENT || XLogRecPtrIsInvalid(s->data.confirmed_flush))
+            continue;
+
+        SpinLockAcquire(&s->mutex);
+        s->data.confirmed_flush = InvalidXLogRecPtr;
+        s->just_dirtied = true;
+        s->dirty = true;
+        modified = true;
+        SpinLockRelease(&s->mutex);
+    }
+
+    if (modified) {
+        CheckPointReplicationSlots();
+    }
+}
+#endif

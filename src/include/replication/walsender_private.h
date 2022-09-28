@@ -154,6 +154,8 @@ typedef struct WalSnd {
     SDRSInteractiveState interactiveState;
     bool isMasterInstanceReady;
     TimestampTz lastRequestTimestamp;
+    /* The idx of replication slot */
+    int slot_idx;
 } WalSnd;
 
 extern THR_LOCAL WalSnd* MyWalSnd;

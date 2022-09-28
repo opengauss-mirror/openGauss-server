@@ -332,6 +332,11 @@ SyncWaitRet SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
          * the commit is cleaned up.
          */
         if (t_thrd.int_cxt.ProcDiePending || t_thrd.proc_cxt.proc_exit_inprogress) {
+#ifndef ENABLE_MULTIPLE_NODES
+            if (g_instance.attr.attr_storage.enable_save_confirmed_lsn) {
+                t_thrd.postgres_cxt.whereToSendOutput = DestNone;
+            }
+#endif
             ereport(WARNING,
                     (errcode(ERRCODE_ADMIN_SHUTDOWN),
                      errmsg("canceling the wait for synchronous replication and terminating connection due to "
@@ -697,6 +702,34 @@ void SyncRepReleaseWaiters(void)
                     (uint32)writePtr, numflush, (uint32)(flushPtr >> 32), (uint32)flushPtr,
                     numapply, (uint32)(replayPtr >> 32), (uint32)replayPtr)));
 }
+
+#ifndef ENABLE_MULTIPLE_NODES
+void SetXactLastCommitToSyncedStandby(XLogRecPtr recptr)
+{
+    int slot_idx;
+    bool modified = false;
+    volatile WalSnd* walsnd = t_thrd.walsender_cxt.MyWalSnd;
+    slot_idx = walsnd->slot_idx;
+
+    if (slot_idx < 0) {
+        ereport(PANIC, (errmsg("The replication slot index is invalid!")));
+    }
+
+    ReplicationSlot *s = &t_thrd.slot_cxt.ReplicationSlotCtl->replication_slots[slot_idx];
+    SpinLockAcquire(&s->mutex);
+    if (XLByteLT(s->data.confirmed_flush, recptr)) {
+        s->data.confirmed_flush = recptr;
+        s->just_dirtied = true;
+        s->dirty = true;
+        modified = true;
+    }
+    SpinLockRelease(&s->mutex);
+
+    if (modified) {
+        ReplicationSlotSave();
+    }
+}
+#endif
 
 static SyncStandbyNumState check_sync_standbys_num(const List* sync_standbys)
 {
@@ -1104,6 +1137,7 @@ int SyncRepWakeQueue(bool all, int mode)
     PGPROC *proc = NULL;
     PGPROC *thisproc = NULL;
     int numprocs = 0;
+    XLogRecPtr confirmedLSN = InvalidXLogRecPtr;
 
     Assert(mode >= 0 && mode < NUM_SYNC_REP_WAIT_MODE);
     Assert(SyncRepQueueIsOrderedByLSN(mode));
@@ -1127,6 +1161,21 @@ int SyncRepWakeQueue(bool all, int mode)
          */
         thisproc = proc;
         thisproc->syncRepInCompleteQueue = true;
+#ifndef ENABLE_MULTIPLE_NODES
+        /*
+         * Set confirmed LSN at primary node during sync wait for LSN.
+         * Confirmed LSN is the start LSN of last xact of proc which all qurom stanby nodes had met with primary.
+         * With saving the confirmed LSN at primary node during sync wait process and validating it during build 
+         * process, it can avoid the primary node lost data if it will be built as new standby while an async 
+         * standby node is running as new primary.
+         */
+        if (g_instance.attr.attr_storage.enable_save_confirmed_lsn &&
+            XLogRecPtrIsValid(thisproc->syncSetConfirmedLSN)) {
+            confirmedLSN =
+                XLByteLT(confirmedLSN, thisproc->syncSetConfirmedLSN) ? thisproc->syncSetConfirmedLSN : confirmedLSN;
+            thisproc->syncSetConfirmedLSN = InvalidXLogRecPtr;
+        }
+#endif
         proc = (PGPROC *)SHMQueueNext(&(t_thrd.walsender_cxt.WalSndCtl->SyncRepQueue[mode]), &(proc->syncRepLinks),
                                       offsetof(PGPROC, syncRepLinks));
 
@@ -1134,6 +1183,12 @@ int SyncRepWakeQueue(bool all, int mode)
         pTail = &(thisproc->syncRepLinks);
         numprocs++;
     }
+
+#ifndef ENABLE_MULTIPLE_NODES
+    if (g_instance.attr.attr_storage.enable_save_confirmed_lsn && XLogRecPtrIsValid(confirmedLSN)) {
+        SetXactLastCommitToSyncedStandby(confirmedLSN);
+    }
+#endif
 
     /* Delete the finished segment from the list, and only notifies leader proc */
     if (pTail != pHead) {

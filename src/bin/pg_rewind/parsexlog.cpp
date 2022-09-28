@@ -15,7 +15,7 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
-#include "filemap.h"
+#include "file_ops.h"
 #include "logging.h"
 #include "pg_rewind.h"
 #include "pg_build.h"
@@ -23,6 +23,7 @@
 #include "access/htup.h"
 #include "access/xlog_internal.h"
 #include "storage/smgr/segment.h"
+#include "replication/slot.h"
 #include "access/xlogreader.h"
 #include "catalog/pg_control.h"
 #include <stdlib.h>
@@ -540,4 +541,172 @@ void recordReadTest(const char* datadir, XLogRecPtr ptr, TimeLineID tli)
     XLogReaderFree(xlogreader);
     CloseXlogFile();
     return;
+}
+
+static void ReadConfirmedLSNFromDisk(char* buffer, XLogRecPtr *confirmedLsn)
+{
+    ReplicationSlotOnDisk slot;
+    pg_crc32c checksum;
+
+    int rc = memcpy_s(&slot, sizeof(ReplicationSlotOnDisk), buffer, sizeof(ReplicationSlotOnDisk));
+    securec_check(rc, "", "");
+
+    INIT_CRC32C(checksum);
+    COMP_CRC32C(checksum, &slot.slotdata, sizeof(ReplicationSlotPersistentData));
+    FIN_CRC32C(checksum);
+
+    if (!EQ_CRC32C(checksum, slot.checksum) ||
+        slot.magic != SLOT_MAGIC ||
+        slot.length != ReplicationSlotOnDiskDynamicSize) {
+        pg_log(PG_ERROR, "Failed to check CRC/Magic/Lenth of replication slot %s.\n", slot.slotdata.name.data);
+        return;
+    }
+
+    if (GET_SLOT_PERSISTENCY(slot.slotdata) != RS_PERSISTENT) {
+        return;
+    }
+
+    if (XLogRecPtrIsValid(slot.slotdata.confirmed_flush) && XLByteLT(*confirmedLsn, slot.slotdata.confirmed_flush)) {
+        *confirmedLsn = slot.slotdata.confirmed_flush;
+        pg_log(PG_PROGRESS, "Get confirmed lsn %X/%X from replication slot %s.", (uint32)((*confirmedLsn) >> 32),
+            (uint32)(*confirmedLsn), slot.slotdata.name.data);
+    }
+}
+
+bool FindConfirmedLSN(const char* dataDir, XLogRecPtr *confirmedLsn)
+{
+    DIR *replicationDir = NULL;
+    struct dirent *replicationDe = NULL;
+    pg_log(PG_PROGRESS, "Start to get the confirmed LSN of the replication slots.\n");
+    char replicationDirPath[MAXPGPATH] = { 0 };
+    int rc = EOK;
+    rc = sprintf_s(replicationDirPath, MAXPGPATH, "%s/pg_replslot", dataDir);
+    securec_check_ss_c(rc, "\0", "\0");
+    replicationDir = opendir(replicationDirPath);
+    if (replicationDir == NULL) {
+        pg_log(PG_WARNING, "The DIR pg_replslot does'nt exist. Can't get confirmed LSN.\n");
+        return false;
+    }
+
+    while ((replicationDe = readdir(replicationDir)) != NULL) {
+        char path[MAXPGPATH] = { 0 };
+        struct stat fst;
+        size_t size;
+        char* buffer = NULL;
+
+        if (strcmp(replicationDe->d_name, ".") == 0 || strcmp(replicationDe->d_name, "..") == 0)
+            continue;
+
+        rc = snprintf_s(path, sizeof(path), MAXPGPATH - 1, "%s/%s/state", replicationDirPath, replicationDe->d_name);
+        securec_check_ss_c(rc, "\0", "\0");
+
+        if (lstat(path, &fst) == 0) {
+            buffer = slurpFile("", path, &size);
+            if (size != sizeof(ReplicationSlotOnDisk)) {
+                pg_log(PG_ERROR, "unexpected slot file size %d, expected %d\n", (int)size,
+                    (int)sizeof(ReplicationSlotOnDisk));
+                free(buffer);
+                continue;
+            }
+            ReadConfirmedLSNFromDisk(buffer, confirmedLsn);
+            free(buffer);
+        }
+    }
+    closedir(replicationDir);
+
+    if (XLogRecPtrIsInvalid(*confirmedLsn)) {
+        return false;
+    }
+
+    return true;
+}
+
+BuildErrorCode CheckConfirmedLSNOnTarget(const char *datadir, TimeLineID tli, XLogRecPtr ckptRedo, XLogRecPtr confirmedLSN,
+    uint32 term)
+{
+    if (XLogRecPtrIsInvalid(confirmedLSN) || XLByteLT(confirmedLSN, ckptRedo)) {
+        return BUILD_SUCCESS;
+    }
+
+    XLogPageReadPrivate privateReader;
+    XLogReaderState *xlogreader = NULL;
+    char pg_conf_file[MAXPGPATH];
+    char *errormsg = NULL;
+
+    privateReader.datadir = datadir;
+    privateReader.tli = tli;
+    xlogreader = XLogReaderAllocate(&SimpleXLogPageRead, &privateReader);
+    if (xlogreader == NULL) {
+        pg_log(PG_ERROR, "out of memory\n");
+        return BUILD_FATAL;
+    }
+
+    /* get conn info */
+    int ret = snprintf_s(pg_conf_file, MAXPGPATH, MAXPGPATH - 1, "%s/postgresql.conf", datadir_target);
+    securec_check_ss_c(ret, "\0", "\0");
+    get_conninfo(pg_conf_file);
+
+    XLogRecord *record = NULL;
+    record = XLogReadRecord(xlogreader, confirmedLSN, &errormsg);
+    if (record == NULL) {
+        if (errormsg != NULL) {
+            pg_fatal("could not find previous WAL record at %X/%X: %s\n", (uint32)(confirmedLSN >> 32),
+                (uint32)confirmedLSN, errormsg);
+        } else {
+            pg_fatal("could not find previous WAL record at %X/%X\n", (uint32)(confirmedLSN >> 32),
+                (uint32)confirmedLSN);
+        }
+        XLogReaderFree(xlogreader);
+        CloseXlogFile();
+        return BUILD_FATAL;
+    }
+
+    if (checkCommonAncestorByXlog(xlogreader->ReadRecPtr, record->xl_crc, term) == false) {
+        pg_log(PG_FATAL, "could not find confirmed record %X/%X on source\n", (uint32)(confirmedLSN >> 32),
+            (uint32)confirmedLSN);
+        XLogReaderFree(xlogreader);
+        CloseXlogFile();
+        return BUILD_FATAL;
+    }
+
+    XLogReaderFree(xlogreader);
+    CloseXlogFile();
+    pg_log(PG_PROGRESS, "Check confirmed lsn %X/%X at source success.", (uint32)((confirmedLSN) >> 32),
+        (uint32)(confirmedLSN));
+    return BUILD_SUCCESS;
+}
+
+bool CheckIfEanbedSaveSlots()
+{
+    const char* optname[] = {"enable_save_confirmed_lsn"};
+    char config_file[MAXPGPATH] = {0};
+    char** optlines = NULL;
+    int ret = EOK;
+    int lines_index = 0;
+    int optvalue_off;
+    int optvalue_len;
+    char optvalue[MAX_VALUE_LEN] = { 0 };
+
+    ret = snprintf_s(config_file, MAXPGPATH, MAXPGPATH - 1, "%s/postgresql.conf", pg_data);
+    securec_check_ss_c(ret, "\0", "\0");
+    config_file[MAXPGPATH - 1] = '\0';
+    optlines = readfile(config_file);
+
+    if (optlines == NULL) {
+        pg_log(PG_WARNING, _("%s cannot be opened.\n"), config_file);
+        return false;
+    }
+
+    lines_index = find_gucoption((const char **)optlines, (const char *)optname[0], NULL, NULL, &optvalue_off, &optvalue_len);
+    if (lines_index != INVALID_LINES_IDX) {
+        ret = strncpy_s(optvalue, MAX_VALUE_LEN, optlines[lines_index] + optvalue_off,
+            (size_t)Min(optvalue_len, MAX_VALUE_LEN - 1));
+        securec_check_c(ret, "", "");
+        if ((strcmp(optvalue, "1") == 0) || (strcmp(optvalue, "true") == 0) || (strcmp(optvalue, "on") == 0)) {
+            pg_log(PG_PROGRESS, _("Enable saving confirmed_lsn in target %s\n"), config_file);
+            return true;
+        }
+    }
+
+    return false;
 }

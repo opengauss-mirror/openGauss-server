@@ -239,6 +239,16 @@ BuildErrorCode gs_increment_build(const char* pgdata, const char* connstr, char*
     PG_CHECKRETURN_AND_RETURN(rv);
     pg_log(PG_PROGRESS, "find diverge point success\n");
 
+    /* Read pg_replslot and get the largest confirmed LSN across all the synced replslots */
+    if(CheckIfEanbedSaveSlots()) {
+        XLogRecPtr confirmedLsn = InvalidXLogRecPtr;
+        if(FindConfirmedLSN(datadir_target, &confirmedLsn) &&
+           CheckConfirmedLSNOnTarget(datadir_target, lastcommontli, chkptredo, confirmedLsn, term) == BUILD_FATAL) {
+            pg_log(PG_PROGRESS, "Can't find quorum confirmed LSN at source, build will exit!\n");
+            exit(1);
+        }
+    }
+
     /* Checkpoint redo should exist. Otherwise, fatal and change to full build. */
     (void)readOneRecord(datadir_target, chkptredo, chkpttli);
     pg_log(PG_PROGRESS,

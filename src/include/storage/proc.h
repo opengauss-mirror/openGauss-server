@@ -185,6 +185,7 @@ struct PGPROC {
     int syncRepState;       /* wait state for sync rep */
     bool syncRepInCompleteQueue; /* waiting in complete queue */
     SHM_QUEUE syncRepLinks; /* list link if process is in syncrep queue */
+    XLogRecPtr syncSetConfirmedLSN;     /* set confirmed LSN for SyncRepWaitForLSN */
 
     XLogRecPtr waitPaxosLSN;    /* waiting for this LSN or higher on paxos callback */
     int syncPaxosState;  /* wait state for sync paxos, reuse syncRepState defines */
