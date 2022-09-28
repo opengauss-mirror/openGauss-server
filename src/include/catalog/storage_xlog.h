@@ -179,5 +179,17 @@ extern void CfsShrinkRedo(XLogReaderState *record);
 extern void CfsShrinkDesc(StringInfo buf, XLogReaderState *record);
 extern const char* CfsShrinkTypeName(uint8 subtype);
 
+static inline uint2 GetCreateXlogFileNodeOpt(const XLogReaderState *record)
+{
+    bool compress = (bool)(XLogRecGetInfo(record) & XLR_REL_COMPRESS);
+    return compress ? ((xl_smgr_create_compress*)(void *)XLogRecGetData(record))->pageCompressOpts : 0;
+}
+
+static inline uint2 GetTruncateXlogFileNodeOpt(const XLogReaderState *record)
+{
+    bool compress = (bool)(XLogRecGetInfo(record) & XLR_REL_COMPRESS);
+    return compress ? ((xl_smgr_truncate_compress*)(void *)XLogRecGetData(record))->pageCompressOpts : 0;
+}
+
 #endif   /* STORAGE_XLOG_H */
 

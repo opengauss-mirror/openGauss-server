@@ -41,7 +41,7 @@ void smgr_desc(StringInfo buf, XLogReaderState *record)
         xl_smgr_create *xlrec = (xl_smgr_create *)rec;
         RelFileNode rnode;
         RelFileNodeCopy(rnode, xlrec->rnode, XLogRecGetBucketId(record));
-
+        rnode.opt = GetCreateXlogFileNodeOpt(record);
         char *path = relpathperm(rnode, xlrec->forkNum);
 
         appendStringInfo(buf, "file create: %s", path);
@@ -55,7 +55,7 @@ void smgr_desc(StringInfo buf, XLogReaderState *record)
         xl_smgr_truncate *xlrec = (xl_smgr_truncate *)rec;
         RelFileNode rnode;
         RelFileNodeCopy(rnode, xlrec->rnode, XLogRecGetBucketId(record));
-
+        rnode.opt = GetTruncateXlogFileNodeOpt(record);
         char *path = relpathperm(rnode, MAIN_FORKNUM);
 
         appendStringInfo(buf, "file truncate: %s to %u blocks", path, xlrec->blkno);

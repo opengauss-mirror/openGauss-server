@@ -759,15 +759,24 @@ void PartitionTruncate(Relation parent, Partition part, BlockNumber nblocks)
 
     if (RelationNeedsWAL(parent)) {
         XLogRecPtr lsn;
-        xl_smgr_truncate xlrec;
+        xl_smgr_truncate_compress xlrec;
+        uint8 info = XLOG_SMGR_TRUNCATE | XLR_SPECIAL_REL_UPDATE;
+        int redoSize;
 
-        xlrec.blkno = nblocks;
-        RelFileNodeRelCopy(xlrec.rnode, part->pd_node);
+        if (rel->rd_node.opt != 0) {
+            xlrec.pageCompressOpts = rel->rd_node.opt;
+            info |= XLR_REL_COMPRESS;
+            redoSize = sizeof(xl_smgr_truncate_compress);
+        } else {
+            redoSize = sizeof(xl_smgr_truncate);
+        }
+        xlrec.xlrec.blkno = nblocks;
+        RelFileNodeRelCopy(xlrec.xlrec.rnode, part->pd_node);
 
         XLogBeginInsert();
-        XLogRegisterData((char*)&xlrec, sizeof(xlrec));
+        XLogRegisterData((char*)&xlrec, redoSize);
 
-        lsn = XLogInsert(RM_SMGR_ID, XLOG_SMGR_TRUNCATE | XLR_SPECIAL_REL_UPDATE, part->pd_node.bucketNode);
+        lsn = XLogInsert(RM_SMGR_ID, info, part->pd_node.bucketNode);
 
         /*
          * Flush, because otherwise the truncation of the main relation might
@@ -1286,6 +1295,7 @@ void smgrApplyXLogTruncateRelation(XLogReaderState* record)
 
     RelFileNodeBackend rbnode;
     RelFileNodeCopy(rbnode.node, xlrec->rnode, (int2)XLogRecGetBucketId(record));
+    rbnode.node.opt = GetTruncateXlogFileNodeOpt(record);
     rbnode.backend = InvalidBackendId;
 
     smgrclosenode(rbnode);

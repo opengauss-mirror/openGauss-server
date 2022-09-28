@@ -40,6 +40,7 @@ XLogRecParseState *smgr_xlog_relnode_parse_to_block(XLogReaderState *record, uin
     int ddltype;
     bool colmrel = false;
     bool compress = (bool)(XLogRecGetInfo(record) & XLR_REL_COMPRESS);
+    uint2 opt;
 
     if (info == XLOG_SMGR_CREATE) {
         xl_smgr_create *xlrec = (xl_smgr_create *)XLogRecGetData(record);
@@ -47,11 +48,13 @@ XLogRecParseState *smgr_xlog_relnode_parse_to_block(XLogReaderState *record, uin
         forknum = xlrec->forkNum;
         ddltype = BLOCK_DDL_CREATE_RELNODE;
         colmrel = IsValidColForkNum(xlrec->forkNum);
+        opt = compress ? ((xl_smgr_create_compress*)(void *)XLogRecGetData(record))->pageCompressOpts : 0;
     } else {
         xl_smgr_truncate *xlrec = (xl_smgr_truncate *)XLogRecGetData(record);
         rnode = &(xlrec->rnode);
         blkno = xlrec->blkno;
         ddltype = BLOCK_DDL_TRUNCATE_RELNODE;
+        opt = compress ? ((xl_smgr_truncate_compress*)(void *)XLogRecGetData(record))->pageCompressOpts : 0;
     }
 
     (*blocknum)++;
@@ -59,6 +62,7 @@ XLogRecParseState *smgr_xlog_relnode_parse_to_block(XLogReaderState *record, uin
 
     RelFileNode tmp_node;
     RelFileNodeCopy(tmp_node, *rnode, (int2)XLogRecGetBucketId(record));
+    tmp_node.opt = opt;
 
     RelFileNodeForkNum filenode = RelFileNodeForkNumFill(&tmp_node, InvalidBackendId, forknum, blkno);
     XLogRecSetBlockCommonState(record, BLOCK_DATA_DDL_TYPE, filenode, recordstatehead);

@@ -1228,6 +1228,7 @@ static void TrackRelStorageCreate(XLogReaderState *record)
 
     RelFileNode rnode;
     RelFileNodeCopy(rnode, xlrec->rnode, (int2)XLogRecGetBucketId(record));
+    rnode.opt = GetCreateXlogFileNodeOpt(record);
 
     /* Logic relfilenode create is ignored */
     if (IsSegmentFileNode(rnode)) {
@@ -1242,6 +1243,7 @@ static void TrackRelStorageTruncate(XLogReaderState *record)
     BlockNumber mainTruncBlkNo, fsmTruncBlkNo, vmTruncBlkNo;
     RelFileNode rnode;
     RelFileNodeCopy(rnode, xlrec->rnode, (int2)XLogRecGetBucketId(record));
+    rnode.opt = GetTruncateXlogFileNodeOpt(record);
 
     /* Logic relfilenode create is ignored */
     if (IsSegmentFileNode(rnode)) {

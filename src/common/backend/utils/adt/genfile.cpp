@@ -408,60 +408,66 @@ static void ReadBinaryFileBlocksFirstCall(PG_FUNCTION_ARGS, int32 startBlockNum,
     (void)MemoryContextSwitchTo(mctx);
 }
 
-static Relation CompressAddressGetRelation(Oid relid)
+static RelFileNode GetCompressRelFileNode(Oid oid)
 {
+    HeapTuple tuple;
+    Form_pg_partition pgPartitionForm;
+    RelFileNode rnode;
+
+    rnode.spcNode = InvalidOid;
+    rnode.dbNode = InvalidOid;
+    rnode.relNode = InvalidOid;
+    rnode.bucketNode = InvalidBktId;
+    rnode.opt = 0;
+
     // try to get origin oid
-    Relation relation = try_relation_open(relid, AccessShareLock);
+    Relation relation = try_relation_open(oid, AccessShareLock);
     if (RelationIsValid(relation)) {
-        return relation;
+        rnode = relation->rd_node;
+        relation_close(relation, AccessShareLock);
+        return rnode;
     }
 
-    // try to open parrent oid
-    Oid parentoid = partid_get_parentid(relid);
-    if (!OidIsValid(parentoid)) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                        errmsg("the specified relid is invalid.")));
+    tuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(oid));
+    if (!HeapTupleIsValid(tuple)) {
+        return rnode;
     }
 
-    relation = try_relation_open(parentoid, AccessShareLock);
-    if (RelationIsValid(relation)) {
-        return relation;
+    pgPartitionForm = (Form_pg_partition)GETSTRUCT(tuple);
+    switch (pgPartitionForm->parttype) {
+        case PARTTYPE_PARTITIONED_RELATION:
+        case PARTTYPE_VALUE_PARTITIONED_RELATION:
+        case PARTTYPE_SUBPARTITIONED_RELATION:
+            rnode.spcNode = ConvertToRelfilenodeTblspcOid(pgPartitionForm->reltablespace);
+            if (pgPartitionForm->relfilenode) {
+                rnode.relNode = pgPartitionForm->relfilenode;
+            } else {
+                rnode.relNode = RelationMapOidToFilenode(oid, false);
+            }
+            if (rnode.spcNode == GLOBALTABLESPACE_OID) {
+                rnode.dbNode = InvalidOid;
+            } else {
+                rnode.dbNode = u_sess->proc_cxt.MyDatabaseId;
+            }
+            rnode.bucketNode = InvalidBktId;
+            break;
+        default:
+            break;
     }
 
-    // try to open parrent oid
-    parentoid = partid_get_parentid(parentoid);
-    if (!OidIsValid(parentoid)) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                        errmsg("the specified relid is invalid.")));
-    }
-
-    relation = try_relation_open(parentoid, AccessShareLock);
-    if (RelationIsValid(relation)) {
-        return relation;
-    }
-
-    ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                        errmsg("the specified relid is invalid.")));
-    return relation;
+    ReleaseSysCache(tuple);
+    return rnode;
 }
 
 static CompressAddrState* CompressAddressInit(PG_FUNCTION_ARGS)
 {
-    Oid relid = PG_GETARG_OID(0);
+    Oid old = PG_GETARG_OID(0);
     int64 segmentNo = PG_GETARG_INT64(1);
     RelFileNode relFileNode;
 
-    Relation relation = CompressAddressGetRelation(relid);
-    relation_close(relation, AccessShareLock);
-    relFileNode = relation->rd_node;
-    relFileNode.relNode = relid;  // specified the reloid to construct the path
-
+    relFileNode = GetCompressRelFileNode(old);
     if (!OidIsValid(relFileNode.relNode)) {
         ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg("can not find table ")));
-    }
-    if (!IS_COMPRESSED_RNODE(relFileNode, MAIN_FORKNUM)) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                        errmsg("the specified file(relation) is non-compression relation.")));
     }
     char *path = relpathbackend(relFileNode, InvalidBackendId, MAIN_FORKNUM);
 

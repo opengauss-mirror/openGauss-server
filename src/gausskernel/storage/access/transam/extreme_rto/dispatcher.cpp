@@ -1086,11 +1086,13 @@ static bool DispatchSmgrRecord(XLogReaderState *record, List *expectedTLIs, Time
         xl_smgr_create *xlrec = (xl_smgr_create *)XLogRecGetData(record);
         RelFileNode rnode;
         RelFileNodeCopy(rnode, xlrec->rnode, XLogRecGetBucketId(record));
+        rnode.opt = GetCreateXlogFileNodeOpt(record);
         DispatchToOnePageWorker(record, rnode, expectedTLIs);
     } else if (IsSmgrTruncate(record)) {
         xl_smgr_truncate *xlrec = (xl_smgr_truncate *)XLogRecGetData(record);
         RelFileNode rnode;
         RelFileNodeCopy(rnode, xlrec->rnode, XLogRecGetBucketId(record));
+        rnode.opt = GetTruncateXlogFileNodeOpt(record);
         uint32 id = GetSlotId(rnode, 0, 0, GetBatchCount());
         AddSlotToPLSet(id);
 
