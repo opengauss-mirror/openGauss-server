@@ -3274,6 +3274,9 @@ void EvalPlanQualFetchRowMarksUHeap(EPQState *epqstate)
             elog(ERROR, "EvalPlanQual doesn't support locking rowmarks");
         }
 
+        if (epqstate->estate->es_result_relation_info->ri_RangeTableIndex == erm->rti) {
+            continue;
+        }
         /* clear any leftover test tuple for this rel */
         slot = EvalPlanQualUSlot(epqstate, erm->relation, erm->rti);
         ExecClearTuple(slot);
@@ -3428,6 +3431,9 @@ void EvalPlanQualFetchRowMarks(EPQState *epqstate)
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("EvalPlanQual doesn't support locking rowmarks")));
         }
 
+        if (epqstate->estate->es_result_relation_info->ri_RangeTableIndex == erm->rti) {
+            continue;
+        }
         /* clear any leftover test tuple for this rel */
         EvalPlanQualSetTuple(epqstate, erm->rti, NULL);
 
@@ -3567,7 +3573,18 @@ void EvalPlanQualFetchRowMarks(EPQState *epqstate)
 TupleTableSlot *EvalPlanQualNext(EPQState *epqstate)
 {
     MemoryContext old_context = MemoryContextSwitchTo(epqstate->estate->es_query_cxt);
-    TupleTableSlot *slot = FetchPlanSlot(epqstate->planstate, epqstate->projInfos);
+    int resultRelation = epqstate->estate->result_rel_index;
+    ExprContext* origExprContext = NULL;
+
+    TupleTableSlot *slot = ExecProcNode(epqstate->planstate);
+    /* for multiple modify, fetch the current read slot corresponding to the result relation. */
+    if (resultRelation > 0) {
+        origExprContext = epqstate->projInfos[resultRelation]->pi_exprContext;
+        epqstate->projInfos[resultRelation]->pi_exprContext = epqstate->planstate->ps_ExprContext;
+
+        slot = ExecProject(epqstate->projInfos[resultRelation], NULL);
+        epqstate->projInfos[resultRelation]->pi_exprContext = origExprContext;
+    }
     (void)MemoryContextSwitchTo(old_context);
 
     return slot;
@@ -3610,6 +3627,8 @@ void EvalPlanQualBegin(EPQState *epqstate, EState *parentestate, bool isUHeap)
          * first ExecProcNode will take care of actually doing the rescan.
          */
         planstate->chgParam = bms_add_member(planstate->chgParam, epqstate->epqParam);
+        estate->result_rel_index = parentestate->result_rel_index;
+        estate->es_result_relation_info = parentestate->es_result_relation_info;
     }
 }
 
@@ -3739,6 +3758,7 @@ static void EvalPlanQualStart(EPQState *epqstate, EState *parentestate, Plan *pl
      * and leaves us ready to start processing tuples.
      */
     epqstate->planstate = ExecInitNode(planTree, estate, 0);
+    estate->es_result_relation_info = parentestate->es_result_relation_info;
 
     (void)MemoryContextSwitchTo(old_context);
 }

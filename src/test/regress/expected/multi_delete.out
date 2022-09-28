@@ -251,7 +251,7 @@ explain(verbose) delete/*+nestloop(a b)*/ from t_t_mutil_t1 a,t_t_mutil_t2 b whe
 --------------------------------------------------------------------------------------------
  Delete on MULTI-RELATION  (cost=0.00..69341.37 rows=23091 width=12)
    ->  Nested Loop  (cost=0.00..69341.37 rows=23091 width=12)
-         Output: a.ctid
+         Output: a.ctid, a.ctid, b.ctid
          Join Filter: (a.col2 = b.col2)
          ->  Seq Scan on public.t_t_mutil_t1 a  (cost=0.00..31.49 rows=2149 width=10)
                Output: a.ctid, a.col2
@@ -266,7 +266,7 @@ explain(verbose) delete/*+hashjoin(a b)*/ from t_t_mutil_t1 a,t_t_mutil_t2 b whe
 --------------------------------------------------------------------------------------------
  Delete on MULTI-RELATION  (cost=58.35..355.67 rows=23091 width=12)
    ->  Hash Join  (cost=58.35..355.67 rows=23091 distinct=[200, 200] width=12)
-         Output: a.ctid
+         Output: a.ctid, a.ctid, b.ctid
          Hash Cond: (a.col2 = b.col2)
          ->  Seq Scan on public.t_t_mutil_t1 a  (cost=0.00..31.49 rows=2149 width=10)
                Output: a.ctid, a.col2
@@ -281,7 +281,7 @@ explain(verbose) delete/*+mergejoin(a b)*/ from t_t_mutil_t1 a,t_t_mutil_t2 b wh
 --------------------------------------------------------------------------------------------
  Delete on MULTI-RELATION  (cost=300.86..657.97 rows=23091 width=12)
    ->  Merge Join  (cost=300.86..657.97 rows=23091 width=12)
-         Output: a.ctid
+         Output: a.ctid, a.ctid, b.ctid
          Merge Cond: (a.col2 = b.col2)
          ->  Sort  (cost=150.43..155.80 rows=2149 width=10)
                Output: a.ctid, a.col2

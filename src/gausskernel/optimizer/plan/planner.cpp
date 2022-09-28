@@ -4977,7 +4977,9 @@ static void preprocess_rowmarks(PlannerInfo* root)
         PlanRowMark* newrc = NULL;
 
         i++;
-        if (!bms_is_member(i, rels))
+        if (rte->rtekind == RTE_JOIN || rte->rtekind == RTE_REMOTE_DUMMY)
+            continue;
+        if (!bms_is_member(i, rels) && list_length(parse->resultRelations) <= 1)
             continue;
 
         newrc = makeNode(PlanRowMark);
