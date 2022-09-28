@@ -5621,7 +5621,7 @@ static void ProcessDemoteRequest(void)
 
                 if (g_instance.pid_cxt.UndoLauncherPID != 0)
                     signal_child(g_instance.pid_cxt.UndoLauncherPID, SIGTERM);
-#if !defined(ENABLE_MULTIPLE_NODES) && !defined(ENABLE_LITE_MODE)
+#ifndef ENABLE_MULTIPLE_NODES
                 if (g_instance.pid_cxt.ApplyLauncerPID != 0)
                     signal_child(g_instance.pid_cxt.ApplyLauncerPID, SIGTERM);
 #endif
