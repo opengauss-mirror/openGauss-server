@@ -1059,7 +1059,11 @@ static void fix_assign_targetlists(ModifyTable* plan, Plan* subplan, List* resul
         int new_resno = 1;
         foreach (lctl, subplan->targetlist) {
             TargetEntry* tle = (TargetEntry*)lfirst(lctl);
-            if (rtindex == tle->rtindex || tle->rtindex == 0) {
+            if (tle->rtindex == 0) {
+                tle = (TargetEntry*)copyObject((void*)tle);
+                tle->resno = new_resno++;
+                temp[i] = lappend(temp[i], tle);
+            } else if (rtindex == tle->rtindex) {
                 tle->resno = new_resno++;
                 temp[i] = lappend(temp[i], tle);
             }

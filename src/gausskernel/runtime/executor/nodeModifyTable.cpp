@@ -3473,7 +3473,8 @@ TupleTableSlot* ExecModifyTable(ModifyTableState* node)
             }
         }
 
-        EvalPlanQualSetSlot(&node->mt_epqstate, plan_slot);
+        if (estate->result_rel_index == 0)
+            EvalPlanQualSetSlot(&node->mt_epqstate, plan_slot);
         slot = plan_slot;
         slot->tts_tupleDescriptor->tdTableAmType = result_rel_info->ri_RelationDesc->rd_tam_type;
 

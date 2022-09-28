@@ -542,5 +542,15 @@ create table settest01(id int,rowid number);
 insert into settest01 values(3,5);
 update settest01 a,settest07 b set b.c2=4 where a.id>b.c1;
 
+drop table if exists t_t_mutil_t1;
+drop table if exists t_t_mutil_t2;
+drop table if exists t_t_mutil_t3;
+create table t_t_mutil_t1(col1 int,col2 int);
+create table t_t_mutil_t2(col1 int,col2 int,col3 int);
+create table t_t_mutil_t3(col1 int,col2 int);
+insert into t_t_mutil_t1 values(1,1),(1,1);
+insert into t_t_mutil_t2 values(1,1),(1,2);
+insert into t_t_mutil_t3 values(1,1),(1,3);
+update t_t_mutil_t1 a,t_t_mutil_t2 b,t_t_mutil_t3 c set b.col2=5,a.col2=4 where a.col1=b.col1 and b.col1=c.col1;
 \c regression
 drop database multiupdate;
