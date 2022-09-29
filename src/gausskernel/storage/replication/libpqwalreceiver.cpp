@@ -1355,10 +1355,12 @@ bool libpqrcv_receive(int timeout, unsigned char *type, char **buffer, int *len)
 
             /* Verify that there are no more results */
             res = PQgetResult(t_thrd.libwalreceiver_cxt.streamConn);
-            if (res != NULL)
+            if (res != NULL) {
+                PQclear(res);
                 ereport(ERROR,
                         (errmsg("unexpected result after CommandComplete: %s",
                                 PQerrorMessage(t_thrd.libwalreceiver_cxt.streamConn))));
+            }
             *len = -1;
             return false;
         }
