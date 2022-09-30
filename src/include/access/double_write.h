@@ -350,6 +350,5 @@ extern void dw_remove_file(const char* file_name);
 extern int dw_open_file(const char* file_name);
 extern void dw_upgrade_renable_double_write();
 
-extern int g_stat_file_id;
 
 #endif /* DOUBLE_WRITE_H */
