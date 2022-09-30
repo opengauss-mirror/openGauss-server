@@ -898,6 +898,7 @@ static void knl_u_stat_init(knl_u_stat_context* stat_cxt)
     stat_cxt->trackedBytes = 0;
     stat_cxt->hotkeySessContext = NULL;
     stat_cxt->hotkeyCandidates = NULL;
+    stat_cxt->stat_file_id = -1;
 }
 
 static void knl_u_storage_init(knl_u_storage_context* storage_cxt)

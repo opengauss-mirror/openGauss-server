@@ -1702,7 +1702,7 @@ typedef struct knl_u_stat_context {
     struct PgBackendStatus* localBackendStatusTable;
 
     int localNumBackends;
-
+    int stat_file_id;
     /*
      * Cluster wide statistics, kept in the stats collector.
      * Contains statistics that are not collected per database
@@ -1737,6 +1737,7 @@ typedef struct knl_u_stat_context {
 
     List* hotkeyCandidates;
     MemoryContext hotkeySessContext;
+    
 } knl_u_stat_context;
 
 #define MAX_LOCKMETHOD 2
