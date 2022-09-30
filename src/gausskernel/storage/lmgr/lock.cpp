@@ -754,30 +754,8 @@ static LockAcquireResult LockAcquireExtendedXC(const LOCKTAG *locktag, LOCKMODE 
      */
     if (lockmode >= AccessExclusiveLock && locktag->locktag_type == LOCKTAG_RELATION && !RecoveryInProgress() &&
         XLogStandbyInfoActive()) {
-        /*
-         * In a scenario like:
-         *
-         *	1, openGauss run vacuum full or autovacuum pg_class, insert AccessExclusiveLock xlog.
-         *	2, datanode crash, vacuum full abort.
-         *	3, datanode restart in pending mode, start recovery.
-         *	4, startup thread acquire pg_class's AccessExclusiveLock.
-         *	5, startup thread complete recovery and wait for notify.
-         *	6, cm agent connect datanode, need to init relcache file.
-         *	7, cm agent connect want to acquire pg_class's AccessShareLock,
-         *		but the AccessExclusiveLock lock is hold by startup thread.
-         *	8, dead lock, datanode hang.
-         *
-         *	Other system tables like pg_attribute/pg_type.. also have such problem.
-         *
-         *	To solve this problem, we don't insert AccessExclusiveLock xlog for system tables.
-         *	This change may cause exception when primary run vacuum full system table while
-         *	standby access the system table at the same time.
-         *
-         */
-        if (locktag->locktag_field2 > FirstNormalObjectId) {
-            LogAccessExclusiveLockPrepare();
-            log_lock = true;
-        }
+        LogAccessExclusiveLockPrepare();
+        log_lock = true;
     }
 
     /*
