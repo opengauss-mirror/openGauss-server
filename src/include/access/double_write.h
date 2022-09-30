@@ -359,6 +359,5 @@ extern void dw_blocked_for_snapshot();
 extern void dw_released_after_snapshot();
 extern bool is_dw_snapshot_blocked();
 
-extern int g_stat_file_id;
 
 #endif /* DOUBLE_WRITE_H */
