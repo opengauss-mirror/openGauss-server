@@ -602,7 +602,7 @@ select * from test1;
 set @v6 := 'drop table test2';
 -- error
 prepare stmt6 as @v6;
-ERROR:  the statement in prepate is not supported.
+ERROR:  the statement in prepare is not supported.
 -- multiStmt
 set @v7 := 'select 1; select 2;';
 -- error
