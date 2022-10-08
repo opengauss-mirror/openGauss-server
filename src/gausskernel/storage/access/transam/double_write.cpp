@@ -54,7 +54,7 @@ Datum dw_get_node_name()
 
 Datum dw_get_file_id()
 {
-    return UInt64GetDatum((int64)g_stat_file_id);
+    return UInt64GetDatum((int64)u_sess->stat_cxt.stat_file_id);
 }
 
 Datum dw_get_dw_number()
@@ -62,7 +62,7 @@ Datum dw_get_dw_number()
     dw_batch_file_context *batch_file_cxt;
 
     if (dw_enabled()) {
-        batch_file_cxt = &g_instance.dw_batch_cxt.batch_file_cxts[g_stat_file_id];
+        batch_file_cxt = &g_instance.dw_batch_cxt.batch_file_cxts[u_sess->stat_cxt.stat_file_id];
         return UInt64GetDatum((uint64)batch_file_cxt->file_head->head.dwn);
     }
 
@@ -74,7 +74,7 @@ Datum dw_get_start_page()
     dw_batch_file_context *batch_file_cxt;
 
     if (dw_enabled()) {
-        batch_file_cxt = &g_instance.dw_batch_cxt.batch_file_cxts[g_stat_file_id];
+        batch_file_cxt = &g_instance.dw_batch_cxt.batch_file_cxts[u_sess->stat_cxt.stat_file_id];
         return UInt64GetDatum((uint64)batch_file_cxt->file_head->start);
     }
 
@@ -86,7 +86,7 @@ Datum dw_get_file_trunc_num()
     dw_batch_file_context *batch_file_cxt;
 
     if (dw_enabled()) {
-        batch_file_cxt = &g_instance.dw_batch_cxt.batch_file_cxts[g_stat_file_id];
+        batch_file_cxt = &g_instance.dw_batch_cxt.batch_file_cxts[u_sess->stat_cxt.stat_file_id];
         return UInt64GetDatum(batch_file_cxt->batch_stat_info.file_trunc_num);
     }
 
@@ -98,7 +98,7 @@ Datum dw_get_file_reset_num()
     dw_batch_file_context *batch_file_cxt;
 
     if (dw_enabled()) {
-        batch_file_cxt = &g_instance.dw_batch_cxt.batch_file_cxts[g_stat_file_id];
+        batch_file_cxt = &g_instance.dw_batch_cxt.batch_file_cxts[u_sess->stat_cxt.stat_file_id];
         return UInt64GetDatum(batch_file_cxt->batch_stat_info.file_reset_num);
     }
 
@@ -110,7 +110,7 @@ Datum dw_get_total_writes()
     dw_batch_file_context *batch_file_cxt;
 
     if (dw_enabled()) {
-        batch_file_cxt = &g_instance.dw_batch_cxt.batch_file_cxts[g_stat_file_id];
+        batch_file_cxt = &g_instance.dw_batch_cxt.batch_file_cxts[u_sess->stat_cxt.stat_file_id];
         return UInt64GetDatum(batch_file_cxt->batch_stat_info.total_writes);
     }
 
@@ -122,7 +122,7 @@ Datum dw_get_low_threshold_writes()
     dw_batch_file_context *batch_file_cxt;
 
     if (dw_enabled()) {
-        batch_file_cxt = &g_instance.dw_batch_cxt.batch_file_cxts[g_stat_file_id];
+        batch_file_cxt = &g_instance.dw_batch_cxt.batch_file_cxts[u_sess->stat_cxt.stat_file_id];
         return UInt64GetDatum(batch_file_cxt->batch_stat_info.low_threshold_writes);
     }
 
@@ -134,7 +134,7 @@ Datum dw_get_high_threshold_writes()
     dw_batch_file_context *batch_file_cxt;
 
     if (dw_enabled()) {
-        batch_file_cxt = &g_instance.dw_batch_cxt.batch_file_cxts[g_stat_file_id];
+        batch_file_cxt = &g_instance.dw_batch_cxt.batch_file_cxts[u_sess->stat_cxt.stat_file_id];
         return UInt64GetDatum(batch_file_cxt->batch_stat_info.high_threshold_writes);
     }
 
@@ -146,7 +146,7 @@ Datum dw_get_total_pages()
     dw_batch_file_context *batch_file_cxt;
 
     if (dw_enabled()) {
-        batch_file_cxt = &g_instance.dw_batch_cxt.batch_file_cxts[g_stat_file_id];
+        batch_file_cxt = &g_instance.dw_batch_cxt.batch_file_cxts[u_sess->stat_cxt.stat_file_id];
         return UInt64GetDatum(batch_file_cxt->batch_stat_info.total_pages);
     }
 
@@ -159,7 +159,7 @@ Datum dw_get_low_threshold_pages()
 
 
     if (dw_enabled()) {
-        batch_file_cxt = &g_instance.dw_batch_cxt.batch_file_cxts[g_stat_file_id];
+        batch_file_cxt = &g_instance.dw_batch_cxt.batch_file_cxts[u_sess->stat_cxt.stat_file_id];
         return UInt64GetDatum(batch_file_cxt->batch_stat_info.low_threshold_pages);
     }
 
@@ -171,7 +171,7 @@ Datum dw_get_high_threshold_pages()
     dw_batch_file_context *batch_file_cxt;
 
     if (dw_enabled()) {
-        batch_file_cxt = &g_instance.dw_batch_cxt.batch_file_cxts[g_stat_file_id];
+        batch_file_cxt = &g_instance.dw_batch_cxt.batch_file_cxts[u_sess->stat_cxt.stat_file_id];
         return UInt64GetDatum(batch_file_cxt->batch_stat_info.high_threshold_pages);
     }
 

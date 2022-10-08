@@ -287,7 +287,6 @@ extern Datum pg_autovac_timeout(PG_FUNCTION_ARGS);
 static int64 pgxc_exec_autoanalyze_timeout(Oid relOid, int32 coordnum, char* funcname);
 extern bool allow_autoanalyze(HeapTuple tuple);
 
-int g_stat_file_id = -1;
 
 /* the size of GaussDB_expr.ir */
 #define IR_FILE_SIZE 29800
@@ -13785,7 +13784,7 @@ static void gs_stat_read_dw_batch(Tuplestorestate *tupStore, TupleDesc tupDesc)
     bool nulls[col_num];
 
     for (i = 0; i < row_num; i++) {
-        g_stat_file_id = i;
+        u_sess->stat_cxt.stat_file_id = i;
 	
         rc = memset_s(values, sizeof(values), 0, sizeof(values));
         securec_check(rc, "\0", "\0");
@@ -13799,8 +13798,7 @@ static void gs_stat_read_dw_batch(Tuplestorestate *tupStore, TupleDesc tupDesc)
 		
         tuplestore_putvalues(tupStore, tupDesc, values, nulls);
     }
-	
-    g_stat_file_id = -1;
+    u_sess->stat_cxt.stat_file_id = -1;
 }
 
 Datum local_double_write_stat(PG_FUNCTION_ARGS)
