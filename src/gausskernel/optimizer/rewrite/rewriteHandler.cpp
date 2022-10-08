@@ -3675,7 +3675,7 @@ List* QueryRewritePrepareStmt(Query* parsetree)
     if (value->consttype != TEXTOID) {
         ereport(ERROR,
             (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
-                errmsg("userdefined variable in prepate statement must be text type.")));
+                errmsg("userdefined variable in prepare statement must be text type.")));
     }
 
     sqlstr = TextDatumGetCString(value->constvalue);
@@ -3699,7 +3699,7 @@ List* QueryRewritePrepareStmt(Query* parsetree)
         default:
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("the statement in prepate is not supported.")));
+                    errmsg("the statement in prepare is not supported.")));
             break;
     }
 
