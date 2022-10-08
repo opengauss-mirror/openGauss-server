@@ -10724,9 +10724,9 @@ CreateTrigStmt:
 					{
 						parser_yyerror("syntax error found");
 					}
-					if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT && $3 != NULL)
+					if ($3 != NULL)
 					{
-						parser_yyerror("only support definer in mysql compatibility database");
+						parser_yyerror("only support definer in B compatibility database and B syntax");
 					}
 					CreateTrigStmt *n = makeNode(CreateTrigStmt);
 					n->definer = $3;
@@ -10788,7 +10788,7 @@ CreateTrigStmt:
 				{
 					if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT || $2 != false)
 					{
-						parser_yyerror("only support definer, trigger_order, subprogram_body in mysql compatibility database");
+						parser_yyerror("only support definer, trigger_order, subprogram_body in B compatibility database");
 					}
 					CreateTrigStmt *n = makeNode(CreateTrigStmt);
 					if ($2 != false)
@@ -10826,7 +10826,7 @@ CreateTrigStmt:
 				{
 					if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT)
 					{
-						parser_yyerror("only support definer, if not exists, trigger_order, subprogram_body in mysql compatibility database");
+						parser_yyerror("only support definer, if not exists, trigger_order, subprogram_body in B compatibility database");
 					}
 					CreateTrigStmt *n = makeNode(CreateTrigStmt);
 					if ($2 != false)

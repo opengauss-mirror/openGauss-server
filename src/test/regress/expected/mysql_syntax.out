@@ -49,6 +49,16 @@ begin
     insert into food(id, foodtype, remark, time_flag) values (1,'ice cream', 'sdsdsdsd', now());
 end;
 /
+--different type trigger follows|precedes
+create trigger animal_trigger2
+before insert on animals
+for each row
+follows animal_trigger1
+begin
+    insert into food(id, foodtype, remark, time_flag) values (2,'chocolate', 'sdsdsdsd', now());
+end;
+/
+ERROR:  trigger "animal_trigger1" type is not same as current trigger
 create trigger animal_trigger2
 after insert on animals
 for each row
@@ -153,5 +163,30 @@ end;
 NOTICE:  trigger "animal_trigger1" for relation "animals" already exists,skipping
 drop table food;
 drop table animals;
+DROP TABLE t_trigger cascade;
+ERROR:  table "t_trigger" does not exist
+CREATE TABLE t_trigger(
+id int primary key,
+name varchar(20) not null
+)partition by hash(id)
+(partition p1 ,
+partition p2,
+partition p3);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_trigger_pkey" for table "t_trigger"
+INSERT INTO t_trigger values(1,'liuyi');
+INSERT INTO t_trigger values(2,'chener');
+DROP TABLE t_func_trigger;
+ERROR:  table "t_func_trigger" does not exist
+CREATE TABLE t_func_trigger(rep text);
+create user vbadmin password 'Aa@111111';
+CREATE definer=vbadmin TRIGGER trigger_insert
+AFTER insert
+ON t_trigger
+FOR EACH ROW
+BEGIN 
+insert into t_func_trigger(rep) values('after insert');END;
+/
+drop trigger trigger_insert on t_trigger;
+drop user vbadmin;
 \c regression
 drop database db_mysql;

@@ -526,9 +526,9 @@ Oid CreateTrigger(CreateTrigStmt* stmt, const char* queryString, Oid relOid, Oid
             ereport(ERROR, (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
                     errmsg("trigger function body has syntax error")));
         }
-        ret = memcpy_s(bodySrcTemp, bodySrcTempSize, stmt->funcSource->bodySrc, last_end - 1);
+        ret = memcpy_s(bodySrcTemp, bodySrcTempSize, stmt->funcSource->bodySrc, last_end);
         securec_check_c(ret, "\0", "\0");
-        bodySrcTemp[last_end - 1] = '\0';
+        bodySrcTemp[last_end] = '\0';
         ret = strcat_s(bodySrcTemp, bodySrcTempSize, inlineProcessDesc);
         securec_check_c(ret, "\0", "\0");
         n->options = lappend(n->options, makeDefElem("as", (Node*)list_make1(makeString(bodySrcTemp))));
@@ -683,8 +683,14 @@ Oid CreateTrigger(CreateTrigStmt* stmt, const char* queryString, Oid relOid, Oid
                 while (HeapTupleIsValid(tuple = systable_getnext(tgscan))) {
                     Form_pg_trigger pg_trigger = (Form_pg_trigger)GETSTRUCT(tuple);
                     if (namestrcmp(&(pg_trigger->tgname), needTestName) == 0) {
-                        is_find = true;
-                        break;
+                        if (pg_trigger->tgtype == tgtype) {
+                            is_find = true;
+                            break;
+                        } else {
+                            ereport(ERROR, (errcode(ERRCODE_DUPLICATE_OBJECT),
+                                errmsg("trigger \"%s\" type is not same as current trigger",
+                                    needTestName)));
+                        }
                     }
                 }
                 systable_endscan(tgscan);
