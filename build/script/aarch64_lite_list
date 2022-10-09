@@ -924,4 +924,4 @@
 ./include/pqcomm.h
 ./include/pqexpbuffer.h
 [version]
-3.0.1
+3.0.2
