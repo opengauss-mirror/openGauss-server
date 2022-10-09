@@ -1894,3 +1894,13 @@ Datum gs_is_recycle_object(PG_FUNCTION_ARGS)
     result = TrIsRefRbObjectEx(classid, objid, NameStr(*objname));
     PG_RETURN_BOOL(result);
 }
+
+Datum gs_is_recycle_obj(PG_FUNCTION_ARGS)
+{
+    Oid classid = PG_GETARG_OID(0);
+    Oid objid = PG_GETARG_OID(1);
+    Name objname = PG_GETARG_NAME(2);
+    bool result = false;
+    result = TrIsRefRbObjectEx(classid, objid, NameStr(*objname));
+    PG_RETURN_BOOL(result);
+}
