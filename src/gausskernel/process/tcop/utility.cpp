@@ -8624,7 +8624,7 @@ const char* CreateCommandTag(Node* parse_tree)
 
         case T_VariableMultiSetStmt:
             {
-                tag = "Set";
+                tag = "SET";
             } break;
 
         case T_VariableShowStmt:

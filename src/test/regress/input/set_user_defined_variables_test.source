@@ -454,6 +454,68 @@ ROLLBACK;
 show client_encoding;
 select @v1;
 
+\c test_set
+drop table if exists t1;
+create table t1(a int);
+
+create or replace function tri_func1() returns trigger as
+$$
+declare
+begin
+    set @num = @num + NEW.a;
+    return NEW;
+end
+$$ LANGUAGE PLPGSQL;
+
+create trigger tri_insert_before before insert on t1 for each row execute procedure tri_func1();
+set @num := 0;
+select @num;
+insert into t1 values(100);
+select @num;
+insert into t1 values(200);
+select @num;
+
+drop trigger tri_insert_before on t1;
+
+create trigger tri_update_before before update on t1 for each row execute procedure tri_func1();
+set @num := 0;
+select @num;
+update t1 set a = 1000 where a = 100;
+select @num;
+update t1 set a = 2000 where a = 200;
+select @num;
+
+drop trigger tri_update_before on t1;
+
+create or replace function tri_func2() returns trigger as
+$$
+declare
+begin
+    set @num = @num + OLD.a;
+    return OLD;
+end
+$$ LANGUAGE PLPGSQL;
+
+create trigger tri_update_after after update on t1 for each row execute procedure tri_func2();
+set @num := 0;
+select @num;
+update t1 set a = 100 where a = 1000;
+select @num;
+update t1 set a = 200 where a = 2000;
+select @num;
+
+drop trigger tri_update_after on t1;
+
+create trigger tri_delete_after after delete on t1 for each row execute procedure tri_func2();
+set @num := 0;
+select @num;
+delete t1 where a = 100;
+select @num;
+delete t1 where a = 200;
+select @num;
+
+drop trigger tri_delete_after on t1;
+
 -- exception scenario
 \c test_set
 set @v2 := 2;
