@@ -8431,7 +8431,7 @@ void XactCleanExceptionSubTransaction(SubTransactionId head)
             AtSubAbort_Portals(s->subTransactionId, s->parent->subTransactionId,
                                s->curTransactionOwner, s->parent->curTransactionOwner, true);
 
-            CallSubXactCallbacks(SUBXACT_EVENT_ABORT_SUB, s->subTransactionId, s->parent->subTransactionId);
+            CallSubXactCallbacks(SUBXACT_EVENT_CLEANUP_SUB, s->subTransactionId, s->parent->subTransactionId);
 
             ResourceOwnerRelease(s->curTransactionOwner, RESOURCE_RELEASE_BEFORE_LOCKS, false, false);
             ResourceOwnerRelease(s->curTransactionOwner, RESOURCE_RELEASE_AFTER_LOCKS, false, false);
