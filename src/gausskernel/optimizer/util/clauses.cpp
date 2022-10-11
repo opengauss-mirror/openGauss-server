@@ -2414,7 +2414,13 @@ Node* eval_const_expressions_mutator(Node* node, eval_const_expressions_context*
             /* Look to see if we've been given a value for this Param */
             if (param->paramkind == PARAM_EXTERN && context->boundParams != NULL && param->paramid > 0 &&
                 param->paramid <= context->boundParams->numParams) {
-                ParamExternData* prm = &context->boundParams->params[param->paramid - 1];
+                ParamListInfo paramInfo = context->boundParams;
+                ParamExternData* prm = &paramInfo->params[param->paramid - 1];
+
+                /* give hook a chance in case parameter in dynamic */
+                if (!OidIsValid(prm->ptype) && paramInfo->paramFetch != NULL) {
+                    (*paramInfo->paramFetch)(paramInfo, param->paramid);
+                }
 
                 if (OidIsValid(prm->ptype)) {
                     /* OK to substitute parameter value? */

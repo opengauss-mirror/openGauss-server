@@ -1625,6 +1625,9 @@ static void pgaudit_ProcessUtility(Node* parsetree, const char* queryString, Par
             VariableSetStmt* variablesetstmt = (VariableSetStmt*)(parsetree);
             pgaudit_process_set_parameter(variablesetstmt->name, queryString);
         } break;
+        case T_VariableMultiSetStmt: {
+            pgaudit_process_set_parameter("set stmt", queryString);
+        } break;
 #ifndef ENABLE_MULTIPLE_NODES
         case T_AlterSystemStmt: {
             AlterSystemStmt* altersystemstmt = (AlterSystemStmt*)(parsetree);
