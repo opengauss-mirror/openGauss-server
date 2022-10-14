@@ -88,12 +88,12 @@ static BlockNumber ComputeTheTotalPages(Relation relation, int nonzeroPartitionN
 
     if (nonzeroPartitionNumber > 0 && nonzeroPartitionNumber < pnumber) {
         if (notAvailPartitionCnt != 0) {
-            totalPages = partPages * ((nonzeroPartitionNumber + notAvailPartitionCnt) / nonzeroPartitionNumber);
+            totalPages = partPages * ((nonzeroPartitionNumber + notAvailPartitionCnt) / (double)nonzeroPartitionNumber);
         } else {
             totalPages = partPages;
         }
     } else if (nonzeroPartitionNumber == pnumber) {
-        totalPages = partPages * (totalPartitionNumber / nonzeroPartitionNumber);
+        totalPages = partPages * (totalPartitionNumber / (double)nonzeroPartitionNumber);
     } else if (nonzeroPartitionNumber == 0) {
         totalPages = relation->rd_rel->relpages;
     }
