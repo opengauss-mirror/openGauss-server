@@ -3274,7 +3274,8 @@ void EvalPlanQualFetchRowMarksUHeap(EPQState *epqstate)
             elog(ERROR, "EvalPlanQual doesn't support locking rowmarks");
         }
 
-        if (epqstate->estate->es_result_relation_info->ri_RangeTableIndex == erm->rti) {
+        if (epqstate->estate->es_result_relation_info != NULL &&
+            epqstate->estate->es_result_relation_info->ri_RangeTableIndex == erm->rti) {
             continue;
         }
         /* clear any leftover test tuple for this rel */
@@ -3431,7 +3432,8 @@ void EvalPlanQualFetchRowMarks(EPQState *epqstate)
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("EvalPlanQual doesn't support locking rowmarks")));
         }
 
-        if (epqstate->estate->es_result_relation_info->ri_RangeTableIndex == erm->rti) {
+        if (epqstate->estate->es_result_relation_info != NULL &&
+            epqstate->estate->es_result_relation_info->ri_RangeTableIndex == erm->rti) {
             continue;
         }
         /* clear any leftover test tuple for this rel */
