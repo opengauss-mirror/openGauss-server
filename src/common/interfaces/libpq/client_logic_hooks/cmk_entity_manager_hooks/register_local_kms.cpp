@@ -600,6 +600,7 @@ static CmkemErrCode read_and_decrypt_cmk(const char *key_path, AsymmetricKeyType
 
     ret = read_cmk_plain(key_file_path, ret_key_plain->ustr_val, &ret_key_plain->ustr_len);
     if (ret != CMKEM_SUCCEED) {
+        free_cmkem_ustr_with_erase(ret_key_plain);
         return ret;
     }
 
@@ -758,11 +759,13 @@ static CmkemErrCode encrypt_cek_with_rsa(CmkemUStr *cek_plain, const char *cmk_i
 
     ret_cek_cipher = malloc_cmkem_ustr(MAX_ASYMM_KEY_BUF_LEN);
     if (ret_cek_cipher == NULL) {
+        RSA_free(rsa_cmk_plain);
         return CMKEM_MALLOC_MEM_ERR;
     }
 
     enc_ret = RSA_public_encrypt(cek_plain->ustr_len, cek_plain->ustr_val, ret_cek_cipher->ustr_val, rsa_cmk_plain,
         RSA_PKCS1_OAEP_PADDING);
+    RSA_free(rsa_cmk_plain);
     if (enc_ret == -1) {
         free_cmkem_ustr(ret_cek_cipher);
         return CMKEM_RSA_ENCRYPT_ERR;
