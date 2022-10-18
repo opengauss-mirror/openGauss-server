@@ -694,16 +694,14 @@ Oid CreateTrigger(CreateTrigStmt* stmt, const char* queryString, Oid relOid, Oid
                             needTestName,RelationGetRelationName(rel))));
                 }
             }
+        } else {
+            values[Anum_pg_trigger_tgordername - 1] = DirectFunctionCall1(namein, CStringGetDatum(""));
+            values[Anum_pg_trigger_tgorder - 1] = DirectFunctionCall1(namein, CStringGetDatum(""));
         }
-        else {
-            values[Anum_pg_trigger_tgordername - 1] = NameGetDatum(&(""));
-            values[Anum_pg_trigger_tgorder - 1] = NameGetDatum(&(""));
-        }
-    }
-    else {
-        values[Anum_pg_trigger_tgordername - 1] = NameGetDatum(&(""));
-        values[Anum_pg_trigger_tgorder - 1] = NameGetDatum(&(""));
-        values[Anum_pg_trigger_tgtime - 1] = NameGetDatum(&(""));
+    } else {
+        values[Anum_pg_trigger_tgordername - 1] = DirectFunctionCall1(namein, CStringGetDatum(""));
+        values[Anum_pg_trigger_tgorder - 1] = DirectFunctionCall1(namein, CStringGetDatum(""));
+        values[Anum_pg_trigger_tgtime - 1] = DirectFunctionCall1(namein, CStringGetDatum(""));
     }
     if (stmt->args) {
         ListCell* le = NULL;
