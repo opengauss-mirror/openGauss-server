@@ -2144,6 +2144,7 @@ StreamState* ExecInitStream(Stream* node, EState* estate, int eflags)
             state->tempTupleVec->tupleVector[j] = MakeTupleTableSlot(false);
             ExecSetSlotDescriptor(state->tempTupleVec->tupleVector[j], typeInfo);
         }
+        node->sort = NULL;
     }
 
     state->StreamDeserialize = GetTupleFromConnBuffer;

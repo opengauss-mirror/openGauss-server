@@ -1093,7 +1093,7 @@ bool PreprocessOperator(Node* node, void* context)
 
                         errno_t errorno = EOK;
                         errorno = memcpy_s(node, sizeof(OpExpr), (Node*)newNode, sizeof(OpExpr));
-                        securec_check_c(errorno, "\0", "\0");
+                        securec_check(errorno, "\0", "\0");
                     }
 
                     pfree_ext(newNode);
@@ -1124,21 +1124,21 @@ void check_is_support_recursive_cte(PlannerInfo* root)
 
     /* 1. Installation nodegroup, compute nodegroup, single nodegroup. */
     if (different_nodegroup_count > 2) {
-       securec_check_ss_c(sprintf_rc, "\0", "\0");
+       securec_check_ss(sprintf_rc, "\0", "\0");
        mark_stream_unsupport();
        return;
     }   
 
     /* 2. Installation nodegroup, compute nodegroup. */
     if (different_nodegroup_count == 2 && ng_get_single_node_distribution() == NULL) {
-       securec_check_ss_c(sprintf_rc, "\0", "\0");
+       securec_check_ss(sprintf_rc, "\0", "\0");
        mark_stream_unsupport();
        return;
     }
 
     /* 3. Installation nodegroup, single nodegroup which is used */
     if (different_nodegroup_count == 2 && u_sess->opt_cxt.is_dngather_support == true) {
-       securec_check_ss_c(sprintf_rc, "\0", "\0");
+       securec_check_ss(sprintf_rc, "\0", "\0");
        mark_stream_unsupport();
        return;
     }
@@ -3313,7 +3313,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                         errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
                             NOTPLANSHIPPING_LENGTH,
                             "set-valued function + groupingsets");
-                        securec_check_ss_c(sprintf_rc, "\0", "\0");
+                        securec_check_ss(sprintf_rc, "\0", "\0");
                         mark_stream_unsupport();
                     }
 
@@ -3321,7 +3321,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                         errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
                             NOTPLANSHIPPING_LENGTH,
                             "var in quals doesn't exist in targetlist");
-                        securec_check_ss_c(sprintf_rc, "\0", "\0");
+                        securec_check_ss(sprintf_rc, "\0", "\0");
                         mark_stream_unsupport();
                     }
                 }
@@ -3425,7 +3425,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                         errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
                             NOTPLANSHIPPING_LENGTH,
                             "\"set-valued expression in qual/targetlist + two-level Groupagg\"");
-                        securec_check_ss_c(sprintf_rc, "\0", "\0");
+                        securec_check_ss(sprintf_rc, "\0", "\0");
                         mark_stream_unsupport();
                     }
 
@@ -3573,7 +3573,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                             errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
                                 NOTPLANSHIPPING_LENGTH,
                                 "\"Count(Distinct) + Group by\" on redistribution unsupported data type");
-                            securec_check_ss_c(sprintf_rc, "\0", "\0");
+                            securec_check_ss(sprintf_rc, "\0", "\0");
                             mark_stream_unsupport();
                         }
                         need_sort_for_grouping = true;
@@ -3608,7 +3608,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                                 errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
                                     NOTPLANSHIPPING_LENGTH,
                                     "multi count(distinct) or agg which need order can not ship.");
-                                securec_check_ss_c(sprintf_rc, "\0", "\0");
+                                securec_check_ss(sprintf_rc, "\0", "\0");
                                 mark_stream_unsupport();
                             }
                         } else if (agg_costs.exprAggs != NIL) {
@@ -3625,7 +3625,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                                 errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
                                     NOTPLANSHIPPING_LENGTH,
                                     "\"Count(Distinct)\" on redistribution unsupported data type");
-                                securec_check_ss_c(sprintf_rc, "\0", "\0");
+                                securec_check_ss(sprintf_rc, "\0", "\0");
                                 mark_stream_unsupport();
                             } else if (result_plan->dop > 1) {
                                 result_plan =
@@ -3643,7 +3643,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                     errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
                         NOTPLANSHIPPING_LENGTH,
                         "\"Aggregate on polymorphic argument type \"");
-                    securec_check_ss_c(sprintf_rc, "\0", "\0");
+                    securec_check_ss(sprintf_rc, "\0", "\0");
                     mark_stream_unsupport();
                 }
 
@@ -3653,7 +3653,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                     errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
                         NOTPLANSHIPPING_LENGTH,
                         "\"Subplan in having qual + two-level Groupagg\"");
-                    securec_check_ss_c(sprintf_rc, "\0", "\0");
+                    securec_check_ss(sprintf_rc, "\0", "\0");
                     mark_stream_unsupport();
                 }
 
@@ -3662,7 +3662,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                     errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
                         NOTPLANSHIPPING_LENGTH,
                         "\"set-valued expression in qual/targetlist + two-level Groupagg\"");
-                    securec_check_ss_c(sprintf_rc, "\0", "\0");
+                    securec_check_ss(sprintf_rc, "\0", "\0");
                     mark_stream_unsupport();
                 }
 
@@ -3702,7 +3702,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                         errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
                             NOTPLANSHIPPING_LENGTH,
                             "\"set-valued expression in qual/targetlist + two-level Groupagg\"");
-                        securec_check_ss_c(sprintf_rc, "\0", "\0");
+                        securec_check_ss(sprintf_rc, "\0", "\0");
                         mark_stream_unsupport();
                     }
 
@@ -3773,7 +3773,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                         errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
                             NOTPLANSHIPPING_LENGTH,
                             "\"set-valued expression in qual/targetlist + two-level Groupagg\"");
-                        securec_check_ss_c(sprintf_rc, "\0", "\0");
+                        securec_check_ss(sprintf_rc, "\0", "\0");
                         mark_stream_unsupport();
                     }
 
@@ -4107,7 +4107,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                     errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
                         NOTPLANSHIPPING_LENGTH,
                         "\"set-valued expression in qual/targetlist + two-level distinct\"");
-                    securec_check_ss_c(sprintf_rc, "\0", "\0");
+                    securec_check_ss(sprintf_rc, "\0", "\0");
                     mark_stream_unsupport();
                 }
 
@@ -4638,7 +4638,7 @@ static Plan* build_groupingsets_plan(PlannerInfo* root, Query* parse, List** tli
                     errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
                         NOTPLANSHIPPING_LENGTH,
                         "\"Count(Distinct)\" on redistribution unsupported data type");
-                    securec_check_ss_c(sprintf_rc, "\0", "\0");
+                    securec_check_ss(sprintf_rc, "\0", "\0");
                     mark_stream_unsupport();
                 }
             }
@@ -4661,7 +4661,7 @@ static Plan* build_groupingsets_plan(PlannerInfo* root, Query* parse, List** tli
                 errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
                     NOTPLANSHIPPING_LENGTH,
                     "\"String_agg\" or \"Array_agg\" or \"Listagg\" + \"Grouping sets\"");
-                securec_check_ss_c(sprintf_rc, "\0", "\0");
+                securec_check_ss(sprintf_rc, "\0", "\0");
                 mark_stream_unsupport();
             }
         }
@@ -5452,7 +5452,7 @@ List* extract_rollup_sets(List* groupingSets)
                 adjacency[i] = (short*)palloc((n_adj + 1) * sizeof(short));
                 errno_t errorno =
                     memcpy_s(adjacency[i], (n_adj + 1) * sizeof(short), adjacency_buf, (n_adj + 1) * sizeof(short));
-                securec_check_c(errorno, "\0", "\0");
+                securec_check(errorno, "\0", "\0");
             } else
                 adjacency[i] = NULL;
 
@@ -6426,7 +6426,7 @@ static bool choose_hashed_grouping(PlannerInfo* root, double tuple_fraction, dou
                     errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
                         NOTPLANSHIPPING_LENGTH,
                         "\"Count(Distinct)\" on redistribution unsupported data type");
-                    securec_check_ss_c(sprintf_rc, "\0", "\0");
+                    securec_check_ss(sprintf_rc, "\0", "\0");
                     mark_stream_unsupport();
                 }
             }
@@ -11151,12 +11151,12 @@ static Plan* generate_hashagg_plan(PlannerInfo* root, Plan* plan, List* final_li
                     errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
                         NOTPLANSHIPPING_LENGTH,
                         "\"Subplan in having qual + Group by\" on redistribution unsupported data type");
-                    securec_check_ss_c(sprintf_rc, "\0", "\0");
+                    securec_check_ss(sprintf_rc, "\0", "\0");
                 } else {
                     errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
                         NOTPLANSHIPPING_LENGTH,
                         "\"String_agg/Array_agg/Listagg + Group by\" on redistribution unsupported data type");
-                    securec_check_ss_c(sprintf_rc, "\0", "\0");
+                    securec_check_ss(sprintf_rc, "\0", "\0");
                 }
                 mark_stream_unsupport();
                 *needs_stream = false;
@@ -11730,7 +11730,7 @@ static Plan* get_count_distinct_partial_plan(PlannerInfo* root, Plan* result_pla
         errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
             NOTPLANSHIPPING_LENGTH,
             "\"Subplan in having qual + Count(distinct)\"");
-        securec_check_ss_c(sprintf_rc, "\0", "\0");
+        securec_check_ss(sprintf_rc, "\0", "\0");
         mark_stream_unsupport();
     }
 
@@ -11758,7 +11758,7 @@ static Plan* get_count_distinct_partial_plan(PlannerInfo* root, Plan* result_pla
         errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
             NOTPLANSHIPPING_LENGTH,
             "\"Count(Distinct)\" on redistribution unsupported data type");
-        securec_check_ss_c(sprintf_rc, "\0", "\0");
+        securec_check_ss(sprintf_rc, "\0", "\0");
         mark_stream_unsupport();
         /* Set final_tlist to plan targetlist, this plan will be discarded. */
         result_plan->targetlist = *final_tlist;
