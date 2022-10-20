@@ -818,10 +818,10 @@ _bt_parallel_seize(IndexScanDesc scan, BlockNumber *pageno)
     *pageno = P_NONE;
 
     btscan = (BTParallelScanDesc) (parallel_scan->ps_btpscan);
-
+    
+    std::unique_lock<std::mutex> lck(btscan->btps_mutex);
     while (1)
     {
-        std::unique_lock<std::mutex> lck(btscan->btps_mutex);
         pageStatus = btscan->btps_pageStatus;
 
         if (so->arrayKeyCount < btscan->btps_arrayKeyCount)

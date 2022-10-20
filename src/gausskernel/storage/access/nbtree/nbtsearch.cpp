@@ -1243,6 +1243,12 @@ static bool _bt_readpage(IndexScanDesc scan, ScanDirection dir, OffsetNumber off
      */
     so->currPos.nextPage = opaque->btpo_next;
 
+    /*
+     * We note the buffer's block number so that we can release the pin later.
+     * This allows us to re-read the buffer if it is needed again for hinting.
+     */
+    so->currPos.currPage = BufferGetBlockNumber(so->currPos.buf);
+
     /* initialize tuple workspace to empty */
     so->currPos.nextTupleOffset = 0;
 
@@ -1404,9 +1410,10 @@ static bool _bt_steppage(IndexScanDesc scan, ScanDirection dir)
 
     rel = scan->indexRelation;
 
-    if (ScanDirectionIsForward(dir)) {
-        /* release the previous buffer, if pinned */
-        _bt_relbuf(rel, so->currPos.buf);
+    /* release the previous buffer, if pinned */
+     _bt_relbuf(rel, so->currPos.buf);
+
+     if (ScanDirectionIsForward(dir)) {
         so->currPos.buf = InvalidBuffer;
 
         /* Walk right to the next page with data */
@@ -1447,6 +1454,11 @@ static bool _bt_steppage(IndexScanDesc scan, ScanDirection dir)
                 so->currPos.buf = InvalidBuffer;
                 return false;
             }
+        }
+        else
+        {
+            /* Not parallel, so just use our own notion of the current page */
+            blkno = so->currPos.currPage;
         }
     }
 
@@ -1533,11 +1545,34 @@ _bt_readnextpage(IndexScanDesc scan, BlockNumber blkno, ScanDirection dir)
     else
     {
         /*
+         * Should only happen in parallel cases, when some other backend
+         * advanced the scan.
+         */
+
+        so->currPos.currPage = blkno;
+        so->currPos.buf = _bt_getbuf(rel, so->currPos.currPage, BT_READ);
+
+        /*
          * Walk left to the next page with data.  This is much more complex
          * than the walk-right case because of the possibility that the page
          * to our left splits while we are in flight to it, plus the
          * possibility that the page we were on gets deleted after we leave
          * it.  See nbtree/README for details.
+         *
+         * It might be possible to rearrange this code to have less overhead
+         * in pinning and locking, but that would require capturing the left
+         * pointer when the page is initially read, and using it here, along
+         * with big changes to _bt_walk_left() and the code below.  It is not
+         * clear whether this would be a win, since if the page immediately to
+         * the left splits after we read this page and before we step left, we
+         * would need to visit more pages than with the current code.
+         *
+         * Note that if we change the code so that we drop the pin for a scan
+         * which uses a non-MVCC snapshot, we will need to modify the code for
+         * walking left, to allow for the possibility that a referenced page
+         * has been deleted.  As long as the buffer is pinned or the snapshot
+         * is MVCC the page cannot move past the half-dead state to fully
+         * deleted.
          */
 
         for (;;)

@@ -906,6 +906,7 @@ typedef struct BTScanPosData {
     Buffer buf; /* if valid, the buffer is pinned */
 
     BlockNumber nextPage; /* page's right link when we scanned it */
+    BlockNumber currPage;       /* page referenced by items array */
 
     TransactionId xid_base;
 
