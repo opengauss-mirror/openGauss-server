@@ -1,0 +1,143 @@
+DROP TABLE IF EXISTS test_row_count;
+NOTICE:  table "test_row_count" does not exist, skipping
+DROP TABLE IF EXISTS merge_tab_row_count;
+NOTICE:  table "merge_tab_row_count" does not exist, skipping
+DROP TABLE IF EXISTS test_row_count1;
+NOTICE:  table "test_row_count1" does not exist, skipping
+DROP TABLE IF EXISTS test_row_count2;
+NOTICE:  table "test_row_count2" does not exist, skipping
+DROP PROCEDURE IF EXISTS proc_row_count;
+NOTICE:  function proc_row_count() does not exist, skipping
+select row_count();
+ row_count 
+-----------
+         0
+(1 row)
+
+create table test_row_count(a int);
+create table merge_tab_row_count(a int);
+select row_count();
+ row_count 
+-----------
+         0
+(1 row)
+
+insert into test_row_count values(1),(2),(3),(4),(5);
+select row_count();
+ row_count 
+-----------
+         5
+(1 row)
+
+insert into merge_tab_row_count values(7);
+select row_count();
+ row_count 
+-----------
+         1
+(1 row)
+
+merge into merge_tab_row_count using test_row_count on (test_row_count.a = merge_tab_row_count.a)
+when not matched then insert values(6);
+update test_row_count set a = 7 where a = 1;
+select row_count();
+ row_count 
+-----------
+         1
+(1 row)
+
+delete from test_row_count where a < 4;
+select row_count();
+ row_count 
+-----------
+         2
+(1 row)
+
+truncate table test_row_count;
+select row_count();
+ row_count 
+-----------
+         0
+(1 row)
+
+select * into test_row_count1 from merge_tab_row_count;
+select row_count();
+ row_count 
+-----------
+         6
+(1 row)
+
+insert into test_row_count values(99999999999999999999999999);
+ERROR:  integer out of range
+CONTEXT:  referenced column: a
+select row_count();
+ row_count 
+-----------
+        -1
+(1 row)
+
+drop table merge_tab_row_count1;
+ERROR:  table "merge_tab_row_count1" does not exist
+select row_count();
+ row_count 
+-----------
+        -1
+(1 row)
+
+select * from merge_tab_row_count1;
+--?.*
+LINE 1: select * from merge_tab_row_count1;
+                      ^
+select row_count();
+ row_count 
+-----------
+        -1
+(1 row)
+
+create table test_row_count2(a int);
+create table test_row_count2(a int);
+ERROR:  relation "test_row_count2" already exists in schema "public"
+DETAIL:  creating new table with existing name in the same schema
+select row_count();
+ row_count 
+-----------
+        -1
+(1 row)
+
+create procedure proc_row_count(a out int, b out int)
+as
+begin
+  insert into test_row_count values(1),(2);
+  select row_count() into a;
+  raise info 'a=%',a;
+  insert into test_row_count values(3);
+  select row_count() into b;
+  raise info 'b=%',b;
+  insert into test_row_count values(4);
+  insert into test_row_count values(5);
+end;
+/
+call proc_row_count(a,b);
+INFO:  a=2
+INFO:  b=1
+ a | b 
+---+---
+ 2 | 1
+(1 row)
+
+select row_count();
+ row_count 
+-----------
+        -1
+(1 row)
+
+DROP TABLE IF EXISTS test_row_count;
+DROP TABLE IF EXISTS test_row_count1;
+DROP TABLE IF EXISTS test_row_count2;
+DROP TABLE IF EXISTS merge_tab_row_count;
+DROP PROCEDURE IF EXISTS proc_row_count;
+select row_count();
+ row_count 
+-----------
+         0
+(1 row)
+

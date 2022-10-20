@@ -2223,6 +2223,8 @@ typedef struct knl_u_statement_context {
     Bitmapset *wait_events_bms;
     bool is_session_bms_active;     /* active after stmt handle copies wait events in backend entry */
     bool enable_wait_events_bitmap; /* change to true in init stage of stmt handle */
+    int64 current_row_count; /* Record the number of rows affected by current query */
+    int64 last_row_count; /* Record the number of rows affected by last query */
 } knl_u_statement_context;
 
 struct Qid_key {
