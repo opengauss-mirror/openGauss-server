@@ -884,7 +884,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 	QUERY QUOTE
 
 	RANDOMIZED RANGE RATIO RAW READ REAL REASSIGN REBUILD RECHECK RECURSIVE RECYCLEBIN REDISANYVALUE REF REFERENCES REFRESH REINDEX REJECT_P
-	RELATIVE_P RELEASE RELOPTIONS REMOTE_P REMOVE RENAME REPEATABLE REPLACE REPLICA
+	RELATIVE_P RELEASE RELOPTIONS REMOTE_P REMOVE RENAME REPEAT REPEATABLE REPLACE REPLICA
 	RESET RESIZE RESOURCE RESTART RESTRICT RETURN RETURNING RETURNS REUSE REVOKE RIGHT ROLE ROLES ROLLBACK ROLLUP
 	ROTATION ROW ROWNUM ROWS ROWTYPE_P RULE
 
@@ -904,7 +904,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 	VACUUM VALID VALIDATE VALIDATION VALIDATOR VALUE_P VALUES VARCHAR VARCHAR2 VARIABLES VARIADIC VARRAY VARYING VCGROUP
 	VERBOSE VERIFY VERSION_P VIEW VOLATILE
 
-	WAIT WEAK WHEN WHERE WHITESPACE_P WINDOW WITH WITHIN WITHOUT WORK WORKLOAD WRAPPER WRITE
+	WAIT WEAK WHEN WHERE WHILE_P WHITESPACE_P WINDOW WITH WITHIN WITHOUT WORK WORKLOAD WRAPPER WRITE
 
 	XML_P XMLATTRIBUTES XMLCONCAT XMLELEMENT XMLEXISTS XMLFOREST XMLPARSE
 	XMLPI XMLROOT XMLSERIALIZE
@@ -13855,7 +13855,7 @@ pkg_body_subprogram: {
                             }
                             continue;
                         }
-						if (tok == LOOP || tok == IF_P || tok == CASE)
+						if (tok == LOOP || tok == IF_P || tok == CASE || tok == WHILE_P || tok == REPEAT)
 						{
 							continue;
 						}
@@ -14465,7 +14465,9 @@ subprogram_body: 	{
 						if (!(tok == ';'  || (tok == 0 || tok == END_OF_PROC))
 							&& tok != IF_P
 							&& tok != CASE
-							&& tok != LOOP)
+							&& tok != LOOP
+							&& tok != WHILE_P
+							&& tok != REPEAT)
 						{
 							tok = END_P;
 							continue;
@@ -26261,6 +26263,7 @@ unreserved_keyword:
 			| REMOTE_P
 			| REMOVE
 			| RENAME
+			| REPEAT
 			| REPEATABLE
 			| REPLACE
 			| REPLICA
@@ -26377,6 +26380,7 @@ unreserved_keyword:
 			| VOLATILE
 			| WAIT
 			| WEAK
+			| WHILE_P
 			| WHITESPACE_P
 			| WITHIN
 			| WITHOUT
