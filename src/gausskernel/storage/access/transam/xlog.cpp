@@ -7551,11 +7551,13 @@ static bool recoveryStopsHere(XLogReaderState *record, bool *includeThis)
         }
     }
 
-    else if (XLogRecGetRmid(record) == RM_XLOG_ID && record_info == XLOG_RESTORE_POINT) {
-        xl_restore_point *recordRestorePointData = (xl_restore_point *)XLogRecGetData(record);
-        recordXtime = recordRestorePointData->rp_time;
-        rc = strncpy_s(recordRPName, MAXFNAMELEN, recordRestorePointData->rp_name, MAXFNAMELEN - 1);
-        securec_check(rc, "", "");
+    else if (XLogRecGetRmid(record) == RM_XLOG_ID) {
+        if (record_info == XLOG_RESTORE_POINT) {
+            xl_restore_point *recordRestorePointData = (xl_restore_point *)XLogRecGetData(record);
+            recordXtime = recordRestorePointData->rp_time;
+            rc = strncpy_s(recordRPName, MAXFNAMELEN, recordRestorePointData->rp_name, MAXFNAMELEN - 1);
+            securec_check(rc, "", "");
+        }
     } else {
         return false;
     }
@@ -8167,7 +8169,7 @@ static void EndRedoXlog()
         EndDispatcherContext();
     }
     ResourceManagerStop();
-    XLogWaitFlush(t_thrd.xlog_cxt.LogwrtResult->Write);
+    XLogWaitFlush(t_thrd.xlog_cxt.XactLastRecEnd);
 }
 
 int XLogSemas(void)
