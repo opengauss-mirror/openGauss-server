@@ -223,13 +223,11 @@ static Oid SynonymCreate(
     /* update the index if any */
     CatalogUpdateIndexes(rel, tuple);
 
+    ObjectAddressSet(myself, PgSynonymRelationId, HeapTupleGetOid(tuple));
+
     /* record the dependencies, for the first create. */
     if (!isUpdate) {
         /* dependency on namespace of synonym object */
-        myself.classId = PgSynonymRelationId;
-        myself.objectId = HeapTupleGetOid(tuple);
-        myself.objectSubId = 0;
-
         referenced.classId = NamespaceRelationId;
         referenced.objectId = synNamespace;
         referenced.objectSubId = 0;
@@ -238,6 +236,8 @@ static Oid SynonymCreate(
         /* dependency on owner of synonym object */
         recordDependencyOnOwner(myself.classId, myself.objectId, synOwner);
     }
+
+    recordDependencyOnCurrentExtension(&myself, isUpdate);
 
     heap_freetuple(tuple);
     heap_close(rel, RowExclusiveLock);

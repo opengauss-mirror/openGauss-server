@@ -289,6 +289,8 @@ extern void recordMultipleDependencies(const ObjectAddress *depender,
 extern void recordDependencyOnCurrentExtension(const ObjectAddress *object,
                                                bool isReplace);
 
+extern void checkMembershipInCurrentExtension(const ObjectAddress *object);
+
 extern void recordPinnedDependency(const ObjectAddress *object);
 
 extern bool IsPackageDependType(Oid typOid, Oid pkgOid, bool isRefCur = false);

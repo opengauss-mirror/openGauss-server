@@ -161,6 +161,14 @@ void recordDependencyOnCurrentExtension(const ObjectAddress* object, bool isRepl
                             getObjectDescription(object),
                             get_extension_name(oldext))));
             }
+
+            /* It's a free-standing object, so reject */
+            ereport(ERROR,
+                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                    errmsg("%s is not a member of extension \"%s\"",
+                        getObjectDescription(object),
+                        get_extension_name(u_sess->cmd_cxt.CurrentExtensionObject)),
+                        errdetail("An extension is not allowed to replace an object that it does not own.")));
         }
 
         /* OK, record it as a member of CurrentExtensionObject */
@@ -171,6 +179,49 @@ void recordDependencyOnCurrentExtension(const ObjectAddress* object, bool isRepl
         recordDependencyOn(object, &extension, DEPENDENCY_EXTENSION);
     }
 }
+
+/*
+ * If we are executing a CREATE EXTENSION operation, check that the given
+ * object is a member of the extension, and throw an error if it isn't.
+ * Otherwise, do nothing.
+ *
+ * This must be called whenever a CREATE IF NOT EXISTS operation (for an
+ * object type that can be an extension member) has found that an object of
+ * the desired name already exists.  It is insecure for an extension to use
+ * IF NOT EXISTS except when the conflicting object is already an extension
+ * member; otherwise a hostile user could substitute an object with arbitrary
+ * properties.
+ */
+void checkMembershipInCurrentExtension(const ObjectAddress *object)
+{
+	/*
+	 * This is actually the same condition tested in
+	 * recordDependencyOnCurrentExtension; but we want to issue a
+	 * differently-worded error, and anyway it would be pretty confusing to
+	 * call recordDependencyOnCurrentExtension in these circumstances.
+	 */
+
+	/* Only whole objects can be extension members */
+	Assert(object->objectSubId == 0);
+
+	if (creating_extension) {
+            Oid oldext;
+
+            oldext = getExtensionOfObject(object->classId, object->objectId);
+            /* If already a member of this extension, OK */
+            if (oldext == u_sess->cmd_cxt.CurrentExtensionObject)
+                return;
+            /* Else complain */
+            ereport(ERROR,
+                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                    errmsg("%s is not a member of extension \"%s\"",
+                        getObjectDescription(object),
+                        get_extension_name(u_sess->cmd_cxt.CurrentExtensionObject)),
+                        errdetail("An extension may only use CREATE ... IF NOT EXISTS to skip object creation"
+                            "if the conflicting object is one that it already owns.")));
+	}
+}
+
 
 /*
  * Record pinned dependency for  fabricated system tables during in-place upgrade.

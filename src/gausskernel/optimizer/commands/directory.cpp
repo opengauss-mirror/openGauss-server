@@ -155,6 +155,7 @@ void CreatePgDirectory(CreateDirectoryStmt* stmt)
     HeapTuple oldtup = NULL;
     HeapTuple tup = NULL;
     TupleDesc tupDesc = NULL;
+    bool isUpdate = false;
     errno_t rc;
 
     /* Permission check. */
@@ -191,6 +192,7 @@ void CreatePgDirectory(CreateDirectoryStmt* stmt)
     if (OidIsValid(targetoid)) {
         /* existing a entry before */
         if (stmt->replace) {
+            isUpdate = true;
             replaces[Anum_pg_directory_directory_name - 1] = false;
             oldtup = SearchSysCache1(DIRECTORYOID, targetoid);
             tupDesc = RelationGetDescr(rel);
@@ -224,6 +226,10 @@ void CreatePgDirectory(CreateDirectoryStmt* stmt)
         pfree(location);
         heap_close(rel, RowExclusiveLock);
     }
+
+    ObjectAddress myself;
+    ObjectAddressSet(myself, PgDirectoryRelationId, isUpdate ? targetoid : directoryId);
+    recordDependencyOnCurrentExtension(&myself, isUpdate);
 }
 
 /*
