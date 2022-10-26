@@ -21273,9 +21273,24 @@ start_with_clause:
                     n->nocycle = true;
                     $$ = (Node *) n;
                 }
+            | CONNECT_BY NOCYCLE a_expr
+                {
+#ifdef ENABLE_MULTIPLE_NODES
+                      const char* message = "START WITH CONNECT BY is not yet supported.";
+                      InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+                      ereport(errstate, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                         errmsg("START WITH CONNECT BY is not yet supported.")));
+#endif
+                    StartWithClause *n = makeNode(StartWithClause);
+                    n->startWithExpr = NULL;
+                    n->connectByExpr = $3;
+                    n->siblingsOrderBy = NULL;
+                    n->priorDirection = false;
+                    n->nocycle = true;
+                    $$ = (Node *) n;
+                }
             | connect_by_expr
                 {
-                    Node* tmp = (Node*) $1;
                     StartWithClause *n = makeNode(StartWithClause);
                     n->startWithExpr = NULL;
                     n->connectByExpr = $1;

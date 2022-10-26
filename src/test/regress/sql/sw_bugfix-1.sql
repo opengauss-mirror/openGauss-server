@@ -301,6 +301,7 @@ insert into test1 values(2,2,2);
 select * from test1 t1 start with c1=1 connect by prior c2<>c3;
 -- will return result when cycle is met
 select * from test1 t1 start with c1=1 connect by NOCYCLE prior c2<>c3;
+select * from test1 t1 connect by NOCYCLE prior c2<>c3;
 
 drop table test1;
 
