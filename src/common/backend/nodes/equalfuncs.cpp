@@ -2167,6 +2167,7 @@ static bool _equalCreatePLangStmt(const CreatePLangStmt* a, const CreatePLangStm
 static bool _equalCreateRoleStmt(const CreateRoleStmt* a, const CreateRoleStmt* b)
 {
     COMPARE_SCALAR_FIELD(stmt_type);
+    COMPARE_SCALAR_FIELD(missing_ok);
     COMPARE_STRING_FIELD(role);
     COMPARE_NODE_FIELD(options);
 

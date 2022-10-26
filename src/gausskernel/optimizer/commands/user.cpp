@@ -1184,7 +1184,12 @@ void CreateRole(CreateRoleStmt* stmt)
 
     if (OidIsValid(get_role_oid(stmt->role, true))) {
         str_reset(password);
-        ereport(ERROR, (errcode(ERRCODE_DUPLICATE_OBJECT), errmsg("role \"%s\" already exists", stmt->role)));
+        int elevel = stmt->missing_ok ? NOTICE : ERROR;
+        ereport(elevel, (errmsg("role \"%s\" already exists", stmt->role)));
+        if (stmt->missing_ok) {
+            heap_close(pg_authid_rel, NoLock);
+            return;
+        }
     }
 
     /* Convert validBegin to internal form */
