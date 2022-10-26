@@ -2347,6 +2347,42 @@ drop package pck1;
 drop table testlog;
 drop type o1;
 
+-- test nest ref package
+create or replace package pck2 IS
+TYPE rateTable is TABLE of NUMBER INDEX by varchar2(50);
+v_ratetable pck2.rateTable;
+PROCEDURE p2(IN_NODE_CODE IN VARCHAR2,IN_CINO IN VARCHAR2);
+END pck2;
+/
+
+create or replace package pck1 IS
+v_ratetable pck2.rateTable;
+type r1 is record (a int, b int);
+PROCEDURE p1(OUT_FLAG OUT VARCHAR2,OUT_MSG OUT VARCHAR2);
+END pck1;
+/
+
+create or replace package body pck1 IS
+PROCEDURE p1(OUT_FLAG OUT VARCHAR2,OUT_MSG OUT VARCHAR2) as
+begin
+null;
+end;
+END pck1;
+/
+
+create or replace package body pck2 is
+PROCEDURE p2(IN_NODE_CODE IN VARCHAR2,IN_CINO IN VARCHAR2) as
+begin
+pck1.p1(IN_NODE_CODE,IN_CINO);
+end;
+end pck2;
+/
+
+call pck2.p2('a','b');
+
+drop package pck2;
+drop package pck1;
+
 -- clean 
 DROP SCHEMA IF EXISTS pkg_val_1 CASCADE;
 DROP SCHEMA IF EXISTS pkg_val_2 CASCADE;
