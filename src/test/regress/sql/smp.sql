@@ -77,6 +77,57 @@ select (select max(id) from t4);
 
 explain (costs off) select * from (select a, rownum as row from (select a from t3) where rownum <= 10) where row >=5;
 select * from (select a, rownum as row from (select a from t3) where rownum <= 10) where row >=5;
+
+CREATE TABLE bmsql_item (
+i_id int NoT NULL,
+i_name varchar(24),
+i_price numeric(5,2),
+i_data varchar( 50),
+i_im_id int
+);
+insert into bmsql_item values ('1','sqltest_varchar_1','0.01','sqltest_varchar_1','1') ;
+insert into bmsql_item values ('2','sqltest_varchar_2','0.02','sqltest_varchar_2','2') ;
+insert into bmsql_item values ('3','sqltest_varchar_3','0.03','sqltest_varchar_3','3') ;
+insert into bmsql_item values ('4','sqltest_varchar_4','0.04','sqltest_varchar_4','4') ;
+insert into bmsql_item(i_id) values ('5');
+
+create table bmsql_warehouse(
+w_id int not null,
+w_ytd numeric(12,2),
+w_tax numeric(4,4),
+w_name varchar(10),
+w_street_1 varchar(20),
+w_street_2 varchar(20),
+w_city varchar(20),
+w_state char(2),
+w_zip char(9)
+);
+insert into bmsql_warehouse values('1','0.01','0.0001','sqltest_va','sqltest_varchar_1','sqltest_varchar_1','sqltest_varchar_1','sq','sqltest_b');
+insert into bmsql_warehouse values('2','0.02','0.0002','sqltest_va','sqltest_varchar_2','sqltest_varchar_2','sqltest_varchar_2','sq','sqltest_b');
+insert into bmsql_warehouse values('3','0.03','0.0003','sqltest_va','sqltest_varchar_3','sqltest_varchar_3','sqltest_varchar_3','sq','sqltest_b');
+insert into bmsql_warehouse values('4','0.04','0.0004','sqltest_va','sqltest_varchar_4','sqltest_varchar_4','sqltest_varchar_4','sq','sqltest_b');
+insert into bmsql_warehouse(w_id) values('5');
+
+set query_dop=4;
+
+explain (costs off) select 0.01
+from bmsql_item
+intersect
+select first_value(i_price) over (order by 2)
+from bmsql_item
+where i_id <=(select w_id from bmsql_warehouse
+where bmsql_item.i_name not like 'sqltest_varchar_2' order by 1 limit 1)
+group by i_price;
+
+select 0.01
+from bmsql_item
+intersect
+select first_value(i_price) over (order by 2)
+from bmsql_item
+where i_id <=(select w_id from bmsql_warehouse
+where bmsql_item.i_name not like 'sqltest_varchar_2' order by 1 limit 1)
+group by i_price;
+
 --clean
 set search_path=public;
 drop schema test_smp cascade;
