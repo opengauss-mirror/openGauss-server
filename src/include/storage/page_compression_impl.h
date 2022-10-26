@@ -96,152 +96,151 @@ static inline void FreePointer(void* pointer)
 #define COMMON ""
 
 #if defined(_M_AMD64) || defined(_M_X64) || defined(__amd64) || defined(__x86_64__)
-void Transpose8x8_8U(uint8 **src, uint8 **dst)
+void Transpose8x8U(uint8 **src, uint8 **dst)
 {
     /* load and crossed-store 0~3 lines */
-    __m128i S0 = _mm_loadl_epi64((__m128i *)(src[0]));                //    0  0  0  0  0  0  0  0  A7 A6 A5 A4 A3 A2 A1 A0
-    __m128i S1 = _mm_loadl_epi64((__m128i *)(src[1]));                //    0  0  0  0  0  0  0  0  B7 B6 B5 B4 B3 B2 B1 B0
-    __m128i S2 = _mm_loadl_epi64((__m128i *)(src[2]));                //    0  0  0  0  0  0  0  0  C7 C6 C5 C4 C3 C2 C1 C0
-    __m128i S3 = _mm_loadl_epi64((__m128i *)(src[3]));                //    0  0  0  0  0  0  0  0  D7 D6 D5 D4 D3 D2 D1 D0
-    __m128i S01 = _mm_unpacklo_epi8(S0, S1);                          //    B7 A7 B6 A6 B5 A5 B4 A4 B3 A3 B2 A2 B1 A1 B0 A0
-    __m128i S23 = _mm_unpacklo_epi8(S2, S3);                          //    D7 C7 D6 C6 D5 C5 D4 C4 D3 C3 D2 C2 D1 C1 D0 C0
-    __m128i S0123L = _mm_unpacklo_epi16(S01, S23);                    //    D3 C3 B3 A3 D2 C2 B2 A2 D1 C1 B1 A1 D0 C0 B0 A0
-    __m128i S0123H = _mm_unpackhi_epi16(S01, S23);                    //    D7 C7 B7 A7 D6 C6 B6 A6 D5 C5 B5 A5 D4 C4 B4 A4
+    __m128i str0 = _mm_loadl_epi64((__m128i *)(src[0]));
+    __m128i str1 = _mm_loadl_epi64((__m128i *)(src[1]));
+    __m128i str2 = _mm_loadl_epi64((__m128i *)(src[2]));
+    __m128i str3 = _mm_loadl_epi64((__m128i *)(src[3]));
+    __m128i str2x1 = _mm_unpacklo_epi8(str0, str1);
+    __m128i str2x2 = _mm_unpacklo_epi8(str2, str3);
+    __m128i str4x1L = _mm_unpacklo_epi16(str2x1, str2x2);
+    __m128i str4x1H = _mm_unpackhi_epi16(str2x1, str2x2);
 
     /* load and crossed-store 4~7 lines */
-    __m128i S4 = _mm_loadl_epi64((__m128i *)(src[4]));                //    0  0  0  0  0  0  0  0  E7 E6 E5 E4 E3 E2 E1 E0
-    __m128i S5 = _mm_loadl_epi64((__m128i *)(src[5]));                //    0  0  0  0  0  0  0  0  F7 F6 F5 F4 F3 F2 F1 F0
-    __m128i S6 = _mm_loadl_epi64((__m128i *)(src[6]));                //    0  0  0  0  0  0  0  0  G7 G6 G5 G4 G3 G2 G1 G0
-    __m128i S7 = _mm_loadl_epi64((__m128i *)(src[7]));                //    0  0  0  0  0  0  0  0  H7 H6 H5 H4 H3 H2 H1 H0
-    __m128i S45 = _mm_unpacklo_epi8(S4, S5);                          //    F7 E7 F6 E6 F5 E5 F4 E4 F3 E3 F2 E2 F1 E1 F0 E0
-    __m128i S67 = _mm_unpacklo_epi8(S6, S7);                          //    H7 G7 H6 G6 H5 G5 H4 G4 H3 G3 H2 G2 H1 G1 H0 G0
-    __m128i S4567L = _mm_unpacklo_epi16(S45, S67);                    //    H3 G3 F3 E3 H2 G2 F2 E2 H1 G1 F1 E1 H0 G0 F0 E0
-    __m128i S4567H = _mm_unpackhi_epi16(S45, S67);                    //    H7 G7 F7 E7 H6 G6 F6 E6 H5 G5 F5 E5 H4 G4 F4 E4
+    __m128i str4 = _mm_loadl_epi64((__m128i *)(src[4]));
+    __m128i str5 = _mm_loadl_epi64((__m128i *)(src[5]));
+    __m128i str6 = _mm_loadl_epi64((__m128i *)(src[6]));
+    __m128i str7 = _mm_loadl_epi64((__m128i *)(src[7]));
+    __m128i str2x3 = _mm_unpacklo_epi8(str4, str5);
+    __m128i str2x4 = _mm_unpacklo_epi8(str6, str7);
+    __m128i str4x2L = _mm_unpacklo_epi16(str2x3, str2x4);
+    __m128i str4x2H = _mm_unpackhi_epi16(str2x3, str2x4);
 
     /* store into dst */
-    __m128i T0 = _mm_unpacklo_epi32(S0123L, S4567L);
-    _mm_storel_epi64((__m128i *)(dst[0]), T0);
-    _mm_storel_epi64((__m128i *)(dst[1]), _mm_srli_si128(T0, 8));
+    __m128i dst0 = _mm_unpacklo_epi32(str4x1L, str4x2L);
+    _mm_storel_epi64((__m128i *)(dst[0]), dst0);
+    _mm_storel_epi64((__m128i *)(dst[1]), _mm_srli_si128(dst0, 8));
 
-    __m128i T1 = _mm_unpackhi_epi32(S0123L, S4567L);
-    _mm_storel_epi64((__m128i *)(dst[2]), T1);
-    _mm_storel_epi64((__m128i *)(dst[3]), _mm_srli_si128(T1, 8));
+    __m128i dst1 = _mm_unpackhi_epi32(str4x1L, str4x2L);
+    _mm_storel_epi64((__m128i *)(dst[2]), dst1);
+    _mm_storel_epi64((__m128i *)(dst[3]), _mm_srli_si128(dst1, 8));
 
-    __m128i T2 = _mm_unpacklo_epi32(S0123H, S4567H);
-    _mm_storel_epi64((__m128i *)(dst[4]), T2);
-    _mm_storel_epi64((__m128i *)(dst[5]), _mm_srli_si128(T2, 8));
+    __m128i dst2 = _mm_unpacklo_epi32(str4x1H, str4x2H);
+    _mm_storel_epi64((__m128i *)(dst[4]), dst2);
+    _mm_storel_epi64((__m128i *)(dst[5]), _mm_srli_si128(dst2, 8));
 
-    __m128i T3 = _mm_unpackhi_epi32(S0123H, S4567H);
-    _mm_storel_epi64((__m128i *)(dst[6]), T3);
-    _mm_storel_epi64((__m128i *)(dst[7]), _mm_srli_si128(T3, 8));
+    __m128i dst3 = _mm_unpackhi_epi32(str4x1H, str4x2H);
+    _mm_storel_epi64((__m128i *)(dst[6]), dst3);
+    _mm_storel_epi64((__m128i *)(dst[7]), _mm_srli_si128(dst3, 8));
 }
 
 #elif defined(_M_ARM64) || defined(__aarch64__)
-void Transpose8x16_8U(uint8 **src, uint8 **dst)
+void Transpose8x16U(uint8 **src, uint8 **dst)
 {
     /* load and crossed-store 0~3 lines */
-    uint8x16x4_t mat0123_line;
-    uint8x16x4_t mat4567_line;
-    uint8 S0123_ptr[64];
-    uint8 S4567_ptr[64];
+    uint8x16x4_t matLine4x1;
+    uint8x16x4_t matLine4x2;
+    uint8 sptr4x1[64];
+    uint8 sptr4x2[64];
 
-    mat0123_line.val[0] = vld1q_u8(src[0]);        // AF AE AD AC AB AA A9 A8 A7 A6 A5 A4 A3 A2 A1 A0
-    mat0123_line.val[1] = vld1q_u8(src[1]);        // BF BE BD BC BB BA B9 B8 B7 B6 B5 B4 B3 B2 B1 B0
-    mat0123_line.val[2] = vld1q_u8(src[2]);        // CF CE CD CC CB CA C9 C8 C7 C6 C5 C4 C3 C2 C1 C0
-    mat0123_line.val[3] = vld1q_u8(src[3]);        // DF DE DD DC DB DA D9 D8 D7 D6 D5 D4 D3 D2 D1 D0
-    vst4q_u8(S0123_ptr, mat0123_line);                        // AF BF CF DF AE BE CE DE ... A0 B0 C0 D0
+    matLine4x1.val[0] = vld1q_u8(src[0]);
+    matLine4x1.val[1] = vld1q_u8(src[1]);
+    matLine4x1.val[2] = vld1q_u8(src[2]);
+    matLine4x1.val[3] = vld1q_u8(src[3]);
+    vst4q_u8(sptr4x1, matLine4x1);
 
     /* load and crossed-store 4~7 lines */
-    mat4567_line.val[0] = vld1q_u8(src[4]);        // EF EE ED EC EB EA E9 E8 E7 E6 E5 E4 E3 E2 E1 E0
-    mat4567_line.val[1] = vld1q_u8(src[5]);        // FF FE FD FC FB FA F9 F8 F7 F6 F5 F4 F3 F2 F1 F0
-    mat4567_line.val[2] = vld1q_u8(src[6]);        // GF GE GD GC GB GA G9 G8 G7 G6 G5 G4 G3 G2 G1 G0
-    mat4567_line.val[3] = vld1q_u8(src[7]);        // HF HE HD HC HB HA H9 H8 H7 H6 H5 H4 H3 H2 H1 H0
-    vst4q_u8(S4567_ptr, mat4567_line);                        // EF FF GF HF EE FE GE HE ... E0 F0 G0 H0
+    matLine4x2.val[0] = vld1q_u8(src[4]);
+    matLine4x2.val[1] = vld1q_u8(src[5]);
+    matLine4x2.val[2] = vld1q_u8(src[6]);
+    matLine4x2.val[3] = vld1q_u8(src[7]);
+    vst4q_u8(sptr4x2, matLine4x2);
 
-    uint32x4x2_t dst04_line;
-    uint32x4x2_t dst15_line;
-    uint32x4x2_t dst26_line;
-    uint32x4x2_t dst37_line;
-    uint8 dst_ptr[128];
+    matLine4x2.val[0] = vld1q_u8(src[4]);
+    matLine4x2.val[1] = vld1q_u8(src[5]);
+    matLine4x2.val[2] = vld1q_u8(src[6]);
+    matLine4x2.val[3] = vld1q_u8(src[7]);
+    vst4q_u8(sptr4x2, matLine4x2);
 
-    dst04_line.val[0] = vld1q_u32((uint32_t *)S0123_ptr);                 // (AF~DF)(AE~DE)(AD~DD)(AC~DC)
-    dst04_line.val[1] = vld1q_u32((uint32_t *)S4567_ptr);                 // (EF~EF)(FE~FE)(GD~GD)(HC~HC)
-    dst15_line.val[0] = vld1q_u32((uint32_t *)(S0123_ptr + 16));          // (AB~DB)(AA~DA)(A9~D9)(A8~D8)
-    dst15_line.val[1] = vld1q_u32((uint32_t *)(S4567_ptr + 16));          // (EB~EB)(FA~FA)(G9~G9)(H8~H8)
-    dst26_line.val[0] = vld1q_u32((uint32_t *)(S0123_ptr + 32));          // (A7~D7)(A6~D6)(A5~D5)(A4~D4)
-    dst26_line.val[1] = vld1q_u32((uint32_t *)(S4567_ptr + 32));          // (E7~E7)(F6~F6)(G5~G5)(H4~H4)
-    dst37_line.val[0] = vld1q_u32((uint32_t *)(S0123_ptr + 48));          // (A3~D3)(A2~D2)(A1~D1)(A0~D0)
-    dst37_line.val[1] = vld1q_u32((uint32_t *)(S4567_ptr + 48));          // (E3~E3)(F2~F2)(G1~G1)(H0~H0)
+    dstLine04.val[0] = vld1q_u32((uint32_t *)sptr4x1);
+    dstLine04.val[1] = vld1q_u32((uint32_t *)sptr4x2);
+    dstLine15.val[0] = vld1q_u32((uint32_t *)(sptr4x1 + 16));
+    dstLine15.val[1] = vld1q_u32((uint32_t *)(sptr4x2 + 16));
+    dstLine26.val[0] = vld1q_u32((uint32_t *)(sptr4x1 + 32));
+    dstLine26.val[1] = vld1q_u32((uint32_t *)(sptr4x2 + 32));
+    dstLine37.val[0] = vld1q_u32((uint32_t *)(sptr4x1 + 48));
+    dstLine37.val[1] = vld1q_u32((uint32_t *)(sptr4x2 + 48));
 
-    vst2q_u32((uint32_t *)dst_ptr, dst04_line);                    // (AF~HF)(AE~HE)(AD~HD)(AC~HC)
-    vst2q_u32((uint32_t *)(dst_ptr + 32), dst15_line);             // (AB~HB)(AA~HA)(A9~H8)(A0~H8)
-    vst2q_u32((uint32_t *)(dst_ptr + 64), dst26_line);             // (A7~H7)(A6~H6)(A5~H5)(A4~H4)
-    vst2q_u32((uint32_t *)(dst_ptr + 96), dst37_line);             // (A3~H3)(A2~H2)(A1~H1)(A0~H0)
+    vst2q_u32((uint32_t *)dstPtr, dstLine04);
+    vst2q_u32((uint32_t *)(dstPtr + 32), dstLine15);
+    vst2q_u32((uint32_t *)(dstPtr + 64), dstLine26);
+    vst2q_u32((uint32_t *)(dstPtr + 96), dstLine37);
 
     /* store into dst */
-    *((uint64 *)(dst[0])) = *((uint64 *)(dst_ptr + 0 * 8));
-    *((uint64 *)(dst[1])) = *((uint64 *)(dst_ptr + 1 * 8));
-    *((uint64 *)(dst[2])) = *((uint64 *)(dst_ptr + 2 * 8));
-    *((uint64 *)(dst[3])) = *((uint64 *)(dst_ptr + 3 * 8));
-    *((uint64 *)(dst[4])) = *((uint64 *)(dst_ptr + 4 * 8));
-    *((uint64 *)(dst[5])) = *((uint64 *)(dst_ptr + 5 * 8));
-    *((uint64 *)(dst[6])) = *((uint64 *)(dst_ptr + 6 * 8));
-    *((uint64 *)(dst[7])) = *((uint64 *)(dst_ptr + 7 * 8));
-    *((uint64 *)(dst[8])) = *((uint64 *)(dst_ptr + 8 * 8));
-    *((uint64 *)(dst[9])) = *((uint64 *)(dst_ptr + 9 * 8));
-    *((uint64 *)(dst[10])) = *((uint64 *)(dst_ptr + 10 * 8));
-    *((uint64 *)(dst[11])) = *((uint64 *)(dst_ptr + 11 * 8));
-    *((uint64 *)(dst[12])) = *((uint64 *)(dst_ptr + 12 * 8));
-    *((uint64 *)(dst[13])) = *((uint64 *)(dst_ptr + 13 * 8));
-    *((uint64 *)(dst[14])) = *((uint64 *)(dst_ptr + 14 * 8));
-    *((uint64 *)(dst[15])) = *((uint64 *)(dst_ptr + 15 * 8));
+    *((uint64 *)(dst[0])) = *((uint64 *)(dstPtr + 0 * 8));
+    *((uint64 *)(dst[1])) = *((uint64 *)(dstPtr + 1 * 8));
+    *((uint64 *)(dst[2])) = *((uint64 *)(dstPtr + 2 * 8));
+    *((uint64 *)(dst[3])) = *((uint64 *)(dstPtr + 3 * 8));
+    *((uint64 *)(dst[4])) = *((uint64 *)(dstPtr + 4 * 8));
+    *((uint64 *)(dst[5])) = *((uint64 *)(dstPtr + 5 * 8));
+    *((uint64 *)(dst[6])) = *((uint64 *)(dstPtr + 6 * 8));
+    *((uint64 *)(dst[7])) = *((uint64 *)(dstPtr + 7 * 8));
+    *((uint64 *)(dst[8])) = *((uint64 *)(dstPtr + 8 * 8));
+    *((uint64 *)(dst[9])) = *((uint64 *)(dstPtr + 9 * 8));
+    *((uint64 *)(dst[10])) = *((uint64 *)(dstPtr + 10 * 8));
+    *((uint64 *)(dst[11])) = *((uint64 *)(dstPtr + 11 * 8));
+    *((uint64 *)(dst[12])) = *((uint64 *)(dstPtr + 12 * 8));
+    *((uint64 *)(dst[13])) = *((uint64 *)(dstPtr + 13 * 8));
+    *((uint64 *)(dst[14])) = *((uint64 *)(dstPtr + 14 * 8));
+    *((uint64 *)(dst[15])) = *((uint64 *)(dstPtr + 15 * 8));
 
     return ;
 }
 
-void Transpose8x8_8U(uint8 **src, uint8 **dst)
+void Transpose8x8U(uint8 **src, uint8 **dst)
 {
     /* load and crossed-store 0~3 lines */
-    uint8x8x4_t mat0123_line;
-    uint8x8x4_t mat4567_line;
-    uint8 S0123_ptr[32];
-    uint8 S4567_ptr[32];
+    uint8x8x4_t matLine4x1;
+    uint8x8x4_t matLine4x2;
+    uint8 sptr4x1[32];
+    uint8 sptr4x2[32];
 
-    mat0123_line.val[0] = vld1_u8(src[0]);        // A7 A6 A5 A4 A3 A2 A1 A0
-    mat0123_line.val[1] = vld1_u8(src[1]);        // B7 B6 B5 B4 B3 B2 B1 B0
-    mat0123_line.val[2] = vld1_u8(src[2]);        // C7 C6 C5 C4 C3 C2 C1 C0
-    mat0123_line.val[3] = vld1_u8(src[3]);        // D7 D6 D5 D4 D3 D2 D1 D0
-    vst4_u8(S0123_ptr, mat0123_line);                        // A7 B7 C7 D7 A6 B6 C6 D6 ... A0 B0 C0 D0
+    matLine4x1.val[0] = vld1_u8(src[0]);
+    matLine4x1.val[1] = vld1_u8(src[1]);
+    matLine4x1.val[2] = vld1_u8(src[2]);
+    matLine4x1.val[3] = vld1_u8(src[3]);
+    vst4_u8(sptr4x1, matLine4x1);
 
     /* load and crossed-store 4~7 lines */
-    mat4567_line.val[0] = vld1_u8(src[4]);        // E7 E6 E5 E4 E3 E2 E1 E0
-    mat4567_line.val[1] = vld1_u8(src[5]);        // F7 F6 F5 F4 F3 F2 F1 F0
-    mat4567_line.val[2] = vld1_u8(src[6]);        // G7 G6 G5 G4 G3 G2 G1 G0
-    mat4567_line.val[3] = vld1_u8(src[7]);        // H7 H6 H5 H4 H3 H2 H1 H0
-    vst4_u8(S4567_ptr, mat4567_line);                        // E7 F7 G7 H7 E6 F6 G6 H6 ... E0 F0 G0 H0
+    matLine4x2.val[0] = vld1_u8(src[4]);
+    matLine4x2.val[1] = vld1_u8(src[5]);
+    matLine4x2.val[2] = vld1_u8(src[6]);
+    matLine4x2.val[3] = vld1_u8(src[7]);
+    vst4_u8(sptr4x2, matLine4x2);
 
    /* store into dst */
-    uint32x4x2_t dst0145_line;
-    uint32x4x2_t dst2367_line;
-    uint8 dst_ptr[64];
+    uint32x4x2_t dstLine4x1;
+    uint32x4x2_t dstLine4x2;
+    uint8 dstPtr[64];
 
-    dst0145_line.val[0] = vld1q_u32((uint32_t *)S0123_ptr);          // (A7~D7)(A6~D6)(A5~D5)(A4~D4)
-    dst0145_line.val[1] = vld1q_u32((uint32_t *)S4567_ptr);          // (E7~H7)(E6~H6)(E5~H5)(E4~H4)
-    dst2367_line.val[0] = vld1q_u32((uint32_t *)(S0123_ptr + 16));   // (A3~D3)(A2~D2)(A1~D1)(A0~D0)
-    dst2367_line.val[1] = vld1q_u32((uint32_t *)(S4567_ptr + 16));   // (E3~H3)(E2~H2)(E1~H1)(E0~H0)
+    dstLine4x1.val[0] = vld1q_u32((uint32_t *)sptr4x1);
+    dstLine4x1.val[1] = vld1q_u32((uint32_t *)sptr4x2);
+    dstLine4x2.val[0] = vld1q_u32((uint32_t *)(sptr4x1 + 16));
+    dstLine4x2.val[1] = vld1q_u32((uint32_t *)(sptr4x2 + 16));
 
-    vst2q_u32((uint32_t *)dst_ptr, dst0145_line);                    // (A7~H7)(A6~H6)(A5~H5)(A4~H4)
-    vst2q_u32((uint32_t *)(dst_ptr + 32), dst2367_line);             // (A3~H3)(A2~H2)(A1~H1)(A0~H0)
+    vst2q_u32((uint32_t *)dstPtr, dstLine4x1);
+    vst2q_u32((uint32_t *)(dstPtr + 32), dstLine4x2);
 
-    //====================
-    *((uint64 *)(dst[0])) = *((uint64 *)(dst_ptr + 0 * 8));
-    *((uint64 *)(dst[1])) = *((uint64 *)(dst_ptr + 1 * 8));
-    *((uint64 *)(dst[2])) = *((uint64 *)(dst_ptr + 2 * 8));
-    *((uint64 *)(dst[3])) = *((uint64 *)(dst_ptr + 3 * 8));
-    *((uint64 *)(dst[4])) = *((uint64 *)(dst_ptr + 4 * 8));
-    *((uint64 *)(dst[5])) = *((uint64 *)(dst_ptr + 5 * 8));
-    *((uint64 *)(dst[6])) = *((uint64 *)(dst_ptr + 6 * 8));
-    *((uint64 *)(dst[7])) = *((uint64 *)(dst_ptr + 7 * 8));
+    *((uint64 *)(dst[0])) = *((uint64 *)(dstPtr + 0 * 8));
+    *((uint64 *)(dst[1])) = *((uint64 *)(dstPtr + 1 * 8));
+    *((uint64 *)(dst[2])) = *((uint64 *)(dstPtr + 2 * 8));
+    *((uint64 *)(dst[3])) = *((uint64 *)(dstPtr + 3 * 8));
+    *((uint64 *)(dst[4])) = *((uint64 *)(dstPtr + 4 * 8));
+    *((uint64 *)(dst[5])) = *((uint64 *)(dstPtr + 5 * 8));
+    *((uint64 *)(dst[6])) = *((uint64 *)(dstPtr + 6 * 8));
+    *((uint64 *)(dst[7])) = *((uint64 *)(dstPtr + 7 * 8));
 
     return;
 }
@@ -455,7 +454,7 @@ static void CompressConvertIndexKeysPart1(uint8 *buf, uint8 *aux_buf, int16 *rea
                 aux_buf + (x + 2) * h + y, aux_buf + (x + 3) * h + y,
                 aux_buf + (x + 4) * h + y, aux_buf + (x + 5) * h + y,
                 aux_buf + (x + 6) * h + y, aux_buf + (x + 7) * h + y};
-            Transpose8x8_8U(src, dst);
+            Transpose8x8U(src, dst);
         }
     }
     for(y = sh; y < h; y++) {
@@ -498,7 +497,7 @@ static void CompressConvertIndexKeysPart1(uint8 *buf, uint8 *aux_buf, int16 *rea
                     aux_buf + (x + 10) * h + y, aux_buf + (x +11) * h + y,
                     aux_buf + (x + 12) * h + y, aux_buf + (x +13) * h + y,
                     aux_buf + (x + 14) * h + y, aux_buf + (x +15) * h + y};
-            Transpose8x16_8U(src, dst);
+            Transpose8x16U(src, dst);
         }
         if ((x + 8) <= sw) {
             uint8 *src[8] = {buf + line0_off + x, buf + line1_off + x, buf + line2_off + x, buf + line3_off + x,
@@ -506,7 +505,7 @@ static void CompressConvertIndexKeysPart1(uint8 *buf, uint8 *aux_buf, int16 *rea
             uint8 *dst[8] = {aux_buf + x * h + y, aux_buf + (x + 1) * h + y, aux_buf + (x + 2) * h + y,
                              aux_buf + (x + 3) * h + y, aux_buf + (x + 4) * h + y, aux_buf + (x + 5) * h + y,
                              aux_buf + (x + 6) * h + y, aux_buf + (x + 7) * h + y};
-            Transpose8x8_8U(src, dst);
+            Transpose8x8U(src, dst);
         }
     }
 
@@ -607,7 +606,7 @@ static void CompressConvertHeapRowsPart1(uint8 *buf, uint8 *aux_buf, int16 *real
                 aux_buf + (x + 2) * h + y, aux_buf + (x + 3) * h + y,
                 aux_buf + (x + 4) * h + y, aux_buf + (x + 5) * h + y,
                 aux_buf + (x + 6) * h + y, aux_buf + (x + 7) * h + y};
-            Transpose8x8_8U(src, dst);
+            Transpose8x8U(src, dst);
         }
     }
     for(y = sh; y < h; y++) {
@@ -650,7 +649,7 @@ static void CompressConvertHeapRowsPart1(uint8 *buf, uint8 *aux_buf, int16 *real
                             aux_buf + (x + 10) * h + y, aux_buf + (x + 11) * h + y,
                             aux_buf + (x + 12) * h + y, aux_buf + (x + 13) * h + y,
                             aux_buf + (x + 14) * h + y, aux_buf + (x + 15) * h + y};
-            Transpose8x16_8U(src, dst);
+            Transpose8x16U(src, dst);
         }
 
         if ((x + 8) <= sw) {
@@ -660,7 +659,7 @@ static void CompressConvertHeapRowsPart1(uint8 *buf, uint8 *aux_buf, int16 *real
                             aux_buf + (x + 2) * h + y, aux_buf + (x + 3) * h + y,
                             aux_buf + (x + 4) * h + y, aux_buf + (x + 5) * h + y,
                             aux_buf + (x + 6) * h + y, aux_buf + (x + 7) * h + y};
-            Transpose8x8_8U(src, dst);
+            Transpose8x8U(src, dst);
         }
     }
 
@@ -1615,7 +1614,7 @@ static void DecompressDeconvertIndexKeysPart1(uint8 *buf, uint8 *aux_buf, int16 
                             aux_buf + line2_off + y, aux_buf + line3_off + y,
                             aux_buf + line4_off + y, aux_buf + line5_off + y,
                             aux_buf + line6_off + y, aux_buf + line7_off + y};
-            Transpose8x8_8U(src, dst);
+            Transpose8x8U(src, dst);
         }
     }
     for(x = 0;x < sw; x++) {
@@ -1666,7 +1665,7 @@ static void DecompressDeconvertIndexKeysPart1(uint8 *buf, uint8 *aux_buf, int16 
                             aux_buf + line10_off + y, aux_buf + line11_off + y,
                             aux_buf + line12_off + y, aux_buf + line13_off + y,
                             aux_buf + line14_off + y, aux_buf + line15_off + y};
-            Transpose8x16_8U(src, dst);
+            Transpose8x16U(src, dst);
         }
     }
     if ((x + 8) <= sw) {
@@ -1687,7 +1686,7 @@ static void DecompressDeconvertIndexKeysPart1(uint8 *buf, uint8 *aux_buf, int16 
                             aux_buf + line2_off + y, aux_buf + line3_off + y,
                             aux_buf + line4_off + y, aux_buf + line5_off + y,
                             aux_buf + line6_off + y, aux_buf + line7_off + y};
-            Transpose8x8_8U(src, dst);
+            Transpose8x8U(src, dst);
         }
     }
     for(x = 0; x < sw; x++) {
@@ -1793,7 +1792,7 @@ static void DecompressDeconvertHeapRowsPart1(uint8 *buf, uint8 *aux_buf, int16 *
                             aux_buf + line2_off + y, aux_buf + line3_off + y,
                             aux_buf + line4_off + y, aux_buf + line5_off + y,
                             aux_buf + line6_off + y, aux_buf + line7_off + y};
-            Transpose8x8_8U(src, dst);
+            Transpose8x8U(src, dst);
         }
     }
     for(x = 0; x < sw; x++) {
@@ -1842,7 +1841,7 @@ static void DecompressDeconvertHeapRowsPart1(uint8 *buf, uint8 *aux_buf, int16 *
                 aux_buf + line7_off + y, aux_buf + line8_off + y, aux_buf + line9_off + y, aux_buf + line10_off + y,
                 aux_buf + line11_off + y, aux_buf + line12_off + y, aux_buf + line13_off + y, aux_buf + line14_off + y,
                 aux_buf + line15_off + y};
-            Transpose8x16_8U(src, dst);
+            Transpose8x16U(src, dst);
         }
     }
     if ((x + 8) <= sw) {
@@ -1863,7 +1862,7 @@ static void DecompressDeconvertHeapRowsPart1(uint8 *buf, uint8 *aux_buf, int16 *
             uint8 *dst[8] = {aux_buf + line0_off + y, aux_buf + line1_off + y, aux_buf + line2_off + y,
                 aux_buf + line3_off + y, aux_buf + line4_off + y, aux_buf + line5_off + y,
                 aux_buf + line6_off + y, aux_buf + line7_off + y};
-            Transpose8x8_8U(src, dst);
+            Transpose8x8U(src, dst);
         }
     }
     for(x = 0; x < sw; x++) {

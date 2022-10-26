@@ -962,7 +962,7 @@ static bool ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
             if (forbid_write) {
                 file = fopen(filename, "ab");
             } else {
-                file = fopen(filename, "wb");
+                file = fopen(filename, IsCompressedFile(filename, strlen(filename)) ? "wb+" : "wb");
             }
             if (NULL == file) {
                 pg_log(PG_WARNING, _("could not create file \"%s\": %s\n"), filename, strerror(errno));

@@ -682,9 +682,10 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
     CheckCompressOption(&indexCreateSupport);
     /* do not suppport to create compressed index for temp table. */
     if ((indexCreateSupport.compressType != (int)COMPRESS_TYPE_NONE) &&
-        (relPersistence == RELPERSISTENCE_TEMP || relPersistence == RELPERSISTENCE_GLOBAL_TEMP)) {
+        (relPersistence == RELPERSISTENCE_TEMP || relPersistence == RELPERSISTENCE_GLOBAL_TEMP ||
+         relPersistence == RELPERSISTENCE_UNLOGGED)) {
             ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("compressed index \"%s\" is not supported for temporary table,"
+            errmsg("compressed index \"%s\" is not supported for temporary table and unlogged table,"
             " please use uncompressed one instead", stmt->idxname)));
     }
 

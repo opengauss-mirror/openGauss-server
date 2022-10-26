@@ -144,6 +144,7 @@ void MmapFree(CfsHeaderMap *cfsHeaderMap)
 {
     if (cfsHeaderMap->pointer != nullptr) {
         (void)munmap(cfsHeaderMap->pointer, cfsHeaderMap->mmapLen);
+        cfsHeaderMap->pointer = nullptr;
     }
 }
 
@@ -183,13 +184,14 @@ bool ReadCompressedInfo(T &t, off_t offset, FILE *file)
     return true;
 }
 
-size_t ReadBlockNumberOfCFile(FILE* compressFd)
+size_t ReadBlockNumberOfCFile(FILE* compressFd, off_t *curFileLen)
 {
     if (fseek(compressFd, 0L, SEEK_END) < 0) {
         return COMPRESS_FSEEK_ERROR;
     }
     /* read file size of toFullPath */
     off_t fileLen = ftell(compressFd);
+    *curFileLen = fileLen;
     if (fileLen == 0) {
         return 0;
     } else {
