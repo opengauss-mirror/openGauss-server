@@ -122,6 +122,10 @@ static bool has_dummy_targetlist(Plan* plan)
         case T_RowToVec:
         case T_Stream:
         case T_VecStream:
+        case T_Limit:
+        case T_VecLimit:
+        case T_Sort:
+        case T_VecSort:
             is_dummy = true;
             break;
         default:
@@ -150,7 +154,11 @@ static void CheckPlanOutput(Plan* subPlan, Relation resultRel)
         case T_VecToRow:
         case T_RowToVec:
         case T_PartIterator:
-        case T_VecPartIterator: {
+        case T_VecPartIterator: 
+        case T_Limit:
+        case T_VecLimit:
+        case T_Sort:
+        case T_VecSort: {
 #ifdef ENABLE_MULTIPLE_NODES
             if (!IS_PGXC_COORDINATOR) {
                 break;

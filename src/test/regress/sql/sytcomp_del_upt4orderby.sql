@@ -137,3 +137,27 @@ select * from sytc_test_sql1 where id<6 order by NLSSORT(id, 'NLS_SORT = generic
 explain delete sytc_test_sql1 where id<6 order by NLSSORT(id,'NLS_SORT = generic_m_ci') limit 1;
 delete sytc_test_sql1 where id<6 order by NLSSORT(id,'NLS_SORT = generic_m_ci') limit 1;
 select * from sytc_test_sql1 where id<6 order by NLSSORT(id, 'NLS_SORT = generic_m_ci');
+
+drop table if exists sytc_test_sql2;
+create table sytc_test_sql2(id1 int, id2 int);
+insert into sytc_test_sql2 values(3,1),(2,1),(4,1),(6,1),(5,1);
+alter table sytc_test_sql2 add (id2 int default 10);
+begin;
+update sytc_test_sql2 set id2 = 20 order by id1 returning *;
+rollback;
+begin;
+delete from sytc_test_sql2 order by id1 returning *;
+rollback;
+
+drop table if exists sytc_test_sql3;
+create table sytc_test_sql3(id1 int, id2 int);
+insert into sytc_test_sql3 values(1,1);
+alter table sytc_test_sql3 drop column id2;
+update sytc_test_sql3 set id1 = 1 limit 1;
+update sytc_test_sql3 set id1 = 1 order by id1 returning *;
+
+drop table if exists t1;
+create table t1(a int primary key,b int);
+insert into t1 values(1,1),(2,2),(3,3),(4,4);
+update t1 set a = a+1 order by a desc;
+select * from t1;

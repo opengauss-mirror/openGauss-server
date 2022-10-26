@@ -199,11 +199,13 @@ WITH max_table as (
 rollback;
 ----update table set col=xxx order by xxx limit xxx 
 explain update sytc_t1 set f2 = 1000 order by f2 desc;
-                            QUERY PLAN                            
-------------------------------------------------------------------
- Update on sytc_t1  (cost=0.00..82.45 rows=5445 width=18)
-   ->  Seq Scan on sytc_t1  (cost=0.00..82.45 rows=5445 width=18)
-(2 rows)
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Update on sytc_t1  (cost=420.33..433.94 rows=5445 width=18)
+   ->  Sort  (cost=420.33..433.94 rows=5445 width=18)
+         Sort Key: f2 DESC
+         ->  Seq Scan on sytc_t1  (cost=0.00..82.45 rows=5445 width=18)
+(4 rows)
 
 explain update sytc_t1 set f2 = 1000 where f1 > 4900 order by f1 limit 10;
                                          QUERY PLAN                                          
@@ -543,5 +545,62 @@ select * from sytc_test_sql1 where id<6 order by NLSSORT(id, 'NLS_SORT = generic
   3 | name |      3
   4 | name |      4
   5 | name |      5
+(4 rows)
+
+drop table if exists sytc_test_sql2;
+NOTICE:  table "sytc_test_sql2" does not exist, skipping
+create table sytc_test_sql2(id1 int, id2 int);
+insert into sytc_test_sql2 values(3,1),(2,1),(4,1),(6,1),(5,1);
+alter table sytc_test_sql2 add (id2 int default 10);
+ERROR:  column "id2" of relation "sytc_test_sql2" already exists
+begin;
+update sytc_test_sql2 set id2 = 20 order by id1 returning *;
+ id1 | id2 
+-----+-----
+   2 |  20
+   3 |  20
+   4 |  20
+   5 |  20
+   6 |  20
+(5 rows)
+
+rollback;
+begin;
+delete from sytc_test_sql2 order by id1 returning *;
+ id1 | id2 
+-----+-----
+   2 |   1
+   3 |   1
+   4 |   1
+   5 |   1
+   6 |   1
+(5 rows)
+
+rollback;
+drop table if exists sytc_test_sql3;
+NOTICE:  table "sytc_test_sql3" does not exist, skipping
+create table sytc_test_sql3(id1 int, id2 int);
+insert into sytc_test_sql3 values(1,1);
+alter table sytc_test_sql3 drop column id2;
+update sytc_test_sql3 set id1 = 1 limit 1;
+update sytc_test_sql3 set id1 = 1 order by id1 returning *;
+ id1 
+-----
+   1
+(1 row)
+
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
+create table t1(a int primary key,b int);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t1_pkey" for table "t1"
+insert into t1 values(1,1),(2,2),(3,3),(4,4);
+update t1 set a = a+1 order by a desc;
+select * from t1;
+ a | b 
+---+---
+ 5 | 4
+ 4 | 3
+ 3 | 2
+ 2 | 1
 (4 rows)
 
