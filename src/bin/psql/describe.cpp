@@ -1330,13 +1330,13 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
      * So we need to turn off it temporarily, and turn on it at the end.
      */
     bool uppercaseIsOn = false;
-    printfPQExpBuffer(&buf, "show uppercase_attribute_name;");
+    printfPQExpBuffer(&buf, "select setting from pg_settings where name = 'uppercase_attribute_name';");
     res = PSQLexec(buf.data, false);
     if (NULL == res) {
         goto error_return;
     }
 
-    uppercaseIsOn = strcmp(PQgetvalue(res, 0, 0), "on") == 0;
+    uppercaseIsOn = PQntuples(res) == 1 && strcmp(PQgetvalue(res, 0, 0), "on") == 0;
 
     PQclear(res);
     res = NULL;
@@ -3281,7 +3281,7 @@ static void add_role_attribute(PQExpBuffer buf, const char* const str)
 /*
  * \drds
  */
-bool listDbRoleSettings(const char* pattern, const char* pattern2)
+bool listDbRoleSettings(const char* pattern1, const char* pattern2)
 {
     PQExpBufferData buf;
     PGresult* res = NULL;
@@ -3298,7 +3298,7 @@ bool listDbRoleSettings(const char* pattern, const char* pattern2)
             "FROM pg_db_role_setting AS s\n"
             "LEFT JOIN pg_database ON pg_database.oid = setdatabase\n"
             "LEFT JOIN pg_roles ON pg_roles.oid = setrole\n");
-        havewhere = processSQLNamePattern(pset.db, &buf, pattern, false, false, NULL, "pg_roles.rolname", NULL, NULL);
+        havewhere = processSQLNamePattern(pset.db, &buf, pattern1, false, false, NULL, "pg_roles.rolname", NULL, NULL);
         (void)processSQLNamePattern(pset.db, &buf, pattern2, havewhere, false, NULL, "pg_database.datname", NULL, NULL);
         appendPQExpBufferStr(&buf, "ORDER BY role, database;");
     } else {
@@ -3314,7 +3314,7 @@ bool listDbRoleSettings(const char* pattern, const char* pattern2)
     }
 
     if (PQntuples(res) == 0 && !pset.quiet) {
-        if (pattern != NULL)
+        if (pattern1 != NULL)
             fprintf(pset.queryFout, _("No matching settings found.\n"));
         else
             fprintf(pset.queryFout, _("No settings found.\n"));
