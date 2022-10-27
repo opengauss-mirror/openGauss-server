@@ -414,6 +414,12 @@ static void knl_g_conn_init(knl_g_conn_context* conn_cxt)
     SpinLockInit(&conn_cxt->ConnCountLock);
 }
 
+static void knl_g_listen_sock_init(knl_g_listen_context* listen_sock_cxt)
+{
+    listen_sock_cxt->reload_fds = false;
+    listen_sock_cxt->is_reloading_listen_socket = 0;
+}
+
 static void knl_g_executor_init(knl_g_executor_context* exec_cxt)
 {
     exec_cxt->function_id_hashtbl = NULL;
@@ -982,6 +988,7 @@ void knl_instance_init()
 #endif
 
     knl_g_datadir_init(&g_instance.datadir_cxt);
+    knl_g_listen_sock_init(&g_instance.listen_cxt);
 }
 
 void add_numa_alloc_info(void* numaAddr, size_t length)

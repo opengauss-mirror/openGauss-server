@@ -120,6 +120,14 @@ typedef enum {
 // type, timestamp, lwlockId, lockmode
 #define LWLOCK_RELEASE_START_DETAIL_BUFSIZE 15
 
+/* ----------
+ * Flags for CAUSE TYPE
+ * ----------
+ */
+#define NUM_F_TYPECASTING (1 << 1) /* cast function exists */
+#define NUM_F_LIMIT (1 << 2) /* limit to much rows */
+#define NUM_F_LEAKPROOF (1 << 3) /* proleakproof of function is false */
+
 #define INVALID_DETAIL_BUFSIZE 0
 
 #define STATEMENT_DETAIL_BUF_MULTI 10
@@ -190,6 +198,7 @@ typedef struct StatementStatContext {
     uint64 plan_size;
     LockSummaryStat lock_summary;
     StatementDetail details;
+    uint32 cause_type; /* possible Slow SQL risks */
 
     /* wait events */
     WaitEventEntry *wait_events;
@@ -228,6 +237,9 @@ extern void instr_stmt_set_wait_events_bitmap(uint32 class_id, uint32 event_id);
 extern void instr_stmt_copy_wait_events();
 extern void instr_stmt_diff_wait_events();
 extern void init_full_sql_wait_events();
+extern void instr_stmt_report_cause_type(uint32 type);
+extern bool instr_stmt_plan_need_report_cause_type();
+extern uint32 instr_stmt_plan_get_cause_type();
 
 #endif
 

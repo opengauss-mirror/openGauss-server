@@ -884,6 +884,84 @@ ALTER TABLE t_hash_list4 MODIFY PARTITION P_HASH4 ADD SUBPARTITION P_HASH4_5 VAL
 SELECT pg_get_tabledef('t_hash_list4');
 DROP TABLE t_hash_list4;
 
+--
+----test create index with tablespace----
+--
+CREATE TABLE t_range_list(c1 int, c2 int, c3 int) TABLESPACE hw_subpartition_tablespace_ts1
+PARTITION BY RANGE (c1) SUBPARTITION BY LIST (c2)
+(
+    PARTITION P_RANGE1 VALUES LESS THAN (5) TABLESPACE hw_subpartition_tablespace_ts1
+    (
+        SUBPARTITION P_RANGE1_1 VALUES ( 1, 2, 3, 4, 5) TABLESPACE hw_subpartition_tablespace_ts1,
+        SUBPARTITION P_RANGE1_2 VALUES ( 6, 7, 8, 9,10) TABLESPACE hw_subpartition_tablespace_ts2,
+        SUBPARTITION P_RANGE1_3 VALUES (11,12,13,14,15) TABLESPACE hw_subpartition_tablespace_ts3,
+        SUBPARTITION P_RANGE1_4 VALUES (16,17,18,19,20)
+    ),
+    PARTITION P_RANGE2 VALUES LESS THAN (10) TABLESPACE hw_subpartition_tablespace_ts2
+    (
+        SUBPARTITION P_RANGE2_1 VALUES ( 1, 2, 3, 4, 5) TABLESPACE hw_subpartition_tablespace_ts1,
+        SUBPARTITION P_RANGE2_2 VALUES ( 6, 7, 8, 9,10) TABLESPACE hw_subpartition_tablespace_ts2,
+        SUBPARTITION P_RANGE2_3 VALUES (DEFAULT)
+    ),
+    PARTITION P_RANGE3 VALUES LESS THAN (15) TABLESPACE hw_subpartition_tablespace_ts3
+    (
+        SUBPARTITION P_RANGE3_1 VALUES ( 1, 2, 3, 4, 5) TABLESPACE hw_subpartition_tablespace_ts1,
+        SUBPARTITION P_RANGE3_2 VALUES ( 6, 7, 8, 9,10) TABLESPACE hw_subpartition_tablespace_ts2,
+        SUBPARTITION P_RANGE3_3 VALUES (11,12,13,14,15) TABLESPACE hw_subpartition_tablespace_ts3,
+        SUBPARTITION P_RANGE3_4 VALUES (16,17,18,19,20)
+    ),
+    PARTITION P_RANGE4 VALUES LESS THAN (20)
+    (
+        SUBPARTITION P_RANGE4_1 VALUES ( 1, 2, 3, 4, 5) TABLESPACE hw_subpartition_tablespace_ts1,
+        SUBPARTITION P_RANGE4_2 VALUES (DEFAULT) TABLESPACE hw_subpartition_tablespace_ts2
+    ),
+    PARTITION P_RANGE5 VALUES LESS THAN (25) TABLESPACE hw_subpartition_tablespace_ts3,
+    PARTITION P_RANGE6 VALUES LESS THAN (30)
+);
+
+CREATE INDEX t_range_list_idx ON t_range_list(c1,c2) LOCAL
+(
+    PARTITION idx_p1(
+        SUBPARTITION idx_p1_1 TABLESPACE hw_subpartition_tablespace_ts1,
+        SUBPARTITION idx_p1_2 TABLESPACE hw_subpartition_tablespace_ts2,
+        SUBPARTITION idx_p1_3 TABLESPACE hw_subpartition_tablespace_ts3,
+        SUBPARTITION idx_p1_4
+    ),
+    PARTITION idx_p2 TABLESPACE hw_subpartition_tablespace_ts2(
+        SUBPARTITION idx_p2_1,
+        SUBPARTITION idx_p2_2,
+        SUBPARTITION idx_p2_3
+    ),
+    PARTITION idx_p3 TABLESPACE hw_subpartition_tablespace_ts2(
+        SUBPARTITION idx_p3_1 TABLESPACE hw_subpartition_tablespace_ts1,
+        SUBPARTITION idx_p3_2 TABLESPACE hw_subpartition_tablespace_ts2,
+        SUBPARTITION idx_p3_3 TABLESPACE hw_subpartition_tablespace_ts3,
+        SUBPARTITION idx_p3_4
+    ),
+    PARTITION idx_p4(
+        SUBPARTITION idx_p4_1,
+        SUBPARTITION idx_p4_2 TABLESPACE hw_subpartition_tablespace_ts2
+    ),
+    PARTITION idx_p5 TABLESPACE hw_subpartition_tablespace_ts3(
+        SUBPARTITION idx_p5_1
+    ),
+    PARTITION idx_p6(
+        SUBPARTITION idx_p6_1 TABLESPACE hw_subpartition_tablespace_ts2
+    )
+) TABLESPACE hw_subpartition_tablespace_ts1;
+
+SELECT p.relname, t.spcname FROM pg_partition p, pg_class c, pg_namespace n, pg_tablespace t
+WHERE p.parentid = c.oid
+    AND c.relname='t_range_list_idx'
+    AND c.relnamespace=n.oid
+    AND n.nspname=CURRENT_SCHEMA
+    AND p.reltablespace = t.oid
+ORDER BY p.relname;
+
+SELECT pg_get_indexdef('hw_subpartition_tablespace.t_range_list_idx'::regclass);
+
+DROP TABLE t_range_list;
+
 --finish
 drop tablespace hw_subpartition_tablespace_ts1;
 drop tablespace hw_subpartition_tablespace_ts2;

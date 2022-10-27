@@ -965,7 +965,11 @@ static void fillPGconn(PGconn* conn, PQconninfoOption* connOptions)
     }
 #ifdef HAVE_CE
     tmp = conninfo_getval(connOptions, "enable_ce");
-    conn->client_logic->enable_client_encryption = (tmp != NULL) ? true : false;
+    if (tmp != NULL && strcmp(tmp, "1") == 0) {
+        conn->client_logic->enable_client_encryption = true;
+    } else {
+        conn->client_logic->enable_client_encryption = false;
+    }
 #endif
 }
 

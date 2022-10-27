@@ -186,7 +186,7 @@ static TupleTableSlot* ExecHashJoin(PlanState* state)
                 }
 
                 hashtable = ExecHashTableCreate((Hash*)hashNode->ps.plan, node->hj_HashOperators,
-                    HJ_FILL_INNER(node) || node->js.nulleqqual != NIL);
+                    HJ_FILL_INNER(node) || node->js.nulleqqual != NIL, node->hj_hash_collations);
                     
                 if (oldcxt) {
                     /*enable_memory_limit*/
@@ -670,6 +670,7 @@ HashJoinState* ExecInitHashJoin(HashJoin* node, EState* estate, int eflags)
     hjstate->hj_OuterHashKeys = lclauses;
     hjstate->hj_InnerHashKeys = rclauses;
     hjstate->hj_HashOperators = hoperators;
+    hjstate->hj_hash_collations = node->hash_collations;
     /* child Hash node needs to evaluate inner hash keys, too */
     ((HashState*)innerPlanState(hjstate))->hashkeys = rclauses;
 

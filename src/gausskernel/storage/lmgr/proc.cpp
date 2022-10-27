@@ -867,6 +867,8 @@ void InitProcess(void)
     t_thrd.pgxact->xid = InvalidTransactionId;
     t_thrd.pgxact->next_xid = InvalidTransactionId;
     t_thrd.pgxact->xmin = InvalidTransactionId;
+    t_thrd.proc->snapXmax = InvalidTransactionId;
+    t_thrd.proc->snapCSN = InvalidCommitSeqNo;
     t_thrd.pgxact->csn_min = InvalidCommitSeqNo;
     t_thrd.pgxact->csn_dr = InvalidCommitSeqNo;
     t_thrd.pgxact->prepare_xid = InvalidTransactionId;
@@ -1117,6 +1119,8 @@ void InitAuxiliaryProcess(void)
     t_thrd.pgxact->xid = InvalidTransactionId;
     t_thrd.pgxact->next_xid = InvalidTransactionId;
     t_thrd.pgxact->xmin = InvalidTransactionId;
+    t_thrd.proc->snapXmax = InvalidTransactionId;
+    t_thrd.proc->snapCSN = InvalidCommitSeqNo;
     t_thrd.pgxact->csn_min = InvalidCommitSeqNo;
     t_thrd.pgxact->csn_dr = InvalidCommitSeqNo;
     t_thrd.proc->backendId = InvalidBackendId;
@@ -2838,10 +2842,11 @@ bool pause_sig_alarm(bool is_statement_timeout)
 bool resume_sig_alarm(bool is_statement_timeout)
 {
     /*
-     * The time counter was not paused before if t_thrd.utils_cxt.timeIsPausing is false.
-     * You should not invoke resume_sig_alarm here.
+     * In case of network error or unchanged statistics, pause_sig_alarm may never be called.
      */
-    Assert(t_thrd.storage_cxt.timeIsPausing == true);
+    if (!t_thrd.storage_cxt.timeIsPausing) {
+        return true;
+    }
 
     if (enable_sig_alarm(t_thrd.storage_cxt.restimems, is_statement_timeout)) {
         t_thrd.storage_cxt.timeIsPausing = false;

@@ -13,6 +13,7 @@
 [ WITH [ RECURSIVE ] with_query [, ...] ]
 SELECT [/*+ plan_hint */] [ ALL | DISTINCT [ ON ( expression [, ...] ) ] ]
     { * | {expression [ [ AS ] output_name ]} [, ...] }
+    [into_option]
     [ FROM from_item [, ...] ]
     [ WHERE condition ]
     [ [ START WITH condition ] CONNECT BY condition [ ORDER SIBLINGS BY expression ] ]
@@ -24,9 +25,27 @@ SELECT [/*+ plan_hint */] [ ALL | DISTINCT [ ON ( expression [, ...] ) ] ]
     [ LIMIT { [offset,] count | ALL } ]
     [ OFFSET start [ ROW | ROWS ] ]
     [ FETCH { FIRST | NEXT } [ count ] { ROW | ROWS } ONLY ]
+    [into_option]
     [ {FOR { UPDATE | NO KEY UPDATE | SHARE | KEY SHARE } [ OF table_name [, ...] ] [ NOWAIT | WAIT N | SKIP LOCKED]} [...] ]
+    [into_option]
 TABLE { ONLY { (table_name) | table_name } | table_name [ * ]};
 
+where into_option can be:
+INTO var_name [, var_name] ...
+| INTO OUTFILE 'file_name'
+   [CHARACTER SET charset_name]
+   export_options
+| INTO DUMPFILE 'file_name'
+where export_options can be:
+[FIELDS
+	[TERMINATED BY 'string']
+	[[OPTIONALLY] ENCLOSED BY 'char']
+	[ESCAPED BY 'char' ]
+]
+[LINES
+	[STARTING BY 'string']
+	[TERMINATED BY 'string']
+]
 where from_item can be:
 [ ONLY ] table_name [ * ] [ partition_clause ] [ [ AS ] alias [ ( column_alias [, ...] ) ] ]
 [ TABLESAMPLE sampling_method ( argument [, ...] ) [ REPEATABLE ( seed ) ] ]
@@ -50,6 +69,7 @@ PARTITION { ( partition_name ) | FOR (  partition_value [, ...] ) }
 SUBPARTITION { ( subpartition_name ) | FOR (  subpartition_value [, ...] )}
 where nlssort_expression_clause can be:
 NLSSORT ( column_name, ' NLS_SORT = { SCHINESE_PINYIN_M | generic_m_ci } ' )
+NOTICE: [into_option] is only available in CENTRALIZED mode and B-format database.
 NOTICE: '[ [ START WITH condition ] CONNECT BY condition [ ORDER SIBLINGS BY expression ] ]' is only avaliable in CENTRALIZED mode!
 NOTICE: 'SUBPARTITION { ( subpartition_name ) | FOR (  subpartition_value [, ...] )}' is only avaliable in CENTRALIZED mode!
 </synopsis>

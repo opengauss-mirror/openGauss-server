@@ -43,6 +43,7 @@
 #include "catalog/catalog.h"
 #include "catalog/heap.h"
 #include "catalog/catversion.h"
+#include "catalog/gs_sql_patch.h"
 #include "catalog/index.h"
 #include "catalog/indexing.h"
 #include "catalog/namespace.h"
@@ -343,6 +344,7 @@ static const FormData_pg_attribute Desc_pg_replication_origin[Natts_pg_replicati
     Schema_pg_replication_origin
 };
 static const FormData_pg_attribute Desc_pg_subscription_rel[Natts_pg_subscription_rel] = {Schema_pg_subscription_rel};
+static const FormData_pg_attribute Desc_gs_sql_patch_origin[Natts_gs_sql_patch] = {Schema_gs_sql_patch};
 
 /* Please add to the array in ascending order of oid value */
 static struct CatalogRelationBuildParam catalogBuildParam[CATALOG_NUM] = {{DefaultAclRelationId,
@@ -1073,6 +1075,15 @@ static struct CatalogRelationBuildParam catalogBuildParam[CATALOG_NUM] = {{Defau
         Desc_gs_job_argument,
         false,
         true},
+    {GsSqlPatchRelationId, /* 9050 */
+        "gs_sql_patch",
+        GsSqlPatchRelationId_Rowtype_Id,
+        false,
+        false,
+        Natts_gs_sql_patch,
+        Desc_gs_sql_patch_origin,
+        false,
+        true},
     {GsGlobalConfigRelationId,
         "gs_global_config",
         GsGlobalConfigRelationId_Rowtype_Id,
@@ -1494,6 +1505,32 @@ static void RelationParseRelOptions(Relation relation, HeapTuple tuple)
     }
 }
 
+static void GetInitdvals(Relation rel, HeapTuple tuple, TupInitDefVal* initdvals, int index, bool *hasInitDefval)
+{
+    bool is_null = false;
+    Datum dval;
+ 
+    dval = fastgetattr(tuple, Anum_pg_attribute_attinitdefval, rel->rd_att, &is_null);
+        
+    if (is_null) {
+        initdvals[index].isNull = true;
+        initdvals[index].datum = NULL;
+        initdvals[index].dataLen = 0;
+    } else {
+        /* fetch and copy the default value. */
+        bytea* val = DatumGetByteaP(dval);
+        int len = VARSIZE(val) - VARHDRSZ;
+        char* buf = (char*)MemoryContextAlloc(LocalMyDBCacheMemCxt(), len);
+        errno_t rc = memcpy_s(buf, len, VARDATA(val), len);
+        securec_check(rc, "", "");
+ 
+        initdvals[index].isNull = false;
+        initdvals[index].datum = (Datum*)buf;
+        initdvals[index].dataLen = len;
+        *hasInitDefval = true;
+    }
+}
+
 /*
  *		RelationBuildTupleDesc
  *
@@ -1515,8 +1552,6 @@ static void RelationBuildTupleDesc(Relation relation, bool onlyLoadInitDefVal)
     int ndef = 0;
 
     /* alter table instantly */
-    Datum dval;
-    bool isNull = false;
     bool hasInitDefval = false;
     TupInitDefVal* initdvals = NULL;
 
@@ -1612,25 +1647,7 @@ static void RelationBuildTupleDesc(Relation relation, bool onlyLoadInitDefVal)
             securec_check(rc, "\0", "\0");
         }
         if (initdvals != NULL) {
-            dval = fastgetattr(pg_attribute_tuple, Anum_pg_attribute_attinitdefval, pg_attribute_desc->rd_att, &isNull);
-
-            if (isNull) {
-                initdvals[attp->attnum - 1].isNull = true;
-                initdvals[attp->attnum - 1].datum = NULL;
-                initdvals[attp->attnum - 1].dataLen = 0;
-            } else {
-                /* fetch and copy the default value. */
-                bytea* val = DatumGetByteaP(dval);
-                int len = VARSIZE(val) - VARHDRSZ;
-                char* buf = (char*)MemoryContextAlloc(LocalMyDBCacheMemCxt(), len);
-                errno_t rc = memcpy_s(buf, len, VARDATA(val), len);
-                securec_check(rc, "", "");
-
-                initdvals[attp->attnum - 1].isNull = false;
-                initdvals[attp->attnum - 1].datum = (Datum*)buf;
-                initdvals[attp->attnum - 1].dataLen = len;
-                hasInitDefval = true;
-            }
+            GetInitdvals(pg_attribute_desc, pg_attribute_tuple, initdvals, attp->attnum - 1, &hasInitDefval);
         }
 
         /* Update constraint/default info */
@@ -1653,6 +1670,46 @@ static void RelationBuildTupleDesc(Relation relation, bool onlyLoadInitDefVal)
                     (errcode(ERRCODE_INDEX_CORRUPTED),
                         errmsg("index data corrupted for %s", RelationGetRelationName(relation))));
         }
+    }
+
+    if (DB_IS_CMPT(B_FORMAT) && need == 1) {
+        Form_pg_attribute attp;
+ 
+        pg_attribute_tuple = SearchSysCache2(ATTNUM, ObjectIdGetDatum(RelationGetRelid(relation)), Int16GetDatum(0));
+        attp = (Form_pg_attribute)GETSTRUCT(pg_attribute_tuple);
+        if (HeapTupleIsValid(pg_attribute_tuple)) {
+            for (int i = 0; i < relation->rd_att->natts; i++) {
+                if (relation->rd_att->attrs[i].attnum == 0) {
+                    errno_t rc = memcpy_s(&relation->rd_att->attrs[i], ATTRIBUTE_FIXED_PART_SIZE,
+                        attp, ATTRIBUTE_FIXED_PART_SIZE);
+                    securec_check(rc, "\0", "\0");
+ 
+                    if (initdvals != NULL) {
+                        GetInitdvals(pg_attribute_desc, pg_attribute_tuple, initdvals, i, &hasInitDefval);
+                    }
+ 
+                    if (attp->attnotnull && !onlyLoadInitDefVal) {
+                        constr->has_not_null = true;
+                    }
+ 
+                    if (attp->atthasdef && !onlyLoadInitDefVal) {
+                        if (attrdef == NULL) {
+                            attrdef = (AttrDefault*)MemoryContextAllocZero(
+                                LocalMyDBCacheMemCxt(),
+                                RelationGetNumberOfAttributes(relation) * sizeof(AttrDefault));
+                        }
+                
+                        attrdef[ndef].adnum = i + 1;
+                        attrdef[ndef].adbin = NULL;
+                        ndef++;
+                    }
+                    break;
+ 
+                }
+            }
+            need--;
+        }
+        ReleaseSysCache(pg_attribute_tuple);
     }
 
     /*
@@ -3760,6 +3817,16 @@ void RelationClearRelation(Relation relation, bool rebuild)
         errno_t rc = memcpy_s(relation->rd_rel, CLASS_TUPLE_SIZE, newrel->rd_rel, CLASS_TUPLE_SIZE);
         securec_check(rc, "", "");
         if (newrel->partMap) {
+            /*
+             * The old partMap pointer has be used by a opened relation.
+             * Therefore, we need to ensure that the memory pointed to by the old partMap pointer cannot be freed
+             * and that the value in the memory pointed to by the old partMap pointer is new.
+             * 1. When the old and new partMaps are equal, keep old partMap pointer by SWAPFIELD.
+             *    Then new partMap will be destoryed later.
+             * 2. When the old and new partMaps are not equal, keep old partMap pointer by SWAPFIELD
+             *    and swap the memory that two partMap pointers point to in partition_rebuild_partmap.
+             *    The new partMap pointer and the memory it points to are then destroyed later.
+             */
             if (!keep_partmap) {
                 RebuildPartitonMap(newrel->partMap, relation->partMap);
             }
@@ -5611,48 +5678,69 @@ static void GeneratedColFetch(TupleConstr *constr, HeapTuple htup, Relation adre
             generatedCol = DatumGetChar(val);
         }
     }
-    attrdef[attrdefIndex].generatedCol = generatedCol;
-    genCols[attrdef[attrdefIndex].adnum - 1] = generatedCol;
+
     if (generatedCol == ATTRIBUTE_GENERATED_STORED) {
+        attrdef[attrdefIndex].generatedCol = generatedCol;
+        genCols[attrdef[attrdefIndex].adnum - 1] = generatedCol;
         constr->has_generated_stored = true;
     }
 }
 
-static void AttrAutoIncrementFetch(Relation relation, AttrNumber attnum, char* adbin)
+static void AttrAutoIncrementFetch(Relation relation, AttrNumber attnum, char* adbin, const char* adsrc)
 {
-    ConstrAutoInc* cons_autoinc = NULL;
-    AutoIncrement* autoinc = NULL;
-    const FmgrBuiltin* castfunc = NULL;
-    Node *adexpr = (Node*)stringToNode_skip_extern_fields(adbin);
-    Assert(adexpr != NULL);
-    if (!IsA(adexpr, AutoIncrement)) {
+    if (adsrc == NULL || strcmp(adsrc, "AUTO_INCREMENT") != 0) {
         return;
     }
 
-    autoinc = (AutoIncrement*)adexpr;
-    cons_autoinc = (ConstrAutoInc*)MemoryContextAllocZero(LocalMyDBCacheMemCxt(), sizeof(ConstrAutoInc));
-    cons_autoinc->attnum = attnum;
-    if (relation->rd_rel->relpersistence == RELPERSISTENCE_TEMP) {
-        cons_autoinc->next = find_tmptable_cache_autoinc(relation->rd_rel->relfilenode);
-        cons_autoinc->seqoid = InvalidOid;
-    } else {
-        cons_autoinc->next = NULL;
-        find_nextval_seqoid_walker(adexpr, &cons_autoinc->seqoid);
-    }
+    ConstrAutoInc* cons_autoinc = NULL;
+    Node *adexpr = NULL;
+    AutoIncrement* autoinc = NULL;
+    const FmgrBuiltin* castfunc = NULL;
+    MemoryContext tmp_cxt;
+    MemoryContext old_cxt;
+ 
+    /* We cannot free Node *adexpr. So we use tmp_cxt to prevent memory leaks. */
+    tmp_cxt = AllocSetContextCreate(CurrentMemoryContext, "auto_increment temporary cxt",
+        ALLOCSET_SMALL_MINSIZE, ALLOCSET_SMALL_INITSIZE, ALLOCSET_SMALL_MAXSIZE);
+ 
+    PG_TRY();
+    {
+        old_cxt = MemoryContextSwitchTo(tmp_cxt);
+        adexpr = (Node*)stringToNode_skip_extern_fields(adbin);
+        (void)MemoryContextSwitchTo(old_cxt);
+        Assert(IsA(adexpr, AutoIncrement));
+        autoinc = (AutoIncrement*)adexpr;
+        cons_autoinc = (ConstrAutoInc*)MemoryContextAllocZero(LocalMyDBCacheMemCxt(), sizeof(ConstrAutoInc));
+        cons_autoinc->attnum = attnum;
+        if (relation->rd_rel->relpersistence == RELPERSISTENCE_TEMP) {
+            cons_autoinc->next = find_tmptable_cache_autoinc(relation->rd_rel->relfilenode);
+            cons_autoinc->seqoid = InvalidOid;
+        } else {
+            cons_autoinc->next = NULL;
+            find_nextval_seqoid_walker(adexpr, &cons_autoinc->seqoid);
+        }
 
-    castfunc = (const FmgrBuiltin*)SearchBuiltinFuncByOid(autoinc->autoincin_funcid);
-    cons_autoinc->datum2autoinc_func = castfunc ? (void*)(uintptr_t)castfunc->func : NULL;
-    if (cons_autoinc->datum2autoinc_func == NULL && u_sess->hook_cxt.searchFuncHook != NULL) {
-       PGFunction castFunc2 = ((searchFunc)(u_sess->hook_cxt.searchFuncHook))(autoinc->autoincin_funcid);
-        cons_autoinc->datum2autoinc_func = castFunc2 ?  (void*)(uintptr_t)castFunc2 : NULL;
+        castfunc = (const FmgrBuiltin*)SearchBuiltinFuncByOid(autoinc->autoincin_funcid);
+        cons_autoinc->datum2autoinc_func = castfunc ? (void*)(uintptr_t)castfunc->func : NULL;
+        if (cons_autoinc->datum2autoinc_func == NULL && u_sess->hook_cxt.searchFuncHook != NULL) {
+            PGFunction castFunc2 = ((searchFunc)(u_sess->hook_cxt.searchFuncHook))(autoinc->autoincin_funcid);
+            cons_autoinc->datum2autoinc_func = castFunc2 ?  (void*)(uintptr_t)castFunc2 : NULL;
+        }
+        castfunc = (const FmgrBuiltin*)SearchBuiltinFuncByOid(autoinc->autoincout_funcid);
+        cons_autoinc->autoinc2datum_func = castfunc ? (void*)(uintptr_t)castfunc->func : NULL;
+        if (cons_autoinc->autoinc2datum_func == NULL && u_sess->hook_cxt.searchFuncHook != NULL) {
+            PGFunction castFunc2 = ((searchFunc)(u_sess->hook_cxt.searchFuncHook))(autoinc->autoincout_funcid);
+            cons_autoinc->autoinc2datum_func = castFunc2 ? (void*)(uintptr_t)castFunc2 : NULL;
+        }
+        relation->rd_att->constr->cons_autoinc = cons_autoinc;
     }
-    castfunc = (const FmgrBuiltin*)SearchBuiltinFuncByOid(autoinc->autoincout_funcid);
-    cons_autoinc->autoinc2datum_func = castfunc ? (void*)(uintptr_t)castfunc->func : NULL;
-    if (cons_autoinc->autoinc2datum_func == NULL && u_sess->hook_cxt.searchFuncHook != NULL) {
-        PGFunction castFunc2 = ((searchFunc)(u_sess->hook_cxt.searchFuncHook))(autoinc->autoincout_funcid);
-        cons_autoinc->autoinc2datum_func = castFunc2 ? (void*)(uintptr_t)castFunc2 : NULL;
+    PG_CATCH();
+    {
+        MemoryContextDelete(tmp_cxt);
+        PG_RE_THROW();
     }
-    relation->rd_att->constr->cons_autoinc = cons_autoinc;
+    PG_END_TRY();
+    MemoryContextDelete(tmp_cxt);
 }
 
 /*
@@ -5665,16 +5753,54 @@ static void UpdatedColFetch(TupleConstr *constr, HeapTuple htup, Relation adrel,
     bool updatedCol = false;
     if (HeapTupleHeaderGetNatts(htup->t_data, adrel->rd_att) >= Anum_pg_attrdef_adsrc_on_update) {
         bool isnull = false;
-        Datum val;
-        val = fastgetattr(htup, Anum_pg_attrdef_adsrc_on_update, adrel->rd_att, &isnull);
-        if (val && pg_strcasecmp(TextDatumGetCString(val), "") != 0) {
+        Datum val = fastgetattr(htup, Anum_pg_attrdef_adsrc_on_update, adrel->rd_att, &isnull);
+        char* adsrc_str = isnull ? NULL : TextDatumGetCString(val);
+        if (adsrc_str && pg_strcasecmp(adsrc_str, "") != 0) {
             updatedCol = true;
         } else {
             updatedCol = false;
         }
+        pfree_ext(adsrc_str);
     }
     attrdef[attrdefIndex].has_on_update = updatedCol;
     on_update[attrdef[attrdefIndex].adnum - 1] = updatedCol;
+}
+
+static void GetDefaultAttr(Relation relation, Relation adrel, HeapTuple htup, int attrdef_index, int attnum)
+{
+    Datum val;
+    bool isnull = false;
+    AttrDefault *attrdef =  relation->rd_att->constr->defval;
+
+    if (t_thrd.proc->workingVersionNum >= GENERATED_COL_VERSION_NUM) {
+        GeneratedColFetch(relation->rd_att->constr, htup, adrel, attrdef_index);
+    }
+
+    UpdatedColFetch(relation->rd_att->constr, htup, adrel, attrdef_index);
+
+    val = fastgetattr(htup, Anum_pg_attrdef_adbin, adrel->rd_att, &isnull);
+    if (isnull) {
+        ereport(WARNING, (errmsg("null adbin for attr %s of rel %s",
+            NameStr(relation->rd_att->attrs[attnum - 1].attname), RelationGetRelationName(relation))));
+    } else {
+        char* adsrc_str = NULL;
+        char* adbin_str = TextDatumGetCString(val);
+        attrdef[attrdef_index].adbin = MemoryContextStrdup(LocalMyDBCacheMemCxt(), adbin_str);
+        val = fastgetattr(htup, Anum_pg_attrdef_adsrc, adrel->rd_att, &isnull);
+        adsrc_str  = (isnull) ? NULL : TextDatumGetCString(val);
+        if (!attrdef[attrdef_index].has_on_update) {
+            AttrAutoIncrementFetch(relation, attnum, adbin_str, adsrc_str);
+        }
+        pfree(adbin_str);
+        pfree_ext(adsrc_str);
+    }
+
+    val = fastgetattr(htup, Anum_pg_attrdef_adbin_on_update, adrel->rd_att, &isnull);
+    if (!isnull) {
+        char* adbin_str = TextDatumGetCString(val);
+        attrdef[attrdef_index].adbin_on_update = MemoryContextStrdup(LocalMyDBCacheMemCxt(), adbin_str);
+        pfree(adbin_str);
+    }
 }
 
 /*
@@ -5686,8 +5812,6 @@ static void AttrDefaultFetch(Relation relation)
     int ndef = relation->rd_att->constr->num_defval;
     ScanKeyData skey;
     HeapTuple htup;
-    Datum val;
-    bool isnull = false;
     int i;
     int found = 0;
 
@@ -5698,6 +5822,14 @@ static void AttrDefaultFetch(Relation relation)
 
     while (HeapTupleIsValid(htup = systable_getnext(adscan))) {
         Form_pg_attrdef adform = (Form_pg_attrdef)GETSTRUCT(htup);
+        if (DB_IS_CMPT(B_FORMAT)) {
+            if (adform->adnum == 0) {
+                found++;
+ 
+                GetDefaultAttr(relation, adrel, htup, ndef - 1, attrdef[ndef - 1].adnum);
+                continue;
+            }
+        }
 
         for (i = 0; i < ndef; i++) {
             if (adform->adnum != attrdef[i].adnum)
@@ -5709,26 +5841,7 @@ static void AttrDefaultFetch(Relation relation)
             else
                 found++;
 
-            if (t_thrd.proc->workingVersionNum >= GENERATED_COL_VERSION_NUM) {
-                GeneratedColFetch(relation->rd_att->constr, htup, adrel, i);
-            }
-
-            UpdatedColFetch(relation->rd_att->constr, htup, adrel, i);
-
-            val = fastgetattr(htup, Anum_pg_attrdef_adbin, adrel->rd_att, &isnull);
-            if (isnull) {
-                ereport(WARNING, (errmsg("null adbin for attr %s of rel %s",
-                    NameStr(relation->rd_att->attrs[adform->adnum - 1].attname), RelationGetRelationName(relation))));
-            } else {
-                attrdef[i].adbin = MemoryContextStrdup(LocalMyDBCacheMemCxt(), TextDatumGetCString(val));
-                if (!attrdef[i].has_on_update) {
-                    AttrAutoIncrementFetch(relation, adform->adnum, attrdef[i].adbin);
-                }
-            }
-
-            val = fastgetattr(htup, Anum_pg_attrdef_adbin_on_update, adrel->rd_att, &isnull);
-            if (!isnull)
-                attrdef[i].adbin_on_update = MemoryContextStrdup(LocalMyDBCacheMemCxt(), TextDatumGetCString(val));
+            GetDefaultAttr(relation, adrel, htup, i, adform->adnum);
             break;
         }
 
@@ -5772,6 +5885,7 @@ static void CheckConstraintFetch(Relation relation)
 
     while (HeapTupleIsValid(htup = systable_getnext(conscan))) {
         Form_pg_constraint conform = (Form_pg_constraint)GETSTRUCT(htup);
+        char* ccbin_str = NULL;
 
         /* We want check constraints only */
         if (conform->contype != CONSTRAINT_CHECK)
@@ -5792,8 +5906,9 @@ static void CheckConstraintFetch(Relation relation)
             ereport(ERROR,
                 (errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
                     errmsg("null conbin for rel %s", RelationGetRelationName(relation))));
-
-        check[found].ccbin = MemoryContextStrdup(LocalMyDBCacheMemCxt(), TextDatumGetCString(val));
+        ccbin_str = TextDatumGetCString(val);
+        check[found].ccbin = MemoryContextStrdup(LocalMyDBCacheMemCxt(), ccbin_str);
+        pfree(ccbin_str);
         found++;
     }
 
@@ -8572,5 +8687,27 @@ char RelationGetRelReplident(Relation r)
     ReleaseSysCache(tuple);
 
     return relreplident;
+}
+
+bool IsRelationReplidentKey(Relation r, int attno)
+{
+    if (RelationGetRelReplident(r) == REPLICA_IDENTITY_FULL)
+        return true;
+
+    Oid replidindex = RelationGetReplicaIndex(r);
+    if (!OidIsValid(replidindex))
+        return true;
+
+    Relation idx_rel = RelationIdGetRelation(replidindex);
+
+    for (int natt = 0; natt < IndexRelationGetNumberOfKeyAttributes(idx_rel); natt++) {
+        if (idx_rel->rd_index->indkey.values[natt] == attno) {
+            RelationClose(idx_rel);
+            return true;
+        }
+    }
+
+    RelationClose(idx_rel);
+    return false;
 }
 

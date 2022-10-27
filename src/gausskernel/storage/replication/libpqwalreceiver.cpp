@@ -798,7 +798,8 @@ retry:
     }
 
 #ifndef ENABLE_MULTIPLE_NODES
-    if (t_thrd.xlog_cxt.is_cascade_standby && !t_thrd.postmaster_cxt.HaShmData->is_cross_region) {
+    if (g_instance.attr.attr_storage.enable_availablezone &&
+        t_thrd.xlog_cxt.is_cascade_standby && !t_thrd.postmaster_cxt.HaShmData->is_cross_region) {
         IdentifyRemoteAvailableZone();
     }
 #endif

@@ -37,6 +37,7 @@ void smgr_desc(StringInfo buf, XLogReaderState *record)
 {
     char *rec = XLogRecGetData(record);
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
+    bool compress = (bool)(XLogRecGetInfo(record) & XLR_REL_COMPRESS);
     if (info == XLOG_SMGR_CREATE) {
         xl_smgr_create *xlrec = (xl_smgr_create *)rec;
         RelFileNode rnode;
@@ -44,7 +45,7 @@ void smgr_desc(StringInfo buf, XLogReaderState *record)
         rnode.opt = GetCreateXlogFileNodeOpt(record);
         char *path = relpathperm(rnode, xlrec->forkNum);
 
-        appendStringInfo(buf, "file create: %s", path);
+        appendStringInfo(buf, "file create: %s%s", path, compress ? COMPRESS_STR : "");
 #ifdef FRONTEND
         free(path);
         path = NULL;
@@ -58,7 +59,7 @@ void smgr_desc(StringInfo buf, XLogReaderState *record)
         rnode.opt = GetTruncateXlogFileNodeOpt(record);
         char *path = relpathperm(rnode, MAIN_FORKNUM);
 
-        appendStringInfo(buf, "file truncate: %s to %u blocks", path, xlrec->blkno);
+        appendStringInfo(buf, "file truncate: %s%s to %u blocks", path, compress ? COMPRESS_STR : "", xlrec->blkno);
 #ifdef FRONTEND
         free(path);
         path = NULL;

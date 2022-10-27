@@ -102,6 +102,7 @@ typedef struct GPCPlainEnv
     int constraint_exclusion;    // QUERY_TUNING_OTHER
     int qrw_inlist2join_optmode;// QUERY_TUNING_OTHER2
     int skew_strategy_store;// QUERY_TUNING_OTHER2
+    unsigned int b_format_behavior_compat_flags;
     unsigned int behavior_compat_flags;
     unsigned int plsql_compile_behavior_compat_flags;
     int datestyle;

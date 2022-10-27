@@ -71,7 +71,7 @@
 
 typedef struct pull_hint_warning_context {
     List* warning;
-} pull_qual_vars_context;
+} pull_hint_warning_context;
 
 #define append_warning_to_list(root, hint, format, ...)                                     \
     do {                                                                                    \
@@ -316,7 +316,7 @@ extern void transform_hints(PlannerInfo* root, Query* parse, HintState* hstate);
 
 extern void check_scan_hint_validity(PlannerInfo* root);
 extern void adjust_scanhint_relid(HintState* hstate, Index oldIdx, Index newIdx);
-extern bool pull_hint_warning_walker(Node* node, pull_qual_vars_context* context);
+extern bool pull_hint_warning_walker(Node* node, pull_hint_warning_context* context);
 extern List* retrieve_query_hint_warning(Node* parse);
 extern void output_utility_hint_warning(Node* query, int lev);
 extern void output_hint_warning(List* warning, int lev);

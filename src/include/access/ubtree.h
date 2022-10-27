@@ -484,7 +484,8 @@ extern bool UBTreeDoDelete(Relation rel, IndexTuple itup, bool isRollbackIndex);
 extern bool UBTreePagePruneOpt(Relation rel, Buffer buf, bool tryDelete);
 extern bool UBTreePagePrune(Relation rel, Buffer buf, TransactionId oldestXmin, OidRBTree *invisibleParts = NULL);
 extern bool UBTreePruneItem(Page page, OffsetNumber offnum, TransactionId oldestXmin, IndexPruneState* prstate);
-extern void UBTreePagePruneExecute(Page page, OffsetNumber* nowdead, int ndead, IndexPruneState* prstate);
+extern void UBTreePagePruneExecute(Page page, OffsetNumber* nowdead, int ndead, IndexPruneState* prstate,
+    TransactionId oldest_xmin);
 extern void UBTreePageRepairFragmentation(Relation rel, BlockNumber blkno, Page page);
 
 extern void UBTreeInsertParent(Relation rel, Buffer buf, Buffer rbuf, BTStack stack, bool is_root, bool is_only);

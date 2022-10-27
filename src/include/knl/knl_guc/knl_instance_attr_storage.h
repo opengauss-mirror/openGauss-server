@@ -138,6 +138,7 @@ typedef struct knl_instance_attr_storage {
     bool gucMostAvailableSync;
     bool enable_ustore;
     bool auto_csn_barrier;
+    bool enable_availablezone;
     bool enable_wal_shipping_compression;
     int WalReceiverBufSize;
     int DataQueueBufSize;

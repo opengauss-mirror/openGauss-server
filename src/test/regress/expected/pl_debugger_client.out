@@ -1286,7 +1286,7 @@ select * from dbe_pldebugger.set_var('test.c', '$$2021-07-31$$::timestamp'); -- 
 (1 row)
 
 select * from dbe_pldebugger.set_var('vrec', '(1,1,1)::test%rowtype'); -- not ok
-WARNING:  Exception occurs when trying to set variable: syntax error at or near "rowtype"
+WARNING:  Exception occurs when trying to set variable: cannot cast type record to test
  set_var 
 ---------
  f

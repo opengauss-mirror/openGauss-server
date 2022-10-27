@@ -215,3 +215,31 @@ Oid get_rewrite_oid_without_relid(const char* rulename, Oid* reloid, bool missin
 
     return ruleoid;
 }
+
+Oid get_rewrite_relid(Oid ruleid, bool missing_ok)
+{
+    Oid relid;
+    ScanKeyData entry;
+    SysScanDesc scan;
+    HeapTuple rewrite_tup;
+    Relation rewrite_rel = heap_open(RewriteRelationId, AccessShareLock);
+
+    ScanKeyInit(&entry, ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(ruleid));
+    scan = systable_beginscan(rewrite_rel, RewriteOidIndexId, true, NULL, 1, &entry);
+    rewrite_tup = systable_getnext(scan);
+    if (!HeapTupleIsValid(rewrite_tup)) {
+        if (missing_ok) {
+            systable_endscan(scan);
+            heap_close(rewrite_rel, AccessShareLock);
+            return InvalidOid;
+        }
+        ereport(ERROR,
+            (errcode(ERRCODE_UNDEFINED_OBJECT),
+                errmsg("rule \"%u\" does not exist", ruleid)));
+    }
+    Form_pg_rewrite pg_rewrite = (Form_pg_rewrite)GETSTRUCT(rewrite_tup);
+    relid = pg_rewrite->ev_class;
+    systable_endscan(scan);
+    heap_close(rewrite_rel, AccessShareLock);
+    return relid;
+}

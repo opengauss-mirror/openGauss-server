@@ -38,6 +38,9 @@
  *	  Backend version and inplace upgrade staffs
  *****************************************************************************/
 
+extern const uint32 PARTITION_ENHANCE_VERSION_NUM;
+extern const uint32 SELECT_INTO_FILE_VERSION_NUM;
+extern const uint32 CHARACTER_SET_VERSION_NUM;
 extern const uint32 SELECT_INTO_VAR_VERSION_NUM;
 extern const uint32 LARGE_SEQUENCE_VERSION_NUM;
 extern const uint32 GRAND_VERSION_NUM;
@@ -121,11 +124,28 @@ extern const uint32 FDW_SUPPORT_JOIN_AGG_VERSION_NUM;
 extern const uint32 UNION_NULL_VERSION_NUM;
 extern const uint32 INSERT_RIGHT_REF_VERSION_NUM;
 extern const uint32 CREATE_INDEX_IF_NOT_EXISTS_VERSION_NUM;
+extern const uint32 SLOW_SQL_VERSION_NUM;
 
 extern void register_backend_version(uint32 backend_version);
 extern bool contain_backend_version(uint32 version_number);
 
 #define INPLACE_UPGRADE_PRECOMMIT_VERSION 1
+
+// b_format_behavior_compat_options params
+#define B_FORMAT_OPT_ENABLE_SET_SESSION_TRANSACTION 1
+#define B_FORMAT_OPT_ENABLE_SET_VARIABLES 2
+#define B_FORMAT_OPT_ENABLE_MODIFY_COLUMN 4
+#define B_FORMAT_OPT_DEFAULT_COLLATION 8
+#define B_FORMAT_OPT_MAX 4
+
+#define ENABLE_SET_SESSION_TRANSACTION                                                                   \
+    ((u_sess->utils_cxt.b_format_behavior_compat_flags & B_FORMAT_OPT_ENABLE_SET_SESSION_TRANSACTION) && \
+     u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
+#define ENABLE_SET_VARIABLES (u_sess->utils_cxt.b_format_behavior_compat_flags & B_FORMAT_OPT_ENABLE_SET_VARIABLES)
+#define USE_DEFAULT_COLLATION (u_sess->utils_cxt.b_format_behavior_compat_flags & B_FORMAT_OPT_DEFAULT_COLLATION)
+#define ENABLE_MODIFY_COLUMN \
+        ((u_sess->utils_cxt.b_format_behavior_compat_flags & B_FORMAT_OPT_ENABLE_MODIFY_COLUMN) && \
+        u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
 
 #define OPT_DISPLAY_LEADING_ZERO 1
 #define OPT_END_MONTH_CALCULATE 2

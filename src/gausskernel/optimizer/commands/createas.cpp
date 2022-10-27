@@ -39,6 +39,7 @@
 #include "optimizer/planner.h"
 #include "parser/analyze.h"
 #include "parser/parse_clause.h"
+#include "parser/parse_utilcmd.h"
 #include "rewrite/rewriteHandler.h"
 #include "storage/smgr/smgr.h"
 #include "tcop/tcopprot.h"
@@ -321,6 +322,7 @@ static void intorel_startup(DestReceiver* self, int operation, TupleDesc typeinf
     create->row_compress = into->row_compress;
     create->tablespacename = into->tableSpaceName;
     create->if_not_exists = false;
+    create->charset = PG_INVALID_ENCODING;
 
     /* Using Materialized view only */
     create->ivm = into->ivm;
@@ -368,6 +370,7 @@ static void intorel_startup(DestReceiver* self, int operation, TupleDesc typeinf
         coltype->arrayBounds = NIL;
         coltype->location = -1;
         coltype->pct_rowtype = false;
+        coltype->charset = get_charset_by_collation(attribute->attcollation);
 
         /*
          * It's possible that the column is of a collatable type but the

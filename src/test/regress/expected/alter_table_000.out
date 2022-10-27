@@ -49,11 +49,17 @@ column_clause
     | ENCRYPTION KEY ROTATION
     | AUTO_INCREMENT [ = ] value
     | ALTER INDEX index_name [ VISBLE | INVISIBLE ]
+    | [ [ DEFAULT ] CHARACTER SET | CHARSET [ = ] charset ] [ [ DEFAULT ] COLLATE [ = ] collation ]
+    | CONVERT TO CHARACTER SET | CHARSET charset [ COLLATE collation ]
+NOTICE: '[ CHARACTER SET | CHARSET ]' is only available in CENTRALIZED mode and B-format database!
+NOTICE: '[ COLLATE ]' is only available in CENTRALIZED mode and B-format database!
 where column_clause can be:
-ADD [ COLUMN ] column_name data_type [ compress_mode ] [ COLLATE collation ] [ column_constraint [ ... ] ]
+ADD [ COLUMN ] column_name data_type [ CHARACTER SET | CHARSET charset ] [ compress_mode ] [ COLLATE collation ] [ column_constraint [ ... ] ] [ FIRST | AFTER column_name ]
     | MODIFY column_name data_type
     | MODIFY column_name [ CONSTRAINT constraint_name ] NOT NULL [ ENABLE ]
     | MODIFY column_name [ CONSTRAINT constraint_name ] NULL
+    | MODIFY [ COLUMN ] column_name data_type [ CHARACTER SET | CHARSET charset ] [ COLLATE collation ] [ column_constraint [ ... ] ] [FIRST | AFTER column_name]
+    | CHANGE [ COLUMN ] column_name new_column_name data_type [ CHARACTER SET | CHARSET charset ] [ COLLATE collation ] [ column_constraint [ ... ] ] [FIRST | AFTER column_name]
     | DROP [ COLUMN ] [ IF EXISTS ] column_name [ RESTRICT | CASCADE ]
     | ALTER [ COLUMN ] column_name [ SET DATA ] TYPE data_type [ COLLATE collation ] [ USING expression ]
     | ALTER [ COLUMN ] column_name { SET DEFAULT expression | DROP DEFAULT }
@@ -64,20 +70,23 @@ ADD [ COLUMN ] column_name data_type [ compress_mode ] [ COLLATE collation ] [ c
     | ALTER [ COLUMN ] column_name SET ( {attribute_option = value} [, ... ] )
     | ALTER [ COLUMN ] column_name RESET ( attribute_option [, ... ] )
     | ALTER [ COLUMN ] column_name SET STORAGE { PLAIN | EXTERNAL | EXTENDED | MAIN }
+NOTICE: 'MODIFY [ COLUMN ] ...' action is only available in CENTRALIZED mode and B-format database!
+NOTICE: 'CHANGE [ COLUMN ] ...' action is only available in CENTRALIZED mode and B-format database!
 where column_constraint can be:
 [ CONSTRAINT constraint_name ]
     { NOT NULL |
       NULL |
       CHECK ( expression ) |
       DEFAULT default_expr |
-      GENERATED ALWAYS AS ( generation_expr ) STORED |
+      GENERATED ALWAYS AS ( generation_expr ) [STORED] |
       AUTO_INCREMENT |
-      UNIQUE index_parameters |
+      UNIQUE [KEY] index_parameters |
       PRIMARY KEY index_parameters |
       ENCRYPTED WITH ( COLUMN_ENCRYPTION_KEY = column_encryption_key, ENCRYPTION_TYPE = encryption_type_value ) |
       REFERENCES reftable [ ( refcolumn ) ] [ MATCH FULL | MATCH PARTIAL | MATCH SIMPLE ]
         [ ON DELETE action ] [ ON UPDATE action ] }
     [ DEFERRABLE | NOT DEFERRABLE | INITIALLY DEFERRED | INITIALLY IMMEDIATE ]
+NOTICE: 'UNIQUE KEY' in table_constraint is only available in CENTRALIZED mode and B-format database!
 where compress_mode can be:
 { DELTA | PREFIX | DICTIONARY | NUMSTR | NOCOMPRESS }
 where table_constraint can be:
@@ -98,11 +107,14 @@ where table_constraint_using_index can be:
     [ DEFERRABLE | NOT DEFERRABLE | INITIALLY DEFERRED | INITIALLY IMMEDIATE ]
 
 NOTICE: '[ constraint_name ]' in table_constraint is optional in CENTRALIZED mode and B-format database, it is mandatory in other scenarios.
-NOTICE: '[ index_name ]' in table_constraint is only avaliable in CENTRALIZED mode and B-format database!
-NOTICE: '[ USING method ]' in table_constraint is only avaliable in CENTRALIZED mode and B-format database!
-NOTICE: '[ ASC | DESC ]' in table_constraint is only avaliable in CENTRALIZED mode and B-format database!
-NOTICE: '( expression )' in 'UNIQUE' clause of table_constraint is only avaliable in CENTRALIZED mode and B-format database!
-NOTICE: 'AUTO_INCREMENT' is only avaliable in CENTRALIZED mode and B-format database!
+NOTICE: '[ index_name ]' in table_constraint is only available in CENTRALIZED mode and B-format database!
+NOTICE: '[ USING method ]' in table_constraint is only available in CENTRALIZED mode and B-format database!
+NOTICE: '[ ASC | DESC ]' in table_constraint is only available in CENTRALIZED mode and B-format database!
+NOTICE: '( expression )' in 'UNIQUE' clause of table_constraint is only available in CENTRALIZED mode and B-format database!
+NOTICE: 'AUTO_INCREMENT' is only available in CENTRALIZED mode and B-format database!
+NOTICE: '[ FIRST | AFTER column_name ]' clause is only available in CENTRALIZED mode!
+NOTICE: '[ FIRST | AFTER column_name ]' in 'MODIFY | CHANGE [ COLUMN ] ...' clause is only available in B-format database!
+NOTICE: '[ CHARACTER SET | CHARSET charset ]' is only available in CENTRALIZED mode and B-format database!
 NOTICE: '[ VISIBLE | INVISIBLE ]' is only avaliable in CENTRALIZED mode and B-format database!
 
 --custom script

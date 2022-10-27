@@ -10,8 +10,8 @@ CREATE TABLE IF NOT EXISTS pg_catalog.gs_model_warehouse
     createtime timestamp with time zone NOCOMPRESS NOT NULL,
     processedtuples int4 NOCOMPRESS NOT NULL,
     discardedtuples int4 NOCOMPRESS NOT NULL,
-    pre_process_time float4 NOCOMPRESS NOT NULL,
-    exec_time float4 NOCOMPRESS NOT NULL,
+    preprocesstime float4 NOCOMPRESS NOT NULL,
+    exectime float4 NOCOMPRESS NOT NULL,
     iterations int4 NOCOMPRESS NOT NULL,
     outputtype Oid NOCOMPRESS NOT NULL,
     modeltype text,
@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS pg_catalog.gs_model_warehouse
     trainingscoresname text[1],
     trainingscoresvalue float4[1],
     modeldescribe text[1]
-)WITH OIDS TABLESPACE pg_default;
+)WITH OIDS;
 
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0, 0, 0, 3992;
 CREATE UNIQUE INDEX gs_model_oid_index ON pg_catalog.gs_model_warehouse USING BTREE(oid OID_OPS);
@@ -44,6 +44,22 @@ CREATE SCHEMA db4ai;
 COMMENT ON schema db4ai IS 'db4ai schema';
 GRANT USAGE ON SCHEMA db4ai TO PUBLIC;
 CREATE TYPE db4ai.snapshot_name AS ("schema" NAME, "name" NAME);
+
+DO $$
+DECLARE 
+query_str text; 
+ans bool;
+BEGIN
+    select case when count(*)=1 then true else false end as ans from (select *from pg_class where relname='snapshot_sequence') into ans;
+    if ans = false then
+        query_str := 'CREATE SEQUENCE db4ai.snapshot_sequence;';
+        EXECUTE IMMEDIATE query_str;
+    end if;
+    update pg_class set relacl = null where relname = 'snapshot_sequence' and relnamespace = 4991;
+    query_str := 'GRANT UPDATE ON db4ai.snapshot_sequence TO PUBLIC;';
+    EXECUTE IMMEDIATE query_str;
+END$$;
+
 CREATE TABLE IF NOT EXISTS db4ai.snapshot
 (
     id BIGINT UNIQUE,                           -- snapshot id (surrogate key)

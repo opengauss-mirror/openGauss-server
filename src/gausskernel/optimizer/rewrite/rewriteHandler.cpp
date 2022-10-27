@@ -34,6 +34,7 @@
 #include "parser/parse_coerce.h"
 #include "parser/parsetree.h"
 #include "parser/parse_merge.h"
+#include "parser/parse_hint.h"
 #include "rewrite/rewriteDefine.h"
 #include "rewrite/rewriteHandler.h"
 #include "rewrite/rewriteManip.h"
@@ -4410,6 +4411,7 @@ char* GetCreateTableStmt(Query* parsetree, CreateTableAsStmt* stmt)
     /* Start building a CreateStmt for creating the target table */
     CreateStmt* create_stmt = makeNode(CreateStmt);
     create_stmt->relation = stmt->into->rel;
+    create_stmt->charset = PG_INVALID_ENCODING;
     IntoClause* into = stmt->into;
     List* tableElts = NIL;
 
@@ -4475,6 +4477,7 @@ char* GetCreateTableStmt(Query* parsetree, CreateTableAsStmt* stmt)
         coldef->cooked_default = NULL;
         coldef->update_default = NULL;
         coldef->constraints = NIL;
+        coldef->collOid = exprCollation((Node*)tle->expr);
 
         /*
          * Set typeOid and typemod. The name of the type is derived while
@@ -4482,6 +4485,7 @@ char* GetCreateTableStmt(Query* parsetree, CreateTableAsStmt* stmt)
          */
         tpname->typeOid = exprType((Node*)tle->expr);
         tpname->typemod = exprTypmod((Node*)tle->expr);
+        tpname->charset = exprCharset((Node*)tle->expr);
 
         /* 
          * If the column of source relation is encrypted
@@ -4570,6 +4574,31 @@ static bool selectNeedRecovery(Query* query)
     return strcasestr(query->sql_statement, "CONNECT") != NULL;
 }
 
+/*
+ * @Description: copy(shallow) hints which needs to be displayed in top.
+*                (e.g. pull "select HINT..."  to "Insert HINT INTO XXX SELECT HINT..." )
+ * @in src: hint state.
+ * @out dest: hint state.
+ */
+static void _copy_top_HintState(HintState *dest, HintState *src)
+{
+    if (dest == NULL || src == NULL) {
+        return;
+    }
+
+    dest->stream_hint = src->stream_hint;
+    dest->gather_hint = src->gather_hint;
+    dest->cache_plan_hint = src->cache_plan_hint;
+    dest->set_hint = src->set_hint;
+    dest->no_gpc_hint = src->no_gpc_hint;
+    dest->multi_node_hint = src->multi_node_hint;
+    dest->skew_hint = src->skew_hint;
+    dest->predpush_hint = src->predpush_hint;
+    dest->predpush_same_level_hint = src->predpush_same_level_hint;
+    dest->rewrite_hint = src->rewrite_hint;
+    dest->no_expand_hint = src->no_expand_hint;
+}
+
 char* GetInsertIntoStmt(CreateTableAsStmt* stmt)
 {
     /* Get the SELECT query string */
@@ -4602,9 +4631,11 @@ char* GetInsertIntoStmt(CreateTableAsStmt* stmt)
 
     appendStringInfo(cquery, "INSERT ");
 
-    HintState *hintState = ((Query*)stmt->query)->hintState;
-    get_hint_string(hintState, cquery);
-
+    HintState *top_hintState = HintStateCreate();
+    _copy_top_HintState(top_hintState, ((Query *)stmt->query)->hintState);
+    get_hint_string(top_hintState, cquery);
+    if (top_hintState)
+        pfree((void *)top_hintState);
     if (relation->schemaname)
         appendStringInfo(
             cquery, " INTO %s.%s", quote_identifier(relation->schemaname), quote_identifier(relation->relname));
@@ -4681,7 +4712,8 @@ List *query_rewrite_set_stmt(Query *query)
     List* querytree_list = NIL;
     VariableSetStmt *stmt = (VariableSetStmt *)query->utilityStmt;
 
-    if(DB_IS_CMPT(B_FORMAT) && stmt->kind == VAR_SET_VALUE && u_sess->attr.attr_common.enable_set_variable_b_format) {
+    if(DB_IS_CMPT(B_FORMAT) && stmt->kind == VAR_SET_VALUE &&
+       (u_sess->attr.attr_common.enable_set_variable_b_format || ENABLE_SET_VARIABLES)) {
         List *resultlist = NIL;
         ListCell *l = NULL;
 
@@ -5041,11 +5073,7 @@ List* QueryRewriteSelectIntoVarList(Node *node)
     List *resList = NIL;
     int res_len = parsetree->targetList->length;
 
-    StringInfo select_sql = makeStringInfo();
-    deparse_query(parsetree, select_sql, NIL, false, false);
-
-    StmtResult *result = execute_stmt(select_sql->data, true);
-    DestroyStringInfo(select_sql);
+    StmtResult *result = execute_select_into_varlist(parsetree);
 
     if (result->tuples == NULL) {
         for (int i = 0; i < res_len; i++) {

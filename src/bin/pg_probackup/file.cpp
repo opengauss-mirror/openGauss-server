@@ -1422,6 +1422,9 @@ static void fio_send_pages_impl(int out, char* buf)
         {
             if (pageCompression) {
                 read_len = pageCompression->ReadCompressedBuffer(blknum, read_buffer, BLCKSZ, true);
+                if (read_len > MIN_COMPRESS_ERROR_RT) {
+                    elog(ERROR, "can not read actual block %u, error code: %lu,", blknum, read_len);
+                }
             } else {
                 /*
                 * Optimize stdio buffer usage, fseek only when current position

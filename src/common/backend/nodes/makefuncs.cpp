@@ -26,6 +26,7 @@
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
 #include "storage/item/itemptr.h"
+#include "mb/pg_wchar.h"
 
 #ifndef FRONTEND_PARSER
 #include "utils/lsyscache.h"
@@ -489,6 +490,7 @@ TypeName* makeTypeNameFromNameList(List* names)
     n->typemod = -1;
     n->location = -1;
     n->pct_rowtype = false;
+    n->charset = PG_INVALID_ENCODING;
     return n;
 }
 
@@ -503,6 +505,7 @@ TypeName* makeTypeNameFromOid(Oid typeOid, int32 typmod)
     n->typeOid = typeOid;
     n->typemod = typmod;
     n->location = -1;
+    n->charset = PG_INVALID_ENCODING;
     return n;
 }
 

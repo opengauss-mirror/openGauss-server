@@ -636,8 +636,8 @@ select * from t_p_mutil_t1;
 select * from t_p_mutil_t2;
  t1 | t2 
 ----+----
-  2 |  6
   3 |  6
+  2 |  6
 (2 rows)
 
 -- subpartition

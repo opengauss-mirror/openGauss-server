@@ -1139,8 +1139,10 @@ static IndexBulkDeleteResult** lazy_scan_heap(
             vacuum_log_cleanup_info(onerel, vacrelstats);
 
             /* Remove index entries */
-            for (i = 0; i < nindexes; i++)
+            for (i = 0; i < nindexes; i++) {
+                vacuum_log_cleanup_info(Irel[i], vacrelstats);
                 lazy_vacuum_index(Irel[i], &indstats[i], vacrelstats, vac_strategy);
+            }
             /* Remove tuples from heap */
             lazy_vacuum_all_heap(onerel, vacrelstats);
 
@@ -1631,6 +1633,7 @@ static IndexBulkDeleteResult** lazy_scan_heap(
         /* Remove index entries */
         for (i = 0; i < nindexes; i++) {
             if (!RelationIsCrossBucketIndex(Irel[i])) {
+                vacuum_log_cleanup_info(Irel[i], vacrelstats);
                 lazy_vacuum_index(Irel[i], &indstats[i], vacrelstats, vac_strategy);
             }
         }

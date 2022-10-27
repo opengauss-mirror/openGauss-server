@@ -1065,7 +1065,39 @@ select decode(c_nvarchar2, c_reltime, 'Conversion successfully!', 'Conversion fa
 select decode(c_text, c_reltime, 'Conversion successfully!', 'Conversion failed!') from tb_test;
 select decode(c_interval, c_reltime, 'Conversion successfully!', 'Conversion failed!') from tb_test;
 
+----
+-- testcase - fix o compatibility of a_style_coerce
+----
+
+-- 1. return type
+set sql_beta_feature = 'a_style_coerce';
+select pg_typeof(decode(1, 1, 1, '1'));
+select pg_typeof(decode(1, 1, '1', 1));
+select pg_typeof(case 1 when 1 then 1 else '1' end);
+select pg_typeof(case 1 when 1 then '1' else 1 end);
+
 set sql_beta_feature = 'none';
+select pg_typeof(decode(1, 1, 1, '1'));
+select pg_typeof(decode(1, 1, '1', 1));
+select pg_typeof(case 1 when 1 then 1 else '1' end);
+select pg_typeof(case 1 when 1 then '1' else 1 end);
+
+-- 2. operator match
+set sql_beta_feature = 'a_style_coerce';
+select decode(1, '1.0', 'same', 'different');
+select decode('1.0', 1, 'same', 'different');
+select decode(1, '1.0'::text, 'same', 'different');
+select decode('1.0'::text, 1, 'same', 'different');
+select case 1 when '1.0' then 'same' else 'different' end;
+select case '1.0' when 1 then 'same' else 'different' end;
+
+set sql_beta_feature = 'none';
+select decode(1, '1.0', 'same', 'different');
+select decode('1.0', 1, 'same', 'different');
+select decode(1, '1.0'::text, 'same', 'different');
+select decode('1.0'::text, 1, 'same', 'different');
+select case 1 when '1.0' then 'same' else 'different' end;
+select case '1.0' when 1 then 'same' else 'different' end;
 
 \c regression
 clean connection to all force for database decode_compatibility;

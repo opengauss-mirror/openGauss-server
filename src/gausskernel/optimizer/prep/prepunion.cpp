@@ -969,6 +969,7 @@ static Plan* make_union_unique(
             list_length(groupList),
             extract_grouping_cols(groupList, plan->targetlist),
             extract_grouping_ops(groupList),
+            extract_grouping_collations(groupList, plan->targetlist),
             numGroups[0],
             plan,
             NULL,

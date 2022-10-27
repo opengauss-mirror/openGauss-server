@@ -263,20 +263,34 @@ static Oid binary_oper_exact(List* opname, Oid arg1, Oid arg2, bool use_a_style_
 {
     Oid result;
     bool was_unknown = false;
-    bool other_was_num = false;
+
+    if (use_a_style_coercion) {
+        /*
+         * For A-style decode,
+         * decode(<num>, <unknwon>, ...) will be compared as characters
+         * decode(<unknwon/known string>, <num>, ...) will be compared as numbers
+         * Note that decode(<num>, <known string type>, ...) categories are not
+         * handled, because PG-style coercion suffers from blankspace padding of
+         * bpchar and displaying fractional part of numeric, the behavior is tricky
+         * to describe.
+         */
+        char arg1_category = get_typecategory(arg1);
+        char arg2_category = get_typecategory(arg2);
+        if (arg1_category == TYPCATEGORY_NUMERIC && arg2_category == TYPCATEGORY_UNKNOWN) {
+            return OpernameGetOprid(opname, TEXTOID, TEXTOID);
+        } else if (arg2_category == TYPCATEGORY_NUMERIC &&
+                   (arg1_category == TYPCATEGORY_UNKNOWN || arg1_category == TYPCATEGORY_STRING)) {
+            return OpernameGetOprid(opname, NUMERICOID, NUMERICOID);
+        }
+    }
 
     /* Unspecified type for one of the arguments? then use the other */
     if ((arg1 == UNKNOWNOID) && (arg2 != InvalidOid)) {
         arg1 = arg2;
         was_unknown = true;
-        other_was_num = get_typecategory(arg2) == TYPCATEGORY_NUMERIC;
     } else if ((arg2 == UNKNOWNOID) && (arg1 != InvalidOid)) {
         arg2 = arg1;
         was_unknown = true;
-        other_was_num = get_typecategory(arg1) == TYPCATEGORY_NUMERIC;
-    }
-    if (use_a_style_coercion && was_unknown && other_was_num) {
-        return OpernameGetOprid(opname, TEXTOID, TEXTOID);
     }
 
     result = OpernameGetOprid(opname, arg1, arg2);
@@ -392,7 +406,7 @@ Operator oper(ParseState* pstate, List* opname, Oid ltypeId, Oid rtypeId, bool n
      * Try to find the mapping in the lookaside cache.
      */
     if (pstate != NULL) {
-        use_a_style_coercion = pstate->p_is_case_when && ENABLE_SQL_BETA_FEATURE(A_STYLE_COERCE);
+        use_a_style_coercion = pstate->p_is_decode && ENABLE_SQL_BETA_FEATURE(A_STYLE_COERCE);
     }
         
     key_ok = make_oper_cache_key(&key, opname, ltypeId, rtypeId, use_a_style_coercion);

@@ -11,6 +11,7 @@
 #test: recovery_2pc_tools recovery_2pc_tools02
 test: recovery_2pc_tools
 
+test: sqlbypass_partition
 test: sqlpatch_base
 test: sqlpatch_func
 
@@ -41,9 +42,14 @@ test: postgres_fdw postgres_fdw_cstore postgres_fdw_partition
 
 #test user_defined_variable
 test: set_user_defined_variables_test
-test: select_into_user_defined_variables
-
 test: set_system_variables_test
+
+# test for set [session | global] transaction
+test: set_transaction_test
+
+# test select into statement
+test: select_into_user_defined_variables
+test: select_into_file
 
 test: gs_dump_package trigger_dump
 test: out_param_func
@@ -72,14 +78,21 @@ test: hw_pwd_encryption_sm3
 
 test: sync_standy_names
 
+#test event
+test: event
+test: event_dump_audit
+
 #test sha func
 test: single_node_sha
+
+#test b format collation
+test: test_b_format_collate charset_b_format
 
 # test subpartition
 test: hw_subpartition_createtable hw_subpartition_scan hw_subpartition_select hw_subpartition_split hw_subpartition_truncate hw_subpartition_update hw_subpartition_gpi hw_subpartition_analyze_vacuum hw_subpartition_alter_table hw_subpartition_index hw_subpartition_add_drop_partition hw_subpartition_tablespace hw_subpartition_ddl_index hw_subpartition_size
 test: hw_subpartition_vacuum_partition hw_subpartition_tablespace_global
 test: gs_dump_subpartition
-test: partition_dml_operations partition_minmax
+test: partition_dml_operations partition_minmax partition_pruning hw_partitionno hw_partition_parallel
 test: partition_param_path
 #test: partition_cost_model
 test: row_partition_iterator_elimination col_partition_iterator_elimination
@@ -633,6 +646,7 @@ test: holdable_cursor
 
 test: alter_table_000 alter_table_002 alter_table_003
 #test: alter_table_001
+test: alter_table_modify alter_table_modify_ustore alter_table_modify_ltt alter_table_modify_gtt
 
 #test: with
 
@@ -699,6 +713,10 @@ test: hw_pwd_reuse
 
 test: hw_audit_toughness
 test: hw_audit_detailinfo
+
+test: hw_audit_client
+test: hw_audit_full
+test: hw_audit_system_func
 
 test: performance_enhance
 test: explain_fqs
@@ -911,6 +929,8 @@ test: hw_partition_hash_dml
 test: hw_partition_hash_dql
 test: hw_partition_list_dml
 test: hw_partition_list_dql
+test: hw_partition_b_db
+test: dump_partition_b_db
 test: hw_cipher_sm4
 test: hw_cipher_aes128
 test: hw_pwd_encryption_sm3
@@ -1048,3 +1068,6 @@ test: show_warnings prevent_table_in_sys_schema
 # partition expression key
 test: partition_expr_key
 test: alter_foreign_schema
+
+# test for slow_sql
+test: slow_sql

@@ -1402,6 +1402,16 @@ void XLogInsertStandbyCSNCommitting(TransactionId xid, CommitSeqNo csn, Transact
     XLogInsert(RM_STANDBY_ID, XLOG_STANDBY_CSN_COMMITTING);
 }
 
+#ifndef ENABLE_MULTIPLE_NODES
+static inline void ResetPartitionLockInfo()
+{
+    list_free_ext(u_sess->storage_cxt.partition_dml_oids);
+    u_sess->storage_cxt.partition_dml_oids = NIL;
+    list_free_ext(u_sess->storage_cxt.partition_ddl_oids);
+    u_sess->storage_cxt.partition_ddl_oids = NIL;
+}
+#endif
+
 /* ----------------------------------------------------------------
  *						CommitTransaction stuff
  * ----------------------------------------------------------------
@@ -2511,6 +2521,10 @@ static void StartTransaction(bool begin_on_gtm)
 #endif
     ResetBCMArray();
 
+#ifndef ENABLE_MULTIPLE_NODES
+    ResetPartitionLockInfo();
+#endif
+
     /* 
      * Get node group status and save in cache,
      * if we are doing two phase commit, skip init cache.
@@ -2581,6 +2595,11 @@ static void CommitTransaction(bool STP_commit)
 #endif
 
     ShowTransactionState("CommitTransaction");
+
+#ifndef ENABLE_MULTIPLE_NODES
+    LockPartitionDDLOperation();
+    ResetPartitionLockInfo();
+#endif
 
     /* Check relcache init flag */
     if (needNewLocalCacheFile) {
@@ -3604,6 +3623,10 @@ static void AbortTransaction(bool PerfectRollback, bool STP_rollback)
     TransactionState s = CurrentTransactionState;
     TransactionId latestXid;
     t_thrd.xact_cxt.bInAbortTransaction = true;
+
+#ifndef ENABLE_MULTIPLE_NODES
+    ResetPartitionLockInfo();
+#endif
 
     /* clean stream snapshot register info */
     ForgetRegisterStreamSnapshots();
@@ -7098,6 +7121,7 @@ void push_unlink_rel_to_hashtbl(ColFileNode *xnodes, int nrels)
                 entry->rnode.bucketNode = colFileNode.filenode.bucketNode;
                 entry->rnode.opt = colFileNode.filenode.opt;
                 entry->maxSegNo = -1;
+                entry->fileUnlink = false;
                 del_rel_num++;
             }
             BatchClearBadBlock(colFileNode.filenode, colFileNode.forknum, 0);

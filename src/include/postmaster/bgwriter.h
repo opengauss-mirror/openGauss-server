@@ -66,6 +66,7 @@ extern void drop_rel_one_fork_buffers();
 typedef struct DelFileTag {
     RelFileNode rnode;
     int32 maxSegNo;
+    bool fileUnlink;
 } DelFileTag;
 
 typedef struct ForkRelFileNode {

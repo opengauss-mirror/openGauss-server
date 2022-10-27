@@ -718,29 +718,6 @@ drop table list_list;
 
 
 --1.4 subpartition key check
--- 一级分区和二级分区分区键是同一列
-
-CREATE TABLE list_list
-(
-    month_code VARCHAR2 ( 30 ) NOT NULL ,
-    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
-    user_no    VARCHAR2 ( 30 ) NOT NULL ,
-    sales_amt  int
-) WITH (STORAGE_TYPE=USTORE)
-PARTITION BY LIST (month_code) SUBPARTITION BY LIST (month_code)
-(
-  PARTITION p_201901 VALUES ( '201902' )
-  (
-    SUBPARTITION p_201901_a VALUES ( '1' ),
-    SUBPARTITION p_201901_b VALUES ( '2' )
-  ),
-  PARTITION p_201902 VALUES ( '201903' )
-  (
-    SUBPARTITION p_201902_a VALUES ( '1' ),
-    SUBPARTITION p_201902_b VALUES ( '2' )
-  )
-);
-
 --二级分区的键值一样
 
 CREATE TABLE list_list

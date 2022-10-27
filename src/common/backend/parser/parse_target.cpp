@@ -36,6 +36,8 @@
 #include "utils/typcache.h"
 #include "executor/executor.h"
 #include "gs_ledger/ledger_utils.h"
+#include "mb/pg_wchar.h"
+#include "parser/parse_utilcmd.h"
 
 static void markTargetListOrigin(ParseState* pstate, TargetEntry* tle, Var* var, int levelsup);
 static Node* transformAssignmentIndirection(ParseState* pstate, Node* basenode, const char* targetName,
@@ -374,6 +376,7 @@ Expr* transformAssignedExpr(ParseState* pstate, Expr* expr, char* colname, int a
     Oid attrtype;   /* type of target column */
     int32 attrtypmod;
     Oid attrcollation; /* collation of target column */
+    int attrcharset = PG_INVALID_ENCODING;
 
     AssertEreport(rd != NULL, MOD_OPT, "");
     /*
@@ -391,6 +394,9 @@ Expr* transformAssignedExpr(ParseState* pstate, Expr* expr, char* colname, int a
     attrtype = attnumTypeId(rd, attrno);
     attrtypmod = rd->rd_att->attrs[attrno - 1].atttypmod;
     attrcollation = rd->rd_att->attrs[attrno - 1].attcollation;
+    if (DB_IS_CMPT(B_FORMAT)) {
+        attrcharset = get_charset_by_collation(attrcollation);
+    }
 
     /*
      * If the expression is a DEFAULT placeholder, insert the attribute's
@@ -534,6 +540,9 @@ Expr* transformAssignedExpr(ParseState* pstate, Expr* expr, char* colname, int a
             }
         }
     }
+#ifndef ENABLE_MULTIPLE_NODES
+    expr = (Expr*)coerce_to_target_charset((Node*)expr, attrcharset, attrtype);
+#endif
 
     ELOG_FIELD_NAME_END;
 

@@ -3160,8 +3160,9 @@ static int parse_page_file(const char *filename, SegmentType type, const uint32 
     char decompressed[BLCKSZ];
     while (start < number) {
         size_t compressedSize = pageCompression->ReadCompressedBuffer(start, compressed, BLCKSZ);
-        if (compressedSize == 0) {
-            fprintf(stderr, "read block %u failed, filename: %s: %s\n", start, filename, strerror(errno));
+        if (compressedSize > MIN_COMPRESS_ERROR_RT) {
+            fprintf(stderr, "read block %u failed, filename: %s: code: %lu %s\n",
+                    start, filename, compressedSize, strerror(errno));
             delete pageCompression;
             return false;
         }
@@ -5435,6 +5436,7 @@ static void fill_filenode_map(char** class_map)
         {"pg_cast_source_target_index", 2661},
         {"pg_class_oid_index", 2662},
         {"pg_class_relname_nsp_index", 2663},
+        {"pg_collation_enc_def_index", 3147},
         {"pg_collation_name_enc_nsp_index", 3164},
         {"pg_collation_oid_index", 3085},
         {"pg_constraint_conname_nsp_index", 2664},

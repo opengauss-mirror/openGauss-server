@@ -69,7 +69,7 @@ SELECT data FROM pg_logical_slot_get_changes('ustore_slot', NULL, NULL);
 --?.*data
 --?.*
 --?.*BEGIN ?.*
- {"table_name":"public.t1","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":["a","b"],"old_keys_type":["integer","text"],"old_keys_val":["3","'abc'"]}
+ {"table_name":"public.t1","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":["a","b","c"],"old_keys_type":["integer","text","integer"],"old_keys_val":["3","'abc'","null"]}
 --?.*COMMIT ?.* CSN ?.*
 (3 rows)
 

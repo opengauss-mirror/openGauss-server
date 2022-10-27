@@ -249,6 +249,7 @@ static relopt_int intRelOpts[] = {
      0,
      0,
      7},
+    {{ "collate", "set relation default collation", RELOPT_KIND_HEAP }, 0, 0, 2000000000 },
     /* list terminator */
     {{NULL}}
 };
@@ -1984,7 +1985,8 @@ bytea *default_reloptions(Datum reloptions, bool validate, relopt_kind kind)
           offsetof(StdRdOptions, compress) + offsetof(PageCompressOpts, compressByteConvert)},
         { "compress_diff_convert", RELOPT_TYPE_BOOL,
           offsetof(StdRdOptions, compress) + offsetof(PageCompressOpts, compressDiffConvert)},
-        { "check_option", RELOPT_TYPE_STRING, offsetof(StdRdOptions, check_option_offset)}
+        { "check_option", RELOPT_TYPE_STRING, offsetof(StdRdOptions, check_option_offset)},
+        { "collate", RELOPT_TYPE_INT, offsetof(StdRdOptions, collate)}
     };
 
     options = parseRelOptions(reloptions, validate, kind, &numoptions);
@@ -2649,6 +2651,33 @@ void ForbidUserToSetCompressedOptions(List *options)
     }
 }
 
+void check_collate_in_options(List *user_options)
+{
+    ListCell *opt = NULL;
+    HeapTuple tp;
+
+    foreach(opt, user_options) {
+        DefElem *def = (DefElem *)lfirst(opt);
+
+        if (pg_strcasecmp(def->defname, "collate") == 0) {
+            Oid collate = intVal(def->arg);
+            if (!DB_IS_CMPT(B_FORMAT))
+                ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        (errmsg("Un-support feature"),
+                         errdetail("Forbid to set or change \"%s\" in non-B format", "collate"))));
+
+            if (!COLLATION_IN_B_FORMAT(collate))
+                ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("this collation only cannot be specified here")));
+            tp = SearchSysCache1(COLLOID, ObjectIdGetDatum(collate));
+            if (!HeapTupleIsValid(tp))
+                ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                        errmsg("cache lookup failed for collation %u", collate)));
+            ReleaseSysCache(tp);
+        }
+    }
+}
+
 /*
  * @Description: forbid to change inner option
  *   inner options only can be used by system itself.
@@ -2669,6 +2698,7 @@ void ForbidOutUsersToSetInnerOptions(List *userOptions)
                             errdetail("Forbid to set or change inner option \"%s\"", innnerOpts[firstInvalidOpt])));
         }
     }
+    check_collate_in_options(userOptions);
 }
 
 void ForbidUserToSetDefinedIndexOptions(List *options)

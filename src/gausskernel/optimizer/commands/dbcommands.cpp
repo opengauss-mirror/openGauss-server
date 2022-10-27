@@ -1217,7 +1217,7 @@ void dropdb(const char* dbname, bool missing_ok)
 /*
  * Must be owner or have alter privilege to alter database
  */
-static void AlterDatabasePermissionCheck(Oid dboid, const char* dbname)
+void AlterDatabasePermissionCheck(Oid dboid, const char* dbname)
 {
     AclResult aclresult = pg_database_aclcheck(dboid, GetUserId(), ACL_ALTER);
     if (aclresult != ACLCHECK_OK && !pg_database_ownercheck(dboid, GetUserId())) {

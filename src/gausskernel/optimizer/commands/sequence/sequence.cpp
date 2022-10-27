@@ -993,6 +993,7 @@ static void DefineSequence(CreateSeqStmt* seq)
     stmt->oncommit = ONCOMMIT_NOOP;
     stmt->tablespacename = NULL;
     stmt->if_not_exists = false;
+    stmt->charset = PG_INVALID_ENCODING;
     char rel_kind = large ? RELKIND_LARGE_SEQUENCE : RELKIND_SEQUENCE;
     seqoid = DefineRelation(stmt, rel_kind, seq->ownerId);
     Assert(seqoid != InvalidOid);

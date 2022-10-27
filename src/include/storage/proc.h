@@ -217,12 +217,16 @@ struct PGPROC {
     bool snapshotGroupMember;
     /* next ProcArray group member waiting for snapshot getting */
     pg_atomic_uint32 snapshotGroupNext;
-    Snapshot snapshotGroup;
+    volatile Snapshot snapshotGroup;
     TransactionId xminGroup;
     TransactionId xmaxGroup;
     TransactionId globalxminGroup;
     volatile TransactionId replicationSlotXminGroup;
     volatile TransactionId replicationSlotCatalogXminGroup;
+
+    TransactionId snapXmax;     /* maximal running XID as it was when we were
+                             * getting our snapshot. */
+    CommitSeqNo snapCSN;    /* csn as it was when we were getting our snapshot. */
 
     /* commit sequence number send down */
     CommitSeqNo commitCSN;

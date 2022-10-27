@@ -721,10 +721,10 @@ select count(distinct(a)) col1, d, avg(b) col2, sum(distinct(a)) col3, avg(disti
 (7 rows)
 
 explain (costs off) select distinct case when min(distinct c)>60 then min(distinct c) else null end as min, count(distinct(b)) from t_distinct group by b;
-                                                         QUERY PLAN                                                         
-----------------------------------------------------------------------------------------------------------------------------
+                                                   QUERY PLAN                                                    
+-----------------------------------------------------------------------------------------------------------------
  HashAggregate
-   Group By Key: CASE WHEN (min(DISTINCT c) > 60) THEN (min(DISTINCT c))::numeric ELSE NULL::numeric END, count(DISTINCT b)
+   Group By Key: CASE WHEN (min(DISTINCT c) > 60) THEN min(DISTINCT c) ELSE NULL::integer END, count(DISTINCT b)
    ->  GroupAggregate
          Group By Key: b
          ->  Sort

@@ -387,7 +387,6 @@ DecryptDataRes ValuesProcessor::deprocess_value(PGconn *conn, const unsigned cha
          * if the size is smaller the size of Oid, so setting oid is not there
          * and this is an error
          */
-        fprintf(stderr, "ERROR(CLIENT): wrong value for processed column\n");
         if (format == 0) {
             libpq_free(unescaped_processed_data);
         }
@@ -454,7 +453,7 @@ DecryptDataRes ValuesProcessor::deprocess_value(PGconn *conn, const unsigned cha
 const bool ValuesProcessor::textual_rep(const Oid oid)
 {
     return (oid != BOOLOID && oid != INT8OID && oid != INT2OID && oid != INT1OID && oid != INT4OID && oid != OIDOID &&
-        oid != NUMERICOID);
+        oid != NUMERICOID && oid != FLOAT4OID && oid != FLOAT8OID);
 }
 
 void ValuesProcessor::process_text_format(unsigned char **plain_text, size_t &plain_text_size,

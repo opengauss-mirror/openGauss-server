@@ -284,7 +284,7 @@ void ExecEndHash(HashState* node)
  *		create an empty hashtable data structure for hashjoin.
  * ----------------------------------------------------------------
  */
-HashJoinTable ExecHashTableCreate(Hash* node, List* hashOperators, bool keepNulls)
+HashJoinTable ExecHashTableCreate(Hash* node, List* hashOperators, bool keepNulls, List *hash_collations)
 {
     HashJoinTable hashtable;
     Plan* outerNode = NULL;
@@ -297,6 +297,7 @@ HashJoinTable ExecHashTableCreate(Hash* node, List* hashOperators, bool keepNull
     int64 local_work_mem = SET_NODEMEM(node->plan.operatorMemKB[0], node->plan.dop);
     int64 max_mem = (node->plan.operatorMaxMem > 0) ? SET_NODEMEM(node->plan.operatorMaxMem, node->plan.dop) : 0;
     ListCell* ho = NULL;
+    ListCell* hc = NULL;
     MemoryContext oldcxt;
 
     /*
@@ -384,8 +385,9 @@ HashJoinTable ExecHashTableCreate(Hash* node, List* hashOperators, bool keepNull
     hashtable->outer_hashfunctions = (FmgrInfo*)palloc(nkeys * sizeof(FmgrInfo));
     hashtable->inner_hashfunctions = (FmgrInfo*)palloc(nkeys * sizeof(FmgrInfo));
     hashtable->hashStrict = (bool*)palloc(nkeys * sizeof(bool));
+    hashtable->collations = (Oid *)palloc(nkeys * sizeof(Oid));
     i = 0;
-    foreach (ho, hashOperators) {
+    forboth (ho, hashOperators, hc, hash_collations) {
         Oid hashop = lfirst_oid(ho);
         Oid left_hashfn;
         Oid right_hashfn;
@@ -398,6 +400,7 @@ HashJoinTable ExecHashTableCreate(Hash* node, List* hashOperators, bool keepNull
         fmgr_info(left_hashfn, &hashtable->outer_hashfunctions[i]);
         fmgr_info(right_hashfn, &hashtable->inner_hashfunctions[i]);
         hashtable->hashStrict[i] = op_strict(hashop);
+        hashtable->collations[i] = lfirst_oid(hc);
         i++;
     }
 
@@ -1399,7 +1402,7 @@ bool ExecHashGetHashValue(HashJoinTable hashtable, ExprContext* econtext, List* 
             /* Compute the hash function */
             uint32 hkey;
 
-            hkey = DatumGetUInt32(FunctionCall1(&hashfunctions[i], keyval));
+            hkey = DatumGetUInt32(FunctionCall1Coll(&hashfunctions[i], hashtable->collations[i], keyval));
             hashkey ^= hkey;
         }
 
@@ -1787,7 +1790,7 @@ static void ExecHashBuildSkewHash(HashJoinTable hashtable, Hash* node, int mcvsT
             uint32 hashvalue;
             int bucket;
 
-            hashvalue = DatumGetUInt32(FunctionCall1(&hashfunctions[0], values[i]));
+            hashvalue = DatumGetUInt32(FunctionCall1Coll(&hashfunctions[0], hashtable->collations[0], values[i]));
 
             /*
              * While we have not hit a hole in the hashtable and have not hit

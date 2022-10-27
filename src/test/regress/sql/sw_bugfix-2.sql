@@ -666,3 +666,77 @@ GROUP BY t.manager_id
 ORDER BY t.manager_id;
 
 drop table swcb_employees;
+
+-- test start with has sub clause
+DROP TABLE IF EXISTS DAT_DEPARTMENT;
+CREATE TABLE DAT_DEPARTMENT(
+	stru_id nvarchar2(10) NOT NULL,
+	sup_stru nvarchar2(10),
+	stru_state nvarchar2(8)
+)
+WITH (orientation=row, compression=no);
+CREATE INDEX sup_stru_dat_department ON  DAT_DEPARTMENT USING btree(sup_stru) TABLESPACE pg_default;
+CREATE INDEX idx_br_dept_stru_id ON  DAT_DEPARTMENT USING btree(stru_id) TABLESPACE pg_default;
+insert into DAT_DEPARTMENT(stru_id,sup_stru,stru_state) values('01','02','2');
+insert into DAT_DEPARTMENT(stru_id,sup_stru,stru_state) values('02','01','2');
+SELECT A.STRU_ID DEPTID,LEVEL,CONNECT_BY_ISCYCLE
+FROM DAT_DEPARTMENT A
+START WITH A.STRU_ID IN
+(SELECT B.STRU_ID DEPTID
+FROM DAT_DEPARTMENT B
+WHERE B.SUP_STRU = '01' OR B.SUP_STRU='02'
+)
+CONNECT BY NOCYCLE PRIOR A.STRU_ID =A.SUP_STRU;
+DROP TABLE DAT_DEPARTMENT;
+
+-- test RTE_JOIN in start with
+DROP TABLE IF EXISTS zb_layer;
+DROP TABLE IF EXISTS rtms_dict;
+DROP TABLE IF EXISTS zb_model;
+CREATE TABLE zb_layer(
+	id character varying(20) NOT NULL,
+	zb_code character varying(20),
+	zb_name character varying(20),
+	zb_organ character varying(50),
+	zb_apply character varying(20),
+	zb_layer_standard character varying(20),
+	zb_threshold_value character varying(30),
+	zb_warning_value character varying(20)
+)
+WITH (orientation=row, compression=no);
+CREATE TABLE rtms_dict(
+	id character varying(10),
+	area character varying(20),
+	cn_area character varying(30),
+	code character varying(50),
+	cname character varying(50),
+	locale character varying(10)
+)
+WITH (orientation=row, compression=no);
+CREATE TABLE zb_model(
+	id character varying(10) NOT NULL,
+	zb_code character varying(20),
+	zb_name character varying(300),
+	zb_risk_area character varying(3),
+	zb_parent_id character varying(20),
+	zb_weight character varying(10),
+	zb_layer_flag character varying(3),
+	zb_status character varying(3)
+)
+WITH (orientation=row, compression=no);
+SELECT DISTINCT I.ZB_CODE,D.CNAME,DECODE(I.ZB_LAYER_FLAG,NULL,D.CNAME,I.ZB_NAME) ZBNAME
+FROM ZB_MODEL I
+LEFT JOIN ZB_LAYER N ON I.ZB_CODE = N.ZB_CODE
+LEFT JOIN RTMS_DICT D ON D.CODE = I.ZB_RISK_AREA AND D.AREA = 'RICK_AREA'
+WHERE NVL(I.ZB_STATUS,1) = 1
+AND I.ZB_CODE NOT IN
+(
+	SELECT T.ZB_CODE FROM ZB_MODEL T WHERE T.ZB_RISK_AREA = 2
+)
+CONNECT BY PRIOR I.ZB_CODE = I.ZB_PARENT_ID
+START WITH I.ZB_CODE IN
+(SELECT ZB_CODE FROM ZB_MODEL)
+ORDER BY I.ZB_CODE;
+DROP TABLE zb_layer;
+DROP TABLE rtms_dict;
+DROP TABLE zb_model;

@@ -78,6 +78,32 @@ select (select max(id) from t4);
 explain (costs off) select * from (select a, rownum as row from (select a from t3) where rownum <= 10) where row >=5;
 select * from (select a, rownum as row from (select a from t3) where rownum <= 10) where row >=5;
 
+create table col_table_001 (id int, name char[] ) with (orientation=column);
+create table col_table_002 (id int, aid int,name char[] ,apple char[]) with (orientation=column);
+insert into col_table_001 values(1, '{a,b,c}' );
+insert into col_table_001 values(2, '{b,b,b}' );
+insert into col_table_001 values(3, '{c,c,c}' );
+insert into col_table_001 values(4, '{a}' );
+insert into col_table_001 values(5, '{b}' );
+insert into col_table_001 values(6, '{c}' );
+insert into col_table_001 values(7, '{a,b,c}' );
+insert into col_table_001 values(8, '{b,c,a}' );
+insert into col_table_001 values(9, '{c,a,b}' );
+insert into col_table_001 values(10, '{c,a,b}' );
+insert into col_table_002 values(11, 1,'{a,s,d}' );
+insert into col_table_002 values(12, 1,'{b,n,m}' );
+insert into col_table_002 values(13, 2,'{c,v,b}' );
+insert into col_table_002 values(14, 1,'{a}' );
+insert into col_table_002 values(15, 1,'{b}' );
+insert into col_table_002 values(15, 2,'{c}' );
+insert into col_table_002 values(17, 1,'{a,s,d}','{a,b,c}' );
+insert into col_table_002 values(18, 1,'{b,n,m}','{a,b,c}' );
+insert into col_table_002 values(19, 2,'{c,v,b}','{a,b,c}');
+insert into col_table_002 values(20, 2,'{c,v,b}','{b,c,a}');
+insert into col_table_002 values(21, 21,'{c,c,b}','{b,c,a}');
+select * from col_table_001 where EXISTS (select * from col_table_002 where col_table_001.name[1] =col_table_002.apple[1]) order by id;
+select * from col_table_001 where EXISTS (select * from col_table_002 where col_table_001.name[1:3] =col_table_002.apple[1:3]) order by id;
+
 CREATE TABLE bmsql_item (
 i_id int NoT NULL,
 i_name varchar(24),

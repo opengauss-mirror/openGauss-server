@@ -56,7 +56,7 @@ Buffer RelationGetBufferForUTuple(Relation relation, Size len, Buffer otherBuffe
      * Blocks that extended one by one are different from bulk-extend blocks, and
      * are not recorded into FSM. As its creator session close this realtion, they
      * can not be used by any other body. It is especially obvious for partition
-     * bulk insert. Here, if no avaiable found in FSM, we check the last block to
+     * bulk insert. Here, if no available found in FSM, we check the last block to
      * reuse the 'leaked free space' mentioned earlier.
      */
     bool test_last_block = false;

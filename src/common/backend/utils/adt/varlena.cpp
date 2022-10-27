@@ -42,6 +42,8 @@
 #include "executor/node/nodeSort.h"
 #include "pgxc/groupmgr.h"
 #include "openssl/evp.h"
+#include "catalog/gs_utf8_collation.h"
+#include "catalog/pg_collation_fn.h"
 
 #define SUBSTR_WITH_LEN_OFFSET 2
 #define SUBSTR_A_CMPT_OFFSET 4
@@ -107,6 +109,8 @@ typedef struct {
 
 static int varstrfastcmp_c(Datum x, Datum y, SortSupport ssup);
 static int bpcharfastcmp_c(Datum x, Datum y, SortSupport ssup);
+static int varstrfastcmp_builtin(Datum x, Datum y, SortSupport ssup);
+static int bpvarstrfastcmp_builtin(Datum x, Datum y, SortSupport ssup);
 static int varstrfastcmp_locale(Datum x, Datum y, SortSupport ssup);
 static int varstrcmp_abbrev(Datum x, Datum y, SortSupport ssup);
 static Datum varstr_abbrev_convert(Datum original, SortSupport ssup);
@@ -1692,6 +1696,8 @@ int varstr_cmp(char* arg1, int len1, char* arg2, int len2, Oid collid)
         result = memcmp(arg1, arg2, Min(len1, len2));
         if ((result == 0) && (len1 != len2))
             result = (len1 < len2) ? -1 : 1;
+    } else if (is_b_format_collation(collid)) {
+        result = varstr_cmp_by_builtin_collations(arg1, len1, arg2, len2, collid);
     } else {
         char a1buf[TEXTBUFLEN];
         char a2buf[TEXTBUFLEN];
@@ -1870,6 +1876,23 @@ int text_cmp(text* arg1, text* arg2, Oid collid)
     return varstr_cmp(a1p, len1, a2p, len2, collid);
 }
 
+bool texteq_with_collation(PG_FUNCTION_ARGS)
+{
+        Datum arg1 = PG_GETARG_DATUM(0);
+        Datum arg2 = PG_GETARG_DATUM(1);
+        bool result = false;
+
+        text* targ1 = DatumGetTextPP(arg1);
+        text* targ2 = DatumGetTextPP(arg2);
+
+        /* text_cmp return 0 means equal */
+        result = (text_cmp(targ1, targ2, PG_GET_COLLATION()) == 0);
+        PG_FREE_IF_COPY(targ1, 0);
+        PG_FREE_IF_COPY(targ2, 1);
+
+        return result;
+}
+
 /*
  * Comparison functions for text strings.
  *
@@ -1882,12 +1905,18 @@ Datum texteq(PG_FUNCTION_ARGS)
 {
     Datum arg1 = PG_GETARG_DATUM(0);
     Datum arg2 = PG_GETARG_DATUM(1);
+    bool result = false;
+
+    Oid collid = PG_GET_COLLATION();
+    if (is_b_format_collation(collid)) {
+        result = texteq_with_collation(fcinfo);
+        PG_RETURN_BOOL(result);
+    }
 
     if (VARATT_IS_HUGE_TOAST_POINTER(DatumGetPointer(arg1)) || VARATT_IS_HUGE_TOAST_POINTER(DatumGetPointer(arg2))) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("texteq could not support more than 1GB clob/blob data")));
     }
-    bool result = false;
     Size len1, len2;
 
     /*
@@ -1924,6 +1953,12 @@ Datum textne(PG_FUNCTION_ARGS)
     }
     bool result = false;
     Size len1, len2;
+
+    Oid collid = PG_GET_COLLATION();
+    if (is_b_format_collation(collid)) {
+        result = !(texteq_with_collation(fcinfo));
+        PG_RETURN_BOOL(result);
+    }
 
     /* See comment in texteq() */
     len1 = toast_raw_datum_size(arg1);
@@ -2133,6 +2168,7 @@ void varstr_sortsupport(SortSupport ssup, Oid collid, bool bpchar)
 {
     bool abbreviate = ssup->abbreviate;
     bool collate_c = false;
+    bool collate_builtin = false;
     VarStringSortSupport* sss = NULL;
 
 #ifdef HAVE_LOCALE_T
@@ -2164,6 +2200,14 @@ void varstr_sortsupport(SortSupport ssup, Oid collid, bool bpchar)
             ssup->comparator = bpcharfastcmp_c;
 
         collate_c = true;
+    } else if (is_b_format_collation(collid)) {
+        if (!bpchar) {
+            ssup->comparator = bpvarstrfastcmp_builtin;
+        } else {
+            ssup->comparator = varstrfastcmp_builtin;
+        }
+        collate_builtin = true;
+        abbreviate = false;
     }
 #ifdef WIN32
     else if (GetDatabaseEncoding() == PG_UTF8)
@@ -2223,7 +2267,7 @@ void varstr_sortsupport(SortSupport ssup, Oid collid, bool bpchar)
      * scratch space (and to detect requirement for BpChar semantics from
      * caller), and the abbreviation case requires additional state.
      */
-    if (abbreviate || !collate_c) {
+    if (abbreviate || !collate_c || !collate_builtin) {
         sss = (VarStringSortSupport*)palloc(sizeof(VarStringSortSupport));
         sss->buf1 = (char*)palloc(TEXTBUFLEN);
         sss->buflen1 = TEXTBUFLEN;
@@ -2334,6 +2378,61 @@ static int bpcharfastcmp_c(Datum x, Datum y, SortSupport ssup)
     return cmp;
 }
 
+/*
+ * sortsupport comparison func (for builtin locale case)
+ */
+static int varstrfastcmp_builtin(Datum x, Datum y, SortSupport ssup)
+{
+    text* arg1 = DatumGetTextPP(x);
+    text* arg2 = DatumGetTextPP(y);
+    char *a1p = NULL, *a2p = NULL;
+    size_t len1, len2;
+    int result;
+
+    a1p = VARDATA_ANY(arg1);
+    a2p = VARDATA_ANY(arg2);
+
+    len1 = VARSIZE_ANY_EXHDR(arg1);
+    len2 = VARSIZE_ANY_EXHDR(arg2);
+
+    result = varstr_cmp_by_builtin_collations(a1p, len1, a2p, len2, ssup->ssup_collation);
+
+    /* We can't afford to leak memory here. */
+    if (PointerGetDatum(arg1) != x) {
+        pfree_ext(arg1);
+    }
+    if (PointerGetDatum(arg2) != y) {
+        pfree_ext(arg2);
+    }
+
+    return result;
+}
+
+static int bpvarstrfastcmp_builtin(Datum x, Datum y, SortSupport ssup)
+{
+    BpChar* arg1 = DatumGetBpCharPP(x);
+    BpChar* arg2 = DatumGetBpCharPP(y);
+    int len1, len2;
+    int result;
+
+    char* a1p = VARDATA_ANY(arg1);
+    char* a2p = VARDATA_ANY(arg2);
+
+    len1 = bpchartruelen(a1p, VARSIZE_ANY_EXHDR(arg1));
+    len2 = bpchartruelen(a2p, VARSIZE_ANY_EXHDR(arg2));
+
+    result = varstr_cmp_by_builtin_collations(a1p, len1, a2p, len2, ssup->ssup_collation);
+
+    /* We can't afford to leak memory here. */
+    if (PointerGetDatum(arg1) != x) {
+        pfree_ext(arg1);
+    }
+    if (PointerGetDatum(arg2) != y) {
+        pfree_ext(arg2);
+    }
+
+    return result;
+}
 /*
  * sortsupport comparison func (for locale case)
  */
@@ -6169,7 +6268,6 @@ Datum group_concat_transfn(PG_FUNCTION_ARGS)
         appendStringInfoText(state, argsconcat); /* value */
         if (state->len > maxlength) {
             state->len = maxlength;
-            state->data[state->len] = '\0';
         }
     } else {
         /*

@@ -351,7 +351,7 @@ static inline void write_logmsg_with_one_item(IndicatorItem* item, struct timeva
 }
 
 /*
- * there are all 32 slots avaiable, and we these ranges:
+ * there are all 32 slots available, and we these ranges:
  * R1: step = 16us,
  *	   0 ~ 16, < 32, < 48, ..., < 320
  * R2:
@@ -1444,7 +1444,7 @@ static const int log2_map[LOG2_MAP_SIZE] = {0,
     10};
 
 /*
- * there are all 32 slots avaiable, and we these ranges:
+ * there are all 32 slots available, and we these ranges:
  * R1: step = 50us,
  *	   0 ~ 50, < 100, < 150, ..., < 1000
  * R2: step = 2^n ms
@@ -1478,7 +1478,7 @@ static int plog_hdp_get_slot(IndicatorItem* item)
 }
 
 /*
- * there are all 21 slots avaiable, and we these ranges:
+ * there are all 21 slots available, and we these ranges:
  * R1: step = 100ms,
  *	   0 ~ 100, < 200, < 300, ..., < 1000
  * R2: step = 1000ms

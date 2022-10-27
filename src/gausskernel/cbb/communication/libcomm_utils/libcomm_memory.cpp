@@ -287,13 +287,13 @@ bool gs_return_tuple(StreamState* node)
 {
     TupleVector* tupleVec = node->tempTupleVec;
 
-    if (tupleVec->tuplePointer == 0) {
+    if (tupleVec->tuplePointer == tupleVec->tupleCount) {
         return false;
     }
 
-    tupleVec->tuplePointer--;
     int n = tupleVec->tuplePointer;
     node->ss.ps.ps_ResultTupleSlot = tupleVec->tupleVector[n];
+    tupleVec->tuplePointer++;
 
     return true;
 }
@@ -334,7 +334,8 @@ bool gs_consume_memory_data(StreamState* node, int loc)
             (void)ExecCopySlot(tupledst->tupleVector[i], tuplesrc->tupleVector[i]);
         }
 
-        tupledst->tuplePointer = tuplesrc->tuplePointer;
+        tupledst->tupleCount = tuplesrc->tuplePointer;
+        tupledst->tuplePointer = 0;
         tuplesrc->tuplePointer = 0;
         (void)gs_return_tuple(node);
     }

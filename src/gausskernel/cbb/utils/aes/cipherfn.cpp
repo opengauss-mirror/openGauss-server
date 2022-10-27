@@ -46,6 +46,7 @@
 #include "openssl/crypto.h"
 
 #include "utils/evp_cipher.h"
+#include "utils/guc_security.h"
 
 #ifdef ENABLE_UT
 #define static
@@ -887,46 +888,49 @@ static GS_UCHAR* getECKeyString(KeyMode mode)
  * 	This function use aes128 to encrypt plain text; key comes from certificate file
  *
  * @IN src_plain_text: source plain text to be encrypted
- * @OUT dest_cipher_text: dest buffer to be filled with encrypted string, this buffer
- * 	should be given by caller
- * @IN dest_cipher_length: dest buffer length which is given by the caller
  * @IN mode: key mode
- * @RETURN: void
+ * @RETURN: dest buffer to be filled with encrypted string, caller should reset and free the buffer
  */
-void encryptECString(char* src_plain_text, char* dest_cipher_text, uint32 dest_cipher_length, int mode)
+char *encryptECString(char* src_plain_text, int mode)
 {
+#define RANDOM_STR_NUM 4
+#define BASE64_INPUT_PER_GROUP_BYTE 3
+#define BASE64_OUTPUT_PER_GROUP_BYTE 4
     GS_UINT32 ciphertextlen = 0;
-    GS_UCHAR ciphertext[1024];
     GS_UCHAR* cipherkey = NULL;
     char* encodetext = NULL;
     errno_t ret = EOK;
 
-    if (NULL == src_plain_text) {
-        return;
-    }
-
     /* First, get encrypt key */
     cipherkey = getECKeyString((KeyMode)mode);
 
-    /* Clear cipher buffer which will be used later */
-    ret = memset_s(ciphertext, sizeof(ciphertext), 0, sizeof(ciphertext));
-    securec_check(ret, "\0", "\0");
+    /*
+     * Calculate the max length of ciphertext:
+     * 1. contain aes-expand length, IV length, Salt length and backup length. Add mac text length.
+     *    (refer to gs_encrypt_aes128_function)
+     * 2. calculate then length after base64((len / 3 + 1) * 4)
+     * 3. add encrypt prefix len and ending symbol len
+     */
+    GS_UINT32 cipherTextMaxLen = (GS_UINT32)(((strlen(src_plain_text) + RANDOM_LEN * RANDOM_STR_NUM + MAC_LEN) /
+        BASE64_INPUT_PER_GROUP_BYTE + 1) * BASE64_OUTPUT_PER_GROUP_BYTE + strlen(EC_ENCRYPT_PREFIX) + 1);
+    char *ciphertext = (char*)palloc0(cipherTextMaxLen);
 
     /*
      * Step-1: Cipher
      * 	src_text with cipher key -> cipher text
      */
-    ciphertextlen = (GS_UINT32)sizeof(ciphertext);
+    ciphertextlen = cipherTextMaxLen;
     if (!gs_encrypt_aes_128((GS_UCHAR*)src_plain_text, cipherkey,
-        (GS_UINT32)strlen((const char*)cipherkey), ciphertext, &ciphertextlen)) {
+        (GS_UINT32)strlen((const char*)cipherkey), (GS_UCHAR*)ciphertext, &ciphertextlen)) {
         ret = memset_s(src_plain_text, strlen(src_plain_text), 0, strlen(src_plain_text));
-        securec_check(ret, "\0", "\0");            
-        ret = memset_s(ciphertext, sizeof(ciphertext), 0, sizeof(ciphertext));
+        securec_check(ret, "\0", "\0");
+        ret = memset_s(ciphertext, cipherTextMaxLen, 0, cipherTextMaxLen);
         securec_check(ret, "\0", "\0");
         ret = memset_s(cipherkey, RANDOM_LEN + 1, 0, RANDOM_LEN + 1);
         securec_check(ret, "\0", "\0");
         pfree_ext(src_plain_text);
         pfree_ext(cipherkey);
+        pfree_ext(ciphertext);
         ereport(
             ERROR, (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION), errmsg("encrypt the EC string failed!")));
     }
@@ -935,10 +939,10 @@ void encryptECString(char* src_plain_text, char* dest_cipher_text, uint32 dest_c
      * Step-2: Encode
      * 	cipher text by Base64 -> encode text
      */
-    encodetext = SEC_encodeBase64((char*)ciphertext, ciphertextlen + RANDOM_LEN);
+    encodetext = SEC_encodeBase64(ciphertext, ciphertextlen + RANDOM_LEN);
 
     /* Check dest buffer length */
-    if (encodetext == NULL || dest_cipher_length < strlen(EC_ENCRYPT_PREFIX) + strlen(encodetext) + 1) {
+    if (encodetext == NULL || cipherTextMaxLen < strlen(EC_ENCRYPT_PREFIX) + strlen(encodetext) + 1) {
         if (encodetext != NULL) {
             ret = memset_s(encodetext, strlen(encodetext), 0, strlen(encodetext));
             securec_check(ret, "\0", "\0");
@@ -947,22 +951,23 @@ void encryptECString(char* src_plain_text, char* dest_cipher_text, uint32 dest_c
         }
         ret = memset_s(src_plain_text, strlen(src_plain_text), 0, strlen(src_plain_text));
         securec_check(ret, "\0", "\0");
-        ret = memset_s(ciphertext, sizeof(ciphertext), 0, sizeof(ciphertext));
+        ret = memset_s(ciphertext, cipherTextMaxLen, 0, cipherTextMaxLen);
         securec_check(ret, "\0", "\0");
         ret = memset_s(cipherkey, RANDOM_LEN + 1, 0, RANDOM_LEN + 1);
         securec_check(ret, "\0", "\0");
         pfree_ext(src_plain_text);
         pfree_ext(cipherkey);
+        pfree_ext(ciphertext);
         ereport(ERROR,
             (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION),
                 errmsg("Encrypt EC internal error: dest cipher length is too short.")));
     }
 
     /* Copy the encrypt string into the dest buffer */
-    ret = memcpy_s(dest_cipher_text, dest_cipher_length, EC_ENCRYPT_PREFIX, strlen(EC_ENCRYPT_PREFIX));
+    ret = memcpy_s(ciphertext, cipherTextMaxLen, EC_ENCRYPT_PREFIX, strlen(EC_ENCRYPT_PREFIX));
     securec_check(ret, "\0", "\0");
-    ret = memcpy_s(dest_cipher_text + strlen(EC_ENCRYPT_PREFIX),
-        dest_cipher_length - strlen(EC_ENCRYPT_PREFIX),
+    ret = memcpy_s(ciphertext + strlen(EC_ENCRYPT_PREFIX),
+        cipherTextMaxLen - strlen(EC_ENCRYPT_PREFIX),
         encodetext,
         strlen(encodetext) + 1);
     securec_check(ret, "\0", "\0");
@@ -970,14 +975,13 @@ void encryptECString(char* src_plain_text, char* dest_cipher_text, uint32 dest_c
     /* Clear buffer for safety's sake */
     ret = memset_s(encodetext, strlen(encodetext), 0, strlen(encodetext));
     securec_check(ret, "\0", "\0");
-    ret = memset_s(ciphertext, sizeof(ciphertext), 0, sizeof(ciphertext));
-    securec_check(ret, "\0", "\0");
     ret = memset_s(cipherkey, RANDOM_LEN + 1, 0, RANDOM_LEN + 1);
     securec_check(ret, "\0", "\0");
 
     OPENSSL_free(encodetext);
     encodetext = NULL;
     pfree_ext(cipherkey);
+    return ciphertext;
 }
 
 /*
@@ -987,13 +991,11 @@ void encryptECString(char* src_plain_text, char* dest_cipher_text, uint32 dest_c
  *
  * @IN src_cipher_text: source cipher text to be decrypted
  * @OUT dest_plain_text: dest buffer to be filled with plain text, this buffer
- * 	should be given by caller
- * @IN dest_plain_length: dest buffer length which is given by the caller
+ * 	should be reset and free by caller
  * @IN mode: key mode
  * @RETURN: bool, true if encrypt success, false if not
  */
-bool decryptECString(const char* src_cipher_text, char* dest_plain_text,
-                          uint32 dest_plain_length, int mode)
+bool decryptECString(const char* src_cipher_text, char** dest_plain_text, int mode)
 {
     GS_UCHAR* ciphertext = NULL;
     GS_UINT32 ciphertextlen = 0;
@@ -1035,25 +1037,9 @@ bool decryptECString(const char* src_cipher_text, char* dest_plain_text,
             ERROR, (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION), errmsg("decrypt the EC string failed!")));
     }
 
-    /* Check dest buffer length */
-    if (plaintextlen > dest_plain_length) {
-        ret = memset_s(plaintext, plaintextlen, 0, plaintextlen);
-        securec_check(ret, "\0", "\0");
-        ret = memset_s(cipherkey, RANDOM_LEN + 1, 0, RANDOM_LEN + 1);
-        securec_check(ret, "\0", "\0");
-        ret = memset_s(ciphertext, ciphertextlen, 0, ciphertextlen);
-        securec_check(ret, "\0", "\0");
-        pfree_ext(plaintext);
-        pfree_ext(cipherkey);
-        OPENSSL_free(ciphertext);
-        ciphertext = NULL;
-        ereport(ERROR,
-            (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION),
-                errmsg("Decrypt EC internal error: dest plain length is too short.")));
-    }
-
+    *dest_plain_text = (char*)palloc0(plaintextlen + 1);
     /* Copy the decrypted string into the dest buffer */
-    ret = memcpy_s(dest_plain_text, dest_plain_length, plaintext, plaintextlen);
+    ret = memcpy_s(*dest_plain_text, plaintextlen + 1, plaintext, plaintextlen);
     securec_check(ret, "\0", "\0");
 
     /* Clear the buffer for safety's sake */
@@ -1102,7 +1088,6 @@ void EncryptGenericOptions(List* options, const char** sensitiveOptionsArray, in
 {
     int i;
     char* srcString = NULL;
-    char encryptString[EC_CIPHER_TEXT_LENGTH] = {0};
     errno_t ret;
     ListCell* cell = NULL;
     bool isPrint = false;
@@ -1138,15 +1123,26 @@ void EncryptGenericOptions(List* options, const char** sensitiveOptionsArray, in
                     break;
                 }
 
+                /*
+                 * current we only check length in subscription mode, cause datasource and user mapping
+                 * could save database A or B password, which we not sure how long it can be.
+                 */
+                if (mode == (int)SUBSCRIPTION_MODE && (int)strlen(srcString) > MAX_PASSWORD_LENGTH) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("Password can't contain more than %d characters.", MAX_PASSWORD_LENGTH)));
+                }
+
                 /* Encrypt the src string */
-                encryptECString(srcString, encryptString, EC_CIPHER_TEXT_LENGTH, mode);
+                char *encryptString = encryptECString(srcString, mode);
 
                 /* Substitute the src */
                 def->arg = (Node*)makeString(pstrdup(encryptString));
 
                 /* Clear the encrypted string */
-                ret = memset_s(encryptString, sizeof(encryptString), 0, sizeof(encryptString));
+                ret = memset_s(encryptString, strlen(encryptString), 0, strlen(encryptString));
                 securec_check(ret, "\0", "\0");
+                pfree_ext(encryptString);
 
                 /* Clear the src string */
                 ret = memset_s(srcString, strlen(srcString), 0, strlen(srcString));
@@ -1190,20 +1186,21 @@ void DecryptOptions(List *options, const char** sensitiveOptionsArray, int array
 
         for (int i = 0; i < arrayLength; i++) {
             if (pg_strcasecmp(def->defname, sensitiveOptionsArray[i]) == 0) {
-                char plainText[EC_CIPHER_TEXT_LENGTH] = {0};
+                char *plainText = NULL;
 
                 /*
                  * If decryptECString return false, it means the stored values is not encrypted.
                  * This happened when user mapping was created in old gaussdb version.
                  */
-                if (decryptECString(str, plainText, EC_CIPHER_TEXT_LENGTH, mode)) {
+                if (decryptECString(str, &plainText, mode)) {
                     pfree_ext(str);
                     pfree_ext(def->arg);
                     def->arg = (Node*)makeString(pstrdup(plainText));
                     
                     /* Clear buffer */
-                    errno_t errCode = memset_s(plainText, EC_CIPHER_TEXT_LENGTH, 0, EC_CIPHER_TEXT_LENGTH);
+                    errno_t errCode = memset_s(plainText, strlen(plainText), 0, strlen(plainText));
                     securec_check(errCode, "\0", "\0");
+                    pfree_ext(plainText);
                 }
 
                 break;

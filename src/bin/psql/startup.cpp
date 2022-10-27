@@ -1056,7 +1056,7 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
     extern char* optarg;
     extern int optind;
     int c;
-    bool is_action_file = false;
+    bool action_string_need_free = false;
     /* Database Security: Data importing/dumping support AES128. */
     char* dencrypt_key = NULL;
     char* dbname = NULL;
@@ -1085,6 +1085,10 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
                 if (optarg == NULL) {
                     break;
                 }
+                if (action_string_need_free) {
+                    free(options->action_string);
+                    action_string_need_free = false;
+                }
                 is_interactive = false;
                 options->action_string = optarg;
                 if (optarg[0] == '\\') {
@@ -1093,6 +1097,7 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
                 } else {
                     options->action = ACT_SINGLE_QUERY;
                     options->action_string = pg_strdup(optarg); /* need to free in main() */
+                    action_string_need_free = true;
                     /* clear action string after -c command when it inludes sensitive info */
                     if (SensitiveStrCheck(optarg)) {
                         rc = memset_s(optarg, strlen(optarg), 0, strlen(optarg));
@@ -1116,11 +1121,13 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
                     break;
                 }
                 is_interactive = false;
-                is_action_file = (options->action_string != NULL) && (options->action == ACT_FILE);
-                if (is_action_file)
+                if (action_string_need_free) {
                     free(options->action_string);
+                    action_string_need_free = false;
+                }
                 options->action_string = pg_strdup(optarg);
                 options->action = ACT_FILE;
+                action_string_need_free = true;
                 break;
             case 'F':
                 if (pset.popt.topt.fieldSep.separator != NULL)
@@ -1259,12 +1266,16 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
                 showVersion();
                 exit(EXIT_SUCCESS);
             case 'W':
-                pset.getPassword = TRI_YES;
-                if (optarg != NULL) {
-                    options->passwd = pg_strdup(optarg);
-                    rc = memset_s(optarg, strlen(optarg), 0, strlen(optarg));
-                    check_memset_s(rc);
+                if (optarg == NULL) {
+                    break;
                 }
+                if (options->passwd != NULL) {
+                    free(options->passwd);
+                }
+                pset.getPassword = TRI_YES;
+                options->passwd = pg_strdup(optarg);
+                rc = memset_s(optarg, strlen(optarg), 0, strlen(optarg));
+                check_memset_s(rc);
                 break;
             case 'x':
                 pset.popt.topt.expanded = (unsigned short int)true;
@@ -1344,6 +1355,11 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
             char *off_argv = temp + strlen("password");
             rc = memset_s(off_argv, strlen(off_argv), '*', strlen(off_argv));
             check_memset_s(rc);
+        }
+        /* Disallow creating replication connections with gsql */
+        if ((temp = strstr(options->dbname, "replication=")) != NULL) {
+            (void)fprintf(stderr, _("The 'replication' parameter is not supported by gsql.\n"));
+            exit(EXIT_FAILURE);
         }
     }
 }

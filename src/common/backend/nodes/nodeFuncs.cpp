@@ -33,8 +33,10 @@
 #include "parser/parse_expr.h"
 #endif /* FRONTEND_PARSER */
 #include "storage/tcap.h"
+#include "parser/parse_utilcmd.h"
 
 static bool expression_returns_set_walker(Node* node, void* context);
+static bool expression_rownum_walker(Node* node, void* context);
 static int leftmostLoc(int loc1, int loc2);
 
 /*
@@ -70,7 +72,7 @@ Oid exprType(const Node* expr)
             type = ((const Const*)expr)->consttype;
             break;
         case T_UserVar:
-            type = ((const Const*)(((UserVar*)expr)->value))->consttype;
+            type = exprType((const Node*)(((UserVar*)expr)->value));
             break;
         case T_Param:
             type = ((const Param*)expr)->paramtype;
@@ -676,6 +678,32 @@ static bool expression_returns_set_walker(Node* node, void* context)
 }
 
 /*
+ * expression_contains_rownum
+ *	  Test whether an expression contains rownum.
+ *
+ * Because we use expression_tree_walker(), this can also be applied to
+ * whole targetlists; it'll produce TRUE if any one of the tlist items
+ * contain rownum.
+ */
+bool expression_contains_rownum(Node* node)
+{
+    return expression_rownum_walker(node, NULL);
+}
+
+static bool expression_rownum_walker(Node* node, void* context)
+{
+    if (node == NULL) {
+        return false;
+    }
+
+    if (IsA(node, Rownum)) {
+        return true;
+    }
+
+    return expression_tree_walker(node, (bool (*)())expression_rownum_walker, context);
+}
+
+/*
  *	exprCollation -
  *	  returns the Oid of the collation of the expression's result.
  *
@@ -882,6 +910,15 @@ Oid exprCollation(const Node* expr)
             break;
     }
     return coll;
+}
+
+/*
+ *	exprCharset -
+ *	  returns the character set of the expression's result.
+ */
+int exprCharset(const Node* expr)
+{
+    return get_charset_by_collation(exprCollation(expr));
 }
 
 /*
@@ -3319,6 +3356,8 @@ bool raw_expression_tree_walker(Node* node, bool (*walker)(), void* context)
             return p2walker(((UpsertClause*)node)->targetList, context);
         case T_CommonTableExpr:
             return p2walker(((CommonTableExpr*)node)->ctequery, context);
+        case T_AutoIncrement:
+            return p2walker(((AutoIncrement*)node)->expr, context);
         default:
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unrecognized node type: %d", (int)nodeTag(node))));

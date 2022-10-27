@@ -277,6 +277,7 @@ typedef struct PMGRAction{
     PMGRActionType type;
     CachedPlanSource *psrc;
     CachedPlan *selected_plan;
+    List *qRelSelec;
     bool valid_plan;
     PMGRStatCollectType statType;
     bool is_shared; /* plansource is shared or not? */
@@ -284,6 +285,8 @@ typedef struct PMGRAction{
     bool is_lock;
     LWLockMode lockmode;
     bool needGenericRoot;
+    PlannerInfo *genericRoot;
+    bool usePartIdx;
     uint8 step;
 }PMGRAction;
 
@@ -409,8 +412,15 @@ typedef struct CachedPlanSource {
     uint64 sql_patch_sequence; /* should match g_instance.cost_cxt.sql_patch_sequence_id */
     PlanManager *planManager;
     int gpc_lockid;
-    int nextval_default_expr_type;
+    /*
+     * PBE scenario for explain opteval:
+     * The call flow is as follows:
+     * ExplainQuery->ExplainOneQuery->ExplainOneUtility->ExplainExecuteQuery->BuildCachedPlan->pg_plan_queries
+     * so CachedPlanSource needs to add the attribute opteval to pass to pg_plan_queries
+     */
+    bool opteval;
     bool hasSubQuery;
+    int nextval_default_expr_type;
 } CachedPlanSource;
 
 /*
@@ -455,6 +465,7 @@ typedef struct CachedPlan {
     }
     CachedPlanInfo *cpi;
     bool is_candidate;
+    double cost;      /* cost of generic plan, or -1 if not known */
 } CachedPlan;
 
 typedef struct CachedPlanInfo {

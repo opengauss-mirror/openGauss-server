@@ -894,7 +894,7 @@ static void DeltaPlusRLEv2_Check(char* rawData, char* cmprData, int cmprSize, in
 #endif
 
 /// get the bound size needed.
-/// the returned value is avaiable for both delta and rle methods.
+/// the returned value is available for both delta and rle methods.
 int DeltaPlusRLEv2::GetBound()
 {
     if (DeltaCanBeApplied(&m_deltaBytes, m_minVal, m_maxVal, m_valueBytes)) {
@@ -1112,7 +1112,7 @@ static int ParseBitmap(char* buf, T* values, int nValues, T valueIfSet, T valueI
 
     /// whole/complete bytes used for this bitmap
     const uint32 bpWholeBytes = (uint32)nValues >> 3;
-    /// avaiable bits in the last part-byte for this bitmap
+    /// available bits in the last part-byte for this bitmap
     /// it may be 0 or others less than 8.
     const uint32 bpRemainBits = (uint32)nValues & 0x07;
 

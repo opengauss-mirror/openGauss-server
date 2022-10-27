@@ -1152,6 +1152,21 @@ static void InitStorageConfigureNamesBool()
             NULL,
             NULL},
 #endif
+
+#ifndef ENABLE_MULTIPLE_NODES
+        {{"enable_availablezone",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            AUDIT_OPTIONS,
+            gettext_noop("enable identifying available zone during cascade standby connection"),
+            NULL},
+            &g_instance.attr.attr_storage.enable_availablezone,
+            false,
+            NULL,
+            NULL,
+            NULL},
+#endif
+
         /* End-of-list marker */
         {{NULL,
             (GucContext)0,

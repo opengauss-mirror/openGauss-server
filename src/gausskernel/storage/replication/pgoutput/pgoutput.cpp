@@ -141,7 +141,8 @@ static void pgoutput_startup(LogicalDecodingContext *ctx, OutputPluginOptions *o
     PGOutputData *data = (PGOutputData *)palloc0(sizeof(PGOutputData));
 
     /* Create our memory context for private allocations. */
-    data->context = AllocSetContextCreate(ctx->context, "logical replication output context", ALLOCSET_DEFAULT_SIZES);
+    data->common.context = AllocSetContextCreate(ctx->context,
+        "logical replication output context", ALLOCSET_DEFAULT_SIZES);
 
     ctx->output_plugin_private = data;
 
@@ -328,7 +329,7 @@ static void pgoutput_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn, 
     }
 
     /* Avoid leaking memory by using and resetting our own context */
-    old = MemoryContextSwitchTo(data->context);
+    old = MemoryContextSwitchTo(data->common.context);
 
     /*
      * Write the relation schema if the current schema haven't been sent yet.
@@ -385,7 +386,7 @@ static void pgoutput_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn, 
 
     /* Cleanup */
     MemoryContextSwitchTo(old);
-    MemoryContextReset(data->context);
+    MemoryContextReset(data->common.context);
 }
 
 /*

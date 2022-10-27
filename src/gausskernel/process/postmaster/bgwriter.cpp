@@ -62,6 +62,7 @@
 #include "utils/timestamp.h"
 #include "gssignal/gs_signal.h"
 #include "replication/slot.h"
+#include "access/hash.h"
 
 /*
  * Multiplier to apply to BgWriterDelay when we decide to hibernate.
@@ -706,6 +707,10 @@ void drop_rel_all_forks_buffers()
     LWLockAcquire(g_instance.bgwriter_cxt.rel_hashtbl_lock, LW_SHARED);
     hash_seq_init(&status, unlink_rel_hashtbl);
     while ((temp_entry = (DelFileTag *)hash_seq_search(&status)) != NULL) {
+        if (temp_entry->fileUnlink == false) {
+            continue;
+        }
+
         entry = (DelFileTag*)hash_search(rel_bak, (void *)&temp_entry->rnode, HASH_ENTER, &found);
         if (!found) {
             entry->rnode = temp_entry->rnode;

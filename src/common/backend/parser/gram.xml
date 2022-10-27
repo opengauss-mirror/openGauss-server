@@ -645,7 +645,7 @@ ALTER WORKLOAD GROUP wg_name
     <MainSentence id="TABLE PARTITION"><![CDATA[
 {ANALYZE | ANALYSE} [ VERBOSE ]
     [ table_name [ ( column_name [, ...] ) ] ]
-    PARTITION ( patrition_name );
+    PARTITION ( partition_name );
 ]]></MainSentence>
     <MainSentence id="FOREIGH TABLE"><![CDATA[
 {ANALYZE | ANALYSE} [ VERBOSE ]

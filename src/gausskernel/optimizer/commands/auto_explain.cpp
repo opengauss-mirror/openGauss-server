@@ -13,6 +13,7 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 #include "pgstat.h"
+#include "optimizer/ml_model.h"
 #include "optimizer/streamplan.h"
 #include "commands/explain.h"
 #include "executor/instrument.h"
@@ -248,6 +249,7 @@ void exec_explain_plan(QueryDesc *queryDesc)
         appendStringInfo(es.str, "\n---------------------------"
             "-NestLevel:%d----------------------------\n", u_sess->exec_cxt.nesting_level);
         ExplainQueryText(&es, queryDesc);
+        SetNullPrediction(queryDesc->planstate);
         appendStringInfo(es.str, "Name: %s\n", g_instance.attr.attr_common.PGXCNodeName);
         ExplainBeginOutput(&es);
         MemoryContext current_ctx = CurrentMemoryContext;
@@ -304,6 +306,7 @@ void explain_querydesc(ExplainState *es, QueryDesc *queryDesc)
         (IS_PGXC_COORDINATOR) ? "Coordinator" : "Datanode", g_instance.attr.attr_common.PGXCNodeName);
 
     ExplainBeginOutput(es);
+    SetNullPrediction(queryDesc->planstate);
     ExplainPrintPlan(es, queryDesc);
     ExplainEndOutput(es);
 

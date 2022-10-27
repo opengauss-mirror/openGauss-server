@@ -104,6 +104,7 @@ void CreateSchemaCommand(CreateSchemaStmt* stmt, const char* queryString)
     int save_sec_context;
     AclResult aclresult;
     char* queryStringwithinfo = (char*)queryString;
+    Oid coll_oid = InvalidOid;
     ObjectAddress address;
 
     GetUserIdAndSecContext(&saved_uid, &save_sec_context);
@@ -236,8 +237,12 @@ void CreateSchemaCommand(CreateSchemaStmt* stmt, const char* queryString)
 	}
     } 
 
+    if (stmt->collate || stmt->charset != PG_INVALID_ENCODING) {
+        coll_oid = transform_default_collation(stmt->collate, stmt->charset);
+    }
+
     /* Create the schema's namespace */
-    namespaceId = NamespaceCreate(schemaName, owner_uid, false, hasBlockChain);
+    namespaceId = NamespaceCreate(schemaName, owner_uid, false, hasBlockChain, coll_oid);
 
     /* Advance cmd counter to make the namespace visible */
     CommandCounterIncrement();
@@ -360,6 +365,8 @@ void AlterSchemaCommand(AlterSchemaStmt* stmt)
     Assert(nspName != NULL);
     bool withBlockchain = stmt->hasBlockChain;
     bool nspIsBlockchain = false;
+    Oid colloid = InvalidOid;
+    Oid nspcollation = InvalidOid;
     HeapTuple tup;
     Relation rel;
     AclResult aclresult;
@@ -398,45 +405,67 @@ void AlterSchemaCommand(AlterSchemaStmt* stmt)
         ereport(ERROR,
             (errcode(ERRCODE_RESERVED_NAME),
                 errmsg("The system schema \"%s\" doesn't allow to alter to blockchain schema", nspName)));
-    /*
-     * If the any table exists in the schema, do not change to ledger schema.
-     */
-    StringInfo existTbl = TableExistInSchema(HeapTupleGetOid(tup), TABLE_TYPE_ANY);
-    if (existTbl->len != 0) {
-        if (withBlockchain) {
-            ereport(ERROR,
-                (errcode(ERRCODE_RESERVED_NAME),
-                    errmsg("It is not supported to change \"%s\" to blockchain schema which includes tables.",
-                        nspName)));
+
+    Datum new_record[Natts_pg_namespace] = {0};
+    bool new_record_nulls[Natts_pg_namespace] = {false};
+    bool new_record_repl[Natts_pg_namespace] = {false};
+
+    Datum datum;
+    bool is_null = true;
+    /* For B format, the default collation of a schema can be changed. */
+    if (stmt->collate || stmt->charset != PG_INVALID_ENCODING) {
+        colloid = transform_default_collation(stmt->collate, stmt->charset);
+        datum = SysCacheGetAttr(NAMESPACENAME, tup, Anum_pg_namespace_nspcollation, &is_null);
+        if (!is_null) {
+            nspcollation = ObjectIdGetDatum(datum);
+        }
+        if (nspcollation != colloid) {
+            new_record[Anum_pg_namespace_nspcollation - 1] = ObjectIdGetDatum(colloid);
+            new_record_repl[Anum_pg_namespace_nspcollation - 1] = true;
         } else {
-            ereport(ERROR,
-                (errcode(ERRCODE_RESERVED_NAME),
-                    errmsg("It is not supported to change \"%s\" to normal schema which includes tables.",
-                        nspName)));
+            heap_close(rel, NoLock);
+            tableam_tops_free_tuple(tup);
+            return;
+        }
+    } else {
+        /*
+        * If the any table exists in the schema, do not change to ledger schema.
+        */
+        StringInfo existTbl = TableExistInSchema(HeapTupleGetOid(tup), TABLE_TYPE_ANY);
+        if (existTbl->len != 0) {
+            if (withBlockchain) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_RESERVED_NAME),
+                        errmsg("It is not supported to change \"%s\" to blockchain schema which includes tables.",
+                            nspName)));
+            } else {
+                ereport(ERROR,
+                    (errcode(ERRCODE_RESERVED_NAME),
+                        errmsg("It is not supported to change \"%s\" to normal schema which includes tables.",
+                            nspName)));
+            }
         }
 
+        /* modify nspblockchain attribute */
+        datum = SysCacheGetAttr(NAMESPACENAME, tup, Anum_pg_namespace_nspblockchain, &is_null);
+        if (!is_null) {
+            nspIsBlockchain = DatumGetBool(datum);
+        }
+        if (nspIsBlockchain != withBlockchain) {
+            new_record[Anum_pg_namespace_nspblockchain - 1] = BoolGetDatum(withBlockchain);
+            new_record_repl[Anum_pg_namespace_nspblockchain - 1] = true;
+        } else {
+            heap_close(rel, NoLock);
+            tableam_tops_free_tuple(tup);
+            return;
+        }
     }
 
-    /* modify nspblockchain attribute */
-    bool is_null = true;
-    Datum datum = SysCacheGetAttr(NAMESPACENAME, tup, Anum_pg_namespace_nspblockchain, &is_null);
-    if (!is_null) {
-        nspIsBlockchain = DatumGetBool(datum);
-    }
-    if (nspIsBlockchain != withBlockchain) {
-        Datum new_record[Natts_pg_namespace] = {0};
-        bool new_record_nulls[Natts_pg_namespace] = {false};
-        bool new_record_repl[Natts_pg_namespace] = {false};
-
-        new_record[Anum_pg_namespace_nspblockchain - 1] = BoolGetDatum(withBlockchain);
-        new_record_repl[Anum_pg_namespace_nspblockchain - 1] = true;
-
-        HeapTuple new_tuple = (HeapTuple) tableam_tops_modify_tuple(tup, RelationGetDescr(rel),
-            new_record, new_record_nulls, new_record_repl);
-        simple_heap_update(rel, &tup->t_self, new_tuple);
-        /* Update indexes */
-        CatalogUpdateIndexes(rel, new_tuple);
-    }
+    HeapTuple new_tuple = (HeapTuple) tableam_tops_modify_tuple(tup, RelationGetDescr(rel),
+        new_record, new_record_nulls, new_record_repl);
+    simple_heap_update(rel, &tup->t_self, new_tuple);
+    /* Update indexes */
+    CatalogUpdateIndexes(rel, new_tuple);
 
     heap_close(rel, NoLock);
     tableam_tops_free_tuple(tup);

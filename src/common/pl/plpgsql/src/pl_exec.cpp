@@ -1577,15 +1577,15 @@ Datum plpgsql_exec_function(PLpgSQL_function* func, FunctionCallInfo fcinfo, boo
             TupleDesc tupdesc = get_func_param_desc(tp, func->fn_rettype, &out_args_num);
             Datum *values = (Datum*)palloc(sizeof(Datum) * (out_args_num + 1));
             bool *nulls = (bool*)palloc(sizeof(bool) * (out_args_num + 1));
-            heap_deform_tuple((HeapTuple)DatumGetPointer(estate.paramval), estate.paramtupdesc, (values + 1),
-                                (nulls + 1));
-            values[0] = estate.retval;
-            nulls[0] = estate.retisnull;
             if (unlikely(estate.paramval == 0 || estate.paramtupdesc ==NULL)) {
                 ereport(ERROR, (errcode(ERRCODE_PLPGSQL_ERROR), errmodule(MOD_PLSQL),
                                 errmsg("tuple is null"),
                                 errdetail("it may be because change guc behavior_compat_options in one session")));
             }
+            heap_deform_tuple((HeapTuple)DatumGetPointer(estate.paramval), estate.paramtupdesc, (values + 1),
+                                (nulls + 1));
+            values[0] = estate.retval;
+            nulls[0] = estate.retisnull;
             HeapTuple rettup = heap_form_tuple(tupdesc, values, nulls);
             estate.retval = PointerGetDatum(SPI_returntuple(rettup, tupdesc));
             pfree(values);
@@ -3581,6 +3581,7 @@ static void plpgsql_set_outparam_value(PLpgSQL_execstate* estate, PLpgSQL_expr* 
     }
     PLpgSQL_row* row = (PLpgSQL_row*)estate->datums[expr->out_param_dno];
     exec_move_row(estate, NULL, row, tuple, paramtupdesc);
+    heap_freetuple(tuple);
     pfree(values);
     pfree(nulls);
 }

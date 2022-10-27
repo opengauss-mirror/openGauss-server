@@ -76,7 +76,8 @@ private:
     /*
      * with cte as([select,insert,update,delete]) select from cte where .so we need to get CacheColumn from cte.
      */
-    static bool run_pre_select_statement(const SelectStmt * const select_stmt, StatementData *statement_data);
+    static bool run_pre_select_statement(const SelectStmt * const select_stmt, StatementData *statement_data,
+        bool *unencrypted = nullptr);
     static bool run_pre_select_statement(const SelectStmt * const select_stmt, const SetOperation &parent_set_operation,
         const bool &parent_all, StatementData *statement_data, ICachedColumns *cacehd_columns = nullptr,
         ICachedColumns *cached_columns_parents = nullptr);
@@ -91,6 +92,7 @@ private:
     static bool run_pre_delete_statement(const DeleteStmt * const delete_stmt, StatementData *statement_data,
         ICachedColumns *cached_columns = nullptr);
     static bool run_pre_prepare_statement(const PrepareStmt * const prepare_stmt, StatementData *statement_data);
+    static bool process_prepare_arg_types(const PrepareStmt * const prepare_stmt, StatementData *statement_data);
     static bool run_pre_execute_statement(const ExecuteStmt * const execute_stmt, StatementData *statement_data);
     static bool run_pre_declare_cursor_statement(const DeclareCursorStmt * const declare_cursor_stmt,
         StatementData *statement_data);

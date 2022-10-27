@@ -1,0 +1,408 @@
+create database atbdb_gtt WITH ENCODING 'UTF-8' dbcompatibility 'B';
+\c atbdb_gtt
+CREATE SCHEMA atbdb_gtt_schema;
+SET CURRENT_SCHEMA TO atbdb_gtt_schema;
+
+-- test modify column without data
+CREATE GLOBAL TEMPORARY TABLE test_at_modify(
+    a int,
+    b int NOT NULL
+);
+ALTER TABLE test_at_modify MODIFY b varchar(8) NULL;
+\d+ test_at_modify;
+ALTER TABLE test_at_modify MODIFY b varchar(8) DEFAULT '0';
+\d+ test_at_modify;
+ALTER TABLE test_at_modify MODIFY b int AUTO_INCREMENT PRIMARY KEY INITIALLY DEFERRED;
+\d+ test_at_modify;
+ALTER TABLE test_at_modify MODIFY b varchar(8) UNIQUE DEFERRABLE;
+\d+ test_at_modify;
+ALTER TABLE test_at_modify MODIFY b varchar(8) CHECK (b < 'a');
+\d+ test_at_modify;
+ALTER TABLE test_at_modify MODIFY b varchar(8) COLLATE "POSIX";
+\d+ test_at_modify;
+ALTER TABLE test_at_modify MODIFY b varchar(8) GENERATED ALWAYS AS (a+1) STORED;
+\d+ test_at_modify;
+ALTER TABLE test_at_modify MODIFY b int NOT NULL;
+\d+ test_at_modify;
+select pg_get_tabledef('test_at_modify'::regclass);
+INSERT INTO test_at_modify VALUES(1,1);
+DROP TABLE test_at_modify;
+
+-- test modify column datatype
+CREATE GLOBAL TEMPORARY TABLE test_at_modify_type(
+    a int,
+    b int NOT NULL
+);
+INSERT INTO test_at_modify_type VALUES(1,1);
+INSERT INTO test_at_modify_type VALUES(2,2);
+INSERT INTO test_at_modify_type VALUES(3,3);
+ALTER TABLE test_at_modify_type MODIFY COLUMN b varchar(8);
+SELECT * FROM test_at_modify_type where b = '3';
+ALTER TABLE test_at_modify_type MODIFY COLUMN b DATE; -- ERROR
+ALTER TABLE test_at_modify_type MODIFY COLUMN b RAW;
+SELECT * FROM test_at_modify_type ORDER BY 1,2;
+DROP TABLE test_at_modify_type;
+CREATE GLOBAL TEMPORARY TABLE test_at_modify_type(
+    a int,
+    b serial NOT NULL
+);
+INSERT INTO test_at_modify_type VALUES(1,1);
+INSERT INTO test_at_modify_type VALUES(2,2);
+INSERT INTO test_at_modify_type VALUES(3,3);
+ALTER TABLE test_at_modify_type MODIFY COLUMN b int;
+ALTER TABLE test_at_modify_type MODIFY COLUMN b int[]; -- ERROR
+ALTER TABLE test_at_modify_type MODIFY COLUMN b int16;
+ALTER TABLE test_at_modify_type MODIFY COLUMN b serial; -- ERROR
+ALTER TABLE test_at_modify_type MODIFY COLUMN b DECIMAL(4,2);
+SELECT * FROM test_at_modify_type where b = 3;
+ALTER TABLE test_at_modify_type MODIFY COLUMN b BOOLEAN;
+SELECT * FROM test_at_modify_type ORDER BY 1,2;
+DROP TABLE test_at_modify_type;
+CREATE GLOBAL TEMPORARY TABLE test_at_modify_type(
+    a int,
+    b text
+);
+INSERT INTO test_at_modify_type VALUES(1,'beijing');
+INSERT INTO test_at_modify_type VALUES(2,'shanghai');
+INSERT INTO test_at_modify_type VALUES(3,'guangzhou');
+ALTER TABLE test_at_modify_type MODIFY COLUMN b SET('beijing','shanghai','nanjing','wuhan'); -- ERROR
+ALTER TABLE test_at_modify_type MODIFY COLUMN b SET('beijing','shanghai','nanjing','guangzhou');
+ALTER TABLE test_at_modify_type MODIFY COLUMN b SET('beijing','shanghai','guangzhou','wuhan'); -- ERROR
+select pg_get_tabledef('test_at_modify_type'::regclass);
+DROP TABLE test_at_modify_type;
+CREATE GLOBAL TEMPORARY TABLE test_at_modify_type(
+    a int,
+    b varchar(32)
+);
+INSERT INTO test_at_modify_type VALUES(1,'2022-11-22 12:00:00');
+INSERT INTO test_at_modify_type VALUES(2,'2022-11-23 12:00:00');
+INSERT INTO test_at_modify_type VALUES(3,'2022-11-24 12:00:00');
+ALTER TABLE test_at_modify_type MODIFY COLUMN b varchar(10); -- ERROR
+ALTER TABLE test_at_modify_type MODIFY COLUMN b DATE;
+SELECT * FROM test_at_modify_type ORDER BY 1,2;
+DROP TABLE test_at_modify_type;
+CREATE GLOBAL TEMPORARY TABLE test_at_modify_type(
+    a int,
+    b int[] NOT NULL
+);
+INSERT INTO test_at_modify_type VALUES(1,ARRAY[1,1]);
+INSERT INTO test_at_modify_type VALUES(2,ARRAY[2,2]);
+INSERT INTO test_at_modify_type VALUES(3,ARRAY[3,3]);
+ALTER TABLE test_at_modify_type MODIFY COLUMN b float4[];
+SELECT * FROM test_at_modify_type ORDER BY 1,2;
+DROP TABLE test_at_modify_type;
+
+-- test modify column constraint
+CREATE GLOBAL TEMPORARY TABLE test_at_modify_constr(
+    a int,
+    b int NOT NULL
+);
+INSERT INTO test_at_modify_constr VALUES(1,1);
+INSERT INTO test_at_modify_constr VALUES(2,2);
+INSERT INTO test_at_modify_constr VALUES(3,3);
+ALTER TABLE test_at_modify_constr MODIFY b varchar(8) NOT NULL NULL; -- ERROR
+ALTER TABLE test_at_modify_constr MODIFY b varchar(8) UNIQUE KEY NULL;
+INSERT INTO test_at_modify_constr VALUES(3,3); -- ERROR
+INSERT INTO test_at_modify_constr VALUES(4,NULL);
+ALTER TABLE test_at_modify_constr MODIFY b int NULL PRIMARY KEY; -- ERROR
+DELETE FROM test_at_modify_constr WHERE b IS NULL;
+ALTER TABLE test_at_modify_constr MODIFY b int NULL PRIMARY KEY;
+INSERT INTO test_at_modify_constr VALUES(4,NULL); -- ERROR
+ALTER TABLE test_at_modify_constr MODIFY b varchar(8) CONSTRAINT t_at_m_check CHECK (b < 3); -- ERROR
+ALTER TABLE test_at_modify_constr MODIFY b varchar(8) CONSTRAINT t_at_m_check CHECK (b < 5);
+ALTER TABLE test_at_modify_constr MODIFY b varchar(8) CONSTRAINT t_at_m_check CHECK (b = a); -- ERROR
+ALTER TABLE test_at_modify_constr MODIFY b varchar(8) CONSTRAINT t_at_m_check_1 CHECK (b = a);
+INSERT INTO test_at_modify_constr VALUES(4,4);
+INSERT INTO test_at_modify_constr VALUES(5,5); -- ERROR
+INSERT INTO test_at_modify_constr VALUES(6,'a'); -- ERROR
+INSERT INTO test_at_modify_constr VALUES(0,'a');
+ALTER TABLE test_at_modify_constr MODIFY b int NOT NULL PRIMARY KEY; -- ERROR
+ALTER TABLE test_at_modify_constr MODIFY b int NOT NULL;
+INSERT INTO test_at_modify_constr VALUES(5,5); -- ERROR
+SELECT b FROM test_at_modify_constr ORDER BY 1;
+select pg_get_tabledef('test_at_modify_constr'::regclass);
+ALTER TABLE test_at_modify_constr MODIFY b int NOT NULL REFERENCES test_at_ref (a); -- ERROR
+DROP TABLE test_at_modify_constr;
+
+-- test modify column default
+CREATE GLOBAL TEMPORARY TABLE test_at_modify_default(
+    a int,
+    b int DEFAULT NULL
+);
+INSERT INTO test_at_modify_default VALUES(1,1);
+INSERT INTO test_at_modify_default VALUES(2,2);
+INSERT INTO test_at_modify_default VALUES(3,3);
+ALTER TABLE test_at_modify_default MODIFY b bigint DEFAULT (a+1); -- ERROR
+ALTER TABLE test_at_modify_default MODIFY b bigint DEFAULT NULL;
+\d+ test_at_modify_default;
+ALTER TABLE test_at_modify_default MODIFY b varchar(8) DEFAULT 'a' GENERATED ALWAYS AS (a+1) STORED; -- ERROR
+ALTER TABLE test_at_modify_default MODIFY b varchar(8) DEFAULT 'a';
+\d+ test_at_modify_default;
+INSERT INTO test_at_modify_default VALUES(0,DEFAULT);
+SELECT b FROM test_at_modify_default ORDER BY 1;
+ALTER TABLE test_at_modify_default MODIFY b int DEFAULT 4 AUTO_INCREMENT; -- ERROR
+ALTER TABLE test_at_modify_default MODIFY b int DEFAULT 4;
+INSERT INTO test_at_modify_default VALUES(4,DEFAULT);
+SELECT b FROM test_at_modify_default ORDER BY 1;
+ALTER TABLE test_at_modify_default MODIFY b varchar(8) GENERATED ALWAYS AS (a+1) STORED;
+SELECT a,b FROM test_at_modify_default ORDER BY 1,2;
+ALTER TABLE test_at_modify_default MODIFY a varchar(8) DEFAULT 'a';
+INSERT INTO test_at_modify_default VALUES(DEFAULT,DEFAULT);
+SELECT a,b FROM test_at_modify_default ORDER BY 1,2;
+\d+ test_at_modify_default;
+DROP TABLE test_at_modify_default;
+
+-- test modify column depended by generated column
+CREATE GLOBAL TEMPORARY TABLE test_at_modify_generated(
+    a int,
+    b varchar(32),
+    c varchar(32) GENERATED ALWAYS AS (b) STORED
+);
+INSERT INTO test_at_modify_generated(a,b) VALUES(1,'2022-11-22 12:00:00');
+INSERT INTO test_at_modify_generated(a,b) VALUES(2,'2022-11-23 12:00:00');
+INSERT INTO test_at_modify_generated(a,b) VALUES(3,'2022-11-24 12:00:00');
+SELECT * FROM test_at_modify_generated ORDER BY 1,2;
+ALTER TABLE test_at_modify_generated MODIFY COLUMN b DATE;
+SELECT * FROM test_at_modify_generated ORDER BY 1,2;
+\d+ test_at_modify_generated
+ALTER TABLE test_at_modify_generated MODIFY COLUMN b varchar(32);
+SELECT * FROM test_at_modify_generated ORDER BY 1,2;
+DROP TABLE test_at_modify_generated;
+
+
+-- test modify column AUTO_INCREMENT
+CREATE GLOBAL TEMPORARY TABLE test_at_modify_autoinc(
+    a int,
+    b int
+);
+INSERT INTO test_at_modify_autoinc VALUES(1,NULL);
+INSERT INTO test_at_modify_autoinc VALUES(2,0);
+ALTER TABLE test_at_modify_autoinc MODIFY b int2 AUTO_INCREMENT; -- ERROR
+ALTER TABLE test_at_modify_autoinc MODIFY b DECIMAL(4,2) AUTO_INCREMENT UNIQUE KEY; -- ERROR
+ALTER TABLE test_at_modify_autoinc MODIFY b serial AUTO_INCREMENT UNIQUE KEY; -- ERROR
+ALTER TABLE test_at_modify_autoinc MODIFY b int2 AUTO_INCREMENT NULL UNIQUE KEY;
+SELECT * FROM test_at_modify_autoinc ORDER BY 1,2;
+INSERT INTO test_at_modify_autoinc VALUES(3,0);
+SELECT * FROM test_at_modify_autoinc ORDER BY 1,2;
+ALTER TABLE test_at_modify_autoinc MODIFY COLUMN b int;
+INSERT INTO test_at_modify_autoinc VALUES(4,0);
+SELECT * FROM test_at_modify_autoinc ORDER BY 1,2;
+ALTER TABLE test_at_modify_autoinc MODIFY b int AUTO_INCREMENT PRIMARY KEY, AUTO_INCREMENT=100;
+SELECT * FROM test_at_modify_autoinc ORDER BY 1,2;
+INSERT INTO test_at_modify_autoinc VALUES(5,0);
+SELECT * FROM test_at_modify_autoinc ORDER BY 1,2;
+ALTER TABLE test_at_modify_autoinc AUTO_INCREMENT=1000;
+ALTER TABLE test_at_modify_autoinc MODIFY b int2 AUTO_INCREMENT;
+INSERT INTO test_at_modify_autoinc VALUES(6,0);
+SELECT * FROM test_at_modify_autoinc ORDER BY 1,2;
+ALTER TABLE test_at_modify_autoinc ADD COLUMN c int AUTO_INCREMENT UNIQUE, MODIFY  b int2 AUTO_INCREMENT UNIQUE KEY; -- ERROR
+ALTER TABLE test_at_modify_autoinc ADD COLUMN c int AUTO_INCREMENT UNIQUE; -- ERROR
+ALTER TABLE test_at_modify_autoinc MODIFY COLUMN b int;
+ALTER TABLE test_at_modify_autoinc ADD COLUMN c int AUTO_INCREMENT UNIQUE;
+INSERT INTO test_at_modify_autoinc VALUES(7,0,0);
+SELECT * FROM test_at_modify_autoinc ORDER BY 1,2;
+ALTER TABLE test_at_modify_autoinc DROP COLUMN c , MODIFY b int2 AUTO_INCREMENT UNIQUE KEY;
+INSERT INTO test_at_modify_autoinc VALUES(8,0);
+SELECT * FROM test_at_modify_autoinc ORDER BY 1,2;
+ALTER TABLE test_at_modify_autoinc MODIFY b float4; -- ALTER TYPE ONLY, KEEP AUTO_INCREMENT
+INSERT INTO test_at_modify_autoinc VALUES(9,0);
+SELECT * FROM test_at_modify_autoinc ORDER BY 1,2;
+DROP TABLE test_at_modify_autoinc;
+
+-- ------------------------------------------------------ test ALTER TABLE CHANGE
+-- test change column without data
+CREATE GLOBAL TEMPORARY TABLE test_at_change(
+    a int,
+    b int NOT NULL
+);
+ALTER TABLE test_at_change CHANGE b b1 varchar(8) NULL;
+\d+ test_at_change;
+ALTER TABLE test_at_change CHANGE b1 b varchar(8) DEFAULT '0';
+\d+ test_at_change;
+ALTER TABLE test_at_change CHANGE b b1 int AUTO_INCREMENT PRIMARY KEY;
+\d+ test_at_change;
+ALTER TABLE test_at_change CHANGE b1 b varchar(8) UNIQUE;
+\d+ test_at_change;
+ALTER TABLE test_at_change CHANGE b b1 varchar(8) CHECK (b1 < 'a');
+\d+ test_at_change;
+ALTER TABLE test_at_change CHANGE b1 b varchar(8) COLLATE "POSIX";
+\d+ test_at_change;
+ALTER TABLE test_at_change CHANGE b b1 varchar(8) GENERATED ALWAYS AS (a+1) STORED;
+\d+ test_at_change;
+ALTER TABLE test_at_change CHANGE b1 b int NOT NULL;
+\d+ test_at_change;
+select pg_get_tabledef('test_at_change'::regclass);
+INSERT INTO test_at_change VALUES(1,1);
+DROP TABLE test_at_change;
+
+-- test change column datatype
+CREATE GLOBAL TEMPORARY TABLE test_at_change_type(
+    a int,
+    b int NOT NULL
+);
+INSERT INTO test_at_change_type VALUES(1,1);
+INSERT INTO test_at_change_type VALUES(2,2);
+INSERT INTO test_at_change_type VALUES(3,3);
+ALTER TABLE test_at_change_type CHANGE b b1 varchar(8);
+SELECT * FROM test_at_change_type where b1 = '3';
+ALTER TABLE test_at_change_type CHANGE b1 b DATE; -- ERROR
+ALTER TABLE test_at_change_type CHANGE b1 b RAW;
+SELECT * FROM test_at_change_type ORDER BY 1,2;
+DROP TABLE test_at_change_type;
+CREATE GLOBAL TEMPORARY TABLE test_at_change_type(
+    a int,
+    b serial NOT NULL
+);
+INSERT INTO test_at_change_type VALUES(1,1);
+INSERT INTO test_at_change_type VALUES(2,2);
+INSERT INTO test_at_change_type VALUES(3,3);
+ALTER TABLE test_at_change_type CHANGE b b1 int;
+ALTER TABLE test_at_change_type CHANGE b1 b serial; -- ERROR
+ALTER TABLE test_at_change_type CHANGE b1 b DECIMAL(4,2);
+SELECT * FROM test_at_change_type where b = 3;
+ALTER TABLE test_at_change_type CHANGE b b1 BOOLEAN;
+SELECT * FROM test_at_change_type ORDER BY 1,2;
+DROP TABLE test_at_change_type;
+CREATE GLOBAL TEMPORARY TABLE test_at_change_type(
+    a int,
+    b text
+);
+INSERT INTO test_at_change_type VALUES(1,'beijing');
+INSERT INTO test_at_change_type VALUES(2,'shanghai');
+INSERT INTO test_at_change_type VALUES(3,'guangzhou');
+ALTER TABLE test_at_change_type CHANGE b b1 SET('beijing','shanghai','nanjing','wuhan'); -- ERROR
+ALTER TABLE test_at_change_type CHANGE b b1 SET('beijing','shanghai','nanjing','guangzhou');
+ALTER TABLE test_at_change_type CHANGE b1 b SET('beijing','shanghai','guangzhou','wuhan'); -- ERROR
+select pg_get_tabledef('test_at_change_type'::regclass);
+DROP TABLE test_at_change_type;
+CREATE GLOBAL TEMPORARY TABLE test_at_change_type(
+    a int,
+    b varchar(32)
+);
+INSERT INTO test_at_change_type VALUES(1,'2022-11-22 12:00:00');
+INSERT INTO test_at_change_type VALUES(2,'2022-11-23 12:00:00');
+INSERT INTO test_at_change_type VALUES(3,'2022-11-24 12:00:00');
+ALTER TABLE test_at_change_type CHANGE b b1 varchar(10); -- ERROR
+ALTER TABLE test_at_change_type CHANGE b b1 DATE;
+SELECT * FROM test_at_change_type ORDER BY 1,2;
+DROP TABLE test_at_change_type;
+
+-- test change column constraint
+CREATE GLOBAL TEMPORARY TABLE test_at_change_constr(
+    a int,
+    b int NOT NULL
+);
+INSERT INTO test_at_change_constr VALUES(1,1);
+INSERT INTO test_at_change_constr VALUES(2,2);
+INSERT INTO test_at_change_constr VALUES(3,3);
+ALTER TABLE test_at_change_constr CHANGE b b1 varchar(8) NOT NULL NULL; -- ERROR
+ALTER TABLE test_at_change_constr CHANGE b b1 varchar(8) UNIQUE KEY NULL;
+INSERT INTO test_at_change_constr VALUES(3,3); -- ERROR
+INSERT INTO test_at_change_constr VALUES(4,NULL);
+ALTER TABLE test_at_change_constr CHANGE b1 b int NULL PRIMARY KEY; -- ERROR
+DELETE FROM test_at_change_constr WHERE b1 IS NULL;
+ALTER TABLE test_at_change_constr CHANGE b1 b int NULL PRIMARY KEY;
+INSERT INTO test_at_change_constr VALUES(4,NULL); -- ERROR
+ALTER TABLE test_at_change_constr CHANGE b b1 varchar(8) CONSTRAINT t_at_m_check CHECK (b1 < 3); -- ERROR
+ALTER TABLE test_at_change_constr CHANGE b b1 varchar(8) CONSTRAINT t_at_m_check CHECK (b1 < 5);
+ALTER TABLE test_at_change_constr CHANGE b1 b varchar(8) CONSTRAINT t_at_m_check CHECK (b = a); -- ERROR
+ALTER TABLE test_at_change_constr CHANGE b1 b varchar(8) CONSTRAINT t_at_m_check_1 CHECK (b = a);
+INSERT INTO test_at_change_constr VALUES(4,4);
+INSERT INTO test_at_change_constr VALUES(5,5); -- ERROR
+INSERT INTO test_at_change_constr VALUES(6,'a'); -- ERROR
+INSERT INTO test_at_change_constr VALUES(0,'a');
+ALTER TABLE test_at_change_constr CHANGE b b1 int NOT NULL PRIMARY KEY; -- ERROR
+ALTER TABLE test_at_change_constr CHANGE b b1 int NOT NULL;
+INSERT INTO test_at_change_constr VALUES(5,5); -- ERROR
+SELECT b1 FROM test_at_change_constr ORDER BY 1;
+select pg_get_tabledef('test_at_change_constr'::regclass);
+ALTER TABLE test_at_change_constr CHANGE b1 b int NOT NULL REFERENCES test_at_ref (a); -- ERROR
+DROP TABLE test_at_change_constr;
+
+-- test change column default
+CREATE GLOBAL TEMPORARY TABLE test_at_change_default(
+    a int,
+    b int DEFAULT NULL
+);
+INSERT INTO test_at_change_default VALUES(1,1);
+INSERT INTO test_at_change_default VALUES(2,2);
+INSERT INTO test_at_change_default VALUES(3,3);
+ALTER TABLE test_at_change_default CHANGE b b1 bigint DEFAULT (a+1); -- ERROR
+ALTER TABLE test_at_change_default CHANGE b b1 bigint DEFAULT NULL;
+\d+ test_at_change_default;
+ALTER TABLE test_at_change_default CHANGE b1 b varchar(8) DEFAULT 'a' GENERATED ALWAYS AS (a+1) STORED; -- ERROR
+ALTER TABLE test_at_change_default CHANGE b1 b varchar(8) DEFAULT 'a';
+\d+ test_at_change_default;
+INSERT INTO test_at_change_default VALUES(0,DEFAULT);
+SELECT b FROM test_at_change_default ORDER BY 1;
+ALTER TABLE test_at_change_default CHANGE b b1 int DEFAULT 4 AUTO_INCREMENT; -- ERROR
+ALTER TABLE test_at_change_default CHANGE b b1 int DEFAULT 4;
+INSERT INTO test_at_change_default VALUES(4,DEFAULT);
+SELECT b1 FROM test_at_change_default ORDER BY 1;
+ALTER TABLE test_at_change_default CHANGE b1 b varchar(8) GENERATED ALWAYS AS (a+1) STORED;
+SELECT a,b FROM test_at_change_default ORDER BY 1,2;
+ALTER TABLE test_at_change_default CHANGE a a1 varchar(8) DEFAULT 'a';
+INSERT INTO test_at_change_default VALUES(DEFAULT,DEFAULT);
+SELECT * FROM test_at_change_default ORDER BY 1,2;
+\d+ test_at_change_default;
+DROP TABLE test_at_change_default;
+
+-- test change column depended by generated column
+CREATE GLOBAL TEMPORARY TABLE test_at_change_generated(
+    a int,
+    b varchar(32),
+    c varchar(32) GENERATED ALWAYS AS (b) STORED
+);
+INSERT INTO test_at_change_generated(a,b) VALUES(1,'2022-11-22 12:00:00');
+INSERT INTO test_at_change_generated(a,b) VALUES(2,'2022-11-23 12:00:00');
+INSERT INTO test_at_change_generated(a,b) VALUES(3,'2022-11-24 12:00:00');
+SELECT * FROM test_at_change_generated ORDER BY 1,2;
+ALTER TABLE test_at_change_generated CHANGE COLUMN b b1 DATE;
+SELECT * FROM test_at_change_generated ORDER BY 1,2;
+\d+ test_at_change_generated
+ALTER TABLE test_at_change_generated CHANGE COLUMN b1 b varchar(32);
+SELECT * FROM test_at_change_generated ORDER BY 1,2;
+DROP TABLE test_at_change_generated;
+
+-- test change column AUTO_INCREMENT
+CREATE GLOBAL TEMPORARY TABLE test_at_change_autoinc(
+    a int,
+    b int
+);
+INSERT INTO test_at_change_autoinc VALUES(1,NULL);
+INSERT INTO test_at_change_autoinc VALUES(2,0);
+ALTER TABLE test_at_change_autoinc CHANGE b b1 int2 AUTO_INCREMENT; -- ERROR
+ALTER TABLE test_at_change_autoinc CHANGE b b1 DECIMAL(4,2) AUTO_INCREMENT UNIQUE KEY; -- ERROR
+ALTER TABLE test_at_change_autoinc CHANGE b b1 serial AUTO_INCREMENT UNIQUE KEY; -- ERROR
+ALTER TABLE test_at_change_autoinc CHANGE b b1 int2 AUTO_INCREMENT NULL UNIQUE KEY;
+SELECT * FROM test_at_change_autoinc ORDER BY 1,2;
+INSERT INTO test_at_change_autoinc VALUES(3,0);
+SELECT * FROM test_at_change_autoinc ORDER BY 1,2;
+ALTER TABLE test_at_change_autoinc CHANGE b1 b int;
+INSERT INTO test_at_change_autoinc VALUES(4,0);
+SELECT * FROM test_at_change_autoinc ORDER BY 1,2;
+ALTER TABLE test_at_change_autoinc CHANGE b b1 int AUTO_INCREMENT PRIMARY KEY, AUTO_INCREMENT=100;
+SELECT * FROM test_at_change_autoinc ORDER BY 1,2;
+INSERT INTO test_at_change_autoinc VALUES(5,0);
+SELECT * FROM test_at_change_autoinc ORDER BY 1,2;
+ALTER TABLE test_at_change_autoinc AUTO_INCREMENT=1000;
+ALTER TABLE test_at_change_autoinc CHANGE b1 b int2 AUTO_INCREMENT;
+INSERT INTO test_at_change_autoinc VALUES(6,0);
+SELECT * FROM test_at_change_autoinc ORDER BY 1,2;
+ALTER TABLE test_at_change_autoinc ADD COLUMN c int AUTO_INCREMENT UNIQUE, CHANGE b b1 int2 AUTO_INCREMENT UNIQUE KEY; -- ERROR
+ALTER TABLE test_at_change_autoinc ADD COLUMN c int AUTO_INCREMENT UNIQUE; -- ERROR
+ALTER TABLE test_at_change_autoinc CHANGE b b1 int;
+ALTER TABLE test_at_change_autoinc ADD COLUMN c int AUTO_INCREMENT UNIQUE;
+INSERT INTO test_at_change_autoinc VALUES(7,0,0);
+SELECT * FROM test_at_change_autoinc ORDER BY 1,2;
+ALTER TABLE test_at_change_autoinc DROP COLUMN c , CHANGE b1 b int2 AUTO_INCREMENT UNIQUE KEY;
+INSERT INTO test_at_change_autoinc VALUES(8,0);
+SELECT * FROM test_at_change_autoinc ORDER BY 1,2;
+DROP TABLE test_at_change_autoinc;
+
+-- END
+RESET CURRENT_SCHEMA;
+DROP SCHEMA atbdb_gtt_schema CASCADE;
+\c regression
+clean connection to all force for database atbdb_gtt;
+drop database if exists atbdb_gtt;

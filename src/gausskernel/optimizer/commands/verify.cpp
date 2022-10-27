@@ -763,7 +763,7 @@ static void DoGlobalVerifyRowRel(VacuumStmt* stmt, Oid relid, bool isDatabase)
     if (!isDatabase) {
         if (stmt->relation->partitionname != NULL) {
             /* check the partition relation */
-            Oid partOid = partitionNameGetPartitionOid(relid,
+            Oid partOid = PartitionNameGetPartitionOid(relid,
                 stmt->relation->partitionname,
                 PART_OBJ_TYPE_TABLE_PARTITION,
                 AccessShareLock,
@@ -845,7 +845,7 @@ static void DoGlobalVerifyColRel(VacuumStmt* stmt, Oid relid, bool isDatabase)
     if (!isDatabase) {
         if (stmt->relation->partitionname != NULL) {
             /* check the partition relation */
-            Oid partOid = partitionNameGetPartitionOid(relid,
+            Oid partOid = PartitionNameGetPartitionOid(relid,
                 stmt->relation->partitionname,
                 PART_OBJ_TYPE_TABLE_PARTITION,
                 AccessShareLock,

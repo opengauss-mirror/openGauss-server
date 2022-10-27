@@ -238,6 +238,11 @@ static void dw_recovery_first_version_page()
 
         rc = memcpy_s(&flush_item, sizeof(dw_first_flush_item), dw_block + pghr->pd_lower, sizeof(dw_first_flush_item));
         securec_check(rc, "\0", "\0");
+        if (unlikely((long)(t_thrd.proc->workingVersionNum < PAGE_COMPRESSION_VERSION))) {
+            BufferTagSecondVer *old_buf_tag = (BufferTagSecondVer *)(void *)&flush_item.buf_tag;
+            flush_item.buf_tag.rnode.bucketNode = (int2)old_buf_tag->rnode.bucketNode;
+            flush_item.buf_tag.rnode.opt = 0;
+        }
 
         if (!dw_verify_pg_checksum((PageHeader)dw_block, flush_item.buf_tag.blockNum, true)) {
             if (PageIsNew(dw_block)) {
@@ -689,6 +694,11 @@ uint16 first_version_dw_single_flush(BufferDesc *buf_desc)
 
     item.dwn = file_head->head.dwn;
     item.buf_tag = phy_tag;
+    if (unlikely((long)(t_thrd.proc->workingVersionNum < PAGE_COMPRESSION_VERSION))) {
+        BufferTagSecondVer *old_buf_tag = (BufferTagSecondVer *)(void *)&item.buf_tag;
+        old_buf_tag->rnode.bucketNode = phy_tag.rnode.bucketNode;
+    }
+
     pghr = (PageHeader)buf;
 
     rc = memcpy_s(buf + pghr->pd_lower, sizeof(dw_first_flush_item), &item, sizeof(dw_first_flush_item));

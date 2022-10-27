@@ -335,6 +335,7 @@ static Oid DefineVirtualRelation(RangeVar* relation, List* tlist, bool replace, 
         createStmt->oncommit = ONCOMMIT_NOOP;
         createStmt->tablespacename = NULL;
         createStmt->if_not_exists = false;
+        createStmt->charset = PG_INVALID_ENCODING;
         Oid ownerOid = InvalidOid;
 
         /* 

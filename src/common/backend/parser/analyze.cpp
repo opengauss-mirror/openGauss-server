@@ -268,6 +268,56 @@ Query* parse_sub_analyze(Node* parseTree, ParseState* parentParseState, CommonTa
     return query;
 }
 
+Node* parse_into_claues(Node* parseTree, IntoClause* intoClause)
+{
+    if (intoClause->userVarList) {
+        UserSetElem* uset = makeNode(UserSetElem);
+        uset->name = intoClause->userVarList;
+
+        SubLink* sl = makeNode(SubLink);
+        sl->subLinkType = EXPR_SUBLINK;
+        sl->testexpr = NULL;
+        sl->operName = NIL;
+        sl->subselect = parseTree;
+        sl->location = -1;
+
+        SelectIntoVarList *sis = makeNode(SelectIntoVarList);
+        sis->sublink = sl;
+        sis->userVarList = uset->name;
+
+        uset->val = (Expr *)sis;
+
+        VariableSetStmt* vss = makeNode(VariableSetStmt);
+        vss->kind = VAR_SET_DEFINED;
+        vss->name = "SELECT INTO VARLIST";
+        vss->defined_args = list_make1((Node *)uset);
+        vss->is_local = false;
+        vss->is_multiset = true;
+
+        VariableMultiSetStmt* vmss = makeNode(VariableMultiSetStmt);
+        vmss->args = list_make1((Node *)vss);
+        return (Node *)vmss;
+    } else if (intoClause->filename) {
+        CopyStmt* cn = makeNode(CopyStmt);
+        cn->relation = NULL;
+        cn->attlist = NIL;
+        cn->is_from = false;
+        cn->options = intoClause->copyOption;
+        cn->filename = intoClause->filename;
+        cn->filetype = intoClause->is_outfile ? S_OUTFILE : S_DUMPFILE;
+        
+        cn->query = parseTree;
+        return (Node*)cn;
+    } else {
+        CreateTableAsStmt* ctas = makeNode(CreateTableAsStmt);
+        ctas->query = parseTree;
+        ctas->into = intoClause;
+        ctas->relkind = OBJECT_TABLE;
+        ctas->is_select_into = true;
+        return (Node*)ctas;
+    }
+}
+
 /*
  * transformTopLevelStmt -
  *	  transform a Parse tree into a Query tree.
@@ -289,53 +339,14 @@ Query* transformTopLevelStmt(ParseState* pstate, Node* parseTree, bool isFirstNo
         AssertEreport(stmt && IsA(stmt, SelectStmt) && stmt->larg == NULL, MOD_OPT, "failure to check parseTree");
 
         if (stmt->intoClause) {
-            if (stmt->intoClause->userVarList) {
-                UserSetElem* uset = makeNode(UserSetElem);
-                uset->name = stmt->intoClause->userVarList;
-                stmt->intoClause = NULL;
-
-                SubLink* sl = makeNode(SubLink);
-                sl->subLinkType = EXPR_SUBLINK;
-                sl->testexpr = NULL;
-                sl->operName = NIL;
-                sl->subselect = (Node *)stmt;
-                sl->location = -1;
-
-                SelectIntoVarList *sis = makeNode(SelectIntoVarList);
-                sis->sublink = sl;
-                sis->userVarList = uset->name;
-
-                uset->val = (Expr *)sis;
-
-                VariableSetStmt* vss = makeNode(VariableSetStmt);
-                vss->kind = VAR_SET_DEFINED;
-                vss->name = "SELECT INTO VARLIST";
-                vss->defined_args = list_make1((Node *)uset);
-                vss->is_local = false;
-                vss->is_multiset = true;
-
-                VariableMultiSetStmt* vmss = makeNode(VariableMultiSetStmt);
-                vmss->args = list_make1((Node *)vss);
-                parseTree = (Node *)vmss;
-            } else {
-                CreateTableAsStmt* ctas = makeNode(CreateTableAsStmt);
-
-                ctas->query = parseTree;
-                ctas->into = stmt->intoClause;
-                ctas->relkind = OBJECT_TABLE;
-                ctas->is_select_into = true;
-
-                /*
-                 * Remove the intoClause from the SelectStmt.  This makes it safe
-                 * for transformSelectStmt to complain if it finds intoClause set
-                 * (implying that the INTO appeared in a disallowed place).
-                 */
-                stmt->intoClause = NULL;
-
-                parseTree = (Node*)ctas;
-            }
+            parseTree = parse_into_claues(parseTree, stmt->intoClause);
+            /*
+            * Remove the intoClause from the SelectStmt.  This makes it safe
+            * for lexical_select_stmt to complain if it finds intoClause set
+            * (implying that the INTO appeared in a disallowed place).
+            */
+            stmt->intoClause = NULL;
         }
-
     }
 
     if (u_sess->hook_cxt.transformStmtHook != NULL) {
@@ -415,6 +426,58 @@ Query* transformCreateModelStmt(ParseState* pstate, CreateModelStmt* stmt)
 
     return result;
 }
+
+Query* transformVariableCreateEventStmt(ParseState* pstate, CreateEventStmt* stmt)
+{
+    Query* result = makeNode(Query);
+    result->commandType = CMD_UTILITY;
+    Node* old_time_expr = NULL;
+    Node* new_time_expr = NULL;
+    if (stmt->start_time_expr) {
+        old_time_expr = stmt->start_time_expr;
+        new_time_expr = transformExpr(pstate, old_time_expr);
+        stmt->start_time_expr = new_time_expr;
+    }
+    if (stmt->end_time_expr) {
+        old_time_expr = stmt->end_time_expr;
+        new_time_expr = transformExpr(pstate, old_time_expr);
+        stmt->end_time_expr = new_time_expr;
+    }
+    result->utilityStmt = (Node*)stmt;
+    return result;
+}
+ 
+Query* transformVariableAlterEventStmt(ParseState* pstate, AlterEventStmt* stmt)
+{
+    Query* result = makeNode(Query);
+    result->commandType = CMD_UTILITY;
+    Node* old_time_expr = NULL;
+    Node* new_time_node = NULL;
+    DefElem* new_time_expr = NULL;
+    if (stmt->start_time_expr) {
+        old_time_expr = stmt->start_time_expr->arg;
+        new_time_node = transformExpr(pstate, old_time_expr);
+        if (new_time_node) {
+            new_time_expr = makeDefElem("start_date", new_time_node);
+        } else {
+            new_time_expr = NULL;
+        }
+        stmt->start_time_expr = new_time_expr;
+    }
+    if (stmt->end_time_expr) {
+        old_time_expr = stmt->end_time_expr->arg;
+        new_time_node = transformExpr(pstate, old_time_expr);
+        if (new_time_node) {
+            new_time_expr = makeDefElem("start_date", new_time_node);
+        } else {
+            new_time_expr = NULL;
+        }
+        stmt->end_time_expr = new_time_expr;
+    }
+    result->utilityStmt = (Node*)stmt;
+    return result;
+}
+
 
 /*
  * transformStmt -
@@ -497,10 +560,10 @@ Query* transformStmt(ParseState* pstate, Node* parseTree, bool isFirstNode, bool
         } break;
 
         case T_VariableSetStmt: {
-                VariableSetStmt* stmt;
-                stmt = (VariableSetStmt*)parseTree;
+                VariableSetStmt* stmt = (VariableSetStmt*)parseTree;
 
-                if (DB_IS_CMPT(B_FORMAT) && u_sess->attr.attr_common.enable_set_variable_b_format && stmt->kind == VAR_SET_VALUE) {
+                if (DB_IS_CMPT(B_FORMAT) && stmt->kind == VAR_SET_VALUE &&
+                    (u_sess->attr.attr_common.enable_set_variable_b_format || ENABLE_SET_VARIABLES)) {
                     transformVariableSetValueStmt(pstate, stmt);
                 }
                 result = makeNode(Query);
@@ -510,6 +573,14 @@ Query* transformStmt(ParseState* pstate, Node* parseTree, bool isFirstNode, bool
 
         case T_VariableMultiSetStmt: 
             result = transformVariableMutiSetStmt(pstate, (VariableMultiSetStmt*)parseTree);
+            break;
+
+        case T_CreateEventStmt:
+            result = transformVariableCreateEventStmt(pstate, (CreateEventStmt*) parseTree);
+            break;
+
+        case T_AlterEventStmt:
+            result = transformVariableAlterEventStmt(pstate, (AlterEventStmt*) parseTree);
             break;
 
         default:
@@ -2554,6 +2625,7 @@ static Query* transformVariableMutiSetStmt(ParseState* pstate, VariableMultiSetS
     List* stmts = muti_stmt->args;
     ListCell* cell = NULL;
     VariableSetStmt* set_stmt;
+    List *usersetlist = NIL;
 
     foreach(cell, stmts) {
         Node* stmt = (Node*)lfirst(cell);
@@ -2565,8 +2637,13 @@ static Query* transformVariableMutiSetStmt(ParseState* pstate, VariableMultiSetS
             set_stmt = (VariableSetStmt*)stmt;
         }
 
-        if (set_stmt->kind == VAR_SET_DEFINED)
+        if (set_stmt->kind == VAR_SET_DEFINED) {
             transformVariableSetStmt(pstate, set_stmt);
+            if (strcmp(set_stmt->name, "USER DEFINED VARIABLE") == 0) {
+                usersetlist = list_concat(usersetlist, set_stmt->defined_args);
+            }
+        }
+
         if (set_stmt->kind == VAR_SET_VALUE)
             transformVariableSetValueStmt(pstate, set_stmt);
 
@@ -2574,9 +2651,22 @@ static Query* transformVariableMutiSetStmt(ParseState* pstate, VariableMultiSetS
             AlterSystemStmt *newnode = makeNode(AlterSystemStmt);
             newnode->setstmt = set_stmt;
             resultList = lappend(resultList, newnode);
+        } else if (set_stmt->kind == VAR_SET_DEFINED) {
+            if (strcmp(set_stmt->name, "USER DEFINED VARIABLE") != 0) {
+                resultList = lappend(resultList, set_stmt);
+            }
         } else {
             resultList = lappend(resultList, set_stmt);
         }
+    }
+
+    if (list_length(usersetlist) != 0) {
+        VariableSetStmt* new_set_stmt = makeNode(VariableSetStmt);
+        new_set_stmt->kind = VAR_SET_DEFINED;
+        new_set_stmt->name = "USER DEFINED VARIABLE";
+        new_set_stmt->is_local = false;
+        new_set_stmt->defined_args = usersetlist;
+        resultList = lappend(resultList, new_set_stmt);
     }
 
     list_free(muti_stmt->args);
@@ -3857,6 +3947,23 @@ static void CheckUpdateRelation(Relation targetrel)
     }
 }
 
+void UpdateParseCheck(ParseState *pstate, Node *qry)
+{
+    /*
+     * Top-level aggregates are simply disallowed in UPDATE, per spec. (From
+     * an implementation point of view, this is forced because the implicit
+     * ctid reference would otherwise be an ungrouped variable.)
+     */
+    if (pstate->p_hasAggs) {
+        ereport(ERROR, (errcode(ERRCODE_GROUPING_ERROR), errmsg("cannot use aggregate function in UPDATE"),
+                        parser_errposition(pstate, locate_agg_of_level(qry, 0))));
+    }
+    if (pstate->p_hasWindowFuncs) {
+        ereport(ERROR, (errcode(ERRCODE_WINDOWING_ERROR), errmsg("cannot use window function in UPDATE"),
+                        parser_errposition(pstate, locate_windowfunc(qry))));
+    }
+}
+
 /*
  * transformUpdateStmt -
  *	  transforms an update statement
@@ -3950,23 +4057,7 @@ static Query* transformUpdateStmt(ParseState* pstate, UpdateStmt* stmt)
 
     qry->hasSubLinks = pstate->p_hasSubLinks;
 
-    /*
-     * Top-level aggregates are simply disallowed in UPDATE, per spec. (From
-     * an implementation point of view, this is forced because the implicit
-     * ctid reference would otherwise be an ungrouped variable.)
-     */
-    if (pstate->p_hasAggs) {
-        ereport(ERROR,
-            (errcode(ERRCODE_GROUPING_ERROR),
-                errmsg("cannot use aggregate function in UPDATE"),
-                parser_errposition(pstate, locate_agg_of_level((Node*)qry, 0))));
-    }
-    if (pstate->p_hasWindowFuncs) {
-        ereport(ERROR,
-            (errcode(ERRCODE_WINDOWING_ERROR),
-                errmsg("cannot use window function in UPDATE"),
-                parser_errposition(pstate, locate_windowfunc((Node*)qry))));
-    }
+    UpdateParseCheck(pstate, (Node *)qry);
 
     assign_query_collations(pstate, qry);
     qry->hintState = stmt->hintState;

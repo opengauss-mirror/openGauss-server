@@ -188,6 +188,7 @@ typedef struct knl_session_attr_sql {
     char* expected_computing_nodegroup;
     char* default_storage_nodegroup;
     char* inlist2join_optmode;
+    char* b_format_behavior_compat_string;
     char* behavior_compat_string;
     char* plsql_compile_behavior_compat_string;
     char* connection_info;

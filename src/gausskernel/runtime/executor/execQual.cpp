@@ -74,6 +74,7 @@
 #include "catalog/pg_proc_fn.h"
 #include "access/tuptoaster.h"
 #include "parser/parse_expr.h"
+#include "auditfuncs.h"
 
 /* static function decls */
 static bool isAssignmentIndirectionExpr(ExprState* exprstate);
@@ -2153,6 +2154,9 @@ restart:
                 fcinfo->isnull = false;
                 rsinfo.isDone = ExprSingleResult;
                 result = FunctionCallInvoke(fcinfo);
+                if (AUDIT_SYSTEM_EXEC_ENABLED) {
+                    audit_system_function(fcinfo, AUDIT_OK);
+                }
                 *isNull = fcinfo->isnull;
                 *isDone = rsinfo.isDone;
 
@@ -2577,6 +2581,9 @@ static Datum ExecMakeFunctionResultNoSets(
         result = FunctionCallInvoke(fcinfo);
     }
     *isNull = fcinfo->isnull;
+    if (AUDIT_SYSTEM_EXEC_ENABLED) {
+        audit_system_function(fcinfo, AUDIT_OK);
+    }
 
     if (has_refcursor && econtext->plpgsql_estate != NULL) {
         PLpgSQL_execstate* estate = econtext->plpgsql_estate;
@@ -2931,6 +2938,9 @@ Tuplestorestate* ExecMakeTableFunctionResult(
             fcinfo.isnull = false;
             rsinfo.isDone = ExprSingleResult;
             result = FunctionCallInvoke(&fcinfo);
+            if (AUDIT_SYSTEM_EXEC_ENABLED) {
+                audit_system_function(&fcinfo, AUDIT_OK);
+            }
 
             if (econtext->plpgsql_estate != NULL) {
                 PLpgSQL_execstate* estate = econtext->plpgsql_estate;
@@ -5979,6 +5989,21 @@ ExprState* ExecInitExpr(Expr* node, PlanState* parent)
 
     gstrace_exit(GS_TRC_ID_ExecInitExpr);
     return state;
+}
+
+/*
+ * ExecInitExprList: call ExecInitExpr on a repression list, return a list of ExprStates.
+ */
+List* ExecInitExprList(List* nodes, PlanState *parent)
+{
+    List* result = NIL;
+    ListCell* lc = NULL;
+
+    foreach (lc, nodes) {
+        Expr* experssion = (Expr*)lfirst(lc);
+        result = lappend(result, ExecInitExpr(experssion, parent));
+    }
+    return result;
 }
 
 /*

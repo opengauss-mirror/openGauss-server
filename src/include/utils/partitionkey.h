@@ -113,3 +113,9 @@ extern void GetPartitionOidListForRTE(RangeTblEntry *rte, RangeVar *relation);
     } while (0)
 
 #endif
+
+#define constIsNull(x) ((x)->constisnull)
+#define constIsMaxValue(x) ((x)->ismaxvalue)
+
+int ConstCompareWithNull(Const *c1, Const *c2);
+int ListPartKeyCompare(PartitionKey* k1, PartitionKey* k2);

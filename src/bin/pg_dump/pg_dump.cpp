@@ -147,6 +147,7 @@ typedef unsigned short uint16_t;
 #define TARGET_V5 (strcasecmp("v5", optarg) == 0 ? true : false)
 #define if_exists (targetV1 || targetV5) ? "IF EXISTS " : ""
 #define if_cascade (targetV1 || targetV5) ? " CASCADE" : ""
+#define INTERVAL_UNITE_OFFSET 3
 
 #define USING_STR_OFFSET 7
 #define UNIQUE_OFFSET 7
@@ -235,11 +236,13 @@ static char connected_node_type = 'N'; /* 'N' -- NONE
                                           'D' -- Datanode
                                         */
 char* all_data_nodename_list = NULL;
+const uint32 CHARACTER_SET_VERSION_NUM = 92844;
 const uint32 USTORE_UPGRADE_VERSION = 92368;
 const uint32 PACKAGE_ENHANCEMENT = 92444;
 const uint32 SUBSCRIPTION_VERSION = 92580;
 const uint32 SUBSCRIPTION_BINARY_VERSION_NUM = 92656;
 const uint32 B_DUMP_TRIGGER_VERSION_NUM = 92843;
+const uint32 EVENT_VERSION = 92844;
 
 #ifdef DUMPSYSLOG
 char* syslogpath = NULL;
@@ -385,6 +388,7 @@ static void dumpOpfamily(Archive* fout, OpfamilyInfo* opfinfo);
 static void dumpCollation(Archive* fout, CollInfo* convinfo);
 static void dumpConversion(Archive* fout, ConvInfo* convinfo);
 static void dumpRule(Archive* fout, RuleInfo* rinfo);
+static void dumpEvent(Archive *fout, EventInfo *einfo);
 static void dumpRlsPolicy(Archive* fout, RlsPolicyInfo* policyinfo);
 static void dumpAgg(Archive* fout, AggInfo* agginfo);
 static void dumpTrigger(Archive* fout, TriggerInfo* tginfo);
@@ -493,6 +497,7 @@ static void dumpUniquePrimaryDef(PQExpBuffer buf, ConstraintInfo* coninfo, IndxI
 static bool findDBCompatibility(Archive* fout, const char* databasename);
 static void dumpTableAutoIncrement(Archive* fout, PQExpBuffer sqlbuf, TableInfo* tbinfo);
 static bool needIgnoreSequence(TableInfo* tbinfo);
+inline bool isDB4AIschema(const NamespaceInfo *nspinfo);
 #ifdef DUMPSYSLOG
 static void ReceiveSyslog(PGconn* conn, const char* current_path);
 #endif
@@ -813,18 +818,6 @@ int main(int argc, char** argv)
             ((dbname != NULL) ? dbname : ""), errorMessages);
     }
 
-    if (!isExecUserSuperRole(fout)) {
-        if (use_role != NULL)
-            write_msg(NULL,
-                "Notice: options --role is not super or sysadmin role, can only back up objects belonging to user "
-                "%s.\n",
-                use_role);
-        else
-            write_msg(NULL,
-                "Notice: options -U is not super or sysadmin role, can only back up objects belonging to user %s.\n",
-                PQuser(((ArchiveHandle*)fout)->connection));
-    }
-
     if (CheckIfStandby(fout)) {
         (void)remove(filename);
         exit_horribly(NULL, "%s is not supported on standby or cascade standby\n", progname);
@@ -854,6 +847,19 @@ int main(int argc, char** argv)
     }
 
     setup_connection(fout);
+
+    if (!isExecUserSuperRole(fout)) {
+        if (use_role != NULL) {
+            write_msg(NULL,
+                "Notice: options --role is not super or sysadmin role, can only back up objects belonging to user "
+                "%s.\n",
+                use_role);
+        } else {
+            write_msg(NULL,
+                "Notice: options -U is not super or sysadmin role, can only back up objects belonging to user %s.\n",
+                PQuser(((ArchiveHandle*)fout)->connection));
+        }
+    }
 
     /*
      * Disable security label support if server version < v9.1.x (prevents
@@ -2215,8 +2221,11 @@ static void selectDumpableNamespace(NamespaceInfo* nsinfo)
              strcmp(nsinfo->dobj.name, "pkg_util") == 0 || strcmp(nsinfo->dobj.name, "sys") == 0 ||
              strcmp(nsinfo->dobj.name, "cstore") == 0 || strcmp(nsinfo->dobj.name, "snapshot") == 0 ||
              strcmp(nsinfo->dobj.name, "information_schema") == 0 || strcmp(nsinfo->dobj.name, "pkg_service") == 0 ||
-             strcmp(nsinfo->dobj.name, "blockchain") == 0 || strcmp(nsinfo->dobj.name, "db4ai") == 0 ||
-             strcmp(nsinfo->dobj.name, "sqladvisor") == 0)
+             strcmp(nsinfo->dobj.name, "blockchain") == 0 || strcmp(nsinfo->dobj.name, "sqladvisor") == 0
+#ifdef ENABLE_MULTIPLE_NODES
+             || strcmp(nsinfo->dobj.name, "db4ai") == 0
+#endif
+    )
         nsinfo->dobj.dump = false;
     else
         nsinfo->dobj.dump = true;
@@ -2369,7 +2378,8 @@ static void selectDumpableType(Archive* fout, TypeInfo* tyinfo)
     /* skip undefined placeholder types */
     else if (!tyinfo->isDefined)
         tyinfo->dobj.dump = false;
-
+    else if (isDB4AIschema(tyinfo->dobj.nmspace))
+        tyinfo->dobj.dump = false;
     else
         tyinfo->dobj.dump = true;
 }
@@ -2384,9 +2394,12 @@ static void selectDumpableType(Archive* fout, TypeInfo* tyinfo)
  */
 static void selectDumpableDefaultACL(DefaultACLInfo* dinfo)
 {
-    if (dinfo->dobj.nmspace != NULL)
-        dinfo->dobj.dump = dinfo->dobj.nmspace->dobj.dump;
-    else
+    if (dinfo->dobj.nmspace != NULL) {
+        if (isDB4AIschema(dinfo->dobj.nmspace))
+            dinfo->dobj.dump = false;
+        else
+            dinfo->dobj.dump = dinfo->dobj.nmspace->dobj.dump;
+    } else
         dinfo->dobj.dump = include_everything;
 }
 
@@ -2444,9 +2457,25 @@ static void selectDumpableObject(DumpableObject* dobj, Archive* fout = NULL)
 }
 
 /*
- *	Dump a table's contents for loading using the COPY command
- *	- this routine is called by the Archiver when it wants the table
- *	  to be dumped.
+ * selectDumpableFuncs: policy-setting subroutine
+ * 		Mark a function as to be dumped or not
+ *
+ * Normally, we dump all extensions, or none of them if dump_include_everything
+ * is false. However, DB4AI functions is created in gs_init, no need dump
+ */
+static void selectDumpableFuncs(FuncInfo *fcinfo, Archive *fout = NULL)
+{
+    if (isDB4AIschema(fcinfo->dobj.nmspace)) {
+        fcinfo->dobj.dump = false;
+    } else {
+        selectDumpableObject(&(fcinfo->dobj), fout);
+    }
+}
+
+/*
+ * 	Dump a table's contents for loading using the COPY command
+ * 	- this routine is called by the Archiver when it wants the table
+ * 	  to be dumped.
  */
 
 static int dumpTableData_copy(Archive* fout, void* dcontext)
@@ -2467,6 +2496,12 @@ static int dumpTableData_copy(Archive* fout, void* dcontext)
         write_msg(NULL,
             "dumping contents of table \"%s\"\n",
             fmtQualifiedId(fout, tbinfo->dobj.nmspace->dobj.name, tbinfo->dobj.name));
+
+    if (isDB4AIschema(tbinfo->dobj.nmspace) && !isExecUserSuperRole(fout)) {
+        write_msg(NULL, "WARNING: schema db4ai not dumped because current user is not a superuser\n");
+        destroyPQExpBuffer(q);
+        return 1;
+    }
 
     /*
      * Make sure we are in proper schema.  We will qualify the table name
@@ -2634,6 +2669,11 @@ static int dumpTableData_insert(Archive* fout, void* dcontext)
     int nfields;
     int field;
 
+    if (isDB4AIschema(tbinfo->dobj.nmspace) && !isExecUserSuperRole(fout)) {
+        write_msg(NULL, "WARNING: schema db4ai not dumped because current user is not a superuser\n");
+        destroyPQExpBuffer(q);
+        return 1;
+    }
     /*
      * Make sure we are in proper schema.  We will qualify the table name
      * below anyway (in case its name conflicts with a pg_catalog table); but
@@ -4915,6 +4955,7 @@ NamespaceInfo* getNamespaces(Archive* fout, int* numNamespaces)
     int i_rolname;
     int i_nspacl;
     int i_nspblockchain;
+    int i_collation;
 
     /*
      * Before 7.3, there are no real namespaces; create two dummy entries, one
@@ -4931,6 +4972,7 @@ NamespaceInfo* getNamespaces(Archive* fout, int* numNamespaces)
         nsinfo[0].rolname = gs_strdup("");
         nsinfo[0].nspacl = gs_strdup("");
         nsinfo[0].hasBlockchain = false;
+        nsinfo[0].collate = 0;
 
         selectDumpableNamespace(&nsinfo[0]);
 
@@ -4942,6 +4984,7 @@ NamespaceInfo* getNamespaces(Archive* fout, int* numNamespaces)
         nsinfo[1].rolname = gs_strdup("");
         nsinfo[1].nspacl = gs_strdup("");
         nsinfo[1].hasBlockchain = false;
+        nsinfo[1].collate = 0;
 
         selectDumpableNamespace(&nsinfo[1]);
 
@@ -4962,8 +5005,12 @@ NamespaceInfo* getNamespaces(Archive* fout, int* numNamespaces)
     appendPQExpBuffer(query,
         "SELECT tableoid, oid, nspname, "
         "(%s nspowner) AS rolname, "
-        "nspacl, nspblockchain FROM pg_namespace",
-        username_subquery);
+        "nspacl, nspblockchain, ", username_subquery);
+    if (GetVersionNum(fout) >= CHARACTER_SET_VERSION_NUM) {
+        appendPQExpBuffer(query, "nspcollation FROM pg_namespace");
+    } else {
+        appendPQExpBuffer(query, "NULL AS nspcollation FROM pg_namespace");
+    }
 
     res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
 
@@ -4977,6 +5024,7 @@ NamespaceInfo* getNamespaces(Archive* fout, int* numNamespaces)
     i_rolname = PQfnumber(res, "rolname");
     i_nspacl = PQfnumber(res, "nspacl");
     i_nspblockchain = PQfnumber(res, "nspblockchain");
+    i_collation = PQfnumber(res, "nspcollation");
 
     for (i = 0; i < ntups; i++) {
         nsinfo[i].dobj.objType = DO_NAMESPACE;
@@ -4987,9 +5035,27 @@ NamespaceInfo* getNamespaces(Archive* fout, int* numNamespaces)
         nsinfo[i].rolname = gs_strdup(PQgetvalue(res, i, i_rolname));
         nsinfo[i].nspacl = gs_strdup(PQgetvalue(res, i, i_nspacl));
         nsinfo[i].hasBlockchain = (strcmp(PQgetvalue(res, i, i_nspblockchain), "t") == 0) ? true : false;
+        if (PQgetisnull(res, i, i_collation)) {
+            nsinfo[i].collate = 0;
+        } else {
+            nsinfo[i].collate = atooid(PQgetvalue(res, i, i_collation));
+        }
 
         /* Decide whether to dump this nmspace */
         selectDumpableNamespace(&nsinfo[i]);
+#ifndef ENABLE_MULTIPLE_NODES
+        if (unlikely(isDB4AIschema(&nsinfo[i]) && nsinfo[i].dobj.dump)) {
+            selectSourceSchema(fout, "db4ai");
+            resetPQExpBuffer(query);
+            appendPQExpBuffer(query, "SELECT id FROM snapshot");
+            PGresult *res_ = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
+            if (PQntuples(res_) != 0 and outputClean == 0) {
+                exit_horribly(NULL, "Using options -c/--clean to dump db4ai schema. Or clean this schema.\n");
+            }
+            nsinfo[i].dobj.dump = (PQntuples(res_) != 0 and outputClean == 1);
+            PQclear(res_);
+        }
+#endif
     }
 
     PQclear(res);
@@ -6154,7 +6220,7 @@ FuncInfo* getFuncs(Archive* fout, int* numFuncs)
         }
 
         /* Decide whether we want to dump it */
-        selectDumpableObject(&(finfo[i].dobj), fout);
+        selectDumpableFuncs(&(finfo[i]), fout);
     }
 
     PQclear(res);
@@ -8745,6 +8811,116 @@ void getTriggers(Archive* fout, TableInfo tblinfo[], int numTables)
     destroyPQExpBuffer(query);
 }
 
+EventInfo* getEvents(Archive *fout, int *numEvents)
+{
+    PGresult *res = NULL;
+    PGresult *attres = NULL;
+    PGresult *procres = NULL;
+    int ntups;
+    int attntups;
+    int i;
+    int j;
+    PQExpBuffer query;
+    EventInfo *evinfo = NULL;
+    int i_oid;
+    int i_jobid;
+    int i_definer;
+    int i_evname;
+    int i_starttime;
+    int i_endtime;
+    int i_intervaltime;
+    int i_evstatus;
+    int i_evbody;
+    int i_nspname;
+    char* database_name = PQdb(GetConnection(fout));
+    bool is_bcompatibility = findDBCompatibility(fout, PQdb(GetConnection(fout)));
+
+    if (GetVersionNum(fout) < EVENT_VERSION) {
+        return NULL;
+    }
+    /* Make sure we are in proper schema */
+    selectSourceSchema(fout, "pg_catalog");
+    query = createPQExpBuffer();
+    if (is_bcompatibility) {
+        appendPQExpBuffer(
+            query,
+            "SELECT pg_job.oid,  job_id, log_user, job_name, pg_job.nspname, pg_namespace.oid, dbname, start_date, "
+            "end_date, interval, enable "
+            "FROM pg_job LEFT join pg_namespace on pg_namespace.nspname = pg_job.nspname where dbname=\'%s\'",
+            database_name);
+        res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
+        
+        ntups = PQntuples(res);
+        if (ntups == 0) {
+            PQclear(res);
+            destroyPQExpBuffer(query);
+            return NULL;
+        }
+        *numEvents = ntups;
+        evinfo = (EventInfo *)pg_malloc(ntups * sizeof(EventInfo));
+        i_definer = PQfnumber(res, "log_user");
+        i_evname = PQfnumber(res, "job_name");
+        i_starttime = PQfnumber(res, "start_date");
+        i_endtime = PQfnumber(res, "end_date");
+        i_intervaltime = PQfnumber(res, "interval");
+        i_evstatus = PQfnumber(res, "enable");
+        i_oid = PQfnumber(res, "oid");
+        i_nspname = PQfnumber(res, "nspname");
+        i_jobid = PQfnumber(res, "job_id");
+        for (i = 0; i < ntups; i++) {
+            evinfo[i].dobj.objType = DO_EVENT;
+            evinfo[i].dobj.catId.oid = atooid(PQgetvalue(res, i, i_oid));
+            AssignDumpId(&evinfo[i].dobj);
+            evinfo[i].dobj.name = gs_strdup(PQgetvalue(res, i, i_evname));
+            evinfo[i].dobj.nmspace =
+                findNamespace(fout, atooid(PQgetvalue(res, i, 5)), evinfo[i].dobj.catId.oid);
+            evinfo[i].evdefiner = gs_strdup(PQgetvalue(res, i, i_definer));
+            evinfo[i].evname = gs_strdup(PQgetvalue(res, i, i_evname));
+            evinfo[i].starttime = gs_strdup(PQgetvalue(res, i, i_starttime));
+            evinfo[i].endtime = gs_strdup(PQgetvalue(res, i, i_endtime));
+            evinfo[i].intervaltime = gs_strdup(PQgetvalue(res, i, i_intervaltime));
+            evinfo[i].evstatus = (PQgetvalue(res, i, i_evstatus)[0] == 't');
+            evinfo[i].nspname = gs_strdup(PQgetvalue(res, i, i_nspname));
+            evinfo[i].comment = NULL;
+            Oid ev_oid = atooid(PQgetvalue(res, i, i_jobid));
+            PQExpBuffer attquery = createPQExpBuffer();
+            appendPQExpBuffer(attquery, "SELECT "
+            "* "
+            "FROM gs_job_attribute where job_name='%s'", evinfo[i].evname);
+            attres = ExecuteSqlQuery(fout, attquery->data, PGRES_TUPLES_OK);
+            attntups = PQntuples(attres);
+            int i_attributename;
+            int i_attributevalue;
+            for (j = 0; j < attntups; j++) {
+                i_attributename = PQfnumber(attres, "attribute_name");
+                i_attributevalue = PQfnumber(attres, "attribute_value");
+                if (strcmp(PQgetvalue(attres, j, i_attributename), "auto_drop") == 0) {
+                    evinfo[i].autodrop = (PQgetvalue(attres, j, i_attributevalue)[0] == 't');
+                } else if (strcmp(PQgetvalue(attres, j, i_attributename), "comments") == 0) {
+                    evinfo[i].comment = gs_strdup(PQgetvalue(attres, j, i_attributevalue));
+                }
+            }
+            PQExpBuffer procquery = createPQExpBuffer();
+            appendPQExpBuffer(procquery, "SELECT "
+            "what "
+            "FROM pg_job_proc where job_id=%u", ev_oid);
+            procres = ExecuteSqlQuery(fout, procquery->data, PGRES_TUPLES_OK);
+            i_evbody = PQfnumber(procres, "what");
+            evinfo[i].evbody = gs_strdup(PQgetvalue(procres, 0, i_evbody));
+            PQclear(attres);
+            PQclear(procres);
+            destroyPQExpBuffer(attquery);
+            destroyPQExpBuffer(procquery);
+            selectDumpableObject(&(evinfo[i].dobj), fout);
+        }
+    }
+    
+    PQclear(res);
+
+    destroyPQExpBuffer(query);
+    return evinfo;
+}
+
 /*
  * getProcLangs
  *	  get basic information about every procedural language in the system
@@ -10670,6 +10846,10 @@ static void dumpDumpableObject(Archive* fout, DumpableObject* dobj)
                 dumpTrigger(fout, (TriggerInfo*)dobj);
             break;
         }
+        case DO_EVENT: {
+            dumpEvent(fout, (EventInfo *)dobj);
+            break;
+        }
         case DO_CONSTRAINT:
             dumpConstraint(fout, (ConstraintInfo*)dobj);
             break;
@@ -10820,6 +11000,9 @@ static void dumpNamespace(Archive* fout, NamespaceInfo* nspinfo)
     if (strlen(nspinfo->dobj.name) == 0)
         return;
 
+    if (isDB4AIschema(nspinfo)) {
+        return;
+    }
     if (isExecUserNotObjectOwner(fout, nspinfo->rolname))
         return;
 
@@ -10828,13 +11011,20 @@ static void dumpNamespace(Archive* fout, NamespaceInfo* nspinfo)
     labelq = createPQExpBuffer();
 
     qnspname = gs_strdup(fmtId(nspinfo->dobj.name));
-    if (!targetV1 || strcasecmp(qnspname, "public") != 0) {
+    if (strcasecmp(qnspname, "public") != 0) {
         appendPQExpBuffer(delq, "DROP SCHEMA IF EXISTS %s%s;\n", qnspname, if_cascade);
 
         if (nspinfo->hasBlockchain) {
             appendPQExpBuffer(q, "CREATE SCHEMA %s WITH BLOCKCHAIN;\n", qnspname);
         } else {
             appendPQExpBuffer(q, "CREATE SCHEMA %s;\n", qnspname);
+        }
+        if (OidIsValid(nspinfo->collate)) {
+            CollInfo *coll = NULL;
+            coll = findCollationByOid(nspinfo->collate);
+            if (coll != NULL) {
+                appendPQExpBuffer(q, "ALTER SCHEMA %s COLLATE = %s;\n", qnspname, fmtId(coll->dobj.name));
+            }
         }
     }
 
@@ -10862,7 +11052,7 @@ static void dumpNamespace(Archive* fout, NamespaceInfo* nspinfo)
         NULL);
 
     /* Dump Schema Comments and Security Labels */
-    if (!targetV1 || strcasecmp(qnspname, "public") != 0) {
+    if (strcasecmp(qnspname, "public") != 0) {
         dumpComment(fout, labelq->data, NULL, nspinfo->rolname, nspinfo->dobj.catId, 0, nspinfo->dobj.dumpId);
     }
     dumpSecLabel(fout, labelq->data, NULL, nspinfo->rolname, nspinfo->dobj.catId, 0, nspinfo->dobj.dumpId);
@@ -17893,6 +18083,7 @@ static PQExpBuffer createTablePartition(Archive* fout, TableInfo* tbinfo)
     int ntups;
     int i;
     int j;
+    int cnt;
 
     bool partkeyexprIsNull = PartkeyexprIsNull(fout, tbinfo, false);
     /* get partitioned table info */
@@ -17996,32 +18187,86 @@ static PQExpBuffer createTablePartition(Archive* fout, TableInfo* tbinfo)
         appendPQExpBuffer(result, "(");
 
         i_partboundary = (int*)pg_malloc(partkeynum * sizeof(int));
-        /* get table partitions info */
-        appendPQExpBuffer(partitionq,
-            "SELECT p.oid as oid, "
-            "p.relname AS partName, "
-            "pg_catalog.array_length(partkey, 1) AS subpartkeynum, "
-            "partkey AS subpartkey, ");
+        if (partStrategy != PART_STRATEGY_LIST || partkeynum == 1) {
+            /* get table partitions info */
+            appendPQExpBuffer(partitionq,
+                "SELECT p.oid as oid, "
+                "p.relname AS partName, "
+                "pg_catalog.array_length(partkey, 1) AS subpartkeynum, "
+                "partkey AS subpartkey, ");
 
-        for (i = 1; i <= partkeynum; i++)
-            appendPQExpBuffer(partitionq, "p.boundaries[%d] AS partBoundary_%d, ", i, i);
-        appendPQExpBuffer(partitionq,
-            "pg_catalog.array_to_string(p.boundaries, ',') as bound, "
-            "pg_catalog.array_to_string(p.boundaries, ''',''') as boundstr, "
-            "t.spcname AS reltblspc "
-            "FROM pg_partition p LEFT JOIN pg_tablespace t "
-            "ON p.reltablespace = t.oid "
-            "WHERE p.parentid = '%u' AND p.parttype = '%c' "
-            "AND p.partstrategy = '%c' ORDER BY ",
-            tbinfo->dobj.catId.oid,
-            PART_OBJ_TYPE_TABLE_PARTITION,
-            newStrategy);
-        for (i = 1; i <= partkeynum; i++) {
-            if (i == partkeynum)
-                appendPQExpBuffer(
-                    partitionq, "p.boundaries[%d]::%s ASC", i, tbinfo->atttypnames[partkeycols[i - 1] - 1]);
-            else
-                appendPQExpBuffer(partitionq, "p.boundaries[%d]::%s, ", i, tbinfo->atttypnames[partkeycols[i - 1] - 1]);
+            for (i = 1; i <= partkeynum; i++)
+                appendPQExpBuffer(partitionq, "p.boundaries[%d] AS partBoundary_%d, ", i, i);
+            appendPQExpBuffer(partitionq,
+                "pg_catalog.array_to_string(p.boundaries, ',') as bound, "
+                "pg_catalog.array_to_string(p.boundaries, ''',''') as boundstr, "
+                "t.spcname AS reltblspc "
+                "FROM pg_partition p LEFT JOIN pg_tablespace t "
+                "ON p.reltablespace = t.oid "
+                "WHERE p.parentid = '%u' AND p.parttype = '%c' "
+                "AND p.partstrategy = '%c' ORDER BY ",
+                tbinfo->dobj.catId.oid,
+                PART_OBJ_TYPE_TABLE_PARTITION,
+                newStrategy);
+            for (i = 1; i <= partkeynum; i++) {
+                if (i == partkeynum)
+                    appendPQExpBuffer(
+                        partitionq, "p.boundaries[%d]::%s ASC", i, tbinfo->atttypnames[partkeycols[i - 1] - 1]);
+                else
+                    appendPQExpBuffer(
+                        partitionq, "p.boundaries[%d]::%s, ", i, tbinfo->atttypnames[partkeycols[i - 1] - 1]);
+            }
+        } else {
+            appendPQExpBuffer(partitionq,
+                "SELECT /*+ hashjoin(p t) */ p.oid AS oid, "
+                "p.relname AS partName, "
+                "pg_catalog.array_length(partkey, 1) AS subpartkeynum, "
+                "partkey AS subpartkey, ");
+            for (i = 1; i <= partkeynum; i++) {
+                appendPQExpBuffer(partitionq, "NULL AS partBoundary_%d, ", i);
+            }
+            appendPQExpBuffer(partitionq,
+                "p.bound_def AS bound, "
+                "p.bound_def AS boundstr, "
+                "t.spcname AS reltblspc FROM ( "
+                "SELECT oid, relname, reltablespace, partkey, "
+                "pg_catalog.string_agg(bound,',' ORDER BY bound_id) AS bound_def FROM( "
+                "SELECT oid, relname, reltablespace, partkey, bound_id, '('||"
+                "pg_catalog.array_to_string(pg_catalog.array_agg(key_value ORDER BY key_id),',','NULL')||')' AS bound "
+                "FROM ( SELECT oid, relname, reltablespace, partkey, bound_id, key_id, ");
+            cnt = 0;
+            for (i = 0; i < partkeynum; i++) {
+                if (!isTypeString(tbinfo, partkeycols[i])) {
+                    continue;
+                }
+                if (cnt > 0) {
+                    appendPQExpBuffer(partitionq, ",");
+                } else {
+                    appendPQExpBuffer(partitionq, "CASE WHEN key_id in (");
+                }
+                appendPQExpBuffer(partitionq, "%d", i + 1);
+                cnt++;
+            }
+            if (cnt > 0) {
+                appendPQExpBuffer(partitionq, ") THEN pg_catalog.quote_literal(key_value) ELSE key_value END AS ");
+            }
+            appendPQExpBuffer(partitionq,
+                "key_value FROM ( "
+                "SELECT oid, relname, reltablespace, partkey, bound_id, "
+                "pg_catalog.generate_subscripts(keys_array, 1) AS key_id, "
+                "pg_catalog.unnest(keys_array)::text AS key_value FROM ( "
+                "SELECT oid, relname, reltablespace, partkey, bound_id,key_bounds::cstring[] AS keys_array FROM ( "
+                "SELECT oid, relname, reltablespace, partkey, pg_catalog.unnest(boundaries) AS key_bounds, "
+                "pg_catalog.generate_subscripts(boundaries, 1) AS bound_id FROM pg_partition "
+                "WHERE parentid = %u AND parttype = '%c' AND partstrategy = '%c')))) "
+                "GROUP BY oid, relname, reltablespace, partkey, bound_id) "
+                "GROUP BY oid, relname, reltablespace, partkey "
+                "UNION ALL SELECT oid, relname, reltablespace, partkey, 'DEFAULT' AS bound_def FROM pg_partition "
+                "WHERE parentid = %u AND parttype = '%c' AND partstrategy = '%c' AND boundaries[1] IS NULL) p "
+                "LEFT JOIN pg_tablespace t ON p.reltablespace = t.oid "
+                "ORDER BY p.bound_def ASC",
+                tbinfo->dobj.catId.oid, PART_OBJ_TYPE_TABLE_PARTITION, PART_STRATEGY_LIST,
+                tbinfo->dobj.catId.oid, PART_OBJ_TYPE_TABLE_PARTITION, PART_STRATEGY_LIST);
         }
 
         res = ExecuteSqlQuery(fout, partitionq->data, PGRES_TUPLES_OK);
@@ -18093,7 +18338,7 @@ static PQExpBuffer createTablePartition(Archive* fout, TableInfo* tbinfo)
                 }
                 if (boundaryValue == NULL || strlen(boundaryValue) == 0) {
                     appendPQExpBuffer(result, "DEFAULT");
-                } else if (isTypeString(tbinfo, partkeycols[0])) {
+                } else if (partkeynum == 1 && isTypeString(tbinfo, partkeycols[0])) {
                     char *boundStr = gs_strdup(PQgetvalue(res, i, iBoundStr));
                     appendPQExpBuffer(result, "'%s'", boundStr);
                     free(boundStr);
@@ -18291,6 +18536,11 @@ bool isTsStoreTable(const TableInfo *tbinfo)
     } else {
         return false;
     }
+}
+
+inline bool isDB4AIschema(const NamespaceInfo *nspinfo)
+{
+    return (strcmp(nspinfo->dobj.name, "db4ai") == 0);
 }
 
 static void dumpExtensionLinkedGrammer(Archive *fout, const TableInfo *tbinfo, PQExpBuffer q)
@@ -21199,6 +21449,9 @@ static void dumpSequenceData(Archive* fout, TableDataInfo* tdinfo, bool large)
 
 #ifndef ENABLE_MULTIPLE_NODES
     last = PQgetvalue(res, 0, 5);
+    if (isDB4AIschema(tbinfo->dobj.nmspace)) {
+        last = atoi(last) > atoi(min) ? last : min;
+    }
 #else
     /*
      * In Postgres-XC it is possible that the current value of a
@@ -21661,6 +21914,93 @@ static void dumpRule(Archive* fout, RuleInfo* rinfo)
     destroyPQExpBuffer(labelq);
 }
 
+static void dumpEvent(Archive *fout, EventInfo *einfo)
+{
+    PQExpBuffer query;
+    PQExpBuffer delqry;
+
+    if (dataOnly || !einfo->dobj.dump) {
+        return;
+    }
+
+    /* Set proper schema search path so type references list correctly */
+    selectSourceSchema(fout, einfo->dobj.nmspace->dobj.name);
+
+    query = createPQExpBuffer();
+    delqry = createPQExpBuffer();
+
+    appendPQExpBuffer(delqry, "DROP EVENT %s ", fmtId(einfo->evname));
+    appendPQExpBuffer(query, "CREATE ");
+    if (einfo->evdefiner) {
+        appendPQExpBuffer(query, "definer=%s ", einfo->evdefiner);
+    }
+    appendPQExpBuffer(query, "EVENT %s.%s ON SCHEDULE ", fmtId(einfo->nspname), fmtId(einfo->evname));
+    if (strcmp(einfo->intervaltime, "null") != 0) {
+        int interval_len = 10;
+        char* begin_pos = einfo->intervaltime + interval_len;
+        char* end_pos = strstr(begin_pos, "\'");
+        uint32 pos_offset;
+        char* interval_unit;
+        if (end_pos) {
+            interval_unit = end_pos + INTERVAL_UNITE_OFFSET;
+            pos_offset = (uint32)(end_pos - begin_pos);
+        } else {
+            return;
+        }
+        char interval_num[pos_offset + 1] = {0};
+        errno_t rc = memcpy_s(interval_num, pos_offset + 1, begin_pos, pos_offset);
+        securec_check_c(rc, "\0", "\0");
+        
+        bool is_exist_to_unite = (strstr(einfo->intervaltime, " to ") != NULL);
+        if (is_exist_to_unite) {
+            appendPQExpBuffer(query, "EVERY \'%s\' ", interval_num);
+        } else {
+            appendPQExpBuffer(query, "EVERY %s ", interval_num);
+        }
+        appendPQExpBuffer(query, "%s ", interval_unit);
+        if (einfo->starttime) {
+            appendPQExpBuffer(query, "STARTS \'%s\' ", einfo->starttime);
+        }
+        if (einfo->endtime) {
+            appendPQExpBuffer(query, "ENDS \'%s\' ", einfo->endtime);
+        }
+    } else {
+        appendPQExpBuffer(query, "AT \'%s\' ", einfo->starttime);
+    }
+    if (einfo->autodrop) {
+        appendPQExpBuffer(query, "ON COMPLETION NOT PRESERVE ");
+    } else {
+        appendPQExpBuffer(query, "ON COMPLETION PRESERVE ");
+    }
+    if (einfo->evstatus) {
+        appendPQExpBuffer(query, "ENABLE ");
+    } else {
+        appendPQExpBuffer(query, "DISABLE ");
+    }
+    if (einfo->comment) {
+        appendPQExpBuffer(query, "COMMENT \'%s\' ", einfo->comment);
+    }
+    appendPQExpBuffer(query, "DO %s;", einfo->evbody);
+
+    ArchiveEntry(fout,
+        einfo->dobj.catId,
+        einfo->dobj.dumpId,
+        einfo->evname,
+        einfo->dobj.nmspace->dobj.name,
+        NULL,
+        einfo->evdefiner,
+        false,
+        "EVENT",
+        SECTION_POST_DATA,
+        query->data,
+        delqry->data,
+        NULL,
+        NULL,
+        0,
+        NULL,
+        NULL);
+    destroyPQExpBuffer(query);
+}
 /*
  * dumpRlsPolicy
  *	Dump row level security information for table
@@ -22213,6 +22553,7 @@ static void addBoundaryDependencies(DumpableObject** dobjs, int numObjs, Dumpabl
             case DO_PUBLICATION:
             case DO_PUBLICATION_REL:
             case DO_SUBSCRIPTION:
+            case DO_EVENT:
                 /* Post-data objects: must come after the post-data boundary */
                 if (dobj->objType == DO_INDEX &&
                     ((IndxInfo*)dobj)->indextable && ((IndxInfo*)dobj)->indextable->isMOT) {

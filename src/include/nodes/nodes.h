@@ -424,6 +424,11 @@ typedef enum NodeTag {
     T_IndexStmt,
     T_CreateFunctionStmt,
     T_AlterFunctionStmt,
+    T_CreateEventStmt,
+    T_AlterEventStmt,
+    T_DropEventStmt,
+    T_ShowEventStmt,
+    T_CompileStmt,
     T_DoStmt,
     T_RenameStmt,
     T_RuleStmt,
@@ -805,7 +810,8 @@ typedef enum NodeTag {
     T_RelCI,
     T_CentroidPoint,
     T_UserSetElem,
-    T_UserVar
+    T_UserVar,
+	T_CharsetCollateOptions
 } NodeTag;
 
 /* if you add to NodeTag also need to add nodeTagToString */

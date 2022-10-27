@@ -1227,6 +1227,79 @@ select @v1, @v2, @v3, @v4;
    1 |   2 |   3 |   3
 (1 row)
 
+\c test_set
+set @v2 := 'aaa';
+set @V4 :=(SELECT @v2 + 1);
+select @v2, @v4;
+ @v2 | @v4 
+-----+-----
+ aaa |   1
+(1 row)
+
+set @aa = 10;
+set @bb = (select sha(@aa));
+select @aa, @bb;
+ @aa |                   @bb                    
+-----+------------------------------------------
+  10 | b1d5781111d84f7b3fe45a0852e59758cd7a87e5
+(1 row)
+
+\c test_set
+set b_format_behavior_compat_options="enable_set_variables";
+drop table if exists t2;
+create table t2(a int, b int);
+insert into t2 values(1,2);
+create or replace procedure test(a int, b int) as
+declare
+    num3 int := a;
+    num4 int := b;
+    pragma autonomous_transaction;
+
+begin
+    set b_format_behavior_compat_options="enable_set_variables";
+    set @v1 := num3, @v2 := num4;
+    insert into t2 values(@v1, @v2);
+    rollback;
+    set b_format_behavior_compat_options="enable_set_variables";
+    insert into t2 values(@v1-1, @v2+1);
+end;
+/
+call test(1,1);
+ test 
+------
+ 
+(1 row)
+
+\c test_set
+set @a := 1, @b := @a;
+select @a, @b;
+ @a | @b 
+----+----
+  1 | 
+(1 row)
+
+set @a := @c := 2, @b := @d := @a;
+select @a, @b, @c, @d;
+ @a | @b | @c | @d 
+----+----+----+----
+  2 |  1 |  2 |  1
+(1 row)
+
+\c test_set
+set @a := 1, @b := @a;
+select @a, @b;
+ @a | @b 
+----+----
+  1 | 
+(1 row)
+
+set @a := @c := 2, @b := @d := @a, @@session_timeout = 700, @e := @f := @a;
+select @a, @b, @c, @d, @e, @f, @@session_timeout;
+ @a | @b | @c | @d | @e | @f | ?column? 
+----+----+----+----+----+----+----------
+  2 |  1 |  2 |  1 |  1 |  1 |      700
+(1 row)
+
 \c regression
 drop database if exists test_set;
 \! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "enable_set_variable_b_format=off" >/dev/null 2>&1

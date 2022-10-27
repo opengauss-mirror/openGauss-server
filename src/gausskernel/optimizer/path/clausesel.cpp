@@ -143,6 +143,13 @@ Selectivity clauselist_selectivity(
     ES_SELECTIVITY* es = NULL;
     MemoryContext ExtendedStat = NULL;
     MemoryContext oldcontext;
+    bool use_muti_stats = true;
+
+    if (ENABLE_CACHEDPLAN_MGR && root->glob->boundParams != NULL) {
+        root->glob->boundParams->params_lazy_bind = false;
+        use_muti_stats = (root->glob->boundParams->uParamInfo != DEFUALT_INFO) ? false : true;
+    }
+
     /*
      * If there's exactly one clause, then no use in trying to match up pairs,
      * so just go directly to clause_selectivity().
@@ -151,7 +158,7 @@ Selectivity clauselist_selectivity(
         return clause_selectivity(root, (Node*)linitial(clauses), varRelid, jointype, sjinfo, varratio_cached, false, use_poisson);
 
     /* initialize es_selectivity class, list_length(clauses) can be 0 when called by set_baserel_size_estimates */
-    if (list_length(clauses) >= 2 &&
+    if (list_length(clauses) >= 2 && use_muti_stats &&
         (jointype == JOIN_INNER || jointype == JOIN_FULL || jointype == JOIN_LEFT || jointype == JOIN_ANTI ||
             jointype == JOIN_SEMI || jointype == JOIN_LEFT_ANTI_FULL)) {
         ExtendedStat = AllocSetContextCreate(CurrentMemoryContext,
@@ -331,6 +338,10 @@ Selectivity clauselist_selectivity(
         list_free_ext(es->unmatched_clause_group);
         delete es;
         MemoryContextDelete(ExtendedStat);
+    }
+
+    if (ENABLE_CACHEDPLAN_MGR && root->glob->boundParams != NULL && root->glob->boundParams->uParamInfo != DEFUALT_INFO) {
+        root->glob->boundParams->params_lazy_bind = true;
     }
 
     return s1;

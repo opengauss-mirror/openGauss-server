@@ -1993,6 +1993,8 @@ typedef struct AlterSchemaStmt {
     char *schemaname; /* the name of the schema to create */
     char *authid;      /* the owner of the created schema */
     bool hasBlockChain;  /* whether this schema has blockchain */
+    int charset;
+    char *collate;
 } AlterSchemaStmt;
 
 /*

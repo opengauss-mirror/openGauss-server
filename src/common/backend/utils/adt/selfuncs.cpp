@@ -156,6 +156,7 @@
 #include "utils/typcache.h"
 #include "utils/memutils.h"
 #include "optimizer/gplanmgr.h"
+#include "instruments/instr_statement.h"
 
 #ifdef PGXC
 #include "pgxc/pgxc.h"
@@ -4796,19 +4797,6 @@ void examine_variable(PlannerInfo* root, Node* node, int varRelid, VariableStatD
     }
 }
 
-static void switch_subquery(const PlannerInfo *const root, Query **subquery, const RelOptInfo *const rel)
-{
-    if (!rel->subroot->parse->is_from_inlist2join_rewrite) {
-        *subquery = rel->subroot->parse;
-        return;
-    }
-
-    if (!root->parse->is_from_sublink_rewrite && !root->parse->is_from_subquery_rewrite) {
-        *subquery = rel->subroot->parse;
-        return;
-    }
-}
-
 /*
  * examine_simple_variable
  *		Handle a simple Var for examine_variable
@@ -4917,7 +4905,10 @@ static void examine_simple_variable(PlannerInfo* root, Var* var, VariableStatDat
          * This is a temporary fix for mislocated varattno after inlist2join
          * optimization.
          */
-        switch_subquery(root, &subquery, rel);
+        if (rel->subroot->parse->is_from_inlist2join_rewrite) {
+            return;
+        }
+        subquery = rel->subroot->parse;
 
         Assert(IsA(subquery, Query));
 
@@ -5000,6 +4991,8 @@ statistic_proc_security_check(const VariableStatData *vardata, Oid func_oid)
 
     if (get_func_leakproof(func_oid))
         return true;
+    
+    instr_stmt_report_cause_type(NUM_F_LEAKPROOF);
 
     ereport(DEBUG2,
             (errmodule(MOD_OPT),

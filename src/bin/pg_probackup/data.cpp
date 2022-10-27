@@ -498,10 +498,16 @@ prepare_page(ConnectionArgs *conn_arg,
         else if (read_len < 0)
             elog(ERROR, "Cannot read block %u of \"%s\": %s",
                 blknum, from_fullpath, strerror(errno));
-        else if (read_len != BLCKSZ)
-            elog(WARNING, "Cannot read block %u of \"%s\": "
-                "read %i of %d, try again",
-                blknum, from_fullpath, read_len, BLCKSZ);
+        else if (read_len != BLCKSZ) {
+            if (read_len > (int)MIN_COMPRESS_ERROR_RT) {
+                elog(ERROR, "Cannot read block %u of \"%s\" code: %lu : %s", blknum, from_fullpath, read_len,
+                     strerror(errno));
+            }
+            elog(WARNING,
+                 "Cannot read block %u of \"%s\": "
+                 "read %i of %d, try again",
+                 blknum, from_fullpath, read_len, BLCKSZ);
+        }
         else
         {
             /* If it is in DSS mode, the validation is skipped */

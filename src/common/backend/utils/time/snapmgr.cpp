@@ -1055,6 +1055,8 @@ static void SnapshotResetXmin(void)
 {
     if (u_sess->utils_cxt.RegisteredSnapshots == 0 && u_sess->utils_cxt.ActiveSnapshot == NULL) {
         t_thrd.pgxact->xmin = InvalidTransactionId;
+        t_thrd.proc->snapXmax = InvalidTransactionId;
+        t_thrd.proc->snapCSN = InvalidCommitSeqNo;
         t_thrd.pgxact->csn_min = InvalidCommitSeqNo;
         t_thrd.pgxact->csn_dr = InvalidCommitSeqNo;
     }

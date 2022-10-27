@@ -143,6 +143,12 @@ alter table list_list split subpartition p_201902_a values (3) into
 	subpartition p_201902_ac
 );
 ERROR:  Only the default boundary subpartition can be splited.
+alter table list_list split subpartition p_201902_c values ((2,3),(3,4)) into
+(
+	subpartition p_201902_c,
+	subpartition p_201902_d
+);
+ERROR:  number of boundary items NOT EQUAL to number of partition keys
 drop table list_list;
 -- range subpartition
 CREATE TABLE range_range

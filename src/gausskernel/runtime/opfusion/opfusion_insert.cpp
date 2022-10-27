@@ -25,6 +25,7 @@
 #include "opfusion/opfusion_insert.h"
 
 #include "access/tableam.h"
+#include "catalog/pg_partition_fn.h"
 #include "catalog/storage_gtt.h"
 #include "commands/matview.h"
 #include "commands/sequence.h"
@@ -232,7 +233,7 @@ Datum ComputePartKeyExprTuple(Relation rel, EState *estate, TupleTableSlot *slot
     if (tmpRel->partMap->type == PART_TYPE_RANGE)
         boundary = ((RangePartitionMap*)(tmpRel->partMap))->rangeElements[0].boundary;
     else if (tmpRel->partMap->type == PART_TYPE_LIST)
-        boundary = ((ListPartitionMap*)(tmpRel->partMap))->listElements[0].boundary;
+        boundary = ((ListPartitionMap*)(tmpRel->partMap))->listElements[0].boundary[0].values;
     else if (tmpRel->partMap->type == PART_TYPE_HASH)
         boundary = ((HashPartitionMap*)(tmpRel->partMap))->hashElements[0].boundary;
     else
@@ -286,13 +287,15 @@ unsigned long InsertFusion::ExecInsert(Relation rel, ResultRelInfo* result_rel_i
     Assert(tuple != NULL);
     if (RELATION_IS_PARTITIONED(rel)) {
         m_c_local.m_estate->esfRelations = NULL;
-        partOid = heapTupleGetPartitionId(rel, tuple, false, m_c_local.m_estate->es_plannedstmt->hasIgnore);
+        int partitionno = INVALID_PARTITION_NO;
+        partOid =
+            heapTupleGetPartitionId(rel, tuple, &partitionno, false, m_c_local.m_estate->es_plannedstmt->hasIgnore);
         if (m_c_local.m_estate->es_plannedstmt->hasIgnore && partOid == InvalidOid) {
             ExecReleaseResource(tuple, m_local.m_reslot, result_rel_info, m_c_local.m_estate, bucket_rel, rel, part,
                                 partRel);
             return 0;
         }
-        part = partitionOpen(rel, partOid, RowExclusiveLock);
+        part = PartitionOpenWithPartitionno(rel, partOid, partitionno, RowExclusiveLock);
         partRel = partitionGetRelation(rel, part);
     }
 

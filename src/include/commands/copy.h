@@ -360,6 +360,10 @@ typedef struct CopyStateData {
     LedgerHashState hashstate;
     bool is_load_copy;
     bool is_useeof;
+    bool is_dumpfile;
+    char* o_enclosed;
+    char* enclosed;
+    char* line_start;
 } CopyStateData;
 
 typedef struct InsertCopyLogInfoData {
@@ -380,8 +384,8 @@ typedef struct InsertCopyLogInfoData* LogInsertState;
 #define IS_TEXT(cstate) ((cstate)->fileformat == FORMAT_TEXT)
 #define IS_REMOTEWRITE(cstate) ((cstate)->fileformat == FORMAT_WRITABLE)
 
-CopyState BeginCopyTo(
-    Relation rel, Node* query, const char* queryString, const char* filename, List* attnamelist, List* options);
+CopyState BeginCopyTo(Relation rel, Node* query, const char* queryString,
+    const char* filename, List* attnamelist, List* options, CopyFileType filetype = S_COPYFILE);
 void EndCopyTo(CopyState cstate);
 uint64 DoCopyTo(CopyState cstate);
 extern uint64 DoCopy(CopyStmt* stmt, const char* queryString);
@@ -389,6 +393,7 @@ template<bool skipEol>
 void CopySendEndOfRow(CopyState cstate);
 void CopyOneRowTo(CopyState cstate, Oid tupleOid, Datum* values, const bool* nulls);
 
+extern void ProcessFileOptions(CopyState cstate, bool is_from, List* options, bool is_dumpfile);
 extern void ProcessCopyOptions(CopyState cstate, bool is_from, List* options);
 extern bool IsTypeAcceptEmptyStr(Oid typeOid);
 extern CopyState BeginCopyFrom(Relation rel, const char* filename, List* attnamelist, 

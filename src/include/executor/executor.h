@@ -177,13 +177,14 @@ ScanState* search_plan_tree(PlanState* node, Oid table_oid);
  * prototypes from functions in execGrouping.c
  */
 extern bool execTuplesMatch(TupleTableSlot* slot1, TupleTableSlot* slot2, int numCols, AttrNumber* matchColIdx,
-    FmgrInfo* eqfunctions, MemoryContext evalContext);
+    FmgrInfo* eqfunctions, MemoryContext evalContext, Oid *collations);
 extern bool execTuplesUnequal(TupleTableSlot* slot1, TupleTableSlot* slot2, int numCols, AttrNumber* matchColIdx,
-    FmgrInfo* eqfunctions, MemoryContext evalContext);
+    FmgrInfo* eqfunctions, MemoryContext evalContext, Oid *collations);
 extern FmgrInfo* execTuplesMatchPrepare(int numCols, Oid* eqOperators);
 extern void execTuplesHashPrepare(int numCols, Oid* eqOperators, FmgrInfo** eqFunctions, FmgrInfo** hashFunctions);
 extern TupleHashTable BuildTupleHashTable(int numCols, AttrNumber* keyColIdx, FmgrInfo* eqfunctions,
-    FmgrInfo* hashfunctions, long nbuckets, Size entrysize, MemoryContext tablecxt, MemoryContext tempcxt, int workMem);
+    FmgrInfo* hashfunctions, long nbuckets, Size entrysize, MemoryContext tablecxt, MemoryContext tempcxt, int workMem,
+    Oid *collations = NULL);
 extern TupleHashEntry LookupTupleHashEntry(
     TupleHashTable hashtable, TupleTableSlot* slot, bool* isnew, bool isinserthashtbl = true);
 extern TupleHashEntry FindTupleHashEntry(
@@ -312,6 +313,7 @@ extern Tuplestorestate* ExecMakeTableFunctionResult(
 extern Datum ExecEvalExprSwitchContext(
     ExprState* expression, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone);
 extern ExprState* ExecInitExpr(Expr* node, PlanState* parent);
+extern List* ExecInitExprList(List* nodes, PlanState *parent);
 extern ExprState* ExecPrepareExpr(Expr* node, EState* estate);
 extern bool ExecQual(List* qual, ExprContext* econtext, bool resultForNull);
 extern int ExecTargetListLength(List* targetlist);
@@ -441,6 +443,22 @@ extern void ExecCloseScanRelation(Relation scanrel);
 static inline RangeTblEntry *exec_rt_fetch(Index rti, EState *estate)
 {
     return (RangeTblEntry *)list_nth(estate->es_range_table, rti - 1);
+}
+
+static inline int128 datum2autoinc(ConstrAutoInc *cons_autoinc, Datum datum)
+{
+    if (cons_autoinc->datum2autoinc_func != NULL) {
+        return DatumGetInt128(DirectFunctionCall1((PGFunction)(uintptr_t)cons_autoinc->datum2autoinc_func, datum));
+    }
+    return DatumGetInt128(datum);
+}
+
+static inline Datum autoinc2datum(ConstrAutoInc *cons_autoinc, int128 autoinc)
+{
+    if (cons_autoinc->autoinc2datum_func != NULL) {
+        return DirectFunctionCall1((PGFunction)(uintptr_t)cons_autoinc->autoinc2datum_func, Int128GetDatum(autoinc));
+    }
+    return Int128GetDatum(autoinc);
 }
 
 extern Partition ExecOpenScanParitition(
@@ -631,6 +649,13 @@ public:
     {
         if (likely(u_sess != NULL)) {
             u_sess->opt_cxt.smp_enabled = false;
+        }
+    }
+
+    void ResetSmp()
+    {
+        if (u_sess != NULL) {
+            u_sess->opt_cxt.smp_enabled = m_smpEnabled;
         }
     }
 

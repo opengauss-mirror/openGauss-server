@@ -740,6 +740,17 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
     }
 
     int fun_arg = fcinfo->nargs;
+
+    _PG_init();
+    /*
+     * Connect to SPI manager
+     */
+    SPI_STACK_LOG("connect", NULL, NULL);
+    rc =  SPI_connect_ext(DestSPI, NULL, NULL, nonatomic ? SPI_OPT_NONATOMIC : 0, func_oid);
+    if (rc  != SPI_OK_CONNECT) {
+        ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_UNDEFINED_OBJECT),
+            errmsg("SPI_connect failed: %s when execute PLSQL function.", SPI_result_code_string(rc))));
+    }
 #ifdef ENABLE_MULTIPLE_NODES
     bool outer_is_stream = false;
     bool outer_is_stream_support = false;
@@ -756,18 +767,6 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
     AutoDopControl dopControl;
     dopControl.CloseSmp();
 #endif
-
-    _PG_init();
-    /*
-     * Connect to SPI manager
-     */
-    SPI_STACK_LOG("connect", NULL, NULL);
-    rc =  SPI_connect_ext(DestSPI, NULL, NULL, nonatomic ? SPI_OPT_NONATOMIC : 0, func_oid);
-    if (rc  != SPI_OK_CONNECT) {
-        ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_UNDEFINED_OBJECT),
-            errmsg("SPI_connect failed: %s when execute PLSQL function.", SPI_result_code_string(rc))));
-    }
-
     int connect = SPI_connectid();
     Oid firstLevelPkgOid = InvalidOid;
     PG_TRY();
@@ -972,6 +971,8 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
         }
 #ifdef ENABLE_MULTIPLE_NODES
         SetSendCommandId(saveSetSendCommandId);
+#else
+        dopControl.ResetSmp();
 #endif
         /* ErrorData could be allocted in SPI's MemoryContext, copy it. */
         oldContext = MemoryContextSwitchTo(oldContext);
@@ -996,6 +997,8 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
     }
 #ifdef ENABLE_MULTIPLE_NODES
     SetSendCommandId(saveSetSendCommandId);
+#else
+    dopControl.ResetSmp();
 #endif
 
     /*
@@ -1040,15 +1043,6 @@ Datum plpgsql_inline_handler(PG_FUNCTION_ARGS)
     int64 startTime = 0;
     bool needRecord = false;
 
-#ifndef ENABLE_MULTIPLE_NODES
-    AutoDopControl dopControl;
-    dopControl.CloseSmp();
-#else
-    /* Saves the status of whether to send commandId. */
-    bool saveSetSendCommandId = IsSendCommandId();
-#endif
-
-
     _PG_init();
 
     AssertEreport(IsA(codeblock, InlineCodeBlock), MOD_PLSQL, "Inline code block is required.");
@@ -1076,6 +1070,14 @@ Datum plpgsql_inline_handler(PG_FUNCTION_ARGS)
     }
     PGSTAT_START_PLSQL_TIME_RECORD();
 
+#ifndef ENABLE_MULTIPLE_NODES
+    AutoDopControl dopControl;
+    dopControl.CloseSmp();
+#else
+    /* Saves the status of whether to send commandId. */
+    bool saveSetSendCommandId = IsSendCommandId();
+#endif
+
     /* Compile the anonymous code block */
     PLpgSQL_compile_context* save_compile_context = u_sess->plsql_cxt.curr_compile_context;
     PG_TRY();
@@ -1088,6 +1090,9 @@ Datum plpgsql_inline_handler(PG_FUNCTION_ARGS)
     }
     PG_CATCH();
     {
+#ifndef ENABLE_MULTIPLE_NODES
+        dopControl.ResetSmp();
+#endif
         popToOldCompileContext(save_compile_context);
         PG_RE_THROW();
     }
@@ -1141,6 +1146,8 @@ Datum plpgsql_inline_handler(PG_FUNCTION_ARGS)
 #ifndef ENABLE_MULTIPLE_NODES
         /* for restore parent session and automn session package var values */
         (void)processAutonmSessionPkgsInException(func);
+
+        dopControl.ResetSmp();
 #endif
         ereport(DEBUG3, (errmodule(MOD_NEST_COMPILE), errcode(ERRCODE_LOG),
             errmsg("%s clear curr_compile_context because of error.", __func__)));
@@ -1167,6 +1174,8 @@ Datum plpgsql_inline_handler(PG_FUNCTION_ARGS)
 
 #ifdef ENABLE_MULTIPLE_NODES
     SetSendCommandId(saveSetSendCommandId);
+#else
+    dopControl.ResetSmp();
 #endif
 
     /* Disconnecting and releasing resources */
@@ -1243,11 +1252,6 @@ Datum plpgsql_validator(PG_FUNCTION_ARGS)
     if (PG_NARGS() >= 3) {
         replace = PG_GETARG_BOOL(2);
     }
-
-#ifndef ENABLE_MULTIPLE_NODES
-    AutoDopControl dopControl;
-    dopControl.CloseSmp();
-#endif
 
     _PG_init();
 

@@ -567,6 +567,9 @@ void smgrdounlink(SMgrRelation reln, bool isRedo, BlockNumber blockNum)
     RelFileNodeBackend rnode = reln->smgr_rnode;
     int which = reln->smgr_which;
     int forknum;
+    HTAB *unlink_rel_hashtbl = g_instance.bgwriter_cxt.unlink_rel_hashtbl;
+    DelFileTag *entry = NULL;
+    bool found = false;
 
     /* Close the forks at smgr level */
     for (forknum = 0; forknum < (int)(reln->md_fdarray_size); forknum++) {
@@ -606,6 +609,13 @@ void smgrdounlink(SMgrRelation reln, bool isRedo, BlockNumber blockNum)
      */
 unlink_file:
     (*(smgrsw[which].smgr_unlink))(rnode, InvalidForkNumber, isRedo, blockNum);
+
+    (void)LWLockAcquire(g_instance.bgwriter_cxt.rel_hashtbl_lock, LW_EXCLUSIVE);
+    entry = (DelFileTag*)hash_search(unlink_rel_hashtbl, (void *)&rnode, HASH_FIND, &found);
+    if (found) {
+        entry->fileUnlink = true;
+    }
+    LWLockRelease(g_instance.bgwriter_cxt.rel_hashtbl_lock);
 }
 
 /*

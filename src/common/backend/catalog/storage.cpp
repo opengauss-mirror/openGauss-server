@@ -965,6 +965,7 @@ void push_del_rel_to_hashtbl(bool isCommit)
                             entry->rnode.bucketNode = pending->relnode.bucketNode;
                             entry->rnode.opt = pending->relnode.opt;
                             entry->maxSegNo = -1;
+                            entry->fileUnlink = false;
                         }
                         BatchClearBadBlock(pending->relnode, pending->forknum, 0);
                     }

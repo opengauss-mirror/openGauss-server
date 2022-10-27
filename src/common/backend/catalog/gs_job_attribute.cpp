@@ -843,7 +843,9 @@ void create_program_internal(PG_FUNCTION_ARGS, bool is_inline)
     Datum comments = PG_ARGISNULL(5) ? (Datum)0 : PG_GETARG_DATUM(5);
 
     /* perform program check */
-    check_program_name_valid(program_name, is_inline);
+    if (!(u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)) {
+        check_program_name_valid(program_name, is_inline);
+    }
     check_program_type_valid(program_type);
     check_program_creation_privilege(program_type);
     check_program_type_argument(program_type, PG_GETARG_INT32(3));
@@ -881,7 +883,7 @@ void create_program_internal(PG_FUNCTION_ARGS, bool is_inline)
  * @param enabled       Object enabled? or not
  */
 static void dbe_insert_pg_job(Datum name, Datum job_id, Datum start_date, Datum interval, Datum end_date, Datum enabled,
-                              Datum priv_user)
+                              Datum priv_user, Datum log_user, Datum schema_name)
 {
     errno_t rc = EOK;
     Datum values[Natts_pg_job];
@@ -899,13 +901,13 @@ static void dbe_insert_pg_job(Datum name, Datum job_id, Datum start_date, Datum 
     values[Anum_pg_job_enable - 1] = TextToBool(enabled);
     values[Anum_pg_job_start_date - 1] = DirectFunctionCall1(timestamptz_timestamp, TextToTimeStampTz(start_date));
     values[Anum_pg_job_end_date - 1] = DirectFunctionCall1(timestamptz_timestamp, TextToTimeStampTz(end_date));
+    values[Anum_pg_job_log_user - 1] = log_user;
+    values[Anum_pg_job_priv_user - 1] = priv_user; /* program's owner */
+    values[Anum_pg_job_nspname - 1] = schema_name;
 
     /* Fill other values */
     const char* db_name = get_and_check_db_name(u_sess->proc_cxt.MyDatabaseId, true);
-    values[Anum_pg_job_log_user - 1] = DirectFunctionCall1(namein, CStringGetDatum(GetUserNameFromId(GetUserId())));
-    values[Anum_pg_job_priv_user - 1] = priv_user; /* program's owner */
     values[Anum_pg_job_dbname - 1] = DirectFunctionCall1(namein, CStringGetDatum(db_name));
-    values[Anum_pg_job_nspname - 1] = DirectFunctionCall1(namein, CStringGetDatum(get_real_search_schema()));
     values[Anum_pg_job_node_name - 1] = get_pg_job_node_name();
     values[Anum_pg_job_job_status - 1] = CharGetDatum(PGJOB_SUCC_STATUS);
     values[Anum_pg_job_current_postgres_pid - 1] = Int64GetDatum(-1);
@@ -930,7 +932,7 @@ static void dbe_insert_pg_job(Datum name, Datum job_id, Datum start_date, Datum 
  * @param job_name
  * @return char*
  */
-static char *get_inline_schedule_name(Datum job_name)
+char *get_inline_schedule_name(Datum job_name)
 {
     errno_t rc;
     char *c_job_name = TextDatumGetCString(job_name);
@@ -947,7 +949,7 @@ static char *get_inline_schedule_name(Datum job_name)
  * @brief create_inline_program
  *  Create a inline program object
  */
-static char *create_inline_program(Datum job_name, Datum job_type, Datum job_action, Datum num_of_args, Datum enabled)
+char *create_inline_program(Datum job_name, Datum job_type, Datum job_action, Datum num_of_args, Datum enabled)
 {
     errno_t rc;
     char *c_job_name = TextDatumGetCString(job_name);
@@ -972,6 +974,45 @@ static char *create_inline_program(Datum job_name, Datum job_type, Datum job_act
     fcinfo_program.arg[4] = enabled;                            /* enabled */
     fcinfo_program.argnull[5] = true;                           /* comments */
     create_program_internal(&fcinfo_program, true);
+
+    return program_name;
+}
+
+char *CreateEventInlineProgram(Datum job_name, Datum job_type, Datum job_action, Datum job_definer)
+{
+    errno_t rc;
+    char *c_job_name = TextDatumGetCString(job_name);
+
+    char *program_name = (char *)palloc(sizeof(char) * MAX_JOB_NAME_LEN);
+    rc = strcpy_s(program_name, MAX_JOB_NAME_LEN, INLINE_JOB_PROGRAM_PREFIX);
+    securec_check(rc, "\0", "\0");
+    rc = strcat_s(program_name, MAX_JOB_NAME_LEN, c_job_name);
+    securec_check(rc, "\0", "\0");
+
+    /* perform program check */
+    if (!(u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)) {
+        check_program_name_valid(CStringGetTextDatum(program_name), true);
+    }
+    check_program_type_valid(job_type);
+    check_program_creation_privilege(job_type);
+    check_program_type_argument(job_type, 0);
+    check_program_action(job_action);
+    check_if_arguments_defined(CStringGetTextDatum(program_name), 0);
+
+    const char *object_type = "program";
+    Datum attribute_name[] = {CStringGetTextDatum("object_type"),    CStringGetTextDatum("program_type"),
+                              CStringGetTextDatum("program_action"), CStringGetTextDatum("number_of_arguments"),
+                              CStringGetTextDatum("enabled"),        CStringGetTextDatum("comments"),
+                              CStringGetTextDatum("owner")};
+    int count = lengthof(attribute_name);
+    Datum attribute_value[] = {
+        CStringGetTextDatum(object_type), job_type, job_action, CStringGetTextDatum("0"), BoolToText(BoolGetDatum(true)), (Datum)0, job_definer};
+    multi_insert_attribute(CStringGetTextDatum(program_name), attribute_name, attribute_value, count);
+
+    for (int i = 0; i < count; i++) {
+        pfree(DatumGetPointer(attribute_name[i]));
+    }
+    pfree(DatumGetPointer(attribute_value[0]));
 
     return program_name;
 }
@@ -1094,16 +1135,26 @@ void create_job_raw(PG_FUNCTION_ARGS)
     Datum end_date = PG_GETARG_DATUM(13);
     Datum job_action = PG_GETARG_DATUM(14);
     Datum job_type = PG_GETARG_DATUM(15);
+    Datum job_definer = (PG_ARGISNULL(16)) ? Datum(0) : PG_GETARG_DATUM(16);
+    Datum job_schemaname = (PG_ARGISNULL(17)) ? Datum(0) : PG_GETARG_DATUM(17);
+    Datum job_definer_oid = (PG_ARGISNULL(18)) ? Datum(0) : PG_GETARG_DATUM(18);
 
     /* Various checks */
-    check_job_name_valid(job_name);
+    if (!(u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)) {
+        check_job_name_valid(job_name);
+    }
     check_job_creation_privilege(job_type);
     check_job_class_valid(job_class);
 
     /* gs_job_attribute */
     const char *object_type = "job";
-    char *username = get_role_name_str();
-    Datum owner = CStringGetTextDatum(username);
+    Datum owner = Datum(0);
+    if (PG_ARGISNULL(16)) {
+        char *username = get_role_name_str();
+        owner = CStringGetTextDatum(username);
+    } else {
+        owner = job_definer_oid;
+    }
     const Datum attribute_name[] = {CStringGetTextDatum("object_type"), CStringGetTextDatum("program_name"),
                                     CStringGetTextDatum("schedule_name"), CStringGetTextDatum("job_class"),
                                     CStringGetTextDatum("auto_drop"), CStringGetTextDatum("comments"),
@@ -1116,8 +1167,23 @@ void create_job_raw(PG_FUNCTION_ARGS)
 
     /* pg_job && pg_job_proc */
     Datum job_id = Int16GetDatum(get_job_id());
-    Datum priv_user = get_priv_user(program_name, job_intype);
-    dbe_insert_pg_job(job_name, job_id, start_date, repeat_interval, end_date, enabled, priv_user);
+    Datum priv_user;
+    Datum log_user;
+    if (PG_ARGISNULL(16)) {
+        priv_user = get_priv_user(program_name, job_intype);
+        log_user = DirectFunctionCall1(namein, CStringGetDatum(GetUserNameFromId(GetUserId())));
+    } else {
+        priv_user = DirectFunctionCall1(namein, job_definer);
+        log_user = DirectFunctionCall1(namein, job_definer);
+    }
+    Datum schema_name;
+    if (PG_ARGISNULL(17)) {
+        schema_name = DirectFunctionCall1(namein, CStringGetDatum(get_real_search_schema()));
+    } else {
+        schema_name = DirectFunctionCall1(namein, job_schemaname);
+    }
+    dbe_insert_pg_job(job_name, job_id, start_date, repeat_interval, end_date, enabled, priv_user, log_user,
+                      schema_name);
     dbe_insert_pg_job_proc(job_id, job_action, job_name);
     for (int i = 0; i < count; i++) {
         pfree(DatumGetPointer(attribute_name[i]));
@@ -1148,7 +1214,7 @@ void create_job_1_internal(PG_FUNCTION_ARGS)
     Datum program_name = CStringGetTextDatum(c_program_name);
     pfree_ext(c_program_name);
 
-    static const short nrgs_job = 16;
+    static const short nrgs_job = 17;
     FunctionCallInfoData fcinfo_job;
     InitFunctionCallInfoData(fcinfo_job, NULL, nrgs_job, InvalidOid, NULL, NULL);
     errno_t rc = memset_s(fcinfo_job.arg, nrgs_job * sizeof(Datum), 0, nrgs_job * sizeof(Datum));
@@ -1172,6 +1238,7 @@ void create_job_1_internal(PG_FUNCTION_ARGS)
     fcinfo_job.arg[13] = TimeStampTzToText(end_date); /* end_date */
     fcinfo_job.arg[14] = job_action;            /* job action */
     fcinfo_job.arg[15] = job_type;              /* job type */
+    fcinfo_job.argnull[16] = true;
     create_job_raw(&fcinfo_job);
 }
 
@@ -1212,7 +1279,7 @@ static void get_schedule_info(Datum schedule_name, Datum *start_date, Datum *rep
  * @param num_of_args
  * @param enabled
  */
-static void get_program_info(Datum program_name, Datum *job_type, Datum *job_action, Datum *num_of_args, Datum *enabled)
+void get_program_info(Datum program_name, Datum *job_type, Datum *job_action, Datum *num_of_args, Datum *enabled)
 {
     check_object_is_visible(program_name);
     /* total of 4 attributes: program_type, number_of_arguments, enabled, program_action from program */
@@ -1257,7 +1324,7 @@ void create_job_2_internal(PG_FUNCTION_ARGS)
     Datum enabled;
     get_program_info(program_name, &job_type, &job_action, &num_of_args, &enabled);
 
-    static const short nrgs_job = 16;
+    static const short nrgs_job = 17;
     FunctionCallInfoData fcinfo_job;
     InitFunctionCallInfoData(fcinfo_job, NULL, nrgs_job, InvalidOid, NULL, NULL);
     errno_t rc = memset_s(fcinfo_job.arg, nrgs_job * sizeof(Datum), 0, nrgs_job * sizeof(Datum));
@@ -1283,6 +1350,7 @@ void create_job_2_internal(PG_FUNCTION_ARGS)
     fcinfo_job.arg[13] = end_date;              /* end_date */
     fcinfo_job.arg[14] = job_action;            /* job action */
     fcinfo_job.arg[15] = job_type;              /* job type */
+    fcinfo_job.argnull[16] = true;
     create_job_raw(&fcinfo_job);
 }
 
@@ -1308,7 +1376,7 @@ void create_job_3_internal(PG_FUNCTION_ARGS)
     Datum enabled;
     get_program_info(program_name, &job_type, &job_action, &num_of_args, &enabled);
 
-    static const short nrgs_job = 16;
+    static const short nrgs_job = 17;
     FunctionCallInfoData fcinfo_job;
     InitFunctionCallInfoData(fcinfo_job, NULL, nrgs_job, InvalidOid, NULL, NULL);
     errno_t rc = memset_s(fcinfo_job.arg, nrgs_job * sizeof(Datum), 0, nrgs_job * sizeof(Datum));
@@ -1334,6 +1402,7 @@ void create_job_3_internal(PG_FUNCTION_ARGS)
     fcinfo_job.arg[13] = TimeStampTzToText(end_date);   /* end_date */
     fcinfo_job.arg[14] = job_action;                    /* job action */
     fcinfo_job.arg[15] = job_type;                      /* job type */
+    fcinfo_job.argnull[16] = true;
     create_job_raw(&fcinfo_job);
 }
 
@@ -1361,7 +1430,7 @@ void create_job_4_internal(PG_FUNCTION_ARGS)
     Datum program_name = CStringGetTextDatum(c_program_name);
     pfree_ext(c_program_name);
 
-    static const short nrgs_job = 16;
+    static const short nrgs_job = 17;
     FunctionCallInfoData fcinfo_job;
     InitFunctionCallInfoData(fcinfo_job, NULL, nrgs_job, InvalidOid, NULL, NULL);
 
@@ -1383,6 +1452,7 @@ void create_job_4_internal(PG_FUNCTION_ARGS)
     fcinfo_job.arg[13] = end_date;              /* end_date */
     fcinfo_job.arg[14] = job_action;            /* job action */
     fcinfo_job.arg[15] = job_type;              /* job type */
+    fcinfo_job.argnull[16] = true;
     create_job_raw(&fcinfo_job);
 }
 
@@ -1788,8 +1858,7 @@ void set_job_attribute(const Datum job_name, const Datum attribute_name, const D
  * @param attribute_name
  * @param attribute_value
  */
-static void set_attribute_with_related_rel(const Datum object_name, const Datum attribute_name,
-                                           const Datum attribute_value)
+void set_attribute_with_related_rel(const Datum object_name, const Datum attribute_name, const Datum attribute_value)
 {
     char *object_type = get_attribute_value_str(object_name, "object_type", RowExclusiveLock, false, false);
     if (pg_strcasecmp(object_type, "program") == 0) {
@@ -1853,7 +1922,7 @@ void set_attribute_1_internal(PG_FUNCTION_ARGS, Oid type)
  * @param extra_name        secondary attribute name for 'event_spec'
  * @param extra_value       secondary attribute value if exists
  */
-static void prepare_set_attribute(Datum attribute, Datum *name, Datum *value, Datum *extra_name, Datum extra_value)
+void prepare_set_attribute(Datum attribute, Datum *name, Datum *value, Datum *extra_name, Datum extra_value)
 {
     /* Cannot change owner. */
     char *attribute_str = TextDatumGetCString(attribute);

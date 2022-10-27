@@ -143,6 +143,7 @@ enum EdataWriteStatus {
 typedef struct TupleVector {
     TupleTableSlot** tupleVector;
     int tuplePointer;
+    int tupleCount;
 } TupleVector;
 
 typedef struct StreamSharedContext {
@@ -302,7 +303,7 @@ public:
     /* Synchronize quit. */
     static void syncQuit(StreamObjStatus status);
 
-    static void ReleaseStreamGroup(bool resetSession);
+    static void ReleaseStreamGroup(bool resetSession, StreamObjStatus status = STREAM_COMPLETE);
 
     /* Grant stream connect permission. */
     static void grantStreamConnectPermission();

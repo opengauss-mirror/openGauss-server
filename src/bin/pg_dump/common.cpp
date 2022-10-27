@@ -97,7 +97,7 @@ TableInfo* getSchemaData(Archive* fout, int* numTablesPtr)
     int numForeignDataWrappers;
     int numForeignServers;
     int numDefaultACLs;
-
+    int numEvents;
     if (g_verbose)
         write_msg(NULL, "reading schemas\n");
     nspinfo = getNamespaces(fout, &numNamespaces);
@@ -241,6 +241,11 @@ TableInfo* getSchemaData(Archive* fout, int* numTablesPtr)
         write_msg(NULL, "reading triggers\n");
     getTriggers(fout, tblinfo, numTables);
 
+    if (g_verbose) {
+        write_msg(NULL, "reading events\n");
+    }
+    getEvents(fout, &numEvents);
+    
     /*Open-source-fix: Fix ordering of obj id for Rules and EventTriggers*/
     if (g_verbose)
         write_msg(NULL, "reading rewrite rules\n");

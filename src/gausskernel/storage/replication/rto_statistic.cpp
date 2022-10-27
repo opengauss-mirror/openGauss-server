@@ -133,7 +133,7 @@ RTOStandbyData *GetRTOStat(uint32 *num)
         /* use volatile pointer to prevent code rearrangement */
         volatile WalSnd *walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
         SpinLockAcquire(&walsnd->mutex);
-        if (walsnd->pid != 0) {
+        if (walsnd->pid != 0 && walsnd->sendRole == SNDROLE_PRIMARY_STANDBY) {
             char *standby_names = (char *)(result[readWalSnd].id);
             rc = strncpy_s(standby_names, IP_LEN, g_instance.rto_cxt.rto_standby_data[i].id,
                            strlen(g_instance.rto_cxt.rto_standby_data[i].id));

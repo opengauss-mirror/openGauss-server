@@ -114,15 +114,19 @@ static void init_tsstore_relation(TsStoreScanState* node, EState* estate)
             resultPlan = plan->pruningInfo;
         }
 
-        ListCell* cell = NULL;
+        ListCell* cell1 = NULL;
+        ListCell* cell2 = NULL;
         List* part_seqs = resultPlan->ls_rangeSelectedPartitions;
+        List* partitionnos = resultPlan->ls_selectedPartitionnos;
+        Assert(list_length(part_seqs) == list_length(partitionnos));
         /* partitions info is initialized */
-        foreach (cell, part_seqs) {
+        forboth (cell1, part_seqs, cell2, partitionnos) {
             Oid tablepartitionid = InvalidOid;
-            int partSeq = lfirst_int(cell);
+            int partSeq = lfirst_int(cell1);
+            int partitionno = lfirst_int(cell2);
 
-            tablepartitionid = getPartitionOidFromSequence(currentRelation, partSeq, plan->pruningInfo->partMap);
-            part = partitionOpen(currentRelation, tablepartitionid, lockmode);
+            tablepartitionid = getPartitionOidFromSequence(currentRelation, partSeq, partitionno);
+            part = PartitionOpenWithPartitionno(currentRelation, tablepartitionid, partitionno, lockmode);
             node->partitions = lappend(node->partitions, part);
         }
 

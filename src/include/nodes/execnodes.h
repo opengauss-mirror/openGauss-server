@@ -758,6 +758,7 @@ typedef struct TupleHashTableData {
     int64 width;               /* records total width in memory */
     bool add_width;            /* if width should be added */
     bool causedBySysRes;       /* the batch increase caused by system resources limit? */
+    Oid *tab_collations;       /* collations for hash and comparison */
 } TupleHashTableData;
 
 typedef HASH_SEQ_STATUS TupleHashIterator;
@@ -986,6 +987,7 @@ typedef struct SubPlanState {
     VectorBatch* aggExprBatch;           /* a batch for only one row to store the para data for vector expr */
     ScalarVector* tempvector;            /* a temp vector for vector expression */
     MemoryContext ecxt_per_batch_memory; /* memory contexts for one batch */
+    Oid *tab_collations;                 /* collations for hash and comparison */
 } SubPlanState;
 
 /* ----------------
@@ -1966,7 +1968,8 @@ typedef struct FunctionScanState {
  *
  *		rowcontext			per-expression-list context
  *		exprlists			array of expression lists being evaluated
- *		array_len			size of array
+ *		exprstatelists		array of expression state lists, for subplans only
+ *		array_len			size of above array
  *		curr_idx			current array index (0-based)
  *		marked_idx			marked position (for mark/restore)
  *
@@ -1975,13 +1978,20 @@ typedef struct FunctionScanState {
  *	rowcontext, in which to build the executor expression state for each
  *	Values sublist.  Resetting this context lets us get rid of expression
  *	state for each row, avoiding major memory leakage over a long values list.
+ *  However, that doesn't work for sublists containing SubPlans, because a
+ *	SubPlan has to be connected up to the outer plan tree to work properly.
+ *	Therefore, for only those sublists containing SubPlans, we do expression
+ *	state construction at executor start, and store those pointers in
+ *	exprstatelists[].  NULL entries in that array correspond to simple
+ *	subexpressions that are handled as described above.
  * ----------------
  */
 typedef struct ValuesScanState {
     ScanState ss; /* its first field is NodeTag */
     ExprContext* rowcontext;
     List** exprlists;
-    int array_len;
+    List** exprstatelists; /* array of expression state lists, for subplans only */
+    int array_len;  /* size of above array */
     int curr_idx;
     int marked_idx;
 } ValuesScanState;
@@ -2279,6 +2289,7 @@ typedef struct HashJoinState {
     bool hj_OuterNotEmpty;
     bool hj_streamBothSides;
     bool hj_rebuildHashtable;
+    List* hj_hash_collations; /* list of collations OIDs */
 } HashJoinState;
 
 /* ----------------------------------------------------------------

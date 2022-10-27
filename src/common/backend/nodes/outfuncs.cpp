@@ -635,6 +635,9 @@ static void _outPlannedStmt(StringInfo str, PlannedStmt* node)
     }
     WRITE_BOOL_FIELD(isRowTriggerShippable);
     WRITE_BOOL_FIELD(is_stream_plan);
+    if (t_thrd.proc->workingVersionNum >= SLOW_SQL_VERSION_NUM) {
+        WRITE_UINT_FIELD(cause_type);
+    }
 }
 
 /*
@@ -671,9 +674,11 @@ static void _outPlanInfo(StringInfo str, Plan* node)
     WRITE_BOOL_FIELD(vec_output);
     WRITE_BOOL_FIELD(hasUniqueResults);
     WRITE_BOOL_FIELD(isDeltaTable);
-    WRITE_INT_FIELD(operatorMemKB[0]);
-    WRITE_INT_FIELD(operatorMemKB[1]);
-    WRITE_INT_FIELD(operatorMaxMem);
+    if (u_sess->opt_cxt.out_plan_stat) {
+        WRITE_INT_FIELD(operatorMemKB[0]);
+        WRITE_INT_FIELD(operatorMemKB[1]);
+        WRITE_INT_FIELD(operatorMaxMem);
+    }
 
     WRITE_BOOL_FIELD(parallel_enabled);
     WRITE_BOOL_FIELD(hasHashFilter);
@@ -686,10 +691,12 @@ static void _outPlanInfo(StringInfo str, Plan* node)
     WRITE_BOOL_FIELD(is_sync_plannode);
 
     if (t_thrd.proc->workingVersionNum >= ML_OPT_MODEL_VERSION_NUM) {
-        WRITE_FLOAT_FIELD(pred_rows, "%.0f");
-        WRITE_FLOAT_FIELD(pred_startup_time, "%.0f");
-        WRITE_FLOAT_FIELD(pred_total_time, "%.0f");
-        WRITE_FLOAT_FIELD(pred_max_memory, "%ld");
+        if (u_sess->opt_cxt.out_plan_stat) {
+            WRITE_FLOAT_FIELD(pred_rows, "%.0f");
+            WRITE_FLOAT_FIELD(pred_startup_time, "%.0f");
+            WRITE_FLOAT_FIELD(pred_total_time, "%.0f");
+            WRITE_FLOAT_FIELD(pred_max_memory, "%ld");
+        }
     }
 }
 
@@ -713,7 +720,9 @@ static void _outPruningResult(StringInfo str, PruningResult* node)
     if (t_thrd.proc->workingVersionNum >= PBESINGLEPARTITION_VERSION_NUM) {
         WRITE_BOOL_FIELD(isPbeSinlePartition);
     }
-    /* skip PartitionMap */
+    if (t_thrd.proc->workingVersionNum >= PARTITION_ENHANCE_VERSION_NUM) {
+        WRITE_NODE_FIELD(ls_selectedPartitionnos);
+    }
 }
 
 static void _outSubPartitionPruningResult(StringInfo str, SubPartitionPruningResult* node)
@@ -723,6 +732,10 @@ static void _outSubPartitionPruningResult(StringInfo str, SubPartitionPruningRes
     WRITE_INT_FIELD(partSeq);
     WRITE_BITMAPSET_FIELD(bm_selectedSubPartitions);
     WRITE_NODE_FIELD(ls_selectedSubPartitions);
+    if (t_thrd.proc->workingVersionNum >= PARTITION_ENHANCE_VERSION_NUM) {
+        WRITE_INT_FIELD(partitionno);
+        WRITE_NODE_FIELD(ls_selectedSubPartitionnos);
+    }
 }
 
 /*
@@ -1078,7 +1091,9 @@ static void _outIndexScan(StringInfo str, IndexScan* node)
         WRITE_BOOL_FIELD(is_ustore);
     }
     if (t_thrd.proc->workingVersionNum >= PLAN_SELECT_VERSION_NUM) {
-        WRITE_FLOAT_FIELD(selectivity, "%.4f");
+        if (u_sess->opt_cxt.out_plan_stat) {
+            WRITE_FLOAT_FIELD(selectivity, "%.4f");
+        }
         WRITE_BOOL_FIELD(is_partial);
     }
 }
@@ -1324,7 +1339,9 @@ static void _outIndexOnlyScan(StringInfo str, IndexOnlyScan* node)
     WRITE_NODE_FIELD(indextlist);
     WRITE_ENUM_FIELD(indexorderdir, ScanDirection);
     if (t_thrd.proc->workingVersionNum >= PLAN_SELECT_VERSION_NUM) {
-        WRITE_FLOAT_FIELD(selectivity, "%.4f");
+        if (u_sess->opt_cxt.out_plan_stat) {
+            WRITE_FLOAT_FIELD(selectivity, "%.4f");
+        }
         WRITE_BOOL_FIELD(is_partial);
     }
 }
@@ -1350,7 +1367,9 @@ static void _outBitmapIndexScan(StringInfo str, BitmapIndexScan* node)
         WRITE_BOOL_FIELD(is_ustore);
     }
     if (t_thrd.proc->workingVersionNum >= PLAN_SELECT_VERSION_NUM) {
-        WRITE_FLOAT_FIELD(selectivity, "%.4f");
+        if (u_sess->opt_cxt.out_plan_stat) {
+            WRITE_FLOAT_FIELD(selectivity, "%.4f");
+        }
         WRITE_BOOL_FIELD(is_partial);
     }
 }
@@ -1637,6 +1656,11 @@ static void _outHashJoin(StringInfo str, HashJoin* node)
     WRITE_BOOL_FIELD(rebuildHashTable);
     WRITE_BOOL_FIELD(isSonicHash);
     out_mem_info(str, &node->mem_info);
+#ifndef ENABLE_MULTIPLE_NODES
+    if (t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
+        WRITE_NODE_FIELD(hash_collations);
+    }
+#endif
 }
 
 static void _outVecHashJoin(StringInfo str, VecHashJoin* node)
@@ -1704,6 +1728,11 @@ static void _outAgg(StringInfo str, Agg* node)
     }
 
     WRITE_GRPOP_FIELD(grpOperators, numCols);
+#ifndef ENABLE_MULTIPLE_NODES
+    if (t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
+        WRITE_GRPOP_FIELD(grp_collations, numCols);
+    }
+#endif
 
     WRITE_LONG_FIELD(numGroups);
     WRITE_NODE_FIELD(groupingSets);
@@ -1737,6 +1766,11 @@ static void _outWindowAgg(StringInfo str, WindowAgg* node)
     }
 
     WRITE_GRPOP_FIELD(partOperators, partNumCols);
+#ifndef ENABLE_MULTIPLE_NODES
+    if (t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
+        WRITE_GRPOP_FIELD(part_collations, partNumCols);
+    }
+#endif
 
     WRITE_INT_FIELD(ordNumCols);
 
@@ -1746,6 +1780,11 @@ static void _outWindowAgg(StringInfo str, WindowAgg* node)
     }
 
     WRITE_GRPOP_FIELD(ordOperators, ordNumCols);
+#ifndef ENABLE_MULTIPLE_NODES
+    if (t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
+        WRITE_GRPOP_FIELD(ord_collations, ordNumCols);
+    }
+#endif
     WRITE_INT_FIELD(frameOptions);
     WRITE_NODE_FIELD(startOffset);
     WRITE_NODE_FIELD(endOffset);
@@ -1768,6 +1807,11 @@ static void _outGroup(StringInfo str, Group* node)
     }
 
     WRITE_GRPOP_FIELD(grpOperators, numCols);
+#ifndef ENABLE_MULTIPLE_NODES
+    if (t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
+        WRITE_GRPOP_FIELD(grp_collations, numCols);
+    }
+#endif
 }
 
 static void _outVecGroup(StringInfo str, VecGroup* node)
@@ -1899,6 +1943,11 @@ static void _outUnique(StringInfo str, Unique* node)
     }
 
     WRITE_GRPOP_FIELD(uniqOperators, numCols);
+#ifndef ENABLE_MULTIPLE_NODES
+    if (t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
+        WRITE_GRPOP_FIELD(uniq_collations, numCols);
+    }
+#endif
 }
 
 static void _outVecUnique(StringInfo str, VecUnique* node)
@@ -1953,6 +2002,11 @@ static void _outSetOp(StringInfo str, SetOp* node)
     }
 
     WRITE_GRPOP_FIELD(dupOperators, numCols);
+#ifndef ENABLE_MULTIPLE_NODES
+    if (t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM) {
+        WRITE_GRPOP_FIELD(dup_collations, numCols);
+    }
+#endif
 
     WRITE_INT_FIELD(flagColIdx);
     WRITE_INT_FIELD(firstFlag);
@@ -2111,6 +2165,11 @@ static void _outIntoClause(StringInfo str, IntoClause* node)
     }
     if (t_thrd.proc->workingVersionNum >= SELECT_INTO_VAR_VERSION_NUM) {
         WRITE_NODE_FIELD(userVarList);
+    }
+    if (t_thrd.proc->workingVersionNum >= SELECT_INTO_FILE_VERSION_NUM) {
+        WRITE_NODE_FIELD(copyOption);
+        WRITE_STRING_FIELD(filename);
+        WRITE_BOOL_FIELD(is_outfile);
     }
 }
 
@@ -2557,9 +2616,10 @@ static void _outSubPlan(StringInfo str, SubPlan* node)
     WRITE_NODE_FIELD(setParam);
     WRITE_NODE_FIELD(parParam);
     WRITE_NODE_FIELD(args);
-    WRITE_FLOAT_FIELD(startup_cost, "%.2f");
-    WRITE_FLOAT_FIELD(per_call_cost, "%.2f");
-
+    if (u_sess->opt_cxt.out_plan_stat) {
+        WRITE_FLOAT_FIELD(startup_cost, "%.2f");
+        WRITE_FLOAT_FIELD(per_call_cost, "%.2f");
+    }
     WRITE_TYPEINFO_FIELD(firstColType);
 }
 
@@ -3572,6 +3632,12 @@ static void _outRangePartitionDefState(StringInfo str, RangePartitionDefState* n
     WRITE_STRING_FIELD(partitionName);
     WRITE_NODE_FIELD(boundary);
     WRITE_STRING_FIELD(tablespacename);
+    if (t_thrd.proc->workingVersionNum >= PARTITION_ENHANCE_VERSION_NUM) {
+        WRITE_NODE_FIELD(subPartitionDefState);
+        WRITE_INT_FIELD(partitionno);
+        WRITE_NODE_FIELD(curStartVal);
+        WRITE_STRING_FIELD(partitionInitName);
+    }
 }
 
 static void _outListPartitionDefState(StringInfo str, ListPartitionDefState* node)
@@ -3581,6 +3647,10 @@ static void _outListPartitionDefState(StringInfo str, ListPartitionDefState* nod
     WRITE_STRING_FIELD(partitionName);
     WRITE_NODE_FIELD(boundary);
     WRITE_STRING_FIELD(tablespacename);
+    if (t_thrd.proc->workingVersionNum >= PARTITION_ENHANCE_VERSION_NUM) {
+        WRITE_NODE_FIELD(subPartitionDefState);
+        WRITE_INT_FIELD(partitionno);
+    }
 }
 
 static void _outHashPartitionDefState(StringInfo str, HashPartitionDefState* node)
@@ -3590,6 +3660,10 @@ static void _outHashPartitionDefState(StringInfo str, HashPartitionDefState* nod
     WRITE_STRING_FIELD(partitionName);
     WRITE_NODE_FIELD(boundary);
     WRITE_STRING_FIELD(tablespacename);
+    if (t_thrd.proc->workingVersionNum >= PARTITION_ENHANCE_VERSION_NUM) {
+        WRITE_NODE_FIELD(subPartitionDefState);
+        WRITE_INT_FIELD(partitionno);
+    }
 }
 
 static void _outIntervalPartitionDefState(StringInfo str, IntervalPartitionDefState* node)
@@ -3616,6 +3690,7 @@ static void _outPartitionState(StringInfo str, PartitionState* node)
     WRITE_ENUM_FIELD(rowMovement, RowMovementValue);
     WRITE_NODE_FIELD(subPartitionState);
     WRITE_NODE_FIELD(partitionNameList);
+    WRITE_INT_FIELD(partitionsNum);
 }
 
 static void _outRangePartitionindexDefState(StringInfo str, RangePartitionindexDefState* node)
@@ -3941,7 +4016,10 @@ static void _outTypeName(StringInfo str, TypeName* node)
     {
         WRITE_LOCATION_FIELD(end_location);
     }
-
+    if (t_thrd.proc->workingVersionNum >= CHARACTER_SET_VERSION_NUM)
+    {
+        WRITE_INT_FIELD(charset);
+    }
     WRITE_TYPEINFO_FIELD(typeOid);
 }
 
@@ -5819,6 +5897,14 @@ static void _outAutoIncrement(StringInfo str, AutoIncrement* node)
     WRITE_OID_FIELD(autoincout_funcid);
 }
 
+static void _outCharsetcollateOptions(StringInfo str, CharsetCollateOptions* node)
+{
+    WRITE_NODE_TYPE("CHARSETCOLLATE");
+    WRITE_ENUM_FIELD(cctype, CharsetCollateType);
+    WRITE_INT_FIELD(charset);
+    WRITE_STRING_FIELD(collate);
+}
+
 static void _outPrefixKey(StringInfo str, PrefixKey* node)
 {
     WRITE_NODE_TYPE("PREFIXKEY");
@@ -6714,6 +6800,9 @@ static void _outNode(StringInfo str, const void* obj)
                 break;
             case T_PLDebug_frame:
                 _outPLDebug_frame(str, (PLDebug_frame*) obj);
+                break;
+            case T_CharsetCollateOptions:
+                _outCharsetcollateOptions(str, (CharsetCollateOptions*)obj);
                 break;
             case T_AutoIncrement:
                 _outAutoIncrement(str, (AutoIncrement*)obj);

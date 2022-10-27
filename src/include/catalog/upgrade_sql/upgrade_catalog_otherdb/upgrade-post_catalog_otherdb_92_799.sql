@@ -382,20 +382,7 @@ BEGIN
 END$DO$;
 
 
-DO $$
-DECLARE 
-query_str text; 
-ans bool;
-BEGIN
-    select case when count(*)=1 then true else false end as ans from (select *from pg_class where relname='snapshot_sequence') into ans;
-    if ans = false then
-        query_str := 'CREATE SEQUENCE db4ai.snapshot_sequence;';
-        EXECUTE IMMEDIATE query_str;
-    end if;
-    update pg_class set relacl = null where relname = 'snapshot_sequence' and relnamespace = 4991;
-    query_str := 'GRANT UPDATE ON db4ai.snapshot_sequence TO PUBLIC;';
-    EXECUTE IMMEDIATE query_str;
-END$$;-- gs_stack_int8
+-- gs_stack_int8
 DROP FUNCTION IF EXISTS pg_catalog.gs_stack(INT8) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 9997;
 CREATE OR REPLACE FUNCTION pg_catalog.gs_stack(INT8)

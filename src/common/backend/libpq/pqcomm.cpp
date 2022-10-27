@@ -564,7 +564,7 @@ static void StreamDoUnlink(int code, Datum arg)
  */
 int StreamServerPort(int family, char* hostName, unsigned short portNumber, const char* unixSocketName,
     pgsocket ListenSocket[], int MaxListen, bool add_localaddr_flag,
-    bool is_create_psql_sock, bool is_create_libcomm_sock, 
+    bool is_create_psql_sock, bool is_create_libcomm_sock, ListenChanelType listen_channel,
     ProtocolExtensionConfig* protocol_config) {
 #define RETRY_SLEEP_TIME 1000000L
     pgsocket fd = PGINVALID_SOCKET;
@@ -816,19 +816,23 @@ int StreamServerPort(int family, char* hostName, unsigned short portNumber, cons
                 result = inet_net_ntop(AF_INET6,
                     &((struct sockaddr_in6*)sinp)->sin6_addr,
                     128,
-                    g_instance.listen_cxt.LocalAddrList[g_instance.listen_cxt.LocalIpNum],
+                    t_thrd.postmaster_cxt.LocalAddrList[t_thrd.postmaster_cxt.LocalIpNum],
                     IP_LEN);
             } else if (addr->ai_family == AF_INET) {
                 result = inet_net_ntop(AF_INET,
                     &((struct sockaddr_in*)sinp)->sin_addr,
                     32,
-                    g_instance.listen_cxt.LocalAddrList[g_instance.listen_cxt.LocalIpNum],
+                    t_thrd.postmaster_cxt.LocalAddrList[t_thrd.postmaster_cxt.LocalIpNum],
                     IP_LEN);
             }
             if (result == NULL) {
                 ereport(WARNING, (errmsg("inet_net_ntop failed, error: %d", EAFNOSUPPORT)));
             } else {
-                g_instance.listen_cxt.LocalIpNum++;
+                ereport(DEBUG5, (errmodule(MOD_COMM_FRAMEWORK),
+                    errmsg("[reload listen IP]set LocalIpNum[%d] %s",
+                    t_thrd.postmaster_cxt.LocalIpNum,
+                    t_thrd.postmaster_cxt.LocalAddrList[t_thrd.postmaster_cxt.LocalIpNum])));
+                t_thrd.postmaster_cxt.LocalIpNum++;
             }
         }
         if (is_create_psql_sock) {
@@ -836,6 +840,20 @@ int StreamServerPort(int family, char* hostName, unsigned short portNumber, cons
         } else {
             g_instance.listen_cxt.listen_sock_type[listen_index] = HA_LISTEN_SOCKET;
         }
+
+        /*
+         * note:
+         * NORMAL_LISTEN_CHANEL include : listen_address or libcomm_bind_addr.
+         * REPL_LISTEN_CHANEL include : replication_info
+         * EXT_LISTEN_CHANEL include : listen_address_ext
+         */
+        g_instance.listen_cxt.listen_chanel_type[listen_index] = listen_channel;
+
+        /* for debug info */
+        rc = strcpy_s(g_instance.listen_cxt.all_listen_addr_list[listen_index], IP_LEN,
+            (hostName == NULL) ? ((addr->ai_family == AF_UNIX) ? "unix domain" : "*") : hostName);
+        securec_check(rc, "", "");
+        g_instance.listen_cxt.all_listen_port_list[listen_index] = portNumber;
 
         continue;
 

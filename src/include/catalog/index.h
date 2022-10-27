@@ -78,7 +78,8 @@ typedef enum CheckWaitMode
     CHECK_NOWAIT,
 } CheckWaitMode;
 
-extern void index_check_primary_key(Relation heapRel, IndexInfo *indexInfo, bool is_alter_table);
+extern void index_check_primary_key(Relation heapRel, IndexInfo *indexInfo, bool is_alter_table,
+    bool is_modify_primary = false);
 
 /*
  * Parameter isPartitionedIndex indicates whether the index is a partition index.

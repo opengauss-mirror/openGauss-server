@@ -874,6 +874,9 @@ static void TestCodeToForceCacheFlushes()
  */
 void AcceptInvalidationMessages()
 {
+    if (!DeepthInAcceptInvalidationMessageNotZero()) {
+        t_thrd.rc_cxt.rcNum = 0;
+    }
     if (EnableLocalSysCache()) {
         u_sess->pcache_cxt.gpc_remote_msg = true;
         knl_u_inval_context *inval_cxt = &t_thrd.lsc_cxt.lsc->inval_cxt;

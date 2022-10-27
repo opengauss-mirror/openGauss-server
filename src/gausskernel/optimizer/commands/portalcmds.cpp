@@ -28,6 +28,7 @@
 #include "commands/portalcmds.h"
 #include "executor/executor.h"
 #include "executor/tstoreReceiver.h"
+#include "distributelayer/streamCore.h"
 #include "pgxc/execRemote.h"
 #include "tcop/pquery.h"
 #include "utils/memutils.h"
@@ -288,6 +289,17 @@ void PortalCleanup(Portal portal)
                 t_thrd.utils_cxt.CurrentResourceOwner = portal->resowner;
                 ExecutorFinish(queryDesc);
                 ExecutorEnd(queryDesc);
+#ifndef ENABLE_MULTIPLE_NODES
+                /*
+                 * estate is under the queryDesc, and stream threads use it.
+                 * we should wait all stream threads exit to cleanup queryDesc.
+                 */
+                if (!StreamThreadAmI()) {
+                    portal->streamInfo.AttachToSession();
+                    StreamNodeGroup::ReleaseStreamGroup(true);
+                    portal->streamInfo.Reset();
+                }
+#endif
                 FreeQueryDesc(queryDesc);
             }
             PG_CATCH();

@@ -1201,7 +1201,7 @@ static void validate_dumpall_options(char** argv)
 
 void help(void)
 {
-    printf(_("%s extracts a openGauss database cluster into an SQL script file.\n\n"), progname);
+    printf(_("%s extracts an openGauss database cluster into an SQL script file.\n\n"), progname);
     printf(_("Usage:\n"));
     printf(_("  %s [OPTION]...\n"), progname);
 

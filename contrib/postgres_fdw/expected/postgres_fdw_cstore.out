@@ -1365,20 +1365,20 @@ SELECT * FROM ft1 t1 WHERE t1.c1 === t1.c2 order by t1.c2 limit 1;
 
 -- case when expr
 explain (verbose, costs off) select * from ft1 where case c1 when 1 then 0 end = 0;
-                                                                                      QUERY PLAN                                                                                      
---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+                                                                             QUERY PLAN                                                                             
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------
  Foreign Scan on public.ft1
    Output: c1, c2, c3, c4, c5, c6, c7, c8
    Node ID: 1
-   Remote SQL: SELECT "C 1", c2, c3, c4, c5, c6, c7, c8 FROM "S 1"."T 1" WHERE (((CASE "C 1" WHEN 1 THEN 0::numeric ELSE NULL::numeric END) = 0::numeric))
+   Remote SQL: SELECT "C 1", c2, c3, c4, c5, c6, c7, c8 FROM "S 1"."T 1" WHERE (((CASE "C 1" WHEN 1 THEN 0 ELSE NULL::integer END) = 0))
  
  FDW remote plans:
- Node 1: EXPLAIN (VERBOSE ON, COSTS OFF) SELECT "C 1", c2, c3, c4, c5, c6, c7, c8 FROM "S 1"."T 1" WHERE (((CASE "C 1" WHEN 1 THEN 0::numeric ELSE NULL::numeric END) = 0::numeric)) 
+ Node 1: EXPLAIN (VERBOSE ON, COSTS OFF) SELECT "C 1", c2, c3, c4, c5, c6, c7, c8 FROM "S 1"."T 1" WHERE (((CASE "C 1" WHEN 1 THEN 0 ELSE NULL::integer END) = 0)) 
    Row Adapter
      Output: "C 1", c2, c3, c4, c5, c6, c7, c8
      ->  CStore Scan on "S 1"."T 1"
            Output: "C 1", c2, c3, c4, c5, c6, c7, c8
-           Filter: (CASE "T 1"."C 1" WHEN 1 THEN 0::numeric ELSE NULL::numeric END = 0::numeric)
+           Filter: (CASE "T 1"."C 1" WHEN 1 THEN 0 ELSE NULL::integer END = 0)
  
 (13 rows)
 

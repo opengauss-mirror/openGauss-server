@@ -2127,6 +2127,9 @@ static bool cmdStringLengthCheck(const char* cmd_string)
     char* rm_cmd = NULL;
     char* slot_name = NULL;
 
+    if (cmd_string == NULL) {
+        return true;
+    }
     size_t cmd_length = strlen(cmd_string);
     if (cmd_length == 0) {
         return true;
@@ -2141,7 +2144,7 @@ static bool cmdStringLengthCheck(const char* cmd_string)
         strncmp(cmd_string, "START_REPLICATION", strlen("START_REPLICATION")) == 0) {
         sub_cmd = strtok_r(comd, " ", &rm_cmd);
         sub_cmd = strtok_r(NULL, " ", &rm_cmd);
-        if (strlen(sub_cmd) != strlen("SLOT") ||
+        if (sub_cmd == NULL || strlen(sub_cmd) != strlen("SLOT") ||
             strncmp(sub_cmd, "SLOT", strlen("SLOT")) != 0) {
             return true;
         }
@@ -2156,14 +2159,17 @@ static bool cmdStringLengthCheck(const char* cmd_string)
         strncmp(cmd_string, "ADVANCE_REPLICATION", strlen("ADVANCE_REPLICATION")) == 0) {
         sub_cmd = strtok_r(comd, " ", &rm_cmd);
         sub_cmd = strtok_r(NULL, " ", &rm_cmd);
-        if (strlen(sub_cmd) != strlen("SLOT") ||
+        if (sub_cmd == NULL || strlen(sub_cmd) != strlen("SLOT") ||
             strncmp(sub_cmd, "SLOT", strlen("SLOT")) != 0) {
-            return false;
+            return true;
         }
     } else {
         return true;
     }
     slot_name = strtok_r(NULL, " ", &rm_cmd);
+    if (slot_name == NULL) {
+        return true;
+    }
     /* if slot_name contains "", its length should minus 2. */
     size_t slot_name_len = strlen(slot_name);
     if (slot_name_len != 0 && slot_name[0] == '"' && slot_name[slot_name_len - 1] == '"') {
@@ -5359,6 +5365,24 @@ static void WalSndSigHupHandler(SIGNAL_ARGS)
     if (t_thrd.walsender_cxt.MyWalSnd)
         SetLatch(&t_thrd.walsender_cxt.MyWalSnd->latch);
 
+    if (AM_WAL_DB_SENDER && t_thrd.walsender_cxt.LogicalSlot != -1) {
+        int slotId = t_thrd.walsender_cxt.LogicalSlot;
+        int parallelism = g_Logicaldispatcher[slotId].pOptions.parallel_decode_num;
+        knl_g_parallel_decode_context *gDecodeCxt = g_instance.comm_cxt.pdecode_cxt;
+
+        if (gDecodeCxt[slotId].ParallelReaderWorkerStatus.threadState == PARALLEL_DECODE_WORKER_RUN &&
+            g_Logicaldispatcher[slotId].readWorker != NULL && g_Logicaldispatcher[slotId].readWorker->tid != 0) {
+            signal_child(g_Logicaldispatcher[slotId].readWorker->tid, SIGHUP, -1);
+        }
+        for (int i = 0; i < parallelism; i++) {
+            if (gDecodeCxt[slotId].ParallelDecodeWorkerStatusList[i].threadState == PARALLEL_DECODE_WORKER_RUN &&
+                g_Logicaldispatcher[slotId].decodeWorkers != NULL &&
+                g_Logicaldispatcher[slotId].decodeWorkers[i] != NULL &&
+                g_Logicaldispatcher[slotId].decodeWorkers[i]->tid.thid != 0) {
+                signal_child(g_Logicaldispatcher[slotId].decodeWorkers[i]->tid.thid, SIGHUP, -1);
+            }
+        }
+    }
     errno = save_errno;
 }
 

@@ -45,6 +45,8 @@
 #include "utils/pg_locale.h"
 #include "utils/selfuncs.h"
 #include "optimizer/gplanmgr.h"
+#include "instruments/instr_statement.h"
+#include "utils/expr_distinct.h"
 
 #define IsBooleanOpfamily(opfamily) ((opfamily) == BOOL_BTREE_FAM_OID || \
     (opfamily) == BOOL_HASH_FAM_OID || (opfamily) == BOOL_UBTREE_FAM_OID)
@@ -154,6 +156,8 @@ static int get_index_column_prefix_lenth(IndexOptInfo *index, int indexcol);
 static Const* prefix_const_node(Const* con, int prefix_len, Oid datatype);
 static RestrictInfo* rewrite_opclause_for_prefixkey(
     RestrictInfo *rinfo, IndexOptInfo* index, Oid opfamily, int prefix_len);
+void check_report_cause_type(FuncExpr *funcExpr, int indkey);
+Node* match_first_var_to_indkey(Node* node, int indkey);
 
 /*
  * create_index_paths
@@ -3106,6 +3110,12 @@ bool match_index_to_operand(Node* operand, int indexcol, IndexOptInfo* index, bo
             return true;
     }
 
+    /*
+     * if FuncExpr, check whether there are risks caused by type conversion.
+     */
+    if (IsA(operand, FuncExpr))
+        check_report_cause_type((FuncExpr*)operand, indkey);
+
     return false;
 }
 
@@ -4309,5 +4319,51 @@ static RestrictInfo* rewrite_opclause_for_prefixkey(RestrictInfo *rinfo, IndexOp
     return make_simple_restrictinfo(newop);
 }
 
+/*
+ * Check whether there are risks caused by type conversion.
+ * If yes, report cause_type.
+ */
+void check_report_cause_type(FuncExpr* funcExpr, int indkey)
+{
+    Node* varNode = NULL;
+    ListCell* argsCell = NULL;
+    if (list_length(funcExpr->args) != 1) {
+        return;
+    }
+    
+    argsCell = list_head(funcExpr->args);
+    Node* node = (Node*)lfirst(argsCell);
+    if (IsA(node, Var)) {
+        varNode = node;
+    } else if (IsA(node, FuncExpr)) {
+        varNode = match_first_var_to_indkey(node, indkey);
+    }
 
+    /* Type conversion in g_typeCastFuncOids with only one parameter is supported. */
+    if (IsFunctionTransferNumDistinct(funcExpr) && varNode != NULL && IsA(varNode, Var) &&
+        indkey == ((Var*)varNode)->varattno) {
+        instr_stmt_report_cause_type(NUM_F_TYPECASTING);
+    }
+}
 
+/*
+ * return the first var that matches the index column
+ * return NULL if not exist
+ */
+Node* match_first_var_to_indkey(Node* node, int indkey)
+{
+    Node* lastNode = NULL;
+
+    List* varList = pull_var_clause(node, PVC_RECURSE_AGGREGATES, PVC_RECURSE_PLACEHOLDERS, PVC_RECURSE_SPECIAL_EXPR);
+    if (varList != NULL) {
+        ListCell* var_cell = NULL;
+        foreach (var_cell, varList) {
+            Node* var = (Node*)lfirst(var_cell);
+            if (indkey == ((Var*)var)->varattno) {
+                lastNode = var;
+                break;
+            }
+        }
+    }
+    return lastNode;
+}
