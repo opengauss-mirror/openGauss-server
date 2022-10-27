@@ -907,8 +907,8 @@ static void transformLimitSortClause(ParseState* pstate, void* stmt, Query* qry,
         flag->consttype = INT8OID;
         flag->consttypmod = -1;
         qry->limitOffset = (Node*)flag;
-        qry->sortClause = rlist;
     }
+    qry->sortClause = rlist;
 }
 
 static void CheckUDRelations(ParseState* pstate, List* sortClause, Node* limitClause, List* returningList,
