@@ -2990,6 +2990,45 @@ drop package pck1;
 NOTICE:  drop cascades to function pkg_val_2.p1()
 drop table testlog;
 drop type o1;
+-- test nest ref package
+create or replace package pck2 IS
+TYPE rateTable is TABLE of NUMBER INDEX by varchar2(50);
+v_ratetable pck2.rateTable;
+PROCEDURE p2(IN_NODE_CODE IN VARCHAR2,IN_CINO IN VARCHAR2);
+END pck2;
+/
+create or replace package pck1 IS
+v_ratetable pck2.rateTable;
+type r1 is record (a int, b int);
+PROCEDURE p1(OUT_FLAG OUT VARCHAR2,OUT_MSG OUT VARCHAR2);
+END pck1;
+/
+create or replace package body pck1 IS
+PROCEDURE p1(OUT_FLAG OUT VARCHAR2,OUT_MSG OUT VARCHAR2) as
+begin
+null;
+end;
+END pck1;
+/
+create or replace package body pck2 is
+PROCEDURE p2(IN_NODE_CODE IN VARCHAR2,IN_CINO IN VARCHAR2) as
+begin
+pck1.p1(IN_NODE_CODE,IN_CINO);
+end;
+end pck2;
+/
+call pck2.p2('a','b');
+ p2 
+----
+ 
+(1 row)
+
+drop package pck2;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to function pkg_val_2.p1()
+drop cascades to function pkg_val_2.p2(character varying,character varying)
+drop package pck1;
+ERROR:  package pck1 does not exist
 -- clean 
 DROP SCHEMA IF EXISTS pkg_val_1 CASCADE;
 DROP SCHEMA IF EXISTS pkg_val_2 CASCADE;

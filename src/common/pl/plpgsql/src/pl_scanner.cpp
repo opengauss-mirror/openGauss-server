@@ -1135,12 +1135,28 @@ bool plpgsql_is_token_keyword(int token)
     }
 }
 
+static PLpgSQL_package *GetCompileListPkg(Oid pkgOid)
+{
+    List *compPkgList = u_sess->plsql_cxt.compile_context_list;
+    ListCell *item = NULL;
+    foreach (item, compPkgList) {
+        PLpgSQL_compile_context *compPkg = (PLpgSQL_compile_context *)lfirst(item);
+        if (compPkg->plpgsql_curr_compile_package && compPkg->plpgsql_curr_compile_package->pkg_oid == pkgOid) {
+            return compPkg->plpgsql_curr_compile_package;
+        }
+    }
+    return NULL;
+}
+
 static PLpgSQL_package* compilePackageSpec(Oid pkgOid)
 {
+    PLpgSQL_package *pkg = GetCompileListPkg(pkgOid);
+    if (unlikely(pkg != NULL)) {
+        return pkg;
+    }
     int oldCompileStatus = getCompileStatus();
     HeapTuple pkgTuple = SearchSysCache1(PACKAGEOID, ObjectIdGetDatum(pkgOid));
     bool isnull = false;
-    PLpgSQL_package* pkg = NULL;
     if (u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package != NULL ||
         u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile != NULL) {
         CompileStatusSwtichTo(COMPILIE_PKG);
