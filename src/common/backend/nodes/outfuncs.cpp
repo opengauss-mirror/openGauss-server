@@ -1218,7 +1218,9 @@ static void _outExecNodes(StringInfo str, ExecNodes* node)
     WRITE_NODE_FIELD(primarynodelist);
     WRITE_NODE_FIELD(nodeList);
     _outDistribution(str, &node->distribution);
-    WRITE_CHAR_FIELD(baselocatortype);
+    if (node->baselocatortype != '\0') {
+        WRITE_CHAR_FIELD(baselocatortype);
+    }
     WRITE_NODE_FIELD(en_expr);
     WRITE_OID_FIELD(en_relid);
 

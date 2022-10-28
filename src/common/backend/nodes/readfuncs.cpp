@@ -3857,7 +3857,9 @@ static ExecNodes* _readExecNodes(void)
     READ_NODE_FIELD(nodeList);
     Distribution* distribution = _readDistribution();
     ng_set_distribution(&local_node->distribution, distribution);
-    READ_CHAR_FIELD(baselocatortype);
+    IF_EXIST(baselocatortype) {
+        READ_CHAR_FIELD(baselocatortype);
+    }
     READ_NODE_FIELD(en_expr);
     READ_OID_FIELD(en_relid);
 
