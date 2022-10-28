@@ -26,6 +26,7 @@
 #include "utils/syscall_lock.h"
 #include "securec.h"
 #include "securec_check.h"
+#include "nodes/pg_list.h"
 
 /* Error level codes */
 #define DEBUG5                                 \
@@ -532,6 +533,21 @@ extern void pg_re_throw(void) __attribute__((noreturn));
 extern void PgRethrowAsFatal(void);
 extern char* pg_strdup(const char* in);
 extern void send_message_to_frontend(ErrorData* edata);
+// only for b database, using in show warnings,show errors
+enum enum_dolphin_error_level { B_NOTE, B_WARNING, B_ERROR, B_END };
+
+typedef struct ErrorDataArea {
+    List* sqlErrorDataList;
+    uint64 current_edata_count;
+    uint64* current_edata_count_by_level;
+} ErrorDataArea;
+
+extern ErrorDataArea* initErrorDataArea();
+extern void resetErrorDataArea(bool);
+extern void pushErrorData(ErrorData*);
+extern uint64 SqlErrorDataErrorCount();
+extern uint64 SqlErrorDataWarnCount();
+extern int SqlErrorDataCount();
 
 /* GUC-configurable parameters */
 

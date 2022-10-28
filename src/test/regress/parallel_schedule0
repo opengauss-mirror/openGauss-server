@@ -1018,3 +1018,6 @@ test: dolphin_guc_config
 
 # row_count()
 test: row_count_function
+
+# show_warnings
+test: show_warnings

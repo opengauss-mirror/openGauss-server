@@ -96,7 +96,9 @@
 
 #include "tcop/stmt_retry.h"
 #include "replication/walsender.h"
-
+#include "nodes/pg_list.h"
+#include "utils/builtins.h"
+#include "funcapi.h"
 #undef _
 #define _(x) err_gettext(x)
 
@@ -3490,6 +3492,10 @@ void send_message_to_frontend(ErrorData* edata)
     )
         return;
 
+    if (DB_IS_CMPT(B_FORMAT)) {
+        pushErrorData(edata);
+    }
+
     /* 'N' (Notice) is for nonfatal conditions, 'E' is for errors */
     pq_beginmessage(&msgbuf, (edata->elevel < ERROR) ? 'N' : 'E');
 
@@ -5199,4 +5205,217 @@ static void write_asplog(char *data, int len, bool end)
     } else {
         write_asp_chunks(data, len, end);
     }
+}
+
+typedef struct {
+    enum_dolphin_error_level elevel;
+    int errorcode;
+    char* message;
+} DolphinErrorData;
+
+ErrorDataArea* initErrorDataArea(){
+    ErrorDataArea* errorDataArea = (ErrorDataArea*) palloc0(sizeof(ErrorDataArea));
+    errorDataArea->current_edata_count_by_level = (uint64*)palloc0(4 * sizeof(uint64));
+    errorDataArea->sqlErrorDataList= NIL;
+    errorDataArea->current_edata_count = 0;
+    for (int i = 0; i <= enum_dolphin_error_level::B_END; i++){
+        errorDataArea->current_edata_count_by_level[i]=0;
+    }
+    return errorDataArea;
+}
+
+void cleanErrorDataArea(ErrorDataArea* errorDataArea){
+    Assert(errorDataArea!=NULL);
+    list_free_deep(errorDataArea->sqlErrorDataList);
+    errorDataArea->sqlErrorDataList = NIL;
+    errorDataArea->current_edata_count = 0;
+    for (int i = 0; i <= enum_dolphin_error_level::B_END; i++){
+        errorDataArea->current_edata_count_by_level[i]=0;
+    }
+}
+
+void copyErrorDataArea(ErrorDataArea* from, ErrorDataArea* to){
+    cleanErrorDataArea(to);
+
+    MemoryContext oldcontext;
+
+    oldcontext = MemoryContextSwitchTo(u_sess->dolphin_errdata_ctx.dolphinErrorDataMemCxt);
+
+    ListCell * lc = NULL;
+    lc = list_head(from->sqlErrorDataList);
+    foreach (lc, from->sqlErrorDataList) {
+        DolphinErrorData *eData = (DolphinErrorData *)lfirst(lc);
+        DolphinErrorData* newErrData = (DolphinErrorData*)palloc(sizeof(DolphinErrorData));
+        newErrData->elevel = eData->elevel;
+        newErrData->errorcode = eData->errorcode;
+        newErrData->message = pstrdup(eData->message);
+        to->sqlErrorDataList = lappend(to->sqlErrorDataList, newErrData);
+    }
+    to->current_edata_count = from->current_edata_count;
+    for (int i = 0; i <= enum_dolphin_error_level::B_END; i++){
+        to->current_edata_count_by_level[i] = from->current_edata_count_by_level[i];
+    }
+    MemoryContextSwitchTo(oldcontext);
+}
+
+void resetErrorDataArea(bool stacked){
+    /* reset all count to zero and list to null */
+    MemoryContext oldcontext;
+    oldcontext = MemoryContextSwitchTo(u_sess->dolphin_errdata_ctx.dolphinErrorDataMemCxt);
+    ErrorDataArea* errorDataArea = u_sess->dolphin_errdata_ctx.errorDataArea;
+    ErrorDataArea* lastErrorDataArea = u_sess->dolphin_errdata_ctx.lastErrorDataArea;
+    if (stacked){
+        copyErrorDataArea(errorDataArea,lastErrorDataArea);
+    }else{
+        cleanErrorDataArea(lastErrorDataArea);
+    }
+    cleanErrorDataArea(errorDataArea);
+    MemoryContextSwitchTo(oldcontext);
+}
+
+enum_dolphin_error_level errorLevelToDolphin(int elevel){
+    if (elevel < WARNING){
+        return enum_dolphin_error_level::B_NOTE;
+    }
+    else if (elevel == WARNING){
+        return enum_dolphin_error_level::B_WARNING;
+    }
+    else {
+        return enum_dolphin_error_level::B_ERROR;
+    }
+}
+
+void pushErrorData(ErrorData* edata){
+    MemoryContext oldcontext;
+    ErrorDataArea* errorDataArea = u_sess->dolphin_errdata_ctx.errorDataArea;
+    oldcontext = MemoryContextSwitchTo(u_sess->dolphin_errdata_ctx.dolphinErrorDataMemCxt);
+    if (u_sess->dolphin_errdata_ctx.max_error_count >= SqlErrorDataCount()) {
+        if (u_sess->dolphin_errdata_ctx.sql_note == true ||
+                errorLevelToDolphin(edata->elevel) != enum_dolphin_error_level::B_NOTE) {
+            DolphinErrorData* dolphinErrorData = (DolphinErrorData*)palloc(sizeof(DolphinErrorData));
+            dolphinErrorData->elevel = errorLevelToDolphin(edata->elevel);
+            dolphinErrorData->errorcode = edata->sqlerrcode;
+            dolphinErrorData->message = pstrdup(edata->message);
+            errorDataArea->sqlErrorDataList = lappend(errorDataArea->sqlErrorDataList,dolphinErrorData);
+            errorDataArea->current_edata_count++;
+            errorDataArea->current_edata_count_by_level[errorLevelToDolphin(edata->elevel)]++;
+        }
+    }
+    MemoryContextSwitchTo(oldcontext);
+}
+
+int32 SqlErrorDataErrorCount(ErrorDataArea* errorDataArea){
+    return errorDataArea->current_edata_count_by_level[enum_dolphin_error_level::B_ERROR];
+}
+
+int32 SqlErrorDataWarnCount(ErrorDataArea* errorDataArea){
+    return errorDataArea->current_edata_count_by_level[enum_dolphin_error_level::B_NOTE] +
+        errorDataArea->current_edata_count_by_level[enum_dolphin_error_level::B_WARNING] +
+        errorDataArea->current_edata_count_by_level[enum_dolphin_error_level::B_ERROR];
+}
+
+int SqlErrorDataCount(){
+    return list_length(u_sess->dolphin_errdata_ctx.errorDataArea->sqlErrorDataList);
+}
+#define NUM_SHOW_WARNINGS_COLUMNS 3
+
+typedef struct {
+    ErrorDataArea * errorDataArea;
+    int currIdx;
+    int limit;
+    ListCell* lc = NULL;
+} ErrorDataAreaStatus;
+
+void gramShowWarningsErrors(int offset, int count, DestReceiver* dest, bool isShowErrors) {
+    TupOutputState* tstate = NULL;
+    TupleDesc tupdesc;
+
+    /* need a tuple descriptor representing three TEXT columns */
+    tupdesc = CreateTemplateTupleDesc(3, false, TAM_HEAP);
+    TupleDescInitEntry(tupdesc, (AttrNumber)1, "level", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)2, "code", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)3, "message", TEXTOID, -1, 0);
+
+    /* prepare for projection of tuples */
+    tstate = begin_tup_output_tupdesc(dest, tupdesc);
+    ErrorDataArea* errorDataArea = u_sess->dolphin_errdata_ctx.lastErrorDataArea;
+    int currIdx = 0;
+    int limit = count;
+    ListCell* lc = NULL;
+    while (currIdx < list_length(errorDataArea->sqlErrorDataList)) {
+        if (limit <= 0) {
+            break;
+        }
+        if (currIdx < offset) {
+            currIdx++;
+            continue;
+        }
+        Datum values[NUM_SHOW_WARNINGS_COLUMNS] = {0};
+        bool nulls[NUM_SHOW_WARNINGS_COLUMNS] = {false};
+        if (lc == NULL) {
+            List *sqlErrorDataList = errorDataArea->sqlErrorDataList;
+            lc = list_head(sqlErrorDataList);
+        } else {
+            lc = lnext(lc);
+        }
+        Assert(lc != NULL);
+        DolphinErrorData *eData = (DolphinErrorData *)lfirst(lc);
+        values[1] = Int32GetDatum(eData->errorcode);
+        if (eData->message){
+            values[2] = CStringGetTextDatum(eData->message);
+        }else{
+            values[2] = CStringGetTextDatum("");
+        }
+        if (isShowErrors) {
+            if (eData->elevel == enum_dolphin_error_level::B_ERROR) {
+                values[0] = CStringGetTextDatum("Error");
+            }
+        } else {
+            switch (eData->elevel) {
+                case enum_dolphin_error_level::B_NOTE:
+                    values[0] = CStringGetTextDatum("Note");
+                    break;
+                case enum_dolphin_error_level::B_WARNING:
+                    values[0] = CStringGetTextDatum("Warning");
+                    break;
+                case enum_dolphin_error_level::B_ERROR:
+                default:
+                    values[0] = CStringGetTextDatum("Error");
+                    break;
+            }
+        }
+        limit--;
+        currIdx++;
+        do_tup_output(tstate, values, 3, nulls, 3);
+
+        /* clean up */
+        pfree(DatumGetPointer(values[0]));
+        pfree(DatumGetPointer(values[2]));
+    }
+    end_tup_output(tstate);
+    copyErrorDataArea(u_sess->dolphin_errdata_ctx.lastErrorDataArea,u_sess->dolphin_errdata_ctx.errorDataArea);
+}
+
+void gramShowWarningsErrorsCount(DestReceiver* dest, bool isShowErrors)
+{
+    TupOutputState* tstate = NULL;
+    TupleDesc tupdesc;
+    Datum values[1] = {0};
+    bool isnull[1] = {false};
+
+    /* need a tuple descriptor representing three TEXT columns */
+    tupdesc = CreateTemplateTupleDesc(1, false, TAM_HEAP);
+    TupleDescInitEntry(tupdesc, (AttrNumber)1, "count", INT4OID, -1, 0);
+
+    /* prepare for projection of tuples */
+    tstate = begin_tup_output_tupdesc(dest, tupdesc);
+    ErrorDataArea* errorDataArea = u_sess->dolphin_errdata_ctx.lastErrorDataArea;
+    if (isShowErrors) {
+        values[0] = Int32GetDatum(SqlErrorDataErrorCount(errorDataArea));
+    } else {
+        values[0] = Int32GetDatum(SqlErrorDataWarnCount(errorDataArea));
+    }
+    do_tup_output(tstate, values, 1, isnull, 1);
+    end_tup_output(tstate);
+    copyErrorDataArea(u_sess->dolphin_errdata_ctx.lastErrorDataArea,u_sess->dolphin_errdata_ctx.errorDataArea);
 }

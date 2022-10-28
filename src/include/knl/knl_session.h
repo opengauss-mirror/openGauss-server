@@ -66,6 +66,7 @@
 #include "utils/palloc.h"
 #include "utils/memgroup.h"
 #include "storage/lock/lock.h"
+#include "utils/elog.h"
 
 typedef void (*pg_on_exit_callback)(int code, Datum arg);
 
@@ -2380,6 +2381,14 @@ typedef struct knl_u_syscache_context {
 
 } knl_u_syscache_context;
 
+typedef struct knl_u_dolphin_errdata_context {
+    MemoryContext dolphinErrorDataMemCxt;
+    ErrorDataArea* errorDataArea;// only for b database, using in show warnings,show errors
+    ErrorDataArea* lastErrorDataArea;
+    bool sql_note;
+    int max_error_count;
+} knl_u_dolphin_errdata_context;
+
 typedef struct knl_u_catalog_context {
     bool nulls[4];
     struct PartitionIdentifier* route;
@@ -2825,6 +2834,7 @@ typedef struct knl_session_context {
     instr_time last_access_time;
 
     knl_u_rep_origin_context reporigin_cxt;
+    knl_u_dolphin_errdata_context dolphin_errdata_ctx;
 
     /*
      * Initialize context which records time for client connection establish.

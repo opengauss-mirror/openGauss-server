@@ -292,6 +292,8 @@ extern int GetNumConfigOptions(void);
 
 extern void SetPGVariable(const char* name, List* args, bool is_local);
 extern void GetPGVariable(const char* name, const char* likename, DestReceiver* dest);
+extern void gramShowWarningsErrors(int offset, int count, DestReceiver* dest, bool isShowErrors);
+extern void gramShowWarningsErrorsCount(DestReceiver* dest, bool isShowErrors);
 extern TupleDesc GetPGVariableResultDesc(const char* name);
 #ifdef PGXC
 extern char* RewriteBeginQuery(char* query_string, const char* name, List* args);

@@ -1062,6 +1062,16 @@ static void knl_u_ledger_init(knl_u_ledger_context *ledger_context)
     ledger_context->resp_tag = NULL;
 }
 
+static void knl_u_dolphin_errdata_init(knl_u_dolphin_errdata_context *dolphin_errdata_context)
+{
+    Assert(dolphin_errdata_context != NULL);
+
+    dolphin_errdata_context->errorDataArea = initErrorDataArea();
+    dolphin_errdata_context->lastErrorDataArea = initErrorDataArea();
+    dolphin_errdata_context->sql_note = true;
+    dolphin_errdata_context->max_error_count = 64;
+}
+
 static void knl_u_user_login_init(knl_u_user_login_context* user_login_cxt)
 {
     Assert(user_login_cxt != NULL);
@@ -1371,7 +1381,7 @@ void knl_session_init(knl_session_context* sess_cxt)
     MemoryContextUnSeal(sess_cxt->top_mem_cxt);
     /* workload manager session context init */
     sess_cxt->wlm_cxt = (knl_u_wlm_context*)palloc0(sizeof(knl_u_wlm_context));
-
+    knl_u_dolphin_errdata_init(&sess_cxt->dolphin_errdata_ctx);
     knl_u_advisor_init(&sess_cxt->adv_cxt);
     knl_u_analyze_init(&sess_cxt->analyze_cxt);
     knl_u_attr_init(&sess_cxt->attr);
@@ -1457,6 +1467,11 @@ static void alloc_context_from_top(knl_session_context* sess, MemoryContext top_
         ALLOCSET_DEFAULT_MAXSIZE);
     sess->stat_cxt.hotkeySessContext = AllocSetContextCreate(top_mem_cxt,
         "HotkeySessionMemoryContext",
+        ALLOCSET_DEFAULT_MINSIZE,
+        ALLOCSET_DEFAULT_INITSIZE,
+        ALLOCSET_DEFAULT_MAXSIZE);
+    sess->dolphin_errdata_ctx.dolphinErrorDataMemCxt =AllocSetContextCreate(top_mem_cxt,
+        "DolphinErrorData",
         ALLOCSET_DEFAULT_MINSIZE,
         ALLOCSET_DEFAULT_INITSIZE,
         ALLOCSET_DEFAULT_MAXSIZE);
