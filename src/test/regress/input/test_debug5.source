@@ -1,0 +1,6 @@
+drop table if exists brinindex_t1;
+set log_min_messages to debug5;
+create table brinindex_t1(c1 numrange,c2 int,c3 text);
+insert into brinindex_t1 select format('[%s,%s]',b*1000,b*1000+3.1415926)::numrange,a,a || 'brinindextest' from (select a,random() as b from generate_series(1,10000) as a);
+drop table brinindex_t1;
+reset log_min_messages;
