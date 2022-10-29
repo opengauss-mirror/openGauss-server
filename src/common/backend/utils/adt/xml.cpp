@@ -131,7 +131,7 @@ static char* xml_pstrdup(const char* string);
 static xmlChar* xml_text2xmlChar(text* in);
 static int parse_xml_decl(const xmlChar* str, size_t* lenp, xmlChar** version, xmlChar** encoding, int* standalone);
 static bool print_xml_decl(StringInfo buf, const xmlChar* version, pg_enc encoding, int standalone);
-static xmlDocPtr xml_parse(text* data, XmlOptionType xmloption_arg, bool preserve_whitespace, int encoding);
+static xmlDocPtr xml_parse(text* data, XmlOptionType xmloption_arg, bool preserve_whitespace, int encoding, bool can_ignore = false);
 static text* xml_xmlnodetoxmltype(xmlNodePtr cur);
 static int xml_xpathobjtoxmlarray(xmlXPathObjectPtr xpathobj, ArrayBuildState** astate);
 #endif /* USE_LIBXML */
@@ -200,7 +200,7 @@ Datum xml_in(PG_FUNCTION_ARGS)
      * Parse the data to check if it is well-formed XML data.  Assume that
      * ERROR occurred if parsing failed.
      */
-    doc = xml_parse(vardata, (XmlOptionType)xmloption, true, GetDatabaseEncoding());
+    doc = xml_parse(vardata, (XmlOptionType)xmloption, true, GetDatabaseEncoding(), fcinfo->can_ignore);
     xmlFreeDoc(doc);
 
     PG_RETURN_XML_P(vardata);
@@ -825,12 +825,9 @@ void pg_xml_init_library(void)
          * we can work.
          */
         if (sizeof(char) != sizeof(xmlChar))
-            ereport(ERROR,
-                (errcode(ERRCODE_DATATYPE_MISMATCH),
-                    errmsg("could not initialize XML library"),
-                    errdetail("libxml2 has incompatible char type: sizeof(char)=%u, sizeof(xmlChar)=%u.",
-                        (int)sizeof(char),
-                        (int)sizeof(xmlChar))));
+            ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("could not initialize XML library"),
+                            errdetail("libxml2 has incompatible char type: sizeof(char)=%u, sizeof(xmlChar)=%u.",
+                                      (int)sizeof(char), (int)sizeof(xmlChar))));
 
 #ifdef USE_LIBXMLCONTEXT
         /* Set up libxml's memory allocation our way */
@@ -1214,7 +1211,8 @@ static bool print_xml_decl(StringInfo buf, const xmlChar* version, pg_enc encodi
  * Maybe libxml2's xmlreader is better? (do not construct DOM,
  * yet do not use SAX - see xmlreader.c)
  */
-static xmlDocPtr xml_parse(text* data, XmlOptionType xmloption_arg, bool preserve_whitespace, int encoding)
+static xmlDocPtr xml_parse(text* data, XmlOptionType xmloption_arg, bool preserve_whitespace, int encoding,
+                           bool can_ignore)
 {
     int32 len;
     xmlChar* string = NULL;
@@ -1248,13 +1246,14 @@ static xmlDocPtr xml_parse(text* data, XmlOptionType xmloption_arg, bool preserv
              * external DTDs, we try to support them too, (see SQL/XML:2008 GR
              * 10.16.7.e)
              */
-            doc = xmlCtxtReadDoc(ctxt,
-                utf8string,
-                NULL,
-                "UTF-8",
-                XML_PARSE_NOENT | XML_PARSE_DTDATTR | (preserve_whitespace ? 0 : XML_PARSE_NOBLANKS));
-            if (doc == NULL || xmlerrcxt->err_occurred)
-                xml_ereport(xmlerrcxt, ERROR, ERRCODE_INVALID_XML_DOCUMENT, "invalid XML document");
+            doc = xmlCtxtReadDoc(ctxt, utf8string, NULL, "UTF-8",
+                                 XML_PARSE_NOENT | XML_PARSE_DTDATTR | (preserve_whitespace ? 0 : XML_PARSE_NOBLANKS));
+            if (doc == NULL || xmlerrcxt->err_occurred) {
+                xml_ereport(xmlerrcxt, can_ignore ? WARNING : ERROR, ERRCODE_INVALID_XML_DOCUMENT,
+                            "invalid XML document");
+                /* if invalid content value error is ignorable, report warning and return 'null' */
+                goto ignorable_error_handle;
+            }
         } else {
             int res_code;
             size_t count;
@@ -1262,9 +1261,16 @@ static xmlDocPtr xml_parse(text* data, XmlOptionType xmloption_arg, bool preserv
             int standalone;
 
             res_code = parse_xml_decl(utf8string, &count, &version, NULL, &standalone);
-            if (res_code != 0)
-                xml_ereport_by_code(
-                    ERROR, ERRCODE_INVALID_XML_CONTENT, "invalid XML content: invalid XML declaration", res_code);
+            if (res_code != 0) {
+                if (can_ignore) {
+                    xml_ereport(xmlerrcxt, WARNING, ERRCODE_INVALID_XML_DOCUMENT, "invalid XML document");
+                    /* if invalid content value error is ignorable, report warning and return 'null' */
+                    goto ignorable_error_handle;
+                } else {
+                    xml_ereport_by_code(ERROR, ERRCODE_INVALID_XML_CONTENT,
+                                        "invalid XML content: invalid XML declaration", res_code);
+                }
+            }
 
             doc = xmlNewDoc(version);
             Assert(doc->encoding == NULL);
@@ -1272,8 +1278,12 @@ static xmlDocPtr xml_parse(text* data, XmlOptionType xmloption_arg, bool preserv
             doc->standalone = standalone;
 
             res_code = xmlParseBalancedChunkMemory(doc, NULL, NULL, 0, utf8string + count, NULL);
-            if (res_code != 0 || xmlerrcxt->err_occurred)
-                xml_ereport(xmlerrcxt, ERROR, ERRCODE_INVALID_XML_CONTENT, "invalid XML content");
+            if (res_code != 0 || xmlerrcxt->err_occurred) {
+                xml_ereport(xmlerrcxt, can_ignore ? WARNING : ERROR, ERRCODE_INVALID_XML_CONTENT,
+                            "invalid XML content");
+                /* if invalid content value error is ignorable, report warning and return 'null' */
+                goto ignorable_error_handle;
+            }
         }
     }
     PG_CATCH();
@@ -1294,6 +1304,17 @@ static xmlDocPtr xml_parse(text* data, XmlOptionType xmloption_arg, bool preserv
     pg_xml_done(xmlerrcxt, false);
 
     return doc;
+
+ignorable_error_handle:
+    text *new_data = cstring_to_text("null");
+    xmlChar *new_utf8string = pg_do_encoding_conversion(xml_text2xmlChar(new_data),
+                                                        VARSIZE(new_data) - VARHDRSZ, encoding, PG_UTF8);
+    volatile xmlDocPtr new_doc = xmlCtxtReadDoc(
+        ctxt, new_utf8string, NULL, "UTF-8",
+        XML_PARSE_NOENT | XML_PARSE_DTDATTR | (preserve_whitespace ? 0 : XML_PARSE_NOBLANKS));
+    xmlFreeParserCtxt(ctxt);
+    pg_xml_done(xmlerrcxt, false);
+    return new_doc;
 }
 
 /*

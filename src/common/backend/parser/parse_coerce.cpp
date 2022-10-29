@@ -394,9 +394,11 @@ Node* coerce_type(ParseState* pstate, Node* node, Oid inputTypeId, Oid targetTyp
          * as CSTRING.
          */
         if (!con->constisnull) {
-            newcon->constvalue = stringTypeDatum(targetType, DatumGetCString(con->constvalue), inputTypeMod);
+            newcon->constvalue = stringTypeDatum(targetType, DatumGetCString(con->constvalue), inputTypeMod,
+                                                 pstate != NULL && pstate->p_has_ignore);
         } else {
-            newcon->constvalue = stringTypeDatum(targetType, NULL, inputTypeMod);
+            newcon->constvalue =
+                stringTypeDatum(targetType, NULL, inputTypeMod, pstate != NULL && pstate->p_has_ignore);
         }
 
         cancel_parser_errposition_callback(&pcbstate);

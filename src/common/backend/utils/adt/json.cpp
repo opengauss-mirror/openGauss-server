@@ -162,7 +162,22 @@ Datum json_in(PG_FUNCTION_ARGS)
 
     /* validate it */
     lex = makeJsonLexContext(result, false);
-    pg_parse_json(lex, &nullSemAction);
+    PG_TRY();
+    {
+        pg_parse_json(lex, &nullSemAction);
+    }
+    PG_CATCH();
+    {
+        if (fcinfo->can_ignore) {
+            ereport(WARNING,
+                    (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+                     errmsg("invalid input syntax for type json")));
+            PG_RETURN_DATUM((Datum)DirectFunctionCall1(json_in, CStringGetDatum("null")));
+        } else {
+            PG_RE_THROW();
+        }
+    }
+    PG_END_TRY();
 
     /* Internal representation is the same as text, for now */
     PG_RETURN_TEXT_P(result);

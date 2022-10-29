@@ -3240,32 +3240,33 @@ int DecodeUnits(int field, const char* lowtoken, int* val)
  * DTERR_TZDISP_OVERFLOW from DTERR_FIELD_OVERFLOW, but SQL99 mandates three
  * separate SQLSTATE codes, so ...
  */
-void DateTimeParseError(int dterr, const char* str, const char* datatype)
+void DateTimeParseError(int dterr, const char* str, const char* datatype, bool can_ignore)
 {
+    int level = can_ignore ? WARNING : ERROR;
     switch (dterr) {
         case DTERR_FIELD_OVERFLOW:
-            ereport(ERROR,
+            ereport(level,
                 (errcode(ERRCODE_DATETIME_FIELD_OVERFLOW), errmsg("date/time field value out of range: \"%s\"", str)));
             break;
         case DTERR_MD_FIELD_OVERFLOW:
             /* <nanny>same as above, but add hint about u_sess->time_cxt.DateStyle</nanny> */
-            ereport(ERROR,
+            ereport(level,
                 (errcode(ERRCODE_DATETIME_FIELD_OVERFLOW),
                     errmsg("date/time field value out of range: \"%s\"", str),
                     errhint("Perhaps you need a different \"datestyle\" setting.")));
             break;
         case DTERR_INTERVAL_OVERFLOW:
-            ereport(ERROR,
+            ereport(level,
                 (errcode(ERRCODE_INTERVAL_FIELD_OVERFLOW), errmsg("interval field value out of range: \"%s\"", str)));
             break;
         case DTERR_TZDISP_OVERFLOW:
-            ereport(ERROR,
+            ereport(level,
                 (errcode(ERRCODE_INVALID_TIME_ZONE_DISPLACEMENT_VALUE),
                     errmsg("time zone displacement out of range: \"%s\"", str)));
             break;
         case DTERR_BAD_FORMAT:
         default:
-            ereport(ERROR,
+            ereport(level,
                 (errcode(ERRCODE_INVALID_DATETIME_FORMAT),
                     errmsg("invalid input syntax for type %s: \"%s\"", datatype, str)));
             break;
@@ -4300,7 +4301,7 @@ static void check_dtype (int dtype, struct pg_tm *tm, fsec_t fsec, Interval *res
     }
 }
 
-Interval *char_to_interval(char *str, int32 typmod) {
+Interval *char_to_interval(char *str, int32 typmod, bool can_ignore) {
     Interval       *result = NULL;
     fsec_t         fsec = 0;
     struct pg_tm tt, *tm = &tt;
@@ -4343,7 +4344,14 @@ Interval *char_to_interval(char *str, int32 typmod) {
     if (dterr != 0) {
         if (dterr == DTERR_FIELD_OVERFLOW)
             dterr = DTERR_INTERVAL_OVERFLOW;
-        DateTimeParseError(dterr, str, "interval");
+        DateTimeParseError(dterr, str, "interval", can_ignore);
+        /* if invalid input error is ignorable, set the result to 0 */
+        tm->tm_year = 0;
+        tm->tm_mon = 0;
+        tm->tm_mday = 0;
+        tm->tm_hour = 0;
+        tm->tm_min = 0;
+        tm->tm_sec = 0;
     }
     // process negative ISO8601 interval
     if (true == isnegative) {

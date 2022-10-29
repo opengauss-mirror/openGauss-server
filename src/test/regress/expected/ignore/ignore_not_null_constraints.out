@@ -377,7 +377,7 @@ DETAIL:  Failing row contains (null).
 select * from t_smalldatetime;
             c             
 --------------------------
- Thu Jan 01 08:00:00 1970
+ Thu Jan 01 00:00:00 1970
 (1 row)
 
 insert into t_smalldatetime values('1991-01-01 08:00:00');
@@ -389,8 +389,8 @@ DETAIL:  Failing row contains (null).
 select * from t_smalldatetime;
             c             
 --------------------------
- Thu Jan 01 08:00:00 1970
- Thu Jan 01 08:00:00 1970
+ Thu Jan 01 00:00:00 1970
+ Thu Jan 01 00:00:00 1970
 (2 rows)
 
 -- date

@@ -2117,8 +2117,11 @@ void CheckNullResult(Oid oid, bool isnull, char* str)
  * called from other SPI functions without extra notation.	This is a hack,
  * but the alternative of expecting all SPI functions to do SPI_push/SPI_pop
  * around I/O calls seems worse.
+ *
+ * With param can_ignore == true, truncation or transformation may be cast
+ * if function failed for ignorable errors like overflowing or out of range.
  */
-Datum InputFunctionCall(FmgrInfo* flinfo, char* str, Oid typioparam, int32 typmod)
+Datum InputFunctionCall(FmgrInfo* flinfo, char* str, Oid typioparam, int32 typmod, bool can_ignore)
 {
     FunctionCallInfoData fcinfo;
     Datum result;
@@ -2139,6 +2142,7 @@ Datum InputFunctionCall(FmgrInfo* flinfo, char* str, Oid typioparam, int32 typmo
     fcinfo.argnull[0] = (str == NULL);
     fcinfo.argnull[1] = false;
     fcinfo.argnull[2] = false;
+    fcinfo.can_ignore = can_ignore;
 
     result = FunctionCallInvoke(&fcinfo);
 
@@ -2301,13 +2305,16 @@ bytea* SendFunctionCall(FmgrInfo* flinfo, Datum val)
 /*
  * As above, for I/O functions identified by OID.  These are only to be used
  * in seldom-executed code paths.  They are not only slow but leak memory.
+ *
+ * With param can_ignore == true, str may be truncated or transformed if function
+ * failed for ignorable errors like overflowing or out of range.
  */
-Datum OidInputFunctionCall(Oid functionId, char* str, Oid typioparam, int32 typmod)
+Datum OidInputFunctionCall(Oid functionId, char* str, Oid typioparam, int32 typmod, bool can_ignore)
 {
     FmgrInfo flinfo;
 
     fmgr_info(functionId, &flinfo);
-    return InputFunctionCall(&flinfo, str, typioparam, typmod);
+    return InputFunctionCall(&flinfo, str, typioparam, typmod, can_ignore);
 }
 
 char* OidOutputFunctionCall(Oid functionId, Datum val)

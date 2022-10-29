@@ -42,7 +42,7 @@ extern bool typeByVal(Type t);
 extern char* typeTypeName(Type t);
 extern Oid typeTypeRelid(Type typ);
 extern Oid typeTypeCollation(Type typ);
-extern Datum stringTypeDatum(Type tp, char* string, int32 atttypmod);
+extern Datum stringTypeDatum(Type tp, char* string, int32 atttypmod, bool can_ignore = false);
 
 extern Oid typeidTypeRelid(Oid type_id);
 extern bool IsTypeSupportedByCStore(_in_ Oid typeOid);
