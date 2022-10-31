@@ -147,6 +147,28 @@ where
           50
       )
   );
+-- fix bug: ERROR: no relation entry for relid 1
+-- Scenario:1
+set enable_hashjoin=on;
+set enable_material=off;
+set enable_mergejoin=off;
+set enable_nestloop=off;
+create table k1(id int,id1 int);
+create table k2(id int,id1 int);
+create table k3(id int,id1 int);
+explain (costs off)select   m.*,k3.id from (select tz.* from (select k1.id from k1 WHERE exists (select k2.id from k2 where k2.id = k1.id and k2.id1 in (1,2,3,4,5,6,7,8,9,10,11))) tz limit 10) m left join k3 on m.id = k3.id;
+-- Scenario:2
+create table customer(c_birth_month int);
+ select 
+      1
+    from 
+      customer t1 ,
+      (with tmp2 as ( select 1 as c_birth_month,   2 as c_birth_day   from   now()) 
+       select c_birth_month,  c_birth_day from ( select 1 as c_birth_month,   2 as c_birth_day   from   now()) tmp2 ) t2  
+    where 
+      t1.c_birth_month = t2.c_birth_day  and exists (select  1 ) ;
+-- Scenario:3
+select 1 from  customer where c_birth_month not in (with  tmp1 as (select 1  from now()) select * from tmp1);
 
 drop schema query_rewrite cascade;
 reset current_schema;
