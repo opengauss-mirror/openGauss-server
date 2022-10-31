@@ -6093,7 +6093,7 @@ static void RenameTableFeature(RenameStmt* stmt)
 
         /* Rename regular table */
         replaces[Anum_pg_class_relname - 1] = true;
-        values[Anum_pg_class_relname - 1] = CStringGetDatum(modfytable);
+        values[Anum_pg_class_relname - 1] = DirectFunctionCall1(namein, CStringGetDatum(modfytable));
         if (modfySchema != NULL) {
             replaces[Anum_pg_class_relnamespace - 1] = true;
             values[Anum_pg_class_relnamespace - 1] = ObjectIdGetDatum(modfyNameSpace);
