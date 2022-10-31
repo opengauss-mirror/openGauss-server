@@ -1294,7 +1294,7 @@ Datum hypopg_reset_index(PG_FUNCTION_ARGS)
  */
 static void hypo_set_indexname(hypoIndex *entry, const char *indexname)
 {
-    char oid[12] = {0}; /* store <oid>, oid shouldn't be more than 9999999999 */
+    char oid[16] = {0}; /* store <oid>, oid shouldn't be more than 99999999999999 */
     int totalsize;
     errno_t rc = EOK;
 
