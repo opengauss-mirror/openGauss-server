@@ -4,6 +4,12 @@ CREATE SCHEMA hw_subpartition_vacuum_partition;
 SET CURRENT_SCHEMA TO hw_subpartition_vacuum_partition;
 \! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "autovacuum = off" >/dev/null 2>&1
 \! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "enable_defer_calculate_snapshot = off" >/dev/null 2>&1
+select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
 CREATE TABLE temp1(c1 int, c2 int);
 --
 --1. test for basic function
