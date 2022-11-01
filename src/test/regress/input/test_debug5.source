@@ -1,6 +1,32 @@
-drop table if exists brinindex_t1;
-set log_min_messages to debug5;
-create table brinindex_t1(c1 numrange,c2 int,c3 text);
-insert into brinindex_t1 select format('[%s,%s]',b*1000,b*1000+3.1415926)::numrange,a,a || 'brinindextest' from (select a,random() as b from generate_series(1,10000) as a);
-drop table brinindex_t1;
-reset log_min_messages;
+DROP TABLE IF EXISTS brinindex_t1;
+DROP TABLE IF EXISTS test_expression_13_01;
+DROP TABLE IF EXISTS test_expression_13_02;
+SET log_min_messages TO debug5;
+
+-- test deparse of subquery pull up in cte
+CREATE TABLE brinindex_t1(c1 numrange,c2 int,c3 text);
+INSERT INTO brinindex_t1 SELECT format('[%s,%s]',b*1000,b*1000+3.1415926)::numrange,a,a || 'brinindextest' FROM (SELECT a,random() as b FROM generate_series(1,10000) as a);
+
+-- test deparse of sublink expr
+CREATE TABLE test_expression_13_01
+(
+    c_id INTEGER NOT NULL,
+    c_name CHAR(16) NOT NULL,
+    c_class VARCHAR(20)
+);
+INSERT INTO test_expression_13_01 VALUES(1, 'Mark', 'Boston');
+CREATE TABLE test_expression_13_02
+(
+    c_gradeid INTEGER NOT NULL,
+    c_id INTEGER,
+    c_grade INTEGER,
+    c_subject varchar
+);
+INSERT INTO test_expression_13_02 VALUES(2, NULL, 201, 'English');
+SELECT c_name,c_class FROM test_expression_13_01 WHERE NULL IN (SELECT c_id FROM test_expression_13_02 WHERE c_grade > 200);
+
+-- clean up
+DROP TABLE brinindex_t1;
+DROP TABLE test_expression_13_01;
+DROP TABLE test_expression_13_02;
+RESET log_min_messages;

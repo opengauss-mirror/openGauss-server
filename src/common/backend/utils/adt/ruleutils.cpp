@@ -11011,6 +11011,11 @@ static void get_sublink_expr(SubLink* sublink, deparse_context* context)
                 exprType((Node*)linitial(rcexpr->largs)),
                 exprType((Node*)linitial(rcexpr->rargs)));
             appendStringInfoChar(buf, ')');
+        } else if (IsA(sublink->testexpr, Const)) {
+            /* const will occur after preprocess_const_params rewrite */
+            get_rule_expr((Node*)sublink->testexpr, context, false);
+            set_string_info_right(need_paren, buf);
+            return;
         } else
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
