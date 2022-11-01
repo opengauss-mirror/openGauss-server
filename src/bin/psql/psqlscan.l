@@ -2310,6 +2310,17 @@ analyze_state(const char* text,PsqlScanStateData* state)
 			state->count_to_read = -1;
 			break;
 		case IDEN_PROCEDURE:
+			if (state->declare_encountered && state->begin_state == BEGIN_UNDEFINED) {
+				/*
+				 * declare_encountered is true means we have met a 'declare' already, sql may like
+				 * 'create trigger declare on declare execute procedure xx', 'declare' should be treat as an identifier
+				 * not a keyword. PROCEDURE is a reserve keyword, so it must be a keyword not a identifier.
+				 */
+				state->declare_encountered = false;
+				state->gram_state[IDEN_PROCEDURE] = false;
+				state->gram_state[IDEN_DECLARE] = false;
+				break;
+			}
 			state->gram_state[IDEN_AS] = true;
 			state->gram_state[IDEN_IS] = true;
 			state->include_ora_comment = true;
@@ -2365,6 +2376,7 @@ analyze_state(const char* text,PsqlScanStateData* state)
 			state->gram_state[IDEN_BINARY] = true;
 			state->gram_state[IDEN_INSENSITIVE] = true;
 			state->gram_state[IDEN_NO] = true;
+			state->gram_state[IDEN_PROCEDURE] = true;
 			state->declare_encountered = true;
 			break;
 		case IDEN_BEGIN:

@@ -1044,3 +1044,51 @@ drop table depth_a, depth_b, depth_c;
 drop function depth_a_tf();
 drop function depth_b_tf();
 drop function depth_c_tf();
+
+-- test declare + on in one sql.
+create schema trigger_declare_test;
+set current_schema to trigger_declare_test;
+create table declare_test(id int);
+create index declare on declare_test(id);
+\d declare_test
+drop index declare;
+
+create table declare(id int);
+create index id_test on declare(id);
+\d declare
+
+CREATE OR REPLACE FUNCTION declare() RETURNS TRIGGER AS
+$$
+DECLARE
+BEGIN
+   INSERT INTO declare_test VALUES(NEW.id);
+   RETURN NEW;
+END
+$$ LANGUAGE PLPGSQL;
+
+CREATE TRIGGER declare AFTER INSERT ON declare FOR EACH ROW EXECUTE PROCEDURE declare();
+insert into declare values(1);
+drop TRIGGER declare on declare cascade;
+
+CREATE TRIGGER declare_test AFTER INSERT ON declare FOR EACH ROW EXECUTE PROCEDURE declare();
+insert into declare values(2);
+drop TRIGGER declare_test on declare cascade;
+
+CREATE OR REPLACE FUNCTION declare() RETURNS TRIGGER AS
+$$
+DECLARE
+BEGIN
+   INSERT INTO declare VALUES(NEW.id);
+   RETURN NEW;
+END
+$$ LANGUAGE PLPGSQL;
+
+CREATE TRIGGER declare AFTER INSERT ON declare_test FOR EACH ROW EXECUTE PROCEDURE declare();
+insert into declare_test values(3);
+drop TRIGGER declare on declare_test cascade;
+select * from declare order by 1;
+select * from declare_test order by 1;
+
+drop table declare;
+drop table declare_test;
+drop schema trigger_declare_test cascade;
