@@ -1,7 +1,10 @@
 DROP TABLE IF EXISTS brinindex_t1;
 DROP TABLE IF EXISTS test_expression_13_01;
 DROP TABLE IF EXISTS test_expression_13_02;
+DROP TABLE IF EXISTS ct_tbl_as;
+DROP TABLE IF EXISTS ct_as;
 SET log_min_messages TO debug5;
+SET logging_module TO 'on(all)';
 
 -- test deparse of subquery pull up in cte
 CREATE TABLE brinindex_t1(c1 numrange,c2 int,c3 text);
@@ -25,8 +28,32 @@ CREATE TABLE test_expression_13_02
 INSERT INTO test_expression_13_02 VALUES(2, NULL, 201, 'English');
 SELECT c_name,c_class FROM test_expression_13_01 WHERE NULL IN (SELECT c_id FROM test_expression_13_02 WHERE c_grade > 200);
 
+-- test ceate table as with union all
+CREATE TABLE ct_tbl_as
+(
+    c_id int, c_int int, c_integer integer,
+    c_real real, c_decimal decimal(38), c_numeric numeric(38),
+    c_char char(50) not null,
+    c_varchar varchar(20),
+    c_varchar2 varchar2(4000)
+)
+PARTITION BY RANGE (c_integer)
+(
+    partition P_20180121 values less than (0),
+    partition P_20190122 values less than (10),
+    partition P_20200123 values less than (20)
+);
+
+INSERT INTO ct_tbl_as VALUES(1,12,-2,123.63,563.893,852.33,'qwe','ugfd','weewvbgfyui');
+INSERT INTO ct_tbl_as VALUES(2,22,8,123.63,563.893,852.33,'qedc','kjjhbn','rtygftyui');
+INSERT INTO ct_tbl_as VALUES(3,32,12,123.63,563.893,852.33,'qhfs','ihgd','wertrtgui');
+
+CREATE TABLE ct_as AS (select c_char c1,c_varchar2 c2 from ct_tbl_as) UNION ALL (SELECT c_char c3,c_varchar2 c4 FROM ct_tbl_as);
+
 -- clean up
 DROP TABLE brinindex_t1;
 DROP TABLE test_expression_13_01;
 DROP TABLE test_expression_13_02;
+DROP TABLE ct_tbl_as;
+DROP TABLE ct_as;
 RESET log_min_messages;

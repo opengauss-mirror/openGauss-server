@@ -1486,6 +1486,13 @@ static Node* pull_up_simple_union_all(PlannerInfo* root, Node* jtnode, RangeTblE
     rtoffset = list_length(root->parse->rtable);
     rtable = (List*)copyObject(subquery->rtable);
     IncrementVarSublevelsUp_rtable(rtable, -1, 1);
+    ListCell *lc= NULL;
+    foreach (lc, rtable){
+        RangeTblEntry* rte = (RangeTblEntry*)lfirst(lc);
+        if (rte->rtekind == RTE_SUBQUERY) {
+            rte->pulled_from_subquery = true;
+        }
+    }
     root->parse->rtable = list_concat(root->parse->rtable, rtable);
 
     /* Subquery can be pull, so set flag to true. */
