@@ -236,6 +236,7 @@ void pull_up_sublinks(PlannerInfo* root)
      * root->parse->jointree must always be a FromExpr, so insert a dummy one
      * if we got a bare RangeTblRef or JoinExpr out of the recursion.
      */
+    FromExpr* old_jointree = root->parse->jointree;
     if (IsA(jtnode, FromExpr))
         root->parse->jointree = (FromExpr*)jtnode;
     else
@@ -265,6 +266,9 @@ void pull_up_sublinks(PlannerInfo* root)
             root->parse->jointree = makeFromExpr(list_make1(jtnode), NULL);
     }
 
+    if (!equal(root->parse->jointree, old_jointree)) {
+        root->parse->is_from_sublink_rewrite = true;
+    }
 }
 
 /*
@@ -1082,6 +1086,7 @@ static Node* pull_up_simple_subquery(PlannerInfo* root, Node* jtnode, RangeTblEn
         return jtnode;
     }
 
+    root->parse->is_from_subquery_rewrite = true;
     /*
      * Need a modifiable copy of the subquery to hack on.  Even if we didn't
      * sometimes choose not to pull up below, we must do this to avoid

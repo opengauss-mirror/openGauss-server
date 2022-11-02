@@ -1979,6 +1979,9 @@ typedef struct Query {
                                      * Please refer to subquery_planner.
                                      */
     bool is_from_inlist2join_rewrite; /* true if the query is created when applying inlist2join optimization */
+    bool is_from_sublink_rewrite;     /* true if the query is created when applying pull sublink optimization */
+    bool is_from_subquery_rewrite;    /* true if the query is created when applying pull subquery optimization */
+
     uint64 uniqueSQLId;             /* used by unique sql id */
 #ifndef ENABLE_MULTIPLE_NODES
     char* unique_sql_text;            /* used by unique sql plain text */

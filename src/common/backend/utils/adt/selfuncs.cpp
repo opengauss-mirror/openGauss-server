@@ -4796,6 +4796,19 @@ void examine_variable(PlannerInfo* root, Node* node, int varRelid, VariableStatD
     }
 }
 
+static void switch_subquery(const PlannerInfo *const root, Query **subquery, const RelOptInfo *const rel)
+{
+    if (!rel->subroot->parse->is_from_inlist2join_rewrite) {
+        *subquery = rel->subroot->parse;
+        return;
+    }
+
+    if (!root->parse->is_from_sublink_rewrite && !root->parse->is_from_subquery_rewrite) {
+        *subquery = rel->subroot->parse;
+        return;
+    }
+}
+
 /*
  * examine_simple_variable
  *		Handle a simple Var for examine_variable
@@ -4904,9 +4917,8 @@ static void examine_simple_variable(PlannerInfo* root, Var* var, VariableStatDat
          * This is a temporary fix for mislocated varattno after inlist2join
          * optimization.
          */
-        if (!rel->subroot->parse->is_from_inlist2join_rewrite) {
-            subquery = rel->subroot->parse;
-        }
+        switch_subquery(root, &subquery, rel);
+
         Assert(IsA(subquery, Query));
 
         /* Get the subquery output expression referenced by the upper Var */
