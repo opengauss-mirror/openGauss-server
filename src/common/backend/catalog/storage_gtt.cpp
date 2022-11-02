@@ -462,8 +462,8 @@ void forget_gtt_storage_info(Oid relid, const RelFileNode rnode, bool isCommit)
             Assert(gttnode2->relfilenode == rnode.relNode);
             Assert(list_length(entry->relfilenode_list) == 1);
             /* rollback switch relfilenode */
-            gtt_switch_rel_relfilenode(
-                entry2->relid, gttnode2->relfilenode, entry->relid, gtt_fetch_current_relfilenode(entry->relid), false);
+            gtt_switch_rel_relfilenode(entry2->relid, gttnode2->relfilenode, entry->relid,
+                                       gtt_fetch_current_relfilenode(entry->relid), false, InvalidTransactionId);
             /* clean up footprint */
             entry2->oldrelid = InvalidOid;
             dRnode = gtt_search_relfilenode(entry, rnode.relNode, false);
@@ -1367,7 +1367,8 @@ Oid gtt_fetch_current_relfilenode(Oid relid)
     return gttRnode->relfilenode;
 }
 
-void gtt_switch_rel_relfilenode(Oid rel1, Oid relfilenode1, Oid rel2, Oid relfilenode2, bool footprint)
+void gtt_switch_rel_relfilenode(Oid rel1, Oid relfilenode1, Oid rel2, Oid relfilenode2, bool footprint,
+                                TransactionId frozenXid)
 {
     gtt_local_hash_entry* entry1;
     gtt_local_hash_entry* entry2;
@@ -1395,6 +1396,15 @@ void gtt_switch_rel_relfilenode(Oid rel1, Oid relfilenode1, Oid rel2, Oid relfil
 
     entry2->relfilenode_list = list_delete_ptr(entry2->relfilenode_list, gttRnode2);
     entry1->relfilenode_list = lappend(entry1->relfilenode_list, gttRnode2);
+
+    if (entry1->relkind == RELKIND_RELATION && TransactionIdIsValid(frozenXid)) {
+        /* update relfrozenxid for the new gtt relfilenode */
+        remove_gtt_relfrozenxid_from_ordered_list((Oid)gttRnode2->relfrozenxid);
+        gttRnode2->relfrozenxid = frozenXid;
+        insert_gtt_relfrozenxid_to_ordered_list((Oid)frozenXid);
+        set_gtt_session_relfrozenxid();
+    }
+
     (void)MemoryContextSwitchTo(oldcontext);
 
     if (footprint) {

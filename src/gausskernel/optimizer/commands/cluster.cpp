@@ -170,7 +170,7 @@ static void VacFullCompaction(Relation oldHeap, Oid partOid);
 }
 #endif
 void swapRelationIndicesRelfileNode(Relation rel1, Relation rel2, uint8 needSwitch);
-static void GttSwapRelationFiles(Oid r1, Oid r2);
+static void GttSwapRelationFiles(Oid r1, Oid r2, TransactionId frozenXid);
 static void HbktModifyPartIndexRelnode(Relation indexRel, Partition indexPart, DataTransferType transferType,
     Oid bucketOid);
 
@@ -3369,7 +3369,7 @@ void finish_heap_swap(Oid OIDOldHeap, Oid OIDNewHeap, bool is_system_catalog, bo
      */
     if (get_rel_persistence(OIDOldHeap) == RELPERSISTENCE_GLOBAL_TEMP) {
         Assert(!is_system_catalog);
-        GttSwapRelationFiles(OIDOldHeap, OIDNewHeap);
+        GttSwapRelationFiles(OIDOldHeap, OIDNewHeap, frozenXid);
     }
 
     swap_relation_files(OIDOldHeap, OIDNewHeap, (OIDOldHeap == RelationRelationId), 
@@ -3575,7 +3575,7 @@ static List* get_tables_to_cluster(MemoryContext cluster_context)
     return rvs;
 }
 
-static void GttSwapRelationFiles(Oid r1, Oid r2)
+static void GttSwapRelationFiles(Oid r1, Oid r2, TransactionId frozenXid)
 {
     Oid         relfilenode1;
     Oid         relfilenode2;
@@ -3589,7 +3589,7 @@ static void GttSwapRelationFiles(Oid r1, Oid r2)
     relfilenode2 = gtt_fetch_current_relfilenode(r2);
 
     Assert(OidIsValid(relfilenode1) && OidIsValid(relfilenode2));
-    gtt_switch_rel_relfilenode(r1, relfilenode1, r2, relfilenode2, true);
+    gtt_switch_rel_relfilenode(r1, relfilenode1, r2, relfilenode2, true, frozenXid);
 
     CacheInvalidateRelcache(rel1);
     CacheInvalidateRelcache(rel2);
