@@ -1458,7 +1458,7 @@ static bool UHeapWait(Relation relation, Buffer buffer, UHeapTuple utuple, LockT
                 }
             } else {
                 if (InvalidSubTransactionId != subXid) {
-                    SubXactLockTableWait(topXid, subXid, waitSec);
+                    SubXactLockTableWait(topXid, subXid, true, waitSec);
                     isSubXact = true;
                 } else {
                     XactLockTableWait(topXid, true, waitSec);

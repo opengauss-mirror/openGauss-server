@@ -70,7 +70,7 @@ extern bool ConditionalXactLockTableWait(TransactionId xid, bool waitparent = tr
 
 /* Lock a SubXID */
 extern void SubXactLockTableInsert(SubTransactionId subxid);
-extern void SubXactLockTableWait(TransactionId xid, SubTransactionId subxid, int waitSec = 0);
+extern void SubXactLockTableWait(TransactionId xid, SubTransactionId subxid, bool allow_con_update = false, int waitSec = 0);
 extern bool ConditionalSubXactLockTableWait(TransactionId xid, SubTransactionId subxid);
 
 /* Lock a general object (other than a relation) of the current database */

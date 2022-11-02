@@ -738,7 +738,7 @@ SubXactLockTableDelete(SubTransactionId subxid)
  * still in progress.
  */
 void
-SubXactLockTableWait(TransactionId xid, SubTransactionId subxid, int waitSec)
+SubXactLockTableWait(TransactionId xid, SubTransactionId subxid, bool allow_con_update, int waitSec)
 {
     LOCKTAG         tag;
     Assert(TransactionIdIsValid(xid));
@@ -747,7 +747,7 @@ SubXactLockTableWait(TransactionId xid, SubTransactionId subxid, int waitSec)
 
     SET_LOCKTAG_SUBTRANSACTION(tag, xid, subxid);
 
-    (void) LockAcquire(&tag, ShareLock, false, false, waitSec);
+    (void) LockAcquire(&tag, ShareLock, false, false, allow_con_update, waitSec);
 
     LockRelease(&tag, ShareLock, false);
 }
