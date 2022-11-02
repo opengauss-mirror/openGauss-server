@@ -189,8 +189,7 @@ extern EquivalenceClass* get_expr_eqClass(PlannerInfo* root, Expr* expr);
 extern void delete_eq_member(PlannerInfo* root, List* tlist, List* collectiveGroupExpr);
 extern bool CheckPathUseGlobalPartIndex(Path* path);
 
-extern void standard_qp_init(PlannerInfo *root, void *extra, List *tlist,
-                 List *activeWindows, List *groupClause);
+extern void standard_qp_init(PlannerInfo *root, void *extra, List *tlist, List *activeWindows, List *groupClause);
 extern void standard_qp_callback(PlannerInfo *root, void *extra);
 
 #endif /* PATHS_H */
