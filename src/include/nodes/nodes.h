@@ -119,6 +119,8 @@ typedef enum NodeTag {
     T_PlanRowMark,
     T_PlanInvalItem,
     T_FuncInvalItem,
+    /* it just use to judge if it's a PLpgSQL_function, no need copy */
+    T_PLpgSQL_FUNCTION,
     /* TAGS FOR POLICY LABEL */
     T_PolicyFilterNode,
     T_CreatePolicyLabelStmt,
@@ -597,7 +599,7 @@ typedef enum NodeTag {
      * purposes (usually because they are involved in APIs where we want to
      * pass multiple object types through the same pointer).
      */
-    T_TriggerData = 970, /* in commands/trigger.h */
+    T_TriggerData = 980, /* in commands/trigger.h */
     T_ReturnSetInfo,     /* in nodes/execnodes.h */
     T_WindowObjectData,  /* private in nodeWindowAgg.c */
     T_TIDBitmap,         /* in nodes/tidbitmap.h */
@@ -625,7 +627,6 @@ typedef enum NodeTag {
     T_VecRecursiveUnion,
     T_VecScan,
     T_CStoreScan,
-    T_DfsScan,
 #ifdef ENABLE_MULTIPLE_NODES
     T_TsStoreScan,
 #endif   /* ENABLE_MULTIPLE_NODES */
@@ -651,7 +652,6 @@ typedef enum NodeTag {
     T_VecStream,
     T_RowToVec,
     T_VecToRow,
-    T_DfsIndexScan,
     T_CStoreIndexScan,
     T_CStoreIndexCtidScan,
     T_CStoreIndexHeapScan,
@@ -676,11 +676,9 @@ typedef enum NodeTag {
     T_VecSortState,
     T_VecForeignScanState,
     T_CStoreScanState,
-    T_DfsScanState,
 #ifdef ENABLE_MULTIPLE_NODES
     T_TsStoreScanState,
 #endif   /* ENABLE_MULTIPLE_NODES */
-    T_DfsIndexScanState,
     T_CStoreIndexScanState,
     T_CStoreIndexCtidScanState,
     T_CStoreIndexHeapScanState,
@@ -704,7 +702,6 @@ typedef enum NodeTag {
     // this must put last for vector engine runtime state
     T_VecEndState,
 
-    /* @hdfs. support HDFS operation */
     T_HDFSTableAnalyze,
     T_ForeignTableDesc,
     T_AttrMetaData,
@@ -738,6 +735,7 @@ typedef enum NodeTag {
     T_PlanCacheHint,
     T_NoExpandHint,
     T_NoGPCHint,
+    T_MaterialSubplanHint,
 
     /*
      * pgfdw
@@ -782,7 +780,8 @@ typedef enum NodeTag {
     T_PLDebug_frame,
 
     T_TdigestData,
-    T_CentroidPoint
+    T_CentroidPoint, 
+    T_AdvanceCatalogXminCmd
 } NodeTag;
 
 /* if you add to NodeTag also need to add nodeTagToString */
@@ -1012,7 +1011,7 @@ typedef enum UpsertAction
 {
     UPSERT_NONE,            /* No "DUPLICATE KEY UPDATE" clause */
     UPSERT_NOTHING,         /* DUPLICATE KEY UPDATE NOTHING */
-    UPSERT_UPDATE           /* DUPLICATE KEY UPDATE ... */
+    UPSERT_UPDATE,          /* DUPLICATE KEY UPDATE ... */
 }UpsertAction;
 
 struct CentroidPoint {

@@ -274,7 +274,7 @@ extern void CreateSlotOnDisk(ReplicationSlot* slot);
 
 /* misc stuff */
 extern bool ReplicationSlotValidateName(const char* name, int elevel);
-extern void ValidateName(const char* name);
+extern void ValidateInputString(const char* inputString);
 extern void ReplicationSlotsComputeRequiredXmin(bool already_locked);
 extern void ReplicationSlotsComputeRequiredLSN(ReplicationSlotState* repl_slt_state);
 extern XLogRecPtr ReplicationSlotsComputeConfirmedLSN(void);
@@ -333,6 +333,7 @@ extern ArchiveTaskStatus* find_archive_task_status(int *idx);
 extern ArchiveTaskStatus* walreceiver_find_archive_task_status(unsigned int expected_pitr_task_status);
 extern void get_hadr_cn_info(char* keyCn, bool* isExitKey, char* deleteCn, bool* isExitDelete, 
     ArchiveSlotConfig *archive_conf);
-
+extern void LogicalCleanSnapDirectory(bool rebuild);
+extern void CleanMyReplicationSlot();
 
 #endif /* SLOT_H */

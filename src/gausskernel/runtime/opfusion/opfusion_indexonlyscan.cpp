@@ -28,6 +28,7 @@
 #include "access/tableam.h"
 #include "access/visibilitymap.h"
 #include "opfusion/opfusion_util.h"
+#include "utils/knl_partcache.h"
 
 
 IndexOnlyScanFusion::IndexOnlyScanFusion(IndexOnlyScan* node, PlannedStmt* planstmt, ParamListInfo params)
@@ -135,6 +136,7 @@ void IndexOnlyScanFusion::Init(long max_rows)
         m_rel = heap_open(m_reloid, AccessShareLock);
         m_index = index_open(m_node->indexid, AccessShareLock);
     }
+    validateTempRelation(m_rel);
 
     if (unlikely(!m_keyInit)) {
         IndexFusion::IndexBuildScanKey(m_node->indexqual);

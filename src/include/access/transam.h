@@ -199,7 +199,6 @@ extern bool TransactionStartedDuringRecovery(void);
 extern bool TransactionIdDidCommit(TransactionId transactionId);
 extern bool TransactionIdDidAbort(TransactionId transactionId);
 extern bool UHeapTransactionIdDidCommit(TransactionId transactionId);
-extern bool UHeapTransactionIdDidAbort(TransactionId transactionId);
 
 #define COMMITSEQNO_INPROGRESS UINT64CONST(0x0)
 #define COMMITSEQNO_ABORTED UINT64CONST(0x1)
@@ -250,8 +249,11 @@ extern TransactionId GetNewTransactionId(bool isSubXact);
 #endif /* PGXC */
 extern TransactionId ReadNewTransactionId(void);
 extern void SetTransactionIdLimit(TransactionId oldest_datfrozenxid, Oid oldest_datoid);
-extern bool ForceTransactionIdLimitUpdate(void);
 extern Oid GetNewObjectId(bool IsToastRel = false);
 extern TransactionId SubTransGetTopParentXidFromProcs(TransactionId xid);
 extern TransactionIdStatus TransactionIdGetStatus(TransactionId transactionId);
+#ifdef DEBUG
+extern bool FastAdvanceXid(void);
+#endif
+
 #endif /* TRAMSAM_H */

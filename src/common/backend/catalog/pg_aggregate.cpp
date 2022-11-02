@@ -63,6 +63,28 @@ static void InternalAggIsSupported(const char *aggName)
                 errdetail("Transition type can not be \"internal\".")));
 }
 
+void CheckAggregateCreatePrivilege(Oid aggNamespace, const char* aggName)
+{
+    if (!isRelSuperuser() &&
+        (aggNamespace == PG_CATALOG_NAMESPACE ||
+        aggNamespace == PG_PUBLIC_NAMESPACE)) {
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+            errmsg("permission denied to create aggregate \"%s\"", aggName),
+            errhint("must be %s to create a aggregate in %s schema.",
+            g_instance.attr.attr_security.enablePrivilegesSeparate ? "initial user" : "sysadmin",
+            get_namespace_name(aggNamespace))));
+    }
+
+    if (!IsInitdb && !u_sess->attr.attr_common.IsInplaceUpgrade &&
+        !g_instance.attr.attr_common.allow_create_sysobject &&
+        IsSysSchema(aggNamespace)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                errmsg("permission denied to create aggregate \"%s\"", aggName),
+                errhint("not allowd to create a aggregate in %s schema when allow_create_sysobject is off.",
+                    get_namespace_name(aggNamespace))));
+    }
+}
 /*
  * AggregateCreate
  * aggKind, aggregation function kind, 'n' for normal aggregation, 'o' for ordered set aggregation.
@@ -304,6 +326,8 @@ void AggregateCreate(const char* aggName, Oid aggNamespace, char aggKind, Oid* a
         if (aclresult != ACLCHECK_OK)
             aclcheck_error_type(aclresult, finaltype);
     }
+
+    CheckAggregateCreatePrivilege(aggNamespace, aggName);
 
     /*
      * Everything looks okay.  Try to create the pg_proc entry for the

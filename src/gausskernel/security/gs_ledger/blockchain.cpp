@@ -43,6 +43,17 @@
  */
 bool gen_global_hash(hash32_t *hash_buffer, const char *info_string, bool exist, const hash32_t *prev_hash)
 {
+#ifdef ENABLE_LITE_MODE
+    /*
+     * If relation is in ledger schema, avoid procedure or function modifying it.
+     */
+    if (u_sess->SPI_cxt._connected > -1) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION),
+            errmsg("ledger table cannot be modified by function, procedure or trigger.")));
+        return false;
+    }
+#endif
+
     errno_t rc = EOK;
     int comb_strlen;
     char *comb_string = NULL;

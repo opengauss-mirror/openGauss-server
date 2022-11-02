@@ -21,6 +21,7 @@
 #include "optimizer/cost.h"
 #include "optimizer/pathnode.h"
 #include "optimizer/tlist.h"
+#include "optimizer/prep.h"
 #include "optimizer/randomplan.h"
 #include "parser/parse_hint.h"
 #include "parser/parsetree.h"
@@ -36,7 +37,6 @@
 static int g_support_hashfilter_types[] = {
     T_SeqScan,
     T_CStoreScan,
-    T_DfsScan,
 #ifdef ENABLE_MULTIPLE_NODES
     T_TsStoreScan,
 #endif   /* ENABLE_MULTIPLE_NODES */
@@ -44,7 +44,6 @@ static int g_support_hashfilter_types[] = {
     T_IndexScan,
     T_IndexOnlyScan,
     T_CStoreIndexScan,
-    T_DfsIndexScan,
     T_TidScan,
     T_SubqueryScan,
     T_BitmapHeapScan,
@@ -163,6 +162,83 @@ static bool is_support_hashfilter(int nodeType)
     return false;
 }
 
+/*
+ * Return new distribute keys based on appendinfo.
+ */
+List *make_hashfilter_keys(PlannerInfo* root, Plan *insidePlan, List *distribute_keys)
+{
+    List *newKeys = NIL;
+    ListCell *cell = NULL;
+    AppendRelInfo *appinfo = NULL;
+
+    Plan *subplan = ((SubqueryScan *)insidePlan)->subplan;
+
+    /*
+     * Find appendinfo in root with subqueryscan relid
+     */
+    if (root->append_rel_list != NULL) {
+        int relid = ((SubqueryScan *)insidePlan)->scan.scanrelid;
+
+        foreach (cell, root->append_rel_list) {
+            AppendRelInfo *info = (AppendRelInfo *)lfirst(cell);
+
+            if (info->child_relid == (Oid)relid) {
+                appinfo = info;
+                break;
+            }
+        }
+    }
+
+    /*
+     * Do Not add hashfilter to subqueryscan if not found appinfo
+     */
+    if (appinfo == NULL) {
+        return NIL;
+    }
+
+    /*
+     * Adjust Distkey from Append level, and transform it as subquery level.
+     */
+    List *keys = (List*)adjust_appendrel_attrs(root, (Node *)distribute_keys, appinfo);
+
+    foreach (cell, keys) {
+        Node *dist_key = (Node *)lfirst(cell);
+
+        if (IsA(dist_key, Var)) {
+            int attno = ((Var *)dist_key)->varattno;
+            TargetEntry *te = get_tle_by_resno(subplan->targetlist, attno);
+
+            /*
+             * For append plan, if its distribute_keys is Var, we may cannot find the var in its
+             * targetlist, in this case, the arg of hashfilter is different from the targetlist,
+             * which will cause wrong plan. So back to stream plan.
+             */
+            if (te == NULL) {
+                return NIL;
+            }
+
+            newKeys = lappend(newKeys, te->expr);
+        } else {
+            /*
+             * If we have Const distkey then add it to hashfilter directly,
+             * and for other type we pop warning here.
+             */
+
+            if (!IsA(dist_key, Const)) {
+                ereport(WARNING,
+                        (errmodule(MOD_OPT),
+                        errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
+                        errmsg("Found %s type distribute key when make hashfilter for subqueryscan.",
+                        nodeTagToString(nodeTag(dist_key)))));
+            }
+
+            newKeys = lappend(newKeys, dist_key);
+        }
+    }
+
+    return newKeys;
+}
+
 bool add_hashfilter_for_replication(PlannerInfo* root, Plan* plan, List* distribute_keys)
 {
     HashFilter* hashfilter = NULL;
@@ -181,8 +257,6 @@ bool add_hashfilter_for_replication(PlannerInfo* root, Plan* plan, List* distrib
     tmpplan = plan;
     if (IsA(tmpplan, PartIterator))
         tmpplan = tmpplan->lefttree;
-    if (IsA(tmpplan, DfsIndexScan))
-        tmpplan = (Plan*)((DfsIndexScan*)tmpplan)->dfsScan;
     if (IsA(tmpplan, Append)) {
         ListCell* appendPlan = NULL;
 
@@ -197,9 +271,22 @@ bool add_hashfilter_for_replication(PlannerInfo* root, Plan* plan, List* distrib
 
         /* Second add hash filter for each child node */
         foreach (appendPlan, ((Append*)tmpplan)->appendplans) {
-            Plan* insidePlan = (Plan*)lfirst(appendPlan);
-            (void)add_hashfilter_for_replication(root, insidePlan, distribute_keys);
+            Plan *insidePlan = (Plan *)lfirst(appendPlan);
+            List *newKeys = NIL;
+
+            if (IsA(insidePlan, SubqueryScan) || IsA(insidePlan, VecSubqueryScan)) {
+                newKeys = make_hashfilter_keys(root, insidePlan, distribute_keys);
+
+                if (newKeys == NIL) {
+                    return false;
+                }
+            } else {
+                newKeys = distribute_keys;
+            }
+
+            (void)add_hashfilter_for_replication(root, insidePlan, newKeys);
         }
+
         return true;
     }
     if (!is_support_hashfilter(nodeTag(tmpplan)))
@@ -1061,8 +1148,11 @@ bool IsModifyTableForDfsTable(Plan* AppendNode)
 void disaster_read_array_init()
 {
     Snapshot snapshot = GetActiveSnapshot();
+    ereport(DEBUG1,
+        (errmodule(MOD_DISASTER_READ),
+            errmsg("array_init get snapshot csn %lu", snapshot->snapshotcsn)));
     if (snapshot == NULL) {
-        snapshot = GetTransactionSnapshot();
+        ereport(ERROR, (errmsg("disaster_read_array_init get null snapshot")));
     }
 
     LWLockAcquire(MaxCSNArrayLock, LW_SHARED);
@@ -1080,30 +1170,39 @@ void disaster_read_array_init()
 
     for (int i = 0; i < slice_num; i++) {
         int j = 0;
+        bool found = false;
         for (; j < slice_internal_num; j++) {
             int nodeIdx = i + j * slice_num;
             bool set = false;
             if (snapshot->snapshotcsn <= maxcsn[nodeIdx] + 1) {
                 u_sess->pgxc_cxt.disasterReadArray[i] = nodeIdx;
                 set = true;
-                ereport(LOG, (errmsg("select [%d, %d] node index %d, nodeid, %d, csn %lu, %s", 
-                    i, j,
-                    nodeIdx,
-                    u_sess->pgxc_cxt.poolHandle->dn_conn_oids[nodeIdx],
-                    maxcsn[nodeIdx],
-                    mainstandby[nodeIdx] ? "Main Standby" : "Cascade Standby")));
+                found = true;
+                ereport(DEBUG1,
+                    (errmodule(MOD_DISASTER_READ),
+                        errmsg("array_init select[%d, %d] node index %d, nodeid, %d, csn %lu, gtm_csn %lu, %s",
+                            i, j,
+                            nodeIdx,
+                            u_sess->pgxc_cxt.poolHandle->dn_conn_oids[nodeIdx],
+                            maxcsn[nodeIdx],
+                            snapshot->snapshotcsn,
+                            mainstandby[nodeIdx] ? "Main Standby" : "Cascade Standby")));
             } else {
-                ereport(LOG, (errmsg("nodeid %d, snapshotcsn = %lu, max_csn_array = %lu",
-                                     u_sess->pgxc_cxt.poolHandle->dn_conn_oids[nodeIdx],
-                                     snapshot->snapshotcsn,
-                                     maxcsn[nodeIdx])));
+                ereport(DEBUG1,
+                    (errmodule(MOD_DISASTER_READ),
+                        errmsg("array_init not select %d nodeid %d, snapshotcsn = %lu, max_csn_array = %lu",
+                            j,
+                            u_sess->pgxc_cxt.poolHandle->dn_conn_oids[nodeIdx],
+                            snapshot->snapshotcsn,
+                            maxcsn[nodeIdx])));
             }
             if (set && !mainstandby[nodeIdx]) {
                 break;
             }
         }
-        if (j == (u_sess->pgxc_cxt.standby_num + 1))
-            ereport(LOG, (errmsg("current slice datanode is all invalid")));
+        if (!found) {
+            ereport(LOG, (errmsg("array_init slice %d is all invalid", i)));
+        }
     }
     LWLockRelease(MaxCSNArrayLock);
     u_sess->pgxc_cxt.DisasterReadArrayInit = true;
@@ -1117,7 +1216,7 @@ NodeDefinition* get_all_datanodes_def()
     NodeDefinition* nodeDefArray = NULL;
     int rc = 0;
 
-    if (IS_DISASTER_RECOVER_MODE) {
+    if (IS_MULTI_DISASTER_RECOVER_MODE) {
         PgxcNodeGetOidsForInit(NULL, &dn_node_arr, NULL, &dn_node_num, NULL, false);
     } else {
         PgxcNodeGetOids(NULL, &dn_node_arr, NULL, &dn_node_num, false);
@@ -1130,7 +1229,7 @@ NodeDefinition* get_all_datanodes_def()
             pfree_ext(dn_node_arr);
             dn_node_arr = NULL;
         }
-        if (IS_DISASTER_RECOVER_MODE) {
+        if (IS_MULTI_DISASTER_RECOVER_MODE) {
             PgxcNodeGetOidsForInit(NULL, &dn_node_arr, NULL, &dn_node_num, NULL, false);
         } else {
             PgxcNodeGetOids(NULL, &dn_node_arr, NULL, &dn_node_num, false);
@@ -1149,7 +1248,7 @@ NodeDefinition* get_all_datanodes_def()
     nodeDefArray = (NodeDefinition*)palloc(sizeof(NodeDefinition) * u_sess->pgxc_cxt.NumDataNodes);
     NodeDefinition* res = NULL;
     for (i = 0; i < u_sess->pgxc_cxt.NumDataNodes; i++) {
-        if (!IS_DISASTER_RECOVER_MODE) {
+        if (!IS_MULTI_DISASTER_RECOVER_MODE) {
             Oid current_primary_oid = PgxcNodeGetPrimaryDNFromMatric(dn_node_arr[i]);
             res = PgxcNodeGetDefinition(current_primary_oid);
         } else {

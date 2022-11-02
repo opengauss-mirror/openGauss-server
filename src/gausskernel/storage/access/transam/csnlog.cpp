@@ -155,7 +155,7 @@ void CSNLogSetCommitSeqNo(TransactionId xid, int nsubxids, TransactionId *subxid
         pageno = TransactionIdToCSNPage(subxids[offset]);
         xid = InvalidTransactionId;
     }
-    if (IS_DISASTER_RECOVER_MODE && COMMITSEQNO_IS_COMMITTED(csn)) {
+    if (IS_MULTI_DISASTER_RECOVER_MODE && COMMITSEQNO_IS_COMMITTED(csn)) {
         UpdateXLogMaxCSN(csn);
     }
 }
@@ -466,6 +466,8 @@ CommitSeqNo CSNLogGetNestCommitSeqNo(TransactionId xid)
 CommitSeqNo CSNLogGetDRCommitSeqNo(TransactionId xid)
 {
     CommitSeqNo csn = InvalidCommitSeqNo;
+    uint32 saveInterruptHoldoffCount = t_thrd.int_cxt.InterruptHoldoffCount;
+    MemoryContext old = CurrentMemoryContext;
     PG_TRY();
     {
         csn = CSNLogGetCommitSeqNo(xid);
@@ -473,6 +475,9 @@ CommitSeqNo CSNLogGetDRCommitSeqNo(TransactionId xid)
     PG_CATCH();
     {
         if (t_thrd.xact_cxt.slru_errcause == SLRU_OPEN_FAILED) {
+            MemoryContextSwitchTo(old);
+            FlushErrorState();
+            t_thrd.int_cxt.InterruptHoldoffCount = saveInterruptHoldoffCount;
             csn = InvalidCommitSeqNo;
         } else {
             PG_RE_THROW();

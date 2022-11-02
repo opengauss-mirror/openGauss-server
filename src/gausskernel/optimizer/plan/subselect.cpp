@@ -1655,6 +1655,21 @@ static bool cte_inline_stream(CommonTableExpr* cte, Query* parse)
      */
     if (cte->cterecursive) { /* Recursive CTE will be handled */
         return false;
+#ifndef ENABLE_MULTIPLE_NODES
+    } else if (cte->ctematerialized == CTEMaterializeDefault && cte->referenced_by_subquery) {
+        /*
+         * if a singly-referenced CTE is referenced by a subquery, it will not be
+         * inline as the default behavior. This is because we do not know if this
+         * subquery can be pulled up. If it cannot be pulled up, we may risk nested
+         * subplan execution, which can be disastrous.
+         */
+        errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
+            NOTPLANSHIPPING_LENGTH,
+            "CTE \"%s\" cannot be inlined. Reason: %s",
+            cte->ctename, "CTE is not inlined by default if referenced by subquery");
+        securec_check_ss_c(sprintf_rc, "\0", "\0");
+        mark_stream_unsupport();
+#endif
     } else if (!cte_inline_common(cte, &buf, parse)) {
         errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
             NOTPLANSHIPPING_LENGTH,
@@ -2921,7 +2936,6 @@ static Bitmapset* finalize_plan(PlannerInfo* root, Plan* plan, Bitmapset* valid_
 
         case T_SeqScan:
         case T_CStoreScan:
-        case T_DfsScan:
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
 #endif   /* ENABLE_MULTIPLE_NODES */
@@ -2971,13 +2985,6 @@ static Bitmapset* finalize_plan(PlannerInfo* root, Plan* plan, Bitmapset* valid_
             (void)finalize_primnode((Node*)((CStoreIndexScan*)plan)->indexqual, &context);
             (void)finalize_primnode((Node*)((CStoreIndexScan*)plan)->indexorderby, &context);
             (void)finalize_primnode((Node*)((CStoreIndexScan*)plan)->cstorequal, &context);
-
-            context.paramids = bms_add_members(context.paramids, scan_params);
-            break;
-        case T_DfsIndexScan:
-            (void)finalize_primnode((Node*)((DfsIndexScan*)plan)->indexqual, &context);
-            (void)finalize_primnode((Node*)((DfsIndexScan*)plan)->indexorderby, &context);
-            (void)finalize_primnode((Node*)((DfsIndexScan*)plan)->cstorequal, &context);
 
             context.paramids = bms_add_members(context.paramids, scan_params);
             break;
@@ -5087,7 +5094,7 @@ static Node* build_op_expr(PlannerInfo* root, int relid, List* pullUpEqualExpr, 
             param->paramtypmod = exprTypmod((Node*)targetExpr);
             param->paramcollid = exprCollation((Node*)targetExpr);
             param->location = -1;
-            param->tableOfIndexType = InvalidOid;
+            param->tableOfIndexTypeList = NULL;
 
             expr = (OpExpr*)make_op(NULL, list_make1(makeString("=")), left_arg, (Node*)param, 0);
 
@@ -5956,6 +5963,33 @@ static void add_targetlist_to_group(Query* query)
     }
 }
 
+
+/**
+ * @Description remove the targetentry in targetlist whose resjunk is true.
+ * 
+ * @in query - query.
+ */
+static void remove_target_not_in_final(Query *query)
+{
+
+    List *old_targetList = NIL;
+    List *new_targetList = NIL;
+
+    old_targetList = query->targetList;
+    query->targetList = NIL;
+    ListCell *lc = NULL;
+
+
+    foreach (lc, old_targetList) {
+        TargetEntry *tg = (TargetEntry *)lfirst(lc);
+        if (tg->resjunk)
+            continue;
+        new_targetList = lappend(new_targetList, tg);
+    }
+    query->targetList = new_targetList;
+}
+
+
 /*
  * @Description: Convert this any sublink to left join.
  * @in root - Per-query information for planning/optimization.
@@ -6007,6 +6041,9 @@ void convert_ORANY_to_join(
 
     /* Judge this quals if only include 'and' and 'equal' oper. */
     if (equal_expr(test_quals)) {
+        /* remove the target entry which will not display in the final target list . */
+        remove_target_not_in_final(sub_select);
+
         /* add all targetlist to query's group clsuse. */
         add_targetlist_to_group(sub_select);
 

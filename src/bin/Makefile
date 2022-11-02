@@ -55,6 +55,7 @@ SUBDIRS = \
 	gsqlerr \
 	pg_basebackup \
 	pg_probackup \
+	gs_persist \
 	gs_plan_simulator
 
 endif

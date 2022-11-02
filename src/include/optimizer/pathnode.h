@@ -123,6 +123,8 @@ extern void get_distribute_keys(PlannerInfo* root, List* joinclauses, Path* oute
     List* desired_keys, bool exact_match);
 extern bool is_distribute_need_on_joinclauses(PlannerInfo* root, List* side_distkeys, List* joinclauses,
     const RelOptInfo* side_rel, const RelOptInfo* other_rel, List** rrinfo);
+extern bool is_distribute_key_on_const(PlannerInfo* root, const RelOptInfo* inner_rel,
+    const RelOptInfo* outer_rel, JoinType jointype);
 
 extern void add_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype, JoinType save_jointype,
     JoinCostWorkspace* workspace, SpecialJoinInfo* sjinfo, SemiAntiJoinFactors* semifactors, Path* outer_path,

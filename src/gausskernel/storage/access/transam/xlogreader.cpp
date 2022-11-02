@@ -1446,7 +1446,7 @@ XLogRecPtr FindMaxLSN(char *workingPath, char *returnMsg, int msgLen, pg_crc32 *
         curLsn = InvalidXLogRecPtr;
         *maxLsnCrc = record->xl_crc;
         if (maxLsnLen != NULL) {
-            *maxLsnLen = record->xl_tot_len;
+            *maxLsnLen = (uint32)(xlogReader->EndRecPtr - xlogReader->ReadRecPtr);
         }
 
         if (maxXactLsn != NULL && XLogRecGetRmid(xlogReader) == RM_XACT_ID) {

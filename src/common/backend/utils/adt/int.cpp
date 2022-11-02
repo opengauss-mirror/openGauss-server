@@ -37,6 +37,7 @@
 #include "common/int.h"
 #include "funcapi.h"
 #include "libpq/pqformat.h"
+#include "miscadmin.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
 
@@ -1219,7 +1220,16 @@ Datum int1in(PG_FUNCTION_ARGS)
 {
     char* num = PG_GETARG_CSTRING(0);
 
-    PG_RETURN_UINT8((uint8)pg_atoi(num, sizeof(uint8), '\0'));
+    if (A_FORMAT_VERSION_10C_V1) {
+        int result = pg_strtoint32(num);
+        if (result < 0 || result > UCHAR_MAX) {
+            ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                errmsg("value \"%s\" is out of range for 8-bit integer", num)));
+        }
+        PG_RETURN_UINT8((uint8)result);
+    } else {
+        PG_RETURN_UINT8((uint8)pg_atoi(num, sizeof(uint8), '\0'));
+    }
 }
 
 // int1out - converts uint8 to "num"

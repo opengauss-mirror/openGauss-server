@@ -447,6 +447,128 @@ begin
 end;
 /
 
+-- test bulk into when attribute exsist varchar withe '()'
+drop table t1;
+create type o1 as (a int, b varchar);
+create table t1(a int, b o1, c varchar2, d number);
+insert into t1 values(1,(11,'sd（de）'),'as(swd)', 1.1);
+insert into t1 values(2,(22,'sd（de）'),'as(swd)(())', 2.2);
+insert into t1 values(3,(33,'sd(de)'),'as(swd)((', 3.3);
+insert into t1 values(4,(44,'sd（de）'),'as(swd)))', 4.4);
+insert into t1 values(5,(55,'sd（de）'),'as(swd))(', 5.5);
+
+-- a. normal use
+declare
+cursor c1 is select * from t1;
+va t1[];
+begin
+open c1;
+fetch c1 bulk collect into va;
+raise info '%',va;
+end;
+/
+
+-- b. use by row
+declare
+cursor c1 is select row(a,b,c,d) from t1;
+va t1[];
+begin
+open c1;
+fetch c1 bulk collect into va;
+raise info '%',va;
+end;
+/
+
+-- c. columns not match
+create or replace procedure p1() as
+declare
+cursor c1 is select * from t1;
+type r1 is record(a number, b text, d int);
+type a1 is varray(10) of r1;
+va a1;
+begin
+open c1;
+fetch c1 bulk collect into va;
+raise info '%',va;
+end;
+/
+
+call p1();
+
+-- c. columns not match with row
+create or replace procedure p1() as
+declare
+cursor c1 is select row(a,b,c,d) from t1;
+type r1 is record(a number, b text, d text);
+type a1 is varray(10) of r1;
+va a1;
+begin
+open c1;
+fetch c1 bulk collect into va;
+raise info '%',va;
+end;
+/
+
+call p1();
+
+-- d. type not match
+create or replace procedure p1() as
+declare
+cursor c1 is select * from t1;
+type r1 is record(a number, b text, c int, d int);
+type a1 is varray(10) of r1;
+va a1;
+begin
+open c1;
+fetch c1 bulk collect into va;
+raise info '%',va;
+end;
+/
+
+call p1();
+
+-- test tuple exsist attribute dropped
+drop type o1 cascade;
+
+declare
+cursor c1 is select * from t1;
+va t1[];
+begin
+open c1;
+fetch c1 bulk collect into va;
+raise info '%',va;
+end;
+/
+
+declare
+cursor c1 is select row(a,c,d) from t1;
+va t1[];
+begin
+open c1;
+fetch c1 bulk collect into va;
+raise info '%',va;
+end;
+/
+
+create or replace procedure p1() as
+declare
+cursor c1 is select * from t1;
+type r1 is record(a number, b text, c int);
+type a1 is varray(10) of r1;
+va a1;
+begin
+open c1;
+fetch c1 bulk collect into va;
+raise info '%',va;
+end;
+/
+
+call p1();
+drop procedure p1();
+drop table t1;
+
+
+
 --------------------------------------------------
 ------------------ END OF TESTS ------------------
 --------------------------------------------------

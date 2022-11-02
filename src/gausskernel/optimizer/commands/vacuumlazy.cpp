@@ -155,7 +155,6 @@ static int cbi_vac_cmp_itemptr(const void* left, const void* right);
 static int vac_cmp_itemptr(const void* left, const void* right);
 extern void vacuum_log_cleanup_info(Relation rel, LVRelStats* vacrelstats);
 static bool HeapPageCheckForUsedLinePointer(Page page);
-static bool UHeapPageCheckForUsedLinePointer(Page page, Relation relation);
 
 /*
  *	lazy_vacuum_rel() -- perform LAZY VACUUM for one heap relation
@@ -187,8 +186,15 @@ void lazy_vacuum_rel(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy 
     MultiXactId	new_min_multi;
     Relation* indexrel = NULL;
     Partition* indexpart = NULL;
-    uint32 statFlag = onerel->parentId;
+    uint32 statFlag = InvalidOid;
     double deleteTupleNum = 0;
+
+    /* the statFlag is used in PgStat_StatTabEntry, seen in pgstat_report_vacuum and pgstat_recv_vacuum */
+    if (RelationIsSubPartitionOfSubPartitionTable(onerel)) {
+        statFlag = onerel->grandparentId;
+    } else if (RelationIsPartition(onerel)) {
+        statFlag = onerel->parentId;
+    }
 
     gstrace_entry(GS_TRC_ID_lazy_vacuum_rel);
     if (RelationIsColStore(onerel)) {
@@ -319,7 +325,7 @@ void lazy_vacuum_rel(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy 
         }
         heap_close(descRel, RowExclusiveLock);
 
-        pgstat_report_vacuum(RelationGetRelid(onerel), onerel->parentId, onerel->rd_rel->relisshared, 0);
+        pgstat_report_vacuum(RelationGetRelid(onerel), statFlag, onerel->rd_rel->relisshared, 0);
         gstrace_exit(GS_TRC_ID_lazy_vacuum_rel);
         return;
     }
@@ -419,7 +425,7 @@ void lazy_vacuum_rel(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy 
     vacrelstats->lock_waiter_detected = false;
     vacrelstats->hasKeepInvisbleTuples = false;
 
-    ereport(LOG, (errmodule(MOD_VACUUM),
+    ereport(GetVacuumLogLevel(), (errmodule(MOD_VACUUM),
         errmsg("%s vacuum rel \"%s.%s\" freeze %ld OldestXmin %lu, FreezeLimit %lu, freezeTableLimit %lu",
             scan_all ? "aggressively" : "normally",
             get_namespace_name(RelationGetNamespace(onerel)),
@@ -772,7 +778,7 @@ static void InitVacPrintStat(VacRelPrintStats *printStats)
 
 static void PrintVacStatsInfo(const VacRelPrintStats *printStats, Relation onerel)
 {
-    ereport(LOG, (errmodule(MOD_VACUUM),
+    ereport(GetVacuumLogLevel(), (errmodule(MOD_VACUUM),
         errmsg("\"%s\": found %.0f removable, %.0f nonremovable row versions in %u out of %u pages",
             RelationGetRelationName(onerel),
             printStats->tupsVacuumed,
@@ -1350,9 +1356,6 @@ static IndexBulkDeleteResult** lazy_scan_heap(
             tupgone = false;
             keepThisInvisibleTuple = false;
 
-            if (u_sess->attr.attr_storage.enable_debug_vacuum)
-                t_thrd.utils_cxt.pRelatedRel = onerel;
-
             switch (HeapTupleSatisfiesVacuum(&tuple, u_sess->cmd_cxt.OldestXmin, buf)) {
                 case HEAPTUPLE_DEAD:
 
@@ -1445,9 +1448,6 @@ static IndexBulkDeleteResult** lazy_scan_heap(
                 lazy_record_dead_tuple(vacrelstats, &(tuple.t_self));
                 HeapTupleHeaderAdvanceLatestRemovedXid(&tuple, &vacrelstats->latestRemovedXid);
 
-                if (u_sess->attr.attr_storage.enable_debug_vacuum)
-                    elogVacuumInfo(onerel, &tuple, "lazy_scan_heap", u_sess->cmd_cxt.OldestXmin);
-
                 tups_vacuumed += 1;
                 has_dead_tuples = true;
             } else if (keepThisInvisibleTuple) {
@@ -1471,8 +1471,6 @@ static IndexBulkDeleteResult** lazy_scan_heap(
                                       &changedMultiXid))
                     frozen[nfrozen++] = offnum;
             }
-
-            t_thrd.utils_cxt.pRelatedRel = NULL;
         } /* scan along page */
 
         /*
@@ -2166,9 +2164,8 @@ count_nondeletable_pages(Relation onerel, LVRelStats *vacrelstats)
         LockBuffer(buf, BUFFER_LOCK_SHARE);
 
         page = BufferGetPage(buf);
-
-        hastup = RelationIsUstoreFormat(onerel) ? UHeapPageCheckForUsedLinePointer(page, onerel) :
-                                                          HeapPageCheckForUsedLinePointer(page);
+        Assert(!RelationIsUstoreFormat(onerel));
+        hastup = HeapPageCheckForUsedLinePointer(page);
 
         UnlockReleaseBuffer(buf);
 
@@ -2333,78 +2330,6 @@ static int vac_cmp_itemptr(const void* left, const void* right)
     if (loff > roff)
         return 1;
     return 0;
-}
-
-void elogVacuumInfo(Relation rel, HeapTuple tuple, char* funcName, TransactionId oldestxmin)
-{
-    bool ignore = false;
-    HeapTupleHeader htup = tuple->t_data;
-    /* Just log info of pg_statistic and related toast table */
-    if ((RelationGetRelid(rel) == StatisticRelationId) ||
-        (!RelationIsPartition(rel) && (IsToastRelationbyOid(RelationGetRelid(rel))) &&
-            (pg_toast_get_baseid(RelationGetRelid(rel), &ignore) == StatisticRelationId)) ||
-        (RelationGetRelid(rel) == AttributeRelationId) || (RelationGetRelid(rel) == TypeRelationId) ||
-        (RelationGetRelid(rel) == RelationRelationId) || (RelationGetRelid(rel) == PartitionRelationId)) {
-        if (HeapTupleHeaderHasOid(htup))
-            ereport(LOG,
-                (errmsg("In %s: xid:" XID_FMT ", pid: %lu; tuple: oid:%u, xmin:" XID_FMT ", xmax:" XID_FMT
-                        ", ctid:%u/%hu,"
-                        "infomask:%hu, infomask2:%hu; RecentXmin:" XID_FMT ", OldestXmin:" XID_FMT
-                        ", useLocalSnapshot:%d, relationid: %u.",
-                    funcName,
-                    t_thrd.pgxact->xid,
-                    t_thrd.proc->pid,
-                    HeapTupleHeaderGetOid(htup),
-                    HeapTupleGetRawXmin(tuple),
-                    HeapTupleGetRawXmax(tuple),
-                    ItemPointerGetBlockNumber(&htup->t_ctid),
-                    ItemPointerGetOffsetNumber(&htup->t_ctid),
-                    htup->t_infomask,
-                    htup->t_infomask2,
-                    u_sess->utils_cxt.RecentXmin,
-                    oldestxmin,
-                    t_thrd.xact_cxt.useLocalSnapshot,
-                    RelationGetRelid(rel))));
-        else
-            ereport(LOG,
-                (errmsg("In %s: xid:" XID_FMT ", pid: %lu; tuple: xmin:" XID_FMT ", xmax:" XID_FMT ", ctid:%u/%hu,"
-                        "infomask:%hu, infomask2:%hu; RecentXmin:" XID_FMT ", OldestXmin:" XID_FMT
-                        ", useLocalSnapshot:%d, relationid: %u.",
-                    funcName,
-                    t_thrd.pgxact->xid,
-                    t_thrd.proc->pid,
-                    HeapTupleGetRawXmin(tuple),
-                    HeapTupleGetRawXmax(tuple),
-                    ItemPointerGetBlockNumber(&htup->t_ctid),
-                    ItemPointerGetOffsetNumber(&htup->t_ctid),
-                    htup->t_infomask,
-                    htup->t_infomask2,
-                    u_sess->utils_cxt.RecentXmin,
-                    oldestxmin,
-                    t_thrd.xact_cxt.useLocalSnapshot,
-                    RelationGetRelid(rel))));
-    }
-}
-
-/*
- * Return true if there is any used line pointer on the page.
- * Assume the caller has atleast a shared lock
- */
-static bool UHeapPageCheckForUsedLinePointer(Page page, Relation relation)
-{
-    if (PageIsNew(page) || UPageIsEmpty((UHeapPageHeaderData *)page)) {
-        return false;
-    }
-
-    OffsetNumber maxoff = UHeapPageGetMaxOffsetNumber((char *)page);
-    for (OffsetNumber offnum = FirstOffsetNumber; offnum <= maxoff; offnum = OffsetNumberNext(offnum)) {
-        RowPtr *rp = UPageGetRowPtr(page, offnum);
-        if (RowPtrIsUsed(rp)) {
-            return true;
-        }
-    }
-
-    return false;
 }
 
 /*

@@ -177,7 +177,7 @@ struct ParseState {
     bool p_hasSynonyms;
     Relation p_target_relation;
     RangeTblEntry* p_target_rangetblentry;
-    bool p_is_case_when;
+    bool p_is_decode;
 
     /*
      * used for start with...connect by rewrite

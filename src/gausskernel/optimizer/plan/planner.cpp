@@ -86,6 +86,8 @@
 #endif
 #include "optimizer/stream_remove.h"
 #include "executor/node/nodeModifyTable.h"
+#include "instruments/instr_statement.h"
+
 
 #ifndef MIN
 #define MIN(A, B) ((B) < (A) ? (B) : (A))
@@ -105,11 +107,6 @@ const char* ESTIMATION_ITEM = "EstimationItem";
 
 /* From experiment, we assume 2.5 times dn number of distinct value can give all dn work to do */
 #define DN_MULTIPLIER_FOR_SATURATION 2.5
-
-#define PLAN_HAS_DELTA(plan)                                                                          \
-    ((IsA((plan), CStoreScan) && HDFS_STORE == ((CStoreScan*)(plan))->relStoreLocation) \
-		||(IsA((plan), CStoreIndexScan) && HDFS_STORE == ((CStoreIndexScan*)(plan)->relStoreLocation) \
-		|| IsA((plan), DfsScan) || IsA((plan), DfsIndexScan))
 
 /* For performance reasons, memory context will be dropped only when the totalSpace larger than 1MB. */
 #define MEMORY_CONTEXT_DELETE_THRESHOLD (1024 * 1024)
@@ -138,7 +135,6 @@ extern Node* preprocess_expression(PlannerInfo* root, Node* expr, int kind);
 static Plan* inheritance_planner(PlannerInfo* root);
 static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction);
 static void preprocess_rowmarks(PlannerInfo* root);
-static void estimate_limit_offset_count(PlannerInfo* root, int64* offset_est, int64* count_est);
 static double preprocess_limit(PlannerInfo* root, double tuple_fraction, int64* offset_est, int64* count_est);
 
 static bool grouping_is_can_hash(Query* parse, AggClauseCosts* agg_costs);
@@ -905,6 +901,9 @@ PlannedStmt* standard_planner(Query* parse, int cursorOptions, ParamListInfo bou
 
     result->query_string = NULL;
     result->MaxBloomFilterNum = root->glob->bloomfilter.bloomfilter_index + 1;
+    if (instr_stmt_plan_need_report_cause_type())
+        result->cause_type = instr_stmt_plan_get_cause_type();
+
     /* record which suplan belongs to which thread */
 #ifdef ENABLE_MULTIPLE_NODES
     if (IS_STREAM_PLAN) {
@@ -1088,7 +1087,7 @@ bool PreprocessOperator(Node* node, void* context)
 
                         errno_t errorno = EOK;
                         errorno = memcpy_s(node, sizeof(OpExpr), (Node*)newNode, sizeof(OpExpr));
-                        securec_check_c(errorno, "\0", "\0");
+                        securec_check(errorno, "\0", "\0");
                     }
 
                     pfree_ext(newNode);
@@ -1119,21 +1118,21 @@ void check_is_support_recursive_cte(PlannerInfo* root)
 
     /* 1. Installation nodegroup, compute nodegroup, single nodegroup. */
     if (different_nodegroup_count > 2) {
-       securec_check_ss_c(sprintf_rc, "\0", "\0");
+       securec_check_ss(sprintf_rc, "\0", "\0");
        mark_stream_unsupport();
        return;
     }   
 
     /* 2. Installation nodegroup, compute nodegroup. */
     if (different_nodegroup_count == 2 && ng_get_single_node_distribution() == NULL) {
-       securec_check_ss_c(sprintf_rc, "\0", "\0");
+       securec_check_ss(sprintf_rc, "\0", "\0");
        mark_stream_unsupport();
        return;
     }
 
     /* 3. Installation nodegroup, single nodegroup which is used */
     if (different_nodegroup_count == 2 && u_sess->opt_cxt.is_dngather_support == true) {
-       securec_check_ss_c(sprintf_rc, "\0", "\0");
+       securec_check_ss(sprintf_rc, "\0", "\0");
        mark_stream_unsupport();
        return;
     }
@@ -1232,7 +1231,7 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
 /* We used DEBUG5 log to print SQL after each rewrite */
 #define DEBUG_QRW(message)                                                                      \
     do {                                                                                        \
-        if (log_min_messages <= DEBUG5) {                                                       \
+        if (log_min_messages <= DEBUG5 && module_logging_is_on(MOD_OPT_REWRITE)) {              \
             initStringInfo(&buf);                                                               \
             deparse_query(root->parse, &buf, NIL, false, false, NULL, true);                    \
             ereport(DEBUG5, (errmodule(MOD_OPT_REWRITE), errmsg("%s: %s", message, buf.data))); \
@@ -1668,8 +1667,11 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
      * Note that both havingQual and parse->jointree->quals are in
      * implicitly-ANDed-list form at this point, even though they are declared
      * as Node *.
+     * Also, HAVING quals should not be transfered into WHERE clauses, since
+     * the rownum is expected to be assigned to tuples before filtered by
+     * other HAVING quals.
      */
-    if (!parse->unique_check)  {
+    if (!parse->unique_check && !expression_contains_rownum((Node*)parse->havingQual))  {
         newHaving = NIL;
         foreach(l, (List *) parse->havingQual)  {
             Node       *havingclause = (Node *)lfirst(l);
@@ -1719,6 +1721,7 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
     if (hasOuterJoins) {
         reduce_outer_joins(root);
         DEBUG_QRW("After outer-to-inner conversion");
+#ifdef ENABLE_MULTIPLE_NODES
         if (IS_STREAM_PLAN) {
             bool support_rewrite = true;
             if (!fulljoin_2_left_union_right_anti_support(root->parse))
@@ -1744,6 +1747,7 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
                 DEBUG_QRW("After full join conversion");
             }
         }
+#endif
     }
 
     /*
@@ -1782,7 +1786,6 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
             Oid taleOid = rt_fetch(parse->resultRelation, parse->rtable)->relid;
             bool partKeyUpdated = targetListHasPartitionKey(parse->targetList, taleOid);
             mainRel = RelationIdGetRelation(taleOid);
-            bool isDfsStore = RelationIsDfsStore(mainRel);
             RelationClose(mainRel);
 
             /*
@@ -1816,7 +1819,7 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
                 parse->mergeSourceTargetList,
                 parse->mergeActionList,
                 parse->upsertClause,
-                isDfsStore);
+                parse->hintState);
 #else
             plan = (Plan*)make_modifytable(parse->commandType,
                 parse->canSetTag,
@@ -1830,7 +1833,7 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
                 parse->mergeSourceTargetList,
                 parse->mergeActionList,
                 parse->upsertClause,
-                isDfsStore);
+                parse->hintState);
 #endif
 #ifdef PGXC
             plan = pgxc_make_modifytable(root, plan);
@@ -2104,7 +2107,6 @@ static Plan* inheritance_planner(PlannerInfo* root)
     List* returningLists = NIL;
     List* rowMarks = NIL;
     ListCell* lc = NULL;
-    bool isDfsStore = false;
     bool partKeyUpdated = false;
     Oid taleOid = rt_fetch(parse->resultRelation, parse->rtable)->relid;
     Relation mainRel = NULL;
@@ -2116,7 +2118,6 @@ static Plan* inheritance_planner(PlannerInfo* root)
         "The relation descriptor is invalid"
         "when generating a query plan and the result relation is an inherient plan.");
 
-    isDfsStore = RelationIsDfsStore(mainRel);
     RelationClose(mainRel);
 
     /*
@@ -2332,11 +2333,11 @@ static Plan* inheritance_planner(PlannerInfo* root)
         rowMarks,
         SS_assign_special_param(root),
         partKeyUpdated,
-        isDfsStore,
         0,
         NULL,
         NULL,
-        NULL);
+        NULL,
+        parse->hintState);
 #else
     return make_modifytables(parse->commandType,
         parse->canSetTag,
@@ -2346,11 +2347,11 @@ static Plan* inheritance_planner(PlannerInfo* root)
         rowMarks,
         SS_assign_special_param(root),
         partKeyUpdated,
-        isDfsStore,
         0,
         NULL,
         NULL,
-        NULL);
+        NULL,
+        parse->hintState);
 #endif
 }
 
@@ -2527,19 +2528,30 @@ static void rebuild_pathkey_for_groupingSet(
 
 static inline Path* choose_best_path(bool use_cheapest_path, PlannerInfo* root, Path* cheapest_path, Path* sorted_path)
 {
-        Path* best_path;
-        if (use_cheapest_path) {
-            best_path = cheapest_path;
-        }
-        else {
-            best_path = sorted_path;
-            ereport(DEBUG2, (errmodule(MOD_OPT), (errmsg("Use presorted path instead of cheapest path."))));
-            /* print more details */
-            if (log_min_messages <= DEBUG2)
-                debug1_print_new_path(root, best_path, false);
-        }
+    Path* best_path;
 
-        return best_path;
+    if (sorted_path != NULL && cheapest_path->hint_value > sorted_path->hint_value) {
+        ereport(DEBUG2, (errmodule(MOD_OPT), (errmsg("Use cheapest path for hint."))));
+        return cheapest_path;
+    } else if (sorted_path != NULL && sorted_path->hint_value > cheapest_path->hint_value) {
+        ereport(DEBUG2, (errmodule(MOD_OPT), (errmsg("Use presorted path for hint."))));
+        if (log_min_messages <= DEBUG2) {
+            debug1_print_new_path(root, sorted_path, false);
+        }
+        return sorted_path;
+    }
+
+    if (use_cheapest_path) {
+        best_path = cheapest_path;
+    } else {
+        best_path = sorted_path;
+        ereport(DEBUG2, (errmodule(MOD_OPT), (errmsg("Use presorted path instead of cheapest path."))));
+        /* print more details */
+        if (log_min_messages <= DEBUG2)
+            debug1_print_new_path(root, best_path, false);
+    }
+
+    return best_path;
 }
 
 #ifdef ENABLE_MULTIPLE_NODES
@@ -3299,7 +3311,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                         errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
                             NOTPLANSHIPPING_LENGTH,
                             "set-valued function + groupingsets");
-                        securec_check_ss_c(sprintf_rc, "\0", "\0");
+                        securec_check_ss(sprintf_rc, "\0", "\0");
                         mark_stream_unsupport();
                     }
 
@@ -3307,7 +3319,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                         errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
                             NOTPLANSHIPPING_LENGTH,
                             "var in quals doesn't exist in targetlist");
-                        securec_check_ss_c(sprintf_rc, "\0", "\0");
+                        securec_check_ss(sprintf_rc, "\0", "\0");
                         mark_stream_unsupport();
                     }
                 }
@@ -3411,7 +3423,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                         errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
                             NOTPLANSHIPPING_LENGTH,
                             "\"set-valued expression in qual/targetlist + two-level Groupagg\"");
-                        securec_check_ss_c(sprintf_rc, "\0", "\0");
+                        securec_check_ss(sprintf_rc, "\0", "\0");
                         mark_stream_unsupport();
                     }
 
@@ -3559,7 +3571,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                             errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
                                 NOTPLANSHIPPING_LENGTH,
                                 "\"Count(Distinct) + Group by\" on redistribution unsupported data type");
-                            securec_check_ss_c(sprintf_rc, "\0", "\0");
+                            securec_check_ss(sprintf_rc, "\0", "\0");
                             mark_stream_unsupport();
                         }
                         need_sort_for_grouping = true;
@@ -3594,7 +3606,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                                 errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
                                     NOTPLANSHIPPING_LENGTH,
                                     "multi count(distinct) or agg which need order can not ship.");
-                                securec_check_ss_c(sprintf_rc, "\0", "\0");
+                                securec_check_ss(sprintf_rc, "\0", "\0");
                                 mark_stream_unsupport();
                             }
                         } else if (agg_costs.exprAggs != NIL) {
@@ -3611,7 +3623,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                                 errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
                                     NOTPLANSHIPPING_LENGTH,
                                     "\"Count(Distinct)\" on redistribution unsupported data type");
-                                securec_check_ss_c(sprintf_rc, "\0", "\0");
+                                securec_check_ss(sprintf_rc, "\0", "\0");
                                 mark_stream_unsupport();
                             } else if (result_plan->dop > 1) {
                                 result_plan =
@@ -3629,7 +3641,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                     errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
                         NOTPLANSHIPPING_LENGTH,
                         "\"Aggregate on polymorphic argument type \"");
-                    securec_check_ss_c(sprintf_rc, "\0", "\0");
+                    securec_check_ss(sprintf_rc, "\0", "\0");
                     mark_stream_unsupport();
                 }
 
@@ -3639,7 +3651,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                     errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
                         NOTPLANSHIPPING_LENGTH,
                         "\"Subplan in having qual + two-level Groupagg\"");
-                    securec_check_ss_c(sprintf_rc, "\0", "\0");
+                    securec_check_ss(sprintf_rc, "\0", "\0");
                     mark_stream_unsupport();
                 }
 
@@ -3648,7 +3660,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                     errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
                         NOTPLANSHIPPING_LENGTH,
                         "\"set-valued expression in qual/targetlist + two-level Groupagg\"");
-                    securec_check_ss_c(sprintf_rc, "\0", "\0");
+                    securec_check_ss(sprintf_rc, "\0", "\0");
                     mark_stream_unsupport();
                 }
 
@@ -3688,7 +3700,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                         errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
                             NOTPLANSHIPPING_LENGTH,
                             "\"set-valued expression in qual/targetlist + two-level Groupagg\"");
-                        securec_check_ss_c(sprintf_rc, "\0", "\0");
+                        securec_check_ss(sprintf_rc, "\0", "\0");
                         mark_stream_unsupport();
                     }
 
@@ -3759,7 +3771,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                         errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
                             NOTPLANSHIPPING_LENGTH,
                             "\"set-valued expression in qual/targetlist + two-level Groupagg\"");
-                        securec_check_ss_c(sprintf_rc, "\0", "\0");
+                        securec_check_ss(sprintf_rc, "\0", "\0");
                         mark_stream_unsupport();
                     }
 
@@ -4093,7 +4105,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                     errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
                         NOTPLANSHIPPING_LENGTH,
                         "\"set-valued expression in qual/targetlist + two-level distinct\"");
-                    securec_check_ss_c(sprintf_rc, "\0", "\0");
+                    securec_check_ss(sprintf_rc, "\0", "\0");
                     mark_stream_unsupport();
                 }
 
@@ -4624,7 +4636,7 @@ static Plan* build_groupingsets_plan(PlannerInfo* root, Query* parse, List** tli
                     errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
                         NOTPLANSHIPPING_LENGTH,
                         "\"Count(Distinct)\" on redistribution unsupported data type");
-                    securec_check_ss_c(sprintf_rc, "\0", "\0");
+                    securec_check_ss(sprintf_rc, "\0", "\0");
                     mark_stream_unsupport();
                 }
             }
@@ -4647,7 +4659,7 @@ static Plan* build_groupingsets_plan(PlannerInfo* root, Query* parse, List** tli
                 errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
                     NOTPLANSHIPPING_LENGTH,
                     "\"String_agg\" or \"Array_agg\" or \"Listagg\" + \"Grouping sets\"");
-                securec_check_ss_c(sprintf_rc, "\0", "\0");
+                securec_check_ss(sprintf_rc, "\0", "\0");
                 mark_stream_unsupport();
             }
         }
@@ -5024,7 +5036,8 @@ static void separate_rowmarks(PlannerInfo* root)
  * Try to obtain the clause values.  We use estimate_expression_value
  * primarily because it can sometimes do something useful with Params.
  */
-static void estimate_limit_offset_count(PlannerInfo* root, int64* offset_est, int64* count_est)
+void estimate_limit_offset_count(PlannerInfo* root, int64* offset_est, int64* count_est,
+    RelOptInfo* final_rel, bool* fix_param)
 {
     Query* parse = root->parse;
     Node* est = NULL;
@@ -5047,7 +5060,14 @@ static void estimate_limit_offset_count(PlannerInfo* root, int64* offset_est, in
                 }
             }
         } else {
-            *count_est = -1; /* can't estimate */
+            if (final_rel == NULL) {
+                *count_est = -1; /* can't estimate */
+            } else {
+                *count_est = clamp_row_est(adjust_limit_row_count(final_rel->rows));
+                if (fix_param != NULL) {
+                    *fix_param = true;
+                }
+            }
         }
     } else {
         *count_est = 0; /* not present */
@@ -5066,7 +5086,14 @@ static void estimate_limit_offset_count(PlannerInfo* root, int64* offset_est, in
                 }
             }
         } else {
-            *offset_est = -1; /* can't estimate */
+            if (final_rel == NULL) {
+                *offset_est = -1; /* can't estimate */
+            } else {
+                *offset_est = Min(max_unknown_offset, clamp_row_est(final_rel->rows * 0.10));
+                if (fix_param != NULL) {
+                    *fix_param = true;
+                }
+            }
         }
     } else {
         *offset_est = 0; /* not present */
@@ -5411,7 +5438,7 @@ List* extract_rollup_sets(List* groupingSets)
                 adjacency[i] = (short*)palloc((n_adj + 1) * sizeof(short));
                 errno_t errorno =
                     memcpy_s(adjacency[i], (n_adj + 1) * sizeof(short), adjacency_buf, (n_adj + 1) * sizeof(short));
-                securec_check_c(errorno, "\0", "\0");
+                securec_check(errorno, "\0", "\0");
             } else
                 adjacency[i] = NULL;
 
@@ -6385,7 +6412,7 @@ static bool choose_hashed_grouping(PlannerInfo* root, double tuple_fraction, dou
                     errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
                         NOTPLANSHIPPING_LENGTH,
                         "\"Count(Distinct)\" on redistribution unsupported data type");
-                    securec_check_ss_c(sprintf_rc, "\0", "\0");
+                    securec_check_ss(sprintf_rc, "\0", "\0");
                     mark_stream_unsupport();
                 }
             }
@@ -8290,8 +8317,6 @@ static bool has_column_store_relation(Plan* top_plan)
 {
     switch (nodeTag(top_plan)) {
         /* Node which vec_output is true */
-        case T_DfsScan:
-        case T_DfsIndexScan:
         case T_CStoreScan:
         case T_CStoreIndexScan:
         case T_CStoreIndexCtidScan:
@@ -8415,8 +8440,6 @@ bool is_vector_scan(Plan* plan)
     }
     switch (nodeTag(plan)) {
         case T_CStoreScan:
-        case T_DfsScan:
-        case T_DfsIndexScan:
         case T_CStoreIndexScan:
         case T_CStoreIndexCtidScan:
         case T_CStoreIndexHeapScan:
@@ -8506,7 +8529,7 @@ bool vector_engine_unsupport_expression_walker(Node* node, VectorPlanContext* pl
         case T_SubPlan: {
             SubPlan* subplan = (SubPlan*)node;
             /* make sure that subplan return type must supported by vector engine */
-            if (!IsTypeSupportedByCStore(subplan->firstColType)) {
+            if (!IsTypeSupportedByVectorEngine(subplan->firstColType)) {
                 return true;
             }
             break;
@@ -8522,7 +8545,7 @@ bool vector_engine_unsupport_expression_walker(Node* node, VectorPlanContext* pl
 	     * the result value is not passed up for calculation.
 	     */
             if (planContext && !planContext->currentExprIsFilter
-                && !IsTypeSupportedByCStore(exprType(node))) {
+                && !IsTypeSupportedByVectorEngine(exprType(node))) {
                 return true;
             }
             break;
@@ -8694,14 +8717,14 @@ bool CheckTypeSupportRowToVec(List* targetlist, int errLevel)
 {
     ListCell* cell = NULL;
     TargetEntry* entry = NULL;
-    Var* var = NULL;
+
     foreach(cell, targetlist) {
         entry = (TargetEntry*)lfirst(cell);
         if (IsA(entry->expr, Var)) {
-            var = (Var*)entry->expr;
+            Var* var = (Var*)entry->expr;
             if (var->varattno > 0 && var->varoattno > 0
                 && var->vartype != TIDOID // cstore support for hidden column CTID
-                && !IsTypeSupportedByCStore(var->vartype)) {
+                && !IsTypeSupportedByVectorEngine(var->vartype)) {
                 ereport(errLevel, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("type \"%s\" is not supported in column store",
                            format_type_with_typemod(var->vartype, var->vartypmod))));
@@ -8709,6 +8732,7 @@ bool CheckTypeSupportRowToVec(List* targetlist, int errLevel)
             }
         }
     }
+
     return true;
 }
 
@@ -9107,16 +9131,13 @@ static bool vector_engine_walker_internal(Plan* result_plan, bool check_rescan, 
         case T_BitmapHeapScan:
         case T_TidScan:
         case T_FunctionScan: {
-            if (!planContext->forceVectorEngine || !CheckTypeSupportRowToVec(result_plan->targetlist, DEBUG2)) {
+            if (!planContext->forceVectorEngine) {
                 return true;
             }
 
             return CostVectorScan<false>((Scan*)result_plan, planContext);
         }
         case T_ValuesScan: {
-            if (!CheckTypeSupportRowToVec(result_plan->targetlist, DEBUG2)) {
-                return true;
-            }
             break;
         }
         case T_CteScan:
@@ -9158,9 +9179,6 @@ static bool vector_engine_walker_internal(Plan* result_plan, bool check_rescan, 
                 return true;
             if (vector_engine_walker_internal(result_plan->lefttree, check_rescan, planContext))
                 return true;
-            if (!CheckTypeSupportRowToVec(result_plan->targetlist, DEBUG2)) {
-                return true;
-            }
         } break;
         case T_PartIterator:
         case T_SetOp:
@@ -9370,8 +9388,6 @@ static Plan* fallback_plan(Plan* result_plan)
     switch (nodeTag(result_plan)) {
         /* Add Row Adapter */
         case T_CStoreScan:
-        case T_DfsScan:
-        case T_DfsIndexScan:
         case T_CStoreIndexScan:
         case T_CStoreIndexHeapScan:
         case T_CStoreIndexCtidScan:
@@ -9507,8 +9523,6 @@ Plan* vectorize_plan(Plan* result_plan, bool ignore_remotequery, bool forceVecto
         /*
          * For Scan node, just leave it.
          */
-        case T_DfsScan:
-        case T_DfsIndexScan:
         case T_CStoreScan:
         case T_CStoreIndexCtidScan:
         case T_CStoreIndexHeapScan:
@@ -9760,8 +9774,6 @@ static Plan* build_vector_plan(Plan* plan)
         case T_Agg:
             plan->type = T_VecAgg;
             break;
-        case T_DfsScan:
-        case T_DfsIndexScan:
         case T_CStoreScan:
         case T_CStoreIndexCtidScan:
         case T_CStoreIndexHeapScan:
@@ -9842,7 +9854,7 @@ bool CheckColumnsSuportedByBatchMode(List *targetList, List *qual)
 
         foreach (vl, vars) {
             Var *var = (Var *)lfirst(vl);
-            if (var->varattno < 0 || !IsTypeSupportedByCStore(var->vartype)) {
+            if (var->varattno < 0 || !IsTypeSupportedByVectorEngine(var->vartype)) {
                 return false;
             }
         }
@@ -9852,7 +9864,7 @@ bool CheckColumnsSuportedByBatchMode(List *targetList, List *qual)
     vars = pull_var_clause((Node *)qual, PVC_RECURSE_AGGREGATES, PVC_RECURSE_PLACEHOLDERS);
     foreach (l, vars) {
         Var *var = (Var *)lfirst(l);
-        if (var->varattno < 0 || !IsTypeSupportedByCStore(var->vartype)) {
+        if (var->varattno < 0 || !IsTypeSupportedByVectorEngine(var->vartype)) {
             return false;
         }
     }
@@ -11114,12 +11126,12 @@ static Plan* generate_hashagg_plan(PlannerInfo* root, Plan* plan, List* final_li
                     errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
                         NOTPLANSHIPPING_LENGTH,
                         "\"Subplan in having qual + Group by\" on redistribution unsupported data type");
-                    securec_check_ss_c(sprintf_rc, "\0", "\0");
+                    securec_check_ss(sprintf_rc, "\0", "\0");
                 } else {
                     errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
                         NOTPLANSHIPPING_LENGTH,
                         "\"String_agg/Array_agg/Listagg + Group by\" on redistribution unsupported data type");
-                    securec_check_ss_c(sprintf_rc, "\0", "\0");
+                    securec_check_ss(sprintf_rc, "\0", "\0");
                 }
                 mark_stream_unsupport();
                 *needs_stream = false;
@@ -11693,7 +11705,7 @@ static Plan* get_count_distinct_partial_plan(PlannerInfo* root, Plan* result_pla
         errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
             NOTPLANSHIPPING_LENGTH,
             "\"Subplan in having qual + Count(distinct)\"");
-        securec_check_ss_c(sprintf_rc, "\0", "\0");
+        securec_check_ss(sprintf_rc, "\0", "\0");
         mark_stream_unsupport();
     }
 
@@ -11721,7 +11733,7 @@ static Plan* get_count_distinct_partial_plan(PlannerInfo* root, Plan* result_pla
         errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
             NOTPLANSHIPPING_LENGTH,
             "\"Count(Distinct)\" on redistribution unsupported data type");
-        securec_check_ss_c(sprintf_rc, "\0", "\0");
+        securec_check_ss(sprintf_rc, "\0", "\0");
         mark_stream_unsupport();
         /* Set final_tlist to plan targetlist, this plan will be discarded. */
         result_plan->targetlist = *final_tlist;
@@ -14373,9 +14385,6 @@ void check_gtm_free_plan(PlannedStmt *stmt, int elevel)
     /* no need to check on DN for now */
     if (IS_PGXC_DATANODE || IS_SINGLE_NODE)
         return;
-
-    /* In redistribution, the user's distributed query is allowed. */
-    elevel = (elevel > WARNING && ClusterResizingInProgress()) ? WARNING : elevel;
 
     FindNodesContext context;
 

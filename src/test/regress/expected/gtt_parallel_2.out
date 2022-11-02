@@ -330,4 +330,10 @@ select * from gtt_with_seq;
   1 |  2
 (1 row)
 
+insert into gtt4 values(1);
+alter index gtt_a_idx unusable;
+reindex index gtt_a_idx;
+insert into gtt4 values(1); -- should fail
+ERROR:  duplicate key value violates unique constraint "gtt_a_idx"
+DETAIL:  Key (a)=(1) already exists.
 reset search_path;

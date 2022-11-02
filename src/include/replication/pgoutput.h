@@ -13,6 +13,7 @@
 #ifndef PGOUTPUT_H
 #define PGOUTPUT_H
 
+#include "replication/logical.h"
 #include "utils/palloc.h"
 
 typedef struct PGOutputData {

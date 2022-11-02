@@ -132,4 +132,7 @@ ReplicationOriginLock 122
 LogicalRepWorkerLock 123
 XGBoostLibLock 124
 NgroupDestoryLock 125
-AuditIndexFileLock 126
+SQLAdvisorLock 126
+AuditIndexFileLock 127
+GsStackLock 128
+DropArchiveSlotLock 129

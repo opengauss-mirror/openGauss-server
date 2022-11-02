@@ -1368,10 +1368,12 @@ void ReleaseDebugCommIdx(int idx)
         return;
     Assert(g_instance.pldebug_cxt.debug_comm[idx].Used());
     PlDebuggerComm* comm = &g_instance.pldebug_cxt.debug_comm[idx];
+    char* tmpBuf = NULL;
     AutoMutexLock debuglock(&comm->mutex);
     debuglock.lock();
     /* clean used msg */
-    pfree_ext(comm->buffer);
+    tmpBuf = comm->buffer;
+    comm->buffer = NULL;
     comm->hasClientFlushed = false;
     comm->hasServerFlushed = false;
     comm->IsServerWaited = false;
@@ -1386,6 +1388,7 @@ void ReleaseDebugCommIdx(int idx)
     comm->bufLen = 0;
     comm->bufSize = 0;
     debuglock.unLock();
+    pfree_ext(tmpBuf);
     /* release debug comm */
     (void)LWLockAcquire(PldebugLock, LW_EXCLUSIVE);
     comm->hasUsed = false;
@@ -1593,26 +1596,34 @@ void SendUnixMsg(int comm_idx, const char* val, int len, bool is_client)
     PlDebuggerComm* debug_comm = &g_instance.pldebug_cxt.debug_comm[comm_idx];
     /* lock */
     (void)MemoryContextSwitchTo(g_instance.pldebug_cxt.PldebuggerCxt);
-    AutoMutexLock debuglock(&debug_comm->mutex);
-    debuglock.lock();
-    Assert(debug_comm->Used());
-    if (is_client) {
-        Assert(debug_comm->hasClientFlushed == false);
-        debug_comm->hasClientFlushed = false;
-    } else {
-        Assert(debug_comm->hasServerFlushed == false);
-        debug_comm->hasServerFlushed = false;
+    pthread_mutex_lock(&debug_comm->mutex);
+    PG_TRY();
+    {
+        Assert(debug_comm->Used());
+        if (is_client) {
+            Assert(debug_comm->hasClientFlushed == false);
+            debug_comm->hasClientFlushed = false;
+        } else {
+            Assert(debug_comm->hasServerFlushed == false);
+            debug_comm->hasServerFlushed = false;
+        }
+        Assert(debug_comm->bufLen == 0);
+        /* resize */
+        debug_comm->buffer = ResizeDebugCommBufferIfNecessary(debug_comm->buffer, &debug_comm->bufSize, len);
+        /* copy buffer */
+        int rc = 0;
+        rc = memcpy_s(debug_comm->buffer, debug_comm->bufSize, val, len);
+        securec_check(rc, "\0", "\0");
+        debug_comm->bufLen += len;
+        /* unlock */
+        pthread_mutex_unlock(&debug_comm->mutex);
     }
-    Assert(debug_comm->bufLen == 0);
-    /* resize */
-    debug_comm->buffer = ResizeDebugCommBufferIfNecessary(debug_comm->buffer, &debug_comm->bufSize, len);
-    /* copy buffer */
-    int rc = 0;
-    rc = memcpy_s(debug_comm->buffer, debug_comm->bufSize, val, len);
-    securec_check(rc, "\0", "\0");
-    debug_comm->bufLen += len;
-    /* unlock */
-    debuglock.unLock();
+    PG_CATCH();
+    {
+        pthread_mutex_unlock(&debug_comm->mutex);
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
     PrintDebugBuffer(val, len);
 }
 

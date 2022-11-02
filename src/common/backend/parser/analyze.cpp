@@ -222,6 +222,14 @@ Query* parse_analyze_varparams(Node* parseTree, const char* sourceText, Oid** pa
     pfree_ext(pstate->p_ref_hook_state);
     free_parsestate(pstate);
 
+    /* For plpy CTAS query. CTAS is a recursive call. CREATE query is the first rewrited.
+     * thd 2nd rewrited query is INSERT SELECT. Without this attribute, DB will have
+     * an error that has no idea about $x when INSERT SELECT query is analyzed.
+     */
+    Assert(PointerIsValid(query));
+    query->fixed_paramTypes = *paramTypes;
+    query->fixed_numParams = *numParams;
+
     return query;
 }
 
@@ -792,6 +800,7 @@ static bool IsSupportDeleteLimit(Relation rel, bool hasLimit)
 static Query* transformDeleteStmt(ParseState* pstate, DeleteStmt* stmt)
 {
     Query* qry = makeNode(Query);
+    ParseNamespaceItem *nsitem = NULL;
     Node* qual = NULL;
     /*
      * Check the delete object name whether is 'paln_table'
@@ -859,7 +868,14 @@ static Query* transformDeleteStmt(ParseState* pstate, DeleteStmt* stmt)
                 errmsg("%s is redistributing, please retry later.", pstate->p_target_relation->rd_rel->relname.data)));
     }
 
+    /* grab the namespace item made by setTargetTable */
+    nsitem = (ParseNamespaceItem *) llast(pstate->p_relnamespace);
+
+    /* there's no DISTINCT in DELETE */
     qry->distinctClause = NIL;
+
+    /* subqueries in USING can see the result relation only via LATERAL */
+    nsitem->p_lateral_only = true;
 
     /*
      * The USING clause is non-standard SQL syntax, and is equivalent in
@@ -868,6 +884,9 @@ static Query* transformDeleteStmt(ParseState* pstate, DeleteStmt* stmt)
      * keyword in the DELETE syntax.
      */
     transformFromClause(pstate, stmt->usingClause);
+
+    /* remaining clauses can see the result relation normally */
+    nsitem->p_lateral_only = false;
 
     qual = transformWhereClause(pstate, stmt->whereClause, "WHERE");
 
@@ -1847,6 +1866,12 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
         pstate->p_varnamespace = NIL;
         addRTEtoQuery(pstate, pstate->p_target_rangetblentry, false, true, true);
         qry->returningList = transformReturningList(pstate, stmt->returningList);
+        if (qry->returningList != NIL && RelationIsColStore(pstate->p_target_relation)) {
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("Un-support feature"),
+                    errdetail("column stored relation doesn't support INSERT returning")));
+        }
     }
 
     /* done building the range table and jointree */
@@ -3313,6 +3338,23 @@ void fixResTargetListWithTableNameRef(Relation rd, RangeVar* rel, List* clause_l
     }
 }
 
+void UpdateParseCheck(ParseState *pstate, Node *qry)
+{
+    /*
+     * Top-level aggregates are simply disallowed in UPDATE, per spec. (From
+     * an implementation point of view, this is forced because the implicit
+     * ctid reference would otherwise be an ungrouped variable.)
+     */
+    if (pstate->p_hasAggs) {
+        ereport(ERROR, (errcode(ERRCODE_GROUPING_ERROR), errmsg("cannot use aggregate function in UPDATE"),
+                        parser_errposition(pstate, locate_agg_of_level(qry, 0))));
+    }
+    if (pstate->p_hasWindowFuncs) {
+        ereport(ERROR, (errcode(ERRCODE_WINDOWING_ERROR), errmsg("cannot use window function in UPDATE"),
+                        parser_errposition(pstate, locate_windowfunc(qry))));
+    }
+}
+
 /*
  * transformUpdateStmt -
  *	  transforms an update statement
@@ -3321,7 +3363,7 @@ static Query* transformUpdateStmt(ParseState* pstate, UpdateStmt* stmt)
 {
     Query* qry = makeNode(Query);
     Node* qual = NULL;
-
+    ParseNamespaceItem *nsitem = NULL;
     qry->commandType = CMD_UPDATE;
     pstate->p_is_insert = false;
 
@@ -3340,6 +3382,10 @@ static Query* transformUpdateStmt(ParseState* pstate, UpdateStmt* stmt)
 
     qry->resultRelation =
         setTargetTable(pstate, stmt->relation, interpretInhOption(stmt->relation->inhOpt), true, ACL_UPDATE);
+    
+    /* subqueries in FROM cannot access the result relation */
+    nsitem = (ParseNamespaceItem *) llast(pstate->p_varnamespace);
+    nsitem->p_lateral_only = true;
 
     // check column store relation distributed by replication
     if (pstate->p_target_relation != NULL && RelationIsColStore(pstate->p_target_relation) &&
@@ -3390,6 +3436,9 @@ static Query* transformUpdateStmt(ParseState* pstate, UpdateStmt* stmt)
     qry->targetList = transformTargetList(pstate, stmt->targetList);
     qual = transformWhereClause(pstate, stmt->whereClause, "WHERE");
 
+    /* remaining clauses can reference the result relation normally */
+    nsitem->p_lateral_only = false;
+
     qry->returningList = transformReturningList(pstate, stmt->returningList);
     if (qry->returningList != NIL && RelationIsColStore(pstate->p_target_relation)) {
         ereport(ERROR,
@@ -3403,23 +3452,7 @@ static Query* transformUpdateStmt(ParseState* pstate, UpdateStmt* stmt)
 
     qry->hasSubLinks = pstate->p_hasSubLinks;
 
-    /*
-     * Top-level aggregates are simply disallowed in UPDATE, per spec. (From
-     * an implementation point of view, this is forced because the implicit
-     * ctid reference would otherwise be an ungrouped variable.)
-     */
-    if (pstate->p_hasAggs) {
-        ereport(ERROR,
-            (errcode(ERRCODE_GROUPING_ERROR),
-                errmsg("cannot use aggregate function in UPDATE"),
-                parser_errposition(pstate, locate_agg_of_level((Node*)qry, 0))));
-    }
-    if (pstate->p_hasWindowFuncs) {
-        ereport(ERROR,
-            (errcode(ERRCODE_WINDOWING_ERROR),
-                errmsg("cannot use window function in UPDATE"),
-                parser_errposition(pstate, locate_windowfunc((Node*)qry))));
-    }
+    UpdateParseCheck(pstate, (Node *)qry);
 
     /*
      * Now we are done with SELECT-like processing, and can get on with
@@ -4677,7 +4710,7 @@ static void transformGroupConstToColumn(ParseState* pstate, Node* groupClause, L
                 }
 
                 long target_pos = intVal(val);
-                if (target_pos <= list_length(targetList)) {
+                if (target_pos > 0 && target_pos <= list_length(targetList)) {
                     TargetEntry* tle = (TargetEntry*)list_nth(targetList, target_pos - 1);
                     lfirst(lc) = copyObject(tle->expr);
 

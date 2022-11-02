@@ -670,6 +670,23 @@ static const struct {
         {"Iran Standard Time", "Iran Daylight Time", "Asia/Tehran"},       /* (GMT+03:30) Tehran */
         {"Jerusalem Standard Time", "Jerusalem Daylight Time", "Asia/Jerusalem"}, /* (GMT+02:00) Jerusalem */
         {"Jordan Standard Time", "Jordan Daylight Time", "Asia/Amman"},           /* (GMT+02:00) Amman */
+        {"Altai Standard Time", "Altai Daylight Time", "Asia/Barnaul"}, /* (UTC+07:00) Barnaul, Gorno-Altaysk */
+        {"Transbaikal Standard Time", "Transbaikal Daylight Time", "Asia/Chita"}, /* (UTC+09:00) Chita */
+        {"Tomsk Standard Time", "Tomsk Daylight Time", "Asia/Tomsk"}, /* (UTC+07:00) Tomsk */
+        {"Atyrau Standard Time", "Atyrau Daylight Time", "Asia/Atyrau"}, /* (UTC+05:00) Atyrau */
+        {"Famagusta Standard Time", "Famagusta Daylight Time", "Asia/Famagusta"},
+        {"Qostanay Standard Time", "Qostanay Daylight Time", "Asia/Qostanay"},
+        {"Srednekolymsk Standard Time", "Srednekolymsk Daylight Time", "Asia/Srednekolymsk"},
+        {"Yangon Standard Time", "Yangon Daylight Time", "Asia/Yangon"},
+        {"Bougainville Standard Time", "Bougainville Daylight Time", "Pacific/Bougainville"},
+        {"Troll Standard Time", "Troll Daylight Time", "Antarctica/Troll"},
+        {"Astrakhan Standard Time", "Astrakhan Daylight Time", "Europe/Astrakhan"},
+        {"Ulyanovsk Standard Time", "Ulyanovsk Daylight Time", "Europe/Ulyanovsk"},
+        {"Kirov Standard Time", "Kirov Daylight Time", "Europe/Kirov"},
+        {"Saratov Standard Time", "Saratov Daylight Time", "Europe/Saratov"},
+        {"Fort_Nelson Standard Time", "Fort_Nelson Daylight Time", "America/Fort_Nelson"},
+        {"Nuuk Standard Time", "Nuuk Daylight Time", "America/Nuuk"},
+        {"Punta_Arenas Standard Time", "Punta_Arenas Daylight Time", "America/Punta_Arenas"},
         {"Kamchatka Standard Time",
             "Kamchatka Daylight Time",
             "Asia/Kamchatka"},                                        /* (GMT+12:00) Petropavlovsk-Kamchatsky */

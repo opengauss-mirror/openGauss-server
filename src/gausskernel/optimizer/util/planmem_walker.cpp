@@ -311,14 +311,6 @@ bool plan_tree_walker(Node* node, MethodWalker walker, void* context)
             /* Other fields are lists of basic items, nothing to walk. */
             break;
 
-        case T_DfsIndexScan:
-            if (walk_scan_node_fields((Scan*)node, walker, context))
-                return true;
-            if (p2walker((Node*)((DfsIndexScan*)node)->indexqual, context))
-                return true;
-            /* Other fields are lists of basic items, nothing to walk. */
-            break;
-
         case T_BitmapIndexScan:
             if (walk_scan_node_fields((Scan*)node, walker, context))
                 return true;
@@ -363,13 +355,6 @@ bool plan_tree_walker(Node* node, MethodWalker walker, void* context)
                 return true;
             break;
 
-        case T_DfsScan: {
-            if (walk_scan_node_fields((Scan*)node, walker, context))
-                return true;
-            DfsPrivateItem* item = (DfsPrivateItem*)((DefElem*)linitial(((DfsScan*)node)->privateData))->arg;
-            if (p2walker((Node*)item->hdfsQual, context))
-                return true;
-        } break;
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
             if (walk_scan_node_fields((Scan*)node, walker, context))

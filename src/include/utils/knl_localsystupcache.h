@@ -170,6 +170,8 @@ public:
         FlushGlobalByInvalidMsg<false>(db_id, hash_value);
     }
     void PrepareToInvalidateCacheTuple(HeapTuple tuple, HeapTuple newtuple, void (*function)(int, uint32, Oid));
+    void RemoveRandomTailTupleElements();
+    void RemoveTailListElements();
     InvalidBaseEntry invalid_entries;
 private:
     /*
@@ -217,7 +219,6 @@ private:
     void InitPhase2Impl();
 
     void RemoveTailTupleElements(Index hash_index);
-    void RemoveTailListElements();
 
     Dllist *GetBucket(Index hash_index)
     {
@@ -254,6 +255,7 @@ private:
     long cc_invals;    /* # of entries invalidated from cache */
     long cc_lsearches; /* total # list-searches */
     long cc_lhits;     /* # of matches against existing lists */
+    uint64 random_swapout;
 };
 
 extern bool CheckPrivilegeOfTuple(HeapTuple ct);

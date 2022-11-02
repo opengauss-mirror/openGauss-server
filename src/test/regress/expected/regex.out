@@ -271,3 +271,10 @@ select 'a' ~ '()+\1';
  t
 (1 row)
 
+-- test {0}
+select 'xyz' ~ '((.)){0}(\2){0}' as t;
+ t 
+---
+ t
+(1 row)
+

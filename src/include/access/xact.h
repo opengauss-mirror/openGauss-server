@@ -306,7 +306,6 @@ extern TransactionId GetCurrentTransactionIdIfAny(void);
 extern GTM_TransactionHandle GetTransactionHandleIfAny(TransactionState s);
 extern GTM_TransactionHandle GetCurrentTransactionHandleIfAny(void);
 extern TransactionState GetCurrentTransactionState(void);
-extern TransactionId GetParentTransactionIdIfAny(TransactionState s);
 extern void ResetTransactionInfo(void);
 extern void EndParallelWorkerTransaction(void);
 
@@ -327,7 +326,6 @@ extern bool GetCurrentCommandIdUsed(void);
 extern TimestampTz GetCurrentTransactionStartTimestamp(void);
 extern TimestampTz GetCurrentStatementStartTimestamp(void);
 extern TimestampTz GetCurrentStatementLocalStartTimestamp(void);
-extern TimestampTz GetCurrentTransactionStopTimestamp(void);
 extern void SetCurrentStatementStartTimestamp();
 #ifdef PGXC
 extern TimestampTz GetCurrentGTMStartTimestamp(void);

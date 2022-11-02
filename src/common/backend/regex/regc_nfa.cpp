@@ -1028,7 +1028,6 @@ static void delsub(struct nfa* nfa, struct state* lp, /* the sub-NFA goes from h
     deltraverse(nfa, lp, lp);
     if (NISERR())
         return;                                         /* Asserts might not hold after failure */
-    Assert(lp->nouts == 0 && rp->nins == 0);            /* did the job */
     Assert(lp->no != FREESTATE && rp->no != FREESTATE); /* no more */
 
     rp->tmp = NULL; /* unmark end */

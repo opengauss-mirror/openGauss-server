@@ -35,6 +35,27 @@
  */
 #define MIN_SAVING_LEN 3
 
+#define UPDATE_SHORTER           0x0001
+#define UPDATE_LONGER            0x0002
+#define UPDATE_TOAST             0x0004
+#define UPDATE_INPLACE           0x0008
+#define UPDATE_NON_INPLACE       0x0010
+#define UPDATE_PRUNE             0x0020
+#define UPDATE_PRUNE_SUCESS      0x0040
+#define UPDATE_VERIFY_FAIL       0x0080
+
+#define USTOREDEBUGINFO , __FUNCTION__, __LINE__,                                          \
+    t_thrd.ustore_cxt.rnode == NULL ? InvalidOid : t_thrd.ustore_cxt.rnode->spcNode,       \
+    t_thrd.ustore_cxt.rnode == NULL ? InvalidOid : t_thrd.ustore_cxt.rnode->dbNode,        \
+    t_thrd.ustore_cxt.rnode == NULL ? InvalidOid : t_thrd.ustore_cxt.rnode->relNode,       \
+    t_thrd.ustore_cxt.rnode == NULL ? InvalidOid : t_thrd.ustore_cxt.rnode->bucketNode,    \
+    BufferIsInvalid(t_thrd.ustore_cxt.oldBuffer) ? InvalidBlockNumber :                    \
+        BufferGetBlockNumber(t_thrd.ustore_cxt.oldBuffer),                                 \
+    GetBufferLockHeldMode(t_thrd.ustore_cxt.oldBuffer),                                    \
+    GetTopTransactionIdIfAny()
+#define USTOREDEBUGSTR "[%s:%d] Buf:{%u:%u:%u:%d}:{%u} Buflock:{%d} Xid:{%lu}. "
+#define USTOREFORMAT(f) USTOREDEBUGSTR f USTOREDEBUGINFO
+
 typedef struct UHeapWALInfo {
     Oid relOid;
     Oid partitionOid;
@@ -47,6 +68,7 @@ typedef struct UHeapWALInfo {
     Buffer buffer;
     StringInfoData oldUTuple; /* Whole tuple before the logging operation */
     UHeapTuple utuple;         /* whole tuple after the logging operation */
+    UHeapTuple toastTuple;     /* whole tuple where TOAST is expanded */
     UndoRecPtr urecptr;        /* urecptr where the current operation's undo is located */
     UndoRecPtr blkprev;        /* byte offset of previous undo for block */
     UndoRecPtr prevurp;        /* urecptr where the previous undo of the current transaction */
@@ -75,11 +97,14 @@ typedef struct {
     int ndeleted;                   /* numbers of entries in arrays below */
     int ndead;
     int nunused;
+    uint16 nfixed;
     /* arrays that accumulate indexes of items to be changed */
 
     OffsetNumber nowdeleted[MaxPossibleUHeapTuplesPerPage];
     OffsetNumber nowdead[MaxPossibleUHeapTuplesPerPage];
     OffsetNumber nowunused[MaxPossibleUHeapTuplesPerPage];
+    OffsetNumber nowfixed[MaxPossibleUHeapTuplesPerPage];
+    uint16 fixedlen[MaxPossibleUHeapTuplesPerPage];
     /* marked[i] is TRUE if item i is entered in one of the above arrays */
     bool marked[MaxPossibleUHeapTuplesPerPage + 1];
 } UPruneState;
@@ -95,6 +120,7 @@ typedef struct {
 Datum UHeapFastGetAttr(UHeapTuple tup, int attnum, TupleDesc tupleDesc, bool *isnull);
 Oid UHeapInsert(Relation rel, UHeapTuple tuple, CommandId cid, BulkInsertState bistate = NULL, bool isToast = false);
 extern TransactionId UHeapFetchInsertXid(UHeapTuple uhtup, Buffer buffer);
+extern void PrevDumpUPage(RelFileNode *relnode, Page page, BlockNumber blocknum, char *type);
 UHeapTuple UHeapPrepareInsert(Relation rel, UHeapTuple tuple, int options);
 void RelationPutUTuple(Relation relation, Buffer buffer, UHeapTupleData *tuple);
 
@@ -103,7 +129,7 @@ extern bool TableFetchAndStore(Relation scanRelation, Snapshot snapshot, Tuple t
 TM_Result UHeapUpdate(Relation relation, Relation parentRelation, ItemPointer otid, UHeapTuple newtup, CommandId cid,
     Snapshot crosscheck, Snapshot snapshot, bool wait, TupleTableSlot **oldslot, TM_FailureData *tmfd,
     bool *indexkey_update_flag, Bitmapset **modifiedIdxAttrs, bool allow_inplace_update = true);
-extern void PutBlockInplaceUpdateTuple(Page page, Item item, RowPtr *lp, Size size);
+extern void PutLinkUpdateTuple(Page page, Item item, RowPtr *lp, Size size);
 
 TM_Result UHeapLockTuple(Relation relation, UHeapTuple tuple, Buffer* buffer,
                            CommandId cid, LockTupleMode mode, bool nowait, TM_FailureData *tmfd,
@@ -116,7 +142,7 @@ UHeapTuple UHeapLockUpdated(CommandId cid, Relation relation,
                                       TransactionId priorXmax, Snapshot snapshot, bool isSelectForUpdate = false);
 bool UHeapFetchRow(Relation relation, ItemPointer tid, Snapshot snapshot, TupleTableSlot *slot, UHeapTuple utuple);
 bool UHeapFetch(Relation relation, Snapshot snapshot, ItemPointer tid, UHeapTuple tuple, Buffer *buf, bool keepBuf,
-    bool keepTup);
+    bool keepTup, bool* has_cur_xact_write = NULL);
 TM_Result UHeapDelete(Relation relation, ItemPointer tid, CommandId cid, Snapshot crosscheck, Snapshot snapshot,
     bool wait, TupleTableSlot** oldslot, TM_FailureData *tmfd, bool changingPart, bool allowDeleteSelf);
 void UHeapReserveDualPageTDSlot(Relation relation, Buffer oldbuf, Buffer newbuf, TransactionId fxid,
@@ -135,9 +161,10 @@ UHeapTuple ExecGetUHeapTupleFromSlot(TupleTableSlot *slot);
 /* in knl_uvacuumlazy.cpp */
 extern void LazyVacuumUHeapRel(Relation onerel, VacuumStmt *vacstmt, BufferAccessStrategy bstrategy);
 
-void UHeapResetPreparedUndo(UndoPersistence persistType, int zid);
+void UHeapResetPreparedUndo();
+LWLockMode GetBufferLockHeldMode(Buffer buffer);
 UndoRecPtr UHeapPrepareUndoInsert(Oid relOid, Oid partitionOid, Oid relfilenode, Oid tablespace,
-    UndoPersistence persistence, Buffer buffer, TransactionId xid, CommandId cid, UndoRecPtr prevurpInOneBlk,
+    UndoPersistence persistence, TransactionId xid, CommandId cid, UndoRecPtr prevurpInOneBlk,
     UndoRecPtr prevurpInOneXact, BlockNumber blk = InvalidBlockNumber, XlUndoHeader *xlundohdr = NULL,
     undo::XlogUndoMeta *xlundometa = NULL);
 UndoRecPtr UHeapPrepareUndoMultiInsert(Oid relOid, Oid partitionOid, Oid relfilenode, Oid tablespace,
@@ -157,14 +184,15 @@ UndoRecPtr UHeapPrepareUndoUpdate(Oid relOid, Oid partitionOid, Oid relfilenode,
     XlUndoHeader *xlundohdr = NULL, undo::XlogUndoMeta *xlundometa = NULL);
 extern bool UHeapPagePruneOptPage(Relation relation, Buffer buffer, TransactionId xid,
     bool acquireConditionalLock = false);
-extern int UHeapPagePrune(const RelationBuffer *relbuf, TransactionId oldest_xmin, bool report_stats,
+extern int CalTupSize(Relation relation, UHeapDiskTuple tup, TupleDesc tupDesc = NULL);
+extern int UHeapPagePrune(Relation rel, const RelationBuffer *relbuf, TransactionId oldest_xmin, bool report_stats,
     TransactionId *latest_removed_xid, bool *pruned);
 extern bool UHeapPagePruneOpt(Relation relation, Buffer buffer, OffsetNumber offnum, Size space_required);
-extern int UHeapPagePruneGuts(const RelationBuffer *relbuf, TransactionId OldestXmin, OffsetNumber target_offnum,
+extern int UHeapPagePruneGuts(Relation relation, const RelationBuffer *relbuf, TransactionId OldestXmin, OffsetNumber target_offnum,
     Size space_required, bool report_stats, bool forcePrune, TransactionId *latestRemovedXid, bool *pruned);
 extern void UHeapPagePruneExecute(Buffer buffer, OffsetNumber target_offnum, const UPruneState *prstate);
-extern void UPageRepairFragmentation(Buffer buffer, OffsetNumber target_offnum, Size space_required, bool *pruned,
-    bool unused_set);
+extern void UPageRepairFragmentation(Relation rel, Buffer buffer, OffsetNumber target_offnum, Size space_required,
+    bool *pruned, bool unused_set);
 extern void UHeapPagePruneFSM(Relation relation, Buffer buffer, TransactionId fxid, Page page, BlockNumber blkno);
 int UHeapPageGetTDSlotId(Buffer buffer, TransactionId xid, UndoRecPtr *urp);
 int UpdateTupleHeaderFromUndoRecord(UndoRecord *urec, UHeapDiskTuple tuple, Page page);
@@ -172,7 +200,7 @@ bool UHeapExecPendingUndoActions(Relation rel, Buffer buffer, TransactionId xwai
 
 extern XLogRecPtr LogUHeapClean(Relation reln, Buffer buffer, OffsetNumber target_offnum, Size space_required,
     OffsetNumber *nowdeleted, int ndeleted, OffsetNumber *nowdead, int ndead, OffsetNumber *nowunused, int nunused,
-    TransactionId latestRemovedXid, bool pruned);
+    OffsetNumber *nowfixed, uint16 *fixedlen, uint16 nfixed, TransactionId latestRemovedXid, bool pruned);
 
 extern void SimpleUHeapDelete(Relation relation, ItemPointer tid, Snapshot snapshot, TupleTableSlot** oldslot = NULL,
     TransactionId* tmfdXmin = NULL);
@@ -183,6 +211,8 @@ void UHeapAbortSpeculative(Relation relation, UHeapTuple tuple);
 
 void UHeapSleepOrWaitForTDSlot(TransactionId xWait, TransactionId myXid, bool isInsert = false);
 void UHeapResetWaitTimeForTDSlot();
-
+void UHeapResetRelnode();
 uint8 UPageExtendTDSlots(Relation relation, Buffer buf);
+bool VerifyRowPtr(Page page, OffsetNumber targetOffnum, Size newTupSize);
+
 #endif

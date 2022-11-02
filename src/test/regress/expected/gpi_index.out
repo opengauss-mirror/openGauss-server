@@ -333,17 +333,23 @@ select count(*) from gpi_index_test1 a, gpi_index_test b where a.a = b.a;
 
 -- merge join
 explain (costs off) select * from gpi_index_test1 a, gpi_index_test b where a.a = b.a and (a.b < 10 or b.b > 9990) order by a.a;
-                                     QUERY PLAN                                      
--------------------------------------------------------------------------------------
- Nested Loop
-   ->  Partition Iterator
-         Iterations: 4
-         ->  Partitioned Index Scan using gpi_index_test_local_a on gpi_index_test b
-               Selected Partitions:  1..4
-   ->  Index Scan using gpi_index_test1_global_a on gpi_index_test1 a
-         Index Cond: (a = b.a)
-         Filter: ((b < 10) OR (b.b > 9990))
-(8 rows)
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Sort
+   Sort Key: a.a
+   ->  Hash Join
+         Hash Cond: (a.a = b.a)
+         Join Filter: ((a.b < 10) OR (b.b > 9990))
+         ->  Partition Iterator
+               Iterations: 4
+               ->  Partitioned Seq Scan on gpi_index_test1 a
+                     Selected Partitions:  1..4
+         ->  Hash
+               ->  Partition Iterator
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on gpi_index_test b
+                           Selected Partitions:  1..4
+(14 rows)
 
 select * from gpi_index_test1 a, gpi_index_test b where a.a = b.a and (a.b < 10 or b.b > 9990) order by a.a;
  a | b |       c        | a | b |       c        

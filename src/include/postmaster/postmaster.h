@@ -244,4 +244,6 @@ extern bool PMstateIsRun(void);
 extern ServerMode GetHaShmemMode(void);
 extern void InitProcessAndShareMemory();
 extern void InitShmemForDcfCallBack();
+extern void ShutdownForDRSwitchover(void);
+extern void InitMemoryLogDirectory();
 #endif /* _POSTMASTER_H */

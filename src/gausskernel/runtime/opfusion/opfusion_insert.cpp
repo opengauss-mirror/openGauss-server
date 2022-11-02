@@ -104,7 +104,7 @@ void InsertFusion::InitGlobals()
 }
 void InsertFusion::InitLocals(ParamListInfo params)
 {
-    m_c_local.m_estate = CreateExecutorState();
+    m_c_local.m_estate = CreateExecutorStateForOpfusion(m_local.m_localContext, m_local.m_tmpContext);
     m_c_local.m_estate->es_range_table = m_global->m_planstmt->rtable;
     m_local.m_reslot = MakeSingleTupleTableSlot(m_global->m_tupDesc);
     if (m_global->m_table_type == TAM_USTORE) {
@@ -294,6 +294,7 @@ unsigned long InsertFusion::ExecInsert(Relation rel, ResultRelInfo* result_rel_i
 
 bool InsertFusion::execute(long max_rows, char* completionTag)
 {
+    MemoryContext oldContext = MemoryContextSwitchTo(m_local.m_tmpContext);
     bool success = false;
     errno_t errorno = EOK;
 
@@ -301,6 +302,7 @@ bool InsertFusion::execute(long max_rows, char* completionTag)
      * step 1: prepare *
      *******************/
     Relation rel = heap_open(m_global->m_reloid, RowExclusiveLock);
+    validateTempRelation(rel);
 
     ResultRelInfo* result_rel_info = makeNode(ResultRelInfo);
     InitResultRelInfo(result_rel_info, rel, 1, 0);
@@ -333,6 +335,7 @@ bool InsertFusion::execute(long max_rows, char* completionTag)
         errorno = snprintf_s(completionTag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1, "INSERT 0 1");
     }
     securec_check_ss(errorno, "\0", "\0");
-
+    FreeExecutorStateForOpfusion(m_c_local.m_estate);
+    MemoryContextSwitchTo(oldContext);
     return success;
 }

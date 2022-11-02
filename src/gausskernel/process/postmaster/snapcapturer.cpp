@@ -58,8 +58,10 @@
 #include "utils/ps_status.h"
 #include "utils/resowner.h"
 #include "utils/snapmgr.h"
-
 #include "postmaster/snapcapturer.h"
+
+extern char* ExecBuildSlotValueDescription(
+    Oid reloid, TupleTableSlot* slot, TupleDesc tupdesc, Bitmapset* modifiedCols, int maxfieldlen);
 
 /* seconds, interval of alarm check loop. */
 static const int SNAP_CAPTURE_INTERVAL = 3;
@@ -125,8 +127,8 @@ ThreadId StartTxnSnapCapturer(void)
         return initialize_util_thread(TXNSNAP_CAPTURER);
     }
 
-    ereport(LOG,
-        (errmsg("not ready to start snapshot capturer.")));
+    ereport(LOG, (errmodule(MOD_TIMECAPSULE),
+        errmsg("not ready to start snapshot capturer.")));
     return 0;
 }
 
@@ -232,7 +234,10 @@ static void TxnSnapSerialize(Snapshot snap, StringInfo buf)
     appendStringInfo(buf, "snapshotcsn:" XID_FMT "\n", snap->snapshotcsn);
     appendStringInfo(buf, "timeline:%u\n", snap->timeline);
     appendStringInfo(buf, "rec:%u\n", snap->takenDuringRecovery);
-    
+    ereport(DEBUG1, (errmodule(MOD_TIMECAPSULE),
+        errmsg("TxnSnapSerialize snapxmin is %lu, snapxmax is %lu, snapshotcsn is %lu ",
+        snap->xmin, snap->xmax, snap->snapshotcsn)));
+
     buf->data[buf->len] = '\0';
 }
 
@@ -245,6 +250,9 @@ void TxnSnapDeserialize(char *buf, Snapshot snap)
     snap->snapshotcsn = TxnSnapParseXidFromText("snapshotcsn:", &tmpBuf);
     snap->timeline = TxnSnapParseTimelineFromText("timeline:", &tmpBuf);
     snap->takenDuringRecovery = TxnSnapParseIntFromText("rec:", &tmpBuf);
+    ereport(DEBUG1, (errmodule(MOD_TIMECAPSULE),
+        errmsg("TxnSnapDeserialize snapxmin is %lu, snapxmax is %lu, snapshotcsn is %lu ",
+        snap->xmin, snap->xmax, snap->snapshotcsn)));
 }
 
 /*
@@ -285,32 +293,80 @@ static void TxnSnapInsert(void)
 
 /*
  * Delete the out-date snapshots, that is,
- *     DELETE FROM pg_snapshot WHERE snptime <= now() - '3 days';
+ *     DELETE FROM pg_snapshot WHERE snptime <= now() - 'undo_retention_time';
  */
 static void TxnSnapDelete(void)
 {
-#define TXNSNAP_EXTRA_RETRNTION_TIME 900
+    const int stringLen = 128;
     Relation rel;
     ScanKeyData skey[2];
     SysScanDesc sd;
     HeapTuple tup;
 
-    /* Retent snapshots for up to undo_retention_time + 15min. */
-    const int64 snapRetentionMs = 1000L * (u_sess->attr.attr_storage.undo_retention_time +
-        TXNSNAP_EXTRA_RETRNTION_TIME);
+    /* Retent snapshots for up to undo_retention_time. */
+    const int64 snapRetentionMs = 1000L * (u_sess->attr.attr_storage.undo_retention_time);
     TimestampTz ft = TimestampTzPlusMilliseconds(GetCurrentTimestamp(), snapRetentionMs * -1);
 
     rel = heap_open(SnapshotRelationId, RowExclusiveLock);
-    ScanKeyInit(&skey[0], Anum_pg_snapshot_snptime, BTLessEqualStrategyNumber, 
+    ScanKeyInit(&skey[0], Anum_pg_snapshot_snptime, BTLessEqualStrategyNumber,
         F_TIMESTAMP_LE, TimestampTzGetDatum(ft));
+
+    char *valDesc = NULL;
+    TupleDesc tupDesc = RelationGetDescr(rel);
+    int count = 0;
 
     sd = systable_beginscan(rel, SnapshotTimeCsnIndexId, true, NULL, 1, skey);
     while ((tup = systable_getnext(sd)) != NULL) {
+        count++;
+        int natts = tupDesc->natts;
+        bool *boolNulls = (bool *)palloc0((uint32)natts * sizeof(bool));
+        TupleTableSlot* slot = MakeSingleTupleTableSlot(tupDesc, false, TAM_HEAP);
+        heap_deform_tuple(tup, tupDesc, slot->tts_values, boolNulls);
+        pfree(boolNulls);
+        slot->tts_tuple = (Tuple)tup;
+        valDesc = ExecBuildSlotValueDescription(RelationGetRelid(rel), slot, tupDesc, NULL, stringLen);
+        ExecDropSingleTupleTableSlot(slot);
         simple_heap_delete(rel, &tup->t_self);
+        ereport(DEBUG1, (errmodule(MOD_TIMECAPSULE),
+            errmsg("count is %d, TranId is %lu, undo_retention_time is %d, tup is %s",
+                count, GetCurrentTransactionId(), u_sess->attr.attr_storage.undo_retention_time, valDesc)));
     }
 
     systable_endscan(sd);
     heap_close(rel, RowExclusiveLock);
+}
+
+/*
+ * TxnReportRecycleXmin
+ *
+ * if open timecapsule, report recycxmin to undorecyclemain.
+ */
+static void TxnReportRecycleXmin()
+{
+    TransactionId flashXid;
+    ereport(DEBUG1, (errmodule(MOD_TIMECAPSULE), errmsg("the current time is %lu.", GetCurrentTimestamp())));
+
+    flashXid = TvFetchSnpxminRecycle();
+
+    if (!TransactionIdIsValid(g_instance.flashback_cxt.oldestXminInFlashback)) {
+        g_instance.flashback_cxt.oldestXminInFlashback = flashXid;
+    }
+
+    if (TransactionIdPrecedesOrEquals(g_instance.flashback_cxt.oldestXminInFlashback, flashXid)) {
+        ereport(DEBUG1, (errmodule(MOD_TIMECAPSULE),
+            errmsg("flashXid is %lu, oldestXminInFlashback is %lu, globalRecycleXid is %lu, oldTime is %lu.",
+                flashXid, g_instance.flashback_cxt.oldestXminInFlashback, g_instance.undo_cxt.globalRecycleXid,
+                GetCurrentTimestamp())));
+    } else {
+        if (TransactionIdIsValid(flashXid)) {
+            ereport(DEBUG1, (errmodule(MOD_TIMECAPSULE),
+                errmsg("flashXid is %lu smaller than oldestXminInFlashback %lu, globalRecycleXid is %lu, ", flashXid,
+                    g_instance.flashback_cxt.oldestXminInFlashback, g_instance.undo_cxt.globalRecycleXid)));
+            g_instance.flashback_cxt.oldestXminInFlashback = flashXid;
+        }
+    }
+
+    return;
 }
 
 /*
@@ -320,21 +376,17 @@ static void TxnSnapDelete(void)
  */
 static void TxnSnapWorkerImpl(void)
 {
-    int retentionTime = u_sess->attr.attr_storage.undo_retention_time;
-    TimestampTz result;
-
     StartTransactionCommand();
 
-    TxnSnapInsert();
+    if (ENABLE_TCAP_VERSION) {
+        TxnSnapInsert();
+    }
 
     TxnSnapDelete();
 
-#ifdef HAVE_INT64_TIMESTAMP
-    result = GetCurrentTimestamp() - retentionTime * (INT64CONST(1000000));
-#else
-    result = GetCurrentTimestamp() - retentionTime;
-#endif
-    g_instance.flashback_cxt.oldestXminInFlashback = TvFetchSnpxminRecycle(result);
+    if (ENABLE_TCAP_VERSION) {
+        TxnReportRecycleXmin();
+    }
 
     CommitTransactionCommand();
 }
@@ -370,7 +422,7 @@ NON_EXEC_STATIC void TxnSnapWorkerMain()
     /* Identify myself via ps */
     init_ps_display("txnsnapworker process", "", "", "");
 
-    elog(DEBUG1, "txnsnapworker started(%s)", NameStr(workInfo->dbName));
+    ereport(DEBUG1, (errmodule(MOD_TIMECAPSULE), errmsg("txnsnapworker started(%s)", NameStr(workInfo->dbName))));
     if (u_sess->attr.attr_security.PostAuthDelay)
         pg_usleep(u_sess->attr.attr_security.PostAuthDelay * 1000000L);
 
@@ -398,7 +450,7 @@ NON_EXEC_STATIC void TxnSnapWorkerMain()
     (void)gspqsignal(SIGTTOU, SIG_DFL);
     (void)gspqsignal(SIGCONT, SIG_DFL);
     (void)gspqsignal(SIGWINCH, SIG_DFL);
-
+    (void)gspqsignal(SIGURG, print_stack);
     /* We allow SIGQUIT (quickdie) at all times */
     (void)sigdelset(&t_thrd.libpq_cxt.BlockSig, SIGQUIT);
 
@@ -416,6 +468,12 @@ NON_EXEC_STATIC void TxnSnapWorkerMain()
 #endif
 
     on_proc_exit(TxnSnapWorkerQuitAndClean, 0);
+
+    /*
+     * Unblock signals (they were blocked when the postmaster forked us)
+     */
+    gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
+    (void)gs_signal_unblock_sigusr2();
 
     t_thrd.proc_cxt.PostInit->SetDatabaseAndUser((char*)pstrdup(NameStr(workInfo->dbName)), InvalidOid, NULL); 
     t_thrd.proc_cxt.PostInit->InitTxnSnapWorker();
@@ -504,12 +562,6 @@ NON_EXEC_STATIC void TxnSnapWorkerMain()
     /* We can now handle ereport(ERROR) */
     t_thrd.log_cxt.PG_exception_stack = &localSigjmpBuf;
 
-    /*
-     * Unblock signals (they were blocked when the postmaster forked us)
-     */
-    gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
-    (void)gs_signal_unblock_sigusr2();
-
     /* Set lockwait_timeout/update_lockwait_timeout to 30s avoid unexpected suspend. */
     SetConfigOption("lockwait_timeout", "30s", PGC_SUSET, PGC_S_OVERRIDE);
     SetConfigOption("update_lockwait_timeout", "30s", PGC_SUSET, PGC_S_OVERRIDE);
@@ -522,7 +574,8 @@ NON_EXEC_STATIC void TxnSnapWorkerMain()
     MemoryContextResetAndDeleteChildren(workMxt);
 
 shutdown:
-    elog(DEBUG1, "txnsnapworker shutting down(%s)", NameStr(workInfo->dbName));
+    ereport(DEBUG1, (errmodule(MOD_TIMECAPSULE),
+        errmsg("txnsnapworker shutting down(%s)", NameStr(workInfo->dbName))));
     proc_exit(0);
 }
 
@@ -556,9 +609,11 @@ static void TxnSnapCapProcInterrupts(int rc)
 
     /* the normal shutdown case */
     if (t_thrd.snapcapturer_cxt.got_SIGTERM) {
-        elog(LOG, "txnsnapcapturer is shutting down.");
+        ereport(LOG, (errmodule(MOD_TIMECAPSULE),
+            errmsg("txnsnapcapturer is shutting down.")));
         proc_exit(0);
     }
+    CHECK_FOR_INTERRUPTS();
 
     /*
      * reload the postgresql.conf
@@ -634,7 +689,8 @@ static void TxnSnapCapImpl(void)
         TxnSnapWorkerInfo *workInfo;
 
         if (TxnSnapWorkerIsAlive()) {
-            elog(ERROR, "start txnsnapworker failed: txnsnapworker already exists!");
+            ereport(ERROR, (errmodule(MOD_TIMECAPSULE),
+                errmsg("start txnsnapworker failed: txnsnapworker already exists!")));
         }
 
         workInfo = TxnSnapWorkerInfoInit((char *)lfirst(cell));
@@ -670,6 +726,30 @@ static void TxnSnapCapImpl(void)
         }
     }
 
+    if (!TransactionIdIsValid(g_instance.flashback_cxt.globalOldestXminInFlashback)) {
+        g_instance.flashback_cxt.globalOldestXminInFlashback = g_instance.flashback_cxt.oldestXminInFlashback;
+    }
+
+    if (TransactionIdPrecedes(g_instance.flashback_cxt.oldestXminInFlashback,
+        g_instance.flashback_cxt.globalOldestXminInFlashback)) {
+        if (TransactionIdIsValid(g_instance.flashback_cxt.oldestXminInFlashback)) {
+            ereport(WARNING, (errmodule(MOD_TIMECAPSULE),
+                errmsg("oldestXminInFlashback %lu smaller than globalOldestXminInFlashback %lu, "
+                    "globalRecycleXid is %lu", g_instance.flashback_cxt.oldestXminInFlashback,
+                    g_instance.flashback_cxt.globalOldestXminInFlashback, g_instance.undo_cxt.globalRecycleXid)));
+        }
+    } else {
+        if (TransactionIdIsValid(g_instance.flashback_cxt.oldestXminInFlashback)) {
+            ereport(DEBUG1, (errmodule(MOD_TIMECAPSULE),
+                errmsg("oldestXminInFlashback is %lu, globalOldestXminInFlashback is %lu, globalRecycleXid is %lu ,",
+                    g_instance.flashback_cxt.oldestXminInFlashback,
+                    g_instance.flashback_cxt.globalOldestXminInFlashback,
+                    g_instance.undo_cxt.globalRecycleXid)));
+            g_instance.flashback_cxt.globalOldestXminInFlashback = g_instance.flashback_cxt.oldestXminInFlashback;
+        }
+    }
+    g_instance.flashback_cxt.oldestXminInFlashback = InvalidTransactionId;
+
     list_free_deep(dblist);
     CommitTransactionCommand();
 }
@@ -696,7 +776,7 @@ NON_EXEC_STATIC void TxnSnapCapturerMain()
     /* Identify myself via ps */
     init_ps_display("txnsnapcapturer process", "", "", "");
 
-    ereport(LOG, (errmsg("txnsnapcapturer started")));
+    ereport(LOG, (errmodule(MOD_TIMECAPSULE), errmsg("txnsnapcapturer started")));
 
     if (u_sess->attr.attr_security.PostAuthDelay)
         pg_usleep(u_sess->attr.attr_security.PostAuthDelay * 1000000L);
@@ -717,7 +797,7 @@ NON_EXEC_STATIC void TxnSnapCapturerMain()
     (void)gspqsignal(SIGTTOU, SIG_DFL);
     (void)gspqsignal(SIGCONT, SIG_DFL);
     (void)gspqsignal(SIGWINCH, SIG_DFL);
-
+    (void)gspqsignal(SIGURG, print_stack);
     /* We allow SIGQUIT (quickdie) at all times */
     (void)sigdelset(&t_thrd.libpq_cxt.BlockSig, SIGQUIT);
 
@@ -727,6 +807,12 @@ NON_EXEC_STATIC void TxnSnapCapturerMain()
 #ifndef EXEC_BACKEND
     InitProcess();
 #endif
+
+    /*
+     * Unblock signals (they were blocked when the postmaster forked us)
+     */
+    gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
+    (void)gs_signal_unblock_sigusr2();
 
     t_thrd.proc_cxt.PostInit->SetDatabaseAndUser((char*)pstrdup(DEFAULT_DATABASE), InvalidOid, NULL); 
     t_thrd.proc_cxt.PostInit->InitTxnSnapCapturer();
@@ -808,16 +894,14 @@ NON_EXEC_STATIC void TxnSnapCapturerMain()
     t_thrd.log_cxt.PG_exception_stack = &localSigjmpBuf;
 
     /*
-     * Unblock signals (they were blocked when the postmaster forked us)
+     * Unblock signals in case they were blocked during long jump.
      */
     gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
     (void)gs_signal_unblock_sigusr2();
 
     /* loop until shutdown request */
-    while (!t_thrd.snapcapturer_cxt.got_SIGTERM && ENABLE_TCAP_VERSION) {
+    while (!t_thrd.snapcapturer_cxt.got_SIGTERM) {
         int rc;
-
-        CHECK_FOR_INTERRUPTS();
 
         /* Clear any already-pending wakeups */
         ResetLatch(&t_thrd.proc->procLatch);
@@ -841,7 +925,7 @@ NON_EXEC_STATIC void TxnSnapCapturerMain()
     }
 
 shutdown:
-    elog(LOG, "txnsnapcapturer shutting down");
+    ereport(LOG, (errmodule(MOD_TIMECAPSULE), errmsg("txnsnapcapturer shutting down")));
     proc_exit(0);
 }
 

@@ -340,6 +340,7 @@ typedef struct IpBlockLocation {
 
 void SetInversePointer(SegExtentGroup *eg, BlockNumber extent, ExtentInversePointer iptr);
 ExtentInversePointer GetInversePointer(SegExtentGroup *eg, BlockNumber extent, Buffer *buf);
+extern ExtentInversePointer RepairGetInversePointer(SegExtentGroup *seg, BlockNumber extent);
 void GetAllInversePointer(SegExtentGroup *seg, uint32 *cnt, ExtentInversePointer **iptrs, BlockNumber **extents);
 const char *GetExtentUsageName(ExtentInversePointer iptr);
 
@@ -392,6 +393,7 @@ SegSpace *spc_open(Oid tablespace_id, Oid database_id, bool create, bool isRedo 
 SegSpace *spc_init_space_node(Oid spcNode, Oid dbNode);
 SpaceDataFileStatus spc_status(SegSpace *spc);
 SegSpace *spc_drop(Oid tablespace_id, Oid database_id, bool redo);
+void spc_drop_space_node(Oid spcNode, Oid dbNode);
 void spc_lock(SegSpace *spc);
 void spc_unlock(SegSpace *spc);
 
@@ -447,7 +449,8 @@ typedef struct SegPageLocation {
     BlockNumber blocknum;
 } SegPageLocation;
 
-SegPageLocation seg_get_physical_location(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum);
+SegPageLocation seg_get_physical_location(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum,
+                                          bool check_standby = true);
 void seg_record_new_extent_on_level0_page(SegSpace *spc, Buffer seg_head_buffer, uint32 new_extent_id,
                                           BlockNumber new_extent_first_pageno);
 void seg_head_update_xlog(Buffer head_buffer, SegmentHead *seg_head, int level0_slot,

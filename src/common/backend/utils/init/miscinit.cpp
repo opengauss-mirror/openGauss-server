@@ -72,6 +72,8 @@
 
 #define INIT_SESSION_MAX_INT32_BUFF 20
 
+#define InvalidPid ((pid_t)(-1))
+
 Alarm alarmItemTooManyDbUserConn[1] = {ALM_AI_Unknown, ALM_AS_Normal, 0, 0, 0, 0, {0}, {0}, NULL};
 
 /* ----------------------------------------------------------------
@@ -338,6 +340,24 @@ Oid GetUserId(void)
 Oid GetCurrentUserId(void)
 {
     return u_sess->misc_cxt.CurrentUserId;
+}
+
+Oid GetOldUserId(bool isReceive)
+{
+    if (isReceive) {
+        return u_sess->misc_cxt.RecOldUserId;
+    } else {
+        return u_sess->misc_cxt.SendOldUserId;
+    }
+}
+
+void SetOldUserId(Oid userId, bool isReceive)
+{
+    if (isReceive) {
+        u_sess->misc_cxt.RecOldUserId = userId;
+    } else {
+        u_sess->misc_cxt.SendOldUserId = userId;
+    }
 }
 
 /*
@@ -674,15 +694,21 @@ static void RegisterNodeGroupCacheCallback()
  * with guc.c's internal state, so SET ROLE has to be disallowed.
  *
  * SECURITY_RESTRICTED_OPERATION indicates that we are inside an operation
- * that does not wish to trust called user-defined functions at all.  This
- * bit prevents not only SET ROLE, but various other changes of session state
- * that normally is unprotected but might possibly be used to subvert the
- * calling session later.  An example is replacing an existing prepared
- * statement with new code, which will then be executed with the outer
- * session's permissions when the prepared statement is next used.  Since
- * these restrictions are fairly draconian, we apply them only in contexts
- * where the called functions are really supposed to be side-effect-free
- * anyway, such as VACUUM/ANALYZE/REINDEX.
+ * that does not wish to trust called user-defined functions at all.  The
+ * policy is to use this before operations, e.g. autovacuum and REINDEX, that
+ * enumerate relations of a database or schema and run functions associated
+ * with each found relation.  The relation owner is the new user ID.  Set this
+ * as soon as possible after locking the relation.  Restore the old user ID as
+ * late as possible before closing the relation; restoring it shortly after
+ * close is also tolerable.  If a command has both relation-enumerating and
+ * non-enumerating modes, e.g. ANALYZE, both modes set this bit.  This bit
+ * prevents not only SET ROLE, but various other changes of session state that
+ * normally is unprotected but might possibly be used to subvert the calling
+ * session later.  An example is replacing an existing prepared statement with
+ * new code, which will then be executed with the outer session's permissions
+ * when the prepared statement is next used.  These restrictions are fairly
+ * draconian, but the functions called in relation-enumerating operations are
+ * really supposed to be side-effect-free anyway.
  *
  * Unlike GetUserId, GetUserIdAndSecContext does *not* Assert that the current
  * value of u_sess->misc_cxt.CurrentUserId is valid; nor does SetUserIdAndSecContext require
@@ -721,6 +747,21 @@ bool InSecurityRestrictedOperation(void)
     return (u_sess->misc_cxt.SecurityRestrictionContext & SECURITY_RESTRICTED_OPERATION) != 0;
 }
 
+/*
+ * InReceivingLocalUserIdChange - are we inside a dn get cn's userid change?
+ */
+bool InReceivingLocalUserIdChange()
+{
+    return (u_sess->misc_cxt.SecurityRestrictionContext & RECEIVER_LOCAL_USERID_CHANGE) != 0;
+}
+
+/*
+ * InSendingLocalUserIdChange - are we inside cn send user to dn change?
+ */
+bool InSendingLocalUserIdChange()
+{
+    return (u_sess->misc_cxt.SecurityRestrictionContext & SENDER_LOCAL_USERID_CHANGE) != 0;
+}
 /*
  * These are obsolete versions of Get/SetUserIdAndSecContext that are
  * only provided for bug-compatibility with some rather dubious code in
@@ -1173,6 +1214,41 @@ static void CreatePidLockFile(const char* filename)
     on_proc_exit(UnLockPidLockFile, Int32GetDatum(fd));
 }
 
+/* Get tgid of input process id */
+pid_t getProcessTgid(pid_t pid)
+{
+#define TGID_ITEM_NUM 2
+    char pid_path[MAXPGPATH];
+    FILE *fp = NULL;
+    char getBuff[MAXPGPATH];
+    char paraName[MAXPGPATH];
+    pid_t tgid = InvalidPid;
+    int rc;
+
+    rc = snprintf_s(pid_path, MAXPGPATH, MAXPGPATH - 1, "/proc/%d/status", pid);
+    securec_check_ss(rc, "\0", "\0");
+
+    /* may fail because of ENOENT or privilege */
+    fp = fopen(pid_path, "r");
+    if (fp == NULL) {
+        return InvalidPid;
+    }
+
+    /* parse process's status file */
+    while (fgets(getBuff, MAXPGPATH, fp) != NULL) {
+        if (strstr(getBuff, "Tgid:") != NULL &&
+            sscanf_s(getBuff, "%s   %d", paraName, MAXPGPATH, &tgid) == TGID_ITEM_NUM) {
+            break;
+        } else {
+            tgid = InvalidPid;
+        }
+    }
+
+    (void)fclose(fp);
+
+    return tgid;
+}
+
 /*
  * Create a lockfile.
  *
@@ -1188,6 +1264,7 @@ static void CreateLockFile(const char* filename, bool amPostmaster, bool isDDLoc
     int len;
     int encoded_pid;
     pid_t other_pid;
+    pid_t other_tgid;
     pid_t my_pid, my_p_pid, my_gp_pid;
     const char* envvar = NULL;
 
@@ -1304,6 +1381,8 @@ static void CreateLockFile(const char* filename, bool amPostmaster, bool isDDLoc
                     buffer)));
         }
 
+        other_tgid = getProcessTgid(other_pid);
+
         /*
          * Check to see if the other process still exists
          *
@@ -1329,7 +1408,8 @@ static void CreateLockFile(const char* filename, bool amPostmaster, bool isDDLoc
          * someone else, at least on machines where /tmp hasn't got a
          * stickybit.)
          */
-        if (other_pid != my_pid && other_pid != my_p_pid && other_pid != my_gp_pid) {
+        if (other_pid != my_pid && other_pid != my_p_pid && other_pid != my_gp_pid &&
+        (other_tgid == InvalidPid || (other_tgid != my_pid && other_tgid != my_p_pid && other_tgid != my_gp_pid))) {
             if (kill(other_pid, 0) == 0 || (errno != ESRCH && errno != EPERM)) {
 /* lockfile belongs to a live process */
 #ifndef WIN32

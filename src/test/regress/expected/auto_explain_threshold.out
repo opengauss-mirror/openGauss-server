@@ -1,0 +1,599 @@
+create schema auto_explain_threshold;
+set search_path = auto_explain_threshold;
+set enable_auto_explain = off;
+set auto_explain_level = notice;
+-- simple query
+-- takes 242ms approx.
+set enable_auto_explain = on;
+create table t (a int);
+insert into t values (generate_series(1,100));
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+Query Text: insert into t values (generate_series(1,100));
+Name: datanode1
+--?.*
+--?.*
+        Output: generate_series(1, 100)
+        Exec Nodes: All datanodes
+
+
+NOTICE:  
+----------------------------NestLevel:0----------------------------
+--?.*
+
+analyze t;
+set auto_explain_log_min_duration = '10s';
+select count(1) from t t1, t t2, t t3; -- no explain
+  count  
+---------
+ 1000000
+(1 row)
+
+set auto_explain_log_min_duration = '10ms';
+select count(1) from t t1, t t2, t t3; -- show plan
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+Query Text: select count(1) from t t1, t t2, t t3;
+Name: datanode1
+--?.*
+  Output: count(1)
+  Exec Nodes: All datanodes
+--?.*
+        Exec Nodes: All datanodes
+--?.*
+              Exec Nodes: All datanodes
+--?.*
+                    Output: t1.a
+                    Exec Nodes: All datanodes
+--?.*
+                    Output: t2.a
+                    Exec Nodes: All datanodes
+--?.*
+                          Output: t2.a
+                          Exec Nodes: All datanodes
+--?.*
+              Output: t3.a
+              Exec Nodes: All datanodes
+--?.*
+                    Output: t3.a
+                    Exec Nodes: All datanodes
+
+
+NOTICE:  
+----------------------------NestLevel:0----------------------------
+--?.*
+
+  count  
+---------
+ 1000000
+(1 row)
+
+set query_dop = 1004;
+select count(1) from t t1, t t2, t t3; -- show smp plan
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+Query Text: select count(1) from t t1, t t2, t t3;
+Name: datanode1
+--?.*
+  Output: count((count(1)))
+--?.*
+        Output: (count(1))
+        Spawn on: All datanodes
+        Consumer Nodes: All datanodes
+--?.*
+              Output: count(1)
+--?.*
+--?.*
+--?.*
+                                Output: t1.a
+                                Spawn on: All datanodes
+                                Consumer Nodes: All datanodes
+--?.*
+                                      Output: t1.a
+--?.*
+                                Output: t2.a
+--?.*
+                                      Output: t2.a
+--?.*
+                          Output: t3.a
+--?.*
+                                Output: t3.a
+                                Spawn on: All datanodes
+                                Consumer Nodes: All datanodes
+--?.*
+                                      Output: t3.a
+
+
+NOTICE:  
+----------------------------NestLevel:0----------------------------
+--?.*
+
+  count  
+---------
+ 1000000
+(1 row)
+
+set query_dop = 1;
+-- test threshold
+set auto_explain_log_min_duration = '100ms';
+select pg_sleep(0.01);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select pg_sleep(0.2);
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+Query Text: select pg_sleep(0.2);
+Name: datanode1
+--?.*
+  Output: pg_sleep(.2::double precision)
+
+
+NOTICE:  
+----------------------------NestLevel:0----------------------------
+--?.*
+
+ pg_sleep 
+----------
+ 
+(1 row)
+
+-- nested execution with plpgsql function
+set enable_auto_explain = off;
+create table test_tab1(a int, b varchar);
+insert into test_tab1 values(1,'test1');
+insert into test_tab1 values(2,'test2');
+insert into test_tab1 values(3,'test2');
+create table test_tab2(a int, b varchar);
+insert into test_tab2 values(1,'test1');
+insert into test_tab2 values(2,'test2');
+insert into test_tab2 values(3,'test2');
+create table test_tab3(a int, b varchar);
+insert into test_tab3 values(1,'test1');
+insert into test_tab3 values(2,'test2');
+insert into test_tab3 values(3,'test2');
+analyze test_tab1;
+analyze test_tab2;
+analyze test_tab3;
+CREATE OR REPLACE FUNCTION func_delete_trigger()
+RETURNS TRIGGER AS $$
+BEGIN
+   DELETE FROM test_tab2 where test_tab2.a = OLD.a;
+    RETURN OLD;
+END;
+$$
+LANGUAGE plpgsql;
+CREATE TRIGGER delete_trigger 
+    AFTER DELETE ON test_tab1
+    FOR EACH ROW
+    EXECUTE PROCEDURE func_delete_trigger();
+    
+CREATE OR REPLACE FUNCTION func_update_trigger()
+  RETURNS trigger AS $$
+   BEGIN
+      UPDATE test_tab3 SET test_tab3.b = NEW.b  where test_tab3.a = NEW.a;
+      RETURN NEW;
+   END;
+$$
+LANGUAGE plpgsql;
+CREATE TRIGGER update_trigger
+    AFTER UPDATE ON test_tab1
+    FOR EACH ROW
+    EXECUTE PROCEDURE func_update_trigger();
+create or replace function process_test() returns int as $$
+declare status  int;
+begin
+select complicate_process() into status;
+return status;
+END
+$$
+LANGUAGE plpgsql;
+create or replace function nested_func(cnt out int) as $$
+begin
+    select count(1) into cnt from test_tab1 t1, test_tab3 t3 where t1.a = t3.a;
+end
+$$
+LANGUAGE plpgsql;
+create or replace function open_cursor(myCursor OUT REFCURSOR) as $$
+begin
+open myCursor for select * from test_tab1;
+END
+$$
+LANGUAGE plpgsql;
+set enable_auto_explain = on;
+set auto_explain_log_min_duration = '200ms';
+-- log starts shortly after delete
+begin;
+create or replace function complicate_process(ret out int)  as $$
+declare v_count1 int;
+declare tt  REFCURSOR;
+declare cur_a int;
+declare cur_b varchar;
+begin
+    select count(1) into v_count1 from test_tab1;
+
+    execute 'select pg_sleep(0.3);';
+
+    delete test_tab1 where a = (select cnt from nested_func() limit 1);
+    ret := 0;
+END
+$$
+LANGUAGE plpgsql;
+select process_test();
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:2----------------------------
+Query Text: select pg_sleep(0.3);
+Name: datanode1
+--?.*
+  Output: pg_sleep(.3::double precision)
+
+
+CONTEXT:  SQL statement "select pg_sleep(0.3);"
+PL/pgSQL function complicate_process() line 9 at EXECUTE statement
+referenced column: complicate_process
+SQL statement "select complicate_process()"
+PL/pgSQL function process_test() line 4 at SQL statement
+referenced column: process_test
+NOTICE:  
+----------------------------NestLevel:2----------------------------
+--?.*
+
+CONTEXT:  SQL statement "select pg_sleep(0.3);"
+PL/pgSQL function complicate_process() line 9 at EXECUTE statement
+referenced column: complicate_process
+SQL statement "select complicate_process()"
+PL/pgSQL function process_test() line 4 at SQL statement
+referenced column: process_test
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:2----------------------------
+Query Text: delete test_tab1 where a = (select cnt from nested_func() limit 1)
+Name: datanode1
+--?.*
+  InitPlan 1 (returns $0)
+--?.*
+          Output: nested_func.cnt
+          Exec Nodes: All datanodes
+--?.*
+                Output: nested_func.cnt
+                Exec Nodes: All datanodes
+                Function Call: nested_func()
+--?.*
+        Output: test_tab1.ctid
+        Exec Nodes: All datanodes
+        Filter: (test_tab1.a = $0)
+
+
+CONTEXT:  SQL statement "delete test_tab1 where a = (select cnt from nested_func() limit 1)"
+PL/pgSQL function complicate_process() line 11 at SQL statement
+referenced column: complicate_process
+SQL statement "select complicate_process()"
+PL/pgSQL function process_test() line 4 at SQL statement
+referenced column: process_test
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:3----------------------------
+Query Text: select count(1)          from test_tab1 t1, test_tab3 t3 where t1.a = t3.a
+Name: datanode1
+--?.*
+  Output: count(1)
+  Exec Nodes: All datanodes
+--?.*
+        Exec Nodes: All datanodes
+        Hash Cond: (t1.a = t3.a)
+--?.*
+              Output: t1.a, t1.b
+              Exec Nodes: All datanodes
+--?.*
+              Output: t3.a
+              Exec Nodes: All datanodes
+--?.*
+                    Output: t3.a
+                    Exec Nodes: All datanodes
+
+
+CONTEXT:  SQL statement "select count(1)          from test_tab1 t1, test_tab3 t3 where t1.a = t3.a"
+PL/pgSQL function nested_func() line 3 at SQL statement
+SQL statement "delete test_tab1 where a = (select cnt from nested_func() limit 1)"
+PL/pgSQL function complicate_process() line 11 at SQL statement
+referenced column: complicate_process
+SQL statement "select complicate_process()"
+PL/pgSQL function process_test() line 4 at SQL statement
+referenced column: process_test
+NOTICE:  
+----------------------------NestLevel:3----------------------------
+--?.*
+
+CONTEXT:  SQL statement "select count(1)          from test_tab1 t1, test_tab3 t3 where t1.a = t3.a"
+PL/pgSQL function nested_func() line 3 at SQL statement
+SQL statement "delete test_tab1 where a = (select cnt from nested_func() limit 1)"
+PL/pgSQL function complicate_process() line 11 at SQL statement
+referenced column: complicate_process
+SQL statement "select complicate_process()"
+PL/pgSQL function process_test() line 4 at SQL statement
+referenced column: process_test
+NOTICE:  
+----------------------------NestLevel:2----------------------------
+--?.*
+
+CONTEXT:  SQL statement "delete test_tab1 where a = (select cnt from nested_func() limit 1)"
+PL/pgSQL function complicate_process() line 11 at SQL statement
+referenced column: complicate_process
+SQL statement "select complicate_process()"
+PL/pgSQL function process_test() line 4 at SQL statement
+referenced column: process_test
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:3----------------------------
+Query Text: DELETE FROM test_tab2 where test_tab2.a = OLD.a
+Name: datanode1
+--?.*
+--?.*
+        Output: ctid
+        Exec Nodes: All datanodes
+        Filter: (test_tab2.a = $22)
+
+
+CONTEXT:  SQL statement "DELETE FROM test_tab2 where test_tab2.a = OLD.a"
+PL/pgSQL function func_delete_trigger() line 3 at SQL statement
+SQL statement "delete test_tab1 where a = (select cnt from nested_func() limit 1)"
+PL/pgSQL function complicate_process() line 11 at SQL statement
+referenced column: complicate_process
+SQL statement "select complicate_process()"
+PL/pgSQL function process_test() line 4 at SQL statement
+referenced column: process_test
+NOTICE:  
+----------------------------NestLevel:3----------------------------
+--?.*
+
+CONTEXT:  SQL statement "DELETE FROM test_tab2 where test_tab2.a = OLD.a"
+PL/pgSQL function func_delete_trigger() line 3 at SQL statement
+SQL statement "delete test_tab1 where a = (select cnt from nested_func() limit 1)"
+PL/pgSQL function complicate_process() line 11 at SQL statement
+referenced column: complicate_process
+SQL statement "select complicate_process()"
+PL/pgSQL function process_test() line 4 at SQL statement
+referenced column: process_test
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:1----------------------------
+Query Text: select complicate_process()
+Name: datanode1
+--?.*
+  Output: complicate_process()
+
+
+CONTEXT:  SQL statement "select complicate_process()"
+PL/pgSQL function process_test() line 4 at SQL statement
+referenced column: process_test
+NOTICE:  
+----------------------------NestLevel:1----------------------------
+--?.*
+
+CONTEXT:  SQL statement "select complicate_process()"
+PL/pgSQL function process_test() line 4 at SQL statement
+referenced column: process_test
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+Query Text: select process_test();
+Name: datanode1
+--?.*
+  Output: process_test()
+
+
+NOTICE:  
+----------------------------NestLevel:0----------------------------
+--?.*
+
+ process_test 
+--------------
+            0
+(1 row)
+
+rollback;
+-- log starts only before update
+begin;
+create or replace function complicate_process(ret out int)  as $$
+declare v_count1 int;
+declare tt  REFCURSOR;
+declare cur_a int;
+declare cur_b varchar;
+begin
+    select count(1) into v_count1 from test_tab1;
+
+
+    delete test_tab1 where a = (select cnt from nested_func() limit 1);
+
+    select open_cursor() into tt;
+    fetch next from tt into cur_a,cur_b;
+    update test_tab1 set b = 'new1' where a = cur_a;
+    execute 'select pg_sleep(0.3);';
+    fetch next from tt into cur_a,cur_b;
+    update test_tab1 set b = 'new2' where a = cur_a;
+    ret := 0;
+END
+$$
+LANGUAGE plpgsql;
+select process_test();
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:2----------------------------
+Query Text: select pg_sleep(0.3);
+Name: datanode1
+--?.*
+  Output: pg_sleep(.3::double precision)
+
+
+CONTEXT:  SQL statement "select pg_sleep(0.3);"
+PL/pgSQL function complicate_process() line 15 at EXECUTE statement
+referenced column: complicate_process
+SQL statement "select complicate_process()"
+PL/pgSQL function process_test() line 4 at SQL statement
+referenced column: process_test
+NOTICE:  
+----------------------------NestLevel:2----------------------------
+--?.*
+
+CONTEXT:  SQL statement "select pg_sleep(0.3);"
+PL/pgSQL function complicate_process() line 15 at EXECUTE statement
+referenced column: complicate_process
+SQL statement "select complicate_process()"
+PL/pgSQL function process_test() line 4 at SQL statement
+referenced column: process_test
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:2----------------------------
+Query Text: select * from test_tab1
+Name: datanode1
+--?.*
+  Output: a, b
+
+
+CONTEXT:  PL/pgSQL function complicate_process() line 16 at FETCH
+referenced column: complicate_process
+SQL statement "select complicate_process()"
+PL/pgSQL function process_test() line 4 at SQL statement
+referenced column: process_test
+NOTICE:  
+----------------------------NestLevel:2----------------------------
+--?.*
+
+CONTEXT:  PL/pgSQL function complicate_process() line 16 at FETCH
+referenced column: complicate_process
+SQL statement "select complicate_process()"
+PL/pgSQL function process_test() line 4 at SQL statement
+referenced column: process_test
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:2----------------------------
+Query Text: update test_tab1 set b = 'new2' where a = cur_a
+Name: datanode1
+--?.*
+--?.*
+        Output: a, 'new2'::character varying, ctid
+        Exec Nodes: All datanodes
+        Filter: (test_tab1.a = $17)
+param1 value: 2 type: int4
+
+
+CONTEXT:  SQL statement "update test_tab1 set b = 'new2' where a = cur_a"
+PL/pgSQL function complicate_process() line 17 at SQL statement
+referenced column: complicate_process
+SQL statement "select complicate_process()"
+PL/pgSQL function process_test() line 4 at SQL statement
+referenced column: process_test
+NOTICE:  
+----------------------------NestLevel:2----------------------------
+--?.*
+
+CONTEXT:  SQL statement "update test_tab1 set b = 'new2' where a = cur_a"
+PL/pgSQL function complicate_process() line 17 at SQL statement
+referenced column: complicate_process
+SQL statement "select complicate_process()"
+PL/pgSQL function process_test() line 4 at SQL statement
+referenced column: process_test
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:3----------------------------
+Query Text: UPDATE test_tab3 SET test_tab3.b = NEW.b  where test_tab3.a = NEW.a
+Name: datanode1
+--?.*
+--?.*
+        Output: a, $22, ctid
+        Exec Nodes: All datanodes
+        Filter: (test_tab3.a = $23)
+
+
+CONTEXT:  SQL statement "UPDATE test_tab3 SET test_tab3.b = NEW.b  where test_tab3.a = NEW.a"
+PL/pgSQL function func_update_trigger() line 3 at SQL statement
+SQL statement "update test_tab1 set b = 'new2' where a = cur_a"
+PL/pgSQL function complicate_process() line 17 at SQL statement
+referenced column: complicate_process
+SQL statement "select complicate_process()"
+PL/pgSQL function process_test() line 4 at SQL statement
+referenced column: process_test
+NOTICE:  
+----------------------------NestLevel:3----------------------------
+--?.*
+
+CONTEXT:  SQL statement "UPDATE test_tab3 SET test_tab3.b = NEW.b  where test_tab3.a = NEW.a"
+PL/pgSQL function func_update_trigger() line 3 at SQL statement
+SQL statement "update test_tab1 set b = 'new2' where a = cur_a"
+PL/pgSQL function complicate_process() line 17 at SQL statement
+referenced column: complicate_process
+SQL statement "select complicate_process()"
+PL/pgSQL function process_test() line 4 at SQL statement
+referenced column: process_test
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:1----------------------------
+Query Text: select complicate_process()
+Name: datanode1
+--?.*
+  Output: complicate_process()
+
+
+CONTEXT:  SQL statement "select complicate_process()"
+PL/pgSQL function process_test() line 4 at SQL statement
+referenced column: process_test
+NOTICE:  
+----------------------------NestLevel:1----------------------------
+--?.*
+
+CONTEXT:  SQL statement "select complicate_process()"
+PL/pgSQL function process_test() line 4 at SQL statement
+referenced column: process_test
+NOTICE:  
+QueryPlan
+
+----------------------------NestLevel:0----------------------------
+Query Text: select process_test();
+Name: datanode1
+--?.*
+  Output: process_test()
+
+
+NOTICE:  
+----------------------------NestLevel:0----------------------------
+--?.*
+
+ process_test 
+--------------
+            0
+(1 row)
+
+rollback;
+drop schema auto_explain_threshold cascade;
+NOTICE:  drop cascades to 9 other objects
+DETAIL:  drop cascades to table t
+drop cascades to table test_tab1
+drop cascades to table test_tab2
+drop cascades to table test_tab3
+drop cascades to function func_delete_trigger()
+drop cascades to function func_update_trigger()
+drop cascades to function process_test()
+drop cascades to function nested_func()
+drop cascades to function open_cursor()

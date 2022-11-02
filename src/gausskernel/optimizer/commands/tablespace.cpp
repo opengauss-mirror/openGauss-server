@@ -69,7 +69,6 @@
 #include "nodes/bitmapset.h"
 #include "nodes/makefuncs.h"
 #include "postmaster/bgwriter.h"
-#include "storage/dfs/dfs_connector.h"
 #include "storage/smgr/fd.h"
 #include "storage/standby.h"
 #include "storage/smgr/segment.h"
@@ -91,27 +90,12 @@
 #endif
 #include "replication/replicainternal.h"
 #include "replication/slot.h"
-#include "dfs_adaptor.h"
 #include "postmaster/rbcleaner.h"
 #include "storage/tcap.h"
 
 static void create_tablespace_directories(const char* location, const Oid tablespaceoid);
-/*
- * Create external directories.
- */
-static void CreateExternalDirectories(const Oid tablespaceOid, Datum options);
-/*
- * Drop external directories.
- */
-static bool DropExternalDirectories(const Oid tablespaceId, bool redo);
 static bool destroy_tablespace_directories(Oid tablespaceoid, bool redo);
 static void createtbspc_abort_callback(bool isCommit, const void* arg);
-/*
- * Get specified option value from datum structure.
- */
-static char* DatumGetTablespaceOptionValue(Datum datum, const char* optionName);
-
-static void CheckTablespaceOptions(const Oid tablespaceOid, Datum options);
 
 Datum CanonicalizeTablespaceOptions(Datum datum);
 
@@ -478,6 +462,62 @@ bool IsLegalRelativeLocation(const char* location)
     return true;
 }
 
+const char *const ReserveEnvPath[] = {
+    "GAUSSHOME",
+    "GAUSSLOG",
+    "PGHOST"
+};
+
+static void CheckSpecificDirectory(const char *location, const char *data_directory, const char *errDesc)
+{
+    if (location == NULL || data_directory == NULL) {
+        return;
+    }
+    if ((0 == strncmp(location, data_directory, strlen(data_directory))) &&
+        ((strlen(location) > strlen(data_directory) && location[strlen(data_directory)] == '/') ||
+        (strlen(location) == strlen(data_directory))))
+        ereport(ERROR, (errmodule(MOD_TBLSPC), errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+            errmsg("tablespace cannot be created under %s directory", errDesc)));
+}
+
+static char* GetEnvRealPath(const char *env)
+{
+    char *envPath = gs_getenv_r(env);
+    char realEnvPath[PATH_MAX + 1] = {'\0'};
+    if (envPath == NULL || realpath(envPath, realEnvPath) == NULL) {
+        ereport(LOG, (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION),
+            errmsg("Get environment of %s failed.\n", env)));
+        return NULL;
+    }
+    envPath = NULL;
+    check_backend_env(realEnvPath);
+    char *realPathRes = (char *)palloc0(strlen(realEnvPath) + 1);
+    errno_t rc = strcpy_s(realPathRes, strlen(realEnvPath) + 1, realEnvPath);
+    securec_check(rc, "\0", "\0");
+    return realPathRes;
+}
+
+static void CheckLocationDataPath(const char *location)
+{
+    CheckSpecificDirectory(location, t_thrd.proc_cxt.DataDir, "data");
+    for (uint32 i = 0; i < lengthof(ReserveEnvPath); i++) {
+        char *envRealPath = GetEnvRealPath(ReserveEnvPath[i]);
+        CheckSpecificDirectory(location, envRealPath, ReserveEnvPath[i]);
+        pfree_ext(envRealPath);
+    }
+}
+
+static void CheckAbsoluteLocationDataPath(const char *location)
+{
+    char realLocationPath[PATH_MAX + 1] = {'\0'};
+    if (realpath(location, realLocationPath) == NULL) {
+        ereport(ERROR, (errmodule(MOD_TBLSPC), errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+            errmsg("fail to get tablespace absolute location data path")));    
+    }
+    check_backend_env(realLocationPath);
+    CheckLocationDataPath(realLocationPath);
+}
+
 /*
  * Create a table space
  *
@@ -549,17 +589,8 @@ void CreateTableSpace(CreateTableSpaceStmt* stmt)
                 (errmodule(MOD_TBLSPC),
                     errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
                     errmsg("tablespace location must be an absolute path")));
-
-        /*
-         * Tablespace cannot be created under  data directory
-         */
-        if ((0 == strncmp(location, t_thrd.proc_cxt.DataDir, strlen(t_thrd.proc_cxt.DataDir))) &&
-            ((strlen(location) > strlen(t_thrd.proc_cxt.DataDir) && location[strlen(t_thrd.proc_cxt.DataDir)] == '/') ||
-                (strlen(location) == strlen(t_thrd.proc_cxt.DataDir))))
-            ereport(ERROR,
-                (errmodule(MOD_TBLSPC),
-                    errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
-                    errmsg("tablespace cannot be created under data directory")));
+        /* Tablespace cannot be created under reserved directory:data, gausshome, gausslog, pghost. */
+        CheckLocationDataPath(location);
 
         if (!IsLegalAbsoluteLocation(location))
             ereport(ERROR,
@@ -640,6 +671,7 @@ void CreateTableSpace(CreateTableSpaceStmt* stmt)
                 errcode(ERRCODE_DUPLICATE_OBJECT),
                 errmsg("tablespace \"%s\" already exists", stmt->tablespacename)));
 
+    (void)LWLockAcquire(g_instance.ckpt_cxt_ctl->snapshotBlockLock, LW_SHARED);
     /*
      * Acquire TablespaceCreateLock to ensure 'check_create_dir' is safe.
      */
@@ -648,6 +680,11 @@ void CreateTableSpace(CreateTableSpaceStmt* stmt)
     rel = heap_open(TableSpaceRelationId, RowExclusiveLock);
 
     check_create_dir(location);
+    
+    /* Tablespace can't be created under reserved directory:data, gausshome, gausslog, pghost. Check the real path. */
+    if (!relative) {
+        CheckAbsoluteLocationDataPath(location);
+    }
 
     errno_t rc = EOK;
     rc = memset_s(nulls, Natts_pg_tablespace, false, Natts_pg_tablespace);
@@ -701,10 +738,7 @@ void CreateTableSpace(CreateTableSpaceStmt* stmt)
      * if we do not check the validity and do not get dfs connector, the
      * local directory has been created, but failed to create the dfs directory.
      */
-    CheckTablespaceOptions(tablespaceoid, newOptions);
-
     create_tablespace_directories(location, tablespaceoid);
-    CreateExternalDirectories(tablespaceoid, newOptions);
 
 #ifdef PGXC
     /*
@@ -781,6 +815,7 @@ void CreateTableSpace(CreateTableSpaceStmt* stmt)
 
     /* We keep the lock on pg_tablespace until commit */
     heap_close(rel, NoLock);
+    LWLockRelease(g_instance.ckpt_cxt_ctl->snapshotBlockLock);
 #else  /* !HAVE_SYMLINK */
     ereport(ERROR,
         (errmodule(MOD_TBLSPC),
@@ -807,6 +842,7 @@ void DropTableSpace(DropTableSpaceStmt* stmt)
     ScanKeyData scankey[1];
     Relation partrel = NULL;
 
+    (void)LWLockAcquire(g_instance.ckpt_cxt_ctl->snapshotBlockLock, LW_SHARED);
     /*
      * Find the target tuple
      */
@@ -826,6 +862,7 @@ void DropTableSpace(DropTableSpaceStmt* stmt)
             tableam_scan_end(scandesc);
             heap_close(rel, NoLock);
         }
+        LWLockRelease(g_instance.ckpt_cxt_ctl->snapshotBlockLock);
         return;
     }
 
@@ -982,6 +1019,7 @@ void DropTableSpace(DropTableSpaceStmt* stmt)
 
     /* We keep the lock on pg_tablespace until commit */
     heap_close(rel, NoLock);
+    LWLockRelease(g_instance.ckpt_cxt_ctl->snapshotBlockLock);
 #else  /* !HAVE_SYMLINK */
     ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("tablespaces are not supported on this platform")));
 #endif /* HAVE_SYMLINK */
@@ -1280,147 +1318,6 @@ Datum CanonicalizeTablespaceOptions(Datum datum)
     return datum;
 }
 
-static void CheckTablespaceOptions(const Oid tablespaceOid, Datum options)
-{
-    DfsSrvOptions* srvOptions = NULL;
-    srvOptions = (DfsSrvOptions*)palloc0(sizeof(DfsSrvOptions));
-    dfs::DFSConnector* conn = NULL;
-
-    /*
-     * If the filesystem type is GENERAL, Unsupport address, cfgpath and storepath options.
-     */
-    srvOptions->filesystem = DatumGetTablespaceOptionValue(options, TABLESPACE_OPTION_FILESYSTEM);
-    srvOptions->address = DatumGetTablespaceOptionValue(options, TABLESPACE_OPTION_ADDRESS);
-    srvOptions->cfgPath = DatumGetTablespaceOptionValue(options, TABLESPACE_OPTION_CFGPATH);
-    CANONICALIZE_PATH(srvOptions->cfgPath);
-    srvOptions->storePath = DatumGetTablespaceOptionValue(options, TABLESPACE_OPTION_STOREPATH);
-    CANONICALIZE_PATH(srvOptions->storePath);
-
-    if (srvOptions->filesystem == NULL ||
-        0 == pg_strncasecmp(srvOptions->filesystem, FILESYSTEM_GENERAL, strlen(srvOptions->filesystem))) {
-        if (srvOptions->address || srvOptions->cfgPath || srvOptions->storePath) {
-            ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("Unsupport address, cfgpath, storepath options "
-                           "when the filesystem is not HDFS.")));
-        }
-    } else {
-        /* cannot create hdfs tablesapce */
-        FEATURE_NOT_PUBLIC_ERROR("HDFS is not yet supported.");
-        if (srvOptions->storePath == NULL) {
-            ereport(ERROR, (errcode_for_file_access(), errmsg("Failed to get storepath from tablespace options.")));
-        }
-
-        if (srvOptions->cfgPath == NULL) {
-            ereport(ERROR, (errcode_for_file_access(), errmsg("Failed to get cfgpath from tablespace options.")));
-        }
-
-        conn = dfs::createConnector(CurrentMemoryContext, srvOptions, tablespaceOid);
-
-        delete (conn);
-    }
-}
-
-/*
- * Brief        : Create external directories for tablespace. Currently, if the
- *                filesystem option is "hdfs", need create external directories.
- * Input        : tablespaceOid, tablespace oid.
- *                options, options of tablespace to be createed.
- * Output       : None.
- * Return Value : None.
- * Notes        : Whether or not create successfully directory, we do not care of
- *                it.
- */
-void CreateExternalDirectories(const Oid tablespaceOid, Datum options)
-{
-    DfsSrvOptions* srvOptions = NULL;
-    dfs::DFSConnector* conn = NULL;
-    StringInfo dfsPath = makeStringInfo();
-
-    Assert(OidIsValid(tablespaceOid));
-    srvOptions = (DfsSrvOptions*)palloc0(sizeof(DfsSrvOptions));
-    srvOptions->filesystem = DatumGetTablespaceOptionValue(options, TABLESPACE_OPTION_FILESYSTEM);
-
-    if (srvOptions->filesystem == NULL ||
-        0 != pg_strncasecmp(srvOptions->filesystem, FILESYSTEM_HDFS, strlen(srvOptions->filesystem))) {
-        pfree_ext(srvOptions);
-        return;
-    }
-
-    srvOptions->cfgPath = DatumGetTablespaceOptionValue(options, TABLESPACE_OPTION_CFGPATH);
-    CANONICALIZE_PATH(srvOptions->cfgPath);
-    srvOptions->address = DatumGetTablespaceOptionValue(options, TABLESPACE_OPTION_ADDRESS);
-    srvOptions->storePath = DatumGetTablespaceOptionValue(options, TABLESPACE_OPTION_STOREPATH);
-    CANONICALIZE_PATH(srvOptions->storePath);
-
-    /*
-     * HDFS tablespace directory will be arranged the following tree on HDFS:
-     *
-     *                      storepath
-     *                         |
-     *                         |
-     *                DFS_TABLESPACE_SUBDIR
-     *                        / \
-     *                       /   \
-     *                      /     \
-     *    Nodename1_pgsql_tmp     Nodename2_pgsql_tmp    [...]
-     */
-    conn = dfs::createConnector(CurrentMemoryContext, srvOptions, tablespaceOid);
-    if (conn == NULL) {
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
-                (errmsg("Failed to create connector for filesystem %s, cfg path %s, address %s, store path %s",
-                srvOptions->filesystem, srvOptions->cfgPath, srvOptions->address, srvOptions->storePath))));
-    }
-    if (-1 == conn->createDirectory(srvOptions->storePath)) {
-        delete (conn);
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
-                (errmsg("Failed to create directory \"%s\" on HDFS.", srvOptions->storePath),
-                    errdetail("Please check log information in %s.", g_instance.attr.attr_common.PGXCNodeName))));
-    }
-
-    appendStringInfo(dfsPath, "%s/%s", srvOptions->storePath, DFS_TABLESPACE_SUBDIR);
-    if (MAXPGPATH <= dfsPath->len) {
-        delete (conn);
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
-                errmsg("tablespace HDFS path \"%s\" is too long.", dfsPath->data)));
-    }
-    if (-1 == conn->createDirectory(dfsPath->data)) {
-        delete (conn);
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
-                (errmsg("Failed to create directory \"%s\" on HDFS.", dfsPath->data),
-                    errdetail("Please check log information in %s.", g_instance.attr.attr_common.PGXCNodeName))));
-    }
-
-    ereport(LOG, (errmsg("Directory \"%s\" has been created on HDFS.", dfsPath->data)));
-
-    if (IS_PGXC_COORDINATOR) {
-        appendStringInfo(dfsPath, "/%s_%s", g_instance.attr.attr_common.PGXCNodeName, DFS_TABLESPACE_TEMPDIR_SUFFIX);
-
-        if (MAXPGPATH <= dfsPath->len) {
-            delete (conn);
-            ereport(ERROR,
-                (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
-                    errmsg("tablespace HDFS path \"%s\" is too long.", dfsPath->data)));
-        }
-        if (conn->pathExists(dfsPath->data) == true) {
-            delete (conn);
-            ereport(ERROR,
-                (errcode(ERRCODE_OBJECT_IN_USE),
-                    errmsg("Directory \"%s\" already in use as a tablespace on HDFS.", dfsPath->data)));
-        }
-        (void)conn->createDirectory(dfsPath->data);
-    }
-
-    pfree_ext(dfsPath->data);
-    pfree_ext(dfsPath);
-    pfree_ext(srvOptions);
-    delete (conn);
-}
-
 /*
  * Brief        : Whether or not the tablespace is specified tablespace.
  * Input        : spcOid, the tablespace Oid.
@@ -1451,49 +1348,6 @@ bool IsSpecifiedTblspc(Oid spcOid, const char* specifedTblspc)
     }
 
     return isSpecified;
-}
-
-/*
- * Brief        : Drop external directories.
- * Input        : tablespaceOid, mark a tablespace oid.
- *                redo, whether or not excute the redo operation.
- * Output       : None.
- * Return Value : Return true if success, otherwise report error.
- * Notes        : If the tablespace is normal tablespace, return true also.
- */
-static bool DropExternalDirectories(const Oid tablespaceOid, bool redo)
-{
-    DfsSrvOptions* srvOptions = NULL;
-
-    Assert(OidIsValid(tablespaceOid));
-
-    if (redo) {
-        return true;
-    }
-    srvOptions = GetDfsSrvOptions(tablespaceOid);
-
-    Assert(srvOptions != NULL);
-    /*
-     * future: Now only support HDFS. we need package and fix the following code to adapt other DFS, if
-     * we need other DFS.
-     */
-    if (srvOptions->filesystem == NULL ||
-        0 != pg_strncasecmp(srvOptions->filesystem, FILESYSTEM_HDFS, strlen(srvOptions->filesystem))) {
-        return true;
-    }
-
-    if (srvOptions->cfgPath == NULL) {
-        ereport(ERROR,
-            (errcode(ERRCODE_UNDEFINED_FILE),
-                errmsg("Failed to drop external directory, "
-                       "because the cfgpath option has not been found from pg_tablespace.")));
-    }
-
-    if (srvOptions->storePath == NULL) {
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_FILE), errmsg("Failed to get storepath from tablespace options.")));
-    }
-
-    return true;
 }
 
 #ifdef PGXC
@@ -1718,7 +1572,7 @@ remove_symlink:
      * drop HDFS tablesapce, first drop local path. when exist empty HDFS table,
      * whether can drop HDFS table or not in local.
      */
-    return DropExternalDirectories(tablespaceoid, redo);
+    return true;
 }
 
 /*
@@ -2164,40 +2018,6 @@ Oid GetDefaultTablespace(char relpersistence)
 }
 
 /*
- * Brief        : Get specified option value from datum structure.
- * Input        : datum, option information.
- *              : optionName, sepcified option name.
- * Output       : None.
- * Return Value : return the specified option value.
- * Notes        : None.
- */
-char* DatumGetTablespaceOptionValue(Datum datum, const char* optionName)
-{
-    List* optionList = NIL;
-    ListCell* optionCell = NULL;
-    char* optionValue = NULL;
-
-    if ((Datum)0 == datum) {
-        return NULL;
-    }
-
-    optionList = untransformRelOptions(datum);
-    foreach (optionCell, optionList) {
-        DefElem* optionDef = (DefElem*)lfirst(optionCell);
-        char* optionDefName = optionDef->defname;
-
-        if (strlen(optionDefName) == strlen(optionName) &&
-            0 == pg_strncasecmp(optionDefName, optionName, strlen(optionName))) {
-            optionValue = defGetString(optionDef);
-            break;
-        }
-    }
-    list_free(optionList);
-
-    return optionValue;
-}
-
-/*
  * Brief        : Get the Specified optioin value.
  * Input        : spcNode, tablespace oid.
  *                optionName, specified option name.
@@ -2264,26 +2084,6 @@ List* GetTablespaceOptionValues(Oid spcNode)
     ReleaseSysCache(tp);
 
     return options;
-}
-
-/*
- * Brief        : Get external server options form pg_tablespace.
- * Input        : spcNode, tableapce oid.
- * Output       : None.
- * Return Value : Return DfsSrvOptions inforamtion.
- * Notes        : None.
- */
-DfsSrvOptions* GetDfsSrvOptions(Oid spcNode)
-{
-    DfsSrvOptions* srvOptions = (DfsSrvOptions*)palloc0(sizeof(DfsSrvOptions));
-    srvOptions->filesystem = GetTablespaceOptionValue(spcNode, TABLESPACE_OPTION_FILESYSTEM);
-    srvOptions->address = GetTablespaceOptionValue(spcNode, TABLESPACE_OPTION_ADDRESS);
-    srvOptions->cfgPath = GetTablespaceOptionValue(spcNode, TABLESPACE_OPTION_CFGPATH);
-    CANONICALIZE_PATH(srvOptions->cfgPath);
-    srvOptions->storePath = GetTablespaceOptionValue(spcNode, TABLESPACE_OPTION_STOREPATH);
-    CANONICALIZE_PATH(srvOptions->storePath);
-
-    return srvOptions;
 }
 
 /*
@@ -2625,6 +2425,7 @@ recheck:
 
 void xlog_create_tblspc(Oid tsId, char* tsPath, bool isRelativePath)
 {
+    (void)LWLockAcquire(g_instance.ckpt_cxt_ctl->snapshotBlockLock, LW_SHARED);
     char* location = tsPath;
     if (isRelativePath) {
         int len = strlen(t_thrd.proc_cxt.DataDir) + 1 + strlen(tsPath) + 1 + strlen(PG_LOCATION_DIR) + 1;
@@ -2640,11 +2441,13 @@ void xlog_create_tblspc(Oid tsId, char* tsPath, bool isRelativePath)
             securec_check_ss(rc, "\0", "\0");
         }
     }
+
     check_create_dir(location);
     create_tablespace_directories(location, tsId);
     if (isRelativePath) {
         pfree_ext(location);
     }
+    LWLockRelease(g_instance.ckpt_cxt_ctl->snapshotBlockLock);
 }
 
 void xlog_drop_tblspc(Oid tsId)
@@ -2664,6 +2467,7 @@ void xlog_drop_tblspc(Oid tsId)
      * etc etc. There's not much we can do about that, so just remove what
      * we can and press on.
      */
+    (void)LWLockAcquire(g_instance.ckpt_cxt_ctl->snapshotBlockLock, LW_SHARED);
     if (!destroy_tablespace_directories(tsId, true)) {
         ResolveRecoveryConflictWithTablespace(tsId);
 
@@ -2681,6 +2485,7 @@ void xlog_drop_tblspc(Oid tsId)
                     errmsg("directories for tablespace %u could not be removed", tsId),
                     errhint("You can remove the directories manually if necessary.")));
     }
+    LWLockRelease(g_instance.ckpt_cxt_ctl->snapshotBlockLock);
 }
 
 /*
@@ -2841,7 +2646,7 @@ inline uint64 TableSpaceUsageManager::GetThresholdSize(uint64 maxSize, uint64 cu
     return maxSize;
 }
 
-static inline bool IgnoreTableSpaceCheck(Oid tableSpaceOid, uint64 requestSize)
+static inline bool IgnoreTableSpaceCheck(Oid tableSpaceOid, uint64 requestSize, bool segment)
 {
     /*
      * Limitations:
@@ -2851,7 +2656,7 @@ static inline bool IgnoreTableSpaceCheck(Oid tableSpaceOid, uint64 requestSize)
      * 3. But If this datanode is in recovery, its mode either PENDING_MODE or STANDBY_MODE.
      *    Ignore checking and ensure a successful recovery.
      */
-    if ((requestSize == 0) || t_thrd.xlog_cxt.InRecovery || (t_thrd.postmaster_cxt.HaShmData == NULL) ||
+    if ((requestSize == 0 && !segment) || t_thrd.xlog_cxt.InRecovery || (t_thrd.postmaster_cxt.HaShmData == NULL) ||
         (t_thrd.postmaster_cxt.HaShmData->current_mode != PRIMARY_MODE &&
             t_thrd.postmaster_cxt.HaShmData->current_mode != NORMAL_MODE)) {
         return true;
@@ -2920,10 +2725,9 @@ void TableSpaceUsageManager::IsExceedMaxsize(Oid tableSpaceOid, uint64 requestSi
         u_sess->cmd_cxt.l_tableSpaceOid = tableSpaceOid;
         u_sess->cmd_cxt.l_isLimit =
             TableSpaceUsageManager::IsLimited(tableSpaceOid, &u_sess->cmd_cxt.l_maxSize);
-        return;
     }
 
-    if (IgnoreTableSpaceCheck(tableSpaceOid, requestSize))
+    if (IgnoreTableSpaceCheck(tableSpaceOid, requestSize, segment))
         return;
 
     bucketIndex = TableSpaceUsageManager::GetBucketIndex(tableSpaceOid);
@@ -2959,6 +2763,10 @@ void TableSpaceUsageManager::IsExceedMaxsize(Oid tableSpaceOid, uint64 requestSi
                 break;
             else if (InvalidOid == bucket->spcUsage[slotIndex].tableSpaceOid && -1 == freeSlotIndex)
                 freeSlotIndex = slotIndex;
+        }
+
+        if (segment && requestSize != 0 && slotIndex == TABLESPACE_BUCKET_CONFLICT_LISTLEN) {
+            return;
         }
 
         if (unlikely(slotIndex == TABLESPACE_BUCKET_CONFLICT_LISTLEN && -1 < freeSlotIndex)) {
@@ -2997,19 +2805,18 @@ void TableSpaceUsageManager::IsExceedMaxsize(Oid tableSpaceOid, uint64 requestSi
         }
 
         /* just refresh currentSize if it is within limit */
-        if (unlikely(currentSize)) {
+        if (unlikely(currentSize) || (segment && requestSize != 0)) {
             if (unlikely(TableSpaceUsageManager::IsFull(maxSize, currentSize, requestSize)) &&
                 !u_sess->attr.attr_common.IsInplaceUpgrade) {
                 /* 
                  * if space is not enough, purge some objs in RB and retry. 
                  * We can not do DML when segment is on, because we can not read any buffer now.
                  */
+                SpinLockRelease(&bucket->mutex);
                 if (!segment && RbCltPurgeSpaceDML(tableSpaceOid)) {
-                    SpinLockRelease(&bucket->mutex);
                     currentSize = pg_cal_tablespace_size_oid(tableSpaceOid);
                     continue;
                 }
-                SpinLockRelease(&bucket->mutex);
                 ereport(ERROR,
                     (errcode(ERRCODE_INSUFFICIENT_RESOURCES),
                         errmsg("Insufficient storage space for tablespace \"%s\"", get_tablespace_name(tableSpaceOid)),
@@ -3039,7 +2846,7 @@ void TableSpaceUsageManager::IsExceedMaxsize(Oid tableSpaceOid, uint64 requestSi
          * tablespace, we lock the uasge slot with paramater lockcCount to prevent it is reset
          */
         SpinLockRelease(&bucket->mutex);
-
+        Assert(!segment || requestSize == 0);
         currentSize = pg_cal_tablespace_size_oid(tableSpaceOid);
     }
 }
@@ -3066,5 +2873,5 @@ Oid ConvertToPgclassRelTablespaceOid(Oid tblspc)
 Oid ConvertToRelfilenodeTblspcOid(Oid tblspc)
 {
     Assert(CheckMyDatabaseMatch());
-    return (InvalidOid == tblspc) ? GetMyDatabaseTableSpace() : tblspc;
+    return (InvalidOid == tblspc) ? u_sess->proc_cxt.MyDatabaseTableSpace : tblspc;
 }

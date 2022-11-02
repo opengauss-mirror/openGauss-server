@@ -68,6 +68,7 @@
 #include "access/ustore/knl_utuple.h"
 #include "catalog/pg_proc.h"
 #include "executor/tuptable.h"
+#include "postmaster/autovacuum.h"
 #include "storage/buf/bufmgr.h"
 #include "storage/pagecompress.h"
 #include "utils/memutils.h"
@@ -703,8 +704,10 @@ HeapTuple heap_form_tuple(TupleDesc tupleDescriptor, Datum *values, bool *isnull
     int i;
 
     if (numberOfAttributes > MaxTupleAttributeNumber) {
-        ereport(ERROR, (errcode(ERRCODE_TOO_MANY_COLUMNS), errmsg("number of columns (%d) exceeds limit (%d)",
-                                                                  numberOfAttributes, MaxTupleAttributeNumber)));
+        ereport(ERROR,
+                (errcode(ERRCODE_TOO_MANY_COLUMNS),
+                 errmsg("number of columns (%d) exceeds limit (%d), AM type (%d), type id (%u)", numberOfAttributes,
+                        MaxTupleAttributeNumber, tupleDescriptor->tdTableAmType, tupleDescriptor->tdtypeid)));
     }
 
     /*
@@ -754,11 +757,9 @@ HeapTuple heap_form_tuple(TupleDesc tupleDescriptor, Datum *values, bool *isnull
     /*
      * Allocate and zero the space needed.	Note that the tuple body and
      * HeapTupleData management structure are allocated in one chunk.
+     * prealloc 8 bytes for hasuids option.
      */
-    Size allocSize = HEAPTUPLESIZE + len;
-    if (tupleDescriptor->tdhasuids) { /* prealloc 8 bytes */
-        allocSize = HEAPTUPLESIZE + MAXALIGN(hoff + sizeof(uint64)) + data_len;
-    }
+    Size allocSize = HEAPTUPLESIZE + MAXALIGN(hoff + sizeof(uint64)) + data_len;
     tuple = (HeapTuple)heaptup_alloc(allocSize);
     tuple->t_data = td = (HeapTupleHeader)((char *)tuple + HEAPTUPLESIZE);
 
@@ -1859,13 +1860,11 @@ MinimalTuple heap_form_minimal_tuple(TupleDesc tupleDescriptor, Datum *values, c
 
     len += data_len;
 
-    Size allocSize = len;
-    if (tupleDescriptor->tdhasuids) { /* prealloc 8 bytes */
-        allocSize = MAXALIGN(hoff + sizeof(uint64)) + data_len;
-    }
+    Size allocSize = MAXALIGN(hoff + sizeof(uint64)) + data_len;
 
     /*
      * Allocate and zero the space needed.
+     * prealloc 8 bytes for hasuids option.
      */
     if (inTuple == NULL) {
         tuple = (MinimalTuple)palloc0(allocSize);
@@ -1994,8 +1993,10 @@ static Size heap_compute_cmprs_data_size(TupleDesc tupleDesc, FormCmprTupleData 
     int numberOfAttributes = tupleDesc->natts;
     Form_pg_attribute *att = tupleDesc->attrs;
     if (numberOfAttributes > MaxTupleAttributeNumber) {
-        ereport(ERROR, (errcode(ERRCODE_TOO_MANY_COLUMNS), errmsg("number of columns (%d) exceeds limit (%d)",
-                                                                  numberOfAttributes, MaxTupleAttributeNumber)));
+        ereport(ERROR,
+                (errcode(ERRCODE_TOO_MANY_COLUMNS),
+                 errmsg("number of columns (%d) exceeds limit (%d), AM type (%d), type id (%u)", numberOfAttributes,
+                        MaxTupleAttributeNumber, tupleDesc->tdTableAmType, tupleDesc->tdtypeid)));
     }
 
     /*
@@ -2534,8 +2535,10 @@ HeapTuple heap_form_cmprs_tuple(TupleDesc tupleDescriptor, FormCmprTupleData *cm
     int i;
 
     if (numberOfAttributes > MaxTupleAttributeNumber) {
-        ereport(ERROR, (errcode(ERRCODE_TOO_MANY_COLUMNS), errmsg("number of columns (%d) exceeds limit (%d)",
-                                                                  numberOfAttributes, MaxTupleAttributeNumber)));
+        ereport(ERROR,
+                (errcode(ERRCODE_TOO_MANY_COLUMNS),
+                 errmsg("number of columns (%d) exceeds limit (%d), AM type (%d), type id (%u)", numberOfAttributes,
+                        MaxTupleAttributeNumber, tupleDescriptor->tdTableAmType, tupleDescriptor->tdtypeid)));
     }
 
     /*
@@ -2589,11 +2592,9 @@ HeapTuple heap_form_cmprs_tuple(TupleDesc tupleDescriptor, FormCmprTupleData *cm
     /*
      * Allocate and zero the space needed.	Note that the tuple body and
      * HeapTupleData management structure are allocated in one chunk.
+     * prealloc 8 bytes for hasuids option.
      */
-    Size allocSize = HEAPTUPLESIZE + len;
-    if (tupleDescriptor->tdhasuids) { /* prealloc 8 bytes */
-        allocSize = HEAPTUPLESIZE + MAXALIGN(hoff + sizeof(uint64)) + data_len;
-    }
+    Size allocSize = HEAPTUPLESIZE + MAXALIGN(hoff + sizeof(uint64)) + data_len;
     tuple = (HeapTuple)heaptup_alloc(allocSize);
     tuple->t_data = td = (HeapTupleHeader)((char*)tuple + HEAPTUPLESIZE);
 
@@ -3396,6 +3397,7 @@ void heap_slot_store_heap_tuple(HeapTuple tuple, TupleTableSlot* slot, Buffer bu
     }
 }
 
+const int CheckPartOidIndex = 1;
 /*
  * Checks whether a dead tuple can be retained
  *
@@ -3409,7 +3411,13 @@ bool HeapKeepInvisibleTuple(HeapTuple tuple, TupleDesc tupleDesc, KeepInvisbleTu
         {PartitionRelationId, Anum_pg_partition_parentid, PartitionParentOidIsLive}};
 
     bool ret = true;
+    bool isVacuumProcess = ((t_thrd.pgxact->vacuumFlags & PROC_IN_VACUUM) || IsAutoVacuumWorkerProcess());
     for (int i = 0; i < (int)lengthof(keepInvisibleArray); i++) {
+        /* Only vacuum/autovacuum process check if parent oid is live. */
+        if (!isVacuumProcess && i == CheckPartOidIndex) {
+            continue;
+        }
+
         bool isNull = false;
         KeepInvisbleOpt keepOpt = keepInvisibleArray[i];
 
@@ -3425,7 +3433,16 @@ bool HeapKeepInvisibleTuple(HeapTuple tuple, TupleDesc tupleDesc, KeepInvisbleTu
         if (checkKeepFunc != NULL) {
             ret &= checkKeepFunc(checkDatum);
         } else if (keepOpt.checkKeepFunc != NULL) {
-            ret &= keepOpt.checkKeepFunc(checkDatum);
+            if (i == CheckPartOidIndex) {
+                char parttype = fastgetattr(tuple, Anum_pg_partition_parttype, tupleDesc, &isNull);
+                if (isNull) {
+                    return false;
+                }
+                bool isSubpart = parttype == 's' ? true : false;
+                ret &= (isSubpart || keepOpt.checkKeepFunc(checkDatum));
+            } else {
+                ret &= keepOpt.checkKeepFunc(checkDatum);
+            }
         } else {
             return false;
         }

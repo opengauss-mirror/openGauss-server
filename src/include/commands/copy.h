@@ -271,6 +271,7 @@ typedef struct CopyStateData {
      * the buffer on each cycle.
      */
     StringInfoData attribute_buf;
+    StringInfoData fieldBuf;
 
     /* field raw data pointers found by COPY FROM */
 
@@ -397,6 +398,9 @@ extern bool NextCopyFrom(CopyState cstate, ExprContext* econtext, Datum* values,
 extern bool NextCopyFromRawFields(CopyState cstate, char*** fields, int* nfields);
 extern void CopyFromErrorCallback(void* arg);
 extern void BulkloadErrorCallback(void* arg);
+
+extern bool isSubDir(char *path, char *subPath);
+extern bool copyCheckSecurityPath(char *filename);
 
 extern DestReceiver* CreateCopyDestReceiver(void);
 

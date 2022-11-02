@@ -1,0 +1,541 @@
+create schema sqlpatch_base;
+set search_path = 'sqlpatch_base';
+-- create user for priv test
+create user sp_sysadmin password 'Gauss@666' sysadmin;
+create user sp_opradmin password 'Gauss@666' opradmin;
+create user sp_monadmin password 'Gauss@666' monadmin;
+create user sp_notadmin password 'Gauss@666';
+-- should be empty
+select * from gs_sql_patch;
+ patch_name | unique_sql_id | owner | enable | status | abort | hint_string | hint_node | original_query | original_query_tree | patched_query | patched_query_tree | description 
+------------+---------------+-------+--------+--------+-------+-------------+-----------+----------------+---------------------+---------------+--------------------+-------------
+(0 rows)
+
+----
+-- test basic APIs
+----
+-- create sql patch
+select * from dbe_sql_util.create_hint_sql_patch(NULL, 1, 'use_cplan'); -- NULL inputs
+ERROR:  Cannot create sql patch with NULL inputs
+select * from dbe_sql_util.create_hint_sql_patch('p1', NULL, 'use_cplan'); -- NULL inputs
+ERROR:  Cannot create sql patch with NULL inputs
+select * from dbe_sql_util.create_hint_sql_patch('p1', 1, NULL);  -- NULL inputs
+ERROR:  Cannot create sql patch with NULL inputs
+select * from dbe_sql_util.create_hint_sql_patch('p1', 1, 'a', NULL); -- invalid hint
+WARNING:  LINE 1: syntax error at 'a'
+ create_hint_sql_patch 
+-----------------------
+ f
+(1 row)
+
+select * from dbe_sql_util.create_hint_sql_patch('p1', 1, 'use_cplan', NULL); -- NULL description is ok
+ create_hint_sql_patch 
+-----------------------
+ t
+(1 row)
+
+select * from dbe_sql_util.create_hint_sql_patch('p1', 2, 'use_cplan'); -- duplicate patch name
+ERROR:  duplicate key value violates unique constraint "gs_sql_patch_patch_name_index"
+DETAIL:  Key (patch_name)=(p1) already exists.
+select * from dbe_sql_util.create_hint_sql_patch('p2', 1, 'use_cplan'); -- duplicate sql id
+ERROR:  Cannot accept sql patches with duplicate unique sql id
+select * from dbe_sql_util.create_hint_sql_patch('p2', 2, 'use_gplan', 'desc p2'); -- with description
+ create_hint_sql_patch 
+-----------------------
+ t
+(1 row)
+
+select * from dbe_sql_util.create_hint_sql_patch('p3', 3, 'tablescan(a)', 'desc p3', NULL); -- null enabled is unacceptable
+ERROR:  Cannot create sql patch with NULL inputs
+select * from dbe_sql_util.create_hint_sql_patch('p3', 3, 'tablescan(a)', 'desc p3', false); -- specifies enabled attr
+ create_hint_sql_patch 
+-----------------------
+ t
+(1 row)
+
+-- create abort patch
+select * from dbe_sql_util.create_abort_sql_patch(NULL, 1); -- NULL inputs
+ERROR:  Cannot create sql patch with NULL inputs
+select * from dbe_sql_util.create_abort_sql_patch('p1', NULL); -- NULL inputs
+ERROR:  Cannot create sql patch with NULL inputs
+select * from dbe_sql_util.create_abort_sql_patch('p1', 4); -- duplicate patch name
+ERROR:  duplicate key value violates unique constraint "gs_sql_patch_patch_name_index"
+DETAIL:  Key (patch_name)=(p1) already exists.
+select * from dbe_sql_util.create_abort_sql_patch('p4', 1); -- duplicate sql id
+ERROR:  Cannot accept sql patches with duplicate unique sql id
+select * from dbe_sql_util.create_abort_sql_patch('p4', 4, NULL); -- NULL description is ok
+ create_abort_sql_patch 
+------------------------
+ t
+(1 row)
+
+select * from dbe_sql_util.create_abort_sql_patch('p5', 5, 'desc p5'); -- with description
+ create_abort_sql_patch 
+------------------------
+ t
+(1 row)
+
+select * from dbe_sql_util.create_abort_sql_patch('p6', 6, 'desc p6', NULL); -- with description
+ERROR:  Cannot create sql patch with NULL inputs
+select * from dbe_sql_util.create_abort_sql_patch('p6', 6, 'desc p6', false); -- specifies enabled attr
+ create_abort_sql_patch 
+------------------------
+ t
+(1 row)
+
+select patch_name, unique_sql_id, enable, status, abort, hint_string, description from gs_sql_patch order by 1;
+ patch_name | unique_sql_id | enable | status | abort | hint_string  | description 
+------------+---------------+--------+--------+-------+--------------+-------------
+ p1         |             1 | t      | d      | f     | use_cplan    | 
+ p2         |             2 | t      | d      | f     | use_gplan    | desc p2
+ p3         |             3 | f      | d      | f     | tablescan(a) | desc p3
+ p4         |             4 | t      | d      | t     |              | 
+ p5         |             5 | t      | d      | t     |              | desc p5
+ p6         |             6 | f      | d      | t     |              | desc p6
+(6 rows)
+
+-- enable patch
+select * from dbe_sql_util.enable_sql_patch(NULL); -- NULL inputs
+ERROR:  Cannot alter sql patch with NULL inputs
+select * from dbe_sql_util.enable_sql_patch('p0'); -- patch not found
+ERROR:  No such SQL patch
+select * from dbe_sql_util.enable_sql_patch('p1'); -- patch already enabled
+ enable_sql_patch 
+------------------
+ t
+(1 row)
+
+select * from dbe_sql_util.enable_sql_patch('p3'); -- patch once disabled
+ enable_sql_patch 
+------------------
+ t
+(1 row)
+
+select patch_name, enable from gs_sql_patch order by 1;
+ patch_name | enable 
+------------+--------
+ p1         | t
+ p2         | t
+ p3         | t
+ p4         | t
+ p5         | t
+ p6         | f
+(6 rows)
+
+-- disable patch
+select * from dbe_sql_util.disable_sql_patch(NULL); -- NULL inputs
+ERROR:  Cannot alter sql patch with NULL inputs
+select * from dbe_sql_util.disable_sql_patch('p0'); -- patch not found
+ERROR:  No such SQL patch
+select * from dbe_sql_util.disable_sql_patch('p4'); -- patch already enabled
+ disable_sql_patch 
+-------------------
+ t
+(1 row)
+
+select * from dbe_sql_util.disable_sql_patch('p6'); -- patch once disabled
+ disable_sql_patch 
+-------------------
+ t
+(1 row)
+
+select patch_name, enable from gs_sql_patch order by 1;
+ patch_name | enable 
+------------+--------
+ p1         | t
+ p2         | t
+ p3         | t
+ p4         | f
+ p5         | t
+ p6         | f
+(6 rows)
+
+-- drop patch
+select * from dbe_sql_util.drop_sql_patch(NULL); -- NULL inputs
+ERROR:  Cannot alter sql patch with NULL inputs
+select * from dbe_sql_util.drop_sql_patch('p0'); -- patch not found
+ERROR:  No such SQL patch
+select * from dbe_sql_util.drop_sql_patch('p2'); -- ok
+ drop_sql_patch 
+----------------
+ t
+(1 row)
+
+select * from dbe_sql_util.drop_sql_patch('p5'); -- ok
+ drop_sql_patch 
+----------------
+ t
+(1 row)
+
+select patch_name, enable from gs_sql_patch order by 1;
+ patch_name | enable 
+------------+--------
+ p1         | t
+ p3         | t
+ p4         | f
+ p6         | f
+(4 rows)
+
+-- show patch
+select * from dbe_sql_util.show_sql_patch(NULL); -- NULL inputs
+ unique_sql_id | enable | abort | hint_str 
+---------------+--------+-------+----------
+(0 rows)
+
+select * from dbe_sql_util.show_sql_patch('p0'); -- patch not found
+ERROR:  No such SQL patch
+select * from dbe_sql_util.show_sql_patch('p1');
+ unique_sql_id | enable | abort | hint_str  
+---------------+--------+-------+-----------
+             1 | t      | f     | use_cplan
+(1 row)
+
+select unique_sql_id, enable, abort, hint_string from gs_sql_patch;
+ unique_sql_id | enable | abort | hint_string  
+---------------+--------+-------+--------------
+             1 | t      | f     | use_cplan
+             3 | t      | f     | tablescan(a)
+             4 | f      | t     | 
+             6 | f      | t     | 
+(4 rows)
+
+select dbe_sql_util.show_sql_patch(patch_name) from gs_sql_patch;
+     show_sql_patch     
+------------------------
+ (1,t,f,use_cplan)
+ (3,t,f,"tablescan(a)")
+ (4,f,t,)
+ (6,f,t,)
+(4 rows)
+
+-- cleanup
+select dbe_sql_util.drop_sql_patch(patch_name) from gs_sql_patch;
+ drop_sql_patch 
+----------------
+ t
+ t
+ t
+ t
+(4 rows)
+
+----
+-- test privileges
+----
+-- sysadmin all good
+SET SESSION AUTHORIZATION sp_sysadmin PASSWORD 'Gauss@666';
+select * from dbe_sql_util.create_hint_sql_patch('priv', 10, 'use_cplan');
+ create_hint_sql_patch 
+-----------------------
+ t
+(1 row)
+
+select * from dbe_sql_util.disable_sql_patch('priv');
+ disable_sql_patch 
+-------------------
+ t
+(1 row)
+
+select * from dbe_sql_util.enable_sql_patch('priv');
+ enable_sql_patch 
+------------------
+ t
+(1 row)
+
+select patch_name, unique_sql_id, enable, status, abort, hint_string, description from gs_sql_patch order by 1;
+ patch_name | unique_sql_id | enable | status | abort | hint_string | description 
+------------+---------------+--------+--------+-------+-------------+-------------
+ priv       |            10 | t      | d      | f     | use_cplan   | 
+(1 row)
+
+select * from dbe_sql_util.drop_sql_patch('priv');
+ drop_sql_patch 
+----------------
+ t
+(1 row)
+
+SET SESSION AUTHORIZATION sp_opradmin PASSWORD 'Gauss@666';
+select * from dbe_sql_util.create_hint_sql_patch('priv', 10, 'use_cplan');
+ create_hint_sql_patch 
+-----------------------
+ t
+(1 row)
+
+select * from dbe_sql_util.disable_sql_patch('priv');
+ disable_sql_patch 
+-------------------
+ t
+(1 row)
+
+select * from dbe_sql_util.enable_sql_patch('priv');
+ enable_sql_patch 
+------------------
+ t
+(1 row)
+
+select patch_name, unique_sql_id, enable, status, abort, hint_string, description from gs_sql_patch order by 1;
+ patch_name | unique_sql_id | enable | status | abort | hint_string | description 
+------------+---------------+--------+--------+-------+-------------+-------------
+ priv       |            10 | t      | d      | f     | use_cplan   | 
+(1 row)
+
+select * from dbe_sql_util.drop_sql_patch('priv');
+ drop_sql_patch 
+----------------
+ t
+(1 row)
+
+SET SESSION AUTHORIZATION sp_monadmin PASSWORD 'Gauss@666';
+select * from dbe_sql_util.create_hint_sql_patch('priv', 10, 'use_cplan');
+ create_hint_sql_patch 
+-----------------------
+ t
+(1 row)
+
+select * from dbe_sql_util.disable_sql_patch('priv');
+ disable_sql_patch 
+-------------------
+ t
+(1 row)
+
+select * from dbe_sql_util.enable_sql_patch('priv');
+ enable_sql_patch 
+------------------
+ t
+(1 row)
+
+select patch_name, unique_sql_id, enable, status, abort, hint_string, description from gs_sql_patch order by 1;
+ patch_name | unique_sql_id | enable | status | abort | hint_string | description 
+------------+---------------+--------+--------+-------+-------------+-------------
+ priv       |            10 | t      | d      | f     | use_cplan   | 
+(1 row)
+
+select * from dbe_sql_util.drop_sql_patch('priv');
+ drop_sql_patch 
+----------------
+ t
+(1 row)
+
+SET SESSION AUTHORIZATION sp_notadmin PASSWORD 'Gauss@666';
+select * from dbe_sql_util.create_hint_sql_patch('priv', 10, 'use_cplan');
+ERROR:  Must be superuser or system/operator/monitor administrator to use SQL patch
+select * from dbe_sql_util.disable_sql_patch('priv');
+ERROR:  Must be superuser or system/operator/monitor administrator to use SQL patch
+select * from dbe_sql_util.enable_sql_patch('priv');
+ERROR:  Must be superuser or system/operator/monitor administrator to use SQL patch
+select patch_name, unique_sql_id, enable, status, abort, hint_string, description from gs_sql_patch order by 1;
+ patch_name | unique_sql_id | enable | status | abort | hint_string | description 
+------------+---------------+--------+--------+-------+-------------+-------------
+(0 rows)
+
+select * from dbe_sql_util.drop_sql_patch('priv');
+ERROR:  Must be superuser or system/operator/monitor administrator to use SQL patch
+RESET SESSION AUTHORIZATION;
+----
+-- test hint parsing
+----
+-- invalid
+select * from dbe_sql_util.create_hint_sql_patch('h1', 101, '');
+ERROR:  Cannot create sql patch with NULL inputs
+select * from dbe_sql_util.create_hint_sql_patch('h1', 101, ' ');
+ERROR:  Cannot get a valid hint from input
+select * from dbe_sql_util.create_hint_sql_patch('h1', 101, 'a');
+WARNING:  LINE 1: syntax error at 'a'
+ create_hint_sql_patch 
+-----------------------
+ f
+(1 row)
+
+select * from dbe_sql_util.create_hint_sql_patch('h1', 101, '/*+ use_cplan */');
+WARNING:  LINE 1: syntax error at '/'
+ create_hint_sql_patch 
+-----------------------
+ f
+(1 row)
+
+-- banned in cent mode
+select * from dbe_sql_util.create_hint_sql_patch('h1', 101, 'MultiNode');
+WARNING:  LINE 1: unsupport distributed hint at 'MultiNode'
+ create_hint_sql_patch 
+-----------------------
+ f
+(1 row)
+
+select * from dbe_sql_util.create_hint_sql_patch('h1', 101, 'Broadcast(a)');
+WARNING:  LINE 1: unsupport distributed hint at ')'
+ create_hint_sql_patch 
+-----------------------
+ f
+(1 row)
+
+select * from dbe_sql_util.create_hint_sql_patch('h1', 101, 'no Broadcast(a)');
+WARNING:  LINE 1: unsupport distributed hint at ')'
+ create_hint_sql_patch 
+-----------------------
+ f
+(1 row)
+
+select * from dbe_sql_util.create_hint_sql_patch('h1', 101, 'redistribute(a)');
+WARNING:  LINE 1: unsupport distributed hint at ')'
+ create_hint_sql_patch 
+-----------------------
+ f
+(1 row)
+
+select * from dbe_sql_util.create_hint_sql_patch('h1', 101, 'no redistribute(a)');
+WARNING:  LINE 1: unsupport distributed hint at ')'
+ create_hint_sql_patch 
+-----------------------
+ f
+(1 row)
+
+select * from dbe_sql_util.create_hint_sql_patch('h1', 101, 'skew(a)');
+WARNING:  LINE 1: syntax error at ')'
+ create_hint_sql_patch 
+-----------------------
+ f
+(1 row)
+
+select * from dbe_sql_util.create_hint_sql_patch('h1', 101, 'gather(a)');
+WARNING:  LINE 1: unsupport distributed hint at ')'
+ create_hint_sql_patch 
+-----------------------
+ f
+(1 row)
+
+-- not supported now
+select * from dbe_sql_util.create_hint_sql_patch('h1', 101, 'BlockName(a)');
+WARNING:  The followed hints are removed since they are not supported by SQL Patch:
+BlockName 
+ create_hint_sql_patch 
+-----------------------
+ f
+(1 row)
+
+select * from dbe_sql_util.create_hint_sql_patch('h1', 101, 'no_expand');
+WARNING:  The followed hints are removed since they are not supported by SQL Patch:
+No_expand 
+ create_hint_sql_patch 
+-----------------------
+ f
+(1 row)
+
+select * from dbe_sql_util.create_hint_sql_patch('h1', 101, 'no_gpc');
+WARNING:  The followed hints are removed since they are not supported by SQL Patch:
+No_gpc 
+ create_hint_sql_patch 
+-----------------------
+ f
+(1 row)
+
+-- invalid guc
+select * from dbe_sql_util.create_hint_sql_patch('h1', 101, 'set(a b)');
+WARNING:  SetHint is invalid. Parameter [a] is not in whitelist.
+ERROR:  Cannot get a valid hint from input
+-- in white list
+select * from dbe_sql_util.create_hint_sql_patch('h1', 101, 'nestloop(a b)');
+ create_hint_sql_patch 
+-----------------------
+ t
+(1 row)
+
+select * from dbe_sql_util.create_hint_sql_patch('h2', 102, 'leading(a b)');
+ create_hint_sql_patch 
+-----------------------
+ t
+(1 row)
+
+select * from dbe_sql_util.create_hint_sql_patch('h3', 103, 'rows(a #1)');
+ create_hint_sql_patch 
+-----------------------
+ t
+(1 row)
+
+select * from dbe_sql_util.create_hint_sql_patch('h4', 104, 'tablescan(a)');
+ create_hint_sql_patch 
+-----------------------
+ t
+(1 row)
+
+select * from dbe_sql_util.create_hint_sql_patch('h5', 105, 'predpush(a)');
+ create_hint_sql_patch 
+-----------------------
+ t
+(1 row)
+
+select * from dbe_sql_util.create_hint_sql_patch('h6', 106, 'predpush_same_level(a,b)');
+ create_hint_sql_patch 
+-----------------------
+ t
+(1 row)
+
+select * from dbe_sql_util.create_hint_sql_patch('h8', 108, 'set(enable_nestloop on)');
+ create_hint_sql_patch 
+-----------------------
+ t
+(1 row)
+
+select * from dbe_sql_util.create_hint_sql_patch('h9', 109, 'use_cplan');
+ create_hint_sql_patch 
+-----------------------
+ t
+(1 row)
+
+-- multuple hint in one
+select * from dbe_sql_util.create_hint_sql_patch('h10', 110, 'nestloop(a b) no_expand no_expand no_gpc multinode BlockName(a)');
+WARNING:  LINE 1: unsupport distributed hint at 'multinode'
+WARNING:  The followed hints are removed since they are not supported by SQL Patch:
+BlockName No_expand No_gpc 
+ create_hint_sql_patch 
+-----------------------
+ t
+(1 row)
+
+select patch_name, unique_sql_id, enable, status, abort, hint_string, description from gs_sql_patch order by 1;
+ patch_name | unique_sql_id | enable | status | abort |                           hint_string                           | description 
+------------+---------------+--------+--------+-------+-----------------------------------------------------------------+-------------
+ h1         |           101 | t      | d      | f     | nestloop(a b)                                                   | 
+ h10        |           110 | t      | d      | f     | nestloop(a b) no_expand no_expand no_gpc multinode BlockName(a) | 
+ h2         |           102 | t      | d      | f     | leading(a b)                                                    | 
+ h3         |           103 | t      | d      | f     | rows(a #1)                                                      | 
+ h4         |           104 | t      | d      | f     | tablescan(a)                                                    | 
+ h5         |           105 | t      | d      | f     | predpush(a)                                                     | 
+ h6         |           106 | t      | d      | f     | predpush_same_level(a,b)                                        | 
+ h8         |           108 | t      | d      | f     | set(enable_nestloop on)                                         | 
+ h9         |           109 | t      | d      | f     | use_cplan                                                       | 
+(9 rows)
+
+-- drop patch bugfix
+begin;
+select * from dbe_sql_util.drop_sql_patch('h10');
+ drop_sql_patch 
+----------------
+ t
+(1 row)
+
+rollback;
+select /*+ indexscan(gs_sql_patch) */ patch_name from gs_sql_patch where patch_name = 'h10';
+ patch_name 
+------------
+ h10
+(1 row)
+
+-- clean up
+select dbe_sql_util.drop_sql_patch(patch_name) from gs_sql_patch;
+ drop_sql_patch 
+----------------
+ t
+ t
+ t
+ t
+ t
+ t
+ t
+ t
+ t
+(9 rows)
+
+drop user sp_sysadmin;
+drop user sp_opradmin;
+drop user sp_monadmin;
+drop user sp_notadmin;
+drop schema sqlpatch_base cascade;

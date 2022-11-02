@@ -76,6 +76,10 @@ public
                 }
             }
             pstmt.close();
+            // check null sql
+            pstmt = conn.prepareStatement(";");
+            int i = pstmt.executeUpdate();
+            pstmt.close();
         } catch (PSQLException exception2) {
             if (pstmt != null) {
                 try {

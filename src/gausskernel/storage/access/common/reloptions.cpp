@@ -235,7 +235,7 @@ static relopt_int intRelOpts[] = {
             "Number of parallel processes that can be used per executor node for this relation.",
             RELOPT_KIND_HEAP,
         },
-        0, 1, 32
+        0, 0, 32
     },
     {{ "compress_level", "Level of page compression.", RELOPT_KIND_HEAP | RELOPT_KIND_BTREE}, 0, -31, 31},
     {{ "compresstype", "compress type (none, pglz or zstd).", RELOPT_KIND_HEAP | RELOPT_KIND_BTREE}, 0, 0, 2},
@@ -312,6 +312,11 @@ static relopt_real realRelOpts[] = {
      0,
      -1.0,
      DBL_MAX },
+    {{ "min_tuples", "Relation tuple number that set the minimum estimation of pg_class.reltuples for query planning",
+       RELOPT_KIND_HEAP },
+     0,
+     0,
+     DBL_MAX },
     /* list terminator */
     {{NULL}}
 };
@@ -333,10 +338,10 @@ static relopt_string stringRelOpts[] = {
     },
     {
         {"indexsplit", "default, insertpt", RELOPT_KIND_BTREE},
-        7,
+        8,
         false,
         ValidateStrOptIndexsplit,
-        INDEXSPLIT_OPT_DEFAULT,
+        INDEXSPLIT_OPT_INSERTPT,
     },
     {
         { "ttl", "time to live for timeseries data management", RELOPT_KIND_HEAP },
@@ -1076,6 +1081,27 @@ bytea *extractRelOptions(HeapTuple tuple, TupleDesc tupdesc, Oid amoptions)
     return options;
 }
 
+bytea *extractPartRelOptions(HeapTuple tuple, TupleDesc partTupDesc)
+{
+    bytea* options = NULL;
+    bool isnull = false;
+    Datum datum;
+
+    /*
+     * Fetch reloptions from tuple; have to use a hardwired descriptor because
+     * we might not have any other for pg_class yet (consider executing this
+     * code for pg_class itself)
+     */
+    datum = fastgetattr(tuple, Anum_pg_partition_reloptions, partTupDesc, &isnull);
+    if (isnull) {
+        return NULL;
+    }
+
+    options = heap_reloptions(RELKIND_RELATION, datum, false);
+    return options;
+}
+
+
 /*
  * Interpret reloptions that are given in text-array format.
  *
@@ -1521,6 +1547,13 @@ void fillTdeRelOptions(List *options, char relkind)
             cmk_flag = true;
             continue;
         }
+#ifdef ENABLE_MULTIPLE_NODES
+        if (pg_strcasecmp(defs->defname, "min_tuples") == 0) {
+            ereport(ERROR, (errmodule(MOD_OPT), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("set relation option min_tuples failed"),
+                errdetail("min_tuples option is not supported in distributed mode")));
+        }
+#endif
     }
 
     if (!spec_encrypt && (dek_flag || cmk_flag)) {
@@ -1975,7 +2008,7 @@ bytea *default_reloptions(Datum reloptions, bool validate, relopt_kind kind)
           offsetof(StdRdOptions, compress) + offsetof(PageCompressOpts, compressByteConvert)},
         { "compress_diff_convert", RELOPT_TYPE_BOOL,
           offsetof(StdRdOptions, compress) + offsetof(PageCompressOpts, compressDiffConvert)},
-
+        { "min_tuples", RELOPT_TYPE_REAL, offsetof(StdRdOptions, min_tuples) }
     };
 
     options = parseRelOptions(reloptions, validate, kind, &numoptions);
@@ -2419,9 +2452,9 @@ static void ValidateStrOptTableAccessMethod(const char* val)
  */
 static void ValidateStrOptSpcFileSystem(const char *val)
 {
-    if ((0 != pg_strcasecmp(val, FILESYSTEM_GENERAL)) && 0 != pg_strcasecmp(val, FILESYSTEM_HDFS)) {
+    if (0 != pg_strcasecmp(val, FILESYSTEM_GENERAL)) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Invalid string for  \"filesystem\" option."),
-                        errdetail("Valid string are \"general\", \"hdfs\".")));
+                        errdetail("Valid string are \"general\".")));
     }
 }
 
@@ -2611,7 +2644,11 @@ void ForbidUserToSetDefinedOptions(List *options)
 {
     /* the following option must be in tab[] of default_reloptions(). */
     static const char *unchangedOpt[] = {"orientation", "hashbucket", "bucketcnt", "segment", "encrypt_algo",
+#ifdef ENABLE_MULTIPLE_NODES
+        "storage_type", "min_tuples"};
+#else
         "storage_type"};
+#endif
 
     int firstInvalidOpt = -1;
     if (FindInvalidOption(options, unchangedOpt, lengthof(unchangedOpt), &firstInvalidOpt)) {

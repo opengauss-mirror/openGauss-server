@@ -36,6 +36,8 @@ void IndexFusion::refreshParameterIfNecessary()
 
         if (m_params->params[m_paramLoc[i].paramId - 1].isnull) {
             m_scanKeys[m_paramLoc[i].scanKeyIndx].sk_flags |= SK_ISNULL;
+        } else {
+            m_scanKeys[m_paramLoc[i].scanKeyIndx].sk_flags &= ~SK_ISNULL;
         }
     }
 }

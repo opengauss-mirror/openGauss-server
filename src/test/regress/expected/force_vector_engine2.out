@@ -47,6 +47,57 @@ explain (analyze on, timing off) select /*+ set(try_vector_engine_strategy force
 --?.*
 (13 rows)
 
+create table t1(id int, val1 name, val2 macaddr, val3 uuid, val4 unknown);
+WARNING:  column "val4" has type "unknown"
+DETAIL:  Proceeding with relation creation anyway.
+insert into t1 values(1, 'abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd123', '08:01:04:03:05:01', 'A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11', 'abcd'),(2, 'abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd124', '08:01:04:03:05:02', 'A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A12', 'abcc');
+set try_vector_engine_strategy=force;
+select val1, count(id) from t1 group by val1;
+                              val1                               | count 
+-----------------------------------------------------------------+-------
+ abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd123 |     1
+ abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd124 |     1
+(2 rows)
+
+select val2, count(id) from t1 group by val2;
+       val2        | count 
+-------------------+-------
+ 08:01:04:03:05:01 |     1
+ 08:01:04:03:05:02 |     1
+(2 rows)
+
+select val3, count(id) from t1 group by val3;
+                 val3                 | count 
+--------------------------------------+-------
+ a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11 |     1
+ a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a12 |     1
+(2 rows)
+
+select val4, count(id) from t1 group by val4;
+ val4 | count 
+------+-------
+ abcc |     1
+ abcd |     1
+(2 rows)
+
+create table force_tb1(c1 int,c2 int);
+insert into force_tb1 values(1,1);
+insert into force_tb1 values(2,2);
+create incremental materialized view v_force as select * from force_tb1;
+select * from v_force order by 1;
+ c1 | c2 
+----+----
+  1 |  1
+  2 |  2
+(2 rows)
+
+set try_vector_engine_strategy=off;
 drop table force_vector_test;
 drop schema test_force_vector2 cascade;
-NOTICE:  drop cascades to table force_vector_partition
+NOTICE:  drop cascades to 6 other objects
+DETAIL:  drop cascades to table force_vector_partition
+drop cascades to table t1
+drop cascades to table force_tb1
+drop cascades to materialized view v_force
+--?.*
+--?.*

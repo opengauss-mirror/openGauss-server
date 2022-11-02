@@ -469,6 +469,28 @@ THR_LOCAL GS_UCHAR derive_vector_saved[RANDOM_LEN] = {0};
 THR_LOCAL GS_UCHAR mac_vector_saved[RANDOM_LEN] = {0};
 THR_LOCAL GS_UCHAR input_saved[RANDOM_LEN] = {0};
 
+#define CLEAR_AES_SAVED_SENSITIVE_MEMORY()                                   \
+    do {                                                                     \
+        errorno = memset_s(input_saved, RANDOM_LEN, 0, RANDOM_LEN);          \
+        securec_check_c(errorno, "", "");                                    \
+        errorno = memset_s(derive_vector_saved, RANDOM_LEN, 0, RANDOM_LEN);  \
+        securec_check_c(errorno, "", "");                                    \
+        errorno = memset_s(mac_vector_saved, RANDOM_LEN, 0, RANDOM_LEN);     \
+        securec_check_c(errorno, "", "");                                    \
+    } while (0)
+
+#define CLEAR_AES_TEMP_SENSITIVE_MEMORY()                                    \
+    do {                                                                     \
+        errorno = memset_s(derive_key, RANDOM_LEN, 0, RANDOM_LEN);           \
+        securec_check_c(errorno, "", "");                                    \
+        errorno = memset_s(mac_key, RANDOM_LEN, 0, RANDOM_LEN);              \
+        securec_check_c(errorno, "", "");                                    \
+        errorno = memset_s(aes_vector, RANDOM_LEN, 0, RANDOM_LEN);           \
+        securec_check_c(errorno, "", "");                                    \
+        errorno = memset_s(user_key, RANDOM_LEN, 0, RANDOM_LEN);             \
+        securec_check_c(errorno, "", "");                                    \
+    } while (0)
+
 /*
  * Target		:Encrypt functions for security.
  * Description	:Encrypt with standard aes128 algorthm using openssl functions.
@@ -487,6 +509,8 @@ bool aes128EncryptSpeed(GS_UCHAR* PlainText, GS_UINT32 PlainLen, GS_UCHAR* Key, 
     GS_UCHAR derive_key[RANDOM_LEN] = {0};
     GS_UCHAR mac_key[RANDOM_LEN] = {0};
     GS_UCHAR aes_vector[RANDOM_LEN] = {0};
+    /* The key input by user in SQL */
+    GS_UCHAR user_key[RANDOM_LEN] = {0};
     GS_UCHAR mac_text[MAC_LEN] = {0};
     GS_UINT32 mac_length = 0;
     GS_UINT32 keylen = 0;
@@ -499,28 +523,16 @@ bool aes128EncryptSpeed(GS_UCHAR* PlainText, GS_UINT32 PlainLen, GS_UCHAR* Key, 
      */
     static THR_LOCAL GS_UCHAR random_salt_saved[RANDOM_LEN] = {0};
 
-    /* The key input by user in SQL */
-    GS_UCHAR user_key[RANDOM_LEN] = {0};
     keylen = strlen((const char*)Key);
     if (keylen > RANDOM_LEN || keylen == 0) {
         (void)fprintf(stderr, _("Key is missing!\n"));
-        errorno = memset_s(input_saved, RANDOM_LEN, 0, RANDOM_LEN);
-        securec_check_c(errorno, "", "");
-        errorno = memset_s(derive_vector_saved, RANDOM_LEN, 0, RANDOM_LEN);
-        securec_check_c(errorno, "", "");
-        errorno = memset_s(mac_vector_saved, RANDOM_LEN, 0, RANDOM_LEN);
-        securec_check_c(errorno, "", "");
+        CLEAR_AES_SAVED_SENSITIVE_MEMORY();
         return false;
     }
 
     if (NULL == PlainText) {
         (void)fprintf(stderr, _("Invalid plain text, please check it!\n"));
-        errorno = memset_s(input_saved, RANDOM_LEN, 0, RANDOM_LEN);
-        securec_check_c(errorno, "", "");
-        errorno = memset_s(derive_vector_saved, RANDOM_LEN, 0, RANDOM_LEN);
-        securec_check_c(errorno, "", "");
-        errorno = memset_s(mac_vector_saved, RANDOM_LEN, 0, RANDOM_LEN);
-        securec_check_c(errorno, "", "");
+        CLEAR_AES_SAVED_SENSITIVE_MEMORY();
         return false;
     }
 
@@ -528,13 +540,8 @@ bool aes128EncryptSpeed(GS_UCHAR* PlainText, GS_UINT32 PlainLen, GS_UCHAR* Key, 
     if (false == init_aes_vector_random(aes_vector, RANDOM_LEN)) {
         (void)fprintf(stderr, _("generate IV vector failed\n"));
         /* clean up */
-        errorno = memset_s(input_saved, RANDOM_LEN, 0, RANDOM_LEN);
-        securec_check_c(errorno, "", "");
-        errorno = memset_s(derive_vector_saved, RANDOM_LEN, 0, RANDOM_LEN);
-        securec_check_c(errorno, "", "");
+        CLEAR_AES_SAVED_SENSITIVE_MEMORY();
         errorno = memset_s(aes_vector, RANDOM_LEN, 0, RANDOM_LEN);
-        securec_check_c(errorno, "", "");
-        errorno = memset_s(mac_vector_saved, RANDOM_LEN, 0, RANDOM_LEN);
         securec_check_c(errorno, "", "");
         return false;
     }
@@ -566,52 +573,24 @@ bool aes128EncryptSpeed(GS_UCHAR* PlainText, GS_UINT32 PlainLen, GS_UCHAR* Key, 
     if (!retval) {
         /* Otherwise generate a new deriveKey. */
         /* use PKCS5_deriveKey to dump the key for encryption */
-        retval = PKCS5_PBKDF2_HMAC(
-            (char*)Key, keylen, RandSalt, RANDOM_LEN, ITERATE_TIMES, (EVP_MD*)EVP_sha256(), RANDOM_LEN, derive_key);
+        retval = PKCS5_PBKDF2_HMAC((char*)Key, keylen, RandSalt, RANDOM_LEN, ITERATE_TIMES, (EVP_MD*)EVP_sha256(),
+            RANDOM_LEN, derive_key);
         if (!retval) {
             (void)fprintf(stderr, _("generate the derived key failed,errcode:%u\n"), retval);
             /* clean up */
-            errorno = memset_s(input_saved, RANDOM_LEN, 0, RANDOM_LEN);
-            securec_check_c(errorno, "", "");
-            errorno = memset_s(derive_vector_saved, RANDOM_LEN, 0, RANDOM_LEN);
-            securec_check_c(errorno, "", "");
-            errorno = memset_s(derive_key, RANDOM_LEN, 0, RANDOM_LEN);
-            securec_check_c(errorno, "", "");
-            errorno = memset_s(mac_vector_saved, RANDOM_LEN, 0, RANDOM_LEN);
-            securec_check_c(errorno, "", "");
-            errorno = memset_s(aes_vector, RANDOM_LEN, 0, RANDOM_LEN);
-            securec_check_c(errorno, "", "");
-            errorno = memset_s(user_key, RANDOM_LEN, 0, RANDOM_LEN);
-            securec_check_c(errorno, "", "");
+            CLEAR_AES_SAVED_SENSITIVE_MEMORY();
+            CLEAR_AES_TEMP_SENSITIVE_MEMORY();
             return false;
         }
 
         /* generate the mac key for hmac */
-        retval = PKCS5_PBKDF2_HMAC((char*)user_key,
-            RANDOM_LEN,
-            RandSalt,
-            RANDOM_LEN,
-            MAC_ITERATE_TIMES,
-            (EVP_MD*)EVP_sha256(),
-            RANDOM_LEN,
-            mac_key);
+        retval = PKCS5_PBKDF2_HMAC((char*)user_key, RANDOM_LEN, RandSalt, RANDOM_LEN, MAC_ITERATE_TIMES,
+            (EVP_MD*)EVP_sha256(), RANDOM_LEN, mac_key);
         if (!retval) {
             (void)fprintf(stderr, _("generate the mac key failed,errcode:%u\n"), retval);
             /* clean up */
-            errorno = memset_s(input_saved, RANDOM_LEN, 0, RANDOM_LEN);
-            securec_check_c(errorno, "", "");
-            errorno = memset_s(derive_vector_saved, RANDOM_LEN, 0, RANDOM_LEN);
-            securec_check_c(errorno, "", "");
-            errorno = memset_s(derive_key, RANDOM_LEN, 0, RANDOM_LEN);
-            securec_check_c(errorno, "", "");
-            errorno = memset_s(mac_vector_saved, RANDOM_LEN, 0, RANDOM_LEN);
-            securec_check_c(errorno, "", "");
-            errorno = memset_s(aes_vector, RANDOM_LEN, 0, RANDOM_LEN);
-            securec_check_c(errorno, "", "");
-            errorno = memset_s(user_key, RANDOM_LEN, 0, RANDOM_LEN);
-            securec_check_c(errorno, "", "");
-            errorno = memset_s(mac_key, RANDOM_LEN, 0, RANDOM_LEN);
-            securec_check_c(errorno, "", "");
+            CLEAR_AES_SAVED_SENSITIVE_MEMORY();
+            CLEAR_AES_TEMP_SENSITIVE_MEMORY();
             return false;
         }
 
@@ -628,25 +607,13 @@ bool aes128EncryptSpeed(GS_UCHAR* PlainText, GS_UINT32 PlainLen, GS_UCHAR* Key, 
     }
 
     /* use deriverkey to encrypt the plaintext */
-    retval = CRYPT_encrypt(
-        NID_aes_128_cbc, derive_key, RANDOM_LEN, aes_vector, RANDOM_LEN, PlainText, PlainLen, CipherText, CipherLen);
+    retval = CRYPT_encrypt(NID_aes_128_cbc, derive_key, RANDOM_LEN, aes_vector, RANDOM_LEN, PlainText, PlainLen,
+        CipherText, CipherLen);
     if (retval != 0) {
         (void)fprintf(stderr, _("encrypt plain text to cipher text failed,errcode:%u\n"), retval);
         /* clean up */
-        errorno = memset_s(input_saved, RANDOM_LEN, 0, RANDOM_LEN);
-        securec_check_c(errorno, "", "");
-        errorno = memset_s(derive_vector_saved, RANDOM_LEN, 0, RANDOM_LEN);
-        securec_check_c(errorno, "", "");
-        errorno = memset_s(derive_key, RANDOM_LEN, 0, RANDOM_LEN);
-        securec_check_c(errorno, "", "");
-        errorno = memset_s(mac_vector_saved, RANDOM_LEN, 0, RANDOM_LEN);
-        securec_check_c(errorno, "", "");
-        errorno = memset_s(aes_vector, RANDOM_LEN, 0, RANDOM_LEN);
-        securec_check_c(errorno, "", "");
-        errorno = memset_s(user_key, RANDOM_LEN, 0, RANDOM_LEN);
-        securec_check_c(errorno, "", "");
-        errorno = memset_s(mac_key, RANDOM_LEN, 0, RANDOM_LEN);
-        securec_check_c(errorno, "", "");
+        CLEAR_AES_SAVED_SENSITIVE_MEMORY();
+        CLEAR_AES_TEMP_SENSITIVE_MEMORY();
         return false;
     }
 
@@ -660,20 +627,8 @@ bool aes128EncryptSpeed(GS_UCHAR* PlainText, GS_UINT32 PlainLen, GS_UCHAR* Key, 
     if (retval != 0 || mac_length != MAC_LEN) {
         (void)fprintf(stderr, _("generate mac text based on plain text failed,errcode:%u\n"), retval);
         /* clean up */
-        errorno = memset_s(input_saved, RANDOM_LEN, 0, RANDOM_LEN);
-        securec_check_c(errorno, "", "");
-        errorno = memset_s(derive_vector_saved, RANDOM_LEN, 0, RANDOM_LEN);
-        securec_check_c(errorno, "", "");
-        errorno = memset_s(derive_key, RANDOM_LEN, 0, RANDOM_LEN);
-        securec_check_c(errorno, "", "");
-        errorno = memset_s(mac_vector_saved, RANDOM_LEN, 0, RANDOM_LEN);
-        securec_check_c(errorno, "", "");
-        errorno = memset_s(aes_vector, RANDOM_LEN, 0, RANDOM_LEN);
-        securec_check_c(errorno, "", "");
-        errorno = memset_s(user_key, RANDOM_LEN, 0, RANDOM_LEN);
-        securec_check_c(errorno, "", "");
-        errorno = memset_s(mac_key, RANDOM_LEN, 0, RANDOM_LEN);
-        securec_check_c(errorno, "", "");
+        CLEAR_AES_SAVED_SENSITIVE_MEMORY();
+        CLEAR_AES_TEMP_SENSITIVE_MEMORY();
         return false;
     }
 
@@ -683,14 +638,7 @@ bool aes128EncryptSpeed(GS_UCHAR* PlainText, GS_UINT32 PlainLen, GS_UCHAR* Key, 
     *CipherLen = *CipherLen + MAC_LEN;
 
     /* clean the user_key, mac_key, derive_key and aes_vector for security */
-    errorno = memset_s(user_key, RANDOM_LEN, 0, RANDOM_LEN);
-    securec_check_c(errorno, "", "");
-    errorno = memset_s(mac_key, RANDOM_LEN, 0, RANDOM_LEN);
-    securec_check_c(errorno, "", "");
-    errorno = memset_s(derive_key, RANDOM_LEN, 0, RANDOM_LEN);
-    securec_check_c(errorno, "", "");
-    errorno = memset_s(aes_vector, RANDOM_LEN, 0, RANDOM_LEN);
-    securec_check_c(errorno, "", "");
+    CLEAR_AES_TEMP_SENSITIVE_MEMORY();
 
     return true;
 }

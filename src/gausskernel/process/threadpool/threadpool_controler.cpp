@@ -56,6 +56,7 @@
 #include "executor/executor.h"
 
 #include "communication/commproxy_interface.h"
+#include "utils/mem_snapshot.h"
 
 #ifdef HAVE_POLL_H
 #include <poll.h>
@@ -79,6 +80,7 @@ ThreadPoolControler::ThreadPoolControler()
     m_scheduler = NULL;
     m_groupNum = 1;
     m_threadNum = 0;
+    m_streamThreadNum = 0;
     m_maxPoolSize = 0;
     m_maxStreamPoolSize = 0;
     m_streamProcRatio = 0;
@@ -115,6 +117,7 @@ void ThreadPoolControler::Init(bool enableNumaDistribute)
     int expectThreadNum = 0;
     int maxStreamNum = 0;
     int numaId = 0;
+    int tmpNumaId = 0;
     int cpuNum = 0;
     int *cpuArr = NULL;
 
@@ -139,20 +142,22 @@ void ThreadPoolControler::Init(bool enableNumaDistribute)
             maxThreadNum = (int)round(
                 (double)m_maxPoolSize * ((double)m_cpuInfo.cpuArrSize[numaId] / (double)m_cpuInfo.activeCpuNum));
             maxStreamNum = (int)round(
-                (double)m_maxPoolSize * ((double)m_cpuInfo.cpuArrSize[numaId] / (double)m_cpuInfo.activeCpuNum));
+                (double)m_maxStreamPoolSize * ((double)m_cpuInfo.cpuArrSize[numaId] / (double)m_cpuInfo.activeCpuNum));
             cpuNum = m_cpuInfo.cpuArrSize[numaId];
             cpuArr = m_cpuInfo.cpuArr[numaId];
 
+            tmpNumaId = numaId;
             numaId++;
         } else {
             expectThreadNum = m_threadNum / m_groupNum;
             maxThreadNum = m_maxPoolSize / m_groupNum;
-            maxStreamNum = m_maxPoolSize / m_groupNum;
+            maxStreamNum = m_maxStreamPoolSize / m_groupNum;
             numaId = -1;
+            tmpNumaId = numaId;
         }
 
         m_groups[i] = New(CurrentMemoryContext)ThreadPoolGroup(maxThreadNum, expectThreadNum,
-                                                    maxStreamNum, i, numaId, cpuNum, cpuArr, bindCpuNuma);
+                                                    maxStreamNum, i, tmpNumaId, cpuNum, cpuArr, bindCpuNuma);
         m_groups[i]->Init(enableNumaDistribute);
     }
 
@@ -662,7 +667,7 @@ CPUBindType ThreadPoolControler::GetCpuBindType() const
 void ThreadPoolControler::SetStreamInfo()
 {
     m_streamProcRatio = m_stream_attr.procRatio;
-    m_maxStreamPoolSize = Min(m_stream_attr.threadNum, m_threadNum);
+    m_streamThreadNum = Min(m_stream_attr.threadNum, m_threadNum);
 }
 
 void ThreadPoolControler::SetGroupAndThreadNum()
@@ -699,6 +704,7 @@ void ThreadPoolControler::ConstrainThreadNum()
     }
     
     m_maxPoolSize = Min(MAX_THREAD_POOL_SIZE, g_instance.attr.attr_network.MaxConnections);
+    m_maxStreamPoolSize = g_instance.attr.attr_network.MaxConnections;
     m_threadNum = Min(m_threadNum, m_maxPoolSize);
 }
 
@@ -722,6 +728,7 @@ ThreadPoolStat* ThreadPoolControler::GetThreadPoolStat(uint32* num)
 
 void ThreadPoolControler::CloseAllSessions()
 {
+    AddWorkerIfNoWorker();
     ereport(LOG, (errmodule(MOD_THREAD_POOL),
                     errmsg("pmState:%d, start to close all sessions in threadpool.", pmState)));
 
@@ -738,7 +745,7 @@ void ThreadPoolControler::CloseAllSessions()
         if (m_sessCtrl->IsActiveListEmpty()) {
             break;
         }
-
+        AddWorkerIfNoWorker();
         allclose = true;
         for (int i = 0; i < m_groupNum; i++) {
             allclose = (m_groups[i]->AllSessionClosed() && allclose);
@@ -797,6 +804,7 @@ void ThreadPoolControler::ShutDownScheduler(bool forceWait, bool noAdjust)
     if (noAdjust) {
         pg_memory_barrier();
         m_scheduler->m_canAdjustPool = false;
+        pg_memory_barrier();
     }
 
     m_scheduler->ShutDown();
@@ -824,6 +832,15 @@ void ThreadPoolControler::AddWorkerIfNecessary()
         m_scheduler->SetShutDown(false);
     }
     EnableAdjustPool();
+}
+
+void ThreadPoolControler::AddWorkerIfNoWorker()
+{
+    for (int i = 0; i < m_groupNum; i++) {
+        if (m_groups[i]->NeedAddWorkers()) {
+            m_groups[i]->AddWorkerIfNecessary();
+        }
+    }
 }
 
 ThreadPoolGroup* ThreadPoolControler::FindThreadGroupWithLeastSession()

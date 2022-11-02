@@ -1,0 +1,717 @@
+set a_format_version='10c';
+set a_format_dev_version='s1';
+set nls_timestamp_format='YYYY-MM-DD HH24:MI:SS.FF';
+--小数字符串转int
+select cast('-.45' as int1);
+ int1 
+------
+ 0
+(1 row)
+
+select cast('-.55' as int1);
+ERROR:  value "-.55" is out of range for 8-bit integer
+LINE 1: select cast('-.55' as int1);
+                    ^
+CONTEXT:  referenced column: int1
+select cast('-123.45' as int1);
+ERROR:  value "-123.45" is out of range for 8-bit integer
+LINE 1: select cast('-123.45' as int1);
+                    ^
+CONTEXT:  referenced column: int1
+select cast('-123.55' as int1);
+ERROR:  value "-123.55" is out of range for 8-bit integer
+LINE 1: select cast('-123.55' as int1);
+                    ^
+CONTEXT:  referenced column: int1
+select cast('.45' as int1);
+ int1 
+------
+ 0
+(1 row)
+
+select cast('.55' as int1);
+ int1 
+------
+ 1
+(1 row)
+
+select cast('.65' as int1);
+ int1 
+------
+ 1
+(1 row)
+
+select cast('123.45' as int1);
+ int1 
+------
+ 123
+(1 row)
+
+select cast('123.55' as int1);
+ int1 
+------
+ 124
+(1 row)
+
+select cast('123.65' as int1);
+ int1 
+------
+ 124
+(1 row)
+
+select cast('255.45' as int1);
+ int1 
+------
+ 255
+(1 row)
+
+select cast('255.55' as int1);
+ERROR:  value "255.55" is out of range for 8-bit integer
+LINE 1: select cast('255.55' as int1);
+                    ^
+CONTEXT:  referenced column: int1
+select cast('s123.65' as int1);
+ERROR:  invalid input syntax for integer: "s123.65"
+LINE 1: select cast('s123.65' as int1);
+                    ^
+CONTEXT:  referenced column: int1
+select cast('123s.65' as int1);
+ERROR:  invalid input syntax for integer: "123s.65"
+LINE 1: select cast('123s.65' as int1);
+                    ^
+CONTEXT:  referenced column: int1
+select cast('123.65s' as int1);
+ERROR:  invalid input syntax for integer: "123.65s"
+LINE 1: select cast('123.65s' as int1);
+                    ^
+CONTEXT:  referenced column: int1
+select cast('-.45' as int2);
+ int2 
+------
+    0
+(1 row)
+
+select cast('-.55' as int2);
+ int2 
+------
+   -1
+(1 row)
+
+select cast('-123.45' as int2);
+ int2 
+------
+ -123
+(1 row)
+
+select cast('-123.55' as int2);
+ int2 
+------
+ -124
+(1 row)
+
+select cast('.45' as int2);
+ int2 
+------
+    0
+(1 row)
+
+select cast('.55' as int2);
+ int2 
+------
+    1
+(1 row)
+
+select cast('.65' as int2);
+ int2 
+------
+    1
+(1 row)
+
+select cast('123.45' as int2);
+ int2 
+------
+  123
+(1 row)
+
+select cast('123.55' as int2);
+ int2 
+------
+  124
+(1 row)
+
+select cast('123.65' as int2);
+ int2 
+------
+  124
+(1 row)
+
+select cast('-32768.45' as int2);
+  int2  
+--------
+ -32768
+(1 row)
+
+select cast('-32768.55' as int2);
+ERROR:  value "-32768.55" is out of range for type smallint
+LINE 1: select cast('-32768.55' as int2);
+                    ^
+CONTEXT:  referenced column: int2
+select cast('32767.45' as int2);
+ int2  
+-------
+ 32767
+(1 row)
+
+select cast('32767.55' as int2);
+ERROR:  value "32767.55" is out of range for type smallint
+LINE 1: select cast('32767.55' as int2);
+                    ^
+CONTEXT:  referenced column: int2
+select cast('s123.65' as int2);
+ERROR:  invalid input syntax for integer: "s123.65"
+LINE 1: select cast('s123.65' as int2);
+                    ^
+CONTEXT:  referenced column: int2
+select cast('123s.65' as int2);
+ERROR:  invalid input syntax for integer: "123s.65"
+LINE 1: select cast('123s.65' as int2);
+                    ^
+CONTEXT:  referenced column: int2
+select cast('123.65s' as int2);
+ERROR:  invalid input syntax for integer: "123.65s"
+LINE 1: select cast('123.65s' as int2);
+                    ^
+CONTEXT:  referenced column: int2
+select cast('-.45' as int);
+ int4 
+------
+    0
+(1 row)
+
+select cast('-.55' as int);
+ int4 
+------
+   -1
+(1 row)
+
+select cast('-123.45' as int);
+ int4 
+------
+ -123
+(1 row)
+
+select cast('-123.55' as int);
+ int4 
+------
+ -124
+(1 row)
+
+select cast('.45' as int);
+ int4 
+------
+    0
+(1 row)
+
+select cast('.55' as int);
+ int4 
+------
+    1
+(1 row)
+
+select cast('.65' as int);
+ int4 
+------
+    1
+(1 row)
+
+select cast('123.45' as int);
+ int4 
+------
+  123
+(1 row)
+
+select cast('123.55' as int);
+ int4 
+------
+  124
+(1 row)
+
+select cast('123.65' as int);
+ int4 
+------
+  124
+(1 row)
+
+select cast('-2147483648.45' as int);
+    int4     
+-------------
+ -2147483648
+(1 row)
+
+select cast('-2147483648.55' as int);
+ERROR:  value "-2147483648.55" is out of range for type integer
+LINE 1: select cast('-2147483648.55' as int);
+                    ^
+CONTEXT:  referenced column: int4
+select cast('2147483647.45' as int);
+    int4    
+------------
+ 2147483647
+(1 row)
+
+select cast('2147483647.55' as int);
+ERROR:  value "2147483647.55" is out of range for type integer
+LINE 1: select cast('2147483647.55' as int);
+                    ^
+CONTEXT:  referenced column: int4
+select cast('s123.65' as int);
+ERROR:  invalid input syntax for integer: "s123.65"
+LINE 1: select cast('s123.65' as int);
+                    ^
+CONTEXT:  referenced column: int4
+select cast('123s.65' as int);
+ERROR:  invalid input syntax for integer: "123s.65"
+LINE 1: select cast('123s.65' as int);
+                    ^
+CONTEXT:  referenced column: int4
+select cast('123.65s' as int);
+ERROR:  invalid input syntax for integer: "123.65s"
+LINE 1: select cast('123.65s' as int);
+                    ^
+CONTEXT:  referenced column: int4
+select cast('-.45' as int4);
+ int4 
+------
+    0
+(1 row)
+
+select cast('-.55' as int4);
+ int4 
+------
+   -1
+(1 row)
+
+select cast('-123.45' as int4);
+ int4 
+------
+ -123
+(1 row)
+
+select cast('-123.55' as int4);
+ int4 
+------
+ -124
+(1 row)
+
+select cast('.45' as int4);
+ int4 
+------
+    0
+(1 row)
+
+select cast('.55' as int4);
+ int4 
+------
+    1
+(1 row)
+
+select cast('.65' as int4);
+ int4 
+------
+    1
+(1 row)
+
+select cast('123.45' as int4);
+ int4 
+------
+  123
+(1 row)
+
+select cast('123.55' as int4);
+ int4 
+------
+  124
+(1 row)
+
+select cast('123.65' as int4);
+ int4 
+------
+  124
+(1 row)
+
+select cast('-2147483648.45' as int4);
+    int4     
+-------------
+ -2147483648
+(1 row)
+
+select cast('-2147483648.55' as int4);
+ERROR:  value "-2147483648.55" is out of range for type integer
+LINE 1: select cast('-2147483648.55' as int4);
+                    ^
+CONTEXT:  referenced column: int4
+select cast('2147483647.45' as int4);
+    int4    
+------------
+ 2147483647
+(1 row)
+
+select cast('2147483647.55' as int4);
+ERROR:  value "2147483647.55" is out of range for type integer
+LINE 1: select cast('2147483647.55' as int4);
+                    ^
+CONTEXT:  referenced column: int4
+select cast('s123.65' as int4);
+ERROR:  invalid input syntax for integer: "s123.65"
+LINE 1: select cast('s123.65' as int4);
+                    ^
+CONTEXT:  referenced column: int4
+select cast('123s.65' as int4);
+ERROR:  invalid input syntax for integer: "123s.65"
+LINE 1: select cast('123s.65' as int4);
+                    ^
+CONTEXT:  referenced column: int4
+select cast('123.65s' as int4);
+ERROR:  invalid input syntax for integer: "123.65s"
+LINE 1: select cast('123.65s' as int4);
+                    ^
+CONTEXT:  referenced column: int4
+select cast('-.45' as int8);
+ int8 
+------
+    0
+(1 row)
+
+select cast('-.55' as int8);
+ int8 
+------
+   -1
+(1 row)
+
+select cast('-123.45' as int8);
+ int8 
+------
+ -123
+(1 row)
+
+select cast('-123.55' as int8);
+ int8 
+------
+ -124
+(1 row)
+
+select cast('.45' as int8);
+ int8 
+------
+    0
+(1 row)
+
+select cast('.55' as int8);
+ int8 
+------
+    1
+(1 row)
+
+select cast('.65' as int8);
+ int8 
+------
+    1
+(1 row)
+
+select cast('123.45' as int8);
+ int8 
+------
+  123
+(1 row)
+
+select cast('123.55' as int8);
+ int8 
+------
+  124
+(1 row)
+
+select cast('123.65' as int8);
+ int8 
+------
+  124
+(1 row)
+
+select cast('-9223372036854775808.45' as int8);
+         int8         
+----------------------
+ -9223372036854775808
+(1 row)
+
+select cast('-9223372036854775808.55' as int8);
+ERROR:  value "-9223372036854775808.55" is out of range for type bigint
+LINE 1: select cast('-9223372036854775808.55' as int8);
+                    ^
+CONTEXT:  referenced column: int8
+select cast('9223372036854775807.45' as int8);
+        int8         
+---------------------
+ 9223372036854775807
+(1 row)
+
+select cast('9223372036854775807.55' as int8);
+ERROR:  value "9223372036854775807.55" is out of range for type bigint
+LINE 1: select cast('9223372036854775807.55' as int8);
+                    ^
+CONTEXT:  referenced column: int8
+select cast('s123.65' as int8);
+ERROR:  invalid input syntax for integer: "s123.65"
+LINE 1: select cast('s123.65' as int8);
+                    ^
+CONTEXT:  referenced column: int8
+select cast('123s.65' as int8);
+ERROR:  invalid input syntax for integer: "123s.65"
+LINE 1: select cast('123s.65' as int8);
+                    ^
+CONTEXT:  referenced column: int8
+select cast('123.65s' as int8);
+ERROR:  invalid input syntax for integer: "123.65s"
+LINE 1: select cast('123.65s' as int8);
+                    ^
+CONTEXT:  referenced column: int8
+select cast('-.45' as int16);
+ int16 
+-------
+     0
+(1 row)
+
+select cast('-.55' as int16);
+ int16 
+-------
+    -1
+(1 row)
+
+select cast('-123.45' as int16);
+ int16 
+-------
+  -123
+(1 row)
+
+select cast('-123.55' as int16);
+ int16 
+-------
+  -124
+(1 row)
+
+select cast('.45' as int16);
+ int16 
+-------
+     0
+(1 row)
+
+select cast('.55' as int16);
+ int16 
+-------
+     1
+(1 row)
+
+select cast('.65' as int16);
+ int16 
+-------
+     1
+(1 row)
+
+select cast('123.45' as int16);
+ int16 
+-------
+   123
+(1 row)
+
+select cast('123.55' as int16);
+ int16 
+-------
+   124
+(1 row)
+
+select cast('123.65' as int16);
+ int16 
+-------
+   124
+(1 row)
+
+select cast('-170141183460469231731687303715884105728.45' as int16);
+                  int16                   
+------------------------------------------
+ -170141183460469231731687303715884105728
+(1 row)
+
+select cast('-170141183460469231731687303715884105728.55' as int16);
+ERROR:  value "-170141183460469231731687303715884105728.55" is out of range for type int16
+LINE 1: select cast('-170141183460469231731687303715884105728.55' as...
+                    ^
+CONTEXT:  referenced column: int16
+select cast('170141183460469231731687303715884105727.45' as int16);
+                  int16                  
+-----------------------------------------
+ 170141183460469231731687303715884105727
+(1 row)
+
+select cast('170141183460469231731687303715884105727.55' as int16);
+ERROR:  value "170141183460469231731687303715884105727.55" is out of range for type int16
+LINE 1: select cast('170141183460469231731687303715884105727.55' as ...
+                    ^
+CONTEXT:  referenced column: int16
+select cast('s123.65' as int16);
+ERROR:  invalid input syntax for integer: "s123.65"
+LINE 1: select cast('s123.65' as int16);
+                    ^
+CONTEXT:  referenced column: int16
+select cast('123s.65' as int16);
+ERROR:  invalid input syntax for integer: "123s.65"
+LINE 1: select cast('123s.65' as int16);
+                    ^
+CONTEXT:  referenced column: int16
+select cast('123.65s' as int16);
+ERROR:  invalid input syntax for integer: "123.65s"
+LINE 1: select cast('123.65s' as int16);
+                    ^
+CONTEXT:  referenced column: int16
+--DEFAULT return_vaule ON CONVERSION ERROR
+select cast('123.4s' as int DEFAULT 666 ON CONVERSION ERROR);
+ERROR:  syntax error at or near "DEFAULT"
+LINE 1: select cast('123.4s' as int DEFAULT 666 ON CONVERSION ERROR)...
+                                    ^
+select cast('123.4s' as int DEFAULT '666' ON CONVERSION ERROR);
+ERROR:  syntax error at or near "DEFAULT"
+LINE 1: select cast('123.4s' as int DEFAULT '666' ON CONVERSION ERRO...
+                                    ^
+select cast('123.4s' as int DEFAULT '666s' ON CONVERSION ERROR);
+ERROR:  syntax error at or near "DEFAULT"
+LINE 1: select cast('123.4s' as int DEFAULT '666s' ON CONVERSION ERR...
+                                    ^
+select cast('123.4s' as float);
+ERROR:  invalid input syntax for type double precision: "123.4s"
+LINE 1: select cast('123.4s' as float);
+                    ^
+CONTEXT:  referenced column: float8
+select cast('123.4s' as float DEFAULT 666.67 ON CONVERSION ERROR);
+ERROR:  syntax error at or near "DEFAULT"
+LINE 1: select cast('123.4s' as float DEFAULT 666.67 ON CONVERSION E...
+                                      ^
+select cast('123.4s' as float DEFAULT '666.67' ON CONVERSION ERROR);
+ERROR:  syntax error at or near "DEFAULT"
+LINE 1: select cast('123.4s' as float DEFAULT '666.67' ON CONVERSION...
+                                      ^
+select cast('123.4s' as int DEFAULT '666.67s' ON CONVERSION ERROR);
+ERROR:  syntax error at or near "DEFAULT"
+LINE 1: select cast('123.4s' as int DEFAULT '666.67s' ON CONVERSION ...
+                                    ^
+SELECT CAST('1997-13-22' AS DATE);
+ERROR:  date/time field value out of range: "1997-13-22"
+LINE 1: SELECT CAST('1997-13-22' AS DATE);
+                    ^
+HINT:  Perhaps you need a different "datestyle" setting.
+CONTEXT:  referenced column: timestamp
+SELECT CAST('1997-13-22' AS DATE DEFAULT '2022-10-01' ON CONVERSION ERROR);
+ERROR:  syntax error at or near "DEFAULT"
+LINE 1: SELECT CAST('1997-13-22' AS DATE DEFAULT '2022-10-01' ON CON...
+                                         ^
+SELECT CAST('1997-13-22 12:13:14' AS TIMESTAMP);
+ERROR:  date/time field value out of range: "1997-13-22 12:13:14"
+LINE 1: SELECT CAST('1997-13-22 12:13:14' AS TIMESTAMP);
+                    ^
+HINT:  Perhaps you need a different "datestyle" setting.
+CONTEXT:  referenced column: timestamp
+SELECT CAST('1997-13-22 12:13:14' AS TIMESTAMP DEFAULT '2022-10-01 12:13:14' ON CONVERSION ERROR);
+ERROR:  syntax error at or near "DEFAULT"
+LINE 1: SELECT CAST('1997-13-22 12:13:14' AS TIMESTAMP DEFAULT '2022...
+                                                       ^
+--fmt
+SELECT CAST ('$12,123.456' AS int);
+ERROR:  invalid input syntax for integer: "$12,123.456"
+LINE 1: SELECT CAST ('$12,123.456' AS int);
+                     ^
+CONTEXT:  referenced column: int4
+SELECT CAST ('$12,123.456' AS float);
+ERROR:  invalid input syntax for type double precision: "$12,123.456"
+LINE 1: SELECT CAST ('$12,123.456' AS float);
+                     ^
+CONTEXT:  referenced column: float8
+SELECT CAST ('$12,345.67' AS NUMBER);
+ERROR:  invalid input syntax for type numeric: "$12,345.67"
+LINE 1: SELECT CAST ('$12,345.67' AS NUMBER);
+                     ^
+CONTEXT:  referenced column: numeric
+SELECT CAST ('$12,123.456' AS int, '$99,999.999');
+ERROR:  syntax error at or near ","
+LINE 1: SELECT CAST ('$12,123.456' AS int, '$99,999.999');
+                                         ^
+SELECT CAST ('$12,123.456' AS float, '$99,999.999');
+ERROR:  syntax error at or near ","
+LINE 1: SELECT CAST ('$12,123.456' AS float, '$99,999.999');
+                                           ^
+SELECT CAST ('$12,345.67' AS NUMBER, '$99,999.99');
+ERROR:  syntax error at or near ","
+LINE 1: SELECT CAST ('$12,345.67' AS NUMBER, '$99,999.99');
+                                           ^
+SELECT CAST ('11-Oct-1999' AS date, 'DD-Mon-YYYY');
+ERROR:  syntax error at or near ","
+LINE 1: SELECT CAST ('11-Oct-1999' AS date, 'DD-Mon-YYYY');
+                                          ^
+SELECT CAST ('11-11-1999' AS date, 'DD-MM-YYYY');
+ERROR:  syntax error at or near ","
+LINE 1: SELECT CAST ('11-11-1999' AS date, 'DD-MM-YYYY');
+                                         ^
+SELECT CAST('January 15, 1989, 11:00 A.M.' AS date , 'Month dd, YYYY, HH:MI A.M.');
+ERROR:  syntax error at or near ","
+LINE 1: ...ELECT CAST('January 15, 1989, 11:00 A.M.' AS date , 'Month d...
+                                                             ^
+SELECT CAST ('11-11-1999 17:45:29' AS timestamp, 'DD-MM-YYYY HH24:MI:SS');
+ERROR:  syntax error at or near ","
+LINE 1: SELECT CAST ('11-11-1999 17:45:29' AS timestamp, 'DD-MM-YYYY...
+                                                       ^
+SELECT CAST (NULL AS int, 99999.999);
+ERROR:  syntax error at or near ","
+LINE 1: SELECT CAST (NULL AS int, 99999.999);
+                                ^
+SELECT CAST (12123.456 AS int, 99999.999);
+ERROR:  syntax error at or near ","
+LINE 1: SELECT CAST (12123.456 AS int, 99999.999);
+                                     ^
+SELECT CAST ('$12,123.456' AS int, '$99,999.999');
+ERROR:  syntax error at or near ","
+LINE 1: SELECT CAST ('$12,123.456' AS int, '$99,999.999');
+                                         ^
+SELECT CAST ('$12,123.456' AS int, to_char('$99,999.999'));
+ERROR:  syntax error at or near ","
+LINE 1: SELECT CAST ('$12,123.456' AS int, to_char('$99,999.999'));
+                                         ^
+SELECT CAST ('$12,123.456' AS int, (SELECT '$99,999.999'));
+ERROR:  syntax error at or near ","
+LINE 1: SELECT CAST ('$12,123.456' AS int, (SELECT '$99,999.999'));
+                                         ^
+SELECT CAST (to_char('$12,123.456') AS int, '$99,999.999');
+ERROR:  syntax error at or near ","
+LINE 1: SELECT CAST (to_char('$12,123.456') AS int, '$99,999.999');
+                                                  ^
+SELECT CAST ((SELECT '$12,123.456') AS int, '$99,999.999');
+ERROR:  syntax error at or near ","
+LINE 1: SELECT CAST ((SELECT '$12,123.456') AS int, '$99,999.999');
+                                                  ^
+SELECT CAST ((SELECT '$12,123.456') AS int, (SELECT '$99,999.999'));
+ERROR:  syntax error at or near ","
+LINE 1: SELECT CAST ((SELECT '$12,123.456') AS int, (SELECT '$99,999...
+                                                  ^
+SELECT CAST ((SELECT '$12,123.456') AS int, to_char('$99,999.999'));
+ERROR:  syntax error at or near ","
+LINE 1: SELECT CAST ((SELECT '$12,123.456') AS int, to_char('$99,999...
+                                                  ^
+SELECT CAST (to_char('$12,123.456') AS int, to_char('$99,999.999'));
+ERROR:  syntax error at or near ","
+LINE 1: SELECT CAST (to_char('$12,123.456') AS int, to_char('$99,999...
+                                                  ^
+SELECT CAST (to_char('$12,123.456') AS int, (SELECT '$99,999.999'));
+ERROR:  syntax error at or near ","
+LINE 1: SELECT CAST (to_char('$12,123.456') AS int, (SELECT '$99,999...
+                                                  ^
+SELECT CAST (cast('12123.456' AS float) AS int, to_char('99999.999'));
+ERROR:  syntax error at or near ","
+LINE 1: SELECT CAST (cast('12123.456' AS float) AS int, to_char('999...
+                                                      ^
+reset nls_timestamp_format;
+set a_format_version='';
+set a_format_dev_version='';

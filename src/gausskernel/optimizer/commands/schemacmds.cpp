@@ -46,7 +46,6 @@
 #include "optimizer/pgxcplan.h"
 #endif
 
-static const int TABLE_TYPE_HDFS = 1;
 static const int TABLE_TYPE_TIMESERIES = 2;
 static const int TABLE_TYPE_ANY = 3;
 
@@ -93,7 +92,7 @@ void CreateSchemaCommand(CreateSchemaStmt* stmt, const char* queryString)
     else
         owner_uid = saved_uid;
 
-    if (IS_PGXC_DATANODE) {
+    if (IS_PGXC_DATANODE && stmt->temptype != Temp_Lob_Toast) {
         if (isToastTempNamespaceName(stmt->schemaname))
             stmt->temptype = Temp_Toast;
         else if (isTempNamespaceName(stmt->schemaname))
@@ -418,16 +417,12 @@ void RenameSchema(const char* oldname, const char* newname)
     HeapTuple tup;
     Relation rel;
     AclResult aclresult;
-    const int STR_SCHEMA_NAME_LENGTH = 9;
-    const int STR_SNAPSHOT_LENGTH = 8;
     bool is_nspblockchain = false;
-    if ((strncmp(oldname, "dbe_perf", STR_SCHEMA_NAME_LENGTH) == 0) ||
-        (strncmp(oldname, "snapshot", STR_SNAPSHOT_LENGTH) == 0)) {
-        ereport(ERROR, (errcode(ERRCODE_OPERATE_FAILED), errmsg("The schema '%s' doesn't allow to rename", oldname)));
-    }
 
-    if (get_namespace_oid(oldname, true) == PG_BLOCKCHAIN_NAMESPACE) {
-        ereport(ERROR, (errcode(ERRCODE_OPERATE_FAILED), errmsg("The schema blockchain doesn't allow to rename")));
+    if (!g_instance.attr.attr_common.allowSystemTableMods && !u_sess->attr.attr_common.IsInplaceUpgrade &&
+        !IsBootstrapProcessingMode() &&
+        ((strcmp(oldname, "public") == 0) || IsSysSchema(get_namespace_oid(oldname, false)))) {
+        ereport(ERROR, (errcode(ERRCODE_OPERATE_FAILED), errmsg("The schema '%s' doesn't allow to rename", oldname)));
     }
 
     rel = heap_open(NamespaceRelationId, RowExclusiveLock);
@@ -458,17 +453,9 @@ void RenameSchema(const char* oldname, const char* newname)
                 errmsg("unacceptable schema name \"%s\"", newname),
                 errdetail("The prefix \"pg_\" is reserved for system schemas.")));
     /*
-     * If the HDFS table or timeseries table exists in the schema, do not rename it.
+     * If the timeseries table exists in the schema, do not rename it.
      */
-    StringInfo existDFSTbl = TableExistInSchema(HeapTupleGetOid(tup), TABLE_TYPE_HDFS);
     StringInfo existTimeSeriesTbl = TableExistInSchema(HeapTupleGetOid(tup), TABLE_TYPE_TIMESERIES);
-    if (0 != existDFSTbl->len) {
-        ereport(ERROR,
-            (errcode(ERRCODE_RESERVED_NAME),
-                errmsg("It is not supported to rename schema \"%s\" which includes DFS table \"%s\".",
-                    oldname,
-                    existDFSTbl->data)));
-    }
     if (0 != existTimeSeriesTbl->len) {
         ereport(ERROR,
             (errcode(ERRCODE_RESERVED_NAME),
@@ -526,10 +513,6 @@ static StringInfo TableExistInSchema(Oid namespaceId, const int tableType)
 
         Relation rel = relation_open(RelOid, AccessShareLock);
         if (tableType == TABLE_TYPE_ANY) {
-            appendStringInfo(existTbl, "%s", RelationGetRelationName(rel));
-            relation_close(rel, AccessShareLock);
-            break;
-        } else if (tableType == TABLE_TYPE_HDFS && RelationIsDfsStore(rel)) {
             appendStringInfo(existTbl, "%s", RelationGetRelationName(rel));
             relation_close(rel, AccessShareLock);
             break;

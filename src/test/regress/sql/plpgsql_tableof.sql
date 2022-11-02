@@ -855,6 +855,36 @@ end;
 /
 
 declare 
+    TYPE SalTabTyp is TABLE OF varchar(10) index by int;  
+	aa SalTabTyp;  
+ begin
+    aa(1) = 'abcde';
+	aa(2) = 'fghij';
+    aa.trim;
+end;
+/
+
+declare 
+    TYPE SalTabTyp is TABLE OF varchar(10) index by varchar(10);  
+	aa SalTabTyp;  
+ begin
+    aa.extend;
+    aa('a') = 'abcde';
+	aa('b') = 'fghij';
+end;
+/
+
+declare 
+    TYPE SalTabTyp is TABLE OF varchar(10) index by int;  
+	aa SalTabTyp;  
+ begin
+    aa.extend;
+    aa(1) = 'abcde';
+	aa(2) = 'fghij';
+end;
+/
+
+declare 
     TYPE SalTabTyp is TABLE OF varchar(10) index by varchar(10);  
 	aa SalTabTyp;  
     c varchar(10);
@@ -1221,6 +1251,23 @@ begin
 end;
 /
 
+-- table of null && delete
+declare
+    cursor c_customers is select c_name from customers order by id;
+    type c_list is table of customers.c_name%type index by integer;
+    name_arr c_list := c_list();
+begin
+    -- bulk collect + cursor
+    open c_customers;
+    fetch c_customers bulk collect into name_arr;
+	name_arr.delete();
+    close c_customers;
+    raise info '%', name_arr.count;
+    raise info '%', name_arr.last;
+    raise info '%', name_arr.exists(7);
+end;
+/
+
 create table pro_tblof_tbl_018_1(c1 int,c2 varchar(20));
 create table pro_tblof_tbl_018(c1 int,c2 pro_tblof_tbl_018_1);
 create type pro_tblof_018 is table of pro_tblof_tbl_018%rowtype;
@@ -1583,6 +1630,75 @@ end pkgnest_auto;
 /
 
 call pkgnest_auto.p1();
+
+-- nested table of in auto session
+create or replace package pck1 as
+type r1 is table of int;
+type r2 is table of r1;
+va r2;
+procedure p1;
+end pck1;
+/
+
+create or replace procedure p2() as
+va int;
+begin
+va := pck1.va(1)(1);
+end;
+/
+
+create or replace package body pck1 as
+procedure p1 as
+PRAGMA AUTONOMOUS_TRANSACTION;
+begin
+p2();
+end;
+end pck1;
+/
+call pck1.p1();
+
+create or replace procedure p2() as
+va int;
+begin
+pck1.va(1)(1) := 1;
+end;
+/
+
+call pck1.p1();
+drop procedure p2();
+drop package pck1;
+
+create or replace package pkgnest021
+ as
+ type ty1 is table of varchar2(20);
+ type ty2 is table of ty1;
+ type ty3 is table of ty2;
+ type ty4 is table of ty3;
+ type ty5 is table of ty4;
+ type ty6 is table of ty5;
+ procedure p1;
+ pv1 ty1;
+ pv2 ty2;
+ pv3 ty3; 
+ pv4 ty4;
+ pv5 ty5; 
+ pv6 ty6;
+ end pkgnest021;
+ /
+ 
+create or replace package body pkgnest021
+as
+procedure p1
+is
+v1 ty6;
+begin
+pv6.extend();
+pv6(1)(1)(1)(1)(1)(1):='1'; pv6(1)(1)(1)(1)(1)(2):='2'; pv6(1)(1)(1)(1)(1)(4):='3'; pv6(2)(1)(1)(1)(3)(1):='4'; pv6(2)(1)(1)(1)(3)(2):='5'; pv6(2)(1)(1)(1)(3)(3):='6'; pv6(4)(1)(1)(4)(3)(1):='7'; pv6(4)(1)(1)(5)(3)(2):='8'; pv6(4)(1)(1)(6)(3)(3):='9'; 
+end;
+end pkgnest021;
+/
+
+drop package pkgnest021;
 
 ---- clean ----
 drop type s_type;

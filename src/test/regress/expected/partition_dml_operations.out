@@ -1,3 +1,7 @@
+DROP SCHEMA partition_dml_operations CASCADE;
+ERROR:  schema "partition_dml_operations" does not exist
+CREATE SCHEMA partition_dml_operations;
+SET CURRENT_SCHEMA TO partition_dml_operations;
 --select
 create table tsource(ld int not null,sd int not null,jname varchar2) partition by range(ld)
 (
@@ -53,9 +57,9 @@ insert into range_list values('201903', '2', '1', 1);
 select * from range_list partition (p_201901);
  month_code | dept_code | user_no | sales_amt 
 ------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+ 201902     | 1         | 1       |         1
  201902     | 2         | 1       |         1
- 201902     | 1         | 1       |         1
- 201902     | 1         | 1       |         1
 (3 rows)
 
 select * from range_list subpartition (p_201901_a);
@@ -68,9 +72,9 @@ select * from range_list subpartition (p_201901_a);
 select * from range_list partition for ('201902');
  month_code | dept_code | user_no | sales_amt 
 ------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+ 201902     | 1         | 1       |         1
  201902     | 2         | 1       |         1
- 201902     | 1         | 1       |         1
- 201902     | 1         | 1       |         1
 (3 rows)
 
 select * from range_list subpartition for ('201902','1');
@@ -253,60 +257,60 @@ insert into range_list values('201903', '2', '1', 1);
 select *from range_list;
  month_code | dept_code | user_no | sales_amt 
 ------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+ 201902     | 1         | 1       |         1
  201902     | 2         | 1       |         1
- 201902     | 1         | 1       |         1
- 201902     | 1         | 1       |         1
- 201903     | 2         | 1       |         1
- 201903     | 2         | 1       |         1
  201903     | 1         | 1       |         1
+ 201903     | 2         | 1       |         1
+ 201903     | 2         | 1       |         1
 (6 rows)
 
 update range_list partition (p_201901) set user_no = '2';
 select *from range_list;
  month_code | dept_code | user_no | sales_amt 
 ------------+-----------+---------+-----------
+ 201902     | 1         | 2       |         1
+ 201902     | 1         | 2       |         1
  201902     | 2         | 2       |         1
- 201902     | 1         | 2       |         1
- 201902     | 1         | 2       |         1
- 201903     | 2         | 1       |         1
- 201903     | 2         | 1       |         1
  201903     | 1         | 1       |         1
+ 201903     | 2         | 1       |         1
+ 201903     | 2         | 1       |         1
 (6 rows)
 
 update range_list subpartition (p_201901_a) set user_no = '3';
 select *from range_list;
  month_code | dept_code | user_no | sales_amt 
 ------------+-----------+---------+-----------
+ 201902     | 1         | 3       |         1
+ 201902     | 1         | 3       |         1
  201902     | 2         | 2       |         1
- 201902     | 1         | 3       |         1
- 201902     | 1         | 3       |         1
- 201903     | 2         | 1       |         1
- 201903     | 2         | 1       |         1
  201903     | 1         | 1       |         1
+ 201903     | 2         | 1       |         1
+ 201903     | 2         | 1       |         1
 (6 rows)
 
 update range_list partition for ('201902') set user_no = '4';
 select *from range_list;
  month_code | dept_code | user_no | sales_amt 
 ------------+-----------+---------+-----------
+ 201902     | 1         | 4       |         1
+ 201902     | 1         | 4       |         1
  201902     | 2         | 4       |         1
- 201902     | 1         | 4       |         1
- 201902     | 1         | 4       |         1
- 201903     | 2         | 1       |         1
- 201903     | 2         | 1       |         1
  201903     | 1         | 1       |         1
+ 201903     | 2         | 1       |         1
+ 201903     | 2         | 1       |         1
 (6 rows)
 
 update range_list subpartition for ('201902','2') set user_no = '5';
 select *from range_list;
  month_code | dept_code | user_no | sales_amt 
 ------------+-----------+---------+-----------
+ 201902     | 1         | 4       |         1
+ 201902     | 1         | 4       |         1
  201902     | 2         | 5       |         1
- 201902     | 1         | 4       |         1
- 201902     | 1         | 4       |         1
- 201903     | 2         | 1       |         1
- 201903     | 2         | 1       |         1
  201903     | 1         | 1       |         1
+ 201903     | 2         | 1       |         1
+ 201903     | 2         | 1       |         1
 (6 rows)
 
 drop table range_list;
@@ -368,21 +372,21 @@ insert into range_list values('201903', '2', '1', 1);
 select *from range_list;
  month_code | dept_code | user_no | sales_amt 
 ------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+ 201902     | 1         | 1       |         1
  201902     | 2         | 1       |         1
- 201902     | 1         | 1       |         1
- 201902     | 1         | 1       |         1
- 201903     | 2         | 1       |         1
- 201903     | 2         | 1       |         1
  201903     | 1         | 1       |         1
+ 201903     | 2         | 1       |         1
+ 201903     | 2         | 1       |         1
 (6 rows)
 
 delete from range_list partition (p_201901);
 select *from range_list;
  month_code | dept_code | user_no | sales_amt 
 ------------+-----------+---------+-----------
- 201903     | 2         | 1       |         1
- 201903     | 2         | 1       |         1
  201903     | 1         | 1       |         1
+ 201903     | 2         | 1       |         1
+ 201903     | 2         | 1       |         1
 (3 rows)
 
 delete from range_list partition for ('201903');
@@ -400,12 +404,12 @@ insert into range_list values('201903', '2', '1', 1);
 select *from range_list;
  month_code | dept_code | user_no | sales_amt 
 ------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+ 201902     | 1         | 1       |         1
  201902     | 2         | 1       |         1
- 201902     | 1         | 1       |         1
- 201902     | 1         | 1       |         1
- 201903     | 2         | 1       |         1
- 201903     | 2         | 1       |         1
  201903     | 1         | 1       |         1
+ 201903     | 2         | 1       |         1
+ 201903     | 2         | 1       |         1
 (6 rows)
 
 delete from range_list subpartition (p_201901_a);
@@ -413,9 +417,9 @@ select *from range_list;
  month_code | dept_code | user_no | sales_amt 
 ------------+-----------+---------+-----------
  201902     | 2         | 1       |         1
- 201903     | 2         | 1       |         1
- 201903     | 2         | 1       |         1
  201903     | 1         | 1       |         1
+ 201903     | 2         | 1       |         1
+ 201903     | 2         | 1       |         1
 (4 rows)
 
 delete from range_list subpartition for ('201903','2');
@@ -950,9 +954,9 @@ WHEN NOT MATCHED THEN
 select *from range_list;
  month_code | dept_code | user_no | sales_amt 
 ------------+-----------+---------+-----------
- 201902     | 2         | 1       |         2
  201901     | 1         | 1       |         1
  201902     | 1         | 1       |         1
+ 201902     | 2         | 1       |         2
 (3 rows)
 
 select *from newrange_list;
@@ -979,9 +983,9 @@ WHEN NOT MATCHED THEN
 select *from range_list;
  month_code | dept_code | user_no | sales_amt 
 ------------+-----------+---------+-----------
- 201902     | 2         | 1       |         2
  201901     | 1         | 1       |         1
  201902     | 1         | 1       |         1
+ 201902     | 2         | 1       |         2
 (3 rows)
 
 select *from newrange_list;
@@ -1010,8 +1014,8 @@ DETAIL:  new tuple does not map to any table partition
 select *from range_list;
  month_code | dept_code | user_no | sales_amt 
 ------------+-----------+---------+-----------
- 201902     | 2         | 1       |         2
  201901     | 1         | 1       |         1
+ 201902     | 2         | 1       |         2
 (2 rows)
 
 select *from newrange_list;
@@ -1034,3 +1038,17 @@ select * from lm_list_range partition for(5,34);
 ERROR:  number of partitionkey values is not equal to the number of partitioning columns
 DETAIL:  N/A.
 drop table lm_list_range;
+drop table if exists tsource;
+NOTICE:  table "tsource" does not exist, skipping
+create table  if not exists tsource(fd int,sd int,ttime date)partition by range (ttime)interval('1 day')
+(partition p1 values less than ('2022-02-01 00:00:00'),
+ partition p2 values less than ('2022-02-02 00:00:00'));
+create index pidx on tsource(fd);
+create index tidx on tsource(ttime);
+insert into tsource values(1,2,'2022-02-01 20:00:00'),(2,3,'2022-02-02 20:00:00');
+insert into tsource partition(p2) values(2,2,'2022-02-01 20:30:00');
+insert into tsource partition for('2022-02-01 11:30:00') values(2,3,'2022-02-01 20:31:00');
+insert into tsource partition for('2022-02-01 11:30:00'::date) values(2,3,'2022-02-01 20:31:00'); 
+drop table if exists tsource;
+DROP SCHEMA partition_dml_operations CASCADE;
+RESET CURRENT_SCHEMA; 

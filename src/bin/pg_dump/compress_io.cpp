@@ -557,11 +557,11 @@ int cfread(void* ptr, int size, cfp* fp)
 {
     size_t read_len;
 #ifdef HAVE_LIBZ
-    if (fp->compressedfp != NULL)
-        return gzread(fp->compressedfp, ptr, size);
-    else
+    if (fp->compressedfp != NULL) {
+        read_len = gzread_file(ptr, size, fp->compressedfp);
+    } else
 #endif
-        read_len = fread(ptr, 1, size, fp->uncompressedfp);
+        read_len = fread_file(ptr, 1, size, fp->uncompressedfp);
     return read_len;
 }
 

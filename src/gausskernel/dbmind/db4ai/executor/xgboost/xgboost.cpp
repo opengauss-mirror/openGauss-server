@@ -502,21 +502,6 @@ void trainXG(AlgorithmAPI *alg, const HyperparamsXGBoost *xg_hyp, xg_data_t *chu
     safe_xgboost(g_xgboostApi->XGBoosterFree(booster));
 }
 
-static void check_label(AlgorithmAPI *self, HyperparamsXGBoost *xg_hyperp, float label)
-{
-    if ((self->algorithm == XG_BIN_LOGISTIC || self->algorithm == XG_REG_LOGISTIC) ||
-        (strcmp(xg_hyperp->eval_metric, "auc") == 0 || strcmp(xg_hyperp->eval_metric, "aucpr") == 0)) {
-        if (label == 0 || label == 1) {
-            return;
-        }
-        ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                        errmsg("Label must be 0 or 1 for logistic regression.")));
-    } else if (self->algorithm == XG_REG_GAMMA && label < 0) {
-        ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                        errmsg("Label must be nonnegative for gamma.")));
-    }
-}
-
 static void check_data_cnt(uint32_t tuple_count, uint32_t pos_cnt, HyperparamsXGBoost *xg_hyperp)
 {
     // only have positive numbers or negative numbers
@@ -580,7 +565,6 @@ static void xgboost_run(AlgorithmAPI *self, TrainModelState *pstate, Model **mod
         float label =
             datum_get_float8(outer_tuple_slot->typid[XG_TARGET_COLUMN], outer_tuple_slot->values[XG_TARGET_COLUMN]);
         chunk.labels[tuple_count] = label;
-        check_label(self, xg_hyperp, label);
 
         bool col_is_null = false;
         for (int j = 1; j < pstate->tuple.ncolumns; ++j) {

@@ -30,6 +30,7 @@
 #include "curl/curl.h"
 
 const int MAX_URL_BUF_LEN = 256;
+const int MAX_HDR_LEN = 64;
 
 typedef enum {
     HTTP_POST,
@@ -141,6 +142,7 @@ extern CmkemErrCode get_http_resmsg(CURL *http_obj, HttpResListType res_part, Cm
 extern CmkemErrCode http_request(HttpReqMsg* http_req_msg, HttpConfig *http_config, CmkemStrList **http_res_list,
     HttpStatusCode *stat_code);
 extern char *find_resheader(CmkemStrList *resheader_list, const char *resheader_type);
+extern char *make_content_length(const char *reqbody);
 extern CmkemErrCode find_value_from_http_resbody(const char *http_resbody, const char **key_list,
     CmkemStrList **value_list);
 

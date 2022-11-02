@@ -49,7 +49,7 @@ class DriverExecute(ExecuteFactory):
     def is_multi_node(self):
         self.init_conn_handle()
         try:
-            self.cur.execute("select count(*) from pgxc_node where node_type='C';")
+            self.cur.execute("select pg_catalog.count(*) from pg_catalog.pgxc_node where node_type='C';")
             self.conn.commit()
             return self.cur.fetchall()[0][0] > 0
         finally:
@@ -100,17 +100,17 @@ class DriverExecute(ExecuteFactory):
         # create hypo-indexes
         if self.schema:
             sqls = 'SET current_schema = %s;' % self.schema
-        sqls += 'SET enable_hypo_index = on;SELECT hypopg_reset_index();'
+        sqls += 'SET enable_hypo_index = on;SELECT pg_catalog.hypopg_reset_index();'
         if multi_node:
             sqls += 'SET enable_fast_query_shipping = off;SET enable_stream_operator = on;'
         for table in query_index_dict.keys():
             for columns_tulpe in query_index_dict[table]:
                 if columns_tulpe != '':
-                    content = "SELECT hypopg_create_index('CREATE INDEX ON %s(%s) %s');" % \
+                    content = "SELECT pg_catalog.hypopg_create_index('CREATE INDEX ON %s(%s) %s');" % \
                             (table, columns_tulpe[0], columns_tulpe[1])
                     content = content.replace('""', '')
                     sqls += content
-        sqls += 'SELECT * from hypopg_display_index();'
+        sqls += 'SELECT * from pg_catalog.hypopg_display_index();'
         result = self.execute(sqls)
         if not result:
             return valid_indexes
@@ -122,21 +122,21 @@ class DriverExecute(ExecuteFactory):
                 match_flag, table_name = ExecuteFactory.match_table_name(table_name,
                                                                          query_index_dict)
                 if not match_flag:
-                    self.execute('SELECT hypopg_reset_index()')
+                    self.execute('SELECT pg_catalog.hypopg_reset_index()')
                     return valid_indexes
                 hypoid_table_column[str(item[1])] = \
                     table_name + ':' + item[3].strip('()')
         sqls = "SET explain_perf_mode = 'normal'; explain %s" % query
         result = self.execute(sqls)
         if not result:
-            self.execute('SELECT hypopg_reset_index()')
+            self.execute('SELECT pg_catalog.hypopg_reset_index()')
             return valid_indexes
         # parse the result of explain plan
         for item in result:
             if 'Index' in item[0] and 'Scan' in item[0] and 'btree' in item[0]:
                 super().get_valid_indexes(
                     item[0], hypoid_table_column, valid_indexes)
-        self.execute('SELECT hypopg_reset_index()')
+        self.execute('SELECT pg_catalog.hypopg_reset_index()')
         return valid_indexes
 
     @staticmethod
@@ -164,7 +164,7 @@ class DriverExecute(ExecuteFactory):
         return cost_total
 
     def update_index_storage(self, index_id, index_config, hypo_index_num):
-        index_size_sql = 'select * from hypopg_estimate_size(%s);' % index_id
+        index_size_sql = 'select * from pg_catalog.hypopg_estimate_size(%s);' % index_id
         res = self.execute(index_size_sql)
         if res:
             index_config[hypo_index_num].storage = float(
@@ -181,7 +181,7 @@ class DriverExecute(ExecuteFactory):
             # create hypo-indexes
             self.execute('SET enable_hypo_index = on')
             for index in index_config:
-                res = self.execute("SELECT * from hypopg_create_index('CREATE INDEX ON %s(%s) %s')" %
+                res = self.execute("SELECT * from pg_catalog.hypopg_create_index('CREATE INDEX ON %s(%s) %s')" %
                                    (index.table, index.columns, index.index_type))
                 if self.max_index_storage and res:
                     self.update_index_storage(
@@ -206,13 +206,14 @@ class DriverExecute(ExecuteFactory):
                         res, index_config, ori_indexes_name)
                     query_cost *= workload[ind].frequency
                     workload[ind].cost_list.append(query_cost)
+                    # update positive_pos and negative_pos
                     if index_config and len(index_config) == 1 and query_cost < workload[ind].cost_list[0]:
-                        index_config[0].positive_pos.append(ind)
+                        index_config[0].update_positive_pos(ind)
                     total_cost += query_cost
                 else:
                     workload[ind].cost_list.append(0)
         if index_config:
-            self.execute('SELECT hypopg_reset_index()')
+            self.execute('SELECT pg_catalog.hypopg_reset_index()')
         return total_cost
 
     def check_useless_index(self, history_indexes, history_invalid_indexes):
@@ -221,7 +222,7 @@ class DriverExecute(ExecuteFactory):
         whole_indexes = list()
         redundant_indexes = list()
         for schema in schemas:
-            table_sql = "select tablename from pg_tables where schemaname = '%s'" % schema
+            table_sql = "select tablename from pg_catalog.pg_tables where schemaname = '%s'" % schema
             table_res = self.execute(table_sql)
             if not table_res:
                 continue
@@ -229,10 +230,10 @@ class DriverExecute(ExecuteFactory):
             tables_string = ','.join(["'%s'" % table for table in tables])
             # query all table index information and primary key information
             sql = "set current_schema = %s; SELECT c.relname AS tablename, i.relname AS indexname, " \
-                  "pg_get_indexdef(i.oid) AS indexdef, p.contype AS pkey from " \
-                  "pg_index x JOIN pg_class c ON c.oid = x.indrelid JOIN " \
-                  "pg_class i ON i.oid = x.indexrelid LEFT JOIN pg_namespace n " \
-                  "ON n.oid = c.relnamespace LEFT JOIN pg_constraint p ON (i.oid = p.conindid " \
+                  "pg_catalog.pg_get_indexdef(i.oid) AS indexdef, p.contype AS pkey from " \
+                  "pg_catalog.pg_index x JOIN pg_catalog.pg_class c ON c.oid = x.indrelid JOIN " \
+                  "pg_catalog.pg_class i ON i.oid = x.indexrelid LEFT JOIN pg_catalog.pg_namespace n " \
+                  "ON n.oid = c.relnamespace LEFT JOIN pg_catalog.pg_constraint p ON (i.oid = p.conindid " \
                   "AND p.contype = 'p') WHERE (c.relkind = ANY (ARRAY['r'::\"char\", " \
                   "'m'::\"char\"])) AND (i.relkind = ANY (ARRAY['i'::\"char\", 'I'::\"char\"])) " \
                   "AND n.nspname = '%s' AND c.relname in (%s) order by c.relname;" % \

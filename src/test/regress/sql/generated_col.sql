@@ -297,6 +297,51 @@ SELECT * FROM gtest25 ORDER BY a;
 ALTER TABLE gtest25 ADD COLUMN x int GENERATED ALWAYS AS (b * 4) STORED;  -- error
 ALTER TABLE gtest25 ADD COLUMN x int GENERATED ALWAYS AS (z * 4) STORED;  -- error
 
+ALTER TABLE gtest25 ADD COLUMN c int DEFAULT 42,
+  ADD COLUMN x int GENERATED ALWAYS AS (c * 4) STORED;
+ALTER TABLE gtest25 ADD COLUMN d int DEFAULT 101;
+ALTER TABLE gtest25 ALTER COLUMN d SET DATA TYPE float8,
+  ADD COLUMN y float8 GENERATED ALWAYS AS (d * 4) STORED;
+SELECT * FROM gtest25 ORDER BY a;
+
+\d gtest25
+
+--default value test
+INSERT INTO gtest25 VALUES (5), (6);
+INSERT INTO gtest25(a,b) VALUES (7,8), (9,10); --error
+INSERT INTO gtest25(a,b) VALUES (7,DEFAULT), (9,DEFAULT);
+INSERT INTO gtest25(x,a,b) VALUES (8,8,DEFAULT), (10,10,DEFAULT); --error
+INSERT INTO gtest25(x,a,b) VALUES (DEFAULT,8,DEFAULT), (DEFAULT,10,DEFAULT);
+INSERT INTO gtest25(x) VALUES (DEFAULT), (DEFAULT);  --error
+SELECT * FROM gtest25 ORDER BY a;
+
+CREATE TABLE gtest25x (a int, b int GENERATED ALWAYS AS (a * 3) STORED);
+INSERT INTO gtest25x(b) VALUES (DEFAULT), (DEFAULT);
+INSERT INTO gtest25x(b) VALUES (DEFAULT);
+
+DROP TABLE gtest25;
+DROP TABLE gtest25x;
+
+-- ALTER TABLE ... ADD COLUMN(USTORE)
+
+CREATE TABLE gtest25 (a int PRIMARY KEY) with (storage_type=USTORE);
+INSERT INTO gtest25 VALUES (3), (4);
+ALTER TABLE gtest25 ADD COLUMN b int GENERATED ALWAYS AS (a * 3) STORED;
+ALTER TABLE gtest25 ADD COLUMN x int GENERATED ALWAYS AS (b * 4) STORED;  -- error
+ALTER TABLE gtest25 ADD COLUMN x int GENERATED ALWAYS AS (z * 4) STORED;  -- error
+
+ALTER TABLE gtest25 ADD COLUMN c int DEFAULT 42,
+  ADD COLUMN x int GENERATED ALWAYS AS (c * 4) STORED;
+-- Regardless of the generated column,
+-- ADD the default value column to the table will be core
+-- so comment out the following use case for now
+
+--ALTER TABLE gtest25 ADD COLUMN d int DEFAULT 101;
+--ALTER TABLE gtest25 ALTER COLUMN d SET DATA TYPE float8,
+--  ADD COLUMN y float8 GENERATED ALWAYS AS (d * 4) STORED;
+SELECT * FROM gtest25 ORDER BY a;
+
+\d gtest25
 DROP TABLE gtest25;
 
 -- ALTER TABLE ... ALTER COLUMN
@@ -315,6 +360,32 @@ ALTER TABLE gtest27 ALTER COLUMN b DROP DEFAULT;  -- error
 \d gtest27
 
 DROP TABLE gtest27;
+
+CREATE TABLE gtest27 (
+    a int,
+    b int,
+    x int GENERATED ALWAYS AS ((a + b) * 2) STORED
+);
+INSERT INTO gtest27 (a, b) VALUES (3, 7), (4, 11);
+ALTER TABLE gtest27 ALTER COLUMN a TYPE text;  -- error
+ALTER TABLE gtest27 ALTER COLUMN x TYPE numeric;
+\d gtest27
+SELECT * FROM gtest27;
+ALTER TABLE gtest27 ALTER COLUMN x TYPE boolean USING x <> 0;
+ALTER TABLE gtest27 ALTER COLUMN x DROP DEFAULT;  -- error
+-- It's possible to alter the column types this way:
+ALTER TABLE gtest27
+  DROP COLUMN x,
+  ALTER COLUMN a TYPE bigint,
+  ALTER COLUMN b TYPE bigint,
+  ADD COLUMN x bigint GENERATED ALWAYS AS ((a + b) * 2) STORED;
+\d gtest27
+-- Ideally you could just do this, but not today (and should x change type?):
+ALTER TABLE gtest27
+  ALTER COLUMN a TYPE float8,
+  ALTER COLUMN b TYPE float8;  -- error
+\d gtest27
+SELECT * FROM gtest27;
 
 -- triggers
 CREATE TABLE gtest26 (
@@ -579,6 +650,18 @@ SELECT * FROM ustoretest;
 UPDATE ustoretest SET a=7 WHERE a=2;
 SELECT * FROM ustoretest;
 DROP TABLE ustoretest;
+
+--default test
+CREATE TABLE def_test1 (a int, b int GENERATED ALWAYS AS (a * 2) STORED);
+INSERT INTO def_test1 VALUES (5, 55), (6, 66);  --error
+INSERT INTO def_test1 VALUES (5, DEFAULT), (6, 66); --error
+INSERT INTO def_test1 VALUES (5, 55), (6, DEFAULT); --error
+INSERT INTO def_test1(b,a) VALUES (DEFAULT, 55), (6, 66); --error
+INSERT INTO def_test1(b,a) VALUES (55, 5), (66, 6); --error
+INSERT INTO def_test1 VALUES (5, DEFAULT), (6, DEFAULT);
+INSERT INTO def_test1(b,a) VALUES (DEFAULT,7) , (DEFAULT,8);
+SELECT * FROM def_test1 ORDER BY a;
+DROP TABLE def_test1;
 
 DROP TABLE gtest0;
 DROP TABLE gtest1;

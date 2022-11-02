@@ -1,0 +1,18 @@
+select count(*) > 0 as ok from pg_ls_waldir();
+ ok 
+----
+ t
+(1 row)
+
+select count(*) >= 0 as ok from pg_ls_tmpdir();
+ ok 
+----
+ t
+(1 row)
+
+select count(*) >= 0 as ok from pg_ls_tmpdir((select oid from pg_tablespace where spcname='pg_default'));
+ ok 
+----
+ t
+(1 row)
+

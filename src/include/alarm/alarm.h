@@ -150,7 +150,7 @@ typedef struct Alarm {
 typedef AlarmCheckResult (*CheckerFunc)(Alarm* alarm, AlarmAdditionalParam* additionalParam);
 
 /*common function to check*/
-extern void AlarmEnvInitialize(void);
+extern void AlarmEnvInitialize(bool enableLogHostname = false);
 
 extern void AlarmItemInitialize(Alarm* alarmItem, AlarmId alarmId, AlarmStat alarmStat, CheckerFunc checkerFunc,
     time_t reportTime = 0, int reportCount = 0);

@@ -58,7 +58,6 @@
 #include "utils/ps_status.h"
 #include "utils/resowner.h"
 #include "utils/snapmgr.h"
-
 #include "postmaster/rbcleaner.h"
 
 const int RBCLEANER_INTERVAL_QUICK_MS = 10;
@@ -231,7 +230,7 @@ void RbCltProcInterrupts(int rc, uint64 id)
         ereport(ERROR, (errmsg("rbcleaner not running")));
     }
 }
-static void RbCltWaitMsg(uint64 id, PurgeMsg *localMsg)
+static void RbCltWaitMsg(uint64 id, PurgeMsg *localMsg, bool *isNoResp)
 {
     PurgeMsg *rbMsg = RbMsg(id);
     uint32 totalTimes = 300;
@@ -258,6 +257,7 @@ static void RbCltWaitMsg(uint64 id, PurgeMsg *localMsg)
         /* Break if rbcleaner not response in a maximum of 300 seconds. */
         if (retryNums > totalTimes) {
             RbCltCancel(id);
+            *isNoResp = true;
             RbMsgSetStatusErrLocal(&localMsg->res, PURGE_MSG_STATUS_ERROR, 
                 ERRCODE_INTERNAL_ERROR, "wait response from rbcleaner timeout over 300 seconds");
             break;
@@ -266,7 +266,7 @@ static void RbCltWaitMsg(uint64 id, PurgeMsg *localMsg)
     }
 }
 
-static void RbCltExec(PurgeMsg *localMsg)
+static void RbCltExec(PurgeMsg *localMsg, bool *isNoResp)
 {
     int ntries;
     int maxtries = 10;
@@ -278,7 +278,7 @@ static void RbCltExec(PurgeMsg *localMsg)
         id = RbCltPushMsg(localMsg);
 
         /* 2. Wait until the purge message processed. */
-        RbCltWaitMsg(id, localMsg);
+        RbCltWaitMsg(id, localMsg, isNoResp);
 
         /* 3. Break if res not overrided. */
         if (localMsg->res.status != PURGE_MSG_STATUS_OVERRIDE) {
@@ -312,12 +312,16 @@ static void RbErrReport(PurgeMsgRes *res)
                 res->skippedNum, res->undefinedNum)));
 }
 
-static void RbCltDone(PurgeMsg *msg, bool isDML = false, bool *purged = NULL)
+static void RbCltDone(PurgeMsg *msg, bool isNoResp, bool isDML = false, bool *purged = NULL)
 {
-    if (RbResIsError(msg->res.errCode)) {
+    if (RbResIsError(msg->res.errCode) && !isNoResp) {
         RbErrReport(&msg->res);
+    } else if (isNoResp) {
+        ereport(INFO, (errmodule(MOD_TIMECAPSULE),
+            errmsg("wait response from rbcleaner timeout over 300 seconds, autopurge is still running")));
+        return;
     }
-
+ 
     /* non-DML purge cmds */
     if (!isDML) {
         if (msg->res.skippedNum > 0) {
@@ -344,14 +348,15 @@ bool RbCltPurgeSpaceDML(Oid spcId)
 
     PurgeMsg prMsg;
     bool purged = false;
+    bool isNoResp = false;
 
     if (TrRbIsEmptySpc(spcId)) {
         return false;
     }
 
     RbMsgInit(&prMsg, PURGE_MSG_TYPE_DML, spcId, u_sess->proc_cxt.MyDatabaseId);
-    RbCltExec(&prMsg);
-    RbCltDone(&prMsg, true, &purged);
+    RbCltExec(&prMsg, &isNoResp);
+    RbCltDone(&prMsg, isNoResp, true, &purged);
 
     return purged;
 }
@@ -375,14 +380,15 @@ void RbCltPurgeRecyclebin()
     }
 
     PurgeMsg prMsg;
+    bool isNoResp = false;
 
     if (TrRbIsEmptyDb(u_sess->proc_cxt.MyDatabaseId)) {
         return;
     }
 
     RbMsgInit(&prMsg, PURGE_MSG_TYPE_RECYCLEBIN, InvalidOid, u_sess->proc_cxt.MyDatabaseId);
-    RbCltExec(&prMsg);
-    RbCltDone(&prMsg);
+    RbCltExec(&prMsg, &isNoResp);
+    RbCltDone(&prMsg, isNoResp);
 }
 
 void RbCltPurgeSchema(Oid nspId)
@@ -428,12 +434,13 @@ ThreadId StartRbCleaner(void)
         return 0;
     }
 
-    if (canAcceptConnections(false) == CAC_OK) {
+    CAC_state result = canAcceptConnections(false);
+    if (result == CAC_OK) {
         return initialize_util_thread(RBCLEANER);
     }
 
     ereport(LOG,
-        (errmsg("not ready to start recyclebin cleaner.")));
+        (errmsg("not ready to start recyclebin cleaner, the canAcceptConnections result is %d.", result)));
     return 0;
 }
 
@@ -450,10 +457,13 @@ static bool RbWorkerIsAlive()
 
     /* Wait 5s until rbcleaner stopped. */
     for (ntries = 0;; ntries++) {
-        if (pg_atomic_read_u64(&workInfo->rbworkerPid) == 0) {
+        ThreadId rbworkerPid = pg_atomic_read_u64(&workInfo->rbworkerPid);
+        if (rbworkerPid == 0) {
             return false;
         }
         if (ntries >= maxtries) {
+            ereport(LOG, (errmodule(MOD_TIMECAPSULE),
+                errmsg("the old rbworker still exists in 5s, the rbworkerPid is %lu.", rbworkerPid)));
             return true;
         }
         /* wait 0.01 sec, then retry */
@@ -716,7 +726,8 @@ static void RbCleanerPurgeImpl(uint64 id)
         TimestampTz launchTime;
 
         if (RbWorkerIsAlive()) {
-            elog(ERROR, "start rbworker failed: rbworker already exists!");
+            ereport(ERROR, (errmodule(MOD_TIMECAPSULE),
+                errmsg("start rbworker failed: rbworker already exists!")));
         }
 
         workerInfo = RbInitWorkerInfo(id, (char *)lfirst(cell));
@@ -826,7 +837,7 @@ NON_EXEC_STATIC void RbCleanerMain()
     }
 
     SetProcessingMode(InitProcessing);
-
+    (void)gspqsignal(SIGURG, print_stack);
     (void)gspqsignal(SIGHUP, RbSighupHandler);
     (void)gspqsignal(SIGINT, RbSigintHandler); /* Cancel signal */
     (void)gspqsignal(SIGTERM, RbSigtermHander);
@@ -853,6 +864,12 @@ NON_EXEC_STATIC void RbCleanerMain()
 #endif
 
     on_proc_exit(RbCleanerQuitAndClean, 0);
+
+    /*
+     * Unblock signals (they were blocked when the postmaster forked us)
+     */
+    gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
+    (void)gs_signal_unblock_sigusr2();
 
     t_thrd.proc_cxt.PostInit->SetDatabaseAndUser((char*)pstrdup(DEFAULT_DATABASE), InvalidOid, NULL); 
     t_thrd.proc_cxt.PostInit->InitRbCleaner();
@@ -925,7 +942,7 @@ NON_EXEC_STATIC void RbCleanerMain()
     t_thrd.log_cxt.PG_exception_stack = &localSigjmpBuf;
 
     /*
-     * Unblock signals (they were blocked when the postmaster forked us)
+     * Unblock signals in case they were blocked during long jump.
      */
     gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
     (void)gs_signal_unblock_sigusr2();
@@ -1061,7 +1078,7 @@ NON_EXEC_STATIC void RbWorkerMain()
     ereport(DEBUG1, (errmsg("rbworker started")));
 
     SetProcessingMode(InitProcessing);
-
+    (void)gspqsignal(SIGURG, print_stack);
     (void)gspqsignal(SIGHUP,  SIG_IGN);
     (void)gspqsignal(SIGINT,  StatementCancelHandler);
     (void)gspqsignal(SIGTERM, die);
@@ -1088,6 +1105,12 @@ NON_EXEC_STATIC void RbWorkerMain()
 #endif
 
     on_proc_exit(RbWorkerQuitAndClean, 0);
+
+    /*
+     * Unblock signals (they were blocked when the postmaster forked us)
+     */
+    gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
+    (void)gs_signal_unblock_sigusr2();
 
     t_thrd.proc_cxt.PostInit->SetDatabaseAndUser((char*)pstrdup(NameStr(workInfo->dbName)), InvalidOid, NULL); 
     t_thrd.proc_cxt.PostInit->InitRbWorker();
@@ -1123,11 +1146,6 @@ NON_EXEC_STATIC void RbWorkerMain()
         /* Report the error to the server log */
         EmitErrorReport();
 
-        /* Report the error to rbcleaner */
-        RbMsgSetStatusErr(workInfo->id, PURGE_MSG_STATUS_STEPDONE, 
-            geterrcode(), Geterrmsg());
-        SetLatch(&t_thrd.rbcleaner_cxt.RbCleanerShmem->workerInfo.latch);
-
         /*
          * Abort the current transaction in order to recover.
          */
@@ -1135,6 +1153,11 @@ NON_EXEC_STATIC void RbWorkerMain()
 
         /* release resource held by lsc */
         AtEOXact_SysDBCache(false);
+
+        /* Report the error to rbcleaner */
+        RbMsgSetStatusErr(workInfo->id, PURGE_MSG_STATUS_STEPDONE, 
+            geterrcode(), Geterrmsg());
+        SetLatch(&t_thrd.rbcleaner_cxt.RbCleanerShmem->workerInfo.latch);
 
         LWLockReleaseAll();
 
@@ -1161,12 +1184,6 @@ NON_EXEC_STATIC void RbWorkerMain()
 
     /* We can now handle ereport(ERROR) */
     t_thrd.log_cxt.PG_exception_stack = &localSigjmpBuf;
-
-    /*
-     * Unblock signals (they were blocked when the postmaster forked us)
-     */
-    gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
-    (void)gs_signal_unblock_sigusr2();
 
     /* Set lockwait_timeout/update_lockwait_timeout to 30s avoid unexpected suspend. */
     SetConfigOption("lockwait_timeout", "30s", PGC_SUSET, PGC_S_OVERRIDE);

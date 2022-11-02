@@ -1177,7 +1177,6 @@ static void set_scan_hint(Path* new_path, HintState* hstate)
     switch (new_path->pathtype) {
         case T_SeqScan:
         case T_CStoreScan:
-        case T_DfsScan:
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
 #endif   /* ENABLE_MULTIPLE_NODES */
@@ -1438,6 +1437,19 @@ static void AddGatherPath(PlannerInfo* root, RelOptInfo* parentRel, Path* newPat
     return;
 }
 
+static void inline InitContainStreamContext(ContainStreamContext *context)
+{
+    context->outer_relids = NULL;
+    context->upper_params = NULL;
+    context->only_check_stream = false;
+    context->under_materialize_all = false;
+    context->has_stream = false;
+    context->has_parameterized_path = false;
+    context->has_cstore_index_delta = false;
+    context->upper_param_cross_stream = false;
+    context->under_stream = false;
+}
+
 static bool AddPathPreCheck(Path* newPath)
 {
     /*
@@ -1446,18 +1458,23 @@ static bool AddPathPreCheck(Path* newPath)
      */
     if (IS_STREAM_PLAN && (IsA(newPath, NestPath) || IsA(newPath, HashPath) ||
                             IsA(newPath, MergePath))) {
-        JoinPath* np = (JoinPath*)newPath;
-        bool invalid = false;
+        JoinPath *np = (JoinPath *)newPath;
         ContainStreamContext context;
+        InitContainStreamContext(&context);
 
-        context.outer_relids = np->outerjoinpath->parent->relids;
-        context.upper_params = NULL;
-        context.only_check_stream = false;
-        context.under_materialize_all = false;
-        context.has_stream = false;
-        context.has_parameterized_path = false;
-        context.has_cstore_index_delta = false;
+        /*
+         * Outer path may have parameters from upper query block.
+         * Thus we should check if there exists upper params under stream in outer path.
+         */
+        stream_path_walker(np->outerjoinpath, &context);
+        if (context.upper_param_cross_stream) {
+            return false;
+        }
 
+        bool invalid = false;
+
+        InitContainStreamContext(&context);
+        context.outer_relids = np->outerjoinpath->parent->relids; /* set outer_relids */
         stream_path_walker(np->innerjoinpath, &context);
 
         /*
@@ -1471,13 +1488,7 @@ static bool AddPathPreCheck(Path* newPath)
                 invalid = true;
             /* If inner is not material, materializeAll is not used, so skip outer check */
             else if (IsA(np->innerjoinpath, MaterialPath)) {
-                context.outer_relids = NULL;
-                context.only_check_stream = false;
-                context.under_materialize_all = false;
-                context.has_stream = false;
-                context.has_parameterized_path = false;
-                context.has_cstore_index_delta = false;
-
+                InitContainStreamContext(&context);
                 stream_path_walker(np->outerjoinpath, &context);
                 /* outer has stream */
                 if (context.has_stream || context.has_cstore_index_delta)
@@ -1985,16 +1996,12 @@ Path* create_cstorescan_path(PlannerInfo* root, RelOptInfo* rel, int dop)
     }
 #endif
 
-    pathnode->pathtype = (REL_COL_ORIENTED == rel->orientation) ? T_CStoreScan : T_DfsScan;
+    pathnode->pathtype = T_CStoreScan;
 
     RangeTblEntry* rte = planner_rt_fetch(rel->relid, root);
     if (NULL == rte->tablesample) {
         if (REL_COL_ORIENTED == rel->orientation) {
             cost_cstorescan(pathnode, root, rel);
-        } else {
-            /* PAX on hdfs. */
-            AssertEreport(REL_PAX_ORIENTED == rel->orientation, MOD_OPT_JOIN, "Rel should be PAX on hdfs");
-            cost_dfsscan(pathnode, root, rel);
         }
     } else {
         AssertEreport(rte->rtekind == RTE_RELATION, MOD_OPT_JOIN, "Rel should be base relation");
@@ -2560,19 +2567,6 @@ AppendPath* create_append_path(PlannerInfo* root, RelOptInfo* rel, List* subpath
 
     bool all_parallelized = true;
 
-    /*
-     * Handle the HDFS scan situation.
-     */
-    if (2 == list_length(subpaths)) {
-        Path* p1 = (Path*)linitial(subpaths);
-        Path* p2 = (Path*)lsecond(subpaths);
-        if (p1->pathtype == T_DfsScan && p2->pathtype == T_SeqScan) {
-            if (p1->dop > 1) {
-                all_parallelized = true;
-                p2->dop = p1->dop;
-            }
-        }
-    }
 
     /*
      * Check if all the subpaths already paralleled,
@@ -4429,6 +4423,7 @@ Path* reparameterize_path(PlannerInfo* root, Path* path, Relids required_outer, 
             errorno = memcpy_s(newpath, sizeof(PartIteratorPath), ppath, sizeof(PartIteratorPath));
             securec_check(errorno, "", "");
 
+            newpath->subPath = reparameterize_path(root, newpath->subPath, required_outer, loop_count);
             newpath->path.param_info = get_baserel_parampathinfo(root, rel, required_outer);
             return (Path *)newpath;
         }
@@ -4715,6 +4710,9 @@ bool find_ec_memeber_for_var(EquivalenceClass* ec, Node* key)
     if (ec == NULL || key == NULL)
         return false;
 
+    while (ec->ec_merged)
+        ec = ec->ec_merged;
+
     foreach (lc, ec->ec_members) {
         EquivalenceMember* em = (EquivalenceMember*)lfirst(lc);
         Expr* emexpr = NULL;
@@ -4899,6 +4897,118 @@ bool is_distribute_need_on_joinclauses(PlannerInfo* root, List* cur_distkeys, Li
     }
 
     return result;
+}
+
+static bool is_distkey_const_precheck(PlannerInfo* root,
+                                      const RelOptInfo* inner_rel,
+                                      const RelOptInfo* outer_rel,
+                                      JoinType jointype)
+{
+    List *innerDisKeys = inner_rel->distribute_keys;
+    List *outerDisKeys = outer_rel->distribute_keys;
+
+    if (innerDisKeys == NIL || outerDisKeys == NIL) {
+        return false;
+    }
+
+    if (jointype != JOIN_INNER) {
+        return false;
+    }
+
+    /* Unsupport feature if uder recursive cte */
+    if (root->is_under_recursive_cte) {
+        return false;
+    }
+
+    if (inner_rel->reloptkind != RELOPT_BASEREL ||
+        outer_rel->reloptkind != RELOPT_BASEREL) {
+        return false;
+    }
+
+    /* Not support multiple distribute keys */
+    if (list_length(innerDisKeys) != 1 || list_length(outerDisKeys) != 1) {
+        return false;
+    }
+
+    if (inner_rel->rtekind != RTE_RELATION || outer_rel->rtekind != RTE_RELATION) {
+        return false;
+    }
+
+    if (inner_rel->orientation != REL_ROW_ORIENTED ||
+		    outer_rel->orientation != REL_ROW_ORIENTED) {
+        return false;
+    }
+
+    return true;
+}
+
+/*
+ * Check const distribute key from one base-rel scan.
+ * Some tips:
+ * 1. Only support single distribute key now
+ * 2. Only support equvi const distkey on base RelOptInfo
+ * 3. Unsupport anything under CTE
+ * 4. Only Support REL_ROW_ORIENTED base table
+ */
+bool is_distribute_key_on_const(PlannerInfo* root,
+                                const RelOptInfo* inner_rel,
+                                const RelOptInfo* outer_rel,
+                                JoinType jointype)
+{
+    ListCell *lc1 = NULL;
+    ListCell *lc2 = NULL;
+
+    if (!is_distkey_const_precheck(root, inner_rel, outer_rel, jointype)) {
+        return false;
+    }
+
+    Node *innerDisKey = (Node *)linitial(inner_rel->distribute_keys);
+    Node *outerDisKey = (Node *)linitial(outer_rel->distribute_keys);
+
+    if (!IsA(innerDisKey, Var) || !IsA(outerDisKey, Var)) {
+        return false;
+    }
+
+    foreach(lc1, root->eq_classes) {
+        EquivalenceClass* cur_ec = (EquivalenceClass*)lfirst(lc1);
+        bool outer_match = false;
+        bool inner_match = false;
+
+        /* Ignore EC unless it contains pseudoconstants */
+        if (!cur_ec->ec_has_const)
+            continue;
+
+        /* Never match to a volatile EC */
+        if (cur_ec->ec_has_volatile)
+            continue;
+
+        /* Does it contain a match to innerDisKey? */
+        foreach (lc2, cur_ec->ec_members) {
+            EquivalenceMember* cur_em = (EquivalenceMember*)lfirst(lc2);
+
+            if (equal(innerDisKey, cur_em->em_expr)) {
+                inner_match = true;
+                break;
+            }
+        }
+
+        /* Does it contain a match to outerDisKey? */
+        foreach (lc2, cur_ec->ec_members) {
+            EquivalenceMember* cur_em = (EquivalenceMember*)lfirst(lc2);
+
+            if (equal(outerDisKey, cur_em->em_expr)) {
+                outer_match = true;
+                break;
+            }
+        }
+
+        /* Return true if inner and outer distkey both match in same eq_classe */
+        if (inner_match && outer_match) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 /*

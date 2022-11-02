@@ -531,7 +531,7 @@ Relation heap_create(const char* relname, Oid relnamespace, Oid reltablespace, O
      */
     if (!allow_system_table_mods && 
         (IsSystemNamespace(relnamespace) || IsToastNamespace(relnamespace) || IsCStoreNamespace(relnamespace) || 
-        IsPackageSchemaOid(relnamespace)) && IsNormalProcessingMode()) {
+        IsPackageSchemaOid(relnamespace) || IsPldeveloper(relnamespace)) && IsNormalProcessingMode()) {
         ereport(ERROR,
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                 errmsg("permission denied to create \"%s.%s\"", get_namespace_name(relnamespace), relname),
@@ -3650,6 +3650,9 @@ void StoreAttrDefault(Relation rel, AttrNumber attnum, Node* expr, char generate
     values[Anum_pg_attrdef_adsrc - 1] = CStringGetTextDatum(adsrc);
     if (t_thrd.proc->workingVersionNum >= GENERATED_COL_VERSION_NUM) {
         values[Anum_pg_attrdef_adgencol - 1] = CharGetDatum(generatedCol);
+    } else {
+        /* set to default value \0 */
+        values[Anum_pg_attrdef_adgencol - 1] = CharGetDatum(0);
     }
 
     adrel = heap_open(AttrDefaultRelationId, RowExclusiveLock);
@@ -5071,13 +5074,7 @@ void addNewPartitionTuple(Relation pg_part_desc, Partition new_part_desc, int2ve
      * We know that no xacts older than RecentXmin are still running, so
      * that will do.
      */
-    if (new_part_tup->parttype == PART_OBJ_TYPE_PARTED_TABLE) {
-        new_part_tup->relfrozenxid = (ShortTransactionId)InvalidTransactionId;
-    } else {
-        Assert(new_part_tup->parttype == PART_OBJ_TYPE_TABLE_PARTITION ||
-               new_part_tup->parttype == PART_OBJ_TYPE_TABLE_SUB_PARTITION);
-        new_part_tup->relfrozenxid = (ShortTransactionId)u_sess->utils_cxt.RecentXmin;
-    }
+    new_part_tup->relfrozenxid = (ShortTransactionId)InvalidTransactionId;
 
     /* Now build and insert the tuple */
     insertPartitionEntry(pg_part_desc,
@@ -7626,6 +7623,25 @@ bool* CheckPartkeyHasTimestampwithzone(Relation partTableRel, bool isForSubParti
 
     relation_close(pgPartRel, AccessShareLock);
     return isTimestamptz;
+}
+
+bool *CheckSubPartkeyHasTimestampwithzone(Relation partTableRel, List *subpartKeyPosList)
+{
+    Assert(RelationIsSubPartitioned(partTableRel));
+
+    int subPartKeyNum = list_length(subpartKeyPosList);
+    bool *isTimestamptzForSubPartKey = (bool *)palloc0(sizeof(bool) * subPartKeyNum);
+    ListCell *subpartKeyCell = NULL;
+    int partKeyIdx = 0;
+    foreach (subpartKeyCell, subpartKeyPosList) {
+        int pos = lfirst_int(subpartKeyCell);
+        if ((RelationGetDescr(partTableRel))->attrs[pos]->atttypid == TIMESTAMPTZOID) {
+            isTimestamptzForSubPartKey[partKeyIdx] = true;
+        }
+        partKeyIdx++;
+    }
+
+    return isTimestamptzForSubPartKey;
 }
 
 /*

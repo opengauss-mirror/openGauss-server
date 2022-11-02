@@ -598,7 +598,7 @@ NON_EXEC_STATIC void FaultMonitorMain()
     t_thrd.proc_cxt.MyProcPid = gs_thread_self();
 
     ereport(DEBUG5, (errmsg("lwlockmonitor process is started: %lu", t_thrd.proc_cxt.MyProcPid)));
-
+    (void)gspqsignal(SIGURG, print_stack);
     (void)gspqsignal(SIGHUP, LWLockMonitorSigHupHandler);    /* set flag to read config file */
     (void)gspqsignal(SIGINT, LWLockMonitorShutdownHandler);  /* request shutdown */
     (void)gspqsignal(SIGTERM, LWLockMonitorShutdownHandler); /* request shutdown */

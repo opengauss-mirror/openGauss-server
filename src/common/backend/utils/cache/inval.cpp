@@ -98,6 +98,8 @@
 
 #include "access/xact.h"
 #include "catalog/catalog.h"
+#include "catalog/pg_attrdef.h"
+#include "catalog/pg_constraint.h"
 #include "catalog/pg_proc.h"
 #include "commands/prepare.h"
 #include "postmaster/postmaster.h"
@@ -872,6 +874,9 @@ static void TestCodeToForceCacheFlushes()
  */
 void AcceptInvalidationMessages()
 {
+    if (!DeepthInAcceptInvalidationMessageNotZero()) {
+        t_thrd.rc_cxt.rcNum = 0;
+    }
     if (EnableLocalSysCache()) {
         u_sess->pcache_cxt.gpc_remote_msg = true;
         knl_u_inval_context *inval_cxt = &t_thrd.lsc_cxt.lsc->inval_cxt;
@@ -1339,6 +1344,18 @@ void CacheInvalidateHeapTuple(Relation relation, HeapTuple tuple, HeapTuple newt
          */
         relationId = pgxcclasstup->pcrelid;
         databaseId = u_sess->proc_cxt.MyDatabaseId;
+    } else if (tupleRelId == AttrDefaultRelationId) {
+        Form_pg_attrdef pgattrdeftup = (Form_pg_attrdef)GETSTRUCT(tuple);
+        relationId = pgattrdeftup->adrelid;
+        databaseId = u_sess->proc_cxt.MyDatabaseId;
+    }  else if (tupleRelId == ConstraintRelationId) {
+        Form_pg_constraint constrtup = (Form_pg_constraint)GETSTRUCT(tuple);
+        if (constrtup->contype == CONSTRAINT_FOREIGN && OidIsValid(constrtup->conrelid)) {
+            relationId = constrtup->conrelid;
+            databaseId = u_sess->proc_cxt.MyDatabaseId;
+        } else {
+            return;
+        }
     } else {
         return;
     }

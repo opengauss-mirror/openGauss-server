@@ -29,6 +29,7 @@
 
 PGconn* conn = NULL;
 char source_slot_name[NAMEDATALEN] = {0};
+char log_directory[MAXPGPATH] = {0};
 
 /*
  * Files are fetched max CHUNKSIZE bytes at a time.
@@ -53,6 +54,7 @@ static char* run_simple_query(const char* sql);
 static BuildErrorCode recurse_dir(const char* datadir, const char* path, process_file_callback_t callback);
 static void get_slot_name_by_app_name(void);
 static BuildErrorCode CheckResultSet(PGresult* pgResult);
+static void get_log_directory_guc(void);
 BuildErrorCode libpqConnect(const char* connstr)
 {
     PGresult* res = NULL;
@@ -931,6 +933,7 @@ static BuildErrorCode execute_pagemap(file_entry_t* entry, FILE* file)
  */
 BuildErrorCode traverse_datadir(const char* datadir, process_file_callback_t callback)
 {
+    get_log_directory_guc();
     recurse_dir(datadir, NULL, callback);
     PG_CHECKBUILD_AND_RETURN();
     return BUILD_SUCCESS;
@@ -971,6 +974,11 @@ static BuildErrorCode recurse_dir(const char* datadir, const char* parentpath, p
         /* Skip compressed page files */
         size_t dirNamePath = strlen(xlde->d_name);
         if (PageCompression::SkipCompressedFile(xlde->d_name, dirNamePath)) {
+            continue;
+        }
+
+        if (strcmp(xlde->d_name, log_directory) == 0) {
+            pg_log(PG_WARNING, "skip log directory %s during fetch target file list\n", xlde->d_name);
             continue;
         }
 
@@ -1181,6 +1189,64 @@ static void get_slot_name_by_app_name(void)
     }
     return;
 }
+
+/*
+ * get log_directory guc specified in postgresql.conf
+ */
+static void get_log_directory_guc(void)
+{
+    const char** optlines = NULL;
+    int lines_index = 0;
+    int optvalue_off;
+    int optvalue_len;
+    const char* config_para_build = "log_directory";
+    int rc = 0;
+    char conf_path[MAXPGPATH] = {0};
+    char* trim_name = NULL;
+
+    rc = snprintf_s(conf_path, MAXPGPATH, MAXPGPATH - 1, "%s/%s", datadir_target, "postgresql.conf");
+    securec_check_ss_c(rc, "\0", "\0");
+
+    if ((optlines = (const char**)readfile(conf_path)) != NULL) {
+        lines_index = find_gucoption(optlines, config_para_build, NULL, NULL, &optvalue_off, &optvalue_len, '\'');
+
+        if (lines_index != INVALID_LINES_IDX) {
+            rc = strncpy_s(log_directory, MAXPGPATH,
+                optlines[lines_index] + optvalue_off, (size_t)Min(optvalue_len, MAX_VALUE_LEN - 1));
+            securec_check_c(rc, "", "");
+        } else {
+            /* default log directory is pg_log under datadir */
+            rc = strcpy_s(log_directory, MAXPGPATH, "pg_log");
+            securec_check_c(rc, "", "");
+        }
+
+        /* first free one-dimensional array memory in case memory leak */
+        int i = 0;
+        while (optlines[i] != NULL) {
+            free(const_cast<char *>(optlines[i]));
+            optlines[i] = NULL;
+            i++;
+        }
+        free(optlines);
+        optlines = NULL;
+    } else {
+        write_stderr(_("%s cannot be opened.\n"), conf_path);
+        return;
+    }
+
+    trim_name = trim_str(log_directory, MAXPGPATH, '\'');
+    if (trim_name != NULL) {
+        rc = snprintf_s(log_directory, MAXPGPATH, MAXPGPATH - 1, "%s", trim_name);
+        securec_check_ss_c(rc, "", "");
+        free(trim_name);
+        trim_name = NULL;
+    }
+
+    pg_log(PG_WARNING, "Get log directory guc is %s\n", log_directory);
+
+    return;
+}
+
 
 /*
  * Check if source DN primary is connected to dummy standby.

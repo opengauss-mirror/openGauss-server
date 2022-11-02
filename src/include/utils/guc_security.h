@@ -14,5 +14,6 @@
 #define GUC_SECURIT_H
 
 extern void InitSecurityConfigureNames();
+extern const int MAX_PASSWORD_LENGTH;
 
 #endif /* GUC_SECURIT_H */

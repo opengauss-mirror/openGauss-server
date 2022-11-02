@@ -271,6 +271,7 @@ CmkemErrCode decrypt_with_sm2_privkey(CmkemUStr *cipher, CmkemUStr *priv_key, Cm
         return CMKEM_MALLOC_MEM_ERR;
     }
 
+    (void)EVP_PKEY_decrypt(ctx, NULL, &((*plain)->ustr_len), cipher->ustr_val, cipher->ustr_len);
     ret = EVP_PKEY_decrypt(ctx, (*plain)->ustr_val, &((*plain)->ustr_len), cipher->ustr_val, cipher->ustr_len);
     EVP_PKEY_CTX_free(ctx);
     if (ret < 0) {

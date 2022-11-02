@@ -399,6 +399,13 @@ static void BuildListPartitionMap(Relation relation, Form_pg_partition partition
     Relation pg_partition, List* partition_list);
 ValuePartitionMap* buildValuePartitionMap(Relation relation, Relation pg_partition, HeapTuple partitioned_tuple);
 
+static bool EqualRangePartitonMap(const RangePartitionMap* partMap1, const RangePartitionMap* partMap2);
+static bool EqualRangeElement(const RangeElement element1, const RangeElement element2);
+static bool EqualListPartitonMap(const ListPartitionMap* partMap1, const ListPartitionMap* partMap2);
+static bool EqualListPartElement(const ListPartElement element1, const ListPartElement element2);
+static bool EqualHashPartitonMap(const HashPartitionMap* partMap1, const HashPartitionMap* partMap2);
+static bool EqualHashPartElement(const HashPartElement element1, const HashPartElement element2);
+
 /*
  * @@GaussDB@@
  * Brief		:
@@ -941,6 +948,199 @@ void RebuildPartitonMap(PartitionMap* oldMap, PartitionMap* newMap)
     }
 }
 
+bool EqualPartitonMap(const PartitionMap* partMap1, const PartitionMap* partMap2)
+{
+    if (partMap1 == NULL && partMap2 == NULL) {
+        return true;
+    }
+    if (partMap1 == NULL || partMap2 == NULL) {
+        return false;
+    }
+    if (partMap1->type != partMap2->type) {
+        return false;
+    }
+
+    if (PartitionMapIsList(partMap1)) {
+        return EqualListPartitonMap((ListPartitionMap*)partMap1, (ListPartitionMap*)partMap2);
+    } else if (PartitionMapIsHash(partMap1)) {
+        return EqualHashPartitonMap((HashPartitionMap*)partMap1, (HashPartitionMap*)partMap2);
+    } else {
+        return EqualRangePartitonMap((RangePartitionMap*)partMap1, (RangePartitionMap*)partMap2);
+    }
+}
+
+static bool EqualRangePartitonMap(const RangePartitionMap* partMap1, const RangePartitionMap* partMap2)
+{
+    Assert(partMap1->type.type == partMap2->type.type);
+    int i;
+
+    /* check for relid */
+    if (partMap1->relid != partMap2->relid) {
+        return false;
+    }
+
+    /* check for partition key */
+    if (!DatumGetBool(DirectFunctionCall2(int2vectoreq, PointerGetDatum(partMap1->partitionKey),
+        PointerGetDatum(partMap2->partitionKey)))) {
+        return false;
+    }
+    for (i = 0; i < partMap1->partitionKey->dim1; i++) {
+        if (partMap1->partitionKeyDataType[i] != partMap2->partitionKeyDataType[i]) {
+            return false;
+        }
+    }
+
+    /* check for each partition */
+    if (partMap1->rangeElementsNum != partMap2->rangeElementsNum) {
+        return false;
+    }
+    for (i = 0; i < partMap1->rangeElementsNum; i++) {
+        if (!EqualRangeElement(partMap1->rangeElements[i], partMap2->rangeElements[i])) {
+            return false;
+        }
+    }
+
+    /* check for interval */
+    if (PartitionMapIsInterval(partMap1)) {
+        if (!DatumGetBool(DirectFunctionCall2(interval_eq, PointerGetDatum(partMap1->intervalValue),
+            PointerGetDatum(partMap2->intervalValue)))) {
+            return false;
+        }
+
+        if (partMap1->intervalTablespace == NULL && partMap2->intervalTablespace == NULL) {
+            return true;
+        }
+        if (partMap1->intervalTablespace == NULL || partMap2->intervalTablespace == NULL) {
+            return false;
+        }
+        if (!DatumGetBool(
+            DirectFunctionCall2(oidvectoreq, PointerGetDatum(partMap1->intervalTablespace),
+                PointerGetDatum(partMap2->intervalTablespace)))) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static bool EqualRangeElement(const RangeElement element1, const RangeElement element2)
+{
+    if (element1.partitionOid != element2.partitionOid) {
+        return false;
+    }
+    if (element1.len != element2.len) {
+        return false;
+    }
+    for (int i = 0; i < element1.len; i++) {
+        if (!equal(element1.boundary[i], element2.boundary[i])) {
+            return false;
+        }
+    }
+    if (element1.isInterval != element2.isInterval) {
+        return false;
+    }
+
+    return true;
+}
+
+static bool EqualListPartitonMap(const ListPartitionMap* partMap1, const ListPartitionMap* partMap2)
+{
+    Assert(partMap1->type.type == partMap2->type.type);
+    int i;
+
+    /* check for relid */
+    if (partMap1->relid != partMap2->relid) {
+        return false;
+    }
+
+    /* check for partition key */
+    if (!DatumGetBool(DirectFunctionCall2(int2vectoreq, PointerGetDatum(partMap1->partitionKey),
+        PointerGetDatum(partMap2->partitionKey)))) {
+        return false;
+    }
+    for (i = 0; i < partMap1->partitionKey->dim1; i++) {
+        if (partMap1->partitionKeyDataType[i] != partMap2->partitionKeyDataType[i]) {
+            return false;
+        }
+    }
+
+    /* check for each partition */
+    if (partMap1->listElementsNum != partMap2->listElementsNum) {
+        return false;
+    }
+    for (i = 0; i < partMap1->listElementsNum; i++) {
+        if (!EqualListPartElement(partMap1->listElements[i], partMap2->listElements[i])) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static bool EqualListPartElement(const ListPartElement element1, const ListPartElement element2)
+{
+    if (element1.partitionOid != element2.partitionOid) {
+        return false;
+    }
+    if (element1.len != element2.len) {
+        return false;
+    }
+    for (int i = 0; i < element1.len; i++) {
+        if (!equal(element1.boundary[i], element2.boundary[i])) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static bool EqualHashPartitonMap(const HashPartitionMap* partMap1, const HashPartitionMap* partMap2)
+{
+    Assert(partMap1->type.type == partMap2->type.type);
+    int i;
+
+    /* check for relid */
+    if (partMap1->relid != partMap2->relid) {
+        return false;
+    }
+
+    /* check for partition key */
+    if (!DatumGetBool(DirectFunctionCall2(int2vectoreq, PointerGetDatum(partMap1->partitionKey),
+        PointerGetDatum(partMap2->partitionKey)))) {
+        return false;
+    }
+    for (i = 0; i < partMap1->partitionKey->dim1; i++) {
+        if (partMap1->partitionKeyDataType[i] != partMap2->partitionKeyDataType[i]) {
+            return false;
+        }
+    }
+
+    /* check for each partition */
+    if (partMap1->hashElementsNum != partMap2->hashElementsNum) {
+        return false;
+    }
+    for (i = 0; i < partMap1->hashElementsNum; i++) {
+        if (!EqualHashPartElement(partMap1->hashElements[i], partMap2->hashElements[i])) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static bool EqualHashPartElement(const HashPartElement element1, const HashPartElement element2)
+{
+    if (element1.partitionOid != element2.partitionOid) {
+        return false;
+    }
+
+    if (!equal(element1.boundary[0], element2.boundary[0])) {
+        return false;
+    }
+
+    return true;
+}
+
 #define PARTITIONMAP_SWAPFIELD(fieldType, fieldName) \
     do {                                             \
         fieldType _temp = oldMap->fieldName;         \
@@ -1110,11 +1310,9 @@ void PartitionMapDestroyHashArray(HashPartElement* hashArray, int arrLen)
     pfree_ext(hashArray);
 }
 
-void RelationDestroyPartitionMap(PartitionMap* partMap)
+void DestroyPartitionMap(PartitionMap* partMap)
 {
-    /* already a non-partitioned relation, just return */
-    if (!partMap)
-        return;
+    Assert(PointerIsValid(partMap));
 
     /* partitioned relation, destroy the partition map */
     if (partMap->type == PART_TYPE_RANGE || partMap->type == PART_TYPE_INTERVAL) {
@@ -1370,6 +1568,8 @@ static void BuildListPartitionMap(Relation relation, Form_pg_partition partition
 
         list_itr++;
     }
+
+    qsort(list_eles, list_map->listElementsNum, sizeof(ListPartElement), ListElementCmp);
 
     /* list element array back in RangePartitionMap */
     old_context = MemoryContextSwitchTo(LocalMyDBCacheMemCxt());
@@ -1937,7 +2137,7 @@ Oid getHashPartitionOid(PartitionMap* partMap, Const** partKeyValue, int32* part
     return result;
 }
 
-Oid GetPartitionOidByParam(Relation relation, Param *paramArg, ParamExternData *prm)
+Oid GetPartitionOidByParam(PartitionMap* partitionmap, Param *paramArg, ParamExternData *prm)
 {
     int16 typLen;
     bool typByVal = false;
@@ -1947,7 +2147,7 @@ Oid GetPartitionOidByParam(Relation relation, Param *paramArg, ParamExternData *
     Const *value = makeConst(paramArg->paramtype, paramArg->paramtypmod, paramArg->paramcollid,
                              (int)typLen, prm->value, prm->isnull, typByVal);
 
-    return getRangePartitionOid(relation->partMap, &value, NULL, true);
+    return getRangePartitionOid(partitionmap, &value, NULL, true);
 }
 
 static Const* CalcLowBoundary(const Const* upBoundary, Interval* intervalValue)
@@ -1976,6 +2176,15 @@ static Const* CalcLowBoundary(const Const* upBoundary, Interval* intervalValue)
 void getFakeReationForPartitionOid(HTAB **fakeRels, MemoryContext cxt, Relation rel, Oid partOid,
                                    Relation *fakeRelation, Partition *partition, LOCKMODE lmode)
 {
+    if (!OidIsValid(partOid)) {
+        ereport(ERROR, (errcode(ERRCODE_RELATION_OPEN_ERROR), errmsg("could not open partition with OID %u", partOid),
+            errdetail("Check whether DDL operations exist on the current partition in the table %s, like "
+            "drop/exchange/split/merge partition",
+            RelationGetRelationName(rel)),
+            errcause("If there is a DDL operation, the cause is incorrect operation. Otherwise, it is a system error."),
+            erraction("Wait for DDL operation to complete or Contact engineer to support.")));
+    }
+
     PartRelIdCacheKey _key = {partOid, -1};
     Relation partParentRel = rel;
     if (PointerIsValid(*partition)) {
@@ -2371,6 +2580,15 @@ int rangeElementCmp(const void* a, const void* b)
     return partitonKeyCompare((Const**)rea->boundary, (Const**)reb->boundary, rea->len);
 }
 
+int ListElementCmp(const void* a, const void* b)
+{
+    const ListPartElement* rea = (const ListPartElement*)a;
+    const ListPartElement* reb = (const ListPartElement*)b;
+
+    /* just compare the first boundary */
+    return partitonKeyCompare((Const**)rea->boundary, (Const**)reb->boundary, 1);
+}
+
 int HashElementCmp(const void* a, const void* b)
 {
     const HashPartElement* rea = (const HashPartElement*)a;
@@ -2516,4 +2734,109 @@ Oid GetNeedDegradToRangePartOid(Relation rel, Oid partOid)
     /* It must never happened. */
     ereport(ERROR, (errcode(ERRCODE_CASE_NOT_FOUND), errmsg("Not find the target partiton %u", partOid)));
     return InvalidOid;
+}
+
+bool trySearchFakeReationForPartitionOid(HTAB** fakeRels, MemoryContext cxt, Relation rel, Oid partOid,
+    Relation* fakeRelation, Partition* partition, LOCKMODE lmode, bool checkSubPart)
+{
+    PartRelIdCacheKey _key = {partOid, -1};
+    Relation partParentRel = rel;
+    Relation partRelForSubPart = NULL;
+    if (PointerIsValid(*partition)) {
+        return false;
+    }
+    if (checkSubPart && RelationIsSubPartitioned(rel) && !RelationIsIndex(rel)) {
+        Oid parentOid = partid_get_parentid(partOid);
+        if (!OidIsValid(parentOid)) {
+            ereport(ERROR,
+                (errcode(ERRCODE_RELATION_OPEN_ERROR),
+                errmsg("partition %u does not exist", partOid),
+                errdetail("this partition may have already been dropped")));
+        }
+        if (parentOid != rel->rd_id) {
+            Partition partForSubPart = NULL;
+            bool res = trySearchFakeReationForPartitionOid(fakeRels, cxt, rel, parentOid, &partRelForSubPart,
+                                                           &partForSubPart, lmode, false);
+            if (!res) {
+                return false;
+            }
+            partParentRel = partRelForSubPart;
+        }
+    }
+    if (RelationIsNonpartitioned(partParentRel)) {
+        *fakeRelation = NULL;
+        *partition = NULL;
+        return false;
+    }
+    if (PointerIsValid(*fakeRels)) {
+        FakeRelationIdCacheLookup((*fakeRels), _key, *fakeRelation, *partition);
+        if (!RelationIsValid(*fakeRelation)) {
+            *partition = tryPartitionOpen(partParentRel, partOid, lmode);
+            if (*partition == NULL) {
+                PartStatus currStatus = PartitionGetMetadataStatus(partOid, false);
+                if (currStatus != PART_METADATA_INVISIBLE) {
+                    ReportPartitionOpenError(partParentRel, partOid);
+                }
+                return false;
+            }
+            *fakeRelation = partitionGetRelation(partParentRel, *partition);
+            FakeRelationCacheInsert((*fakeRels), (*fakeRelation), (*partition), -1);
+        }
+    } else {
+        HASHCTL ctl;
+        errno_t errorno = EOK;
+        errorno = memset_s(&ctl, sizeof(ctl), 0, sizeof(ctl));
+        securec_check_c(errorno, "\0", "\0");
+        ctl.keysize = sizeof(PartRelIdCacheKey);
+        ctl.entrysize = sizeof(PartRelIdCacheEnt);
+        ctl.hash = tag_hash;
+        ctl.hcxt = cxt;
+        *fakeRels = hash_create("fakeRelationCache by OID", FAKERELATIONCACHESIZE, &ctl,
+                                HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
+        *partition = tryPartitionOpen(partParentRel, partOid, lmode);
+        if (*partition == NULL) {
+            PartStatus currStatus = PartitionGetMetadataStatus(partOid, false);
+            if (currStatus != PART_METADATA_INVISIBLE) {
+                ReportPartitionOpenError(partParentRel, partOid);
+            }
+            return false;
+        }
+        *fakeRelation = partitionGetRelation(partParentRel, *partition);
+        FakeRelationCacheInsert((*fakeRels), (*fakeRelation), (*partition), -1);
+    }
+
+    return true;
+}
+
+/* Transform the Const value into the target type of partkey column, do nothing if the type is same.
+ * If the type is not same as partkey column, it may result in a wrong hash value. For example, hash('123 '::varchar) is
+ * different with hash('123'::char) */
+Const **transformConstIntoPartkeyType(Form_pg_attribute *attrs, int2vector *partitionKey, Const **boundary, int len)
+{
+    if (unlikely(partitionKey->dim1 != len)) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("number of boundary items NOT EQUAL to number of partition keys")));
+    }
+
+    int2 partKeyPos = 0;
+    Const *newBoundary = NULL;
+    for (int i = 0; i < len; i++) {
+        partKeyPos = partitionKey->values[i];
+
+        if (likely(attrs[partKeyPos - 1]->atttypid == boundary[i]->consttype) || boundary[i]->ismaxvalue) {
+            continue;
+        }
+
+        newBoundary = (Const *)GetTargetValue(attrs[partKeyPos - 1], boundary[i], false);
+        if (!PointerIsValid(newBoundary)) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION),
+                errmsg("partition key value must be const or const-evaluable expression")));
+        }
+        if (!OidIsValid(newBoundary->constcollid) && OidIsValid(attrs[partKeyPos - 1]->attcollation)) {
+            newBoundary->constcollid = attrs[partKeyPos - 1]->attcollation;
+        }
+        boundary[i] = newBoundary;
+    }
+
+    return boundary;
 }

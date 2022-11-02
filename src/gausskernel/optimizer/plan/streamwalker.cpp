@@ -23,6 +23,7 @@
 #include "optimizer/streamplan.h"
 #include "utils/lsyscache.h"
 #include "parser/parsetree.h"
+#include "parser/parse_merge.h"
 #include "utils/syscache.h"
 #include "pgxc/locator.h"
 
@@ -258,6 +259,13 @@ static void stream_walker_query_merge(Query* query, shipping_context *cxt)
                     cxt->current_shippable = false;
                 }
             }
+#ifndef ENABLE_MULTIPLE_NODES
+            /* if insert or update has subquery, do not use smp */
+            if (contain_subquery_walker((Node*)mc, NULL)) {
+                cxt->current_shippable = false;
+                break;
+            }
+#endif
         }
     }
 }
@@ -361,7 +369,8 @@ static void stream_walker_query_jointree(Query* query, shipping_context *cxt)
         expression_tree_walker((Node*)query->jointree->fromlist, (bool (*)())stream_walker, (void *)cxt)) {
         cxt->current_shippable = false;
     }
-    if (query->jointree != NULL && stream_walker((Node*)query->jointree->quals, (void *)cxt)) {
+    if (query->jointree != NULL &&
+        contain_unsupport_expression((Node*)query->jointree->quals, (void *)cxt)) {
         cxt->current_shippable = false;
     }
 }
@@ -901,6 +910,18 @@ static bool contain_unsupport_expression(Node* expr, void* context)
                 }
             }
         } break;
+        case T_OpExpr: {
+            OpExpr* op = (OpExpr*)expr;
+            if (contain_unsupport_expression((Node*)op->args, context)) {
+                cxt->current_shippable = false;
+            }
+        } break;
+        case T_BoolExpr: {
+            BoolExpr* be = (BoolExpr*)expr;
+            if (contain_unsupport_expression((Node*)be->args, context)) {
+                cxt->current_shippable = false;
+            }
+        } break;
         case T_FuncExpr: {
             FuncExpr* func = (FuncExpr*)expr;
             if (pgxc_is_shippable_func_contain_any(func->funcid)) {
@@ -928,7 +949,14 @@ static bool contain_unsupport_expression(Node* expr, void* context)
                 }
             }
         } break;
-
+        case T_Rownum: {
+            sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
+                NOTPLANSHIPPING_LENGTH,
+                "Rownum can not be shipped.");
+            securec_check_ss_c(sprintf_rc, "\0", "\0");
+            cxt->current_shippable = false;
+            break;
+        }
         default:
             /* Record return type is not stream supported */
             if (exprType(expr) == RECORDOID) {

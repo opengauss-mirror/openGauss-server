@@ -43,6 +43,8 @@
 
 extern void mc_tcp_set_keepalive_param(int idle, int intvl, int count);
 
+extern void mc_tcp_set_user_timeout(int timeout);
+
 extern void mc_tcp_set_timeout_param(int conn_timeout, int send_timeout);
 
 extern int mc_tcp_get_connect_timeout();

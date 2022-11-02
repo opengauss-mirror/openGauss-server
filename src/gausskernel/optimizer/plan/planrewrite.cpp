@@ -649,8 +649,8 @@ static bool IsConvertableBaseRel(const RangeTblEntry* rte)
                 errmsg("could not open relation with OID %u", relId)));
     }
 
-    /* Disallow HDFS table case and Foreign table case */
-    if (RelationIsDfsStore(rel) || RelationIsForeignTable(rel) || RelationIsStream(rel)) {
+    /* Disallow Foreign table case */
+    if (RelationIsForeignTable(rel) || RelationIsStream(rel)) {
         convertable = false;
     }
 
@@ -1346,7 +1346,7 @@ static void rebuild_subquery(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* 
             param->paramtypmod = -1;
             param->paramcollid = listvar->varcollid;
             param->location = -1;
-            param->tableOfIndexType = InvalidOid;
+            param->tableOfIndexTypeList = NULL;
             args_in_opexpr = lappend(args_in_opexpr, param);
 
             OpExpr* opexpr = makeNode(OpExpr);

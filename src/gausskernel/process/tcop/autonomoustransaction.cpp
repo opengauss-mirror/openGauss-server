@@ -103,9 +103,14 @@ void AutonomousSession::AttachSession(void)
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_DATABASE), errmsg("database with OID %u does not exist",
                                                                     u_sess->proc_cxt.MyDatabaseId)));
     }
-
+    /*
+     * It shares a connection timeout interval with gsql CONNECT_TIMEOUT.
+     * You can also define a connection timeout interval,
+     * but this timeout interval is meaningless.
+     */
     errno_t ret = snprintf_s(connInfo, sizeof(connInfo), sizeof(connInfo) - 1,
-                             "dbname=%s port=%d host='localhost' application_name='autonomoustransaction' user=%s",
+                             "dbname=%s port=%d host='localhost' application_name='autonomoustransaction' user=%s "
+                             "connect_timeout=600",
                              dbName, g_instance.attr.attr_network.PostPortNumber,
                              (char*)GetSuperUserName((char*)userName));
     securec_check_ss_c(ret, "\0", "\0");
@@ -233,7 +238,8 @@ void CreateAutonomousSession(void)
         u_sess->SPI_cxt.autonomous_session->Init();
         u_sess->SPI_cxt.autonomous_session->AttachSession();
         u_sess->SPI_cxt.autonomous_session->ExecSimpleQuery("set session_timeout = 0;", NULL, 0);
-        ATResult res = u_sess->SPI_cxt.autonomous_session->ExecSimpleQuery("select pg_current_sessid();", NULL, 0);
+        ATResult res = u_sess->SPI_cxt.autonomous_session->ExecSimpleQuery("select \
+            pg_catalog.pg_current_sessid();", NULL, 0);
         u_sess->SPI_cxt.autonomous_session->current_attach_sessionid = res.ResTup;
     } else {
         if (!u_sess->SPI_cxt.autonomous_session->GetConnStatus() 

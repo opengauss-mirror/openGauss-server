@@ -68,7 +68,7 @@ function set_paxos_config()
 function turn_paxos()
 {
     gs_guc set -Z datanode -D $primary_data_dir -c "enable_dcf = "$1
-    
+
     for((i=1; i<=$node_num; i++))
     do
         datanode_dir=$data_dir/datanode$i
@@ -145,29 +145,8 @@ function check_old_primary_dir()
     do
         gs_ctl query -D ${nodes[$i]} | grep -o -E "Primary"
         if [ $? -eq 0 ];then
-	   if [ $i == 0 ];then
-		current_primary=$primary_data_dir
-		break
-	   fi
-	   if [ $i == 1 ];then
-		current_primary=$standby_data_dir
-		break
-           fi
-	   
-	   if [ $i == 2 ];then
-		current_primary=$standby2_data_dir
-		break
-	   fi 
-	
-	   if [ $i == 3 ];then
-		current_primary=$standby3_data_dir
-		break
-	   fi
-	  
-           if [ $i == 4 ];then
-                current_primary=$standby4_data_dir
-                break
-           fi 
+            current_primary=${nodes[$i]}
+            break
         fi
     done
     echo "old primary dir:"${current_primary}

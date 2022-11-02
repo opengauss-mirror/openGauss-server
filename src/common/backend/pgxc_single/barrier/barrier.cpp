@@ -45,7 +45,7 @@ static void EndBarrier(PGXCNodeAllHandles* handles, const char* id, bool isSwitc
 static void CommitBarrier(PGXCNodeAllHandles* prepared_handles, const char* id);
 static void WriteBarrierLSNFile(XLogRecPtr barrierLSN, const char* barrier_id);
 static void replace_barrier_id_compatible(const char* id, char** log_id);
-static void RequestXLogFromStream();
+static void RequestXLogStreamForBarrier();
 static void barrier_redo_pause(char* barrierId);
 static bool TryBarrierLockWithTimeout();
 static void CheckBarrierCommandStatus(PGXCNodeAllHandles* conn_handles, const char* id, const char* command, bool isCn,
@@ -199,6 +199,7 @@ void ProcessCreateBarrierExecute(const char* id, bool isSwitchoverBarrier)
 
     if (isSwitchoverBarrier == true) {
         ereport(LOG, (errmsg("Handling DISASTER RECOVERY SWITCHOVER BARRIER:<%s>.", id)));
+        ShutdownForDRSwitchover();
         // The access of all users is not blocked temporarily.
         /*
          * Force a checkpoint before starting the switchover. This will force dirty
@@ -422,7 +423,7 @@ void CreateHadrSwitchoverBarrier()
             (errcode(ERRCODE_OPERATE_NOT_SUPPORTED), 
                 errmsg("DISASTER RECOVERY CREATE BARRIER command must be sent to a DataNode")));
 
-
+    ShutdownForDRSwitchover();
     // The access of all users is not blocked temporarily.
     /*
      * Force a checkpoint before starting the switchover. This will force dirty
@@ -452,7 +453,7 @@ void barrier_redo(XLogReaderState* record)
     /* Nothing to do */
     XLogRecPtr barrierLSN = record->EndRecPtr;
     char* barrierId = XLogRecGetData(record);
-    if (IS_HADR_BARRIER(barrierId) && IS_DISASTER_RECOVER_MODE) {
+    if (IS_HADR_BARRIER(barrierId) && IS_MULTI_DISASTER_RECOVER_MODE) {
         ereport(WARNING, (errmsg("The HADR barrier %s is not for streaming standby cluster", barrierId)));
         return;
     }
@@ -489,13 +490,13 @@ void barrier_redo(XLogReaderState* record)
             t_thrd.xact_cxt.ShmemVariableCache->nextCommitSeqNo = csn + 1;
     }
 
-    if (!IS_DISASTER_RECOVER_MODE || XLogRecPtrIsInvalid(t_thrd.xlog_cxt.minRecoveryPoint) ||
+    if (!IS_MULTI_DISASTER_RECOVER_MODE || XLogRecPtrIsInvalid(t_thrd.xlog_cxt.minRecoveryPoint) ||
         XLByteLT(barrierLSN, t_thrd.xlog_cxt.minRecoveryPoint) ||
         t_thrd.shemem_ptr_cxt.ControlFile->backupEndRequired) {
         return;
     }
 
-    if (g_instance.csn_barrier_cxt.barrier_hash_table != NULL) {
+    if (IS_BARRIER_HASH_INIT) {
         LWLockAcquire(g_instance.csn_barrier_cxt.barrier_hashtbl_lock, LW_EXCLUSIVE);
         BarrierCacheDeleteBarrierId(barrierId);
         LWLockRelease(g_instance.csn_barrier_cxt.barrier_hashtbl_lock);
@@ -832,6 +833,7 @@ static void ExecuteBarrier(const char* id, bool isSwitchoverBarrier)
 
     if (isSwitchoverBarrier == true) {
         ereport(LOG, (errmsg("Sending DISASTER RECOVERY SWITCHOVER BARRIER:<%s>.", id)));
+        ShutdownForDRSwitchover();
         // The access of all users is not blocked temporarily.
         /*
          * Force a checkpoint before starting the switchover. This will force dirty
@@ -994,7 +996,7 @@ void replace_barrier_id_compatible(const char* id, char** log_id) {
     *log_id = tmp_id;
 }
 
-static void RequestXLogFromStream()
+static void RequestXLogStreamForBarrier()
 {
     XLogRecPtr replayEndPtr = GetXLogReplayRecPtr(NULL);
     if (t_thrd.xlog_cxt.is_cascade_standby && (CheckForSwitchoverTrigger() || CheckForFailoverTrigger())) {
@@ -1007,14 +1009,13 @@ static void RequestXLogFromStream()
         walrcv->receivedUpto = 0;
         SpinLockRelease(&walrcv->mutex);
         if (t_thrd.xlog_cxt.readFile >= 0) {
-            close(t_thrd.xlog_cxt.readFile);
+            (void)close(t_thrd.xlog_cxt.readFile);
             t_thrd.xlog_cxt.readFile = -1;
         }
 
         RequestXLogStreaming(&replayEndPtr, t_thrd.xlog_cxt.PrimaryConnInfo, REPCONNTARGET_PRIMARY,
                              u_sess->attr.attr_storage.PrimarySlotName);
     }
-
 }
 
 static void barrier_redo_pause(char* barrierId)
@@ -1039,8 +1040,8 @@ static void barrier_redo_pause(char* barrierId)
             RedoInterruptCallBack();
             if (IS_OBS_DISASTER_RECOVER_MODE) {
                 update_recovery_barrier();
-            } else if (IS_DISASTER_RECOVER_MODE) {
-                RequestXLogFromStream();
+            } else if (IS_MULTI_DISASTER_RECOVER_MODE) {
+                RequestXLogStreamForBarrier();
             }
             ereport(DEBUG4, ((errmodule(MOD_REDO), errcode(ERRCODE_LOG), 
                     errmsg("Sleeping to get a new target global barrier %s;"

@@ -401,5 +401,33 @@ SELECT * FROM information_schema.sequences WHERE sequence_name IN
  regression       | public          | sequence_test2 | int16     |               128 |                       2 |             0 | 32          | 1             | 9223372036854775807 | 1         | NO
 (1 row)
 
+-- test case sensitivity of index names
+create sequence "QUOTATION_SEQ";
+create sequence NO_QUOTATION_SEQ;
+select "QUOTATION_SEQ".nextval;
+ nextval 
+---------
+       1
+(1 row)
+
+select QUOTATION_SEQ.nextval;
+ERROR:  missing FROM-clause entry for table "quotation_seq"
+LINE 1: select QUOTATION_SEQ.nextval;
+               ^
+CONTEXT:  referenced column: nextval
+select NO_QUOTATION_SEQ.nextval;
+ nextval 
+---------
+       1
+(1 row)
+
+select no_quotation_seq.nextval;
+ nextval 
+---------
+       2
+(1 row)
+
 DROP USER seq_user;
 DROP SEQUENCE seq;
+drop sequence "QUOTATION_SEQ";
+drop sequence no_quotation_seq;

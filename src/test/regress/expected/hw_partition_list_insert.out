@@ -27,7 +27,6 @@ insert into test_partition_for_null_list values (null, null, null, null);
 ERROR:  inserted partition key does not map to any table partition
 -- success
 insert into test_partition_for_null_list values (0, null, null, null);
-
 CREATE TABLE select_list_partition_table_000_3(
  C_CHAR_1 CHAR(1),
  C_CHAR_2 CHAR(10),
@@ -49,10 +48,8 @@ CREATE TABLE select_list_partition_table_000_3(
      partition select_list_partition_000_3_1 values (111,222,333,444),
      partition select_list_partition_000_3_2 values (555,666,777,888,999,1100,1600)
 );
-
 create index select_list_partition_table_index_000_3 ON select_list_partition_table_000_3(C_CHAR_3,C_VARCHAR_3,C_INT,C_TS_WITHOUT) local(partition select_list_partition_000_3_1, partition select_list_partition_000_3_3);
 create view select_list_partition_table_view_000_3 as select * from select_list_partition_table_000_3;
-
 INSERT INTO select_list_partition_table_000_3 VALUES('A','ABC','ABCDEFG','a','abc','abcdefg',111,111111,11,1.1,1.11,1.111,'2000-01-01','2000-01-01 01:01:01','2000-01-01 01:01:01+01');
 INSERT INTO select_list_partition_table_000_3 VALUES('B','BCD','BCDEFGH','b','bcd','bcdefgh',222,222222,22,2.2,2.22,2.222,'2000-02-02','2000-02-02 02:02:02','2000-02-02 02:02:02+02');
 INSERT INTO select_list_partition_table_000_3 VALUES('C','CDE','CDEFGHI','c','cde','cdefghi',333,333333,33,3.3,3.33,3.333,'2000-03-03','2000-03-03 03:03:03','2000-03-03 03:03:03+03');
@@ -72,14 +69,12 @@ select count(*) from select_list_partition_table_000_3;
     13
 (1 row)
 
-
 CREATE TABLE partition_wise_join_table_001_1 (ID INT NOT NULL,NAME VARCHAR(50) NOT NULL,SCORE NUMERIC(4,1),BIRTHDAY TIMESTAMP WITHOUT TIME ZONE,ADDRESS TEXT,SALARY double precision,RANK SMALLINT) 
 partition  by  list(ID) 
 ( 
 	partition partition_wise_join_table_001_1_1  values (1,42,3,44,5,46,7,48,9),
 	partition partition_wise_join_table_001_1_2  values (41,2,43,4,45,6,47,8,49)
 ) ;
-
 INSERT INTO partition_wise_join_table_001_1 VALUES (generate_series(1,9),'PARTITION WIASE JOIN 1-1-' || generate_series(1,10),90 + random() * 10,'1990-8-8',$$No.88# Science 6 Street  of Xi'an  of China $$,10000,13 );
 INSERT INTO partition_wise_join_table_001_1 VALUES (generate_series(41,49),'PARTITION WIASE JOIN 1-3-' || generate_series(40,60),90 + random() * 10,'1990-8-8',$$No.88# Science 6 Street  of Xi'an  of China $$,15000,15 );
 select count(*) from partition_wise_join_table_001_1;
@@ -88,14 +83,12 @@ select count(*) from partition_wise_join_table_001_1;
    153
 (1 row)
 
-
 CREATE TABLE partition_wise_join_table_001_2 (ID INT NOT NULL,NAME VARCHAR(50) NOT NULL,SCORE NUMERIC(4,1),BIRTHDAY TIMESTAMP WITHOUT TIME ZONE,ADDRESS TEXT,SALARY double precision ) 
 partition by list(ID)
 ( 
 	partition partition_wise_join_table_001_1_1  values (71,2,73,4,75,6,77,8,79), 
 	partition partition_wise_join_table_001_1_2  values (1,72,3,74,5,76,7,78,9)
 );
-
 INSERT INTO partition_wise_join_table_001_2 VALUES (generate_series(1,9),'PARTITION WIASE JOIN 2-1-' || generate_series(1,10),90 + random() * 10,'1990-8-8',$$No 66# Science 4 Street  of Xi'an  of China $$,10000);
 INSERT INTO partition_wise_join_table_001_2 VALUES (generate_series(71,79),'PARTITION WIASE JOIN 2-3-' || generate_series(70,80),90 + random() * 10,'1990-8-8',$$No 77# Science 4 Street  of Xi'an  of China $$,15000);
 select count(*) from partition_wise_join_table_001_2;
@@ -103,7 +96,6 @@ select count(*) from partition_wise_join_table_001_2;
 -------
    189
 (1 row)
-
 
 CREATE TABLE select_partition_table_000_3(
 	C_CHAR_1 CHAR(1),
@@ -126,10 +118,8 @@ CREATE TABLE select_partition_table_000_3(
      partition select_partition_000_3_1 values (111,222,333,444),
      partition select_partition_000_3_3 values (555,666,777,888,999,1100,1600)
 );
-
 create index select_partition_table_index_000_3 ON select_partition_table_000_3(C_CHAR_3,C_VARCHAR_3,C_INT,C_TS_WITHOUT) local(partition select_partition_000_3_1, partition select_partition_000_3_3);
 create view select_partition_table_view_000_3 as select * from select_partition_table_000_3;
-
 INSERT INTO select_partition_table_000_3 VALUES('A','ABC','ABCDEFG','a','abc','abcdefg',111,111111,11,1.1,1.11,1.111,'2000-01-01','2000-01-01 01:01:01','2000-01-01 01:01:01+01');
 INSERT INTO select_partition_table_000_3 VALUES('B','BCD','BCDEFGH','b','bcd','bcdefgh',222,222222,22,2.2,2.22,2.222,'2000-02-02','2000-02-02 02:02:02','2000-02-02 02:02:02+02');
 INSERT INTO select_partition_table_000_3 VALUES('C','CDE','CDEFGHI','c','cde','cdefghi',333,333333,33,3.3,3.33,3.333,'2000-03-03','2000-03-03 03:03:03','2000-03-03 03:03:03+03');
@@ -151,9 +141,7 @@ select count(*) from select_partition_table_000_3;
     13
 (1 row)
 
-
 create table hw_partition_select_ordinary_table (a int, b int);
-
 create table test_select_list_partition (a int, b int) 
 partition by list(a) 
 (
@@ -161,7 +149,6 @@ partition by list(a)
 	partition test_select_list_partition_p2 values (1,2,3),
 	partition test_select_list_partition_p3 values (4,5,6)
 );
-
 insert into test_select_list_partition values(1,1);
 insert into test_select_list_partition values(2,2);
 insert into test_select_list_partition values(0,0);
@@ -175,7 +162,6 @@ select count(*) from test_select_list_partition;
 -------
      4
 (1 row)
-
 
 CREATE TABLE hw_partition_select_test(C_INT INTEGER)
  partition by list (C_INT)

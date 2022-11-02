@@ -1701,6 +1701,49 @@ Datum array_indexby_length(PG_FUNCTION_ARGS)
 }
 
 /*
+ * array_count :
+ *		returns the count, of the dimension requested, for
+ *		the array pointed to by "v", as an int4
+ */
+Datum array_count(PG_FUNCTION_ARGS)
+{
+    if (ARRAY_COUNT_COMPAT && PG_ARGISNULL(0)) {
+        PG_RETURN_INT32(0);
+    } else if (PG_ARGISNULL(0)) {
+        PG_RETURN_NULL();
+    }
+
+    ArrayType* v = PG_GETARG_ARRAYTYPE_P(0);
+    int reqdim = PG_GETARG_INT32(1);
+    int* dimv = NULL;
+    int result = 0;
+
+    /* Sanity check: does it look like an array at all */
+    if (ARR_NDIM(v) <= 0 || ARR_NDIM(v) > MAXDIM) {
+        if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT) {
+            PG_RETURN_NULL();
+        } else {
+            PG_RETURN_INT32(0);
+        }
+    }
+
+    /* Sanity check: was the requested dim valid */
+    if (reqdim <= 0 || reqdim > ARR_NDIM(v)) {
+        if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT) {
+            PG_RETURN_NULL();
+        } else {
+            PG_RETURN_INT32(0);
+        }
+    }
+
+    dimv = ARR_DIMS(v);
+
+    result = dimv[reqdim - 1];
+
+    PG_RETURN_INT32(result);
+}
+
+/*
  * array_exists:
  *    returns whether index element is null
  */
@@ -3690,7 +3733,6 @@ ArrayType* construct_md_array(Datum* elems, bool* nulls, int ndims, int* dims, c
 
     nelems = ArrayGetNItems(ndims, dims);
     ArrayCheckBounds(ndims, dims, lbs);
-
     /* compute required space */
     nbytes = 0;
     hasnulls = false;

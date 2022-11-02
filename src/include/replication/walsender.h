@@ -73,8 +73,6 @@ extern bool WalSndAllInProgress(int type);
 extern bool WalSndQuorumInProgress(int type);
 extern XLogSegNo WalGetSyncCountWindow(void);
 extern void add_archive_task_to_list(int archive_task_status_idx, WalSnd *walsnd);
-extern void SendSignalToDecodeWorker(int signal, int slotId);
-extern void SendSignalToReaderWorker(int signal, int slotId);
 extern void XLogCompression(int *compressedSize, XLogRecPtr startPtr, Size nbytes);
 
 /*

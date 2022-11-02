@@ -116,6 +116,8 @@ static void send_xlog_location();
 static void send_xlog_header(const char *linkpath);
 static void save_xlogloc(const char *xloglocation);
 static XLogRecPtr GetMinArchiveSlotLSN(void);
+static XLogRecPtr GetMinLogicalSlotLSN(void);
+static XLogRecPtr UpdateStartPtr(XLogRecPtr minLsn, XLogRecPtr curStartPtr);
 
 /* compressed Function */
 static void SendCompressedFile(char* readFileName, int basePathLen, struct stat& statbuf, bool missingOk, int64* size);
@@ -362,6 +364,18 @@ static void SendSecureFileToDisasterCluster(basebackup_options *opt)
     pfree(ti);
 }
 
+static XLogRecPtr UpdateStartPtr(XLogRecPtr minLsn, XLogRecPtr curStartPtr)
+{
+    XLogRecPtr resStartPtr = curStartPtr;
+    if (!XLByteEQ(minLsn, InvalidXLogRecPtr) && (minLsn < resStartPtr)) {
+        /* If xlog file has been recycled, don't use this minlsn */
+        if (XlogFileIsExisted(t_thrd.proc_cxt.DataDir, minLsn, DEFAULT_TIMELINE_ID) == true) {
+            resStartPtr = minLsn;
+        }
+    }
+    return resStartPtr;
+}
+
 /*
  * Actually do a base backup for the specified tablespaces.
  *
@@ -393,26 +407,31 @@ static void perform_base_backup(basebackup_options *opt, DIR *tblspcdir)
     ReplicationSlotsComputeRequiredXmin(false);
     ReplicationSlotsComputeRequiredLSN(NULL);
 
+    /*
+     * If force recycle has been triggered, archive slot min lsn may be the smallest one, but its xlog is gone.
+     * In result, we fail to use minlsn to update startptr. But we need keep some needed xlogs which are smaller
+     * than startptr but bigger than archive slot min lsn. So calculate the specific restart lsn one by one.
+     */
+    /* consider min lsn in all slots, but we should fail to keep minlsn if force recycle happen, see detail above. */
     XLogRecPtr minlsn = XLogGetReplicationSlotMinimumLSNByOther();
-    if (!XLByteEQ(minlsn, InvalidXLogRecPtr) && (minlsn < startptr)) {
-        /* If xlog file has been recycled, don't use this minlsn */
-        if (XlogFileIsExisted(t_thrd.proc_cxt.DataDir, minlsn, DEFAULT_TIMELINE_ID) == true) {
-            startptr = minlsn;
-        }
-    }
+    startptr = UpdateStartPtr(minlsn, startptr);
+    /* only consider min lsn in archive slots */
     disasterSlotRestartPtr = GetMinArchiveSlotLSN();
-    if (disasterSlotRestartPtr != InvalidXLogRecPtr && XLByteLT(disasterSlotRestartPtr, startptr)) {
-        if (XlogFileIsExisted(t_thrd.proc_cxt.DataDir, disasterSlotRestartPtr, DEFAULT_TIMELINE_ID) == true) {
-            startptr = disasterSlotRestartPtr;
-        }
-    }
+    startptr = UpdateStartPtr(disasterSlotRestartPtr, startptr);
+    /* only consider min lsn in logical slots */
+    XLogRecPtr logicalMinLsn = GetMinLogicalSlotLSN();
+    startptr = UpdateStartPtr(logicalMinLsn, startptr);
+
     LWLockAcquire(FullBuildXlogCopyStartPtrLock, LW_EXCLUSIVE);
     XlogCopyStartPtr = startptr;
     LWLockRelease(FullBuildXlogCopyStartPtrLock);
-    ereport(
-        INFO,
-        (errmsg("The starting position of the xlog copy of the full build is: %X/%X. The slot minimum LSN is: %X/%X.",
-                (uint32)(startptr >> 32), (uint32)startptr, (uint32)(minlsn >> 32), (uint32)minlsn)));
+    ereport(INFO,
+        (errmsg("The starting position of the xlog copy of the full build is: %X/%X. The slot minimum LSN is: %X/%X."
+        " The disaster slot minimum LSN is: %X/%X. The logical slot minimum LSN is: %X/%X.",
+        (uint32)(startptr >> 32), (uint32)startptr, (uint32)(minlsn >> 32), (uint32)minlsn,
+        (uint32)(disasterSlotRestartPtr >> 32), (uint32)disasterSlotRestartPtr,
+        (uint32)(logicalMinLsn >> 32), (uint32)logicalMinLsn)));
+
 #ifdef ENABLE_MULTIPLE_NODES
     cbm_rotate_file(startptr);
 #endif
@@ -1429,7 +1448,7 @@ static int64 sendDir(const char *path, int basepathlen, bool sizeonly, List *tab
             }
             LWLockRelease(ReplicationSlotControlLock);
 
-            if (isphysicalslot || (isArchiveSlot && AM_WAL_HADR_DNCN_SENDER))
+            if (isphysicalslot || (isArchiveSlot && (AM_WAL_HADR_DNCN_SENDER || AM_WAL_SHARE_STORE_SENDER)))
                 continue;
         }
 
@@ -2314,7 +2333,53 @@ static XLogRecPtr GetMinArchiveSlotLSN(void)
     }
     return minArchSlotPtr;
 }
+
+static XLogRecPtr GetMinLogicalSlotLSN(void)
+{
+    XLogRecPtr minLogicalSlotPtr = InvalidXLogRecPtr;
+
+    for (int slotno = 0; slotno < g_instance.attr.attr_storage.max_replication_slots; slotno++) {
+        XLogRecPtr restart_lsn;
+        ReplicationSlot *slot = &t_thrd.slot_cxt.ReplicationSlotCtl->replication_slots[slotno];
+        SpinLockAcquire(&slot->mutex);
+        if (slot->in_use == true && slot->data.database != InvalidOid) {
+            restart_lsn = slot->data.restart_lsn;
+            if ((!XLByteEQ(restart_lsn, InvalidXLogRecPtr)) &&
+                (XLByteEQ(minLogicalSlotPtr, InvalidXLogRecPtr) || XLByteLT(restart_lsn, minLogicalSlotPtr))) {
+                minLogicalSlotPtr = restart_lsn;
+            }
+        }
+        SpinLockRelease(&slot->mutex);
+    }
+    return minLogicalSlotPtr;
+}
+
 void ut_save_xlogloc(const char *xloglocation)
 {
     save_xlogloc(xloglocation);
+}
+
+/*
+ * Handle open/fopen error scenarior.
+ * Return true if we can ignore such error.
+ */
+bool handleFopenFailure(const char* filepath, bool missing_ok)
+{
+    if (errno == ENOENT && missing_ok) {
+        return true;
+    } else if (errno == EACCES) {
+        /* we choose to ignore permission issue of files that seem not to belong to database */
+        const char* fname = NULL;
+        fname = last_dir_separator(filepath);
+        fname = (fname != NULL ? fname + 1 : filepath);
+
+        if (strcspn(fname, "0123456789") == strlen(fname) &&
+            strstr(fname, ".conf") == NULL && strstr(fname, "label") == NULL) {
+            ereport(WARNING, (errcode_for_file_access(),
+                      errmsg("File %s seems not to belong to database, ignore it due to permission issue.", filepath)));
+            return true;
+        }
+    }
+
+    return false;
 }

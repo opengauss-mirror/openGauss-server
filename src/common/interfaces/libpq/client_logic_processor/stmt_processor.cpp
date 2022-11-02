@@ -778,14 +778,20 @@ bool Processor::run_pre_select_target_list(List* targetList, StatementData* stat
     return true;
 }
 
-bool Processor::run_pre_select_statement(const SelectStmt * const select_stmt, StatementData *statement_data)
+bool Processor::run_pre_select_statement(const SelectStmt * const select_stmt,
+    StatementData *statement_data, bool *unencrypted)
 {
     SetOperation set_operation(SETOP_NONE);
-    bool all(false);
+    bool all = false;
+    bool res = false;
     CachedColumns cached_columns(false, true);
     CachedColumns cached_columns_parents(false, true);
-    return run_pre_select_statement(select_stmt, set_operation, all, statement_data, 
+    res = run_pre_select_statement(select_stmt, set_operation, all, statement_data, 
         &cached_columns, &cached_columns_parents);
+    if (cached_columns.size() == 0) {
+        *unencrypted = true; /* if unencrypted is true, it means the table is not full encrypted */
+    }
+    return res;
 }
 
 bool Processor::run_pre_select_statement(const SelectStmt * const select_stmt, const SetOperation &parent_set_operation,
@@ -1090,17 +1096,6 @@ bool Processor::run_pre_copy_statement(const CopyStmt * const copy_stmt, Stateme
         return true; /* nothing to do */
     }
 
-    if (copy_stmt->filename || copy_stmt->encrypted) { // we have a file the data will not pass through the client
-        fprintf(stderr, "ERROR(CLIENT): column encryption does't support copy from server file to table\n");
-        return false;
-    }
-    if (copy_stmt->query)
-        /* we have a COPY FILE statement so the data is not passed through the client - it's a server side operation. */
-        if (copy_stmt->filename) {
-            // nothing to do
-            return true;
-        }
-
     PreparedStatement *prepared_statement = NULL;
     if (copy_stmt->query) {
         /*
@@ -1109,9 +1104,29 @@ bool Processor::run_pre_copy_statement(const CopyStmt * const copy_stmt, Stateme
          */
         if (nodeTag(copy_stmt->query) != T_SelectStmt)
             return false;
-        if (!run_pre_select_statement((SelectStmt *)copy_stmt->query, statement_data))
+        bool unecrypted = false;
+        bool res = run_pre_select_statement((SelectStmt *)copy_stmt->query, statement_data, &unecrypted);
+        if (!res) {
             return false;
+        }
+        if (unecrypted) {
+            return true;
+        }
+        if (copy_stmt->filename || copy_stmt->encrypted) { // we have a file the data will not pass through the client
+            fprintf(stderr, "ERROR(CLIENT): column encryption does't support copy from server file to table\n");
+            return false;
+        }
     } else if (copy_stmt->relation) {
+        CachedColumns cached_column_range(false);
+        (void)statement_data->conn->client_logic->m_cached_column_manager->get_cached_columns(copy_stmt->relation,
+            &cached_column_range);
+        if (cached_column_range.size() == 0) {
+            return true;
+        }
+        if (copy_stmt->filename || copy_stmt->encrypted) { // we have a file the data will not pass through the client
+            fprintf(stderr, "ERROR(CLIENT): column encryption does't support copy from server file to table\n");
+            return false;
+        }
         /*
          *  "COPY <relation> FROM STDIN" requires us to build a cached columns list for the csv that will be inserted
          *  "COPY <relation> TO STDOUT" does not need any more processing
@@ -1905,8 +1920,10 @@ bool Processor::run_pre_statement(const Node * const stmt, StatementData *statem
             return run_pre_delete_statement((DeleteStmt *)stmt, statement_data);
         case T_UpdateStmt:
             return run_pre_update_statement((UpdateStmt *)stmt, statement_data);
-        case T_SelectStmt:
-            return run_pre_select_statement((SelectStmt *)stmt, statement_data);
+        case T_SelectStmt: {
+            bool unencrypted = false;
+            return run_pre_select_statement((SelectStmt *)stmt, statement_data, &unencrypted);
+        }
         case T_PrepareStmt:
             return run_pre_prepare_statement((PrepareStmt *)stmt, statement_data);
         case T_ExecuteStmt:
@@ -1941,12 +1958,14 @@ bool Processor::run_pre_statement(const Node * const stmt, StatementData *statem
             const VariableSetStmt *set_stmt = (const VariableSetStmt *)stmt;
             return run_pre_set_statement(set_stmt, statement_data);
         }
-        case T_ViewStmt:
+        case T_ViewStmt: {
+            bool unencrypted = false;
             current_statement->cacheRefresh |= CacheRefreshType::COLUMNS;
             /*
                 rewrite query in the CREATE VIEW clause if query has relevant columns
             */
-            return run_pre_select_statement((SelectStmt *)((ViewStmt *)stmt)->query, statement_data);
+            return run_pre_select_statement((SelectStmt *)((ViewStmt *)stmt)->query, statement_data, &unencrypted);
+        }
         case T_DropStmt:
             return run_pre_drop_statement((DropStmt *)stmt, statement_data);
             break;
@@ -1984,8 +2003,15 @@ bool Processor::run_pre_statement(const Node * const stmt, StatementData *statem
                 current_statement->cacheRefresh |= CacheRefreshType::GLOBAL_SETTING;
             }
             break;
-        case T_CreateTableAsStmt:
-            return run_pre_select_statement((SelectStmt *)((CreateTableAsStmt *)stmt)->query, statement_data);
+        case T_CreateTableAsStmt: {
+            bool unencrypted = false;
+            bool res = run_pre_select_statement((SelectStmt *)((CreateTableAsStmt *)stmt)->query,
+                statement_data, &unencrypted);
+            if (res && !unencrypted) {
+                current_statement->cacheRefresh |= CacheRefreshType::COLUMNS;
+            }
+            return res;
+        }
         default:
             break;
     }

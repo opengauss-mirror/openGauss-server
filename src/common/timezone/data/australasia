@@ -462,6 +462,12 @@ Zone Pacific/Kiritimati	-10:29:20 -	LMT	1901
 			-10:40	-	LINT	1979 Oct
 			-10:00	-	LINT	1994 Dec 31
 			 14:00	-	LINT
+Zone Pacific/Bougainville 10:22:16 -	LMT	1880
+			 9:48:32 -	PMMT	1895
+			10:00	-	BST	1942 Jul
+			 9:00	-	BST	1945 Aug 21
+			10:00	-	BST	2014 Dec 28  2:00
+			11:00	-	BST
 
 # N Mariana Is
 # See Pacific/Guam.

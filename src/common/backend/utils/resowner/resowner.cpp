@@ -169,7 +169,7 @@ THR_LOCAL ResourceOwner IsolatedResourceOwner = NULL;
 #ifdef MEMORY_CONTEXT_CHECKING
 #define PrintGlobalSysCacheLeakWarning(owner, strinfo) \
 do { \
-    if (EnableLocalSysCache() && LOCAL_SYSDB_RESOWNER != (owner)) { \
+    if (EnableLocalSysCache()) { \
         ereport(WARNING, (errmsg("global syscache reference leak %s %s %d", strinfo, __FILE__, __LINE__))); \
     } \
 } while(0)
@@ -188,9 +188,6 @@ static void PrintPlanCacheLeakWarning(CachedPlan* plan);
 static void PrintTupleDescLeakWarning(TupleDesc tupdesc);
 static void PrintSnapshotLeakWarning(Snapshot snapshot);
 static void PrintFileLeakWarning(File file);
-
-extern void PrintMetaCacheBlockLeakWarning(CacheSlotId_t slot);
-extern void ReleaseMetaBlock(CacheSlotId_t slot);
 
 /*****************************************************************************
  *	  EXPORTED ROUTINES														 *
@@ -293,8 +290,8 @@ static void ResourceOwnerReleaseInternal(
 
     if (phase == RESOURCE_RELEASE_BEFORE_LOCKS) {
         if (owner == t_thrd.utils_cxt.TopTransactionResourceOwner) {
-            if (u_sess->ustore_cxt.urecvec) {
-                u_sess->ustore_cxt.urecvec->Reset(false);
+            if (t_thrd.ustore_cxt.urecvec) {
+                t_thrd.ustore_cxt.urecvec->Reset(false);
             }
             ReleaseUndoBuffers();
             undo::ReleaseSlotBuffer();
@@ -321,11 +318,6 @@ static void ResourceOwnerReleaseInternal(
             if (isCommit)
                 CUCache->PrintDataCacheSlotLeakWarning(owner->dataCacheSlots[owner->nDataCacheSlots - 1]);
             CUCache->UnPinDataBlock(owner->dataCacheSlots[owner->nDataCacheSlots - 1]);
-        }
-        while (owner->nMetaCacheSlots > 0) {
-            if (isCommit)
-                PrintMetaCacheBlockLeakWarning(owner->metaCacheSlots[owner->nMetaCacheSlots - 1]);
-            ReleaseMetaBlock(owner->metaCacheSlots[owner->nMetaCacheSlots - 1]);
         }
 
         while (owner->nfakerelrefs > 0) {
@@ -525,6 +517,7 @@ void ResourceOwnerDelete(ResourceOwner owner)
      */
     if (IsolatedResourceOwner == owner)
         IsolatedResourceOwner = NULL;
+    Assert(t_thrd.lsc_cxt.local_sysdb_resowner != owner);
 
     while (owner->firstchild != NULL)
         ResourceOwnerDelete(owner->firstchild);
@@ -735,14 +728,6 @@ ResourceOwner ResourceOwnerGetNextChild(ResourceOwner owner)
 const char* ResourceOwnerGetName(ResourceOwner owner)
 {
     return owner->name;
-}
-
-/*
- * Fetch firstchild of a ResourceOwner
- */
-ResourceOwner ResourceOwnerGetFirstChild(ResourceOwner owner)
-{
-    return owner->firstchild;
 }
 
 /*
@@ -1497,14 +1482,14 @@ void ResourceOwnerRememberTupleDesc(ResourceOwner owner, TupleDesc tupdesc)
 /*
  * Forget that a tupdesc reference is owned by a ResourceOwner
  */
-void ResourceOwnerForgetTupleDesc(ResourceOwner owner, TupleDesc tupdesc)
+bool ResourceOwnerForgetTupleDesc(ResourceOwner owner, TupleDesc tupdesc)
 {
     TupleDesc* tupdescs = owner->tupdescs;
     int nt1 = owner->ntupdescs - 1;
     int i;
 
     if (!owner->valid)
-        return;
+        return false;
 
     for (i = nt1; i >= 0; i--) {
         if (tupdescs[i] == tupdesc) {
@@ -1513,12 +1498,14 @@ void ResourceOwnerForgetTupleDesc(ResourceOwner owner, TupleDesc tupdesc)
                 i++;
             }
             owner->ntupdescs = nt1;
-            return;
+            return true;
         }
     }
     ereport(ERROR,
         (errcode(ERRCODE_WARNING_PRIVILEGE_NOT_GRANTED),
             errmsg("tupdesc is not owned by resource owner %s", owner->name)));
+
+    return false;
 }
 
 /*
@@ -1812,7 +1799,7 @@ void PrintResourceOwnerLeakWarning()
         ereport(WARNING, (errmsg("resource owner \"%s\" may leak", IsolatedResourceOwner->name)));
 }
 
-void ResourceOwnerReleasePthreadMutex()
+void ResourceOwnerReleaseAllXactPthreadMutex()
 {
     ResourceOwner owner = t_thrd.utils_cxt.TopTransactionResourceOwner;
     ResourceOwner child;
@@ -2025,6 +2012,22 @@ void ResourceOwnerForgetPthreadRWlock(ResourceOwner owner, pthread_rwlock_t* pRW
             errmsg("pthread rwlock is not owned by resource owner %s", owner->name)));
 }
 
+bool ResourceOwnerExistPthreadMutex(ResourceOwner owner, pthread_mutex_t* pMutex)
+{
+    pthread_mutex_t** mutexs = owner->pThdMutexs;
+    int ns1 = owner->nPthreadMutex - 1;
+
+    if (!owner->valid) {
+        return false;
+    }
+
+    for (int i = ns1; i >= 0; i--) {
+        if (mutexs[i] == pMutex) {
+            return true;
+        }
+    }
+    return false;
+}
 void ResourceOwnerEnlargeLocalCatCList(ResourceOwner owner)
 {
     int newmax;
@@ -2237,6 +2240,17 @@ void ResourceOwnerForgetGlobalBaseEntry(ResourceOwner owner, GlobalBaseEntry* en
             errmsg("the global base entry is not owned by resource owner %s", owner->name)));
 }
 
+void ResourceOwnerReleasePthreadMutex(ResourceOwner owner, bool isCommit)
+{
+    while (owner->nPthreadMutex > 0) {
+        if (isCommit) {
+            PrintGlobalSysCacheLeakWarning(owner, "MutexLock");
+        }
+        /* unlock do -- */
+        PthreadMutexUnlock(owner, owner->pThdMutexs[owner->nPthreadMutex - 1]);
+    }
+}
+
 void ResourceOwnerReleaseRWLock(ResourceOwner owner, bool isCommit)
 {
     while (owner->nPthreadRWlock > 0) {
@@ -2278,9 +2292,7 @@ void ResourceOwnerReleaseRelationRef(ResourceOwner owner, bool isCommit)
         Relation rel = owner->relrefs[owner->nrelrefs - 1];
         if (isCommit) {
             PrintGlobalSysCacheLeakWarning(owner, "Relation");
-            if (!EnableLocalSysCache()) {
-                PrintRelCacheLeakWarning(rel);
-            }
+            PrintRelCacheLeakWarning(rel);
         }
         /* close do -- */
         RelationClose(rel);
@@ -2510,4 +2522,29 @@ void ResourceOwnerReleaseAllPlanCacheRefs(ResourceOwner owner)
     t_thrd.utils_cxt.CurrentResourceOwner = owner;
     ResourceOwnerDecrementNPlanRefs(owner, true);
     t_thrd.utils_cxt.CurrentResourceOwner = save;
+}
+void ReleaseResownerOutOfTransaction()
+{
+    if (likely(t_thrd.utils_cxt.CurrentResourceOwner == NULL)) {
+        return;
+    }
+    if (unlikely(IsTransactionOrTransactionBlock())) {
+        return;
+    }
+    ResourceOwner root = t_thrd.utils_cxt.CurrentResourceOwner;
+    while (root->parent != NULL) {
+        root = root->parent;
+    }
+    Assert(t_thrd.utils_cxt.TopTransactionResourceOwner != root);
+    if (unlikely(t_thrd.utils_cxt.TopTransactionResourceOwner == root)) {
+        return;
+    }
+    Assert(strcmp(root->name, "TopTransaction") != 0);
+    if (unlikely(strcmp(root->name, "TopTransaction") == 0)) {
+        return;
+    }
+
+    ResourceOwnerRelease(root, RESOURCE_RELEASE_BEFORE_LOCKS, false, true);
+    ResourceOwnerRelease(root, RESOURCE_RELEASE_LOCKS, false, true);
+    ResourceOwnerRelease(root, RESOURCE_RELEASE_AFTER_LOCKS, false, true);
 }

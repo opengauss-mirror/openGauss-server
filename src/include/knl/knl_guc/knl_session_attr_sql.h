@@ -91,6 +91,7 @@ typedef struct knl_session_attr_sql {
     bool enable_random_datanode;
     bool enable_fstream;
     bool enable_geqo;
+    bool enable_gtt_concurrent_truncate;
     bool restart_after_crash;
     bool enable_early_free;
     bool enable_kill_query;
@@ -181,6 +182,9 @@ typedef struct knl_session_attr_sql {
     char* default_storage_nodegroup;
     char* inlist2join_optmode;
     char* behavior_compat_string;
+    char* plsql_compile_behavior_compat_string;
+    char* a_format_version_compat_string;
+    char* a_format_dev_version_compat_string;
     char* connection_info;
     char* retry_errcode_list;
     /* the vmoptions to start JVM */

@@ -61,7 +61,7 @@ ab.abnormal_order_no ;
  HashAggregate
    Group By Key: mer.abnormal_order_no, ab.abnormal_order_no
    ->  Hash Join
-         Hash Cond: (((mer.abnormal_order_no)::text = (ab.abnormal_order_no)::text) AND (mer.warehouse_id = ab.warehouse_id))
+         Hash Cond: ((mer.warehouse_id = ab.warehouse_id) AND ((mer.abnormal_order_no)::text = (ab.abnormal_order_no)::text))
          ->  Hash Join
                Hash Cond: ((mer.warehouse_id = ord.warehouse_id) AND ((mer.stocktaking_serno)::text = (ord.stocktaking_serno)::text))
                ->  Hash Join

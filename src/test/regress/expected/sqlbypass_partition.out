@@ -2731,5 +2731,162 @@ execute p1 (1);
 
 deallocate p1;
 drop table test_list_lt1;
+drop table test_list_lt;
+ERROR:  table "test_list_lt" does not exist
+create table test_list_lt (a int, b int, c int)
+partition by list(a)
+(
+	partition p1 values (2000),
+	partition p2 values (3000),
+	partition p3 values (4000)
+) ;
+create index idx_list_c on test_list_lt(c) local;
+create index idx_list_b on test_list_lt(b) local;
+create index idx_list_bc on test_list_lt(b,c) local;
+set enable_seqscan = off;
+set enable_bitmapscan = off;
+explain(costs off, verbose on) select *from test_list_lt where a = 2000 and b = 1 order by c;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ [No Bypass]reason: Bypass not executed because query used indexscan with qual.
+ Partition Iterator
+   Output: a, b, c
+   Iterations: 1
+   ->  Partitioned Index Scan using idx_list_bc on public.test_list_lt
+         Output: a, b, c
+         Index Cond: (test_list_lt.b = 1)
+         Filter: (test_list_lt.a = 2000)
+         Selected Partitions:  1
+(9 rows)
+
+explain(costs off, verbose on) select *from test_list_lt where a = 5000 and b = 1 order by c;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ [No Bypass]reason: Bypass not executed because query used indexscan with qual.
+ Partition Iterator
+   Output: a, b, c
+   Iterations: 0
+   ->  Partitioned Index Scan using idx_list_bc on public.test_list_lt
+         Output: a, b, c
+         Index Cond: (test_list_lt.b = 1)
+         Filter: (test_list_lt.a = 5000)
+         Selected Partitions:  NONE
+(9 rows)
+
+prepare p1 as  select *from test_list_lt where a = $1 and b = $2 order by c;
+explain(costs off, verbose on) execute p1(2000,1);
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ [No Bypass]reason: Bypass not executed because query used indexscan with qual.
+ Partition Iterator
+   Output: a, b, c
+   Iterations: PART
+   ->  Partitioned Index Scan using idx_list_bc on public.test_list_lt
+         Output: a, b, c
+         Index Cond: (test_list_lt.b = $2)
+         Filter: (test_list_lt.a = $1)
+         Selected Partitions:  PART
+(9 rows)
+
+explain(costs off, verbose on) execute p1(5000,1);
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ [No Bypass]reason: Bypass not executed because query used indexscan with qual.
+ Partition Iterator
+   Output: a, b, c
+   Iterations: PART
+   ->  Partitioned Index Scan using idx_list_bc on public.test_list_lt
+         Output: a, b, c
+         Index Cond: (test_list_lt.b = $2)
+         Filter: (test_list_lt.a = $1)
+         Selected Partitions:  PART
+(9 rows)
+
+deallocate p1;
+prepare p1 as  select *from test_list_lt where a = $1 order by b;
+explain(costs off, verbose on) execute p1(2000);
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ [No Bypass]reason: Bypass not executed because query used indexscan with qual.
+ Partition Iterator
+   Output: a, b, c
+   Iterations: PART
+   ->  Partitioned Index Scan using idx_list_bc on public.test_list_lt
+         Output: a, b, c
+         Filter: (test_list_lt.a = $1)
+         Selected Partitions:  PART
+(8 rows)
+
+deallocate p1;
+reset enable_seqscan;
+reset enable_bitmapscan;
+drop table test_list_lt;
+drop table test_hash_ht;
+ERROR:  table "test_hash_ht" does not exist
+create table test_hash_ht (a int, b int, c int)
+partition by hash(a)
+(
+	partition p1, 
+	partition p2,  
+	partition p3,
+	partition p4,
+	partition p5,
+	partition p6,
+	partition p7,
+	partition p8
+);
+create index idx_hash_c on test_hash_ht(c) local;
+create index idx_hash_b on test_hash_ht(b) local;
+create index idx_hash_bc on test_hash_ht(b,c) local;
+set enable_seqscan = off;
+set enable_bitmapscan = off;
+explain(costs off, verbose on) select *from test_hash_ht where a = 2000 and b = 1 order by c;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ [No Bypass]reason: Bypass not executed because query used indexscan with qual.
+ Partition Iterator
+   Output: a, b, c
+   Iterations: 1
+   ->  Partitioned Index Scan using idx_hash_bc on public.test_hash_ht
+         Output: a, b, c
+         Index Cond: (test_hash_ht.b = 1)
+         Filter: (test_hash_ht.a = 2000)
+         Selected Partitions:  5
+(9 rows)
+
+prepare p1 as  select *from test_hash_ht where a = $1 and b = $2 order by c;
+explain(costs off, verbose on) execute p1(2000,1);
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ [No Bypass]reason: Bypass not executed because query used indexscan with qual.
+ Partition Iterator
+   Output: a, b, c
+   Iterations: PART
+   ->  Partitioned Index Scan using idx_hash_bc on public.test_hash_ht
+         Output: a, b, c
+         Index Cond: (test_hash_ht.b = $2)
+         Filter: (test_hash_ht.a = $1)
+         Selected Partitions:  PART
+(9 rows)
+
+deallocate p1;
+prepare p1 as  select *from test_hash_ht where a = $1 order by b;
+explain(costs off, verbose on) execute p1(2000);
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ [No Bypass]reason: Bypass not executed because query used indexscan with qual.
+ Partition Iterator
+   Output: a, b, c
+   Iterations: PART
+   ->  Partitioned Index Scan using idx_hash_bc on public.test_hash_ht
+         Output: a, b, c
+         Filter: (test_hash_ht.a = $1)
+         Selected Partitions:  PART
+(8 rows)
+
+deallocate p1;
+reset enable_seqscan;
+reset enable_bitmapscan;
+drop table test_hash_ht;
 reset enable_partition_opfusion;
 drop table test_bypass_sql_partition;

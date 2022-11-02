@@ -142,5 +142,10 @@ select count(*) from gtt_t_kenyon;
 insert into gtt_with_seq (c1) values(1);
 select * from gtt_with_seq;
 
+insert into gtt4 values(1);
+alter index gtt_a_idx unusable;
+reindex index gtt_a_idx;
+insert into gtt4 values(1); -- should fail
+
 reset search_path;
 

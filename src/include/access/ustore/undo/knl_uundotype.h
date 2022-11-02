@@ -40,14 +40,18 @@ const uint32 USTORE_VERSION = 92350;
 
 const int32 UNDO_ZONE_COUNT = 1024*1024;
 
+const int ALLOCSET_UNDO_MAXSIZE = 300 * UNDO_ZONE_COUNT;
+
 /* Parameter for calculating the number of locks used in undo zone. */
-#define UNDO_ZONE_LOCK 4
+#define UNDO_ZONE_LOCK 30
 
 const int PAGES_READ_NUM = 1024 * 16;
 
 #define UNDO_LOG_MAX_SIZE ((UndoLogOffset) 1L << 44)
 
 #define INVALID_ZONE_ID -1
+
+#define ALL_ZONES -1
 
 #define MAX_UNDO_RECORD_SIZE (1024 << 1)
 
@@ -72,6 +76,9 @@ const int PAGES_READ_NUM = 1024 * 16;
 #define IS_VALID_UNDO_REC_PTR(urecptr) ((bool)((UndoRecPtr)(urecptr) != INVALID_UNDO_REC_PTR))
 
 #define UNDO_REC_PTR_FORMAT "%016lX"
+#define UNDO_REC_PTR_UFORMAT "%lu"
+#define UNDO_REC_PTR_DFORMAT "%d"
+
 
 /* The width of an undo log number in bits.  20 allows for 1048576 logs. */
 #define UNDO_LOG_NUMBER_BITS 20
@@ -137,11 +144,19 @@ typedef enum {
 } UndoSpaceType;
 
 typedef enum {
+    UNDO_META_ZONE = 0,
+    UNDO_META_SPACES = 1,
+    UNDO_META_SLOTS = 2,
+    UNDO_META_BUTT
+} UndoMetaInfoType;
+
+typedef enum {
     UNDO_TRAVERSAL_DEFAULT = 0,
-    UNDO_TRAVERSAL_COMPLETE,
-    UNDO_TRAVERSAL_STOP,
-    UNDO_TRAVERSAL_ABORT,
-    UNDO_TRAVERSAL_END
+    UNDO_TRAVERSAL_COMPLETE,    /* The correct version of the transaction information is obtained. */
+    UNDO_TRAVERSAL_STOP,        /* Less than globalFrozenXid, visible. */
+    UNDO_TRAVERSAL_ABORT,       /* The undo record has been force discard. */
+    UNDO_TRAVERSAL_END,         /* The undo record has been discard. */
+    UNDO_TRAVERSAL_ENDCHAIN     /* The undo record chain end, no found old version. */
 } UndoTraversalState;
 
 typedef enum {
@@ -151,6 +166,14 @@ typedef enum {
     UNDO_RECORD_NOT_INSERT,
     UNDO_RECORD_INVALID
 } UndoRecordState;
+
+typedef struct MiniSlot {
+    UndoRecPtr endUndoPtr;
+    UndoRecPtr startUndoPtr;
+    TransactionId xactId;
+    Oid dbId;
+} MiniSlot;
+
 
 #define UNDO_PERSISTENCE_LEVELS 3
 

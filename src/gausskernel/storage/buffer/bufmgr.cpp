@@ -43,7 +43,6 @@
 #include "access/double_write.h"
 #include "access/parallel_recovery/dispatcher.h"
 #include "catalog/catalog.h"
-#include "catalog/dfsstore_ctlg.h"
 #include "catalog/pg_hashbucket_fn.h"
 #include "catalog/storage_gtt.h"
 #include "commands/tablespace.h"
@@ -2342,6 +2341,9 @@ static Buffer ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumb
     t_thrd.vacuum_cxt.VacuumPageMiss++;
     if (t_thrd.vacuum_cxt.VacuumCostActive)
         t_thrd.vacuum_cxt.VacuumCostBalance += u_sess->attr.attr_storage.VacuumCostPageMiss;
+
+    SegmentCheck(!IsSegmentSmgrRelation(smgr) ||
+        (bufHdr->seg_blockno != InvalidBlockNumber && ExtentTypeIsValid(bufHdr->seg_fileno)));
 
     TRACE_POSTGRESQL_BUFFER_READ_DONE(forkNum, blockNum, smgr->smgr_rnode.node.spcNode, smgr->smgr_rnode.node.dbNode,
                                       smgr->smgr_rnode.node.relNode, smgr->smgr_rnode.backend, isExtend, found);
@@ -5540,9 +5542,9 @@ void LockBuffer(Buffer buffer, int mode)
     if (mode == BUFFER_LOCK_UNLOCK) {
         LWLockRelease(buf->content_lock);
     } else if (mode == BUFFER_LOCK_SHARE) {
-        (void)LWLockAcquire(buf->content_lock, LW_SHARED, need_update_lockid);
+        (void)LWLockAcquire(buf->content_lock, LW_SHARED, need_update_lockid, &(buf->tag));
     } else if (mode == BUFFER_LOCK_EXCLUSIVE) {
-        (void)LWLockAcquire(buf->content_lock, LW_EXCLUSIVE, need_update_lockid);
+        (void)LWLockAcquire(buf->content_lock, LW_EXCLUSIVE, need_update_lockid, &(buf->tag));
     } else {
         ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), (errmsg("unrecognized buffer lock mode: %d", mode))));
     }

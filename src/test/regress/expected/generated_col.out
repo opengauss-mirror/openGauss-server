@@ -518,6 +518,98 @@ ERROR:  cannot use generated column "b" in column generation expression
 DETAIL:  A generated column cannot reference another generated column.
 ALTER TABLE gtest25 ADD COLUMN x int GENERATED ALWAYS AS (z * 4) STORED;  -- error
 ERROR:  column "z" does not exist
+ALTER TABLE gtest25 ADD COLUMN c int DEFAULT 42,
+  ADD COLUMN x int GENERATED ALWAYS AS (c * 4) STORED;
+ALTER TABLE gtest25 ADD COLUMN d int DEFAULT 101;
+ALTER TABLE gtest25 ALTER COLUMN d SET DATA TYPE float8,
+  ADD COLUMN y float8 GENERATED ALWAYS AS (d * 4) STORED;
+SELECT * FROM gtest25 ORDER BY a;
+ a | b  | c  |  x  |  d  |  y  
+---+----+----+-----+-----+-----
+ 3 |  9 | 42 | 168 | 101 | 404
+ 4 | 12 | 42 | 168 | 101 | 404
+(2 rows)
+
+\d gtest25
+                                Table "public.gtest25"
+ Column |       Type       |                        Modifiers                         
+--------+------------------+----------------------------------------------------------
+ a      | integer          | not null
+ b      | integer          | generated always as ((a * 3)) stored
+ c      | integer          | default 42
+ x      | integer          | generated always as ((c * 4)) stored
+ d      | double precision | default 101
+ y      | double precision | generated always as ((d * (4)::double precision)) stored
+Indexes:
+    "gtest25_pkey" PRIMARY KEY, btree (a) TABLESPACE pg_default
+
+--default value test
+INSERT INTO gtest25 VALUES (5), (6);
+INSERT INTO gtest25(a,b) VALUES (7,8), (9,10); --error
+ERROR:  cannot insert into column "b"
+DETAIL:  Column "b" is a generated column.
+INSERT INTO gtest25(a,b) VALUES (7,DEFAULT), (9,DEFAULT);
+INSERT INTO gtest25(x,a,b) VALUES (8,8,DEFAULT), (10,10,DEFAULT); --error
+ERROR:  cannot insert into column "x"
+DETAIL:  Column "x" is a generated column.
+INSERT INTO gtest25(x,a,b) VALUES (DEFAULT,8,DEFAULT), (DEFAULT,10,DEFAULT);
+INSERT INTO gtest25(x) VALUES (DEFAULT), (DEFAULT);  --error
+ERROR:  null value in column "a" violates not-null constraint
+DETAIL:  Failing row contains (null, null, 42, 168, 101, 404).
+SELECT * FROM gtest25 ORDER BY a;
+ a  | b  | c  |  x  |  d  |  y  
+----+----+----+-----+-----+-----
+  3 |  9 | 42 | 168 | 101 | 404
+  4 | 12 | 42 | 168 | 101 | 404
+  5 | 15 | 42 | 168 | 101 | 404
+  6 | 18 | 42 | 168 | 101 | 404
+  7 | 21 | 42 | 168 | 101 | 404
+  8 | 24 | 42 | 168 | 101 | 404
+  9 | 27 | 42 | 168 | 101 | 404
+ 10 | 30 | 42 | 168 | 101 | 404
+(8 rows)
+
+CREATE TABLE gtest25x (a int, b int GENERATED ALWAYS AS (a * 3) STORED);
+INSERT INTO gtest25x(b) VALUES (DEFAULT), (DEFAULT);
+INSERT INTO gtest25x(b) VALUES (DEFAULT);
+DROP TABLE gtest25;
+DROP TABLE gtest25x;
+-- ALTER TABLE ... ADD COLUMN(USTORE)
+CREATE TABLE gtest25 (a int PRIMARY KEY) with (storage_type=USTORE);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "gtest25_pkey" for table "gtest25"
+INSERT INTO gtest25 VALUES (3), (4);
+ALTER TABLE gtest25 ADD COLUMN b int GENERATED ALWAYS AS (a * 3) STORED;
+ALTER TABLE gtest25 ADD COLUMN x int GENERATED ALWAYS AS (b * 4) STORED;  -- error
+ERROR:  cannot use generated column "b" in column generation expression
+DETAIL:  A generated column cannot reference another generated column.
+ALTER TABLE gtest25 ADD COLUMN x int GENERATED ALWAYS AS (z * 4) STORED;  -- error
+ERROR:  column "z" does not exist
+ALTER TABLE gtest25 ADD COLUMN c int DEFAULT 42,
+  ADD COLUMN x int GENERATED ALWAYS AS (c * 4) STORED;
+-- Regardless of the generated column,
+-- ADD the default value column to the table will be core
+-- so comment out the following use case for now
+--ALTER TABLE gtest25 ADD COLUMN d int DEFAULT 101;
+--ALTER TABLE gtest25 ALTER COLUMN d SET DATA TYPE float8,
+--  ADD COLUMN y float8 GENERATED ALWAYS AS (d * 4) STORED;
+SELECT * FROM gtest25 ORDER BY a;
+ a | b  | c  |  x  
+---+----+----+-----
+ 3 |  9 | 42 | 168
+ 4 | 12 | 42 | 168
+(2 rows)
+
+\d gtest25
+                 Table "public.gtest25"
+ Column |  Type   |              Modifiers               
+--------+---------+--------------------------------------
+ a      | integer | not null
+ b      | integer | generated always as ((a * 3)) stored
+ c      | integer | default 42
+ x      | integer | generated always as ((c * 4)) stored
+Indexes:
+    "gtest25_pkey" PRIMARY KEY, ubtree (a) WITH (storage_type=USTORE) TABLESPACE pg_default
+
 DROP TABLE gtest25;
 -- ALTER TABLE ... ALTER COLUMN
 CREATE TABLE gtest27 (
@@ -554,6 +646,69 @@ ERROR:  column "b" of relation "gtest27" is a generated column
  b      | boolean | generated always as ((a * 2)) stored
 
 DROP TABLE gtest27;
+CREATE TABLE gtest27 (
+    a int,
+    b int,
+    x int GENERATED ALWAYS AS ((a + b) * 2) STORED
+);
+INSERT INTO gtest27 (a, b) VALUES (3, 7), (4, 11);
+ALTER TABLE gtest27 ALTER COLUMN a TYPE text;  -- error
+ERROR:  cannot alter type of a column used by a generated column
+DETAIL:  Column "a" is used by generated column "x".
+ALTER TABLE gtest27 ALTER COLUMN x TYPE numeric;
+\d gtest27
+                    Table "public.gtest27"
+ Column |  Type   |                 Modifiers                  
+--------+---------+--------------------------------------------
+ a      | integer | 
+ b      | integer | 
+ x      | numeric | generated always as (((a + b) * 2)) stored
+
+SELECT * FROM gtest27;
+ a | b  | x  
+---+----+----
+ 3 |  7 | 20
+ 4 | 11 | 30
+(2 rows)
+
+ALTER TABLE gtest27 ALTER COLUMN x TYPE boolean USING x <> 0;
+ALTER TABLE gtest27 ALTER COLUMN x DROP DEFAULT;  -- error
+ERROR:  column "x" of relation "gtest27" is a generated column
+-- It's possible to alter the column types this way:
+ALTER TABLE gtest27
+  DROP COLUMN x,
+  ALTER COLUMN a TYPE bigint,
+  ALTER COLUMN b TYPE bigint,
+  ADD COLUMN x bigint GENERATED ALWAYS AS ((a + b) * 2) STORED;
+\d gtest27
+                    Table "public.gtest27"
+ Column |  Type  |                 Modifiers                  
+--------+--------+--------------------------------------------
+ a      | bigint | 
+ b      | bigint | 
+ x      | bigint | generated always as (((a + b) * 2)) stored
+
+-- Ideally you could just do this, but not today (and should x change type?):
+ALTER TABLE gtest27
+  ALTER COLUMN a TYPE float8,
+  ALTER COLUMN b TYPE float8;  -- error
+ERROR:  cannot alter type of a column used by a generated column
+DETAIL:  Column "a" is used by generated column "x".
+\d gtest27
+                    Table "public.gtest27"
+ Column |  Type  |                 Modifiers                  
+--------+--------+--------------------------------------------
+ a      | bigint | 
+ b      | bigint | 
+ x      | bigint | generated always as (((a + b) * 2)) stored
+
+SELECT * FROM gtest27;
+ a | b  | x  
+---+----+----
+ 3 |  7 | 20
+ 4 | 11 | 30
+(2 rows)
+
 -- triggers
 CREATE TABLE gtest26 (
     a int PRIMARY KEY,
@@ -945,6 +1100,35 @@ SELECT * FROM ustoretest;
 (2 rows)
 
 DROP TABLE ustoretest;
+--default test
+CREATE TABLE def_test1 (a int, b int GENERATED ALWAYS AS (a * 2) STORED);
+INSERT INTO def_test1 VALUES (5, 55), (6, 66);  --error
+ERROR:  cannot insert into column "b"
+DETAIL:  Column "b" is a generated column.
+INSERT INTO def_test1 VALUES (5, DEFAULT), (6, 66); --error
+ERROR:  cannot insert into column "b"
+DETAIL:  Column "b" is a generated column.
+INSERT INTO def_test1 VALUES (5, 55), (6, DEFAULT); --error
+ERROR:  cannot insert into column "b"
+DETAIL:  Column "b" is a generated column.
+INSERT INTO def_test1(b,a) VALUES (DEFAULT, 55), (6, 66); --error
+ERROR:  cannot insert into column "b"
+DETAIL:  Column "b" is a generated column.
+INSERT INTO def_test1(b,a) VALUES (55, 5), (66, 6); --error
+ERROR:  cannot insert into column "b"
+DETAIL:  Column "b" is a generated column.
+INSERT INTO def_test1 VALUES (5, DEFAULT), (6, DEFAULT);
+INSERT INTO def_test1(b,a) VALUES (DEFAULT,7) , (DEFAULT,8);
+SELECT * FROM def_test1 ORDER BY a;
+ a | b  
+---+----
+ 5 | 10
+ 6 | 12
+ 7 | 14
+ 8 | 16
+(4 rows)
+
+DROP TABLE def_test1;
 DROP TABLE gtest0;
 DROP TABLE gtest1;
 DROP TABLE gtest2;

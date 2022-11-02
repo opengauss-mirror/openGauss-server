@@ -836,6 +836,10 @@ Datum bulkload_vector::append_var_length(bulkload_rows* batch_rows, Datum v, int
     char* ptr = NULL;
     int data_len = (varlen == -1) ? VARSIZE_ANY(data) : (1 + strlen(data));
 
+    if (varlen == -1 && VARATT_IS_HUGE_TOAST_POINTER(data)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("Un-support clob/blob type more than 1GB for cstore")));
+    }
     /* choose a block which can hold this string */
     this->choose_varsize_block(batch_rows, data_len);
 

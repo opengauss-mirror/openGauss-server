@@ -85,6 +85,8 @@ typedef struct IndexInfo {
     int ii_NumIndexKeyAttrs;    /* number of key columns in index */
     AttrNumber ii_KeyAttrNumbers[INDEX_MAX_KEYS];
     List* ii_Expressions;       /* list of Expr */
+    List* ii_ExpressionUsers;        /* InvalidOid if don't have expression index or expression is system function.
+                                     Save expression's creater's oid */
     List* ii_ExpressionsState;  /* list of ExprState */
     List* ii_Predicate;         /* list of Expr */
     List* ii_PredicateState;    /* list of ExprState */
@@ -206,6 +208,8 @@ typedef struct ExprContext {
     Cursor_Data cursor_data;
     int dno;
     PLpgSQL_execstate* plpgsql_estate;
+
+    bool hasSetResultStore;
     /*
      * For vector set-result function.
      */
@@ -517,6 +521,8 @@ typedef struct BloomFilterControl {
 
 #define InvalidBktId  (-1)    /* invalid hash-bucket id */
 
+typedef struct QueryDesc QueryDesc;
+
 /* ----------------
  *	  EState information
  *
@@ -638,6 +644,8 @@ typedef struct EState {
 #endif
 
     PruningResult* pruningResult;
+    bool have_current_xact_date; /* Check whether dirty reads exist in the cursor rollback scenario. */
+    QueryDesc* rootQueryDesc;
 } EState;
 
 /*
@@ -1393,6 +1401,7 @@ typedef struct ModifyTableState {
     UpsertState* mt_upsert;                /*  DUPLICATE KEY UPDATE evaluation state */
     instr_time first_tuple_modified; /* record the end time for the first tuple inserted, deleted, or updated */
     ExprContext* limitExprContext; /* for limit expresssion */
+    bool mt_material_all;
 } ModifyTableState;
 
 typedef struct CopyFromManagerData* CopyFromManager;
@@ -1653,7 +1662,8 @@ struct SeqScanAccessor;
  */
 typedef TupleTableSlot *(*ExecScanAccessMtd) (ScanState *node);
 typedef bool(*ExecScanRecheckMtd) (ScanState *node, TupleTableSlot *slot);
-typedef void (*SeqScanGetNextMtd)(TableScanDesc scan, TupleTableSlot* slot, ScanDirection direction);
+typedef void (*SeqScanGetNextMtd)(TableScanDesc scan, TupleTableSlot* slot, ScanDirection direction,
+    bool* has_cur_xact_write);
 
 typedef struct ScanState {
     PlanState ps; /* its first field is NodeTag */
@@ -1683,6 +1693,7 @@ typedef struct ScanState {
     ExecScanAccessMtd ScanNextMtd;
     bool scanBatchMode;
     ScanBatchState* scanBatchState;
+    Snapshot timecapsuleSnapshot;    /* timecapusule snap info */
 } ScanState;
 
 /*
@@ -2562,7 +2573,7 @@ typedef struct GroupingIdExprState {
 } GroupingIdExprState;
 
 /*
- * used by CstoreInsert and DfsInsert in nodeModifyTable.h and vecmodifytable.cpp
+ * used by CstoreInsert in nodeModifyTable.h and vecmodifytable.cpp
  */
 #define FLUSH_DATA(obj, type)                             \
     do {                                                  \

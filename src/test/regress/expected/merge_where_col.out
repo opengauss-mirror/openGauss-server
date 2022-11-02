@@ -132,10 +132,34 @@ SELECT * FROM tb_b ORDER BY  1;
 (4 rows)
 
 ROLLBACK; 
+create table col_com_base_1(
+col_int                      integer,
+col_double                   double precision,
+col_date                     date
+);
+create table col_com_base_2(
+col_int                      integer,
+col_double                   double precision,
+col_date                     date
+);
+MERGE INTO col_com_base_1 Table_004 USING col_com_base_2 Table_003
+    ON ( Table_003.col_double = Table_004.col_double ) 
+WHEN MATCHED THEN UPDATE SET col_date = col_date
+WHERE  Table_004.col_int = ( select SUM(Table_004.col_int) from col_com_base_1);
+ERROR:  cannot use aggregate function in UPDATE
+LINE 4: WHERE  Table_004.col_int = ( select SUM(Table_004.col_int) f...
+                                            ^
+UPDATE col_com_base_1 Table_004 SET col_int = 2 where Table_004.col_int = ( select SUM(Table_004.col_int) from col_com_base_1);
+ERROR:  cannot use aggregate function in UPDATE
+LINE 1: ...ET col_int = 2 where Table_004.col_int = ( select SUM(Table_...
+                                                             ^
+UPDATE col_com_base_1 Table_004 SET col_int = 2 where Table_004.col_int = ( select SUM(col_int) from col_com_base_1);
 -- clean up
 DROP SCHEMA merge_where_col CASCADE;
-NOTICE:  drop cascades to 4 other objects
+NOTICE:  drop cascades to 6 other objects
 DETAIL:  drop cascades to table merge_nest_tab1
 drop cascades to table dt2
 drop cascades to table tb_a
 drop cascades to table tb_b
+drop cascades to table col_com_base_1
+drop cascades to table col_com_base_2

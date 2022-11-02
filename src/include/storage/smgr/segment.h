@@ -188,5 +188,7 @@ extern Oid get_tablespace_oid_by_name(const char *tablespacename);
 extern void redo_xlog_deal_alloc_seg(uint8 opCode, Buffer buffer, const char* data, int data_len,
     TransactionId xid);
 extern StorageType PartitionGetStorageType(Partition partition, Oid parentOid);
+extern bool repair_check_physical_type(uint32 spcNode, uint32 dbNode, int32 forkNum, uint32 *relNode, uint32 *blockNum);
+extern RelFileNode get_segment_logic_rnode(SegSpace *spc, BlockNumber head_blocknum, int aim_fork);
 
 #endif

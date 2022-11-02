@@ -764,6 +764,7 @@ vtrim1(PG_FUNCTION_ARGS)
 	Datum 			args[1];
 	FunctionCallInfoData finfo;
 
+    finfo.flinfo = fcinfo->flinfo;
 	finfo.arg = &args[0];
 
 

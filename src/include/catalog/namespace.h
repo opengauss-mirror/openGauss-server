@@ -137,8 +137,9 @@ extern FuncCandidateList FuncnameGetCandidates(List *names,
                       bool expand_variadic,
                       bool expand_defaults,
                       bool func_create,
-                      bool  include_out = false,
-                      char prokind = 'u');
+                      bool include_out = false,
+                      char prokind = 'u',
+                      bool is_overload = false);
 
 extern bool FunctionIsVisible(Oid funcid);
 

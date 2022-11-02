@@ -336,6 +336,7 @@ uint16 second_version_dw_single_flush(BufferTag tag, Block block, XLogRecPtr pag
 extern uint16 seg_dw_single_flush_without_buffer(BufferTag tag, Block block, bool* flush_old_file);
 extern uint16 seg_dw_single_flush(BufferDesc *buf_desc, bool* flush_old_file);
 extern void wait_all_single_dw_finish_flush_old();
+extern void wait_all_single_dw_finish_flush(bool is_first);
 extern uint16 dw_single_flush_internal_old(BufferTag tag, Block block, XLogRecPtr page_lsn,
     BufferTag phy_tag, bool *dw_flush);
 extern void dw_single_old_file_truncate();
@@ -345,10 +346,17 @@ extern void dw_fetch_batch_file_name(int i, char* buf);
 extern void wait_all_dw_page_finish_flush();
 extern void dw_generate_meta_file(dw_batch_meta_file* batch_meta_file);
 extern void dw_generate_batch_files(int batch_file_num, uint64 dw_file_size);
+extern void dw_remove_batch_file(int dw_file_num);
+extern void dw_remove_batch_meta_file();
+extern void dw_recover_all_partial_write_batch(knl_g_dw_context *batch_cxt);
 extern void dw_cxt_init_batch();
 extern void dw_remove_file(const char* file_name);
 extern int dw_open_file(const char* file_name);
+extern int dw_create_file(const char* file_name);
 extern void dw_upgrade_renable_double_write();
 
+extern void dw_blocked_for_snapshot();
+extern void dw_released_after_snapshot();
+extern bool is_dw_snapshot_blocked();
 
 #endif /* DOUBLE_WRITE_H */

@@ -90,6 +90,7 @@ typedef struct knl_session_attr_resource {
     int sqlUseSpaceLimit;
     bool enable_auto_explain;
     int  auto_explain_level;
+    int auto_explain_log_min_duration;
 } knl_session_attr_resource;
 
 #endif /* SRC_INCLUDE_KNL_KNL_SESSION_ATTR_RESOURCE_H_ */

@@ -5307,8 +5307,8 @@ AclMode pg_directory_aclmask(Oid dir_oid, Oid roleid, AclMode mask, AclMaskHow h
      * when enable_access_server_directory is off, only initial user bypass all permission checking
      * otherwise, superuser can bypass all permission checking
      */
-    if ((!g_instance.attr.attr_storage.enable_access_server_directory && superuser_arg_no_seperation(roleid)) ||
-        (g_instance.attr.attr_storage.enable_access_server_directory &&
+    if ((!u_sess->attr.attr_storage.enable_access_server_directory && superuser_arg_no_seperation(roleid)) ||
+        (u_sess->attr.attr_storage.enable_access_server_directory &&
             (superuser_arg(roleid) || systemDBA_arg(roleid))))
         return REMOVE_DDL_FLAG(mask);
 

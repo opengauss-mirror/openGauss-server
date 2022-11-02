@@ -81,7 +81,7 @@ static const uint32 ALL_WORKER = (uint32)-3;
 static const uint32 USTORE_WORKER = (uint32)-4;
 
 RedoItem* CreateRedoItem(XLogReaderState* record, uint32 shareCount, uint32 designatedWorker, List* expectedTLIs,
-    TimestampTz recordXTime, bool buseoriginal);
+    TimestampTz recordXTime);
 RedoItem* CreateLSNMarker(XLogReaderState* record, List* expectedTLIs, bool buseoriginal = false);
 
 bool IsLSNMarker(const RedoItem* item);

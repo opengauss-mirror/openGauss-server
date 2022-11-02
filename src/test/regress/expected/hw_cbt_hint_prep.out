@@ -1,0 +1,144 @@
+CREATE TABLE txn_inv_transaction_costs_t (
+    route_group_id character varying(40) NOT NULL,
+    transaction_cost_id bigint NOT NULL,
+    created_by bigint DEFAULT (-1) NOT NULL,
+    creation_date timestamp without time zone DEFAULT now() NOT NULL,
+    delete_flag character(1) DEFAULT 'N'::bpchar NOT NULL,
+    description nvarchar2(500),
+    last_update_date timestamp without time zone DEFAULT now() NOT NULL,
+    last_update_version integer DEFAULT 1 NOT NULL,
+    last_updated_by bigint DEFAULT (-1) NOT NULL,
+    coa_account_code nvarchar2(10),
+    accounted_flag character(1) DEFAULT 'N'::bpchar NOT NULL,
+    batch_sequence_number bigint,
+    coa_bu_code nvarchar2(10),
+    coa_company_code nvarchar2(30),
+    cost_group_code nvarchar2(50),
+    cost_update_id bigint,
+    costed_flag character(1),
+    costing_sequence_number bigint,
+    currency_code nvarchar2(15),
+    defer_flag character(1),
+    coa_department_code nvarchar2(30),
+    exchange_rate_value numeric(38,18),
+    exchange_rate_date timestamp(0) without time zone,
+    exchange_rate_type nvarchar2(100),
+    gc_total_amount numeric(38,10),
+    gc_total_variance_amount numeric(38,10),
+    gc_transaction_cost numeric(38,18),
+    coa_ic_code nvarchar2(30),
+    link_transaction_id bigint,
+    coa_product_code nvarchar2(50),
+    coa_geo_pc_code nvarchar2(10),
+    total_amount numeric(38,10),
+    total_variance_amount numeric(38,10),
+    transaction_cost numeric(38,18),
+    transaction_id bigint NOT NULL,
+    cogs_flag character(1),
+    transaction_event_id nvarchar2(100),
+    accounted_finished_date timestamp without time zone,
+    cogs_finished_date timestamp without time zone,
+    costed_finished_date timestamp without time zone,
+    cost_method_code nvarchar2(50),
+    ou_name nvarchar2(20),
+    unit_code nvarchar2(30),
+    je_transfer_status_code nvarchar2(30),
+    organization_code nvarchar2(3),
+    last_update_trace_id nvarchar2(100)
+)
+WITH (orientation=row, compression=no, storage_type=USTORE)
+PARTITION BY LIST (route_group_id) (PARTITION p1031 VALUES ('1031') TABLESPACE pg_default)
+ENABLE ROW MOVEMENT;
+CREATE UNIQUE INDEX txn_inv_transaction_costs_u1 ON txn_inv_transaction_costs_t USING ubtree (transaction_id, route_group_id) LOCAL(PARTITION p1031_transaction_id_route_group_id_idx)  WITH (storage_type=ustore) TABLESPACE pg_default;
+CREATE INDEX txn_inv_transaction_costs_n1 ON txn_inv_transaction_costs_t USING ubtree (last_update_date, route_group_id) LOCAL(PARTITION p1031_last_update_date_route_group_id_idx)  WITH (storage_type=ustore) TABLESPACE pg_default;
+CREATE INDEX txn_inv_transaction_costs_n2 ON txn_inv_transaction_costs_t USING ubtree (transaction_event_id) LOCAL(PARTITION p1031_transaction_event_id_idx)  WITH (storage_type=ustore) TABLESPACE pg_default;
+CREATE INDEX txn_inv_transaction_costs_n5 ON txn_inv_transaction_costs_t USING ubtree (batch_sequence_number, organization_code, route_group_id) LOCAL(PARTITION p1031_batch_sequence_number_organization_code_route_group_i_idx)  WITH (storage_type=ustore) TABLESPACE pg_default;
+CREATE INDEX txn_inv_transaction_costs_n6 ON txn_inv_transaction_costs_t USING ubtree (costing_sequence_number, organization_code, route_group_id) LOCAL(PARTITION p1031_costing_sequence_number_organization_code_route_group_idx)  WITH (storage_type=ustore) TABLESPACE pg_default;
+CREATE INDEX txn_inv_transaction_costs_n4 ON txn_inv_transaction_costs_t USING ubtree (creation_date, route_group_id) LOCAL(PARTITION p1031_creation_date_route_group_id_idx)  WITH (storage_type=ustore) TABLESPACE pg_default;
+CREATE INDEX txn_inv_transaction_costs_n3 ON txn_inv_transaction_costs_t USING ubtree (link_transaction_id, route_group_id) LOCAL(PARTITION p1031_link_transaction_id_route_group_id_idx)  WITH (storage_type=ustore) TABLESPACE pg_default;
+ALTER TABLE txn_inv_transaction_costs_t ADD CONSTRAINT txn_inv_transaction_costs_t_pkey PRIMARY KEY (transaction_cost_id, route_group_id) WITH (storage_type=USTORE);
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "txn_inv_transaction_costs_t_pkey" for table "txn_inv_transaction_costs_t"
+CREATE TABLE txn_inv_transactions_t (
+    route_group_id character varying(40) NOT NULL,
+    transaction_id bigint NOT NULL,
+    created_by bigint DEFAULT (-1) NOT NULL,
+    creation_date timestamp without time zone DEFAULT now() NOT NULL,
+    delete_flag character(1) DEFAULT 'N'::bpchar NOT NULL,
+    description nvarchar2(500),
+    last_update_date timestamp without time zone DEFAULT now() NOT NULL,
+    last_update_version integer DEFAULT 1 NOT NULL,
+    last_updated_by bigint DEFAULT (-1) NOT NULL,
+    account_period_code nvarchar2(15),
+    inventory_type_code nvarchar2(30),
+    subinventory_code nvarchar2(10),
+    item_code nvarchar2(40) NOT NULL,
+    locator_code nvarchar2(40),
+    organization_code nvarchar2(3),
+    organization_id bigint NOT NULL,
+    plan_code nvarchar2(30),
+    plan_site nvarchar2(60),
+    plan_type nvarchar2(30),
+    primary_transaction_quantity numeric(24,10),
+    primary_uom_code nvarchar2(3),
+    property_code nvarchar2(30),
+    property_site nvarchar2(60),
+    property_type nvarchar2(30),
+    rcv_transaction_id bigint,
+    revision nvarchar2(3),
+    secondary_transaction_quantity numeric(24,10),
+    secondary_uom_code nvarchar2(3),
+    source_code nvarchar2(30),
+    source_line_id numeric(38,10) NOT NULL,
+    transaction_action_code nvarchar2(30),
+    transaction_quantity numeric(24,10) NOT NULL,
+    transaction_reference nvarchar2(240),
+    trans_event_header_id bigint NOT NULL,
+    trans_event_line_id bigint NOT NULL,
+    transaction_reason_code nvarchar2(30),
+    transaction_date timestamp without time zone NOT NULL,
+    transaction_type_code nvarchar2(80),
+    transaction_source_type_code nvarchar2(30),
+    transaction_uom_code nvarchar2(3) NOT NULL,
+    transfer_inventory_type_code nvarchar2(30),
+    transfer_subinventory_code nvarchar2(10),
+    transfer_locator_code nvarchar2(40),
+    transfer_organization_code nvarchar2(3),
+    transfer_organization_id bigint,
+    transfer_plan_code nvarchar2(30),
+    transfer_plan_site nvarchar2(60),
+    transfer_plan_type nvarchar2(30),
+    transfer_property_code nvarchar2(30),
+    transfer_property_site nvarchar2(60),
+    transfer_property_type nvarchar2(30),
+    transfer_transaction_id bigint,
+    trx_source_line_id numeric(38,10),
+    transaction_source_number nvarchar2(80),
+    transaction_reason_id bigint,
+    transaction_source_type_id bigint,
+    transaction_type_id bigint,
+    transaction_action_id bigint,
+    subinventory_type nvarchar2(30),
+    transfer_subinventory_type nvarchar2(30),
+    source_system_code nvarchar2(20),
+    trans_exattr_id bigint,
+    transaction_source_id bigint,
+    operation_seq_num bigint,
+    last_update_trace_id nvarchar2(100)
+)
+WITH (orientation=row, compression=no, storage_type=USTORE)
+PARTITION BY LIST (route_group_id) (PARTITION p1031 VALUES ('1031') TABLESPACE pg_default)
+ENABLE ROW MOVEMENT;
+COMMENT ON COLUMN txn_inv_transactions_t.operation_seq_num IS '工序序号';
+CREATE INDEX txn_inv_transactions_n11 ON txn_inv_transactions_t USING ubtree (last_update_date, route_group_id) LOCAL(PARTITION p1031_last_update_date_route_group_id_idx)  WITH (storage_type=ustore) TABLESPACE pg_default;
+CREATE INDEX txn_inv_transactions_t_n4 ON txn_inv_transactions_t USING ubtree (transaction_source_number) LOCAL(PARTITION p1031_transaction_source_number_idx)  WITH (storage_type=ustore) TABLESPACE pg_default;
+CREATE INDEX txn_inv_transactions_t_n1 ON txn_inv_transactions_t USING ubtree (item_code, subinventory_code, organization_code, route_group_id) LOCAL(PARTITION p1031_item_code_subinventory_code_organization_code_route_g_idx)  WITH (storage_type=ustore) TABLESPACE pg_default;
+CREATE INDEX txn_inv_transactions_n12 ON txn_inv_transactions_t USING ubtree (transfer_transaction_id, route_group_id) LOCAL(PARTITION p1031_transfer_transaction_id_route_group_id_idx)  WITH (storage_type=ustore) TABLESPACE pg_default;
+CREATE INDEX txn_inv_transactions_t_n9 ON txn_inv_transactions_t USING ubtree (trans_exattr_id, route_group_id) LOCAL(PARTITION p1031_trans_exattr_id_route_group_id_idx)  WITH (storage_type=ustore) TABLESPACE pg_default;
+CREATE INDEX txn_inv_transactions_t_n8 ON txn_inv_transactions_t USING ubtree (source_line_id, route_group_id) LOCAL(PARTITION p1031_source_line_id_route_group_id_idx)  WITH (storage_type=ustore) TABLESPACE pg_default;
+CREATE INDEX txn_inv_transactions_t_n7 ON txn_inv_transactions_t USING ubtree (trx_source_line_id, route_group_id) LOCAL(PARTITION p1031_trx_source_line_id_route_group_id_idx)  WITH (storage_type=ustore) TABLESPACE pg_default;
+CREATE INDEX txn_inv_transactions_t_n6 ON txn_inv_transactions_t USING ubtree (transaction_date, route_group_id) LOCAL(PARTITION p1031_transaction_date_route_group_id_idx)  WITH (storage_type=ustore) TABLESPACE pg_default;
+CREATE INDEX txn_inv_transactions_t_n5 ON txn_inv_transactions_t USING ubtree (creation_date, route_group_id) LOCAL(PARTITION p1031_creation_date_route_group_id_idx)  WITH (storage_type=ustore) TABLESPACE pg_default;
+CREATE INDEX txn_inv_transactions_t_n3 ON txn_inv_transactions_t USING ubtree (trans_event_header_id) LOCAL(PARTITION p1031_trans_event_header_id_idx)  WITH (storage_type=ustore) TABLESPACE pg_default;
+CREATE INDEX txn_inv_transactions_t_n2 ON txn_inv_transactions_t USING ubtree (trans_event_line_id) LOCAL(PARTITION p1031_trans_event_line_id_idx)  WITH (storage_type=ustore) TABLESPACE pg_default;
+ALTER TABLE txn_inv_transactions_t ADD CONSTRAINT txn_inv_transactions_t_pkey PRIMARY KEY (transaction_id, route_group_id) WITH (storage_type=USTORE);
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "txn_inv_transactions_t_pkey" for table "txn_inv_transactions_t"

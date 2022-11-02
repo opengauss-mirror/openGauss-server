@@ -194,3 +194,17 @@ vacuum ustore_part;
 insert into ustore_part values (lpad('B',409600,'B'), lpad('C',409600,'C'));
 -- vacuum full ustore_part;
 drop table ustore_part;
+-- test upsert for partition table in ustore
+create table ustore_part(c1 int, c2 int, c3 int) with (storage_type=USTORE) 
+partition by range(c1)
+(
+partition p1 values less than(3),
+partition p2 values less than(7),
+partition p3 values less than(10)
+);
+CREATE UNIQUE INDEX ustore_part_u2 ON ustore_part (c2) TABLESPACE pg_default;
+ALTER TABLE ustore_part ADD CONSTRAINT ustore_part_pk PRIMARY KEY (c1);
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "ustore_part_pk" for table "ustore_part"
+INSERT INTO ustore_part values(1, 10) on duplicate key update c3 = 10;
+INSERT INTO ustore_part values(1, 11) on duplicate key update c3 = 10;
+drop table ustore_part;

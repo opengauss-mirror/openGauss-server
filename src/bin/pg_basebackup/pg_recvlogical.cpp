@@ -388,7 +388,7 @@ static void BeginToText(const char* stream, uint32 *curPos, PQExpBuffer res)
     *curPos += sizeof(LSNupper);
     uint32 LSNlower = ntohl(*(uint32 *)(&stream[*curPos]));
     *curPos += sizeof(LSNlower);
-    appendPQExpBuffer(res, "commit_lsn: %X/%X", LSNupper, LSNlower);
+    appendPQExpBuffer(res, "first_lsn: %X/%X", LSNupper, LSNlower);
 
     if (stream[*curPos] == 'T') {
         *curPos += 1;

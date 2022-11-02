@@ -1419,17 +1419,24 @@ Oid ProcedureCreate(const char* procedureName, Oid procNamespace, Oid propackage
 
     /* A db do not overload a function by arguments.*/
     NameData* pkgname = NULL;
+    char* schemaName = get_namespace_name(procNamespace);
+    if (OidIsValid(propackageid)) {
+        pkgname = GetPackageName(propackageid);
+    }
+    if (pkgname == NULL) { 
+        name = list_make2(makeString(schemaName), makeString(pstrdup(procedureName)));
+    } else {
+        name = list_make3(makeString(schemaName),
+            makeString(pstrdup(pkgname->data)), makeString(pstrdup(procedureName)));
+    }
+#ifndef ENABLE_MULTIPLE_NODES
+    if (pkgname == NULL) {
+        LockProcName(schemaName, NULL, procedureName);
+    } else {
+        LockProcName(schemaName, pkgname->data, procedureName);
+    }
+#endif
     if (isOraStyle && !package) {
-        if (OidIsValid(propackageid)) {
-            pkgname = GetPackageName(propackageid);
-        }
-        if (pkgname == NULL) { 
-            name = list_make2(makeString(get_namespace_name(procNamespace)), makeString(pstrdup(procedureName)));
-        } else {
-            name = list_make3(makeString(get_namespace_name(procNamespace)), makeString(pstrdup(pkgname->data)), makeString(pstrdup(procedureName)));
-        }
-        List* name = list_make2(makeString(get_namespace_name(procNamespace)), makeString(pstrdup(procedureName)));
-
         FuncCandidateList listfunc = FuncnameGetCandidates(name, -1, NULL, false, false, true);
         if (listfunc) {
             if (listfunc->next)
@@ -2258,6 +2265,9 @@ void delete_file_handle(const char* library_path)
     DynamicFileList* file_scanner = NULL;
     DynamicFileList* pre_file_scanner = file_list;
 
+    AutoMutexLock libraryLock(&file_list_lock);
+    libraryLock.lock();
+
     char* fullname = expand_dynamic_library_name(library_path);
     for (file_scanner = file_list; file_scanner != NULL; file_scanner = file_scanner->next) {
         if (strncmp(fullname, file_scanner->filename, strlen(fullname) + 1) == 0) {
@@ -2280,6 +2290,8 @@ void delete_file_handle(const char* library_path)
             pre_file_scanner = file_scanner;
         }
     }
+
+    libraryLock.unLock();
 }
 
 /*
@@ -2661,6 +2673,29 @@ static void CheckInParameterConflicts(CatCList* catlist, const char* procedureNa
             ereport(ERROR, (errcode(ERRCODE_DUPLICATE_FUNCTION),
                 errmsg("function \"%s\" already exists with same argument types", procedureName)));
         }
+    }
+}
+
+/*
+ * Due to procedure has no unique index on parameters, it maybe insert same data
+ * and this function prevent insert procedure with same funcname and funcargs,
+ */
+void LockProcName(char* schemaname, char* pkgname, const char* funcname)
+{
+    if (u_sess->attr.attr_common.upgrade_mode != 0) {
+        return;
+    }
+    Oid schemaOid = SchemaNameGetSchemaOid(schemaname, false);
+    if (IsPackageSchemaOid(schemaOid)) {
+        return;
+    }
+    if (pkgname != NULL) {
+        List* funcnameList = list_make2(makeString(pstrdup(pkgname)), makeString(pstrdup(funcname)));
+        uint32 hash_value = string_hash(NameListToQuotedString(funcnameList), NAMEDATALEN + NAMEDATALEN);
+        LockDatabaseObject(ProcedureRelationId, schemaOid, hash_value, ExclusiveLock);
+    } else {
+        uint32 hash_value = string_hash(funcname, NAMEDATALEN);
+        LockDatabaseObject(ProcedureRelationId, schemaOid, hash_value, ExclusiveLock);
     }
 }
 #endif

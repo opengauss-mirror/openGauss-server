@@ -203,7 +203,7 @@ static const RmgrDispatchData g_dispatchTable[RM_MAX_ID + 1] = {
 #ifdef ENABLE_MOT
     {DispatchMotRecord, NULL, RM_MOT_ID, 0, 0},
 #endif
-    { DispatchUHeapRecord, RmgrRecordInfoValid, RM_UHEAP_ID, XLOG_UHEAP_INSERT, XLOG_UHEAP_MULTI_INSERT },
+    { DispatchUHeapRecord, RmgrRecordInfoValid, RM_UHEAP_ID, XLOG_UHEAP_INSERT, XLOG_UHEAP_NEW_PAGE },
     { DispatchUHeap2Record, RmgrRecordInfoValid, RM_UHEAP2_ID, XLOG_UHEAP2_BASE_SHIFT, XLOG_UHEAP2_EXTEND_TD_SLOTS },
     { DispatchUHeapUndoRecord, RmgrRecordInfoValid, RM_UNDOLOG_ID, XLOG_UNDO_EXTEND, XLOG_UNDO_DISCARD },
     { DispatchUndoActionRecord, RmgrRecordInfoValid, RM_UHEAPUNDO_ID, 
@@ -1420,7 +1420,8 @@ static void GetUndoSlotIds(XLogReaderState *record)
         }
         case XLOG_UHEAP_FREEZE_TD_SLOT:
         case XLOG_UHEAP_INVALID_TD_SLOT:
-        case XLOG_UHEAP_CLEAN: {
+        case XLOG_UHEAP_CLEAN:
+        case XLOG_UHEAP_NEW_PAGE: {
             /* No undo actions to redo */
             return;
         }
@@ -1616,7 +1617,12 @@ void ClearRecordInfo(XLogReaderState *xlogState)
 #endif
     }
     xlogState->max_block_id = -1;
-    
+    if (xlogState->readRecordBufSize > BIG_RECORD_LENGTH) {
+        pfree(xlogState->readRecordBuf);
+        xlogState->readRecordBuf = NULL;
+        xlogState->readRecordBufSize = 0;
+    }
+
     xlogState->isDecode = false;
     xlogState->isFullSync = false;
     xlogState->refcount = 0;
@@ -1625,13 +1631,13 @@ void ClearRecordInfo(XLogReaderState *xlogState)
 /* Run from each page worker thread. */
 void FreeRedoItem(RedoItem *item)
 {
-#ifdef USE_ASSERT_CHECKING
     if (item->record.isDecode) {
+#ifdef USE_ASSERT_CHECKING
         ItemBlocksOfItemIsReplayed(item);
         ItemLsnCheck(item);
-    }
 #endif
-    CountXLogNumbers(&item->record);
+        CountXLogNumbers(&item->record);
+    }
     ClearRecordInfo(&item->record);
     pg_write_barrier();
     RedoItem *oldHead = (RedoItem *)pg_atomic_read_uintptr((uintptr_t *)&g_dispatcher->freeHead);
@@ -1889,6 +1895,13 @@ void UpdateStandbyState(HotStandbyState newState)
         UpdatePageRedoWorkerStandbyState(g_dispatcher->readLine.readPageThd, newState);
         UpdatePageRedoWorkerStandbyState(g_dispatcher->readLine.readThd, newState);
         pg_atomic_write_u32(&(g_dispatcher->standbyState), newState);
+    }
+}
+
+void UpdateMinRecoveryForTrxnRedoThd(XLogRecPtr newMinRecoveryPoint)
+{
+    if ((get_real_recovery_parallelism() > 1) && (GetBatchCount() > 0)) {
+        g_dispatcher->trxnLine.redoThd->minRecoveryPoint = newMinRecoveryPoint;
     }
 }
 
@@ -2160,13 +2173,6 @@ static bool DispatchUHeapUndoRecord(XLogReaderState* record, List* expectedTLIs,
             undo::XlogUndoExtend *xlrec = (undo::XlogUndoExtend *) XLogRecGetData(record);
             zoneId = UNDO_PTR_GET_ZONE_ID(xlrec->tail);
             opName = "UNDO_ALLOCATE";
-            break;
-        }
-        case XLOG_UNDO_CLEAN: 
-        case XLOG_SLOT_CLEAN: {
-            undo::XlogUndoClean *xlrec = (undo::XlogUndoClean *)XLogRecGetData(record);
-            zoneId = UNDO_PTR_GET_ZONE_ID(xlrec->tail);
-            opName = "UNDO_CLEAN";
             break;
         }
         default: {

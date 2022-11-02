@@ -51,6 +51,7 @@
 /*** SHA-256 Context Structures *******************************/
 #define K_LENGTH 32
 #define ITERATION_COUNT 10000
+#define MAX_ITERATION_COUNT 10000000
 #ifdef ENABLE_LITE_MODE
 #define ITERATION_COUNT_V1 2048
 #endif

@@ -48,7 +48,6 @@ List* check_op_list_template(Plan* result_plan, List* (*check_eval)(Node*))
     switch (nodeTag(result_plan)) {
         case T_SeqScan:
         case T_CStoreScan:
-        case T_DfsScan:
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
 #endif   /* ENABLE_MULTIPLE_NODES */
@@ -87,11 +86,6 @@ List* check_op_list_template(Plan* result_plan, List* (*check_eval)(Node*))
         } break;
         case T_CStoreIndexScan: {
             CStoreIndexScan* splan = (CStoreIndexScan*)result_plan;
-
-            res_list = list_concat_unique(res_list, check_eval((Node*)splan->indexqual));
-        } break;
-        case T_DfsIndexScan: {
-            DfsIndexScan* splan = (DfsIndexScan*)result_plan;
 
             res_list = list_concat_unique(res_list, check_eval((Node*)splan->indexqual));
         } break;
@@ -272,8 +266,8 @@ void stream_path_walker(Path* path, ContainStreamContext* context)
     /* Record if there's parameterized path */
     if (path->param_info) {
         Relids req_outer = bms_intersect(path->param_info->ppi_req_outer, context->outer_relids);
-#ifdef ENABLE_MULTIPLE_NODES
         Bitmapset* req_upper = bms_union(path->param_info->ppi_req_upper, context->upper_params);
+#ifdef ENABLE_MULTIPLE_NODES
         if (!bms_is_empty(req_outer) || !bms_is_empty(req_upper)) {
 #else
         if (!bms_is_empty(req_outer)) {
@@ -287,6 +281,11 @@ void stream_path_walker(Path* path, ContainStreamContext* context)
                 context->has_stream = true;
             bms_free_ext(req_outer);
         }
+
+        if (!bms_is_empty(req_upper) && context->under_stream) {
+            context->upper_param_cross_stream = true;
+            bms_free_ext(req_upper);
+        }
     }
 
     /* Quit earlier if check condition meets */
@@ -299,7 +298,10 @@ void stream_path_walker(Path* path, ContainStreamContext* context)
             /* Don't count stream node under added materialize node */
             if (!context->under_materialize_all)
                 context->has_stream = true;
+            bool old_under_stream = context->under_stream;
+            context->under_stream = true;
             stream_path_walker(((StreamPath*)path)->subpath, context);
+            context->under_stream = old_under_stream;
         } break;
         /* For subqueryscan, we should traverse to its child plan */
         case T_SubqueryScan: {

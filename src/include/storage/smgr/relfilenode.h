@@ -114,7 +114,11 @@ typedef struct RelFileNodeV2 {
     int4 bucketNode; /* bucketid */
 } RelFileNodeV2;
 
-
+typedef struct buftag {
+    RelFileNode rnode; /* physical relation identifier */
+    ForkNumber forkNum;
+    BlockNumber blockNum; /* blknum relative to begin of reln */
+} BufferTag;
 #define IsSegmentFileNode(rnode) ((rnode).bucketNode > InvalidBktId)
 #define IsHeapFileNode(rnode)  (!IsSegmentFileNode(rnode))
 #define IsSegmentPhysicalRelNode(rNode) (IsSegmentFileNode(rNode) && (rNode).relNode <= 5)

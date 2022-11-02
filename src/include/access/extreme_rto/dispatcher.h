@@ -237,6 +237,7 @@ PGPROC *StartupPidGetProc(ThreadId pid);
 extern void SetStartupBufferPinWaitBufId(int bufid);
 extern void GetStartupBufferPinWaitBufId(int *bufids, uint32 len);
 void UpdateStandbyState(HotStandbyState newState);
+void UpdateMinRecoveryForTrxnRedoThd(XLogRecPtr minRecoveryPoint);
 
 /* Redo end state saved by each page worker. */
 void **GetXLogInvalidPagesFromWorkers();

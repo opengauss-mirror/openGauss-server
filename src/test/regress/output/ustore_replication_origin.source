@@ -14,6 +14,7 @@ SELECT data FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL);
 --?.*
 --?.*
 --?.*
+--?.*
  {"table_name":"public.a","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["1","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
  {"table_name":"public.a","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["2","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
  {"table_name":"public.a","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["3","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}

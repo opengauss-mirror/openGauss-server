@@ -76,10 +76,43 @@ explain (costs off) select * from t1 order by 1 limit 1 offset 10;
 explain (costs off) select (select max(id) from t4);
 select (select max(id) from t4);
 
+explain (costs off) select * from (select a, rownum as row from (select a from t3) where rownum <= 10) where row >=5;
+select * from (select a, rownum as row from (select a from t3) where rownum <= 10) where row >=5;
+
 create table test_smp_tbl(dir text);
 select sample_0.classoid as c0, 6 as c1, sample_0.xc_node_id as c2 from pg_catalog.pg_seclabel as sample_0 where ((((EXISTS ( select sample_0.classoid as c0,sample_1.dir as c2, sample_1.dir as c3 from test_smp_tbl as sample_1 where (select proargtypes from pg_catalog.pg_proc limit 1 offset 4) = (select indcollation from pg_catalog.pg_index ))))));
 drop table test_smp_tbl;
-
 --clean
 set search_path=public;
 drop schema test_smp cascade;
+
+create table col_table_001 (id int, name char[] ) with (orientation=column);
+create table col_table_002 (id int, aid int,name char[] ,apple char[]) with (orientation=column);
+insert into col_table_001 values(1, '{a,b,c}' );
+insert into col_table_001 values(2, '{b,b,b}' );
+insert into col_table_001 values(3, '{c,c,c}' );
+insert into col_table_001 values(4, '{a}' );
+insert into col_table_001 values(5, '{b}' );
+insert into col_table_001 values(6, '{c}' );
+insert into col_table_001 values(7, '{a,b,c}' );
+insert into col_table_001 values(8, '{b,c,a}' );
+insert into col_table_001 values(9, '{c,a,b}' );
+insert into col_table_001 values(10, '{c,a,b}' );
+insert into col_table_002 values(11, 1,'{a,s,d}' );
+insert into col_table_002 values(12, 1,'{b,n,m}' );
+insert into col_table_002 values(13, 2,'{c,v,b}' );
+insert into col_table_002 values(14, 1,'{a}' );
+insert into col_table_002 values(15, 1,'{b}' );
+insert into col_table_002 values(15, 2,'{c}' );
+insert into col_table_002 values(17, 1,'{a,s,d}','{a,b,c}' );
+insert into col_table_002 values(18, 1,'{b,n,m}','{a,b,c}' );
+insert into col_table_002 values(19, 2,'{c,v,b}','{a,b,c}');
+insert into col_table_002 values(20, 2,'{c,v,b}','{b,c,a}');
+insert into col_table_002 values(21, 21,'{c,c,b}','{b,c,a}');
+
+select * from col_table_001 where EXISTS (select * from col_table_002 where col_table_001.name[1] =col_table_002.apple[1]) order by id;
+select * from col_table_001 where EXISTS (select * from col_table_002 where col_table_001.name[1:3] =col_table_002.apple[1:3]) order by id;
+
+reset query_dop;
+drop table col_table_001;
+drop table col_table_002;

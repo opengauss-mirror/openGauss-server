@@ -88,7 +88,7 @@ BEGIN
             FOR idx IN 3 .. pg_catalog.array_length(i_mapping, 1) BY 3 LOOP
                 IF idx = 3 THEN
                     ins_grnt := ins_grnt || pg_catalog.quote_ident(i_mapping[idx]);
-                    ins_rule := ins_rule || coalesce(i_mapping[idx-2], i_mapping[idx-1]);
+                    ins_rule := ins_rule || coalesce(i_mapping[idx-2], i_mapping[idx-1])::TEXT;
                     ins_vals := ins_vals || 'new.' || pg_catalog.quote_ident(i_mapping[idx]);
                 ELSE
                     sel_view := sel_view || ', ';
@@ -222,7 +222,7 @@ BEGIN
 
     -- obtain active message level
     BEGIN
-        EXECUTE 'SET LOCAL client_min_messages TO ' || pg_catalog.current_setting('db4ai.message_level');
+        EXECUTE 'SET LOCAL client_min_messages TO ' || pg_catalog.current_setting('db4ai.message_level')::TEXT;
         RAISE INFO 'effective client_min_messages is %', pg_catalog.upper(pg_catalog.current_setting('db4ai.message_level'));
     EXCEPTION WHEN OTHERS THEN
     END;
@@ -281,8 +281,8 @@ BEGIN
         RAISE EXCEPTION 'parent snapshot %.% does not exist' , pg_catalog.quote_ident(i_schema), pg_catalog.quote_ident(i_parent);
     END;
 
-    --SELECT nextval('db4ai.snapshot_sequence') INTO STRICT s_id;
-    SELECT pg_catalog.MAX(id)+1 FROM db4ai.snapshot INTO STRICT s_id; -- openGauss BUG: cannot create sequences in initdb
+    --SELECT nextval('db4ai.snapshot_sequence') ==> -1 at first time fetch
+    SELECT nextval('db4ai.snapshot_sequence') + 1 INTO STRICT s_id;
 
     -- extract highest used c_id from existing backing table or parent ()
     -- cannot use information_schema here, because the current user has no read permission on the backing table
@@ -617,7 +617,7 @@ BEGIN
                                 CONTINUE;
                             END IF;
                         ELSE
-                            pattern := pattern || CASE WHEN quoted THEN cur_ch ELSE pg_catalog.lower(cur_ch) END;
+                            pattern := pattern || CASE WHEN quoted THEN cur_ch::TEXT ELSE pg_catalog.lower(cur_ch) END;
                             CONTINUE;
                         END CASE;
 
@@ -767,7 +767,7 @@ BEGIN
                                     THEN 'ALTER TABLE db4ai.t' || m_id::TEXT
                                     ELSE command_str || ',' END
                                     || ' ADD f' || c_id::TEXT || ' '
-                                    || pg_catalog.format_type(atttypid, atttypmod) FROM pg_catalog.pg_attribute
+                                    || pg_catalog.format_type(atttypid, atttypmod)::TEXT FROM pg_catalog.pg_attribute
                                     WHERE attrelid = ('db4ai.t' || m_id::TEXT)::regclass AND attname = mapping[idx-1];
                                 mapping[idx-2] := 'f' || c_id::TEXT;
                                 newmap := TRUE;

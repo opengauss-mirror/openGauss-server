@@ -180,14 +180,8 @@ struct WritebackContext;
  *		Assumes buffer is valid.
  */
 #define BufferGetBlock(buffer)                                                           \
-        (BufferIsLocal(buffer) ? u_sess->storage_cxt.LocalBufferBlockPointers[-(buffer)-1] \
-                              : (Block)(t_thrd.storage_cxt.BufferBlocks + ((Size)((uint)(buffer)-1)) * BLCKSZ))
-
-#define ADDR_IN_LOCAL_BUFFER_CONTENT(block)                                                     \
-    (u_sess->storage_cxt.NLocBuffer > 0 &&                                                      \
-        ((static_cast<const char *>(block) >= static_cast<const char *>(BufferGetBlock(-1))) && \
-        (static_cast<const char *>(block) <=                                                    \
-        static_cast<const char *>(BufferGetBlock(-u_sess->storage_cxt.NLocBuffer)))))
+        (BufferIsLocal(buffer) ? u_sess->storage_cxt.LocalBufferBlockPointers[-(buffer) - 1] \
+                              : (Block)(t_thrd.storage_cxt.BufferBlocks + ((Size)((uint)(buffer) - 1)) * BLCKSZ))
 
 #define ADDR_IN_SHARED_BUFFER_CONTENT(block) \
     ( TOTAL_BUFFER_NUM > 0 && \
@@ -196,10 +190,6 @@ struct WritebackContext;
 
 static inline Buffer BlockGetBuffer(const char *block)
 {
-    if (ADDR_IN_LOCAL_BUFFER_CONTENT(block)) {
-        return -1 - ((block - (const char *)BufferGetBlock(-1))/BLCKSZ);
-    }
-
     if (ADDR_IN_SHARED_BUFFER_CONTENT(block)) {
         return 1 + ((block - (const char*)BufferGetBlock(1))/BLCKSZ);
     }
@@ -381,4 +371,5 @@ extern void RemoteReadFile(RemoteReadFileKey *key, char *buf, uint32 size, int t
 extern int64 RemoteReadFileSize(RemoteReadFileKey *key, int timeout);
 
 extern bool StartBufferIO(BufferDesc* buf, bool forInput);
+
 #endif

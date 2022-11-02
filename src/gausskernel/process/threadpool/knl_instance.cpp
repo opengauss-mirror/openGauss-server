@@ -55,8 +55,6 @@ const int SIZE_OF_TWO_UINT64 = 16;
 
 knl_instance_context g_instance;
 
-const int ALLOCSET_UNDO_MAXSIZE = 300 * UNDO_ZONE_COUNT;
-
 extern void InitGlobalVecFuncMap();
 
 static void knl_g_cost_init(knl_g_cost_context* cost_cxt)
@@ -66,6 +64,7 @@ static void knl_g_cost_init(knl_g_cost_context* cost_cxt)
     cost_cxt->receive_kdata_cost = DEFAULT_RECEIVE_KDATA_COST;
     cost_cxt->disable_cost = 1.0e10;
     cost_cxt->disable_cost_enlarge_factor = 10;
+    cost_cxt->sql_patch_sequence_id = 0;
 }
 
 static void knl_g_quota_init(knl_g_quota_context* quota_cxt)
@@ -211,6 +210,7 @@ static void knl_g_mctcp_init(knl_g_mctcp_context* mctcp_cxt)
     mctcp_cxt->mc_tcp_keepalive_idle = 0;
     mctcp_cxt->mc_tcp_keepalive_interval = 0;
     mctcp_cxt->mc_tcp_keepalive_count = 0;
+    mctcp_cxt->mc_tcp_user_timeout = 0;
     mctcp_cxt->mc_tcp_connect_timeout = 0;
     mctcp_cxt->mc_tcp_send_timeout = 0;
 }
@@ -277,6 +277,7 @@ static void knl_g_parallel_decode_init(knl_g_parallel_decode_context* pdecode_cx
     Assert(pdecode_cxt != NULL);
     pdecode_cxt->state = DECODE_INIT;
     pdecode_cxt->parallelDecodeCtx = NULL;
+    pdecode_cxt->logicalLogCtx = NULL;
     pdecode_cxt->ParallelReaderWorkerStatus.threadId = 0;
     pdecode_cxt->ParallelReaderWorkerStatus.threadState = PARALLEL_DECODE_WORKER_INVALID;
     for (int i = 0; i < MAX_PARALLEL_DECODE_NUM; ++i) {
@@ -284,6 +285,7 @@ static void knl_g_parallel_decode_init(knl_g_parallel_decode_context* pdecode_cx
         pdecode_cxt->ParallelDecodeWorkerStatusList[i].threadState = PARALLEL_DECODE_WORKER_INVALID;
     }
     pdecode_cxt->totalNum = 0;
+    pdecode_cxt->edata = NULL;
     SpinLockInit(&(pdecode_cxt->rwlock));
     SpinLockInit(&(pdecode_cxt->destroy_lock));
 }
@@ -352,6 +354,8 @@ static void knl_g_comm_init(knl_g_comm_context* comm_cxt)
     comm_cxt->usedDnSpace = NULL;
     comm_cxt->request_disaster_cluster = true;
     comm_cxt->lastArchiveRcvTime = 0;
+    comm_cxt->pLogCtl = NULL;
+    comm_cxt->rejectRequest = false;
 
 #ifdef USE_SSL
     comm_cxt->libcomm_data_port_list = NULL;
@@ -425,6 +429,7 @@ static void KnlGUndoInit(knl_g_undo_context *undoCxt)
         memset_s((g_instance.undo_cxt.uZoneBitmap[i])->words,
             (g_instance.undo_cxt.uZoneBitmap[i])->nwords * sizeof(bitmapword),
             -1, (g_instance.undo_cxt.uZoneBitmap[i])->nwords * sizeof(bitmapword));
+        Assert(bms_num_members(g_instance.undo_cxt.uZoneBitmap[i]) != 0);
     }
     MemoryContextSwitchTo(oldContext);
     undoCxt->undoTotalSize = 0;
@@ -432,13 +437,14 @@ static void KnlGUndoInit(knl_g_undo_context *undoCxt)
     undoCxt->uZoneCount = 0;
     undoCxt->maxChainSize = 0;
     undoCxt->undoChainTotalSize = 0;
-    undoCxt->oldestFrozenXid = InvalidTransactionId;
-    undoCxt->oldestXidInUndo = InvalidTransactionId;
+    undoCxt->globalFrozenXid = InvalidTransactionId;
+    undoCxt->globalRecycleXid = InvalidTransactionId;
 }
 
 static void knl_g_flashback_init(knl_g_flashback_context *flashbackCxt)
 {
     flashbackCxt->oldestXminInFlashback = InvalidTransactionId;
+    flashbackCxt->globalOldestXminInFlashback = InvalidTransactionId;
 }
 
 static void knl_g_libpq_init(knl_g_libpq_context* libpq_cxt)
@@ -487,7 +493,6 @@ static void knl_g_stat_init(knl_g_stat_context* stat_cxt)
     stat_cxt->stbyStmtHistFast = NULL;
     stat_cxt->stbyStmtHistSlow = NULL;
     stat_cxt->InstrUserHTAB = NULL;
-    stat_cxt->calculate_on_other_cn = false;
     stat_cxt->force_process = false;
     stat_cxt->RTPERCENTILE[0] = 0;
     stat_cxt->RTPERCENTILE[1] = 0;
@@ -512,6 +517,7 @@ static void knl_g_stat_init(knl_g_stat_context* stat_cxt)
     rc = memset_s(stat_cxt->tableStat, sizeof(UHeapPruneStat), 0, sizeof(UHeapPruneStat));
     securec_check(rc, "\0", "\0");
 
+    stat_cxt->memory_log_directory = NULL;
     stat_cxt->active_sess_hist_arrary = NULL;
     stat_cxt->ash_appname = NULL;
     stat_cxt->instr_stmt_is_cleaning = false;
@@ -703,9 +709,10 @@ static void knl_g_roach_init(knl_g_roach_context* roach_cxt)
 
 static void knl_g_streaming_dr_init(knl_g_streaming_dr_context* streaming_dr_cxt)
 {
-    streaming_dr_cxt->isInStreaming_dr = false;
     streaming_dr_cxt->isInSwitchover = false;
     streaming_dr_cxt->isInteractionCompleted = false;
+    streaming_dr_cxt->hadrWalSndNum = 0;
+    streaming_dr_cxt->interactionCompletedNum = 0;
     streaming_dr_cxt->switchoverBarrierLsn = InvalidXLogRecPtr;
     streaming_dr_cxt->rpoSleepTime = 0;
     streaming_dr_cxt->rpoBalanceSleepTime = 0;
@@ -731,7 +738,7 @@ static void knl_g_csn_barrier_init(knl_g_csn_barrier_context* csn_barrier_cxt)
 static void knl_g_audit_init(knl_g_audit_context *audit_cxt)
 {
     g_instance.audit_cxt.global_audit_context = AllocSetContextCreate(g_instance.instance_context,
-        "GlobalCacheMemory",
+        "GlobalAuditMemory",
         ALLOCSET_DEFAULT_MINSIZE,
         ALLOCSET_DEFAULT_INITSIZE,
         ALLOCSET_DEFAULT_MAXSIZE,
@@ -744,6 +751,7 @@ static void knl_g_audit_init(knl_g_audit_context *audit_cxt)
     g_instance.audit_cxt.audit_indextbl_old = NULL;
     g_instance.audit_cxt.current_audit_index = 0;
     g_instance.audit_cxt.thread_num = 1;
+    g_instance.audit_cxt.audit_init_done = 0;
 
     for (int i = 0; i < MAX_AUDIT_NUM; ++i) {
         g_instance.audit_cxt.audit_coru_fnum[i] = UINT32_MAX;

@@ -54,6 +54,7 @@ void insert_gs_sec_encrypted_column_tuple(CeHeapInfo *ce_heap_info, Relation rel
 bool is_exist_encrypted_column(const ObjectAddresses *targetObjects);
 bool is_enc_type(Oid type_oid);
 bool is_enc_type(const char *type_name);
+bool IsFullEncryptedRel(Relation rel);
 ClientLogicColumnRef *get_column_enc_def(Oid rel_oid, const char *col_name);
 /* Get description functions */
 void get_global_setting_description(StringInfo buffer, const ObjectAddress* object);
@@ -61,4 +62,6 @@ void get_column_setting_description(StringInfo buffer, const ObjectAddress* obje
 void get_cached_column_description(StringInfo buffer, const ObjectAddress* object);
 void get_global_setting_args_description(StringInfo buffer, const ObjectAddress* object);
 void get_column_setting_args_description(StringInfo buffer, const ObjectAddress* object);
+const char *get_typename_by_id(Oid typeOid);
+const char *get_encryption_type_name(EncryptionType algorithm_type);
 extern Datum get_client_info(PG_FUNCTION_ARGS);

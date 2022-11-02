@@ -30,6 +30,7 @@
 #include "utils/inval.h"
 #include "catalog/pg_object.h"
 #include "catalog/pg_class.h"
+#include "storage/lmgr.h"
 #include "utils/memutils.h"
 #include "utils/syscache.h"
 #include "utils/timestamp.h"
@@ -317,6 +318,9 @@ void UpdatePgObjectMtime(Oid objectOid, PgObjectType objectType)
     if (IsInitdb || !IsNormalProcessingMode() || nowtime == (Datum)NULL || !CheckObjectExist(objectOid, objectType)) {
         return;
     }
+    // If the same object is updated concurrently, an error will be reported.
+    // Therefore, lock the object before the update.
+    LockDatabaseObject(objectOid, (Oid)objectType, 0, ExclusiveLock);
     relation = heap_open(PgObjectRelationId, RowExclusiveLock);
     tup = SearchSysCache2(PGOBJECTID, ObjectIdGetDatum(objectOid), CharGetDatum(objectType));
     if (!HeapTupleIsValid(tup)) {
@@ -380,6 +384,9 @@ void UpdatePgObjectChangecsn(Oid objectOid, PgObjectType objectType)
     if (u_sess->exec_cxt.isExecTrunc) {
         return;
     }
+    // If the same object is updated concurrently, an error will be reported.
+    // Therefore, lock the object before the update.
+    LockDatabaseObject(objectOid, (Oid)objectType, 0, ExclusiveLock);
     relation = heap_open(PgObjectRelationId, RowExclusiveLock);
     tup = SearchSysCache2(PGOBJECTID, ObjectIdGetDatum(objectOid), CharGetDatum(objectType));
     if (!HeapTupleIsValid(tup)) {

@@ -53,6 +53,7 @@
 
 #include "access/transam.h"
 #include "catalog/namespace.h"
+#include "executor/node/nodeModifyTable.h"
 #include "executor/executor.h"
 #include "executor/lightProxy.h"
 #include "executor/spi.h"
@@ -63,6 +64,7 @@
 #include "optimizer/prep.h"
 #include "optimizer/planner.h"
 #include "optimizer/bucketpruning.h"
+#include "optimizer/sqlpatch.h"
 #include "parser/analyze.h"
 #include "parser/parsetree.h"
 #include "storage/lmgr.h"
@@ -122,7 +124,8 @@ bool IsStreamSupport()
 #ifdef ENABLE_MULTIPLE_NODES
     return u_sess->attr.attr_sql.enable_stream_operator;
 #else
-    return u_sess->opt_cxt.query_dop > 1;
+    bool res = (u_sess->opt_cxt.query_dop > 1) && (u_sess->opt_cxt.smp_enabled);
+    return res;
 #endif
 }
 
@@ -227,13 +230,13 @@ CachedPlanSource* CreateCachedPlan(Node* raw_parse_tree, const char* query_strin
         if (ENABLE_CN_GPC && enable_spi_gpc) {
             contextName =  "SPI_GPCCachedPlanSource";
         }
+        ResourceOwnerEnlargeGMemContext(t_thrd.utils_cxt.TopTransactionResourceOwner);
         source_context = AllocSetContextCreate(GLOBAL_PLANCACHE_MEMCONTEXT,
                                                contextName,
                                                ALLOCSET_SMALL_MINSIZE,
                                                ALLOCSET_SMALL_INITSIZE,
                                                ALLOCSET_DEFAULT_MAXSIZE,
                                                SHARED_CONTEXT);
-        ResourceOwnerEnlargeGMemContext(t_thrd.utils_cxt.TopTransactionResourceOwner);
         ResourceOwnerRememberGMemContext(t_thrd.utils_cxt.TopTransactionResourceOwner, source_context);
     }
 
@@ -288,6 +291,7 @@ CachedPlanSource* CreateCachedPlan(Node* raw_parse_tree, const char* query_strin
     plansource->is_checked_opfusion = false;
     plansource->is_support_gplan = false;
     plansource->spi_signature = {(uint32)-1, 0, (uint32)-1, -1};
+    plansource->sql_patch_sequence = pg_atomic_read_u64(&g_instance.cost_cxt.sql_patch_sequence_id);
 
 #ifdef ENABLE_MOT
     plansource->storageEngineType = SE_TYPE_UNSPECIFIED;
@@ -770,6 +774,8 @@ List* RevalidateCachedQuery(CachedPlanSource* plansource, bool has_lp)
         }
     }
 
+    RevalidateGplanBySqlPatch(plansource);
+
     /*
      * If the query rewrite phase had a possible RLS dependency, we must redo
      * it if either the role setting has changed.
@@ -864,6 +870,12 @@ List* RevalidateCachedQuery(CachedPlanSource* plansource, bool has_lp)
     else
         tlist =
             pg_analyze_and_rewrite(rawtree, plansource->query_string, plansource->param_types, plansource->num_params);
+
+    ereport(DEBUG2, (errmodule(MOD_SQLPATCH),
+        errmsg("[SQLPatch] %lu after revalidation update from %lu to %lu", u_sess->unique_sql_cxt.unique_sql_id,
+        plansource->sql_patch_sequence, pg_atomic_read_u64(&g_instance.cost_cxt.sql_patch_sequence_id))));
+    plansource->sql_patch_sequence = pg_atomic_read_u64(&g_instance.cost_cxt.sql_patch_sequence_id);
+    plansource->nextval_default_expr_type = u_sess->opt_cxt.nextval_default_expr_type;
 
     /* Release snapshot if we got one */
     if (snapshot_set)
@@ -985,6 +997,7 @@ List* RevalidateCachedQuery(CachedPlanSource* plansource, bool has_lp)
         OpFusion::tearDown((OpFusion*)plansource->opFusionObj);
         plansource->opFusionObj = NULL;
     }
+    plansource->is_checked_opfusion = false;
 
 #ifdef ENABLE_MOT
     /* clean JIT context if exists */
@@ -1222,6 +1235,7 @@ static CachedPlan* BuildCachedPlan(CachedPlanSource* plansource, List* qlist, Pa
      * memory context.
      */
     if (!plansource->is_oneshot) {
+        ResourceOwnerEnlargeGMemContext(t_thrd.utils_cxt.TopTransactionResourceOwner);
         if (!plansource->gpc.status.IsPrivatePlan()) {
             plan_context = AllocSetContextCreate(GLOBAL_PLANCACHE_MEMCONTEXT,
     											 "GPCCachedPlan",
@@ -1238,15 +1252,15 @@ static CachedPlan* BuildCachedPlan(CachedPlanSource* plansource, List* qlist, Pa
         }
 
         /* We must track shared memory context for handling exception */
-        ResourceOwnerEnlargeGMemContext(t_thrd.utils_cxt.TopTransactionResourceOwner);
         ResourceOwnerRememberGMemContext(t_thrd.utils_cxt.TopTransactionResourceOwner, plan_context);
         
         /*
          * Copy plan into the new context.
          */
         MemoryContextSwitchTo(plan_context);
-
-        plist = (List*)copyObject(plist);
+        u_sess->copyfunc_cxt.gPlanCopy = true;
+        plist = (List *)copyObject(plist);
+        u_sess->copyfunc_cxt.gPlanCopy = false;
     } else
         plan_context = CurrentMemoryContext;
 
@@ -1341,6 +1355,7 @@ static CachedPlan* BuildCachedPlan(CachedPlanSource* plansource, List* qlist, Pa
     }
 
     plpgsql_estate = saved_estate;
+    u_sess->opt_cxt.nextval_default_expr_type = plansource->nextval_default_expr_type;
 
     return plan;
 }
@@ -1698,6 +1713,11 @@ CachedPlan* GetCachedPlan(CachedPlanSource* plansource, ParamListInfo boundParam
     if (useResOwner && !plansource->is_saved)
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot apply ResourceOwner to non-saved cached plan")));
+    int elevel = u_sess->attr.attr_sql.explain_allow_multinode ? WARNING : ERROR;
+    if (elevel == ERROR && g_instance.attr.attr_storage.enable_gtm_free &&
+        !u_sess->attr.attr_sql.enable_cluster_resize && !IS_PGXC_DATANODE && !IS_SINGLE_NODE) {
+        elevel = ClusterResizingInProgress() ? WARNING : ERROR;
+    }
 
     /* Make sure the querytree list is valid and we have parse-time locks */
     qlist = RevalidateCachedQuery(plansource);
@@ -1899,7 +1919,7 @@ CachedPlan* GetCachedPlan(CachedPlanSource* plansource, ParamListInfo boundParam
         if (!IsA(plannedstmt, PlannedStmt))
             continue; /* Ignore utility statements */
 
-        check_gtm_free_plan(plannedstmt, u_sess->attr.attr_sql.explain_allow_multinode ? WARNING : ERROR);
+        check_gtm_free_plan(plannedstmt, elevel);
     }
 
     return plan;
@@ -2237,6 +2257,7 @@ CachedPlanSource* CopyCachedPlan(CachedPlanSource* plansource, bool is_share)
     if (plansource->is_oneshot)
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot copy a one-shot cached plan")));
 
+    ResourceOwnerEnlargeGMemContext(t_thrd.utils_cxt.TopTransactionResourceOwner);
     if (ENABLE_GPC && is_share == true) {
         source_context = AllocSetContextCreate(GLOBAL_PLANCACHE_MEMCONTEXT,
                                                "GPCCachedPlanSource",
@@ -2244,8 +2265,6 @@ CachedPlanSource* CopyCachedPlan(CachedPlanSource* plansource, bool is_share)
                                                ALLOCSET_SMALL_INITSIZE,
                                                ALLOCSET_DEFAULT_MAXSIZE,
                                                SHARED_CONTEXT);
-        ResourceOwnerEnlargeGMemContext(t_thrd.utils_cxt.TopTransactionResourceOwner);
-        ResourceOwnerRememberGMemContext(t_thrd.utils_cxt.TopTransactionResourceOwner, source_context);
     } else {
         source_context = AllocSetContextCreate(u_sess->cache_mem_cxt,
                                                "CachedPlanSource",
@@ -2253,6 +2272,7 @@ CachedPlanSource* CopyCachedPlan(CachedPlanSource* plansource, bool is_share)
                                                ALLOCSET_SMALL_INITSIZE,
                                                ALLOCSET_DEFAULT_MAXSIZE);
     }
+    ResourceOwnerRememberGMemContext(t_thrd.utils_cxt.TopTransactionResourceOwner, source_context);
 
 
     oldcxt = MemoryContextSwitchTo(source_context);
@@ -2291,8 +2311,7 @@ CachedPlanSource* CopyCachedPlan(CachedPlanSource* plansource, bool is_share)
                                                   ALLOCSET_SMALL_INITSIZE,
                                                   ALLOCSET_DEFAULT_MAXSIZE,
                                                   SHARED_CONTEXT);
-    }
-    else {
+    } else {
         querytree_context = AllocSetContextCreate(source_context,
                                                   "CachedPlanQuery",
                                                   ALLOCSET_SMALL_MINSIZE,
@@ -2324,6 +2343,7 @@ CachedPlanSource* CopyCachedPlan(CachedPlanSource* plansource, bool is_share)
     newsource->is_checked_opfusion = false;
     newsource->spi_signature = plansource->spi_signature;
     newsource->gplan_is_fqs = plansource->gplan_is_fqs;
+    newsource->nextval_default_expr_type = plansource->nextval_default_expr_type;
 
 #ifdef ENABLE_MOT
     newsource->storageEngineType = SE_TYPE_UNSPECIFIED;
@@ -2341,9 +2361,12 @@ CachedPlanSource* CopyCachedPlan(CachedPlanSource* plansource, bool is_share)
 #endif
 
     MemoryContextSwitchTo(oldcxt);
-    if (ENABLE_GPC && is_share)
+    if (ENABLE_GPC && is_share) {
         GPC_LOG("copy plan when recreate", newsource, 0);
-
+    } else {
+        /* only forget memory for unshared case, because for shared case, still may has error accur. */
+        ResourceOwnerForgetGMemContext(t_thrd.utils_cxt.TopTransactionResourceOwner, source_context);
+    }
     return newsource;
 }
 

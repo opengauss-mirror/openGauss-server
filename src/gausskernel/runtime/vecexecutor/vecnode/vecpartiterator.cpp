@@ -71,9 +71,6 @@ static int GetVecscanPartitionNum(const PartIteratorState* node)
             partitionScan = ((TsStoreScanState*)noden)->part_id;
             break;
 #endif
-        case T_DfsIndexScanState:
-            partitionScan = ((DfsIndexScanState*)noden)->part_id;
-            break;
         case T_CStoreIndexScanState:
             partitionScan = ((CStoreIndexScanState*)noden)->part_id;
             break;

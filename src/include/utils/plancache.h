@@ -359,6 +359,8 @@ typedef struct CachedPlanSource {
     bool force_custom_plan; /* force to use custom plan */
     bool single_shard_stmt;  /* single shard stmt? */
 #endif
+    uint64 sql_patch_sequence; /* should match g_instance.cost_cxt.sql_patch_sequence_id */
+    int nextval_default_expr_type;
 } CachedPlanSource;
 
 /*

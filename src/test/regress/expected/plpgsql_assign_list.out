@@ -276,6 +276,63 @@ drop package autonomous_pkg_a;
 NOTICE:  drop cascades to function plpgsql_assignlist.autonomous_f_public(integer)
 drop type ct1;
 drop type ct;
+-- test select into syntax error
+declare
+va int;
+vb varchar2;
+vc varchar2;
+begin
+select 1,'a','b' into va,vb vc;
+end;
+/
+ERROR:  syntax error, expected ","
+LINE 6: select 1,'a','b' into va,vb vc;
+                                    ^
+QUERY:  DECLARE 
+va int;
+vb varchar2;
+vc varchar2;
+begin
+select 1,'a','b' into va,vb vc;
+end
+-- test nest cursor loop exception bug
+drop table tb1;
+ERROR:  table "tb1" does not exist
+create table tb1 (c1 int, c2 varchar(30)) with (storage_type = 'ustore');
+insert into tb1 values(1, 'aaa');
+insert into tb1 values(2, 'bbb');
+insert into tb1 values(3, '123');
+insert into tb1 values(4, 'VC00F7101700020D08');
+insert into tb1 values(5, '123');
+insert into tb1 values(6, 'dqd');
+create or replace procedure p2 as
+cursor c1 is select * from tb1;
+cursor c2 is select * from tb1;
+va tb1%rowtype;
+vb int;
+begin
+for rec in c1 loop
+  begin
+   for rec2 in c2 loop
+    commit;
+    vb := 1/(rec2.c1 - 3);
+   end loop;
+  exception when division_by_zero then
+   rollback;
+  end;
+  commit;
+end loop;
+
+end;
+/
+call p2();
+ p2 
+----
+ 
+(1 row)
+
+drop procedure p2();
+drop table tb1;
 --------------------------------------------------
 ------------------ END OF TESTS ------------------
 --------------------------------------------------

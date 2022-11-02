@@ -1,0 +1,7 @@
+select pg_sleep(3);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+update gtest1 set a=a||'thread2';

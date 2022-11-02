@@ -82,7 +82,6 @@ extern void PartitionCacheInvalidate(void);
 extern void PartitionCloseSmgrByOid(Oid partitionId);
 extern void AtEOXact_PartitionCache(bool isCommit);
 extern void AtEOSubXact_PartitionCache(bool isCommit, SubTransactionId mySubid, SubTransactionId parentSubid);
-extern void UpdatePartrelPointer(Relation partrel, Relation rel, Partition part);
 extern Relation partitionGetRelation(Relation rel, Partition part);
 
 void releaseDummyRelation(Relation* relation);

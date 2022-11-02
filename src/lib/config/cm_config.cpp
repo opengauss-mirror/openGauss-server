@@ -1453,9 +1453,6 @@ int get_nodename_list_by_AZ(const char* AZName, const char* data_dir, char** nod
                 if (dn->datanodeId == 0)
                     continue;
 
-                if (dn->datanodeRole == CASCADE_STANDBY_TYPE)
-                    continue;
-
                 for (n = 0; n < CM_MAX_DATANODE_STANDBY_NUM && !get_dn_in_same_shard; n++) {
                     peerDatanodeInfo* peer_datanode = &(dn->peerDatanodes[n]);
                     if (strlen(peer_datanode->datanodePeerHAIP[0]) == 0)

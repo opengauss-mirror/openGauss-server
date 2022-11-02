@@ -407,7 +407,7 @@ static inline bool NeedSyncXact(uint32 syncFlag, Oid tableOid, Snapshot snapshot
  *		  Xmax is not committed))))			that has not been committed
  *
  */
-bool HeapTupleSatisfiesNow(HeapTuple htup, Snapshot snapshot, Buffer buffer)
+bool HeapTupleSatisfiesNow(HeapTuple htup, Snapshot snapshot, Buffer buffer, bool* has_cur_xact_write = NULL)
 {
     uint32 needSync = 0;
     HeapTupleHeader tuple = htup->t_data;
@@ -432,6 +432,10 @@ restart:
             return false;
 
         if (TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetXmin(page, tuple))) {
+            if (has_cur_xact_write != NULL && HeapTupleHeaderGetCmin(tuple, page) < GetCurrentCommandId(false)) {
+                *has_cur_xact_write = true;
+            }
+
             if (HeapTupleHeaderGetCmin(tuple, page) >= GetCurrentCommandId(false))
                 return false; /* inserted after scan started */
 
@@ -524,6 +528,9 @@ restart:
     }
 
     if (TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetXmax(page, tuple))) {
+        if (has_cur_xact_write != NULL && HeapTupleHeaderGetCmax(tuple, page) < GetCurrentCommandId(false)) {
+            *has_cur_xact_write = true;
+        }
         if (HEAP_XMAX_IS_LOCKED_ONLY(tuple->t_infomask, tuple->t_infomask2))
             return true;
         if (HeapTupleHeaderGetCmax(tuple, page) >= GetCurrentCommandId(false))
@@ -647,17 +654,19 @@ TM_Result HeapTupleSatisfiesUpdate(HeapTuple htup, CommandId curcid, Buffer buff
     Page page = BufferGetPage(buffer);
 
     /* do not need sync, because snapshot is not used */
-    ereport(DEBUG1,
-        (errmsg("HeapTupleSatisfiesUpdate self(%u,%u) ctid(%u,%u) cur_xid " XID_FMT " xmin"
-                XID_FMT " xmax " XID_FMT " infomask %u",
-            ItemPointerGetBlockNumber(&htup->t_self),
-            ItemPointerGetOffsetNumber(&htup->t_self),
-            ItemPointerGetBlockNumber(&tuple->t_ctid),
-            ItemPointerGetOffsetNumber(&tuple->t_ctid),
-            GetCurrentTransactionIdIfAny(),
-            HeapTupleHeaderGetXmin(page, tuple),
-            HeapTupleHeaderGetXmax(page, tuple),
-            tuple->t_infomask)));
+    if (SHOW_DEBUG_MESSAGE()) {
+        ereport(DEBUG1,
+            (errmsg("HeapTupleSatisfiesUpdate self(%u,%u) ctid(%u,%u) cur_xid " XID_FMT " xmin"
+                    XID_FMT " xmax " XID_FMT " infomask %u",
+                ItemPointerGetBlockNumber(&htup->t_self),
+                ItemPointerGetOffsetNumber(&htup->t_self),
+                ItemPointerGetBlockNumber(&tuple->t_ctid),
+                ItemPointerGetOffsetNumber(&tuple->t_ctid),
+                GetCurrentTransactionIdIfAny(),
+                HeapTupleHeaderGetXmin(page, tuple),
+                HeapTupleHeaderGetXmax(page, tuple),
+                tuple->t_infomask)));
+    }
 
 restart:
     if (!HeapTupleHeaderXminCommitted(tuple)) {
@@ -1010,7 +1019,8 @@ static bool HeapTupleSatisfiesDirty(HeapTuple htup, Snapshot snapshot, Buffer bu
  * basis of the true state of the transaction, even if we then pretend we
  * can't see it.)
  */
-static bool HeapTupleSatisfiesMVCC(HeapTuple htup, Snapshot snapshot, Buffer buffer)
+static bool HeapTupleSatisfiesMVCC(HeapTuple htup, Snapshot snapshot, Buffer buffer,
+    bool* has_cur_xact_write = NULL)
 {
     HeapTupleHeader tuple = htup->t_data;
     Assert(ItemPointerIsValid(&htup->t_self));
@@ -1019,17 +1029,19 @@ static bool HeapTupleSatisfiesMVCC(HeapTuple htup, Snapshot snapshot, Buffer buf
     TransactionIdStatus hintstatus;
     Page page = BufferGetPage(buffer);
 
-    ereport(DEBUG1,
-        (errmsg("HeapTupleSatisfiesMVCC self(%d,%d) ctid(%d,%d) cur_xid %ld xmin %ld"
-                " xmax %ld csn %lu",
-            ItemPointerGetBlockNumber(&htup->t_self),
-            ItemPointerGetOffsetNumber(&htup->t_self),
-            ItemPointerGetBlockNumber(&tuple->t_ctid),
-            ItemPointerGetOffsetNumber(&tuple->t_ctid),
-            GetCurrentTransactionIdIfAny(),
-            HeapTupleHeaderGetXmin(page, tuple),
-            HeapTupleHeaderGetXmax(page, tuple),
-            snapshot->snapshotcsn)));
+    if (SHOW_DEBUG_MESSAGE()) {
+        ereport(DEBUG1,
+            (errmsg("HeapTupleSatisfiesMVCC self(%d,%d) ctid(%d,%d) cur_xid %ld xmin %ld"
+                    " xmax %ld csn %lu",
+                ItemPointerGetBlockNumber(&htup->t_self),
+                ItemPointerGetOffsetNumber(&htup->t_self),
+                ItemPointerGetBlockNumber(&tuple->t_ctid),
+                ItemPointerGetOffsetNumber(&tuple->t_ctid),
+                GetCurrentTransactionIdIfAny(),
+                HeapTupleHeaderGetXmin(page, tuple),
+                HeapTupleHeaderGetXmax(page, tuple),
+                snapshot->snapshotcsn)));
+    }
 
     /*
      * Just valid for read-only transaction when u_sess->attr.attr_common.XactReadOnly is true.
@@ -1046,6 +1058,9 @@ static bool HeapTupleSatisfiesMVCC(HeapTuple htup, Snapshot snapshot, Buffer buf
         /* IMPORTANT: Version snapshot is independent of the current transaction. */
         if (!IsVersionMVCCSnapshot(snapshot) &&
             TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetXmin(page, tuple))) {
+            if (has_cur_xact_write != NULL && HeapTupleHeaderGetCmin(tuple, page) < snapshot->curcid) {
+                *has_cur_xact_write = true;
+            }
             if ((tuple->t_infomask & HEAP_COMBOCID) && CheckStreamCombocid(tuple, snapshot->curcid, page))
                 return true; /* delete after stream producer thread scan started */
 
@@ -1077,6 +1092,9 @@ static bool HeapTupleSatisfiesMVCC(HeapTuple htup, Snapshot snapshot, Buffer buf
                 Assert(!TransactionIdDidCommit(HeapTupleHeaderGetXmax(page, tuple)));
                 SetHintBits(tuple, buffer, HEAP_XMAX_INVALID, InvalidTransactionId);
                 return true;
+            }
+            if (has_cur_xact_write != NULL && HeapTupleHeaderGetCmax(tuple, page) < snapshot->curcid) {
+                *has_cur_xact_write = true;
             }
 
             if (HeapTupleHeaderGetCmax(tuple, page) >= snapshot->curcid)
@@ -1155,6 +1173,9 @@ recheck_xmax:
         /* IMPORTANT: Version snapshot is independent of the current transaction. */
         if (!IsVersionMVCCSnapshot(snapshot) &&
             TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetXmax(page, tuple))) {
+            if (has_cur_xact_write != NULL && HeapTupleHeaderGetCmax(tuple, page) < snapshot->curcid) {
+                *has_cur_xact_write = true;
+            }
             if (HeapTupleHeaderGetCmax(tuple, page) >= snapshot->curcid)
                 return true; /* deleted after scan started */
             else
@@ -1319,10 +1340,6 @@ HTSV_Result HeapTupleSatisfiesVacuum(HeapTuple htup, TransactionId OldestXmin, B
             /*
              * Not in Progress, Not Committed, so either Aborted or crashed
              */
-            if (u_sess->attr.attr_storage.enable_debug_vacuum && t_thrd.utils_cxt.pRelatedRel) {
-                elogVacuumInfo(
-                    t_thrd.utils_cxt.pRelatedRel, htup, "HeapTupleSatisfiedVacuum set HEAP_XMIN_INVALID", OldestXmin);
-            }
             if (!LatestFetchTransactionIdDidAbort(HeapTupleHeaderGetXmin(page, tuple)))
                 LatestTransactionStatusError(HeapTupleHeaderGetXmin(page, tuple),
                     NULL,
@@ -1369,10 +1386,6 @@ HTSV_Result HeapTupleSatisfiesVacuum(HeapTuple htup, TransactionId OldestXmin, B
              * We know that xmax did lock the tuple, but it did not and will
              * never actually update it.
              */
-            if (u_sess->attr.attr_storage.enable_debug_vacuum && t_thrd.utils_cxt.pRelatedRel) {
-                elogVacuumInfo(
-                    t_thrd.utils_cxt.pRelatedRel, htup, "HeapTupleSatisfiedVacuum set HEAP_XMAX_INVALID ", OldestXmin);
-            }
             SetHintBits(tuple, buffer, HEAP_XMAX_INVALID, InvalidTransactionId);
         }
         return HEAPTUPLE_LIVE;
@@ -1880,11 +1893,11 @@ static bool HeapTupleSatisfiesDecodeMVCC(HeapTuple htup, Snapshot snapshot, Buff
  *	Hint bits in the HeapTuple's t_infomask may be updated as a side effect;
  *	if so, the indicated buffer is marked dirty.
  */
-bool HeapTupleSatisfiesVisibility(HeapTuple tup, Snapshot snapshot, Buffer buffer)
+bool HeapTupleSatisfiesVisibility(HeapTuple tup, Snapshot snapshot, Buffer buffer, bool* has_cur_xact_write)
 {
     switch (snapshot->satisfies) {
         case SNAPSHOT_MVCC:
-            return HeapTupleSatisfiesMVCC(tup, snapshot, buffer);
+            return HeapTupleSatisfiesMVCC(tup, snapshot, buffer, has_cur_xact_write);
             break;
         case SNAPSHOT_VERSION_MVCC:
             return HeapTupleSatisfiesVersionMVCC(tup, snapshot, buffer);
@@ -1896,11 +1909,11 @@ bool HeapTupleSatisfiesVisibility(HeapTuple tup, Snapshot snapshot, Buffer buffe
             return HeapTupleSatisfiesLost(tup, snapshot, buffer);
             break;
         case SNAPSHOT_NOW:
-            return HeapTupleSatisfiesNow(tup, snapshot, buffer);
+            return HeapTupleSatisfiesNow(tup, snapshot, buffer, has_cur_xact_write);
             break;
 #ifdef ENABLE_MULTIPLE_NODES
         case SNAPSHOT_NOW_NO_SYNC:
-            return HeapTupleSatisfiesNow(tup, snapshot, buffer);
+            return HeapTupleSatisfiesNow(tup, snapshot, buffer, has_cur_xact_write);
             break;
 #endif
         case SNAPSHOT_SELF:
@@ -1932,10 +1945,12 @@ void HeapTupleCheckVisible(Snapshot snapshot, HeapTuple tuple, Buffer buffer)
         return;
     LockBuffer(buffer, BUFFER_LOCK_SHARE);
     if (!HeapTupleSatisfiesVisibility(tuple, snapshot, buffer)) {
-        LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
-        ereport(ERROR,
-                (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+        TransactionId tupleXmin = HeapTupleHeaderGetXmin(BufferGetPage(buffer), tuple->t_data);
+        if (!TransactionIdIsCurrentTransactionId(tupleXmin)) {
+            LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
+            ereport(ERROR, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
                  errmsg("could not serialize access due to concurrent update")));
+        }
     }
     LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
 }

@@ -1,4 +1,5 @@
 # ustore tests
+test: test_ustore_undo_tool
 #test: test_ustore_undo_view
 #test: test_ustore_undozone
 
@@ -19,17 +20,15 @@ test: test_ustore_simple_delete
 test: test_ustore_update
 test: test_ustore_lock
 test: test_ustore_insert
-test: test_ustore_concurrent_delete
 test: test_ustore_concurrent_delete_and_update
 test: test_ustore_concurrent_delete_and_update_rollback
-test: test_ustore_concurrent_delete_rollback
 test: test_inplace_tpd_rollback_delete
 test: test_ustore_concurrent_delete_update_2
 test: test_ustore_concurrent_update
 test: test_ustore_index_including
 test: test_ustore_index
 test: test_ustore_index_cache_rightpage
-#test: test_ustore_multi_insert
+test: test_ustore_index_parallel
 test: test_ustore_repeatable_read
 test: test_ustore_insert_update
 #test: test_ustore_insert_select
@@ -52,13 +51,11 @@ test: test_ustore_groupby_2
 test: test_ustore_groupby_3
 #test: test_ustore_insert_select_new
 
-test: test_unione_insert_multi_col
 test: test_unione_update_multi_col
 test: test_unione_delete_multi_col
 test: test_unione_select_multi_col
 #test: test_unione_insert_select_multi_col
 
-test: test_unione_insert_single_col
 #test: test_unione_insert_select_single_col
 test: test_unione_delete_single_col
 test: test_unione_update_single_col
@@ -107,4 +104,6 @@ test: timecapsule_partition_ustore_test_2
 test: ustore_hw_partition_list_insert
 
 test: component_view_enhancements
+test: ustore_disables_functions
+test: ustore_upsert
 

@@ -3446,7 +3446,6 @@ void CheckForSerializableConflictOut(bool visible, Relation relation, void* stup
      * is going on with it.
      */
     htsvResult = HeapTupleSatisfiesVacuum(tuple, u_sess->utils_cxt.TransactionXmin, buffer);
-    t_thrd.utils_cxt.pRelatedRel = NULL;
     switch (htsvResult) {
         case HEAPTUPLE_LIVE:
             if (visible)
@@ -3499,9 +3498,6 @@ void CheckForSerializableConflictOut(bool visible, Relation relation, void* stup
     if (TransactionIdEquals(xid, GetTopTransactionIdIfAny()))
         return;
     }
-
-        if (u_sess->attr.attr_storage.enable_debug_vacuum)
-            t_thrd.utils_cxt.pRelatedRel = relation;
 
     /*
      * Find sxact or summarized info for the top level xid.

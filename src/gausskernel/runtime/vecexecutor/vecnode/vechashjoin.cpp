@@ -571,7 +571,8 @@ HashJoinTbl::HashJoinTbl(VecHashJoinState* runtime_context)
 
     SetJoinType();
 
-    if (m_joinType == HASH_JOIN_SEMI || m_joinType == HASH_JOIN_RIGHT_SEMI || m_joinType == HASH_JOIN_RIGHT_ANTI) {
+    if (m_joinType == HASH_JOIN_SEMI || m_joinType == HASH_JOIN_RIGHT_SEMI ||
+        m_joinType == HASH_JOIN_RIGHT_ANTI || m_joinType == HASH_JOIN_RIGHT_ANTI_FULL) {
         cellPoint = (hashCell**)palloc(BatchMaxSize * sizeof(hashCell*));
     } else
         cellPoint = NULL;

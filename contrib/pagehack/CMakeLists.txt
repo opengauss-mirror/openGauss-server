@@ -15,7 +15,7 @@ set(pagehack_LINK_LIBS -lpgport -lcrypt -ldl -lm -ledit -lssl -lcrypto -lsecurec
 add_bintarget(pagehack TGT_pagehack_SRC TGT_pagehack_INC "${pagehack_DEF_OPTIONS}" "${pagehack_COMPILE_OPTIONS}" "${pagehack_LINK_OPTIONS}" "${pagehack_LINK_LIBS}")
 add_dependencies(pagehack pgport_static pagecompression)
 target_link_directories(pagehack PUBLIC
-    ${LIBOPENSSL_LIB_PATH} ${PROTOBUF_LIB_PATH} ${LIBPARQUET_LIB_PATH} ${LIBCURL_LIB_PATH} ${SECURE_LIB_PATH}
+    ${LIBOPENSSL_LIB_PATH} ${LIBCURL_LIB_PATH} ${SECURE_LIB_PATH}
     ${ZLIB_LIB_PATH} ${LIBOBS_LIB_PATH} ${LIBEDIT_LIB_PATH} ${LIBCGROUP_LIB_PATH} ${CMAKE_BINARY_DIR}/lib
     ${ZSTD_LIB_PATH} ${PROJECT_SRC_DIR}/lib/page_compression
 )

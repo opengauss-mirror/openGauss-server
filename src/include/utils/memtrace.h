@@ -58,5 +58,7 @@ extern void InsertTrackMemoryInfo(const void* pointer, const MemoryContext conte
 extern void RemoveTrackMemoryInfo(const void* pointer);
 extern void RemoveTrackMemoryContext(const MemoryContext context);
 extern MemoryAllocDetailList* GetMemoryTrackInfo();
+extern int PthreadRWlockTryWrlock(ResourceOwner owner, pthread_rwlock_t* rwlock);
+extern void PthreadRWlockUnlock(ResourceOwner owner, pthread_rwlock_t* rwlock);
 
 #endif

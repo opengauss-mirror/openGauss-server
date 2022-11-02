@@ -119,7 +119,7 @@ void xlog_desc(StringInfo buf, XLogReaderState *record)
                          checkpoint->fullPageWrites ? "true" : "false", checkpoint->nextXid, checkpoint->nextOid,
                          checkpoint->nextMulti, checkpoint->nextMultiOffset, checkpoint->oldestXid,
                          checkpoint->oldestXidDB, checkpoint->oldestActiveXid,
-                         (ckpt_plus->length > CKPTPLUSLEN)  ? ckpt_undo->oldestXidInUndo : 0,
+                         (ckpt_plus->length > CKPTPLUSLEN)  ? ckpt_undo->globalRecycleXid : 0,
                          (info == XLOG_CHECKPOINT_SHUTDOWN) ? "shutdown" : "online", ckpttime_str,
                          (uint32)(checkpoint->remove_seg >> 32), (uint32)checkpoint->remove_seg);
     } else if (info == XLOG_NOOP) {
@@ -140,6 +140,9 @@ void xlog_desc(StringInfo buf, XLogReaderState *record)
         /* no further information to print */
     } else if (info == XLOG_FPI_FOR_HINT) {
         appendStringInfo(buf, "page hint");
+        if (XLogRecGetDataLen(record) != 0) {
+            appendStringInfo(buf, ", type %u", *(uint8 *) XLogRecGetData(record));
+        }
     } else if (info == XLOG_BACKUP_END) {
         XLogRecPtr startpoint;
 

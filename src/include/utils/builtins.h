@@ -382,6 +382,8 @@ extern uint64 pg_strtouint64(const char* str, char** endptr, int base);
 extern int32 pg_atoi(char* s, int size, int c);
 extern int16 pg_strtoint16(const char* s);
 extern int32 pg_strtoint32(const char* s);
+extern int64 pg_strtoint64(const char* s);
+extern int128 pg_strtoint128(const char* s);
 extern void pg_itoa(int16 i, char* a);
 extern void pg_ltoa(int32 l, char* a);
 extern void pg_ctoa(uint8 i, char* a);
@@ -1182,6 +1184,7 @@ extern Datum hashmacaddr(PG_FUNCTION_ARGS);
 /* numeric.c */
 extern Datum numeric_in(PG_FUNCTION_ARGS);
 extern Datum numeric_out(PG_FUNCTION_ARGS);
+extern Datum numeric_out_with_zero(PG_FUNCTION_ARGS);
 extern Datum numeric_recv(PG_FUNCTION_ARGS);
 extern Datum numeric_send(PG_FUNCTION_ARGS);
 extern Datum numerictypmodin(PG_FUNCTION_ARGS);
@@ -1346,6 +1349,10 @@ extern Datum pg_try_advisory_xact_lock_shared_int4(PG_FUNCTION_ARGS);
 extern Datum pg_advisory_unlock_int4(PG_FUNCTION_ARGS);
 extern Datum pg_advisory_unlock_shared_int4(PG_FUNCTION_ARGS);
 extern Datum pg_advisory_unlock_all(PG_FUNCTION_ARGS);
+extern Datum gs_lwlock_status(PG_FUNCTION_ARGS);
+
+/* pgstatfuncs.cpp */
+extern Datum gs_stack(PG_FUNCTION_ARGS);
 
 /* txid.c */
 extern Datum txid_snapshot_in(PG_FUNCTION_ARGS);
@@ -1558,10 +1565,8 @@ extern Datum text_timestamp(PG_FUNCTION_ARGS);
 extern void encryptOBS(char* srcplaintext, char destciphertext[], uint32 destcipherlength);
 extern void decryptOBS(
     const char* srcciphertext, char destplaintext[], uint32 destplainlength, const char* obskey = NULL);
-extern void encryptECString(char* src_plain_text, char* dest_cipher_text,
-                                 uint32 dest_cipher_length, int mode);
-extern bool decryptECString(const char* src_cipher_text, char* dest_plain_text,
-                                 uint32 dest_plain_length, int mode);
+extern char *encryptECString(char* src_plain_text, int mode);
+extern bool decryptECString(const char* src_cipher_text, char** dest_plain_text, int mode);
 extern bool IsECEncryptedString(const char* src_cipher_text);
 extern void EncryptGenericOptions(List* options, const char** sensitiveOptionsArray,
                                          int arrayLength, int mode);
@@ -1635,6 +1640,13 @@ Datum gs_index_verify(PG_FUNCTION_ARGS);
 Datum gs_index_recycle_queue(PG_FUNCTION_ARGS);
 
 /* undo meta */
+extern Datum gs_undo_meta_dump_zone(PG_FUNCTION_ARGS);
+extern Datum gs_undo_meta_dump_spaces(PG_FUNCTION_ARGS);
+extern Datum gs_undo_meta_dump_slot(PG_FUNCTION_ARGS);
+extern Datum gs_undo_translot_dump_slot(PG_FUNCTION_ARGS);
+extern Datum gs_undo_translot_dump_xid(PG_FUNCTION_ARGS);
+extern Datum gs_undo_dump_record(PG_FUNCTION_ARGS);
+extern Datum gs_undo_dump_xid(PG_FUNCTION_ARGS);
 extern Datum gs_undo_meta(PG_FUNCTION_ARGS);
 extern Datum gs_stat_undo(PG_FUNCTION_ARGS);
 extern Datum gs_undo_translot(PG_FUNCTION_ARGS);
@@ -1689,6 +1701,13 @@ extern Datum pg_get_publication_tables(PG_FUNCTION_ARGS);
 /* launcher.cpp */
 extern Datum pg_stat_get_subscription(PG_FUNCTION_ARGS);
 
+/* sqlpatch.cpp */
+extern Datum create_sql_patch_by_id_hint(PG_FUNCTION_ARGS);
+extern Datum enable_sql_patch(PG_FUNCTION_ARGS);
+extern Datum disable_sql_patch(PG_FUNCTION_ARGS);
+extern Datum drop_sql_patch(PG_FUNCTION_ARGS);
+extern Datum create_abort_patch_by_id(PG_FUNCTION_ARGS);
+extern Datum show_sql_patch(PG_FUNCTION_ARGS);
 #endif /* !FRONTEND_PARSER */
 
 #endif /* BUILTINS_H */

@@ -143,3 +143,20 @@ ExtentInversePointer GetInversePointer(SegExtentGroup *seg, BlockNumber extent, 
 
     return res;
 }
+
+ExtentInversePointer RepairGetInversePointer(SegExtentGroup *seg, BlockNumber extent)
+{
+    ExtentInversePointer res = {0, 0};
+    IpBlockLocation loc = GetIpBlock(extent, seg->extent_size);
+    Buffer buf = ip_readbuf(seg, loc.ipblock, false);
+    if (BufferIsInvalid(buf)) {
+        return res;
+    }
+    LockBuffer(buf, BUFFER_LOCK_SHARE);
+    ExtentInversePointer *eips = (ExtentInversePointer *)PageGetContents(BufferGetBlock(buf));
+    res = eips[loc.offset];
+    LockBuffer(buf, BUFFER_LOCK_UNLOCK);
+    SegReleaseBuffer(buf);
+    return res;
+}
+

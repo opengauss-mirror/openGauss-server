@@ -20,11 +20,14 @@ import tempfile
 from logging.handlers import TimedRotatingFileHandler
 
 import yaml
+import requests
+from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
 from dbmind.common.daemon import Daemon
+from dbmind.common.security import check_ip_valid, check_port_valid
+from dbmind.common.utils import write_to_terminal
 from dbmind.common.utils import set_proc_title, check_ssl_certificate_remaining_days,\
     check_ssl_file_permission
-from dbmind.common.utils import write_to_terminal
 from . import controller
 from . import service
 from .. import __version__
@@ -42,6 +45,8 @@ DEFAULT_LOGFILE = 'dbmind_opengauss_exporter.log'
 with tempfile.NamedTemporaryFile(suffix='.pid') as fp:
     EXPORTER_PIDFILE_NAME = fp.name
 
+requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
+
 
 class PairAction(argparse.Action):
     def __call__(self, parser, args, values, option_string=None):
@@ -53,6 +58,37 @@ class PairAction(argparse.Action):
             setattr(args, self.dest, d)
         except ValueError:
             parser.error('Illegal constant labels: %s.' % values)
+
+
+class CheckPort(argparse.Action):
+    def __call__(self, parser, args, values, option_string=None):
+        if not check_port_valid(values):
+            parser.error('Illegal port value(1024~65535): %s.' % values)
+        setattr(args, self.dest, values)
+
+
+class CheckIP(argparse.Action):
+    def __call__(self, parser, args, values, option_string=None):
+        if not check_ip_valid(values):
+            parser.error('Illegal IP: %s.' % values)
+        setattr(args, self.dest, values)
+
+
+def is_exporter_alive(host, port, disable_https):
+    scheme = 'http' if disable_https else 'https'
+    host = '127.0.0.1' if host == '0.0.0.0' else host
+    url = "{}://{}:{}/metrics".format(scheme, host, port)
+    try:
+        response = requests.get(
+            url,
+            headers={"Content-Type": "application/json"},
+            verify=False,
+        )
+        if response.status_code == 200:
+            return True
+        return False
+    except Exception as e:
+        return False
 
 
 def wipe_off_password(dsn):
@@ -84,9 +120,9 @@ def parse_argv(argv):
                         help='path to config file.')
     parser.add_argument('--constant-labels', default='', action=PairAction,
                         help='a list of label=value separated by comma(,).')
-    parser.add_argument('--web.listen-address', default='127.0.0.1',
+    parser.add_argument('--web.listen-address', default='127.0.0.1', action=CheckIP,
                         help='address on which to expose metrics and web interface')
-    parser.add_argument('--web.listen-port', type=int, default=9187,
+    parser.add_argument('--web.listen-port', type=int, default=9187, action=CheckPort,
                         help='listen port to expose metrics and web interface')
     parser.add_argument('--web.telemetry-path', default='/metrics',
                         help='path under which to expose metrics.')
@@ -165,8 +201,8 @@ class ExporterMain(Daemon):
         if os.path.exists(self.pid_file):
             os.unlink(self.pid_file)
 
-    def __init__(self, argv):
-        self.args = parse_argv(argv)
+    def __init__(self, args):
+        self.args = args
         self.pid_file = EXPORTER_PIDFILE_NAME
         super().__init__(self.pid_file)
 
@@ -221,4 +257,10 @@ class ExporterMain(Daemon):
 
 
 def main(argv):
-    ExporterMain(argv).start()
+    args = parse_argv(argv)
+    if is_exporter_alive(args.__dict__['web.listen_address'],
+                         args.__dict__['web.listen_port'],
+                         args.disable_https):
+        write_to_terminal('Service has been started, exiting...', color='red')
+    else:
+        ExporterMain(args).start()

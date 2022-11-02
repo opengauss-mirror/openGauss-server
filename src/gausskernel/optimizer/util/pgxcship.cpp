@@ -61,8 +61,6 @@
 #include "pgxc/pgxc.h"
 #endif
 
-#define XOR(A, B) (((A) && !(B)) || (!(A) && (B)))
-
 typedef bool (*CheckColocateHook)(Query* query, RangeTblEntry* rte, void* plpgsql_func);
 
 /*
@@ -104,6 +102,8 @@ typedef struct {
     bool sc_disallow_volatile_func_shippability; /* If true disallow volatie func shippable */
     
     bool sc_inselect;
+
+    bool sc_security_barrier;                          /* true if contains security barrier */
 } Shippability_context;
 
 /*
@@ -261,6 +261,9 @@ static ExecNodes* pgxc_FQS_datanodes_for_rtr(Index varno, Shippability_context* 
 {
     Query* query = sc_context->sc_query;
     RangeTblEntry* rte = rt_fetch(varno, query->rtable);
+    if (rte->security_barrier) {
+        sc_context->sc_security_barrier = true;
+    }
     switch (rte->rtekind) {
         case RTE_RELATION: {
             /* For anything, other than a table, we can't find the datanodes */
@@ -380,6 +383,14 @@ static List* match_equivclause_recurse(Node* var, Node* con, List* quals_v)
         Node* rvar = (Node*)lsecond(op->args);
         Node* tvar = NULL;  /* temporary placeholder */
 
+        if (IsA(lvar, RelabelType)) {
+            lvar = (Node*)((RelabelType*)lvar)->arg;
+        }
+
+        if (IsA(rvar, RelabelType)) {
+            rvar = (Node*)((RelabelType*)rvar)->arg;
+        }
+
         /* Skip if type doesn't match */
         if ((nodeTag(lvar) != nodeTag(var)) && (nodeTag(rvar) != nodeTag(var))) {
             tmp_quals = lappend(tmp_quals, op);
@@ -453,13 +464,24 @@ static List* match_equivclause(List* quals_c, List* quals_v)
         Expr* qual_expr = (Expr*)lfirst(qcell);
         OpExpr* op = (OpExpr*)qual_expr;
 
+        Node* arg1 = (Node*)linitial(op->args);
+        Node* arg2 = (Node*)lsecond(op->args);
+
+        if (IsA(arg1, RelabelType)) {
+            arg1 = (Node*)((RelabelType*)arg1)->arg;
+        }
+
+        if (IsA(arg2, RelabelType)) {
+            arg2 = (Node*)((RelabelType*)arg2)->arg;
+        }
+
         /* Var-Const relation */
-        if ((IsA((Node*)linitial(op->args), Const)) || (IsA((Node*)linitial(op->args), Param))) {
-            var = (Node*)lsecond(op->args);
-            con = (Node*)linitial(op->args);
-        } else if ((IsA((Node*)lsecond(op->args), Const)) || (IsA((Node*)lsecond(op->args), Param))) {
-            var = (Node*)linitial(op->args);
-            con = (Node*)lsecond(op->args);
+        if ((IsA(arg1, Const)) || (IsA(arg1, Param))) {
+            var = arg2;
+            con = arg1;
+        } else if ((IsA(arg2, Const)) || (IsA(arg2, Param))) {
+            var = arg1;
+            con = arg2;
         } else {
             return NIL; /* Breaking condition */
         }
@@ -486,6 +508,17 @@ static List* match_equivclause(List* quals_c, List* quals_v)
     }
 
     return ret_quals;
+}
+
+static bool IsVarConstCond(const Node* arg1, const Node* arg2)
+{
+    if ((IsA(arg1, Const) || IsA(arg1, Param)) && IsA(arg2, Var)) {
+        return true;
+    }
+    if ((IsA(arg2, Const) || IsA(arg2, Param)) && IsA(arg1, Var)) {
+        return true;
+    }
+    return false;
 }
 
 /*
@@ -525,15 +558,25 @@ static Node* rewrite_equivclause(Node *quals)
             continue;
         }
 
+        Node* arg1 = (Node*)linitial(op->args);
+        Node* arg2 = (Node*)lsecond(op->args);
+
+        if (IsA(arg1, RelabelType)) {
+            arg1 = (Node*)((RelabelType*)arg1)->arg;
+        }
+
+        if (IsA(arg2, RelabelType)) {
+            arg2 = (Node*)((RelabelType*)arg2)->arg;
+        }
+
         /* Var-Var relation with RelabelType support */
-        if (nodeTag((Node*)linitial(op->args)) == nodeTag((Node*)lsecond(op->args))) { 
-            if (nodeTag((Node*)linitial(op->args)) == T_Const) { /* (+) compatible */
+        if (nodeTag(arg1) == nodeTag(arg2)) { 
+            if (nodeTag(arg1) == T_Const) { /* (+) compatible */
                 ret_quals = lappend(ret_quals, (Node*)copyObject(op));
                 continue;
             }
             tmp_quals_v = lappend(tmp_quals_v, op);
-        } else if ((XOR(IsA((Node*)linitial(op->args), Const), IsA((Node*)lsecond(op->args), Const))) ||
-                  (XOR(IsA((Node*)linitial(op->args), Param), IsA((Node*)lsecond(op->args), Param)))) {
+        } else if (IsVarConstCond(arg1, arg2)) {
             tmp_quals_c = lappend(tmp_quals_c, op);
         } else {
             /* Other not handled cases, append */
@@ -2162,6 +2205,7 @@ ExecNodes* pgxc_is_query_shippable(
     sc_context.sc_contain_column_store = (contain_column_store != NULL && *contain_column_store) ?
         true : contains_column_tables(query->rtable);
     sc_context.sc_use_star_upper_level = false;
+    sc_context.sc_security_barrier = false;
 
     /* Make the boundParams available for all subqueries if needed */
     if (query->boundParamsQ != NULL) {
@@ -2174,6 +2218,11 @@ ExecNodes* pgxc_is_query_shippable(
      * shipped.
      */
     pgxc_shippability_walker((Node*)query, &sc_context);
+
+    /* Do not ship query that refers to views with security barrier, which cannot be handle properly on DN. */
+    if (sc_context.sc_security_barrier) {
+        return NULL;
+    }
 
 #ifdef STREAMPLAN
     /*
@@ -2481,6 +2530,9 @@ bool pgxc_is_func_shippable(Oid funcid, shipping_context* context)
                 break;
 
             case NEXTVALFUNCOID:
+                if (t_thrd.proc->workingVersionNum < LARGE_SEQUENCE_VERSION_NUM) {
+                    return false;
+                }
                 return context->is_nextval_shippable;
                 break;
 

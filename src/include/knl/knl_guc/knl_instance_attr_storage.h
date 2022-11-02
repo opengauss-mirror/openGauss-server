@@ -89,7 +89,6 @@ typedef struct knl_instance_attr_storage {
     bool enable_gtm_free;
     bool comm_cn_dn_logic_conn;
     bool enable_adio_function;
-    bool enable_access_server_directory;
     bool enableIncrementalCheckpoint;
     bool enable_double_write;
     bool enable_delta_store;
@@ -97,6 +96,7 @@ typedef struct knl_instance_attr_storage {
     bool gucMostAvailableSync;
     bool enable_ustore;
     bool auto_csn_barrier;
+    bool enable_availablezone;
     bool enable_wal_shipping_compression;
     int WalReceiverBufSize;
     int DataQueueBufSize;
@@ -158,6 +158,7 @@ typedef struct knl_instance_attr_storage {
 #ifndef ENABLE_MULTIPLE_NODES
     bool enable_save_confirmed_lsn;
 #endif
+    int max_active_gtt;
 } knl_instance_attr_storage;
 
 #endif /* SRC_INCLUDE_KNL_KNL_INSTANCE_ATTR_STORAGE_H_ */

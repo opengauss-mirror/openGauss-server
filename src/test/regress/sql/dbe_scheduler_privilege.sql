@@ -104,3 +104,7 @@ select DBE_SCHEDULER.grant_user_authorization('scheduler_user2', 'execute any pr
 drop user scheduler_user1;
 drop user scheduler_user2;
 select attribute_name, attribute_value from gs_job_attribute; -- empty
+
+select DBE_SCHEDULER.create_credential('cre_1', ' scheduler_user1', ''); -- failed, space is not allowed
+select DBE_SCHEDULER.create_credential('cre_1', '"scheduler_user1', ''); -- failed, quote is not allowed
+select DBE_SCHEDULER.create_credential('cre_1', '&scheduler_user1', ''); -- failed, & is not allowed

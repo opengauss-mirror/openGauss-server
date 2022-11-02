@@ -28,7 +28,7 @@
 #include <fcntl.h> /* need open() flags */
 #include "c.h"
 #include "utils/palloc.h"
-
+#include "fmgr/fmgr_comp.h"
 #include "storage/lock/lwlock.h"
 
 static const uint32 HALF_K = 512;
@@ -102,8 +102,10 @@ typedef struct st_dw_file_head {
 
 /* write the st_dw_meta_file data into the first three sector of the page */
 static const uint32 DW_META_FILE_BLOCK_NUM = 3;
-
 static const uint32 DW_FILE_HEAD_ID_NUM = 3;
+
+/* number of retries to open or create dw files   */
+static const int DW_FILE_RETRY_TIMES = 3;
 
 /* write file head 3 times, distributed in start, middle, end of the first page of dw file */
 static const uint16 g_dw_file_head_ids[DW_FILE_HEAD_ID_NUM] = {0, 8, 15};
@@ -137,7 +139,7 @@ typedef int slock_t;
 
 typedef uintptr_t Datum;
 
-typedef Datum (*dw_view_get_data_func)();
+typedef Datum (*dw_view_get_data_func)(void*);
 
 typedef struct st_dw_view_col {
     char name[DW_VIEW_COL_NAME_LEN];
@@ -145,7 +147,7 @@ typedef struct st_dw_view_col {
     dw_view_get_data_func get_data;
 } dw_view_col_t;
 
-Datum dw_get_node_name();
+Datum dw_get_node_name(void* para = NULL);
 
 typedef struct st_dw_read_asst {
     int fd;
@@ -179,5 +181,8 @@ typedef struct dw_stat_info_single {
 
 extern const dw_view_col_t g_dw_view_col_arr[DW_VIEW_COL_NUM];
 extern const dw_view_col_t g_dw_single_view[DW_SINGLE_VIEW_COL_NUM];
+
+Datum gs_block_dw_io(PG_FUNCTION_ARGS);
+Datum gs_is_dw_io_blocked(PG_FUNCTION_ARGS);
 
 #endif /* DOUBLE_WRITE_BASIC_H */

@@ -18,7 +18,6 @@
 #define DEPENDENCY_H
 
 #include "catalog/objectaddress.h"
-#include "catalog/dfsstore_ctlg.h"
 #include "catalog/pg_directory.h"
 
 
@@ -286,6 +285,8 @@ extern void recordMultipleDependencies(const ObjectAddress *depender,
 
 extern void recordDependencyOnCurrentExtension(const ObjectAddress *object,
                                                bool isReplace);
+
+extern void checkMembershipInCurrentExtension(const ObjectAddress *object);
 
 extern void recordPinnedDependency(const ObjectAddress *object);
 

@@ -5,6 +5,90 @@ drop schema if exists plpgsql_override_out;
 create schema plpgsql_override_out;
 set current_schema = plpgsql_override_out;
 set behavior_compat_options = 'proc_outparam_override';
+create or replace procedure p_wrt1(w_text varchar(100))
+as
+declare
+v_file number;
+begin
+ v_file := dbe_file.open('dbef_dir', 'w_tmp.txt', 'w', 20000);
+ for i in 1..5 loop
+ dbe_file.format_write(v_file, '%s\n', w_text);
+ end loop;
+ dbe_file.flush(v_file);
+
+ if dbe_file.is_close(v_file) then
+ perform dbe_file.close(v_file);
+ end if;
+end;
+/
+
+BEGIN
+DBE_SCHEDULER.CREATE_JOB('job_1', 'PLSQL_BLOCK', 'BEGIN \d+; END;', 0, NULL, NULL, NULL,'DEFAULT_JOB_CLASS', FALSE, TRUE, NULL, NULL, NULL);
+END;
+/
+declare
+in_job_name varchar2;
+begin
+in_job_name='cidpjob_13';
+dbe_scheduler.drop_job(job_name=>in_job_name,force=>true);
+end;
+/
+\df aclexplode
+\df check_engine_status
+\df comm_check_info
+\df adm_hist_sqlstat_func
+\df adm_hist_sqlstat_idlag_func
+create or replace procedure pro2(i_col1 out int)
+is
+a int;
+begin
+a := 9;
+end;
+/
+ 
+declare
+a int;
+begin
+perform pro2(a);
+raise info '%',a;
+end;
+/
+create or replace procedure test1(col1 out varchar2) package
+is
+begin
+col1:=1;
+raise info '2';
+end;
+/
+
+create or replace procedure test1(col1 out int) package
+is
+begin
+col1:=1;
+raise info '3';
+end;
+/
+declare
+a int;
+begin
+perform test1(a);
+raise info '%',a;
+end;
+/
+CREATE OR REPLACE PROCEDURE proc_out_test(a int) package
+is
+begin
+null;
+end;
+/
+
+CREATE OR REPLACE PROCEDURE proc_out_test(a out int) package
+is
+begin
+null;
+end;
+/
+select proname,proargtypes,allargtypes from pg_proc where proname='proc_out_test';
 create or replace package pck1 is
 procedure p1;
 procedure p1(v1 in varchar2);
@@ -368,6 +452,22 @@ perform pck1.p1(var,'a');--不支持，报错
 end;
 /
 \df
+
+create or replace procedure dbe_test(inout oldstring varchar2,newstr varchar2)
+is
+begin
+    oldstring:=oldstring || newstr;
+end;
+/
+
+declare
+a text:='aaaaaaaaaaa';
+begin
+for i in 1..50000 loop
+    dbe_test(a,'aaaaa');
+end loop;
+end;
+/
 drop package pck1;
 drop type o1_test;
 set behavior_compat_options = '';
@@ -440,7 +540,262 @@ not_1:='202208';
 end;
 /
 
+
+create or replace function f1(a out text) return text
+is
+b text;
+begin
+return b;
+end;
+/
+ 
+create or replace function f3() return text
+as
+declare
+buf text;
+ddd text;
+b text;
+begin
+return buf;
+end;
+/
+ 
+call f3();
+ 
+create or replace function f1(a out text) return text
+is
+b text;
+begin
+a :='aaa';
+return b;
+end;
+/
+ 
+create or replace function f3() return text
+as
+declare
+buf text;
+ddd text;
+b text;
+begin
+perform f1(buf);
+return buf;
+end;
+/
+ 
+call f3();
+ 
+create or replace function f1(c int, a out text) return text
+is
+b text;
+begin
+c:=1;
+a :='aaa';
+return b;
+end;
+/
+ 
+create or replace function f3() return text
+as
+declare
+buf text;
+ddd text;
+b text;
+begin
+perform f1(1,buf);
+return buf;
+end;
+/
+ 
+call f3();
+create or replace procedure pro2(i_col1 out int)
+is
+a int;
+begin
+a := 9;
+end;
+/
+
+declare
+a int;
+begin
+perform pro2(a);
+end;
+/
+
 call proc_test();
 drop procedure proc_test;
 
+set behavior_compat_options='proc_outparam_override';
+set plsql_compile_check_options='outparam';
+create procedure p11(a out int) package is
+begin
+a:=12;
+end;
+/
+create procedure p11(a out varchar2) package is
+begin
+a:='12aa';
+end;
+/
+create procedure p11(a out int[]) package is
+begin
+a:=12;
+end;
+/
+create procedure p11(a in int, b out int) package is
+begin
+a:=12;
+b:=66;
+end;
+/
+
+drop procedure if exists p112(out int);
+create procedure p112(a out int) is
+declare
+aa varchar2;
+a varchar2;
+begin
+aa := p11(p11(p11('2aaa')));--常量报错
+raise info 'aa=%',aa;
+end;
+/
+
+
+drop procedure if exists p112(out int);
+create procedure p112(a out int) is
+declare
+aa varchar2;
+a varchar2;
+begin
+aa := p11(p11('2aaa'));--常量报错
+raise info 'aa=%',aa;
+end;
+/
+
+drop procedure if exists p112(out int);
+create procedure p112(a out int) is
+declare
+aa varchar2;
+a varchar2;
+begin
+aa := p11('2aaa');--常量报错
+raise info 'aa=%',aa;
+end;
+/
+
+drop procedure if exists p112(out int);
+create procedure p112(a out int) is
+declare
+aa varchar2;
+a varchar2;
+begin
+aa := p11(1+1);--常量报错
+raise info 'aa=%',aa;
+end;
+/
+
+drop procedure if exists p112(out int);
+create procedure p112(a out int) is
+declare
+aa varchar2;
+a varchar2;
+begin
+aa := p11(a);--常量不报错
+raise info 'aa=%',aa;
+end;
+/
+
+drop procedure if exists p112(out int);
+create procedure p112(a out int) is
+declare
+aa varchar2;
+a int[];
+begin
+aa := p11(a);--常量不报错
+raise info 'aa=%',aa;
+end;
+/
+
+drop procedure if exists p112(out int);
+create procedure p112(a out int) is
+declare
+aa varchar2;
+bb int;
+begin
+aa := p11(p11('2aaa'),bb);--常量报错
+raise info 'aa=%',aa;
+end;
+/
+
+drop package if exists pck1;
+create or replace package pck1 is
+type tp_1 is record(v01 number, v03 varchar2, v02 number);
+procedure p1(a out int);
+procedure p1(b out tp_1);
+end pck1;
+/
+
+create or replace package body pck1 is
+procedure p1(a out int) is
+begin
+a:=12;
+end;
+procedure p1(b out tp_1) is
+begin
+b.v01:=13;
+raise info 'b:%', b;
+end;
+end pck1;
+/
+
+declare
+begin
+perform pck1.p1(2);--常量报错
+end;
+/
+
+drop package if exists pck1;
+create or replace package pck1 is
+type tp_1 is record(v01 number, v03 varchar2, v02 number);
+type tp_2 is varray(10) of int;
+procedure p1(a in tp_1,c inout tp_2,b out varchar2);
+procedure p1(a in tp_2,c inout tp_1,b out tp_1);
+end pck1;
+/
+
+create or replace package body pck1 is
+procedure p1(a in tp_1,c inout tp_2,b out varchar2) is
+begin
+c(1):=a.v01;
+b:=a.v03;
+raise info 'b:%',b;
+end;
+procedure p1(a in tp_2,c inout tp_1,b out tp_1) is
+begin
+c.v03:=a(1);
+b:=(a(1),c.v03,a(2));
+raise info 'b:%',b;
+end;
+end pck1;
+/
+
+declare
+var1 pck1.tp_2;
+var2 varchar2;
+begin
+perform pck1.p1((1,'bb','11'),array[2,3,4],var2);--报错
+end;
+/
+
+declare
+var1 pck1.tp_2;
+var2 varchar2;
+begin
+perform pck1.p1(a=>(1,'bb','11'),c=>var1,b=>'aa');--报错
+end;
+/
+
+set plsql_compile_check_options='';
+drop package if exists pck1;
 drop schema if exists plpgsql_override_out cascade;

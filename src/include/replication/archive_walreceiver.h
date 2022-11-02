@@ -53,6 +53,7 @@ extern void archive_disconnect(void);
 #define IS_CN_OBS_DISASTER_RECOVER_MODE \
     (IS_PGXC_COORDINATOR  && GetArchiveRecoverySlot())
 #define OBS_ARCHIVE_STATUS_FILE "obs_archive_start_end_record"
+#define OBS_LAST_CLEAN_RECORD "obs_last_clean_record"
 #define ARCHIVE_GLOBAL_BARRIER_LIST_PATH "global_barrier_records"
 #define FILE_TIME_INTERVAL 600000
 

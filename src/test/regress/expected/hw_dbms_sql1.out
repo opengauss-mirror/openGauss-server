@@ -1622,17 +1622,15 @@ end loop;
 dbe_sql.sql_unregister_context(context_id);
 end;
 /
+ERROR:  function dbe_sql.get_result_raw(integer, integer, bytea) does not exist
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  compilation of PL/pgSQL function "pro_dbe_sql_all_02" near line 24
 --调用存储过程
 call pro_dbe_sql_all_02(HEXTORAW('DEADBEEF'),0,1);
-info:1 info:\x363436343634
-info:1 info:\x363436343634
- pro_dbe_sql_all_02 
---------------------
- 
-(1 row)
-
+ERROR:  function "pro_dbe_sql_all_02" doesn't exist 
 --删除存储过程
 DROP PROCEDURE pro_dbe_sql_all_02;
+ERROR:  function pro_dbe_sql_all_02 does not exist
 
 -----------set_result_type-------column_value----------------------------bpchar
 
@@ -2273,7 +2271,7 @@ CONTEXT:  SQL statement "drop table if exists pro_dbe_sql_all_tb1_02"
 PL/pgSQL function pro_dbe_sql_all_02(raw,integer,integer) line 15 at SQL statement
 id:4
 id:6
-col_num:4
+col_num:6
 col_type:23
 col_type:23
 col_type:23
@@ -2941,3 +2939,226 @@ ERROR:  no such savepoint
 CONTEXT:  PL/pgSQL function y(integer) line 6 at ROLLBACK TO SAVEPOINT
 drop FUNCTION x1();
 drop procedure y();
+
+-- test commit/rollback with /
+create or replace procedure pro(numt out int)
+as
+begin
+numt:=12;
+rollback;
+numt:=10;
+commit;
+numt:=10;
+commit;
+end;
+/
+create or replace procedure pro2(numtin in int,numtout out int)
+as
+begin
+numtout:=pro()/numtin;
+exception
+when others then
+raise info 'numtout : %', numtout;
+end;
+/
+
+call pro2(2,1);
+ numtout 
+---------
+       5
+(1 row)
+
+call pro2(2,1);
+ numtout 
+---------
+       5
+(1 row)
+
+
+drop procedure pro2;
+drop procedure pro;
+
+drop table if exists tab_1;
+NOTICE:  table "tab_1" does not exist, skipping
+drop procedure if exists test();
+NOTICE:  function test() does not exist, skipping
+
+create table tab_1(a int);
+insert into tab_1 values (1),(2),(3),(4);
+
+select * from tab_1 order by 1;
+ a 
+---
+ 1
+ 2
+ 3
+ 4
+(4 rows)
+
+
+create or replace procedure test()
+as
+query varchar(2000);
+context_id int;
+cnt int :=3;
+col int[];
+col1 int[];
+col2 int[];
+num int;
+begin
+query := 'select * from tab_1 order by 1;';
+context_id := dbe_sql.register_context();
+dbe_sql.sql_set_sql(context_id, query, 1); 
+dbe_sql.set_results_type(context_id,1,col,cnt,1);
+dbe_sql.sql_run(context_id);
+loop 
+num := dbe_sql.next_row(context_id);
+dbe_sql.get_results(context_id,1,col1); 
+dbe_sql.get_results(context_id,1,col2);
+exit when(num != 3); 
+end loop; 
+FOR j IN col1.FIRST .. col1.LAST LOOP 
+dbe_output.print_line(col1[j]); 
+END LOOP; 
+FOR j IN col2.FIRST .. col2.LAST LOOP 
+dbe_output.print_line(col2[j]); 
+END LOOP;
+dbe_sql.sql_unregister_context(context_id);
+end;
+/
+
+call test();
+1
+2
+3
+4
+1
+2
+3
+4
+ test 
+------
+ 
+(1 row)
+
+
+drop procedure if exists test();
+drop table if exists tab_1;
+
+
+create or replace procedure pro_dbms_sql_all_03(in_raw raw,in_int int,in_long bigint,in_text text,in_char char(30),in_varchar varchar(30))
+as
+declare
+cursorid int;
+v_id int;
+v_info bytea :=1;
+v_info_new raw;
+v_long bigint;
+v_text text:=2;
+v_char char(30):=1;
+v_varchar text :=1;
+query varchar(2000);
+execute_ret int;
+define_column_ret_raw raw;
+define_column_ret int;
+define_column_ret_long bigint;
+define_column_ret_text text;
+define_column_ret_char char(30);
+define_column_ret_varchar text;
+err numeric;
+act_len int;
+begin
+drop table if exists pro_dbms_sql_all_tb1_03 ;
+create table pro_dbms_sql_all_tb1_03(a int ,b raw,c bigint,d text,e char(30),f varchar(30));
+insert into pro_dbms_sql_all_tb1_03 values(1,HEXTORAW('DEADBEEF'),in_long,in_text,in_char,in_varchar);
+insert into pro_dbms_sql_all_tb1_03 values(in_int,in_raw,-9223372036854775808,'5','十里春风','845injnj');
+insert into pro_dbms_sql_all_tb1_03 values(3,HEXTORAW('DEADBEEF'),9223372036854775807,'4','十全十美','芝麻街');
+insert into pro_dbms_sql_all_tb1_03 values(-2147483648,HEXTORAW('1'),'3','3','暖暖','weicn');
+insert into pro_dbms_sql_all_tb1_03 values(2147483647,HEXTORAW('2'),'4','2',in_varchar,in_char);
+query := 'select * from pro_dbms_sql_all_tb1_03 order by 1';
+--打开游标
+cursorid := DBE_SQL.register_context();
+--编译游标
+DBE_SQL.sql_set_sql(cursorid, query, 1);
+--定义列
+define_column_ret:= DBE_SQL.set_result_type(cursorid,1,v_id);
+define_column_ret_raw := DBE_SQL.set_result_type_raw(cursorid,2,v_info_new,20);
+define_column_ret_long := DBE_SQL.set_result_type_long(cursorid,3);
+define_column_ret_text := DBE_SQL.set_result_type(cursorid,4,v_text);
+define_column_ret_char := DBE_SQL.set_result_type_char(cursorid,5,v_char,30);
+define_column_ret_varchar:= DBE_SQL.set_result_type(cursorid,6,v_varchar);
+--执行
+execute_ret := DBE_SQL.sql_run(cursorid);
+loop
+exit when (DBE_SQL.next_row(cursorid) <= 0);
+--获取值
+DBE_SQL.get_result(cursorid,1,v_id);
+DBE_SQL.get_result_raw(cursorid,2,v_info_new);
+DBE_SQL.get_result_long(cursorid,3,21,1,v_long,act_len);
+DBE_SQL.get_result(cursorid,4,v_text);
+DBE_SQL.get_result_char(cursorid,5,v_char,err,act_len);
+DBE_SQL.get_result(cursorid,6,v_varchar);
+--输出结果
+raise notice 'result is: %', v_id || ' , ' || v_info|| ' , ' || v_long|| ' , ' || v_text|| ' , ' || v_char|| ' , ' || v_varchar;
+end loop;
+--关闭游标
+DBE_SQL.sql_unregister_context(cursorid);
+end;
+/
+
+call pro_dbms_sql_all_03(HEXTORAW('DEADBEEF'),2,4,'十里桃花','sdj是','东城街道shj23');
+NOTICE:  table "pro_dbms_sql_all_tb1_03" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists pro_dbms_sql_all_tb1_03"
+PL/pgSQL function pro_dbms_sql_all_03(raw,integer,bigint,text,character,character varying) line 22 at SQL statement
+NOTICE:  result is: -2147483648 , \x31 , 3 , 3 , 暖 , weicn
+NOTICE:  result is: 1 , \x31 , 4 , 十里桃花 , s , 东城街道shj23
+NOTICE:  result is: 2 , \x31 , -9223372036854775808 , 5 , 十里春风 , 845injnj
+NOTICE:  result is: 3 , \x31 , 9223372036854775807 , 4 , 十全十美 , 芝麻街
+NOTICE:  result is: 2147483647 , \x31 , 4 , 2 , 东 , sdj是
+ pro_dbms_sql_all_03 
+---------------------
+ 
+(1 row)
+
+
+----==========================bigint
+create or replace procedure pro_dbms_sql_all_03()
+as
+declare
+	context_id int;
+	execute_ret int;
+	fetch_ret int;
+	col_value bigint[];  
+	cnt int := 2;  
+	query varchar(2000);
+BEGIN
+drop table if exists t;
+create table t (a int, b bigint, c text, d raw, e bytea, f clob, g blob, h varchar);
+insert into t values (1, 1, '1', '1', '1', '1', '1', '1');
+insert into t values (2, 2, '2', '2', '2', '2', '2', '2');
+insert into t values (3, 3, '3', '3', '3', '3', '3', '3');
+query := 'select b from t where b < x;';
+context_id := dbe_sql.register_context();
+dbe_sql.sql_set_sql(context_id, query, 1);
+dbe_sql.sql_bind_variable(context_id, 'x', 10);
+dbe_sql.set_results_type(context_id, 1, col_value, cnt, 1);
+execute_ret := dbe_sql.sql_run(context_id);
+fetch_ret := dbe_sql.next_row(context_id);
+dbe_sql.get_results(context_id, 1, col_value);
+dbe_sql.sql_unregister_context(context_id);
+raise info 'execute_ret: %', execute_ret;
+raise info 'fetch_ret: %', fetch_ret;
+raise info 'col_value: %', col_value;
+END;
+/
+call pro_dbms_sql_all_03();
+NOTICE:  table "t" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists t"
+PL/pgSQL function pro_dbms_sql_all_03() line 10 at SQL statement
+INFO:  execute_ret: 1
+INFO:  fetch_ret: 2
+INFO:  col_value: {1,2}
+ pro_dbms_sql_all_03 
+---------------------
+ 
+(1 row)

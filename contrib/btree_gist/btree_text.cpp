@@ -61,6 +61,19 @@ static int32 gbt_textcmp(const void* a, const void* b, Oid collation)
     return DatumGetInt32(DirectFunctionCall2Coll(bttextcmp, collation, PointerGetDatum(a), PointerGetDatum(b)));
 }
 
+static Datum gbt_rtrim1(PG_FUNCTION_ARGS)
+{
+    text* string = PG_GETARG_TEXT_PP(0);
+    text* ret = NULL;
+
+    ret = dotrim(VARDATA_ANY(string), VARSIZE_ANY_EXHDR(string), " ", 1, false, true);
+
+    if ((ret == NULL || 0 == VARSIZE_ANY_EXHDR(ret)) && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)
+        PG_RETURN_NULL();
+    else
+        PG_RETURN_TEXT_P(ret);
+}
+
 static gbtree_vinfo tinfo = {
     gbt_t_text, 0, FALSE, gbt_textgt, gbt_textge, gbt_texteq, gbt_textle, gbt_textlt, gbt_textcmp, NULL};
 
@@ -91,7 +104,7 @@ Datum gbt_bpchar_compress(PG_FUNCTION_ARGS)
 
     if (entry->leafkey) {
 
-        Datum d = DirectFunctionCall1(rtrim1, entry->key);
+        Datum d = DirectFunctionCall1(gbt_rtrim1, entry->key);
         GISTENTRY trim;
 
         gistentryinit(trim, d, entry->rel, entry->page, entry->offset, TRUE);
@@ -135,7 +148,7 @@ Datum gbt_bpchar_consistent(PG_FUNCTION_ARGS)
     bool retval = false;
     GBT_VARKEY* key = (GBT_VARKEY*)DatumGetPointer(entry->key);
     GBT_VARKEY_R r = gbt_var_key_readable(key);
-    void* trim = (void*)DatumGetPointer(DirectFunctionCall1(rtrim1, PointerGetDatum(query)));
+    void* trim = (void*)DatumGetPointer(DirectFunctionCall1(gbt_rtrim1, PointerGetDatum(query)));
 
     /* All cases served by this function are exact */
     *recheck = false;

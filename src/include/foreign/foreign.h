@@ -233,12 +233,6 @@ extern bool CheckSupportedFDWType(Oid relId);
  */
 extern ObsOptions* getObsOptions(Oid foreignTableId);
 
-/*
- * brief: Creates and returns the option values to be used.
- * input param @foreignTableId: Oid of the foreign tableId.
- */
-HdfsFdwOptions* HdfsGetOptions(Oid foreignTableId);
-
 bool isSpecifiedSrvTypeFromRelId(Oid relId, const char* SepcifiedType);
 bool isSpecifiedSrvTypeFromSrvName(const char* srvName, const char* SepcifiedType);
 
@@ -282,7 +276,31 @@ ServerTypeOption getServerType(Oid foreignTableId);
 List* getFdwOptions(Oid foreignTableId);
 int getSpecialCharCnt(const char* path, const char specialChar);
 ObsOptions* setObsSrvOptions(ForeignOptions* fOptions);
-HdfsOptions* setHdfsSrvOptions(ForeignOptions* fOptions);
+
+/*
+ * brief: Check foldername, filenames, hdfscfgpath format. The rules are the followings:
+ *		  1. The space do not allow appear in the entrie OptStr, but '\ ' is needed
+ *		  2. The comma do not appera in beignning and ending of OptStr
+ *		  3. The comma as a separator exists if OptStr have many filenames path
+ *		  4. Only a foldername path exists for foldername option and hdfscfgpath
+ *		  5. The OptStr do not be empty
+ * input param @OptStr: the foldername path or file names or hdfscfgpath string
+ * input param @OptType: a foldername, a filenames or a hdfscfgpath type
+ */
+void CheckFoldernameOrFilenamesOrCfgPtah(const char *OptStr, char *OptType);
+
+/*
+ * brief: Check or get port and ip of foreign server(Only support ipv4 format),
+ *        the rules are the followings:
+ *		  1. The space do not allow appear in the entrie Address
+ *		  2. The comma do not appera in beignning and ending of Address
+ *		  3. The comma as a separator exists if OptStr have many address
+ *		  4. The Address do not be empty
+ * input param @Address: address option of foreign server
+ * output param @AddrList: return List included port and ip
+ * input param @IsCheck: if IsCheck is true, only check, else get port and ip
+ */
+void CheckGetServerIpAndPort(const char *Address, List **AddrList, bool IsCheck, int real_addr_max);
 
 bool isWriteOnlyFt(Oid relid);
 

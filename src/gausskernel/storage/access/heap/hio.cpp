@@ -66,13 +66,14 @@ void RelationPutHeapTuple(Relation relation, Buffer buffer, HeapTuple tuple, Tra
 /*
  * Read in a buffer, using bulk-insert strategy if bistate isn't NULL.
  */
-Buffer ReadBufferBI(Relation relation, BlockNumber target_block, BulkInsertState bistate)
+Buffer ReadBufferBI(Relation relation, BlockNumber target_block, ReadBufferMode mode, BulkInsertState bistate)
 {
     Buffer buffer;
 
     /* If not bulk-insert, exactly like ReadBuffer */
-    if (!bistate)
-        return ReadBuffer(relation, target_block);
+    if (!bistate) {
+        return ReadBufferExtended(relation, MAIN_FORKNUM, target_block, mode, NULL);
+    }
 
     /* If we have the desired block already pinned, re-pin and return it */
     if (bistate->current_buf != InvalidBuffer) {
@@ -94,7 +95,7 @@ Buffer ReadBufferBI(Relation relation, BlockNumber target_block, BulkInsertState
     }
 
     /* Perform a read using the buffer strategy */
-    buffer = ReadBufferExtended(relation, MAIN_FORKNUM, target_block, RBM_NORMAL, bistate->strategy);
+    buffer = ReadBufferExtended(relation, MAIN_FORKNUM, target_block, mode, bistate->strategy);
 
     /* Save the selected block as target for future inserts */
     IncrBufferRefCount(buffer);
@@ -138,7 +139,7 @@ static void UBtreeAddExtraBlocks(Relation relation, BulkInsertState bistate)
     CheckRelation(relation, &extraBlocks, lockWaiters);
     while (extraBlocks-- >= 0) {
         /* Ouch - an unnecessary lseek() each time through the loop! */
-        Buffer buffer = ReadBufferBI(relation, P_NEW, bistate);
+        Buffer buffer = ReadBufferBI(relation, P_NEW, RBM_NORMAL, bistate);
         /* ubtree don't need to read or write here, and don't use FSM */
         ReleaseBuffer(buffer); /* just release the buffer */
     }
@@ -175,10 +176,7 @@ void RelationAddExtraBlocks(Relation relation, BulkInsertState bistate)
     CheckRelation(relation, &extra_blocks, lock_waiters);
     while (extra_blocks-- >= 0) {
         /* Ouch - an unnecessary lseek() each time through the loop! */
-        Buffer buffer = ReadBufferBI(relation, P_NEW, bistate);
-
-        /* Extend by one page. */
-        LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
+        Buffer buffer = ReadBufferBI(relation, P_NEW, RBM_ZERO_AND_LOCK, bistate);
         Page page = BufferGetPage(buffer);
 
         if (!RelationIsIndex(relation)) {
@@ -487,7 +485,7 @@ loop:
         extralen = 0;
         if (other_buffer == InvalidBuffer) {
             /* easy case */
-            buffer = ReadBufferBI(relation, target_block, bistate);
+            buffer = ReadBufferBI(relation, target_block, RBM_NORMAL, bistate);
             if (PageIsAllVisible(BufferGetPage(buffer))) {
                 visibilitymap_pin(relation, target_block, vmbuffer);
             }
@@ -656,30 +654,7 @@ loop:
      * it worth keeping an accurate file length in shared memory someplace,
      * rather than relying on the kernel to do it for us?
      */
-    buffer = ReadBufferBI(relation, P_NEW, bistate);
-
-    /*
-     * We can be certain that locking the otherBuffer first is OK, since it
-     * must have a lower page number.
-     */
-    if (other_buffer != InvalidBuffer) {
-        LockBuffer(other_buffer, BUFFER_LOCK_EXCLUSIVE);
-    }
-
-    /*
-     * Now acquire lock on the new page.
-     */
-    LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
-
-    /*
-     * Release the file-extension lock; it's now OK for someone else to extend
-     * the relation some more.	Note that we cannot release this lock before
-     * we have buffer lock on the new page, or we risk a race condition
-     * against vacuumlazy.c --- see comments therein.
-     */
-    if (need_lock) {
-        UnlockRelationForExtension(relation, ExclusiveLock);
-    }
+    buffer = ReadBufferBI(relation, P_NEW, RBM_ZERO_AND_LOCK, bistate);
 
     /*
      * We need to initialize the empty new page.  Double-check that it really
@@ -706,6 +681,51 @@ loop:
         phdr->pd_upper -= sizeof(TdePageInfo);
         phdr->pd_special -= sizeof(TdePageInfo);
         PageSetTDE(page);
+    }
+    MarkBufferDirty(buffer);
+    /*
+     * Release the file-extension lock; it's now OK for someone else to extend
+     * the relation some more.	Note that we cannot release this lock before
+     * we have buffer lock on the new page, or we risk a race condition
+     * against vacuumlazy.c --- see comments therein.
+     */
+    if (need_lock) {
+        UnlockRelationForExtension(relation, ExclusiveLock);
+    }
+
+    /*
+     * Lock the other buffer. It's guaranteed to be of a lower page number
+     * than the new page. To conform with the deadlock prevent rules, we ought
+     * to lock otherBuffer first, but that would give other backends a chance
+     * to put tuples on our page. To reduce the likelihood of that, attempt to
+     * lock the other buffer conditionally, that's very likely to work.
+     * Otherwise we need to lock buffers in the correct order, and retry if
+     * the space has been used in the mean time.
+     *
+     * Alternatively, we could acquire the lock on otherBuffer before
+     * extending the relation, but that'd require holding the lock while
+     * performing IO, which seems worse than an unlikely retry.
+     */
+    if (other_buffer != InvalidBuffer) {
+        Assert(other_buffer != buffer);
+
+        if (unlikely(!ConditionalLockBuffer(other_buffer))) {
+            LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
+            LockBuffer(other_buffer, BUFFER_LOCK_EXCLUSIVE);
+            LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
+
+            /*
+             * Because the buffer was unlocked for a while, it's possible,
+             * although unlikely, that the page was filled. If so, just retry
+             * from start.
+             */
+            if (len > PageGetHeapFreeSpace(page)) {
+                LockBuffer(other_buffer, BUFFER_LOCK_UNLOCK);
+                UnlockReleaseBuffer(buffer);
+
+                goto loop;
+            }
+        }
     }
 
     if (len > PageGetHeapFreeSpace(page)) {
@@ -752,8 +772,7 @@ Buffer RelationGetNewBufferForBulkInsert(Relation relation, Size len, Size dict_
      */
     heap_tuple_len_verifier(len);
 
-    buffer = ReadBufferBI(relation, P_NEW, bistate);
-    LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
+    buffer = ReadBufferBI(relation, P_NEW, RBM_ZERO_AND_LOCK, bistate);
 
     if (need_lock) {
         UnlockRelationForExtension(relation, ExclusiveLock);

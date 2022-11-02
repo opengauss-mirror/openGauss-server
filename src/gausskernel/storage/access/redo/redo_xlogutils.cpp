@@ -128,7 +128,8 @@ bool DoLsnCheck(const RedoBufferInfo *bufferinfo, bool willInit, XLogRecPtr last
                                     "lsn in current page %lu, page info:%u/%u/%u forknum %d lsn %lu blknum:%u",
                                     lastLsn, pageCurLsn, blockinfo->rnode.spcNode, blockinfo->rnode.dbNode,
                                     blockinfo->rnode.relNode, blockinfo->forknum, lsn, blockinfo->blkno)));
-        } else if (pageCurLsn == InvalidXLogRecPtr && PageIsEmpty(page) && PageUpperIsInitNew(page)) {
+        } else if ((pageCurLsn == InvalidXLogRecPtr && PageIsEmpty(page) && PageUpperIsInitNew(page)) ||
+            (g_instance.roach_cxt.isRoachRestore)) {
             return XLogLsnCheckLogInvalidPage(bufferinfo, LSN_CHECK_ERROR, pblk);
         } else {
             int elevel = PANIC;
@@ -756,22 +757,6 @@ void XLogRecSetUndoBlockState(XLogReaderState *record, uint32 blockid, XLogRecPa
             blockundo->undoExtendParse.tailOffset = UNDO_PTR_GET_OFFSET(tailPtr);
             blockundo->undoExtendParse.extendLsn = record->EndRecPtr;
             zoneId = blockundo->undoExtendParse.zoneId;
-            break;
-        }
-        case XLOG_UNDO_CLEAN: {
-            UndoRecPtr tailPtr = ((undo::XlogUndoClean *)xlrec)->tail;
-            blockundo->undoCleanParse.zoneId = UNDO_PTR_GET_ZONE_ID(tailPtr);
-            blockundo->undoCleanParse.tailOffset = UNDO_PTR_GET_OFFSET(tailPtr);
-            blockundo->undoCleanParse.cleanLsn = record->EndRecPtr;
-            zoneId = blockundo->undoCleanParse.zoneId;
-            break;
-        }
-        case XLOG_SLOT_CLEAN: {
-            UndoRecPtr tailPtr = ((undo::XlogUndoClean *)xlrec)->tail;
-            blockundo->undoCleanParse.zoneId = UNDO_PTR_GET_ZONE_ID(tailPtr);
-            blockundo->undoCleanParse.tailOffset = UNDO_PTR_GET_OFFSET(tailPtr);
-            blockundo->undoCleanParse.cleanLsn = record->EndRecPtr;
-            zoneId = blockundo->undoCleanParse.zoneId;
             break;
         }
         default:

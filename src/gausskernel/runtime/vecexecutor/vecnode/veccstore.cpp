@@ -482,7 +482,7 @@ void InitCStoreRelation(CStoreScanState* node, EState* estate, bool idx_flag, Re
                     Oid tbl_part_id = InvalidOid;
                     int part_seq = lfirst_int(cell);
 
-                    tbl_part_id = getPartitionOidFromSequence(curr_rel, part_seq);
+                    tbl_part_id = getPartitionOidFromSequence(curr_rel, part_seq, plan->pruningInfo->partMap);
                     part = partitionOpen(curr_rel, tbl_part_id, lock_mode);
                     node->partitions = lappend(node->partitions, part);
                 }
@@ -533,7 +533,7 @@ void InitCStoreRelation(CStoreScanState* node, EState* estate, bool idx_flag, Re
                     Oid tbl_part_id = InvalidOid;
                     int part_seq = lfirst_int(cell);
 
-                    tbl_part_id = getPartitionOidFromSequence(parent_rel, part_seq);
+                    tbl_part_id = getPartitionOidFromSequence(parent_rel, part_seq, plan->pruningInfo->partMap);
                     part = partitionOpen(parent_rel, tbl_part_id, lock_mode);
                     Oid part_idx_oid = getPartitionIndexOid(plan->scanrelid, part->pd_id);
                     Assert(OidIsValid(part_idx_oid));
@@ -1078,6 +1078,9 @@ static Datum GetParamExternConstValue(Oid left_type, Expr* expr, PlanState* ps, 
      */
     if (param_info && param_id > 0 && param_id <= param_info->numParams) {
         ParamExternData* prm = &param_info->params[param_id - 1];
+        if (!OidIsValid(prm->ptype) && param_info->paramFetch != NULL) {
+            (*param_info->paramFetch)(param_info, param_id);
+        }
         *flag = prm->isnull;
         if (OidIsValid(prm->ptype)) {
             return convert_scan_key_int64_if_need(left_type, prm->ptype, prm->value);

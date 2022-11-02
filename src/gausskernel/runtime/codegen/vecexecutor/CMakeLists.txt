@@ -12,18 +12,3 @@ set(vecexecutor_COMPILE_OPTIONS ${vecexecutor_COMPILE_OPTIONS} -fomit-frame-poin
 list(REMOVE_ITEM vecexecutor_COMPILE_OPTIONS -fno-omit-frame-pointer)
 set(vecexecutor_LINK_OPTIONS ${BIN_LINK_OPTIONS})
 add_static_objtarget(gausskernel_runtime_codegen_vecexecutor TGT_vecexecutor_SRC TGT_vecexecutor_INC "${vecexecutor_DEF_OPTIONS}" "${vecexecutor_COMPILE_OPTIONS}" "${vecexecutor_LINK_OPTIONS}")
-target_link_libraries(gausskernel_runtime_codegen_vecexecutor PUBLIC -lncurses -lrt -ldl -lm)
-
-SET(llvm_libs_var "")
-if(${ENABLE_LLVM_COMPILE})
-    execute_process(
-        COMMAND ${LLVM_CONFIG} --libs
-        RESULT_VARIABLE llvm_libs_ret
-        OUTPUT_VARIABLE llvm_libs_var
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
-endif()
-separate_arguments(llvm_libs UNIX_COMMAND ${llvm_libs_var})
-
-target_link_libraries(gausskernel_runtime_codegen_vecexecutor PUBLIC  ${llvm_libs})
-target_link_directories(gausskernel_runtime_codegen_vecexecutor PUBLIC ${LIBLLVM_LIB_PATH})

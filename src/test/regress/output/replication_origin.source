@@ -9,6 +9,7 @@ insert into a values(generate_series(1, 10), 1);
 update a set b = b+1 where b = 1;
 delete a where b = 2;
 SELECT data FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL);
+--?.*
                                                                                             data                                                                                             
 ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 --?.*

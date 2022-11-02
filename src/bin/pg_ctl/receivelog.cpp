@@ -688,7 +688,7 @@ bool ReceiveXlogStream(PGconn* conn, XLogRecPtr startpos, uint32 timeline, const
                 ping_sent = false;
                 continue;
             } else if (r < 0) {
-                pg_log(PG_WARNING, _(" select() failed: %m\n"));
+                pg_log(PG_WARNING, _(" select() failed: %s\n"), strerror(errno));
                 goto error;
             }
             /* Else there is actually data on the socket */

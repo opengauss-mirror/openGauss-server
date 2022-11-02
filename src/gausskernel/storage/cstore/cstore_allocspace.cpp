@@ -23,7 +23,6 @@
  */
 
 #include "access/cstore_am.h"
-#include "access/genam.h"
 #include "access/sdir.h"
 #include "access/skey.h"
 #include "storage/cstore/cstorealloc.h"

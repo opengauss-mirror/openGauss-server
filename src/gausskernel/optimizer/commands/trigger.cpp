@@ -1719,6 +1719,7 @@ static HeapTuple ExecCallTriggerFunc(
     PgStat_FunctionCallUsage fcusage;
     Datum result;
     Oid old_uesr = 0;
+    Oid save_old_uesr = 0;
     int save_sec_context = 0;
     bool saved_is_allow_commit_rollback = false;
     bool need_reset_err_msg;
@@ -1754,6 +1755,7 @@ static HeapTuple ExecCallTriggerFunc(
      * the tuple cycle.
      */
     MemoryContext oldContext = MemoryContextSwitchTo(per_tuple_context);
+    save_old_uesr = GetOldUserId(false);
 
     /* get trigger owner and make sure current user is trigger owner when execute trigger-func */
     GetUserIdAndSecContext(&old_uesr, &save_sec_context);
@@ -1761,7 +1763,9 @@ static HeapTuple ExecCallTriggerFunc(
     if (trigger_owner == InvalidTgOwnerId) {
         ereport(LOG, (errmsg("old system table pg_trigger does not have tgowner column, use old default permission")));
     } else {
-        SetUserIdAndSecContext(trigger_owner, (int)((uint32)save_sec_context | SECURITY_LOCAL_USERID_CHANGE));
+        SetOldUserId(old_uesr, false);
+        SetUserIdAndSecContext(trigger_owner,
+            (int)((uint32)save_sec_context | SECURITY_LOCAL_USERID_CHANGE | SENDER_LOCAL_USERID_CHANGE));
         u_sess->exec_cxt.is_exec_trigger_func = true;
     }
     /*
@@ -1780,6 +1784,10 @@ static HeapTuple ExecCallTriggerFunc(
     {
         stp_reset_xact_state_and_err_msg(saved_is_allow_commit_rollback, need_reset_err_msg);
         u_sess->tri_cxt.MyTriggerDepth--;
+
+        SetOldUserId(save_old_uesr, false);
+        /* reset current user */
+        SetUserIdAndSecContext(old_uesr, save_sec_context);
         PG_RE_THROW();
     }
     PG_END_TRY();
@@ -1789,6 +1797,7 @@ static HeapTuple ExecCallTriggerFunc(
 
     pgstat_end_function_usage(&fcusage, true);
 
+    SetOldUserId(save_old_uesr, false);
     /* reset current user */
     SetUserIdAndSecContext(old_uesr, save_sec_context);
     u_sess->exec_cxt.is_exec_trigger_func = false;

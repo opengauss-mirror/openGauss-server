@@ -14,8 +14,3 @@ INTERVAL ('1 month')
 	PARTITION partition_interval_parallel_p2 VALUES LESS THAN ('2020-06-01')
 );
 CREATE INDEX idx1_partition_interval_parallel on partition_interval_parallel(c3) local ;
-
-
-
-
-

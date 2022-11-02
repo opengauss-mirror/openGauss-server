@@ -18,7 +18,6 @@
 
 #include "access/clog.h"
 #include "access/csnlog.h"
-#include "access/dfs/dfs_insert.h"
 #include "access/xlog.h"
 #include "access/heapam.h"
 #include "access/multixact.h"
@@ -72,7 +71,6 @@
 #include "storage/spin.h"
 #include "storage/cstore/cstorealloc.h"
 #include "storage/cucache_mgr.h"
-#include "storage/dfs/dfs_connector.h"
 #include "storage/xlog_share_storage/xlog_share_storage.h"
 #include "utils/memprot.h"
 #include "pgaudit.h"
@@ -183,7 +181,6 @@ Size ComputeTotalSizeOfShmem()
             size = add_size(size, DcfContextShmemSize());
         }
 #endif
-        size = add_size(size, CalShareStorageCtlSize());
         /* freeze the addin request size and include it */
         t_thrd.storage_cxt.addin_request_allowed = false;
         size = add_size(size, t_thrd.storage_cxt.total_addin_request);
@@ -409,7 +406,7 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
     InitSegSpcCache();
 
 #ifdef ENABLE_MULTIPLE_NODES
-    if (IS_DISASTER_RECOVER_MODE) {
+    if (IS_MULTI_DISASTER_RECOVER_MODE) {
         InitDisasterCache();
     }
 #endif
@@ -428,20 +425,8 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
     }
 #endif   /* ENABLE_MULTIPLE_NODES */
 
-#ifndef ENABLE_LITE_MODE
-    /*
-     * Set up DfsConnector cache
-     */
-    dfs::InitOBSConnectorCacheLock();
-#endif
-
     /* set up Dummy server cache */
     InitDummyServrCache();
-
-    /*
-     * Set up dfs space cache hash table.
-     */
-    DfsInsert::InitDfsSpaceCache();
 
     LsnXlogFlushChkShmInit();
 

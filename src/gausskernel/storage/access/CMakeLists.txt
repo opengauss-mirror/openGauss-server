@@ -7,7 +7,6 @@ set(CMAKE_SKIP_RPATH TRUE)
 set(CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/cbtree 
     ${CMAKE_CURRENT_SOURCE_DIR}/common
-    ${CMAKE_CURRENT_SOURCE_DIR}/dfs
     ${CMAKE_CURRENT_SOURCE_DIR}/gin
     ${CMAKE_CURRENT_SOURCE_DIR}/gist
     ${CMAKE_CURRENT_SOURCE_DIR}/hash
@@ -35,7 +34,6 @@ endif()
 
 add_subdirectory(cbtree)
 add_subdirectory(common)
-add_subdirectory(dfs)
 add_subdirectory(gin)
 add_subdirectory(gist)
 add_subdirectory(hash)

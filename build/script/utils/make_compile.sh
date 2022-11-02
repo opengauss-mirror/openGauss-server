@@ -142,8 +142,8 @@ function install_gaussdb()
         echo "WARNING: do not separate symbol in debug mode!"
     fi
 
-    if [ "$product_mode" != "opengauss" ]; then
-        die "the product mode can only be opengauss!"
+    if [ "$product_mode" != "opengauss" -a "$product_mode" != "lite" ]; then
+        die "the product mode can only be opengauss, lite!"
     fi
 
     #configure
@@ -175,6 +175,20 @@ function install_gaussdb()
             ./configure $shared_opt CFLAGS="-O0 ${GAUSSDB_EXTRA_FLAGS}" --enable-mot --enable-debug --enable-cassert --disable-jemalloc CC=g++ $extra_config_opt >> "$LOG_FILE" 2>&1
         else
             ./configure $shared_opt CFLAGS="-O0 ${GAUSSDB_EXTRA_FLAGS}" --enable-mot --enable-debug --enable-cassert CC=g++ $extra_config_opt >> "$LOG_FILE" 2>&1
+        fi
+    elif [ "$product_mode"x == "lite"x ]; then
+        shared_opt="--gcc-version=${gcc_version}.0 --prefix="${BUILD_DIR}" --3rd=${binarylib_dir} --enable-thread-safety ${enable_readline} --without-zlib  --without-gssapi --without-krb5"
+        if [ "$version_mode"x == "release"x ]; then
+            # configure -D__USE_NUMA -D__ARM_LSE with arm single mode
+            if [ "$PLATFORM_ARCH"X == "aarch64"X ] ; then
+                echo "configure -D__USE_NUMA -D__ARM_LSE with arm single mode"
+                GAUSSDB_EXTRA_FLAGS=" -D__USE_NUMA -D__ARM_LSE"
+            fi
+            ./configure $shared_opt CFLAGS="-O2 -g3 ${GAUSSDB_EXTRA_FLAGS}" CC=g++  $extra_config_opt --enable-lite-mode >> "$LOG_FILE" 2>&1
+        elif [ "$version_mode"x == "memcheck"x ]; then
+            ./configure $shared_opt CFLAGS='-O0' --enable-debug --enable-cassert --enable-memory-check CC=g++ $extra_config_opt --enable-lite-mode >> "$LOG_FILE" 2>&1
+        else
+            ./configure $shared_opt CFLAGS="-O0 ${GAUSSDB_EXTRA_FLAGS}" --enable-debug --enable-cassert CC=g++ $extra_config_opt  --enable-lite-mode>> "$LOG_FILE" 2>&1
         fi
     fi
 
@@ -258,9 +272,6 @@ function install_gaussdb()
 
     chmod 444 ${BUILD_DIR}/bin/cluster_guc.conf
     dos2unix ${BUILD_DIR}/bin/cluster_guc.conf > /dev/null 2>&1
-
-    separate_symbol
-    
     get_kernel_commitid
 }
 

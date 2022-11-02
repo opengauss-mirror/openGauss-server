@@ -117,6 +117,7 @@
 #include "executor/node/nodeWindowAgg.h"
 #include "executor/node/nodeWorktablescan.h"
 #include "executor/exec/execStream.h"
+#include "instruments/instr_slow_query.h"
 #include "optimizer/clauses.h"
 #include "optimizer/encoding.h"
 #include "optimizer/ml_model.h"
@@ -124,7 +125,6 @@
 #include "miscadmin.h"
 #include "vecexecutor/vecnodecstorescan.h"
 #include "vecexecutor/vecnodecstoreindexscan.h"
-#include "vecexecutor/vecnodedfsindexscan.h"
 #include "vecexecutor/vecnodevectorow.h"
 #include "vecexecutor/vecnodecstoreindexctidscan.h"
 #include "vecexecutor/vecnodecstoreindexheapscan.h"
@@ -343,8 +343,6 @@ PlanState* ExecInitNodeByType(Plan* node, EState* estate, int eflags)
             return (PlanState*)ExecInitVecStream((Stream*)node, estate, eflags);
         case T_CStoreScan:
             return (PlanState*)ExecInitCStoreScan((CStoreScan*)node, NULL, estate, eflags);
-        case T_DfsScan:
-            return (PlanState*)ExecInitDfsScan((DfsScan*)node, NULL, estate, eflags);
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
             return (PlanState*)ExecInitTsStoreScan((TsStoreScan *)node, NULL, estate, eflags);
@@ -353,8 +351,6 @@ PlanState* ExecInitNodeByType(Plan* node, EState* estate, int eflags)
             return (PlanState*)ExecInitVecHashJoin((VecHashJoin*)node, estate, eflags);
         case T_VecAgg:
             return (PlanState*)ExecInitVecAggregation((VecAgg*)node, estate, eflags);
-        case T_DfsIndexScan:
-            return (PlanState*)ExecInitDfsIndexScan((DfsIndexScan*)node, estate, eflags);
         case T_CStoreIndexScan:
             return (PlanState*)ExecInitCstoreIndexScan((CStoreIndexScan*)node, estate, eflags);
         case T_CStoreIndexCtidScan:
@@ -996,6 +992,13 @@ ExecProcFuncType g_execProcFuncTable[] = {
     ExecStreamWrap
 };
 
+static inline bool NeedAutoExplain(QueryDesc *queryDesc)
+{
+    return auto_explain_plan() && u_sess->attr.attr_resource.auto_explain_log_min_duration > 0 &&
+           is_valid_query(queryDesc) && unlikely(!queryDesc->plannedstmt->auto_explain_done) &&
+           unlikely(t_thrd.explain_cxt.need_auto_explain);
+}
+
 /* ----------------------------------------------------------------
  *		ExecProcNode
  *
@@ -1015,6 +1018,10 @@ TupleTableSlot* ExecProcNode(PlanState* node)
         return NULL;
     }
 #endif
+
+    if (NeedAutoExplain(node->state->rootQueryDesc)) {
+        exec_do_explain(node->state->rootQueryDesc, true);
+    }
 
     /* Switch to Node Level Memory Context */
     old_context = MemoryContextSwitchTo(node->nodeContext);
@@ -1389,10 +1396,6 @@ static void ExecEndNodeByType(PlanState* node)
         case T_CStoreScanState:
             ExecEndCStoreScan((CStoreScanState*)node, false);
             break;
-
-        case T_DfsScanState:
-            ExecEndDfsScan((DfsScanState*)node);
-            break;
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScanState:
             ExecEndTsStoreScan((TsStoreScanState *)node, false);
@@ -1400,10 +1403,6 @@ static void ExecEndNodeByType(PlanState* node)
 #endif   /* ENABLE_MULTIPLE_NODES */
         case T_IndexScanState:
             ExecEndIndexScan((IndexScanState*)node);
-            break;
-
-        case T_DfsIndexScanState:
-            ExecEndDfsIndexScan((DfsIndexScanState*)node);
             break;
 
         case T_CStoreIndexScanState:

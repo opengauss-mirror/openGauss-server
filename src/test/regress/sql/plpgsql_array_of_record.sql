@@ -517,6 +517,9 @@ end pck1;
 /
 
 call pck1.p1();
+set behavior_compat_options='array_count_compat';
+call pck1.p1();
+set behavior_compat_options='';
 DROP PACKAGE pck1;
 
 -- test array of table nest same record

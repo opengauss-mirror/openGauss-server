@@ -24,6 +24,7 @@
 #include "utils/resowner.h"
 #include "utils/partitionmap_gs.h"
 #include "utils/plpgsql.h"
+#include "utils/guc.h"
 
 /*
  * The "eflags" argument to ExecutorStart and the various ExecInitNode
@@ -304,6 +305,7 @@ typedef struct ExecIndexTuplesState {
     Relation targetPartRel;
     Partition p;
     bool* conflict;
+    bool rollbackIndex;
 } ExecIndexTuplesState;
 
 typedef struct ConflictInfoData {
@@ -335,12 +337,13 @@ extern void end_tup_output(TupOutputState* tstate);
 /*
  * prototypes from functions in execUtils.c
  */
-extern EState* CreateExecutorState(MemoryContext saveCxt = NULL);
+extern EState* CreateExecutorState();
 extern void FreeExecutorState(EState* estate);
 extern ExprContext* CreateExprContext(EState* estate);
 extern ExprContext* CreateStandaloneExprContext(void);
 extern void FreeExprContext(ExprContext* econtext, bool isCommit);
 extern void ReScanExprContext(ExprContext* econtext);
+extern void ShutdownExprContext(ExprContext* econtext, bool isCommit);
 
 #define ResetExprContext(econtext) MemoryContextReset((econtext)->ecxt_per_tuple_memory)
 
@@ -406,7 +409,8 @@ extern bool ExecCheckIndexConstraints(TupleTableSlot *slot, EState *estate, Rela
                                       Oid *conflictPartOid = NULL, int2 *conflictBucketId = NULL);
 
 extern void ExecDeleteIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* estate,
-    Relation targetPartRel, Partition p, const Bitmapset *modifiedIdxAttrs, const bool inplaceUpdated);
+    Relation targetPartRel, Partition p, const Bitmapset *modifiedIdxAttrs,
+    const bool inplaceUpdated, const bool isRollbackIndex);
 
 extern void ExecUHeapDeleteIndexTuplesGuts(
     TupleTableSlot* oldslot, Relation rel, ModifyTableState* node, ItemPointer tupleid,
@@ -466,6 +470,9 @@ extern void ExecSimpleRelationDelete(EState *estate, EPQState *epqstate, TupleTa
 extern void CheckCmdReplicaIdentity(Relation rel, CmdType cmd);
 extern void GetFakeRelAndPart(EState *estate, Relation rel, TupleTableSlot *slot, FakeRelationPartition *relAndPart);
 
+extern Datum ExecEvalArrayRef(ArrayRefExprState* astate, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone);
+extern bool ResourceOwnerExistPthreadMutex(ResourceOwner owner, pthread_mutex_t* pMutex);
+
 // AutoMutexLock
 //		Auto object for non-recursive pthread_mutex_t lock
 //
@@ -473,7 +480,11 @@ class AutoMutexLock {
 public:
     AutoMutexLock(pthread_mutex_t* mutex, bool trace = true)
         : m_mutex(mutex), m_fLocked(false), m_trace(trace), m_owner(t_thrd.utils_cxt.CurrentResourceOwner)
-    {}
+    {
+        if (mutex == &file_list_lock) {
+            m_owner = t_thrd.lsc_cxt.local_sysdb_resowner;
+        }
+    }
 
     ~AutoMutexLock()
     {
@@ -520,10 +531,15 @@ public:
         if (m_fLocked) {
             int ret = 0;
 
-            if (t_thrd.utils_cxt.CurrentResourceOwner == NULL)
-                m_owner = NULL;
-
-            ret = PthreadMutexUnlock(m_owner, m_mutex, m_trace);
+            if (m_mutex == &file_list_lock) {
+                if (ResourceOwnerExistPthreadMutex(m_owner, m_mutex)) {
+                    ret = PthreadMutexUnlock(m_owner, m_mutex, m_trace);
+                } else {
+                    ret = 0;
+                }
+            } else {
+                ret = PthreadMutexUnlock(m_owner, m_mutex, m_trace);
+            }
             m_fLocked = (ret == 0 ? false : true);
             if (m_fLocked) {
                 /* this should never happen, system may be completely in a mess */
@@ -544,6 +560,42 @@ private:
     bool m_fLocked;
     bool m_trace;
     ResourceOwner m_owner;
+};
+
+class AutoDopControl {
+public:
+    AutoDopControl()
+    {
+        if (likely(u_sess != NULL)) {
+            m_smpEnabled = u_sess->opt_cxt.smp_enabled;
+        } else {
+            m_smpEnabled = true;
+        }
+    }
+
+    ~AutoDopControl()
+    {
+        if (u_sess != NULL) {
+            u_sess->opt_cxt.smp_enabled = m_smpEnabled;
+        }
+    }
+
+    void CloseSmp()
+    {
+        if (likely(u_sess != NULL)) {
+            u_sess->opt_cxt.smp_enabled = false;
+        }
+    }
+
+    void ResetSmp()
+    {
+        if (u_sess != NULL) {
+            u_sess->opt_cxt.smp_enabled = m_smpEnabled;
+        }
+    }
+
+private:
+    bool m_smpEnabled;
 };
 
 #endif /* EXECUTOR_H  */

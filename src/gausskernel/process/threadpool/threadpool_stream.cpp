@@ -139,7 +139,6 @@ void ThreadPoolStream::InitStream()
     read_nondefault_variables();
 
     /* Do local initialization of file, storage and buffer managers */
-    ReBuildLSC();
     InitFileAccess();
     smgrinit();
 
@@ -191,6 +190,9 @@ static void ResetStreamStatus()
     if (unlikely(t_thrd.log_cxt.msgbuf->data != NULL)) {
         pfree_ext(t_thrd.log_cxt.msgbuf->data);
     }
+
+    t_thrd.proc->databaseId = InvalidOid;
+    t_thrd.proc->roleId = InvalidOid;
 
     /*
      * Reset extended-query-message flag, so that any errors

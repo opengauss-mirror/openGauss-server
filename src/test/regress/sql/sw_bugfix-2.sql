@@ -506,3 +506,214 @@ create table t123(id int, lid int, name text);
 insert into t123 values(1,null,'A'),(2,1,'B'),(3,2,'C');
 with t2 as (select * from t123 where id!=10) select level,t.* from (select * from t2 where id!=10 order by id) t start with t.id=2 connect by prior t.id=t.lid;
 drop table t123;
+
+-- test order siblings's unnamed expr, alias case
+-- test case for subquery with order siblings by colIndex
+create table test_place as select id, name, tex from test_hcb_ptb;
+explain
+select (
+    select id
+    from test_place
+    where id=test_hcb_ptb.id) as siblings,
+    pid,level
+from test_hcb_ptb start with id=141 connect by prior pid=id order siblings by 1;
+
+select (
+    select id
+    from test_place
+    where id=test_hcb_ptb.id) as siblings,
+    pid,level
+from test_hcb_ptb start with id=141 connect by prior pid=id order siblings by 1;
+
+-- test case for subquery with order siblings by alias
+explain
+select (
+    select id
+    from test_place
+    where id=test_hcb_ptb.id) as siblings,
+    pid,level
+from test_hcb_ptb start with id=141 connect by prior pid=id order siblings by siblings;
+
+select (
+    select id
+    from test_place
+    where id=test_hcb_ptb.id) as siblings,
+    pid,level
+from test_hcb_ptb start with id=141 connect by prior pid=id order siblings by siblings;
+
+
+---  test case for unnamed expr with order siblings by colIndex
+explain
+select id*2, pid from test_hcb_ptb start with id=141 connect by prior pid=id order siblings by 1;
+select id*2, pid from test_hcb_ptb start with id=141 connect by prior pid=id order siblings by 1;
+
+explain
+select id*2 as a, pid from test_hcb_ptb start with id=141 connect by prior pid=id order siblings by a;
+select id*2 as a, pid from test_hcb_ptb start with id=141 connect by prior pid=id order siblings by a;
+
+--  test case for mix alias and colname in order siblings by calause
+explain
+select id as a,pid from test_hcb_ptb start with id=141 connect by prior pid=id order siblings by a;
+select id as a,pid from test_hcb_ptb start with id=141 connect by prior pid=id order siblings by a;
+
+explain
+select id as a,pid from test_hcb_ptb start with id=141 connect by prior pid=id order siblings by pid,a;
+select id as a,pid from test_hcb_ptb start with id=141 connect by prior pid=id order siblings by pid,a;
+drop table test_place;
+
+--  test case for expression with none-var in order siblings
+create table item_inventory_start_3 (
+    LOCATION_ID number(15,0) primary key,
+    ITEM_INV_DT DATE,
+    ITEM_ID number(38,5),
+    ON_HAND_COST_AMT NUMBER(38,24)
+);
+
+create table item_inventory_plan_start_3 (
+    item_inventory_plan_dt date  primary key,
+    location_id number(35,0),
+    item_id number(20,5),
+    plan_on_hand_qty decimal(18,4) null,
+    plan_on_hand_retail_amt number(18,4) null
+);
+
+INSERT INTO ITEM_INVENTORY_PLAN_start_3 VALUES (DATE '1970-01-01', 1, 0.12, 0.30 , NULL);
+INSERT INTO ITEM_INVENTORY_PLAN_start_3 VALUES (DATE '1973-01-01', 1, 0.12, NULL, 1.0);
+INSERT INTO ITEM_INVENTORY_start_3 VALUES ( 38, DATE '1970-01-01',  0.12, 0.70);
+INSERT INTO ITEM_INVENTORY_start_3 VALUES ( 1, DATE '1973-01-01',  1.3, 178787.0);
+
+EXPLAIN
+SELECT 1 /* none-var entry */
+FROM item_inventory_start_3 ,item_inventory_plan_start_3
+WHERE PRIOR on_hand_cost_amt=PRIOR plan_on_hand_retail_amt
+START WITH plan_on_hand_qty<>on_hand_cost_amt
+CONNECT BY PRIOR on_hand_cost_amt  LIKE '_P%'
+ORDER SIBLINGS BY 1;
+
+SELECT 1
+FROM item_inventory_start_3 ,item_inventory_plan_start_3
+WHERE PRIOR on_hand_cost_amt=PRIOR plan_on_hand_retail_amt
+START WITH plan_on_hand_qty<>on_hand_cost_amt
+CONNECT BY PRIOR on_hand_cost_amt  LIKE '_P%'
+ORDER SIBLINGS BY 1;
+
+EXPLAIN
+SELECT 1 as siblings
+FROM item_inventory_start_3 ,item_inventory_plan_start_3
+WHERE PRIOR on_hand_cost_amt=PRIOR plan_on_hand_retail_amt
+START WITH plan_on_hand_qty<>on_hand_cost_amt
+CONNECT BY PRIOR on_hand_cost_amt  LIKE '_P%'
+ORDER SIBLINGS BY siblings;
+
+SELECT 1 as siblings
+FROM item_inventory_start_3 ,item_inventory_plan_start_3
+WHERE PRIOR on_hand_cost_amt=PRIOR plan_on_hand_retail_amt
+START WITH plan_on_hand_qty<>on_hand_cost_amt
+CONNECT BY PRIOR on_hand_cost_amt  LIKE '_P%'
+ORDER SIBLINGS BY siblings;
+
+DROP TABLE item_inventory_start_3;
+DROP TABLE item_inventory_plan_start_3;
+
+-- test prior as target
+drop table if exists dts_t1;
+create table dts_t1(c1 int,c2 int,c3 int);
+insert into dts_t1 values(1,1,1);
+insert into dts_t1 values(2,2,2);
+select c1,prior c2,c2 from dts_t1 start with c1=1 connect by prior c2+1=c2 ;
+select c1,c2 from dts_t1 start with c1=1 connect by prior c2+1=c2 ;
+drop table dts_t1;
+
+-- test start with has sub clause
+DROP TABLE IF EXISTS DAT_DEPARTMENT;
+CREATE TABLE DAT_DEPARTMENT(
+	stru_id nvarchar2(10) NOT NULL,
+	sup_stru nvarchar2(10),
+	stru_state nvarchar2(8)
+)
+WITH (orientation=row, compression=no);
+CREATE INDEX sup_stru_dat_department ON  DAT_DEPARTMENT USING btree(sup_stru) TABLESPACE pg_default;
+CREATE INDEX idx_br_dept_stru_id ON  DAT_DEPARTMENT USING btree(stru_id) TABLESPACE pg_default;
+insert into DAT_DEPARTMENT(stru_id,sup_stru,stru_state) values('01','02','2');
+insert into DAT_DEPARTMENT(stru_id,sup_stru,stru_state) values('02','01','2');
+SELECT A.STRU_ID DEPTID,LEVEL,CONNECT_BY_ISCYCLE
+FROM DAT_DEPARTMENT A
+START WITH A.STRU_ID IN
+(SELECT B.STRU_ID DEPTID
+FROM DAT_DEPARTMENT B
+WHERE B.SUP_STRU = '01' OR B.SUP_STRU='02'
+)
+CONNECT BY NOCYCLE PRIOR A.STRU_ID =A.SUP_STRU;
+DROP TABLE DAT_DEPARTMENT;
+
+-- test RTE_JOIN in start with
+DROP TABLE IF EXISTS zb_layer;
+DROP TABLE IF EXISTS rtms_dict;
+DROP TABLE IF EXISTS zb_model;
+CREATE TABLE zb_layer(
+	id character varying(20) NOT NULL,
+	zb_code character varying(20),
+	zb_name character varying(20),
+	zb_organ character varying(50),
+	zb_apply character varying(20),
+	zb_layer_standard character varying(20),
+	zb_threshold_value character varying(30),
+	zb_warning_value character varying(20)
+)
+WITH (orientation=row, compression=no);
+CREATE TABLE rtms_dict(
+	id character varying(10),
+	area character varying(20),
+	cn_area character varying(30),
+	code character varying(50),
+	cname character varying(50),
+	locale character varying(10)
+)
+WITH (orientation=row, compression=no);
+CREATE TABLE zb_model(
+	id character varying(10) NOT NULL,
+	zb_code character varying(20),
+	zb_name character varying(300),
+	zb_risk_area character varying(3),
+	zb_parent_id character varying(20),
+	zb_weight character varying(10),
+	zb_layer_flag character varying(3),
+	zb_status character varying(3)
+)
+WITH (orientation=row, compression=no);
+SELECT DISTINCT I.ZB_CODE,D.CNAME,DECODE(I.ZB_LAYER_FLAG,NULL,D.CNAME,I.ZB_NAME) ZBNAME
+FROM ZB_MODEL I
+LEFT JOIN ZB_LAYER N ON I.ZB_CODE = N.ZB_CODE
+LEFT JOIN RTMS_DICT D ON D.CODE = I.ZB_RISK_AREA AND D.AREA = 'RICK_AREA'
+WHERE NVL(I.ZB_STATUS,1) = 1
+AND I.ZB_CODE NOT IN
+(
+	SELECT T.ZB_CODE FROM ZB_MODEL T WHERE T.ZB_RISK_AREA = 2
+)
+CONNECT BY PRIOR I.ZB_CODE = I.ZB_PARENT_ID
+START WITH I.ZB_CODE IN
+(SELECT ZB_CODE FROM ZB_MODEL)
+ORDER BY I.ZB_CODE;
+DROP TABLE zb_layer;
+DROP TABLE rtms_dict;
+DROP TABLE zb_model;
+
+-- test rownum/level appear in connect by clause
+DROP TABLE IF EXISTS RLTEST;
+CREATE TABLE RLTEST(
+    A CHAR(1),
+    B CHAR(1)
+);
+INSERT INTO RLTEST VALUES('1','2'),('2','3'),('3','1'),('4','5'),('5','6'),('7','8');
+SELECT * FROM RLTEST START WITH A=1 CONNECT BY PRIOR B=A AND (1=1 OR ROWNUM=1);
+SELECT * FROM RLTEST START WITH A=1 CONNECT BY NOCYCLE PRIOR B=A AND (1=1 OR ROWNUM=1);
+SELECT * FROM RLTEST CONNECT BY (PRIOR a = b) AND (LEVEL < 2) AND (ROWNUM < 2);
+SELECT * FROM RLTEST CONNECT BY (PRIOR a = b) AND (LEVEL < 2 OR ROWNUM < 2);
+SELECT * FROM RLTEST CONNECT BY (LEVEL < 1 OR ROWNUM < 2);
+SELECT * FROM RLTEST CONNECT BY PRIOR B=A AND ROWNUM = LENGTH(LEVEL);
+SELECT * FROM RLTEST CONNECT BY NOCYCLE PRIOR B=A AND (MOD(ROWNUM+1,2) = 0);
+SELECT * FROM RLTEST CONNECT BY PRIOR B=A OR (LEVEL < 1 OR ROWNUM < 2);
+SELECT * FROM RLTEST CONNECT BY PRIOR B=A AND (LEVEL=1 OR B<10) AND (ROWNUM<3 OR PRIOR A=B);
+SELECT * FROM RLTEST CONNECT BY PRIOR B=A OR (MOD(ROWNUM+1,2) = 0);
+SELECT * FROM RLTEST CONNECT BY PRIOR LEVEL<3;
+DROP TABLE RLTEST;

@@ -153,4 +153,47 @@ end pack01;
 drop package pack01;
 drop package pack0;
 
+create or replace function f0(out y text) return text
+as
+declare
+begin
+return null;
+end;
+/
+
+create or replace function f1(in y text) return text
+as
+declare
+buf text;
+res text;
+begin
+res := f0(buf);
+return res;
+end;
+/
+
+create or replace function f2 return timestamp(0)
+as
+declare 
+x varchar2(30);
+y varchar2(64);
+begin
+y = f1('test');
+return TO_TIMESTAMP(x,'yyyymmddHH24MISS');
+Exception
+when others then
+return sysdate;
+end;
+/
+
+set behavior_compat_options='bind_procedure_searchpath,plsql_security_definer,aformat_null_test,allow_procedure_compile_check,proc_outparam_override,proc_implicit_for_loop_variable,plstmt_implicit_savepoint';
+
+Create or replace package pkg1 as 
+t_data timestamp(0) = f2;
+End pkg1;
+/
+drop function f1;
+drop function f2;
+drop function f0;
+drop package pkg1;
 drop schema if exists plpgsql_nest_compile cascade;

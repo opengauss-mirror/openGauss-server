@@ -28,6 +28,10 @@
 
 #define INIBARRIERCACHESIZE 100
 
+#define IS_BARRIER_HASH_INIT \
+    (g_instance.csn_barrier_cxt.barrier_hash_table != NULL && \
+    g_instance.csn_barrier_cxt.barrier_hashtbl_lock != NULL)
+
 #define BarrierCacheInsertBarrierId(BARRIER) do { \
     CommitSeqNo *idhentry = NULL;                                                                                \
     bool found = false;                                                                                          \

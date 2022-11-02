@@ -30,7 +30,7 @@
  * intentionally do not copy them into the result.	Rather, we forcibly
  * instantiate all available parameter values and copy the datum values.
  */
-ParamListInfo copyParamList(ParamListInfo from)
+ParamListInfo copyParamList(ParamListInfo from, bool withFetch)
 {
     ParamListInfo retval;
     Size size;
@@ -57,7 +57,7 @@ ParamListInfo copyParamList(ParamListInfo from)
         bool typByVal = false;
 
         /* give hook a chance in case parameter is dynamic */
-        if (!OidIsValid(oprm->ptype) && from->paramFetch != NULL) {
+        if (!OidIsValid(oprm->ptype) && from->paramFetch != NULL && !withFetch) {
             (*from->paramFetch)(from, i + 1);
         }
 
@@ -78,6 +78,23 @@ ParamListInfo copyParamList(ParamListInfo from)
             nprm->tabInfo->isnestedtable = oprm->tabInfo->isnestedtable;
             nprm->tabInfo->tableOfLayers = oprm->tabInfo->tableOfLayers;
         }
+    }
+
+    /* Copy paramFetchArg to avoid different stream thread use same Arg may cause fetch error data */
+    if (withFetch && from->paramFetchArg) {
+        PLpgSQL_execstate* estate = (PLpgSQL_execstate*)from->paramFetchArg;
+        PLpgSQL_execstate* estate_cpy = (PLpgSQL_execstate*)palloc0(sizeof(PLpgSQL_execstate));
+        errno_t rc = memcpy_s(estate_cpy, sizeof(PLpgSQL_execstate), estate, sizeof(PLpgSQL_execstate));
+        securec_check(rc, "\0", "\0");
+        if (estate->cur_expr) {
+            estate_cpy->cur_expr = (PLpgSQL_expr*)palloc0(sizeof(PLpgSQL_expr));
+            rc = memcpy_s(estate_cpy->cur_expr, sizeof(PLpgSQL_expr), estate->cur_expr, sizeof(PLpgSQL_expr));
+            securec_check(rc, "\0", "\0");
+            estate_cpy->cur_expr->paramnos = bms_copy(estate->cur_expr->paramnos);
+        }
+        retval->paramFetchArg = (void*)estate_cpy;
+        /* stream thread will fetch data while execute, so remember fetch function */
+        retval->paramFetch = from->paramFetch;
     }
 
     return retval;

@@ -25,12 +25,20 @@
 #include "libpq-int.h"
 #include "securec.h"
 
-tableFullName::tableFullName() {}
+tableFullName::tableFullName()
+{
+    m_catalog_name = {0};
+    m_schema_name = {0};
+    m_table_name = {0};
+}
 
 tableFullName::~tableFullName() {}
 
 tableFullName::tableFullName(const char *catalog_name, const char *schema_name, const char *table_name)
 {
+    m_catalog_name = {0};
+    m_schema_name = {0};
+    m_table_name = {0};
     if (catalog_name) {
         check_strncpy_s(
             strncpy_s(m_catalog_name.data, sizeof(m_catalog_name.data), catalog_name, strlen(catalog_name)));

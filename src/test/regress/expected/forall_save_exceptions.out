@@ -1045,11 +1045,10 @@ select decode(2,'ff3',5,2); -- now ok
 (1 row)
 
 select case when 2 = 'ff3' then 5 else 2 end; -- now ok
- case 
-------
-    2
-(1 row)
-
+ERROR:  invalid input syntax for integer: "ff3"
+LINE 1: select case when 2 = 'ff3' then 5 else 2 end;
+                             ^
+CONTEXT:  referenced column: case
 -- still valid
 select
     decode(col_char, 'arbitrary', 1, 2),
@@ -1167,11 +1166,10 @@ select decode(2,3,'r',2); -- now ok
 (1 row)
 
 select case when 2 = 3 then 'r' else 2 end; -- now ok
- case 
-------
- 2
-(1 row)
-
+ERROR:  invalid input syntax for integer: "r"
+LINE 1: select case when 2 = 3 then 'r' else 2 end;
+                                    ^
+CONTEXT:  referenced column: case
 -- still valid
 select
     decode(1, 2, 'never', col_char),
@@ -1199,7 +1197,7 @@ from test_decode_coercion;
 select 
     decode(1, 2, 'never', col_bool)
 from test_decode_coercion;
-ERROR:  CASE types boolean and text cannot be matched
+ERROR:  DECODE types text and boolean cannot be matched
 LINE 2:     decode(1, 2, 'never', col_bool)
                          ^
 CONTEXT:  referenced column: col_bool

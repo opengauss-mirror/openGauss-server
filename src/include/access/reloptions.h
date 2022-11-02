@@ -260,6 +260,7 @@ extern Datum transformRelOptions(Datum old_options, List* def_list, const char* 
     bool ignore_oids, bool is_reset);
 extern List* untransformRelOptions(Datum options);
 extern bytea* extractRelOptions(HeapTuple tuple, TupleDesc tupdesc, Oid amoptions);
+extern bytea *extractPartRelOptions(HeapTuple tuple, TupleDesc partTupDesc);
 extern relopt_value* parseRelOptions(Datum options, bool validate, relopt_kind kind, int* numrelopts);
 extern void* allocateReloptStruct(Size base, relopt_value* options, int numoptions);
 extern void fillRelOptions(void* rdopts, Size basesize, relopt_value* options, int numoptions, bool validate,

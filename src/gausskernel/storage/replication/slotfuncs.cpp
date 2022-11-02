@@ -36,6 +36,8 @@
 #include "replication/archive_walreceiver.h"
 
 #define AllSlotInUse(a, b) ((a) == (b))
+#define IS_STANDBY_CLUSTER_MODE (IS_SHARED_STORAGE_STANDBY_CLUSTER && \
+            static_cast<ClusterRunMode>(g_instance.attr.attr_common.stream_cluster_run_mode) == RUN_MODE_STANDBY)
 extern void *internal_load_library(const char *libname);
 extern bool PMstateIsRun(void);
 static void redo_slot_create(const ReplicationSlotPersistentData *slotInfo, char* extra_content = NULL);
@@ -231,7 +233,7 @@ Datum pg_create_physical_replication_slot(PG_FUNCTION_ARGS)
     HeapTuple tuple;
     Datum result;
 
-    ValidateName(NameStr(*name));
+    ValidateInputString(NameStr(*name));
 
     check_permissions();
 
@@ -279,7 +281,7 @@ Datum pg_create_physical_replication_slot_extern(PG_FUNCTION_ARGS)
     bool for_backup = false;
     int ret;
 
-    ValidateName(NameStr(*name));
+    ValidateInputString(NameStr(*name));
 
     for_backup = (strncmp(NameStr(*name), "gs_roach", strlen("gs_roach")) == 0);
 
@@ -453,8 +455,8 @@ Datum pg_create_logical_replication_slot(PG_FUNCTION_ARGS)
     char *str_tmp_lsn = NULL;
     NameData databaseName;
 
-    ValidateName(NameStr(*name));
-    ValidateName(NameStr(*plugin));
+    ValidateInputString(NameStr(*name));
+    ValidateInputString(NameStr(*plugin));
     str_tmp_lsn = (char *)palloc0(128);
 
     Oid userId = GetUserId();
@@ -494,7 +496,7 @@ Datum pg_drop_replication_slot(PG_FUNCTION_ARGS)
     bool for_backup = false;
     bool isLogical = false;
 
-    ValidateName(NameStr(*name));
+    ValidateInputString(NameStr(*name));
 
     /* for gs_roach backup, acl is different and we always log slot drop */
     if (strncmp(NameStr(*name), "gs_roach", strlen("gs_roach")) == 0) {
@@ -530,7 +532,7 @@ Datum pg_drop_replication_slot(PG_FUNCTION_ARGS)
  */
 Datum pg_get_replication_slots(PG_FUNCTION_ARGS)
 {
-#define PG_GET_REPLICATION_SLOTS_COLS 9
+#define PG_GET_REPLICATION_SLOTS_COLS 10
     ReturnSetInfo *rsinfo = (ReturnSetInfo *)fcinfo->resultinfo;
     TupleDesc tupdesc;
     Tuplestorestate *tupstore = NULL;
@@ -575,12 +577,13 @@ Datum pg_get_replication_slots(PG_FUNCTION_ARGS)
         TransactionId xmin;
         TransactionId catalog_xmin;
         XLogRecPtr restart_lsn;
+        XLogRecPtr confirmed_lsn;
         bool active = false;
         bool isDummyStandby = false;
         Oid database;
         const char *slot_name = NULL;
 
-        char restart_lsn_s[MAXFNAMELEN];
+        char lsn_buf[MAXFNAMELEN];
         const char *plugin = NULL;
         int i;
 
@@ -593,6 +596,7 @@ Datum pg_get_replication_slots(PG_FUNCTION_ARGS)
             catalog_xmin = slot->data.catalog_xmin;
             database = slot->data.database;
             restart_lsn = slot->data.restart_lsn;
+            confirmed_lsn = slot->data.confirmed_flush;
             slot_name = pstrdup(NameStr(slot->data.name));
 
             plugin = pstrdup(NameStr(slot->data.plugin));
@@ -603,10 +607,6 @@ Datum pg_get_replication_slots(PG_FUNCTION_ARGS)
 
         rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
         securec_check(rc, "\0", "\0");
-
-        nRet = snprintf_s(restart_lsn_s, sizeof(restart_lsn_s), sizeof(restart_lsn_s) - 1, "%X/%X",
-                          (uint32)(restart_lsn >> 32), (uint32)restart_lsn);
-        securec_check_ss(nRet, "\0", "\0");
 
         i = 0;
         values[i++] = CStringGetTextDatum(slot_name);
@@ -628,12 +628,28 @@ Datum pg_get_replication_slots(PG_FUNCTION_ARGS)
             values[i++] = TransactionIdGetDatum(catalog_xmin);
         else
             nulls[i++] = true;
+
+        const uint32 upperPart = 32;
+        /* fill restart_lsn */
+        nRet = snprintf_s(lsn_buf, sizeof(lsn_buf), sizeof(lsn_buf) - 1, "%X/%X",
+                          (uint32)(restart_lsn >> upperPart), (uint32)restart_lsn);
+        securec_check_ss(nRet, "\0", "\0");
         if (!XLByteEQ(restart_lsn, InvalidXLogRecPtr))
-            values[i++] = CStringGetTextDatum(restart_lsn_s);
+            values[i++] = CStringGetTextDatum(lsn_buf);
         else
             nulls[i++] = true;
 
+        /* fill dummy_standby */
         values[i++] = BoolGetDatum(isDummyStandby);
+
+        /* fill confirmed_lsn */
+        nRet = snprintf_s(lsn_buf, sizeof(lsn_buf), sizeof(lsn_buf) - 1, "%X/%X",
+                          (uint32)(confirmed_lsn >> upperPart), (uint32)confirmed_lsn);
+        securec_check_ss(nRet, "\0", "\0");
+        if (!XLByteEQ(confirmed_lsn, InvalidXLogRecPtr))
+            values[i++] = CStringGetTextDatum(lsn_buf);
+        else
+            nulls[i++] = true;
 
         tuplestore_putvalues(tupstore, tupdesc, values, nulls);
     }
@@ -877,7 +893,7 @@ Datum pg_replication_slot_advance(PG_FUNCTION_ARGS)
     char EndLsn[NAMEDATALEN];
     bool for_backup = false;
 
-    ValidateName(NameStr(*slotname));
+    ValidateInputString(NameStr(*slotname));
 
     for_backup = (strncmp(NameStr(*slotname), "gs_roach", strlen("gs_roach")) == 0);
 
@@ -898,7 +914,7 @@ Datum pg_replication_slot_advance(PG_FUNCTION_ARGS)
             moveto = GetXLogReplayRecPtr(NULL);
     } else {
         const char *str_upto_lsn = TextDatumGetCString(PG_GETARG_DATUM(1));
-        ValidateName(str_upto_lsn);
+        ValidateInputString(str_upto_lsn);
         if (!AssignLsn(&moveto, str_upto_lsn)) {
             ereport(ERROR,
                     (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION), errmsg("invalid input syntax for type lsn: \"%s\" "
@@ -928,10 +944,37 @@ Datum pg_replication_slot_advance(PG_FUNCTION_ARGS)
     PG_RETURN_DATUM(result);
 }
 
+static void update_redo_slot_persistent_data(const ReplicationSlotPersistentData *slotInfo)
+{
+    TransactionId xmin = t_thrd.slot_cxt.MyReplicationSlot->data.xmin;
+    TransactionId catalog_xmin = t_thrd.slot_cxt.MyReplicationSlot->data.catalog_xmin;
+    XLogRecPtr restart_lsn = t_thrd.slot_cxt.MyReplicationSlot->data.restart_lsn;
+    XLogRecPtr confirmed_flush = t_thrd.slot_cxt.MyReplicationSlot->data.confirmed_flush;
+
+    errno_t rc = memcpy_s(&t_thrd.slot_cxt.MyReplicationSlot->data, sizeof(ReplicationSlotPersistentData), slotInfo,
+        sizeof(ReplicationSlotPersistentData));
+    securec_check(rc, "\0", "\0");
+
+    if (t_thrd.slot_cxt.MyReplicationSlot->data.database == InvalidOid) {
+        return;
+    }
+
+    if (TransactionIdPrecedes(t_thrd.slot_cxt.MyReplicationSlot->data.xmin, xmin)) {
+        t_thrd.slot_cxt.MyReplicationSlot->data.xmin = xmin;
+    }
+    if (TransactionIdPrecedes(t_thrd.slot_cxt.MyReplicationSlot->data.catalog_xmin, catalog_xmin)) {
+        t_thrd.slot_cxt.MyReplicationSlot->data.catalog_xmin = catalog_xmin;
+    }
+    if (XLByteLT(t_thrd.slot_cxt.MyReplicationSlot->data.restart_lsn, restart_lsn)) {
+        t_thrd.slot_cxt.MyReplicationSlot->data.restart_lsn = restart_lsn;
+    }
+    if (XLByteLT(t_thrd.slot_cxt.MyReplicationSlot->data.confirmed_flush, confirmed_flush)) {
+        t_thrd.slot_cxt.MyReplicationSlot->data.confirmed_flush = confirmed_flush;
+    }
+}
+
 void redo_slot_advance(const ReplicationSlotPersistentData *slotInfo)
 {
-    errno_t rc;
-
     Assert(!t_thrd.slot_cxt.MyReplicationSlot);
 
     /*
@@ -945,11 +988,16 @@ void redo_slot_advance(const ReplicationSlotPersistentData *slotInfo)
 
     /* Acquire the slot so we "own" it */
     ReplicationSlotAcquire(NameStr(slotInfo->name), false);
-    rc = memcpy_s(&t_thrd.slot_cxt.MyReplicationSlot->data, sizeof(ReplicationSlotPersistentData), slotInfo,
-                  sizeof(ReplicationSlotPersistentData));
-    securec_check(rc, "\0", "\0");
-    t_thrd.slot_cxt.MyReplicationSlot->effective_xmin = slotInfo->xmin;
-    t_thrd.slot_cxt.MyReplicationSlot->effective_catalog_xmin = slotInfo->catalog_xmin;
+    update_redo_slot_persistent_data(slotInfo);
+
+    if (t_thrd.slot_cxt.MyReplicationSlot->data.database == InvalidOid ||
+        TransactionIdPrecedes(t_thrd.slot_cxt.MyReplicationSlot->effective_xmin, slotInfo->xmin)) {
+        t_thrd.slot_cxt.MyReplicationSlot->effective_xmin = slotInfo->xmin;
+    }
+    if (t_thrd.slot_cxt.MyReplicationSlot->data.database == InvalidOid ||
+        TransactionIdPrecedes(t_thrd.slot_cxt.MyReplicationSlot->effective_catalog_xmin, slotInfo->catalog_xmin)) {
+        t_thrd.slot_cxt.MyReplicationSlot->effective_catalog_xmin = slotInfo->catalog_xmin;
+    }
     ReplicationSlotMarkDirty();
     ReplicationSlotsComputeRequiredXmin(false);
     ReplicationSlotsComputeRequiredLSN(NULL);
@@ -1022,7 +1070,12 @@ void slot_redo(XLogReaderState *record)
     ReplicationSlotPersistentData *xlrec = (ReplicationSlotPersistentData *)XLogRecGetData(record);
     LogicalPersistentData *LogicalSlot = (LogicalPersistentData *)XLogRecGetData(record);
 
-    if ((IS_DISASTER_RECOVER_MODE && (info == XLOG_SLOT_CREATE || info == XLOG_SLOT_ADVANCE)) ||
+    if (info == XLOG_TERM_LOG) {
+        /* nothing to replay for term log */
+        return;
+    }
+
+    if ((IS_STANDBY_CLUSTER_MODE && (info == XLOG_SLOT_CREATE || info == XLOG_SLOT_ADVANCE)) ||
         IsRoachRestore() || t_thrd.xlog_cxt.recoveryTarget == RECOVERY_TARGET_TIME_OBS) {
         return;
     }
@@ -1441,7 +1494,7 @@ Datum gs_get_parallel_decode_status(PG_FUNCTION_ARGS)
     FuncCallContext* funcctx = NULL;
     MemoryContext oldcontext = NULL;
     ParallelStatusData *entry = NULL;
-    const int columnNum = 4;
+    const int columnNum = 7;
 
     if (SRF_IS_FIRSTCALL()) {
         funcctx = SRF_FIRSTCALL_INIT();
@@ -1452,6 +1505,9 @@ Datum gs_get_parallel_decode_status(PG_FUNCTION_ARGS)
         TupleDescInitEntry(tupdesc, (AttrNumber)ARR_2, "parallel_decode_num", INT4OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)ARR_3, "read_change_queue_length", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)ARR_4, "decode_change_queue_length", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ARR_5, "reader_lsn", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ARR_6, "working_txn_cnt", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)ARR_7, "working_txn_memory", INT8OID, -1, 0);
         funcctx->tuple_desc = BlessTupleDesc(tupdesc);
         funcctx->user_fctx = (void *)GetParallelDecodeStatus(&(funcctx->max_calls));
         (void)MemoryContextSwitchTo(oldcontext);
@@ -1473,6 +1529,9 @@ Datum gs_get_parallel_decode_status(PG_FUNCTION_ARGS)
         values[ARG_1] = Int32GetDatum(entry->parallelDecodeNum);
         values[ARG_2] = CStringGetTextDatum(entry->readQueueLen);
         values[ARG_3] = CStringGetTextDatum(entry->decodeQueueLen);
+        values[ARG_4] = CStringGetTextDatum(entry->readerLsn);
+        values[ARG_5] = Int64GetDatum(entry->workingTxnCnt);
+        values[ARG_6] = Int64GetDatum(entry->workingTxnMemory);
         tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
 
         SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));

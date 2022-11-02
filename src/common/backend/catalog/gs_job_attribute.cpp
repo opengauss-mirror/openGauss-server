@@ -576,7 +576,7 @@ static void check_credential_name_valid(const Datum username)
 {
     char *name_str = TextDatumGetCString(username);
     const char *danger_character_list[] = {"|", ";", "&", "$", "<", ">", "`", "\\", "'", "\"", "{",
-                                           "}", "(", ")", "[", "]", "~", "*", "?",  "!", "\n", NULL};
+                                           "}", "(", ")", "[", "]", "~", "*", "?",  "!", "\n", " ", NULL};
     for (int i = 0; danger_character_list[i] != NULL; i++) {
         if (strstr(name_str, danger_character_list[i]) != NULL) {
             ereport(ERROR, (errmodule(MOD_JOB), errcode(ERRCODE_INVALID_NAME),
@@ -585,6 +585,27 @@ static void check_credential_name_valid(const Datum username)
                             erraction("Please enter a valid str")));
         }
     }
+
+    int name_len = strlen(name_str);
+    for (int i = 0; i < name_len; i++) {
+        if (name_str[i] >= 'a' && name_str[i] <= 'z') {
+            continue;
+        }
+        if (name_str[i] >= 'A' && name_str[i] <= 'Z') {
+            continue;
+        }
+        if (name_str[i] >= '0' && name_str[i] <= '9') {
+            continue;
+        }
+        if (name_str[i] == '-' || name_str[i] == '_') {
+            continue;
+        }
+        ereport(ERROR, (errmodule(MOD_JOB), errcode(ERRCODE_INVALID_NAME),
+            errmsg("Credential username is invalid."),
+            errdetail("Credential username contains invalid character"), errcause("str is invalid"),
+            erraction("Please enter a valid str")));
+    }
+
     char *inital_user = get_current_username();
     Assert(inital_user != NULL);
     if (inital_user == NULL) {
@@ -619,6 +640,20 @@ void create_credential_internal(PG_FUNCTION_ARGS)
     }
     const Datum credential_name = PG_GETARG_DATUM(0);
     const Datum username = PG_GETARG_DATUM(1);
+
+    if (!PG_ARGISNULL(2)) {
+        char *passwdstr = TextDatumGetCString(PG_GETARG_DATUM(2));
+        bool is_valid_passwd = !isStrHasInvalidCharacter(passwdstr);
+        str_reset(passwdstr);
+        pfree_ext(passwdstr);
+        if (!is_valid_passwd) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PASSWORD),
+                errmsg("Password cannot contain characters except numbers, alphabetic characters and "
+                       "specified special characters."),
+                errcause("Password contain invalid characters."),
+                erraction("Use valid characters in password.")));
+        }
+    }
     const Datum database_role = (Datum)0;
     const Datum windows_domain = (Datum)0;
     if (!PG_ARGISNULL(3) || !PG_ARGISNULL(4)) {

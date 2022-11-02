@@ -76,7 +76,8 @@ private:
     /*
      * with cte as([select,insert,update,delete]) select from cte where .so we need to get CacheColumn from cte.
      */
-    static bool run_pre_select_statement(const SelectStmt * const select_stmt, StatementData *statement_data);
+    static bool run_pre_select_statement(const SelectStmt * const select_stmt,
+        StatementData *statement_data, bool *unencrypted);
     static bool run_pre_select_statement(const SelectStmt * const select_stmt, const SetOperation &parent_set_operation,
         const bool &parent_all, StatementData *statement_data, ICachedColumns *cacehd_columns = nullptr,
         ICachedColumns *cached_columns_parents = nullptr);

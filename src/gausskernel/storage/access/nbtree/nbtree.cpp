@@ -32,7 +32,6 @@
 #include "tcop/tcopprot.h"
 #include "utils/aiomem.h"
 #include "utils/memutils.h"
-#include "vecexecutor/vecnodes.h"
 #include "vecexecutor/vecnodecstorescan.h"
 #include "commands/tablespace.h"
 

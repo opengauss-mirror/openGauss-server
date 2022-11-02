@@ -110,10 +110,10 @@ explain (costs off) select * from list_list;
 select * from list_list;
  col_1 | col_2 | col_3 | col_4 
 -------+-------+-------+-------
-    11 |     2 | cc    |     4
-    19 |     8 | dd    |    16
      1 |     1 | aa    |     2
      5 |     5 | bb    |    10
+    11 |     2 | cc    |     4
+    19 |     8 | dd    |    16
 (4 rows)
 
 drop table if exists list_list_02;

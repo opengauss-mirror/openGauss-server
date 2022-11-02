@@ -130,7 +130,7 @@ static Size action_gtt_shared_hash_entry_size(void)
     int wordnum;
     Size hashEntrySize = 0;
 
-    if (u_sess->attr.attr_storage.max_active_gtt <= 0)
+    if (g_instance.attr.attr_storage.max_active_gtt <= 0)
         return 0;
 
     wordnum = WORDNUM(MAX_BACKEND_SLOT + 1);
@@ -142,12 +142,12 @@ static Size action_gtt_shared_hash_entry_size(void)
 
 Size active_gtt_shared_hash_size(void)
 {
-    if (u_sess->attr.attr_storage.max_active_gtt <= 0)
+    if (g_instance.attr.attr_storage.max_active_gtt <= 0)
         return 0;
 
     Size size = MAXALIGN(sizeof(gtt_ctl_data));
     Size hashEntrySize = action_gtt_shared_hash_entry_size();
-    size += hash_estimate_size(u_sess->attr.attr_storage.max_active_gtt, hashEntrySize);
+    size += hash_estimate_size(g_instance.attr.attr_storage.max_active_gtt, hashEntrySize);
 
     return size;
 }
@@ -157,7 +157,7 @@ void active_gtt_shared_hash_init(void)
     HASHCTL info;
     bool found;
 
-    if (u_sess->attr.attr_storage.max_active_gtt <= 0)
+    if (g_instance.attr.attr_storage.max_active_gtt <= 0)
         return;
 
     t_thrd.shemem_ptr_cxt.gtt_shared_ctl =
@@ -166,7 +166,7 @@ void active_gtt_shared_hash_init(void)
     if (!found) {
         LWLockRegisterTranche((int)LWTRANCHE_GTT_CTL, "gtt_shared_ctl");
         LWLockInitialize(&t_thrd.shemem_ptr_cxt.gtt_shared_ctl->lock, (int)LWTRANCHE_GTT_CTL);
-        t_thrd.shemem_ptr_cxt.gtt_shared_ctl->max_entry = u_sess->attr.attr_storage.max_active_gtt;
+        t_thrd.shemem_ptr_cxt.gtt_shared_ctl->max_entry = g_instance.attr.attr_storage.max_active_gtt;
         t_thrd.shemem_ptr_cxt.gtt_shared_ctl->entry_size = action_gtt_shared_hash_entry_size();
     }
 
@@ -187,7 +187,7 @@ static void gtt_storage_checkin(Oid relid)
     bool found;
     gtt_fnode fnode = {0};
 
-    if (u_sess->attr.attr_storage.max_active_gtt <= 0)
+    if (g_instance.attr.attr_storage.max_active_gtt <= 0)
         return;
 
     fnode.dbNode = u_sess->proc_cxt.MyDatabaseId;
@@ -222,7 +222,7 @@ static void gtt_storage_checkout(Oid relid, bool skiplock, bool isCommit)
     gtt_shared_hash_entry* entry;
     gtt_fnode fnode = {0};
 
-    if (u_sess->attr.attr_storage.max_active_gtt <= 0)
+    if (g_instance.attr.attr_storage.max_active_gtt <= 0)
         return;
 
     fnode.dbNode = u_sess->proc_cxt.MyDatabaseId;
@@ -263,7 +263,7 @@ Bitmapset* copy_active_gtt_bitmap(Oid relid)
     Bitmapset* mapCopy = NULL;
     gtt_fnode fnode = {0};
 
-    if (u_sess->attr.attr_storage.max_active_gtt <= 0)
+    if (g_instance.attr.attr_storage.max_active_gtt <= 0)
         return NULL;
 
     fnode.dbNode = u_sess->proc_cxt.MyDatabaseId;
@@ -290,7 +290,7 @@ bool is_other_backend_use_gtt(Oid relid)
     bool inUse = false;
     gtt_fnode fnode = {0};
 
-    if (u_sess->attr.attr_storage.max_active_gtt <= 0)
+    if (g_instance.attr.attr_storage.max_active_gtt <= 0)
         return false;
 
     fnode.dbNode = u_sess->proc_cxt.MyDatabaseId;
@@ -330,7 +330,7 @@ void remember_gtt_storage_info(const RelFileNode rnode, Relation rel)
     gtt_relfilenode* newNode = NULL;
     Oid relid = RelationGetRelid(rel);
 
-    if (u_sess->attr.attr_storage.max_active_gtt <= 0) {
+    if (g_instance.attr.attr_storage.max_active_gtt <= 0) {
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("Global temporary table feature is disable"),
@@ -340,10 +340,6 @@ void remember_gtt_storage_info(const RelFileNode rnode, Relation rel)
 
     if (RecoveryInProgress()) {
         elog(ERROR, "readonly mode not support access global temporary table");
-    }
-    if (rel->rd_rel->relkind == RELKIND_INDEX && rel->rd_index &&
-        (!rel->rd_index->indisvalid || !rel->rd_index->indisready)) {
-        elog(ERROR, "invalid gtt index %s not allow to create storage", RelationGetRelationName(rel));
     }
 
     if (u_sess->gtt_ctx.gtt_storage_local_hash == NULL) {
@@ -441,7 +437,7 @@ void forget_gtt_storage_info(Oid relid, const RelFileNode rnode, bool isCommit)
     gtt_local_hash_entry* entry = NULL;
     gtt_relfilenode* dRnode = NULL;
 
-    if (u_sess->attr.attr_storage.max_active_gtt <= 0) {
+    if (g_instance.attr.attr_storage.max_active_gtt <= 0) {
         return;
     }
     entry = gtt_search_by_relid(relid, true);
@@ -466,8 +462,8 @@ void forget_gtt_storage_info(Oid relid, const RelFileNode rnode, bool isCommit)
             Assert(gttnode2->relfilenode == rnode.relNode);
             Assert(list_length(entry->relfilenode_list) == 1);
             /* rollback switch relfilenode */
-            gtt_switch_rel_relfilenode(
-                entry2->relid, gttnode2->relfilenode, entry->relid, gtt_fetch_current_relfilenode(entry->relid), false);
+            gtt_switch_rel_relfilenode(entry2->relid, gttnode2->relfilenode, entry->relid,
+                                       gtt_fetch_current_relfilenode(entry->relid), false, InvalidTransactionId);
             /* clean up footprint */
             entry2->oldrelid = InvalidOid;
             dRnode = gtt_search_relfilenode(entry, rnode.relNode, false);
@@ -521,7 +517,7 @@ bool gtt_storage_attached(Oid relid)
     bool found = false;
     gtt_local_hash_entry* entry = NULL;
 
-    if (u_sess->attr.attr_storage.max_active_gtt <= 0) {
+    if (g_instance.attr.attr_storage.max_active_gtt <= 0) {
         return false;
     }
 
@@ -631,7 +627,7 @@ void up_gtt_relstats(const Relation relation, BlockNumber numPages, double numTu
     gtt_local_hash_entry* entry;
     gtt_relfilenode* gttRnode = NULL;
 
-    if (u_sess->attr.attr_storage.max_active_gtt <= 0)
+    if (g_instance.attr.attr_storage.max_active_gtt <= 0)
         return;
 
     entry = gtt_search_by_relid(relid, true);
@@ -678,7 +674,7 @@ bool get_gtt_relstats(Oid relid, BlockNumber* relpages, double* reltuples, Block
     gtt_local_hash_entry* entry;
     gtt_relfilenode* gttRnode = NULL;
 
-    if (u_sess->attr.attr_storage.max_active_gtt <= 0)
+    if (g_instance.attr.attr_storage.max_active_gtt <= 0)
         return false;
 
     entry = gtt_search_by_relid(relid, true);
@@ -760,7 +756,7 @@ void up_gtt_att_statistic(Oid reloid, int attnum, int natts, TupleDesc tupleDesc
     MemoryContext oldcontext;
     int i = 0;
 
-    if (u_sess->attr.attr_storage.max_active_gtt <= 0)
+    if (g_instance.attr.attr_storage.max_active_gtt <= 0)
         return;
 
     entry = gtt_search_by_relid(reloid, true);
@@ -801,7 +797,7 @@ HeapTuple get_gtt_att_statistic(Oid reloid, int attnum)
     gtt_local_hash_entry* entry;
     int i = 0;
 
-    if (u_sess->attr.attr_storage.max_active_gtt <= 0)
+    if (g_instance.attr.attr_storage.max_active_gtt <= 0)
         return NULL;
 
     entry = gtt_search_by_relid(reloid, true);
@@ -1034,6 +1030,7 @@ Datum pg_gtt_attached_pid(PG_FUNCTION_ARGS)
     PGPROC* proc = NULL;
     Bitmapset* map = NULL;
     ThreadId pid = 0;
+    uint64 sessionID = 0;
     int backendid = 0;
 
     if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
@@ -1077,7 +1074,8 @@ Datum pg_gtt_attached_pid(PG_FUNCTION_ARGS)
                     backendid = bms_next_member(map, backendid);
                     continue;
                 }
-                pid = sess->attachPid;
+                pid = (int64)sess->attachPid < 0 ? 0 : sess->attachPid;
+                sessionID = sess->session_id;
             } else {
                 proc = BackendIdGetProc(backendid);
                 if (proc == NULL) {     // session already exited while processing bitmap
@@ -1085,17 +1083,19 @@ Datum pg_gtt_attached_pid(PG_FUNCTION_ARGS)
                     continue;
                 }
                 pid = proc->pid;
+                sessionID = proc->pid;
             }
 
             // output attribute: relid | pid
-            Datum values[2];
-            bool isnull[2];
+            Datum values[3];
+            bool isnull[3];
             errno_t rc = memset_s(isnull, sizeof(isnull), 0, sizeof(isnull));
             securec_check(rc, "", "");
             rc = memset_s(values, sizeof(values), 0, sizeof(values));
             securec_check(rc, "", "");
             values[0] = UInt32GetDatum(reloid);
             values[1] = UInt64GetDatum(pid);
+            values[2] = UInt64GetDatum(sessionID);
             tuple = heap_form_tuple(tupdesc, values, isnull);
             tuplestore_puttuple(tupstore, tuple);
             backendid = bms_next_member(map, backendid);
@@ -1147,7 +1147,7 @@ Datum pg_list_gtt_relfrozenxids(PG_FUNCTION_ARGS)
     rsinfo->setDesc = tupdesc;
     (void)MemoryContextSwitchTo(oldcontext);
 
-    if (u_sess->attr.attr_storage.max_active_gtt <= 0) {
+    if (g_instance.attr.attr_storage.max_active_gtt <= 0) {
         return (Datum)0;
     }
 
@@ -1193,37 +1193,6 @@ Datum pg_list_gtt_relfrozenxids(PG_FUNCTION_ARGS)
     return (Datum)0;
 }
 
-void gtt_force_enable_index(Relation index)
-{
-    if (!RELATION_IS_GLOBAL_TEMP(index))
-        return;
-
-    Assert(index->rd_rel->relkind == RELKIND_INDEX);
-    Assert(OidIsValid(RelationGetRelid(index)));
-
-    index->rd_index->indisvalid = true;
-    index->rd_index->indisready = true;
-}
-
-void gtt_fix_index_state(Relation index)
-{
-    Oid indexOid = RelationGetRelid(index);
-    Oid relOid = index->rd_index->indrelid;
-
-    if (!RELATION_IS_GLOBAL_TEMP(index))
-        return;
-
-    if (!index->rd_index->indisvalid)
-        return;
-
-    if (gtt_storage_attached(relOid) && !gtt_storage_attached(indexOid)) {
-        index->rd_index->indisvalid = false;
-        index->rd_index->indisready = false;
-    }
-
-    return;
-}
-
 /* remove junk files when other session exited unexpected */
 static void UnlinkJunkRelFile(Relation rel)
 {
@@ -1256,7 +1225,10 @@ static void CreateGTTRelFiles(const ResultRelInfo* resultRelInfo)
 
     /* remove junk files when other session exited unexpected */
     UnlinkJunkRelFile(relation);
-
+    if (RelationIsUstoreFormat(relation)) {
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("global temp table is not supported in ustore yet")));
+    }
     RelationCreateStorage(
         relation->rd_node, RELPERSISTENCE_GLOBAL_TEMP, relation->rd_rel->relowner, InvalidOid, relation);
     for (i = 0; i < resultRelInfo->ri_NumIndices; i++) {
@@ -1265,8 +1237,6 @@ static void CreateGTTRelFiles(const ResultRelInfo* resultRelInfo)
         UnlinkJunkRelFile(index);
 
         IndexInfo* info = resultRelInfo->ri_IndexRelationInfo[i];
-        Assert(index->rd_index->indisvalid);
-        Assert(index->rd_index->indisready);
         index_build(relation, NULL, index, NULL, info, index->rd_index->indisprimary, false, INDEX_CREATE_NONE_PARTITION);
     }
 
@@ -1309,7 +1279,7 @@ void init_gtt_storage(CmdType operation, ResultRelInfo* resultRelInfo)
         return;
     }
 
-    if (u_sess->attr.attr_storage.max_active_gtt <= 0) {
+    if (g_instance.attr.attr_storage.max_active_gtt <= 0) {
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("Global temporary table feature is disable"),
@@ -1317,7 +1287,7 @@ void init_gtt_storage(CmdType operation, ResultRelInfo* resultRelInfo)
                         "to enable this feature.")));
     }
 
-    if (!(operation == CMD_UTILITY || operation == CMD_INSERT)) {
+    if (!(operation == CMD_UTILITY || operation == CMD_INSERT || operation == CMD_MERGE)) {
         return;
     }
 
@@ -1378,7 +1348,7 @@ Oid gtt_fetch_current_relfilenode(Oid relid)
     gtt_local_hash_entry* entry;
     gtt_relfilenode* gttRnode = NULL;
 
-    if (u_sess->attr.attr_storage.max_active_gtt <= 0) {
+    if (g_instance.attr.attr_storage.max_active_gtt <= 0) {
         return InvalidOid;
     }
 
@@ -1397,7 +1367,8 @@ Oid gtt_fetch_current_relfilenode(Oid relid)
     return gttRnode->relfilenode;
 }
 
-void gtt_switch_rel_relfilenode(Oid rel1, Oid relfilenode1, Oid rel2, Oid relfilenode2, bool footprint)
+void gtt_switch_rel_relfilenode(Oid rel1, Oid relfilenode1, Oid rel2, Oid relfilenode2, bool footprint,
+                                TransactionId frozenXid)
 {
     gtt_local_hash_entry* entry1;
     gtt_local_hash_entry* entry2;
@@ -1405,7 +1376,7 @@ void gtt_switch_rel_relfilenode(Oid rel1, Oid relfilenode1, Oid rel2, Oid relfil
     gtt_relfilenode* gttRnode2 = NULL;
     MemoryContext oldcontext;
 
-    if (u_sess->attr.attr_storage.max_active_gtt <= 0)
+    if (g_instance.attr.attr_storage.max_active_gtt <= 0)
         return;
 
     if (u_sess->gtt_ctx.gtt_storage_local_hash == NULL)
@@ -1425,6 +1396,15 @@ void gtt_switch_rel_relfilenode(Oid rel1, Oid relfilenode1, Oid rel2, Oid relfil
 
     entry2->relfilenode_list = list_delete_ptr(entry2->relfilenode_list, gttRnode2);
     entry1->relfilenode_list = lappend(entry1->relfilenode_list, gttRnode2);
+
+    if (entry1->relkind == RELKIND_RELATION && TransactionIdIsValid(frozenXid)) {
+        /* update relfrozenxid for the new gtt relfilenode */
+        remove_gtt_relfrozenxid_from_ordered_list((Oid)gttRnode2->relfrozenxid);
+        gttRnode2->relfrozenxid = frozenXid;
+        insert_gtt_relfrozenxid_to_ordered_list((Oid)frozenXid);
+        set_gtt_session_relfrozenxid();
+    }
+
     (void)MemoryContextSwitchTo(oldcontext);
 
     if (footprint) {
@@ -1481,11 +1461,18 @@ void gtt_create_storage_files(Oid relid)
         return;
     }
 
+    Relation rel = relation_open(relid, NoLock);
+
+    /* skip storage initialization for unusable index */
+    if (rel->rd_index != NULL && !IndexIsUsable(rel->rd_index)) {
+        relation_close(rel, NoLock);
+        return;
+    }
+
     MemoryContext ctxAlterGtt =
         AllocSetContextCreate(CurrentMemoryContext, "gtt alter table", ALLOCSET_DEFAULT_SIZES);
     MemoryContext oldcontext = MemoryContextSwitchTo(ctxAlterGtt);
     ResultRelInfo* resultRelInfo = makeNode(ResultRelInfo);
-    Relation rel = relation_open(relid, NoLock);
 
     InitResultRelInfo(resultRelInfo, rel, 1, 0);
     if (resultRelInfo->ri_RelationDesc->rd_rel->relhasindex &&

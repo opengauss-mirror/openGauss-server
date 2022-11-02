@@ -606,6 +606,9 @@ static void _outPlannedStmt(StringInfo str, PlannedStmt* node)
     }
     WRITE_BOOL_FIELD(isRowTriggerShippable);
     WRITE_BOOL_FIELD(is_stream_plan);
+    if (t_thrd.proc->workingVersionNum >= SLOW_SQL_VERSION_NUM) {
+        WRITE_UINT_FIELD(cause_type);
+    }
 }
 
 /*
@@ -1043,34 +1046,6 @@ static void _outCStoreIndexScan(StringInfo str, CStoreIndexScan* node)
     WRITE_NODE_FIELD(cstorequal);
     WRITE_NODE_FIELD(indextlist);
     WRITE_ENUM_FIELD(relStoreLocation, RelstoreType);
-    WRITE_BOOL_FIELD(indexonly);
-}
-
-static void _outDfsIndexScan(StringInfo str, DfsIndexScan* node)
-{
-    WRITE_NODE_TYPE("DFSINDEXSCAN");
-
-    _outScanInfo(str, (Scan*)node);
-
-    WRITE_OID_FIELD(indexid);
-#ifdef STREAMPLAN
-    if (node->indexid >= FirstBootstrapObjectId && IsStatisfyUpdateCompatibility(node->indexid)) {
-        appendStringInfo(str, " :indexname ");
-        _outToken(str, get_rel_name(node->indexid));
-        appendStringInfo(str, " :indexnamespace ");
-        _outToken(str, get_namespace_name(get_rel_namespace(node->indexid)));
-    }
-#endif  // STREAMPLAN
-    WRITE_NODE_FIELD(indextlist);
-    WRITE_NODE_FIELD(indexqual);
-    WRITE_NODE_FIELD(indexqualorig);
-    WRITE_NODE_FIELD(indexorderby);
-    WRITE_NODE_FIELD(indexorderbyorig);
-    WRITE_ENUM_FIELD(indexorderdir, ScanDirection);
-    WRITE_ENUM_FIELD(relStoreLocation, RelstoreType);
-    WRITE_NODE_FIELD(cstorequal);
-    WRITE_NODE_FIELD(indexScantlist);
-    WRITE_NODE_FIELD(dfsScan);
     WRITE_BOOL_FIELD(indexonly);
 }
 
@@ -2157,13 +2132,16 @@ static void _outParam(StringInfo str, Param* node)
     WRITE_LOCATION_FIELD(location);
     WRITE_TYPEINFO_FIELD(paramtype);
     
-    if (t_thrd.proc->workingVersionNum >= COMMENT_ROWTYPE_TABLEOF_VERSION_NUM)
-    {
+    if (t_thrd.proc->workingVersionNum >= COMMENT_ROWTYPE_TABLEOF_VERSION_NUM) {
         WRITE_OID_FIELD(tableOfIndexType);
     }
-    if (t_thrd.proc->workingVersionNum >= COMMENT_RECORD_PARAM_VERSION_NUM)
-    {
+
+    if (t_thrd.proc->workingVersionNum >= COMMENT_RECORD_PARAM_VERSION_NUM) {
         WRITE_OID_FIELD(recordVarTypOid);
+    }
+
+    if (t_thrd.proc->workingVersionNum >= COMMENT_ROWTYPE_NEST_TABLEOF_VERSION_NUM) {
+        WRITE_NODE_FIELD(tableOfIndexTypeList);
     }
 
 }
@@ -3000,6 +2978,7 @@ static void _outPartIteratorPath(StringInfo str, PartIteratorPath* node)
     WRITE_BOOL_FIELD(ispwj);
     WRITE_NODE_FIELD(upperboundary);
     WRITE_NODE_FIELD(lowerboundary);
+    WRITE_BOOL_FIELD(needSortNode);
 }
 
 static void _outForeignPath(StringInfo str, ForeignPath* node)
@@ -4138,6 +4117,12 @@ static void _outScanMethodHint(StringInfo str, ScanMethodHint* node)
     WRITE_NODE_FIELD(indexlist);
 }
 
+static void _outMaterialSubplanHint(StringInfo str, MaterialSubplanHint* node)
+{
+    WRITE_NODE_TYPE("MATERIALSUBPLANHINT");
+    _outBaseHint(str, (Hint*)node);
+}
+
 /*
  * @Description: Write gc_fdw remote information node to string.
  * @out str: String buf.
@@ -4266,6 +4251,12 @@ static void _outHintState(StringInfo str, HintState* node)
     }
     if (t_thrd.proc->workingVersionNum >= PREDPUSH_SAME_LEVEL_VERSION_NUM) {
         WRITE_NODE_FIELD(predpush_same_level_hint);
+    }
+    if (t_thrd.proc->workingVersionNum >= SQL_PATCH_VERSION_NUM) {
+        WRITE_BOOL_FIELD(from_sql_patch);
+    }
+    if (t_thrd.proc->workingVersionNum >= MATERIAL_SUBPLAN_HINT_VERSION_NUM) {
+        WRITE_NODE_FIELD(material_subplan_hint);
     }
 }
 
@@ -5205,17 +5196,6 @@ static void _outCStoreScan(StringInfo str, CStoreScan* node)
     WRITE_BOOL_FIELD(is_replica_table);
 }
 
-static void _outDfsScan(StringInfo str, DfsScan* node)
-{
-    WRITE_NODE_TYPE("DFSSCAN");
-
-    _outScanInfo(str, (Scan*)node);
-
-    WRITE_ENUM_FIELD(relStoreLocation, RelstoreType);
-    WRITE_NODE_FIELD(privateData);
-    WRITE_STRING_FIELD(storeFormat);
-}
-
 #ifdef ENABLE_MULTIPLE_NODES
 static void
 _outTsStoreScan(StringInfo str, TsStoreScan *node)
@@ -5702,9 +5682,6 @@ static void _outNode(StringInfo str, const void* obj)
                 break;
             case T_CStoreIndexScan:
                 _outCStoreIndexScan(str, (CStoreIndexScan*)obj);
-                break;
-            case T_DfsIndexScan:
-                _outDfsIndexScan(str, (DfsIndexScan*)obj);
                 break;
             case T_BitmapIndexScan:
                 _outBitmapIndexScan(str, (BitmapIndexScan*)obj);
@@ -6319,9 +6296,6 @@ static void _outNode(StringInfo str, const void* obj)
                 _outCStoreScan(str, (CStoreScan*)obj);
                 break;
 
-            case T_DfsScan:
-                _outDfsScan(str, (DfsScan*)obj);
-                break;
 #ifdef ENABLE_MULTIPLE_NODES
             case T_TsStoreScan:
                 _outTsStoreScan(str, (TsStoreScan*)obj);
@@ -6480,6 +6454,10 @@ static void _outNode(StringInfo str, const void* obj)
                 break;
             case T_NoGPCHint:
                 _outNoGPCHint(str, (NoGPCHint*) obj);
+                break;
+            case T_MaterialSubplanHint:
+                _outMaterialSubplanHint(str, (MaterialSubplanHint*) obj);
+                break;
             case T_TrainModel:
                 _outTrainModel(str, (TrainModel*)obj);
                 break;

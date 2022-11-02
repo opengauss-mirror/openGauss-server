@@ -187,6 +187,9 @@ typedef struct PlannedStmt {
     bool multi_node_hint;
 
     uint64 uniqueSQLId;
+
+    uint32 cause_type; /* Possible Slow SQL Risks in the Plan. */
+    bool auto_explain_done;
 } PlannedStmt;
 
 typedef struct NodeGroupInfoContext {
@@ -423,6 +426,7 @@ typedef struct ModifyTable {
     Node* upsertWhere;          /* Qualifiers for upsert's update clause to check */
 
     OpMemInfo mem_info;    /*  Memory info for modify node */
+    bool material_all_subplan;
 } ModifyTable;
 
 /* ----------------
@@ -613,18 +617,6 @@ typedef struct CStoreScan : public Scan {
 
 /*
  * ==========
- * Dfs Store Scan nodes. When the relation is CU format, we use CstoreScan
- * to scan data.
- * ==========
- */
-typedef struct DfsScan : public Scan {
-    RelstoreType relStoreLocation;
-    char* storeFormat; /* The store format, the ORC format only is supported for dfsScan. */
-    List* privateData; /* Private data. */
-} DfsScan;
-
-/*
- * ==========
  * Time Series Store Scan nodes
  * ==========
  */
@@ -794,25 +786,6 @@ typedef struct CStoreIndexAnd : public BitmapAnd {
 
 typedef struct CStoreIndexOr : public BitmapOr {
 } CStoreIndexOr;
-
-/* ----------------
- *		DFS Store index scan node
- */
-typedef struct DfsIndexScan {
-    Scan scan;
-    Oid indexid;                   /* OID of index to scan */
-    List* indextlist;              /* list of index target entry which represents the column of base-relation */
-    List* indexqual;               /* list of index quals (usually OpExprs) */
-    List* indexqualorig;           /* the same in original form */
-    List* indexorderby;            /* list of index ORDER BY exprs */
-    List* indexorderbyorig;        /* the same in original form */
-    ScanDirection indexorderdir;   /* forward or backward or don't care */
-    RelstoreType relStoreLocation; /* The store position information. */
-    List* cstorequal;              /* quals that can be pushdown to cstore base table */
-    List* indexScantlist;          /* list of target column for scanning on index table */
-    DfsScan* dfsScan;              /* the inner object for scanning the base-relation */
-    bool indexonly;                /* flag indicates index only scan */
-} DfsIndexScan;
 
 /* ----------------
  *		tid scan node

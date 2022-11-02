@@ -28,6 +28,23 @@ typedef struct RoleIdHashEntry {
     int64 roleNum;
 } RoleIdHashEntry;
 
+/* Our shared memory area */
+typedef struct ProcArrayStruct {
+    int numProcs; /* number of valid procs entries */
+    int maxProcs; /* allocated size of procs array */
+
+    /* oldest xmin of any replication slot */
+    TransactionId replication_slot_xmin;
+    /* oldest catalog xmin of any replication slot */
+    TransactionId replication_slot_catalog_xmin;
+    /*
+     * We declare pgprocnos[] as 1 entry because C wants a fixed-size array,
+     * but actually it is maxProcs entries long.
+     */
+    int pgprocnos[1]; /* VARIABLE LENGTH ARRAY */
+} ProcArrayStruct;
+
+
 extern void InitRoleIdHashTable();
 extern int GetRoleIdCount(Oid roleoid);
 extern int IncreaseUserCount(Oid roleoid);
@@ -94,7 +111,9 @@ extern bool IsBackendPid(ThreadId pid);
 
 extern VirtualTransactionId* GetCurrentVirtualXIDs(
     TransactionId limitXmin, bool excludeXmin0, bool allDbs, int excludeVacuum, int* nvxids);
-extern VirtualTransactionId* GetConflictingVirtualXIDs(TransactionId limitXmin, Oid dbOid, XLogRecPtr lsn = 0);
+extern VirtualTransactionId *GetConflictingVirtualXIDs(TransactionId limitXmin, Oid dbOid, XLogRecPtr lsn = 0,
+                                                       CommitSeqNo limitXminCSN = InvalidCommitSeqNo,
+                                                       TransactionId* xminArray = NULL);
 extern ThreadId CancelVirtualTransaction(const VirtualTransactionId& vxid, ProcSignalReason sigmode);
 
 extern bool MinimumActiveBackends(int min);

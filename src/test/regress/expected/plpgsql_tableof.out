@@ -1066,7 +1066,7 @@ declare
     aa.trim;
 end;
 /
-ERROR:  index by varchar type don't support trim function at or near "aa"
+ERROR:  index by type don't support trim function at or near "aa"
 LINE 6:     aa.trim;
             ^
 QUERY:  DECLARE  TYPE SalTabTyp is TABLE OF varchar(10) index by varchar(10);  
@@ -1075,6 +1075,63 @@ QUERY:  DECLARE  TYPE SalTabTyp is TABLE OF varchar(10) index by varchar(10);
     aa('a') = 'abcde';
 	aa('b') = 'fghij';
     aa.trim;
+end
+declare 
+    TYPE SalTabTyp is TABLE OF varchar(10) index by int;  
+	aa SalTabTyp;  
+ begin
+    aa(1) = 'abcde';
+	aa(2) = 'fghij';
+    aa.trim;
+end;
+/
+ERROR:  index by type don't support trim function at or near "aa"
+LINE 6:     aa.trim;
+            ^
+QUERY:  DECLARE  TYPE SalTabTyp is TABLE OF varchar(10) index by int;  
+	aa SalTabTyp;  
+ begin
+    aa(1) = 'abcde';
+	aa(2) = 'fghij';
+    aa.trim;
+end
+declare 
+    TYPE SalTabTyp is TABLE OF varchar(10) index by varchar(10);  
+	aa SalTabTyp;  
+ begin
+    aa.extend;
+    aa('a') = 'abcde';
+	aa('b') = 'fghij';
+end;
+/
+ERROR:  index by type don't support extend function at or near "aa"
+LINE 4:     aa.extend;
+            ^
+QUERY:  DECLARE  TYPE SalTabTyp is TABLE OF varchar(10) index by varchar(10);  
+	aa SalTabTyp;  
+ begin
+    aa.extend;
+    aa('a') = 'abcde';
+	aa('b') = 'fghij';
+end
+declare 
+    TYPE SalTabTyp is TABLE OF varchar(10) index by int;  
+	aa SalTabTyp;  
+ begin
+    aa.extend;
+    aa(1) = 'abcde';
+	aa(2) = 'fghij';
+end;
+/
+ERROR:  index by type don't support extend function at or near "aa"
+LINE 4:     aa.extend;
+            ^
+QUERY:  DECLARE  TYPE SalTabTyp is TABLE OF varchar(10) index by int;  
+	aa SalTabTyp;  
+ begin
+    aa.extend;
+    aa(1) = 'abcde';
+	aa(2) = 'fghij';
 end
 declare 
     TYPE SalTabTyp is TABLE OF varchar(10) index by varchar(10);  
@@ -1363,7 +1420,8 @@ begin
   v_record_user2(1).c1 :=1;
 end;
 /
-ERROR:  subscripts list has members less than tableof value v_record_user3 expected
+ERROR:  malformed record literal: "1"
+DETAIL:  Missing left parenthesis.
 CONTEXT:  PL/pgSQL function inline_code_block line 7 at assignment
 drop table customers cascade;
 NOTICE:  drop cascades to type _customers[]
@@ -1513,6 +1571,25 @@ begin
     exit when c_customers%NOTFOUND;
     close c_customers;
 end
+-- table of null && delete
+declare
+    cursor c_customers is select c_name from customers order by id;
+    type c_list is table of customers.c_name%type index by integer;
+    name_arr c_list := c_list();
+begin
+    -- bulk collect + cursor
+    open c_customers;
+    fetch c_customers bulk collect into name_arr;
+	name_arr.delete();
+    close c_customers;
+    raise info '%', name_arr.count;
+    raise info '%', name_arr.last;
+    raise info '%', name_arr.exists(7);
+end;
+/
+INFO:  0
+INFO:  <NULL>
+INFO:  f
 create table pro_tblof_tbl_018_1(c1 int,c2 varchar(20));
 create table pro_tblof_tbl_018(c1 int,c2 pro_tblof_tbl_018_1);
 create type pro_tblof_018 is table of pro_tblof_tbl_018%rowtype;
@@ -1959,10 +2036,88 @@ return pv6.first;
 end;
 end pkgnest_auto;
 /
-ERROR:  Un-support feature: nest tableof variable (null) not support pass through autonm function
+ERROR:  Un-support feature: nest tableof variable "pv2" not support pass through autonm function
 CONTEXT:  compilation of PL/pgSQL package near line 6
 call pkgnest_auto.p1();
 ERROR:  package body not defined
+-- nested table of in auto session
+create or replace package pck1 as
+type r1 is table of int;
+type r2 is table of r1;
+va r2;
+procedure p1;
+end pck1;
+/
+create or replace procedure p2() as
+va int;
+begin
+va := pck1.va(1)(1);
+end;
+/
+create or replace package body pck1 as
+procedure p1 as
+PRAGMA AUTONOMOUS_TRANSACTION;
+begin
+p2();
+end;
+end pck1;
+/
+call pck1.p1();
+ERROR:  ERROR:  Un-support feature: nest tableof variable "va" not support pass through autonm function
+CONTEXT:  referenced column: va
+SQL statement "SELECT pck1.va[1][1]"
+PL/pgSQL function p2() line 4 at assignment
+SQL statement "CALL p2()"
+PL/pgSQL function p1() line 4 at PERFORM
+referenced column: p1
+
+create or replace procedure p2() as
+va int;
+begin
+pck1.va(1)(1) := 1;
+end;
+/
+call pck1.p1();
+ERROR:  ERROR:  Un-support feature: nest tableof variable "va" not support pass through autonm function
+CONTEXT:  PL/pgSQL function p2() line 4 at assignment
+SQL statement "CALL p2()"
+PL/pgSQL function p1() line 4 at PERFORM
+referenced column: p1
+
+drop procedure p2();
+drop package pck1;
+NOTICE:  drop cascades to function plpgsql_table.p1()
+create or replace package pkgnest021
+ as
+ type ty1 is table of varchar2(20);
+ type ty2 is table of ty1;
+ type ty3 is table of ty2;
+ type ty4 is table of ty3;
+ type ty5 is table of ty4;
+ type ty6 is table of ty5;
+ procedure p1;
+ pv1 ty1;
+ pv2 ty2;
+ pv3 ty3; 
+ pv4 ty4;
+ pv5 ty5; 
+ pv6 ty6;
+ end pkgnest021;
+ /
+ 
+create or replace package body pkgnest021
+as
+procedure p1
+is
+v1 ty6;
+begin
+pv6.extend();
+pv6(1)(1)(1)(1)(1)(1):='1'; pv6(1)(1)(1)(1)(1)(2):='2'; pv6(1)(1)(1)(1)(1)(4):='3'; pv6(2)(1)(1)(1)(3)(1):='4'; pv6(2)(1)(1)(1)(3)(2):='5'; pv6(2)(1)(1)(1)(3)(3):='6'; pv6(4)(1)(1)(4)(3)(1):='7'; pv6(4)(1)(1)(5)(3)(2):='8'; pv6(4)(1)(1)(6)(3)(3):='9'; 
+end;
+end pkgnest021;
+/
+drop package pkgnest021;
+NOTICE:  drop cascades to function plpgsql_table.p1()
 ---- clean ----
 drop type s_type;
 ERROR:  cannot drop type s_type because other objects depend on it

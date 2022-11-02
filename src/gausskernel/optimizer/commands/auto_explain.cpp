@@ -13,6 +13,7 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 #include "pgstat.h"
+#include "optimizer/ml_model.h"
 #include "optimizer/streamplan.h"
 #include "commands/explain.h"
 #include "executor/instrument.h"
@@ -32,17 +33,7 @@ static ExecutorRun_hook_type prev_ExecutorRun = NULL;
 static ExecutorFinish_hook_type prev_ExecutorFinish = NULL;
 static ExecutorEnd_hook_type prev_ExecutorEnd = NULL;
 static instr_time plan_time;
-#define auto_explain_enabled() \
-    (u_sess->attr.attr_storage.log_min_duration_statement >= 0 && u_sess->exec_cxt.nesting_level == 0)
-#define auto_explain_plan() \
-	(!u_sess->attr.attr_sql.under_explain && u_sess->attr.attr_resource.enable_auto_explain)
-#ifdef ENABLE_MULTIPLE_NODES
-#define is_valid_query(queryDesc) \
-    (queryDesc!=NULL && queryDesc->sourceText != NULL && strcmp(queryDesc->sourceText, "DUMMY") != 0 && IS_PGXC_COORDINATOR)
-#else
-#define is_valid_query(queryDesc) \
-    (queryDesc!=NULL && queryDesc->sourceText != NULL && strcmp(queryDesc->sourceText, "DUMMY") != 0)
-#endif
+
 void  auto_explain_init(void);
 void  _PG_fini(void);
 
@@ -231,60 +222,107 @@ void print_parameters(const QueryDesc *queryDesc, ExplainState es)
         }
     } 
 }
+
+void exec_do_explain(QueryDesc *queryDesc, bool running)
+{
+    if (u_sess->attr.attr_resource.auto_explain_log_min_duration > 0 && queryDesc->plannedstmt->auto_explain_done) {
+        return;
+    }
+    queryDesc->plannedstmt->auto_explain_done = true;
+    ExplainState es;
+    INSTR_TIME_SET_CURRENT(plan_time);
+    ExplainInitState(&es);
+    es.costs = true;
+    es.nodes = true;
+    es.format = EXPLAIN_FORMAT_TEXT;
+    es.verbose = true;
+    es.analyze = false;
+    es.timing = false;
+    int old_explain_perf_mode = t_thrd.explain_cxt.explain_perf_mode;
+    t_thrd.explain_cxt.explain_perf_mode = (int)EXPLAIN_NORMAL;
+    /* auto explain threshold > 0, the plan will be printed on demand within executor stack, fix the nesting level */
+    int nesting_level = running ? u_sess->exec_cxt.nesting_level - 1 : u_sess->exec_cxt.nesting_level;
+    appendStringInfo(es.str,
+                     "\n----------------------------NestLevel:%d----------------------------\n",
+                     nesting_level);
+    ExplainQueryText(&es, queryDesc);
+    SetNullPrediction(queryDesc->planstate);
+    appendStringInfo(es.str, "Name: %s\n", g_instance.attr.attr_common.PGXCNodeName);
+    ExplainBeginOutput(&es);
+    MemoryContext current_ctx = CurrentMemoryContext;
+    PG_TRY();
+    {
+        ExplainPrintPlan(&es, queryDesc);
+        ExplainEndOutput(&es);
+    }
+    PG_CATCH();
+    {
+        MemoryContextSwitchTo(current_ctx);
+        ErrorData* edata = CopyErrorData();
+        FlushErrorState();
+        ereport(u_sess->attr.attr_resource.auto_explain_level,
+            (errmsg("\nQueryPlan\nexplain failed\nerror:%s", edata->message), errhidestmt(true)));
+        FreeErrorData(edata);
+        pfree(es.str->data);
+        t_thrd.explain_cxt.explain_perf_mode = old_explain_perf_mode;
+        return;
+    }
+    PG_END_TRY();
+    t_thrd.explain_cxt.explain_perf_mode = old_explain_perf_mode;
+    print_parameters(queryDesc, es);
+    ereport(u_sess->attr.attr_resource.auto_explain_level,
+        (errmsg("\nQueryPlan\n%s\n", es.str->data), errhidestmt(true)));
+    pfree(es.str->data);
+}
+
 void exec_explain_plan(QueryDesc *queryDesc)
 {
-    ExplainState es;
-    if (is_valid_query(queryDesc) && auto_explain_plan()) {
-        INSTR_TIME_SET_CURRENT(plan_time);
-        ExplainInitState(&es);
-        es.costs = true;
-        es.nodes = true;
-        es.format = EXPLAIN_FORMAT_TEXT;
-        es.verbose = true;
-        es.analyze = false;
-        es.timing = false;
-        int old_explain_perf_mode = t_thrd.explain_cxt.explain_perf_mode;
-        t_thrd.explain_cxt.explain_perf_mode = (int)EXPLAIN_NORMAL;
-        appendStringInfo(es.str, "\n---------------------------"
-            "-NestLevel:%d----------------------------\n", u_sess->exec_cxt.nesting_level);
-        ExplainQueryText(&es, queryDesc);
-        appendStringInfo(es.str, "Name: %s\n", g_instance.attr.attr_common.PGXCNodeName);
-        ExplainBeginOutput(&es);
-        MemoryContext current_ctx = CurrentMemoryContext;
-        PG_TRY();
-        {
-            ExplainPrintPlan(&es, queryDesc);
-            ExplainEndOutput(&es);
+    if (!is_valid_query(queryDesc) || !auto_explain_plan()) {
+        return;
+    }
+    if (u_sess->attr.attr_resource.auto_explain_log_min_duration == 0) {
+        exec_do_explain(queryDesc, false);
+    } else if (u_sess->exec_cxt.nesting_level == 0) {
+        if (!enable_auto_explain_threshold_sig_alarm()) {
+            ereport(FATAL, (errmsg("could not enable timer for process wakeup")));
         }
-        PG_CATCH();
-        {
-            MemoryContextSwitchTo(current_ctx);
-            ErrorData* edata = CopyErrorData();
-            FlushErrorState();
-            ereport(u_sess->attr.attr_resource.auto_explain_level,
-                (errmsg("\nQueryPlan\nexplain failed\nerror:%s", edata->message), errhidestmt(true)));
-            FreeErrorData(edata);
-            pfree(es.str->data);
-            t_thrd.explain_cxt.explain_perf_mode = old_explain_perf_mode;
-            return;
-        }
-        PG_END_TRY();
-        t_thrd.explain_cxt.explain_perf_mode = old_explain_perf_mode;
-        print_parameters(queryDesc, es);
-        ereport(u_sess->attr.attr_resource.auto_explain_level,
-            (errmsg("\nQueryPlan\n%s\n", es.str->data), errhidestmt(true)));
-        pfree(es.str->data);
     }
 }
-void print_duration(const QueryDesc *queryDesc) {
-    if (is_valid_query(queryDesc) && auto_explain_plan()) {
-        double time_diff = 0;
-        time_diff += elapsed_time(&plan_time);
-        ereport(u_sess->attr.attr_resource.auto_explain_level,
-            (errmsg("\n----------------------------NestLevel:%d"
-            "----------------------------\nduration: %.3f s\n",u_sess->exec_cxt.nesting_level, time_diff),
-            errhidestmt(true)));
+
+void exec_end_explain_plan(QueryDesc *queryDesc)
+{
+    if (!is_valid_query(queryDesc) || !auto_explain_plan()) {
+        return;
     }
+
+    if (u_sess->attr.attr_resource.auto_explain_log_min_duration == 0) {
+        print_duration();
+    } else {
+        if (t_thrd.explain_cxt.need_auto_explain) {
+            PlannedStmt* pstmt = queryDesc->plannedstmt;
+            if (unlikely(!pstmt->auto_explain_done)) {
+                exec_do_explain(queryDesc, false);
+            }
+            /* show duration only when min duration is exceeded */
+            print_duration();
+        }
+        /* only disable if at top execution stack */
+        if (u_sess->exec_cxt.nesting_level == 0) {
+            if (!disable_auto_explain_threshold_sig_alarm()) {
+                ereport(FATAL, (errmsg("could not disable timer for process wakeup")));
+            }
+            t_thrd.explain_cxt.need_auto_explain = false;
+        }
+    }
+}
+
+void print_duration() {
+    double time_diff = 0;
+    time_diff += elapsed_time(&plan_time);
+    ereport(u_sess->attr.attr_resource.auto_explain_level,
+        (errmsg("\n----------------------------NestLevel:%d"
+        "----------------------------\nduration: %.3f s\n",u_sess->exec_cxt.nesting_level, time_diff),
+        errhidestmt(true)));
 }
 
 void explain_querydesc(ExplainState *es, QueryDesc *queryDesc)
@@ -304,6 +342,7 @@ void explain_querydesc(ExplainState *es, QueryDesc *queryDesc)
         (IS_PGXC_COORDINATOR) ? "Coordinator" : "Datanode", g_instance.attr.attr_common.PGXCNodeName);
 
     ExplainBeginOutput(es);
+    SetNullPrediction(queryDesc->planstate);
     ExplainPrintPlan(es, queryDesc);
     ExplainEndOutput(es);
 

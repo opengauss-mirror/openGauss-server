@@ -31,8 +31,7 @@
 #include "client_logic_fmt/gs_fmt.h"
 #include "client_logic_cache/icached_column.h"
 
-extern unsigned char *PQescapeByteaConn1(PGconn *conn, const unsigned char *from, size_t from_length, size_t *to_length,
-    bool add_quotes);
+unsigned char *PQescapeByteaCe(PGconn *conn, const unsigned char *from, size_t fromlen, size_t *tolen, bool addquote);
 
 RawValue::RawValue(PGconn *conn)
     : m_is_param(false),
@@ -87,33 +86,7 @@ bool RawValue::process(const ICachedColumn *cached_column, char *err_msg)
     errno_t rcs = EOK;
 
     if (m_data_value_format == 0) {
-        char *text_value(NULL);
-        bool allocated = false;
-
-        if (m_data_value[m_data_value_size] == 0) {
-            text_value = (char *)m_data_value;
-        } else {
-            text_value = (char *)malloc((m_data_value_size + 1) * sizeof(char));
-            if (text_value == NULL) {
-                check_sprintf_s(sprintf_s(err_msg, MAX_ERRMSG_LENGTH, "failed to malloc text value"));
-                return false;
-            }
-            text_value[0] = 0;
-            check_strncat_s(
-                strncat_s(text_value, m_data_value_size + 1, (const char *)m_data_value, m_data_value_size));
-            allocated = true;
-        }
-
-        binary = Format::text_to_binary((const PGconn*)m_conn, text_value, cached_column->get_origdatatype_oid(),
-            cached_column->get_origdatatype_mod(), &binary_size, err_msg);
-        if (allocated) {
-            free(text_value);
-            text_value = NULL;
-        }
-        if (binary == NULL) {
-            if (strlen(err_msg) == 0) {
-                check_sprintf_s(sprintf_s(err_msg, MAX_ERRMSG_LENGTH, "failed to convert text to binary"));
-            }
+        if (!process_binary(cached_column, err_msg, &binary, &binary_size)) {
             return false;
         }
     } else {
@@ -146,7 +119,10 @@ bool RawValue::process(const ICachedColumn *cached_column, char *err_msg)
         HooksManager::get_estimated_processed_data_size(cached_column->get_column_hook_executors(), binary_size) +
         sizeof(Oid),
         sizeof(unsigned char));
-    RETURN_IF(m_processed_data == NULL, false);
+    if (m_processed_data == NULL) {
+        libpq_free(binary);
+        return false;
+    }
     int processed_size = HooksManager::process_data(cached_column, cached_column->get_column_hook_executors(), binary,
         binary_size, m_processed_data);
     if (processed_size <= 0) {
@@ -168,7 +144,7 @@ bool RawValue::process(const ICachedColumn *cached_column, char *err_msg)
     if (!m_is_param || m_data_value_format == 0) {
         /* replace processedData with its escaped version */
         size_t processed_data_size_tmp(0);
-        const char *processed_data_tmp = (char *)PQescapeByteaConn1(m_conn, (const unsigned char *)m_processed_data,
+        const char *processed_data_tmp = (char *)PQescapeByteaCe(m_conn, (const unsigned char *)m_processed_data,
             m_processed_data_size, &processed_data_size_tmp, !m_is_param);
         free_processed_data();
         if (!processed_data_tmp) {
@@ -180,12 +156,47 @@ bool RawValue::process(const ICachedColumn *cached_column, char *err_msg)
 
         m_processed_data = (unsigned char *)processed_data_tmp;
         m_processed_data_size = processed_data_size_tmp -
-            1; /* the \0 is counted in the orignal PQescapeByteaConn function, so we need -1 */
+            1; /* the \0 is counted in the orignal PQescapeByteaCe function, so we need -1 */
     }
 
     return true;
 }
 
+/* Processing data of type text to binary type */
+bool RawValue::process_binary(const ICachedColumn *cached_column, char *err_msg,
+    unsigned char **binary, size_t *binary_size)
+{
+    char *text_value(NULL);
+    bool allocated = false;
+
+    if (m_data_value[m_data_value_size] == 0) {
+        text_value = (char *)m_data_value;
+    } else {
+        text_value = (char *)malloc((m_data_value_size + 1) * sizeof(char));
+        if (text_value == NULL) {
+            check_sprintf_s(sprintf_s(err_msg, MAX_ERRMSG_LENGTH, "failed to malloc text value"));
+            return false;
+        }
+        text_value[0] = 0;
+        check_strncat_s(
+            strncat_s(text_value, m_data_value_size + 1, (const char *)m_data_value, m_data_value_size));
+        allocated = true;
+    }
+
+    *binary = Format::text_to_binary((const PGconn*)m_conn, text_value, cached_column->get_origdatatype_oid(),
+        cached_column->get_origdatatype_mod(), binary_size, err_msg);
+    if (allocated) {
+        free(text_value);
+        text_value = NULL;
+    }
+    if (*binary == NULL) {
+        if (strlen(err_msg) == 0) {
+            check_sprintf_s(sprintf_s(err_msg, MAX_ERRMSG_LENGTH, "failed to convert text to binary"));
+        }
+        return false;
+    }
+    return true;
+}
 void RawValue::inc_ref_count()
 {
     Assert(ref_count >= 0);

@@ -69,31 +69,25 @@ select_package_command
 #######################################################################
 ##get os dist version
 #######################################################################
-export PLAT_FORM_STR=$(sh "${ROOT_DIR}/src/get_PlatForm_str.sh")
-if [ "${PLAT_FORM_STR}"x == "Failed"x -o "${PLAT_FORM_STR}"x == ""x ]
-then
-    echo "We only support openEuler(aarch64), EulerOS(aarch64), CentOS, Kylin(aarch64) platform."
-    exit 1;
-fi
 
-if [[ "$PLAT_FORM_STR" =~ "euleros" ]]; then
+if [[ -f "/etc/euleros-release" ]]; then
     dist_version="EulerOS"
-    if [ "$PLATFORM_ARCH"X == "aarch64"X ];then 
+    if [ "$PLATFORM_ARCH"X == "aarch64"X ];then
         GAUSSDB_EXTRA_FLAGS=" -D__USE_NUMA"
     fi
-elif [[ "$PLAT_FORM_STR" =~ "centos" ]]; then
+elif [[ -f "/etc/centos-release" ]]; then
     dist_version="CentOS"
-    if [ "$PLATFORM_ARCH"X == "aarch64"X ];then 
+    if [ "$PLATFORM_ARCH"X == "aarch64"X ];then
         GAUSSDB_EXTRA_FLAGS=" -D__USE_NUMA"
     fi
-elif [[ "$PLAT_FORM_STR" =~ "openeuler" ]]; then
+elif [[ -f "/etc/openEuler-release" ]]; then
     dist_version="openEuler"
-    if [ "$PLATFORM_ARCH"X == "aarch64"X ];then 
+    if [ "$PLATFORM_ARCH"X == "aarch64"X ];then
         GAUSSDB_EXTRA_FLAGS=" -D__USE_NUMA -D__ARM_LSE"
     fi
-elif [[ "$PLAT_FORM_STR" =~ "kylin" ]]; then
+elif [[ -f "/etc/kylin-release" ]]; then
     dist_version="Kylin"
-    if [ "$PLATFORM_ARCH"X == "aarch64"X ];then 
+    if [ "$PLATFORM_ARCH"X == "aarch64"X ];then
         GAUSSDB_EXTRA_FLAGS=" -D__USE_NUMA"
     fi
 else
@@ -111,35 +105,45 @@ if [ "$PLATFORM_ARCH"X == "aarch64"X ] ; then
 fi
 
 if [ "${binarylib_dir}" != 'None' ] && [ -d "${binarylib_dir}" ]; then
-    BUILD_TOOLS_PATH="${binarylib_dir}/buildtools/${PLAT_FORM_STR}"
-    PLATFORM_PATH="${binarylib_dir}/platform/${PLAT_FORM_STR}"
-    BINARYLIBS_PATH="${binarylib_dir}/dependency"
+    BUILD_TOOLS_PATH="${binarylib_dir}/buildtools"
+    PLATFORM_PATH="${binarylib_dir}/kernel/platform"
+    BINARYLIBS_PATH="${binarylib_dir}/kernel/dependency"
 else
-    die "${binarylib_dir} not exist"
+    die "${binarylib_dir} doesn't exist."
 fi
 
-declare INSTALL_TOOLS_DIR=${BINARYLIBS_PATH}/install_tools_${PLAT_FORM_STR}
-declare UNIX_ODBC="${BINARYLIBS_PATH}/${PLAT_FORM_STR}/unixodbc"
+# 小型化
+declare lite_dist_version=${dist_version}
+if [ "${lite_dist_version}" == "openEuler" ]; then
+    lite_dist_version="OPENEULER"
+elif [ "${lite_dist_version}" == "Kylin" ]; then
+    lite_dist_version="LYLIN"
+elif [ "${lite_dist_version}" == "EulerOS" ]; then
+    lite_dist_version="EULER"
+fi
 
-# Comment 编译相关 
-gcc_version="7.3" 
+declare INSTALL_TOOLS_DIR=${binarylib_dir}/install_tools
+declare UNIX_ODBC="${BINARYLIBS_PATH}/unixodbc"
+
+# Comment 编译相关
+gcc_version="7.3"
 ccache -V >/dev/null 2>&1 && USE_CCACHE="ccache " ENABLE_CCACHE="--enable-ccache"
 export CC="${USE_CCACHE}$BUILD_TOOLS_PATH/gcc$gcc_version/gcc/bin/gcc"
 export CXX="${USE_CCACHE}$BUILD_TOOLS_PATH/gcc$gcc_version/gcc/bin/g++"
 export LD_LIBRARY_PATH=$BUILD_TOOLS_PATH/gcc$gcc_version/gcc/lib64:$BUILD_TOOLS_PATH/gcc$gcc_version/isl/lib:$BUILD_TOOLS_PATH/gcc$gcc_version/mpc/lib/:$BUILD_TOOLS_PATH/gcc$gcc_version/mpfr/lib/:$BUILD_TOOLS_PATH/gcc$gcc_version/gmp/lib/:$LD_LIBRARY_PATH
 export PATH=$BUILD_TOOLS_PATH/gcc$gcc_version/gcc/bin:$PATH
-export JAVA_HOME=${binarylib_dir}/platform/huaweijdk8/${PLATFORM_ARCH}/jdk
+export JAVA_HOME=${PLATFORM_PATH}/huaweijdk8/${PLATFORM_ARCH}/jdk
 
 declare ERR_MKGS_FAILED=1
 declare MKGS_OK=0
 
 
-gaussdb_200_file="${binarylib_dir}/buildtools/license_control/gaussdb.version.GaussDB200"
-gaussdb_300_file="${binarylib_dir}/buildtools/license_control/gaussdb.version.GaussDB300"
-gaussdb_200_standard_file="${binarylib_dir}/buildtools/license_control/gaussdb.license.GaussDB200_Standard"
+gaussdb_200_file="${BUILD_TOOLS_PATH}/license_control/gaussdb.version.GaussDB200"
+gaussdb_300_file="${BUILD_TOOLS_PATH}/license_control/gaussdb.version.GaussDB300"
+gaussdb_200_standard_file="${BUILD_TOOLS_PATH}/license_control/gaussdb.license.GaussDB200_Standard"
 gaussdb_version_file="${ROOT_DIR}/src/gausskernel/process/postmaster/gaussdb_version.cpp"
 
-    
+
 if [ -f "$SCRIPT_DIR/gaussdb.ver" ];then
     declare version_number=$(cat ${SCRIPT_DIR}/gaussdb.ver | grep 'VERSION' | awk -F "=" '{print $2}')
 else
@@ -159,6 +163,9 @@ declare libpq_package_name="${package_pre_name}-Libpq.tar.gz"
 declare tools_package_name="${package_pre_name}-tools.tar.gz"
 declare kernel_package_name="${package_pre_name}.tar.bz2"
 declare symbol_package_name="${package_pre_name}-symbol.tar.gz"
-declare sha256_name="${package_pre_name}.sha256"
-
-
+declare sha256_name="${lite_package_pre_name}.sha256"
+declare lite_package_pre_name="GaussDB-Kernel-V500R002C10-${lite_dist_version}-${PLATFORM}bit"
+declare lite_kernel_package_name="${lite_package_pre_name}.bin"
+declare lite_libpq_package_name="${lite_package_pre_name}-Libpq.tar.gz"
+declare lite_symbol_package_name="${lite_package_pre_name}-symbol.tar.gz"
+declare lite_sha256_name="${lite_package_pre_name}.sha256"

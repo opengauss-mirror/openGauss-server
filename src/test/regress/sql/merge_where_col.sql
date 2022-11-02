@@ -83,5 +83,25 @@ USING tb_a at
 SELECT * FROM tb_b ORDER BY  1; 
 ROLLBACK; 
 
+create table col_com_base_1(
+col_int                      integer,
+col_double                   double precision,
+col_date                     date
+);
+
+create table col_com_base_2(
+col_int                      integer,
+col_double                   double precision,
+col_date                     date
+);
+
+MERGE INTO col_com_base_1 Table_004 USING col_com_base_2 Table_003
+    ON ( Table_003.col_double = Table_004.col_double ) 
+WHEN MATCHED THEN UPDATE SET col_date = col_date
+WHERE  Table_004.col_int = ( select SUM(Table_004.col_int) from col_com_base_1);
+
+UPDATE col_com_base_1 Table_004 SET col_int = 2 where Table_004.col_int = ( select SUM(Table_004.col_int) from col_com_base_1);
+UPDATE col_com_base_1 Table_004 SET col_int = 2 where Table_004.col_int = ( select SUM(col_int) from col_com_base_1);
+
 -- clean up
 DROP SCHEMA merge_where_col CASCADE;

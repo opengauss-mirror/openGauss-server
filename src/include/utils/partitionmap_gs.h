@@ -139,6 +139,9 @@ typedef struct HashPartitionMap {
     HashPartElement* hashElements;   /* array of hashElement */
 } HashPartitionMap;
 
+extern Const **transformConstIntoPartkeyType(Form_pg_attribute* attrs, int2vector* partitionKey, Const **boundary,
+    int len);
+
 #define PartitionkeyTypeGetIntervalType(type)                                          \
     do {                                                                               \
         if (DATEOID == (type) || TIMESTAMPOID == (type) || TIMESTAMPTZOID == (type)) { \
@@ -255,17 +258,21 @@ typedef struct HashPartitionMap {
 
 #define partitionRoutingForValueEqual(rel, keyValue, valueLen, topClosed, result)                                      \
     do {                                                                                                               \
-        if ((rel)->partMap->type == PART_TYPE_LIST) {                                                                 \
-            (result)->partArea = PART_AREA_LIST;                                                                      \
-            (result)->partitionId = getListPartitionOid(((rel)->partMap), (keyValue), &((result)->partSeq), topClosed);          \
+        (keyValue) = transformConstIntoPartkeyType((rel)->rd_att->attrs, GetPartitionKey((rel)->partMap), (keyValue),  \
+            (valueLen));                                                                                               \
+        if ((rel)->partMap->type == PART_TYPE_LIST) {                                                                  \
+            (result)->partArea = PART_AREA_LIST;                                                                       \
+            (result)->partitionId =                                                                                    \
+                getListPartitionOid(((rel)->partMap), (keyValue), &((result)->partSeq), topClosed);                    \
             if ((result)->partSeq < 0) {                                                                               \
                 (result)->fileExist = false;                                                                           \
             } else {                                                                                                   \
                 (result)->fileExist = true;                                                                            \
             }                                                                                                          \
         } else if ((rel)->partMap->type == PART_TYPE_HASH) {                                                           \
-            (result)->partArea = PART_AREA_HASH;                                                                      \
-            (result)->partitionId = getHashPartitionOid(((rel)->partMap), (keyValue), &((result)->partSeq), topClosed);          \
+            (result)->partArea = PART_AREA_HASH;                                                                       \
+            (result)->partitionId =                                                                                    \
+                getHashPartitionOid(((rel)->partMap), (keyValue), &((result)->partSeq), topClosed);                    \
             if ((result)->partSeq < 0) {                                                                               \
                 (result)->fileExist = false;                                                                           \
             } else {                                                                                                   \
@@ -472,6 +479,7 @@ typedef struct PruningResult {
     Expr* expr;
     /* This variable applies only to single-partition key range partition tables in PBE mode. */
     bool isPbeSinlePartition = false;
+    PartitionMap* partMap;
 } PruningResult;
 
 extern Oid partIDGetPartOid(Relation relation, PartitionIdentifier* partID);
@@ -479,6 +487,7 @@ extern PartitionIdentifier* partOidGetPartID(Relation rel, Oid partOid);
 
 extern void RebuildPartitonMap(PartitionMap* oldMap, PartitionMap* newMap);
 extern void RebuildRangePartitionMap(RangePartitionMap* oldMap, RangePartitionMap* newMap);
+extern bool EqualPartitonMap(const PartitionMap* partMap1, const PartitionMap* partMap2);
 
 bool isPartKeyValuesInPartition(RangePartitionMap* partMap, Const** partKeyValues, int partkeyColumnNum, int partSeq);
 
@@ -496,10 +505,13 @@ int ValueCmpLowBoudary(Const** partKeyValue, const RangeElement* partition, Inte
 extern void get_typlenbyval(Oid typid, int16 *typlen, bool *typbyval);
 extern RangeElement* copyRangeElements(RangeElement* src, int elementNum, int partkeyNum);
 extern int rangeElementCmp(const void* a, const void* b);
+extern int ListElementCmp(const void* a, const void* b);
 extern int HashElementCmp(const void* a, const void* b);
 extern void DestroyListElements(ListPartElement* src, int elementNum);
 extern void PartitionMapDestroyHashArray(HashPartElement* hashArray, int arrLen);
 extern void partitionMapDestroyRangeArray(RangeElement* rangeArray, int arrLen);
-extern void RelationDestroyPartitionMap(PartitionMap* partMap);
+extern void DestroyPartitionMap(PartitionMap* partMap);
+extern bool trySearchFakeReationForPartitionOid(HTAB** fakeRels, MemoryContext cxt, Relation rel, Oid partOid,
+    Relation* fakeRelation, Partition* partition, LOCKMODE lmode, bool checkSubPart = true);
 
 #endif /* PARTITIONMAP_GS_H_ */

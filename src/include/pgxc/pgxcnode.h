@@ -312,9 +312,10 @@ extern int pgxc_all_handles_send_query(PGXCNodeAllHandles* pgxc_handles, const c
 extern void add_error_message(PGXCNodeHandle* handle, const char *message, ...);
 extern char get_message(PGXCNodeHandle *conn, int *len, char **msg);
 extern Datum pgxc_execute_on_nodes(int numnodes, Oid* nodelist, char* query);
-extern bool pgxc_node_receive(const int conn_count, PGXCNodeHandle** connections, struct timeval* timeout);
+extern bool pgxc_node_receive(const int conn_count, PGXCNodeHandle** connections,
+                              struct timeval* timeout, bool ignoreTimeoutWarning = false);
 extern bool datanode_receive_from_physic_conn(
-const int conn_count, PGXCNodeHandle** connections, struct timeval* timeout);
+const int conn_count, PGXCNodeHandle** connections, struct timeval* timeout, bool ignoreTimeoutWarning = false);
 extern bool datanode_receive_from_logic_conn(
 const int conn_count, PGXCNodeHandle** connections, StreamNetCtl* ctl, int time_out);
 extern bool pgxc_node_validate(PGXCNodeHandle *conn);

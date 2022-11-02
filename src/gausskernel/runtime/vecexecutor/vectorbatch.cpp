@@ -975,17 +975,17 @@ Datum ScalarVector::AddCStringVar(Datum data, int aindex)
     char* result = NULL;
 
     if ((len + VARHDRSZ_SHORT) < VARATT_SHORT_MAX) {
-        var_len = len + VARHDRSZ_SHORT + 1;
+        var_len = len + VARHDRSZ_SHORT;
         result = (char*)m_buf->Allocate(var_len);
         SET_VARSIZE_SHORT(result, var_len);
     } else {
-        var_len = len + VARHDRSZ + 1;
+        var_len = len + VARHDRSZ;
         result = (char*)m_buf->Allocate(var_len);
         SET_VARSIZE(result, var_len);
     }
     errno_t errorno = EOK;
     if (len > 0) {
-        errorno = memcpy_s(VARDATA_ANY(result), len + 1, src_ptr, len + 1);
+        errorno = memcpy_s(VARDATA_ANY(result), len, src_ptr, len);
         securec_check(errorno, "\0", "\0");
     }
 

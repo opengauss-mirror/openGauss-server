@@ -86,7 +86,7 @@ static char* AlarmIdToAlarmInfoCh(AlarmId id);
 static char* AlarmIdToAlarmLevel(AlarmId id);
 static void ReadAlarmItem(void);
 static void GetHostName(char* myHostName, unsigned int myHostNameLen);
-static void GetHostIP(const char* myHostName, char* myHostIP, unsigned int myHostIPLen);
+static void GetHostIP(const char* myHostName, char* myHostIP, unsigned int myHostIPLen, bool enableLogHostname);
 static void GetClusterName(char* clusterName, unsigned int clusterNameLen);
 static bool CheckAlarmComponent(const char* alarmComponentPath);
 static bool SuppressComponentAlarmReport(Alarm* alarmItem, AlarmType type, int timeInterval);
@@ -381,13 +381,25 @@ static void GetHostName(char* myHostName, unsigned int myHostNameLen)
     AlarmLog(ALM_LOG, "Host Name: %s \n", myHostName);
 }
 
-static void GetHostIP(const char* myHostName, char* myHostIP, unsigned int myHostIPLen)
+static void GetHostIP(const char* myHostName, char* myHostIP, unsigned int myHostIPLen, bool enableLogHostname)
 {
     struct hostent* hp;
     errno_t rc = 0;
     char* ipstr = NULL;
     char ipv6[IP_LEN] = {0};
     char* result = NULL;
+    size_t len = 0;
+
+    if (!enableLogHostname) {
+        size_t myHostNameLen = strlen(myHostName);
+        len = (myHostNameLen < (myHostIPLen - 1)) ? myHostNameLen : (myHostIPLen - 1);
+        rc = memcpy_s(myHostIP, myHostIPLen, myHostName, len);
+        securec_check_c(rc, "\0", "\0");
+        myHostIP[len] = '\0';
+        AlarmLog(ALM_LOG, "Host IP: %s. Copy hostname directly in case of taking 10s to use 'gethostbyname' when "
+            "/etc/hosts does not contain <HOST IP>\n", myHostIP);
+        return;
+    }
 
     hp = gethostbyname(myHostName);
     if (hp == NULL) {
@@ -407,7 +419,7 @@ static void GetHostIP(const char* myHostName, char* myHostIP, unsigned int myHos
         }
         ipstr = ipv6;
     }
-    size_t len = (strlen(ipstr) < (myHostIPLen - 1)) ? strlen(ipstr) : (myHostIPLen - 1);
+    len = (strlen(ipstr) < (myHostIPLen - 1)) ? strlen(ipstr) : (myHostIPLen - 1);
     rc = memcpy_s(myHostIP, myHostIPLen, ipstr, len);
     securec_check_c(rc, "\0", "\0");
     myHostIP[len] = '\0';
@@ -435,7 +447,7 @@ static void GetClusterName(char* clusterName, unsigned int clusterNameLen)
     }
 }
 
-void AlarmEnvInitialize()
+void AlarmEnvInitialize(bool enableLogHostname)
 {
     char* warningType = NULL;
     int nRet = 0;
@@ -456,7 +468,7 @@ void AlarmEnvInitialize()
 
     // save this host IP into MyHostIP array
     // MyHostIP is a static global variable
-    GetHostIP(MyHostName, MyHostIP, sizeof(MyHostIP));
+    GetHostIP(MyHostName, MyHostIP, sizeof(MyHostIP), enableLogHostname);
 
     // save this cluster name into ClusterName array
     // ClusterName is a static global variable

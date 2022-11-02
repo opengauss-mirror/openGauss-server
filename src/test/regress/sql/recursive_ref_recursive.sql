@@ -1,4 +1,4 @@
-﻿create schema recursive_ref_recursive;
+create schema recursive_ref_recursive;
 set search_path to recursive_ref_recursive;
 
 drop table if exists rec_tb1;

@@ -99,7 +99,9 @@ extern void PreCommit_on_commit_actions(void);
 extern void AtEOXact_on_commit_actions(bool isCommit);
 extern void AtEOSubXact_on_commit_actions(bool isCommit, SubTransactionId mySubid, SubTransactionId parentSubid);
 #ifdef PGXC
-extern bool IsTempTable(Oid relid);
+extern bool IsTempTable(Oid relid, bool includGTT = false);
+extern bool IsGlobalTempTable(Oid relid);
+extern bool IsGlobalTempTableParallelTrunc();
 extern bool IsRelaionView(Oid relid);
 extern bool IsIndexUsingTempTable(Oid relid);
 extern bool IsOnCommitActions(void);
@@ -131,7 +133,6 @@ extern void ComparePartitionValue(List* pos, Form_pg_attribute* attrs, List *par
 extern void CompareListValue(const List* pos, Form_pg_attribute* attrs, List *partitionList);
 extern void clearAttrInitDefVal(Oid relid);
 
-extern void AlterDfsCreateTables(Oid relOid, Datum toast_options, CreateStmt* mainTblStmt);
 extern void ATMatviewGroup(List* stmts, Oid mvid, LOCKMODE lockmode);
 extern void AlterCreateChainTables(Oid relOid, Datum reloptions, CreateStmt *mainTblStmt);
 
@@ -154,4 +155,6 @@ extern void ExecuteTimeCapsule(TimeCapsuleStmt* stmt);
 extern void truncate_check_rel(Relation rel);
 extern void CheckDropViewValidity(ObjectType stmtType, char relKind, const char* relname);
 extern int getPartitionElementsIndexByOid(Relation partTableRel, Oid partOid);
+
+extern void SetPartionIndexType(IndexStmt* stmt, Relation rel, bool is_alter_table);
 #endif /* TABLECMDS_H */

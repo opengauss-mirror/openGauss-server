@@ -415,6 +415,71 @@ static bool HasNOTNULLConstraint(Query* parse, NullTest* ntest)
     return false;
 }
 
+#ifndef ENABLE_MULTIPLE_NODES
+static bool is_indexpath_useful(Expr* mminfo_targe, List* indextlist)
+{
+    Assert(mminfo_targe != NULL);
+    if (IsA(mminfo_targe, RelabelType)) {
+        mminfo_targe = ((RelabelType*)mminfo_targe)->arg;
+    }
+    if (indextlist == NULL || !IsA(mminfo_targe, Var)) {
+        return false;
+    }
+
+    TargetEntry* indexTarget = (TargetEntry*)linitial(indextlist);
+    if (indexTarget->expr == NULL || !IsA(indexTarget->expr, Var)) {
+        return false;
+    }
+    Var* indexVar = (Var*)indexTarget->expr;
+    Var* mminfoVar = (Var*)mminfo_targe;
+    if (mminfoVar->varno == indexVar->varno && mminfoVar->varattno == indexVar->varattno) {
+        return true;
+    }
+    return false;
+}
+#endif
+
+/*
+ * The partitioned data has no sequence. If the pathkey of the subpath is directly inherited,
+ * the sort operator needs to be added at the end of the PartIterator plan in make_agg_subplan.
+ * For details about the inheritance rules of pathkey in the partitioned table,
+ * see function make_partiterator_pathkey.
+ */
+static void get_pathkeys_for_partiteratorpath(RelOptInfo *final_rel, Expr* mminfo_target)
+{
+#ifndef ENABLE_MULTIPLE_NODES
+    if (!final_rel->isPartitionedTable) {
+        return;
+    }
+    ListCell *l = NULL;
+    foreach (l, final_rel->pathlist) {
+        Path *path = (Path *)lfirst(l);
+        if (!IsA(path, PartIteratorPath)) {
+            continue;
+        }
+        PartIteratorPath *itrpath = (PartIteratorPath *)path;
+        if (itrpath->path.pathkeys == NULL &&
+            (itrpath->subPath->pathtype == T_IndexOnlyScan || itrpath->subPath->pathtype == T_IndexScan)) {
+            IndexPath *indexPath = (IndexPath *)itrpath->subPath;
+            // only supprot btree index.
+            if (!OID_IS_BTREE(indexPath->indexinfo->relam)) {
+                continue;
+            }
+            if (!is_indexpath_useful(mminfo_target, indexPath->indexinfo->indextlist)) {
+                continue;
+            }
+            IndexesUsableType usable_type = eliminate_partition_index_unusable(indexPath->indexinfo->indexoid,
+                                                                               final_rel->pruning_result, NULL, NULL);
+            if (usable_type != INDEXES_FULL_USABLE) {
+                continue;
+            }
+            itrpath->path.pathkeys = itrpath->subPath->pathkeys;
+            itrpath->needSortNode = true;
+        }
+    }
+#endif
+}
+
 /*
  * build_minmax_path
  *		Given a MIN/MAX aggregate, try to build an indexscan Path it can be
@@ -535,6 +600,11 @@ static bool build_minmax_path(PlannerInfo* root, MinMaxAggInfo* mminfo, Oid eqop
                           final_rel, 
                           dNumGroups);
 
+    /* Partition table optimization */
+    if (subroot->sort_pathkeys) {
+        get_pathkeys_for_partiteratorpath(final_rel, (Expr*)mminfo->target);
+    }
+
     /* 
      * Finally, generate the best unsorted and presorted paths for 
      * this Query. 
@@ -599,8 +669,31 @@ static Plan* make_agg_subplan(PlannerInfo* root, MinMaxAggInfo* mminfo)
     plan->targetlist = subparse->targetList;
 
     /* For partition table, we should pass targetlist down to base table scan */
-    if (IsA(plan, PartIterator))
+    if (IsA(plan, PartIterator)) {
         plan->lefttree->targetlist = plan->targetlist;
+    }
+    if (IsA(mminfo->path, PartIteratorPath)) {
+        PartIterator *partItr = NULL;
+        if (IsA(plan, BaseResult)) {
+            partItr = (PartIterator *)((BaseResult*)plan)->plan.lefttree;
+        } else if (IsA(plan, PartIterator)) {
+            partItr = (PartIterator *)plan;
+        } else {
+            ereport(
+                ERROR,
+                (errmodule(MOD_OPT), errcode(ERRCODE_UNEXPECTED_NODE_STATE),
+                 (errmsg("For this type of plan, the min/max optimization cannot be performed on the partition table."),
+                  errdetail("N/A."), errcause("System error."), erraction("Contact engineer to support."))));
+        }
+        PartIteratorPath* itrpath = (PartIteratorPath*)mminfo->path;
+        if (itrpath->needSortNode) {
+            Node *limitCount =
+                (Node *)makeConst(INT8OID, -1, InvalidOid, sizeof(int64), Int64GetDatum(1), false, FLOAT8PASSBYVAL);
+            Plan *limit_plan = (Plan *)make_limit(subroot, partItr->plan.lefttree, NULL, limitCount, 0, 1);
+            partItr->plan.lefttree = limit_plan;
+            plan = (Plan *)make_sort_from_pathkeys(subroot, plan, subroot->sort_pathkeys, subroot->limit_tuples);
+        }
+    }
 
     plan = (Plan*)make_limit(root, plan, subparse->limitOffset, subparse->limitCount, 0, 1);
 #ifdef ENABLE_MULTIPLE_NODES

@@ -177,6 +177,8 @@ typedef struct knl_u_executor_context {
     bool isExecTrunc;
 
     bool isLockRows;
+
+    bool isFlashBack;
 } knl_u_executor_context;
 
 typedef struct knl_u_sig_context {
@@ -334,9 +336,14 @@ typedef struct knl_u_optimizer_context {
     double cursor_tuple_fraction;
 
     /* Global variables used for parallel execution. */
-    int query_dop_store; /* Store the dop. */
+    /* Backup for query dop, in order to restore query_dop while one query begin.*/
+    int query_dop_store;
 
-    int query_dop; /* Degree of parallel, 1 means not parallel. */
+    /* Degree of parallel, 1 means not parallel. Used in optimizer, and may be changed. */
+    int query_dop;
+
+    /* Mark smp is enabled in procedure. */
+    bool smp_enabled;
 
     double smp_thread_cost;
 
@@ -376,6 +383,10 @@ typedef struct knl_u_optimizer_context {
     struct ShippingInfo* not_shipping_info;
 
     bool is_under_append_plan;
+
+    bool xact_modify_sql_patch;
+
+    int nextval_default_expr_type;
 } knl_u_optimizer_context;
 
 typedef struct knl_u_parser_context {
@@ -419,6 +430,9 @@ typedef struct knl_u_parser_context {
     bool isCreateFuncOrProc;
     
     bool isTimeCapsule;
+    bool isForbidTruncate;
+    bool isPerform;
+    void* stmt;
 } knl_u_parser_context;
 
 typedef struct knl_u_trigger_context {
@@ -516,6 +530,9 @@ typedef struct knl_u_utils_context {
     int GUCNestLevel; /* 1 when in main transaction */
 
     unsigned int behavior_compat_flags;
+    unsigned int plsql_compile_behavior_compat_flags;
+    unsigned int a_format_version_flag;
+    unsigned int a_format_dev_version_flag;
 
     int save_argc;
 
@@ -1070,6 +1087,10 @@ typedef struct knl_u_misc_context {
 
     Oid CurrentUserId;
 
+    Oid SendOldUserId; /* save oid for switch role id with SetUserIdAndSecContext for cn */
+
+    Oid RecOldUserId; /* save oid for switch role id for dn */
+
     int SecurityRestrictionContext;
 
     const char* CurrentUserName;
@@ -1129,6 +1150,7 @@ typedef struct knl_u_proc_context {
     Oid MyRoleId;
 
     Oid MyDatabaseId;
+    uint32 DbidHashValue;
 
     Oid MyDatabaseTableSpace;
 
@@ -1139,6 +1161,7 @@ typedef struct knl_u_proc_context {
     char* DatabasePath;
 
     bool Isredisworker;
+    bool IsNoMaskingInnerTools;   /* can not masking inner tool check flag */
     bool IsInnerMaintenanceTools; /* inner tool check flag */
     bool clientIsGsrewind;        /* gs_rewind tool check flag */
     bool clientIsGsredis;         /* gs_redis tool check flag */
@@ -1148,10 +1171,14 @@ typedef struct knl_u_proc_context {
     bool clientIsGsroach;         /* gs_roach tool check flag */
     bool clientIsGsRestore;       /* gs_restore tool check flag */
     bool clientIsSubscription;    /* subscription client check flag */
+    bool clientIsCMAgent;         /* CM agent check flag */
     bool IsBinaryUpgrade;
     bool IsWLMWhiteList;          /* this proc will not be controled by WLM */
     bool gsRewindAddCount;
     bool PassConnLimit;
+    bool clientIsGsql;            /* gsql tool check flag */
+    /* We allow gsql to copy snapshot from other threads, but set a limit number */
+    int gsqlRemainCopyNum;
 
     char applicationName[NAMEDATALEN];        /* receive application name in ProcessStartupPacket */
 
@@ -1561,6 +1588,7 @@ typedef struct knl_u_plpgsql_context {
 
     /* xact context still attached by SPI while transaction is terminated. */
     void *spi_xact_context;
+    void *spi_xact_expr_context;
 
     /* store reseverd subxact resowner's scope temporay during finshing. */
     int64 minSubxactStackId;
@@ -1639,6 +1667,8 @@ typedef struct knl_u_stat_context {
      * in this hash table (indexed by function OID).
      */
     struct HTAB* pgStatFunctions;
+    /* MemoryContext for pgStatFunctions */
+    MemoryContext pgStatFunctionsHashContext;
 
     /*
      * Indicates if backend has some function stats that it hasn't yet
@@ -1850,6 +1880,10 @@ typedef struct knl_u_libpq_context {
     bool ssl_loaded_verify_locations;
     bool ssl_initialized;
     SSL_CTX* SSL_server_context;
+
+    bool crl_check;
+    bool crl_expired;
+    bool crl_invalid;
 #endif
 } knl_u_libpq_context;
 
@@ -1955,29 +1989,6 @@ typedef struct knl_u_ps_context {
     char** save_argv;
 } knl_u_ps_context;
 
-typedef struct knl_u_ustore_context {
-#define MAX_UNDORECORDS_PER_OPERATION 2 /* multi-insert may need special handling */
-    class URecVector *urecvec;
-    class UndoRecord *undo_records[MAX_UNDORECORDS_PER_OPERATION];
-
-/*
- * Caching several undo buffers.
- * max undo buffers per record = 2
- * max undo records per operation = 2
- */
-#define MAX_UNDO_BUFFERS 16 /* multi-insert may need special handling */
-    struct UndoBuffer *undo_buffers;
-    int undo_buffer_idx;
-
-#define TD_RESERVATION_TIMEOUT_MS (60 * 1000) // 60 seconds
-    TimestampTz tdSlotWaitFinishTime;
-    bool tdSlotWaitActive;
-} knl_u_ustore_context;
-
-typedef struct knl_u_undo_context {
-    Bitmapset *undo_zones;
-} knl_u_undo_context;
-
 typedef struct ParctlState {
     unsigned char global_reserve;    /* global reserve active statement flag */
     unsigned char rp_reserve;        /* resource pool reserve active statement flag */
@@ -2032,9 +2043,12 @@ typedef struct knl_u_relmap_context {
     struct ScanKeyData relfilenodeSkey[2];
     /* used for ustore table. */
     struct ScanKeyData uHeapRelfilenodeSkey[2];
+    /* used for partition */
+    struct ScanKeyData partfilenodeSkey[2];
     /* Hash table for informations about each relfilenode <-> oid pair */
     struct HTAB* RelfilenodeMapHash;
     struct HTAB* UHeapRelfilenodeMapHash;
+    struct HTAB* PartfilenodeMapHash;
 } knl_u_relmap_context;
 
 typedef struct knl_u_unique_sql_context {
@@ -2144,6 +2158,9 @@ typedef struct knl_u_unique_sql_context {
 
     /* handle nested portal calling */
     uint32 portal_nesting_level;
+ 
+    /* child statements in open cursor case, need always generate unique sql id */
+    bool force_generate_unique_sql;
 #ifndef ENABLE_MULTIPLE_NODES
     char* unique_sql_text;
 #endif
@@ -2324,11 +2341,15 @@ typedef struct knl_u_cache_context {
 
     struct HTAB* PartitionIdCache;
 
+    struct HTAB* PartRelCache;
+
     struct HTAB* BucketIdCache;
 
     struct HTAB* dn_hash_table;
 
     bool PartCacheNeedEOXActWork;
+
+    bool PartRelCacheNeedEOXActWork;
 
     bool bucket_cache_need_eoxact_work; 
 
@@ -2346,9 +2367,6 @@ typedef struct knl_u_syscache_context {
 
 } knl_u_syscache_context;
 
-namespace dfs {
-class DFSConnector;
-}
 typedef struct knl_u_catalog_context {
     bool nulls[4];
     struct PartitionIdentifier* route;
@@ -2372,8 +2390,6 @@ typedef struct knl_u_catalog_context {
     struct RelFileNodeBackend* ColMainFileNodes;
     int ColMainFileNodesMaxNum;
     int ColMainFileNodesCurNum;
-    List* pendingDfsDeletes;
-    dfs::DFSConnector* delete_conn;
     struct StringInfoData* vf_store_root;
     Oid currentlyReindexedHeap;
     Oid currentlyReindexedIndex;
@@ -2416,6 +2432,15 @@ typedef struct knl_u_catalog_context {
     Oid myTempToastNamespace;
     bool deleteTempOnQuiting;
     SubTransactionId myTempNamespaceSubID;
+
+    /*
+     * myLobTempToastNamespace and ActiveLobToastOid will be created in same transaction.
+     * In case error accurs after myLobTempToastNamespace created, we need to save and
+     * check myLobTempNamespaceSubID for cleaning myLobTempToastNamespace and ActiveLobToastOid.
+     */
+    SubTransactionId myLobTempNamespaceSubID;
+    Oid myLobTempToastNamespace;
+    Oid ActiveLobToastOid;
     /* stuff for online expansion redis-cancel */
     bool redistribution_cancelable;
 } knl_u_catalog_context;
@@ -2653,6 +2678,28 @@ typedef struct knl_u_hook_context {
     void *transformStmtHook;
 } knl_u_hook_context;
 
+typedef enum {
+    NOT_BITMAP,
+    BITMAP_HEAP_DEEP_COPY,
+    BITMAP_INDEX_SHALLOW_COPY
+} BitmapPruningInfoCopyState;
+
+typedef struct knl_u_copyfunc_context {
+    bool gPlanCopy;
+    BitmapPruningInfoCopyState bitmapCopyState;
+    void* savePruningInfo;
+} knl_u_copyfunc_context;
+
+/* PBE message flag */
+typedef enum {
+    NO_QUERY,
+    SIMPLE_QUERY,
+    PARSE_MESSAGE_QUERY,
+    BIND_MESSAGE_QUERY,
+    EXECUTE_MESSAGE_QUERY,
+    EXECUTE_BATCH_MESSAGE_QUERY
+} PBEMessage;
+
 typedef struct knl_session_context {
     volatile knl_session_status status;
     /* used for threadworker, elem in m_readySessionList */
@@ -2699,6 +2746,8 @@ typedef struct knl_session_context {
     int num_guc_variables;
 
     int on_sess_exit_index;
+
+    PBEMessage pbe_message;
     
     List* plsqlErrorList;
     knl_session_attr attr;
@@ -2750,9 +2799,6 @@ typedef struct knl_session_context {
     knl_u_mot_context mot_cxt;
 #endif
 
-    knl_u_ustore_context ustore_cxt;
-    knl_u_undo_context undo_cxt;
-
     /* instrumentation */
     knl_u_unique_sql_context unique_sql_cxt;
     knl_u_user_login_context user_login_cxt;
@@ -2783,6 +2829,8 @@ typedef struct knl_session_context {
     struct knl_u_clientConnTime_context clientConnTime_cxt;
 
     knl_u_hook_context hook_cxt;
+
+    knl_u_copyfunc_context copyfunc_cxt;
 } knl_session_context;
 
 enum stp_xact_err_type {

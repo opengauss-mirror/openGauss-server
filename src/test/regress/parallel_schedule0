@@ -5,9 +5,20 @@
 # By convention, we put no more than twenty tests in any one parallel group;
 # this limits the number of connections needed to run the tests.
 # ----------
+
+# This test case is used to monitor GUC parameter information.
+# If the GUC parameter is changed, please modify the Code/src/bin/gs_guc/cluster_guc.conf and Code/src/test/regress/output/recovery_2pc_tools.source files.
+test: recovery_2pc_tools 
+test: sqlbypass_partition
+
+test: auto_explain auto_explain_threshold opt_relopt_tuples
+
+test: sqlpatch_base
+test: sqlpatch_func
+test: smp
 test: alter_hw_package
 test: hw_grant_package gsc_func gsc_db
-test: uppercase_attribute_name
+test: uppercase_attribute_name decode_compatible_with_o outerjoin_bugfix
 test: replace_func_with_two_args trunc_func_for_date nlssort_pinyin updatable_views
 
 # parse xlog and page
@@ -15,10 +26,11 @@ test: parse_page
 test: parse_xlog
 
 test: gs_dump_package
-test: out_param_func
+test: out_param_func out_param_func1
+#test: sqlcode_cursor
 
 # test AI4DB
-test: plpgsql_override_out
+#test: plpgsql_override_out
 test: plpgsql_sql_with_proc_keyword
 test: plsql_show_all_error
 test: pldeveloper_gs_source
@@ -40,10 +52,11 @@ test: hw_pwd_encryption_sm3
 test: sync_standy_names
 
 # test subpartition
-test: hw_subpartition_createtable hw_subpartition_scan hw_subpartition_select hw_subpartition_split hw_subpartition_truncate hw_subpartition_update hw_subpartition_gpi hw_subpartition_analyze_vacuum hw_subpartition_alter_table hw_subpartition_index hw_subpartition_add_drop_partition hw_subpartition_tablespace hw_subpartition_ddl_index
+test: hw_subpartition_createtable hw_subpartition_scan hw_subpartition_select hw_subpartition_split hw_subpartition_truncate hw_subpartition_update hw_subpartition_gpi hw_subpartition_analyze_vacuum hw_subpartition_alter_table hw_subpartition_index hw_subpartition_add_drop_partition hw_subpartition_tablespace hw_subpartition_ddl_index hw_subpartition_size
 test: hw_subpartition_vacuum_partition
 test: gs_dump_subpartition
-test: partition_dml_operations
+test: partition_dml_operations partition_minmax partition_pruning
+test: partition_param_path
 
 # test subpartition with segment=on
 test: segment_subpartition_createtable segment_subpartition_scan segment_subpartition_select segment_subpartition_split segment_subpartition_truncate segment_subpartition_update segment_subpartition_gpi segment_subpartition_analyze_vacuum segment_subpartition_alter_table segment_subpartition_add_drop_partition segment_subpartition_tablespace segment_subpartition_ddl_index
@@ -60,6 +73,11 @@ test: single_node_tablespace
 test: sw_prepare
 test: sw_basic sw_icbc sw_siblings sw_bugfix-1 sw_bugfix-2 sw_by_rownum_level
 test: sw_clearup
+
+# test customer base environment hint
+test: hw_cbt_hint_prep
+test: hw_cbt_hint
+test: hw_cbt_hint_drop
 
 #--------------
 # any privilege
@@ -229,7 +247,6 @@ test: single_node_produce_commit_rollback
 test: single_node_function_commit_rollback
 
 test: instr_unique_sql
-test: auto_explain
 test: shutdown
 
 # List/Hash table exchange
@@ -241,6 +258,9 @@ test: hw_partition_list_truncate hw_partition_hash_truncate
 
 # add/drop partition
 test: hw_partition_add_drop_partition
+
+# create view on partition/subpartition
+test: hw_partition_create_view
 
 #test: hw_partition_start_end
 # To check min_max fuc support IP
@@ -380,7 +400,7 @@ test: upsert_prepare
 test: upsert_001 upsert_002 upsert_003 upsert_008 upsert_009 upsert_010
 test: upsert_grammer_test_01 upsert_unlog_test upsert_tmp_test
 test: upsert_grammer_test_02 upsert_restriction upsert_composite
-test: upsert_trigger_test upsert_explain upsert_where upsert_where_sublink
+test: upsert_trigger_test upsert_explain upsert_where upsert_where_sublink upsert_repeatable_read
 test: upsert_subquery
 test: upsert_clean
 
@@ -423,7 +443,7 @@ test: tpch01 tpch03 tpch04 libcomm_check_status tpch03_querymem
 test: tpch05 tpch06 tpch07 tpch08
 test: tpch09 tpch10 tpch11 tpch12
 test: tpch13 tpch14 tpch15 tpch16
-#test: tpch_vector_optimal
+test: tpch_vector_optimal
 test: tpch18 tpch19 tpch20 tpch18_querymem
 test: tpch21 tpch22 tpch11_pretty_performance vector_procedure
 #test: tpch02 tpch17 
@@ -543,6 +563,7 @@ test: interval tinterval macaddr tstypes comments
 # is concurrent safe.(duplicate)
 # ----------
 test: copyselect copy_error_log copy_support_transform copy_from_support_parallel
+test: copy_new_gram
 #test: copy_eol
 
 # ----------
@@ -572,7 +593,7 @@ test: select_into subselect_part2 gs_aggregate
 test: holdable_cursor
 #test: portals_p2 window tsearch temp__6 col_subplan_base_2
 
-test: alter_table_000 alter_table_002 alter_table_003
+test: alter_table_000 alter_table_002 alter_table_003 alter_table_004
 #test: alter_table_001
 
 #test: with
@@ -594,6 +615,7 @@ test: vec_append_part1 vec_append_part2 vec_append_part3
 test: vec_cursor_part1 vec_cursor_part2
 test: vec_delete_part1 vec_delete_part2
 test: vec_set_func
+test: hw_cursor_rollback hw_cursor_rollback_ustore
 
 test: alter_schema_db_rename_seq
 
@@ -656,6 +678,7 @@ test: sp_set_policy_plugin_disable
 # so keep this parallel group to at most 19 tests
 # ----------
 #test: plpgsql
+test: plpgsql_simple_eval
 test: select_where_func
 test: arrayinterface_single
 test: plpgsql_table_opengauss  
@@ -671,6 +694,7 @@ test: plpgsql_record_attrname
 test: plpgsql_insert_record
 test: hw_package_variable
 test: autonomous_cursor
+test: plpgsql_reset_session
 #test: plancache limit rangefuncs prepare
 test: returning largeobject
 test: hw_explain_pretty1 hw_explain_pretty2 hw_explain_pretty3
@@ -822,7 +846,7 @@ test: tpchcol03 tpchcol04
 test: tpchcol12 tpchcol13 tpchcol14 tpchcol16 tpchcol18 tpchcol19 tpchcol21
 
 test: vec_partition vec_partition_1 vec_material_001
-
+test: vec_m_file
 test: llvm_vecsort llvm_vecsort2
 
 test: udf_crem create_c_function
@@ -878,14 +902,15 @@ test: leaky_function_operator
 # ----------
 #test: gs_guc
 
-test: smp
-
 test: cstore_unique_index
 
 test: cast_privileges_test
 
 #generated column test
 test: generated_col
+test: gen_col_pall_start
+test: gen_col_thread1 gen_col_thread2
+test: gen_col_pall_end
 
 # gs_ledger
 test: ledger_table_case
@@ -899,6 +924,10 @@ test: sequence_cache_test
 test: pg_buffercache_pages
 test: procedure_privilege_test
 
+# global temporary table: parallel truncate
+test: gtt_trunc_pre
+test: gtt_trunc_parallel_dml1 gtt_trunc_parallel_dml2 gtt_trunc_parallel_ddl1 gtt_trunc_parallel_ddl2 truncate_table_last_data_changed_time
+test: gtt_trunc_clean
 
 test: toomanyparams
 
@@ -918,3 +947,12 @@ test: detail
 test: gs_dump_encrypt
 test: composite_datum_record
 test: join_test_alias
+
+test: pg_ls_dir
+test: cost_model
+test: base_update
+# test for builtin func
+test: builtin_func_13
+
+# test for slow_sql
+test: slow_sql

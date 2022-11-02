@@ -49,4 +49,5 @@ extern void pgaudit_system_stop_ok(int shutdown);
 extern void pgaudit_user_login(bool login_ok, const char* object_name, const char* detaisinfo);
 extern void pgaudit_user_logout(void);
 extern void pgaudit_lock_or_unlock_user(bool islocked, const char* user_name);
+extern void pgaudit_ddl_sql_patch(const char* objectName, const char* cmdText);
 #endif

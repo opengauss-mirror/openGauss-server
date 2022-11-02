@@ -1541,3 +1541,150 @@ raise info 'pck1.vb: %',pck1.vb;
 raise info 'pck1.vc: %',pck1.vc;
 end;
 /
+
+drop package pck1;
+
+-- 11. package with init
+create or replace package pck1 IS
+va int:=1;
+function f1(num1 int) return int;
+end pck1;
+/
+create or replace package body pck1 as
+  vb int :=1;
+function f1(num1 int) return int
+  is
+  declare PRAGMA AUTONOMOUS_TRANSACTION;
+  re_int int;
+  begin
+  va:=va+num1;
+  raise info 'va in f1:%',va;
+  re_int = va+vb;
+  return re_int;
+  end;
+  begin
+  va :=0;
+  vb :=0;
+end pck1;
+/
+create or replace function out_039(num1 int) return int
+is
+  declare PRAGMA AUTONOMOUS_TRANSACTION;
+  v1 int:=10;
+  v2 int:=20;
+  re_int int;
+  begin
+  v1 = num1 + v1;
+  v2 = num1 + v2;
+  pck1.va = pck1.va + 10;
+  raise info 'pck1.va in out_039:%',pck1.va;
+  re_int = pck1.f1(10);
+  return re_int;
+  end;
+/
+create or replace function app039_1() return int
+is
+declare PRAGMA AUTONOMOUS_TRANSACTION;
+begin
+return out_039(1);
+end;
+/
+select app039_1();
+select app039_1();
+
+drop procedure app039_1;
+drop procedure out_039;
+drop package pck1;
+
+-- package with private value and private function and nested call
+create or replace package pck1 as
+  g_c_user_id         CONSTANT VARCHAR2(7) := 'USER_ID';
+  TYPE t_hashtable IS TABLE OF VARCHAR2(2000) INDEX BY VARCHAR2(2000);
+  z_context t_hashtable;
+  FUNCTION user_id RETURN NUMBER;
+  FUNCTION get(pi_name VARCHAR2) RETURN VARCHAR2;
+  PROCEDURE sp_write_error_msg();
+end pck1;
+/
+
+create or replace package body pck1 as
+  g_110            NUMBER :=110;
+  FUNCTION get(pi_name VARCHAR2) RETURN VARCHAR2 IS
+  BEGIN
+    IF NOT z_context.EXISTS(pi_name)
+    THEN
+      RETURN NULL;
+    END IF;
+    RETURN z_context(pi_name);
+  END;
+  
+  FUNCTION user_id RETURN NUMBER IS
+  vb number;
+  BEGIN
+  vb := get('aa');
+  RETURN vb;
+  END;
+  
+    
+ PROCEDURE sp_write_error_msg() is
+ pragma autonomous_transaction;
+ va number;
+ BEGIN
+     va := user_id();
+     COMMIT;
+ END;
+ 
+end pck1;
+/
+
+call pck1.sp_write_error_msg();
+drop package pck1;
+
+--test when bind_procedure_searchpath, no warning
+set behavior_compat_options='bind_procedure_searchpath,plsql_security_definer,aformat_null_test,allow_procedure_compile_check,proc_outparam_override,proc_implicit_for_loop_variable,plstmt_implicit_savepoint';
+create or replace function f0(out y text) return text
+as
+declare
+begin
+return 1/0;
+end;
+/
+
+create or replace function f2 return int
+as
+declare 
+y varchar2(64);
+z text;
+begin
+y = f0(z);
+return 1;
+Exception 
+   when others then
+   return 0;
+end;
+/
+
+Create or replace package pkg1 as 
+    var int;
+    procedure proc();
+end pkg1;
+/
+Create or replace package body pkg1 as 
+  procedure proc() as
+  declare PRAGMA AUTONOMOUS_TRANSACTION;
+  begin
+    var = int4abs(-10);
+	raise info 'var is %', var;
+    var = f2() +1;
+    raise info 'var is %', var;
+  end;
+End pkg1;
+/
+
+call pkg1.proc();
+
+drop package pkg1;
+drop function f2();
+drop function f0();
+
+reset behavior_compat_options;

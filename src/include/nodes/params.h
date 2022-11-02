@@ -123,7 +123,7 @@ typedef struct ParamExecData {
 enum { CURSOR_ISOPEN = 1, CURSOR_FOUND, CURSOR_NOTFOUND, CURSOR_ROWCOUNT };
 
 /* Functions found in src/backend/nodes/params.c */
-extern ParamListInfo copyParamList(ParamListInfo from);
+extern ParamListInfo copyParamList(ParamListInfo from, bool withFetch = false);
 extern HTAB* copyTableOfIndex(HTAB* oldValue);
 
 #endif /* PARAMS_H */

@@ -77,7 +77,6 @@ static size_t dump_http_response_msg_callback(void *tmp_cur_res_str, size_t chr_
                 if (http_res_list->filter_res_type == HTTP_RESBODY) {
                     is_need_dump = true;
                 }
-                http_res_list->cur_pos = HTTP_RESLINE;
                 break;
             default:
                 break;
@@ -289,6 +288,21 @@ CmkemErrCode http_request(HttpReqMsg* http_req_msg, HttpConfig *http_config, Cmk
     *stat_code = (HttpStatusCode)http_stat_code;
     
     return CMKEM_SUCCEED;
+}
+
+char *make_content_length(const char *reqbody)
+{
+    errno_t rc = 0;
+
+    char *reqhdr = (char *)malloc(MAX_HDR_LEN);
+    if (reqhdr == NULL) {
+        return NULL;
+    }
+
+    rc = sprintf_s(reqhdr, MAX_HDR_LEN, "Content-Length: %lu", strlen(reqbody));
+    securec_check_ss_c(rc, "", "");
+
+    return reqhdr;
 }
 
 char *find_resheader(CmkemStrList *resheader_list, const char *resheader_type)

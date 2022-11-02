@@ -88,9 +88,9 @@ bool wal_catchup = false;
 
 #define WAL_DATA_LEN ((sizeof(uint32) + 1 + sizeof(XLogRecPtr)))
 
-#define TEMP_CONF_FILE "postgresql.conf.bak"
+#define TEMP_WAL_CONF_FILE "postgresql.conf.wal.bak"
 
-const char *g_reserve_param[RESERVE_SIZE] = {
+const char *g_reserve_param[] = {
     "application_name",
     "archive_command",
     "audit_directory",
@@ -116,6 +116,8 @@ const char *g_reserve_param[RESERVE_SIZE] = {
     "cross_cluster_replconninfo6",
     "cross_cluster_replconninfo7",
     "cross_cluster_replconninfo8",
+    "repl_uuid",
+    "repl_auth_mode",
     "ssl",
     "ssl_ca_file",
     "ssl_cert_file",
@@ -156,6 +158,8 @@ const char *g_reserve_param[RESERVE_SIZE] = {
 #endif
 };
 
+const int g_reserve_param_num = lengthof(g_reserve_param);
+
 const WalReceiverFunc WalReceiverFuncTable[] = {
     { libpqrcv_connect, libpqrcv_receive, libpqrcv_send, libpqrcv_disconnect, NULL, NULL, NULL, NULL },
     { archive_connect, archive_receive, archive_send, archive_disconnect, NULL, NULL, NULL, NULL },
@@ -169,6 +173,7 @@ const WalReceiverFunc WalReceiverFuncTable[] = {
 static void EnableWalRcvImmediateExit(void);
 static void DisableWalRcvImmediateExit(void);
 static void WalRcvDie(int code, Datum arg);
+static void WalRcvOnShareStorageDie(int code, Datum arg);
 static void XLogWalRcvDataPageReplication(char *buf, Size len);
 static void XLogWalRcvProcessMsg(unsigned char type, char *buf, Size len);
 static void XLogWalRcvSendHSFeedback(void);
@@ -401,6 +406,7 @@ void WalRcvrProcessData(TimestampTz *last_recv_timestamp, bool *ping_sent)
         /* Receive any more data we can without sleeping */
         while ((t_thrd.walreceiver_cxt.start_switchover == false) &&
             (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_receive(0, &type, &buf, &len) ) {
+            ProcessWalRcvInterrupts();
             *last_recv_timestamp = GetCurrentTimestamp();
             *ping_sent = false;
             XLogWalRcvProcessMsg(type, buf, len);
@@ -564,6 +570,10 @@ void WalReceiverMain(void)
     /* Arrange to clean up at walreceiver exit */
     on_shmem_exit(WalRcvDie, 0);
 
+    if (IS_SHARED_STORAGE_MODE) {
+        on_shmem_exit(WalRcvOnShareStorageDie, 0);
+    }
+
     /* Reset some signals that are accepted by postmaster but not here */
     (void)gspqsignal(SIGHUP, WalRcvSigHupHandler); /* set flag to read config file */
     (void)gspqsignal(SIGINT, SIG_IGN);
@@ -573,7 +583,7 @@ void WalReceiverMain(void)
     (void)gspqsignal(SIGPIPE, SIG_IGN);
     (void)gspqsignal(SIGUSR1, sigusr1_handler);
     (void)gspqsignal(SIGUSR2, SIG_IGN);
-
+    (void)gspqsignal(SIGURG, print_stack);
     /* Reset some signals that are accepted by postmaster but not here */
     (void)gspqsignal(SIGCHLD, SIG_DFL);
     (void)gspqsignal(SIGTTIN, SIG_DFL);
@@ -627,7 +637,7 @@ void WalReceiverMain(void)
         securec_check_ss(nRet, "\0", "\0");
 
         nRet = snprintf_s(t_thrd.walreceiver_cxt.temp_guc_conf_file, MAXPGPATH, MAXPGPATH - 1, "%s/%s",
-                          t_thrd.proc_cxt.DataDir, TEMP_CONF_FILE);
+                          t_thrd.proc_cxt.DataDir, TEMP_WAL_CONF_FILE);
         securec_check_ss(nRet, "\0", "\0");
 
         nRet = snprintf_s(t_thrd.walreceiver_cxt.gucconf_lock_file, MAXPGPATH, MAXPGPATH - 1, "%s/postgresql.conf.lock",
@@ -815,25 +825,19 @@ bool HasBuildReason()
     }
 }
 
-static void rcvAllXlog()
+static void RcvAllXLog()
 {
-    if (HasBuildReason() || t_thrd.walreceiver_cxt.checkConsistencyOK == false) {
-        ereport(LOG, (errmsg("rcvAllXlog no need copy xlog buildreason:%d, check flag:%d",
-            (int)t_thrd.postmaster_cxt.HaShmData->repl_reason[t_thrd.postmaster_cxt.HaShmData->current_repl],
-            (int)t_thrd.walreceiver_cxt.checkConsistencyOK)));
-        return;
-    }
     unsigned char type;
     char *buf = NULL;
     int len;
-    ereport(LOG, (errmsg("rcvAllXlog before walreceiver quit")));
-    while(WalReceiverFuncTable[GET_FUNC_IDX].walrcv_receive(0, &type, &buf, &len)) {
+    ereport(LOG, (errmsg("RcvAllXLog before walreceiver quit")));
+    while (WalReceiverFuncTable[GET_FUNC_IDX].walrcv_receive(0, &type, &buf, &len)) {
         XLogWalRcvProcessMsg(type, buf, len);
         t_thrd.walreceiver_cxt.hasReceiveNewData = true;
     }
 
     const uint32 shiftSize = 32;
-    ereport(LOG, (errmsg("rcvAllXlog dorado position:%x/%x, flush position: %x/%x",
+    ereport(LOG, (errmsg("RcvAllXLog dorado position:%x/%x, flush position: %x/%x",
         (uint32)(g_instance.xlog_cxt.shareStorageXLogCtl->insertHead >> shiftSize),
         (uint32)(g_instance.xlog_cxt.shareStorageXLogCtl->insertHead),
         (uint32)(t_thrd.walreceiver_cxt.walRcvCtlBlock->flushPtr >> shiftSize),
@@ -847,6 +851,33 @@ static void WalRcvClearSignalFlag()
     t_thrd.walreceiver_cxt.start_switchover = false;
 }
 
+static void WalRcvOnShareStorageDie(int code, Datum arg)
+{
+    if (!IS_SHARED_STORAGE_MODE) {
+        return;
+    }
+
+    if (HasBuildReason() || !t_thrd.walreceiver_cxt.checkConsistencyOK || t_thrd.walreceiver_cxt.termChanged) {
+        ereport(LOG, (errmsg("WalRcvOnShareStorageDie no need copy xlog buildreason:%d, check flag:%d, termchange:%d",
+            (int)t_thrd.postmaster_cxt.HaShmData->repl_reason[t_thrd.postmaster_cxt.HaShmData->current_repl],
+            (int)t_thrd.walreceiver_cxt.checkConsistencyOK, (int)t_thrd.walreceiver_cxt.termChanged)));
+        return;
+    }
+
+    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+
+    SpinLockAcquire(&walrcv->mutex);
+    walrcv->walRcvState = WALRCV_STOPPING;
+    SpinLockRelease(&walrcv->mutex);
+
+    WalRcvClearSignalFlag();
+    RcvAllXLog();
+    uint32 disableConnectionNode = pg_atomic_read_u32(&g_instance.comm_cxt.localinfo_cxt.need_disable_connection_node);
+    if (disableConnectionNode && !t_thrd.walreceiver_cxt.termChanged) {
+        pg_atomic_write_u32(&t_thrd.walreceiverfuncs_cxt.WalRcv->rcvDoneFromShareStorage, true);
+    }
+}
+
 /*
  * Mark us as STOPPED in proc exit.
  */
@@ -854,18 +885,6 @@ static void WalRcvDie(int code, Datum arg)
 {
     /* use volatile pointer to prevent code rearrangement */
     volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
-    if (IS_SHARED_STORAGE_MODE && !t_thrd.walreceiver_cxt.termChanged) {
-        SpinLockAcquire(&walrcv->mutex);
-        walrcv->walRcvState = WALRCV_STOPPING;
-        SpinLockRelease(&walrcv->mutex);
-        WalRcvClearSignalFlag();
-        rcvAllXlog();
-        uint32 disableConnectionNode = 
-            pg_atomic_read_u32(&g_instance.comm_cxt.localinfo_cxt.need_disable_connection_node);
-        if (disableConnectionNode && !t_thrd.walreceiver_cxt.termChanged) {
-            pg_atomic_write_u32(&t_thrd.walreceiverfuncs_cxt.WalRcv->rcvDoneFromShareStorage, true);
-        }
-    }
     /*
      * Shutdown WalRcvWriter thread, clear the data receive buffer.
      * Ensure that all WAL records received are flushed to disk.
@@ -1327,7 +1346,7 @@ static void ProcessReplyFlags(void)
 {
 #ifdef ENABLE_MULTIPLE_NODES
     volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
-    if (IS_DISASTER_RECOVER_MODE) {
+    if (IS_MULTI_DISASTER_RECOVER_MODE) {
         SpinLockAcquire(&walrcv->mutex);
         if (walrcv->isPauseByTargetBarrier) {
             t_thrd.walreceiver_cxt.reply_message->replyFlags |= IS_PAUSE_BY_TARGET_BARRIER;
@@ -1357,7 +1376,7 @@ static void ProcessReplyFlags(void)
 /*
  * Receive XLOG data into receiver buffer.
  */
-void XLogWalRcvReceive(char *buf, Size nbytes, XLogRecPtr recptr)
+void XLogWalRcvReceive(char *buf, Size nbytes, XLogRecPtr recptr, bool calledByDCF)
 {
     int walfreeoffset;
     int walwriteoffset;
@@ -1444,10 +1463,15 @@ void XLogWalRcvReceive(char *buf, Size nbytes, XLogRecPtr recptr)
                         walRcvDataCleanup();
                 }
 
-                ereport(FATAL,
-                        (errmsg("Unexpected seek in the walreceiver buffer. "
-                                "xlogrecptr is (%X:%X) but local xlogptr is (%X:%X).",
-                                (uint32)(recptr >> 32), (uint32)recptr, (uint32)(startptr >> 32), (uint32)startptr)));
+                if (calledByDCF) {
+                    ShutdownWalRcv();
+                } else {
+                    ereport(FATAL,
+                            (errmsg("Unexpected seek in the walreceiver buffer. "
+                                    "xlogrecptr is (%X:%X) but local xlogptr is (%X:%X).",
+                                    (uint32)(recptr >> 32), (uint32)recptr,
+                                    (uint32)(startptr >> 32), (uint32)startptr)));
+                }
             }
         }
 
@@ -1522,6 +1546,13 @@ void XLogWalRcvSendReply(bool force, bool requestReply)
     flushPtr = t_thrd.walreceiver_cxt.walRcvCtlBlock->flushPtr;
     SpinLockRelease(&t_thrd.walreceiver_cxt.walRcvCtlBlock->mutex);
 
+    /* In shared storage, standby receivePtr equal dorado insertHead */
+    if (IS_SHARED_STORAGE_STANBY_MODE) {
+        ShareStorageXLogCtl *ctlInfo = AlignAllocShareStorageCtl();
+        ReadShareStorageCtlInfo(ctlInfo);
+        receivePtr = ctlInfo->insertHead;
+        AlignFreeShareStorageCtl(ctlInfo);
+    }
     /* Get current timestamp. */
     now = GetCurrentTimestamp();
     /*
@@ -1638,18 +1669,22 @@ static void XLogWalRcvSendHSFeedback(void)
     if (!HotStandbyActive())
         return;
 
-    /*
-     * Make the expensive call to get the oldest xmin once we are certain
-     * everything else has been checked.
-     */
+    if (u_sess->attr.attr_storage.hot_standby_feedback) {
 #ifndef ENABLE_MULTIPLE_NODES
-    /* Get updated RecentGlobalXmin */
-    GetSnapshotData(u_sess->utils_cxt.CurrentSnapshotData, true, true);
+        /* Get updated RecentGlobalXmin */
+        GetSnapshotData(u_sess->utils_cxt.CurrentSnapshotData, true, true);
 #endif
-    if (u_sess->attr.attr_storage.hot_standby_feedback)
+
+        /*
+         * Make the expensive call to get the oldest xmin once we are certain
+         * everything else has been checked.
+         */
         xmin = GetOldestXmin(NULL);
-    else
+    } else {
         xmin = InvalidTransactionId;
+    }
+    t_thrd.pgxact->xmin = InvalidTransactionId;
+
     /*
      * Always send feedback message.
      */
@@ -1908,10 +1943,11 @@ static void ProcessArchiveXlogMessage(const ArchiveXlogMessage* archive_xlog_mes
     errno_t errorno = EOK;
     ArchiveTaskStatus *archive_task = find_archive_task_status(archive_xlog_message->slot_name);
     if (archive_task == NULL) {
-        ereport(ERROR, (errmsg("get archive xlog message %s :%X/%X, but task slot not find", 
+        ereport(WARNING, (errmsg("get archive xlog message %s :%X/%X, but task slot not find",
             archive_xlog_message->slot_name, 
             (uint32)(archive_xlog_message->targetLsn >> 32), 
             (uint32)(archive_xlog_message->targetLsn))));
+        return;
     }
     volatile unsigned int *pitr_task_status = &archive_task->pitr_task_status;
     if (archive_xlog_message->targetLsn == InvalidXLogRecPtr) {
@@ -1987,8 +2023,10 @@ static void WalRecvSendArchiveXlogResponse(ArchiveTaskStatus *archive_task)
     char buf[sizeof(ArchiveXlogResponseMessage) + 1];
     ArchiveXlogResponseMessage reply;
     errno_t errorno = EOK;
+    SpinLockAcquire(&archive_task->mutex);
     reply.pitr_result = archive_task->pitr_finish_result;
     reply.targetLsn = archive_task->archive_task.targetLsn;
+    SpinLockRelease(&archive_task->mutex);
     errorno = memcpy_s(&reply.slot_name, NAMEDATALEN, archive_task->slotname, NAMEDATALEN);
     securec_check(errorno, "\0", "\0");
 
@@ -2503,7 +2541,7 @@ static bool ProcessConfigFileMessage(char *buf, Size len)
         return false;
     }
 
-    reserve_item = alloc_opt_lines(RESERVE_SIZE);
+    reserve_item = alloc_opt_lines(g_reserve_param_num);
     if (reserve_item == NULL) {
         ereport(LOG, (errmsg("Alloc mem for reserved parameters failed")));
         return false;
@@ -2669,23 +2707,36 @@ static void ProcessHadrSwitchoverRequest(HadrSwitchoverMessage *hadrSwitchoverMe
 {
     /* use volatile pointer to prevent code rearrangement */
     volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+    XLogRecPtr last_flush_location = walrcv->receiver_flush_location;
+    XLogRecPtr last_replay_location = GetXLogReplayRecPtr(NULL);
     SpinLockAcquire(&walrcv->mutex);
     walrcv->targetSwitchoverBarrierLSN = hadrSwitchoverMessage->switchoverBarrierLsn;
+    walrcv->isMasterInstanceReady = hadrSwitchoverMessage->isMasterInstanceReady;
     SpinLockRelease(&walrcv->mutex);
 
     if (g_instance.streaming_dr_cxt.isInSwitchover && 
-        XLByteEQ(walrcv->targetSwitchoverBarrierLSN, walrcv->lastSwitchoverBarrierLSN)) {
-        g_instance.streaming_dr_cxt.isInteractionCompleted = true;
+        XLByteEQ(walrcv->targetSwitchoverBarrierLSN, walrcv->lastSwitchoverBarrierLSN) &&
+        XLByteEQ(last_flush_location, last_replay_location) &&
+        XLByteEQ(walrcv->targetSwitchoverBarrierLSN, last_replay_location)) {
         WalRecvHadrSwitchoverResponse();
+        if (walrcv->isMasterInstanceReady) {
+            g_instance.streaming_dr_cxt.isInteractionCompleted = true;
+        }
     }
 
-    ereport(LOG,
-        (errmsg("ProcessHadrSwitchoverRequest: target switchover barrier lsn  %X/%X, "
-            "receive switchover barrier lsn %X/%X, isInteractionCompleted %d",
+    ereport(LOG,(errmsg("ProcessHadrSwitchoverRequest: "
+            "is_hadr_main_standby: %d, is_cn: %d, target switchover barrier lsn  %X/%X, "
+            "receive switchover barrier lsn %X/%X, last_replay_location %X/%X, "
+            "last_flush_location %X/%X, isInteractionCompleted %d",
+            t_thrd.xlog_cxt.is_hadr_main_standby, IS_PGXC_COORDINATOR,
             (uint32)(walrcv->targetSwitchoverBarrierLSN >> 32),
             (uint32)(walrcv->targetSwitchoverBarrierLSN),
             (uint32)(walrcv->lastSwitchoverBarrierLSN >> 32),
             (uint32)(walrcv->lastSwitchoverBarrierLSN),
+            (uint32)(last_replay_location >> 32),
+            (uint32)(last_replay_location),
+            (uint32)(last_flush_location >> 32),
+            (uint32)(last_flush_location),
             g_instance.streaming_dr_cxt.isInteractionCompleted)));
 }
 

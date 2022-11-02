@@ -78,14 +78,17 @@ const char* timestamptz_to_str(TimestampTz dt)
     char zone[MAXDATELEN + 1];
     time_t result = (time_t)timestamptz_to_time_t(dt);
     struct tm* ltime = localtime(&result);
+    errno_t rc = EOK;
 
     strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", ltime);
     strftime(zone, sizeof(zone), "%Z", ltime);
 
 #ifdef HAVE_INT64_TIMESTAMP
-    sprintf(buf, "%s.%06d %s", ts, (int)(dt % USECS_PER_SEC), zone);
+    rc = snprintf_s(buf, sizeof(buf), sizeof(buf) - 1, "%s.%06d %s", ts, (int)(dt % USECS_PER_SEC), zone);
+    securec_check_ss_c(rc, "\0", "\0");
 #else
-    sprintf(buf, "%s.%.6f %s", ts, fabs(dt - floor(dt)), zone);
+    rc = snprintf_s(buf, sizeof(buf), sizeof(buf) - 1, "%s.%.6f %s", ts, fabs(dt - floor(dt)), zone);
+    securec_check_ss_c(rc, "\0", "\0");
 #endif
 
     return buf;

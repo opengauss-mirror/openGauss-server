@@ -35,7 +35,6 @@
 #include "access/twophase.h"
 #include "access/xact.h"
 #include "access/xlog.h"
-#include "access/dfs/dfs_insert.h"
 #include "gs_bbox.h"
 #include "catalog/namespace.h"
 #include "catalog/pgxc_group.h"
@@ -764,6 +763,20 @@ static void InitResourceConfigureNamesInt()
             &u_sess->attr.attr_resource.parctl_min_cost,
             100000,
             -1,
+            INT_MAX,
+            NULL,
+            NULL,
+            NULL},
+        {{"auto_explain_log_min_duration",
+            PGC_USERSET,
+            NODE_ALL,
+            RESOURCES_WORKLOAD,
+            gettext_noop("Sets min duration for auto-explain."),
+            gettext_noop("This value is set to 0 as default. "),
+            GUC_UNIT_MS},
+            &u_sess->attr.attr_resource.auto_explain_log_min_duration,
+            0,
+            0,
             INT_MAX,
             NULL,
             NULL,

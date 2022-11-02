@@ -785,6 +785,10 @@ typedef enum {
 } XLogUHeapCleanBlockEnum;
 
 typedef enum {
+    UHEAP_NEWPAGE_ORIG_BLOCK_NUM = 0
+} XLogUHeapNewPageBlockEnum;
+
+typedef enum {
     UHEAP2_ORIG_BLOCK_NUM = 0
 } XLogUHeap2BlockEnum;
 

@@ -27,17 +27,22 @@
 #define KNL_LOCALSYSCACHE_COMMON_H
 #include "utils/knl_globalsyscache_common.h"
 
-struct LocalBaseEntry {
+/*
+ * element entry for LSC's RelCache/PartCache
+ */
+typedef struct LocalBaseEntry {
     Oid oid;
     Dlelem cache_elem;
     bool obj_is_nailed;
-};
-struct LocalPartitionEntry : LocalBaseEntry {
+} LocalBaseEntry;
+
+typedef struct LocalPartitionEntry : LocalBaseEntry {
     Partition part;
-};
-struct LocalRelationEntry : LocalBaseEntry {
+} LocalPartitionEntry;
+
+typedef struct LocalRelationEntry : LocalBaseEntry {
     Relation rel;
-};
+} LocalRelationEntry;
 
 struct InvalidBaseEntry {
     int count;
@@ -144,6 +149,11 @@ void StreamTxnContextRestoreInvalidMsg(void *stc);
  * so max_used_space = max_total_space * 0.72
  * this means 72% memory can be used at the worst sence */
 const double MAX_LSC_FREESIZE_RATIO = 0.2;
+#ifdef ENABLE_LIET_MODE
+const double MAX_LSC_SWAPOUT_RATIO = 0.8;
+const double MIN_LSC_SWAPOUT_RATIO = 0.4;
+#else
 const double MAX_LSC_SWAPOUT_RATIO = 0.9;
 const double MIN_LSC_SWAPOUT_RATIO = 0.7;
+#endif
 #endif

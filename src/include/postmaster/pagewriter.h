@@ -58,6 +58,7 @@ typedef struct PageWriterProc {
 
     volatile int buf_id_start;     /* buffer id start loc */
     int32 next_scan_normal_loc;
+    int32 next_scan_ratio_loc;
 
     /* thread candidate list, main thread store the segment buffer information */
     Buffer *cand_buf_list;   /* thread candidate buffer list */

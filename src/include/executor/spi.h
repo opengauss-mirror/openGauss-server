@@ -34,7 +34,6 @@ typedef struct SPICachedPlanStack {
     CachedPlan* cplan;
     SPICachedPlanStack* previous;
     SubTransactionId subtranid;
-    ResourceOwner owner;
 } SPIPlanStack;
 
 #define SPI_ERROR_CONNECT (-1)
@@ -149,7 +148,8 @@ extern void AtEOSubXact_SPI(bool isCommit, SubTransactionId mySubid, bool STP_ro
 extern void AtEOSubXact_SPI(bool isCommit, SubTransactionId mySubid);
 extern DestReceiver* createAnalyzeSPIDestReceiver(CommandDest dest);
 
-extern void ReleaseSpiPlanRef();
+extern void ReleaseSpiPlanRef(TransactionId mysubid);
+
 /* SPI execution helpers */
 extern void spi_exec_with_callback(CommandDest dest, const char* src, bool read_only, long tcount, bool direct_call,
     void (*callbackFn)(void*), void* clientData);
@@ -162,7 +162,7 @@ extern int SPI_execute_direct(const char* src, char* nodename);
 #endif
 extern int _SPI_begin_call(bool execmem);
 extern int _SPI_end_call(bool procmem);
-extern void _SPI_hold_cursor();
+extern void _SPI_hold_cursor(bool is_rollback = false);
 extern void _SPI_prepare_oneshot_plan_for_validator(const char* src, SPIPlanPtr plan);
 extern void InitSPIPlanCxt();
 extern void _SPI_prepare_plan(const char *src, SPIPlanPtr plan);

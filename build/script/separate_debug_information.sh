@@ -119,7 +119,7 @@ separate_symbol()
 					chmod 755 "$INSTALL_DIR/${symbol_name}.symbol"
 					mv $INSTALL_DIR/${symbol_name}.symbol $CPTODEST
 				fi
-			elif [[ "$x" = *".so" ]]; then
+			elif [[ "$x" = *".so" || "$x" = *".so."* ]]; then
 			        if [[ "$platformname" = "Redhat" ]] || [[ "$platformname" = "Euler" ]]; then
 				    if [[ "$x" = "libkadm5clnt.so" ]]; then
 				    	    echo "$x is not a dynamically linked or not stripped, do not separate symbol"

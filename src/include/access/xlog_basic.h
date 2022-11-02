@@ -55,7 +55,7 @@
  */
 #define XLogSegSize ((uint32)XLOG_SEG_SIZE)
 #define XLogSegmentsPerXLogId (UINT64CONST(0x100000000) / XLOG_SEG_SIZE)
-#define XLogRecordMaxSize ((uint32)0x3fffffff) /* 1 gigabyte - 1 */
+#define XLogRecordMaxSize ((uint32)0x3fffe000) /* 1 gigabyte - 8 kbyte */
 
 /* Compute XLogRecPtr with segment number and offset. */
 #define XLogSegNoOffsetToRecPtr(segno, offset, dest) (dest) = (segno)*XLOG_SEG_SIZE + (offset)

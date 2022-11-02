@@ -27,7 +27,7 @@
 extern inline bool is_errmodule_enable(int elevel, ModuleId mod_id);
 #define AUTOVAC_LOG(level, format, ...)                                                                      \
     do {                                                                                                     \
-        if (is_errmodule_enable(level, MOD_AUTOVAC)) {                                                       \
+        if (module_logging_is_on(MOD_AUTOVAC)) {                                                       \
             ereport(level, (errmodule(MOD_AUTOVAC), errmsg(format, ##__VA_ARGS__), ignore_interrupt(true))); \
         }                                                                                                    \
     } while (0)
@@ -72,7 +72,6 @@ extern void AutoVacuumUpdateDelay(void);
 #ifdef EXEC_BACKEND
 extern void AutoVacLauncherMain();
 extern void AutoVacWorkerMain();
-extern void AutovacuumWorkerIAm(void);
 extern void AutovacuumLauncherIAm(void);
 #endif
 
@@ -136,10 +135,12 @@ typedef struct autovac_table {
     int at_vacuum_cost_delay;
     int at_vacuum_cost_limit;
     char* at_partname;
+    char* at_subpartname;
     char* at_relname;
     char* at_nspname;
     char* at_datname;
     bool at_is_toast;
+    bool at_gpivacuumed;
 } autovac_table;
 
 /* partitioned table's autovac state */
@@ -149,6 +150,7 @@ typedef struct at_partitioned_table {
     bool at_dovacuum;    /* partitioned table will do vacuum */
     bool at_doanalyze;   /* partitioned table will do analyze */
     bool at_needfreeze;  /* partitioned table need freeze old tuple to recycle clog */
+    bool at_gpivacuumed; /* partitioned table has vacuumed global index */
 } at_partitioned_table;
 
 /* -------------

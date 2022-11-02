@@ -29,7 +29,7 @@
 #include "knl/knl_variable.h"
 #include "storage/lock/lwlock.h"
 
-extern void remember_lwlock_acquire(LWLock* lockid);
+extern void remember_lwlock_acquire(LWLock* lockid, LWLockMode mode);
 extern void forget_lwlock_acquire(void);
 
 #endif  // SRC_INCLUDE_STORAGE_LWLOCK_BE_H

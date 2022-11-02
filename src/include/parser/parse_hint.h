@@ -58,6 +58,7 @@
 #define HINT_CPLAN "Use_cplan"
 #define HINT_GPLAN "Use_gplan"
 #define HINT_NO_GPC "No_gpc"
+#define HINT_MATERIAL_SUBPLAN "Material_subplan"
 
 #define BLOCK_COMMENT_START "/*"
 #define BLOCK_COMMENT_END "*/"
@@ -67,7 +68,7 @@
 
 typedef struct pull_hint_warning_context {
     List* warning;
-} pull_qual_vars_context;
+} pull_hint_warning_context;
 
 #define append_warning_to_list(root, hint, format, ...)                                     \
     do {                                                                                    \
@@ -105,6 +106,7 @@ typedef enum HintKeyword {
     HINT_KEYWORD_CPLAN,
     HINT_KEYWORD_GPLAN,
     HINT_KEYWORD_NO_GPC,
+    HINT_KEYWORD_MATERIAL_SUBPLAN,
 } HintKeyword;
 
 /* hint status */
@@ -288,8 +290,13 @@ typedef struct hintKeyword {
     int value;
 } hintKeyword;
 
+typedef struct MaterialSubplanHint {
+    Hint base; /* base hint */
+}MaterialSubplanHint;
+
 extern HintState* HintStateCreate();
 extern HintState* create_hintstate(const char* hints);
+extern HintState* create_hintstate_worker(const char* hint_str);
 extern List* find_specific_join_hint(
     HintState* hstate, Relids joinrelids, Relids innerrelids, HintKeyword keyWord, bool leading = true);
 extern List* find_specific_scan_hint(HintState* hstate, Relids relids, HintKeyword keyWord);
@@ -302,7 +309,7 @@ extern void transform_hints(PlannerInfo* root, Query* parse, HintState* hstate);
 
 extern void check_scan_hint_validity(PlannerInfo* root);
 extern void adjust_scanhint_relid(HintState* hstate, Index oldIdx, Index newIdx);
-extern bool pull_hint_warning_walker(Node* node, pull_qual_vars_context* context);
+extern bool pull_hint_warning_walker(Node* node, pull_hint_warning_context* context);
 extern List* retrieve_query_hint_warning(Node* parse);
 extern void output_utility_hint_warning(Node* query, int lev);
 extern void output_hint_warning(List* warning, int lev);
@@ -316,6 +323,7 @@ extern GatherSource get_gather_hint_source(PlannerInfo *root);
 extern bool check_set_hint_in_white_list(const char* name);
 extern bool has_no_expand_hint(Query* subquery);
 extern bool has_no_gpc_hint(HintState* hintState);
+extern bool has_material_subplan_hint(HintState* hintState);
 
 extern void RemoveQueryHintByType(Query* query, HintKeyword hint);
 extern bool CheckNodeNameHint(HintState* hintstate);

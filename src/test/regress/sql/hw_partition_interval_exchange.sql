@@ -126,7 +126,6 @@ create table partition_table_001(
         PARTITION partition_table_001_p2 VALUES LESS THAN ('2020-04-01'),
         PARTITION partition_table_001_p3 VALUES LESS THAN ('2020-05-01')
     );
-
 insert into partition_table_001 values (1,'aaa',1,'2020-02-23',true,'aaa',1.1);
 insert into partition_table_001 values (2,'bbb',2,'2020-03-23',false,'bbb',2.2);
 insert into partition_table_001 values (3,'ccc',3,'2020-04-23',true,'ccc',3.3);

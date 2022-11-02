@@ -1,4 +1,4 @@
-﻿set explain_perf_mode=normal;
+set explain_perf_mode=normal;
 
 -- aggregate functions without group by clause
 select avg(c1), avg(c2), avg(c3), avg(c4), avg(c5), avg(c6), avg(c7) from aggtable1;

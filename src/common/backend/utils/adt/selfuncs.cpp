@@ -155,6 +155,8 @@
 #include "utils/snapmgr.h"
 #include "utils/typcache.h"
 #include "utils/memutils.h"
+#include "instruments/instr_statement.h"
+
 #ifdef PGXC
 #include "pgxc/pgxc.h"
 #include "access/transam.h"
@@ -3715,7 +3717,7 @@ static void handle_fraction(double *estfract, double mcvfreq)
         *estfract = 1.0e-7;
     else if (*estfract >= 1.0)  // hack
     {
-        if (mcvfreq > 0.0)
+        if (mcvfreq > 0.0 && mcvfreq <= 1.0)
             *estfract = mcvfreq;
         else
             *estfract = 1.0;
@@ -4894,9 +4896,11 @@ static void examine_simple_variable(PlannerInfo* root, Var* var, VariableStatDat
          * This is a temporary fix for mislocated varattno after inlist2join
          * optimization.
          */
-        if (!rel->subroot->parse->is_from_inlist2join_rewrite) {
-            subquery = rel->subroot->parse;
+        if (rel->subroot->parse->is_from_inlist2join_rewrite) {
+            return;
         }
+        subquery = rel->subroot->parse;
+
         Assert(IsA(subquery, Query));
 
         /* Get the subquery output expression referenced by the upper Var */
@@ -4950,6 +4954,7 @@ static void examine_simple_variable(PlannerInfo* root, Var* var, VariableStatDat
              */
             examine_simple_variable(rel->subroot, var, vardata);
         }
+
     } else {
         /*
          * Otherwise, the Var comes from a FUNCTION, VALUES, or CTE RTE.  (We
@@ -4978,6 +4983,8 @@ statistic_proc_security_check(const VariableStatData *vardata, Oid func_oid)
 
     if (get_func_leakproof(func_oid))
         return true;
+
+    instr_stmt_report_cause_type(NUM_F_LEAKPROOF);
 
     ereport(DEBUG2,
             (errmodule(MOD_OPT),
@@ -5477,6 +5484,7 @@ static bool get_actual_variable_range(PlannerInfo* root, VariableStatData* varda
             if (min != NULL) {
                 index_scan = (IndexScanDesc)index_beginscan(heapRel, indexRel, SnapshotNow, 1, 0);
                 index_rescan(index_scan, scankeys, 1, NULL, 0);
+                index_scan->xs_sampling_scan = true;
 
                 /* Fetch first tuple in sortop's direction */
                 if ((tup = (HeapTuple)index_getnext(index_scan, indexscandir)) != NULL) {
@@ -5506,6 +5514,7 @@ static bool get_actual_variable_range(PlannerInfo* root, VariableStatData* varda
             if ((max != NULL) && have_data) {
                 index_scan = (IndexScanDesc)index_beginscan(heapRel, indexRel, SnapshotNow, 1, 0);
                 index_rescan(index_scan, scankeys, 1, NULL, 0);
+                index_scan->xs_sampling_scan = true;
 
                 /* Fetch first tuple in reverse direction */
                 if ((tup = (HeapTuple)index_getnext(index_scan, (ScanDirection)-indexscandir)) != NULL) {

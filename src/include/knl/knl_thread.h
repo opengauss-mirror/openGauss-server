@@ -75,7 +75,8 @@
 #include "port/pg_crc32c.h"
 #define MAX_PATH_LEN 1024
 
-#define RESERVE_SIZE 52
+extern const int g_reserve_param_num;
+
 #define PARTKEY_VALUE_MAXNUM 64
 
 typedef struct ResourceOwnerData* ResourceOwner;
@@ -391,7 +392,7 @@ typedef struct knl_t_xact_context {
      */
     struct SERIALIZABLEXACT* MySerializableXact;
     bool MyXactDidWrite;
-    bool applying_subxact_undo;
+    bool executeSubxactUndo;
 
 #ifdef PGXC
     bool useLocalSnapshot;
@@ -410,6 +411,7 @@ typedef struct knl_t_xact_context {
     TransactionId XactXidStoreForCheck;
     Oid ActiveLobRelid;
     bool isSelectInto;
+    bool callPrint;
 } knl_t_xact_context;
 
 typedef struct RepairBlockKey RepairBlockKey;
@@ -964,6 +966,27 @@ typedef struct knl_t_undo_context {
     bool fetchRecord;
 } knl_t_undo_context;
 
+typedef struct knl_u_ustore_context {
+#define MAX_UNDORECORDS_PER_OPERATION 2 /* multi-insert may need special handling */
+    class URecVector *urecvec;
+    class UndoRecord *undo_records[MAX_UNDORECORDS_PER_OPERATION];
+
+/*
+ * Caching several undo buffers.
+ * max undo buffers per record = 2
+ * max undo records per operation = 2
+ */
+#define MAX_UNDO_BUFFERS 16 /* multi-insert may need special handling */
+    struct UndoBuffer *undo_buffers;
+    int undo_buffer_idx;
+
+#define TD_RESERVATION_TIMEOUT_MS (60 * 1000) // 60 seconds
+    TimestampTz tdSlotWaitFinishTime;
+    bool tdSlotWaitActive;
+    RelFileNode *rnode;
+    Buffer oldBuffer;
+} knl_u_ustore_context;
+
 typedef struct knl_t_index_context {
     typedef uint64 XLogRecPtr;
     struct ginxlogInsertDataInternal* ptr_data;
@@ -1018,8 +1041,11 @@ typedef struct knl_t_wlmthrd_context {
     /* thread initialization has been finished */
     bool wlm_init_done;
 
-    /*check if current stmt has recorded cursor*/
+    /* check if current stmt has recorded cursor */
     bool has_cursor_record;
+
+    /* Check whether memory snapshot has been taken in this cycle */
+    bool has_do_memory_snapshot;
 
     /* alarm finish time */
     TimestampTz wlmalarm_fin_time;
@@ -1189,6 +1215,8 @@ typedef struct knl_t_log_context {
 
     unsigned char* module_logging_configure;
 
+    bool output_backtrace_log;
+
 } knl_t_log_context;
 
 typedef struct knl_t_format_context {
@@ -1261,6 +1289,7 @@ typedef struct knl_t_async_context {
 typedef struct knl_t_explain_context {
     int explain_perf_mode;
     bool explain_light_proxy;
+    bool need_auto_explain;
 } knl_t_explain_context;
 
 typedef struct knl_t_arch_context {
@@ -1664,8 +1693,6 @@ typedef struct knl_t_postgres_context {
     /* clear key message that may appear in core file for security */
     bool clear_key_memory;
 
-    /* true if create table in create table as select' has been done */
-    bool table_created_in_CTAS;
     const char* debug_query_string; /* client-supplied query string */
     bool isInResetUserName;
 
@@ -1750,6 +1777,9 @@ typedef struct knl_t_postgres_context {
     struct timeval Save_t;
 
     bool gpc_fisrt_send_clean;   // cn send clean to dn for global plan cache
+
+    bool auto_explain_threshold_active;
+    TimestampTz auto_explain_threshold_time;
 } knl_t_postgres_context;
 
 typedef struct knl_t_utils_context {
@@ -1789,8 +1819,10 @@ typedef struct knl_t_utils_context {
     struct ResourceOwnerData* STPSavedResourceOwner;
     struct ResourceOwnerData* CurTransactionResourceOwner;
     struct ResourceOwnerData* TopTransactionResourceOwner;
+
+    /* flag to indicate g_instance.baselock is help by current thread */
+    bool holdProcBaseLock;
     bool SortColumnOptimize;
-    struct RelationData* pRelatedRel;
 
 #ifndef WIN32
     timer_t sigTimerId;
@@ -2288,6 +2320,7 @@ typedef struct knl_t_walsender_context {
     /* My slot in the shared memory array */
     struct WalSnd* MyWalSnd;
     int logical_xlog_advanced_timeout; /* maximum time to write xlog * of logical slot advance */
+    int logical_slot_advanced_timeout; /* maximum time to notify primary advance logical slot */
     typedef int ServerMode;
     typedef int DemoteMode;
     DemoteMode Demotion;
@@ -2358,6 +2391,10 @@ typedef struct knl_t_walsender_context {
      * Timestamp of the last logical xlog advanced is written.
      */
     TimestampTz last_logical_xlog_advanced_timestamp;
+    /*
+     * Timestamp of the last primary logical slot advanced is written.
+     */
+    TimestampTz last_logical_slot_advanced_timestamp;
     /* Have we sent a heartbeat message asking for reply, since last reply? */
     bool waiting_for_ping_response;
     /* Flags set by signal handlers for later service in main loop */
@@ -2402,6 +2439,7 @@ typedef struct knl_t_walsender_context {
     bool is_obsmode;
     bool standbyConnection;
     bool cancelLogCtl;
+    XLogRecPtr firstConfirmedFlush;
 } knl_t_walsender_context;
 
 typedef struct knl_t_walreceiverfuncs_context {
@@ -2445,26 +2483,23 @@ typedef struct knl_t_logical_context {
     bool ExportInProgress;
     bool IsAreaDecode;
     ResourceOwner SavedResourceOwnerDuringExport;
+    int dispatchSlotId;
 } knl_t_logical_context;
 
 extern struct ParallelDecodeWorker** parallelDecodeWorker;
 
 typedef struct knl_t_parallel_decode_worker_context {
-    volatile sig_atomic_t shutdown_requested;
     volatile sig_atomic_t got_SIGHUP;
     volatile sig_atomic_t sleep_long;
-    int slotId;
     int parallelDecodeId;
 } knl_t_parallel_decode_worker_context;
 
 typedef struct knl_t_logical_read_worker_context {
-    volatile sig_atomic_t shutdown_requested;
     volatile sig_atomic_t got_SIGHUP;
     volatile sig_atomic_t sleep_long;
     volatile sig_atomic_t got_SIGTERM;
     MemoryContext ReadWorkerCxt;
     ParallelDecodeWorker** parallelDecodeWorkers;
-    int slotId;
     int totalWorkerCount;
 } knl_t_logical_read_worker_context;
 
@@ -2508,6 +2543,7 @@ typedef struct knl_t_storage_context {
     TransactionId latestObservedXid;
     struct RunningTransactionsData* CurrentRunningXacts;
     struct VirtualTransactionId* proc_vxids;
+    TransactionId* xminArray;
     union BufferDescPadded* BufferDescriptors;
     char* BufferBlocks;
     struct WritebackContext* BackendWritebackContext;
@@ -2589,7 +2625,7 @@ typedef struct knl_t_storage_context {
     CacheSlotId_t CacheBlockInProgressUncompress;
     CacheSlotId_t MetaBlockInProgressIO;
 
-    List* RecoveryLockList;
+    HTAB* RecoveryLockList;
     int standbyWait_us;
     /*
      * All accesses to pg_largeobject and its index make use of a single Relation
@@ -2700,6 +2736,9 @@ typedef struct knl_t_storage_context {
     bool isSwitchoverLockHolder;
     int num_held_lwlocks;
     struct LWLockHandle* held_lwlocks;
+    TimestampTz* lwlock_held_times;
+    bool trace_lwlock_time;
+
     int lock_addin_request;
     bool lock_addin_request_allowed;
     int counts_for_pid;
@@ -2799,8 +2838,8 @@ typedef struct knl_t_postmaster_context {
      * ReplConn*2 is used to connect secondary on primary or standby, or connect primary
      * or standby on secondary.
      */
-    struct replconninfo* ReplConnArray[DOUBLE_MAX_REPLNODE_NUM + 1];
-    int ReplConnChangeType[DOUBLE_MAX_REPLNODE_NUM + 1];
+    struct replconninfo* ReplConnArray[MAX_REPLNODE_NUM];
+    int ReplConnChangeType[MAX_REPLNODE_NUM];
     struct replconninfo* CrossClusterReplConnArray[MAX_REPLNODE_NUM];
     bool CrossClusterReplConnChanged[MAX_REPLNODE_NUM];
     struct hashmemdata* HaShmData;
@@ -3044,6 +3083,10 @@ typedef struct knl_t_index_advisor_context {
 }
 knl_t_index_advisor_context;
 
+typedef struct knl_t_sql_patch_context {
+    void *sql_patch_prev_post_parse_analyze_hook;
+} knl_t_sql_patch_context;
+
 #ifdef ENABLE_MOT
 /* MOT thread attributes */
 #define MOT_MAX_ERROR_MESSAGE 256
@@ -3111,6 +3154,12 @@ typedef struct knl_t_barrier_preparse_context {
 typedef struct knl_t_proxy_context {
     char identifier[IDENTIFIER_LENGTH];
 } knl_t_proxy_context;
+
+#define RC_MAX_NUM 16
+typedef struct knl_t_rc_context {
+    int rcNum;
+    Oid rcData[RC_MAX_NUM];
+} knl_t_rc_context;
 
 #define DCF_MAX_NODES 10
 /* For log ctrl. Willing let standby flush and apply log under RTO seconds */
@@ -3209,7 +3258,17 @@ typedef struct knl_t_lsc_context {
     LocalSysDBCache *lsc;
     bool enable_lsc;
     FetTupleFrom FetchTupleFromCatCList;
-}knl_t_lsc_context;
+    /*
+     * A seqno for each worker/session attachement to identify if rd_smgr's "smgr_targblock"
+     * needs cleanup, its value starts with 0, when equals to rd_smgr->xact_xeqno means the
+     * rd_smgr is open and used in current transaction then do nothing, otherwise we reset
+     * rd_smgr->smgr_targblock to InvalidBlockNumber to avoid incorrect target block and force
+     * it to be re-fetched
+     */
+    uint64 xact_seqno;
+    /* used for query lsc/gsc out of transaction */
+    ResourceOwner local_sysdb_resowner;
+} knl_t_lsc_context;
 
 /* replication apply launcher, for subscription */
 typedef struct knl_t_apply_launcher_context {
@@ -3367,6 +3426,7 @@ typedef struct knl_thrd_context {
     knl_t_undolauncher_context undolauncher_cxt;
     knl_t_undoworker_context undoworker_cxt;
     knl_t_undorecycler_context undorecycler_cxt;
+    knl_u_ustore_context ustore_cxt;
     knl_t_rollback_requests_context rollback_requests_cxt;
     knl_t_ts_compaction_context ts_compaction_cxt;
     knl_t_ash_context ash_cxt;
@@ -3391,6 +3451,8 @@ typedef struct knl_thrd_context {
     knl_t_apply_launcher_context applylauncher_cxt;
     knl_t_apply_worker_context applyworker_cxt;
     knl_t_publication_context publication_cxt;
+    knl_t_sql_patch_context sql_patch_cxt;
+    knl_t_rc_context rc_cxt;
 } knl_thrd_context;
 
 #ifdef ENABLE_MOT
@@ -3416,9 +3478,21 @@ inline bool StreamTopConsumerAmI()
     return (t_thrd.subrole == TOP_CONSUMER);
 }
 
+inline bool WLMThreadAmI()
+{
+    return (t_thrd.role == WLM_WORKER || t_thrd.role == WLM_MONITOR ||
+        t_thrd.role == WLM_ARBITER || t_thrd.role == WLM_CPMONITOR);
+}
+
+inline bool ParallelLogicalWorkerThreadAmI()
+{
+    return (t_thrd.role == LOGICAL_READ_RECORD || t_thrd.role == PARALLEL_DECODE);
+}
+
 RedoInterruptCallBackFunc RegisterRedoInterruptCallBack(RedoInterruptCallBackFunc func);
 void RedoInterruptCallBack();
 RedoPageRepairCallBackFunc RegisterRedoPageRepairCallBack(RedoPageRepairCallBackFunc func);
 void RedoPageRepairCallBack(RepairBlockKey key, XLogPhyBlock pblk);
+extern void VerifyMemoryContext();
 
 #endif /* SRC_INCLUDE_KNL_KNL_THRD_H_ */

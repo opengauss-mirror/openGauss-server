@@ -47,7 +47,8 @@
 #include "utils/postinit.h"
 
 extern void destroy_handles();
-const int SLEEP_INTERVAL = 10;
+const int SLEEP_INTERVAL_ONE = 1;
+const int SLEEP_INTERVAL_TEN = 10;
 namespace PercentileSpace {
 bool pgstat_fetch_sql_rt_info(PGXCNodeAllHandles* pgxcHandle, char tag, int* Count, SqlRTInfo* sqlRT);
 List* pgstat_send_command(PGXCNodeAllHandles* pgxc_handles, char tag, bool* isSendSuccess);
@@ -123,6 +124,7 @@ void PercentileSpace::init_gspqsignal()
      * except SIGHUP and SIGQUIT.
      */
     (void)gspqsignal(SIGHUP, instr_percentile_sighup_handler);
+    (void)gspqsignal(SIGURG, print_stack);
     (void)gspqsignal(SIGINT, SIG_IGN);
     (void)gspqsignal(SIGTERM, instr_percentile_exit);
     (void)gspqsignal(SIGQUIT, quickdie);
@@ -220,7 +222,7 @@ NON_EXEC_STATIC void PercentileMain()
         pgstat_report_activity(STATE_IDLE, NULL);
         t_thrd.percentile_cxt.need_reset_timer = true;
         g_instance.stat_cxt.force_process = false;
-        sleep(SLEEP_INTERVAL);
+        sleep(SLEEP_INTERVAL_ONE);
     }
     elog(LOG, "instrumention percentile ended");
     gs_thread_exit(0);
@@ -302,6 +304,7 @@ void PercentileSpace::calculatePercentileOfSingleNode(void)
     {
         (void)MemoryContextSwitchTo(oldcxt);
         pfree_ext(sqlRT);
+        LWLockReleaseAll();
         FlushErrorState();
         elog(WARNING, "Percentile job failed");
     }
@@ -313,9 +316,7 @@ void PercentileSpace::calculatePercentileOfMultiNode(void)
     MemoryContext oldcxt = CurrentMemoryContext;
     PG_TRY();
     {
-        if (!g_instance.stat_cxt.calculate_on_other_cn) {
-            processCalculatePercentile();
-        }
+        processCalculatePercentile();
     }
     PG_CATCH();
     {
@@ -323,6 +324,7 @@ void PercentileSpace::calculatePercentileOfMultiNode(void)
         /* free all handles */
         release_pgxc_handles(t_thrd.percentile_cxt.pgxc_all_handles);
         t_thrd.percentile_cxt.pgxc_all_handles = NULL;
+        LWLockReleaseAll();
         FlushErrorState();
         elog(WARNING, "Percentile job failed");
     }
@@ -359,7 +361,7 @@ void PercentileSpace::SubPercentileMain(void)
             t_thrd.percentile_cxt.need_reset_timer = true;
             g_instance.stat_cxt.force_process = false;
         }
-        pg_usleep(SLEEP_INTERVAL * 1000L);  // CCN check if need force process percentile
+        pg_usleep(SLEEP_INTERVAL_TEN * 1000L);  // CCN check if need force process percentile
     }                               /* end of loop */
 }
 
@@ -505,6 +507,7 @@ void processCalculatePercentile()
     PG_CATCH();
     {
         (void)MemoryContextSwitchTo(oldcxt);
+        ereport(LOG, (errmodule(MOD_INSTR), errmsg("Percentile job - failed to get CN handler.")));
         release_pgxc_handles(t_thrd.percentile_cxt.pgxc_all_handles);
         t_thrd.percentile_cxt.pgxc_all_handles = NULL;
         list_free(cnlist);
@@ -514,6 +517,7 @@ void processCalculatePercentile()
     list_free(cnlist);
 
     if (t_thrd.percentile_cxt.pgxc_all_handles == NULL) {
+        ereport(LOG, (errmodule(MOD_INSTR), errmsg("Percentile job - CN handler is null.")));
         return;
     }
     /* 1. fetch sql rt count from other cns */
@@ -546,6 +550,7 @@ void processCalculatePercentile()
     t_thrd.percentile_cxt.pgxc_all_handles = NULL;
     if (isTimeOut) {
         /* if pgxc handles is time out, we should destroy handles, release occupied memory */
+        ereport(LOG, (errmodule(MOD_INSTR), errmsg("Percentile job - get data timeout.")));
         destroy_handles();
     }
 }

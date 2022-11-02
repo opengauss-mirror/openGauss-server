@@ -111,6 +111,10 @@ public:
     {
         return m_thrd;
     }
+    inline void SetThreadContextPtr(knl_thrd_context *thrd)
+    {
+        m_thrd = thrd;
+    }
 
 
     inline ThreadStatus GetthreadStatus()
@@ -146,6 +150,7 @@ private:
     volatile ThreadStatus m_threadStatus;
     ThreadStayReason m_reason;
     Dlelem m_elem;
+    Dlelem m_elem2;
     ThreadPoolGroup* m_group;
     pthread_mutex_t* m_mutex;
     pthread_cond_t* m_cond;

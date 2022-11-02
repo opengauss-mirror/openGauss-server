@@ -45,7 +45,7 @@ void StartUpMultiRedo(XLogReaderState *xlogreader, uint32 privateLen)
     if (IsExtremeRedo()) {
         extreme_rto::StartRecoveryWorkers(xlogreader, privateLen);
     } else if (IsParallelRedo()) {
-        parallel_recovery::StartRecoveryWorkers();
+        parallel_recovery::StartRecoveryWorkers(xlogreader->ReadRecPtr);
     }
 }
 
@@ -133,6 +133,13 @@ void MultiRedoUpdateStandbyState(HotStandbyState newState)
         extreme_rto::UpdateStandbyState(newState);
     } else if (IsParallelRedo()) {
         parallel_recovery::UpdateStandbyState(newState);
+    }
+}
+
+void MultiRedoUpdateMinRecovery(XLogRecPtr newMinRecoveryPoint)
+{
+    if (IsExtremeRedo()) {
+        extreme_rto::UpdateMinRecoveryForTrxnRedoThd(newMinRecoveryPoint);
     }
 }
 

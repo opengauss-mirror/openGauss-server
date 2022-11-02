@@ -1178,9 +1178,7 @@ static void HandleAnalyzeTotalRow(RemoteQueryState* combiner, const char* msg_bo
         combiner->analyze_memsize[ANALYZENORMAL] = pq_getmsgint64(&buf);
     } else {
         Assert(len == sizeof(int64) * 3);
-        combiner->analyze_totalrowcnt[ANALYZEMAIN - 1] = pq_getmsgint64(&buf);
         combiner->analyze_totalrowcnt[ANALYZEDELTA - 1] = pq_getmsgint64(&buf);
-        combiner->analyze_memsize[ANALYZEMAIN - 1] = pq_getmsgint64(&buf);
         combiner->analyze_memsize[ANALYZEDELTA - 1] = 0;
     }
 
@@ -6441,13 +6439,6 @@ static void recv_totalrowcnt_from_dn(int dn_conn_count, PGXCNodeAllHandles* pgxc
         stmt->pstGlobalStatEx[ANALYZENORMAL].totalRowCnts = 0;
         stmt->pstGlobalStatEx[ANALYZENORMAL].topRowCnts = 0;
         stmt->pstGlobalStatEx[ANALYZENORMAL].topMemSize = 0;
-    } else {
-        stmt->pstGlobalStatEx[ANALYZEMAIN - 1].totalRowCnts = 0;
-        stmt->pstGlobalStatEx[ANALYZEDELTA - 1].totalRowCnts = 0;
-        stmt->pstGlobalStatEx[ANALYZEMAIN - 1].topRowCnts = 0;
-        stmt->pstGlobalStatEx[ANALYZEDELTA - 1].topRowCnts = 0;
-        stmt->pstGlobalStatEx[ANALYZEMAIN - 1].topMemSize = 0;
-        stmt->pstGlobalStatEx[ANALYZEDELTA - 1].topMemSize = 0;
     }
 
     if (remotestate->request_type == REQUEST_TYPE_NOT_DEFINED)
@@ -6488,28 +6479,6 @@ static void recv_totalrowcnt_from_dn(int dn_conn_count, PGXCNodeAllHandles* pgxc
                         "%s total row count[%lf] for %s.",
                         (arq_type == ARQ_TYPE_SAMPLE) ? "Step 4-1: Get real" : "Step 1-1: Get estimate",
                         (double)remotestate->analyze_totalrowcnt[ANALYZENORMAL],
-                        get_pgxc_nodename(conn->nodeoid, &nodename));
-                } else {
-                    stmt->pstGlobalStatEx[ANALYZEMAIN - 1].totalRowCnts +=
-                        (double)remotestate->analyze_totalrowcnt[ANALYZEMAIN - 1];
-                    stmt->pstGlobalStatEx[ANALYZEDELTA - 1].totalRowCnts +=
-                        (double)remotestate->analyze_totalrowcnt[ANALYZEDELTA - 1];
-                    stmt->pstGlobalStatEx[ANALYZEMAIN - 1].topRowCnts =
-                        Max(stmt->pstGlobalStatEx[ANALYZEMAIN - 1].topRowCnts,
-                            remotestate->analyze_totalrowcnt[ANALYZEMAIN - 1]);
-                    stmt->pstGlobalStatEx[ANALYZEDELTA - 1].topRowCnts =
-                        Max(stmt->pstGlobalStatEx[ANALYZEDELTA - 1].topRowCnts,
-                            remotestate->analyze_totalrowcnt[ANALYZEDELTA - 1]);
-                    stmt->pstGlobalStatEx[ANALYZEMAIN - 1].topMemSize =
-                        Max(stmt->pstGlobalStatEx[ANALYZEMAIN - 1].topMemSize,
-                            remotestate->analyze_memsize[ANALYZEMAIN - 1]);
-                    stmt->pstGlobalStatEx[ANALYZEDELTA - 1].topMemSize = 0;
-
-                    elog(DEBUG1,
-                        "%s total row count[%lf][%lf] for %s.",
-                        (arq_type == ARQ_TYPE_SAMPLE) ? "Step 4-1: Get real" : "Step 1-1: Get estimate",
-                        (double)remotestate->analyze_totalrowcnt[ANALYZEMAIN - 1],
-                        (double)remotestate->analyze_totalrowcnt[ANALYZEDELTA - 1],
                         get_pgxc_nodename(conn->nodeoid, &nodename));
                 }
             } else if (res == RESPONSE_COMPLETE) {
@@ -6555,14 +6524,9 @@ static HeapTuple* recv_samplerows_from_dn(int dn_conn_count, PGXCNodeAllHandles*
 #define RECV_DELTATUPLE_TUPDESCNO 2
 
     int i, numRows = 0;
-    int hdfsnumRows[ANALYZEDELTA] = {0};
     int* tupdescno = NULL;
     TupleTableSlot** scanslot = NULL;
     HeapTuple* results = NULL;
-    double dfsecsamplerows = 0;
-    double deltaecsamplerows = 0;
-    double estdfsrows = 0;
-    double estdeltarows = 0;
     int estrows = 0;
     double rstate = 0;
 
@@ -6587,25 +6551,6 @@ static HeapTuple* recv_samplerows_from_dn(int dn_conn_count, PGXCNodeAllHandles*
 
         results = (HeapTuple*)palloc0(estrows * sizeof(HeapTuple));
         stmt->pstGlobalStatEx[ANALYZENORMAL].totalRowCnts = 0;
-    } else { /* current table is hdfs table, we should malloc more memory for three tables. */
-        stmt->pstGlobalStatEx[ANALYZEMAIN - 1].tupleDesc = NULL;
-        stmt->pstGlobalStatEx[ANALYZEDELTA - 1].tupleDesc = NULL;
-
-        /* get estimate total sample rows of dfs table. */
-        estdfsrows = dn_conn_count * Max(DEFAULT_SAMPLE_ROWCNT,
-                                         ceil(stmt->pstGlobalStatEx[ANALYZEMAIN - 1].totalRowCnts *
-                                              stmt->pstGlobalStatEx[ANALYZEMAIN - 1].sampleRate));
-        stmt->pstGlobalStatEx[ANALYZEMAIN - 1].sampleRows = (HeapTuple*)palloc0((Size)(estdfsrows * sizeof(HeapTuple)));
-
-        /* get estimate total sample rows of delta table. */
-        estdeltarows = dn_conn_count * Max(DEFAULT_SAMPLE_ROWCNT,
-                                           ceil(stmt->pstGlobalStatEx[ANALYZEDELTA - 1].totalRowCnts *
-                                                stmt->pstGlobalStatEx[ANALYZEDELTA - 1].sampleRate));
-        stmt->pstGlobalStatEx[ANALYZEDELTA - 1].sampleRows =
-            (HeapTuple*)palloc0((Size)(estdeltarows * sizeof(HeapTuple)));
-
-        stmt->pstGlobalStatEx[ANALYZEMAIN - 1].totalRowCnts = 0;
-        stmt->pstGlobalStatEx[ANALYZEDELTA - 1].totalRowCnts = 0;
     }
 
     if (remotestate->request_type == REQUEST_TYPE_NOT_DEFINED)
@@ -6681,32 +6626,6 @@ static HeapTuple* recv_samplerows_from_dn(int dn_conn_count, PGXCNodeAllHandles*
                         }
                         numRows++;
                     }
-                } else {
-                    Assert(tupdescno[i] < ANALYZE_MODE_MAX_NUM);
-
-                    /* receive and save sample rows for hdfs table. */
-                    if ((tupdescno[i] == RECV_DFSTUPLE_TUPDESCNO) || (tupdescno[i] == RECV_DELTATUPLE_TUPDESCNO)) {
-                        /* save tuple descriptor for the sample rows if it is NULL. */
-                        if (stmt->pstGlobalStatEx[ANALYZEDELTA - tupdescno[i]].tupleDesc == NULL)
-                            stmt->pstGlobalStatEx[ANALYZEDELTA - tupdescno[i]].tupleDesc =
-                                CreateTupleDescCopy(scanslot[i]->tts_tupleDescriptor);
-
-                        /*
-                         * don't save the received sample rows if the num rows we have received
-                         * more than total rows for dfs or delta table.
-                         */
-                        if (((ANALYZEDELTA - tupdescno[i]) == (ANALYZEMAIN - 1) &&
-                                (hdfsnumRows[ANALYZEDELTA - tupdescno[i]] < estdfsrows)) ||
-                            ((ANALYZEDELTA - tupdescno[i]) == (ANALYZEDELTA - 1) &&
-                                (hdfsnumRows[ANALYZEDELTA - tupdescno[i]] < estdeltarows))) {
-                            stmt->pstGlobalStatEx[ANALYZEDELTA - tupdescno[i]]
-                                .sampleRows[hdfsnumRows[ANALYZEDELTA - tupdescno[i]]++] = heap_form_tuple(
-                                scanslot[i]->tts_tupleDescriptor, scanslot[i]->tts_values, scanslot[i]->tts_isnull);
-                        }
-                    } else { /* receive and save the second sample row count. */
-                        dfsecsamplerows += (double)(scanslot[i]->tts_values[0]);
-                        deltaecsamplerows += (double)(scanslot[i]->tts_values[1]);
-                    }
                 }
 
                 (void)ExecClearTuple(scanslot[i]);
@@ -6720,17 +6639,6 @@ static HeapTuple* recv_samplerows_from_dn(int dn_conn_count, PGXCNodeAllHandles*
 
                     stmt->pstGlobalStatEx[ANALYZENORMAL].totalRowCnts +=
                         (double)remotestate->analyze_totalrowcnt[ANALYZENORMAL];
-                } else {
-                    elog(DEBUG1,
-                        "Step 4-1: Get real total row count[%lf][%lf] for %s.",
-                        (double)remotestate->analyze_totalrowcnt[ANALYZEMAIN - 1],
-                        (double)remotestate->analyze_totalrowcnt[ANALYZEDELTA - 1],
-                        get_pgxc_nodename(conn->nodeoid, &nodename));
-
-                    stmt->pstGlobalStatEx[ANALYZEMAIN - 1].totalRowCnts +=
-                        (double)remotestate->analyze_totalrowcnt[ANALYZEMAIN - 1];
-                    stmt->pstGlobalStatEx[ANALYZEDELTA - 1].totalRowCnts +=
-                        (double)remotestate->analyze_totalrowcnt[ANALYZEDELTA - 1];
                 }
             } else if (res == RESPONSE_COMPLETE) {
                 if (i < --dn_conn_count) {
@@ -6760,19 +6668,6 @@ static HeapTuple* recv_samplerows_from_dn(int dn_conn_count, PGXCNodeAllHandles*
             "Step 3: Get sample rows from DNs finished, receive [%d] tuples, sample [%d] tuples",
             numRows,
             stmt->num_samples);
-    } else {
-        for (i = 0; i < ANALYZEDELTA; i++) {
-            /* save num of sample rows that we have received for hdfs table. */
-            stmt->pstGlobalStatEx[i].num_samples = hdfsnumRows[i];
-        }
-
-        elog(DEBUG1,
-            "Step 3: Get sample rows from DNs finished, num_samples[%d][%d] for DFS table.",
-            stmt->pstGlobalStatEx[ANALYZEMAIN - 1].num_samples,
-            stmt->pstGlobalStatEx[ANALYZEDELTA - 1].num_samples);
-
-        stmt->pstGlobalStatEx[ANALYZEMAIN - 1].secsamplerows = dfsecsamplerows;
-        stmt->pstGlobalStatEx[ANALYZEDELTA - 1].secsamplerows = deltaecsamplerows;
     }
 
     return results;
@@ -8249,8 +8144,7 @@ static char* construct_fetch_statistics_query(const char* schemaname, const char
     StatisticKind kind, VacuumStmt* stmt, Oid relid, RangeVar* parentRel)
 {
     /* there is no tuples in pg_class for complex table, but it has pg_statistic. */
-    if (stmt && IS_PGXC_COORDINATOR && !IsConnFromCoord() && (StatisticPageAndTuple == kind) &&
-        (stmt->pstGlobalStatEx[stmt->tableidx].eAnalyzeMode == ANALYZECOMPLEX)) {
+    if (stmt && IS_PGXC_COORDINATOR && !IsConnFromCoord() && (StatisticPageAndTuple == kind)) {
         return NULL;
     }
 
@@ -8330,12 +8224,8 @@ static char* construct_fetch_statistics_query(const char* schemaname, const char
             if (stmt && IS_PGXC_COORDINATOR && !IsConnFromCoord() &&
                 (stmt->pstGlobalStatEx[stmt->tableidx].eAnalyzeMode != ANALYZENORMAL)) {
                 switch (stmt->pstGlobalStatEx[stmt->tableidx].eAnalyzeMode) {
-                    case ANALYZEMAIN:
                     case ANALYZEDELTA:
                         appendStringInfoString(query, "and s.stainherit=false ");
-                        break;
-                    case ANALYZECOMPLEX:
-                        appendStringInfoString(query, "and s.stainherit=true ");
                         break;
                     default:
                         return NULL;
@@ -8736,52 +8626,8 @@ static void FetchGlobalRelationStatistics(VacuumStmt* stmt, Oid relid, RangeVar*
                 schemaname, relname, stmt->va_cols, StatisticPartitionPageAndTuple, parentRel, stmt, isReplication);
     } else /* other CNs get stats */
     {
-        /* we must get statistic in pg_class and pg_statistic from oreignal CN for delta table if the relation is hdfs
-         * table. */
-        if (RelationIsDfsStore(rel)) {
-            Oid deltaRelId = RelationGetDeltaRelId(rel);
-            if (OidIsValid(deltaRelId)) {
-                Relation deltaRel = relation_open(deltaRelId, AccessShareLock);
-                if (deltaRel != NULL) {
-                    VacuumStmt* deltaStmt = makeNode(VacuumStmt);
-                    deltaStmt->relation = makeNode(RangeVar);
-                    deltaStmt->relation->relname = pstrdup(RelationGetRelationName(deltaRel));
-                    deltaStmt->relation->schemaname = get_namespace_name(CSTORE_NAMESPACE);
-                    deltaStmt->options = stmt->options;
-                    deltaStmt->flags = stmt->flags;
-                    /* set nodeNo identify original CN id where the local CN will get statistic info from and update in
-                     * local. */
-                    deltaStmt->nodeNo = stmt->nodeNo;
-                    deltaStmt->orgCnNodeNo = stmt->orgCnNodeNo;
-                    deltaStmt->va_cols = (List*)copyObject(stmt->va_cols);
-                    deltaStmt->tableidx = ANALYZEDELTA - 1;
-                    deltaStmt->pstGlobalStatEx[deltaStmt->tableidx].eAnalyzeMode = ANALYZEDELTA;
-                    /*
-                     * Here we must use the local relname and schemaname, for
-                     * the relation var of the stmt may be null or has no schema
-                     * information.
-                     */
-                    RangeVar* parentVar = makeNode(RangeVar);
-                    parentVar->relname = relname;
-                    parentVar->schemaname = schemaname;
-                    (void)FetchGlobalRelationStatistics(deltaStmt, deltaRelId, parentVar);
-                    pfree_ext(parentVar);
-                    relation_close(deltaRel, AccessShareLock);
-                    /*
-                     * get the total row count for delta table and it will used later in
-                     * function ReceivePageAndTuple for hdfs table.
-                     */
-                    stmt->pstGlobalStatEx[ANALYZEDELTA - 1].totalRowCnts =
-                        deltaStmt->pstGlobalStatEx[ANALYZEMAIN - 1].totalRowCnts;
-                }
-            }
-
-            stmt->tableidx = ANALYZEMAIN - 1;
-            stmt->pstGlobalStatEx[stmt->tableidx].eAnalyzeMode = ANALYZEMAIN;
-        } else {
-            stmt->tableidx = ANALYZENORMAL;
-            stmt->pstGlobalStatEx[stmt->tableidx].eAnalyzeMode = ANALYZENORMAL;
-        }
+        stmt->tableidx = ANALYZENORMAL;
+        stmt->pstGlobalStatEx[stmt->tableidx].eAnalyzeMode = ANALYZENORMAL;
 
         /* for global stats, other CNs get stats from the CN which do analyze. */
         FETCH_GLOBAL_STATS(relname, va_cols, va_cols_multi, (stmt->va_cols != NIL));
@@ -10470,3 +10316,11 @@ Datum global_clean_prepared_xacts(PG_FUNCTION_ARGS)
 
     PG_RETURN_NULL();
 }
+
+bool check_errmsg_for_receive_buffer(RemoteQueryState* combiner, int tapenum, bool* has_checked, int* has_err_idx)
+{
+    Assert(false);
+    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
+    return NULL;
+}
+

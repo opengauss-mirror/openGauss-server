@@ -11,6 +11,129 @@ NOTICE:  schema "plpgsql_override_out" does not exist, skipping
 create schema plpgsql_override_out;
 set current_schema = plpgsql_override_out;
 set behavior_compat_options = 'proc_outparam_override';
+create or replace procedure p_wrt1(w_text varchar(100))
+as
+declare
+v_file number;
+begin
+ v_file := dbe_file.open('dbef_dir', 'w_tmp.txt', 'w', 20000);
+ for i in 1..5 loop
+ dbe_file.format_write(v_file, '%s\n', w_text);
+ end loop;
+ dbe_file.flush(v_file);
+
+ if dbe_file.is_close(v_file) then
+ perform dbe_file.close(v_file);
+ end if;
+end;
+/
+BEGIN
+DBE_SCHEDULER.CREATE_JOB('job_1', 'PLSQL_BLOCK', 'BEGIN \d+; END;', 0, NULL, NULL, NULL,'DEFAULT_JOB_CLASS', FALSE, TRUE, NULL, NULL, NULL);
+END;
+/
+declare
+in_job_name varchar2;
+begin
+in_job_name='cidpjob_13';
+dbe_scheduler.drop_job(job_name=>in_job_name,force=>true);
+end;
+/
+NOTICE:  Undefined object cidpjob_13.
+CONTEXT:  SQL statement "CALL dbe_scheduler.drop_job(job_name=>in_job_name,force=>true)"
+PL/pgSQL function inline_code_block line 5 at PERFORM
+\df aclexplode
+                                                                                      List of functions
+   Schema   |    Name    | Result data type |                                        Argument data types                                         |  Type  | fencedmode | propackage | prokind 
+------------+------------+------------------+----------------------------------------------------------------------------------------------------+--------+------------+------------+---------
+ pg_catalog | aclexplode | SETOF record     | acl aclitem[], OUT grantor oid, OUT grantee oid, OUT privilege_type text, OUT is_grantable boolean | normal | f          | f          | f
+(1 row)
+
+\df check_engine_status
+                                                    List of functions
+   Schema   |        Name         | Result data type | Argument data types  |  Type  | fencedmode | propackage | prokind 
+------------+---------------------+------------------+----------------------+--------+------------+------------+---------
+ pg_catalog | check_engine_status | text             | text, text, OUT text | normal | f          | f          | f
+(1 row)
+
+\df comm_check_info
+                                         List of functions
+ Schema | Name | Result data type | Argument data types | Type | fencedmode | propackage | prokind 
+--------+------+------------------+---------------------+------+------------+------------+---------
+(0 rows)
+
+\df adm_hist_sqlstat_func
+                                                                                                                                                                                          List of functions
+   Schema   |         Name          | Result data type |                                                                                                                                      Argument data types                                                                                                                                       |  Type  | fencedmode | propackage | prokind 
+------------+-----------------------+------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------+------------+------------+---------
+ pg_catalog | adm_hist_sqlstat_func | SETOF record     | OUT instance_number integer, OUT plan_hash_value integer, OUT module integer, OUT apwait_delta integer, OUT sql_id bigint, OUT snap_id bigint, OUT elapsed_time_delta bigint, OUT cpu_time_delta bigint, OUT executions_delta bigint, OUT iowait_delta bigint, OUT rows_processed_delta bigint | normal | f          | f          | f
+(1 row)
+
+\df adm_hist_sqlstat_idlag_func
+                                                                    List of functions
+   Schema   |            Name             | Result data type |             Argument data types              |  Type  | fencedmode | propackage | prokind 
+------------+-----------------------------+------------------+----------------------------------------------+--------+------------+------------+---------
+ pg_catalog | adm_hist_sqlstat_idlag_func | SETOF record     | OUT snap_id integer, OUT snap_id_lag integer | normal | f          | f          | f
+(1 row)
+
+create or replace procedure pro2(i_col1 out int)
+is
+a int;
+begin
+a := 9;
+end;
+/
+ 
+declare
+a int;
+begin
+perform pro2(a);
+raise info '%',a;
+end;
+/
+INFO:  <NULL>
+create or replace procedure test1(col1 out varchar2) package
+is
+begin
+col1:=1;
+raise info '2';
+end;
+/
+create or replace procedure test1(col1 out int) package
+is
+begin
+col1:=1;
+raise info '3';
+end;
+/
+declare
+a int;
+begin
+perform test1(a);
+raise info '%',a;
+end;
+/
+INFO:  3
+CONTEXT:  SQL statement "CALL test1(a)"
+PL/pgSQL function inline_code_block line 4 at SQL statement
+INFO:  1
+CREATE OR REPLACE PROCEDURE proc_out_test(a int) package
+is
+begin
+null;
+end;
+/
+CREATE OR REPLACE PROCEDURE proc_out_test(a out int) package
+is
+begin
+null;
+end;
+/
+select proname,proargtypes,allargtypes from pg_proc where proname='proc_out_test';
+    proname    | proargtypes | allargtypes 
+---------------+-------------+-------------
+ proc_out_test |             | 23
+(1 row)
+
 create or replace package pck1 is
 procedure p1;
 procedure p1(v1 in varchar2);
@@ -586,14 +709,6 @@ begin
 perform pck1.p1(var,'a');
 end;
 /
-ERROR:  not support perform when behavior_compat_options="proc_outparam_override"
-LINE 4: perform pck1.p1(var,'a');
-        ^
-QUERY:  DECLARE 
-var pck1.tp1;
-begin
-perform pck1.p1(var,'a');
-end
 set behavior_compat_options='proc_outparam_override';
 create or replace procedure p2(a int,b out int) is
 begin
@@ -624,29 +739,39 @@ begin
 perform pck1.p1(var,'a');--不支持，报错
 end;
 /
-ERROR:  not support perform when behavior_compat_options="proc_outparam_override"
-LINE 4: perform pck1.p1(var,'a');--不支持，报错
-        ^
-QUERY:  DECLARE 
-var pck1.tp1;
-begin
-perform pck1.p1(var,'a');--不支持，报错
-end
 \df
-                                                              List of functions
-        Schema        |   Name   | Result data type |            Argument data types            |  Type  | fencedmode | propackage | prokind 
-----------------------+----------+------------------+-------------------------------------------+--------+------------+------------+---------
- plpgsql_override_out | bio_func | SETOF record     | INOUT a integer, b integer, OUT c integer | normal | f          | f          | f
- plpgsql_override_out | bio_proc | record           | INOUT a integer, b integer, OUT c integer | normal | f          | f          | p
- plpgsql_override_out | iob_func | SETOF record     | a integer, OUT b integer, INOUT c integer | normal | f          | f          | f
- plpgsql_override_out | iob_proc | record           | a integer, OUT b integer, INOUT c integer | normal | f          | f          | p
- plpgsql_override_out | obi_func | SETOF record     | OUT a integer, INOUT b integer, c integer | normal | f          | f          | f
- plpgsql_override_out | obi_proc | record           | OUT a integer, INOUT b integer, c integer | normal | f          | f          | p
- plpgsql_override_out | p2       | integer          | a integer, OUT b integer                  | normal | f          | f          | p
-(7 rows)
+                                                                 List of functions
+        Schema        |     Name      | Result data type  |            Argument data types            |  Type  | fencedmode | propackage | prokind 
+----------------------+---------------+-------------------+-------------------------------------------+--------+------------+------------+---------
+ plpgsql_override_out | bio_func      | SETOF record      | INOUT a integer, b integer, OUT c integer | normal | f          | f          | f
+ plpgsql_override_out | bio_proc      | record            | INOUT a integer, b integer, OUT c integer | normal | f          | f          | p
+ plpgsql_override_out | iob_func      | SETOF record      | a integer, OUT b integer, INOUT c integer | normal | f          | f          | f
+ plpgsql_override_out | iob_proc      | record            | a integer, OUT b integer, INOUT c integer | normal | f          | f          | p
+ plpgsql_override_out | obi_func      | SETOF record      | OUT a integer, INOUT b integer, c integer | normal | f          | f          | f
+ plpgsql_override_out | obi_proc      | record            | OUT a integer, INOUT b integer, c integer | normal | f          | f          | p
+ plpgsql_override_out | p2            | integer           | a integer, OUT b integer                  | normal | f          | f          | p
+ plpgsql_override_out | p_wrt1        | void              | w_text character varying                  | normal | f          | f          | p
+ plpgsql_override_out | pro2          | integer           | OUT i_col1 integer                        | normal | f          | f          | p
+ plpgsql_override_out | proc_out_test | integer           | OUT a integer                             | normal | f          | t          | p
+ plpgsql_override_out | test1         | character varying | OUT col1 character varying                | normal | f          | t          | p
+(11 rows)
 
+create or replace procedure dbe_test(inout oldstring varchar2,newstr varchar2)
+is
+begin
+    oldstring:=oldstring || newstr;
+end;
+/
+declare
+a text:='aaaaaaaaaaa';
+begin
+for i in 1..50000 loop
+    dbe_test(a,'aaaaa');
+end loop;
+end;
+/
 drop package pck1;
---?.*
+NOTICE:  drop cascades to function plpgsql_override_out.p1(character varying)
 drop type o1_test;
 set behavior_compat_options = '';
 create or replace procedure proc_test
@@ -734,6 +859,101 @@ begin
 not_1:='202208';
 end;
 /
+create or replace function f1(a out text) return text
+is
+b text;
+begin
+return b;
+end;
+/
+ 
+create or replace function f3() return text
+as
+declare
+buf text;
+ddd text;
+b text;
+begin
+return buf;
+end;
+/
+ 
+call f3();
+ f3 
+----
+ 
+(1 row)
+
+ 
+create or replace function f1(a out text) return text
+is
+b text;
+begin
+a :='aaa';
+return b;
+end;
+/
+ 
+create or replace function f3() return text
+as
+declare
+buf text;
+ddd text;
+b text;
+begin
+perform f1(buf);
+return buf;
+end;
+/
+ 
+call f3();
+ f3 
+----
+ 
+(1 row)
+
+ 
+create or replace function f1(c int, a out text) return text
+is
+b text;
+begin
+c:=1;
+a :='aaa';
+return b;
+end;
+/
+ 
+create or replace function f3() return text
+as
+declare
+buf text;
+ddd text;
+b text;
+begin
+perform f1(1,buf);
+return buf;
+end;
+/
+ 
+call f3();
+ f3 
+----
+ 
+(1 row)
+
+create or replace procedure pro2(i_col1 out int)
+is
+a int;
+begin
+a := 9;
+end;
+/
+declare
+a int;
+begin
+perform pro2(a);
+end;
+/
 call proc_test();
  proc_test 
 -----------
@@ -741,9 +961,202 @@ call proc_test();
 (1 row)
 
 drop procedure proc_test;
+set behavior_compat_options='proc_outparam_override';
+set plsql_compile_check_options='outparam';
+create procedure p11(a out int) package is
+begin
+a:=12;
+end;
+/
+create procedure p11(a out varchar2) package is
+begin
+a:='12aa';
+end;
+/
+create procedure p11(a out int[]) package is
+begin
+a:=12;
+end;
+/
+create procedure p11(a in int, b out int) package is
+begin
+a:=12;
+b:=66;
+end;
+/
+drop procedure if exists p112(out int);
+NOTICE:  function p112(pg_catalog.int4) does not exist, skipping
+create procedure p112(a out int) is
+declare
+aa varchar2;
+a varchar2;
+begin
+aa := p11(p11(p11('2aaa')));--常量报错
+raise info 'aa=%',aa;
+end;
+/
+ERROR:  when invoking function p11, no destination for argments num "a"
+CONTEXT:  compilation of PL/pgSQL function "p112" near line 4
+drop procedure if exists p112(out int);
+NOTICE:  function p112(pg_catalog.int4) does not exist, skipping
+create procedure p112(a out int) is
+declare
+aa varchar2;
+a varchar2;
+begin
+aa := p11(p11('2aaa'));--常量报错
+raise info 'aa=%',aa;
+end;
+/
+ERROR:  when invoking function p11, no destination for argments num "a"
+CONTEXT:  compilation of PL/pgSQL function "p112" near line 4
+drop procedure if exists p112(out int);
+NOTICE:  function p112(pg_catalog.int4) does not exist, skipping
+create procedure p112(a out int) is
+declare
+aa varchar2;
+a varchar2;
+begin
+aa := p11('2aaa');--常量报错
+raise info 'aa=%',aa;
+end;
+/
+ERROR:  when invoking function p11, no destination for argments num "a"
+CONTEXT:  compilation of PL/pgSQL function "p112" near line 4
+drop procedure if exists p112(out int);
+NOTICE:  function p112(pg_catalog.int4) does not exist, skipping
+create procedure p112(a out int) is
+declare
+aa varchar2;
+a varchar2;
+begin
+aa := p11(1+1);--常量报错
+raise info 'aa=%',aa;
+end;
+/
+ERROR:  when invoking function p11, no destination for argments num "a"
+CONTEXT:  compilation of PL/pgSQL function "p112" near line 4
+drop procedure if exists p112(out int);
+NOTICE:  function p112(pg_catalog.int4) does not exist, skipping
+create procedure p112(a out int) is
+declare
+aa varchar2;
+a varchar2;
+begin
+aa := p11(a);--常量不报错
+raise info 'aa=%',aa;
+end;
+/
+drop procedure if exists p112(out int);
+create procedure p112(a out int) is
+declare
+aa varchar2;
+a int[];
+begin
+aa := p11(a);--常量不报错
+raise info 'aa=%',aa;
+end;
+/
+drop procedure if exists p112(out int);
+create procedure p112(a out int) is
+declare
+aa varchar2;
+bb int;
+begin
+aa := p11(p11('2aaa'),bb);--常量报错
+raise info 'aa=%',aa;
+end;
+/
+ERROR:  when invoking function p11, no destination for argments num "a"
+CONTEXT:  compilation of PL/pgSQL function "p112" near line 4
+drop package if exists pck1;
+NOTICE:  package pck1() does not exist, skipping
+create or replace package pck1 is
+type tp_1 is record(v01 number, v03 varchar2, v02 number);
+procedure p1(a out int);
+procedure p1(b out tp_1);
+end pck1;
+/
+create or replace package body pck1 is
+procedure p1(a out int) is
+begin
+a:=12;
+end;
+procedure p1(b out tp_1) is
+begin
+b.v01:=13;
+raise info 'b:%', b;
+end;
+end pck1;
+/
+declare
+begin
+perform pck1.p1(2);--常量报错
+end;
+/
+ERROR:  query has no destination for result data
+HINT:  If you want to discard the results of a SELECT, use PERFORM instead.
+CONTEXT:  PL/pgSQL function inline_code_block line 3 at SQL statement
+drop package if exists pck1;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to function plpgsql_override_out.p1()
+drop cascades to function plpgsql_override_out.p1()
+create or replace package pck1 is
+type tp_1 is record(v01 number, v03 varchar2, v02 number);
+type tp_2 is varray(10) of int;
+procedure p1(a in tp_1,c inout tp_2,b out varchar2);
+procedure p1(a in tp_2,c inout tp_1,b out tp_1);
+end pck1;
+/
+create or replace package body pck1 is
+procedure p1(a in tp_1,c inout tp_2,b out varchar2) is
+begin
+c(1):=a.v01;
+b:=a.v03;
+raise info 'b:%',b;
+end;
+procedure p1(a in tp_2,c inout tp_1,b out tp_1) is
+begin
+c.v03:=a(1);
+b:=(a(1),c.v03,a(2));
+raise info 'b:%',b;
+end;
+end pck1;
+/
+declare
+var1 pck1.tp_2;
+var2 varchar2;
+begin
+perform pck1.p1((1,'bb','11'),array[2,3,4],var2);--报错
+end;
+/
+INFO:  b:bb
+CONTEXT:  SQL statement "CALL pck1.p1((1,'bb','11'),array[2,3,4],var2)"
+PL/pgSQL function inline_code_block line 5 at SQL statement
+ERROR:  query has no destination for result data
+HINT:  If you want to discard the results of a SELECT, use PERFORM instead.
+CONTEXT:  PL/pgSQL function inline_code_block line 5 at SQL statement
+declare
+var1 pck1.tp_2;
+var2 varchar2;
+begin
+perform pck1.p1(a=>(1,'bb','11'),c=>var1,b=>'aa');--报错
+end;
+/
+ERROR:  Named argument "b" can not be a const
+CONTEXT:  compilation of PL/pgSQL function "inline_code_block" near line 5
+set plsql_compile_check_options='';
+drop package if exists pck1;
+NOTICE:  drop cascades to 2 other objects
+--?.*
+--?.*
 drop schema if exists plpgsql_override_out cascade;
-NOTICE:  drop cascades to 8 other objects
-DETAIL:  drop cascades to function iob_proc(integer,integer)
+NOTICE:  drop cascades to 20 other objects
+DETAIL:  drop cascades to function p_wrt1(character varying)
+drop cascades to function test1()
+drop cascades to function plpgsql_override_out.test1()
+drop cascades to function proc_out_test()
+drop cascades to function iob_proc(integer,integer)
 drop cascades to function bio_proc(integer,integer)
 drop cascades to function obi_proc(integer,integer)
 drop cascades to function iob_func(integer,integer)
@@ -751,3 +1164,11 @@ drop cascades to function bio_func(integer,integer)
 drop cascades to function obi_func(integer,integer)
 drop cascades to function p2(integer)
 drop cascades to table test_tb
+drop cascades to function dbe_test(character varying,character varying)
+drop cascades to function f1(integer)
+drop cascades to function f3()
+drop cascades to function pro2()
+drop cascades to function plpgsql_override_out.p11()
+drop cascades to function p11()
+drop cascades to function plpgsql_override_out.p11()
+drop cascades to function p11(integer)

@@ -239,6 +239,7 @@ extern char* make_column_map(TupleDesc tuple_desc);
  * @Notes: remember to pfree the array.
  */
 extern bool* CheckPartkeyHasTimestampwithzone(Relation partTableRel, bool isForSubPartition = false);
+extern bool *CheckSubPartkeyHasTimestampwithzone(Relation partTableRel, List *subpartKeyPosList);
 
 extern Oid AddNewIntervalPartition(Relation rel, void* insertTuple, bool isDDL = false);
 

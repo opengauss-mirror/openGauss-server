@@ -110,7 +110,8 @@ typedef enum {
     REMOVE_MEMBER_COMMAND,
     CHANGE_ROLE_COMMAND,
     MINORITY_START_COMMAND,
-    COPY_COMMAND
+    COPY_COMMAND,
+    GS_STACK_COMMAND
 } CtlCommand;
 
 typedef enum {
@@ -129,6 +130,12 @@ typedef enum {
     REMOVE_OPERATION,
     CHANGE_OPERATION
 } MemberOperation;
+
+typedef enum {
+    DEFAULT_REASON = 0,
+    CONN_PRIMARY_FAIL
+} BuildFailReason;
+
 
 #define MAX_PERCENT 100
 #define FAIL_PERCENT -1
@@ -199,6 +206,9 @@ static char g_hotpatch_cmd_file[MAXPGPATH];
 static char g_hotpatch_tmp_cmd_file[MAXPGPATH];
 static char g_hotpatch_ret_file[MAXPGPATH];
 static char g_hotpatch_lockfile[MAXPGPATH];
+static char g_stack_ret_file[MAXPGPATH];
+static char g_stack_tmp_cmd_file[MAXPGPATH];
+static char g_stack_cmd_file[MAXPGPATH];
 char gaussdb_state_file[MAXPGPATH] = {0};
 static char add_member_file[MAXPGPATH];
 static char remove_member_file[MAXPGPATH];
@@ -223,6 +233,7 @@ pid_t process_id = 0;
 const int g_length_stop_char = 2;
 const int g_length_suffix = 3;
 const static int INC_BUILD_RETRY_TIMES = 3;
+BuildFailReason g_inc_fail_reason = DEFAULT_REASON;
 
 bool g_is_obsmode = false;
 
@@ -349,6 +360,7 @@ static void free_ctl();
 extern int GetLengthAndCheckReplConn(const char* ConnInfoList);
 extern BuildErrorCode gs_increment_build(const char* pgdata, const char* connstr, char* sysidentifier, uint32 timeline, uint32 term);
 const char *BuildModeToString(BuildMode mode);
+static char* get_gausshome();
 
 void check_input_for_security(char* input_env_value)
 {
@@ -438,7 +450,7 @@ static pgpid_t get_pgdbpid_for_stop(void)
             }
 
             if (chmod(pid_file, 0600) == -1) {
-                pg_log(PG_WARNING, _(" could not set permissions of file \"%s\": %m\n"), pid_file);
+                pg_log(PG_WARNING, _("could not set permissions of file \"%s\": %s\n"), pid_file, strerror(errno));
             }
             if (unlink(pid_file) < 0) {
                 pg_log(PG_WARNING, _("Delete %s failed ,please try to delete it manually again.\n"), pid_file);
@@ -789,8 +801,11 @@ static pgpid_t start_postmaster(void)
     struct stat buf;
     FILE* fd = NULL;
     int ret = 0;
-
 #ifndef WIN32
+#ifdef ENABLE_LITE_MODE
+    char* gausshome = getenv("GAUSSHOME");
+    check_input_for_security(gausshome);
+#endif
     pgpid_t pm_pid;
 
     /* Flush stdio channels just before fork, to avoid double-output problems */
@@ -808,7 +823,6 @@ static pgpid_t start_postmaster(void)
         return pm_pid;
     }
 
-    /* fork succeeded, in child */
 
     /*
      * If possible, detach the postmaster process from the launching process
@@ -822,9 +836,14 @@ static pgpid_t start_postmaster(void)
         exit(1);
     }
 #endif
-
+    /* fork succeeded, in child */
+#ifndef ENABLE_LITE_MODE
     if (pg_host != NULL && *(pg_host) != '\0') {
         ret = snprintf_s(template_file, MAXPGPATH, MAXPGPATH - 1, "%s/binary_upgrade/old_upgrade_version", pg_host);
+#else
+    if (gausshome != NULL && *(gausshome) != '\0') {
+        ret = snprintf_s(template_file, MAXPGPATH, MAXPGPATH - 1, "%s/old_upgrade_version", gausshome);
+#endif
         securec_check_ss_c(ret, "\0", "\0");
         if (realpath(template_file, version_file) == NULL && version_file[0] == '\0') {
             pg_log(PG_WARNING, _("could not get correct path or the abs path is too long!\n"));
@@ -1814,7 +1833,7 @@ static void do_stop(bool force)
         if (force || (shutdown_mode == IMMEDIATE_MODE)) {
             kill_proton_force();
             if (-1 == chmod(pid_file, 0600)) {
-                pg_log(PG_WARNING, _(" could not set permissions of file \"%s\": %m\n"), pid_file);
+                pg_log(PG_WARNING, _("could not set permissions of file \"%s\": %s\n"), pid_file, strerror(errno));
                 return;
             }
         }
@@ -1851,7 +1870,7 @@ static void do_stop(bool force)
         }
 
         if (pid != 0) { /* pid file still exists */
-            if (force) {
+            if (force || (shutdown_mode == IMMEDIATE_MODE)) {
                 kill_proton_force();
 
                 if (stat(pid_file, &statbuf) != 0) {
@@ -1865,7 +1884,7 @@ static void do_stop(bool force)
                 }
 
                 if (-1 == chmod(pid_file, 0600)) {
-                    pg_log(PG_WARNING, _(" could not set permissions of file \"%s\": %m\n"), pid_file);
+                    pg_log(PG_WARNING, _("could not set permissions of file \"%s\": %s\n"), pid_file, strerror(errno));
                 }
                 return;
             } else {
@@ -3643,6 +3662,7 @@ static void do_help(void)
 #if defined(ENABLE_MULTIPLE_NODES) || (defined(ENABLE_PRIVATEGAUSS) && (!defined(ENABLE_LITE_MODE)))
     (void)printf(_("  %s hotpatch  [-D DATADIR] [-a ACTION] [-n NAME]\n"), progname);
 #endif
+    (void)printf(_("  %s stack [-D DATADIR] [-I lwtid]\n"), progname);
 #ifndef ENABLE_MULTIPLE_NODES
 #ifndef ENABLE_LITE_MODE
     doDCFAddCmdHelp();
@@ -3704,9 +3724,9 @@ static void do_help(void)
 
 #if defined(ENABLE_MULTIPLE_NODES) || (defined(ENABLE_PRIVATEGAUSS) && (!defined(ENABLE_LITE_MODE)))
     printf(_("\nOptions for hotpatch:\n"));
-    printf(
-        _("  -a ACTION  patch command, ACTION can be \"load\" \"unload\" \"active\" \"deactive\" \"info\" \"list\"\n"));
-    printf(_("  -n NAME    patch name, NAME should be patch name with path\n"));
+    printf(_("  -a ACTION   patch command, ACTION can be"
+        " \"load\" \"unload\" \"active\" \"deactive\" \"info\" \"list\"\n"));
+    printf(_("  -n NAME     patch name, NAME should be patch name with path\n"));
 #endif
 #ifndef ENABLE_MULTIPLE_NODES
 #ifndef ENABLE_LITE_MODE
@@ -3714,6 +3734,8 @@ static void do_help(void)
     doDCFOptionDesHelp();
 #endif
 #endif
+    printf(_("\nOptions for stack:\n"));
+    printf(_("  -I lwtid    light weight thread id. get stack of specific thread according to it's lwtid\n"));
 
     printf(_("\nShutdown modes are:\n"));
     printf(_("  fast        quit directly, with proper shutdown\n"));
@@ -4130,6 +4152,12 @@ static bool DoAutoBuild(uint32 term)
 {
     bool buildSuccess = DoIncBuild(term);
     if (!buildSuccess) {
+        if (g_inc_fail_reason == CONN_PRIMARY_FAIL) {
+            /* If primary can not be connected, there is no meaning to try full build. */
+            pg_log(PG_WARNING, _("inc build failed due to primary connection failure, skip full build.\n"));
+            return buildSuccess;
+        }
+
         pg_log(PG_WARNING, _("inc build failed, change to full build.\n"));
         buildSuccess = do_actual_build(term);
     }
@@ -4202,6 +4230,11 @@ static void do_build(uint32 term)
         pg_log(PG_WARNING, "%s: Invalid datanode/coordinator connector: %s.\n", progname, conn_str);
         exit(1);
     }
+
+    if (build_mode != COPY_SECURE_FILES_BUILD) {
+        set_build_pid(getpid());
+    }
+
     if (pid > 0 && build_mode != COPY_SECURE_FILES_BUILD) {
         do_build_stop(pid);
     } else if (pid <= 0 && build_mode != COPY_SECURE_FILES_BUILD) {
@@ -4361,7 +4394,8 @@ static void do_full_backup(uint32 term)
     securec_check_ss_c(ret, "\0", "\0");
 
     ret = snprintf_s(sql_cmd, MAXPGPATH, MAX_PATH_LEN - 1,
-        "select * from gs_upload_obs_file('%s', 'base.tar.gz', '%s/base.tar.gz')", slotname, pgxc_node_name);
+        "select * from pg_catalog.gs_upload_obs_file('%s', 'base.tar.gz', '%s/base.tar.gz')",
+        slotname, pgxc_node_name);
     securec_check_ss_c(ret, "\0", "\0");
 
     bool buildSuccess = backup_main(pg_data, term, false);
@@ -4425,7 +4459,6 @@ static char* get_gausshome()
             tnRet = strncpy_s(lcdata, MAXPGPATH, gausshome, strlen(gausshome));
             securec_check_c(tnRet, "\0", "\0");
         }
-
         canonicalize_path(lcdata);
         return xstrdup(lcdata);
     } else {
@@ -4517,7 +4550,7 @@ static void do_full_restore(void)
     read_ssl_confval();
 
     ret = snprintf_s(sql_cmd, MAXPGPATH, MAX_PATH_LEN - 1,
-        "select * from gs_download_obs_file('%s', '%s/base.tar.gz', 'base.tar.gz')", slotname, key_cn);
+        "select * from pg_catalog.gs_download_obs_file('%s', '%s/base.tar.gz', 'base.tar.gz')", slotname, key_cn);
     securec_check_ss_c(ret, "\0", "\0");
 
     ret = snprintf_s(tar_cmd, MAXPGPATH, MAX_PATH_LEN - 1, "tar -zvxf %s/base.tar.gz -C %s --strip-components 1",
@@ -4629,6 +4662,40 @@ static void check_nested_pgconf(void)
     optlines = NULL;
 }
 
+static bool GetRemoteNodeName()
+{
+    PGresult* res = NULL;
+    char* val = NULL;
+    char* save = NULL;
+    char* rname = NULL;
+    errno_t errorno = EOK;
+
+    res = PQexec(streamConn, "IDENTIFY_MAXLSN");
+    if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+        pg_log(PG_WARNING, _(" could not identify maxlsn: %s"), PQerrorMessage(streamConn));
+        PQclear(res);
+        return false;
+    }
+
+    if (PQntuples(res) != 1 || PQnfields(res) != 1) {
+        pg_log(PG_WARNING, _("could not identify maxlsn, got %d rows and %d fields\n"), PQntuples(res), PQnfields(res));
+        PQclear(res);
+        return false;
+    }
+
+    val = PQgetvalue(res, 0, 0);
+    rname = strtok_r(val, "|", &save);
+    if (rname == NULL) {
+        pg_log(PG_WARNING, _(" get remote node name failed from %s.\n"), val);
+        PQclear(res);
+        return false;
+    }
+    errorno = strcpy_s(remotenodename, MAXPGPATH, rname);
+    securec_check_ss_c(errorno, "\0", "\0");
+    PQclear(res);
+
+    return true;
+}
 /*
  * build_mode:
  *		AUTO_BUILD: do gs_rewind first, after failed 3 times, do full
@@ -4645,10 +4712,10 @@ static bool do_incremental_build(uint32 term)
     uint32 timeline;
     char connstrSource[MAXPGPATH] = {0};
 
-    CheckBuildParameter();
+    g_inc_fail_reason = DEFAULT_REASON;
 
+    CheckBuildParameter();
     check_nested_pgconf();
-    set_build_pid(getpid());
 
     /* 
      * Save connection info from command line or openGauss file.
@@ -4659,6 +4726,7 @@ static bool do_incremental_build(uint32 term)
     streamConn = check_and_conn(standby_connect_timeout, standby_recv_timeout, term);
     if (streamConn == NULL) {
         pg_log(PG_WARNING, _("could not connect to server.\n"));
+        g_inc_fail_reason = CONN_PRIMARY_FAIL;
         return false;
     }
 
@@ -4691,6 +4759,14 @@ static bool do_incremental_build(uint32 term)
     sysidentifier = pg_strdup(PQgetvalue(res, 0, 0));
     timeline = atoi(PQgetvalue(res, 0, 1));
     PQclear(res);
+
+    if (IS_CROSS_CLUSTER_BUILD && !GetRemoteNodeName()) {
+        pg_log(PG_WARNING, _("could not get remote node name when cross cluster build.\n"));
+        PQfinish(streamConn);
+        streamConn = NULL;
+        return false;
+    }
+
     if (streamConn != NULL) {
         PQfinish(streamConn);
         streamConn = NULL;
@@ -4824,15 +4900,19 @@ static void do_overwrite()
 {
     char cmd[MAX_PATH_LEN] = {0};
     int nRet = 0;
-    
+    uint32 high = 0;
+    uint32 low = 0;
+
     nRet = snprintf_s(
-        cmd, sizeof(cmd), sizeof(cmd) - 1, "gaussdb --single -Q %s postgres", xlog_overwrite_opt);
+        cmd, sizeof(cmd), sizeof(cmd) - 1, "gaussdb --single -Q \'%s\' postgres", xlog_overwrite_opt);
     securec_check_ss_c(nRet, "\0", "\0");
 
-    if (xlog_overwrite_opt != NULL && strcmp(xlog_overwrite_opt, "copy_from_local") == 0) {
+    if (xlog_overwrite_opt != NULL && (strcmp(xlog_overwrite_opt, "copy_from_local") == 0 ||
+        sscanf_s(xlog_overwrite_opt, "copy_from_local(%08X/%08X)", &high, &low) == 2)) {
         pg_log(PG_WARNING,
             _("start to overwrite xlog from local pg_xlog to shared storage.\n"));
-    } else if (xlog_overwrite_opt != NULL && strcmp(xlog_overwrite_opt, "force_copy_from_local") == 0) {
+    } else if (xlog_overwrite_opt != NULL && (strcmp(xlog_overwrite_opt, "force_copy_from_local") == 0 ||
+        sscanf_s(xlog_overwrite_opt, "force_copy_from_local(%08X/%08X)", &high, &low) == 2)) {
         pg_log(PG_WARNING,
             _("start to force overwrite xlog local pg_xlog to shared storage.\n"));
     } else if (xlog_overwrite_opt != NULL && strcmp(xlog_overwrite_opt, "copy_from_share") == 0) {
@@ -4904,8 +4984,7 @@ static bool do_actual_build(uint32 term)
     pg_log(PG_WARNING, _("current workdir is (%s).\n"), cwd);
 
     check_nested_pgconf();
-    set_build_pid(getpid());
-
+    
     replconn_num = get_replconn_number(pg_conf_file);
 
     tnRet = memset_s(&state, sizeof(state), 0, sizeof(state));
@@ -4926,6 +5005,11 @@ static bool do_actual_build(uint32 term)
 
     bool is_from_standby = (build_mode == STANDBY_FULL_BUILD || build_mode == CROSS_CLUSTER_STANDBY_FULL_BUILD);
     bool buildSuccess = backup_main(pg_data, term, is_from_standby);
+
+    if (buildSuccess && IS_CROSS_CLUSTER_BUILD) {
+        buildSuccess = RenameTblspcDir(pg_data);
+    }
+
     if (!buildSuccess) {
         pg_log(PG_WARNING, _("%s failed(%s).\n"), BuildModeToString(build_mode), pg_data);
         return buildSuccess;
@@ -4976,8 +5060,6 @@ static bool do_incremental_build_xlog()
     /* save progress info */
     GaussState state;
     errno_t tnRet = 0;
-
-    set_build_pid(getpid());
 
     tnRet = memset_s(&state, sizeof(state), 0, sizeof(state));
     securec_check_c(tnRet, "\0", "\0");
@@ -5244,7 +5326,7 @@ int remove_last_result_file(void)
     return -1;
 }
 
-FILE* hotpatch_wait_return_file(void)
+FILE* wait_return_file(char* ret_file, int wait_counter)
 {
     int i;
     int ret = 0;
@@ -5254,10 +5336,10 @@ FILE* hotpatch_wait_return_file(void)
     ts.tv_sec = 0;
     ts.tv_nsec = 1000000;
 
-    canonicalize_path(g_hotpatch_ret_file);
+    canonicalize_path(ret_file);
 
-    for (i = 0; i < g_hotpatch_wait_counter; i++) {
-        retfd = fopen(g_hotpatch_ret_file, "r");
+    for (i = 0; i < wait_counter; i++) {
+        retfd = fopen(ret_file, "r");
         if (retfd != NULL) {
             ret = fread(&tmp_pid, sizeof(pid_t), 1, retfd);
             if (ret != 1) {
@@ -5285,7 +5367,7 @@ void hotpatch_wait_and_get_replyinfo_from_node(bool is_list)
     FILE* retfd = NULL;
     char return_string[MAX_LENGTH_RETURN_STRING] = {};
 
-    retfd = hotpatch_wait_return_file();
+    retfd = wait_return_file(g_hotpatch_ret_file, g_hotpatch_wait_counter);
     if (retfd == NULL) {
         pg_log(PG_WARNING, _("[PATCH-ERROR]: Hotpatch timeout!\n"));
         return;
@@ -5375,6 +5457,182 @@ void set_hotpatch_name(const char* arg)
     ret = snprintf_s(g_hotpatch_name, g_max_length_path, g_max_length_path - 1, "%s", arg);
     securec_check_ss_c(ret, "\0", "\0");
 
+    return;
+}
+
+int remove_last_stack_result(void)
+{
+    int ret = unlink(g_stack_ret_file);
+    if ((ret != 0) && (errno != ENOENT)) {
+        return -1;
+    }
+
+    return 0;
+}
+
+int set_stack_cmd(void)
+{
+    int mode = O_WRONLY | O_CREAT | PG_BINARY;
+    int flags = 0600;
+    int local_errno;
+    int lw_thread = 0;
+
+    canonicalize_path(g_stack_tmp_cmd_file);
+    int cmdfd = open(g_stack_tmp_cmd_file, mode, flags);
+    if (cmdfd < 0) {
+        return errno;
+    }
+
+    if (write(cmdfd, &process_id, sizeof(pid_t)) < 0) {
+        local_errno = errno;
+        close(cmdfd);
+        return local_errno;
+    }
+
+    if (taskid != NULL) {
+        if (strspn(taskid, "0123456789") != strlen(taskid)) {
+            pg_log(PG_WARNING, _("[STACK-ERROR] Invalid lwtid! \"%s\"\n"), taskid);
+            close(cmdfd);
+            return -1;
+        }
+        lw_thread = atoi(taskid);
+        if (lw_thread <= 0) {
+            pg_log(PG_WARNING, _("[STACK-ERROR] Invalid lwtid! \"%s\"\n"), taskid);
+            close(cmdfd);
+            return -1;
+        }
+    }
+
+    if (write(cmdfd, &lw_thread, sizeof(int)) < 0) {
+        local_errno = errno;
+        close(cmdfd);
+        return local_errno;
+    }
+
+    if (fsync(cmdfd) != 0) {
+        local_errno = errno;
+        close(cmdfd);
+        return local_errno;
+    }
+    close(cmdfd);
+    if (rename(g_stack_tmp_cmd_file, g_stack_cmd_file) != 0) {
+        return errno;
+    }
+
+    return 0;
+}
+
+void read_and_output_stack_in_sections(FILE* retfd, int total_size, int section_size)
+{
+    int ret;
+    int stack_size;
+    int total_stack_size = total_size;
+
+    if (total_size < 0 || section_size < 0) {
+        pg_log(PG_WARNING, _("[STACK-ERROR] Invalid stack size or section size!\n"));
+        return;
+    }
+    stack_size = total_stack_size > section_size ? section_size : total_stack_size;
+    char* stack = (char*)malloc(stack_size + 1);
+    if (stack == NULL) {
+        pg_log(PG_WARNING, _("[STACK-ERROR] out of memory!\n"));
+        return;
+    }
+    ret = memset_s(stack, stack_size + 1, '\0', stack_size + 1);
+    securec_check_c(ret, "\0", "\0");
+    pg_log(PG_PROGRESS, _("gs_stack start:\n"));
+
+    for (;total_stack_size > 0;) {
+        ret = fread(stack, sizeof(char), stack_size, retfd);
+        if (ret != stack_size) {
+            if (ferror(retfd) != 0) {
+                pg_log(PG_WARNING, _("[STACK-ERROR] Read stack failed!\n"));
+                free(stack);
+                return;
+            }
+        }
+        write_stderr(_("%s"), stack);
+        ret = memset_s(stack, stack_size + 1, '\0', stack_size + 1);
+        securec_check_c(ret, "\0", "\0");
+        total_stack_size = total_stack_size - section_size;
+        stack_size = total_stack_size > section_size ? section_size : total_stack_size;
+    }
+    free(stack);
+}
+
+void wait_and_get_stack(void)
+{
+    int ret;
+    FILE* retfd = NULL;
+    const int max_wait = 30000;
+    int stack_size;
+    const int section_size = 4096;
+
+    retfd = wait_return_file(g_stack_ret_file, max_wait);
+    if (retfd == NULL) {
+        pg_log(PG_WARNING, _("[STACK-ERROR]: Stack timeout!\n"));
+        return;
+    }
+
+    ret = fread(&stack_size, sizeof(int), 1, retfd);
+    if (ret != 1) {
+        // file length less than string max length, ret is not 1, this condition is OK. but if error happens, not OK.
+        if (ferror(retfd) != 0) {
+            fclose(retfd);
+            retfd = NULL;
+            pg_log(PG_WARNING, _("[STACK-ERROR] Read stack size failed!\n"));
+            return;
+        }
+    }
+
+    read_and_output_stack_in_sections(retfd, stack_size, section_size);
+    fclose(retfd);
+    ret = unlink(g_stack_ret_file);
+    if (ret != 0) {
+        pg_log(PG_WARNING, _("[STACK-ERROR] unlink stack ret file failed!\n"));
+    }
+    retfd = NULL;
+    pg_log(PG_WARNING, _("gs_stack finished!\n"));
+    return;
+}
+
+void do_gs_stack(void)
+{
+    pgpid_t pid;
+    errno_t ret = 0;
+
+    pid = get_pgpid();
+    if (pid == 0) {
+        pg_log(PG_WARNING, _("[STACK-ERROR] Can not get instance pid\n"));
+        return;
+    }
+
+    if (remove_last_stack_result() != 0) {
+        pg_log(PG_WARNING, _("[STACK-ERROR] Can not remove result file. maybe other process stacking now\n"));
+        return;
+    }
+
+    ret = set_stack_cmd();
+    if (ret != 0) {
+        pg_log(PG_WARNING, _("[STACK-ERROR] Set stack cmd failed\n"));
+        ret = unlink(g_stack_tmp_cmd_file);
+        if (ret != 0 && (errno != ENOENT)) {
+            pg_log(PG_WARNING, _("[STACK-ERROR] unlink stack tmp file failed\n"));
+        }
+        return;
+    }
+
+    sig = SIGUSR1;
+    if (kill((pid_t)pid, sig) != 0) {
+        pg_log(PG_WARNING, _("[STACK-ERROR] send stack signal failed\n"));
+        ret = unlink(g_stack_cmd_file);
+        if (ret != 0) {
+            pg_log(PG_WARNING, _("[STACK-ERROR] unlink stack file failed\n"));
+        }
+        return;
+    }
+
+    wait_and_get_stack();
     return;
 }
 
@@ -5789,6 +6047,12 @@ void SetConfigFilePath()
         securec_check_ss_c(ret, "\0", "\0");
         ret = snprintf_s(g_hotpatch_lockfile, MAXPGPATH, MAXPGPATH - 1, "%s/hotpatch.lock", pg_data);
         securec_check_ss_c(ret, "\0", "\0");
+        ret = snprintf_s(g_stack_ret_file, MAXPGPATH, MAXPGPATH - 1, "%s/gs_stack.ret", pg_data);
+        securec_check_ss_c(ret, "\0", "\0");
+        ret = snprintf_s(g_stack_tmp_cmd_file, MAXPGPATH, MAXPGPATH - 1, "%s/gs_stack.cmd.tmp", pg_data);
+        securec_check_ss_c(ret, "\0", "\0");
+        ret = snprintf_s(g_stack_cmd_file, MAXPGPATH, MAXPGPATH - 1, "%s/gs_stack.cmd", pg_data);
+        securec_check_ss_c(ret, "\0", "\0");
         g_dcfEnabled = GetPaxosValue(pg_conf_file);
         if (g_dcfEnabled) {
             ret = snprintf_s(add_member_file, MAXPGPATH, MAXPGPATH - 1, "%s/addmember", pg_data);
@@ -5916,15 +6180,15 @@ int main(int argc, char** argv)
         pgxcCommand = xstrdup("--single_node");
 #ifdef ENABLE_PRIVATEGAUSS
 #ifndef ENABLE_LITE_MODE
-        while ((c = getopt_long(argc, argv, "a:b:cD:e:fi:G:l:m:M:N:n:o:O:p:P:r:R:v:x:sS:t:u:U:wWZ:C:dqL:T:Q:", long_options,
-            &option_index)) != -1)
+        while ((c = getopt_long(argc, argv, "a:b:cD:e:fi:G:l:m:M:N:n:o:O:p:P:r:R:v:x:sS:t:u:U:wWZ:C:dqL:I:T:Q:",
+            long_options, &option_index)) != -1)
 #else
-        while ((c = getopt_long(argc, argv, "b:cD:e:fi:G:l:m:M:N:o:O:p:P:r:R:v:x:sS:t:u:U:wWZ:C:dqL:T:Q:", long_options,
-            &option_index)) != -1)
+        while ((c = getopt_long(argc, argv, "b:cD:e:fi:G:l:m:M:N:o:O:p:P:r:R:v:x:sS:t:u:U:wWZ:C:dqL:I:T:Q:",
+            long_options, &option_index)) != -1)
 #endif
 #else
-        while ((c = getopt_long(argc, argv, "b:cD:e:fi:G:l:m:M:N:o:O:p:P:r:R:v:x:sS:t:u:U:wWZ:C:dqL:T:Q:", long_options,
-            &option_index)) != -1)
+        while ((c = getopt_long(argc, argv, "b:cD:e:fi:G:l:m:M:N:o:O:p:P:r:R:v:x:sS:t:u:U:wWZ:C:dqL:I:T:Q:",
+            long_options, &option_index)) != -1)
 #endif
 #endif
         {
@@ -6368,6 +6632,8 @@ int main(int argc, char** argv)
                 ctl_command = FINISH_REDO_COMMAND;
             else if (strcmp(argv[optind], "copy") == 0)
                 ctl_command = COPY_COMMAND;
+            else if (strcmp(argv[optind], "stack") == 0)
+                ctl_command = GS_STACK_COMMAND;
             else {
                 pg_log(PG_WARNING, _(" unrecognized operation mode \"%s\"\n"), argv[optind]);
                 do_advice();
@@ -6611,6 +6877,14 @@ int main(int argc, char** argv)
                 (void)pg_ctl_unlock(lockfile);
             } else {
                 pg_log(PG_PROGRESS, _("[PATCH-ERROR] Another gs_ctl command is still running,hotpatch failed !\n"));
+            }
+            break;
+        case GS_STACK_COMMAND:
+            if (-1 != pg_ctl_lock(pg_ctl_lockfile, &lockfile)) {
+                do_gs_stack();
+                (void)pg_ctl_unlock(lockfile);
+            } else {
+                pg_log(PG_PROGRESS, _("[STACK-ERROR] Another gs_ctl command is still running,gs_stack failed !\n"));
             }
             break;
 #ifndef ENABLE_MULTIPLE_NODES

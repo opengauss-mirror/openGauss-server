@@ -165,6 +165,8 @@ Datum hashtext(PG_FUNCTION_ARGS)
     text *key = PG_GETARG_TEXT_PP(0);
     Datum result;
 
+    FUNC_CHECK_HUGE_POINTER(false, key, "hashtext()");
+
 #ifdef PGXC
     if (g_instance.attr.attr_sql.string_hash_compatible) {
         result = hash_any((unsigned char *)VARDATA_ANY(key), bcTruelen(key));

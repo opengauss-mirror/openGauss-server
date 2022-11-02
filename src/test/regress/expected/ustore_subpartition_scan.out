@@ -29,7 +29,6 @@ insert into range_list values('201902', '2', '1', 1);
 insert into range_list values('201902', '1', '1', 1);
 insert into range_list values('201903', '2', '1', 1);
 insert into range_list values('201903', '1', '1', 1);
-insert into range_list values('201903', '2', '1', 1);
 explain(costs off, verbose on) select * from range_list order by 1, 2, 3, 4;
                                             QUERY PLAN                                             
 ---------------------------------------------------------------------------------------------------
@@ -53,8 +52,7 @@ select * from range_list order by 1, 2, 3, 4;
  201902     | 2         | 1       |         1
  201903     | 1         | 1       |         1
  201903     | 2         | 1       |         1
- 201903     | 2         | 1       |         1
-(6 rows)
+(5 rows)
 
 create index idx_month_code on range_list(month_code) local;
 create index idx_dept_code on range_list(dept_code) local;
@@ -144,8 +142,7 @@ select * from range_list where user_no = '1' order by 1, 2, 3, 4;
  201902     | 2         | 1       |         1
  201903     | 1         | 1       |         1
  201903     | 2         | 1       |         1
- 201903     | 2         | 1       |         1
-(6 rows)
+(5 rows)
 
 set enable_bitmapscan = off;
 explain(costs off, verbose on) select * from range_list where month_code = '201902' order by 1, 2, 3, 4;
@@ -220,8 +217,7 @@ select * from range_list where user_no = '1' order by 1, 2, 3, 4;
  201902     | 2         | 1       |         1
  201903     | 1         | 1       |         1
  201903     | 2         | 1       |         1
- 201903     | 2         | 1       |         1
-(6 rows)
+(5 rows)
 
 reset enable_seqscan;
 reset enable_bitmapscan;
@@ -644,14 +640,14 @@ explain (costs off)  select * from list_range_02 where col_2 in
          ->  Partitioned Index Scan using index_01 on list_range_02
                Index Cond: ((col_2 = ANY ('{100,200,300}'::integer[])) AND (col_2 > 10) AND (col_2 < 100))
                Filter: ((col_1 + col_2) = 50)
-               Selected Partitions:  1,3,5..6
-               Selected Subpartitions:  1:1, 3:1, 5:1, 6:1
+               Selected Partitions:  2..3,5,7
+               Selected Subpartitions:  2:1, 3:1, 5:1, 7:1
    ->  Materialize
          ->  Partition Iterator
                Iterations: 1, Sub Iterations: 1
                ->  Partitioned Seq Scan on list_range_02
                      Filter: ((col_1 > 10) AND (col_1 < 100) AND (col_1 = ANY ('{100,200,300}'::integer[])))
-                     Selected Partitions:  6
+                     Selected Partitions:  2
                      Selected Subpartitions:  ALL
 (16 rows)
 

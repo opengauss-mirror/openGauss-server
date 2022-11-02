@@ -20,8 +20,10 @@
 #include "catalog/gs_matview.h"
 #include "catalog/pg_type.h"
 #include "catalog/pg_class.h"
+#include "catalog/pg_proc.h"
 #include "commands/trigger.h"
 #include "commands/matview.h"
+#include "commands/sequence.h"
 #include "commands/tablecmds.h"
 #include "executor/executor.h"
 #include "foreign/fdwapi.h"
@@ -31,6 +33,7 @@
 #include "parser/parse_coerce.h"
 #include "parser/parsetree.h"
 #include "parser/parse_merge.h"
+#include "parser/parse_hint.h"
 #include "rewrite/rewriteDefine.h"
 #include "rewrite/rewriteHandler.h"
 #include "rewrite/rewriteManip.h"
@@ -67,9 +70,8 @@ static bool acquireLocksOnSubLinks(Node* node, void* context);
 static Query* rewriteRuleAction(
     Query* parsetree, Query* rule_action, Node* rule_qual, int rt_index, CmdType event, bool* returning_flag);
 static List* adjustJoinTreeList(Query* parsetree, bool removert, int rt_index);
-static List* rewriteTargetListIU(List* targetList, CmdType commandType,
-                                      Relation target_relation, int result_rtindex,
-                                      List** attrno_list);
+static List *rewriteTargetListIU(List *targetList, CmdType commandType, Relation target_relation, int result_rtindex,
+    List **attrno_list, bool *hasGenCol);
 static TargetEntry* process_matched_tle(TargetEntry* src_tle, TargetEntry* prior_tle, const char* attrName);
 static Node* get_assignment_input(Node* node);
 static void rewriteValuesRTE(RangeTblEntry* rte, Relation target_relation, List* attrnos);
@@ -626,7 +628,7 @@ static List* adjustJoinTreeList(Query* parsetree, bool removert, int rt_index)
  * processing VALUES RTEs.
  */
 static List* rewriteTargetListIU(List* targetList, CmdType commandType, Relation target_relation,
-    int result_rtindex, List** attrno_list)
+    int result_rtindex, List** attrno_list, bool* hasGenCol)
 {
     TargetEntry** new_tles;
     List* new_tlist = NIL;
@@ -730,6 +732,7 @@ static List* rewriteTargetListIU(List* targetList, CmdType commandType, Relation
              * stored generated column will be fixed in executor
              */
             new_tle = NULL;
+            *hasGenCol = true;
         } else if (applyDefault) {
             Node* new_expr = NULL;
 
@@ -920,6 +923,35 @@ static Node* get_assignment_input(Node* node)
     return NULL;
 }
 
+static bool check_sequence_return_numeric_walker(Node *node, int *ret)
+{
+    /* Traverse through the expression tree and check requence related function return type */
+    if (node == NULL) {
+        *ret = NDE_UNKNOWN;
+        return false;
+    }
+
+    if (IsA(node, Query)) {
+        return (Node *)query_tree_walker((Query *)node, (bool (*)())check_sequence_return_numeric_walker,
+            (void *)ret, 0);
+    }
+
+    if (IsA(node, FuncExpr)) {
+        FuncExpr *func = (FuncExpr *)node;
+        if (func->funcid == NEXTVALFUNCOID || func->funcid == CURRVALFUNCOID || func->funcid == LASTVALFUNCOID) {
+            if (func->funcresulttype == NUMERICOID) {
+                *ret = NDE_NUMERIC;
+                return true;
+            } else {
+                *ret = NDE_BIGINT;
+                return true;
+            }
+        }
+    }
+
+    return expression_tree_walker(node, (bool (*)())check_sequence_return_numeric_walker, (void *)ret);
+}
+
 /*
  * Make an expression tree for the default value for a column.
  *
@@ -950,6 +982,9 @@ Node* build_column_default(Relation rel, int attrno, bool isInsertCmd)
                  * Found it, convert string representation to node tree.
                  */
                 expr = (Node*)stringToNode_skip_extern_fields(defval[ndef].adbin);
+                if (t_thrd.proc->workingVersionNum < LARGE_SEQUENCE_VERSION_NUM) {
+                    (void)check_sequence_return_numeric_walker(expr, &(u_sess->opt_cxt.nextval_default_expr_type));
+                }
                 break;
             }
         }
@@ -1031,6 +1066,34 @@ static bool searchForDefault(RangeTblEntry* rte)
     return false;
 }
 
+static void checkGenDefault(RangeTblEntry* rte, Relation target_relation, List* attrnos, bool hasGenCol)
+{
+    ListCell* lc = NULL;
+
+    if (!hasGenCol) {
+        return ;
+    }
+
+    foreach (lc, rte->values_lists) {
+        List* sublist = (List*)lfirst(lc);
+        ListCell* lc2 = NULL;
+        ListCell* lc3 = NULL;
+
+        forboth (lc2, sublist, lc3, attrnos) {
+            Node* col = (Node*)lfirst(lc2);
+            int attrno = lfirst_int(lc3);
+            Form_pg_attribute att_tup = target_relation->rd_att->attrs[attrno - 1];
+            bool generatedCol = ISGENERATEDCOL(target_relation->rd_att, attrno - 1);
+            bool applyDefault = IsA(col, SetToDefault);
+
+            if (!applyDefault && generatedCol)
+                ereport(ERROR, (errmodule(MOD_GEN_COL), errcode(ERRCODE_SYNTAX_ERROR),
+                    errmsg("cannot insert into column \"%s\"", NameStr(att_tup->attname)),
+                    errdetail("Column \"%s\" is a generated column.", NameStr(att_tup->attname))));
+        }
+    }
+}
+
 /*
  * When processing INSERT ... VALUES with a VALUES RTE (ie, multiple VALUES
  * lists), we have to replace any DEFAULT items in the VALUES lists with
@@ -1072,12 +1135,6 @@ static void rewriteValuesRTE(RangeTblEntry* rte, Relation target_relation, List*
             Form_pg_attribute att_tup = target_relation->rd_att->attrs[attrno - 1];
             bool generatedCol = ISGENERATEDCOL(target_relation->rd_att, attrno - 1);
             bool applyDefault = IsA(col, SetToDefault);
-
-            if (generatedCol && !applyDefault) {
-                ereport(ERROR, (errmodule(MOD_GEN_COL), errcode(ERRCODE_SYNTAX_ERROR),
-                    errmsg("cannot insert into column \"%s\"", NameStr(att_tup->attname)),
-                    errdetail("Column \"%s\" is a generated column.", NameStr(att_tup->attname))));
-            }
 
             if (applyDefault) {
                 Node *new_expr = NULL;
@@ -1256,17 +1313,32 @@ static void rewriteTargetListUD(Query* parsetree, RangeTblEntry* target_rte, Rel
 
         for (counter = 0; counter < index_col_count; counter++) {
             AttrNumber att_no = indexed_col[counter];
+            HeapTuple heaptuple = NULL;
             Form_pg_attribute att_tup = NULL;
             Node* new_expr = NULL;
             TargetEntry* new_tle = NULL;
 
-            att_tup = target_relation->rd_att->attrs[att_no - 1];
+            if (att_no > 0) {
+                att_tup = target_relation->rd_att->attrs[att_no - 1];
+            } else {
+                heaptuple =
+                    SearchSysCache2(ATTNUM, ObjectIdGetDatum(RelationGetRelid(target_relation)), Int16GetDatum(att_no));
+                if (!HeapTupleIsValid(heaptuple))
+                    ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                        errmsg("cache lookup failed for attribute %d of relation %u", att_no,
+                        RelationGetRelid(target_relation))));
+                att_tup = (Form_pg_attribute)GETSTRUCT(heaptuple);
+            }
 
             new_expr = (Node*)makeVar(
                 parsetree->resultRelation, att_no, att_tup->atttypid, att_tup->atttypmod, att_tup->attcollation, 0);
             new_tle = makeTargetEntry((Expr*)new_expr, list_length(parsetree->targetList) + 1, "xc_primary_key", true);
 
             parsetree->targetList = lappend(parsetree->targetList, new_tle);
+
+            if (att_no <= 0) {
+                ReleaseSysCache(heaptuple);
+            }
         }
     }
 #endif
@@ -2370,6 +2442,7 @@ static List* RewriteQuery(Query* parsetree, List* rewrite_events)
         RangeTblEntry* rt_entry = NULL;
         Relation rt_entry_relation;
         List* locks = NIL;
+        bool hasGenCol = false;
 
         result_relation = parsetree->resultRelation;
 
@@ -2412,26 +2485,31 @@ static List* RewriteQuery(Query* parsetree, List* rewrite_events)
                 /* Process the main targetlist ... */
                 parsetree->targetList =
                     rewriteTargetListIU(parsetree->targetList, parsetree->commandType,
-                                        rt_entry_relation, parsetree->resultRelation, &attrnos);
+                                        rt_entry_relation, parsetree->resultRelation, &attrnos,
+                                        &hasGenCol);
+                checkGenDefault(values_rte, rt_entry_relation, attrnos, hasGenCol);
                 /* ... and the VALUES expression lists */
                 rewriteValuesRTE(values_rte, rt_entry_relation, attrnos);
             } else {
                 /* Process just the main targetlist */
                 parsetree->targetList =
                     rewriteTargetListIU(parsetree->targetList, parsetree->commandType,
-                                        rt_entry_relation, parsetree->resultRelation, NULL);
+                                        rt_entry_relation, parsetree->resultRelation, NULL,
+                                        &hasGenCol);
             }
 
             if (parsetree->upsertClause != NULL &&
                 parsetree->upsertClause->upsertAction == UPSERT_UPDATE) {
                 parsetree->upsertClause->updateTlist =
                     rewriteTargetListIU(parsetree->upsertClause->updateTlist, CMD_UPDATE,
-                                        rt_entry_relation, parsetree->resultRelation, NULL);
+                                        rt_entry_relation, parsetree->resultRelation, NULL,
+                                        &hasGenCol);
             }
         } else if (event == CMD_UPDATE) {
             parsetree->targetList =
                 rewriteTargetListIU(parsetree->targetList, parsetree->commandType,
-                                    rt_entry_relation, parsetree->resultRelation, NULL);
+                                    rt_entry_relation, parsetree->resultRelation, NULL,
+                                    &hasGenCol);
             rewriteTargetListUD(parsetree, rt_entry, rt_entry_relation);
         } else if (event == CMD_MERGE) {
             /*
@@ -3007,6 +3085,31 @@ static bool selectNeedRecovery(Query* query)
     return strcasestr(query->sql_statement, "CONNECT") != NULL;
 }
 
+/*
+ * @Description: copy(shallow) hints which needs to be displayed in top.
+*                (e.g. pull "select HINT..."  to "Insert HINT INTO XXX SELECT HINT..." )
+ * @in src: hint state.
+ * @out dest: hint state.
+ */
+static void _copy_top_HintState(HintState *dest, HintState *src)
+{
+    if (dest == NULL || src == NULL) {
+        return;
+    }
+
+    dest->stream_hint = src->stream_hint;
+    dest->gather_hint = src->gather_hint;
+    dest->cache_plan_hint = src->cache_plan_hint;
+    dest->set_hint = src->set_hint;
+    dest->no_gpc_hint = src->no_gpc_hint;
+    dest->multi_node_hint = src->multi_node_hint;
+    dest->skew_hint = src->skew_hint;
+    dest->predpush_hint = src->predpush_hint;
+    dest->predpush_same_level_hint = src->predpush_same_level_hint;
+    dest->rewrite_hint = src->rewrite_hint;
+    dest->no_expand_hint = src->no_expand_hint;
+}
+
 char* GetInsertIntoStmt(CreateTableAsStmt* stmt)
 {
     /* Get the SELECT query string */
@@ -3039,9 +3142,11 @@ char* GetInsertIntoStmt(CreateTableAsStmt* stmt)
 
     appendStringInfo(cquery, "INSERT ");
 
-    HintState *hintState = ((Query*)stmt->query)->hintState;
-    get_hint_string(hintState, cquery);
-
+    HintState *top_hintState = HintStateCreate();
+    _copy_top_HintState(top_hintState, ((Query *)stmt->query)->hintState);
+    get_hint_string(top_hintState, cquery);
+    if (top_hintState)
+        pfree((void *)top_hintState);
     if (relation->schemaname)
         appendStringInfo(
             cquery, " INTO %s.%s", quote_identifier(relation->schemaname), quote_identifier(relation->relname));
@@ -3200,53 +3305,47 @@ List* QueryRewriteCTAS(Query* parsetree)
     /* Get the target table */
     stmt = (CreateTableAsStmt*)parsetree->utilityStmt;
 
-    if (!t_thrd.postgres_cxt.table_created_in_CTAS) {
-        /* CREATE TABLE AS */
-        Query* cparsetree = (Query*)copyObject(parsetree);
-        char* create_sql = GetCreateTableStmt(cparsetree, stmt);
+    /* CREATE TABLE AS */
+    Query* cparsetree = (Query*)copyObject(parsetree);
+    char* create_sql = GetCreateTableStmt(cparsetree, stmt);
 
-        if (stmt->relkind == OBJECT_MATVIEW) {
-            zparsetree = (Query*)copyObject(cparsetree);
-            view_sql = GetCreateViewStmt(zparsetree, stmt);
+    if (stmt->relkind == OBJECT_MATVIEW) {
+        zparsetree = (Query*)copyObject(cparsetree);
+        view_sql = GetCreateViewStmt(zparsetree, stmt);
 
-            ViewStmt *mvStmt = (ViewStmt *)zparsetree->utilityStmt;
-            mvStmt->mv_stmt = cparsetree->utilityStmt;
-            mvStmt->mv_sql = create_sql;
-        }
-
-        /* If MATILIZED VIEW exists, cannot send create table to DNs. */
-        if (stmt->relkind != OBJECT_MATVIEW) {
-            ProcessUtility(cparsetree->utilityStmt,
-                           create_sql,
-                           NULL, true, NULL, false, NULL);
-        }
-
-        /* CREATE MATILIZED VIEW AS*/
-        if (stmt->relkind == OBJECT_MATVIEW) {
-            Query *query = (Query *)stmt->query;
-
-            ProcessUtility(zparsetree->utilityStmt,
-                           view_sql,
-                           NULL, true, NULL, false, NULL);
-
-            create_matview_meta(query, stmt->into->rel, stmt->into->ivm);
-
-            /* for ivm should not execute insert into ... select just return. */
-            if (stmt->into->ivm) {
-                return NIL;
-            }
-
-            if (IS_PGXC_COORDINATOR && IsConnFromCoord()) {
-                return NIL;
-            }
-        }
-
-        /*
-         * Now fold the CTAS statement into an INSERT INTO statement. The
-         * utility is no more required.
-         */
-        parsetree->utilityStmt = NULL;
+        ViewStmt *mvStmt = (ViewStmt *)zparsetree->utilityStmt;
+        mvStmt->mv_stmt = cparsetree->utilityStmt;
+        mvStmt->mv_sql = create_sql;
     }
+
+    /* If MATILIZED VIEW exists, cannot send create table to DNs. */
+    if (stmt->relkind != OBJECT_MATVIEW) {
+        ProcessUtility(cparsetree->utilityStmt, create_sql, NULL, true, NULL, false, NULL);
+    }
+
+    /* CREATE MATILIZED VIEW AS*/
+    if (stmt->relkind == OBJECT_MATVIEW) {
+        Query *query = (Query *)stmt->query;
+
+        ProcessUtility(zparsetree->utilityStmt, view_sql, NULL, true, NULL, false, NULL);
+
+        create_matview_meta(query, stmt->into->rel, stmt->into->ivm);
+
+        /* for ivm should not execute insert into ... select just return. */
+        if (stmt->into->ivm) {
+            return NIL;
+        }
+
+        if (IS_PGXC_COORDINATOR && IsConnFromCoord()) {
+            return NIL;
+        }
+    }
+
+    /*
+     * Now fold the CTAS statement into an INSERT INTO statement. The
+     * utility is no more required.
+     */
+    parsetree->utilityStmt = NULL;
 
     char* insert_into_sqlstr = GetInsertIntoStmt(stmt);
 

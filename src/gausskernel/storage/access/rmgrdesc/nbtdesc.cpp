@@ -455,14 +455,29 @@ void UBTree2Desc(StringInfo buf, XLogReaderState* record)
         }
         case XLOG_UBTREE2_RECYCLE_QUEUE_MODIFY: {
             xl_ubtree2_recycle_queue_modify *xlrec = (xl_ubtree2_recycle_queue_modify *)rec;
-            appendStringInfo(buf, "recycle queue modify: isInsert %s, blkno %u, offset %u",
+            appendStringInfo(buf, "recycle queue modify: isInsert %s, blkno %u, offset %u. ",
                 (xlrec->isInsert ? "yes" : "no"), xlrec->blkno, xlrec->offset);
+            appendStringInfo(buf, "recycle queue modify iteminfo: xid %lu, blkno %u, prev %d, next %d. ",
+                xlrec->item.xid, xlrec->item.blkno, xlrec->item.prev, xlrec->item.next);
+            appendStringInfo(buf, "recycle queue modify header: flags %u, head %d, tail %d, freeItems %d, "
+                "freeListHead %d, prevBlkno %u, nextBlkno %u.",
+                xlrec->header.flags, xlrec->header.head, xlrec->header.tail, xlrec->header.freeItems,
+                xlrec->header.freeListHead, xlrec->header.prevBlkno, xlrec->header.nextBlkno);
             break;
         }
         case XLOG_UBTREE2_FREEZE: {
             xl_ubtree2_freeze *xlrec = (xl_ubtree2_freeze *)rec;
+            OffsetNumber *offsets = (OffsetNumber *)(((char *)xlrec) + SizeOfUBTree2Freeze);
             appendStringInfo(buf, "freeze page: blkno %u, nfrozen: %d, latestRemovedXid: %lu",
                 xlrec->blkno, xlrec->nfrozen, xlrec->oldestXmin);
+            if (xlrec->nfrozen > 0) {
+                appendStringInfo(buf, ", offsets info: ");
+                int32 offsetIdx = 0;
+                while (offsetIdx < xlrec->nfrozen) {
+                    appendStringInfo(buf, "(%d : %u) ", offsetIdx, offsets[offsetIdx]);
+                    offsetIdx++;
+                }
+            }
             break;
         }
         default:

@@ -22,6 +22,7 @@
 #include "common/int.h"
 #include "funcapi.h"
 #include "libpq/pqformat.h"
+#include "miscadmin.h"
 #include "utils/int8.h"
 #include "utils/builtins.h"
 
@@ -144,7 +145,12 @@ Datum int8in(PG_FUNCTION_ARGS)
     char* str = PG_GETARG_CSTRING(0);
     int64 result;
 
-    (void)scanint8(str, false, &result);
+    if (A_FORMAT_VERSION_10C_V1) {
+        result = pg_strtoint64(str);
+    } else {
+        (void)scanint8(str, false, &result);
+    }
+
     PG_RETURN_INT64(result);
 }
 

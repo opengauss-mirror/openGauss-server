@@ -38,6 +38,140 @@
 static void ExecMergeNotMatched(ModifyTableState* mtstate, EState* estate, TupleTableSlot* slot);
 static bool ExecMergeMatched(ModifyTableState* mtstate, EState* estate, TupleTableSlot* slot, JunkFilter* junkfilter,
     ItemPointer tupleid, HeapTupleHeader oldtuple, Oid oldPartitionOid, int2 bucketid);
+
+/*
+ * Use for encoding-check in merge into
+ */
+char* PrintMessage()
+{
+    StringInfoData str;
+    /* read message info from a threadlocal variable ? */
+    char* buffer = t_thrd.libpq_cxt.PqRecvBuffer;
+    int len = t_thrd.libpq_cxt.PqRecvLength;
+    
+    initStringInfo(&str);
+
+    if (len == 0) {
+        appendStringInfoString(&str, "null");
+        return str.data;
+    }
+
+    int i;
+    int p = 0;
+    for (i = 0; i < len; i++) {
+        if (i - p == 0 && buffer[i] == '\0') {
+            appendStringInfoSpaces(&str, 1);
+            p++;
+            continue;
+        }
+        if (i - p != 0 && buffer[i] == '\0') {
+            appendBinaryStringInfo(&str, buffer + p, i - p);
+            appendStringInfoSpaces(&str, 1);
+            p = i + 1;
+        }
+    }
+    if (p < len) {
+        appendBinaryStringInfo(&str, buffer + p, len - p);
+    }
+    return str.data;
+}
+
+/*
+ * Use for encoding-check in merge into
+ */
+char* PrintParameters(EState* estate)
+{
+    StringInfoData str;
+    initStringInfo(&str);
+    QueryDesc* queryDesc = estate->rootQueryDesc;
+    if (queryDesc == NULL) {
+        appendStringInfoString(&str, "querydesc is null\n");
+        return str.data;
+    }
+    ParamListInfo param_list_info = queryDesc->params;
+    if (param_list_info == NULL) {
+        appendStringInfoString(&str, "params is null\n");
+        return str.data;
+    }
+
+    int i;
+    int n = 0;
+    for (i = 0; i < param_list_info->numParams; i++) {
+        ParamExternData param_data = param_list_info->params[i];
+        Oid oid = param_data.ptype;
+        Datum value = param_data.value;
+        if (oid == InvalidOid) {
+            continue;
+        }
+        n++;
+        if (param_data.isnull) {
+            appendStringInfo(&str, "param %d value: null\n", n);
+            continue;
+        }
+        Datum data = 0;
+        char* output = NULL;
+        Oid typOutput;
+        bool typIsVarlena;
+        getTypeOutputInfo(oid, &typOutput, &typIsVarlena);
+        if (typIsVarlena) {
+            data = PointerGetDatum(PG_DETOAST_DATUM(value));
+        }
+        output = OidOutputFunctionCall(typOutput, typIsVarlena ? data : value);
+        appendStringInfo(&str, "param %d value: %s ", n, output);
+        appendStringInfo(&str, "type: %s\n", format_type_be(oid));
+        if (output != NULL) {
+            pfree(output);
+        }
+        if (typIsVarlena && value != data) {
+            pfree(DatumGetPointer(data));
+        }
+    }
+    return str.data;
+}
+
+static void EncodingCheck(EState* estate, TupleTableSlot* slot)
+{
+    if (!module_logging_is_on(MOD_ENCODING_CHECK)) {
+        return;
+    }
+
+    TupleDesc desc = slot->tts_tupleDescriptor;
+    int i = 0;
+    for (i = 0; i < desc->natts; i++) {
+        Form_pg_attribute attr = desc->attrs[i];
+        if (attr->atttypid != VARCHAROID) {
+            continue;
+        }
+        if (unlikely(attr->attisdropped)) {
+            continue;
+        }
+        if (unlikely(slot->tts_isnull[i])) {
+            continue;
+        }
+        Datum value = slot->tts_values[i];
+        text* str = DatumGetTextPP(value);
+        if (pg_verify_mbstr(u_sess->mb_cxt.DatabaseEncoding->encoding,
+            VARDATA_ANY(str), VARSIZE_ANY_EXHDR(str), true)) {
+            continue;
+        }
+        char* cstring = text_to_cstring(str);
+        char* message = PrintMessage();
+        char* paramters = PrintParameters(estate);
+        int old_backtrace_min_messages = u_sess->attr.attr_common.backtrace_min_messages;
+        u_sess->attr.attr_common.backtrace_min_messages = WARNING;
+        ereport(WARNING, (errmodule(MOD_ENCODING_CHECK), errcode(ERRCODE_INTERNAL_ERROR),
+            errmsg("ENCODING CHECK ERROR IN MERGE INTO:\nquery: %s\nparams:\n%serror str: %s len: %lu",
+                t_thrd.postgres_cxt.debug_query_string,
+                paramters,
+                cstring, VARSIZE_ANY_EXHDR(str))));
+        write_stderr(_("message: %s\n"), message);
+        pfree(cstring);
+        pfree(message);
+        pfree(paramters);
+        u_sess->attr.attr_common.backtrace_min_messages = old_backtrace_min_messages;
+    }
+}
+
 /*
  * Perform MERGE.
  */
@@ -394,6 +528,10 @@ static bool ExecMergeMatched(ModifyTableState* mtstate, EState* estate, TupleTab
         slot = ExecMergeProjQual(mtstate, mergeMatchedActionStates, econtext, slot, slot, estate);
 
         if (slot != NULL) {
+
+            /* Encoding check if need */
+            EncodingCheck(estate, slot);
+
             (void)ExecUpdate(tupleid,
                              oldPartitionOid,
                              bucketid,
@@ -507,6 +645,9 @@ static void ExecMergeNotMatched(ModifyTableState* mtstate, EState* estate, Tuple
             }
 
             estate->es_result_remoterel = estate->es_result_insert_remoterel;
+
+            /* Encoding check if need */
+            EncodingCheck(estate, myslot);
 
             (void)ExecInsertT<false>(mtstate, myslot, slot, estate, mtstate->canSetTag, hi_options, NULL);
 

@@ -34,9 +34,6 @@ set(TGT_bootstrap_INC
     ${PROJECT_SRC_DIR}/lib/gstrace
     ${LIBCGROUP_INCLUDE_PATH}
     ${PROJECT_SRC_DIR}/include/libcomm
-    ${LIBORC_INCLUDE_PATH}
-    ${PROTOBUF_INCLUDE_PATH}
-    ${LIBPARQUET_INCLUDE_PATH}
     ${ZLIB_INCLUDE_PATH}
 )
 

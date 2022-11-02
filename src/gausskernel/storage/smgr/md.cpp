@@ -2080,8 +2080,6 @@ void mdwrite(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, const 
     int nbytes;
     MdfdVec *v = NULL;
 
-    instr_time start_time;
-    instr_time end_time;
     PgStat_Counter time_diff = 0;
     static THR_LOCAL PgStat_Counter msg_count = 1;
     static THR_LOCAL PgStat_Counter sum_page = 0;
@@ -2093,7 +2091,10 @@ void mdwrite(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, const 
     static THR_LOCAL Oid lst_db = InvalidOid;
     static THR_LOCAL Oid lst_spc = InvalidOid;
 
+#ifndef ENABLE_LITE_MODE
+    instr_time start_time;
     (void)INSTR_TIME_SET_CURRENT(start_time);
+#endif
 
     /* This assert is too expensive to have on normally ... */
 #ifdef CHECK_WRITE_VS_EXTEND
@@ -2124,9 +2125,13 @@ void mdwrite(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, const 
                                             reln->smgr_rnode.node.dbNode, reln->smgr_rnode.node.relNode,
                                             reln->smgr_rnode.backend, nbytes, BLCKSZ);
     }
+#ifndef ENABLE_LITE_MODE
+    instr_time end_time;
     (void)INSTR_TIME_SET_CURRENT(end_time);
     INSTR_TIME_SUBTRACT(end_time, start_time);
     time_diff = (PgStat_Counter)INSTR_TIME_GET_MICROSEC(end_time);
+#endif
+
     if (msg_count == 0) {
         lst_file = reln->smgr_rnode.node.relNode;
         lst_db = reln->smgr_rnode.node.dbNode;

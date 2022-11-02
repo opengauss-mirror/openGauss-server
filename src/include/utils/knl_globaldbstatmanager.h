@@ -56,6 +56,19 @@ typedef struct GlobalSysCacheStat {
     pg_atomic_uint64 part_hits;
     pg_atomic_uint64 part_newloads;
     uint64 swapout_count;
+    void CleanStat()
+    {
+        tup_searches = 0;
+        tup_hits = 0;
+        tup_newloads = 0;
+        rel_searches = 0;
+        rel_hits = 0;
+        rel_newloads = 0;
+        part_searches = 0;
+        part_hits = 0;
+        part_newloads = 0;
+        swapout_count = 0;
+    }
 } GlobalSysCacheStat;
 
 /*
@@ -83,6 +96,9 @@ typedef struct GlobalCatalogTupleStat {
     uint64          refcount;
 } GlobalCatalogTupleStat;
 
+/*
+ * noen-catalog table's stat
+ */
 struct GlobalCatalogTableStat{
     Oid db_id;
     Datum db_name;

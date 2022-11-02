@@ -45,19 +45,10 @@ static const uint32 LSN_MARKER = 0;
 
 /* Run from the dispatcher thread. */
 RedoItem *CreateRedoItem(XLogReaderState *record, uint32 shareCount, uint32 designatedWorker, List *expectedTLIs,
-                         TimestampTz recordXTime, bool buseoriginal)
+                         TimestampTz recordXTime)
 {
     RedoItem *item = GetRedoItemPtr(record);
     if (t_thrd.xlog_cxt.redoItemIdx == 0) {
-        /*
-         * Some blocks are optional and redo functions rely on the correct
-         * value of in_use to determine if optional blocks are present.
-         * Explicitly set all unused blocks' in_use to false.
-         */
-        for (int i = record->max_block_id + 1; i <= XLR_MAX_BLOCK_ID; i++)
-            item->record.blocks[i].in_use = false;
-    }
-    if (buseoriginal && (t_thrd.xlog_cxt.redoItemIdx == 0)) {
         t_thrd.xlog_cxt.redoItemIdx++;
     } else {
         /* if shareCount is 1, we should make a copy of record in NewReaderState function */

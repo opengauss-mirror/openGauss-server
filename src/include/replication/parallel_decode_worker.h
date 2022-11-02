@@ -50,11 +50,12 @@
 #include "utils/ps_status.h"
 #include "storage/ipc.h"
 
-
-extern ParallelDecodeWorker *CreateLogicalDecodeWorker(uint32 id, char* dbUser, char* dbName, char* slotname, uint32 slotId);
-extern void SendSignalToDecodeWorker(int signal, int slotId);
+extern ParallelDecodeWorker *CreateLogicalDecodeWorker(int id, char* dbUser, char* dbName, char* slotname, int slotId);
 extern void parallel_tuple_to_stringinfo(StringInfo s, TupleDesc tupdesc, HeapTuple tuple, bool skip_nulls);
 extern void LogicalReadRecordMain(ParallelDecodeReaderWorker *worker);
 extern int logical_read_xlog_page(XLogReaderState *state, XLogRecPtr targetPagePtr, int reqLen, XLogRecPtr targetRecPtr,
                                   char *cur_page, TimeLineID *pageTLI, char* xlog_path);
+extern bool IsLogicalWorkerShutdownRequested();
+extern void ReleaseParallelDecodeResource(int slotId);
+
 #endif

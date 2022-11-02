@@ -93,7 +93,10 @@ TupleTableSlot* ExecResult(ResultState* node)
      * storage allocated in the previous tuple cycle.  Note this can't happen
      * until we're done projecting out tuples from a scan tuple.
      */
-    ResetExprContext(econtext);
+    if (!econtext->hasSetResultStore) {
+        /* return value one by one, just free early one */
+        ResetExprContext(econtext);
+    }
 
     /*
      * Check to see if we're still projecting out tuples from a previous scan
@@ -107,6 +110,11 @@ TupleTableSlot* ExecResult(ResultState* node)
         }
         /* Done with that source tuple... */
         node->ps.ps_TupFromTlist = false;
+    }
+
+    if (econtext->hasSetResultStore) {
+        /* return values all store in ResultStore, could not free early one */
+        ResetExprContext(econtext);
     }
 
     /*

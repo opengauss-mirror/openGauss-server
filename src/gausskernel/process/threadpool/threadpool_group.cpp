@@ -244,7 +244,8 @@ void ThreadPoolGroup::AddWorkerIfNecessary()
 
     if (m_workerNum < m_expectWorkerNum) {
         for (int i = 0; i < m_expectWorkerNum; i++) {
-            if (m_workers[i].stat.slotStatus == THREAD_SLOT_UNUSE) {
+            if (m_workers[i].stat.slotStatus == THREAD_SLOT_UNUSE &&
+                g_threadPoolControler->GetScheduler()->m_canAdjustPool) {
                 if (m_workers[i].worker != NULL) {
                     pfree_ext(m_workers[i].worker);
                 }
@@ -513,9 +514,10 @@ void ThreadPoolGroup::ReturnStreamToPool(Dlelem* elem)
 
 void ThreadPoolGroup::RemoveStreamFromPool(Dlelem* elem, int idx)
 {
-    m_freeStreamList->Remove(elem);
-    pg_atomic_fetch_sub_u32((volatile uint32*)&m_idleStreamNum, 1);
     pthread_mutex_lock(&m_mutex);
+    if (elem && m_freeStreamList->RemoveConfirm(elem)) {
+        (void)pg_atomic_fetch_sub_u32((volatile uint32*)&m_idleStreamNum, 1);
+    }
     m_streams[idx].stat.slotStatus = THREAD_SLOT_UNUSE;
     m_streamNum--;
     pthread_mutex_unlock(&m_mutex);
@@ -533,6 +535,7 @@ void ThreadPoolGroup::ReduceStreams()
                 break;
             }
             ThreadPoolStream* stream = (ThreadPoolStream*)DLE_VAL(elem);
+            pg_atomic_fetch_sub_u32((volatile uint32*)&m_idleStreamNum, 1);
             stream->WakeUpToUpdate(THREAD_EXIT);
         }
     }

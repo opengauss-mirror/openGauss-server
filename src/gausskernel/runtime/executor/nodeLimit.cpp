@@ -23,7 +23,10 @@
 
 #include "executor/executor.h"
 #include "executor/node/nodeLimit.h"
+#include "instruments/instr_statement.h"
 #include "nodes/nodeFuncs.h"
+
+#define REPORT_LIMIT_THRESHOLD 5000 /* report cause_type's threshold for limit */
 
 static void pass_down_bound(LimitState* node, PlanState* child_node);
 
@@ -265,6 +268,12 @@ void recompute_limits(LimitState* node)
         node->count = 0;
         node->noCount = true;
     }
+
+    /*
+     * Check whether there are risks caused by limit to much rows.
+     */
+    if (!node->noCount && node->count >= REPORT_LIMIT_THRESHOLD)
+        instr_stmt_report_cause_type(NUM_F_LIMIT);
 
     /* Reset position to start-of-scan */
     node->position = 0;

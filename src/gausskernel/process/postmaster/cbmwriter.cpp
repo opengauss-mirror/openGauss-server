@@ -41,7 +41,6 @@
 #include "utils/hsearch.h"
 #include "utils/memutils.h"
 #include "utils/resowner.h"
-
 #include "gssignal/gs_signal.h"
 
 /* Signal handlers */
@@ -75,6 +74,7 @@ void CBMWriterMain(void)
     /*
      * Reset some signals that are accepted by postmaster but not here
      */
+    (void)gspqsignal(SIGURG, print_stack);
     (void)gspqsignal(SIGHUP, CBMSigHupHandler);    /* set flag to read config file */
     (void)gspqsignal(SIGINT, CBMShutdownHandler);  /* request shutdown */
     (void)gspqsignal(SIGTERM, CBMShutdownHandler); /* request shutdown */
@@ -217,6 +217,10 @@ void CBMWriterMain(void)
 
         if (t_thrd.cbm_cxt.shutdown_requested) {
             g_instance.proc_base->cbmwriterLatch = NULL;
+
+            /* clean cbm track resources */
+            ResetXlogCbmSys();
+
             /* Normal exit from the walwriter is here */
             proc_exit(0); /* done */
         }

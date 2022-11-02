@@ -698,7 +698,7 @@ Name: datanode1
                     Output: test1.id, test1.val
                     Exec Nodes: All datanodes
                     Filter: (test1.id = ($15)::numeric)
-        ->  Seq Scan on public.test1 t1  (cost=0.00..18.69 rows=869 p-time=0 p-rows=0 width=70)
+--?.*
               Output: t1.id, t1.val, t1.ctid
               Exec Nodes: All datanodes
 param1 value: 103 type: int4

@@ -93,7 +93,6 @@
 #include "access/xloginsert.h"
 #include "access/xlogutils.h"
 #include "access/cstore_am.h"
-#include "access/dfs/dfs_insert.h"
 #include "catalog/pg_type.h"
 #include "catalog/storage.h"
 #include "commands/tablespace.h"
@@ -721,6 +720,8 @@ static void MarkAsPreparingGuts(GTM_TransactionHandle handle, GlobalTransaction 
     pgxact->handle = handle;
     pgxact->xid = xid;
     pgxact->xmin = InvalidTransactionId;
+    proc->snapXmax = InvalidTransactionId;
+    proc->snapCSN = InvalidCommitSeqNo;
     pgxact->csn_min = InvalidCommitSeqNo;
     pgxact->csn_dr = InvalidCommitSeqNo;
     pgxact->delayChkpt = false;
@@ -1998,7 +1999,20 @@ void EndPrepare(GlobalTransaction gxact)
                 t_thrd.proc->syncSetConfirmedLSN = t_thrd.xlog_cxt.ProcLastRecPtr;
             }
 #endif
-            SyncRepWaitForLSN(gxact->prepare_end_lsn);
+          SyncWaitRet stopWatiRes = SyncRepWaitForLSN(gxact->prepare_end_lsn, false);
+#ifdef ENABLE_MULTIPLE_NODES
+            /* In distribute prepare phase, repsync failed participant rasie error to coordinator */
+            if (stopWatiRes == STOP_WAIT) {
+                ereport(ERROR, (errmodule(MODE_REPSYNC), errmsg("Fail to sync prepare transaction to standbys.")));
+            }
+#endif
+            if (module_logging_is_on(MODE_REPSYNC) && IS_PGXC_DATANODE) {
+                ereport(LOG, (errmodule(MODE_REPSYNC), errmsg("prepare xid: %lu, gxid: %s, end_lsn: %lu,"
+                    " sync_commit_guc: %d, sync_names: %s, stop wait reason: %s",
+                    gxact->xid, gxact->gid, gxact->prepare_end_lsn, u_sess->attr.attr_storage.guc_synchronous_commit,
+                    (SyncStandbysDefined() ? u_sess->attr.attr_storage.SyncRepStandbyNames : "not defined"),
+                    SyncWaitRetDesc[stopWatiRes])));
+            }
             g_instance.comm_cxt.localinfo_cxt.set_term = true;
         }
     }
@@ -2555,9 +2569,6 @@ void FinishPreparedTransaction(const char *gid, bool isCommit)
             ColFileNodeRel *colFileNodeRel = commitrels + i;
 
             ColFileNodeCopy(&colFileNode, colFileNodeRel);
-            /* dfs table is not supported */
-            Assert(!IsValidPaxDfsForkNum(colFileNode.forknum));
-            Assert(!IsTruncateDfsForkNum(colFileNode.forknum));
         }
         /* second loop to handle abortrels */
         for (i = 0; i < hdr->nabortrels; i++) {
@@ -2670,9 +2681,6 @@ void FinishPreparedTransaction(const char *gid, bool isCommit)
     }
 
     END_CRIT_SECTION();
-
-    /* clean the pending delete files of which transaction is prepared after we release locks */
-    doPendingDfsDelete(isCommit, &xid);
 
     /* Count the prepared xact as committed or aborted */
     AtEOXact_PgStat(isCommit);

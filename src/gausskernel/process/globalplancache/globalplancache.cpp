@@ -33,6 +33,7 @@
 #include "executor/lightProxy.h"
 #include "executor/spi_priv.h"
 #include "optimizer/nodegroups.h"
+#include "optimizer/sqlpatch.h"
 #include "opfusion/opfusion.h"
 #include "pgxc/groupmgr.h"
 #include "pgxc/pgxcnode.h"
@@ -44,6 +45,7 @@
 #include "utils/plpgsql.h"
 #include "nodes/pg_list.h"
 #include "commands/sqladvisor.h"
+extern bool IsTransactionExitStmt(Node* parsetree);
 
 template void GlobalPlanCache::RemovePlanSource<ACTION_RECREATE>(CachedPlanSource* plansource, const char* stmt_name);
 
@@ -532,6 +534,13 @@ void GlobalPlanCache::RemoveEntry(uint32 htblIdx, GPCEntry *entry)
 
 bool GlobalPlanCache::CheckRecreateCachePlan(CachedPlanSource* psrc, bool* hasGetLock)
 {
+    if (IsAbortedTransactionBlockState() && (!IsTransactionExitStmt(psrc->raw_parse_tree)))
+        ereport(ERROR,
+            (errcode(ERRCODE_IN_FAILED_SQL_TRANSACTION),
+                errmsg("current transaction is aborted, "
+                    "commands ignored until end of transaction block, firstChar[%c]",
+                    u_sess->proc_cxt.firstChar),
+                errdetail_abort()));
     /*
      * Start up a transaction command so we can run parse analysis etc. (Note
      * that this will normally change current memory context.) Nothing happens
@@ -556,6 +565,11 @@ bool GlobalPlanCache::CheckRecreateCachePlan(CachedPlanSource* psrc, bool* hasGe
     if (!psrc->gpc.status.InShareTable()) {
         return false;
     }
+
+    /* If query_dop alreadly change, need build plan again. */
+    if (psrc->stream_enabled != IsStreamSupport()) {
+        return true;
+    }
 #endif
 
     if (u_sess->pcache_cxt.gpc_in_ddl == true) {
@@ -574,6 +588,12 @@ bool GlobalPlanCache::CheckRecreateCachePlan(CachedPlanSource* psrc, bool* hasGe
     if (psrc->search_path && !OverrideSearchPathMatchesCurrent(psrc->search_path)) {
         return true;
     }
+
+#ifndef ENABLE_MULTIPLE_NODES
+    if (CheckRecreateCachePlanBySqlPatch(psrc)) {
+        return true;
+    }
+#endif
 
     return false;
 }
@@ -641,7 +661,7 @@ void GlobalPlanCache::MoveIntoInvalidPlanList(CachedPlanSource* psrc)
 }
 
 void GlobalPlanCache::RecreateCachePlan(CachedPlanSource* oldsource, const char* stmt_name, PreparedStatement *entry,
-                                        SPIPlanPtr spiplan, ListCell* spiplanCell, bool hasGetLock)
+                                        SPIPlanPtr spiplan, ListCell* spiplanCell, bool hasGetLock, bool isUnnamed)
 {
     GPC_LOG("recreate plan", oldsource, oldsource->stmt_name);
     /* these operator may throw error, make sure shared plan is invalid first */
@@ -654,12 +674,14 @@ void GlobalPlanCache::RecreateCachePlan(CachedPlanSource* oldsource, const char*
                 AcquireExecutorLocks(oldsource->gplan->stmt_list, false);
             }
         }
-        newsource = CopyCachedPlan(oldsource, true);
+        newsource = CopyCachedPlan(oldsource, !isUnnamed);
         MemoryContext oldcxt = MemoryContextSwitchTo(newsource->context);
         newsource->stream_enabled = IsStreamSupport();
         u_sess->exec_cxt.CurrentOpFusionObj = NULL;
-        Assert (oldsource->gpc.status.IsSharePlan());
-        newsource->gpc.status.ShareInit();
+        if (!isUnnamed) {
+            Assert (oldsource->gpc.status.IsSharePlan());
+            newsource->gpc.status.ShareInit();
+        }
         // If the planSource is set to invalid, the AST must be analyzed again
         // because the meta has changed.
         newsource->is_valid = false;
@@ -671,13 +693,15 @@ void GlobalPlanCache::RecreateCachePlan(CachedPlanSource* oldsource, const char*
             newsource->parserSetup = spiplan->parserSetup;
             newsource->parserSetupArg = spiplan->parserSetupArg;
         } else if (IS_PGXC_DATANODE) {
-            newsource->stmt_name = pstrdup(stmt_name);
+            newsource->stmt_name = isUnnamed ? NULL : pstrdup(stmt_name);
         } else {
-            newsource->stmt_name = pstrdup(stmt_name);
+            newsource->stmt_name = isUnnamed ? NULL : pstrdup(stmt_name);
 #ifdef ENABLE_MULTIPLE_NODES
             has_lp = (oldsource->single_exec_node != NULL && oldsource->gplan == NULL && oldsource->cplan == NULL);
             /* clean session's datanode statment on cn */
             if (has_lp) {
+                /* unnamed stmt not support lp in gpc */
+                Assert(!isUnnamed);
                 /* no lp in newsource, delete old lp */
                 GPCDropLPIfNecessary(stmt_name, false, true, NULL);
             } else if (oldsource->gplan != NULL) {
@@ -698,14 +722,15 @@ void GlobalPlanCache::RecreateCachePlan(CachedPlanSource* oldsource, const char*
     PG_END_TRY();
 
     /* newsource has reference on session, forget resource owner */
-    ResourceOwnerForgetGMemContext(t_thrd.utils_cxt.TopTransactionResourceOwner, newsource->context);
+    if (!isUnnamed)
+        ResourceOwnerForgetGMemContext(t_thrd.utils_cxt.TopTransactionResourceOwner, newsource->context);
     newsource->next_saved = u_sess->pcache_cxt.first_saved_plan;
     u_sess->pcache_cxt.first_saved_plan = newsource;
     newsource->is_saved = true;
     newsource->gpc.status.SetLoc(GPC_SHARE_IN_LOCAL_SAVE_PLAN_LIST);
     if (spiplan != NULL)
         spiplanCell->data.ptr_value = newsource;
-    else {
+    else if (!isUnnamed) {
 #ifdef ENABLE_MULTIPLE_NODES
         if (IS_PGXC_DATANODE)
             u_sess->pcache_cxt.cur_stmt_psrc = newsource;
@@ -714,6 +739,9 @@ void GlobalPlanCache::RecreateCachePlan(CachedPlanSource* oldsource, const char*
 #else
         entry->plansource = newsource;
 #endif
+    } else {
+        Assert(u_sess->pcache_cxt.unnamed_stmt_psrc == oldsource);
+        u_sess->pcache_cxt.unnamed_stmt_psrc = newsource;
     }
 
     RemovePlanSource<ACTION_RECREATE>(oldsource, stmt_name);

@@ -36,8 +36,7 @@ endif()
 add_bintarget(gs_basebackup TGT_basebackup_SRC TGT_basebackup_INC "${basebackup_DEF_OPTIONS}" "${basebackup_COMPILE_OPTIONS}" "${basebackup_LINK_OPTIONS}" "${basebackup_LINK_LIBS}")
 add_dependencies(gs_basebackup lib_string_obj elog_static buildquery_static pgcommon_static hotpatchclient_static pgport_static pq)
 target_link_directories(gs_basebackup PUBLIC
-    ${LIBOPENSSL_LIB_PATH} ${PROTOBUF_LIB_PATH} ${LIBPARQUET_LIB_PATH} ${LIBEDIT_LIB_PATH}
-    ${LIBCURL_LIB_PATH} ${ZLIB_LIB_PATH} ${LIBOBS_LIB_PATH} ${LIBCGROUP_LIB_PATH}
+    ${LIBOPENSSL_LIB_PATH} ${LIBEDIT_LIB_PATH} ${LIBCURL_LIB_PATH} ${ZLIB_LIB_PATH} ${LIBOBS_LIB_PATH} ${LIBCGROUP_LIB_PATH}
     ${LIBCGROUP_LIB_PATH} ${LZ4_LIB_PATH} ${KERBEROS_LIB_PATH} ${CMAKE_BINARY_DIR}/lib ${SECURE_LIB_PATH}
 )
 install(TARGETS gs_basebackup RUNTIME DESTINATION bin)
@@ -76,8 +75,7 @@ endif()
 add_bintarget(pg_receivexlog TGT_receivexlog_SRC TGT_receivexlog_INC "${receivexlog_DEF_OPTIONS}" "${receivexlog_COMPILE_OPTIONS}" "${receivexlog_LINK_OPTIONS}" "${receivexlog_LINK_LIBS}")
 add_dependencies(pg_receivexlog lib_string_obj elog_static buildquery_static pgcommon_static hotpatchclient_static pgport_static pq)
 target_link_directories(pg_receivexlog PUBLIC
-    ${LIBOPENSSL_LIB_PATH} ${PROTOBUF_LIB_PATH} ${LIBPARQUET_LIB_PATH} ${LIBCGROUP_LIB_PATH}
-    ${LIBCURL_LIB_PATH} ${ZLIB_LIB_PATH} ${LIBOBS_LIB_PATH} ${LIBCGROUP_LIB_PATH} ${LIBEDIT_LIB_PATH}
+    ${LIBOPENSSL_LIB_PATH} ${LIBCGROUP_LIB_PATH} ${LIBCURL_LIB_PATH} ${ZLIB_LIB_PATH} ${LIBOBS_LIB_PATH} ${LIBCGROUP_LIB_PATH} ${LIBEDIT_LIB_PATH}
     ${LZ4_LIB_PATH} ${SECURE_LIB_PATH} ${KERBEROS_LIB_PATH} ${CMAKE_BINARY_DIR}/lib
 )
 install(TARGETS pg_receivexlog RUNTIME DESTINATION bin)
@@ -115,8 +113,7 @@ endif()
 add_bintarget(pg_recvlogical TGT_recvlogical_SRC TGT_recvlogical_INC "${recvlogical_DEF_OPTIONS}" "${recvlogical_COMPILE_OPTIONS}" "${recvlogical_LINK_OPTIONS}" "${recvlogical_LINK_LIBS}")
 add_dependencies(pg_recvlogical lib_string_obj elog_static buildquery_static pgcommon_static hotpatchclient_static pgport_static pq)
 target_link_directories(pg_recvlogical PUBLIC
-    ${LIBOPENSSL_LIB_PATH} ${PROTOBUF_LIB_PATH} ${LIBPARQUET_LIB_PATH} ${LIBCURL_LIB_PATH}
-    ${ZLIB_LIB_PATH} ${LIBOBS_LIB_PATH} ${LIBCGROUP_LIB_PATH} ${LIBEDIT_LIB_PATH} ${LIBCGROUP_LIB_PATH}
+    ${LIBOPENSSL_LIB_PATH} ${LIBCURL_LIB_PATH} ${ZLIB_LIB_PATH} ${LIBOBS_LIB_PATH} ${LIBCGROUP_LIB_PATH} ${LIBEDIT_LIB_PATH} ${LIBCGROUP_LIB_PATH}
     ${LZ4_LIB_PATH} ${KERBEROS_LIB_PATH} ${CMAKE_BINARY_DIR}/lib ${SECURE_LIB_PATH}
 )
 install(TARGETS pg_recvlogical RUNTIME DESTINATION bin)

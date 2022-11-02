@@ -236,8 +236,9 @@ typedef struct Param {
     int32 paramtypmod;   /* typmod value, if known */
     Oid paramcollid;     /* OID of collation, or InvalidOid if none */
     int location;        /* token location, or -1 if unknown */
-    Oid tableOfIndexType; /* type Oid of table of */
+    Oid tableOfIndexType; /* type Oid of table of (wait to discard) */
     Oid recordVarTypOid; /* package record var's composite type oid */
+    List* tableOfIndexTypeList; /* type Oid list of table of, max size 6 */
 } Param;
 
 /*
@@ -839,6 +840,7 @@ typedef struct CaseExpr {
     List* args;      /* the arguments (list of WHEN clauses) */
     Expr* defresult; /* the default result (ELSE clause) */
     int location;    /* token location, or -1 if unknown */
+    bool fromDecode; /* whether is parsed from decode expr, no need to (de-)serialize */
 } CaseExpr;
 
 /*

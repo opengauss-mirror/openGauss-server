@@ -18,8 +18,8 @@ set(guc_COMPILE_OPTIONS ${OPTIMIZE_OPTIONS} ${OS_OPTIONS} ${PROTECT_OPTIONS} ${W
 set(guc_LINK_OPTIONS ${BIN_LINK_OPTIONS})
 set(guc_LINK_LIBS libelog.a libconfig.a libpgport.a -lcrypt -ldl -lm -lssl -lcrypto -l${SECURE_C_CHECK} -lrt -lz -lminiunz)
 set(guc_LINK_DEPEND elog_static config_static pgport_static)
-set(guc_LINK_DIRS ${LIBOPENSSL_LIB_PATH}  ${PROTOBUF_LIB_PATH} ${LIBPARQUET_LIB_PATH} ${KERBEROS_LIB_PATH} ${CMAKE_BINARY_DIR}/lib
-    ${LIBCURL_LIB_PATH} ${ZLIB_LIB_PATH} ${LIBORC_LIB_PATH} ${LIBCGROUP_LIB_PATH} ${LIBEDIT_LIB_PATH} ${SECURE_LIB_PATH})
+set(guc_LINK_DIRS ${LIBOPENSSL_LIB_PATH} ${KERBEROS_LIB_PATH} ${CMAKE_BINARY_DIR}/lib
+    ${LIBCURL_LIB_PATH} ${ZLIB_LIB_PATH} ${LIBCGROUP_LIB_PATH} ${LIBEDIT_LIB_PATH} ${SECURE_LIB_PATH})
 
 if("${ENABLE_UT}" STREQUAL "ON")
     add_shared_libtarget(utgsguc TGT_guc_SRC TGT_guc_INC "${guc_DEF_OPTIONS}" "${guc_COMPILE_OPTIONS}" "${guc_LINK_OPTIONS}") 
@@ -58,7 +58,7 @@ set(encrypt_LINK_LIBS libelog.a libpgport.a -lcrypt -ldl -lm -lssl -lcrypto -l${
 add_bintarget(encrypt TGT_encrypt_SRC TGT_encrypt_INC "${encrypt_DEF_OPTIONS}" "${encrypt_COMPILE_OPTIONS}" "${encrypt_LINK_OPTIONS}" "${encrypt_LINK_LIBS}")
 add_dependencies(encrypt elog_static pgport_static)
 target_link_directories(encrypt PUBLIC
-    ${LIBOPENSSL_LIB_PATH} ${PROTOBUF_LIB_PATH} ${LIBPARQUET_LIB_PATH} ${KERBEROS_LIB_PATH} ${CMAKE_BINARY_DIR}/lib
+    ${LIBOPENSSL_LIB_PATH} ${KERBEROS_LIB_PATH} ${CMAKE_BINARY_DIR}/lib
     ${LIBCURL_LIB_PATH} ${ZLIB_LIB_PATH} ${LIBOBS_LIB_PATH} ${LIBCGROUP_LIB_PATH} ${LIBEDIT_LIB_PATH} ${LIBCGROUP_LIB_PATH} ${SECURE_LIB_PATH}
 )
 install(TARGETS encrypt RUNTIME DESTINATION bin)

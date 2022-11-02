@@ -52,6 +52,7 @@ typedef struct PruningContext {
     /* used for slice pruning */
     Index varno;
     ParamListInfo boundParams;
+    PartitionMap *partmap;
 } PruningContext;
 
 typedef enum PartKeyColumnRangeMode {
@@ -86,18 +87,18 @@ void generateListFromPruningBM(PruningResult* result);
 PruningResult* partitionPruningWalker(Expr* expr, PruningContext* pruningCtx);
 PruningResult* partitionPruningForExpr(PlannerInfo* root, RangeTblEntry* rte, Relation rel, Expr* expr);
 PruningResult* partitionPruningForRestrictInfo(
-    PlannerInfo* root, RangeTblEntry* rte, Relation rel, List* restrictInfoList);
+    PlannerInfo* root, RangeTblEntry* rte, Relation rel, List* restrictInfoList, PartitionMap *partmap);
 PruningResult* singlePartitionPruningForRestrictInfo(Oid partitionOid, Relation rel);
 PruningResult* SingleSubPartitionPruningForRestrictInfo(Oid subPartitionOid, Relation rel, Oid partOid);
 extern PruningResult* copyPruningResult(PruningResult* srcPruningResult);
-extern Oid getPartitionOidFromSequence(Relation relation, int partSeq);
+extern Oid getPartitionOidFromSequence(Relation relation, int partSeq, PartitionMap *oldmap = NULL);
 extern int varIsInPartitionKey(int attrNo, int2vector* partKeyAttrs, int partKeyNum);
 extern bool checkPartitionIndexUnusable(Oid indexOid, int partItrs, PruningResult* pruning_result);
 
 extern PruningResult* GetPartitionInfo(PruningResult* result, EState* estate, Relation current_relation);
 static inline PartitionMap* GetPartitionMap(PruningContext *context)
 {
-    return context->GetPartitionMap(context->relation);
+    return PointerIsValid(context->partmap) ? context->partmap : context->GetPartitionMap(context->relation);
 }
 extern SubPartitionPruningResult* GetSubPartitionPruningResult(List* selectedSubPartitions, int partSeq);
 

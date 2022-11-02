@@ -37,10 +37,10 @@ EXCEPTION
 END;
 /
 call p3_error();
-33816706: PL/pgSQL function p0() line 9 at assignment
-33816706: PL/pgSQL function p1() line 3 at PERFORM
-33816706: PL/pgSQL function p2() line 3 at PERFORM
-33816706: PL/pgSQL function p3_error() line 3 at PERFORM
+--?[0-9]{8}: PL/pgSQL function p0\(\) line 9 at assignment
+--?[0-9]{8}: PL/pgSQL function p1\(\) line 3 at PERFORM
+--?[0-9]{8}: PL/pgSQL function p2\(\) line 3 at PERFORM
+--?[0-9]{8}: PL/pgSQL function p3_error\(\) line 3 at PERFORM
 
  p3_error 
 ----------
@@ -58,7 +58,7 @@ EXCEPTION
 END;
 /
 call p3_error_stack();
-33816706: division by zero
+--?[0-9]{8}: division by zero
  p3_error_stack 
 ----------------
  
@@ -145,42 +145,101 @@ result is: 1
  
 (1 row)
 
---test dbe_utility.get_time
-CREATE OR REPLACE PROCEDURE test_get_time1() 
+CREATE OR REPLACE PROCEDURE p1()
 AS
-declare
-    start_time  bigint;
-    end_time  bigint;
+a integer;
 BEGIN
-    start_time:= dbe_utility.get_time ();
-    pg_sleep(1);
-    end_time:=dbe_utility.get_time ();
-    dbe_output.print_line(end_time - start_time);	
+do $DODO$
+begin
+BEGIN
+raise exception 'ERROR';
+EXCEPTION
+WHEN OTHERS THEN
+raise exception 'ERROR';
+END;
+end$DODO$;
+EXCEPTION
+WHEN OTHERS THEN
+dbe_output.print_line(dbe_utility.format_error_backtrace());
 END;
 /
-call test_get_time1();
-100
- test_get_time1 
-----------------
+call p1();
+--?[0-9]{8}: PL/pgSQL function p1\(\) line 4 at SQL statement
+
+ p1 
+----
  
 (1 row)
 
-CREATE OR REPLACE PROCEDURE test_get_time5() 
+call dbe_utility.format_error_backtrace();
+ format_error_backtrace 
+------------------------
+ 
+(1 row)
+
+CREATE OR REPLACE PROCEDURE p1()
+AS
+a integer;
+BEGIN
+BEGIN
+a := 1/0;
+EXCEPTION
+WHEN OTHERS THEN
+a := 1/0;
+END;
+EXCEPTION
+WHEN OTHERS THEN
+dbe_output.print_line(dbe_utility.format_error_backtrace());
+END;
+/
+BEGIN
+p1();
+dbe_output.print_line(dbe_utility.format_error_backtrace());
+END;
+/
+--?[0-9]{8}: PL/pgSQL function p1\(\) line 8 at assignment
+--?[0-9]{8}: PL/pgSQL function inline_code_block line 3 at PERFORM
+
+BEGIN
+do $DODO$
+DECLARE
+a integer;
+BEGIN
+BEGIN
+BEGIN
+a := 1/0;
+EXCEPTION
+WHEN OTHERS THEN
+a := 1/0;
+END;
+EXCEPTION
+WHEN OTHERS THEN
+dbe_output.print_line(dbe_utility.format_error_backtrace());
+END;
+end$DODO$;
+dbe_output.print_line(dbe_utility.format_error_backtrace());
+END;
+/
+--?[0-9]{8}: PL/pgSQL function inline_code_block line 10 at assignment
+--?[0-9]{8}: PL/pgSQL function inline_code_block line 3 at SQL statement
+
+--test dbe_utility.get_time
+CREATE OR REPLACE PROCEDURE test_get_time()
 AS
 declare
     start_time  bigint;
     end_time  bigint;
 BEGIN
-    start_time:= dbe_utility.get_time ();
-    pg_sleep(5);
-    end_time:=dbe_utility.get_time ();
-    dbe_output.print_line(end_time - start_time);	
+    start_time := dbe_utility.get_time();
+    pg_sleep(1);
+    end_time := dbe_utility.get_time();
+    dbe_output.print_line(trunc((end_time - start_time) / 100));
 END;
 /
-call test_get_time5();
-500
- test_get_time5 
-----------------
+call test_get_time();
+1
+ test_get_time 
+---------------
  
 (1 row)
 
@@ -563,11 +622,11 @@ call test_clob_write();
  
 (1 row)
 
-select * from test_clob;
+select * from test_clob order by 1;
  a |  b  
 ---+-----
+ 1 | abc
  2 | zzz
- 1 | dbc
 (2 rows)
 
 create or replace procedure test_lob_write_nodyna
@@ -588,11 +647,11 @@ ezz
  
 (1 row)
 
-select * from test_clob;
+select * from test_clob order by 1;
  a |  b  
 ---+-----
+ 1 | abc
  2 | zzz
- 1 | dbc
 (2 rows)
 
 create or replace procedure test_blob_write
@@ -612,11 +671,11 @@ call test_blob_write();
  
 (1 row)
 
-select * from test_blob;
+select * from test_blob order by 1;
  a |    b     
 ---+----------
+ 1 | 0ABC
  2 | 0FFFFFFF
- 1 | 0DBC
 (2 rows)
 
 --test append+update
@@ -637,11 +696,11 @@ call test_clob_append();
  
 (1 row)
 
-select * from test_clob;
- a |   b    
----+--------
+select * from test_clob order by 1;
+ a |  b  
+---+-----
+ 1 | abc
  2 | zzz
- 1 | dbcddd
 (2 rows)
 
 create or replace procedure test_blob_append
@@ -661,11 +720,11 @@ call test_blob_append();
  
 (1 row)
 
-select * from test_blob;
+select * from test_blob order by 1;
  a |    b     
 ---+----------
+ 1 | 0ABC
  2 | 0FFFFFFF
- 1 | 0DBC0DDD
 (2 rows)
 
 --test read
@@ -683,7 +742,7 @@ begin
 end;
 /
 call test_clob_read();
-d
+a
  test_clob_read 
 ----------------
  

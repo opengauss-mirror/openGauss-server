@@ -156,8 +156,9 @@ ObjectAddress publication_add_relation(Oid pubid, Relation targetrel, bool if_no
     if (SearchSysCacheExists2(PUBLICATIONRELMAP, ObjectIdGetDatum(relid), ObjectIdGetDatum(pubid))) {
         heap_close(rel, RowExclusiveLock);
 
-        if (if_not_exists)
+        if (if_not_exists) {
             return myself;
+        }
 
         ereport(ERROR, (errcode(ERRCODE_DUPLICATE_OBJECT), errmsg(
             "relation \"%s\" is already member of publication \"%s\"", RelationGetRelationName(targetrel), pub->name)));

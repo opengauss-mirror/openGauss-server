@@ -646,7 +646,7 @@ static bool binary_upgrade_is_next_part_toast_pg_type_oid_valid()
     return true;
 }
 
-static void InitTempToastNamespace(void)
+static void InitLobTempToastNamespace(void)
 {
     char toastNamespaceName[NAMEDATALEN];
     char PGXCNodeNameSimplified[NAMEDATALEN];
@@ -723,15 +723,15 @@ static void InitTempToastNamespace(void)
     toastspaceId = get_namespace_oid(toastNamespaceName, true);
     if (OidIsValid(toastspaceId)) {
         ereport(ERROR,
-            (errcode(ERRCODE_CACHE_LOOKUP_FAILED), 
-                errmsg("toast Namespace Named %s has existed, please drop it and try again", toastNamespaceName)));
+            (errcode(ERRCODE_INTERNAL_ERROR),
+                errmsg("lob toast namespace named %s has existed!", toastNamespaceName)));
     }
 
     create_stmt = makeNode(CreateSchemaStmt);
     create_stmt->authid = bootstrap_username;
     create_stmt->schemaElts = NULL;
     create_stmt->schemaname = toastNamespaceName;
-    create_stmt->temptype = Temp_Toast;
+    create_stmt->temptype = Temp_Lob_Toast;
     rc = memset_s(str, sizeof(str), 0, sizeof(str));
     securec_check(rc, "", "");
     ret = snprintf_s(str,
@@ -745,12 +745,12 @@ static void InitTempToastNamespace(void)
 
     /* Advance command counter to make namespace visible */
     CommandCounterIncrement();
-    if (!OidIsValid(u_sess->catalog_cxt.myTempToastNamespace)) {
+
+    if (!OidIsValid(u_sess->catalog_cxt.myLobTempToastNamespace)) {
         ereport(ERROR,
-            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg("Temp toast namespace create failed")));
+            (errcode(ERRCODE_INTERNAL_ERROR),
+                errmsg("lob temp toast namespace create failed!")));
     }
-    u_sess->catalog_cxt.baseSearchPathValid = false;
 }
 
 bool create_toast_by_sid(Oid *toastOid)
@@ -766,8 +766,8 @@ bool create_toast_by_sid(Oid *toastOid)
     int16 coloptions[2];
     errno_t rc = EOK;
     uint64 session_id = 0;
-    if (OidIsValid(u_sess->plsql_cxt.ActiveLobToastOid)) {
-        *toastOid = u_sess->plsql_cxt.ActiveLobToastOid;
+    if (OidIsValid(u_sess->catalog_cxt.ActiveLobToastOid)) {
+        *toastOid = u_sess->catalog_cxt.ActiveLobToastOid;
         return false;
     }
 
@@ -793,12 +793,10 @@ bool create_toast_by_sid(Oid *toastOid)
     tupdesc->attrs[0]->attstorage = 'p';
     tupdesc->attrs[1]->attstorage = 'p';
     tupdesc->attrs[2]->attstorage = 'p';
-    if (OidIsValid(u_sess->catalog_cxt.myTempToastNamespace)) {
-        namespaceid = GetTempToastNamespace();
-    } else {
-        InitTempToastNamespace();
-        namespaceid = GetTempToastNamespace();
+    if (!OidIsValid(u_sess->catalog_cxt.myLobTempToastNamespace)) {
+        InitLobTempToastNamespace();
     }
+    namespaceid = u_sess->catalog_cxt.myLobTempToastNamespace;
 
     StorageType storage_type = HEAP_DISK;
     Datum reloptions = (Datum)0;
@@ -893,8 +891,26 @@ bool create_toast_by_sid(Oid *toastOid)
         false);
 
     heap_close(toast_rel, NoLock);
-    u_sess->plsql_cxt.ActiveLobToastOid = toast_relid;
+    u_sess->catalog_cxt.ActiveLobToastOid = toast_relid;
     *toastOid = toast_relid;
+
+    ObjectAddress referenced;
+    ObjectAddress toastobject;
+
+    toastobject.classId = RelationRelationId;
+    toastobject.objectId = toast_relid;
+    toastobject.objectSubId = 0;
+
+    if (u_sess->attr.attr_common.IsInplaceUpgrade && toastobject.objectId < FirstBootstrapObjectId) {
+        recordPinnedDependency(&toastobject);
+    } else {
+        referenced.classId = NamespaceRelationId;
+        referenced.objectId = namespaceid;
+        referenced.objectSubId = 0;
+
+        recordDependencyOn(&toastobject, &referenced, DEPENDENCY_INTERNAL);
+    }
+
     /*
      * Make changes visible
      */

@@ -15,19 +15,16 @@
  *
  * -------------------------------------------------------------------------
  */
-#include "access/dfs/dfs_query.h" /* stay here, otherwise compile errors */
 #include "postgres.h"
 #include <math.h>
 #include "access/clog.h"
 #include "access/cstore_rewrite.h"
-#include "access/dfs/dfs_insert.h"
 #include "access/genam.h"
 #include "access/tableam.h"
 #include "access/heapam.h"
 #include "access/reloptions.h"
 #include "access/transam.h"
 #include "access/xact.h"
-#include "catalog/dfsstore_ctlg.h"
 #include "catalog/index.h"
 #include "catalog/pgxc_class.h"
 #include "catalog/storage.h"
@@ -36,6 +33,7 @@
 #include "commands/cluster.h"
 #include "commands/tablespace.h"
 #include "commands/verify.h"
+#include "vecexecutor/vecnodes.h"
 #include "utils/acl.h"
 #include "utils/fmgroids.h"
 #include "utils/snapmgr.h"
@@ -65,8 +63,8 @@ static void VerifyIndexRel(VacuumStmt* stmt, Relation indexRel, VerifyDesc* chec
 static void VerifyRowRels(VacuumStmt* stmt, Relation parentRel, Relation rel);
 static void VerifyRowRel(VacuumStmt* stmt, Relation rel, VerifyDesc* checkCudesc = NULL);
 static bool VerifyRowRelFull(VacuumStmt* stmt, Relation rel, VerifyDesc* checkCudesc = NULL);
-static bool VerifyRowRelFast(Relation rel, VerifyDesc* checkCudesc = NULL);
-static bool VerifyRowRelComplete(Relation rel, VerifyDesc* checkCudesc = NULL);
+static bool VerifyRowRelFast(Relation rel, VerifyDesc* checkCudesc = NULL, bool isCompleteMode = false);
+static bool VerifyRowRelComplete(Relation rel, VerifyDesc* checkCudesc = NULL, bool isCompleteMode = true);
 static void VerifyColRels(VacuumStmt* stmt, Relation parentRel, Relation rel);
 static void VerifyColRel(VacuumStmt* stmt, Relation rel);
 static void VerifyColRelFast(Relation rel);
@@ -377,7 +375,7 @@ void DoGlobalVerifyDatabase(VacuumStmt* stmt, const char* queryString, bool sent
         PushActiveSnapshot(GetTransactionSnapshot());
 
         Relation rel = relation_open(relid, AccessShareLock);
-        if (RelationIsForeignTable(rel) || RelationIsStream(rel) || RelationIsDfsStore(rel)) {
+        if (RelationIsForeignTable(rel) || RelationIsStream(rel)) {
             ereport(LOG, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("The hdfs table does not support verify.")));
             canVerify = false;
         }
@@ -626,7 +624,7 @@ static void CheckVerifyRelation(Relation rel)
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("Non-table objects do not support verify.")));
     }
 
-    if (RelationIsForeignTable(rel) || RelationIsStream(rel) || RelationIsDfsStore(rel)) {
+    if (RelationIsForeignTable(rel) || RelationIsStream(rel)) {
         relation_close(rel, AccessShareLock);
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("The hdfs table does not support verify.")));
     }
@@ -1251,7 +1249,7 @@ static void VerifyRowRel(VacuumStmt* stmt, Relation rel, VerifyDesc* checkCudesc
  * @in&out checkCudesc - checkCudesc is a struct to judge whether cudesc tables is damaged.
  * @return: bool
  */
-static bool VerifyRowRelFast(Relation rel, VerifyDesc* checkCudesc)
+static bool VerifyRowRelFast(Relation rel, VerifyDesc* checkCudesc, bool isCompleteMode)
 {
     if (unlikely(rel == NULL)) {
         ereport(ERROR,
@@ -1288,6 +1286,16 @@ static bool VerifyRowRelFast(Relation rel, VerifyDesc* checkCudesc)
                 rdStatus = smgrread(src, forkNum, blkno, buf);
             }
             if (rdStatus != SMGR_RD_CRC_ERROR) {
+                /* Ustrore white-box verification adapt to analyze verify. */
+                if (rdStatus == SMGR_RD_OK) {
+                    UPageVerifyParams verifyParam;
+                    Page page = (char *) buf;
+                    if (!isCompleteMode && unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UPAGE,
+                        USTORE_VERIFY_FAST, (char *) &verifyParam, rel, page, InvalidBlockNumber, InvalidOffsetNumber,
+                        NULL, NULL, InvalidXLogRecPtr, NULL, NULL, ANALYZE_VERIFY))) {
+                        ExecuteUstoreVerify(USTORE_VERIFY_MOD_UPAGE, (char *) &verifyParam);
+                    }
+                }
                 continue;
             }
 
@@ -1312,7 +1320,16 @@ static bool VerifyRowRelFast(Relation rel, VerifyDesc* checkCudesc)
                         handle_in_client(true)));
             /* Add the wye page to the global variable and try to fix it. */
             addGlobalRepairBadBlockStat(src->smgr_rnode, forkNum, blkno);
-        }
+            } else if (rdStatus == SMGR_RD_OK) {
+                /* Ustrore white-box verification adapt to analyze verify. */
+                UPageVerifyParams verifyParam;
+                Page page = (char *) buf;
+                if (!isCompleteMode && unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UPAGE, USTORE_VERIFY_FAST,
+                    (char *) &verifyParam, rel, page, InvalidBlockNumber, InvalidOffsetNumber,
+                    NULL, NULL, InvalidXLogRecPtr, NULL, NULL, (int)ANALYZE_VERIFY))) {
+                    ExecuteUstoreVerify(USTORE_VERIFY_MOD_UPAGE, (char *) &verifyParam);
+                }
+            }
     }
 
     pfree_ext(buf);
@@ -1328,7 +1345,7 @@ static bool VerifyRowRelFast(Relation rel, VerifyDesc* checkCudesc)
  * @in&out checkCudesc - checkCudesc is a struct to judge whether cudesc tables is damaged.
  * @return: bool
  */
-static bool VerifyRowRelComplete(Relation rel, VerifyDesc* checkCudesc)
+static bool VerifyRowRelComplete(Relation rel, VerifyDesc* checkCudesc, bool isCompleteMode)
 {
     if (RELATION_IS_GLOBAL_TEMP(rel) && !gtt_storage_attached(RelationGetRelid(rel))) {
         return true;
@@ -1343,6 +1360,9 @@ static bool VerifyRowRelComplete(Relation rel, VerifyDesc* checkCudesc)
     ForkNumber forkNum = MAIN_FORKNUM;
     bool isValidRelationPageFast = true;
     bool isValidRelationPageComplete = true;
+    SMgrRelation smgrRel = NULL;
+    BlockNumber nblocks = 0;
+    char *buf = NULL;
 
     /* create column table verify memory context */
     MemoryContext verifyRowMemContext = AllocSetContextCreate(CurrentMemoryContext,
@@ -1354,7 +1374,27 @@ static bool VerifyRowRelComplete(Relation rel, VerifyDesc* checkCudesc)
     MemoryContext oldMemContext = MemoryContextSwitchTo(verifyRowMemContext);
 
     /* check page header and crc first */
-    isValidRelationPageFast = VerifyRowRelFast(rel, checkCudesc);
+    isValidRelationPageFast = VerifyRowRelFast(rel, checkCudesc, true);
+
+    /* check all tuples of ustore relation. */
+    buf = (char*)palloc(BLCKSZ);
+    RelationOpenSmgr(rel);
+    smgrRel = rel->rd_smgr;
+    nblocks = smgrnblocks(smgrRel, forkNum);
+    for (BlockNumber blkno = 0; blkno < nblocks; blkno++) {
+        CHECK_FOR_INTERRUPTS();
+        SMGR_READ_STATUS rdStatus = smgrread(smgrRel, forkNum, blkno, buf);
+        if (rdStatus == SMGR_RD_OK) {
+            UPageVerifyParams verifyParam;
+            Page page = (char *) buf;
+            if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UPAGE, USTORE_VERIFY_COMPLETE,
+                (char *) &verifyParam, rel, page, InvalidBlockNumber, InvalidOffsetNumber,
+                NULL, NULL, InvalidXLogRecPtr, NULL, NULL, ANALYZE_VERIFY))) {
+                ExecuteUstoreVerify(USTORE_VERIFY_MOD_UPAGE, (char *) &verifyParam);
+            }
+        }
+    }
+    pfree_ext(buf);
 
     if (rel->rd_rel->relkind == RELKIND_RELATION || rel->rd_rel->relkind == RELKIND_TOASTVALUE) {
         /* check the tuple */
@@ -1449,7 +1489,7 @@ static bool VerifyRowRelComplete(Relation rel, VerifyDesc* checkCudesc)
 
 static bool VerifyRowRelFull(VacuumStmt* stmt, Relation rel, VerifyDesc* checkCudesc)
 {
-    bool (*verifyfunc)(Relation, VerifyDesc*);
+    bool (*verifyfunc)(Relation, VerifyDesc*, bool);
     Relation bucketRel = NULL;
 
     if ((unsigned int)stmt->options & VACOPT_FAST) {
@@ -1466,7 +1506,7 @@ static bool VerifyRowRelFull(VacuumStmt* stmt, Relation rel, VerifyDesc* checkCu
         Assert(checkCudesc == NULL);
         for (int i = 0; i < bucketlist->dim1; i++) {
             bucketRel = bucketGetRelation(rel, NULL, bucketlist->values[i]);
-            if (verifyfunc(bucketRel, NULL) == false) {
+            if (verifyfunc(bucketRel, NULL, false) == false) {
                 bucketCloseRelation(bucketRel);
                 return false;
             }
@@ -1474,7 +1514,7 @@ static bool VerifyRowRelFull(VacuumStmt* stmt, Relation rel, VerifyDesc* checkCu
         }
         return true;
     } else
-        return verifyfunc(rel, checkCudesc);
+        return verifyfunc(rel, checkCudesc, false);
 }
 
 

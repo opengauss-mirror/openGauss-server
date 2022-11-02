@@ -90,11 +90,6 @@
  * Note: if there's any pad bytes in the struct, INIT_BUFFERTAG will have
  * to be fixed to zero them, since this struct is used as a hash key.
  */
-typedef struct buftag {
-    RelFileNode rnode; /* physical relation identifier */
-    ForkNumber forkNum;
-    BlockNumber blockNum; /* blknum relative to begin of reln */
-} BufferTag;
 
 typedef struct buftagnocompress {
     RelFileNodeV2 rnode;

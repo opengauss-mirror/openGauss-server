@@ -733,7 +733,6 @@ static void process_ordered_aggregate_single(
 
     /* init the number of arguments to a function. */
     InitFunctionCallInfoArgs(fcinfo, peraggstate->numArguments + 1, 1);
-
     /* Load the column into argument 1 (arg 0 will be transition value) */
     newVal = fcinfo.arg + 1;
     isNull = fcinfo.argnull + 1;
@@ -824,7 +823,6 @@ static void process_ordered_aggregate_multi(
                 slot1, slot2, numDistinctCols, peraggstate->sortColIdx, peraggstate->equalfns, workcontext)) {
             /* init the number of arguments to a function. */
             InitFunctionCallInfoArgs(fcinfo, numTransInputs + 1, 1);
-
             /* Load values into fcinfo */
             /* Start from 1, since the 0th arg will be the transition value */
             for (i = 0; i < numTransInputs; i++) {

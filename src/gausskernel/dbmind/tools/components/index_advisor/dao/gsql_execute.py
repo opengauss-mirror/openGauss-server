@@ -48,7 +48,7 @@ class GSqlExecute(ExecuteFactory):
         proc = subprocess.Popen(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
         (stdout, stderr) = proc.communicate()
-        stdout, stderr = stdout.decode(), stderr.decode()
+        stdout, stderr = stdout.decode(errors='ignore'), stderr.decode(errors='ignore')
         if 'gsql: FATAL:' in stderr or 'failed to connect' in stderr:
             raise ConnectionError("An error occurred while connecting to the database.\n"
                                   + "Details: " + stderr)
@@ -61,9 +61,9 @@ class GSqlExecute(ExecuteFactory):
             ret = subprocess.check_output(
                 shlex.split(cmd), stderr=subprocess.STDOUT)
         except subprocess.CalledProcessError as e:
-            print(e.output.decode(), file=sys.stderr)
+            print(e.output.decode(errors='ignore'), file=sys.stderr)
 
-        return ret.decode()
+        return ret.decode(errors='ignore')
 
     def is_multi_node(self):
         cmd = BASE_CMD + " -c " + shlex.quote("select count(*) from pgxc_node where node_type='C';")
@@ -71,8 +71,8 @@ class GSqlExecute(ExecuteFactory):
             ret = subprocess.check_output(
                 shlex.split(cmd), stderr=subprocess.STDOUT)
         except subprocess.CalledProcessError as e:
-            print(e.output.decode(), file=sys.stderr)
-        return int(ret.decode().strip().split()[2]) > 0
+            print(e.output.decode(errors='ignore'), file=sys.stderr)
+        return int(ret.decode(errors='ignore').strip().split()[2]) > 0
 
     @staticmethod
     def parse_single_advisor_result(res, table_index_dict):
@@ -199,8 +199,9 @@ class GSqlExecute(ExecuteFactory):
                 query_cost = GSqlExecute.parse_plan_cost(line)
                 query_cost *= workload[select_sql_pos[i]].frequency
                 workload[select_sql_pos[i]].cost_list.append(query_cost)
+                # update positive_pos and negative_pos
                 if index_config and len(index_config) == 1 and query_cost < workload[select_sql_pos[i]].cost_list[0]:
-                    index_config[0].positive_pos.append(select_sql_pos[i])
+                    index_config[0].update_positive_pos(select_sql_pos[i])
                 total_cost += query_cost
                 found_plan = False
                 i += 1
@@ -303,8 +304,9 @@ class GSqlExecute(ExecuteFactory):
                 elif re.match(r'\(\d+ rows?\)', line):
                     continue
                 elif '|' in line:
-                    temptable, tempindex, indexdef, temppkey = [
-                        item.strip() for item in line.split('|')]
+                    temptable, tempindex = [item.strip() for item in line.split('|')[:2]]
+                    indexdef = ('|'.join(line.split('|')[2:-1])).strip()
+                    temppkey = line.split('|')[-1].strip()
                     if temptable and tempindex:
                         table, index, pkey = temptable, tempindex, temppkey
                     if line.strip().endswith(('+| p', '+|')):

@@ -1178,6 +1178,7 @@ typedef enum WaitState {
     STATE_WAIT_FLUSH_DATA,
     STATE_WAIT_RESERVE_TD,
     STATE_WAIT_TD_ROLLBACK,
+    STATE_WAIT_AVAILABLE_TD,
     STATE_WAIT_TRANSACTION_ROLLBACK,
     STATE_PRUNE_TABLE,
     STATE_PRUNE_INDEX,
@@ -1203,6 +1204,7 @@ typedef enum WaitState {
     STATE_ANALYZE,
     STATE_VACUUM,
     STATE_VACUUM_FULL,
+    STATE_VACUUM_GPI,
     STATE_GTM_CONNECT,
     STATE_GTM_RESET_XMIN,
     STATE_GTM_GET_XMIN,
@@ -1229,6 +1231,8 @@ typedef enum WaitState {
     STATE_WAIT_SYNC_PRODUCER_NEXT_STEP,
     STATE_GTM_SET_CONSISTENCY_POINT,
     STATE_WAIT_SYNC_BGWORKERS,
+    STATE_STANDBY_READ_RECOVERY_CONFLICT,
+    STATE_STANDBY_GET_SNAPSHOT,
     STATE_WAIT_NUM  // MUST be last, DO NOT use this value.
 } WaitState;
 
@@ -1586,10 +1590,14 @@ typedef struct PgBackendStatus {
     int lw_count;
     /* lwlock object now requiring */
     LWLock* lw_want_lock;
+    LWLockMode lw_want_mode;
+    TimestampTz lw_want_start_time;
 
     /* all lwlocks held by this thread */
     int* lw_held_num;                      /* point to num_held_lwlocks */
     void* lw_held_locks;                   /* point to held_lwlocks[] */
+    void* lw_held_times;                   /* point to lwlock_held_times[] */
+
     volatile bool st_lw_access_flag;       /* valid flag */
     volatile bool st_lw_is_cleanning_flag; /* is cleanning lw ptr */
 
@@ -1599,6 +1607,7 @@ typedef struct PgBackendStatus {
     /* The entry is valid if st_block_sessionid > 0, unused if st_block_sessionid == 0 */
 
     volatile uint64 st_block_sessionid; /* block session */
+    BufferTag bufTag;
     syscalllock statement_cxt_lock;     /* mutex for statement context(between session and statement flush thread) */
     void* statement_cxt;                /* statement context of full sql */
     knl_u_trace_context trace_cxt;      /* request trace id */
@@ -1757,6 +1766,7 @@ extern void pgstat_report_unique_sql_id(bool resetUniqueSql);
 extern void pgstat_report_global_session_id(GlobalSessionId globalSessionId);
 extern void pgstat_report_jobid(uint64 jobid);
 extern void pgstat_report_parent_sessionid(uint64 sessionid, uint32 level = 0);
+extern void pgstat_report_bgworker_parent_sessionid(uint64 sessionid);
 extern void pgstat_report_smpid(uint32 smpid);
 
 extern void pgstat_report_blocksid(void* waitLockThrd, uint64 blockSessionId);
@@ -1847,6 +1857,67 @@ static inline WaitState pgstat_report_waitstatus(WaitState waitstatus, bool isOn
 
     return oldStatus;
 }
+
+static inline WaitState pgstat_report_waitstatus_ex(WaitState waitstatus, bool isOnlyFetch = false,
+    bool Intrastat = false, TimestampTz  start = 0)
+{
+    volatile PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
+    WaitState oldwaitstatus;
+    if (IS_PGSTATE_TRACK_UNDEFINE) {
+        return STATE_WAIT_UNDEFINED;
+    }
+
+    WaitState oldStatus = beentry->st_waitstatus;
+
+    if (isOnlyFetch)
+        return oldStatus;
+
+    pgstat_increment_changecount_before(beentry);
+    /*
+     * Since this is a single-byte field in a struct that only this process
+     * may modify, there seems no need to bother with the st_changecount
+     * protocol.  The update must appear atomic in any case.
+     */
+    oldwaitstatus = beentry->st_waitstatus;
+    beentry->st_waitstatus = waitstatus;
+    if (t_thrd.role == THREADPOOL_WORKER) {
+        t_thrd.threadpool_cxt.worker->m_waitState = waitstatus;
+    }
+
+    /* If it switches into STATE_POOLER_CREATE_CONN, point to global thread local parameters. */
+    if (STATE_POOLER_CREATE_CONN == waitstatus) {
+        libpq_wait_nodeid = &(beentry->st_libpq_wait_nodeid);
+        libpq_wait_nodecount = &(beentry->st_libpq_wait_nodecount);
+    }
+
+    /* If it is restored to STATE_WAIT_UNDEFINED, restore the related parameters. */
+    if (STATE_WAIT_UNDEFINED == waitstatus) {
+        beentry->st_xid = 0;
+        beentry->st_nodeid = -1;
+        beentry->st_waitnode_count = 0;
+        beentry->st_plannodeid = -1;
+        beentry->st_numnodes = -1;
+        beentry->st_relname[0] = '\0';
+        beentry->st_relname[NAMEDATALEN * 2 - 1] = '\0';
+        beentry->st_libpq_wait_nodecount = 0;
+        beentry->st_libpq_wait_nodeid = InvalidOid;
+    }
+
+    if (u_sess->attr.attr_common.enable_instr_track_wait && (int)waitstatus != (int)STATE_WAIT_UNDEFINED) {
+        beentry->waitInfo.status_info.start_time = GetCurrentTimestamp();
+    } else if (u_sess->attr.attr_common.enable_instr_track_wait &&
+               (uint32)oldwaitstatus != (uint32)STATE_WAIT_UNDEFINED && waitstatus == STATE_WAIT_UNDEFINED) {
+        TimestampTz current_time =  GetCurrentTimestamp();
+        TimestampTz originStartTime = Intrastat ? start : beentry->waitInfo.status_info.start_time;
+        int64 duration = current_time - originStartTime;
+        UpdateWaitStatusStat(&beentry->waitInfo, (uint32)oldwaitstatus, duration, current_time);
+        beentry->waitInfo.status_info.start_time = 0;
+    }
+
+    pgstat_increment_changecount_after(beentry);
+    return oldStatus;
+}
+
 
 /*
  * For 64-bit xid, report waitstatus and xid, then return the last wait status.
@@ -1990,6 +2061,16 @@ static inline void pgstat_report_wait_lock_failed(uint32 wait_event_info)
     pgstat_increment_changecount_after(beentry);
 }
 
+static inline void CopyBufTag(volatile BufferTag* dest, Oid spcNode, Oid dbNode, Oid relNode,
+    int4 bucketNode, ForkNumber forkNum, BlockNumber blockNum)
+{
+    dest->rnode.spcNode = spcNode;
+    dest->rnode.dbNode = dbNode;
+    dest->rnode.relNode = relNode;
+    dest->rnode.bucketNode = bucketNode;
+    dest->forkNum = forkNum;
+    dest->blockNum = blockNum;
+}
 /* ----------
  * pgstat_report_waitevent() -
  *
@@ -2003,7 +2084,7 @@ static inline void pgstat_report_wait_lock_failed(uint32 wait_event_info)
  *
  * ----------
  */
-static inline void pgstat_report_waitevent(uint32 wait_event_info)
+static inline void pgstat_report_waitevent(uint32 wait_event_info, volatile BufferTag* bufTag = NULL)
 {
     PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
 
@@ -2017,7 +2098,12 @@ static inline void pgstat_report_waitevent(uint32 wait_event_info)
      */
     uint32 old_wait_event_info = beentry->st_waitevent;
     beentry->st_waitevent = wait_event_info;
-
+    if (bufTag != NULL) {
+        CopyBufTag(&(beentry->bufTag), bufTag->rnode.spcNode, bufTag->rnode.dbNode, bufTag->rnode.relNode,
+            bufTag->rnode.bucketNode, bufTag->forkNum, bufTag->blockNum);
+    } else {
+        CopyBufTag(&(beentry->bufTag), 0, 0, 0, 0, 0, 0);
+    }
     if (u_sess->attr.attr_common.enable_instr_track_wait && wait_event_info != WAIT_EVENT_END) {
         beentry->waitInfo.event_info.start_time = GetCurrentTimestamp();
     } else if (u_sess->attr.attr_common.enable_instr_track_wait && old_wait_event_info != WAIT_EVENT_END &&
@@ -2767,6 +2853,7 @@ extern TableDistributionInfo* get_recovery_stat(TupleDesc tuple_desc);
 extern TableDistributionInfo* streaming_hadr_get_recovery_stat(TupleDesc tuple_desc);
 extern TableDistributionInfo* get_remote_node_xid_csn(TupleDesc tuple_desc);
 extern TableDistributionInfo* get_remote_index_status(TupleDesc tuple_desc, const char *schname, const char *idxname);
+extern TableDistributionInfo* GetRemoteGsLWLockStatus(TupleDesc tuple_desc);
 
 #define SessionMemoryArraySize (BackendStatusArray_size)
 

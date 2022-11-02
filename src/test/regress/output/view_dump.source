@@ -87,6 +87,9 @@ CREATE VIEW test_sjs_view8(col1,col2,col3,col4,col5,col6) AS
     SELECT t1.*, t1.b AS col4, t2.* FROM ((SELECT view_bug_sjs.a, view_bug_sjs.b, view_bug_sjs.b AS "numeric" FROM view_bug_sjs) t1 LEFT JOIN (SELECT view_bug_sjs.a, view_bug_sjs.b AS "numeric" FROM view_bug_sjs) t2 ON ((t1.a = t2.a)));
 CREATE VIEW test_sjs_view9(col1,col2,col3,col4,col5,col6) AS
     SELECT t1.*, t1.b AS col4, t2.* FROM ((SELECT view_bug_sjs.a, view_bug_sjs.b, view_bug_sjs.b AS "numeric" FROM view_bug_sjs) t1 JOIN (SELECT view_bug_sjs.a, view_bug_sjs.b AS "numeric" FROM view_bug_sjs) t2 ON ((t1.a = t2.a)));
+COPY db4ai.snapshot (id, parent_id, matrix_id, root_id, schema, name, owner, commands, comment, published, archived, created, row_count) FROM stdin;
+\.
+;
 COPY view_bug_sjs (a, b) FROM stdin;
 \.
 ;
@@ -143,6 +146,8 @@ CREATE VIEW test_sjs_view8(col1,col2,col3,col4,col5,col6) AS
     SELECT t1.*, t1.b AS col4, t2.* FROM ((SELECT view_bug_sjs.a, view_bug_sjs.b, view_bug_sjs.b AS "numeric" FROM view_bug_sjs) t1 LEFT JOIN (SELECT view_bug_sjs.a, view_bug_sjs.b AS "numeric" FROM view_bug_sjs) t2 ON ((t1.a = t2.a)));
 CREATE VIEW test_sjs_view9(col1,col2,col3,col4,col5,col6) AS
     SELECT t1.*, t1.b AS col4, t2.* FROM ((SELECT view_bug_sjs.a, view_bug_sjs.b, view_bug_sjs.b AS "numeric" FROM view_bug_sjs) t1 JOIN (SELECT view_bug_sjs.a, view_bug_sjs.b AS "numeric" FROM view_bug_sjs) t2 ON ((t1.a = t2.a)));
+COPY db4ai.snapshot (id, parent_id, matrix_id, root_id, schema, name, owner, commands, comment, published, archived, created, row_count) FROM stdin;
+;
 COPY view_bug_sjs (a, b) FROM stdin;
 ;
 \c regression

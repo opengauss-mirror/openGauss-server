@@ -38,7 +38,6 @@
 #include "access/twophase.h"
 #include "access/xact.h"
 #include "access/xlog.h"
-#include "access/dfs/dfs_insert.h"
 #ifdef ENABLE_WHITEBOX
 #include "access/ustore/knl_whitebox_test.h"
 #endif
@@ -164,6 +163,7 @@
 #include "utils/guc_memory.h"
 #include "utils/guc_network.h"
 #include "utils/guc_resource.h"
+#include "utils/mem_snapshot.h"
 
 #ifndef PG_KRB_SRVTAB
 #define PG_KRB_SRVTAB ""
@@ -213,6 +213,9 @@
 #define S_PER_D (60 * 60 * 24)
 #define MS_PER_D (1000 * 60 * 60 * 24)
 #define H_PER_D 24
+
+#define AUDITFILE_THRESHOLD_LOWER_BOUND 100
+const uint32 AUDIT_THRESHOLD_VERSION_NUM = 92685;
 
 extern volatile bool most_available_sync;
 extern void SetThreadLocalGUC(knl_session_context* session);
@@ -329,6 +332,11 @@ const char* sync_guc_variable_namelist[] = {"work_mem",
     "enable_hdfs_predicate_pushdown",
     "enable_hadoop_env",
     "behavior_compat_options",
+#ifndef ENABLE_MULTIPLE_NODES
+    "plsql_compile_check_options",
+#endif
+    "a_format_version",
+    "a_format_dev_version",
     "enable_valuepartition_pruning",
     "enable_constraint_optimization",
     "enable_bloom_filter",
@@ -439,6 +447,7 @@ static bool check_bonjour(bool* newval, void** extra, GucSource source);
 #endif
 
 static bool check_gpc_syscache_threshold(bool* newval, void** extra, GucSource source);
+static void assign_global_plancache(bool newval, void* extra);
 static bool check_stage_log_stats(bool* newval, void** extra, GucSource source);
 static bool check_log_stats(bool* newval, void** extra, GucSource source);
 static void assign_thread_working_version_num(int newval, void* extra);
@@ -506,6 +515,7 @@ static bool validate_conf_bool(struct config_generic *record, const char *name, 
                           int elevel, bool freemem, void *newvalue, void **newextra);
 static bool validate_conf_int(struct config_generic *record, const char *name, const char *value, GucSource source,
                           int elevel, bool freemem, void *newvalue, void **newextra);
+static void upgrade_conf_int_check(const char *name, int *newval);
 static bool validate_conf_int64(struct config_generic *record, const char *name, const char *value, GucSource source,
                           int elevel, bool freemem, void *newvalue, void **newextra);
 static bool validate_conf_real(struct config_generic *record, const char *name, const char *value, GucSource source,
@@ -1520,6 +1530,18 @@ static void InitConfigureNamesBool()
             NULL,
             NULL,
             NULL},
+        {{"allow_create_sysobject",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            DEVELOPER_OPTIONS,
+            gettext_noop("Allows create or replace system object."),
+            NULL,
+            GUC_NOT_IN_SAMPLE},
+            &g_instance.attr.attr_common.allow_create_sysobject,
+            true,
+            NULL,
+            NULL,
+            NULL},
 
         {{"IsInplaceUpgrade",
             PGC_SUSET,
@@ -1626,7 +1648,7 @@ static void InitConfigureNamesBool()
             &g_instance.attr.attr_common.enable_global_plancache,
             false,
             check_gpc_syscache_threshold,
-            NULL,
+            assign_global_plancache,
             NULL},
 #ifdef ENABLE_MULTIPLE_NODES
         {{"enable_gpc_grayrelease_mode",
@@ -1799,6 +1821,18 @@ static void InitConfigureNamesBool()
             &g_instance.attr.attr_storage.enable_ustore,
             true,
             NULL,
+            NULL,
+            NULL,
+            NULL
+        },
+        {{"enable_gtt_concurrent_truncate",
+            PGC_SIGHUP,
+            NODE_SINGLENODE,
+            QUERY_TUNING_METHOD,
+            gettext_noop("Enable concurrent truncate table for GTT"),
+            NULL},
+            &u_sess->attr.attr_sql.enable_gtt_concurrent_truncate,
+            true,
             NULL,
             NULL,
             NULL
@@ -2312,6 +2346,22 @@ static void InitConfigureNamesInt()
             NULL,
             assign_tcp_keepalives_count,
             show_tcp_keepalives_count},
+        {{"tcp_user_timeout",
+            PGC_SIGHUP,
+            NODE_ALL,
+            CLIENT_CONN_OTHER,
+            gettext_noop("Maximum timeout of TCP retransmits."),
+            gettext_noop("This controls the timeout of TCP retransmits that can be "
+                         "lost before a connection is considered dead. A value of 0 uses the "
+                         "system default."),
+            GUC_UNIT_MS},
+            &u_sess->attr.attr_common.tcp_user_timeout,
+            0,
+            0,
+            3600000,
+            NULL,
+            NULL,
+            NULL},
         {{"gin_fuzzy_search_limit",
             PGC_USERSET,
             NODE_ALL,
@@ -2903,6 +2953,17 @@ static void InitConfigureNamesString()
             "SQL_ASCII",
             check_client_encoding,
             assign_client_encoding,
+            NULL},
+        {{"safe_data_path",
+            PGC_SIGHUP,
+            NODE_ALL,
+            UNGROUPED,
+            gettext_noop("Set the security path allowed by the administrator."),
+            NULL},
+            &u_sess->attr.attr_common.safe_data_path,
+            NULL,
+            check_security_path,
+            NULL,
             NULL},
         {{"log_line_prefix",
             PGC_SIGHUP,
@@ -3680,6 +3741,20 @@ static void InitConfigureNamesString()
             check_statement_stat_level,
             assign_statement_stat_level,
             NULL},
+
+        {{"resilience_threadpool_reject_cond",
+            PGC_SIGHUP,
+            NODE_ALL,
+            CLIENT_CONN,
+            gettext_noop("Sets the sessions percent for threadpool worker num."),
+            NULL,
+            GUC_LIST_INPUT},
+            &u_sess->attr.attr_common.threadpool_reset_percent_item,
+            "0,0",
+            CheckThreadpoolResetPercent,
+            AssignThreadpoolResetPercent,
+            NULL},
+
 #ifdef ENABLE_MULTIPLE_NODES
         /* Can't be set in postgresql.conf */
         {{"node_group_mode",
@@ -4091,7 +4166,7 @@ static void InitConfigureNamesEnum()
             NULL},
         {{"stream_cluster_run_mode",
             PGC_POSTMASTER,
-            NODE_DISTRIBUTE,
+            NODE_ALL,
             PRESET_OPTIONS,
             gettext_noop("Sets the type of streaming cluster."),
             NULL},
@@ -6847,6 +6922,15 @@ static bool validate_conf_bool(struct config_generic *record, const char *name, 
     return true;
 }
 
+static void upgrade_conf_int_check(const char *name, int *newval)
+{
+    if (GRAND_VERSION_NUM >= AUDIT_THRESHOLD_VERSION_NUM) {
+        if (strcmp(name, "audit_file_remain_threshold") == 0 && *newval < AUDITFILE_THRESHOLD_LOWER_BOUND) {
+            *newval = AUDITFILE_THRESHOLD_LOWER_BOUND;
+        }
+    }
+}
+
 static bool validate_conf_int(struct config_generic *record, const char *name, const char *value, GucSource source,
                           int elevel, bool freemem, void *newvalue, void **newextra)
 {
@@ -6862,7 +6946,8 @@ static bool validate_conf_int(struct config_generic *record, const char *name, c
                  name, value), hintmsg ? errhint("%s", _(hintmsg)) : 0));
         return false;
     }
-
+    
+    upgrade_conf_int_check(name, newval);
     if (*newval < conf->min || *newval > conf->max) {
         ereport(elevel,
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
@@ -8264,6 +8349,7 @@ static void CheckAlterSystemSetPrivilege(const char* name)
         "unix_socket_directory", "unix_socket_group", "unix_socket_permissions",
         "krb_caseins_users", "krb_server_keyfile", "krb_srvname", "allow_system_table_mods", "enableSeparationOfDuty",
         "modify_initial_password", "password_encryption_type", "password_policy", "audit_xid_info",
+        "allow_create_sysobject",
         NULL
     };
     for (int i = 0; blackList[i] != NULL; i++) {
@@ -10038,8 +10124,14 @@ static void write_one_nondefault_variable(FILE* fp, struct config_generic* gconf
 
         case PGC_ENUM: {
             struct config_enum* conf = (struct config_enum*)gconf;
+            char* ret_name = (char*) config_enum_lookup_by_value(conf, *conf->variable);
 
-            fprintf(fp, "%s", config_enum_lookup_by_value(conf, *conf->variable));
+            fprintf(fp, "%s", ret_name);
+
+            if (pg_strncasecmp(conf->gen.name, "rewrite_rule", sizeof("rewrite_rule")) == 0 ||
+                pg_strncasecmp(conf->gen.name, "sql_beta_feature", sizeof("sql_beta_feature")) == 0) {
+                pfree_ext(ret_name);
+            }
         } break;
         default:
             break;
@@ -10950,6 +11042,15 @@ static bool check_gpc_syscache_threshold(bool* newval, void** extra, GucSource s
         }
     }
     return true;
+}
+
+static void assign_global_plancache(bool newval, void* extra)
+{
+    if (isRestoreMode) {
+        g_instance.attr.attr_common.enable_global_plancache = false;
+    }
+
+    return;
 }
 
 static bool check_stage_log_stats(bool* newval, void** extra, GucSource source)
@@ -11955,7 +12056,7 @@ ErrCode copy_guc_lines(char** copy_to_line, char** optlines, const char** opt_na
     int opt_num = 0;
 
     if (optlines != NULL) {
-        for (i = 0; i < RESERVE_SIZE; i++) {
+        for (i = 0; i < g_reserve_param_num; i++) {
             opt_name_index = find_guc_option(optlines, opt_name[i], NULL, NULL, &optvalue_off, &optvalue_len, false);
             if (INVALID_LINES_IDX != opt_name_index) {
                 errno_t errorno = EOK;
@@ -12051,7 +12152,7 @@ void modify_guc_lines(char*** guc_optlines, const char** opt_name, char** copy_f
     if (optlines == NULL) {
         ereport(LOG, (errmsg("configuration file has not data")));
     } else {
-        for (int i = 0; i < RESERVE_SIZE; i++) {
+        for (int i = 0; i < g_reserve_param_num; i++) {
             opt_name_index = find_guc_option(optlines, opt_name[i], NULL, NULL, &optvalue_off, &optvalue_len, false);
             if (NULL != copy_from_line[i]) {
                 if (INVALID_LINES_IDX != opt_name_index) {
@@ -12105,7 +12206,7 @@ void comment_guc_lines(char** optlines, const char** opt_name)
     if (optlines == NULL) {
         ereport(LOG, (errmsg("configuration file has not data")));
     } else {
-        for (int i = 0; i < RESERVE_SIZE; i++) {
+        for (int i = 0; i < g_reserve_param_num; i++) {
             opt_name_index = find_guc_option(optlines, opt_name[i], NULL, NULL, &optvalue_off, &optvalue_len, false);
             if (opt_name_index != INVALID_LINES_IDX) {
                 /* Skip all the blanks at the begin of the optLine */
@@ -12548,11 +12649,11 @@ void reset_set_message(bool isCommit)
     reset_params_htab(u_sess->utils_cxt.set_params_htab, isCommit);
 }
 
-#define ERRMSG_EMPTY_MODULE_NAME "empty module name"
-#define ERRMSG_MODNAME_NOT_FOUND "module name \"%s\" not found"
+#define ERRMSG_EMPTY_MODULE_NAME "parameter \"%s\" does not accept empty module name"
+#define ERRMSG_MODNAME_NOT_FOUND "parameter \"%s\" module name \"%s\" not found"
 
-#define ERRMSG_EMPTY_MODULE_LIST "empty module list"
-#define ERRMSG_MODLIST_NOT_FOUND "module list not found"
+#define ERRMSG_EMPTY_MODULE_LIST "parameter \"%s\" empty module list"
+#define ERRMSG_MODLIST_NOT_FOUND "parameter \"%s\" module list not found"
 
 #define HINT_MODULE_LIST_FMT "Module list begins with '(', ends with ')', and is delimited with '%c'."
 
@@ -12572,7 +12673,7 @@ void reset_set_message(bool isCommit)
  * @Return: return false if any keyword is not found; or return true.
  * @See also:
  */
-static inline bool string_guc_keyword_matched(char** start, bool* turn_on)
+static inline bool string_guc_keyword_matched(char** start, bool* turn_on, const char* confname)
 {
     char* p = *start;
 
@@ -12600,7 +12701,7 @@ static inline bool string_guc_keyword_matched(char** start, bool* turn_on)
 
 missing_kw:
     /* bad format: not found key words "on" or "off" */
-    GUC_check_errmsg("missing keywords \"on\" or \"off\"");
+    GUC_check_errmsg("parameter \"%s\" missing keywords \"on\" or \"off\"", confname);
     GUC_check_errdetail("Must begin with keyword \"on\" or \"off\".");
     return false;
 }
@@ -12612,7 +12713,7 @@ missing_kw:
  *          otherwise return false.
  * @See also:
  */
-static inline bool string_guc_list_start(char** start)
+static inline bool string_guc_list_start(char** start, const char* confname)
 {
     char* p = *start;
 
@@ -12620,7 +12721,7 @@ static inline bool string_guc_list_start(char** start)
 
     if ('\0' == *p || '(' != *p) {
         /* bad format: not found ( */
-        GUC_check_errmsg(ERRMSG_MODLIST_NOT_FOUND);
+        GUC_check_errmsg(ERRMSG_MODLIST_NOT_FOUND, confname);
         GUC_check_errdetail("'(' is not found.");
         GUC_check_errhint(HINT_MODULE_LIST_FMT, MOD_DELIMITER);
         return false;
@@ -12631,12 +12732,12 @@ static inline bool string_guc_list_start(char** start)
 
     if ('\0' == *p) {
         /* bad format: '(' not match anything */
-        GUC_check_errmsg(ERRMSG_MODLIST_NOT_FOUND);
+        GUC_check_errmsg(ERRMSG_MODLIST_NOT_FOUND, confname);
         GUC_check_errhint(HINT_MODULE_LIST_FMT, MOD_DELIMITER);
         return false;
     } else if (')' == *p) {
         /* bad format: empty list given */
-        GUC_check_errmsg(ERRMSG_EMPTY_MODULE_LIST);
+        GUC_check_errmsg(ERRMSG_EMPTY_MODULE_LIST, confname);
         GUC_check_errdetail("Must one or more modules are given, and delimited with '%c'.", MOD_DELIMITER);
         return false;
     }
@@ -12652,20 +12753,20 @@ static inline bool string_guc_list_start(char** start)
  * @Return: true if it's well formatted; otherwise return false.
  * @See also:
  */
-static inline bool string_guc_list_end(char** start, bool delim_found)
+static inline bool string_guc_list_end(char** start, bool delim_found, const char* confname)
 {
     char* p = *start;
 
     if ('\0' == *p) {
         /* bad format: ')' not found */
-        GUC_check_errmsg(ERRMSG_MODLIST_NOT_FOUND);
+        GUC_check_errmsg(ERRMSG_MODLIST_NOT_FOUND, confname);
         GUC_check_errdetail("Module list does not end with ')'.");
         GUC_check_errhint(HINT_MODULE_LIST_FMT, MOD_DELIMITER);
         return false;
     }
     if (delim_found) {
         /* bad format: the last module name is empty */
-        GUC_check_errmsg(ERRMSG_EMPTY_MODULE_NAME);
+        GUC_check_errmsg(ERRMSG_EMPTY_MODULE_NAME, confname);
         GUC_check_errdetail("The last module name is empty.");
         GUC_check_errhint("Module name must be given between '%c' and ')'.", MOD_DELIMITER);
         return false;
@@ -12676,7 +12777,7 @@ static inline bool string_guc_list_end(char** start, bool delim_found)
 
     if ('\0' != *p) {
         /* bad format: non-space found after ')' */
-        GUC_check_errmsg("extra text found after the first list of module names");
+        GUC_check_errmsg("parameter \"%s\" extra text found after the first list of module names", confname);
         GUC_check_errhint("Remove the extra text after the first list of module names.");
         return false;
     }
@@ -12692,7 +12793,7 @@ static inline bool string_guc_list_end(char** start, bool delim_found)
  * @Return: true if next name found; otherwise false.
  * @See also:
  */
-static inline bool string_guc_list_find_next_name(char** start, bool* delim_found)
+static inline bool string_guc_list_find_next_name(char** start, bool* delim_found, const char* confname)
 {
     char* p = *start;
 
@@ -12704,7 +12805,7 @@ static inline bool string_guc_list_find_next_name(char** start, bool* delim_foun
                 *delim_found = true;
             } else {
                 /* bad format: empty module name */
-                GUC_check_errmsg(ERRMSG_EMPTY_MODULE_NAME);
+                GUC_check_errmsg(ERRMSG_EMPTY_MODULE_NAME, confname);
                 GUC_check_errdetail("Module name cannot be empty.");
                 GUC_check_errhint("Module name must be given between '%c'.", MOD_DELIMITER);
                 return false;
@@ -12730,6 +12831,7 @@ static inline bool string_guc_list_find_next_name(char** start, bool* delim_foun
 static inline bool logging_module_parse_name(
     char* mod_name, int mod_name_len, ModuleId* mods, int* mods_num, bool* all_found)
 {
+    const char* confname = "logging_module";
     if (mod_name_len > 0 && mod_name_len < MODULE_NAME_MAXLEN) {
         ModuleId modid = MOD_MAX;
         const char ch = mod_name[mod_name_len];
@@ -12739,7 +12841,7 @@ static inline bool logging_module_parse_name(
         modid = get_module_id(mod_name);
         if (MOD_MAX == modid) {
             /* bad format: not existing module name */
-            GUC_check_errmsg(ERRMSG_MODNAME_NOT_FOUND, mod_name);
+            GUC_check_errmsg(ERRMSG_MODNAME_NOT_FOUND, confname, mod_name);
             GUC_check_errhint(HINT_QUERY_ALL_MODULES);
             /* needn't to resotre the replaced char because it's a copy of new value. */
             return false;
@@ -12754,11 +12856,11 @@ static inline bool logging_module_parse_name(
     } else {
         /* bad format: empty string or not valid module name */
         if (0 == mod_name_len) {
-            GUC_check_errmsg(ERRMSG_EMPTY_MODULE_NAME);
+            GUC_check_errmsg(ERRMSG_EMPTY_MODULE_NAME, confname);
             GUC_check_errdetail("Module name cannot be empty.");
         } else {
             mod_name[mod_name_len] = '\0';
-            GUC_check_errmsg(ERRMSG_MODNAME_NOT_FOUND, mod_name);
+            GUC_check_errmsg(ERRMSG_MODNAME_NOT_FOUND, confname, mod_name);
             /* needn't to resotre the replaced char because it's a copy of new value. */
         }
         GUC_check_errhint(HINT_QUERY_ALL_MODULES);
@@ -12784,6 +12886,7 @@ static bool logging_module_guc_check(char* newval)
     char* p = newval;
     bool all_found = false;
     bool turn_on = false;
+    const char* confname = "logging_module";
 
     /* forbit that no module name appear between two delimiters.
      * forbit that no module name appear between delimiter and ')'
@@ -12793,11 +12896,11 @@ static bool logging_module_guc_check(char* newval)
     /* treat all the error type as syntax error. */
     GUC_check_errcode(ERRCODE_SYNTAX_ERROR);
 
-    if (!string_guc_keyword_matched(&p, &turn_on)) {
+    if (!string_guc_keyword_matched(&p, &turn_on, confname)) {
         return false;
     }
 
-    if (!string_guc_list_start(&p)) {
+    if (!string_guc_list_start(&p, confname)) {
         return false;
     }
 
@@ -12814,13 +12917,13 @@ static bool logging_module_guc_check(char* newval)
         }
 
         if (!logging_module_parse_name(mod_name, p - mod_name, mods, &mods_num, &all_found) ||
-            !string_guc_list_find_next_name(&p, &delim_found)) {
+            !string_guc_list_find_next_name(&p, &delim_found, confname)) {
             pfree_ext(mods);
             return false;
         }
     }
 
-    if (!string_guc_list_end(&p, delim_found)) {
+    if (!string_guc_list_end(&p, delim_found, confname)) {
         pfree_ext(mods);
         return false;
     }
@@ -12946,6 +13049,7 @@ static void assign_is_inplace_upgrade(const bool newval, void* extra)
 static inline bool analysis_options_parse_name(
     char* anls_opt_name, int anls_opt_name_len, AnalysisOpt* options, int* opt_num, bool* all_found)
 {
+    const char* confname = "analysis_options";
     if (anls_opt_name_len > 0 && anls_opt_name_len < ANLS_OPT_NAME_MAXLEN) {
         AnalysisOpt anls_option = ANLS_MAX;
         const char ch = anls_opt_name[anls_opt_name_len];
@@ -12955,7 +13059,7 @@ static inline bool analysis_options_parse_name(
         anls_option = get_anls_opt_id(anls_opt_name);
         if (ANLS_MAX == anls_option) {
             /* bad format: not existing analysis option name */
-            GUC_check_errmsg(ERRMSG_MODNAME_NOT_FOUND, anls_opt_name);
+            GUC_check_errmsg(ERRMSG_MODNAME_NOT_FOUND, confname, anls_opt_name);
             GUC_check_errhint(HINT_QUERY_ALL_MODULES);
             /* needn't to resotre the replaced char because it's a copy of new value. */
             return false;
@@ -12964,7 +13068,7 @@ static inline bool analysis_options_parse_name(
         /* repeat set is not allow */
         for (int i = 0; i < *opt_num; i++) {
             if (options[i] == anls_option) {
-                GUC_check_errmsg("repeat option: %s.", anls_opt_name);
+                GUC_check_errmsg("parameter \"%s\" repeat option: %s.", confname, anls_opt_name);
                 GUC_check_errdetail("Please don't set analysis option name repeatedly.");
                 return false;
             }
@@ -12980,12 +13084,12 @@ static inline bool analysis_options_parse_name(
     } else {
         /* bad format: empty string or not valid module name */
         if (0 == anls_opt_name_len) {
-            GUC_check_errmsg(ERRMSG_EMPTY_MODULE_NAME);
+            GUC_check_errmsg(ERRMSG_EMPTY_MODULE_NAME, confname);
             GUC_check_errdetail("analysis option name cannot be empty.");
         } else {
             /* needn't to resotre the replaced char because it's a copy of new value. */
             anls_opt_name[anls_opt_name_len] = '\0';
-            GUC_check_errmsg(ERRMSG_MODNAME_NOT_FOUND, anls_opt_name);
+            GUC_check_errmsg(ERRMSG_MODNAME_NOT_FOUND, confname, anls_opt_name);
         }
         GUC_check_errhint(HINT_QUERY_ALL_MODULES);
         return false;
@@ -13007,6 +13111,7 @@ static bool analysis_options_guc_check(char* newval)
     char* p = newval;
     bool all_found = false;
     bool turn_on = false;
+    const char* confname = "analysis_options";
 
     /* forbit that no option name appear between two delimiters, or between delimiter and ')' */
     bool delim_found = false;
@@ -13014,11 +13119,11 @@ static bool analysis_options_guc_check(char* newval)
     /* treat all the error type as syntax error. */
     GUC_check_errcode(ERRCODE_SYNTAX_ERROR);
 
-    if (!string_guc_keyword_matched(&p, &turn_on)) {
+    if (!string_guc_keyword_matched(&p, &turn_on, confname)) {
         return false;
     }
 
-    if (!string_guc_list_start(&p)) {
+    if (!string_guc_list_start(&p, confname)) {
         return false;
     }
 
@@ -13035,13 +13140,13 @@ static bool analysis_options_guc_check(char* newval)
         }
 
         if (!analysis_options_parse_name(anls_opt_name, p - anls_opt_name, options, &opt_num, &all_found) ||
-            !string_guc_list_find_next_name(&p, &delim_found)) {
+            !string_guc_list_find_next_name(&p, &delim_found, confname)) {
             pfree_ext(options);
             return false;
         }
     }
 
-    if (!string_guc_list_end(&p, delim_found)) {
+    if (!string_guc_list_end(&p, delim_found, confname)) {
         pfree_ext(options);
         return false;
     }
@@ -13176,6 +13281,9 @@ static void analysis_options_guc_assign(const char* newval, void* extra)
 #define DEFAULT_CAND_LIST_USAGE_COUNT false
 #define DEFAULT_USTATS_TRACKER_NAPTIME 20
 #define DEFAULT_UMAX_PRUNE_SEARCH_LEN 10
+#define DEFAULT_SYNC_ROLLBACK true
+#define DEFAULT_ASYNC_ROLLBACK true
+#define DEFAULT_PAGE_ROLLBACK true
 
 static void InitUStoreAttr()
 {
@@ -13183,6 +13291,11 @@ static void InitUStoreAttr()
     u_sess->attr.attr_storage.enable_candidate_buf_usage_count = DEFAULT_CAND_LIST_USAGE_COUNT;
     u_sess->attr.attr_storage.ustats_tracker_naptime = DEFAULT_USTATS_TRACKER_NAPTIME;
     u_sess->attr.attr_storage.umax_search_length_for_prune = DEFAULT_UMAX_PRUNE_SEARCH_LEN;
+    u_sess->attr.attr_storage.ustore_verify_level = USTORE_VERIFY_DEFAULT;
+    u_sess->attr.attr_storage.ustore_verify_module = USTORE_VERIFY_MOD_INVALID;
+    u_sess->attr.attr_storage.enable_ustore_sync_rollback = DEFAULT_SYNC_ROLLBACK;
+    u_sess->attr.attr_storage.enable_ustore_async_rollback = DEFAULT_ASYNC_ROLLBACK;
+    u_sess->attr.attr_storage.enable_ustore_page_rollback = DEFAULT_PAGE_ROLLBACK;
 }
 
 bool check_percentile(char** newval, void** extra, GucSource source)

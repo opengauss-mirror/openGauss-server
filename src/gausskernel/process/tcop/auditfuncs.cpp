@@ -384,6 +384,7 @@ static void pgaudit_ddl_database_object(
         case AUDIT_DDL_MODEL:
         case AUDIT_DDL_PUBLICATION_SUBSCRIPTION:
         case AUDIT_DDL_FOREIGN_DATA_WRAPPER:
+        case AUDIT_DDL_SQL_PATCH:
             pgaudit_store_auditstat(audit_type, audit_result, objectname, mask_string);
             break;
         default:
@@ -1018,6 +1019,15 @@ static void pgaudit_ddl_fdw(const char* objectname, const char* cmdtext)
 
     pgaudit_ddl_database_object(AUDIT_DDL_FOREIGN_DATA_WRAPPER, AUDIT_OK, objectname, cmdtext);
     return;
+}
+
+void pgaudit_ddl_sql_patch(const char* objectname, const char* cmdtext)
+{
+    if (!CHECK_AUDIT_DDL(DDL_SQL_PATCH)) {
+        return;
+    }
+
+    pgaudit_ddl_database_object(AUDIT_DDL_SQL_PATCH, AUDIT_OK, objectname, cmdtext);
 }
 
 /*

@@ -1283,6 +1283,20 @@ bool is_enc_type(const char *type_name)
     return false;
 }
 
+bool IsFullEncryptedRel(Relation rel)
+{
+    if (rel == NULL || rel->rd_att == NULL || rel->rd_rel->relkind != RELKIND_RELATION) {
+        return false;
+    }
+    TupleDesc tupDesc = rel->rd_att;
+    for (int i = 0; i < tupDesc->natts; i++) {
+        if (is_enc_type(tupDesc->attrs[i]->atttypid)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /*
  * if a column is encrypted, we will rewrite its type and
  *  (1) store its source col_type in catalog 'gs_encrypted_columns'
@@ -1349,4 +1363,24 @@ Datum get_client_info(PG_FUNCTION_ARGS)
  
     tuplestore_donestoring(rsinfo->setResult);
     return (Datum)0;
+}
+
+const char *get_typename_by_id(Oid typeOid)
+{
+    if (typeOid == BYTEAWITHOUTORDERWITHEQUALCOLOID) {
+        return "byteawithoutorderwithequal";
+    } else if (typeOid == BYTEAWITHOUTORDERCOLOID) {
+        return "byteawithoutorder";
+    }
+    return NULL;
+}
+ 
+const char *get_encryption_type_name(EncryptionType algorithm_type)
+{
+    if (algorithm_type == EncryptionType::DETERMINISTIC_TYPE) {
+        return "DETERMINISTIC";
+    } else if (algorithm_type == EncryptionType::RANDOMIZED_TYPE) {
+        return "RANDOMIZED";
+    }
+    return NULL;
 }

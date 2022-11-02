@@ -305,7 +305,7 @@ void StartupProcessMain(void)
     (void)gspqsignal(SIGINT, StartupProcSigIntHandler);    /* check repair page and file */
     (void)gspqsignal(SIGTERM, StartupProcShutdownHandler); /* request shutdown */
     (void)gspqsignal(SIGQUIT, startupproc_quickdie);       /* hard crash time */
-
+    (void)gspqsignal(SIGURG, print_stack);
     if (g_instance.attr.attr_storage.EnableHotStandby)
         (void)gspqsignal(SIGALRM, handle_standby_sig_alarm); /* ignored unless
 

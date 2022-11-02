@@ -53,6 +53,7 @@
 #include "catalog/pg_partition_fn.h"
 #include "executor/exec/execdebug.h"
 #include "nodes/nodeFuncs.h"
+#include "nodes/nodes.h"
 #include "parser/parsetree.h"
 #include "storage/lmgr.h"
 #include "storage/tcap.h"
@@ -62,12 +63,12 @@
 #include "utils/partitionmap_gs.h"
 #include "optimizer/var.h"
 #include "utils/resowner.h"
+#include "utils/plpgsql.h"
 #include "miscadmin.h"
 
 static bool get_last_attnums(Node* node, ProjectionInfo* projInfo);
 static bool index_recheck_constraint(
     Relation index, Oid* constr_procs, Datum* existing_values, const bool* existing_isnull, Datum* new_values);
-static void ShutdownExprContext(ExprContext* econtext, bool isCommit);
 static bool check_violation(Relation heap, Relation index, IndexInfo *indexInfo, ItemPointer tupleid, Datum *values,
                             const bool *isnull, EState *estate, bool newIndex, bool errorOK, CheckWaitMode waitMode,
                             ConflictInfoData *conflictInfo, Oid partoid = InvalidOid, int2 bucketid = InvalidBktId,
@@ -89,7 +90,7 @@ static bool check_violation(Relation heap, Relation index, IndexInfo *indexInfo,
  * CurrentMemoryContext.
  * ----------------
  */
-EState* CreateExecutorState(MemoryContext saveCxt)
+EState* CreateExecutorState()
 {
     EState* estate = NULL;
     MemoryContext qcontext;
@@ -98,15 +99,11 @@ EState* CreateExecutorState(MemoryContext saveCxt)
     /*
      * Create the per-query context for this Executor run.
      */
-    if (saveCxt != NULL) {
-        qcontext = saveCxt;
-    } else {
-        qcontext = AllocSetContextCreate(CurrentMemoryContext,
-            "ExecutorState",
-            ALLOCSET_DEFAULT_MINSIZE,
-            ALLOCSET_DEFAULT_INITSIZE,
-            ALLOCSET_DEFAULT_MAXSIZE);
-    }
+    qcontext = AllocSetContextCreate(CurrentMemoryContext,
+        "ExecutorState",
+        ALLOCSET_DEFAULT_MINSIZE,
+        ALLOCSET_DEFAULT_INITSIZE,
+        ALLOCSET_DEFAULT_MAXSIZE);
 
     /*
      * Make the EState node within the per-query context.  This way, we don't
@@ -183,6 +180,7 @@ EState* CreateExecutorState(MemoryContext saveCxt)
     estate->es_recursive_next_iteration = false;
 
     estate->pruningResult = NULL;
+    estate->rootQueryDesc = NULL;
 
     /*
      * Return the executor state structure
@@ -286,6 +284,7 @@ ExprContext* CreateExprContext(EState* estate)
 
     econtext->ecxt_callbacks = NULL;
     econtext->plpgsql_estate = NULL;
+    econtext->hasSetResultStore = false;
 
     /*
      * Link the ExprContext into the EState to ensure it is shut down when the
@@ -936,6 +935,18 @@ void ExecFreeExprContext(PlanState* planstate)
      * unlink it from the plan node, though.
      */
     planstate->ps_ExprContext = NULL;
+    if (nodeTag(planstate) == T_FunctionScanState) {
+        FunctionScanState* fstate = (FunctionScanState*)planstate;
+        if (nodeTag(fstate->funcexpr) == T_FuncExprState) {
+            FunctionCallInfoData fcinfo = ((FuncExprState*)(fstate->funcexpr))->fcinfo_data;
+            if (fcinfo.flinfo != NULL && fcinfo.flinfo->fn_extra != NULL) {
+                PLpgSQL_function* func = (PLpgSQL_function*)fcinfo.flinfo->fn_extra;
+                if (nodeTag(func) == T_PLpgSQL_FUNCTION) {
+                    decrease_exec_refcount(func);
+                }
+            }
+        }
+    }
 }
 
 /* ----------------------------------------------------------------
@@ -1229,7 +1240,8 @@ void ExecCloseIndices(ResultRelInfo* resultRelInfo)
  * Copied from ExecInsertIndexTuples
  */
 void ExecDeleteIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* estate,
-    Relation targetPartRel, Partition p, const Bitmapset *modifiedIdxAttrs, const bool inplaceUpdated)
+    Relation targetPartRel, Partition p, const Bitmapset *modifiedIdxAttrs,
+    const bool inplaceUpdated, const bool isRollbackIndex)
 {
     ResultRelInfo* resultRelInfo = NULL;
     int numIndices;
@@ -1384,7 +1396,7 @@ void ExecDeleteIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* es
          */
         FormIndexDatum(indexInfo, slot, estate, values, isnull);
 
-        index_delete(actualindex, values, isnull, tupleid);
+        index_delete(actualindex, values, isnull, tupleid, isRollbackIndex);
     }
 
     list_free_ext(partitionIndexOidList);
@@ -1401,7 +1413,8 @@ void ExecUHeapDeleteIndexTuplesGuts(
                               exec_index_tuples_state.estate, exec_index_tuples_state.targetPartRel,
                               exec_index_tuples_state.p,
                               modifiedIdxAttrs,
-                              inplaceUpdated);
+                              inplaceUpdated,
+                              exec_index_tuples_state.rollbackIndex);
     } else {
         UHeapTuple tmpUtup = ExecGetUHeapTupleFromSlot(oldslot); // materialize the tuple
         tmpUtup->table_oid = RelationGetRelid(rel);
@@ -1410,7 +1423,8 @@ void ExecUHeapDeleteIndexTuplesGuts(
                               exec_index_tuples_state.estate, exec_index_tuples_state.targetPartRel,
                               exec_index_tuples_state.p,
                               modifiedIdxAttrs,
-                              inplaceUpdated);
+                              inplaceUpdated,
+                              exec_index_tuples_state.rollbackIndex);
     }
 }
 
@@ -1544,6 +1558,7 @@ bool ExecCheckIndexConstraints(TupleTableSlot *slot, EState *estate, Relation ta
      * constraint.
      */
     for (i = 0; i < numIndices; i++) {
+        actualHeap = targetRel;
         Relation indexRelation = relationDescs[i];
         IndexInfo* indexInfo = NULL;
         bool satisfiesConstraint = false;
@@ -1825,7 +1840,7 @@ List* ExecInsertIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* e
         if (!indexRelation->rd_index->indisunique) {
             checkUnique = UNIQUE_CHECK_NO;
         } else if (conflict != NULL) {
-            checkUnique = UNIQUE_CHECK_UPSERT;
+            checkUnique = UNIQUE_CHECK_PARTIAL;
         } else if (indexRelation->rd_index->indimmediate) {
             checkUnique = UNIQUE_CHECK_YES;
         } else {
@@ -1857,7 +1872,7 @@ List* ExecInsertIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* e
                 actualheap, actualindex, indexInfo, tupleid, values, isnull, estate, false, errorOK);
         }
 
-        if ((IndexUniqueCheckNoError(checkUnique) || indexInfo->ii_ExclusionOps != NULL) && !satisfiesConstraint) {
+        if ((checkUnique == UNIQUE_CHECK_PARTIAL || indexInfo->ii_ExclusionOps != NULL) && !satisfiesConstraint) {
             /*
              * The tuple potentially violates the uniqueness or exclusion
              * constraint, so make a note of the index so that we can re-check
@@ -2247,7 +2262,7 @@ void UnregisterExprContextCallback(ExprContext* econtext, ExprContextCallbackFun
  * If isCommit is false, just clean the callback list but don't call 'em.
  * (See comment for FreeExprContext.)
  */
-static void ShutdownExprContext(ExprContext* econtext, bool isCommit)
+void ShutdownExprContext(ExprContext* econtext, bool isCommit)
 {
     ExprContext_CB* ecxt_callback = NULL;
     MemoryContext oldcontext;

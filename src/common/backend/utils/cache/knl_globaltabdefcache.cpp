@@ -317,15 +317,15 @@ static PartitionMap *CopyRangePartitionMap(RangePartitionMap *src_rpm)
     return (PartitionMap *)dst_rpm;
 }
 
-static PartitionMap *CopyPartitionMap(Relation rel)
+PartitionMap *CopyPartitionMap(PartitionMap *oldmap)
 {
-    if (rel->partMap == NULL) {
+    if (oldmap == NULL) {
         return NULL;
     }
-    switch (rel->partMap->type) {
+    switch (oldmap->type) {
         case PART_TYPE_VALUE: {
             ValuePartitionMap *dst_vpm = (ValuePartitionMap *)palloc0(sizeof(ValuePartitionMap));
-            ValuePartitionMap *src_vpm = (ValuePartitionMap *)rel->partMap;
+            ValuePartitionMap *src_vpm = (ValuePartitionMap *)oldmap;
             dst_vpm->type = src_vpm->type;
             dst_vpm->relid = src_vpm->relid;
             dst_vpm->partList = list_copy(src_vpm->partList);
@@ -333,11 +333,11 @@ static PartitionMap *CopyPartitionMap(Relation rel)
         }
         case PART_TYPE_RANGE:
         case PART_TYPE_INTERVAL: {
-            return (PartitionMap *)CopyRangePartitionMap((RangePartitionMap *)rel->partMap);
+            return (PartitionMap *)CopyRangePartitionMap((RangePartitionMap *)oldmap);
         }
         case PART_TYPE_LIST: {
             ListPartitionMap *dst_lpm = (ListPartitionMap *)palloc(sizeof(ListPartitionMap));
-            ListPartitionMap *src_lpm = (ListPartitionMap *)rel->partMap;
+            ListPartitionMap *src_lpm = (ListPartitionMap *)oldmap;
             *dst_lpm = *src_lpm;
             dst_lpm->partitionKey = int2vectorCopy(src_lpm->partitionKey);
             size_t key_len = sizeof(Oid) * src_lpm->partitionKey->dim1;
@@ -349,7 +349,7 @@ static PartitionMap *CopyPartitionMap(Relation rel)
         }
         case PART_TYPE_HASH: {
             HashPartitionMap *dst_hpm = (HashPartitionMap *)palloc(sizeof(HashPartitionMap));
-            HashPartitionMap *src_hpm = (HashPartitionMap *)rel->partMap;
+            HashPartitionMap *src_hpm = (HashPartitionMap *)oldmap;
             *dst_hpm = *src_hpm;
             dst_hpm->partitionKey = int2vectorCopy(src_hpm->partitionKey);
             size_t key_len = sizeof(Oid) * src_hpm->partitionKey->dim1;
@@ -363,8 +363,8 @@ static PartitionMap *CopyPartitionMap(Relation rel)
         default:
             ereport(ERROR,
                     (errcode(ERRCODE_PARTITION_ERROR),
-                     errmsg("Fail to copy partitionmap for partitioned table \"%u\".", RelationGetRelid(rel)),
-                     errdetail("Incorrect partition strategy \"%c\" for partitioned table.", rel->partMap->type)));
+                     errmsg("Fail to copy partitionmap."),
+                     errdetail("Incorrect partition strategy \"%c\".", oldmap->type)));
             return NULL;
     }
     return NULL;
@@ -477,7 +477,7 @@ Relation CopyRelationData(Relation newrel, Relation rel, MemoryContext rules_cxt
 
     newrel->rd_bucketkey = CopyRelationBucketKey(rel);
 
-    newrel->partMap = (PartitionMap *)CopyPartitionMap(rel);
+    newrel->partMap = (PartitionMap *)CopyPartitionMap(rel->partMap);
 
     newrel->pgstat_info = NULL;
 
@@ -564,8 +564,8 @@ TupleDesc GlobalTabDefCache::GetPgClassDescriptor()
     }
     MemoryContext old = MemoryContextSwitchTo(m_db_entry->GetRandomMemCxt());
     TupleDesc tmp = BuildHardcodedDescriptor(Natts_pg_class, Desc_pg_class, true);
-    PthreadMutexUnlock(owner, m_catalog_lock, true);
     m_pgclassdesc = tmp;
+    PthreadMutexUnlock(owner, m_catalog_lock, true);
     MemoryContextSwitchTo(old);
     return m_pgclassdesc;
 }
@@ -580,8 +580,8 @@ TupleDesc GlobalTabDefCache::GetPgIndexDescriptor()
     }
     MemoryContext old = MemoryContextSwitchTo(m_db_entry->GetRandomMemCxt());
     TupleDesc tmp = BuildHardcodedDescriptor(Natts_pg_index, Desc_pg_index, false);
-    PthreadMutexUnlock(owner, m_catalog_lock, true);
     m_pgindexdesc = tmp;
+    PthreadMutexUnlock(owner, m_catalog_lock, true);
     MemoryContextSwitchTo(old);
     return m_pgindexdesc;
 }
@@ -630,3 +630,128 @@ List *GlobalTabDefCache::GetTableStats(Oid rel_oid)
 
 template void GlobalTabDefCache::ResetRelCaches<false>();
 template void GlobalTabDefCache::ResetRelCaches<true>();
+
+#include "access/nbtree.h"
+#include "utils/knl_partcache.h"
+Relation BuildRelationFromPartRel(Relation rel, Partition part, bytea* merge_reloption)
+{
+    MemoryContext oldcxt = MemoryContextSwitchTo(u_sess->cache_mem_cxt);
+    Relation relation = (Relation)palloc0(sizeof(RelationData));
+
+    relation->rd_node = part->pd_node;
+    relation->rd_refcnt = 0;
+    relation->rd_backend = InvalidBackendId;
+    relation->rd_isnailed = false;
+    relation->rd_isvalid = part->pd_isvalid;
+    relation->rd_indexvalid = part->pd_indexvalid;
+    relation->rd_createSubid = part->pd_createSubid;
+    relation->rd_newRelfilenodeSubid = part->pd_newRelfilenodeSubid;
+
+    relation->rd_rel = (Form_pg_class)palloc(sizeof(FormData_pg_class));
+    errno_t rc = memcpy_s(relation->rd_rel, sizeof(FormData_pg_class), rel->rd_rel, sizeof(FormData_pg_class));
+    securec_check(rc, "\0", "\0");
+    relation->rd_rel->reltoastrelid = part->pd_part->reltoastrelid;
+    relation->rd_rel->reltablespace = part->pd_part->reltablespace;
+    if (PartitionHasSubpartition(part))
+        relation->rd_rel->parttype = PARTTYPE_PARTITIONED_RELATION;
+    else
+        relation->rd_rel->parttype = PARTTYPE_NON_PARTITIONED_RELATION;
+    relation->rd_rel->relfilenode = part->pd_part->relfilenode;
+    relation->rd_rel->relpages = part->pd_part->relpages;
+    relation->rd_rel->reltuples = part->pd_part->reltuples;
+    relation->rd_rel->relallvisible = part->pd_part->relallvisible;
+    relation->rd_rel->relcudescrelid = part->pd_part->relcudescrelid;
+    relation->rd_rel->relcudescidx = part->pd_part->relcudescidx;
+    relation->rd_rel->reldeltarelid = part->pd_part->reldeltarelid;
+    relation->rd_rel->reldeltaidx = part->pd_part->reldeltaidx;
+
+    relation->rd_bucketoid = rel->rd_bucketoid;
+    if (REALTION_BUCKETKEY_INITED(rel))
+        relation->rd_bucketkey = CopyRelationBucketKey(rel);
+    else
+        relation->rd_bucketkey = NULL;
+
+    relation->rd_att = CopyTupleDesc(rel->rd_att);
+    relation->rd_att->tdrefcount = 0;
+
+    relation->rd_partHeapOid = part->pd_part->indextblid;
+    
+    relation->rd_indextuple = heap_copytuple(rel->rd_indextuple);
+    if (relation->rd_indextuple != NULL) {
+        relation->rd_index = (Form_pg_index)GETSTRUCT(relation->rd_indextuple);
+    } else {
+        relation->rd_index = NULL;
+    }
+
+    relation->rd_am = CopyRelationAm(rel);
+
+    relation->rd_indnkeyatts = rel->rd_indnkeyatts;
+    relation->rd_tam_type = rel->rd_tam_type;
+
+    if (!OidIsValid(rel->rd_rel->relam)) {
+        relation->rd_indexcxt = NULL;
+    } else {
+        Assert(rel->rd_indexcxt != NULL);
+        relation->rd_indexcxt = AllocSetContextCreate(u_sess->cache_mem_cxt,
+            PartitionGetPartitionName(part),
+            ALLOCSET_SMALL_MINSIZE,
+            ALLOCSET_SMALL_INITSIZE,
+            ALLOCSET_SMALL_MAXSIZE);
+    }
+
+    CopyRelationIndexAccessInfo(relation, rel, relation->rd_indexcxt);
+    if (rel->rd_aminfo != NULL) {
+        relation->rd_aminfo = (RelationAmInfo *)palloc(sizeof(RelationAmInfo));
+        *relation->rd_aminfo = *rel->rd_aminfo;
+    }
+    if (rel->rd_amcache != NULL) {
+        relation->rd_amcache = (BTMetaPageData *)palloc(sizeof(BTMetaPageData));
+        *(BTMetaPageData *)relation->rd_amcache = *(BTMetaPageData *)rel->rd_amcache;
+    }
+
+    relation->rd_id = part->pd_id;
+    relation->rd_indexlist = list_copy(part->pd_indexlist);
+    relation->rd_oidindex = part->pd_oidindex;
+    relation->rd_lockInfo = part->pd_lockInfo;
+    relation->rd_toastoid = part->pd_toastoid;
+    relation->partMap = NULL;
+    relation->subpartitiontype = part->pd_part->parttype;
+    relation->pgstat_info = NULL;
+    relation->parentId = rel->rd_id;
+    if (part->pd_part->parttype == PART_OBJ_TYPE_TABLE_SUB_PARTITION) {
+        relation->grandparentId = rel->parentId;
+    } else {
+        relation->grandparentId = InvalidOid;
+    }
+    relation->rd_smgr = part->pd_smgr;
+    relation->rd_isblockchain = rel->rd_isblockchain;
+    relation->storage_type = rel->storage_type;
+    relation->relreplident = rel->relreplident;
+
+    /* detach the binding between partition and SmgrRelation */
+    part->pd_smgr = NULL;
+
+    /* build the binding between dummy Relation and SmgrRelation */
+    if (relation->rd_smgr) {
+        smgrsetowner(&((relation)->rd_smgr), relation->rd_smgr);
+    }
+
+    bytea* des_reloption;
+    if (NULL != merge_reloption)
+        des_reloption = merge_reloption;
+    else
+        des_reloption = rel->rd_options;
+
+    if (NULL != des_reloption) {
+        int relOptSize = VARSIZE_ANY(des_reloption);
+        relation->rd_options = (bytea*)palloc(relOptSize);
+        errno_t ret = memcpy_s(relation->rd_options, relOptSize, des_reloption, relOptSize);
+        securec_check(ret, "\0", "\0");
+    }
+
+    SetRelationPartitionMap(relation, part);
+    relation->partMap =  (PartitionMap *)CopyPartitionMap(relation->partMap);
+
+    (void)MemoryContextSwitchTo(oldcxt);
+    return relation;
+}

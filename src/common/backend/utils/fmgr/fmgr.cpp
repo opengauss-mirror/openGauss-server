@@ -39,6 +39,7 @@
 #include "utils/lsyscache.h"
 #include "utils/syscache.h"
 #include "utils/plpgsql.h"
+#include "utils/dynahash.h"
 #include "log_fdw.h"
 
 /*
@@ -406,10 +407,6 @@ static PGFunction load_plpgsql_function(char* funcname)
         retval = &file_fdw_validator;
     } else if (!strcmp(funcname, "file_fdw_handler")) {
         retval = &file_fdw_handler;
-    } else if (!strcmp(funcname, "hdfs_fdw_validator")) {
-        retval = &hdfs_fdw_validator;
-    } else if (!strcmp(funcname, "hdfs_fdw_handler")) {
-        retval = &hdfs_fdw_handler;
 #ifdef ENABLE_MOT
     } else if (!strcmp(funcname, "mot_fdw_validator")) {
         retval = &mot_fdw_validator;
@@ -732,7 +729,12 @@ static void record_C_func(HeapTuple procedureTuple, PGFunction user_fn, const Pg
     entry->fn_xmin = HeapTupleGetRawXmin(procedureTuple);
     entry->fn_tid = procedureTuple->t_self;
     entry->user_fn = user_fn;
-    entry->inforec = inforec;
+    MemoryContext oldcxt = MemoryContextSwitchTo(CFuncHash->hcxt);
+    Pg_finfo_record* cur_inforec = (Pg_finfo_record*)palloc0(sizeof(Pg_finfo_record));
+    errno_t rc = memcpy_s(cur_inforec, sizeof(Pg_finfo_record), inforec, sizeof(Pg_finfo_record));
+    entry->inforec = cur_inforec;
+    securec_check(rc, "\0", "\0");
+    (void)MemoryContextSwitchTo(oldcxt);
 }
 
 /*
@@ -1087,6 +1089,7 @@ static Datum fmgr_security_definer(PG_FUNCTION_ARGS)
     struct fmgr_security_definer_cache* volatile fcache = NULL;
     FmgrInfo* save_flinfo = NULL;
     Oid save_userid;
+    Oid save_olduserid;
     int save_sec_context;
     volatile int save_nestlevel;
     PgStat_FunctionCallUsage fcusage;
@@ -1139,9 +1142,12 @@ static Datum fmgr_security_definer(PG_FUNCTION_ARGS)
     } else {
         save_nestlevel = 0; /* keep compiler quiet */
     }
+    save_olduserid = GetOldUserId(false);
 
     if (OidIsValid(fcache->userid) && !u_sess->exec_cxt.is_exec_trigger_func) {
-        SetUserIdAndSecContext(fcache->userid, save_sec_context | SECURITY_LOCAL_USERID_CHANGE);
+        SetOldUserId(save_userid, false);
+        SetUserIdAndSecContext(fcache->userid,
+            save_sec_context | SECURITY_LOCAL_USERID_CHANGE | SENDER_LOCAL_USERID_CHANGE);
     }
 
     if (fcache->proconfig != NULL) {
@@ -1176,6 +1182,7 @@ static Datum fmgr_security_definer(PG_FUNCTION_ARGS)
         pgstat_end_function_usage(&fcusage,
             (fcinfo->resultinfo == NULL || !IsA(fcinfo->resultinfo, ReturnSetInfo) ||
                 ((ReturnSetInfo*)fcinfo->resultinfo)->isDone != ExprMultipleResult));
+        SetOldUserId(save_olduserid, false);
     }
     PG_CATCH();
     {
@@ -1187,6 +1194,10 @@ static Datum fmgr_security_definer(PG_FUNCTION_ARGS)
 
         /* restore is_allow_commit_rollback */
         stp_retore_old_xact_stmt_state(savedisAllowCommitRollback);
+        SetOldUserId(save_olduserid, false);
+        if (OidIsValid(fcache->userid) && !u_sess->exec_cxt.is_exec_trigger_func) {
+            SetUserIdAndSecContext(save_userid, save_sec_context);
+        }
         PG_RE_THROW();
     }
     PG_END_TRY();
@@ -2501,11 +2512,11 @@ struct varlena* pg_detoast_datum(struct varlena* datum)
 
 struct varlena* pg_detoast_datum_copy(struct varlena* datum)
 {
-    if (VARATT_IS_EXTENDED(datum)) {
+    if (VARATT_IS_EXTENDED(datum) && !VARATT_IS_HUGE_TOAST_POINTER(datum)) {
         return heap_tuple_untoast_attr(datum);
     } else {
         /* Make a modifiable copy of the varlena object */
-        Size len = VARSIZE(datum);
+        Size len = VARATT_IS_HUGE_TOAST_POINTER(datum) ? VARSIZE_EXTERNAL(datum) :  VARSIZE(datum);
         struct varlena* result = (struct varlena*)palloc(len);
 
         errno_t rc = memcpy_s(result, len, datum, len);

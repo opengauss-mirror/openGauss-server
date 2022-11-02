@@ -29,16 +29,24 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
+/* For shared storage mode */
+typedef enum {
+    XLOG_COPY_NOT = 0,
+    XLOG_COPY_FROM_LOCAL,
+    XLOG_FORCE_COPY_FROM_LOCAL,
+    XLOG_COPY_FROM_SHARE
+} XLogCopyMode;
+
 void SharedStorageXlogCopyBackendMain(void);
 void WakeUpXLogCopyerBackend();
 void CheckShareStorageCtlInfo(XLogRecPtr localEnd);
-bool XLogOverwriteFromLocal(bool force = false);
+bool XLogOverwriteFromLocal(bool force = false, XLogRecPtr setStart = InvalidXLogRecPtr);
 bool XLogOverwriteFromShare();
-Size CalShareStorageCtlSize();
 ShareStorageXLogCtl *AlignAllocShareStorageCtl();
 void AlignFreeShareStorageCtl(ShareStorageXLogCtl *ctlInfo);
 bool LockNasWriteFile(int fd);
 bool UnlockNasWriteFile(int fd);
+void DoShareStorageXLogCopy(XLogCopyMode mode, XLogRecPtr start);
 
 static inline void AddShareStorageXLopCopyBackendWakeupRequest()
 {

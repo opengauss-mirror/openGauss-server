@@ -84,37 +84,41 @@ enum FileExistStatus { FILE_EXIST, FILE_NOT_EXIST, FILE_NOT_REG };
  */
 
 /* Operations on virtual Files --- equivalent to Unix kernel file ops */
-extern File PathNameOpenFile(FileName fileName, int fileFlags, int fileMode, File file = FILE_INVALID);
+extern File PathNameOpenFile(FileName fileName, int fileFlags, int fileMode, File file = FILE_INVALID,
+    bool interXact = false);
 extern File OpenTemporaryFile(bool interXact);
-extern void FileClose(File file);
-extern void FileCloseWithThief(File file);
-extern int FilePrefetch(File file, off_t offset, int amount, uint32 wait_event_info = 0);
-extern int FileSync(File file, uint32 wait_event_info = 0);
-extern off_t FileSeek(File file, off_t offset, int whence);
-extern int FileTruncate(File file, off_t offset, uint32 wait_event_info = 0);
-extern void FileWriteback(File file, off_t offset, off_t nbytes);
-extern char* FilePathName(File file);
-
-extern void FileAsyncCUClose(File* vfdList, int32 vfdnum);
-extern int FileAsyncRead(AioDispatchDesc_t** dList, int32 dn);
-extern int FileAsyncWrite(AioDispatchDesc_t** dList, int32 dn);
-extern int FileAsyncCURead(AioDispatchCUDesc_t** dList, int32 dn);
-extern int FileAsyncCUWrite(AioDispatchCUDesc_t** dList, int32 dn);
-extern void FileFastExtendFile(File file, uint32 offset, uint32 size, bool keep_size);
-extern int FileRead(File file, char* buffer, int amount);
-extern int FileWrite(File file, const char* buffer, int amount, off_t offset, int fastExtendSize = 0);
+extern void FileClose(File file, bool interXact = false);
+extern void FileCloseWithThief(File file, bool interXact = false);
+extern int FilePrefetch(File file, off_t offset, int amount, uint32 wait_event_info = 0, bool interXact = false);
+extern int FileSync(File file, uint32 wait_event_info = 0, bool interXact = false);
+extern off_t FileSeek(File file, off_t offset, int whence, bool interXact = false);
+extern int FileTruncate(File file, off_t offset, uint32 wait_event_info = 0, bool interXact = false);
+extern void FileWriteback(File file, off_t offset, off_t nbytes, bool interXact = false);
+extern char* FilePathName(File file, bool interXact = false);
+extern void FileAllocate(File file, uint32 offset, uint32 size, bool interXact = false);
+extern void FileAllocateDirectly(int fd, char* path, uint32 offset, uint32 size);
+extern void FileAsyncCUClose(File* vfdList, int32 vfdnum, bool interXact = false);
+extern int FileAsyncRead(AioDispatchDesc_t** dList, int32 dn, bool interXact = false);
+extern int FileAsyncWrite(AioDispatchDesc_t** dList, int32 dn, bool interXact = false);
+extern int FileAsyncCURead(AioDispatchCUDesc_t** dList, int32 dn, bool interXact = false);
+extern int FileAsyncCUWrite(AioDispatchCUDesc_t** dList, int32 dn, bool interXact = false);
+extern void FileFastExtendFile(File file, uint32 offset, uint32 size, bool keep_size, bool interXact = false);
+extern int FileRead(File file, char* buffer, int amount, bool interXact = false);
+extern int FileWrite(File file, const char* buffer, int amount, off_t offset, int fastExtendSize = 0,
+    bool interXact = false);
 
 // Threading virtual files IO interface, using pread() / pwrite()
 //
-extern int FilePRead(File file, char* buffer, int amount, off_t offset, uint32 wait_event_info = 0);
+extern int FilePRead(File file, char* buffer, int amount, off_t offset, uint32 wait_event_info = 0,
+    bool interXact = false);
 extern int FilePWrite(File file, const char *buffer, int amount, off_t offset, uint32 wait_event_info = 0,
-    int fastExtendSize = 0);
+    int fastExtendSize = 0, bool interXact = false);
 
 extern int AllocateSocket(const char* ipaddr, int port);
 extern int FreeSocket(int sockfd);
 
 /* Operations used for sharing named temporary files */
-extern File PathNameCreateTemporaryFile(char *name, bool error_on_failure);
+extern File PathNameCreateTemporaryFile(char *name, bool error_on_failure, bool interXact = false);
 extern File PathNameOpenTemporaryFile(char *name);
 extern bool PathNameDeleteTemporaryFile(const char *name, bool error_on_failure);
 extern void PathNameCreateTemporaryDir(const char *base, const char *name);
@@ -126,12 +130,13 @@ extern FILE* AllocateFile(const char* name, const char* mode);
 extern int FreeFile(FILE* file);
 extern void GlobalStatsCleanupFiles();
 
-extern File OpenCacheFile(const char* pathname, bool unlink_owner);
+extern File OpenCacheFile(const char* pathname, bool unlink_owner, bool interXact = false);
 extern void UnlinkCacheFile(const char* pathname);
 
 /* Operations to allow use of the <dirent.h> library routines */
 extern DIR* AllocateDir(const char* dirname);
 extern struct dirent* ReadDir(DIR* dir, const char* dirname);
+extern struct dirent *ReadDirExtended(DIR *dir, const char *dirname, int elevel);
 extern int FreeDir(DIR* dir);
 /* Operations to allow use of a plain kernel FD, with automatic cleanup */
 extern int OpenTransientFile(FileName fileName, int fileFlags, int fileMode);
@@ -141,9 +146,11 @@ extern int BasicOpenFile(FileName fileName, int fileFlags, int fileMode);
 
 /* Miscellaneous support routines */
 extern void InitFileAccess(void);
+extern void InitSessionFileAccess(void);
 extern void set_max_safe_fds(void);
 extern void CloseGaussPidDir(void);
 extern void closeAllVfds(void);
+extern void CloseAllTempFile(bool inter_xact);
 extern void SetTempTablespaces(Oid* tableSpaces, int numSpaces);
 extern bool TempTablespacesAreSet(void);
 extern int GetTempTablespaces(Oid *tableSpaces, int numSpaces);
@@ -153,8 +160,12 @@ extern void AtEOSubXact_Files(bool isCommit, SubTransactionId mySubid, SubTransa
 extern void AtProcExit_Files(int code, Datum arg);
 extern void RemovePgTempFiles(void);
 
+/* for interxact file on gsc mode */
+extern void DestroyAllVfds(bool inter_xact);
+extern void closeAllVfds(bool inter_xact);
+
 extern void RemoveErrorCacheFiles();
-extern int FileFd(File file);
+extern int FileFd(File file, bool interXact = false);
 
 extern int pg_fsync(int fd);
 extern int pg_fsync_no_writethrough(int fd);
@@ -166,7 +177,8 @@ extern void DestroyAllVfds(void);
 extern void InitDataFileIdCache(void);
 extern Size DataFileIdCacheSize(void);
 extern File DataFileIdOpenFile(
-    FileName fileName, const RelFileNodeForkNum& fileNode, int fileFlags, int fileMode, File file = FILE_INVALID);
+    FileName fileName, const RelFileNodeForkNum& fileNode, int fileFlags, int fileMode, File file = FILE_INVALID,
+    bool interXact = false);
 
 extern RelFileNodeForkNum RelFileNodeForkNumFill(
     const RelFileNodeBackend& rnode, ForkNumber forkNum, BlockNumber segno);
@@ -195,5 +207,6 @@ extern PageCompressHeader *GetPageCompressMemoryMap(File file, uint32 chunk_size
 //
 #define PG_TEMP_FILES_DIR "pgsql_tmp"
 #define PG_TEMP_FILE_PREFIX "pgsql_tmp"
+#define EIO_RETRY_TIMES 3
 
 #endif /* FD_H */

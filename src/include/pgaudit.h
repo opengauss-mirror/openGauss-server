@@ -49,8 +49,6 @@ extern void pgaudit_stop_all(void);
 extern void allow_immediate_pgaudit_restart(void);
 
 // multi-thread audit
-extern void audit_process_cxt_init(void);
-extern void audit_process_cxt_exit();
 extern int audit_load_thread_index(void);
 
 #ifdef EXEC_BACKEND
@@ -111,7 +109,8 @@ typedef enum {
     AUDIT_DDL_MODEL,
     AUDIT_DDL_GLOBALCONFIG,
     AUDIT_DDL_PUBLICATION_SUBSCRIPTION,
-    AUDIT_DDL_FOREIGN_DATA_WRAPPER
+    AUDIT_DDL_FOREIGN_DATA_WRAPPER,
+    AUDIT_DDL_SQL_PATCH
 } AuditType;
 
 /* keep the same sequence with parameter audit_system_object */
@@ -141,7 +140,8 @@ typedef enum {
     DDL_MODEL,
     DDL_PUBLICATION_SUBSCRIPTION,
     DDL_GLOBALCONFIG,
-    DDL_FOREIGN_DATA_WRAPPER
+    DDL_FOREIGN_DATA_WRAPPER,
+    DDL_SQL_PATCH
 } DDLType;
 
 /*

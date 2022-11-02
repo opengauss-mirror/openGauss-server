@@ -692,7 +692,7 @@ static bool FindLockCycleRecurseMember(PGPROC *checkProc,
                 }
             }
             LWLockRelease(ProcArrayLock);
-            proc = (PGPROC *)waitQueue->links.next;
+            proc = (PGPROC *)proc->links.next;
         }
     }
 
