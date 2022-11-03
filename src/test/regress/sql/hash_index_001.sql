@@ -28,6 +28,7 @@ drop index if exists hash_t1_id3;
 drop index if exists hash_t1_id4;
 create index hash_t1_id3 on hash_table_1 using btree (id);
 create index hash_t1_id4 on hash_table_1 using hash (id);
+explain(costs off) select id from hash_table_1 where id = 4;
 
 -- drop superfluous index now
 drop index hash_t1_id3, hash_t1_id4;

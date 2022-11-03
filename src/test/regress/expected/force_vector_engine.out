@@ -71,16 +71,14 @@ select count(*) from force_vector_test1 where id=2 and val=2;
 
 set enable_indexscan=off;
 explain select count(*) from force_vector_test1 where id=2;
-                                                QUERY PLAN                                                
-----------------------------------------------------------------------------------------------------------
+                                                        QUERY PLAN                                                         
+---------------------------------------------------------------------------------------------------------------------------
  Row Adapter  (cost=8.28..8.28 rows=1 width=8)
    ->  Vector Aggregate  (cost=8.27..8.28 rows=1 width=8)
          ->  Vector Adapter  (cost=8.27..8.27 rows=1 width=0)
-               ->  Bitmap Heap Scan on force_vector_test1  (cost=4.26..8.27 rows=1 width=0)
-                     Recheck Cond: (id = 2)
-                     ->  Bitmap Index Scan on force_vector_test1_id_idx  (cost=0.00..4.26 rows=1 width=0)
-                           Index Cond: (id = 2)
-(7 rows)
+               ->  Index Only Scan using force_vector_test1_id_idx on force_vector_test1  (cost=0.00..8.27 rows=1 width=0)
+                     Index Cond: (id = 2)
+(5 rows)
 
 select count(*) from force_vector_test1 where id=2;
  count 

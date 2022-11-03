@@ -982,8 +982,12 @@ void cost_index(IndexPath* path, PlannerInfo* root, double loop_count)
     double tuples_fetched;
     double pages_fetched;
     bool ispartitionedindex = path->indexinfo->rel->isPartitionedTable;
-    bool disable_path = enable_parametrized_path(root, baserel, (Path*)path) || \
-        (!u_sess->attr.attr_sql.enable_indexscan);
+    bool disable_path = false;
+    if (enable_parametrized_path(root, baserel, (Path*)path) ||
+        (!u_sess->attr.attr_sql.enable_indexscan && !indexonly) ||
+        (!u_sess->attr.attr_sql.enable_indexonlyscan && indexonly)) {
+        disable_path = true;
+    }
 
     /* Should only be applied to base relations */
     AssertEreport(IsA(baserel, RelOptInfo) && IsA(index, IndexOptInfo),
