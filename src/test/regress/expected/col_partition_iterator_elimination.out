@@ -1215,19 +1215,17 @@ explain(costs off, verbose on) select * from test_range_pt where a = 30 order by
 (11 rows)
 
 explain(costs off, verbose on) select count(a) from test_range_pt where a = 30;
-                                             QUERY PLAN                                             
-----------------------------------------------------------------------------------------------------
+                                                        QUERY PLAN                                                        
+--------------------------------------------------------------------------------------------------------------------------
  Row Adapter
    Output: (count(a))
    ->  Vector Aggregate
          Output: count(a)
-         ->  Partitioned CStore Index Heap Scan on col_partition_iterator_elimination.test_range_pt
+         ->  Partitioned CStore Index Only Scan using idx_range_local on col_partition_iterator_elimination.test_range_pt
                Output: a
-               Recheck Cond: (test_range_pt.a = 30)
+               Index Cond: (test_range_pt.a = 30)
                Selected Partitions:  3
-               ->  Partitioned CStore Index Ctid Scan on idx_range_local
-                     Index Cond: (test_range_pt.a = 30)
-(10 rows)
+(8 rows)
 
 explain(costs off, verbose on) select count(b) from test_range_pt where a = 30;
                                              QUERY PLAN                                             
@@ -1411,19 +1409,17 @@ explain(costs off, verbose on) select * from test_range_pt where a = 30 order by
 (11 rows)
 
 explain(costs off, verbose on) select count(a) from test_range_pt where a = 30;
-                                             QUERY PLAN                                             
-----------------------------------------------------------------------------------------------------
+                                                        QUERY PLAN                                                        
+--------------------------------------------------------------------------------------------------------------------------
  Row Adapter
    Output: (count(a))
    ->  Vector Aggregate
          Output: count(a)
-         ->  Partitioned CStore Index Heap Scan on col_partition_iterator_elimination.test_range_pt
+         ->  Partitioned CStore Index Only Scan using idx_range_local on col_partition_iterator_elimination.test_range_pt
                Output: a
-               Recheck Cond: (test_range_pt.a = 30)
+               Index Cond: (test_range_pt.a = 30)
                Selected Partitions:  3
-               ->  Partitioned CStore Index Ctid Scan on idx_range_local
-                     Index Cond: (test_range_pt.a = 30)
-(10 rows)
+(8 rows)
 
 explain(costs off, verbose on) select count(b) from test_range_pt where a = 30;
                                              QUERY PLAN                                             
@@ -1607,19 +1603,17 @@ explain(costs off, verbose on) select * from test_range_pt where a = 30 order by
 (11 rows)
 
 explain(costs off, verbose on) select count(a) from test_range_pt where a = 30;
-                                             QUERY PLAN                                             
-----------------------------------------------------------------------------------------------------
+                                                        QUERY PLAN                                                        
+--------------------------------------------------------------------------------------------------------------------------
  Row Adapter
    Output: (count(a))
    ->  Vector Aggregate
          Output: count(a)
-         ->  Partitioned CStore Index Heap Scan on col_partition_iterator_elimination.test_range_pt
+         ->  Partitioned CStore Index Only Scan using idx_range_local on col_partition_iterator_elimination.test_range_pt
                Output: a
-               Recheck Cond: (test_range_pt.a = 30)
+               Index Cond: (test_range_pt.a = 30)
                Selected Partitions:  3
-               ->  Partitioned CStore Index Ctid Scan on idx_range_local
-                     Index Cond: (test_range_pt.a = 30)
-(10 rows)
+(8 rows)
 
 explain(costs off, verbose on) select count(b) from test_range_pt where a = 30;
                                              QUERY PLAN                                             
