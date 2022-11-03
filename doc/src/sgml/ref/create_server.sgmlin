@@ -11,8 +11,10 @@
 <refsynopsisdiv>
 <synopsis>
 CREATE SERVER server_name 
+    [ TYPE 'server_type' ]
+    [ VERSION ' server_version ' ]
     FOREIGN DATA WRAPPER fdw_name
-    OPTIONS ( { option_name ' value ' } [, ...] ) ;
+    [ OPTIONS ( { option_name ' value ' } [, ...] ) ] ;
 </synopsis>
 </refsynopsisdiv>
 </refentry>
