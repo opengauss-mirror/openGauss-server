@@ -115,6 +115,426 @@ order by 1 limit 1);
      1
 (1 row)
 
+explain(costs off, verbose) select count(*)
+from bmsql_oorder
+where bmsql_oorder.o_d_id >( select c_w_id from bmsql_customer where bmsql_oorder.o_w_id >=3
+union
+select 1
+from (select c_w_id ,c_balance ,c_last
+from bmsql_customer
+join bmsql_district
+on c_w_id <> d_id
+union
+select * from
+(select count(*) as count,i_price,i_name
+from bmsql_item
+group by 2,3)) as tb1 ,
+(with tmp as (select count(*) , '123' as c5
+from (with tmp1 as (select distinct '2010-01-03' as c4 ,ol_d_id as c3 from bmsql_order_line) select * from tmp1 ) where c3>=3 group by c4,c3 )select * from tmp ) tb2
+group by rollup (tb1.c_balance,tb2.c5,tb1.c_last),tb1.c_balance
+except
+select distinct c_w_id
+from bmsql_customer
+where log(bmsql_oorder.o_carrier_id +5.5,bmsql_oorder.o_carrier_id+6) != bmsql_oorder.o_entry_d
+or bmsql_oorder.o_ol_cnt<=3
+order by 1 limit 1);
+                                                                                                                                                                                                                                                                                                                                                                                              QUERY PLAN                                                                                                                                                                                                                                                                                                                                                                                               
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: (count(*))
+   ->  Vector Aggregate
+         Output: count(*)
+         ->  Vector Adapter(type: BATCH MODE)
+               Output: bmsql_oorder.o_w_id, bmsql_oorder.o_d_id, bmsql_oorder.o_id, bmsql_oorder.o_c_id, bmsql_oorder.o_carrier_id, bmsql_oorder.o_ol_cnt, bmsql_oorder.o_ali_local, bmsql_oorder.o_entry_d
+               Filter: (bmsql_oorder.o_d_id > (SubPlan 1))
+               ->  Seq Scan on public.bmsql_oorder
+                     Output: bmsql_oorder.o_w_id, bmsql_oorder.o_d_id, bmsql_oorder.o_id, bmsql_oorder.o_c_id, bmsql_oorder.o_carrier_id, bmsql_oorder.o_ol_cnt, bmsql_oorder.o_ali_local, bmsql_oorder.o_entry_d
+                     SubPlan 1
+                       ->  Row Adapter
+                             Output: public.bmsql_customer.c_w_id, (0)
+                             ->  Vector Limit
+                                   Output: public.bmsql_customer.c_w_id, (0)
+                                   ->  Vector Sort
+                                         Output: public.bmsql_customer.c_w_id, (0)
+                                         Sort Key: public.bmsql_customer.c_w_id
+                                         ->  Vector HashSetOp Except
+                                               Output: public.bmsql_customer.c_w_id, (0)
+                                               ->  Vector Append
+                                                     ->  Vector Result
+                                                           Output: public.bmsql_customer.c_w_id, 0
+                                                           ->  Vector Sonic Hash Aggregate
+                                                                 Output: public.bmsql_customer.c_w_id
+                                                                 Group By Key: public.bmsql_customer.c_w_id
+                                                                 ->  Vector Append
+                                                                       ->  Vector Result
+                                                                             Output: public.bmsql_customer.c_w_id
+                                                                             One-Time Filter: (bmsql_oorder.o_w_id >= 3)
+                                                                             ->  Vector Adapter(type: BATCH MODE)
+                                                                                   Output: public.bmsql_customer.c_w_id, public.bmsql_customer.c_d_id, public.bmsql_customer.c_id, public.bmsql_customer.c_discount, public.bmsql_customer.c_credit, public.bmsql_customer.c_last, public.bmsql_customer.c_first, public.bmsql_customer.c_credit_lim, public.bmsql_customer.c_balance, public.bmsql_customer.c_ytd_payment, public.bmsql_customer.c_payment_cnt, public.bmsql_customer.c_delivery_cnt, public.bmsql_customer.c_street_1, public.bmsql_customer.c_street_2, public.bmsql_customer.c_city, public.bmsql_customer.c_state, public.bmsql_customer.c_zip, public.bmsql_customer.c_phone, public.bmsql_customer.c_since, public.bmsql_customer.lc_middle, public.bmsql_customer.c_data
+                                                                                   ->  Seq Scan on public.bmsql_customer
+                                                                                         Output: public.bmsql_customer.c_w_id, public.bmsql_customer.c_d_id, public.bmsql_customer.c_id, public.bmsql_customer.c_discount, public.bmsql_customer.c_credit, public.bmsql_customer.c_last, public.bmsql_customer.c_first, public.bmsql_customer.c_credit_lim, public.bmsql_customer.c_balance, public.bmsql_customer.c_ytd_payment, public.bmsql_customer.c_payment_cnt, public.bmsql_customer.c_delivery_cnt, public.bmsql_customer.c_street_1, public.bmsql_customer.c_street_2, public.bmsql_customer.c_city, public.bmsql_customer.c_state, public.bmsql_customer.c_zip, public.bmsql_customer.c_phone, public.bmsql_customer.c_since, public.bmsql_customer.lc_middle, public.bmsql_customer.c_data
+                                                                       ->  Vector Subquery Scan on "*SELECT* 2"
+                                                                             Output: "*SELECT* 2"."?column?"
+                                                                             ->  Vector Sort Aggregate
+                                                                                   Output: 1, "*SELECT* 1".c_balance, tb2.c5, "*SELECT* 1".c_last
+                                                                                   Group By Key: "*SELECT* 1".c_balance, tb2.c5, "*SELECT* 1".c_last
+                                                                                   Group By Key: "*SELECT* 1".c_balance, tb2.c5
+                                                                                   Group By Key: "*SELECT* 1".c_balance
+                                                                                   Group By Key: "*SELECT* 1".c_balance
+                                                                                   ->  Vector Sort
+                                                                                         Output: "*SELECT* 1".c_balance, tb2.c5, "*SELECT* 1".c_last
+                                                                                         Sort Key: "*SELECT* 1".c_balance, tb2.c5, "*SELECT* 1".c_last
+                                                                                         ->  Vector Nest Loop
+                                                                                               Output: "*SELECT* 1".c_balance, tb2.c5, "*SELECT* 1".c_last
+                                                                                               ->  Vector Sonic Hash Aggregate
+                                                                                                     Output: (("*SELECT* 1".c_w_id)::bigint), "*SELECT* 1".c_balance, "*SELECT* 1".c_last
+                                                                                                     Group By Key: (("*SELECT* 1".c_w_id)::bigint), "*SELECT* 1".c_balance, "*SELECT* 1".c_last
+                                                                                                     ->  Vector Append
+                                                                                                           ->  Vector Subquery Scan on "*SELECT* 1"
+                                                                                                                 Output: "*SELECT* 1".c_w_id, "*SELECT* 1".c_balance, "*SELECT* 1".c_last
+                                                                                                                 ->  Vector Nest Loop
+                                                                                                                       Output: public.bmsql_customer.c_w_id, public.bmsql_customer.c_balance, public.bmsql_customer.c_last
+                                                                                                                       Join Filter: (public.bmsql_customer.c_w_id <> bmsql_district.d_id)
+                                                                                                                       ->  Vector Adapter(type: BATCH MODE)
+                                                                                                                             Output: bmsql_district.d_w_id, bmsql_district.d_id, bmsql_district.d_ytd, bmsql_district.d_tax, bmsql_district.d_next_o_id, bmsql_district.d_name, bmsql_district.d_street_1, bmsql_district.d_street_2, bmsql_district.d_city, bmsql_district.d_state, bmsql_district.d_zip
+                                                                                                                             ->  Seq Scan on public.bmsql_district
+                                                                                                                                   Output: bmsql_district.d_w_id, bmsql_district.d_id, bmsql_district.d_ytd, bmsql_district.d_tax, bmsql_district.d_next_o_id, bmsql_district.d_name, bmsql_district.d_street_1, bmsql_district.d_street_2, bmsql_district.d_city, bmsql_district.d_state, bmsql_district.d_zip
+                                                                                                                       ->  Vector Materialize
+                                                                                                                             Output: public.bmsql_customer.c_w_id, public.bmsql_customer.c_balance, public.bmsql_customer.c_last
+                                                                                                                             ->  Vector Adapter(type: BATCH MODE)
+                                                                                                                                   Output: public.bmsql_customer.c_w_id, public.bmsql_customer.c_balance, public.bmsql_customer.c_last
+                                                                                                                                   ->  Seq Scan on public.bmsql_customer
+                                                                                                                                         Output: public.bmsql_customer.c_w_id, public.bmsql_customer.c_balance, public.bmsql_customer.c_last
+                                                                                                           ->  Vector Sonic Hash Aggregate
+                                                                                                                 Output: count(*), bmsql_item.i_price, bmsql_item.i_name
+                                                                                                                 Group By Key: bmsql_item.i_price, bmsql_item.i_name
+                                                                                                                 ->  Vector Adapter(type: BATCH MODE)
+                                                                                                                       Output: bmsql_item.i_price, bmsql_item.i_name
+                                                                                                                       ->  Seq Scan on public.bmsql_item
+                                                                                                                             Output: bmsql_item.i_price, bmsql_item.i_name
+                                                                                               ->  Vector Materialize
+                                                                                                     Output: tb2.c5
+                                                                                                     ->  Vector Subquery Scan on tb2
+                                                                                                           Output: tb2.c5
+                                                                                                           ->  Vector Subquery Scan on tmp
+                                                                                                                 Output: tmp.count, tmp.c5
+                                                                                                                 ->  Vector Sonic Hash Aggregate
+                                                                                                                       Output: count(*), '123'::text, ('2010-01-03'::text), bmsql_order_line.ol_d_id
+                                                                                                                       Group By Key: ('2010-01-03'::text), bmsql_order_line.ol_d_id
+                                                                                                                       ->  Vector Sonic Hash Aggregate
+                                                                                                                             Output: ('2010-01-03'::text), bmsql_order_line.ol_d_id
+                                                                                                                             Group By Key: ('2010-01-03'::text), bmsql_order_line.ol_d_id
+                                                                                                                             ->  Vector Adapter(type: BATCH MODE)
+                                                                                                                                   Output: ('2010-01-03'::text), bmsql_order_line.ol_d_id
+                                                                                                                                   Filter: (bmsql_order_line.ol_d_id >= 3)
+                                                                                                                                   ->  Seq Scan on public.bmsql_order_line
+                                                                                                                                         Output: '2010-01-03'::text, bmsql_order_line.ol_d_id
+                                                     ->  Vector Subquery Scan on "*SELECT* 3"
+                                                           Output: "*SELECT* 3".c_w_id, 1
+                                                           ->  Vector Sonic Hash Aggregate
+                                                                 Output: public.bmsql_customer.c_w_id
+                                                                 Group By Key: public.bmsql_customer.c_w_id
+                                                                 ->  Vector Result
+                                                                       Output: public.bmsql_customer.c_w_id
+                                                                       One-Time Filter: (((log(((bmsql_oorder.o_carrier_id)::numeric + 5.5), ((bmsql_oorder.o_carrier_id + 6))::numeric))::text <> (bmsql_oorder.o_entry_d)::text) OR (bmsql_oorder.o_ol_cnt <= 3))
+                                                                       ->  Vector Adapter(type: BATCH MODE)
+                                                                             Output: public.bmsql_customer.c_w_id, public.bmsql_customer.c_d_id, public.bmsql_customer.c_id, public.bmsql_customer.c_discount, public.bmsql_customer.c_credit, public.bmsql_customer.c_last, public.bmsql_customer.c_first, public.bmsql_customer.c_credit_lim, public.bmsql_customer.c_balance, public.bmsql_customer.c_ytd_payment, public.bmsql_customer.c_payment_cnt, public.bmsql_customer.c_delivery_cnt, public.bmsql_customer.c_street_1, public.bmsql_customer.c_street_2, public.bmsql_customer.c_city, public.bmsql_customer.c_state, public.bmsql_customer.c_zip, public.bmsql_customer.c_phone, public.bmsql_customer.c_since, public.bmsql_customer.lc_middle, public.bmsql_customer.c_data
+                                                                             ->  Seq Scan on public.bmsql_customer
+                                                                                   Output: public.bmsql_customer.c_w_id, public.bmsql_customer.c_d_id, public.bmsql_customer.c_id, public.bmsql_customer.c_discount, public.bmsql_customer.c_credit, public.bmsql_customer.c_last, public.bmsql_customer.c_first, public.bmsql_customer.c_credit_lim, public.bmsql_customer.c_balance, public.bmsql_customer.c_ytd_payment, public.bmsql_customer.c_payment_cnt, public.bmsql_customer.c_delivery_cnt, public.bmsql_customer.c_street_1, public.bmsql_customer.c_street_2, public.bmsql_customer.c_city, public.bmsql_customer.c_state, public.bmsql_customer.c_zip, public.bmsql_customer.c_phone, public.bmsql_customer.c_since, public.bmsql_customer.lc_middle, public.bmsql_customer.c_data
+(101 rows)
+
+set try_vector_engine_strategy=off;
+select count(*)
+from bmsql_oorder
+where bmsql_oorder.o_d_id >( select c_w_id from bmsql_customer where bmsql_oorder.o_w_id >=3
+union
+select 1
+from (select c_w_id ,c_balance ,c_last
+from bmsql_customer
+join bmsql_district
+on c_w_id <> d_id
+union
+select * from
+(select count(*) as count,i_price,i_name
+from bmsql_item
+group by 2,3)) as tb1 ,
+(with tmp as (select count(*) , '123' as c5
+from (with tmp1 as (select distinct '2010-01-03' as c4 ,ol_d_id as c3 from bmsql_order_line) select * from tmp1 ) where c3>=3 group by c4,c3 )select * from tmp ) tb2
+group by rollup (tb1.c_balance,tb2.c5,tb1.c_last),tb1.c_balance
+except
+select distinct c_w_id
+from bmsql_customer
+where log(bmsql_oorder.o_carrier_id +5.5,bmsql_oorder.o_carrier_id+6) != bmsql_oorder.o_entry_d
+or bmsql_oorder.o_ol_cnt<=3
+order by 1 limit 1);
+ count 
+-------
+     1
+(1 row)
+
+explain(costs off, verbose) select count(*)
+from bmsql_oorder
+where bmsql_oorder.o_d_id >( select c_w_id from bmsql_customer where bmsql_oorder.o_w_id >=3
+union
+select 1
+from (select c_w_id ,c_balance ,c_last
+from bmsql_customer
+join bmsql_district
+on c_w_id <> d_id
+union
+select * from
+(select count(*) as count,i_price,i_name
+from bmsql_item
+group by 2,3)) as tb1 ,
+(with tmp as (select count(*) , '123' as c5
+from (with tmp1 as (select distinct '2010-01-03' as c4 ,ol_d_id as c3 from bmsql_order_line) select * from tmp1 ) where c3>=3 group by c4,c3 )select * from tmp ) tb2
+group by rollup (tb1.c_balance,tb2.c5,tb1.c_last),tb1.c_balance
+except
+select distinct c_w_id
+from bmsql_customer
+where log(bmsql_oorder.o_carrier_id +5.5,bmsql_oorder.o_carrier_id+6) != bmsql_oorder.o_entry_d
+or bmsql_oorder.o_ol_cnt<=3
+order by 1 limit 1);
+                                                                                                                                                                                                                                                                                                                                                                                  QUERY PLAN                                                                                                                                                                                                                                                                                                                                                                                   
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: count(*)
+   ->  Seq Scan on public.bmsql_oorder
+         Output: bmsql_oorder.o_w_id, bmsql_oorder.o_d_id, bmsql_oorder.o_id, bmsql_oorder.o_c_id, bmsql_oorder.o_carrier_id, bmsql_oorder.o_ol_cnt, bmsql_oorder.o_ali_local, bmsql_oorder.o_entry_d
+         Filter: (bmsql_oorder.o_d_id > (SubPlan 1))
+         SubPlan 1
+           ->  Limit
+                 Output: public.bmsql_customer.c_w_id, (0)
+                 ->  Sort
+                       Output: public.bmsql_customer.c_w_id, (0)
+                       Sort Key: public.bmsql_customer.c_w_id
+                       ->  HashSetOp Except
+                             Output: public.bmsql_customer.c_w_id, (0)
+                             ->  Append
+                                   ->  Result
+                                         Output: public.bmsql_customer.c_w_id, 0
+                                         ->  HashAggregate
+                                               Output: public.bmsql_customer.c_w_id
+                                               Group By Key: public.bmsql_customer.c_w_id
+                                               ->  Append
+                                                     ->  Result
+                                                           Output: public.bmsql_customer.c_w_id
+                                                           One-Time Filter: (bmsql_oorder.o_w_id >= 3)
+                                                           ->  Seq Scan on public.bmsql_customer
+                                                                 Output: public.bmsql_customer.c_w_id, public.bmsql_customer.c_d_id, public.bmsql_customer.c_id, public.bmsql_customer.c_discount, public.bmsql_customer.c_credit, public.bmsql_customer.c_last, public.bmsql_customer.c_first, public.bmsql_customer.c_credit_lim, public.bmsql_customer.c_balance, public.bmsql_customer.c_ytd_payment, public.bmsql_customer.c_payment_cnt, public.bmsql_customer.c_delivery_cnt, public.bmsql_customer.c_street_1, public.bmsql_customer.c_street_2, public.bmsql_customer.c_city, public.bmsql_customer.c_state, public.bmsql_customer.c_zip, public.bmsql_customer.c_phone, public.bmsql_customer.c_since, public.bmsql_customer.lc_middle, public.bmsql_customer.c_data
+                                                     ->  Subquery Scan on "*SELECT* 2"
+                                                           Output: "*SELECT* 2"."?column?"
+                                                           ->  GroupAggregate
+                                                                 Output: 1, "*SELECT* 1".c_balance, tb2.c5, "*SELECT* 1".c_last
+                                                                 Group By Key: "*SELECT* 1".c_balance, tb2.c5, "*SELECT* 1".c_last
+                                                                 Group By Key: "*SELECT* 1".c_balance, tb2.c5
+                                                                 Group By Key: "*SELECT* 1".c_balance
+                                                                 Group By Key: "*SELECT* 1".c_balance
+                                                                 ->  Sort
+                                                                       Output: "*SELECT* 1".c_balance, tb2.c5, "*SELECT* 1".c_last
+                                                                       Sort Key: "*SELECT* 1".c_balance, tb2.c5, "*SELECT* 1".c_last
+                                                                       ->  Nested Loop
+                                                                             Output: "*SELECT* 1".c_balance, tb2.c5, "*SELECT* 1".c_last
+                                                                             ->  HashAggregate
+                                                                                   Output: (("*SELECT* 1".c_w_id)::bigint), "*SELECT* 1".c_balance, "*SELECT* 1".c_last
+                                                                                   Group By Key: (("*SELECT* 1".c_w_id)::bigint), "*SELECT* 1".c_balance, "*SELECT* 1".c_last
+                                                                                   ->  Append
+                                                                                         ->  Subquery Scan on "*SELECT* 1"
+                                                                                               Output: "*SELECT* 1".c_w_id, "*SELECT* 1".c_balance, "*SELECT* 1".c_last
+                                                                                               ->  Nested Loop
+                                                                                                     Output: public.bmsql_customer.c_w_id, public.bmsql_customer.c_balance, public.bmsql_customer.c_last
+                                                                                                     Join Filter: (public.bmsql_customer.c_w_id <> bmsql_district.d_id)
+                                                                                                     ->  Seq Scan on public.bmsql_district
+                                                                                                           Output: bmsql_district.d_w_id, bmsql_district.d_id, bmsql_district.d_ytd, bmsql_district.d_tax, bmsql_district.d_next_o_id, bmsql_district.d_name, bmsql_district.d_street_1, bmsql_district.d_street_2, bmsql_district.d_city, bmsql_district.d_state, bmsql_district.d_zip
+                                                                                                     ->  Materialize
+                                                                                                           Output: public.bmsql_customer.c_w_id, public.bmsql_customer.c_balance, public.bmsql_customer.c_last
+                                                                                                           ->  Seq Scan on public.bmsql_customer
+                                                                                                                 Output: public.bmsql_customer.c_w_id, public.bmsql_customer.c_balance, public.bmsql_customer.c_last
+                                                                                         ->  HashAggregate
+                                                                                               Output: count(*), bmsql_item.i_price, bmsql_item.i_name
+                                                                                               Group By Key: bmsql_item.i_price, bmsql_item.i_name
+                                                                                               ->  Seq Scan on public.bmsql_item
+                                                                                                     Output: bmsql_item.i_price, bmsql_item.i_name
+                                                                             ->  Materialize
+                                                                                   Output: tb2.c5
+                                                                                   ->  Subquery Scan on tb2
+                                                                                         Output: tb2.c5
+                                                                                         ->  Subquery Scan on tmp
+                                                                                               Output: tmp.count, tmp.c5
+                                                                                               ->  HashAggregate
+                                                                                                     Output: count(*), '123'::text, ('2010-01-03'::text), bmsql_order_line.ol_d_id
+                                                                                                     Group By Key: ('2010-01-03'::text), bmsql_order_line.ol_d_id
+                                                                                                     ->  HashAggregate
+                                                                                                           Output: ('2010-01-03'::text), bmsql_order_line.ol_d_id
+                                                                                                           Group By Key: '2010-01-03'::text, bmsql_order_line.ol_d_id
+                                                                                                           ->  Seq Scan on public.bmsql_order_line
+                                                                                                                 Output: '2010-01-03'::text, bmsql_order_line.ol_d_id
+                                                                                                                 Filter: (bmsql_order_line.ol_d_id >= 3)
+                                   ->  Subquery Scan on "*SELECT* 3"
+                                         Output: "*SELECT* 3".c_w_id, 1
+                                         ->  HashAggregate
+                                               Output: public.bmsql_customer.c_w_id
+                                               Group By Key: public.bmsql_customer.c_w_id
+                                               ->  Result
+                                                     Output: public.bmsql_customer.c_w_id
+                                                     One-Time Filter: (((log(((bmsql_oorder.o_carrier_id)::numeric + 5.5), ((bmsql_oorder.o_carrier_id + 6))::numeric))::text <> (bmsql_oorder.o_entry_d)::text) OR (bmsql_oorder.o_ol_cnt <= 3))
+                                                     ->  Seq Scan on public.bmsql_customer
+                                                           Output: public.bmsql_customer.c_w_id, public.bmsql_customer.c_d_id, public.bmsql_customer.c_id, public.bmsql_customer.c_discount, public.bmsql_customer.c_credit, public.bmsql_customer.c_last, public.bmsql_customer.c_first, public.bmsql_customer.c_credit_lim, public.bmsql_customer.c_balance, public.bmsql_customer.c_ytd_payment, public.bmsql_customer.c_payment_cnt, public.bmsql_customer.c_delivery_cnt, public.bmsql_customer.c_street_1, public.bmsql_customer.c_street_2, public.bmsql_customer.c_city, public.bmsql_customer.c_state, public.bmsql_customer.c_zip, public.bmsql_customer.c_phone, public.bmsql_customer.c_since, public.bmsql_customer.lc_middle, public.bmsql_customer.c_data
+(83 rows)
+
+set try_vector_engine_strategy=optimal;
+select count(*)
+from bmsql_oorder
+where bmsql_oorder.o_d_id >( select c_w_id from bmsql_customer where bmsql_oorder.o_w_id >=3
+union
+select 1
+from (select c_w_id ,c_balance ,c_last
+from bmsql_customer
+join bmsql_district
+on c_w_id <> d_id
+union
+select * from
+(select count(*) as count,i_price,i_name
+from bmsql_item
+group by 2,3)) as tb1 ,
+(with tmp as (select count(*) , '123' as c5
+from (with tmp1 as (select distinct '2010-01-03' as c4 ,ol_d_id as c3 from bmsql_order_line) select * from tmp1 ) where c3>=3 group by c4,c3 )select * from tmp ) tb2
+group by rollup (tb1.c_balance,tb2.c5,tb1.c_last),tb1.c_balance
+except
+select distinct c_w_id
+from bmsql_customer
+where log(bmsql_oorder.o_carrier_id +5.5,bmsql_oorder.o_carrier_id+6) != bmsql_oorder.o_entry_d
+or bmsql_oorder.o_ol_cnt<=3
+order by 1 limit 1);
+ count 
+-------
+     1
+(1 row)
+
+explain(costs off, verbose) select count(*)
+from bmsql_oorder
+where bmsql_oorder.o_d_id >( select c_w_id from bmsql_customer where bmsql_oorder.o_w_id >=3
+union
+select 1
+from (select c_w_id ,c_balance ,c_last
+from bmsql_customer
+join bmsql_district
+on c_w_id <> d_id
+union
+select * from
+(select count(*) as count,i_price,i_name
+from bmsql_item
+group by 2,3)) as tb1 ,
+(with tmp as (select count(*) , '123' as c5
+from (with tmp1 as (select distinct '2010-01-03' as c4 ,ol_d_id as c3 from bmsql_order_line) select * from tmp1 ) where c3>=3 group by c4,c3 )select * from tmp ) tb2
+group by rollup (tb1.c_balance,tb2.c5,tb1.c_last),tb1.c_balance
+except
+select distinct c_w_id
+from bmsql_customer
+where log(bmsql_oorder.o_carrier_id +5.5,bmsql_oorder.o_carrier_id+6) != bmsql_oorder.o_entry_d
+or bmsql_oorder.o_ol_cnt<=3
+order by 1 limit 1);
+                                                                                                                                                                                                                                                                                                                                                                                        QUERY PLAN                                                                                                                                                                                                                                                                                                                                                                                         
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: count(*)
+   ->  Seq Scan on public.bmsql_oorder
+         Output: bmsql_oorder.o_w_id, bmsql_oorder.o_d_id, bmsql_oorder.o_id, bmsql_oorder.o_c_id, bmsql_oorder.o_carrier_id, bmsql_oorder.o_ol_cnt, bmsql_oorder.o_ali_local, bmsql_oorder.o_entry_d
+         Filter: (bmsql_oorder.o_d_id > (SubPlan 1))
+         SubPlan 1
+           ->  Row Adapter
+                 Output: public.bmsql_customer.c_w_id, (0)
+                 ->  Vector Limit
+                       Output: public.bmsql_customer.c_w_id, (0)
+                       ->  Vector Sort
+                             Output: public.bmsql_customer.c_w_id, (0)
+                             Sort Key: public.bmsql_customer.c_w_id
+                             ->  Vector HashSetOp Except
+                                   Output: public.bmsql_customer.c_w_id, (0)
+                                   ->  Vector Append
+                                         ->  Vector Result
+                                               Output: public.bmsql_customer.c_w_id, 0
+                                               ->  Vector Sonic Hash Aggregate
+                                                     Output: public.bmsql_customer.c_w_id
+                                                     Group By Key: public.bmsql_customer.c_w_id
+                                                     ->  Vector Append
+                                                           ->  Vector Result
+                                                                 Output: public.bmsql_customer.c_w_id
+                                                                 One-Time Filter: (bmsql_oorder.o_w_id >= 3)
+                                                                 ->  Vector Adapter(type: BATCH MODE)
+                                                                       Output: public.bmsql_customer.c_w_id, public.bmsql_customer.c_d_id, public.bmsql_customer.c_id, public.bmsql_customer.c_discount, public.bmsql_customer.c_credit, public.bmsql_customer.c_last, public.bmsql_customer.c_first, public.bmsql_customer.c_credit_lim, public.bmsql_customer.c_balance, public.bmsql_customer.c_ytd_payment, public.bmsql_customer.c_payment_cnt, public.bmsql_customer.c_delivery_cnt, public.bmsql_customer.c_street_1, public.bmsql_customer.c_street_2, public.bmsql_customer.c_city, public.bmsql_customer.c_state, public.bmsql_customer.c_zip, public.bmsql_customer.c_phone, public.bmsql_customer.c_since, public.bmsql_customer.lc_middle, public.bmsql_customer.c_data
+                                                                       ->  Seq Scan on public.bmsql_customer
+                                                                             Output: public.bmsql_customer.c_w_id, public.bmsql_customer.c_d_id, public.bmsql_customer.c_id, public.bmsql_customer.c_discount, public.bmsql_customer.c_credit, public.bmsql_customer.c_last, public.bmsql_customer.c_first, public.bmsql_customer.c_credit_lim, public.bmsql_customer.c_balance, public.bmsql_customer.c_ytd_payment, public.bmsql_customer.c_payment_cnt, public.bmsql_customer.c_delivery_cnt, public.bmsql_customer.c_street_1, public.bmsql_customer.c_street_2, public.bmsql_customer.c_city, public.bmsql_customer.c_state, public.bmsql_customer.c_zip, public.bmsql_customer.c_phone, public.bmsql_customer.c_since, public.bmsql_customer.lc_middle, public.bmsql_customer.c_data
+                                                           ->  Vector Subquery Scan on "*SELECT* 2"
+                                                                 Output: "*SELECT* 2"."?column?"
+                                                                 ->  Vector Sort Aggregate
+                                                                       Output: 1, "*SELECT* 1".c_balance, tb2.c5, "*SELECT* 1".c_last
+                                                                       Group By Key: "*SELECT* 1".c_balance, tb2.c5, "*SELECT* 1".c_last
+                                                                       Group By Key: "*SELECT* 1".c_balance, tb2.c5
+                                                                       Group By Key: "*SELECT* 1".c_balance
+                                                                       Group By Key: "*SELECT* 1".c_balance
+                                                                       ->  Vector Sort
+                                                                             Output: "*SELECT* 1".c_balance, tb2.c5, "*SELECT* 1".c_last
+                                                                             Sort Key: "*SELECT* 1".c_balance, tb2.c5, "*SELECT* 1".c_last
+                                                                             ->  Vector Nest Loop
+                                                                                   Output: "*SELECT* 1".c_balance, tb2.c5, "*SELECT* 1".c_last
+                                                                                   ->  Vector Sonic Hash Aggregate
+                                                                                         Output: (("*SELECT* 1".c_w_id)::bigint), "*SELECT* 1".c_balance, "*SELECT* 1".c_last
+                                                                                         Group By Key: (("*SELECT* 1".c_w_id)::bigint), "*SELECT* 1".c_balance, "*SELECT* 1".c_last
+                                                                                         ->  Vector Append
+                                                                                               ->  Vector Subquery Scan on "*SELECT* 1"
+                                                                                                     Output: "*SELECT* 1".c_w_id, "*SELECT* 1".c_balance, "*SELECT* 1".c_last
+                                                                                                     ->  Vector Nest Loop
+                                                                                                           Output: public.bmsql_customer.c_w_id, public.bmsql_customer.c_balance, public.bmsql_customer.c_last
+                                                                                                           Join Filter: (public.bmsql_customer.c_w_id <> bmsql_district.d_id)
+                                                                                                           ->  Vector Adapter(type: BATCH MODE)
+                                                                                                                 Output: bmsql_district.d_w_id, bmsql_district.d_id, bmsql_district.d_ytd, bmsql_district.d_tax, bmsql_district.d_next_o_id, bmsql_district.d_name, bmsql_district.d_street_1, bmsql_district.d_street_2, bmsql_district.d_city, bmsql_district.d_state, bmsql_district.d_zip
+                                                                                                                 ->  Seq Scan on public.bmsql_district
+                                                                                                                       Output: bmsql_district.d_w_id, bmsql_district.d_id, bmsql_district.d_ytd, bmsql_district.d_tax, bmsql_district.d_next_o_id, bmsql_district.d_name, bmsql_district.d_street_1, bmsql_district.d_street_2, bmsql_district.d_city, bmsql_district.d_state, bmsql_district.d_zip
+                                                                                                           ->  Vector Materialize
+                                                                                                                 Output: public.bmsql_customer.c_w_id, public.bmsql_customer.c_balance, public.bmsql_customer.c_last
+                                                                                                                 ->  Vector Adapter(type: BATCH MODE)
+                                                                                                                       Output: public.bmsql_customer.c_w_id, public.bmsql_customer.c_balance, public.bmsql_customer.c_last
+                                                                                                                       ->  Seq Scan on public.bmsql_customer
+                                                                                                                             Output: public.bmsql_customer.c_w_id, public.bmsql_customer.c_balance, public.bmsql_customer.c_last
+                                                                                               ->  Vector Sonic Hash Aggregate
+                                                                                                     Output: count(*), bmsql_item.i_price, bmsql_item.i_name
+                                                                                                     Group By Key: bmsql_item.i_price, bmsql_item.i_name
+                                                                                                     ->  Vector Adapter(type: BATCH MODE)
+                                                                                                           Output: bmsql_item.i_price, bmsql_item.i_name
+                                                                                                           ->  Seq Scan on public.bmsql_item
+                                                                                                                 Output: bmsql_item.i_price, bmsql_item.i_name
+                                                                                   ->  Vector Materialize
+                                                                                         Output: tb2.c5
+                                                                                         ->  Vector Subquery Scan on tb2
+                                                                                               Output: tb2.c5
+                                                                                               ->  Vector Subquery Scan on tmp
+                                                                                                     Output: tmp.count, tmp.c5
+                                                                                                     ->  Vector Sonic Hash Aggregate
+                                                                                                           Output: count(*), '123'::text, ('2010-01-03'::text), bmsql_order_line.ol_d_id
+                                                                                                           Group By Key: ('2010-01-03'::text), bmsql_order_line.ol_d_id
+                                                                                                           ->  Vector Sonic Hash Aggregate
+                                                                                                                 Output: ('2010-01-03'::text), bmsql_order_line.ol_d_id
+                                                                                                                 Group By Key: ('2010-01-03'::text), bmsql_order_line.ol_d_id
+                                                                                                                 ->  Vector Adapter(type: BATCH MODE)
+                                                                                                                       Output: ('2010-01-03'::text), bmsql_order_line.ol_d_id
+                                                                                                                       Filter: (bmsql_order_line.ol_d_id >= 3)
+                                                                                                                       ->  Seq Scan on public.bmsql_order_line
+                                                                                                                             Output: '2010-01-03'::text, bmsql_order_line.ol_d_id
+                                         ->  Vector Subquery Scan on "*SELECT* 3"
+                                               Output: "*SELECT* 3".c_w_id, 1
+                                               ->  Vector Sonic Hash Aggregate
+                                                     Output: public.bmsql_customer.c_w_id
+                                                     Group By Key: public.bmsql_customer.c_w_id
+                                                     ->  Vector Result
+                                                           Output: public.bmsql_customer.c_w_id
+                                                           One-Time Filter: (((log(((bmsql_oorder.o_carrier_id)::numeric + 5.5), ((bmsql_oorder.o_carrier_id + 6))::numeric))::text <> (bmsql_oorder.o_entry_d)::text) OR (bmsql_oorder.o_ol_cnt <= 3))
+                                                           ->  Vector Adapter(type: BATCH MODE)
+                                                                 Output: public.bmsql_customer.c_w_id, public.bmsql_customer.c_d_id, public.bmsql_customer.c_id, public.bmsql_customer.c_discount, public.bmsql_customer.c_credit, public.bmsql_customer.c_last, public.bmsql_customer.c_first, public.bmsql_customer.c_credit_lim, public.bmsql_customer.c_balance, public.bmsql_customer.c_ytd_payment, public.bmsql_customer.c_payment_cnt, public.bmsql_customer.c_delivery_cnt, public.bmsql_customer.c_street_1, public.bmsql_customer.c_street_2, public.bmsql_customer.c_city, public.bmsql_customer.c_state, public.bmsql_customer.c_zip, public.bmsql_customer.c_phone, public.bmsql_customer.c_since, public.bmsql_customer.lc_middle, public.bmsql_customer.c_data
+                                                                 ->  Seq Scan on public.bmsql_customer
+                                                                       Output: public.bmsql_customer.c_w_id, public.bmsql_customer.c_d_id, public.bmsql_customer.c_id, public.bmsql_customer.c_discount, public.bmsql_customer.c_credit, public.bmsql_customer.c_last, public.bmsql_customer.c_first, public.bmsql_customer.c_credit_lim, public.bmsql_customer.c_balance, public.bmsql_customer.c_ytd_payment, public.bmsql_customer.c_payment_cnt, public.bmsql_customer.c_delivery_cnt, public.bmsql_customer.c_street_1, public.bmsql_customer.c_street_2, public.bmsql_customer.c_city, public.bmsql_customer.c_state, public.bmsql_customer.c_zip, public.bmsql_customer.c_phone, public.bmsql_customer.c_since, public.bmsql_customer.lc_middle, public.bmsql_customer.c_data
+(97 rows)
+
 drop table if exists bmsql_oorder;
 drop table if exists bmsql_order_line;
 drop table if exists bmsql_district;

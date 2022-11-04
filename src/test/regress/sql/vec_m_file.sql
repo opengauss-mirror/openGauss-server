@@ -116,6 +116,130 @@ where log(bmsql_oorder.o_carrier_id +5.5,bmsql_oorder.o_carrier_id+6) != bmsql_o
 or bmsql_oorder.o_ol_cnt<=3
 order by 1 limit 1);
 
+explain(costs off, verbose) select count(*)
+from bmsql_oorder
+where bmsql_oorder.o_d_id >( select c_w_id from bmsql_customer where bmsql_oorder.o_w_id >=3
+union
+select 1
+from (select c_w_id ,c_balance ,c_last
+from bmsql_customer
+join bmsql_district
+on c_w_id <> d_id
+union
+select * from
+(select count(*) as count,i_price,i_name
+from bmsql_item
+group by 2,3)) as tb1 ,
+(with tmp as (select count(*) , '123' as c5
+from (with tmp1 as (select distinct '2010-01-03' as c4 ,ol_d_id as c3 from bmsql_order_line) select * from tmp1 ) where c3>=3 group by c4,c3 )select * from tmp ) tb2
+group by rollup (tb1.c_balance,tb2.c5,tb1.c_last),tb1.c_balance
+except
+select distinct c_w_id
+from bmsql_customer
+where log(bmsql_oorder.o_carrier_id +5.5,bmsql_oorder.o_carrier_id+6) != bmsql_oorder.o_entry_d
+or bmsql_oorder.o_ol_cnt<=3
+order by 1 limit 1);
+
+set try_vector_engine_strategy=off;
+
+select count(*)
+from bmsql_oorder
+where bmsql_oorder.o_d_id >( select c_w_id from bmsql_customer where bmsql_oorder.o_w_id >=3
+union
+select 1
+from (select c_w_id ,c_balance ,c_last
+from bmsql_customer
+join bmsql_district
+on c_w_id <> d_id
+union
+select * from
+(select count(*) as count,i_price,i_name
+from bmsql_item
+group by 2,3)) as tb1 ,
+(with tmp as (select count(*) , '123' as c5
+from (with tmp1 as (select distinct '2010-01-03' as c4 ,ol_d_id as c3 from bmsql_order_line) select * from tmp1 ) where c3>=3 group by c4,c3 )select * from tmp ) tb2
+group by rollup (tb1.c_balance,tb2.c5,tb1.c_last),tb1.c_balance
+except
+select distinct c_w_id
+from bmsql_customer
+where log(bmsql_oorder.o_carrier_id +5.5,bmsql_oorder.o_carrier_id+6) != bmsql_oorder.o_entry_d
+or bmsql_oorder.o_ol_cnt<=3
+order by 1 limit 1);
+
+explain(costs off, verbose) select count(*)
+from bmsql_oorder
+where bmsql_oorder.o_d_id >( select c_w_id from bmsql_customer where bmsql_oorder.o_w_id >=3
+union
+select 1
+from (select c_w_id ,c_balance ,c_last
+from bmsql_customer
+join bmsql_district
+on c_w_id <> d_id
+union
+select * from
+(select count(*) as count,i_price,i_name
+from bmsql_item
+group by 2,3)) as tb1 ,
+(with tmp as (select count(*) , '123' as c5
+from (with tmp1 as (select distinct '2010-01-03' as c4 ,ol_d_id as c3 from bmsql_order_line) select * from tmp1 ) where c3>=3 group by c4,c3 )select * from tmp ) tb2
+group by rollup (tb1.c_balance,tb2.c5,tb1.c_last),tb1.c_balance
+except
+select distinct c_w_id
+from bmsql_customer
+where log(bmsql_oorder.o_carrier_id +5.5,bmsql_oorder.o_carrier_id+6) != bmsql_oorder.o_entry_d
+or bmsql_oorder.o_ol_cnt<=3
+order by 1 limit 1);
+
+set try_vector_engine_strategy=optimal;
+
+select count(*)
+from bmsql_oorder
+where bmsql_oorder.o_d_id >( select c_w_id from bmsql_customer where bmsql_oorder.o_w_id >=3
+union
+select 1
+from (select c_w_id ,c_balance ,c_last
+from bmsql_customer
+join bmsql_district
+on c_w_id <> d_id
+union
+select * from
+(select count(*) as count,i_price,i_name
+from bmsql_item
+group by 2,3)) as tb1 ,
+(with tmp as (select count(*) , '123' as c5
+from (with tmp1 as (select distinct '2010-01-03' as c4 ,ol_d_id as c3 from bmsql_order_line) select * from tmp1 ) where c3>=3 group by c4,c3 )select * from tmp ) tb2
+group by rollup (tb1.c_balance,tb2.c5,tb1.c_last),tb1.c_balance
+except
+select distinct c_w_id
+from bmsql_customer
+where log(bmsql_oorder.o_carrier_id +5.5,bmsql_oorder.o_carrier_id+6) != bmsql_oorder.o_entry_d
+or bmsql_oorder.o_ol_cnt<=3
+order by 1 limit 1);
+
+explain(costs off, verbose) select count(*)
+from bmsql_oorder
+where bmsql_oorder.o_d_id >( select c_w_id from bmsql_customer where bmsql_oorder.o_w_id >=3
+union
+select 1
+from (select c_w_id ,c_balance ,c_last
+from bmsql_customer
+join bmsql_district
+on c_w_id <> d_id
+union
+select * from
+(select count(*) as count,i_price,i_name
+from bmsql_item
+group by 2,3)) as tb1 ,
+(with tmp as (select count(*) , '123' as c5
+from (with tmp1 as (select distinct '2010-01-03' as c4 ,ol_d_id as c3 from bmsql_order_line) select * from tmp1 ) where c3>=3 group by c4,c3 )select * from tmp ) tb2
+group by rollup (tb1.c_balance,tb2.c5,tb1.c_last),tb1.c_balance
+except
+select distinct c_w_id
+from bmsql_customer
+where log(bmsql_oorder.o_carrier_id +5.5,bmsql_oorder.o_carrier_id+6) != bmsql_oorder.o_entry_d
+or bmsql_oorder.o_ol_cnt<=3
+order by 1 limit 1);
+
 drop table if exists bmsql_oorder;
 drop table if exists bmsql_order_line;
 drop table if exists bmsql_district;
