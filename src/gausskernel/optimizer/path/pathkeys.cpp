@@ -1674,11 +1674,9 @@ construct_pathkeys(PlannerInfo *root, List *tlist, List *activeWindows,
 /*
  * Init the standard_qp_extra
  */
-void
-standard_qp_init(PlannerInfo *root, void *extra, List *tlist,
-                 List *activeWindows, List *groupClause)
+void standard_qp_init(PlannerInfo *root, void *extra, List *tlist, List *activeWindows, List *groupClause)
 {
-    if (ENABLE_SQL_BETA_FEATURE(CANONICAL_PATHKEY)) {
+    if (!ENABLE_SQL_BETA_FEATURE(CANONICAL_PATHKEY)) {
         Assert (extra != NULL);
         standard_qp_extra *qp_extra = (standard_qp_extra *)extra;
         qp_extra->tlist = tlist;
@@ -1694,10 +1692,9 @@ standard_qp_init(PlannerInfo *root, void *extra, List *tlist,
 /*
  * Compute query_pathkeys and other pathkeys during plan generation
  */
-void
-standard_qp_callback(PlannerInfo *root, void *extra)
+void standard_qp_callback(PlannerInfo *root, void *extra)
 {
-    if (ENABLE_SQL_BETA_FEATURE(CANONICAL_PATHKEY)) {
+    if (!ENABLE_SQL_BETA_FEATURE(CANONICAL_PATHKEY)) {
         Assert (extra != NULL);
         standard_qp_extra *qp_extra = (standard_qp_extra *)extra;
         construct_pathkeys(root, qp_extra->tlist, qp_extra->activeWindows,

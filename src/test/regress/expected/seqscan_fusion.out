@@ -3113,7 +3113,7 @@ select t.b from (select b, count(c) as cc from t1 group by b) s1 inner join t on
          Group By Key: t.b
          ->  Hash Join  (cost=99.92..1927.12 rows=140046 distinct=[200, 200] width=4)
                Output: t.b
-               Hash Cond: (t.b = t2.b)
+               Hash Cond: (t1.b = t2.b)
                ->  Hash Join  (cost=49.96..259.85 rows=15771 distinct=[200, 200] width=8)
                      Output: t1.b, t.b
                      Hash Cond: (t1.b = t.b)

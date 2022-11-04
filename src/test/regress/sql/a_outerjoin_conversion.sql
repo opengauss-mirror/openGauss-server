@@ -368,6 +368,37 @@ select t11.c1, t12.c2, t13.c2 from t11, t12, t13 where t11.c2 = t12.c3(+) and t1
 select t11.c1, t12.c2, t13.c2 from t11, t12, t13 where t11.c2 = t12.c3(+) and t11.c3 = t13.c1(+) and (t13.c2(+) > t12.c1)::bool;
 select * from t_a a,t_b b where b.id=a.id(+) and a.code(+) + 1 * 2 + a.code(+) IS NOT NULL ;
 
+-- test join on nestloop
+create table join_nestloop_bugfix_t1(c1 int, c2 text);
+create table join_nestloop_bugfix_t2(c1 int, c2 text);
+
+insert into join_nestloop_bugfix_t1 values (generate_series(1,10), 'hello');
+insert into join_nestloop_bugfix_t2 values (generate_series(1,10), 'world');
+create index idx_join_nestloop_bugfix_t2_c1 on join_nestloop_bugfix_t2(c1);
+create view join_nestloop_bugfix_v as
+select join_nestloop_bugfix_t1.c1 cc1, join_nestloop_bugfix_t1.c2 cc2,
+	case when join_nestloop_bugfix_t1.c1 = 1 then 1 when join_nestloop_bugfix_t1.c1 = 2 then 2
+	    else join_nestloop_bugfix_t2.c1 end cc3, join_nestloop_bugfix_t2.c2 cc4
+	from join_nestloop_bugfix_t1
+    left join join_nestloop_bugfix_t2 on join_nestloop_bugfix_t1.c1 = join_nestloop_bugfix_t2.c1;
+
+set enable_mergejoin to off;
+set enable_hashjoin to off;
+set enable_seqscan to off;
+set enable_index_nestloop to on;
+
+select * from join_nestloop_bugfix_v where cc3 = 2 order by cc3;
+select * from join_nestloop_bugfix_v where cc3 = 2;
+
+drop view join_nestloop_bugfix_v;
+drop table join_nestloop_bugfix_t1;
+drop table join_nestloop_bugfix_t2;
+
+reset enable_mergejoin;
+reset enable_hashjoin;
+reset enable_seqscan;
+reset enable_index_nestloop;
+
 drop view plus_v;
 drop function plus_join_test_1();
 drop table t1;

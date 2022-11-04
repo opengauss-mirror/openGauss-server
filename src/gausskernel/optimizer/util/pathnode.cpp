@@ -4698,6 +4698,9 @@ bool find_ec_memeber_for_var(EquivalenceClass* ec, Node* key)
     if (ec == NULL || key == NULL)
         return false;
 
+    while (ec->ec_merged) {
+        ec = ec->ec_merged;
+    }
     foreach (lc, ec->ec_members) {
         EquivalenceMember* em = (EquivalenceMember*)lfirst(lc);
         Expr* emexpr = NULL;
