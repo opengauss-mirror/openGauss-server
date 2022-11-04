@@ -673,6 +673,10 @@ void SyncRepReleaseWaiters(void)
 #ifndef ENABLE_MULTIPLE_NODES
 void SetXactLastCommitToSyncedStandby(XLogRecPtr recptr)
 {
+    if (t_thrd.walsender_cxt.WalSndCtl->sync_master_standalone || t_thrd.walsender_cxt.MyWalSnd == NULL) {
+        return;
+    }
+
     int slot_idx;
     bool modified = false;
     volatile WalSnd* walsnd = t_thrd.walsender_cxt.MyWalSnd;
@@ -1104,7 +1108,7 @@ int SyncRepWakeQueue(bool all, int mode)
     PGPROC *proc = NULL;
     PGPROC *thisproc = NULL;
     int numprocs = 0;
-    XLogRecPtr confirmedLSN = InvalidXLogRecPtr;
+    XLogRecPtr* confirmedLSN = &(t_thrd.walsender_cxt.WalSndCtl->last_saved_confirmed_lsn);
 
     Assert(mode >= 0 && mode < NUM_SYNC_REP_WAIT_MODE);
     Assert(SyncRepQueueIsOrderedByLSN(mode));
@@ -1138,8 +1142,8 @@ int SyncRepWakeQueue(bool all, int mode)
          */
         if (g_instance.attr.attr_storage.enable_save_confirmed_lsn &&
             XLogRecPtrIsValid(thisproc->syncSetConfirmedLSN)) {
-            confirmedLSN =
-                XLByteLT(confirmedLSN, thisproc->syncSetConfirmedLSN) ? thisproc->syncSetConfirmedLSN : confirmedLSN;
+            *confirmedLSN =
+                XLByteLT(*confirmedLSN, thisproc->syncSetConfirmedLSN) ? thisproc->syncSetConfirmedLSN : *confirmedLSN;
             thisproc->syncSetConfirmedLSN = InvalidXLogRecPtr;
         }
 #endif
@@ -1151,12 +1155,6 @@ int SyncRepWakeQueue(bool all, int mode)
         numprocs++;
     }
 
-#ifndef ENABLE_MULTIPLE_NODES
-    if (g_instance.attr.attr_storage.enable_save_confirmed_lsn && XLogRecPtrIsValid(confirmedLSN)) {
-        SetXactLastCommitToSyncedStandby(confirmedLSN);
-    }
-#endif
-
     /* Delete the finished segment from the list, and only notifies leader proc */
     if (pTail != pHead) {
         PGPROC* leaderProc = (PGPROC *) (((char *) pHead->next) - offsetof(PGPROC, syncRepLinks));
@@ -1164,6 +1162,12 @@ int SyncRepWakeQueue(bool all, int mode)
         pHead->next = pTail->next;
         pTail->next->prev = pHead;
         pTail->next = NULL;
+
+#ifndef ENABLE_MULTIPLE_NODES
+        if (g_instance.attr.attr_storage.enable_save_confirmed_lsn && XLogRecPtrIsValid(*confirmedLSN)) {
+            SetXactLastCommitToSyncedStandby(*confirmedLSN);
+        }
+#endif
 
         /*
          * SyncRepWaitForLSN() reads syncRepState without holding the lock, so
@@ -1308,6 +1312,14 @@ void SyncRepUpdateSyncStandbysDefined(void)
 
         LWLockRelease(SyncRepLock);
     }
+
+#ifndef ENABLE_MULTIPLE_NODES
+    /* If there is no sync standbys or sync_master_standalone, reset last_saved_confirmed_lsn */
+    if (g_instance.attr.attr_storage.enable_save_confirmed_lsn &&
+        (!sync_standbys_defined || t_thrd.walsender_cxt.WalSndCtl->sync_master_standalone)) {
+        t_thrd.walsender_cxt.WalSndCtl->last_saved_confirmed_lsn = InvalidXLogRecPtr;
+    }
+#endif
 }
 
 /*

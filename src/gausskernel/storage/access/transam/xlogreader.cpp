@@ -1307,7 +1307,7 @@ tryAgain:
 }
 
 XLogRecPtr FindMaxLSN(char *workingPath, char *returnMsg, int msgLen, pg_crc32 *maxLsnCrc, uint32 *maxLsnLen, 
-    TimeLineID *returnTli)
+    TimeLineID *returnTli, XLogRecPtr *maxXactLsn)
 {
     DIR *xlogDir = NULL;
     struct dirent *dirEnt = NULL;
@@ -1447,6 +1447,10 @@ XLogRecPtr FindMaxLSN(char *workingPath, char *returnMsg, int msgLen, pg_crc32 *
         *maxLsnCrc = record->xl_crc;
         if (maxLsnLen != NULL) {
             *maxLsnLen = record->xl_tot_len;
+        }
+
+        if (maxXactLsn != NULL && XLogRecGetRmid(xlogReader) == RM_XACT_ID) {
+            *maxXactLsn = xlogReader->ReadRecPtr;
         }
     } while (true);
 

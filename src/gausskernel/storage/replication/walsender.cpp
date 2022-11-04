@@ -5247,6 +5247,7 @@ void WalSndShmemInit(void)
         t_thrd.walsender_cxt.WalSndCtl->sync_master_standalone = false;
         t_thrd.walsender_cxt.WalSndCtl->keep_sync_window_start = 0;
         t_thrd.walsender_cxt.WalSndCtl->out_keep_sync_window = false;
+        t_thrd.walsender_cxt.WalSndCtl->last_saved_confirmed_lsn = InvalidXLogRecPtr;
         t_thrd.walsender_cxt.WalSndCtl->demotion = NoDemote;
         SpinLockInit(&t_thrd.walsender_cxt.WalSndCtl->mutex);
     }
