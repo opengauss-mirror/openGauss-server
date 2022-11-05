@@ -103,7 +103,7 @@ static const uint32 EXIT_WAIT_DELAY = 100; /* 100 us */
 
 static const int UNDO_START_BLK = 1;
 static const int UHEAP_UPDATE_UNDO_START_BLK = 2; 
-static const uint32 XLOG_FPI_FOR_HINT_VERSION_NUM = 92608;
+static const uint32 XLOG_FPI_FOR_HINT_VERSION_NUM = 92658;
 static const XLogRecPtr DISPATCH_FIX_SIZE = (XLogRecPtr)1024 * 1024 * 1024 * 2;
 
 typedef void *(*GetStateFunc)(PageRedoWorker *worker);

@@ -218,7 +218,7 @@
 #define MS_PER_D (1000 * 60 * 60 * 24)
 #define H_PER_D 24
 #define AUDITFILE_THRESHOLD_LOWER_BOUND 100
-const uint32 AUDIT_THRESHOLD_VERSION_NUM = 92685;
+const uint32 AUDIT_THRESHOLD_VERSION_NUM = 92735;
 
 extern volatile bool most_available_sync;
 extern void SetThreadLocalGUC(knl_session_context* session);
