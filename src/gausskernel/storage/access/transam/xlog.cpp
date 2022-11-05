@@ -6775,7 +6775,7 @@ XLogSegNo GetNewestXLOGSegNo(const char *workingPath)
     securec_check_ss(rc, "", "");
     xlogDir = opendir(xlogDirStr);
     if (!xlogDir) {
-        ereport(ERROR, (errcode_for_file_access(), errmsg("could not open xlog dir in GetOldestXLOGSegNo.")));
+        ereport(ERROR, (errcode_for_file_access(), errmsg("could not open xlog dir in GetNewestXLOGSegNo.")));
     }
     while ((dirEnt = readdir(xlogDir)) != NULL) {
         if (strlen(dirEnt->d_name) == XLOGFILENAMELEN &&
@@ -6791,7 +6791,7 @@ XLogSegNo GetNewestXLOGSegNo(const char *workingPath)
     (void)closedir(xlogDir);
 
     if (sscanf_s(newestXLogFileName, "%08X%08X%08X", &tli, &xlogReadLogid, &xlogReadLogSeg) != 3) {
-        ereport(ERROR, (errcode_for_file_access(), errmsg("failed to translate name to xlog in GetOldestXLOGSegNo.")));
+        ereport(ERROR, (errcode_for_file_access(), errmsg("failed to translate name to xlog in GetNewestXLOGSegNo.")));
     }
     segno = (uint64)xlogReadLogid * XLogSegmentsPerXLogId + xlogReadLogSeg;
 
