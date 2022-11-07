@@ -754,7 +754,8 @@ static int ReadCommand(StringInfo inBuf)
      * we will select the smaller one as timeout, that is to say, only start the timer for session timeout.
      */
     if (u_sess->attr.attr_common.IdleInTransactionSessionTimeout > 0 &&
-        u_sess->attr.attr_common.SessionTimeout > u_sess->attr.attr_common.IdleInTransactionSessionTimeout &&
+        (u_sess->attr.attr_common.SessionTimeout == 0 ||
+        u_sess->attr.attr_common.SessionTimeout > u_sess->attr.attr_common.IdleInTransactionSessionTimeout) &&
         (IsAbortedTransactionBlockState() || IsTransactionOrTransactionBlock())) {
         if (!enable_idle_in_transaction_session_sig_alarm(
             u_sess->attr.attr_common.IdleInTransactionSessionTimeout * 1000)) {
