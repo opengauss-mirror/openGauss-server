@@ -20,6 +20,7 @@
 #include <dirent.h>
 #include <math.h>
 
+#include "access/sysattr.h"
 #include "catalog/catalog.h"
 #include "catalog/pg_authid.h"
 #include "catalog/pg_tablespace.h"
@@ -33,6 +34,7 @@
 #include "parser/keywords.h"
 #include "pgstat.h"
 #include "postmaster/syslogger.h"
+#include "rewrite/rewriteHandler.h"
 #include "replication/replicainternal.h"
 #include "storage/smgr/fd.h"
 #include "storage/pmsignal.h"
@@ -1045,4 +1047,47 @@ Datum pg_get_replica_identity_index(PG_FUNCTION_ARGS)
 Datum b_database_row_count(PG_FUNCTION_ARGS)
 {
     PG_RETURN_INT64(u_sess->statement_cxt.last_row_count);
+}
+
+/*
+ * pg_relation_is_updatable - determine which update events the specified
+ * relation supports.
+ *
+ * This relies on relation_is_updatable() in rewriteHandler.c, which see
+ * for additional information.
+ */
+Datum pg_relation_is_updatable(PG_FUNCTION_ARGS)
+{
+    Oid reloid = PG_GETARG_OID(0);
+    bool include_triggers = PG_GETARG_BOOL(1);
+
+    PG_RETURN_INT32(relation_is_updatable(reloid, include_triggers, NULL));
+}
+
+/*
+ * pg_column_is_updatable - determine whether a column is updatable
+ *
+ * This function encapsulates the decision about just what
+ * information_schema.columns.is_updatable actually means.	It's not clear
+ * whether deletability of the column's relation should be required, so
+ * we want that decision in C code where we could change it without initdb.
+ */
+Datum pg_column_is_updatable(PG_FUNCTION_ARGS)
+{
+    Oid reloid = PG_GETARG_OID(0);
+    AttrNumber attnum = PG_GETARG_INT16(1);
+    AttrNumber col = attnum - FirstLowInvalidHeapAttributeNumber;
+    bool include_triggers = PG_GETARG_BOOL(2);
+    int events;
+
+    /* System columns are never updatable */
+    if (attnum <= 0)
+        PG_RETURN_BOOL(false);
+
+    events = relation_is_updatable(reloid, include_triggers, bms_make_singleton(col));
+
+    /* We require both updatability and deletability of the relation */
+#define REQ_EVENTS ((1 << CMD_UPDATE) | (1 << CMD_DELETE))
+
+    PG_RETURN_BOOL((events & REQ_EVENTS) == REQ_EVENTS);
 }

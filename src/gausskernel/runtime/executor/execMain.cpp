@@ -1578,9 +1578,8 @@ void InitPlan(QueryDesc *queryDesc, int eflags)
 /*
  * Check that a proposed result relation is a legal target for the operation
  *
- * In most cases parser and/or planner should have noticed this already, but
- * let's make sure.  In the view case we do need a test here, because if the
- * view wasn't rewritten by a rule, it had better have an INSTEAD trigger.
+ * Generally the parser and/or planner should have noticed any such mistake
+ * already, but let's make sure.
  *
  * Note: when changing this function, you probably also need to look at
  * CheckValidRowMarkRel.
@@ -1610,13 +1609,20 @@ void CheckValidResultRel(Relation resultRel, CmdType operation)
             break;
         case RELKIND_VIEW:
         case RELKIND_CONTQUERY:
+            /*
+             * Okay only if there's a suitable INSTEAD OF trigger.  Messages
+             * here should match rewriteHandler.c's rewriteTargetView and
+             * RewriteQuery, except that we omit errdetail because we haven't
+             * got the information handy (and given that we really shouldn't
+             * get here anyway, it's not worth great exertion to get).
+             */
             switch (operation) {
                 case CMD_INSERT:
                     if (trigDesc == NULL || !trigDesc->trig_insert_instead_row) {
                         ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
                             errmsg("cannot insert into view \"%s\"", RelationGetRelationName(resultRel)),
-                            errhint("You need an unconditional ON INSERT DO INSTEAD rule or an INSTEAD OF INSERT "
-                            "trigger.")));
+                            errhint("To enable inserting into the view, provide an INSTEAD OF INSERT trigger or "
+                            "an unconditional ON INSERT DO INSTEAD rule.")));
                     }
 
                     break;
@@ -1624,16 +1630,16 @@ void CheckValidResultRel(Relation resultRel, CmdType operation)
                     if (trigDesc == NULL || !trigDesc->trig_update_instead_row) {
                         ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
                             errmsg("cannot update view \"%s\"", RelationGetRelationName(resultRel)),
-                            errhint("You need an unconditional ON UPDATE DO INSTEAD rule or an INSTEAD OF UPDATE "
-                            "trigger.")));
+                            errhint("To enable updating the view, provide an INSTEAD OF UPDATE trigger or "
+                            "an unconditional ON UPDATE DO INSTEAD rule.")));
                     }
                     break;
                 case CMD_DELETE:
                     if (trigDesc == NULL || !trigDesc->trig_delete_instead_row) {
                         ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
                             errmsg("cannot delete from view \"%s\"", RelationGetRelationName(resultRel)),
-                            errhint("You need an unconditional ON DELETE DO INSTEAD rule or an INSTEAD OF DELETE "
-                            "trigger.")));
+                            errhint("To enable deleting from the view, provide an INSTEAD OF DELETE trigger or "
+                            "an unconditional ON DELETE DO INSTEAD rule.")));
                     }
                     break;
                 default:
@@ -1719,7 +1725,7 @@ static void CheckValidRowMarkRel(Relation rel, RowMarkType markType)
                 errmsg("cannot lock rows in TOAST relation \"%s\"", RelationGetRelationName(rel))));
             break;
         case RELKIND_VIEW:
-            /* Should not get here */
+            /* Should not get here; planner should have expanded the view */
             ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                 errmsg("cannot lock rows in view \"%s\"", RelationGetRelationName(rel))));
             break;
@@ -2588,6 +2594,57 @@ bool ExecConstraints(ResultRelInfo *resultRelInfo, TupleTableSlot *slot, EState 
                 erraction("set client_min_messages = info for more details")));
     }
     return true;
+}
+
+/*
+ * ExecWithCheckOptions -- check that tuple satisfies any WITH CHECK OPTIONs
+ */
+void ExecWithCheckOptions(ResultRelInfo *resultRelInfo, TupleTableSlot *slot, EState *estate)
+{
+    Relation rel = resultRelInfo->ri_RelationDesc;
+    TupleDesc tupdesc = RelationGetDescr(rel);
+    ExprContext* econtext = NULL;
+    ListCell *l1 = NULL, *l2 = NULL;
+
+    /*
+     * We will use the EState's per-tuple context for evaluating constraint
+     * expressions (creating it if it's not already there).
+     */
+    econtext = GetPerTupleExprContext(estate);
+
+    /* Arrange for econtext's scan tuple to be the tuple under test */
+    econtext->ecxt_scantuple = slot;
+
+    /* Check each of the constraints */
+    forboth (l1, resultRelInfo->ri_WithCheckOptions, l2, resultRelInfo->ri_WithCheckOptionExprs) {
+        WithCheckOption* wco = (WithCheckOption*)lfirst(l1);
+        ExprState* wcoExpr = (ExprState*)lfirst(l2);
+        Bitmapset* modifiedCols = NULL;
+        Bitmapset *insertedCols = NULL;
+        Bitmapset *updatedCols = NULL;
+        char* val_desc = NULL;
+
+        insertedCols = GetInsertedColumns(resultRelInfo, estate);
+        updatedCols = GetUpdatedColumns(resultRelInfo, estate);
+        modifiedCols = bms_union(insertedCols, updatedCols);
+        val_desc = ExecBuildSlotValueDescription(RelationGetRelid(rel),
+                                                 slot,
+                                                 tupdesc,
+                                                 modifiedCols,
+                                                 64);
+
+        /*
+         * WITH CHECK OPTION checks are intended to ensure that the new tuple
+         * is visible in the view.  If the view's qual evaluates to NULL, then
+         * the new tuple won't be included in the view.  Therefore we need to
+         * tell ExecQual to return FALSE for NULL (the opposite of what we do
+         * above for CHECK constraints).
+         */
+        if (!ExecQual((List*)wcoExpr, econtext, false))
+            ereport(ERROR, (errcode(ERRCODE_WITH_CHECK_OPTION_VIOLATION),
+                    errmsg("new row violates WITH CHECK OPTION for view \"%s\"", wco->viewname),
+                    val_desc ? errdetail("Failing row contains %s.", val_desc) : 0));
+    }
 }
 
 /*

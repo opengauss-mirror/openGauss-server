@@ -227,7 +227,7 @@ F311	Schema definition statement			NO
 F311	Schema definition statement	01	CREATE SCHEMA	YES	
 F311	Schema definition statement	02	CREATE TABLE for persistent base tables	YES	
 F311	Schema definition statement	03	CREATE VIEW	YES	
-F311	Schema definition statement	04	CREATE VIEW: WITH CHECK OPTION	NO	
+F311	Schema definition statement	04	CREATE VIEW: WITH CHECK OPTION	YES	
 F311	Schema definition statement	05	GRANT statement	YES	
 F312	MERGE statement			YES	
 F313	Enhanced MERGE statement			YES	

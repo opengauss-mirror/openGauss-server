@@ -24,6 +24,10 @@ extern List* pull_qual_vars(Node* node, int varno = 0, int flags = 0, bool nonRe
 extern void rewriteTargetListMerge(Query* parsetree, Index result_relation, List* range_table);
 extern List *query_rewrite_multiset_stmt(Query* parse_tree);
 extern List *query_rewrite_set_stmt(Query* parse_tree);
+extern Query* get_view_query(Relation view);
+extern const char* view_query_is_auto_updatable(Query* viewquery, bool check_cols);
+extern int relation_is_updatable(Oid reloid, bool include_triggers, Bitmapset* include_cols);
+extern bool view_has_instead_trigger(Relation view, CmdType event);
 
 #ifdef PGXC
 extern List* QueryRewriteCTAS(Query* parsetree);

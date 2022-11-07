@@ -1224,6 +1224,7 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
     int num_old_subplans = list_length(glob->subplans);
     PlannerInfo* root = NULL;
     Plan* plan = NULL;
+    List* newWithCheckOptions = NIL;
     List* newHaving = NIL;
     bool hasOuterJoins = false;
     bool hasResultRTEs = false;
@@ -1552,6 +1553,15 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
      */
     parse->targetList = (List*)preprocess_expression(root, (Node*)parse->targetList, EXPRKIND_TARGET);
 
+    foreach(l, parse->withCheckOptions) {
+        WithCheckOption* wco = (WithCheckOption*)lfirst(l);
+
+        wco->qual = preprocess_expression(root, wco->qual, EXPRKIND_QUAL);
+        if (wco->qual != NULL)
+            newWithCheckOptions = lappend(newWithCheckOptions, wco);
+    }
+    parse->withCheckOptions = newWithCheckOptions;
+
     parse->returningList = (List*)preprocess_expression(root, (Node*)parse->returningList, EXPRKIND_TARGET);
 
     preprocess_qual_conditions(root, (Node*)parse->jointree);
@@ -1784,6 +1794,7 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
         plan = grouping_planner(root, tuple_fraction);
         /* If it's not SELECT, we need a ModifyTable node */
         if (parse->commandType != CMD_SELECT) {
+            List* withCheckOptionLists = NIL;
             List* returningLists = NIL;
             List* rowMarks = NIL;
             Relation mainRel = NULL;
@@ -1793,8 +1804,14 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
             RelationClose(mainRel);
 
             /*
-             * Set up the RETURNING list-of-lists, if needed.
+             * Set up the WITH CHECK OPTION and RETURNING lists-of-lists, if
+             * needed.
              */
+            if (parse->withCheckOptions)
+                withCheckOptionLists = list_make1(parse->withCheckOptions);
+            else
+                withCheckOptionLists = NIL;
+
             if (parse->returningList)
                 returningLists = list_make1(parse->returningList);
             else
@@ -1815,6 +1832,7 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
                 parse->canSetTag,
                 list_make1(parse->resultRelations),
                 list_make1(plan),
+                withCheckOptionLists,
                 returningLists,
                 rowMarks,
                 SS_assign_special_param(root),
@@ -1828,6 +1846,7 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
                 parse->canSetTag,
                 list_make1(parse->resultRelations),
                 list_make1(plan),
+                withCheckOptionLists,
                 returningLists,
                 rowMarks,
                 SS_assign_special_param(root),
@@ -4977,7 +4996,7 @@ static void preprocess_rowmarks(PlannerInfo* root)
         PlanRowMark* newrc = NULL;
 
         i++;
-        if (rte->rtekind == RTE_JOIN || rte->rtekind == RTE_REMOTE_DUMMY)
+        if (rte->rtekind == RTE_JOIN || rte->rtekind == RTE_REMOTE_DUMMY || rte->relkind == RELKIND_VIEW)
             continue;
         if (!bms_is_member(i, rels) && list_length(parse->resultRelations) <= 1)
             continue;

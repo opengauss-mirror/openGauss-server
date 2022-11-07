@@ -811,6 +811,9 @@ static void _outModifyTable(StringInfo str, ModifyTable* node)
         WRITE_NODE_FIELD(targetlists);
     }
 #endif		
+    if (t_thrd.proc->workingVersionNum >= SUPPORT_VIEW_AUTO_UPDATABLE) {
+        WRITE_NODE_FIELD(withCheckOptionLists);
+    }
 }
 
 static void _outUpsertClause(StringInfo str, const UpsertClause* node)
@@ -4474,6 +4477,19 @@ static void _outQuery(StringInfo str, Query* node)
     if (t_thrd.proc->workingVersionNum >= MULTI_MODIFY_VERSION_NUM) {
         WRITE_NODE_FIELD(resultRelations);
     }
+    if (t_thrd.proc->workingVersionNum >= SUPPORT_VIEW_AUTO_UPDATABLE) {
+        WRITE_NODE_FIELD(withCheckOptions);
+    }
+}
+
+static void _outWithCheckOption(StringInfo str, const WithCheckOption* node)
+{
+    WRITE_NODE_TYPE("WITHCHECKOPTION");
+
+    WRITE_STRING_FIELD(viewname);
+    WRITE_NODE_FIELD(qual);
+    WRITE_BOOL_FIELD(cascaded);
+    WRITE_UINT_FIELD(rtindex);
 }
 
 static void _outSortGroupClause(StringInfo str, SortGroupClause* node)
@@ -6276,6 +6292,9 @@ static void _outNode(StringInfo str, const void* obj)
                 break;
             case T_Query:
                 _outQuery(str, (Query*)obj);
+                break;
+            case T_WithCheckOption:
+                _outWithCheckOption(str, (WithCheckOption*)obj);
                 break;
             case T_SortGroupClause:
                 _outSortGroupClause(str, (SortGroupClause*)obj);

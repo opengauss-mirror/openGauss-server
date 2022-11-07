@@ -15572,6 +15572,36 @@ static void ATExecSetRelOptions(Relation rel, List* defList, AlterTableType oper
     }
     CheckSupportModifyCompression(rel, relOpt, defList);
 
+    /* Special-case validation of view options */
+    if (rel->rd_rel->relkind == RELKIND_VIEW) {
+        Query* view_query = get_view_query(rel);
+        ListCell* cell = NULL;
+        bool check_option = false;
+
+        foreach(cell, defList) {
+            DefElem* defel = (DefElem*)lfirst(cell);
+
+            if (pg_strcasecmp(defel->defname, "check_option") == 0) {
+                check_option = true;
+                break;
+            }
+        }
+
+        /*
+        * If the check option is specified, look to see if the view is
+        * actually auto-updatable or not.
+        */
+        if (check_option) {
+            const char *view_updatable_error = view_query_is_auto_updatable(view_query, true);
+
+            if (view_updatable_error)
+                ereport(ERROR,
+                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("WITH CHECK OPTION is supported only on auto-updatable views"),
+                        errhint("%s", view_updatable_error)));
+        }
+    }
+
     /*
      * All we need do here is update the pg_class row; the new options will be
      * propagated into relcaches during post-commit cache inval.

@@ -118,8 +118,9 @@ extern bool check_dsitribute_key_in_targetlist(PlannerInfo* root, List* distribu
 extern int get_plan_actual_total_width(Plan* plan, bool vectorized, OpType type, int newcol = 0);
 #ifdef STREAMPLAN
 extern Plan* make_modifytable(PlannerInfo* root, CmdType operation, bool canSetTag, List* resultRelations,
-    List* subplans, List* returningLists, List* rowMarks, int epqParam, bool partKeyUpdated, Index mergeTargetRelation,
-    List* mergeSourceTargetList, List* mergeActionList, UpsertExpr* upsertClause);
+    List* subplans, List *withCheckOptionLists, List* returningLists, List* rowMarks, int epqParam,
+    bool partKeyUpdated, Index mergeTargetRelation, List* mergeSourceTargetList, List* mergeActionList,
+    UpsertExpr* upsertClause);
 extern Plan* make_modifytables(PlannerInfo* root, CmdType operation, bool canSetTag, List* resultRelations,
     List* subplans, List* returningLists, List* rowMarks, int epqParam, bool partKeyUpdated,
     Index mergeTargetRelation, List* mergeSourceTargetList, List *mergeActionList, UpsertExpr *upsertClause);
@@ -129,8 +130,9 @@ extern Plan* make_stream_plan(PlannerInfo* root, Plan* lefttree, List* redistrib
     Distribution* target_distribution = NULL);
 #else
 extern ModifyTable* make_modifytable(CmdType operation, bool canSetTag, List* resultRelations,
-    List* subplans, List* returningLists, List* rowMarks, int epqParam, bool partKeyUpdated, Index mergeTargetRelation,
-    List* mergeSourceTargetList, List* mergeActionList, UpsertExpr* upsertClause);
+    List* subplans, List *withCheckOptionLists, List* returningLists, List* rowMarks, int epqParam,
+    bool partKeyUpdated, Index mergeTargetRelation, List* mergeSourceTargetList, List* mergeActionList,
+    UpsertExpr* upsertClause);
 extern ModifyTable* make_modifytables(CmdType operation, bool canSetTag, List* resultRelations,
     List* subplans, List* returningLists, List* rowMarks, int epqParam, bool partKeyUpdated,
     Index mergeTargetRelation, List* mergeSourceTargetList, List* mergeActionList, UpsertExpr* upsertClause);

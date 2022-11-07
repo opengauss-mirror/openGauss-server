@@ -26,6 +26,7 @@
 #include "catalog/pg_type.h"
 #include "commands/defrem.h"
 #include "commands/tablespace.h"
+#include "commands/view.h"
 #include "nodes/makefuncs.h"
 #include "pgxc/redistrib.h"
 #ifdef ENABLE_MULTIPLE_NODES
@@ -510,6 +511,13 @@ static relopt_string stringRelOpts[] = {
         false,
         ValidateStrOptStringOptimize,
         COLUMN_UNDEFINED,
+    },
+    {
+        {"check_option", "View has WITH CHECK OPTION defined (local or cascaded).", RELOPT_KIND_VIEW},
+        0,
+        true,
+        validateWithCheckOption,
+        NULL
     },
     /* list terminator */
     {{NULL}}
@@ -1975,7 +1983,8 @@ bytea *default_reloptions(Datum reloptions, bool validate, relopt_kind kind)
         { "compress_byte_convert", RELOPT_TYPE_BOOL,
           offsetof(StdRdOptions, compress) + offsetof(PageCompressOpts, compressByteConvert)},
         { "compress_diff_convert", RELOPT_TYPE_BOOL,
-          offsetof(StdRdOptions, compress) + offsetof(PageCompressOpts, compressDiffConvert)}
+          offsetof(StdRdOptions, compress) + offsetof(PageCompressOpts, compressDiffConvert)},
+        { "check_option", RELOPT_TYPE_STRING, offsetof(StdRdOptions, check_option_offset)}
     };
 
     options = parseRelOptions(reloptions, validate, kind, &numoptions);

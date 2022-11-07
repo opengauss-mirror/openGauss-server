@@ -1439,7 +1439,7 @@ ReorderBufferTupleCidKey
 ReorderBufferTXN
 ReorderBufferTXNByIdEnt
 ResTarget
-ResolveNew_context
+ReplaceVarsFromTargetList_context
 ResourceOwner
 ResourceReleaseCallback
 ResourceReleaseCallbackItem

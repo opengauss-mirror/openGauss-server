@@ -6546,6 +6546,7 @@ TableInfo* getTables(Archive* fout, int* numTables)
 #endif
     int i_reltablespace = 0;
     int i_reloptions = 0;
+    int i_checkoption = 0;
     int i_toastreloptions = 0;
     int i_reloftype = 0;
     int i_parttype = 0;
@@ -6653,7 +6654,9 @@ TableInfo* getTables(Archive* fout, int* numTables)
                 "(SELECT pg_catalog.string_agg(node_name,',') AS pgxc_node_names from pgxc_node n where n.oid "
                 "in (select pg_catalog.unnest(nodeoids) from pgxc_class v where v.pcrelid=c.oid) ) , "
 #endif
-                "pg_catalog.array_to_string(c.reloptions, ', ') AS reloptions, "
+                "pg_catalog.array_to_string(pg_catalog.array_remove(pg_catalog.array_remove(c.reloptions,'check_option=local'),'check_option=cascaded'), ', ') AS reloptions, "
+                      "CASE WHEN 'check_option=local' = ANY (c.reloptions) THEN 'LOCAL'::text "
+                        "WHEN 'check_option=cascaded' = ANY (c.reloptions) THEN 'CASCADED'::text ELSE NULL END AS checkoption, "
                 "pg_catalog.array_to_string(array(SELECT 'toast.' || "
                 "x FROM pg_catalog.unnest(tc.reloptions) x), ', ') AS toast_reloptions "
                 "FROM pg_class c "
@@ -6703,7 +6706,9 @@ TableInfo* getTables(Archive* fout, int* numTables)
                 "(SELECT pg_catalog.string_agg(node_name,',') AS pgxc_node_names from pgxc_node n where n.oid "
                 "in (select pg_catalog.unnest(nodeoids) from pgxc_class v where v.pcrelid=c.oid) ) , "
 #endif
-                "pg_catalog.array_to_string(c.reloptions, ', ') AS reloptions, "
+                "pg_catalog.array_to_string(pg_catalog.array_remove(pg_catalog.array_remove(c.reloptions,'check_option=local'),'check_option=cascaded'), ', ') AS reloptions, "
+                      "CASE WHEN 'check_option=local' = ANY (c.reloptions) THEN 'LOCAL'::text "
+                        "WHEN 'check_option=cascaded' = ANY (c.reloptions) THEN 'CASCADED'::text ELSE NULL END AS checkoption, "
                 "pg_catalog.array_to_string(array(SELECT 'toast.' || "
                 "x FROM pg_catalog.unnest(tc.reloptions) x), ', ') AS toast_reloptions "
                 "FROM pg_class c "
@@ -7056,6 +7061,7 @@ TableInfo* getTables(Archive* fout, int* numTables)
 #endif
     i_reltablespace = PQfnumber(res, "reltablespace");
     i_reloptions = PQfnumber(res, "reloptions");
+    i_checkoption = PQfnumber(res, "checkoption");
     i_toastreloptions = PQfnumber(res, "toast_reloptions");
     i_reloftype = PQfnumber(res, "reloftype");
 
@@ -7227,6 +7233,10 @@ TableInfo* getTables(Archive* fout, int* numTables)
             free(tmp_str);
             tmp_str = NULL;
         }
+        if (i_checkoption == -1 || PQgetisnull(res, i, i_checkoption))
+            tblinfo[i].checkoption = NULL;
+        else
+            tblinfo[i].checkoption = gs_strdup(PQgetvalue(res, i, i_checkoption));
         tblinfo[i].toast_reloptions = gs_strdup(PQgetvalue(res, i, i_toastreloptions));
 
         /* other fields were zeroed above */
@@ -18176,7 +18186,14 @@ static void dumpViewSchema(
     appendPQExpBuffer(q, " VIEW %s(%s)", fmtId(tbinfo->dobj.name), schemainfo);
     if ((tbinfo->reloptions != NULL) && strlen(tbinfo->reloptions) > 0)
         appendPQExpBuffer(q, " WITH (%s)", tbinfo->reloptions);
-    appendPQExpBuffer(q, " AS\n    %s\n", viewdef);
+    appendPQExpBuffer(q, " AS\n    ");
+
+    Assert(viewdef[strlen(viewdef) - 1] == ';');
+    appendBinaryPQExpBuffer(q, viewdef, strlen(viewdef) - 1);
+
+    if (tbinfo->checkoption != NULL)
+        appendPQExpBuffer(q, "\n  WITH %s CHECK OPTION", tbinfo->checkoption);
+    appendPQExpBuffer(q, ";\n");
 
     appendPQExpBuffer(labelq, "VIEW %s", fmtId(tbinfo->dobj.name));
 

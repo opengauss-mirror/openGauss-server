@@ -199,7 +199,7 @@ create rule "_RETURN" as on select to ttt1 do instead (
 	);
 
 -- test
-insert into ttt1 values (1, 'hello'); --error
+insert into ttt1 values (1, 'hello');
 insert into ttt2 values (10, 'world');
 select * from ttt1;
 

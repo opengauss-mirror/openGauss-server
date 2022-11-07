@@ -391,6 +391,9 @@ unsigned long InsertFusion::ExecInsert(Relation rel, ResultRelInfo* result_rel_i
 
     list_free_ext(recheck_indexes);
 
+    if (result_rel_info->ri_WithCheckOptions != NIL)
+        ExecWithCheckOptions(result_rel_info, m_local.m_reslot, m_c_local.m_estate);
+
     tableam_tops_free_tuple(tuple);
 
     (void)ExecClearTuple(m_local.m_reslot);
@@ -435,6 +438,24 @@ bool InsertFusion::execute(long max_rows, char* completionTag)
     m_c_local.m_estate->es_result_relation_info = result_rel_info;
     m_c_local.m_estate->es_plannedstmt = m_global->m_planstmt;
     refreshParameterIfNecessary();
+
+    ModifyTable* node = (ModifyTable*)(m_global->m_planstmt->planTree);
+    if (node->withCheckOptionLists != NIL) {
+        Plan* plan = (Plan*)linitial(node->plans);
+        PlanState* ps = ExecInitNode(plan, m_c_local.m_estate, 0);
+        List* wcoList = (List*)linitial(node->withCheckOptionLists);
+        List* wcoExprs = NIL;
+        ListCell* ll = NULL;
+
+        foreach(ll, wcoList) {
+            WithCheckOption* wco = (WithCheckOption*)lfirst(ll);
+            ExprState* wcoExpr = ExecInitExpr((Expr*)wco->qual, ps);
+            wcoExprs = lappend(wcoExprs, wcoExpr);
+        }
+
+        result_rel_info->ri_WithCheckOptions = wcoList;
+        result_rel_info->ri_WithCheckOptionExprs = wcoExprs;
+    }
 
     /************************
      * step 2: begin insert *

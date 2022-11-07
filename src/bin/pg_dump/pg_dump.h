@@ -216,6 +216,7 @@ typedef struct _tableInfo {
     char relreplident;        /* replica identifier */
     char* reltablespace;      /* relation tablespace */
     char* reloptions;         /* options specified by WITH (...) */
+    char* checkoption;        /* WITH CHECK OPTION */
     Oid   relbucket;          /* relation bucket OID */	    
     char* toast_reloptions;   /* ditto, for the TOAST table */
     bool hasindex;            /* does it have any indexes? */

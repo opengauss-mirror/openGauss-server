@@ -61,6 +61,7 @@
 #include "parser/parsetree.h"
 #include "rewrite/rewriteManip.h"
 #include "rewrite/rewriteRlsPolicy.h"
+#include "rewrite/rewriteHandler.h"
 #ifdef PGXC
 #include "miscadmin.h"
 #include "pgxc/pgxc.h"
@@ -953,6 +954,73 @@ static void transformLimitSortClause(ParseState* pstate, void* stmt, Query* qry,
     }
 }
 
+static void CheckRelationSupportMultiModify(Relation targetrel, bool forDel)
+{
+    const char* type = NULL;
+    if (forDel) {
+        CheckDeleteRelation(targetrel);
+        type = "DELETE";
+    } else {
+        CheckUpdateRelation(targetrel);
+        type = "UPDATE";
+    }
+
+    if (RelationIsColStore(targetrel)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Un-support feature"),
+                errdetail("column stored relation in mutilple-relations modifying doesn't support %s", type)));
+    }
+    if (RelationIsForeignTable(targetrel) || RelationIsStream(targetrel)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Un-support feature"),
+                errdetail("FDW relation in mutilple-relations modifying doesn't support %s", type)));
+    }
+    if (targetrel->rd_rel->relhasrules) {
+        if (RelationIsView(targetrel) && (targetrel->rd_rules->numLocks > 1 ||
+            view_has_instead_trigger(targetrel, forDel ? CMD_DELETE : CMD_UPDATE))) {
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("Un-support feature"),
+                    errdetail("view has rules or tiggers in mutilple-relations modifying doesn't support %s",
+                                type)));
+        } else if (!RelationIsView(targetrel)) {
+                ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("Un-support feature"),
+                    errdetail("relation has rules in mutilple-relations modifying doesn't support %s", type)));
+        } else {
+            /* recursive check for view */
+            Query* viewquery = get_view_query(targetrel);
+            RangeTblRef* rtr = NULL;
+            RangeTblEntry* base_rte = NULL;
+            Relation base_rel;
+
+            /* Ignore here, and it would throw an error during query rewrite. */
+            if (list_length(viewquery->jointree->fromlist) != 1) {
+                return;
+            }
+
+            rtr = (RangeTblRef*)linitial(viewquery->jointree->fromlist);
+
+            /* Ignore here, it would throw an error during query rewrite. */
+            if (!IsA(rtr, RangeTblRef)) {
+                return;
+            }
+
+            base_rte = rt_fetch(rtr->rtindex, viewquery->rtable);
+            base_rel = try_relation_open(base_rte->relid, AccessShareLock);
+
+            if (base_rel != NULL) {
+                CheckRelationSupportMultiModify(base_rel, forDel);
+
+                relation_close(base_rel, AccessShareLock);
+            }
+        }
+    }
+}
+
 static void CheckUDRelations(ParseState* pstate, List* sortClause, Node* limitClause, List* returningList,
                              bool forDel)
 {
@@ -987,36 +1055,7 @@ static void CheckUDRelations(ParseState* pstate, List* sortClause, Node* limitCl
 
     foreach_cell (l, pstate->p_target_relation) {
         Relation targetrel = (Relation)lfirst(l);
-        if (forDel) {
-            CheckDeleteRelation(targetrel);
-        } else {
-            CheckUpdateRelation(targetrel);
-        }
-        
-        if (RelationIsColStore(targetrel)) {
-            ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("Un-support feature"),
-                    errdetail("column stored relation in mutilple-relations modifying doesn't support %s", type)));
-        }
-        if (RelationIsForeignTable(targetrel) || RelationIsStream(targetrel)) {
-            ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("Un-support feature"),
-                    errdetail("FDW relation in mutilple-relations modifying doesn't support %s", type)));
-        }
-        if (RelationIsView(targetrel)) {
-            ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("Un-support feature"),
-                    errdetail("view in mutilple-relations modifying doesn't support %s", type)));
-        }
-        if (targetrel->rd_rel->relhasrules) {
-            ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("Un-support feature"),
-                    errdetail("relation has rules in mutilple-relations modifying doesn't support %s", type)));
-        }
+        CheckRelationSupportMultiModify(targetrel, forDel);
     }
 }
 
@@ -4192,8 +4231,6 @@ static List* transformUpdateTargetList(ParseState* pstate, List* qryTlist, List*
     RangeTblEntry* target_rte = NULL;
     ListCell* tl;
     ListCell* orig_tl;
-    ListCell* rb;
-    ListCell* r;
     Relation targetrel = NULL;
     int rtindex = 0;
     int targetRelationNum = list_length(pstate->p_target_relation);
@@ -4240,12 +4277,6 @@ static List* transformUpdateTargetList(ParseState* pstate, List* qryTlist, List*
      * or synonym in multiple update, merge their targetLists.
      */
     transformMultiTargetList(pstate->p_target_rangetblentry, new_tle);
-
-    forboth (rb, pstate->p_target_rangetblentry, r, pstate->p_target_relation) {
-        target_rte = (RangeTblEntry*)lfirst(rb);
-        targetrel = (Relation)lfirst(r);
-        setExtraUpdatedCols(target_rte, targetrel->rd_att);
-    }
 
     for (int i = 0; i < targetRelationNum; i++) {
         if (new_tle[i]) {

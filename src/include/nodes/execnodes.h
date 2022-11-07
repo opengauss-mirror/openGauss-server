@@ -471,6 +471,8 @@ struct ExprState {
  *		junkFilter				for removing junk attributes from tuples
  *		projectReturning		for computing a RETURNING list
  *		updateProj				for computing a UPSERT update list
+ *		WithCheckOptions		list of WithCheckOption's for views
+ *		WithCheckOptionExprs	list of WithCheckOption expr states
  * ----------------
  */
 typedef struct ResultRelInfo {
@@ -522,6 +524,8 @@ typedef struct ResultRelInfo {
     int ri_NumGeneratedNeeded;
     /* number of stored UpdateExpr columns we need to compute */
     int ri_NumUpdatedNeeded;
+    List* ri_WithCheckOptions;
+    List* ri_WithCheckOptionExprs;
 } ResultRelInfo;
 
 /* bloom filter controller */

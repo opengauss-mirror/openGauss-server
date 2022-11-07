@@ -377,6 +377,20 @@ typedef struct RangeTblEntry {
 } RangeTblEntry;
 
 /*
+ * WithCheckOption -
+ *		representation of WITH CHECK OPTION checks to be applied to new tuples
+ *		when inserting/updating an auto-updatable view.
+ */
+typedef struct WithCheckOption {
+    NodeTag type;
+    char* viewname; /* name of view that specified the WCO */
+    Node* qual;     /* constraint qual to check */
+    bool cascaded;  /* true = WITH CASCADED CHECK OPTION */
+    Index rtindex;  /* used when multiple modifying. It indicates the resultRelation 
+                     * to which this wco belongs */
+} WithCheckOption;
+
+/*
  * SortGroupClause -
  *		representation of ORDER BY, GROUP BY, PARTITION BY,
  *		DISTINCT, DISTINCT ON items
