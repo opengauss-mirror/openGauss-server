@@ -47,6 +47,7 @@
 #include "utils/palloc.h"
 #include "utils/relmapper.h"
 #include "pageparse.h"
+#include "storage/file/fio_device_com.h"
 
 #define INVALID_FD (-1)
 

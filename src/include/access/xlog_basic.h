@@ -34,6 +34,7 @@
 #include "port/pg_crc32c.h"
 #include "utils/pg_crc.h"
 #include "tde_key_management/data_common.h"
+#include "storage/file/fio_device_com.h"
 /*
  * These macros encapsulate knowledge about the exact layout of XLog file
  * names, timeline history file names, and archive-status file names.
@@ -53,12 +54,13 @@
  * The XLOG is split into WAL segments (physical files) of the size indicated
  * by XLOG_SEG_SIZE.
  */
-#define XLogSegSize ((uint32)XLOG_SEG_SIZE)
-#define XLogSegmentsPerXLogId (UINT64CONST(0x100000000) / XLOG_SEG_SIZE)
+#define XLogSegSize XLogSegmentSize
+#define XLogSegmentsPerXLogId (UINT64CONST(0x100000000) / XLogSegmentSize)
 #define XLogRecordMaxSize ((uint32)0x3fffe000) /* 1 gigabyte - 8 kbyte */
 
 /* Compute XLogRecPtr with segment number and offset. */
-#define XLogSegNoOffsetToRecPtr(segno, offset, dest) (dest) = (segno)*XLOG_SEG_SIZE + (offset)
+#define XLogSegNoOffsetToRecPtr(segno, offset, dest) \
+    (dest) = (segno) * XLogSegmentSize + (offset)
 
 /*
  * Compute ID and segment from an XLogRecPtr.
@@ -88,9 +90,11 @@
 /*
  * The XLog directory and control file (relative to $PGDATA)
  */
+#define SS_XLOGDIR (g_instance.datadir_cxt.xlogDir)
 #define XLOGDIR "pg_xlog"
-#define XLOG_CONTROL_FILE "global/pg_control"
-#define XLOG_CONTROL_FILE_BAK "global/pg_control.backup"
+#define ARCHIVEDIR "pg_xlog/archive_status"
+#define XLOG_CONTROL_FILE (g_instance.datadir_cxt.controlPath)
+#define XLOG_CONTROL_FILE_BAK (g_instance.datadir_cxt.controlBakPath)
 #define MAX_PAGE_FLUSH_LSN_FILE           "global/max_page_flush_lsn"
 
 #define PG_LSN_XLOG_FLUSH_CHK_FILE "global/pg_lsnxlogflushchk"

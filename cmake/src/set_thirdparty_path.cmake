@@ -76,6 +76,8 @@ set(HOTPATCH_HOME ${PLATFORM_PATH}/hotpatch)
 set(SECURE_HOME ${PLATFORM_PATH}/Huawei_Secure_C/${LIB_UNIFIED_SUPPORT})
 set(SECUREDYNAMICLIB_HOME ${PLATFORM_PATH}/Huawei_Secure_C/Dynamic_Lib)
 set(DCF_HOME ${COMPONENT_PATH}/dcf)
+set(DMS_HOME ${COMPONENT_PATH}/dms)
+set(DSS_HOME ${COMPONENT_PATH}/dss)
 
 set(MOCKCPP_HOME ${BUILDTOOLS_PATH}/mockcpp/${LIB_UNIFIED_SUPPORT})
 set(GTEST_HOME ${BUILDTOOLS_PATH}/gtest/${LIB_UNIFIED_SUPPORT})
@@ -262,6 +264,17 @@ set(ZSTD_LIB_PATH ${ZSTD_HOME}/lib)
 #############################################################################
 set(DCF_INCLUDE_PATH ${DCF_HOME}/include)
 set(DCF_LIB_PATH ${DCF_HOME}/lib)
+
+#############################################################################
+# dms component
+#############################################################################
+set(DMS_LIB_PATH ${DMS_HOME}/lib)
+
+#############################################################################
+# dss component
+#############################################################################
+set(DSS_LIB_PATH ${DSS_HOME}/lib)
+set(DSS_BIN_PATH ${DSS_HOME}/bin)
 
 #############################################################################
 # license manager compnent

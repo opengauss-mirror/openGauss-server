@@ -34,6 +34,7 @@
 
 #include <sys/stat.h>
 #include <securec.h>
+#include "storage/file/fio_device.h"
 
 /*
  * main function to make dir

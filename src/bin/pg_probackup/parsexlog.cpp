@@ -1123,7 +1123,7 @@ static int read_requested_page(XLogReaderData *reader_data, char *readBuf,
         }
     }
 #ifdef HAVE_LIBZ
-    else
+    else if (!IsDssMode())
     {
         if (fio_gzseek(reader_data->gz_xlogfile, (z_off_t) targetPageOff, SEEK_SET) == -1)
         {
@@ -1733,7 +1733,7 @@ CleanupXLogPageRead(XLogReaderState *xlogreader)
         reader_data->xlogfile = -1;
     }
 #ifdef HAVE_LIBZ
-    else if (reader_data->gz_xlogfile != NULL)
+    else if (reader_data->gz_xlogfile != NULL && !IsDssMode())
     {
         fio_gzclose(reader_data->gz_xlogfile);
         reader_data->gz_xlogfile = NULL;

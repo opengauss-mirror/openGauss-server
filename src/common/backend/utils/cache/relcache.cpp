@@ -181,6 +181,7 @@
 #include "storage/page_compression.h"
 #include "storage/smgr/smgr.h"
 #include "storage/smgr/segment.h"
+#include "storage/file/fio_device.h"
 #include "threadpool/threadpool.h"
 #include "storage/tcap.h"
 #include "utils/array.h"
@@ -3077,7 +3078,11 @@ extern void formrdesc(const char* relationName, Oid relationReltype, bool isshar
     if (IsBootstrapProcessingMode())
         RelationMapUpdateMap(RelationGetRelid(relation), RelationGetRelid(relation), isshared, true);
 
-    relation->storage_type = HEAP_DISK;
+    if (t_thrd.shemem_ptr_cxt.ControlFile->bootstrap_segment) {
+        relation->storage_type = SEGMENT_PAGE;
+    } else {
+        relation->storage_type = HEAP_DISK;
+    }
     
     /*
      * initialize the relation lock manager information
@@ -4724,8 +4729,10 @@ void RelationSetNewRelfilenode(Relation relation, TransactionId freezeXid, Multi
     } else {
         /* segment storage */
         isbucket = BUCKET_OID_IS_VALID(relation->rd_bucketoid) && !RelationIsCrossBucketIndex(relation);
+        Oid database_id = (ConvertToRelfilenodeTblspcOid(relation->rd_rel->reltablespace) == GLOBALTABLESPACE_OID) ?
+            InvalidOid : u_sess->proc_cxt.MyDatabaseId;
         newrelfilenode = seg_alloc_segment(ConvertToRelfilenodeTblspcOid(relation->rd_rel->reltablespace),
-            u_sess->proc_cxt.MyDatabaseId, isbucket, InvalidBlockNumber);
+            database_id, isbucket, InvalidBlockNumber);
     }
     
     // We must consider cudesc relation and delta relation when it is a CStore relation
@@ -7022,6 +7029,10 @@ struct PublicationActions* GetRelationPublicationActions(Relation relation)
  */
 static bool load_relcache_init_file(bool shared)
 {
+    if (ENABLE_DMS) {
+        return false;
+    }
+
     FILE* fp = NULL;
     char initfilename[MAXPGPATH];
     Relation* rels = NULL;
@@ -7033,7 +7044,8 @@ static bool load_relcache_init_file(bool shared)
         rc = snprintf_s(initfilename,
             sizeof(initfilename),
             sizeof(initfilename) - 1,
-            "global/%s.%u",
+            "%s/%s.%u",
+            GLOTBSDIR,
             RELCACHE_INIT_FILENAME,
             GRAND_VERSION_NUM);
     else
@@ -7416,6 +7428,10 @@ read_failed:
  */
 static void write_relcache_init_file(bool shared)
 {
+    if (ENABLE_DSS || SS_STANDBY_MODE) {
+        return;
+    }
+
     FILE* fp = NULL;
     char tempfilename[MAXPGPATH];
     char finalfilename[MAXPGPATH];
@@ -7444,7 +7460,8 @@ static void write_relcache_init_file(bool shared)
         rc = snprintf_s(tempfilename,
             sizeof(tempfilename),
             sizeof(tempfilename) - 1,
-            "global/%s.%u.%lu",
+            "%s/%s.%u.%lu",
+            GLOTBSDIR,
             RELCACHE_INIT_FILENAME,
             GRAND_VERSION_NUM,
             t_thrd.proc_cxt.MyProcPid);
@@ -7452,7 +7469,8 @@ static void write_relcache_init_file(bool shared)
         rc = snprintf_s(finalfilename,
             sizeof(finalfilename),
             sizeof(finalfilename) - 1,
-            "global/%s.%u",
+            "%s/%s.%u",
+            GLOTBSDIR,
             RELCACHE_INIT_FILENAME,
             GRAND_VERSION_NUM);
         securec_check_ss(rc, "\0", "\0");
@@ -7675,12 +7693,12 @@ void RelationCacheInitFilePreInvalidate(void)
 
     if (unlink(initfilename) < 0) {
         /*
-         * The file might not be there if no backend has been started since
-         * the last removal.  But complain about failures other than ENOENT.
-         * Fortunately, it's not too late to abort the transaction if we can't
-         * get rid of the would-be-obsolete init file.
-         */
-        if (errno != ENOENT)
+        * The file might not be there if no backend has been started since
+        * the last removal.  But complain about failures other than ENOENT.
+        * Fortunately, it's not too late to abort the transaction if we can't
+        * get rid of the would-be-obsolete init file.
+        */
+        if (!FILE_POSSIBLY_DELETED(errno))
             ereport(ERROR, (errcode_for_file_access(), errmsg("could not remove cache file \"%s\": %m", initfilename)));
     }
 }
@@ -7711,17 +7729,18 @@ void RelationCacheInitFileRemove(void)
      * We zap the shared cache file too.  In theory it can't get out of sync
      * enough to be a problem, but in data-corruption cases, who knows ...
      */
-    rc = snprintf_s(path, sizeof(path), sizeof(path) - 1, "global/%s.%u", RELCACHE_INIT_FILENAME, GRAND_VERSION_NUM);
+    rc = snprintf_s(path, sizeof(path), sizeof(path) - 1, "%s/%s.%u",
+        GLOTBSDIR, RELCACHE_INIT_FILENAME, GRAND_VERSION_NUM);
     securec_check_ss(rc, "\0", "\0");
     unlink_initfile(path);
 
     /* Scan everything in the default tablespace */
-    RelationCacheInitFileRemoveInDir("base");
+    RelationCacheInitFileRemoveInDir(DEFTBSDIR);
 
     /* Scan the tablespace link directory to find non-default tablespaces */
-    dir = AllocateDir(tblspcdir);
+    dir = AllocateDir(TBLSPCDIR);
     if (dir == NULL) {
-        ereport(LOG, (errmsg("could not open tablespace link directory \"%s\": %m", tblspcdir)));
+        ereport(LOG, (errmsg("could not open tablespace link directory \"%s\": %m", TBLSPCDIR)));
         return;
     }
 
@@ -7730,17 +7749,32 @@ void RelationCacheInitFileRemove(void)
             /* Scan the tablespace dir for per-database dirs */
 #ifdef PGXC
             /* Postgres-XC tablespaces include node name in path */
+            if (ENABLE_DSS) {
+                rc = snprintf_s(path,
+                    sizeof(path),
+                    sizeof(path) - 1,
+                    "%s/%s/%s",
+                    TBLSPCDIR,
+                    de->d_name,
+                    TABLESPACE_VERSION_DIRECTORY);
+            } else {
+                rc = snprintf_s(path,
+                    sizeof(path),
+                    sizeof(path) - 1,
+                    "%s/%s/%s_%s",
+                    TBLSPCDIR,
+                    de->d_name,
+                    TABLESPACE_VERSION_DIRECTORY,
+                    g_instance.attr.attr_common.PGXCNodeName);
+            }
+#else
             rc = snprintf_s(path,
                 sizeof(path),
                 sizeof(path) - 1,
-                "%s/%s/%s_%s",
-                tblspcdir,
+                "%s/%s/%s",
+                TBLSPCDIR,
                 de->d_name,
-                TABLESPACE_VERSION_DIRECTORY,
-                g_instance.attr.attr_common.PGXCNodeName);
-#else
-            rc = snprintf_s(
-                path, sizeof(path), sizeof(path) - 1, "%s/%s/%s", tblspcdir, de->d_name, TABLESPACE_VERSION_DIRECTORY);
+                TABLESPACE_VERSION_DIRECTORY);
 #endif
             securec_check_ss(rc, "\0", "\0");
             RelationCacheInitFileRemoveInDir(path);
@@ -7788,7 +7822,7 @@ static void unlink_initfile(const char* initfilename)
 {
     if (unlink(initfilename) < 0) {
         /* It might not be there, but log any error other than ENOENT */
-        if (errno != ENOENT)
+        if (!FILE_POSSIBLY_DELETED(errno))
             ereport(LOG, (errmsg("could not remove cache file \"%s\": %m", initfilename)));
     }
 }

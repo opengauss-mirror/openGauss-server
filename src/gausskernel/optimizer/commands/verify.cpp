@@ -1277,6 +1277,15 @@ static bool VerifyRowRelFast(Relation rel, VerifyDesc* checkCudesc)
         /* If we got a cancel signal during the copy of the data, quit */
         CHECK_FOR_INTERRUPTS();
         SMGR_READ_STATUS rdStatus = smgrread(src, forkNum, blkno, buf);
+        /* For DMS , try to read from buffer in case the data is not flused to disk */
+        if (rdStatus == SMGR_RD_CRC_ERROR && ENABLE_DMS) {
+            Buffer buffer = ReadBufferWithoutRelcache(src->smgr_rnode.node, forkNum, blkno, RBM_NORMAL, NULL, NULL);
+            if (buffer != InvalidBuffer) {
+                ReleaseBuffer(buffer);
+                continue;
+            }
+        }
+
         /* check the page & crc */
         if (rdStatus == SMGR_RD_CRC_ERROR) {
             // Retry 5 times to increase program reliability.
@@ -1320,16 +1329,16 @@ static bool VerifyRowRelFast(Relation rel, VerifyDesc* checkCudesc)
                         handle_in_client(true)));
             /* Add the wye page to the global variable and try to fix it. */
             addGlobalRepairBadBlockStat(src->smgr_rnode, forkNum, blkno);
-            } else if (rdStatus == SMGR_RD_OK) {
-                /* Ustrore white-box verification adapt to analyze verify. */
-                UPageVerifyParams verifyParam;
-                Page page = (char *) buf;
-                if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UPAGE, USTORE_VERIFY_FAST,
-                    (char *) &verifyParam, rel, page, InvalidBlockNumber, NULL, NULL, InvalidXLogRecPtr, NULL,
-                    NULL, true))) {
-                    ExecuteUstoreVerify(USTORE_VERIFY_MOD_UPAGE, (char *) &verifyParam);
-                }
+        } else if (rdStatus == SMGR_RD_OK) {
+            /* Ustrore white-box verification adapt to analyze verify. */
+            UPageVerifyParams verifyParam;
+            Page page = (char *) buf;
+            if (unlikely(ConstructUstoreVerifyParam(USTORE_VERIFY_MOD_UPAGE, USTORE_VERIFY_FAST,
+                (char *) &verifyParam, rel, page, InvalidBlockNumber, NULL, NULL, InvalidXLogRecPtr, NULL,
+                NULL, true))) {
+                ExecuteUstoreVerify(USTORE_VERIFY_MOD_UPAGE, (char *) &verifyParam);
             }
+        }
     }
 
     pfree_ext(buf);

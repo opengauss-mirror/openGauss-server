@@ -50,6 +50,7 @@ extern bool CommittedXidVisibleInSnapshot(TransactionId xid, Snapshot snapshot, 
 extern bool CommittedXidVisibleInDecodeSnapshot(TransactionId xid, Snapshot snapshot, Buffer buffer);
 extern bool IsXidVisibleInGtmLiteLocalSnapshot(TransactionId xid, Snapshot snapshot, TransactionIdStatus hint_status,
                                                                                     bool xmin_equal_xmax, Buffer buffer, bool *sync);
+extern void RecheckXidFinish(TransactionId xid, CommitSeqNo csn);
 /*
  * We don't provide a static SnapshotDirty variable because it would be
  * non-reentrant.  Instead, users of that snapshot type should declare a

@@ -395,6 +395,11 @@ void XLogAtomicOpStart()
         ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg("recovery is in progress"),
                         errhint("cannot make new WAL entries during recovery")));
     }
+
+    if (!SSXLogInsertAllowed()) {
+        ereport(FATAL, (errmsg("SS standby cannot make new WAL entries")));
+    }
+
     XLogAtomicOpMgr->XLogStart();
 }
 

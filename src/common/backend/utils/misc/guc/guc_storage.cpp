@@ -204,6 +204,12 @@ static bool check_and_assign_namespace_oids(List* elemlist);
 static bool check_and_assign_general_oids(List* elemlist);
 static int GetLengthAndCheckReplConn(const char* ConnInfoList);
 
+static bool check_ss_interconnect_type(char **newval, void **extra, GucSource source);
+static bool check_ss_rdma_work_config(char** newval, void** extra, GucSource source);
+static bool check_ss_dss_vg_name(char** newval, void** extra, GucSource source);
+static bool check_ss_dss_conn_path(char** newval, void** extra, GucSource source);
+static bool check_ss_enable_ssl(bool* newval, void** extra, GucSource source);
+
 #ifndef ENABLE_MULTIPLE_NODES
 static void assign_dcf_election_timeout(int newval, void* extra);
 static void assign_dcf_auto_elc_priority_en(int newval, void* extra);
@@ -970,6 +976,83 @@ static void InitStorageConfigureNamesBool()
             NULL,
             },
             &u_sess->attr.attr_storage.enable_candidate_buf_usage_count,
+            false,
+            NULL,
+            NULL,
+            NULL},
+
+        {{"ss_enable_dss",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            SHARED_STORAGE_OPTIONS,
+            gettext_noop("Whether use dss"),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_storage.dss_attr.ss_enable_dss,
+            false,
+            NULL,
+            NULL,
+            NULL},
+
+        {{"ss_enable_dms",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            SHARED_STORAGE_OPTIONS,
+            gettext_noop("Whether use dms"),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_storage.dms_attr.enable_dms,
+            false,
+            NULL,
+            NULL,
+            NULL},
+
+        {{"ss_enable_catalog_centralized",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            SHARED_STORAGE_OPTIONS,
+            gettext_noop("Whether dms catalog stored centralized or distributed"),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_storage.dms_attr.enable_catalog_centralized,
+            true,
+            NULL,
+            NULL,
+            NULL},
+#ifdef USE_ASSERT_CHECKING
+        {{"ss_enable_reform",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            SHARED_STORAGE_OPTIONS,
+            gettext_noop("Whether use dms reform"),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_storage.dms_attr.enable_reform,
+            true,
+            NULL,
+            NULL,
+            NULL},
+#endif
+        {{"ss_enable_ssl",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            SHARED_STORAGE_OPTIONS,
+            gettext_noop("Whether use dms ssl"),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_storage.dms_attr.enable_ssl,
+            true,
+            check_ss_enable_ssl,
+            NULL,
+            NULL},
+
+        {{"ss_enable_log_level",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            SHARED_STORAGE_OPTIONS,
+            gettext_noop("Set dms and dss log level to LOG"),
+            NULL},
+            &g_instance.attr.attr_storage.dms_attr.enable_log_level,
             false,
             NULL,
             NULL,
@@ -3289,6 +3372,62 @@ static void InitStorageConfigureNamesInt()
             NULL,
             NULL,
             NULL},
+        {{"ss_instance_id",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            SHARED_STORAGE_OPTIONS,
+            gettext_noop("Sets the instance id."),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_storage.dms_attr.instance_id,
+            0,
+            0,
+            63,
+            NULL,
+            NULL,
+            NULL},
+        {{"ss_interconnect_channel_count",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            SHARED_STORAGE_OPTIONS,
+            gettext_noop("Sets ss mes interconnect channel count"),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_storage.dms_attr.channel_count,
+            16,
+            1,
+            32,
+            NULL,
+            NULL,
+            NULL},
+        {{"ss_work_thread_count",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            SHARED_STORAGE_OPTIONS,
+            gettext_noop("Sets ss mes work thread count"),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_storage.dms_attr.work_thread_count,
+            32,
+            16,
+            128,
+            NULL,
+            NULL,
+            NULL},
+        {{"ss_recv_msg_pool_size",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            SHARED_STORAGE_OPTIONS,
+            gettext_noop("Sets the ss receive message pool size (KB)"),
+            NULL,
+            GUC_SUPERUSER_ONLY | GUC_UNIT_KB},
+            &g_instance.attr.attr_storage.dms_attr.recv_msg_pool_size,
+            16 * 1024,
+            1024,
+            1024 * 1024,
+            NULL,
+            NULL,
+            NULL},
         /* End-of-list marker */
         {{NULL,
             (GucContext)0,
@@ -4088,6 +4227,76 @@ static void InitStorageConfigureNamesString()
             "",
             check_logical_decode_options_default,
             assign_logical_decode_options_default,
+            NULL},
+        {{"ss_dss_vg_name",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            SHARED_STORAGE_OPTIONS,
+            gettext_noop("Sets the vg name of DSS node."),
+            NULL},
+            &g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name,
+            "",
+            check_ss_dss_vg_name,
+            NULL,
+            NULL},
+        {{"ss_dss_conn_path",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            SHARED_STORAGE_OPTIONS,
+            gettext_noop("Sets the socket file path of DSS node."),
+            NULL},
+            &g_instance.attr.attr_storage.dss_attr.ss_dss_conn_path,
+            "UDS:/tmp/.dss_unix_d_socket",
+            check_ss_dss_conn_path,
+            NULL,
+            NULL},
+        {{"ss_interconnect_url",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            SHARED_STORAGE_OPTIONS,
+            gettext_noop("Sets the url to connect to ss."),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_storage.dms_attr.interconnect_url,
+            "0:127.0.0.1:1611",
+            NULL,
+            NULL,
+            NULL},
+        {{"ss_interconnect_type",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            SHARED_STORAGE_OPTIONS,
+            gettext_noop("Sets the type of connect to ss, range: TCP, RDMA."),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_storage.dms_attr.interconnect_type,
+            "TCP",
+            check_ss_interconnect_type,
+            NULL,
+            NULL},
+        {{"ss_rdma_work_config",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            SHARED_STORAGE_OPTIONS,
+            gettext_noop("Sets config with digit number: A B."),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_storage.dms_attr.rdma_work_config,
+            "",
+            check_ss_rdma_work_config,
+            NULL,
+            NULL},
+        {{"ss_ock_log_path",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            SHARED_STORAGE_OPTIONS,
+            gettext_noop("Sets config with string file path."),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_storage.dms_attr.ock_log_path,
+            "",
+            NULL,
+            NULL,
             NULL},
         {{NULL,
             (GucContext)0,
@@ -5378,6 +5587,119 @@ static int GetLengthAndCheckReplConn(const char* ConnInfoList)
 
     pfree(ReplStr);
     return repl_len;
+}
+
+static bool check_ss_interconnect_type(char **newval, void **extra, GucSource source)
+{
+    return (strcmp("TCP", *newval) == 0 || strcmp("RDMA", *newval) == 0);
+}
+
+static inline bool check_digit_text(char *str, uint32* len)
+{
+    uint32 idx = 0;
+    if (str == NULL) {
+        *len = 0;
+        return true;
+    }
+
+    while (*str != '\0' && *str == ' ') {
+        idx++;
+        ++str;
+    }
+
+    while (*str != '\0') {
+        if (*str == ' ') {
+            break;
+        }
+
+        if (*str >= '0' && *str <= '9') {
+            ++str;
+            ++idx;
+        } else {
+            *len = 0;
+            return false;
+        }
+    }
+
+    *len = idx;
+    return true;
+}
+
+static bool check_ss_rdma_work_config(char** newval, void** extra, GucSource source)
+{
+    uint32 idx1 = 0;
+    uint32 idx2 = 0;
+    if (!check_digit_text(*newval, &idx1)) {
+        return false;
+    }
+    if (!check_digit_text(*newval + idx1, &idx2)) {
+        return false;
+    }
+    return true;
+}
+
+static bool check_ss_dss_vg_name(char** newval, void** extra, GucSource source)
+{
+    char *ReplStr = NULL;
+    char *ptr = NULL;
+    if (newval == NULL || *newval == NULL || **newval == '\0') {
+        return true;
+    }
+
+    ReplStr = pstrdup(*newval);
+    if (*ReplStr == '+') {
+        ptr = ReplStr;
+        while (*ptr != '\0') {
+            if (*ptr == '/') {
+                break;
+            }
+            ptr++;
+        }
+        if (*ptr == '\0') {
+            pfree(ReplStr);
+            return true;
+        }
+    }
+    ereport(ERROR, (errmsg("DSS vg name must start with '+' and not comtain '\\'.")));
+    pfree(ReplStr);
+    return false;
+}
+
+static bool check_ss_dss_conn_path(char** newval, void** extra, GucSource source)
+{
+    char *ReplStr = NULL;
+    int strlen = sizeof("UDS:") - 1;
+    if (newval == NULL || *newval == NULL || **newval == '\0') {
+        ereport(ERROR, (errmsg("DSS conn path can not be NULL.")));
+        return false;
+    }
+
+    canonicalize_path(*newval);
+    ReplStr = pstrdup(*newval);
+    if (strncmp(ReplStr, "UDS:", strlen) != 0) {
+        ereport(ERROR, (errmsg("DSS conn path format: \"UDS:socket_domain\"")));
+        return false;
+    }
+
+    if (!ENABLE_DSS) {
+        return true;
+    }
+    
+    ReplStr = ReplStr + strlen;
+    if (is_absolute_path(ReplStr)) {
+        return true;
+    } else {
+        ereport(ERROR, (errmsg("DSS conn path must be absolute path.")));
+    }
+    return false;
+}
+
+static bool check_ss_enable_ssl(bool *newval, void **extra, GucSource source)
+{
+    if (!*newval) {
+        ereport(WARNING, (errmsg("The SSL connection will be disabled during build, which brings security risks.")));
+    }
+    return true;
 }
 
 #ifndef ENABLE_MULTIPLE_NODES

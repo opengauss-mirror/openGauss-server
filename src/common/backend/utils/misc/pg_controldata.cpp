@@ -140,7 +140,7 @@ ControlFileData* GetControlfile(const char *dataDir, bool *crc_ok_p)
     AssertArg(crc_ok_p);
 
     controlFile = (ControlFileData*)palloc(sizeof(ControlFileData));
-    errno_t rc = snprintf_s(controlFilePath, MAXPGPATH, MAXPGPATH - 1, "%s/global/pg_control", dataDir);
+    errno_t rc = snprintf_s(controlFilePath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", dataDir, XLOG_CONTROL_FILE);
     securec_check_ss_c(rc, "\0", "\0");
 
     fd = OpenControlFile(controlFilePath);

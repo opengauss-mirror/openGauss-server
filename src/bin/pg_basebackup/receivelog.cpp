@@ -130,8 +130,8 @@ static int open_walfile(XLogRecPtr startpoint, uint32 timeline, const char* base
         MAXFNAMELEN - 1,
         "%08X%08X%08X",
         timeline,
-        (uint32)((startpoint / XLOG_SEG_SIZE) / XLogSegmentsPerXLogId),
-        (uint32)((startpoint / XLOG_SEG_SIZE) % XLogSegmentsPerXLogId));
+        (uint32)((startpoint / XLogSegSize) / XLogSegmentsPerXLogId),
+        (uint32)((startpoint / XLogSegSize) % XLogSegmentsPerXLogId));
     securec_check_ss_c(nRet, "", "");
 
     nRet = snprintf_s(fn, sizeof(fn), sizeof(fn) - 1, "%s/%s.partial", basedir, namebuf);
@@ -160,11 +160,11 @@ static int open_walfile(XLogRecPtr startpoint, uint32 timeline, const char* base
         f = -1;
         return -1;
     }
-    if (statbuf.st_size == XLogSegSize)
+    if (statbuf.st_size == (off_t)XLogSegSize)
         return f; /* File is open and ready to use */
     if (statbuf.st_size != 0) {
         pg_log(PG_PRINT,
-            _("%s: WAL segment %s is %d bytes, should be 0 or %d\n"),
+            _("%s: WAL segment %s is %d bytes, should be 0 or %lu\n"),
             progname,
             Lrealpath,
             (int)statbuf.st_size,
@@ -302,7 +302,7 @@ static bool close_walfile(int walfile, const char* basedir, char* walname, bool 
      * Rename the .partial file only if we've completed writing the
      * whole segment or segment_complete is true.
      */
-    if (currpos == XLOG_SEG_SIZE || segment_complete) {
+    if (currpos == (off_t)XLogSegSize || segment_complete) {
         char oldfn[MAXPGPATH];
         char newfn[MAXPGPATH];
         errno_t nRet;
@@ -438,7 +438,7 @@ static bool checkForReceiveTimeout(PGconn* conn)
 static int DoWALWrite(const char* wal_buf, int len, XLogRecPtr& block_pos, const char* basedir, char* cur_wal_file,
     uint32 wal_file_timeline, int& walfile, stream_stop_callback stream_stop, PGconn* conn)
 {
-    int xlogoff = block_pos % XLOG_SEG_SIZE;
+    int xlogoff = block_pos % XLogSegSize;
     int bytes_left = len;
     int bytes_to_write = 0;
 
@@ -470,8 +470,8 @@ static int DoWALWrite(const char* wal_buf, int len, XLogRecPtr& block_pos, const
     while (bytes_left) {
 
         /* If crossing a WAL boundary, only write up until we reach XLOG_SEG_SIZE. */
-        if (xlogoff + bytes_left > XLOG_SEG_SIZE)
-            bytes_to_write = XLOG_SEG_SIZE - xlogoff;
+        if (xlogoff + bytes_left > (int)XLogSegSize)
+            bytes_to_write = (int)XLogSegSize - xlogoff;
         else
             bytes_to_write = bytes_left;
 
@@ -502,7 +502,7 @@ static int DoWALWrite(const char* wal_buf, int len, XLogRecPtr& block_pos, const
         xlogoff += bytes_to_write;
 
         /* Did we reach the end of a WAL segment? */
-        if (block_pos % XLOG_SEG_SIZE == 0) {
+        if (block_pos % XLogSegSize == 0) {
             if (!close_walfile(walfile, basedir, cur_wal_file, false, block_pos)) {
                 suspendHeartBeatTimer();
                 /* Error message written in close_walfile() */

@@ -21,7 +21,8 @@ OBJS += backup.o catalog.o configure.o data.o \
 
 OBJS += datapagemap.o receivelog.o streamutil.o \
 	xlogreader.o pg_lzcompress.o
-OBJS += $(top_builddir)/src/lib/pgcommon/libpgcommon.a
+OBJS += $(top_builddir)/src/lib/pgcommon/libpgcommon.a \
+	$(top_builddir)/src/gausskernel/storage/dss/dss_adaptor.o
 
 EXTRA_CLEAN = datapagemap.cpp datapagemap.h \
 	receivelog.cpp receivelog.h streamutil.cpp streamutil.h \
@@ -40,7 +41,7 @@ endif
 PG_CPPFLAGS = -I$(libpq_srcdir) ${PTHREAD_CFLAGS} -Isrc -I$(top_builddir)/$(subdir) -I$(LZ4_INCLUDE_PATH) -I$(ZLIB_INCLUDE_PATH) -I$(ZSTD_INCLUDE_PATH)
 # add page_compression so .h
 LDFLAGS += -L../../lib/page_compression
-PG_CPPFLAGS = -I../../lib/page_compression
+PG_CPPFLAGS = -I../../lib/page_compression -I../../src/common/port
 LIBS += -lpagecompression -lzstd
 override CPPFLAGS := -DFRONTEND $(CPPFLAGS) $(PG_CPPFLAGS) -DHAVE_LIBZ
 PG_LIBS_INTERNAL = $(libpq_pgport) ${PTHREAD_CFLAGS}

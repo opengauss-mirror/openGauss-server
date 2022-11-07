@@ -72,6 +72,7 @@
 #endif
 #include "postmaster/barrier_creator.h"
 #include "pgxc/barrier.h"
+#include "ddes/dms/ss_dms_recovery.h"
 
 const int NUM_PERCENTILE_COUNT = 2;
 const int INIT_NUMA_ALLOC_COUNT = 32;
@@ -110,6 +111,16 @@ enum knl_parallel_redo_state {
     REDO_IN_PROGRESS,
     REDO_DONE,
 };
+
+/*
+ *  used for dms
+ */
+typedef enum en_dms_status {
+    DMS_STATUS_OUT = 0,
+    DMS_STATUS_JOIN = 1,
+    DMS_STATUS_REFORM = 2,
+    DMS_STATUS_IN = 3
+} dms_status_t;
 
 /* all process level attribute which expose to user */
 typedef struct knl_instance_attr {
@@ -1151,6 +1162,52 @@ typedef struct knl_g_abo_context {
     HTAB *models;
 } knl_g_abo_context;
 
+typedef struct knl_g_dwsubdatadir_context {
+     /* share and cluster one copy */
+    char dwOldPath[MAXPGPATH];
+    char dwPathPrefix[MAXPGPATH];
+    char dwSinglePath[MAXPGPATH];
+    char dwBuildPath[MAXPGPATH];
+    char dwUpgradePath[MAXPGPATH];
+    char dwBatchUpgradeMetaPath[MAXPGPATH];
+    char dwBatchUpgradeFilePath[MAXPGPATH];
+    char dwMetaPath[MAXPGPATH];
+    char dwExtChunkPath[MAXPGPATH];
+    uint8 dwStorageType;
+} knl_g_dwsubdatadir_context;
+
+typedef struct knl_g_datadir_context {
+    char baseDir[MAXPGPATH];
+    char globalDir[MAXPGPATH];
+    char clogDir[MAXPGPATH];
+    char csnlogDir[MAXPGPATH];
+    char locationDir[MAXPGPATH];
+    char notifyDir[MAXPGPATH];
+    char serialDir[MAXPGPATH];
+    char snapshotsDir[MAXPGPATH];
+    char tblspcDir[MAXPGPATH];
+    char twophaseDir[MAXPGPATH];
+    char multixactDir[MAXPGPATH];
+    char xlogDir[MAXPGPATH];
+    char controlPath[MAXPGPATH];
+    char controlBakPath[MAXPGPATH];
+    knl_g_dwsubdatadir_context dw_subdir_cxt;
+} knl_g_datadir_context;
+
+typedef struct knl_g_dms_context {
+    uint32 dmsProcSid;
+    uint64 xminAck;
+    dms_status_t dms_status;
+    ClusterNodeState SSClusterState;
+    ss_reformer_ctrl_t SSReformerControl;  // saved in disk; saved by primary
+    ss_reform_info_t SSReformInfo;
+    ss_recovery_info_t SSRecoveryInfo;
+    pg_tz* log_timezone;
+    pg_atomic_uint32 inDmsThreShmemInitCnt; // the count of threads in DmsCallbackThreadShmemInit
+    pg_atomic_uint32 inProcExitCnt; // Post Main in proc_exit function
+    bool dmsInited;
+}knl_g_dms_context;
+
 typedef struct knl_instance_context {
     knl_virtual_role role;
     volatile int status;
@@ -1284,9 +1341,10 @@ typedef struct knl_instance_context {
 #endif
     pg_atomic_uint32 extensionNum;
     knl_g_audit_context audit_cxt;
-
     knl_g_abo_context abo_cxt;
     knl_g_listen_context listen_cxt;
+    knl_g_datadir_context datadir_cxt;
+    knl_g_dms_context dms_cxt;
 } knl_instance_context;
 
 extern long random();

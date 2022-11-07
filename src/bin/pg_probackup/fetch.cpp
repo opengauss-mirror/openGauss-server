@@ -27,15 +27,12 @@
  *
  */
 char *
-slurpFile(const char *datadir, const char *path, size_t *filesize, bool safe, fio_location location)
+slurpFile(const char *fullpath, size_t *filesize, bool safe, fio_location location)
 {
     int         fd;
     char       *buffer;
     struct stat statbuf;
-    char        fullpath[MAXPGPATH];
     int         len;
-
-    join_path_components(fullpath, datadir, path);
 
     if ((fd = fio_open(fullpath, O_RDONLY | PG_BINARY, location)) == -1)
     {

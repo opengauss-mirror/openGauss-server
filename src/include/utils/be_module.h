@@ -140,9 +140,12 @@ enum ModuleId {
     MOD_LOGICAL_DECODE,    /* logical decode */
     MOD_GPRC, /* global package runtime cache */
     MOD_DISASTER_READ,
-
     MODE_REPSYNC, /* debug info for func SyncRepWaitForLSN */
     MOD_SQLPATCH,
+    MOD_DMS, /* DMS */
+    MOD_DSS, /* dss api module */
+
+    MOD_GPI, /* debug info for global partition index */
 
     /*
      * Add your module id above.

@@ -877,6 +877,16 @@ pgBackupCreateDir(pgBackup *backup)
     backup->database_dir = (char *)pgut_malloc(MAXPGPATH);
     join_path_components(backup->database_dir, backup->root_dir, DATABASE_DIR);
 
+    if (IsDssMode())
+    {
+        /* prepare dssdata_dir */
+        backup->dssdata_dir = (char *)pgut_malloc(MAXPGPATH);
+        join_path_components(backup->dssdata_dir, backup->root_dir, DSSDATA_DIR);
+
+        /* add into subdirs array, which will be create later */
+        parray_append(subdirs, pg_strdup(DSSDATA_DIR));
+    }
+
     /* block header map */
     init_header_map(backup);
 
@@ -1907,6 +1917,9 @@ pgBackupWriteControl(FILE *out, pgBackup *backup)
 
     if (backup->content_crc != 0)
         fio_fprintf(out, "content-crc = %u\n", backup->content_crc);
+    
+    fio_fprintf(out, "\n#Database Storage type\n");
+    fio_fprintf(out, "storage-type = %s\n", dev2str(backup->storage_type));
 
 }
 
@@ -2069,14 +2082,15 @@ write_backup_filelist(pgBackup *backup, parray *files, const char *root,
                          "\"mode\":\"%u\", \"is_datafile\":\"%u\", "
                          "\"is_cfs\":\"%u\", \"crc\":\"%u\", "
                          "\"compress_alg\":\"%s\", \"external_dir_num\":\"%d\", "
-                         "\"dbOid\":\"%u\"",
+                         "\"dbOid\":\"%u\", \"file_type\":\"%d\"",
                         file->rel_path, file->write_size, file->mode,
                         file->is_datafile ? 1 : 0,
                         file->is_cfs ? 1 : 0,
                         file->crc,
                         deparse_compress_alg(file->compress_alg),
                         file->external_dir_num,
-                        file->dbOid);
+                        file->dbOid,
+                        (int)file->type);
         securec_check_ss_c(nRet, "\0", "\0");
         len = nRet;
 
@@ -2195,6 +2209,7 @@ readBackupControlFile(const char *path)
     char    *compress_alg = NULL;
 	char    *recovery_name = NULL;
     int     parsed_options;
+    char    *storage_type = NULL;
     errno_t rc = 0;
 
     ConfigOption options[] =
@@ -2229,6 +2244,7 @@ readBackupControlFile(const char *path)
         {'s', 0, "note",				&backup->note, SOURCE_FILE_STRICT},
         {'s', 0, "recovery-name",		&recovery_name, SOURCE_FILE_STRICT},
         {'u', 0, "content-crc",			&backup->content_crc, SOURCE_FILE_STRICT},
+        {'s', 0, "storage-type",        &storage_type, SOURCE_FILE_STRICT},
         {0}
     };
 
@@ -2326,6 +2342,9 @@ readBackupControlFile(const char *path)
 
     if (compress_alg)
         backup->compress_alg = parse_compress_alg(compress_alg);
+
+    if (storage_type)
+        backup->storage_type = str2dev(storage_type);
 
     return backup;
 }

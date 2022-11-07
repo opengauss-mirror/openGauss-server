@@ -24,10 +24,12 @@
 #include <zlib.h>
 #endif
 
+#include "tool_common.h"
 #include "thread.h"
 #include "common/fe_memutils.h"
 #include "lz4.h"
 #include "zstd.h"
+#include "storage/file/fio_device.h"
 
 /* Union to ease operations on relation pages */
 typedef struct DataPage
@@ -502,6 +504,10 @@ prepare_page(ConnectionArgs *conn_arg,
                 blknum, from_fullpath, read_len, BLCKSZ);
         else
         {
+            /* If it is in DSS mode, the validation is skipped */
+            if (IsDssMode())
+                return PageIsOk;
+                
             /* We have BLCKSZ of raw data, validate it */
             rc = validate_one_page(page, absolute_blknum,
                 InvalidXLogRecPtr, page_st,
@@ -800,10 +806,11 @@ backup_non_data_file(pgFile *file, pgFile *prev_file,
                                             BackupMode backup_mode, time_t parent_backup_time,
                                             bool missing_ok)
 {
+    fio_location from_location = is_dss_file(from_fullpath) ? FIO_DSS_HOST : FIO_DB_HOST;
     /* special treatment for global/pg_control */
-    if (file->external_dir_num == 0 && strcmp(file->rel_path, XLOG_CONTROL_FILE) == 0)
+    if (file->external_dir_num == 0 && strcmp(file->name, PG_XLOG_CONTROL_FILE) == 0)
     {
-        copy_pgcontrol_file(from_fullpath, FIO_DB_HOST,
+        copy_pgcontrol_file(from_fullpath, from_location,
                                             to_fullpath, FIO_BACKUP_HOST, file);
         return;
     }
@@ -815,7 +822,7 @@ backup_non_data_file(pgFile *file, pgFile *prev_file,
         file->mtime <= parent_backup_time)
     {
 
-        file->crc = fio_get_crc32(from_fullpath, FIO_DB_HOST, false);
+        file->crc = fio_get_crc32(from_fullpath, from_location, false);
 
         /* ...and checksum is the same... */
         if (EQ_TRADITIONAL_CRC32(file->crc, prev_file->crc))
@@ -825,8 +832,7 @@ backup_non_data_file(pgFile *file, pgFile *prev_file,
         }
     }
 
-    backup_non_data_file_internal(from_fullpath, FIO_DB_HOST,
-        to_fullpath, file, true);
+    backup_non_data_file_internal(from_fullpath, from_location, to_fullpath, file, true);
 }
 
 /*
@@ -901,8 +907,16 @@ restore_data_file(parray *parent_chain, pgFile *dest_file, FILE *out,
         * At this point we are sure, that something is going to be copied
         * Open source file.
         */
-        join_path_components(from_root, backup->root_dir, DATABASE_DIR);
-        join_path_components(from_fullpath, from_root, tmp_file->rel_path);
+        if (is_dss_type(tmp_file->type))
+        {
+            join_path_components(from_root, backup->root_dir, DSSDATA_DIR);
+            join_path_components(from_fullpath, from_root, tmp_file->rel_path);
+        }
+        else
+        {
+            join_path_components(from_root, backup->root_dir, DATABASE_DIR);
+            join_path_components(from_fullpath, from_root, tmp_file->rel_path);
+        }
 
         in = fopen(from_fullpath, PG_BINARY_R);
         if (in == NULL)
@@ -915,8 +929,8 @@ restore_data_file(parray *parent_chain, pgFile *dest_file, FILE *out,
         /* get headers for this file */
         if (use_headers && tmp_file->n_headers > 0)
             headers = get_data_file_headers(&(backup->hdr_map), tmp_file,
-                                                                    parse_program_version(backup->program_version),
-                                                                    true);
+                                            parse_program_version(backup->program_version),
+                                            true);
 
         if (use_headers && !headers && tmp_file->n_headers > 0)
             elog(ERROR, "Failed to get page headers for file \"%s\"", from_fullpath);
@@ -928,13 +942,13 @@ restore_data_file(parray *parent_chain, pgFile *dest_file, FILE *out,
         * copy the file from backup.
         */
         total_write_len += restore_data_file_internal(in, out, tmp_file,
-                                                                                parse_program_version(backup->program_version),
-                                                                                from_fullpath, to_fullpath, dest_file->n_blocks,
-                                                                                use_bitmap ? &(dest_file)->pagemap : NULL,
-                                                                                checksum_map, backup->checksum_version,
-                                                                                /* shiftmap can be used only if backup state precedes the shift */
-                                                                                backup->stop_lsn <= shift_lsn ? lsn_map : NULL,
-                                                                                headers);
+                                                      parse_program_version(backup->program_version),
+                                                      from_fullpath, to_fullpath, dest_file->n_blocks,
+                                                      use_bitmap ? &(dest_file)->pagemap : NULL,
+                                                      checksum_map, backup->checksum_version,
+                                                      /* shiftmap can be used only if backup state precedes the shift */
+                                                      backup->stop_lsn <= shift_lsn ? lsn_map : NULL,
+                                                      headers);
 
         if (fclose(in) != 0)
             elog(ERROR, "Cannot close file \"%s\": %s", from_fullpath,
@@ -984,8 +998,8 @@ restore_data_file_internal(FILE *in, FILE *out, pgFile *file, uint32 backup_vers
     * but should never happen in case of blocks from FULL backup.
     */
     if (fio_fseek(out, cur_pos_out) < 0)
-    elog(ERROR, "Cannot seek block %u of \"%s\": %s",
-    blknum, to_fullpath, strerror(errno));
+        elog(ERROR, "Cannot seek block %u of \"%s\": %s",
+            blknum, to_fullpath, strerror(errno));
 
     for (;;)
     {
@@ -1136,8 +1150,8 @@ restore_data_file_internal(FILE *in, FILE *out, pgFile *file, uint32 backup_vers
             cur_pos_in != headers[n_hdr].pos)
         {
             if (fseek(in, headers[n_hdr].pos, SEEK_SET) != 0)
-            elog(ERROR, "Cannot seek to offset %u of \"%s\": %s",
-            headers[n_hdr].pos, from_fullpath, strerror(errno));
+                elog(ERROR, "Cannot seek to offset %u of \"%s\": %s",
+                    headers[n_hdr].pos, from_fullpath, strerror(errno));
 
             cur_pos_in = headers[n_hdr].pos;
         }
@@ -1224,7 +1238,7 @@ restore_non_data_file_internal(FILE *in, FILE *out, pgFile *file,
                                                         const char *from_fullpath, const char *to_fullpath)
 {
     size_t     read_len = 0;
-    char      *buf = (char *)pgut_malloc(STDIO_BUFSIZE); /* 64kB buffer */
+    char       buf[STDIO_BUFSIZE] __attribute__((__aligned__(ALIGNOF_BUFFER))); /* 64kB buffer, need to be aligned */
 
     /* copy content */
     for (;;)
@@ -1251,10 +1265,6 @@ restore_non_data_file_internal(FILE *in, FILE *out, pgFile *file,
         if (feof(in))
             break;
     }
-
-    pg_free(buf);
-
-    
 }
 
 size_t
@@ -1355,15 +1365,17 @@ restore_non_data_file(parray *parent_chain, pgBackup *dest_backup,
             to_fullpath, strerror(errno));
     }
 
-    if (tmp_file->external_dir_num == 0)
-        join_path_components(from_root, tmp_backup->root_dir, DATABASE_DIR);
-    else
+    if (tmp_file->external_dir_num != 0)
     {
         char    external_prefix[MAXPGPATH];
 
         join_path_components(external_prefix, tmp_backup->root_dir, EXTERNAL_DIR);
         makeExternalDirPathByNum(from_root, external_prefix, tmp_file->external_dir_num);
     }
+    else if (is_dss_type(tmp_file->type))
+        join_path_components(from_root, tmp_backup->root_dir, DSSDATA_DIR);
+    else
+        join_path_components(from_root, tmp_backup->root_dir, DATABASE_DIR);
 
     join_path_components(from_fullpath, from_root, dest_file->rel_path);
 
@@ -1424,10 +1436,8 @@ bool backup_remote_file(const char *from_fullpath, const char *to_fullpath, pgFi
  * it is either small control file or already compressed cfs file.
  */
 void
-backup_non_data_file_internal(const char *from_fullpath,
-                                                            fio_location from_location,
-                                                            const char *to_fullpath, pgFile *file,
-                                                            bool missing_ok)
+backup_non_data_file_internal(const char *from_fullpath, fio_location from_location,
+                              const char *to_fullpath, pgFile *file, bool missing_ok)
 {
     FILE       *in = NULL;
     FILE       *out = NULL;
@@ -1448,9 +1458,12 @@ backup_non_data_file_internal(const char *from_fullpath,
             to_fullpath, strerror(errno));
 
     /* update file permission */
-    if (chmod(to_fullpath, file->mode) == -1)
-        elog(ERROR, "Cannot change mode of \"%s\": %s", to_fullpath,
-            strerror(errno));
+    if (!is_dss_file(from_fullpath))
+    {
+        if (chmod(to_fullpath, file->mode) == -1)
+            elog(ERROR, "Cannot change mode of \"%s\": %s", to_fullpath,
+                strerror(errno));
+    }
 
     /* backup remote file  */
     if (fio_is_remote(FIO_DB_HOST))
@@ -1466,7 +1479,7 @@ backup_non_data_file_internal(const char *from_fullpath,
         if (in == NULL)
         {
             /* maybe deleted, it's not error in case of backup */
-            if (errno == ENOENT)
+            if (is_file_delete(errno))
             {
                 if (missing_ok)
                 {
@@ -1648,7 +1661,7 @@ check_data_file(ConnectionArgs *arguments, pgFile *file,
         * If file is not found, this is not en error.
         * It could have been deleted by concurrent openGauss transaction.
         */
-        if (errno == ENOENT)
+        if (is_file_delete(errno))
         {
             elog(LOG, "File \"%s\" is not found", from_fullpath);
             return true;
@@ -1709,15 +1722,12 @@ validate_file_pages(pgFile *file, const char *fullpath, XLogRecPtr stop_lsn,
     int         n_hdr = -1;
     off_t       cur_pos_in = 0;
 
-    
-
     /* should not be possible */
     Assert(!(backup_version >= 20400 && file->n_headers <= 0));
 
     in = fopen(fullpath, PG_BINARY_R);
     if (in == NULL)
-    elog(ERROR, "Cannot open file \"%s\": %s",
-    fullpath, strerror(errno));
+        elog(ERROR, "Cannot open file \"%s\": %s", fullpath, strerror(errno));
 
     headers = get_data_file_headers(hdr_map, file, backup_version, false);
 
@@ -1732,7 +1742,6 @@ validate_file_pages(pgFile *file, const char *fullpath, XLogRecPtr stop_lsn,
 
     /* calc CRC of backup file */
     INIT_FILE_CRC32(use_crc32c, crc);
-
     /* read and validate pages one by one */
     while (true)
     {
@@ -1837,10 +1846,10 @@ validate_file_pages(pgFile *file, const char *fullpath, XLogRecPtr stop_lsn,
             const char *errormsg = NULL;
 
             uncompressed_size = do_decompress(page.data, BLCKSZ,
-                                                                      compressed_page.data,
-                                                                      compressed_size,
-                                                                      file->compress_alg,
-                                                                      &errormsg);
+                                              compressed_page.data,
+                                              compressed_size,
+                                              file->compress_alg,
+                                              &errormsg);
             if (uncompressed_size < 0 && errormsg != NULL)
             {
                 elog(WARNING, "An error occured during decompressing block %u of file \"%s\": %s",
@@ -1862,14 +1871,12 @@ validate_file_pages(pgFile *file, const char *fullpath, XLogRecPtr stop_lsn,
                 return false;
             }
 
-            rc = validate_one_page(page.data,
-            file->segno * RELSEG_SIZE + blknum,
-            stop_lsn, &page_st, checksum_version);
+            rc = validate_one_page(page.data, file->segno * RELSEG_SIZE + blknum,
+                                   stop_lsn, &page_st, checksum_version);
         }
         else
-        rc = validate_one_page(compressed_page.data,
-                                                file->segno * RELSEG_SIZE + blknum,
-                                                stop_lsn, &page_st, checksum_version);
+        rc = validate_one_page(compressed_page.data, file->segno * RELSEG_SIZE + blknum,
+                               stop_lsn, &page_st, checksum_version);
 
         switch (rc)
         {

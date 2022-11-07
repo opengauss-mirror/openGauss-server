@@ -309,7 +309,7 @@ bool errstart(int elevel, const char* filename, int lineno, const char* funcname
          */
         for (i = 0; i <= t_thrd.log_cxt.errordata_stack_depth; i++)
             elevel = Max(elevel, t_thrd.log_cxt.errordata[i].elevel);
-        if (elevel == FATAL && t_thrd.role == JOB_WORKER) {
+        if (elevel == FATAL && (t_thrd.role == JOB_WORKER || t_thrd.role == DMS_WORKER)) {
             elevel = ERROR;
         }
     }
@@ -851,11 +851,14 @@ int errcode_for_file_access(void)
 
             /* File not found */
         case ENOENT: /* No such file or directory */
+        case ERR_DSS_FILE_NOT_EXIST: /*  No such file in dss */
+        case ERR_DSS_DIR_NOT_EXIST: /* No such directory in dss */
             edata->sqlerrcode = ERRCODE_UNDEFINED_FILE;
             break;
 
             /* Duplicate file */
         case EEXIST: /* File exists */
+        case ERR_DSS_DIR_CREATE_DUPLICATED: /* File or directory already existed in DSS */
             edata->sqlerrcode = ERRCODE_DUPLICATE_FILE;
             break;
 
@@ -870,6 +873,7 @@ int errcode_for_file_access(void)
 
             /* Insufficient resources */
         case ENOSPC: /* No space left on device */
+        case ERR_DSS_NO_SPACE: /* No space left on dss */
             edata->sqlerrcode = ERRCODE_DISK_FULL;
             break;
 

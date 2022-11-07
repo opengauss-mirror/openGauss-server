@@ -164,6 +164,9 @@ const uint32 STANDBY_STMTHIST_VERSION_NUM = 92777;
 bool useLocalXid = false;
 #endif
 
+/* allow to store tables in segment storage while initdb */
+bool EnableInitDBSegment = false;
+
 /*
  *     EarlyBindingTLSVariables
  *         Bind static variables to another static TLS variable's address.

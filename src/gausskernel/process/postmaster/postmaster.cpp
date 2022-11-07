@@ -255,6 +255,11 @@
 
 #include "gs_ledger/blockchain.h"
 #include "communication/commproxy_interface.h"
+#include "storage/file/fio_device.h"
+#include "storage/dss/dss_adaptor.h"
+#include "storage/dss/dss_log.h"
+#include "ddes/dms/ss_switchover.h"
+#include "ddes/dms/ss_reform_common.h"
 
 #ifdef ENABLE_UT
 #define static
@@ -913,7 +918,7 @@ bool SetDBStateFileState(DbState state, bool optional)
         securec_check_intval(rc, , false);
 
         /* Write the new content into a temp file and rename it at last. */
-        int fd = open(gaussdb_state_file, O_RDONLY);
+        int fd = open(gaussdb_state_file, O_RDONLY, 0);
         if (fd == -1) {
             if (errno == ENOENT && optional) {
                 write_stderr("gaussdb.state does not exist, and skipt setting since it is optional.");
@@ -1570,6 +1575,25 @@ int PostmasterMain(int argc, char* argv[])
 
     InitializeNumLwLockPartitions();
 
+    if (dss_device_init(g_instance.attr.attr_storage.dss_attr.ss_dss_conn_path,
+        g_instance.attr.attr_storage.dss_attr.ss_enable_dss) !=  DSS_SUCCESS) {
+        write_stderr("failed to init dss device\n");
+        ExitPostmaster(1);
+    }
+    if (ENABLE_DSS) {
+        if (g_instance.attr.attr_storage.recovery_parse_workers > 1 ||
+            g_instance.attr.attr_storage.recovery_redo_workers_per_paser_worker > 1) {
+            write_stderr("Not support extreme RTO while DMS and DSS enabled, please cancel rto parameter\n");
+            ExitPostmaster(1);
+        }
+        
+        if (u_sess->attr.attr_common.XLogArchiveMode || strlen(u_sess->attr.attr_storage.XLogArchiveCommand) != 0) {
+            write_stderr("Not support archive function while DMS and DSS enabled\n");
+            ExitPostmaster(1);
+        }
+        dss_log_init();
+    }
+
     noProcLogicTid = GLOBAL_ALL_PROCS;
 
     if (FencedUDFMasterMode) {
@@ -1595,6 +1619,9 @@ int PostmasterMain(int argc, char* argv[])
         FencedUDFMasterMain(0, NULL);
         return 0;
     }
+    
+    /* Check DSS config */
+    initDSSConf();
 
     /* Verify that t_thrd.proc_cxt.DataDir looks reasonable */
     checkDataDir();
@@ -2320,14 +2347,96 @@ int PostmasterMain(int argc, char* argv[])
 
     /* PostmasterRandom wants its own copy */
     gettimeofday(&t_thrd.postmaster_cxt.random_start_time, NULL);
+    
+    /* load primary id and reform stable list from control file in shared storage based on dms and dss.
+     * (1) If the current instance startup in multimaster_primary mode, the condition is as follows:
+     *     (a) primary_id loaded from control file is equel to the current instance id, the current instance id
+     *      will be save straightly into control file.
+     *     (b) primary_id loaded from controlfile is not the current instance id, this indicate that the current node
+     *      node is multimaster_standby previously, then the current node will need to recovery by pg_xlog from
+     *      primary_id, so the current instance id will not be save as primary id until recovery finish.
+     * (2) If the current instance startup in multimaster_standby mode, get primary_id from control file.
+     */
+    if (g_instance.attr.attr_storage.dms_attr.enable_dms) {
+        /* load primary id and reform stable list from control file */
+        SSReadControlFile(REFORM_CTRL_PAGE);
+        int src_id = g_instance.dms_cxt.SSReformerControl.primaryInstId;
+        ereport(LOG, (errmsg("[SS reform] node%d starts, found cluster PRIMARY:%d",
+            g_instance.attr.attr_storage.dms_attr.instance_id, src_id)));
+        Assert(src_id >= 0 && src_id <= DMS_MAX_INSTANCE - 1);
+
+        if (!SS_MY_INST_IS_MASTER && g_instance.attr.attr_storage.dms_attr.enable_reform) {
+            const long SLEEP_ONE_SEC = 1000000L;
+            while (g_instance.dms_cxt.SSReformerControl.list_stable == 0) {
+                pg_usleep(SLEEP_ONE_SEC);
+                SSReadControlFile(REFORM_CTRL_PAGE);
+                ereport(WARNING, (errmsg("[SS reform] node%d waiting for PRIMARY:%d to finish 1st reform",
+                    g_instance.attr.attr_storage.dms_attr.instance_id, src_id)));
+            }
+            ereport(LOG, (errmsg("[SS reform] Success: node:%d wait for PRIMARY:%d to finish 1st reform",
+                g_instance.attr.attr_storage.dms_attr.instance_id, src_id)));
+        }
+    }
+
+    if (SS_PRIMARY_MODE) {
+        if (dss_set_server_status_wrapper(true) != GS_SUCCESS) {
+            ereport(FATAL, (errmsg("Could not set dssserver flag, vgname: \"%s\", socketpath: \"%s\"",
+                g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name,
+                g_instance.attr.attr_storage.dss_attr.ss_dss_conn_path),
+                errhint("Check vgname and socketpath and restart later.")));
+        }
+        ereport(LOG, (errmsg("set dss server status as primary")));
+    } else if (SS_STANDBY_MODE) {
+        if (dss_set_server_status_wrapper(false) != GS_SUCCESS) {
+            ereport(FATAL, (errmsg("Could not set dssserver flag, vgname: \"%s\", socketpath: \"%s\"",
+                g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name,
+                g_instance.attr.attr_storage.dss_attr.ss_dss_conn_path),
+                errhint("Check vgname and socketpath and restart later.")));
+        }
+        ereport(LOG, (errmsg("set dss server status as standby")));
+    }
+
+    /*
+     * Save backend variables for DCF call back thread, 
+     * the saved backend variables will be restored in
+     * DCF call back thread share memory init function.
+     */
+    if (g_instance.attr.attr_storage.dcf_attr.enable_dcf || g_instance.attr.attr_storage.dms_attr.enable_dms) {
+        int ss_rc = memset_s(&port, sizeof(port), 0, sizeof(port));
+        securec_check(ss_rc, "\0", "\0");
+        port.sock = PGINVALID_SOCKET;
+        BackendVariablesGlobal = static_cast<BackendParameters *>(palloc(sizeof(BackendParameters)));
+        save_backend_variables(BackendVariablesGlobal, &port);
+
+        if (g_instance.attr.attr_storage.dms_attr.enable_dms) {
+            /* need to initialize before STARTUP */
+            DMSInit();
+        }
+    }
 
     /*
      * We're ready to rock and roll...
      */
     ShareStorageInit();
-    g_instance.pid_cxt.StartupPID = initialize_util_thread(STARTUP);
-    Assert(g_instance.pid_cxt.StartupPID != 0);
-    pmState = PM_STARTUP;
+    if (ENABLE_DMS && ENABLE_REFORM) {
+        if (!DMSWaitInitStartup()) {
+            if (g_instance.pid_cxt.StartupPID == 0) {
+                ereport(LOG, (errmsg("[SS reform] Node:%d first startup fail and exit", SS_MY_INST_ID)));
+                KillGraceThreads();
+                WaitGraceThreadsExit();
+
+                // threading: do not clean sema, maybe other thread is using it.
+                cancelSemphoreRelease();
+                cancelIpcMemoryDetach();
+
+                ExitPostmaster(0);
+            }
+        }
+    } else {
+        g_instance.pid_cxt.StartupPID = initialize_util_thread(STARTUP);
+        Assert(g_instance.pid_cxt.StartupPID != 0);
+        pmState = PM_STARTUP;
+    }
 
 #ifdef ENABLE_MULTIPLE_NODES
 
@@ -2346,18 +2455,6 @@ int PostmasterMain(int argc, char* argv[])
 
     load_searchserver_library();
 #endif
-    /*
-     * Save backend variables for DCF call back thread,
-     * the saved backend variables will be restored in
-     * DCF call back thread share memory init function.
-     */
-    if (g_instance.attr.attr_storage.dcf_attr.enable_dcf) {
-        int ss_rc = memset_s(&port, sizeof(port), 0, sizeof(port));
-        securec_check(ss_rc, "\0", "\0");
-        port.sock = PGINVALID_SOCKET;
-        BackendVariablesGlobal = static_cast<BackendParameters *>(palloc(sizeof(BackendParameters)));
-        save_backend_variables(BackendVariablesGlobal, &port);
-    }
     /* If start with plpython fenced mode, we just startup as fenced mode */
     if (PythonFencedMasterModel) {
         fencedMasterPID = StartUDFMaster();
@@ -2529,8 +2626,13 @@ static void checkDataDir(void)
 
     /* Look for PG_VERSION before looking for pg_control */
     ValidatePgVersion(t_thrd.proc_cxt.DataDir);
-
-    int ret = snprintf_s(path, sizeof(path), MAXPGPATH - 1, "%s/global/pg_control", t_thrd.proc_cxt.DataDir);
+    
+    int ret = 0;
+    if (ENABLE_DSS) {
+        ret = snprintf_s(path, sizeof(path), MAXPGPATH - 1, "%s", XLOG_CONTROL_FILE);
+    } else {
+        ret = snprintf_s(path, sizeof(path), MAXPGPATH - 1, "%s/%s", t_thrd.proc_cxt.DataDir, XLOG_CONTROL_FILE);
+    }
     securec_check_intval(ret, , );
     fp = AllocateFile(path, PG_BINARY_R);
 
@@ -2611,12 +2713,22 @@ static void CheckShareStorageConfigConflicts(void)
 
         if ((uint64)g_instance.attr.attr_storage.xlog_file_size % XLogSegSize != 0) {
             ereport(ERROR, (errcode(ERRCODE_SYSTEM_ERROR),
-                errmsg("value of \"xlog_file_size\" %ld must be an integer multiple of %u",
+                errmsg("value of \"xlog_file_size\" %ld must be an integer multiple of %lu",
                     g_instance.attr.attr_storage.xlog_file_size, XLogSegSize)));
         }
 
         if (g_instance.attr.attr_storage.xlog_lock_file_path == NULL) {
             ereport(LOG, (errmsg("use scsi to preempt shared storage")));
+        }
+    }
+
+    if (g_instance.attr.attr_storage.dss_attr.ss_enable_dss) {
+        char *temp_tablespaces = u_sess->attr.attr_storage.temp_tablespaces;
+        if (temp_tablespaces != NULL && strlen(temp_tablespaces) > 0) {
+            ereport(ERROR,
+                (errcode(ERRCODE_SYSTEM_ERROR),
+                    errmsg("shared storage mode could not support specifics tablespace(s)."),
+                    errhint("Either set temp_tablespaces to NULL, or turn off ss_enable_dss.")));
         }
     }
 }
@@ -2816,7 +2928,7 @@ static int ServerLoop(void)
     /* Database Security: Support database audit */
     char details[PGAUDIT_MAXLENGTH] = {0};
     bool threadPoolActivated = g_instance.attr.attr_common.enable_thread_pool;
-
+    bool startup_reform_finish = false;
     /* make sure gaussdb can receive request */
     DISABLE_MEMORY_PROTECT();
 
@@ -2885,6 +2997,20 @@ static int ServerLoop(void)
 
         gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
         (void)gs_signal_unblock_sigusr2();
+
+        if (ENABLE_DMS && ENABLE_REFORM && g_instance.dms_cxt.SSRecoveryInfo.startup_reform
+            && !startup_reform_finish) {
+            ereport(LOG, (errmsg("[SS reform] Node:%d first-round reform start wait.", SS_MY_INST_ID)));
+            if (!DMSWaitReform()) {
+                ereport(WARNING, (errmsg("[SS reform] Node:%d first-round reform failed, shutdown now",
+                                         SS_MY_INST_ID)));
+                (void)gs_signal_send(PostmasterPid, SIGTERM);
+                startup_reform_finish = true;
+            } else {
+                ereport(LOG, (errmsg("[SS reform] Node:%d first-round reform success.", SS_MY_INST_ID)));
+                startup_reform_finish = true;
+            }
+        }
 
         this_start_poll_time = mc_timers_us();
         if ((this_start_poll_time - last_start_loop_time) != 0) {
@@ -3174,7 +3300,8 @@ static int ServerLoop(void)
         if (!u_sess->proc_cxt.IsBinaryUpgrade && g_instance.pid_cxt.AutoVacPID == 0 &&
             (AutoVacuumingActive() || t_thrd.postmaster_cxt.start_autovac_launcher) && pmState == PM_RUN &&
             !dummyStandbyMode && u_sess->attr.attr_common.upgrade_mode != 1 &&
-            !g_instance.streaming_dr_cxt.isInSwitchover) {
+            !g_instance.streaming_dr_cxt.isInSwitchover &&
+            !SS_STANDBY_MODE && !SS_PERFORMING_SWITCHOVER && !SS_STANDBY_FAILOVER) {
             g_instance.pid_cxt.AutoVacPID = initialize_util_thread(AUTOVACUUM_LAUNCHER);
 
             if (g_instance.pid_cxt.AutoVacPID != 0)
@@ -3262,7 +3389,7 @@ static int ServerLoop(void)
 
         /* If we have lost the snapshot capturer, try to start a new one */
         if ((g_instance.role == VSINGLENODE) && pmState == PM_RUN &&
-                g_instance.pid_cxt.TxnSnapCapturerPID == 0 && !dummyStandbyMode)
+                g_instance.pid_cxt.TxnSnapCapturerPID == 0 && !dummyStandbyMode && !ENABLE_DMS)
             g_instance.pid_cxt.TxnSnapCapturerPID = StartTxnSnapCapturer();
 
         /* If we have lost the cfs shrinker, try to start a new one */
@@ -3270,26 +3397,31 @@ static int ServerLoop(void)
             g_instance.pid_cxt.CfsShrinkerPID = StartCfsShrinkerCapturer();
 
         /* If we have lost the rbcleaner, try to start a new one */
-        if (ENABLE_TCAP_RECYCLEBIN && (g_instance.role == VSINGLENODE) && pmState == PM_RUN && g_instance.pid_cxt.RbCleanrPID == 0 && !dummyStandbyMode)
+        if (ENABLE_TCAP_RECYCLEBIN && (g_instance.role == VSINGLENODE) && pmState == PM_RUN &&
+            g_instance.pid_cxt.RbCleanrPID == 0 && !dummyStandbyMode && !ENABLE_DMS)
             g_instance.pid_cxt.RbCleanrPID = StartRbCleaner();
 
         /* If we have lost the stats collector, try to start a new one */
         if ((IS_PGXC_COORDINATOR || (g_instance.role == VSINGLENODE)) && g_instance.pid_cxt.SnapshotPID == 0 &&
-            u_sess->attr.attr_common.enable_wdr_snapshot && pmState == PM_RUN)
+            u_sess->attr.attr_common.enable_wdr_snapshot && pmState == PM_RUN && !SS_STANDBY_MODE &&
+            !SS_PERFORMING_SWITCHOVER && !SS_STANDBY_FAILOVER)
             g_instance.pid_cxt.SnapshotPID = snapshot_start();
 
-        if (ENABLE_ASP && g_instance.pid_cxt.AshPID == 0 && pmState == PM_RUN && !dummyStandbyMode)
+        if (ENABLE_ASP && g_instance.pid_cxt.AshPID == 0 && pmState == PM_RUN && !dummyStandbyMode
+            && !SS_STANDBY_MODE && !SS_PERFORMING_SWITCHOVER && !SS_STANDBY_FAILOVER)
             g_instance.pid_cxt.AshPID = initialize_util_thread(ASH_WORKER);
 
         /* If we have lost the full sql flush thread, try to start a new one */
-        if (ENABLE_STATEMENT_TRACK && g_instance.pid_cxt.StatementPID == 0 && (pmState == PM_RUN || pmState == PM_HOT_STANDBY))
+        if (ENABLE_STATEMENT_TRACK && g_instance.pid_cxt.StatementPID == 0 && (pmState == PM_RUN || pmState == PM_HOT_STANDBY)
+            && !SS_STANDBY_MODE && !SS_PERFORMING_SWITCHOVER && !SS_STANDBY_FAILOVER)
             g_instance.pid_cxt.StatementPID = initialize_util_thread(TRACK_STMT_WORKER);
 
         if ((IS_PGXC_COORDINATOR || IS_SINGLE_NODE) && u_sess->attr.attr_common.enable_instr_rt_percentile &&
             g_instance.pid_cxt.PercentilePID == 0 &&
             pmState == PM_RUN)
             g_instance.pid_cxt.PercentilePID = initialize_util_thread(PERCENTILE_WORKER);
-        if (g_instance.stat_cxt.stack_perf_start) {
+        if ((ENABLE_DMS && pmState == PM_RUN && g_instance.stat_cxt.stack_perf_start)
+            || (!ENABLE_DMS && g_instance.stat_cxt.stack_perf_start)) {
             g_instance.pid_cxt.StackPerfPID = initialize_util_thread(STACK_PERF_WORKER);
             g_instance.stat_cxt.stack_perf_start = false;
         }
@@ -3320,8 +3452,10 @@ static int ServerLoop(void)
              t_thrd.postmaster_cxt.HaShmData->current_mode == PRIMARY_MODE) &&
 #endif
             u_sess->attr.attr_common.upgrade_mode != 1 &&
-            g_instance.pid_cxt.TwoPhaseCleanerPID == 0 && pmState == PM_RUN)
+            g_instance.pid_cxt.TwoPhaseCleanerPID == 0 && pmState == PM_RUN
+            && !SS_STANDBY_MODE && !SS_PERFORMING_SWITCHOVER && !SS_STANDBY_FAILOVER) {
             g_instance.pid_cxt.TwoPhaseCleanerPID = initialize_util_thread(TWOPASECLEANER);
+        }
 
         /* If we have lost the LWLock monitor, try to start a new one */
         if (g_instance.pid_cxt.FaultMonitorPID == 0 && pmState == PM_RUN)
@@ -4130,6 +4264,11 @@ int ProcessStartupPacket(Port* port, bool SSLdone)
             if (hashmdata->current_mode == STANDBY_MODE && !g_instance.attr.attr_storage.EnableHotStandby) {
                 ereport(elevel, (errcode(ERRCODE_CANNOT_CONNECT_NOW),
                         errmsg("can not accept connection if hot standby off")));
+            }
+
+            if (SS_IN_REFORM) {
+                ereport(ERROR, (errcode(ERRCODE_CANNOT_CONNECT_NOW),
+                        errmsg("cannot accept connection during SS cluster reform")));
             }
 #endif
         }
@@ -5241,7 +5380,6 @@ static void pmdie(SIGNAL_ARGS)
                 if (g_instance.pid_cxt.WalWriterPID != 0)
                     signal_child(g_instance.pid_cxt.WalWriterPID, SIGTERM);
 
-
                 pmState = PM_WAIT_BACKENDS;
                 if (ENABLE_THREAD_POOL) {
                     g_threadPoolControler->EnableAdjustPool();
@@ -5328,6 +5466,15 @@ static void PrepareDemoteResponse(void)
     if (NoDemote == g_instance.demotion)
         return;
 
+    if (ENABLE_DMS) {
+        ereport(LOG,
+            (errmsg("[SS switchover] primary demoting: shutdown ckpt done, demote success. restart now")));
+        Assert(g_instance.dms_cxt.SSClusterState == NODESTATE_PRIMARY_DEMOTING);
+        g_instance.dms_cxt.SSClusterState = NODESTATE_PROMOTE_APPROVE;
+
+        allow_immediate_pgstat_restart();
+        return;
+    }
     SetWalsndsNodeState(NODESTATE_PROMOTE_APPROVE, NODESTATE_STANDBY_REDIRECT);
 
     /*
@@ -5475,6 +5622,11 @@ static void ProcessDemoteRequest(void)
             g_instance.demotion = FastDemote;
             ereport(LOG, (errmsg("received fast demote request")));
 
+            /* Under SS, demotion terminates only backends and ckpt threads. */
+            if (ENABLE_DMS) {
+                goto dms_demote;
+            }
+
             if (g_instance.pid_cxt.StartupPID != 0)
                 signal_child(g_instance.pid_cxt.StartupPID, SIGTERM);
 
@@ -5596,6 +5748,7 @@ static void ProcessDemoteRequest(void)
 
 #endif   /* ENABLE_MULTIPLE_NODES */
 
+dms_demote:
             if (pmState == PM_RECOVERY) {
                 /*
                  * Only startup, bgwriter, and checkpointer should be active
@@ -5612,40 +5765,108 @@ static void ProcessDemoteRequest(void)
                     g_threadPoolControler->ShutDownScheduler(true, true);
                     g_threadPoolControler->ShutDownThreads();
                 }
-                /* shut down all backends and autovac workers */
-                (void)SignalSomeChildren(SIGTERM, BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC);
 
-                /* and the autovac launcher too */
-                if (g_instance.pid_cxt.AutoVacPID != 0)
-                    signal_child(g_instance.pid_cxt.AutoVacPID, SIGTERM);
+                /* cancel TXNs on all nodes in SS and kill only backends and autovac threads */
+                if (ENABLE_DMS) {
+                    if (g_instance.pid_cxt.AshPID != 0) {
+                        Assert(!dummyStandbyMode);
+                        signal_child(g_instance.pid_cxt.AshPID, SIGTERM);
+                    }
 
-                if (g_instance.pid_cxt.UndoLauncherPID != 0)
-                    signal_child(g_instance.pid_cxt.UndoLauncherPID, SIGTERM);
-#ifndef ENABLE_MULTIPLE_NODES
-                if (g_instance.pid_cxt.ApplyLauncerPID != 0)
-                    signal_child(g_instance.pid_cxt.ApplyLauncerPID, SIGTERM);
+                    if (g_instance.pid_cxt.TwoPhaseCleanerPID != 0)
+                        signal_child(g_instance.pid_cxt.TwoPhaseCleanerPID, SIGTERM);
+
+                    if (g_instance.pid_cxt.StatementPID!= 0) {
+                        Assert(!dummyStandbyMode);
+                        signal_child(g_instance.pid_cxt.StatementPID, SIGTERM);
+                    }
+
+                    /* and the walwriter too, to avoid checkpoint hang after ss switchover */
+                    if (g_instance.pid_cxt.WalWriterPID != 0)
+                        signal_child(g_instance.pid_cxt.WalWriterPID, SIGTERM);
+                    StopAliveBuildSender();
+
+                    if (g_instance.pid_cxt.WalWriterAuxiliaryPID != 0)
+                        signal_child(g_instance.pid_cxt.WalWriterAuxiliaryPID, SIGTERM);
+
+                    /* shut down all backends and autovac workers */
+                    (void)SignalSomeChildren(SIGTERM, BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC);
+
+                    /* and the autovac launcher too */
+                    if (g_instance.pid_cxt.AutoVacPID != 0) {
+                        signal_child(g_instance.pid_cxt.AutoVacPID, SIGTERM);
+                    }
+
+                    if (g_instance.pid_cxt.UndoRecyclerPID != 0) {
+                        signal_child(g_instance.pid_cxt.UndoRecyclerPID, SIGTERM);
+                    }
+
+                    if (g_instance.pid_cxt.WLMCollectPID != 0) {
+                        WLMProcessThreadShutDown();
+                        signal_child(g_instance.pid_cxt.WLMCollectPID, SIGTERM);
+                    }
+
+                    if (g_instance.pid_cxt.WLMMonitorPID != 0)
+                        signal_child(g_instance.pid_cxt.WLMMonitorPID, SIGTERM);
+
+                    if (g_instance.pid_cxt.WLMArbiterPID != 0)
+                        signal_child(g_instance.pid_cxt.WLMArbiterPID, SIGTERM);
+
+                    /* kill it once again since WLMonitor would start it */
+                    if (g_instance.pid_cxt.WLMCollectPID != 0) {
+                        Assert(!dummyStandbyMode);
+                        signal_child(g_instance.pid_cxt.WLMCollectPID, SIGTERM);
+                    }
+
+                    if (g_instance.pid_cxt.PercentilePID != 0) {
+                        Assert(!dummyStandbyMode);
+                        signal_child(g_instance.pid_cxt.PercentilePID, SIGTERM);
+                    }
+
+                    if (g_instance.pid_cxt.SnapshotPID != 0) {
+                        Assert(!dummyStandbyMode);
+                        signal_child(g_instance.pid_cxt.SnapshotPID, SIGTERM);
+                    }
+
+                    ereport(LOG, (errmsg("[SS switchover] primary demoting: "
+                        "killed threads, waiting for backends die")));
+                    pmState = PM_WAIT_BACKENDS;
+                } else {
+                    /* shut down all backends and autovac workers */
+                    (void)SignalSomeChildren(SIGTERM, BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC);
+
+                    /* and the autovac launcher too */
+                    if (g_instance.pid_cxt.AutoVacPID != 0)
+                        signal_child(g_instance.pid_cxt.AutoVacPID, SIGTERM);
+
+                    if (g_instance.pid_cxt.UndoLauncherPID != 0)
+                        signal_child(g_instance.pid_cxt.UndoLauncherPID, SIGTERM);
+#if !defined(ENABLE_MULTIPLE_NODES)
+                    if (g_instance.pid_cxt.ApplyLauncerPID != 0)
+                        signal_child(g_instance.pid_cxt.ApplyLauncerPID, SIGTERM);
 #endif
-                if (g_instance.pid_cxt.GlobalStatsPID != 0)
-                    signal_child(g_instance.pid_cxt.GlobalStatsPID, SIGTERM);
+                    if (g_instance.pid_cxt.GlobalStatsPID != 0)
+                        signal_child(g_instance.pid_cxt.GlobalStatsPID, SIGTERM);
 
-                if (g_instance.pid_cxt.UndoRecyclerPID != 0)
-                    signal_child(g_instance.pid_cxt.UndoRecyclerPID, SIGTERM);
+                    if (g_instance.pid_cxt.UndoRecyclerPID != 0)
+                        signal_child(g_instance.pid_cxt.UndoRecyclerPID, SIGTERM);
 
-                if (g_instance.pid_cxt.PgJobSchdPID != 0)
-                    signal_child(g_instance.pid_cxt.PgJobSchdPID, SIGTERM);
+                    if (g_instance.pid_cxt.PgJobSchdPID != 0)
+                        signal_child(g_instance.pid_cxt.PgJobSchdPID, SIGTERM);
 
-                if ((IS_PGXC_COORDINATOR) && g_instance.pid_cxt.CommPoolerCleanPID != 0)
-                    signal_child(g_instance.pid_cxt.CommPoolerCleanPID, SIGTERM);
+                    if ((IS_PGXC_COORDINATOR) && g_instance.pid_cxt.CommPoolerCleanPID != 0)
+                        signal_child(g_instance.pid_cxt.CommPoolerCleanPID, SIGTERM);
 
-                /* and the walwriter too */
-                if (g_instance.pid_cxt.WalWriterPID != 0)
-                    signal_child(g_instance.pid_cxt.WalWriterPID, SIGTERM);
-                StopAliveBuildSender();
+                    /* and the walwriter too */
+                    if (g_instance.pid_cxt.WalWriterPID != 0)
+                        signal_child(g_instance.pid_cxt.WalWriterPID, SIGTERM);
+                    StopAliveBuildSender();
 
-                if (g_instance.pid_cxt.WalWriterAuxiliaryPID != 0)
-                    signal_child(g_instance.pid_cxt.WalWriterAuxiliaryPID, SIGTERM);
+                    if (g_instance.pid_cxt.WalWriterAuxiliaryPID != 0)
+                        signal_child(g_instance.pid_cxt.WalWriterAuxiliaryPID, SIGTERM);
 
-                pmState = PM_WAIT_BACKENDS;
+                    pmState = PM_WAIT_BACKENDS;
+                }
             }
             break;
 
@@ -5900,7 +6121,8 @@ static void reaper(SIGNAL_ARGS)
              */
             if (!u_sess->proc_cxt.IsBinaryUpgrade && AutoVacuumingActive() && g_instance.pid_cxt.AutoVacPID == 0 &&
                 !dummyStandbyMode && u_sess->attr.attr_common.upgrade_mode != 1 &&
-                !g_instance.streaming_dr_cxt.isInSwitchover)
+                !g_instance.streaming_dr_cxt.isInSwitchover &&
+                !SS_STANDBY_MODE && !SS_PERFORMING_SWITCHOVER && !SS_STANDBY_FAILOVER)
                 g_instance.pid_cxt.AutoVacPID = initialize_util_thread(AUTOVACUUM_LAUNCHER);
 
             /* Before GRAND VERSION NUM 81000, we do not support scheduled job. */
@@ -5945,27 +6167,31 @@ static void reaper(SIGNAL_ARGS)
                 g_instance.pid_cxt.PgStatPID = pgstat_start();
 
             if ((g_instance.role == VSINGLENODE) && pmState == PM_RUN &&
-                    g_instance.pid_cxt.TxnSnapCapturerPID == 0 && !dummyStandbyMode)
+                    g_instance.pid_cxt.TxnSnapCapturerPID == 0 && !dummyStandbyMode && !ENABLE_DMS)
                 g_instance.pid_cxt.TxnSnapCapturerPID = StartTxnSnapCapturer();
 
             /* If we have lost the cfs shrinker, try to start a new one */
             if (g_instance.pid_cxt.CfsShrinkerPID == 0 && pmState <= PM_RUN)
                 g_instance.pid_cxt.CfsShrinkerPID = StartCfsShrinkerCapturer();
 
-            if (ENABLE_TCAP_RECYCLEBIN && (g_instance.role == VSINGLENODE) && pmState == PM_RUN && g_instance.pid_cxt.RbCleanrPID== 0 && !dummyStandbyMode)
+            if (ENABLE_TCAP_RECYCLEBIN && (g_instance.role == VSINGLENODE) && pmState == PM_RUN &&
+                g_instance.pid_cxt.RbCleanrPID == 0 && !dummyStandbyMode && !ENABLE_DMS)
                 g_instance.pid_cxt.RbCleanrPID = StartRbCleaner();
 
-            if ((IS_PGXC_COORDINATOR || (g_instance.role == VSINGLENODE)) && u_sess->attr.attr_common.enable_wdr_snapshot &&
-                g_instance.pid_cxt.SnapshotPID == 0 && !dummyStandbyMode)
+            if ((IS_PGXC_COORDINATOR || (g_instance.role == VSINGLENODE)) &&
+                u_sess->attr.attr_common.enable_wdr_snapshot && g_instance.pid_cxt.SnapshotPID == 0 &&
+                !dummyStandbyMode && !SS_STANDBY_MODE && !SS_PERFORMING_SWITCHOVER && !SS_STANDBY_FAILOVER)
                 g_instance.pid_cxt.SnapshotPID = snapshot_start();
             if ((IS_PGXC_COORDINATOR || IS_SINGLE_NODE) && u_sess->attr.attr_common.enable_instr_rt_percentile &&
                 g_instance.pid_cxt.PercentilePID == 0 && !dummyStandbyMode)
                 g_instance.pid_cxt.PercentilePID = initialize_util_thread(PERCENTILE_WORKER);
 
-            if (ENABLE_ASP && g_instance.pid_cxt.AshPID == 0 && !dummyStandbyMode)
+            if (ENABLE_ASP && g_instance.pid_cxt.AshPID == 0 && !dummyStandbyMode
+                && !SS_STANDBY_MODE && !SS_PERFORMING_SWITCHOVER && !SS_STANDBY_FAILOVER)
                 g_instance.pid_cxt.AshPID = initialize_util_thread(ASH_WORKER);
 
-            if (ENABLE_STATEMENT_TRACK && g_instance.pid_cxt.StatementPID == 0)
+            if (ENABLE_STATEMENT_TRACK && g_instance.pid_cxt.StatementPID == 0
+                && !SS_STANDBY_MODE && !SS_PERFORMING_SWITCHOVER && !SS_STANDBY_FAILOVER)
                 g_instance.pid_cxt.StatementPID = initialize_util_thread(TRACK_STMT_WORKER);
 
             /* Database Security: Support database audit */
@@ -5991,8 +6217,10 @@ static void reaper(SIGNAL_ARGS)
                  t_thrd.postmaster_cxt.HaShmData->current_mode == PRIMARY_MODE) &&
 #endif
                 u_sess->attr.attr_common.upgrade_mode != 1 &&
-                g_instance.pid_cxt.TwoPhaseCleanerPID == 0)
+                g_instance.pid_cxt.TwoPhaseCleanerPID == 0 && !SS_STANDBY_MODE && !SS_PERFORMING_SWITCHOVER
+                && !SS_STANDBY_FAILOVER) {
                 g_instance.pid_cxt.TwoPhaseCleanerPID = initialize_util_thread(TWOPASECLEANER);
+            }
 
             if (g_instance.pid_cxt.FaultMonitorPID == 0)
                 g_instance.pid_cxt.FaultMonitorPID = initialize_util_thread(FAULTMONITOR);
@@ -6196,8 +6424,10 @@ static void reaper(SIGNAL_ARGS)
                 if (g_instance.pid_cxt.PgStatPID != 0)
                     signal_child(g_instance.pid_cxt.PgStatPID, SIGQUIT);
 
-                if (g_instance.pid_cxt.TxnSnapCapturerPID != 0)
-                    signal_child(g_instance.pid_cxt.TxnSnapCapturerPID, SIGQUIT);
+                if (!SS_PERFORMING_SWITCHOVER) {
+                    if (g_instance.pid_cxt.TxnSnapCapturerPID != 0)
+                        signal_child(g_instance.pid_cxt.TxnSnapCapturerPID, SIGQUIT);
+                }
 
                 if (g_instance.pid_cxt.CfsShrinkerPID != 0)
                     signal_child(g_instance.pid_cxt.CfsShrinkerPID, SIGQUIT);
@@ -6465,7 +6695,7 @@ static void reaper(SIGNAL_ARGS)
             if (!EXIT_STATUS_0(exitstatus))
                 LogChildExit(LOG, _("snapshot collector process"), pid, exitstatus);
 
-            if (pmState == PM_RUN)
+            if (pmState == PM_RUN && !SS_STANDBY_MODE && !SS_PERFORMING_SWITCHOVER && !SS_STANDBY_FAILOVER)
                 g_instance.pid_cxt.SnapshotPID = snapshot_start();
             continue;
         }
@@ -6477,7 +6707,8 @@ static void reaper(SIGNAL_ARGS)
             if (!EXIT_STATUS_0(exitstatus))
                 LogChildExit(LOG, _("Active session history collector process"), pid, exitstatus);
 
-            if (pmState == PM_RUN && ENABLE_ASP)
+            if (pmState == PM_RUN && ENABLE_ASP && !SS_STANDBY_MODE && !SS_PERFORMING_SWITCHOVER
+                && !SS_STANDBY_FAILOVER)
                 g_instance.pid_cxt.AshPID = initialize_util_thread(ASH_WORKER);
             continue;
         }
@@ -6489,7 +6720,8 @@ static void reaper(SIGNAL_ARGS)
             if (!EXIT_STATUS_0(exitstatus))
                 LogChildExit(LOG, _("full SQL statement flush process"), pid, exitstatus);
 
-            if (pmState == PM_RUN && ENABLE_STATEMENT_TRACK)
+            if (pmState == PM_RUN && ENABLE_STATEMENT_TRACK && !SS_STANDBY_MODE && !SS_PERFORMING_SWITCHOVER
+                && !SS_STANDBY_FAILOVER)
                 g_instance.pid_cxt.StatementPID = initialize_util_thread(TRACK_STMT_WORKER);
             continue;
         }
@@ -7279,7 +7511,10 @@ static void PostmasterStateMachine(void)
          * later after writing the checkpoint record, like the archiver
          * process.
          */
-        if (CountChildren(BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC) == 0 && g_instance.pid_cxt.StartupPID == 0 &&
+        if ((SS_PERFORMING_SWITCHOVER && CountChildren(BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC) == 0 &&
+            g_instance.pid_cxt.AshPID == 0 && g_instance.pid_cxt.TwoPhaseCleanerPID == 0 &&
+            g_instance.pid_cxt.StatementPID == 0 && g_instance.pid_cxt.PercentilePID == 0) ||
+            (CountChildren(BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC) == 0 && g_instance.pid_cxt.StartupPID == 0 &&
             g_instance.pid_cxt.TwoPhaseCleanerPID == 0 && g_instance.pid_cxt.FaultMonitorPID == 0 &&
             g_instance.pid_cxt.WalReceiverPID == 0 && g_instance.pid_cxt.WalRcvWriterPID == 0 &&
             g_instance.pid_cxt.DataReceiverPID == 0 && g_instance.pid_cxt.DataRcvWriterPID == 0 &&
@@ -7309,7 +7544,7 @@ static void PostmasterStateMachine(void)
 #ifndef ENABLE_MULTIPLE_NODES
             g_instance.pid_cxt.ApplyLauncerPID == 0 &&
 #endif
-            IsAllPageWorkerExit() && IsAllBuildSenderExit()) {
+            IsAllPageWorkerExit() && IsAllBuildSenderExit())) {
             if (g_instance.fatal_error) {
                 /*
                  * Start waiting for dead_end children to die.	This state
@@ -7434,10 +7669,12 @@ static void PostmasterStateMachine(void)
          */
         if (DLGetHead(g_instance.backend_list) == NULL && g_instance.pid_cxt.PgArchPID == 0 &&
             g_instance.pid_cxt.PgStatPID == 0 && AuditAllShutDown() &&
-            ckpt_all_flush_buffer_thread_exit() && ObsArchAllShutDown()) {
+            ckpt_all_flush_buffer_thread_exit() && ObsArchAllShutDown() && !SS_PERFORMING_SWITCHOVER) {
 
             AsssertAllChildThreadExit();
             /* syslogger is not considered here */
+            pmState = PM_NO_CHILDREN;
+        } else if (SS_PERFORMING_SWITCHOVER) {
             pmState = PM_NO_CHILDREN;
         }
     }
@@ -7536,8 +7773,11 @@ static void PostmasterStateMachine(void)
             if (g_threadPoolControler && g_threadPoolControler->GetScheduler()->HasShutDown() == false)
                 g_threadPoolControler->ShutDownScheduler(true, false);
         }
-        shmem_exit(1);
-        reset_shared(g_instance.attr.attr_network.PostPortNumber);
+        
+        if (!ENABLE_DMS) {
+            shmem_exit(1);
+            reset_shared(g_instance.attr.attr_network.PostPortNumber);
+        }
 
         /* after reseting shared memory, we shall reset col-space cache.
          * all the data of this cache will be out of date after switchover.
@@ -7548,7 +7788,7 @@ static void PostmasterStateMachine(void)
         /* if failed to enter archive-recovery state, then reboot as primary. */
         {
             volatile HaShmemData* hashmdata = t_thrd.postmaster_cxt.HaShmData;
-            hashmdata->current_mode = STANDBY_MODE;
+            hashmdata->current_mode = ENABLE_DMS ? NORMAL_MODE : STANDBY_MODE;
             NotifyGscHotStandby();
             UpdateOptsFile();
             ereport(LOG, (errmsg("archive recovery started")));
@@ -7684,6 +7924,11 @@ static bool SignalSomeChildren(int signal, int target)
 bool SignalCancelAllBackEnd()
 {
     return SignalSomeChildren(SIGINT, BACKEND_TYPE_NORMAL);
+}
+
+void SignalTermAllBackEnd()
+{
+    (void)SignalSomeChildren(SIGTERM, BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC);
 }
 
 static int IsHaWhiteListIp(const Port* port)
@@ -8256,6 +8501,7 @@ void ExitPostmaster(int status)
      *
      * MUST		-- vadim 05-10-1999
      */
+    DMSUninit();
 
     CloseGaussPidDir();
 
@@ -8309,25 +8555,53 @@ static void handle_recovery_started()
          * Crank up the background tasks.  It doesn't matter if this fails,
          * we'll just try again later.
          */
-        Assert(g_instance.pid_cxt.CheckpointerPID == 0);
-        g_instance.pid_cxt.CheckpointerPID = initialize_util_thread(CHECKPOINT_THREAD);
-        Assert(g_instance.pid_cxt.BgWriterPID == 0);
-        if (!ENABLE_INCRE_CKPT) {
-            g_instance.pid_cxt.BgWriterPID = initialize_util_thread(BGWRITER);
-        }
-        Assert(g_instance.pid_cxt.SpBgWriterPID == 0);
-        g_instance.pid_cxt.SpBgWriterPID = initialize_util_thread(SPBGWRITER);
+        if (ENABLE_DMS) {
+            if (g_instance.pid_cxt.CheckpointerPID == 0) {
+                g_instance.pid_cxt.CheckpointerPID = initialize_util_thread(CHECKPOINT_THREAD);
+            }
 
-        if (ENABLE_INCRE_CKPT) {
-            for (int i = 0; i < g_instance.ckpt_cxt_ctl->pgwr_procs.num; i++) {
-                Assert(g_instance.pid_cxt.PageWriterPID[i] == 0);
-                g_instance.pid_cxt.PageWriterPID[i] = initialize_util_thread(PAGEWRITER_THREAD);
+            if (!ENABLE_INCRE_CKPT && g_instance.pid_cxt.BgWriterPID == 0) {
+                g_instance.pid_cxt.BgWriterPID = initialize_util_thread(BGWRITER);
+            }
+            
+            if (g_instance.pid_cxt.SpBgWriterPID == 0) {
+                g_instance.pid_cxt.SpBgWriterPID = initialize_util_thread(SPBGWRITER);
+            }
+
+            if (u_sess->attr.attr_storage.enable_cbm_tracking && g_instance.pid_cxt.CBMWriterPID == 0) {
+                g_instance.pid_cxt.CBMWriterPID = initialize_util_thread(CBMWRITER);
+            }
+
+            if (ENABLE_INCRE_CKPT) {
+                for (int i = 0; i < g_instance.ckpt_cxt_ctl->pgwr_procs.num; i++) {
+                    if (g_instance.pid_cxt.PageWriterPID[i] == 0) {
+                        g_instance.pid_cxt.PageWriterPID[i] = initialize_util_thread(PAGEWRITER_THREAD);
+                    }
+                }
+            }
+        } else {
+            Assert(g_instance.pid_cxt.CheckpointerPID == 0);
+            g_instance.pid_cxt.CheckpointerPID = initialize_util_thread(CHECKPOINT_THREAD);
+            Assert(g_instance.pid_cxt.BgWriterPID == 0);
+            if (!ENABLE_INCRE_CKPT) {
+                g_instance.pid_cxt.BgWriterPID = initialize_util_thread(BGWRITER);
+            }
+            Assert(g_instance.pid_cxt.SpBgWriterPID == 0);
+            g_instance.pid_cxt.SpBgWriterPID = initialize_util_thread(SPBGWRITER);
+
+            Assert(g_instance.pid_cxt.CBMWriterPID == 0);
+            if (u_sess->attr.attr_storage.enable_cbm_tracking) {
+                g_instance.pid_cxt.CBMWriterPID = initialize_util_thread(CBMWRITER);
+            }
+
+            if (ENABLE_INCRE_CKPT) {
+                for (int i = 0; i < g_instance.ckpt_cxt_ctl->pgwr_procs.num; i++) {
+                    Assert(g_instance.pid_cxt.PageWriterPID[i] == 0);
+                    g_instance.pid_cxt.PageWriterPID[i] = initialize_util_thread(PAGEWRITER_THREAD);
+                }
             }
         }
-        Assert(g_instance.pid_cxt.CBMWriterPID == 0);
-        if (u_sess->attr.attr_storage.enable_cbm_tracking) {
-            g_instance.pid_cxt.CBMWriterPID = initialize_util_thread(CBMWRITER);
-        }
+        
         pmState = PM_RECOVERY;
     }
 }
@@ -8898,7 +9172,7 @@ static void sigusr1_handler(SIGNAL_ARGS)
 
     /* should not start a worker in shutdown or demotion procedure */
     if (CheckPostmasterSignal(PMSIGNAL_START_TXNSNAPWORKER) && g_instance.status == NoShutdown &&
-        g_instance.demotion == NoDemote) {
+        g_instance.demotion == NoDemote && !ENABLE_DMS) {
         /* The rbcleaner wants us to start a worker process. */
         StartTxnSnapWorker();
     }
@@ -8936,7 +9210,7 @@ static void sigusr1_handler(SIGNAL_ARGS)
 
     if (CheckPostmasterSignal(PMSIGNAL_START_WALRECEIVER) && g_instance.pid_cxt.WalReceiverPID == 0 &&
         (pmState == PM_STARTUP || pmState == PM_RECOVERY || pmState == PM_HOT_STANDBY || pmState == PM_WAIT_READONLY) &&
-        g_instance.status == NoShutdown) {
+        g_instance.status == NoShutdown && !ENABLE_DMS) {
         if (g_instance.pid_cxt.WalRcvWriterPID == 0) {
             g_instance.pid_cxt.WalRcvWriterPID = initialize_util_thread(WALRECWRITE);
             SetWalRcvWriterPID(g_instance.pid_cxt.WalRcvWriterPID);
@@ -8969,6 +9243,12 @@ static void sigusr1_handler(SIGNAL_ARGS)
         /* Advance postmaster's state machine */
         PostmasterStateMachine();
     }
+
+    if (SS_STANDBY_MODE && !SS_PERFORMING_SWITCHOVER && pmState == PM_RUN &&
+        (mode = CheckSwitchoverSignal())) {
+        SSDoSwitchover();
+    }
+
     if ((mode = CheckSwitchoverSignal()) != 0 && WalRcvIsOnline() && DataRcvIsOnline() &&
         (pmState == PM_STARTUP || pmState == PM_RECOVERY || pmState == PM_HOT_STANDBY || pmState == PM_WAIT_READONLY)) {
         if (!IS_SHARED_STORAGE_STANDBY_CLUSTER_STANDBY_MODE) {
@@ -8993,6 +9273,178 @@ static void sigusr1_handler(SIGNAL_ARGS)
     if (CheckFinishRedoSignal() && g_instance.comm_cxt.localinfo_cxt.is_finish_redo != 1) {
         pg_atomic_write_u32(&(g_instance.comm_cxt.localinfo_cxt.is_finish_redo), 1);
     }
+
+    if (ENABLE_DMS && CheckPostmasterSignal(PMSIGNAL_DMS_SWITCHOVER_PROMOTE)) {
+        if (ENABLE_THREAD_POOL) {
+            g_threadPoolControler->CloseAllSessions();
+            /*
+            * before pmState set to wait backends,
+            * threadpool cannot launch new thread by scheduler during demote.
+            */
+            g_threadPoolControler->ShutDownScheduler(true, true);
+            g_threadPoolControler->ShutDownThreads(true);
+        }
+        /* shut down all backends and autovac workers */
+        (void)SignalSomeChildren(SIGTERM, BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC);
+
+        /* and the autovac launcher too */
+        if (g_instance.pid_cxt.AutoVacPID != 0)
+            signal_child(g_instance.pid_cxt.AutoVacPID, SIGTERM);
+
+        if (g_instance.pid_cxt.PgJobSchdPID != 0)
+            signal_child(g_instance.pid_cxt.PgJobSchdPID, SIGTERM);
+
+        /* and the walwriter too */
+        if (g_instance.pid_cxt.WalWriterPID != 0)
+            signal_child(g_instance.pid_cxt.WalWriterPID, SIGTERM);
+
+        if (g_instance.pid_cxt.WalWriterAuxiliaryPID != 0)
+            signal_child(g_instance.pid_cxt.WalWriterAuxiliaryPID, SIGTERM);
+
+        /* WLM threads need to release resources, such as long-holding table locks */
+        if (g_instance.pid_cxt.WLMCollectPID != 0) {
+            WLMProcessThreadShutDown();
+            signal_child(g_instance.pid_cxt.WLMCollectPID, SIGTERM);
+        }
+
+        if (g_instance.pid_cxt.WLMMonitorPID != 0)
+            signal_child(g_instance.pid_cxt.WLMMonitorPID, SIGTERM);
+
+        if (g_instance.pid_cxt.WLMArbiterPID != 0)
+            signal_child(g_instance.pid_cxt.WLMArbiterPID, SIGTERM);
+
+        /* kill it once again since WLMonitor would start it */
+        if (g_instance.pid_cxt.WLMCollectPID != 0) {
+            Assert(!dummyStandbyMode);
+            signal_child(g_instance.pid_cxt.WLMCollectPID, SIGTERM);
+        }
+
+        pmState = PM_WAIT_BACKENDS;
+        if (ENABLE_THREAD_POOL) {
+            g_threadPoolControler->EnableAdjustPool();
+        }
+
+        SSHandleSwitchoverPromote();
+    }
+
+    if (ENABLE_DMS && CheckPostmasterSignal(PMSIGNAL_DMS_REFORM)) {
+        if (ENABLE_THREAD_POOL) {
+            g_threadPoolControler->CloseAllSessions();
+            /*
+            * before pmState set to wait backends,
+            * threadpool cannot launch new thread by scheduler during demote.
+            */
+            g_threadPoolControler->ShutDownScheduler(true, true);
+            g_threadPoolControler->ShutDownThreads(true);
+        }
+        /* shut down all backends and autovac workers */
+        (void)SignalSomeChildren(SIGTERM, BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC);
+
+        /* and the autovac launcher too */
+        if (g_instance.pid_cxt.AutoVacPID != 0)
+            signal_child(g_instance.pid_cxt.AutoVacPID, SIGTERM);
+
+        if (g_instance.pid_cxt.PgJobSchdPID != 0)
+            signal_child(g_instance.pid_cxt.PgJobSchdPID, SIGTERM);
+
+        /* and the walwriter too */
+        if (g_instance.pid_cxt.WalWriterPID != 0)
+            signal_child(g_instance.pid_cxt.WalWriterPID, SIGTERM);
+
+        if (g_instance.pid_cxt.WalWriterAuxiliaryPID != 0)
+            signal_child(g_instance.pid_cxt.WalWriterAuxiliaryPID, SIGTERM);
+
+        /* WLM threads need to release resources, such as long-holding table locks */
+        if (g_instance.pid_cxt.WLMCollectPID != 0) {
+            WLMProcessThreadShutDown();
+            signal_child(g_instance.pid_cxt.WLMCollectPID, SIGTERM);
+        }
+
+        if (g_instance.pid_cxt.WLMMonitorPID != 0)
+            signal_child(g_instance.pid_cxt.WLMMonitorPID, SIGTERM);
+
+        if (g_instance.pid_cxt.WLMArbiterPID != 0)
+            signal_child(g_instance.pid_cxt.WLMArbiterPID, SIGTERM);
+
+        /* kill it once again since WLMonitor would start it */
+        if (g_instance.pid_cxt.WLMCollectPID != 0) {
+            Assert(!dummyStandbyMode);
+            signal_child(g_instance.pid_cxt.WLMCollectPID, SIGTERM);
+        }
+
+        if (g_instance.pid_cxt.AshPID!= 0) {
+            Assert(!dummyStandbyMode);
+            signal_child(g_instance.pid_cxt.AshPID, SIGTERM);
+        }
+
+        if (g_instance.pid_cxt.TwoPhaseCleanerPID != 0)
+            signal_child(g_instance.pid_cxt.TwoPhaseCleanerPID, SIGTERM);
+
+        if (g_instance.pid_cxt.StatementPID!= 0) {
+            Assert(!dummyStandbyMode);
+            signal_child(g_instance.pid_cxt.StatementPID, SIGTERM);
+        }
+
+        if (g_instance.pid_cxt.UndoRecyclerPID != 0) {
+            signal_child(g_instance.pid_cxt.UndoRecyclerPID, SIGTERM);
+        }
+
+        if (g_instance.pid_cxt.PercentilePID != 0) {
+            Assert(!dummyStandbyMode);
+            signal_child(g_instance.pid_cxt.PercentilePID, SIGTERM);
+        }
+
+        if (g_instance.pid_cxt.SnapshotPID != 0) {
+            Assert(!dummyStandbyMode);
+            signal_child(g_instance.pid_cxt.SnapshotPID, SIGTERM);
+        }
+
+        if (ENABLE_THREAD_POOL) {
+            g_threadPoolControler->EnableAdjustPool();
+        }
+
+        ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform] terminate backends success")));
+        g_instance.dms_cxt.SSRecoveryInfo.reform_ready = true;
+    }
+
+    if (ENABLE_DMS && CheckPostmasterSignal(PMSIGNAL_DMS_TRIGGERFAILOVER)) {
+        if (ENABLE_THREAD_POOL) {
+            g_threadPoolControler->CloseAllSessions();
+            /*
+            * before pmState set to wait backends,
+            * threadpool cannot launch new thread by scheduler during demote.
+            */
+            g_threadPoolControler->ShutDownScheduler(true, true);
+            g_threadPoolControler->ShutDownThreads();
+        }
+        /* shut down all backends and autovac workers */
+        (void)SignalSomeChildren(SIGTERM, BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC);
+
+        /* and the autovac launcher too */
+        if (g_instance.pid_cxt.AutoVacPID != 0)
+            signal_child(g_instance.pid_cxt.AutoVacPID, SIGTERM);
+
+        if (g_instance.pid_cxt.PgJobSchdPID != 0)
+            signal_child(g_instance.pid_cxt.PgJobSchdPID, SIGTERM);
+
+        /*
+         * before init startup threads, need close WalWriter and WalWriterAuxiliary
+         * because during StartupXLOG remove_xlogtemp_files() occurs process file concurrently
+         */
+        if (g_instance.pid_cxt.WalWriterPID != 0)
+            signal_child(g_instance.pid_cxt.WalWriterPID, SIGTERM);
+
+        if (g_instance.pid_cxt.WalWriterAuxiliaryPID != 0)
+            signal_child(g_instance.pid_cxt.WalWriterAuxiliaryPID, SIGTERM);
+
+        pmState = PM_WAIT_BACKENDS;
+        if (ENABLE_THREAD_POOL) {
+            g_threadPoolControler->EnableAdjustPool();
+        }
+
+        SShandle_promote_signal();
+    }
+
     if (CheckPromoteSignal()) {
         handle_promote_signal();
     }
@@ -11147,6 +11599,7 @@ DbState get_local_dbstate_sub(WalRcvData* walrcv, ServerMode mode)
         IsCascadeStandby())) || dummyStandbyMode || disater_recovery_has_no_build_reason) {
         has_build_reason = false;
     }
+
     switch (mode) {
         case NORMAL_MODE:
         case PRIMARY_MODE:
@@ -11179,6 +11632,19 @@ DbState get_local_dbstate(void)
     volatile WalRcvData* walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
     ServerMode mode = t_thrd.postmaster_cxt.HaShmData->current_mode;
     DbState db_state = UNKNOWN_STATE;
+
+    if (ENABLE_DMS) {
+        if (SS_PRIMARY_DEMOTING) {
+            db_state = DEMOTING_STATE;
+        } else if (SS_STANDBY_WAITING) {
+            db_state = WAITING_STATE;
+        } else if (SS_STANDBY_PROMOTING || SS_STANDBY_FAILOVER) {
+            db_state = PROMOTING_STATE;
+        } else {
+            db_state = NORMAL_STATE;
+        }
+        return db_state;
+    }
 
     if (t_thrd.walsender_cxt.WalSndCtl && t_thrd.walsender_cxt.WalSndCtl->demotion > NoDemote)
         db_state = DEMOTING_STATE;
@@ -11223,6 +11689,12 @@ const char* wal_get_db_state_string(DbState db_state)
 
 static ServerMode get_cur_mode(void)
 {
+    if (ENABLE_DMS) {
+        if (RecoveryInProgress()) {
+            return RECOVERY_MODE;
+        }
+        return SS_STANDBY_MODE ? STANDBY_MODE : PRIMARY_MODE;
+    }
     return t_thrd.postmaster_cxt.HaShmData->current_mode;
 }
 
@@ -12242,6 +12714,14 @@ int GaussDbThreadMain(knl_thread_arg* arg)
         ALLOCSET_DEFAULT_MINSIZE,
         ALLOCSET_DEFAULT_INITSIZE,
         ALLOCSET_DEFAULT_MAXSIZE);
+
+    if (g_instance.attr.attr_storage.dms_attr.enable_dms) {
+        t_thrd.dms_cxt.msgContext = AllocSetContextCreate(t_thrd.top_mem_cxt,
+            "DMSWorkerContext",
+            ALLOCSET_DEFAULT_MINSIZE,
+            ALLOCSET_DEFAULT_INITSIZE,
+            ALLOCSET_DEFAULT_MAXSIZE);
+    }
 
     /*
      * Reload any libraries that were preloaded by the postmaster.	Since we
@@ -13436,3 +13916,60 @@ void ShutdownForDRSwitchover(void)
     ereport(LOG, (errmsg("Close All Sessions and shutdown AutoVacuum for DR switchover.")));
 }
 
+void InitShmemForDmsCallBack()
+{
+    Port port;
+    errno_t rc = 0;
+    rc = memset_s(&port, sizeof(port), 0, sizeof(port));
+    securec_check(rc, "\0", "\0");
+    port.sock = PGINVALID_SOCKET;
+    InitializeGUCOptions();
+    restore_backend_variables(BackendVariablesGlobal, &port);
+    /* may no need read_nondefault_variables */
+    BaseInit();
+    InitProcessAndShareMemory();
+}
+
+const char *GetSSServerMode()
+{
+    if (SS_STANDBY_MODE) {
+        return "Standby";
+    }
+ 
+    if (SS_PRIMARY_MODE) {
+        return "Primary";
+    }
+ 
+    return "Unknown";
+}
+ 
+bool SSIsServerModeReadOnly()
+{
+    return SS_PERFORMING_SWITCHOVER || SS_STANDBY_MODE;
+}
+
+void SSRestartFailoverPromote()
+{
+    /* shut down all backends and autovac workers */
+    (void)SignalSomeChildren(SIGTERM, BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC);
+
+    /* and the autovac launcher too */
+    if (g_instance.pid_cxt.AutoVacPID != 0)
+        signal_child(g_instance.pid_cxt.AutoVacPID, SIGTERM);
+
+    if (g_instance.pid_cxt.PgJobSchdPID != 0)
+        signal_child(g_instance.pid_cxt.PgJobSchdPID, SIGTERM);
+
+    /*
+     * before init startup threads, need close WalWriter and WalWriterAuxiliary
+     * because during StartupXLOG remove_xlogtemp_files() occurs process file concurrently
+     */
+    if (g_instance.pid_cxt.WalWriterPID != 0)
+        signal_child(g_instance.pid_cxt.WalWriterPID, SIGTERM);
+
+    if (g_instance.pid_cxt.WalWriterAuxiliaryPID != 0)
+        signal_child(g_instance.pid_cxt.WalWriterAuxiliaryPID, SIGTERM);
+
+    pmState = PM_WAIT_BACKENDS;
+    SShandle_promote_signal();
+}

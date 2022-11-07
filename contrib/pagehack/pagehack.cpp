@@ -80,6 +80,8 @@
 #include "storage/smgr/relfilenode.h"
 #include "storage/sinval.h"
 #include "storage/smgr/segment.h"
+#include "storage/dss/dss_adaptor.h"
+#include "storage/file/fio_device.h"
 #include "replication/bcm.h"
 #include "utils/datetime.h"
 #include "utils/memutils.h"
@@ -88,6 +90,7 @@
 #include "cstore.h"
 #include "common/build_query/build_query.h"
 #include <libgen.h>
+#include "tool_common.h"
 #ifdef ENABLE_MULTIPLE_NODES
 #include "tsdb/utils/constant_def.h"
 #endif
@@ -99,6 +102,7 @@
 /* Number of pg_class types */
 #define CLASS_TYPE_NUM 512
 #define TEN 10
+
 
 typedef unsigned char* binary;
 static const char* indents[] = {  // 10 tab is enough to used.
@@ -192,6 +196,7 @@ static ParseHeapTupleData PgIndexRelTupleParser[] = {ParseToastIndexTupleData};
 static int PgHeapRelTupleParserCursor = -1;
 static int PgIndexRelTupleParserCursor = -1;
 
+
 /* For Assert(...) macros. */
 THR_LOCAL bool assert_enabled = true;
 
@@ -200,6 +205,7 @@ bool only_vm = false;
 bool only_bcm = false;
 bool write_back = false;
 bool dirty_page = false;
+bool enable_dss = false;
 int start_item = 1;
 int num_item = 0;
 int SegNo = 0;
@@ -1014,6 +1020,9 @@ static void usage(const char* progname)
            "  -d only for test, use 0xFF to fill the last half page[4k]\n"
            "  -z only for undo space/group meta, dump the specified space/group\n"
            "  -S heap file segment number\n"
+           "\nDss options:\n"
+           "  -D enable shared storage mode\n"
+           "  -c SOCKETPATH  dss connect socket file path\n"
            "\nCommon options:\n"
            "  --help, -h       show this help, then exit\n"
            "  --version, -V    output version information, then exit\n");
@@ -3195,7 +3204,8 @@ static int parse_uncompressed_page_file(const char *filename, SegmentType type, 
     BlockNumber number = number_read;
     size_t result;
 
-    if (NULL == (fd = fopen(filename, "rb+"))) {
+    fd = fopen(filename, "rb+");
+    if (fd == NULL) {
         fprintf(stderr, "%s: %s\n", filename, strerror(errno));
         return false;
     }
@@ -3422,7 +3432,8 @@ static bool parse_internal_init_file(char* filename)
         return false;
     }
 
-    if (NULL == (fp = fopen(filename, "rb"))) {
+    fp = fopen(filename, "rb");
+    if (fp == NULL) {
         result = false;
         fprintf(stderr, "IO error when opening %s: %s\n", filename, strerror(errno));
         goto read_failed;
@@ -3653,7 +3664,8 @@ static int parse_filenodemap_file(char* filename)
     }
     fill_filenode_map(pg_class_map);
 
-    if (NULL == (fd = fopen(filename, "rb"))) {
+    fd = fopen(filename, "rb");
+    if (fd == NULL) {
         fprintf(stderr, "%s: %s\n", filename, strerror(errno));
         return false;
     }
@@ -3738,7 +3750,8 @@ static int parse_cu_file(char* filename, uint64 offset)
     errno_t rc = snprintf_s(fullpath, sizeof(fullpath), sizeof(fullpath) - 1, "%s.%d", filename, seg_num);
     securec_check_ss_c(rc, "\0", "\0");
 
-    if (NULL == (fd = fopen(fullpath, "rb"))) {
+    fd = fopen(fullpath, "rb");
+    if (fd == NULL) {
         fprintf(stderr, "%s: %s\n", fullpath, strerror(errno));
         return false;
     }
@@ -3797,7 +3810,8 @@ static int parse_slot_file(char* filename)
     size_t readBytes = 0;
     pg_crc32 checksum = 0;
 
-    if (NULL == (fd = fopen(filename, "rb"))) {
+    fd = fopen(filename, "rb");
+    if (fd == NULL) {
         fprintf(stderr, "%s: %s\n", filename, strerror(errno));
         return false;
     }
@@ -3894,7 +3908,8 @@ static int parse_gaussdb_state_file(char* filename)
     char* BuildModeStr[] = {"node", "auto", "full", "incremental"};
     XLogRecPtr lsn;
     uint32 term;
-    if (NULL == (fd = fopen(filename, "rb"))) {
+    fd = fopen(filename, "rb");
+    if (fd == NULL) {
         fprintf(stderr, "%s: %s\n", filename, strerror(errno));
         return false;
     }
@@ -3956,7 +3971,8 @@ static int parse_pg_control_file(char* filename)
     char sysident_str[32];
     const char* strftime_fmt = "%c";
 
-    if (NULL == (fd = fopen(filename, "rb"))) {
+    fd = fopen(filename, "rb");
+    if (fd == NULL) {
         fprintf(stderr, "%s: %s\n", filename, strerror(errno));
         return false;
     }
@@ -4091,7 +4107,8 @@ static int parse_clog_file(char* filename)
 
     xid = (uint64)segnum * segnum_xid;
 
-    if (NULL == (fd = fopen(filename, "rb"))) {
+    fd = fopen(filename, "rb");
+    if (fd == NULL) {
         fprintf(stderr, "%s: %s\n", filename, strerror(errno));
         return false;
     }
@@ -4146,7 +4163,8 @@ static int parse_csnlog_file(char* filename)
 
     xid = (uint64)segnum * segnum_xid;
 
-    if (NULL == (fd = fopen(filename, "rb"))) {
+    fd = fopen(filename, "rb");
+    if (fd == NULL) {
         fprintf(stderr, "%s: %s\n", filename, gs_strerror(errno));
         return false;
     }
@@ -4403,7 +4421,7 @@ static bool parse_dw_file(const char* file_name, uint32 start_page, uint32 page_
     (void)dirname(meta_full_path);
 
     /* extract the meta name from DW_META_FILE */
-    rc = strcpy_s(meta_name_tmp, PATH_MAX, DW_META_FILE);
+    rc = strcpy_s(meta_name_tmp, PATH_MAX, T_DW_META_FILE);
     securec_check(rc, "", "");
     meta_name = basename(meta_name_tmp);
 
@@ -4414,7 +4432,6 @@ static bool parse_dw_file(const char* file_name, uint32 start_page, uint32 page_
     securec_check(rc, "", "");
 
     fd = fopen(meta_full_path, "rb+");
-
     if (fd == NULL) {
         fprintf(stderr, "%s: %s\n", meta_full_path, strerror(errno));
         return false;
@@ -4580,8 +4597,7 @@ static bool parse_segment_head(char *filename, uint32 start_page)
     }
 
     bool result;
-
-    int fd = open(filename, O_RDONLY);
+    int fd = open(filename, O_RDONLY, S_IRUSR | S_IWUSR);
     if (fd < 0) {
         fprintf(stderr, "Failed to open %s: %s\n", filename, strerror(errno));
         free(buf);
@@ -4652,7 +4668,8 @@ static bool parse_dw_single_flush_file(const char* file_name)
     char *dw_block = (char *)TYPEALIGN(BLCKSZ, unaligned_buf2);
     PageHeader pghr = NULL;
 
-    if (NULL == (fd = fopen(file_name, "rb"))) {
+    fd = fopen(file_name, "rb");
+    if (fd == NULL) {
         fprintf(stderr, "%s: %s\n", file_name, gs_strerror(errno));
         free(item);
         free(unaligned_buf);
@@ -5569,6 +5586,7 @@ int main(int argc, char** argv)
     char* filename = NULL;
     char* env = NULL;
     const char* progname = NULL;
+    const char* socketpath = NULL;
     uint32 start_point = 0;
     uint32 num_block = 0;
     uint64 cu_offset = 0;
@@ -5593,7 +5611,7 @@ int main(int argc, char** argv)
     setvbuf(stderr, NULL, _IONBF, 0);
 #endif
 
-    while ((c = getopt(argc, argv, "bf:o:t:vs:z:n:r:i:I:N:uwdS:")) != -1) {
+    while ((c = getopt(argc, argv, "bc:Df:o:t:vs:z:n:r:i:I:N:uwdS:")) != -1) {
         switch (c) {
             case 'f':
                 filename = optarg;
@@ -5699,6 +5717,15 @@ int main(int argc, char** argv)
                 SegNo = (unsigned int)strtolSafe(optarg, 0);
                 break;
 
+            case 'D':
+                enable_dss = true;
+                break;
+
+            case 'c':
+                socketpath = optarg;
+                enable_dss = true;
+                break;
+
             default:
                 fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname);
                 exit(1);
@@ -5718,6 +5745,16 @@ int main(int argc, char** argv)
 
     if (only_bcm && (hackingtype > HACKING_INDEX)) {
         fprintf(stderr, "Only heap file and index file have bcm map info.\n");
+        exit(1);
+    }
+
+    if (enable_dss && socketpath == NULL) {
+        fprintf(stderr, "Socketpath cannot be NULL when enable dss.\n");
+        exit(1);
+    }
+
+    if (enable_dss && (filename[0] != '+' || strstr(filename, "/") == NULL)) {
+        fprintf(stderr, "Filepath should be absolutely when enable dss.\n");
         exit(1);
     }
 
@@ -5748,6 +5785,13 @@ int main(int argc, char** argv)
         if ((env = getenv("GAUSSDATA")) != NULL && *env != '\0')
             pgdata = env;
     }
+
+    // dss device init
+    if (dss_device_init(socketpath, enable_dss) != DSS_SUCCESS) {
+        exit(1);
+    }
+
+    initDataPathStruct(false);
 
     // if heap relation name is given (-r), force hackingtype to be HACKING_HEAP
     if (PgHeapRelTupleParserCursor >= 0) {

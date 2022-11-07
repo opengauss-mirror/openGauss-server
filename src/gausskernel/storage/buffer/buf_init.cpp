@@ -25,6 +25,8 @@
 #include "postmaster/pagewriter.h"
 #include "postmaster/bgwriter.h"
 #include "utils/palloc.h"
+#include "ddes/dms/ss_dms_bufmgr.h"
+#include "ddes/dms/ss_common_attr.h"
 
 const int PAGE_QUEUE_SLOT_MULTI_NBUFFERS = 5;
 
@@ -85,8 +87,14 @@ void InitBufferPool(void)
     t_thrd.storage_cxt.BufferBlocks =
         (char *)CACHELINEALIGN(ShmemInitStruct("Buffer Blocks", buffer_size, &found_bufs));
 #else
-    buffer_size = (TOTAL_BUFFER_NUM - NVM_BUFFER_NUM) * (Size)BLCKSZ;
-    t_thrd.storage_cxt.BufferBlocks = (char *)ShmemInitStruct("Buffer Blocks", buffer_size, &found_bufs);
+    if (ENABLE_DSS) {
+        buffer_size = (uint64)((TOTAL_BUFFER_NUM - NVM_BUFFER_NUM) * (Size)BLCKSZ + ALIGNOF_BUFFER);
+        t_thrd.storage_cxt.BufferBlocks =
+            (char *)BUFFERALIGN(ShmemInitStruct("Buffer Blocks", buffer_size, &found_bufs));
+    } else {
+        buffer_size = (TOTAL_BUFFER_NUM - NVM_BUFFER_NUM) * (Size)BLCKSZ;
+        t_thrd.storage_cxt.BufferBlocks = (char *)ShmemInitStruct("Buffer Blocks", buffer_size, &found_bufs);
+    }
 #endif
 
     if (g_instance.attr.attr_storage.nvm_attr.enable_nvm) {
@@ -165,6 +173,12 @@ void InitBufferPool(void)
         g_instance.bgwriter_cxt.rel_one_fork_hashtbl_lock = LWLockAssign(LWTRANCHE_UNLINK_REL_FORK_TBL);
     }
 
+    /* re-assign locks for un-reinited buffers, may delete this */
+    if (SS_PERFORMING_SWITCHOVER) {
+        g_instance.bgwriter_cxt.rel_hashtbl_lock = LWLockAssign(LWTRANCHE_UNLINK_REL_TBL);
+        g_instance.bgwriter_cxt.rel_one_fork_hashtbl_lock = LWLockAssign(LWTRANCHE_UNLINK_REL_FORK_TBL);
+    }
+
     /* Init other shared buffer-management stuff */
     StrategyInitialize(!found_descs);
 
@@ -173,6 +187,10 @@ void InitBufferPool(void)
 
     /* Initialize per-backend file flush context */
     WritebackContextInit(t_thrd.storage_cxt.BackendWritebackContext, &u_sess->attr.attr_common.backend_flush_after);
+
+    if (ENABLE_DMS) {
+        InitDmsBufCtrl();
+    }
 }
 
 /*
@@ -205,6 +223,11 @@ Size BufferShmemSize(void)
 
     /* size of candidate free map */
     size = add_size(size, mul_size(TOTAL_BUFFER_NUM, sizeof(bool)));
+
+    /* size of dms buf ctrl and buffer align */
+    if (ENABLE_DMS) {
+        size = add_size(size, mul_size(TOTAL_BUFFER_NUM, sizeof(dms_buf_ctrl_t))) + ALIGNOF_BUFFER + PG_CACHE_LINE_SIZE;
+    }
 
     return size;
 }

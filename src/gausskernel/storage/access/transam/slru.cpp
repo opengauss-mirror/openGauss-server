@@ -57,11 +57,13 @@
 #include "access/slru.h"
 #include "access/transam.h"
 #include "access/xlog.h"
+#include "access/csnlog.h"
 #include "storage/smgr/fd.h"
 #include "storage/shmem.h"
 #include "miscadmin.h"
 #include "pgstat.h"
 #include "utils/builtins.h"
+#include "storage/file/fio_device.h"
 
 /*
  * During SimpleLruFlush(), we will usually not need to write/fsync more
@@ -531,8 +533,10 @@ static void SlruInternalWritePage(SlruCtl ctl, int slotno, SlruFlush fdata)
     /* Acquire per-buffer lock (cannot deadlock, see notes at top) */
     (void)LWLockAcquire(shared->buffer_locks[slotno], LW_EXCLUSIVE);
 
-    /* Release control lock while doing I/O */
-    LWLockRelease(shared->control_lock);
+    if (!ENABLE_DSS) {
+        /* Release control lock while doing I/O */
+        LWLockRelease(shared->control_lock);
+    }
 
     /* Do the write */
     ok = SlruPhysicalWritePage(ctl, pageno, slotno, fdata);
@@ -544,8 +548,10 @@ static void SlruInternalWritePage(SlruCtl ctl, int slotno, SlruFlush fdata)
             (void)close(fdata->fd[i]);
     }
 
-    /* Re-acquire control lock and update page state */
-    (void)LWLockAcquire(shared->control_lock, LW_EXCLUSIVE);
+    if (!ENABLE_DSS) {
+        /* Re-acquire control lock and update page state */
+        (void)LWLockAcquire(shared->control_lock, LW_EXCLUSIVE);
+    }
 
     if (!(shared->page_number[slotno] == pageno && shared->page_status[slotno] == SLRU_PAGE_WRITE_IN_PROGRESS))
         ereport(PANIC,
@@ -652,6 +658,41 @@ static bool SlruPhysicalReadPage(SlruCtl ctl, int64 pageno, int slotno)
         t_thrd.xact_cxt.slru_errcause = SLRU_CLOSE_FAILED;
         t_thrd.xact_cxt.slru_errno = errno;
         return false;
+    }
+
+    return true;
+}
+
+static bool SSPreAllocSegment(int fd, SlruFlush fdata)
+{
+    struct stat s;
+    if (fstat(fd, &s) < 0) {
+        t_thrd.xact_cxt.slru_errcause = SLRU_OPEN_FAILED;
+        t_thrd.xact_cxt.slru_errno = errno;
+        if (fdata == NULL) {
+            (void)close(fd);
+        }
+        return false;
+    }
+
+    int64 trunc_size = (int64)(SLRU_PAGES_PER_SEGMENT * BLCKSZ);
+    if (s.st_size < trunc_size) {
+        /* extend file at once to avoid dss cross-border write issue */
+        pgstat_report_waitevent(WAIT_EVENT_SLRU_WRITE);
+        errno = 0;
+        if (fallocate(fd, 0, s.st_size, trunc_size) != 0) {
+            pgstat_report_waitevent(WAIT_EVENT_END);
+            if (errno == 0) {
+                errno = ENOSPC;
+            }
+            t_thrd.xact_cxt.slru_errcause = SLRU_WRITE_FAILED;
+            t_thrd.xact_cxt.slru_errno = errno;
+            if (fdata == NULL) {
+                (void)close(fd);
+            }
+            return false;
+        }
+        pgstat_report_waitevent(WAIT_EVENT_END);
     }
 
     return true;
@@ -777,11 +818,34 @@ static bool SlruPhysicalWritePage(SlruCtl ctl, int64 pageno, int slotno, SlruFlu
     }
 
     if (lseek(fd, (off_t)offset, SEEK_SET) < 0) {
-        t_thrd.xact_cxt.slru_errcause = SLRU_SEEK_FAILED;
-        t_thrd.xact_cxt.slru_errno = errno;
-        if (fdata == NULL)
-            (void)close(fd);
-        return false;
+        bool failed = true;
+        if (ENABLE_DSS && errno == ERR_DSS_FILE_SEEK) {
+            if (!SSPreAllocSegment(fd, fdata)) {
+                return false;
+            }
+            if (lseek(fd, (off_t)offset, SEEK_SET) >= 0) {
+                failed = false;
+            }
+        }
+
+        if (failed) {
+            t_thrd.xact_cxt.slru_errcause = SLRU_SEEK_FAILED;
+            t_thrd.xact_cxt.slru_errno = errno;
+            if (fdata == NULL) {
+                (void)close(fd);
+            }
+            return false;
+        }
+    }
+    
+    if (SS_STANDBY_PROMOTING) {
+        ereport(WARNING, (errmodule(MOD_DMS), errmsg("DMS standby can't write slru page for switchover")));
+        return true;
+    }
+
+    if (SS_STANDBY_MODE && strlen(shared->page_buffer[slotno])) {
+        force_backtrace_messages = true;
+        ereport(PANIC, (errmodule(MOD_DMS), errmsg("DMS standby can't write to disk")));
     }
 
     errno = 0;
@@ -1078,11 +1142,19 @@ int SimpleLruFlush(SlruCtl ctl, bool checkpoint)
  */
 void SimpleLruTruncate(SlruCtl ctl, int64 cutoffPage, int partitionNum)
 {
+    if (SS_STANDBY_MODE) {
+        ereport(WARNING, (errmodule(MOD_DMS), errmsg("DMS standby can't truncate slru page")));
+        return;
+    }
+
     SlruShared shared = NULL;
     int64 slotno;
-    bool isCsnLogCtl = strcmp(ctl->dir, "pg_csnlog") == 0;
+    bool isCsnLogCtl = false;
     bool isPart = (partitionNum > NUM_SLRU_DEFAULT_PARTITION);
 
+    /* check whether the slru file is csnlog */
+    isCsnLogCtl = strcmp(ctl->dir, CSNLOGDIR) == 0;
+    
     /*
      * The cutoff point is the start of the segment containing cutoffPage.
      */
@@ -1243,6 +1315,18 @@ bool SlruScanDirectory(SlruCtl ctl, SlruScanCallback callback, const void *data)
     (void)FreeDir(cldir);
 
     return retval;
+}
+
+void SimpleLruSetPageEmpty(SlruCtl ctl, const char *name, int trancheId, int nslots, int nlsns, LWLock *ctllock,
+    const char *subdir, int index)
+{
+    bool found = false;
+    int slotno;
+    SlruShared shared = (SlruShared)ShmemInitStruct(name, SimpleLruShmemSize(nslots, nlsns), &found);
+
+    for (slotno = 0; slotno < nslots; slotno++) {
+        shared->page_status[slotno] = SLRU_PAGE_EMPTY;
+    }
 }
 
 #ifdef ENABLE_UT

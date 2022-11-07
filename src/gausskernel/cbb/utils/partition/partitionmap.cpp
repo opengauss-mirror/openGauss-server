@@ -781,6 +781,11 @@ void RelationInitPartitionMap(Relation relation, bool isSubPartition)
                 (errcode(ERRCODE_RUN_TRANSACTION_DURING_RECOVERY),
                     errmsg("Can not run transaction to remote nodes during recovery.")));
         }
+
+        if (SSIsServerModeReadOnly()) {
+            ereport(ERROR, (errmsg("Can not run transaction to remote nodes at Standby with DMS enabled")));
+        }
+
         Assert(0);
         ereport(ERROR,
             (errcode(ERRCODE_UNDEFINED_OBJECT),

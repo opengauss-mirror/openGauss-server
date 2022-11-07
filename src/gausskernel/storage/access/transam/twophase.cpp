@@ -126,11 +126,12 @@
 #include "storage/mot/mot_fdw.h"
 #endif
 #include "instruments/instr_statement.h"
+#include "storage/file/fio_device.h"
 
 /*
  * Directory where Two-phase commit files reside within PGDATA
  */
-#define TWOPHASE_DIR "pg_twophase"
+#define TWOPHASE_DIR (g_instance.datadir_cxt.twophaseDir)
 
 int PendingPreparedXactsCount = 0;
 
@@ -2070,7 +2071,7 @@ static char *ReadTwoPhaseFile(TransactionId xid, bool give_warnings)
     pg_crc32 calc_crc, file_crc;
     errno_t rc;
 
-    rc = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, TWOPHASE_DIR "/%08X%08X", (uint32)(xid >> 32), (uint32)xid);
+    rc = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/%08X%08X", TWOPHASE_DIR, (uint32)(xid >> 32), (uint32)xid);
     securec_check_ss(rc, "", "");
 
     fd = BasicOpenFile(path, O_RDONLY | PG_BINARY, 0);
@@ -2864,7 +2865,7 @@ static void RemoveTwoPhaseFile(TransactionId xid, bool giveWarning)
     char path[MAXPGPATH];
     errno_t rc = EOK;
 
-    rc = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, TWOPHASE_DIR "/%08X%08X", (uint32)(xid >> 32), (uint32)xid);
+    rc = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/%08X%08X", TWOPHASE_DIR, (uint32)(xid >> 32), (uint32)xid);
     securec_check_ss(rc, "", "");
     if (unlink(path)) {
         if (errno != ENOENT || giveWarning) {
@@ -2892,7 +2893,7 @@ static void RecreateTwoPhaseFile(TransactionId xid, void *content, int len)
     COMP_CRC32(statefile_crc, content, len);
     FIN_CRC32(statefile_crc);
 
-    rc = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, TWOPHASE_DIR "/%08X%08X", (uint32)(xid >> 32), (uint32)xid);
+    rc = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/%08X%08X", TWOPHASE_DIR, (uint32)(xid >> 32), (uint32)xid);
     securec_check_ss(rc, "", "");
 
     fd = BasicOpenFile(path, O_CREAT | O_TRUNC | O_WRONLY | PG_BINARY, S_IRUSR | S_IWUSR);

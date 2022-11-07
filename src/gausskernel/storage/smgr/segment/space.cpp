@@ -39,6 +39,7 @@
 #include "utils/inval.h"
 #include "utils/relfilenodemap.h"
 #include "pgxc/execRemote.h"
+#include "ddes/dms/ss_transaction.h"
 
 void spc_lock(SegSpace *spc)
 {
@@ -277,6 +278,10 @@ SegSpace *spc_open(Oid spcNode, Oid dbNode, bool create, bool isRedo)
 
 void spc_drop_space_node(Oid spcNode, Oid dbNode)
 {
+    if (ENABLE_DMS && SS_PRIMARY_MODE) {
+        SSBCastDropSegSpace(spcNode, dbNode);
+    }
+
     SegSpace *spc = spc_init_space_node(spcNode, dbNode);
     SegSpcTag tag = {.spcNode = spcNode, .dbNode = dbNode};
     bool found = false;
@@ -301,6 +306,10 @@ void spc_drop_space_node(Oid spcNode, Oid dbNode)
  */
 SegSpace *spc_drop(Oid spcNode, Oid dbNode, bool redo)
 {
+    if (ENABLE_DMS && SS_PRIMARY_MODE) {
+        SSBCastDropSegSpace(spcNode, dbNode);
+    }
+
     SegSpace *spc = spc_init_space_node(spcNode, dbNode);
     AutoMutexLock spc_lock(&spc->lock);
     spc_lock.lock();
@@ -350,6 +359,44 @@ SegSpace *spc_drop(Oid spcNode, Oid dbNode, bool redo)
     }
 
     return spc;
+}
+
+static void SSClose_seg_files(SegSpace *spc)
+{
+    for (int egid = 0; egid < EXTENT_TYPES; egid++) {
+        for (int j = 0; j <= SEGMENT_MAX_FORKNUM; j++) {
+            SegExtentGroup *eg = &spc->extent_group[egid][j];
+            SegLogicFile *sf = eg->segfile;
+            AutoMutexLock filelock(&sf->filelock);
+            filelock.lock();
+
+            for (int i = sf->file_num - 1; i >= 0; i--) {
+                (void)close(sf->segfiles[i].fd);
+                sf->segfiles[i].fd = -1;
+                sf->file_num--;
+            }
+            sf->file_num = 0;
+            filelock.unLock();
+        }
+    }
+}
+
+void SSDrop_seg_space(Oid spcNode, Oid dbNode)
+{
+    SegSpace *spc = spc_init_space_node(spcNode, dbNode);
+    AutoMutexLock spc_lock(&spc->lock);
+    spc_lock.lock();
+
+    SpaceDataFileStatus dataStatus = spc_status(spc);
+    if (dataStatus == SpaceDataFileStatus::EMPTY) {
+        spc_lock.unLock();
+        return;
+    }
+
+    SegDropSpaceMetaBuffers(spcNode, dbNode);
+    SSClose_seg_files(spc);
+    spc_lock.unLock();
+    return;
 }
 
 /*
@@ -431,7 +478,15 @@ Buffer try_get_moved_pagebuf(RelFileNode *rnode, int forknum, BlockNumber logic_
 static void copy_extent(SegExtentGroup *seg, RelFileNode logic_rnode, uint32 logic_start_blocknum,
                         BlockNumber nblocks, BlockNumber phy_from_extent, BlockNumber phy_to_extent)
 {
-    char *content = (char *)palloc(BLCKSZ);
+    char *content = NULL;
+    char *unaligned_content = NULL;
+    if (ENABLE_DSS) {
+        unaligned_content = (char*)palloc(BLCKSZ + ALIGNOF_BUFFER);
+        content = (char*)BUFFERALIGN(unaligned_content);
+    } else {
+        content = (char *)palloc(BLCKSZ);
+    }
+
     char *pagedata = NULL;
     for (int i = 0; i < seg->extent_size; i++) {
         /* 
@@ -525,7 +580,12 @@ static void copy_extent(SegExtentGroup *seg, RelFileNode logic_rnode, uint32 log
             UnpinBuffer(bufdesc, true);
         }
     }
-    pfree(content);
+
+    if (ENABLE_DSS) {
+        pfree(unaligned_content);
+    } else {
+        pfree(content);
+    }
 }
 
 /*
@@ -1144,6 +1204,10 @@ Datum gs_space_shrink(PG_FUNCTION_ARGS)
                 errmsg("Don't shrink space, for recovery is in progress.")));
     }
 
+    if (SS_STANDBY_MODE) {
+        ereport(ERROR, (errmsg("SS standby cannot perform gs_space_shrink")));
+    }
+
     Oid spaceid = PG_GETARG_OID(0);
     Oid dbid = PG_GETARG_OID(1);
     uint32 extent_type = PG_GETARG_UINT32(2);
@@ -1157,6 +1221,10 @@ Datum local_space_shrink(PG_FUNCTION_ARGS)
     if (!XLogInsertAllowed()) {
         ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
                 errmsg("Don't shrink space locally, for recovery is in progress.")));
+    }
+
+    if (SS_STANDBY_MODE) {
+        ereport(ERROR, (errmsg("SS standby cannot perform local_space_shrink")));
     }
 
     char *tablespacename = text_to_cstring(PG_GETARG_TEXT_PP(0));
@@ -1178,6 +1246,10 @@ Datum global_space_shrink(PG_FUNCTION_ARGS)
     if (!XLogInsertAllowed()) {
         ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
                 errmsg("Don't shrink space globally, for recovery is in progress.")));
+    }
+
+    if (SS_STANDBY_MODE) {
+        ereport(ERROR, (errmsg("SS standby cannot perform global_space_shrink")));
     }
 
     char *tablespacename = text_to_cstring(PG_GETARG_TEXT_PP(0));

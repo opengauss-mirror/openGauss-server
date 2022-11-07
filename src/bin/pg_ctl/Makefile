@@ -16,7 +16,7 @@ subdir = src/bin/pg_ctl
 top_builddir = ../../..
 include $(top_builddir)/src/Makefile.global
 
-override CPPFLAGS := -I$(libpq_srcdir) -I$(ZLIB_INCLUDE_PATH) $(CPPFLAGS) -DHAVE_LIBZ -DFRONTEND -I$(top_builddir)/src/bin/pg_rewind -I${top_builddir}/src/lib/page_compression
+override CPPFLAGS := -I$(libpq_srcdir) -I$(ZLIB_INCLUDE_PATH) $(CPPFLAGS) -DHAVE_LIBZ -DFRONTEND -I$(top_builddir)/src/bin/pg_rewind -I${top_builddir}/src/lib/page_compression -I${top_builddir}/src/include
 override LDFLAGS += -L$(LZ4_LIB_PATH) -L$(ZSTD_LIB_PATH) -L${top_builddir}/src/lib/page_compression
 ifeq ($(enable_lite_mode), no)
     LIBS += -lgssapi_krb5_gauss -lgssrpc_gauss -lkrb5_gauss -lkrb5support_gauss -lk5crypto_gauss -lcom_err_gauss -lpagecompression -lzstd -llz4

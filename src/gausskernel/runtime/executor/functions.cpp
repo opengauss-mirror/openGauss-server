@@ -1576,7 +1576,6 @@ bool check_sql_fn_retval(Oid func_id, Oid ret_type, List* query_tree_list, bool*
     Oid res_type;
     ListCell* lc = NULL;
     bool gs_encrypted_proc_was_created = false;
-    AssertArg(!IsPolymorphicType(ret_type));
     CommandCounterIncrement();
     if (modify_target_list != NULL)
         *modify_target_list = false; /* initialize for no change */

@@ -65,6 +65,7 @@
 #include "utils/fmgrtab.h"
 #include "utils/postinit.h"
 #include "utils/relmapper.h"
+#include "utils/knl_localsysdbcache.h"
 #include "catalog/pg_language.h"
 #include "catalog/pg_proc.h"
 #include "commands/user.h"
@@ -234,6 +235,15 @@ void FencedUDFMasterMain(int argc, char* argv[])
     InitProcess();
     t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "fencedMaster",
         THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_AI));
+#endif
+
+#if defined(USE_ASSERT_CHECKING) && !defined(ENABLE_MEMORY_CHECK)
+    /*
+     * ignore lsc check in UDF, because UDF call exit() to abort process,
+     * it will execute object destruction function,
+     * call proc_exit() to abort UDF will be better.
+     */
+    CloseLSCCheck();
 #endif
 
     /*

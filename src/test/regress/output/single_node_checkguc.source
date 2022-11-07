@@ -1,0 +1,120 @@
+--
+-- check dms guc parameter and ssl parameter
+-- check dms guc
+\! @abs_bindir@/gs_ctl stop -D @abs_srcdir@/tmp_check/datanode1  > /dev/null
+\! sleep 5
+-- check ssl guc with value
+\! chmod 600 @abs_srcdir@/sslcert_ss/*
+\! cp @abs_srcdir@/sslcert_ss/server.*  @abs_srcdir@/tmp_check/datanode1/ 
+\! cp @abs_srcdir@/sslcert_ss/cacert.pem  @abs_srcdir@/tmp_check/datanode1/
+\! export PGSSLMODE=verify-ca
+\! export PGSSLROOTCERT=@abs_srcdir@/sslcert_ss/cacert.pem
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "ssl = on"
+The gs_guc run with the following arguments: [@abs_bindir@/gs_guc -D @abs_srcdir@/tmp_check/datanode1/ -c ssl = on set ].
+expected instance path: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
+gs_guc set: ssl=on: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
+
+Total instances: 1. Failed instances: 0.
+Success to perform gs_guc!
+
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "ssl_cert_notify_time = 90"
+The gs_guc run with the following arguments: [@abs_bindir@/gs_guc -D @abs_srcdir@/tmp_check/datanode1/ -c ssl_cert_notify_time = 90 set ].
+NOTICE: Alarm days before ssl cert expires.
+expected instance path: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
+gs_guc set: ssl_cert_notify_time=90: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
+
+Total instances: 1. Failed instances: 0.
+Success to perform gs_guc!
+
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "ssl_cert_file = 'server.crt'"
+The gs_guc run with the following arguments: [@abs_bindir@/gs_guc -D @abs_srcdir@/tmp_check/datanode1/ -c ssl_cert_file = 'server.crt' set ].
+expected instance path: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
+gs_guc set: ssl_cert_file='server.crt': [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
+
+Total instances: 1. Failed instances: 0.
+Success to perform gs_guc!
+
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "ssl_key_file = 'server.key'"
+The gs_guc run with the following arguments: [@abs_bindir@/gs_guc -D @abs_srcdir@/tmp_check/datanode1/ -c ssl_key_file = 'server.key' set ].
+expected instance path: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
+gs_guc set: ssl_key_file='server.key': [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
+
+Total instances: 1. Failed instances: 0.
+Success to perform gs_guc!
+
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "ssl_ca_file = 'cacert.pem'"
+The gs_guc run with the following arguments: [@abs_bindir@/gs_guc -D @abs_srcdir@/tmp_check/datanode1/ -c ssl_ca_file = 'cacert.pem' set ].
+expected instance path: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
+gs_guc set: ssl_ca_file='cacert.pem': [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
+
+Total instances: 1. Failed instances: 0.
+Success to perform gs_guc!
+
+\! @abs_bindir@/gs_ctl start -D @abs_srcdir@/tmp_check/datanode1  > /dev/null
+\! sleep 10
+-- check ssl guc without value
+\! @abs_bindir@/gs_ctl stop -D @abs_srcdir@/tmp_check/datanode1  > /dev/null
+\! sleep 5
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "ssl = off"
+The gs_guc run with the following arguments: [@abs_bindir@/gs_guc -D @abs_srcdir@/tmp_check/datanode1/ -c ssl = off set ].
+expected instance path: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
+gs_guc set: ssl=off: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
+
+Total instances: 1. Failed instances: 0.
+Success to perform gs_guc!
+
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "ssl_cert_file = ''"
+The gs_guc run with the following arguments: [@abs_bindir@/gs_guc -D @abs_srcdir@/tmp_check/datanode1/ -c ssl_cert_file = '' set ].
+expected instance path: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
+gs_guc set: ssl_cert_file='': [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
+
+Total instances: 1. Failed instances: 0.
+Success to perform gs_guc!
+
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "ssl_key_file = ''"
+The gs_guc run with the following arguments: [@abs_bindir@/gs_guc -D @abs_srcdir@/tmp_check/datanode1/ -c ssl_key_file = '' set ].
+expected instance path: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
+gs_guc set: ssl_key_file='': [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
+
+Total instances: 1. Failed instances: 0.
+Success to perform gs_guc!
+
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "ssl_ca_file = ''"
+The gs_guc run with the following arguments: [@abs_bindir@/gs_guc -D @abs_srcdir@/tmp_check/datanode1/ -c ssl_ca_file = '' set ].
+expected instance path: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
+gs_guc set: ssl_ca_file='': [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
+
+Total instances: 1. Failed instances: 0.
+Success to perform gs_guc!
+
+\! @abs_bindir@/gs_ctl stop -D @abs_srcdir@/tmp_check/datanode1  > /dev/null
+\! rm -rf @abs_srcdir@/tmp_check/datanode1/server.*
+\! rm -rf @abs_srcdir@/tmp_check/datanode1/cacert.pem
+\! @abs_bindir@/gs_ctl start -D @abs_srcdir@/tmp_check/datanode1  > /dev/null
+\! sleep 10
+-- check rdma guc
+\! @abs_bindir@/gs_ctl stop -D @abs_srcdir@/tmp_check/datanode1  > /dev/null
+\! sleep 5
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "ss_rdma_work_config='abc123'"
+The gs_guc run with the following arguments: [@abs_bindir@/gs_guc -D @abs_srcdir@/tmp_check/datanode1/ -c ss_rdma_work_config='abc123' set ].
+expected instance path: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
+gs_guc set: ss_rdma_work_config='abc123': [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
+
+Total instances: 1. Failed instances: 0.
+Success to perform gs_guc!
+
+\! @abs_bindir@/gs_ctl start -D @abs_srcdir@/tmp_check/datanode1  > /dev/null
+\! sleep 10
+-- clean guc vlue
+\! @abs_bindir@/gs_ctl stop -D @abs_srcdir@/tmp_check/datanode1  > /dev/null
+\! sleep 5
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "ss_rdma_work_config=''"
+The gs_guc run with the following arguments: [@abs_bindir@/gs_guc -D @abs_srcdir@/tmp_check/datanode1/ -c ss_rdma_work_config='' set ].
+expected instance path: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
+gs_guc set: ss_rdma_work_config='': [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
+
+Total instances: 1. Failed instances: 0.
+Success to perform gs_guc!
+
+\! @abs_bindir@/gs_ctl start -D @abs_srcdir@/tmp_check/datanode1  > /dev/null
+\! sleep 5

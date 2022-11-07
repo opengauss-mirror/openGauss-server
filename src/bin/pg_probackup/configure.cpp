@@ -14,6 +14,7 @@
 
 #include "configuration.h"
 #include "json.h"
+#include "catalog/pg_control.h"
 
 
 static void assign_log_level_console(ConfigOption *opt, const char *arg);
@@ -40,6 +41,7 @@ static void show_configure_json(ConfigOption *opt);
 #define OPTION_RETENTION_GROUP    "Retention parameters"
 #define OPTION_COMPRESS_GROUP    "Compression parameters"
 #define OPTION_REMOTE_GROUP        "Remote access parameters"
+#define OPTION_DSS_GROUP          "DSS connect parameters"
 
 /*
  * Short name should be non-printable ASCII character.
@@ -220,6 +222,27 @@ ConfigOption instance_options[] =
         &instance_config.remote.libpath, SOURCE_CMD, (OptionSource)0,
         OPTION_REMOTE_GROUP, 0, option_get_value
     },
+    /* DSS options */
+    {
+        'b', 232, "enable-dss",
+        &instance_config.dss.enable_dss, SOURCE_CMD, (OptionSource)0,
+        OPTION_DSS_GROUP, 0, option_get_value
+    },
+    {
+        's', 233, "vgname",
+        &instance_config.dss.vgname, SOURCE_CMD, (OptionSource)0,
+        OPTION_DSS_GROUP, 0, option_get_value
+    },
+    {
+        's', 234, "socketpath",
+        &instance_config.dss.socketpath, SOURCE_CMD, (OptionSource)0,
+        OPTION_DSS_GROUP, 0, option_get_value
+    },
+    {
+        'i', 235, "instance-id",
+        &instance_config.dss.instance_id, SOURCE_CMD, (OptionSource)0,
+        OPTION_DSS_GROUP, 0, option_get_value
+    },
     { 0 }
 };
 
@@ -333,7 +356,7 @@ init_config(InstanceConfig *config, const char *instance_name)
 #if PG_VERSION_NUM >= 110000
     config->xlog_seg_size = 0;
 #else
-    config->xlog_seg_size = XLOG_SEG_SIZE;
+    config->xlog_seg_size = XLogSegSize;
 #endif
 
     config->archive_timeout = ARCHIVE_TIMEOUT_DEFAULT;
@@ -349,6 +372,9 @@ init_config(InstanceConfig *config, const char *instance_name)
     config->compress_level = COMPRESS_LEVEL_DEFAULT;
 
     config->remote.proto = (const char*)"ssh";
+
+    config->dss.enable_dss = false;
+    config->dss.instance_id = INVALID_INSTANCEID;
 }
 
 /*
@@ -514,6 +540,23 @@ readInstanceConfigFile(const char *instance_name)
         {
             's', 231, "remote-libpath", &instance->remote.libpath, SOURCE_CMD, (OptionSource)0,
             OPTION_REMOTE_GROUP, 0, option_get_value
+        },
+        /* DSS connect options */
+        {
+            'b', 232, "enable-dss", &instance->dss.enable_dss, SOURCE_CMD, (OptionSource)0,
+            OPTION_DSS_GROUP, 0, option_get_value
+        },
+        {
+            's', 233, "vgname", &instance->dss.vgname, SOURCE_CMD, (OptionSource)0,
+            OPTION_DSS_GROUP, 0, option_get_value
+        },
+        {
+            's', 234, "socketpath", &instance->dss.socketpath, SOURCE_CMD, (OptionSource)0,
+            OPTION_DSS_GROUP, 0, option_get_value
+        },
+        {
+            'i', 235, "instance-id", &instance->dss.instance_id, SOURCE_CMD, (OptionSource)0,
+            OPTION_DSS_GROUP, 0, option_get_value
         },
         { 0 }
     };

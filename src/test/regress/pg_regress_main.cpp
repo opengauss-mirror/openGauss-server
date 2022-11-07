@@ -86,7 +86,7 @@ static void gen_sql_cmd(char * const psql_cmd, int psql_size, const char* testna
                     outfile);
                 securec_check_ss_c(rc, "\0", "\0");
             }
-        } else{
+        } else {
             (void)snprintf_s(psql_cmd + offset,
                              (SQL_CMD_LEN - offset),
                              psql_size - offset,
@@ -172,6 +172,99 @@ static PID_TYPE psql_start_test(
     add_stringlist_item(expectfiles, expectfile);
 
     gen_sql_cmd(psql_cmd, sizeof(psql_cmd), testname, infile, outfile, is_binary, use_jdbc_client, is_jdbc_binary_test);
+
+    pid = spawn_process(psql_cmd);
+
+    if (pid == INVALID_PID) {
+        fprintf(stderr, _("could not start process for test %s\n"), testname);
+        exit(2);
+    }
+
+    return pid;
+}
+
+/* generate gsql/jdbc command for specific flag */
+static void gen_ss_sql_cmd(char * const psql_cmd, int psql_size, const char* testname, const char* infile,
+    const char* outfile, bool is_stanby)
+{
+    int port = is_stanby ? myinfo.dn_port[1] : myinfo.dn_port[0];
+    (void)snprintf_s(psql_cmd,
+        (SQL_CMD_LEN),
+        psql_size,
+        SYSTEMQUOTE "\"%s%sgsql\" -X -p %d -a %s %s -q -d \"%s\" -C "
+                 "< \"%s\" > \"%s\" 2>&1" SYSTEMQUOTE,
+                 psqldir ? psqldir : "",
+                 psqldir ? "/" : "",
+                 port,
+                 (char*)g_stRegrConfItems.acFieldSepForAllText,
+                 (char*)g_stRegrConfItems.acTuplesOnly,
+                 dblist->str,
+                 infile,
+                 outfile);
+}
+
+/*
+ * start a psql test process for specified file (including redirection),
+ * and return process ID
+ */
+PID_TYPE psql_ss_start_test(
+    const char* testname, _stringlist** resultfiles, _stringlist** expectfiles, _stringlist** tags,
+    bool is_stanby)
+    {
+    PID_TYPE pid;
+    char infile[MAXPGPATH];
+    char outfile[MAXPGPATH];
+    char expectfile[MAXPGPATH];
+    char psql_cmd[SQL_CMD_LEN];
+    /*
+     * Look for files in the output dir first, consistent with a vpath search.
+     * This is mainly to create more reasonable error messages if the file is
+     * not found.  It also allows local test overrides when running pg_regress
+     * outside of the source tree.
+     */
+
+    if (!is_stanby) {
+        snprintf(infile, sizeof(infile), "%s/sql/ss_wr/%s.sql", outputdir, testname);
+        if (!file_exists(infile)) {
+            snprintf(infile, sizeof(infile), "%s/sql/ss_wr/%s.sql", inputdir, testname);
+        }
+    } else {
+        snprintf(infile, sizeof(infile), "%s/sql/ss_r/%s.sql", outputdir, testname);
+        if (!file_exists(infile)) {
+            snprintf(infile, sizeof(infile), "%s/sql/ss_r/%s.sql", inputdir, testname);
+        }
+    }
+
+
+    /* If the .sql file does not exist, then record the error in diff summary
+     * file and cont */
+    if (!file_exists(infile)) {
+        FILE* fp = fopen(difffilename, "a");
+
+        if (fp) {
+            (void)fprintf(fp, "\n[%s]: No such file or directory!!\n", infile);
+            fclose(fp);
+        } else
+            fprintf(stderr, _("\n COULD NOT OPEN [%s]!!!!\n"), difffilename);
+    }
+    if (!is_stanby) {
+        (void)snprintf(outfile, sizeof(outfile), "%s/results/ss_wr/%s.out", outputdir, testname);
+
+        snprintf(expectfile, sizeof(expectfile), "%s/expected/ss_wr/%s.out", outputdir, testname);
+        if (!file_exists(expectfile))
+            snprintf(expectfile, sizeof(expectfile), "%s/expected/ss_wr/%s.out", inputdir, testname);
+    } else {
+        (void)snprintf(outfile, sizeof(outfile), "%s/results/ss_r/%s.out", outputdir, testname);
+
+        snprintf(expectfile, sizeof(expectfile), "%s/expected/ss_r/%s.out", outputdir, testname);
+        if (!file_exists(expectfile))
+            snprintf(expectfile, sizeof(expectfile), "%s/expected/ss_r/%s.out", inputdir, testname);
+    }
+
+    add_stringlist_item(resultfiles, outfile);
+    add_stringlist_item(expectfiles, expectfile);
+
+    gen_ss_sql_cmd(psql_cmd, sizeof(psql_cmd), testname, infile, outfile, is_stanby);
 
     pid = spawn_process(psql_cmd);
 

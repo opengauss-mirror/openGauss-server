@@ -83,6 +83,7 @@
 #include "storage/vfd.h"
 #include "storage/ipc.h"
 #include "storage/shmem.h"
+#include "storage/file/fio_device.h"
 #include "threadpool/threadpool.h"
 #include "utils/guc.h"
 #include "utils/plog.h"
@@ -232,7 +233,7 @@ static File AllocateVfd(void);
 static void FreeVfd(File file);
 
 static int FileAccess(File file);
-static File OpenTemporaryFileInTablespace(Oid tblspcOid, bool rejectError);
+static File OpenTemporaryFileInTablespaceOrDir(Oid tblspcOid, bool rejectError);
 static void CleanupTempFiles(bool isProcExit);
 static void RemovePgTempFilesInDir(const char* tmpdirname, bool unlinkAll);
 static void RemovePgTempRelationFiles(const char* tsdirname);
@@ -367,13 +368,16 @@ RelFileNodeForkNum RelFileNodeForkNumFill(RelFileNode* rnode,
  */
 int pg_fsync(int fd)
 {
+    if (is_dss_fd(fd)) {
+        return 0;
+    }
     /* #if is to skip the sync_method test if there's no need for it */
 #if defined(HAVE_FSYNC_WRITETHROUGH) && !defined(FSYNC_WRITETHROUGH_IS_FSYNC)
     if (u_sess->attr.attr_storage.sync_method == SYNC_METHOD_FSYNC_WRITETHROUGH)
         return pg_fsync_writethrough(fd);
     else
 #endif
-        return pg_fsync_no_writethrough(fd);
+    return pg_fsync_no_writethrough(fd);
 }
 
 /*
@@ -432,6 +436,9 @@ int pg_fdatasync(int fd)
  */
 void pg_flush_data(int fd, off_t offset, off_t nbytes)
 {
+    if (is_dss_fd(fd)) {
+        return;
+    }
     /*
      * Right now file flushing is primarily used to avoid making later
      * fsync()/fdatasync() calls have less impact. Thus don't trigger flushes
@@ -1457,7 +1464,7 @@ PathNameDeleteTemporaryDir(const char *dirname)
     struct stat statbuf;
 
     /* Silently ignore missing directory. */
-    if (stat(dirname, &statbuf) != 0 && errno == ENOENT)
+    if (stat(dirname, &statbuf) != 0 && FILE_POSSIBLY_DELETED(errno))
         return;
 
     /*
@@ -1494,30 +1501,35 @@ File OpenTemporaryFile(bool interXact)
      */
     if (!interXact)
         ResourceOwnerEnlargeFiles(t_thrd.utils_cxt.CurrentResourceOwner);
-    /*
-     * If some temp tablespace(s) have been given to us, try to use the next
-     * one.  If a given tablespace can't be found, we silently fall back to
-     * the database's default tablespace.
-     *
-     * BUT: if the temp file is slated to outlive the current transaction,
-     * force it into the database's default tablespace, so that it will not
-     * pose a threat to possible tablespace drop attempts.
-     */
-    if (u_sess->storage_cxt.numTempTableSpaces > 0 && !interXact) {
-        Oid tblspcOid = GetNextTempTableSpace();
-        if (OidIsValid(tblspcOid))
-            file = OpenTemporaryFileInTablespace(tblspcOid, false);
-    }
+    
+    if (ENABLE_DSS) {
+        file = OpenTemporaryFileInTablespaceOrDir(InvalidOid, true);
+    } else {
+        /*
+        * If some temp tablespace(s) have been given to us, try to use the next
+        * one.  If a given tablespace can't be found, we silently fall back to
+        * the database's default tablespace.
+        *
+        * BUT: if the temp file is slated to outlive the current transaction,
+        * force it into the database's default tablespace, so that it will not
+        * pose a threat to possible tablespace drop attempts.
+        */
+        if (u_sess->storage_cxt.numTempTableSpaces > 0 && !interXact) {
+            Oid tblspcOid = GetNextTempTableSpace();
+            if (OidIsValid(tblspcOid))
+                file = OpenTemporaryFileInTablespaceOrDir(tblspcOid, false);
+        }
 
-    /*
-     * If not, or if tablespace is bad, create in database's default
-     * tablespace.	u_sess->proc_cxt.MyDatabaseTableSpace should normally be set before we get
-     * here, but just in case it isn't, fall back to pg_default tablespace.
-     */
-    if (file <= 0)
-        file = OpenTemporaryFileInTablespace(
-                   u_sess->proc_cxt.MyDatabaseTableSpace ? u_sess->proc_cxt.MyDatabaseTableSpace : DEFAULTTABLESPACE_OID,
-                   true);
+        /*
+        * If not, or if tablespace is bad, create in database's default
+        * tablespace.	u_sess->proc_cxt.MyDatabaseTableSpace should normally be set before we get
+        * here, but just in case it isn't, fall back to pg_default tablespace.
+        */
+        if (file <= 0)
+            file = OpenTemporaryFileInTablespaceOrDir(
+                    u_sess->proc_cxt.MyDatabaseTableSpace ? u_sess->proc_cxt.MyDatabaseTableSpace :
+                    DEFAULTTABLESPACE_OID, true);
+    }
 
     vfd *vfdcache = GetVfdCache();
     /* Mark it for deletion at close and temporary file size limit */
@@ -1542,12 +1554,19 @@ void TempTablespacePath(char *path, Oid tablespace)
      *
      * If someone tries to specify pg_global, use pg_default instead.
      */
-    if (tablespace == InvalidOid || tablespace == DEFAULTTABLESPACE_OID || tablespace == GLOBALTABLESPACE_OID)
-        err_rc = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "base/%s", PG_TEMP_FILES_DIR);
-    else {
+    if (tablespace == DEFAULTTABLESPACE_OID || tablespace == GLOBALTABLESPACE_OID) {
+        err_rc = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/%s", DEFTBSDIR, PG_TEMP_FILES_DIR);
+    } else if (ENABLE_DSS && tablespace == InvalidOid) {
+        err_rc = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s", SS_PG_TEMP_FILES_DIR);
+    } else {
         /* All other tablespaces are accessed via symlinks */
-        err_rc = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "pg_tblspc/%u/%s_%s/%s", tablespace, 
-            TABLESPACE_VERSION_DIRECTORY, g_instance.attr.attr_common.PGXCNodeName, PG_TEMP_FILES_DIR);
+        if (ENABLE_DSS) {
+            err_rc = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/%u/%s/%s", TBLSPCDIR, tablespace,
+                TABLESPACE_VERSION_DIRECTORY, PG_TEMP_FILES_DIR);
+        } else {
+            err_rc = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/%u/%s_%s/%s", TBLSPCDIR, tablespace,
+                TABLESPACE_VERSION_DIRECTORY, g_instance.attr.attr_common.PGXCNodeName, PG_TEMP_FILES_DIR);
+        }
     }
     securec_check_ss(err_rc, "", "");
 }
@@ -1616,10 +1635,10 @@ void UnlinkCacheFile(const char* pathname)
 }
 
 /*
- * Open a temporary file in a specific tablespace.
+ * Open a temporary file in a specific tablespace or dirctory.
  * Subroutine for OpenTemporaryFile, which see for details.
  */
-static File OpenTemporaryFileInTablespace(Oid tblspcOid, bool rejectError)
+static File OpenTemporaryFileInTablespaceOrDir(Oid tblspcOid, bool rejectError)
 {
     char tempdirpath[MAXPGPATH];
     char tempfilepath[MAXPGPATH];
@@ -1633,31 +1652,46 @@ static File OpenTemporaryFileInTablespace(Oid tblspcOid, bool rejectError)
      */
     if (tblspcOid == DEFAULTTABLESPACE_OID || tblspcOid == GLOBALTABLESPACE_OID) {
         /* The default tablespace is {datadir}/base */
-        rc = snprintf_s(tempdirpath, sizeof(tempdirpath), sizeof(tempdirpath) - 1, "base/%s", PG_TEMP_FILES_DIR);
-        securec_check_ss(rc, "", "");
+        rc = snprintf_s(tempdirpath, sizeof(tempdirpath), sizeof(tempdirpath) - 1,
+                        "%s/%s", DEFTBSDIR, PG_TEMP_FILES_DIR);
+    } else if (ENABLE_DSS && tblspcOid == InvalidOid) {
+        rc = snprintf_s(tempdirpath, sizeof(tempdirpath), sizeof(tempdirpath) - 1, "%s", SS_PG_TEMP_FILES_DIR);
     } else {
         /* All other tablespaces are accessed via symlinks */
 #ifdef PGXC
         /* Postgres-XC tablespaces include node name in path */
-        rc = snprintf_s(tempdirpath,
-                        sizeof(tempdirpath),
-                        sizeof(tempdirpath) - 1,
-                        "pg_tblspc/%u/%s_%s/%s",
-                        tblspcOid,
-                        TABLESPACE_VERSION_DIRECTORY,
-                        g_instance.attr.attr_common.PGXCNodeName,
-                        PG_TEMP_FILES_DIR);
+        if (ENABLE_DSS) {
+            rc = snprintf_s(tempdirpath,
+                            sizeof(tempdirpath),
+                            sizeof(tempdirpath) - 1,
+                            "%s/%u/%s/%s",
+                            TBLSPCDIR,
+                            tblspcOid,
+                            TABLESPACE_VERSION_DIRECTORY,
+                            PG_TEMP_FILES_DIR);
+        } else {
+            rc = snprintf_s(tempdirpath,
+                            sizeof(tempdirpath),
+                            sizeof(tempdirpath) - 1,
+                            "%s/%u/%s_%s/%s",
+                            TBLSPCDIR,
+                            tblspcOid,
+                            TABLESPACE_VERSION_DIRECTORY,
+                            g_instance.attr.attr_common.PGXCNodeName,
+                            PG_TEMP_FILES_DIR);
+        }
 #else
         rc = snprintf_s(tempdirpath,
                         sizeof(tempdirpath),
                         sizeof(tempdirpath) - 1,
-                        "pg_tblspc/%u/%s/%s",
+                        "%s/%u/%s/%s",
+                        TBLSPCDIR,
                         tblspcOid,
                         TABLESPACE_VERSION_DIRECTORY,
                         PG_TEMP_FILES_DIR);
 #endif
-        securec_check_ss(rc, "", "");
     }
+    securec_check_ss(rc, "", "");
 
     /*
      * Generate a tempfile name that should be unique within the current
@@ -1810,11 +1844,11 @@ bool PathNameDeleteTemporaryFile(const char *path, bool error_on_failure)
      * non-existence to support BufFileDeleteShared which doesn't know how
      * many segments it has to delete until it runs out.
      */
-    if (stat_errno == ENOENT)
+    if (FILE_POSSIBLY_DELETED(stat_errno))
         return false;
 
     if (unlink(path) < 0) {
-        if (errno != ENOENT)
+        if (!FILE_POSSIBLY_DELETED(errno))
             ereport(error_on_failure ? ERROR : LOG,
                 (errcode_for_file_access(), errmsg("cannot unlink temporary file \"%s\": %m", path)));
         return false;
@@ -1932,6 +1966,10 @@ int FilePrefetch(File file, off_t offset, int amount, uint32 wait_event_info)
 
     Assert(FileIsValid(file));
     vfd *vfdcache = GetVfdCache();
+
+    if (is_dss_file(vfdcache[file].fileName)) {
+        return 0;
+    }
 
     DO_DB(ereport(LOG,
                   (errmsg("FilePrefetch: %d (%s) " INT64_FORMAT " %d",
@@ -3473,18 +3511,19 @@ void RemovePgTempFiles(void)
     DIR* spc_dir = NULL;
     struct dirent* spc_de = NULL;
     errno_t rc = EOK;
+
     /*
      * First process temp files in pg_default ($PGDATA/base)
      */
-    rc = snprintf_s(temp_path, sizeof(temp_path), sizeof(temp_path) - 1, "base/%s", PG_TEMP_FILES_DIR);
+    rc = snprintf_s(temp_path, sizeof(temp_path), sizeof(temp_path) - 1, "%s/%s", DEFTBSDIR, PG_TEMP_FILES_DIR);
     securec_check_ss(rc, "", "");
     RemovePgTempFilesInDir(temp_path, false);
-    RemovePgTempRelationFiles("base");
+    RemovePgTempRelationFiles(DEFTBSDIR);
 
     /*
      * Cycle through temp directories for all non-default tablespaces.
      */
-    spc_dir = AllocateDir("pg_tblspc");
+    spc_dir = AllocateDir(TBLSPCDIR);
     if (spc_dir == NULL) {
         ereport(ERROR, (errcode_for_file_access(), errmsg("Allocate dir failed.")));
     }
@@ -3502,20 +3541,34 @@ void RemovePgTempFiles(void)
         securec_check(rc, "", "");
 #ifdef PGXC
         /* Postgres-XC tablespaces include node name in path */
-        rc = snprintf_s(temp_path,
-                        sizeof(temp_path),
-                        sizeof(temp_path) - 1,
-                        "pg_tblspc/%s/%s_%s/%s",
-                        spc_de->d_name,
-                        TABLESPACE_VERSION_DIRECTORY,
-                        g_instance.attr.attr_common.PGXCNodeName,
-                        PG_TEMP_FILES_DIR);
-        securec_check_ss(rc, "", "");
+        if (ENABLE_DSS) {
+            rc = snprintf_s(temp_path,
+                            sizeof(temp_path),
+                            sizeof(temp_path) - 1,
+                            "%s/%s/%s/%s",
+                            TBLSPCDIR,
+                            spc_de->d_name,
+                            TABLESPACE_VERSION_DIRECTORY,
+                            PG_TEMP_FILES_DIR);
+            securec_check_ss(rc, "", "");
+        } else {
+            rc = snprintf_s(temp_path,
+                            sizeof(temp_path),
+                            sizeof(temp_path) - 1,
+                            "%s/%s/%s_%s/%s",
+                            TBLSPCDIR,
+                            spc_de->d_name,
+                            TABLESPACE_VERSION_DIRECTORY,
+                            g_instance.attr.attr_common.PGXCNodeName,
+                            PG_TEMP_FILES_DIR);
+            securec_check_ss(rc, "", "");
+        }
 #else
         rc = snprintf_s(temp_path,
                         sizeof(temp_path),
                         sizeof(temp_path) - 1,
-                        "pg_tblspc/%s/%s/%s",
+                        "%s/%s/%s/%s",
+                        TBLSPCDIR,
                         curSubDir,
                         TABLESPACE_VERSION_DIRECTORY,
                         PG_TEMP_FILES_DIR);
@@ -3525,19 +3578,32 @@ void RemovePgTempFiles(void)
 
 #ifdef PGXC
         /* Postgres-XC tablespaces include node name in path */
-        rc = snprintf_s(temp_path,
-                        sizeof(temp_path),
-                        sizeof(temp_path) - 1,
-                        "pg_tblspc/%s/%s_%s",
-                        spc_de->d_name,
-                        TABLESPACE_VERSION_DIRECTORY,
-                        g_instance.attr.attr_common.PGXCNodeName);
-        securec_check_ss(rc, "", "");
+        if (ENABLE_DSS) {
+            rc = snprintf_s(temp_path,
+                            sizeof(temp_path),
+                            sizeof(temp_path) - 1,
+                            "%s/%s/%s",
+                            TBLSPCDIR,
+                            spc_de->d_name,
+                            TABLESPACE_VERSION_DIRECTORY);
+            securec_check_ss(rc, "", "");
+        } else {
+            rc = snprintf_s(temp_path,
+                            sizeof(temp_path),
+                            sizeof(temp_path) - 1,
+                            "%s/%s/%s_%s",
+                            TBLSPCDIR,
+                            spc_de->d_name,
+                            TABLESPACE_VERSION_DIRECTORY,
+                            g_instance.attr.attr_common.PGXCNodeName);
+            securec_check_ss(rc, "", "");
+        }
 #else
         rc = snprintf_s(temp_path,
                         sizeof(temp_path),
                         sizeof(temp_path) - 1,
-                        "pg_tblspc/%s/%s",
+                        "%s/%s/%s",
+                        TBLSPCDIR,
                         curSubDir,
                         TABLESPACE_VERSION_DIRECTORY);
         securec_check_ss(rc, "\0", "\0");
@@ -3552,7 +3618,11 @@ void RemovePgTempFiles(void)
      * t_thrd.proc_cxt.DataDir as well.
      */
 #ifdef EXEC_BACKEND
-    RemovePgTempFilesInDir(PG_TEMP_FILES_DIR, false);
+    if (ENABLE_DSS) {
+        RemovePgTempFilesInDir(SS_PG_TEMP_FILES_DIR, false);
+    } else {
+        RemovePgTempFilesInDir(PG_TEMP_FILES_DIR, false);
+    }
 #endif
 }
 
@@ -3567,8 +3637,9 @@ static void RemovePgTempFilesInDir(const char* tmpdirname, bool unlinkAll)
     temp_dir = AllocateDir(tmpdirname);
     if (temp_dir == NULL) {
         /* anything except ENOENT is fishy */
-        if (errno != ENOENT)
+        if (!FILE_POSSIBLY_DELETED(errno)) {
             ereport(LOG, (errmsg("could not open temporary-files directory \"%s\": %m", tmpdirname)));
+        }
         return;
     }
 
@@ -3991,8 +4062,9 @@ static void Walkdir(const char *path, void (*action)(const char *fname, bool isd
 static void UnlinkIfExistsFname(const char *fname, bool isdir, int elevel)
 {
     if (isdir) {
-        if (rmdir(fname) != 0 && errno != ENOENT)
+        if (rmdir(fname) != 0 && !FILE_POSSIBLY_DELETED(errno)) {
             ereport(elevel, (errcode_for_file_access(), errmsg("could not rmdir directory \"%s\": %m", fname)));
+        }
     } else {
         /* Use PathNameDeleteTemporaryFile to report filesize */
         PathNameDeleteTemporaryFile(fname, false);

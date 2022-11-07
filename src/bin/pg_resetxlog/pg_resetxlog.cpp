@@ -49,6 +49,7 @@
 #include <getopt.h>
 #endif
 
+#include "tool_common.h"
 #include "access/transam.h"
 #include "access/tuptoaster.h"
 #include "access/multixact.h"
@@ -239,6 +240,8 @@ int main(int argc, char* argv[])
         exit(1);
     }
 
+    initDataPathStruct(false);
+
     /*
      * Check for a postmaster lock file --- if there is one, refuse to
      * proceed, on grounds we might be interfering with a live installation.
@@ -364,7 +367,7 @@ static bool ReadControlFile(void)
     pg_crc32 crc;
     errno_t rc = 0;
 
-    if ((fd = open(XLOG_CONTROL_FILE, O_RDONLY | PG_BINARY, 0)) < 0) {
+    if ((fd = open(T_XLOG_CONTROL_FILE, O_RDONLY | PG_BINARY, 0)) < 0) {
         /*
          * If pg_control is not there at all, or we can't read it, the odds
          * are we've been handed a bad DataDir path, so give up. User can do
@@ -373,14 +376,14 @@ static bool ReadControlFile(void)
         fprintf(stderr,
             _("%s: could not open file \"%s\" for reading: %s\n"),
             progname,
-            XLOG_CONTROL_FILE,
+            T_XLOG_CONTROL_FILE,
             strerror(errno));
         if (errno == ENOENT)
             fprintf(stderr,
                 _("If you are sure the data directory path is correct, execute\n"
                   "  touch %s\n"
                   "and try again.\n"),
-                XLOG_CONTROL_FILE);
+                T_XLOG_CONTROL_FILE);
         exit(1);
     }
 
@@ -394,7 +397,7 @@ static bool ReadControlFile(void)
     }
     len = read(fd, buffer, PG_CONTROL_SIZE);
     if (len < 0) {
-        fprintf(stderr, _("%s: could not read file \"%s\": %s\n"), progname, XLOG_CONTROL_FILE, strerror(errno));
+        fprintf(stderr, _("%s: could not read file \"%s\": %s\n"), progname, T_XLOG_CONTROL_FILE, strerror(errno));
         free(buffer);
         buffer = NULL;
         close(fd);
@@ -494,7 +497,7 @@ static void GuessControlValues(void)
     ControlFile.blcksz = BLCKSZ;
     ControlFile.relseg_size = RELSEG_SIZE;
     ControlFile.xlog_blcksz = XLOG_BLCKSZ;
-    ControlFile.xlog_seg_size = XLOG_SEG_SIZE;
+    ControlFile.xlog_seg_size = XLogSegSize;
     ControlFile.nameDataLen = NAMEDATALEN;
     ControlFile.indexMaxKeys = INDEX_MAX_KEYS;
     ControlFile.toast_max_chunk_size = TOAST_MAX_CHUNK_SIZE;
@@ -637,9 +640,9 @@ static void RewriteControlFile(void)
     rc = memcpy_s(buffer, PG_CONTROL_SIZE, &ControlFile, sizeof(ControlFileData));
     securec_check_c(rc, "", "");
 
-    unlink(XLOG_CONTROL_FILE);
+    unlink(T_XLOG_CONTROL_FILE);
 
-    fd = open(XLOG_CONTROL_FILE, O_RDWR | O_CREAT | O_EXCL | PG_BINARY, S_IRUSR | S_IWUSR);
+    fd = open(T_XLOG_CONTROL_FILE, O_RDWR | O_CREAT | O_EXCL | PG_BINARY, S_IRUSR | S_IWUSR);
     if (fd < 0) {
         fprintf(stderr, _("%s: could not create pg_control file: %s\n"), progname, strerror(errno));
         exit(1);

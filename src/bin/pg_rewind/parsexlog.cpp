@@ -463,7 +463,7 @@ XLogRecPtr getValidCommonLSN(XLogRecPtr checkLsn, XLogRecPtr maxLsn)
     XLByteToPrevSeg(checkLsn, checkLogSegNo);
     if (maxLogSegNo > (checkLogSegNo + 1)) {
         for (loopLogSegNo = (checkLogSegNo + 1); loopLogSegNo <= maxLogSegNo; loopLogSegNo++) {
-            startLsn = loopLogSegNo * XLOG_SEG_SIZE;
+            startLsn = loopLogSegNo * XLogSegSize;
             curLsn = InvalidXLogRecPtr;
             curLsn = XLogFindNextRecord(xlogreader, startLsn);
             if (!XLogRecPtrIsInvalid(curLsn)) {

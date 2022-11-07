@@ -30,6 +30,7 @@
 #include "catalog/pg_collation.h"
 #include "catalog/pg_proc.h"
 #include "catalog/pg_type.h"
+#include "catalog/pg_class.h"
 #include "libpq/pqsignal.h"
 #include "miscadmin.h"
 #include "pgstat.h"
@@ -69,6 +70,9 @@
 #endif
 
 #include "gssignal/gs_signal.h"
+#include "storage/file/fio_device.h"
+#include "storage/dss/dss_adaptor.h"
+#include "storage/dss/dss_log.h"
 
 #define ALLOC(t, c) ((t*)selfpalloc0((unsigned)(c) * sizeof(t)))
 
@@ -248,7 +252,7 @@ void BootStrapProcessMain(int argc, char* argv[])
     t_thrd.bootstrap_cxt.MyAuxProcType = CheckerProcess;
 
     initOptParseContext(&optCtxt);
-    while ((flag = getopt_r(argc, argv, "B:c:d:D:Fr:x:g:-:", &optCtxt)) != -1) {
+    while ((flag = getopt_r(argc, argv, "B:c:d:D:FGr:x:g:-:", &optCtxt)) != -1) {
         switch (flag) {
             case 'B':
                 SetConfigOption("shared_buffers", optCtxt.optarg, PGC_POSTMASTER, PGC_S_ARGV);
@@ -269,6 +273,9 @@ void BootStrapProcessMain(int argc, char* argv[])
             } break;
             case 'F':
                 SetConfigOption("fsync", "false", PGC_POSTMASTER, PGC_S_ARGV);
+                break;
+            case 'G':
+                EnableInitDBSegment = true;
                 break;
             case 'g':
                 SetConfigOption("xlog_file_path", optCtxt.optarg, PGC_POSTMASTER, PGC_S_ARGV);
@@ -334,6 +341,17 @@ void BootStrapProcessMain(int argc, char* argv[])
     /* If standalone, create lockfile for data directory */
     if (!IsUnderPostmaster)
         CreateDataDirLockFile(false);
+    
+    /* Callback function for dss operator */
+    if (dss_device_init(g_instance.attr.attr_storage.dss_attr.ss_dss_conn_path,
+        g_instance.attr.attr_storage.dss_attr.ss_enable_dss) != DSS_SUCCESS) {
+        ereport(PANIC, (errmsg("failed to init dss device")));
+        proc_exit(1);
+    }
+    if (ENABLE_DSS) {
+        dss_log_init();
+    }
+    initDSSConf();
 
     SetProcessingMode(BootstrapProcessing);
     u_sess->attr.attr_common.IgnoreSystemIndexes = true;
@@ -688,6 +706,16 @@ void DefineAttr(const char* name, char* type, int attnum)
 }
 
 /* ----------------
+ *      ChangePgClassBucketValueForSegment
+ * ----------------
+ */
+static inline void ChangePgClassBucketValueForSegment()
+{
+    values[Anum_pg_class_relbucket - 1] = ObjectIdGetDatum(VirtualSegmentOid);
+    Nulls[Anum_pg_class_relbucket - 1] = false;
+}
+
+/* ----------------
  *		InsertOneTuple
  *
  * If objectid is not zero, it is a specific OID to assign to the tuple.
@@ -704,6 +732,10 @@ void InsertOneTuple(Oid objectid)
 
     if (IsBootingPgProc(t_thrd.bootstrap_cxt.boot_reldesc)) {
         ereport(FATAL, (errmsg("Built-in functions should not be added into pg_proc")));
+    }
+
+    if (IsBootingPgClass(t_thrd.bootstrap_cxt.boot_reldesc) && EnableInitDBSegment) {
+        ChangePgClassBucketValueForSegment();
     }
     tupDesc = CreateTupleDesc(t_thrd.bootstrap_cxt.numattr,
         RelationGetForm(t_thrd.bootstrap_cxt.boot_reldesc)->relhasoids,

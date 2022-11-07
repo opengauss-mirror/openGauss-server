@@ -20,6 +20,7 @@
 #include "storage/page_compression.h"
 #include "storage/smgr/relfilenode.h"
 
+#include "storage/file/fio_device_com.h"
 typedef struct vfd {
     int fd;                 /* current FD, or VFD_CLOSED if none */
     unsigned short fdstate; /* bitflags for VFD's state */

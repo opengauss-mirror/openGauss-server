@@ -429,6 +429,21 @@ bool path_is_prefix_of_path(const char* path1, const char* path2)
     return false;
 }
 
+void get_top_path(char *path)
+{
+    char *p = NULL;
+    
+    if (path == NULL || path[0] == '\0') {
+        return;
+    }
+
+    /* fetch first dir sep */
+    for (p = path; !IS_DIR_SEP(*p) && p[0] != '\0'; p++)
+        ;
+
+    *p = '\0';
+}
+
 /*
  * Extracts the actual name of the program as called -
  * stripped of .exe suffix if any

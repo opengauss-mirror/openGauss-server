@@ -63,7 +63,8 @@ override CFLAGS := $(filter-out -fPIE, $(CFLAGS)) -fPIC -fstack-protector-all
 # OBJS from this file.
 OBJS=	fe-auth.o fe-connect.o fe-exec.o fe-misc.o fe-print.o fe-lobj.o \
 	fe-protocol2.o fe-protocol3.o pqexpbuffer.o pqsignal.o fe-secure.o \
-	libpq-events.o
+	libpq-events.o \
+	$(top_builddir)/src/gausskernel/storage/dss/fio_dss.o $(top_builddir)/src/gausskernel/storage/file/fio_device.o
 # libpgport C files we always use
 OBJS += chklocale.o inet_net_ntop.o noblock.o pgstrcasecmp.o thread.o cipher.o path.o pgsleep.o
 # libpgport C files that are needed if identified by configure

@@ -453,6 +453,7 @@ void WalReceiverMain(void)
     int nRet = 0;
     errno_t rc = 0;
 
+    Assert(ENABLE_DSS == false);
     t_thrd.walreceiver_cxt.last_sendfilereply_timestamp = GetCurrentTimestamp();
     t_thrd.walreceiver_cxt.standby_config_modify_time = time(NULL);
 
@@ -2111,7 +2112,7 @@ int GetSyncPercent(XLogRecPtr startLsn, XLogRecPtr totalLsn, XLogRecPtr hasCompl
         if (segno < WalGetSyncCountWindow()) {
             startLsn = InvalidXLogRecPtr;
         } else {
-            startLsn = totalLsn - (WalGetSyncCountWindow() * XLOG_SEG_SIZE);
+            startLsn = totalLsn - (WalGetSyncCountWindow() * XLogSegSize);
             basePercent = STREAMING_START_PERCENT;
         }
     }
@@ -2432,7 +2433,11 @@ Datum pg_stat_get_stream_replications(PG_FUNCTION_ARGS)
         ereport(WARNING, (errmsg("server mode is unknown.")));
 
     /* local role */
-    values[0] = CStringGetTextDatum(wal_get_role_string(local_role));
+    if (g_instance.attr.attr_storage.dms_attr.enable_dms) {
+        values[0] = CStringGetTextDatum(GetSSServerMode());
+    } else {
+        values[0] = CStringGetTextDatum(wal_get_role_string(local_role));
+    }
     /* static connections */
     values[1] = Int32GetDatum(static_connnections);
     /* db state */
@@ -2656,7 +2661,7 @@ void WalRcvSetPercentCountStartLsn(XLogRecPtr startLsn)
 /* Set start send lsn for current walsender (only called in walsender) */
 static void WalRcvRefreshPercentCountStartLsn(XLogRecPtr currentMaxLsn, XLogRecPtr currentDoneLsn)
 {
-    uint64 coundWindow = ((uint64)WalGetSyncCountWindow() * XLOG_SEG_SIZE);
+    uint64 coundWindow = ((uint64)WalGetSyncCountWindow() * XLogSegSize);
     volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
     XLogRecPtr baseStartLsn = InvalidXLogRecPtr;
 

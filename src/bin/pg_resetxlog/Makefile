@@ -27,7 +27,7 @@ OBJS= pg_resetxlog.o $(WIN32RES)
 all: pg_resetxlog
 
 override CXXFLAGS += -fPIE
-override CPPFLAGS := -I$(libpq_srcdir) $(CPPFLAGS) 
+override CPPFLAGS := -I$(libpq_srcdir) $(CPPFLAGS) -I${top_builddir}/src/include
 CFLAGS += -Wl,-z,relro,-z,now -fPIE
 LDFLAGS += -pie
 

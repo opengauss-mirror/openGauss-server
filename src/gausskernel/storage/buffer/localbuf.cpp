@@ -497,7 +497,8 @@ static Block GetLocalBufferStorage(void)
         num_bufs = Min((unsigned int)(num_bufs), MaxAllocSize / BLCKSZ);
 
         u_sess->storage_cxt.cur_block =
-            (char*)MemoryContextAlloc(u_sess->storage_cxt.LocalBufferContext, num_bufs * BLCKSZ);
+            (char*)BUFFERALIGN(MemoryContextAlloc(u_sess->storage_cxt.LocalBufferContext,
+            num_bufs * BLCKSZ + ALIGNOF_BUFFER));
         u_sess->storage_cxt.next_buf_in_block = 0;
         u_sess->storage_cxt.num_bufs_in_block = num_bufs;
     }

@@ -15,6 +15,7 @@
 #include "c.h"
 
 #include <dirent.h>
+#include "storage/file/fio_device.h"
 
 /*
  * Test to see if a directory exists and is empty or not.
@@ -32,11 +33,11 @@ int pg_check_dir(const char* dir)
     struct dirent* file = NULL;
 
     errno = 0;
-
     chkdir = opendir(dir);
 
-    if (chkdir == NULL)
-        return (errno == ENOENT) ? 0 : -1;
+    if (chkdir == NULL) {
+        return (is_file_delete(errno) ? 0 : -1);
+    }
 
     while ((file = gs_readdir(chkdir)) != NULL) {
         if (strcmp(".", file->d_name) == 0 || strcmp("..", file->d_name) == 0) {

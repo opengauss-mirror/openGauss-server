@@ -51,6 +51,7 @@
 #include "utils/rel_gs.h"
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
+#include "ddes/dms/ss_transaction.h"
 
 #ifdef ENABLE_MULTIPLE_NODES
 #include "tsdb/cache/part_cachemgr.h"
@@ -843,12 +844,19 @@ void smgrDoDropBufferUsingScan(bool isCommit)
         }
     }
     DropRelFileNodeAllBuffersUsingScan(rnodes, rnode_len);
+
+    if (ENABLE_DMS && SS_PRIMARY_MODE && rnode_len > 0) {
+        SSBCastDropRelAllBuffer(rnodes, rnode_len);
+    }
 }
 
 void smgrDoDropBufferUsingHashTbl(bool isCommit)
 {
     PendingRelDelete* pending = NULL;
     PendingRelDelete* next = NULL;
+
+    int rnode_len = 0;
+    RelFileNode rnodes[DROP_BUFFER_USING_HASH_DEL_REL_NUM_THRESHOLD];
 
     int nestLevel = GetCurrentTransactionNestLevel();
     HTAB* relfilenode_hashtbl = relfilenode_hashtbl_create();
@@ -863,10 +871,22 @@ void smgrDoDropBufferUsingHashTbl(bool isCommit)
                     (void)hash_search(relfilenode_hashtbl, &(pending->relnode), HASH_ENTER, &found);
                     if (!found) {
                         enter_cnt++;
+
+                        if (ENABLE_DMS && SS_PRIMARY_MODE) {
+                            if (rnode_len >= DROP_BUFFER_USING_HASH_DEL_REL_NUM_THRESHOLD) {
+                                SSBCastDropRelAllBuffer(rnodes, rnode_len);
+                                rnode_len = 0;
+                            }
+                            rnodes[rnode_len++] = pending->relnode;
+                        }
                     }
                 } 
             } 
         }
+    }
+
+    if (ENABLE_DMS && SS_PRIMARY_MODE && rnode_len > 0) {
+        SSBCastDropRelAllBuffer(rnodes, rnode_len);
     }
     
     /* At least one relnode founded */

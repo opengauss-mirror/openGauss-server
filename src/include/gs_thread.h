@@ -147,7 +147,8 @@ typedef enum knl_thread_role {
     WAL_STANDBY_SENDER, /* Am I cascading WAL to another standby ? */
     WAL_DB_SENDER,
     TOP_CONSUMER,
-    DCF_WORKER
+    DCF_WORKER,
+    DMS_WORKER
 } knl_thread_role;
 
 /*

@@ -56,6 +56,10 @@ extern MemoryContext LocalSmgrStorageMemoryCxt();
 
 extern bool EnableGlobalSysCache();
 
+#if defined(USE_ASSERT_CHECKING) && !defined(ENABLE_MEMORY_CHECK)
+extern void CloseLSCCheck();
+#endif
+
 knl_u_inval_context *GetInvalCxt();
 knl_u_relmap_context *GetRelMapCxt();
 

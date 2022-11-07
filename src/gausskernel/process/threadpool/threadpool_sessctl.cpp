@@ -859,7 +859,7 @@ TransactionId ThreadPoolSessControl::ListAllSessionGttFrozenxids(int maxSize,
         *n = 0;
     }
 
-    if (RecoveryInProgress()) {
+    if (RecoveryInProgress() || SSIsServerModeReadOnly()) {
         return InvalidTransactionId;
     }
 

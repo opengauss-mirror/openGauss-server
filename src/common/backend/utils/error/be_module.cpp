@@ -130,6 +130,9 @@ const module_data module_map[] = {{MOD_ALL, "ALL"},
     {MOD_DISASTER_READ, "DISASTER_READ"},
     {MODE_REPSYNC, "REPSYNC"},
     {MOD_SQLPATCH, "SQLPATCH"},
+    {MOD_DMS, "DMS"},
+    {MOD_DSS, "DSS_API"},
+    {MOD_GPI, "GPI"},
 
     /* add your module name above */
     {MOD_MAX, "BACKEND"}};

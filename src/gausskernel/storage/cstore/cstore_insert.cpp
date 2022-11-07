@@ -2982,7 +2982,18 @@ int PartitionValueCache::InternalWrite(const char* buf, int len)
 void PartitionValueCache::FlushData()
 {
     if (likely(m_bufCursor > 0)) {
-        int retval = FilePWrite(m_fd, m_buffer, m_bufCursor, m_writeOffset);
+        int retval;
+        if (ENABLE_DSS) {
+            char *buffer_ori = (char*)palloc(BLCKSZ + m_bufCursor);
+            char *buffer_ali = (char*)BUFFERALIGN(buffer_ori);
+            errno_t rc = memcpy_s(buffer_ali, m_bufCursor, m_buffer, m_bufCursor);
+            securec_check(rc, "", "");
+            retval = FilePWrite(m_fd, buffer_ali, m_bufCursor, (off_t)m_writeOffset);
+            pfree(buffer_ori);
+            buffer_ali = NULL;
+        } else {
+            retval = FilePWrite(m_fd, m_buffer, m_bufCursor, m_writeOffset);
+        }
         if (retval < 0)
             ereport(ERROR, (errcode_for_file_access(), errmsg("could not write cache file \"%s\": %m", FilePathName(m_fd))));
         m_writeOffset += retval;

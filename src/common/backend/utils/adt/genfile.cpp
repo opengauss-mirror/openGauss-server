@@ -38,6 +38,7 @@
 #include "utils/lsyscache.h"
 #include "catalog/pg_partition_fn.h"
 #include "storage/cfs/cfs_buffers.h"
+#include "storage/file/fio_device.h"
 
 typedef struct {
     char* location;
@@ -1402,7 +1403,7 @@ Datum pg_ls_waldir(PG_FUNCTION_ARGS)
     if (!superuser() && !isMonitoradmin(GetUserId()))
         ereport(ERROR,
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("only system/monitor admin can check WAL directory!")));
-    return pg_ls_dir_files(fcinfo, XLOGDIR, false);
+    return pg_ls_dir_files(fcinfo, SS_XLOGDIR, false);
 }
 
 /*
@@ -1415,8 +1416,11 @@ static Datum pg_ls_tmpdir(FunctionCallInfo fcinfo, Oid tblspc)
         ereport(ERROR,
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                 errmsg("only system/monitor admin can check pgsql_tmp directory!")));
-    if (!SearchSysCacheExists1(TABLESPACEOID, ObjectIdGetDatum(tblspc)))
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("tablespace with OID %u does not exist", tblspc)));
+    if (OidIsValid(tblspc)) {
+        if (!SearchSysCacheExists1(TABLESPACEOID, ObjectIdGetDatum(tblspc)))
+            ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("tablespace with OID %u does not exist", tblspc)));
+    }
 
     TempTablespacePath(path, tblspc);
     return pg_ls_dir_files(fcinfo, path, true);
@@ -1428,7 +1432,11 @@ static Datum pg_ls_tmpdir(FunctionCallInfo fcinfo, Oid tblspc)
  */
 Datum pg_ls_tmpdir_noargs(PG_FUNCTION_ARGS)
 {
-    return pg_ls_tmpdir(fcinfo, DEFAULTTABLESPACE_OID);
+    if (!ENABLE_DSS) {
+        return pg_ls_tmpdir(fcinfo, DEFAULTTABLESPACE_OID);
+    } else {
+        return pg_ls_tmpdir(fcinfo, InvalidOid);
+    }
 }
 
 /*

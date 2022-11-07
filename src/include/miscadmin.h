@@ -340,6 +340,7 @@ extern const uint32 BACKUP_SLOT_VERSION_NUM;
 #ifdef PGXC
 extern bool useLocalXid;
 #endif
+extern bool EnableInitDBSegment;
 
 #define DEFUALT_STACK_SIZE 16384
 
@@ -400,6 +401,8 @@ extern void InitializeSessionUserIdStandalone(void);
 extern void SetSessionAuthorization(Oid userid, bool is_superuser);
 extern Oid GetCurrentRoleId(void);
 extern void SetCurrentRoleId(Oid roleid, bool is_superuser);
+void ss_initdwsubdir(char *dssdir, int instance_id);
+extern void initDSSConf(void);
 
 extern Oid get_current_lcgroup_oid();
 extern const char* get_current_lcgroup_name();
@@ -459,6 +462,7 @@ extern bool CheckExecDirectPrivilege(const char* query); /* check user have priv
         u_sess->misc_cxt.Mode = (mode);                                                                      \
     } while (0)
 
+#define ENABLE_DSS (g_instance.attr.attr_storage.dss_attr.ss_enable_dss == true)
 
 /*
  * Auxiliary-process type identifiers.
@@ -539,6 +543,8 @@ typedef enum {
 #define AmTsCompactionConsumerProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == TsCompactionConsumerProcess)
 #define AmTsCompactionAuxiliaryProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == TsCompactionAuxiliaryProcess)
 #define AmPageRedoWorker() (t_thrd.bootstrap_cxt.MyAuxProcType == PageRedoProcess)
+#define AmDmsReformProcProcess() (t_thrd.role == DMS_WORKER && \
+    strncmp("DMS REFORM PROC", t_thrd.proc_cxt.MyProgName, 15) == 0)
 
 
 

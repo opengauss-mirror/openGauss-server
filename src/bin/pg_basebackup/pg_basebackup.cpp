@@ -32,6 +32,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 
+#include "tool_common.h"
 #include "getopt_long.h"
 #include "receivelog.h"
 #include "streamutil.h"
@@ -82,6 +83,7 @@ extern int tblspaceCount;
 extern int tblspaceIndex;
 
 extern int standby_message_timeout; /* 10 sec = default */
+
 
 /* Progress counters */
 static uint64 totalsize;
@@ -1513,13 +1515,13 @@ static void backup_dw_file(const char *target_dir)
     char *unaligned_buf = NULL;
 
     /* Delete the dw file, if it exists. */
-    remove_dw_file(OLD_DW_FILE_NAME, target_dir, real_file_path);
+    remove_dw_file(T_OLD_DW_FILE_NAME, target_dir, real_file_path);
 
     rc = memset_s(real_file_path, (PATH_MAX + 1), 0, (PATH_MAX + 1));
     securec_check_c(rc, "\0", "\0");
 
     /* Delete the dw build file, if it exists. */
-    remove_dw_file(DW_BUILD_FILE_NAME, target_dir, real_file_path);
+    remove_dw_file(T_DW_BUILD_FILE_NAME, target_dir, real_file_path);
 
     /* Create the dw build file. */
     if ((fd = open(real_file_path, (DW_FILE_FLAG | O_CREAT), DW_FILE_PERM)) < 0) {

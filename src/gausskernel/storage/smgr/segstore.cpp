@@ -38,6 +38,7 @@
 #include "utils/resowner.h"
 #include "vectorsonic/vsonichash.h"
 #include "storage/procarray.h"
+#include "ddes/dms/ss_transaction.h"
 /*
  * This code manages relations that reside on segment-page storage. It implements functions used for smgr.cpp.
  *
@@ -97,6 +98,9 @@
 static void seg_update_timeline()
 {
     pg_atomic_add_fetch_u32(&g_instance.segment_cxt.segment_drop_timeline, 1);
+    if (ENABLE_DMS && SS_PRIMARY_MODE) {
+        SSUpdateSegDropTimeline(pg_atomic_read_u32(&g_instance.segment_cxt.segment_drop_timeline));
+    }
 }
 
 static uint32 seg_get_drop_timeline()
@@ -135,6 +139,12 @@ void UnlockSegmentHeadPartition(Oid spcNode, Oid dbNode, BlockNumber head)
 
 #define ReadLevel0Buffer(spc, blockno)                                                                                 \
     ReadBufferFast((spc), EXTENT_GROUP_RNODE((spc), LEVEL0_PAGE_EXTENT_SIZE), MAIN_FORKNUM, (blockno), RBM_NORMAL)
+
+#define ReadSegmentBuffer_RBM_ZERO(spc, blockno)                                                                       \
+        ReadBufferFast((spc), EXTENT_GROUP_RNODE((spc), SEGMENT_HEAD_EXTENT_SIZE), MAIN_FORKNUM, (blockno), RBM_ZERO)
+
+#define ReadLevel0Buffer_RBM_ZERO(spc, blockno)                                                                        \
+    ReadBufferFast((spc), EXTENT_GROUP_RNODE((spc), LEVEL0_PAGE_EXTENT_SIZE), MAIN_FORKNUM, (blockno), RBM_ZERO)
 
 /*
  * Calculate extent id & offset according to logic page id
@@ -227,7 +237,7 @@ void seg_init_new_level0_page(SegSpace *spc, uint32_t new_extent_id, Buffer seg_
 {
     SegmentHead *seg_head = (SegmentHead *)PageGetContents(BufferGetPage(seg_head_buffer));
 
-    Buffer new_level0_buffer = ReadLevel0Buffer(spc, new_level0_page);
+    Buffer new_level0_buffer = ReadLevel0Buffer_RBM_ZERO(spc, new_level0_page);
     LockBuffer(new_level0_buffer, BUFFER_LOCK_EXCLUSIVE);
     Page level0_page = BufferGetPage(new_level0_buffer);
 
@@ -486,6 +496,9 @@ static bool normal_open_segment(SMgrRelation reln, int forknum, bool create)
             reln->seg_desc[MAIN_FORKNUM]->head_blocknum)));
     }
 
+    if (ENABLE_DMS) {
+        LockBuffer(main_buffer, BUFFER_LOCK_SHARE);
+    }
     /*
      * For non-main fork, the segment head is stored in the main fork segment head.
      * The block number being invalid means that the segment has not been created yet.
@@ -494,6 +507,9 @@ static bool normal_open_segment(SMgrRelation reln, int forknum, bool create)
 
     if (fork_head_blocknum == InvalidBlockNumber) {
         if (create) {
+            if (ENABLE_DMS) {
+                LockBuffer(main_buffer, BUFFER_LOCK_UNLOCK);
+            }
             LockBuffer(main_buffer, BUFFER_LOCK_EXCLUSIVE);
 
             /*
@@ -529,10 +545,16 @@ static bool normal_open_segment(SMgrRelation reln, int forknum, bool create)
             }
             SegUnlockReleaseBuffer(main_buffer);
         } else {
+            if (ENABLE_DMS) {
+                LockBuffer(main_buffer, BUFFER_LOCK_UNLOCK);
+            }
             SegReleaseBuffer(main_buffer);
             return false;
         }
     } else {
+        if (ENABLE_DMS) {
+            LockBuffer(main_buffer, BUFFER_LOCK_UNLOCK);
+        }
         SegReleaseBuffer(main_buffer);
     }
 
@@ -709,7 +731,7 @@ static void bucket_ensure_mapblock(SegSpace *spc, Buffer main_buffer, uint32 blo
             spc_alloc_extent(spc, SEGMENT_HEAD_EXTENT_SIZE, MAIN_FORKNUM, InvalidBlockNumber, iptr);
         main_head->bkt_map[blockid] = newmap_block;
 
-        Buffer map_buffer = ReadSegmentBuffer(spc, newmap_block);
+        Buffer map_buffer = ReadSegmentBuffer_RBM_ZERO(spc, newmap_block);
         LockBuffer(map_buffer, BUFFER_LOCK_EXCLUSIVE);
         bucket_init_map_page(map_buffer, lsn);
         XLogAtomicOpRegisterBuffer(map_buffer, REGBUF_WILL_INIT, SPCXLOG_BUCKET_INIT_MAPBLOCK,
@@ -771,7 +793,7 @@ static BlockNumber bucket_alloc_segment(Oid tablespace_id, Oid database_id, Bloc
     XLogAtomicOpStart();
     BlockNumber main_head_blocknum =
         spc_alloc_extent(spc, SEGMENT_HEAD_EXTENT_SIZE, MAIN_FORKNUM, InvalidBlockNumber, iptr);
-    Buffer main_head_buffer = ReadSegmentBuffer(spc, main_head_blocknum);
+    Buffer main_head_buffer = ReadSegmentBuffer_RBM_ZERO(spc, main_head_blocknum);
     LockBuffer(main_head_buffer, BUFFER_LOCK_EXCLUSIVE);
 
     Page main_head_page = BufferGetPage(main_head_buffer);
@@ -1091,10 +1113,16 @@ SegPageLocation seg_get_physical_location(RelFileNode rnode, ForkNumber forknum,
 
     reln = smgropen(rnode, InvalidBackendId);
     Buffer buffer = read_head_buffer(reln, forknum, false);
+    if (ENABLE_DMS) {
+        LockBuffer(buffer, BUFFER_LOCK_SHARE);
+    }
     SegmentCheck(BufferIsValid(buffer));
     SegmentHead *head = (SegmentHead *)PageGetContents(BufferGetBlock(buffer));
 
     SegPageLocation loc = seg_logic_to_physic_mapping(reln, head, blocknum);
+    if (ENABLE_DMS) {
+        LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
+    }
 
     SegReleaseBuffer(buffer);
     return loc;
@@ -1141,7 +1169,7 @@ static bool open_segment(SMgrRelation reln, ForkNumber forknum, bool create, XLo
     }
 
     if (reln->seg_desc[forknum]) {
-        if (forknum != MAIN_FORKNUM && !CurrentThreadIsWorker() &&
+        if (forknum != MAIN_FORKNUM && (!CurrentThreadIsWorker() || SS_STANDBY_MODE) &&
             reln->seg_desc[forknum]->timeline != seg_get_drop_timeline()) {
             /*
              * It's possible that the current smgr cache is invalid. We should close it and reopen.
@@ -1461,17 +1489,27 @@ SMGR_READ_STATUS seg_read(SMgrRelation reln, ForkNumber forknum, BlockNumber blo
     LOG_SMGR_API(reln->smgr_rnode, forknum, blocknum, "seg_read");
 
     Buffer seg_buffer = read_head_buffer(reln, forknum, false);
+    if (ENABLE_DMS) {
+        LockBuffer(seg_buffer, BUFFER_LOCK_SHARE);
+    }
     SegmentCheck(BufferIsValid(seg_buffer));
     SegmentHead *seg_head = (SegmentHead *)PageGetContents(BufferGetBlock(seg_buffer));
     SegmentCheck(IsNormalSegmentHead(seg_head));
 
     if (seg_head->nblocks <= blocknum) {
+        if (ENABLE_DMS) {
+            LockBuffer(seg_buffer, BUFFER_LOCK_UNLOCK);
+        }
         SegReleaseBuffer(seg_buffer);
         ereport(ERROR, (errmodule(MOD_SEGMENT_PAGE), errcode(ERRCODE_DATA_CORRUPTED),
                         errmsg("seg_read blocknum exceeds segment size"),
                         errdetail("segment %s, head: %u, read block %u, but nblocks is %u",
                                   relpathperm(reln->smgr_rnode.node, forknum), reln->seg_desc[forknum]->head_blocknum,
                                   blocknum, seg_head->nblocks)));
+    }
+
+    if (ENABLE_DMS) {
+        LockBuffer(seg_buffer, BUFFER_LOCK_UNLOCK);
     }
 
     LockSegmentHeadPartition(reln->seg_space->spcNode, reln->seg_space->dbNode, reln->seg_desc[forknum]->head_blocknum,

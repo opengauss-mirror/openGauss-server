@@ -33,15 +33,16 @@
 
 static const uint32 HALF_K = 512;
 
-static const char OLD_DW_FILE_NAME[] = "global/pg_dw";
-static const char DW_FILE_NAME_PREFIX[] = "global/pg_dw_";
-static const char SINGLE_DW_FILE_NAME[] = "global/pg_dw_single";
-static const char DW_BUILD_FILE_NAME[] = "global/pg_dw.build";
-static const char DW_UPGRADE_FILE_NAME[] = "global/dw_upgrade";
-static const char DW_BATCH_UPGRADE_META_FILE_NAME[] = "global/dw_batch_upgrade_meta";
-static const char DW_BATCH_UPGRADE_BATCH_FILE_NAME[] = "global/dw_batch_upgrade_files";
-static const char DW_META_FILE[] = "global/pg_dw_meta";
-static const char DW_EXT_DIRECTORY[] = "global/pg_dw_ext_chunk";
+#define OLD_DW_FILE_NAME (g_instance.datadir_cxt.dw_subdir_cxt.dwOldPath)
+#define DW_FILE_NAME_PREFIX (g_instance.datadir_cxt.dw_subdir_cxt.dwPathPrefix)
+#define SINGLE_DW_FILE_NAME (g_instance.datadir_cxt.dw_subdir_cxt.dwSinglePath)
+#define DW_BUILD_FILE_NAME (g_instance.datadir_cxt.dw_subdir_cxt.dwBuildPath)
+#define DW_UPGRADE_FILE_NAME (g_instance.datadir_cxt.dw_subdir_cxt.dwUpgradePath) 
+#define DW_BATCH_UPGRADE_META_FILE_NAME (g_instance.datadir_cxt.dw_subdir_cxt.dwBatchUpgradeMetaPath) 
+#define DW_BATCH_UPGRADE_BATCH_FILE_NAME (g_instance.datadir_cxt.dw_subdir_cxt.dwBatchUpgradeFilePath)
+#define DW_META_FILE (g_instance.datadir_cxt.dw_subdir_cxt.dwMetaPath)
+#define DW_EXT_DIRECTORY (g_instance.datadir_cxt.dw_subdir_cxt.dwExtChunkPath)
+#define DW_STORAGE_TYPE ((device_type_t)g_instance.datadir_cxt.dw_subdir_cxt.dwStorageType)
 
 static const uint32 DW_TRY_WRITE_TIMES = 8;
 #ifndef WIN32

@@ -2453,6 +2453,12 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
      * warning here; it would just lead to chatter during a database-wide
      * VACUUM.)
      */
+    if (ENABLE_DSS && RELATION_IS_TEMP(onerel)) {
+        CloseAllRelationsBeforeReturnFalse();
+        proc_snapshot_and_transaction();
+        return false;
+    }
+
     if (RELATION_IS_OTHER_TEMP(onerel)) {
         CloseAllRelationsBeforeReturnFalse();
 

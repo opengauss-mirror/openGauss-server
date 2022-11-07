@@ -93,6 +93,7 @@ extern bool RegisterBackgroundWorker(BackgroundWorker *worker);
 extern int LaunchBackgroundWorkers(int nworkers, void *bgshared, bgworker_main bgmain, bgworker_exit bgexit);
 extern void BackgroundWorkerMain(void);
 extern bool IsBgWorkerProcess(void);
+extern bool IsDMSWorkerProcess(void);
 extern void BgworkerListSyncQuit();
 extern void BgworkerListWaitFinish(int *nparticipants);
 extern void InitBgworkerGlobal(void);

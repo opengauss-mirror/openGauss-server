@@ -89,6 +89,29 @@ typedef struct knl_instance_attr_nvm {
     double bypassNvm;
 } knl_instance_attr_nvm;
 
+typedef struct knl_instance_attr_dss {
+    bool ss_enable_dss;
+    char* ss_dss_vg_name;
+    char* ss_dss_conn_path;
+} knl_instance_attr_dss;
+
+typedef struct knl_instance_attr_dms {
+    bool enable_dms;
+    bool enable_catalog_centralized;
+    int instance_id;
+    int recv_msg_pool_size;
+    char* interconnect_url;
+    char* interconnect_type;
+    char* rdma_work_config;
+    char* ock_log_path;
+    int channel_count;
+    int work_thread_count;
+    bool enable_reform;
+    bool enable_ssl;
+    int inst_count;
+    bool enable_log_level;
+} knl_instance_attr_dms;
+
 typedef struct knl_instance_attr_storage {
     bool wal_log_hints;
     bool EnableHotStandby;
@@ -154,6 +177,8 @@ typedef struct knl_instance_attr_storage {
     char* available_zone;
     knl_instance_attr_dcf dcf_attr;
     knl_instance_attr_nvm nvm_attr;
+    knl_instance_attr_dss dss_attr;
+    knl_instance_attr_dms dms_attr;
     int num_internal_lock_partitions[LWLOCK_PART_KIND];
     char* num_internal_lock_partitions_str;
     int wal_insert_status_entries_power;

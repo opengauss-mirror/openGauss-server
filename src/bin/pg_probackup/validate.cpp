@@ -16,6 +16,7 @@
 
 #include "thread.h"
 #include "common/fe_memutils.h"
+#include "storage/file/fio_device.h"
 
 static void *pgBackupValidateFiles(void *arg);
 static void do_validate_instance(void);
@@ -26,6 +27,7 @@ static bool skipped_due_to_lock = false;
 typedef struct
 {
     const char *base_path;
+    const char *dss_path;
     parray        *files;
     bool        corrupted;
     XLogRecPtr     stop_lsn;
@@ -88,6 +90,16 @@ bool pre_check_backup(pgBackup *backup)
         return false;
     }
 
+    /* Check backup storage mode suitable */
+    if (IsDssMode() != is_dss_type(backup->storage_type))
+    {
+        elog(WARNING, "Backup %s is not suit for instance %s, because they have different "
+            "storage type. Change it to CORRUPT and skip validation.",
+            base36enc((long unsigned int)backup->start_time), instance_name);
+        write_backup_status(backup, BACKUP_STATUS_CORRUPT, instance_name, true);
+        return false;
+    }
+
     if (backup->status == BACKUP_STATUS_OK || backup->status == BACKUP_STATUS_DONE ||
         backup->status == BACKUP_STATUS_MERGING)
         elog(INFO, "Validating backup %s", base36enc(backup->start_time));
@@ -109,6 +121,7 @@ void
 pgBackupValidate(pgBackup *backup, pgRestoreParams *params)
 {
     char        base_path[MAXPGPATH];
+    char        dss_path[MAXPGPATH];
     char        external_prefix[MAXPGPATH];
     parray       *files = NULL;
     bool        corrupted = false;
@@ -122,6 +135,7 @@ pgBackupValidate(pgBackup *backup, pgRestoreParams *params)
         return;
 
     join_path_components(base_path, backup->root_dir, DATABASE_DIR);
+    join_path_components(dss_path, backup->root_dir, DSSDATA_DIR);
     join_path_components(external_prefix, backup->root_dir, EXTERNAL_DIR);
     files = get_backup_filelist(backup, false);
 
@@ -158,6 +172,7 @@ pgBackupValidate(pgBackup *backup, pgRestoreParams *params)
         validate_files_arg *arg = &(threads_args[i]);
 
         arg->base_path = base_path;
+        arg->dss_path = dss_path;
         arg->files = files;
         arg->corrupted = false;
         arg->backup_mode = backup->backup_mode;
@@ -257,7 +272,7 @@ void check_crc(pgFile *file, char *file_fullpath, validate_files_arg *arguments)
         if (arguments->backup_version >= 20025 &&
             strcmp(file->name, "pg_control") == 0 &&
             !file->external_dir_num)
-            crc = get_pgcontrol_checksum(arguments->base_path);
+            crc = get_pgcontrol_checksum(file_fullpath);
         else
             crc = pgFileGetCRC(file_fullpath,
                                arguments->backup_version <= 20021 ||
@@ -277,6 +292,9 @@ void check_crc(pgFile *file, char *file_fullpath, validate_files_arg *arguments)
          * check page headers, checksums (if enabled)
          * and compute checksum of the file
          */
+        if (IsDssMode()) {
+            return;
+        }
         if (!validate_file_pages(file, file_fullpath, arguments->stop_lsn,
                               arguments->checksum_version,
                               arguments->backup_version,
@@ -348,6 +366,8 @@ pgBackupValidateFiles(void *arg)
             makeExternalDirPathByNum(temp, arguments->external_prefix, file->external_dir_num);
             join_path_components(file_fullpath, temp, file->rel_path);
         }
+        else if (is_dss_type(file->type))
+            join_path_components(file_fullpath, arguments->dss_path, file->rel_path);
         else
             join_path_components(file_fullpath, arguments->base_path, file->rel_path);
 

@@ -356,6 +356,12 @@ static void XLogDump(XLogRecPtr start_lsn, XLogRecPtr end_lsn, XLogFilter *filte
 /* There are only two parameters in PG_FUNCTION_ARGS: start_lsn and end_lsn */
 Datum gs_xlogdump_lsn(PG_FUNCTION_ARGS)
 {
+    if (ENABLE_DSS) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("unsupported gs_xlogdump_lsn when enable dss.")));
+        PG_RETURN_VOID();
+    }
+
     errno_t rc = EOK;
     /* check user's right */
     const char fName[MAXFNAMELEN] = "gs_xlogdump_lsn";
@@ -395,6 +401,12 @@ Datum gs_xlogdump_lsn(PG_FUNCTION_ARGS)
 /* There are only one parameter in PG_FUNCTION_ARGS: c_xid */
 Datum gs_xlogdump_xid(PG_FUNCTION_ARGS)
 {
+    if (ENABLE_DSS) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("unsupported gs_xlogdump_xid when enable dss.")));
+        PG_RETURN_VOID();
+    }
+
     errno_t rc = EOK;
     /* check user's right */
     const char fName[MAXFNAMELEN] = "gs_xlogdump_xid";
@@ -430,6 +442,12 @@ Datum gs_xlogdump_xid(PG_FUNCTION_ARGS)
 /* There are only three parameters in PG_FUNCTION_ARGS: path, blocknum, relation_type */
 Datum gs_xlogdump_tablepath(PG_FUNCTION_ARGS)
 {
+    if (ENABLE_DSS) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("unsupported gs_xlogdump_tablepath when enable dss.")));
+        PG_RETURN_VOID();
+    }
+
     errno_t rc = EOK;
     /* check user's right */
     const char fName[MAXFNAMELEN] = "gs_xlogdump_tablepath";
@@ -472,6 +490,12 @@ Datum gs_xlogdump_tablepath(PG_FUNCTION_ARGS)
 
 Datum gs_xlogdump_parsepage_tablepath(PG_FUNCTION_ARGS)
 {
+    if (ENABLE_DSS) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("unsupported gs_xlogdump_parsepage_tablepath when enable dss.")));
+        PG_RETURN_VOID();
+    }
+
     /* check user's right */
     const char fName[MAXFNAMELEN] = "gs_xlogdump_parsepage_tablepath";
     CheckUser(fName);

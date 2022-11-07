@@ -38,6 +38,7 @@
 #include "storage/pmsignal.h"
 #include "storage/proc.h"
 #include "storage/procarray.h"
+#include "storage/file/fio_device.h"
 #include "utils/lsyscache.h"
 #include "tcop/tcopprot.h"
 #include "utils/acl.h"
@@ -626,37 +627,50 @@ Datum pg_tablespace_databases(PG_FUNCTION_ARGS)
 
         fctx = (ts_db_fctx*)palloc(sizeof(ts_db_fctx));
 
-        /*
-         * size = tablespace dirname length + dir sep char + oid + terminator
-         */
-#ifdef PGXC
-        /* openGauss tablespaces also include node name in path */
-        location_len = 9 + 1 + OIDCHARS + 1 + strlen(g_instance.attr.attr_common.PGXCNodeName) + 1 +
-                       strlen(TABLESPACE_VERSION_DIRECTORY) + 1;
-        fctx->location = (char*)palloc(location_len);
-#else
-        location_len = 9 + 1 + OIDCHARS + 1 + strlen(TABLESPACE_VERSION_DIRECTORY) + 1 fctx->location =
-                           (char*)palloc(location_len);
-#endif
         if (tablespaceOid == GLOBALTABLESPACE_OID) {
             fctx->dirdesc = NULL;
             ereport(WARNING, (errmsg("global tablespace never has databases")));
         } else {
-            if (tablespaceOid == DEFAULTTABLESPACE_OID)
-                ss_rc = sprintf_s(fctx->location, location_len, "base");
-            else
-#ifdef PGXC
-                /* openGauss tablespaces also include node name in path */
+            if (tablespaceOid == DEFAULTTABLESPACE_OID) {
+                location_len = (int)strlen(DEFTBSDIR) + 1;
+                fctx->location = (char*)palloc(location_len);
+                ss_rc = sprintf_s(fctx->location, (size_t)location_len, "%s", DEFTBSDIR);
+            } else if (ENABLE_DSS) {
+                location_len = (int)strlen(TBLSPCDIR) + 1 + OIDCHARS + 1 +
+                               (int)strlen(TABLESPACE_VERSION_DIRECTORY) + 1;
+                fctx->location = (char*)palloc(location_len);
                 ss_rc = sprintf_s(fctx->location,
                     location_len,
-                    "pg_tblspc/%u/%s_%s",
+                    "%s/%u/%s",
+                    TBLSPCDIR,
+                    tablespaceOid,
+                    TABLESPACE_VERSION_DIRECTORY);
+            } else {
+#ifdef PGXC
+                /* openGauss tablespaces also include node name in path */
+                location_len = (int)strlen(TBLSPCDIR) + 1 + OIDCHARS + 1 +
+                               (int)strlen(TABLESPACE_VERSION_DIRECTORY) + 1 +
+                               (int)strlen(g_instance.attr.attr_common.PGXCNodeName) + 1;
+                fctx->location = (char*)palloc(location_len);
+                ss_rc = sprintf_s(fctx->location,
+                    location_len,
+                    "%s/%u/%s_%s",
+                    TBLSPCDIR,
                     tablespaceOid,
                     TABLESPACE_VERSION_DIRECTORY,
                     g_instance.attr.attr_common.PGXCNodeName);
 #else
-                ss_rc = sprintf_s(
-                    fctx->location, location_len, "pg_tblspc/%u/%s", tablespaceOid, TABLESPACE_VERSION_DIRECTORY);
+                location_len = (int)strlen(TBLSPCDIR) + 1 + OIDCHARS + 1 +
+                               (int)strlen(TABLESPACE_VERSION_DIRECTORY) + 1;
+                fctx->location = (char*)palloc(location_len);
+                ss_rc = sprintf_s(fctx->location,
+                    location_len,
+                    "%s/%u/%s",
+                    TBLSPCDIR,
+                    tablespaceOid,
+                    TABLESPACE_VERSION_DIRECTORY);
 #endif
+            }
             securec_check_ss(ss_rc, "\0", "\0");
             fctx->dirdesc = AllocateDir(fctx->location);
 
@@ -690,7 +704,7 @@ Datum pg_tablespace_databases(PG_FUNCTION_ARGS)
         /* if database subdir is empty, don't report tablespace as used */
 
         /* size = path length + dir sep char + file name + terminator */
-        int sub_len = strlen(fctx->location) + 1 + strlen(de->d_name) + 1;
+        int sub_len = (int)strlen(fctx->location) + 1 + (int)strlen(de->d_name) + 1;
         subdir = (char*)palloc(sub_len);
         ss_rc = sprintf_s(subdir, sub_len, "%s/%s", fctx->location, de->d_name);
         securec_check_ss(ss_rc, "\0", "\0");
@@ -743,7 +757,8 @@ Datum pg_tablespace_location(PG_FUNCTION_ARGS)
      * Find the location of the tablespace by reading the symbolic link that
      * is in pg_tblspc/<oid>.
      */
-    errno_t ss_rc = snprintf_s(sourcepath, sizeof(sourcepath), sizeof(sourcepath) - 1, "pg_tblspc/%u", tablespaceOid);
+    errno_t ss_rc = snprintf_s(sourcepath, sizeof(sourcepath), sizeof(sourcepath) - 1,
+                               "%s/%u", TBLSPCDIR, tablespaceOid);
     securec_check_ss(ss_rc, "\0", "\0");
 
     rllen = readlink(sourcepath, targetpath, sizeof(targetpath));

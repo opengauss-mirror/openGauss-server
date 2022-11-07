@@ -313,21 +313,34 @@ int64 MlogGetMaxSeqno(Oid mlogid)
  */
 void SetRelationIsScannable(Relation relation)
 {
-   Page page;
+    Page page;
+    char* unaligned_buffer = NULL;
 
-   Assert(relation->rd_rel->relkind == RELKIND_MATVIEW);
-   Assert(relation->rd_isscannable == false);
+    Assert(relation->rd_rel->relkind == RELKIND_MATVIEW);
+    Assert(relation->rd_isscannable == false);
 
-   RelationOpenSmgr(relation);
-   page = (Page)palloc(BLCKSZ);
-   PageInit(page, BLCKSZ, 0, true);
-   PageSetChecksumInplace(page, 0);
-   smgrextend(relation->rd_smgr, MAIN_FORKNUM, 0, (char *) page, true);
-   pfree(page);
+    RelationOpenSmgr(relation);
 
-   smgrimmedsync(relation->rd_smgr, MAIN_FORKNUM);
+    if (ENABLE_DSS) {
+        unaligned_buffer = (char*)palloc(BLCKSZ + ALIGNOF_BUFFER);
+        page = (Page)BUFFERALIGN(unaligned_buffer);
+    } else {
+        page = (Page)palloc(BLCKSZ);
+    }
 
-   RelationCacheInvalidateEntry(relation->rd_id);
+    PageInit(page, BLCKSZ, 0, true);
+    PageSetChecksumInplace(page, 0);
+    smgrextend(relation->rd_smgr, MAIN_FORKNUM, 0, (char *) page, true);
+
+    if (ENABLE_DSS) {
+        pfree(unaligned_buffer);
+    } else {
+        pfree(page);
+    }
+
+    smgrimmedsync(relation->rd_smgr, MAIN_FORKNUM);
+
+    RelationCacheInvalidateEntry(relation->rd_id);
 }
 
 static Index get_index_ref(QueryDesc* queryDesc, Oid relid)

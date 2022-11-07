@@ -58,6 +58,8 @@ typedef int CLogXidStatus;
 #define CLOG_XID_STATUS_COMMITTED 0x01
 #define CLOG_XID_STATUS_ABORTED 0x02
 
+#define CLOGDIR (g_instance.datadir_cxt.clogDir)
+
 /*
  * A "subcommitted" transaction is a committed subtransaction whose parent
  * hasn't committed or aborted yet.
@@ -102,6 +104,7 @@ typedef enum {
 
 #include "fmgr.h"
 extern Datum gs_fault_inject(PG_FUNCTION_ARGS);
+extern void SSCLOGShmemClear(void);
 
 #endif /* CLOG_H */
 

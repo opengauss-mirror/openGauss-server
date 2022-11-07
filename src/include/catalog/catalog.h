@@ -29,6 +29,10 @@
 #define TABLESPACE_VERSION_DIRECTORY	"PG_" PG_MAJORVERSION "_" \
 									CppAsString2(CATALOG_VERSION_NO)
 
+#define DEFTBSDIR (g_instance.datadir_cxt.baseDir)
+#define GLOTBSDIR (g_instance.datadir_cxt.globalDir)
+#define TBLSPCDIR (g_instance.datadir_cxt.tblspcDir) 
+
 /* file name: Cxxxxx.0
  * the max length is up to MaxAttrNumber
  */

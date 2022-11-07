@@ -2027,7 +2027,17 @@ OptSchemaEltList:
 		;
 
 OptBlockchainWith:
-			WITH BLOCKCHAIN							{ $$ = true; }
+			WITH BLOCKCHAIN
+			    {
+                    if (ENABLE_DMS) {
+			            const char* message = "BLOCKCHAIN is not supported while DMS and DSS enabled";
+			            InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+			            ereport(errstate, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), 
+				                errmsg("BLOCKCHAIN is not supported while DMS and DSS enabled")));
+					}
+
+                    $$ = true;
+			    }
 			| /* EMPTY */							{ $$ = false; }
 		;
 
@@ -2049,7 +2059,17 @@ AlterSchemaStmt:
 			;
 
 OptAlterToBlockchain:
-			WITH BLOCKCHAIN							{ $$ = true; }
+			WITH BLOCKCHAIN
+			    {
+                    if (ENABLE_DMS) {
+			            const char* message = "BLOCKCHAIN is not supported while DMS and DSS enabled";
+			            InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+			            ereport(errstate, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), 
+				                errmsg("BLOCKCHAIN is not supported while DMS and DSS enabled")));
+					}
+
+                    $$ = true;
+			    }
 			| WITHOUT BLOCKCHAIN					{ $$ = false; }
 		;
 
@@ -8656,6 +8676,11 @@ CreateMatViewStmt:
                                 errmsg("It's not supported to specify distribute key on incremental materialized views")));
                    }
 #endif
+                   if (ENABLE_DMS) {
+                        ereport(errstate, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("matview is not supported while DMS and DSS enabled.")));
+                   }
+                    
 				   $6->ivm = $3;
 				   $$ = (Node *) ctas;
 			   }
@@ -16641,14 +16666,28 @@ TransactionStmt:
 					$$ = (Node *)n;
 				}
 			| PREPARE TRANSACTION Sconst
-				{
+				{   
+					if (ENABLE_DMS) {
+			            const char* message = "PREPARE TRANSACTION is not supported while DMS and DSS enabled";
+			            InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+			            ereport(errstate, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), 
+				                errmsg("PREPARE TRANSACTION is not supported while DMS and DSS enabled")));
+					}
+
 					TransactionStmt *n = makeNode(TransactionStmt);
 					n->kind = TRANS_STMT_PREPARE;
 					n->gid = $3;
 					$$ = (Node *)n;
 				}
 			| COMMIT PREPARED Sconst
-				{
+				{   
+					if (ENABLE_DMS) {
+			            const char* message = "COMMIT TRANSACTION is not supported while DMS and DSS enabled";
+			            InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+			            ereport(errstate, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), 
+				                errmsg("COMMIT TRANSACTION is not supported while DMS and DSS enabled")));
+					}
+
 					TransactionStmt *n = makeNode(TransactionStmt);
 					n->kind = TRANS_STMT_COMMIT_PREPARED;
 					n->gid = $3;
@@ -16656,7 +16695,14 @@ TransactionStmt:
 					$$ = (Node *)n;
 				}
 			| COMMIT PREPARED Sconst WITH Sconst
-				{
+				{   
+					if (ENABLE_DMS) {
+			            const char* message = "COMMIT TRANSACTION is not supported while DMS and DSS enabled";
+			            InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+			            ereport(errstate, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), 
+				                errmsg("COMMIT TRANSACTION is not supported while DMS and DSS enabled")));
+					}
+
 					TransactionStmt *n = makeNode(TransactionStmt);
 					n->kind = TRANS_STMT_COMMIT_PREPARED;
 					n->gid = $3;
@@ -16664,7 +16710,14 @@ TransactionStmt:
 					$$ = (Node *)n;
 				}
 			| ROLLBACK PREPARED Sconst
-				{
+				{   
+					if (ENABLE_DMS) {
+			            const char* message = "ROLLBACK TRANSACTION is not supported while DMS and DSS enabled";
+			            InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+			            ereport(errstate, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), 
+				                errmsg("ROLLBACK TRANSACTION is not supported while DMS and DSS enabled")));
+					}
+
 					TransactionStmt *n = makeNode(TransactionStmt);
 					n->kind = TRANS_STMT_ROLLBACK_PREPARED;
 					n->gid = $3;

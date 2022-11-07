@@ -24,6 +24,7 @@ set(CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/tcap
     ${CMAKE_CURRENT_SOURCE_DIR}/xlog_share_storage
     ${CMAKE_CURRENT_SOURCE_DIR}/dorado_operation
+    ${CMAKE_CURRENT_SOURCE_DIR}/dss
 )
 
 if("${ENABLE_MOT}" STREQUAL "ON")
@@ -53,6 +54,7 @@ add_subdirectory(nvm)
 add_subdirectory(tcap)
 add_subdirectory(xlog_share_storage)
 add_subdirectory(dorado_operation)
+add_subdirectory(dss)
 
 if("${ENABLE_MOT}" STREQUAL "ON")
     add_subdirectory(mot)

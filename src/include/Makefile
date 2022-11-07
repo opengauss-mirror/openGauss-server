@@ -167,6 +167,7 @@ endif
 	$(INSTALL_DATA) replication/origin.h '$(DESTDIR)$(includedir_server)/replication/origin.h'
 	$(INSTALL_DATA) parser/scanner.h '$(DESTDIR)$(includedir_server)/parser/scanner.h'
 	$(INSTALL_DATA) parser/keywords.h '$(DESTDIR)$(includedir_server)/parser/keywords.h'
+	$(INSTALL_DATA) ddes/dms/dms_api.h '$(DESTDIR)$(includedir_server)/ddes/dms/dms_api.h'
 # We don't use INSTALL_DATA for performance reasons --- there are a lot of files
 	cp $(srcdir)/*.h '$(DESTDIR)$(includedir_server)'/ || exit; \
 	chmod $(INSTALL_DATA_MODE) '$(DESTDIR)$(includedir_server)'/*.h  || exit; \

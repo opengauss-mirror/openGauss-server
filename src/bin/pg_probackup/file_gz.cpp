@@ -158,7 +158,7 @@ fio_gzread(gzFile f, void *buf, unsigned size)
                 gz->strm.next_in = gz->buf;
             }
             rc = fio_read(gz->fd, gz->strm.next_in + gz->strm.avail_in,
-            gz->buf + ZLIB_BUFFER_SIZE - gz->strm.next_in - gz->strm.avail_in);
+                gz->buf + ZLIB_BUFFER_SIZE - gz->strm.next_in - gz->strm.avail_in);
             if (rc > 0)
             {
                 gz->strm.avail_in += rc;
