@@ -3657,6 +3657,52 @@ void fixResTargetListWithTableNameRef(Relation rd, RangeVar* rel, List* clause_l
     }
 }
 
+/* Merge the targetlists of multiple identical result relations into the one and change their rtindex. */
+static void MergeTargetList(List** targetLists, RangeTblEntry* rte1, int rtindex1,
+                            RangeTblEntry* rte2, int rtindex2)
+{
+    ListCell* l = NULL;
+    ListCell* l_pre = NULL;
+
+    foreach (l, targetLists[rtindex2 - 1]) {
+        TargetEntry* tle = (TargetEntry*)lfirst(l);
+        tle->rtindex = (Index)rtindex1;
+        rte1->updatedCols = bms_add_member(rte1->updatedCols, tle->resno - FirstLowInvalidHeapAttributeNumber);
+        rte2->updatedCols = bms_del_member(rte2->updatedCols, tle->resno - FirstLowInvalidHeapAttributeNumber);
+        targetLists[rtindex1 - 1] = lappend(targetLists[rtindex1 - 1], tle);
+        targetLists[rtindex2 - 1] = list_delete_cell(targetLists[rtindex2 - 1], l, l_pre);
+
+        l_pre = l;
+    }
+}
+
+static void transformMultiTargetList(List* target_rangetblentry, List** targetLists)
+{
+    int rtindex1 = 1, rtindex2 = 1;
+    ListCell* l1;
+    ListCell* l2;
+
+    if (list_length(target_rangetblentry) <= 1) {
+        return;
+    }
+    foreach (l1, target_rangetblentry) {
+        RangeTblEntry* rte1 = (RangeTblEntry*)lfirst(l1);
+        rtindex2 = 0;
+
+        l2 = lnext(l1);
+        rtindex2 = rtindex1 + 1;
+        while (l2 != NULL) {
+            RangeTblEntry* rte2 = (RangeTblEntry*)lfirst(l2);
+            if (rte2->relid == rte1->relid) {
+                MergeTargetList(targetLists, rte1, rtindex1, rte2, rtindex2);
+            }
+            rtindex2++;
+            l2 = lnext(l2);
+        }
+        rtindex1++;
+    }
+}
+
 /*
  * If a relation has no column updated in the resultRelations, it is redundant
  * and remove it from the resultRelations.
@@ -3675,7 +3721,7 @@ static List* remove_update_redundant_relation(List* resultRelations, List* targe
     while (res != NULL) {
         res_next = lnext(res);
         target_rte = (RangeTblEntry*)lfirst(rte);
-        if (target_rte->updatedCols == NULL) {
+        if (bms_is_empty(target_rte->updatedCols)) {
             resultRelations = list_delete_cell(resultRelations, res, res_pre);
         } else {
             res_pre = res;
@@ -3756,7 +3802,7 @@ static Query* transformUpdateStmt(ParseState* pstate, UpdateStmt* stmt)
         qry->hasModifyingCTE = pstate->p_hasModifyingCTE;
     }
 
-    if (list_length(stmt->relationClause) > 1) {
+    if (list_length(stmt->relationClause) > 1 || !IsA(linitial(stmt->relationClause), RangeVar)) {
         /* add all relations from relationClause to resultRelations. */
         transformFromClause(pstate, stmt->relationClause, true, false, true);
         qry->resultRelations = pstate->p_updateRelations;
@@ -4072,7 +4118,12 @@ static List* transformUpdateTargetList(ParseState* pstate, List* qryTlist, List*
         tle->rtindex = rtindex;
         new_tle[rtindex - 1] = lappend(new_tle[rtindex - 1], tle);
     }
-    
+    /*
+     * If there are actually the same result relations by different alias
+     * or synonym in multiple update, merge their targetLists.
+     */
+    transformMultiTargetList(pstate->p_target_rangetblentry, new_tle);
+
     forboth (rb, pstate->p_target_rangetblentry, r, pstate->p_target_relation) {
         target_rte = (RangeTblEntry*)lfirst(rb);
         targetrel = (Relation)lfirst(r);

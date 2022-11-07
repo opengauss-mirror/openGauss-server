@@ -551,6 +551,27 @@ create table t_t_mutil_t3(col1 int,col2 int);
 insert into t_t_mutil_t1 values(1,1),(1,1);
 insert into t_t_mutil_t2 values(1,1),(1,2);
 insert into t_t_mutil_t3 values(1,1),(1,3);
+begin;
 update t_t_mutil_t1 a,t_t_mutil_t2 b,t_t_mutil_t3 c set b.col2=5,a.col2=4 where a.col1=b.col1 and b.col1=c.col1;
+rollback;
+
+begin;
+update t_t_mutil_t1 t1,t_t_mutil_t2 t2 set t2.col2 = 3, t1.col1 = 2;
+select * from t_t_mutil_t1;
+rollback;
+CREATE SYNONYM s_t_mutil_t1 FOR t_t_mutil_t1;
+CREATE SYNONYM s_t_mutil_t2 FOR t_t_mutil_t1;
+begin;
+update t_t_mutil_t1 t1,s_t_mutil_t1 set s_t_mutil_t1.col2 = 3, t1.col1 = 2;
+select * from t_t_mutil_t1;
+rollback;
+begin;
+update s_t_mutil_t2,s_t_mutil_t1 set s_t_mutil_t1.col2 = 3, s_t_mutil_t2.col1 = 2;
+select * from t_t_mutil_t1;
+rollback;
+begin;
+update s_t_mutil_t2,s_t_mutil_t1 set s_t_mutil_t1.col2 = 3, s_t_mutil_t2.col2 = 4;
+select * from t_t_mutil_t1;
+rollback;
 \c regression
 drop database multiupdate;

@@ -20316,17 +20316,25 @@ UpdateStmt: opt_with_clause UPDATE hint_string from_list
 				{
 					UpdateStmt *n = makeNode(UpdateStmt);
 					n->relation = NULL;
-					if (list_length($4) > 1) {
 #ifdef ENABLE_MULTIPLE_NODES
+					if (list_length($4) > 1) {
 						ereport(errstate, 
 							    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 								 errmsg("multi-relation update is not yet supported.")));
-#endif
-						if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT)
+					}
+					if (!IsA(linitial($4), RangeVar)) {
+							ereport(errstate,
+								    (errcode(ERRCODE_SYNTAX_ERROR),
+								     errmsg("invalid target relation name."),
+								     parser_errposition(@4)));
+					}
+#else
+					if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT) {
+						if (list_length($4) > 1) {
 							ereport(errstate, 
 									(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 									 errmsg("multi-relation update only support in B-format database")));
-					} else {
+						}
 						if (!IsA(linitial($4), RangeVar)) {
 							ereport(errstate,
 								    (errcode(ERRCODE_SYNTAX_ERROR),
@@ -20334,6 +20342,7 @@ UpdateStmt: opt_with_clause UPDATE hint_string from_list
 								     parser_errposition(@4)));
 						}
 					}
+#endif
 					n->relationClause = $4;
 					n->targetList = $6;
 					n->fromClause = $7;
