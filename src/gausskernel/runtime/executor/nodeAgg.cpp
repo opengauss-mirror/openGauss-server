@@ -1925,15 +1925,6 @@ static TupleTableSlot* agg_retrieve_hash_table(AggState* aggstate)
     return NULL;
 }
 
-int getPower2Num(int num)
-{
-    int i = 1;
-    while (i < num) {
-        i <<= 1;
-    }
-    return i;
-}
-
 /* -----------------
  * ExecInitAgg
  *
@@ -2903,7 +2894,7 @@ Datum aggregate_dummy(PG_FUNCTION_ARGS)
 }
 
 FORCE_INLINE void agg_spill_to_disk(AggWriteFileControl* TempFileControl, TupleHashTable hashtable,
-    TupleTableSlot* hashslot, int numGroups, bool isAgg, int planId, int dop, Instrumentation* instrument)
+    TupleTableSlot* hashslot, int64 numGroups, bool isAgg, int planId, int dop, Instrumentation* instrument)
 {
     if (TempFileControl->spillToDisk == false) {
         Assert(TempFileControl->finishwrite == false);
@@ -2967,7 +2958,7 @@ FORCE_INLINE void agg_spill_to_disk(AggWriteFileControl* TempFileControl, TupleH
                 }
 
                 /* estimate num of temp file */
-                int estsize = getPower2Num(4 * numGroups / TempFileControl->inmemoryRownum);
+                int estsize = getPower2NextNum(4 * numGroups / TempFileControl->inmemoryRownum);
                 TempFileControl->filenum = Max(HASH_MIN_FILENUMBER, estsize);
                 TempFileControl->filenum = Min(TempFileControl->filenum, HASH_MAX_FILENUMBER);
                 TempFileControl->filesource =

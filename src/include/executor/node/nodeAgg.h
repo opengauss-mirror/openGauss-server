@@ -279,9 +279,8 @@ extern long ExecGetMemCostAgg(Agg*);
 extern void initialize_phase(AggState* aggstate, int newphase);
 extern List* find_hash_columns(AggState* aggstate);
 extern uint32 ComputeHashValue(TupleHashTable hashtbl);
-extern int getPower2Num(int num);
 extern void agg_spill_to_disk(AggWriteFileControl* TempFileControl, TupleHashTable hashtable, TupleTableSlot* hashslot,
-    int numGroups, bool isAgg, int planId, int dop, Instrumentation* intrument = NULL);
+    int64 numGroups, bool isAgg, int planId, int dop, Instrumentation* intrument = NULL);
 extern void ExecEarlyFreeAggregation(AggState* node);
 extern void ExecReSetAgg(AggState* node);
 
