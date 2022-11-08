@@ -241,6 +241,8 @@ RewriteState begin_heap_rewrite(Relation old_heap, Relation new_heap, Transactio
     MemoryContext old_cxt;
     HASHCTL hash_ctl;
     errno_t errorno = EOK;
+    char* unalign_cmprBuffer = NULL;
+    char* unalign_rsBuffer = NULL;
 
     /*
      * To ease cleanup, make a separate context that will contain the
@@ -273,7 +275,12 @@ RewriteState begin_heap_rewrite(Relation old_heap, Relation new_heap, Transactio
     }
     ADIO_ELSE()
     {
-        state->rs_buffer = (Page)palloc(BLCKSZ);
+        if (ENABLE_DSS) {
+            unalign_rsBuffer = (char*)palloc(BLCKSZ + ALIGNOF_BUFFER);
+            state->rs_buffer = (Page)BUFFERALIGN(unalign_rsBuffer);
+        } else {
+            state->rs_buffer = (Page)palloc(BLCKSZ);
+        }
     }
     ADIO_END();
 
@@ -300,7 +307,12 @@ RewriteState begin_heap_rewrite(Relation old_heap, Relation new_heap, Transactio
         }
         ADIO_ELSE()
         {
-            state->rs_cmprBuffer = (Page)palloc0(BLCKSZ);
+            if (ENABLE_DSS) {
+                unalign_cmprBuffer = (char*)palloc0(BLCKSZ + ALIGNOF_BUFFER);
+                state->rs_cmprBuffer = (Page)BUFFERALIGN(unalign_cmprBuffer);
+            } else {
+                state->rs_cmprBuffer = (Page)palloc0(BLCKSZ);
+            }
         }
         ADIO_END();
         state->rs_tupBuf = (HeapTuple *)palloc(sizeof(HeapTuple) * DEFAULTBUFFEREDTUPLES);

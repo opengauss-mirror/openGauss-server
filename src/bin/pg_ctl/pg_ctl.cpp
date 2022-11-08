@@ -54,6 +54,7 @@
 #include "fetch.h"
 #include "common/fe_memutils.h"
 #include "logging.h"
+#include "tool_common.h"
 
 #ifdef ENABLE_MOT
 #include "fetchmot.h"
@@ -79,6 +80,7 @@
 #ifdef ENABLE_UT
 #define static
 #endif
+
 
 /* PID can be negative for standalone backend */
 typedef long pgpid_t;
@@ -6720,6 +6722,7 @@ int main(int argc, char** argv)
         do_wait = false;
     }
 
+    initDataPathStruct(false);
     SetConfigFilePath();
 
     pg_host = getenv("PGHOST");

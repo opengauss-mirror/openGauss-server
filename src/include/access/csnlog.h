@@ -21,6 +21,8 @@
 #define CSNBufMappingPartitionLock(hashcode) (&t_thrd.shemem_ptr_cxt.mainLWLockArray[FirstCSNBufMappingLock + CSNBufHashPartition(hashcode)].lock)
 #define CSNBufMappingPartitionLockByIndex(i) (&t_thrd.shemem_ptr_cxt.mainLWLockArray[FirstCSNBufMappingLock + i].lock)
 
+#define CSNLOGDIR (g_instance.datadir_cxt.csnlogDir)
+
 extern void CSNLogSetCommitSeqNo(TransactionId xid, int nsubxids, TransactionId* subxids, CommitSeqNo csn);
 extern CommitSeqNo CSNLogGetCommitSeqNo(TransactionId xid);
 extern CommitSeqNo CSNLogGetNestCommitSeqNo(TransactionId xid);
@@ -35,5 +37,6 @@ extern void ShutdownCSNLOG(void);
 extern void CheckPointCSNLOG(void);
 extern void ExtendCSNLOG(TransactionId newestXact);
 extern void TruncateCSNLOG(TransactionId oldestXact);
+void SSCSNLOGShmemClear(void);
 
 #endif /* CSNLOG_H */

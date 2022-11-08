@@ -1,6 +1,10 @@
 #This is the main CMAKE for build all components.
+execute_process(
+    COMMAND ln -fs ${PROJECT_SRC_DIR}/gausskernel/storage/dss/dss_adaptor.cpp ${CMAKE_CURRENT_SOURCE_DIR}/dss_adaptor.cpp
+)
 set(TGT_controldata_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/pg_controldata.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/dss_adaptor.cpp
 )
 
 set(TGT_controldata_INC 

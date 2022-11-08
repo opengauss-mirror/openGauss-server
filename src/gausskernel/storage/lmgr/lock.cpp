@@ -49,6 +49,7 @@
 #include "executor/exec/execStream.h"
 #include "instruments/instr_event.h"
 #include "instruments/instr_statement.h"
+#include "ddes/dms/ss_dms_bufmgr.h"
 
 #define NLOCKENTS()                                           \
     mul_size(g_instance.attr.attr_storage.max_locks_per_xact, \
@@ -1028,6 +1029,17 @@ static LockAcquireResult LockAcquireExtendedXC(const LOCKTAG *locktag, LOCKMODE 
     }
 
     instr_stmt_report_lock(LOCK_END, lockmode);
+    if (ENABLE_DMS && SS_PRIMARY_MODE &&
+        (locktag->locktag_type < (uint8)LOCKTAG_PAGE || locktag->locktag_type == (uint8)LOCKTAG_OBJECT) &&
+        lockmode >= AccessExclusiveLock && !RecoveryInProgress()) {
+        int ret = SSLockAcquire(locktag, lockmode, sessionLock, false);
+        if (ret) {
+            (void)LockRelease(locktag, lockmode, sessionLock);
+            ereport(ERROR,
+                (errmsg("SSBcast LockAcquire failed, release my own local and report error!")));
+        }
+    }
+
     return LOCKACQUIRE_OK;
 }
 
@@ -1220,6 +1232,13 @@ static void RemoveLocalLock(LOCALLOCK *locallock)
     }
     if (!hash_search(t_thrd.storage_cxt.LockMethodLocalHash, (void *)&(locallock->tag), HASH_REMOVE, NULL))
         ereport(WARNING, (errmsg("locallock table corrupted")));
+
+    if (ENABLE_DMS && SS_PRIMARY_MODE &&
+        (locallock->tag.lock.locktag_type < (uint8)LOCKTAG_PAGE ||
+        locallock->tag.lock.locktag_type == (uint8)LOCKTAG_OBJECT) &&
+        locallock->tag.mode == AccessExclusiveLock && !RecoveryInProgress()) {
+        (void)SSLockRelease(&(locallock->tag.lock), locallock->tag.mode, false);
+    }
 }
 
 bool inline IsInSameLockGroup(const PROCLOCK *proclock1, const PROCLOCK *proclock2)

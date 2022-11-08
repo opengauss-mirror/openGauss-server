@@ -1769,8 +1769,10 @@ void PartitionSetNewRelfilenode(Relation parent, Partition part, TransactionId f
         /* segment storage */
         Assert(parent->storage_type == SEGMENT_PAGE);
         isbucket = BUCKET_OID_IS_VALID(parent->rd_bucketoid) && !RelationIsCrossBucketIndex(parent);
+        Oid database_id = (ConvertToRelfilenodeTblspcOid(part->pd_part->reltablespace) == GLOBALTABLESPACE_OID) ?
+            InvalidOid : u_sess->proc_cxt.MyDatabaseId;
         newrelfilenode = seg_alloc_segment(ConvertToRelfilenodeTblspcOid(part->pd_part->reltablespace),
-                                           u_sess->proc_cxt.MyDatabaseId, isbucket, InvalidBlockNumber);
+                                           database_id, isbucket, InvalidBlockNumber);
     }
 
 

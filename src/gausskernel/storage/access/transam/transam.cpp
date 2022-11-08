@@ -33,6 +33,8 @@
 #include "utils/snapmgr.h"
 #include "replication/walreceiver.h"
 #include "storage/procarray.h"
+#include "ddes/dms/ss_transaction.h"
+#include "ddes/dms/ss_common_attr.h"
 
 #ifdef PGXC
 #include "utils/builtins.h"
@@ -180,7 +182,7 @@ RETRY:
                         (errmsg("TransactionIdGetCommitSeqNo: "
                                 "Treat CSN as frozen when csnlog file cannot be found for the given xid: %lu csn: %lu",
                                 transactionId, result)));
-            } else if (GTM_LITE_MODE && retry_times == 0) {
+            } else if ((GTM_LITE_MODE || (ENABLE_DMS && t_thrd.role == DMS_WORKER)) && retry_times == 0) {
                 t_thrd.int_cxt.InterruptHoldoffCount = saveInterruptHoldoffCount;
                 FlushErrorState();
                 ereport(LOG, (errmsg("recentGlobalXmin has been updated, csn log may be truncated, try clog, xid"
@@ -391,6 +393,10 @@ Datum pgxc_get_csn(PG_FUNCTION_ARGS)
  */
 bool TransactionIdDidCommit(TransactionId transactionId) /* true if given transaction committed */
 {
+    if (SS_STANDBY_MODE) {
+        return SSTransactionIdDidCommit(transactionId);
+    }
+
     CLogXidStatus xidstatus;
 
     xidstatus = TransactionLogFetch(transactionId);

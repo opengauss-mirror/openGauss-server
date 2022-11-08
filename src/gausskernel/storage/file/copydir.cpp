@@ -28,6 +28,7 @@
 #include "storage/smgr/segment.h"
 #include "miscadmin.h"
 #include "pgstat.h"
+#include "storage/file/fio_device.h"
 
 /*
  *	On Windows, call non-macro versions of palloc; we can't reference
@@ -56,7 +57,8 @@ bool copydir(char* fromdir, char* todir, bool recurse, int elevel)
     char fromfile[MAXPGPATH];
     char tofile[MAXPGPATH];
 
-    if (mkdir(todir, S_IRWXU) != 0 && !(errno == EEXIST && IsRoachRestore())) {
+    if (mkdir(todir, S_IRWXU) != 0  &&
+        !(FILE_ALREADY_EXIST(errno) && IsRoachRestore())) {
         ereport(ERROR, (errcode_for_file_access(), errmsg("could not create directory \"%s\": %m", todir)));
     }
 
@@ -152,12 +154,29 @@ void copy_file_internal(char* fromfile, char* tofile, bool trunc_file)
     int dstflag;
     int nbytes;
     off_t offset;
+    int buf_size;
+    char* unalign_buffer = NULL;
+    int align_nbytes;
 
     /* Use palloc to ensure we get a maxaligned buffer */
 #define COPY_BUF_SIZE (8 * BLCKSZ)
+    /* DSS needs large buffer to speed up */
+#define COPY_BUF_SIZE_FOR_DSS (2 * 1024 * 1024)
 
     /* add extern BLCKSZ for protect memory overstep the boundary */
-    buffer = (char*)palloc0(COPY_BUF_SIZE + BLCKSZ);
+    buf_size = COPY_BUF_SIZE + BLCKSZ;
+
+    if (ENABLE_DSS) {
+        buf_size = COPY_BUF_SIZE_FOR_DSS + BLCKSZ;
+        buf_size += ALIGNOF_BUFFER;
+    }
+    unalign_buffer = (char*)palloc0(buf_size);
+ 
+    if (ENABLE_DSS) {
+        buffer = (char*)BUFFERALIGN(unalign_buffer);
+    } else {
+        buffer = unalign_buffer;
+    }
 
     /*
      * Open the files
@@ -178,7 +197,9 @@ void copy_file_internal(char* fromfile, char* tofile, bool trunc_file)
     /*
      * Do the data copying.
      */
-    for (offset = 0;; offset += nbytes) {
+    struct stat stat_buf;
+    (void)stat(fromfile, &stat_buf);
+    for (offset = 0;offset < stat_buf.st_size; offset += nbytes) {
         /* If we got a cancel signal during the copy of the file, quit */
         CHECK_FOR_INTERRUPTS();
 
@@ -194,8 +215,14 @@ void copy_file_internal(char* fromfile, char* tofile, bool trunc_file)
             break;
         }
         errno = 0;
+
+        align_nbytes = nbytes;
+        if (ENABLE_DSS && ((nbytes % ALIGNOF_BUFFER) != 0)) {
+            align_nbytes = (int)BUFFERALIGN(nbytes);
+        }
+
         pgstat_report_waitevent(WAIT_EVENT_COPY_FILE_WRITE);
-        if ((int)write(dstfd, buffer, nbytes) != nbytes) {
+        if ((int)write(dstfd, buffer, align_nbytes) != align_nbytes) {
             pgstat_report_waitevent(WAIT_EVENT_END);
             (void)close(srcfd);
             (void)close(dstfd);
@@ -222,7 +249,7 @@ void copy_file_internal(char* fromfile, char* tofile, bool trunc_file)
 
     (void)close(srcfd);
 
-    pfree(buffer);
+    pfree(unalign_buffer);
 }
 
 void copy_file(char* fromfile, char* tofile)
@@ -279,7 +306,7 @@ int durable_rename(const char* oldfile, const char* newfile, int elevel)
     errno = 0;
     fd = BasicOpenFile((char*)newfile, PG_BINARY | O_RDWR, 0);
     if (fd < 0) {
-        if (errno != ENOENT) {
+        if (!FILE_POSSIBLY_DELETED(errno)) {
             ereport(elevel, (errcode_for_file_access(), errmsg("could not open file \"%s\": %m", newfile)));
             return -1;
         }
@@ -390,6 +417,9 @@ static int fsync_fname_ext(const char* fname, bool isdir, bool ignore_perm, int 
     int flags;
     int returncode;
 
+    if (is_dss_file(fname)) {
+        return 0;
+    }
     /*
      * Some OSs require directories to be opened read-only whereas other
      * systems don't allow us to fsync files opened read-only; so we need both
@@ -451,6 +481,11 @@ static int fsync_parent_path(const char* fname, int elevel)
 {
     char parentpath[MAXPGPATH];
     errno_t retcode;
+
+    if (is_dss_file(fname)) {
+        return 0;
+    }
+    
     retcode = strncpy_s(parentpath, MAXPGPATH, fname, strlen(fname));
     securec_check(retcode, "\0", "\0");
     get_parent_directory(parentpath);

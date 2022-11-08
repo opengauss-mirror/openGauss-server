@@ -17,10 +17,13 @@
 
 #include <sys/stat.h>
 
+#include "tool_common.h"
 #include "configuration.h"
 #include "thread.h"
 #include <time.h>
 #include "common/fe_memutils.h"
+#include "storage/file/fio_device.h"
+#include "storage/dss/dss_adaptor.h"
 
 const char  *PROGRAM_NAME = NULL;        /* PROGRAM_NAME_FULL without .exe suffix
                                          * if any */
@@ -149,6 +152,7 @@ static void opt_backup_mode(ConfigOption *opt, const char *arg);
 static void opt_show_format(ConfigOption *opt, const char *arg);
 
 static void compress_init(void);
+static void dss_init(void);
 
 /*
  * Short name should be non-printable ASCII character.
@@ -755,7 +759,7 @@ int main(int argc, char *argv[])
     
     /* Initialize logger */
     init_logger(backup_path, &instance_config.logger);
-
+    
     /* command was initialized for a few commands */
     if (command)
     {
@@ -781,6 +785,13 @@ int main(int argc, char *argv[])
     if (instance_config.pgdata != NULL &&
         !is_absolute_path(instance_config.pgdata))
         elog(ERROR, "-D, --pgdata must be an absolute path");
+
+    /* prepare pgdata of g_datadir struct */
+    if (instance_config.pgdata != NULL)
+    {
+        errno_t rc = strcpy_s(g_datadir.pg_data, strlen(instance_config.pgdata) + 1, instance_config.pgdata);
+        securec_check_c(rc, "\0", "\0");
+    }
 
 #if PG_VERSION_NUM >= 110000
     /* Check xlog-seg-size option */
@@ -813,6 +824,10 @@ int main(int argc, char *argv[])
 
     /* compress_init */
     compress_init();
+
+    dss_init();
+
+    initDataPathStruct(IsDssMode());
 
     /* do actual operation */
     return do_actual_operate();
@@ -907,5 +922,72 @@ compress_init(void)
 #endif
         if (instance_config.compress_alg == PGLZ_COMPRESS && num_threads > 1)
             elog(ERROR, "Multithread backup does not support pglz compression");
+    }
+}
+
+static void dss_init(void)
+{
+    if (instance_config.dss.enable_dss) {
+        /* skip in some special backup modes */
+        if (backup_subcmd == DELETE_CMD || backup_subcmd == DELETE_INSTANCE_CMD) {
+            return;
+        }
+
+        /* register for dssapi */
+        if (dss_device_init(instance_config.dss.socketpath, instance_config.dss.enable_dss) != DSS_SUCCESS) {
+            elog(ERROR, "fail to init dss device");
+            return;
+        }
+
+        if (IsSshProtocol()) {
+            elog(ERROR, "Remote operations on dss mode are not supported");
+        }
+
+        parse_vgname_args(instance_config.dss.vgname);
+
+        /* Check dss connect */
+        if (!dss_exist_dir(instance_config.dss.vgdata)) {
+            elog(ERROR, "Could not connect dssserver, vgdata: \"%s\", socketpath: \"%s\", check and retry later.",
+                 instance_config.dss.vgdata, instance_config.dss.socketpath);
+        }
+
+        if (strlen(instance_config.dss.vglog) && !dss_exist_dir(instance_config.dss.vglog)) {
+            elog(ERROR, "Could not connect dssserver, vglog: \"%s\", socketpath: \"%s\", check and retry later.",
+                 instance_config.dss.vglog, instance_config.dss.socketpath);
+        }
+
+        /* Check backup instance id in shared storage mode */
+        int id = instance_config.dss.instance_id;
+        if (id < MIN_INSTANCEID || id > MAX_INSTANCEID) {
+            elog(ERROR, "Instance id must be specified in dss mode, valid range is %d - %d.",
+                MIN_INSTANCEID, MAX_INSTANCEID);
+        }
+
+        if (backup_subcmd != RESTORE_CMD) {
+            off_t size = 0;
+            char xlog_control_path[MAXPGPATH];
+
+            join_path_components(xlog_control_path, instance_config.dss.vgdata, PG_XLOG_CONTROL_FILE);
+            if ((size = dss_get_file_size(xlog_control_path)) == INVALID_DEVICE_SIZE) {
+                elog(ERROR, "Could not get \"%s\" size: %s", xlog_control_path, strerror(errno));
+            }
+
+            if (size < (off_t)BLCKSZ * id) {
+                elog(ERROR, "Cound not read beyond end of file \"%s\", file_size: %ld, instance_id: %d\n",
+                    xlog_control_path, size, id);
+            }
+        }
+
+        /* Prepare some g_datadir parameters */
+        g_datadir.instance_id = id;
+
+        errno_t rc = strcpy_s(g_datadir.dss_data, strlen(instance_config.dss.vgdata) + 1, instance_config.dss.vgdata);
+        securec_check_c(rc, "\0", "\0");
+
+        rc = strcpy_s(g_datadir.dss_log, strlen(instance_config.dss.vglog) + 1, instance_config.dss.vglog);
+        securec_check_c(rc, "\0", "\0");
+
+        XLogSegmentSize = DSS_XLOG_SEG_SIZE;
+        instance_config.xlog_seg_size = DSS_XLOG_SEG_SIZE;
     }
 }

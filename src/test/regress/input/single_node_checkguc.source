@@ -1,0 +1,70 @@
+--
+-- check dms guc parameter and ssl parameter
+-- check dms guc
+
+
+\! @abs_bindir@/gs_ctl stop -D @abs_srcdir@/tmp_check/datanode1  > /dev/null
+\! sleep 5
+
+-- check ssl guc with value
+\! chmod 600 @abs_srcdir@/sslcert_ss/*
+\! cp @abs_srcdir@/sslcert_ss/server.*  @abs_srcdir@/tmp_check/datanode1/ 
+\! cp @abs_srcdir@/sslcert_ss/cacert.pem  @abs_srcdir@/tmp_check/datanode1/
+\! export PGSSLMODE=verify-ca
+\! export PGSSLROOTCERT=@abs_srcdir@/sslcert_ss/cacert.pem
+
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "ssl = on"
+
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "ssl_cert_notify_time = 90"
+
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "ssl_cert_file = 'server.crt'"
+
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "ssl_key_file = 'server.key'"
+
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "ssl_ca_file = 'cacert.pem'"
+
+
+\! @abs_bindir@/gs_ctl start -D @abs_srcdir@/tmp_check/datanode1  > /dev/null
+\! sleep 10
+
+-- check ssl guc without value
+\! @abs_bindir@/gs_ctl stop -D @abs_srcdir@/tmp_check/datanode1  > /dev/null
+\! sleep 5
+
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "ssl = off"
+
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "ssl_cert_file = ''"
+
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "ssl_key_file = ''"
+
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "ssl_ca_file = ''"
+
+\! @abs_bindir@/gs_ctl stop -D @abs_srcdir@/tmp_check/datanode1  > /dev/null
+
+\! rm -rf @abs_srcdir@/tmp_check/datanode1/server.*
+\! rm -rf @abs_srcdir@/tmp_check/datanode1/cacert.pem
+
+\! @abs_bindir@/gs_ctl start -D @abs_srcdir@/tmp_check/datanode1  > /dev/null
+\! sleep 10
+
+-- check rdma guc
+\! @abs_bindir@/gs_ctl stop -D @abs_srcdir@/tmp_check/datanode1  > /dev/null
+\! sleep 5
+
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "ss_rdma_work_config='abc123'"
+
+\! @abs_bindir@/gs_ctl start -D @abs_srcdir@/tmp_check/datanode1  > /dev/null
+\! sleep 10
+
+-- clean guc vlue
+\! @abs_bindir@/gs_ctl stop -D @abs_srcdir@/tmp_check/datanode1  > /dev/null
+\! sleep 5
+
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "ss_rdma_work_config=''"
+
+\! @abs_bindir@/gs_ctl start -D @abs_srcdir@/tmp_check/datanode1  > /dev/null
+
+\! sleep 5
+
+
+

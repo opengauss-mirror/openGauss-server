@@ -173,4 +173,7 @@ extern void ut_SlruReportIOError(SlruCtl ctl, int64 pageno, TransactionId xid);
 extern void SimpleLruWaitIO(SlruCtl ctl, int slotno);
 extern bool SlruScanDirCbDeleteCutoff(SlruCtl ctl, const char* filename, int64 segpage, const void* data);
 
+extern void SimpleLruSetPageEmpty(
+    SlruCtl ctl, const char* name, int trancheId, int nslots, int nlsns, LWLock* ctllock, const char* subdir, int index = 0);
+
 #endif /* SLRU_H */

@@ -53,6 +53,7 @@
 #include "miscadmin.h"
 #include "storage/smgr/fd.h"
 #include "storage/lock/lwlock.h"
+#include "storage/file/fio_device.h"
 #include "utils/inval.h"
 #include "utils/relmapper.h"
 
@@ -486,6 +487,17 @@ void RelationMapFinishBootstrap(void)
 {
     Assert(IsBootstrapProcessingMode());
 
+    if (ENABLE_DSS) {
+        char map_file_name[MAXPGPATH];
+        int rc = snprintf_s(map_file_name, sizeof(map_file_name), sizeof(map_file_name) - 1, "%s/global/%s",
+            g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name, RELMAPPER_FILENAME);
+        securec_check_ss_c(rc, "\0", "\0");
+
+        if (dss_exist_file(map_file_name)) {
+            return;
+        }
+    }
+
     knl_u_relmap_context *relmap_cxt = GetRelMapCxt();
     /* Shouldn't be anything "pending" ... */
     Assert(relmap_cxt->active_shared_updates->num_mappings == 0);
@@ -604,10 +616,18 @@ void load_relmap_file(bool shared, RelMapFile *map)
     bool isNewMap;
 
     if (shared) {
-        rc = snprintf_s(
-        map_file_name[0], sizeof(map_file_name[0]), sizeof(map_file_name[0]) - 1, "global/%s", RELMAPPER_FILENAME);
+        rc = snprintf_s(map_file_name[0],
+            sizeof(map_file_name[0]),
+            sizeof(map_file_name[0]) - 1,
+            "%s/%s",
+            GLOTBSDIR,
+            RELMAPPER_FILENAME);
         securec_check_ss(rc, "\0", "\0");
-        rc = snprintf_s(map_file_name[1], sizeof(map_file_name[1]), sizeof(map_file_name[1]) - 1, "global/%s",
+        rc = snprintf_s(map_file_name[1],
+            sizeof(map_file_name[1]),
+            sizeof(map_file_name[1]) - 1,
+            "%s/%s",
+            GLOTBSDIR,
             RELMAPPER_FILENAME_BAK);
         securec_check_ss(rc, "\0", "\0");
     } else {
@@ -630,10 +650,9 @@ void load_relmap_file(bool shared, RelMapFile *map)
 
     // check backup file
     if (stat(map_file_name[1], &stat_buf) != 0) {
-        if (ENOENT != errno) {
+        if (!FILE_POSSIBLY_DELETED(errno)) {
             ereport(LOG, (errmsg("can not stat file \"%s\", ignore backup file", map_file_name[1])));
-        }
-        else {
+        } else {
             fix_backup = true;
             // switch to exclusive lock to do backup map file recovery
             LWLockRelease(RelationMappingLock);
@@ -761,11 +780,21 @@ static void write_relmap_file(bool shared, RelMapFile* newmap, bool write_wal, b
     knl_u_relmap_context *relmap_cxt = GetRelMapCxt();
     for (int i = 0; i < 2; i++) {
         if (shared) {
-            rc = snprintf_s(map_file_name, sizeof(map_file_name), sizeof(map_file_name) - 1, "global/%s", fname[i]);
+            rc = snprintf_s(map_file_name,
+                sizeof(map_file_name),
+                sizeof(map_file_name) - 1,
+                "%s/%s",
+                GLOTBSDIR,
+                fname[i]);
             securec_check_ss_c(rc, "\0", "\0");
             real_map = relmap_cxt->shared_map;
         } else {
-            rc = snprintf_s(map_file_name, sizeof(map_file_name), sizeof(map_file_name) - 1, "%s/%s", dbpath, fname[i]);
+            rc = snprintf_s(map_file_name,
+                sizeof(map_file_name),
+                sizeof(map_file_name) - 1,
+                "%s/%s",
+                dbpath,
+                fname[i]);
             securec_check_ss_c(rc, "\0", "\0");
             real_map = relmap_cxt->local_map;
         }
@@ -962,7 +991,12 @@ static void recover_relmap_file(bool shared, bool backupfile, RelMapFile* real_m
     }
 
     if (shared) {
-        rc = snprintf_s(map_file_name, sizeof(map_file_name), sizeof(map_file_name) - 1, "global/%s", file_name);
+        rc = snprintf_s(map_file_name,
+            sizeof(map_file_name),
+            sizeof(map_file_name) - 1,
+            "%s/%s",
+            GLOTBSDIR,
+            file_name);
         securec_check_ss(rc, "\0", "\0");
     } else {
         rc = snprintf_s(map_file_name,
@@ -1076,14 +1110,25 @@ void relmap_redo(XLogReaderState* record)
 static int WriteOldVersionRelmap(RelMapFile* map, int fd)
 {
     errno_t rc;
-    char* mapCache = (char*)palloc0(RELMAP_SIZE_OLD);
+    char* mapCache_ori = NULL;
+    char* mapCache = NULL;
+    if (ENABLE_DSS) {
+        mapCache_ori = (char*)palloc0(RELMAP_SIZE_OLD + ALIGNOF_BUFFER);
+        mapCache = (char *)BUFFERALIGN(mapCache_ori);
+    } else {
+        mapCache = (char*)palloc0(RELMAP_SIZE_OLD);
+    }
     rc = memcpy_s(mapCache, RELMAP_SIZE_OLD, map, MAPPING_LEN_OLDMAP_HEAD);
     securec_check(rc, "\0", "\0");
     rc = memcpy_s(
         mapCache + MAPPING_LEN_OLDMAP_HEAD, RELMAP_SIZE_OLD - MAPPING_LEN_OLDMAP_HEAD, &(map->crc), MAPPING_LEN_TAIL);
     securec_check(rc, "\0", "\0");
     int writeBytes = write(fd, mapCache, RELMAP_SIZE_OLD);
-    pfree_ext(mapCache);
+    if (ENABLE_DSS) {
+        pfree_ext(mapCache_ori);
+    } else {
+        pfree_ext(mapCache);
+    }
     return writeBytes;
 }
 
@@ -1176,10 +1221,25 @@ static int32 ReadRelMapFile(RelMapFile* map, int fd, bool isNewMap)
 static int32 WriteRelMapFile(RelMapFile* map, int fd)
 {
     int32 writeBytes = 0;
+    char* unalignRelMap = NULL;
+    RelMapFile* relMap = NULL;
+
     if (IS_NEW_RELMAP(map->magic)) {
-        writeBytes = write(fd, map, sizeof(RelMapFile));
+        if (ENABLE_DSS) {
+            unalignRelMap = (char*)palloc0(sizeof(RelMapFile) + ALIGNOF_BUFFER);
+            relMap = (RelMapFile*)BUFFERALIGN(unalignRelMap);
+            errno_t err = memcpy_s(relMap, sizeof(RelMapFile), map, sizeof(RelMapFile));
+            securec_check(err, "\0", "\0");
+        } else {
+            relMap = map;
+        }
+        writeBytes = write(fd, relMap, sizeof(RelMapFile));
     } else {
         writeBytes = WriteOldVersionRelmap(map, fd);
+    }
+
+    if (unalignRelMap != NULL) {
+        pfree(unalignRelMap);
     }
     return writeBytes;
 }

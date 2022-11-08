@@ -170,6 +170,31 @@ static void knl_g_startup_init(knl_g_startup_context *starup_cxt)
     starup_cxt->current_record = NULL;
 }
 
+static void knl_g_dms_init(knl_g_dms_context *dms_cxt)
+{
+    Assert(dms_cxt != NULL);
+    dms_cxt->dmsProcSid = 0;
+    dms_cxt->xminAck = 0;
+    dms_cxt->SSReformerControl.list_stable = 0;
+    dms_cxt->SSReformerControl.primaryInstId = -1;
+    dms_cxt->SSReformInfo.in_reform = false;
+    dms_cxt->SSReformInfo.dms_role = DMS_ROLE_UNKNOW;
+    dms_cxt->SSClusterState = NODESTATE_NORMAL;
+    dms_cxt->SSRecoveryInfo.recovery_pause_flag = true;
+    dms_cxt->SSRecoveryInfo.failover_triggered = false;
+    dms_cxt->SSRecoveryInfo.new_primary_reset_walbuf_flag = false;
+    dms_cxt->SSRecoveryInfo.skip_redo_replay = false;
+    dms_cxt->SSRecoveryInfo.reclsn_updated = false;
+    dms_cxt->SSRecoveryInfo.ready_to_startup = false;
+    dms_cxt->SSRecoveryInfo.startup_reform = true;
+    dms_cxt->SSRecoveryInfo.restart_failover_flag = false;
+    dms_cxt->SSRecoveryInfo.reform_ready = false;
+    dms_cxt->SSRecoveryInfo.in_failover = false;
+    dms_cxt->log_timezone = NULL;
+    pg_atomic_init_u32(&dms_cxt->inDmsThreShmemInitCnt, 0);
+    pg_atomic_init_u32(&dms_cxt->inProcExitCnt, 0);
+    dms_cxt->dmsInited = false;
+}
 
 static void knl_g_tests_init(knl_g_tests_context* tests_cxt)
 {
@@ -707,6 +732,93 @@ static void knl_g_roach_init(knl_g_roach_context* roach_cxt)
     roach_cxt->targetRestoreTimeFromMedia = NULL;
 }
 
+static void knl_g_dwsubdir_init(knl_g_dwsubdatadir_context* dw_subdir_cxt)
+{
+    Assert(dw_subdir_cxt != NULL);
+    errno_t rc = memset_s(dw_subdir_cxt, sizeof(knl_g_dwsubdatadir_context), 0, sizeof(knl_g_dwsubdatadir_context));
+    securec_check(rc, "\0", "\0");
+
+    errno_t errorno = EOK;
+    
+    errorno = strcpy_s(dw_subdir_cxt->dwOldPath, MAXPGPATH, "global/pg_dw");
+    securec_check_c(errorno, "\0", "\0");
+
+    errorno = strcpy_s(dw_subdir_cxt->dwPathPrefix, MAXPGPATH, "global/pg_dw_");
+    securec_check_c(errorno, "\0", "\0");
+    
+    errorno = strcpy_s(dw_subdir_cxt->dwSinglePath, MAXPGPATH, "global/pg_dw_single");
+    securec_check_c(errorno, "\0", "\0");
+
+    errorno = strcpy_s(dw_subdir_cxt->dwBuildPath, MAXPGPATH, "global/pg_dw.build");
+    securec_check_c(errorno, "\0", "\0");
+
+    errorno = strcpy_s(dw_subdir_cxt->dwUpgradePath, MAXPGPATH, "global/dw_upgrade");
+    securec_check_c(errorno, "\0", "\0");
+
+    errorno = strcpy_s(dw_subdir_cxt->dwBatchUpgradeMetaPath, MAXPGPATH, "global/dw_batch_upgrade_meta");
+    securec_check_c(errorno, "\0", "\0");
+
+    errorno = strcpy_s(dw_subdir_cxt->dwBatchUpgradeFilePath, MAXPGPATH, "global/dw_batch_upgrade_files");
+    securec_check_c(errorno, "\0", "\0");
+
+    errorno = strcpy_s(dw_subdir_cxt->dwMetaPath, MAXPGPATH, "global/pg_dw_meta");
+    securec_check_c(errorno, "\0", "\0");
+
+    errorno = strcpy_s(dw_subdir_cxt->dwExtChunkPath, MAXPGPATH, "global/pg_dw_ext_chunk");
+    securec_check_c(errorno, "\0", "\0");
+
+    dw_subdir_cxt->dwStorageType = 0;
+}
+
+static void knl_g_datadir_init(knl_g_datadir_context* datadir_init)
+{
+    errno_t errorno = EOK;
+    
+    errorno = strcpy_s(datadir_init->baseDir, MAXPGPATH, "base");
+    securec_check_c(errorno, "\0", "\0");
+
+    errorno = strcpy_s(datadir_init->globalDir, MAXPGPATH, "global");
+    securec_check_c(errorno, "\0", "\0");
+    
+    errorno = strcpy_s(datadir_init->clogDir, MAXPGPATH, "pg_clog");
+    securec_check_c(errorno, "\0", "\0");
+
+    errorno = strcpy_s(datadir_init->csnlogDir, MAXPGPATH, "pg_csnlog");
+    securec_check_c(errorno, "\0", "\0");
+
+    errorno = strcpy_s(datadir_init->locationDir, MAXPGPATH, "pg_location");
+    securec_check_c(errorno, "\0", "\0");
+
+    errorno = strcpy_s(datadir_init->notifyDir, MAXPGPATH, "pg_notify");
+    securec_check_c(errorno, "\0", "\0");
+
+    errorno = strcpy_s(datadir_init->serialDir, MAXPGPATH, "pg_serial");
+    securec_check_c(errorno, "\0", "\0");
+
+    errorno = strcpy_s(datadir_init->snapshotsDir, MAXPGPATH, "pg_snapshots");
+    securec_check_c(errorno, "\0", "\0");
+
+    errorno = strcpy_s(datadir_init->tblspcDir, MAXPGPATH, "pg_tblspc");
+    securec_check_c(errorno, "\0", "\0");
+
+    errorno = strcpy_s(datadir_init->twophaseDir, MAXPGPATH, "pg_twophase");
+    securec_check_c(errorno, "\0", "\0");
+
+    errorno = strcpy_s(datadir_init->multixactDir, MAXPGPATH, "pg_multixact");
+    securec_check_c(errorno, "\0", "\0");
+
+    errorno = strcpy_s(datadir_init->xlogDir, MAXPGPATH, "pg_xlog");
+    securec_check_c(errorno, "\0", "\0");
+
+    errorno = strcpy_s(datadir_init->controlPath, MAXPGPATH, "global/pg_control");
+    securec_check_c(errorno, "\0", "\0");
+
+    errorno = strcpy_s(datadir_init->controlBakPath, MAXPGPATH, "global/pg_control.backup");
+    securec_check_c(errorno, "\0", "\0");
+
+    knl_g_dwsubdir_init(&datadir_init->dw_subdir_cxt);
+}
+
 static void knl_g_streaming_dr_init(knl_g_streaming_dr_context* streaming_dr_cxt)
 {
     streaming_dr_cxt->isInSwitchover = false;
@@ -820,6 +932,7 @@ void knl_instance_init()
     knl_g_bgwriter_init(&g_instance.bgwriter_cxt);
     knl_g_repair_init(&g_instance.repair_cxt);
     knl_g_startup_init(&g_instance.startup_cxt);
+    knl_g_dms_init(&g_instance.dms_cxt);
     knl_g_shmem_init(&g_instance.shmem_cxt);
     g_instance.ckpt_cxt_ctl = &g_instance.ckpt_cxt;
     g_instance.ckpt_cxt_ctl = (knl_g_ckpt_context*)TYPEALIGN(SIZE_OF_TWO_UINT64, g_instance.ckpt_cxt_ctl);
@@ -862,6 +975,8 @@ void knl_instance_init()
         pthread_mutex_init(&g_instance.loadPluginLock[i], NULL);
     }
 #endif
+
+    knl_g_datadir_init(&g_instance.datadir_cxt);
 }
 
 void add_numa_alloc_info(void* numaAddr, size_t length)

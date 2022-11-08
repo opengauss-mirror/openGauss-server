@@ -44,6 +44,7 @@
 #include "storage/smgr/relfilenode.h"
 #include "storage/page_compression.h"
 #include "postmaster/aiocompleter.h"
+#include "storage/file/fio_device_com.h"
 
 /*
  * FileSeek uses the standard UNIX lseek(2) flags.
@@ -65,19 +66,6 @@ typedef struct DataFileIdCacheEntry {
 } DataFileIdCacheEntry;
 
 enum FileExistStatus { FILE_EXIST, FILE_NOT_EXIST, FILE_NOT_REG };
-
-/*
- * On Windows, we have to interpret EACCES as possibly meaning the same as
- * ENOENT, because if a file is unlinked-but-not-yet-gone on that platform,
- * that's what you get.  Ugh.  This code is designed so that we don't
- * actually believe these cases are okay without further evidence (namely,
- * a pending fsync request getting canceled ... see mdsync).
- */
-#ifndef WIN32
-#define FILE_POSSIBLY_DELETED(err) ((err) == ENOENT)
-#else
-#define FILE_POSSIBLY_DELETED(err) ((err) == ENOENT || (err) == EACCES)
-#endif
 
 /*
  * prototypes for functions in fd.c
@@ -198,5 +186,6 @@ extern bool repair_deleted_file_check(RelFileNodeForkNum fileNode, int fd);
 //
 #define PG_TEMP_FILES_DIR "pgsql_tmp"
 #define PG_TEMP_FILE_PREFIX "pgsql_tmp"
+#define SS_PG_TEMP_FILES_DIR "ss_pgsql_tmp"
 
 #endif /* FD_H */

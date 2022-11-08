@@ -19,7 +19,9 @@
 #include <unistd.h>
 
 #include <sys/stat.h>
+#include "tool_common.h"
 #include "common/fe_memutils.h"
+#include "storage/file/fio_device.h"
 
 static const char *statusName[] =
 {
@@ -34,6 +36,14 @@ static const char *statusName[] =
     "DONE",
     "ORPHAN",
     "CORRUPT"
+};
+
+static const char *devTypeName[] =
+{
+    "FILE",
+    "DSS",
+    "UNKNOWN",
+    "UNKNOWN"
 };
 
 uint32 NUM_65536 = 65536;
@@ -84,17 +94,33 @@ static void
 checkControlFile(ControlFileData *ControlFile)
 {
     pg_crc32c   crc;
-
     /* Calculate CRC */
     INIT_CRC32C(crc);
     COMP_CRC32C(crc, (char *) ControlFile, offsetof(ControlFileData, crc));
     FIN_CRC32C(crc);
-
     /* Then compare it */
     if (!EQ_CRC32C(crc, ControlFile->crc))
         elog(ERROR, "Calculated CRC checksum does not match value stored in file.\n"
              "Either the file is corrupt, or it has a different layout than this program\n"
              "is expecting. The results below are untrustworthy.");
+
+    if ((ControlFile->pg_control_version % NUM_65536 == 0 || ControlFile->pg_control_version % NUM_65536 > NUM_10000) &&
+        ControlFile->pg_control_version / NUM_65536 != 0)
+        elog(ERROR, "possible byte ordering mismatch\n"
+                 "The byte ordering used to store the pg_control file might not match the one\n"
+                 "used by this program. In that case the results below would be incorrect, and\n"
+                 "the PostgreSQL installation would be incompatible with this data directory.");
+}
+
+static void checkSSControlFile(ControlFileData* ControlFile, char* last, size_t size)
+{
+    pg_crc32c   crc;
+    /* Calculate CRC */
+    INIT_CRC32C(crc);
+    COMP_CRC32C(crc, (char *) ControlFile, offsetof(ControlFileData, crc));
+    COMP_CRC32C(crc, last, size);
+    FIN_CRC32C(crc);
+    ControlFile->crc = crc;
 
     if ((ControlFile->pg_control_version % NUM_65536 == 0 || ControlFile->pg_control_version % NUM_65536 > NUM_10000) &&
         ControlFile->pg_control_version / NUM_65536 != 0)
@@ -110,15 +136,51 @@ checkControlFile(ControlFileData *ControlFile)
 static void
 digestControlFile(ControlFileData *ControlFile, char *src, size_t size)
 {
-    if (size != PG_CONTROL_SIZE)
-        elog(ERROR, "unexpected control file size %d, expected %d",
-             (int) size, PG_CONTROL_SIZE);
+    errno_t rc;
+    char* oldSrc = src;
+    char* tmpDssSrc;
+    size_t clearSize = 0;
+    bool dssMode = IsDssMode();
+    int instanceId = instance_config.dss.instance_id;
+    int64 instanceId64 = (int64) instanceId;
+    size_t instanceIdSize = (size_t) instanceId;
+    size_t compareSize = PG_CONTROL_SIZE;
+    /* control file contents need special handle in dss mode */
+    if (dssMode) {
+        // dms support (MAX_INSTANCEID + 1) instance, and last page for all control.
+        compareSize = 1 + MAX_INSTANCEID - MIN_INSTANCEID;
+        compareSize = (compareSize + 1) * PG_CONTROL_SIZE;
+        src += instanceId64 * PG_CONTROL_SIZE;
+        // in here, we clear all control page except instance page and last page.
+        if (instanceId != MIN_INSTANCEID) {
+            clearSize = instanceIdSize * PG_CONTROL_SIZE;
+            rc = memset_s(oldSrc, clearSize, 0, clearSize);
+            securec_check_c(rc, "\0", "\0");
+        }
+        if (instanceId != MAX_INSTANCEID) {
+            clearSize = (size_t) (MAX_INSTANCEID - instanceIdSize) * PG_CONTROL_SIZE;
+            tmpDssSrc = oldSrc;
+            tmpDssSrc += (instanceId64 + 1) * PG_CONTROL_SIZE;
+            rc = memset_s(tmpDssSrc, clearSize, 0, clearSize);
+            securec_check_c(rc, "\0", "\0");
+        }
+    }
+    
+    if (size != compareSize)
+            elog(ERROR, "unexpected control file size %d, expected %d",
+                 (int) size, compareSize);
 
-    errno_t rc = memcpy_s(ControlFile, sizeof(ControlFileData), src, sizeof(ControlFileData));
+    rc = memcpy_s(ControlFile, sizeof(ControlFileData), src, sizeof(ControlFileData));
     securec_check_c(rc, "\0", "\0");
 
     /* Additional checks on control file */
-    checkControlFile(ControlFile);
+    if (dssMode) {
+        tmpDssSrc = oldSrc;
+        tmpDssSrc += (MAX_INSTANCEID + 1) * PG_CONTROL_SIZE;
+        checkSSControlFile(ControlFile, tmpDssSrc, PG_CONTROL_SIZE);
+    } else {
+        checkControlFile(ControlFile);
+    }
 }
 
 /*
@@ -136,7 +198,6 @@ writeControlFile(ControlFileData *ControlFile, const char *path, fio_location lo
     /* Write pg_control */
     fd = fio_open(path,
                   O_RDWR | O_CREAT | O_TRUNC | PG_BINARY, location);
-
     if (fd < 0)
         elog(ERROR, "Failed to open file: %s", path);
 
@@ -148,6 +209,30 @@ writeControlFile(ControlFileData *ControlFile, const char *path, fio_location lo
 
     fio_close(fd);
     pg_free(buffer);
+}
+
+/*
+ * Write Dss buffer to pg_control
+ */
+static void
+writeDssControlFile(char* src, size_t srcLen, const char *path, fio_location location)
+{
+    int            fd;
+    /* Write pg_control */
+    fd = fio_open(path,
+                  O_RDWR | O_CREAT | O_TRUNC | PG_BINARY, location);
+    if (fd < 0)
+        elog(ERROR, "Failed to open file: %s", path);
+
+    if (fio_write(fd, src, srcLen) != (ssize_t)srcLen)
+        elog(ERROR, "Failed to overwrite file: %s", path);
+
+    if (fio_flush(fd) != 0)
+        elog(ERROR, "Failed to sync file: %s", path);
+
+    if (fio_close(fd) != 0) {
+        elog(ERROR, "Failed to close file: %s", path);
+    }
 }
 
 /*
@@ -189,10 +274,17 @@ get_current_timeline_from_control(bool safe)
     ControlFileData ControlFile;
     char       *buffer;
     size_t      size;
+    fio_location location;
 
     /* First fetch file... */
-    buffer = slurpFile(instance_config.pgdata, XLOG_CONTROL_FILE, &size,
-                       safe, FIO_DB_HOST);
+    location = is_dss_file(T_XLOG_CONTROL_FILE) ? FIO_DSS_HOST : FIO_DB_HOST;
+    if (IsDssMode()) {
+        buffer = slurpFile(T_XLOG_CONTROL_FILE, &size, false, location);
+    } else {
+        char xlog_ctl_file_path[MAXPGPATH] = {'\0'};
+        join_path_components(xlog_ctl_file_path, instance_config.pgdata, T_XLOG_CONTROL_FILE);
+        buffer = slurpFile(xlog_ctl_file_path, &size, false, location);
+    }
     if (safe && buffer == NULL)
         return 0;
 
@@ -233,8 +325,16 @@ get_checkpoint_location(PGconn *conn)
     char       *buffer;
     size_t        size;
     ControlFileData ControlFile;
+    fio_location location;
 
-    buffer = slurpFile(instance_config.pgdata, XLOG_CONTROL_FILE, &size, false, FIO_DB_HOST);
+    location = is_dss_file(T_XLOG_CONTROL_FILE) ? FIO_DSS_HOST : FIO_DB_HOST;
+    if (IsDssMode()) {
+        buffer = slurpFile(T_XLOG_CONTROL_FILE, &size, false, location);
+    } else {
+        char xlog_ctl_file_path[MAXPGPATH] = {'\0'};
+        join_path_components(xlog_ctl_file_path, instance_config.pgdata, T_XLOG_CONTROL_FILE);
+        buffer = slurpFile(xlog_ctl_file_path, &size, false, location);
+    }
     digestControlFile(&ControlFile, buffer, size);
     pg_free(buffer);
 
@@ -248,9 +348,18 @@ get_system_identifier(const char *pgdata_path)
     ControlFileData ControlFile;
     char       *buffer;
     size_t        size;
+    fio_location location;
 
     /* First fetch file... */
-    buffer = slurpFile(pgdata_path, XLOG_CONTROL_FILE, &size, false, FIO_DB_HOST);
+    location = is_dss_file(T_XLOG_CONTROL_FILE) ? FIO_DSS_HOST : FIO_DB_HOST;
+    if (IsDssMode()) {
+        buffer = slurpFile(T_XLOG_CONTROL_FILE, &size, false, location);
+    } else {
+        char xlog_ctl_file_path[MAXPGPATH] = {'\0'};
+        join_path_components(xlog_ctl_file_path, pgdata_path, T_XLOG_CONTROL_FILE);
+        buffer = slurpFile(xlog_ctl_file_path, &size, false, location);
+    }
+    
     if (buffer == NULL)
         return 0;
     digestControlFile(&ControlFile, buffer, size);
@@ -283,8 +392,17 @@ get_remote_system_identifier(PGconn *conn)
     char       *buffer;
     size_t        size;
     ControlFileData ControlFile;
+    fio_location location;
 
-    buffer = slurpFile(instance_config.pgdata, XLOG_CONTROL_FILE, &size, false, FIO_DB_HOST);
+    location = is_dss_file(T_XLOG_CONTROL_FILE) ? FIO_DSS_HOST : FIO_DB_HOST;
+    location = is_dss_file(T_XLOG_CONTROL_FILE) ? FIO_DSS_HOST : FIO_DB_HOST;
+    if (IsDssMode()) {
+        buffer = slurpFile(T_XLOG_CONTROL_FILE, &size, false, location);
+    } else {
+        char xlog_ctl_file_path[MAXPGPATH] = {'\0'};
+        join_path_components(xlog_ctl_file_path, instance_config.pgdata, T_XLOG_CONTROL_FILE);
+        buffer = slurpFile(xlog_ctl_file_path, &size, false, location);
+    }
     digestControlFile(&ControlFile, buffer, size);
     pg_free(buffer);
 
@@ -299,15 +417,24 @@ get_xlog_seg_size(char *pgdata_path)
     ControlFileData ControlFile;
     char       *buffer;
     size_t        size;
+    fio_location location;
 
     /* First fetch file... */
-    buffer = slurpFile(pgdata_path, XLOG_CONTROL_FILE, &size, false, FIO_DB_HOST);
+    location = is_dss_file(T_XLOG_CONTROL_FILE) ? FIO_DSS_HOST : FIO_DB_HOST;
+    location = is_dss_file(T_XLOG_CONTROL_FILE) ? FIO_DSS_HOST : FIO_DB_HOST;
+    if (IsDssMode()) {
+        buffer = slurpFile(T_XLOG_CONTROL_FILE, &size, false, location);
+    } else {
+        char xlog_ctl_file_path[MAXPGPATH] = {'\0'};
+        join_path_components(xlog_ctl_file_path, pgdata_path, T_XLOG_CONTROL_FILE);
+        buffer = slurpFile(xlog_ctl_file_path, &size, false, location);
+    }
     digestControlFile(&ControlFile, buffer, size);
     pg_free(buffer);
 
     return ControlFile.xlog_seg_size;
 #else
-    return (uint32) XLOG_SEG_SIZE;
+    return (uint32) XLogSegSize;
 #endif
 }
 
@@ -317,10 +444,17 @@ get_data_checksum_version(bool safe)
     ControlFileData ControlFile;
     char       *buffer;
     size_t        size;
+    fio_location location;
 
     /* First fetch file... */
-    buffer = slurpFile(instance_config.pgdata, XLOG_CONTROL_FILE, &size,
-                       safe, FIO_DB_HOST);
+    location = is_dss_file(T_XLOG_CONTROL_FILE) ? FIO_DSS_HOST : FIO_DB_HOST;
+    if (IsDssMode()) {
+        buffer = slurpFile(T_XLOG_CONTROL_FILE, &size, false, location);
+    } else {
+        char xlog_ctl_file_path[MAXPGPATH] = {'\0'};
+        join_path_components(xlog_ctl_file_path, instance_config.pgdata, T_XLOG_CONTROL_FILE);
+        buffer = slurpFile(xlog_ctl_file_path, &size, false, location);
+    }
     if (buffer == NULL)
         return 0;
     digestControlFile(&ControlFile, buffer, size);
@@ -330,15 +464,14 @@ get_data_checksum_version(bool safe)
 }
 
 pg_crc32c
-get_pgcontrol_checksum(const char *pgdata_path)
+get_pgcontrol_checksum(const char *fullpath)
 {
     ControlFileData ControlFile;
     char       *buffer;
     size_t        size;
 
-    /* First fetch file... */
-    buffer = slurpFile(pgdata_path, XLOG_CONTROL_FILE, &size, false, FIO_BACKUP_HOST);
-
+    /* First fetch file in backup dir ... */
+    buffer = slurpFile(fullpath, &size, false, FIO_BACKUP_HOST);
     digestControlFile(&ControlFile, buffer, size);
     pg_free(buffer);
 
@@ -351,9 +484,17 @@ get_redo(const char *pgdata_path, RedoParams *redo)
     ControlFileData ControlFile;
     char       *buffer;
     size_t        size;
+    fio_location location;
 
     /* First fetch file... */
-    buffer = slurpFile(pgdata_path, XLOG_CONTROL_FILE, &size, false, FIO_DB_HOST);
+    location = is_dss_file(T_XLOG_CONTROL_FILE) ? FIO_DSS_HOST : FIO_DB_HOST;
+    if (IsDssMode()) {
+        buffer = slurpFile(T_XLOG_CONTROL_FILE, &size, false, location);
+    } else {
+        char xlog_ctl_file_path[MAXPGPATH] = {'\0'};
+        join_path_components(xlog_ctl_file_path, pgdata_path, T_XLOG_CONTROL_FILE);
+        buffer = slurpFile(xlog_ctl_file_path, &size, false, location);
+    }
 
     digestControlFile(&ControlFile, buffer, size);
     pg_free(buffer);
@@ -376,21 +517,103 @@ get_redo(const char *pgdata_path, RedoParams *redo)
 
 }
 
+void
+parse_vgname_args(const char* args)
+{
+    char *vgname = xstrdup(args);
+    if (strstr(vgname, "/") != NULL)
+        elog(ERROR, "invalid token \"/\" in vgname");
+
+    char *comma = strstr(vgname, ",");
+    if (comma == NULL) {
+        instance_config.dss.vgdata = vgname;
+        instance_config.dss.vglog = const_cast<char*>("");
+        return;
+    }
+
+    instance_config.dss.vgdata = xstrdup(vgname);
+    comma = strstr(instance_config.dss.vgdata, ",");
+    comma[0] = '\0';
+    instance_config.dss.vglog = comma + 1;
+    if (strstr(instance_config.dss.vgdata, ",") != NULL)
+        elog(ERROR, "invalid vgname args, should be two volume group names, example: \"+data,+log\"");
+    if (strstr(instance_config.dss.vglog, ",") != NULL)
+        elog(ERROR, "invalid vgname args, should be two volume group names, example: \"+data,+log\"");
+}
+
+bool
+is_ss_xlog(const char *ss_dir)
+{
+    char ss_xlog[MAXPGPATH] = {0};
+    char ss_doublewrite[MAXPGPATH] = {0};
+    char ss_notify[MAXPGPATH] = {0};
+    char ss_snapshots[MAXPGPATH] = {0};
+    int rc = EOK;
+    int instance_id = instance_config.dss.instance_id;
+
+    rc = sprintf_s(ss_xlog, sizeof(ss_xlog), "%s%d", "pg_xlog", instance_id);
+    securec_check_ss_c(rc, "\0", "\0");
+
+    rc = sprintf_s(ss_doublewrite, sizeof(ss_doublewrite), "%s%d", "pg_doublewrite", instance_id);
+    securec_check_ss_c(rc, "\0", "\0");
+
+    rc = sprintf_s(ss_notify, sizeof(ss_notify), "%s%d", "pg_notify", instance_id);
+    securec_check_ss_c(rc, "\0", "\0");
+
+    rc = sprintf_s(ss_snapshots, sizeof(ss_snapshots), "%s%d", "pg_snapshots", instance_id);
+    securec_check_ss_c(rc, "\0", "\0");
+
+    if (IsDssMode() && strlen(instance_config.dss.vglog) &&
+        (pg_strcasecmp(ss_dir, ss_xlog) == 0 ||
+        pg_strcasecmp(ss_dir, ss_doublewrite) == 0 ||
+        pg_strcasecmp(ss_dir, ss_notify) == 0 ||
+        pg_strcasecmp(ss_dir, ss_notify) == 0)) {
+        return true;
+    }
+    return false;
+}
+
+void
+ss_createdir(const char *ss_dir, const char *vgdata, const char *vglog)
+{
+    char path[MAXPGPATH] = {0};
+    char link_path[MAXPGPATH] = {0};
+    int rc = EOK;
+
+    rc = sprintf_s(link_path, sizeof(link_path), "%s/%s", vgdata, ss_dir);
+    securec_check_ss_c(rc, "\0", "\0");
+    rc = sprintf_s(path, sizeof(path), "%s/%s", vglog, ss_dir);
+    securec_check_ss_c(rc, "\0", "\0");
+
+    dir_create_dir(path, DIR_PERMISSION);
+    if (symlink(path, link_path) < 0) {
+        elog(ERROR, "can not link dss xlog dir \"%s\" to dss xlog dir \"%s\": %s", link_path, path,
+            strerror(errno));
+    }
+}
+
 /*
  * Rewrite minRecoveryPoint of pg_control in backup directory. minRecoveryPoint
  * 'as-is' is not to be trusted.
  */
 void
-set_min_recovery_point(pgFile *file, const char *backup_path,
+set_min_recovery_point(pgFile *file, const char *fullpath,
                        XLogRecPtr stop_backup_lsn)
 {
     ControlFileData ControlFile;
     char       *buffer;
     size_t      size;
-    char        fullpath[MAXPGPATH];
+    fio_location location;
 
     /* First fetch file content */
-    buffer = slurpFile(instance_config.pgdata, XLOG_CONTROL_FILE, &size, false, FIO_DB_HOST);
+    location = is_dss_file(T_XLOG_CONTROL_FILE) ? FIO_DSS_HOST : FIO_DB_HOST;
+    if (IsDssMode()) {
+        buffer = slurpFile(T_XLOG_CONTROL_FILE, &size, false, location);
+    } else {
+        char xlog_ctl_file_path[MAXPGPATH] = {'\0'};
+        join_path_components(xlog_ctl_file_path, instance_config.pgdata, T_XLOG_CONTROL_FILE);
+        buffer = slurpFile(xlog_ctl_file_path, &size, false, location);
+    }
     digestControlFile(&ControlFile, buffer, size);
 
     elog(LOG, "Current minRecPoint %X/%X",
@@ -410,9 +633,6 @@ set_min_recovery_point(pgFile *file, const char *backup_path,
     FIN_CRC32C(ControlFile.crc);
 
     /* overwrite pg_control */
-    errno_t rc = snprintf_s(fullpath, sizeof(fullpath), sizeof(fullpath) - 1,
-               "%s/%s", backup_path, XLOG_CONTROL_FILE);
-    securec_check_ss_c(rc, "\0", "\0");
     writeControlFile(&ControlFile, fullpath, FIO_LOCAL_HOST);
 
     /* Update pg_control checksum in backup_list */
@@ -432,17 +652,19 @@ copy_pgcontrol_file(const char *from_fullpath, fio_location from_location,
     char       *buffer;
     size_t        size;
 
-    buffer = slurpFile(from_fullpath, "", &size, false, from_location);
-
+    buffer = slurpFile(from_fullpath, &size, false, from_location);
     digestControlFile(&ControlFile, buffer, size);
-
     file->crc = ControlFile.crc;
     file->read_size = size;
     file->write_size = size;
     file->uncompressed_size = size;
-
-    writeControlFile(&ControlFile, to_fullpath, to_location);
-
+    
+    /* Write pg_control */
+    if (is_dss_type(file->type)) {
+        writeDssControlFile(buffer, size, to_fullpath, to_location);
+    } else {
+        writeControlFile(&ControlFile, to_fullpath, to_location);
+    }
     pg_free(buffer);
 }
 
@@ -520,6 +742,20 @@ str2status(const char *status)
         }
     }
     return BACKUP_STATUS_INVALID;
+}
+
+const char *dev2str(device_type_t type)
+{
+    return devTypeName[type];
+}
+
+device_type_t str2dev(const char *dev)
+{
+    for (int i = 0; i < (int)DEV_TYPE_NUM; i++) {
+        if (pg_strcasecmp(dev, devTypeName[i]) == 0)
+            return (device_type_t)i;
+    }
+    return DEV_TYPE_INVALID;
 }
 
 bool

@@ -62,6 +62,7 @@
 #include "utils/inval.h"
 #include "utils/lsyscache.h"
 #include "gs_policy/policy_common.h"
+#include "storage/file/fio_device.h"
 
 #ifdef ENABLE_MULTIPLE_NODES
 #include "tsdb/compaction/compaction_entry.h"
@@ -1775,6 +1776,11 @@ void ValidatePgVersion(const char* path)
     const char* version_string = PG_VERSION;
     errno_t rc;
 
+    // skip in dss mode
+    if (ENABLE_DSS) {
+        return;
+    }
+
     my_major = strtol(version_string, &endptr, 10);
 
     if (*endptr == '.')
@@ -1983,4 +1989,111 @@ bool contain_backend_version(uint32 version_number) {
     return ((version_number >= V5R1C20_BACKEND_VERSION_NUM &&
              version_number < V5R2C00_START_VERSION_NUM) ||
             (version_number >= V5R2C00_BACKEND_VERSION_NUM));
+}
+
+void ss_initdwsubdir(char *dssdir, int instance_id)
+{
+    int rc;
+
+    /* file correspanding to double write directory */
+    rc = snprintf_s(g_instance.datadir_cxt.dw_subdir_cxt.dwOldPath, MAXPGPATH, MAXPGPATH - 1,
+        "%s/pg_doublewrite%d/pg_dw", dssdir, instance_id);
+    securec_check_ss(rc, "", "");
+
+    rc = snprintf_s(g_instance.datadir_cxt.dw_subdir_cxt.dwPathPrefix, MAXPGPATH, MAXPGPATH - 1,
+        "%s/pg_doublewrite%d/pg_dw_", dssdir, instance_id);
+    securec_check_ss(rc, "", "");
+
+    rc = snprintf_s(g_instance.datadir_cxt.dw_subdir_cxt.dwSinglePath, MAXPGPATH, MAXPGPATH - 1,
+        "%s/pg_doublewrite%d/pg_dw_single", dssdir, instance_id);
+    securec_check_ss(rc, "", "");
+
+    rc = snprintf_s(g_instance.datadir_cxt.dw_subdir_cxt.dwBuildPath, MAXPGPATH, MAXPGPATH - 1,
+        "%s/pg_doublewrite%d/pg_dw.build", dssdir, instance_id);
+    securec_check_ss(rc, "", "");
+
+    rc = snprintf_s(g_instance.datadir_cxt.dw_subdir_cxt.dwUpgradePath, MAXPGPATH, MAXPGPATH - 1,
+        "%s/pg_doublewrite%d/dw_upgrade", dssdir, instance_id);
+    securec_check_ss(rc, "", "");
+
+    rc = snprintf_s(g_instance.datadir_cxt.dw_subdir_cxt.dwBatchUpgradeMetaPath, MAXPGPATH, MAXPGPATH - 1,
+        "%s/pg_doublewrite%d/dw_batch_upgrade_meta", dssdir, instance_id);
+    securec_check_ss(rc, "", "");
+
+    rc = snprintf_s(g_instance.datadir_cxt.dw_subdir_cxt.dwBatchUpgradeFilePath, MAXPGPATH, MAXPGPATH - 1,
+        "%s/pg_doublewrite%d/dw_batch_upgrade_files", dssdir, instance_id);
+    securec_check_ss(rc, "", "");
+
+    rc = snprintf_s(g_instance.datadir_cxt.dw_subdir_cxt.dwMetaPath, MAXPGPATH, MAXPGPATH - 1,
+        "%s/pg_doublewrite%d/pg_dw_meta", dssdir, instance_id);
+    securec_check_ss(rc, "", "");
+
+    rc = snprintf_s(g_instance.datadir_cxt.dw_subdir_cxt.dwExtChunkPath, MAXPGPATH, MAXPGPATH - 1,
+        "%s/pg_doublewrite%d/pg_dw_ext_chunk", dssdir, instance_id);
+    securec_check_ss(rc, "", "");
+
+    g_instance.datadir_cxt.dw_subdir_cxt.dwStorageType = (uint8)DEV_TYPE_DSS;
+}
+
+/*
+ * Check whether dss connect is successful.
+ */
+void initDSSConf(void)
+{
+    if (!ENABLE_DSS) {
+        return;
+    }
+    if (!dss_exist_dir(g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name)) {
+        ereport(FATAL, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+            errmsg("Could not connect dssserver, vgname: \"%s\", socketpath: \"%s\"",
+            g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name,
+            g_instance.attr.attr_storage.dss_attr.ss_dss_conn_path),
+            errhint("Check vgname and socketpath and restart later.")));
+    } else {
+        errno_t rc = EOK;
+        char *dssdir = g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name;
+
+        rc = snprintf_s(g_instance.datadir_cxt.baseDir, MAXPGPATH, MAXPGPATH - 1, "%s/base", dssdir);
+        securec_check_ss(rc, "", "");
+
+        rc = snprintf_s(g_instance.datadir_cxt.globalDir, MAXPGPATH, MAXPGPATH - 1, "%s/global", dssdir);
+        securec_check_ss(rc, "", "");
+
+        rc = snprintf_s(g_instance.datadir_cxt.locationDir, MAXPGPATH, MAXPGPATH - 1, "%s/pg_location", dssdir);
+        securec_check_ss(rc, "", "");
+
+        rc = snprintf_s(g_instance.datadir_cxt.tblspcDir, MAXPGPATH, MAXPGPATH - 1, "%s/pg_tblspc", dssdir);
+        securec_check_ss(rc, "", "");
+
+        rc = snprintf_s(g_instance.datadir_cxt.clogDir, MAXPGPATH, MAXPGPATH - 1, "%s/pg_clog", dssdir);
+        securec_check_ss(rc, "", "");
+
+        rc = snprintf_s(g_instance.datadir_cxt.csnlogDir, MAXPGPATH, MAXPGPATH - 1, "%s/pg_csnlog", dssdir);
+        securec_check_ss(rc, "", "");
+
+        rc = snprintf_s(g_instance.datadir_cxt.serialDir, MAXPGPATH, MAXPGPATH - 1, "%s/pg_serial", dssdir);
+        securec_check_ss(rc, "", "");
+
+        rc = snprintf_s(g_instance.datadir_cxt.twophaseDir, MAXPGPATH, MAXPGPATH - 1, "%s/pg_twophase", dssdir);
+        securec_check_ss(rc, "", "");
+
+        rc = snprintf_s(g_instance.datadir_cxt.multixactDir, MAXPGPATH, MAXPGPATH - 1, "%s/pg_multixact", dssdir);
+        securec_check_ss(rc, "", "");
+
+        rc = snprintf_s(g_instance.datadir_cxt.xlogDir, MAXPGPATH, MAXPGPATH - 1, "%s/pg_xlog%d", dssdir,
+            g_instance.attr.attr_storage.dms_attr.instance_id);
+        securec_check_ss(rc, "", "");
+
+        rc = snprintf_s(g_instance.datadir_cxt.controlPath, MAXPGPATH, MAXPGPATH - 1, "%s/pg_control", dssdir);
+        securec_check_ss(rc, "", "");
+
+        rc = snprintf_s(g_instance.datadir_cxt.controlBakPath, MAXPGPATH, MAXPGPATH - 1, "%s/pg_control.backup",
+            dssdir);
+        securec_check_ss(rc, "", "");
+
+        ss_initdwsubdir(dssdir, g_instance.attr.attr_storage.dms_attr.instance_id);
+    }
+
+    /* set xlog seg size to 1GB */
+    XLogSegmentSize = DSS_XLOG_SEG_SIZE;
 }

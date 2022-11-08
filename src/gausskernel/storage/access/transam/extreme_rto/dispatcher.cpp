@@ -311,7 +311,7 @@ void AllocRecordReadBuffer(XLogReaderState *xlogreader, uint32 privateLen)
     g_dispatcher->rtoXlogBufState.targetRecPtr = InvalidXLogRecPtr;
     g_dispatcher->rtoXlogBufState.expectLsn = InvalidXLogRecPtr;
     g_dispatcher->rtoXlogBufState.waitRedoDone = 0;
-    g_dispatcher->rtoXlogBufState.readsegbuf = (char *)palloc0(XLOG_SEG_SIZE * MAX_ALLOC_SEGNUM);
+    g_dispatcher->rtoXlogBufState.readsegbuf = (char *)palloc0(XLogSegSize * MAX_ALLOC_SEGNUM);
     g_dispatcher->rtoXlogBufState.readBuf = (char *)palloc0(XLOG_BLCKSZ);
     g_dispatcher->rtoXlogBufState.readprivate = (void *)palloc0(MAXALIGN(privateLen));
     errorno = memset_s(g_dispatcher->rtoXlogBufState.readprivate, MAXALIGN(privateLen), 0, MAXALIGN(privateLen));
@@ -323,7 +323,7 @@ void AllocRecordReadBuffer(XLogReaderState *xlogreader, uint32 privateLen)
     char *readsegbuf = g_dispatcher->rtoXlogBufState.readsegbuf;
     for (uint32 i = 0; i < MAX_ALLOC_SEGNUM; i++) {
         g_dispatcher->rtoXlogBufState.xlogsegarray[i].readsegbuf = readsegbuf;
-        readsegbuf += XLOG_SEG_SIZE;
+        readsegbuf += XLogSegSize;
         g_dispatcher->rtoXlogBufState.xlogsegarray[i].bufState = NONE;
     }
 

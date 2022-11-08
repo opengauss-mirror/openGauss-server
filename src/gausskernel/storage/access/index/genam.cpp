@@ -598,7 +598,7 @@ static bool GPIInsertFakeParentRelCacheForSubpartition(GPIScanDesc gpiScan, Memo
     HTAB* fakeRels = gpiScan->fakeRelationTable;
     Relation parentRel = gpiScan->parentRelation;
     Oid parentPartOid = partid_get_parentid(gpiScan->currPartOid);
-    if (parentPartOid != parentRel->rd_id) {
+    if (OidIsValid(parentPartOid) && parentPartOid != parentRel->rd_id) {
         PartRelIdCacheKey fakeRelKey = {parentPartOid, InvalidBktId};
         Partition parentPartition = NULL;
         FakeRelationIdCacheLookup(fakeRels, fakeRelKey, parentRel, parentPartition);
@@ -741,7 +741,10 @@ bool GPIGetNextPartRelation(GPIScanDesc gpiScan, MemoryContext cxt, LOCKMODE lmo
         /* Get current partition status in GPI */
         currStatus = PartitionGetMetadataStatus(gpiScan->currPartOid, false);
         /* Just save partition status if current partition metadata is invisible */
-        if (currStatus == PART_METADATA_INVISIBLE) {
+        if (currStatus == PART_METADATA_INVISIBLE || currStatus == PART_METADATA_NOEXIST) {
+            if (currStatus == PART_METADATA_NOEXIST && module_logging_is_on(MOD_GPI)) {
+                ereport(LOG, (errmodule(MOD_GPI), errmsg("Partition %u does not exist", gpiScan->currPartOid)));
+            }
             /* If current partition metadata is invisible, add current partition oid into invisiblePartMap */
             (void)OidRBTreeInsertOid(gpiScan->invisiblePartTree, gpiScan->currPartOid);
             gpiScan->currPartOid = InvalidOid;

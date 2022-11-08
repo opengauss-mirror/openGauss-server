@@ -30,7 +30,7 @@
 #define CRITICA_POINT_VALUE 104857600 /* 100 MB */
 #define TABLESPACE_THRESHOLD_RATE 0.9 /* threshold rate */
 #define TABLESPACE_UNLIMITED_STRING "unlimited"
-#define PG_LOCATION_DIR "pg_location"
+#define PG_LOCATION_DIR (g_instance.datadir_cxt.locationDir)
 
 typedef struct TableSpaceUsageSlot {
     uint64 maxSize;

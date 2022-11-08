@@ -62,8 +62,6 @@ typedef struct ReadPipeline {
 
 #define MAX_XLOG_READ_BUFFER (0xFFFFF) /* 8k uint */
 
-#define MAX_ALLOC_SEGNUM (4) /* 16* 4 */
-
 typedef enum {
     WORKER_STATE_STOP = 0,
     WORKER_STATE_RUN,

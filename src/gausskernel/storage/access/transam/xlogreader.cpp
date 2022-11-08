@@ -1400,7 +1400,7 @@ XLogRecPtr FindMaxLSN(char *workingPath, char *returnMsg, int msgLen, pg_crc32 *
     }
 
     /* Start to find the max lsn from a valid xlogfile */
-    startLsn = (xlogReadLogSeg * XLOG_SEG_SIZE) + ((XLogRecPtr)xlogReadLogid * XLogSegmentsPerXLogId * XLogSegSize);
+    startLsn = (xlogReadLogSeg * XLogSegSize) + ((XLogRecPtr)xlogReadLogid * XLogSegmentsPerXLogId * XLogSegSize);
     while (!XLogRecPtrIsInvalid(startLsn)) {
         /* find the first valid record from the bigger xlogrecord. then break */
         curLsn = XLogFindNextRecord(xlogReader, startLsn);
@@ -1409,7 +1409,7 @@ XLogRecPtr FindMaxLSN(char *workingPath, char *returnMsg, int msgLen, pg_crc32 *
                 close(xlogreadfd);
                 xlogreadfd = -1;
             }
-            startLsn = startLsn - XLOG_SEG_SIZE;
+            startLsn = startLsn - XLogSegSize;
             continue;
         } else {
             findValidXLogFile = true;
@@ -1566,7 +1566,7 @@ XLogRecPtr FindMinLSN(char *workingPath, char *returnMsg, int msgLen, pg_crc32 *
     }
 
     /* Start to find the min lsn from a valid xlogfile */
-    startLsn = (xlogReadLogSeg * XLOG_SEG_SIZE) + ((XLogRecPtr)xlogReadLogid * XLogSegmentsPerXLogId * XLogSegSize);
+    startLsn = (xlogReadLogSeg * XLogSegSize) + ((XLogRecPtr)xlogReadLogid * XLogSegmentsPerXLogId * XLogSegSize);
     while (!XLogRecPtrIsInvalid(startLsn)) {
         curLsn = XLogFindNextRecord(xlogReader, startLsn);
         if (XLogRecPtrIsInvalid(curLsn)) {
@@ -1574,7 +1574,7 @@ XLogRecPtr FindMinLSN(char *workingPath, char *returnMsg, int msgLen, pg_crc32 *
                 close(xlogreadfd);
                 xlogreadfd = -1;
             }
-            startLsn = startLsn + XLOG_SEG_SIZE;
+            startLsn = startLsn + XLogSegSize;
             continue;
         } else {
             findValidXLogFile = true;

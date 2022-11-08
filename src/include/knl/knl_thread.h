@@ -73,10 +73,10 @@
 #include "replication/origin.h"
 #include "catalog/pg_subscription.h"
 #include "port/pg_crc32c.h"
+#include "ddes/dms/ss_common_attr.h"
+
 #define MAX_PATH_LEN 1024
-
 extern const int g_reserve_param_num;
-
 #define PARTKEY_VALUE_MAXNUM 64
 
 typedef struct ResourceOwnerData* ResourceOwner;
@@ -2735,7 +2735,9 @@ typedef struct knl_t_storage_context {
 
     /* global variable */
     char* pageCopy;
+    char* pageCopy_ori;
     char* segPageCopy;
+    char* segPageCopyOri;
 
     bool isSwitchoverLockHolder;
     int num_held_lwlocks;
@@ -2784,10 +2786,9 @@ typedef struct knl_t_storage_context {
     int max_safe_fds; /* default if not changed */
     /* reserve `1000' for thread-private file id */
     int max_userdatafiles;
-
     int timeoutRemoteOpera;
-
     char* PcaBufferBlocks;
+    dms_buf_ctrl_t* dmsBufCtl;
 } knl_t_storage_context;
 
 typedef struct knl_t_port_context {
@@ -3309,6 +3310,10 @@ typedef struct knl_t_publication_context {
     bool updateConninfoNeeded;
 } knl_t_publication_context;
 
+typedef struct knl_t_dms_context {
+    MemoryContext msgContext;
+} knl_t_dms_context;
+
 /* thread context. */
 typedef struct knl_thrd_context {
     knl_thread_role role;
@@ -3456,6 +3461,7 @@ typedef struct knl_thrd_context {
     knl_t_page_compression_context page_compression_cxt;
     knl_t_cfs_shrinker_context cfs_shrinker_cxt;
     knl_t_sql_patch_context sql_patch_cxt;
+    knl_t_dms_context dms_cxt;
 } knl_thrd_context;
 
 #ifdef ENABLE_MOT
@@ -3497,5 +3503,6 @@ void RedoInterruptCallBack();
 RedoPageRepairCallBackFunc RegisterRedoPageRepairCallBack(RedoPageRepairCallBackFunc func);
 void RedoPageRepairCallBack(RepairBlockKey key, XLogPhyBlock pblk);
 extern void VerifyMemoryContext();
+
 
 #endif /* SRC_INCLUDE_KNL_KNL_THRD_H_ */

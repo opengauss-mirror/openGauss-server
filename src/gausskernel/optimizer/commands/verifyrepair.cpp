@@ -654,6 +654,11 @@ Datum local_clear_bad_block_info(PG_FUNCTION_ARGS)
 
 Datum gs_repair_page(PG_FUNCTION_ARGS)
 {
+    if (ENABLE_DMS) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Not support repair page while DMS and DSS enabled")));
+    }
+
     checkInstanceType();
     checkSupUserOrOperaMode();
     // read in parameters
@@ -682,6 +687,10 @@ bool CheckRelDataFilePath(const char* path)
 
 Datum gs_repair_file(PG_FUNCTION_ARGS)
 {
+    if (ENABLE_DMS) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Not support repair file while DMS and DSS enabled")));
+    }
     checkInstanceType();
     checkSupUserOrOperaMode();
     Oid tableOid = PG_GETARG_UINT32(0);
@@ -898,6 +907,10 @@ void gs_tryrepair_compress_extent(SMgrRelation reln, BlockNumber logicBlockNumbe
 
 Datum gs_verify_and_tryrepair_page(PG_FUNCTION_ARGS)
 {
+    if (ENABLE_DMS) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Not support verify and tryrepair page while DMS and DSS enabled")));
+    }
 #define REPAIR_BLOCK_STAT_NATTS 6
     checkInstanceType();
     checkSupUserOrOperaMode();

@@ -132,7 +132,8 @@ int ProcGlobalSemas(void)
      * We need a sema per backend (including autovacuum), plus one for each
      * auxiliary process.
      */
-    return g_instance.shmem_cxt.MaxBackends + NUM_CMAGENT_PROCS + NUM_AUXILIARY_PROCS + NUM_DCF_CALLBACK_PROCS;
+    return (g_instance.shmem_cxt.MaxBackends + NUM_CMAGENT_PROCS + \
+            NUM_AUXILIARY_PROCS + NUM_DCF_CALLBACK_PROCS + NUM_DMS_CALLBACK_PROCS);
 }
 
 /*
@@ -352,7 +353,7 @@ void InitProcGlobal(void)
     g_instance.proc_base->allProcCount = TotalProcs;
     g_instance.proc_base->allNonPreparedProcCount = g_instance.shmem_cxt.MaxBackends +
                                                     NUM_CMAGENT_PROCS + NUM_AUXILIARY_PROCS + 
-                                                    NUM_DCF_CALLBACK_PROCS;
+                                                    NUM_DCF_CALLBACK_PROCS + NUM_DMS_CALLBACK_PROCS;
     if (procs == NULL)
         ereport(FATAL, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of shared memory")));
 
@@ -391,7 +392,7 @@ void InitProcGlobal(void)
          * with a real process
          */
         if (i < g_instance.shmem_cxt.MaxBackends + NUM_CMAGENT_PROCS +
-            NUM_AUXILIARY_PROCS + NUM_DCF_CALLBACK_PROCS) {
+            NUM_AUXILIARY_PROCS + NUM_DCF_CALLBACK_PROCS + NUM_DMS_CALLBACK_PROCS) {
             PGSemaphoreCreate(&(procs[i]->sem));
             InitSharedLatch(&(procs[i]->procLatch));
             procs[i]->backendLock = LWLockAssign(LWTRANCHE_PROC);
@@ -423,12 +424,17 @@ void InitProcGlobal(void)
             procs[i]->links.next = (SHM_QUEUE *)g_instance.proc_base->pgjobfreeProcs;
             g_instance.proc_base->pgjobfreeProcs = procs[i];
         } else if (i < g_instance.shmem_cxt.MaxConnections + thread_pool_stream_proc_num + AUXILIARY_BACKENDS +
-                   g_instance.attr.attr_sql.job_queue_processes + 1 + NUM_DCF_CALLBACK_PROCS) {
+                   g_instance.attr.attr_sql.job_queue_processes + 1 + NUM_DCF_CALLBACK_PROCS + \
+                   NUM_DMS_CALLBACK_PROCS) {
             /* PGPROC for external thread, add to externalFreeProcs list */
             procs[i]->links.next = (SHM_QUEUE *)g_instance.proc_base->externalFreeProcs;
             g_instance.proc_base->externalFreeProcs = procs[i];
+            if (!pg_atomic_read_u32(&g_instance.dms_cxt.dmsProcSid)) {
+                pg_atomic_write_u32(&g_instance.dms_cxt.dmsProcSid, (uint32)(i + NUM_DCF_CALLBACK_PROCS));
+            }
         } else if (i < g_instance.shmem_cxt.MaxConnections + thread_pool_stream_proc_num + AUXILIARY_BACKENDS +
-                   g_instance.attr.attr_sql.job_queue_processes + 1 + NUM_DCF_CALLBACK_PROCS + NUM_CMAGENT_PROCS) {
+                   g_instance.attr.attr_sql.job_queue_processes + 1 + NUM_DCF_CALLBACK_PROCS + NUM_CMAGENT_PROCS + \
+                   NUM_DMS_CALLBACK_PROCS) {
             /*
              * This pointer indicates the first position of cm anget's procs.
              * In the first time, cmAgentFreeProcs is NULL, so procs[LAST]->links.next is NULL.
@@ -438,10 +444,11 @@ void InitProcGlobal(void)
             g_instance.proc_base->cmAgentFreeProcs = procs[i];
         } else if (i < g_instance.shmem_cxt.MaxConnections + thread_pool_stream_proc_num + AUXILIARY_BACKENDS +
                    g_instance.attr.attr_sql.job_queue_processes + 1 +
-                   NUM_CMAGENT_PROCS + g_max_worker_processes + NUM_DCF_CALLBACK_PROCS) {
+                   NUM_CMAGENT_PROCS + g_max_worker_processes + NUM_DCF_CALLBACK_PROCS + NUM_DMS_CALLBACK_PROCS) {
             procs[i]->links.next = (SHM_QUEUE*)g_instance.proc_base->bgworkerFreeProcs;
             g_instance.proc_base->bgworkerFreeProcs = procs[i];
-        } else if (i < g_instance.shmem_cxt.MaxBackends + NUM_CMAGENT_PROCS + NUM_DCF_CALLBACK_PROCS) {
+        } else if (i < g_instance.shmem_cxt.MaxBackends + NUM_CMAGENT_PROCS + NUM_DCF_CALLBACK_PROCS + \
+                   NUM_DMS_CALLBACK_PROCS) {
             /*
              * PGPROC for AV launcher/worker, add to autovacFreeProcs list
              * list size is autovacuum_max_workers + AUTOVACUUM_LAUNCHERS
@@ -468,9 +475,10 @@ void InitProcGlobal(void)
      * processes and prepared transactions.
      */
     g_instance.proc_aux_base = &procs[g_instance.shmem_cxt.MaxBackends +
-                                      NUM_CMAGENT_PROCS + NUM_DCF_CALLBACK_PROCS];
+                                      NUM_CMAGENT_PROCS + NUM_DCF_CALLBACK_PROCS + NUM_DMS_CALLBACK_PROCS];
     g_instance.proc_preparexact_base = &procs[g_instance.shmem_cxt.MaxBackends +
-                                              NUM_CMAGENT_PROCS + NUM_AUXILIARY_PROCS + NUM_DCF_CALLBACK_PROCS];
+                                              NUM_CMAGENT_PROCS + NUM_AUXILIARY_PROCS + NUM_DCF_CALLBACK_PROCS + \
+                                              NUM_DMS_CALLBACK_PROCS];
 
     /* Create &g_instance.proc_base_mutex_lock mutexlock, too */
     pthread_mutex_init(&g_instance.proc_base_mutex_lock, NULL);
@@ -642,7 +650,7 @@ static void GetProcFromFreeList()
         t_thrd.proc = g_instance.proc_base->pgjobfreeProcs;
     } else if (IsBgWorkerProcess()) {
         t_thrd.proc = g_instance.proc_base->bgworkerFreeProcs;
-    } else if (t_thrd.dcf_cxt.is_dcf_thread) {
+    } else if (t_thrd.dcf_cxt.is_dcf_thread || t_thrd.role == DMS_WORKER) {
         t_thrd.proc = g_instance.proc_base->externalFreeProcs;
     } else if (u_sess->libpq_cxt.IsConnFromCmAgent) {
         t_thrd.proc = GetFreeCMAgentProc();
@@ -759,7 +767,7 @@ void InitProcess(void)
             g_instance.proc_base->pgjobfreeProcs = (PGPROC*)t_thrd.proc->links.next;
         } else if (IsBgWorkerProcess()) {
             g_instance.proc_base->bgworkerFreeProcs = (PGPROC*)t_thrd.proc->links.next;
-        } else if (t_thrd.dcf_cxt.is_dcf_thread) {
+        } else if (t_thrd.dcf_cxt.is_dcf_thread || t_thrd.role == DMS_WORKER) {
             g_instance.proc_base->externalFreeProcs = (PGPROC*)t_thrd.proc->links.next;
         } else if (u_sess->libpq_cxt.IsConnFromCmAgent) {
             g_instance.proc_base->cmAgentFreeProcs = (PGPROC *)t_thrd.proc->links.next;
@@ -841,7 +849,7 @@ void InitProcess(void)
      */
     if (IsUnderPostmaster && !IsAutoVacuumLauncherProcess() && !IsJobSchedulerProcess() &&
         !IsJobWorkerProcess() && !t_thrd.dcf_cxt.is_dcf_thread && !IsBgWorkerProcess() &&
-        !IsFencedProcessingMode())
+        !IsFencedProcessingMode() && (t_thrd.role != DMS_WORKER))
         MarkPostmasterChildActive();
 
     /*
@@ -1360,7 +1368,7 @@ static void ProcPutBackToFreeList()
     } else if (IsJobSchedulerProcess() || IsJobWorkerProcess()) {
         t_thrd.proc->links.next = (SHM_QUEUE*)g_instance.proc_base->pgjobfreeProcs;
         g_instance.proc_base->pgjobfreeProcs = t_thrd.proc;
-    } else if (t_thrd.dcf_cxt.is_dcf_thread) {
+    } else if (t_thrd.dcf_cxt.is_dcf_thread || t_thrd.role == DMS_WORKER) {
         t_thrd.proc->links.next = (SHM_QUEUE *)g_instance.proc_base->externalFreeProcs;
         g_instance.proc_base->externalFreeProcs = t_thrd.proc;
     } else if (u_sess->libpq_cxt.IsConnFromCmAgent) {
@@ -1508,9 +1516,10 @@ static void ProcKill(int code, Datum arg)
      * This process is no longer present in shared memory in any meaningful
      * way, so tell the postmaster we've cleaned up acceptably well. (XXX
      * autovac launcher should be included here someday)
+     * DMS worker threads does not have shmem resources to clean.
      */
     if (IsUnderPostmaster && !IsAutoVacuumLauncherProcess() && !StreamThreadAmI() && !IsJobSchedulerProcess() &&
-        !IsJobWorkerProcess() && !IsBgWorkerProcess())
+        !IsJobWorkerProcess() && !IsBgWorkerProcess() && !IsDMSWorkerProcess())
         MarkPostmasterChildInactive();
 
     /*

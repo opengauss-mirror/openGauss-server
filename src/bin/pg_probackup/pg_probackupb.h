@@ -56,6 +56,7 @@ typedef struct pgFile_t
     pg_crc32 hdr_crc;        /* CRC value of header file: name_hdr */
     off_t    hdr_off;       /* offset in header map */
     int      hdr_size;       /* offset in header map */
+    device_type_t type;      /* file device type */
 } pgFile;
 
 typedef struct page_map_entry
@@ -128,6 +129,16 @@ typedef struct ArchiveOptions
     const char *user;
 } ArchiveOptions;
 
+typedef struct DssOptions
+{
+    bool enable_dss;
+    int instance_id;
+    const char *vgname;
+    char *vglog;
+    char *vgdata;
+    char *socketpath;
+} DssOptions;
+
 /*
  * An instance configuration. It can be stored in a configuration file or passed
  * from command line.
@@ -168,6 +179,9 @@ typedef struct InstanceConfig
 
     /* Archive description */
     ArchiveOptions archive;
+
+    /* DSS conntct parameters */
+    DssOptions dss;
 } InstanceConfig;
 
 extern ConfigOption instance_options[];
@@ -268,6 +282,8 @@ struct pgBackup
                                        backup_path/instance_name/backup_id */
     char            *database_dir;    /* Full path to directory with data files:
                                        backup_path/instance_name/backup_id/database */
+    char            *dssdata_dir;     /* Full path to directory with dss data files:
+                                       backup_path/instance_name/backup_id/database/dssdata */
     parray            *files;            /* list of files belonging to this backup
                                      * must be populated explicitly */
     char            *note;
@@ -278,6 +294,9 @@ struct pgBackup
 
     /* map used for access to page headers */
     HeaderMap       hdr_map;
+
+    /* device type */
+    device_type_t storage_type;
 };
 
 /* Recovery target for restore and validate subcommands */
@@ -334,6 +353,8 @@ typedef struct
 
     const char *from_root;
     const char *to_root;
+    const char *src_dss;
+    const char *dst_dss;
     const char *external_prefix;
 
     parray       *files_list;

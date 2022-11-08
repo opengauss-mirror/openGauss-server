@@ -76,6 +76,7 @@
 #include "catalog/pg_partition_fn.h"
 #include "miscadmin.h"
 #include "storage/smgr/smgr.h"
+#include "storage/file/fio_device.h"
 #include "storage/proc.h"
 #include "tcop/tcopprot.h"
 #include "utils/aiomem.h"
@@ -257,7 +258,11 @@ static Page _bt_blnewpage(uint32 level)
     }
     ADIO_ELSE()
     {
-        page = (Page)palloc(BLCKSZ);
+        if (ENABLE_DSS) {
+            page = (Page)mem_align_alloc(SYS_LOGICAL_BLOCK_SIZE, BLCKSZ);
+        } else {
+            page = (Page)palloc(BLCKSZ);
+        }
     }
     ADIO_END();
 
@@ -307,7 +312,11 @@ static void _bt_segment_blwritepage(BTWriteState *wstate, Page page, BlockNumber
     PageSetLSN(BufferGetPage(buf), xlog_ptr);
     MarkBufferDirty(buf);
     UnlockReleaseBuffer(buf);
-    pfree(page);
+    if (ENABLE_DSS) {
+        mem_align_free(page);
+    } else {
+        pfree(page);
+    }
     page = NULL;
 }
 
@@ -318,11 +327,12 @@ static void _bt_blwritepage(BTWriteState *wstate, Page page, BlockNumber blkno)
 {
     if (IsSegmentFileNode(wstate->index->rd_node)) {
         _bt_segment_blwritepage(wstate, page, blkno);
-        return; 
+        return;
     }
 
     bool need_free = false;
     errno_t errorno = EOK;
+    char* unalign_zerobuffer = NULL;
 
     /* XLOG stuff */
     if (wstate->btws_use_wal) {
@@ -355,7 +365,12 @@ static void _bt_blwritepage(BTWriteState *wstate, Page page, BlockNumber blkno)
             }
             ADIO_ELSE()
             {
-                wstate->btws_zeropage = (Page)palloc0(BLCKSZ);
+                if (ENABLE_DSS) {
+                    unalign_zerobuffer = (char*)palloc0(BLCKSZ + ALIGNOF_BUFFER);
+                    wstate->btws_zeropage = (Page)BUFFERALIGN(unalign_zerobuffer);
+                } else {
+                    wstate->btws_zeropage = (Page)palloc0(BLCKSZ);
+                }
             }
             ADIO_END();
             need_free = true;
@@ -411,10 +426,18 @@ static void _bt_blwritepage(BTWriteState *wstate, Page page, BlockNumber blkno)
     ADIO_ELSE()
     {
         if (need_free) {
-            pfree(wstate->btws_zeropage);
+            if (ENABLE_DSS) {
+                pfree(unalign_zerobuffer);
+            } else {
+                pfree(wstate->btws_zeropage);
+            }
             wstate->btws_zeropage = NULL;
         }
-        pfree(page);
+        if (ENABLE_DSS) {
+            mem_align_free(page);
+        } else {
+            pfree(page);
+        }
         page = NULL;
     }
     ADIO_END();
@@ -805,7 +828,11 @@ void _bt_uppershutdown(BTWriteState *wstate, BTPageState *state)
     }
     ADIO_ELSE()
     {
-        metapage = (Page)palloc(BLCKSZ);
+        if (ENABLE_DSS) {
+            metapage = (Page)mem_align_alloc(SYS_LOGICAL_BLOCK_SIZE, BLCKSZ);
+        } else {
+            metapage = (Page)palloc(BLCKSZ);
+        }
     }
     ADIO_END();
     _bt_initmetapage(metapage, rootblkno, rootlevel);

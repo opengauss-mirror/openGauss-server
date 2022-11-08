@@ -185,6 +185,11 @@ static const ObjectPropertyType* get_object_property_data(Oid class_id);
 ObjectAddress get_object_address(
     ObjectType objtype, List* objname, List* objargs, Relation* relp, LOCKMODE lockmode, bool missing_ok)
 {
+    if (ENABLE_DMS && (objtype == OBJECT_PUBLICATION || objtype == OBJECT_PUBLICATION_NAMESPACE ||
+        objtype == OBJECT_PUBLICATION_REL || objtype == OBJECT_SUBSCRIPTION)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("Not support Publication and Subscription while DMS and DSS enabled")));
+    }
     ObjectAddress address;
     ObjectAddress old_address = {InvalidOid, InvalidOid, 0};
     Relation relation = NULL;

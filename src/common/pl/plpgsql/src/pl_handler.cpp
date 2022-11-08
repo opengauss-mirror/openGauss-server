@@ -209,6 +209,7 @@ void InsertGsSource(Oid objId, Oid nspid, const char* name, const char* type, bo
         "EXCEPTION WHEN OTHERS THEN NULL; \n");
     appendStringInfoString(&str, "end;");
     List* rawParseList = raw_parser(str.data);
+    pfree_ext(str.data);
     DoStmt* stmt = (DoStmt *)linitial(rawParseList);
     int save_compile_status = getCompileStatus();
     int save_compile_list_length = list_length(u_sess->plsql_cxt.compile_context_list);
@@ -242,7 +243,6 @@ void InsertGsSource(Oid objId, Oid nspid, const char* name, const char* type, bo
     if (temp != NULL) {
         MemoryContextSwitchTo(temp);
     }
-    pfree_ext(str.data);
 }
 static void PkgInsertGsSource(Oid pkgOid, bool isSpec, bool status)
 {

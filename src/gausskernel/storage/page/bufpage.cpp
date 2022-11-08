@@ -277,8 +277,14 @@ static inline void AllocPageCopyMem()
         }
         ADIO_ELSE()
         {
-            t_thrd.storage_cxt.pageCopy = (char*)MemoryContextAlloc(
-                THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), BLCKSZ);
+            if (ENABLE_DSS) {
+                t_thrd.storage_cxt.pageCopy_ori = (char*)MemoryContextAlloc(
+                    THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), (BLCKSZ + ALIGNOF_BUFFER));
+                t_thrd.storage_cxt.pageCopy = (char*)BUFFERALIGN(t_thrd.storage_cxt.pageCopy_ori);
+            } else {
+                t_thrd.storage_cxt.pageCopy = (char*)MemoryContextAlloc(
+                    THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), BLCKSZ);
+            }
         }
         ADIO_END();
     }
@@ -289,8 +295,14 @@ static inline void AllocPageCopyMem()
         }
         ADIO_ELSE()
         {
-            t_thrd.storage_cxt.segPageCopy = (char*)MemoryContextAlloc(
-                THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), BLCKSZ);
+            if (ENABLE_DSS) {
+                t_thrd.storage_cxt.segPageCopyOri = (char*)MemoryContextAlloc(
+                    THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), (BLCKSZ + ALIGNOF_BUFFER));
+                t_thrd.storage_cxt.segPageCopy = (char*)BUFFERALIGN(t_thrd.storage_cxt.segPageCopyOri);
+            } else {
+                t_thrd.storage_cxt.segPageCopy = (char*)MemoryContextAlloc(
+                    THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), BLCKSZ);
+            }
         }
         ADIO_END();
     }

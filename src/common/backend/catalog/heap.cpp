@@ -525,6 +525,13 @@ Relation heap_create(const char* relname, Oid relnamespace, Oid reltablespace, O
     Relation rel;
     bool isbucket = false;
 
+    if (IsInitdb && EnableInitDBSegment) {
+        /* store tables in segment storage as all possible while initdb */
+        if (relpersistence == RELPERSISTENCE_PERMANENT) {
+            storage_type = SEGMENT_PAGE;
+        }
+    }
+
     /* The caller must have provided an OID for the relation. */
     Assert(OidIsValid(relid));
 
@@ -578,7 +585,17 @@ Relation heap_create(const char* relname, Oid relnamespace, Oid reltablespace, O
             }
             break;
     }
-    
+
+    if (ENABLE_DSS && !partitioned_relation) {
+        /*
+         * when we store systable to segment, we should allocate segment header page
+         * for all objects, to avoid some issues, like: pg_table_size for view.
+         * if the view has no segment header page, the seg_totalblocks' call will crash,
+         * because of read_head_buffer's magic number check fail.
+         */
+        create_storage = true;
+    }
+
     /*
      * Never allow a pg_class entry to explicitly specify the database's
      * default tablespace in reltablespace; force it to zero instead. This
@@ -599,17 +616,21 @@ Relation heap_create(const char* relname, Oid relnamespace, Oid reltablespace, O
         if (u_sess->proc_cxt.IsBinaryUpgrade) {
             if (!partitioned_relation && storage_type == SEGMENT_PAGE) {
                 isbucket = BUCKET_OID_IS_VALID(bucketOid) && !newcbi;
+                Oid database_id = (ConvertToRelfilenodeTblspcOid(reltablespace) == GLOBALTABLESPACE_OID) ?
+                    InvalidOid : u_sess->proc_cxt.MyDatabaseId;
                 relfilenode = seg_alloc_segment(ConvertToRelfilenodeTblspcOid(reltablespace), 
-                                                u_sess->proc_cxt.MyDatabaseId, isbucket, relfilenode);
+                                                database_id, isbucket, relfilenode);
             }
         } else {
             create_storage = false;
         }
-    } else if (storage_type == SEGMENT_PAGE && !partitioned_relation) {
-        Assert(reltablespace != GLOBALTABLESPACE_OID);
+    } else if ((storage_type == SEGMENT_PAGE && !partitioned_relation) ||
+                (storage_type == SEGMENT_PAGE && ENABLE_DSS && create_storage)) {
         isbucket = BUCKET_OID_IS_VALID(bucketOid) && !newcbi;
+        Oid database_id = (ConvertToRelfilenodeTblspcOid(reltablespace) == GLOBALTABLESPACE_OID) ?
+            InvalidOid : u_sess->proc_cxt.MyDatabaseId;
         relfilenode = (Oid)seg_alloc_segment(ConvertToRelfilenodeTblspcOid(reltablespace), 
-                                             u_sess->proc_cxt.MyDatabaseId, isbucket, InvalidBlockNumber);
+                                             database_id, isbucket, InvalidBlockNumber);
         ereport(LOG, (errmsg("Segment Relation %s(%u) set relfilenode %u xid %lu", relname, relid, relfilenode,
             GetCurrentTransactionIdIfAny())));
     } else {
@@ -2479,6 +2500,15 @@ static Oid AddNewRelationType(const char* typname, Oid typeNamespace, Oid new_re
         InvalidOid);                /* rowtypes never have a collation */
 }
 
+static Datum AddSegmentOption(Datum relOptions)
+{
+    DefElem *def = makeDefElem(pstrdup("segment"), (Node *)makeString((char *)"on"));
+    List* optsList = untransformRelOptions(relOptions);
+    optsList = lappend(optsList, def);
+
+    return transformRelOptions((Datum)0, optsList, NULL, NULL, false, false);
+}
+
 /* --------------------------------
  *		heap_create_with_catalog
  *
@@ -2531,6 +2561,21 @@ Oid heap_create_with_catalog(const char *relname, Oid relnamespace, Oid reltable
     int2vector* bucketcol = NULL;
     bool relhasbucket = false;
     bool relhasuids = false;
+
+    if (IsInitdb && EnableInitDBSegment) {
+        if (relpersistence == RELPERSISTENCE_UNLOGGED) {
+            relpersistence = RELPERSISTENCE_PERMANENT;
+            ereport(WARNING,
+                (errmsg("Store unlogged table in segment when enable system table segment")));
+        }
+    
+        /* store tables in segment storage as all possible while initdb */
+        if (relpersistence == RELPERSISTENCE_PERMANENT &&
+            (relkind != RELKIND_SEQUENCE && relkind != RELKIND_LARGE_SEQUENCE)) {
+            storage_type = SEGMENT_PAGE;
+            reloptions = AddSegmentOption(reloptions);
+        }
+    }
 
     pg_class_desc = heap_open(RelationRelationId, RowExclusiveLock);
 

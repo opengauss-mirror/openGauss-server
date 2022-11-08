@@ -33,6 +33,7 @@
 #include "storage/buf/bufpage.h"
 #include "storage/lock/lwlock.h"
 #include "storage/smgr/smgr.h"
+#include "storage/file/fio_device_com.h"
 #include "utils/segment_test.h"
 
 const int DF_MAP_GROUP_RESERVED = 3;
@@ -100,6 +101,7 @@ void df_unlink(SegLogicFile *sf);
 void df_create_file(SegLogicFile *sf, bool redo);
 void df_shrink(SegLogicFile *sf, BlockNumber target);
 void df_flush_data(SegLogicFile *sf, BlockNumber blocknum, BlockNumber nblocks);
+bool df_ss_update_segfile_size(SegLogicFile *sf, BlockNumber target_block);
 
 /*
  * Data files status in the segment space;
@@ -396,6 +398,7 @@ SegSpace *spc_drop(Oid tablespace_id, Oid database_id, bool redo);
 void spc_drop_space_node(Oid spcNode, Oid dbNode);
 void spc_lock(SegSpace *spc);
 void spc_unlock(SegSpace *spc);
+void SSDrop_seg_space(Oid spcNode, Oid dbNode);
 
 BlockNumber spc_alloc_extent(SegSpace *spc, int extent_size, ForkNumber forknum, BlockNumber designate_block,
                              ExtentInversePointer iptr);
@@ -500,6 +503,7 @@ typedef struct SegmentDesc {
     BlockNumber head_blocknum; // Segment Head block number
     uint32 timeline;
 } SegmentDesc;
+
 
 #define IsNormalForknum(forknum)                                                                                       \
     ((forknum) == MAIN_FORKNUM || (forknum) == FSM_FORKNUM || (forknum) == VISIBILITYMAP_FORKNUM)

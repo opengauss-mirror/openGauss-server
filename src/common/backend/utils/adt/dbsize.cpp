@@ -71,6 +71,7 @@
 #include "storage/cstore/cstore_compress.h"
 #include "storage/page_compression.h"
 #include "vecexecutor/vecnodes.h"
+#include "storage/file/fio_device.h"
 
 #ifdef PGXC
 static Datum pgxc_database_size(Oid dbOid);
@@ -159,6 +160,7 @@ static int64 calculate_database_size(Oid dbOid)
 {
     int64 totalsize;
     DIR* dirdesc = NULL;
+    char* dssdir = NULL;
     struct dirent* direntry = NULL;
     char dirpath[MAXPGPATH] = {'\0'};
     char pathname[MAXPGPATH] = {'\0'};
@@ -170,16 +172,30 @@ static int64 calculate_database_size(Oid dbOid)
     if (aclresult != ACLCHECK_OK)
         aclcheck_error(aclresult, ACL_KIND_DATABASE, get_and_check_db_name(dbOid));
 
+    /* Get the vgname in DSS mode */
+    if (ENABLE_DSS)
+        dssdir = g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name;
+
     /* Shared storage in pg_global is not counted */
 
     /* Include pg_default storage */
-    rc = snprintf_s(pathname, MAXPGPATH, MAXPGPATH - 1, "base/%u", dbOid);
-    securec_check_ss(rc, "\0", "\0");
+    if (ENABLE_DSS && dbOid != 1) {
+        rc = snprintf_s(pathname, MAXPGPATH, MAXPGPATH - 1, "%s/base/%u", dssdir, dbOid);
+        securec_check_ss(rc, "", "");
+    } else {
+        rc = snprintf_s(pathname, MAXPGPATH, MAXPGPATH - 1, "base/%u", dbOid);
+        securec_check_ss(rc, "\0", "\0");
+    }
     totalsize = db_dir_size(pathname);
 
     /* Scan the non-default tablespaces */
-    rc = snprintf_s(dirpath, MAXPGPATH, MAXPGPATH - 1, "pg_tblspc");
-    securec_check_ss(rc, "\0", "\0");
+    if (ENABLE_DSS) {
+        rc = snprintf_s(dirpath, MAXPGPATH, MAXPGPATH - 1, "%s/pg_tblspc", dssdir);
+        securec_check_ss(rc, "", "");
+    } else {
+        rc = snprintf_s(dirpath, MAXPGPATH, MAXPGPATH - 1, "pg_tblspc");
+        securec_check_ss(rc, "\0", "\0");
+    }
     dirdesc = AllocateDir(dirpath);
     if (NULL == dirdesc)
         ereport(ERROR, (errcode_for_file_access(), errmsg("could not open tablespace directory \"%s\": %m", dirpath)));
@@ -192,16 +208,26 @@ static int64 calculate_database_size(Oid dbOid)
 
 #ifdef PGXC
         /* openGauss tablespaces include node name in path */
-        rc = snprintf_s(pathname,
-            MAXPGPATH,
-            MAXPGPATH - 1,
-            "pg_tblspc/%s/%s_%s/%u",
-            direntry->d_name,
-            TABLESPACE_VERSION_DIRECTORY,
-            g_instance.attr.attr_common.PGXCNodeName,
-            dbOid);
-        securec_check_ss(rc, "\0", "\0");
-
+        if (ENABLE_DSS) {
+            rc = snprintf_s(pathname,
+                MAXPGPATH,
+                MAXPGPATH - 1,
+                "pg_tblspc/%s/%s/%u",
+                direntry->d_name,
+                TABLESPACE_VERSION_DIRECTORY,
+                dbOid);
+            securec_check_ss(rc, "\0", "\0");
+        } else {
+            rc = snprintf_s(pathname,
+                MAXPGPATH,
+                MAXPGPATH - 1,
+                "pg_tblspc/%s/%s_%s/%u",
+                direntry->d_name,
+                TABLESPACE_VERSION_DIRECTORY,
+                g_instance.attr.attr_common.PGXCNodeName,
+                dbOid);
+            securec_check_ss(rc, "\0", "\0");
+        }
 #else
         rc = snprintf_s(pathname,
             MAXPGPATH,
@@ -212,6 +238,13 @@ static int64 calculate_database_size(Oid dbOid)
             dbOid);
         securec_check_ss(rc, "\0", "\0");
 #endif
+        /*  Get the path in DSS mode */
+        if (ENABLE_DSS) {
+            char temp_path[MAXPGPATH];
+            rc = snprintf_s(temp_path, MAXPGPATH, MAXPGPATH - 1, "%s", pathname);
+            rc = snprintf_s(pathname, MAXPGPATH, MAXPGPATH - 1, "%s/%s", dssdir, temp_path);
+            securec_check_ss(rc, "", "");
+        }
         totalsize += db_dir_size(pathname);
     }
 
@@ -592,21 +625,37 @@ static int64 calculate_tablespace_size(Oid tblspcOid)
                 errdetail("Please calculate size of DFS tablespace \"%s\" on coordinator node.",
                     get_tablespace_name(tblspcOid))));
     }
-    if (tblspcOid == DEFAULTTABLESPACE_OID)
-        rc = snprintf_s(tblspcPath, MAXPGPATH, MAXPGPATH - 1, "base");
-
-    else if (tblspcOid == GLOBALTABLESPACE_OID)
-        rc = snprintf_s(tblspcPath, MAXPGPATH, MAXPGPATH - 1, "global");
-    else
+    if (tblspcOid == DEFAULTTABLESPACE_OID) {
+        if (ENABLE_DSS) {
+            rc = snprintf_s(tblspcPath, MAXPGPATH, MAXPGPATH - 1, "%s/base",
+                g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name);
+        } else {
+            rc = snprintf_s(tblspcPath, MAXPGPATH, MAXPGPATH - 1, "base");
+        }
+    } else if (tblspcOid == GLOBALTABLESPACE_OID) {
+        if (ENABLE_DSS) {
+            rc = snprintf_s(tblspcPath, MAXPGPATH, MAXPGPATH - 1, "%s/global",
+                g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name);
+        } else {
+            rc = snprintf_s(tblspcPath, MAXPGPATH, MAXPGPATH - 1, "global");
+        }
+    } else
 #ifdef PGXC
         /* openGauss tablespaces include node name in path */
-        rc = snprintf_s(tblspcPath,
-            MAXPGPATH,
-            MAXPGPATH - 1,
-            "pg_tblspc/%u/%s_%s",
-            tblspcOid,
-            TABLESPACE_VERSION_DIRECTORY,
-            g_instance.attr.attr_common.PGXCNodeName);
+        if (ENABLE_DSS) {
+            rc = snprintf_s(
+                tblspcPath, MAXPGPATH, MAXPGPATH - 1, "%s/pg_tblspc/%u/%s",
+                g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name,
+                tblspcOid, TABLESPACE_VERSION_DIRECTORY);
+        } else {
+            rc = snprintf_s(tblspcPath,
+                MAXPGPATH,
+                MAXPGPATH - 1,
+                "pg_tblspc/%u/%s_%s",
+                tblspcOid,
+                TABLESPACE_VERSION_DIRECTORY,
+                g_instance.attr.attr_common.PGXCNodeName);
+        }
 #else
         rc = snprintf_s(
             tblspcPath, MAXPGPATH, MAXPGPATH - 1, "pg_tblspc/%u/%s", tblspcOid, TABLESPACE_VERSION_DIRECTORY);

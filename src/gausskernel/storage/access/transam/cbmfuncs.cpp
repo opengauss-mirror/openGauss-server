@@ -92,6 +92,10 @@ Datum pg_cbm_get_merged_file(PG_FUNCTION_ARGS)
         ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg("recovery is in progress"),
                         errhint("pg_cbm_get_merged_file() cannot be executed during recovery.")));
 
+    if (SSIsServerModeReadOnly()) {
+        ereport(ERROR, (errmsg("pg_cbm_get_merged_file() cannot be executed at Standby with DMS enabled")));
+    }
+
     char *start_lsn_str = text_to_cstring(start_lsn_arg);
     char *end_lsn_str = text_to_cstring(end_lsn_arg);
     char merged_file_name[MAXPGPATH] = {'\0'};
@@ -279,12 +283,23 @@ Datum pg_cbm_get_changed_block(PG_FUNCTION_ARGS)
             pfree(db_path);
         } else {
             /* tablespace create/drop */
-            int len = strlen("pg_tblspc") + 1 + OIDCHARS + 1 + strlen(g_instance.attr.attr_common.PGXCNodeName) + 1 +
-                      strlen(TABLESPACE_VERSION_DIRECTORY) + 2;
+            int len = 0;
+            if (ENABLE_DSS) {
+                len = strlen("pg_tblspc") + 1 + OIDCHARS + 1 + strlen(TABLESPACE_VERSION_DIRECTORY) + 2;
+            } else {
+                len = strlen("pg_tblspc") + 1 + OIDCHARS + 1 + strlen(g_instance.attr.attr_common.PGXCNodeName) +
+                    1 + strlen(TABLESPACE_VERSION_DIRECTORY) + 2;
+            }
             char *tblspc_path = (char *)palloc(len);
-            rc = snprintf_s(tblspc_path, len, len - 1, "pg_tblspc/%u/%s_%s", cur_array_entry.cbmTag.rNode.spcNode,
-                            TABLESPACE_VERSION_DIRECTORY, g_instance.attr.attr_common.PGXCNodeName);
-            securec_check_ss(rc, "\0", "\0");
+            if (ENABLE_DSS) {
+                rc = snprintf_s(tblspc_path, len, len - 1, "pg_tblspc/%u/%s", cur_array_entry.cbmTag.rNode.spcNode,
+                    TABLESPACE_VERSION_DIRECTORY);
+                securec_check_ss(rc, "\0", "\0");
+            } else {
+                rc = snprintf_s(tblspc_path, len, len - 1, "pg_tblspc/%u/%s_%s", cur_array_entry.cbmTag.rNode.spcNode,
+                    TABLESPACE_VERSION_DIRECTORY, g_instance.attr.attr_common.PGXCNodeName);
+                securec_check_ss(rc, "\0", "\0");
+            }
             values[6] = CStringGetTextDatum(tblspc_path);
             pfree(tblspc_path);
         }
@@ -376,6 +391,10 @@ Datum pg_cbm_force_track(PG_FUNCTION_ARGS)
     if (RecoveryInProgress())
         ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg("recovery is in progress"),
                         errhint("pg_cbm_force_track() cannot be executed during recovery.")));
+
+    if (SSIsServerModeReadOnly()) {
+        ereport(ERROR, (errmsg("pg_cbm_force_track() cannot be executed at Standby with DMS enabled")));
+    }
 
     if (time_out < 0)
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Negative timeout for force track cbm!")));

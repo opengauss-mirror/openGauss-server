@@ -80,6 +80,9 @@ target_link_directories(pg_receivexlog PUBLIC
     ${LIBOPENSSL_LIB_PATH} ${LIBCGROUP_LIB_PATH} ${LIBCURL_LIB_PATH} ${ZLIB_LIB_PATH} ${LIBOBS_LIB_PATH} ${LIBCGROUP_LIB_PATH} ${LIBEDIT_LIB_PATH}
     ${LZ4_LIB_PATH} ${SECURE_LIB_PATH} ${KERBEROS_LIB_PATH} ${CMAKE_BINARY_DIR}/lib
 )
+# BIND_NOW 
+target_link_options(pg_receivexlog PRIVATE "-Wl,-z,relro,-z,now")
+
 install(TARGETS pg_receivexlog RUNTIME DESTINATION bin)
 
 # pg_recvlogical bin

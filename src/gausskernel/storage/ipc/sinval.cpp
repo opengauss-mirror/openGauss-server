@@ -26,6 +26,7 @@
 #include "utils/inval.h"
 #include "utils/plancache.h"
 #include "libcomm/libcomm.h"
+#include "ddes/dms/ss_transaction.h"
 
 /*
  * Because backends sitting idle will not be reading sinval events, we
@@ -74,6 +75,10 @@ void GlobalExecuteSharedInvalidMessages(const SharedInvalidationMessage* msgs, i
  */
 void SendSharedInvalidMessages(const SharedInvalidationMessage* msgs, int n)
 {
+    if (ENABLE_DMS && SS_PRIMARY_MODE && !RecoveryInProgress()) {
+        SSSendSharedInvalidMessages(msgs, n);
+    }
+
     /* threads who not support gsc still need invalid global when commit */
     if (EnableGlobalSysCache()) {
         GlobalInvalidSharedInvalidMessages(msgs, n, true);

@@ -72,6 +72,7 @@
 #include "storage/procsignal.h"
 #include "storage/sinvaladt.h"
 #include "storage/smgr/smgr.h"
+#include "storage/file/fio_device.h"
 #include "tcop/tcopprot.h"
 #include "threadpool/threadpool.h"
 #include "utils/acl.h"
@@ -609,7 +610,9 @@ void BaseInit(void)
     InitSync();
     smgrinit();
     InitBufferPoolAccess();
-    undo::UndoLogInit();
+    if (!ENABLE_DSS) {
+        undo::UndoLogInit();
+    }
 }
 
 /* -------------------------------------
@@ -2657,7 +2660,7 @@ void PostgresInitializer::SetDatabasePath()
         securec_check_ss(rcs, "\0", "\0");
 
         pgaudit_user_login(FALSE, (char*)m_username, m_details);
-        if (errno == ENOENT)
+        if (FILE_POSSIBLY_DELETED(errno))
             ereport(FATAL,
                 (errcode(ERRCODE_UNDEFINED_DATABASE),
                     errmsg("database \"%s\" does not exist", m_dbname),
@@ -2915,5 +2918,3 @@ void PostgresInitializer::InitBarrierCreator()
 
     return;
 }
-
-

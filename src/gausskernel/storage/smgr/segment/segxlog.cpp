@@ -768,7 +768,8 @@ static void redo_space_drop(XLogReaderState *record)
 
 void seg_redo_new_page_copy_and_flush(BufferTag *tag, char *data, XLogRecPtr lsn)
 {
-    char page[BLCKSZ];
+    char page[BLCKSZ] __attribute__((__aligned__(ALIGNOF_BUFFER))) = {0};
+
     errno_t er = memcpy_s(page, BLCKSZ, data, BLCKSZ);
     securec_check(er, "\0", "\0");
 

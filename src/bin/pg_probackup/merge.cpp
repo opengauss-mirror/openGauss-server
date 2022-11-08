@@ -15,6 +15,7 @@
 
 #include "thread.h"
 #include "common/fe_memutils.h"
+#include "storage/file/fio_device.h"
 
 typedef struct
 {
@@ -1393,7 +1394,7 @@ merge_data_file(parray *parent_chain, pgBackup *full_backup,
     if (out == NULL)
         elog(ERROR, "Cannot open merge target file \"%s\": %s",
             to_fullpath_tmp1, strerror(errno));
-            setvbuf(out, buffer, _IOFBF, STDIO_BUFSIZE);
+    setvbuf(out, buffer, _IOFBF, STDIO_BUFSIZE);
 
     /* restore file into temp file */
     restore_data_file(parent_chain, dest_file, out, to_fullpath_tmp1,

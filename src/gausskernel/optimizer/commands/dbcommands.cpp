@@ -65,6 +65,7 @@
 #include "storage/ipc.h"
 #include "storage/procarray.h"
 #include "storage/smgr/smgr.h"
+#include "storage/file/fio_device.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
@@ -2236,6 +2237,9 @@ int errdetail_busy_db(int notherbackends, int npreparedxacts)
             "There are %d other sessions using the database.",
             notherbackends,
             notherbackends);
+    else if (ENABLE_DMS && notherbackends == 0 && npreparedxacts == 0)
+        errdetail("[SS] There is other session(s) or prepared transaction(s) using the database "
+            "in other db node(s). Or some other node(s) is not connected in the cluster by dms.");
     else
         errdetail_plural("There is %d prepared transaction using the database.",
             "There are %d prepared transactions using the database.",

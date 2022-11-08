@@ -5514,8 +5514,10 @@ static void HbktModifyPartIndexRelnode(Relation indexRel, Partition indexPart, D
         newrelfilenode = GetNewRelFileNode(indexPart->pd_part->reltablespace, NULL, indexRel->rd_rel->relpersistence);
         bucketNode = InvalidBktId;
     } else {
+        Oid database_id = (ConvertToRelfilenodeTblspcOid(indexPart->pd_part->reltablespace) == GLOBALTABLESPACE_OID) ?
+            InvalidOid : u_sess->proc_cxt.MyDatabaseId;
         newrelfilenode = seg_alloc_segment(ConvertToRelfilenodeTblspcOid(indexPart->pd_part->reltablespace),
-            u_sess->proc_cxt.MyDatabaseId, isBucket, InvalidBlockNumber);
+            database_id, isBucket, InvalidBlockNumber);
         bucketNode = SegmentBktId;
     }
 

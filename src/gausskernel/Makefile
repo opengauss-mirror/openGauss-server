@@ -22,7 +22,7 @@ override CXXFLAGS += $(PTHREAD_CFLAGS)
 # these directories: catalog  lib  libpq nodes  parser  po  port  regex  snowball  tsearch  utils pgxc
 # under ../common 
 #
-SUBDIRS = ../common/backend bootstrap cbb optimizer process dbmind runtime  security  storage \
+SUBDIRS = ../common/backend bootstrap cbb optimizer process dbmind runtime  security  storage ddes \
 	$(top_builddir)/src/common/timezone $(top_builddir)/src/common/interfaces/libpq \
 	$(top_builddir)/contrib/file_fdw $(top_builddir)/contrib/log_fdw \
 	$(top_builddir)/contrib/test_decoding $(top_builddir)/contrib/mppdb_decoding \

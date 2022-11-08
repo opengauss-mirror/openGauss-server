@@ -34,6 +34,8 @@
 #include "common/build_query/build_query.h"
 #include "bin/elog.h"
 #include "pg_build.h"
+#include "tool_common.h"
+
 
 #define FORMATTED_TS_LEN 128
 #define BUILD_PID "gs_build.pid"
@@ -718,7 +720,7 @@ static void rewind_dw_file()
     char* unaligned_buf = NULL;
 
     /* Delete the dw file, if it exists. */
-    rc = snprintf_s(dw_file_path, MAXPGPATH, MAXPGPATH - 1, "%s/%s", datadir_target, OLD_DW_FILE_NAME);
+    rc = snprintf_s(dw_file_path, MAXPGPATH, MAXPGPATH - 1, "%s/%s", datadir_target, T_OLD_DW_FILE_NAME);
     securec_check_ss_c(rc, "\0", "\0");
     if (realpath(dw_file_path, real_file_path) == NULL) {
         if (real_file_path[0] == '\0') {
@@ -734,7 +736,7 @@ static void rewind_dw_file()
     securec_check_c(rc, "\0", "\0");
 
     /* Delete the dw build file, if it exists. */
-    rc = snprintf_s(dw_file_path, MAXPGPATH, MAXPGPATH - 1, "%s/%s", datadir_target, DW_BUILD_FILE_NAME);
+    rc = snprintf_s(dw_file_path, MAXPGPATH, MAXPGPATH - 1, "%s/%s", datadir_target, T_DW_BUILD_FILE_NAME);
     securec_check_ss_c(rc, "\0", "\0");
     if (realpath(dw_file_path, real_file_path) == NULL) {
         if (real_file_path[0] == '\0') {

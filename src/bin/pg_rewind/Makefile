@@ -18,7 +18,7 @@ include $(top_builddir)/src/Makefile.global
 PG_CPPFLAGS = -I$(libpq_srcdir)
 PG_LIBS = $(libpq_pgport)
 
-override CPPFLAGS := -I$(libpq_srcdir) $(CPPFLAGS) -I$(top_builddir)/src/bin/pg_ctl -I${top_builddir}/src/lib/page_compression
+override CPPFLAGS := -I$(libpq_srcdir) $(CPPFLAGS) -I$(top_builddir)/src/bin/pg_ctl -I${top_builddir}/src/lib/page_compression -I${top_builddir}/src/include
 override LDFLAGS := -L../../src/lib/page_compression
 ifneq "$(MAKECMDGOALS)" "clean"
   ifneq "$(MAKECMDGOALS)" "distclean"

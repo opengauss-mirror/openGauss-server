@@ -706,7 +706,8 @@ void ClientAuthentication(Port* port)
         if (IsRoleExist(port->user_name) && GetRoleOid(port->user_name) != INITIAL_USER_ID) {
             Oid roleid = GetRoleOid(port->user_name);
             USER_STATUS rolestatus;
-            if (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE) {
+            if (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE ||
+                (ENABLE_DMS && !SS_MY_INST_IS_MASTER)) {
                 rolestatus = GetAccountLockedStatusFromHashTable(roleid);
             } else {
                 rolestatus = GetAccountLockedStatus(roleid);
@@ -714,7 +715,8 @@ void ClientAuthentication(Port* port)
             if (UNLOCK_STATUS != rolestatus) {
                 errno_t errorno = EOK;
                 bool unlocked = false;
-                if (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE) {
+                if (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE ||
+                    (ENABLE_DMS && !SS_MY_INST_IS_MASTER)) {
                     unlocked = UnlockAccountToHashTable(roleid, false, false);
                 } else {
                     unlocked = TryUnlockAccount(roleid, false, false);
@@ -738,7 +740,8 @@ void ClientAuthentication(Port* port)
                         (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION), errmsg("The account has been locked.")));
                 }
             } else if (status == STATUS_OK) {
-                if (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE) {
+                if (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE ||
+                    (ENABLE_DMS && !SS_MY_INST_IS_MASTER)) {
                     (void)UnlockAccountToHashTable(roleid, false, true);
                 } else {
                     (void)TryUnlockAccount(roleid, false, true);
@@ -747,7 +750,8 @@ void ClientAuthentication(Port* port)
 
             /* if password is not right, send signal to try lock the account*/
             if (status == STATUS_WRONG_PASSWORD) {
-                if (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE) {
+                if (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE ||
+                    (ENABLE_DMS && !SS_MY_INST_IS_MASTER)) {
                     UpdateFailCountToHashTable(roleid, 1, false);
                 } else {
                     TryLockAccount(roleid, 1, false);

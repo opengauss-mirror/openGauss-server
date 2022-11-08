@@ -47,6 +47,7 @@
 #include "storage/cucache_mgr.h"
 #include "storage/cstore/cstore_compress.h"
 #include "storage/smgr/smgr.h"
+#include "storage/file/fio_device.h"
 #include "access/heapam.h"
 #include "access/sysattr.h"
 #include "executor/instrument.h"

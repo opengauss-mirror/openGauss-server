@@ -48,6 +48,7 @@ extern void make_native_path(char* path);
 extern bool path_contains_parent_reference(const char* path);
 extern bool path_is_relative_and_below_cwd(const char* path);
 extern bool path_is_prefix_of_path(const char* path1, const char* path2);
+extern void get_top_path(char *path);
 extern const char* get_progname(const char* argv0);
 extern void get_share_path(const char* my_exec_path, char* ret_path);
 extern void get_etc_path(const char* my_exec_path, char* ret_path, size_t ret_path_len);

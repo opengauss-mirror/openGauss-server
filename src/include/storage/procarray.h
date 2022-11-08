@@ -190,3 +190,4 @@ extern void ResetProcXidCache(PGPROC* proc, bool needlock);
 // For GTT
 extern TransactionId ListAllThreadGttFrozenxids(int maxSize, ThreadId *pids, TransactionId *xids, int *n);
 extern TransactionId GetReplicationSlotCatalogXmin();
+extern void GetOldestGlobalProcXmin(TransactionId *globalProcXmin);

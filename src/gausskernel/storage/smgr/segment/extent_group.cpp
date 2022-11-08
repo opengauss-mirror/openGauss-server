@@ -51,12 +51,24 @@ bool eg_df_valid(SegExtentGroup *seg)
     }
 
     /* Read map head, check 1. block checksum; 2. bit unit */
-    char *buffer = (char *)palloc(BLCKSZ);
+    char *buffer = NULL;
+    char *unaligned_buffer = NULL;
+    if (ENABLE_DSS) {
+        unaligned_buffer = (char*)palloc(BLCKSZ + ALIGNOF_BUFFER);
+        buffer = (char *)BUFFERALIGN(unaligned_buffer);
+    } else {
+        buffer = (char *)palloc(BLCKSZ);
+    }
+
     df_pread_block(sf, buffer, DF_MAP_HEAD_PAGE);
 
     if (!PageIsVerified((Page)buffer, DF_MAP_HEAD_PAGE)) {
         ereport(LOG, (errmsg("extent group %s map head block checksum verification failed", sf->filename)));
-        pfree(buffer);
+        if (ENABLE_DSS) {
+            pfree(unaligned_buffer);
+        } else {
+            pfree(buffer);
+        }
         return false;
     }
 
@@ -64,11 +76,20 @@ bool eg_df_valid(SegExtentGroup *seg)
     if (map_head->bit_unit != seg->extent_size) {
         ereport(LOG, (errmsg("extent group %s, bit unit in head is %u, but its extent size is %u ", sf->filename,
                              map_head->bit_unit, seg->extent_size)));
-        pfree(buffer);
+        if (ENABLE_DSS) {
+            pfree(unaligned_buffer);
+        } else {
+            pfree(buffer);
+        }
         return false;
     }
 
-    pfree(buffer);
+    if (ENABLE_DSS) {
+        pfree(unaligned_buffer);
+    } else {
+        pfree(buffer);
+    }
+    
     return true;
 }
 
@@ -208,7 +229,16 @@ void eg_init_map_head_page_content(Page map_head_page, int extent_size)
 static void eg_init_map_head(SegExtentGroup *seg, XLogRecPtr rec_ptr)
 {
     BlockNumber pageno = DF_MAP_HEAD_PAGE;
-    Page page = (Page)palloc(BLCKSZ);
+    Page page = NULL;
+    char* unaligned_page = NULL;
+
+    if (ENABLE_DSS) {
+        unaligned_page = (char*)palloc(BLCKSZ + ALIGNOF_BUFFER);
+        page = (Page)BUFFERALIGN(unaligned_page);
+    } else {
+        page = (Page)palloc(BLCKSZ);
+    }
+
     errno_t er = memset_s((void *)page, BLCKSZ, 0, BLCKSZ);
     securec_check(er, "", "");
 
@@ -218,7 +248,11 @@ static void eg_init_map_head(SegExtentGroup *seg, XLogRecPtr rec_ptr)
     PageSetChecksumInplace(page, pageno);
     df_pwrite_block(seg->segfile, (char *)page, pageno);
 
-    pfree(page);
+    if (ENABLE_DSS) {
+        pfree(unaligned_page);
+    } else {
+        pfree(page);
+    }
 
     seg->map_head_entry = pageno;
     seg->map_head = NULL;
@@ -425,7 +459,7 @@ bool eg_alloc_preassigned_block(SegExtentGroup *seg, BlockNumber preassigned_blo
 
 void eg_init_bitmap_page(SegExtentGroup *seg, BlockNumber pageno, BlockNumber first_page)
 {
-    Buffer buffer = ReadBufferFast(seg->space, seg->rnode, seg->forknum, pageno, RBM_NORMAL);
+    Buffer buffer = ReadBufferFast(seg->space, seg->rnode, seg->forknum, pageno, RBM_ZERO);
     LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
 
     START_CRIT_SECTION();
@@ -731,7 +765,7 @@ void eg_create_if_necessary(SegExtentGroup *seg)
             return;
         }
 
-	TablespaceCreateDbspace(seg->rnode.spcNode, seg->rnode.dbNode, false);
+        TablespaceCreateDbspace(seg->rnode.spcNode, seg->rnode.dbNode, false);
         /* Ensure tablespace limits at first. */
         uint64 requestSize = DF_FILE_EXTEND_STEP_SIZE;
         TableSpaceUsageManager::IsExceedMaxsize(seg->rnode.spcNode, requestSize, true);

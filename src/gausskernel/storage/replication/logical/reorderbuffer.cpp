@@ -2277,7 +2277,7 @@ static Size ReorderBufferRestoreChanges(ReorderBuffer *rb, ReorderBufferTXN *txn
 
             Assert(*segno != 0 || dlist_is_empty(&txn->changes));
 
-            recptr = (*segno * XLOG_SEG_SIZE);
+            recptr = (*segno * XLogSegSize);
 
             /*
              * No need to care about TLIs here, only used during a single run,
@@ -2501,7 +2501,7 @@ static void ReorderBufferRestoreCleanup(ReorderBuffer *rb, ReorderBufferTXN *txn
     for (cur = first; cur <= last; cur++) {
         char path[MAXPGPATH];
         XLogRecPtr recptr;
-        recptr = (cur * XLOG_SEG_SIZE);
+        recptr = (cur * XLogSegSize);
         rc = sprintf_s(path, sizeof(path), "pg_replslot/%s/snap/xid-%lu-lsn-%X-%X.snap", NameStr(slot->data.name),
                        txn->xid, (uint32)(recptr >> 32), uint32(recptr));
         securec_check_ss(rc, "", "");

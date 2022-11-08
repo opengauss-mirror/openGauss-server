@@ -678,6 +678,10 @@ static void InitLobTempToastNamespace(void)
         ereport(ERROR,
             (errcode(ERRCODE_READ_ONLY_SQL_TRANSACTION), errmsg("cannot create temporary tables during recovery")));
 
+    if (SSIsServerModeReadOnly()) {
+        ereport(ERROR, (errmsg("cannot create temporary tables at Standby with DMS enabled")));
+    }
+
     timeLineId = get_controlfile_timeline();
     tempID = __sync_add_and_fetch(&gt_tempID_seed, 1);
 

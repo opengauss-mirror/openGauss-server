@@ -218,6 +218,8 @@ extern void set_disable_conn_mode(void);
 #define IsConnPortFromCoord(port) false
 #endif
 
+const char *GetSSServerMode();
+bool SSIsServerModeReadOnly();
 bool IsFromLocalAddr(Port* port);
 extern bool IsMatchSocketAddr(const struct sockaddr* sock_addr, int compare_port);
 extern bool IsHAPort(Port* port);
@@ -246,4 +248,7 @@ extern void InitProcessAndShareMemory();
 extern void InitShmemForDcfCallBack();
 extern void ShutdownForDRSwitchover(void);
 extern void InitMemoryLogDirectory();
+extern void InitShmemForDmsCallBack();
+extern void SignalTermAllBackEnd();
+extern void SSRestartFailoverPromote();
 #endif /* _POSTMASTER_H */

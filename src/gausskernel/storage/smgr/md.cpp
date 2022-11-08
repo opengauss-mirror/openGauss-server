@@ -37,6 +37,7 @@
 #include "storage/page_compression.h"
 #include "storage/smgr/knl_usync.h"
 #include "storage/smgr/smgr.h"
+#include "storage/file/fio_device.h"
 #include "utils/aiomem.h"
 #include "utils/hsearch.h"
 #include "utils/memutils.h"
@@ -502,7 +503,7 @@ static void mdunlinkfork(const RelFileNodeBackend& rnode, ForkNumber forkNum, bo
      */
     Assert(IsHeapFileNode(rnode.node));
     if (isRedo || u_sess->attr.attr_common.IsInplaceUpgrade || forkNum != MAIN_FORKNUM ||
-        RelFileNodeBackendIsTemp(rnode)) {
+        RelFileNodeBackendIsTemp(rnode) || ENABLE_DMS) {
         /* First, forget any pending sync requests for the first segment */
         if (!RelFileNodeBackendIsTemp(rnode)) {
             md_register_forget_request(rnode.node, forkNum, 0 /* first segment */);
@@ -510,7 +511,7 @@ static void mdunlinkfork(const RelFileNodeBackend& rnode, ForkNumber forkNum, bo
 
         /* Next unlink the file */
         ret = unlink(openFilePath);
-        if (ret < 0 && errno != ENOENT) {
+        if (ret < 0 && !FILE_POSSIBLY_DELETED(errno)) {
             ereport(WARNING, (errcode_for_file_access(), errmsg("could not remove file \"%s\": ", openFilePath)));
         }
         if (isRedo) {
@@ -523,7 +524,6 @@ static void mdunlinkfork(const RelFileNodeBackend& rnode, ForkNumber forkNum, bo
         fd = BasicOpenFile(openFilePath, O_RDWR | PG_BINARY, 0);
         if (fd >= 0) {
             int save_errno;
-
             ret = ftruncate(fd, 0);
             save_errno = errno;
             (void)close(fd);
@@ -531,7 +531,7 @@ static void mdunlinkfork(const RelFileNodeBackend& rnode, ForkNumber forkNum, bo
         } else {
             ret = -1;
         }
-        if (ret < 0 && errno != ENOENT) {
+        if (ret < 0 && !FILE_POSSIBLY_DELETED(errno)) {
             ereport(WARNING, (errcode_for_file_access(), errmsg("could not truncate file \"%s\": %m", openFilePath)));
         }
 
@@ -912,6 +912,11 @@ void mdasyncread(SMgrRelation reln, ForkNumber forkNum, AioDispatchDesc_t **dLis
     if (IS_COMPRESSED_MAINFORK(reln, forkNum)) {
         return;
     }
+    
+    if (ENABLE_DSS) {
+        return;
+    }
+
     for (int i = 0; i < dn; i++) {
         off_t offset;
         MdfdVec *v = NULL;
@@ -1018,6 +1023,11 @@ void mdasyncwrite(SMgrRelation reln, ForkNumber forkNumber, AioDispatchDesc_t **
     if (IS_COMPRESSED_MAINFORK(reln, forkNumber)) {
         return;
     }
+
+    if (ENABLE_DSS) {
+        return;
+    }
+
     for (int i = 0; i < dn; i++) {
         off_t offset;
         MdfdVec *v = NULL;
@@ -1150,7 +1160,8 @@ static void check_file_stat(char *file_name)
     struct stat stat_buf;
     char file_path[MAX_PATH_LEN] = {0};
     char strfbuf[FILE_NAME_LEN];
-    if (t_thrd.proc_cxt.DataDir == NULL || file_name == NULL) {
+
+    if (t_thrd.proc_cxt.DataDir == NULL || file_name == NULL || is_dss_file(file_name)) {
         return;
     }
     rc = snprintf_s(file_path, MAX_PATH_LEN, MAX_PATH_LEN - 1, "%s/%s", t_thrd.proc_cxt.DataDir, file_name);
@@ -1559,6 +1570,9 @@ void mdtruncate(SMgrRelation reln, ForkNumber forknum, BlockNumber nblocks)
     prior_blocks = 0;
     while (v != NULL) {
         MdfdVec *ov = v;
+        if (ENABLE_DMS && !RelFileNodeBackendIsTemp(reln->smgr_rnode)) {
+            md_register_forget_request(reln->smgr_rnode.node, forknum, 0 /* first segment */);
+        }
 
         if (prior_blocks > nblocks) {
             /*
@@ -2010,7 +2024,7 @@ int SyncMdFile(const FileTag *ftag, char *path)
  */
 int UnlinkMdFile(const FileTag *ftag, char *path)
 {
-    char       *p;
+    char *p;
 
     /* Compute the path. */
     p = relpathperm(ftag->rnode, MAIN_FORKNUM);

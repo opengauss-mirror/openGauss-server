@@ -878,6 +878,9 @@
    XLOG_BLCKSZ). Changing XLOG_SEG_SIZE requires an initdb. */
 #define XLOG_SEG_SIZE (16 * 1024 * 1024)
 
+/* Number of max alloc xlog segment in extreme_rto, default 4 */
+#define MAX_ALLOC_SEGNUM 4
+
 /* Number of bits in a file offset, on hosts where this is settable. */
 /* #undef _FILE_OFFSET_BITS */
 

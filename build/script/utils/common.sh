@@ -59,7 +59,9 @@ select_package_command
 #######################################################################
 ##get os dist version
 #######################################################################
-if [[ -f "/etc/euleros-release" ]]; then
+if [[ -f "/etc/openEuler-release" ]]; then
+    os_name="openEuler"
+elif [[ -f "/etc/euleros-release" ]]; then
     os_name="EulerOS"
 elif [[ -f "/etc/centos-release" ]]; then
     os_name="CentOS"

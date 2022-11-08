@@ -19,6 +19,7 @@
 #include "thread.h"
 #include "common/fe_memutils.h"
 #include "catalog/catalog.h"
+#include "storage/file/fio_device.h"
 
 #define RESTORE_ARRAY_LEN 100
 
@@ -31,6 +32,7 @@ typedef struct
     parray       *parent_chain;
     bool        skip_external_dirs;
     const char *to_root;
+    const char *to_dss;
     size_t        restored_bytes;
     bool        use_bitmap;
     IncrRestoreMode        incremental_mode;
@@ -55,8 +57,8 @@ static void set_orphan_status(parray *backups, pgBackup *parent_backup);
 static void pg12_recovery_config(pgBackup *backup, bool add_include);
 
 static void restore_chain(pgBackup *dest_backup, parray *parent_chain,
-                          pgRestoreParams *params,
-                          const char *pgdata_path, bool no_sync);
+                          pgRestoreParams *params, const char *pgdata_path,
+                          const char *dssdata_path, bool no_sync);
 static void check_incremental_compatibility(const char *pgdata, uint64 system_identifier,
                                             IncrRestoreMode incremental_mode);
 static pgBackup *find_backup_range(parray *backups,
@@ -84,6 +86,7 @@ static void threads_handle(pthread_t *threads,
                            parray *parent_chain,
                            pgRestoreParams *params,
                            const char *pgdata_path,
+                           const char *dssdata_path,
                            bool use_bitmap,
                            size_t total_bytes);
 static void sync_restored_files(parray *dest_files,
@@ -160,6 +163,7 @@ do_restore_or_validate(time_t target_backup_id, pgRecoveryTarget *rt,
     const char       *action = (const char *)(params->is_restore ? "Restore":"Validate");
     parray       *parent_chain = NULL;
     bool        pgdata_is_empty = true;
+    bool        dssdata_is_empty = true;
     bool        tblspaces_are_empty = true;
 
     if (params->is_restore)
@@ -167,6 +171,29 @@ do_restore_or_validate(time_t target_backup_id, pgRecoveryTarget *rt,
         if (instance_config.pgdata == NULL)
             elog(ERROR,
                 "required parameter not specified: PGDATA (-D, --pgdata)");
+
+        if (IsDssMode())
+        {
+            /* do not support increment restore in dss mode */
+            if (params->incremental_mode != INCR_NONE)
+            {
+                elog(ERROR, "Incremental restore is not support when enable dss");
+            }
+
+            if (!dir_is_empty(instance_config.dss.vgdata, FIO_DSS_HOST))
+            {
+                dssdata_is_empty = false;
+                elog(ERROR, "Restore destination is not empty: \"%s\"",
+                     instance_config.dss.vgdata);
+            }
+            if (!dir_is_empty(instance_config.dss.vglog, FIO_DSS_HOST))
+            {
+                dssdata_is_empty = false;
+                elog(ERROR, "Restore destination is not empty: \"%s\"",
+                     instance_config.dss.vglog);
+            }
+        }
+
         /* Check if restore destination empty */
         if (!dir_is_empty(instance_config.pgdata, FIO_DB_HOST))
         {
@@ -229,7 +256,7 @@ do_restore_or_validate(time_t target_backup_id, pgRecoveryTarget *rt,
     {
         check_tablespace_mapping(dest_backup, params->incremental_mode != INCR_NONE, &tblspaces_are_empty);
 
-        if (params->incremental_mode != INCR_NONE && pgdata_is_empty && tblspaces_are_empty)
+        if (params->incremental_mode != INCR_NONE && pgdata_is_empty && tblspaces_are_empty && dssdata_is_empty)
         {
             elog(INFO, "Destination directory and tablespace directories are empty, "
                     "disable incremental restore");
@@ -394,8 +421,8 @@ do_restore_or_validate(time_t target_backup_id, pgRecoveryTarget *rt,
      */
     if (params->is_restore)
     {
-        restore_chain(dest_backup, parent_chain,
-                      params, instance_config.pgdata, no_sync);
+        restore_chain(dest_backup, parent_chain, params, instance_config.pgdata,
+                      instance_config.dss.vgdata, no_sync);
 
         /* Create recovery.conf with given recovery target parameters */
         create_recovery_conf(target_backup_id, rt, dest_backup, params);
@@ -685,8 +712,8 @@ static XLogRecPtr determine_shift_lsn(pgBackup *dest_backup)
  */
 void
 restore_chain(pgBackup *dest_backup, parray *parent_chain,
-              pgRestoreParams *params,
-              const char *pgdata_path, bool no_sync)
+              pgRestoreParams *params, const char *pgdata_path,
+              const char *dssdata_path, bool no_sync)
 {
     int         i;
     char        timestamp[100];
@@ -781,6 +808,13 @@ restore_chain(pgBackup *dest_backup, parray *parent_chain,
                             params->incremental_mode != INCR_NONE,
                             FIO_DB_HOST);
 
+    /* some file is in dssserver */
+    if (IsDssMode())
+        create_data_directories(dest_files, instance_config.dss.vgdata,
+                                dest_backup->root_dir, true,
+                                params->incremental_mode != INCR_NONE,
+                                FIO_DSS_HOST);
+
     /*
      * Restore dest_backup external directories.
      */
@@ -848,9 +882,9 @@ restore_chain(pgBackup *dest_backup, parray *parent_chain,
     threads_args = (restore_files_arg *) palloc(sizeof(restore_files_arg) *
                                                 num_threads);
 
-    threads_handle(threads, threads_args, dest_backup,
-                   dest_files, pgdata_files, external_dirs, parent_chain,
-                   params, pgdata_path, use_bitmap, total_bytes);
+    threads_handle(threads, threads_args, dest_backup, dest_files,
+                   pgdata_files, external_dirs, parent_chain, params,
+                   pgdata_path, dssdata_path, use_bitmap, total_bytes);
 
     /* Close page header maps */
     for (i = parray_num(parent_chain) - 1; i >= 0; i--)
@@ -1012,6 +1046,7 @@ static void threads_handle(pthread_t *threads,
                            parray *parent_chain,
                            pgRestoreParams *params,
                            const char *pgdata_path,
+                           const char *dssdata_path,
                            bool use_bitmap,
                            size_t total_bytes)
 {
@@ -1045,6 +1080,7 @@ static void threads_handle(pthread_t *threads,
         arg->parent_chain = parent_chain;
         arg->skip_external_dirs = params->skip_external_dirs;
         arg->to_root = pgdata_path;
+        arg->to_dss = dssdata_path;
         arg->use_bitmap = use_bitmap;
         arg->incremental_mode = params->incremental_mode;
         arg->shift_lsn = params->shift_lsn;
@@ -1111,6 +1147,10 @@ static void sync_restored_files(parray *dest_files,
             params->skip_external_dirs)
             continue;
 
+        /* skip dss files, which do not need sync */
+        if (is_dss_type(dest_file->type))
+            continue;
+
         /* construct fullpath */
         if (dest_file->external_dir_num == 0)
         {
@@ -1169,6 +1209,7 @@ restore_files(void *arg)
     char        to_fullpath[MAXPGPATH];
     FILE       *out = NULL;
     char       *out_buf = (char *)pgut_malloc(STDIO_BUFSIZE);
+    fio_location out_location;
 
     restore_files_arg *arguments = (restore_files_arg *) arg;
 
@@ -1217,14 +1258,18 @@ restore_files(void *arg)
             continue;
 
         /* set fullpath of destination file */
-        if (dest_file->external_dir_num == 0)
-            join_path_components(to_fullpath, arguments->to_root, dest_file->rel_path);
-        else
+        if (dest_file->external_dir_num != 0)
         {
             char    *external_path = (char *)parray_get(arguments->dest_external_dirs,
                                                         dest_file->external_dir_num - 1);
             join_path_components(to_fullpath, external_path, dest_file->rel_path);
         }
+        else if (is_dss_type(dest_file->type))
+        {
+            join_path_components(to_fullpath, arguments->to_dss, dest_file->rel_path);
+        }
+        else
+            join_path_components(to_fullpath, arguments->to_root, dest_file->rel_path);
 
         if (arguments->incremental_mode != INCR_NONE &&
             parray_bsearch(arguments->pgdata_files, dest_file, pgFileCompareRelPathWithExternalDesc))
@@ -1232,6 +1277,7 @@ restore_files(void *arg)
             already_exists = true;
         }
 
+        out_location = is_dss_type(dest_file->type) ? FIO_DSS_HOST : FIO_DB_HOST;
         /*
          * Handle incremental restore case for data files.
          * If file is already exists in pgdata, then
@@ -1246,13 +1292,13 @@ restore_files(void *arg)
             {
                 lsn_map = fio_get_lsn_map(to_fullpath, arguments->dest_backup->checksum_version,
                                 dest_file->n_blocks, arguments->shift_lsn,
-                                dest_file->segno * RELSEG_SIZE, FIO_DB_HOST);
+                                dest_file->segno * RELSEG_SIZE, out_location);
             }
             else if (arguments->incremental_mode == INCR_CHECKSUM)
             {
                 checksum_map = fio_get_checksum_map(to_fullpath, arguments->dest_backup->checksum_version,
                                                     dest_file->n_blocks, arguments->dest_backup->stop_lsn,
-                                                    dest_file->segno * RELSEG_SIZE, FIO_DB_HOST);
+                                                    dest_file->segno * RELSEG_SIZE, out_location);
             }
         }
 
@@ -1262,20 +1308,20 @@ restore_files(void *arg)
          * if file do not exist
          */
         if ((already_exists && dest_file->write_size == 0) || !already_exists)
-            out = fio_fopen(to_fullpath, PG_BINARY_W, FIO_DB_HOST);
+            out = fio_fopen(to_fullpath, PG_BINARY_W, out_location);
         /*
          * If file already exists and dest size is not zero,
          * then open it for reading and writing.
          */
         else
-            out = fio_fopen(to_fullpath, PG_BINARY_R "+", FIO_DB_HOST);
+            out = fio_fopen(to_fullpath, PG_BINARY_R "+", out_location);
 
         if (out == NULL)
             elog(ERROR, "Cannot open restore target file \"%s\": %s",
                  to_fullpath, strerror(errno));
 
         /* update file permission */
-        if (fio_chmod(to_fullpath, dest_file->mode, FIO_DB_HOST) == -1)
+        if (fio_chmod(to_fullpath, dest_file->mode, out_location) == -1)
             elog(ERROR, "Cannot change mode of \"%s\": %s", to_fullpath,
                  strerror(errno));
 
@@ -1292,8 +1338,8 @@ restore_files(void *arg)
             if (!fio_is_remote_file(out))
                 setvbuf(out, out_buf, _IOFBF, STDIO_BUFSIZE);
             /* Destination file is data file */
-            arguments->restored_bytes += restore_data_file(arguments->parent_chain,
-                                                           dest_file, out, to_fullpath,
+            arguments->restored_bytes += restore_data_file(arguments->parent_chain, dest_file,
+                                                           out, to_fullpath,
                                                            arguments->use_bitmap, checksum_map,
                                                            arguments->shift_lsn, lsn_map, true);
         }
@@ -1304,8 +1350,9 @@ restore_files(void *arg)
                 setvbuf(out, NULL, _IONBF, BUFSIZ);
             /* Destination file is nonedata file */
             arguments->restored_bytes += restore_non_data_file(arguments->parent_chain,
-                                        arguments->dest_backup, dest_file, out, to_fullpath,
-                                        already_exists);
+                                                               arguments->dest_backup,
+                                                               dest_file, out,
+                                                               to_fullpath, already_exists);
         }
 
 done:
@@ -2050,3 +2097,4 @@ check_incremental_compatibility(const char *pgdata, uint64 system_identifier,
     if (!success)
         elog(ERROR, "Incremental restore is impossible");
 }
+

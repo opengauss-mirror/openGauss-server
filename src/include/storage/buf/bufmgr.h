@@ -412,5 +412,11 @@ extern int getDuplicateRequest(CheckpointerRequest *requests, int num_requests, 
 extern void RemoteReadFile(RemoteReadFileKey *key, char *buf, uint32 size, int timeout, uint32* remote_size);
 extern int64 RemoteReadFileSize(RemoteReadFileKey *key, int timeout);
 
+extern void WaitIO(BufferDesc *buf);
 extern bool StartBufferIO(BufferDesc* buf, bool forInput);
+
+extern Buffer ReadBuffer_common_for_dms(ReadBufferMode readmode, BufferDesc *bufDesc, const XLogPhyBlock *pblk);
+extern void ReadBuffer_common_for_check(ReadBufferMode readmode, BufferDesc* buf_desc,
+    const XLogPhyBlock *pblk, Block bufBlock);
+
 #endif

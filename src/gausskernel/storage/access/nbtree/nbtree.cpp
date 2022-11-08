@@ -148,6 +148,7 @@ Datum btbuildempty(PG_FUNCTION_ARGS)
 {
     Relation index = (Relation)PG_GETARG_POINTER(0);
     Page metapage;
+    char* unaligned_buffer = NULL;
 
     /* Construct metapage. */
     ADIO_RUN()
@@ -156,7 +157,12 @@ Datum btbuildempty(PG_FUNCTION_ARGS)
     }
     ADIO_ELSE()
     {
-        metapage = (Page)palloc(BLCKSZ);
+        if (ENABLE_DSS) {
+            unaligned_buffer = (char*)palloc(BLCKSZ + ALIGNOF_BUFFER);
+            metapage = (Page)BUFFERALIGN(unaligned_buffer);
+        } else {
+            metapage = (Page)palloc(BLCKSZ);
+        }
     }
     ADIO_END();
 
@@ -192,7 +198,11 @@ Datum btbuildempty(PG_FUNCTION_ARGS)
     }
     ADIO_ELSE()
     {
-        pfree(metapage);
+        if (ENABLE_DSS) {
+            pfree(unaligned_buffer);
+        } else {
+            pfree(metapage);
+        }
     }
     ADIO_END();
 

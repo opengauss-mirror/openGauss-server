@@ -441,9 +441,22 @@ const int MAX_COMPACTION_THREAD_NUM = 10;
         (g_instance.attr.attr_storage.dcf_attr.enable_dcf ? \
         g_instance.attr.attr_storage.dcf_attr.dcf_max_workers : 0)
 
+#define NUM_DMS_REFORM_CALLLBACK_PROCS (3)
+#define NUM_DMS_LSNR_CALLBACK_PROC (1)
+#define NUM_DMS_RDMA_THREAD_CNT (g_instance.attr.attr_storage.dms_attr.work_thread_count * 2)
+#define NUM_DMS_CALLBACK_PROCS \
+        (g_instance.attr.attr_storage.dms_attr.enable_dms ? \
+        (g_instance.attr.attr_storage.dms_attr.channel_count * g_instance.attr.attr_storage.dms_attr.inst_count + \
+        ((!strcasecmp(g_instance.attr.attr_storage.dms_attr.interconnect_type, "TCP"))? \
+        g_instance.attr.attr_storage.dms_attr.work_thread_count :      \
+        NUM_DMS_RDMA_THREAD_CNT) + \
+        NUM_DMS_LSNR_CALLBACK_PROC + \
+        NUM_DMS_REFORM_CALLLBACK_PROCS ) : 0)
+
 #define GLOBAL_ALL_PROCS \
     (g_instance.shmem_cxt.MaxBackends + \
      NUM_CMAGENT_PROCS + NUM_AUXILIARY_PROCS + NUM_DCF_CALLBACK_PROCS + \
+     NUM_DMS_CALLBACK_PROCS + \
      (g_instance.attr.attr_storage.max_prepared_xacts * NUM_TWOPHASE_PARTITIONS))
 
 #define GLOBAL_MAX_SESSION_NUM (2 * g_instance.shmem_cxt.MaxBackends)

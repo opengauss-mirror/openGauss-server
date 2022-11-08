@@ -2438,6 +2438,11 @@ Datum gs_undo_dump_parsepage_mv(PG_FUNCTION_ARGS)
     ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("unsupported view in multiple nodes mode.")));
     PG_RETURN_VOID();
 #else
+    if (ENABLE_DSS) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("unsupported view when enable dss.")));
+        PG_RETURN_VOID();
+    }
+
     /* check user's right */
     const char fName[MAXFNAMELEN] = "gs_undo_dump_parsepage_mv";
     CheckUser(fName);

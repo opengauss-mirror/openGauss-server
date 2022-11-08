@@ -52,7 +52,7 @@ sub _new
 	$options->{wal_segsize} = 16
 	  unless $options->{wal_segsize};      # undef or 0 means default
 	die "Bad wal_segsize $options->{wal_segsize}"
-	  unless grep { $_ == $options->{wal_segsize} } (1, 2, 4, 8, 16, 32, 64);
+	  unless grep { $_ == $options->{wal_segsize} } (1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024);
 
 	$self->DeterminePlatform();
 

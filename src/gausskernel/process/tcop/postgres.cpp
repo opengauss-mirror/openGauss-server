@@ -190,6 +190,9 @@ extern int optreset; /* might not be declared by system headers */
 #include "storage/mot/jit_exec.h"
 #endif
 #include "commands/sqladvisor.h"
+#include "storage/file/fio_device.h"
+#include "storage/dss/dss_adaptor.h"
+#include "storage/dss/dss_log.h"
 
 THR_LOCAL VerifyCopyCommandIsReparsed copy_need_to_be_reparse = NULL;
 
@@ -6885,7 +6888,7 @@ void process_postgres_switches(int argc, char* argv[], GucContext ctx, const cha
      * the common help() function in main/main.c.
      */
     initOptParseContext(&optCtxt);
-    while ((flag = getopt_r(argc, argv, "A:B:bc:C:D:d:EeFf:h:ijk:lN:nOo:Pp:r:S:sTt:v:W:g:Q:-:", &optCtxt)) != -1) {
+    while ((flag = getopt_r(argc, argv, "A:B:bc:C:D:d:EeFf:Gh:ijk:lN:nOo:Pp:r:S:sTt:v:W:g:Q:-:", &optCtxt)) != -1) {
         switch (flag) {
             case 'A':
                 SetConfigOption("debug_assertions", optCtxt.optarg, ctx, gucsource);
@@ -6932,6 +6935,16 @@ void process_postgres_switches(int argc, char* argv[], GucContext ctx, const cha
                 if (!set_plan_disabling_options(optCtxt.optarg, ctx, gucsource))
                     errs++;
                 break;
+
+            case 'G':
+                if (!singleuser) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_SYNTAX_ERROR),
+                        errmsg("-G can be used only in single user or bootstrap mode")));
+                }
+                EnableInitDBSegment = true;
+                break;
+
             case 'g':
                 SetConfigOption("xlog_file_path", optCtxt.optarg, ctx, gucsource);
                 break;
@@ -7663,6 +7676,17 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
          */
         CreateDataDirLockFile(false);
     }
+
+    /* Callback function for dss operator */
+    if (dss_device_init(g_instance.attr.attr_storage.dss_attr.ss_dss_conn_path,
+                    g_instance.attr.attr_storage.dss_attr.ss_enable_dss) != DSS_SUCCESS) {
+        ereport(FATAL, (errmsg("failed to init dss device")));
+        proc_exit(1);
+    }
+    if (ENABLE_DSS) {
+        dss_log_init();
+    }
+    initDSSConf();
 
     /* Early initialization */
     BaseInit();

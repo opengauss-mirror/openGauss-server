@@ -131,3 +131,7 @@ PID_TYPE spawn_process(const char* cmdline);
 void exit_nicely(int code);
 void replace_string(char* string, char* replace, char* replacement);
 bool file_exists(const char* file);
+
+PID_TYPE psql_ss_start_test(
+    const char* testname, _stringlist** resultfiles, _stringlist** expectfiles, _stringlist** tags,
+    bool is_stanby);

@@ -82,6 +82,9 @@
 #include "gstrace/storage_gstrace.h"
 #include "tsan_annotation.h"
 #include "tde_key_management/tde_key_storage.h"
+#include "ddes/dms/ss_dms_bufmgr.h"
+#include "ddes/dms/ss_common_attr.h"
+#include "ddes/dms/ss_transaction.h"
 
 const int ONE_MILLISECOND = 1;
 const int TEN_MICROSECOND = 10;
@@ -127,7 +130,7 @@ static bool ReadBuffer_common_ReadBlock(SMgrRelation smgr, char relpersistence, 
     bool *need_repair);
 static Buffer ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber forkNum, BlockNumber blockNum,
     ReadBufferMode mode, BufferAccessStrategy strategy, bool *hit, const XLogPhyBlock *pblk);
-
+static void TerminateBufferIO_common(BufferDesc *buf, bool clear_dirty, uint32 set_flag_bits);
 
 /*
  * Return the PrivateRefCount entry for the passed buffer. It is searched
@@ -708,7 +711,14 @@ static volatile BufferDesc *PageListBufferAlloc(SMgrRelation smgr, char relpersi
         /* Everything is fine, the buffer is ours, so break */
         old_flags = buf_state & BUF_FLAG_MASK;
         if (BUF_STATE_GET_REFCOUNT(buf_state) == 1 && !(old_flags & BM_DIRTY) && !(old_flags & BM_IS_META)) {
-            break;
+            if (ENABLE_DMS && (old_flags & BM_TAG_VALID)) {
+                if (DmsReleaseOwner(buf->tag, buf->buf_id)) {
+                    ClearReadHint(buf->buf_id, true);
+                    break;
+                }
+            } else {
+                break;
+            }
         }
 
         /*
@@ -2052,7 +2062,8 @@ static bool ReadBuffer_common_ReadBlock(SMgrRelation smgr, char relpersistence, 
                                 blockNum, relpath(smgr->smgr_rnode, forkNum))));
                         return false;
                     }
-                    ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+                    int elevel = ENABLE_DMS ? PANIC : ERROR;
+                    ereport(elevel, (errcode(ERRCODE_DATA_CORRUPTED),
                         errmsg("invalid page in block %u of relation %s",
                             blockNum, relpath(smgr->smgr_rnode, forkNum))));
                 }
@@ -2063,6 +2074,85 @@ static bool ReadBuffer_common_ReadBlock(SMgrRelation smgr, char relpersistence, 
     }
 
     return needputtodirty;
+}
+
+void ReadBuffer_common_for_check(ReadBufferMode readmode, BufferDesc* buf_desc,
+    const XLogPhyBlock *pblk, Block bufBlock)
+{
+    bool need_repair = false;
+    dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
+    BlockNumber blockNum = InvalidBlockNumber;
+    ForkNumber forkNum = buf_desc->tag.forkNum;
+    bool isExtend = (buf_ctrl->state & BUF_IS_EXTEND) ? true: false;
+    SMgrRelation smgr = smgropen(buf_desc->tag.rnode, InvalidBackendId);
+    blockNum = buf_desc->tag.blockNum;
+    char relpersistence = (buf_ctrl->state & BUF_IS_RELPERSISTENT)? 'p': 0;
+
+    if (pblk != NULL) {
+        Assert(PhyBlockIsValid(*pblk));
+        Assert(OidIsValid(pblk->relNode));
+        ereport(DEBUG1, (errmsg("Reading SegPage databuffer %d with pblk%u-%u",
+            buf_ctrl->buf_id, pblk->relNode, pblk->block)));
+        (void)ReadBuffer_common_ReadBlock(smgr, relpersistence, forkNum,
+            blockNum, readmode, isExtend, bufBlock, pblk, &need_repair);
+    } else {
+        (void)ReadBuffer_common_ReadBlock(smgr, relpersistence, forkNum,
+            blockNum, readmode, isExtend, bufBlock, NULL, &need_repair);
+    }
+    if (need_repair) {
+        ereport(PANIC, (errmsg("[%d/%d/%d/%d %d-%d]need_repair.",
+            buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode,
+            buf_desc->tag.rnode.bucketNode, buf_desc->tag.forkNum, buf_desc->tag.blockNum)));
+    }
+}
+
+/*
+ * ReadBuffer read block for dms -- fast read block for dms
+ *
+ */
+Buffer ReadBuffer_common_for_dms(ReadBufferMode readmode, BufferDesc* buf_desc, const XLogPhyBlock *pblk)
+{
+    bool needputtodirty = false;
+    bool need_repair = false;
+    dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
+    BlockNumber blockNum = InvalidBlockNumber;
+    ForkNumber forkNum = buf_desc->tag.forkNum;
+    bool isExtend = (buf_ctrl->state & BUF_IS_EXTEND) ? true: false;
+    SMgrRelation smgr = smgropen(buf_desc->tag.rnode, InvalidBackendId);
+    blockNum = buf_desc->tag.blockNum;
+    char relpersistence = (buf_ctrl->state & BUF_IS_RELPERSISTENT)? 'p': 0;
+    Block bufBlock = BufHdrGetBlock(buf_desc);
+
+    if (pblk != NULL) {
+        Assert(PhyBlockIsValid(*pblk));
+        Assert(OidIsValid(pblk->relNode));
+        ereport(DEBUG1, (errmsg("Reading SegPage databuffer %d with pblk%u-%u",
+            buf_ctrl->buf_id, pblk->relNode, pblk->block)));
+        needputtodirty = ReadBuffer_common_ReadBlock(smgr, relpersistence, forkNum,
+            blockNum, readmode, isExtend, bufBlock, pblk, &need_repair);
+    } else {
+        needputtodirty = ReadBuffer_common_ReadBlock(smgr, relpersistence, forkNum,
+            blockNum, readmode, isExtend, bufBlock, NULL, &need_repair);
+    }
+    if (need_repair) {
+        LWLockRelease(buf_desc->io_in_progress_lock);
+        UnpinBuffer(buf_desc, true);
+        AbortBufferIO();
+        return InvalidBuffer;
+    }
+
+    buf_desc->lsn_on_disk = PageGetLSN(bufBlock);
+#ifdef USE_ASSERT_CHECKING
+    buf_desc->lsn_dirty = InvalidXLogRecPtr;
+#endif
+    /* Set BM_VALID, terminate IO, and wake up any waiters */
+    TerminateBufferIO(buf_desc, false, BM_VALID);
+
+    t_thrd.vacuum_cxt.VacuumPageMiss++;
+    if (t_thrd.vacuum_cxt.VacuumCostActive)
+        t_thrd.vacuum_cxt.VacuumCostBalance += u_sess->attr.attr_storage.VacuumCostPageMiss;
+
+    return BufferDescriptorGetBuffer(buf_desc);
 }
 
 static inline void BufferDescSetPBLK(BufferDesc *buf, const XLogPhyBlock *pblk)
@@ -2151,11 +2241,15 @@ static Buffer ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumb
         }
     }
 
+found_branch:
     /* At this point we do NOT hold any locks.
      *
      * if it was already in the buffer pool, we're done
      */
     if (found) {
+        if (ENABLE_DMS) {
+            MarkReadPblk(bufHdr->buf_id, pblk);
+        }
         if (!isExtend) {
             /* Just need to update stats before we exit */
             *hit = true;
@@ -2174,7 +2268,12 @@ static Buffer ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumb
              */
             if (!isLocalBuf) {
                 if (mode == RBM_ZERO_AND_LOCK) {
-                    LWLockAcquire(bufHdr->content_lock, LW_EXCLUSIVE);
+                    if (ENABLE_DMS) {
+                        GetDmsBufCtrl(bufHdr->buf_id)->state |= BUF_READ_MODE_ZERO_LOCK;
+                        LockBuffer(BufferDescriptorGetBuffer(bufHdr), BUFFER_LOCK_EXCLUSIVE);
+                    } else {
+                        LWLockAcquire(bufHdr->content_lock, LW_EXCLUSIVE);
+                    }
                     /*
                      * A corner case in segment-page storage:
                      * a block is moved by segment space shrink, and its physical location is changed. But physical
@@ -2185,10 +2284,13 @@ static Buffer ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumb
                      */
                     BufferDescSetPBLK(bufHdr, pblk);
                 } else if (mode == RBM_ZERO_AND_CLEANUP_LOCK) {
+                    if (ENABLE_DMS) {
+                        GetDmsBufCtrl(bufHdr->buf_id)->state |= BUF_READ_MODE_ZERO_LOCK;
+                    }
                     LockBufferForCleanup(BufferDescriptorGetBuffer(bufHdr));
                 }
             }
-
+            
             return BufferDescriptorGetBuffer(bufHdr);
         }
 
@@ -2246,6 +2348,55 @@ static Buffer ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumb
                 UnlockBufHdr(bufHdr, buf_state);
             } while (!StartBufferIO(bufHdr, true));
         }
+    }
+
+    /* DMS: Try get page remote */
+    if (ENABLE_DMS) {
+        MarkReadHint(bufHdr->buf_id, relpersistence, isExtend, pblk);
+        if (mode != RBM_FOR_REMOTE && relpersistence != RELPERSISTENCE_TEMP && !isLocalBuf) {
+            Assert(!(pg_atomic_read_u32(&bufHdr->state) & BM_VALID));
+
+            do {
+                bool startio;
+                if (LWLockHeldByMe(bufHdr->io_in_progress_lock)) {
+                    startio = true;
+                } else {
+                    startio = StartBufferIO(bufHdr, true);
+                }
+
+                if (!startio) {
+                    Assert(pg_atomic_read_u32(&bufHdr->state) & BM_VALID);
+                    found = true;
+                    goto found_branch;
+                }
+
+                dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(bufHdr->buf_id);
+                LWLockMode req_lock_mode = isExtend ? LW_EXCLUSIVE : LW_SHARED;
+                if (!LockModeCompatible(buf_ctrl, req_lock_mode)) {
+                    if (!StartReadPage(bufHdr, req_lock_mode)) {
+                        TerminateBufferIO(bufHdr, false, 0);
+                        // when reform fail, should return InvalidBuffer to reform proc thread
+                        if (AmDmsReformProcProcess() && dms_reform_failed()) {
+                            return InvalidBuffer;
+                        }
+
+                        pg_usleep(5000L);
+                        continue;
+                    }
+                } else {
+                    /*
+                    * 1. previous attempts to read the buffer must have failed,
+                    * but DRC has been created, so load page directly again
+                    * 2. maybe we have failed previous, and try again in this loop
+                    */
+                    buf_ctrl->state |= BUF_NEED_LOAD;
+                }
+                break;
+            }while (true);
+
+            return TerminateReadPage(bufHdr, mode, pblk);
+        }
+        ClearReadHint(bufHdr->buf_id);
     }
 
     /*
@@ -2597,6 +2748,7 @@ static BufferDesc *BufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumbe
                 } else {
                     FlushBuffer(buf, NULL);
                 }
+
                 LWLockRelease(buf->content_lock);
 
                 ScheduleBufferTagForWriteback(t_thrd.storage_cxt.BackendWritebackContext, &buf->tag);
@@ -2694,7 +2846,6 @@ static BufferDesc *BufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumbe
          * Need to lock the buffer header too in order to change its tag.
          */
         buf_state = LockBufHdr(buf);
-
         /*
          * Somebody could have pinned or re-dirtied the buffer while we were
          * doing the I/O and making the new hashtable entry.  If so, we can't
@@ -2702,9 +2853,22 @@ static BufferDesc *BufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumbe
          * over with a new victim buffer.
          */
         old_flags = buf_state & BUF_FLAG_MASK;
+
         if (BUF_STATE_GET_REFCOUNT(buf_state) == 1 && !(old_flags & BM_DIRTY) 
             && !(old_flags & BM_IS_META)) {
-            break;
+            if (ENABLE_DMS && (old_flags & BM_TAG_VALID)) {
+                /*
+                * notify DMS to release drc owner. if failed, can't recycle this buffer.
+                * release owner procedure is in buf header lock, it's not reasonable,
+                * need to improve.
+                */
+                if (DmsReleaseOwner(old_tag, buf->buf_id)) {
+                    ClearReadHint(buf->buf_id, true);
+                    break;
+                }
+            } else {
+                break;
+            }
         }
 
         UnlockBufHdr(buf, buf_state);
@@ -2745,6 +2909,10 @@ static BufferDesc *BufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumbe
 
     UnlockBufHdr(buf, buf_state);
 
+    if (ENABLE_DMS) {
+        GetDmsBufCtrl(buf->buf_id)->lock_mode = DMS_LOCK_NULL;
+    }
+
     if (old_flags & BM_TAG_VALID) {
         BufTableDelete(&old_tag, old_hash);
         if (old_partition_lock != new_partition_lock) {
@@ -2757,6 +2925,9 @@ static BufferDesc *BufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumbe
         Assert(PhyBlockIsValid(*pblk));
         buf->seg_fileno = pblk->relNode;
         buf->seg_blockno = pblk->block;
+        if (ENABLE_DMS) {
+            MarkReadPblk(buf->buf_id, pblk);
+        }
     } else {
         buf->seg_fileno = EXTENT_INVALID;
         buf->seg_blockno = InvalidBlockNumber;
@@ -2854,6 +3025,24 @@ retry:
         }
         WaitIO(buf);
         goto retry;
+    }
+
+    if (ENABLE_DMS && (buf_state & BM_TAG_VALID)) {
+        /* before release owner, request page again using X to ensure other node invalid page */
+        if (SS_NORMAL_PRIMARY && GetDmsBufCtrl(buf->buf_id)->lock_mode != DMS_LOCK_EXCLUSIVE &&
+            !(GetDmsBufCtrl(buf->buf_id)->state & BUF_IS_RELPERSISTENT_TEMP)) {
+            ereport(DEBUG1, (errmodule(MOD_DMS), errmsg("DMS master force invalidate other node's page")));
+            (void)StartReadPage(buf, LW_EXCLUSIVE);
+        }
+
+        if (!DmsReleaseOwner(buf->tag, buf->buf_id)) {
+            UnlockBufHdr(buf, buf_state);
+            LWLockRelease(old_partition_lock);
+            pg_usleep(5000);
+            goto retry;
+        }
+
+        ClearReadHint(buf->buf_id, true);
     }
 
     /* remove from dirty page list */
@@ -4731,6 +4920,10 @@ void DropRelFileNodeShareBuffers(RelFileNode node, ForkNumber forkNum, BlockNumb
         else
             UnlockBufHdr(buf_desc, buf_state);
     }
+
+    if (ENABLE_DMS && SS_PRIMARY_MODE) {
+        SSBCastDropRelRangeBuffer(node, forkNum, firstDelBlock);
+    }
 }
 
 /*
@@ -5045,6 +5238,11 @@ void DropDatabaseBuffers(Oid dbid)
             UnlockBufHdr(buf_desc, buf_state);
         }
     }
+
+    if (ENABLE_DMS && SS_PRIMARY_MODE) {
+        SSBCastDropDBAllBuffer(dbid);
+    }
+
     gstrace_exit(GS_TRC_ID_DropDatabaseBuffers);
 }
 
@@ -5313,6 +5511,10 @@ void IncrBufferRefCount(Buffer buffer)
  */
 void MarkBufferDirtyHint(Buffer buffer, bool buffer_std)
 {
+    if (SS_STANDBY_MODE) {
+        return;
+    }
+
     BufferDesc *buf_desc = NULL;
     Page page = BufferGetPage(buffer);
 
@@ -5526,6 +5728,8 @@ void LockBuffer(Buffer buffer, int mode)
     if (dw_enabled() && t_thrd.storage_cxt.num_held_lwlocks > 0) {
         need_update_lockid = true;
     }
+
+retry:
     if (mode == BUFFER_LOCK_UNLOCK) {
         LWLockRelease(buf->content_lock);
     } else if (mode == BUFFER_LOCK_SHARE) {
@@ -5534,6 +5738,38 @@ void LockBuffer(Buffer buffer, int mode)
         (void)LWLockAcquire(buf->content_lock, LW_EXCLUSIVE, need_update_lockid);
     } else {
         ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), (errmsg("unrecognized buffer lock mode: %d", mode))));
+    }
+
+    /*
+     * need to transfer newest page version by DMS.
+     */
+    if (ENABLE_DMS && mode != BUFFER_LOCK_UNLOCK) {
+        LWLockMode lock_mode = (mode == BUFFER_LOCK_SHARE) ? LW_SHARED : LW_EXCLUSIVE;
+        Buffer tmp_buffer;
+        ReadBufferMode read_mode = RBM_NORMAL;
+        if (lock_mode == LW_EXCLUSIVE && (GetDmsBufCtrl(buffer - 1)->state & BUF_READ_MODE_ZERO_LOCK)) {
+            read_mode = RBM_ZERO_AND_LOCK;
+            GetDmsBufCtrl(buffer - 1)->state &= ~BUF_READ_MODE_ZERO_LOCK;
+        }
+
+        if (IsSegmentBufferID(buf->buf_id)) {
+            tmp_buffer = DmsReadSegPage(buffer, lock_mode, read_mode);
+        } else {
+            tmp_buffer = DmsReadPage(buffer, lock_mode, read_mode);
+        }
+
+        if (tmp_buffer == 0) {
+            /* failed to request newest page, release related locks, and retry */
+            if (IsSegmentBufferID(buf->buf_id)) {
+                SegTerminateBufferIO((BufferDesc *)buf, false, 0);
+            } else {
+                TerminateBufferIO(buf, false, 0);
+            }
+            LWLockRelease(buf->content_lock);
+
+            pg_usleep(5000L);
+            goto retry;
+        }
     }
 }
 
@@ -5557,17 +5793,39 @@ bool TryLockBuffer(Buffer buffer, int mode, bool must_wait)
     }
 
     volatile BufferDesc *buf = GetBufferDescriptor(buffer - 1);
-
+    bool ret = false;
     if (mode == BUFFER_LOCK_SHARE) {
-        return LWLockConditionalAcquire(buf->content_lock, LW_SHARED);
+        ret = LWLockConditionalAcquire(buf->content_lock, LW_SHARED);
     } else if (mode == BUFFER_LOCK_EXCLUSIVE) {
-        return LWLockConditionalAcquire(buf->content_lock, LW_EXCLUSIVE);
+        ret = LWLockConditionalAcquire(buf->content_lock, LW_EXCLUSIVE);
     } else {
         ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH),
             (errmsg("unrecognized buffer lock mode for TryLockBuffer: %d", mode))));
     }
 
-    return false;
+    /* transfer newest page version by DMS */
+    if (ENABLE_DMS && ret) {
+        LWLockMode lock_mode = (mode == BUFFER_LOCK_SHARE) ? LW_SHARED : LW_EXCLUSIVE;
+        Buffer tmp_buffer;
+        if (IsSegmentBufferID(buf->buf_id)) {
+            tmp_buffer = DmsReadSegPage(buffer, lock_mode, RBM_NORMAL);
+        } else {
+            tmp_buffer = DmsReadPage(buffer, lock_mode, RBM_NORMAL);
+        }
+
+        if (tmp_buffer == 0) {
+            /* failed to request newest page, release related locks, and retry */
+            if (IsSegmentBufferID(buf->buf_id)) {
+                SegTerminateBufferIO((BufferDesc *)buf, false, 0);
+            } else {
+                TerminateBufferIO(buf, false, 0);
+            }
+            LWLockRelease(buf->content_lock);
+            ret = false;
+        }
+    }
+
+    return ret;
 }
 
 /*
@@ -5586,7 +5844,31 @@ bool ConditionalLockBuffer(Buffer buffer)
 
     buf = GetBufferDescriptor(buffer - 1);
 
-    return LWLockConditionalAcquire(buf->content_lock, LW_EXCLUSIVE);
+retry:
+    bool ret = LWLockConditionalAcquire(buf->content_lock, LW_EXCLUSIVE);
+
+    if (ENABLE_DMS && ret) {
+        Buffer tmp_buffer;
+        if (IsSegmentBufferID(buf->buf_id)) {
+            tmp_buffer = DmsReadSegPage(buffer, LW_EXCLUSIVE, RBM_NORMAL);
+        } else {
+            tmp_buffer = DmsReadPage(buffer, LW_EXCLUSIVE, RBM_NORMAL);
+        }
+
+        /* failed to request newest page, release related locks, and retry */
+        if (tmp_buffer == 0) {
+            if (IsSegmentBufferID(buf->buf_id)) {
+                SegTerminateBufferIO((BufferDesc *)buf, false, 0);
+            } else {
+                TerminateBufferIO(buf, false, 0);
+            }
+            LWLockRelease(buf->content_lock);
+
+            pg_usleep(5000L);
+            goto retry;
+        }
+    }
+    return ret;
 }
 
 /*
@@ -6177,7 +6459,9 @@ void AbortBufferIO_common(BufferDesc *buf, bool isForInput)
     if (isForInput) {
         /* When reading we expect the buffer to be invalid but not dirty */
         Assert(!(buf_state & BM_DIRTY));
-        Assert(!(buf_state & BM_VALID));
+        if (!ENABLE_DSS) {
+            Assert(!(buf_state & BM_VALID));
+        }
         UnlockBufHdr(buf, buf_state);
     } else {
         /* When writing we expect the buffer to be valid and dirty */

@@ -1738,7 +1738,7 @@ void AlterRole(AlterRoleStmt* stmt)
 
     /* Extract options from the statement node tree */
     foreach (option, stmt->options) {
-        DefElem* defel = (DefElem*)lfirst(option);
+        DefElem *defel = (DefElem *)lfirst(option);
 
         if (strcmp(defel->defname, "password") == 0 || strcmp(defel->defname, "encryptedPassword") == 0 ||
             strcmp(defel->defname, "unencryptedPassword") == 0 || strcmp(defel->defname, "expiredPassword") == 0) {
@@ -2261,13 +2261,13 @@ void AlterRole(AlterRoleStmt* stmt)
         CheckLockPrivilege(roleid, tuple, is_opradmin);
 
         if (stmt->lockstatus == LOCK_ROLE) {
-            if (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE) {
+            if (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE || SS_STANDBY_MODE) {
                 UpdateFailCountToHashTable(roleid, 0, true);
             } else {
                 TryLockAccount(roleid, 0, true);
             }
         } else {
-            if (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE) {
+            if (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE || SS_STANDBY_MODE) {
                 UnlockAccountToHashTable(roleid, true, false);
             } else {
                 TryUnlockAccount(roleid, true, false);
@@ -2457,7 +2457,7 @@ void AlterRole(AlterRoleStmt* stmt)
     }
 
     /* If locked, try unlock to see whether lock time is over. */
-    if (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE) {
+    if (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE || SS_STANDBY_MODE) {
         if (UNLOCK_STATUS != GetAccountLockedStatusFromHashTable(roleid)) {
             UnlockAccountToHashTable(roleid, false, false);
             rolestatus = GetAccountLockedStatusFromHashTable(roleid);
@@ -2780,7 +2780,7 @@ void AlterRole(AlterRoleStmt* stmt)
                         /* the password is not right, and try to lock the account */
                         if (u_sess->attr.attr_security.Password_lock_time > 0 &&
                             u_sess->attr.attr_security.Failed_login_attempts > 0) {
-                            if (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE) {
+                            if (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE || SS_STANDBY_MODE) {
                                 UpdateFailCountToHashTable(roleid, 1, false);
                             } else {
                                 TryLockAccount(roleid, 1, false);
@@ -2791,7 +2791,7 @@ void AlterRole(AlterRoleStmt* stmt)
                         str_reset(oldPasswd);
                         ereport(ERROR, (errcode(ERRCODE_INVALID_PASSWORD), errmsg("The old password is invalid.")));
                     } else {
-                        if (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE) {
+                        if (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE || SS_STANDBY_MODE) {
                             UnlockAccountToHashTable(roleid, false, true);
                         } else {
                             TryUnlockAccount(roleid, false, true);
@@ -5163,7 +5163,7 @@ void TryLockAccount(Oid roleID, int extrafails, bool superlock)
     char* rolename = NULL;
 
     /* We could not insert new xlog if recovery in process */
-    if (RecoveryInProgress()) {
+    if (RecoveryInProgress() || SSIsServerModeReadOnly()) {
         return;
     }
 
@@ -5314,7 +5314,7 @@ bool TryUnlockAccount(Oid roleID, bool superunlock, bool isreset)
     char* rolename = NULL;
 
     /* We could not insert new xlog if recovery in process */
-    if (RecoveryInProgress()) {
+    if (RecoveryInProgress() || SSIsServerModeReadOnly()) {
         return false;
     }
 
@@ -5432,7 +5432,7 @@ void TryUnlockAllAccounts(void)
     bool roleIdIsNull = false;
     char* rolename = NULL;
 
-    if (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE) {
+    if (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE || SS_STANDBY_MODE) {
         return;
     }
 

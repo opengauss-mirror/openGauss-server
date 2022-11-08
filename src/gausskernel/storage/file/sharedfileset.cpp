@@ -56,7 +56,11 @@ void SharedFileSetInit(SharedFileSet *fileset)
     fileset->ntablespaces = GetTempTablespaces(&fileset->tablespaces[0], lengthof(fileset->tablespaces));
     if (fileset->ntablespaces == 0) {
         /* If the GUC is empty, use current database's default tablespace */
-        fileset->tablespaces[0] = u_sess->proc_cxt.MyDatabaseTableSpace;
+        if (ENABLE_DSS) {
+            fileset->tablespaces[0] = InvalidOid;
+        } else {
+            fileset->tablespaces[0] = u_sess->proc_cxt.MyDatabaseTableSpace;
+        }
         fileset->ntablespaces = 1;
     } else {
         int i;
@@ -187,6 +191,10 @@ static void SharedFileSetPath(char *path, const SharedFileSet *fileset, Oid tabl
  */
 static Oid ChooseTablespace(const SharedFileSet *fileset, const char *name)
 {
+    if (ENABLE_DSS) {
+        return InvalidOid;
+    }
+
     uint32 hash = hash_any((const unsigned char *)name, strlen(name));
 
     return fileset->tablespaces[hash % fileset->ntablespaces];

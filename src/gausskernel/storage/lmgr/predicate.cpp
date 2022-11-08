@@ -319,6 +319,8 @@
 
 #define OldSerXidPage(xid) ((((uint32)(xid)) / OLDSERXID_ENTRIESPERPAGE) % (OLDSERXID_MAX_PAGE + 1))
 
+#define SERIALDIR (g_instance.datadir_cxt.serialDir)
+
 typedef struct OldSerXidControlData {
     int headPage;          /* newest initialized page */
     TransactionId headXid; /* newest valid Xid in the SLRU */
@@ -645,7 +647,7 @@ static void OldSerXidInit(void)
                   NUM_OLDSERXID_BUFFERS,
                   0,
                   OldSerXidLock,
-                  "pg_serial");
+                  SERIALDIR);
     /* Override default assumption that writes should be fsync'd */
     t_thrd.shemem_ptr_cxt.OldSerXidSlruCtl->do_fsync = false;
 

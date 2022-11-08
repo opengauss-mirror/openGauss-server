@@ -78,6 +78,9 @@ static void XLogResetLogicalPage(void);
  */
 void XLogBeginInsert(void)
 {
+    if (SS_PERFORMING_SWITCHOVER) {
+        XLogResetInsertion();
+    }
     Assert(t_thrd.xlog_cxt.max_registered_block_id == 0);
     Assert(t_thrd.xlog_cxt.mainrdata_last == (XLogRecData *)&t_thrd.xlog_cxt.mainrdata_head);
     Assert(t_thrd.xlog_cxt.mainrdata_len == 0);
@@ -90,6 +93,11 @@ void XLogBeginInsert(void)
     if (SECUREC_UNLIKELY(t_thrd.xlog_cxt.begininsert_called))
         ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
                         errmsg("XLogBeginInsert was already called")));
+
+    if (!SSXLogInsertAllowed()) {
+        ereport(LOG, (errmsg("SS standby cannot insert XLOG entries")));
+        return;
+    }
 
     t_thrd.xlog_cxt.begininsert_called = true;
 }

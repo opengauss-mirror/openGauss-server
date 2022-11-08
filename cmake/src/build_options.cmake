@@ -17,6 +17,12 @@ if(NOT ${PGPORT})
     set(PGPORT 5432)
 endif()
 
+#this is the default WAL segment size (MB), the old is --with-wal-segsize=16, now -DWAL_SEGSIZE=16
+option(WAL_SEGSIZE 16)
+if(NOT ${WAL_SEGSIZE})
+    set(WAL_SEGSIZE 16)
+endif()
+
 GET_VERSIONSTR_FROMGIT(GET_PG_VERSION_STR)
 
 #CMake does not allow g++ to compile C files. They are two different languages. You should understand what you are doing.
@@ -58,6 +64,7 @@ option(ENABLE_MYSQL_FDW "enable export or import data with mysql,the old is --en
 option(ENABLE_ORACLE_FDW "enable export or import data with oracle,the old is --enable-oracle-fdw" OFF)
 option(BUILD_BY_CMAKE "the BUILD_BY_CMAKE is new,used in distribute pg_regress.cpp" ON)
 option(DEBUG_UHEAP "collect USTORE statistics" OFF)
+option(MAX_ALLOC_SEGNUM "max alloc xlog seg num in extreme_rto" 4)
 
 #No matter what to set, the old mppdb aways use ENABLE_THREAD_SAFETY=yes by default defined.
 option(ENABLE_THREAD_SAFETY "enable thread safety, the old is --enable-thread-safety" ON)
@@ -139,6 +146,17 @@ set(WARNING_OPTIONS -Wall -Wendif-labels -Werror -Wformat-security)
 set(OPTIMIZE_OPTIONS -pipe -pthread -fno-aggressive-loop-optimizations -fno-expensive-optimizations -fno-omit-frame-pointer -fno-strict-aliasing -freg-struct-return)
 set(CHECK_OPTIONS -Wmissing-format-attribute -Wno-attributes -Wno-unused-but-set-variable -Wno-write-strings -Wpointer-arith)
 set(MACRO_OPTIONS -D_GLIBCXX_USE_CXX11_ABI=0 -DENABLE_GSTRACE -D_GNU_SOURCE -DPGXC -D_POSIX_PTHREAD_SEMANTICS -D_REENTRANT -DSTREAMPLAN -D_THREAD_SAFE ${DB_COMMON_DEFINE})
+
+# Set MAX_ALLOC_SEGNUM size in extreme_rto
+if(${WAL_SEGSIZE} LESS 512)
+    set(MAX_ALLOC_SEGNUM 4)
+elseif(${WAL_SEGSIZE} GREATER_EQUAL 512 AND ${WAL_SEGSIZE} LESS 1024)
+    set(MAX_ALLOC_SEGNUM 2)
+elseif(${WAL_SEGSIZE} GREATER_EQUAL 1024)
+    set(MAX_ALLOC_SEGNUM 1)
+else()
+    message(FATAL_ERROR "error: Invalid WAL segment size. Allowed values are 1,2,4,8,16,32,64,128,256,512,1024.")
+endif()
 
 # libraries need secure options during compling
 set(LIB_SECURE_OPTIONS -fPIC -fno-common -fstack-protector)
@@ -275,6 +293,7 @@ if(${ENABLE_LLVM_COMPILE} STREQUAL "ON")
     # LLVM version
     execute_process(COMMAND ${LLVM_CONFIG} --version OUTPUT_VARIABLE LLVM_VERSION_STR OUTPUT_STRIP_TRAILING_WHITESPACE)
     string(REPLACE "." ";" LLVM_VERSION_LIST ${LLVM_VERSION_STR})
+    message(STATUS "status ENV{LLVM_VERSION_STR}" $ENV{LLVM_VERSION_STR})
     list(GET LLVM_VERSION_LIST 0 LLVM_MAJOR_VERSION)
     list(GET LLVM_VERSION_LIST 1 LLVM_MINOR_VERSION)
 endif()

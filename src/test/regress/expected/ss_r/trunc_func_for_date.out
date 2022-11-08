@@ -1,0 +1,217 @@
+---
+--- data type 1 : timestamp
+---
+-- format can recognize
+select trunc(timestamp '2021-08-11 20:19:39', 'cc');    -- century
+          trunc           
+--------------------------
+ Mon Jan 01 00:00:00 2001
+(1 row)
+
+select trunc(timestamp '2021-08-11 20:19:39', 'yyyy');  -- year
+          trunc           
+--------------------------
+ Fri Jan 01 00:00:00 2021
+(1 row)
+
+select trunc(timestamp '2021-08-11 20:19:39', 'q');     -- quarter
+          trunc           
+--------------------------
+ Thu Jul 01 00:00:00 2021
+(1 row)
+
+select trunc(timestamp '2021-08-11 20:19:39', 'mm');    -- month
+          trunc           
+--------------------------
+ Sun Aug 01 00:00:00 2021
+(1 row)
+
+select trunc(timestamp '2021-08-11 20:19:39', 'j');     -- day
+          trunc           
+--------------------------
+ Wed Aug 11 00:00:00 2021
+(1 row)
+
+select trunc(timestamp '2021-08-11 20:19:39', 'dd');    -- day
+          trunc           
+--------------------------
+ Wed Aug 11 00:00:00 2021
+(1 row)
+
+select trunc(timestamp '2021-08-11 20:19:39', 'ddd');   -- day
+          trunc           
+--------------------------
+ Wed Aug 11 00:00:00 2021
+(1 row)
+
+select trunc(timestamp '2021-08-11 20:19:39', 'hh');    -- hour
+          trunc           
+--------------------------
+ Wed Aug 11 20:00:00 2021
+(1 row)
+
+select trunc(timestamp '2021-08-11 20:19:39', 'mi');    -- minute
+          trunc           
+--------------------------
+ Wed Aug 11 20:19:00 2021
+(1 row)
+
+-- format can not recognize
+select trunc(timestamp '2021-08-11 20:19:39', 'qq');    -- quarter
+ERROR:  timestamp units "qq" not recognized
+CONTEXT:  referenced column: trunc
+select trunc(timestamp '2021-08-11 20:19:39', 'mmm');   -- month
+ERROR:  timestamp units "mmm" not recognized
+CONTEXT:  referenced column: trunc
+select trunc(timestamp '2021-08-11 20:19:39', 'dddd');  -- day
+ERROR:  timestamp units "dddd" not recognized
+CONTEXT:  referenced column: trunc
+select trunc(timestamp '2021-08-11 20:19:39', 'hhh');   -- hour
+ERROR:  timestamp units "hhh" not recognized
+CONTEXT:  referenced column: trunc
+---
+--- data type 2 : timestamptz
+---
+-- format can recognize
+select trunc(timestamptz '2021-08-12 08:48:26.366526+08', 'cc');    -- century
+            trunc             
+------------------------------
+ Mon Jan 01 00:00:00 2001 PST
+(1 row)
+
+select trunc(timestamptz '2021-08-12 08:48:26.366526+08', 'yyyy');  -- year
+            trunc             
+------------------------------
+ Fri Jan 01 00:00:00 2021 PST
+(1 row)
+
+select trunc(timestamptz '2021-08-12 08:48:26.366526+08', 'q');     -- quarter
+            trunc             
+------------------------------
+ Thu Jul 01 00:00:00 2021 PDT
+(1 row)
+
+select trunc(timestamptz '2021-08-12 08:48:26.366526+08', 'mm');    -- month
+            trunc             
+------------------------------
+ Sun Aug 01 00:00:00 2021 PDT
+(1 row)
+
+select trunc(timestamptz '2021-08-12 08:48:26.366526+08', 'j');     -- day
+            trunc             
+------------------------------
+ Wed Aug 11 00:00:00 2021 PDT
+(1 row)
+
+select trunc(timestamptz '2021-08-12 08:48:26.366526+08', 'dd');    -- day
+            trunc             
+------------------------------
+ Wed Aug 11 00:00:00 2021 PDT
+(1 row)
+
+select trunc(timestamptz '2021-08-12 08:48:26.366526+08', 'ddd');   -- day
+            trunc             
+------------------------------
+ Wed Aug 11 00:00:00 2021 PDT
+(1 row)
+
+select trunc(timestamptz '2021-08-12 08:48:26.366526+08', 'hh');    -- hour
+            trunc             
+------------------------------
+ Wed Aug 11 17:00:00 2021 PDT
+(1 row)
+
+select trunc(timestamptz '2021-08-12 08:48:26.366526+08', 'mi');    -- minute
+            trunc             
+------------------------------
+ Wed Aug 11 17:48:00 2021 PDT
+(1 row)
+
+-- format can't recognize
+select trunc(timestamptz '2021-08-12 08:48:26.366526+08', 'qq');    -- quarter
+ERROR:  timestamp with time zone units "qq" not recognized
+CONTEXT:  referenced column: trunc
+select trunc(timestamptz '2021-08-12 08:48:26.366526+08', 'mmm');   -- month
+ERROR:  timestamp with time zone units "mmm" not recognized
+CONTEXT:  referenced column: trunc
+select trunc(timestamptz '2021-08-12 08:48:26.366526+08', 'dddd');  -- day
+ERROR:  timestamp with time zone units "dddd" not recognized
+CONTEXT:  referenced column: trunc
+select trunc(timestamptz '2021-08-12 08:48:26.366526+08', 'hhh');   -- hour
+ERROR:  timestamp with time zone units "hhh" not recognized
+CONTEXT:  referenced column: trunc
+---
+--- data type 3 : interval
+---
+-- format can recognize
+select trunc(interval '2 years 3 months 4 days 5 hours 6 minutes 7 seconds', 'cc');    -- century
+ trunc 
+-------
+ @ 0
+(1 row)
+
+select trunc(interval '2 years 3 months 4 days 5 hours 6 minutes 7 seconds', 'yyyy');  -- year
+   trunc   
+-----------
+ @ 2 years
+(1 row)
+
+select trunc(interval '2 years 3 months 4 days 5 hours 6 minutes 7 seconds', 'q');     -- quarter
+      trunc       
+------------------
+ @ 2 years 3 mons
+(1 row)
+
+select trunc(interval '2 years 3 months 4 days 5 hours 6 minutes 7 seconds', 'mm');    -- month
+      trunc       
+------------------
+ @ 2 years 3 mons
+(1 row)
+
+select trunc(interval '2 years 3 months 4 days 5 hours 6 minutes 7 seconds', 'j');     -- day
+          trunc          
+-------------------------
+ @ 2 years 3 mons 4 days
+(1 row)
+
+select trunc(interval '2 years 3 months 4 days 5 hours 6 minutes 7 seconds', 'dd');    -- day
+          trunc          
+-------------------------
+ @ 2 years 3 mons 4 days
+(1 row)
+
+select trunc(interval '2 years 3 months 4 days 5 hours 6 minutes 7 seconds', 'ddd');   -- day
+          trunc          
+-------------------------
+ @ 2 years 3 mons 4 days
+(1 row)
+
+select trunc(interval '2 years 3 months 4 days 5 hours 6 minutes 7 seconds', 'hh');    -- hour
+              trunc              
+---------------------------------
+ @ 2 years 3 mons 4 days 5 hours
+(1 row)
+
+select trunc(interval '2 years 3 months 4 days 5 hours 6 minutes 7 seconds', 'mi');    -- minute
+                 trunc                  
+----------------------------------------
+ @ 2 years 3 mons 4 days 5 hours 6 mins
+(1 row)
+
+-- format can not recognize
+select trunc(interval '2 years 3 months 4 days 5 hours 6 minutes 7 seconds', 'qq');    -- quarter
+ERROR:  interval units "qq" not recognized
+CONTEXT:  referenced column: trunc
+select trunc(interval '2 years 3 months 4 days 5 hours 6 minutes 7 seconds', 'mmm');   -- month
+ERROR:  interval units "mmm" not recognized
+CONTEXT:  referenced column: trunc
+select trunc(interval '2 years 3 months 4 days 5 hours 6 minutes 7 seconds', 'dddd');  -- day
+ERROR:  interval units "dddd" not recognized
+CONTEXT:  referenced column: trunc
+select trunc(interval '2 years 3 months 4 days 5 hours 6 minutes 7 seconds', 'hhh');   -- hour
+ERROR:  interval units "hhh" not recognized
+CONTEXT:  referenced column: trunc
+-- not supported
+select trunc(interval '2 years 3 months 4 days 5 hours 6 minutes 7 seconds', 'w');     -- week
+ERROR:  interval units "w" not supported
+CONTEXT:  referenced column: trunc

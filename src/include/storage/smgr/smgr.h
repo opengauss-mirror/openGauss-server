@@ -22,6 +22,8 @@
 #include "utils/rel_gs.h"
 #include "vecexecutor/vectorbatch.h"
 #include "nodes/bitmapset.h"
+#include "storage/file/fio_device_com.h"
+#include "storage/dss/dss_api_def.h"
 
 typedef int File;
 
@@ -137,10 +139,12 @@ enum SMGR_READ_STATUS {
  * a pending fsync request getting canceled ... see mdsync).
  */
 #ifndef WIN32
-#define FILE_POSSIBLY_DELETED(err) ((err) == ENOENT)
+#define FILE_POSSIBLY_DELETED(err) ((err) == ENOENT || (err) == ERR_DSS_DIR_NOT_EXIST || (err) == ERR_DSS_FILE_NOT_EXIST)
 #else
 #define FILE_POSSIBLY_DELETED(err) ((err) == ENOENT || (err) == EACCES)
 #endif
+
+#define FILE_ALREADY_EXIST(err) ((err) == EEXIST || (err) == ERR_DSS_DIR_CREATE_DUPLICATED)
 
 extern void smgrinit(void);
 extern SMgrRelation smgropen(const RelFileNode& rnode, BackendId backend, int col = 0);

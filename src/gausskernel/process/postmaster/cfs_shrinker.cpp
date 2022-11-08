@@ -186,6 +186,10 @@ static void CfsShrinkerSigtermHander(SIGNAL_ARGS)
 
 ThreadId StartCfsShrinkerCapturer(void)
 {
+    if (ENABLE_DMS) {
+        return 0;
+    }
+
     if (!IsPostmasterEnvironment) {
         return 0;
     }

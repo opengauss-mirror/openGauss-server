@@ -100,7 +100,7 @@ Datum pg_start_backup(PG_FUNCTION_ARGS)
                  errmsg("a non-exclusive backup is already in progress in this session")));
 
     backupidstr = text_to_cstring(backupid);
-    dir = AllocateDir("pg_tblspc");
+    dir = AllocateDir(TBLSPCDIR);
     if (!dir) {
         ereport(ERROR, (errmsg("could not open directory \"%s\": %m", "pg_tblspc")));
     }
@@ -181,7 +181,7 @@ Datum pg_start_backup_v2(PG_FUNCTION_ARGS)
                 errmsg("a non-exclusive backup is already in progress in this session")));
 
     backupidstr = text_to_cstring(backupid);
-    dir = AllocateDir("pg_tblspc");
+    dir = AllocateDir(TBLSPCDIR);
     if (!dir) {
         ereport(ERROR, (errmsg("could not open directory \"%s\": %m", "pg_tblspc")));
     }

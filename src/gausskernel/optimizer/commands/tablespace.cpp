@@ -72,6 +72,7 @@
 #include "storage/smgr/fd.h"
 #include "storage/standby.h"
 #include "storage/smgr/segment.h"
+#include "storage/file/fio_device.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
@@ -140,10 +141,11 @@ void TablespaceCreateDbspace(Oid spcNode, Oid dbNode, bool isRedo)
     Assert(OidIsValid(dbNode));
 
     dir = GetDatabasePath(dbNode, spcNode);
+    errno = 0;
 
     if (stat(dir, &st) < 0) {
         /* Directory does not exist? */
-        if (errno == ENOENT) {
+        if (FILE_POSSIBLY_DELETED(errno)) {
             /*
              * Acquire TablespaceCreateLock to ensure that no DROP TABLESPACE
              * or TablespaceCreateDbspace is running concurrently.
@@ -162,7 +164,7 @@ void TablespaceCreateDbspace(Oid spcNode, Oid dbNode, bool isRedo)
                     char* parentdir = NULL;
 
                     /* Failure other than not exists or not in WAL replay? */
-                    if (errno != ENOENT || !isRedo)
+                    if (!FILE_POSSIBLY_DELETED(errno) || !isRedo)
                         ereport(
                             ERROR, (errcode_for_file_access(), errmsg("could not create directory \"%s\": %m", dir)));
 
@@ -179,7 +181,7 @@ void TablespaceCreateDbspace(Oid spcNode, Oid dbNode, bool isRedo)
                     /* create the second parent */
                     get_parent_directory(parentdir);
                     /* Can't create parent and it doesn't already exist? */
-                    if (mkdir(parentdir, S_IRWXU) < 0 && errno != EEXIST)
+                    if (mkdir(parentdir, S_IRWXU) < 0 && !FILE_ALREADY_EXIST(errno))
                         ereport(ERROR,
                             (errcode_for_file_access(), errmsg("could not create directory \"%s\": %m", parentdir)));
                     pfree_ext(parentdir);
@@ -188,13 +190,13 @@ void TablespaceCreateDbspace(Oid spcNode, Oid dbNode, bool isRedo)
                     parentdir = pstrdup(dir);
                     get_parent_directory(parentdir);
                     /* Can't create parent and it doesn't already exist? */
-                    if (mkdir(parentdir, S_IRWXU) < 0 && errno != EEXIST)
+                    if (mkdir(parentdir, S_IRWXU) < 0 && !FILE_ALREADY_EXIST(errno))
                         ereport(ERROR,
                             (errcode_for_file_access(), errmsg("could not create directory \"%s\": %m", parentdir)));
                     pfree_ext(parentdir);
 
                     /* Create database directory */
-                    if (mkdir(dir, S_IRWXU) < 0 && errno != EEXIST)
+                    if (mkdir(parentdir, S_IRWXU) < 0 && !FILE_ALREADY_EXIST(errno))
                         ereport(
                             ERROR, (errcode_for_file_access(), errmsg("could not create directory \"%s\": %m", dir)));
                 }
@@ -551,6 +553,13 @@ void CreateTableSpace(CreateTableSpaceStmt* stmt)
             (errmodule(MOD_TBLSPC),
                 errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
                 errmsg("Create tablespace with absolute location can't be allowed")));
+    
+    if (!relative && ENABLE_DSS) {
+        ereport(ERROR,
+            (errmodule(MOD_TBLSPC),
+                errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+                errmsg("Can not create tablespace with absolute location in shared storage mode")));
+    }
 
     /* Must be users with sysadmin privilege or the member of gs_role_tablespace role */
     if (!superuser() && !is_member_of_role(GetUserId(), DEFAULT_ROLE_TABLESPACE)) {
@@ -612,18 +621,30 @@ void CreateTableSpace(CreateTableSpaceStmt* stmt)
                     errmsg("The relative location can not be null")));
 
         /* We need reform location for relative mode */
+        int len;
+        errno_t rc = EOK;
         relativeLocation = pstrdup(location);
         pfree_ext(location);
-        int len = strlen(t_thrd.proc_cxt.DataDir) + 1 + strlen(relativeLocation) + 1 + strlen(PG_LOCATION_DIR) + 1;
-        location = (char*)palloc(len);
-        errno_t rc = EOK;
 
-        if (t_thrd.proc_cxt.DataDir[strlen(t_thrd.proc_cxt.DataDir)] == '/')
-            rc = snprintf_s(
-                location, len, len - 1, "%s%s/%s", t_thrd.proc_cxt.DataDir, PG_LOCATION_DIR, relativeLocation);
-        else
-            rc = snprintf_s(
-                location, len, len - 1, "%s/%s/%s", t_thrd.proc_cxt.DataDir, PG_LOCATION_DIR, relativeLocation);
+        if (ENABLE_DSS) {
+            len = (int)strlen(PG_LOCATION_DIR) + 1 + (int)strlen(relativeLocation) + 1;
+            location = (char*)palloc(len);
+            rc = snprintf_s(location, len, len - 1, "%s/%s", PG_LOCATION_DIR, relativeLocation);
+        } else {
+            if (t_thrd.proc_cxt.DataDir[strlen(t_thrd.proc_cxt.DataDir)] == '/') {
+                len = (int)strlen(t_thrd.proc_cxt.DataDir) + (int)strlen(PG_LOCATION_DIR) +
+                    1 + (int)strlen(relativeLocation) + 1;
+                location = (char*)palloc(len);
+                rc = snprintf_s(
+                    location, len, len - 1, "%s%s/%s", t_thrd.proc_cxt.DataDir, PG_LOCATION_DIR, relativeLocation);
+            } else {
+                len = (int)strlen(t_thrd.proc_cxt.DataDir) + 1 + (int)strlen(PG_LOCATION_DIR) +
+                    1 + (int)strlen(relativeLocation) + 1;
+                location = (char*)palloc(len);
+                rc = snprintf_s(
+                    location, len, len - 1, "%s/%s/%s", t_thrd.proc_cxt.DataDir, PG_LOCATION_DIR, relativeLocation);
+            }
+        }
         securec_check_ss(rc, "\0", "\0");
     }
 
@@ -1041,7 +1062,7 @@ static void check_tablespace_symlink(const char* location)
 
     Assert(location != NULL);
 
-    dir = AllocateDir(tbs_path);
+    dir = AllocateDir(TBLSPCDIR);
     if (dir == NULL) {
         ereport(ERROR,
             (errmodule(MOD_TBLSPC),
@@ -1052,7 +1073,7 @@ static void check_tablespace_symlink(const char* location)
         if (strcmp(dent->d_name, ".") == 0 || strcmp(dent->d_name, "..") == 0)
             continue;
 
-        rc = snprintf_s(tmppath, MAXPGPATH + 2, MAXPGPATH + 1, "%s/%s", tbs_path, dent->d_name);
+        rc = snprintf_s(tmppath, MAXPGPATH + 2, MAXPGPATH + 1, "%s/%s", TBLSPCDIR, dent->d_name);
         securec_check_ss(rc, "\0", "\0");
 
         /* get file status */
@@ -1069,7 +1090,7 @@ static void check_tablespace_symlink(const char* location)
             ereport(ERROR,
                 (errmodule(MOD_TBLSPC),
                     errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                    errmsg("\"%s\" is not symlink, please check and clean the remains in \"%s\"", tmppath, tbs_path)));
+                    errmsg("\"%s\" is not symlink, please check and clean the remains in \"%s\"", tmppath, TBLSPCDIR)));
         }
 
         /* get target directory */
@@ -1133,18 +1154,23 @@ static void check_tablespace_symlink(const char* location)
  */
 static void create_tablespace_directories(const char* location, const Oid tablespaceoid)
 {
-    char* linkloc = (char*)palloc(OIDCHARS + OIDCHARS + 1);
+    char* linkloc = (char*)palloc(strlen(TBLSPCDIR) + OIDCHARS + 2);
     char* locationWithTempDir = NULL;
     int locationWithTempDirLen = 0;
 #ifdef PGXC
-    char* location_with_version_dir =
-        (char*)palloc(strlen(location) + 1 + strlen(TABLESPACE_VERSION_DIRECTORY) + 1 + PGXC_NODENAME_LENGTH + 1);
+    char* location_with_version_dir = NULL;
+    if (ENABLE_DSS) {
+        location_with_version_dir = (char *)palloc(strlen(location) + 1 + strlen(TABLESPACE_VERSION_DIRECTORY) + 1);
+    } else {
+        location_with_version_dir =
+            (char*)palloc(strlen(location) + 1 + strlen(TABLESPACE_VERSION_DIRECTORY) + 1 + PGXC_NODENAME_LENGTH + 1);
+    }
 #else
     char* location_with_version_dir = palloc(strlen(location) + 1 + strlen(TABLESPACE_VERSION_DIRECTORY) + 1);
 #endif
     int rc = 0;
 
-    rc = sprintf_s(linkloc, OIDCHARS + OIDCHARS + 1, "pg_tblspc/%u", tablespaceoid);
+    rc = sprintf_s(linkloc, strlen(TBLSPCDIR) + 1 + OIDCHARS + 1, "%s/%u", TBLSPCDIR, tablespaceoid);
     securec_check_ss(rc, "\0", "\0");
 #ifdef PGXC
     /*
@@ -1152,13 +1178,22 @@ static void create_tablespace_directories(const char* location, const Oid tables
      * of TABLESPACE_VERSION_DIRECTORY. Node name unicity in Postgres-XC
      * cluster insures unicity of tablespace.
      */
-    rc = sprintf_s(location_with_version_dir,
-        strlen(location) + 1 + strlen(TABLESPACE_VERSION_DIRECTORY) + 1 + PGXC_NODENAME_LENGTH + 1,
-        "%s/%s_%s",
-        location,
-        TABLESPACE_VERSION_DIRECTORY,
-        g_instance.attr.attr_common.PGXCNodeName);
-    securec_check_ss(rc, "\0", "\0");
+    if (ENABLE_DSS) {
+        rc = sprintf_s(location_with_version_dir,
+            strlen(location) + 1 + strlen(TABLESPACE_VERSION_DIRECTORY) + 1,
+            "%s/%s",
+            location,
+            TABLESPACE_VERSION_DIRECTORY);
+        securec_check_ss(rc, "\0", "\0");
+    } else {
+        rc = sprintf_s(location_with_version_dir,
+            strlen(location) + 1 + strlen(TABLESPACE_VERSION_DIRECTORY) + 1 + PGXC_NODENAME_LENGTH + 1,
+            "%s/%s_%s",
+            location,
+            TABLESPACE_VERSION_DIRECTORY,
+            g_instance.attr.attr_common.PGXCNodeName);
+        securec_check_ss(rc, "\0", "\0");
+    }
 #else
     rc = sprintf_s(location_with_version_dir,
         strlen(location) + 1 + strlen(TABLESPACE_VERSION_DIRECTORY) + 1,
@@ -1185,7 +1220,7 @@ static void create_tablespace_directories(const char* location, const Oid tables
      * it doesn't exist or has the wrong owner.
      */
     if (chmod(location, S_IRWXU) != 0) {
-        if (errno == ENOENT)
+        if (FILE_POSSIBLY_DELETED(errno))
             ereport(ERROR,
                 (errcode(ERRCODE_UNDEFINED_FILE),
                     errmsg("directory \"%s\" does not exist", location),
@@ -1218,7 +1253,7 @@ static void create_tablespace_directories(const char* location, const Oid tables
      * in a single location.
      */
     if (mkdir(location_with_version_dir, S_IRWXU) < 0) {
-        if (errno == EEXIST) {
+        if (FILE_ALREADY_EXIST(errno)) {
             if (!IsRoachRestore())
                 ereport(ERROR,
                     (errcode(ERRCODE_OBJECT_IN_USE),
@@ -1233,7 +1268,7 @@ static void create_tablespace_directories(const char* location, const Oid tables
     // Create PG_TEMP_FILES_DIR directory
     //
     if (mkdir(locationWithTempDir, S_IRWXU) < 0) {
-        if (errno == EEXIST) {
+        if (FILE_ALREADY_EXIST(errno)) {
             if (!IsRoachRestore())
                 ereport(ERROR,
                     (errcode(ERRCODE_OBJECT_IN_USE),
@@ -1249,12 +1284,12 @@ static void create_tablespace_directories(const char* location, const Oid tables
         struct stat st;
 
         if (lstat(linkloc, &st) < 0) {
-            if (errno != ENOENT)
+            if (!FILE_POSSIBLY_DELETED(errno))
                 ereport(ERROR, (errcode_for_file_access(), errmsg("could not stat file \"%s\": %m", linkloc)));
         } else if (S_ISDIR(st.st_mode)) {
-            if (rmdir(linkloc) < 0 && errno != ENOENT)
+            if (rmdir(linkloc) < 0 && !FILE_POSSIBLY_DELETED(errno))
                 ereport(ERROR, (errcode_for_file_access(), errmsg("could not remove directory \"%s\": %m", linkloc)));
-        } else if (unlink(linkloc) < 0 && errno != ENOENT) {
+        } else if (unlink(linkloc) < 0 && !FILE_POSSIBLY_DELETED(errno)) {
             ereport(ERROR, (errcode_for_file_access(), errmsg("could not remove symbolic link \"%s\": %m", linkloc)));
         }
     }
@@ -1363,20 +1398,36 @@ static void createtbspc_abort_callback(bool isCommit, const void* arg)
     char* linkloc = NULL;
     struct stat st;
     errno_t rc = EOK;
-    int len = strlen("pg_tblspc") + 1 + OIDCHARS + 1 + strlen(g_instance.attr.attr_common.PGXCNodeName) + 1 +
+    int len = 0;
+    if (ENABLE_DSS) {
+        len = strlen(TBLSPCDIR) + 1 + OIDCHARS + 1 + strlen(TABLESPACE_VERSION_DIRECTORY) + 1;
+    } else {
+        len = strlen(TBLSPCDIR) + 1 + OIDCHARS + 1 + strlen(g_instance.attr.attr_common.PGXCNodeName) + 1 +
               strlen(TABLESPACE_VERSION_DIRECTORY) + 1;
+    }
 
     if (isCommit)
         return;
 
     linkloc_with_version_dir = (char*)palloc(len);
-    rc = sprintf_s(linkloc_with_version_dir,
-        len,
-        "pg_tblspc/%u/%s_%s",
-        tablespaceoid,
-        TABLESPACE_VERSION_DIRECTORY,
-        g_instance.attr.attr_common.PGXCNodeName);
-    securec_check_ss(rc, "\0", "\0");
+    if (ENABLE_DSS) {
+        rc = sprintf_s(linkloc_with_version_dir,
+            len,
+            "%s/%u/%s",
+            TBLSPCDIR,
+            tablespaceoid,
+            TABLESPACE_VERSION_DIRECTORY);
+        securec_check_ss(rc, "\0", "\0");
+    } else {
+        rc = sprintf_s(linkloc_with_version_dir,
+            len,
+            "%s/%u/%s_%s",
+            TBLSPCDIR,
+            tablespaceoid,
+            TABLESPACE_VERSION_DIRECTORY,
+            g_instance.attr.attr_common.PGXCNodeName);
+        securec_check_ss(rc, "\0", "\0");
+    }
 
     /* First, remove version directory */
     if (!rmtree(linkloc_with_version_dir, true)) {
@@ -1433,20 +1484,39 @@ static bool destroy_tablespace_directories(Oid tablespaceoid, bool redo)
     errno_t rc = EOK;
 
 #ifdef PGXC
-    int len = strlen("pg_tblspc") + 1 + OIDCHARS + 1 + strlen(g_instance.attr.attr_common.PGXCNodeName) + 1 +
-              strlen(TABLESPACE_VERSION_DIRECTORY) + 1;
+    int len = 0;
+    if (ENABLE_DSS) {
+        len = strlen(TBLSPCDIR) + 1 + OIDCHARS + 1 + strlen(TABLESPACE_VERSION_DIRECTORY) + 1;
+        linkloc_with_version_dir = (char*)palloc(len);
+        rc = sprintf_s(linkloc_with_version_dir,
+            len,
+            "%s/%u/%s",
+            TBLSPCDIR,
+            tablespaceoid,
+            TABLESPACE_VERSION_DIRECTORY);
+        securec_check_ss(rc, "\0", "\0");
+    } else {
+        len = strlen(TBLSPCDIR) + 1 + OIDCHARS + 1 + strlen(g_instance.attr.attr_common.PGXCNodeName) + 1 +
+                strlen(TABLESPACE_VERSION_DIRECTORY) + 1;
+        linkloc_with_version_dir = (char*)palloc(len);
+        rc = sprintf_s(linkloc_with_version_dir,
+            len,
+            "%s/%u/%s_%s",
+            TBLSPCDIR,
+            tablespaceoid,
+            TABLESPACE_VERSION_DIRECTORY,
+            g_instance.attr.attr_common.PGXCNodeName);
+        securec_check_ss(rc, "\0", "\0");
+    }
+#else
+    int len = strlen(TBLSPCDIR) + 1 + OIDCHARS + 1 + strlen(TABLESPACE_VERSION_DIRECTORY) + 1;
     linkloc_with_version_dir = (char*)palloc(len);
     rc = sprintf_s(linkloc_with_version_dir,
         len,
-        "pg_tblspc/%u/%s_%s",
+        "%s/%u/%s",
+        TBLSPCDIR,
         tablespaceoid,
-        TABLESPACE_VERSION_DIRECTORY,
-        g_instance.attr.attr_common.PGXCNodeName);
-    securec_check_ss(rc, "\0", "\0");
-#else
-    int len = strlen("pg_tblspc") + 1 + OIDCHARS + 1 + strlen(TABLESPACE_VERSION_DIRECTORY) + 1;
-    linkloc_with_version_dir = (char*)palloc(len);
-    rc = sprintf_s(linkloc_with_version_dir, len, "pg_tblspc/%u/%s", tablespaceoid, TABLESPACE_VERSION_DIRECTORY);
+        TABLESPACE_VERSION_DIRECTORY);
     securec_check_ss(rc, "\0", "\0");
 #endif
 
@@ -1474,7 +1544,7 @@ static bool destroy_tablespace_directories(Oid tablespaceoid, bool redo)
      */
     dirdesc = AllocateDir(linkloc_with_version_dir);
     if (dirdesc == NULL) {
-        if (errno == ENOENT) {
+        if (!FILE_POSSIBLY_DELETED(errno)) {
             if (!redo)
                 ereport(WARNING,
                     (errcode_for_file_access(),
@@ -1558,7 +1628,7 @@ remove_symlink:
                 (errcode_for_file_access(), errmsg("could not remove directory \"%s\": %m", linkloc)));
     } else {
         if (unlink(linkloc) < 0)
-            ereport(redo ? LOG : (errno == ENOENT ? WARNING : ERROR),
+            ereport(redo ? LOG : (FILE_POSSIBLY_DELETED(errno) ? WARNING : ERROR),
                 (errcode_for_file_access(), errmsg("could not remove symbolic link \"%s\": %m", linkloc)));
     }
 
@@ -1609,7 +1679,7 @@ void remove_tablespace_symlink(const char* linkloc)
     struct stat st;
 
     if (lstat(linkloc, &st) < 0) {
-        if (errno == ENOENT)
+        if (FILE_POSSIBLY_DELETED(errno))
             return;
         ereport(ERROR, (errcode_for_file_access(), errmsg("could not stat file \"%s\": %m", linkloc)));
     }
@@ -1619,12 +1689,12 @@ void remove_tablespace_symlink(const char* linkloc)
          * This will fail if the directory isn't empty, but not if it's a
          * junction point.
          */
-        if (rmdir(linkloc) < 0 && errno != ENOENT)
+        if (rmdir(linkloc) < 0 && !FILE_POSSIBLY_DELETED(errno))
             ereport(ERROR, (errcode_for_file_access(), errmsg("could not remove directory \"%s\": %m", linkloc)));
     }
 #ifdef S_ISLNK
     else if (S_ISLNK(st.st_mode)) {
-        if (unlink(linkloc) < 0 && errno != ENOENT)
+        if (unlink(linkloc) < 0 && !FILE_POSSIBLY_DELETED(errno))
             ereport(ERROR, (errcode_for_file_access(), errmsg("could not remove symbolic link \"%s\": %m", linkloc)));
     }
 #endif
@@ -2422,20 +2492,29 @@ recheck:
 
 void xlog_create_tblspc(Oid tsId, char* tsPath, bool isRelativePath)
 {
+    int len;
     char* location = tsPath;
+    errno_t rc = EOK;
+
     if (isRelativePath) {
-        int len = strlen(t_thrd.proc_cxt.DataDir) + 1 + strlen(tsPath) + 1 + strlen(PG_LOCATION_DIR) + 1;
-        location = (char*)palloc(len);
-        errno_t rc = EOK;
-        if (t_thrd.proc_cxt.DataDir[strlen(t_thrd.proc_cxt.DataDir) - 1] == '/') {
-            rc = snprintf_s(
-                location, len, len - 1, "%s%s/%s", t_thrd.proc_cxt.DataDir, PG_LOCATION_DIR, tsPath);
-            securec_check_ss(rc, "\0", "\0");
+        if (ENABLE_DSS) {
+            len = (int)strlen(PG_LOCATION_DIR) + 1 + (int)strlen(tsPath) + 1;
+            location = (char*)palloc(len);
+            rc = snprintf_s(location, len, len - 1, "%s/%s", PG_LOCATION_DIR, tsPath);
         } else {
-            rc = snprintf_s(
-                location, len, len - 1, "%s/%s/%s", t_thrd.proc_cxt.DataDir, PG_LOCATION_DIR, tsPath);
-            securec_check_ss(rc, "\0", "\0");
+            if (t_thrd.proc_cxt.DataDir[strlen(t_thrd.proc_cxt.DataDir) - 1] == '/') {
+                len = strlen(t_thrd.proc_cxt.DataDir) + strlen(PG_LOCATION_DIR) + 1 + strlen(tsPath) + 1;
+                location = (char*)palloc(len);
+                rc = snprintf_s(
+                    location, len, len - 1, "%s%s/%s", t_thrd.proc_cxt.DataDir, PG_LOCATION_DIR, tsPath);
+            } else {
+                len = strlen(t_thrd.proc_cxt.DataDir) + 1 + strlen(PG_LOCATION_DIR) + 1 + strlen(tsPath) + 1;
+                location = (char*)palloc(len);
+                rc = snprintf_s(
+                    location, len, len - 1, "%s/%s/%s", t_thrd.proc_cxt.DataDir, PG_LOCATION_DIR, tsPath);
+            }
         }
+        securec_check_ss(rc, "\0", "\0");
     }
     check_create_dir(location);
     create_tablespace_directories(location, tsId);
@@ -2701,7 +2780,14 @@ void TableSpaceUsageManager::IsExceedMaxsize(Oid tableSpaceOid, uint64 requestSi
     uint64 currentSize = 0;
     TableSpaceUsageBucket* bucket = NULL;
     TableSpaceUsageSlot* slot = NULL;
-    
+
+    /* skip it while initdb */
+    if (IsInitdb) {
+        u_sess->cmd_cxt.l_tableSpaceOid = tableSpaceOid;
+        u_sess->cmd_cxt.l_isLimit = false;
+        return;
+    }
+
     /*
      * Segment-page storage calls IsExceedMaxsize is often caused by 'smgrextend', which does physical file
      * extension. However, smgrextend may be invoked in ReadBuffer_common_ReadBlock that after invoking

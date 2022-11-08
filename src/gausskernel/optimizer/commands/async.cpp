@@ -169,6 +169,8 @@ typedef struct AsyncQueueEntry {
 
 #define AsyncQueueEntryEmptySize (offsetof(AsyncQueueEntry, data) + 2)
 
+#define NOTIFYDIR (g_instance.datadir_cxt.notifyDir)
+
 /*
  * Struct describing a queue position, and assorted macros for working with it
  */
@@ -389,7 +391,8 @@ void AsyncShmemInit(void)
      * Set up SLRU management of the pg_notify data.
      */
     SimpleLruInit(AsyncCtl, GetBuiltInTrancheName(LWTRANCHE_ASYNC_CTL), LWTRANCHE_ASYNC_CTL, NUM_ASYNC_BUFFERS, 0, 
-                  AsyncCtlLock, "pg_notify");
+                  AsyncCtlLock, NOTIFYDIR);
+
     /* Override default assumption that writes should be fsync'd */
     AsyncCtl->do_fsync = false;
 

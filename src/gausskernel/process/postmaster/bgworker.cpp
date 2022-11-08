@@ -41,6 +41,11 @@ bool IsBgWorkerProcess(void)
     return t_thrd.role == BGWORKER;
 }
 
+bool IsDMSWorkerProcess(void)
+{
+    return t_thrd.role == DMS_WORKER;
+}
+
 static inline void BgworkerPutBackToFreeList(BackgroundWorker* bgworker)
 {
     BGW_HDR* bgworker_base = (BGW_HDR *)g_instance.bgw_base;

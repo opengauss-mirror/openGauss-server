@@ -7,6 +7,7 @@ set(CMAKE_SKIP_RPATH TRUE)
 set(CMAKE_MODULE_PATH 
     ${CMAKE_CURRENT_SOURCE_DIR}/bootstrap
     ${CMAKE_CURRENT_SOURCE_DIR}/storage
+    ${CMAKE_CURRENT_SOURCE_DIR}/ddes
     ${CMAKE_CURRENT_SOURCE_DIR}/cbb
     ${CMAKE_CURRENT_SOURCE_DIR}/dbmind
     ${CMAKE_CURRENT_SOURCE_DIR}/optimizer
@@ -23,6 +24,7 @@ add_subdirectory(bootstrap)
 add_subdirectory(process)
 add_subdirectory(runtime)
 add_subdirectory(security)
+add_subdirectory(ddes)
 
 # gaussdb
 SET(llvm_libs_var "")
@@ -133,6 +135,7 @@ set(gaussdb_objects
     $<TARGET_OBJECTS:gausskernel_storage_access_common>
     $<TARGET_OBJECTS:gausskernel_security_gs_ledger>
     $<TARGET_OBJECTS:gausskernel_security_tde_key_management>
+    $<TARGET_OBJECTS:gausskernel_ddes_dms_adapter>
 )
 
 if("${ENABLE_MULTIPLE_NODES}" STREQUAL "OFF")
@@ -194,6 +197,7 @@ list(APPEND gaussdb_objects
     $<TARGET_OBJECTS:gausskernel_storage_page>
     $<TARGET_OBJECTS:gausskernel_storage_remote>
     $<TARGET_OBJECTS:gausskernel_storage_smgr>
+    $<TARGET_OBJECTS:gausskernel_storage_dss>
     $<TARGET_OBJECTS:gausskernel_storage_smgr_segment>
     $<TARGET_OBJECTS:gausskernel_storage_smgr_cfs>
     $<TARGET_OBJECTS:gausskernel_storage_access_ustore>
