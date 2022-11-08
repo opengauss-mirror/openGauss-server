@@ -61,6 +61,7 @@
 #include "utils/timestamp.h"
 #include "gssignal/gs_signal.h"
 #include "replication/slot.h"
+#include "access/hash.h"
 
 /*
  * Multiplier to apply to BgWriterDelay when we decide to hibernate.
@@ -613,6 +614,28 @@ void invalid_buffer_bgwriter_main()
     }
 }
 
+static int file_node_ignore_opt_match(const void* left, const void* right, Size keysize)
+{
+    const RelFileNode* lnode = (const RelFileNode*)left;
+    const RelFileNode* rnode = (const RelFileNode*)right;
+    Assert(lnode != NULL && rnode != NULL);
+    Assert(keysize == sizeof(RelFileNode));
+
+    /* we just care whether the result is 0 or not */
+    if (RelFileNodeEquals(*lnode, *rnode)) {
+        return 0;
+    }
+
+    return 1;
+}
+
+static uint32 file_node_ignore_opt_hash(const void* key, Size keysize)
+{
+    RelFileNode rnode = *(const RelFileNode*)key;
+    rnode.opt = DefaultFileNodeOpt;
+    return DatumGetUInt32(hash_any((const unsigned char*)&rnode, (int)keysize));
+}
+
 const int HASH_TABLE_ELEMENT_MIN_NUM = 512;
 HTAB *relfilenode_hashtbl_create(const char *name, bool use_heap_mem)
 {
@@ -623,7 +646,8 @@ HTAB *relfilenode_hashtbl_create(const char *name, bool use_heap_mem)
     rc = memset_s(&hashCtrl, sizeof(hashCtrl), 0, sizeof(hashCtrl));
     securec_check(rc, "", "");
     hashCtrl.hcxt = (MemoryContext)CurrentMemoryContext;
-    hashCtrl.hash = tag_hash;
+    hashCtrl.match = file_node_ignore_opt_match;
+    hashCtrl.hash = file_node_ignore_opt_hash;
     hashCtrl.keysize = sizeof(RelFileNode);
     /* keep entrysize >= keysize, stupid limits */
     hashCtrl.entrysize = sizeof(DelFileTag);
@@ -631,14 +655,37 @@ HTAB *relfilenode_hashtbl_create(const char *name, bool use_heap_mem)
     if (use_heap_mem) {
         hashtbl = HeapMemInitHash(name, HASH_TABLE_ELEMENT_MIN_NUM,
             Max(g_instance.attr.attr_common.max_files_per_process, t_thrd.storage_cxt.max_userdatafiles),  &hashCtrl,
-            (HASH_FUNCTION | HASH_ELEM));
+            (HASH_FUNCTION | HASH_ELEM | HASH_COMPARE));
         if (hashtbl == NULL) {
             ereport(FATAL, (errmsg("could not initialize unlinik relation hash table")));
         }
     } else {
-        hashtbl = hash_create(name, HASH_TABLE_ELEMENT_MIN_NUM, &hashCtrl, (HASH_CONTEXT | HASH_FUNCTION | HASH_ELEM));
+        hashtbl = hash_create(name, HASH_TABLE_ELEMENT_MIN_NUM, &hashCtrl,
+            (HASH_CONTEXT | HASH_FUNCTION | HASH_ELEM | HASH_COMPARE));
     }
     return hashtbl;
+}
+
+static int fork_file_node_ignore_opt_match(const void* left, const void* right, Size keysize)
+{
+    const ForkRelFileNode* lnode = (const ForkRelFileNode*)left;
+    const ForkRelFileNode* rnode = (const ForkRelFileNode*)right;
+    Assert(lnode != NULL && rnode != NULL);
+    Assert(keysize == sizeof(ForkRelFileNode));
+
+    /* we just care whether the result is 0 or not */
+    if (RelFileNodeEquals(lnode->rnode, rnode->rnode) && lnode->forkNum == rnode->forkNum) {
+        return 0;
+    }
+
+    return 1;
+}
+
+static uint32 fork_file_node_ignore_opt_hash(const void* key, Size keysize)
+{
+    ForkRelFileNode rnode = *(const ForkRelFileNode*)key;
+    rnode.rnode.opt = DefaultFileNodeOpt;
+    return DatumGetUInt32(hash_any((const unsigned char*)&rnode, (int)keysize));
 }
 
 HTAB *relfilenode_fork_hashtbl_create(const char* name, bool use_heap_mem)
@@ -650,7 +697,8 @@ HTAB *relfilenode_fork_hashtbl_create(const char* name, bool use_heap_mem)
     rc = memset_s(&hashCtrl, sizeof(hashCtrl), 0, sizeof(hashCtrl));
     securec_check(rc, "", "");
     hashCtrl.hcxt = (MemoryContext)CurrentMemoryContext;
-    hashCtrl.hash = tag_hash;
+    hashCtrl.match = fork_file_node_ignore_opt_match;
+    hashCtrl.hash = fork_file_node_ignore_opt_hash;
     hashCtrl.keysize = sizeof(ForkRelFileNode);
     /* keep  entrysize >= keysize, stupid limits */
     hashCtrl.entrysize = sizeof(DelForkFileTag);
@@ -658,12 +706,13 @@ HTAB *relfilenode_fork_hashtbl_create(const char* name, bool use_heap_mem)
     if (use_heap_mem) {
         hashtbl = HeapMemInitHash(name, HASH_TABLE_ELEMENT_MIN_NUM,
             Max(g_instance.attr.attr_common.max_files_per_process, t_thrd.storage_cxt.max_userdatafiles),
-            &hashCtrl, (HASH_FUNCTION | HASH_ELEM));
+            &hashCtrl, (HASH_FUNCTION | HASH_ELEM | HASH_COMPARE));
         if (hashtbl == NULL) {
             ereport(FATAL, (errmsg("could not initialize unlinik relation hash table")));
         }
     } else {
-        hashtbl = hash_create(name, HASH_TABLE_ELEMENT_MIN_NUM, &hashCtrl, (HASH_CONTEXT | HASH_FUNCTION | HASH_ELEM));
+        hashtbl = hash_create(name, HASH_TABLE_ELEMENT_MIN_NUM, &hashCtrl,
+            (HASH_CONTEXT | HASH_FUNCTION | HASH_ELEM | HASH_COMPARE));
     }
     return hashtbl;
 }
