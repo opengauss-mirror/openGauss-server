@@ -271,13 +271,14 @@ select * from t_timestamp;
 
 -- timetz
 create table t_timetz(c timetz not null);
+set timezone to 'PRC';
 insert /*+ ignore_error */ into t_timetz values (null);
 WARNING:  null value in column "c" violates not-null constraint
 DETAIL:  Failing row contains (null).
 select * from t_timetz;
       c      
 -------------
- 00:00:00-07
+ 00:00:00+08
 (1 row)
 
 insert into t_timetz values('00:00:01+08');
@@ -289,9 +290,16 @@ DETAIL:  Failing row contains (null).
 select * from t_timetz;
       c      
 -------------
- 00:00:00-07
- 00:00:00-07
+ 00:00:00+08
+ 00:00:00+08
 (2 rows)
+
+reset timezone;
+show timezone;
+ TimeZone 
+----------
+ PST8PDT
+(1 row)
 
 -- time
 create table t_time(c time not null);
