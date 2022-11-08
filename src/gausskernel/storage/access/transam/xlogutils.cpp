@@ -20,6 +20,7 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
+#include "access/hash.h"
 #include "access/nbtree.h"
 #include "access/xlog.h"
 #include "access/xlogutils.h"
@@ -141,6 +142,28 @@ static inline void SetCurrentXLogLSN(XLogRecPtr lsn)
     t_thrd.xlog_cxt.current_redo_xlog_lsn = lsn;
 }
 
+uint32 XlInvalidPageKeyHash(const void *key, Size keysize)
+{
+    xl_invalid_page_key invalidPageKey = *(const xl_invalid_page_key *)key;
+    invalidPageKey.node.opt = 0;
+    return DatumGetUInt32(hash_any((const unsigned char *)&invalidPageKey, (int)keysize));
+}
+
+int XlInvalidPageKeyMatch(const void *left, const void *right, Size keysize)
+{
+    const xl_invalid_page_key *leftKey = (const xl_invalid_page_key *)left;
+    const xl_invalid_page_key *rightKey = (const xl_invalid_page_key *)right;
+    Assert(keysize == sizeof(xl_invalid_page_key));
+
+    /* we just care whether the result is 0 or not */
+    if (RelFileNodeEquals(leftKey->node, rightKey->node) && leftKey->forkno == rightKey->forkno &&
+        leftKey->blkno == rightKey->blkno) {
+        return 0;
+    }
+
+    return 1;
+}
+
 /* Log a reference to an invalid page */
 void log_invalid_page(const RelFileNode &node, ForkNumber forkno, BlockNumber blkno, InvalidPageType type,
                       const XLogPhyBlock *pblk)
@@ -168,8 +191,9 @@ void log_invalid_page(const RelFileNode &node, ForkNumber forkno, BlockNumber bl
 
         ctl.keysize = sizeof(xl_invalid_page_key);
         ctl.entrysize = sizeof(xl_invalid_page);
-        ctl.hash = tag_hash;
-        int flag = HASH_ELEM | HASH_FUNCTION;
+        ctl.hash = XlInvalidPageKeyHash;
+        ctl.match = XlInvalidPageKeyMatch;
+        int flag = HASH_ELEM | HASH_FUNCTION | HASH_COMPARE;
         if (IsMultiThreadRedoRunning()) {
             ctl.hcxt = g_instance.comm_cxt.predo_cxt.parallelRedoCtx;
             flag |= HASH_SHRCTX;

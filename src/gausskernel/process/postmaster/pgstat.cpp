@@ -67,6 +67,7 @@
 #include "storage/pg_shmem.h"
 #include "storage/procsignal.h"
 #include "storage/procarray.h"
+#include "storage/smgr/relfilenode_hash.h"
 #include "threadpool/threadpool.h"
 #include "utils/ascii.h"
 #include "utils/atomic.h"
@@ -9691,10 +9692,11 @@ void initGlobalBadBlockStat()
         hash_ctl.hcxt = global_bad_block_mcxt;
         hash_ctl.keysize = sizeof(BadBlockHashKey);
         hash_ctl.entrysize = sizeof(BadBlockHashEnt);
-        hash_ctl.hash = tag_hash;
+        hash_ctl.hash = BadBlockHashKeyHash;
+        hash_ctl.match = BadBlockHashKeyMatch;
 
-        global_bad_block_stat =
-            hash_create("bad block stat global hash table", 64, &hash_ctl, HASH_ELEM | HASH_SHRCTX | HASH_FUNCTION);
+        global_bad_block_stat = hash_create("bad block stat global hash table", 64, &hash_ctl,
+                                            HASH_ELEM | HASH_SHRCTX | HASH_FUNCTION | HASH_COMPARE);
     }
 
     LWLockRelease(BadBlockStatHashLock);
@@ -9724,10 +9726,11 @@ void initLocalBadBlockStat()
         hash_ctl.hcxt = t_thrd.stat_cxt.local_bad_block_mcxt;
         hash_ctl.keysize = sizeof(BadBlockHashKey);
         hash_ctl.entrysize = sizeof(BadBlockHashEnt);
-        hash_ctl.hash = tag_hash;
+        hash_ctl.hash = BadBlockHashKeyHash;
+        hash_ctl.match = BadBlockHashKeyMatch;
 
-        t_thrd.stat_cxt.local_bad_block_stat =
-            hash_create("bad block stat session hash table", 16, &hash_ctl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
+        t_thrd.stat_cxt.local_bad_block_stat = hash_create("bad block stat session hash table", 16, &hash_ctl,
+                                                           HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT | HASH_COMPARE);
     }
 }
 
@@ -9799,10 +9802,11 @@ void resetBadBlockStat()
     hash_ctl.hcxt = global_bad_block_mcxt;
     hash_ctl.keysize = sizeof(BadBlockHashKey);
     hash_ctl.entrysize = sizeof(BadBlockHashEnt);
-    hash_ctl.hash = tag_hash;
+    hash_ctl.hash = BadBlockHashKeyHash;
+    hash_ctl.match = BadBlockHashKeyMatch;
 
     global_bad_block_stat =
-        hash_create("bad block stat hash table", 64, &hash_ctl, HASH_ELEM | HASH_SHRCTX | HASH_FUNCTION);
+        hash_create("bad block stat hash table", 64, &hash_ctl, HASH_ELEM | HASH_SHRCTX | HASH_FUNCTION | HASH_COMPARE);
 
     LWLockRelease(BadBlockStatHashLock);
 }

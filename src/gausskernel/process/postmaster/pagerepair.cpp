@@ -35,6 +35,7 @@
 #include "storage/copydir.h"
 #include "storage/lmgr.h"
 #include "storage/remote_read.h"
+#include "storage/smgr/relfilenode_hash.h"
 #include "storage/smgr/fd.h"
 #include "pgstat.h"
 #include "postmaster/pagerepair.h"
@@ -231,10 +232,12 @@ void PageRepairHashTblInit(void)
         securec_check(rc, "", "");
         ctl.keysize = sizeof(RepairBlockKey);
         ctl.entrysize = sizeof(RepairBlockEntry);
-        ctl.hash = tag_hash;
+        ctl.hash = RepairBlockKeyHash;
+        ctl.match = RepairBlockKeyMatch;
         ctl.hcxt = INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE);
-        g_instance.repair_cxt.page_repair_hashtbl = hash_create("Page Repair Hash Table", MAX_REPAIR_PAGE_NUM, &ctl,
-            HASH_ELEM | HASH_FUNCTION |HASH_CONTEXT);
+        g_instance.repair_cxt.page_repair_hashtbl =
+            hash_create("Page Repair Hash Table", MAX_REPAIR_PAGE_NUM, &ctl,
+                        HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT | HASH_COMPARE);
 
         if (!g_instance.repair_cxt.page_repair_hashtbl)
             ereport(FATAL, (errmsg("could not initialize page repair Hash table")));
@@ -891,10 +894,11 @@ void FileRepairHashTblInit(void)
         securec_check(rc, "", "");
         ctl.keysize = sizeof(RepairFileKey);
         ctl.entrysize = sizeof(RepairFileEntry);
-        ctl.hash = tag_hash;
+        ctl.hash = RepairFileKeyHash;
+        ctl.match = RepairFileKeyMatch;
         ctl.hcxt = INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE);
         g_instance.repair_cxt.file_repair_hashtbl = hash_create("File Repair Hash Table", MAX_REPAIR_FILE_NUM, &ctl,
-            HASH_ELEM | HASH_FUNCTION |HASH_CONTEXT);
+            HASH_ELEM | HASH_FUNCTION |HASH_CONTEXT | HASH_COMPARE);
 
         if (!g_instance.repair_cxt.file_repair_hashtbl)
             ereport(FATAL, (errmsg("could not initialize file repair Hash table")));

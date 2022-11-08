@@ -72,7 +72,9 @@ void InitBufTable(int size)
  */
 uint32 BufTableHashCode(BufferTag *tagPtr)
 {
-    return hashquickany(0xFFFFFFFF, (unsigned char *)tagPtr, sizeof(BufferTag));
+    BufferTag tag = *tagPtr;
+    tag.rnode.opt = DefaultFileNodeOpt;
+    return hashquickany(0xFFFFFFFF, (unsigned char *)&tag, sizeof(BufferTag));
 }
 
 /*

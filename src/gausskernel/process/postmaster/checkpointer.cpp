@@ -50,6 +50,7 @@
 #include "storage/ipc.h"
 #include "storage/lock/lwlock.h"
 #include "storage/smgr/knl_usync.h"
+#include "storage/smgr/relfilenode_hash.h"
 #include "storage/proc.h"
 #include "storage/shmem.h"
 #include "storage/smgr/smgr.h"
@@ -1236,11 +1237,12 @@ int getDuplicateRequest(CheckpointerRequest *requests, int num_requests, bool *s
     securec_check(rc, "\0", "\0");
     ctl.keysize = sizeof(CheckpointerRequest);
     ctl.entrysize = sizeof(struct CheckpointerSlotMapping);
-    ctl.hash = tag_hash;
+    ctl.hash = CheckpointerRequestHash;
+    ctl.match = CheckpointerRequestMatch;
     ctl.hcxt = CurrentMemoryContext;
 
     htab = hash_create("CompactRequestQueue", num_requests, &ctl,
-        HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
+        HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT | HASH_COMPARE);
 
     /*
      * The basic idea here is that a request can be skipped if it's followed

@@ -52,6 +52,7 @@
 #include "storage/proc.h"
 #include "storage/shmem.h"
 #include "storage/smgr/smgr.h"
+#include "storage/smgr/relfilenode_hash.h"
 #include "storage/spin.h"
 #include "storage/standby.h"
 #include "utils/guc.h"
@@ -642,7 +643,8 @@ HTAB *relfilenode_hashtbl_create(const char *name, bool use_heap_mem)
     rc = memset_s(&hashCtrl, sizeof(hashCtrl), 0, sizeof(hashCtrl));
     securec_check(rc, "", "");
     hashCtrl.hcxt = (MemoryContext)CurrentMemoryContext;
-    hashCtrl.hash = tag_hash;
+    hashCtrl.match = file_node_ignore_opt_match;
+    hashCtrl.hash = file_node_ignore_opt_hash;
     hashCtrl.keysize = sizeof(RelFileNode);
     /* keep entrysize >= keysize, stupid limits */
     hashCtrl.entrysize = sizeof(DelFileTag);
@@ -650,12 +652,13 @@ HTAB *relfilenode_hashtbl_create(const char *name, bool use_heap_mem)
     if (use_heap_mem) {
         hashtbl = HeapMemInitHash(name, HASH_TABLE_ELEMENT_MIN_NUM,
             Max(g_instance.attr.attr_common.max_files_per_process, t_thrd.storage_cxt.max_userdatafiles),  &hashCtrl,
-            (HASH_FUNCTION | HASH_ELEM));
+            (HASH_FUNCTION | HASH_ELEM | HASH_COMPARE));
         if (hashtbl == NULL) {
             ereport(FATAL, (errmsg("could not initialize unlinik relation hash table")));
         }
     } else {
-        hashtbl = hash_create(name, HASH_TABLE_ELEMENT_MIN_NUM, &hashCtrl, (HASH_CONTEXT | HASH_FUNCTION | HASH_ELEM));
+        hashtbl = hash_create(name, HASH_TABLE_ELEMENT_MIN_NUM, &hashCtrl,
+            (HASH_CONTEXT | HASH_FUNCTION | HASH_ELEM | HASH_COMPARE));
     }
     return hashtbl;
 }
@@ -669,7 +672,8 @@ HTAB *relfilenode_fork_hashtbl_create(const char* name, bool use_heap_mem)
     rc = memset_s(&hashCtrl, sizeof(hashCtrl), 0, sizeof(hashCtrl));
     securec_check(rc, "", "");
     hashCtrl.hcxt = (MemoryContext)CurrentMemoryContext;
-    hashCtrl.hash = tag_hash;
+    hashCtrl.match = fork_file_node_ignore_opt_match;
+    hashCtrl.hash = fork_file_node_ignore_opt_hash;
     hashCtrl.keysize = sizeof(ForkRelFileNode);
     /* keep  entrysize >= keysize, stupid limits */
     hashCtrl.entrysize = sizeof(DelForkFileTag);
@@ -677,12 +681,13 @@ HTAB *relfilenode_fork_hashtbl_create(const char* name, bool use_heap_mem)
     if (use_heap_mem) {
         hashtbl = HeapMemInitHash(name, HASH_TABLE_ELEMENT_MIN_NUM,
             Max(g_instance.attr.attr_common.max_files_per_process, t_thrd.storage_cxt.max_userdatafiles),
-            &hashCtrl, (HASH_FUNCTION | HASH_ELEM));
+            &hashCtrl, (HASH_FUNCTION | HASH_ELEM | HASH_COMPARE));
         if (hashtbl == NULL) {
             ereport(FATAL, (errmsg("could not initialize unlinik relation hash table")));
         }
     } else {
-        hashtbl = hash_create(name, HASH_TABLE_ELEMENT_MIN_NUM, &hashCtrl, (HASH_CONTEXT | HASH_FUNCTION | HASH_ELEM));
+        hashtbl = hash_create(name, HASH_TABLE_ELEMENT_MIN_NUM, &hashCtrl,
+            (HASH_CONTEXT | HASH_FUNCTION | HASH_ELEM | HASH_COMPARE));
     }
     return hashtbl;
 }
