@@ -36,6 +36,7 @@ public:
     ThreadPoolGroup* m_group;
     volatile bool m_reaperAllSession;
     bool m_getKilled;
+    volatile int m_isHang;
 
     ThreadPoolListener(ThreadPoolGroup* group);
     ~ThreadPoolListener();
@@ -52,6 +53,8 @@ public:
     void ReaperAllSession();
     void ShutDown() const;
     bool GetSessIshang(instr_time* current_time, uint64* sessionId);
+    void WakeupForHang();
+    void WakeupReadySessionList();
 
     inline ThreadPoolGroup* GetGroup()
     {
