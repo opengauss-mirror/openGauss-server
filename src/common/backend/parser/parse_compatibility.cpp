@@ -657,7 +657,7 @@ bool plus_outerjoin_precheck(const OperatorPlusProcessContext* ctx, Node* expr, 
         }
 
         /* Report Error when t_noplus and t_hasplus is the same RTE */
-        if (strcmp(t_noplus->eref->aliasname, t_hasplus->eref->aliasname) == 0) {
+        if (t_noplus == t_hasplus) {
             ereport(ERROR,
                 (errcode(ERRCODE_SYNTAX_ERROR),
                     errmsg("\"%s\" is not allowed to outer join with itself.", t_noplus->eref->aliasname)));
