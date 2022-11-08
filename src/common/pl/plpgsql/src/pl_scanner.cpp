@@ -124,6 +124,7 @@ static const ScanKeyword unreserved_keywords[] = {
     PG_KEYWORD("call", K_CALL, UNRESERVED_KEYWORD)
     PG_KEYWORD("collect", K_COLLECT, UNRESERVED_KEYWORD) 
     PG_KEYWORD("commit", K_COMMIT, UNRESERVED_KEYWORD) 
+    PG_KEYWORD("condition", K_CONDITION, UNRESERVED_KEYWORD) 
     PG_KEYWORD("constant", K_CONSTANT, UNRESERVED_KEYWORD) 
     PG_KEYWORD("continue", K_CONTINUE, UNRESERVED_KEYWORD) 
     PG_KEYWORD("current", K_CURRENT, UNRESERVED_KEYWORD) 
@@ -226,6 +227,7 @@ static void push_back_token(int token, TokenAuxData* auxdata);
 static void location_lineno_init(void);
 static int get_self_defined_tok(int tok_flag);
 static int plpgsql_parse_cursor_attribute(int* loc);
+static int plpgsql_parse_declare(int* loc);
 static void RecordDependencyOfPkg(PLpgSQL_package* pkg, Oid pkgOid, Oid currCompPkgOid);
 static PLpgSQL_datum* SearchPackageDatum(PLpgSQL_package* pkg, Oid pkgOid, Oid currCompPkgOid,
     const char* pkgname, const char* objname);
@@ -257,6 +259,14 @@ int plpgsql_yylex(void)
     if (tok1 != -1) {
         plpgsql_yylloc = loc;
         return tok1;
+    }
+    if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) {
+        /* parse declare condition */
+        tok1 = plpgsql_parse_declare(&loc);
+        if (tok1 != -1) {
+            plpgsql_yylloc = loc;
+            return tok1;
+        }
     }
 
     tok1 = internal_yylex(&aux1);
@@ -1120,6 +1130,55 @@ static int plpgsql_parse_cursor_attribute(int* loc)
     return token;
 }
 
+static int plpgsql_parse_declare(int* loc)
+{
+    TokenAuxData aux1;
+    int tok1 = -1;
+    int token = -1;
+
+    if (u_sess->parser_cxt.in_package_function_compile) {
+        return token;
+    }
+
+    tok1 = internal_yylex(&aux1);
+    if (tok1 == K_DECLARE) {
+        TokenAuxData aux2;
+        TokenAuxData aux3;
+
+        int tok2 = -1;
+        int tok3 = -1;
+        tok2 = internal_yylex(&aux2);
+        tok3 = internal_yylex(&aux3);
+        if (tok2 != IDENT || tok3 != IDENT) {
+            push_back_token(tok3, &aux3);
+            push_back_token(tok2, &aux2);
+            push_back_token(tok1, &aux1);
+            return token;
+        }
+        if (strcasecmp(aux3.lval.str, "cursor") == 0) {
+            token = T_DECLARE_CURSOR;
+            push_back_token(tok3, &aux3);
+            push_back_token(tok2, &aux2);
+            /* get the declare attribute location */
+            *loc = aux1.lloc;
+            plpgsql_yylval = aux1.lval;
+        } else if (strcasecmp(aux3.lval.str, "condition") == 0) {
+            token = T_DECLARE_CONDITION;
+            push_back_token(tok3, &aux3);
+            push_back_token(tok2, &aux2);
+            /* get the declare attribute location */
+            *loc = aux1.lloc;
+            plpgsql_yylval = aux1.lval;
+        } else {
+                push_back_token(tok3, &aux3);
+                push_back_token(tok2, &aux2);
+                push_back_token(tok1, &aux1);
+        }
+    } else {
+        push_back_token(tok1, &aux1);
+    }
+    return token;
+}
 /*
  * a convenient method to see if the next two tokens are what we expected
  */
