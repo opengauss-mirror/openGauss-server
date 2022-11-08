@@ -565,6 +565,11 @@ trace_msg_code gstrace_start(int key, const char* mask, uint64_t bufferSize, con
     bufferSize = gsAlign(((bufferSize > MIN_BUF_SIZE) ? bufferSize : MIN_BUF_SIZE), SLOT_SIZE);
     bufferSize = bTrcToFile ? MIN_BUF_SIZE : roundToNearestPowerOfTwo(bufferSize);
 
+    /* check if database process exist. */
+    if (!checkProcess(key)) {
+        return TRACE_PROCESS_NOT_EXIST;
+    }
+
     if (attachTraceCfgSharedMem(key) != TRACE_OK) {
         /* Failed to attached to shared memory. */
         return TRACE_ATTACH_CFG_SHARE_MEMORY_ERR;
@@ -572,11 +577,6 @@ trace_msg_code gstrace_start(int key, const char* mask, uint64_t bufferSize, con
 
     if (pTrcCxt->pTrcCfg->bEnabled) {
         return TRACE_ALREADY_START;
-    }
-
-    /* check if database process exist. */
-    if (!checkProcess(key)) {
-        return TRACE_PROCESS_NOT_EXIST;
     }
 
     /* set the mask if it's passed in */
@@ -613,6 +613,11 @@ trace_msg_code gstrace_stop(int key)
 {
     char sBufMemName[TRC_SHARED_MEM_NAME_MAX] = {0};
     trace_context* pTrcCxt = getTraceContext();
+
+    /* check if database process exist. */
+    if (!checkProcess(key)) {
+        return TRACE_PROCESS_NOT_EXIST;
+    }
 
     if (attachTraceCfgSharedMem(key) != TRACE_OK) {
         return TRACE_ATTACH_CFG_SHARE_MEMORY_ERR;
@@ -1013,6 +1018,11 @@ trace_msg_code gstrace_dump(int key, const char* outPath)
 {
     trace_context* pTrcCxt = getTraceContext();
     trace_msg_code ret;
+
+    /* check if database process exist. */
+    if (!checkProcess(key)) {
+        return TRACE_PROCESS_NOT_EXIST;
+    }
 
     if (attachTraceCfgSharedMem(key) != TRACE_OK) {
         return TRACE_ATTACH_CFG_SHARE_MEMORY_ERR;
