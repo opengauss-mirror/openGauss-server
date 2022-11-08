@@ -291,6 +291,16 @@ Oid *namespaceid, bool isFirstNode)
      */
     if (stmt->if_not_exists && OidIsValid(existing_relid)) {
         bool exists_ok = true;
+
+        /*
+         * If we are in an extension script, insist that the pre-existing
+         * object be a member of the extension, to avoid security risks.
+         */
+        ObjectAddress address;
+
+        ObjectAddressSet(address, RelationRelationId, existing_relid);
+        checkMembershipInCurrentExtension(&address);
+
         /* 
          * Emit the right error or warning message for a "CREATE" command issued on a exist relation.
          * remote node : should have relation if recieve "IF NOT EXISTS" stmt.

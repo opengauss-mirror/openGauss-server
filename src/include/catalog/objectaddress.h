@@ -41,6 +41,16 @@ typedef struct ObjectAddress
     char        deptype;        /* Indicates the deptype that the object is referenced by other object. */
 } ObjectAddress;
 
+#define ObjectAddressSubSet(addr, class_id, object_id, object_sub_id) \
+	do { \
+		(addr).classId = (class_id); \
+		(addr).objectId = (object_id); \
+		(addr).objectSubId = (object_sub_id); \
+	} while (0)
+
+#define ObjectAddressSet(addr, class_id, object_id) \
+	ObjectAddressSubSet(addr, class_id, object_id, 0)
+
 extern ObjectAddress get_object_address(ObjectType objtype, List *objname,
 				   List *objargs, Relation *relp,
 				   LOCKMODE lockmode, bool missing_ok);

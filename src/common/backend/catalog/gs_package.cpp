@@ -393,9 +393,7 @@ Oid PackageSpecCreate(Oid pkgNamespace, const char* pkgName, const Oid ownerId, 
     heap_close(pkgDesc, RowExclusiveLock);
 
     /* Record dependencies */
-    myself.classId = PackageRelationId;
-    myself.objectId = pkgOid;
-    myself.objectSubId = 0;
+    ObjectAddressSet(myself, PackageRelationId, pkgOid);
     isUpgrade = u_sess->attr.attr_common.IsInplaceUpgrade && myself.objectId < FirstBootstrapObjectId && !isReplaced;
     if (isUpgrade) {
         recordPinnedDependency(&myself);
@@ -408,7 +406,7 @@ Oid PackageSpecCreate(Oid pkgNamespace, const char* pkgName, const Oid ownerId, 
 
         recordDependencyOnOwner(PackageRelationId, pkgOid, ownerId);
 
-        recordDependencyOnCurrentExtension(&myself, false);
+        recordDependencyOnCurrentExtension(&myself, isReplaced);
     }
 
     /* Post creation hook for new schema */
