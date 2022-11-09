@@ -115,6 +115,7 @@ typedef struct buftagnohbkt {
         (a).rnode.dbNode = InvalidOid,   \
         (a).rnode.relNode = InvalidOid,  \
         (a).rnode.bucketNode = -1,\
+        (a).rnode.opt = DefaultFileNodeOpt, \
         (a).forkNum = InvalidForkNumber, \
         (a).blockNum = InvalidBlockNumber)
 
@@ -132,6 +133,7 @@ typedef struct buftagnohbkt {
         (a)->rnode.dbNode = (b)->rnode.dbNode,   \
         (a)->rnode.relNode = (b)->rnode.relNode, \
         (a)->rnode.bucketNode = (b)->rnode.bucketNode,\
+        (a)->rnode.opt = (b)->rnode.opt,             \
         (a)->forkNum = (b)->forkNum,             \
         (a)->blockNum = (b)->blockNum)
 
