@@ -27,11 +27,21 @@ ALTER PROCEDURE <replaceable>name</replaceable> [ ( [ [ <replaceable class="para
     
 <phrase>where <replaceable class="parameter">action</replaceable> is one of:</phrase>
 
+    CALLED ON NULL INPUT  | STRICT
+    IMMUTABLE | STABLE | VOLATILE
+    SHIPPABLE | NOT SHIPPABLE
+    NOT FENCED | FENCED
+    [ NOT ] LEAKPROOF
     [ EXTERNAL ] SECURITY INVOKER | [ EXTERNAL ] SECURITY DEFINER
+    AUTHID DEFINER
+    AUTHID CURRENT_USER
+    COST <replaceable class="parameter">execution_cost</replaceable>
+    ROWS <replaceable class="parameter">result_rows</replaceable>
     SET <replaceable class="parameter">configuration_parameter</replaceable> { TO | = } { <replaceable class="parameter">value</replaceable> | DEFAULT }
     SET <replaceable class="parameter">configuration_parameter</replaceable> FROM CURRENT
     RESET <replaceable class="parameter">configuration_parameter</replaceable>
     RESET ALL
+    COMMENT <replaceable class="parameter">'text'</replaceable>
 </synopsis>
  </refsynopsisdiv>
  </refentry>
