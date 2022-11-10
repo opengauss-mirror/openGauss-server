@@ -1469,6 +1469,14 @@ static bool _equalDoStmt(const DoStmt* a, const DoStmt* b)
     return true;
 }
 
+static bool _equalRenameCell(const RenameCell *a, const RenameCell *b)
+{
+    COMPARE_NODE_FIELD(original_name);
+    COMPARE_NODE_FIELD(modify_name);
+
+    return true;
+}
+
 static bool _equalRenameStmt(const RenameStmt* a, const RenameStmt* b)
 {
     COMPARE_SCALAR_FIELD(renameType);
@@ -1480,6 +1488,8 @@ static bool _equalRenameStmt(const RenameStmt* a, const RenameStmt* b)
     COMPARE_STRING_FIELD(newname);
     COMPARE_SCALAR_FIELD(behavior);
     COMPARE_SCALAR_FIELD(missing_ok);
+    COMPARE_NODE_FIELD(renameTargetList);
+    COMPARE_SCALAR_FIELD(renameTableflag);
 
     return true;
 }
@@ -3674,6 +3684,9 @@ bool equal(const void* a, const void* b)
             break;
         case T_DoStmt:
             retval = _equalDoStmt((DoStmt*)a, (DoStmt*)b);
+            break;
+        case T_RenameCell:
+            retval = _equalRenameCell((RenameCell*)a, (RenameCell*)b);
             break;
         case T_RenameStmt:
             retval = _equalRenameStmt((RenameStmt*)a, (RenameStmt*)b);

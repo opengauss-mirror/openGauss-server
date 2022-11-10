@@ -2171,6 +2171,7 @@ typedef struct CreatePackageBodyStmt {
 } CreatePackageBodyStmt;
 
 typedef struct RenameCell {
+    NodeTag type;
     RangeVar* original_name;
     RangeVar* modify_name;
 } RenameCell;
