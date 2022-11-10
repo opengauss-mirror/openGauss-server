@@ -3297,6 +3297,7 @@ static void exec_parse_message(const char* query_string, /* string to execute */
 #endif
     ExecNodes* single_exec_node = NULL;
     bool is_read_only = false;
+    bool is_ctas = false;
 
     gstrace_entry(GS_TRC_ID_exec_parse_message);
     /*
@@ -3595,6 +3596,7 @@ static void exec_parse_message(const char* query_string, /* string to execute */
         */
         if (query->utilityStmt != NULL && IsA(query->utilityStmt, CreateTableAsStmt)) {
             querytree_list = list_make1(query);
+            is_ctas = true;
         } else {
             querytree_list = pg_rewrite_query(query);
         }
@@ -3685,7 +3687,7 @@ static void exec_parse_message(const char* query_string, /* string to execute */
         is_read_only); /* fixed result */
 
      /* For ctas query, rewrite is not called in PARSE, so we must set invalidation to revalidate the cached plan. */
-    if (raw_parse_tree != NULL && IsA(raw_parse_tree, CreateTableAsStmt)) {
+    if (is_ctas) {
         psrc->is_valid = false;
     }
 
