@@ -2073,7 +2073,13 @@ static void SendCompressedFile(char* readFileName, int basePathLen, struct stat&
         }
     }
     transfer->nblocks = transfer->last_synced_nblocks = blockNum;
-    transfer->last_synced_allocated_chunks = transfer->allocated_chunks = chunkIndex;
+    transfer->last_synced_allocated_chunks = transfer->allocated_chunks = chunkIndex - 1;
+    if (totalBlockNum < RELSEG_SIZE) {
+        PageCompressAddr *addr = GET_PAGE_COMPRESS_ADDR(transfer, chunkSize, totalBlockNum);
+        long zeroSize = ((char*)transfer) + pcaFileLen - (char*)addr;
+        errno_t rc = memset_s(addr, zeroSize, 0, zeroSize);
+        securec_check(rc, (char*)"", (char*)"");
+    }
     TransferPcaFile(pcaFilePath, basePathLen, pcaStruct, transfer, pcaFileLen);
 
     SEND_DIR_ADD_SIZE(*size, pcaStruct);
