@@ -420,6 +420,24 @@ void DumpFileFlowVisitor::flushThreadFlows()
     }
 }
 
+/**
+ * @brief If exception occures, remove all temp file before exit
+ * 
+ * @param it map_flow::iterator
+ * @return trace_msg_code trace status code
+ */
+void DumpFileFlowVisitor::removeAllTempFiles(map_flow::iterator it){
+
+    //If exception occures, remove all temp file from where iterator begins
+    for ( ; it != mapFlows.end(); ++it) {
+        char tmpPath[MAX_PATH_LEN] = {0};
+        int ret;
+        ret = snprintf_s(tmpPath, MAX_PATH_LEN, MAX_PATH_LEN - 1, "tid.%d", it->first);
+        securec_check_ss_c(ret, "\0", "\0");
+        ret = remove(tmpPath);
+    }
+}
+
 void DumpFileFlowVisitor::mergeFiles(const char* outPath, size_t len)
 {
     FILE* fpOut = NULL;
@@ -430,6 +448,7 @@ void DumpFileFlowVisitor::mergeFiles(const char* outPath, size_t len)
 
     fpOut = trace_fopen(outPath, "w+");
     if (fpOut == NULL) {
+        this->removeAllTempFiles(mapFlows.begin());
         printf("Cannot open file %s\n", outPath);
         goto exit;
     }
@@ -446,6 +465,7 @@ void DumpFileFlowVisitor::mergeFiles(const char* outPath, size_t len)
             // Open the file with read mode
             FILE* fpIn = trace_fopen(tmpPath, "r");
             if (NULL == fpIn) {
+                this->removeAllTempFiles(it);
                 printf("Cannot open file %s\n", tmpPath);
                 goto exit;
             }

@@ -137,6 +137,7 @@ public:
     void outputStat(FILE* fp) override;
     void putIfUnexisted(pid_t pid, pid_t tid);
     void putFuncStatIfUnexisted(uint32_t func_id, func_stat* func_stat_map);
+    void removeAllTempFiles(map_flow::iterator it);
     void mergeFiles(const char* outPath, size_t len);
     void flushThreadFlows();
 
