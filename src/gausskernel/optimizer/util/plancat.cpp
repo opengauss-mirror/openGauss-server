@@ -154,7 +154,13 @@ static void acquireSamplesForPartitionedRelation(
                     continue;
                 }
 
-                part = partitionOpen(relation, partitionOid, lmode);
+                /* No need lock here, this partition is already locked by ConditionalLockPartition */
+                part = tryPartitionOpen(relation, partitionOid, NoLock);
+                if (part == NULL) {
+                    notAvailPartitionCnt++;
+                    continue;
+                }
+
                 currentPartPages = PartitionGetNumberOfBlocks(relation, part);
                 partitionClose(relation, part, lmode);
 
