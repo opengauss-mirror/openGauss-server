@@ -1382,6 +1382,7 @@
 ./lib/libkrb5support_gauss.so*
 ./lib/libkrb5_gauss.so*
 ./lib/libcom_err_gauss.so*
+./lib/libcjson.so*
 [libpq]
 ./lib/libpq.a
 ./lib/libpq.so
@@ -1403,6 +1404,7 @@
 ./lib/libkrb5support_gauss.so*
 ./lib/libkrb5_gauss.so*
 ./lib/libcom_err_gauss.so*
+./lib/libcjson.so*
 ./include/gs_thread.h
 ./include/gs_threadlocal.h
 ./include/postgres_ext.h
