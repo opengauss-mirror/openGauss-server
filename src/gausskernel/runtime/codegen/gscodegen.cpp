@@ -1027,7 +1027,8 @@ void CodeGenThreadInitialize()
 
 bool CodeGenThreadObjectReady()
 {
-    return t_thrd.codegen_cxt.thr_codegen_obj != NULL && !t_thrd.codegen_cxt.g_runningInFmgr;
+    return t_thrd.codegen_cxt.thr_codegen_obj != NULL && !t_thrd.codegen_cxt.g_runningInFmgr
+        && !((dorado::GsCodeGen*)t_thrd.codegen_cxt.thr_codegen_obj)->IsCompiled();
 }
 
 /**

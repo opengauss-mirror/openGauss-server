@@ -785,7 +785,8 @@ void standard_ExecutorEnd(QueryDesc *queryDesc)
     UnregisterSnapshot(estate->es_crosscheck_snapshot);
 
 #ifdef ENABLE_LLVM_COMPILE
-    if (!t_thrd.codegen_cxt.g_runningInFmgr) {
+   /* Do not release codegen in Fmgr and Procedure */
+    if (!t_thrd.codegen_cxt.g_runningInFmgr && u_sess->SPI_cxt._connected == -1) {
         CodeGenThreadTearDown();
     }
 #endif
@@ -3766,4 +3767,15 @@ void EvalPlanQualEnd(EPQState *epqstate)
     epqstate->estate = NULL;
     epqstate->planstate = NULL;
     epqstate->origslot = NULL;
+}
+
+TupleTableSlot* FetchPlanSlot(PlanState* subPlanState, ProjectionInfo** projInfos)
+{
+    int result_rel_index = subPlanState->state->result_rel_index;
+
+    if (result_rel_index > 0) {
+        return ExecProject(projInfos[result_rel_index], NULL);
+    } else {
+        return ExecProcNode(subPlanState);
+    }
 }
