@@ -672,6 +672,15 @@ ifneq ($(with_openeuler_os), yes)
 	cp '$(LIBOPENSSL_BIN_PATH)/openssl' '$(DESTDIR)$(bindir)/openssl'
 ifeq ($(enable_multiple_nodes), no)
 	cp '$(DCF_LIB_PATH)/libdcf.so' '$(DESTDIR)$(libdir)/libdcf.so'
+	cp '$(DSS_LIB_PATH)/libdssaio.so' '$(DESTDIR)$(libdir)/libdssaio.so'
+	cp '$(DSS_LIB_PATH)/libdssapi.so' '$(DESTDIR)$(libdir)/libdssapi.so'
+	cp '$(DSS_BIN_PATH)/dss_clear.sh' '$(DESTDIR)$(bindir)/dss_clear.sh'
+	cp '$(DSS_BIN_PATH)/dsscmd' '$(DESTDIR)$(bindir)/dsscmd'
+	cp '$(DSS_BIN_PATH)/dssserver' '$(DESTDIR)$(bindir)/dssserver'
+	cp '$(DSS_BIN_PATH)/perctrl' '$(DESTDIR)$(bindir)/perctrl'
+	cp '$(DMS_LIB_PATH)/libdms.so' '$(DESTDIR)$(libdir)/libdms.so'
+	cp '$(top_builddir)/src/gausskernel/ddes/script/dms_contrl.sh' '$(DESTDIR)$(bindir)/dms_contrl.sh'
+	cp '$(top_builddir)/src/gausskernel/ddes/script/dss_contrl.sh' '$(DESTDIR)$(bindir)/dss_contrl.sh'
 endif
 	cp '$(ZSTD_LIB_PATH)'/libzstd.so* '$(DESTDIR)$(libdir)/'
 
