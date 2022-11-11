@@ -72,7 +72,7 @@ ThreadPoolGroup::ThreadPoolGroup(int maxWorkerNum, int expectWorkerNum, int maxS
       m_sessionCount(0),
       m_waitServeSessionCount(0),
       m_processTaskCount(0),
-      m_hasHanged(0),
+      m_isTooBusy(0),
       m_groupId(groupId),
       m_numaId(numaId),
       m_groupCpuNum(cpuNum),
@@ -372,25 +372,38 @@ void ThreadPoolGroup::ShutDownThreads()
     alock.unLock();
 }
 
-bool ThreadPoolGroup::IsGroupHang()
+bool ThreadPoolGroup::IsGroupTooBusy()
 {
     if (pg_atomic_exchange_u32((volatile uint32*)&m_processTaskCount, 0) != 0 ||
         m_idleWorkerNum != 0)
         return false;
 
-    bool ishang = m_listener->GetSessIshang(&m_current_time, &m_sessionId);
-    return ishang;
+    bool isTooBusy = m_listener->GetSessIshang(&m_current_time, &m_sessionId);
+    return isTooBusy;
 }
 
-void ThreadPoolGroup::SetGroupHanged(bool isHang)
+bool ThreadPoolGroup::CheckGroupHang()
 {
-    pg_atomic_exchange_u32((volatile uint32*)&m_hasHanged, (uint32)isHang);
+    if (m_waitServeSessionCount == 0 || m_idleWorkerNum < m_workerNum)
+        return false;
+
+    bool isHang = m_listener->GetSessIshang(&m_current_time, &m_sessionId);
+    if (!isHang)
+        return false;
+
+    m_listener->WakeupForHang();
+    return true;
 }
 
-bool ThreadPoolGroup::IsGroupHanged()
+void ThreadPoolGroup::SetGroupTooBusy(bool isTooBusy)
+{
+    pg_atomic_exchange_u32((volatile uint32*)&m_isTooBusy, (uint32)isTooBusy);
+}
+
+bool ThreadPoolGroup::isGroupAlreadyTooBusy()
 {
     pg_memory_barrier();
-    return m_hasHanged != 0;
+    return m_isTooBusy != 0;
 }
 
 void ThreadPoolGroup::AttachThreadToCPU(ThreadId thread, int cpu)

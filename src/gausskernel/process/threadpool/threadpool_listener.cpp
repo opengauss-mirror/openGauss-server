@@ -62,6 +62,11 @@ static void ListenerSIGUSR1Handler(SIGNAL_ARGS)
     t_thrd.threadpool_cxt.listener->m_reaperAllSession = true;
 }
 
+static void ListenerSIGUSR2Handler(SIGNAL_ARGS)
+{
+    // Do nothing but wakeup for epoll
+}
+
 static void ListenerSIGKILLHandler(SIGNAL_ARGS)
 {
     t_thrd.threadpool_cxt.listener->m_getKilled = true;
@@ -79,7 +84,7 @@ void TpoolListenerMain(ThreadPoolListener* listener)
     (void)gspqsignal(SIGQUIT, SIG_IGN);
     (void)gspqsignal(SIGPIPE, SIG_IGN);
     (void)gspqsignal(SIGUSR1, ListenerSIGUSR1Handler);
-    (void)gspqsignal(SIGUSR2, SIG_IGN);
+    (void)gspqsignal(SIGUSR2, ListenerSIGUSR2Handler);
     (void)gspqsignal(SIGFPE, FloatExceptionHandler);
     (void)gspqsignal(SIGCHLD, SIG_DFL);
     (void)gspqsignal(SIGHUP, SIG_IGN);
@@ -113,6 +118,7 @@ ThreadPoolListener::ThreadPoolListener(ThreadPoolGroup* group)
     m_epollEvents = NULL;
     m_reaperAllSession = false;
     m_getKilled = false;
+    m_isHang = 0;
     m_freeWorkerList = New(CurrentMemoryContext) DllistWithLock();
     m_readySessionList = New(CurrentMemoryContext) DllistWithLock();
     m_idleSessionList = New(CurrentMemoryContext) DllistWithLock();
@@ -362,6 +368,10 @@ void ThreadPoolListener::WaitTask()
             ReaperAllSession();
         }
 
+        if (unlikely(m_isHang != 0)) {
+            WakeupReadySessionList();
+        }
+
         /* as we specify timeout -1, so 0 will not be return, either > 0 or < 0 */
         if (ENABLE_THREAD_POOL_DN_LOGICCONN) {
             nevents = CommEpollWait(m_epollFd, m_epollEvents, GLOBAL_MAX_SESSION_NUM, -1);
@@ -454,7 +464,7 @@ void ThreadPoolListener::DispatchSession(knl_session_context* session)
                         errmsg("%s remove session:%lu from idleSessionList to readySessionList",
                                __func__, session->session_id)));
             INSTR_TIME_SET_CURRENT(session->last_access_time);
-            
+
             /* Add new session to the head so the connection request can be quickly processed. */
             if (session->status == KNL_SESS_UNINIT) {
                 AddIdleSessionToHead(session);
@@ -510,6 +520,28 @@ bool ThreadPoolListener::GetSessIshang(instr_time* current_time, uint64* session
     }
     m_readySessionList->ReleaseLock();
     return ishang;
+}
+
+void ThreadPoolListener::WakeupForHang() {
+    pg_atomic_exchange_u32((volatile uint32*)&m_isHang, 1);
+    gs_signal_send(m_tid, SIGUSR2);
+}
+
+void ThreadPoolListener::WakeupReadySessionList() {
+    Dlelem *elem = m_readySessionList->RemoveHead();
+    knl_session_context *sess = NULL;
+    // last time WakeupReadySession() is not finished, but m_isHang is set again
+    while (elem != NULL && m_group->m_idleWorkerNum > 0) {
+        sess = (knl_session_context *)DLE_VAL(elem);
+        ereport(DEBUG2,
+                (errmodule(MOD_THREAD_POOL),
+                 errmsg("WakeupReadySessionList remove a session:%lu from m_readySessionList", sess->session_id)));
+        DispatchSession(sess);
+        elem = m_readySessionList->RemoveHead();
+    }
+    // m_isHang maybe set true when we do checkGroupHang again before it, now we will miss one time.
+    // But if group is actually hang, m_isHang will be set true again.
+    pg_atomic_exchange_u32((volatile uint32*)&m_isHang, 0);
 }
 
 Dlelem *ThreadPoolListener::GetFreeWorker(knl_session_context* session)

@@ -32,6 +32,7 @@ public:
     int StartUp();
     void DynamicAdjustThreadPool();
     void GPCScheduleCleaner(int* gpc_count);
+    void CheckGroupHang();
     void ShutDown() const;
     void SigHupHandler();
     inline ThreadId GetThreadId()

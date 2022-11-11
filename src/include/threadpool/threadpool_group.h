@@ -87,10 +87,11 @@ public:
     float4 GetSessionPerThread();
     void GetThreadPoolGroupStat(ThreadPoolStat* stat);
     /* get ready session list check for hang */
-    bool IsGroupHang();
-    /* check for hang flag */
-    void SetGroupHanged(bool isHang);
-    bool IsGroupHanged();
+    bool IsGroupTooBusy();
+    bool CheckGroupHang();
+    /* check for too busy flag */
+    void SetGroupTooBusy(bool isTooBusy);
+    bool isGroupAlreadyTooBusy();
 
     inline ThreadPoolListener* GetListener()
     {
@@ -150,7 +151,7 @@ private:
     volatile int m_sessionCount;           // all session count;
     volatile int m_waitServeSessionCount;  // wait for worker to server
     volatile int m_processTaskCount;
-    volatile int m_hasHanged;
+    volatile int m_isTooBusy;
 
     int m_groupId;
     int m_numaId;
