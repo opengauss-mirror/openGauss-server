@@ -15,6 +15,10 @@ test: auto_explain auto_explain_threshold opt_relopt_tuples
 
 test: sqlpatch_base
 test: sqlpatch_func
+
+#wlm
+test: workload_manager
+
 test: smp
 test: alter_hw_package
 test: hw_grant_package gsc_func gsc_db
@@ -881,7 +885,6 @@ test: rule_test
 
 #delete limit
 test: delete_limit
-
 
 # --------------------------
 # DB4AI
