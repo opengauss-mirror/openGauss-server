@@ -151,6 +151,12 @@ static RegExternFunc plpgsql_function_table[] = {
     {"report_application_error", report_application_error},
 };
 
+/*
+ * Now for dolphin to rewrite plpgsql_call_handler, plpgsql_inline_handler
+ * and plpgsql_validator.
+ */
+RegExternFunc b_plpgsql_function_table[3];
+
 static HTAB* CFuncHash = NULL;
 
 static void fmgr_info_cxt_security(Oid functionId, FmgrInfo* finfo, MemoryContext mcxt, bool ignore_security);
@@ -391,11 +397,20 @@ static PGFunction load_plpgsql_function(char* funcname)
     RegExternFunc* search_result = NULL;
 
     tmp_key.func_name = funcname;
-    search_result = (RegExternFunc*)bsearch(&tmp_key,
-        plpgsql_function_table,
-        sizeof(plpgsql_function_table) / sizeof(plpgsql_function_table[0]),
+    if (u_sess->attr.attr_sql.dolphin) {
+        search_result = (RegExternFunc*)bsearch(&tmp_key,
+        b_plpgsql_function_table,
+        sizeof(b_plpgsql_function_table) / sizeof(b_plpgsql_function_table[0]),
         sizeof(RegExternFunc),
         ExternFuncComp);
+    }
+    if (search_result == NULL) {
+        search_result = (RegExternFunc*)bsearch(&tmp_key,
+            plpgsql_function_table,
+            sizeof(plpgsql_function_table) / sizeof(plpgsql_function_table[0]),
+            sizeof(RegExternFunc),
+            ExternFuncComp);
+    }
     if (search_result != NULL) {
         retval = search_result->func_addr;
     } else if (!strcmp(funcname, "dist_fdw_validator")) {
