@@ -2260,7 +2260,9 @@ static void ReplicationStat(report_params* params)
 }
 static void GetUtilityStatus(report_params* params)
 {
-    if (!is_single_node_report(params)) {
+    /* supported report type: detail/all */
+    /* supported report scope: cluster */
+    if (is_summary_report(params) || is_cluster_report(params)) {
         return;
     }
     dashboard* dash = CreateDash();
@@ -2291,7 +2293,9 @@ static void GetUtilityStatus(report_params* params)
 
 static void GetConfigSettings(report_params* params)
 {
-    if (!is_single_node_report(params)) {
+    /* supported report type: detail/all */
+    /* supported report scope: cluster */
+    if (is_summary_report(params) || is_cluster_report(params)) {
         return;
     }
     dashboard* dash = CreateDash();
