@@ -1,0 +1,24 @@
+create resource pool respool_01 with(active_statements = 2147483647); -- INT_MAX
+create resource pool respool_02 with(active_statements = 2147483648);
+ERROR:  active_statements value can't be 2147483648.
+create resource pool respool_02 with(active_statements = 21474836470);
+ERROR:  active_statements value can't be 21474836470.
+create resource pool respool_02 with(active_statements = -2);
+ERROR:  active_statements value can't be -2.
+create resource pool respool_02 with(io_limits = 2147483647);  -- INT_MAX
+create resource pool respool_03 with(io_limits = 2147483648);
+ERROR:  io_limits can't be 2147483648.
+create resource pool respool_03 with(io_limits = 21474836470);
+ERROR:  io_limits can't be 21474836470.
+create resource pool respool_03 with(io_limits = -2);
+ERROR:  io_limits can't be -2.
+select * from pg_resource_pool;
+ respool_name | mem_percent | cpu_affinity |    control_group    | active_statements | max_dop | memory_limit | parentid | io_limits  | io_priority |  nodegroup   | is_foreign | max_worker 
+--------------+-------------+--------------+---------------------+-------------------+---------+--------------+----------+------------+-------------+--------------+------------+------------
+ default_pool |         100 |           -1 | DefaultClass:Medium |                -1 |       1 | 8GB          |        0 |          0 | None        | installation | f          |           
+ respool_01   |           0 |           -1 | DefaultClass:Medium |        2147483647 |       1 | 8GB          |        0 |          0 | None        | installation | f          |          1
+ respool_02   |           0 |           -1 | DefaultClass:Medium |                10 |       1 | 8GB          |        0 | 2147483647 | None        | installation | f          |          1
+(3 rows)
+
+drop resource pool respool_01;
+drop resource pool respool_02;

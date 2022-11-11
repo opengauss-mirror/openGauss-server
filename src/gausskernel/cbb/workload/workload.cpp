@@ -574,15 +574,15 @@ static void CheckResourcePoolOptions(const char* pool_name, List* options, bool 
                     (errcode(ERRCODE_NULL_VALUE_NO_INDICATOR_PARAMETER), errmsg("redundant options: \"mem_percent\"")));
             }
 
-            mempct = (int)defGetInt64(defel);
+            int64 val = defGetInt64(defel);
 
             /* check memory percent value */
-            if ((mempct > ULIMITED_MEMORY_PERCENTAGE) || (mempct < DEFAULT_MEMORY_PERCENTAGE)) {
+            if ((val > ULIMITED_MEMORY_PERCENTAGE) || (val < DEFAULT_MEMORY_PERCENTAGE)) {
                 ereport(ERROR,
                     (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
                         errmsg("mem_percent has to be in the range of 0-100.")));
             }
-
+            mempct = (int)val;
             values[memp_cnt - 1] = Int32GetDatum(mempct);
             nulls[memp_cnt - 1] = false;
             repl[memp_cnt - 1] = true;
@@ -595,15 +595,15 @@ static void CheckResourcePoolOptions(const char* pool_name, List* options, bool 
                     (errcode(ERRCODE_WITH_CHECK_OPTION_VIOLATION), errmsg("redundant options: \"active_statements\"")));
             }
 
-            int act_statements = (int)defGetInt64(defel);
+            int64 act_statements = defGetInt64(defel);
 
-            if (act_statements < ULIMITED_ACT_STATEMENTS) {
+            if (act_statements < ULIMITED_ACT_STATEMENTS || act_statements > INT_MAX) {
                 ereport(ERROR,
                     (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
-                        errmsg("active_statements value can't be %d.", act_statements)));
+                        errmsg("active_statements value can't be %ld.", act_statements)));
             }
 
-            values[acts_cnt - 1] = Int32GetDatum(act_statements);
+            values[acts_cnt - 1] = Int32GetDatum((int)act_statements);
             nulls[acts_cnt - 1] = false;
             repl[acts_cnt - 1] = true;
         } else if (strcmp(defel->defname, "control_group") == 0) { /* check the control_group option */
@@ -626,7 +626,7 @@ static void CheckResourcePoolOptions(const char* pool_name, List* options, bool 
                     (errcode(ERRCODE_NULL_VALUE_NO_INDICATOR_PARAMETER), errmsg("redundant options: \"max_dop\"")));
             }
 
-            max_dop = (int)defGetInt64(defel);
+            max_dop = defGetInt64(defel);
 
             if (max_dop < DEFAULT_DOP || max_dop > DEFAULT_MAX_DOP) {
                 ereport(ERROR,
@@ -658,14 +658,14 @@ static void CheckResourcePoolOptions(const char* pool_name, List* options, bool 
                     (errcode(ERRCODE_NULL_VALUE_NO_INDICATOR_PARAMETER), errmsg("redundant options: \"io_limits\"")));
             }
 
-            int iops_limit_value = (int)defGetInt64(defel);
+            int64 iops_limit_value = defGetInt64(defel);
 
-            if (iops_limit_value < DEFAULT_IOPS_LIMITS) {
+            if (iops_limit_value < DEFAULT_IOPS_LIMITS || iops_limit_value > INT_MAX) {
                 ereport(ERROR,
-                    (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE), errmsg("io_limits can't be %d.", iops_limit_value)));
+                    (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE), errmsg("io_limits can't be %ld.", iops_limit_value)));
             }
 
-            values[iops_limits - 1] = Int32GetDatum(iops_limit_value);
+            values[iops_limits - 1] = Int32GetDatum((int)iops_limit_value);
             nulls[iops_limits - 1] = false;
             repl[iops_limits - 1] = true;
         } else if (strcmp(defel->defname, "io_priority") == 0) {
@@ -754,14 +754,14 @@ static void CheckResourcePoolOptions(const char* pool_name, List* options, bool 
                     errmsg("redundant options: \"max_worker\"")));
             }
         
-            int max_workers = (int)defGetInt64(defel);
+            int64 max_workers = defGetInt64(defel);
         
             if (max_workers < DEFAULT_WORKER || max_workers > DEFAULT_MAX_WORKER) {
                 ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
-                    errmsg("max_worker can't be %d.", max_workers)));
+                    errmsg("max_worker can't be %ld.", max_workers)));
             }
         
-            values[max_worker - 1] = Int32GetDatum(max_workers);
+            values[max_worker - 1] = Int32GetDatum((int)max_workers);
             nulls[max_worker - 1] = false;
             repl[max_worker - 1] = true;
         } else {
