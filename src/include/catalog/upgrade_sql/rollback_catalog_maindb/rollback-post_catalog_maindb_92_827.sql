@@ -4,7 +4,7 @@ ans boolean;
 BEGIN
 
     -- openGauss 3.0.X already have this feature, same as the version we are, do nothing.
-    select case when working_version_num() = 92606 then true else false end into ans;
+    select case when working_version_num() >= 92606 and working_version_num() < 92656 then true else false end into ans;
     if ans = false then
         DROP FUNCTION IF EXISTS dbe_perf.standby_statement_history(boolean);
         DROP FUNCTION IF EXISTS dbe_perf.standby_statement_history(boolean, timestamp with time zone[]);
@@ -131,6 +131,3 @@ BEGIN
     end if;
 
 END$$;
-
-
-
