@@ -14,6 +14,9 @@ test: recovery_2pc_tools
 test: sqlpatch_base
 test: sqlpatch_func
 
+#wlm
+test: workload_manager
+
 test: spm_adaptive_gplan
 test: smp
 test: alter_hw_package
@@ -907,7 +910,6 @@ test: dump_auto_increment
 
 #delete limit
 test: delete_limit
-
 
 # --------------------------
 # DB4AI
