@@ -672,15 +672,15 @@ ifneq ($(with_openeuler_os), yes)
 	cp '$(LIBOPENSSL_BIN_PATH)/openssl' '$(DESTDIR)$(bindir)/openssl'
 ifeq ($(enable_multiple_nodes), no)
 	cp '$(DCF_LIB_PATH)/libdcf.so' '$(DESTDIR)$(libdir)/libdcf.so'
-	cp '$(DSS_LIB_PATH)/libdssaio.so' '$(DESTDIR)$(libdir)/libdssaio.so'
-	cp '$(DSS_LIB_PATH)/libdssapi.so' '$(DESTDIR)$(libdir)/libdssapi.so'
-	cp '$(DSS_BIN_PATH)/dss_clear.sh' '$(DESTDIR)$(bindir)/dss_clear.sh'
-	cp '$(DSS_BIN_PATH)/dsscmd' '$(DESTDIR)$(bindir)/dsscmd'
-	cp '$(DSS_BIN_PATH)/dssserver' '$(DESTDIR)$(bindir)/dssserver'
-	cp '$(DSS_BIN_PATH)/perctrl' '$(DESTDIR)$(bindir)/perctrl'
-	cp '$(DMS_LIB_PATH)/libdms.so' '$(DESTDIR)$(libdir)/libdms.so'
-	cp '$(top_builddir)/src/gausskernel/ddes/script/dms_contrl.sh' '$(DESTDIR)$(bindir)/dms_contrl.sh'
-	cp '$(top_builddir)/src/gausskernel/ddes/script/dss_contrl.sh' '$(DESTDIR)$(bindir)/dss_contrl.sh'
+	@if test -f $(DSS_LIB_PATH)/libdssaio.so; then cp $(DSS_LIB_PATH)/libdssaio.so $(DESTDIR)$(libdir)/libdssaio.so; fi
+	@if test -f $(DSS_LIB_PATH)/libdssapi.so; then cp $(DSS_LIB_PATH)/libdssapi.so $(DESTDIR)$(libdir)/libdssapi.so; fi
+	@if test -f $(DSS_BIN_PATH)/dss_clear.sh; then cp $(DSS_BIN_PATH)/dss_clear.sh $(DESTDIR)$(bindir)/dss_clear.sh; fi
+	@if test -f $(DSS_BIN_PATH)/dsscmd; then cp $(DSS_BIN_PATH)/dsscmd $(DESTDIR)$(bindir)/dsscmd; fi
+	@if test -f $(DSS_BIN_PATH)/dssserver; then cp $(DSS_BIN_PATH)/dssserver $(DESTDIR)$(bindir)/dssserver; fi
+	@if test -f $(DSS_BIN_PATH)/perctrl; then cp $(DSS_BIN_PATH)/perctrl $(DESTDIR)$(bindir)/perctrl; fi
+	@if test -f $(DMS_LIB_PATH)/libdms.so; then cp $(DMS_LIB_PATH)/libdms.so $(DESTDIR)$(libdir)/libdms.so; fi
+	@if test -f $(top_builddir)/src/gausskernel/ddes/script/dms_contrl.sh; then cp $(top_builddir)/src/gausskernel/ddes/script/dms_contrl.sh $(DESTDIR)$(bindir)/dms_contrl.sh; fi
+	@if test -f $(top_builddir)/src/gausskernel/ddes/script/dss_contrl.sh; then cp $(top_builddir)/src/gausskernel/ddes/script/dss_contrl.sh $(DESTDIR)$(bindir)/dss_contrl.sh; fi
 endif
 	cp '$(ZSTD_LIB_PATH)'/libzstd.so* '$(DESTDIR)$(libdir)/'
 
