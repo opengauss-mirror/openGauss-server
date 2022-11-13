@@ -2139,6 +2139,11 @@ static void do_failover(uint32 term)
         exit(1);
     }
 
+    if (g_dcfEnabled) {
+        pg_log(PG_WARNING, _("Failover is not supported in dcf mode.\n"));
+        exit(1);
+    }
+
     if (!do_wait) {
         pg_log(PG_WARNING, _(" server starting failover\n"));
     } else {
