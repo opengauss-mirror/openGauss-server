@@ -263,6 +263,8 @@ struct ParseState {
                               * update statement, then assign to qry->resultRelations.
                               */
     List* p_updateRangeVars; /* For multiple-update, use relationClase to generate RangeVar list. */
+
+    RightRefState* rightRefState; 
 };
 
 /* An element of p_relnamespace or p_varnamespace */

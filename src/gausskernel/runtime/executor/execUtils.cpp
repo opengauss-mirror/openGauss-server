@@ -743,6 +743,30 @@ ProjectionInfo* ExecBuildVecProjectionInfo(
     return projInfo;
 }
 
+ProjectionInfo* ExecBuildRightRefProjectionInfo(PlanState* planState, TupleDesc inputDesc) 
+{
+    List* targetList = planState->targetlist; 
+    ExprContext* econtext = planState->ps_ExprContext; 
+    TupleTableSlot* slot = planState->ps_ResultTupleSlot;
+    
+    ProjectionInfo* projInfo = makeNode(ProjectionInfo);
+    int len = ExecTargetListLength(targetList);
+
+    econtext->rightRefState = planState->plan->rightRefState;
+    projInfo->pi_exprContext = econtext;
+    projInfo->pi_slot = slot;
+    projInfo->pi_lastInnerVar = 0;
+    projInfo->pi_lastOuterVar = 0;
+    projInfo->pi_lastScanVar = 0;
+    
+    projInfo->pi_targetlist = targetList;
+    projInfo->pi_numSimpleVars = 0;
+    projInfo->pi_directMap = false;
+    projInfo->pi_itemIsDone = (ExprDoneCond*)palloc(len * sizeof(ExprDoneCond));
+
+    return projInfo;
+}
+
 /* ----------------
  *		ExecBuildProjectionInfo
  *
@@ -782,6 +806,7 @@ ProjectionInfo* ExecBuildProjectionInfo(
     projInfo->pi_lastInnerVar = 0;
     projInfo->pi_lastOuterVar = 0;
     projInfo->pi_lastScanVar = 0;
+    projInfo->isUpsertHasRightRef = false;
 
     /*
      * We separate the target list elements into simple Var references and
@@ -840,6 +865,11 @@ ProjectionInfo* ExecBuildProjectionInfo(
                     break;
             }
             numSimpleVars++;
+            
+            if (econtext && IS_ENABLE_RIGHT_REF(econtext->rightRefState)) {
+                exprlist = lappend(exprlist, gstate);
+                get_last_attnums((Node*)variable, projInfo);
+            }
         } else {
             /* Not a simple variable, add it to generic targetlist */
             exprlist = lappend(exprlist, gstate);
@@ -917,8 +947,12 @@ static bool get_last_attnums(Node* node, ProjectionInfo* projInfo)
  */
 void ExecAssignProjectionInfo(PlanState* planstate, TupleDesc inputDesc)
 {
-    planstate->ps_ProjInfo = ExecBuildProjectionInfo(
-        planstate->targetlist, planstate->ps_ExprContext, planstate->ps_ResultTupleSlot, inputDesc);
+    if (planstate->plan && IS_ENABLE_RIGHT_REF(planstate->plan->rightRefState)) {
+        planstate->ps_ProjInfo = ExecBuildRightRefProjectionInfo(planstate, inputDesc);
+    } else {
+        planstate->ps_ProjInfo = ExecBuildProjectionInfo(planstate->targetlist, planstate->ps_ExprContext,
+                                                         planstate->ps_ResultTupleSlot, inputDesc);
+    }
 }
 
 /* ----------------
@@ -2691,4 +2725,88 @@ Tuple ReplaceTupleNullCol(TupleDesc tupleDesc, TupleTableSlot *slot)
     
     tableam_tops_free_tuple(oldTup);
     return newTup;
+}
+
+
+void InitOutputValues(RightRefState* refState, GenericExprState* targetArr[],
+                      Datum* values, bool* isnull, int targetCount, bool* hasExecs)
+{
+    if (!IS_ENABLE_RIGHT_REF(refState)) {
+        return;
+    }
+
+    refState->values = values;
+    refState->isNulls = isnull;
+    refState->hasExecs = hasExecs;
+    int colCnt = refState->colCnt;
+    for (int i = 0; i < colCnt; ++i) {
+        hasExecs[i] = false;
+    }
+
+    if (IS_ENABLE_INSERT_RIGHT_REF(refState)) {
+        for (int i = 0; i < targetCount; ++i) {
+            Const* con = refState->constValues[i];
+            if (con) {
+                values[i] = con->constvalue;
+                isnull[i] = con->constisnull;
+            } else {
+                values[i] = (Datum)0;
+                isnull[i] = true;
+            }
+        }
+    }
+}
+
+void SortTargetListAsArray(RightRefState* refState, List* targetList, GenericExprState* targetArr[])
+{
+    ListCell* lc = NULL;
+    if (IS_ENABLE_INSERT_RIGHT_REF(refState)) {
+        const int len = list_length(targetList);
+        GenericExprState* tempArr[len];
+        int tempIndex = 0;
+        foreach(lc, targetList) {
+            tempArr[tempIndex++] = (GenericExprState*)lfirst(lc);
+        }
+
+        for (int i = 0; i < refState->explicitAttrLen; ++i) {
+            int explIndex = refState->explicitAttrNos[i] - 1;
+            targetArr[i] = tempArr[explIndex];
+            tempArr[explIndex] = nullptr;
+        }
+
+        int defaultNodeOffset = refState->explicitAttrLen;
+        for (int i = 0; i < len; ++i) {
+            if (tempArr[i]) {
+                targetArr[defaultNodeOffset++] = tempArr[i];
+            }
+        }
+
+        Assert(defaultNodeOffset == len);
+    } else if (IS_ENABLE_UPSERT_RIGHT_REF(refState)) {
+        const int len = list_length(targetList);
+        GenericExprState* tempArr[len];
+        int tempIndex = 0;
+        foreach(lc, targetList) {
+            tempArr[tempIndex++] = (GenericExprState*)lfirst(lc);
+        }
+
+        for (int i = 0; i < refState->usExplicitAttrLen; ++i) {
+            int explIndex = refState->usExplicitAttrNos[i] - 1;
+            targetArr[i] = tempArr[explIndex];
+            tempArr[explIndex] = nullptr;
+        }
+
+        int defaultNodeOffset = refState->usExplicitAttrLen;
+        for (int i = 0; i < len; ++i) {
+            if (tempArr[i]) {
+                targetArr[defaultNodeOffset++] = tempArr[i];
+            }
+        }
+        Assert(defaultNodeOffset == len);
+    } else {
+        int index = 0;
+        foreach(lc, targetList) {
+            targetArr[index++] = (GenericExprState*)lfirst(lc);
+        }
+    }
 }

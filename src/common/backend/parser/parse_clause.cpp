@@ -331,6 +331,8 @@ int setTargetTable(ParseState* pstate, RangeVar* relRv, bool inh, bool alsoSourc
          */
         if (alsoSource) {
             addRTEtoQuery(pstate, rte, true, true, true);
+        } else if (IS_SUPPORT_RIGHT_REF(pstate->rightRefState)) {
+            addRTEtoQuery(pstate, rte, false, false, true);
         }
     }
     return index;

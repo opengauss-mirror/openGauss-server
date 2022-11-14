@@ -183,6 +183,7 @@ Query* parse_analyze(
     }
 
     pfree_ext(pstate->p_ref_hook_state);
+    pstate->rightRefState = nullptr;
     free_parsestate(pstate);
 
     /* For plpy CTAS query. CTAS is a recursive call. CREATE query is the first rewrited.
@@ -496,6 +497,10 @@ Query* transformStmt(ParseState* pstate, Node* parseTree, bool isFirstNode, bool
     /* Mark whether synonym object is in rtables or not. */
     result->hasSynonyms = pstate->p_hasSynonyms;
 
+    if (nodeTag(parseTree) != T_InsertStmt) {
+        result->rightRefState = nullptr;
+    }
+    
     return result;
 }
 
@@ -1527,6 +1532,74 @@ static void CheckUnsupportInsertSelectClause(Query* query)
     }
 }
 
+
+static void SetInsertAttrnoState(ParseState* pstate, List* attrnos) 
+{
+    RightRefState* rstate = pstate->rightRefState;
+    Relation relation = (Relation)linitial(pstate->p_target_relation);
+    rstate->colCnt = RelationGetNumberOfAttributes(relation);
+    int len = list_length(attrnos);
+    rstate->explicitAttrLen = len;
+    rstate->explicitAttrNos = (int*)palloc0(sizeof(int) * len);
+    
+    ListCell* attr = list_head(attrnos);
+    for (int i = 0; i < len; ++i) {
+        rstate->explicitAttrNos[i] = lfirst_int(attr);
+        attr = lnext(attr);
+    }
+}
+
+static void SetUpsertAttrnoState(ParseState* pstate, List *targetList) 
+{
+    if (!targetList) {
+        return;
+    }
+    RightRefState* rstate = pstate->rightRefState;
+    int len = list_length(targetList);
+    rstate->usExplicitAttrLen = len;
+    rstate->usExplicitAttrNos = (int*)palloc0(sizeof(int) * len);
+
+    Relation relation = (Relation)linitial(pstate->p_target_relation);
+    Form_pg_attribute* attr = relation->rd_att->attrs;
+    int colNum = RelationGetNumberOfAttributes(relation);
+    ListCell* target = list_head(targetList);
+    for (int ni = 0; ni < len; ++ni) {
+        ResTarget* res = (ResTarget*)lfirst(target);
+        const char* name = res->name;
+        for (int ci = 0; ci < colNum; ++ci) {
+            if (attr[ci]->attisdropped) {
+                continue;
+            }
+            if (strcmp(name, attr[ci]->attname.data) == 0) {
+                rstate->usExplicitAttrNos[ni] = ci + 1;
+                break;
+            }
+        }
+        
+        target = lnext(target);
+    }
+}
+
+static RightRefState* MakeRightRefState() 
+{
+    RightRefState* refState = (RightRefState*)palloc0(sizeof(RightRefState));
+    refState->isSupported = !IsInitdb && DB_IS_CMPT(B_FORMAT);
+    refState->isInsertHasRightRef = false;
+    refState->explicitAttrLen = 0;
+    refState->explicitAttrNos = nullptr;
+    
+    refState->colCnt = 0;
+    refState->values = nullptr;
+    refState->isNulls = nullptr;
+    refState->hasExecs = nullptr;
+    
+    refState->isUpsert = false;
+    refState->isUpsertHasRightRef = false;
+    refState->usExplicitAttrLen = 0;
+    refState->usExplicitAttrNos = nullptr;
+    return refState;
+}
+
 /*
  * transformInsertStmt -
  *	  transform an Insert Statement
@@ -1553,9 +1626,13 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
     /* There can't be any outer WITH to worry about */
     AssertEreport(pstate->p_ctenamespace == NIL, MOD_OPT, "para should be NIL");
 
+    RightRefState* rightRefState = MakeRightRefState();
+    
     qry->commandType = CMD_INSERT;
     pstate->p_is_insert = true;
     pstate->p_has_ignore = stmt->hasIgnore;
+    pstate->rightRefState = rightRefState;
+    
     /* set io state for backend status for the thread, we will use it to check user space */
     pgstat_set_io_state(IOSTATE_WRITE);
 
@@ -1718,6 +1795,9 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
 
     /* Validate stmt->cols list, or build default list if no list given */
     icolumns = checkInsertTargets(pstate, stmt->cols, &attrnos);
+
+    SetInsertAttrnoState(pstate, attrnos);
+    
     AssertEreport(list_length(icolumns) == list_length(attrnos), MOD_OPT, "list length inconsistent");
 
     /*
@@ -2069,7 +2149,15 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
 
     /* Process DUPLICATE KEY UPDATE, if any. */
     if (stmt->upsertClause) {
-        qry->upsertClause = transformUpsertClause(pstate, stmt->upsertClause);
+        if (IS_SUPPORT_RIGHT_REF(rightRefState)) {
+            pstate->p_varnamespace = NIL;
+            rightRefState->isUpsert = true;
+            SetUpsertAttrnoState(pstate, stmt->upsertClause->targetList);
+            qry->upsertClause = transformUpsertClause(pstate, stmt->upsertClause);
+            rightRefState->isUpsert = false;
+        } else {
+            qry->upsertClause = transformUpsertClause(pstate, stmt->upsertClause);
+        }
     }
     /*
      * If we have a RETURNING clause, we need to add the target relation to
@@ -2117,6 +2205,14 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
     qry->tdTruncCastStatus = pstate->tdTruncCastStatus;
     qry->hintState = stmt->hintState;
     qry->hasIgnore = stmt->hasIgnore;
+
+    if (IS_ENABLE_RIGHT_REF(rightRefState)) {
+        qry->rightRefState = rightRefState;
+    } else {
+        qry->rightRefState = nullptr;
+        pstate->rightRefState = nullptr;
+        pfree(rightRefState);
+    }
 
     return qry;
 }

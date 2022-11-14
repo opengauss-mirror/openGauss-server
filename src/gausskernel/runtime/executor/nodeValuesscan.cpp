@@ -120,12 +120,32 @@ static TupleTableSlot* ValuesNext(ValuesScanState* node)
         values = slot->tts_values;
         is_null = slot->tts_isnull;
 
+        RightRefState* refState = econtext->rightRefState;
+        int targetCount = list_length(expr_state_list);
+        GenericExprState* targetArr[targetCount];
+
+        int colCnt = (IS_ENABLE_RIGHT_REF(refState) && refState->colCnt > 0) ? refState->colCnt : 1;
+        bool hasExecs[colCnt];
+
+        SortTargetListAsArray(refState, expr_state_list, targetArr);
+
+        InitOutputValues(refState, targetArr, values, is_null, targetCount, hasExecs);
+        
         resind = 0;
         foreach (lc, expr_state_list) {
             ExprState* exprState = (ExprState*)lfirst(lc);
 
             values[resind] = ExecEvalExpr(exprState, econtext, &is_null[resind], NULL);
+            if (IS_ENABLE_RIGHT_REF(refState) && resind < refState->colCnt) {
+                hasExecs[resind] = true;
+            }
             resind++;
+        }
+
+        if (IS_ENABLE_RIGHT_REF(econtext->rightRefState)) {
+            econtext->rightRefState->values = nullptr;
+            econtext->rightRefState->isNulls = nullptr;
+            econtext->rightRefState->hasExecs = nullptr;
         }
 
         MemoryContextSwitchTo(old_context);
@@ -199,6 +219,7 @@ ValuesScanState* ExecInitValuesScan(ValuesScan* node, EState* estate, int eflags
      */
     ExecAssignExprContext(estate, plan_state);
     scan_state->rowcontext = plan_state->ps_ExprContext;
+    ATTACH_RIGHT_REF_STATE(plan_state);
     ExecAssignExprContext(estate, plan_state);
 
     /*

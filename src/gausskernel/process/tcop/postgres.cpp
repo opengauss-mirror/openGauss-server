@@ -1324,6 +1324,14 @@ PlannedStmt* pg_plan_query(Query* querytree, int cursorOptions, ParamListInfo bo
 
     plan->multi_node_hint = multi_node_hint;
 
+    if (plan->planTree) {
+        if (IS_ENABLE_RIGHT_REF(querytree->rightRefState)) {
+            plan->planTree->rightRefState = querytree->rightRefState;
+        } else {
+            plan->planTree->rightRefState = nullptr;
+        }
+    }
+    
     return plan;
 }
 
@@ -2217,6 +2225,25 @@ void exec_init_poolhandles(void)
 #endif
 }
 
+static bool IsRightRefState(List* plantreeList)
+{
+    if (!plantreeList || !list_length(plantreeList)) {
+        return false;
+    }
+
+    ListCell* cell = list_head(plantreeList);
+    if (!cell) {
+        return false;
+    }
+    Node* node = (Node*)lfirst(cell);
+    if (node && IsA(node, PlannedStmt)) {
+        PlannedStmt* stmt = (PlannedStmt*) node;
+        return stmt->planTree && IS_ENABLE_RIGHT_REF(stmt->planTree->rightRefState);
+    }
+
+    return false;
+}
+
 /*
  * exec_simple_query
  *
@@ -2708,7 +2735,7 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
             SetForceXidFromGTM(true);
 #endif
         /* SQL bypass */
-        if (runOpfusionCheck) {
+        if (runOpfusionCheck && !IsRightRefState(plantree_list)) {
             (void)MemoryContextSwitchTo(oldcontext);
             void* opFusionObj = OpFusion::FusionFactory(
                 OpFusion::getFusionType(NULL, NULL, plantree_list), oldcontext, NULL, plantree_list, NULL);

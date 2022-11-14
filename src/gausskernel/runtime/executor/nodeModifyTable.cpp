@@ -3832,7 +3832,8 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
     i = 0;
     foreach (l, node->plans) {
         sub_plan = (Plan*)lfirst(l);
-
+        sub_plan->rightRefState = node->plan.rightRefState;
+        
         /*
          * Verify result relation is a valid target for the current operation
          */
@@ -3977,6 +3978,7 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
         /* Need an econtext too */
         econtext = CreateExprContext(estate);
         mt_state->ps.ps_ExprContext = econtext;
+        ATTACH_RIGHT_REF_STATE(&(mt_state->ps));
 
         /*
          * Build a projection for each result rel.
@@ -4020,6 +4022,7 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
         }
 
         econtext = mt_state->ps.ps_ExprContext;
+        ATTACH_RIGHT_REF_STATE(&(mt_state->ps));
 
         /* initialize slot for the existing tuple */
         upsertState->us_existing =
@@ -4039,7 +4042,8 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
         result_rel_info->ri_updateProj =
         ExecBuildProjectionInfo((List*)setexpr, econtext,
             upsertState->us_updateproj, result_rel_info->ri_RelationDesc->rd_att);
-
+        result_rel_info->ri_updateProj->isUpsertHasRightRef = 
+                IS_ENABLE_RIGHT_REF(econtext->rightRefState) && econtext->rightRefState->isUpsertHasRightRef;
         /* initialize expression state to evaluate update where clause if exists */
         if (node->upsertWhere) {
             upsertState->us_updateWhere = (List*)ExecInitExpr((Expr*)node->upsertWhere, &mt_state->ps);

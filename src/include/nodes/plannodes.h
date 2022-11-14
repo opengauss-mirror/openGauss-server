@@ -26,6 +26,7 @@
 #include "pgxc/nodemgr.h"
 #include "bulkload/dist_fdw.h"
 #include "utils/bloom_filter.h"
+#include "parsenodes_common.h"
 
 #define MAX_SPECIAL_BUCKETMAP_NUM    20
 #define BUCKETMAP_DEFAULT_INDEX_BIT (1 << 31)
@@ -351,6 +352,8 @@ typedef struct Plan {
 
     /* used for ustore partial seq scan */
     List* flatList = NULL; /* flattened targetlist representing columns in query */
+    
+    RightRefState* rightRefState;
 } Plan;
 
 /* ----------------

@@ -793,7 +793,7 @@ test: disable_vector_engine
 test: hybrid_row_column
 test: retry
 test: hw_replication_slots
-test: insert
+test: insert insert_right_ref
 test: copy2 temp
 test: truncate
 #test: temp_table
