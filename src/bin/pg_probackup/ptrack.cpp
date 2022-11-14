@@ -101,10 +101,27 @@ pg_ptrack_get_pagemapset(PGconn *backup_conn, XLogRecPtr lsn)
     PQclear(res);
     elog(INFO, "change bitmap end lsn location is %s", params[1]);
 
-    res = pgut_execute(backup_conn,
-                       "SELECT path,changed_block_number,changed_block_list "
-                       "FROM pg_cbm_get_changed_block($1, $2)",
-                       2, (const char **) params);
+    const char *query = "SELECT path,changed_block_number,changed_block_list FROM \
+                         pg_cbm_get_changed_block($1, $2)";
+
+
+    res = pgut_execute_extended(backup_conn, query,
+                                2, (const char **) params, true, true);
+    
+    switch (PQresultStatus(res))
+    {
+        case PGRES_TUPLES_OK:
+        case PGRES_COMMAND_OK:
+        case PGRES_COPY_IN:
+            break;
+        default:
+            elog(ERROR, "query failed: %s query was: %s\n"
+                 "Please check the replication slots, if it has slots useless," 
+                 "delete it and try again.",
+                 PQerrorMessage(backup_conn), query);
+            break;
+    }
+
     pfree(params[0]);
     pfree(params[1]);
 
