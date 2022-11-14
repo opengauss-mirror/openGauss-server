@@ -114,6 +114,9 @@ int ss_dms_func_init()
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_drc_accessible));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_broadcast_opengauss_ddllock));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_reform_last_failed));
+    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_latch_timed_x));
+    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_latch_timed_s));
+    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_unlatch));
 
     return DMS_SUCCESS;
 }
@@ -201,6 +204,21 @@ int dms_broadcast_opengauss_ddllock(dms_context_t *dms_ctx, char *data, unsigned
 {
     return g_ss_dms_func.dms_broadcast_opengauss_ddllock(dms_ctx, data, len, handle_recv_msg, timeout,
         resend_after_reform);
+}
+
+bool dms_latch_timed_x(dms_context_t *dms_ctx, dms_drlatch_t *dlatch, unsigned int wait_ticks)
+{
+    return (bool)g_ss_dms_func.dms_latch_timed_x(dms_ctx, dlatch, wait_ticks);
+}
+
+bool dms_latch_timed_s(dms_context_t *dms_ctx, dms_drlatch_t *dlatch, unsigned int wait_ticks, unsigned char is_force)
+{
+    return (bool)g_ss_dms_func.dms_latch_timed_s(dms_ctx, dlatch, wait_ticks, is_force);
+}
+
+void dms_unlatch(dms_context_t *dms_ctx, dms_drlatch_t *dlatch)
+{
+    g_ss_dms_func.dms_unlatch(dms_ctx, dlatch);
 }
 
 int dms_register_thread_init(dms_thread_init_t thrd_init)

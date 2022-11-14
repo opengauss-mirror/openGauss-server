@@ -68,6 +68,10 @@ typedef struct st_ss_dms_func {
     int (*dms_broadcast_opengauss_ddllock)(dms_context_t *dms_ctx, char *data, unsigned int len,
         unsigned char handle_recv_msg, unsigned int timeout, unsigned char resend_after_reform);
     int (*dms_reform_last_failed)(void);
+    bool (*dms_latch_timed_x)(dms_context_t *dms_ctx, dms_drlatch_t *dlatch, unsigned int wait_ticks);
+    bool (*dms_latch_timed_s)(dms_context_t *dms_ctx, dms_drlatch_t *dlatch, unsigned int wait_ticks,
+        unsigned char is_force);
+    void (*dms_unlatch)(dms_context_t *dms_ctx, dms_drlatch_t *dlatch);
 } ss_dms_func_t;
 
 int ss_dms_func_init();
@@ -102,6 +106,9 @@ int dms_drc_accessible(void);
 int dms_broadcast_opengauss_ddllock(dms_context_t *dms_ctx, char *data, unsigned int len, unsigned char handle_recv_msg,
     unsigned int timeout, unsigned char resend_after_reform);
 int dms_reform_last_failed(void);
+bool dms_latch_timed_x(dms_context_t *dms_ctx, dms_drlatch_t *dlatch, unsigned int wait_ticks);
+bool dms_latch_timed_s(dms_context_t *dms_ctx, dms_drlatch_t *dlatch, unsigned int wait_ticks, unsigned char is_force);
+void dms_unlatch(dms_context_t *dms_ctx, dms_drlatch_t *dlatch);
 #ifdef __cplusplus
 }
 #endif
