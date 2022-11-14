@@ -424,6 +424,7 @@ static void processFunctionRecordOutParam(int varno, Oid funcoid, int* outparam)
 %token <cword>		T_CWORD		/* unrecognized composite identifier */
 %token <wdatum>		T_DATUM		/* a VAR, ROW, REC, or RECFIELD variable */
 %token <word>		T_PLACEHOLDER		/* place holder , for IN/OUT parameters */
+%token <word>           T_LABELLOOP T_LABELWHILE T_LABELREPEAT
 %token <wdatum>		T_VARRAY T_ARRAY_FIRST  T_ARRAY_LAST  T_ARRAY_COUNT  T_ARRAY_EXISTS  T_ARRAY_PRIOR  T_ARRAY_NEXT  T_ARRAY_DELETE  T_ARRAY_EXTEND  T_ARRAY_TRIM  T_VARRAY_VAR  T_RECORD
 %token <wdatum>		T_TABLE T_TABLE_VAR T_PACKAGE_VARIABLE
 %token <wdatum>     T_PACKAGE_CURSOR_ISOPEN T_PACKAGE_CURSOR_FOUND T_PACKAGE_CURSOR_NOTFOUND T_PACKAGE_CURSOR_ROWCOUNT
@@ -2804,6 +2805,40 @@ stmt_loop		: opt_block_label K_LOOP loop_body
                         /* register the stmt if it is labeled */
                         record_stmt_label(u_sess->plsql_cxt.curr_compile_context->ns_top->name, (PLpgSQL_stmt *)newp);
                     }
+                | T_LABELLOOP loop_body
+                    {
+                        /*
+                         * When the database is in mysql compatible mode
+                         * support "label: loop"
+                         */
+                        if(u_sess->attr.attr_sql.sql_compatibility != B_FORMAT)
+                            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                errmsg("'label:' is only supported in database which dbcompatibility='B'.")));
+
+                        PLpgSQL_stmt_loop  *newp;
+                        newp = (PLpgSQL_stmt_loop *)palloc0(sizeof(PLpgSQL_stmt_loop));
+                        newp->cmd_type = PLPGSQL_STMT_LOOP;
+                        newp->lineno   = plpgsql_location_to_lineno(@1);
+                        newp->label    = u_sess->plsql_cxt.curr_compile_context->ns_top->name;
+                        newp->body        = $2.stmts;
+                        newp->sqlString = plpgsql_get_curline_query();
+
+                        if(strcmp(newp->label, "") == 0)
+                        {
+                            ereport(errstate,
+                                   (errcode(ERRCODE_SYNTAX_ERROR),
+                                    errmsg("The label name is invalid"),
+                                    parser_errposition(@1)));
+                        }
+
+                        check_labels(u_sess->plsql_cxt.curr_compile_context->ns_top->name, $2.end_label, $2.end_label_location);
+                        plpgsql_ns_pop();
+
+                        $$ = (PLpgSQL_stmt *)newp;
+
+                        /* register the stmt if it is labeled */
+                        record_stmt_label(u_sess->plsql_cxt.curr_compile_context->ns_top->name, (PLpgSQL_stmt *)newp);
+                    }
                 ;
 
 stmt_while		: opt_block_label K_WHILE expr_until_while_loop loop_body
@@ -2872,6 +2907,41 @@ stmt_while		: opt_block_label K_WHILE expr_until_while_loop loop_body
                         }
 
                         check_labels(u_sess->plsql_cxt.curr_compile_context->ns_top->name, $4.end_label, $4.end_label_location);
+                        plpgsql_ns_pop();
+
+                        $$ = (PLpgSQL_stmt *)newp;
+
+                        /* register the stmt if it is labeled */
+                        record_stmt_label(u_sess->plsql_cxt.curr_compile_context->ns_top->name, (PLpgSQL_stmt *)newp);
+                    }
+                | T_LABELWHILE expr_until_while_loop loop_body
+                    {
+                        /*
+                         * Check for correct syntax
+                         */
+                        if($2.endtoken != K_LOOP)
+                             ereport(ERROR,
+                                (errcode(ERRCODE_SYNTAX_ERROR), errmsg("while-loop syntax is mixed with while-do syntax"), parser_errposition(@1)));
+
+                        PLpgSQL_stmt_while *newp;
+
+                        newp = (PLpgSQL_stmt_while *)palloc0(sizeof(PLpgSQL_stmt_while));
+                        newp->cmd_type = PLPGSQL_STMT_WHILE;
+                        newp->lineno   = plpgsql_location_to_lineno(@1);
+                        newp->label       = u_sess->plsql_cxt.curr_compile_context->ns_top->name;
+                        newp->cond        = $2.expr;
+                        newp->body        = $3.stmts;
+                        newp->sqlString = plpgsql_get_curline_query();
+
+                        if(strcmp(newp->label, "") == 0)
+                        {
+                            ereport(errstate,
+                                   (errcode(ERRCODE_SYNTAX_ERROR),
+                                    errmsg("The label name is invalid"),
+                                    parser_errposition(@1)));
+                        }
+
+                        check_labels(u_sess->plsql_cxt.curr_compile_context->ns_top->name, $3.end_label, $3.end_label_location);
                         plpgsql_ns_pop();
 
                         $$ = (PLpgSQL_stmt *)newp;
@@ -2963,6 +3033,39 @@ stmt_while		: opt_block_label K_WHILE expr_until_while_loop loop_body
                         /* register the stmt if it is labeled */
                         record_stmt_label(u_sess->plsql_cxt.curr_compile_context->ns_top->name, (PLpgSQL_stmt *)newp);
                     }
+                | T_LABELWHILE expr_until_while_loop while_body
+                    {
+                        /*
+                         * Check for correct syntax
+                         */
+                        if($2.endtoken != K_DO)
+                             ereport(ERROR,
+                                (errcode(ERRCODE_SYNTAX_ERROR), errmsg("while-loop syntax is mixed with while-do syntax"), parser_errposition(@1)));
+
+                        PLpgSQL_stmt_while  *newp;
+                        newp = (PLpgSQL_stmt_while *)palloc0(sizeof(PLpgSQL_stmt_while));
+                        newp->cmd_type = PLPGSQL_STMT_WHILE;
+                        newp->lineno   = plpgsql_location_to_lineno(@1);
+                        newp->label    = u_sess->plsql_cxt.curr_compile_context->ns_top->name;
+                        newp->cond        = $2.expr;
+                        newp->body        = $3.stmts;
+                        newp->sqlString = plpgsql_get_curline_query();
+
+                        if(strcmp(newp->label, "") == 0)
+                        {
+                            ereport(errstate,
+                                   (errcode(ERRCODE_SYNTAX_ERROR),
+                                    errmsg("The label name is invalid"),
+                                    parser_errposition(@1)));
+                        }
+                        check_labels(u_sess->plsql_cxt.curr_compile_context->ns_top->name, $3.end_label, $3.end_label_location);
+                        plpgsql_ns_pop();
+
+                        $$ = (PLpgSQL_stmt *)newp;
+
+                        /* register the stmt if it is labeled */
+                        record_stmt_label(u_sess->plsql_cxt.curr_compile_context->ns_top->name, (PLpgSQL_stmt *)newp);
+                    }
                 | opt_block_label K_REPEAT proc_sect K_UNTIL repeat_condition
                     {
                         /*
@@ -3020,6 +3123,34 @@ stmt_while		: opt_block_label K_WHILE expr_until_while_loop loop_body
                         }
 
                         check_labels(u_sess->plsql_cxt.curr_compile_context->ns_top->name, $5.end_label, $5.end_label_location);
+                        plpgsql_ns_pop();
+
+                        $$ = (PLpgSQL_stmt *)newp;
+
+                        /* register the stmt if it is labeled */
+                        record_stmt_label(u_sess->plsql_cxt.curr_compile_context->ns_top->name, (PLpgSQL_stmt *)newp);
+                    }
+                | T_LABELREPEAT proc_sect K_UNTIL repeat_condition
+                    {
+                        PLpgSQL_stmt_while *newp;
+
+                        newp = (PLpgSQL_stmt_while *)palloc0(sizeof(PLpgSQL_stmt_while));
+                        newp->cmd_type = PLPGSQL_STMT_WHILE;
+                        newp->lineno   = plpgsql_location_to_lineno(@1);
+                        newp->label       = u_sess->plsql_cxt.curr_compile_context->ns_top->name;
+                        newp->cond        = $4.expr;
+                        newp->body        = $2;
+                        newp->sqlString = plpgsql_get_curline_query();
+
+                        if(strcmp(newp->label, "") == 0)
+                        {
+                            ereport(errstate,
+                                   (errcode(ERRCODE_SYNTAX_ERROR),
+                                    errmsg("The label name is invalid"),
+                                    parser_errposition(@1)));
+                        }
+
+                        check_labels(u_sess->plsql_cxt.curr_compile_context->ns_top->name, $4.end_label, $4.end_label_location);
                         plpgsql_ns_pop();
 
                         $$ = (PLpgSQL_stmt *)newp;
@@ -9112,6 +9243,109 @@ make_execsql_stmt(int firsttoken, int location)
                     ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                             errmsg("'label:' is only supported in database which dbcompatibility='B'.")));
             }
+        }
+
+        if ((tok == T_LABELLOOP || tok == T_LABELWHILE || tok == T_LABELREPEAT) && prev_tok == T_WORD)
+        {
+            StringInfoData  lb;
+            initStringInfo(&lb);
+            int  lb_end = yylloc;
+            if(u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
+            {
+                int  count = 0;
+                label_begin =  true;
+                plpgsql_push_back_token(tok);
+                plpgsql_append_source_text(&lb, location, lb_end);
+
+                for(int i = lb.len-1; i > 0; i--)
+                {
+                    if(lb.data[i] == ' ')
+                    {
+                        count++;
+                    }
+                    else
+                        break;
+                }
+                if(count > 0 && lb.len-count > 0)
+                {
+                    char*  name = NULL;
+                    errno_t rc = 0;
+                    int len = -1;
+
+                    name = (char*)palloc(lb.len-count+1);
+                    rc = strncpy_s(name, lb.len-count+1, lb.data, lb.len-count);
+                    securec_check_c(rc, "\0", "\0");
+                    len = strspn(pg_strtolower(name), "abcdefghijklmnopqrstuvwxyz0123456789_");
+
+                    if(len != lb.len - count) {
+                        pfree(name);
+                        pfree_ext(lb.data);
+                        ereport(errstate,
+                                (errcode(ERRCODE_SYNTAX_ERROR),
+                                errmsg("The label name is invalid"),
+                                parser_errposition(location + len)));
+                    }
+                    if(name[0] >= '0' && name[0] <= '9') {
+                        pfree(name);
+                        pfree_ext(lb.data);
+                        ereport(errstate,
+                                (errcode(ERRCODE_SYNTAX_ERROR),
+                                errmsg("The label name is invalid"),
+                                parser_errposition(location)));
+                    }
+
+                    if(lb.len-count >= NAMEDATALEN)
+                    {
+                        char*   namedata = NULL;
+                        errno_t rc = 0;
+                        namedata = (char*)palloc(NAMEDATALEN);
+                        rc = strncpy_s(namedata, NAMEDATALEN, name, NAMEDATALEN-1);
+                        securec_check_c(rc, "\0", "\0");
+                        plpgsql_ns_additem(PLPGSQL_NSTYPE_LABEL, 0, pg_strtolower(namedata));
+                        pfree(namedata);
+                    }
+                    else
+                        plpgsql_ns_additem(PLPGSQL_NSTYPE_LABEL, 0, pg_strtolower(name));
+                    pfree(name);
+                }
+                else
+                {
+                    int len = -1;
+                    len = strspn(pg_strtolower(lb.data), "abcdefghijklmnopqrstuvwxyz0123456789_");
+
+                    if(len != lb.len) {
+                        pfree_ext(lb.data);
+                        ereport(errstate,
+                                (errcode(ERRCODE_SYNTAX_ERROR),
+                                errmsg("The label name is invalid"),
+                                parser_errposition(location + len)));
+                    }
+                    if(lb.data[0] >= '0' && lb.data[0] <= '9') {
+                        pfree_ext(lb.data);
+                        ereport(errstate,
+                                (errcode(ERRCODE_SYNTAX_ERROR),
+                                errmsg("The label name is invalid"),
+                                parser_errposition(location)));
+                    }
+                    if(lb.len >= NAMEDATALEN)
+                    {
+                        char*   namedata = NULL;
+                        errno_t rc = 0;
+                        namedata = (char*)palloc(NAMEDATALEN);
+                        rc = strncpy_s(namedata, NAMEDATALEN, lb.data, NAMEDATALEN-1);
+                        securec_check_c(rc, "\0", "\0");
+                        plpgsql_ns_additem(PLPGSQL_NSTYPE_LABEL, 0, pg_strtolower(namedata));
+                        pfree(namedata);
+                    }
+                    else
+                        plpgsql_ns_additem(PLPGSQL_NSTYPE_LABEL, 0, pg_strtolower(lb.data));
+                }
+                pfree_ext(lb.data);
+                break;
+            }
+            else
+                ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("'label:' is only supported in database which dbcompatibility='B'.")));
         }
 
         if (tok == T_CWORD && prev_tok!=K_SELECT 

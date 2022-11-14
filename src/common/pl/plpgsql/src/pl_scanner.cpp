@@ -263,6 +263,9 @@ int plpgsql_yylex(void)
     if (tok1 == IDENT || tok1 == PARAM || tok1 == T_SQL_BULK_EXCEPTIONS) {
         int tok2;
         TokenAuxData aux2;
+        char* tok1_val = NULL;
+        if(tok1 == PARAM)
+            tok1_val = aux1.lval.str;
 
         tok2 = internal_yylex(&aux2);
         if (tok2 == '.') {
@@ -401,7 +404,21 @@ int plpgsql_yylex(void)
             } else if (aux1.lval.str[0] == ':' && tok1 == PARAM) {
                 /* Check place holder, it should be like :({identifier}|{integer})
                  * It is a placeholder in exec statement. */
-                tok1 = T_PLACEHOLDER;
+                if(u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
+                {
+                    if(pg_strcasecmp(tok1_val, ":loop") == 0)
+                        tok1 = T_LABELLOOP;
+                    else if(pg_strcasecmp(tok1_val, ":while") == 0)
+                        tok1 = T_LABELWHILE;
+                    else if(pg_strcasecmp(tok1_val, ":repeat") == 0)
+                        tok1 = T_LABELREPEAT;
+                    else
+                        tok1 = T_PLACEHOLDER;
+                }
+                else
+                {
+                    tok1 = T_PLACEHOLDER;
+                }
             } else {
                 tok1 = T_WORD;
             }

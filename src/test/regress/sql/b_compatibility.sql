@@ -392,6 +392,22 @@ call doiterate(2);
 create or replace procedure doiterate(p1 int)
 as
 begin
+LABEL1:loop
+p1 := p1+1;
+if p1 < 10 then
+raise notice '123';
+end if;
+exit LABEL1;
+end loop LABEL1;
+end;
+/
+
+call doiterate(2);
+
+--success
+create or replace procedure doiterate(p1 int)
+as
+begin
 LAbEL1:
 loop
 p1 := p1+1;
@@ -1066,6 +1082,12 @@ begin
     raise notice '%', _i;
   end while the_while;
 
+  the_while1:while _i < 10 do
+    _i := _i + 1;
+    continue the_while1 when _i % 2 = 0;
+    raise notice '%', _i;
+  end while the_while1;
+
   raise notice '---3---';
   _i := 1;
   while _i <= 3 loop
@@ -1159,6 +1181,12 @@ begin
     continue the_while when _i % 2 = 0;
     raise notice '%', _i;
   end while the_while;
+
+  the_while1:while _i < 10 do
+    _i := _i + 1;
+    continue the_while1 when _i % 2 = 0;
+    raise notice '%', _i;
+  end while the_while1;
 
   raise notice '---3---';
   _i := 1;
@@ -1385,6 +1413,19 @@ i int =0;
 BEGIN
 label:
 repeat
+i = i + 1;
+until i >p1 end repeat label;
+raise notice '%',i;
+end;
+/
+select dorepeat(5);
+--success
+CREATE or replace PROCEDURE dorepeat(p1 INT)
+as
+declare
+i int =0;
+BEGIN
+label:repeat
 i = i + 1;
 until i >p1 end repeat label;
 raise notice '%',i;
