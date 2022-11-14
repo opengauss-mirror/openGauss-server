@@ -198,6 +198,7 @@ typedef struct WalSndCtlData {
     bool sync_master_standalone;
     TimestampTz keep_sync_window_start;
     bool out_keep_sync_window;
+    XLogRecPtr last_saved_confirmed_lsn;
 
     /*
      * The demotion of postmaster  Also indicates that all the walsenders

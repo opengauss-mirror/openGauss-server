@@ -56,7 +56,7 @@ extern XLogRecPtr readOneRecord(const char* datadir, XLogRecPtr ptr, TimeLineID 
 extern XLogRecPtr FindMaxLSN(char* workingpath, char* returnmsg, pg_crc32 *maxLsnCrc, uint32 *maxLsnLen = NULL, 
     TimeLineID *returnTli = NULL);
 BuildErrorCode findCommonCheckpoint(const char* datadir, TimeLineID tli, XLogRecPtr startrec, XLogRecPtr* lastchkptrec,
-    TimeLineID* lastchkpttli, XLogRecPtr *lastchkptredo, uint32 term);
+    TimeLineID* lastchkpttli, XLogRecPtr *lastchkptredo, uint32 term, XLogRecPtr* maxXactLsn);
 extern int find_gucoption(const char** optlines, const char* opt_name, int* name_offset, int* name_len, 
     int* value_offset, int* value_len);
 
@@ -70,8 +70,9 @@ void recordReadTest(const char* datadir, XLogRecPtr ptr, TimeLineID tli);
 void openDebugLog(void);
 bool FindConfirmedLSN(const char* dataDir, XLogRecPtr *confirmedLsn);
 BuildErrorCode CheckConfirmedLSNOnTarget(const char *datadir, TimeLineID tli, XLogRecPtr ckptRedo, XLogRecPtr confirmedLSN,
-    uint32 term);
+    uint32 term, XLogRecPtr maxXactLsn);
 bool CheckIfEanbedSaveSlots();
+bool CheckIfEanbedMostAvailableSync();
 
 #define PG_CHECKBUILD_AND_RETURN()                  \
     do {                                            \

@@ -132,7 +132,7 @@ XLogRecPtr readOneRecord(const char* datadir, XLogRecPtr ptr, TimeLineID tli)
 }
 
 BuildErrorCode findCommonCheckpoint(const char* datadir, TimeLineID tli, XLogRecPtr startrec, XLogRecPtr* lastchkptrec,
-    TimeLineID* lastchkpttli, XLogRecPtr *lastchkptredo, uint32 term)
+    TimeLineID* lastchkpttli, XLogRecPtr *lastchkptredo, uint32 term, XLogRecPtr* maxXactLsn)
 {
 /* define a time counter, if could not find a same checkpoint within this count number change to full build */
 #ifdef HAVE_INT64_TIMESTAMP
@@ -157,7 +157,7 @@ BuildErrorCode findCommonCheckpoint(const char* datadir, TimeLineID tli, XLogRec
     /*
      * local max lsn must be exists, or change to full build.
      */
-    max_lsn = FindMaxLSN(datadir_target, returnmsg, XLOG_READER_MAX_MSGLENTH, &maxLsnCrc);
+    max_lsn = FindMaxLSN(datadir_target, returnmsg, XLOG_READER_MAX_MSGLENTH, &maxLsnCrc, NULL, NULL, maxXactLsn);
     if (XLogRecPtrIsInvalid(max_lsn)) {
         pg_fatal("find max lsn fail, errmsg:%s\n", returnmsg);
         return BUILD_FATAL;
@@ -569,7 +569,7 @@ static void ReadConfirmedLSNFromDisk(char* buffer, XLogRecPtr *confirmedLsn)
 
     if (XLogRecPtrIsValid(slot.slotdata.confirmed_flush) && XLByteLT(*confirmedLsn, slot.slotdata.confirmed_flush)) {
         *confirmedLsn = slot.slotdata.confirmed_flush;
-        pg_log(PG_PROGRESS, "Get confirmed lsn %X/%X from replication slot %s.", (uint32)((*confirmedLsn) >> 32),
+        pg_log(PG_PROGRESS, "Get confirmed lsn %X/%X from replication slot %s.\n", (uint32)((*confirmedLsn) >> 32),
             (uint32)(*confirmedLsn), slot.slotdata.name.data);
     }
 }
@@ -623,9 +623,16 @@ bool FindConfirmedLSN(const char* dataDir, XLogRecPtr *confirmedLsn)
 }
 
 BuildErrorCode CheckConfirmedLSNOnTarget(const char *datadir, TimeLineID tli, XLogRecPtr ckptRedo, XLogRecPtr confirmedLSN,
-    uint32 term)
+    uint32 term, XLogRecPtr maxXactLsn)
 {
-    if (XLogRecPtrIsInvalid(confirmedLSN) || XLByteLT(confirmedLSN, ckptRedo)) {
+    XLogRecPtr confirmedLSNForCheck = confirmedLSN;
+    if (CheckIfEanbedMostAvailableSync() && XLogRecPtrIsValid(maxXactLsn) && XLByteLT(confirmedLSN, maxXactLsn)) {
+        pg_log(PG_PROGRESS, "Most available sync is on, use maxXactLsn %X/%X replace confirmed Lsn.\n",
+               (uint32)((maxXactLsn) >> 32), (uint32)(maxXactLsn));
+        confirmedLSNForCheck = maxXactLsn;
+    }
+
+    if (XLogRecPtrIsInvalid(confirmedLSNForCheck) || XLByteLT(confirmedLSNForCheck, ckptRedo)) {
         return BUILD_SUCCESS;
     }
 
@@ -648,14 +655,14 @@ BuildErrorCode CheckConfirmedLSNOnTarget(const char *datadir, TimeLineID tli, XL
     get_conninfo(pg_conf_file);
 
     XLogRecord *record = NULL;
-    record = XLogReadRecord(xlogreader, confirmedLSN, &errormsg);
+    record = XLogReadRecord(xlogreader, confirmedLSNForCheck, &errormsg);
     if (record == NULL) {
         if (errormsg != NULL) {
-            pg_fatal("could not find previous WAL record at %X/%X: %s\n", (uint32)(confirmedLSN >> 32),
-                (uint32)confirmedLSN, errormsg);
+            pg_fatal("could not find previous WAL record at %X/%X: %s\n", (uint32)(confirmedLSNForCheck >> 32),
+                (uint32)confirmedLSNForCheck, errormsg);
         } else {
-            pg_fatal("could not find previous WAL record at %X/%X\n", (uint32)(confirmedLSN >> 32),
-                (uint32)confirmedLSN);
+            pg_fatal("could not find previous WAL record at %X/%X\n", (uint32)(confirmedLSNForCheck >> 32),
+                (uint32)confirmedLSNForCheck);
         }
         XLogReaderFree(xlogreader);
         CloseXlogFile();
@@ -663,8 +670,8 @@ BuildErrorCode CheckConfirmedLSNOnTarget(const char *datadir, TimeLineID tli, XL
     }
 
     if (checkCommonAncestorByXlog(xlogreader->ReadRecPtr, record->xl_crc, term) == false) {
-        pg_log(PG_FATAL, "could not find confirmed record %X/%X on source\n", (uint32)(confirmedLSN >> 32),
-            (uint32)confirmedLSN);
+        pg_log(PG_FATAL, "could not find confirmed record or local commited record %X/%X on source\n",
+               (uint32)(confirmedLSNForCheck >> 32), (uint32)confirmedLSNForCheck);
         XLogReaderFree(xlogreader);
         CloseXlogFile();
         return BUILD_FATAL;
@@ -672,14 +679,13 @@ BuildErrorCode CheckConfirmedLSNOnTarget(const char *datadir, TimeLineID tli, XL
 
     XLogReaderFree(xlogreader);
     CloseXlogFile();
-    pg_log(PG_PROGRESS, "Check confirmed lsn %X/%X at source success.", (uint32)((confirmedLSN) >> 32),
-        (uint32)(confirmedLSN));
+    pg_log(PG_PROGRESS, "Check confirmed lsn %X/%X at source success.", (uint32)((confirmedLSNForCheck) >> 32),
+        (uint32)(confirmedLSNForCheck));
     return BUILD_SUCCESS;
 }
 
-bool CheckIfEanbedSaveSlots()
+static bool CheckOptionsConfiguredInGuc(const char* optname)
 {
-    const char* optname[] = {"enable_save_confirmed_lsn"};
     char config_file[MAXPGPATH] = {0};
     char** optlines = NULL;
     int ret = EOK;
@@ -698,7 +704,7 @@ bool CheckIfEanbedSaveSlots()
         return false;
     }
 
-    lines_index = find_gucoption((const char **)optlines, (const char *)optname[0], NULL, NULL, &optvalue_off, &optvalue_len);
+    lines_index = find_gucoption((const char **)optlines, optname, NULL, NULL, &optvalue_off, &optvalue_len);
     if (lines_index != INVALID_LINES_IDX) {
         ret = strncpy_s(optvalue, MAX_VALUE_LEN, optlines[lines_index] + optvalue_off,
             (size_t)Min(optvalue_len, MAX_VALUE_LEN - 1));
@@ -710,4 +716,16 @@ bool CheckIfEanbedSaveSlots()
     }
 
     return false;
+}
+
+bool CheckIfEanbedSaveSlots()
+{
+    const char* optname = "enable_save_confirmed_lsn";
+    return CheckOptionsConfiguredInGuc(optname);
+}
+
+bool CheckIfEanbedMostAvailableSync()
+{
+    const char* optname = "most_available_sync";
+    return CheckOptionsConfiguredInGuc(optname);
 }
