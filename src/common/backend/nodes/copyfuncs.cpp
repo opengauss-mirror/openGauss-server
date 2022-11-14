@@ -6086,6 +6086,7 @@ static CreateRoleStmt* _copyCreateRoleStmt(const CreateRoleStmt* from)
 
     COPY_SCALAR_FIELD(stmt_type);
     COPY_STRING_FIELD(role);
+    COPY_SCALAR_FIELD(missing_ok);
     COPY_NODE_FIELD(options);
 
     return newnode;

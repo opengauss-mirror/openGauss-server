@@ -24,3 +24,9 @@ create user test_user_002 password 'test@1234';
 create schema if not exists test_schema_002 authorization test_user_002;
 drop schema test_schema_002;
 drop user test_user_002;
+
+CREATE USER ZZZ WITH PASSWORD 'openGauss@123';
+CREATE USER ZZZ WITH PASSWORD 'openGauss@123';
+CREATE USER IF NOT EXISTS ZZZ WITH PASSWORD 'openGauss@123';
+DROP USER ZZZ;
+CREATE USER IF NOT EXISTS ZZZ WITH PASSWORD 'openGauss@123';
