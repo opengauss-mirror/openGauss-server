@@ -2209,7 +2209,7 @@ BEGIN
   end loop;
 end; 
 /
-ERROR:  while-loop syntax is mixed with while-do syntax
+ERROR:  'while-do' is only supported in database which dbcompatibility='B'.
 LINE 4:   while _i < 10 do
           ^
 QUERY:  

@@ -446,7 +446,10 @@ const char* plpgsql_stmt_typename(PLpgSQL_stmt* stmt)
         case PLPGSQL_STMT_LOOP:
             return "LOOP";
         case PLPGSQL_STMT_WHILE:
-            return "WHILE";
+            if(((PLpgSQL_stmt_while*)stmt)->condition)
+                return "WHILE";
+            else
+                return "REPEAT";
         case PLPGSQL_STMT_FORI:
             return _("FOR with integer loop variable");
         case PLPGSQL_STMT_FORS:
@@ -1374,15 +1377,29 @@ static void dump_loop(PLpgSQL_stmt_loop* stmt)
 
 static void dump_while(PLpgSQL_stmt_while* stmt)
 {
-    dump_ind();
-    printf("WHILE ");
-    dump_expr(stmt->cond);
-    printf("\n");
+    if(stmt->condition)
+    {
+        dump_ind();
+        printf("WHILE ");
+        dump_expr(stmt->cond);
+        printf("\n");
 
-    dump_stmts(stmt->body);
+        dump_stmts(stmt->body);
 
-    dump_ind();
-    printf("    ENDWHILE\n");
+        dump_ind();
+        printf("    ENDWHILE\n");
+    }
+    else
+    {
+        dump_ind();
+        printf("REPEAT ");
+        dump_stmts(stmt->body);
+        printf("\n");
+        printf("UNTIL ");
+        dump_expr(stmt->cond);
+        dump_ind();
+        printf("    ENDREPEAT\n");
+    }
 }
 
 static void dump_fori(PLpgSQL_stmt_fori* stmt)
