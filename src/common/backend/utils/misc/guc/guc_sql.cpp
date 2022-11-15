@@ -182,6 +182,7 @@ static void assign_plsql_compile_behavior_compat_options(const char* newval, voi
 static void assign_connection_info(const char* newval, void* extra);
 static bool check_application_type(int* newval, void** extra, GucSource source);
 static void assign_convert_string_to_digit(bool newval, void* extra);
+static bool check_enable_ignore_case_in_dquotes(bool* newval, void** extra, GucSource source);
 static bool CheckUStoreAttr(char** newval, void** extra, GucSource source);
 static void AssignUStoreAttr(const char* newval, void* extra);
 static bool check_snapshot_delimiter(char** newval, void** extra, GucSource source);
@@ -1724,6 +1725,17 @@ static void InitSqlConfigureNamesBool()
             &u_sess->attr.attr_sql.partition_iterator_elimination,
             false,
             NULL,
+            NULL,
+            NULL},
+        {{"enable_ignore_case_in_dquotes",
+            PGC_USERSET,
+            NODE_ALL,
+            QUERY_TUNING_METHOD,
+            gettext_noop("Enable ignore case in double quotes for some driver."),
+            NULL},
+            &u_sess->attr.attr_sql.enable_ignore_case_in_dquotes,
+            false,
+            check_enable_ignore_case_in_dquotes,
             NULL,
             NULL},
         {{"enable_streaming",
@@ -3760,6 +3772,16 @@ static void assign_convert_string_to_digit(bool newval, void* extra)
         InvalidateOprCacheCallBack(0, 0, 0);
     }
     return;
+}
+
+static bool check_enable_ignore_case_in_dquotes(bool* newval, void** extra, GucSource source)
+{
+    if (*newval && (currentGucContext == PGC_SUSET || currentGucContext == PGC_USERSET)) {
+        ereport(WARNING, (errmsg("if tables with the same name but different case already\n"
+        "exists in the database, this will result in only being able to\n"
+        "manipulate tables with table names that are entirely lowercase.")));
+    }
+    return true;
 }
 
 #define IS_NULL_STR(str) ((str) == NULL || (str)[0] == '\0')

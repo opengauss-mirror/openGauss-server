@@ -28882,14 +28882,36 @@ SignedIconst: Iconst								{ $$ = $1; }
 
 /* Column identifier --- names that can be column, table, etc names.
  */
-ColId:		IDENT									{ $$ = $1; }
+ColId:		IDENT
+				{ 
+					if (u_sess->attr.attr_sql.enable_ignore_case_in_dquotes 
+					    && (pg_yyget_extra(yyscanner))->core_yy_extra.ident_quoted)
+					{
+						$$ = pg_strtolower(pstrdup($1));
+					}
+					else
+					{
+						$$ = $1;
+					}
+				}
 			| unreserved_keyword					{ $$ = pstrdup($1); }
 			| col_name_keyword						{ $$ = pstrdup($1); }
 		;
 
 /* Type/function identifier --- names that can be type or function names.
  */
-type_function_name:	IDENT							{ $$ = $1; }
+type_function_name:	IDENT
+				{
+					if (u_sess->attr.attr_sql.enable_ignore_case_in_dquotes
+					    && (pg_yyget_extra(yyscanner))->core_yy_extra.ident_quoted)
+					{
+						$$ = pg_strtolower(pstrdup($1));
+					}
+					else
+					{
+						$$ = $1;
+					}
+				}
 			| unreserved_keyword					{ $$ = pstrdup($1); }
 			| type_func_name_keyword				{ $$ = pstrdup($1); }
 		;
@@ -28897,7 +28919,18 @@ type_function_name:	IDENT							{ $$ = $1; }
 /* Column label --- allowed labels in "AS" clauses.
  * This presently includes *all* Postgres keywords.
  */
-ColLabel:	IDENT									{ $$ = $1; }
+ColLabel:	IDENT
+				{
+					if (u_sess->attr.attr_sql.enable_ignore_case_in_dquotes
+					    && (pg_yyget_extra(yyscanner))->core_yy_extra.ident_quoted)
+					{
+						$$ = pg_strtolower(pstrdup($1));
+					}
+					else
+					{
+						$$ = $1;
+					}
+				}
 			| unreserved_keyword					{ $$ = pstrdup($1); }
 			| col_name_keyword						{ $$ = pstrdup($1); }
 			| type_func_name_keyword				{ $$ = pstrdup($1); }
