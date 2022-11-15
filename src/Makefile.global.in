@@ -276,7 +276,7 @@ ifeq ($(with_3rd), NONE)
   LIBLLVM_HOME = $(top_builddir)/$(BINARYPATH)/llvm/comm
   XGBOOST_HOME = $(top_builddir)/$(BINARYPATH)/xgboost/comm
   EVENT_HOME = $(top_builddir)/$(BINARYPATH)/event/$(LIB_SUPPORT_LLT)
-  ZLIB_HOME = $(top_builddir)/$(BINARYPATH)/zlib1.2.11/$(LIB_SUPPORT_LLT)
+  ZLIB_HOME = $(top_builddir)/$(BINARYPATH)/zlib1.2.12/$(LIB_SUPPORT_LLT)
   LZ4_HOME  = $(top_builddir)/$(BINARYPATH)/lz4/$(LIB_SUPPORT_LLT)
   CJSON_HOME = $(top_builddir)/$(BINARYPATH)/cjson/$(LIB_SUPPORT_LLT)
   KERBEROS_HOME = $(top_builddir)/$(BINARYPATH)/kerberos/$(LIB_SUPPORT_LLT)
@@ -312,7 +312,7 @@ else
   LIBLLVM_HOME = $(with_3rd)/$(BINARYPATH)/llvm/comm
   XGBOOST_HOME = $(with_3rd)/$(BINARYPATH)/xgboost/$(LIB_SUPPORT_LLT)
   EVENT_HOME = $(with_3rd)/$(BINARYPATH)/event/$(LIB_SUPPORT_LLT)
-  ZLIB_HOME = $(with_3rd)/$(BINARYPATH)/zlib1.2.11/$(LIB_SUPPORT_LLT)
+  ZLIB_HOME = $(with_3rd)/$(BINARYPATH)/zlib1.2.12/$(LIB_SUPPORT_LLT)
   LZ4_HOME  = $(with_3rd)/$(BINARYPATH)/lz4/$(LIB_SUPPORT_LLT)
   CJSON_HOME = $(with_3rd)/$(BINARYPATH)/cjson/$(LIB_SUPPORT_LLT)
   KERBEROS_HOME = $(with_3rd)/$(BINARYPATH)/kerberos/$(LIB_SUPPORT_LLT)
@@ -336,7 +336,7 @@ endif
   PLJAVA_HOME = $(with_3rd)/$(BINARYPATH)/pljava/$(LIB_SUPPORT_LLT)
   using_openjdk = $(shell if [ -d "$(with_3rd)/$(PLATFORMPATH)/openjdk8" ]; then echo "yes"; else echo "no"; fi;)
   ifeq ($(using_openjdk), yes)
-    JAVA_HOME = $(with_3rd)/$(PLATFORMPATH)/openjdk8/jdk1.8.0_222
+    JAVA_HOME = $(with_3rd)/$(PLATFORMPATH)/openjdk8/jdk
   else
     JAVA_HOME = $(with_3rd)/$(PLATFORMPATH)/huaweijdk8/x86_64/jdk
   endif
