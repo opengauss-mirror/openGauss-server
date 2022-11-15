@@ -1177,7 +1177,7 @@ pg_start_backup(const char *label, bool smooth, pgBackup *backup,
                 securec_check_for_sscanf_s(ret, 2, "\0", "\0");
                 repslotLsn = ((uint64) lsn_hi )<< 32 | lsn_lo;
                 startLsn = Min(startLsn, repslotLsn);
-
+                
                 char* slotname = pg_strdup(PQgetvalue(res, i, 0));
                 parray_append(logical_replslot, slotname);
             }
