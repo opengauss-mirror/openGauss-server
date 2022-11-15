@@ -43,8 +43,17 @@ static TupleTableSlot* ExecScanFetch(ScanState* node, ExecScanAccessMtd access_m
          */
         Index scan_rel_id = ((Scan*)node->ps.plan)->scanrelid;
 
-        Assert(scan_rel_id > 0);
-        if (estate->es_epqTupleSet[scan_rel_id - 1]) {
+        if (scan_rel_id == 0) {
+            /*
+             * This is a ForeignScan which has pushed down a
+             * join to the remote side.  The recheck method is responsible not
+             * only for rechecking the scan/join quals but also for storing
+             * the correct tuple in the slot.
+             * 
+             * currently not support.
+             */
+            Assert(false);
+        } else if (estate->es_epqTupleSet[scan_rel_id - 1]) {
             TupleTableSlot* slot = node->ss_ScanTupleSlot;
 
             /* Return empty slot if we already returned a tuple */

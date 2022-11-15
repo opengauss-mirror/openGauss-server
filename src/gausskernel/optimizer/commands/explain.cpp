@@ -567,6 +567,7 @@ void ExplainInitState(ExplainState* es)
     es->indent = 0;
     es->pindent = 0;
     es->wlm_statistics_plan_max_digit = NULL;
+    es->es_frs.parent = es;
     /* Reset flag for plan_table. */
     IsExplainPlanStmt = false;
     IsExplainPlanSelectForUpdateStmt = false;
@@ -1211,6 +1212,13 @@ void ExplainOnePlan(
         }
         u_sess->exec_cxt.remotequery_list = NIL;
     }
+
+    /* we have get all plan of foreignscan remote sql, append it */
+    if (es->es_frs.node_num > 0) {
+        appendStringInfo(es->str, "%s\n", es->es_frs.str->data);
+        pfree_ext(es->es_frs.str->data);
+    }
+
     /*
      * Close down the query and free resources.  Include time for this in the
      * total runtime (although it should be pretty minimal).
@@ -2102,7 +2110,9 @@ static void ExplainNode(
         case T_WorkTableScan:
         case T_ForeignScan:
         case T_VecForeignScan:
-            ExplainScanTarget((Scan*)plan, es);
+            if (((Scan *) plan)->scanrelid > 0) {
+                ExplainScanTarget((Scan*)plan, es);
+            }
             break;
         case T_TrainModel:
             appendStringInfo(es->str, " - %s", sname);
@@ -3330,7 +3340,7 @@ static void show_plan_tlist(PlanState* planstate, List* ancestors, ExplainState*
 
     if (IsA(plan, ForeignScan) || IsA(plan, VecForeignScan)) {
         ForeignScan* fscan = (ForeignScan*)plan;
-        if (IsSpecifiedFDWFromRelid(fscan->scan_relid, GC_FDW)) {
+        if (OidIsValid(fscan->scan_relid) && IsSpecifiedFDWFromRelid(fscan->scan_relid, GC_FDW)) {
             List* str_targetlist = get_str_targetlist(fscan->fdw_private);
             if (str_targetlist != NULL)
                 result = str_targetlist;
@@ -7449,9 +7459,33 @@ static void show_foreignscan_info(ForeignScanState* fsstate, ExplainState* es)
 {
     FdwRoutine* fdwroutine = fsstate->fdwroutine;
 
+    /* if we want to know what the remote plan like, numbering this node to find it quickly later. */
+    if (u_sess->attr.attr_common.show_fdw_remote_plan) {
+        es->es_frs.node_num++;
+        ExplainPropertyInteger("Node ID", es->es_frs.node_num , es);
+    }
+
     /* Let the FDW emit whatever fields it wants */
     if (NULL != fdwroutine && NULL != fdwroutine->ExplainForeignScan)
         fdwroutine->ExplainForeignScan(fsstate, es);
+    
+    /* Let the FDW get the remote plan */
+    if (u_sess->attr.attr_common.show_fdw_remote_plan) {
+        /* Set a title */
+        if (es->es_frs.node_num == 1) {
+            es->es_frs.str=makeStringInfo();
+            appendStringInfo(es->es_frs.str, "\nFDW remote plans:\n");
+        }
+
+        appendStringInfo(es->es_frs.str, "Node %d: ", es->es_frs.node_num);
+
+        /* Let the FDW emit whatever fields it wants */
+        if (NULL != fdwroutine && NULL != fdwroutine->ExplainForeignScanRemote) {
+            fdwroutine->ExplainForeignScanRemote(fsstate, es);
+        } else {
+            appendStringInfo(es->es_frs.str, "No remote plan information.\n");
+        }
+    }
 }
 
 /*

@@ -3779,7 +3779,7 @@ Path* create_worktablescan_path(PlannerInfo* root, RelOptInfo* rel)
  * way to calculate them in core.
  */
 ForeignPath* create_foreignscan_path(PlannerInfo* root, RelOptInfo* rel, Cost startup_cost, Cost total_cost,
-    List* pathkeys, Relids required_outer, List* fdw_private, int dop)
+    List* pathkeys, Relids required_outer, Path* fdw_outerpath, List* fdw_private, int dop)
 {
     ForeignPath* pathnode = makeNode(ForeignPath);
 
@@ -3793,14 +3793,14 @@ ForeignPath* create_foreignscan_path(PlannerInfo* root, RelOptInfo* rel, Cost st
     pathnode->path.locator_type = rel->locator_type;
     pathnode->path.exec_type = SetBasePathExectype(root, rel);
     pathnode->path.stream_cost = 0;
-
+    pathnode->fdw_outerpath = fdw_outerpath;
     pathnode->fdw_private = fdw_private;
 
     pathnode->path.dop = 1;
     dop = SET_DOP(dop);
 
     /* Create a parallel foreignscan path. */
-    if (root->parse && dop > 1) {
+    if (root->parse && dop > 1 && IS_SIMPLE_REL(rel)) {
         RangeTblEntry* source = rt_fetch(rel->relid, root->parse->rtable);
 
         AssertEreport(NULL != source, MOD_OPT_JOIN, "There should be rtable in table list");
@@ -3824,6 +3824,8 @@ ForeignPath* create_foreignscan_path(PlannerInfo* root, RelOptInfo* rel, Cost st
          *			  It is comfortable to add smp foreign scan for this scenario.
          * HDFS Server: we don't add smp feature for this kind of server. No reason.
          * Others:	  Keep constant with the original logic.
+         * 
+         * Notice: Only Base scan is supported, join\agg is not supported.
          */
         if (T_OBS_SERVER == serverType) {
             if ((CMD_SELECT == root->parse->commandType || CMD_INSERT == root->parse->commandType) &&

@@ -3632,13 +3632,23 @@ static ForeignScan* create_foreignscan_plan(PlannerInfo* root, ForeignPath* best
     Index scan_relid = rel->relid;
     RangeTblEntry* rte = NULL;
     RangeTblEntry* target_rte = NULL;
+    Plan* outer_plan = NULL;
     int i;
 
-    /* it should be a base rel... */
-    Assert(scan_relid > 0);
-    Assert(rel->rtekind == RTE_RELATION);
-    rte = planner_rt_fetch(scan_relid, root);
-    Assert(rte->rtekind == RTE_RELATION);
+    /* transform the child path if any */
+    if (best_path->fdw_outerpath) {
+        outer_plan = create_plan_recurse(root, best_path->fdw_outerpath);
+    }
+
+    /*
+     * If we're scanning a base relation, fetch its OID.  (Irrelevant if
+     * scanning a join relation.)
+     */
+    if (scan_relid > 0) {
+        Assert(rel->rtekind == RTE_RELATION);
+        rte = planner_rt_fetch(scan_relid, root);
+        Assert(rte->rtekind == RTE_RELATION);
+    }
 
     /*
      * Sort clauses into best execution order.	We do this first since the FDW
@@ -3655,7 +3665,7 @@ static ForeignScan* create_foreignscan_plan(PlannerInfo* root, ForeignPath* best
      * For now, error table only support insert statement.
      */
     target_rte = rte;
-    if (root->parse->commandType == CMD_INSERT) {
+    if (scan_relid > 0 && root->parse->commandType == CMD_INSERT) {
         // Confirm whether exists error table.
         DefElem* def = GetForeignTableOptionByName(rte->relid, optErrorRel);
         if (def != NULL) {
@@ -3686,19 +3696,36 @@ static ForeignScan* create_foreignscan_plan(PlannerInfo* root, ForeignPath* best
      * Assign task to the datanodes where target table exists so that
      * the error information will be saved only in these nodes.
      */
-    scan_plan = rel->fdwroutine->GetForeignPlan(root, rel, target_rte->relid, best_path, tlist, scan_clauses);
-    scan_plan->scan_relid = rte->relid;
+    scan_plan = rel->fdwroutine->GetForeignPlan(root, rel, 
+        target_rte == NULL ? scan_relid : target_rte->relid,
+        best_path, tlist, scan_clauses, outer_plan);
 
-    char locator_type = GetLocatorType(rte->relid);
+    scan_plan->scan_relid = (rte == NULL ? scan_relid : rte->relid);
+    /* Copy foreign server OID; likewise, no need to make FDW do this */
+    scan_plan->fs_server = rel->serverid;
+
+    /*
+     * Likewise, copy the relids that are represented by this foreign scan. An
+     * upper rel doesn't have relids set, but it covers all the base relations
+     * participating in the underlying scan, so use root's all_baserels.
+     */
+    if (rel->reloptkind == RELOPT_UPPER_REL) {
+        scan_plan->fs_relids = root->all_baserels;
+    } else {
+        scan_plan->fs_relids = best_path->path.parent->relids;
+    }
+
+    char locator_type = (rte == NULL ? LOCATOR_TYPE_NONE : GetLocatorType(rte->relid));
 
     /*
      * In order to support error table in multi-nodegroup situation,
      * execute foreign scan only on DNs where the insert-targeted table exists.
      * Secondly, find the DNs where the target table lies and set them as the exec_nodes.
      */
-    exec_nodes = GetRelationNodesByQuals(
-        (void*)root->parse, target_rte->relid, scan_relid, (Node*)scan_clauses, RELATION_ACCESS_READ, NULL);
-
+    if (scan_relid > 0) {
+        exec_nodes = GetRelationNodesByQuals((void *)root->parse, target_rte->relid,
+            scan_relid, (Node *)scan_clauses, RELATION_ACCESS_READ, NULL);
+    }
     if (exec_nodes == NULL) {
         /* foreign scan is executed on installation group */
         exec_nodes = ng_get_installation_group_exec_node();
@@ -3724,6 +3751,15 @@ static ForeignScan* create_foreignscan_plan(PlannerInfo* root, ForeignPath* best
     copy_path_costsize(&scan_plan->scan.plan, &best_path->path);
 
     /*
+     * If this is a foreign join, and to make it valid to push down we had to
+     * assume that the current user is the same as some user explicitly named
+     * in the query, mark the finished plan as depending on the current user.
+     */
+    if (rel->useridiscurrent) {
+        root->glob->dependsOnRole = true;
+    }
+
+    /*
      * Replace any outer-relation variables with nestloop params in the qual
      * and fdw_exprs expressions.  We do this last so that the FDW doesn't
      * have to be involved.  (Note that parts of fdw_exprs could have come
@@ -3731,8 +3767,9 @@ static ForeignScan* create_foreignscan_plan(PlannerInfo* root, ForeignPath* best
      * wouldn't work.)
      */
     if (best_path->path.param_info) {
-        scan_plan->scan.plan.qual = (List*)replace_nestloop_params(root, (Node*)scan_plan->scan.plan.qual);
-        scan_plan->fdw_exprs = (List*)replace_nestloop_params(root, (Node*)scan_plan->fdw_exprs);
+        scan_plan->scan.plan.qual = (List *)replace_nestloop_params(root, (Node *)scan_plan->scan.plan.qual);
+        scan_plan->fdw_exprs = (List *)replace_nestloop_params(root, (Node *)scan_plan->fdw_exprs);
+        scan_plan->fdw_recheck_quals = (List *)replace_nestloop_params(root, (Node *)scan_plan->fdw_recheck_quals);
     }
 
     /*
@@ -3741,6 +3778,10 @@ static ForeignScan* create_foreignscan_plan(PlannerInfo* root, ForeignPath* best
      * out of the API presented to FDWs.
      */
     scan_plan->fsSystemCol = false;
+    if (scan_relid == 0) {
+        return scan_plan;
+    }
+
     for (i = rel->min_attr; i < 0; i++) {
         if (!bms_is_empty(rel->attr_needed[i - rel->min_attr])) {
             scan_plan->fsSystemCol = true;
@@ -5921,8 +5962,8 @@ static WorkTableScan* make_worktablescan(List* qptlist, List* qpqual, Index scan
     return node;
 }
 
-ForeignScan* make_foreignscan(
-    List* qptlist, List* qpqual, Index scanrelid, List* fdw_exprs, List* fdw_private, RemoteQueryExecType type)
+ForeignScan *make_foreignscan(List *qptlist, List *qpqual, Index scanrelid, List *fdw_exprs, List *fdw_private,
+    List *fdw_scan_tlist, List *fdw_recheck_quals, Plan *outer_plan, RemoteQueryExecType type)
 {
     ForeignScan* node = makeNode(ForeignScan);
 
@@ -5931,17 +5972,29 @@ ForeignScan* make_foreignscan(
     /* cost will be filled in by create_foreignscan_plan */
     plan->targetlist = qptlist;
     plan->qual = qpqual;
-    plan->lefttree = NULL;
+    plan->lefttree = outer_plan;
     plan->righttree = NULL;
     plan->exec_type = type;
     plan->distributed_keys = NIL;
 #ifdef ENABLE_MULTIPLE_NODES
-    plan->distributed_keys =
         lappend(plan->distributed_keys, makeVar(0, InvalidAttrNumber, InvalidOid, -1, InvalidOid, 0));
 #endif
     node->scan.scanrelid = scanrelid;
+
+    /* these may be overridden by the FDW's PlanDirectModify callback. */
+    node->operation = CMD_SELECT;
+    node->resultRelation = 0;
+
+    /* fs_server will be filled in by create_foreignscan_plan */
+    node->fs_server = InvalidOid;
     node->fdw_exprs = fdw_exprs;
     node->fdw_private = fdw_private;
+    node->fdw_scan_tlist = fdw_scan_tlist;
+    node->fdw_recheck_quals = fdw_recheck_quals;
+
+    /* fs_relids will be filled in by create_foreignscan_plan */
+    node->fs_relids = NULL;
+
     /* fsSystemCol will be filled in by create_foreignscan_plan */
     node->fsSystemCol = false;
 
@@ -8298,8 +8351,10 @@ static Plan* FindForeignScan(Plan* plan)
     switch (nodeTag(plan)) {
         case T_ForeignScan: {
             ForeignScan* fscan = (ForeignScan*)plan;
-            if (isObsOrHdfsTableFormTblOid(fscan->scan_relid) || IS_LOGFDW_FOREIGN_TABLE(fscan->scan_relid) ||
-                IS_POSTGRESFDW_FOREIGN_TABLE(fscan->scan_relid)) {
+            if (fscan->scan_relid > 0 &&
+                (isObsOrHdfsTableFormTblOid(fscan->scan_relid) ||
+                 IS_LOGFDW_FOREIGN_TABLE(fscan->scan_relid) ||
+                 IS_POSTGRESFDW_FOREIGN_TABLE(fscan->scan_relid))) {
                 return NULL;
             }
             return plan;
@@ -8709,7 +8764,7 @@ ModifyTable* make_modifytable(CmdType operation, bool canSetTag, List* resultRel
             Plan* subplan = (Plan*)(linitial(subplans));
             ForeignScan* fscan = NULL;
             if ((fscan = (ForeignScan*)FindForeignScan(subplan)) != NULL) {
-                if (!CheckSupportedFDWType(fscan->scan_relid))
+                if (!CheckSupportedFDWType(fscan->fs_server, true))
                     ereport(ERROR,
                         (errmodule(MOD_OPT),
                             errcode(ERRCODE_FEATURE_NOT_SUPPORTED),

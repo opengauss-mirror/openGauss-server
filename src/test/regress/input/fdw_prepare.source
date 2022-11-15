@@ -1,0 +1,24 @@
+-- 1. create usermapping.cihper
+\! echo $OLDGAUSSHOME | xargs -I{} rm -f {}/bin/usermapping.key.cipher
+\! echo $OLDGAUSSHOME | xargs -I{} rm -f {}/bin/usermapping.key.rand
+\! echo $OLDGAUSSHOME | xargs -I{} @abs_bindir@/gs_guc generate -S 123456@pwd -D {}/bin -o usermapping > /dev/null 2>&1 ; echo $?
+
+
+-- 2. copy the test case script from contrib/, touch it first in case copy failed, otherwise fastcheck will stop becase cannot find test case script;
+\! sh -c "touch @abs_srcdir@/sql/postgres_fdw.sql"
+\! sh -c "echo 'failed, please check the test case: fdw_prepare' > @abs_srcdir@/sql/postgres_fdw.sql"
+\! sh -c "touch @abs_srcdir@/expected/postgres_fdw.out"
+\! sh -c "cp @abs_srcdir@/../../../contrib/postgres_fdw/sql/postgres_fdw.sql       @abs_srcdir@/sql/postgres_fdw.sql"
+\! sh -c "cp @abs_srcdir@/../../../contrib/postgres_fdw/expected/postgres_fdw.out  @abs_srcdir@/expected/postgres_fdw.out"
+
+\! sh -c "touch @abs_srcdir@/sql/postgres_fdw_cstore.sql"
+\! sh -c "echo 'failed, please check the test case: fdw_prepare' > @abs_srcdir@/sql/postgres_fdw_cstore.sql"
+\! sh -c "touch @abs_srcdir@/expected/postgres_fdw_cstore.out"
+\! sh -c "cp @abs_srcdir@/../../../contrib/postgres_fdw/sql/postgres_fdw_cstore.sql       @abs_srcdir@/sql/postgres_fdw_cstore.sql"
+\! sh -c "cp @abs_srcdir@/../../../contrib/postgres_fdw/expected/postgres_fdw_cstore.out  @abs_srcdir@/expected/postgres_fdw_cstore.out"
+
+\! sh -c "touch @abs_srcdir@/sql/postgres_fdw_partition.sql"
+\! sh -c "echo 'failed, please check the test case: fdw_prepare' > @abs_srcdir@/sql/postgres_fdw_partition.sql"
+\! sh -c "touch @abs_srcdir@/expected/postgres_fdw_partition.out"
+\! sh -c "cp @abs_srcdir@/../../../contrib/postgres_fdw/sql/postgres_fdw_partition.sql       @abs_srcdir@/sql/postgres_fdw_partition.sql"
+\! sh -c "cp @abs_srcdir@/../../../contrib/postgres_fdw/expected/postgres_fdw_partition.out  @abs_srcdir@/expected/postgres_fdw_partition.out"

@@ -83,7 +83,7 @@ extern void ProcessDistImportOptions(DistImportPlanState *planstate, List *optio
 extern void distImportGetRelSize(PlannerInfo* root, RelOptInfo* baserel, Oid foreigntableid);
 extern void distImportGetPaths(PlannerInfo* root, RelOptInfo* baserel, Oid foreigntableid);
 extern ForeignScan* distImportGetPlan(PlannerInfo* root, RelOptInfo* baserel, Oid foreigntableid,
-    ForeignPath* best_path, List* tlist, List* scan_clauses);
+    ForeignPath* best_path, List* tlist, List* scan_clauses, Plan *outer_plan);
 
 extern void distImportExplain(ForeignScanState* node, ExplainState* es);
 

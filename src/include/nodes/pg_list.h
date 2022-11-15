@@ -251,6 +251,7 @@ extern List* lcons_int(int datum, List* list);
 extern List* lcons_oid(Oid datum, List* list);
 
 extern List* list_concat(List* list1, List* list2);
+extern List* list_concat2(List* list1, List* list2);
 extern List* list_truncate(List* list, int new_size);
 
 extern void* list_nth(const List* list, int n);

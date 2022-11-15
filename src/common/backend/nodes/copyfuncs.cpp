@@ -959,6 +959,13 @@ static ForeignScan* _copyForeignScan(const ForeignScan* from)
         }
     }
 
+    COPY_SCALAR_FIELD(operation);
+    COPY_SCALAR_FIELD(resultRelation);
+    COPY_SCALAR_FIELD(fs_server);
+    COPY_BITMAPSET_FIELD(fs_relids);
+    COPY_NODE_FIELD(fdw_scan_tlist);
+    COPY_NODE_FIELD(fdw_recheck_quals);
+
     return newnode;
 }
 
@@ -1830,6 +1837,13 @@ static VecForeignScan* _copyVecForeignScan(const VecForeignScan* from)
             COPY_NODE_FIELD(bloomFilterSet[cell]);
         }
     }
+
+    COPY_SCALAR_FIELD(operation);
+    COPY_SCALAR_FIELD(resultRelation);
+    COPY_SCALAR_FIELD(fs_server);
+    COPY_BITMAPSET_FIELD(fs_relids);
+    COPY_NODE_FIELD(fdw_scan_tlist);
+    COPY_NODE_FIELD(fdw_recheck_quals);
 
     return newnode;
 }

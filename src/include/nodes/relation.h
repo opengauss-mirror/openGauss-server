@@ -86,6 +86,23 @@ typedef struct AggClauseCosts {
 } AggClauseCosts;
 
 /*
+ * This enum identifies the different types of "upper" (post-scan/join)
+ * relations that we might deal with during planning.
+ */
+typedef enum UpperRelationKind {
+    UPPERREL_INIT,              /* is a base rel */
+    UPPERREL_SETOP,             /* result of UNION/INTERSECT/EXCEPT, if any */
+    UPPERREL_GROUP_AGG,         /* result of grouping/aggregation, if any */
+    UPPERREL_WINDOW,            /* result of window functions, if any */
+    UPPERREL_DISTINCT,          /* result of "SELECT DISTINCT", if any */
+    UPPERREL_ORDERED,           /* result of ORDER BY, if any */
+    UPPERREL_ROWMARKS,          /* result of ROMARKS, if any */
+    UPPERREL_LIMIT,             /* result of limit offset, if any */
+    UPPERREL_FINAL              /* result of any remaining top-level actions */
+                                /* NB: UPPERREL_FINAL must be last enum entry; it's used to size arrays */
+} UpperRelationKind;
+
+/*
  * For global path optimization, we should keep all paths with interesting distribute
  * keys. There are two kinds of such keys: super set (taking effect for intermediate
  * relation and before agg) and exact match (taking effect for intermediate resultset
@@ -465,9 +482,14 @@ typedef struct PlannerInfo {
  *
  * We also have "other rels", which are like base rels in that they refer to
  * single RT indexes; but they are not part of the join tree, and are given
- * a different RelOptKind to identify them.  Lastly, there is a RelOptKind
- * for "dead" relations, which are base rels that we have proven we don't
- * need to join after all.
+ * a different RelOptKind to identify them.  
+ * There is also a RelOptKind for "upper" relations, which are RelOptInfos
+ * that describe post-scan/join processing steps, such as aggregation.
+ * Many of the fields in these RelOptInfos are meaningless, but their Path
+ * fields always hold Paths showing ways to do that processing step, currently
+ * this kind is only used for fdw to search path.
+ * Lastly, there is a RelOptKind for "dead" relations, which are base rels
+ * that we have proven we don't need to join after all.
  *
  * Currently the only kind of otherrels are those made for member relations
  * of an "append relation", that is an inheritance set or UNION ALL subquery.
@@ -531,8 +553,6 @@ typedef struct PlannerInfo {
  *		allvisfrac - fraction of disk pages that are marked all-visible
  *		subplan - plan for subquery (NULL if it's not a subquery)
  *		subroot - PlannerInfo for subquery (NULL if it's not a subquery)
- *		fdwroutine - function hooks for FDW, if foreign table (else NULL)
- *		fdw_private - private state for FDW, if foreign table (else NULL)
  *
  *		Note: for a subquery, tuples, subplan, subroot are not set immediately
  *		upon creation of the RelOptInfo object; they are filled in when
@@ -541,7 +561,16 @@ typedef struct PlannerInfo {
  *
  *		For otherrels that are appendrel members, these fields are filled
  *		in just as for a baserel.
+ * If the relation is either a foreign table or a join of foreign tables that
+ * all belong to the same foreign server and are assigned to the same user to
+ * check access permissions as (cf checkAsUser), these fields will be set:
  *
+ *		serverid - OID of foreign server, if foreign table (else InvalidOid)
+ *		userid - OID of user to check access as (InvalidOid means current user)
+ *		useridiscurrent - we've assumed that userid equals current user
+ *		fdwroutine - function hooks for FDW, if foreign table (else NULL)
+ *		fdw_private - private state for FDW, if foreign table (else NULL)
+ * 
  * The presence of the remaining fields depends on the restrictions
  * and joins that the relation participates in:
  *
@@ -575,7 +604,7 @@ typedef struct PlannerInfo {
  * and may need it multiple times to price index scans.
  * ----------
  */
-typedef enum RelOptKind { RELOPT_BASEREL, RELOPT_JOINREL, RELOPT_OTHER_MEMBER_REL, RELOPT_DEADREL } RelOptKind;
+typedef enum RelOptKind { RELOPT_BASEREL, RELOPT_JOINREL, RELOPT_OTHER_MEMBER_REL, RELOPT_UPPER_REL, RELOPT_DEADREL } RelOptKind;
 
 typedef enum PartitionFlag { PARTITION_NONE, PARTITION_REQURIED, PARTITION_ANCESOR } PartitionFlag;
 
@@ -587,6 +616,9 @@ typedef enum PartitionFlag { PARTITION_NONE, PARTITION_REQURIED, PARTITION_ANCES
 
 /* Is the given relation a join relation? */
 #define IS_JOIN_REL(rel) ((rel)->reloptkind == RELOPT_JOINREL)
+
+/* Is the given relation an upper relation? */
+#define IS_UPPER_REL(rel) ((rel)->reloptkind == RELOPT_UPPER_REL)
 
 typedef struct RelOptInfo {
     NodeTag type;
@@ -653,6 +685,11 @@ typedef struct RelOptInfo {
     struct Plan* subplan; /* if subquery */
     PlannerInfo* subroot; /* if subquery */
     List *subplan_params; /* if subquery */
+
+    /* Information about foreign tables and foreign joins */
+    Oid serverid;         /* identifies server for the table or join */
+    Oid userid;           /* identifies user to check access as */
+    bool useridiscurrent; /* join is only valid for current user */
     /* use "struct FdwRoutine" to avoid including fdwapi.h here */
     struct FdwRoutine* fdwroutine; /* if foreign table */
     void* fdw_private;             /* if foreign table */

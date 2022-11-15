@@ -4512,6 +4512,16 @@ static ForeignScan* _readForeignScan(ForeignScan* local_node)
     }
 
     READ_BOOL_FIELD(in_compute_pool);
+
+    IF_EXIST(operation) {
+        READ_ENUM_FIELD(operation, CmdType);
+        READ_UINT_FIELD(resultRelation);
+        READ_OID_FIELD(fs_server);
+        READ_BITMAPSET_FIELD(fs_relids);
+        READ_NODE_FIELD(fdw_scan_tlist);
+        READ_NODE_FIELD(fdw_recheck_quals);
+    }
+
     READ_DONE();
 }
 
@@ -5046,6 +5056,14 @@ static VecForeignScan* _readVecForeignScan(VecForeignScan* local_node)
     }
 
     READ_BOOL_FIELD(in_compute_pool);
+    IF_EXIST(operation) {
+        READ_ENUM_FIELD(operation, CmdType);
+        READ_UINT_FIELD(resultRelation);
+        READ_OID_FIELD(fs_server);
+        READ_BITMAPSET_FIELD(fs_relids);
+        READ_NODE_FIELD(fdw_scan_tlist);
+        READ_NODE_FIELD(fdw_recheck_quals);
+    }
     READ_DONE();
 }
 
