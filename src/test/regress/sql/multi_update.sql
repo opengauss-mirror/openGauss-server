@@ -559,6 +559,13 @@ begin;
 update t_t_mutil_t1 t1,t_t_mutil_t2 t2 set t2.col2 = 3, t1.col1 = 2;
 select * from t_t_mutil_t1;
 rollback;
+begin;
+update t_t_mutil_t1 t1, t_t_mutil_t1 t2, t_t_mutil_t1 t3 set t2.col2 = 3, t3.col1 = 2;
+rollback;
+begin;
+update t_t_mutil_t2 t1, t_t_mutil_t2 t2, t_t_mutil_t2 t3 set t1.col1 = 3, t3.col2 = 2, t2.col3 = 3;
+rollback;
+
 CREATE SYNONYM s_t_mutil_t1 FOR t_t_mutil_t1;
 CREATE SYNONYM s_t_mutil_t2 FOR t_t_mutil_t1;
 begin;
