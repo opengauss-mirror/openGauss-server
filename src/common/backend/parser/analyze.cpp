@@ -1584,19 +1584,6 @@ static RightRefState* MakeRightRefState()
 {
     RightRefState* refState = (RightRefState*)palloc0(sizeof(RightRefState));
     refState->isSupported = !IsInitdb && DB_IS_CMPT(B_FORMAT);
-    refState->isInsertHasRightRef = false;
-    refState->explicitAttrLen = 0;
-    refState->explicitAttrNos = nullptr;
-    
-    refState->colCnt = 0;
-    refState->values = nullptr;
-    refState->isNulls = nullptr;
-    refState->hasExecs = nullptr;
-    
-    refState->isUpsert = false;
-    refState->isUpsertHasRightRef = false;
-    refState->usExplicitAttrLen = 0;
-    refState->usExplicitAttrNos = nullptr;
     return refState;
 }
 
