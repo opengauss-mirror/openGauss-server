@@ -899,6 +899,10 @@ static void transformLimitSortClause(ParseState* pstate, void* stmt, Query* qry,
     rlist =  forDel ? transformSortClause(pstate, ((DeleteStmt*)stmt)->sortClause, &qry->targetList, true, false) :
                 transformUpdateSortClause(pstate, (UpdateStmt*)stmt, qry);
 
+    /*
+     * For update statement, the effective range of sort clause is not optimized. For delete statement,
+     * sorting is performed only when limit or returning clause takes effect.
+     */
     if (qry->limitCount != NULL) {
         /* flag for discriminating rownum */
         Const *flag = makeNode(Const);
@@ -907,8 +911,10 @@ static void transformLimitSortClause(ParseState* pstate, void* stmt, Query* qry,
         flag->consttype = INT8OID;
         flag->consttypmod = -1;
         qry->limitOffset = (Node*)flag;
+        qry->sortClause = rlist;
+    } else if (!forDel || qry->returningList != NULL) {
+        qry->sortClause = rlist;
     }
-    qry->sortClause = rlist;
 }
 
 static void CheckUDRelations(ParseState* pstate, List* sortClause, Node* limitClause, List* returningList,
@@ -3662,18 +3668,15 @@ static void MergeTargetList(List** targetLists, RangeTblEntry* rte1, int rtindex
                             RangeTblEntry* rte2, int rtindex2)
 {
     ListCell* l = NULL;
-    ListCell* l_pre = NULL;
 
     foreach (l, targetLists[rtindex2 - 1]) {
         TargetEntry* tle = (TargetEntry*)lfirst(l);
         tle->rtindex = (Index)rtindex1;
         rte1->updatedCols = bms_add_member(rte1->updatedCols, tle->resno - FirstLowInvalidHeapAttributeNumber);
         rte2->updatedCols = bms_del_member(rte2->updatedCols, tle->resno - FirstLowInvalidHeapAttributeNumber);
-        targetLists[rtindex1 - 1] = lappend(targetLists[rtindex1 - 1], tle);
-        targetLists[rtindex2 - 1] = list_delete_cell(targetLists[rtindex2 - 1], l, l_pre);
-
-        l_pre = l;
     }
+    targetLists[rtindex1 - 1] = list_concat(targetLists[rtindex1 - 1], targetLists[rtindex2 - 1]);
+    targetLists[rtindex2 - 1] = NULL;
 }
 
 static void transformMultiTargetList(List* target_rangetblentry, List** targetLists)
@@ -4135,6 +4138,7 @@ static List* transformUpdateTargetList(ParseState* pstate, List* qryTlist, List*
             tlist = list_concat(tlist, new_tle[i]);
         }
     }
+    pfree(new_tle);
     return tlist;
 }
 
