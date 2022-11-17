@@ -1293,7 +1293,16 @@ static void create_tablespace_directories(const char* location, const Oid tables
             ereport(ERROR, (errcode_for_file_access(), errmsg("could not remove symbolic link \"%s\": %m", linkloc)));
         }
     }
-
+    /* do not support symbolic link ->  symbolic link */
+    struct stat st;
+    if (lstat(location, &st) == 0) {
+        if (S_ISLNK(st.st_mode)) {
+            ereport(ERROR,
+                (errmodule(MOD_TBLSPC),
+                    errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                    errmsg("location \"%s\" is symbolic link", location)));
+        }
+    }
     /*
      * Create the symlink under PGDATA
      */
