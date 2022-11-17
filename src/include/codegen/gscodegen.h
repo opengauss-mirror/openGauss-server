@@ -540,6 +540,14 @@ public:
     }
 
     /*
+     * @Description : Get m_moduleCompiled.
+     */
+    inline bool IsCompiled()
+    {
+        return m_moduleCompiled;
+    }
+
+    /*
      * @Description	: IR compile to machine code.
      */
     void compileCurrentModule(bool enable_jitcache);
