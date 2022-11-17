@@ -205,7 +205,7 @@ TupleTableSlot* ExecRecursiveUnion(RecursiveUnionState* node)
              * For START WITH CONNECT BY, create converted tuple with pseudo columns.
              */
             slot = isSW ? ConvertRuScanOutputSlot(node, slot, false) : slot;
-            swSlot = isSW ? GetStartWithSlot(node, slot) : NULL;
+            swSlot = isSW ? GetStartWithSlot(node, slot, false) : NULL;
             if (isSW && swSlot == NULL) {
                 /* Not satisfy connect_by_level_qual，skip this tuple */
                 continue;
@@ -379,14 +379,24 @@ TupleTableSlot* ExecRecursiveUnion(RecursiveUnionState* node)
              * avoid order siblings by exist.
              * */
             if (node->iteration > max_times) {
-                ereport(ERROR,
-                        (errcode(ERRCODE_CONFIGURATION_LIMIT_EXCEEDED),
-                        errmsg("Current Start With...Connect by has exceeded max iteration times %d", max_times),
-                        errhint("Please check your connect by clause carefully")));
+                /* if connectByLevelQual can't offer a limited results, declare a cycle exception
+                 * and suggest user add NOCYCLE into CONNECT BY clause.
+                 */
+                if (IsConnectByLevelStartWithPlan(swplan)) {
+                    ereport(ERROR,
+                            (errmodule(MOD_EXECUTOR),
+                            errmsg("START WITH .. CONNECT BY statement runs into cycle exception because of bad"
+                                    " condition for evaluation given in CONNECT BY clause")));
+                } else {
+                    ereport(ERROR,
+                            (errcode(ERRCODE_CONFIGURATION_LIMIT_EXCEEDED),
+                            errmsg("Current Start With...Connect by has exceeded max iteration times %d", max_times),
+                            errhint("Please check your connect by clause carefully")));
+                }
             }
 
             slot = ConvertRuScanOutputSlot(node, slot, true);
-            swSlot = GetStartWithSlot(node, slot);
+            swSlot = GetStartWithSlot(node, slot, true);
             if (isSW && swSlot == NULL) {
                 /* Not satisfy connect_by_level_qual，skip this tuple */
                 continue;
