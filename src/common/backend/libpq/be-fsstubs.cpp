@@ -79,44 +79,24 @@ Datum lo_open(PG_FUNCTION_ARGS)
     LargeObjectDesc* lobjDesc = NULL;
     int fd;
 
-#ifdef PGXC
-    ereport(ERROR,
-        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("openGauss does not support large object yet"),
-            errdetail("The feature is not currently supported")));
-#endif
-
     CreateFSContext();
-
     lobjDesc = inv_open(lobjId, mode, u_sess->libpq_cxt.fscxt);
-
     if (lobjDesc == NULL) { /* lookup failed */
         PG_RETURN_INT32(-1);
     }
 
     fd = newLOfd(lobjDesc);
-
     PG_RETURN_INT32(fd);
 }
 
 Datum lo_close(PG_FUNCTION_ARGS)
 {
     int32 fd = PG_GETARG_INT32(0);
-
-#ifdef PGXC
-    ereport(ERROR,
-        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("openGauss does not support large object yet"),
-            errdetail("The feature is not currently supported")));
-#endif
-
     if (fd < 0 || fd >= u_sess->libpq_cxt.cookies_size || u_sess->libpq_cxt.cookies[fd] == NULL)
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("invalid large-object descriptor: %d", fd)));
 
     inv_close(u_sess->libpq_cxt.cookies[fd]);
-
     deleteLOfd(fd);
-
     PG_RETURN_INT32(0);
 }
 
@@ -131,61 +111,48 @@ Datum lo_close(PG_FUNCTION_ARGS)
 int lo_read(int fd, char* buf, int len)
 {
     int status = -1;
-
-#ifdef PGXC
-    ereport(ERROR,
-        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("openGauss does not support large object yet"),
-            errdetail("The feature is not currently supported")));
-#endif
-
+    LargeObjectDesc *lobj;
     if (fd < 0 || fd >= u_sess->libpq_cxt.cookies_size || u_sess->libpq_cxt.cookies[fd] == NULL)
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("invalid large-object descriptor: %d", fd)));
+    lobj = u_sess->libpq_cxt.cookies[fd];
 
-    /* Permission checks */
-    if (!u_sess->attr.attr_sql.lo_compat_privileges &&
-        pg_largeobject_aclcheck_snapshot(
-            u_sess->libpq_cxt.cookies[fd]->id, GetUserId(), ACL_SELECT, u_sess->libpq_cxt.cookies[fd]->snapshot) !=
-            ACLCHECK_OK)
-        ereport(ERROR,
-            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-                errmsg("permission denied for large object %u", u_sess->libpq_cxt.cookies[fd]->id)));
+    /* Permission checks --- first time through only */
+    if ((lobj->flags & IFS_RD_PERM_OK) == 0) {
+        if (!u_sess->attr.attr_sql.lo_compat_privileges &&
+            pg_largeobject_aclcheck_snapshot(
+                lobj->id, GetUserId(), ACL_UPDATE, lobj->snapshot) != ACLCHECK_OK)
+                ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                        errmsg("permission denied for large object %u", lobj->id)));
+        lobj->flags |= IFS_RD_PERM_OK;
+    }
 
-    status = inv_read(u_sess->libpq_cxt.cookies[fd], buf, len);
-
+    status = inv_read(lobj, buf, len);
     return status;
 }
 
 int lo_write(int fd, const char* buf, int len)
 {
     int status = -1;
-
-#ifdef PGXC
-    ereport(ERROR,
-        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("openGauss does not support large object yet"),
-            errdetail("The feature is not currently supported")));
-#endif
-
+    LargeObjectDesc *lobj;
     if (fd < 0 || fd >= u_sess->libpq_cxt.cookies_size || u_sess->libpq_cxt.cookies[fd] == NULL)
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("invalid large-object descriptor: %d", fd)));
+    lobj = u_sess->libpq_cxt.cookies[fd];
 
-    if (((unsigned int)u_sess->libpq_cxt.cookies[fd]->flags & IFS_WRLOCK) == 0)
-        ereport(ERROR,
-            (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+    if (((unsigned int)lobj->flags & IFS_WRLOCK) == 0)
+        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
                 errmsg("large object descriptor %d was not opened for writing", fd)));
 
-    /* Permission checks */
-    if (!u_sess->attr.attr_sql.lo_compat_privileges &&
-        pg_largeobject_aclcheck_snapshot(
-            u_sess->libpq_cxt.cookies[fd]->id, GetUserId(), ACL_UPDATE, u_sess->libpq_cxt.cookies[fd]->snapshot) !=
-            ACLCHECK_OK)
-        ereport(ERROR,
-            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-                errmsg("permission denied for large object %u", u_sess->libpq_cxt.cookies[fd]->id)));
+    /* Permission checks --- first time through only */
+    if ((lobj->flags & IFS_WR_PERM_OK) == 0) {
+        if (!u_sess->attr.attr_sql.lo_compat_privileges &&
+            pg_largeobject_aclcheck_snapshot(
+                lobj->id, GetUserId(), ACL_UPDATE, lobj->snapshot) != ACLCHECK_OK)
+            ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                    errmsg("permission denied for large object %u", lobj->id)));
+        lobj->flags |= IFS_WR_PERM_OK;
+    }
 
-    status = inv_write(u_sess->libpq_cxt.cookies[fd], buf, len);
-
+    status = inv_write(lobj, buf, len);
     return status;
 }
 
@@ -194,42 +161,45 @@ Datum lo_lseek(PG_FUNCTION_ARGS)
     int32 fd = PG_GETARG_INT32(0);
     int32 offset = PG_GETARG_INT32(1);
     int32 whence = PG_GETARG_INT32(2);
-    int status;
-
-#ifdef PGXC
-    ereport(ERROR,
-        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("openGauss does not support large object yet"),
-            errdetail("The feature is not currently supported")));
-#endif
-
+    int64 status;
     if (fd < 0 || fd >= u_sess->libpq_cxt.cookies_size || u_sess->libpq_cxt.cookies[fd] == NULL)
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("invalid large-object descriptor: %d", fd)));
-
     status = inv_seek(u_sess->libpq_cxt.cookies[fd], offset, whence);
 
-    PG_RETURN_INT32(status);
+    /* guard against result overflow */
+    if (status != (int32) status)
+        ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                errmsg("lo_lseek result out of range for large-object descriptor %d", fd)));
+
+    PG_RETURN_INT32((int32)status);
+}
+
+Datum lo_lseek64(PG_FUNCTION_ARGS)
+{
+    int32 fd = PG_GETARG_INT32(0);
+    int64 offset = PG_GETARG_INT64(1);
+    int32 whence = PG_GETARG_INT32(2);
+    int64 status;
+
+    if (fd < 0 || fd >= u_sess->libpq_cxt.cookies_size || u_sess->libpq_cxt.cookies[fd] == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+                errmsg("invalid large-object descriptor: %d", fd)));
+    }
+
+    status = inv_seek(u_sess->libpq_cxt.cookies[fd], offset, whence);
+    PG_RETURN_INT64(status);
 }
 
 Datum lo_creat(PG_FUNCTION_ARGS)
 {
     Oid lobjId;
 
-#ifdef PGXC
-    ereport(ERROR,
-        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("openGauss does not support large object yet"),
-            errdetail("The feature is not currently supported")));
-#endif
-
     /*
      * We don't actually need to store into fscxt, but create it anyway to
      * ensure that AtEOXact_LargeObject knows there is state to clean up
      */
     CreateFSContext();
-
     lobjId = inv_create(InvalidOid);
-
     PG_RETURN_OID(lobjId);
 }
 
@@ -237,52 +207,48 @@ Datum lo_create(PG_FUNCTION_ARGS)
 {
     Oid lobjId = PG_GETARG_OID(0);
 
-#ifdef PGXC
-    ereport(ERROR,
-        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("openGauss does not support large object yet"),
-            errdetail("The feature is not currently supported")));
-#endif
-
     /*
      * We don't actually need to store into fscxt, but create it anyway to
      * ensure that AtEOXact_LargeObject knows there is state to clean up
      */
     CreateFSContext();
-
     lobjId = inv_create(lobjId);
-
     PG_RETURN_OID(lobjId);
 }
 
 Datum lo_tell(PG_FUNCTION_ARGS)
 {
     int32 fd = PG_GETARG_INT32(0);
-
-#ifdef PGXC
-    ereport(ERROR,
-        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("openGauss does not support large object yet"),
-            errdetail("The feature is not currently supported")));
-#endif
+    int64 offset = 0;
 
     if (fd < 0 || fd >= u_sess->libpq_cxt.cookies_size || u_sess->libpq_cxt.cookies[fd] == NULL)
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("invalid large-object descriptor: %d", fd)));
+    offset = inv_tell(u_sess->libpq_cxt.cookies[fd]);
+    /* guard against result overflow */
+    if (offset != (int32) offset)
+        ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                errmsg("lo_tell result out of range for large-object descriptor %d", fd)));
 
-    PG_RETURN_INT32(inv_tell(u_sess->libpq_cxt.cookies[fd]));
+    PG_RETURN_INT32((int32) offset);
+}
+
+Datum lo_tell64(PG_FUNCTION_ARGS)
+{
+    int32 fd = PG_GETARG_INT32(0);
+    int64 offset;
+
+    if (fd < 0 || fd >= u_sess->libpq_cxt.cookies_size || u_sess->libpq_cxt.cookies[fd] == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+                errmsg("invalid large-object descriptor: %d", fd)));
+    }
+
+    offset = inv_tell(u_sess->libpq_cxt.cookies[fd]);
+    PG_RETURN_INT64(offset);
 }
 
 Datum lo_unlink(PG_FUNCTION_ARGS)
 {
     Oid lobjId = PG_GETARG_OID(0);
-
-#ifdef PGXC
-    ereport(ERROR,
-        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("openGauss does not support large object yet"),
-            errdetail("The feature is not currently supported")));
-#endif
-
     /* Must be owner of the largeobject */
     if (!u_sess->attr.attr_sql.lo_compat_privileges && !pg_largeobject_ownercheck(lobjId, GetUserId()))
         ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("must be owner of large object %u", lobjId)));
@@ -292,7 +258,6 @@ Datum lo_unlink(PG_FUNCTION_ARGS)
      */
     if (u_sess->libpq_cxt.fscxt != NULL) {
         int i;
-
         for (i = 0; i < u_sess->libpq_cxt.cookies_size; i++) {
             if (u_sess->libpq_cxt.cookies[i] != NULL && u_sess->libpq_cxt.cookies[i]->id == lobjId) {
                 inv_close(u_sess->libpq_cxt.cookies[i]);
@@ -319,39 +284,23 @@ Datum loread(PG_FUNCTION_ARGS)
     bytea* retval = NULL;
     int totalread;
 
-#ifdef PGXC
-    ereport(ERROR,
-        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("openGauss does not support large object yet"),
-            errdetail("The feature is not currently supported")));
-#endif
-
     if (len < 0)
         len = 0;
 
     retval = (bytea*)palloc(VARHDRSZ + len);
     totalread = lo_read(fd, VARDATA(retval), len);
     SET_VARSIZE(retval, totalread + VARHDRSZ);
-
     PG_RETURN_BYTEA_P(retval);
 }
 
 Datum lowrite(PG_FUNCTION_ARGS)
 {
     int32 fd = PG_GETARG_INT32(0);
-    bytea* wbuf = PG_GETARG_BYTEA_P(1);
+    bytea* wbuf = PG_GETARG_BYTEA_PP(1);
     int bytestowrite;
     int totalwritten;
-
-#ifdef PGXC
-    ereport(ERROR,
-        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("openGauss does not support large object yet"),
-            errdetail("The feature is not currently supported")));
-#endif
-
-    bytestowrite = VARSIZE(wbuf) - VARHDRSZ;
-    totalwritten = lo_write(fd, VARDATA(wbuf), bytestowrite);
+    bytestowrite = VARSIZE_ANY_EXHDR(wbuf);
+    totalwritten = lo_write(fd, VARDATA_ANY(wbuf), bytestowrite);
     PG_RETURN_INT32(totalwritten);
 }
 
@@ -366,14 +315,6 @@ Datum lowrite(PG_FUNCTION_ARGS)
 Datum lo_import(PG_FUNCTION_ARGS)
 {
     text* filename = PG_GETARG_TEXT_PP(0);
-
-#ifdef PGXC
-    ereport(ERROR,
-        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("openGauss does not support large object yet"),
-            errdetail("The feature is not currently supported")));
-#endif
-
     PG_RETURN_OID(lo_import_internal(filename, InvalidOid));
 }
 
@@ -385,14 +326,6 @@ Datum lo_import_with_oid(PG_FUNCTION_ARGS)
 {
     text* filename = PG_GETARG_TEXT_PP(0);
     Oid oid = PG_GETARG_OID(1);
-
-#ifdef PGXC
-    ereport(ERROR,
-        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("openGauss does not support large object yet"),
-            errdetail("The feature is not currently supported")));
-#endif
-
     PG_RETURN_OID(lo_import_internal(filename, oid));
 }
 
@@ -405,7 +338,6 @@ static Oid lo_import_internal(text* filename, Oid lobjOid)
     char fnamebuf[MAXPGPATH];
     LargeObjectDesc* lobj = NULL;
     Oid oid;
-    int offset = 0;
 
 #ifndef ALLOW_DANGEROUS_LO_FUNCTIONS
     if (!superuser())
@@ -416,12 +348,11 @@ static Oid lo_import_internal(text* filename, Oid lobjOid)
 #endif
 
     CreateFSContext();
-
     /*
      * open the file to be read in
      */
     text_to_cstring_buffer(filename, fnamebuf, sizeof(fnamebuf));
-    fd = PathNameOpenFile(fnamebuf, O_RDONLY | PG_BINARY, S_IRWXU);
+    fd = OpenTransientFile(fnamebuf, O_RDONLY | PG_BINARY, S_IRWXU);
     if (fd < 0)
         ereport(ERROR, (errcode_for_file_access(), errmsg("could not open server file \"%s\": %m", fnamebuf)));
 
@@ -434,19 +365,16 @@ static Oid lo_import_internal(text* filename, Oid lobjOid)
      * read in from the filesystem and write to the inversion object
      */
     lobj = inv_open(oid, INV_WRITE, u_sess->libpq_cxt.fscxt);
-
-    while ((nbytes = FilePRead(fd, buf, BUFSIZE, offset)) > 0) {
+    while ((nbytes = read(fd, buf, BUFSIZE)) > 0) {
         tmp = inv_write(lobj, buf, nbytes);
-        offset += nbytes;
         Assert(tmp == nbytes);
     }
-
-    inv_close(lobj);
-    FileClose(fd);
-
+    
     if (nbytes < 0)
         ereport(ERROR, (errcode_for_file_access(), errmsg("could not read server file \"%s\": %m", fnamebuf)));
-
+    inv_close(lobj);
+    if (CloseTransientFile(fd) != 0)
+        ereport(ERROR, (errcode_for_file_access(), errmsg("could not close file \"%s\": %m", fnamebuf)));
     return oid;
 }
 
@@ -464,28 +392,18 @@ Datum lo_export(PG_FUNCTION_ARGS)
     char buf[BUFSIZE];
     char fnamebuf[MAXPGPATH];
     LargeObjectDesc* lobj = NULL;
-    int offset = 0;
     bool dirIsExist = false;
     struct stat checkdir;
     mode_t oumask;
 
-#ifdef PGXC
-    ereport(ERROR,
-        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("openGauss does not support large object yet"),
-            errdetail("The feature is not currently supported")));
-#endif
-
 #ifndef ALLOW_DANGEROUS_LO_FUNCTIONS
     if (!superuser())
-        ereport(ERROR,
-            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                 errmsg("must be system admin to use server-side lo_export()"),
                 errhint("Anyone can use the client-side lo_export() provided by libpq.")));
 #endif
 
     CreateFSContext();
-
     /*
      * open the inversion object (no need to test for failure)
      */
@@ -506,8 +424,8 @@ Datum lo_export(PG_FUNCTION_ARGS)
     oumask = umask(S_IWGRP | S_IWOTH);
     PG_TRY();
     {
-        fd =
-            PathNameOpenFile(fnamebuf, O_CREAT | O_WRONLY | O_TRUNC | PG_BINARY, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+        fd = OpenTransientFile(fnamebuf, O_CREAT | O_WRONLY | O_TRUNC | PG_BINARY,
+                               S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
     }
     PG_CATCH();
     {
@@ -524,7 +442,10 @@ Datum lo_export(PG_FUNCTION_ARGS)
 
     if (!dirIsExist) {
         if (chmod(fnamebuf, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH) < 0) {
-            FileClose(fd);
+            if (CloseTransientFile(fd) != 0) {
+                inv_close(lobj);
+                ereport(ERROR, (errcode_for_file_access(), errmsg("could not close file \"%s\": %m", fnamebuf)));
+            }
             inv_close(lobj);
             ereport(ERROR, (errcode_for_file_access(), errmsg("could not chmod server file \"%s\": %m", fnamebuf)));
         }
@@ -534,18 +455,22 @@ Datum lo_export(PG_FUNCTION_ARGS)
      * read in from the inversion file and write to the filesystem
      */
     while ((nbytes = inv_read(lobj, buf, BUFSIZE)) > 0) {
-        tmp = FilePWrite(fd, buf, nbytes, offset);
+        tmp = write(fd, buf, nbytes);
         if (tmp != nbytes) {
-            FileClose(fd);
+            if (CloseTransientFile(fd) != 0) {
+                inv_close(lobj);
+                ereport(ERROR, (errcode_for_file_access(), errmsg("could not close file \"%s\": %m", fnamebuf)));
+            }
             inv_close(lobj);
             ereport(ERROR, (errcode_for_file_access(), errmsg("could not write server file \"%s\": %m", fnamebuf)));
         }
-        offset += tmp;
     }
 
-    FileClose(fd);
-    inv_close(lobj);
+    if (CloseTransientFile(fd) != 0)
+        ereport(ERROR, (errcode_for_file_access(),
+            errmsg("could not close file \"%s\": %m", fnamebuf)));
 
+    inv_close(lobj);
     PG_RETURN_INT32(1);
 }
 
@@ -553,32 +478,52 @@ Datum lo_export(PG_FUNCTION_ARGS)
  * lo_truncate -
  *	  truncate a large object to a specified length
  */
+static void lo_truncate_internal(int32 fd, int64 len)
+{
+    LargeObjectDesc *lobj;
+
+    if (fd < 0 || fd >= u_sess->libpq_cxt.cookies_size || u_sess->libpq_cxt.cookies[fd] == NULL)
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("invalid large-object descriptor: %d", fd)));
+    lobj = u_sess->libpq_cxt.cookies[fd];
+
+    if ((lobj->flags & IFS_WRLOCK) == 0)
+        ereport(ERROR,
+            (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                errmsg("large object descriptor %d was not opened for writing", fd)));
+
+    /* Permission checks --- first time through only */
+    if ((lobj->flags & IFS_WR_PERM_OK) == 0) {
+        if (!u_sess->attr.attr_sql.lo_compat_privileges &&
+            pg_largeobject_aclcheck_snapshot(
+                lobj->id, GetUserId(), ACL_UPDATE, lobj->snapshot) != ACLCHECK_OK)
+            ereport(ERROR,
+                (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                    errmsg("permission denied for large object %u", lobj->id)));
+        lobj->flags |= IFS_WR_PERM_OK;
+    }
+
+    inv_truncate(lobj, len);
+}
+
+/*
+ * lo_truncate -
+ *      truncate a large object to a specified length
+ */
 Datum lo_truncate(PG_FUNCTION_ARGS)
 {
     int32 fd = PG_GETARG_INT32(0);
     int32 len = PG_GETARG_INT32(1);
 
-#ifdef PGXC
-    ereport(ERROR,
-        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("openGauss does not support large object yet"),
-            errdetail("The feature is not currently supported")));
-#endif
+    lo_truncate_internal(fd, len);
+    PG_RETURN_INT32(0);
+}
 
-    if (fd < 0 || fd >= u_sess->libpq_cxt.cookies_size || u_sess->libpq_cxt.cookies[fd] == NULL)
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("invalid large-object descriptor: %d", fd)));
+Datum lo_truncate64(PG_FUNCTION_ARGS)
+{
+    int32 fd = PG_GETARG_INT32(0);
+    int64 len = PG_GETARG_INT64(1);
 
-    /* Permission checks */
-    if (!u_sess->attr.attr_sql.lo_compat_privileges &&
-        pg_largeobject_aclcheck_snapshot(
-            u_sess->libpq_cxt.cookies[fd]->id, GetUserId(), ACL_UPDATE, u_sess->libpq_cxt.cookies[fd]->snapshot) !=
-            ACLCHECK_OK)
-        ereport(ERROR,
-            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-                errmsg("permission denied for large object %u", u_sess->libpq_cxt.cookies[fd]->id)));
-
-    inv_truncate(u_sess->libpq_cxt.cookies[fd], len);
-
+    lo_truncate_internal(fd, len);
     PG_RETURN_INT32(0);
 }
 
@@ -589,7 +534,6 @@ Datum lo_truncate(PG_FUNCTION_ARGS)
 void AtEOXact_LargeObject(bool isCommit)
 {
     int i;
-
     if (u_sess->libpq_cxt.fscxt == NULL)
         return; /* no LO operations in this xact */
 
@@ -610,7 +554,8 @@ void AtEOXact_LargeObject(bool isCommit)
     u_sess->libpq_cxt.cookies_size = 0;
 
     /* Release the LO memory context to prevent permanent memory leaks. */
-    MemoryContextDelete(u_sess->libpq_cxt.fscxt);
+    if (u_sess->libpq_cxt.fscxt)
+        MemoryContextDelete(u_sess->libpq_cxt.fscxt);
     u_sess->libpq_cxt.fscxt = NULL;
 
     /* Give inv_api.c a chance to clean up, too */
@@ -627,7 +572,6 @@ void AtEOXact_LargeObject(bool isCommit)
 void AtEOSubXact_LargeObject(bool isCommit, SubTransactionId mySubid, SubTransactionId parentSubid)
 {
     int i;
-
     if (u_sess->libpq_cxt.fscxt == NULL) /* no LO operations in this xact */
         return;
 
@@ -685,7 +629,6 @@ static int newLOfd(LargeObjectDesc* lobjCookie)
             0,
             (newsize - u_sess->libpq_cxt.cookies_size) * sizeof(LargeObjectDesc*));
         securec_check(rc, "\0", "\0");
-
         u_sess->libpq_cxt.cookies_size = newsize;
     }
 
@@ -697,4 +640,136 @@ static int newLOfd(LargeObjectDesc* lobjCookie)
 static void deleteLOfd(int fd)
 {
     u_sess->libpq_cxt.cookies[fd] = NULL;
+}
+
+/*****************************************************************************
+ *    Wrappers oriented toward SQL callers
+ *****************************************************************************/
+
+/*
+ * Read [offset, offset+nbytes) within LO; when nbytes is -1, read to end.
+ */
+static bytea *lo_get_fragment_internal(Oid loOid, int64 offset, int32 nbytes)
+{
+    LargeObjectDesc *loDesc;
+    int64 loSize;
+    int64 result_length;
+    int total_read PG_USED_FOR_ASSERTS_ONLY;
+    bytea *result = NULL;
+
+    /*
+     * We don't actually need to store into fscxt, but create it anyway to
+     * ensure that AtEOXact_LargeObject knows there is state to clean up
+     */
+    CreateFSContext();
+    loDesc = inv_open(loOid, INV_READ, u_sess->libpq_cxt.fscxt);
+    /* Permission check */
+    if (!u_sess->attr.attr_sql.lo_compat_privileges &&
+        pg_largeobject_aclcheck_snapshot(
+            loDesc->id, GetUserId(), ACL_SELECT, loDesc->snapshot) != ACLCHECK_OK)
+            ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                    errmsg("permission denied for large object %u", loDesc->id)));
+
+    /*
+     * Compute number of bytes we'll actually read, accommodating nbytes == -1
+     * and reads beyond the end of the LO.
+     */
+    loSize = inv_seek(loDesc, 0, SEEK_END);
+    if (loSize > offset) {
+        if (nbytes >= 0 && nbytes <= loSize - offset)
+            result_length = nbytes; /* request is wholly inside LO */
+        else
+            result_length = loSize - offset;    /* adjust to end of LO */
+    } else {
+        result_length = 0;        /* request is wholly outside LO */
+    }
+
+    /*
+     * A result_length calculated from loSize may not fit in a size_t.  Check
+     * that the size will satisfy this and subsequently-enforced size limits.
+     */
+    if (result_length > MaxAllocSize - VARHDRSZ)
+        ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                errmsg("large object read request is too large")));
+    result = (bytea *) palloc(VARHDRSZ + result_length);
+    inv_seek(loDesc, offset, SEEK_SET);
+    total_read = inv_read(loDesc, VARDATA(result), result_length);
+    Assert(total_read == result_length);
+    SET_VARSIZE(result, result_length + VARHDRSZ);
+    inv_close(loDesc);
+    return result;
+}
+
+/*
+ * Read entire LO
+ */
+Datum lo_get(PG_FUNCTION_ARGS)
+{
+    Oid loOid = PG_GETARG_OID(0);
+    bytea *result = NULL;
+    result = lo_get_fragment_internal(loOid, 0, -1);
+    PG_RETURN_BYTEA_P(result);
+}
+
+/*
+ * Read range within LO
+ */
+Datum lo_get_fragment(PG_FUNCTION_ARGS)
+{
+    Oid loOid = PG_GETARG_OID(0);
+    int64 offset = PG_GETARG_INT64(1);
+    int32 nbytes = PG_GETARG_INT32(2);
+    bytea *result = NULL;
+
+    if (nbytes < 0)
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("requested length cannot be negative")));
+    result = lo_get_fragment_internal(loOid, offset, nbytes);
+    PG_RETURN_BYTEA_P(result);
+}
+
+/*
+ * Create LO with initial contents given by a bytea argument
+ */
+Datum lo_from_bytea(PG_FUNCTION_ARGS)
+{
+    Oid loOid = PG_GETARG_OID(0);
+    bytea *str = PG_GETARG_BYTEA_PP(1);
+    LargeObjectDesc *loDesc = NULL;
+    int written PG_USED_FOR_ASSERTS_ONLY;
+
+    CreateFSContext();
+    loOid = inv_create(loOid);
+    loDesc = inv_open(loOid, INV_WRITE, u_sess->libpq_cxt.fscxt);
+    written = inv_write(loDesc, VARDATA_ANY(str), VARSIZE_ANY_EXHDR(str));
+    Assert(written == VARSIZE_ANY_EXHDR(str));
+    inv_close(loDesc);
+    PG_RETURN_OID(loOid);
+}
+
+/*
+ * Update range within LO
+ */
+Datum lo_put(PG_FUNCTION_ARGS)
+{
+    Oid loOid = PG_GETARG_OID(0);
+    int64 offset = PG_GETARG_INT64(1);
+    bytea *str = PG_GETARG_BYTEA_PP(2);
+    LargeObjectDesc *loDesc = NULL;
+    int written PG_USED_FOR_ASSERTS_ONLY;
+
+    CreateFSContext();
+    loDesc = inv_open(loOid, INV_WRITE, u_sess->libpq_cxt.fscxt);
+    /* Permission check */
+    if (!u_sess->attr.attr_sql.lo_compat_privileges &&
+        pg_largeobject_aclcheck_snapshot(
+            loDesc->id, GetUserId(), ACL_UPDATE, loDesc->snapshot) != ACLCHECK_OK)
+            ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                    errmsg("permission denied for large object %u", loDesc->id)));
+
+    inv_seek(loDesc, offset, SEEK_SET);
+    written = inv_write(loDesc, VARDATA_ANY(str), VARSIZE_ANY_EXHDR(str));
+    Assert(written == VARSIZE_ANY_EXHDR(str));
+    inv_close(loDesc);
+    PG_RETURN_VOID();
 }

@@ -168,3 +168,6 @@ PQexecPreparedBatch       165
 PQsendQueryPreparedBatch  166
 PQexecParamsBatch         167
 PQsendQueryParamsBatch    168
+lo_lseek64                169
+lo_tell64                 170
+lo_truncate64             171

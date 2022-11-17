@@ -6,14 +6,29 @@
 SET bytea_output TO escape;
 
 -- Load a file
-CREATE TABLE lotest_stash_values (loid oid, junk integer, fd integer);
+CREATE TABLE lotest_stash_values (loid oid, fd integer);
 -- lo_creat(mode integer) returns oid
 -- The mode arg to lo_creat is unused, some vestigal holdover from ancient times
 -- returns the large object id
-INSERT INTO lotest_stash_values (loid) VALUES( lo_creat(42) );
+INSERT INTO lotest_stash_values (loid) SELECT lo_creat(42);
+
+-- Test ALTER LARGE OBJECT
+CREATE ROLE regresslo IDENTIFIED BY 'Huawei123';
+DO $$
+  BEGIN
+    EXECUTE 'ALTER LARGE OBJECT ' || (select loid from lotest_stash_values)
+		|| ' OWNER TO regresslo';
+  END
+$$;
+SELECT
+	rol.rolname
+FROM
+	lotest_stash_values s
+	JOIN pg_largeobject_metadata lo ON s.loid = lo.oid
+	JOIN pg_authid rol ON lo.lomowner = rol.oid;
 
 -- NOTE: large objects require transactions
-START TRANSACTION;
+BEGIN;
 
 -- lo_open(lobjId oid, mode integer) returns integer
 -- The mode parameter to lo_open uses two constants:
@@ -27,27 +42,35 @@ UPDATE lotest_stash_values SET fd = lo_open(loid, CAST(x'20000' | x'40000' AS in
 -- lowrite(fd integer, data bytea) returns integer
 -- the integer is the number of bytes written
 SELECT lowrite(fd, '
-Whose woods these are I think I know,
-His house is in the village though.
-He will not see me stopping here,
-To watch his woods fill up with snow.
+I wandered lonely as a cloud
+That floats on high o''er vales and hills,
+When all at once I saw a crowd,
+A host, of golden daffodils;
+Beside the lake, beneath the trees,
+Fluttering and dancing in the breeze.
 
-My little horse must think it queer,
-To stop without a farmhouse near,
-Between the woods and frozen lake,
-The darkest evening of the year.
+Continuous as the stars that shine
+And twinkle on the milky way,
+They stretched in never-ending line
+Along the margin of a bay:
+Ten thousand saw I at a glance,
+Tossing their heads in sprightly dance.
 
-He gives his harness bells a shake,
-To ask if there is some mistake.
-The only other sound''s the sweep,
-Of easy wind and downy flake.
+The waves beside them danced; but they
+Out-did the sparkling waves in glee:
+A poet could not but be gay,
+In such a jocund company:
+I gazed--and gazed--but little thought
+What wealth the show to me had brought:
 
-The woods are lovely, dark and deep,
-But I have promises to keep,
-And miles to go before I sleep,
-And miles to go before I sleep.
+For oft, when on my couch I lie
+In vacant or in pensive mood,
+They flash upon that inward eye
+Which is the bliss of solitude;
+And then my heart with pleasure fills,
+And dances with the daffodils.
 
-         -- Robert Frost
+         -- William Wordsworth
 ') FROM lotest_stash_values;
 
 -- lo_close(fd integer) returns integer
@@ -56,8 +79,15 @@ SELECT lo_close(fd) FROM lotest_stash_values;
 
 END;
 
+-- Copy to another large object.
+-- Note: we intentionally don't remove the object created here;
+-- it's left behind to help test pg_dump.
+
+CREATE TABLE tmp_values (loid oid);
+INSERT INTO tmp_values (loid) SELECT lo_from_bytea(0, lo_get(loid)) FROM lotest_stash_values;
+
 -- Read out a portion
-START TRANSACTION;
+BEGIN;
 UPDATE lotest_stash_values SET fd=lo_open(loid, CAST(x'20000' | x'40000' AS integer));
 
 -- lo_lseek(fd integer, offset integer, whence integer) returns integer
@@ -66,11 +96,11 @@ UPDATE lotest_stash_values SET fd=lo_open(loid, CAST(x'20000' | x'40000' AS inte
 --  SEEK_CUR (= 1) meaning relative to current position
 --  SEEK_END (= 2) meaning relative to end (offset better be negative)
 -- returns current position in file
-SELECT lo_lseek(fd, 422, 0) FROM lotest_stash_values;
+SELECT lo_lseek(fd, 104, 0) FROM lotest_stash_values;
 
 -- loread/lowrite names are wonky, different from other functions which are lo_*
 -- loread(fd integer, len integer) returns bytea
-SELECT loread(fd, 35) FROM lotest_stash_values;
+SELECT loread(fd, 28) FROM lotest_stash_values;
 
 SELECT lo_lseek(fd, -19, 1) FROM lotest_stash_values;
 
@@ -78,24 +108,24 @@ SELECT lowrite(fd, 'n') FROM lotest_stash_values;
 
 SELECT lo_tell(fd) FROM lotest_stash_values;
 
-SELECT lo_lseek(fd, -156, 2) FROM lotest_stash_values;
+SELECT lo_lseek(fd, -744, 2) FROM lotest_stash_values;
 
-SELECT loread(fd, 35) FROM lotest_stash_values;
+SELECT loread(fd, 28) FROM lotest_stash_values;
 
 SELECT lo_close(fd) FROM lotest_stash_values;
 
 END;
 
 -- Test resource management
-START TRANSACTION;
+BEGIN;
 SELECT lo_open(loid, x'40000'::int) from lotest_stash_values;
 ABORT;
 
 -- Test truncation.
-START TRANSACTION;
+BEGIN;
 UPDATE lotest_stash_values SET fd=lo_open(loid, CAST(x'20000' | x'40000' AS integer));
 
-SELECT lo_truncate(fd, 10) FROM lotest_stash_values;
+SELECT lo_truncate(fd, 11) FROM lotest_stash_values;
 SELECT loread(fd, 15) FROM lotest_stash_values;
 
 SELECT lo_truncate(fd, 10000) FROM lotest_stash_values;
@@ -110,18 +140,44 @@ SELECT lo_tell(fd) FROM lotest_stash_values;
 SELECT lo_close(fd) FROM lotest_stash_values;
 END;
 
+-- Test 64-bit large object functions.
+BEGIN;
+UPDATE lotest_stash_values SET fd = lo_open(loid, CAST(x'20000' | x'40000' AS integer));
+
+SELECT lo_lseek64(fd, 4294967296, 0) FROM lotest_stash_values;
+SELECT lowrite(fd, 'offset:4GB') FROM lotest_stash_values;
+SELECT lo_tell64(fd) FROM lotest_stash_values;
+
+SELECT lo_lseek64(fd, -10, 1) FROM lotest_stash_values;
+SELECT lo_tell64(fd) FROM lotest_stash_values;
+SELECT loread(fd, 10) FROM lotest_stash_values;
+
+SELECT lo_truncate64(fd, 5000000000) FROM lotest_stash_values;
+SELECT lo_lseek64(fd, 0, 2) FROM lotest_stash_values;
+SELECT lo_tell64(fd) FROM lotest_stash_values;
+
+SELECT lo_truncate64(fd, 3000000000) FROM lotest_stash_values;
+SELECT lo_lseek64(fd, 0, 2) FROM lotest_stash_values;
+SELECT lo_tell64(fd) FROM lotest_stash_values;
+
+SELECT lo_close(fd) FROM lotest_stash_values;
+END;
+
 -- lo_unlink(lobjId oid) returns integer
 -- return value appears to always be 1
 SELECT lo_unlink(loid) from lotest_stash_values;
 
 TRUNCATE lotest_stash_values;
+SELECT lo_import('@abs_srcdir@/data/tenk.data', 16812);
+INSERT INTO lotest_stash_values (loid) SELECT lo_import('@abs_srcdir@/data/tenk.data');
 
-INSERT INTO lotest_stash_values (loid) VALUES( lo_import('@abs_srcdir@/data/tenk.data') );
-
-START TRANSACTION;
+BEGIN;
 UPDATE lotest_stash_values SET fd=lo_open(loid, CAST(x'20000' | x'40000' AS integer));
 
--- with the default BLKSZ, LOBLKSZ = 2048, so this positions us for a block
+-- verify length of large object
+SELECT lo_lseek(fd, 0, 2) FROM lotest_stash_values;
+
+-- with the default BLCKSZ, LOBLKSIZE = 2048, so this positions us for a block
 -- edge case
 SELECT lo_lseek(fd, 2030, 0) FROM lotest_stash_values;
 
@@ -143,7 +199,7 @@ SELECT lo_close(fd) FROM lotest_stash_values;
 END;
 
 SELECT lo_export(loid, '@abs_builddir@/results/lotest.txt') FROM lotest_stash_values;
-COPY lotest_stash_values TO '@abs_builddir@/results/lotest.txt';
+
 \lo_import '@abs_builddir@/results/lotest.txt'
 
 \set newloid :LASTOID
@@ -158,8 +214,43 @@ SELECT pageno, data FROM pg_largeobject WHERE loid = (SELECT loid from lotest_st
 EXCEPT
 SELECT pageno, data FROM pg_largeobject WHERE loid = :newloid;
 
-
 SELECT lo_unlink(loid) FROM lotest_stash_values;
-\lo_unlink :newloid
 
 TRUNCATE lotest_stash_values;
+
+\lo_unlink :newloid
+
+\lo_import '@abs_builddir@/results/lotest.txt'
+
+\set newloid_1 :LASTOID
+
+UPDATE tmp_values SET loid=lo_from_bytea(0, lo_get(:newloid_1));
+
+SELECT lo_get(loid, 0, 20) from tmp_values;
+SELECT lo_get(loid, 10, 20) from tmp_values;
+SELECT lo_put(loid, 5, decode('afafafaf', 'hex')) from tmp_values;
+SELECT lo_get(loid, 0, 20) from tmp_values;
+
+SELECT lo_put(loid, 4294967310, 'foo') from tmp_values;
+SELECT lo_get(loid) from tmp_values;
+SELECT lo_get(loid, 4294967294, 100) from tmp_values;
+
+\lo_unlink :newloid_1
+SELECT lo_unlink(loid) FROM tmp_values;
+
+-- This object is left in the database for pg_dump test purposes
+UPDATE tmp_values SET loid=lo_from_bytea(0, E'\\xdeadbeef');
+
+SET bytea_output TO hex;
+SELECT lo_get(loid) from tmp_values;
+
+-- Create one more object that we leave behind for testing pg_dump/pg_upgrade;
+-- this one intentionally has an OID in the system range
+SELECT lo_create(3001);
+
+COMMENT ON LARGE OBJECT 3001 IS 'testing comments';
+
+-- Clean up
+DROP TABLE lotest_stash_values;
+DROP TABLE tmp_values;
+DROP ROLE regresslo;

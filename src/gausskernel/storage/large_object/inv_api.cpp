@@ -233,31 +233,40 @@ Oid inv_create(Oid lobjId)
 LargeObjectDesc* inv_open(Oid lobjId, int flags, MemoryContext mcxt)
 {
     LargeObjectDesc* retval = NULL;
+    Snapshot snapshot = NULL;
+    int descflags = 0;
 
-    retval = (LargeObjectDesc*)MemoryContextAlloc(mcxt, sizeof(LargeObjectDesc));
+    if (flags & INV_WRITE) {
+        snapshot = SnapshotNow;
+        descflags = IFS_WRLOCK | IFS_RDLOCK;
+    } else if (flags & INV_READ) {
+        snapshot = GetActiveSnapshot();
+        descflags = IFS_RDLOCK;
+    } else {
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("invalid flags: %d", flags)));
+    }
 
+    /* Can't use LargeObjectExists here because it always uses SnapshotNow */
+    if (!myLargeObjectExists(lobjId, snapshot))
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("large object %u does not exist", lobjId)));
+    
+    /*
+     * We must register the snapshot in TopTransaction's resowner, because
+     * it must stay alive until the LO is closed rather than until the
+     * current portal shuts down. Do this after checking that the LO exists,
+     * to avoid leaking the snapshot if an error is thrown.
+     */
+    if (snapshot)
+        snapshot = RegisterSnapshotOnOwner(snapshot,
+                        t_thrd.utils_cxt.TopTransactionResourceOwner);
+
+    /* All set, create a descriptor */
+    retval = (LargeObjectDesc *) MemoryContextAlloc(mcxt, sizeof(LargeObjectDesc));
     retval->id = lobjId;
     retval->subid = GetCurrentSubTransactionId();
     retval->offset = 0;
-
-    if (flags & INV_WRITE) {
-        retval->snapshot = SnapshotNow;
-        retval->flags = IFS_WRLOCK | IFS_RDLOCK;
-    } else if (flags & INV_READ) {
-        /*
-         * We must register the snapshot in TopTransaction's resowner, because
-         * it must stay alive until the LO is closed rather than until the
-         * current portal shuts down.
-         */
-        retval->snapshot = RegisterSnapshotOnOwner(GetActiveSnapshot(), t_thrd.utils_cxt.TopTransactionResourceOwner);
-        retval->flags = IFS_RDLOCK;
-    } else
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("invalid flags: %d", flags)));
-
-    /* Can't use LargeObjectExists here because it always uses SnapshotNow */
-    if (!myLargeObjectExists(lobjId, retval->snapshot))
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("large object %u does not exist", lobjId)));
-
+    retval->snapshot = snapshot;
+    retval->flags = descflags;
     return retval;
 }
 
@@ -268,7 +277,6 @@ LargeObjectDesc* inv_open(Oid lobjId, int flags, MemoryContext mcxt)
 void inv_close(LargeObjectDesc* obj_desc)
 {
     Assert(PointerIsValid(obj_desc));
-
     if (obj_desc->snapshot != SnapshotNow)
         UnregisterSnapshotFromOwner(obj_desc->snapshot, t_thrd.utils_cxt.TopTransactionResourceOwner);
 
@@ -307,9 +315,9 @@ int inv_drop(Oid lobjId)
  * NOTE: LOs can contain gaps, just like Unix files.  We actually return
  * the offset of the last byte + 1.
  */
-static uint32 inv_getsize(LargeObjectDesc* obj_desc)
+static uint64 inv_getsize(LargeObjectDesc* obj_desc)
 {
-    uint32 lastbyte = 0;
+    uint64 lastbyte = 0;
     ScanKeyData skey[1];
     SysScanDesc sd;
     HeapTuple tuple;
@@ -340,7 +348,7 @@ static uint32 inv_getsize(LargeObjectDesc* obj_desc)
             ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("null field found in pg_largeobject")));
         data = (Form_pg_largeobject)GETSTRUCT(tuple);
         getdatafield(data, &datafield, &len, &pfreeit);
-        lastbyte = data->pageno * LOBLKSIZE + len;
+        lastbyte = (uint64) data->pageno * LOBLKSIZE + len;
         if (pfreeit)
             pfree(datafield);
     }
@@ -350,34 +358,49 @@ static uint32 inv_getsize(LargeObjectDesc* obj_desc)
     return lastbyte;
 }
 
-int inv_seek(LargeObjectDesc* obj_desc, int offset, int whence)
+int64 inv_seek(LargeObjectDesc* obj_desc, int64 offset, int whence)
 {
+    int64 newoffset;
     Assert(PointerIsValid(obj_desc));
 
+    /*
+	 * We allow seek/tell if you have either read or write permission, so no
+	 * need for a permission check here.
+	 */
+
+	/*
+	 * Note: overflow in the additions is possible, but since we will reject
+	 * negative results, we don't need any extra test for that.
+	 */
     switch (whence) {
         case SEEK_SET:
-            if (offset < 0)
-                ereport(ERROR, (errcode_for_file_access(), errmsg("invalid seek offset: %d", offset)));
-            obj_desc->offset = offset;
+            newoffset = offset;
             break;
         case SEEK_CUR:
-            if (offset < 0 && obj_desc->offset < ((uint32)(-offset)))
-                ereport(ERROR, (errcode_for_file_access(), errmsg("invalid seek offset: %d", offset)));
-            obj_desc->offset += offset;
+            newoffset = obj_desc->offset + offset;
             break;
-        case SEEK_END: {
-            uint32 size = inv_getsize(obj_desc);
-            if (offset < 0 && size < ((uint32)(-offset)))
-                ereport(ERROR, (errcode_for_file_access(), errmsg("invalid seek offset: %d", offset)));
-            obj_desc->offset = size + offset;
-        } break;
+        case SEEK_END:
+            newoffset = inv_getsize(obj_desc) + offset;
+            break;
         default:
             ereport(ERROR, (errcode_for_file_access(), errmsg("invalid whence: %d", whence)));
+            newoffset = 0;        /* keep compiler quiet */
+            break;
     }
-    return obj_desc->offset;
+
+    /*
+     * use errmsg_internal here because we don't want to expose INT64_FORMAT
+     * in translatable strings; doing better is not worth the trouble
+     */
+    if (newoffset < 0 || newoffset > MAX_LARGE_OBJECT_SIZE)
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg_internal("invalid large object seek target: " INT64_FORMAT, newoffset)));
+
+    obj_desc->offset = newoffset;
+    return newoffset;
 }
 
-int inv_tell(LargeObjectDesc* obj_desc)
+int64 inv_tell(LargeObjectDesc* obj_desc)
 {
     Assert(PointerIsValid(obj_desc));
 
@@ -386,19 +409,23 @@ int inv_tell(LargeObjectDesc* obj_desc)
 
 int inv_read(LargeObjectDesc* obj_desc, char* buf, int nbytes)
 {
-    Assert(PointerIsValid(obj_desc));
     int nread = 0;
-    int n;
-    int off;
+    int64 n;
+    int64 off;
     int len;
     int32 pageno = (int32)(obj_desc->offset / LOBLKSIZE);
-    uint32 pageoff;
+    uint64 pageoff;
     ScanKeyData skey[2];
     SysScanDesc sd;
     HeapTuple tuple;
     errno_t rc = EOK;
 
+    Assert(PointerIsValid(obj_desc));
     Assert(buf != NULL);
+
+    if ((obj_desc->flags & IFS_RDLOCK) == 0)
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+            errmsg("permission denied for large object %u", obj_desc->id)));
 
     if (nbytes <= 0) {
         return 0;
@@ -427,7 +454,7 @@ int inv_read(LargeObjectDesc* obj_desc, char* buf, int nbytes)
          * there may be missing pages if the LO contains unwritten "holes". We
          * want missing sections to read out as zeroes.
          */
-        pageoff = ((uint32)data->pageno) * LOBLKSIZE;
+        pageoff = ((uint64) data->pageno) * LOBLKSIZE;
         if (pageoff > obj_desc->offset) {
             n = pageoff - obj_desc->offset;
             n = (n <= (nbytes - nread)) ? n : (nbytes - nread);
@@ -438,11 +465,9 @@ int inv_read(LargeObjectDesc* obj_desc, char* buf, int nbytes)
         }
 
         if (nread < nbytes) {
-            off = (int)(obj_desc->offset - pageoff);
-            if (off < 0 || off >= LOBLKSIZE) {
-                ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
-                                errmsg("invalid offset num:%d", off)));
-            }
+            Assert(obj_desc->offset >= pageoff);
+            off = (int64)(obj_desc->offset - pageoff);
+            Assert(off >= 0 && off < LOBLKSIZE);
 
             getdatafield(data, &datafield, &len, &pfreeit);
             if (len > off) {
@@ -482,9 +507,6 @@ void check_obj_desc(const LargeObjectDesc* obj_desc)
 
 int inv_write(LargeObjectDesc* obj_desc, const char* buf, int nbytes)
 {
-    if (nbytes <= 0) {
-        return 0;
-    }
     int nwritten = 0;
     int n;
     int off;
@@ -519,6 +541,18 @@ int inv_write(LargeObjectDesc* obj_desc, const char* buf, int nbytes)
     securec_check(rc, "\0", "\0");
     Assert(buf != NULL);
 
+    /* enforce writability because snapshot is probably wrong otherwise */
+    Assert(obj_desc->flags & IFS_WRLOCK);
+
+    if (nbytes <= 0) {
+        return 0;
+    }
+
+    /* this addition can't overflow because nbytes is only int32 */
+    if ((nbytes + obj_desc->offset) > MAX_LARGE_OBJECT_SIZE)
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("invalid large object write request size: %d", nbytes)));
+
     check_obj_desc(obj_desc);
     open_lo_relation();
 
@@ -545,7 +579,6 @@ int inv_write(LargeObjectDesc* obj_desc, const char* buf, int nbytes)
             }
             neednextpage = false;
         }
-
         /*
          * If we have a pre-existing page, see if it is the page we want to
          * write, or a later one.
@@ -650,7 +683,6 @@ int inv_write(LargeObjectDesc* obj_desc, const char* buf, int nbytes)
         }
         pageno++;
     }
-
     systable_endscan_ordered(sd);
 
     CatalogCloseIndexes(indstate);
@@ -664,10 +696,10 @@ int inv_write(LargeObjectDesc* obj_desc, const char* buf, int nbytes)
     return nwritten;
 }
 
-void inv_truncate(LargeObjectDesc* obj_desc, int len)
+void inv_truncate(LargeObjectDesc* obj_desc, int64 len)
 {
     int32 pageno = (int32)(len / LOBLKSIZE);
-    int off;
+    int32 off;
     ScanKeyData skey[2];
     SysScanDesc sd;
     HeapTuple oldtuple;
@@ -688,6 +720,17 @@ void inv_truncate(LargeObjectDesc* obj_desc, int len)
     rc = memset_s(&workbuf, sizeof(workbuf), 0, sizeof(workbuf));
     securec_check(rc, "\0", "\0");
     Assert(PointerIsValid(obj_desc));
+
+    /* enforce writability because snapshot is probably wrong otherwise */
+    Assert(obj_desc->flags & IFS_WRLOCK);
+
+    /*
+     * use errmsg_internal here because we don't want to expose INT64_FORMAT
+     * in translatable strings; doing better is not worth the trouble
+     */
+    if (len < 0 || len > MAX_LARGE_OBJECT_SIZE)
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg_internal("invalid large object truncation target: " INT64_FORMAT, len)));
 
     check_obj_desc(obj_desc);
     open_lo_relation();
@@ -748,6 +791,12 @@ void inv_truncate(LargeObjectDesc* obj_desc, int len)
         /*
          * Form and insert updated tuple
          */
+        rc = memset_s(values, sizeof(values), 0, sizeof(values));
+        securec_check(rc, "\0", "\0");
+        rc = memset_s(nulls, sizeof(nulls), false, sizeof(nulls));
+        securec_check(rc, "\0", "\0");
+        rc = memset_s(replace, sizeof(replace), false, sizeof(replace));
+        securec_check(rc, "\0", "\0");
         values[Anum_pg_largeobject_data - 1] = PointerGetDatum(&workbuf);
         replace[Anum_pg_largeobject_data - 1] = true;
         newtup = heap_modify_tuple(oldtuple, RelationGetDescr(t_thrd.storage_cxt.lo_heap_r), values, nulls, replace);
@@ -782,6 +831,10 @@ void inv_truncate(LargeObjectDesc* obj_desc, int len)
         /*
          * Form and insert new tuple
          */
+        rc = memset_s(values, sizeof(values), 0, sizeof(values));
+        securec_check(rc, "\0", "\0");
+        rc = memset_s(nulls, sizeof(nulls), false, sizeof(nulls));
+        securec_check(rc, "\0", "\0");
         values[Anum_pg_largeobject_loid - 1] = ObjectIdGetDatum(obj_desc->id);
         values[Anum_pg_largeobject_pageno - 1] = Int32GetDatum(pageno);
         values[Anum_pg_largeobject_data - 1] = PointerGetDatum(&workbuf);

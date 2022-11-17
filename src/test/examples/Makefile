@@ -20,7 +20,7 @@ ifneq "$(MAKECMDGOALS)" "clean"
     endif
   endif
 endif
-PROGS = testlibpq testlibpq2 testlibpq3 testlibpq4 testlo
+PROGS = testlibpq testlibpq2 testlibpq3 testlibpq4 testlo testlo64
 
 all: $(PROGS)
 

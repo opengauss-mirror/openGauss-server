@@ -639,11 +639,11 @@ SELECT has_sequence_privilege('x_seq', 'USAGE');
 SET SESSION AUTHORIZATION regressuser1 PASSWORD 'gauss@123';
 SET search_path TO public;
 
-SELECT lo_create(1001);	-- to be failed
-SELECT lo_create(1002);	-- to be failed
-SELECT lo_create(1003);	-- to be failed
-SELECT lo_create(1004);	-- to be failed
-SELECT lo_create(1005);	-- to be failed
+SELECT lo_create(1001);
+SELECT lo_create(1002);
+SELECT lo_create(1003);
+SELECT lo_create(1004);
+SELECT lo_create(1005);
 
 GRANT ALL ON LARGE OBJECT 1001 TO PUBLIC;
 GRANT SELECT ON LARGE OBJECT 1003 TO regressuser2;
@@ -687,12 +687,12 @@ SELECT oid, pg_get_userbyid(lomowner) ownername, lomacl FROM pg_largeobject_meta
 SET SESSION AUTHORIZATION regressuser3 PASSWORD 'gauss@123';
 SET search_path TO public;
 
-SELECT loread(lo_open(1001, x'40000'::int), 32);	-- to be failed
+SELECT loread(lo_open(1001, x'40000'::int), 32);
 SELECT loread(lo_open(1003, x'40000'::int), 32);	-- to be failed
 SELECT loread(lo_open(1005, x'40000'::int), 32);	-- to be failed
 
 SELECT lo_truncate(lo_open(1005, x'20000'::int), 10);	-- to be failed
-SELECT lo_truncate(lo_open(2001, x'20000'::int), 10);	-- to be failed
+SELECT lo_truncate(lo_open(2001, x'20000'::int), 10);
 
 -- compatibility mode in largeobject permission
 \c -

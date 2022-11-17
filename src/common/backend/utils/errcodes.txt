@@ -203,6 +203,7 @@ Section: Class 22 - Data Exception
 2200O    E    ERRCODE_INVALID_XML_ERROR_CONTEXT                              invalid_xml_error_context
 2200S    E    ERRCODE_INVALID_XML_COMMENT                                    invalid_xml_comment
 2200T    E    ERRCODE_INVALID_XML_PROCESSING_INSTRUCTION                     invalid_xml_processing_instruction
+22P07    E    ERRCODE_BLOB_OFFSET_OVERFLOW                                   blob_offset_overflow
 
 Section: Class 23 - Integrity Constraint Violation
 
