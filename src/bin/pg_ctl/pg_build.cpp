@@ -1015,6 +1015,7 @@ int find_gucoption(
     const char* tmp = NULL;
     int i = 0;
     size_t paramlen = 0;
+    int result = INVALID_LINES_IDX;
 
     if (optlines == NULL || opt_name == NULL) {
         return INVALID_LINES_IDX;
@@ -1059,10 +1060,10 @@ int find_gucoption(
         if (value_len != NULL) {
             *value_len = (tmp == NULL) ? 0 : (tmp - p);
         }
-        return i;
+        result = i;
     }
 
-    return INVALID_LINES_IDX;
+    return result;
 }
 
 /*
