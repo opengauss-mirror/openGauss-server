@@ -2692,6 +2692,7 @@ typedef struct knl_u_hook_context {
     void *aggSmpHook;
     void *standardProcessUtilityHook;
     void *aggIsSupportedHook;
+    void *searchFuncHook;
 } knl_u_hook_context;
 /* PBE message flag */
 typedef enum {

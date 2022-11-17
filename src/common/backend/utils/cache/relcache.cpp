@@ -1279,6 +1279,8 @@ typedef struct opclasscacheent {
     RegProcedure* supportProcs; /* OIDs of support procedures */
 } OpClassCacheEnt;
 
+typedef PGFunction (*searchFunc)(Oid funcId);
+
 /* non-export function prototypes */
 
 static void RelationFlushRelation(Relation relation);
@@ -5635,8 +5637,16 @@ static void AttrAutoIncrementFetch(Relation relation, AttrNumber attnum, char* a
 
     castfunc = (const FmgrBuiltin*)SearchBuiltinFuncByOid(autoinc->autoincin_funcid);
     cons_autoinc->datum2autoinc_func = castfunc ? (void*)(uintptr_t)castfunc->func : NULL;
+    if (cons_autoinc->datum2autoinc_func == NULL && u_sess->hook_cxt.searchFuncHook != NULL) {
+       PGFunction castFunc2 = ((searchFunc)(u_sess->hook_cxt.searchFuncHook))(autoinc->autoincin_funcid);
+        cons_autoinc->datum2autoinc_func = castFunc2 ?  (void*)(uintptr_t)castFunc2 : NULL;
+    }
     castfunc = (const FmgrBuiltin*)SearchBuiltinFuncByOid(autoinc->autoincout_funcid);
     cons_autoinc->autoinc2datum_func = castfunc ? (void*)(uintptr_t)castfunc->func : NULL;
+    if (cons_autoinc->autoinc2datum_func == NULL && u_sess->hook_cxt.searchFuncHook != NULL) {
+        PGFunction castFunc2 = ((searchFunc)(u_sess->hook_cxt.searchFuncHook))(autoinc->autoincout_funcid);
+        cons_autoinc->autoinc2datum_func = castFunc2 ? (void*)(uintptr_t)castFunc2 : NULL;
+    }
     relation->rd_att->constr->cons_autoinc = cons_autoinc;
 }
 
