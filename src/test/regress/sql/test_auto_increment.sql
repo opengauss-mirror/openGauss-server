@@ -38,7 +38,12 @@ CREATE TABLE test_create_autoinc_err(id int16 auto_increment, name varchar(200),
 CREATE TABLE test_create_autoinc_err(id INTEGER auto_increment, name varchar(200),a int, primary key(id)) with (ORIENTATION=column);
 CREATE TABLE test_create_autoinc_err(id INTEGER auto_increment, name varchar(200),a int, primary key(id)) with (ORIENTATION=orc);
 CREATE TABLE test_create_autoinc_err(id INTEGER auto_increment, name varchar(200),a int, primary key(id)) with (ORIENTATION=timeseries);
-
+CREATE FOREIGN TABLE t_table_0020 (
+  col01 integer AUTO_INCREMENT NOT NULL,
+  col02 float,
+  col03 int,
+  PRIMARY KEY (col01,col02,col03)
+) server gsmpp_server;
 --test different type with auto_increment start value
 CREATE TABLE test_create_autoinc(id bool auto_increment primary key, name varchar(200),a int) auto_increment=1;
 INSERT INTO test_create_autoinc VALUES(DEFAULT,'Gauss',0);
