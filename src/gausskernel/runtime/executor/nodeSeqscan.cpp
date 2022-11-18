@@ -191,16 +191,17 @@ static void ExecInitNextPartitionForSeqScan(SeqScanState* node);
 
 template<TableAmType type, bool hashBucket>
 FORCE_INLINE
-void seq_scan_getnext_template(TableScanDesc scan,  TupleTableSlot* slot, ScanDirection direction)
+void seq_scan_getnext_template(TableScanDesc scan,  TupleTableSlot* slot, ScanDirection direction,
+    bool* has_cur_xact_write)
 {
     Tuple tuple;
     if(hashBucket) {
         /* fall back to orign slow function. */
-        tuple =  scan_handler_tbl_getnext(scan, direction, NULL);
+        tuple =  scan_handler_tbl_getnext(scan, direction, NULL, has_cur_xact_write);
     } else if(type == TAM_HEAP) {
-        tuple =  (Tuple)heap_getnext(scan, direction);
+        tuple =  (Tuple)heap_getnext(scan, direction, has_cur_xact_write);
     } else {
-        tuple =  (Tuple)UHeapGetNext(scan, direction);
+        tuple =  (Tuple)UHeapGetNext(scan, direction, has_cur_xact_write);
     }
     if (hashBucket) {
         scan = ((HBktTblScanDesc)scan)->currBktScan;
@@ -248,7 +249,7 @@ static TupleTableSlot* SeqNext(SeqScanState* node)
     /*
      * get the next tuple from the table for seqscan.
      */
-    node->fillNextSlotFunc(scanDesc, slot, estate->es_direction);
+    node->fillNextSlotFunc(scanDesc, slot, estate->es_direction, &node->ps.state->have_current_xact_date);
 
     return slot;
 }
@@ -288,18 +289,60 @@ void ExecStoreTupleBatchMode(TableScanDesc scanDesc, TupleTableSlot** slot)
     }
 }
 
+bool FetchEpqTupleBatchMode(ScanState* node)
+{
+    EState* estate = node->ps.state;
+    Index scan_rel_id = ((Scan*)node->ps.plan)->scanrelid;
+    Assert(scan_rel_id > 0);
+
+    if (estate->es_epqTupleSet[scan_rel_id - 1]) {
+        TupleTableSlot* slot = node->scanBatchState->scanBatch.scanTupleSlotInBatch[0];
+
+        /* Return empty slot if we already returned a tuple */
+        if (estate->es_epqScanDone[scan_rel_id - 1]) {
+            (void)ExecClearTuple(slot);
+            return true;
+        }
+        /* Else mark to remember that we shouldn't return more */
+        estate->es_epqScanDone[scan_rel_id - 1] = true;
+
+        /* Return empty slot if we haven't got a test tuple */
+        if (estate->es_epqTuple[scan_rel_id - 1] == NULL) {
+            (void)ExecClearTuple(slot);
+            return true;
+        }
+
+        /* Store test tuple in the plan node's scan slot */
+        (void)ExecStoreTuple(estate->es_epqTuple[scan_rel_id - 1], slot, InvalidBuffer, false);
+
+        return true;
+    }
+
+    return false;
+}
+
 static ScanBatchResult *SeqNextBatchMode(SeqScanState *node)
 {
     TableScanDesc scanDesc;
-    EState *estate = NULL;
+    EState *estate = node->ps.state;
     ScanDirection direction;
-    TupleTableSlot **slot = NULL;
+    TupleTableSlot **slot = &(node->scanBatchState->scanBatch.scanTupleSlotInBatch[0]);
+
+    /* while inside an EvalPlanQual recheck, return a test tuple */
+    if (estate->es_epqTuple != NULL && FetchEpqTupleBatchMode(node)) {
+        if (TupIsNull(slot[0])) {
+            node->scanBatchState->scanBatch.rows = 0;
+            return NULL;
+        } else {
+            node->scanBatchState->scanBatch.rows = 1;
+            return &node->scanBatchState->scanBatch;
+        }
+    }
 
     /* get information from the estate and scan state */
     scanDesc = node->ss_currentScanDesc;
     estate = node->ps.state;
     direction = estate->es_direction;
-    slot = &(node->scanBatchState->scanBatch.scanTupleSlotInBatch[0]);
 
     /* get tuples from the table. */
     scanDesc->rs_maxScanRows = node->scanBatchState->scanTupleSlotMaxNum;
@@ -448,9 +491,11 @@ TableScanDesc BeginScanRelation(SeqScanState* node, Relation relation, Transacti
             if (TransactionIdPrecedes(FirstNormalTransactionId, scanSnap->xmax) &&
                 !TransactionIdIsCurrentTransactionId(relfrozenxid64) &&
                 TransactionIdPrecedes(scanSnap->xmax, relfrozenxid64)) {
-                ereport(ERROR,
-                        (errcode(ERRCODE_SNAPSHOT_INVALID),
-                         (errmsg("Snapshot too old."))));
+                ereport(ERROR, (errcode(ERRCODE_SNAPSHOT_INVALID),
+                    (errmsg("Snapshot too old, ScanRelation, the info: snapxmax is %lu, "
+                        "snapxmin is %lu, csn is %lu, relfrozenxid64 is %lu, globalRecycleXid is %lu.",
+                        scanSnap->xmax, scanSnap->xmin, scanSnap->snapshotcsn, relfrozenxid64,
+                        g_instance.undo_cxt.globalRecycleXid))));
             }
         }
 
@@ -458,7 +503,7 @@ TableScanDesc BeginScanRelation(SeqScanState* node, Relation relation, Transacti
             (void)reset_scan_qual(relation, node);
         }
 
-        current_scan_desc = UHeapBeginScan(relation, scanSnap, 0);
+        current_scan_desc = UHeapBeginScan(relation, scanSnap, 0, NULL);
     } else {
         current_scan_desc = InitBeginScan(node, relation);
     }
@@ -568,7 +613,7 @@ void InitScanRelation(SeqScanState* node, EState* estate, int eflags)
                 int partSeq = lfirst_int(cell);
                 List* subpartition = NIL;
 
-                tablepartitionid = getPartitionOidFromSequence(current_relation, partSeq);
+                tablepartitionid = getPartitionOidFromSequence(current_relation, partSeq, plan->pruningInfo->partMap);
                 part = partitionOpen(current_relation, tablepartitionid, lockmode);
                 node->partitions = lappend(node->partitions, part);
                 if (resultPlan->ls_selectedSubPartitions != NIL) {

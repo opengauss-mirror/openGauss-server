@@ -1673,6 +1673,112 @@ drop procedure pro_tblof_pro_013_1();
 ERROR:  function pro_tblof_pro_013_1 does not exist
 drop type pro_tblof_013;
 drop table pro_tblof_tbl_013;
+set behavior_compat_options = 'allow_procedure_compile_check';
+create or replace procedure pro19
+as
+a int;
+begin
+ select c1 from t1 into ;             
+ select c1 from t1  limit  1  a;       
+ select c1 from t1 where c2=1 intoo a; 
+ select c1 from t1 into b;                          
+end;
+/
+NOTICE:  syntax error at or near ";"
+LINE 4:  select c1 from t1 into ;             
+                                ^
+QUERY:   DECLARE 
+a int;
+begin
+ select c1 from t1 into ;             
+ select c1 from t1  limit  1  a;       
+ select c1 from t1 where c2=1 intoo a; 
+ select c1 from t1 into b;                          
+end
+ERROR:  relation "t1" does not exist
+LINE 4:  select c1 from t1 into ;             
+         ^
+DETAIL:  
+QUERY:   DECLARE 
+a int;
+begin
+ select c1 from t1 into ;             
+ select c1 from t1  limit  1  a;       
+ select c1 from t1 where c2=1 intoo a; 
+ select c1 from t1 into b;                          
+end
+create or replace procedure pro20
+as
+a int;
+begin
+ select  into a from t1.c1;
+ select 1  into ab;
+end;
+/
+NOTICE:  syntax error at or near "from"
+LINE 4:  select  into a from t1.c1;
+                        ^
+QUERY:   DECLARE 
+a int;
+begin
+ select  into a from t1.c1;
+ select 1  into ab;
+end
+NOTICE:  syntax error at or near "from"
+LINE 2: a int;
+             ^
+QUERY:   DECLARE 
+a int;
+begin
+ select  into a from t1.c1;
+ select 1  into ab;
+end
+ERROR:  compile failed when parse the query: select         from t1.c1
+DETAIL:  unexpected null parsetree list
+CONTEXT:  compilation of PL/pgSQL function "pro20" near line 4
+create or replace procedure pro21
+as
+a int;
+begin
+ select 1  into ab;
+ select 1  intoo a;
+ dbe_output.print_line('a  is:'||a);
+end;
+/
+NOTICE:  "ab" is not a known variable
+LINE 4:  select 1  into ab;
+                        ^
+QUERY:   DECLARE 
+a int;
+begin
+ select 1  into ab;
+ select 1  intoo a;
+ dbe_output.print_line('a  is:'||a);
+end
+ERROR:  Invalid use of identifiers.
+LINE 5:  select 1  intoo a;
+                   ^
+DETAIL:  Syntax error found near token "intoo"
+QUERY:   DECLARE 
+a int;
+begin
+ select 1  into ab;
+ select 1  intoo a;
+ dbe_output.print_line('a  is:'||a);
+end
+create or replace procedure pro22
+as
+a int;
+b char(1);
+begin
+ b=:1;
+ select 1  into a;
+ dbe_output.print_line('a  is:'||a);
+end;
+/
+ERROR:  schema "dbe_output" does not exist
+CONTEXT:  compilation of PL/pgSQL function "pro22" near line 6
+set behavior_compat_options = '';
 drop package if exists package_020;
 NOTICE:  drop cascades to 2 other objects
 DETAIL:  drop cascades to function public.pro1(integer,integer,character varying)

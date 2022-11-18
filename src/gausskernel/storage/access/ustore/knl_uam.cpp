@@ -29,7 +29,8 @@ bool UHeapFetchRowVersion(TidScanState *node, Relation relation, ItemPointer tid
 
     ExecClearTuple(slot);
 
-    if (UHeapFetch(relation, snapshot, tid, utuple, &buffer, false, false)) {
+    if (UHeapFetch(relation, snapshot, tid, utuple, &buffer, false, false,
+                   &node->ss.ps.state->have_current_xact_date)) {
         ExecStoreTuple(UHeapCopyTuple(utuple), slot, InvalidBuffer, true);
         ReleaseBuffer(buffer);
 

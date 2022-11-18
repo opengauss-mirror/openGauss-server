@@ -628,6 +628,16 @@ NOTICE:  <NULL>
  
 (1 row)
 
+set behavior_compat_options='array_count_compat';
+call pck1.p1();
+NOTICE:  <NULL>
+NOTICE:  0
+ p1 
+----
+ 
+(1 row)
+
+set behavior_compat_options='';
 DROP PACKAGE pck1;
 NOTICE:  drop cascades to function plpgsql_arrayofrecord.p1()
 -- test array of table nest same record

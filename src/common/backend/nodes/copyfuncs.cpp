@@ -176,6 +176,8 @@ static PlannedStmt* _copyPlannedStmt(const PlannedStmt* from)
     COPY_SCALAR_FIELD(is_stream_plan);
     COPY_SCALAR_FIELD(multi_node_hint);
     COPY_SCALAR_FIELD(uniqueSQLId);
+    COPY_SCALAR_FIELD(cause_type);
+    COPY_SCALAR_FIELD(auto_explain_done);
     /*
      * Not copy ng_queryMem to avoid memory leak in CachedPlan context,
      * and dywlm_client_manager always calls CalculateQueryMemMain to generate it.
@@ -566,8 +568,23 @@ static void CopyScanFields(const Scan* from, Scan* newnode)
     COPY_SCALAR_FIELD(isPartTbl);
     COPY_SCALAR_FIELD(itrs);
     COPY_SCALAR_FIELD(partScanDirection);
-
-    newnode->pruningInfo = copyPruningResult(from->pruningInfo);
+    if (u_sess->copyfunc_cxt.gPlanCopy && from->pruningInfo != NULL) {
+        switch (u_sess->copyfunc_cxt.bitmapCopyState) {
+            case NOT_BITMAP:
+                newnode->pruningInfo = copyPruningResult(from->pruningInfo);
+                break;
+            case BITMAP_HEAP_DEEP_COPY:
+                u_sess->copyfunc_cxt.savePruningInfo = (void *)copyPruningResult(from->pruningInfo);
+                u_sess->copyfunc_cxt.bitmapCopyState = BITMAP_INDEX_SHALLOW_COPY;
+            case BITMAP_INDEX_SHALLOW_COPY:
+                newnode->pruningInfo = (PruningResult *)u_sess->copyfunc_cxt.savePruningInfo;
+                break;
+            default:
+                break;
+        }
+    } else {
+        newnode->pruningInfo = copyPruningResult(from->pruningInfo);
+    }
     COPY_SCALAR_FIELD(scan_qual_optimized);
     COPY_SCALAR_FIELD(predicate_pushdown_optimized);
     COPY_SCALAR_FIELD(scanBatchMode);
@@ -669,37 +686,6 @@ static CStoreIndexScan* _copyCStoreIndexScan(const CStoreIndexScan* from)
 }
 
 /*
- * _copyCStoreIndexScan
- */
-static DfsIndexScan* _copyDfsIndexScan(const DfsIndexScan* from)
-{
-    DfsIndexScan* newnode = makeNode(DfsIndexScan);
-
-    /*
-     * copy node superclass fields
-     */
-    CopyScanFields((const Scan*)from, (Scan*)newnode);
-
-    /*
-     * copy remainder of node
-     */
-    COPY_SCALAR_FIELD(indexid);
-    COPY_NODE_FIELD(indextlist);
-    COPY_NODE_FIELD(indexqual);
-    COPY_NODE_FIELD(indexqualorig);
-    COPY_NODE_FIELD(indexorderby);
-    COPY_NODE_FIELD(indexorderbyorig);
-    COPY_SCALAR_FIELD(indexorderdir);
-    COPY_SCALAR_FIELD(relStoreLocation);
-    COPY_NODE_FIELD(cstorequal);
-    COPY_NODE_FIELD(indexScantlist);
-    COPY_NODE_FIELD(dfsScan);
-    COPY_SCALAR_FIELD(indexonly);
-
-    return newnode;
-}
-
-/*
  * _copyIndexOnlyScan
  */
 static IndexOnlyScan* _copyIndexOnlyScan(const IndexOnlyScan* from)
@@ -752,11 +738,15 @@ static BitmapIndexScan* _copyBitmapIndexScan(const BitmapIndexScan* from)
 static BitmapHeapScan* _copyBitmapHeapScan(const BitmapHeapScan* from)
 {
     BitmapHeapScan* newnode = makeNode(BitmapHeapScan);
+    u_sess->copyfunc_cxt.bitmapCopyState = BITMAP_HEAP_DEEP_COPY;
 
     /*
      * copy node superclass fields
      */
     CopyScanFields((const Scan*)from, (Scan*)newnode);
+
+    u_sess->copyfunc_cxt.bitmapCopyState = NOT_BITMAP;
+    u_sess->copyfunc_cxt.savePruningInfo = NULL; /* should not free */
 
     /*
      * copy remainder of node
@@ -1654,20 +1644,6 @@ static CStoreScan* _copyCStoreScan(const CStoreScan* from)
     return newnode;
 }
 
-static DfsScan* _copyDfsScan(const DfsScan* from)
-{
-    DfsScan* newnode = makeNode(DfsScan);
-
-    /*
-     * copy node superclass fields
-     */
-    CopyScanFields((const Scan*)from, (Scan*)newnode);
-    COPY_SCALAR_FIELD(relStoreLocation);
-    COPY_STRING_FIELD(storeFormat);
-    COPY_NODE_FIELD(privateData);
-    return newnode;
-}
-
 #ifdef ENABLE_MULTIPLE_NODES
 static TsStoreScan*
 _copyTsStoreScan(const TsStoreScan * from)
@@ -2439,6 +2415,7 @@ static Param* _copyParam(const Param* from)
     COPY_LOCATION_FIELD(location);
     COPY_SCALAR_FIELD(tableOfIndexType);
     COPY_SCALAR_FIELD(recordVarTypOid);
+    COPY_NODE_FIELD(tableOfIndexTypeList);
 
     return newnode;
 }
@@ -2861,6 +2838,7 @@ static CaseExpr* _copyCaseExpr(const CaseExpr* from)
     COPY_NODE_FIELD(args);
     COPY_NODE_FIELD(defresult);
     COPY_LOCATION_FIELD(location);
+    COPY_SCALAR_FIELD(fromDecode);
 
     return newnode;
 }
@@ -4479,6 +4457,13 @@ static LeadingHint* _copyLeadingHint(const LeadingHint* from)
     return newnode;
 }
 
+static MaterialSubplanHint* _copyMaterialSubplanHint(const MaterialSubplanHint* from)
+{
+    MaterialSubplanHint* newnode = makeNode(MaterialSubplanHint);
+    CopyBaseHintFilelds((const Hint*)from, (Hint*)newnode);
+    return newnode;
+}
+
 /*
  * @Description: Copy Hintstate.
  * @in from: HintState source.
@@ -4507,6 +4492,8 @@ static HintState* _copyHintState(const HintState* from)
     COPY_NODE_FIELD(cache_plan_hint);
     COPY_NODE_FIELD(no_gpc_hint);
     COPY_NODE_FIELD(predpush_same_level_hint);
+    COPY_SCALAR_FIELD(from_sql_patch);
+    COPY_NODE_FIELD(material_subplan_hint);
 
     return newnode;
 }
@@ -6809,9 +6796,6 @@ void* copyObject(const void* from)
         case T_IndexOnlyScan:
             retval = _copyIndexOnlyScan((IndexOnlyScan*)from);
             break;
-        case T_DfsIndexScan:
-            retval = _copyDfsIndexScan((DfsIndexScan*)from);
-            break;
         case T_CStoreIndexScan:
             retval = _copyCStoreIndexScan((CStoreIndexScan*)from);
             break;
@@ -6943,9 +6927,6 @@ void* copyObject(const void* from)
             break;
         case T_CStoreScan:
             retval = _copyCStoreScan((CStoreScan*)from);
-            break;
-        case T_DfsScan:
-            retval = _copyDfsScan((DfsScan*)from);
             break;
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
@@ -7940,6 +7921,9 @@ void* copyObject(const void* from)
             break;
         case T_CopyColExpr:
             retval = _copyCopyColExpr((CopyColExpr*)from);
+            break;
+        case T_MaterialSubplanHint:
+            retval = _copyMaterialSubplanHint((MaterialSubplanHint*)from);
             break;
 
             /* skew info */

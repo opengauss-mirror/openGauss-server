@@ -82,6 +82,7 @@ static void BlockNameHintDelete(BlockNameHint* hint);
 static void ScanMethodHintDelete(ScanMethodHint* hint);
 static void SkewHintDelete(SkewHint* hint);
 static void SkewHintTransfDelete(SkewHintTransf* hint);
+static void MaterialSubplanHintDelete(MaterialSubplanHint* hint);
 static char* get_hints_from_comment(const char* comment_str);
 static void drop_duplicate_blockname_hint(HintState* hstate);
 static void drop_duplicate_join_hint(PlannerInfo* root, HintState* hstate);
@@ -185,8 +186,8 @@ static void append_value(StringInfo buf, Value* value, Node* node)
     }
 }
 
-#define HINT_NUM 16
-#define HINT_KEYWORD_NUM 21
+#define HINT_NUM 17
+#define HINT_KEYWORD_NUM 22
 
 typedef struct {
     HintKeyword keyword;
@@ -215,6 +216,7 @@ const char* G_HINT_KEYWORD[HINT_KEYWORD_NUM] = {
     (char*) HINT_CPLAN,
     (char*) HINT_GPLAN,
     (char*) HINT_NO_GPC,
+    (char*) HINT_MATERIAL_SUBPLAN,
 };
 
 /*
@@ -225,7 +227,7 @@ static const char* KeywordDesc(HintKeyword keyword)
 {
     const char* value = NULL;
     /* In case new tag is added within the old range. Keep the LFS as the newest keyword */
-    Assert(HINT_KEYWORD_NO_GPC == HINT_KEYWORD_NUM - 1);
+    Assert(HINT_KEYWORD_MATERIAL_SUBPLAN == HINT_KEYWORD_NUM - 1);
     if ((int)keyword >= HINT_KEYWORD_NUM || (int)keyword < 0) {
         elog(WARNING, "unrecognized keyword %d", (int)keyword);
     } else {
@@ -738,6 +740,12 @@ static void SkewHintDesc(SkewHint* hint, StringInfo buf)
     appendStringInfoString(buf, ")");
 }
 
+static void MaterialSubplanHintDesc(MaterialSubplanHint* hint, StringInfo buf)
+{
+    Assert(buf != NULL);
+    appendStringInfo(buf, " %s", KeywordDesc(hint->base.hint_keyword));
+}
+
 /*
  * @Description: Describe hint to string.
  * @in hint: Hint.
@@ -794,6 +802,9 @@ char* descHint(Hint* hint)
         case T_NoGPCHint:
             NoGPCHintDesc((NoGPCHint*)hint, &str);
             break;
+        case T_MaterialSubplanHint:
+            MaterialSubplanHintDesc((MaterialSubplanHint*)hint, &str);
+            break;
         default:
             break;
     }
@@ -840,6 +851,7 @@ void desc_hint_in_state(PlannerInfo* root, HintState* hstate)
     find_unused_hint_to_buf(hstate->set_hint, &str_buf);
     find_unused_hint_to_buf(hstate->no_gpc_hint, &str_buf);
     find_unused_hint_to_buf(hstate->predpush_same_level_hint, &str_buf);
+    find_unused_hint_to_buf(hstate->material_subplan_hint, &str_buf);
 
     /* for skew hint */
     ListCell* lc = NULL;
@@ -1070,6 +1082,13 @@ static void SkewHintTransfDelete(SkewHintTransf* hint)
     pfree_ext(hint);
 }
 
+static void MaterialSubplanHintDelete(MaterialSubplanHint* hint)
+{
+    if (hint == NULL)
+        return;
+    pfree_ext(hint);
+}
+
 /*
  * @Description: Delete hint, call different delete function according to type.
  * @in hint: Deleted hint.
@@ -1111,6 +1130,9 @@ void hintDelete(Hint* hint)
             break;
         case T_GatherHint:
             GatherHintDelete((GatherHint*)hint);
+            break;
+        case T_MaterialSubplanHint:
+            MaterialSubplanHintDelete((MaterialSubplanHint*)hint);
             break;
         default:
             elog(WARNING, "unrecognized hint method: %d", (int)nodeTag(hint));
@@ -1183,6 +1205,11 @@ void HintStateDelete(HintState* hintState)
         PredpushSameLevelHint* hint = (PredpushSameLevelHint*)lfirst(lc);
         PredpushSameLevelHintDelete(hint);
     }
+
+    foreach (lc, hintState->material_subplan_hint) {
+        MaterialSubplanHint* hint = (MaterialSubplanHint*) lfirst(lc);
+        MaterialSubplanHintDelete(hint);
+    }
 }
 
 /*
@@ -1211,7 +1238,8 @@ HintState* HintStateCreate()
     hstate->set_hint = NIL;
     hstate->cache_plan_hint = NIL;
     hstate->no_expand_hint = NIL;
-
+    hstate->from_sql_patch = false;
+    hstate->material_subplan_hint = NIL;
     return hstate;
 }
 
@@ -1386,6 +1414,11 @@ static void AddNoGPCHint(HintState* hstate, Hint* hint)
     }
 }
 
+static void AddMaterialSubplanHint(HintState* hstate, Hint* hint)
+{
+    hstate->material_subplan_hint = lappend(hstate->material_subplan_hint, hint);
+}
+
 typedef void (*AddHintFunc)(HintState*, Hint*);
 
 const AddHintFunc G_HINT_CREATOR[HINT_NUM] = {
@@ -1405,26 +1438,12 @@ const AddHintFunc G_HINT_CREATOR[HINT_NUM] = {
     AddPlanCacheHint,
     AddNoExpandHint,
     AddNoGPCHint,
+    AddMaterialSubplanHint,
 };
 
-/*
- * @Description: Generate hint struct according to hint str.
- * @in hints: Hint string.
- * @return: Hintstate struct.
- */
-HintState* create_hintstate(const char* hints)
+HintState* create_hintstate_worker(const char* hint_str)
 {
-    if (hints == NULL) {
-        return NULL;
-    }
-
-    char* hint_str = NULL;
     HintState* hstate = NULL;
-
-    hint_str = get_hints_from_comment(hints);
-    if (hint_str == NULL) {
-        return NULL;
-    }
 
     /* Initilized plan hint variable, which will be set in hint parser */
     u_sess->parser_cxt.hint_list = u_sess->parser_cxt.hint_warning = NIL;
@@ -1447,7 +1466,7 @@ HintState* create_hintstate(const char* hints)
     if (u_sess->parser_cxt.hint_list != NULL) {
         ListCell* lc = NULL;
         int firstHintTag = T_JoinMethodHint; /* Do not add hint tag before JoinMethodHint. */
-        int lastHintTag = T_NoGPCHint; /* Keep this as the last hint tag in nodes.h. */
+        int lastHintTag = T_MaterialSubplanHint; /* Keep this as the last hint tag in nodes.h. */
 
         foreach (lc, u_sess->parser_cxt.hint_list) {
             Hint* hint = (Hint*)lfirst(lc);
@@ -1489,6 +1508,29 @@ HintState* create_hintstate(const char* hints)
         /* Only keep the last cplan/gplanhint */
         hstate->cache_plan_hint = keep_last_hint_cell(hstate->cache_plan_hint);
     }
+
+    return hstate;
+}
+
+/*
+ * @Description: Generate hint struct according to hint str.
+ * @in hints: Hint string.
+ * @return: Hintstate struct.
+ */
+HintState* create_hintstate(const char* hints)
+{
+    if (hints == NULL) {
+        return NULL;
+    }
+
+    char* hint_str = NULL;
+
+    hint_str = get_hints_from_comment(hints);
+    if (hint_str == NULL) {
+        return NULL;
+    }
+
+    HintState* hstate = create_hintstate_worker(hint_str);
 
     pfree_ext(hint_str);
     return hstate;
@@ -2681,7 +2723,7 @@ static void set_colinfo_by_relation(Oid relid, int location, SkewColumnInfo* col
 {
     ResourceOwner currentOwner = t_thrd.utils_cxt.CurrentResourceOwner;
     ResourceOwner tmpOwner;
-    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "ForSkewHint",
+    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(currentOwner, "ForSkewHint",
         THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER));
     Relation relation = NULL;
 
@@ -3393,7 +3435,13 @@ static void transform_predpush_hint(PlannerInfo* root, Query* parse, List* predp
         }
 
         int relid = find_relid_aliasname(parse, predpush_hint->dest_name, true);
-        if (relid <= NOTFOUNDRELNAME) {
+        if (relid == NOTFOUNDRELNAME) {
+            append_warning_to_list(root, (Hint *)predpush_hint, "Error hint:%s, relation name \"%s\" is not found.",
+                                   hint_string, predpush_hint->dest_name);
+            continue;
+        } else if (relid == AMBIGUOUSRELNAME) {
+            append_warning_to_list(root, (Hint *)predpush_hint, "Error hint:%s, relation name \"%s\" is ambiguous.",
+                                   hint_string, predpush_hint->dest_name);
             continue;
         }
 
@@ -3491,8 +3539,11 @@ static unsigned int get_rewrite_rule_bits(RewriteHint* hint)
         else if (pg_strcasecmp(param_name, "intargetlist") == 0) {
             bits = bits | SUBLINK_PULLUP_IN_TARGETLIST;
         }
-        else {
-            elog(WARNING, "invalid rewrite rule. (Supported rules: lazyagg, magicset, partialpush, uniquecheck, disablerep, intargetlist)");
+        else if (pg_strcasecmp(param_name, "disable_pullup_expr_sublink") == 0) {
+            bits = bits | SUBLINK_PULLUP_DISABLE_EXPR;
+        } else {
+            elog(WARNING, "invalid rewrite rule. (Supported rules: lazyagg, magicset, partialpush, uniquecheck, "
+                          "disablerep, intargetlist,disable_pullup_expr_sublink)");
         }
     }
 
@@ -3522,8 +3573,10 @@ bool permit_from_rewrite_hint(PlannerInfo *root, unsigned int params)
         else 
             bits = rewrite_hint->param_bits;
 
-        if (bits & params)
+        if (bits & params) {
+            rewrite_hint->base.state = HINT_STATE_USED;
             return false;
+        }
     }
     return true;
 }
@@ -3791,7 +3844,7 @@ bool permit_predpush(PlannerInfo *root)
     return !predpushHint->negative;
 }
 
-const unsigned int G_NUM_SET_HINT_WHITE_LIST = 33;
+const unsigned int G_NUM_SET_HINT_WHITE_LIST = 34;
 const char* G_SET_HINT_WHITE_LIST[G_NUM_SET_HINT_WHITE_LIST] = {
     /* keep in the ascending alphabetical order of frequency */
     (char*)"best_agg_plan",
@@ -3825,6 +3878,7 @@ const char* G_SET_HINT_WHITE_LIST[G_NUM_SET_HINT_WHITE_LIST] = {
     (char*)"node_name",
     (char*)"query_dop",
     (char*)"random_page_cost",
+    (char*)"rewrite_rule",
     (char*)"seq_page_cost",
     (char*)"try_vector_engine_strategy"};
 
@@ -3913,6 +3967,19 @@ bool CheckNodeNameHint(HintState* hintstate)
         if (unlikely(strcmp(hint->name, "node_name") == 0)) {
             return true;
         }
+    }
+    return false;
+}
+
+bool has_material_subplan_hint(HintState* hintState)
+{
+    if (hintState == NULL) {
+        return false;
+    }
+    if (hintState->material_subplan_hint != NULL) {
+        MaterialSubplanHint* hint = (MaterialSubplanHint*)linitial(hintState->material_subplan_hint);
+        hint->base.state = HINT_STATE_USED;
+        return true;
     }
     return false;
 }

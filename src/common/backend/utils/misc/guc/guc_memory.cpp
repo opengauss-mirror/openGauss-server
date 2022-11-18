@@ -35,7 +35,6 @@
 #include "access/twophase.h"
 #include "access/xact.h"
 #include "access/xlog.h"
-#include "access/dfs/dfs_insert.h"
 #include "gs_bbox.h"
 #include "catalog/namespace.h"
 #include "catalog/pgxc_group.h"
@@ -143,6 +142,7 @@
 #include "workload/cpwlm.h"
 #include "workload/workload.h"
 #include "utils/guc_memory.h"
+#include "utils/mem_snapshot.h"
 
 static bool check_memory_detail_tracking(char** newval, void** extra, GucSource source);
 static void assign_memory_detail_tracking(const char* newval, void* extra);
@@ -169,6 +169,14 @@ static const struct config_enum_entry memory_tracking_option[] = {
     {"normal", MEMORY_TRACKING_NORMAL, false},
     {"executor", MEMORY_TRACKING_EXECUTOR, false},
     {"fullexec", MEMORY_TRACKING_FULLEXEC, false},
+    {NULL, 0, false}
+};
+
+/* memory_trace_level enum */
+static const struct config_enum_entry memory_trace_level[] = {
+    {"none", MEMORY_TRACE_NONE, false},
+    {"level1", MEMORY_TRACE_LEVEL1, false},
+    {"level2", MEMORY_TRACE_LEVEL2, false},
     {NULL, 0, false}
 };
 
@@ -390,7 +398,7 @@ static void InitMemoryConfigureNamesInt()
             NULL,
             NULL,
             NULL},
-        
+
         /* End-of-list marker */
         {{NULL,
             (GucContext)0,
@@ -499,6 +507,19 @@ static void InitMemoryConfigureNamesString()
             assign_uncontrolled_memory_context,
             show_uncontrolled_memory_context},
 
+        {{"resilience_memory_reject_percent",
+            PGC_SIGHUP,
+            NODE_ALL,
+            RESOURCES_MEM,
+            gettext_noop("Sets the memory percent."),
+            NULL,
+            GUC_LIST_INPUT},
+            &u_sess->attr.attr_memory.memory_reset_percent_item,
+            "0,0",
+            CheckMemoryResetPercent,
+            AssignMemoryResetPercent,
+            NULL},
+
         {{NULL,
             (GucContext)0,
             (GucNodeType)0,
@@ -532,6 +553,18 @@ static void InitMemoryConfigureNamesEnum()
             &u_sess->attr.attr_memory.memory_tracking_mode,
             MEMORY_TRACKING_NONE,
             memory_tracking_option,
+            NULL,
+            NULL,
+            NULL},
+        {{"memory_trace_level",
+            PGC_SIGHUP,
+            NODE_ALL,
+            RESOURCES_MEM,
+            gettext_noop("Sets the used memory level for memory snapshot."),
+            NULL},
+            &u_sess->attr.attr_memory.memory_trace_level,
+            MEMORY_TRACE_LEVEL1,
+            memory_trace_level,
             NULL,
             NULL,
             NULL},

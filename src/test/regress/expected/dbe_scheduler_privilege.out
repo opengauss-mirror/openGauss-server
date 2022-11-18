@@ -362,3 +362,15 @@ select attribute_name, attribute_value from gs_job_attribute; -- empty
 ----------------+-----------------
 (0 rows)
 
+select DBE_SCHEDULER.create_credential('cre_1', ' scheduler_user1', ''); -- failed, space is not allowed
+ERROR:  Credential username is invalid.
+DETAIL:  Credential username contains invalid character
+CONTEXT:  referenced column: create_credential
+select DBE_SCHEDULER.create_credential('cre_1', '"scheduler_user1', ''); -- failed, quote is not allowed
+ERROR:  Credential username is invalid.
+DETAIL:  Credential username contains invalid character
+CONTEXT:  referenced column: create_credential
+select DBE_SCHEDULER.create_credential('cre_1', '&scheduler_user1', ''); -- failed, & is not allowed
+ERROR:  Credential username is invalid.
+DETAIL:  Credential username contains invalid character
+CONTEXT:  referenced column: create_credential

@@ -54,7 +54,8 @@ static const char* SegmentXLogOpName[] = {
     "update high water mark",
     "set inverse pointer",
     "move buckets",
-    "bucket add redis info"
+    "bucket add redis info",
+    "shrink update segment head"
 };
 
 /* 

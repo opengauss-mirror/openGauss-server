@@ -170,9 +170,10 @@ bool load_policy_labels(bool reload)
     }
 
     /* scan to load all labels */
-    if (all_labels == NULL) {
-        all_labels = new loaded_labels;
+    if (all_labels != NULL) {
+        delete all_labels;
     }
+    all_labels = new loaded_labels;
     scan_policy_labels(all_labels);
 
     return true;

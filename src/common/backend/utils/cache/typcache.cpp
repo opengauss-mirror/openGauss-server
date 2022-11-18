@@ -827,7 +827,12 @@ void TypeCacheRelCallback(Datum arg, Oid relid)
     TypeCacheEntry* typentry = NULL;
 
     /* GetTypeCacheHash() must exist, else this callback wouldn't be registered */
-    hash_seq_init(&status, GetTypeCacheHash());
+    struct HTAB *TypeCacheHash = GetTypeCacheHash();
+    Assert(TypeCacheHash != NULL);
+    if (TypeCacheHash == NULL) {
+        return;
+    }
+    hash_seq_init(&status, TypeCacheHash);
     while ((typentry = (TypeCacheEntry*)hash_seq_search(&status)) != NULL) {
         if (typentry->typtype != TYPTYPE_COMPOSITE) {
             continue; /* skip non-composites */

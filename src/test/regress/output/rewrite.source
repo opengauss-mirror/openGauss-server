@@ -14,6 +14,7 @@ NOTICE:  CREATE TABLE will create implicit sequence "replication_example_id_seq"
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "replication_example_pkey" for table "replication_example"
 INSERT INTO replication_example(somedata) VALUES (1);
 SELECT data FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL, 'include-xids', '0', 'skip-empty-xacts', '1');
+--?.*
                                                    data                                                   
 ----------------------------------------------------------------------------------------------------------
  BEGIN
@@ -50,6 +51,21 @@ INSERT INTO replication_example(somedata, testcolumn1, testcolumn3) VALUES (7, 5
 -- make old files go away
 CHECKPOINT;
 SELECT data FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL, 'include-xids', '0', 'skip-empty-xacts', '1');
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
                                                                                        data                                                                                       
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  BEGIN

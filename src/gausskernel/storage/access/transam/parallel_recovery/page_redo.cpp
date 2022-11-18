@@ -44,6 +44,7 @@
 #include "postmaster/postmaster.h"
 #include "postmaster/pagerepair.h"
 #include "storage/ipc.h"
+#include "storage/standby.h"
 #include "access/nbtree.h"
 #include "utils/guc.h"
 #include "utils/palloc.h"
@@ -261,6 +262,8 @@ PGPROC *GetPageRedoWorkerProc(PageRedoWorker *worker)
 
 void HandlePageRedoInterrupts()
 {
+    static uint64 clearUndoFdCount = 0;
+    const uint64 clearundoFdCountMask = 0xFFFF;
     if (t_thrd.page_redo_cxt.got_SIGHUP) {
         t_thrd.page_redo_cxt.got_SIGHUP = false;
         ProcessConfigFile(PGC_SIGHUP);
@@ -280,6 +283,15 @@ void HandlePageRedoInterrupts()
             PAGE_REDO_WORKER_EXIT);
 
         proc_exit(1);
+    }
+
+    ++clearUndoFdCount;
+    if ((clearUndoFdCount & clearundoFdCountMask) == 0) {
+        uint64 needClearUndoFds = pg_atomic_read_u64(&g_redoWorker->needClearUndoFds);
+        if (needClearUndoFds > 0) {
+            smgrcloseall();
+            pg_atomic_write_u64(&g_redoWorker->needClearUndoFds, 0);
+        }
     }
 }
 
@@ -320,13 +332,13 @@ void PageRedoWorkerMain()
 
     InitGlobals();
     ResourceManagerStartup();
-
+    InitRecoveryLockHash();
     g_redoWorker->oldCtx = MemoryContextSwitchTo(g_instance.comm_cxt.predo_cxt.parallelRedoCtx);
 
     int retCode = ApplyRedoLoop();
 
     (void)MemoryContextSwitchTo(g_redoWorker->oldCtx);
-
+    StandbyReleaseAllLocks();
     ResourceManagerStop();
     ereport(LOG, (errmsg("Page-redo-worker thread %u terminated, retcode %d.", g_redoWorker->id, retCode)));
     LastMarkReached();
@@ -364,7 +376,6 @@ static void SetupSignalHandlers()
     (void)gspqsignal(SIGINT, SIG_IGN);
     (void)gspqsignal(SIGTERM, PageRedoShutdownHandler);
     (void)gspqsignal(SIGQUIT, PageRedoQuickDie);
-    (void)gspqsignal(SIGALRM, SIG_IGN);
     (void)gspqsignal(SIGPIPE, SIG_IGN);
     (void)gspqsignal(SIGUSR1, PageRedoSigUser1Handler);
     (void)gspqsignal(SIGUSR2, PageRedoUser2Handler);
@@ -373,7 +384,12 @@ static void SetupSignalHandlers()
     (void)gspqsignal(SIGTTOU, SIG_IGN);
     (void)gspqsignal(SIGCONT, SIG_IGN);
     (void)gspqsignal(SIGWINCH, SIG_IGN);
-
+    if (g_instance.attr.attr_storage.EnableHotStandby) {
+        (void)gspqsignal(SIGALRM, handle_standby_sig_alarm); /* ignored unless InHotStandby */
+    } else {
+        (void)gspqsignal(SIGALRM, SIG_IGN);
+    }
+    (void)gspqsignal(SIGURG, print_stack);
     gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
     (void)gs_signal_unblock_sigusr2();
 }
@@ -507,6 +523,19 @@ static void ApplyAndFreeRedoItem(RedoItem *item)
     }
 }
 
+static void NotifyRedoWorkerToCleanUndoFds(RedoItem *item)
+{
+    if (undo::IsUndoUnlinkXLog(&item->record)) {
+        Assert(g_redoWorker->role == UndoLogZidWorker);
+        for (uint32 i = 0; i < g_dispatcher->pageWorkerCount; ++i) {
+            PageRedoWorker *redoWorker = g_dispatcher->pageWorkers[i];
+            if (redoWorker->role != UndoLogZidWorker) {
+                pg_atomic_write_u64(&redoWorker->needClearUndoFds, 1);
+            }
+        }
+    }
+}
+
 /* Run from the worker thread */
 static void ApplyRecordWithoutSyncUndoLog(RedoItem *item)
 {
@@ -519,7 +548,6 @@ static void ApplyRecordWithoutSyncUndoLog(RedoItem *item)
         uint32 shrCount = pg_atomic_read_u32(&item->shareCount);
         uint32 trueRefCount = pg_atomic_add_fetch_u32(&item->trueRefCount, 1);
         uint32 undoZidWorkersNum = get_recovery_undozidworkers_num();
-
         /* The last one to replay the item */
         if (trueRefCount == (shrCount + undoZidWorkersNum))
             FreeRedoItem(item);
@@ -536,7 +564,7 @@ static void ApplyRecordWithoutSyncUndoLog(RedoItem *item)
 
             GetReplayedRecPtrFromUndoWorkers(&lrRead, &lrEnd);
         
-            while (XLByteLT(lrEnd, record->EndRecPtr)) {
+            while (XLByteLT(lrEnd, record->EndRecPtr) || (lrEnd == InvalidXLogRecPtr)) {
                 GetReplayedRecPtrFromUndoWorkers(&lrRead, &lrEnd);
                 RedoInterruptCallBack();
             }
@@ -558,7 +586,7 @@ static void ApplySinglePageRecord(RedoItem *item, bool replayUndo)
     ApplyRedoRecord(record);
     (void)MemoryContextSwitchTo(oldCtx);
     record->readblocks = u_sess->instr_cxt.pg_buffer_usage->local_blks_read - readbufcountbefore;
-
+    NotifyRedoWorkerToCleanUndoFds(item);
     if (replayUndo) {
         uint32 shrCount = pg_atomic_read_u32(&item->shareCount);
         uint32 trueRefCount = pg_atomic_add_fetch_u32(&item->trueRefCount, 1);
@@ -1090,7 +1118,7 @@ void WaitAllPageWorkersQueueEmpty()
     if ((get_real_recovery_parallelism() > 1) && (GetPageWorkerCount() > 0)) {
         for (uint32 i = 0; i < g_dispatcher->pageWorkerCount; i++) {
             while (!SPSCBlockingQueueIsEmpty(g_dispatcher->pageWorkers[i]->queue)) {
-                HandlePageRedoInterrupts();
+                RedoInterruptCallBack();
             }
         }
     }

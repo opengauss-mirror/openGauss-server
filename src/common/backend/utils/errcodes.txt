@@ -622,6 +622,6 @@ TS000    E    ERRCODE_TS_COMMON_ERROR                                        tim
 TS001    E    ERRCODE_TS_KEYTYPE_MISMATCH                                    column_key_type_mismatch
 
 Section: Class SE - Security Error
-42714    E    ERRCODE_DUPLICATE_POLICY                                        duplicate_policy
-42715    E    ERRCODE_DUPLICATE_LABEL                                         duplicate_label
 SE001    E    ERRCODE_INVALID_AUDIT_LOG                                       invalid audit log
+SE002    E    ERRCODE_DUPLICATE_POLICY                                        duplicate_policy
+SE003    E    ERRCODE_DUPLICATE_LABEL                                         duplicate_label

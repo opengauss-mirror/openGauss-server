@@ -108,6 +108,7 @@ void AggFusion::InitLocals(ParamListInfo params)
 
 bool AggFusion::execute(long max_rows, char *completionTag)
 {
+    MemoryContext oldContext = MemoryContextSwitchTo(m_local.m_tmpContext);
     max_rows = FETCH_ALL;
     bool success = false;
 
@@ -168,6 +169,7 @@ bool AggFusion::execute(long max_rows, char *completionTag)
     errno_t errorno = snprintf_s(completionTag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1,
             "SELECT %lu", nprocessed);
     securec_check_ss(errorno, "\0", "\0");
+    MemoryContextSwitchTo(oldContext);
 
     return success;
 }

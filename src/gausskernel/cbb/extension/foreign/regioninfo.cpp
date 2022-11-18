@@ -39,7 +39,6 @@
 #include "pgxc/execRemote.h"
 #include "utils/builtins.h"
 #include "utils/snapmgr.h"
-#include "storage/dfs/dfs_connector.h"
 
 #include "cjson/cJSON.h"
 
@@ -176,46 +175,8 @@ char* readDataFromJsonFile(char* region)
 
 static bool clean_region_info()
 {
-#ifndef ENABLE_LITE_MODE
-    Relation rel;
-    TableScanDesc scan;
-    HeapTuple tuple;
-    int cleanNum = 0;
-    bool ret = true;
-
-    rel = heap_open(ForeignServerRelationId, AccessShareLock);
-    scan = tableam_scan_begin(rel, GetActiveSnapshot(), 0, NULL);
-    while ((tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
-        Oid srvOid = HeapTupleGetOid(tuple);
-        PG_TRY();
-        {
-            if (dfs::InvalidOBSConnectorCache(srvOid)) {
-                cleanNum++;
-            }
-        }
-        PG_CATCH();
-        {
-            FlushErrorState();
-            Form_pg_foreign_server server = (Form_pg_foreign_server)GETSTRUCT(tuple);
-            tableam_scan_end(scan);
-            heap_close(rel, AccessShareLock);
-            ereport(LOG, (errmodule(MOD_DFS), errmsg("Failed to clean region info of %s.", NameStr(server->srvname))));
-
-            ret = false;
-        }
-        PG_END_TRY();
-    }
-
-    tableam_scan_end(scan);
-    heap_close(rel, AccessShareLock);
-
-    ereport(LOG, (errmodule(MOD_DFS), errmsg("clean %d region info.", cleanNum)));
-
-    return ret;
-#else
     FEATURE_ON_LITE_MODE_NOT_SUPPORTED();
     return true;
-#endif
 }
 
 /**

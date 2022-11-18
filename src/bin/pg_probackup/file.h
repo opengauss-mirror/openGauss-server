@@ -87,8 +87,6 @@ typedef enum
 
 typedef struct
 {
-    //  fio_operations cop;
-    //  16
     unsigned cop    : 32;
     unsigned handle : 32;
     unsigned size   : 32;

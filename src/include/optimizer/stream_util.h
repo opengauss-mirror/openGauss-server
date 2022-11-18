@@ -34,6 +34,8 @@ typedef struct {
     bool has_stream;             /* if there's stream node in the path */
     bool has_parameterized_path; /* If parameter is passed in the path */
     bool has_cstore_index_delta; /* if there is cstore index scan with delta data */
+    bool upper_param_cross_stream; /* if there is a path requiring param from upper query block and under a stream */
+    bool under_stream;            /* if traversing under a stream node */
 } ContainStreamContext;
 
 typedef enum {

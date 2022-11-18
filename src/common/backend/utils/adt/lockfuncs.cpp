@@ -525,7 +525,7 @@ Datum pg_lock_status(PG_FUNCTION_ARGS)
 
 #define SET_LOCKTAG_INT32_DB(tag, databaseOid, key1, key2) SET_LOCKTAG_ADVISORY(tag, databaseOid, key1, key2, 2)
 
-static void CheckIfAnySchemaInRedistribution()
+static bool CheckIfAnySchemaInRedistribution()
 {
     Relation rel = heap_open(NamespaceRelationId, AccessShareLock);
     TableScanDesc scan = tableam_scan_begin(rel, SnapshotNow, 0, NULL);
@@ -538,13 +538,14 @@ static void CheckIfAnySchemaInRedistribution()
             continue;
         }
         if (DatumGetChar(datum) == 'y') {
-            ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("Please check if another schema is in redistribution in the same database.")));
+            tableam_scan_end(scan);
+            heap_close(rel, NoLock);
+            return false;
         }
     }
     tableam_scan_end(scan);
     heap_close(rel, NoLock);
+    return true;
 }
 
 static void UpdateSchemaInRedistribution(Name schemaName, bool isLock)
@@ -582,8 +583,7 @@ static void UpdateSchemaInRedistribution(Name schemaName, bool isLock)
 
     /* Update */
     HeapTuple newtuple = heap_modify_tuple(tuple, RelationGetDescr(rel), newRecord, newRecordNulls, newRecordRepl);
-    simple_heap_update(rel, &tuple->t_self, newtuple);
-    CatalogUpdateIndexes(rel, newtuple);
+    heap_inplace_update(rel, newtuple);
     heap_freetuple_ext(newtuple);
 
     ReleaseSysCache(tuple);
@@ -599,10 +599,10 @@ static void PGXCSendTransfer(Name schemaName, bool isLock)
     int rc;
     if (isLock) {
         rc = snprintf_s(updateSql, CHAR_BUF_SIZE, CHAR_BUF_SIZE - 1,
-            "select pgxc_unlock_for_transfer('%s'::name)", schemaName->data);
+            "select pg_catalog.pgxc_unlock_for_transfer('%s'::name)", schemaName->data);
     } else {
         rc = snprintf_s(updateSql, CHAR_BUF_SIZE, CHAR_BUF_SIZE - 1,
-            "select pgxc_lock_for_transfer('%s'::name)", schemaName->data);
+            "select pg_catalog.pgxc_lock_for_transfer('%s'::name)", schemaName->data);
     }
     securec_check_ss(rc, "\0", "\0");
     ExecUtilityStmtOnNodes(updateSql, NULL, false, false, EXEC_ON_COORDS, false);
@@ -654,10 +654,7 @@ static bool pgxc_advisory_lock(int64 key64, int32 key1, int32 key2, bool iskeybi
      * can not process SIGUSR1 of "pgxc_pool_reload" command immediately.
      */
 #ifdef ENABLE_MULTIPLE_NODES
-        if (IsGotPoolReload()) {
-            processPoolerReload();
-            ResetGotPoolReload(false);
-        }
+    ReloadPoolerWithoutTransaction();
 #endif
     PgxcNodeGetOids(&coOids, &dnOids, &numcoords, &numdnodes, false);
 
@@ -1611,9 +1608,19 @@ Datum pgxc_lock_for_transfer(PG_FUNCTION_ARGS)
     /* 2. lock database */
     char *databaseName = get_and_check_db_name(u_sess->proc_cxt.MyDatabaseId, true);
     if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
-        /* pgxc_lock_for_sp_database will affect gs_redis in process, so check first */
-        CheckIfAnySchemaInRedistribution();
-
+        /* pgxc_lock_for_sp_database will affect gs_redis in process, so acquire a dedicated lock first */
+        (void)DirectFunctionCall3(pg_advisory_lock_sp_db_int4,
+            NamespaceRelationId,
+            NamespaceRelationId,
+            NameGetDatum(databaseName));
+        if (!CheckIfAnySchemaInRedistribution()) {
+            (void)DirectFunctionCall3(pg_advisory_unlock_sp_db_int4,
+                NamespaceRelationId,
+                NamespaceRelationId,
+                NameGetDatum(databaseName));
+            ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Concurrent redistribution across schema in one database is not supported")));
+        }
         DirectFunctionCall1(pgxc_lock_for_sp_database, CStringGetDatum(databaseName));
     }
 
@@ -1622,6 +1629,10 @@ Datum pgxc_lock_for_transfer(PG_FUNCTION_ARGS)
 
     /* 4. send transfer to all other coordinator and unlock database */
     if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
+        (void)DirectFunctionCall3(pg_advisory_unlock_sp_db_int4,
+            NamespaceRelationId,
+            NamespaceRelationId,
+            NameGetDatum(databaseName));
         PGXCSendTransfer(schemaName, isLock);
 
         DirectFunctionCall1(pgxc_unlock_for_sp_database, CStringGetDatum(databaseName));

@@ -22,7 +22,7 @@ OBJS = catalog.o dependency.o heap.o index.o indexing.o namespace.o aclchk.o \
        pg_depend.o pg_enum.o pg_inherits.o pg_largeobject.o pg_namespace.o pg_object.o\
        pg_operator.o gs_package.o pg_proc.o pg_range.o pg_db_role_setting.o pg_shdepend.o pg_synonym.o\
        pg_type.o pgxc_class.o storage.o storage_gtt.o toasting.o pg_job.o pg_partition.o\
-       pg_hashbucket.o cstore_ctlg.o dfsstore_ctlg.o pg_builtin_proc.o streaming_stream.o\
+       pg_hashbucket.o cstore_ctlg.o pg_builtin_proc.o streaming_stream.o\
        gs_matview.o pgxc_slice.o pg_job_proc.o gs_job_argument.o gs_job_attribute.o pg_uid.o gs_global_config.o\
        gs_db_privilege.o pg_publication.o pg_subscription.o
 
@@ -60,7 +60,7 @@ POSTGRES_BKI_SRCS = $(addprefix $(top_srcdir)/src/include/catalog/,\
 	pg_streaming_stream.h pg_streaming_cont_query.h pg_streaming_reaper_status.h gs_matview.h\
 	gs_matview_dependency.h pgxc_slice.h gs_opt_model.h gs_model.h\
 	pg_recyclebin.h pg_snapshot.h gs_job_argument.h gs_job_attribute.h pg_uid.h gs_db_privilege.h\
-	pg_replication_origin.h pg_publication.h pg_publication_rel.h pg_subscription.h\
+	pg_replication_origin.h pg_publication.h pg_publication_rel.h pg_subscription.h gs_sql_patch.h\
     )
 
 # location of Catalog.pm

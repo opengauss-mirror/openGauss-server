@@ -22,7 +22,6 @@
  * -------------------------------------------------------------------------
  */
 #include "access/xact.h"
-#include "access/genam.h"
 #include "access/heapam.h"
 #include "access/tableam.h"
 #include "access/sysattr.h"

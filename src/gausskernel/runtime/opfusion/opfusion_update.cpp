@@ -202,7 +202,7 @@ void UpdateFusion::InitLocals(ParamListInfo params)
 {
     m_local.m_tmpisnull = NULL;
     m_local.m_tmpvals = NULL;
-    m_c_local.m_estate = CreateExecutorState();
+    m_c_local.m_estate = CreateExecutorStateForOpfusion(m_local.m_localContext, m_local.m_tmpContext);
     m_c_local.m_estate->es_range_table = m_global->m_planstmt->rtable;
 
     m_local.m_reslot = MakeSingleTupleTableSlot(m_global->m_tupDesc);
@@ -411,6 +411,7 @@ lreplace:
                     exec_index_tuples_state.targetPartRel = RELATION_IS_PARTITIONED(rel) ? partRel : NULL;
                     exec_index_tuples_state.p = RELATION_IS_PARTITIONED(rel) ? part : NULL;
                     exec_index_tuples_state.conflict = NULL;
+                    exec_index_tuples_state.rollbackIndex = false;
                     recheck_indexes = tableam_tops_exec_update_index_tuples(m_local.m_reslot, oldslot,
                         bucket_rel == NULL ? destRel : bucket_rel,
                         NULL, tup, &((HeapTuple)oldtup)->t_self, exec_index_tuples_state, bucketid, modifiedIdxAttrs);
@@ -516,6 +517,7 @@ lreplace:
 
 bool UpdateFusion::execute(long max_rows, char *completionTag)
 {
+    MemoryContext oldContext = MemoryContextSwitchTo(m_local.m_tmpContext);
     bool success = false;
     errno_t errorno = EOK;
 
@@ -555,5 +557,7 @@ bool UpdateFusion::execute(long max_rows, char *completionTag)
             snprintf_s(completionTag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1, "UPDATE %ld", nprocessed);
     }
     securec_check_ss(errorno, "\0", "\0");
+    MemoryContextSwitchTo(oldContext);
+    FreeExecutorStateForOpfusion(m_c_local.m_estate);
     return success;
 }

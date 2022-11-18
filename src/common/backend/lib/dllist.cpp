@@ -303,13 +303,6 @@ bool DllistWithLock::IsEmpty()
     return ret;
 }
 
-Dlelem* DllistWithLock::GetHead()
-{
-    Dlelem* head = NULL;
-    head = m_list.dll_head;
-    return head;
-}
-
 void DllistWithLock::GetLock()
 {
     START_CRIT_SECTION();

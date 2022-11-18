@@ -21,6 +21,7 @@
 #include <ctype.h>
 
 #include "common/int.h"
+#include "miscadmin.h"
 #include "utils/builtins.h"
 
 /*
@@ -120,6 +121,100 @@ int32 pg_atoi(char* s, int size, int c)
     return (int32)l;
 }
 
+static inline bool check_trailing_symbol(unsigned char ptr)
+{
+    return ptr != '\0' && isspace(ptr);
+}
+
+static inline bool check_leading_symbol(unsigned char ptr)
+{
+    return ptr && isspace(ptr);
+}
+
+static bool check_one_digit(unsigned char ptr, const char *str)
+{
+    /* require at least one digit */
+    if (!isdigit(ptr)) {
+        if (DB_IS_CMPT(A_FORMAT | PG_FORMAT))
+            ereport(ERROR, (errmodule(MOD_FUNCTION), errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+                errmsg("invalid input syntax for %s: \"%s\"", "integer", str)));
+        else if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool check_sign(unsigned char ptr, bool *neg)
+{
+    /* handle sign */
+    if (ptr == '-') {
+        *neg = true;
+        return true;
+    } else if (ptr == '+') {
+        return true;
+    }
+    return false;
+}
+
+static void check_empty_string(unsigned char ptr, const char *str)
+{
+    if (ptr != '\0' && u_sess->attr.attr_sql.sql_compatibility != B_FORMAT) {
+        ereport(ERROR, (errmodule(MOD_FUNCTION), errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+            errmsg("invalid input syntax for %s: \"%s\"", "integer", str)));
+    }
+}
+
+static bool check_digit_int16(unsigned char ptr, const char *str, int16 *tmp)
+{
+    /* process digits */
+    if (ptr && isdigit(ptr)) {
+        int16 digit = (ptr - '0');
+        const int base = 10;
+
+        if (pg_mul_s16_overflow(*tmp, base, tmp) || pg_sub_s16_overflow(*tmp, digit, tmp)) {
+            ereport(ERROR, (errmodule(MOD_FUNCTION), errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                errmsg("value \"%s\" is out of range for type %s", str, "smallint")));
+        }
+        return true;
+    }
+
+    return false;
+}
+
+static bool check_dot_digit_int16(unsigned char ptr, const char *str, bool *hasdot, bool *dotdigit, int16 *tmp)
+{
+    /* process dot and digits */
+    if (!(*hasdot) && ptr == '.') {
+        *hasdot = true;
+        return true;
+    }
+
+    if (!isdigit(ptr)) {
+        return false;
+    }
+
+    int16 digit = (ptr - '0');
+    const int base = 10;
+
+    if (*hasdot) {
+        if (!(*dotdigit)) {
+            *dotdigit = true;
+            constexpr int ROUNDING_THRESHOLD = 5;
+            if (digit >= ROUNDING_THRESHOLD && pg_sub_s16_overflow(*tmp, 1, tmp)) {
+                ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                    errmsg("value \"%s\" is out of range for type %s", str, "smallint")));
+            }
+        }
+    } else if (pg_mul_s16_overflow(*tmp, base, tmp) || pg_sub_s16_overflow(*tmp, digit, tmp)) {
+        ereport(ERROR, (errmodule(MOD_FUNCTION), errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+            errmsg("value \"%s\" is out of range for type %s", str, "smallint")));
+    }
+
+    return true;
+}
+
+
 /*
  * Convert input string to a signed 16 bit integer.
  *
@@ -130,67 +225,114 @@ int32 pg_atoi(char* s, int size, int c)
  * representation of the most negative number, which can't be represented as a
  * positive number.
  */
-int16 pg_strtoint16(const char* s)
+int16 pg_strtoint16(const char *s)
 {
-    const char* ptr = s;
-    int16 tmp = 0;
-    bool neg = false;
-
+    const char *ptr = s;
     /* skip leading spaces */
-    while (likely(*ptr) && isspace((unsigned char)*ptr)) {
+    while (check_leading_symbol((unsigned char)*ptr)) {
         ptr++;
     }
 
+    bool neg = false;
     /* handle sign */
-    if (*ptr == '-') {
+    if (check_sign((unsigned char)*ptr, &neg)) {
         ptr++;
-        neg = true;
-    } else if (*ptr == '+')
-        ptr++;
-
-    /* require at least one digit */
-    if (unlikely(!isdigit((unsigned char)*ptr))) {
-        if (DB_IS_CMPT(A_FORMAT | PG_FORMAT))
-            goto invalid_syntax;
-        if (DB_IS_CMPT(B_FORMAT))
-            return tmp;
     }
 
-    /* process digits */
-    while (*ptr && isdigit((unsigned char)*ptr)) {
-        int8 digit = (*ptr++ - '0');
+    int16 tmp = 0;
 
-        if (unlikely(pg_mul_s16_overflow(tmp, 10, &tmp)) || unlikely(pg_sub_s16_overflow(tmp, digit, &tmp)))
-            goto out_of_range;
+    if (A_FORMAT_VERSION_10C_V1) {
+        if (*ptr != '.' && !check_one_digit((unsigned char)*ptr, s)) {
+            return tmp;
+        }
+
+        /* process digits */
+        bool hasdot = false;
+        bool dotdigit = false;
+        while (check_dot_digit_int16((unsigned char)*ptr, s, &hasdot, &dotdigit, &tmp)) {
+            ptr++;
+        }
+    } else {
+        /* require at least one digit */
+        if (!check_one_digit((unsigned char)*ptr, s)) {
+            return tmp;
+        }
+
+        /* process digits */
+        while (check_digit_int16((unsigned char)*ptr, s, &tmp)) {
+            ptr++;
+        }
     }
 
     /* allow trailing whitespace, but not other trailing chars */
-    while (*ptr != '\0' && isspace((unsigned char)*ptr)) {
+    while (check_trailing_symbol((unsigned char)*ptr)) {
         ptr++;
     }
 
-    if (unlikely(*ptr != '\0') && u_sess->attr.attr_sql.sql_compatibility != B_FORMAT)
-        goto invalid_syntax;
+    check_empty_string((unsigned char)*ptr, s);
 
     if (!neg) {
         /* could fail if input is most negative number */
-        if (unlikely(tmp == PG_INT16_MIN))
-            goto out_of_range;
+        if (tmp == PG_INT16_MIN) {
+            ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                errmsg("value \"%s\" is out of range for type %s", s, "smallint")));
+        }
         tmp = -tmp;
     }
 
     return tmp;
-
-out_of_range:
-    ereport(ERROR,
-        (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
-            errmsg("value \"%s\" is out of range for type %s", s, "smallint")));
-
-invalid_syntax:
-    ereport(ERROR,
-        (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION), errmsg("invalid input syntax for %s: \"%s\"", "integer", s)));
-    return 0;
 }
+
+static bool check_digit_int32(unsigned char ptr, const char *str, int32 *tmp)
+{
+    /* process digits */
+    if (ptr && isdigit(ptr)) {
+        int16 digit = (ptr - '0');
+        const int base = 10;
+
+        if (pg_mul_s32_overflow(*tmp, base, tmp) || pg_sub_s32_overflow(*tmp, digit, tmp)) {
+            ereport(ERROR, (errmodule(MOD_FUNCTION), errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                errmsg("value \"%s\" is out of range for type %s", str, "integer")));
+        }
+        return true;
+    }
+
+    return false;
+}
+
+
+static bool check_dot_digit_int32(unsigned char ptr, const char *str, bool *hasdot, bool *dotdigit, int32 *tmp)
+{
+    /* process dot and digits */
+    if (!(*hasdot) && ptr == '.') {
+        *hasdot = true;
+        return true;
+    }
+
+    if (!isdigit(ptr)) {
+        return false;
+    }
+
+    int16 digit = (ptr - '0');
+    const int base = 10;
+
+    if (*hasdot) {
+        if (!(*dotdigit)) {
+            *dotdigit = true;
+            constexpr int ROUNDING_THRESHOLD = 5;
+            if (digit >= ROUNDING_THRESHOLD && pg_sub_s32_overflow(*tmp, 1, tmp)) {
+                ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                    errmsg("value \"%s\" is out of range for type %s", str, "integer")));
+            }
+        }
+    } else if (pg_mul_s32_overflow(*tmp, base, tmp) || pg_sub_s32_overflow(*tmp, digit, tmp)) {
+        ereport(ERROR, (errmodule(MOD_FUNCTION), errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+            errmsg("value \"%s\" is out of range for type %s", str, "integer")));
+    }
+
+    return true;
+}
+
 
 /*
  * Convert input string to a signed 32 bit integer.
@@ -202,67 +344,297 @@ invalid_syntax:
  * representation of the most negative number, which can't be represented as a
  * positive number.
  */
-int32 pg_strtoint32(const char* s)
+int32 pg_strtoint32(const char *s)
 {
-    const char* ptr = s;
-    int32 tmp = 0;
-    bool neg = false;
-
+    const char *ptr = s;
     /* skip leading spaces */
-    while (likely(*ptr) && isspace((unsigned char)*ptr)) {
+    while (check_leading_symbol((unsigned char)*ptr)) {
         ptr++;
     }
 
+    bool neg = false;
     /* handle sign */
-    if (*ptr == '-') {
+    if (check_sign((unsigned char)*ptr, &neg)) {
         ptr++;
-        neg = true;
-    } else if (*ptr == '+')
-        ptr++;
-
-    /* require at least one digit */
-    if (unlikely(!isdigit((unsigned char)*ptr))) {
-        if (DB_IS_CMPT(A_FORMAT | PG_FORMAT))
-            goto invalid_syntax;
-        else if (DB_IS_CMPT(B_FORMAT))
-            return tmp;
     }
 
-    /* process digits */
-    while (*ptr && isdigit((unsigned char)*ptr)) {
-        int8 digit = (*ptr++ - '0');
+    int32 tmp = 0;
 
-        if (unlikely(pg_mul_s32_overflow(tmp, 10, &tmp)) || unlikely(pg_sub_s32_overflow(tmp, digit, &tmp)))
-            goto out_of_range;
+    if (A_FORMAT_VERSION_10C_V1) {
+        if (*ptr != '.' && !check_one_digit((unsigned char)*ptr, s)) {
+            return tmp;
+        }
+        /* process digits */
+        bool hasdot = false;
+        bool dotdigit = false;
+        while (check_dot_digit_int32((unsigned char)*ptr, s, &hasdot, &dotdigit, &tmp)) {
+            ptr++;
+        }
+    } else {
+        /* require at least one digit */
+        if (!check_one_digit((unsigned char)*ptr, s)) {
+            return tmp;
+        }
+
+        /* process digits */
+        while (check_digit_int32((unsigned char)*ptr, s, &tmp)) {
+            ptr++;
+        }
     }
 
     /* allow trailing whitespace, but not other trailing chars */
-    while (*ptr != '\0' && isspace((unsigned char)*ptr)) {
+    while (check_trailing_symbol((unsigned char)*ptr)) {
         ptr++;
     }
 
-    if (unlikely(*ptr != '\0') && u_sess->attr.attr_sql.sql_compatibility != B_FORMAT)
-        goto invalid_syntax;
+    check_empty_string((unsigned char)*ptr, s);
 
     if (!neg) {
         /* could fail if input is most negative number */
-        if (unlikely(tmp == PG_INT32_MIN))
-            goto out_of_range;
+        if (tmp == PG_INT32_MIN) {
+            ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                errmsg("value \"%s\" is out of range for type %s", s, "integer")));
+        }
         tmp = -tmp;
     }
 
     return tmp;
-
-out_of_range:
-    ereport(ERROR,
-        (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
-            errmsg("value \"%s\" is out of range for type %s", s, "integer")));
-
-invalid_syntax:
-    ereport(ERROR,
-        (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION), errmsg("invalid input syntax for %s: \"%s\"", "integer", s)));
-    return 0;
 }
+
+static bool check_digit_int64(unsigned char ptr, const char *str, int64 *tmp)
+{
+    /* process digits */
+    if (ptr && isdigit(ptr)) {
+        int16 digit = (ptr - '0');
+        const int base = 10;
+
+        if (pg_mul_s64_overflow(*tmp, base, tmp) || pg_sub_s64_overflow(*tmp, digit, tmp)) {
+            ereport(ERROR, (errmodule(MOD_FUNCTION), errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                errmsg("value \"%s\" is out of range for type %s", str, "bigint")));
+        }
+        return true;
+    }
+
+    return false;
+}
+
+static bool check_dot_digit_int64(unsigned char ptr, const char *str, bool *hasdot, bool *dotdigit, int64 *tmp)
+{
+    /* process dot and digits */
+    if (!(*hasdot) && ptr == '.') {
+        *hasdot = true;
+        return true;
+    }
+
+    if (!isdigit(ptr)) {
+        return false;
+    }
+
+    int16 digit = (ptr - '0');
+    const int base = 10;
+
+    if (*hasdot) {
+        if (!(*dotdigit)) {
+            *dotdigit = true;
+            constexpr int ROUNDING_THRESHOLD = 5;
+            if (digit >= ROUNDING_THRESHOLD && pg_sub_s64_overflow(*tmp, 1, tmp)) {
+                ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                    errmsg("value \"%s\" is out of range for type %s", str, "bigint")));
+            }
+        }
+    } else if (pg_mul_s64_overflow(*tmp, base, tmp) || pg_sub_s64_overflow(*tmp, digit, tmp)) {
+        ereport(ERROR, (errmodule(MOD_FUNCTION), errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+            errmsg("value \"%s\" is out of range for type %s", str, "bigint")));
+    }
+
+    return true;
+}
+
+/*
+ * Convert input string to a signed 64 bit integer.
+ *
+ * Allows any number of leading or trailing whitespace characters. Will throw
+ * ereport() upon bad input format or overflow.
+ *
+ * NB: Accumulate input as a negative number, to deal with two's complement
+ * representation of the most negative number, which can't be represented as a
+ * positive number.
+ */
+int64 pg_strtoint64(const char *s)
+{
+    const char *ptr = s;
+    /* skip leading spaces */
+    while (check_leading_symbol((unsigned char)*ptr)) {
+        ptr++;
+    }
+
+    bool neg = false;
+    /* handle sign */
+    if (check_sign((unsigned char)*ptr, &neg)) {
+        ptr++;
+    }
+
+    int64 tmp = 0;
+
+    if (A_FORMAT_VERSION_10C_V1) {
+        /* require at least one digit */
+        if (*ptr != '.' && !check_one_digit((unsigned char)*ptr, s)) {
+            return tmp;
+        }
+        /* process dot and digits */
+        bool hasdot = false;
+        bool dotdigit = false;
+        while (check_dot_digit_int64((unsigned char)*ptr, s, &hasdot, &dotdigit, &tmp)) {
+            ptr++;
+        }
+    } else {
+        /* require at least one digit */
+        if (!check_one_digit((unsigned char)*ptr, s)) {
+            return tmp;
+        }
+
+        /* process digits */
+        while (check_digit_int64((unsigned char)*ptr, s, &tmp)) {
+            ptr++;
+        }
+    }
+
+    /* allow trailing whitespace, but not other trailing chars */
+    while (check_trailing_symbol((unsigned char)*ptr)) {
+        ptr++;
+    }
+
+    check_empty_string((unsigned char)*ptr, s);
+
+    if (!neg) {
+        /* could fail if input is most negative number */
+        if (tmp == PG_INT64_MIN) {
+            ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                errmsg("value \"%s\" is out of range for type %s", s, "bigint")));
+        }
+        tmp = -tmp;
+    }
+
+    return tmp;
+}
+
+static bool check_digit_int128(unsigned char ptr, const char *str, int128 *tmp)
+{
+    /* process digits */
+    if (ptr && isdigit(ptr)) {
+        int16 digit = (ptr - '0');
+        const int base = 10;
+
+        if (pg_mul_s128_overflow(*tmp, base, tmp) || pg_sub_s128_overflow(*tmp, digit, tmp)) {
+            ereport(ERROR, (errmodule(MOD_FUNCTION), errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                errmsg("value \"%s\" is out of range for type %s", str, "int16")));
+        }
+        return true;
+    }
+
+    return false;
+}
+
+static bool check_dot_digit_int128(unsigned char ptr, const char *str, bool *hasdot, bool *dotdigit, int128 *tmp)
+{
+    /* process dot and digits */
+    if (!(*hasdot) && ptr == '.') {
+        *hasdot = true;
+        return true;
+    }
+
+    if (!isdigit(ptr)) {
+        return false;
+    }
+
+    int16 digit = (ptr - '0');
+    const int base = 10;
+
+    if (*hasdot) {
+        if (!(*dotdigit)) {
+            *dotdigit = true;
+            constexpr int ROUNDING_THRESHOLD = 5;
+            if (digit >= ROUNDING_THRESHOLD && pg_sub_s128_overflow(*tmp, 1, tmp)) {
+                ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                    errmsg("value \"%s\" is out of range for type %s", str, "int16")));
+            }
+        }
+    } else if (pg_mul_s128_overflow(*tmp, base, tmp) || pg_sub_s128_overflow(*tmp, digit, tmp)) {
+        ereport(ERROR, (errmodule(MOD_FUNCTION), errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+            errmsg("value \"%s\" is out of range for type %s", str, "int16")));
+    }
+
+    return true;
+}
+
+/*
+ * Convert input string to a signed 128 bit integer.
+ *
+ * Allows any number of leading or trailing whitespace characters. Will throw
+ * ereport() upon bad input format or overflow.
+ *
+ * NB: Accumulate input as a negative number, to deal with two's complement
+ * representation of the most negative number, which can't be represented as a
+ * positive number.
+ */
+int128 pg_strtoint128(const char *s)
+{
+    const char *ptr = s;
+    /* skip leading spaces */
+    while (check_leading_symbol((unsigned char)*ptr)) {
+        ptr++;
+    }
+
+    bool neg = false;
+    /* handle sign */
+    if (check_sign((unsigned char)*ptr, &neg)) {
+        ptr++;
+    }
+
+    int128 tmp = 0;
+
+    if (A_FORMAT_VERSION_10C_V1) {
+        /* require at least one digit */
+        if (*ptr != '.' && !check_one_digit((unsigned char)*ptr, s)) {
+            return tmp;
+        }
+        /* process dot and digits */
+        bool hasdot = false;
+        bool dotdigit = false;
+        while (check_dot_digit_int128((unsigned char)*ptr, s, &hasdot, &dotdigit, &tmp)) {
+            ptr++;
+        }
+    } else {
+        /* require at least one digit */
+        if (!check_one_digit((unsigned char)*ptr, s)) {
+            return tmp;
+        }
+
+        /* process digits */
+        while (check_digit_int128((unsigned char)*ptr, s, &tmp)) {
+            ptr++;
+        }
+    }
+
+    /* allow trailing whitespace, but not other trailing chars */
+    while (check_trailing_symbol((unsigned char)*ptr)) {
+        ptr++;
+    }
+
+    check_empty_string((unsigned char)*ptr, s);
+
+    if (!neg) {
+        /* could fail if input is most negative number */
+        if (tmp == PG_INT128_MIN) {
+            ereport(ERROR, (errmodule(MOD_FUNCTION), errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                errmsg("value \"%s\" is out of range for type %s", s, "int16")));
+        }
+        tmp = -tmp;
+    }
+
+    return tmp;
+}
+
 
 // pg_ctoa: converts a unsigned 8-bit integer to its string representation
 //

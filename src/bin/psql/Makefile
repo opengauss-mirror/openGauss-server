@@ -28,8 +28,11 @@ LIBEDIT_HOME = $(with_3rd)/$(BINARYPATH)/libedit/$(LIB_SUPPORT_LLT)
 LIBEDIT_INCLUDE_PATH = $(LIBEDIT_HOME)/include
 LIBEDIT_LIB_PATH = $(LIBEDIT_HOME)/lib
 
+ifeq ($(enable_lite_mode), no)
 override CPPFLAGS := -I. -I$(srcdir) -I$(libpq_srcdir) -I$(top_srcdir)/src/bin/pg_dump -DHAVE_CE -I$(LIBEDIT_INCLUDE_PATH) $(CPPFLAGS)
-
+else
+override CPPFLAGS := -I. -I$(srcdir) -I$(libpq_srcdir) -I$(top_srcdir)/src/bin/pg_dump -I$(LIBEDIT_INCLUDE_PATH) $(CPPFLAGS)
+endif
 ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
   ifneq ($(enable_lite_mode), yes)
     CPPFLAGS += -L$(top_builddir)/../distribute/bin/gs_ktool/ -lgs_ktool -L$(LIBKMC_LIB_PATH) -lkmc
@@ -81,9 +84,9 @@ EXTRA_OBJS = $(top_builddir)/src/gausskernel/cbb/utils/aes/aes.o
 FLEXFLAGS = -Cfe -b -p -p
 
 all: submake-aes gsql
-
+ifeq ($(enable_lite_mode), no)
 libpq_pgport:=$(subst -lpq,-lpq_ce,$(libpq_pgport))
-
+endif
 ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
   ifneq ($(enable_lite_mode), yes)
     libpq_pgport += -L$(top_builddir)/../distribute/bin/gs_ktool/ -lgs_ktool -L$(LIBKMC_LIB_PATH) -lkmc
@@ -92,10 +95,13 @@ endif
 
 $(top_builddir)/src/lib/elog/elog.a:
 	$(MAKE) -C $(top_builddir)/src/lib/elog elog.a
-
+ifeq ($(enable_lite_mode), no)
 gsql: submake-libpq_ce submake-libpgport $(OBJS)
 	$(CC) $(CFLAGS) $(OBJS) $(EXTRA_OBJS) $(LIBS) $(libpq_pgport) $(LDFLAGS) $(LDFLAGS_EX) -lncurses -o $@$(X)
-
+else
+gsql: submake-libpq submake-libpgport $(OBJS)
+	$(CC) $(CFLAGS) $(OBJS) $(EXTRA_OBJS) $(LIBS) $(libpq_pgport) $(LDFLAGS) $(LDFLAGS_EX) -lncurses -o $@$(X)
+endif
 help.o: sql_help.h
 
 sqla: $(OBJS) 
@@ -134,8 +140,12 @@ install: all installdirs
 	$(INSTALL_PROGRAM) gsql$(X) '$(DESTDIR)$(bindir)/gsql$(X)'
 	$(INSTALL_DATA) $(srcdir)/psqlrc.sample '$(DESTDIR)$(datadir)/psqlrc.sample'
 	$(INSTALL_DATA) retry_errcodes.conf '$(DESTDIR)$(bindir)/retry_errcodes.conf'
+ifeq ($(enable_lite_mode), no)
 	 $(MAKE) -C $(libpq_builddir) install ENABLE_CE=1
 	$(INSTALL_DATA) $(top_builddir)/src/common/interfaces/libpq/jdbc/client_logic_jni/libgauss_cl_jni.so$(X) '$(DESTDIR)$(bindir)/../lib/libgauss_cl_jni.so$(X)'
+else
+	 $(MAKE) -C $(libpq_builddir) install
+endif
 installdirs:
 	$(MKDIR_P) '$(DESTDIR)$(bindir)' '$(DESTDIR)$(datadir)'
 
@@ -148,4 +158,3 @@ clean distclean:
 	$(MAKE) -C $(libpq_builddir) clean ENABLE_CE=1
 maintainer-clean: distclean
 	rm -f sql_help.h sql_help.cpp psqlscan.inc
-

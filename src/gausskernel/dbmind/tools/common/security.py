@@ -15,6 +15,7 @@ import hmac
 import random
 import secrets
 import string
+import re
 
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
@@ -33,6 +34,25 @@ def check_path_valid(path):
             return False
 
     return True
+
+
+def check_ip_valid(value):
+    ip_pattern = re.compile(r'^(1\d{2}|2[0-4]\d|25[0-5]|[1-9]\d|[1-9])\.'
+                            '(1\d{2}|2[0-4]\d|25[0-5]|[1-9]\d|\d)\.'
+                            '(1\d{2}|2[0-4]\d|25[0-5]|[1-9]\d|\d)\.'
+                            '(1\d{2}|2[0-4]\d|25[0-5]|[1-9]\d|\d)$')
+    if ip_pattern.match(value):
+        return True
+    return value == '0.0.0.0'
+
+
+def check_port_valid(value):
+    if isinstance(value, str):
+        return str.isdigit(value) and 1023 < int(value) <= 65535
+    elif isinstance(value, int):
+        return 1023 < value <= 65535
+    else:
+        return False
 
 
 def unsafe_random_string(length):

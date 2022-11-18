@@ -275,6 +275,25 @@ SegSpace *spc_open(Oid spcNode, Oid dbNode, bool create, bool isRedo)
     return entry;
 }
 
+void spc_drop_space_node(Oid spcNode, Oid dbNode)
+{
+    SegSpace *spc = spc_init_space_node(spcNode, dbNode);
+    SegSpcTag tag = {.spcNode = spcNode, .dbNode = dbNode};
+    bool found = false;
+    AutoMutexLock spc_lock(&spc->lock);
+    spc_lock.lock();
+
+    SpaceDataFileStatus dataStatus = spc_status(spc);
+    if (dataStatus != SpaceDataFileStatus::EMPTY) {
+        spc_clean_extent_groups(spc);
+        spc_lock.unLock();
+        AutoMutexLock spc_lock(&segspace_lock);
+        spc_lock.lock();
+        (void)hash_search(t_thrd.storage_cxt.SegSpcCache, (void *)&tag, HASH_REMOVE, &found);
+        SegmentCheck(found);
+    }
+}
+
 /*
  * Check whether the space is empty, if so, drop all metadata buffers.
  *
@@ -568,12 +587,8 @@ RelFileNode get_segment_logic_rnode(SegSpace *spc, BlockNumber head_blocknum, in
 
 Oid get_relation_oid(Oid spcNode, Oid relNode)
 {
-    Oid relation_oid = RelidByRelfilenode(spcNode, relNode, true);
-    if (!OidIsValid(relation_oid)) {
-        /* Try pg_partition */
-        Oid toastid, partition_oid;
-        relation_oid = PartitionRelidByRelfilenode(spcNode, relNode, toastid, &partition_oid, true);
-    }
+    Oid toastid = InvalidOid;
+    Oid relation_oid = HeapGetRelid(spcNode, relNode, toastid, NULL, true);
     return relation_oid;
 }
 
@@ -1181,7 +1196,7 @@ Datum global_space_shrink(PG_FUNCTION_ARGS)
 
     StringInfoData buf;
     initStringInfo(&buf);
-    appendStringInfo(&buf, "select local_space_shrink(\'%s\', \'%s\')", tablespacename, dbname);
+    appendStringInfo(&buf, "select pg_catalog.local_space_shrink(\'%s\', \'%s\')", tablespacename, dbname);
     ParallelFunctionState* state = RemoteFunctionResultHandler(buf.data, NULL, NULL, true, EXEC_ON_DATANODES, true);
     FreeParallelFunctionState(state);
 

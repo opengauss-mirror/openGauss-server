@@ -38,8 +38,9 @@
  *	  Backend version and inplace upgrade staffs
  *****************************************************************************/
 
+extern const uint32 LARGE_SEQUENCE_VERSION_NUM;
 extern const uint32 GRAND_VERSION_NUM;
-
+extern const uint32 SQL_PATCH_VERSION_NUM;
 extern const uint32 PREDPUSH_SAME_LEVEL_VERSION_NUM;
 extern const uint32 UPSERT_WHERE_VERSION_NUM;
 extern const uint32 FUNC_PARAM_COL_VERSION_NUM;
@@ -47,6 +48,7 @@ extern const uint32 SUBPARTITION_VERSION_NUM;
 extern const uint32 PBESINGLEPARTITION_VERSION_NUM;
 extern const uint32 COMMENT_PROC_VERSION_NUM;
 extern const uint32 COMMENT_ROWTYPE_TABLEOF_VERSION_NUM;
+extern const uint32 COMMENT_ROWTYPE_NEST_TABLEOF_VERSION_NUM;
 extern const uint32 COMMENT_PCT_TYPE_VERSION_NUM;
 extern const uint32 HINT_ENHANCEMENT_VERSION_NUM;
 extern const uint32 MATERIALIZED_CTE_NUM;
@@ -94,6 +96,12 @@ extern const uint32 ANALYZER_HOOK_VERSION_NUM;
 extern const uint32 SUPPORT_HASH_XLOG_VERSION_NUM;
 extern const uint32 PITR_INIT_VERSION_NUM;
 extern const uint32 STANDBY_STMTHIST_VERSION_NUM;
+extern const uint32 ADVANCE_CATALOG_XMIN_VERSION_NUM;
+extern const uint32 V5R2C00_ADVANCE_CATALOG_XMIN_VERSION_NUM;
+extern const uint32 LOGICAL_DECODE_FLATTEN_TOAST_VERSION_NUM;
+extern const uint32 SWITCH_ROLE_VERSION_NUM;
+extern const uint32 SLOW_SQL_VERSION_NUM;
+extern const uint32 MATERIAL_SUBPLAN_HINT_VERSION_NUM;
 
 extern void register_backend_version(uint32 backend_version);
 extern bool contain_backend_version(uint32 version_number);
@@ -123,7 +131,19 @@ extern bool contain_backend_version(uint32 version_number);
 #define OPT_ROWNUM_TYPE_COMPAT 1048576
 #define OPT_COMPAT_CURSOR 2097152
 #define OPT_CHAR_COERCE_COMPAT 4194304
-#define OPT_MAX 23
+#define OPT_TRUNC_NUMERIC_TAIL_ZERO 8388608
+#define OPT_ARRAY_COUNT_COMPAT 16777216
+#define OPT_MAX 25
+
+#define PLPSQL_OPT_FOR_LOOP 1
+#define PLPSQL_OPT_OUTPARAM 2
+#define PLPSQL_OPT_MAX 2
+
+#define A_FORMAT_OPT_VERSION_MAX 2
+#define A_FORMAT_OPT_VER_10C 1
+
+#define A_FORMAT_OPT_DEV_VERSION_MAX 2
+#define A_FORMAT_OPT_DEV_V1 1
 
 
 #define DISPLAY_LEADING_ZERO (u_sess->utils_cxt.behavior_compat_flags & OPT_DISPLAY_LEADING_ZERO)
@@ -146,12 +166,23 @@ extern bool contain_backend_version(uint32 version_number);
 #define SKIP_GS_SOURCE (u_sess->utils_cxt.behavior_compat_flags & OPT_SKIP_GS_SOURCE)
 #define PROC_OUTPARAM_OVERRIDE (u_sess->utils_cxt.behavior_compat_flags & OPT_PROC_OUTPARAM_OVERRIDE)
 #define ALLOW_PROCEDURE_COMPILE_CHECK (u_sess->utils_cxt.behavior_compat_flags & OPT_ALLOW_PROCEDURE_COMPILE_CHECK)
-#define IMPLICIT_FOR_LOOP_VARIABLE (u_sess->utils_cxt.behavior_compat_flags & OPT_IMPLICIT_FOR_LOOP_VARIABLE)
+#define IMPLICIT_FOR_LOOP_VARIABLE (u_sess->utils_cxt.behavior_compat_flags & OPT_IMPLICIT_FOR_LOOP_VARIABLE \
+    || (u_sess->utils_cxt.plsql_compile_behavior_compat_flags & PLPSQL_OPT_FOR_LOOP))
 #define AFORMAT_NULL_TEST (u_sess->utils_cxt.behavior_compat_flags & OPT_AFORMAT_NULL_TEST)
 #define AFORMAT_REGEX_MATCH (u_sess->utils_cxt.behavior_compat_flags & OPT_AFORMAT_REGEX_MATCH)
 #define ROWNUM_TYPE_COMPAT (u_sess->utils_cxt.behavior_compat_flags & OPT_ROWNUM_TYPE_COMPAT)
 #define COMPAT_CURSOR (u_sess->utils_cxt.behavior_compat_flags & OPT_COMPAT_CURSOR)
 #define CHAR_COERCE_COMPAT (u_sess->utils_cxt.behavior_compat_flags & OPT_CHAR_COERCE_COMPAT)
+#define TRUNC_NUMERIC_TAIL_ZERO (u_sess->utils_cxt.behavior_compat_flags & OPT_TRUNC_NUMERIC_TAIL_ZERO)
+
+#define PLSQL_COMPILE_FOR_LOOP (u_sess->utils_cxt.plsql_compile_behavior_compat_flags & PLPSQL_OPT_FOR_LOOP)
+#define PLSQL_COMPILE_OUTPARAM (u_sess->utils_cxt.plsql_compile_behavior_compat_flags & PLPSQL_OPT_OUTPARAM)
+#define ARRAY_COUNT_COMPAT (u_sess->utils_cxt.behavior_compat_flags & OPT_ARRAY_COUNT_COMPAT)
+
+#define A_FORMAT_VERSION_10C ((bool)(u_sess->utils_cxt.a_format_version_flag & A_FORMAT_OPT_VER_10C))
+#define A_FORMAT_DEV_VERSION_V1 ((bool)(u_sess->utils_cxt.a_format_dev_version_flag & A_FORMAT_OPT_DEV_V1))
+#define A_FORMAT_VERSION_10C_V1 (A_FORMAT_VERSION_10C && A_FORMAT_DEV_VERSION_V1 \
+    && ((bool)(u_sess->attr.attr_sql.sql_compatibility == A_FORMAT)))
 
 /* define database compatibility Attribute */
 typedef struct {
@@ -342,6 +373,8 @@ extern int trace_recovery(int trace_level);
 /* flags to be OR'd to form sec_context */
 #define SECURITY_LOCAL_USERID_CHANGE 0x0001
 #define SECURITY_RESTRICTED_OPERATION 0x0002
+#define SENDER_LOCAL_USERID_CHANGE 0x0004
+#define RECEIVER_LOCAL_USERID_CHANGE 0x0008
 
 /* now in utils/init/miscinit.c */
 extern char* GetUserNameFromId(Oid roleid);
@@ -350,12 +383,16 @@ extern Oid GetAuthenticatedUserId(void);
 extern Oid GetUserId(void);
 extern Oid getCurrentNamespace();
 extern Oid GetCurrentUserId(void);
+extern Oid GetOldUserId(bool isReceive);
+extern void SetOldUserId(Oid userId, bool isReceive);
 extern Oid GetOuterUserId(void);
 extern Oid GetSessionUserId(void);
 extern void GetUserIdAndSecContext(Oid* userid, int* sec_context);
 extern void SetUserIdAndSecContext(Oid userid, int sec_context);
 extern bool InLocalUserIdChange(void);
 extern bool InSecurityRestrictedOperation(void);
+extern bool InReceivingLocalUserIdChange();
+extern bool InSendingLocalUserIdChange();
 extern void GetUserIdAndContext(Oid* userid, bool* sec_def_context);
 extern void SetUserIdAndContext(Oid userid, bool sec_def_context);
 extern void InitializeSessionUserId(const char* rolename, bool flagresue = false, Oid useroid = InvalidOid);

@@ -44,7 +44,6 @@
 #include "parser/parse_hint.h"
 #ifdef PGXC
 #include "access/htup.h"
-#include "catalog/dfsstore_ctlg.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_class.h"
 #include "catalog/pg_proc.h"
@@ -1265,6 +1264,13 @@ static ScanMethodHint* _readScanMethodHint(void)
     READ_END();
 }
 
+static MaterialSubplanHint* _readMaterialSubplanHint(void)
+{
+    READ_LOCALS_NO_FIELDS(MaterialSubplanHint);
+    _readBaseHint(&(local_node->base));
+    READ_END();
+}
+
 /*
  * @Description: Read string to pgfdw remote information.
  * @return: Scan hint struct.
@@ -1392,6 +1398,13 @@ static HintState* _readHintState()
     IF_EXIST(predpush_same_level_hint) {
         READ_NODE_FIELD(predpush_same_level_hint);
     }
+    IF_EXIST(from_sql_patch) {
+        READ_BOOL_FIELD(from_sql_patch);
+    }
+    IF_EXIST(material_subplan_hint) {
+        READ_NODE_FIELD(material_subplan_hint);
+    }
+    
     READ_DONE();
 }
 
@@ -1946,6 +1959,10 @@ static Param* _readParam(void)
     IF_EXIST(recordVarTypOid)
     {
         READ_OID_FIELD(recordVarTypOid);
+    }
+    IF_EXIST(tableOfIndexTypeList)
+    {
+        READ_NODE_FIELD(tableOfIndexTypeList);
     }
     READ_DONE();
 }
@@ -3347,6 +3364,7 @@ static PruningResult* _readPruningResult(PruningResult* local_node)
     IF_EXIST(isPbeSinlePartition) {
         READ_BOOL_FIELD(isPbeSinlePartition);
     }
+    /* skip PartitionMap */
 
     READ_DONE();
 }
@@ -3709,51 +3727,6 @@ static CStoreIndexScan* _readCStoreIndexScan(CStoreIndexScan* local_node)
     READ_ENUM_FIELD(relStoreLocation, RelstoreType);
     READ_BOOL_FIELD(indexonly);
 
-    READ_DONE();
-}
-
-static DfsIndexScan* _readDfsIndexScan(DfsIndexScan* local_node)
-{
-    READ_LOCALS_NULL(DfsIndexScan);
-    READ_TEMP_LOCALS();
-
-    // Read Scan
-    _readScan(&local_node->scan);
-
-    READ_OID_FIELD(indexid);
-#ifdef STREAMPLAN
-    // Note: The Oid shipped(in plan) is invalid here
-    // We need to get the Oid on this node
-    if (local_node->indexid >= FirstBootstrapObjectId) {
-        IF_EXIST(indexname) {
-            char *indexname, *indexnamespace;
-
-            token = pg_strtok(&length);
-            token = pg_strtok(&length);
-            indexname = nullable_string(token, length);
-            token = pg_strtok(&length);
-            token = pg_strtok(&length);
-            indexnamespace = nullable_string(token, length);
-            if (!IS_PGXC_COORDINATOR)
-                local_node->indexid = get_valid_relname_relid(indexnamespace, indexname);
-
-            pfree_ext(indexname);
-            pfree_ext(indexnamespace);
-        }
-    }
-#endif  // STREAMPLAN
-
-    READ_NODE_FIELD(indextlist);
-    READ_NODE_FIELD(indexqual);
-    READ_NODE_FIELD(indexqualorig);
-    READ_NODE_FIELD(indexorderby);
-    READ_NODE_FIELD(indexorderbyorig);
-    READ_ENUM_FIELD(indexorderdir, ScanDirection);
-    READ_ENUM_FIELD(relStoreLocation, RelstoreType);
-    READ_NODE_FIELD(cstorequal);
-    READ_NODE_FIELD(indexScantlist);
-    READ_NODE_FIELD(dfsScan);
-    READ_BOOL_FIELD(indexonly);
     READ_DONE();
 }
 
@@ -4334,6 +4307,9 @@ static PlannedStmt* _readPlannedStmt(void)
     }
     READ_BOOL_FIELD(isRowTriggerShippable);
     READ_BOOL_FIELD(is_stream_plan);
+    IF_EXIST(cause_type) {
+        READ_UINT_FIELD(cause_type);
+    }
 
     READ_DONE();
 }
@@ -4762,21 +4738,6 @@ static CStoreScan* _readCStoreScan(CStoreScan* local_node)
     READ_NODE_FIELD(minMaxInfo);
     READ_ENUM_FIELD(relStoreLocation, RelstoreType);
     READ_BOOL_FIELD(is_replica_table);
-
-    READ_DONE();
-}
-
-static DfsScan* _readDfsScan(DfsScan* local_node)
-{
-    READ_LOCALS_NULL(DfsScan);
-    READ_TEMP_LOCALS();
-
-    // Read Scan
-    _readScan((Scan*)local_node);
-
-    READ_ENUM_FIELD(relStoreLocation, RelstoreType);
-    READ_NODE_FIELD(privateData);
-    READ_STRING_FIELD(storeFormat);
 
     READ_DONE();
 }
@@ -5982,8 +5943,6 @@ Node* parseNodeString(void)
         return_value = _readBitmapAnd(NULL);
     } else if (MATCH("INDEXONLYSCAN", 13)) {
         return_value = _readIndexOnlyScan(NULL);
-    } else if (MATCH("DFSINDEXSCAN", 12)) {
-        return_value = _readDfsIndexScan(NULL);
     } else if (MATCH("CSTOREINDEXSCAN", 15)) {
         return_value = _readCStoreIndexScan(NULL);
     } else if (MATCH("CSTOREINDEXCTIDSCAN", 19)) {
@@ -6030,8 +5989,6 @@ Node* parseNodeString(void)
         return_value = _readVecResult(NULL);
     } else if (MATCH("CSTORESCAN", 10)) {
         return_value = _readCStoreScan(NULL);
-    } else if (MATCH("DFSSCAN", 7)) {
-        return_value = _readDfsScan(NULL);
 #ifdef ENABLE_MULTIPLE_NODES
     } else if (MATCH("TSSTORESCAN",11)) {
         return_value = _readTsStoreScan(NULL);
@@ -6194,6 +6151,8 @@ Node* parseNodeString(void)
         return_value = _readPLDebug_frame();
     } else if (MATCH("TdigestData", 11)) {
         return_value = _readTdigestData();
+    } else if (MATCH("MATERIALSUBPLANHINT", 19)) {
+        return_value = _readMaterialSubplanHint();
     } else {
         ereport(ERROR,
             (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),

@@ -19,9 +19,13 @@
 #include "access/xact.h"
 #include "access/transam.h"
 #include "access/tableam.h"
+#include "access/tuptoaster.h"
 #include "access/sysattr.h"
 #include "access/ustore/knl_utuple.h"
+#include "access/ustore/knl_uvisibility.h"
 #include "access/ustore/knl_whitebox_test.h"
+#include "access/tuptoaster.h"
+#include "utils/typcache.h"
 
 #define TUPLE_IS_HEAP_TUPLE(tup) (((HeapTuple)tup)->tupTableType == HEAP_TUPLE)
 #define TUPLE_IS_UHEAP_TUPLE(tup) (((UHeapTuple)tup)->tupTableType == UHEAP_TUPLE)
@@ -197,7 +201,7 @@ void UHeapFillDiskTuple(TupleDesc tupleDesc, Datum *values, const bool *isnull, 
             /* varlena */
             Pointer val = DatumGetPointer(values[i]);
 
-            diskTuple->flag |= HEAP_HASVARWIDTH;
+            diskTuple->flag |= UHEAP_HASVARWIDTH;
 
             if (VARATT_IS_EXTERNAL(val)) {
                 diskTuple->flag |= HEAP_HASEXTERNAL;
@@ -222,7 +226,7 @@ void UHeapFillDiskTuple(TupleDesc tupleDesc, Datum *values, const bool *isnull, 
                 securec_check(rc, "\0", "\0");
             }
         } else if (att[i]->attlen == LEN_CSTRING) {
-            diskTuple->flag |= HEAP_HASVARWIDTH;
+            diskTuple->flag |= UHEAP_HASVARWIDTH;
             Assert(att[i]->attalign == 'c');
             attrLength = strlen(DatumGetCString(values[i])) + 1;
             Assert(attrLength <= MaxPossibleUHeapTupleSize);
@@ -567,13 +571,16 @@ UHeapTuple UHeapFormTuple(TupleDesc tuple_desc, Datum *values, bool *is_nulls)
     bool enableReverseBitmap = NAttrsReserveSpace(attrNum);
     bool enableReserve = u_sess->attr.attr_storage.reserve_space_for_nullable_atts;
     UHeapDiskTupleData *diskTuple = NULL;
+    Form_pg_attribute *att = tuple_desc->attrs;
     int nullcount = 0;
 
     enableReserve = enableReserve && enableReverseBitmap;
 
     if (attrNum > MaxTupleAttributeNumber) {
         ereport(ERROR, (errcode(ERRCODE_TOO_MANY_COLUMNS),
-            errmsg("number of columns (%d) exceeds limit (%d)", attrNum, MaxTupleAttributeNumber)));
+            errmodule(MOD_UPAGE),
+            errmsg(USTOREFORMAT("number of columns (%d) exceeds limit (%d), AM type (%d), type id (%u)."),
+            attrNum, MaxTupleAttributeNumber, tuple_desc->tdTableAmType, tuple_desc->tdtypeid)));
     }
 
     WHITEBOX_TEST_STUB(UHEAP_FORM_TUPLE_FAILED, WhiteboxDefaultErrorEmit);
@@ -582,6 +589,14 @@ UHeapTuple UHeapFormTuple(TupleDesc tuple_desc, Datum *values, bool *is_nulls)
     for (i = 0; i < attrNum; i++) {
         if (is_nulls[i]) {
             nullcount++;
+        } else if (att[i]->attlen == -1 && att[i]->attalign == 'd' && att[i]->attndims == 0 &&
+            !VARATT_IS_EXTENDED(DatumGetPointer(values[i]))) {
+            values[i] = toast_flatten_tuple_attribute(values[i], att[i]->atttypid, att[i]->atttypmod);
+        } else if (att[i]->attlen == -1 && att[i]->attalign == 'i' &&
+            VARATT_IS_HUGE_TOAST_POINTER(DatumGetPointer(values[i])) &&
+            !(att[i]->atttypid == CLOBOID || att[i]->atttypid == BLOBOID)) {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmodule(MOD_UPAGE), errmsg("only suport type(clob/blob) for more than 1G toast")));
         }
     }
     diskTupleSize = SizeOfUHeapDiskTupleData;
@@ -620,7 +635,7 @@ UHeapTuple UHeapFormTuple(TupleDesc tuple_desc, Datum *values, bool *is_nulls)
     }
 
     uheapTuplePtr->disk_tuple_size = diskTupleSize;
-
+    FastVerifyUTuple(uheapTuplePtr->disk_tuple, InvalidBuffer);
     return uheapTuplePtr;
 }
 
@@ -741,7 +756,7 @@ void SlotDeformUTuple(TupleTableSlot *slot, UHeapTuple tuple, long *offp, int na
         }
 
         values[attnum] = fetchatt(thisatt, tp + off);
-        off = att_addlength_pointer(off, thisatt->attlen, tp + off);        
+        off = att_addlength_pointer(off, thisatt->attlen, tp + off);
     }
 
     /*
@@ -817,7 +832,6 @@ void UHeapDeformTupleGuts(UHeapTuple utuple, TupleDesc rowDesc, Datum *values, b
         }
 
         values[attnum] = fetchatt(thisatt, tupPtr + off);
-
         off = att_addlength_pointer(off, thisatt->attlen, tupPtr + off);
     }
 
@@ -871,39 +885,6 @@ HeapTuple UHeapToHeap(TupleDesc tuple_desc, UHeapTuple uheaptuple)
 }
 
 /*
- * This is similar to heap version's SetHintBits but handles Inplace tuples instead.
- */
-void UHeapTupleSetHintBits(UHeapDiskTuple tuple, Buffer buffer, uint16 infomask, TransactionId xid)
-{
-    // The following scenario may use local snapshot, so do not set hint bits.
-    // Notice: we don't support two or more bits within infomask.
-    //
-    Assert(infomask > 0);
-    Assert((infomask & (infomask - 1)) == 0);
-    if ((t_thrd.xact_cxt.useLocalSnapshot && !(infomask & UHEAP_XID_COMMITTED)) || RecoveryInProgress() ||
-        g_instance.attr.attr_storage.IsRoachStandbyCluster) {
-        ereport(DEBUG2, (errmsg("ignore setting tuple hint bits when local snapshot is used.")));
-        return;
-    }
-
-    if (XACT_READ_UNCOMMITTED == u_sess->utils_cxt.XactIsoLevel && !(infomask & UHEAP_XID_COMMITTED)) {
-        ereport(DEBUG2, (errmsg("ignore setting tuple hint bits when XACT_READ_UNCOMMITTED is used.")));
-        return;
-    }
-
-    if (TransactionIdIsValid(xid)) {
-        /* NB: xid must be known committed here! */
-        XLogRecPtr commitLSN = TransactionIdGetCommitLSN(xid);
-        if (BufferIsPermanent(buffer) && XLogNeedsFlush(commitLSN) && XLByteLT(BufferGetLSNAtomic(buffer), commitLSN)) {
-            /* not flushed and no LSN interlock, so don't set hint */
-            return;
-        }
-    }
-
-    MarkBufferDirtyHint(buffer, true);
-}
-
-/*
  * UHeapGetSysAttr
  * Fetch the value of a system attribute for a tuple.
  */
@@ -923,11 +904,15 @@ Datum UHeapGetSysAttr(UHeapTuple uhtup, Buffer buf, int attnum, TupleDesc tupleD
             result = PointerGetDatum(&(uhtup->ctid));
             break;
         case MinTransactionIdAttributeNumber:
+            result = TransactionIdGetDatum(uhtup->xmin);
+            break;
         case MaxTransactionIdAttributeNumber:
+            result = TransactionIdGetDatum(uhtup->xmax);
+            break;
         case MinCommandIdAttributeNumber:
         case MaxCommandIdAttributeNumber:
             ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("xmin, xmax, cmin, and cmax are not supported for ustore tuples")));
+                errmodule(MOD_UPAGE), errmsg("cmin, and cmax are not supported for ustore tuples")));
             break;
         case TableOidAttributeNumber:
             result = ObjectIdGetDatum(uhtup->table_oid);
@@ -936,7 +921,8 @@ Datum UHeapGetSysAttr(UHeapTuple uhtup, Buffer buf, int attnum, TupleDesc tupleD
             result = UInt32GetDatum(uhtup->xc_node_id);
             break;
         default:
-            elog(ERROR, "invalid attnum: %d", attnum);
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmodule(MOD_UPAGE), errmsg("invalid attnum: %d.", attnum)));
             result = 0; /* keep compiler quiet */
             break;
     }
@@ -969,7 +955,8 @@ Bitmapset *UHeapTupleAttrEquals(TupleDesc tupdesc, Bitmapset *att_list, UHeapTup
          * and might not have been set correctly yet in the new tuple.
          */
         if (attno <= InvalidAttrNumber && attno != TableOidAttributeNumber) {
-            elog(ERROR, "system-column update is not supported");
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmodule(MOD_UPAGE), errmsg("system-column update is not supported")));
         }
 
         if (lAttno < attno)
@@ -1069,6 +1056,7 @@ void UHeapCopyTupleWithBuffer(UHeapTuple srcTup, UHeapTuple destTup)
     errno_t rc = memcpy_s((char *)destTup->disk_tuple, destTup->disk_tuple_size, (char *)srcTup->disk_tuple,
         srcTup->disk_tuple_size);
     securec_check(rc, "\0", "\0");
+    FastVerifyUTuple(destTup->disk_tuple, InvalidBuffer);
 }
 
 /*
@@ -1134,7 +1122,8 @@ bool UHeapAttIsNull(UHeapTuple tup, int attnum, TupleDesc tupleDesc)
             /* these are never null */
             break;
         default:
-            elog(ERROR, "invalid attnum: %d", attnum);
+            ereport(ERROR, (errmodule(MOD_UPAGE),
+                errmsg(USTOREFORMAT("invalid attnum: %d."), attnum)));
     }
 
     return false;
@@ -1152,6 +1141,7 @@ Datum UHeapNoCacheGetAttr(UHeapTuple tuple, uint32 attnum, TupleDesc tupleDesc)
     bool slow = false;      /* do we have to walk attrs? */
     int off;                /* current offset within data */
     int hoff = tup->t_hoff; /* header length on tuple data */
+    bool hasnulls = UHeapDiskTupHasNulls(tup);
 
     /* ----------------
      * Three cases:
@@ -1265,12 +1255,11 @@ Datum UHeapNoCacheGetAttr(UHeapTuple tuple, uint32 attnum, TupleDesc tupleDesc)
         int nullcount = 0;
         int tupleAttrs = UHeapTupleHeaderGetNatts(tup);
         bool enableReverseBitmap = NAttrsReserveSpace(tupleAttrs);
-        for (uint32 i = 0;; i++) { /* loop exit is at "break" */
+        for (uint32 i = 0; i <= attnum; i++) { /* loop exit is at "break" */
+            Assert(i < (uint32)tupleDesc->natts);
             int attrLen = att[i]->attlen;
 
-            Assert(i < (uint32)tupleDesc->natts);
-
-            if (UHeapDiskTupHasNulls(tup) && att_isnull(i, bp)) {
+            if (hasnulls && att_isnull(i, bp)) {
                 if (enableReverseBitmap && !att_isnull(tupleAttrs + nullcount, bp))
                     off += att[i]->attlen;
 
@@ -1289,7 +1278,7 @@ Datum UHeapNoCacheGetAttr(UHeapTuple tuple, uint32 attnum, TupleDesc tupleDesc)
                 att[i]->attcacheoff = off - hoff;
             }
 
-            if (i == attnum)
+            if (i == (uint32)attnum)
                 break;
 
             off = att_addlength_pointer(off, att[i]->attlen, tp + off);
@@ -1486,8 +1475,9 @@ bool UHeapSlotAttIsNull(const TupleTableSlot *slot, int attnum)
     if (attnum <= 0) {
         /* internal error */
         if (uhtup == NULL) {
-            ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot extract system attribute from virtual tuple")));
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmodule(MOD_UPAGE),
+                errmsg(USTOREFORMAT("cannot extract system attribute from virtual tuple."))));
         }
         return UHeapAttIsNull(uhtup, attnum, tupleDesc);
     }
@@ -1512,8 +1502,9 @@ bool UHeapSlotAttIsNull(const TupleTableSlot *slot, int attnum)
      */
     /* internal error */
     if (uhtup == NULL) {
-        ereport(ERROR,
-            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot extract attribute from empty tuple slot")));
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmodule(MOD_UPAGE),
+            errmsg(USTOREFORMAT("cannot extract attribute from empty tuple slot."))));
     }
 
     /* and let the tuple tell it */
@@ -1575,8 +1566,9 @@ Datum UHeapSlotGetAttr(TupleTableSlot *slot, int attnum, bool *isnull)
      */
     if (attnum <= 0) {
         if (utuple == NULL) { /* internal error */
-            ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot extract system attribute from virtual tuple")));
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmodule(MOD_UPAGE),
+                errmsg(USTOREFORMAT("cannot extract system attribute from empty tuple."))));
         }
         return UHeapGetSysAttr(utuple, InvalidBuffer, attnum, tupleDesc, isnull);
     }
@@ -1613,8 +1605,9 @@ Datum UHeapSlotGetAttr(TupleTableSlot *slot, int attnum, bool *isnull)
      */
     /* internal error */
     if (utuple == NULL) {
-        ereport(ERROR,
-            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot extract attribute from empty tuple slot")));
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmodule(MOD_UPAGE),
+            errmsg(USTOREFORMAT("cannot extract attribute from empty tuple."))));
     }
 
     /*
@@ -1862,3 +1855,35 @@ Tuple UHeapMaterialize(TupleTableSlot *slot)
     return slot->tts_tuple;
 }
 
+void PrevDumpUDiskTuple(UHeapDiskTuple diskTuple)
+{
+    if (diskTuple == NULL) {
+        return;
+    }
+    ereport(LOG, (errmodule(MOD_UPAGE),
+        errmsg("[DiskTuple] xid(%u), tdid(%u), reserve(%u), flag(%u), "
+        "flag2(%u), hoff(%u).",
+        diskTuple->xid, diskTuple->td_id, diskTuple->reserved, diskTuple->flag,
+        diskTuple->flag2, diskTuple->t_hoff)));
+    return;
+}
+
+void PrevDumpUTuple(UHeapTuple utuple)
+{
+    if (utuple == NULL) {
+        return;
+    }
+
+    ereport(LOG, (errmodule(MOD_UPAGE),
+        errmsg("[UHeapTuple] tuplesize(%u), type(%u), tupinfo(%u), bucketid(%u), "
+        "blockno(%u), offset(%u), tableoid(%u), xidbase(%lu), multibase(%lu), "
+        "xmin(%lu), xmax(%lu).",
+        utuple->disk_tuple_size, utuple->tupTableType, utuple->tupInfo, utuple->t_bucketId,
+        ItemPointerGetBlockNumberNoCheck(&(utuple->ctid)), ItemPointerGetOffsetNumberNoCheck(&(utuple->ctid)),
+        utuple->table_oid, utuple->t_xid_base, utuple->t_multi_base, utuple->xmin,
+        utuple->xmax)));
+
+    PrevDumpUDiskTuple(utuple->disk_tuple);
+
+    return;
+}

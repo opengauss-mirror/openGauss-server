@@ -28,7 +28,7 @@
  * remember lwlock to require before entering to lwlock
  * waiting loop.
  */
-void remember_lwlock_acquire(LWLock *lock)
+void remember_lwlock_acquire(LWLock *lock, LWLockMode mode)
 {
     if (t_thrd.shemem_ptr_cxt.MyBEEntry) {
         volatile PgBackendStatus *beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
@@ -38,6 +38,8 @@ void remember_lwlock_acquire(LWLock *lock)
          * because this function maybe called before pgstat_bestart() function.
          */
         beentry->lw_want_lock = lock;
+        beentry->lw_want_mode = mode;
+        beentry->lw_want_start_time = t_thrd.storage_cxt.trace_lwlock_time ? GetCurrentTimestamp() : (TimestampTz)0;
     }
 }
 
@@ -55,5 +57,6 @@ void forget_lwlock_acquire(void)
          * because this function may be called before pgstat_bestart() function.
          */
         beentry->lw_want_lock = NULL;
+        beentry->lw_want_start_time = (TimestampTz)0;
     }
 }

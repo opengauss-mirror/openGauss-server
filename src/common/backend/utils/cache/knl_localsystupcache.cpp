@@ -262,7 +262,8 @@ void LocalSysTupCache::FlushGlobalByInvalidMsg(Oid db_id, uint32 hash_value)
         InitPhase2();
         Assert(db_id == m_db_id);
     }
-    if (!m_is_inited_phase2) {
+    if (m_global_systupcache == NULL) {
+        Assert(!m_is_inited_phase2);
         Assert(!m_is_inited);
         /* redoxact meand !m_is_inited_phase2 */
         GlobalSysDBCacheEntry *entry = g_instance.global_sysdbcache.FindTempGSCEntry(db_id);
@@ -325,6 +326,7 @@ LocalSysTupCache::LocalSysTupCache(int cache_id)
         m_relinfo.cc_keyno[i] = cur_cache_info->key[i];
     }
     m_relinfo.cc_relisshared = g_instance.global_sysdbcache.HashSearchSharedRelation(m_relinfo.cc_reloid);
+    random_swapout = 0;
 }
 
 void LocalSysTupCache::CreateCatBucket()
@@ -379,12 +381,26 @@ void LocalSysTupCache::InitPhase2Impl()
     m_is_inited_phase2 = true;
 }
 
-void LocalSysTupCache::RemoveTailTupleElements(Index hash_index)
+
+void LocalSysTupCache::RemoveRandomTailTupleElements()
 {
-    bool listBelowThreshold = GetBucket(hash_index)->dll_len < MAX_LSC_LIST_LENGTH;
-    if (listBelowThreshold && !t_thrd.lsc_cxt.lsc->LocalSysDBCacheNeedSwapOut()) {
+    if (unlikely(!m_is_inited_phase2)) {
         return;
     }
+    for (; random_swapout < (uint64)cc_nbuckets; random_swapout++) {
+        if (GetBucket(random_swapout)->dll_len == 0) {
+            /* meet null bucket, it seems the htab is empty */
+            break;
+        }
+        RemoveTailTupleElements((Index)(random_swapout));
+    }
+    if (random_swapout >= (uint64)cc_nbuckets) {
+        random_swapout = 0;
+    }
+}
+
+void LocalSysTupCache::RemoveTailTupleElements(Index hash_index)
+{
     Dllist *list = GetBucket(hash_index);
     for (Dlelem *elt = DLGetTail(list); elt != NULL;) {
         LocalCatCTup *ct = (LocalCatCTup *)DLE_VAL(elt);
@@ -400,10 +416,10 @@ void LocalSysTupCache::RemoveTailTupleElements(Index hash_index)
 
 void LocalSysTupCache::RemoveTailListElements()
 {
-    bool listBelowThreshold = cc_lists.dll_len < MAX_LSC_LIST_LENGTH;
-    if (listBelowThreshold && !t_thrd.lsc_cxt.lsc->LocalSysDBCacheNeedSwapOut()) {
+    if (unlikely(!m_is_inited_phase2)) {
         return;
     }
+    bool listBelowThreshold = cc_lists.dll_len < MAX_LSC_LIST_LENGTH;
     int swapout_count = 0;
     int max_swapout_count_once = cc_lists.dll_len >> 1;
     for (Dlelem *elt = DLGetTail(&cc_lists); elt != NULL;) {
@@ -529,7 +545,8 @@ LocalCatCTup *LocalSysTupCache::SearchTupleInternal(int nkeys, Datum v1, Datum v
         cc_neg_hits++;
         ct = NULL;
     }
-    if (unlikely(!found)) {
+    if (unlikely(!found) && (t_thrd.lsc_cxt.lsc->LocalSysDBCacheNeedSwapOut() ||
+        GetBucket(hash_index)->dll_len >= MAX_LSC_LIST_LENGTH)) {
         RemoveTailTupleElements(hash_index);
     }
 
@@ -674,6 +691,9 @@ LocalCatCList *LocalSysTupCache::SearchListInternal(int nkeys, Datum v1, Datum v
     if (unlikely(!found)) {
         cl = SearchListFromGlobal(nkeys, arguments, hash_value, level);
         ResourceOwnerRememberLocalCatCList(LOCAL_SYSDB_RESOWNER, cl);
+    }
+    if (unlikely(!found) && (cc_lists.dll_len >= MAX_LSC_LIST_LENGTH ||
+        t_thrd.lsc_cxt.lsc->LocalSysDBCacheNeedSwapOut())) {
         RemoveTailListElements();
     }
 
@@ -825,7 +845,8 @@ LocalCatCTup *LocalSysTupCache::SearchLocalCatCTupleForProcAllArgs(
         cc_hits++;
         ResourceOwnerRememberLocalCatCTup(LOCAL_SYSDB_RESOWNER, ct);
     }
-    if (unlikely(!found)) {
+    if (unlikely(!found) && (t_thrd.lsc_cxt.lsc->LocalSysDBCacheNeedSwapOut() ||
+        GetBucket(hash_index)->dll_len >= MAX_LSC_LIST_LENGTH)) {
         RemoveTailTupleElements(hash_index);
     }
 

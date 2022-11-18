@@ -14,11 +14,6 @@ subdir = src/test/regress
 top_builddir = ../../..
 include $(top_builddir)/src/Makefile.global
 server_topdir = ../../../..
-# get  string from script get_PlatForm_str.sh
-PLAT_FORM_STR = $(shell sh $(top_builddir)/src/get_PlatForm_str.sh)
-ifeq ($(PLAT_FORM_STR), Failed)
-        exit 1;
-endif
 
 override CPPFLAGS := $(filter-out -fPIE, $(CPPFLAGS)) -fPIC
 override CFLAGS := $(filter-out -fPIE, $(CFLAGS)) -fPIC
@@ -273,7 +268,7 @@ fastcheck_inplace: all tablespace-setup
 	export LD_LIBRARY_PATH=$(SSL_LIB_PATH):$(LD_LIBRARY_PATH) && \
         $(call hotpatch_setup_func) && \
         $(call exception_arm_cases) && \
-	$(pg_regress_check) $(REGRESS_OPTS) -d $(d) -c $(c) -p $(p) -r $(runtest) -b $(dir) -n $(n) --abs_gausshome=$(abs_gausshome) --schedule=$(srcdir)/parallel_schedule$(PART) --keep_last_data=${keep_last_data} $(MAXCONNOPT) --temp-config=$(srcdir)/make_fastcheck_postgresql.conf --inplace_upgrade --data_base_dir=$(data_base_dir) --platform=$(PLAT_FORM_STR) --upgrade_script_dir=$(upgrade_script_dir) $(EXTRA_TESTS) $(REG_CONF) --upgrade_from=$(upgrade_from)
+	$(pg_regress_check) $(REGRESS_OPTS) -d $(d) -c $(c) -p $(p) -r $(runtest) -b $(dir) -n $(n) --abs_gausshome=$(abs_gausshome) --schedule=$(srcdir)/parallel_schedule$(PART) --keep_last_data=${keep_last_data} $(MAXCONNOPT) --temp-config=$(srcdir)/make_fastcheck_postgresql.conf --inplace_upgrade --data_base_dir=$(data_base_dir) --upgrade_script_dir=$(upgrade_script_dir) $(EXTRA_TESTS) $(REG_CONF) --upgrade_from=$(upgrade_from)
 
 fastcheck_single: all tablespace-setup
 	$(call hotpatch_check_func)
@@ -292,7 +287,7 @@ upgradecheck_single: all tablespace-setup
 	export LD_LIBRARY_PATH=$(SSL_LIB_PATH):$(LD_LIBRARY_PATH) && \
 	$(call hotpatch_setup_func) && \
 	$(pg_regress_check) $(REGRESS_OPTS) -d 1 -c 0 -p $(p) -r $(runtest) -b $(dir) -n $(n) --abs_gausshome=$(abs_gausshome) --single_node --schedule=$(srcdir)/parallel_schedule0$(PART) -w --keep_last_data=${keep_last_data} $(MAXCONNOPT) --temp-config=$(srcdir)/make_fastcheck_postgresql.conf $(EXTRA_TESTS) $(REG_CONF)
-    --data_base_dir=$(grayscale_data_base_dir) --platform=$(PLAT_FORM_STR) \
+    --data_base_dir=$(grayscale_data_base_dir) \
     --upgrade_script_dir=$(grayscale_upgrade_script_dir) \
     --old_bin_dir=$(old_bin_dir) --grayscale_full_mode \
     --upgrade_from=$(upgrade_from)

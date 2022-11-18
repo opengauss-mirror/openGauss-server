@@ -38,7 +38,6 @@
 
 #include "postgres.h"
 #include "knl/knl_variable.h"
-#include "access/dfs/dfs_insert.h"
 #include "access/xact.h"
 #include "access/tableam.h"
 #include "catalog/heap.h"
@@ -82,7 +81,6 @@
 #include "utils/portal.h"
 #include "utils/snapmgr.h"
 #include "vecexecutor/vecmergeinto.h"
-#include "access/dfs/dfs_insert.h"
 #include "access/heapam.h"
 #include "access/ustore/knl_uheap.h"
 #include "access/ustore/knl_whitebox_test.h"
@@ -150,7 +148,9 @@ static void CheckPlanOutput(Plan* subPlan, Relation resultRel)
         case T_VecToRow:
         case T_RowToVec:
         case T_PartIterator:
-        case T_VecPartIterator: {
+        case T_VecPartIterator:
+        case T_Material:
+        case T_VecMaterial: {
 #ifdef ENABLE_MULTIPLE_NODES
             if (!IS_PGXC_COORDINATOR) {
                 break;
@@ -288,7 +288,7 @@ static void ExecCheckTIDVisible(Relation        targetrel, EState* estate, Relat
             errmsg("failed to fetch conflicting tuple for DUPLICATE KEY UPDATE")));
     }
 
-    tableam_tuple_check_visible(targetrel, estate->es_snapshot, &tuple, buffer);
+    tableam_tuple_check_visible(targetrel, estate->es_snapshot, tuple, buffer);
     tableam_tops_destroy_tuple(targetrel, tuple);
     ReleaseBuffer(buffer);
 }
@@ -660,13 +660,16 @@ static Oid ExecUpsert(ModifyTableState* state, TupleTableSlot* slot, TupleTableS
     RangeTblEntry *rte = exec_rt_fetch(resultRelInfo->ri_RangeTableIndex, estate);
     if (RelationIsPartitioned(resultRelationDesc)) {
         partitionid = heapTupleGetPartitionId(resultRelationDesc, tuple);
-        searchFakeReationForPartitionOid(estate->esfRelations,
+        bool res = trySearchFakeReationForPartitionOid(&estate->esfRelations,
             estate->es_query_cxt,
             resultRelationDesc,
             partitionid,
-            heaprel,
-            partition,
+            &heaprel,
+            &partition,
             RowExclusiveLock);
+        if (!res) {
+            return InvalidOid;
+        }
         CheckPartitionOidForSpecifiedPartition(rte, partitionid);
 
         if (RelationIsSubPartitioned(resultRelationDesc)) {
@@ -765,6 +768,21 @@ static Oid ExecUpsert(ModifyTableState* state, TupleTableSlot* slot, TupleTableS
      * then abort the tuple and try to find the conflict tuple again
      */
     if (specConflict) {
+        /* delete index tuples and mark them as dead */
+        ExecIndexTuplesState exec_index_tuples_state;
+        exec_index_tuples_state.estate = estate;
+        exec_index_tuples_state.targetPartRel = heaprel;
+        exec_index_tuples_state.p = partition;
+        exec_index_tuples_state.conflict = NULL;
+        exec_index_tuples_state.rollbackIndex = true;
+
+        UpsertAction oldAction = state->mt_upsert->us_action;
+        state->mt_upsert->us_action = UPSERT_NONE;
+        tableam_tops_exec_delete_index_tuples(slot, heaprel, state,
+                                              &item, exec_index_tuples_state, NULL);
+        state->mt_upsert->us_action = oldAction;
+
+        /* rollback heap/uheap tuple */
         tableam_tuple_abort_speculative(targetrel, tuple);
 
         list_free(recheckIndexes);
@@ -1064,15 +1082,6 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                         if (RelationIsCUFormat(result_relation_desc)) {
                             HeapInsertCStore(result_relation_desc, estate->es_result_relation_info, (HeapTuple)tuple,
                                 0);
-                        } else if (RelationIsPAXFormat(result_relation_desc)) {
-                            /* here the insert including both none-partitioned and value-partitioned relations */
-                            DfsInsertInter* insert = CreateDfsInsert(result_relation_desc, false);
-                            insert->BeginBatchInsert(TUPLE_SORT, estate->es_result_relation_info);
-                            insert->TupleInsert(slot->tts_values, slot->tts_isnull, 0);
-                            insert->SetEndFlag();
-                            insert->TupleInsert(NULL, NULL, 0);
-                            insert->Destroy();
-                            delete insert;
                         } else {
                             target_rel = result_relation_desc;
                             if (bucket_id != InvalidBktId) {
@@ -1094,8 +1103,11 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                         partition_id = heapTupleGetPartitionId(result_relation_desc, tuple);
                         CheckPartitionOidForSpecifiedPartition(rte, partition_id);
 
-                        searchFakeReationForPartitionOid(estate->esfRelations, estate->es_query_cxt,
-                            result_relation_desc, partition_id, heap_rel, partition, RowExclusiveLock);
+                        bool res = trySearchFakeReationForPartitionOid(&estate->esfRelations, estate->es_query_cxt,
+                            result_relation_desc, partition_id, &heap_rel, &partition, RowExclusiveLock);
+                        if (!res) {
+                            return NULL;
+                        }
                         if (RelationIsColStore(result_relation_desc)) {
                             HeapInsertCStore(heap_rel, estate->es_result_relation_info, (HeapTuple)tuple, 0);
 #ifdef ENABLE_MULTIPLE_NODES
@@ -1131,16 +1143,22 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                         partitionId = heapTupleGetPartitionId(result_relation_desc, tuple);
                         CheckPartitionOidForSpecifiedPartition(rte, partitionId);
 
-                        searchFakeReationForPartitionOid(estate->esfRelations, estate->es_query_cxt,
-                                                         result_relation_desc, partitionId, partRel, part,
-                                                         RowExclusiveLock);
+                        bool res = trySearchFakeReationForPartitionOid(&estate->esfRelations, estate->es_query_cxt,
+                            result_relation_desc, partitionId, &partRel, &part, RowExclusiveLock);
+                        if (!res) {
+                            return NULL;
+                        }
 
                         /* get subpartititon oid for insert the record */
                         subPartitionId = heapTupleGetPartitionId(partRel, tuple);
                         CheckSubpartitionOidForSpecifiedSubpartition(rte, partitionId, subPartitionId);
 
-                        searchFakeReationForPartitionOid(estate->esfRelations, estate->es_query_cxt, partRel,
-                                                         subPartitionId, subPartRel, subPart, RowExclusiveLock);
+                        res = trySearchFakeReationForPartitionOid(&estate->esfRelations, estate->es_query_cxt,
+                            partRel, subPartitionId, &subPartRel, &subPart, RowExclusiveLock);
+                        if (!res) {
+                            partitionClose(result_relation_desc, part, RowExclusiveLock);
+                            return NULL;
+                        }
 
                         partition_id = subPartitionId;
                         heap_rel = subPartRel;
@@ -1438,6 +1456,7 @@ ldelete:
                         isPartitionedRelation(result_relation_desc->rd_rel) ? part_relation : NULL;
                     exec_index_tuples_state.p = isPartitionedRelation(result_relation_desc->rd_rel) ? partition : NULL;
                     exec_index_tuples_state.conflict = NULL;
+                    exec_index_tuples_state.rollbackIndex = false;
                     tableam_tops_exec_delete_index_tuples(oldslot, fake_relation, node,
                         tupleid, exec_index_tuples_state, modifiedIdxAttrs);
                     if (oldslot) {
@@ -1808,14 +1827,6 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
         LockTupleMode lockmode;
 
         /*
-         * Compute stored generated columns
-         */
-        if (result_relation_desc->rd_att->constr && result_relation_desc->rd_att->constr->has_generated_stored) {
-            ExecComputeStoredGenerated(result_rel_info, estate, slot, tuple, CMD_UPDATE);
-            tuple = slot->tts_tuple;
-        }
-
-        /*
          * Check the constraints of the tuple
          *
          * If we generate a new candidate tuple after EvalPlanQual testing, we
@@ -1826,6 +1837,15 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
          */
         Assert(RELATION_HAS_BUCKET(result_relation_desc) == (bucketid != InvalidBktId));
 lreplace:
+
+        /*
+         * Compute stored generated columns
+         */
+        if (result_relation_desc->rd_att->constr && result_relation_desc->rd_att->constr->has_generated_stored) {
+            ExecComputeStoredGenerated(result_rel_info, estate, slot, tuple, CMD_UPDATE);
+            tuple = slot->tts_tuple;
+        }
+
         if (result_relation_desc->rd_att->constr) {
             if (node->mt_update_constr_slot == NULL)
                 ExecConstraints(result_rel_info, slot, estate);
@@ -2017,6 +2037,7 @@ lreplace:
                         exec_index_tuples_state.targetPartRel = NULL;
                         exec_index_tuples_state.p = NULL;
                         exec_index_tuples_state.conflict = NULL;
+                        exec_index_tuples_state.rollbackIndex = false;
                         recheck_indexes = tableam_tops_exec_update_index_tuples(slot, oldslot, fake_relation,
                             node, tuple, tupleid, exec_index_tuples_state, bucketid, modifiedIdxAttrs);
                     }
@@ -2275,6 +2296,7 @@ lreplace:
                             exec_index_tuples_state.targetPartRel = fake_part_rel;
                             exec_index_tuples_state.p = partition;
                             exec_index_tuples_state.conflict = NULL;
+                            exec_index_tuples_state.rollbackIndex = false;
                             recheck_indexes = tableam_tops_exec_update_index_tuples(slot, oldslot, fake_relation,
                                 node, tuple, tupleid, exec_index_tuples_state, bucketid, modifiedIdxAttrs);
                         }
@@ -2363,6 +2385,7 @@ ldelete:
                                     exec_index_tuples_state.targetPartRel = old_fake_relation;
                                     exec_index_tuples_state.p = old_partition;
                                     exec_index_tuples_state.conflict = NULL;
+                                    exec_index_tuples_state.rollbackIndex = false;
                                     tableam_tops_exec_delete_index_tuples(oldslot, old_fake_relation, node,
                                                 tupleid, exec_index_tuples_state, modifiedIdxAttrs);
                                     if (oldslot) {
@@ -2490,13 +2513,17 @@ ldelete:
                                 new_partId = AddNewIntervalPartition(result_relation_desc, tuple);
                             }
 
-                            searchFakeReationForPartitionOid(estate->esfRelations,
+                            bool res = trySearchFakeReationForPartitionOid(&estate->esfRelations,
                                 estate->es_query_cxt,
                                 result_relation_desc,
                                 new_partId,
-                                fake_part_rel,
-                                insert_partition,
+                                &fake_part_rel,
+                                &insert_partition,
                                 RowExclusiveLock);
+                            if (!res) {
+                                return NULL;
+                            }
+
                             fake_insert_relation = fake_part_rel;
                             if (bucketid != InvalidBktId) {
                                 searchHBucketFakeRelation(estate->esfRelations,
@@ -2845,6 +2872,11 @@ TupleTableSlot* ExecModifyTable(ModifyTableState* node)
 
     subPlanState->state->es_skip_early_free = true;
     subPlanState->state->es_skip_early_deinit_consumer = true;
+
+    if (node->mt_material_all && IsA(subPlanState, MaterialState)) {
+        MaterialState* ms = (MaterialState*)subPlanState;
+        ms->materalAll = true;
+    }
 
     /*
      * Fetch rows from subplan(s), and execute the required table modification
@@ -3229,6 +3261,20 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
          */
         CheckValidResultRel(result_rel_info->ri_RelationDesc, operation);
 
+        /* Now init the plan for this result rel */
+        estate->es_result_relation_info = result_rel_info;
+        if (sub_plan->type == T_Limit && operation == CMD_DELETE && IsLimitDML((Limit*)sub_plan)) {
+            /* remove limit plan for delete limit */
+            if (mt_state->limitExprContext == NULL) {
+                mt_state->limitExprContext = CreateExprContext(estate);
+            }
+            mt_state->mt_plans[i] = ExecInitNode(outerPlan(sub_plan), estate, eflags);
+            estate->deleteLimitCount = GetDeleteLimitCount(mt_state->limitExprContext,
+                                                           mt_state->mt_plans[i], (Limit*)sub_plan);
+        } else {
+            mt_state->mt_plans[i] = ExecInitNode(sub_plan, estate, eflags);
+        }
+
         /*
          * If there are indices on the result relation, open them and save
          * descriptors in the result relation info, so that we can add new
@@ -3245,26 +3291,15 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
             if (result_rel_info->ri_FdwRoutine == NULL || result_rel_info->ri_FdwRoutine->GetFdwType == NULL ||
                 result_rel_info->ri_FdwRoutine->GetFdwType() != MOT_ORC) {
 #endif
-                ExecOpenIndices(result_rel_info, node->upsertAction != UPSERT_NONE);
+                if (RelationIsUstoreFormat(result_rel_info->ri_RelationDesc) || operation != CMD_DELETE) {
+                    ExecOpenIndices(result_rel_info, node->upsertAction != UPSERT_NONE);
+                }
 #ifdef ENABLE_MOT
             }
 #endif
         }
 
         init_gtt_storage(operation, result_rel_info);
-        /* Now init the plan for this result rel */
-        estate->es_result_relation_info = result_rel_info;
-        if (sub_plan->type == T_Limit && operation == CMD_DELETE && IsLimitDML((Limit*)sub_plan)) {
-            /* remove limit plan for delete limit */
-            if (mt_state->limitExprContext == NULL) {
-                mt_state->limitExprContext = CreateExprContext(estate);
-            }
-            mt_state->mt_plans[i] = ExecInitNode(outerPlan(sub_plan), estate, eflags);
-            estate->deleteLimitCount = GetDeleteLimitCount(mt_state->limitExprContext,
-                                                           mt_state->mt_plans[i], (Limit*)sub_plan);
-        } else {
-            mt_state->mt_plans[i] = ExecInitNode(sub_plan, estate, eflags);
-        }
 
         if (operation == CMD_MERGE && RelationInClusterResizing(estate->es_result_relation_info->ri_RelationDesc)) {
             ereport(ERROR,
@@ -3646,6 +3681,9 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
         !(IS_PGXC_COORDINATOR && u_sess->exec_cxt.under_stream_runtime))
         estate->es_auxmodifytables = lcons(mt_state, estate->es_auxmodifytables);
 
+    if (node->material_all_subplan) {
+        mt_state->mt_material_all = true;
+    }
     return mt_state;
 }
 

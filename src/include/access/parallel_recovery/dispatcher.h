@@ -42,6 +42,11 @@
 
 namespace parallel_recovery {
 
+typedef struct _DispatchFix {
+    int dispatchRandom;
+    XLogRecPtr lastCheckLsn;
+}DispatchFix;
+
 typedef struct LogDispatcher {
     MemoryContext oldCtx;
     PageRedoWorker** pageWorkers; /* Array of page redo workers. */
@@ -69,6 +74,7 @@ typedef struct LogDispatcher {
     RedoInterruptCallBackFunc oldStartupIntrruptFunc;
     XLogRedoNumStatics xlogStatics[RM_NEXT_ID][MAX_XLOG_INFO_NUM];
     RedoTimeCost *startupTimeCost;
+    DispatchFix dispatchFix;
 } LogDispatcher;
 
 extern LogDispatcher* g_dispatcher;
@@ -84,7 +90,7 @@ const static uint64 OUTPUT_WAIT_COUNT = 0x7FFFFFF;
 const static uint64 PRINT_ALL_WAIT_COUNT = 0x7FFFFFFFF;
 
 
-void StartRecoveryWorkers();
+void StartRecoveryWorkers(XLogRecPtr startLsn);
 
 /* RedoItem lifecycle. */
 void DispatchRedoRecordToFile(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime);

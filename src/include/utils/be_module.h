@@ -97,6 +97,7 @@ enum ModuleId {
     MOD_PARSER,     /* parser module*/
     MOD_INSTR,      /* Instrumentation */
     MOD_WDR_SNAPSHOT,  /* wdr snapshot */
+    MOD_WDR_REPORT, /* wdr report */
     MOD_INCRE_CKPT, /* incremental checkpoint */
     MOD_INCRE_BG,   /* incremental checkpoint bgwriter */
     MOD_DW,         /* double write */
@@ -114,7 +115,10 @@ enum ModuleId {
     MOD_OPT_AI,     /* ai optimizer */
     MOD_WALRECEIVER,  /* walreceiver */
     MOD_USTORE,     /* ustore */
+    MOD_UPAGE,     /* upage */
+    MOD_UBTREE,     /* ubtree */
     MOD_UNDO,       /* undo */
+    MOD_TIMECAPSULE, /* timecapsule */
     MOD_GEN_COL,   /* generated column */
     MOD_DCF,        /* DCF paxos */
     MOD_DB4AI,      /* DB4AI & AUTOML */
@@ -135,9 +139,18 @@ enum ModuleId {
     MOD_SPI,
     MOD_NEST_COMPILE,
     MOD_RESOWNER,
+    MOD_GSSTACK,
     MOD_LOGICAL_DECODE,    /* logical decode */
     MOD_GPRC, /* global package runtime cache */
+    MOD_DISASTER_READ,
 
+    MODE_REPSYNC, /* debug info for func SyncRepWaitForLSN */
+    MOD_SQLPATCH,
+
+    MOD_GPI, /* debug info for global partition index */
+    MOD_LWLOCK, /* debug info for lwlock held longer than a threshold*/
+
+    MOD_ENCODING_CHECK, /* debug info for encoding check */
     /*
      * Add your module id above.
      * Do not forget to fill up module_map[] about module name, and keep their ordering;

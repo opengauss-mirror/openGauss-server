@@ -34,7 +34,7 @@ endif()
 add_bintarget(gs_ctl TGT_gsctl_SRC TGT_gsctl_INC "${gsctl_DEF_OPTIONS}" "${gsctl_COMPILE_OPTIONS}" "${gsctl_LINK_OPTIONS}" "${gsctl_LINK_LIBS}")
 add_dependencies(gs_ctl elog_static buildquery_static pg_rewind_static pgcommon_static hotpatchclient_static pgport_static pq pagecompression)
 target_link_directories(gs_ctl PUBLIC
-    ${LIBOPENSSL_LIB_PATH} ${PROTOBUF_LIB_PATH} ${LIBPARQUET_LIB_PATH} ${LIBCURL_LIB_PATH}
+    ${LIBOPENSSL_LIB_PATH} ${LIBCURL_LIB_PATH}
     ${ZLIB_LIB_PATH} ${LIBOBS_LIB_PATH} ${LIBEDIT_LIB_PATH} ${LIBCGROUP_LIB_PATH} ${SECURE_LIB_PATH}
     ${LIBHOTPATCH_LIB_PATH} ${KERBEROS_LIB_PATH} ${CMAKE_BINARY_DIR}/lib ${ZSTD_LIB_PATH}
 )

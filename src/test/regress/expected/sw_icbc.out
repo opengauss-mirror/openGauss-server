@@ -425,52 +425,87 @@ START WITH tt.id = 1;
 (7 rows)
 
 --test correlated sublink in targetlist
-explain select b.id, (select count(a.id) from t1 a where a.pid = b.id) c from t1 b
+explain (costs off) select b.id, (select count(a.id) from t1 a where a.pid = b.id) c from t1 b
 start with b.id=1 connect by prior b.id = b.pid;
-                                           QUERY PLAN                                            
--------------------------------------------------------------------------------------------------
- CTE Scan on tmp_reuslt  (cost=18.22..122.64 rows=91 width=4)
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ CTE Scan on tmp_reuslt
    CTE tmp_reuslt
-     ->  StartWith Operator  (cost=0.00..18.22 rows=91 width=10)
+     ->  StartWith Operator
            Start With pseudo atts: RUITR, array_key_1
-           ->  Recursive Union  (cost=0.00..18.22 rows=91 width=10)
-                 ->  Seq Scan on t1 b  (cost=0.00..1.11 rows=1 width=10)
+           ->  Recursive Union
+                 ->  Seq Scan on t1 b
                        Filter: (id = 1)
-                 ->  Hash Join  (cost=0.33..1.53 rows=9 width=10)
+                 ->  Hash Join
                        Hash Cond: (b.pid = tmp_reuslt."b@id")
-                       ->  Seq Scan on t1 b  (cost=0.00..1.09 rows=9 width=10)
-                       ->  Hash  (cost=0.20..0.20 rows=10 width=4)
-                             ->  WorkTable Scan on tmp_reuslt  (cost=0.00..0.20 rows=10 width=4)
+                       ->  Seq Scan on t1 b
+                       ->  Hash
+                             ->  WorkTable Scan on tmp_reuslt
    SubPlan 2
-     ->  Aggregate  (cost=1.12..1.13 rows=1 width=12)
-           ->  Seq Scan on t1 a  (cost=0.00..1.11 rows=2 width=4)
+     ->  Aggregate
+           ->  Seq Scan on t1 a
                  Filter: (pid = tmp_reuslt."b@id")
 (16 rows)
 
-explain select * from t1 as test
+explain (costs off) select * from t1 as test
 where not exists (select 1 from t1 where test.id = t1.id)
 start with test.id = 1 connect by prior test.id = test.pid;
-                                           QUERY PLAN                                            
--------------------------------------------------------------------------------------------------
- CTE Scan on tmp_reuslt  (cost=18.22..121.28 rows=46 width=40)
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ CTE Scan on tmp_reuslt
    Filter: (NOT (alternatives: SubPlan 2 or hashed SubPlan 3))
    CTE tmp_reuslt
-     ->  StartWith Operator  (cost=0.00..18.22 rows=91 width=10)
+     ->  StartWith Operator
            Start With pseudo atts: RUITR, array_key_1
-           ->  Recursive Union  (cost=0.00..18.22 rows=91 width=10)
-                 ->  Seq Scan on t1 test  (cost=0.00..1.11 rows=1 width=10)
+           ->  Recursive Union
+                 ->  Seq Scan on t1 test
                        Filter: (id = 1)
-                 ->  Hash Join  (cost=0.33..1.53 rows=9 width=10)
+                 ->  Hash Join
                        Hash Cond: (test.pid = tmp_reuslt."test@id")
-                       ->  Seq Scan on t1 test  (cost=0.00..1.09 rows=9 width=10)
-                       ->  Hash  (cost=0.20..0.20 rows=10 width=4)
-                             ->  WorkTable Scan on tmp_reuslt  (cost=0.00..0.20 rows=10 width=4)
+                       ->  Seq Scan on t1 test
+                       ->  Hash
+                             ->  WorkTable Scan on tmp_reuslt
    SubPlan 2
-     ->  Seq Scan on t1  (cost=0.00..1.11 rows=1 width=0)
+     ->  Seq Scan on t1
            Filter: (tmp_reuslt."test@id" = id)
    SubPlan 3
-     ->  Seq Scan on t1  (cost=0.00..1.09 rows=9 width=4)
+     ->  Seq Scan on t1
 (18 rows)
+
+--test start with in correlated sublink
+explain (costs off) select * from t1 where t1.name = 'test' and exists(select * from t2 where t1.id = id start with name = 'test' connect by prior id = pid);
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Seq Scan on t1
+   Filter: ((name = 'test'::text) AND (alternatives: SubPlan 2 or hashed SubPlan 4))
+   SubPlan 2
+     ->  CTE Scan on tmp_reuslt
+           Filter: (t1.id = "t2@id")
+           CTE tmp_reuslt
+             ->  StartWith Operator
+                   Start With pseudo atts: RUITR, array_key_1
+                   ->  Recursive Union
+                         ->  Seq Scan on t2
+                               Filter: (name = 'test'::text)
+                         ->  Hash Join
+                               Hash Cond: (swtest.t2.pid = tmp_reuslt."t2@id")
+                               ->  Seq Scan on t2
+                               ->  Hash
+                                     ->  WorkTable Scan on tmp_reuslt
+   SubPlan 4
+     ->  CTE Scan on tmp_reuslt
+           CTE tmp_reuslt
+             ->  StartWith Operator
+                   Start With pseudo atts: RUITR, array_key_1
+                   ->  Recursive Union
+                         ->  Seq Scan on t2
+                               Filter: (name = 'test'::text)
+                         ->  Hash Join
+                               Hash Cond: (swtest.t2.pid = tmp_reuslt."t2@id")
+                               ->  Seq Scan on t2
+                               ->  Hash
+                                     ->  WorkTable Scan on tmp_reuslt
+(29 rows)
 
 --multiple tables case
 explain (costs off) select * from t1, t2 where t1.id = t2.id start with t1.id = t2.id and t1.id = 1 connect by prior t1.id = t1.pid;
@@ -549,6 +584,11 @@ explain (costs off) select * from t1, (select * from t2) as test where t1.id = t
 
 explain (costs off) select id, (select id from t2 start with t2.id = t1.id connect by t2.id = t1.id limit 1) from t1 where id = 1;
 ERROR:  START WITH CONNECT BY clauses must have at least one prior key.
+--not support pseudo column in order siblings by
+explain (costs off) select *, level from t1 start with id = 1 connect by prior id = pid order siblings by 4;
+ERROR:  Not support refer startwith Pseudo column in order siblings by.
+explain (costs off) select *, connect_by_root id from t1 start with id = 1 connect by prior id = pid order siblings by 4;
+ERROR:  Not support refer startwithfunc column in order siblings by.
 --unsupport case
 select prior id cc from t1 start with id = 1 connect by prior id = pid;
 ERROR:  Not Support prior column in TargetList in case swcb.

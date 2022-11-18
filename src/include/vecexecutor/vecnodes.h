@@ -26,7 +26,6 @@
 #ifndef VECNODES_H_
 #define VECNODES_H_
 
-#include "access/dfs/dfs_am.h"
 #include "executor/exec/execStream.h"
 #include "nodes/execnodes.h"
 #include "access/cstore_am.h"
@@ -242,16 +241,6 @@ typedef struct CStoreScanState : ScanState {
     bool m_isReplicaTable; /* If it is a replication table? */
 } CStoreScanState;
 
-typedef struct DfsScanState : ScanState {
-    VectorBatch* m_pScanBatch;     // batch to work on
-    VectorBatch* m_pCurrentBatch;  // output batch
-    MemoryContext m_scanCxt;
-    bool m_done;
-    dfs::reader::ReaderState* m_readerState;
-    dfs::reader::Reader* m_fileReader;
-    List* m_splitList;
-} DfsScanState;
-
 class TimeRange;
 class TagFilters;
 class TsStoreSearch;
@@ -306,24 +295,12 @@ typedef struct CBTreeOnlyScanState : IndexOnlyScanState {
 } CBTreeOnlyScanState;
 
 struct CStoreIndexScanState;
-struct DfsIndexScanState;
 typedef VectorBatch* (*cstoreIndexScanFunc)(CStoreIndexScanState* state);
-typedef void (*dfsIndexScanFunc)(DfsIndexScanState* state);
 
 typedef struct CstoreBitmapIndexScanState : BitmapIndexScanState {
     IndexSortState* m_sort;
     List* m_indexScanTList;
 } CstoreBitmapIndexScanState;
-
-typedef struct DfsIndexScanState : DfsScanState {
-    CStoreScanState* m_indexScan;              /* index scan state */
-    CBTreeScanState* m_btreeIndexScan;         /* cbtree index scan state */
-    CBTreeOnlyScanState* m_btreeIndexOnlyScan; /* cbtree index only scan state */
-    IndexSortState* m_sort;
-    List* m_dfsPreparedCols; /* the list of prepared columns(index) */
-    bool m_indexonly;        /* index only scan flag */
-    dfsIndexScanFunc m_dfsIndexScanFunc;
-} DfsIndexScanState;
 
 /* ----------------
  *	 CstoreIndexScanState information

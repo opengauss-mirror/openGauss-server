@@ -9,6 +9,8 @@ truncate DBE_PLDEVELOPER.gs_errors;
 -- basic cases
 --
 -- function normal
+CREATE OR REPLACE FUNCTION set_next_pg_type_oid(OID) RETURNS VOID AS '/GaussDBKernel-server/mppdb_temp_install/lib/postgresql/pg_upgrade_support1' LANGUAGE C STRICT NOT FENCED; 
+ERROR:  Copy file "/GaussDBKernel-server/mppdb_temp_install/lib/postgresql/pg_upgrade_support1" failed: No such file or directory
 CREATE OR REPLACE PROCEDURE gourav88(a inout int, b out int, c out int, d in int, e inout int)
 PACKAGE
 AS DECLARE V1 INT;
@@ -577,6 +579,14 @@ select name,type,status,src from DBE_PLDEVELOPER.gs_source order by name;
               |              |        | begin                                                                          +
               |              |        | create role yyy password '********';                                           +
               |              |        | end;
+ func1        | function     | f      | create function func1() returns boolean as $$ declare                          +
+              |              |        | sql_temp text;                                                                 +
+              |              |        | begin                                                                          +
+              |              |        |     sql_temp := 'create table test(a int);';                                   +
+              |              |        |     execute immediate sql_temp;                                                +
+              |              |        |     return true;                                                               +
+              |              |        | end;                                                                           +
+              |              |        | $$ language plpgsql;
  func1        | procedure    | f      | create or replace procedure func1                                              +
               |              |        | is                                                                             +
               |              |        | begin                                                                          +
@@ -645,7 +655,7 @@ select name,type,status,src from DBE_PLDEVELOPER.gs_source order by name;
               |              |        | begin                                                                          +
               |              |        | insert int a;                                                                  +
               |              |        | end;
-(16 rows)
+(17 rows)
 
 set plsql_show_all_error=off;
 create or replace procedure proc4
@@ -690,11 +700,6 @@ select name,type,status,src from DBE_PLDEVELOPER.gs_source order by name;
               |              |        | return var1;                                                                   +
               |              |        | end;                                                                           +
               |              |        | $$;
- error2       | package      | t      | CREATE OR REPLACE PACKAGE error2 IS                                            +
-              |              |        | a int;b int;                                                                   +
-              |              |        | FUNCTION func1(a in int, b inout int, c out int) return int;                   +
-              |              |        | FUNCTION func2(a in int, b inout int, c out int) return int;                   +
-              |              |        | END error2;
  error2       | package body | f      | CREATE OR REPLACE PACKAGE BODY error2 IS                                       +
               |              |        | FUNCTION func1 (a in int, b inout int c out int) return int                    +
               |              |        | IS                                                                             +
@@ -712,6 +717,11 @@ select name,type,status,src from DBE_PLDEVELOPER.gs_source order by name;
               |              |        | RETURN(a1 + a + b);                                                            +
               |              |        | END;                                                                           +
               |              |        | END error2;
+ error2       | package      | t      | CREATE OR REPLACE PACKAGE error2 IS                                            +
+              |              |        | a int;b int;                                                                   +
+              |              |        | FUNCTION func1(a in int, b inout int, c out int) return int;                   +
+              |              |        | FUNCTION func2(a in int, b inout int, c out int) return int;                   +
+              |              |        | END error2;
  func00       | procedure    | t      | create or replace procedure func00                                             +
               |              |        | is                                                                             +
               |              |        | begin                                                                          +
@@ -722,6 +732,14 @@ select name,type,status,src from DBE_PLDEVELOPER.gs_source order by name;
               |              |        | begin                                                                          +
               |              |        | insert into fasd af asd asdf;                                                  +
               |              |        | end;
+ func1        | function     | f      | create function func1() returns boolean as $$ declare                          +
+              |              |        | sql_temp text;                                                                 +
+              |              |        | begin                                                                          +
+              |              |        |     sql_temp := 'create table test(a int);';                                   +
+              |              |        |     execute immediate sql_temp;                                                +
+              |              |        |     return true;                                                               +
+              |              |        | end;                                                                           +
+              |              |        | $$ language plpgsql;
  mask         | procedure    | t      | create or replace procedure mask                                               +
               |              |        | is                                                                             +
               |              |        | begin                                                                          +
@@ -782,10 +800,12 @@ select name,type,status,src from DBE_PLDEVELOPER.gs_source order by name;
               |              |        | end;
  proc4        | procedure    | f      | create or replace procedure proc4                                              +
               |              |        | is                                                                             +
+              |              |        | b int;                                                                         +
+              |              |        | c int;                                                                         +
               |              |        | begin                                                                          +
               |              |        | insert int a;                                                                  +
               |              |        | end;
-(16 rows)
+(17 rows)
 
 create or replace procedure proc5
 is
@@ -829,6 +849,70 @@ array_v1 pack1.array_type1;
 procedure pp1();
 end 
 CONTEXT:  compilation of PL/pgSQL package near line 2
+set check_function_bodies = 'off';
+create or replace function test1(aa int) return arrytype
+is 
+begin
+return null;
+end;
+/
+ERROR:  type "arrytype" does not exist
+select name, status, type, src from dbe_pldeveloper.gs_source where name='test1';
+ name  | status |   type   |                           src                            
+-------+--------+----------+----------------------------------------------------------
+ test1 | f      | function | create or replace function test1(aa int) return arrytype+
+       |        |          | is                                                      +
+       |        |          | begin                                                   +
+       |        |          | return null;                                            +
+       |        |          | end;
+(1 row)
+
+create or replace function aa.test1(aa arrytype) return arrytype
+is 
+begin
+return null;
+end;
+/
+WARNING:  schema not defined, it may cause duplicate data.
+DETAIL:  schema not exists.
+ERROR:  schema "aa" does not exist
+select name, status, type, src from dbe_pldeveloper.gs_source where name='test1';
+ name  | status |   type   |                               src                                
+-------+--------+----------+------------------------------------------------------------------
+ test1 | f      | function | create or replace function test1(aa int) return arrytype        +
+       |        |          | is                                                              +
+       |        |          | begin                                                           +
+       |        |          | return null;                                                    +
+       |        |          | end;
+ test1 | f      | function | create or replace function aa.test1(aa arrytype) return arrytype+
+       |        |          | is                                                              +
+       |        |          | begin                                                           +
+       |        |          | return null;                                                    +
+       |        |          | end;
+(2 rows)
+
+create or replace function test2(aa int) return int
+is 
+begin
+a a;
+return arrytype;
+end;
+/
+select  name, status, type, src from dbe_pldeveloper.gs_source where name='test1';
+ name  | status |   type   |                               src                                
+-------+--------+----------+------------------------------------------------------------------
+ test1 | f      | function | create or replace function test1(aa int) return arrytype        +
+       |        |          | is                                                              +
+       |        |          | begin                                                           +
+       |        |          | return null;                                                    +
+       |        |          | end;
+ test1 | f      | function | create or replace function aa.test1(aa arrytype) return arrytype+
+       |        |          | is                                                              +
+       |        |          | begin                                                           +
+       |        |          | return null;                                                    +
+       |        |          | end;
+(2 rows)
+
 set behavior_compat_options='skip_insert_gs_source';
 create or replace procedure SkipInsertGsSource
 is
@@ -836,7 +920,12 @@ begin
 null;
 end;
 /
+set behavior_compat_options='';
 set plsql_show_all_error to on;
+set  check_function_bodies to off;
+create or replace procedure test1 is begin null; end;
+/
+set  check_function_bodies to on;
 select name,type,status,src from DBE_PLDEVELOPER.gs_source order by name;
      name     |     type     | status |                                       src                                       
 --------------+--------------+--------+---------------------------------------------------------------------------------
@@ -850,11 +939,6 @@ select name,type,status,src from DBE_PLDEVELOPER.gs_source order by name;
               |              |        | return var1;                                                                   +
               |              |        | end;                                                                           +
               |              |        | $$;
- error2       | package      | t      | CREATE OR REPLACE PACKAGE error2 IS                                            +
-              |              |        | a int;b int;                                                                   +
-              |              |        | FUNCTION func1(a in int, b inout int, c out int) return int;                   +
-              |              |        | FUNCTION func2(a in int, b inout int, c out int) return int;                   +
-              |              |        | END error2;
  error2       | package body | f      | CREATE OR REPLACE PACKAGE BODY error2 IS                                       +
               |              |        | FUNCTION func1 (a in int, b inout int c out int) return int                    +
               |              |        | IS                                                                             +
@@ -872,11 +956,24 @@ select name,type,status,src from DBE_PLDEVELOPER.gs_source order by name;
               |              |        | RETURN(a1 + a + b);                                                            +
               |              |        | END;                                                                           +
               |              |        | END error2;
+ error2       | package      | t      | CREATE OR REPLACE PACKAGE error2 IS                                            +
+              |              |        | a int;b int;                                                                   +
+              |              |        | FUNCTION func1(a in int, b inout int, c out int) return int;                   +
+              |              |        | FUNCTION func2(a in int, b inout int, c out int) return int;                   +
+              |              |        | END error2;
  func00       | procedure    | t      | create or replace procedure func00                                             +
               |              |        | is                                                                             +
               |              |        | begin                                                                          +
               |              |        | create role yyy password '********';                                           +
               |              |        | end;
+ func1        | function     | f      | create function func1() returns boolean as $$ declare                          +
+              |              |        | sql_temp text;                                                                 +
+              |              |        | begin                                                                          +
+              |              |        |     sql_temp := 'create table test(a int);';                                   +
+              |              |        |     execute immediate sql_temp;                                                +
+              |              |        |     return true;                                                               +
+              |              |        | end;                                                                           +
+              |              |        | $$ language plpgsql;
  func1        | procedure    | f      | create or replace procedure func1                                              +
               |              |        | is                                                                             +
               |              |        | begin                                                                          +
@@ -942,10 +1039,36 @@ select name,type,status,src from DBE_PLDEVELOPER.gs_source order by name;
               |              |        | end;
  proc4        | procedure    | f      | create or replace procedure proc4                                              +
               |              |        | is                                                                             +
+              |              |        | b int;                                                                         +
+              |              |        | c int;                                                                         +
               |              |        | begin                                                                          +
               |              |        | insert int a;                                                                  +
               |              |        | end;
-(16 rows)
+ proc5        | procedure    | f      | create or replace procedure proc5                                              +
+              |              |        | is                                                                             +
+              |              |        | b int;                                                                         +
+              |              |        | c int;                                                                         +
+              |              |        | begin                                                                          +
+              |              |        | insert int a;                                                                  +
+              |              |        | end;
+ test1        | procedure    | t      | create or replace procedure test1 is begin null; end;
+ test1        | function     | f      | create or replace function test1(aa int) return arrytype                       +
+              |              |        | is                                                                             +
+              |              |        | begin                                                                          +
+              |              |        | return null;                                                                   +
+              |              |        | end;
+ test1        | function     | f      | create or replace function aa.test1(aa arrytype) return arrytype               +
+              |              |        | is                                                                             +
+              |              |        | begin                                                                          +
+              |              |        | return null;                                                                   +
+              |              |        | end;
+ test2        | function     | t      | create or replace function test2(aa int) return int                            +
+              |              |        | is                                                                             +
+              |              |        | begin                                                                          +
+              |              |        | a a;                                                                           +
+              |              |        | return arrytype;                                                               +
+              |              |        | end;
+(22 rows)
 
 select name,type,line,src from DBE_PLDEVELOPER.gs_errors order by name;
     name    |     type     | line |                  src                  
@@ -963,8 +1086,7 @@ select name,type,line,src from DBE_PLDEVELOPER.gs_errors order by name;
  pkg4       | package      |    3 | type does not exist
  pro25      | procedure    |    6 | it is not a known variable 
  pro71      | procedure    |    2 | column "pro70" has pseudo-type void
- proc4      | procedure    |    4 | syntax error
-(14 rows)
+(13 rows)
 
 drop package if exists pkg4;
 NOTICE:  package pkg4() does not exist, skipping
@@ -996,11 +1118,6 @@ select rolname, name, status, type, src from DBE_PLDEVELOPER.gs_source s join pg
                |              |        |              | return var1;                                                                   +
                |              |        |              | end;                                                                           +
                |              |        |              | $$;
- gs_developper | error2       | t      | package      | CREATE OR REPLACE PACKAGE error2 IS                                            +
-               |              |        |              | a int;b int;                                                                   +
-               |              |        |              | FUNCTION func1(a in int, b inout int, c out int) return int;                   +
-               |              |        |              | FUNCTION func2(a in int, b inout int, c out int) return int;                   +
-               |              |        |              | END error2;
  gs_developper | error2       | f      | package body | CREATE OR REPLACE PACKAGE BODY error2 IS                                       +
                |              |        |              | FUNCTION func1 (a in int, b inout int c out int) return int                    +
                |              |        |              | IS                                                                             +
@@ -1018,6 +1135,11 @@ select rolname, name, status, type, src from DBE_PLDEVELOPER.gs_source s join pg
                |              |        |              | RETURN(a1 + a + b);                                                            +
                |              |        |              | END;                                                                           +
                |              |        |              | END error2;
+ gs_developper | error2       | t      | package      | CREATE OR REPLACE PACKAGE error2 IS                                            +
+               |              |        |              | a int;b int;                                                                   +
+               |              |        |              | FUNCTION func1(a in int, b inout int, c out int) return int;                   +
+               |              |        |              | FUNCTION func2(a in int, b inout int, c out int) return int;                   +
+               |              |        |              | END error2;
  gs_developper | func00       | t      | procedure    | create or replace procedure func00                                             +
                |              |        |              | is                                                                             +
                |              |        |              | begin                                                                          +
@@ -1028,6 +1150,14 @@ select rolname, name, status, type, src from DBE_PLDEVELOPER.gs_source s join pg
                |              |        |              | begin                                                                          +
                |              |        |              | insert into fasd af asd asdf;                                                  +
                |              |        |              | end;
+ gs_developper | func1        | f      | function     | create function func1() returns boolean as $$ declare                          +
+               |              |        |              | sql_temp text;                                                                 +
+               |              |        |              | begin                                                                          +
+               |              |        |              |     sql_temp := 'create table test(a int);';                                   +
+               |              |        |              |     execute immediate sql_temp;                                                +
+               |              |        |              |     return true;                                                               +
+               |              |        |              | end;                                                                           +
+               |              |        |              | $$ language plpgsql;
  gs_developper | mask         | t      | procedure    | create or replace procedure mask                                               +
                |              |        |              | is                                                                             +
                |              |        |              | begin                                                                          +
@@ -1051,19 +1181,6 @@ select rolname, name, status, type, src from DBE_PLDEVELOPER.gs_source s join pg
                |              |        |              | a inv%d;                                                                       +
                |              |        |              | procedure proc1(c ff%F);                                                       +
                |              |        |              | end pkg2;
- gs_developper | pkg3         | f      | package body | create or replace package body pkg3                                            +
-               |              |        |              | is                                                                             +
-               |              |        |              | a b c d;                                                                       +
-               |              |        |              | procedure proc1()                                                              +
-               |              |        |              | is                                                                             +
-               |              |        |              | begin                                                                          +
-               |              |        |              | insert int asd asd;                                                            +
-               |              |        |              | end;                                                                           +
-               |              |        |              | end pkg3;
- gs_developper | pkg3         | t      | package      | create or replace package pkg3                                                 +
-               |              |        |              | is                                                                             +
-               |              |        |              | a int;                                                                         +
-               |              |        |              | end pkg3;
  gs_developper | pkg4         | f      | package      | create or replace package pkg4                                                 +
                |              |        |              | is                                                                             +
                |              |        |              | a a;                                                                           +
@@ -1088,17 +1205,43 @@ select rolname, name, status, type, src from DBE_PLDEVELOPER.gs_source s join pg
                |              |        |              | end;
  gs_developper | proc4        | f      | procedure    | create or replace procedure proc4                                              +
                |              |        |              | is                                                                             +
+               |              |        |              | b int;                                                                         +
+               |              |        |              | c int;                                                                         +
                |              |        |              | begin                                                                          +
                |              |        |              | insert int a;                                                                  +
                |              |        |              | end;
-(16 rows)
+ gs_developper | proc5        | f      | procedure    | create or replace procedure proc5                                              +
+               |              |        |              | is                                                                             +
+               |              |        |              | b int;                                                                         +
+               |              |        |              | c int;                                                                         +
+               |              |        |              | begin                                                                          +
+               |              |        |              | insert int a;                                                                  +
+               |              |        |              | end;
+ gs_developper | test1        | f      | function     | create or replace function test1(aa int) return arrytype                       +
+               |              |        |              | is                                                                             +
+               |              |        |              | begin                                                                          +
+               |              |        |              | return null;                                                                   +
+               |              |        |              | end;
+ gs_developper | test1        | f      | function     | create or replace function aa.test1(aa arrytype) return arrytype               +
+               |              |        |              | is                                                                             +
+               |              |        |              | begin                                                                          +
+               |              |        |              | return null;                                                                   +
+               |              |        |              | end;
+ gs_developper | test1        | t      | procedure    | create or replace procedure test1 is begin null; end;
+ gs_developper | test2        | t      | function     | create or replace function test2(aa int) return int                            +
+               |              |        |              | is                                                                             +
+               |              |        |              | begin                                                                          +
+               |              |        |              | a a;                                                                           +
+               |              |        |              | return arrytype;                                                               +
+               |              |        |              | end;
+(20 rows)
 
 truncate DBE_PLDEVELOPER.gs_source;
 truncate DBE_PLDEVELOPER.gs_errors;
 reset role;
 reset behavior_compat_options;
 drop schema gs_source cascade;
-NOTICE:  drop cascades to 14 other objects
+NOTICE:  drop cascades to 16 other objects
 DETAIL:  drop cascades to function gourav88(integer,integer,integer)
 drop cascades to function func1()
 drop cascades to function mask()
@@ -1108,10 +1251,12 @@ drop cascades to function func0(integer,integer)
 drop cascades to function pro70()
 drop cascades to table t1
 drop cascades to function bulk_f_039_1()
---?drop cascades to package .*
+--?.*
 drop cascades to function gs_source.func1(integer,integer)
 drop cascades to function gs_source.func2(integer,integer)
 drop cascades to function func00()
+drop cascades to function test2(integer)
 drop cascades to function skipinsertgssource()
+drop cascades to function test1()
 drop role jackson_src;
 drop role gs_developper;

@@ -54,6 +54,7 @@ INSERT INTO nobarf(data) VALUES('2');
 SELECT data FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL, 'include-xids', '0', 'skip-empty-xacts', '1');
 --?.*
 --?.*
+--?.*
  BEGIN
  {"table_name":"public.nobarf","op_type":"INSERT","columns_name":["id","data"],"columns_type":["integer","text"],"columns_val":["1","'1'"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
 --?.*
@@ -62,6 +63,7 @@ SELECT data FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL, 'inc
 COMMIT;
 INSERT INTO nobarf(data) VALUES('3');
 SELECT data FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL, 'include-xids', '0', 'skip-empty-xacts', '1');
+--?.*
 --?.*
 --?.*
  BEGIN

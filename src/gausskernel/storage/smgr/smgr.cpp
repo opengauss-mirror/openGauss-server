@@ -236,10 +236,11 @@ SMgrRelation smgropen(const RelFileNode& rnode, BackendId backend, int col /* = 
             reln->smgr_prevtargblock = InvalidBlockNumber;
             reln->smgr_fsm_nblocks = InvalidBlockNumber;
             reln->smgr_vm_nblocks = InvalidBlockNumber;
+            reln->smgr_cached_nblocks = InvalidBlockNumber;
             reln->encrypt = false;
             temp = col + 1;
             reln->smgr_bcm_nblocks = (BlockNumber*)MemoryContextAllocZero(
-                LocalSmgrStorageMemoryCxt(), temp * sizeof(BlockNumber));
+                LocalSmgrStorageMemoryCxt(false), temp * sizeof(BlockNumber));
             reln->smgr_bcmarry_size = temp;
             for (colnum = 0; colnum < reln->smgr_bcmarry_size; colnum++) {
                 reln->smgr_bcm_nblocks[colnum] = InvalidBlockNumber;
@@ -254,12 +255,12 @@ SMgrRelation smgropen(const RelFileNode& rnode, BackendId backend, int col /* = 
             if (reln->smgr_which == SEGMENT_MANAGER) {
                 reln->md_fdarray_size = fdNeeded;
                 reln->seg_desc = (struct SegmentDesc **)MemoryContextAllocZero(
-                    LocalSmgrStorageMemoryCxt(), fdNeeded * sizeof(struct SegmentDesc *));
+                    LocalSmgrStorageMemoryCxt(false), fdNeeded * sizeof(struct SegmentDesc *));
                 reln->md_fd = NULL;
             } else if (reln->smgr_which == MD_MANAGER) {
                 reln->md_fdarray_size = fdNeeded;
                 reln->md_fd = (struct _MdfdVec**)MemoryContextAllocZero(
-                                    LocalSmgrStorageMemoryCxt(), fdNeeded * sizeof(struct _MdfdVec*));
+                                    LocalSmgrStorageMemoryCxt(false), fdNeeded * sizeof(struct _MdfdVec*));
                 reln->seg_desc = NULL;
             } else {
                 reln->md_fdarray_size = 1;
@@ -279,6 +280,7 @@ SMgrRelation smgropen(const RelFileNode& rnode, BackendId backend, int col /* = 
                 dlist_push_tail(&parent_smgr->bucket_smgr_head, &reln->bucket_smgr_node);
             }
         }
+        TryFreshSmgrCache(reln);
 
         if (reln->smgr_bcmarry_size < col + 1) {
             int old_bcmarry_size = reln->smgr_bcmarry_size;
@@ -469,27 +471,7 @@ void smgrcloseall(void)
         }
     }
 }
-static void smgrcleanbolcknum(SMgrRelation reln)
-{
-    reln->smgr_targblock = InvalidBlockNumber;
-}
 
-void smgrcleanblocknumall(void)
-{
-    HASH_SEQ_STATUS status;
-    SMgrRelation reln;
-
-    /* Nothing to do if hashtable not set up */
-    if (GetSMgrRelationHash() == NULL) {
-        return;
-    }
-
-    hash_seq_init(&status, GetSMgrRelationHash());
-
-    while ((reln = (SMgrRelation)hash_seq_search(&status)) != NULL) {
-        smgrcleanbolcknum(reln);
-    }
-}
 /*
  *	smgrclosenode() -- Close SMgrRelation object for given RelFileNode,
  *					   if one exists.
@@ -532,6 +514,7 @@ void smgrcreate(SMgrRelation reln, ForkNumber forknum, bool isRedo)
     if (isRedo && reln->md_fd[forknum] != NULL)
         return;
 
+    (void)LWLockAcquire(g_instance.ckpt_cxt_ctl->snapshotBlockLock, LW_SHARED);
     /*
      * We may be using the target table space for the first time in this
      * database, so create a per-database subdirectory if needed.
@@ -546,6 +529,7 @@ void smgrcreate(SMgrRelation reln, ForkNumber forknum, bool isRedo)
                             isRedo);
 
     (*(smgrsw[reln->smgr_which].smgr_create))(reln, forknum, isRedo);
+    LWLockRelease(g_instance.ckpt_cxt_ctl->snapshotBlockLock);
 }
 
 /*
@@ -566,16 +550,14 @@ void smgrdounlink(SMgrRelation reln, bool isRedo, BlockNumber blockNum)
     int which = reln->smgr_which;
     int forknum;
 
+    (void)LWLockAcquire(g_instance.ckpt_cxt_ctl->snapshotBlockLock, LW_SHARED);
     /* Close the forks at smgr level */
     for (forknum = 0; forknum < (int)(reln->md_fdarray_size); forknum++) {
         (*(smgrsw[which].smgr_close))(reln, (ForkNumber)forknum, blockNum);
     }
-
     if (which == UNDO_MANAGER) {
-        /* Drop undo buffer is excuted in ReleaseUndoSpace. */
         goto unlink_file;
     }
-
     /*
      * Get rid of any remaining buffers for the relation.  bufmgr will just
      * drop them without bothering to write the contents.
@@ -607,6 +589,7 @@ void smgrdounlink(SMgrRelation reln, bool isRedo, BlockNumber blockNum)
      */
 unlink_file:
     (*(smgrsw[which].smgr_unlink))(rnode, InvalidForkNumber, isRedo, blockNum);
+    LWLockRelease(g_instance.ckpt_cxt_ctl->snapshotBlockLock);
 }
 
 /*
@@ -624,6 +607,7 @@ void smgrdounlinkfork(SMgrRelation reln, ForkNumber forknum, bool isRedo)
     RelFileNodeBackend rnode = reln->smgr_rnode;
     int which = reln->smgr_which;
 
+    (void)LWLockAcquire(g_instance.ckpt_cxt_ctl->snapshotBlockLock, LW_SHARED);
     /* Close the fork at smgr level */
     (*(smgrsw[which].smgr_close))(reln, forknum, InvalidBlockNumber);
 
@@ -657,6 +641,7 @@ void smgrdounlinkfork(SMgrRelation reln, ForkNumber forknum, bool isRedo)
      * xact.
      */
     (*(smgrsw[which].smgr_unlink))(rnode, forknum, isRedo, InvalidBlockNumber);
+    LWLockRelease(g_instance.ckpt_cxt_ctl->snapshotBlockLock);
 }
 
 /*
@@ -803,6 +788,7 @@ void smgrtruncatefunc(SMgrRelation reln, ForkNumber forknum, BlockNumber nblocks
  */
 void smgrtruncate(SMgrRelation reln, ForkNumber forknum, BlockNumber nblocks)
 {
+    (void)LWLockAcquire(g_instance.ckpt_cxt_ctl->snapshotBlockLock, LW_SHARED);
     /*
      * Get rid of any buffers for the about-to-be-deleted blocks. bufmgr will
      * just drop them without bothering to write the contents.
@@ -830,6 +816,7 @@ void smgrtruncate(SMgrRelation reln, ForkNumber forknum, BlockNumber nblocks)
      * sure the message is sent before we start changing things on-disk.
      */
     smgrtruncatefunc(reln, forknum, nblocks);
+    LWLockRelease(g_instance.ckpt_cxt_ctl->snapshotBlockLock);
 }
 
 /*

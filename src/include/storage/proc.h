@@ -27,6 +27,7 @@
 #include "gtm/gtm_c.h"
 #include "alarm/alarm.h"
 #include "utils/atomic.h"
+#include "utils/snapshot.h"
 #include "access/multi_redo_settings.h"
 
 
@@ -198,17 +199,34 @@ struct PGPROC {
     char myProgName[64];
     pg_time_t myStartTime;
     syscalllock deleMemContextMutex;
+    int64* usedMemory;
 
     /* Support for group XID clearing. */
     /* true, if member of ProcArray group waiting for XID clear */
     bool procArrayGroupMember;
     /* next ProcArray group member waiting for XID clear */
     pg_atomic_uint32 procArrayGroupNext;
+
     /*
      * latest transaction id among the transaction's main XID and
      * subtransactions
      */
     TransactionId procArrayGroupMemberXid;
+
+    /* Support for group snapshot getting. */
+    bool snapshotGroupMember;
+    /* next ProcArray group member waiting for snapshot getting */
+    pg_atomic_uint32 snapshotGroupNext;
+    volatile Snapshot snapshotGroup;
+    TransactionId xminGroup;
+    TransactionId xmaxGroup;
+    TransactionId globalxminGroup;
+    volatile TransactionId replicationSlotXminGroup;
+    volatile TransactionId replicationSlotCatalogXminGroup;
+
+    TransactionId snapXmax;     /* maximal running XID as it was when we were
+                             * getting our snapshot. */
+    CommitSeqNo snapCSN;    /* csn as it was when we were getting our snapshot. */
 
     /* commit sequence number send down */
     CommitSeqNo commitCSN;
@@ -294,7 +312,7 @@ struct PGPROC {
 /* NOTE: "typedef struct PGPROC PGPROC" appears in storage/lock/lock.h. */
 
 /* the offset of the last padding if exists*/
-#define PGXACT_PAD_OFFSET 55
+#define PGXACT_PAD_OFFSET 69
 
 /*
  * Prior to PostgreSQL 9.2, the fields below were stored as part of the
@@ -335,6 +353,9 @@ typedef struct PGXACT {
 /* the offset of the last padding if exists*/
 #define PROC_HDR_PAD_OFFSET 112
 
+/* max number of CMA's connections */
+#define NUM_CMAGENT_PROCS (10)
+
 /*
  * There is one ProcGlobal struct for the whole database cluster.
  */
@@ -355,12 +376,16 @@ typedef struct PROC_HDR {
     PGPROC* autovacFreeProcs;
     /* Head of list of cm agent's free PGPROC structures */
     PGPROC* cmAgentFreeProcs;
+    /* Head of list of cm agent's all PGPROC structures */
+    PGPROC* cmAgentAllProcs[NUM_CMAGENT_PROCS];
     /* Head of list of pg_job's free PGPROC structures */
     PGPROC* pgjobfreeProcs;
 	/* Head of list of bgworker free PGPROC structures */
     PGPROC* bgworkerFreeProcs;
     /* First pgproc waiting for group XID clear */
     pg_atomic_uint32 procArrayGroupFirst;
+    /* First pgproc waiting for group snapshot getting */
+    pg_atomic_uint32 snapshotGroupFirst;
     /* First pgproc waiting for group transaction status update */
     pg_atomic_uint32 clogGroupFirst;
     /* WALWriter process's latch */
@@ -397,7 +422,7 @@ typedef struct PROC_HDR {
  *
  * PGXC needs another slot for the pool manager process
  */
-const int MAX_PAGE_WRITER_THREAD_NUM = 16;
+const int MAX_PAGE_WRITER_THREAD_NUM = 17;
 
 #ifndef ENABLE_LITE_MODE
 const int MAX_COMPACTION_THREAD_NUM = 100;
@@ -415,8 +440,6 @@ const int MAX_COMPACTION_THREAD_NUM = 10;
 
 #define NUM_AUXILIARY_PROCS (NUM_SINGLE_AUX_PROC + NUM_MULTI_AUX_PROC) 
 
-/* max number of CMA's connections */
-#define NUM_CMAGENT_PROCS (10)
 /* buffer length of information when no free proc available for cm_agent */
 #define CONNINFOLEN (64)
 
@@ -453,6 +476,9 @@ extern void InitProcGlobal(void);
 extern void InitProcess(void);
 extern void InitProcessPhase2(void);
 extern void InitAuxiliaryProcess(void);
+
+extern void ProcBaseLockAcquire(pthread_mutex_t *procBaseLock);
+extern void ProcBaseLockRelease(pthread_mutex_t *procBaseLock);
 
 extern int GetAuxProcEntryIndex(int baseIdx);
 extern void PublishStartupProcessInformation(void);
@@ -504,15 +530,19 @@ extern void BecomeLockGroupMember(PGPROC *leader);
 
 static inline bool TransactionIdOlderThanAllUndo(TransactionId xid)
 {
-    uint64 cutoff = pg_atomic_read_u64(&g_instance.undo_cxt.oldestXidInUndo);
+    uint64 cutoff = pg_atomic_read_u64(&g_instance.undo_cxt.globalRecycleXid);
     return xid < cutoff;
 }
 static inline bool TransactionIdOlderThanFrozenXid(TransactionId xid)
 {
-    uint64 cutoff = pg_atomic_read_u64(&g_instance.undo_cxt.oldestFrozenXid);
+    uint64 cutoff = pg_atomic_read_u64(&g_instance.undo_cxt.globalFrozenXid);
     return xid < cutoff;
 }
 
 extern int GetThreadPoolStreamProcNum(void);
+
+extern bool enable_auto_explain_threshold_sig_alarm();
+
+extern bool disable_auto_explain_threshold_sig_alarm();
 
 #endif /* PROC_H */

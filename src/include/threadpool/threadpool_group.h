@@ -79,6 +79,10 @@ public:
     ThreadId AddStream(StreamProducer* producer);
     void ShutDownThreads();
     void AddWorkerIfNecessary();
+    bool NeedAddWorkers()
+    {
+        return m_workerNum <= 0 && m_sessionCount > 0;
+    }
     bool EnlargeWorkers(int enlargeNum);
     void ReduceWorkers(int reduceNum);
     void ShutDownPendingWorkers();

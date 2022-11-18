@@ -110,6 +110,13 @@
 #define CAS_NOT_VALID				0x10
 #define CAS_NO_INHERIT				0x20
 
+/*
+ * In the IntoClause structure there is a char value which will eventually be
+ * set to RELKIND_RELATION or RELKIND_MATVIEW based on the relkind field in
+ * the statement-level structure, which is an ObjectType. Define the default
+ * here, which should always be overridden later.
+ */
+#define INTO_CLAUSE_RELKIND_DEFAULT    '\0'
 
 #define parser_yyerror(msg)  scanner_yyerror(msg, yyscanner)
 #define parser_errposition(pos)  scanner_errposition(pos, yyscanner)
@@ -143,6 +150,9 @@ static void doNegateFloat(Value *v);
 static Node *makeAArrayExpr(List *elements, int location);
 static Node *makeXmlExpr(XmlExprOp op, char *name, List *named_args,
 						 List *args, int location);
+static void SplitColQualList(List *qualList,
+							 List **constraintList, CollateClause **collClause,
+							 core_yyscan_t yyscanner);
 static void SplitColQualList(List *qualList,
                              List **constraintList, CollateClause **collClause, ClientLogicColumnRef **clientLogicColumnRef,
                              core_yyscan_t yyscanner);
@@ -216,7 +226,7 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
         AlterRoleStmt AlterTableStmt AlterUserStmt
         SelectStmt UpdateStmt InsertStmt DeleteStmt
         VariableResetStmt VariableSetStmt
-        CopyStmt CreateStmt TransactionStmt PreparableStmt CreateSchemaStmt
+        CopyStmt CreateAsStmt CreateStmt TransactionStmt PreparableStmt CreateSchemaStmt
         DeclareCursorStmt CreateFunctionStmt CreateProcedureStmt CallFuncStmt
         PrepareStmt ExecDirectStmt ExecuteStmt
         CreateKeyStmt ViewStmt MergeStmt
@@ -266,7 +276,7 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
 				reloptions 
 				OptWith opt_distinct opt_definition definition def_list
 				opt_column_list columnList opt_name_list opt_multi_name_list
-				sort_clause opt_sort_clause sortby_list
+				sort_clause opt_sort_clause sortby_list opt_c_include
 				name_list from_clause from_list opt_array_bounds
 				qualified_name_list any_name
 				any_operator expr_list attrs 
@@ -286,12 +296,12 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
 %type <node>	grouping_sets_clause
 
 %type <range>	OptTempTableName
-%type <into>	into_clause
+%type <into>	into_clause create_as_target
 
 %type <typnam>	func_type
 
-%type <boolean>  opt_nowait
-%type <ival>	 OptTemp opt_wait
+%type <boolean>  opt_nowait opt_with_data
+%type <ival>	 OptTemp opt_wait OptKind
 %type <oncommit> OnCommitOption
 
 %type <node>	for_locking_item
@@ -412,15 +422,18 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
 				opt_frame_clause frame_extent frame_bound
 %type <str>		opt_existing_window_name
 %type <chr>		OptCompress
+%type <ival>	KVType
 %type <ival>		ColCmprsMode
 %type <node>	column_item opt_table_partitioning_clause
 				range_partitioning_clause value_partitioning_clause opt_interval_partition_clause
 				interval_expr maxValueItem list_partitioning_clause hash_partitioning_clause
 				range_start_end_item range_less_than_item list_partition_item hash_partition_item
+				subpartitioning_clause range_subpartitioning_clause hash_subpartitioning_clause
+				list_subpartitioning_clause subpartition_item
 %type <list>	range_partition_definition_list list_partition_definition_list hash_partition_definition_list maxValueList
 			column_item_list tablespaceList opt_interval_tablespaceList
 			split_dest_partition_define_list
-			range_start_end_list range_less_than_list opt_range_every_list
+			range_start_end_list range_less_than_list opt_range_every_list subpartition_definition_list
 %type <range> partition_name
 
 %type <ival> opt_row_movement_clause
@@ -727,6 +740,7 @@ stmt :
             | AlterRoleStmt
             | AlterUserStmt
             | CopyStmt
+			| CreateAsStmt
             | CreateStmt
             | CreateSchemaStmt
             | DeclareCursorStmt
@@ -4192,10 +4206,11 @@ CreateStmt:	CREATE OptTemp TABLE qualified_name '(' OptTableElementList ')'
 			OptDistributeBy OptSubCluster
 /* PGXC_END */
 			opt_table_partitioning_clause
-			opt_internal_data
+			opt_internal_data OptKind
 				{
 					CreateStmt *n = makeNode(CreateStmt);
 					$4->relpersistence = $2;
+					n->relkind = $17;
 					n->relation = $4;
 					n->tableElts = $6;
 					n->inhRelations = $8;
@@ -4295,6 +4310,16 @@ CreateStmt:	CREATE OptTemp TABLE qualified_name '(' OptTableElementList ')'
 				}
 		;
 
+OptKind:
+	FOR MATERIALIZED VIEW
+		{
+			$$ = OBJECT_MATVIEW;
+		}
+	| /* empty */
+		{
+			$$ = OBJECT_TABLE;
+		}
+	;
 opt_table_partitioning_clause:
 		range_partitioning_clause
 			{
@@ -4317,27 +4342,41 @@ opt_table_partitioning_clause:
 
 range_partitioning_clause:
 		PARTITION BY RANGE '(' column_item_list ')'
-		opt_interval_partition_clause '(' range_partition_definition_list ')' opt_row_movement_clause
+		opt_interval_partition_clause subpartitioning_clause '(' range_partition_definition_list ')' opt_row_movement_clause
 			{
 				PartitionState *n = makeNode(PartitionState);
+				if ($8 != NULL && list_length($5) != 1) {
+					ereport(ERROR,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("Un-support feature"),
+							errdetail("The partition key's length should be 1.")));
+				}
+				if ($8 != NULL && $7 != NULL) {
+					ereport(errstate,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("Un-support feature"),
+							errdetail("Subpartitions do not support interval partition."),
+							errcause("System error."), erraction("Contact engineer to support.")));
+				}
 				n->partitionKey = $5;
 				n->intervalPartDef = (IntervalPartitionDefState *)$7;
-				n->partitionList = $9;
+				n->partitionList = $10;
 
 				if (n->intervalPartDef)
 					n->partitionStrategy = 'i';
 				else
 					n->partitionStrategy = 'r';
 
-				n->rowMovement = (RowMovementValue)$11;
+				n->rowMovement = (RowMovementValue)$12;
+				n->subPartitionState = (PartitionState *)$8;
 
 				$$ = (Node *)n;
 			}
 		;
 
 list_partitioning_clause:
-		PARTITION BY LIST '(' column_item_list ')'
-		'(' list_partition_definition_list ')'
+		PARTITION BY LIST '(' column_item_list ')' subpartitioning_clause
+		'(' list_partition_definition_list ')' opt_row_movement_clause
 			{
 #ifdef ENABLE_MULTIPLE_NODES
 				ereport(ERROR,
@@ -4351,25 +4390,22 @@ list_partitioning_clause:
 							errmsg("Un-support feature"),
 							errdetail("The partition key's length should be 1.")));
 				}
-				if (list_length($8) > 64) {
-					ereport(ERROR,
-						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						errmsg("Un-support feature"),
-						errdetail("The partition's length should be less than 65.")));
-				}
 				PartitionState *n = makeNode(PartitionState);
 				n->partitionKey = $5;
 				n->intervalPartDef = NULL;
-				n->partitionList = $8;
+				n->partitionList = $9;
 				n->partitionStrategy = 'l';
+				n->subPartitionState = (PartitionState *)$7;
+				n->rowMovement = (RowMovementValue)$11;
+
 				$$ = (Node *)n;
 
 			}
 		;
 
 hash_partitioning_clause:
-		PARTITION BY IDENT '(' column_item_list ')'
-		'(' hash_partition_definition_list ')'
+		PARTITION BY IDENT '(' column_item_list ')' subpartitioning_clause
+		'(' hash_partition_definition_list ')' opt_row_movement_clause
 			{
 #ifdef ENABLE_MULTIPLE_NODES
 				ereport(ERROR,
@@ -4387,17 +4423,13 @@ hash_partitioning_clause:
 					ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
 						errmsg("unrecognized option \"%s\"", $3)));	
 				}
-				if (list_length($8) > 64) {
-					ereport(ERROR,
-						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						errmsg("Un-support feature"),
-						errdetail("The partition's length should be less than 65.")));
-				}
 				PartitionState *n = makeNode(PartitionState);
 				n->partitionKey = $5;
 				n->intervalPartDef = NULL;
-				n->partitionList = $8;
+				n->partitionList = $9;
 				n->partitionStrategy = 'h';
+				n->subPartitionState = (PartitionState *)$7;;
+				n->rowMovement = (RowMovementValue)$11;
 				int i = 0;
 				ListCell *elem = NULL;
 				List *parts = n->partitionList;
@@ -4417,6 +4449,155 @@ value_partitioning_clause:
 				PartitionState *n = makeNode(PartitionState);
 				n->partitionKey = $5;
 				n->partitionStrategy = 'v';
+				$$ = (Node *)n;
+			}
+		;
+subpartitioning_clause:
+		range_subpartitioning_clause
+			{
+				$$ = $1;
+			}
+		|hash_subpartitioning_clause
+			{
+				$$ = $1;
+			}
+		|list_subpartitioning_clause
+			{
+				$$ = $1;
+			}
+		| /* empty */			{ $$ = NULL; }
+		;
+range_subpartitioning_clause:
+		SUBPARTITION BY RANGE '(' column_item_list ')'
+			{
+#ifdef ENABLE_MULTIPLE_NODES
+				ereport(ERROR,
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						errmsg("Un-support feature"),
+						errdetail("The distributed capability is not supported currently.")));
+#endif
+				PartitionState *n = makeNode(PartitionState);
+				if (list_length($5) != 1) {
+					ereport(ERROR,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("Un-support feature"),
+							errdetail("The partition key's length should be 1.")));
+				}
+				n->partitionKey = $5;
+				n->intervalPartDef = NULL;
+				n->partitionList = NIL;
+				n->partitionStrategy = 'r';
+
+				n->rowMovement = ROWMOVEMENT_DEFAULT;
+				n->subPartitionState = NULL;
+
+				$$ = (Node *)n;
+			}
+		;
+
+list_subpartitioning_clause:
+		SUBPARTITION BY LIST '(' column_item_list ')'
+			{
+#ifdef ENABLE_MULTIPLE_NODES
+				ereport(ERROR,
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						errmsg("Un-support feature"),
+						errdetail("The distributed capability is not supported currently.")));
+#endif
+				if (list_length($5) != 1) {
+					ereport(ERROR,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("Un-support feature"),
+							errdetail("The partition key's length should be 1.")));
+				}
+				PartitionState *n = makeNode(PartitionState);
+				n->partitionKey = $5;
+				n->intervalPartDef = NULL;
+				n->partitionList = NIL;
+				n->partitionStrategy = 'l';
+				n->subPartitionState = NULL;
+				$$ = (Node *)n;
+			}
+		;
+
+hash_subpartitioning_clause:
+		SUBPARTITION BY IDENT '(' column_item_list ')'
+			{
+#ifdef ENABLE_MULTIPLE_NODES
+				ereport(ERROR,
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						errmsg("Un-support feature"),
+						errdetail("The distributed capability is not supported currently.")));
+#endif
+				if (list_length($5) != 1) {
+					ereport(ERROR,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("Un-support feature"),
+							errdetail("The partition key's length should be 1.")));
+				}
+				if (strcmp($3, "hash") != 0) {
+					ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+						errmsg("unrecognized option \"%s\"", $3)));	
+				}
+				PartitionState *n = makeNode(PartitionState);
+				n->partitionKey = $5;
+				n->intervalPartDef = NULL;
+				n->partitionList = NIL;
+				n->partitionStrategy = 'h';
+				n->subPartitionState = NULL;
+
+				$$ = (Node *)n;
+
+			}
+		;
+
+subpartition_definition_list:
+		subpartition_item
+			{
+				$$ = list_make1($1);
+			}
+		| subpartition_definition_list ',' subpartition_item
+			{
+				$$ = lappend($1, $3);
+			}
+		;
+
+subpartition_item:
+		SUBPARTITION name VALUES '(' expr_list ')' OptTableSpace
+			{
+				ListPartitionDefState *n = makeNode(ListPartitionDefState);
+				n->partitionName = $2;
+				n->boundary = $5;
+				n->tablespacename = $7;
+
+				$$ = (Node *)n;
+			}
+		| SUBPARTITION name VALUES '(' DEFAULT ')' OptTableSpace
+			{
+				ListPartitionDefState *n = makeNode(ListPartitionDefState);
+				n->partitionName = $2;
+				Const *n_default = makeNode(Const);
+				n_default->ismaxvalue = true;
+				n_default->location = -1;
+				n->boundary = list_make1(n_default);
+				n->tablespacename = $7;
+				$$ = (Node *)n;
+			}
+		| SUBPARTITION name OptTableSpace
+			{
+				HashPartitionDefState *n = makeNode(HashPartitionDefState);
+				n->partitionName = $2;
+				n->tablespacename = $3;
+
+				$$ = (Node*)n;
+			}
+		| SUBPARTITION name VALUES LESS THAN
+		'(' maxValueList ')' OptTableSpace
+			{
+				RangePartitionDefState *n = makeNode(RangePartitionDefState);
+				n->partitionName = $2;
+				n->boundary = $7;
+				n->tablespacename = $9;
 
 				$$ = (Node *)n;
 			}
@@ -4536,10 +4717,6 @@ list_partition_item:
 			}
 		| PARTITION name VALUES '(' DEFAULT ')' OptTableSpace
 			{
-				ereport(ERROR,
-					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						errmsg("Un-support feature"),
-						errdetail("The default list's partition is not supported currently."))); 
 				ListPartitionDefState *n = makeNode(ListPartitionDefState);
 				n->partitionName = $2;
 				Const *n_default = makeNode(Const);
@@ -4547,6 +4724,49 @@ list_partition_item:
 				n_default->location = -1;
 				n->boundary = list_make1(n_default);
 				n->tablespacename = $7;
+				$$ = (Node *)n;
+			}
+		| PARTITION name VALUES '(' expr_list ')' OptTableSpace '(' subpartition_definition_list ')'
+			{
+				ListPartitionDefState *n = makeNode(ListPartitionDefState);
+				n->partitionName = $2;
+				n->boundary = $5;
+				n->tablespacename = $7;
+				n->subPartitionDefState = $9;
+				int i = 0;
+				ListCell *elem = NULL;
+				List *parts = n->subPartitionDefState;
+				foreach(elem, parts) {
+					if (!IsA((Node*)lfirst(elem), HashPartitionDefState)) {
+						break;
+					}
+					HashPartitionDefState *hashPart = (HashPartitionDefState*)lfirst(elem);
+					hashPart->boundary = list_make1(makeIntConst(i, -1));
+					i++;
+				}
+				$$ = (Node *)n;
+			}
+		| PARTITION name VALUES '(' DEFAULT ')' OptTableSpace '(' subpartition_definition_list ')'
+			{
+				ListPartitionDefState *n = makeNode(ListPartitionDefState);
+				n->partitionName = $2;
+				Const *n_default = makeNode(Const);
+				n_default->ismaxvalue = true;
+				n_default->location = -1;
+				n->boundary = list_make1(n_default);
+				n->tablespacename = $7;
+				n->subPartitionDefState = $9;
+				int i = 0;
+				ListCell *elem = NULL;
+				List *parts = n->subPartitionDefState;
+				foreach(elem, parts) {
+					if (!IsA((Node*)lfirst(elem), HashPartitionDefState)) {
+						break;
+					}
+					HashPartitionDefState *hashPart = (HashPartitionDefState*)lfirst(elem);
+					hashPart->boundary = list_make1(makeIntConst(i, -1));
+					i++;
+				}
 				$$ = (Node *)n;
 			}
 		;
@@ -4560,6 +4780,26 @@ hash_partition_item:
 
 				$$ = (Node*)n;
 			}
+		| PARTITION name OptTableSpace '(' subpartition_definition_list ')'
+			{
+				HashPartitionDefState *n = makeNode(HashPartitionDefState);
+				n->partitionName = $2;
+				n->tablespacename = $3;
+				n->subPartitionDefState = $5;
+				int i = 0;
+				ListCell *elem = NULL;
+				List *parts = n->subPartitionDefState;
+				foreach(elem, parts) {
+					if (!IsA((Node*)lfirst(elem), HashPartitionDefState)) {
+						break;
+					}
+					HashPartitionDefState *hashPart = (HashPartitionDefState*)lfirst(elem);
+					hashPart->boundary = list_make1(makeIntConst(i, -1));
+					i++;
+				}
+				$$ = (Node *)n;
+			}
+		;
 
 range_less_than_item:
 		PARTITION name VALUES LESS THAN
@@ -4569,6 +4809,28 @@ range_less_than_item:
 				n->partitionName = $2;
 				n->boundary = $7;
 				n->tablespacename = $9;
+
+				$$ = (Node *)n;
+			}
+		| PARTITION name VALUES LESS THAN
+		'(' maxValueList ')' OptTableSpace '(' subpartition_definition_list ')'
+			{
+				RangePartitionDefState *n = makeNode(RangePartitionDefState);
+				n->partitionName = $2;
+				n->boundary = $7;
+				n->tablespacename = $9;
+				n->subPartitionDefState = $11;
+				int i = 0;
+				ListCell *elem = NULL;
+				List *parts = n->subPartitionDefState;
+				foreach(elem, parts) {
+					if (!IsA((Node*)lfirst(elem), HashPartitionDefState)) {
+						break;
+					}
+					HashPartitionDefState *hashPart = (HashPartitionDefState*)lfirst(elem);
+					hashPart->boundary = list_make1(makeIntConst(i, -1));
+					i++;
+				}
 
 				$$ = (Node *)n;
 			}
@@ -4740,28 +5002,34 @@ TypedTableElement:
 			| TableConstraint	 				{ $$ = $1; }
 		;
 
-columnDef:	ColId Typename ColCmprsMode create_generic_options ColQualList
+columnDef:	ColId Typename KVType ColCmprsMode create_generic_options ColQualList
 				{
 					ColumnDef *n = makeNode(ColumnDef);
 					n->colname = $1;
 					n->typname = $2;
+					n->kvtype = $3;
 					n->inhcount = 0;
 					n->is_local = true;
 					n->is_not_null = false;
 					n->is_from_type = false;
 					n->storage = 0;
-					n->cmprs_mode = $3;
+					n->cmprs_mode = $4;
 					n->raw_default = NULL;
 					n->cooked_default = NULL;
 					n->collOid = InvalidOid;
-					n->fdwoptions = $4;
+					n->fdwoptions = $5;
                     n->clientLogicColumnRef=NULL;
-					
-                    SplitColQualList($5, &n->constraints, &n->collClause,&n->clientLogicColumnRef, yyscanner);
-
+		    if ($3 == ATT_KV_UNDEFINED) {
+						SplitColQualList($6, &n->constraints, &n->collClause, &n->clientLogicColumnRef,
+									 yyscanner);
+					} else {
+						SplitColQualList($6, &n->constraints, &n->collClause,
+										yyscanner);
+					}
 					$$ = (Node *)n;
 				}
 		;
+
 
 /* Options definition for CREATE FDW, SERVER and USER MAPPING */
 create_generic_options:
@@ -4837,7 +5105,11 @@ alter_generic_option_elem:
                     $$ = makeDefElemExtended(NULL, $2, NULL, DEFELEM_DROP);
                 }
         ;
-
+KVType: TSTAG		{$$ = ATT_KV_TAG;}  /* tag for kv storage */
+		| TSFIELD	{$$ = ATT_KV_FIELD;}  /* field for kv storage */
+		| TSTIME	{$$ = ATT_KV_TIMETAG;}  /* field for kv storage */
+		| /* EMPTY */	{$$ = ATT_KV_UNDEFINED;} /* not using kv storage */
+;
 ColCmprsMode:	DELTA		{$$ = ATT_CMPR_DELTA;}  /* delta compression */
 		| PREFIX	{$$ = ATT_CMPR_PREFIX;}  /* prefix compression */
 		| DICTIONARY		{$$ = ATT_CMPR_DICTIONARY;}  /* dictionary compression */
@@ -5397,6 +5669,9 @@ TableLikeClause:
 					TableLikeClause *n = makeNode(TableLikeClause);
 					n->relation = $2;
 					n->options = CREATE_TABLE_LIKE_ALL & ~$4;
+#ifndef ENABLE_MULTIPLE_NODES					
+						n->options = n->options & ~CREATE_TABLE_LIKE_DISTRIBUTION;
+#endif					
 					$$ = (Node *)n;
 				}
 		;
@@ -5409,11 +5684,11 @@ excluding_option_list:
 TableLikeOptionList:
 				TableLikeOptionList INCLUDING TableLikeIncludingOption	{ $$ = $1 | $3; }
 				| TableLikeOptionList EXCLUDING TableLikeExcludingOption	{ $$ = $1 & ~$3; }
-				| /* EMPTY */						{ $$ = 0; }
+				| /* EMPTY */						{ $$ = CREATE_TABLE_LIKE_DEFAULTS_SERIAL; }
 		;
 
 TableLikeIncludingOption:
-				DEFAULTS			{ $$ = CREATE_TABLE_LIKE_DEFAULTS; }
+				DEFAULTS			{ $$ = CREATE_TABLE_LIKE_DEFAULTS | CREATE_TABLE_LIKE_DEFAULTS_SERIAL; }
 				| CONSTRAINTS		{ $$ = CREATE_TABLE_LIKE_CONSTRAINTS; }
 				| INDEXES			{ $$ = CREATE_TABLE_LIKE_INDEXES; }
 				| STORAGE			{ $$ = CREATE_TABLE_LIKE_STORAGE; }
@@ -5426,7 +5701,7 @@ TableLikeIncludingOption:
 		;
 
 TableLikeExcludingOption:
-				DEFAULTS			{ $$ = CREATE_TABLE_LIKE_DEFAULTS; }
+				DEFAULTS			{ $$ = CREATE_TABLE_LIKE_DEFAULTS | CREATE_TABLE_LIKE_DEFAULTS_SERIAL; }
 				| CONSTRAINTS		{ $$ = CREATE_TABLE_LIKE_CONSTRAINTS; }
 				| INDEXES			{ $$ = CREATE_TABLE_LIKE_INDEXES; }
 				| STORAGE			{ $$ = CREATE_TABLE_LIKE_STORAGE; }
@@ -5440,7 +5715,7 @@ TableLikeExcludingOption:
 		;
 
 opt_internal_data: 
-            INTERNAL DATA_P 	internal_data_body		{$$ = NULL;}
+            INTERNAL DATA_P 	internal_data_body		{$$ = $3;}
 			| /* EMPTY */      	{$$ = NULL;}
 		;
 
@@ -5509,20 +5784,21 @@ ConstraintElem:
 					n->initially_valid = !n->skip_validation;
 					$$ = (Node *)n;
 				}
-			| UNIQUE '(' columnList ')' opt_definition OptConsTableSpace
+			| UNIQUE '(' columnList ')' opt_c_include opt_definition OptConsTableSpace
 				ConstraintAttributeSpec InformationalConstraintElem
 				{
 					Constraint *n = makeNode(Constraint);
 					n->contype = CONSTR_UNIQUE;
 					n->location = @1;
 					n->keys = $3;
-					n->options = $5;
+					n->including = $5;
+					n->options = $6;
 					n->indexname = NULL;
-					n->indexspace = $6;
-					processCASbits($7, @7, "UNIQUE",
+					n->indexspace = $7;
+					processCASbits($8, @8, "UNIQUE",
 								   &n->deferrable, &n->initdeferred, NULL,
 								   NULL, yyscanner);
-					n->inforConstraint = (InformationalConstraint *) $8; /* informational constraint info */
+					n->inforConstraint = (InformationalConstraint *) $9; /* informational constraint info */
 					$$ = (Node *)n;
 				}
 			| UNIQUE ExistingIndex ConstraintAttributeSpec InformationalConstraintElem
@@ -5540,20 +5816,21 @@ ConstraintElem:
 					n->inforConstraint = (InformationalConstraint *) $4; /* informational constraint info */
 					$$ = (Node *)n;
 				}
-			| PRIMARY KEY '(' columnList ')' opt_definition OptConsTableSpace
+			| PRIMARY KEY '(' columnList ')' opt_c_include opt_definition OptConsTableSpace
 				ConstraintAttributeSpec InformationalConstraintElem
 				{
 					Constraint *n = makeNode(Constraint);
 					n->contype = CONSTR_PRIMARY;
 					n->location = @1;
 					n->keys = $4;
-					n->options = $6;
+					n->including = $6;
+					n->options = $7;
 					n->indexname = NULL;
-					n->indexspace = $7;
-					processCASbits($8, @8, "PRIMARY KEY",
+					n->indexspace = $8;
+					processCASbits($9, @9, "PRIMARY KEY",
 								   &n->deferrable, &n->initdeferred, NULL,
 								   NULL, yyscanner);
-					n->inforConstraint = (InformationalConstraint *) $9; /* informational constraint info */
+					n->inforConstraint = (InformationalConstraint *) $10; /* informational constraint info */
 					$$ = (Node *)n;
 				}
 			| PRIMARY KEY ExistingIndex ConstraintAttributeSpec InformationalConstraintElem
@@ -5562,6 +5839,7 @@ ConstraintElem:
 					n->contype = CONSTR_PRIMARY;
 					n->location = @1;
 					n->keys = NIL;
+					n->including = NIL;
 					n->options = NIL;
 					n->indexname = $3;
 					n->indexspace = NULL;
@@ -5572,7 +5850,7 @@ ConstraintElem:
 					$$ = (Node *)n;
 				}
 			| EXCLUDE access_method_clause '(' ExclusionConstraintList ')'
-				opt_definition OptConsTableSpace ExclusionWhereClause
+				opt_c_include opt_definition OptConsTableSpace ExclusionWhereClause
 				ConstraintAttributeSpec
 				{
 					Constraint *n = makeNode(Constraint);
@@ -5580,11 +5858,12 @@ ConstraintElem:
 					n->location = @1;
 					n->access_method	= $2;
 					n->exclusions		= $4;
-					n->options			= $6;
+					n->including		= $6;
+					n->options			= $7;
 					n->indexname		= NULL;
-					n->indexspace		= $7;
-					n->where_clause		= $8;
-					processCASbits($9, @9, "EXCLUDE",
+					n->indexspace		= $8;
+					n->where_clause		= $9;
+					processCASbits($10, @10, "EXCLUDE",
 								   &n->deferrable, &n->initdeferred, NULL,
 								   NULL, yyscanner);
 					$$ = (Node *)n;
@@ -5685,6 +5964,9 @@ columnElem: ColId
 				}
 		;
 
+opt_c_include:	INCLUDE '(' columnList ')'			{ $$ = $3; }
+			 |		/* EMPTY */						{ $$ = NIL; }
+		;
 key_match:  MATCH FULL
 			{
 				$$ = FKCONSTR_MATCH_FULL;
@@ -5926,6 +6208,8 @@ OptDistributeByInternal:  DISTRIBUTE BY OptDistributeType '(' name_list ')'
                         n->disttype = DISTTYPE_REPLICATION;
 					else if (strcmp($3, "roundrobin") == 0)
 						n->disttype = DISTTYPE_ROUNDROBIN;
+                    else if (strcmp($3, "hidetag") == 0)
+                        n->disttype = DISTTYPE_HIDETAG;
                     else
                         ereport(ERROR,
                                 (errcode(ERRCODE_SYNTAX_ERROR),
@@ -6275,7 +6559,48 @@ ExistingIndex:   USING INDEX index_name				{ $$ = $3; }
  *****************************************************************************/
 
 
+CreateAsStmt:
+		CREATE OptTemp TABLE create_as_target AS SelectStmt opt_with_data
+				{
+					CreateTableAsStmt *ctas = makeNode(CreateTableAsStmt);
+					ctas->query = $6;
+					ctas->into = $4;
+					ctas->relkind = OBJECT_TABLE;
+					ctas->is_select_into = false;
+					/* cram additional flags into the IntoClause */
+					$4->rel->relpersistence = $2;
+					$4->skipData = !($7);
+					$$ = (Node *) ctas;
+				}
+		;
+
+create_as_target:
+			qualified_name opt_column_list OptWith OnCommitOption OptCompress OptTableSpace
+/* PGXC_BEGIN */
+			OptDistributeBy OptSubCluster
 /* PGXC_END */
+				{
+					$$ = makeNode(IntoClause);
+					$$->rel = $1;
+					$$->colNames = $2;
+					$$->options = $3;
+					$$->onCommit = $4;
+					$$->row_compress = $5;
+					$$->tableSpaceName = $6;
+					$$->skipData = false;		/* might get changed later */
+/* PGXC_BEGIN */
+					$$->distributeby = $7;
+					$$->subcluster = $8;
+					$$->relkind = INTO_CLAUSE_RELKIND_DEFAULT;
+/* PGXC_END */
+				}
+		;
+
+opt_with_data:
+			WITH DATA_P								{ $$ = TRUE; }
+			| WITH NO DATA_P						{ $$ = FALSE; }
+			| /*EMPTY*/								{ $$ = TRUE; }
+		;
 
 opt_as:		AS										{}
 			| /* EMPTY */							{}
@@ -12093,6 +12418,59 @@ makeXmlExpr(XmlExprOp op, char *name, List *named_args, List *args,
 	x->type = InvalidOid;			/* marks the node as not analyzed */
 	x->location = location;
 	return (Node *) x;
+}
+
+/* Separate Constraint nodes from COLLATE clauses in a ColQualList */
+static void
+SplitColQualList(List *qualList,
+				 List **constraintList, CollateClause **collClause,
+				 core_yyscan_t yyscanner)
+{
+	ListCell   *cell;
+	ListCell   *prev;
+	ListCell   *next;
+
+	*collClause = NULL;
+	prev = NULL;
+	for (cell = list_head(qualList); cell; cell = next)
+	{
+		Node   *n = (Node *) lfirst(cell);
+
+		next = lnext(cell);
+		if (IsA(n, Constraint))
+		{
+			/* keep it in list */
+			prev = cell;
+			continue;
+		}
+		if (IsA(n, CollateClause))
+		{
+			CollateClause *c = (CollateClause *) n;
+
+			if (*collClause) {
+				ereport(errstate,
+						(errcode(ERRCODE_SYNTAX_ERROR),
+						 errmsg("multiple COLLATE clauses not allowed"),
+						 parser_errposition(c->location)));
+			}
+			*collClause = c;
+		}
+		else if (IsA(n, ClientLogicColumnRef))
+		{
+			ereport(errstate, (errmodule(MOD_SEC), errcode(ERRCODE_SYNTAX_ERROR),
+				errmsg("unsupported syntax: ENCRYPTED WITH in this operation"), errdetail("N/A"),
+					errcause("client encryption feature is not supported this operation."),
+						erraction("Check client encryption feature whether supported this operation.")));
+		}
+		else {
+			ereport(errstate,
+					(errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+						errmsg("unexpected node type %d", (int) n->type)));
+		}
+		/* remove non-Constraint nodes from qualList */
+		qualList = list_delete_cell(qualList, cell, prev);
+	}
+	*constraintList = qualList;
 }
 
 /* Separate Constraint nodes from COLLATE clauses in a ColQualList */

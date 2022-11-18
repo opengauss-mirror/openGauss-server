@@ -38,11 +38,10 @@ extern void up_gtt_relstats(const Relation relation,
                             TransactionId relfrozenxid);
 extern bool get_gtt_relstats(
     Oid relid, BlockNumber* relpages, double* reltuples, BlockNumber* relallvisible, TransactionId* relfrozenxid);
-extern void gtt_force_enable_index(Relation index);
-extern void gtt_fix_index_state(Relation index);
 extern void init_gtt_storage(CmdType operation, ResultRelInfo *resultRelInfo);
 extern Oid gtt_fetch_current_relfilenode(Oid relid);
-extern void gtt_switch_rel_relfilenode(Oid rel1, Oid relfilenode1, Oid rel2, Oid relfilenode2, bool footprint);
+extern void gtt_switch_rel_relfilenode(Oid rel1, Oid relfilenode1, Oid rel2, Oid relfilenode2, bool footprint,
+                                       TransactionId frozenXid);
 extern void gtt_create_storage_files(Oid relid);
 extern void remove_gtt_att_statistic(Oid reloid, int attnum);
 extern void CheckGttTableInUse(Relation rel);

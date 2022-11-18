@@ -71,12 +71,7 @@ select pg_get_ruledef(oid, true) from pg_rewrite where rulename='_RETURN' and ev
 (1 row)
 
 drop view llt_make_ruledef_t1;
-ERROR:  "llt_make_ruledef_t1" is not a view
-HINT:  Use DROP TABLE to remove a table.
 drop table llt_make_ruledef_t2;
-ERROR:  cannot drop table llt_make_ruledef_t2 because other objects depend on it
-DETAIL:  table llt_make_ruledef_t1 depends on table llt_make_ruledef_t2
-HINT:  Use DROP ... CASCADE to drop the dependent objects too.
 -- add test case for function byteane
 select 'a'::bytea <> 'b'::bytea;
  ?column? 

@@ -1,33 +1,19 @@
 /*
- * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
- *
- * openGauss is licensed under Mulan PSL v2.
+ * Copyright (c) Huawei Technologies Co., Ltd. 2014-2021. All rights reserved.
+ * Licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
  * You may obtain a copy of Mulan PSL v2 at:
- *
  *          http://license.coscl.org.cn/MulanPSL2
- *
  * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
  * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
  * See the Mulan PSL v2 for more details.
- * ---------------------------------------------------------------------------------------
- * 
- * securectype.h
- *        define internal used macro and data type. The marco of SECUREC_ON_64BITS
- *        will be determined in this header file, which is a switch for part
- *        of code. Some macro are used to supress warning by MS compiler.
- * 
- * 
- * 
- * IDENTIFICATION
- *        src/include/securectype.h
- *
- * Note:
- *        user can change the value of SECUREC_STRING_MAX_LEN and SECUREC_MEM_MAX_LEN
- *        macro to meet their special need ,but The maximum value should not exceed 2G .
- *
- * ---------------------------------------------------------------------------------------
+ * Description: Define internal used macro and data type. The marco of SECUREC_ON_64BITS
+ *              will be determined in this header file, which is a switch for part
+ *              of code. Some macro are used to suppress warning by MS compiler.
+ * Create: 2014-02-25
+ * Notes: User can change the value of SECUREC_STRING_MAX_LEN and SECUREC_MEM_MAX_LEN
+ *        macro to meet their special need, but The maximum value should not exceed 2G.
  */
 /*
  * [Standardize-exceptions]: Performance-sensitive
@@ -78,7 +64,7 @@
 #ifdef _CRTIMP_ALTERNATIVE
 #undef _CRTIMP_ALTERNATIVE
 #endif
-#define _CRTIMP_ALTERNATIVE     /* Comment microsoft *_s function */
+#define _CRTIMP_ALTERNATIVE     /* Comment Microsoft *_s function */
 #endif
 
 /* Compile in kernel under macro control */
@@ -87,6 +73,15 @@
 #define SECUREC_IN_KERNEL               1
 #else
 #define SECUREC_IN_KERNEL               0
+#endif
+#endif
+
+/* make kernel symbols of functions available to loadable modules */
+#ifndef SECUREC_EXPORT_KERNEL_SYMBOL
+#if SECUREC_IN_KERNEL
+#define SECUREC_EXPORT_KERNEL_SYMBOL    1
+#else
+#define SECUREC_EXPORT_KERNEL_SYMBOL    0
 #endif
 #endif
 
@@ -394,16 +389,17 @@
 #endif
 
 /*
- * Add the -DSECUREC_SUPPORT_BUILTIN_EXPECT=0 compiler option, if complier can not support __builtin_expect.
+ * Add the -DSECUREC_SUPPORT_BUILTIN_EXPECT=0 compiler option, if compiler can not support __builtin_expect.
  */
 #ifndef SECUREC_SUPPORT_BUILTIN_EXPECT
 #define SECUREC_SUPPORT_BUILTIN_EXPECT 1
 #endif
 
-#if SECUREC_SUPPORT_BUILTIN_EXPECT && defined(__GNUC__) && ((__GNUC__ > 3 || (__GNUC__ == 3 && __GNUC_MINOR__ > 3)))
+#if SECUREC_SUPPORT_BUILTIN_EXPECT && defined(__GNUC__) && ((__GNUC__ > 3) || \
+    (defined(__GNUC_MINOR__) && (__GNUC__ == 3 && __GNUC_MINOR__ > 3)))
 /*
  * This is a built-in function that can be used without a declaration, if warning for declaration not found occurred,
- * you can add -DSECUREC_NEED_BUILTIN_EXPECT_DECLARE to complier options
+ * you can add -DSECUREC_NEED_BUILTIN_EXPECT_DECLARE to compiler options
  */
 #ifdef SECUREC_NEED_BUILTIN_EXPECT_DECLARE
 long __builtin_expect(long exp, long c);
@@ -457,7 +453,7 @@ long __builtin_expect(long exp, long c);
 #endif
 
 /*
- * Codes should run under the macro SECUREC_COMPATIBLE_LINUX_FORMAT in unknow system on default,
+ * Codes should run under the macro SECUREC_COMPATIBLE_LINUX_FORMAT in unknown system on default,
  * and strtold.
  * The function strtold is referenced first at ISO9899:1999(C99), and some old compilers can
  * not support these functions. Here provides a macro to open these functions:
@@ -489,14 +485,14 @@ long __builtin_expect(long exp, long c);
 
 /* For strncpy_s performance optimization */
 #define SECUREC_STRNCPY_SM(dest, destMax, src, count) \
-    (((void *)(dest) != NULL && (void *)(src) != NULL && (size_t)(destMax) > 0 && \
+    (((void *)(dest) != NULL && (const void *)(src) != NULL && (size_t)(destMax) > 0 && \
     (((unsigned long long)(destMax) & (unsigned long long)(-2)) < SECUREC_STRING_MAX_LEN) && \
     (SECUREC_TWO_MIN((size_t)(count), strlen(src)) + 1) <= (size_t)(destMax)) ? \
     (((size_t)(count) < strlen(src)) ? (memcpy((dest), (src), (count)), *((char *)(dest) + (count)) = '\0', EOK) : \
     (memcpy((dest), (src), strlen(src) + 1), EOK)) : (strncpy_error((dest), (destMax), (src), (count))))
 
 #define SECUREC_STRCPY_SM(dest, destMax, src) \
-    (((void *)(dest) != NULL && (void *)(src) != NULL && (size_t)(destMax) > 0 && \
+    (((void *)(dest) != NULL && (const void *)(src) != NULL && (size_t)(destMax) > 0 && \
     (((unsigned long long)(destMax) & (unsigned long long)(-2)) < SECUREC_STRING_MAX_LEN) && \
     (strlen(src) + 1) <= (size_t)(destMax)) ? (memcpy((dest), (src), strlen(src) + 1), EOK) : \
     (strcpy_error((dest), (destMax), (src))))
@@ -505,7 +501,7 @@ long __builtin_expect(long exp, long c);
 #if defined(__GNUC__)
 #define SECUREC_STRCAT_SM(dest, destMax, src) ({ \
     int catRet_ = EOK; \
-    if ((void *)(dest) != NULL && (void *)(src) != NULL && (size_t)(destMax) > 0 && \
+    if ((void *)(dest) != NULL && (const void *)(src) != NULL && (size_t)(destMax) > 0 && \
         (((unsigned long long)(destMax) & (unsigned long long)(-2)) < SECUREC_STRING_MAX_LEN)) { \
         char *catTmpDst_ = (char *)(dest); \
         size_t catRestSize_ = (destMax); \
@@ -537,7 +533,7 @@ long __builtin_expect(long exp, long c);
 #if defined(__GNUC__)
 #define SECUREC_STRNCAT_SM(dest, destMax, src, count) ({ \
     int ncatRet_ = EOK; \
-    if ((void *)(dest) != NULL && (void *)(src) != NULL && (size_t)(destMax) > 0 && \
+    if ((void *)(dest) != NULL && (const void *)(src) != NULL && (size_t)(destMax) > 0 && \
         (((unsigned long long)(destMax) & (unsigned long long)(-2)) < SECUREC_STRING_MAX_LEN)  && \
         (((unsigned long long)(count) & (unsigned long long)(-2)) < SECUREC_STRING_MAX_LEN)) { \
         char *ncatTmpDest_ = (char *)(dest); \
@@ -574,7 +570,7 @@ long __builtin_expect(long exp, long c);
 #define  SECUREC_MEMCPY_SM(dest, destMax, src, count) \
     (!(((size_t)(destMax) == 0) || \
         (((unsigned long long)(destMax) & (unsigned long long)(-2)) > SECUREC_MEM_MAX_LEN) || \
-        ((size_t)(count) > (size_t)(destMax)) || ((void *)(dest)) == NULL || ((void *)(src) == NULL)) ? \
+        ((size_t)(count) > (size_t)(destMax)) || ((void *)(dest)) == NULL || ((const void *)(src) == NULL)) ? \
         (memcpy((dest), (src), (count)), EOK) : \
         (memcpy_s((dest), (destMax), (src), (count))))
 

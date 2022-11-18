@@ -33,7 +33,6 @@
 #include "commands/copy.h"
 #include "executor/node/nodeIndexscan.h"
 #include "gstrace/executer_gstrace.h"
-#include "instruments/instr_unique_sql.h"
 #include "libpq/pqformat.h"
 #include "mb/pg_wchar.h"
 #include "nodes/makefuncs.h"
@@ -59,6 +58,38 @@
 #include "gs_policy/policy_common.h"
 
 extern void opfusion_executeEnd(PlannedStmt *plannedstmt, const char *queryString, Snapshot snapshot);
+extern bool check_log_statement(List* stmt_list);
+extern int errdetail_params(ParamListInfo params);
+#ifndef ENABLE_MULTIPLE_NODES
+static void report_iud_time_for_opfusion(PlannedStmt *plannedstmt)
+{
+    if (plannedstmt->commandType != CMD_INSERT && plannedstmt->commandType != CMD_DELETE &&
+        plannedstmt->commandType != CMD_UPDATE && plannedstmt->commandType != CMD_MERGE) {
+        return;
+    }
+    ListCell *lc = NULL;
+    Oid rid;
+    if (u_sess->attr.attr_sql.enable_save_datachanged_timestamp == false) {
+        return;
+    }
+    foreach (lc, plannedstmt->resultRelations) {
+        Index idx = lfirst_int(lc);
+        rid = getrelid(idx, plannedstmt->rtable);
+        if (OidIsValid(rid) == false || rid < FirstNormalObjectId) {
+            continue;
+        }
+        Relation rel = NULL;
+        rel = heap_open(rid, AccessShareLock);
+        if (rel->rd_rel->relkind == RELKIND_RELATION) {
+            if (rel->rd_rel->relpersistence == RELPERSISTENCE_PERMANENT ||
+                rel->rd_rel->relpersistence == RELPERSISTENCE_UNLOGGED) {
+                pgstat_report_data_changed(rid, STATFLG_RELATION, rel->rd_rel->relisshared);
+            }
+        }
+        heap_close(rel, AccessShareLock);
+    }
+}
+#endif
 
 OpFusion::OpFusion(MemoryContext context, CachedPlanSource *psrc, List *plantree_list)
 {
@@ -146,6 +177,7 @@ void OpFusion::InitLocals(MemoryContext context)
     m_local.m_ledger_relhash = 0;
     m_local.m_optype = NONE_FUSION;
     m_local.m_resOwner = NULL;
+    m_local.m_has_init_param = false;
 }
 
 /* clear local variables before global it */
@@ -399,6 +431,7 @@ bool OpFusion::executeEnd(const char *portal_name, bool *isQueryCompleted)
         }
         u_sess->xact_cxt.pbe_execute_complete = true;
         m_local.m_resOwner = NULL;
+        m_local.m_has_init_param = false;
     } else {
         if (isQueryCompleted)
             *isQueryCompleted = false;
@@ -433,6 +466,20 @@ void OpFusion::fusionExecute(StringInfo msg, char *completionTag, bool isTopLeve
         max_rows = (long)pq_getmsgint(msg, 4);
         if (max_rows <= 0)
             max_rows = FETCH_ALL;
+        /* log_statement only support for PBE msg */
+        u_sess->exec_cxt.CurrentOpFusionObj->checkLogStatement(portal_name, max_rows != FETCH_ALL);
+    }
+    /*
+     * instr unique sql: handle fetch portal case, refer to related codes in exec_execute_message,
+     * we update sql start time in B/E message, for fetch case, we don't know where the start time
+     * from(possible message sequences, PBDES/BDES/... or PBDES/ES/ES..), so need to reset
+     * unique_sql_start_time at the end of OpFusion::fusionExecute.
+     * Message 'U' updates n_calls and elapse time at PostgresMain
+     */
+    if (isTopLevel && u_sess->pbe_message != EXECUTE_BATCH_MESSAGE_QUERY) {
+        instr_unique_sql_set_start_time(u_sess->unique_sql_cxt.unique_sql_start_time > 0,
+            u_sess->unique_sql_cxt.unique_sql_start_time, GetCurrentStatementLocalStartTimestamp());
+        SetUniqueSQLIdFromCachedPlanSource(u_sess->exec_cxt.CurrentOpFusionObj->m_global->m_psrc);
     }
 
     u_sess->exec_cxt.CurrentOpFusionObj->executeInit();
@@ -451,6 +498,10 @@ void OpFusion::fusionExecute(StringInfo msg, char *completionTag, bool isTopLeve
             opfusion_unified_audit_executor_hook(u_sess->exec_cxt.CurrentOpFusionObj->m_global->m_planstmt);
         }
         u_sess->exec_cxt.CurrentOpFusionObj->execute(max_rows, completionTag);
+#ifndef ENABLE_MULTIPLE_NODES
+        /* CN would do it in multiple nodes */
+        report_iud_time_for_opfusion(u_sess->exec_cxt.CurrentOpFusionObj->m_global->m_planstmt);
+#endif
         u_sess->exec_cxt.need_track_resource = old_status;
         gstrace_exit(GS_TRC_ID_BypassExecutor);
         completed = u_sess->exec_cxt.CurrentOpFusionObj->executeEnd(portal_name, isQueryCompleted);
@@ -478,8 +529,9 @@ void OpFusion::fusionExecute(StringInfo msg, char *completionTag, bool isTopLeve
 
 bool OpFusion::process(int op, StringInfo msg, char *completionTag, bool isTopLevel, bool *isQueryCompleted)
 {
-    if (op == FUSION_EXECUTE && msg != NULL)
+    if ((op == FUSION_EXECUTE || op == FUSION_SIMPLE_EXECUTE) && msg != NULL) {
         refreshCurFusion(msg);
+    }
 
     bool res = false;
     if (u_sess->exec_cxt.CurrentOpFusionObj == NULL) {
@@ -487,6 +539,7 @@ bool OpFusion::process(int op, StringInfo msg, char *completionTag, bool isTopLe
     }
 
     switch (op) {
+        case FUSION_SIMPLE_EXECUTE:
         case FUSION_EXECUTE: {
             u_sess->exec_cxt.CurrentOpFusionObj->fusionExecute(msg, completionTag, isTopLevel, isQueryCompleted);
             break;
@@ -530,6 +583,33 @@ void OpFusion::CheckLogDuration()
         }
         default:
             break;
+    }
+}
+
+void OpFusion::checkLogStatement(const char* portal_name, bool execute_is_fetch)
+{
+    /* Log immediately if dictated by log_statement */
+    if (m_global->m_cacheplan && check_log_statement(m_global->m_cacheplan->stmt_list)) {
+        char* mask_string = NULL;
+        char* prep_stmtname = NULL;
+        if (m_global->m_psrc->stmt_name) {
+            prep_stmtname = pstrdup(m_global->m_psrc->stmt_name);
+        } else {
+            prep_stmtname = "<unnamed>";
+        }
+
+        MASK_PASSWORD_START(mask_string, m_global->m_psrc->query_string);
+        ereport(LOG,
+            (errmsg("Bypass %s %s%s%s: %s",
+                    execute_is_fetch ? _("execute fetch from") : _("execute"),
+                    prep_stmtname,
+                    *portal_name ? "/" : "",
+                    *portal_name ? portal_name : "",
+                    mask_string),
+                errhidestmt(true),
+                errdetail_params(m_local.m_outParams ? m_local.m_outParams :
+                                 (m_local.m_has_init_param ? m_local.m_params : NULL))));
+        MASK_PASSWORD_END(mask_string, m_global->m_psrc->query_string);
     }
 }
 
@@ -790,6 +870,7 @@ void OpFusion::updatePreAllocParamter(StringInfo input_message)
              */
             params->params[paramno].pflags = PARAM_FLAG_CONST;
             params->params[paramno].ptype = ptype;
+            params->params[paramno].tabInfo = NULL;
 
             /* Reset the compatible illegal chars import flag */
             u_sess->mb_cxt.insertValuesBind_compatible_illegal_chars = false;
@@ -810,6 +891,7 @@ void OpFusion::updatePreAllocParamter(StringInfo input_message)
     CopyFormats(rformats, num_rformats);
     pq_getmsgend(input_message);
     pfree_ext(rformats);
+    m_local.m_has_init_param = true;
     MemoryContextSwitchTo(old_context);
 }
 
@@ -996,16 +1078,14 @@ void OpFusion::initParams(ParamListInfo params)
     if (m_global->m_is_pbe_query && !IsGlobal() && params != NULL) {
         m_global->m_paramNum = params->numParams;
         m_local.m_params =
-            (ParamListInfo)palloc(offsetof(ParamListInfoData, params) + m_global->m_paramNum * sizeof(ParamExternData));
-        m_local.m_params->paramFetch = NULL;
-        m_local.m_params->paramFetchArg = NULL;
-        m_local.m_params->parserSetup = NULL;
-        m_local.m_params->parserSetupArg = NULL;
-        m_local.m_params->params_need_process = false;
-        m_local.m_params->numParams = m_global->m_paramNum;
+            (ParamListInfo)palloc0(offsetof(ParamListInfoData, params) +
+                                   m_global->m_paramNum * sizeof(ParamExternData));
     } else if (IsGlobal() && m_global->m_paramNum > 0) {
         m_local.m_params =
-            (ParamListInfo)palloc(offsetof(ParamListInfoData, params) + m_global->m_paramNum * sizeof(ParamExternData));
+            (ParamListInfo)palloc0(offsetof(ParamListInfoData, params) +
+                                   m_global->m_paramNum * sizeof(ParamExternData));
+    }
+    if (m_local.m_params != NULL) {
         m_local.m_params->paramFetch = NULL;
         m_local.m_params->paramFetchArg = NULL;
         m_local.m_params->parserSetup = NULL;
@@ -1154,13 +1234,14 @@ void OpFusion::storeFusion(const char *portalname)
         initFusionHtab();
 
     removeFusionFromHtab(m_local.m_portalName);
-    entry = (pnFusionObj *)(hash_search(u_sess->pcache_cxt.pn_fusion_htab, portalname, HASH_ENTER, NULL));
-    entry->opfusion = this;
 
     MemoryContext old_cxt = MemoryContextSwitchTo(m_local.m_localContext);
     pfree_ext(m_local.m_portalName);
     m_local.m_portalName = pstrdup(portalname);
     MemoryContextSwitchTo(old_cxt);
+
+    entry = (pnFusionObj *)(hash_search(u_sess->pcache_cxt.pn_fusion_htab, portalname, HASH_ENTER, NULL));
+    entry->opfusion = this;
 }
 
 OpFusion *OpFusion::locateFusion(const char *portalname)
@@ -1194,4 +1275,128 @@ void OpFusion::refreshCurFusion(StringInfo msg)
         OpFusion::setCurrentOpFusionObj(opfusion);
     }
     msg->cursor = oldCursor;
+}
+
+static void ResetOpfusionExecutorState(EState* estate)
+{
+   /*
+     * Initialize all fields of the Executor State structure
+     */
+    estate->es_direction = ForwardScanDirection;
+    estate->es_snapshot = SnapshotNow;
+    estate->es_crosscheck_snapshot = InvalidSnapshot; /* no crosscheck */
+    estate->es_plannedstmt = NULL;
+
+    estate->es_junkFilter = NULL;
+
+    estate->es_output_cid = (CommandId)0;
+
+    estate->es_result_relations = NULL;
+    estate->es_num_result_relations = 0;
+    estate->es_result_relation_info = NULL;
+#ifdef ENABLE_MULTIPLE_NODES
+    estate->es_result_remoterel = NULL;
+#endif
+    estate->esCurrentPartition = NULL;
+    estate->esfRelations = NULL;
+    estate->es_trig_target_relations = NIL;
+    estate->es_trig_tuple_slot = NULL;
+    estate->es_trig_oldtup_slot = NULL;
+    estate->es_trig_newtup_slot = NULL;
+
+    estate->es_param_list_info = NULL;
+    estate->es_param_exec_vals = NULL;
+
+    estate->es_tupleTable = NIL;
+    estate->es_epqTupleSlot = NULL;
+
+    estate->es_rowMarks = NIL;
+
+    estate->es_modifiedRowHash = NIL;
+    estate->es_processed = 0;
+    estate->es_last_processed = 0;
+    estate->es_lastoid = InvalidOid;
+
+    estate->es_top_eflags = 0;
+    estate->es_instrument = INSTRUMENT_NONE;
+    estate->es_finished = false;
+
+    estate->es_exprcontexts = NIL;
+
+    estate->es_subplanstates = NIL;
+
+    estate->es_auxmodifytables = NIL;
+    estate->es_remotequerystates = NIL;
+
+    estate->es_per_tuple_exprcontext = NULL;
+
+    estate->es_epqTuple = NULL;
+    estate->es_epqTupleSet = NULL;
+    estate->es_epqScanDone = NULL;
+
+    estate->es_subplan_ids = NIL;
+    estate->es_skip_early_free = false;
+    estate->es_skip_early_deinit_consumer = false;
+    estate->es_under_subplan = false;
+    estate->es_material_of_subplan = NIL;
+    estate->es_recursive_next_iteration = false;
+
+    estate->pruningResult = NULL;
+}
+
+/* ----------------
+ *		CreateExecutorStateForOpfusion
+ *
+ *		Create and initialize an EState node, which is the root of
+ *		working storage for an entire Executor invocation.
+ *
+ * The estate will be created under nodeCxt, which sould be m_local.m_localContext,
+ * so the estate can be reused in each query. es_query_cxt set to queryCxt, which should
+ * be m_local.m_tmpContext, so the memory will be reset in each query.
+ * ----------------
+ */
+EState* CreateExecutorStateForOpfusion(MemoryContext nodeCxt, MemoryContext queryCxt)
+{
+    EState* estate = NULL;
+    MemoryContext oldcontext;
+
+    /*
+     * Make the EState node within nodeCxt.  This way, estate can be
+     * reused in each query.
+     */
+    oldcontext = MemoryContextSwitchTo(nodeCxt);
+
+    estate = makeNode(EState);
+
+    estate->es_query_cxt = queryCxt;
+    estate->es_const_query_cxt = queryCxt; /* set to tmpCxt, will be reset at each query */
+    estate->es_range_table = NIL;
+    ResetOpfusionExecutorState(estate);
+
+    /*
+     * Return the executor state structure
+     */
+    MemoryContextSwitchTo(oldcontext);
+
+    return estate;
+}
+
+/* free the estate memory in each query */
+void FreeExecutorStateForOpfusion(EState* estate)
+{
+    /*
+     * Shut down and free any remaining ExprContexts.  We do this explicitly
+     * to ensure that any remaining shutdown callbacks get called (since they
+     * might need to release resources that aren't simply memory within the
+     * per-query memory context).
+     */
+    while (estate->es_exprcontexts) {
+        /*
+         * XXX: seems there ought to be a faster way to implement this than
+         * repeated list_delete(), no?
+         */
+        FreeExprContext((ExprContext*)linitial(estate->es_exprcontexts), true);
+        /* FreeExprContext removed the list link for us */
+    }
+    ResetOpfusionExecutorState(estate);
 }

@@ -9,6 +9,8 @@ truncate DBE_PLDEVELOPER.gs_errors;
 -- basic cases
 --
 -- function normal
+CREATE OR REPLACE FUNCTION set_next_pg_type_oid(OID) RETURNS VOID AS '/GaussDBKernel-server/mppdb_temp_install/lib/postgresql/pg_upgrade_support1' LANGUAGE C STRICT NOT FENCED; 
+
 CREATE OR REPLACE PROCEDURE gourav88(a inout int, b out int, c out int, d in int, e inout int)
 PACKAGE
 AS DECLARE V1 INT;
@@ -276,6 +278,29 @@ array_v1 pack1.array_type1;
 procedure pp1();
 end pack3;
 /
+set check_function_bodies = 'off';
+create or replace function test1(aa int) return arrytype
+is 
+begin
+return null;
+end;
+/
+select name, status, type, src from dbe_pldeveloper.gs_source where name='test1';
+create or replace function aa.test1(aa arrytype) return arrytype
+is 
+begin
+return null;
+end;
+/
+select name, status, type, src from dbe_pldeveloper.gs_source where name='test1';
+create or replace function test2(aa int) return int
+is 
+begin
+a a;
+return arrytype;
+end;
+/
+select  name, status, type, src from dbe_pldeveloper.gs_source where name='test1';
 set behavior_compat_options='skip_insert_gs_source';
 create or replace procedure SkipInsertGsSource
 is
@@ -283,7 +308,12 @@ begin
 null;
 end;
 /
+set behavior_compat_options='';
 set plsql_show_all_error to on;
+set  check_function_bodies to off;
+create or replace procedure test1 is begin null; end;
+/
+set  check_function_bodies to on;
 select name,type,status,src from DBE_PLDEVELOPER.gs_source order by name;
 select name,type,line,src from DBE_PLDEVELOPER.gs_errors order by name;
 drop package if exists pkg4;

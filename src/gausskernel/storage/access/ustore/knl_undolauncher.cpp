@@ -47,13 +47,15 @@
 #include "access/ustore/knl_undoworker.h"
 #include "access/ustore/knl_undorequest.h"
 
+#define InvalidPid ((ThreadId)(-1))
+
 static void UndolauncherSighupHandler(SIGNAL_ARGS);
 static void UndolauncherSigusr2Handler(SIGNAL_ARGS);
 static void UndolauncherSigtermHandler(SIGNAL_ARGS);
 
-static bool UndoLauncherGetWork(UndoWorkInfo work);
+static bool UndoLauncherGetWork(UndoWorkInfo work, int *idx);
 static bool CanLaunchUndoWorker();
-static void StartUndoWorker(UndoWorkInfo work);
+static void StartUndoWorker(UndoWorkInfo work, int idx);
 
 /* SIGHUP: set flag to re-read config file at next convenient time */
 static void UndolauncherSighupHandler(SIGNAL_ARGS)
@@ -91,12 +93,22 @@ static void UndolauncherSigtermHandler(SIGNAL_ARGS)
     errno = saveErrno;
 }
 
-static bool UndoLauncherGetWork(UndoWorkInfo work)
+static bool UndoLauncherGetWork(UndoWorkInfo work, int *idx)
 {
     RollbackRequestsHashEntry *entry = GetNextRollbackRequest();
+    int actualUndoWorkers = Min(g_instance.attr.attr_storage.max_undo_workers, MAX_UNDO_WORKERS);
 
     if (entry == NULL) {
         return false;
+    }
+
+    for (int i = 0; i < actualUndoWorkers; i++) {
+        if (*idx == -1 && !TransactionIdIsValid(t_thrd.undolauncher_cxt.UndoWorkerShmem->undo_worker_status[i].xid)) {
+            *idx = i;
+        }
+        if (t_thrd.undolauncher_cxt.UndoWorkerShmem->undo_worker_status[i].xid == entry->xid) {
+            return false;
+        }
     }
 
     work->xid = entry->xid;
@@ -114,26 +126,43 @@ static bool CanLaunchUndoWorker()
      * is pointing at has been picked up by an undo worker and that
      * we can override the value.
      */
-    uint32 requestIsLaunched = pg_atomic_read_u32(&t_thrd.undolauncher_cxt.UndoWorkerShmem->request_is_launched);
     uint32 activeWorkers = pg_atomic_read_u32(&t_thrd.undolauncher_cxt.UndoWorkerShmem->active_undo_workers);
 
-    return (requestIsLaunched && activeWorkers < (uint32)g_instance.attr.attr_storage.max_undo_workers);
+    return (activeWorkers < (uint32)g_instance.attr.attr_storage.max_undo_workers);
 }
 
 
-static void StartUndoWorker(UndoWorkInfo work)
+static void StartUndoWorker(UndoWorkInfo work, int idx)
 {
-    Assert(pg_atomic_read_u32(&t_thrd.undolauncher_cxt.UndoWorkerShmem->request_is_launched) == 1);
-
     errno_t rc = memcpy_s(t_thrd.undolauncher_cxt.UndoWorkerShmem->rollback_request, sizeof(UndoWorkInfoData), work,
         sizeof(UndoWorkInfoData));
     securec_check(rc, "\0", "\0");
 
-    pg_atomic_sub_fetch_u32(&t_thrd.undolauncher_cxt.UndoWorkerShmem->request_is_launched, 1);
+    int actualUndoWorkers = Min(g_instance.attr.attr_storage.max_undo_workers, MAX_UNDO_WORKERS);
+    const TimestampTz waitTime = 10 * 1000;
+    const int maxRetryTimes = 1000;
+    int retryTimes = 0;
+    if (idx < 0 || idx >= actualUndoWorkers) {
+        ereport(PANIC, (errmsg("Can't find a slot in undo_worker_status, max_undo_workers %d, active_undo_workers %u",
+            g_instance.attr.attr_storage.max_undo_workers,
+            t_thrd.undolauncher_cxt.UndoWorkerShmem->active_undo_workers)));
+    }
 
-    SendPostmasterSignal(PMSIGNAL_START_UNDO_WORKER);
+    t_thrd.undolauncher_cxt.UndoWorkerShmem->undo_worker_status[idx].xid = work->xid;
+    t_thrd.undolauncher_cxt.UndoWorkerShmem->undo_worker_status[idx].startUndoPtr = work->startUndoPtr;
 
-    ereport(LOG, (errmsg("UndoLauncher: Signal TransactionID: %ld", work->xid)));
+    while (!t_thrd.undolauncher_cxt.got_SIGTERM) {
+        bool hit10s = (retryTimes % maxRetryTimes == 0);
+        if (hit10s) {
+            SendPostmasterSignal(PMSIGNAL_START_UNDO_WORKER);
+        }
+        if (!TransactionIdIsValid(t_thrd.undolauncher_cxt.UndoWorkerShmem->undo_worker_status[idx].xid) ||
+            t_thrd.undolauncher_cxt.UndoWorkerShmem->undo_worker_status[idx].pid != InvalidPid) {
+            break;
+        }
+        pg_usleep(waitTime);
+        retryTimes++;
+    };
 }
 
 Size UndoWorkerShmemSize(void)
@@ -152,12 +181,18 @@ void UndoWorkerShmemInit(void)
     if (!found) {
         t_thrd.undolauncher_cxt.UndoWorkerShmem->undo_launcher_pid = 0;
         t_thrd.undolauncher_cxt.UndoWorkerShmem->active_undo_workers = 0;
-        t_thrd.undolauncher_cxt.UndoWorkerShmem->request_is_launched = 1;
 
         InitSharedLatch(&t_thrd.undolauncher_cxt.UndoWorkerShmem->latch);
 
         t_thrd.undolauncher_cxt.UndoWorkerShmem->rollback_request =
             (UndoWorkInfo)((char *)t_thrd.undolauncher_cxt.UndoWorkerShmem + MAXALIGN(sizeof(UndoWorkerShmemStruct)));
+
+        for (int i = 0; i < MAX_UNDO_WORKERS; i++) {
+            t_thrd.undolauncher_cxt.UndoWorkerShmem->undo_worker_status[i].xid = InvalidTransactionId;
+            t_thrd.undolauncher_cxt.UndoWorkerShmem->undo_worker_status[i].pid = InvalidPid;
+            t_thrd.undolauncher_cxt.UndoWorkerShmem->undo_worker_status[i].startUndoPtr = INVALID_UNDO_REC_PTR;
+            t_thrd.undolauncher_cxt.UndoWorkerShmem->undo_worker_status[i].rollbackStartTime = (TimestampTz)0;
+        }
     }
 }
 
@@ -204,7 +239,7 @@ NON_EXEC_STATIC void UndoLauncherMain()
     gspqsignal(SIGUSR2, UndolauncherSigusr2Handler);
     gspqsignal(SIGFPE, FloatExceptionHandler);
     gspqsignal(SIGCHLD, SIG_DFL);
-
+    gspqsignal(SIGURG, print_stack);
     /* Early initialization */
     BaseInit();
 
@@ -263,9 +298,10 @@ NON_EXEC_STATIC void UndoLauncherMain()
 
     while (!t_thrd.undolauncher_cxt.got_SIGTERM) {
         UndoWorkInfoData work;
+        int idx = -1;
 
-        if (CanLaunchUndoWorker() && UndoLauncherGetWork(&work)) {
-            StartUndoWorker(&work);
+        if (CanLaunchUndoWorker() && UndoLauncherGetWork(&work, &idx)) {
+            StartUndoWorker(&work, idx);
             currSleepTime = defaultSleepTime;
         } else {
             /* Wait until sleep time expires or we get some type of signal */

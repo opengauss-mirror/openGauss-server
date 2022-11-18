@@ -34,6 +34,7 @@
 #include "storage/tcap.h"
 
 static bool expression_returns_set_walker(Node* node, void* context);
+static bool expression_rownum_walker(Node* node, void* context);
 static int leftmostLoc(int loc1, int loc2);
 
 /*
@@ -651,6 +652,32 @@ static bool expression_returns_set_walker(Node* node, void* context)
     }
 
     return expression_tree_walker(node, (bool (*)())expression_returns_set_walker, context);
+}
+
+/*
+ * expression_contains_rownum
+ *	  Test whether an expression contains rownum.
+ *
+ * Because we use expression_tree_walker(), this can also be applied to
+ * whole targetlists; it'll produce TRUE if any one of the tlist items
+ * contain rownum.
+ */
+bool expression_contains_rownum(Node* node)
+{
+    return expression_rownum_walker(node, NULL);
+}
+
+static bool expression_rownum_walker(Node* node, void* context)
+{
+    if (node == NULL) {
+        return false;
+    }
+
+    if (IsA(node, Rownum)) {
+        return true;
+    }
+
+    return expression_tree_walker(node, (bool (*)())expression_rownum_walker, context);
 }
 
 /*

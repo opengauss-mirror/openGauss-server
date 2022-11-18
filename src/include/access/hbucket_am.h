@@ -79,7 +79,8 @@ extern void scan_handler_tbl_restrpos(TableScanDesc scan);
 extern void scan_handler_tbl_init_parallel_seqscan(TableScanDesc scan, int32 dop, ScanDirection dir);
 extern TableScanDesc scan_handler_tbl_beginscan_bm(Relation relation, Snapshot snapshot, int nkeys, ScanKey key, ScanState* sstate);
 extern TableScanDesc scan_handler_tbl_beginscan_sampling(Relation relation, Snapshot snapshot, int nkeys, ScanKey key, bool allow_strat, bool allow_sync, ScanState* sstate);
-extern Tuple scan_handler_tbl_getnext(TableScanDesc scan, ScanDirection direction, Relation rel);
+extern Tuple scan_handler_tbl_getnext(TableScanDesc scan, ScanDirection direction, Relation rel,
+    bool* has_cur_xact_write = NULL);
 extern void scan_handler_tbl_endscan(TableScanDesc scan);
 extern void scan_handler_tbl_rescan(TableScanDesc scan, struct ScanKeyData* key, Relation rel,
     bool is_bitmap_rescan = false);

@@ -115,34 +115,84 @@ END;
 /
 call p3_call_stack();
 
---test dbe_utility.get_time
-CREATE OR REPLACE PROCEDURE test_get_time1() 
+CREATE OR REPLACE PROCEDURE p1()
 AS
-declare
-    start_time  bigint;
-    end_time  bigint;
+a integer;
 BEGIN
-    start_time:= dbe_utility.get_time ();
-    pg_sleep(1);
-    end_time:=dbe_utility.get_time ();
-    dbe_output.print_line(end_time - start_time);	
+do $DODO$
+begin
+BEGIN
+raise exception 'ERROR';
+EXCEPTION
+WHEN OTHERS THEN
+raise exception 'ERROR';
+END;
+end$DODO$;
+EXCEPTION
+WHEN OTHERS THEN
+dbe_output.print_line(dbe_utility.format_error_backtrace());
 END;
 /
-call test_get_time1();
+call p1();
+call dbe_utility.format_error_backtrace();
 
-CREATE OR REPLACE PROCEDURE test_get_time5() 
+CREATE OR REPLACE PROCEDURE p1()
+AS
+a integer;
+BEGIN
+BEGIN
+a := 1/0;
+EXCEPTION
+WHEN OTHERS THEN
+a := 1/0;
+END;
+EXCEPTION
+WHEN OTHERS THEN
+dbe_output.print_line(dbe_utility.format_error_backtrace());
+END;
+/
+
+BEGIN
+p1();
+dbe_output.print_line(dbe_utility.format_error_backtrace());
+END;
+/
+
+BEGIN
+do $DODO$
+DECLARE
+a integer;
+BEGIN
+BEGIN
+BEGIN
+a := 1/0;
+EXCEPTION
+WHEN OTHERS THEN
+a := 1/0;
+END;
+EXCEPTION
+WHEN OTHERS THEN
+dbe_output.print_line(dbe_utility.format_error_backtrace());
+END;
+end$DODO$;
+dbe_output.print_line(dbe_utility.format_error_backtrace());
+END;
+/
+
+--test dbe_utility.get_time
+CREATE OR REPLACE PROCEDURE test_get_time()
 AS
 declare
     start_time  bigint;
     end_time  bigint;
 BEGIN
-    start_time:= dbe_utility.get_time ();
-    pg_sleep(5);
-    end_time:=dbe_utility.get_time ();
-    dbe_output.print_line(end_time - start_time);	
+    start_time := dbe_utility.get_time();
+    pg_sleep(1);
+    end_time := dbe_utility.get_time();
+    dbe_output.print_line(trunc((end_time - start_time) / 100));
 END;
 /
-call test_get_time5();
+call test_get_time();
 
 --test dbe_match.edit_distance_similarity
 select dbe_match.edit_distance_similarity('abcd', 'abcd');
@@ -448,7 +498,6 @@ end;
 call test_clob_read();
 
 drop table if exists test_clob;
-
 \c regression;
 drop database IF EXISTS pl_test_pkg_single;
 

@@ -68,7 +68,6 @@ extern void ResourceOwnerConcat(ResourceOwner target, ResourceOwner source);
 extern ResourceOwner ResourceOwnerGetParent(ResourceOwner owner);
 extern ResourceOwner ResourceOwnerGetNextChild(ResourceOwner owner);
 extern const char * ResourceOwnerGetName(ResourceOwner owner);
-extern ResourceOwner ResourceOwnerGetFirstChild(ResourceOwner owner);
 extern MemoryContext ResourceOwnerGetMemCxt(ResourceOwner owner);
 extern void ResourceOwnerNewParent(ResourceOwner owner, ResourceOwner newparent);
 
@@ -120,7 +119,7 @@ extern void ResourceOwnerForgetPlanCacheRef(ResourceOwner owner, CachedPlan* pla
 /* support for tupledesc refcount management */
 extern void ResourceOwnerEnlargeTupleDescs(ResourceOwner owner);
 extern void ResourceOwnerRememberTupleDesc(ResourceOwner owner, TupleDesc tupdesc);
-extern void ResourceOwnerForgetTupleDesc(ResourceOwner owner, TupleDesc tupdesc);
+extern bool ResourceOwnerForgetTupleDesc(ResourceOwner owner, TupleDesc tupdesc);
 
 /* support for snapshot refcount management */
 extern void ResourceOwnerEnlargeSnapshots(ResourceOwner owner);
@@ -154,7 +153,7 @@ extern void ResourceOwnerEnlargePthreadMutex(ResourceOwner owner);
 
 extern void PrintPthreadMutexLeakWarning(pthread_mutex_t* pMutex);
 extern void PrintResourceOwnerLeakWarning();
-extern void ResourceOwnerReleasePthreadMutex();
+extern void ResourceOwnerReleaseAllXactPthreadMutex();
 
 extern void ResourceOwnerEnlargePartitionMapRefs(ResourceOwner owner);
 extern void ResourceOwnerRememberPartitionMapRef(ResourceOwner owner, PartitionMap* partmap);
@@ -198,6 +197,7 @@ extern void ResourceOwnerEnlargeGlobalIsExclusive(ResourceOwner owner);
 extern void ResourceOwnerRememberGlobalIsExclusive(ResourceOwner owner, volatile uint32 *isexclusive);
 extern void ResourceOwnerForgetGlobalIsExclusive(ResourceOwner owner, volatile uint32 *isexclusive);
 
+extern void ResourceOwnerReleasePthreadMutex(ResourceOwner owner, bool isCommit);
 extern void ResourceOwnerReleaseRWLock(ResourceOwner owner, bool isCommit);
 extern void ResourceOwnerReleaseLocalCatCTup(ResourceOwner owner, bool isCommit);
 extern void ResourceOwnerReleaseLocalCatCList(ResourceOwner owner, bool isCommit);
@@ -209,4 +209,5 @@ extern void ResourceOwnerReleaseGlobalBaseEntry(ResourceOwner owner, bool isComm
 extern void ResourceOwnerReleaseGlobalDBEntry(ResourceOwner owner, bool isCommit);
 extern void ResourceOwnerReleaseGlobalIsExclusive(ResourceOwner owner, bool isCommit);
 extern bool CurrentResourceOwnerIsEmpty(ResourceOwner owner);
+extern void ReleaseResownerOutOfTransaction();
 #endif /* RESOWNER_H */

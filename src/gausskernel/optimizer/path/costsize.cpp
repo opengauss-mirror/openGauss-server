@@ -106,6 +106,14 @@
 /* The default value of the column row width */
 #define COL_TUPLE_WIDTH 30
 
+/*
+ * Maximum value for row estimates.  We cap row estimates to this to help
+ * ensure that costs based on these estimates remain within the range of what
+ * double can represent.  add_path() wouldn't act sanely given infinite or NaN
+ * cost values.
+ */
+#define MAXIMUM_ROWCOUNT 1e100
+
 typedef struct {
     PlannerInfo* root;
     QualCost total;
@@ -161,7 +169,7 @@ static inline void get_info_from_rel(
 }
 
 /*
- * Description: estimation the memory info for cstoreinsert and dfsinsert .
+ * Description: estimation the memory info for cstoreinsert.
  *
  * For dfs insert : maxMem = insert memory + sort memory(if has pck). If the table is value partition,
  * we set 2G memory for all dynamic partitions to use. If the table is not partition table,we shoule used
@@ -185,12 +193,11 @@ static inline void get_info_from_rel(
  *	@in modify_mem: is the number of kilobytes of work memory allowed for the sort.
  *   @in dop: set the dop.
  *	@in resultRelOid: the relation to be scanned.
- *   @in isDfsStore: judge whether table is dfs table.
  *	@in mem_info: is operator max and min info used by memory control module.
  *   Return: void
  */
 void cost_insert(Path* path, bool vectorized, Cost input_cost, double tuples, int width, Cost comparison_cost,
-    int modify_mem, int dop, Oid resultRelOid, bool isDfsStore, OpMemInfo* mem_info)
+    int modify_mem, int dop, Oid resultRelOid, OpMemInfo* mem_info)
 {
     Cost startup_cost = input_cost;
     Cost run_cost = 0;
@@ -206,7 +213,6 @@ void cost_insert(Path* path, bool vectorized, Cost input_cost, double tuples, in
     Relation relation;
     int maxBatchRow = MAX_BATCH_ROWS;
     int partialClusterRows = PARTIAL_CLUSTER_ROWS;
-    double sortRows = 1;
 
     /* We should compute the table's partition num and maxBatchRow and pck and index information. */
     if (resultRelOid) {
@@ -228,11 +234,8 @@ void cost_insert(Path* path, bool vectorized, Cost input_cost, double tuples, in
     /* Include the default cost-per-comparison */
     comparison_cost += 2.0 * u_sess->attr.attr_sql.cpu_operator_cost;
 
-    /* if dfs table for insert, the memory is 128MB. If cstore table for insert, the memory is maxBatchRow*width. */
-    if (isDfsStore)
-        output_bytes_insert = DFS_MIN_MEM_SIZE * MEM_KB;
-    else
-        output_bytes_insert = relation_byte_size(maxBatchRow, width, vectorized) * 3;
+    /* If cstore table for insert, the memory is maxBatchRow*width. */
+    output_bytes_insert = relation_byte_size(maxBatchRow, width, vectorized) * 3;
 
     if (output_bytes_insert > modify_mem_bytes) {
         /* CPU costs : Assume about N log2 N comparisons */
@@ -254,64 +257,34 @@ void cost_insert(Path* path, bool vectorized, Cost input_cost, double tuples, in
         }
     }
 
-    if (isDfsStore) {
-        sortRows = tuples > partialClusterRows ? partialClusterRows : tuples;
-        if (mem_info != NULL) {
-            mem_info->opMem = modify_mem;
-            if (hasPck && isValuePartTable) {
-                output_bytes_insert = PARTITION_MAX_SIZE * MEM_KB;
-                output_bytes_pck = relation_byte_size(sortRows, width, vectorized);
-                mem_info->maxMem = output_bytes_pck / MEM_KB + output_bytes_insert / MEM_KB;
-                mem_info->minMem = mem_info->maxMem;
-            } else if (!hasPck && isValuePartTable) {
-                output_bytes = PARTITION_MAX_SIZE * MEM_KB;
-                mem_info->maxMem = output_bytes / MEM_KB;
-                mem_info->minMem = mem_info->maxMem;
-            } else if (hasPck && !isValuePartTable) {
-                output_bytes_pck = relation_byte_size(sortRows, width, vectorized);
-                mem_info->maxMem = (output_bytes_insert + output_bytes_pck) / MEM_KB;
-                mem_info->minMem = output_bytes_insert / MEM_KB + output_bytes_pck / MEM_KB / SORT_MAX_DISK_SIZE;
-            } else {
-                mem_info->maxMem = output_bytes_insert / MEM_KB;
-                mem_info->minMem = output_bytes_insert / MEM_KB;
-            }
-            mem_info->regressCost = compute_sort_disk_cost(input_bytes, mem_info->minMem);
-            MEMCTL_LOG(DEBUG2,
-                "DFS INSERT:The opMem is: %lfKB, the maxMem is: %lfKB, the minMem is: %lfKB",
-                mem_info->opMem,
-                mem_info->maxMem,
-                mem_info->minMem);
+    /* calucate the mem_info for partition\ partition_pck,cstoretable\cstoretable_pck.*/
+    if (mem_info != NULL) {
+        mem_info->opMem = modify_mem;
+        if (hasPck && isPartTable) {
+            /* we will need 2g memory to insert ,4g memory to sort. NOTICE : PARTITION_MAX_SIZE is KB */
+            output_bytes_pck = PARTITION_MAX_SIZE * MEM_KB * 2;
+            output_bytes_insert = PARTITION_MAX_SIZE * MEM_KB;
+            mem_info->maxMem = (output_bytes_pck + output_bytes_insert) / MEM_KB;
+        } else if (!hasPck && isPartTable) {
+            output_bytes = output_bytes_insert;
+            double output_k_bytes = output_bytes / MEM_KB;
+            mem_info->maxMem = (output_k_bytes > PARTITION_MAX_SIZE) ? output_k_bytes : PARTITION_MAX_SIZE;
+        } else if (hasPck && !isPartTable) {
+            output_bytes_pck = relation_byte_size(partialClusterRows, width, vectorized);
+            output_bytes = output_bytes_pck + output_bytes_insert;
+            mem_info->maxMem = output_bytes / MEM_KB;
+        } else {
+            output_bytes = output_bytes_insert;
+            mem_info->maxMem = output_bytes / MEM_KB;
         }
-    } else {
-        /* calucate the mem_info for partition\ partition_pck,cstoretable\cstoretable_pck.*/
-        if (mem_info != NULL) {
-            mem_info->opMem = modify_mem;
-            if (hasPck && isPartTable) {
-                /* we will need 2g memory to insert ,4g memory to sort. NOTICE : PARTITION_MAX_SIZE is KB */
-                output_bytes_pck = PARTITION_MAX_SIZE * MEM_KB * 2;
-                output_bytes_insert = PARTITION_MAX_SIZE * MEM_KB;
-                mem_info->maxMem = (output_bytes_pck + output_bytes_insert) / MEM_KB;
-            } else if (!hasPck && isPartTable) {
-                output_bytes = output_bytes_insert;
-                double output_k_bytes = output_bytes / MEM_KB;
-                mem_info->maxMem = (output_k_bytes > PARTITION_MAX_SIZE) ? output_k_bytes : PARTITION_MAX_SIZE;
-            } else if (hasPck && !isPartTable) {
-                output_bytes_pck = relation_byte_size(partialClusterRows, width, vectorized);
-                output_bytes = output_bytes_pck + output_bytes_insert;
-                mem_info->maxMem = output_bytes / MEM_KB;
-            } else {
-                output_bytes = output_bytes_insert;
-                mem_info->maxMem = output_bytes / MEM_KB;
-            }
 
-            mem_info->minMem = mem_info->maxMem / SORT_MAX_DISK_SIZE;
-            mem_info->regressCost = compute_sort_disk_cost(input_bytes, mem_info->minMem);
-            MEMCTL_LOG(DEBUG2,
-                "CSTORE INSERT:The opMem is: %lfKB, the maxMem is: %lfKB, the minMem is: %lfKB",
-                mem_info->opMem,
-                mem_info->maxMem,
-                mem_info->minMem);
-        }
+        mem_info->minMem = mem_info->maxMem / SORT_MAX_DISK_SIZE;
+        mem_info->regressCost = compute_sort_disk_cost(input_bytes, mem_info->minMem);
+        MEMCTL_LOG(DEBUG2,
+            "CSTORE INSERT:The opMem is: %lfKB, the maxMem is: %lfKB, the minMem is: %lfKB",
+            mem_info->opMem,
+            mem_info->maxMem,
+            mem_info->minMem);
     }
 
     /*
@@ -329,9 +302,9 @@ void cost_insert(Path* path, bool vectorized, Cost input_cost, double tuples, in
 }
 
 /*
- * Description: estimation the memory info for cstoredelete and dfsdelete .
+ * Description: estimation the memory info for cstoredelete.
  *
- * For delete : maxMem = delete mem(for sort). It is same between cstoredelete and dfsdelete .
+ * For delete : maxMem = delete mem(for sort). It is same between cstoredelete.
  * sortMem =  partialClusterRows(tuples) * column. If the mem is less than 16MB,maxMem >=16MB.
  * Default partialClusterRows is 420w. if tuples number is less than 420w, the true values(tuples number)
  * is used to caculate the memory.
@@ -346,12 +319,11 @@ void cost_insert(Path* path, bool vectorized, Cost input_cost, double tuples, in
  *	@in modify_mem: is the number of kilobytes of work memory allowed for the sort.
  *   @in dop: set the dop.
  *	@in resultRelOid: the relation to be scanned.
- *   @in isDfsStore: judge whether table is dfs table.
  *	@in mem_info: is operator max and min info used by memory control module.
  *   Return: void
  */
 void cost_delete(Path* path, bool vectorized, Cost input_cost, double tuples, int width, Cost comparison_cost,
-    int modify_mem, int dop, Oid resultRelOid, bool isDfsStore, OpMemInfo* mem_info)
+    int modify_mem, int dop, Oid resultRelOid, OpMemInfo* mem_info)
 {
     Cost startup_cost = input_cost;
     Cost run_cost = 0;
@@ -430,7 +402,7 @@ void cost_delete(Path* path, bool vectorized, Cost input_cost, double tuples, in
 }
 
 /*
- * Description: estimation the memory info for cstoreupdate and dfsupdate . update = delete +insert(insert + sort).
+ * Description: estimation the memory info for cstoreupdate. update = delete +insert(insert + sort).
  * So, we should caculate the delete mem(sort mem) and insert mem(insert and sort). Here, the deleted
  * memory can be reused for the pck sort memory when insert, so regardless of whether there is a pck,
  * we need to calculate the memory required by sort. So, update mem = sortMem(delete) + insertMem.
@@ -457,12 +429,11 @@ void cost_delete(Path* path, bool vectorized, Cost input_cost, double tuples, in
  *	@in modify_mem: is the number of kilobytes of work memory allowed for the sort.
  *   @in dop: set the dop.
  *	@in resultRelOid: the relation to be scanned.
- *   @in isDfsStore: judge whether table is dfs table.
  *	@in mem_info: is operator max and min info used by memory control module.
  *   Return: void
  */
 void cost_update(Path* path, bool vectorized, Cost input_cost, double tuples, int width, Cost comparison_cost,
-    int modify_mem, int dop, Oid resultRelOid, bool isDfsStore, OpMemInfo* mem_info)
+    int modify_mem, int dop, Oid resultRelOid, OpMemInfo* mem_info)
 {
     Cost startup_cost = input_cost;
     Cost run_cost = 0;
@@ -499,14 +470,10 @@ void cost_update(Path* path, bool vectorized, Cost input_cost, double tuples, in
     /* Include the default cost-per-comparison */
     comparison_cost += 2.0 * u_sess->attr.attr_sql.cpu_operator_cost;
 
-    /* If dfs table for insert, the memory is 128MB.
-     * If dfs part table for insert, the memory is 2GB.
+    /*
      * If cstore table for insert, the memory is maxBatchRow*width.
      */
-    if (isDfsStore)
-        output_bytes_insert = isValuePartTable ? PARTITION_MAX_SIZE * MEM_KB : DFS_MIN_MEM_SIZE * MEM_KB;
-    else
-        output_bytes_insert = relation_byte_size(maxBatchRow, width, vectorized) * 3;
+    output_bytes_insert = relation_byte_size(maxBatchRow, width, vectorized) * 3;
 
     if (output_bytes_insert > modify_mem_bytes) {
         /* CPU costs : Assume about N log2 N comparisons */
@@ -532,48 +499,32 @@ void cost_update(Path* path, bool vectorized, Cost input_cost, double tuples, in
      * calucate the mem_info for partition\ cstoretable. delete memory + insert memory.
      * delete sort will be reused to insert sort.
      */
-    if (isDfsStore) {
-        if (mem_info != NULL) {
-            mem_info->opMem = modify_mem;
+    if (mem_info != NULL) {
+        mem_info->opMem = modify_mem;
+        if (isPartTable) {
+            /* We will need 2g memory to insert ,4g memory to sort.*/
+            output_bytes_pck = PARTITION_MAX_SIZE * MEM_KB * 2;
+            output_bytes_insert = PARTITION_MAX_SIZE * MEM_KB;
+            mem_info->maxMem = (output_bytes_pck + output_bytes_insert) / MEM_KB;
+            mem_info->minMem = output_bytes_insert / MEM_KB + output_bytes_pck / SORT_MAX_DISK_SIZE / MEM_KB;
+            MEMCTL_LOG(DEBUG2,
+                "CSTORE PART TABLE UPDATE:The opMem is: %lfKB, the maxMem is: %lfKB, the minMem is: %lfKB",
+                mem_info->opMem,
+                mem_info->maxMem,
+                mem_info->minMem);
+        } else {
             output_bytes_pck = relation_byte_size(partialClusterRows, width, vectorized);
             output_bytes = output_bytes_pck + output_bytes_insert;
             mem_info->maxMem = output_bytes / MEM_KB;
             mem_info->minMem = output_bytes_insert / MEM_KB + output_bytes_pck / SORT_MAX_DISK_SIZE / MEM_KB;
-            mem_info->regressCost = compute_sort_disk_cost(input_bytes, mem_info->minMem);
             MEMCTL_LOG(DEBUG2,
-                "DFS UPDATE:The opMem is: %lfKB, the maxMem is: %lfKB, the minMem is: %lfKB",
+                "CSTORE TABLE UPDATE:The opMem is: %lfKB, the maxMem is: %lfKB, the minMem is: %lfKB",
                 mem_info->opMem,
                 mem_info->maxMem,
                 mem_info->minMem);
         }
-    } else {
-        if (mem_info != NULL) {
-            mem_info->opMem = modify_mem;
-            if (isPartTable) {
-                /* We will need 2g memory to insert ,4g memory to sort.*/
-                output_bytes_pck = PARTITION_MAX_SIZE * MEM_KB * 2;
-                output_bytes_insert = PARTITION_MAX_SIZE * MEM_KB;
-                mem_info->maxMem = (output_bytes_pck + output_bytes_insert) / MEM_KB;
-                mem_info->minMem = output_bytes_insert / MEM_KB + output_bytes_pck / SORT_MAX_DISK_SIZE / MEM_KB;
-                MEMCTL_LOG(DEBUG2,
-                    "CSTORE PART TABLE UPDATE:The opMem is: %lfKB, the maxMem is: %lfKB, the minMem is: %lfKB",
-                    mem_info->opMem,
-                    mem_info->maxMem,
-                    mem_info->minMem);
-            } else {
-                output_bytes_pck = relation_byte_size(partialClusterRows, width, vectorized);
-                output_bytes = output_bytes_pck + output_bytes_insert;
-                mem_info->maxMem = output_bytes / MEM_KB;
-                mem_info->minMem = output_bytes_insert / MEM_KB + output_bytes_pck / SORT_MAX_DISK_SIZE / MEM_KB;
-                MEMCTL_LOG(DEBUG2,
-                    "CSTORE TABLE UPDATE:The opMem is: %lfKB, the maxMem is: %lfKB, the minMem is: %lfKB",
-                    mem_info->opMem,
-                    mem_info->maxMem,
-                    mem_info->minMem);
-            }
 
-            mem_info->regressCost = compute_sort_disk_cost(input_bytes, mem_info->minMem);
-        }
+        mem_info->regressCost = compute_sort_disk_cost(input_bytes, mem_info->minMem);
     }
 
     /*
@@ -851,70 +802,6 @@ void cost_cstorescan(Path* path, PlannerInfo* root, RelOptInfo* baserel)
     if (!u_sess->attr.attr_sql.enable_seqscan)
         path->total_cost *=
             (g_instance.cost_cxt.disable_cost_enlarge_factor * g_instance.cost_cxt.disable_cost_enlarge_factor);
-}
-
-/*
- * Determines and returns the cost of scanning a DFS relation.
- * path:    The scan path.
- * root:    The PlannerInfo struct.
- * baserel: The relation to be scanned.
- */
-void cost_dfsscan(Path* path, PlannerInfo* root, RelOptInfo* baserel)
-{
-    Cost startup_cost = 0;
-    Cost run_cost = 0;
-    double spc_seq_page_cost;
-    Cost cpu_per_tuple = 0.0;
-    int dop = SET_DOP(path->dop);
-
-    /*
-     * Should only be applied to base relations.
-     */
-    AssertEreport(
-        baserel->relid > 0, MOD_OPT, "The relid is invalid when determining the cost of scanning a DFS relation.");
-    AssertEreport(baserel->rtekind == RTE_RELATION,
-        MOD_OPT,
-        "Only base relation can be supported when determining the cost of scanning a DFS relation.");
-
-    set_rel_path_rows(path, baserel, NULL);
-    set_parallel_path_rows(path);
-
-    /*
-     * Fetch estimated page cost for tablespace containing table.
-     */
-    get_tablespace_page_costs(baserel->reltablespace, NULL, &spc_seq_page_cost);
-
-    startup_cost = baserel->baserestrictcost.startup;
-    /* Parallelize start up cost. */
-    if (!u_sess->attr.attr_sql.enable_seqscan)
-        startup_cost += g_instance.cost_cxt.disable_cost;
-
-    /*
-     * When we parallel the scan node, then the disk costs and cpu costs
-     * wiil be equal division to all parallelism thread.
-     */
-    run_cost += u_sess->opt_cxt.smp_thread_cost * (dop - 1);
-    cpu_per_tuple =
-        u_sess->attr.attr_sql.cpu_tuple_cost / COL_TUPLE_COST_MULTIPLIER + baserel->baserestrictcost.per_tuple;
-
-    run_cost += (cpu_per_tuple * RELOPTINFO_LOCAL_FIELD(root, baserel, tuples)) / dop +
-                (spc_seq_page_cost * baserel->pages) / dop;
-
-    path->startup_cost = startup_cost;
-    path->total_cost = startup_cost + run_cost;
-    path->stream_cost = 0;
-
-    if (!u_sess->attr.attr_sql.enable_seqscan)
-        path->total_cost *=
-            (g_instance.cost_cxt.disable_cost_enlarge_factor * g_instance.cost_cxt.disable_cost_enlarge_factor);
-
-    /*
-     * data redistribution for DFS table.
-     */
-    if (true == u_sess->attr.attr_sql.enable_cluster_resize && root->query_level == 1 &&
-        root->parse->commandType == CMD_INSERT) {
-        root->dataDestRelIndex = baserel->relid;
-    }
 }
 
 #ifdef ENABLE_MULTIPLE_NODES
@@ -1514,6 +1401,48 @@ static double get_indexpath_pages(Path* bitmapqual)
 }
 
 /*
+ * has_lossy_pages
+ *		Judge whether there are lossy pages.
+ */
+bool has_lossy_pages(RelOptInfo *baserel, const double &pages_fetched, double &lossy_pages, double &exact_pages)
+{
+    if (ENABLE_SQL_BETA_FEATURE(DISABLE_BITMAP_COST_WITH_LOSSY_PAGES)) {
+        return false;
+    }
+
+    /*
+     * Calculate the number of pages fetched from the heap.  Then based on
+     * current work_mem estimate get the estimated maxentries in the bitmap.
+     * (Note that we always do this calculation based on the number of pages
+     * that would be fetched in a single iteration, even if loop_count > 1.
+     * That's correct, because only that number of entries will be stored in
+     * the bitmap at one time.)
+     */
+    double heap_pages = Min(pages_fetched, baserel->pages);
+    const long work_mem_size = u_sess->attr.attr_memory.work_mem * 1024L;
+    long maxentries = tbm_calculate_entries(work_mem_size);
+    if (maxentries >= heap_pages) {
+        return false;
+    }
+
+    /*
+     * Crude approximation of the number of lossy pages.  Because of the
+     * way tbm_lossify() is coded, the number of lossy pages increases
+     * very sharply as soon as we run short of memory; this formula has
+     * that property and seems to perform adequately in testing, but it's
+     * possible we could do better somehow.
+     */
+    const long half_entry_num = maxentries / 2;
+    lossy_pages = Max(0, heap_pages - half_entry_num);
+    exact_pages = heap_pages - lossy_pages;
+
+    if (lossy_pages <= 0) {
+        return false;
+    }
+    return true;
+}
+
+/*
  * cost_bitmap_heap_scan
  *	  Determines and returns the cost of scanning a relation using a bitmap
  *	  index-then-heap plan.
@@ -1639,6 +1568,26 @@ void cost_bitmap_heap_scan(
         pages_fetched = T;
     } else {
         pages_fetched = ceil(pages_fetched);
+    }
+
+    double lossy_pages = 0;
+    double exact_pages = 0;
+    if (has_lossy_pages(baserel, pages_fetched, lossy_pages, exact_pages)) {
+        /*
+         * If there are lossy pages then recompute the  number of tuples
+         * processed by the bitmap heap node.  We assume here that the chance
+         * of a given tuple coming from an exact page is the same as the
+         * chance that a given page is exact.  This might not be true, but
+         * it's not clear how we can do any better.
+         */
+        double heap_pages = Min(pages_fetched, baserel->pages);
+        double nrows = indexSelectivity * (exact_pages / heap_pages) * baserel->tuples +
+                       (lossy_pages / heap_pages) * baserel->tuples;
+        if (nrows > MAXIMUM_ROWCOUNT || isnan(nrows)) {
+            tuples_fetched = MAXIMUM_ROWCOUNT;
+        } else {
+            tuples_fetched = clamp_row_est(nrows);
+        }
     }
 
     /*
@@ -2759,6 +2708,10 @@ void cost_limit(Plan* plan, Plan* lefttree, int64 offset_est, int64 count_est)
      *       used if default_limit_rows is -0.1.
      * Direct adjustment when positive:
      *  e.g. 100 is used if default_limit_rows is 100.
+     *
+     * For offset as parameter, we assume that norally the offset will not exceed
+     * 10000 rows. This is somewhat ad-hoc but it is not worthy to add another
+     * guc.
      */
     if (offset_est != 0) {
         double offset_rows;
@@ -2768,8 +2721,9 @@ void cost_limit(Plan* plan, Plan* lefttree, int64 offset_est, int64 count_est)
             if (is_replicated_plan(lefttree) && is_execute_on_datanodes(lefttree)) {
                 offset_rows *= ng_get_dest_num_data_nodes(lefttree);
             }
-        } else
-            offset_rows = clamp_row_est(lefttree->plan_rows * 0.10);
+        } else {
+            offset_rows = Min(max_unknown_offset, clamp_row_est(lefttree->plan_rows * 0.10));
+        }
         if (offset_rows > lefttree->plan_rows)
             offset_rows = lefttree->plan_rows;
         if (plan->plan_rows > 0)

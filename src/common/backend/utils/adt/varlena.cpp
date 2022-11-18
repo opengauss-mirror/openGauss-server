@@ -634,12 +634,18 @@ Datum textin(PG_FUNCTION_ARGS)
 Datum textout(PG_FUNCTION_ARGS)
 {
     Datum txt = PG_GETARG_DATUM(0);
-    if (VARATT_IS_HUGE_TOAST_POINTER(DatumGetPointer(txt))) {
-        int len = strlen("<CLOB>") + 1;
-        char *res = (char *)palloc(len);
-        errno_t rc = strcpy_s(res, len, "<CLOB>");
-        securec_check_c(rc, "\0", "\0");
-        PG_RETURN_CSTRING(res);
+    if (unlikely(VARATT_IS_HUGE_TOAST_POINTER(DatumGetPointer(txt)))) {
+        if (t_thrd.xact_cxt.callPrint) {
+            int len = strlen("<CLOB>") + 1;
+            char *res = (char *)palloc(len);
+            errno_t rc = strcpy_s(res, len, "<CLOB>");
+            securec_check_c(rc, "\0", "\0");
+            PG_RETURN_CSTRING(res);
+        } else {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("textout() could not support larger than 1GB clob/blob data"),
+                    errcause("parameter larger than 1GB"), erraction("parameter must less than 1GB")));
+        }
     }
     PG_RETURN_CSTRING(TextDatumGetCString(txt));
 }
@@ -997,7 +1003,11 @@ static int charlen_to_bytelen(const char* p, int n)
 Datum text_substr(PG_FUNCTION_ARGS)
 {
     text* result = NULL;
-
+    
+    if (!PG_ARGISNULL(0)  &&VARATT_IS_HUGE_TOAST_POINTER(PG_GETARG_TEXT_PP(0))) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("text_substr could not support more than 1GB clob/blob data")));
+    }
     result = text_substring(PG_GETARG_DATUM(0), PG_GETARG_INT32(1), PG_GETARG_INT32(2), false);
 
     PG_RETURN_TEXT_P(result);
@@ -2328,6 +2338,9 @@ static int varstrfastcmp_locale(Datum x, Datum y, SortSupport ssup)
     bool arg1_match = false;
     VarStringSortSupport* sss = (VarStringSortSupport*)ssup->ssup_extra;
     errno_t rc = EOK;
+
+    FUNC_CHECK_HUGE_POINTER(false, arg1, "sort()");
+    FUNC_CHECK_HUGE_POINTER(false, arg2, "sort()");
 
     /* working state */
     char *a1p = NULL, *a2p = NULL;
@@ -4478,6 +4491,8 @@ Datum split_text(PG_FUNCTION_ARGS)
     int end_posn;
     text* result_text = NULL;
 
+    FUNC_CHECK_HUGE_POINTER(false, inputstring, "split_part()");
+
     /* field number is 1 based */
     if (fldnum < 1)
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("field position must be greater than zero")));
@@ -4959,6 +4974,8 @@ Datum md5_text(PG_FUNCTION_ARGS)
     text* in_text = PG_GETARG_TEXT_PP(0);
     size_t len;
     char hexsum[MD5_HASH_LEN + 1];
+
+    FUNC_CHECK_HUGE_POINTER(false, in_text, "md5()");
 
     /* Calculate the length of the buffer using varlena metadata */
     len = VARSIZE_ANY_EXHDR(in_text);
@@ -6077,6 +6094,8 @@ Datum text_format(PG_FUNCTION_ARGS)
     if (PG_ARGISNULL(0))
         PG_RETURN_NULL();
 
+    FUNC_CHECK_HUGE_POINTER(false, PG_GETARG_TEXT_PP(0), "text_format()");
+
     /* If argument is marked VARIADIC, expand array into elements */
     if (get_fn_expr_variadic(fcinfo->flinfo)) {
         ArrayType* arr = NULL;
@@ -6103,6 +6122,7 @@ Datum text_format(PG_FUNCTION_ARGS)
 
             /* OK, safe to fetch the array value */
             arr = PG_GETARG_ARRAYTYPE_P(1);
+            FUNC_CHECK_HUGE_POINTER(false, PG_GETARG_TEXT_PP(1), "text_format()");
 
             /* Get info about array element type */
             element_type = ARR_ELEMTYPE(arr);
@@ -6615,6 +6635,8 @@ Datum instr_3args(PG_FUNCTION_ARGS)
     text* text_str_to_search = PG_GETARG_TEXT_P(1);
     int32 beg_index = PG_GETARG_INT32(2);
 
+    FUNC_CHECK_HUGE_POINTER(false, text_str, "instr()");
+
     return (Int32GetDatum(text_instr_3args(text_str, text_str_to_search, beg_index)));
 }
 Datum instr_4args(PG_FUNCTION_ARGS)
@@ -6646,6 +6668,8 @@ Datum substrb_with_lenth(PG_FUNCTION_ARGS)
     int32 start = PG_GETARG_INT32(1);
     int32 length = PG_GETARG_INT32(2);
 
+    FUNC_CHECK_HUGE_POINTER(PG_ARGISNULL(0), PG_GETARG_TEXT_PP(0), "regexp()");
+
     int32 total = 0;
     total = toast_raw_datum_size(str) - VARHDRSZ;
     if ((length < 0) || (total == 0) || (start > total) || (start + total < 0)) {
@@ -6669,6 +6693,7 @@ Datum substrb_without_lenth(PG_FUNCTION_ARGS)
     text* result = NULL;
     Datum str = PG_GETARG_DATUM(0);
     int32 start = PG_GETARG_INT32(1);
+    FUNC_CHECK_HUGE_POINTER(PG_ARGISNULL(0), PG_GETARG_TEXT_PP(0), "regexp()");
 
     int32 total = 0;
     total = toast_raw_datum_size(str) - VARHDRSZ;

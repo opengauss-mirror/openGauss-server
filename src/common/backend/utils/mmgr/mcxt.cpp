@@ -82,10 +82,19 @@ static inline void InsertMemoryAllocInfo(const void* pointer, MemoryContext cont
              * Get lock failed means there is some thread get write lock,
              * we could not insert track memory info now, so pass it
              */
-            if (likely(pthread_rwlock_tryrdlock(&g_instance.stat_cxt.track_memory_lock) == 0)) {
-                InsertTrackMemoryInfo(pointer, context, file, line, size);
-                (void)pthread_rwlock_unlock(&g_instance.stat_cxt.track_memory_lock);
+            PG_TRY();
+            {
+                if (likely(pthread_rwlock_trywrlock(&g_instance.stat_cxt.track_memory_lock) == 0)) {
+                    InsertTrackMemoryInfo(pointer, context, file, line, size);
+                    (void)pthread_rwlock_unlock(&g_instance.stat_cxt.track_memory_lock);
+                }
             }
+            PG_CATCH();
+            {
+                (void)pthread_rwlock_unlock(&g_instance.stat_cxt.track_memory_lock);
+                PG_RE_THROW();
+            }
+            PG_END_TRY();
         }
     }
 }
@@ -95,10 +104,19 @@ static inline void RemoveMemoryAllocInfo(const void* pointer, MemoryContext cont
     if (unlikely(g_instance.stat_cxt.track_memory_inited) &&
         unlikely(MemoryContextShouldTrack(context->name))) {
         /* Do not use tryrdlock because it may cause use-after-free */
-        if (likely(pthread_rwlock_rdlock(&g_instance.stat_cxt.track_memory_lock) == 0)) {
-            RemoveTrackMemoryInfo(pointer);
-            (void)pthread_rwlock_unlock(&g_instance.stat_cxt.track_memory_lock);
+        PG_TRY();
+        {
+            if (likely(pthread_rwlock_trywrlock(&g_instance.stat_cxt.track_memory_lock) == 0)) {
+                RemoveTrackMemoryInfo(pointer);
+                (void)pthread_rwlock_unlock(&g_instance.stat_cxt.track_memory_lock);
+            }
         }
+        PG_CATCH();
+        {
+            (void)pthread_rwlock_unlock(&g_instance.stat_cxt.track_memory_lock);
+            PG_RE_THROW();
+        }
+        PG_END_TRY();
     }
 }
 
@@ -107,10 +125,19 @@ static inline void RemoveMemoryContextInfo(MemoryContext context)
     if (unlikely(g_instance.stat_cxt.track_memory_inited) &&
         unlikely(MemoryContextShouldTrack(context->name))) {
         /* Do not use tryrdlock because it may cause use-after-free */
-        if (likely(pthread_rwlock_rdlock(&g_instance.stat_cxt.track_memory_lock) == 0)) {
-            RemoveTrackMemoryContext(context);
-            (void)pthread_rwlock_unlock(&g_instance.stat_cxt.track_memory_lock);
+        PG_TRY();
+        {
+            if (likely(pthread_rwlock_trywrlock(&g_instance.stat_cxt.track_memory_lock) == 0)) {
+                RemoveTrackMemoryContext(context);
+                (void)pthread_rwlock_unlock(&g_instance.stat_cxt.track_memory_lock);
+            }
         }
+        PG_CATCH();
+        {
+            (void)pthread_rwlock_unlock(&g_instance.stat_cxt.track_memory_lock);
+            PG_RE_THROW();
+        }
+        PG_END_TRY();
     }
 }
 

@@ -26,7 +26,7 @@ extern void ShutdownRecoveryTransactionEnvironment(void);
 
 extern void ResolveRecoveryConflictWithSnapshot(TransactionId latestRemovedXid,
                                                 const RelFileNode& node, XLogRecPtr lsn = 0);
-void ResolveRecoveryConflictWithSnapshotOid(TransactionId latestRemovedXid, Oid dbid);
+void ResolveRecoveryConflictWithSnapshotOid(TransactionId latestRemovedXid, Oid dbid, XLogRecPtr lsn);
 extern void ResolveRecoveryConflictWithTablespace(Oid tsid);
 extern void ResolveRecoveryConflictWithDatabase(Oid dbid);
 
@@ -45,7 +45,7 @@ extern void StandbyAcquireAccessExclusiveLock(TransactionId xid, Oid dbOid, Oid 
 extern void StandbyReleaseLockTree(TransactionId xid, int nsubxids, TransactionId* subxids);
 extern void StandbyReleaseAllLocks(void);
 extern void StandbyReleaseOldLocks(TransactionId oldestRunningXid);
-extern bool HasStandbyLocks();
+extern void InitRecoveryLockHash();
 
 extern bool standbyWillTouchStandbyLocks(XLogReaderState* record);
 
@@ -65,6 +65,15 @@ typedef struct xl_standby_locks {
     int nlocks;                                   /* number of entries in locks array */
     xl_standby_lock locks[FLEXIBLE_ARRAY_MEMBER]; /* VARIABLE LENGTH ARRAY */
 } xl_standby_locks;
+
+/*
+ * Keep track of all the locks owned by a given transaction.
+ */
+typedef struct RecoveryLockListsEntry {
+	TransactionId xid;
+	List	   *locks;
+} RecoveryLockListsEntry;
+
 
 #define MinSizeOfXactStandbyLocks offsetof(xl_standby_locks, locks)
 

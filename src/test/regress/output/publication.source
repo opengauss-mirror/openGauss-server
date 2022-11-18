@@ -37,6 +37,14 @@ SELECT pg_delete_audit('1012-11-10', '3012-11-11');
 
 --enable publication and subscription audit
 \! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_system_object=16777215" > /dev/null 2>&1
+--enable recyclebin for depency test when drop table
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "enable_recyclebin=on" > /dev/null 2>&1
+select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
 --- prepare
 CREATE ROLE regress_publication_user LOGIN SYSADMIN PASSWORD 'Abcdef@123';
 CREATE ROLE regress_publication_user2 LOGIN SYSADMIN PASSWORD 'Abcdef@123';
@@ -47,6 +55,20 @@ CREATE TABLE testpub_tbl2 (id int primary key, data text);
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "testpub_tbl2_pkey" for table "testpub_tbl2"
 CREATE TABLE testpub_tbl3 (id int primary key, data text);
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "testpub_tbl3_pkey" for table "testpub_tbl3"
+CREATE TABLE testpub_ustore (id int primary key, data text) with (storage_type=ustore);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "testpub_ustore_pkey" for table "testpub_ustore"
+--- create publication with ustore
+CREATE PUBLICATION testpub_with_ustore_table FOR TABLE testpub_ustore;
+--- drop table, it will be in recyclebin
+DROP TABLE testpub_ustore;
+select count(*) from gs_recyclebin where rcyoriginname='testpub_ustore';
+ count 
+-------
+     1
+(1 row)
+
+DROP PUBLICATION testpub_with_ustore_table;
+purge table testpub_ustore;
 --- create publication
 CREATE PUBLICATION testpub_default;
 ------ for all tables
@@ -193,6 +215,8 @@ DROP ROLE normal_user;
 SELECT object_name,detail_info FROM pg_query_audit('2022-01-13 9:30:00', '2031-12-12 22:00:00') where type = 'ddl_publication_subscription';
          object_name         |                                  detail_info                                  
 -----------------------------+-------------------------------------------------------------------------------
+ testpub_with_ustore_table   | CREATE PUBLICATION testpub_with_ustore_table FOR TABLE testpub_ustore;
+ testpub_with_ustore_table   | DROP PUBLICATION testpub_with_ustore_table;
  testpub_default             | CREATE PUBLICATION testpub_default;
  testpub_foralltables        | CREATE PUBLICATION testpub_foralltables FOR ALL TABLES;
  testpub_only_tbl1           | CREATE PUBLICATION testpub_only_tbl1 FOR TABLE ONLY testpub_tbl1;
@@ -210,7 +234,7 @@ SELECT object_name,detail_info FROM pg_query_audit('2022-01-13 9:30:00', '2031-1
  testpub_only_tbl1           | DROP PUBLICATION IF EXISTS testpub_only_tbl1;
  testpub_only_insert         | DROP PUBLICATION IF EXISTS testpub_only_insert;
  testpub_multitbls           | DROP PUBLICATION IF EXISTS testpub_multitbls;
-(17 rows)
+(19 rows)
 
 --clear audit log
 SELECT pg_delete_audit('1012-11-10', '3012-11-11');
@@ -220,3 +244,10 @@ SELECT pg_delete_audit('1012-11-10', '3012-11-11');
 (1 row)
 
 \! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_system_object" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "enable_recyclebin" > /dev/null 2>&1
+select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+

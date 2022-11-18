@@ -229,7 +229,7 @@ static void HeapPop(void **array, size_t size,
 static void HeapSort(void **array, size_t size,
                      int(*compare)(const void *, const void *))
 {
-    for (int64 i = (size - 2) / 2; i >= 0; i--) { /* parent node:(size -2) / 2 */
+    for (int64 i = ((int64)size - 2) / 2; i >= 0; i--) { /* parent node:(size -2) / 2 */
         HeapAdjust(array, size, i, compare);
     }
 

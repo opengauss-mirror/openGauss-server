@@ -178,11 +178,8 @@ void CleanUndoFileDirectory(UndoPersistence upersistence)
 {
     char dir[UNDO_FILE_DIR_LEN];
     GetUndoFileDirectory(dir, UNDO_FILE_DIR_LEN, upersistence);
-    if (rmdir(dir) < 0 && errno != ENOENT) {
-        /* try again */
-        if ((rmdir(dir) < 0) && (errno != ENOENT)) {
-            ereport(WARNING, (errmsg(UNDOFORMAT("could not remove file \"%s\": %m."), dir)));
-        }
+    if (!rmtree(dir, false)) {
+        ereport(WARNING, (errmsg(UNDOFORMAT("could not remove file \"%s\": %m."), dir)));
     }
     return;
 }
@@ -227,7 +224,7 @@ static BlockNumber GetUndoFileBlocks(SMgrRelation reln, ForkNumber forknum, cons
 
     if (len % BLCKSZ != 0) {
         CloseUndoFile(reln, forknum, InvalidBlockNumber);
-        ereport(ERROR, (errmsg(UNDOFORMAT("The expected size of file \"%s\" is %d, but the actual size is %ld."),
+        ereport(WARNING, (errmsg(UNDOFORMAT("The expected size of file \"%s\" is %d, but the actual size is %ld."),
             fileName, undoFileSize, len)));
     }
 
@@ -297,7 +294,7 @@ void ExtendUndoFile(SMgrRelation reln, ForkNumber forknum, BlockNumber blockno, 
         }
     }
 
-    if (fstat(GetVfdCache()[fd].fd, &statBuffer) < 0) {
+    if (fstat(GetVfdCache(false)[fd].fd, &statBuffer) < 0) {
         CloseUndoFile(reln, forknum, InvalidBlockNumber);
         ereport(ERROR, (errmsg(UNDOFORMAT("could not stat file \"%s\": %m."), path)));
     }
@@ -394,7 +391,6 @@ static UndoFileState *OpenUndoFile(SMgrRelation reln, ForkNumber forknum, BlockN
         if (fd < 0) {
             CloseUndoFile(reln, forknum, InvalidBlockNumber);
             if (t_thrd.undo_cxt.fetchRecord == true) {
-                t_thrd.undo_cxt.fetchRecord = false;
                 if (t_thrd.storage_cxt.InProgressBuf != NULL) {
                     Buffer buffer = BufferDescriptorGetBuffer(t_thrd.storage_cxt.InProgressBuf);
                     TerminateBufferIO(t_thrd.storage_cxt.InProgressBuf, false, BM_VALID);
@@ -625,7 +621,7 @@ int SyncUndoFile(const FileTag *tag, char *path)
     UndoFileState *state = OpenUndoFile(reln, tag->forknum,
         tag->segno * undoFileBlocks, EXTENSION_RETURN_NULL);
     if (state == NULL) {
-        return -1;
+        return 0;
     }
 
     return FileSync(state->file, WAIT_EVENT_UNDO_FILE_SYNC);

@@ -155,7 +155,7 @@ extern TupleDesc CreateTupleDescCopy(TupleDesc tupdesc);
 
 extern TupleDesc CreateTupleDescCopyConstr(TupleDesc tupdesc);
 
-extern void FreeTupleDesc(TupleDesc tupdesc);
+extern void FreeTupleDesc(TupleDesc tupdesc, bool need_check = true);
 
 extern void IncrTupleDescRefCount(TupleDesc tupdesc);
 extern void DecrTupleDescRefCount(TupleDesc tupdesc);

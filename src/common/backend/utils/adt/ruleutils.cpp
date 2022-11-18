@@ -54,6 +54,7 @@
 #include "commands/defrem.h"
 #include "commands/tablespace.h"
 #include "commands/tablecmds.h"
+#include "client_logic/client_logic.h"
 #include "executor/spi.h"
 #include "executor/spi_priv.h"
 #include "funcapi.h"
@@ -2412,7 +2413,7 @@ static inline bool IsTableVisible(Oid tableoid)
 {
     StringInfoData query;
     initStringInfo(&query);
-    appendStringInfo(&query, "select oid from %s where oid = %u", "pg_class", tableoid);
+    appendStringInfo(&query, "select oid from %s where oid = %u", "pg_catalog.pg_class", tableoid);
     Oid oid = SearchSysTable(query.data);
     pfree_ext(query.data);
     return OidIsValid(oid);
@@ -3124,7 +3125,7 @@ static void pg_get_indexdef_partitions(Oid indexrelid, Form_pg_index idxrec, boo
             AppendOnePartitionIndex(indexrelid, partOid, showTblSpc, &isFirst, buf, isSub);
         }
     }
-    
+
     appendStringInfo(buf, ") ");
 
     heap_close(rel, NoLock);
@@ -3856,7 +3857,7 @@ static inline bool IsUserVisible(Oid roleid)
 {
     StringInfoData query;
     initStringInfo(&query);
-    appendStringInfo(&query, "select oid from %s where oid = %u", "pg_roles", roleid);
+    appendStringInfo(&query, "select oid from %s where oid = %u", "pg_catalog.pg_roles", roleid);
     Oid oid = SearchSysTable(query.data);
     pfree_ext(query.data);
     return OidIsValid(oid);
@@ -4027,7 +4028,7 @@ static inline bool IsFunctionVisible(Oid funcoid)
 {
     StringInfoData query;
     initStringInfo(&query);
-    appendStringInfo(&query, "select pg_namespace.oid from pg_namespace where pg_namespace.oid in "
+    appendStringInfo(&query, "select pg_namespace.oid from pg_catalog.pg_namespace where pg_namespace.oid in "
         "(select pronamespace from pg_proc where pg_proc.oid = %u);", funcoid);
     Oid oid = SearchSysTable(query.data);
     pfree_ext(query.data);
@@ -5876,6 +5877,7 @@ void get_hint_string(HintState* hstate, StringInfo buf)
     get_hint_string_internal(hstate->set_hint, buf);
     get_hint_string_internal(hstate->no_expand_hint, buf);
     get_hint_string_internal(hstate->no_gpc_hint, buf);
+    get_hint_string_internal(hstate->material_subplan_hint, buf);
     foreach (lc, hstate->skew_hint) {
         hint = (Hint*)lfirst(lc);
         if (IsA(hint, SkewHintTransf)) {
@@ -7600,14 +7602,22 @@ static void get_utility_query_def(Query* query, deparse_context* context)
 
                 /* if the column is encrypted, we should convert its data type */
                 if (coldef_enc != NULL && coldef_enc->dest_typname != NULL) {
+                    /* get typename from the oid */
+                    appendStringInfo(buf,
+                        "%s %s ENCRYPTED WITH (DATATYPE_CL=%s,COLUMN_ENCRYPTION_KEY=%s, ENCRYPTION_TYPE = %s)",
+                        quote_identifier(coldef->colname),
+                        format_type_with_typemod(tpname->typeOid, tpname->typemod),
+                        get_typename_by_id(coldef_enc->dest_typname->typeOid),
+                        NameListToString(coldef_enc->column_key_name),
+                        get_encryption_type_name(coldef_enc->columnEncryptionAlgorithmType));
                     tpname = coldef_enc->dest_typname;
+                } else {
+                    /* get typename from the oid */
+                    appendStringInfo(buf,
+                        "%s %s",
+                        quote_identifier(coldef->colname),
+                        format_type_with_typemod(tpname->typeOid, tpname->typemod));
                 }
-
-                /* get typename from the oid */
-                appendStringInfo(buf,
-                    "%s %s",
-                    quote_identifier(coldef->colname),
-                    format_type_with_typemod(tpname->typeOid, tpname->typemod));
 
                 // add the compress mode for this column
                 switch (coldef->cmprs_mode) {

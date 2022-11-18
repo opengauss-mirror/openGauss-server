@@ -59,7 +59,7 @@ void rto_get_standby_info_text(char *info, uint32 max_info_len)
         }
 
         errorno = snprintf_s(info + strlen(info), max_info_len - strlen(info), max_info_len - strlen(info) - 1,
-                             "\n%-30s%-20lu%-20u%-20lu", g_instance.rto_cxt.rto_standby_data[i].id,
+                             "\n%-30s%-20ld%-20d%-20ld", g_instance.rto_cxt.rto_standby_data[i].id,
                              g_instance.rto_cxt.rto_standby_data[i].current_rto, u_sess->attr.attr_storage.target_rto,
                              g_instance.rto_cxt.rto_standby_data[i].current_sleep_time);
         securec_check_ss(errorno, "\0", "\0");
@@ -133,7 +133,7 @@ RTOStandbyData *GetRTOStat(uint32 *num)
         /* use volatile pointer to prevent code rearrangement */
         volatile WalSnd *walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
         SpinLockAcquire(&walsnd->mutex);
-        if (walsnd->pid != 0) {
+        if (walsnd->pid != 0 && walsnd->sendRole == SNDROLE_PRIMARY_STANDBY) {
             char *standby_names = (char *)(result[readWalSnd].id);
             rc = strncpy_s(standby_names, IP_LEN, g_instance.rto_cxt.rto_standby_data[i].id,
                            strlen(g_instance.rto_cxt.rto_standby_data[i].id));

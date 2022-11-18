@@ -12,8 +12,6 @@ begin
   end loop;
 end;
 $$ language plpgsql;
-
-
 select insert_mm('2020-05-1');
  insert_mm 
 -----------

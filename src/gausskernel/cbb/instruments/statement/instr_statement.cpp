@@ -75,7 +75,7 @@
 
 #define STATEMENT_DETAILS_HEAD_SIZE (1)     /* [VERSION] */
 #define INSTR_STMT_UNIX_DOMAIN_PORT (-1)
-#define INSTR_STATEMENT_ATTRNUM 52
+#define INSTR_STATEMENT_ATTRNUM 53
 
 /* support different areas in stmt detail column */
 #define STATEMENT_DETAIL_TYPE_LEN (1)
@@ -357,6 +357,7 @@ static void ProcessSignal(void)
      */
     (void)gspqsignal(SIGHUP, statement_sighup_handler);
     (void)gspqsignal(SIGINT, SIG_IGN);
+    (void)gspqsignal(SIGURG, print_stack);
     (void)gspqsignal(SIGTERM, statement_exit); /* cancel current query and exit */
     (void)gspqsignal(SIGQUIT, quickdie);
     (void)gspqsignal(SIGUSR1, procsignal_sigusr1_handler);
@@ -447,6 +448,31 @@ static void set_stmt_lock_summary(const LockSummaryStat *lock_summary, Datum val
     values[(*i)++] = Int64GetDatum(lock_summary->lwlock_wait_time);
 }
 
+static void set_stmt_advise(StatementStatContext* statementInfo, Datum values[], bool nulls[], int* i)
+{
+    if (statementInfo->cause_type == 0)
+        nulls[(*i)++] = true;
+    else {
+        errno_t rc;
+        char causeInfo[STRING_MAX_LEN];
+        rc = memset_s(causeInfo, sizeof(causeInfo), 0, sizeof(causeInfo));
+        securec_check(rc, "\0", "\0");
+        if (statementInfo->cause_type & NUM_F_TYPECASTING) {
+            rc = strcat_s(causeInfo, sizeof(causeInfo), "Cast Function Cause Index Miss. ");
+            securec_check(rc, "\0", "\0");
+        }
+        if (statementInfo->cause_type & NUM_F_LIMIT) {
+            rc = strcat_s(causeInfo, sizeof(causeInfo), "Limit too much rows.");
+            securec_check(rc, "\0", "\0");
+        }
+        if (statementInfo->cause_type & NUM_F_LEAKPROOF) {
+            rc = strcat_s(causeInfo, sizeof(causeInfo), "Proleakproof of function is false.");
+            securec_check(rc, "\0", "\0");
+        }
+        values[(*i)++] = CStringGetTextDatum(causeInfo);
+    }
+}
+
 static HeapTuple GetStatementTuple(Relation rel, StatementStatContext* statementInfo,
     const knl_u_statement_context* statementCxt, bool* isSlow = NULL)
 {
@@ -521,6 +547,9 @@ static HeapTuple GetStatementTuple(Relation rel, StatementStatContext* statement
     }
 
     SET_TEXT_VALUES(statementInfo->trace_id, i++);
+
+    set_stmt_advise(statementInfo, values, nulls, &i);
+
     Assert(INSTR_STATEMENT_ATTRNUM == i);
     return heap_form_tuple(RelationGetDescr(rel), values, nulls);
 }
@@ -564,6 +593,7 @@ bool check_statement_retention_time(char** newval, void** extra, GucSource sourc
 
     if (res->length != STATEMENT_SQL_KIND) {
         GUC_check_errdetail("attr num:%d is error,track_stmt_retention_time attr is 2", res->length);
+        list_free_deep(res);
         return false;
     }
 
@@ -573,17 +603,20 @@ bool check_statement_retention_time(char** newval, void** extra, GucSource sourc
     if (!StrToInt32((char*)linitial(res), &full_sql_retention_sec) ||
         !StrToInt32((char*)lsecond(res), &slow_query_retention_days)) {
         GUC_check_errdetail("invalid input syntax");
+        list_free_deep(res);
         return false;
     }
 
     if (slow_query_retention_days < 0 || slow_query_retention_days > MAX_SLOW_QUERY_RETENSION_DAYS) {
         GUC_check_errdetail("slow_query_retention_days:%d is out of range [%d, %d].",
             slow_query_retention_days, 0, MAX_SLOW_QUERY_RETENSION_DAYS);
+        list_free_deep(res);
         return false;
     }
     if (full_sql_retention_sec < 0 || full_sql_retention_sec > MAX_FULL_SQL_RETENSION_SEC) {
         GUC_check_errdetail("full_sql_retention_sec:%d is out of range [%d, %d].",
             full_sql_retention_sec, 0, MAX_FULL_SQL_RETENSION_SEC);
+        list_free_deep(res);
         return false;
     }
     list_free_deep(res);
@@ -943,6 +976,7 @@ static void SetupSignal(void)
     (void)gspqsignal(SIGTTOU, SIG_DFL);
     (void)gspqsignal(SIGCONT, SIG_DFL);
     (void)gspqsignal(SIGWINCH, SIG_DFL);
+    (void)gspqsignal(SIGURG, print_stack);
 
     gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
     (void)gs_signal_unblock_sigusr2();
@@ -2016,7 +2050,10 @@ void instr_stmt_report_query(uint64 unique_query_id)
     CURRENT_STMT_METRIC_HANDLE->unique_query_id = unique_query_id;
     CURRENT_STMT_METRIC_HANDLE->unique_sql_cn_id = u_sess->unique_sql_cxt.unique_sql_cn_id;
 
-    if (likely(!is_local_unique_sql() || CURRENT_STMT_METRIC_HANDLE->query)) {
+    if (likely(!is_local_unique_sql() || 
+        (!u_sess->attr.attr_common.track_stmt_parameter && CURRENT_STMT_METRIC_HANDLE->query) ||
+        (u_sess->attr.attr_common.track_stmt_parameter && 
+         (u_sess->pbe_message == PARSE_MESSAGE_QUERY || u_sess->pbe_message == BIND_MESSAGE_QUERY)))) {
         return;
     }
 
@@ -2881,4 +2918,29 @@ Datum standby_statement_history(PG_FUNCTION_ARGS)
 Datum standby_statement_history_1v(PG_FUNCTION_ARGS)
 {
     return standby_statement_history(fcinfo);
+}
+
+void instr_stmt_report_cause_type(uint32 type)
+{
+    CHECK_STMT_HANDLE();
+
+    if (type & NUM_F_TYPECASTING)
+        CURRENT_STMT_METRIC_HANDLE->cause_type |= NUM_F_TYPECASTING;
+    if (type & NUM_F_LIMIT)
+        CURRENT_STMT_METRIC_HANDLE->cause_type |= NUM_F_LIMIT;
+    if (type & NUM_F_LEAKPROOF)
+        CURRENT_STMT_METRIC_HANDLE->cause_type |= NUM_F_LEAKPROOF;
+}
+
+bool instr_stmt_plan_need_report_cause_type()
+{
+    if (CURRENT_STMT_METRIC_HANDLE == NULL || CURRENT_STMT_METRIC_HANDLE->cause_type == 0)
+        return false;
+
+    return true;
+}
+
+uint32 instr_stmt_plan_get_cause_type()
+{
+    return CURRENT_STMT_METRIC_HANDLE->cause_type;
 }

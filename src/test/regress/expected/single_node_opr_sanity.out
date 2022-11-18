@@ -1588,6 +1588,7 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  9988 | tdigest_merge_to_one
  9989 | tdigest_merge
  9990 | percentile_of_value
+ 9998 | gs_stack
  9999 | pg_test_err_contain_err
 --?.*
 

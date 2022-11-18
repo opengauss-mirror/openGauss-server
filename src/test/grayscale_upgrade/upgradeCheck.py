@@ -211,6 +211,11 @@ class Pterodb():
 
     def spliceSqlFile(self, fileDir, scriptType="_"):
         try:
+            # Versions in white list are allowed to exist under both openGauss and privateGauss upgrade sql dir.
+            # Since upgrade check in default takes privateGauss sql file, anyone who adds new version into this
+            # white list should test openGauss upgrade sql by themselves.
+            commonVersionWhiteList = ["407", "445", "467", "565", "575"]
+
             NewVersionNum = self.getNewVersionNum()
             BaseVersionNum = self.upgrade_from
             fileAllList = os.listdir(fileDir)
@@ -218,10 +223,16 @@ class Pterodb():
             keyElement = []
             if fileDir != check_upgrade_path:
                 privateFileAllList = os.listdir(private_dict[fileDir])
-                commonScriptList = list(set(fileAllList) & set(privateFileAllList))
-                commonScriptList = [script for script in  commonScriptList if "407" not in script]
-                commonScriptList = [script for script in  commonScriptList if "445" not in script]
-                commonScriptList = [script for script in  commonScriptList if "467" not in script]
+                tmpList = list(set(fileAllList) & set(privateFileAllList))
+                commonScriptList = []
+                for script in tmpList:
+                    inWhiteList = False
+                    for whiteVersion in commonVersionWhiteList:
+                        if whiteVersion in script:
+                            inWhiteList = True
+                    if not inWhiteList:
+                        commonScriptList.append(script)
+
                 keyElement = fileDir.split('/')[-2].split('_')
                 if commonScriptList:
                     errMsg = "OpenGauss and privategauss contain scripts of the same version number. " \
@@ -230,7 +241,7 @@ class Pterodb():
                     self.writeLogFile(errMsg)
                     raise Exception("The script name does not meet the specifications. Error: {0}".format(errMsg))
 
-            allList = fileAllList + privateFileAllList
+            allList = list(set(fileAllList).union(set(privateFileAllList)))
 
             for name in allList:
                 for key in keyElement:
@@ -267,10 +278,10 @@ class Pterodb():
         file.write(os.linesep)
         self.writeLogFile("fileDir is {0}, The list of files being written is {1}".format(fileDir, fileList))
         for each_file in fileList:
-            if os.path.isfile("%s/%s" % (fileDir, each_file)):
-                each_file_with_path = "%s/%s" % (fileDir, each_file)
-            elif os.path.isfile("%s/%s" % (private_dict[fileDir], each_file)):
+            if os.path.isfile("%s/%s" % (private_dict[fileDir], each_file)):
                 each_file_with_path = "%s/%s" % (private_dict[fileDir], each_file)
+            elif os.path.isfile("%s/%s" % (fileDir, each_file)):
+                each_file_with_path = "%s/%s" % (fileDir, each_file)
             else:
                 errMsg = "can not file the file {0}".format(each_file)
                 raise Exception(errMsg)

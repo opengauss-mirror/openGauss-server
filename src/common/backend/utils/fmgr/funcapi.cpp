@@ -184,12 +184,15 @@ bool is_function_with_plpgsql_language_and_outparam(Oid funcid)
     return false;
 #endif
     char* funclang = get_func_langname(funcid);
-    if (strcasecmp(funclang, "plpgsql") != 0) {
+    if (strcasecmp(funclang, "plpgsql") != 0 && strcasecmp(funclang, "plsql") != 0) {
         pfree(funclang);
         return false;
     }
     pfree(funclang);
-
+    Oid schema_oid = get_func_namespace(funcid);
+    if (IsAformatStyleFunctionOid(schema_oid)) {
+        return false;
+    }
     HeapTuple tp;
     bool existOutParam = false;
     bool isNull = false;
@@ -235,8 +238,13 @@ TupleDesc get_func_param_desc(HeapTuple tp, Oid resultTypeId, int* return_out_ar
     int attindex = 2;
     for (int i = 0; i < p_nargs; i++) {
         if (p_argmodes[i] == 'o' || p_argmodes[i] == 'b') {
-            TupleDescInitEntry(resultTupleDesc, (AttrNumber)attindex, p_argnames[i], p_argtypes[i], p_argmodes[i],
-                               0);
+            if (unlikely(p_argnames == NULL)) {
+                TupleDescInitEntry(resultTupleDesc, (AttrNumber)attindex, NULL,
+                                    p_argtypes[i], p_argmodes[i], 0);
+            } else {
+                TupleDescInitEntry(resultTupleDesc, (AttrNumber)attindex,
+                                    p_argnames[i], p_argtypes[i], p_argmodes[i], 0);
+            }
             attindex++;
         }
     }
@@ -249,8 +257,8 @@ void construct_func_param_desc(Oid funcid, TypeFuncClass* typclass, TupleDesc* t
     if (tupdesc == NULL || resultTypeId == NULL || typclass == NULL) {
         return;
     }
-    Oid paramTypeOid = is_function_with_plpgsql_language_and_outparam(funcid);
-    if (paramTypeOid == InvalidOid) {
+    bool isWithOutParam = is_function_with_plpgsql_language_and_outparam(funcid);
+    if (!isWithOutParam) {
         return;
     }
     /* Contruct argument tuple descriptor */

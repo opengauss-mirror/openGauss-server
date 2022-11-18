@@ -825,11 +825,11 @@ void dumpAsanBlock(AsanSet set, StringInfoData* memoryBuf)
     return;
 }
 
-void GetAsanBlockInfo(AsanSet set, StringInfoData* memoryBuf)
+void GetAsanBlockInfo(AsanSet set, StringInfoDataHuge* memoryBuf)
 {
     for (AsanBlock blk = set->blocks; blk != NULL; blk = blk->next) {
         uint32 realSize = ASAN_BLOCKRELSZ(blk->requestSize);
-        appendStringInfo(memoryBuf, "%s:%d, %u\n", blk->file, blk->line, realSize);
+        appendStringInfoHuge(memoryBuf, "%s:%d, %u\n", blk->file, blk->line, realSize);
     }
 
     return;

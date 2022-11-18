@@ -61,16 +61,16 @@ PartIteratorState* ExecInitPartIterator(PartIterator* node, EState* estate, int 
     return state;
 }
 
-static int GetScanPartitionNum(PartIteratorState* node)
+static int GetScanPartitionNum(PartIteratorState* node, PlanState* noden)
 {
     PartIterator* pi_node = (PartIterator*)node->ps.plan;
-    PlanState* noden = (PlanState*)node->ps.lefttree;
     int partitionScan;
     switch (nodeTag(noden)) {
         case T_SeqScanState:
         case T_IndexScanState:
         case T_IndexOnlyScanState:
         case T_BitmapHeapScanState:
+        case T_TidScanState:
             partitionScan =  ((ScanState*)noden)->part_id;
             break;
         case T_VecToRowState:
@@ -108,13 +108,12 @@ void SetPartitionIteratorParamter(PartIteratorState* node, List* subPartLengthLi
     }
 }
 
-static void InitScanPartition(PartIteratorState* node, int partitionScan)
+static void InitScanPartition(PartIteratorState* node, int partitionScan, PlanState* noden)
 {
     int paramno = 0;
     unsigned int itr_idx = 0;
     PartIterator* pi_node = (PartIterator*)node->ps.plan;
     ParamExecData* param = NULL;
-    PlanState* noden = (PlanState*)node->ps.lefttree;
     List *subPartLengthList = NIL;
     if (IsA(noden, VecToRowState)) {
         subPartLengthList = ((VecToRowState *)noden)->subPartLengthList;
@@ -158,7 +157,11 @@ TupleTableSlot* ExecPartIterator(PartIteratorState* node)
     node->ps.lefttree->do_not_reset_rownum = true;
     bool orig_early_free = state->es_skip_early_free;
 
-    int partitionScan = GetScanPartitionNum(node);
+    PlanState* noden = (PlanState*)node->ps.lefttree;
+    if (IsA(noden, LimitState)) {
+        noden = ((LimitState*)noden)->ps.lefttree;
+    }
+    int partitionScan = GetScanPartitionNum(node, noden);
     if (partitionScan == 0) {
         /* return NULL if no partition is selected */
         return NULL;
@@ -166,7 +169,7 @@ TupleTableSlot* ExecPartIterator(PartIteratorState* node)
 
     /* init first scanned partition */
     if (node->currentItr == -1)
-        InitScanPartition(node, partitionScan);
+        InitScanPartition(node, partitionScan, noden);
 
     /* For partition wise join, can not early free left tree's caching memory */
     state->es_skip_early_free = true;
@@ -182,7 +185,6 @@ TupleTableSlot* ExecPartIterator(PartIteratorState* node)
         node->ps.lefttree->ps_rownum--;
 
         if (node->currentItr + 1 >= partitionScan) { /* have scanned all partitions */
-            PlanState* noden = (PlanState*)node->ps.lefttree;
             List *subPartLengthList = NIL;
             if (IsA(noden, VecToRowState)) {
                 subPartLengthList = ((VecToRowState *)noden)->subPartLengthList;
@@ -202,7 +204,7 @@ TupleTableSlot* ExecPartIterator(PartIteratorState* node)
         }
 
         /* switch to next partiiton */
-        InitScanPartition(node, partitionScan);
+        InitScanPartition(node, partitionScan, noden);
 
         /* For partition wise join, can not early free left tree's caching memory */
         orig_early_free = state->es_skip_early_free;
@@ -245,7 +247,11 @@ void ExecReScanPartIterator(PartIteratorState* node)
     ParamExecData* subPartParam = NULL;
 
     /* do nothing if there is no partition to scan */
-    int partitionScan = GetScanPartitionNum(node);
+    PlanState* noden = (PlanState*)node->ps.lefttree;
+    if (IsA(noden, LimitState)) {
+        noden = ((LimitState*)noden)->ps.lefttree;
+    }
+    int partitionScan = GetScanPartitionNum(node, noden);
     if (partitionScan == 0) {
         /* return NULL if no partition is selected */
         return;

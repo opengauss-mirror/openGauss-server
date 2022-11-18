@@ -29,7 +29,7 @@
 #include "utils/builtins.h"
 
 const uint16 RESULT_LEN = 256;
-Datum dw_get_single_flush_dwn()
+Datum dw_get_single_flush_dwn(void*)
 {
     if (dw_enabled()) {
         char dwn[RESULT_LEN] = {0};
@@ -49,7 +49,7 @@ Datum dw_get_single_flush_dwn()
     return CStringGetTextDatum("0/0");
 }
 
-Datum dw_get_single_flush_start()
+Datum dw_get_single_flush_start(void*)
 {
     if (dw_enabled()) {
         char start[RESULT_LEN] = {0};
@@ -70,7 +70,7 @@ Datum dw_get_single_flush_start()
     return CStringGetTextDatum("0/0");
 }
 
-Datum dw_get_single_flush_trunc_num()
+Datum dw_get_single_flush_trunc_num(void*)
 {
     char trunc_num[RESULT_LEN] = {0};
     errno_t rc;
@@ -87,7 +87,7 @@ Datum dw_get_single_flush_trunc_num()
     return CStringGetTextDatum(trunc_num);
 }
 
-Datum dw_get_single_flush_reset_num()
+Datum dw_get_single_flush_reset_num(void*)
 {
     char reset_num[RESULT_LEN] = {0};
     errno_t rc;
@@ -104,7 +104,7 @@ Datum dw_get_single_flush_reset_num()
     return CStringGetTextDatum(reset_num);
 }
 
-Datum dw_get_single_flush_total_writes()
+Datum dw_get_single_flush_total_writes(void*)
 {
     char total_writes[RESULT_LEN] = {0};
     errno_t rc;
@@ -143,7 +143,7 @@ void dw_generate_single_file()
 {
     char *file_head = NULL;
     int64 remain_size;
-    int fd = -1;
+    int fd;
     errno_t rc;
     char *unaligned_buf = NULL;
 
@@ -153,15 +153,9 @@ void dw_generate_single_file()
 
     ereport(LOG, (errmodule(MOD_DW), errmsg("DW bootstrap single flush file")));
 
-    fd = open(SINGLE_DW_FILE_NAME, (DW_FILE_FLAG | O_CREAT), DW_FILE_PERM);
-    if (fd == -1) {
-        ereport(PANIC,
-                (errcode_for_file_access(), errmodule(MOD_DW), errmsg("Could not create file \"%s\"",
-                    SINGLE_DW_FILE_NAME)));
-    }
+    fd = dw_create_file(SINGLE_DW_FILE_NAME);
 
     unaligned_buf = (char *)palloc0(DW_FILE_EXTEND_SIZE + BLCKSZ); /* one more BLCKSZ for alignment */
-
     file_head = (char *)TYPEALIGN(BLCKSZ, unaligned_buf);
 
     /* file head and first batch head will be writen */
@@ -438,6 +432,7 @@ void dw_recovery_partial_write_single()
 {
     knl_g_dw_context* single_cxt = &g_instance.dw_single_cxt;
 
+    ereport(LOG, (errmodule(MOD_DW), errmsg("DW single flush file recovery start.")));
     if (single_cxt->file_head->dw_version == DW_SUPPORT_NEW_SINGLE_FLUSH) {
         dw_recovery_first_version_page();
         dw_recovery_second_version_page();
@@ -556,7 +551,7 @@ void dw_generate_new_single_file()
 {
     char *file_head = NULL;
     int64 extend_size;
-    int fd = -1;
+    int fd;
     errno_t rc;
     char *unaligned_buf = NULL;
 
@@ -567,12 +562,7 @@ void dw_generate_new_single_file()
 
     ereport(LOG, (errmodule(MOD_DW), errmsg("DW bootstrap new single flush file")));
 
-    fd = open(SINGLE_DW_FILE_NAME, (DW_FILE_FLAG | O_CREAT), DW_FILE_PERM);
-    if (fd == -1) {
-        ereport(PANIC,
-                (errcode_for_file_access(), errmodule(MOD_DW), errmsg("Could not create file \"%s\"",
-                    SINGLE_DW_FILE_NAME)));
-    }
+    fd = dw_create_file(SINGLE_DW_FILE_NAME);
 
     /* NO EREPORT(ERROR) from here till changes are logged */
     START_CRIT_SECTION();
@@ -618,6 +608,10 @@ uint16 first_version_dw_single_flush(BufferDesc *buf_desc)
     dw_first_flush_item item;
     PageHeader pghr = NULL;
     BufferTag phy_tag;
+
+    /* used to block the io for snapshot feature */
+    (void)LWLockAcquire(g_instance.ckpt_cxt_ctl->snapshotBlockLock, LW_SHARED);
+    LWLockRelease(g_instance.ckpt_cxt_ctl->snapshotBlockLock);
 
     uint32 buf_state = LockBufHdr(buf_desc);
     Block block = BufHdrGetBlock(buf_desc);
@@ -671,6 +665,10 @@ uint16 second_version_dw_single_flush(BufferTag tag, Block block, XLogRecPtr pag
     dw_file_head_t *file_head = dw_single_cxt->second_file_head;
     char *buf = t_thrd.proc->dw_buf;
 
+    /* used to block the io for snapshot feature */
+    (void)LWLockAcquire(g_instance.ckpt_cxt_ctl->snapshotBlockLock, LW_SHARED);
+    LWLockRelease(g_instance.ckpt_cxt_ctl->snapshotBlockLock);
+    
     /* first step, copy buffer to dw buf, than flush page lsn, the buffer content lock  is already held */
     rc = memcpy_s(buf, BLCKSZ, block, BLCKSZ);
     securec_check(rc, "\0", "\0");
@@ -919,12 +917,7 @@ void dw_cxt_init_single()
     single_cxt->second_flush_lock = LWLockAssign(LWTRANCHE_DW_SINGLE_SECOND);
     single_cxt->second_buftag_lock = LWLockAssign(LWTRANCHE_DW_SINGLE_SECOND_BUFTAG);
 
-    single_cxt->fd = open(SINGLE_DW_FILE_NAME, DW_FILE_FLAG, DW_FILE_PERM);
-    if (single_cxt->fd == -1) {
-        ereport(PANIC,
-            (errcode_for_file_access(), errmodule(MOD_DW), errmsg("Could not open file \"%s\"", SINGLE_DW_FILE_NAME)));
-    }
-
+    single_cxt->fd = dw_open_file(SINGLE_DW_FILE_NAME);
     data_page_num = DW_FIRST_DATA_PAGE_NUM + DW_SECOND_DATA_PAGE_NUM;
 
     /* two file head plus one for alignment */

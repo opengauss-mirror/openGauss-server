@@ -71,14 +71,12 @@ const OperationInfo G_OPERATION_INFO_TABLE[G_MAX_OPERATION_NUMBER] = {
     {T_VecHashJoin,         TEXT_OPTNAME_JOIN,              TEXT_STRATEGY_JOIN_HASH},
     {T_CStoreScan,          TEXT_OPTNAME_SCAN,              TEXT_STRATEGY_SCAN_SEQ},
     {T_SeqScan,             TEXT_OPTNAME_SCAN,              TEXT_STRATEGY_SCAN_SEQ},
-    {T_DfsScan,             TEXT_OPTNAME_SCAN,              ""},
     {T_IndexScan,           TEXT_OPTNAME_SCAN,              TEXT_STRATEGY_SCAN_INDEX},
     {T_CStoreIndexScan,     TEXT_OPTNAME_SCAN,              TEXT_STRATEGY_SCAN_INDEX},
     {T_IndexOnlyScan,       TEXT_OPTNAME_SCAN,              TEXT_STRATEGY_SCAN_INDEX_ONLY},
     {T_BitmapIndexScan,     TEXT_OPTNAME_SCAN,              TEXT_STRATEGY_SCAN_BITMAP_INDEX},
     {T_CStoreIndexHeapScan, TEXT_OPTNAME_SCAN,              TEXT_STRATEGY_SCAN_BITMAP_HEAP},
     {T_BitmapHeapScan,      TEXT_OPTNAME_SCAN,              TEXT_STRATEGY_SCAN_BITMAP_HEAP},
-    {T_DfsIndexScan,        TEXT_OPTNAME_SCAN,              TEXT_STRATEGY_SCAN_INDEX},
     {T_TidScan,             TEXT_OPTNAME_SCAN,              TEXT_STRATEGY_SCAN_TID},
     {T_CStoreIndexCtidScan, TEXT_OPTNAME_SCAN,              TEXT_STRATEGY_SCAN_TID},
     {T_SubqueryScan,        TEXT_OPTNAME_SCAN,              TEXT_STRATEGY_SCAN_SUBQUERY},
@@ -499,7 +497,7 @@ static inline bool IsScan(Plan* plan)
            IsA(plan, BitmapHeapScan) || IsA(plan, TidScan) || IsA(plan, CStoreScan) || IsA(plan, VecForeignScan) ||
            IsA(plan, CStoreIndexScan) || IsA(plan, CStoreIndexCtidScan) || IsA(plan, CStoreIndexHeapScan) ||
            IsA(plan, FunctionScan) || IsA(plan, ValuesScan) || IsA(plan, CteScan) ||
-           IsA(plan, WorkTableScan) || IsA(plan, ForeignScan) || IsA(plan, VecScan) || IsA(plan, DfsScan) ||
+           IsA(plan, WorkTableScan) || IsA(plan, ForeignScan) || IsA(plan, VecScan) ||
            IsA(plan, VecIndexScan) || IsA(plan, VecIndexOnlyScan) || IsA(plan, VecBitmapIndexScan) ||
            IsA(plan, VecBitmapHeapScan);
 }
@@ -789,9 +787,7 @@ void PHGetPlanNodeText(Plan* plan, char** pname, bool* isRow, char** strategy, c
 
     *strategy = GetStrategy(plan);
 
-    if (nodeTag == T_DfsScan || nodeTag == T_DfsIndexScan) {
-        AppendStringInfoWithSpace(option, TEXT_OPTION_SCAN_DFS);
-    } else if (nodeTag == T_Stream || nodeTag == T_VecStream) {
+    if (nodeTag == T_Stream || nodeTag == T_VecStream) {
         GetStreamOption(plan, option);
     } else if (IsJoin(plan)) {
         GetJoinOption(plan, option);
@@ -918,9 +914,6 @@ static void GetSpecialPlanOptCondition(PlanState* planstate, StringInfo conditio
         case T_CStoreIndexScan:
             GetPlanOptConditionFromQual(((CStoreIndexScan*)plan)->indexqualorig, planstate, condition, maxlen, rtable);
             break;
-        case T_DfsIndexScan:
-            GetPlanOptConditionFromQual(((DfsIndexScan*)plan)->indexqualorig, planstate, condition, maxlen, rtable);
-            break;
         case T_BitmapHeapScan:
         case T_CStoreIndexHeapScan:
             GetPlanOptConditionFromQual(((BitmapHeapScan*)plan)->bitmapqualorig, planstate, condition, maxlen, rtable);
@@ -979,7 +972,6 @@ static void GetPlanOptCondition(PlanState* planstate, StringInfo condition, int 
         case T_IndexScan:
         case T_IndexOnlyScan:
         case T_CStoreIndexScan:
-        case T_DfsIndexScan:
         case T_BitmapHeapScan:
         case T_CStoreIndexHeapScan:
         case T_VecNestLoop:

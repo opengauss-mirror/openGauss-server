@@ -1013,6 +1013,16 @@ int StreamConnection(pgsocket server_fd, Port* port)
         int opval = 0;
         on = 1;
 
+#ifndef USE_LIBNET
+        /* libnet not support SO_PROTOCOL in lwip */
+        socklen_t oplen = sizeof(opval);
+        /* CommProxy Support */
+        if (comm_getsockopt(port->sock, SOL_SOCKET, SO_PROTOCOL, &opval, &oplen) < 0) {
+            ereport(LOG, (errmsg("comm_getsockopt(SO_PROTOCOL) failed: %m")));
+            return STATUS_ERROR;
+        }
+#endif
+
         /* CommProxy Support */
         if (comm_setsockopt(port->sock, IPPROTO_TCP, TCP_NODELAY, (char*)&on, sizeof(on)) < 0) {
             ereport(LOG, (errmsg("comm_setsockopt(TCP_NODELAY) failed: %m")));
@@ -1050,6 +1060,7 @@ int StreamConnection(pgsocket server_fd, Port* port)
             (void)pq_setkeepalivesidle(u_sess->attr.attr_common.tcp_keepalives_idle, port);
             (void)pq_setkeepalivesinterval(u_sess->attr.attr_common.tcp_keepalives_interval, port);
             (void)pq_setkeepalivescount(u_sess->attr.attr_common.tcp_keepalives_count, port);
+            (void)pq_settcpusertimeout(u_sess->attr.attr_common.tcp_user_timeout, port);
         }
     }
 
@@ -2351,6 +2362,76 @@ int pq_setkeepalivescount(int count, Port* port)
 #else
     if (count != 0) {
         ereport(LOG, (errmsg("comm_setsockopt(TCP_KEEPCNT) not supported")));
+        return STATUS_ERROR;
+    }
+#endif
+
+    return STATUS_OK;
+}
+
+int pq_gettcpusertimeout(Port *port)
+{
+#ifdef TCP_USER_TIMEOUT
+    if (port == NULL || IS_AF_UNIX(port->laddr.addr.ss_family)) {
+        return 0;
+    }
+
+    if (port->tcp_user_timeout != 0) {
+        return port->tcp_user_timeout;
+    }
+
+    if ((port->default_tcp_user_timeout == 0) && (port->sock != NO_SOCKET)) {
+        ACCEPT_TYPE_ARG3 size = sizeof(port->default_tcp_user_timeout);
+
+        if (comm_getsockopt(port->sock, IPPROTO_TCP, TCP_USER_TIMEOUT,
+            (char *)&port->default_tcp_user_timeout, &size) < 0) {
+            ereport(LOG, (errmsg("comm_getsockopt(TCP_USER_TIMEOUT) failed: %m")));
+            port->default_tcp_user_timeout = -1;    /* don't know */
+        }
+    }
+
+    return port->default_tcp_user_timeout;
+#else
+    return 0;
+#endif
+}
+
+int pq_settcpusertimeout(int timeout, Port *port)
+{
+    if (port == NULL || IS_AF_UNIX(port->laddr.addr.ss_family)) {
+        return STATUS_OK;
+    }
+
+#ifdef TCP_USER_TIMEOUT
+    if (timeout == port->tcp_user_timeout) {
+        return STATUS_OK;
+    }
+
+    if (port->default_tcp_user_timeout <= 0) {
+        if (pq_gettcpusertimeout(port) < 0) {
+            if (timeout == 0) {
+                return STATUS_OK;    /* default is set but unknown */
+            } else {
+                return STATUS_ERROR;
+            }
+        }
+    }
+
+    if (timeout == 0) {
+        timeout = port->default_tcp_user_timeout;
+    }
+
+    if (port->sock != NO_SOCKET) {
+        if (comm_setsockopt(port->sock, IPPROTO_TCP, TCP_USER_TIMEOUT, (char *) &timeout, sizeof(timeout)) < 0) {
+            ereport(LOG, (errmsg("comm_setsockopt(TCP_USER_TIMEOUT) %d failed: %m", port->sock)));
+            return STATUS_ERROR;
+        }
+
+        port->tcp_user_timeout = timeout;
+    }
+#else
+    if (timeout != 0) {
+        ereport(LOG, (errmsg("comm_setsockopt(TCP_USER_TIMEOUT) not supported")));
         return STATUS_ERROR;
     }
 #endif

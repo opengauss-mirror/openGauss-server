@@ -38,6 +38,11 @@ static void resetCreateFuncFlag()
     u_sess->parser_cxt.isCreateFuncOrProc = false;
 }
 
+static void resetForbidTruncateFlag()
+{
+    u_sess->parser_cxt.isForbidTruncate = false;
+}
+
 /*
  * raw_parser
  *        Given a query in string form, do lexical and grammatical analysis.
@@ -58,6 +63,9 @@ List* raw_parser(const char* str, List** query_string_locationlist)
 
     /* reset u_sess->parser_cxt.isCreateFuncOrProc */
     resetCreateFuncFlag();
+
+    /* reset u_sess->parser_cxt.isForbidTruncate */
+    resetForbidTruncateFlag();
 
     /* initialize the flex scanner */
     yyscanner = scanner_init(str, &yyextra.core_yy_extra, ScanKeywords, NumScanKeywords);

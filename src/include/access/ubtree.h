@@ -22,7 +22,6 @@
 #include "access/sdir.h"
 #include "access/transam.h"
 #include "access/xlogreader.h"
-#include "access/ubtree.h"
 #include "access/visibilitymap.h"
 #include "access/ustore/knl_whitebox_test.h"
 #include "catalog/pg_index.h"
@@ -47,16 +46,21 @@ extern Datum ubtvacuumcleanup(PG_FUNCTION_ARGS);
 extern Datum ubtcanreturn(PG_FUNCTION_ARGS);
 extern Datum ubtoptions(PG_FUNCTION_ARGS);
 
-extern bool UBTreeDelete(Relation index_relation, Datum* values, const bool* isnull, ItemPointer heapTCtid);
-
+extern bool UBTreeDelete(Relation index_relation, Datum* values, const bool* isnull, ItemPointer heapTCtid,
+                         bool isRollbackIndex);
 extern bool IndexPagePrepareForXid(Relation rel, Page page, TransactionId xid, bool needWal, Buffer buf);
-extern void FreezeSingleIndexPage(Relation rel, Buffer buf, bool *hasPruned, OidRBTree *invisibleParts = NULL);
+extern void FreezeSingleIndexPage(Relation rel, Buffer buf, bool *hasPruned,
+    TransactionId oldestXmin, OidRBTree *invisibleParts = NULL);
+
+#define UBTREEDEBUGINFO , __FUNCTION__, __LINE__
+#define UBTREEDEBUGSTR "[%s:%d]"
+#define UBTREEFORMAT(f) UBTREEDEBUGSTR f UBTREEDEBUGINFO
 
 /* structures for ubtrecycle.cpp */
 typedef enum {
     RECYCLE_FREED_FORK = 0,
     RECYCLE_EMPTY_FORK,
-    RECYCLE_NONE_FORK,   //last unused item
+    RECYCLE_NONE_FORK,   // last unused item
 } UBTRecycleForkNumber;
 
 typedef struct UBTRecycleQueueAddress {
@@ -473,19 +477,27 @@ typedef struct {
     OffsetNumber previousdead[MaxIndexTuplesPerPage];
 } IndexPruneState;
 
+typedef struct {
+    uint32 visitQueuePageCount;     // visit urq page count
+    uint32 visitQueueItemCount;     // visit urq page items total count
+    bool getIndexPageValid;         // whether get available index page
+    TimestampTz getQueueHeadTime;   // time to get urq header page time
+    TimestampTz visitQueueTime;     // time to visit urq totally
+} UrqState;
+
 #define TXNINFOSIZE (sizeof(ShortTransactionId) * 2)
 
 /*
  * prototypes for functions in ubtinsert.cpp
  */
 extern bool UBTreeDoInsert(Relation rel, IndexTuple itup, IndexUniqueCheck checkUnique, Relation heapRel);
-extern bool UBTreeDoDelete(Relation rel, IndexTuple itup);
+extern bool UBTreeDoDelete(Relation rel, IndexTuple itup, bool isRollbackIndex);
 
 extern bool UBTreePagePruneOpt(Relation rel, Buffer buf, bool tryDelete);
 extern bool UBTreePagePrune(Relation rel, Buffer buf, TransactionId oldestXmin, OidRBTree *invisibleParts = NULL);
 extern bool UBTreePruneItem(Page page, OffsetNumber offnum, TransactionId oldestXmin, IndexPruneState* prstate);
 extern void UBTreePagePruneExecute(Page page, OffsetNumber* nowdead, int ndead, IndexPruneState* prstate);
-extern void UBTreePageRepairFragmentation(Page page);
+extern void UBTreePageRepairFragmentation(Relation rel, BlockNumber blkno, Page page);
 
 extern void UBTreeInsertParent(Relation rel, Buffer buf, Buffer rbuf, BTStack stack, bool is_root, bool is_only);
 extern void UBTreeFinishSplit(Relation rel, Buffer lbuf, BTStack stack);
@@ -509,6 +521,7 @@ extern OffsetNumber UBTreeBinarySearch(Relation rel, BTScanInsert key, Buffer bu
 extern int32 UBTreeCompare(Relation rel, BTScanInsert key, Page page, OffsetNumber offnum, Buffer buf);
 extern bool UBTreeFirst(IndexScanDesc scan, ScanDirection dir);
 extern bool UBTreeNext(IndexScanDesc scan, ScanDirection dir);
+extern void UBTreeTraceTuple(IndexScanDesc scan, OffsetNumber offnum, bool isVisible, bool isHikey = false);
 extern Buffer UBTreeGetEndPoint(Relation rel, uint32 level, bool rightmost);
 extern bool UBTreeGetTupleInternal(IndexScanDesc scan, ScanDirection dir);
 
@@ -537,9 +550,9 @@ extern Buffer UBTreeGetRoot(Relation rel, int access);
 extern bool UBTreePageRecyclable(Page page);
 extern int UBTreePageDel(Relation rel, Buffer buf);
 
-extern OffsetNumber UBTreeFindsplitloc(Relation rel, Page page, OffsetNumber newitemoff,
+extern OffsetNumber UBTreeFindsplitloc(Relation rel, Buffer buf, OffsetNumber newitemoff,
     Size newitemsz, bool* newitemonleft);
-extern OffsetNumber UBTreeFindsplitlocInsertpt(Relation rel, Page page, OffsetNumber newitemoff, Size newitemsz,
+extern OffsetNumber UBTreeFindsplitlocInsertpt(Relation rel, Buffer buf, OffsetNumber newitemoff, Size newitemsz,
     bool *newitemonleft, IndexTuple newitem);
 
 extern Buffer UBTreeGetNewPage(Relation rel, UBTRecycleQueueAddress* addr);
@@ -593,27 +606,68 @@ typedef enum {
     VERIFY_MAIN_PAGE,
     VERIFY_RECYCLE_QUEUE_PAGE
 } UBTVerifyPageType;
-extern char * UBTGetVerifiedPageTypeStr(uint32 type);
-extern char * UBTGetVerifiedResultStr(uint32 type);
+
+typedef enum {
+    VERIFY_URQ_NORMAL = 0,
+	VERIFY_URQ_META_ERROR, // queue meta page meta info error
+    VERIFY_URQ_HEAD_MISSED_ERROR, // queue lack head page error
+    VERIFY_URQ_TAIL_MISSED_ERROR, // queue lack tail page error
+	VERIFY_URQ_MIXED_ERROR, // free queue and empty queue mixed errror
+	VERIFY_URQ_NO_LINK_META_ERROR, // queue does not link the meta page error
+    VERIFY_URQ_PREV_LINK_ERROR, // queue prev link error
+	VERIFY_URQ_NEXT_LINK_ERROR, // queue next link error
+    VERIFY_URQ_ITEM_OFFSET_ERROR, // queue page item offset error
+    VERIFY_URQ_ITEM_LINK_ERROR, // queue page item link error
+    VERIFY_URQ_ITEM_XID_ERROR, // queue page item xid error
+	VERIFY_URQ_ITEM_CNT_ERROR, // queue page item count error
+	VERIFY_URQ_FREE_LIST_LINK_ERROR, // queue page freelist link error
+    VERIFY_URQ_PAGE_HEADER_ERROR, // queue page header info error
+    VERIFY_URQ_FETCH_INDEX_PAGE_TIME, // stat fetch index page from queue time
+	VERIFY_URQ_ERROR_COUNT
+} URQVerifyErrorCode;
+
+#define MAX_URQ_ERROR_CODE_STRING_SIZE  128
+#define MAX_URQ_ERROR_MSG_SIZE 1048576
+
+typedef struct URQErrorInfo {
+    URQVerifyErrorCode error_code;
+    char error_msg[MAX_URQ_ERROR_MSG_SIZE];
+} URQErrorInfo;
+
+extern char* UBTGetVerifiedPageTypeStr(uint32 type);
+extern char* UBTGetVerifiedResultStr(uint32 type);
 extern void UBTreeVerifyRecordOutput(uint blkType, BlockNumber blkno, int errorCode,
     TupleDesc *tupDesc, Tuplestorestate *tupstore, uint32 cols);
 extern void UBTreeVerifyIndex(Relation rel, TupleDesc *tupDesc, Tuplestorestate *tupstore, uint32 cols);
 extern int UBTreeVerifyOnePage(Relation rel, Page page, BTScanInsert cmpKeys, IndexTuple prevHikey);
 extern uint32 UBTreeVerifyRecycleQueue(Relation rel, TupleDesc *tupleDesc, Tuplestorestate *tupstore, uint32 cols);
 extern Buffer RecycleQueueGetEndpointPage(Relation rel, UBTRecycleForkNumber forkNumber, bool needHead, int access);
+extern bool UBTreePageVerify(UBtreePageVerifyParams *verifyParams);
+extern void VerifyUrqPhysics(Relation rel, UBTRecycleForkNumber forkNum, BlockNumber blkno, URQErrorInfo* result);
+extern void VerifyUrqPerformance(Relation rel, UBTRecycleForkNumber forkNum, URQErrorInfo* result);
+
+typedef enum IndexTraceLevel {
+    TRACE_NO = 0,
+    TRACE_NORMAL,
+    TRACE_VISIBILITY,
+    TRACE_SHOWHIKEY,
+    TRACE_ALL
+} IndexTraceLevel;
 
 /*
  * prototypes for functions in ubtrecycle.cpp
  */
 const BlockNumber minRecycleQueueBlockNumber = 6;
 extern UBTRecycleQueueHeader GetRecycleQueueHeader(Page page, BlockNumber blkno);
+extern uint32 BlockGetMaxItems(BlockNumber blkno);
 extern Buffer ReadRecycleQueueBuffer(Relation rel, BlockNumber blkno);
 extern void UBTreeInitializeRecycleQueue(Relation rel);
 extern void UBTreeTryRecycleEmptyPage(Relation rel);
 extern void UBTreeRecordFreePage(Relation rel, BlockNumber blkno, TransactionId xid);
 extern void UBTreeRecordEmptyPage(Relation rel, BlockNumber blkno, TransactionId xid);
 extern void UBTreeRecordUsedPage(Relation rel, UBTRecycleQueueAddress addr);
-extern Buffer UBTreeGetAvailablePage(Relation rel, UBTRecycleForkNumber forkNumber, UBTRecycleQueueAddress* addr);
+extern Buffer UBTreeGetAvailablePage(Relation rel, UBTRecycleForkNumber forkNumber,
+    UBTRecycleQueueAddress* addr, UrqState *stat = NULL);
 extern void UBTreeRecycleQueueInitPage(Relation rel, Page page, BlockNumber blkno, BlockNumber prevBlkno,
     BlockNumber nextBlkno);
 extern void UBtreeRecycleQueueChangeChain(Buffer buf, BlockNumber newBlkno, bool setNext);
@@ -624,5 +678,6 @@ extern uint32 UBTreeRecycleQueuePageDump(Relation rel, Buffer buf, bool recordEa
     TupleDesc *tupleDesc, Tuplestorestate *tupstore, uint32 cols);
 extern void UBTreeDumpRecycleQueueFork(Relation rel, UBTRecycleForkNumber forkNum, TupleDesc *tupDesc,
     Tuplestorestate *tupstore, uint32 cols);
-
+extern void UBTreeBuildCallback(Relation index, HeapTuple htup, Datum *values, const bool *isnull, bool tupleIsAlive,
+    void *state);
 #endif /* UBTREE_H */

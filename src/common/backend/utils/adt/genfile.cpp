@@ -125,7 +125,7 @@ bytea* read_binary_file(const char* filename, int64 seek_offset, int64 bytes_to_
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("requested length too large")));
 
     if ((file = AllocateFile(filename, PG_BINARY_R)) == NULL) {
-        if (missing_ok && errno == ENOENT)
+        if (handleFopenFailure(filename, missing_ok))
             return NULL;
         else
             ereport(ERROR, (errcode_for_file_access(), errmsg("could not open file \"%s\" for reading: %m", filename)));
@@ -562,6 +562,14 @@ static stated_file* pg_ls_dir_recursive(const char* location, stated_file* sd_fi
         if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0)
             continue;
 
+        /*
+         * Do not copy log directory during gs_rewind. Currently we only consider such case that
+         * log_directory is relative path and only one level deep. More complicated cases should
+         * be taken care of in the future.
+         */
+        if (u_sess->proc_cxt.clientIsGsrewind && strcmp(de->d_name, u_sess->attr.attr_common.Log_directory) == 0)
+            continue;
+
         int maxPathLen = strlen(location) + strlen(de->d_name) + 2;
         sd_file->path = (char*)palloc0(maxPathLen);
 
@@ -708,4 +716,140 @@ Datum pg_stat_file_recursive(PG_FUNCTION_ARGS)
     }
 
     SRF_RETURN_DONE(funcctx);
+}
+
+/*
+ * Generic function to return a directory listing of files.
+ *
+ * If the directory isn't there, silently return an empty set if missing_ok.
+ * Other unreadable-directory cases throw an error.
+ */
+static Datum pg_ls_dir_files(FunctionCallInfo fcinfo, const char *dir, bool missing_ok)
+{
+    ReturnSetInfo *rsinfo = (ReturnSetInfo *)fcinfo->resultinfo;
+    bool randomAccess;
+    TupleDesc tupdesc;
+    Tuplestorestate *tupstore;
+    DIR *dirdesc;
+    struct dirent *de;
+    MemoryContext oldcontext;
+    errno_t rc = EOK;
+
+    /* check to see if caller supports us returning a tuplestore */
+    if (rsinfo == NULL || !IsA(rsinfo, ReturnSetInfo))
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("set-valued function called in context that cannot accept a set")));
+    if (!(rsinfo->allowedModes & SFRM_Materialize))
+        ereport(ERROR,
+            (errcode(ERRCODE_SYNTAX_ERROR),
+                errmsg("materialize mode required, but it is not allowed in this context")));
+
+    /* The tupdesc and tuplestore must be created in ecxt_per_query_memory */
+    oldcontext = MemoryContextSwitchTo(rsinfo->econtext->ecxt_per_query_memory);
+
+    if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
+        elog(ERROR, "return type must be a row type");
+
+    randomAccess = (rsinfo->allowedModes & SFRM_Materialize_Random) != 0;
+    tupstore = tuplestore_begin_heap(randomAccess, false, u_sess->attr.attr_memory.work_mem);
+    rsinfo->returnMode = SFRM_Materialize;
+    rsinfo->setResult = tupstore;
+    rsinfo->setDesc = tupdesc;
+
+    (void)MemoryContextSwitchTo(oldcontext);
+
+    /*
+     * Now walk the directory.  Note that we must do this within a single SRF
+     * call, not leave the directory open across multiple calls, since we
+     * can't count on the SRF being run to completion.
+     */
+    dirdesc = AllocateDir(dir);
+    if (!dirdesc) {
+        /* Return empty tuplestore if appropriate */
+        if (missing_ok && errno == ENOENT)
+            return (Datum)0;
+        /* Otherwise, we can let ReadDir() throw the error */
+    }
+
+    while ((de = ReadDir(dirdesc, dir)) != NULL) {
+        Datum values[3];
+        bool nulls[3];
+        char path[MAXPGPATH * 2];
+        struct stat attrib;
+
+        /* Skip hidden files */
+        if (de->d_name[0] == '.')
+            continue;
+
+        /* Get the file info */
+        rc = snprintf_s(path, sizeof(path), sizeof(path) - 1, "%s/%s", dir, de->d_name);
+        securec_check_ss(rc, "\0", "\0");
+
+        if (stat(path, &attrib) < 0) {
+            /* Ignore concurrently-deleted files, else complain */
+            if (errno == ENOENT)
+                continue;
+            ereport(ERROR, (errcode_for_file_access(), errmsg("could not stat file \"%s\": %m", path)));
+        }
+
+        /* Ignore anything but regular files */
+        if (!S_ISREG(attrib.st_mode))
+            continue;
+
+        values[0] = CStringGetTextDatum(de->d_name);
+        values[1] = Int64GetDatum((int64)attrib.st_size);
+        values[2] = TimestampTzGetDatum(time_t_to_timestamptz(attrib.st_mtime));
+        rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
+        securec_check(rc, "\0", "\0");
+
+        tuplestore_putvalues(tupstore, tupdesc, values, nulls);
+    }
+
+    (void)FreeDir(dirdesc);
+    return (Datum)0;
+}
+
+/* Function to return the list of files in the WAL directory */
+Datum pg_ls_waldir(PG_FUNCTION_ARGS)
+{
+    if (!superuser() && !isMonitoradmin(GetUserId()))
+        ereport(ERROR,
+            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("only system/monitor admin can check WAL directory!")));
+    return pg_ls_dir_files(fcinfo, XLOGDIR, false);
+}
+
+/*
+ * Generic function to return the list of files in pgsql_tmp
+ */
+static Datum pg_ls_tmpdir(FunctionCallInfo fcinfo, Oid tblspc)
+{
+    char path[MAXPGPATH];
+    if (!superuser() && !isMonitoradmin(GetUserId()))
+        ereport(ERROR,
+            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                errmsg("only system/monitor admin can check pgsql_tmp directory!")));
+    if (!SearchSysCacheExists1(TABLESPACEOID, ObjectIdGetDatum(tblspc)))
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("tablespace with OID %u does not exist", tblspc)));
+
+    TempTablespacePath(path, tblspc);
+    return pg_ls_dir_files(fcinfo, path, true);
+}
+
+/*
+ * Function to return the list of temporary files in the pg_default tablespace's
+ * pgsql_tmp directory
+ */
+Datum pg_ls_tmpdir_noargs(PG_FUNCTION_ARGS)
+{
+    return pg_ls_tmpdir(fcinfo, DEFAULTTABLESPACE_OID);
+}
+
+/*
+ * Function to return the list of temporary files in the specified tablespace's
+ * pgsql_tmp directory
+ */
+Datum pg_ls_tmpdir_1arg(PG_FUNCTION_ARGS)
+{
+    return pg_ls_tmpdir(fcinfo, PG_GETARG_OID(0));
 }

@@ -240,6 +240,7 @@ typedef FormData_pg_operator *Form_pg_operator;
 #define OID_NAME_ICLIKE_OP        1625
 #define OID_TEXT_ICLIKE_OP        1627
 #define OID_BPCHAR_ICLIKE_OP    1629
+#define OID_BPCHAR_IC_NOT_LIKE_OP 1630
 #define NUMEQOID 1752
 #define NUMERICEQOID 1752
 #define NUMERICNEOID 1753

@@ -113,6 +113,7 @@ typedef UBTPageOpaqueData* UBTPageOpaque;
 #define BTP_SPLIT_END (1 << 5)   /* rightmost page of split group */
 #define BTP_HAS_GARBAGE (1 << 6) /* page has LP_DEAD tuples */
 #define BTP_INCOMPLETE_SPLIT (1 << 7)	/* right sibling's downlink is missing */
+#define BTP_VACUUM_DELETING (1 << 8)    /* vacuum worker is deleting this page */
 
 /*
  * The max allowed value of a cycle ID is a bit less than 64K.	This is
@@ -219,7 +220,8 @@ typedef struct BTMetaPageData {
 #define P_ISHALFDEAD(opaque) ((opaque)->btpo_flags & BTP_HALF_DEAD)
 #define P_IGNORE(opaque) ((opaque)->btpo_flags & (BTP_DELETED | BTP_HALF_DEAD))
 #define P_HAS_GARBAGE(opaque) ((opaque)->btpo_flags & BTP_HAS_GARBAGE)
-#define P_INCOMPLETE_SPLIT(opaque)	((opaque)->btpo_flags & BTP_INCOMPLETE_SPLIT)
+#define P_INCOMPLETE_SPLIT(opaque) ((opaque)->btpo_flags & BTP_INCOMPLETE_SPLIT)
+#define P_VACUUM_DELETING(opaque) ((opaque)->btpo_flags & BTP_VACUUM_DELETING)
 
 /*
  *	Lehman and Yao's algorithm requires a ``high key'' on every non-rightmost
@@ -767,6 +769,8 @@ typedef struct BTScanOpaqueData {
     IndexInfo* indexInfo;
     EState* fakeEstate;
 
+    bool isPageInfoLogged;
+
     /*
      * If the marked position is on the same page as current position, we
      * don't use markPos, but just keep the marked itemIndex in markItemIndex
@@ -900,6 +904,8 @@ typedef struct BTCheckElement {
     ScanKey itupScanKey;
     OffsetNumber offset;
     int indnkeyatts;
+    bool useFastPath;
+    BlockNumber targetBlock;
 } BTCheckElement;
 
 /*
@@ -1154,7 +1160,7 @@ extern void _bt_leafbuild(BTSpool* btspool, BTSpool* spool2);
 extern void _bt_buildadd(BTWriteState* wstate, BTPageState* state, IndexTuple itup);
 extern void _bt_uppershutdown(BTWriteState* wstate, BTPageState* state);
 BTPageState* _bt_pagestate(BTWriteState* wstate, uint32 level);
-extern bool _index_tuple_compare(TupleDesc tupdes, ScanKey indexScanKey, int keysz, IndexTuple itup, IndexTuple itup2);
+extern bool _bt_index_tuple_compare(TupleDesc tupdes, ScanKey indexScanKey, int keysz, IndexTuple itup, IndexTuple itup2);
 extern List* insert_ordered_index(List* list, TupleDesc tupdes, ScanKey indexScanKey, int keysz, IndexTuple itup,
     BlockNumber heapModifiedOffset, IndexScanDesc srcIdxRelScan);
 extern uint64 uniter_next(pg_atomic_uint64 *curiter, uint32 cycle0, uint32 cycle1);

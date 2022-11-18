@@ -44,10 +44,12 @@
 #include "workload/workload.h"
 #include "workload/statctl.h"
 #include <mntent.h>
+#include <sys/sysinfo.h>
 #ifdef PGXC
 #include "pgxc/pgxc.h"
 #include "pgxc/poolutils.h"
 #endif
+#include "utils/mem_snapshot.h"
 
 static void WLMmonitor_MainLoop(void);
 static void WLMmonitor_worker(int type);
@@ -914,6 +916,60 @@ void RequestSchedulingFromQueue(void)
     rq_lock.UnLock();
 }
 
+static void WLMmonitor_check_other_memory()
+{
+    const int otherMemoryLimit = 10 * 1024; /* set other memory limit is 10GB */
+    const int mbUnit = 1024 * 1024;
+    unsigned long totalVm = 0, res = 0, shared = 0, text = 0, lib, data, dt;
+    const char* statmPath = "/proc/self/statm";
+    FILE* f = fopen(statmPath, "r");
+    int pageSize = getpagesize();
+    if (pageSize <= 0) {
+        ereport(WARNING, (errcode(ERRCODE_WARNING),
+                errmsg("error for call 'getpagesize()', the values for "
+                       "process_used_memory and other_used_memory are error!")));
+        pageSize = 1;
+    }
+
+    if (f != NULL) {
+        if (7 == fscanf_s(f, "%lu %lu %lu %lu %lu %lu %lu\n", &totalVm, &res, &shared, &text, &lib, &data, &dt)) {
+            /* page translated to MB */
+            res = BYTES_TO_MB((unsigned long)(res * pageSize));
+            shared = BYTES_TO_MB((unsigned long)(shared * pageSize));
+            text = BYTES_TO_MB((unsigned long)(text * pageSize));
+        }
+        (void)fclose(f);
+    } else {
+        return;
+    }
+
+    int dynamicUsedMemory = (int)(processMemInChunks << (chunkSizeInBits - BITS_IN_MB));
+    int cuSize = (int)(CUCache->GetCurrentMemSize() >> BITS_IN_MB);
+    int otherUsedMemory = (int)(res - shared - text) - dynamicUsedMemory - cuSize;
+    if (otherUsedMemory < 0) {
+        otherUsedMemory = 0;
+    }
+
+    if (otherUsedMemory > otherMemoryLimit) {
+        struct sysinfo s_info;
+        if (sysinfo(&s_info) == 0) {
+            ereport(WARNING,
+                    (errcode(ERRCODE_OUT_OF_LOGICAL_MEMORY),
+                        errmsg("The other memory is too large. "
+                        "db statistics:total[%lu], memctx[%d], shared[%lu], other[%d]. "
+                        "os memory statistics:total[%lu], unused[%lu], swap[%lu].",
+                        res, dynamicUsedMemory, shared, otherUsedMemory,
+                        s_info.totalram/mbUnit, s_info.freeram/mbUnit, s_info.totalswap/mbUnit)));
+        } else {
+            ereport(WARNING,
+                    (errcode(ERRCODE_OUT_OF_LOGICAL_MEMORY),
+                        errmsg("The other memory is too large."
+                        "db statistics:total[%lu], memctx[%d], shared[%lu], other[%d]",
+                        res, dynamicUsedMemory, shared, otherUsedMemory)));
+        }
+    }
+}
+
 /*
  * @Description: wlm monitor main loop
  * @IN :void
@@ -924,6 +980,8 @@ static void WLMmonitor_MainLoop(void)
 {
     TimestampTz last_monitor_time = GetCurrentTimestamp();
     TimestampTz next_timeout_time = 0;
+    TimestampTz next_memcheck_time = 0;
+    TimestampTz next_other_memcheck_time = 0;
     int verify_count = 0;
 
     /* instance statistics parameters */
@@ -956,6 +1014,18 @@ static void WLMmonitor_MainLoop(void)
         }
 
         ResetLatch(&t_thrd.wlm_cxt.wlm_mainloop_latch);
+
+        TimestampTz memcheck_time = GetCurrentTimestamp();
+        if (memcheck_time > next_memcheck_time) {
+            ExecOverloadEscape();
+            next_memcheck_time = TimestampTzPlusMilliseconds(memcheck_time, 10 * MSECS_PER_SEC);
+        }
+
+        TimestampTz other_memcheck_time = GetCurrentTimestamp();
+        if (other_memcheck_time > next_other_memcheck_time) {
+            WLMmonitor_check_other_memory();
+            next_other_memcheck_time = TimestampTzPlusMilliseconds(other_memcheck_time, 10 * MSECS_PER_MIN);
+        }
 
         /*
          * Sleep until a signal is received, or until a poll is forced by
@@ -992,6 +1062,7 @@ static void WLMmonitor_MainLoop(void)
                 WLMUpdateCgroupCPUInfo();
                 next_timeout_time = TimestampTzPlusMilliseconds(time_now, 10 * MSECS_PER_SEC);
             }
+
         }
 
         if (IS_PGXC_COORDINATOR) {
@@ -1168,7 +1239,7 @@ NON_EXEC_STATIC void WLMmonitorMain(void)
 
     t_thrd.wlm_cxt.wlm_init_done = false;
     t_thrd.wlm_cxt.wlm_xact_start = false;
-
+    (void)gspqsignal(SIGURG, print_stack);
     (void)gspqsignal(SIGHUP, WLMSigHupHandler);
     (void)gspqsignal(SIGINT, SIG_IGN);
     (void)gspqsignal(SIGTERM, WLMmonitorSigTermHandler);
@@ -1496,6 +1567,7 @@ NON_EXEC_STATIC void WLMarbiterMain(void)
     t_thrd.wlm_cxt.wlm_init_done = false;
     t_thrd.wlm_cxt.wlm_xact_start = false;
 
+    (void)gspqsignal(SIGURG, print_stack);
     (void)gspqsignal(SIGHUP, WLMSigHupHandler);
     (void)gspqsignal(SIGINT, SIG_IGN);
     (void)gspqsignal(SIGTERM, WLMarbiterSigTermHandler);

@@ -155,11 +155,11 @@ ERROR:  argument of TIMESTAMP must be type timestamp with time zone, not type in
 LINE 1: select * from tv_web_returns_p2 timecapsule timestamp 0;
                                                               ^
 select * from tv_web_returns_p2 timecapsule csn 0;
-ERROR:  restore point not found
+ERROR:  cannot find the restore point, timecapsule csn is too old, please check and use correct csn
 timecapsule table tv_web_returns_p2 to timestamp 0;
 ERROR:  argument of TIMESTAMP must be type timestamp with time zone, not type integer
 timecapsule table tv_web_returns_p2 to csn 0;
-ERROR:  restore point not found
+ERROR:  cannot find the restore point, timecapsule csn is too old, please check and use correct csn
 drop table if exists tv_web_returns_p2;
 select * from pg_class timecapsule timestamp 0;
 ERROR:  timecapsule feature does not support system table
@@ -245,7 +245,7 @@ select pg_sleep(4);
 prepare p1(int) as select * from tv_t1 timecapsule csn :1;
 prepare p2(timestamp) as select * from tv_t1 timecapsule timestamp :1;
 execute p1(1);
-ERROR:  restore point not found
+ERROR:  cannot find the restore point, timecapsule csn is too old, please check and use correct csn
 execute p2(now());
  c1 
 ----
@@ -299,9 +299,9 @@ select * from fb_qtbl_invalid_1;
 (1 row)
 
 select * from fb_qtbl_invalid_1 timecapsule csn 0;
-ERROR:  restore point not found
+ERROR:  cannot find the restore point, timecapsule csn is too old, please check and use correct csn
 select * from fb_qtbl_invalid_1 timecapsule csn 1;
-ERROR:  restore point not found
+ERROR:  cannot find the restore point, timecapsule csn is too old, please check and use correct csn
 select * from fb_qtbl_invalid_1 timecapsule csn 9999999999999999;
 ERROR:  invalid csn specified
 select * from fb_qtbl_invalid_1 timecapsule csn 9999999999999998 + 1/1;
@@ -341,7 +341,7 @@ ERROR:  invalid input syntax for type timestamp with time zone: "asdfgag"
 LINE 1: ...ct * from fb_qtbl_invalid_2 timecapsule timestamp 'asdfgag';
                                                              ^
 select * from fb_qtbl_invalid_2 timecapsule timestamp now() - 1/24;
-ERROR:  cannot find the restore point
+ERROR:  cannot find the restore point, timecapsule time is too old, please check and use correct time
 select * from fb_qtbl_invalid_2 timecapsule timestamp now() + 1/24;
 ERROR:  invalid timestamp specified
 drop table fb_qtbl_invalid_2;
@@ -447,10 +447,10 @@ select * from fb_qtbl_normal_2 timecapsule timestamp now() - 1/(24*60*60) where 
 (1 row)
 
 explain (costs off) select * from fb_qtbl_normal_2 timecapsule timestamp now() - 1/(24*60*60) where id > 0;
-                           QUERY PLAN                           
-----------------------------------------------------------------
- Index Only Scan using idx_fb_qtbl_normal_2 on fb_qtbl_normal_2
-   Index Cond: (id > 0)
+          QUERY PLAN          
+------------------------------
+ Seq Scan on fb_qtbl_normal_2
+   Filter: (id > 0)
 (2 rows)
 
 explain (costs off) select * from fb_qtbl_normal_2 where id > 0;
@@ -879,6 +879,69 @@ select * from fb_tbl_normal order by id;
 
 drop table temp;
 drop table fb_tbl_normal;
+--timecapsule various execution plans
+drop table ttt cascade;
+ERROR:  table "ttt" does not exist
+create table ttt(a numeric(38,0), b numeric(38,0), c timestamp(6) default now());
+create  unique index ttt_1 on ttt(a);
+create index ttt_2 on ttt(b);
+create index ttt_3 on ttt(b,a);
+insert into ttt values(generate_series(1,100000), random()*1000000);
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+explain (costs off) select /*+ indexscan(ttt ttt_1) */ * from ttt where a>0;
+           QUERY PLAN           
+--------------------------------
+ [Bypass]
+ Index Scan using ttt_1 on ttt
+   Index Cond: (a > 0::numeric)
+(3 rows)
+
+explain (costs off) select /*+ indexscan(ttt ttt_1) */ * from ttt TIMECAPSULE TIMESTAMP now() - 1/(24*60*60) where a>0;
+WARNING:  unused hint: IndexScan(ttt ttt_1)
+         QUERY PLAN         
+----------------------------
+ Seq Scan on ttt
+   Filter: (a > 0::numeric)
+(2 rows)
+
+explain (costs off) select /*+ indexonlyscan(ttt ttt_1) */ count(*) from ttt where a>0;
+                QUERY PLAN                
+------------------------------------------
+ Aggregate
+   ->  Index Only Scan using ttt_1 on ttt
+         Index Cond: (a > 0::numeric)
+(3 rows)
+
+explain (costs off) select /*+ indexonlyscan(ttt ttt_1) */ count(*) from ttt TIMECAPSULE TIMESTAMP now() - 1/(24*60*60) where a>0;
+WARNING:  unused hint: IndexOnlyScan(ttt ttt_1)
+            QUERY PLAN            
+----------------------------------
+ Aggregate
+   ->  Seq Scan on ttt
+         Filter: (a > 0::numeric)
+(3 rows)
+
+explain (costs off) select /*+ no tablescan(ttt) */ a, b from ttt where a>0;
+              QUERY PLAN              
+--------------------------------------
+ Bitmap Heap Scan on ttt
+   Recheck Cond: (a > 0::numeric)
+   ->  Bitmap Index Scan on ttt_1
+         Index Cond: (a > 0::numeric)
+(4 rows)
+
+explain (costs off) select /*+ no tablescan(ttt) */ a, b from ttt TIMECAPSULE TIMESTAMP now() - 1/(24*60*60) where a>0;
+         QUERY PLAN         
+----------------------------
+ Seq Scan on ttt
+   Filter: (a > 0::numeric)
+(2 rows)
+
 --timecapsule normal table to the scn1, excute dml, timecapsule to scn2, excute dml, timecapsule to scn3, excute dml, timecapsule to scn1
 drop table if exists fb_tbl_normal;
 NOTICE:  table "fb_tbl_normal" does not exist, skipping
@@ -991,13 +1054,14 @@ drop table temp;
 drop table fb_tbl_normal;
 drop view dual;
 drop schema schema_test_3 cascade;
-NOTICE:  drop cascades to 7 other objects
+NOTICE:  drop cascades to 8 other objects
 DETAIL:  drop cascades to function pro_fb_tbl_invalid_3()
 drop cascades to function pro_fb_tbl_normal_1()
 drop cascades to function pro_fb_tbl_normal_2()
 drop cascades to function pro_fb_tbl_normal_3()
 drop cascades to function pro_fb_tbl_normal_re1()
 drop cascades to function pro_timecapsule1()
+drop cascades to table ttt
 drop cascades to function pro_fb_tbl_normal_rb1(integer)
 reset search_path;
 set enable_default_ustore_table = off; 

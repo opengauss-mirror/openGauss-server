@@ -95,10 +95,11 @@ bool AutoAnaProcess::executeSQLCommand(char* queryString)
     t_thrd.int_cxt.ImmediateInterruptOK = ImmediateInterruptOK_Old;
 
     if (PQresultStatus(m_res) != PGRES_COMMAND_OK) {
-        elog(DEBUG2, "[AUTO-ANALYZE] autoanalyze failed: %s, error: %s", queryString, PQerrorMessage(m_pgconn));
+        ereport(DEBUG2, (errmodule(MOD_OPT),
+            (errmsg("[AUTO-ANALYZE] autoanalyze failed: %s, error: %s", queryString, PQerrorMessage(m_pgconn)))));
     } else {
         result = true;
-        elog(DEBUG2, "[AUTO-ANALYZE] autoanalyze sucess: %s", queryString);
+        ereport(DEBUG2, (errmodule(MOD_OPT), (errmsg("[AUTO-ANALYZE] autoanalyze sucess: %s", queryString))));
     }
     PQclear(m_res);
     m_res = NULL;
@@ -114,7 +115,7 @@ bool AutoAnaProcess::run()
 
     foreach (lc, m_query) {
         char* cmd = (char*)lfirst(lc);
-        elog(DEBUG2, "[AUTO-ANALYZE] autoanalyze start: %s", cmd);
+        ereport(DEBUG2, (errmodule(MOD_OPT), (errmsg("[AUTO-ANALYZE] autoanalyze start: %s", cmd))));
     }
 
     ret = snprintf_s(conninfo,
@@ -137,7 +138,8 @@ bool AutoAnaProcess::run()
             }
         }
     } else {
-        elog(DEBUG2, "[AUTO-ANALYZE] connection to database failed: %s", PQerrorMessage(m_pgconn));
+        ereport(DEBUG2, (errmodule(MOD_OPT),
+            (errmsg("[AUTO-ANALYZE] connection to database failed: %s", PQerrorMessage(m_pgconn)))));
     }
 
     PQclear(m_res);
@@ -196,7 +198,8 @@ bool AutoAnaProcess::runAutoAnalyze(Relation rel)
 
     /* 1 check conditions */
     if (!check_conditions(rel)) {
-        elog(DEBUG2, "[AUTO-ANALYZE] check analyze conditions failed: table \"%s\"", NameStr(rel->rd_rel->relname));
+        ereport(DEBUG2, (errmodule(MOD_OPT),
+            (errmsg("[AUTO-ANALYZE] check analyze conditions failed: table \"%s\"", NameStr(rel->rd_rel->relname)))));
         return result;
     }
 
@@ -210,7 +213,7 @@ bool AutoAnaProcess::runAutoAnalyze(Relation rel)
 
     if (!getProcess) {
         /* no free process */
-        elog(DEBUG2, "[AUTO-ANALYZE] no free autoanalyze process");
+        ereport(DEBUG2, (errmodule(MOD_OPT), (errmsg("[AUTO-ANALYZE] no free autoanalyze process"))));
         return result;
     }
 

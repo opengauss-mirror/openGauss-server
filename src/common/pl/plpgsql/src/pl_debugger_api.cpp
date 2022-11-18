@@ -990,13 +990,15 @@ static void InterfaceCheck(const char* funcname, bool needAttach)
         DebugClientInfo* client = u_sess->plsql_cxt.debug_client;
         AutoMutexLock debuglock(&debug_comm->mutex);
         debuglock.lock();
-        if ((debug_comm->clientId != u_sess->session_id && debug_comm->clientId != t_thrd.proc_cxt.MyProcPid) ||
-            !debug_comm->isRunning()) {
+        bool needClear = (debug_comm->clientId != u_sess->session_id &&
+                          debug_comm->clientId != t_thrd.proc_cxt.MyProcPid) ||
+                         !debug_comm->isRunning();
+        debuglock.unLock();
+        if (needClear) {
+            u_sess->plsql_cxt.debug_client = NULL;
             client->comm_idx = -1;
             MemoryContextDelete(client->context);
-            u_sess->plsql_cxt.debug_client = NULL;
         }
-        debuglock.unLock();
     }
     if (needAttach && u_sess->plsql_cxt.debug_client == NULL) {
         ereport(ERROR,

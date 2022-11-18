@@ -32,8 +32,7 @@ typedef enum StartWithOpExecStatus {
     SWOP_UNKNOWN = 0,
     SWOP_BUILD = 1,
     SWOP_EXECUTE,
-    SWOP_FINISH,
-    SWOP_ESCAPE
+    SWOP_FINISH
 } StartWithOpExecStatus;
 
 #define KEY_START_TAG "{"
@@ -230,6 +229,7 @@ static bool unsupported_filter_walker(Node *node, Node *context_node)
  *   - ExecStartWithOp()
  *   - ExecEndStartWithOp()
  *   - ExecReScanStartWithOp()
+ *   - ResetRecursiveInner()
  */
 StartWithOpState* ExecInitStartWithOp(StartWithOp* node, EState* estate, int eflags)
 {
@@ -372,7 +372,8 @@ bool CheckCycleExeception(StartWithOpState *node, TupleTableSlot *slot)
 {
     RecursiveUnionState *rustate = NULL;
     StartWithOp *swplan = (StartWithOp *)node->ps.plan;
-    bool   incycle = false;
+    bool nocycle = swplan->swoptions->nocycle;
+    bool incycle = false;
 
     if (swplan->swoptions->siblings_orderby_clause != NULL) {
         SortState *sstate = (SortState *)node->ps.lefttree;
@@ -383,7 +384,7 @@ bool CheckCycleExeception(StartWithOpState *node, TupleTableSlot *slot)
 
     Assert (IsA(rustate, RecursiveUnionState));
 
-    if (IsConnectByLevelStartWithPlan(swplan) || node->sw_keyAttnum == 0) {
+    if ((!nocycle && IsConnectByLevelStartWithPlan(swplan)) || node->sw_keyAttnum == 0) {
         /* for connect by level case, we do not do cycle check */
         return false;
     }
@@ -397,7 +398,7 @@ bool CheckCycleExeception(StartWithOpState *node, TupleTableSlot *slot)
     CheckIsCycle(node, &incycle);
 
     /* compatible with ORA behavior, if NOCYCLE is not set, we report error */
-    if (!swplan->swoptions->nocycle && incycle) {
+    if (!nocycle && incycle) {
         ereport(ERROR,
                 (errmodule(MOD_EXECUTOR),
                 errmsg("START WITH .. CONNECT BY statement runs into cycle exception")));
@@ -415,6 +416,31 @@ bool CheckCycleExeception(StartWithOpState *node, TupleTableSlot *slot)
     return incycle;
 }
 
+/*
+ * This function is called during executing recursive part(inner plan) of recursive union,
+ * so it would be enough to rescan(reset) only inner_plan of RecursiveUnionState to refreash
+ * last working state including working table.
+ */
+void ResetRecursiveInner(RecursiveUnionState *node)
+{
+    PlanState *outerPlanState = outerPlanState(node);
+    PlanState *innerPlanState = innerPlanState(node);
+    RecursiveUnion *ruPlan = (RecursiveUnion*)node->ps.plan;
+
+    /*
+     * Set recursive term's chgParam to tell it that we'll modify the working
+     * table and therefore it has to rescan.
+     */
+    innerPlanState->chgParam = bms_add_member(innerPlanState->chgParam, ruPlan->wtParam);
+    if (outerPlanState->chgParam == NULL) {
+        ExecReScan(innerPlanState);
+    }
+
+    /* reset processing state */
+    node->intermediate_empty = true;
+    tuplestore_clear(node->working_table);
+    tuplestore_clear(node->intermediate_table);
+}
 
 /*
  * Peeking a tuple's connectable descendants for exactly one level.
@@ -431,9 +457,8 @@ static List* peekNextLevel(TupleTableSlot* startSlot, PlanState* outerNode, int 
 {
     List* queue = NULL;
     RecursiveUnionState* rus = (RecursiveUnionState*) outerNode;
-    StartWithOpState *swnode = rus->swstate;
-    /* clean up RU's old working table */
-    ExecReScan(outerNode);
+    /* ReSet RU's inner plan, inlcuding re-scan inner and free its working table */
+    ResetRecursiveInner(rus);
     /* pushing the depth-first tuple into RU's working table */
     rus->recursing = true;
     tuplestore_puttupleslot(rus->working_table, startSlot);
@@ -441,10 +466,8 @@ static List* peekNextLevel(TupleTableSlot* startSlot, PlanState* outerNode, int 
     /* fetch the depth-first tuple's children exactly one level below */
     rus->iteration = level;
     int begin_iteration = rus->iteration;
-    int begin_rowCount = swnode->sw_rownum;
     TupleTableSlot* srcSlot = NULL;
     for (;;) {
-        swnode->sw_rownum = begin_rowCount;
         srcSlot = ExecProcNode(outerNode);
         if (TupIsNull(srcSlot) || (rus->iteration != begin_iteration)) break;
         TupleTableSlot* newSlot = MakeSingleTupleTableSlot(srcSlot->tts_tupleDescriptor);
@@ -473,7 +496,7 @@ static bool depth_first_connect(int currentLevel, StartWithOpState *node, List* 
 
     /* loop until all siblings' DFS are done */
     for (;;) {
-        if (queue->head == NULL || node->swop_status == SWOP_ESCAPE) {
+        if (queue->head == NULL) {
             return isCycle;
         }
         TupleTableSlot* leader = (TupleTableSlot*) lfirst(queue->head);
@@ -558,7 +581,7 @@ void markSWLevelEnd(StartWithOpState *node, int64 rowCount)
  * @Function: ExecStartWithRowLevelQual()
  *
  * @Brief:
- *         Check if LEVEL/ROWNUM conditions still hold for the recursion to
+ *         Check if SWCB's conditions still hold for the recursion to
  *         continue. Level and rownum should have been made available
  *         in dstSlot by ConvertStartWithOpOutputSlot() already.
  *
@@ -587,44 +610,19 @@ bool ExecStartWithRowLevelQual(RecursiveUnionState* node, TupleTableSlot* dstSlo
     return true;
 }
 
-static bool isStoppedByRowNum(RecursiveUnionState* node, TupleTableSlot* slot)
+static void DiscardSWLastTuple(StartWithOpState *node)
 {
-    TupleTableSlot* dstSlot = node->swstate->ps.ps_ResultTupleSlot;
-    bool ret = false;
-
-    /* 1. roll back to the converted result row */
-    node->swstate->sw_rownum--;
-    /* 2. roll back to one row before execution to check rownum stop condition */
-    node->swstate->sw_rownum--;
-    dstSlot = ConvertStartWithOpOutputSlot(node->swstate, slot, dstSlot);
-    if (ExecStartWithRowLevelQual(node, dstSlot)) {
-        ret = true;
-    }
-    /* undo the rollback after conversion (yes, just one line) */
-    node->swstate->sw_rownum++;
-    return ret;
+    node->sw_rownum--;
+    node->sw_numtuples--;
 }
 
-TupleTableSlot* GetStartWithSlot(RecursiveUnionState* node, TupleTableSlot* slot)
+TupleTableSlot* GetStartWithSlot(RecursiveUnionState* node, TupleTableSlot* slot, bool isRecursive)
 {
     TupleTableSlot* dstSlot = node->swstate->ps.ps_ResultTupleSlot;
     dstSlot = ConvertStartWithOpOutputSlot(node->swstate, slot, dstSlot);
 
-    if (!ExecStartWithRowLevelQual(node, dstSlot)) {
-        StartWithOpState *swnode = node->swstate;
-        StartWithOp *swplan = (StartWithOp *)swnode->ps.plan;
-        PlanState      *outerNode = outerPlanState(swnode);
-        bool isDfsEnabled = swplan->swoptions->nocycle && !IsA(outerNode, SortState);
-        /*
-         * ROWNUM/LEVEL limit reached:
-         * Tell ExecRecursiveUnion to terminate the recursion by returning NULL
-         *
-         * Specifically for ROWNUM limit reached:
-         * Tell DFS routine to stop immediately by setting SW status to ESCAPE.
-         */
-        node->swstate->swop_status = isDfsEnabled && isStoppedByRowNum(node, slot) ?
-                                     SWOP_ESCAPE :
-                                     node->swstate->swop_status;
+    if (isRecursive && !ExecStartWithRowLevelQual(node, dstSlot)) {
+        DiscardSWLastTuple(node->swstate);
         return NULL;
     }
 

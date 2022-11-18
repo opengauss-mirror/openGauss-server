@@ -740,8 +740,11 @@ static bool ProcessResult(PGresult** results, bool is_explain, bool print_error)
     bool success = true;
     bool first_cycle = true;
 
-    if (is_explain && (*results = PQgetResult(pset.db)) == NULL && ConnectionUp())
-        return success;
+    if (is_explain) {
+        *results = PQgetResult(pset.db);
+        if (*results == NULL && ConnectionUp())
+            return success;
+    }
 
     do {
         ExecStatusType result_status;
@@ -782,12 +785,27 @@ static bool ProcessResult(PGresult** results, bool is_explain, bool print_error)
              * Marshal the COPY data.  Either subroutine will get the
              * connection out of its COPY state, then call PQresultStatus()
              * once and report any error.
+             *
+             * For COPY OUT, direct the output to pset.copyStream if it's set,
+             * otherwise to queryFout.
+             * For COPY IN, use pset.copyStream as data source if it's set,
+             * otherwise cur_cmd_source.
              */
+            FILE *copystream;
+
             SetCancelConn();
-            if (result_status == PGRES_COPY_OUT)
-                success = handleCopyOut(pset.db, pset.queryFout) && success;
-            else
-                success = handleCopyIn(pset.db, pset.cur_cmd_source, PQbinaryTuples(*results)) && success;
+            if (result_status == PGRES_COPY_OUT) {
+                /*
+                 * pset.copyStream: invoked by \copy
+                 * pset.queryFout: fall back to the generic query output stream
+                 */
+                copystream = pset.copyStream ? pset.copyStream : pset.queryFout;
+                success = handleCopyOut(pset.db, copystream) && success;
+            } else {
+                /* COPY IN */
+                copystream = pset.copyStream ? pset.copyStream : pset.cur_cmd_source;
+                success = handleCopyIn(pset.db, copystream, PQbinaryTuples(*results)) && success;
+            }
             ResetCancelConn();
 
             /*
@@ -800,10 +818,13 @@ static bool ProcessResult(PGresult** results, bool is_explain, bool print_error)
         } else if (is_explain || first_cycle)
             /* fast path: no COPY commands; PQexec visited all results */
             break;
-        else if (!is_explain && ((next_result = PQgetResult(pset.db)) != NULL)) {
-            /* non-COPY command(s) after a COPY: keep the last one */
-            PQclear(*results);
-            *results = next_result;
+        else if (!is_explain) {
+            next_result = PQgetResult(pset.db);
+            if (next_result != NULL) {
+                /* non-COPY command(s) after a COPY: keep the last one */
+                PQclear(*results);
+                *results = next_result;
+            }
         }
 
         first_cycle = false;

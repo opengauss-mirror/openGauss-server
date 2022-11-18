@@ -304,7 +304,7 @@ static void cross_db_view_to_json(const char *view_name, const char *main_query)
 
             StringInfoData db_query;
             initStringInfo(&db_query);
-            appendStringInfo(&db_query, "select json from wdr_xdb_query('dbname=%s', '%s') as r(json text)",
+            appendStringInfo(&db_query, "select json from pg_catalog.wdr_xdb_query('dbname=%s', '%s') as r(json text)",
                 curr_db, main_query);
 
             output_query_to_json(db_query.data, curr_db, view_name);
@@ -348,15 +348,16 @@ Datum capture_view_to_json(PG_FUNCTION_ARGS)
 
     StringInfoData query;
     initStringInfo(&query);
-    appendStringInfo(&query, "select row_to_json(src_view) as json from ("
+    appendStringInfo(&query, "select pg_catalog.row_to_json(src_view) as json from ("
                              "    select * from "
-                             "    floor(EXTRACT(epoch FROM clock_timestamp()) * 1000) as record_time, "
-                             "    current_setting(%spgxc_node_name%s) as perf_node_name, "
-                             "    current_database() as perf_database_name, "
+                             "    pg_catalog.floor(EXTRACT(epoch FROM pg_catalog.clock_timestamp()) * 1000) "
+                             "    as record_time, "
+                             "    pg_catalog.current_setting(%spgxc_node_name%s) as perf_node_name, "
+                             "    pg_catalog.current_database() as perf_database_name, "
                              "    (select %s%s%s as perf_view_name), "
                              "    %s %s) as src_view;", quota, quota, quota, view_name, quota, view_name, filter);
     pfree_ext(filter);
-
+    MemoryContext oldcontext = CurrentMemoryContext;
     /* get query result to json */
     SPI_STACK_LOG("connect", NULL, NULL);
     if ((rc = SPI_connect()) != SPI_OK_CONNECT) {
@@ -367,7 +368,7 @@ Datum capture_view_to_json(PG_FUNCTION_ARGS)
     }
 
     ErrorData* edata = NULL;
-    MemoryContext oldcontext = CurrentMemoryContext;
+
     PG_TRY();
     {
         if (is_all_db == 0) {

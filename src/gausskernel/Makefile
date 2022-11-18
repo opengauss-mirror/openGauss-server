@@ -24,8 +24,8 @@ override CXXFLAGS += $(PTHREAD_CFLAGS)
 #
 SUBDIRS = ../common/backend bootstrap cbb optimizer process dbmind runtime  security  storage \
 	$(top_builddir)/src/common/timezone $(top_builddir)/src/common/interfaces/libpq \
-	$(top_builddir)/contrib/file_fdw $(top_builddir)/contrib/hdfs_fdw \
-	$(top_builddir)/contrib/log_fdw $(top_builddir)/contrib/test_decoding $(top_builddir)/contrib/mppdb_decoding \
+	$(top_builddir)/contrib/file_fdw $(top_builddir)/contrib/log_fdw \
+	$(top_builddir)/contrib/test_decoding $(top_builddir)/contrib/mppdb_decoding \
 	$(top_builddir)/contrib/postgres_fdw
 
 ifeq ($(enable_db4ai_mock), yes)
@@ -41,8 +41,8 @@ ifeq ($(enable_oracle_fdw), yes)
 endif
 
 ifeq ($(enable_multiple_nodes), yes)
-SUBDIRS += $(top_builddir)/../contrib/carbondata \
-	$(top_builddir)/../distribute/kernel $(top_builddir)/../distribute/kernel/extension/roach_api $(top_builddir)/../distribute/kernel/extension/dimsearch/main \
+SUBDIRS += $(top_builddir)/../distribute/kernel \
+	 $(top_builddir)/../distribute/kernel/extension/roach_api $(top_builddir)/../distribute/kernel/extension/dimsearch/main \
 	$(top_builddir)/../distribute/kernel/extension/tsdb $(top_builddir)/../distribute/kernel/extension/streaming
 
 ifeq ($(enable_qunit), yes)
@@ -197,29 +197,6 @@ LIBS += -lcgroup
 LIBCGROUP=libcgroup.so
 
 ############################################################################
-# link orc for gaussdb
-############################################################################
-ifeq ($(enable_lite_mode), no)
-LIBS += -lorc
-endif
-
-############################################################################
-# link parquet for gaussdb
-############################################################################
-ifeq ($(enable_lite_mode), no)
-LDFLAGS += -L$(LIBPARQUET_LIB_PATH) -L$(LIBPARQUET_ARROW_LIB_PATH)
-LIBS += -lparquet -larrow
-endif
-
-############################################################################
-# link carbondata for gaussdb
-############################################################################
-ifeq ($(enable_multiple_nodes), yes)
-LIBS += -lcarbondata
-LDFLAGS += -L$(LIBCARBONDATA_LIB_PATH)
-endif
-
-############################################################################
 # link dcf for gaussdb
 ############################################################################
 ifeq ($(enable_multiple_nodes), no)
@@ -228,51 +205,10 @@ LDFLAGS += -L$(DCF_LIB_PATH)
 endif
 
 ############################################################################
-# link thrift for gaussdb
-############################################################################
-ifeq ($(enable_lite_mode), no)
-LDFLAGS += -L$(LIBTHRIFT_LIB_PATH)
-LIBS += -lthrift
-endif
-
-############################################################################
-# link snappy for gaussdb
-############################################################################
-SNAPPY_LIB_NAME=
-ifeq ($(enable_llt), yes)
- SNAPPY_LIB_NAME=snappy_pic
-else
- ifeq ($(enable_ut), yes)
-  SNAPPY_LIB_NAME=snappy_pic
- else
-  SNAPPY_LIB_NAME=snappy	
- endif
-endif
-ifeq ($(enable_lite_mode), no)
-LIBS += -l${SNAPPY_LIB_NAME}
-endif
-
-############################################################################
 # link zstd for gaussdb
 ############################################################################
 LDFLAGS += -L$(ZSTD_LIB_PATH)
 LIBS += -lzstd
-
-################################################################################
-# protobuf
-################################################################################
-PROTOBUF_LIB_NAME=
-ifeq ($(enable_llt), yes)
- PROTOBUF_LIB_NAME=protobuf_pic
-else
- ifeq ($(enable_ut), yes)
-  PROTOBUF_LIB_NAME=protobuf_pic
- else
-  PROTOBUF_LIB_NAME=protobuf	
- endif
-endif
-
-LIBS += -l${PROTOBUF_LIB_NAME}
 
 ##################################################################################
 # kerberos
@@ -292,7 +228,6 @@ endif
 ##################################################################################
 # boost
 ###################################################################################
-ifeq ($(enable_lite_mode), no)
 ifeq ($(enable_llt), yes)
  LIBS += -lboost_thread_pic -lboost_chrono_pic  -lboost_system_pic -lboost_atomic
 else
@@ -301,7 +236,6 @@ else
  else
   LIBS += -lboost_thread -lboost_chrono  -lboost_system -lboost_atomic
  endif
-endif
 endif
 
 ################################################################################
@@ -332,15 +266,15 @@ endif
 ################################################################################
 # for 3rd support
 ################################################################################
-LDFLAGS += -L$(LIBLLVM_LIB_PATH) -L$(LIBTINFO_LIB_PATH) \
-    -L$(LIBCGROUP_LIB_PATH) -L$(PROTOBUF_LIB_PATH) \
+LDFLAGS += -L$(BOOST_LIB_PATH) -L$(LIBTINFO_LIB_PATH) \
+    -L$(LIBCGROUP_LIB_PATH) \
     -L$(LIBOPENSSL_LIB_PATH)
 
 ifeq ($(enable_lite_mode), no)
-LDFLAGS += -L$(LIBOBS_LIB_PATH) -L$(LIBORC_LIB_PATH) \
-    -L$(SNAPPY_LIB_PATH) -L$(BOOST_LIB_PATH) -L$(LIBXML_LIB_PATH) \
-    -L$(KERBEROS_LIB_PATH) -L$(LIBSTD_LIB_PATH) \
-    -L$(LIBCARBONDATA_LIB_PATH)
+LDFLAGS += -L$(LIBOBS_LIB_PATH) \
+    -L$(LIBLLVM_LIB_PATH) -L$(LIBXML_LIB_PATH) \
+    -L$(KERBEROS_LIB_PATH) -L$(LIBSTD_LIB_PATH)
+#    -L$(LIBCARBONDATA_LIB_PATH)
 endif
  
   # append lz4 for compression: lz4
@@ -364,9 +298,6 @@ endif
 ##########################################################################
 
 all: submake-libpgport submake-schemapg libgstrace submake-libalarmclient gaussdb $(POSTGRES_IMP)
-ifeq ($(enable_multiple_nodes), yes)
-all: submake-libcarbondata
-endif
 
 ifneq ($(PORTNAME), cygwin)
 ifneq ($(PORTNAME), win32)
@@ -449,7 +380,7 @@ libgstrace:
 
 ifeq ($(enable_multiple_nodes), yes)
 # Update the commonly used headers before building the subdirectories
-$(SUBDIRS:%=%-recursive): $(top_builddir)/src/include/parser/gram.hpp $(top_builddir)/src/include/catalog/schemapg.h $(top_builddir)/src/common/backend/utils/fmgroids.h $(top_builddir)/src/common/backend/utils/pg_builtin_proc.h $(top_builddir)/src/include/utils/errcodes.h $(top_builddir)/src/include/utils/probes.h $(top_builddir)/src/include/parser/hint_gram.hpp $(top_builddir)/src/include/replication/repl_gram.hpp $(top_builddir)/src/include/replication/syncrep_gram.hpp $(top_builddir)/src/include/storage/lwlocknames.h $(top_builddir)/../contrib/carbondata/libcarbondata.a
+$(SUBDIRS:%=%-recursive): $(top_builddir)/src/include/parser/gram.hpp $(top_builddir)/src/include/catalog/schemapg.h $(top_builddir)/src/common/backend/utils/fmgroids.h $(top_builddir)/src/common/backend/utils/pg_builtin_proc.h $(top_builddir)/src/include/utils/errcodes.h $(top_builddir)/src/include/utils/probes.h $(top_builddir)/src/include/parser/hint_gram.hpp $(top_builddir)/src/include/replication/repl_gram.hpp $(top_builddir)/src/include/replication/syncrep_gram.hpp $(top_builddir)/src/include/storage/lwlocknames.h
 
 else
 $(SUBDIRS:%=%-recursive): $(top_builddir)/src/include/parser/gram.hpp $(top_builddir)/src/include/catalog/schemapg.h $(top_builddir)/src/common/backend/utils/fmgroids.h $(top_builddir)/src/common/backend/utils/pg_builtin_proc.h $(top_builddir)/src/include/utils/errcodes.h $(top_builddir)/src/include/utils/probes.h $(top_builddir)/src/include/parser/hint_gram.hpp $(top_builddir)/src/include/replication/repl_gram.hpp $(top_builddir)/src/include/replication/syncrep_gram.hpp $(top_builddir)/src/include/storage/lwlocknames.h
@@ -474,10 +405,6 @@ ifeq ($(enable_lite_mode), no)
 submake-libpljava: | submake-fmgroids
 	$(top_builddir)/third_party/dependency/pljava/build.sh -m only_so
 endif
-
-# run this to build carbondata-sdk
-$(top_builddir)/../contrib/carbondata/libcarbondata.a: 
-	$(MAKE) -C $(top_builddir)/../contrib/carbondata all
 
 .PHONY: submake-schemapg submake-errcodes
 
@@ -643,7 +570,6 @@ install: all installdirs install-bin
 	$(MAKE) -C ../common/backend/tsearch install-data
 	$(MAKE) -C storage/bulkload install-data
 	$(MAKE) -C $(top_builddir)/contrib/file_fdw install
-	$(MAKE) -C $(top_builddir)/contrib/hdfs_fdw install
 	$(MAKE) -C $(top_builddir)/contrib/log_fdw install
 ifeq ($(enable_multiple_nodes), yes)
 	$(MAKE) -C $(top_builddir)/../distribute/kernel/extension/gauss_connector install
@@ -684,8 +610,6 @@ ifeq ($(enable_lite_mode), no)
 	cp $(LIBOBS_LIB_PATH)/libiconv* '$(DESTDIR)$(libdir)/'
 	cp $(LIBOBS_LIB_PATH)/OBS* '$(DESTDIR)$(libdir)/'
 	cp $(LIBOBS_LIB_PATH)/libnghttp* '$(DESTDIR)$(libdir)/'
-	cp $(LIBPARQUET_LIB_PATH)/libparquet* '$(DESTDIR)$(libdir)/'
-	cp $(LIBPARQUET_LIB_PATH)/libarrow* '$(DESTDIR)$(libdir)/'
 endif
 	cp -d $(ZLIB_LIB_PATH)/libz* '$(DESTDIR)$(libdir)/'
 	cp -d $(XGBOOST_LIB_PATH)/libxgboost* '$(DESTDIR)$(libdir)/'
@@ -693,7 +617,9 @@ endif
 
 ifneq ($(with_openeuler_os), yes)
 	cp -d $(LZ4_LIB_PATH)/liblz4* '$(DESTDIR)$(libdir)/'
+ifeq ($(enable_lite_mode), no)
 	cp -d $(with_3rd)/$(BINARYPATH)/event/$(LIB_SUPPORT_LLT)/lib/libevent* '$(DESTDIR)$(libdir)/'
+endif
 	cp $(SECUREDYNAMICLIB_HOME)/libsecurec* '$(DESTDIR)$(libdir)/'
 ifneq (, $(findstring __USE_NUMA, $(CFLAGS)))
 	cp $(ZSTD_LIB_PATH)/libzstd* '$(DESTDIR)$(libdir)/'
@@ -748,33 +674,9 @@ ifneq ($(with_openeuler_os), yes)
 ifeq ($(enable_multiple_nodes), no)
 	cp '$(DCF_LIB_PATH)/libdcf.so' '$(DESTDIR)$(libdir)/libdcf.so'
 endif
-	cp '$(ZSTD_LIB_PATH)/libzstd.so' '$(DESTDIR)$(libdir)/libzstd.so'
-	cp '$(ZSTD_LIB_PATH)/libzstd.so.1' '$(DESTDIR)$(libdir)/libzstd.so.1'
-	cp '$(ZSTD_LIB_PATH)/libzstd.so.1.5.0' '$(DESTDIR)$(libdir)/libzstd.so.1.5.0'
+	cp '$(ZSTD_LIB_PATH)/'libzstd.so* '$(DESTDIR)$(libdir)/'
 
-ifeq ($(PLAT_FORM_STR), euleros2.0_sp2_x86_64)
 	cp -d '$(LIBCURL_LIB_PATH)'/libcurl.so* '$(DESTDIR)$(libdir)/'
-else ifeq ($(PLAT_FORM_STR), euleros2.0_sp5_x86_64)
-	cp -d '$(LIBCURL_LIB_PATH)'/libcurl.so* '$(DESTDIR)$(libdir)/'
-else ifeq ($(PLAT_FORM_STR), euleros2.0_sp8_aarch64)
-	cp -d '$(LIBCURL_LIB_PATH)'/libcurl.so* '$(DESTDIR)$(libdir)/'
-else ifeq ($(PLAT_FORM_STR), euleros2.0_sp9_aarch64)
-	cp -d '$(LIBCURL_LIB_PATH)'/libcurl.so* '$(DESTDIR)$(libdir)/'
-else ifeq ($(PLAT_FORM_STR), openeuler_aarch64)
-	cp -d '$(LIBCURL_LIB_PATH)'/libcurl.so* '$(DESTDIR)$(libdir)/'
-else ifeq ($(PLAT_FORM_STR), openeuler_x86_64)
-	cp -d '$(LIBCURL_LIB_PATH)'/libcurl.so* '$(DESTDIR)$(libdir)/'
-else ifeq ($(PLAT_FORM_STR), centos7.6_x86_64)
-	cp -d '$(LIBCURL_LIB_PATH)'/libcurl.so* '$(DESTDIR)$(libdir)/'
-else ifeq ($(PLAT_FORM_STR), kylinv10_sp1_aarch64)
-	cp -d '$(LIBCURL_LIB_PATH)'/libcurl.so* '$(DESTDIR)$(libdir)/'
-else ifeq ($(PLAT_FORM_STR), kylinv10_sp1_x86_64_intel)
-	cp -d '$(LIBCURL_LIB_PATH)'/libcurl.so* '$(DESTDIR)$(libdir)/'
-else ifeq ($(PLAT_FORM_STR), ubuntu18.04_x86_64)
-	cp -d '$(LIBCURL_LIB_PATH)'/libcurl.so* '$(DESTDIR)$(libdir)/'
-else
-	cp -d '$(LIBCURL_LIB_PATH)'/libcurl.so* '$(DESTDIR)$(libdir)/'
-endif
 endif
 
 	rm -rf '$(DESTDIR)$(libdir)/../temp'
@@ -785,6 +687,7 @@ endif
 
 install-bin: gaussdb $(POSTGRES_IMP) installdirs libcgroup
 	$(INSTALL_PROGRAM) gaussdb$(X) '$(DESTDIR)$(bindir)/gaussdb$(X)'
+	$(INSTALL_PROGRAM) '$(LZ4_BIN_PATH)/lz4' '$(DESTDIR)$(bindir)/lz4'
 ifeq ($(enable_lite_mode), no)
 	@if test -d $(KERBEROS_BIN_PATH); then cp -rf $(KERBEROS_BIN_PATH)/klist $(DESTDIR)$(bindir)/; fi  
 	@if test -d $(KERBEROS_BIN_PATH); then cp -rf $(KERBEROS_BIN_PATH)/kinit $(DESTDIR)$(bindir)/; fi
@@ -797,7 +700,6 @@ ifeq (${host_cpu}, aarch64)
 	$(INSTALL_PROGRAM) ../bin/scripts/setArmOptimization$(X).sh '$(DESTDIR)$(bindir)/setArmOptimization$(X).sh'
 	$(INSTALL_PROGRAM) ../bin/scripts/bind_net_irq$(X).sh '$(DESTDIR)$(bindir)/bind_net_irq$(X).sh'
 endif
-	$(INSTALL_PROGRAM) '$(LZ4_BIN_PATH)/lz4' '$(DESTDIR)$(bindir)/lz4'
 
 	@rm -f '$(DESTDIR)$(bindir)/gs_encrypt$(X)'
 	ln -s gaussdb$(X) '$(DESTDIR)$(bindir)/gs_encrypt$(X)'
@@ -830,7 +732,6 @@ installdirs:
 	$(MKDIR_P) '$(DESTDIR)$(datadir)/../sslcert'
 	$(MKDIR_P) '$(DESTDIR)$(datadir)/../sslcert/gsql'
 ifeq ($(enable_lite_mode), no)
-	cp '$(top_builddir)/src/gausskernel/storage/access/dfs/region_map'  '$(DESTDIR)$(bindir)/../etc/'
 	@if test -d '$(top_builddir)/src/common/backend/libpq/kerberos'; then cp -rf '$(top_builddir)/src/common/backend/libpq/kerberos'  '$(DESTDIR)$(bindir)/../etc/'; fi
 	$(MKDIR_P) '$(DESTDIR)$(datadir)/../sslcert/etcd'
 	$(MKDIR_P) '$(DESTDIR)$(datadir)/../sslcert/gds'
@@ -895,7 +796,6 @@ endif
 	$(MAKE) -C ../common/backend/tsearch uninstall-data
 	$(MAKE) -C storage/bulkload uninstall-data
 	$(MAKE) -C $(top_builddir)/contrib/file_fdw uninstall
-	$(MAKE) -C $(top_builddir)/contrib/hdfs_fdw uninstall
 ifeq ($(enable_multiple_nodes), yes)
 	$(MAKE) -C $(top_builddir)/../distribute/kernel/extension/gauss_connector uninstall
 	$(MAKE) -C $(top_builddir)/../distribute/kernel/extension/roach_api uninstall

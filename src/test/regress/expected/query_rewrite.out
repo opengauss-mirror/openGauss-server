@@ -226,9 +226,108 @@ where
     5 |   5 | records.storage.state
 (1 row)
 
+--test pulling up sublinks: in orclause.
+drop table if exists t1;
+drop table if exists t2;
+create table t1(c1 int, c2 int, c3 int);
+create table t2(c1 int, c2 int, c3 int);
+insert into t1 values(1,0),(2,0),(1,0),(2,1),(1,1),(1,0),(2,0),(1,0),(2,1),(1,1),(2,3),(2,1),(1,2);
+insert into t2 values(1,0,1),(2,0,2),(1,0,1),(2,1,1),(1,1,0),(1,0,1),(2,0,2),(1,0,1),(2,1,1),(1,1,0),(0,0,1);
+explain  (verbose, costs off) select * from t2 where t2.c1 in (select t1.c1 from t1 group by t1.c1, t1.c2) or t2.c2 = 1;
+                   QUERY PLAN                   
+------------------------------------------------
+ Hash Left Join
+   Output: t2.c1, t2.c2, t2.c3
+   Hash Cond: (t2.c1 = t1.c1)
+   Filter: ((t1.c1 IS NOT NULL) OR (t2.c2 = 1))
+   ->  Seq Scan on query_rewrite.t2
+         Output: t2.c1, t2.c2, t2.c3
+   ->  Hash
+         Output: t1.c1
+         ->  HashAggregate
+               Output: t1.c1
+               Group By Key: t1.c1
+               ->  Seq Scan on query_rewrite.t1
+                     Output: t1.c1
+(13 rows)
+
+-- fix bug: ERROR: no relation entry for relid 1
+-- Scenario:1
+set enable_hashjoin=on;
+set enable_material=off;
+set enable_mergejoin=off;
+set enable_nestloop=off;
+create table k1(id int,id1 int);
+create table k2(id int,id1 int);
+create table k3(id int,id1 int);
+explain (costs off)select   m.*,k3.id from (select tz.* from (select k1.id from k1 WHERE exists (select k2.id from k2 where k2.id = k1.id and k2.id1 in (1,2,3,4,5,6,7,8,9,10,11))) tz limit 10) m left join k3 on m.id = k3.id;
+                                          QUERY PLAN                                          
+----------------------------------------------------------------------------------------------
+ Hash Right Join
+   Hash Cond: (k3.id = k1.id)
+   ->  Seq Scan on k3
+   ->  Hash
+         ->  Limit
+               ->  Hash Join
+                     Hash Cond: (k1.id = query_rewrite.k2.id)
+                     ->  Seq Scan on k1
+                     ->  Hash
+                           ->  HashAggregate
+                                 Group By Key: query_rewrite.k2.id
+                                 ->  Hash Join
+                                       Hash Cond: (query_rewrite.k2.id1 = "*VALUES*".column1)
+                                       ->  Seq Scan on k2
+                                       ->  Hash
+                                             ->  HashAggregate
+                                                   Group By Key: "*VALUES*".column1
+                                                   ->  Values Scan on "*VALUES*"
+(18 rows)
+
+-- Scenario:2
+create table customer(c_birth_month int);
+ select 
+      1
+    from 
+      customer t1 ,
+      (with tmp2 as ( select 1 as c_birth_month,   2 as c_birth_day   from   now()) 
+       select c_birth_month,  c_birth_day from ( select 1 as c_birth_month,   2 as c_birth_day   from   now()) tmp2 ) t2  
+    where 
+      t1.c_birth_month = t2.c_birth_day  and exists (select  1 ) ;
+ ?column? 
+----------
+(0 rows)
+
+-- Scenario:3
+select 1 from  customer where c_birth_month not in (with  tmp1 as (select 1  from now()) select * from tmp1);
+ ?column? 
+----------
+(0 rows)
+
+--fix bug: Error hint: TableScan(seq_t0), relation name "seq_t0" is not found.
+drop table if exists seq_t0;
+NOTICE:  table "seq_t0" does not exist, skipping
+drop table if exists seq_t1;
+NOTICE:  table "seq_t1" does not exist, skipping
+create table seq_t0(a int, b int8 );
+create table seq_t1(a int, b int8 );
+explain (costs off) select /*+ tablescan(seq_t0) */ b from seq_t0 union all select /*+ tablescan(seq_t1) */ b from seq_t1;
+           QUERY PLAN           
+--------------------------------
+ Result
+   ->  Append
+         ->  Seq Scan on seq_t0
+         ->  Seq Scan on seq_t1
+(4 rows)
+
 drop schema query_rewrite cascade;
-NOTICE:  drop cascades to 3 other objects
-DETAIL:  drop cascades to table t1
+NOTICE:  drop cascades to 9 other objects
+DETAIL:  drop cascades to table t3
+drop cascades to table t1
 drop cascades to table t2
-drop cascades to table t3
+drop cascades to table k1
+drop cascades to table k2
+drop cascades to table k3
+drop cascades to table customer
+drop cascades to table seq_t0
+drop cascades to table seq_t1
 reset current_schema;

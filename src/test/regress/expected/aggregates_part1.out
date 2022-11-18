@@ -454,10 +454,38 @@ GROUP BY c2,c3;
 ----+----+----+------------
 (0 rows)
 
+CREATE OR REPLACE FUNCTION WM_CONCAT_START(A TEXT[], S TEXT)  RETURN TEXT[]  AS
+BEGIN
+RETURN A || S;
+END;
+/
+CREATE OR REPLACE FUNCTION WM_CONCAT_END(A TEXT[]) RETURN TEXT AS
+BEGIN
+RETURN array_to_string(A, ',');
+END;
+/
+CREATE AGGREGATE WM_CONCAT(
+BASETYPE = TEXT,
+SFUNC = WM_CONCAT_START,
+STYPE = TEXT[],
+FINALFUNC =WM_CONCAT_END
+);
+create table zyw(id int);
+insert into zyw select generate_series(1,5) union all select generate_series(1,5);
+select WM_CONCAT(distinct id) from zyw;
+ wm_concat 
+-----------
+ 1,2,3,4,5
+(1 row)
+
 reset current_schema;
 drop schema if exists distribute_aggregates_part1 cascade;
-NOTICE:  drop cascades to 4 other objects
+NOTICE:  drop cascades to 8 other objects
 DETAIL:  drop cascades to table distribute_aggregates_part1.tmp_t1
 drop cascades to table distribute_aggregates_part1.t_agg1
 drop cascades to table distribute_aggregates_part1.t_agg2
 drop cascades to table distribute_aggregates_part1.sales_transaction_line
+drop cascades to function distribute_aggregates_part1.wm_concat_start(text[],text)
+drop cascades to function distribute_aggregates_part1.wm_concat_end(text[])
+drop cascades to function distribute_aggregates_part1.wm_concat(text)
+drop cascades to table distribute_aggregates_part1.zyw

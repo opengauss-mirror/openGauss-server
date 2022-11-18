@@ -417,15 +417,10 @@ select * from "TEST"."Test_Table";
 
 set current_schema=information_schema;
 create table test_info(a int, b int);
-insert into test_info values(1,2),(2,3),(3,4),(4,5);
-\d+ test_info
 \d+ sql_features
 explain (verbose on, costs off) select count(*) from sql_features;
 select count(*) from sql_features;
 
-explain (verbose on, costs off) select * from test_info;
-select count(*) from test_info;
-drop table test_info;
 reset current_schema;
 
 create table t_serial(a int, b serial);

@@ -653,6 +653,7 @@ static void wakeup_sub_thread()
 
         if (pgwr->proc != NULL) {
             (void)pg_atomic_add_fetch_u32(&g_instance.ckpt_cxt_ctl->pgwr_procs.running_num, 1);
+            g_instance.ckpt_cxt_ctl->is_standby_mode = RecoveryInProgress();
             pg_write_barrier();
             g_instance.ckpt_cxt_ctl->pgwr_procs.writer_proc[thread_loc].need_flush = true;
             pg_write_barrier();
@@ -1185,7 +1186,10 @@ void dw_upgrade_single()
             (errcode_for_file_access(), errmodule(MOD_DW), errmsg("during upgrade, could not open file \"%s\"",
             SINGLE_DW_FILE_NAME)));
     }
+
+    pg_memory_barrier();
     pg_atomic_write_u32(&g_instance.dw_single_cxt.dw_version, DW_SUPPORT_NEW_SINGLE_FLUSH);
+    pg_memory_barrier();
 
     if (close(fd) != 0 || unlink(DW_UPGRADE_FILE_NAME) != 0) {
         ereport(PANIC,
@@ -1278,7 +1282,7 @@ static void ckpt_pagewriter_main_thread_loop(void)
         HandlePageWriterMainInterrupts();
 
         candidate_num = get_curr_candidate_nums(false) + get_curr_candidate_nums(true);
-        if (candidate_num == 0) {
+        if (candidate_num == 0 && !t_thrd.pagewriter_cxt.shutdown_requested) {
             /* wakeup sub thread scan the buffer pool, init the candidate list */
             wakeup_sub_thread();
         }
@@ -1572,7 +1576,7 @@ static void SetupPageWriterSignalHook(void)
     (void)gspqsignal(SIGPIPE, SIG_IGN);
     (void)gspqsignal(SIGUSR1, ckpt_pagewriter_sigusr1_handler);
     (void)gspqsignal(SIGUSR2, SIG_IGN);
-
+    (void)gspqsignal(SIGURG, print_stack);
     /*
      * Reset some signals that are accepted by postmaster but not here
      */
@@ -2146,6 +2150,11 @@ static uint32 get_list_flush_num(bool is_segment)
 const int MAX_SCAN_BATCH_NUM = 131072 * 10; /* 10GB buffers */
 static void incre_ckpt_pgwr_scan_buf_pool(WritebackContext wb_context)
 {
+    int ratio_buf_id_start;
+    int ratio_cand_list_size;
+    int ratio_avg_num;
+    int ratio_shared_buffers;
+    int thread_num = g_instance.ckpt_cxt_ctl->pgwr_procs.sub_num;
     int thread_id = t_thrd.pagewriter_cxt.pagewriter_id;
     PageWriterProc *pgwr = &g_instance.ckpt_cxt_ctl->pgwr_procs.writer_proc[thread_id];
     uint32 need_flush_num = 0;
@@ -2154,21 +2163,47 @@ static void incre_ckpt_pgwr_scan_buf_pool(WritebackContext wb_context)
     bool is_new_relfilenode = false;
     int batch_scan_num = 0;
     uint32 max_flush_num = 0;
+    bool am_standby = g_instance.ckpt_cxt_ctl->is_standby_mode;
+    int normal_shared_buffers = SharedBufferNumber;
 
     /* handle the normal buffer pool */
     if (get_thread_candidate_nums(thread_id) < pgwr->cand_list_size) {
-        start = MAX(pgwr->buf_id_start, pgwr->next_scan_normal_loc);
-        end = pgwr->buf_id_start + pgwr->cand_list_size;
-        batch_scan_num = MIN(pgwr->cand_list_size, MAX_SCAN_BATCH_NUM);
+        if (am_standby) {
+            ratio_shared_buffers = int(normal_shared_buffers * u_sess->attr.attr_storage.shared_buffers_fraction);
+            ratio_avg_num = ratio_shared_buffers / thread_num;
+            ratio_buf_id_start = ratio_avg_num * (thread_id - 1);
+            ratio_cand_list_size = ratio_avg_num;
+            if (thread_id == thread_num) {
+                ratio_cand_list_size += ratio_shared_buffers % thread_num;
+            }
+
+            start = MAX(ratio_buf_id_start, pgwr->next_scan_ratio_loc);
+            end = ratio_buf_id_start + ratio_cand_list_size;
+            batch_scan_num = MIN(ratio_cand_list_size, MAX_SCAN_BATCH_NUM);
+        } else {
+            start = MAX(pgwr->buf_id_start, pgwr->next_scan_normal_loc);
+            end = pgwr->buf_id_start + pgwr->cand_list_size;
+            batch_scan_num = MIN(pgwr->cand_list_size, MAX_SCAN_BATCH_NUM);
+        }
+
         end = MIN(start + batch_scan_num, end);
         max_flush_num = get_list_flush_num(false);
-
         need_flush_num = get_candidate_buf_and_flush_list(start, end, max_flush_num, &is_new_relfilenode);
-        if (end >= pgwr->buf_id_start + pgwr->cand_list_size) {
-            pgwr->next_scan_normal_loc = pgwr->buf_id_start;
+
+        if (am_standby) {
+            if (end >= ratio_buf_id_start + ratio_cand_list_size) {
+                pgwr->next_scan_ratio_loc = ratio_buf_id_start;
+            } else {
+                pgwr->next_scan_ratio_loc = end;
+            }
         } else {
-            pgwr->next_scan_normal_loc = end;
+            if (end >= pgwr->buf_id_start + pgwr->cand_list_size) {
+                pgwr->next_scan_normal_loc = pgwr->buf_id_start;
+            } else {
+                pgwr->next_scan_normal_loc = end;
+            }
         }
+
         if (need_flush_num > 0) {
             incre_ckpt_pgwr_flush_dirty_list(wb_context, need_flush_num, is_new_relfilenode);
         }
@@ -2343,7 +2378,6 @@ static void candidate_buf_push(int buf_id, int thread_id)
     volatile uint64 tail = pg_atomic_read_u64(&pgwr->tail);
 
     if (unlikely(tail - head >= list_size)) {
-        Assert(0);
         return;
     }
     tail_loc = tail % list_size;
@@ -2363,7 +2397,6 @@ static void seg_candidate_buf_push(int buf_id, int thread_id)
     volatile uint64 tail = pg_atomic_read_u64(&pgwr->seg_tail);
 
     if (unlikely(tail - head >= list_size)) {
-        Assert(0);
         return;
     }
     tail_loc = tail % list_size;

@@ -84,14 +84,15 @@ static BlockNumber ComputeTheTotalPages(Relation relation, int nonzeroPartitionN
     int totalPartitionNumber, BlockNumber partPages)
 {
     BlockNumber totalPages = 0;
+    int pnumber = RelationIsSubPartitioned(relation) ? ESTIMATE_SUBPARTITION_NUMBER : ESTIMATE_PARTITION_NUMBER;
 
-    if (nonzeroPartitionNumber > 0 && nonzeroPartitionNumber < ESTIMATE_PARTITION_NUMBER) {
+    if (nonzeroPartitionNumber > 0 && nonzeroPartitionNumber < pnumber) {
         if (notAvailPartitionCnt != 0) {
             totalPages = partPages * ((nonzeroPartitionNumber + notAvailPartitionCnt) / nonzeroPartitionNumber);
         } else {
             totalPages = partPages;
         }
-    } else if (nonzeroPartitionNumber == ESTIMATE_PARTITION_NUMBER) {
+    } else if (nonzeroPartitionNumber == pnumber) {
         totalPages = partPages * (totalPartitionNumber / nonzeroPartitionNumber);
     } else if (nonzeroPartitionNumber == 0) {
         totalPages = relation->rd_rel->relpages;
@@ -142,7 +143,12 @@ static void acquireSamplesForPartitionedRelationModify(
             continue;
         }
 
-        Partition part = partitionOpen(relation, partitionOid, lmode);
+        /* we've already got partition lock in ConditionalLockPartition, so just NoLock here */
+        /* the partition may have already been dropped, so should check here */
+        Partition part = tryPartitionOpen(relation, partitionOid, NoLock);
+        if (part == NULL) {
+            continue;
+        }
         currentPartPages = PartitionGetNumberOfBlocksInFork(relation, part, MAIN_FORKNUM, true);
         /* for empty heap, PartitionGetNumberOfBlocks() return 0 */
         if (currentPartPages > 0) {
@@ -181,8 +187,8 @@ static void acquireSamplesForSubPartitionedRelation(Relation relation, LOCKMODE 
 {
     Assert(RelationIsSubPartitioned(relation));
 
-    /* we set no lock here to avoid wait on lock when another session still holds the lock */
-    List *subpartidlist = RelationGetSubPartitionOidList(relation, NoLock);
+    /* we set estimate flag here to avoid wait on lock when another session still holds the lock */
+    List *subpartidlist = RelationGetSubPartitionOidList(relation, AccessShareLock, true);
     int totalSubPartitionNumber = list_length(subpartidlist);
     int nonzeroSubPartitionNumber = 0;
     int notAvailSubPartitionNumber = 0;
@@ -194,7 +200,8 @@ static void acquireSamplesForSubPartitionedRelation(Relation relation, LOCKMODE 
     ListCell *cell = NULL;
 
     int stepNum = totalSubPartitionNumber > ESTIMATE_SUBPARTITION_NUMBER ?
-        totalSubPartitionNumber / ESTIMATE_PARTITION_NUMBER :1;
+        totalSubPartitionNumber / ESTIMATE_SUBPARTITION_NUMBER :
+        1;
     foreach (cell, subpartidlist) {
         iterations++;
         if (iterations % stepNum != 0) {
@@ -202,38 +209,39 @@ static void acquireSamplesForSubPartitionedRelation(Relation relation, LOCKMODE 
         }
 
         Oid subpartid = DatumGetObjectId(lfirst(cell));
-        if (!OidIsValid(subpartid)) {
-            ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
-                errmsg("The subpartition of relation %u is invalid", RelationGetRelid(relation)),
-                errdetail("N/A"),
-                errcause("Maybe the partition table is dropped"),
-                erraction("Check system table 'pg_partition' for more information")));
-        }
         Oid partid = partid_get_parentid(subpartid);
         if (!OidIsValid(partid)) {
-            ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
-                errmsg("The partition which owns the subpartition %u is missing", subpartid),
-                errdetail("N/A"),
-                errcause("Maybe the subpartition table is dropped"),
-                erraction("Check system table 'pg_partition' for more information")));
-        }
-
-        if (!ConditionalLockPartition(relid, partid, lmode, PARTITION_LOCK) ||
-            !ConditionalLockPartition(partid, subpartid, lmode, PARTITION_LOCK)) {
             notAvailSubPartitionNumber++;
             continue;
         }
 
-        /* the partition may be dropped */
-        Partition part = tryPartitionOpen(relation, partid, lmode);
+        if (!ConditionalLockPartition(relid, partid, lmode, PARTITION_LOCK)) {
+            notAvailSubPartitionNumber++;
+            continue;
+        }
+        if (!ConditionalLockPartition(partid, subpartid, lmode, PARTITION_LOCK)) {
+            if (lmode != NoLock) {
+                UnlockPartition(relid, partid, lmode, PARTITION_LOCK);
+            }
+            notAvailSubPartitionNumber++;
+            continue;
+        }
+
+        /*
+         * we've already got partition lock in ConditionalLockPartition, so just NoLock here
+         * and noticed that nolock is applied when getting subpartidlist, so the partition may have already been dropped
+         */
+        Partition part = tryPartitionOpen(relation, partid, NoLock);
         if (part == NULL) {
             totalSubPartitionNumber--;
             continue;
         }
         Relation partrel = partitionGetRelation(relation, part);
         /* the subpartition may be dropped */
-        Partition subpart = tryPartitionOpen(partrel, subpartid, lmode);
+        Partition subpart = tryPartitionOpen(partrel, subpartid, NoLock);
         if (subpart == NULL) {
+            releaseDummyRelation(&partrel);
+            partitionClose(relation, part, lmode);
             totalSubPartitionNumber--;
             continue;
         }
@@ -271,42 +279,16 @@ static void acquireSamplesForPartitionedRelation(
         if (relation->rd_rel->relkind == RELKIND_RELATION) {  
             int totalRangePartitionNumber = GetTotalPartitionNumber(relation);
             int totalPartitionNumber = totalRangePartitionNumber;
-            int partitionNumber = 0;
             int nonzeroPartitionNumber = 0;
             BlockNumber partPages = 0;
             BlockNumber currentPartPages = 0;
             Partition part = NULL;
             int notAvailPartitionCnt = 0;
 
-            for (partitionNumber = 0; partitionNumber < totalPartitionNumber; partitionNumber++) {
-                Oid partitionOid = InvalidOid;
-                if (relation->partMap->type == PART_TYPE_LIST) {
-                    ListPartitionMap* partMap = (ListPartitionMap*)(relation->partMap);
-                    partitionOid = partMap->listElements[partitionNumber].partitionOid;
-                } else if (relation->partMap->type == PART_TYPE_HASH) {
-                    HashPartitionMap* partMap = (HashPartitionMap*)(relation->partMap);
-                    partitionOid = partMap->hashElements[partitionNumber].partitionOid;
-                } else {
-                    RangePartitionMap* partMap = (RangePartitionMap*)(relation->partMap);
-
-#ifdef PGXC  /* open range partition */
-                    partitionOid = partMap->rangeElements[partitionNumber].partitionOid;
-#else  /* open range partition or interval partition */
-                    if (partitionNumber < totalRangePartitionNumber) {
-                        partitionOid = partMap->rangeElements[partitionNumber].partitionOid;
-                    } else {
-                        IntervalPartitionMap* intervalPartMap = NULL;
-                        int intervalPartitionIndex = partitionNumber - totalRangePartitionNumber;
-
-                        AssertEreport(relation->partMap->type == PART_TYPE_INTERVAL,
-                            MOD_OPT,
-                            "Expected interval partition type but exception occurred.");
-                        intervalPartMap = (IntervalPartitionMap*)(relation->partMap);
-
-                        partitionOid = intervalPartMap->intervalElements[intervalPartitionIndex].partitionOid;
-                    }
-#endif
-                }
+            List *partidlist = relationGetPartitionOidList(relation);
+            ListCell *cell = NULL;
+            foreach (cell, partidlist) {
+                Oid partitionOid = DatumGetObjectId(lfirst(cell));
 
                 if (!OidIsValid(partitionOid))
                     continue;
@@ -316,7 +298,13 @@ static void acquireSamplesForPartitionedRelation(
                     continue;
                 }
 
-                part = partitionOpen(relation, partitionOid, NoLock);
+                /* we've already got partition lock in ConditionalLockPartition, so just NoLock here */
+                /* the partition may have already been dropped, so should check here */
+                part = tryPartitionOpen(relation, partitionOid, NoLock);
+                if (part == NULL) {
+                    notAvailPartitionCnt++;
+                    continue;
+                }
                 currentPartPages = PartitionGetNumberOfBlocksInFork(relation, part, MAIN_FORKNUM, true);
                 partitionClose(relation, part, lmode);
 
@@ -341,6 +329,7 @@ static void acquireSamplesForPartitionedRelation(
                     list_free_ext(*sampledPartitionOids);
                 acquireSamplesForPartitionedRelationModify(relation, lmode, samplePages, sampledPartitionOids);
             }
+            pfree_ext(partidlist);
         }
     }
 }
@@ -470,6 +459,9 @@ void get_relation_info(PlannerInfo* root, Oid relationObjectId, bool inhparent, 
          */
         lmode = (rel->relid == (unsigned int)root->parse->resultRelation) ? RowExclusiveLock : AccessShareLock;
 
+        StringInfoData gttEmptyIndex;
+        initStringInfo(&gttEmptyIndex);
+
         foreach (l, indexoidlist) {
             Oid indexoid = lfirst_oid(l);
             int i, ncolumns, nkeycolumns;
@@ -494,6 +486,11 @@ void get_relation_info(PlannerInfo* root, Oid relationObjectId, bool inhparent, 
 
             /* Ignore empty index for global temp table */
             if (RELATION_IS_GLOBAL_TEMP(indexRelation) && !gtt_storage_attached(RelationGetRelid(indexRelation))) {
+                if (u_sess->attr.attr_sql.under_explain) {
+                    char* emptyIndexName = get_rel_name(indexoid);
+                    appendStringInfo(&gttEmptyIndex, "%s ", emptyIndexName);
+                    pfree(emptyIndexName);
+                }
                 index_close(indexRelation, NoLock);
                 continue;
             }
@@ -705,6 +702,11 @@ void get_relation_info(PlannerInfo* root, Oid relationObjectId, bool inhparent, 
 
             indexinfos = lcons(info, indexinfos);
         }
+        if (gttEmptyIndex.data[0] != '\0') {
+            ereport(WARNING,
+                (errmsg("The following uninitialized GTT indexes are ignored: %s", gttEmptyIndex.data)));
+        }
+        pfree_ext(gttEmptyIndex.data);
 
         list_free_ext(indexoidlist);
     }
@@ -820,7 +822,10 @@ void estimate_rel_size(Relation rel, int32* attr_widths, RelPageType* pages, dou
              */
             if ((RelationIsPartitioned(rel) || RelationIsSubPartitioned(rel)) && !RelationIsColStore(rel) &&
                 !RelationIsGlobalIndex(rel)) {
-                acquireSamplesForPartitionedRelation(rel, AccessShareLock, &curpages, sampledPartitionIds);
+                curpages = rel->rd_rel->relpages;
+                if (curpages == 0) {
+                    acquireSamplesForPartitionedRelation(rel, AccessShareLock, &curpages, sampledPartitionIds);
+                }
             } else if (RelationIsValuePartitioned(rel)) {
                 /*
                  * For value partitioned rels, the effort of getting curpages might be
@@ -929,6 +934,12 @@ void estimate_rel_size(Relation rel, int32* attr_widths, RelPageType* pages, dou
                 density = (BLCKSZ - SizeOfPageHeaderData) / (double)tuple_width;
             }
             *tuples = rint(density * curpages);
+#ifndef ENABLE_MULTIPLE_NODES
+            if (rel->rd_options != NULL && ((StdRdOptions *)(rel->rd_options))->min_tuples != 0) {
+#define MAX(A, B) ((B) > (A) ? (B) : (A))
+                *tuples = MAX(((StdRdOptions *)(rel->rd_options))->min_tuples, *tuples);
+            }
+#endif /* ENABLE_MULTIPLE_NODES */
             *tuples = clamp_row_est(*tuples);
 
             /*
@@ -1446,16 +1457,7 @@ bool IsRteForStartWith(PlannerInfo *root, RangeTblEntry *rte)
     /* check and set fromStartWithConverted */
     ListCell *lc = NULL;
     int levelsup = rte->ctelevelsup;
-    cteroot = root;
-    while (levelsup-- > 0) {
-        cteroot = cteroot->parent_root;
-        if (cteroot == NULL) { /* shouldn't happen */
-            ereport(ERROR,
-                (errmodule(MOD_OPT),
-                    errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
-                    errmsg("bad levelsup for CTE \"%s\"", rte->ctename)));
-        }
-    }
+    cteroot = get_cte_root(root, levelsup, rte->ctename);
 
     /* search CTE expr and check if it is sw converted case */
     foreach (lc, cteroot->parse->cteList) {
@@ -1706,6 +1708,9 @@ static unsigned int GetInstrRestrictPattern(Oid operatorid, bool varOnLeft)
  */
 static bool InstrAsPatternMatch(Oid* operatorid, List** args)
 {
+    if (list_length(*args) != 2) {
+        return false;
+    }
     bool valid = false;
     bool varOnLeft = IsA((Node*)lsecond(*args), Const);
     Node* constSide = varOnLeft ? (Node*)lsecond(*args) : (Node*)linitial(*args);
@@ -2000,11 +2005,7 @@ static void setRelStoreInfo(RelOptInfo* relOptInfo, Relation relation)
         /*
          * Set store location type.
          */
-        if (RelationIsDfsStore(relation)) {
-            relOptInfo->relStoreLocation = HDFS_STORE;
-        } else {
-            relOptInfo->relStoreLocation = LOCAL_STORE;
-        }
+        relOptInfo->relStoreLocation = LOCAL_STORE;
 
         /*
          * Set store format type.
@@ -2027,3 +2028,17 @@ static void setRelStoreInfo(RelOptInfo* relOptInfo, Relation relation)
     }
 }
 
+PlannerInfo *get_cte_root(PlannerInfo *root, int levelsup, char *ctename)
+{
+    PlannerInfo *cteroot = root;
+    while (levelsup-- > 0) {
+        cteroot = cteroot->parent_root;
+        if (cteroot == NULL) { /* shouldn't happen */
+            ereport(ERROR,
+                (errmodule(MOD_OPT),
+                    errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
+                    errmsg("bad levelsup for CTE \"%s\"", ctename)));
+        }
+    }
+    return cteroot;
+}

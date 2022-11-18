@@ -37,6 +37,12 @@ SELECT pg_delete_audit('1012-11-10', '3012-11-11');
 
 --enable publication and subscription audit
 \! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_system_object=16777215" > /dev/null 2>&1
+select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
 --- prepare
 \! echo $OLDGAUSSHOME | xargs -I{} rm -f {}/bin/subscription.key.cipher
 \! echo $OLDGAUSSHOME | xargs -I{} rm -f {}/bin/subscription.key.rand
@@ -143,9 +149,21 @@ ERROR:  current transaction is aborted, commands ignored until end of transactio
 select subname, subenabled from pg_subscription  where subname='testsub_rename';
 ERROR:  current transaction is aborted, commands ignored until end of transaction block, firstChar[Q]
 COMMIT;
+-- success, password len with 999
+CREATE SUBSCRIPTION sub_len_999 CONNECTION 'host=192.16''''8.1.50 port=5432 user=foo dbname=foodb password=xxin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*lei' PUBLICATION insert_only WITH (enabled = false);
+-- fail, password len with 1000
+CREATE SUBSCRIPTION sub_len_1000 CONNECTION 'host=192.16''''8.1.50 port=5432 user=foo dbname=foodb password=xxin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leid' PUBLICATION insert_only WITH (enabled = false);
+ERROR:  Password can't contain more than 999 characters.
+-- fail, set password len with 1000
+ALTER SUBSCRIPTION sub_len_999 SET (conninfo='host=192.16''''8.1.50 port=5432 user=foo dbname=foodb password=xxin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leid');
+ERROR:  Password can't contain more than 999 characters.
+-- fail, set password len with 1000
+ALTER SUBSCRIPTION sub_len_999 CONNECTION 'host=192.16''''8.1.50 port=5432 user=foo dbname=foodb password=xxin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leideyipi@123xin!@#$%^&*(!@#@$%^&*!@#$%^&*leid';
+ERROR:  Password can't contain more than 999 characters.
 --- drop subscription
 DROP SUBSCRIPTION IF EXISTS testsub_rename;
 DROP SUBSCRIPTION IF EXISTS testsub_maskconninfo;
+DROP SUBSCRIPTION IF EXISTS sub_len_999;
 --- cleanup
 RESET SESSION AUTHORIZATION;
 DROP ROLE regress_subscription_user;
@@ -268,8 +286,8 @@ ERROR:  could not find tuple for replication origin 'origin_test'
 CONTEXT:  referenced column: pg_replication_origin_session_setup
 drop table t_origin_test;
 SELECT object_name,detail_info FROM pg_query_audit('2022-01-13 9:30:00', '2031-12-12 22:00:00') where type = 'ddl_publication_subscription' order by time;
-     object_name      |                                                                                                                  detail_info                                                                                                                  
-----------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+     object_name      |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             detail_info                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             
+----------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  testsub              | DROP SUBSCRIPTION IF EXISTS testsub;
  testsub              | CREATE SUBSCRIPTION testsub CONNECTION **********************PUBLICATION testpub WITH (ENABLED=false, slot_name='testsub', synchronous_commit=off);
  testsub_maskconninfo | CREATE SUBSCRIPTION testsub_maskconninfo CONNECTION ***************************************************************************************************PUBLICATION testpub WITH (ENABLED=false, slot_name='testsub', synchronous_commit=off);
@@ -282,9 +300,11 @@ SELECT object_name,detail_info FROM pg_query_audit('2022-01-13 9:30:00', '2031-1
  testsub              | ALTER SUBSCRIPTION testsub SET (synchronous_commit=on);
  testsub              | ALTER SUBSCRIPTION testsub owner to regress_subscription_user2;
  testsub              | ALTER SUBSCRIPTION testsub rename to testsub_rename;
+ sub_len_999          | CREATE SUBSCRIPTION sub_len_999 CONNECTION *********************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************PUBLICATION insert_only WITH (enabled = false);
  testsub_rename       | DROP SUBSCRIPTION IF EXISTS testsub_rename;
  testsub_maskconninfo | DROP SUBSCRIPTION IF EXISTS testsub_maskconninfo;
-(14 rows)
+ sub_len_999          | DROP SUBSCRIPTION IF EXISTS sub_len_999;
+(16 rows)
 
 --clear audit log
 SELECT pg_delete_audit('1012-11-10', '3012-11-11');
@@ -294,3 +314,9 @@ SELECT pg_delete_audit('1012-11-10', '3012-11-11');
 (1 row)
 
 \! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "audit_system_object" > /dev/null 2>&1
+select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+

@@ -111,6 +111,11 @@ class DBMindRun:
             elif args.subcommand == 'show':
                 pass
             elif args.subcommand == 'set':
+                if args.option.lower() == 'password':
+                    parser.error(
+                        message='Setting the metadatabase password via the set subcommand is not supported, '
+                                'you can do so by modifying the configuration file '
+                                'and then executing \'... service setup --initialize\' to initialize.')
                 config_utils.set_config_parameter(args.conf, args.section, args.option, args.target)
             elif args.subcommand == 'component':
                 components_module.call_component(args.name, args.arguments)

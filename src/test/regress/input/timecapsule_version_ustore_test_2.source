@@ -480,7 +480,24 @@ select * from fb_tbl_normal order by id;
 drop table temp;
 drop table fb_tbl_normal;
 
+--timecapsule various execution plans
+drop table ttt cascade;
+create table ttt(a numeric(38,0), b numeric(38,0), c timestamp(6) default now());
 
+create  unique index ttt_1 on ttt(a);
+create index ttt_2 on ttt(b);
+create index ttt_3 on ttt(b,a);
+
+insert into ttt values(generate_series(1,100000), random()*1000000);
+select pg_sleep(4);
+explain (costs off) select /*+ indexscan(ttt ttt_1) */ * from ttt where a>0;
+explain (costs off) select /*+ indexscan(ttt ttt_1) */ * from ttt TIMECAPSULE TIMESTAMP now() - 1/(24*60*60) where a>0;
+
+explain (costs off) select /*+ indexonlyscan(ttt ttt_1) */ count(*) from ttt where a>0;
+explain (costs off) select /*+ indexonlyscan(ttt ttt_1) */ count(*) from ttt TIMECAPSULE TIMESTAMP now() - 1/(24*60*60) where a>0;
+
+explain (costs off) select /*+ no tablescan(ttt) */ a, b from ttt where a>0;
+explain (costs off) select /*+ no tablescan(ttt) */ a, b from ttt TIMECAPSULE TIMESTAMP now() - 1/(24*60*60) where a>0;
 
 --timecapsule normal table to the scn1, excute dml, timecapsule to scn2, excute dml, timecapsule to scn3, excute dml, timecapsule to scn1
 drop table if exists fb_tbl_normal;

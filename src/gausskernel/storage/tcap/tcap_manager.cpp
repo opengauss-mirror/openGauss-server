@@ -984,6 +984,7 @@ static bool TrPurgeBatch(TrFetchBeginHook beginHook, TrFetchMatchHook matchHook,
             } else {
                 PG_RE_THROW();
             }
+            FlushErrorState();
         }
         PG_END_TRY();
 
@@ -1873,7 +1874,7 @@ void TrForbidAccessRbObject(Oid classid, Oid objid, const char *objname)
         return;
     }
 
-    if (TrRbIsEmptyDb(u_sess->proc_cxt.MyDatabaseId) || !TrMaybeRbObject(classid, objid, objname)) {
+    if (!TrMaybeRbObject(classid, objid, objname) || TrRbIsEmptyDb(u_sess->proc_cxt.MyDatabaseId)) {
         return;
     }
 

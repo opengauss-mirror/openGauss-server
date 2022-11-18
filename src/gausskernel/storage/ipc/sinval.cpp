@@ -84,6 +84,36 @@ void SendSharedInvalidMessages(const SharedInvalidationMessage* msgs, int n)
     }
 }
 
+static bool SkipRedundantInvalMsg(SharedInvalidationMessage *msg)
+{
+    if (msg->id != SHAREDINVALRELCACHE_ID || unlikely(u_sess->proc_cxt.MyDatabaseId == InvalidOid) ||
+        unlikely(msg->rc.dbId == InvalidOid)) {
+        return false;
+    }
+
+    /* skip if no need to handle for current db */
+    if (u_sess->proc_cxt.MyDatabaseId != msg->rc.dbId) {
+        return true;
+    }
+
+    /* skip if inval msg is duplicate */
+    for (int i = t_thrd.rc_cxt.rcNum - 1; i >= 0; i--) {
+        if (msg->rc.relId == t_thrd.rc_cxt.rcData[i]) {
+            return true;
+        }
+    }
+
+    /* reset msg reservoir if full */
+    if (t_thrd.rc_cxt.rcNum >= RC_MAX_NUM) {
+        t_thrd.rc_cxt.rcNum = 0;
+    }
+    
+    /* keep track of 16 deduplicated msg */
+    t_thrd.rc_cxt.rcData[t_thrd.rc_cxt.rcNum] = msg->rc.relId;
+    t_thrd.rc_cxt.rcNum++;
+    return false;
+}
+
 /*
  * ReceiveSharedInvalidMessages
  *		Process shared-cache-invalidation messages waiting for this backend
@@ -114,6 +144,10 @@ void ReceiveSharedInvalidMessages(void (*invalFunction)(SharedInvalidationMessag
     /* Deal with any messages still pending from an outer recursion */
     while (inval_cxt->nextmsg < inval_cxt->nummsgs) {
         SharedInvalidationMessage msg = inval_cxt->messages[inval_cxt->nextmsg++];
+
+        if (SkipRedundantInvalMsg(&msg)) {
+            continue;
+        }
 
         inval_cxt->SIMCounter++;
         invalFunction(&msg);

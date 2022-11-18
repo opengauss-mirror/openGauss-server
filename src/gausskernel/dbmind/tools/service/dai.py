@@ -140,26 +140,28 @@ def get_latest_metric_value(metric_name):
 
 
 def save_forecast_sequence(metric_name, host, sequence):
-    dao.forecasting_metrics.batch_insert_forecasting_metric(
-        metric_name, host, sequence.values, sequence.timestamps,
-        metric_type=get_metric_type(metric_name),
-        node_id=None
-    )
+    if sequence is not None: 
+        dao.forecasting_metrics.batch_insert_forecasting_metric(
+            metric_name, host, sequence.values, sequence.timestamps,
+            metric_type=get_metric_type(metric_name),
+            node_id=None
+        )
 
 
 def save_slow_queries(slow_queries):
     for slow_query in slow_queries:
-        dao.slow_queries.insert_slow_query(
-            schema_name=slow_query.schema_name,
-            db_name=slow_query.db_name,
-            query=slow_query.query,
-            start_at=slow_query.start_at,
-            duration_time=slow_query.duration_time,
-            hit_rate=slow_query.hit_rate, fetch_rate=slow_query.fetch_rate,
-            cpu_time=slow_query.cpu_time, data_io_time=slow_query.data_io_time,
-            root_cause=slow_query.root_causes, suggestion=slow_query.suggestions,
-            template_id=slow_query.template_id
-        )
+        if slow_query is not None:
+            dao.slow_queries.insert_slow_query(
+                schema_name=slow_query.schema_name,
+                db_name=slow_query.db_name,
+                query=slow_query.query,
+                start_at=slow_query.start_at,
+                duration_time=slow_query.duration_time,
+                hit_rate=slow_query.hit_rate, fetch_rate=slow_query.fetch_rate,
+                cpu_time=slow_query.cpu_time, data_io_time=slow_query.data_io_time,
+                root_cause=slow_query.root_causes, suggestion=slow_query.suggestions,
+                template_id=slow_query.template_id
+            )
 
 
 def get_all_slow_queries(minutes):

@@ -1,3 +1,4 @@
+set ustore_attr='ustore_verify_level=slow;ustore_verify_module=all';
 set enable_seqscan to false;
 set enable_indexonlyscan to true;
 set enable_indexscan to true;
@@ -245,3 +246,16 @@ explain SELECT /*+ tablescan(t1) */c1 FROM t1 WHERE c1 = 50;
 explain SELECT /*+ indexonlyscan(t1) */c1 FROM t1 WHERE c1 = 50;
 
 drop table t1;
+
+-- test ustore index trace
+create table t(a int, b int) with(storage_type=USTORE);
+create index on t(a, b);
+insert into t values(generate_series(1, 10), generate_series(1, 10));
+delete from t where a % 2 = 0;
+
+set ustore_attr="index_trace_level=all;enable_log_tuple=on";
+
+select /*+ indexscan(t) */ * from t where a = 1;
+
+set ustore_attr="index_trace_level=no;enable_log_tuple=off";
+drop table t;

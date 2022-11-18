@@ -26,17 +26,18 @@
 #include "access/ubtree.h"
 #include "commands/tablespace.h"
 #include "storage/lmgr.h"
+#include "storage/procarray.h"
 #include "utils/aiomem.h"
 #include "utils/builtins.h"
 
-static uint32 BlockGetMaxItems(BlockNumber blkno);
+uint32 BlockGetMaxItems(BlockNumber blkno);
 static void UBTreeInitRecycleQueuePage(Relation rel, Page page, Size size, BlockNumber blkno);
 static void UBTreeRecycleQueueDiscardPage(Relation rel, UBTRecycleQueueAddress addr);
 static void UBTreeRecycleQueueAddPage(Relation rel, UBTRecycleForkNumber forkNumber,
     BlockNumber blkno, TransactionId xid);
 static Buffer StepNextPage(Relation rel, Buffer buf);
 static Buffer GetAvailablePageOnPage(Relation rel, UBTRecycleForkNumber forkNumber, Buffer buf,
-    TransactionId waterLevelXid, UBTRecycleQueueAddress *addr, bool *continueScan);
+    TransactionId waterLevelXid, UBTRecycleQueueAddress *addr, bool *continueScan, UrqState *stat = NULL);
 static Buffer MoveToEndpointPage(Relation rel, Buffer buf, bool needHead, int access);
 static uint16 PageAllocateItem(Buffer buf);
 static void RecycleQueueLinkNewPage(Relation rel, Buffer leftBuf, Buffer newBuf);
@@ -53,7 +54,7 @@ const uint16 OtherBlockOffset = ((uint16)0) - 2;   /* indicate that previous or 
 #define IsMetaPage(blkno) (blkno < FirstNormalBlockNumber)
 #define IsNormalOffset(offset) (offset < OtherBlockOffset)
 
-static uint32 BlockGetMaxItems(BlockNumber blkno)
+uint32 BlockGetMaxItems(BlockNumber blkno)
 {
     uint32 freeSpace = BLCKSZ - sizeof(PageHeaderData) - offsetof(UBTRecycleQueueHeaderData, items);
     if (IsMetaPage(blkno)) {
@@ -75,7 +76,9 @@ static UBTRecycleQueueItem HeaderGetItem(UBTRecycleQueueHeader header, uint16 of
     if (offset >= 0 && offset <= UBTRecycleMaxItems) {
         return &header->items[offset];
     }
-    ereport(ERROR, (errmsg("HeaderGetItem: %d", offset)));
+    ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+            errmsg("trying to fetch invalid recycle queue item with offset %u", offset),
+            errhint("Can fixed by REINDEX this index")));
     pg_unreachable(); /* won't reach here */
 }
 
@@ -171,8 +174,8 @@ static void LogInitRecycleQueuePage(Relation rel, Buffer buf, Buffer leftBuf, Bu
         XLogBeginInsert();
         XLogRegisterData((char *)&xlrec, SizeOfUBTree2RecycleQueueInitPage);
         XLogRegisterBuffer(UBTREE2_RECYCLE_QUEUE_INIT_PAGE_CURR_BLOCK_NUM, buf, REGBUF_WILL_INIT);
-        XLogRegisterBuffer(UBTREE2_RECYCLE_QUEUE_INIT_PAGE_LEFT_BLOCK_NUM, leftBuf, REGBUF_STANDARD);
-        XLogRegisterBuffer(UBTREE2_RECYCLE_QUEUE_INIT_PAGE_RIGHT_BLOCK_NUM, rightBuf, REGBUF_STANDARD);
+        XLogRegisterBuffer(UBTREE2_RECYCLE_QUEUE_INIT_PAGE_LEFT_BLOCK_NUM, leftBuf, 0);
+        XLogRegisterBuffer(UBTREE2_RECYCLE_QUEUE_INIT_PAGE_RIGHT_BLOCK_NUM, rightBuf, 0);
 
         XLogRecPtr recptr = XLogInsert(RM_UBTREE2_ID, XLOG_UBTREE2_RECYCLE_QUEUE_INIT_PAGE);
 
@@ -268,8 +271,8 @@ void UBTreeInitializeRecycleQueue(Relation rel)
         /* check that the blkno is what we expected */
         if (BufferGetBlockNumber(buf) != blkno) {
             ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
-                errmsg("corrupted index recycle queue of index %u: expected blkno is %u, actual blkno is %u",
-                       rel->rd_id, blkno, BufferGetBlockNumber(buf))));
+                    errmsg("corrupted index recycle queue of index \"%s\": expected blkno is %u, actual blkno is %u",
+                           RelationGetRelationName(rel), blkno, BufferGetBlockNumber(buf))));
         }
         InitRecycleQueueInitialPage(rel, buf);
         UnlockReleaseBuffer(buf);
@@ -347,14 +350,28 @@ static Buffer StepNextPage(Relation rel, Buffer buf)
 }
 
 static Buffer GetAvailablePageOnPage(Relation rel, UBTRecycleForkNumber forkNumber, Buffer buf,
-    TransactionId WaterLevelXid, UBTRecycleQueueAddress *addr, bool *continueScan)
+    TransactionId WaterLevelXid, UBTRecycleQueueAddress *addr, bool *continueScan, UrqState *stat)
 {
     Page page = BufferGetPage(buf);
     UBTRecycleQueueHeader header = GetRecycleQueueHeader(page, BufferGetBlockNumber(buf));
 
     uint16 curOffset = header->head;
+    BlockNumber itemCount = 0;
     while (IsNormalOffset(curOffset)) {
         UBTRecycleQueueItem item = HeaderGetItem(header, curOffset);
+        if (unlikely(stat != NULL)) {
+            stat->visitQueueItemCount++;
+        }
+        if (item->next == curOffset) {
+            ereport(ERROR, (errmsg("GetAvailablePageOnPage invalid: next item is it self blkno %u item offset %d"
+                " oldestxmin %lu index oid %u", BufferGetBlockNumber(buf), curOffset, WaterLevelXid, rel->rd_id)));
+        }
+        if (itemCount > UBTRecycleMaxItems + 1) {
+            ereport(ERROR, (errmsg("GetAvailablePageOnPage invalid: form a circle itemCount %u blkno %u item offset %d"
+                " oldestxmin %lu index oid %u", itemCount, BufferGetBlockNumber(buf), curOffset, WaterLevelXid,
+                rel->rd_id)));
+        }
+        itemCount++;
         if (TransactionIdFollowsOrEquals(item->xid, WaterLevelXid)) {
             *continueScan = false;
             return InvalidBuffer;
@@ -367,7 +384,21 @@ static Buffer GetAvailablePageOnPage(Relation rel, UBTRecycleForkNumber forkNumb
         _bt_checkbuffer_valid(rel, targetBuf);
         if (ConditionalLockBuffer(targetBuf)) {
             _bt_checkpage(rel, targetBuf);
-            if (forkNumber == RECYCLE_EMPTY_FORK || UBTreePageRecyclable(BufferGetPage(targetBuf))) {
+            bool pageUsable = true;
+            if (forkNumber == RECYCLE_FREED_FORK) {
+                pageUsable = UBTreePageRecyclable(BufferGetPage(targetBuf));
+            } else if (forkNumber == RECYCLE_EMPTY_FORK) {
+                /* make sure that it's not half-dead or the deletion is not reserved yet */
+                Page indexPage = BufferGetPage(targetBuf);
+                UBTPageOpaque opaque = (UBTPageOpaque)PageGetSpecialPointer(indexPage);
+                if (P_ISHALFDEAD((UBTPageOpaqueInternal)opaque)) {
+                    TransactionId previousXact = opaque->xact;
+                    if (TransactionIdIsValid(previousXact) && TransactionIdIsInProgress(previousXact, NULL, true)) {
+                        pageUsable = false;
+                    }
+                }
+            }
+            if (pageUsable) {
                 WHITEBOX_TEST_STUB("GetAvailablePageOnPage-got", WhiteboxDefaultErrorEmit);
 
                 *continueScan = false;
@@ -392,25 +423,43 @@ static Buffer GetAvailablePageOnPage(Relation rel, UBTRecycleForkNumber forkNumb
     return InvalidBuffer;
 }
 
-Buffer UBTreeGetAvailablePage(Relation rel, UBTRecycleForkNumber forkNumber, UBTRecycleQueueAddress *addr)
+Buffer UBTreeGetAvailablePage(Relation rel, UBTRecycleForkNumber forkNumber,
+    UBTRecycleQueueAddress *addr, UrqState *stat)
 {
-    TransactionId frozenXid = g_instance.undo_cxt.oldestFrozenXid;
-    TransactionId recycleXid = g_instance.undo_cxt.oldestXidInUndo;
-
-    TransactionId waterLevelXid = ((forkNumber == RECYCLE_EMPTY_FORK) ? recycleXid : frozenXid);
-
+    TransactionId oldestXmin = u_sess->utils_cxt.RecentGlobalDataXmin;
+    TimestampTz startTime = 0;
+    if (unlikely(stat != NULL)) {
+        startTime = GetCurrentTimestamp();
+    }
     Buffer queueBuf = RecycleQueueGetEndpointPage(rel, forkNumber, true, BT_READ);
+    if (unlikely(stat != NULL)) {
+        stat->getQueueHeadTime = GetCurrentTimestamp() - startTime;
+    }
 
     Buffer indexBuf = InvalidBuffer;
     bool continueScan = false;
+    BlockNumber bufCount = 0;
+    /* open smgr, might have to re-open if a cache flush happened */
+    RelationOpenSmgr(rel);
     for (;;) {
-        indexBuf = GetAvailablePageOnPage(rel, forkNumber, queueBuf, waterLevelXid, addr, &continueScan);
+        if (unlikely(stat != NULL)) {
+            stat->visitQueuePageCount++;
+        }
+        indexBuf = GetAvailablePageOnPage(rel, forkNumber, queueBuf, oldestXmin, addr, &continueScan, stat);
         if (!continueScan) {
             break;
         }
+        if (bufCount > smgrnblocks(rel->rd_smgr, FSM_FORKNUM)) {
+            ereport(ERROR, (errmsg("UBTreeGetAvailablePage invalid: bufCount%u > totalBuf %u index oid %u",
+                bufCount, smgrnblocks(rel->rd_smgr, FSM_FORKNUM), rel->rd_id)));
+        }
+        bufCount++;
         queueBuf = StepNextPage(rel, queueBuf);
     }
     LockBuffer(queueBuf, BUFFER_LOCK_UNLOCK);
+    if (unlikely(stat != NULL)) {
+        stat->visitQueueTime = GetCurrentTimestamp() - startTime;
+    }
 
     if (indexBuf != InvalidBuffer) {
         return indexBuf;
@@ -420,7 +469,7 @@ Buffer UBTreeGetAvailablePage(Relation rel, UBTRecycleForkNumber forkNumber, UBT
     ReleaseBuffer(queueBuf);
     addr->queueBuf = InvalidBuffer;
 
-    if (forkNumber == RECYCLE_EMPTY_FORK) {
+    if (forkNumber == RECYCLE_EMPTY_FORK || unlikely(stat != NULL)) {
         return InvalidBuffer;
     }
 
@@ -500,6 +549,19 @@ static void RecycleQueueChangeEndpoint(Relation rel, Buffer buf, Buffer nextBuf,
 
     WHITEBOX_TEST_STUB("RecycleQueueChangeEndpoint", WhiteboxDefaultErrorEmit);
 
+    uint32 endpointFlag = (isHead ? URQ_HEAD_PAGE : URQ_TAIL_PAGE);
+    UBTRecycleQueueHeader nextHeader = GetRecycleQueueHeader(BufferGetPage(nextBuf), BufferGetBlockNumber(nextBuf));
+    if ((nextHeader->flags & endpointFlag) != 0) {
+        UBTRecycleQueueHeader header = GetRecycleQueueHeader(BufferGetPage(buf), BufferGetBlockNumber(buf));
+        ereport(ERROR, (errmsg("RecycleQueueChangeEndpoint invalid: blkno %u nextblkno %u header->flags %u"
+            " nextHeader->flags %u dstEndpointFlag %u", BufferGetBlockNumber(buf), BufferGetBlockNumber(nextBuf),
+            header->flags, nextHeader->flags, endpointFlag)));
+    }
+    if (nextHeader->prevBlkno == nextHeader->nextBlkno) {
+        ereport(ERROR, (errmsg("RecycleQueueChangeEndpoint invalid: prev and next page is the same, blkno %u nextBlkno"
+            " %u prev and next blkno %u", BufferGetBlockNumber(buf), BufferGetBlockNumber(nextBuf),
+            nextHeader->prevBlkno)));
+    }
     /* Do the update.  No ereport(ERROR) until changes are logged */
     START_CRIT_SECTION();
 
@@ -518,8 +580,8 @@ static void RecycleQueueChangeEndpoint(Relation rel, Buffer buf, Buffer nextBuf,
 
         XLogBeginInsert();
         XLogRegisterData((char *)&xlrec, SizeOfUBTree2RecycleQueueEndpoint);
-        XLogRegisterBuffer(0, buf, REGBUF_STANDARD);
-        XLogRegisterBuffer(1, nextBuf, REGBUF_STANDARD);
+        XLogRegisterBuffer(0, buf, 0);
+        XLogRegisterBuffer(1, nextBuf, 0);
 
         XLogRecPtr recptr = XLogInsert(RM_UBTREE2_ID, XLOG_UBTREE2_RECYCLE_QUEUE_ENDPOINT);
 
@@ -570,8 +632,11 @@ restart:
         /* by here, buf is write locked */
         Buffer nextBuf = ReadRecycleQueueBuffer(rel, header->nextBlkno);
         LockBuffer(nextBuf, BT_WRITE);
-        /* change endpoint, and insert xlog */
-        RecycleQueueChangeEndpoint(rel, buf, nextBuf, true);
+        if ((header->flags & URQ_HEAD_PAGE) != 0) {
+            /* if itself has not changed endpoint in above RemoveOneItemFromPage */
+            /* change endpoint, and insert xlog */
+            RecycleQueueChangeEndpoint(rel, buf, nextBuf, true);
+        }
         /* release current page, and return the next page */
         UnlockReleaseBuffer(buf);
         buf = nextBuf;
@@ -644,7 +709,10 @@ static void RecycleQueueLinkNewPage(Relation rel, Buffer leftBuf, Buffer newBuf)
     }
 
     END_CRIT_SECTION();
-
+    if (header->prevBlkno == header->nextBlkno) {
+        ereport(ERROR, (errmsg("RecycleQueueLinkNewPage invalid: prev and next page is the same, "
+            "blkno %u nextBlkno %u prev next blkno %u", leftBlkno, BufferGetBlockNumber(newBuf), header->prevBlkno)));
+    }
     UnlockReleaseBuffer(rightBuf);
 }
 
@@ -765,7 +833,7 @@ static void LogModifyPage(Buffer buf, bool isInsert, uint16 offset, UBTRecycleQu
 
     XLogBeginInsert();
     XLogRegisterData((char *)&xlrec, SizeOfUBTree2RecycleQueueModify);
-    XLogRegisterBuffer(0, buf, REGBUF_STANDARD);
+    XLogRegisterBuffer(0, buf, 0);
 
     XLogRecPtr recptr = XLogInsert(RM_UBTREE2_ID, XLOG_UBTREE2_RECYCLE_QUEUE_MODIFY);
 
@@ -1088,3 +1156,354 @@ uint32 UBTreeRecycleQueuePageDump(Relation rel, Buffer buf, bool recordEachItem,
     return errVerified;
 }
 
+URQErrorInfo* VerifyUrqHasEndpoint(Relation rel, BlockNumber headBlkno, bool isHead, URQErrorInfo* errorInfos)
+{
+    errno_t rc = EOK;
+    UBTRecycleQueueHeader header = NULL;
+    BlockNumber curBlkno = headBlkno;
+    BlockNumber urqBlocks = smgrnblocks(rel->rd_smgr, FSM_FORKNUM);
+    Buffer buf = ReadBufferExtended(rel, FSM_FORKNUM, curBlkno, RBM_NORMAL, NULL);
+    LockBuffer(buf, BT_READ);
+    BlockNumber visitedPages = 0;
+    char* travelPath = (char *) palloc0(MAX_URQ_ERROR_MSG_SIZE);
+    uint32 endpointFlag = (isHead ? URQ_HEAD_PAGE : URQ_TAIL_PAGE);
+    bool hasEndpointFlag = false;
+    BlockNumber maxUrqBlocks = 0;
+    do {
+        maxUrqBlocks = smgrnblocks(rel->rd_smgr, FSM_FORKNUM);
+        visitedPages++;
+        curBlkno = BufferGetBlockNumber(buf);
+        rc = snprintf_s(travelPath + (int)strlen(travelPath), MAX_URQ_ERROR_MSG_SIZE - strlen(travelPath),
+            MAX_URQ_ERROR_MSG_SIZE - strlen(travelPath) - 1, "%u->", curBlkno);
+        securec_check_ss(rc, "\0", "\0");
+        header = GetRecycleQueueHeader(BufferGetPage(buf), curBlkno);
+        BlockNumber nextBlkno = header->nextBlkno;
+        if ((header->flags & endpointFlag) != 0) {
+            hasEndpointFlag = true;
+            break;
+        }
+        if (nextBlkno >= maxUrqBlocks) {
+            break;
+        }
+        UnlockReleaseBuffer(buf);
+        CHECK_FOR_INTERRUPTS();
+        buf = ReadBufferExtended(rel, FSM_FORKNUM, nextBlkno, RBM_NORMAL, NULL);
+        LockBuffer(buf, BT_READ);
+    } while (visitedPages < urqBlocks);
+    UnlockReleaseBuffer(buf);
+    if (!hasEndpointFlag) {
+        errorInfos->error_code = isHead ? VERIFY_URQ_HEAD_MISSED_ERROR : VERIFY_URQ_TAIL_MISSED_ERROR;
+        rc = memcpy_s(errorInfos->error_msg, strlen(travelPath), travelPath, strlen(travelPath));
+        securec_check(rc, "\0", "\0");
+        errorInfos++;
+    }
+    pfree(travelPath);
+    return errorInfos;
+}
+
+URQErrorInfo* VerifyUrqLink(Relation rel, BlockNumber metaBlkno, BlockNumber headBlkno, bool isNext,
+    URQErrorInfo* errorInfos, bool* hasHead, bool* hasTail, bool* noLinkMeta, bool* urqMixed)
+{
+    errno_t rc = EOK;
+    BlockNumber curBlkno = headBlkno;
+    BlockNumber visitedPages = 0;
+    UBTRecycleQueueHeader header = NULL;
+    char* travelPath = (char *) palloc0(MAX_URQ_ERROR_MSG_SIZE);
+    Buffer buf = ReadBufferExtended(rel, FSM_FORKNUM, curBlkno, RBM_NORMAL, NULL);
+    LockBuffer(buf, BT_READ);
+    bool travelMeta = false;
+    BlockNumber maxUrqBlocks = 0;
+    do {
+        maxUrqBlocks = smgrnblocks(rel->rd_smgr, FSM_FORKNUM);
+        visitedPages++;
+        curBlkno = BufferGetBlockNumber(buf);
+        rc = snprintf_s(travelPath + (int)strlen(travelPath), MAX_URQ_ERROR_MSG_SIZE - strlen(travelPath),
+            MAX_URQ_ERROR_MSG_SIZE - strlen(travelPath) - 1, "%u->", curBlkno);
+        securec_check_ss(rc, "\0", "\0");
+        if (curBlkno == 1 - metaBlkno && !(*urqMixed)) {
+            *urqMixed = true;
+            errorInfos->error_code = VERIFY_URQ_MIXED_ERROR;
+            rc = memcpy_s(errorInfos->error_msg, strlen(travelPath), travelPath, strlen(travelPath));
+            securec_check(rc, "\0", "\0");
+            errorInfos++;
+        }
+        if (curBlkno == metaBlkno) {
+            travelMeta = true;
+        }
+        header = GetRecycleQueueHeader(BufferGetPage(buf), curBlkno);
+        BlockNumber nextBlkno = isNext ? header->nextBlkno : header->prevBlkno;
+        if ((header->flags & URQ_HEAD_PAGE) != 0) {
+            *hasHead = true;
+        }
+        if ((header->flags & URQ_TAIL_PAGE) != 0) {
+            *hasTail = true;
+        }
+        if (nextBlkno >= maxUrqBlocks) {
+            break;
+        }
+        UnlockReleaseBuffer(buf);
+        CHECK_FOR_INTERRUPTS();
+        buf = ReadBufferExtended(rel, FSM_FORKNUM, nextBlkno, RBM_NORMAL, NULL);
+        LockBuffer(buf, BT_READ);
+    } while (BufferGetBlockNumber(buf) != headBlkno && visitedPages < maxUrqBlocks);
+    if (BufferGetBlockNumber(buf) != headBlkno) {
+        errorInfos->error_code = isNext ? VERIFY_URQ_NEXT_LINK_ERROR : VERIFY_URQ_PREV_LINK_ERROR;
+        rc = memcpy_s(errorInfos->error_msg, strlen(travelPath), travelPath, strlen(travelPath));
+        securec_check(rc, "\0", "\0");
+        errorInfos++;
+    }
+    if (!travelMeta && !(*noLinkMeta)) {
+        *noLinkMeta = true;
+        errorInfos->error_code = VERIFY_URQ_NO_LINK_META_ERROR;
+        rc = memcpy_s(errorInfos->error_msg, strlen(travelPath), travelPath, strlen(travelPath));
+        securec_check(rc, "\0", "\0");
+        errorInfos++;
+    }
+
+    UnlockReleaseBuffer(buf);
+    pfree(travelPath);
+    return errorInfos;
+}
+
+bool VerifyUrqSinglePageHeaderNormal(UBTRecycleQueueHeader header, BlockNumber curBlkno)
+{
+    if (header->flags > (URQ_HEAD_PAGE | URQ_TAIL_PAGE)) {
+        return false;
+    }
+    if (header->head != InvalidOffset && header->tail == InvalidOffset) {
+        return false;
+    }
+    if (header->head == InvalidOffset && header->tail != InvalidOffset) {
+        return false;
+    }
+    if (header->freeItems > BlockGetMaxItems(curBlkno)) {
+        return false;
+    }
+    if (header->prevBlkno == header->nextBlkno || header->prevBlkno == curBlkno || header->nextBlkno == curBlkno) {
+        return false;
+    }
+    return true;
+}
+
+void RecordUrqHeaderInfo(URQErrorInfo* errorInfos, UBTRecycleQueueHeader header, BlockNumber blkno)
+{
+    errno_t rc = snprintf_s(errorInfos->error_msg + (int)strlen(errorInfos->error_msg), MAX_URQ_ERROR_MSG_SIZE -
+        strlen(errorInfos->error_msg), MAX_URQ_ERROR_MSG_SIZE - strlen(errorInfos->error_msg) - 1,
+        "curBlkno %u, header: flags = %u, head = %d, tail = %d, freeItems = %d, freeListHead"
+        " = %d, prevBlkno = %u, nextBlkno = %u,", blkno, header->flags, header->head, header->tail, header->freeItems,
+        header->freeListHead, header->prevBlkno, header->nextBlkno);
+    securec_check_ss(rc, "\0", "\0");
+}
+
+void RecordUrqItemInfo(URQErrorInfo* errorInfos, UBTRecycleQueueItem item, uint16 offset, uint16 prevOffset,
+    uint16 itemCount, TransactionId prevXid, TransactionId maxXid)
+{
+    errno_t rc = snprintf_s(errorInfos->error_msg + (int)strlen(errorInfos->error_msg), MAX_URQ_ERROR_MSG_SIZE -
+        strlen(errorInfos->error_msg), MAX_URQ_ERROR_MSG_SIZE - strlen(errorInfos->error_msg) - 1,
+        "prevOffset %u curOffset %u, itemCount %u, preXid %ld, maxXid %ld, ",
+        prevOffset, offset, itemCount, prevXid, maxXid);
+    securec_check_ss(rc, "\0", "\0");
+    if (item == NULL) {
+        return;
+    }
+    rc = snprintf_s(errorInfos->error_msg + (int)strlen(errorInfos->error_msg), MAX_URQ_ERROR_MSG_SIZE -
+        strlen(errorInfos->error_msg), MAX_URQ_ERROR_MSG_SIZE - strlen(errorInfos->error_msg) - 1,
+        "item: xid = %ld, blkno = %u, prev = %d, next = %d, ", item->xid, item->blkno, item->prev, item->next);
+    securec_check_ss(rc, "\0", "\0");
+}
+
+bool VerifyUrqSinglePage(Relation rel, Buffer buf, URQErrorInfo* errorInfos)
+{
+    URQErrorInfo* startErrorInfos = errorInfos;
+    BlockNumber curBlkno = BufferGetBlockNumber(buf);
+    UBTRecycleQueueHeader header = GetRecycleQueueHeader(BufferGetPage(buf), curBlkno);
+    if (!VerifyUrqSinglePageHeaderNormal(header, curBlkno)) {
+        errorInfos->error_code = VERIFY_URQ_PAGE_HEADER_ERROR;
+        RecordUrqHeaderInfo(errorInfos, header, curBlkno);
+        errorInfos++;
+    }
+    uint16 curOffset = header->head;
+
+    bool hasItemLinkError = false;
+    bool hasItemXidError = false;
+    uint16 prevOffset = InvalidOffset;
+    uint16 itemCount = header->freeItems;
+    TransactionId maxXid = ReadNewTransactionId();
+    TransactionId prevXid = 0;
+    while (IsNormalOffset(curOffset) && itemCount <= UBTRecycleMaxItems) {
+        UBTRecycleQueueItem item = NULL;
+        itemCount++;
+        if (curOffset <= UBTRecycleMaxItems) {
+            item = HeaderGetItem(header, curOffset);
+        } else {
+            errorInfos->error_code = VERIFY_URQ_ITEM_OFFSET_ERROR;
+            RecordUrqHeaderInfo(errorInfos, header, curBlkno);
+            RecordUrqItemInfo(errorInfos, item, curOffset, prevOffset, itemCount, prevXid, maxXid);
+            errorInfos++;
+            return false;
+        }
+        if ((item->prev != prevOffset || item->prev == curOffset) && !hasItemLinkError) {
+            hasItemLinkError = true;
+            errorInfos->error_code = VERIFY_URQ_ITEM_LINK_ERROR;
+            RecordUrqHeaderInfo(errorInfos, header, curBlkno);
+            RecordUrqItemInfo(errorInfos, item, curOffset, prevOffset, itemCount, prevXid, maxXid);
+            errorInfos++;
+        }
+        if ((item->xid > maxXid || item->xid < prevXid) && !hasItemXidError) {
+            hasItemXidError = true;
+            errorInfos->error_code = VERIFY_URQ_ITEM_XID_ERROR;
+            RecordUrqHeaderInfo(errorInfos, header, curBlkno);
+            RecordUrqItemInfo(errorInfos, item, curOffset, prevOffset, itemCount, prevXid, maxXid);
+            errorInfos++;
+        }
+        prevXid = item->xid;
+        prevOffset = curOffset;
+        curOffset = item->next;
+    }
+    /* check freeList */
+    if (header->freeListHead != InvalidOffset) {
+        curOffset = header->freeListHead;
+        prevOffset = InvalidOffset;
+        while (curOffset != InvalidOffset && itemCount <= BlockGetMaxItems(curBlkno)) {
+            if (curOffset <= UBTRecycleMaxItems) {
+                itemCount++;
+                UBTRecycleQueueItem item = HeaderGetItem(header, curOffset);
+                prevOffset = curOffset;
+                curOffset = item->next;
+                continue;
+            }
+            errorInfos->error_code = VERIFY_URQ_FREE_LIST_LINK_ERROR;
+            RecordUrqHeaderInfo(errorInfos, header, curBlkno);
+            RecordUrqItemInfo(errorInfos, NULL, curOffset, prevOffset, itemCount, 0, maxXid);
+            errorInfos++;
+            break;
+        }
+    }
+
+    if (itemCount != BlockGetMaxItems(curBlkno)) {
+        errorInfos->error_code = VERIFY_URQ_ITEM_CNT_ERROR;
+        RecordUrqHeaderInfo(errorInfos, header, curBlkno);
+        RecordUrqItemInfo(errorInfos, NULL, curOffset, prevOffset, itemCount, 0, maxXid);
+        errorInfos++;
+    }
+    return startErrorInfos == errorInfos;
+}
+
+void VerifyUrqWholeQueue(Relation rel, UBTRecycleForkNumber forkNum, BlockNumber blkno, URQErrorInfo* result)
+{
+    URQErrorInfo* errorInfos = result;
+    errno_t rc = EOK;
+
+    BlockNumber metaBlkno = forkNum;
+    Buffer metaBuf = ReadBufferExtended(rel, FSM_FORKNUM, metaBlkno, RBM_NORMAL, NULL);
+    LockBuffer(metaBuf, BT_READ);
+    UBTRecycleMeta metaData = (UBTRecycleMeta)PageGetContents(BufferGetPage(metaBuf));
+    /* check UBTRecycleMeta error */
+    BlockNumber headBlkno = metaData->headBlkno;
+    BlockNumber tailBlkno = metaData->tailBlkno;
+    BlockNumber nblocksUpper = metaData->nblocksUpper;
+    BlockNumber indexBlocks = RelationGetNumberOfBlocks(rel);
+    BlockNumber urqBlocks = smgrnblocks(rel->rd_smgr, FSM_FORKNUM);
+    bool isMetaError = false;
+    if ((headBlkno == 1 - metaBlkno) || headBlkno >= urqBlocks) {
+        isMetaError = true;
+        headBlkno = metaBlkno;
+    }
+    if ((tailBlkno == 1 - metaBlkno) || tailBlkno >= urqBlocks) {
+        isMetaError = true;
+        tailBlkno = metaBlkno;
+    }
+    if (nblocksUpper > indexBlocks) {
+        isMetaError = true;
+    }
+    if (isMetaError) {
+        errorInfos->error_code = VERIFY_URQ_META_ERROR;
+        rc = snprintf_s(errorInfos->error_msg, MAX_URQ_ERROR_MSG_SIZE, MAX_URQ_ERROR_MSG_SIZE - 1, "meta data: "
+            "metaBlkno = %u, headBlkno = %u, tailBlkno = %u, nblocksUpper = %u; urqBlocks = %u, indexBlocks = %u",
+            metaBlkno, metaData->headBlkno, metaData->tailBlkno, metaData->nblocksUpper, urqBlocks, indexBlocks);
+        securec_check_ss(rc, "\0", "\0");
+        errorInfos++;
+    }
+    UnlockReleaseBuffer(metaBuf);
+
+    /* check queue link error */
+    BlockNumber curBlkno = headBlkno;
+    BlockNumber visitedPages = 0;
+    UBTRecycleQueueHeader header = NULL;
+    bool hasHead = false;
+    bool hasTail = false;
+    bool noLinkMeta = false;
+    bool urqMixed = false;
+    errorInfos = VerifyUrqLink(rel, metaBlkno, headBlkno, true, errorInfos,
+        &hasHead, &hasTail, &noLinkMeta, &urqMixed);
+    errorInfos = VerifyUrqLink(rel, metaBlkno, headBlkno, false, errorInfos,
+        &hasHead, &hasTail, &noLinkMeta, &urqMixed);
+    if (!hasHead) {
+        errorInfos = VerifyUrqHasEndpoint(rel, headBlkno, true, errorInfos);
+    }
+    if (!hasTail) {
+        errorInfos = VerifyUrqHasEndpoint(rel, headBlkno, false, errorInfos);
+    }
+
+    if (blkno != 0) {
+        // check queue all pages' items
+        Buffer buf = ReadBufferExtended(rel, FSM_FORKNUM, curBlkno, RBM_NORMAL, NULL);
+        LockBuffer(buf, BT_READ);
+        visitedPages = 0;
+        do {
+            urqBlocks = smgrnblocks(rel->rd_smgr, FSM_FORKNUM);
+            visitedPages++;
+            if (!VerifyUrqSinglePage(rel, buf, errorInfos)) {
+                break;
+            }
+            curBlkno = BufferGetBlockNumber(buf);
+            header = GetRecycleQueueHeader(BufferGetPage(buf), curBlkno);
+            BlockNumber nextBlkno = header->nextBlkno;
+            if ((header->flags & URQ_TAIL_PAGE) != 0 || nextBlkno >= urqBlocks) {
+                break;
+            }
+            UnlockReleaseBuffer(buf);
+            CHECK_FOR_INTERRUPTS();
+            buf = ReadBufferExtended(rel, FSM_FORKNUM, nextBlkno, RBM_NORMAL, NULL);
+            LockBuffer(buf, BT_READ);
+        } while (visitedPages < urqBlocks);
+        UnlockReleaseBuffer(buf);
+    }
+}
+
+void VerifyUrqPerformance(Relation rel, UBTRecycleForkNumber forkNum, URQErrorInfo* result)
+{
+    UBTRecycleQueueAddress addr;
+    UrqState *stat = (UrqState*) palloc0(sizeof(UrqState));
+    Buffer indexBuf = UBTreeGetAvailablePage(rel, forkNum, &addr, stat);
+    if (indexBuf != InvalidBuffer) {
+        UnlockReleaseBuffer(indexBuf);
+        if (BufferIsValid(addr.queueBuf)) {
+            ReleaseBuffer(addr.queueBuf);
+        }
+        stat->getIndexPageValid = true;
+    }
+    result->error_code = VERIFY_URQ_FETCH_INDEX_PAGE_TIME;
+    const char *fetchResult = stat->getIndexPageValid ? "get page success" : "no available page";
+    errno_t rc = snprintf_s(result->error_msg, MAX_URQ_ERROR_MSG_SIZE, MAX_URQ_ERROR_MSG_SIZE - 1,
+        "UBTreeGetAvailablePageStat: %s, RecycleQueueGetEndpointPage costTime %ld\n visitQueue costTime %ld "
+        "pageCount %u  itemCount %u ", fetchResult, stat->getQueueHeadTime, stat->visitQueueTime,
+        stat->visitQueuePageCount, stat->visitQueueItemCount);
+    securec_check_ss(rc, "\0", "\0");
+    pfree(stat);
+}
+
+void VerifyUrqPhysics(Relation rel, UBTRecycleForkNumber forkNum, BlockNumber blkno, URQErrorInfo* result)
+{
+    if (forkNum == RECYCLE_NONE_FORK) {
+        BlockNumber nblocks = smgrnblocks(rel->rd_smgr, FSM_FORKNUM);
+        if (blkno < nblocks) {
+            Buffer buf = ReadBufferExtended(rel, FSM_FORKNUM, blkno, RBM_NORMAL, NULL);
+            LockBuffer(buf, BT_READ);
+            VerifyUrqSinglePage(rel, buf, result);
+            UnlockReleaseBuffer(buf);
+        }
+        return;
+    }
+    VerifyUrqWholeQueue(rel, forkNum, blkno, result);
+}

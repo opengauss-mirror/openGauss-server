@@ -37,7 +37,6 @@
 extern Datum pg_options_to_table(PG_FUNCTION_ARGS);
 extern Datum postgresql_fdw_validator(PG_FUNCTION_ARGS);
 
-extern void CheckGetServerIpAndPort(const char* Address, List** AddrList, bool IsCheck, int real_addr_max);
 extern void decryptKeyString(
     const char* keyStr, char destplainStr[], uint32 destplainLength, const char* obskey = NULL);
 
@@ -872,33 +871,6 @@ DefElem* GetForeignTableOptionByName(Oid reloid, const char* optname)
     return NULL;
 }
 
-HdfsFdwOptions* HdfsGetOptions(Oid foreignTableId)
-{
-    HdfsFdwOptions* hdfsFdwOptions = NULL;
-    char* address = NULL;
-    List* AddrList = NULL;
-
-    hdfsFdwOptions = (HdfsFdwOptions*)palloc0(sizeof(HdfsFdwOptions));
-    hdfsFdwOptions->filename = HdfsGetOptionValue(foreignTableId, OPTION_NAME_FILENAMES);
-    hdfsFdwOptions->foldername = HdfsGetOptionValue(foreignTableId, OPTION_NAME_FOLDERNAME);
-    hdfsFdwOptions->location = HdfsGetOptionValue(foreignTableId, OPTION_NAME_LOCATION);
-
-    address = HdfsGetOptionValue(foreignTableId, OPTION_NAME_ADDRESS);
-
-    if (NULL != address) {
-        if (T_HDFS_SERVER == getServerType(foreignTableId)) {
-            CheckGetServerIpAndPort(address, &AddrList, false, -1);
-            hdfsFdwOptions->address = ((HdfsServerAddress*)linitial(AddrList))->HdfsIp;
-            hdfsFdwOptions->port = atoi(((HdfsServerAddress*)linitial(AddrList))->HdfsPort);
-        } else {
-            /* As for OBS table, only the address is needed. */
-            hdfsFdwOptions->address = address;
-        }
-    }
-
-    return hdfsFdwOptions;
-}
-
 /*
  * @Description: get option DefElem
  * @IN foreignTableId: foreign table oid
@@ -1254,20 +1226,6 @@ ObsOptions* setObsSrvOptions(ForeignOptions* fOptions)
     return options;
 }
 
-HdfsOptions* setHdfsSrvOptions(ForeignOptions* fOptions)
-{
-    HdfsOptions* options = (HdfsOptions*)palloc0(sizeof(HdfsOptions));
-
-    options->servername = getFTOptionValue(fOptions->fOptions, OPTION_NAME_REMOTESERVERNAME);
-
-    options->format = getFTOptionValue(fOptions->fOptions, OPTION_NAME_FORMAT);
-    if (NULL == options->format) {
-        ereport(ERROR, (errcode(ERRCODE_FDW_ERROR), errmsg("No \"format\" option provided.")));
-    }
-
-    return options;
-}
-
 extern char* TrimStr(const char* str);
 
 /**
@@ -1570,3 +1528,168 @@ char* rebuildLocationOption(char* regionCode, char* location)
 
     return rebuildLocation;
 }
+
+void CheckGetServerIpAndPort(const char *Address, List **AddrList, bool IsCheck, int real_addr_max)
+{
+    char *Str = NULL;
+    char *Delimiter = NULL;
+    char *SeparaterStr = NULL;
+    char *tmp_token = NULL;
+    HdfsServerAddress *ServerAddress = NULL;
+    int addressCounter = 0;
+    int addressMaxNum = (real_addr_max == -1 ? 2 : real_addr_max);
+    errno_t rc = 0;
+
+    Assert(Address != NULL);
+    Str = (char *)palloc0(strlen(Address) + 1);
+    rc = strncpy_s(Str, strlen(Address) + 1, Address, strlen(Address));
+    securec_check(rc, "\0", "\0");
+
+    /* Frist, check address stirng, the ' ' could not exist */
+    if (strstr(Str, " ") != NULL) {
+        ereport(ERROR, (errcode(ERRCODE_WITH_CHECK_OPTION_VIOLATION), errmodule(MOD_DFS),
+                        errmsg("The address option exists illegal character: \'%c\'", ' ')));
+    }
+
+    if (strlen(Str) == 0) {
+        ereport(ERROR, (errcode(ERRCODE_WITH_CHECK_OPTION_VIOLATION), errmodule(MOD_DFS),
+                        errmsg("No address is specified for the server.")));
+    }
+
+    /* Check the address string, the first and last character could not be a character ',' */
+    if (Str[strlen(Str) - 1] == ',' || *Str == ',') {
+        ereport(ERROR, (errcode(ERRCODE_WITH_CHECK_OPTION_VIOLATION), errmodule(MOD_DFS),
+                        errmsg("The address option exists illegal character: \'%c\'", ',')));
+    }
+
+    /* Now, we obtain ip string and port string */
+    /* Separater Str use a ',' delimiter, for example xx.xx.xx.xx:xxxx,xx.xx.xx.xx:xxxx */
+    Delimiter = ",";
+    SeparaterStr = strtok_r(Str, Delimiter, &tmp_token);
+    while (SeparaterStr != NULL) {
+        char *AddrPort = NULL;
+        int PortLen = 0;
+
+        if (++addressCounter > addressMaxNum) {
+            ereport(ERROR,
+                    (errcode(ERRCODE_WITH_CHECK_OPTION_VIOLATION), errmodule(MOD_DFS),
+                     errmsg("The count of address \"%s\" must be not greater than %d.", Address, addressMaxNum)));
+        }
+
+        /* Judge ipv6 format or ipv4 format,like fe80::7888:bf24:e381:27:25000 */
+        if (strstr(SeparaterStr, "::") != NULL) {
+            ereport(ERROR, (errcode(ERRCODE_WITH_CHECK_OPTION_VIOLATION), errmodule(MOD_DFS),
+                            errmsg("Unsupport ipv6 foramt")));
+        } else if ((AddrPort = strstr(SeparaterStr, ":")) != NULL) {
+            /* Deal with ipv4 format, like xx.xx.xx.xx:xxxx
+             * Get SeparaterStr is "xx.xx.xx.xx" and AddrPort is xxxx.
+             * Because the original SeparaterStr transform "xx.xx.xx.xx\0xxxxx"
+             */
+            *AddrPort++ = '\0';
+        } else {
+            ereport(ERROR, (errcode(ERRCODE_WITH_CHECK_OPTION_VIOLATION), errmodule(MOD_DFS),
+                            errmsg("The incorrect address format")));
+        }
+
+        /* Check ip validity  */
+        (void)DirectFunctionCall1(inet_in, CStringGetDatum(SeparaterStr));
+
+        /* Check port validity */
+        if (AddrPort != NULL) {
+            PortLen = strlen(AddrPort);
+        }
+        if (PortLen != 0) {
+            char *PortStr = AddrPort;
+            while (*PortStr) {
+                if (isdigit(*PortStr)) {
+                    PortStr++;
+                } else {
+                    ereport(ERROR, (errcode(ERRCODE_WITH_CHECK_OPTION_VIOLATION), errmodule(MOD_DFS),
+                                    errmsg("The address option exists illegal character: \'%c\'", *PortStr)));
+                }
+            }
+            int portVal = pg_strtoint32(AddrPort);
+            if (portVal > 65535) {
+                ereport(ERROR, (errcode(ERRCODE_WITH_CHECK_OPTION_VIOLATION), errmodule(MOD_DFS),
+                                errmsg("The port value is out of range: \'%s\'", AddrPort)));
+            }
+        } else {
+            ereport(ERROR, (errcode(ERRCODE_WITH_CHECK_OPTION_VIOLATION), errmodule(MOD_DFS),
+                            errmsg("The incorrect address format")));
+        }
+
+        /* If IsCheck is false, get port and ip, Otherwise, only check validity of ip and port. */
+        if (!IsCheck) {
+            ServerAddress = (HdfsServerAddress *)palloc0(sizeof(HdfsServerAddress));
+            ServerAddress->HdfsIp = SeparaterStr;
+            ServerAddress->HdfsPort = AddrPort;
+            *AddrList = lappend(*AddrList, ServerAddress);
+        }
+
+        SeparaterStr = strtok_r(NULL, Delimiter, &tmp_token);
+    }
+}
+
+
+void CheckFoldernameOrFilenamesOrCfgPtah(const char *OptStr, char *OptType)
+{
+    const char *Errorchar = NULL;
+    char BeginChar;
+    char EndChar;
+    uint32 i = 0;
+
+    Assert(OptStr != NULL);
+    Assert(OptType != NULL);
+
+    /* description: remove the hdfs info. */
+    if (strlen(OptStr) == 0) {
+        if (pg_strncasecmp(OptType, OPTION_NAME_FOLDERNAME, NAMEDATALEN) == 0) {
+            ereport(ERROR, (errcode(ERRCODE_WITH_CHECK_OPTION_VIOLATION), errmodule(MOD_DFS),
+                            errmsg("No folder path is specified for the foreign table.")));
+        } else if (pg_strncasecmp(OptType, OPTION_NAME_FILENAMES, NAMEDATALEN) == 0) {
+            ereport(ERROR, (errcode(ERRCODE_WITH_CHECK_OPTION_VIOLATION), errmodule(MOD_DFS),
+                            errmsg("No file path is specified for the foreign table.")));
+        } else {
+            ereport(ERROR, (errcode(ERRCODE_WITH_CHECK_OPTION_VIOLATION), errmodule(MOD_DFS),
+                            errmsg("No hdfscfg path is specified for the server.")));
+        }
+    }
+    size_t optStrLen = strlen(OptStr);
+    for (i = 0; i < optStrLen; i++) {
+        if (OptStr[i] == ' ') {
+            if (i == 0 || (i - 1 > 0 && OptStr[i - 1] != '\\')) {
+                ereport(ERROR, (errcode(ERRCODE_WITH_CHECK_OPTION_VIOLATION), errmodule(MOD_DFS),
+                                errmsg("There is an illegal character \'%c\' in the option %s.", OptStr[i], OptType)));
+            }
+        }
+    }
+    BeginChar = *OptStr;
+    EndChar = *(OptStr + strlen(OptStr) - 1);
+    if (BeginChar == ',' || EndChar == ',') {
+        ereport(ERROR, (errcode(ERRCODE_WITH_CHECK_OPTION_VIOLATION), errmodule(MOD_DFS),
+                        errmsg("There is an illegal character \'%c\' in the option %s.", ',', OptType)));
+    }
+    if (0 == pg_strcasecmp(OptType, OPTION_NAME_FILENAMES) && EndChar == '/') {
+        ereport(ERROR, (errcode(ERRCODE_WITH_CHECK_OPTION_VIOLATION), errmodule(MOD_DFS),
+                        errmsg("The option %s should not be end with \'%c\'.", OptType, EndChar)));
+    }
+
+    Errorchar = strstr(OptStr, ",");
+    if (Errorchar && 0 == pg_strcasecmp(OptType, OPTION_NAME_FOLDERNAME)) {
+        ereport(ERROR, (errcode(ERRCODE_WITH_CHECK_OPTION_VIOLATION), errmodule(MOD_DFS),
+                        errmsg("Only a folder path is allowed for the foreign table.")));
+    }
+    if (Errorchar && 0 == pg_strcasecmp(OptType, OPTION_NAME_CFGPATH)) {
+        ereport(ERROR, (errcode(ERRCODE_WITH_CHECK_OPTION_VIOLATION), errmodule(MOD_DFS),
+                        errmsg("Only a hdfscfg path is allowed for the server.")));
+    }
+
+    /*
+     * The path must be an absolute path.
+     */
+    if (!is_absolute_path(OptStr)) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_OBJECT_DEFINITION), errmodule(MOD_DFS),
+                        errmsg("The path \"%s\" must be an absolute path.", OptStr)));
+    }
+}
+

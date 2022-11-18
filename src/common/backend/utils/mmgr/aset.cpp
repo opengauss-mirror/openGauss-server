@@ -1786,7 +1786,7 @@ void dumpAllocBlock(AllocSet set, StringInfoData* memoryBuf)
 /*
  * chunk walker
  */
-static void GetAllocChunkInfo(AllocSet set, AllocBlock blk, StringInfoData* memoryBuf)
+static void GetAllocChunkInfo(AllocSet set, AllocBlock blk, StringInfoDataHuge* memoryBuf)
 {
     char* bpoz = ((char*)blk) + ALLOC_BLOCKHDRSZ;
     while (bpoz < blk->freeptr) {
@@ -1800,14 +1800,14 @@ static void GetAllocChunkInfo(AllocSet set, AllocBlock blk, StringInfoData* memo
         }
 
         if (memoryBuf != NULL) {
-            appendStringInfo(memoryBuf, "%s:%d, %lu\n", chunk->file, chunk->line, chunk->size);
+            appendStringInfoHuge(memoryBuf, "%s:%d, %lu\n", chunk->file, chunk->line, chunk->size);
         }
 
         bpoz += ALLOC_CHUNKHDRSZ + chsize;
     }
 }
 
-void GetAllocBlockInfo(AllocSet set, StringInfoData* memoryBuf)
+void GetAllocBlockInfo(AllocSet set, StringInfoDataHuge* memoryBuf)
 {
     for (AllocBlock blk = set->blocks; blk != NULL; blk = blk->next) {
         char* bpoz = ((char*)blk) + ALLOC_BLOCKHDRSZ;

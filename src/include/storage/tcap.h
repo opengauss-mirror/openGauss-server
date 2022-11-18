@@ -68,7 +68,7 @@ extern void TvUheapDeleteDelta(Oid relid, Snapshot snap);
 extern void TvUheapInsertLost(Oid relid, Snapshot snap);
 
 extern void TvRestoreVersion(TimeCapsuleStmt *stmt);
-extern TransactionId TvFetchSnpxminRecycle(TimestampTz tz);
+extern TransactionId TvFetchSnpxminRecycle();
 
 /*
  * Interfaces for Timecapsule `Recyclebin-based query, restore`

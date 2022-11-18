@@ -34,6 +34,7 @@
 #include "access/tableam.h"
 #include "commands/tablespace.h"
 #include "storage/smgr/fd.h"
+#include "storage/smgr/segment.h"
 
 const int TIMEOUT_MIN = 60;
 const int TIMEOUT_MAX = 3600;
@@ -254,10 +255,14 @@ void addGlobalRepairBadBlockStat(const RelFileNodeBackend &rnode, ForkNumber for
             entry->pblk.relNode = EXTENT_INVALID;
             entry->pblk.block = InvalidBlockNumber;
         }
+        if (entry->repair_time != -1) {
+            entry->check_time = check_time;
+            entry->repair_time = -1;
+        }
+
     }
     LWLockRelease(RepairBadBlockStatHashLock);
 }
-
 
 bool CheckSum(const PageHeader page, BlockNumber blockNum)
 {
@@ -298,67 +303,100 @@ Buffer PageIsInMemory(SMgrRelation smgr, ForkNumber forkNum, BlockNumber blockNu
 
 
 // init RelFileNode and outputFilename
-void PrepForRead(char* path, int64 blocknum, bool is_segment, RelFileNode *relnode)
+void PrepForRead(char* path, uint blocknum, bool is_segment, RelFileNode *relnode)
 {
     char* pathFirstpart = (char*)palloc0(MAXFNAMELEN);
-    errno_t rc = 0;
-    bool flag = false;
 
     RelFileNodeForkNum relfilenode;
-    if (strlen(pathFirstpart) == 0) {
+    if (is_segment) {
+        char* bucketNodestr = strstr(path, "_b");
+        if (NULL != bucketNodestr) {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    (errmsg("Un-support feature"),
+                            errdetail("The repair do not support hashbucket."),
+                            errcause("The function is not implemented."),
+                            erraction("Do not repair hashbucket."))));
+        }
         relfilenode = relpath_to_filenode(path);
+        relfilenode.rnode.node.bucketNode = SegmentBktId;
+        if (!IsSegmentPhysicalRelNode(relfilenode.rnode.node)) {
+            Oid relation_oid = RelidByRelfilenodeCache(relfilenode.rnode.node.spcNode,
+                relfilenode.rnode.node.relNode);
+            if (!OidIsValid(relation_oid)) {
+                relation_oid = RelidByRelfilenode(relfilenode.rnode.node.spcNode,
+                    relfilenode.rnode.node.relNode, is_segment);
+            }
+            if (!OidIsValid(relation_oid)) {
+                ereport(ERROR,
+                        (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                                errmsg("Error parameter to get relation.")));
+            }
+
+            SMgrRelation reln = smgropen(relfilenode.rnode.node, InvalidBackendId);
+            if (reln->seg_desc == NULL || !(seg_exists(reln, MAIN_FORKNUM, blocknum) && reln->seg_desc[MAIN_FORKNUM] != NULL)) {
+                ereport(ERROR,
+                        (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                                errmsg("Error parameter to get smgr relation.")));
+            }
+
+            RelFileNode relFileNode = {
+                    .spcNode = reln->seg_space->spcNode,
+                    .dbNode = reln->seg_space->dbNode,
+                    .relNode = EXTENT_SIZE_TO_TYPE(LEVEL0_PAGE_EXTENT_SIZE),
+                    .bucketNode = SegmentBktId
+            };
+
+            Buffer buffer = ReadBufferFast((reln->seg_space), relFileNode, MAIN_FORKNUM,
+                                           (reln->seg_desc[MAIN_FORKNUM]->head_blocknum), RBM_NORMAL);
+            SegmentHead *head = (SegmentHead *)PageGetContents(BufferGetPage(buffer));
+            if (head->magic == BUCKET_SEGMENT_MAGIC) {
+                ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        (errmsg("Un-support feature"),
+                                errdetail("The repair do not support hashbucket."),
+                                errcause("The function is not implemented."),
+                                erraction("Do not repair hashbucket."))));
+            }
+        } else {
+            SegSpace *spc = spc_open(relfilenode.rnode.node.spcNode, relfilenode.rnode.node.dbNode, false, false);
+            if (!spc) {
+                ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        (errmsg("Spc open failed. spcNode is: %u, dbNode is %u",
+                                relfilenode.rnode.node.spcNode, relfilenode.rnode.node.dbNode))));
+            }
+            int egid = EXTENT_TYPE_TO_GROUPID(relfilenode.rnode.node.relNode);
+            SegExtentGroup *seg = &spc->extent_group[egid][MAIN_FORKNUM];
+            if (seg->segfile->total_blocks <= blocknum) {
+                ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        (errmsg("Total block is: %u, given block is %u",
+                                seg->segfile->total_blocks, blocknum))));
+            }
+            struct stat statBuf;
+            if (stat(path, &statBuf) < 0) {
+                ereport(ERROR,
+                        (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                                errmsg("Error parameter to open file.")));
+            }
+        }
     } else {
-        relfilenode = relpath_to_filenode(pathFirstpart);
+        relfilenode = relpath_to_filenode(path);
+        relfilenode.rnode.node.bucketNode = InvalidBktId;
     }
     if (relfilenode.forknumber != MAIN_FORKNUM) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                 (errmsg("Error forknum is: %d", relfilenode.forknumber))));
     }
-    if (is_segment) {
-        relfilenode.rnode.node.bucketNode = SegmentBktId;
-        // base/16604/4161_b10426
-        char* bucketNodestr = strstr(path, "_b");
-        if (NULL != bucketNodestr) {
-            bucketNodestr += 2; /* delete first two chars: _b */
-            int _bucketNode;
-            flag = StrToInt32(bucketNodestr, &_bucketNode);
-            if (!flag) {
-                ereport(ERROR, (errmsg("Can not covert %s to int32 type. \n", bucketNodestr)));
-            }
-            relfilenode.rnode.node.bucketNode = (int2)_bucketNode;
-            rc = strncpy_s(pathFirstpart, MAXFNAMELEN, path, strlen(path) - strlen(bucketNodestr));
-            securec_check(rc, "\0", "\0");
-        }
-        if (!IsSegmentPhysicalRelNode(relfilenode.rnode.node)) {
-            SMgrRelation reln = smgropen(relfilenode.rnode.node, InvalidBackendId);
-            bool exist = seg_exists(reln, MAIN_FORKNUM, blocknum);
-            bool found = false;
-            if (!(exist && reln->seg_desc[MAIN_FORKNUM] != NULL)) {
-                ereport(ERROR,
-                        (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                                errmsg("Error parameter to get smgr relation.")));
-            }
-            (void)SegBufferAlloc(reln->seg_space, relfilenode.rnode.node, MAIN_FORKNUM, blocknum, &found);
-            if (!found) {
-                ereport(ERROR,
-                        (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                                errmsg("Error parameter to find buffer")));
-            }
-        }
-    } else {
-        relfilenode.rnode.node.bucketNode = InvalidBktId;
-    }
     RelFileNodeCopy(*relnode, relfilenode.rnode.node, relfilenode.rnode.node.bucketNode);
     pfree(pathFirstpart);
 }
 
-bool tryRepairPage(int blocknum, bool is_segment, RelFileNode *relnode, int timeout)
+bool tryRepairPage(BlockNumber blocknum, bool is_segment, RelFileNode *relnode, int timeout)
 {
     char *buf = (char*)palloc0(BLCKSZ);
     XLogPhyBlock pblk;
     ForkNumber forknum = MAIN_FORKNUM;
     RelFileNode logicalRelNode = {0};
     int logicalBlocknum = 0;
+    BlockNumber checksumBlock = blocknum;
 
     SMgrRelation smgr = smgropen(*relnode, InvalidBackendId, GetColumnNum(forknum));
 
@@ -386,11 +424,12 @@ bool tryRepairPage(int blocknum, bool is_segment, RelFileNode *relnode, int time
     // to repair page
     if (is_segment && !isSegmentPhysical) {
         RemoteReadBlock(relnodeBack, forknum, blocknum, buf, &pblk, timeout);
+        checksumBlock = logicalBlocknum;
     } else {
         RemoteReadBlock(relnodeBack, forknum, blocknum, buf, NULL, timeout);
     }
 
-    if (PageIsVerified((Page)buf, blocknum)) {
+    if (PageIsVerified((Page)buf, checksumBlock)) {
         if (is_segment) {
             SegSpace* spc = spc_open(relnode->spcNode, relnode->dbNode, false, false);
             if (!spc) {
@@ -459,6 +498,11 @@ bool repairPage(char* path, uint blocknum, bool is_segment, int timeout)
     t_thrd.storage_cxt.timeoutRemoteOpera = timeout;
 
     PrepForRead((char*)path, blocknum, is_segment, &relnode);
+
+    if (IsSegmentPhysicalRelNode(relnode)) {
+        repair_check_physical_type(relnode.spcNode, relnode.dbNode, MAIN_FORKNUM, &(relnode.relNode),
+                                   &blocknum);
+    }
 
     return tryRepairPage(blocknum, is_segment, &relnode, timeout);
 }
@@ -690,8 +734,8 @@ void splicMemPageMsg(bool isPageValid, bool isDirty, char* mem_page_res)
     }
 }
 
-bool isNeedRepairPageByMem(char* disk_page_res, int blockNum, char* mem_page_res,
-    XLogPhyBlock *pblk, RelFileNode relnode)
+bool isNeedRepairPageByMem(char* disk_page_res, BlockNumber blockNum, char* mem_page_res,
+    bool isSegment, RelFileNode relnode)
 {
     bool found = true;
     bool need_repair = false;
@@ -726,11 +770,6 @@ bool isNeedRepairPageByMem(char* disk_page_res, int blockNum, char* mem_page_res
 
     if (IsSegmentPhysicalRelNode(relnode)) {
         spc = spc_open(relnode.spcNode, relnode.dbNode, false, false);
-        if (!spc) {
-            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                    (errmsg("Spc open failed. spcNode is: %u, dbNode is %u",
-                            relnode.spcNode, relnode.dbNode))));
-        }
         seg_physical_read(spc, relnode, MAIN_FORKNUM, blockNum, buffer);
         if (PageIsVerified(buffer, blockNum)) {
             rdStatus = SMGR_RD_OK;
@@ -752,11 +791,11 @@ bool isNeedRepairPageByMem(char* disk_page_res, int blockNum, char* mem_page_res
     }
 
     if (!found && need_repair) {
-        if (IsSegmentPhysicalRelNode(relnode)) {
+        if (isSegment) {
             const int TIMEOUT = 1200;
             is_repair = tryRepairPage(blockNum, true, &relnode, TIMEOUT);
         } else {
-            buf = ReadBufferWithoutRelcache(relnode, MAIN_FORKNUM, blockNum, RBM_NORMAL, NULL, pblk);
+            buf = ReadBufferWithoutRelcache(relnode, MAIN_FORKNUM, blockNum, RBM_NORMAL, NULL, NULL);
             is_repair = true;
             UpdateRepairTime(relnode, MAIN_FORKNUM, blockNum);
         }
@@ -802,7 +841,6 @@ Datum gs_verify_and_tryrepair_page(PG_FUNCTION_ARGS)
     char* mem_page_res = (char*)palloc0(ERR_MSG_LEN);
     bool is_repair = false;
     int j = 1;
-    XLogPhyBlock pblk = {0, 0, 0};
 
     UnsupportedPageRepair(path);
     
@@ -825,26 +863,19 @@ Datum gs_verify_and_tryrepair_page(PG_FUNCTION_ARGS)
                 (errmsg("Blocknum should be between 0 and %u. \n", MaxBlockNumber))));
 
     RelFileNode relnode = {0, 0, 0, -1};
-
     PrepForRead((char*)path, blockNum, is_segment, &relnode);
-    bool isSegmentPhysical = is_segment && IsSegmentPhysicalRelNode(relnode);
-
-    if (is_segment && !isSegmentPhysical) {
-        SegPageLocation loc = seg_get_physical_location(relnode, MAIN_FORKNUM, blockNum);
-        pblk.relNode = (uint8) EXTENT_SIZE_TO_TYPE(loc.extent_size);
-        pblk.block = loc.blocknum;
-    }
 
     SMgrRelation smgr = smgropen(relnode, InvalidBackendId, GetColumnNum(MAIN_FORKNUM));
 
     if (!verify_mem && !IsSegmentPhysicalRelNode(relnode)) { // only check disk
         gs_verify_page_by_disk(smgr, MAIN_FORKNUM, blockNum, disk_page_res);
     } else {
-        if (is_segment && !isSegmentPhysical) {
-            is_repair = isNeedRepairPageByMem(disk_page_res, blockNum, mem_page_res, &pblk, relnode);
-        } else {
-            is_repair = isNeedRepairPageByMem(disk_page_res, blockNum, mem_page_res, NULL, relnode);
+        BlockNumber logicBlockNum = blockNum;
+        if (IsSegmentPhysicalRelNode(relnode)) {
+            repair_check_physical_type(relnode.spcNode, relnode.dbNode, MAIN_FORKNUM, &(relnode.relNode),
+                                       &logicBlockNum);
         }
+        is_repair = isNeedRepairPageByMem(disk_page_res, logicBlockNum, mem_page_res, is_segment, relnode);
     }
 
     values[i++] = CStringGetTextDatum(g_instance.attr.attr_common.PGXCNodeName);
@@ -1332,7 +1363,8 @@ static bool PrimaryRepairSegFile(RemoteReadFileKey *repairFileKey, char* path, i
     errno_t rc;
     char* buf = NULL;
     char *segpath = (char *)palloc0(strlen(path) + SEGLEN);
-    uint32 seg_size  = (seg_no < maxSegno ? (RELSEG_SIZE * BLCKSZ) : (size % (RELSEG_SIZE * BLCKSZ)));
+    uint32 seg_size  = ((seg_no < maxSegno || (size % (RELSEG_SIZE * BLCKSZ)) == 0) ?
+                        (RELSEG_SIZE * BLCKSZ) : (size % (RELSEG_SIZE * BLCKSZ)));
 
     if (seg_no == 0) {
         rc = sprintf_s(segpath, strlen(path) + SEGLEN, "%s", path);
@@ -1508,7 +1540,8 @@ bool gsRepairFile(Oid tableOid, char* path, int timeout)
         return true;
     }
 
-    int maxSegno = size / (RELSEG_SIZE * BLCKSZ);
+    int maxSegno = (size % (RELSEG_SIZE * BLCKSZ)) != 0 ? size / (RELSEG_SIZE * BLCKSZ) :
+                    (size / (RELSEG_SIZE * BLCKSZ)) - 1;
 
     for (int i = 0; i <= maxSegno; i++) {
         bool repair = PrimaryRepairSegFile(&repairFileKey, firstPath, i, maxSegno, timeout, size);

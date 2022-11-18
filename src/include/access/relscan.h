@@ -19,6 +19,7 @@
 #include "access/heapam.h"
 #include "access/itup.h"
 #include "access/tupdesc.h"
+#include "access/ustore/knl_uvisibility.h"
 
 #define PARALLEL_SCAN_GAP 100
 
@@ -107,6 +108,7 @@ typedef struct IndexScanDescData {
 
     Relation indexRelation; /* index relation descriptor */
     bool isUpsert;
+    UstoreUndoScanDesc xc_undo_scan;
     GPIScanDesc xs_gpi_scan; /* global partition index scan use information */
     CBIScanDesc xs_cbi_scan; /* global bucket index scan use information */
     Snapshot xs_snapshot;   /* snapshot to see */
@@ -140,6 +142,9 @@ typedef struct IndexScanDescData {
 
     /* used in ubtree only, indicate that we need to recheck the returned IndexTuple */
     bool xs_recheck_itup;
+
+    /* indicate whether this scan is for sampling only */
+    bool xs_sampling_scan;
 
     /* state data for traversing HOT chains in index_getnext */
     bool xs_continue_hot; /* T if must keep walking HOT chain */

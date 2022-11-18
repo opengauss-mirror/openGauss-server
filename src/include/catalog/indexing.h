@@ -407,7 +407,8 @@ DECLARE_UNIQUE_INDEX(pg_partition_partoid_index, 3479, on pg_partition using btr
 /* Add index of indextable and parent oid for pg_partition */
 DECLARE_UNIQUE_INDEX(pg_partition_indextblid_parentoid_reloid_index, 9996, on pg_partition using btree(indextblid oid_ops, parentid oid_ops, oid oid_ops));
 #define PartitionIndexTableIdParentOidIndexId  9996
-
+DECLARE_INDEX(pg_partition_tblspc_relfilenode_index, 3480, on pg_partition using btree(reltablespace oid_ops, relfilenode oid_ops));
+#define PartitionTblspcRelfilenodeIndexId  3480
 
 /* Add index of table oid for pg_hashbucket */
 DECLARE_UNIQUE_INDEX(pg_hashbucket_oid_index, 3492, on pg_hashbucket using btree(oid oid_ops));
@@ -651,6 +652,11 @@ DECLARE_UNIQUE_INDEX(pg_replication_origin_roident_index, 6136, on pg_replicatio
 DECLARE_UNIQUE_INDEX(pg_replication_origin_roname_index, 6137, on pg_replication_origin using btree(roname text_pattern_ops));
 #define ReplicationOriginNameIndex 6137
 
+DECLARE_UNIQUE_INDEX(gs_sql_patch_patch_name_index, 9053, on gs_sql_patch using btree(patch_name name_ops));
+#define GsSqlPatchPatchNameIndex 9053
+
+DECLARE_INDEX(gs_sql_patch_unique_sql_id_index, 9054, on gs_sql_patch using btree(unique_sql_id int8_ops));
+#define GsSqlPatchUniqueSqlIdIndex 9054
 
 /* last step of initialization script: build the indexes declared above */
 BUILD_INDICES

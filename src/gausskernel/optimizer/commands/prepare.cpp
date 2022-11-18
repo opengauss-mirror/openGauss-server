@@ -288,6 +288,7 @@ void ExecuteQuery(ExecuteStmt* stmt, IntoClause* intoClause, const char* querySt
     * above GetCachedPlan call and here.
     */
     PortalDefineQuery(portal, NULL, query_string, entry->plansource->commandTag, plan_list, cplan);
+    portal->nextval_default_expr_type = psrc->nextval_default_expr_type;
 
     /* incase change shared plan in execute stage */
     CopyPlanForGPCIfNecessary(entry->plansource, portal);
@@ -675,7 +676,7 @@ void StorePreparedStatementCNGPC(const char *stmt_name, CachedPlanSource *planso
 
     /* Now it's safe to move the CachedPlanSource to permanent memory */
     if (!is_share) {
-        Assert(IsA((plansource)->raw_parse_tree, TransactionStmt) ||
+        Assert((plansource->raw_parse_tree && IsA(plansource->raw_parse_tree, TransactionStmt)) ||
                !plansource->is_support_gplan || plansource->gpc.status.IsSharePlan());
         plansource->gpc.status.SetLoc(GPC_SHARE_IN_LOCAL_SAVE_PLAN_LIST);
         SaveCachedPlan(plansource);
@@ -1417,6 +1418,7 @@ void DropDatanodeStatement(const char* stmt_name)
         (void*)hash_search(u_sess->pcache_cxt.datanode_queries, entry->stmt_name, HASH_REMOVE, NULL);
         if (!ENABLE_CN_GPC)
             ExecCloseRemoteStatement(stmt_name, nodelist);
+        list_free_ext(nodelist);
     }
 }
 

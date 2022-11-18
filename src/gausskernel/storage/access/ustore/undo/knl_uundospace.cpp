@@ -38,13 +38,14 @@ static uint32 USEG_BLOCKS(uint32 dbId)
     return UNDO_META_SEG_SIZE;
 }
 
-uint32 UndoSpace::Used(void)
+uint32 UndoSpace::Used(int zoneId)
 {
     WHITEBOX_TEST_STUB(UNDO_USED_FAILED, WhiteboxDefaultErrorEmit);
 
     if (tail_ < head_) {
-        ereport(PANIC, (errmodule(MOD_UNDO),
-            errmsg(UNDOFORMAT("space tail %lu < head %lu."), tail_, head_)));
+        ereport(WARNING, (errmodule(MOD_UNDO),
+            errmsg(UNDOFORMAT("zoneId %d space tail %lu < head %lu."), zoneId, tail_, head_)));
+        return 0;
     }
     return (uint32)((tail_ - head_) / BLCKSZ);
 }
@@ -54,7 +55,6 @@ void UndoSpace::ExtendUndoLog(int zid, UndoLogOffset offset, uint32 dbId)
 {
     RelFileNode rnode;
     UndoLogOffset tail = tail_;
-    Assert(tail < offset && head_ <= tail_);
     BlockNumber blockno;
     UNDO_PTR_ASSIGN_REL_FILE_NODE(rnode, MAKE_UNDO_PTR(zid, offset), dbId);
     SMgrRelation reln = smgropen(rnode, InvalidBackendId);
@@ -66,10 +66,12 @@ void UndoSpace::ExtendUndoLog(int zid, UndoLogOffset offset, uint32 dbId)
     while (tail < offset) {
         if ((!t_thrd.xlog_cxt.InRecovery) && (static_cast<int>(g_instance.undo_cxt.undoTotalSize) +
             static_cast<int>(g_instance.undo_cxt.undoMetaSize) >= u_sess->attr.attr_storage.undo_space_limit_size)) {
+            uint64 undoSize = (g_instance.undo_cxt.undoTotalSize + g_instance.undo_cxt.undoMetaSize) * BLCKSZ /
+                (1024 * 1024);
+            uint64 limitSize = u_sess->attr.attr_storage.undo_space_limit_size * BLCKSZ / (1024 * 1024);
             ereport(ERROR, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT(
-                "The undo space size %u > limit size %d. Please increase the undo_space_limit_size."),
-                g_instance.undo_cxt.undoTotalSize + g_instance.undo_cxt.undoMetaSize,
-                u_sess->attr.attr_storage.undo_space_limit_size)));
+                "undo space size %luM > limit size %luM. Please increase the undo_space_limit_size."),
+                undoSize, limitSize)));
         }
         blockno = (BlockNumber)(tail / BLCKSZ + 1);
         /* Create a new undo segment. */
@@ -90,7 +92,6 @@ void UndoSpace::UnlinkUndoLog(int zid, UndoLogOffset offset, uint32 dbId)
 {
     RelFileNode rnode;
     UndoLogOffset head = head_;
-    Assert(head < offset && head_ <= tail_);
     UNDO_PTR_ASSIGN_REL_FILE_NODE(rnode, MAKE_UNDO_PTR(zid, offset), dbId);
     SMgrRelation reln = smgropen(rnode, InvalidBackendId);
     uint64 segSize = USEG_SIZE(dbId);
@@ -103,14 +104,16 @@ void UndoSpace::UnlinkUndoLog(int zid, UndoLogOffset offset, uint32 dbId)
         /* Create a new undo segment. */
         smgrdounlink(reln, t_thrd.xlog_cxt.InRecovery, (head / BLCKSZ));
         if (g_instance.undo_cxt.undoTotalSize < segBlocks) {
-            ereport(PANIC, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT(
+            ereport(WARNING, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT(
                 "unlink undo log, total blocks=%u < segment size."),
                 g_instance.undo_cxt.undoTotalSize)));
+            pg_atomic_write_u32(&g_instance.undo_cxt.undoTotalSize, 0);
+        } else {
+            pg_atomic_fetch_sub_u32(&g_instance.undo_cxt.undoTotalSize, segBlocks);
         }
-        pg_atomic_fetch_sub_u32(&g_instance.undo_cxt.undoTotalSize, segBlocks);
         head += segSize;
     }
-
+    smgrclose(reln);
     ereport(DEBUG1, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT(
         "unlink undo log, total blocks=%u, zid=%d, dbid=%u, head=%lu."),
         g_instance.undo_cxt.undoTotalSize, zid, dbId, offset)));
@@ -133,7 +136,7 @@ void UndoSpace::CreateNonExistsUndoFile(int zid, uint32 dbId)
         blockno = (BlockNumber)(offset / BLCKSZ + 1);
         if (!smgrexists(reln, MAIN_FORKNUM, blockno)) {
             smgrextend(reln, MAIN_FORKNUM, blockno, NULL, false);
-            ereport(LOG, (errmodule(MOD_UNDO), 
+            ereport(DEBUG1, (errmodule(MOD_UNDO), 
                 errmsg(UNDOFORMAT("undo file not exists, zid %d, blockno=%u."), zid, blockno)));
             pg_atomic_fetch_add_u32(&g_instance.undo_cxt.undoTotalSize, segBlocks);
         }
@@ -309,7 +312,7 @@ void UndoSpace::RecoveryUndoSpace(int fd, UndoSpaceType type)
     char *uspMetaBuffer = NULL;
     MemoryContext oldContext = MemoryContextSwitchTo(g_instance.undo_cxt.undoContext);
     char *persistBlock = (char *)palloc0(UNDO_META_PAGE_SIZE * PAGES_READ_NUM);
-    oldContext = MemoryContextSwitchTo(g_instance.undo_cxt.undoContext);
+    (void*)MemoryContextSwitchTo(oldContext);
     if (type == UNDO_LOG_SPACE) {
         UNDOSPACE_META_PAGE_COUNT(PERSIST_ZONE_COUNT, UNDOZONE_COUNT_PER_PAGE, totalPageCnt);
         lseek(fd, totalPageCnt * UNDO_META_PAGE_SIZE, SEEK_SET);
@@ -376,21 +379,27 @@ void UndoSpace::RecoveryUndoSpace(int fd, UndoSpaceType type)
             (g_instance.undo_cxt.uZones == NULL || g_instance.undo_cxt.uZones[zoneId] == NULL)) {
             continue;
         }
-        undo::UndoZoneGroup::InitUndoCxtUzones();
-        UndoZone *uzone = (UndoZone *)g_instance.undo_cxt.uZones[zoneId];
-        uzone = UndoZoneGroup::GetUndoZone(zoneId, true);
+        UndoZone *uzone = UndoZoneGroup::GetUndoZone(zoneId, true);
         UndoSpace *usp = uzone->GetSpace(type);
-        usp->LockInit();
         usp->MarkClean();
         usp->SetLSN(uspMetaInfo->lsn);
         usp->SetHead(uspMetaInfo->head);
         usp->SetTail(uspMetaInfo->tail);
+        uint64 segSize = 0;
         if (type == UNDO_LOG_SPACE) {
             usp->CreateNonExistsUndoFile(zoneId, UNDO_DB_OID);
+            segSize = USEG_SIZE(UNDO_DB_OID);
         } else {
             usp->CreateNonExistsUndoFile(zoneId, UNDO_SLOT_DB_OID);
+            segSize = USEG_SIZE(UNDO_SLOT_DB_OID);
         }
-        pg_atomic_fetch_add_u32(&g_instance.undo_cxt.undoTotalSize, usp->Used());
+        pg_atomic_fetch_add_u32(&g_instance.undo_cxt.undoTotalSize, usp->Used(zoneId));
+        uint64 transUndoThresholdSize = (uint64)u_sess->attr.attr_storage.undo_limit_size_transaction * BLCKSZ;
+        const uint64 MAX_OFFSET = (UNDO_LOG_MAX_SIZE - transUndoThresholdSize) - segSize;
+        if (usp->Tail() < usp->Head() || usp->Tail() > MAX_OFFSET) {
+            g_instance.undo_cxt.uZoneBitmap[UNDO_PERMANENT] =
+                bms_del_member(g_instance.undo_cxt.uZoneBitmap[UNDO_PERMANENT], zoneId);
+        }
     }
     pfree(persistBlock);
 }

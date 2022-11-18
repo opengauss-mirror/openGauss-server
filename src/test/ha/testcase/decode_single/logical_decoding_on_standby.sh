@@ -53,9 +53,19 @@ function test_1()
 
   sleep 1
 
+  pg_recvlogical -d $db -p $dn1_primary_port -S slot4 --create
+  if [ $? -eq 0 ]; then
+    echo "create replication slot4 success"
+  else
+    echo "$failed_keyword: create replication slot slot4 failed."
+    exit 1
+  fi
+
+  sleep 1
+
   #start logical decoding on standby
   echo "begin to decode"
-  nohup pg_recvlogical -d $db -p $dn1_standby_port -o include-xids=false -o include-timestamp=true -o skip-empty-xacts=true -o only-local=true -o white-table-list='public.*' -o parallel-decode-num=5 -o standby-connection=false -o decode-style='j' -S slot1 --start -s 2 -f $scripts_dir/data/test1.log &
+  nohup pg_recvlogical -d $db -p $dn1_standby_port -o include-xids=false -o include-timestamp=true -o skip-empty-xacts=true -o only-local=true -o white-table-list='public.*' -o parallel-decode-num=2 -o parallel-queue-size=256 -o sender-timeout='60s' -o standby-connection=false -o decode-style='j' -S slot1 --start -s 2 -f $scripts_dir/data/test1.log &
   if [ $? -eq 0 ]; then
     echo "parallel decoding with type \'j\' start on standby success"
   else
@@ -63,7 +73,7 @@ function test_1()
     exit 1
   fi
 
-  nohup pg_recvlogical -d $db -p $dn1_standby_port -o parallel-decode-num=5 -o standby-connection=true -o decode-style='t' -o white-table-list='public.t4_decode,*.t1_decode' -S slot2 --start -s 2 -f $scripts_dir/data/test2.log &
+  nohup pg_recvlogical -d $db -p $dn1_standby_port -o parallel-decode-num=2 -o standby-connection=true -o decode-style='t' -o max-txn-in-memory=0 -o max-reorderbuffer-in-memory=0 -o white-table-list='public.t4_decode,*.t1_decode' -S slot2 --start -s 2 -f $scripts_dir/data/test2.log &
   if [ $? -eq 0 ]; then
     echo "parallel decoding with type \'t\' start on standby success"
   else
@@ -71,9 +81,17 @@ function test_1()
     exit 1
   fi
 
-  nohup pg_recvlogical -d $db -p $dn1_standby_port -o parallel-decode-num=5 -o standby-connection=true -o decode-style='b' -o white-table-list='public.t2_decode,public.t3_decode' -S slot3 --start -s 2 -f $scripts_dir/data/test3.log &
+  nohup pg_recvlogical -d $db -p $dn1_standby_port -o parallel-decode-num=2 -o standby-connection=true -o decode-style='b' -o max-txn-in-memory=1 -o max-reorderbuffer-in-memory=1 -o white-table-list='public.t2_decode,public.t3_decode' -S slot3 --start -s 2 -f $scripts_dir/data/test3.log &
   if [ $? -eq 0 ]; then
     echo "parallel decoding with type \'b\' start on standby success"
+  else
+    echo "$failed_keyword: parallel decoding with type \'b\' start on standby failed."
+    exit 1
+  fi
+
+  nohup pg_recvlogical -d $db -p $dn1_standby_port -o standby-connection=true -o max-txn-in-memory=1 -o max-reorderbuffer-in-memory=1 -S slot4 --start -s 2 -f $scripts_dir/data/test4.log &
+  if [ $? -eq 0 ]; then
+    echo "logical decoding start on standby success"
   else
     echo "$failed_keyword: parallel decoding with type \'b\' start on standby failed."
     exit 1
@@ -119,6 +137,7 @@ function test_1()
   rm $scripts_dir/data/test1.log
   rm $scripts_dir/data/test2.log
   rm $scripts_dir/data/test3.log
+  rm $scripts_dir/data/test4.log
 }
 
 test_1

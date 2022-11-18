@@ -22,7 +22,7 @@ with_query_name [ ( column_name [, ...] ) ] AS [ [ NOT ] MATERIALIZED ]
 where partition_clause can be:
 PARTITION { ( partition_name ) | FOR ( partition_value [, ...] ) } |
 SUBPARTITION { ( subpartition_name ) | FOR ( subpartition_value [, ...] ) }
-NOTICE: 'partition_clause' is only avaliable in CENTRALIZED mode!
+NOTICE: 'partition_clause' and 'LIMIT row_count' are only avaliable in CENTRALIZED mode!
 </synopsis>
 </refsynopsisdiv>
 </refentry>

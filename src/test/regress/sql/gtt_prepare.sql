@@ -9,6 +9,12 @@ create global temp table gtt2(a int primary key, b text) on commit delete rows;
 
 create global temp table gtt3(a int primary key, b text);
 
+create global temp table gtt4(a int, b text);
+
+create unique index gtt_a_idx on gtt4(a);
+
+alter index gtt_a_idx unusable;
+
 create global temp table gtt_t_kenyon(id int,vname varchar(48),remark text) on commit PRESERVE rows;
 create index idx_gtt_t_kenyon_1 on gtt_t_kenyon(id);
 create index idx_gtt_t_kenyon_2 on gtt_t_kenyon(remark);

@@ -120,7 +120,7 @@ static inline IndexTuple UBTreeSplitFirstright(FindSplitData *state, SplitPoint 
  * the left or right page.	The bool is necessary to disambiguate the case
  * where firstright == newitemoff.
  */
-OffsetNumber UBTreeFindsplitlocInsertpt(Relation rel, Page page, OffsetNumber newitemoff, Size newitemsz,
+OffsetNumber UBTreeFindsplitlocInsertpt(Relation rel, Buffer buf, OffsetNumber newitemoff, Size newitemsz,
     bool *newitemonleft, IndexTuple newitem)
 {
     UBTPageOpaqueInternal opaque;
@@ -132,6 +132,7 @@ OffsetNumber UBTreeFindsplitlocInsertpt(Relation rel, Page page, OffsetNumber ne
     double fillfactormult;
     bool usemult = false;
     SplitPoint leftpage, rightpage;
+    Page page = BufferGetPage(buf);
 
     opaque = (UBTPageOpaqueInternal)PageGetSpecialPointer(page);
     maxoff = PageGetMaxOffsetNumber(page);
@@ -236,7 +237,9 @@ OffsetNumber UBTreeFindsplitlocInsertpt(Relation rel, Page page, OffsetNumber ne
      */
     if (state.nsplits == 0)
         ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
-            errmsg("could not find a feasible split point for index \"%s\"", RelationGetRelationName(rel))));
+                errmsg("could not find a feasible split point for index \"%s\" at blkno %u. "
+                       "newitemoff %u, newitemsize %lu",
+                       RelationGetRelationName(rel), BufferGetBlockNumber(buf), newitemoff, newitemsz)));
 
     /*
      * Start search for a split point among list of legal split points.  Give

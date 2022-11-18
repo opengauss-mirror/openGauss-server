@@ -155,14 +155,6 @@ void log_invalid_page(const RelFileNode &node, ForkNumber forkno, BlockNumber bl
     if (IsMultiThreadRedoRunning()) {
         oldCtx = MemoryContextSwitchTo(g_instance.comm_cxt.predo_cxt.parallelRedoCtx);
     }
-    /*
-     * Log references to invalid pages at DEBUG1 level.  This allows some
-     * tracing of the cause (note the ereport context mechanism will tell us
-     * something about the XLOG record that generated the reference).
-     */
-    xl_invalid_page new_invalid_page = {.key = key, .type = type, .lsn = GetCurrentXLogLSN() };
-    if (log_min_messages <= DEBUG1 || client_min_messages <= DEBUG1)
-        report_invalid_page(LOG, &new_invalid_page);
 
     if (t_thrd.xlog_cxt.invalid_page_tab == NULL) {
         /* create hash table when first needed */
@@ -195,6 +187,7 @@ void log_invalid_page(const RelFileNode &node, ForkNumber forkno, BlockNumber bl
             hentry->pblk.relNode = EXTENT_INVALID;
             hentry->pblk.block = InvalidBlockNumber;
         }
+        report_invalid_page(LOG, hentry);
     }
 
     if (IsMultiThreadRedoRunning()) {
@@ -228,6 +221,10 @@ void forget_specified_invalid_pages(RepairBlockKey key)
 
     while ((hentry = (xl_invalid_page *)hash_seq_search(&status)) != NULL) {
         if (specified_invalid_page_match(hentry, key)) {
+            char *path = relpathperm(hentry->key.node, key.forknum);
+            ereport(LOG, (errmodule(MOD_REDO), errmsg("page %u of relation %s(%u/%u) has been dropped",
+                hentry->key.blkno, path, hentry->pblk.relNode, hentry->pblk.block)));
+            pfree(path);
             if (hash_search(t_thrd.xlog_cxt.invalid_page_tab, (void *)&hentry->key, HASH_REMOVE, NULL) == NULL) {
                 ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("hash table corrupted")));
             }
@@ -277,13 +274,9 @@ static void forget_invalid_pages(const RelFileNode &node, ForkNumber forkno, Blo
 
     while ((hentry = (xl_invalid_page *)hash_seq_search(&status)) != NULL) {
         if (single_invalid_page_match(hentry, node, forkno, minblkno, segment_shrink)) {
-            if (log_min_messages <= DEBUG2 || client_min_messages <= DEBUG2) {
-                char *path = relpathperm(hentry->key.node, forkno);
-
-                ereport(DEBUG2, (errmsg("page %u of relation %s has been dropped", hentry->key.blkno, path)));
-
-                pfree(path);
-            }
+            char *path = relpathperm(hentry->key.node, forkno);
+            ereport(LOG, (errmsg("page %u of relation %s has been dropped", hentry->key.blkno, path)));
+            pfree(path);
 
             if (hash_search(t_thrd.xlog_cxt.invalid_page_tab, (void *)&hentry->key, HASH_REMOVE, NULL) == NULL)
                 ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("hash table corrupted")));
@@ -345,7 +338,7 @@ void forget_range_invalid_pages(void *pageinfo)
     while ((hentry = (xl_invalid_page *)hash_seq_search(&status)) != NULL) {
         if (range_invalid_page_match(hentry, node, forknum, minblkno, maxblkno)) {
             char *path = relpathperm(hentry->key.node, forknum);
-            ereport(DEBUG1, (errmodule(MOD_REDO),
+            ereport(LOG, (errmodule(MOD_REDO),
                 errmsg("[file repair] file %s seg %u rename finish, clean invalid page, minblkno is %u, maxblkno is %u",
                     path, key->segno, minblkno, maxblkno)));
             pfree(path);
@@ -388,12 +381,9 @@ static void forget_invalid_pages_batch(Oid spcNode, Oid dbNode)
 
     while ((hentry = (xl_invalid_page *)hash_seq_search(&status)) != NULL) {
         if (invalid_page_match(&hentry->key.node, spcNode, dbNode)) {
-            if (log_min_messages <= DEBUG2 || client_min_messages <= DEBUG2) {
-                char *path = relpathperm(hentry->key.node, hentry->key.forkno);
-
-                ereport(DEBUG2, (errmsg("page %u of relation %s has been dropped", hentry->key.blkno, path)));
-                pfree(path);
-            }
+            char *path = relpathperm(hentry->key.node, hentry->key.forkno);
+            ereport(LOG, (errmsg("page %u of relation %s has been dropped", hentry->key.blkno, path)));
+            pfree(path);
 
             if (hash_search(t_thrd.xlog_cxt.invalid_page_tab, (void *)&hentry->key, HASH_REMOVE, NULL) == NULL)
                 ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("hash table corrupted")));
@@ -1682,5 +1672,202 @@ int read_local_xlog_page(XLogReaderState *state, XLogRecPtr targetPagePtr, int r
 
     /* number of valid bytes in the buffer */
     return count;
+}
+
+void XLogRecSetMultiXactOffState(XLogBlockMultiXactOffParse *blockmultistate, MultiXactOffset moffset,
+                                 MultiXactId multi)
+{
+    blockmultistate->moffset = moffset;
+    blockmultistate->multi = multi;
+}
+XLogRecParseState *multixact_xlog_ddl_parse_to_block(XLogReaderState *record, uint32 *blocknum)
+{
+    uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
+    int64 pageno = 0;
+    ForkNumber forknum = MAIN_FORKNUM;
+    BlockNumber lowblknum = InvalidBlockNumber;
+    RelFileNodeForkNum filenode;
+    XLogRecParseState *recordstatehead = NULL;
+    int ddltype = BLOCK_DDL_TYPE_NONE;
+    *blocknum = 0;
+
+    if ((info & XLOG_MULTIXACT_MASK) == XLOG_MULTIXACT_ZERO_OFF_PAGE) {
+        get_multixact_pageno(info, &pageno, record);
+        ddltype = BLOCK_DDL_MULTIXACT_OFF_ZERO;
+    } else if ((info & XLOG_MULTIXACT_MASK) == XLOG_MULTIXACT_ZERO_MEM_PAGE) {
+        get_multixact_pageno(info, &pageno, record);
+        ddltype = BLOCK_DDL_MULTIXACT_MEM_ZERO;
+    }
+    forknum = (ForkNumber)((uint64)pageno >> LOW_BLOKNUMBER_BITS);
+    lowblknum = (BlockNumber)((uint64)pageno & LOW_BLOKNUMBER_MASK);
+    (*blocknum)++;
+    XLogParseBufferAllocListFunc(record, &recordstatehead, NULL);
+    if (recordstatehead == NULL) {
+        return NULL;
+    }
+    filenode = RelFileNodeForkNumFill(NULL, InvalidBackendId, forknum, lowblknum);
+    XLogRecSetBlockCommonState(record, BLOCK_DATA_DDL_TYPE, filenode, recordstatehead);
+    XLogRecSetBlockDdlState(&(recordstatehead->blockparse.extra_rec.blockddlrec), ddltype,
+        (char *)XLogRecGetData(record));
+    return recordstatehead;
+}
+XLogRecParseState *multixact_xlog_offset_parse_to_block(XLogReaderState *record, uint32 *blocknum)
+{
+    uint64 pageno;
+    ForkNumber forknum = MAIN_FORKNUM;
+    BlockNumber lowblknum = InvalidBlockNumber;
+    RelFileNodeForkNum filenode;
+    XLogRecParseState *recordstatehead = NULL;
+    xl_multixact_create *xlrec = (xl_multixact_create *)XLogRecGetData(record);
+    pageno = MultiXactIdToOffsetPage(xlrec->mid);
+    (*blocknum)++;
+    XLogParseBufferAllocListFunc(record, &recordstatehead, NULL);
+    if (recordstatehead == NULL) {
+        return NULL;
+    }
+    forknum = (ForkNumber)(pageno >> LOW_BLOKNUMBER_BITS);
+    lowblknum = (BlockNumber)(pageno & LOW_BLOKNUMBER_MASK);
+    filenode = RelFileNodeForkNumFill(NULL, InvalidBackendId, forknum, lowblknum);
+    XLogRecSetBlockCommonState(record, BLOCK_DATA_MULITACT_OFF_TYPE, filenode, recordstatehead);
+    XLogRecSetMultiXactOffState(&(recordstatehead->blockparse.extra_rec.blockmultixactoff), xlrec->moff, xlrec->mid);
+    return recordstatehead;
+}
+void XLogRecSetMultiXactMemState(XLogBlockMultiXactMemParse *blockmultistate, MultiXactOffset startoffset,
+                                 MultiXactId multi, uint64 xidnum, TransactionId *xidsarry)
+{
+    blockmultistate->startoffset = startoffset;
+    blockmultistate->multi = multi;
+    blockmultistate->xidnum = xidnum;
+    for (uint64 i = 0; i < xidnum; i++) {
+        blockmultistate->xidsarry[i] = xidsarry[i];
+    }
+}
+XLogRecParseState *multixact_xlog_mem_parse_to_block(XLogReaderState *record, uint32 *blocknum,
+                                                     XLogRecParseState *recordstatehead)
+{
+    uint64 pageno;
+    MultiXactOffset offset = 0;
+    MultiXactOffset startoffset = 0;
+    uint64 prev_pageno;
+    int continuenum = 0;
+    TransactionId xidsarry[MAX_BLOCK_XID_NUMS];
+    ForkNumber forknum = MAIN_FORKNUM;
+    BlockNumber lowblknum = InvalidBlockNumber;
+    XLogRecParseState *blockstate = NULL;
+    xl_multixact_create *xlrec = (xl_multixact_create *)XLogRecGetData(record);
+    if (xlrec->nxids > 0) {
+        offset = xlrec->moff;
+        startoffset = offset;
+        prev_pageno = MXOffsetToMemberPage(offset);
+        (*blocknum)++;
+        XLogParseBufferAllocListFunc(record, &blockstate, recordstatehead);
+        if (blockstate == NULL) {
+            return NULL;
+        }
+        forknum = (ForkNumber)(prev_pageno >> LOW_BLOKNUMBER_BITS);
+        lowblknum = (BlockNumber)(prev_pageno & LOW_BLOKNUMBER_MASK);
+        RelFileNodeForkNum filenode = RelFileNodeForkNumFill(NULL, InvalidBackendId, forknum, lowblknum);
+        XLogRecSetBlockCommonState(record, BLOCK_DATA_MULITACT_MEM_TYPE, filenode, blockstate);
+        xidsarry[continuenum] = xlrec->xids[0];
+        offset++;
+        continuenum++;
+    }
+    for (int i = 1; i < xlrec->nxids; i++, offset++) {
+        pageno = MXOffsetToMemberPage(offset);
+        if ((pageno != prev_pageno) || (continuenum == MAX_BLOCK_XID_NUMS)) {
+            XLogRecSetMultiXactMemState(&(blockstate->blockparse.extra_rec.blockmultixactmem), startoffset, xlrec->mid,
+                                        continuenum, xidsarry);
+            prev_pageno = pageno;
+            startoffset = offset;
+            continuenum = 0;
+            (*blocknum)++;
+            XLogParseBufferAllocListFunc(record, &blockstate, recordstatehead);
+            if (blockstate == NULL) {
+                return NULL;
+            }
+            forknum = (ForkNumber)(prev_pageno >> LOW_BLOKNUMBER_BITS);
+            lowblknum = (BlockNumber)(prev_pageno & LOW_BLOKNUMBER_MASK);
+            RelFileNodeForkNum filenode = RelFileNodeForkNumFill(NULL, InvalidBackendId, forknum, lowblknum);
+            XLogRecSetBlockCommonState(record, BLOCK_DATA_MULITACT_MEM_TYPE, filenode, blockstate);
+        }
+        xidsarry[continuenum] = xlrec->xids[i];
+        continuenum++;
+    }
+    if (blockstate == NULL) {
+        return NULL;
+    }
+    XLogRecSetMultiXactMemState(&(blockstate->blockparse.extra_rec.blockmultixactmem), startoffset, xlrec->mid,
+                                continuenum, xidsarry);
+    return recordstatehead;
+}
+
+void XLogRecSetMultiXactUpdatOidState(XLogBlockMultiUpdateParse *blockmultistate, MultiXactOffset nextoffset,
+                                      MultiXactId nextmulti, TransactionId maxxid)
+{
+    blockmultistate->nextmulti = nextmulti;
+    blockmultistate->nextoffset = nextoffset;
+    blockmultistate->maxxid = maxxid;
+}
+XLogRecParseState *multixact_xlog_updateoid_parse_to_block(XLogReaderState *record, uint32 *blocknum,
+                                                           XLogRecParseState *recordstatehead)
+{
+    ForkNumber forknum = MAIN_FORKNUM;
+    BlockNumber lowblknum = InvalidBlockNumber;
+    RelFileNodeForkNum filenode;
+    MultiXactId nextmulti;
+    MultiXactOffset nextoffset;
+    TransactionId max_xid;
+    XLogRecParseState *blockstate = NULL;
+    xl_multixact_create *xlrec = (xl_multixact_create *)XLogRecGetData(record);
+    (*blocknum)++;
+    XLogParseBufferAllocListFunc(record, &blockstate, recordstatehead);
+    if (blockstate == NULL) {
+        return NULL;
+    }
+    filenode = RelFileNodeForkNumFill(NULL, InvalidBackendId, forknum, lowblknum);
+    XLogRecSetBlockCommonState(record, BLOCK_DATA_MULITACT_UPDATEOID_TYPE, filenode, blockstate);
+    nextmulti = xlrec->mid + 1;
+    nextoffset = xlrec->moff + xlrec->nxids;
+    max_xid = XLogRecGetXid(record);
+    for (int32 i = 0; i < xlrec->nxids; i++) {
+        TransactionId memberXid = GET_MEMBER_XID_FROM_SLRU_XID(xlrec->xids[i]);
+        if (TransactionIdPrecedes(max_xid, memberXid))
+            max_xid = memberXid;
+    }
+    XLogRecSetMultiXactUpdatOidState(&(blockstate->blockparse.extra_rec.blockmultiupdate), nextoffset, nextmulti,
+                                     max_xid);
+    return recordstatehead;
+}
+XLogRecParseState *multixact_xlog_createxid_parse_to_block(XLogReaderState *record, uint32 *blocknum)
+{
+    XLogRecParseState *recordstatehead = NULL;
+    recordstatehead = multixact_xlog_offset_parse_to_block(record, blocknum);
+    if (recordstatehead == NULL) {
+        return NULL;
+    }
+    recordstatehead = multixact_xlog_mem_parse_to_block(record, blocknum, recordstatehead);
+    if (recordstatehead == NULL) {
+        return NULL;
+    }
+    recordstatehead = multixact_xlog_updateoid_parse_to_block(record, blocknum, recordstatehead);
+    if (recordstatehead == NULL) {
+        return NULL;
+    }
+    return recordstatehead;
+}
+XLogRecParseState *multixact_redo_parse_to_block(XLogReaderState *record, uint32 *blocknum)
+{
+    uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
+    XLogRecParseState *recordstatehead = NULL;
+    *blocknum = 0;
+    if (((info & XLOG_MULTIXACT_MASK) == XLOG_MULTIXACT_ZERO_OFF_PAGE) ||
+        ((info & XLOG_MULTIXACT_MASK) == XLOG_MULTIXACT_ZERO_MEM_PAGE)) {
+        recordstatehead = multixact_xlog_ddl_parse_to_block(record, blocknum);
+    } else if (info == XLOG_MULTIXACT_CREATE_ID) {
+        recordstatehead = multixact_xlog_createxid_parse_to_block(record, blocknum);
+    } else {
+        ereport(PANIC, (errmsg("multixact_redo_parse_to_block: unknown op code %u", info)));
+    }
+    return recordstatehead;
 }
 

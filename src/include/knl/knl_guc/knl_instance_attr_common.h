@@ -48,6 +48,7 @@ typedef struct knl_instance_attr_common {
 #endif
     bool Logging_collector;
     bool allowSystemTableMods;
+    bool allow_create_sysobject;
     bool enable_thread_pool;
     bool enable_ffic_log;
     bool enable_global_plancache;

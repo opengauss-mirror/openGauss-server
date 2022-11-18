@@ -41,17 +41,22 @@
 #define IS_PAUSE_BY_TARGET_BARRIER 0x00000001
 #define IS_CANCEL_LOG_CTRL 0x00000010
 
-#ifdef ENABLE_MULTIPLE_NODES
-#define AM_HADR_CN_WAL_RECEIVER (t_thrd.postmaster_cxt.HaShmData->is_cross_region && \
-            t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE && IS_PGXC_COORDINATOR)
-#endif
-
-#define AM_HADR_WAL_RECEIVER (t_thrd.postmaster_cxt.HaShmData->is_cross_region && \
-            t_thrd.postmaster_cxt.HaShmData->is_hadr_main_standby)
-
 #define IS_DISASTER_RECOVER_MODE \
+    (static_cast<ClusterRunMode>(g_instance.attr.attr_common.stream_cluster_run_mode) == RUN_MODE_STANDBY)
+
+#ifdef ENABLE_MULTIPLE_NODES
+#define AM_HADR_CN_WAL_RECEIVER (IS_DISASTER_RECOVER_MODE && \
+    t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE && IS_PGXC_COORDINATOR)
+
+#define IS_MULTI_DISASTER_RECOVER_MODE \
     (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE && \
     g_instance.attr.attr_common.stream_cluster_run_mode == RUN_MODE_STANDBY)
+#else
+#define IS_MULTI_DISASTER_RECOVER_MODE false
+#endif
+
+#define AM_HADR_WAL_RECEIVER (IS_DISASTER_RECOVER_MODE && \
+    t_thrd.postmaster_cxt.HaShmData->is_hadr_main_standby)
 
 #define IS_CN_DISASTER_RECOVER_MODE \
     (IS_PGXC_COORDINATOR && t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE && \
@@ -225,6 +230,7 @@ typedef struct WalRcvData {
     XLogRecPtr lastReceivedBarrierLSN;
     XLogRecPtr lastSwitchoverBarrierLSN;
     XLogRecPtr targetSwitchoverBarrierLSN;
+    bool isMasterInstanceReady;
     bool isFirstTimeAccessStorage;
     bool isPauseByTargetBarrier;
     Latch* obsArchLatch;
@@ -258,7 +264,7 @@ extern XLogRecPtr latestValidRecord;
 extern pg_crc32 latestRecordCrc;
 extern uint32 latestRecordLen;
 
-extern const char *g_reserve_param[RESERVE_SIZE];
+extern const char *g_reserve_param[];
 extern bool ws_dummy_data_writer_use_file;
 extern THR_LOCAL uint32 ws_dummy_data_read_file_num;
 
@@ -318,7 +324,7 @@ extern void set_failover_host_conninfo_for_dummy(const char *remote_host, int re
 extern void get_failover_host_conninfo_for_dummy(int *repl);
 extern void set_wal_rcv_write_rec_ptr(XLogRecPtr rec_ptr);
 extern void ha_set_rebuild_connerror(HaRebuildReason reason, WalRcvConnError connerror);
-extern void XLogWalRcvReceive(char *buf, Size nbytes, XLogRecPtr recptr);
+extern void XLogWalRcvReceive(char *buf, Size nbytes, XLogRecPtr recptr, bool calledByDCF = false);
 extern void wal_get_ha_rebuild_reason(char *buildReason, ServerMode local_role, bool isRunning);
 extern bool HasBuildReason();
 extern void GetMinLsnRecordsFromHadrCascadeStandby(void);

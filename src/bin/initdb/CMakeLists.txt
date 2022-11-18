@@ -32,7 +32,7 @@ set(initdb_LINK_LIBS libelog.a libpgport.a -lcrypt -ldl -lm -lssl -lcrypto -l${S
 add_bintarget(gs_initdb TGT_initdb_SRC TGT_initdb_INC "${initdb_DEF_OPTIONS}" "${initdb_COMPILE_OPTIONS}" "${initdb_LINK_OPTIONS}" "${initdb_LINK_LIBS}")
 add_dependencies(gs_initdb elog_static pgport_static)
 target_link_directories(gs_initdb PUBLIC
-    ${LIBOPENSSL_LIB_PATH} ${PROTOBUF_LIB_PATH} ${LIBPARQUET_LIB_PATH} ${LIBCURL_LIB_PATH} ${KERBEROS_LIB_PATH}
+    ${LIBOPENSSL_LIB_PATH} ${LIBCURL_LIB_PATH} ${KERBEROS_LIB_PATH}
     ${ZLIB_LIB_PATH} ${LIBOBS_LIB_PATH} ${LIBEDIT_LIB_PATH} ${LIBCGROUP_LIB_PATH} ${SECURE_LIB_PATH} ${CMAKE_BINARY_DIR}/lib
 )
 

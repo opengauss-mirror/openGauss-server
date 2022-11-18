@@ -69,7 +69,6 @@ static const char *const bmp_file_name_template = "%s%s%lu_%08X%08X_%08X%08X.cbm
 static const char *const merged_bmp_file_name_template = "%s%s%08X%08X_%08X%08X_%ld-%d.cbm";
 
 static void CBMFileHomeInitialize(void);
-static void ResetXlogCbmSys(void);
 static bool IsCBMFile(const char *fileName, uint64 *seqNum, XLogRecPtr *startLSN, XLogRecPtr *endLSN);
 static void ValidateCBMFile(const char *filename, XLogRecPtr *trackedLSN, uint64 *lastfileSize, bool truncErrPage);
 static bool ReadCBMPage(BitmapFile *cbmFile, char *page, bool *checksum_ok);
@@ -213,7 +212,7 @@ static void CBMFileHomeInitialize(void)
         ereport(FATAL, (errmsg("Length of absolute CBM file path would exceed MAXPGPATH!")));
 }
 
-static void ResetXlogCbmSys(void)
+extern void ResetXlogCbmSys(void)
 {
     int rc = 0;
 
@@ -427,9 +426,13 @@ static void ValidateCBMFile(const char *filename, XLogRecPtr *trackedLSN, uint64
         *lastfileSize = (off_t)0;
     else {
         if (cbmFile.offset < st.st_size && truncErrPage) {
-            if (ftruncate(cbmFile.fd, cbmFile.offset))
+            if (ftruncate(cbmFile.fd, cbmFile.offset)) {
+                if (close(cbmFile.fd))
+                    ereport(WARNING, (errcode_for_file_access(), errmsg("could not close CBM file \"%s\": %m", filePath)));
+
                 ereport(ERROR, (errcode_for_file_access(),
                                 errmsg("Failed to truncate CBM file \"%s\" to length %ld", filePath, cbmFile.offset)));
+            }
         }
 
         *lastfileSize = cbmFile.offset;
@@ -604,6 +607,7 @@ static void StartNextCBMFile(XLogRecPtr startLSN)
         ereport(ERROR, (errcode_for_file_access(),
                         errmsg("could not create new CBM file \"%s\": %m", t_thrd.cbm_cxt.XlogCbmSys->out.name)));
 
+    Assert(t_thrd.cbm_cxt.XlogCbmSys->out.fd == -1);
     t_thrd.cbm_cxt.XlogCbmSys->out.fd = fd;
     t_thrd.cbm_cxt.XlogCbmSys->out.size = 0;
     t_thrd.cbm_cxt.XlogCbmSys->out.offset = (off_t)0;
@@ -618,6 +622,7 @@ static void StartExistCBMFile(uint64 lastfileSize)
         ereport(ERROR, (errcode_for_file_access(),
                         errmsg("could not open CBM file \"%s\": %m", t_thrd.cbm_cxt.XlogCbmSys->out.name)));
 
+    Assert(t_thrd.cbm_cxt.XlogCbmSys->out.fd == -1);
     t_thrd.cbm_cxt.XlogCbmSys->out.fd = fd;
     t_thrd.cbm_cxt.XlogCbmSys->out.size = lastfileSize;
     t_thrd.cbm_cxt.XlogCbmSys->out.offset = (off_t)lastfileSize;
@@ -689,7 +694,25 @@ extern void CBMFollowXlog(void)
     } else
         isRecEnd = true;
 
+    if (RecoveryInProgress()) {
+        XLogRecPtr standbyReplayLsn = GetXLogReplayRecPtr(NULL, NULL);
+        if (XLByteLT(standbyReplayLsn, tmpEndLSN)) {
+            ereport(LOG, (errmsg("The xlog LSN to be parsed %08X/%08X is larger than "
+                                 "already replay xlog LSN %08X/%08X, due to previous force "
+                                 "CBM track. Skip CBM track this time",
+                                 (uint32)(tmpEndLSN >> 32), (uint32)tmpEndLSN,
+                                 (uint32)(standbyReplayLsn >> 32),
+                                 (uint32)standbyReplayLsn)));
+            t_thrd.cbm_cxt.XlogCbmSys->needReset = false;
+            LWLockRelease(CBMParseXlogLock);
+            return;
+        }
+    }
+
     if (XLByteLT(tmpEndLSN, t_thrd.cbm_cxt.XlogCbmSys->startLSN)) {
+        if (checkUserRequstAndRotateCbm()) {
+            RotateCBMFile();
+        }
         if (XLByteEQ(t_thrd.cbm_cxt.XlogCbmSys->startLSN, GetLatestCompTargetLSN())) {
             Assert(XLByteEQ(tmpEndLSN, checkPointRedo));
             ereport(LOG, (errmsg("The xlog LSN to be parsed %08X/%08X is smaller than "
@@ -1417,6 +1440,11 @@ static void skipUndoRecBody(char **currLogPtr, XlUndoHeader *xlundohdr)
     if ((xlundohdr->flag & XLOG_UNDO_HEADER_HAS_CURRENT_XID) != 0) {
         *currLogPtr += sizeof(TransactionId);
     }
+
+    if ((xlundohdr->flag & XLOG_UNDO_HEADER_HAS_TOAST) != 0) {
+        uint32 toastLen = *(uint32 *)(*currLogPtr);
+        *currLogPtr += sizeof(toastLen) + toastLen;
+    }
 }
 
 static void TrackUheapInsert(XLogReaderState *record)
@@ -1425,8 +1453,9 @@ static void TrackUheapInsert(XLogReaderState *record)
     BlockNumber undoStartBlk;
     UndoSlotPtr slotPtr;
     RelFileNode rnode;
+    bool hasCSN = (record->decoded_record->xl_term & XLOG_CONTAIN_CSN) == XLOG_CONTAIN_CSN;
     XlUHeapInsert *xlrec = (XlUHeapInsert *)XLogRecGetData(record);
-    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapInsert);
+    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapInsert + (hasCSN ? sizeof(CommitSeqNo) : 0));
     char *currLogPtr = ((char *)xlundohdr + SizeOfXLUndoHeader);
 
     skipUndoRecBody(&currLogPtr, xlundohdr);
@@ -1456,8 +1485,9 @@ static void TrackUheapDelete(XLogReaderState *record)
     BlockNumber undoStartBlk;
     UndoSlotPtr slotPtr;
     RelFileNode rnode;
+    bool hasCSN = (record->decoded_record->xl_term & XLOG_CONTAIN_CSN) == XLOG_CONTAIN_CSN;
     XlUHeapDelete *xlrec = (XlUHeapDelete *)XLogRecGetData(record);
-    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapDelete);
+    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapDelete + (hasCSN ? sizeof(CommitSeqNo) : 0));
     char *currLogPtr = ((char *)xlundohdr + SizeOfXLUndoHeader);
 
     skipUndoRecBody(&currLogPtr, xlundohdr);
@@ -1488,8 +1518,9 @@ static void TrackUheapUpdate(XLogReaderState *record)
     BlockNumber undoStartBlk;
     UndoSlotPtr slotPtr;
     RelFileNode rnode;
+    bool hasCSN = (record->decoded_record->xl_term & XLOG_CONTAIN_CSN) == XLOG_CONTAIN_CSN;
     XlUHeapUpdate *xlrec = (XlUHeapUpdate *)XLogRecGetData(record);
-    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapUpdate);
+    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapUpdate + (hasCSN ? sizeof(CommitSeqNo) : 0));
     char *currLogPtr = ((char *)xlundohdr + SizeOfXLUndoHeader);
 
     skipUndoRecBody(&currLogPtr, xlundohdr);
@@ -1536,6 +1567,7 @@ static void TrackUheapMultiInsert(XLogReaderState *record)
     int nranges;
     UndoRecPtr *urpvec = NULL;
     bool isinit = (XLogRecGetInfo(record) & XLOG_UHEAP_INIT_PAGE) != 0;
+    bool hasCSN = (record->decoded_record->xl_term & XLOG_CONTAIN_CSN) == XLOG_CONTAIN_CSN;
     XlUndoHeader *xlundohdr = (XlUndoHeader *)XLogRecGetData(record);
     char *currLogPtr = ((char *)xlundohdr + SizeOfXLUndoHeader);
 
@@ -1549,7 +1581,7 @@ static void TrackUheapMultiInsert(XLogReaderState *record)
         currLogPtr += sizeof(uint16);
     }
 
-    if ((record->decoded_record->xl_term & XLOG_CONTAIN_CSN) != 0) {
+    if (hasCSN) {
         currLogPtr += sizeof(CommitSeqNo);
     }
 
@@ -1643,18 +1675,6 @@ static void TrackUndoStorageModification(XLogReaderState *record)
             undoFile = true;
             begUrp = ((undo::XlogUndoExtend *)xlrec)->prevtail;
             endUrp = ((undo::XlogUndoExtend *)xlrec)->tail;
-            break;
-        case XLOG_UNDO_CLEAN:
-            extend = false;
-            undoFile = true;
-            /* always clean the last undo seg, see CleanUndoSpace */
-            endUrp = ((undo::XlogUndoClean *)xlrec)->tail + UNDO_LOG_SEGMENT_SIZE;
-            break;
-        case XLOG_SLOT_CLEAN:
-            extend = false;
-            undoFile = false;
-            /* always clean the last undo seg, see CleanSlotSpace */
-            endUrp = ((undo::XlogUndoClean *)xlrec)->tail + UNDO_META_SEGMENT_SIZE;
             break;
         case XLOG_SLOT_UNLINK:
             extend = false;
@@ -1986,6 +2006,7 @@ static void RotateCBMFile(void)
     if (close(t_thrd.cbm_cxt.XlogCbmSys->out.fd) != 0)
         ereport(ERROR, (errcode_for_file_access(),
                         errmsg("close CBM file \"%s\" failed during rotate", t_thrd.cbm_cxt.XlogCbmSys->out.name)));
+    t_thrd.cbm_cxt.XlogCbmSys->out.fd = -1;
 
     if (strncmp(t_thrd.cbm_cxt.XlogCbmSys->out.name, t_thrd.cbm_cxt.XlogCbmSys->cbmFileHome,
                 strlen(t_thrd.cbm_cxt.XlogCbmSys->cbmFileHome)) ||
@@ -2806,6 +2827,9 @@ static void CBMPageEtyTruncateBefore(const CBMPageTag &cbmPageTag, HTAB *cbmPage
                     }
                 }
 
+                appendStringInfo(log, " truncate %s page with first blocknum %u", needReserve ? "partial" : "whole",
+                                 cbmPageHeader->firstBlkNo);
+
                 if (needReserve) {
                     for (blkNo = cbmPageHeader->firstBlkNo; blkNo < truncBlkNo; blkNo++) {
                         mapByte = BLKNO_TO_CBMBYTEOFPAGE(blkNo);
@@ -2825,9 +2849,6 @@ static void CBMPageEtyTruncateBefore(const CBMPageTag &cbmPageTag, HTAB *cbmPage
                         DLFreeElem(eltPagelist);
                     }
                 }
-
-                appendStringInfo(log, " truncate %s page with first blocknum %u", needReserve ? "partial" : "whole",
-                                 cbmPageHeader->firstBlkNo);
             }
         }
     }

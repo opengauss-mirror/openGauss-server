@@ -101,8 +101,6 @@
 extern uint64 pg_relation_perm_table_size(Relation rel);
 extern uint64 pg_relation_table_size(Relation rel);
 
-extern int64 MetaCacheGetCurrentUsedSize();
-
 extern bool is_searchserver_api_load();
 extern void* get_searchlet_resource_info(int* used_mem, int* peak_mem);
 extern void ExplainOneQueryForStatistics(QueryDesc* queryDesc);
@@ -1184,6 +1182,8 @@ void WLMCleanUpNodeInternal(const Qid* qid)
 
         /* No threads already, remove the info from the hash table. */
         if (info->threadCount <= 0) {
+            pfree_ext(info->qband);
+            pfree_ext(info->statement);
             hash_search(g_instance.wlm_cxt->stat_manager.collect_info_hashtbl, qid, HASH_REMOVE, NULL);
         }
     }
@@ -4188,9 +4188,11 @@ bool WLMInsertCollectInfoIntoHashTable(void)
 
         USE_MEMORY_CONTEXT(g_instance.wlm_cxt->query_resource_track_mcxt);
         if (u_sess->attr.attr_resource.query_band) {
+            pfree_ext(pDNodeInfo->qband);
             pDNodeInfo->qband = pstrdup(u_sess->attr.attr_resource.query_band);
         }
 
+        pfree_ext(pDNodeInfo->statement);
         pDNodeInfo->statement = pstrdup(t_thrd.wlm_cxt.collect_info->sdetail.statement);
 
         /* cpu threshold is valid, set cpu control flag */
@@ -7014,7 +7016,7 @@ void* WLMGetSessionStatistics(int* num)
                 queryMaskedPassWd = maskPassword(pDNodeInfo->statement);
             }
             if (queryMaskedPassWd == NULL) {
-                queryMaskedPassWd = pDNodeInfo->statement == NULL ? (char*)"" : pDNodeInfo->statement;
+                queryMaskedPassWd = pDNodeInfo->statement == NULL ? (char*)"" : pstrdup(pDNodeInfo->statement);
             }
             stat_element->statement = queryMaskedPassWd;
             stat_element->query_plan = (entry->query_plan == NULL) ? (char*)"NoPlan" : pstrdup(entry->query_plan);
@@ -7474,7 +7476,7 @@ bool WLMUpdateMemoryInfo(bool need_adjust)
     unsigned long lib = 0;
     unsigned long data = 0;
     unsigned long dt = 0;
-    uint32 cu_size = (uint32)((uint64)(CUCache->GetCurrentMemSize() + MetaCacheGetCurrentUsedSize()) >> BITS_IN_MB);
+    uint32 cu_size = (uint32)((uint64)(CUCache->GetCurrentMemSize()) >> BITS_IN_MB);
     int gpu_used = 0;
 
 #ifdef ENABLE_MULTIPLE_NODES
@@ -7795,6 +7797,7 @@ int WLMProcessThreadMain(void)
      * SIGINT is used to signal canceling; SIGTERM
      * means abort and exit cleanly, and SIGQUIT means abandon ship.
      */
+    (void)gspqsignal(SIGURG, print_stack);
     (void)gspqsignal(SIGINT, SIG_IGN);
     (void)gspqsignal(SIGTERM, die);
     (void)gspqsignal(SIGQUIT, quickdie);

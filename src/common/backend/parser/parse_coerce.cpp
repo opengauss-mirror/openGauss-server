@@ -44,9 +44,19 @@ static Node* coerce_record_to_complex(
     ParseState* pstate, Node* node, Oid targetTypeId, CoercionContext ccontext, CoercionForm cformat, int location);
 static bool is_complex_array(Oid typid);
 static bool typeIsOfTypedTable(Oid reltypeId, Oid reloftypeId);
+static Oid choose_decode_result1_type(ParseState* pstate, List* exprs, const char* context);
+static void handle_diff_category(ParseState* pstate, Node* nextExpr, const char* context,
+    TYPCATEGORY preferCategory, TYPCATEGORY nextCategory, Oid preferType, Oid nextType);
+static bool category_can_be_matched(TYPCATEGORY preferCategory, TYPCATEGORY nextCategory);
+static bool type_can_be_matched(Oid preferType, Oid nextType);
 static Oid choose_specific_expr_type(ParseState* pstate, List* exprs, const char* context);
 static Oid choose_nvl_type(ParseState* pstate, List* exprs, const char* context);
 static Oid choose_expr_type(ParseState* pstate, List* exprs, const char* context, Node** which_expr);
+static bool check_category_in_whitelist(TYPCATEGORY category, Oid type);
+static bool check_numeric_type_in_blacklist(Oid type);
+static bool meet_decode_compatibility(List* exprs, const char* context);
+static bool meet_c_format_compatibility(List* exprs, const char* context);
+static bool check_parse_phrase(const char* context, const char* target);
 
 /*
  * @Description: same as get_element_type() except this reports error
@@ -1063,6 +1073,138 @@ int parser_coercion_errposition(ParseState* pstate, int coerce_location, Node* i
     }
 }
 
+/* choose_decode_result1_type
+ * Choose case when and decode return value type in A_FORMAT.
+ */
+static Oid choose_decode_result1_type(ParseState* pstate, List* exprs, const char* context)
+{
+    Node* preferExpr = NULL;
+    Oid preferType = UNKNOWNOID;
+    TYPCATEGORY preferCategory = TYPCATEGORY_UNKNOWN;
+    ListCell* lc = NULL;
+
+    /* result1 is the first expr, treat result1 type (or category) as return value type */
+    foreach (lc, exprs) {
+        preferExpr = (Node*)lfirst(lc);
+
+        /* if first expr is "null", treat it as unknown type */
+        if (IsA(preferExpr, Const) && ((Const*)preferExpr)->constisnull) {
+            break;
+        }
+
+        preferType = getBaseType(exprType(preferExpr));
+        preferCategory = get_typecategory(preferType);
+        break;
+    }
+    if (lc == NULL) {
+        return preferType;
+    }
+
+    lc = lnext(lc);
+    for_each_cell(lc, lc)
+    {
+        Node* nextExpr = (Node*)lfirst(lc);
+        Oid nextType = getBaseType(exprType(nextExpr));
+
+        /* skip "null" */
+        if (IsA(nextExpr, Const) && ((Const*)nextExpr)->constisnull) {
+            continue;
+        }
+
+        /* no need to check if nextType the same as preferType */
+        if (nextType != preferType) {
+            TYPCATEGORY nextCategory = get_typecategory(nextType);
+
+            /*
+            * Both types in different categories, we check if nextCategory/nextType can be implicitly
+            * converted to preferCategory/preferType. Here we will treat unknow type as text type.
+            */
+            if (nextCategory != preferCategory) {
+                handle_diff_category(pstate, nextExpr, context, preferCategory, nextCategory, preferType, nextType);
+            }
+            /* both types is same categories, we choose a priority higher. */
+            else if (GetPriority(preferType) < GetPriority(nextType)) {
+                preferType = nextType;
+            }
+        }
+    }
+
+    /*
+     * If preferCategory is TYPCATEGORY_NUMERIC, choose NUMERICOID as preferType.
+     * To compatible with a string representing a large number needs to be converted to a number type.
+     * e.g., "select decode(1, 2, 2, '63274723794832454677432493248593478549543535453'::text);"
+     */
+    if (preferCategory == TYPCATEGORY_NUMERIC) {
+        preferType = NUMERICOID;
+    }
+
+    return preferType;
+}
+
+/*
+ * Handle the case where nextCategory and preferCategory are different.
+ * Check whether nextCategory can be converted to preferCategory,
+ * or nextType can be converted to preferType.
+ */
+static void handle_diff_category(ParseState* pstate, Node* nextExpr, const char* context,
+    TYPCATEGORY preferCategory, TYPCATEGORY nextCategory, Oid preferType, Oid nextType)
+{
+    if (!category_can_be_matched(preferCategory, nextCategory) &&
+        !type_can_be_matched(preferType, nextType)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_DATATYPE_MISMATCH),
+                errmsg("%s types %s and %s cannot be matched",
+                    context,
+                    format_type_be(preferType == UNKNOWNOID ? TEXTOID : preferType),
+                    format_type_be(nextType == UNKNOWNOID ? TEXTOID : nextType)),
+                parser_errposition(pstate, exprLocation(nextExpr))));
+    }
+}
+
+/*
+ * Check whether nextCategory can be converted to preferCategory.
+ */
+static bool category_can_be_matched(TYPCATEGORY preferCategory, TYPCATEGORY nextCategory)
+{
+    bool can_be_matched = false;
+
+    static TYPCATEGORY categoryMatchedList[][2] = {
+        {TYPCATEGORY_STRING, TYPCATEGORY_UNKNOWN}, {TYPCATEGORY_STRING, TYPCATEGORY_NUMERIC},
+        {TYPCATEGORY_UNKNOWN, TYPCATEGORY_STRING}, {TYPCATEGORY_UNKNOWN, TYPCATEGORY_NUMERIC},
+        {TYPCATEGORY_NUMERIC, TYPCATEGORY_STRING}, {TYPCATEGORY_NUMERIC, TYPCATEGORY_UNKNOWN},
+        {TYPCATEGORY_STRING, TYPCATEGORY_DATETIME}, {TYPCATEGORY_STRING, TYPCATEGORY_TIMESPAN},
+        {TYPCATEGORY_UNKNOWN, TYPCATEGORY_DATETIME}, {TYPCATEGORY_UNKNOWN, TYPCATEGORY_TIMESPAN}};
+
+    for (unsigned int i = 0; i < sizeof(categoryMatchedList) / sizeof(categoryMatchedList[0]); i++) {
+        if (preferCategory == categoryMatchedList[i][0] && nextCategory == categoryMatchedList[i][1]) {
+            can_be_matched = true;
+            break;
+        }
+    }
+
+    return can_be_matched;
+}
+
+/*
+ * Check whether nextType can be converted to preferType.
+ */
+static bool type_can_be_matched(Oid preferType, Oid nextType)
+{
+    bool can_be_matched = false;
+
+    static Oid typeMatchedList[][2] = {
+        {RAWOID, VARCHAROID}, {RAWOID, TEXTOID}, {VARCHAROID, RAWOID}, {TEXTOID, RAWOID}};
+
+    for (unsigned int i = 0; i < sizeof(typeMatchedList) / sizeof(typeMatchedList[0]); i++) {
+        if (preferType == typeMatchedList[i][0] && nextType == typeMatchedList[i][1]) {
+            can_be_matched = true;
+            break;
+        }
+    }
+
+    return can_be_matched;
+}
+
 /* choose_specific_expr_type
  * Choose case when and coalesce return value type in C_FORMAT.
  */
@@ -1293,6 +1435,86 @@ static Oid choose_expr_type(ParseState* pstate, List* exprs, const char* context
 }
 
 /*
+ * To maintain forward compatibility, decode type conversion rules compatible with O is
+ * only valid for a few specific type categories. Save these type categories in the form
+ * of a whitelist. If any one is not in the whitelist, allInWhitelist is set to false.
+ */
+bool check_all_in_whitelist(List* resultexprs)
+{
+    bool allInWhitelist = true;
+    Node* exprTmp = NULL;
+    ListCell* lc = NULL;
+    Oid exprTypeTmp = UNKNOWNOID;
+    TYPCATEGORY exprCategoryTmp = TYPCATEGORY_UNKNOWN;
+
+    foreach (lc, resultexprs) {
+        exprTmp = (Node*)lfirst(lc);
+
+        /* if exprTmp is "null", treat it as unknown type, can skip it. */
+        if (IsA(exprTmp, Const) && ((Const*)exprTmp)->constisnull) {
+            continue;
+        }
+
+        exprTypeTmp = getBaseType(exprType(exprTmp));
+        exprCategoryTmp = get_typecategory(exprTypeTmp);
+        if (!check_category_in_whitelist(exprCategoryTmp, exprTypeTmp)) {
+            allInWhitelist = false;
+            break;
+        }
+    }
+
+    return allInWhitelist;
+}
+
+/*
+ * Check whether the given category and type is in the whitelist.
+ */
+static bool check_category_in_whitelist(TYPCATEGORY category, Oid type)
+{
+    bool categoryInWhitelist = false;
+
+    static TYPCATEGORY categoryWhitelist[] = {TYPCATEGORY_BOOLEAN, TYPCATEGORY_NUMERIC, TYPCATEGORY_STRING,
+        TYPCATEGORY_UNKNOWN, TYPCATEGORY_DATETIME, TYPCATEGORY_TIMESPAN, TYPCATEGORY_USER};
+    
+    for (unsigned int i = 0; i < sizeof(categoryWhitelist) / sizeof(categoryWhitelist[0]); i++) {
+        if (category == categoryWhitelist[i]) {
+            /*
+             * For TYPCATEGORY_USER, just RAW in the whitelist.
+             * For TYPCATEGORY_NUMERIC, some numeric type not in the whitelist.
+             */
+            if ((category == TYPCATEGORY_USER && type != RAWOID) ||
+                (category == TYPCATEGORY_NUMERIC && check_numeric_type_in_blacklist(type))) {
+                break;
+            }
+            categoryInWhitelist = true;
+            break;
+        }
+    }
+
+    return categoryInWhitelist;
+}
+
+/*
+ * Check whether the given numeric type is in the blacklist.
+ */
+static bool check_numeric_type_in_blacklist(Oid type)
+{
+    bool typeInBlacklist = false;
+
+    static Oid numericTypeBlacklist[] = {CASHOID, INT16OID, REGPROCOID, OIDOID, REGPROCEDUREOID,
+        REGOPEROID, REGOPERATOROID, REGCLASSOID, REGTYPEOID, REGCONFIGOID, REGDICTIONARYOID};
+
+    for (unsigned int i = 0; i < sizeof(numericTypeBlacklist) / sizeof(numericTypeBlacklist[0]); i++) {
+        if (type == numericTypeBlacklist[i]) {
+            typeInBlacklist = true;
+            break;
+        }
+    }
+
+    return typeInBlacklist;
+}
+
+/*
  * select_common_type()
  *		Determine the common supertype of a list of input expressions.
  *		This is used for determining the output type of CASE, UNION,
@@ -1341,10 +1563,14 @@ Oid select_common_type(ParseState* pstate, List* exprs, const char* context, Nod
         }
     }
 
-    if ((u_sess->attr.attr_sql.sql_compatibility == C_FORMAT && context != NULL &&
-        (0 == strncmp(context, "CASE", sizeof("CASE")) || 0 == strncmp(context, "COALESCE", sizeof("COALESCE")))) ||
-        (ENABLE_SQL_BETA_FEATURE(A_STYLE_COERCE) && context != NULL &&
-            (0 == strncmp(context, "CASE", sizeof("CASE"))))) {
+    if (meet_decode_compatibility(exprs, context)) {
+        /*
+         * For A format, result1 is considered the most significant type in determining preferred type.
+         * In this function, try to choose a higher priority type of the same category as result1.
+         * And check whether other parameters can be implicitly converted to the data type of result1.
+         */
+        ptype = choose_decode_result1_type(pstate, exprs, context);
+    } else if (meet_c_format_compatibility(exprs, context)) {
         /*
          * To C format, we need handle numeric and string mix situation.
          * For A format, type should be coerced by the first case, therefore, it can accept cases like
@@ -1353,9 +1579,8 @@ Oid select_common_type(ParseState* pstate, List* exprs, const char* context, Nod
          * using C format coercion.
          */
         ptype = choose_specific_expr_type(pstate, exprs, context);
-    }
-    /* Follow A db nvl*/
-    else if (context != NULL && 0 == strncmp(context, "NVL", sizeof("NVL"))) {
+    } else if (context != NULL && check_parse_phrase(context, "NVL")) {
+        /* Follow A db nvl*/
         ptype = choose_nvl_type(pstate, exprs, context);
     } else {
         ptype = choose_expr_type(pstate, exprs, context, which_expr);
@@ -1379,6 +1604,29 @@ Oid select_common_type(ParseState* pstate, List* exprs, const char* context, Nod
         *which_expr = pexpr;
     }
     return ptype;
+}
+
+/*
+ * Check meet the decode type conversion rules compatibility or not.
+ */
+static bool meet_decode_compatibility(List* exprs, const char* context)
+{
+    bool res = u_sess->attr.attr_sql.sql_compatibility == A_FORMAT && ENABLE_SQL_BETA_FEATURE(A_STYLE_COERCE) &&
+        context != NULL && check_parse_phrase(context, "DECODE") && check_all_in_whitelist(exprs);
+    return res;
+}
+
+/*
+ * Check meet the c format compatibility or not.
+ * For A format, some temporary are also in it.
+ */
+static bool meet_c_format_compatibility(List* exprs, const char* context)
+{
+    bool res = (u_sess->attr.attr_sql.sql_compatibility == C_FORMAT && context != NULL &&
+                (check_parse_phrase(context, "CASE") || check_parse_phrase(context, "COALESCE") ||
+                 check_parse_phrase(context, "DECODE"))) ||
+               (ENABLE_SQL_BETA_FEATURE(A_STYLE_COERCE) && context != NULL && check_parse_phrase(context, "DECODE"));
+    return res;
 }
 
 /*
@@ -2348,5 +2596,10 @@ void expression_error_callback(void* arg)
     if (colname != NULL && strcmp(colname, "?column?")) {
         errcontext("referenced column: %s", colname);
     }
+}
+
+static bool check_parse_phrase(const char* context, const char* target)
+{
+    return strncmp(context, target, strlen(target)) == 0;
 }
 

@@ -152,6 +152,7 @@ typedef struct RelationData {
     TupleDesc rd_att;     /* tuple descriptor */
     Oid rd_id;            /* relation's object id */
     bool rd_isblockchain; /* relation is in blockchain schema */
+    char relreplident;    /* see REPLICA_IDENTITY_xxx constants  */
 
     LockInfoData rd_lockInfo;  /* lock mgr's info for locking relation */
     RuleLock* rd_rules;        /* rewrite rules */
@@ -292,8 +293,9 @@ typedef struct RelationData {
     bool newcbi;
 
     bool is_compressed;
+    bool come_from_partrel;
     /* used only for gsc, keep it preserved if you modify the rel, otherwise set it null */
-    struct LocalRelationEntry *entry; 
+    struct LocalRelationEntry *entry;
 } RelationData;
 
 /*
@@ -405,6 +407,7 @@ typedef struct StdRdOptions {
     bool enable_tde;     /* switch flag for table-level TDE encryption */
     bool on_commit_delete_rows; /* global temp table */
     PageCompressOpts compress; /* page compress related reloptions. */
+    float8 min_tuples;
 } StdRdOptions;
 
 #define HEAP_MIN_FILLFACTOR 10
@@ -612,6 +615,7 @@ extern TransactionId PartGetRelFrozenxid64(Partition part);
  */
 #define RelationIsMapped(relation) ((relation)->rd_rel->relfilenode == InvalidOid)
 
+extern void TryFreshSmgrCache(struct SMgrRelationData *smgr);
 /*
  * RelationOpenSmgr
  *		Open the relation at the smgr level, if not already done.
@@ -620,6 +624,9 @@ extern TransactionId PartGetRelFrozenxid64(Partition part);
     do {                                                                                                 \
         if ((relation)->rd_smgr == NULL)                                                                 \
             smgrsetowner(&((relation)->rd_smgr), smgropen((relation)->rd_node, (relation)->rd_backend)); \
+        else {                                                                                           \
+            TryFreshSmgrCache((relation)->rd_smgr);                                                      \
+        }                                                                                                \
     } while (0)
 
 /*
@@ -811,5 +818,6 @@ extern void RelationDecrementReferenceCount(Oid relationId);
 extern void GetTdeInfoFromRel(Relation rel, TdeInfo *tde_info);
 extern char RelationGetRelReplident(Relation r);
 extern void SetupPageCompressForRelation(RelFileNode* node, PageCompressOpts* compressOpts, const char* name);
+extern bool IsRelationReplidentKey(Relation r, int attno);
 #endif /* REL_H */
 

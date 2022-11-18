@@ -71,7 +71,7 @@ extern Node* makeTidConst(ItemPointer item);
 extern FuncCall* makeFuncCall(List* funcname, List* args, int location);
 extern Param* makeParam(
     ParamKind paramkind, int paramid, Oid paramtype, int32 paramtypmod, Oid paramcollid, int location);
-extern IndexInfo* makeIndexInfo(int numattrs, List *expressions, List *predicates,
+extern IndexInfo* makeIndexInfo(int numattrs, List *expressions, List* expressionUsers, List *predicates,
     bool unique, bool isready, bool concurrent);
 
 #endif /* !FRONTEND_PARSER */

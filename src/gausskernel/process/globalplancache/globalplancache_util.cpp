@@ -169,6 +169,7 @@ GlobalPlanCache::EnvFill(GPCEnv *env, bool depends_on_role)
     env->plainenv.cursor_tuple_fraction = u_sess->attr.attr_sql.cursor_tuple_fraction;
     env->plainenv.constraint_exclusion = u_sess->attr.attr_sql.constraint_exclusion;
     env->plainenv.behavior_compat_flags = u_sess->utils_cxt.behavior_compat_flags;
+    env->plainenv.plsql_compile_behavior_compat_flags = u_sess->utils_cxt.plsql_compile_behavior_compat_flags;
     env->plainenv.datestyle = u_sess->time_cxt.DateStyle;
     env->plainenv.dateorder = u_sess->time_cxt.DateOrder;
     env->plainenv.sql_beta_feature = u_sess->attr.attr_sql.sql_beta_feature;
@@ -273,43 +274,15 @@ void GPCReGplan(CachedPlanSource* plansource)
     u_sess->pcache_cxt.first_saved_plan = plansource;
 }
 
-void CNGPCCleanUpSession()
-{
-    if (!ENABLE_CN_GPC) {
-        return;
-    }
-
-    DropAllPreparedStatements();
-    /* if in shared memory, delete context. */
-    CachedPlanSource* psrc = u_sess->pcache_cxt.ungpc_saved_plan;
-    CachedPlanSource* next = NULL;
-    while (psrc != NULL) {
-        next = psrc->next_saved;
-        Assert (!psrc->gpc.status.InShareTable());
-        if (!psrc->gpc.status.IsPrivatePlan())
-            DropCachedPlan(psrc);
-        psrc = next;
-    }
-    psrc = u_sess->pcache_cxt.first_saved_plan;
-    while (psrc != NULL) {
-        next = psrc->next_saved;
-        Assert (!psrc->gpc.status.InShareTable());
-        if (!psrc->gpc.status.IsPrivatePlan())
-            DropCachedPlan(psrc);
-        psrc = next;
-    }
-}
-
 void GPCCleanUpSessionSavedPlan()
 {
     if (!ENABLE_GPC) {
         return;
     }
-    if (u_sess->pcache_cxt.first_saved_plan == NULL &&
-        u_sess->pcache_cxt.unnamed_stmt_psrc == NULL &&
-        u_sess->pcache_cxt.ungpc_saved_plan == NULL) {
-        return;
-    }
+    /* clean gpc refcount and plancache in shared memory */
+    if (ENABLE_DN_GPC)
+        CleanSessGPCPtr(u_sess);
+
     /* unnamed_stmt_psrc only save shared gpc plan or private plan,
      * so we only need to sub refcount for shared plan. */
     if (u_sess->pcache_cxt.unnamed_stmt_psrc && u_sess->pcache_cxt.unnamed_stmt_psrc->gpc.status.InShareTable()) {
@@ -320,7 +293,6 @@ void GPCCleanUpSessionSavedPlan()
     /* For DN and CN */
     CachedPlanSource* psrc = u_sess->pcache_cxt.first_saved_plan;
     CachedPlanSource* next = NULL;
-    u_sess->pcache_cxt.first_saved_plan = NULL;
     while (psrc != NULL) {
         next = psrc->next_saved;
         Assert (!psrc->gpc.status.InShareTable());

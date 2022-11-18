@@ -200,53 +200,23 @@ CREATE TABLE t1_1 AS    SELECT c1,c2       FROM t1;
 CREATE TABLE t1_2 AS    SELECT c1,c3,c4    FROM t1;
 CREATE TABLE t1_3 AS    SELECT c1,c2,c3,c4 FROM t1;
 CREATE TABLE t1_4 AS    SELECT *           FROM t1;
--- TODO : not support yet
-CREATE TABLE t1_4 AS    SELECT c1,c4       FROM t1 WHERE c4 = 'r4 c4';
-ERROR:  invalid input syntax for type byteawithoutorderwithequalcol
-LINE 1: ...LE t1_4 AS    SELECT c1,c4       FROM t1 WHERE c4 = 'r4 c4';
-                                                               ^
+CREATE TABLE t1_8 AS    SELECT c1,c4       FROM t1 WHERE c4 = 'r3 c4';
 CREATE TABLE t1_5 AS    SELECT c1,c3,c4    FROM t1 WHERE c3 = 'r2 c3';
-ERROR:  invalid input syntax for type byteawithoutorderwithequalcol
-LINE 1: ...LE t1_5 AS    SELECT c1,c3,c4    FROM t1 WHERE c3 = 'r2 c3';
-                                                               ^
 CREATE TABLE t1_6 AS    SELECT c1,c2,c4    FROM t1 WHERE c2 = 12 AND c4 = 'r1 c4';
-ERROR:  operator does not exist: byteawithoutorderwithequalcol = integer
-LINE 1: ...LE t1_6 AS    SELECT c1,c2,c4    FROM t1 WHERE c2 = 12 AND c...
-                                                             ^
-HINT:  No operator matches the given name and argument type(s). You might need to add explicit type casts.
 CREATE TABLE t1_7 AS    SELECT *           FROM t1 WHERE c2 = 32;
-ERROR:  operator does not exist: byteawithoutorderwithequalcol = integer
-LINE 1: ...E TABLE t1_7 AS    SELECT *           FROM t1 WHERE c2 = 32;
-                                                                  ^
-HINT:  No operator matches the given name and argument type(s). You might need to add explicit type casts.
 CREATE TABLE t2_1 AS    SELECT c1,c2       FROM t1;
 CREATE TABLE t2_2 AS    SELECT c1,c3,c4    FROM t1;
 CREATE TABLE t2_3 AS    SELECT c1,c2,c3,c4 FROM t1;
 CREATE TABLE t2_4 AS    SELECT *           FROM t1;
--- TODO : not support yet
-CREATE TABLE t2_4 AS    SELECT c1,c4       FROM t2 WHERE c4 = 'r4 c4';
-ERROR:  invalid input syntax for type byteawithoutorderwithequalcol
-LINE 1: ...LE t2_4 AS    SELECT c1,c4       FROM t2 WHERE c4 = 'r4 c4';
-                                                               ^
+CREATE TABLE t2_8 AS    SELECT c1,c4       FROM t2 WHERE c4 = 'r3 c4';
 CREATE TABLE t2_5 AS    SELECT c1,c3,c4    FROM t2 WHERE c3 = 'r2 c3';
-ERROR:  invalid input syntax for type byteawithoutorderwithequalcol
-LINE 1: ...LE t2_5 AS    SELECT c1,c3,c4    FROM t2 WHERE c3 = 'r2 c3';
-                                                               ^
 CREATE TABLE t2_6 AS    SELECT c1,c2,c4    FROM t2 WHERE c2 = 12 AND c4 = 'r1 c4';
-ERROR:  operator does not exist: byteawithoutorderwithequalcol = integer
-LINE 1: ...LE t2_6 AS    SELECT c1,c2,c4    FROM t2 WHERE c2 = 12 AND c...
-                                                             ^
-HINT:  No operator matches the given name and argument type(s). You might need to add explicit type casts.
 CREATE TABLE t2_7 AS    SELECT *           FROM t2 WHERE c2 = 32;
-ERROR:  operator does not exist: byteawithoutorderwithequalcol = integer
-LINE 1: ...E TABLE t2_7 AS    SELECT *           FROM t2 WHERE c2 = 32;
-                                                                  ^
-HINT:  No operator matches the given name and argument type(s). You might need to add explicit type casts.
 -- (7) show results | succeed
 SELECT count(*) FROM gs_encrypted_columns;
  count 
 -------
-    24
+    40
 (1 row)
 
 SELECT * FROM t1_1 ORDER BY c1 ASC;
@@ -282,21 +252,29 @@ SELECT * FROM t1_4 ORDER BY c1 ASC;
 (3 rows)
 
 SELECT * FROM t1_5 ORDER BY c1 ASC;
-ERROR:  relation "t1_5" does not exist on datanode1
-LINE 1: SELECT * FROM t1_5 ORDER BY c1 ASC;
-                      ^
+ c1 |  c3   |  c4   
+----+-------+-------
+  2 | r2 c3 | r2 c4
+(1 row)
+
 SELECT * FROM t1_6 ORDER BY c1 ASC;
-ERROR:  relation "t1_6" does not exist on datanode1
-LINE 1: SELECT * FROM t1_6 ORDER BY c1 ASC;
-                      ^
+ c1 | c2 |  c4   
+----+----+-------
+  1 | 12 | r1 c4
+(1 row)
+
 SELECT * FROM t1_7 ORDER BY c1 ASC;
-ERROR:  relation "t1_7" does not exist on datanode1
-LINE 1: SELECT * FROM t1_7 ORDER BY c1 ASC;
-                      ^
+ c1 | c2 |  c3   |  c4   
+----+----+-------+-------
+  3 | 32 | r3 c3 | r3 c4
+(1 row)
+
 SELECT * FROM t1_8 ORDER BY c1 ASC;
-ERROR:  relation "t1_8" does not exist on datanode1
-LINE 1: SELECT * FROM t1_8 ORDER BY c1 ASC;
-                      ^
+ c1 |  c4   
+----+-------
+  3 | r3 c4
+(1 row)
+
 SELECT * FROM t2_1 ORDER BY c1 ASC;
  c1 | c2 
 ----+----
@@ -330,30 +308,42 @@ SELECT * FROM t2_4 ORDER BY c1 ASC;
 (3 rows)
 
 SELECT * FROM t2_5 ORDER BY c1 ASC;
-ERROR:  relation "t2_5" does not exist on datanode1
-LINE 1: SELECT * FROM t2_5 ORDER BY c1 ASC;
-                      ^
+ c1 | c3 | c4 
+----+----+----
+(0 rows)
+
 SELECT * FROM t2_6 ORDER BY c1 ASC;
-ERROR:  relation "t2_6" does not exist on datanode1
-LINE 1: SELECT * FROM t2_6 ORDER BY c1 ASC;
-                      ^
+ c1 | c2 | c4 
+----+----+----
+(0 rows)
+
 SELECT * FROM t2_7 ORDER BY c1 ASC;
-ERROR:  relation "t2_7" does not exist on datanode1
-LINE 1: SELECT * FROM t2_7 ORDER BY c1 ASC;
-                      ^
+ c1 | c2 | c3 | c4 
+----+----+----+----
+(0 rows)
+
 SELECT * FROM t2_8 ORDER BY c1 ASC;
-ERROR:  relation "t2_8" does not exist on datanode1
-LINE 1: SELECT * FROM t2_8 ORDER BY c1 ASC;
-                      ^
+ c1 | c4 
+----+----
+(0 rows)
+
 -- (8) clean copyted table
 DROP TABLE t1_1;
 DROP TABLE t1_2;
 DROP TABLE t1_3;
 DROP TABLE t1_4;
+DROP TABLE t1_5;
+DROP TABLE t1_6;
+DROP TABLE t1_7;
+DROP TABLE t1_8;
 DROP TABLE t2_1;
 DROP TABLE t2_2;
 DROP TABLE t2_3;
 DROP TABLE t2_4;
+DROP TABLE t2_5;
+DROP TABLE t2_6;
+DROP TABLE t2_7;
+DROP TABLE t2_8;
 -- (9) finish | clean environment | succeed
 DROP TABLE IF EXISTS t1;
 DROP TABLE IF EXISTS t2;

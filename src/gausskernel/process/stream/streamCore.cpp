@@ -359,6 +359,7 @@ StreamNodeGroup::StreamNodeGroup()
 #ifndef ENABLE_MULTIPLE_NODES
     m_portal = NULL;
 #endif
+    m_spiLevel = u_sess->SPI_cxt._connected;
 }
 
 StreamNodeGroup::~StreamNodeGroup()
@@ -904,7 +905,7 @@ void StreamNodeGroup::destroy(StreamObjStatus status)
 
     /* We must relase all pthread mutex by my thread, Or it will dead lock. But it is not a good solution. */
     // lock the same thread mutex can't be conflict in one thread.
-    ResourceOwnerReleasePthreadMutex();
+    ResourceOwnerReleaseAllXactPthreadMutex();
 
     WaitState oldStatus = pgstat_report_waitstatus(STATE_STREAM_WAIT_NODEGROUP_DESTROY);
 
@@ -919,7 +920,7 @@ void StreamNodeGroup::destroy(StreamObjStatus status)
     if (u_sess->stream_cxt.global_obj != NULL) {
 #ifndef ENABLE_MULTIPLE_NODES
         if (u_sess->stream_cxt.global_obj->m_portal != NULL) {
-            u_sess->stream_cxt.global_obj->m_portal->streamInfo.streamGroup = NULL;
+            u_sess->stream_cxt.global_obj->m_portal->streamInfo.Reset();
         }
 #endif
         u_sess->stream_cxt.global_obj->deInit(status);
@@ -952,9 +953,18 @@ void StreamNodeGroup::syncQuit(StreamObjStatus status)
         u_sess->stream_cxt.enter_sync_point == true)
         return;
 
+    /* add trace info while smp not correct. */
+    if (t_thrd.log_cxt.errordata_stack_depth == (ERRORDATA_STACK_SIZE - 1) && StreamTopConsumerAmI()) {
+        if (u_sess->stream_cxt.global_obj != NULL) {
+            ereport(LOG, (errmsg("[StreamSyncQuit] global_obj: %lu, runtime_mem_cxt: %lu",
+                (uint64)u_sess->stream_cxt.global_obj, (uint64)u_sess->stream_cxt.stream_runtime_mem_cxt)));
+            return;
+        }
+    }
+
     /* We must relase all pthread mutex by my thread, Or it will dead lock. But it is not a good solution. */
     // lock the same thread mutex can't be conflict in one thread.
-    ResourceOwnerReleasePthreadMutex();
+    ResourceOwnerReleaseAllXactPthreadMutex();
 
     WaitState oldStatus = pgstat_report_waitstatus(STATE_STREAM_WAIT_THREAD_SYNC_QUIT);
 
@@ -1010,6 +1020,27 @@ void StreamNodeGroup::syncQuit(StreamObjStatus status)
 
     u_sess->stream_cxt.enter_sync_point = true;
     pgstat_report_waitstatus(oldStatus);
+}
+
+void StreamNodeGroup::ReleaseStreamGroup(bool resetSession, StreamObjStatus status)
+{
+    /* we can only release inner StreamNodeGroup */
+    if (u_sess->stream_cxt.global_obj == NULL ||
+        u_sess->stream_cxt.global_obj->m_spiLevel < u_sess->SPI_cxt._connected) {
+        return;
+    }
+
+    StreamTopConsumerIam();
+    /* Set sync point for waiting all stream threads complete. */
+    StreamNodeGroup::syncQuit(status);
+    UnRegisterStreamSnapshots();
+    StreamNodeGroup::destroy(status);
+    if (!resetSession) {
+        /* reset some flag related to stream */
+        ResetStreamEnv();
+    } else {
+        ResetSessionEnv();
+    }
 }
 
 /*

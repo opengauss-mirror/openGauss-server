@@ -78,6 +78,8 @@ static bool is_rangequery_contain_scalarop(Node* clause, RestrictInfo* rinfo);
 static void set_varratio_for_rqclause(
     PlannerInfo* root, List* varlist, int varRelid, double ratio, SpecialJoinInfo* sjinfo);
 
+static Selectivity get_restrict_selectivity(PlannerInfo *root, OpExpr *op, int varRelid);
+
 /****************************************************************************
  *		ROUTINES TO COMPUTE SELECTIVITIES
  ****************************************************************************/
@@ -583,7 +585,13 @@ Selectivity clause_selectivity(PlannerInfo* root, Node* clause, int varRelid, Jo
 
         s1 = 0.0;
         foreach (arg, ((BoolExpr*)clause)->args) {
-            Selectivity s2 = clause_selectivity(root, (Node*)lfirst(arg), varRelid, jointype, sjinfo);
+            /*
+             * Ideally, or-clauses should be splitted into groups identified by Var oprend. However, Poisson
+             * optimization is known to bring about NDV underestimation and cardinality overestimation in OLTP cases.
+             * Also, it is hard to take acount of the effect of different Vars (e.g. t1.a = 1 or t2.b = 1) on single
+             * Vars. Therefore, or clauses is ignored for var ratio cache for now.
+             */
+            Selectivity s2 = clause_selectivity(root, (Node*)lfirst(arg), varRelid, jointype, sjinfo, false);
 
             s1 = s1 + s2 - s1 * s2;
         }
@@ -616,7 +624,7 @@ Selectivity clause_selectivity(PlannerInfo* root, Node* clause, int varRelid, Jo
             }
 
             if (isFinish == false) {
-                s1 = restriction_selectivity(root, opno, opclause->args, opclause->inputcollid, varRelid);
+                s1 = get_restrict_selectivity(root, opclause, varRelid);
             }
         }
 
@@ -696,6 +704,174 @@ Selectivity clause_selectivity(PlannerInfo* root, Node* clause, int varRelid, Jo
 #ifdef SELECTIVITY_DEBUG
     ereport(DEBUG4, (errmodule(MOD_OPT_JOIN), (errmsg("clause_selectivity: s1 %f", s1))));
 #endif /* SELECTIVITY_DEBUG */
+
+    return s1;
+}
+
+
+/*
+ * We only handle the case that 'Coalesce(Var, const)'.
+ * So we use the data structure CoalescePattern to represent this case.
+ */
+typedef struct CoalescePattern {
+    Var *var;
+    Const *const_expr;
+} CoalescePattern;
+
+/*
+ * The first two elements in the args list must be Var and Const respectively.
+ */
+static CoalescePattern *find_coalesce_pattern(CoalesceExpr *node, int varRelid)
+{
+    if (list_length(node->args) < 2) {
+        return NULL;
+    }
+    Var *var = NULL;
+    Node *arg = NULL;
+
+    /* At least two elements here, feel free to use linitial and lsecond */
+    arg = (Node *)linitial(node->args);
+    if (arg == NULL || !IsA(arg, Var)) {
+        /* the first element is not Var, just return */
+        return NULL;
+    }
+    var = (Var *)arg;
+    if (varRelid != 0 && (int)var->varno != varRelid) {
+        /* Not the target relation, just return */
+        return NULL;
+    }
+
+    arg = (Node *)lsecond(node->args);
+    if (arg == NULL || !IsA(arg, Const)) {
+        /* the second element is not Const, just return */
+        return NULL;
+    }
+
+    /* Ok, find the pattern */
+    CoalescePattern *pattern = (CoalescePattern *)palloc0(sizeof(CoalescePattern));
+    pattern->var = var;
+    pattern->const_expr = (Const *)arg;
+
+    return pattern;
+}
+
+/*
+ * Estimate the OpExpr with new args.
+ * Return -1 if it is not able to be estimated.
+ */
+static Selectivity estimate_newargs_value(PlannerInfo *root, OpExpr *op, List* new_args)
+{
+    Selectivity res = -1;
+
+    /* use the new args to estimate result; remember setting it back after the estimation */
+    List *old_args = op->args;
+    op->args = new_args;
+
+    Node* est_node = estimate_expression_value(root, (Node *)op);
+    if (est_node != NULL && IsA(est_node, Const)) {
+        Const *cnst = (Const *)est_node;
+        if (cnst->consttype == BOOLOID) {
+            res = (Selectivity)DatumGetBool(cnst->constvalue);
+        }
+    }
+    op->args = old_args;
+
+    return res;
+}
+
+/*
+ * If arguments contain 'coalesce' expression, we need to adjust the selectivity by null fraction.
+ * For example, the expression is:
+ *      coalesce(Var1, Const1) = Const2,
+ * Var1's null_frac is N1, and the selectivity of Var1 = const2 is s1.
+ * Then the adjusted selectivity is:
+ *      s2 = N1 * (const1 = const2) + (1 - N1) * s1;
+ *
+ * Now, we only handle the case that there is only one coalesce in the restriction. And the coalesce
+ * only contains one Var. If we find some corner case beyond this scope, just add them here.
+ *
+ * input:
+ *      s1: the selectivity computed by the underlying operator selectivity function that handle the
+ *          coalesce as plain Var.
+ *
+ */
+static Selectivity adjust_selectivity_for_coalesce(PlannerInfo *root, OpExpr *op, int varRelid, Selectivity s1)
+{
+    List *new_args = NULL;
+    int coal_num = 0;
+    ListCell *lc = NULL;
+    CoalescePattern *coal_pattern = NULL;
+
+    foreach (lc, op->args) {
+        Node *node = (Node *)lfirst(lc);
+        if (!IsA(node, CoalesceExpr)) {
+            new_args = lappend(new_args, node);
+            continue;
+        }
+        
+        /* must be a CoalesceExpr */
+        CoalescePattern *pattern = find_coalesce_pattern((CoalesceExpr*) node, varRelid);
+        if (pattern == NULL) {
+            /* This coalesce expression does not have what we want */
+            new_args = lappend(new_args, node);
+        } else {
+            coal_num++;
+            if (coal_num > 1) {
+                pfree_ext(pattern);
+                /* we won't recompute selectivity, so no need to maintain the new_args list */
+                break;
+            }
+            /* target pattern */
+            coal_pattern = pattern;
+            new_args = lappend(new_args, coal_pattern->const_expr);
+        }
+    }
+
+    if (coal_num == 1) {
+        Assert(coal_pattern != NULL);
+        Var *var = coal_pattern->var;
+        VariableStatData vardata;
+        vardata.statsTuple = NULL;
+        vardata.freefunc = NULL;
+        vardata.rel = NULL;
+        vardata.var = NULL;
+
+        examine_variable(root, (Node *)var, varRelid, &vardata);
+        if (HeapTupleIsValid(vardata.statsTuple)) {
+            Form_pg_statistic stats = (Form_pg_statistic)GETSTRUCT(vardata.statsTuple);
+            double nullfrac = stats->stanullfrac;
+            ReleaseVariableStats(vardata);
+
+            /* Compute the selectivity with the new args that use the Const instead of the CoalesceExpr */
+            Selectivity s2 = estimate_newargs_value(root, op, new_args);
+            if (s2 >= 0) {
+                /* Ok, get all parameters we need now. */
+                s1 = nullfrac * s2 + (1 - nullfrac) * s1;
+            }
+        }
+
+        pfree_ext(coal_pattern);
+    }
+
+    list_free_ext(new_args);
+
+    return s1;
+}
+
+/*
+ * This function is a wrap for 'restriction_selectivity'.
+ *
+ * The arguments of a restriction may be complicated expressions that can not be known by the
+ * underlying operator selectivity function. Now, these expressions are simplified as plain Vars.
+ * Obveriously, the selectivity between a plain Var and a complicated expression based on the Var
+ * may be totally different. So we need to do some preprocess here.
+ *
+ * Currently, this function only handle 'coalesce'.
+ */
+static Selectivity get_restrict_selectivity(PlannerInfo *root, OpExpr *op, int varRelid)
+{
+    Selectivity s1 = restriction_selectivity(root, op->opno, op->args, op->inputcollid, varRelid);
+    s1 = adjust_selectivity_for_coalesce(root, op, varRelid, s1);
 
     return s1;
 }

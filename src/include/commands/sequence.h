@@ -201,6 +201,12 @@ typedef struct rename_sequence_callback_arg {
     char* oldseqname;
 } rename_sequence_callback_arg;
 
+typedef enum {
+    NDE_UNKNOWN = 0,
+    NDE_NUMERIC, /* expected numeric nextval */
+    NDE_BIGINT /* expected bigint nextval */
+} nextval_default_expr_type_enum;
+
 extern void delete_global_seq(Oid relid, Relation seqrel);
 /* Sequence callbacks on GTM */
 extern void register_sequence_rename_cb(const char* oldseqname, const char* newseqname);

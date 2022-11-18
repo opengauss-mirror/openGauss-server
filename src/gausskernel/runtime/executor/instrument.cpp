@@ -979,13 +979,6 @@ Instrumentation* ThreadInstrumentation::allocInstrSlot(int plan_node_id, int par
 
             plan_type = IO_OP;
             break;
-        case T_DfsScan:
-            if (((Scan*)plan)->isPartTbl)
-                pname = "Partitioned Dfs Scan";
-            else
-                pname = "Dfs Scan";
-            plan_type = IO_OP;
-            break;
         case T_CStoreScan:
             if (!((Scan*)plan)->tablesample) {
                 if (((Scan*)plan)->isPartTbl) {
@@ -1038,20 +1031,6 @@ Instrumentation* ThreadInstrumentation::allocInstrSlot(int plan_node_id, int par
                 pname = "Partitioned Bitmap Heap Scan";
             else
                 pname = "Bitmap Heap Scan";
-            plan_type = IO_OP;
-            break;
-        case T_DfsIndexScan:
-            if (((Scan*)plan)->isPartTbl) {
-                if (((DfsIndexScan*)plan)->indexonly)
-                    pname = "Partitioned Dfs Index Only Scan";
-                else
-                    pname = "Partitioned Dfs Index Scan";
-            } else {
-                if (((DfsIndexScan*)plan)->indexonly)
-                    pname = "Dfs Index Only Scan";
-                else
-                    pname = "Dfs Index Scan";
-            }
             plan_type = IO_OP;
             break;
         case T_CStoreIndexScan:
@@ -1349,11 +1328,9 @@ Instrumentation* ThreadInstrumentation::allocInstrSlot(int plan_node_id, int par
     switch (nodeTag(plan)) {
         case T_SeqScan:
         case T_CStoreScan:
-        case T_DfsScan:
 #ifdef ENABLE_MULTIPLE_NODES
         case T_TsStoreScan:
 #endif   /* ENABLE_MULTIPLE_NODES */
-        case T_DfsIndexScan:
         case T_IndexScan:
         case T_IndexOnlyScan:
         case T_BitmapHeapScan:

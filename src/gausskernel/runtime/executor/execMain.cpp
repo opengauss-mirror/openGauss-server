@@ -228,7 +228,6 @@ void standard_ExecutorStart(QueryDesc *queryDesc, int eflags)
 {
     EState *estate = NULL;
     MemoryContext old_context;
-    instr_time starttime;
     double totaltime = 0;
 
     /* sanity checks: queryDesc must not be started already */
@@ -377,12 +376,17 @@ void standard_ExecutorStart(QueryDesc *queryDesc, int eflags)
     /*
      * Initialize the plan state tree
      */
+#ifndef ENABLE_LITE_MODE
+    instr_time starttime;
     (void)INSTR_TIME_SET_CURRENT(starttime);
+#endif
 
     IPC_PERFORMANCE_LOG_OUTPUT("standard_ExecutorStart InitPlan start.");
     InitPlan(queryDesc, eflags);
     IPC_PERFORMANCE_LOG_OUTPUT("standard_ExecutorStart InitPlan end.");
+#ifndef ENABLE_LITE_MODE
     totaltime += elapsed_time(&starttime);
+#endif
 
     /*
      * if current plan is working for expression, no need to collect instrumentation.
@@ -445,6 +449,8 @@ void ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count)
     if (u_sess->SPI_cxt._connected >= 0) {
         u_sess->pcache_cxt.cur_stmt_name = NULL;
     }
+
+    instr_stmt_report_query_plan(queryDesc);
     exec_explain_plan(queryDesc);
     if (u_sess->attr.attr_resource.use_workload_manager &&
         u_sess->attr.attr_resource.resource_track_level == RESOURCE_TRACK_OPERATOR && 
@@ -505,8 +511,7 @@ void ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count)
             RecordQueryPlanIssues(issue_results);
         }
     }
-    print_duration(queryDesc);
-    instr_stmt_report_query_plan(queryDesc);
+    instr_stmt_report_cause_type(queryDesc->plannedstmt->cause_type);
 
     /* sql active feature, opeartor history statistics */
     if (can_operator_history_statistics) {
@@ -521,6 +526,7 @@ void ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count)
     }
 
     u_sess->pcache_cxt.cur_stmt_name = old_stmt_name;
+    exec_end_explain_plan(queryDesc);
     u_sess->statement_cxt.executer_run_level--;
 }
 
@@ -531,12 +537,12 @@ void standard_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long co
     DestReceiver *dest = NULL;
     bool send_tuples = false;
     MemoryContext old_context;
-    instr_time starttime;
     double totaltime = 0;
 
     /* sanity checks */
     Assert(queryDesc != NULL);
     estate = queryDesc->estate;
+    estate->rootQueryDesc = queryDesc;
     Assert(estate != NULL);
     Assert(!(estate->es_top_eflags & EXEC_FLAG_EXPLAIN_ONLY));
 
@@ -596,7 +602,10 @@ void standard_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long co
         u_sess->exec_cxt.global_bucket_cnt = 0;
     }
 
+#ifndef ENABLE_LITE_MODE
+    instr_time starttime;
     (void)INSTR_TIME_SET_CURRENT(starttime);
+#endif
     /*
      * run plan
      */
@@ -612,7 +621,9 @@ void standard_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long co
 #endif
         }
     }
+#ifndef ENABLE_LITE_MODE
     totaltime += elapsed_time(&starttime);
+#endif
 
     queryDesc->executed = true;
 
@@ -738,10 +749,12 @@ void standard_ExecutorEnd(QueryDesc *queryDesc)
 {
     EState *estate = NULL;
     MemoryContext old_context;
-    instr_time starttime;
     double totaltime = 0;
 
+#ifndef ENABLE_LITE_MODE
+    instr_time starttime;
     (void)INSTR_TIME_SET_CURRENT(starttime);
+#endif
 
     /* sanity checks */
     Assert(queryDesc != NULL);
@@ -801,7 +814,9 @@ void standard_ExecutorEnd(QueryDesc *queryDesc)
 
     /* output the memory tracking information into file */
     MemoryTrackingOutputFile();
+#ifndef ENABLE_LITE_MODE
     totaltime += elapsed_time(&starttime);
+#endif
 
     /*
      * if current plan is working for expression, no need to collect instrumentation.
@@ -945,6 +960,7 @@ static bool ExecCheckRTEPerms(RangeTblEntry *rte)
         }
     }
 
+#ifndef ENABLE_LITE_MODE
     /*
      * If relation is in ledger schema, avoid procedure or function on it.
      */
@@ -952,6 +968,7 @@ static bool ExecCheckRTEPerms(RangeTblEntry *rte)
         gstrace_exit(GS_TRC_ID_ExecCheckRTEPerms);
         return false;
     }
+#endif
 
     /*
      * No work if requiredPerms is empty.

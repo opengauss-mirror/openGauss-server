@@ -50,6 +50,8 @@
 #include "utils/rel_gs.h"
 #include "utils/syscache.h"
 
+static void CheckAlterNamespacePrivilege(char* nsp);
+
 /*
  * Executes an ALTER OBJECT / RENAME TO statement.	Based on the object
  * type, the function appropriate to that type is executed.
@@ -226,6 +228,7 @@ void ExecAlterObjectSchemaStmt(AlterObjectSchemaStmt* stmt)
             break;
 
         case OBJECT_FUNCTION:
+            CheckAlterNamespacePrivilege(stmt->newschema);
             AlterFunctionNamespace(stmt->object, stmt->objarg, false, stmt->newschema);
             break;
 
@@ -610,5 +613,25 @@ void ExecAlterOwnerStmt(AlterOwnerStmt* stmt)
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
                     errmsg("unrecognized AlterOwnerStmt type: %d", (int)stmt->objectType)));
+    }
+}
+
+static void CheckAlterNamespacePrivilege(char* nsp)
+{
+    if (unlikely(nsp == NULL)) {
+        return;
+    }
+    Oid nspoid = get_namespace_oid(nsp, true);
+    if (nspoid == InvalidOid) {
+        return;
+    }
+    if (!IsInitdb && !u_sess->attr.attr_common.IsInplaceUpgrade &&
+        (IsPackageSchemaOid(nspoid) || nspoid == PG_DB4AI_NAMESPACE)) {
+        ereport(ERROR,
+            (errmodule(MOD_PLSQL), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Permission denied to Alter Object to schema \"%s\"", nsp),
+                errdetail("Object alter is not supported for %s schema.", nsp),
+                errcause("The schema in the package does not support object alter.."),
+                erraction("Please create an object in another schema.")));
     }
 }

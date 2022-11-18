@@ -1098,6 +1098,49 @@ drop procedure pro_tblof_pro_013_1();
 drop type pro_tblof_013;
 drop table pro_tblof_tbl_013;
 
+set behavior_compat_options = 'allow_procedure_compile_check';
+create or replace procedure pro19
+as
+a int;
+begin
+ select c1 from t1 into ;             
+ select c1 from t1  limit  1  a;       
+ select c1 from t1 where c2=1 intoo a; 
+ select c1 from t1 into b;                          
+end;
+/
+
+create or replace procedure pro20
+as
+a int;
+begin
+ select  into a from t1.c1;
+ select 1  into ab;
+end;
+/
+
+create or replace procedure pro21
+as
+a int;
+begin
+ select 1  into ab;
+ select 1  intoo a;
+ dbe_output.print_line('a  is:'||a);
+end;
+/
+
+create or replace procedure pro22
+as
+a int;
+b char(1);
+begin
+ b=:1;
+ select 1  into a;
+ dbe_output.print_line('a  is:'||a);
+end;
+/
+set behavior_compat_options = '';
+
 drop package if exists package_020;
 drop package if exists z_pk2;
 drop package if exists aa;

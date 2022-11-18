@@ -254,6 +254,9 @@ static void build_pkg_row_variable(int varno, PLpgSQL_package* pkg, const char* 
     char* refName = NULL;
 
     for (int i = 0; i < row->nfields; i++) {
+        if (is_row_attr_dropped(row, i)) {
+            continue;
+        }
         datum = row->pkg->datums[row->varnos[i]];
         if (datum != NULL) {
             refName = ((PLpgSQL_variable*)datum)->refname;
@@ -341,7 +344,15 @@ int plpgsql_pkg_add_unknown_var_to_namespace(List* name)
     bool isSamePkg = false;
     PLpgSQL_datum* datum = GetPackageDatum(name, &isSamePkg);
     if (datum != NULL) {
-        return plpgsql_build_pkg_variable(name, datum, isSamePkg);
+        /*
+         * The current memory context is temp context, when this function is called by yylex_inparam etc,
+         * so we should swtich to function context.
+         * If add package var, plpgsql_ns_additem will swtich to package context.
+         */
+        MemoryContext oldCxt = MemoryContextSwitchTo(u_sess->plsql_cxt.curr_compile_context->compile_cxt);
+        int varno = plpgsql_build_pkg_variable(name, datum, isSamePkg);
+        (void)MemoryContextSwitchTo(oldCxt);
+        return varno;
     } else {
         return -1;
     }
@@ -676,23 +687,10 @@ void delete_package(PLpgSQL_package* pkg)
 static void plpgsql_pkg_append_dlcell(plpgsql_pkg_HashEnt* entity)
 {
     MemoryContext oldctx;
-    PLpgSQL_package* pkg = NULL;
     oldctx = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER));
     u_sess->plsql_cxt.plpgsqlpkg_dlist_objects = dlappend(u_sess->plsql_cxt.plpgsqlpkg_dlist_objects, entity);
     (void)MemoryContextSwitchTo(oldctx);
-
     entity->cell = u_sess->plsql_cxt.plpgsqlpkg_dlist_objects->tail;
-    while (dlength(u_sess->plsql_cxt.plpgsqlpkg_dlist_objects) > g_instance.attr.attr_sql.max_compile_functions) {
-        DListCell* headcell = u_sess->plsql_cxt.plpgsqlpkg_dlist_objects->head;
-        plpgsql_pkg_HashEnt* head_entity = (plpgsql_pkg_HashEnt*)lfirst(headcell);
-
-        pkg = head_entity->package;
-
-        /* delete from the hash and delete the function's compile */
-        CheckCurrCompileDependOnPackage(pkg->pkg_oid);
-        delete_package(pkg);
-        pfree_ext(pkg);
-    }
 }
 
 
@@ -1087,6 +1085,7 @@ PLpgSQL_package* plpgsql_pkg_compile(Oid pkgOid, bool for_validator, bool isSpec
     PLpgSQL_package* pkg = NULL;
     PLpgSQL_pkg_hashkey hashkey;
     bool pkg_valid = false;
+    MemoryContext oldcxt = CurrentMemoryContext;
     /*
      * Lookup the gs_package tuple by Oid; we'll need it in any case
      */
@@ -1111,12 +1110,14 @@ PLpgSQL_package* plpgsql_pkg_compile(Oid pkgOid, bool for_validator, bool isSpec
             ItemPointerEquals(&pkg->pkg_tid, &pkg_tup->t_self)) {
                 pkg_valid = true;
         } else {
+            MemoryContextSwitchTo(oldcxt);
             /* need reuse pkg slot in hash table later, we need clear all refcount for this pkg and delete it here */
             delete_package_and_check_invalid_item(pkgOid);
             pkg_valid = false;
         }
     }
     PLpgSQL_compile_context* save_compile_context = u_sess->plsql_cxt.curr_compile_context;
+    Oid old_value = saveCallFromPkgOid(pkgOid);
     PG_TRY();
     {
         if (!pkg_valid) {
@@ -1173,6 +1174,7 @@ PLpgSQL_package* plpgsql_pkg_compile(Oid pkgOid, bool for_validator, bool isSpec
         ReleaseSysCache(pkg_tup);
         pkg_tup = NULL;
     }
+    restoreCallFromPkgOid(old_value);
     /*
      * Finally return the compiled function
      */

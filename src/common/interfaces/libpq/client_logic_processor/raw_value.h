@@ -42,6 +42,7 @@ public:
     RawValue &operator = (const RawValue &) = delete;
 
     bool process(const ICachedColumn *cached_column, char *err_msg);
+    bool process_binary(const ICachedColumn *cached_column, char *err_msg, unsigned char **binary, size_t *binary_size);
     void set_data(const unsigned char *data, size_t data_size);
     void set_data_value(const unsigned char *data_value, size_t size)
     {

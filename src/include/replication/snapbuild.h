@@ -73,9 +73,9 @@ extern SnapBuildState SnapBuildCurrentState(SnapBuild* snapstate);
 extern bool SnapBuildXactNeedsSkip(SnapBuild* snapstate, XLogRecPtr ptr);
 
 extern void SnapBuildCommitTxn(
-    SnapBuild* builder, XLogRecPtr lsn, TransactionId xid, int nsubxacts, TransactionId* subxacts);
+    LogicalDecodingContext *ctx, XLogRecPtr lsn, TransactionId xid, int nsubxacts, TransactionId* subxacts);
 extern bool SnapBuildProcessChange(SnapBuild* builder, TransactionId xid, XLogRecPtr lsn);
-extern void SnapBuildProcessNewCid(SnapBuild* builder, TransactionId xid, XLogRecPtr lsn, struct xl_heap_new_cid* cid,
+extern void SnapBuildProcessNewCid(LogicalDecodingContext *ctx, TransactionId xid, XLogRecPtr lsn, struct xl_heap_new_cid* cid,
                                    int bucket_id);
 extern void SnapBuildProcessRunningXacts(SnapBuild* builder, XLogRecPtr lsn, struct xl_running_xacts* running);
 extern void SnapBuildSerializationPoint(SnapBuild* builder, XLogRecPtr lsn);

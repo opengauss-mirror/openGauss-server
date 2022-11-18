@@ -547,6 +547,29 @@ call pro_cs_trans_1();
 drop procedure pro_cs_trans_1;
 drop table cs_trans_1; 
 
+-- test for rec in cursor loop
+show behavior_compat_options;
+create table test_table(col1 varchar2(10));
+create or replace package test_pckg as
+    procedure test_proc(v01 in varchar2);
+end test_pckg;
+/
+
+
+create or replace package body test_pckg as
+    procedure test_proc(v01 in varchar2) as
+ cursor cur(vcol1 varchar2) is select col1 from test_table where col1 = vcol1;
+ v02 varchar2;
+ begin
+ for rec in cur(v01) loop
+ v02 := 'a';
+ end loop;
+ end;
+end test_pckg;
+/
+drop table test_table;
+drop package test_pckg;
+
 -- test for rec in select loop when rec is defined
 set behavior_compat_options='proc_implicit_for_loop_variable';
 create table t1(a int, b int);
@@ -582,6 +605,9 @@ end pck_for;
 
 call pck_for.p1();
 drop package pck_for;
+
+set behavior_compat_options='';
+set plsql_compile_check_options='for_loop';
 
 -- (b) definde as scarlar
 create or replace package pck_for is
@@ -634,6 +660,39 @@ drop package pck_for;
 drop table t1;
 drop table t2;
 set behavior_compat_options='';
+set plsql_compile_check_options='';
+
+create or replace procedure check_compile() as
+declare
+	cursor c1 is select sysdate a;
+	v_a varchar2;
+begin
+	for rec in c1 loop 
+	select 'aa' into v_a from sys_dummy where sysdate = rec.a;
+	raise info '%' ,v_a;
+	end loop;
+end;
+/
+
+call  check_compile();
+
+set behavior_compat_options='allow_procedure_compile_check';
+create or replace procedure check_compile_1() as
+declare
+	cursor c1 is select sysdate a;
+	v_a varchar2;
+begin
+	for rec in c1 loop 
+	select 'aa' into v_a from sys_dummy where sysdate = rec.a;
+	raise info '%' ,v_a;
+	end loop;
+end;
+/
+
+call  check_compile_1();
+set behavior_compat_options='';
+
+drop procedure check_compile;
 
 ----  clean  ----
 drop package pck1;

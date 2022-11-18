@@ -1033,18 +1033,10 @@ void AlterForeignServer(AlterForeignServerStmt* stmt)
 
     char* typeName = getServerOptionValue(srvId, "type");
     if (NULL == typeName) {
-        /* hdfs foreign server without option 'type' */
-        if (0 == pg_strcasecmp(fdw->fdwname, HDFS_FDW)) {
-            FEATURE_NOT_PUBLIC_ERROR("HDFS is not yet supported.");
-        }
-    } else if (0 == pg_strcasecmp(typeName, HDFS)) {
-        FEATURE_NOT_PUBLIC_ERROR("HDFS is not yet supported.");
-    }else if (0 == pg_strcasecmp(typeName, OBS)) {
-#ifndef ENABLE_LITE_MODE
-        (void)dfs::InvalidOBSConnectorCache(srvId);
-#else
-        FEATURE_ON_LITE_MODE_NOT_SUPPORTED();
-#endif
+        /* nothing to do */
+    } else if ((0 == pg_strcasecmp(typeName, HDFS)) ||
+               (0 == pg_strcasecmp(typeName, OBS))) {
+        FEATURE_NOT_PUBLIC_ERROR("Feature is not yet supported.");
     } else if (0 == pg_strcasecmp(typeName, DUMMY_SERVER)) {
         InvalidDummyServerCache(srvId);
     }
@@ -1066,10 +1058,6 @@ void RemoveForeignServerById(Oid srvId)
         ereport(
             ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for foreign server %u", srvId)));
 
-    Form_pg_foreign_server serverform = (Form_pg_foreign_server)GETSTRUCT(tp);
-    ForeignDataWrapper* fdw = GetForeignDataWrapper(serverform->srvfdw);
-    const bool is_hdfs_fdw = (0 == pg_strcasecmp(fdw->fdwname, HDFS_FDW));
-
     simple_heap_delete(rel, &tp->t_self);
 
     ReleaseSysCache(tp);
@@ -1078,18 +1066,10 @@ void RemoveForeignServerById(Oid srvId)
 
     char* typeName = getServerOptionValue(srvId, "type");
     if (NULL == typeName) {
-        /* hdfs foreign server without option 'type' */
-        if (is_hdfs_fdw) {
-            FEATURE_NOT_PUBLIC_ERROR("HDFS is not yet supported.");
-        }
-    } else if (0 == pg_strcasecmp(typeName, HDFS)) {
-        FEATURE_NOT_PUBLIC_ERROR("HDFS is not yet supported.");
-    } else if (0 == pg_strcasecmp(typeName, OBS)) {
-#ifndef ENABLE_LITE_MODE
-        (void)dfs::InvalidOBSConnectorCache(srvId);
-#else
-        FEATURE_ON_LITE_MODE_NOT_SUPPORTED();
-#endif
+       /* nothing to do */
+    } else if ((0 == pg_strcasecmp(typeName, HDFS)) ||
+               (0 == pg_strcasecmp(typeName, OBS))) {
+        FEATURE_NOT_PUBLIC_ERROR("Feature is not yet supported.");
     } else if (0 == pg_strcasecmp(typeName, DUMMY_SERVER)) {
         InvalidDummyServerCache(srvId);
     }

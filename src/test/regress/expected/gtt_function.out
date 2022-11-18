@@ -30,7 +30,7 @@ cluster gtt1 using gtt1_pkey;
 create index CONCURRENTLY idx_gtt1 on gtt1 (b);
 --ERROR
 alter index idx_gtt1 SET TABLESPACE pg_default;
-ERROR:  not support alter table set tablespace on global temp table.
+ERROR:  not support alter index set tablespace on global temp table.
 alter index idx_gtt1 SET (on_commit_delete_rows='true');
 ERROR:  table cannot add or modify on commit parameter by ALTER TABLE command.
 alter index idx_gtt1 RESET (on_commit_delete_rows='false');
@@ -521,9 +521,51 @@ DELETE FROM ONLY gtt_test13;
 UPDATE gtt_test13 SET c0 = (NOT (gtt_test13.c0)) WHERE gtt_test13.c0;
 INSERT INTO gtt_test13(c0) VALUES(FALSE), (FALSE) ON DUPLICATE KEY UPDATE  NOTHING;
 TRUNCATE gtt_test13 CONTINUE IDENTITY;
+-- alter table bugfix
+drop table if exists gtt_test14;
+NOTICE:  table "gtt_test14" does not exist, skipping
+create global temp table gtt_test14(c_id int,
+c_street_1 varchar(10485760) ,
+c_text text,
+c_clob clob) on commit preserve rows;
+insert into gtt_test14 values(1, repeat('中文（Chinese）是中国的语言文字。特指汉族的语言文字，即汉语和汉字。在汉字文化圈和海外华人社区中，中文
+也被称为华文、汉文。中文（汉语）有标准语和方言之分，其标准语即汉语普通话，是规范后的汉民族共同语，也是中国的国家通用语言
+',100), repeat('中文（Chinese）是中国的语言文字。特指汉族的语言文字，即汉语和汉字。在汉字文化圈和海外华人社区中，中文也被称为华文、汉文。中文（汉语）有标准语和方言之分，其标准语即汉语普通话，是规范后的汉民族共同语，也是中国的国家通用语言',1000));
+select c_id, length(c_street_1), length(c_text) c_clob from gtt_test14;
+ c_id | length | c_clob 
+------+--------+--------
+    1 |  11600 | 114000
+(1 row)
+
+alter table gtt_test14 add column c_id1 int default 100;
+select c_id, length(c_street_1), length(c_text) c_clob from gtt_test14;
+ c_id | length | c_clob 
+------+--------+--------
+    1 |  11600 | 114000
+(1 row)
+
+update gtt_test14 set c_street_1='street1',c_text='text',c_clob='clob';
+select * from gtt_test14;
+ c_id | c_street_1 | c_text | c_clob | c_id1 
+------+------------+--------+--------+-------
+    1 | street1    | text   | clob   |   100
+(1 row)
+
+--test index in new session
+\c regression
+set search_path=gtt_function,sys;
+select * from gtt_test12;
+ c0 | c1 
+----+----
+(0 rows)
+
+insert into gtt_test12 values(generate_series(1,2), 't');
+insert into gtt_test12 values(generate_series(1,2), 't'); --should fail
+ERROR:  duplicate key value violates unique constraint "gtt_test12_c0_c1_key"
+DETAIL:  Key (c0, c1)=(1, t) already exists.
 reset search_path;
 drop schema gtt_function cascade;
-NOTICE:  drop cascades to 36 other objects
+NOTICE:  drop cascades to 37 other objects
 DETAIL:  drop cascades to table gtt_function.gtt1
 drop cascades to table gtt_function.gtt2
 drop cascades to table gtt_function.gtt3
@@ -560,5 +602,6 @@ drop cascades to table gtt_function.gtt_test9
 drop cascades to table gtt_function.gtt_test10
 drop cascades to table gtt_function.gtt_test12
 drop cascades to table gtt_function.gtt_test13
+drop cascades to table gtt_function.gtt_test14
 drop table public.gtt_test_new;
 drop user gtt_user;

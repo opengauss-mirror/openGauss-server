@@ -118,7 +118,7 @@ static void CheckCreateDirectoryPermission()
      * When enable_access_server_directory is on, sysadmin and the member of gs_role_directory_create role
      * can create directory.
      */
-    if (g_instance.attr.attr_storage.enable_access_server_directory) {
+    if (u_sess->attr.attr_storage.enable_access_server_directory) {
         if (!superuser() && !is_member_of_role(GetUserId(), DEFAULT_ROLE_DIRECTORY_CREATE)) {
             ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                 errmsg("permission denied to create directory"),
@@ -155,6 +155,7 @@ void CreatePgDirectory(CreateDirectoryStmt* stmt)
     HeapTuple oldtup = NULL;
     HeapTuple tup = NULL;
     TupleDesc tupDesc = NULL;
+    bool isUpdate = false;
     errno_t rc;
 
     /* Permission check. */
@@ -191,6 +192,7 @@ void CreatePgDirectory(CreateDirectoryStmt* stmt)
     if (OidIsValid(targetoid)) {
         /* existing a entry before */
         if (stmt->replace) {
+            isUpdate = true;
             replaces[Anum_pg_directory_directory_name - 1] = false;
             oldtup = SearchSysCache1(DIRECTORYOID, targetoid);
             tupDesc = RelationGetDescr(rel);
@@ -198,6 +200,7 @@ void CreatePgDirectory(CreateDirectoryStmt* stmt)
                 ereport(ERROR,
                     (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for directory %u", targetoid)));
             }
+
             tup = (HeapTuple) tableam_tops_modify_tuple(oldtup, tupDesc, values, nulls, replaces);
             simple_heap_update(rel, &tup->t_self, tup);
 
@@ -206,6 +209,7 @@ void CreatePgDirectory(CreateDirectoryStmt* stmt)
             pfree(location);
             heap_close(rel, RowExclusiveLock);
         } else {
+            isUpdate = false;
             pfree(location);
             heap_close(rel, RowExclusiveLock);
             ereport(ERROR,
@@ -214,6 +218,7 @@ void CreatePgDirectory(CreateDirectoryStmt* stmt)
         }
     } else {
         /* create a new entry */
+        isUpdate = false;
         tup = heap_form_tuple(rel->rd_att, values, nulls);
         directoryId = simple_heap_insert(rel, tup);
         CatalogUpdateIndexes(rel, tup);
@@ -224,6 +229,9 @@ void CreatePgDirectory(CreateDirectoryStmt* stmt)
         pfree(location);
         heap_close(rel, RowExclusiveLock);
     }
+    ObjectAddress myself;
+    ObjectAddressSet(myself, PgDirectoryRelationId, isUpdate ? targetoid : directoryId);
+    recordDependencyOnCurrentExtension(&myself, isUpdate);
 }
 
 /*
@@ -236,7 +244,7 @@ static void CheckDropDirectoryPermission(Oid directoryId, const char* directoryN
      * When enable_access_server_directory is on, directory owner or users have drop privileges of the directory or
      * the member of the gs_role_directory_drop role can drop directory.
      */
-    if (g_instance.attr.attr_storage.enable_access_server_directory) {
+    if (u_sess->attr.attr_storage.enable_access_server_directory) {
         AclResult aclresult = pg_directory_aclcheck(directoryId, GetUserId(), ACL_DROP);
         if (aclresult != ACLCHECK_OK && !superuser() && !pg_directory_ownercheck(directoryId, GetUserId())
             && !is_member_of_role(GetUserId(), DEFAULT_ROLE_DIRECTORY_DROP)) {
@@ -429,7 +437,7 @@ void AlterDirectoryOwner(const char* dirname, Oid newOwnerId)
         HeapTuple newtuple;
         errno_t rc;
 
-        if (g_instance.attr.attr_storage.enable_access_server_directory) {
+        if (u_sess->attr.attr_storage.enable_access_server_directory) {
             /* must be sysadmin or owner of the existing object */
             if (!superuser() && !pg_directory_ownercheck(HeapTupleGetOid(tuple), GetUserId())) {
                 aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_DIRECTORY, dirname);

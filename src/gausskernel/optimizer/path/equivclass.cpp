@@ -24,6 +24,7 @@
 #include "optimizer/paths.h"
 #include "optimizer/planmain.h"
 #include "optimizer/prep.h"
+#include "optimizer/subselect.h"
 #include "optimizer/tlist.h"
 #include "optimizer/var.h"
 #include "parser/parse_coerce.h"
@@ -449,6 +450,27 @@ static EquivalenceMember* add_eq_member(
     return em;
 }
 
+static bool restrict_contains_bplike_walker(Node *node, void *context)
+{
+    if (node == NULL) {
+        return false;
+    }
+
+    if (IsA(node, OpExpr)) {
+        OpExpr *opExpr = (OpExpr *)node;
+        if (opExpr->opno == OID_BPCHAR_LIKE_OP || opExpr->opno == OID_BPCHAR_NOT_LIKE_OP ||
+            opExpr->opno == OID_BPCHAR_ICLIKE_OP || opExpr->opno == OID_BPCHAR_IC_NOT_LIKE_OP) {
+            return true;
+        }
+    }
+
+    return expression_tree_walker(node, (bool (*)())restrict_contains_bplike_walker, context);
+}
+static bool restrict_contains_bplike(RestrictInfo *rinfo)
+{
+    return restrict_contains_bplike_walker((Node *)rinfo->clause, NULL);
+}
+
 /*
  * get_eclass_for_sort_expr
  *	  Given an expression and opfamily/collation info, find an existing
@@ -656,6 +678,23 @@ void generate_base_implied_qualities(PlannerInfo* root)
             if (BMS_SINGLETON != bms_membership(rinfo->clause_relids))
                 continue;
 
+            /*
+             * Even two vars are in the same EquivalenceClass, there exists some expression get different result on two
+             * vars. The type bpchar (blank padded character) is an example. Its equal function and like function is not
+             * consistent.
+             *     equal function---bpchareq: ignore the padded blank charater at the end of the Var.
+             *     like function --bpliketext: NOT ignore the padded blank character!
+             * For example:
+             *     create table A(a char(10)); create table B(a char(2));
+             *     insert into A values('33'); insert into B values('33');
+             * Then A.a = B.a, but B.a like '33' is true while A.a like '33' is false !.
+             *
+             * This is the only inconsistent behavior among EquivalenceClass members we found yet. So just skip it!
+             */
+            if (restrict_contains_bplike(rinfo)) {
+                continue;
+            }
+
             generate_base_implied_quality_clause(root, rel, rinfo);
         }
     }
@@ -706,6 +745,11 @@ static void generate_base_implied_quality_clause(PlannerInfo* root, RelOptInfo* 
 
             if (list_member(src_list, em->em_expr))
                 continue;
+
+            if (IsA((Node*)rinfo->clause, NullTest) && ((NullTest*)rinfo->clause)->nulltesttype == IS_NOT_NULL &&
+                check_var_nonnullable(root->parse, (Node*)em->em_expr)) {
+                continue;
+            }
 
             new_clause = replace_node_clause_for_equality((Node*)rinfo->clause, src_list, (Node*)em->em_expr);
             relids = pull_varnos(new_clause);

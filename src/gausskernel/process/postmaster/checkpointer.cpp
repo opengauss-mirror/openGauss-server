@@ -191,6 +191,7 @@ void CheckpointerMain(void)
      * want to wait for the backends to exit, whereupon the postmaster will
      * tell us it's okay to shut down (via SIGUSR2).
      */
+    (void)gspqsignal(SIGURG, print_stack);
     (void)gspqsignal(SIGHUP, ChkptSigHupHandler);   /* set flag to read config
                                                      * file */
     (void)gspqsignal(SIGINT, ReqCheckpointHandler); /* request checkpoint */

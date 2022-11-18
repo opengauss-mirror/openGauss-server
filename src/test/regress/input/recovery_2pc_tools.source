@@ -2,7 +2,6 @@
 -- check the CATALOG_VERSION_NO value which from "src/bin/catalog/catversion.h"
 -- If changed, please inform the OM tools team. The scripts of OM tools need to be modified together
 --
-\! @abs_bindir@/pg_controldata @abs_srcdir@/tmp_check/coordinator1/ | grep "Catalog version number"
 --
 -- check GUC parameter
 --

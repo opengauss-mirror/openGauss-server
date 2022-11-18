@@ -535,11 +535,13 @@ void InjectDelayWaitRedoPageManagerQueueEmpty()
 
 void WaitAllRedoWorkerQueueEmpty()
 {
-    if ((get_real_recovery_parallelism() > 1) && (GetBatchCount() > 0)) {
-        PageRedoPipeline *myRedoLine = &g_dispatcher->pageLines[g_redoWorker->slotId];
-        const uint32 WorkerNumPerMng = myRedoLine->redoThdNum;
+    if ((get_real_recovery_parallelism() <= 1) || (GetBatchCount() == 0)) {
+        return;
+    }
+    for (uint j = 0; j < g_dispatcher->pageLineNum; ++j) {
+        PageRedoPipeline *myRedoLine = &g_dispatcher->pageLines[j];
 
-        for (uint32 i = 0; i < WorkerNumPerMng; ++i) {
+        for (uint32 i = 0; i < myRedoLine->redoThdNum; ++i) {
             while (!SPSCBlockingQueueIsEmpty(myRedoLine->redoThd[i]->queue)) {
                 RedoInterruptCallBack();
             }
@@ -897,38 +899,16 @@ void PageManagerProcSegPipeLineSyncState(HTAB *hashMap, XLogRecParseState *parse
 
 static void WaitNextBarrier(XLogRecParseState *parseState)
 {
-    const int MAINDATALEN = (int)parseState->blockparse.extra_rec.blockbarrier.maindatalen;
-    XLogRecPtr barrierLSN = parseState->blockparse.blockhead.end_ptr;
-    if (!IS_DISASTER_RECOVER_MODE || XLogRecPtrIsInvalid(t_thrd.xlog_cxt.minRecoveryPoint) ||
-        XLByteLT(barrierLSN, t_thrd.xlog_cxt.minRecoveryPoint) ||
-        t_thrd.shemem_ptr_cxt.ControlFile->backupEndRequired) {
-        XLogBlockParseStateRelease(parseState);
-        return;
+    bool needWait = parseState->isFullSync;
+    if (needWait) {
+        pg_atomic_write_u32(&g_redoWorker->fullSyncFlag, 1);
     }
-
-    char barrier[MAINDATALEN + 1];
-    errno_t rc = memcpy_s(barrier, MAINDATALEN, parseState->blockparse.extra_rec.blockbarrier.maindata, MAINDATALEN);
-    securec_check(rc, "\0", "\0");
-
-    uint8 info = parseState->blockparse.blockhead.xl_info & ~XLR_INFO_MASK;
+    
     XLogBlockParseStateRelease(parseState);
-    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
-
-    if (info == XLOG_BARRIER_COMMIT || !IS_DISASTER_RECOVER_MODE || !is_barrier_pausable(barrier))
-        return;
-
-    while (true) {
-        SpinLockAcquire(&walrcv->mutex);
-        if (BARRIER_LT((char *)barrier, (char *)walrcv->recoveryTargetBarrierId) ||
-            BARRIER_LE((char *)barrier, (char *)walrcv->recoveryStopBarrierId)||
-            BARRIER_EQ((char *)barrier, (char *)walrcv->recoverySwitchoverBarrierId)) {
-            SpinLockRelease(&walrcv->mutex);
-            break;
-        } else {
-            SpinLockRelease(&walrcv->mutex);
-            pg_usleep(1000L);
-            RedoInterruptCallBack();
-        }
+    uint32 val = pg_atomic_read_u32(&g_redoWorker->fullSyncFlag);
+    while (val != 0) {
+        RedoInterruptCallBack();
+        val = pg_atomic_read_u32(&g_redoWorker->fullSyncFlag);
     }
 }
 
@@ -1249,12 +1229,20 @@ bool CheckFullSyncCheckpoint(RedoItem *item)
     return false;
 }
 
+static void TrxnWorkerQueueCallBack()
+{
+    if (XLByteLT(t_thrd.xlog_cxt.minRecoveryPoint, g_redoWorker->minRecoveryPoint)) {
+        t_thrd.xlog_cxt.minRecoveryPoint = g_redoWorker->minRecoveryPoint;
+    }
+    HandlePageRedoInterrupts();
+}
+
 void TrxnWorkMain()
 {
 #ifdef ENABLE_MOT
     MOTBeginRedoRecovery();
 #endif
-    (void)RegisterRedoInterruptCallBack(HandlePageRedoInterrupts);
+    (void)RegisterRedoInterruptCallBack(TrxnWorkerQueueCallBack);
     if (ParseStateWithoutCache()) {
         XLogRedoBufferInitFunc(&(g_redoWorker->bufferManager), MAX_LOCAL_BUFF_NUM, &recordRefOperate,
                                RedoInterruptCallBack);
@@ -2132,7 +2120,7 @@ void XLogReadManagerResponseSignal(uint32 tgigger)
             if (t_thrd.xlog_cxt.is_cascade_standby) {
                 SendPostmasterSignal(PMSIGNAL_UPDATE_PROMOTING);
                 t_thrd.xlog_cxt.is_cascade_standby = false;
-                if (t_thrd.postmaster_cxt.HaShmData->is_cross_region) {
+                if (IS_DISASTER_RECOVER_MODE) {
                     t_thrd.xlog_cxt.is_hadr_main_standby = true;
                     SpinLockAcquire(&t_thrd.postmaster_cxt.HaShmData->mutex);
                     t_thrd.postmaster_cxt.HaShmData->is_hadr_main_standby = true;
@@ -2501,10 +2489,12 @@ void ParallelRedoThreadMain()
     InitGlobals();
     
     ResourceManagerStartup();
+    InitRecoveryLockHash();
     WaitStateNormal();
     EnableSyncRequestForwarding();
 
     int retCode = RedoMainLoop();
+    StandbyReleaseAllLocks();
     ResourceManagerStop();
     ereport(LOG, (errmsg("Page-redo-worker thread %u terminated, role:%u, slotId:%u, retcode %u.", g_redoWorker->id,
                          g_redoWorker->role, g_redoWorker->slotId, retCode)));
@@ -2545,7 +2535,6 @@ static void SetupSignalHandlers()
     (void)gspqsignal(SIGINT, SIG_IGN);
     (void)gspqsignal(SIGTERM, PageRedoShutdownHandler);
     (void)gspqsignal(SIGQUIT, PageRedoQuickDie);
-    (void)gspqsignal(SIGALRM, SIG_IGN);
     (void)gspqsignal(SIGPIPE, SIG_IGN);
     (void)gspqsignal(SIGUSR1, PageRedoUser1Handler);
     (void)gspqsignal(SIGUSR2, PageRedoUser2Handler);
@@ -2554,6 +2543,12 @@ static void SetupSignalHandlers()
     (void)gspqsignal(SIGTTOU, SIG_IGN);
     (void)gspqsignal(SIGCONT, SIG_IGN);
     (void)gspqsignal(SIGWINCH, SIG_IGN);
+    (void)gspqsignal(SIGURG, print_stack);
+    if (g_instance.attr.attr_storage.EnableHotStandby) {
+        (void)gspqsignal(SIGALRM, handle_standby_sig_alarm); /* ignored unless InHotStandby */
+    } else {
+        (void)gspqsignal(SIGALRM, SIG_IGN);
+    }
 
     gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
     (void)gs_signal_unblock_sigusr2();

@@ -878,20 +878,23 @@ static void SetPlainReSizeWithPruningRatio(RelOptInfo *rel, double pruningRatio)
  */
 static bool IsPbeSinglePartition(Relation rel, RelOptInfo* relInfo)
 {
-    if (relInfo->pruning_result->paramArg == NULL) {
+    if (relInfo->pruning_result->paramArg == NULL || relInfo->pruning_result->paramArg->paramkind != PARAM_EXTERN) {
+        relInfo->pruning_result->isPbeSinlePartition = false;
         return false;
     }
     if (RelationIsSubPartitioned(rel)) {
+        relInfo->pruning_result->isPbeSinlePartition = false;
         return false;
     }
-    if (rel->partMap->type != PART_TYPE_RANGE) {
-        return false;
+    if (rel->partMap->type == PART_TYPE_RANGE || rel->partMap->type == PART_TYPE_INTERVAL) {
+        RangePartitionMap *partMap = (RangePartitionMap *)rel->partMap;
+        int partKeyNum = partMap->partitionKey->dim1;
+        if (partKeyNum > 1) {
+            relInfo->pruning_result->isPbeSinlePartition = false;
+            return false;
+        }
     }
-    RangePartitionMap* partMap = (RangePartitionMap*)rel->partMap;
-    int partKeyNum = partMap->partitionKey->dim1;
-    if (partKeyNum > 1) {
-        return false;
-    }
+
     if (relInfo->pruning_result->isPbeSinlePartition) {
         return true;
     }
@@ -909,6 +912,10 @@ static void set_plain_rel_size(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry
         Relation relation = heap_open(rte->relid, NoLock);
         double pruningRatio = 1.0;
 
+        /* Before static pruning, we save the partmap in pruning_result, which will used in dynamic pruning and
+         * executor, seen in GetPartitionInfo and getPartitionOidFromSequence */
+        PartitionMap *partmap = CopyPartitionMap(relation->partMap);
+
         /* get pruning result */
         if (rte->isContainPartition) {
             rel->pruning_result = singlePartitionPruningForRestrictInfo(rte->partitionOid, relation);
@@ -916,10 +923,11 @@ static void set_plain_rel_size(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry
             rel->pruning_result =
                 SingleSubPartitionPruningForRestrictInfo(rte->subpartitionOid, relation, rte->partitionOid);
         } else {
-            rel->pruning_result = partitionPruningForRestrictInfo(root, rte, relation, rel->baserestrictinfo);
+            rel->pruning_result = partitionPruningForRestrictInfo(root, rte, relation, rel->baserestrictinfo, partmap);
         }
 
         Assert(rel->pruning_result);
+        rel->pruning_result->partMap = partmap;
 
         if (IsPbeSinglePartition(relation, rel)) {
             rel->partItrs = 1;
@@ -1180,9 +1188,6 @@ static void set_plain_rel_pathlist(PlannerInfo* root, RelOptInfo* rel, RangeTblE
                 (errmodule(MOD_OPT),
                     errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
                     errmsg("could not open relation with OID %u", relId)));
-        }
-        if (RelationIsDfsStore(relation)) {
-            rte->inh = true;
         }
 
         RelationClose(relation);
@@ -2190,6 +2195,15 @@ static bool has_multiple_baserels(PlannerInfo* root)
     return false;
 }
 
+static bool has_rownum(Query* query)
+{
+    if (query == NULL) {
+        return false;
+    }
+
+    return expression_contains_rownum((Node*)query->targetList);
+}
+
 static bool can_push_qual_into_subquery(PlannerInfo* root,
                                                 RestrictInfo* rinfo,
                                                 RangeTblEntry* rte,
@@ -2212,6 +2226,10 @@ static bool can_push_qual_into_subquery(PlannerInfo* root,
     }
 
     if (!qual_pushdown_in_partialpush(root->parse, subquery, clause)){
+        return false;
+    }
+
+    if (has_rownum(subquery)) {
         return false;
     }
 
@@ -3768,9 +3786,17 @@ static void make_partiterator_pathkey(
         return;
     }
 
+    if (RelationIsSubPartitioned(relation)) {
+        return;
+    }
+
     if (rel->partItrs <= 1) {
         /* inherit pathkeys if pruning result is <= 1 */
         itrpath->path.pathkeys = pathkeys;
+        return;
+    }
+
+    if (relation->partMap->type != PART_TYPE_RANGE && relation->partMap->type != PART_TYPE_INTERVAL) {
         return;
     }
 
@@ -4038,6 +4064,8 @@ static Path* create_partiterator_path(PlannerInfo* root, RelOptInfo* rel, Path* 
             itrpath->path.startup_cost = path->startup_cost;
             itrpath->path.total_cost = path->total_cost;
             itrpath->path.dop = path->dop;
+            itrpath->partType = relation->partMap->type;
+            itrpath->path.hint_value = path->hint_value;
 
             /* scan parttition from lower boundary to upper boundary by default */
             itrpath->direction = ForwardScanDirection;

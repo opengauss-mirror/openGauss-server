@@ -191,8 +191,15 @@ bool checkPartitionIndexUnusable(Oid indexOid, int partItrs, PruningResult* prun
         int partSeq = lfirst_int(cell);
         Relation tablepartrel = NULL;
 
-        tablepartitionid = getPartitionOidFromSequence(heapRel, partSeq);
-        tablepart = partitionOpen(heapRel, tablepartitionid, AccessShareLock);
+        tablepartitionid = getPartitionOidFromSequence(heapRel, partSeq, pruning_result->partMap);
+        tablepart = tryPartitionOpen(heapRel, tablepartitionid, AccessShareLock);
+        if (!tablepart) {
+            PartStatus currStatus = PartitionGetMetadataStatus(tablepartitionid, false);
+            if (currStatus != PART_METADATA_INVISIBLE) {
+                ReportPartitionOpenError(heapRel, tablepartitionid);
+            }
+            continue;
+        }
 
         /* get index partition and add it to a list for following scan */
         if (RelationIsSubPartitioned(heapRel)) {
@@ -313,7 +320,7 @@ static IndexesUsableType eliminate_subpartition_index_unusable(Relation heapRel,
         List* partitionIndexOidList = NIL;
         int partSeq = lfirst_int(cell);
 
-        tablepartitionid = getPartitionOidFromSequence(heapRel, partSeq);
+        tablepartitionid = getPartitionOidFromSequence(heapRel, partSeq, inputPruningResult->partMap);
         tablepart = partitionOpen(heapRel, tablepartitionid, AccessShareLock);
         tablepartrel = partitionGetRelation(heapRel, tablepart);
 
@@ -415,8 +422,15 @@ IndexesUsableType eliminate_partition_index_unusable(Relation heapRel, Relation 
         List* partitionIndexOidList = NIL;
         int partSeq = lfirst_int(cell);
 
-        tablepartitionid = getPartitionOidFromSequence(heapRel, partSeq);
-        tablepart = partitionOpen(heapRel, tablepartitionid, AccessShareLock);
+        tablepartitionid = getPartitionOidFromSequence(heapRel, partSeq, inputPruningResult->partMap);
+        tablepart = tryPartitionOpen(heapRel, tablepartitionid, AccessShareLock);
+        if (!tablepart) {
+            PartStatus currStatus = PartitionGetMetadataStatus(tablepartitionid, false);
+            if (currStatus != PART_METADATA_INVISIBLE) {
+                ReportPartitionOpenError(heapRel, tablepartitionid);
+            }
+            continue;
+        }
 
         /* get index partition and add it to a list for following scan */
         partitionIndexOidList = PartitionGetPartIndexList(tablepart);

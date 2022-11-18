@@ -21,7 +21,6 @@
 #include "access/cstore_delta.h"
 #include "access/cstore_insert.h"
 #include "access/cstore_rewrite.h"
-#include "access/dfs/dfs_am.h"
 #include "access/genam.h"
 #include "access/heapam.h"
 #include "access/reloptions.h"
@@ -35,10 +34,10 @@
 #include "access/tableam.h"
 #include "access/ustore/knl_uheap.h"
 #include "access/ustore/knl_uscan.h"
+#include "access/ustore/knl_undorequest.h"
 #include "access/multixact.h"
 #include "catalog/catalog.h"
 #include "catalog/dependency.h"
-#include "catalog/dfsstore_ctlg.h"
 #include "catalog/heap.h"
 #include "catalog/index.h"
 #include "catalog/indexing.h"
@@ -58,7 +57,6 @@
 #include "catalog/pg_opclass.h"
 #include "catalog/pg_partition.h"
 #include "catalog/pg_partition_fn.h"
-#include "catalog/pg_rewrite.h"
 #include "catalog/pg_hashbucket.h"
 #include "catalog/pg_hashbucket_fn.h"
 #include "catalog/pg_tablespace.h"
@@ -127,6 +125,7 @@
 #include "storage/lock/lock.h"
 #include "storage/page_compression.h"
 #include "storage/predicate.h"
+#include "storage/procarray.h"
 #include "storage/remote_read.h"
 #include "storage/smgr/segment.h"
 #include "storage/smgr/smgr.h"
@@ -193,7 +192,6 @@
 #include "pgxc/redistrib.h"
 #include "pgxc/groupmgr.h"
 #endif
-#include "dfs_adaptor.h"
 #include "c.h"
 #include "instruments/generate_report.h"
 #include "gs_ledger/ledger_utils.h"
@@ -309,6 +307,7 @@ typedef struct NewColumnValue {
     AttrNumber attnum;    /* which column */
     Expr* expr;           /* expression to compute */
     ExprState* exprstate; /* execution state */
+    bool is_generated;     /* is it a GENERATED expression? */
 } NewColumnValue;
 
 /*
@@ -438,6 +437,8 @@ typedef OldToNewChunkIdMappingData* OldToNewChunkIdMapping;
 
 #define MATVIEW_SUPPORT_AT_CMD(cmd) ((cmd) == AT_SubCluster || (cmd) == AT_ChangeOwner)
 
+#define MLOG_MAP_SUPPORT_AT_CMD(cmd) ((cmd) == AT_SubCluster)
+
 #define HDFS_TBLSPC_SUPPORT_CREATE_LOGIC_OBJECT(kind)                                           \
     ((kind) == RELKIND_VIEW || (kind) == RELKIND_FOREIGN_TABLE || (kind) == RELKIND_SEQUENCE || \
         (kind) == RELKIND_COMPOSITE_TYPE || (kind) == RELKIND_STREAM || (kind) == RELKIND_CONTQUERY)
@@ -505,7 +506,6 @@ static void ExecOnlyTestRowPartitionedTable(AlteredTableInfo*);
  * @in tab, The AlteredTableInfo struct.
  * @return None.
  */
-static void exec_only_test_dfs_table(AlteredTableInfo* tab);
 static void ExecOnlyTestCStoreTable(AlteredTableInfo*);
 static void ExecOnlyTestCStorePartitionedTable(AlteredTableInfo*);
 static void ExecChangeTableSpaceForRowTable(AlteredTableInfo*, LOCKMODE);
@@ -646,6 +646,7 @@ static void ATExecAddRangePartition(Relation rel, AddPartitionState *partState);
 static void ATExecAddListPartition(Relation rel, AddPartitionState *partState);
 static void ATExecAddSubPartition(Relation rel, AddSubPartitionState *subpartState);
 static void CheckForAddPartition(Relation rel, List *partDefStateList);
+static void CheckForAddSubPartition(Relation rel, Relation partrel, List *subpartDefStateList);
 static void CheckTablespaceForAddPartition(Relation rel, List *partDefStateList);
 static void CheckPartitionNameConflictForAddPartition(List *newPartitionNameList, List *existingPartitionNameList);
 static void CheckPartitionValueConflictForAddPartition(Relation rel, Node *partDefState);
@@ -730,7 +731,6 @@ static void replaceRepeatChunkId(HTAB* chunkIdHashTable, List* srcPartToastRels)
 static bool checkChunkIdRepeat(List* srcPartToastRels, int index, Oid chunkId);
 static void addCudescTableForNewPartition(Relation relation, Oid newPartId);
 static void addDeltaTableForNewPartition(Relation relation, Oid newPartId);
-extern DfsSrvOptions* GetDfsSrvOptions(Oid spcNode);
 static bool OptionSupportedByORCRelation(const char* option);
 static void checkObjectCreatedinHDFSTblspc(CreateStmt* stmt, char relkind);
 /**
@@ -754,7 +754,6 @@ static void ATCheckDuplicateColumn(const AlterTableCmd* cmd, const List* tabCmds
 static void ATCheckNotNullConstr(const AlterTableCmd* cmd, const AlteredTableInfo* tab);
 static void DelDependencONDataType(Relation rel, Relation depRel, const Form_pg_attribute attTup);
 static void ATExecEncryptionKeyRotation(Relation rel, LOCKMODE lockmode);
-static bool IsViewAndRuleDependReltion(Oid relId);
 
 inline static bool CStoreSupportATCmd(AlterTableType cmdtype)
 {
@@ -2119,8 +2118,9 @@ Oid DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, bool isCTAS)
         aclresult = pg_tablespace_aclcheck(tablespaceId, GetUserId(), ACL_CREATE);
         if (aclresult != ACLCHECK_OK)
             aclcheck_error(aclresult, ACL_KIND_TABLESPACE, get_tablespace_name(tablespaceId));
-        // view is not related to tablespace, so no need to check permissions
-        if (isalter && relkind != RELKIND_VIEW &&  relkind != RELKIND_CONTQUERY) {
+        /* view and sequence are not related to tablespace, so no need to check permissions */
+        if (isalter && relkind != RELKIND_VIEW && relkind != RELKIND_CONTQUERY &&
+            relkind != RELKIND_SEQUENCE && relkind != RELKIND_LARGE_SEQUENCE) {
             aclresult = pg_tablespace_aclcheck(tablespaceId, ownerId, ACL_CREATE);
             if (aclresult != ACLCHECK_OK)
                 aclcheck_error(aclresult, ACL_KIND_TABLESPACE, get_tablespace_name(tablespaceId));
@@ -2380,6 +2380,10 @@ Oid DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, bool isCTAS)
                 ereport(LOG, (errmodule(MOD_TIMESERIES), errmsg("use implicit distribution column method.")));
             }
         } else if (pg_strcasecmp(storeChar, TABLE_ACCESS_METHOD_USTORE) == 0) {
+            if (stmt->relation->relpersistence == RELPERSISTENCE_GLOBAL_TEMP) {
+                ereport(ERROR, 
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("UStore tables do not support global temp table")));
+            }
             auto compression = StdRdOptionsGetStringData(std_opt, compression, COMPRESSION_NO);
             auto orientation = StdRdOptionsGetStringData(std_opt, orientation, ORIENTATION_ROW);
             if ((pg_strcasecmp(COMPRESSION_NO, compression) != 0 &&
@@ -2387,6 +2391,10 @@ Oid DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, bool isCTAS)
                 IsCompressedByCmprsInPgclass((RelCompressType)stmt->row_compress)) {
                 ereport(ERROR,
                         (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("UStore tables do not support compression.")));
+            }
+            if (g_instance.attr.attr_storage.recovery_parse_workers > 1) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("UStore tables do not support extreme rto.")));
             }
             ForbidToSetOptionsForRowTbl(stmt->options);
             ForbidToSetOptionsForUstoreTbl(stmt->options);
@@ -3847,7 +3855,8 @@ void TruncateOnePart(Relation rel, HeapTuple tup)
     partitionClose(rel, p, AccessExclusiveLock);
 
     /* report truncate partition to PgStatCollector */
-    pgstat_report_truncate(partOid, rel->rd_id, rel->rd_rel->relisshared);
+    Oid statFlag = RelationIsPartitionOfSubPartitionTable(rel) ? partid_get_parentid(rel->rd_id) : rel->rd_id;
+    pgstat_report_truncate(partOid, statFlag, rel->rd_rel->relisshared);
 }
 
 /*
@@ -3956,6 +3965,7 @@ void ExecuteTruncate(TruncateStmt* stmt)
         Relation rel, myrel;
         bool recurse = interpretInhOption(rv->inhOpt);
         Oid myrelid;
+        LOCKMODE lockmode;
 
         /*
          * Need to let ProcSleep know if we could cancel redistribution transaction which
@@ -3967,9 +3977,25 @@ void ExecuteTruncate(TruncateStmt* stmt)
         if (IS_PGXC_COORDINATOR)
             u_sess->exec_cxt.could_cancel_redistribution = true;
 
-        rel = heap_openrv(rv, AccessExclusiveLock);
-        myrel = rel;
-        myrelid = RelationGetRelid(rel);
+        if (IsGlobalTempTableParallelTrunc()) {
+            /*
+            * Truncate global temp table only cleans up the data in current backend,
+            * only low-level locks are required.
+            */
+            myrelid = RangeVarGetRelid(rv, NoLock, false);
+            if (IsGlobalTempTable(myrelid)) {
+                lockmode = RowExclusiveLock;
+            } else {
+                lockmode = AccessExclusiveLock;
+            }
+            rel = heap_openrv(rv, lockmode);
+            myrel = rel;
+        } else {
+            rel = heap_openrv(rv, AccessExclusiveLock);
+            myrel = rel;
+            myrelid = RelationGetRelid(rel);
+            lockmode = AccessExclusiveLock;
+        }
 
         TrForbidAccessRbObject(RelationRelationId, myrelid, rv->relname);
 
@@ -3983,7 +4009,7 @@ void ExecuteTruncate(TruncateStmt* stmt)
 
         /* don't throw error for "TRUNCATE foo, foo" */
         if (list_member_oid(relids, myrelid)) {
-            heap_close(rel, AccessExclusiveLock);
+            heap_close(rel, lockmode);
             continue;
         }
         truncate_check_rel(rel);
@@ -4098,7 +4124,11 @@ void ExecuteTruncate(TruncateStmt* stmt)
                 Oid relid = lfirst_oid(cell);
                 Relation rel;
 
-                rel = heap_open(relid, AccessExclusiveLock);
+                if (IsGlobalTempTableParallelTrunc() && IsGlobalTempTable(relid)) {
+                    rel = heap_open(relid, RowExclusiveLock);
+                } else {
+                    rel = heap_open(relid, AccessExclusiveLock);
+                }
                 ereport(NOTICE, (errmsg("truncate cascades to table \"%s\"", RelationGetRelationName(rel))));
                 truncate_check_rel(rel);
                 rels = lappend(rels, rel);
@@ -4222,34 +4252,6 @@ void ExecuteTruncate(TruncateStmt* stmt)
 #else
         if (!RELATION_IS_PARTITIONED(rel)) {
 #endif
-            /*
-			 * non partitioned table
-             * Need the full transaction-safe pushups.
-             *
-             * Create a new empty storage file for the relation, and assign it
-             * as the relfilenode value. The old storage file is scheduled for
-             * deletion at commit.
-             */
-            if (RelationIsPAXFormat(rel)) {
-                /*
-                 * For dfs table truncation, we need to get the current dfs files,
-                 * and write them into a file. We will delete the correspoinding files
-                 * when committed. The dfs files will be deleted on DN.
-                 */
-                isDfsTruncate = true;
-
-                if (!IS_PGXC_COORDINATOR) {
-                    DFSDescHandler* handler =
-                        New(CurrentMemoryContext) DFSDescHandler(MAX_LOADED_DFSDESC, rel->rd_att->natts, rel);
-                    /*
-                     * Before truncation, delete the garbage file first.
-                     */
-                    RemoveGarbageFiles(rel, handler);
-                    SaveDfsFilelist(rel, handler);
-                    delete (handler);
-                }
-            }
-
             RelationSetNewRelfilenode(rel, u_sess->utils_cxt.RecentXmin,
                                       RelationIsColStore(rel) ? InvalidMultiXactId : minmulti,
                                       isDfsTruncate);
@@ -4264,7 +4266,11 @@ void ExecuteTruncate(TruncateStmt* stmt)
              * The same for the toast table, if any.
              */
             if (OidIsValid(toast_relid)) {
-                rel = relation_open(toast_relid, AccessExclusiveLock);
+                if (IsGlobalTempTableParallelTrunc() && RELATION_IS_GLOBAL_TEMP(rel)) {
+                    rel = relation_open(toast_relid, RowExclusiveLock);
+                } else {
+                    rel = relation_open(toast_relid, AccessExclusiveLock);
+                }
                 RelationSetNewRelfilenode(rel, u_sess->utils_cxt.RecentXmin, minmulti);
                 if (rel->rd_rel->relpersistence == RELPERSISTENCE_UNLOGGED)
                     heap_create_init_fork(rel);
@@ -4277,7 +4283,8 @@ void ExecuteTruncate(TruncateStmt* stmt)
             /*
              * Reconstruct the indexes to match, and we're done.
              */
-            (void)ReindexRelation(heap_relid, REINDEX_REL_PROCESS_TOAST, REINDEX_ALL_INDEX, NULL);
+            (void)ReindexRelation(heap_relid, REINDEX_REL_PROCESS_TOAST, REINDEX_ALL_INDEX, NULL,
+                NULL, false, ALL_KIND, RELATION_IS_GLOBAL_TEMP(rel) ? true : false);
         } else {
             /* truncate partitioned table */
             List* partTupleList = NIL;
@@ -4318,7 +4325,10 @@ void ExecuteTruncate(TruncateStmt* stmt)
             pgstat_report_truncate(
                 heap_relid, InvalidOid, is_shared); /* report truncate partitioned table to PgStatCollector */
 
-            /* process all index */
+            /* process all index
+             *
+             * Global temporary tables do not support partitions, no need to add IsTruncGTT here.
+             */
             (void)ReindexRelation(heap_relid, REINDEX_REL_PROCESS_TOAST, REINDEX_ALL_INDEX, NULL);
         }
     }
@@ -4453,8 +4463,13 @@ void ExecuteTruncate(TruncateStmt* stmt)
     foreach (cell, rels) {
         Relation rel = (Relation)lfirst(cell);
 
-        /* Record time of truancate relation. */
-        recordRelationMTime(rel->rd_id, rel->rd_rel->relkind);
+        /*
+         * In order to execute truncate concurrently for GTT, GTT does not record time of truancate relation.
+         */
+        if (!(IsGlobalTempTableParallelTrunc() && RELATION_IS_GLOBAL_TEMP(rel))) {
+            /* Record time of truancate relation. */
+            recordRelationMTime(rel->rd_id, rel->rd_rel->relkind);
+        }
 
         heap_close(rel, NoLock);
     }
@@ -6071,7 +6086,7 @@ void renamePartition(RenameStmt* stmt)
      * escalation.
      */
     partitionedTableOid = RangeVarGetRelidExtended(stmt->relation,
-        AccessShareLock,
+        ShareUpdateExclusiveLock,
         stmt->missing_ok,
         false,
         false,
@@ -6154,7 +6169,6 @@ void renamePartition(RenameStmt* stmt)
         }
     }
 
-    /* hold lock until committed */
     relation_close(rel, NoLock);
 
     /*
@@ -6839,21 +6853,6 @@ void AlterTable(Oid relid, LOCKMODE lockmode, AlterTableStmt* stmt)
         }
     }
 
-    /*
-     * Process 'ALTER TABLE DELTA_TABLE ADD NODE' cmd.
-     */
-    if (!stmt->fromCreate && RelationIsDfsStore(rel)) {
-        ListCell* lc = NULL;
-        foreach (lc, stmt->cmds) {
-            AlterTableCmd* cmd = (AlterTableCmd*)lfirst(lc);
-
-            if (AT_AddNodeList == cmd->subtype || AT_SubCluster == cmd->subtype) {
-                /* ALTER TABLE DELTA_TABLE ADD NODE' cmd. */
-                addNodeCmds = lappend(addNodeCmds, cmd);
-            }
-        }
-    }
-
     if (!stmt->fromCreate && (((uint32)RelationGetInternalMask(rel)) & INTERNAL_MASK_DALTER)) {
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -6888,6 +6887,14 @@ void AlterTable(Oid relid, LOCKMODE lockmode, AlterTableStmt* stmt)
                         (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                             (errmsg("Un-support feature"),
                                 errdetail("table owning matview doesn't support this ALTER yet."))));
+                }
+
+                /* Unsupport ALTER statement for mlog/matviewmap table */
+                if ((ISMLOG(rel->rd_rel->relname.data) || ISMATMAP(rel->rd_rel->relname.data)) &&
+                    !MLOG_MAP_SUPPORT_AT_CMD(cmd->subtype)) {
+                    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        (errmsg("Un-support feature"), errdetail("%s table doesn't support this ALTER yet.",
+                        ISMLOG(rel->rd_rel->relname.data) ? "mlog" : "matviewmap"))));
                 }
             }
 
@@ -6947,29 +6954,16 @@ void AlterTable(Oid relid, LOCKMODE lockmode, AlterTableStmt* stmt)
     }
 
     if (addNodeCmds != NIL) {
-        /*
-         * Process 'ALTER TABLE DELTA_TABLE ADD NODE' cmd.
-         */
-        if (RelationIsDfsStore(rel)) {
-            Oid deltaRelId = RelationGetDeltaRelId(rel);
-            Assert(InvalidOid != deltaRelId);
-            Relation deltaRel = relation_open(deltaRelId, lockmode);
-            Assert(RelationIsValid(deltaRel));
+        /* process 'ALTER FOREIGN TABLE ... ADD NODE' cmd */
+        DefElem* def = GetForeignTableOptionByName(relid, optErrorRel);
+        if (def != NULL) {
+            char* relname = strVal(def->arg);
+            Oid errtableid = get_relname_relid(relname, get_rel_namespace(relid));
 
-            ATController(deltaRel, addNodeCmds, interpretInhOption(stmt->relation->inhOpt), lockmode);
-        } else {
+            /* open error table releation, closed in ATController */
+            Relation errtablerel = relation_open(errtableid, lockmode);
 
-            /* process 'ALTER FOREIGN TABLE ... ADD NODE' cmd */
-            DefElem* def = GetForeignTableOptionByName(relid, optErrorRel);
-            if (def != NULL) {
-                char* relname = strVal(def->arg);
-                Oid errtableid = get_relname_relid(relname, get_rel_namespace(relid));
-
-                /* open error table releation, closed in ATController */
-                Relation errtablerel = relation_open(errtableid, lockmode);
-
-                ATController(errtablerel, addNodeCmds, interpretInhOption(stmt->relation->inhOpt), lockmode);
-            }
+            ATController(errtablerel, addNodeCmds, interpretInhOption(stmt->relation->inhOpt), lockmode);
         }
         list_free_ext(addNodeCmds);
     }
@@ -7185,39 +7179,6 @@ static void ATController(Relation rel, List* cmds, bool recurse, LOCKMODE lockmo
     ATRewriteTables(&wqueue, lockmode);
 }
 
-static void CheckIsViewAndRuleForAlterPartition(AlterTableCmd *cmd, Relation rel)
-{
-    bool result = false;
-    bool hasView = IsViewAndRuleDependReltion(RelationGetRelid(rel));
-    switch (cmd->subtype) {
-        case AT_ExchangePartition:
-            if (cmd->alterGPI && hasView) {
-                result = true;
-            }
-            break;
-        case AT_DropPartition:
-        case AT_DropSubPartition:
-        case AT_MergePartition:
-        case AT_SplitPartition:
-        case AT_SplitSubPartition:
-            if (hasView) {
-                result = true;
-            }
-            break;
-        default: /* other option will pass */
-            break;
-    }
-    if (result) {
-        ereport(ERROR,
-                (errcode(ERRCODE_DEPENDENT_OBJECTS_STILL_EXIST),
-                 (errmsg("Cannot perform this operation because There are views or rules that depend on table %s.",
-                         RelationGetRelationName(rel)),
-                  errdetail("N/A"),
-                  errhint("drop the views or rules first. Use pg_rules to find rules. Use pg_class, pg_rewrite, "
-                          "pg_depend, pg_namespacesql to find views"))));
-    }
-}
-
 /*
  * ATPrepCmd
  *
@@ -7243,8 +7204,6 @@ static void ATPrepCmd(List** wqueue, Relation rel, AlterTableCmd* cmd, bool recu
      * numbers in different children).
      */
     cmd = (AlterTableCmd*)copyObject(cmd);
-
-    CheckIsViewAndRuleForAlterPartition(cmd, rel);
     /*
      * Do permissions checking, recursion to child tables if needed, and any
      * additional phase-1 processing needed.
@@ -8014,15 +7973,13 @@ typedef void (*ExecChangeTabspcFuncPtr)(AlteredTableInfo*, LOCKMODE);
 
 #define IDX_ROW_TBL 0
 #define IDX_COL_TBL 1
-#define IDX_DFS_TBL 2
 #define IDX_ORDINARY_TBL 0
 #define IDX_PARTITIONED_TBL 1
 
 ExecRewriteFuncPtr ExecRewriteFuncPtrArray[2][2] = {
     {ExecRewriteRowTable, ExecRewriteRowPartitionedTable}, {ExecRewriteCStoreTable, ExecRewriteCStorePartitionedTable}};
-ExecOnlyTestFuncPtr ExecOnlyTestFuncPtrArray[3][2] = {{ExecOnlyTestRowTable, ExecOnlyTestRowPartitionedTable},
-    {ExecOnlyTestCStoreTable, ExecOnlyTestCStorePartitionedTable},
-    {exec_only_test_dfs_table, NULL}};
+ExecOnlyTestFuncPtr ExecOnlyTestFuncPtrArray[2][2] = {{ExecOnlyTestRowTable, ExecOnlyTestRowPartitionedTable},
+    {ExecOnlyTestCStoreTable, ExecOnlyTestCStorePartitionedTable}};
 ExecChangeTabspcFuncPtr ExecChangeTabspcFuncPtrArray[2][2] = {
     {ExecChangeTableSpaceForRowTable, ExecChangeTableSpaceForRowPartition},
     {ExecChangeTableSpaceForCStoreTable, ExecChangeTableSpaceForCStorePartition}};
@@ -8075,7 +8032,7 @@ static void ATRewriteTables(List** wqueue, LOCKMODE lockmode)
         if (tab->relkind == RELKIND_RELATION) {
             Relation temprel = heap_open(tab->relid, NoLock);
             rel_format_idx =
-                RelationIsCUFormat(temprel) ? IDX_COL_TBL : (RelationIsPAXFormat(temprel) ? IDX_DFS_TBL : IDX_ROW_TBL);
+                RelationIsCUFormat(temprel) ? IDX_COL_TBL : IDX_ROW_TBL;
             idxPartitionedOrNot = RELATION_IS_PARTITIONED(temprel) ? IDX_PARTITIONED_TBL : IDX_ORDINARY_TBL;
             heap_close(temprel, NoLock);
         } else if (tab->relkind == RELKIND_INDEX || tab->relkind == RELKIND_GLOBAL_INDEX) {
@@ -8247,6 +8204,47 @@ static UHeapTuple RestoreScanCuTup(UHeapTuple backUpTup)
 {
     UHeapTuple scanCuTup = UHeapCopyTuple(backUpTup);
     return scanCuTup;
+}
+
+template<typename T, TableAmType amtype>
+static T EvaluateGenExpr(AlteredTableInfo* tab, T tuple,
+                                  TupleDesc newTupDesc, ExprContext* econtext,
+                                  Datum* values, bool* isnull)
+{
+    bool hasGenCol = false;
+    ListCell* l = NULL;
+    T tup = tuple;
+
+    if (tab->rewrite) {
+        foreach(l, tab->newvals)
+        {
+            NewColumnValue *ex = (NewColumnValue*)lfirst(l);
+
+            if (!ex->is_generated)
+                continue;
+
+            hasGenCol = true;
+
+            values[ex->attnum - 1]
+                = ExecEvalExpr(ex->exprstate,
+                               econtext,
+                               &isnull[ex->attnum - 1],
+                               NULL);
+        }
+
+        if (hasGenCol) {
+            /*
+             * Form the new tuple. Note that we don't explicitly pfree it,
+             * since the per-tuple memory context will be reset shortly.
+            */
+            if (amtype == TAM_HEAP) {
+                tup = (T)heap_form_tuple(newTupDesc, values, isnull);
+            } else {
+                tup = (T)tableam_tops_form_tuple(newTupDesc, values, isnull, UHEAP_TUPLE);
+            }
+        }
+    }
+    return tup;
 }
 
 /*
@@ -8455,13 +8453,20 @@ static void ATRewriteTableInternal(AlteredTableInfo* tab, Relation oldrel, Relat
 
                     /*
                      * Process supplied expressions to replace selected columns.
-                     * Expression inputs come from the old tuple.
+                     *
+                     * First, evaluate expressions whose inputs come from the old
+                     * tuple.
                      */
                     econtext->ecxt_scantuple = oldslot;
 
                     foreach(l, tab->newvals)
                     {
                             NewColumnValue *ex = (NewColumnValue*)lfirst(l);
+
+                            if (ex->is_generated) {
+                                isnull[ex->attnum - 1] = true;
+                                continue;
+                            }
 
                             values[ex->attnum - 1] = ExecEvalExpr(ex->exprstate,
                                                                   econtext,
@@ -8479,6 +8484,13 @@ static void ATRewriteTableInternal(AlteredTableInfo* tab, Relation oldrel, Relat
                 /* Now check any constraints on the possibly-changed tuple */
                 (void)ExecStoreTuple(utuple, newslot, InvalidBuffer, false);
                 econtext->ecxt_scantuple = newslot;
+
+                /*
+                 * Now, evaluate any expressions whose inputs come from the
+                 * new tuple.  We assume these columns won't reference each
+                 * other, so that there's no ordering dependency.
+                 */
+                utuple = EvaluateGenExpr<UHeapTuple, TAM_USTORE>(tab, utuple, newTupDesc, econtext, values, isnull);
 
                 foreach(l, notnull_attrs)
                 {
@@ -8556,13 +8568,20 @@ static void ATRewriteTableInternal(AlteredTableInfo* tab, Relation oldrel, Relat
 
                     /*
                      * Process supplied expressions to replace selected columns.
-                     * Expression inputs come from the old tuple.
+                     *
+                     * First, evaluate expressions whose inputs come from the old
+                     * tuple.
                      */
                     (void)ExecStoreTuple(tuple, oldslot, InvalidBuffer, false);
                     econtext->ecxt_scantuple = oldslot;
 
                     foreach (l, tab->newvals) {
                         NewColumnValue* ex = (NewColumnValue*)lfirst(l);
+
+                        if (ex->is_generated) {
+                            isnull[ex->attnum - 1] = true;
+                            continue;
+                        }
 
                         values[ex->attnum - 1] = ExecEvalExpr(ex->exprstate, econtext, &isnull[ex->attnum - 1], NULL);
                     }
@@ -8581,6 +8600,13 @@ static void ATRewriteTableInternal(AlteredTableInfo* tab, Relation oldrel, Relat
                 /* Now check any constraints on the possibly-changed tuple */
                 (void)ExecStoreTuple(tuple, newslot, InvalidBuffer, false);
                 econtext->ecxt_scantuple = newslot;
+
+                /*
+                 * Now, evaluate any expressions whose inputs come from the
+                 * new tuple.  We assume these columns won't reference each
+                 * other, so that there's no ordering dependency.
+                 */
+                tuple = EvaluateGenExpr<HeapTuple, TAM_HEAP>(tab, tuple, newTupDesc, econtext, values, isnull);
 
                 foreach (l, notnull_attrs) {
                     int attn = lfirst_int(l);
@@ -9227,7 +9253,8 @@ static void ATPrepCheckDefault(Node* node)
     }
 }
 
-static FORCE_INLINE void ATExecAppendDefValExpr(_in_ AttrNumber attnum, _in_ Expr* defval, _out_ AlteredTableInfo* tab)
+static FORCE_INLINE void ATExecAppendDefValExpr(_in_ AttrNumber attnum, _in_ Expr* defval, _out_ AlteredTableInfo* tab,
+                                                ColumnDef  *colDef)
 {
     NewColumnValue* newval;
 
@@ -9236,6 +9263,7 @@ static FORCE_INLINE void ATExecAppendDefValExpr(_in_ AttrNumber attnum, _in_ Exp
     newval->expr = expression_planner(defval);
 
     tab->newvals = lappend(tab->newvals, newval);
+    newval->is_generated = (colDef->generatedCol != '\0');
     tab->rewrite = true;
 }
 
@@ -9566,7 +9594,7 @@ static void ATExecAddColumn(List** wqueue, AlteredTableInfo* tab, Relation rel, 
              */
             if (RelationIsCUFormat(rel) || tab->rewrite ||
                 RelationUsesSpaceType(rel->rd_rel->relpersistence) == SP_TEMP || colDef->generatedCol) {
-                ATExecAppendDefValExpr(attribute.attnum, defval, tab);
+                ATExecAppendDefValExpr(attribute.attnum, defval, tab, colDef);
             } else {
                 bytea* value = NULL;
                 AT_INSTANT_DEFAULT_VALUE ret =
@@ -9591,7 +9619,7 @@ static void ATExecAddColumn(List** wqueue, AlteredTableInfo* tab, Relation rel, 
                                               "2. the storage length of default value may be greater than 127.\n"
                                               "3. the data type of new column is not supported."))));
                     }
-                    ATExecAppendDefValExpr(attribute.attnum, defval, tab);
+                    ATExecAppendDefValExpr(attribute.attnum, defval, tab, colDef);
                 }
                 /* nothing to do if ret is DEFAULT_NULL */
             }
@@ -10147,16 +10175,6 @@ static void ATExecAddStatistics(Relation rel, Node* def, LOCKMODE lockmode)
 
     if (array_length > 0) {
         update_attstats(relid, relkind, false, array_length, vacattrstats_array, RelationGetRelPersistence(rel));
-        if (RelationIsDfsStore(rel)) {
-            /* HDFS complex table */
-            update_attstats(relid, relkind, true, array_length, vacattrstats_array, RelationGetRelPersistence(rel));
-
-            /* HDFS delta table */
-            Oid delta_relid = rel->rd_rel->reldeltarelid;
-            Assert(OidIsValid(delta_relid));
-            update_attstats(
-                delta_relid, relkind, false, array_length, vacattrstats_array, RelationGetRelPersistence(rel));
-        }
     }
 }
 
@@ -10191,15 +10209,6 @@ static void ATExecDeleteStatistics(Relation rel, Node* def, LOCKMODE lockmode)
 
     if (array_length > 0) {
         delete_attstats(relid, relkind, false, array_length, vacattrstats_array, DELETE_STATS_MULTI);
-        if (RelationIsDfsStore(rel)) {
-            /* HDFS complex table */
-            delete_attstats(relid, relkind, true, array_length, vacattrstats_array, DELETE_STATS_MULTI);
-
-            /* HDFS delta table */
-            Oid delta_relid = rel->rd_rel->reldeltarelid;
-            Assert(OidIsValid(delta_relid));
-            delete_attstats(delta_relid, relkind, false, array_length, vacattrstats_array, DELETE_STATS_MULTI);
-        }
     }
 }
 
@@ -12563,10 +12572,22 @@ void CheckHugeToast(AlteredTableInfo *tab, Relation rel, AttrNumber attnum)
     if (RelationIsPartitioned(rel)) {
         ListCell *partCell = NULL;
         List *partList = relationGetPartitionList(rel, NoLock);
-        foreach(partCell, partList) {
+        foreach (partCell, partList) {
             Partition part = (Partition)lfirst(partCell);
             Relation partRel = partitionGetRelation(rel, part);
-            CheckHugeToastInternal(reldesc, partRel, attnum);
+            if (RelationIsSubPartitioned(rel)) {
+                ListCell *subPartCell = NULL;
+                List *subPartList = relationGetPartitionList(partRel, NoLock);
+                foreach (subPartCell, subPartList) {
+                    Partition subPart = (Partition)lfirst(subPartCell);
+                    Relation subPartRel = partitionGetRelation(partRel, subPart);
+                    CheckHugeToastInternal(reldesc, subPartRel, attnum);
+                    releaseDummyRelation(&subPartRel);
+                }
+                releasePartitionList(partRel, &subPartList, NoLock);
+            } else {
+                CheckHugeToastInternal(reldesc, partRel, attnum);
+            }
             releaseDummyRelation(&partRel);
         }
         releasePartitionList(rel, &partList, NoLock);
@@ -12750,6 +12771,7 @@ static void ATPrepAlterColumnType(List** wqueue, AlteredTableInfo* tab, Relation
         newval = (NewColumnValue*)palloc0(sizeof(NewColumnValue));
         newval->attnum = attnum;
         newval->expr = (Expr*)transform;
+        newval->is_generated = false;
 
         tab->newvals = lappend(tab->newvals, newval);
         if (ATColumnChangeRequiresRewrite(transform, attnum))
@@ -13497,6 +13519,7 @@ static void AttachEachCommandInQueue(
         switch (nodeTag(stm)) {
             case T_IndexStmt: {
                 IndexStmt* stmt = (IndexStmt*)stm;
+                SetPartionIndexType(stmt, rel, true);
                 AlterTableCmd* newcmd = NULL;
 
                 if (!rewrite) {
@@ -13526,8 +13549,9 @@ static void AttachEachCommandInQueue(
                     switch (cmd->subtype) {
                         case AT_AddIndex:
                             Assert(IsA(cmd->def, IndexStmt));
+                            SetPartionIndexType((IndexStmt*)cmd->def, rel, true);
                             if (!rewrite) {
-                                if (RelationIsPartitioned(rel)) {
+                                if (RelationIsPartitioned(rel) && !((IndexStmt*)cmd->def)->isGlobal) {
                                     tryReusePartedIndex(get_constraint_index(oldId), (IndexStmt*)cmd->def, rel);
                                 } else {
                                     TryReuseIndex(get_constraint_index(oldId), (IndexStmt*)cmd->def);
@@ -13602,10 +13626,12 @@ static void ATPostAlterTypeParse(
 /*
  * Subroutine for ATPostAlterTypeParse().  Calls out to CheckIndexCompatible()
  * for the real analysis, then mutates the IndexStmt based on that verdict.
+ * Global temporary table cannot reuse relfilenode because the relfilenode mapping is maintained in memory.
  */
 void TryReuseIndex(Oid oldId, IndexStmt* stmt)
 {
-    if (CheckIndexCompatible(oldId, stmt->accessMethod, stmt->indexParams, stmt->excludeOpNames)) {
+    if (CheckIndexCompatible(oldId, stmt->accessMethod, stmt->indexParams, stmt->excludeOpNames) &&
+        !IsGlobalTempTable(oldId)) {
         Relation irel = index_open(oldId, NoLock);
 
         /*
@@ -15171,9 +15197,10 @@ static void ATExecSetTableSpace(Oid tableOid, Oid newTableSpace, LOCKMODE lockmo
     rel = relation_open(tableOid, lockmode);
 
     if (RELATION_IS_GLOBAL_TEMP(rel)) {
+        const char* objType = RelationIsIndex(rel) ? "index" : "table";
         ereport(ERROR,
            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-               errmsg("not support alter table set tablespace on global temp table.")));
+               errmsg("not support alter %s set tablespace on global temp table.", objType)));
     }
 
     /*
@@ -15402,24 +15429,28 @@ static void copy_relation_data(Relation rel, SMgrRelation* dstptr, ForkNumber fo
 
             UnlockReleaseBuffer(buf);
         } else {
-            /*
-            * WAL-log the copied page. Unfortunately we don't know what kind of a
-            * page this is, so we have to log the full page including any unused
-            * space.
-            */
-            if (use_wal) {
-                log_newpage(&dst->smgr_rnode.node, forkNum, blkno, page, false, &tde_info);
-            }
-
-            if (RelationisEncryptEnable(rel)) {
-                bufToWrite = PageDataEncryptIfNeed(page, &tde_info, true);
+            if (RelationIsUstoreFormat(rel) && t_thrd.proc->workingVersionNum >= XLOG_UHEAP_NEW_PAGE_VERSION_NUM) {
+                ExecuteUndoActionsPageForPartition(rel, dst, forkNum, blkno, blkno);
             } else {
-                bufToWrite = page;
+                /*
+                * WAL-log the copied page. Unfortunately we don't know what kind of a
+                * page this is, so we have to log the full page including any unused
+                * space.
+                */
+                if (use_wal) {
+                    log_newpage(&dst->smgr_rnode.node, forkNum, blkno, page, false, &tde_info);
+                }
+
+                if (RelationisEncryptEnable(rel)) {
+                    bufToWrite = PageDataEncryptIfNeed(page, &tde_info, true);
+                } else {
+                    bufToWrite = page;
+                }
+
+                PageSetChecksumInplace((Page)bufToWrite, blkno);
+
+                smgrextend(dst, forkNum, blkno, bufToWrite, true);
             }
-
-            PageSetChecksumInplace((Page)bufToWrite, blkno);
-
-            smgrextend(dst, forkNum, blkno, bufToWrite, true);
         }
     }
 
@@ -15624,25 +15655,46 @@ static void mergeHeapBlock(Relation src, Relation dest, ForkNumber forkNum, char
             MarkBufferDirty(buf);
             UnlockReleaseBuffer(buf);
         } else {
-            /*
-            * XLOG stuff
-            * Retry to open smgr in case it is cloesd when we process SI messages
-            */
             RelationOpenSmgr(dest);
-            if (use_wal) {
-                log_newpage(&dest->rd_smgr->smgr_rnode.node, forkNum, dest_blkno, page, true, &tde_info);
-            }
-
-            if (RelationisEncryptEnable(src)) {
-                bufToWrite = PageDataEncryptIfNeed(page, &tde_info, true);
+            if (RelationIsUstoreFormat(src) && t_thrd.proc->workingVersionNum >= XLOG_UHEAP_NEW_PAGE_VERSION_NUM) {
+                PartitionToastInfo pToastInfo = {InvalidOid, InvalidOid, InvalidOid, InvalidOid, NULL, NULL};
+                if (OidIsValid(destToastOid)) {
+                    pToastInfo.srcPartTupleToastOid = srcToastOid;
+                    pToastInfo.destPartTupleToastOid = destToastOid;
+                    pToastInfo.tupDesc = srcTupleDesc;
+                    pToastInfo.srcToastTableRelOid = InvalidOid;
+                    pToastInfo.destToastTableRelOid = InvalidOid;
+                    pToastInfo.chunkIdHashTable = chunkIdHashTable;
+                } else if (RelationIsToast(dest)) {
+                    pToastInfo.srcPartTupleToastOid = InvalidOid;
+                    pToastInfo.destPartTupleToastOid = InvalidOid;
+                    pToastInfo.tupDesc = src->rd_att;
+                    pToastInfo.srcToastTableRelOid = src->rd_id;
+                    pToastInfo.destToastTableRelOid =dest->rd_id;
+                    pToastInfo.chunkIdHashTable = chunkIdHashTable;
+                }
+                ExecuteUndoActionsPageForPartition(src, dest->rd_smgr, forkNum, src_blkno, dest_blkno, &pToastInfo);
             } else {
-                bufToWrite = page;
+                /*
+                * XLOG stuff
+                * Retry to open smgr in case it is cloesd when we process SI messages
+                */
+                RelationOpenSmgr(dest);
+                if (use_wal) {
+                    log_newpage(&dest->rd_smgr->smgr_rnode.node, forkNum, dest_blkno, page, true, &tde_info);
+                }
+
+                if (RelationisEncryptEnable(src)) {
+                    bufToWrite = PageDataEncryptIfNeed(page, &tde_info, true);
+                } else {
+                    bufToWrite = page;
+                }
+
+                /* heap block mix in the block number to checksum. need recalculate */
+                PageSetChecksumInplace((Page)bufToWrite, dest_blkno);
+
+                smgrextend(dest->rd_smgr, forkNum, dest_blkno, bufToWrite, true);
             }
-
-            /* heap block mix in the block number to checksum. need recalculate */
-            PageSetChecksumInplace((Page)bufToWrite, dest_blkno);
-
-            smgrextend(dest->rd_smgr, forkNum, dest_blkno, bufToWrite, true);
         }
     }
 
@@ -19060,11 +19112,13 @@ void CompareListValue(const List* pos, Form_pg_attribute* attrs, List *partition
 
     /* Check if list partition has intersect values */
     /* XXX need a better way to reduce time complexity */
+    int compare = 0;
     for (int i = 0; i < partitionList->length; ++i) {
         for (int j = 0; j < partValueLen[i]; ++j) {
             /* Check if value overlapped in same list */
             for (int k = 0; k < j; ++k) {
-                if (constCompare_constType(valueArray[i] + j, valueArray[i] + k) == 0) {
+                constCompare(valueArray[i] + j, valueArray[i] + k, compare);
+                if (compare == 0) {
                     ReportListPartitionIntersect(partitionList, valueArray, i, i);
                 }
             }
@@ -19075,7 +19129,8 @@ void CompareListValue(const List* pos, Form_pg_attribute* attrs, List *partition
                     if ((valueArray[i] + j)->ismaxvalue || (valueArray[m] + n)->ismaxvalue) {
                         continue;
                     }
-                    if (constCompare_constType(valueArray[i] + j, valueArray[m] + n) == 0) {
+                    constCompare(valueArray[i] + j, valueArray[m] + n, compare);
+                    if (compare == 0) {
                         ReportListPartitionIntersect(partitionList, valueArray, m, i);
                     }
                 }
@@ -19517,6 +19572,8 @@ static void CheckPartitionValueConflictForAddPartition(Relation rel, Node *partD
     List *partKeyValueList = NIL;
     Oid existingPartOid = InvalidOid;
 
+    incre_partmap_refcount(rel->partMap);
+
     int partNum = getNumberOfPartitions(rel);
     if (nodeTag(partDefState) == T_RangePartitionDefState) {
         RangePartitionDefState *partDef = (RangePartitionDefState *)partDefState;
@@ -19559,6 +19616,8 @@ static void CheckPartitionValueConflictForAddPartition(Relation rel, Node *partD
                 errmsg("list boundary of adding partition MUST NOT overlap with existing partition")));
         }
     }
+
+    decre_partmap_refcount(rel->partMap);
 }
 
 static void CheckSubpartitionForAddPartition(Relation rel, Node *partDefState)
@@ -19636,7 +19695,11 @@ static void CheckForAddPartition(Relation rel, List *partDefStateList)
     CheckTablespaceForAddPartition(rel, partDefStateList);
 
     /* check 2: can not add more partition, because more enough */
-    if ((getNumberOfPartitions(rel) + partDefStateList->length) > MAX_PARTITION_NUM) {
+    List* newPartitionNameList = GetPartitionNameList(partDefStateList);
+    List* existingPartitionNameList = RelationGetPartitionNameList(rel);
+    int npart = list_length(newPartitionNameList);
+    int nnewpart = list_length(existingPartitionNameList);
+    if ((npart + nnewpart) > MAX_PARTITION_NUM) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
                 errmsg("too many partitions for partitioned table"),
@@ -19644,8 +19707,6 @@ static void CheckForAddPartition(Relation rel, List *partDefStateList)
     }
 
     /* check 3: name conflict check */
-    List* newPartitionNameList = GetPartitionNameList(partDefStateList);
-    List* existingPartitionNameList = RelationGetPartitionNameList(rel);
     CheckPartitionNameConflictForAddPartition(newPartitionNameList, existingPartitionNameList);
     list_free_deep(existingPartitionNameList);
     /* don't free the cell of newPartitionNameList */
@@ -19683,6 +19744,61 @@ static void CheckForAddPartition(Relation rel, List *partDefStateList)
     }
 }
 
+static void CheckForAddSubPartition(Relation rel, Relation partrel, List *subpartDefStateList)
+{
+    Assert(RELATION_IS_PARTITIONED(rel));
+    Assert(RELATION_IS_PARTITIONED(partrel));
+
+    /* check 1: tablespace privileges */
+    CheckTablespaceForAddPartition(rel, subpartDefStateList);
+
+    /* check 2: can not add more partition, because more enough */
+    List* newPartitionNameList = GetPartitionNameList(subpartDefStateList);
+    List* existingPartitionNameList = RelationGetPartitionNameList(rel);
+    int npart = list_length(newPartitionNameList);
+    int nnewpart = list_length(existingPartitionNameList);
+    if ((npart + nnewpart) > MAX_PARTITION_NUM) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+                errmsg("too many partitions for partitioned table"),
+                errhint("Number of partitions can not be more than %d", MAX_PARTITION_NUM)));
+    }
+
+    /* check 3: name conflict check */
+    CheckPartitionNameConflictForAddPartition(newPartitionNameList, existingPartitionNameList);
+    list_free_deep(existingPartitionNameList);
+    /* don't free the cell of newPartitionNameList */
+    list_free_ext(newPartitionNameList);
+
+    /* check 4: partition values constraint */
+    int2vector *partitionKey = GetPartitionKey(partrel->partMap);
+    List *partKeyPosList = NIL;
+    for (int i = 0; i < partitionKey->dim1; i++) {
+        partKeyPosList = lappend_int(partKeyPosList, partitionKey->values[i] - 1);
+    }
+    if (partrel->partMap->type == PART_TYPE_RANGE) {
+        ComparePartitionValue(partKeyPosList, (RelationGetDescr(partrel))->attrs, subpartDefStateList);
+    } else if (partrel->partMap->type == PART_TYPE_LIST) {
+        CompareListValue(partKeyPosList, (RelationGetDescr(partrel))->attrs, subpartDefStateList);
+    }
+    list_free_ext(partKeyPosList);
+
+    ListCell *cell = NULL;
+    foreach (cell, subpartDefStateList) {
+        /* check 5: new adding partitions behind the last partition */
+        CheckPartitionValueConflictForAddPartition(partrel, (Node*)lfirst(cell));
+    }
+
+    /* check 6: whether has the unusable local index */
+    if (!checkRelationLocalIndexesUsable(rel)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+                errmsg("can't add partition bacause the relation %s has unusable local index",
+                    NameStr(rel->rd_rel->relname)),
+                errhint("please reindex the unusable index first.")));
+    }
+}
+
 static void ATExecAddListPartition(Relation rel, AddPartitionState *partState)
 {
     Relation pgPartRel = NULL;
@@ -19697,7 +19813,6 @@ static void ATExecAddListPartition(Relation rel, AddPartitionState *partState)
     Oid bucketOid;
     Relation parentrel = NULL;
     char subparttype = PART_STRATEGY_INVALID;
-    List *subpartKeyPosList = NIL;
     int2vector *subpartitionKey = NULL;
 
     /* if the relation is a partrel of a subpartition, here we get the relation first */
@@ -19716,24 +19831,18 @@ static void ATExecAddListPartition(Relation rel, AddPartitionState *partState)
     ListPartitionDefState* partDef = NULL;
 
     /* step 1: Check before the actual work */
-    CheckForAddPartition(rel, partState->partitionList);
+    if (RelationIsPartitionOfSubPartitionTable(rel)) {
+        CheckForAddSubPartition(parentrel, rel, partState->partitionList);
+    } else {
+        CheckForAddPartition(rel, partState->partitionList);
+    }
 
     bool* isTimestamptz = CheckPartkeyHasTimestampwithzone(rel);
     bool *isTimestamptzForSubPartKey = NULL;
     if (RelationIsSubPartitioned(rel)) {
+        List *subpartKeyPosList = NIL;
         RelationGetSubpartitionInfo(rel, &subparttype, &subpartKeyPosList, &subpartitionKey);
-
-        int subPartKeyNum = list_length(subpartKeyPosList);
-        isTimestamptzForSubPartKey = (bool *)palloc0(sizeof(bool) * subPartKeyNum);
-        ListCell *subpartKeyCell = NULL;
-        int partKeyIdx = 0;
-        foreach (subpartKeyCell, subpartKeyPosList) {
-            int pos = lfirst_int(subpartKeyCell);
-            if ((RelationGetDescr(rel))->attrs[pos]->atttypid == TIMESTAMPTZOID) {
-                isTimestamptzForSubPartKey[partKeyIdx] = true;
-            }
-            partKeyIdx++;
-        }
+        isTimestamptzForSubPartKey = CheckSubPartkeyHasTimestampwithzone(rel, subpartKeyPosList);
         list_free_ext(subpartKeyPosList);
     }
 
@@ -19879,7 +19988,6 @@ static void ATExecAddRangePartition(Relation rel, AddPartitionState *partState)
     Oid bucketOid;
     Relation parentrel = NULL;
     char subparttype = PART_STRATEGY_INVALID;
-    List *subpartKeyPosList = NIL;
     int2vector *subpartitionKey = NULL;
 
     /* if the relation is a partrel of a subpartition, here we get the relation first */
@@ -19898,24 +20006,18 @@ static void ATExecAddRangePartition(Relation rel, AddPartitionState *partState)
     RangePartitionDefState* partDef = NULL;
 
     /* step 1: Check before the actual work */
-    CheckForAddPartition(rel, partState->partitionList);
+    if (RelationIsPartitionOfSubPartitionTable(rel)) {
+        CheckForAddSubPartition(parentrel, rel, partState->partitionList);
+    } else {
+        CheckForAddPartition(rel, partState->partitionList);
+    }
 
     bool* isTimestamptz = CheckPartkeyHasTimestampwithzone(rel);
     bool *isTimestamptzForSubPartKey = NULL;
     if (RelationIsSubPartitioned(rel)) {
+        List *subpartKeyPosList = NIL;
         RelationGetSubpartitionInfo(rel, &subparttype, &subpartKeyPosList, &subpartitionKey);
-
-        int subPartKeyNum = list_length(subpartKeyPosList);
-        isTimestamptzForSubPartKey = (bool *)palloc0(sizeof(bool) * subPartKeyNum);
-        ListCell *subpartKeyCell = NULL;
-        int partKeyIdx = 0;
-        foreach (subpartKeyCell, subpartKeyPosList) {
-            int pos = lfirst_int(subpartKeyCell);
-            if ((RelationGetDescr(rel))->attrs[pos]->atttypid == TIMESTAMPTZOID) {
-                isTimestamptzForSubPartKey[partKeyIdx] = true;
-            }
-            partKeyIdx++;
-        }
+        isTimestamptzForSubPartKey = CheckSubPartkeyHasTimestampwithzone(rel, subpartKeyPosList);
         list_free_ext(subpartKeyPosList);
     }
 
@@ -20842,7 +20944,7 @@ static void renamePartitionIndexes(Oid partitionedTableOid, Oid partitionOid, ch
  * Description	:
  * Notes		:
  */
-static void heap_truncate_one_part_new(const AlterTableCmd* cmd, Relation partRel, Oid srcPartOid,
+static Oid heap_truncate_one_part_new(const AlterTableCmd* cmd, Relation partRel, Oid srcPartOid,
     Relation rel = InvalidRelation)
 {
     Partition srcPart = NULL;
@@ -20877,9 +20979,11 @@ static void heap_truncate_one_part_new(const AlterTableCmd* cmd, Relation partRe
     list_free_ext(indexList);
     pfree_ext(partitionIndexNames);
     pfree_ext(destPartitionName);
+
+    return destPartOid;
 }
 
-static void ATExecTruncatePartitionForSubpartitionTable(Relation rel, Oid partOid, AlterTableCmd* cmd)
+static void ATExecTruncatePartitionForSubpartitionTable(Relation rel, Oid partOid, AlterTableCmd* cmd, bool hasGPI)
 {
     /* truncate subpartitioned table */
     Partition part = partitionOpen(rel, partOid, AccessExclusiveLock);
@@ -20891,28 +20995,26 @@ static void ATExecTruncatePartitionForSubpartitionTable(Relation rel, Oid partOi
     if (!cmd->alterGPI) {
         // Unusable Global Index
         ATUnusableGlobalIndex(rel);
+    } else {
+        AlterPartitionedSetWaitCleanGPI(cmd->alterGPI, rel, partOid);
     }
     foreach (subPartOidCell, subPartOidList) {
         Oid subPartOid = lfirst_oid(subPartOidCell);
-        bool all_ubtree = true;
 
         if (cmd->alterGPI) {
-            /* Delete subpartition tuples in GPI and add parent to pending vacuum list */
-            all_ubtree = DeleteGPITuplesForSubPartition(RelationGetRelid(rel), partOid, subPartOid);
             AlterSubPartitionedSetWaitCleanGPI(cmd->alterGPI, rel, partOid, subPartOid);
         }
 
-        if (all_ubtree) {
-            /* If no nbtree global index exists */
+        if (!cmd->alterGPI || !hasGPI || RelationIsColStore(rel)) {
             heap_truncate_one_part(partRel, subPartOid);
         } else {
             heap_truncate_one_part_new(cmd, partRel, subPartOid, rel);
         }
-        pgstat_report_truncate(subPartOid, partRel->rd_id, partRel->rd_rel->relisshared);
+        pgstat_report_truncate(subPartOid, rel->rd_id, rel->rd_rel->relisshared);
     }
 
     releaseDummyRelation(&partRel);
-    partitionClose(rel, part, AccessExclusiveLock);
+    partitionClose(rel, part, NoLock);
 }
 
 /*
@@ -20927,9 +21029,10 @@ static void ATExecTruncatePartition(Relation rel, AlterTableCmd* cmd)
     List* oidList = NULL;
     List* relid = lappend_oid(NULL, rel->rd_id);
     Oid partOid = InvalidOid;
+    Oid destPartOid = InvalidOid;
     Oid newPartOid = InvalidOid;
     Relation newTableRel = NULL;
-    bool all_ubtree = true;
+    bool hasGPI = (list_length(RelationGetSpecificKindIndexList(rel, true)) > 0);
 
     oidList = heap_truncate_find_FKs(relid);
     if (PointerIsValid(oidList)) {
@@ -21015,7 +21118,7 @@ static void ATExecTruncatePartition(Relation rel, AlterTableCmd* cmd)
     }
 
     if (RelationIsSubPartitioned(rel)) {
-        ATExecTruncatePartitionForSubpartitionTable(rel, partOid, cmd);
+        ATExecTruncatePartitionForSubpartitionTable(rel, partOid, cmd, hasGPI);
         return;
     }
 
@@ -21023,16 +21126,13 @@ static void ATExecTruncatePartition(Relation rel, AlterTableCmd* cmd)
         // Unusable Global Index
         ATUnusableGlobalIndex(rel);
     } else {
-        /* Delete partition tuples in GPI and add parent to pending vacuum list */
-        all_ubtree = DeleteGPITuplesForPartition(RelationGetRelid(rel), partOid);
         AlterPartitionedSetWaitCleanGPI(cmd->alterGPI, rel, partOid);
     }
 
-    if (all_ubtree) {
-        /* If no nbtree global index exists */
+    if (!cmd->alterGPI || !hasGPI || RelationIsColStore(rel)) {
         heap_truncate_one_part(rel, partOid);
     } else {
-        heap_truncate_one_part_new(cmd, rel, partOid);
+        destPartOid = heap_truncate_one_part_new(cmd, rel, partOid);
     }
 
     pgstat_report_truncate(partOid, rel->rd_id, rel->rd_rel->relisshared);
@@ -21043,7 +21143,11 @@ static void ATExecTruncatePartition(Relation rel, AlterTableCmd* cmd)
 
         /*  delete partOid related rows in delete delta table  */
         simple_delete_redis_tuples(rel, partOid);
-        ResetOnePartRedisCtidRelOptions(rel, partOid);
+        if (OidIsValid(destPartOid)) {
+            ResetOnePartRedisCtidRelOptions(rel, destPartOid);
+        } else {
+            ResetOnePartRedisCtidRelOptions(rel, partOid);
+        }
 
         /* clean up */
         heap_close(newTableRel, AccessExclusiveLock);
@@ -21069,7 +21173,7 @@ static void ATExecTruncateSubPartition(Relation rel, AlterTableCmd* cmd)
     List* oidList = NULL;
     List* relid = lappend_oid(NULL, rel->rd_id);
     Oid subPartOid = InvalidOid;
-    bool all_ubtree = true;
+    bool hasGPI = (list_length(RelationGetSpecificKindIndexList(rel, true)) > 0);
 
     oidList = heap_truncate_find_FKs(relid);
     if (PointerIsValid(oidList)) {
@@ -21111,18 +21215,16 @@ static void ATExecTruncateSubPartition(Relation rel, AlterTableCmd* cmd)
         // Unusable Global Index
         ATUnusableGlobalIndex(rel);
     } else {
-        /* Delete subpartition tuples in GPI and add parent to pending vacuum list */
-        all_ubtree = DeleteGPITuplesForSubPartition(RelationGetRelid(rel), partOid, subPartOid);
+        AlterPartitionedSetWaitCleanGPI(cmd->alterGPI, rel, partOid);
         AlterSubPartitionedSetWaitCleanGPI(cmd->alterGPI, rel, partOid, subPartOid);
     }
 
-    if (all_ubtree) {
-        /* If no nbtree global index exists */
+    if (!cmd->alterGPI || !hasGPI || RelationIsColStore(rel)) {
         heap_truncate_one_part(partRel, subPartOid);
     } else {
         heap_truncate_one_part_new(cmd, partRel, subPartOid, rel);
     }
-    pgstat_report_truncate(subPartOid, partRel->rd_id, partRel->rd_rel->relisshared);
+    pgstat_report_truncate(subPartOid, rel->rd_id, rel->rd_rel->relisshared);
 
     releaseDummyRelation(&partRel);
     partitionClose(rel, part, AccessExclusiveLock);
@@ -21715,6 +21817,11 @@ static void ATExecMergePartition(Relation partTableRel, AlterTableCmd* cmd)
         return;
     }
 
+    /* Ustore tables do not support alter table merge partition operations in transaction blocks. */
+    if (RelationIsUstoreFormat(partTableRel)) {
+        PreventTransactionChain(true, "ALTER TABLE MERGE PARTITION");
+    }
+
     /* the source partitions, must be at least 2, to merge into 1 partition  */
     if (partNum < 2) {
         ereport(ERROR,
@@ -22230,6 +22337,40 @@ static bool checkChunkIdRepeat(List* srcPartToastRels, int selfIndex, Oid chunkI
     return false;
 }
 
+static void ExecuteUndoActionsPageForRelation(Relation rel)
+{
+    Assert(RelationIsUstoreFormat(rel));
+
+    RelationOpenSmgr(rel);
+
+    BlockNumber blkno;
+    BlockNumber srcHeapBlocks = smgrnblocks(rel->rd_smgr, MAIN_FORKNUM);
+    if (srcHeapBlocks == 0) {
+        RelationCloseSmgr(rel);
+        return;
+    }
+
+    for (blkno = 0; blkno < srcHeapBlocks; blkno++) {
+        ExecuteUndoActionsPageForPartition(rel, rel->rd_smgr, MAIN_FORKNUM, blkno, blkno, NULL);
+    }
+
+    RelationCloseSmgr(rel);
+}
+
+static void ExecuteUndoActionsPageForExchangePartition(Relation partTableRel, Oid partOid, Relation ordTableRel)
+{
+    Partition part = NULL;
+    Relation partrel = NULL;
+
+    part = partitionOpen(partTableRel, partOid, NoLock);
+    partrel = partitionGetRelation(partTableRel, part);
+    ExecuteUndoActionsPageForRelation(partrel);
+    releaseDummyRelation(&partrel);
+    partitionClose(partTableRel, part, NoLock);
+
+    ExecuteUndoActionsPageForRelation(ordTableRel);
+}
+
 // Description : Execute exchange
 static void ATExecExchangePartition(Relation partTableRel, AlterTableCmd* cmd)
 {
@@ -22310,6 +22451,10 @@ static void ATExecExchangePartition(Relation partTableRel, AlterTableCmd* cmd)
     checkColStoreForExchange(partTableRel, ordTableRel);
     // Swap object of partition and ordinary table
     LockPartition(partTableRel->rd_id, partOid, AccessExclusiveLock, PARTITION_LOCK);
+
+    if (RelationIsUstoreFormat(partTableRel)) {
+        ExecuteUndoActionsPageForExchangePartition(partTableRel, partOid, ordTableRel);
+    }
 
     // Check the value is valided for partition boundary
     if (cmd->check_validation) {
@@ -23147,7 +23292,7 @@ static void checkValidationForExchangeTable(Relation partTableRel, Relation ordT
     tupleDesc = ordTableRel->rd_att;
 
     if (exchangeVerbose) {
-        indexList = RelationGetSpecificKindIndexList(partTableRel, false);
+        indexList = RelationGetIndexList(partTableRel, false);
 
         foreach (cell, indexList) {
             Oid indexOid = lfirst_oid(cell);
@@ -23160,7 +23305,20 @@ static void checkValidationForExchangeTable(Relation partTableRel, Relation ordT
 
         if (PointerIsValid(indexRelList)) {
             estate = CreateExecutorState();
-            indexslot = MakeSingleTupleTableSlot(RelationGetDescr(partTableRel));
+            /*
+            * We need a ResultRelInfo so we can use the regular executor's
+            * index-entry-making machinery.  (There used to be a huge amount of code
+            * here that basically duplicated execUtils.c ...)
+            */
+            ResultRelInfo *resultRelInfo = makeNode(ResultRelInfo);
+            resultRelInfo->ri_RangeTableIndex = 1;      /* dummy */
+            resultRelInfo->ri_RelationDesc = ordTableRel;
+            ExecOpenIndices(resultRelInfo, false);
+            estate->es_result_relations = resultRelInfo;
+            estate->es_num_result_relations = 1;
+            estate->es_result_relation_info = resultRelInfo;
+
+            indexslot = MakeSingleTupleTableSlot(RelationGetDescr(partTableRel), false, partTableRel->rd_tam_type);
         }
     }
 
@@ -23218,19 +23376,23 @@ static void checkValidationForExchangeTable(Relation partTableRel, Relation ordT
                     bool isNull[tupleDesc->natts];
                     bool estateIsNotNull = false;
 
-                    partIndexOid = getPartitionIndexOid(indexOid, targetPartOid);
-                    searchFakeReationForPartitionOid(partRelHTAB,
-                        CurrentMemoryContext,
-                        indexRel,
-                        partIndexOid,
-                        partIndexRel,
-                        partIndex,
-                        RowExclusiveLock);
+                    bool isglobal = RelationIsGlobalIndex(indexRel);
+                    if (!isglobal) {
+                        partIndexOid = getPartitionIndexOid(indexOid, targetPartOid);
+                        searchFakeReationForPartitionOid(partRelHTAB,
+                            CurrentMemoryContext,
+                            indexRel,
+                            partIndexOid,
+                            partIndexRel,
+                            partIndex,
+                            RowExclusiveLock);
+                        indexRel = partIndexRel;
+                    }
 
                     if (RELATION_HAS_BUCKET(indexRel) && !(RelationAmIsBtree(indexRel) &&
                         RELOPTIONS_CROSSBUCKET(indexRel->rd_options))) {
                         searchHBucketFakeRelation(
-                            partRelHTAB, CurrentMemoryContext, partIndexRel, bucketId, partIndexRel);
+                            partRelHTAB, CurrentMemoryContext, indexRel, bucketId, indexRel);
                     }
 
                     if (indexInfo->ii_Expressions != NIL || indexInfo->ii_ExclusionOps != NULL) {
@@ -23241,7 +23403,7 @@ static void checkValidationForExchangeTable(Relation partTableRel, Relation ordT
 
                     FormIndexDatum(indexInfo, indexslot, estateIsNotNull ? estate : NULL, values, isNull);
 
-                    (void)index_insert(partIndexRel,
+                    (void)index_insert(indexRel,
                         values,
                         isNull,
                         &((HeapTuple)copyTuple)->t_self,
@@ -23253,14 +23415,16 @@ static void checkValidationForExchangeTable(Relation partTableRel, Relation ordT
                 tableam_tops_free_tuple(copyTuple);
                 TM_Result result;
                 TM_FailureData tmfd;
-                result = tableam_tuple_delete(GetTableScanDesc(scan, ordTableRel)->rs_rd, 
-                    &((HeapTuple)tuple)->t_self, 
-                    GetCurrentCommandId(true), 
-                    InvalidSnapshot, 
-                    GetActiveSnapshot(), 
-                    true, 
-                    NULL, 
-                    &tmfd, 
+                Relation fake_relation = GetTableScanDesc(scan, ordTableRel)->rs_rd;
+                TupleTableSlot* oldslot = NULL;
+                result = tableam_tuple_delete(fake_relation,
+                    &((HeapTuple)tuple)->t_self,
+                    GetCurrentCommandId(true),
+                    InvalidSnapshot,
+                    GetActiveSnapshot(),
+                    true,
+                    &oldslot,
+                    &tmfd,
                     true);
                 switch (result) {
                     case TM_SelfModified:
@@ -23269,10 +23433,23 @@ static void checkValidationForExchangeTable(Relation partTableRel, Relation ordT
                             errmsg("tuple already updated by self")));
                         break;
 
-                    case TM_Ok:
-                        /* done successfully */
+                    case TM_Ok: { /* done successfully */
+                        if (PointerIsValid(indexRelList)) {
+                            Bitmapset *modifiedIdxAttrs = NULL;
+                            ExecIndexTuplesState exec_index_tuples_state;
+                            exec_index_tuples_state.estate = estate;
+                            exec_index_tuples_state.targetPartRel = NULL;
+                            exec_index_tuples_state.p = NULL;
+                            exec_index_tuples_state.conflict = NULL;
+                            exec_index_tuples_state.rollbackIndex = false;
+                            tableam_tops_exec_delete_index_tuples(oldslot, fake_relation, NULL,
+                                &((HeapTuple)tuple)->t_self, exec_index_tuples_state, modifiedIdxAttrs);
+                        }
+                        if (oldslot) {
+                            ExecDropSingleTupleTableSlot(oldslot);
+                        }
                         break;
-
+                    }
                     case TM_Updated:
                         ereport(ERROR, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE), 
                             errmsg("tuple concurrently updated")));
@@ -23310,6 +23487,8 @@ static void checkValidationForExchangeTable(Relation partTableRel, Relation ordT
         list_free_ext(indexInfoList);
 
         if (PointerIsValid(estate)) {
+            ExecCloseIndices(estate->es_result_relation_info);
+            pfree_ext(estate->es_result_relations);
             FreeExecutorState(estate);
         }
 
@@ -23523,7 +23702,7 @@ static Oid getPartitionElementsOid(const char* partitionElement)
 
 int getPartitionElementsIndexByOid(Relation partTableRel, Oid partOid)
 {
-    int partSeq = 0;
+    int partSeq = -1;
     int partitionElementsNum = 0;
     char* partitionElements = NULL;
     void* partMap = NULL;
@@ -23945,9 +24124,17 @@ void checkDestListSubPartitionNameForSplit(Relation rel, List* destPartDefList, 
                                               ObjectIdGetDatum(partOid))) {
                 ereport(ERROR,
                         (errcode(ERRCODE_DUPLICATE_OBJECT),
-                         errmsg("resulting subpartition \"%s\" name conflicts with that of an existing subpartition",
+                         errmsg("resulting subpartition \"%s\" name conflicts with an existing subpartition",
                                 destSubPartName)));
             }
+        }
+        if (InvalidOid != GetSysCacheOid3(PARTPARTOID, NameGetDatum(destSubPartName),
+                                            CharGetDatum(PART_OBJ_TYPE_TABLE_PARTITION),
+                                            ObjectIdGetDatum(RelationGetRelid(rel)))) {
+            ereport(ERROR,
+                    (errcode(ERRCODE_DUPLICATE_OBJECT),
+                        errmsg("resulting subpartition \"%s\" name conflicts with an existing partition",
+                            destSubPartName)));
         }
     }
 }
@@ -23974,9 +24161,17 @@ static void CheckDestRangeSubPartitionNameForSplit(Relation rel, List* destPartD
                                               ObjectIdGetDatum(partOid))) {
                 ereport(ERROR,
                         (errcode(ERRCODE_DUPLICATE_OBJECT),
-                         errmsg("resulting subpartition \"%s\" name conflicts with that of an existing subpartition",
+                         errmsg("resulting subpartition \"%s\" name conflicts with an existing subpartition",
                                 destSubPartName)));
             }
+        }
+        if (InvalidOid != GetSysCacheOid3(PARTPARTOID, NameGetDatum(destSubPartName),
+                                            CharGetDatum(PART_OBJ_TYPE_TABLE_PARTITION),
+                                            ObjectIdGetDatum(RelationGetRelid(rel)))) {
+            ereport(ERROR,
+                    (errcode(ERRCODE_DUPLICATE_OBJECT),
+                        errmsg("resulting subpartition \"%s\" name conflicts with an existing partition",
+                            destSubPartName)));
         }
     }
 }
@@ -24804,7 +24999,27 @@ static Oid AddTemporaryPartitionForAlterPartitions(const AlterTableCmd* cmd, Rel
         }
         case PART_TYPE_RANGE:
         case PART_TYPE_INTERVAL: {
+            RangePartitionMap *partmap = (RangePartitionMap *)partTableRel->partMap;
+            bool isinterval = partmap->rangeElements[partSeq].isInterval;
             destPartOid = AddTemporaryRangePartitionForAlterPartitions(cmd, partTableRel, partSeq, renameTargetPart);
+
+            if (!isinterval) {
+                break;
+            }
+
+            /* if srcPartOid is a interval partition oid, we need transform destPart to interval */
+            Relation pg_partition = relation_open(PartitionRelationId, RowExclusiveLock);
+            HeapTuple parttup = SearchSysCacheCopy1(PARTRELID, ObjectIdGetDatum(destPartOid));
+            Assert(HeapTupleIsValid(parttup));
+
+            Form_pg_partition partform = (Form_pg_partition)GETSTRUCT(parttup);
+            partform->partstrategy = PART_STRATEGY_INTERVAL;
+            simple_heap_update(pg_partition, &parttup->t_self, parttup);
+            CatalogUpdateIndexes(pg_partition, parttup);
+
+            tableam_tops_free_tuple(parttup);
+            relation_close(pg_partition, RowExclusiveLock);
+            CommandCounterIncrement();
             break;
         }
         default:
@@ -24827,6 +25042,12 @@ static Oid AddTemporaryPartitionForAlterPartitions(const AlterTableCmd* cmd, Rel
 static void ExchangePartitionWithGPI(const AlterTableCmd* cmd, Relation partTableRel, Oid srcPartOid,
     TransactionId frozenXid, MultiXactId multiXid)
 {
+    // Return if no global index exists
+    List* gpiList = RelationGetSpecificKindIndexList(partTableRel, true);
+    if (list_length(gpiList) == 0) {
+        return;
+    }
+
     List* indexList = NIL;
     ListCell* cell = NULL;
     Partition srcPart = NULL;
@@ -24866,7 +25087,7 @@ static void ExchangePartitionWithGPI(const AlterTableCmd* cmd, Relation partTabl
 
     // Swap relfilenode of table and toast table
     CommandCounterIncrement();
-    finishPartitionHeapSwap(srcPartOid, destPartOid, false, frozenXid, multiXid, true);
+    finishPartitionHeapSwap(destPartOid, srcPartOid, false, frozenXid, multiXid, true);
 
     CommandCounterIncrement();
     AlterPartitionedSetWaitCleanGPI(cmd->alterGPI, partTableRel, srcPartOid);
@@ -25425,7 +25646,7 @@ Datum caculateBoundary(Datum transpoint, Oid attrtypid, Datum intervalue, Oid in
  *
  * Check if given table Oid is temporary.
  */
-bool IsTempTable(Oid relid)
+bool IsTempTable(Oid relid, bool includGTT)
 {
     HeapTuple tuple = NULL;
     bool res = false;
@@ -25439,10 +25660,42 @@ bool IsTempTable(Oid relid)
         return false;
     }
     Form_pg_class classForm = (Form_pg_class)GETSTRUCT(tuple);
-    res = (classForm->relpersistence == RELPERSISTENCE_TEMP);
+    res = (classForm->relpersistence == RELPERSISTENCE_TEMP ||
+           (includGTT && classForm->relpersistence == RELPERSISTENCE_GLOBAL_TEMP));
     ReleaseSysCache(tuple);
 
     return res;
+}
+
+bool IsGlobalTempTable(Oid relid)
+{
+    HeapTuple tuple = NULL;
+    bool res = false;
+
+    // if oid is invalid, it's not a table, and not a temp table.
+    if (InvalidOid == relid)
+        return false;
+
+    tuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
+    if (!HeapTupleIsValid(tuple)) {
+        return false;
+    }
+    Form_pg_class classForm = (Form_pg_class)GETSTRUCT(tuple);
+    res = (classForm->relpersistence == RELPERSISTENCE_GLOBAL_TEMP);
+    ReleaseSysCache(tuple);
+
+    return res;
+}
+
+bool IsGlobalTempTableParallelTrunc()
+{
+#ifndef ENABLE_MULTIPLE_NODES
+    if (u_sess->attr.attr_sql.enable_gtt_concurrent_truncate) {
+        return true;
+    }
+#endif
+
+    return false;
 }
 
 /*
@@ -26016,55 +26269,6 @@ static void ATCStoreRewritePartition(AlteredTableInfo* tab, LOCKMODE lockMode)
 }
 
 /*
- * Brief        : when alter the Dfs table, the followings must be deal with.
-                  1. add Delta table for Dfs table.
-                  2. add DfsDesc table for Dfs table.
- * Input        : relOid, the main table table Oid.
- *                reloptions, the table options.
- *                mainTblStmt, CreateStmt struct about the main table.
- * Output       : None.
- * Return Value : None.
- * Notes        : 1. If the store format is CU, we create CUDesc table, create
- *                DfsDesc table otherwise.
- */
-void AlterDfsCreateTables(Oid relOid, Datum reloptions, CreateStmt* mainTblStmt)
-{
-    Relation rel;
-
-    /*
-     * Grab an exclusive lock on the target table, since we'll update its
-     * pg_class tuple. This is redundant for all present uses, since caller
-     * will have such a lock already.  But the lock is needed to ensure that
-     * concurrent readers of the pg_class tuple won't have visibility issues,
-     * so let's be safe.
-     */
-    rel = heap_open(relOid, AccessExclusiveLock);
-    if (!RelationIsDfsStore(rel)) {
-        heap_close(rel, NoLock);
-        return;
-    }
-
-#ifndef ENABLE_MULTIPLE_NODES
-    ereport(ERROR,
-        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("Un-supported feature"),
-            errdetail("HDFS data source or servers are no longer supported.")));
-#endif
-
-    (void)CreateDeltaTable(rel, reloptions, false, mainTblStmt);
-    createDfsDescTable(rel, reloptions);
-
-    /* create hdfs directory just on primary CN */
-    if (IS_PGXC_COORDINATOR)
-        CreateDfsStorage(rel);
-
-    /*
-     * we will deal with partition Dfs table here when support the parttion Dfs table.
-     */
-    heap_close(rel, NoLock);
-}
-
-/*
  * @Description: forbidden to set tablespace for partitioned table
  * @Param[IN] tab: Alter Table Info
  * @See also:
@@ -26102,10 +26306,6 @@ static void ExecRewriteRowTable(AlteredTableInfo* tab, Oid NewTableSpace, LOCKMO
     ATRewriteTable(tab, oldRel, newRel);
     heap_close(oldRel, NoLock);
     heap_close(newRel, NoLock);
-    bool swapToastByContent = false;
-    if (RELATION_IS_GLOBAL_TEMP(oldRel)) {
-        swapToastByContent = true;
-    }
 
     /*
      * Swap the physical files of the old and new heaps, then rebuild
@@ -26115,7 +26315,7 @@ static void ExecRewriteRowTable(AlteredTableInfo* tab, Oid NewTableSpace, LOCKMO
      * we never try to swap toast tables by content, since we have no
      * interest in letting this code work on system catalogs.
      */
-    finish_heap_swap(tab->relid, OIDNewHeap, false, swapToastByContent, true, u_sess->utils_cxt.RecentXmin,
+    finish_heap_swap(tab->relid, OIDNewHeap, false, false, true, u_sess->utils_cxt.RecentXmin,
                      GetOldestMultiXactId());
 
     /* clear all attrinitdefval */
@@ -26348,74 +26548,6 @@ List* make_not_null_attrs(TupleDesc tuple_desc)
     }
 
     return not_null_attrs;
-}
-
-/**
- * @Description: Only check the validity of existing data because of some altering operators,
- * for example, the query "alter table ... add column col date type not null" contains
- * "NOT NULL" constaint, if the relation has no data, the query will be executed successfully,
- * otherwise get a fail result.
- * @in tab, The AlteredTableInfo struct.
- * @return None.
- */
-static void exec_only_test_dfs_table(AlteredTableInfo* tab)
-{
-    if (IS_PGXC_DATANODE && tab->new_notnull) {
-        Relation rel = RelationIdGetRelation(tab->relid);
-        MemoryContext context = AllocSetContextCreate(CurrentMemoryContext,
-            "AlterTableContext",
-            ALLOCSET_DEFAULT_MINSIZE,
-            ALLOCSET_DEFAULT_INITSIZE,
-            ALLOCSET_DEFAULT_MAXSIZE);
-        MemoryContext old_context = MemoryContextSwitchTo(context);
-        TupleDesc tuple_desc = RelationGetDescr(rel);
-        Datum* values = (Datum*)palloc0(rel->rd_att->natts * sizeof(Datum));
-        bool* nulls = (bool*)palloc0(rel->rd_att->natts * sizeof(bool));
-        List* not_null_attrs = make_not_null_attrs(tuple_desc);
-        TupleTableSlot* scan_tuple_slot = NULL;
-        HeapTuple tuple = NULL;
-        ListCell* lc = NULL;
-        /*
-         * Create tuple slot for scanning.
-         */
-        scan_tuple_slot = MakeTupleTableSlot(true, tuple_desc->tdTableAmType);
-        scan_tuple_slot->tts_tupleDescriptor = tuple_desc;
-        scan_tuple_slot->tts_values = values;
-        scan_tuple_slot->tts_isnull = nulls;
-        DfsScanState* scan = dfs::reader::DFSBeginScan(rel, NIL, 0, NULL);
-        do {
-            dfs::reader::DFSGetNextTuple(scan, scan_tuple_slot);
-
-            if (!scan_tuple_slot->tts_isempty) {
-
-                tuple = heap_form_tuple(tuple_desc, values, nulls);
-                foreach (lc, not_null_attrs) {
-                    int attn = lfirst_int(lc);
-
-                    if (relationAttIsNull(tuple, attn + 1, tuple_desc)) {
-                        dfs::reader::DFSEndScan(scan);
-                        pfree_ext(scan_tuple_slot);
-
-                        relation_close(rel, NoLock);
-                        ereport(ERROR,
-                            (errcode(ERRCODE_NOT_NULL_VIOLATION),
-                                errmsg(
-                                    "column \"%s\" contains null values", NameStr(tuple_desc->attrs[attn]->attname))));
-                    }
-                }
-            } else {
-                break;
-            }
-
-        } while (true);
-
-        dfs::reader::DFSEndScan(scan);
-        pfree_ext(scan_tuple_slot);
-        (void)MemoryContextSwitchTo(old_context);
-        MemoryContextDelete(context);
-
-        relation_close(rel, NoLock);
-    }
 }
 
 /*
@@ -27448,29 +27580,3 @@ void CheckDropViewValidity(ObjectType stmtType, char relKind, const char* relnam
     }
     DropErrorMsgWrongType(relname, relKind, expectedRelKind);
 }
-
-static bool IsViewAndRuleDependReltion(Oid relId)
-{
-    bool result = false;
-    Relation depRel = NULL;
-    ScanKeyData key[2];
-    SysScanDesc depScan = NULL;
-    HeapTuple depTup = NULL;
-
-    depRel = heap_open(DependRelationId, AccessShareLock);
-
-    ScanKeyInit(&key[0], Anum_pg_depend_classid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(RewriteRelationId));
-    ScanKeyInit(&key[1], Anum_pg_depend_refobjid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(relId));
-
-    depScan = systable_beginscan(depRel, InvalidOid, false, NULL, 2, key);
-
-    if (HeapTupleIsValid(depTup = systable_getnext(depScan))) {
-        result = true;
-    }
-
-    systable_endscan(depScan);
-    relation_close(depRel, AccessShareLock);
-
-    return result;
-}
-

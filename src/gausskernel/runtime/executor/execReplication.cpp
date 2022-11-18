@@ -113,8 +113,10 @@ static bool inline CheckTupleLockRes(TM_Result res)
         case TM_Ok:
             break;
         case TM_Updated:
+        case TM_Deleted:
             /* XXX: Improve handling here */
-            ereport(LOG, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE), errmsg("concurrent update, retrying")));
+            ereport(LOG, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+                errmsg("concurrent update or delete, retrying")));
             return true;
         case TM_Invisible:
             elog(ERROR, "attempted to lock invisible tuple");
@@ -171,7 +173,7 @@ static bool PartitionFindReplTupleByIndex(EState *estate, Relation rel, Relation
         /* Get index partition of this heap partition */
         Oid idxPartOid = getPartitionIndexOid(RelationGetRelid(idxrel), heapPart->pd_id);
         Partition idxPart = partitionOpen(idxrel, idxPartOid, RowExclusiveLock);
-        Relation idxPartRel = RelationIsSubPartitioned(rel) ? SubPartitionGetRelation(idxrel, idxPart, NoLock) :
+        Relation idxPartRel = RelationIsSubPartitioned(idxrel) ? SubPartitionGetRelation(idxrel, idxPart, NoLock) :
                                                               partitionGetRelation(idxrel, idxPart);
 
         fakeRelInfo->partRel = partionRel;
@@ -696,6 +698,7 @@ void ExecSimpleRelationUpdate(EState *estate, EPQState *epqstate, TupleTableSlot
             exec_index_tuples_state.targetPartRel = RELATION_IS_PARTITIONED(rel) ? targetRelation : NULL;
             exec_index_tuples_state.p = relAndPart->part;
             exec_index_tuples_state.conflict = NULL;
+            exec_index_tuples_state.rollbackIndex = false;
             recheckIndexes = tableam_tops_exec_update_index_tuples(slot, oldslot, targetRelation, NULL, tuple,
                 searchSlotTid, exec_index_tuples_state, InvalidBktId, modifiedIdxAttrs);
         }
@@ -712,6 +715,7 @@ void ExecSimpleRelationUpdate(EState *estate, EPQState *epqstate, TupleTableSlot
         exec_index_tuples_state.targetPartRel = relAndPart->partRel;
         exec_index_tuples_state.p = relAndPart->part;
         exec_index_tuples_state.conflict = NULL;
+        exec_index_tuples_state.rollbackIndex = false;
         tableam_tops_exec_delete_index_tuples(oldslot, relAndPart->partRel, NULL, searchSlotTid,
             exec_index_tuples_state, modifiedIdxAttrs);
 
@@ -778,6 +782,7 @@ void ExecSimpleRelationDelete(EState *estate, EPQState *epqstate, TupleTableSlot
     exec_index_tuples_state.targetPartRel = RELATION_IS_PARTITIONED(rel) ? relAndPart->partRel : NULL;
     exec_index_tuples_state.p = relAndPart->part;
     exec_index_tuples_state.conflict = NULL;
+    exec_index_tuples_state.rollbackIndex = false;
     tableam_tops_exec_delete_index_tuples(oldslot, targetRel, NULL, tid, exec_index_tuples_state, modifiedIdxAttrs);
     if (oldslot) {
         ExecDropSingleTupleTableSlot(oldslot);
@@ -799,7 +804,8 @@ void CheckCmdReplicaIdentity(Relation rel, CmdType cmd)
         return;
 
     /* If relation has replica identity we are always good. */
-    if (RelationGetRelReplident(rel) == REPLICA_IDENTITY_FULL || OidIsValid(RelationGetReplicaIndex(rel)))
+    Assert(rel->relreplident == RelationGetRelReplident(rel));
+    if (rel->relreplident == REPLICA_IDENTITY_FULL || OidIsValid(RelationGetReplicaIndex(rel)))
         return;
 
     /*

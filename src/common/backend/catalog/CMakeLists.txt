@@ -15,7 +15,7 @@ set(POSTGRES_BKI_SRCS_S
 @pg_object.h @pg_synonym.h @toasting.h @indexing.h @gs_obsscaninfo.h @pg_directory.h @pg_hashbucket.h @gs_global_chain.h @gs_global_config.h
 @pg_streaming_stream.h @pg_streaming_cont_query.h @pg_streaming_reaper_status.h @gs_matview.h @gs_matview_dependency.h @pgxc_slice.h 
 @gs_opt_model.h @pg_recyclebin.h @pg_snapshot.h @gs_model.h @gs_package.h @gs_job_argument.h @gs_job_attribute.h @pg_uid.h @gs_db_privilege.h
-@pg_replication_origin.h @pg_publication.h @pg_publication_rel.h @pg_subscription.h"
+@pg_replication_origin.h @pg_publication.h @pg_publication_rel.h @pg_subscription.h @gs_sql_patch.h"
 
 )
 
@@ -39,9 +39,7 @@ set(TGT_catalog_INC
     ${PROJECT_SRC_DIR}/lib/gstrace
     ${LZ4_INCLUDE_PATH}
     ${LIBCGROUP_INCLUDE_PATH}
-    ${LIBORC_INCLUDE_PATH}
     ${EVENT_INCLUDE_PATH}
-    ${PROTOBUF_INCLUDE_PATH}
     ${ZLIB_INCLUDE_PATH}
 )
 

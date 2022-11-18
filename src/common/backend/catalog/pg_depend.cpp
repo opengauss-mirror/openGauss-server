@@ -161,6 +161,13 @@ void recordDependencyOnCurrentExtension(const ObjectAddress* object, bool isRepl
                             getObjectDescription(object),
                             get_extension_name(oldext))));
             }
+
+            ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+					errmsg("%s is not a member of extension \"%s\"",
+						getObjectDescription(object),
+						get_extension_name(u_sess->cmd_cxt.CurrentExtensionObject)),
+					    errdetail("An extension is not allowed to replace an object that it does not own.")));
         }
 
         /* OK, record it as a member of CurrentExtensionObject */
@@ -169,6 +176,34 @@ void recordDependencyOnCurrentExtension(const ObjectAddress* object, bool isRepl
         extension.objectSubId = 0;
 
         recordDependencyOn(object, &extension, DEPENDENCY_EXTENSION);
+    }
+}
+
+void checkMembershipInCurrentExtension(const ObjectAddress *object)
+{
+    /*
+     * This is actually the same condition tested in
+     * recordDependencyOnCurrentExtension; but we want to issue a
+     * differently-worded error, and anyway it would be pretty confusing to
+     * call recordDependencyOnCurrentExtension in these circumstances.
+     */
+
+    /* Only whole objects can be extension members */
+    Assert(object->objectSubId == 0);
+
+    if (creating_extension) {
+        Oid	oldext;
+
+        oldext = getExtensionOfObject(object->classId, object->objectId);
+        /* If already a member of this extension, OK */
+        if (oldext == u_sess->cmd_cxt.CurrentExtensionObject)
+            return;
+        /* Else complain */
+        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+            errmsg("%s is not a member of extension \"%s\"", getObjectDescription(object),
+                get_extension_name(u_sess->cmd_cxt.CurrentExtensionObject)),
+                errdetail("An extension may only use CREATE ... IF NOT EXISTS to skip object creation"
+                    "if the conflicting object is one that it already owns.")));
     }
 }
 

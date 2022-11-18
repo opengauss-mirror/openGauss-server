@@ -57,8 +57,6 @@ extern XLogRecPtr FindMaxLSN(char* workingpath, char* returnmsg, pg_crc32 *maxLs
     TimeLineID *returnTli = NULL);
 BuildErrorCode findCommonCheckpoint(const char* datadir, TimeLineID tli, XLogRecPtr startrec, XLogRecPtr* lastchkptrec,
     TimeLineID* lastchkpttli, XLogRecPtr *lastchkptredo, uint32 term, XLogRecPtr* maxXactLsn);
-extern int find_gucoption(const char** optlines, const char* opt_name, int* name_offset, int* name_len, 
-    int* value_offset, int* value_len);
 
 extern bool TransLsn2XlogFileName(XLogRecPtr lsn, TimeLineID lastcommontli, char* xlogName);
 extern XLogRecPtr getValidCommonLSN(XLogRecPtr checkLsn, XLogRecPtr maxLsn);

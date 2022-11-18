@@ -35,6 +35,7 @@
 
 const int FUSION_EXECUTE = 0;
 const int FUSION_DESCRIB = 1;
+const int FUSION_SIMPLE_EXECUTE = 2;
 typedef struct pnFusionObj {
     char portalname[NAMEDATALEN];
     OpFusion *opfusion;
@@ -112,7 +113,9 @@ enum FusionType {
     NOBYPASS_NO_INCLUDING_PARTITIONKEY,
     NOBYPASS_PARTITION_BYPASS_NOT_OPEN,
     NOBYPASS_VERSION_SCAN_PLAN,
-    NOBYPASS_PARTITION_NOT_SUPPORT_IN_LIST_OR_HASH_PARTITION
+    NOBYPASS_PARTITION_TYPE_NOT_SUPPORT,
+    NOBYPASS_SUBPARTITION_TYPE_NOT_SUPPORT,
+    NOBYPASS_GPC_NOT_SUPPORT_PARTITION_BYPASS
 };
 
 enum FusionDebug {
@@ -141,7 +144,6 @@ const Oid function_id[] = {
     317,  /* convert float8 to int4 */
     318,  /* convert int4 to float4 */
     319,  /* convert float4 to int4 */
-    401,  /* convert char(n) to text */
     406,  /* convert name to text */
     407,  /* convert text to name */
     408,  /* convert name to char(n) */
@@ -170,8 +172,6 @@ const Oid function_id[] = {
     1744, /* convert numeric to int4 */
     1745, /* convert numeric to float4 */
     1746, /* convert numeric to float8 */
-    1768, /* format interval to text */
-    1777, /* convert text to numeric */
     1778, /* convert text to timestamp with time zone */
     1780, /* convert text to date */
     1961, /* adjust timestamp precision */

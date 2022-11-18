@@ -60,12 +60,12 @@ template void GlobalSysDBCacheEntry::ResetDBCache<true>();
 void GlobalSysDBCacheEntry::MemoryEstimateAdd(uint64 size)
 {
     (void)pg_atomic_fetch_add_u64(&m_rough_used_space, size);
-    (void)pg_atomic_fetch_add_u64(&g_instance.global_sysdbcache.gsc_rough_used_space, size);
+    (void)pg_atomic_fetch_add_u64(&g_instance.global_sysdbcache.db_rough_used_space, size);
 }
 void GlobalSysDBCacheEntry::MemoryEstimateSub(uint64 size)
 {
     (void)pg_atomic_fetch_sub_u64(&m_rough_used_space, size);
-    (void)pg_atomic_fetch_sub_u64(&g_instance.global_sysdbcache.gsc_rough_used_space, size);
+    (void)pg_atomic_fetch_sub_u64(&g_instance.global_sysdbcache.db_rough_used_space, size);
 }
 
 GlobalDBStatManager::GlobalDBStatManager()
@@ -135,7 +135,8 @@ void GlobalDBStatManager::RecordSwapOutDBEntry(GlobalSysDBCacheEntry *entry)
             break;
         }
     }
-    if (lc != NULL) {
+    /* refcount not zero, cannot remove m_dbstat */
+    if (lc != NULL || entry->m_refcount != 0) {
         return;
     }
     MemoryContext old = MemoryContextSwitchTo(m_dbstat_memcxt);

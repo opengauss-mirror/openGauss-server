@@ -1182,8 +1182,9 @@ static char *ssh_run_external_program(const char *username, const char *action)
 {
     StringInfoData ssh_buf;
     initStringInfo(&ssh_buf);
-    appendStringInfoString(&ssh_buf, "ssh ");
+    appendStringInfoString(&ssh_buf, "ssh \"");
     appendStringInfoString(&ssh_buf, username);
+    appendStringInfoString(&ssh_buf, "\"");
     appendStringInfoString(&ssh_buf, "@localhost \"");
     appendStringInfoString(&ssh_buf, action);
     appendStringInfoString(&ssh_buf, "\"");

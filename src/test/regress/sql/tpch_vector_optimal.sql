@@ -1,6 +1,5 @@
 set try_vector_engine_strategy=optimal;
 
-explain (costs off)
 select
         l_returnflag,
         l_linestatus,
@@ -24,7 +23,6 @@ order by
         l_linestatus
 ;
 
-explain (costs off)
 select
         s_acctbal,
         s_name,
@@ -71,7 +69,6 @@ order by
 limit 100
 ;
 
-explain (costs off)
 select
         l_orderkey,
         sum(l_extendedprice * (1 - l_discount)) as revenue,
@@ -97,7 +94,6 @@ order by
 limit 10
 ;
 
-explain (costs off)
 select
         o_orderpriority,
         count(*) as order_count
@@ -120,7 +116,6 @@ group by
 order by
         o_orderpriority;
 
-explain (costs off)
 select
         n_name,
         sum(l_extendedprice * (1 - l_discount)) as revenue
@@ -146,7 +141,6 @@ group by
 order by
         revenue desc;
 
-explain (costs off)
 select
         sum(l_extendedprice * l_discount) as revenue
 from
@@ -158,7 +152,6 @@ where
     and l_discount <= 0.06 + 0.01
         and l_quantity < 24;
 
-explain (costs off)
 select
         supp_nation,
         cust_nation,
@@ -200,7 +193,6 @@ order by
         cust_nation,
         l_year;
 
-explain (costs off)
 select
         o_year,
         sum(case
@@ -240,7 +232,6 @@ group by
 order by
         o_year;
 
-explain (costs off)
 select
         nation,
         o_year,
@@ -274,7 +265,6 @@ order by
         nation,
         o_year desc;
 
-explain (costs off)
 select
         c_custkey,
         c_name,
@@ -309,7 +299,6 @@ order by
 limit 20
 ;
 
-explain (costs off)
 select
         ps_partkey,
         sum(ps_supplycost * ps_availqty) as value
@@ -338,7 +327,6 @@ group by
 order by
         value desc;
 
-explain (costs off)
 select
         l_shipmode,
         sum(case
@@ -368,7 +356,6 @@ group by
 order by
         l_shipmode;
 
-explain (costs off)
 select
         c_count,
         count(*) as custdist
@@ -390,7 +377,6 @@ order by
         custdist desc,
         c_count desc;
 
-explain (costs off)
 select
         100.00 * sum(case
                 when p_type like 'PROMO%'
@@ -406,7 +392,6 @@ where
         and l_shipdate < date '1995-09-01' + interval '1 month'
 ;
 
-explain (costs off)
 with revenue (supplier_no, total_revenue) as
 (
         select
@@ -435,7 +420,6 @@ order by
         s_suppkey
 ;
 
-explain (costs off)
 select
         p_brand,
         p_type,
@@ -468,7 +452,6 @@ order by
 limit 100
 ;
 
-explain (costs off)
 select
         sum(l_extendedprice) / 7.0 as avg_yearly
 from
@@ -488,7 +471,6 @@ where
         )
 ;
 
-explain (costs off)
 select
         c_name,
         c_custkey,
@@ -523,7 +505,6 @@ order by
         o_orderdate
 limit 100;
 
-explain (costs off)
 select
         sum(l_extendedprice* (1 - l_discount)) as revenue
 from
@@ -560,7 +541,6 @@ where
                 and substring(l_shipinstruct, 1, 7) = 'DELIVER'
         );
 
-explain (costs off)
 select
         s_name,
         s_address
@@ -597,7 +577,6 @@ where
 order by
         s_name;
 
-explain (costs off)
 select
         s_name,
         count(*) as numwait
@@ -639,7 +618,6 @@ order by
         s_name
 limit 100;
 
-explain (costs off)
 select
         cntrycode,
         count(*) as numcust,

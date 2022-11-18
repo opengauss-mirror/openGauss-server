@@ -69,6 +69,8 @@ typedef struct StartWithTransformContext {
     Node *connectByExpr;
     Node *whereClause;
     List *siblingsOrderBy;
+    List *rownum_or_level_list;
+    List *normal_list;
     bool is_where;
     StartWithConnectByType  connect_by_type;
 
@@ -335,7 +337,6 @@ void AddStartWithTargetRelInfo(ParseState* pstate, Node* relNode,
         if (substmt->withClause == NULL) {
             substmt->withClause = (WithClause*)copyObject(pstate->origin_with);
         }
-
         startInfo->rte = rte;
         startInfo->rtr = rtr;
         startInfo->rtekind = rte->rtekind;
@@ -695,17 +696,28 @@ static void HandleSWCBColumnRef(StartWithTransformContext *context, Node *node)
              */
             result = ExtractColumnRefStartInfo(pstate, column, NULL, colname, preResult);
 
-            if (prior) {
-                char *dummy = makeStartWithDummayColname(
-                                            strVal(linitial(column->fields)),
-                                            strVal(lsecond(column->fields)));
-
-                column->fields = list_make2(makeString("tmp_reuslt"), makeString(dummy));
-
-                /* record working table name */
-                context->connectby_prior_name = lappend(context->connectby_prior_name,
-                                                        makeString(dummy));
+            if (!prior) {
+                break;
             }
+
+            if (list_length(column->fields) <= 1) {
+                ereport(ERROR,
+                    (errmodule(MOD_PARSER), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("Invalid column reference in START WITH / CONNECT BY clause."),
+                        errdetail("The column referred to may not exist."),
+                        errcause("Usually this happens when the column referred to does not exist."),
+                        erraction("Check and revise your query or contact Huawei engineers.")));
+            }
+
+            char *dummy = makeStartWithDummayColname(
+                                        strVal(linitial(column->fields)),
+                                        strVal(lsecond(column->fields)));
+
+            column->fields = list_make2(makeString("tmp_reuslt"), makeString(dummy));
+
+            /* record working table name */
+            context->connectby_prior_name = lappend(context->connectby_prior_name,
+                                                        makeString(dummy));
 
             break;
         }
@@ -796,7 +808,16 @@ static Node *tryReplaceFakeValue(Node *node)
     if (IsA(node, Rownum)) {
         node = makeIntConst(CONNECT_BY_ROWNUM_FAKEVALUE, -1);
     } else if (is_cref_by_name(node, "level")) {
-        node = makeIntConst(CONNECT_BY_LEVEL_FAKEVALUE, -1);
+        ColumnRef* colRef = (ColumnRef*)node;
+        if (colRef->prior) {
+            ereport(ERROR, (errmodule(MOD_PARSER), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("LEVEL cannot be specified by prior."),
+            errdetail("Unsupported node type: %d.", (int)nodeTag(node)),
+            errcause("Unsupported expression in START WITH / CONNECT BY clause."),
+            erraction("Check and revise your query or contact Huawei engineers.")));
+        } else {
+            node = makeIntConst(CONNECT_BY_LEVEL_FAKEVALUE, -1);
+        }
     } else if (IsA(node, List)) {
         node = replaceListFakeValue((List *) node);
     }
@@ -846,6 +867,215 @@ static bool pseudo_level_rownum_walker(Node *node, Node *context_parent_node)
             break;
     }
     return raw_expression_tree_walker(node, (bool (*)()) pseudo_level_rownum_walker, node);
+}
+
+/*
+ * --------------------------------------------------------------------------------------
+ * @Brief:  check is there any rownum/level/prior in expressions, if given expression
+ *          containing prior and rownum/level simultaneously, then error it out.
+ * --------------------------------------------------------------------------------------
+*/
+static void rowNumOrLevelWalker(Node *expr, bool *hasRownumOrLevel, bool *hasPrior)
+{
+    if (expr == NULL || (*hasRownumOrLevel && *hasPrior)) {
+        return;
+    }
+
+    switch (nodeTag(expr)) {
+        case T_ColumnRef: {
+            ColumnRef* colRef = (ColumnRef*)expr;
+            *hasRownumOrLevel = is_cref_by_name((Node *)colRef, "level") ||
+                                        *hasRownumOrLevel;
+            *hasPrior = colRef->prior || *hasPrior;
+            break;
+        }
+
+        case T_Rownum: {
+            *hasRownumOrLevel = true;
+            break;
+        }
+
+        case T_NullTest: {
+            NullTest* nullTestExpr = (NullTest*)expr;
+            Node* arg = (Node *)nullTestExpr->arg;
+            rowNumOrLevelWalker(arg, hasRownumOrLevel, hasPrior);
+            break;
+        }
+
+        case T_SubLink: {
+            SubLink *sublink = (SubLink *)expr;
+            Node *testexpr = sublink->testexpr;
+            rowNumOrLevelWalker(testexpr, hasRownumOrLevel, hasPrior);
+            break;
+        }
+
+        case T_CoalesceExpr: {
+            Node* node = (Node *)(((CoalesceExpr*)expr)->args);
+            rowNumOrLevelWalker(node, hasRownumOrLevel, hasPrior);
+            break;
+        }
+
+        case T_CollateClause: {
+            CollateClause *cc = (CollateClause*) expr;
+            rowNumOrLevelWalker(cc->arg, hasRownumOrLevel, hasPrior);
+            break;
+        }
+
+        case T_TypeCast: {
+            TypeCast* tc = (TypeCast*)expr;
+            rowNumOrLevelWalker(tc->arg, hasRownumOrLevel, hasPrior);
+            break;
+        }
+
+        case T_List: {
+            List* l = (List*)expr;
+            ListCell* lc = NULL;
+            foreach (lc, l) {
+                rowNumOrLevelWalker((Node*)lfirst(lc), hasRownumOrLevel, hasPrior);
+            }
+            break;
+        }
+
+        case T_FuncCall: {
+            ListCell *args = NULL;
+            FuncCall* fn = (FuncCall *)expr;
+
+            foreach (args, fn->args) {
+                rowNumOrLevelWalker((Node*)lfirst(args), hasRownumOrLevel, hasPrior);
+            }
+            break;
+        }
+
+        case T_A_Indirection: {
+            A_Indirection* idn = (A_Indirection *)expr;
+            rowNumOrLevelWalker(idn->arg, hasRownumOrLevel, hasPrior);
+            break;
+        }
+
+        case T_A_Expr: {
+            A_Expr *a_expr = (A_Expr *)expr;
+            Node *left_expr = a_expr->lexpr;
+            Node *right_expr = a_expr->rexpr;
+
+            switch (a_expr->kind) {
+                case AEXPR_OP:
+                case AEXPR_AND:
+                case AEXPR_OR:
+                case AEXPR_IN: {
+                    rowNumOrLevelWalker(left_expr, hasRownumOrLevel, hasPrior);
+                    rowNumOrLevelWalker(right_expr, hasRownumOrLevel, hasPrior);
+                    break;
+                }
+                case AEXPR_NOT: {
+                    rowNumOrLevelWalker(right_expr, hasRownumOrLevel, hasPrior);
+                    break;
+                }
+                default: {
+                    ereport(ERROR,
+                        (errmodule(MOD_PARSER), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("Unsupported expression found in START WITH / CONNECT BY "
+                                        "clause during rowNumOrLevelWalker."),
+                            errdetail("Unsupported expr type: %d.", (int)a_expr->kind),
+                            errcause("Unsupported expression in START WITH / CONNECT BY clause."),
+                            erraction("Check and revise your query or contact Huawei engineers.")));
+                    break;
+                }
+            }
+            break;
+        }
+        case T_A_Const: {
+            A_Const *n = (A_Const *)expr;
+            if (n->val.type == T_Integer) {
+                long val = n->val.val.ival;
+                if (val == CONNECT_BY_ROWNUM_FAKEVALUE || val == CONNECT_BY_LEVEL_FAKEVALUE) {
+                    *hasRownumOrLevel = true;
+                }
+            }
+            break;
+        }
+        case T_A_ArrayExpr:
+        case T_ParamRef: {
+            break;
+        }
+
+        default: {
+            ereport(ERROR,
+                (errmodule(MOD_PARSER), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("Unsupported expression found in START WITH / CONNECT BY "
+                                "clause during rowNumOrLevelWalker."),
+                    errdetail("Unsupported node type: %d.", (int)nodeTag(expr)),
+                    errcause("Unsupported expression in START WITH / CONNECT BY clause."),
+                    erraction("Check and revise your query or contact Huawei engineers.")));
+            break;
+        }
+    }
+
+    return;
+}
+
+/*
+ * --------------------------------------------------------------------------------------
+ * @Brief:  flatten connectByExpr into two lists
+ * @Param:
+ *      - rownum_or_level_list: the exprs in this list contains "level" or "rownum"
+ *      - normal_list: the exprs in this list = connectByExpr - rownum_or_level_list
+ *      - expr
+ * --------------------------------------------------------------------------------------
+*/
+static void flattenConnectByExpr(StartWithTransformContext *context, Node *expr)
+{
+    if (expr == NULL) {
+        return;
+    }
+
+    bool hasRownumOrLevel = false;
+    bool hasPrior = false;
+    if (nodeTag(expr) == T_A_Expr) {
+        A_Expr *a_expr = (A_Expr *)expr;
+        if (a_expr->kind ==  AEXPR_AND) {
+            Node *lexpr = a_expr->lexpr;
+            Node *rexpr = a_expr->rexpr;
+            flattenConnectByExpr(context, lexpr);
+            flattenConnectByExpr(context, rexpr);
+            return;
+        }
+    }
+
+    rowNumOrLevelWalker(expr, &hasRownumOrLevel, &hasPrior);
+    if (hasRownumOrLevel && hasPrior) {
+        ereport(ERROR, (errmodule(MOD_PARSER), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("column specified by prior cannot concide with ROWNUM/LEVEL."),
+            errdetail("Unsupported node type: %d.", (int)nodeTag(expr)),
+            errcause("Unsupported expression in START WITH / CONNECT BY clause."),
+            erraction("Check and revise your query or contact Huawei engineers.")));
+    }
+    if (hasRownumOrLevel) {
+        context->rownum_or_level_list = lappend(context->rownum_or_level_list, expr);
+    } else {
+        context->normal_list = lappend(context->normal_list, expr);
+    }
+}
+
+/*
+ * --------------------------------------------------------------------------------------
+ * @Brief:  build a internal expr from given list using "AND"
+ * @Return: the final expr
+ * --------------------------------------------------------------------------------------
+*/
+static Node *buildExprUsingAnd(ListCell *tempCell)
+{
+    if (tempCell == NULL) {
+        return NULL;
+    }
+
+    Node *nowExpr = (Node *)lfirst(tempCell);
+    Node *nextExpr = buildExprUsingAnd(lnext(tempCell));
+
+    if (nextExpr != NULL) {
+        return (Node *)makeA_Expr(AEXPR_AND, NULL, nowExpr, nextExpr, -1);
+    } else {
+        return nowExpr;
+    }
 }
 
 /*
@@ -900,6 +1130,12 @@ static void StartWithWalker(StartWithTransformContext *context, Node *expr)
             break;
         }
 
+        case T_CoalesceExpr: {
+            Node* node = (Node *)(((CoalesceExpr*)expr)->args);
+            StartWithWalker(context, node);
+            break;
+        }
+
         case T_CollateClause: {
             CollateClause *cc = (CollateClause*) expr;
             StartWithWalker(context, cc->arg);
@@ -918,6 +1154,10 @@ static void StartWithWalker(StartWithTransformContext *context, Node *expr)
             foreach (lc, l) {
                 StartWithWalker(context, (Node*)lfirst(lc));
             }
+            break;
+        }
+
+        case T_A_ArrayExpr: {
             break;
         }
 
@@ -948,17 +1188,12 @@ static void StartWithWalker(StartWithTransformContext *context, Node *expr)
                     if (left_expr != NULL && (is_cref_by_name(left_expr, "level") ||
                             IsA(left_expr, Rownum))) {
                         context->connect_by_type = CONNECT_BY_MIXED_LEVEL;
-                        context->connectByLevelExpr = (Node *)copyObject(a_expr);
-                        a_expr->kind = AEXPR_OR;
-                        a_expr->lexpr = makeBoolAConst(true, -1);
-                        a_expr->rexpr = makeBoolAConst(true, -1);
-                        A_Expr* cble = (A_Expr*) context->connectByLevelExpr;
                         A_Const *n = makeNode(A_Const);
                         n->val.type = T_Integer;
                         n->val.val.ival = IsA(left_expr, Rownum) ?
                             CONNECT_BY_ROWNUM_FAKEVALUE : CONNECT_BY_LEVEL_FAKEVALUE;
                         n->location = -1;
-                        cble->lexpr = (Node*) n;
+                        a_expr->lexpr = (Node*) n;
                         break;
                     }
 
@@ -1106,24 +1341,20 @@ static void transformStartWithClause(StartWithTransformContext *context, SelectS
     context->nocycle = clause->nocycle;
     context->siblingsOrderBy = (List *)clause->siblingsOrderBy;
 
-    /* Handling CONNECT BY ROWNUM / LEVEL */
-    if (startWithExpr == NULL) {
-        raw_expression_tree_walker((Node*)context->connectByExpr,
-            (bool (*)())pseudo_level_rownum_walker, (Node*)context->connectByExpr);
-        checkConnectByExprValidity((Node*)connectByExpr);
-        StartWithWalker(context, connectByExpr);
-        context->relInfoList = context->pstate->p_start_info;
-        if (context->connect_by_type != CONNECT_BY_PRIOR) {
-            context->connectByLevelExpr = connectByExpr;
-            context->connectByOtherExpr = NULL;
-        }
-    }
+    /* when ROWNUM or LEVEL appear in Expressions other than A_Expr, do an extra replacement */
+    raw_expression_tree_walker((Node*)context->connectByExpr,
+        (bool (*)())pseudo_level_rownum_walker, (Node*)context->connectByExpr);
+    checkConnectByExprValidity((Node*)connectByExpr);
+    context->relInfoList = context->pstate->p_start_info;
+
+    flattenConnectByExpr(context, connectByExpr);
+    context->connectByLevelExpr = buildExprUsingAnd(list_head(context->rownum_or_level_list));
+    context->connectByExpr = buildExprUsingAnd(list_head(context->normal_list));
 
     /* transform start with ... connect by's expr */
     StartWithWalker(context, startWithExpr);
-    if (startWithExpr != NULL) {
-        StartWithWalker(context, connectByExpr);
-    }
+    StartWithWalker(context, context->connectByLevelExpr);
+    StartWithWalker(context, context->connectByExpr);
 
     /*
      * now handle where quals which might need to be pushed down.
@@ -1290,6 +1521,21 @@ static void AddWithClauseToBranch(ParseState *pstate, SelectStmt *stmt, List *re
     return;
 }
 
+static bool count_columnref_walker(Node *node, int *columnref_count)
+{
+    if (node == NULL) {
+        return false;
+    }
+
+    if (!IsA(node, ColumnRef)) {
+        return raw_expression_tree_walker(node, (bool (*)()) count_columnref_walker, (void*)columnref_count);
+    }
+
+    *columnref_count = *columnref_count + 1;
+
+    return false;
+}
+
 static bool walker_to_exclude_non_join_quals(Node *node, Node *context_node)
 {
     if (node == NULL) {
@@ -1301,17 +1547,23 @@ static bool walker_to_exclude_non_join_quals(Node *node, Node *context_node)
     }
 
     A_Expr* expr = (A_Expr*) node;
+    if (expr->kind != AEXPR_OP) {
+        return raw_expression_tree_walker(node, (bool (*)()) walker_to_exclude_non_join_quals, (void*)NULL);
+    }
+
     /*
      * this is to achieve consistent result sets with those produced by the original
      * start with .. connect by syntax, which does not push filter quals down to connect quals.
-     * if non-column item appears on any side of an operator, we guess that it is
+     * if no more than one column item appears inside an AEXPR_OP, we guess that it is
      * not a join qual so should not be filtered in sw op, and force it to be true.
      * this rule is not always correct but should work fine most of the time.
      * could be improved later on, e.g. find better ways to extract non-join quals
      * from the where clause.
      */
-    if (expr->kind == AEXPR_OP &&
-        (!IsA(expr->lexpr, ColumnRef) || !IsA(expr->rexpr, ColumnRef))) {
+    int columnref_count = 0;
+    (void) raw_expression_tree_walker(node, (bool (*)()) count_columnref_walker, (void*)&columnref_count);
+
+    if (columnref_count <= 1) {
         expr->lexpr = makeBoolAConst(true, -1);
         expr->rexpr = makeBoolAConst(true, -1);
         expr->kind = AEXPR_OR;
@@ -1393,47 +1645,18 @@ static SelectStmt *CreateStartWithCTEInnerBranch(ParseState* pstate,
 
     /* process regular/level */
     switch (context->connect_by_type) {
-        case CONNECT_BY_PRIOR: {
+        case CONNECT_BY_PRIOR:
+        case CONNECT_BY_ROWNUM:
+        case CONNECT_BY_LEVEL:
+        case CONNECT_BY_MIXED_LEVEL:  {
             join->jointype = JOIN_INNER;
             join->isNatural = FALSE;
             join->larg = (Node *)work_table;
             join->rarg = origin_table;
             join->usingClause = NIL;
             join->quals = (Node *)copyObject(connectByExpr);
-
             result->targetList = expandAllTargetList(relInfoList);
             result->fromClause = list_make1(join);
-
-            break;
-        }
-        case CONNECT_BY_ROWNUM:
-        case CONNECT_BY_LEVEL: {
-            join->jointype = JOIN_INNER;
-            join->isNatural = TRUE;
-            join->larg = (Node *)work_table;
-            join->rarg = origin_table;
-            join->usingClause = NIL;
-
-            /* for connect-by-level we set joinquals to TRUE as a netural join */
-            join->quals = makeBoolAConst(true, -1);
-
-            result->targetList = expandAllTargetList(relInfoList);
-            result->fromClause = list_make1(join);
-            result->whereClause = (Node *)context->connectByOtherExpr;
-
-            break;
-        }
-        case CONNECT_BY_MIXED_LEVEL: {
-            join->jointype = JOIN_INNER;
-            join->isNatural = TRUE;
-            join->larg = (Node *)work_table;
-            join->rarg = origin_table;
-            join->usingClause = NIL;
-            /* for MIXED connect-by-level we keep the original quals except for the level part */
-            join->quals = (Node *)copyObject(connectByExpr);
-            result->targetList = expandAllTargetList(relInfoList);
-            result->fromClause = list_make1(join);
-            result->whereClause = (Node *)context->connectByOtherExpr;
             break;
         }
         default: {
@@ -1489,7 +1712,6 @@ static SelectStmt *CreateStartWithCTEOuterBranch(ParseState *pstate,
     /* push whereClause down to init part, taking care to avoid NULL in expr. */
     quals = (Node *)startWithExpr;
     Node* whereClauseCopy = (Node *)copyObject(whereClause);
-
     if (whereClause != NULL) {
         /* only join quals can be pushed down */
         raw_expression_tree_walker((Node*)whereClauseCopy,
@@ -1669,7 +1891,7 @@ static void transformFromList(ParseState* pstate, Query* qry,
     List *relInfoList = context->relInfoList;
     Node *whereClause = context->whereClause;
 
-    /* make union-all branch for none- recursive part */
+    /* make union-all branch for none-recursive part */
     SelectStmt *outerBranch = CreateStartWithCTEOuterBranch(pstate, context,
                         relInfoList, (Node *)startWithExpr, whereClause);
 

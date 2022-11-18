@@ -22,6 +22,7 @@
 #include "access/multixact.h"
 #include "access/tableam.h"
 #include "access/transam.h"
+#include "access/sysattr.h"
 #include "access/xlog.h"
 #include "access/xloginsert.h"
 #include "access/xlogutils.h"
@@ -761,9 +762,13 @@ static Datum GetIntDefVal(TypeName* name, T value)
     }
 }
 
-void DefineSequenceWrapper(CreateSeqStmt* seq)
+void DefineSequenceWrapper(CreateSeqStmt *seq)
 {
     if (seq->is_large) {
+        if (t_thrd.proc->workingVersionNum < LARGE_SEQUENCE_VERSION_NUM) {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("It is not supported to create large sequence during upgrade.")));
+        }
         DefineSequence<FormData_pg_large_sequence, int128, true>(seq);
     } else {
         DefineSequence<FormData_pg_sequence, int64, false>(seq);
@@ -854,9 +859,11 @@ static void DefineSequence(CreateSeqStmt* seq)
 
     if (notSupportTmpSeq)
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("Temporary sequences are not supported")));
+#ifdef ENABLE_MULTIPLE_NODES
     if (!IS_SINGLE_NODE && seq->uuid == INVALIDSEQUUID)
         ereport(ERROR,
             (errcode(ERRCODE_DATA_CORRUPTED), errmsg("Invaild UUID for CREATE SEQUENCE %s.", seq->sequence->relname)));
+#endif
 
     /* Check and set all option values */
 #ifdef PGXC
@@ -1284,13 +1291,68 @@ Datum nextval(PG_FUNCTION_ARGS)
     PG_RETURN_INT64(nextval_internal(relid));
 }
 
+Oid get_nextval_rettype()
+{
+    /*
+     * deliberately scan systable instead of search in syscache so that the
+     * influence of hard-coded pg_proc is eliminated.
+     */
+    HeapTuple tup = NULL;
+    ScanKeyData entry;
+    SysScanDesc scanDesc = NULL;
+    Relation rel = heap_open(ProcedureRelationId, NoLock);
+    ScanKeyInit(&entry, ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(NEXTVALFUNCOID));
+    scanDesc = systable_beginscan(rel, ProcedureOidIndexId, true, SnapshotNow, 1, &entry);
+    tup = systable_getnext(scanDesc);
+    if (!HeapTupleIsValid(tup)) {
+        ereport(ERROR, (errmsg("catalog lookup failed for proc %u", NEXTVALFUNCOID)));
+    }
+    Form_pg_proc form = (Form_pg_proc)GETSTRUCT(tup);
+    Oid ret = form->prorettype;
+    systable_endscan(scanDesc);
+    heap_close(rel, NoLock);
+
+    return ret;
+}
+
+bool shouldReturnNumeric()
+{
+    /*
+     * The return type is controled because the binary may mismatch that of system catalog.
+     * Sequence functions should always return the desired type that is determined during
+     * optimizer stage.
+     * During inplace upgrade, if the nextval function is called by default value, I.E.
+     * u_sess->opt_cxt.nextval_default_expr_type != NDE_UNKNOWN, we return the required type
+     * in build_column_default.
+     * Otherwise, we scan the systable for current return type.
+     */
+    if (t_thrd.proc->workingVersionNum >= LARGE_SEQUENCE_VERSION_NUM) {
+        return true;
+    }
+
+    switch (u_sess->opt_cxt.nextval_default_expr_type) {
+        case NDE_NUMERIC:
+            return true;
+        case NDE_BIGINT:
+            return false;
+        default:
+            break;
+    }
+
+    return get_nextval_rettype() == NUMERICOID;
+}
+
 Datum nextval_oid(PG_FUNCTION_ARGS)
 {
     Oid relid = PG_GETARG_OID(0);
 
     int128 result = nextval_internal(relid);
 
-    PG_RETURN_NUMERIC(convert_int128_to_numeric(result, 0));
+    if (shouldReturnNumeric()) {
+        PG_RETURN_NUMERIC(convert_int128_to_numeric(result, 0));
+    } else {
+        PG_RETURN_INT64(int64(result));
+    }
 }
 
 static int128 nextval_internal(Oid relid)
@@ -1398,7 +1460,11 @@ Datum currval_oid(PG_FUNCTION_ARGS)
     result = elm->last;
     relation_close(seqrel, NoLock);
 
-    PG_RETURN_NUMERIC(convert_int128_to_numeric(result, 0));
+    if (shouldReturnNumeric()) {
+        PG_RETURN_NUMERIC(convert_int128_to_numeric(result, 0));
+    } else {
+        PG_RETURN_INT64(int64(result));
+    }
 }
 
 Datum lastval(PG_FUNCTION_ARGS)
@@ -1434,7 +1500,11 @@ Datum lastval(PG_FUNCTION_ARGS)
     result = u_sess->cmd_cxt.last_used_seq->last;
     relation_close(seqrel, NoLock);
 
-    PG_RETURN_NUMERIC(convert_int128_to_numeric(result, 0));
+    if (shouldReturnNumeric()) {
+        PG_RETURN_NUMERIC(convert_int128_to_numeric(result, 0));
+    } else {
+        PG_RETURN_INT64(int64(result));
+    }
 }
 
 /*

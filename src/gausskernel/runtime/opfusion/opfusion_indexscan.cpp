@@ -27,6 +27,7 @@
 
 #include "access/tableam.h"
 #include "opfusion/opfusion_util.h"
+#include "utils/knl_partcache.h"
 
 IndexScanFusion::IndexScanFusion(IndexScan* node, PlannedStmt* planstmt, ParamListInfo params)
     : IndexFusion(params, planstmt)
@@ -122,6 +123,7 @@ void IndexScanFusion::Init(long max_rows)
         m_rel = heap_open(m_reloid, AccessShareLock);
         m_index = index_open(m_node->indexid, AccessShareLock);
     }
+    validateTempRelation(m_rel);
 
     if (unlikely(!m_keyInit)) {
         IndexFusion::IndexBuildScanKey(m_node->indexqual);

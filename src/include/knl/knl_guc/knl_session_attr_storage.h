@@ -135,6 +135,7 @@ typedef struct knl_session_attr_storage {
     int checkpoint_flush_after;
     int CheckPointWaitTimeOut;
     int WalWriterDelay;
+    int repl_auth_mode;
     int wal_sender_timeout;
     int CommitDelay;
     int partition_lock_upgrade_timeout;
@@ -191,6 +192,7 @@ typedef struct knl_session_attr_storage {
     char* ReplConnInfoArr[GUC_MAX_REPLNODE_NUM];
     char* CrossClusterReplConnInfoArr[GUC_MAX_REPLNODE_NUM];
     char* PrimarySlotName;
+    char* repl_uuid;
     char* logging_module;
     char* Inplace_upgrade_next_system_object_oids;
     char* hadr_super_user_record_path;
@@ -203,6 +205,7 @@ typedef struct knl_session_attr_storage {
     int pageWriterSleep;
     bool enable_cbm_tracking;
     bool enable_copy_server_files;
+    bool enable_access_server_directory;
     int target_rto;
     int time_to_target_rpo;
     int hadr_recovery_time_target;
@@ -210,7 +213,14 @@ typedef struct knl_session_attr_storage {
     bool enable_twophase_commit;
     int ustats_tracker_naptime;
     int umax_search_length_for_prune;
+    int ustore_verify_level;
+    int ustore_verify_module;
+    int index_trace_level;
     int archive_interval;
+    bool enable_ustore_sync_rollback;
+    bool enable_ustore_async_rollback;
+    bool enable_ustore_page_rollback;
+    bool enable_log_tuple;
 
     /*
      * xlog keep for all standbys even through they are not connect and donnot created replslot.
@@ -224,7 +234,6 @@ typedef struct knl_session_attr_storage {
     bool enable_segment;
 
     /* for GTT */
-    int max_active_gtt;
     int vacuum_gtt_defer_check_age;
 
     /* for undo */
@@ -248,6 +257,11 @@ typedef struct knl_session_attr_storage {
     bool reserve_space_for_nullable_atts;
     knl_session_attr_dcf dcf_attr;
     int catchup2normal_wait_time;
+
+    char* logical_decode_options_default_str;
+    void* logical_decode_options_default;
+
+    int logical_sender_timeout;
 } knl_session_attr_storage;
 
 #endif /* SRC_INCLUDE_KNL_KNL_SESSION_ATTR_STORAGE */

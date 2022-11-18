@@ -80,16 +80,19 @@ static void SetBarrieID(const char *barrierId, XLogRecPtr lsn)
     const uint32 shiftSize = 32;
     volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
 
-    SpinLockAcquire(&walrcv->mutex);
-    rc = strncpy_s((char *)walrcv->lastReceivedBarrierId, MAX_BARRIER_ID_LENGTH, barrierId, MAX_BARRIER_ID_LENGTH - 1);
-    securec_check(rc, "\0", "\0");
+    if (strcmp(barrierId, (char *)walrcv->lastReceivedBarrierId) > 0) {
+        SpinLockAcquire(&walrcv->mutex);
+        rc = strncpy_s((char *)walrcv->lastReceivedBarrierId, MAX_BARRIER_ID_LENGTH, barrierId,
+                       MAX_BARRIER_ID_LENGTH - 1);
+        securec_check(rc, "\0", "\0");
 
-    walrcv->lastReceivedBarrierId[MAX_BARRIER_ID_LENGTH - 1] = '\0';
-    walrcv->lastReceivedBarrierLSN = lsn;
-    SpinLockRelease(&walrcv->mutex);
+        walrcv->lastReceivedBarrierId[MAX_BARRIER_ID_LENGTH - 1] = '\0';
+        walrcv->lastReceivedBarrierLSN = lsn;
+        SpinLockRelease(&walrcv->mutex);
 
-    ereport(LOG, (errmsg("SetBarrieID set the barrier ID is %s, the barrier LSN is %08X/%08X", barrierId,
-        (uint32)(lsn >> shiftSize), (uint32)lsn)));
+        ereport(LOG, (errmsg("[BarrierPreParse] SetBarrieID set the barrier ID is %s, the barrier LSN is %08X/%08X",
+            barrierId, (uint32)(lsn >> shiftSize), (uint32)lsn)));
+    }
 }
 
 static void BarrierPreParseSigHupHandler(SIGNAL_ARGS)
@@ -176,7 +179,6 @@ void BarrierPreParseMain(void)
     XLogRecPtr startLSN = InvalidXLogRecPtr;
     XLogRecPtr preStartLSN = InvalidXLogRecPtr;
     XLogRecPtr lastReadLSN = InvalidXLogRecPtr;
-    bool found = false;
     XLogRecPtr barrierLSN = InvalidXLogRecPtr;
     char *xLogBarrierId = NULL;
     char barrierId[MAX_BARRIER_ID_LENGTH] = {0};
@@ -196,6 +198,7 @@ void BarrierPreParseMain(void)
     (void)gspqsignal(SIGPIPE, SIG_IGN);
     (void)gspqsignal(SIGUSR1, BarrierPreParseSigUsr1Handler);
     (void)gspqsignal(SIGUSR2, SIG_IGN);
+    (void)gspqsignal(SIGURG, print_stack);
 
     /*
      * Reset some signals that are accepted by postmaster but not here
@@ -257,21 +260,25 @@ void BarrierPreParseMain(void)
             proc_exit(0); /* done */
         }
 
-        found = false;
+        if (XLogRecPtrIsInvalid(startLSN)) {
+            ereport(ERROR, (errmsg("[BarrierPreParse] startLSN is invalid")));
+        }
+
         preStartLSN = startLSN;
         ereport(DEBUG1, (errmsg("[BarrierPreParse] start to preparse at: %08X/%08X",
             (uint32)(startLSN >> shiftSize), (uint32)startLSN)));
         startLSN = XLogFindNextRecord(xlogreader, startLSN);
         if (XLogRecPtrIsInvalid(startLSN)) {
             startLSN = preStartLSN;
-            if (!XLByteEQ(walrcv->receiver_flush_location, startLSN) &&
-                !XLByteEQ(walrcv->lastRecoveredBarrierLSN, startLSN)) {
-                /* reset startLSN */
-                startLSN = walrcv->lastRecoveredBarrierLSN;
-                ereport(LOG, (errmsg("[BarrierPreParse] reset startLSN with lastRecoveredBarrierLSN: %08X/%08X",
-                    (uint32)(startLSN >> shiftSize), (uint32)startLSN)));
-            }
-            continue;
+        }
+
+        /*
+         * If at page start, we must skip over the page header using xrecoff check.
+         */
+        if (0 == startLSN % XLogSegSize) {
+            XLByteAdvance(startLSN, SizeOfXLogLongPHD);
+        } else if (0 == startLSN % XLOG_BLCKSZ) {
+            XLByteAdvance(startLSN, SizeOfXLogShortPHD);
         }
 
         do {
@@ -279,7 +286,7 @@ void BarrierPreParseMain(void)
             if (record == NULL) {
                 break;
             }
-            lastReadLSN = xlogreader->EndRecPtr;
+            lastReadLSN = xlogreader->ReadRecPtr;
             uint8 info = XLogRecGetInfo(xlogreader) & ~XLR_INFO_MASK;
             if (NEED_INSERT_INTO_HASH) {
                 xLogBarrierId = XLogRecGetData(xlogreader);
@@ -287,7 +294,6 @@ void BarrierPreParseMain(void)
                     ereport(WARNING, (errmsg("[BarrierPreParse] %s is not for standby cluster", xLogBarrierId)));
                 } else {
                     // insert into hash table
-                    found = true;
                     barrierLSN = xlogreader->EndRecPtr;
                     rc = strncpy_s((char *)barrierId, MAX_BARRIER_ID_LENGTH, xLogBarrierId, MAX_BARRIER_ID_LENGTH - 1);
                     securec_check(rc, "\0", "\0");
@@ -295,8 +301,7 @@ void BarrierPreParseMain(void)
                     LWLockAcquire(g_instance.csn_barrier_cxt.barrier_hashtbl_lock, LW_EXCLUSIVE);
                     BarrierCacheInsertBarrierId(barrierId);
                     LWLockRelease(g_instance.csn_barrier_cxt.barrier_hashtbl_lock);
-                    ereport(LOG, (errmsg("[BarrierPreParse] insert barrierID %s to the hash table, rmid: %d, crc: %d.",
-                    barrierId, record->xl_rmid, record->xl_crc)));
+                    SetBarrieID(barrierId, barrierLSN);
                 }
             }
             startLSN = InvalidXLogRecPtr;
@@ -304,10 +309,7 @@ void BarrierPreParseMain(void)
 
         /* close xlogreadfd after circulation */
         CloseXlogFile();
-
-        if (found) {
-            SetBarrieID(barrierId, barrierLSN);
-        }
+        XLogReaderInvalReadState(xlogreader);
 
         startLSN = XLogRecPtrIsInvalid(lastReadLSN) ? preStartLSN : lastReadLSN;
 

@@ -476,3 +476,31 @@ gaussdb_qps_by_instance:
   ttl: 60
   timeout: 0.1
 
+load_average:
+  name: load_average
+  desc: load average for database server.
+  query:
+    - name: load_average
+      promql: "
+        label_replace(
+          node_load1,
+          'instance', '$1', 'instance', '(.*):.*')
+      "
+      version: '>=0.0.0'
+      timeout: 0.1
+      ttl: 10
+      status: enable
+      dbRole: ""
+  metrics:
+    - name: from_job
+      label: job
+      description: from job
+      usage: LABEL
+    - name: from_instance
+      label: instance
+      description: from instance
+      usage: LABEL
+  status: enable
+  ttl: 60
+  timeout: 0.1
+

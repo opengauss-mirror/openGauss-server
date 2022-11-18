@@ -642,6 +642,7 @@ hashSource* setOpTbl::GetHashSource()
             return NULL;
     } else {
         ps = New(CurrentMemoryContext) hashOpSource(outerPlanState(m_runtime));
+        pfree_ext(m_filesource);
     }
     return ps;
 }

@@ -96,5 +96,16 @@ select * from t tt1 join t tt2 on tt1.a = tt2.b where tt1.a is null;
 ---+---+---+---
 (0 rows)
 
+explain select * from t tt1 join t tt2 on tt1.a = tt2.b where tt1.a is not null;
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Hash Join  (cost=58.35..354.32 rows=22973 width=16)
+   Hash Cond: (tt1.a = tt2.b)
+   ->  Seq Scan on t tt1  (cost=0.00..31.49 rows=2138 width=8)
+         Filter: (a IS NOT NULL)
+   ->  Hash  (cost=31.49..31.49 rows=2149 width=8)
+         ->  Seq Scan on t tt2  (cost=0.00..31.49 rows=2149 width=8)
+(6 rows)
+
 drop schema null_test_opt_nsp cascade;
 NOTICE:  drop cascades to table t

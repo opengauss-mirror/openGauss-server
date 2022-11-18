@@ -747,7 +747,7 @@ other			.
 					if (yyextra->literallen == 0)
 						yyerror("zero-length delimited identifier");
 					ident = litbufdup(yyscanner);
-					if (yyextra->literallen >= NAMEDATALEN && u_sess->parser_cxt.is_load_copy == false)
+					if (yyextra->literallen >= NAMEDATALEN && u_sess->parser_cxt.is_load_copy == false && u_sess->parser_cxt.isForbidTruncate == false)
 						truncate_identifier(ident, yyextra->literallen, yyextra->warnOnTruncateIdent);
 					yylval->str = ident;
 					yyextra->ident_quoted = true;
@@ -763,7 +763,7 @@ other			.
 						yyerror("zero-length delimited identifier");
 					ident = litbuf_udeescape('\\', yyscanner);
 					identlen = strlen(ident);
-					if (identlen >= NAMEDATALEN && u_sess->parser_cxt.is_load_copy == false)
+					if (identlen >= NAMEDATALEN && u_sess->parser_cxt.is_load_copy == false && u_sess->parser_cxt.isForbidTruncate == false)
 						truncate_identifier(ident, identlen, yyextra->warnOnTruncateIdent);
 					yylval->str = ident;
 					/* throw back all but the quote */
@@ -781,7 +781,7 @@ other			.
 						yyerror("zero-length delimited identifier");
 					ident = litbuf_udeescape(yytext[yyleng - 2], yyscanner);
 					identlen = strlen(ident);
-					if (identlen >= NAMEDATALEN && u_sess->parser_cxt.is_load_copy == false)
+					if (identlen >= NAMEDATALEN && u_sess->parser_cxt.is_load_copy == false && u_sess->parser_cxt.isForbidTruncate == false)
 						truncate_identifier(ident, identlen, yyextra->warnOnTruncateIdent);
 					yylval->str = ident;
 					yyextra->ident_quoted = false;

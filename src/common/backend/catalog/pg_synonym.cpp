@@ -50,6 +50,31 @@ static Oid SynonymCreate(
     Oid synNamespace, const char* synName, Oid synOwner, const char* objSchema, const char* objName, bool replace);
 static void SynonymDrop(Oid synNamespace, char* synName, DropBehavior behavior, bool missing);
 
+void CheckCreateSynonymPrivilege(Oid synNamespace, const char* synName)
+{
+    if (!isRelSuperuser() &&
+        (synNamespace == PG_CATALOG_NAMESPACE ||
+        synNamespace == PG_PUBLIC_NAMESPACE ||
+        synNamespace == PG_DB4AI_NAMESPACE)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                errmsg("permission denied to create synonym \"%s\"", synName),
+                errhint("must be %s to create a synonym in %s schema.",
+                    g_instance.attr.attr_security.enablePrivilegesSeparate ? "initial user" : "sysadmin",
+                    get_namespace_name(synNamespace))));
+    }
+
+    if (!IsInitdb && !u_sess->attr.attr_common.IsInplaceUpgrade &&
+        !g_instance.attr.attr_common.allow_create_sysobject &&
+        IsSysSchema(synNamespace)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                errmsg("permission denied to create synonym \"%s\"", synName),
+                errhint("not allowd to create a synonym in %s schema when allow_create_sysobject is off.",
+                    get_namespace_name(synNamespace))));
+    }
+}
+
 /*
  * CREATE SYNONYM
  */
@@ -78,14 +103,7 @@ void CreateSynonym(CreateSynonymStmt* stmt)
         aclcheck_error(aclResult, ACL_KIND_NAMESPACE, get_namespace_name(synNamespace));
     }
 
-    if (synNamespace == PG_PUBLIC_NAMESPACE && !isRelSuperuser()) {
-        ereport(ERROR,
-            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-                errmsg("permission denied to create synonym \"%s\"", synName),
-                errhint("must be %s to create a synonym in public schema.",
-                    g_instance.attr.attr_security.enablePrivilegesSeparate  ? "initial user" : "sysadmin")));
-    }
-
+    CheckCreateSynonymPrivilege(synNamespace, synName);
     /* Deconstruct the referenced qualified-name. */
     DeconstructQualifiedName(stmt->objName, &objSchema, &objName);
 
@@ -201,12 +219,11 @@ static Oid SynonymCreate(
     /* update the index if any */
     CatalogUpdateIndexes(rel, tuple);
 
+    ObjectAddressSet(myself, PgSynonymRelationId, HeapTupleGetOid(tuple));
+
     /* record the dependencies, for the first create. */
     if (!isUpdate) {
         /* dependency on namespace of synonym object */
-        myself.classId = PgSynonymRelationId;
-        myself.objectId = HeapTupleGetOid(tuple);
-        myself.objectSubId = 0;
 
         referenced.classId = NamespaceRelationId;
         referenced.objectId = synNamespace;
@@ -216,6 +233,8 @@ static Oid SynonymCreate(
         /* dependency on owner of synonym object */
         recordDependencyOnOwner(myself.classId, myself.objectId, synOwner);
     }
+
+    recordDependencyOnCurrentExtension(&myself, isUpdate);
 
     heap_freetuple(tuple);
     heap_close(rel, RowExclusiveLock);

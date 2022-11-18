@@ -52,6 +52,7 @@ struct TupleTableSlot;
                                             * reused */
 #define SINGLE_LOCKER_XID_IS_LOCK 0x2000 /* locked from SELECT FOR UPDATE/SHARE */
 #define SINGLE_LOCKER_XID_IS_SUBXACT 0x4000
+#define SINGLE_LOCKER_XID_IS_TRANS 0x8000
 #define SINGLE_LOCKER_INFOMASK (SINGLE_LOCKER_XID_IS_LOCK | UHEAP_XID_EXCL_LOCK | UHEAP_XID_SHR_LOCK)
 #define SINGLE_LOCKER_XID_EXCL_LOCK (SINGLE_LOCKER_XID_IS_LOCK | UHEAP_XID_EXCL_LOCK)
 #define SINGLE_LOCKER_XID_SHR_LOCK (SINGLE_LOCKER_XID_IS_LOCK | UHEAP_XID_SHR_LOCK)
@@ -61,11 +62,10 @@ struct TupleTableSlot;
                                      * another partition */
 #define UHEAP_LOCK_MASK (UHEAP_XID_SHR_LOCK | UHEAP_XID_EXCL_LOCK)
 
-#define UHEAP_VIS_STATUS_MASK 0x7FF0 /* mask for visibility bits (5 ~ 14 \
+#define UHEAP_VIS_STATUS_MASK 0xFFF0 /* mask for visibility bits (5 ~ 14 \
                                       * bits) */
 #define UHEAP_LOCK_STATUS_MASK                                                                       \
     (UHEAP_XID_KEYSHR_LOCK | UHEAP_XID_NOKEY_EXCL_LOCK | UHEAP_XID_EXCL_LOCK | UHEAP_MULTI_LOCKERS)
-
 
 /*
  * Use these to test whether a particular lock is applied to a tuple
@@ -74,6 +74,7 @@ struct TupleTableSlot;
 #define SINGLE_LOCKER_XID_IS_SHR_LOCKED(infomask) ((infomask & SINGLE_LOCKER_INFOMASK) == SINGLE_LOCKER_XID_SHR_LOCK)
 
 #define UHEAP_XID_IS_LOCK(infomask) (((infomask) & SINGLE_LOCKER_XID_IS_LOCK) != 0)
+#define UHEAP_XID_IS_TRANS(infomask) (((infomask) & SINGLE_LOCKER_XID_IS_TRANS) != 0)
 #define UHEAP_XID_IS_SHR_LOCKED(infomask) (((infomask)&UHEAP_LOCK_MASK) == UHEAP_XID_SHR_LOCK)
 #define UHEAP_XID_IS_EXCL_LOCKED(infomask) (((infomask)&UHEAP_LOCK_MASK) == UHEAP_XID_EXCL_LOCK)
 #define UHeapTupleHasExternal(tuple) (((tuple)->disk_tuple->flag & UHEAP_HASEXTERNAL) != 0)
@@ -96,7 +97,6 @@ struct TupleTableSlot;
 #define UHEAP_XACT_SLOT 0x00FF /* 8 bits for transaction slot */
 #define UHeapTupleHeaderGetXactSlot(tup) (((tup)->locker_td_id & UHEAP_XACT_SLOT))
 
-
 #define UHeapDiskTupNoNulls(_udisk_tuple) (((_udisk_tuple)->flag & UHEAP_HAS_NULL) == 0)
 
 #define UHeapDiskTupSetHasNulls(_udisk_tuple) ((_udisk_tuple)->flag |= UHEAP_HAS_NULL)
@@ -109,16 +109,11 @@ struct TupleTableSlot;
 
 #define UHeapTupleHeaderSetTDSlot(udisk_tuple, slot_num) ((udisk_tuple)->td_id = ((uint8)slot_num))
 
-#define UHeapTupleHeaderGetLockerTDSlot(udisk_tuple) ((udisk_tuple)->locker_td_id)
-
-#define UHeapTupleHeaderSetLockerTDSlot(udisk_tuple, slot_num) ((udisk_tuple)->locker_td_id = ((uint8)slot_num))
-
 #define UHeapTupleHeaderSetMovedPartitions(udisk_tuple) ((udisk_tuple)->flag |= UHEAP_MOVED)
 
 #define UHeapTupleHeaderClearSingleLocker(utuple)                                         \
     do {                                                                                  \
-        (utuple)->xid = (ShortTransactionId)FrozenTransactionId;                         \
-        (utuple)->flag &= ~(SINGLE_LOCKER_XID_IS_LOCK | SINGLE_LOCKER_XID_IS_SUBXACT);   \
+        (utuple)->flag &= ~(SINGLE_LOCKER_XID_IS_LOCK | SINGLE_LOCKER_XID_IS_SUBXACT);    \
     } while (0)
 
 #define IsUHeapTupleModified(infomask) \
@@ -147,7 +142,7 @@ struct TupleTableSlot;
 
 typedef struct UHeapDiskTupleData {
     ShortTransactionId xid;
-    uint16 td_id : 8, locker_td_id : 8; /* Locker as well as the last updater, 8 bits each */
+    uint16 td_id : 8, reserved : 8; /* Locker as well as the last updater, 8 bits each */
     uint16 flag;                          /* Flag for tuple attributes */
     uint16 flag2;                         /* Number of attributes for now(11 bits) */
     uint8 t_hoff;                         /* Sizeof header incl. bitmap, padding */
@@ -178,6 +173,8 @@ typedef struct UHeapTupleData {
     Oid                  table_oid;
     TransactionId        t_xid_base;
     TransactionId        t_multi_base;
+    TransactionId        xmin;  /* true xmin without xid_base */
+    TransactionId        xmax;  /* true xmax without xid_base */
 #ifdef PGXC
     uint32 xc_node_id; /* Data node the tuple came from */
 #endif
@@ -249,6 +246,8 @@ typedef enum LockOper {
         (tup)->t_multi_base = ((UHeapPageHeaderData *)(page))->pd_multi_base; \
     } while (0)
 
+#define PtrGetVal(ptr, val) (((ptr) == NULL) ? 0 : ((ptr)->val))
+
 #ifndef FRONTEND
 inline void UHeapTupleSetRawXid(UHeapTuple tup, TransactionId xid)
 {
@@ -265,7 +264,6 @@ void UHeapDeformTuple(UHeapTuple utuple, TupleDesc rowDesc, Datum *values, bool 
 void UHeapDeformTupleGuts(UHeapTuple utuple, TupleDesc rowDesc, Datum *values, bool *isNulls, int unatts);
 UHeapTuple HeapToUHeap(TupleDesc tuple_desc, HeapTuple heaptuple);
 HeapTuple UHeapToHeap(TupleDesc tuple_desc, UHeapTuple uheaptuple);
-void UHeapTupleSetHintBits(UHeapDiskTuple tuple, Buffer buffer, uint16 infomask, TransactionId xid);
 Datum UHeapGetSysAttr(UHeapTuple uhtup, Buffer buf, int attnum, TupleDesc tupleDesc, bool *isnull);
 Bitmapset *UHeapTupleAttrEquals(TupleDesc tupdesc, Bitmapset *att_list, UHeapTuple tup1, UHeapTuple tup2);
 UHeapTuple UHeapCopyTuple(UHeapTuple uhtup);
@@ -315,4 +313,6 @@ void UHeapFillDiskTuple(TupleDesc tupleDesc, Datum *values, const bool *isnull, 
     uint32 dataSize, bool enableReverseBitmap, bool enableReserve);
 void CheckTupleValidity(Relation rel, UHeapTuple utuple);
 Tuple UHeapMaterialize(TupleTableSlot *slot);
+void PrevDumpUDiskTuple(UHeapDiskTuple diskTuple);
+void PrevDumpUTuple(UHeapTuple utuple);
 #endif

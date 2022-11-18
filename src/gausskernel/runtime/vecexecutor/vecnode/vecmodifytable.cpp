@@ -26,10 +26,6 @@
 
 #include "access/cstore_delete.h"
 #include "access/cstore_update.h"
-#include "access/dfs/dfs_delete.h"
-#include "access/dfs/dfs_update.h"
-#include "access/dfs/dfs_insert.h"
-#include "catalog/dfsstore_ctlg.h"
 #include "executor/executor.h"
 #include "executor/node/nodeModifyTable.h"
 #ifdef PGXC
@@ -53,8 +49,6 @@
 
 extern void ExecVecConstraints(ResultRelInfo* result_rel_info, VectorBatch* batch, EState* estate);
 extern void FlushErrorInfo(Relation rel, EState* estate, ErrorCacheEntry* cache);
-extern void InsertNewFileToDfsPending(const char* file_name, Oid owner_id, uint64 file_size);
-extern void ResetPendingDfsDelete();
 
 template <class T>
 VectorBatch* ExecVecInsert(VecModifyTableState* state, T* insert_op, VectorBatch* batch, VectorBatch* plan_batch,
@@ -121,17 +115,12 @@ VectorBatch* ExecVecUpdate(
 template VectorBatch* ExecVecUpdate<CStoreUpdate>(VecModifyTableState* state, CStoreUpdate* update_op,
     VectorBatch* batch, EState* estate, bool canSetTag, int options);
 
-template VectorBatch* ExecVecUpdate<DfsUpdate>(
-    VecModifyTableState* state, DfsUpdate* update_op, VectorBatch* batch, EState* estate, bool can_set_tag, int options);
-
 template VectorBatch* ExecVecInsert<CStorePartitionInsert>(VecModifyTableState* state, CStorePartitionInsert* insert_op,
     VectorBatch* batch, VectorBatch* plan_batch, EState* estate, bool can_set_tag, int options);
 
 template VectorBatch* ExecVecInsert<CStoreInsert>(VecModifyTableState* state, CStoreInsert* insert_op,
     VectorBatch* batch, VectorBatch* plan_batch, EState* estate, bool can_set_tag, int options);
 
-template VectorBatch* ExecVecInsert<DfsInsertInter>(VecModifyTableState* state, DfsInsertInter* insert_op,
-    VectorBatch* batch, VectorBatch* plan_batch, EState* estate, bool can_set_tag, int options);
 
 /*
  * @Description:  get table partition key data type
@@ -629,9 +618,6 @@ VectorBatch* ExecVecModifyTable(VecModifyTableState* node)
                     if (RelationIsCUFormat(result_rel_desc)) {
                         batch = ExecVecInsert<CStoreInsert>(
                             node, (CStoreInsert*)batch_opt, batch, plan_batch, estate, node->canSetTag, hi_options);
-                    } else if (RelationIsPAXFormat(result_rel_desc)) {
-                        batch = ExecVecInsert<DfsInsertInter>(
-                            node, (DfsInsertInter*)batch_opt, batch, plan_batch, estate, node->canSetTag, hi_options);
                     } else if (RelationIsTsStore(result_rel_desc)) {
                         ereport(ERROR,
                             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -648,8 +634,6 @@ VectorBatch* ExecVecModifyTable(VecModifyTableState* node)
             case CMD_DELETE:
                 if (RelationIsCUFormat(result_rel_desc)) {
                     ((CStoreDelete*)batch_opt)->PutDeleteBatch(batch, junk_filter);
-                } else if (RelationIsPAXFormat(result_rel_desc)) {
-                    ((DfsDelete*)batch_opt)->PutDeleteBatch(batch, junk_filter);
 #ifdef ENABLE_MULTIPLE_NODES
                 } else if (RelationIsTsStore(result_rel_desc)) {
                     (reinterpret_cast<Tsdb::TsStoreDelete*>(batch_opt))->put_delete_batch(batch, junk_filter);
@@ -668,9 +652,6 @@ VectorBatch* ExecVecModifyTable(VecModifyTableState* node)
                 if (RelationIsCUFormat(result_rel_desc)) {
                     batch = ExecVecUpdate<CStoreUpdate>(
                         node, (CStoreUpdate*)batch_opt, batch, estate, node->canSetTag, hi_options);
-                } else if (RelationIsPAXFormat(result_rel_desc)) {
-                    batch = ExecVecUpdate<DfsUpdate>(
-                        node, (DfsUpdate*)batch_opt, batch, estate, node->canSetTag, hi_options);
                 } else {
                     Assert(false);
                     ereport(ERROR,
@@ -725,16 +706,6 @@ VectorBatch* ExecVecModifyTable(VecModifyTableState* node)
                 if (RelationIsCUFormat(result_rel_desc)) {
                     FLUSH_DATA(batch_opt, CStoreInsert);
                     CStoreInsert::DeInitInsertArg(args);
-                } else if (RelationIsPAXFormat(result_rel_desc)) {
-                    FLUSH_DATA(batch_opt, DfsInsertInter);
-                    /* data redistribution for DFS table. */
-                    if (u_sess->attr.attr_sql.enable_cluster_resize && data_dest_rel != NULL) {
-                        /*
-                         * Append old files of redistributed table table into pendingDfsDeletes.
-                         */
-                        InsertDeletedFilesForTransaction(data_dest_rel);
-                        ExecCloseScanRelation(data_dest_rel);
-                    }
                 } else {
                     Assert(false);
                     ereport(ERROR,
@@ -748,9 +719,6 @@ VectorBatch* ExecVecModifyTable(VecModifyTableState* node)
             if (RelationIsCUFormat(result_rel_desc)) {
                 ExecVecDelete<CStoreDelete>(node, (CStoreDelete*)batch_opt, estate, node->canSetTag);
                 DELETE_EX_TYPE(batch_opt, CStoreDelete);
-            } else if (RelationIsPAXFormat(result_rel_desc)) {
-                ExecVecDelete<DfsDelete>(node, (DfsDelete*)batch_opt, estate, node->canSetTag);
-                DELETE_EX_TYPE(batch_opt, DfsDelete);
 #ifdef ENABLE_MULTIPLE_NODES
             } else if (RelationIsTsStore(result_rel_desc)) {
                 ExecVecDelete<Tsdb::TsStoreDelete>(node, reinterpret_cast<Tsdb::TsStoreDelete*>(batch_opt), estate, node->canSetTag);
@@ -768,9 +736,6 @@ VectorBatch* ExecVecModifyTable(VecModifyTableState* node)
             if (RelationIsCUFormat(result_rel_desc)) {
                 ((CStoreUpdate*)batch_opt)->EndUpdate(hi_options);
                 DELETE_EX_TYPE(batch_opt, CStoreUpdate);
-            } else if (RelationIsPAXFormat(result_rel_desc)) {
-                ((DfsUpdate*)batch_opt)->EndUpdate(hi_options);
-                DELETE_EX_TYPE(batch_opt, DfsUpdate);
             } else {
                 Assert(false);
                 ereport(ERROR,
@@ -868,24 +833,6 @@ void* CreateOperatorObject(CmdType operation, bool is_partitioned, Relation resu
                     args->sortType = BATCH_SORT;
                     batch_opt =
                         New(CurrentMemoryContext) CStoreInsert(result_rel_desc, *args, false, node->ps.plan, NULL);
-                } else if (RelationIsPAXFormat(result_rel_desc)) {
-                    /* data redistribution for DFS table.
-                     * In redistribution mode, we need HDFS table relation for DfsInsert object.
-                     */
-                    if (u_sess->attr.attr_sql.enable_cluster_resize && estate->dataDestRelIndex > 0) {
-                        /* Reset pendingDfsDelete. */
-                        ResetPendingDfsDelete();
-
-                        *data_dest_rel = ExecOpenScanRelation(estate, estate->dataDestRelIndex);
-
-                        batch_opt = CreateDfsInsert(result_rel_desc, false, *data_dest_rel, node->ps.plan, NULL);
-                        ((DfsInsertInter*)batch_opt)->RegisterInsertPendingFunc(InsertNewFileToDfsPending);
-
-                    } else {
-                        batch_opt = CreateDfsInsert(result_rel_desc, false, NULL, node->ps.plan, NULL);
-                    }
-
-                    ((DfsInsertInter*)batch_opt)->BeginBatchInsert(BATCH_SORT, result_rel_info);
                 } else {
                     Assert(false);
                     ereport(ERROR,
@@ -900,9 +847,6 @@ void* CreateOperatorObject(CmdType operation, bool is_partitioned, Relation resu
                 batch_opt =
                     New(CurrentMemoryContext) CStoreDelete(result_rel_desc, estate, false, node->ps.plan, NULL);
                 ((CStoreDelete*)batch_opt)->InitSortState();
-            } else if (RelationIsPAXFormat(result_rel_desc)) {
-                batch_opt = New(CurrentMemoryContext) DfsDelete(result_rel_desc, estate, false, node->ps.plan, NULL);
-                ((DfsDelete*)batch_opt)->InitSortState();
 #ifdef ENABLE_MULTIPLE_NODES
             } else if (RelationIsTsStore(result_rel_desc)) {
                 batch_opt = New(CurrentMemoryContext) Tsdb::TsStoreDelete(result_rel_desc, estate, false, node->ps.plan, NULL);
@@ -921,9 +865,6 @@ void* CreateOperatorObject(CmdType operation, bool is_partitioned, Relation resu
             if (RelationIsCUFormat(result_rel_desc)) {
                 batch_opt = New(CurrentMemoryContext) CStoreUpdate(result_rel_desc, estate, node->ps.plan);
                 ((CStoreUpdate*)batch_opt)->InitSortState(sort_tup_desc);
-            } else if (RelationIsPAXFormat(result_rel_desc)) {
-                batch_opt = New(CurrentMemoryContext) DfsUpdate(result_rel_desc, estate, node->ps.plan);
-                ((DfsUpdate*)batch_opt)->InitSortState(sort_tup_desc);
             } else {
                 Assert(false);
                 ereport(ERROR,

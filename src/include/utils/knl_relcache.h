@@ -289,4 +289,6 @@ inline void EnlargeLocalRelCacheMaxBucketMapSize(double ratio)
     }
 }
 
+extern void RememberToFreeTupleDescAtEOX(TupleDesc td);
+
 #endif

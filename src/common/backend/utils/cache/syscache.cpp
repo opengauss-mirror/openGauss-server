@@ -37,6 +37,7 @@
 #include "catalog/gs_encrypted_proc.h"
 #include "catalog/gs_job_argument.h"
 #include "catalog/gs_job_attribute.h"
+#include "catalog/gs_sql_patch.h"
 #include "catalog/pg_amop.h"
 #include "catalog/pg_amproc.h"
 #include "catalog/pg_auth_members.h"

@@ -201,11 +201,12 @@ bool SynRepWaitCatchup(XLogRecPtr XactCommitLSN)
  * the state to SYNC_REP_WAIT_COMPLETE once replication is confirmed.
  * This backend then resets its state to SYNC_REP_NOT_WAITING.
  */
-void SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
+SyncWaitRet SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
 {
     char *new_status = NULL;
     const char *old_status = NULL;
     int mode = u_sess->attr.attr_storage.sync_rep_wait_mode;
+    SyncWaitRet waitStopRes = NOT_REQUEST;
 
     /*
      * Fast exit if user has not requested sync replication, or there are no
@@ -214,7 +215,7 @@ void SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
      */
     if (!u_sess->attr.attr_storage.enable_stream_replication || !SyncRepRequested() ||
         !SyncStandbysDefined() || (t_thrd.postmaster_cxt.HaShmData->current_mode == NORMAL_MODE))
-        return;
+        return NOT_REQUEST;
 
     Assert(SHMQueueIsDetached(&(t_thrd.proc->syncRepLinks)));
     Assert(t_thrd.walsender_cxt.WalSndCtl != NULL);
@@ -233,14 +234,27 @@ void SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
      * condition but we'll be fetching that cache line anyway so its likely to
      * be a low cost check. We don't wait for sync rep if no sync standbys alive
      */
-    if (!t_thrd.walsender_cxt.WalSndCtl->sync_standbys_defined ||
-        XLByteLE(XactCommitLSN, t_thrd.walsender_cxt.WalSndCtl->lsn[mode]) ||
-        (t_thrd.walsender_cxt.WalSndCtl->sync_master_standalone && !IS_SHARED_STORAGE_MODE &&
-         !DelayIntoMostAvaSync(false)) ||
-        !SynRepWaitCatchup(XactCommitLSN)) {
+    if (!t_thrd.walsender_cxt.WalSndCtl->sync_standbys_defined) {
         LWLockRelease(SyncRepLock);
         RESUME_INTERRUPTS();
-        return;
+        return NOT_SET_STANDBY_DEFINED;
+    }
+    if (XLByteLE(XactCommitLSN, t_thrd.walsender_cxt.WalSndCtl->lsn[mode])) {
+        LWLockRelease(SyncRepLock);
+        RESUME_INTERRUPTS();
+        return REPSYNCED;
+    }
+    if (t_thrd.walsender_cxt.WalSndCtl->sync_master_standalone && !IS_SHARED_STORAGE_MODE &&
+        !DelayIntoMostAvaSync(false)) {
+        LWLockRelease(SyncRepLock);
+        RESUME_INTERRUPTS();
+        return STAND_ALONE;
+    }
+    
+    if (!SynRepWaitCatchup(XactCommitLSN)) {
+        LWLockRelease(SyncRepLock);
+        RESUME_INTERRUPTS();
+        return NOT_WAIT_CATCHUP;
     }
 
     /*
@@ -300,8 +314,10 @@ void SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
          * walsender changes the state to SYNC_REP_WAIT_COMPLETE, it will never
          * update it again, so we can't be seeing a stale value in that case.
          */
-        if (t_thrd.proc->syncRepState == SYNC_REP_WAIT_COMPLETE && !DelayIntoMostAvaSync(true))
+        if (t_thrd.proc->syncRepState == SYNC_REP_WAIT_COMPLETE && !DelayIntoMostAvaSync(true)) {
+            waitStopRes = SYNC_COMPLETE;
             break;
+        }
 
         /*
          * If a wait for synchronous replication is pending, we can neither
@@ -329,6 +345,7 @@ void SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
                                "the standby.")));
             t_thrd.postgres_cxt.whereToSendOutput = DestNone;
             if (SyncRepCancelWait()) {
+                waitStopRes = STOP_WAIT;
                 break;
             }
         }
@@ -349,6 +366,7 @@ void SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
                      errdetail("The transaction has already committed locally, but might not have been replicated to "
                                "the standby.")));
             if (SyncRepCancelWait()) {
+                waitStopRes = STOP_WAIT;
                 break;
             }
         }
@@ -362,6 +380,7 @@ void SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
             t_thrd.int_cxt.ProcDiePending = true;
             t_thrd.postgres_cxt.whereToSendOutput = DestNone;
             if (SyncRepCancelWait()) {
+                waitStopRes = STOP_WAIT;
                 break;
             }
         }
@@ -380,6 +399,7 @@ void SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
                      errdetail("The transaction has already committed locally, but might not have been replicated to "
                                "the standby.")));
             if (SyncRepCancelWait()) {
+                waitStopRes = STOP_WAIT;
                 break;
             }
         }
@@ -397,6 +417,7 @@ void SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
                          errdetail("The transaction has already committed locally, but might not have been replicated "
                                    "to the standby.")));
                 if (SyncRepCancelWait()) {
+                    waitStopRes = STOP_WAIT;
                     break;
                 }
             }
@@ -412,6 +433,7 @@ void SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
                      errdetail("The transaction has already committed locally, but might not have been replicated to "
                                "the standby.")));
             if (SyncRepCancelWait()) {
+                waitStopRes = STOP_WAIT;
                 break;
             }
         }
@@ -453,6 +475,7 @@ void SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
     }
 
     RESUME_INTERRUPTS();
+    return waitStopRes;
 }
 
 /*
@@ -561,6 +584,16 @@ void SyncRepInitConfig(void)
         ereport(DEBUG1, (errmsg("standby \"%s\" now has synchronous standby group and priority: %d %d",
                                 u_sess->attr.attr_common.application_name, group, priority)));
     }
+
+    if (AM_WAL_DB_SENDER) {
+        /*
+         * WARNING may not be handled at client (such as pg_recvlogical, JDBC and etc).
+         * Don't send it to client now.
+         */
+        if (client_min_messages < ERROR) {
+            SetConfigOption("client_min_messages", "ERROR", PGC_INTERNAL, PGC_S_OVERRIDE);
+        }
+    }
 }
 
 /*
@@ -644,20 +677,20 @@ void SyncRepReleaseWaiters(void)
      * this location.
      */
     if (XLByteLT(walsndctl->lsn[SYNC_REP_WAIT_RECEIVE], receivePtr)) {
-        walsndctl->lsn[SYNC_REP_WAIT_RECEIVE] = t_thrd.walsender_cxt.MyWalSnd->receive;
+        walsndctl->lsn[SYNC_REP_WAIT_RECEIVE] = receivePtr;
         numreceive = SyncRepWakeQueue(false, SYNC_REP_WAIT_RECEIVE);
     }
     if (XLByteLT(walsndctl->lsn[SYNC_REP_WAIT_WRITE], writePtr)) {
-        walsndctl->lsn[SYNC_REP_WAIT_WRITE] = t_thrd.walsender_cxt.MyWalSnd->write;
+        walsndctl->lsn[SYNC_REP_WAIT_WRITE] = writePtr;
         numwrite = SyncRepWakeQueue(false, SYNC_REP_WAIT_WRITE);
     }
     if (XLByteLT(walsndctl->lsn[SYNC_REP_WAIT_FLUSH], flushPtr)) {
-        walsndctl->lsn[SYNC_REP_WAIT_FLUSH] = t_thrd.walsender_cxt.MyWalSnd->flush;
+        walsndctl->lsn[SYNC_REP_WAIT_FLUSH] = flushPtr;
         numflush = SyncRepWakeQueue(false, SYNC_REP_WAIT_FLUSH);
     }
     if (XLByteLT(walsndctl->lsn[SYNC_REP_WAIT_APPLY], replayPtr)) {
-        walsndctl->lsn[SYNC_REP_WAIT_APPLY] = t_thrd.walsender_cxt.MyWalSnd->apply;
-        numapply = SyncRepWakeQueue(false, SYNC_REP_WAIT_APPLY);
+        walsndctl->lsn[SYNC_REP_WAIT_APPLY] = replayPtr;
+        numflush = SyncRepWakeQueue(false, SYNC_REP_WAIT_APPLY);
     }
 
     LWLockRelease(SyncRepLock);
@@ -1065,7 +1098,7 @@ static void SyncRepGetStandbyGroupAndPriority(int* gid, int* prio)
     if (AM_WAL_STANDBY_SENDER || AM_WAL_SHARE_STORE_SENDER || AM_WAL_HADR_DNCN_SENDER || AM_WAL_DB_SENDER)
         return;
 
-    if (!SyncStandbysDefined() || t_thrd.syncrep_cxt.SyncRepConfig == NULL || !SyncRepRequested())
+    if (!SyncStandbysDefined() || t_thrd.syncrep_cxt.SyncRepConfig == NULL)
         return;
 
     for (group = 0; group < t_thrd.syncrep_cxt.SyncRepConfigGroups && !found; group++) {

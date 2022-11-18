@@ -83,7 +83,6 @@
 #include "pgxc/poolutils.h"
 #include "tcop/utility.h"
 #endif
-#include "storage/dfs/dfs_connector.h"
 #include "storage/smgr/segment.h"
 
 typedef struct {
@@ -187,6 +186,16 @@ void createdb(const CreatedbStmt* stmt)
     int npreparedxacts;
     createdb_failure_params fparms;
     Snapshot snapshot;
+
+    if (u_sess->attr.attr_common.upgrade_mode > 0) {
+        LOCKTAG tag;
+        SET_LOCKTAG_OBJECT(tag, InvalidOid, DatabaseRelationId, get_database_oid_by_name("template0"), 0);
+        if (LockAcquire(&tag, RowExclusiveLock, false, true) == LOCKACQUIRE_NOT_AVAIL) {
+            ereport(ERROR, (errmsg("can not execute create database statement when update template0")));
+        }
+    }
+
+    (void)LWLockAcquire(g_instance.ckpt_cxt_ctl->snapshotBlockLock, LW_SHARED);
 
     /* Extract options from the statement node tree */
     foreach (option, stmt->options) {
@@ -428,12 +437,6 @@ void createdb(const CreatedbStmt* stmt)
         if (dst_deftablespace == GLOBALTABLESPACE_OID)
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("pg_global cannot be used as default tablespace")));
-
-        if (IsSpecifiedTblspc(dst_deftablespace, FILESYSTEM_HDFS)) {
-            ereport(ERROR,
-                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                    errmsg("DFS tablespace can not be used as default tablespace.")));
-        }
 
         /*
          * If we are trying to change the default tablespace of the template,
@@ -723,6 +726,7 @@ void createdb(const CreatedbStmt* stmt)
      */
     set_dbcleanup_callback(createdb_xact_callback, &fparms.dest_dboid, sizeof(fparms.dest_dboid));
 #endif
+    LWLockRelease(g_instance.ckpt_cxt_ctl->snapshotBlockLock);
 }
 
 /*
@@ -954,7 +958,7 @@ static void DropdbXactCallback(bool isCommit, const void* arg)
             pfree_ext(dstpath);
             continue;
         }
-
+        spc_drop_space_node(dsttablespace, dbOid);
         if (!rmtree(dstpath, true))
             ereport(
                 WARNING, (errmsg("some useless files may be left behind in old database directory \"%s\"", dstpath)));
@@ -1103,9 +1107,8 @@ void dropdb(const char* dbname, bool missing_ok)
     if (!HeapTupleIsValid(tup))
         ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for database %u", db_id)));
 
-    if (EnableGlobalSysCache()) {
-        g_instance.global_sysdbcache.DropDB(db_id, true);
-    }
+    NotifyGscDropDB(db_id, true);
+
     simple_heap_delete(pgdbrel, &tup->t_self);
 
     ReleaseSysCache(tup);
@@ -1228,7 +1231,6 @@ void RenameDatabase(const char* oldname, const char* newname)
     Relation rel;
     int notherbackends;
     int npreparedxacts;
-    List* existTblSpcList = NIL;
     Relation pg_job_tbl = NULL;
     TableScanDesc scan = NULL;
     HeapTuple tuple = NULL;
@@ -1277,16 +1279,6 @@ void RenameDatabase(const char* oldname, const char* newname)
                 errmsg("database \"%s\" is being accessed by other users", oldname),
                 errdetail_busy_db(notherbackends, npreparedxacts)));
 
-    existTblSpcList = HDFSTablespaceDirExistDatabase(db_id);
-    if (existTblSpcList != NIL) {
-        StringInfo existTblspc = (StringInfo)linitial(existTblSpcList);
-        ereport(ERROR,
-            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("It is unsupported to rename database \"%s\" on DFS tablespace \"%s\".",
-                    oldname,
-                    existTblspc->data)));
-    }
-
     /* rename */
     newtup = SearchSysCacheCopy1(DATABASEOID, ObjectIdGetDatum(db_id));
     if (!HeapTupleIsValid(newtup))
@@ -1298,9 +1290,7 @@ void RenameDatabase(const char* oldname, const char* newname)
      * rename db dont change GSC content, but a name swap for two db may cause lsc fake cache hit, which
      * brings about inconsistent data event
      **/
-    if (EnableGlobalSysCache()) {
-        g_instance.global_sysdbcache.DropDB(db_id, false);
-    }
+    NotifyGscDropDB(db_id, false);
 
     simple_heap_update(rel, &newtup->t_self, newtup);
     CatalogUpdateIndexes(rel, newtup);
@@ -1331,17 +1321,6 @@ void RenameDatabase(const char* oldname, const char* newname)
 
 }
 
-/*
- * Whether Check existance of a database with given db_id in
- * HDFS tablesacpe or not.
- * @_in_param db_id: The database oid to be checked.
- * @return Return StringInfo list of tablespace name if exists, otherwise return
- * NIL.
- */
-List* HDFSTablespaceDirExistDatabase(Oid db_id)
-{
-    return NIL;
-}
 
 #ifdef PGXC
 /*
@@ -1384,6 +1363,8 @@ static void movedb(const char* dbname, const char* tblspcname)
     DIR* dstdir = NULL;
     struct dirent* xlde = NULL;
     movedb_failure_params fparms;
+
+    (void)LWLockAcquire(g_instance.ckpt_cxt_ctl->snapshotBlockLock, LW_SHARED);
 
     /*
      * Look up the target database's OID, and get exclusive lock on it. We
@@ -1449,6 +1430,7 @@ static void movedb(const char* dbname, const char* tblspcname)
     if (src_tblspcoid == dst_tblspcoid) {
         heap_close(pgdbrel, NoLock);
         UnlockSharedObjectForSession(DatabaseRelationId, db_id, 0, AccessExclusiveLock);
+        LWLockRelease(g_instance.ckpt_cxt_ctl->snapshotBlockLock);
         return;
     }
 
@@ -1483,6 +1465,11 @@ static void movedb(const char* dbname, const char* tblspcname)
      * files, which would cause rmdir() to fail.
      */
     RequestCheckpoint(CHECKPOINT_IMMEDIATE | CHECKPOINT_FORCE | CHECKPOINT_WAIT);
+    /* when alter database back to it's origin tablespace in a short time,
+     * it may miss some new changes since the old database buffers will be referenced again.
+     * to avoid this we need to drop database buffers here.
+     */
+    DropDatabaseBuffers(db_id);
 
     /*
      * Check for existence of files in the target directory, i.e., objects of
@@ -1570,9 +1557,8 @@ static void movedb(const char* dbname, const char* tblspcname)
 
         newtuple =
             (HeapTuple) tableam_tops_modify_tuple(oldtuple, RelationGetDescr(pgdbrel), new_record, new_record_nulls, new_record_repl);
-        if (EnableGlobalSysCache()) {
-            g_instance.global_sysdbcache.DropDB(db_id, false);
-        }
+        NotifyGscDropDB(db_id, false);
+
         simple_heap_update(pgdbrel, &oldtuple->t_self, newtuple);
 
         /* Update indexes */
@@ -1602,6 +1588,7 @@ static void movedb(const char* dbname, const char* tblspcname)
         heap_close(pgdbrel, NoLock);
     }
     PG_END_ENSURE_ERROR_CLEANUP(movedb_failure_callback, PointerGetDatum(&fparms));
+    LWLockRelease(g_instance.ckpt_cxt_ctl->snapshotBlockLock);
 #ifdef PGXC
     /*
      * Even if we are successful, ultimately this transaction may or may not
@@ -1647,7 +1634,7 @@ static void movedb_success_callback(Oid db_id, Oid src_tblspcoid)
     /* Start new transaction for the remaining work; don't need a snapshot */
     StartTransactionCommand();
 #endif
-
+    spc_drop_space_node(src_tblspcoid, db_id);
     /*
      * Remove files from the old tablespace
      */
@@ -1749,15 +1736,6 @@ void AlterDatabase(AlterDatabaseStmt* stmt, bool isTopLevel)
     }
 
     if (dtablespace != NULL) {
-        Oid dst_deftablespace = get_tablespace_oid(strVal(dtablespace->arg), false);
-        /* currently, can't be specified along with any other options */
-        Assert(!dconnlimit);
-        if (IsSpecifiedTblspc(dst_deftablespace, FILESYSTEM_HDFS)) {
-            ereport(ERROR,
-                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                    errmsg("DFS tablespace can not be used as default tablespace.")));
-        }
-        /* this case isn't allowed within a transaction block */
 #ifdef PGXC
         /* Clean connections before alter a database on local node */
         if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
@@ -1821,8 +1799,8 @@ void AlterDatabase(AlterDatabaseStmt* stmt, bool isTopLevel)
     }
 
     newtuple = (HeapTuple) tableam_tops_modify_tuple(tuple, RelationGetDescr(rel), new_record, new_record_nulls, new_record_repl);
-    if (EnableGlobalSysCache() && privateobject != NULL) {
-        g_instance.global_sysdbcache.DropDB(HeapTupleGetOid(tuple), false);
+    if (privateobject != NULL) {
+        NotifyGscDropDB(HeapTupleGetOid(tuple), false);
     }
     simple_heap_update(rel, &tuple->t_self, newtuple);
 
@@ -2352,6 +2330,7 @@ void xlog_db_create(Oid dstDbId, Oid dstTbSpcId, Oid srcDbId, Oid srcTbSpcId)
     char* dst_path = NULL;
     struct stat st;
 
+    (void)LWLockAcquire(g_instance.ckpt_cxt_ctl->snapshotBlockLock, LW_SHARED);
     src_path = GetDatabasePath(srcDbId, srcTbSpcId);
     dst_path = GetDatabasePath(dstDbId, dstTbSpcId);
 
@@ -2396,6 +2375,7 @@ void xlog_db_create(Oid dstDbId, Oid dstTbSpcId, Oid srcDbId, Oid srcTbSpcId)
         /* forknum and blockno has no meaning */
         log_invalid_page(tmp, MAIN_FORKNUM, 0, NOT_PRESENT, NULL);
     }
+    LWLockRelease(g_instance.ckpt_cxt_ctl->snapshotBlockLock);
 }
 
 void do_db_drop(Oid dbId, Oid tbSpcId)
@@ -2412,6 +2392,7 @@ void do_db_drop(Oid dbId, Oid tbSpcId)
         LockSharedObjectForSession(DatabaseRelationId, dbId, 0, AccessExclusiveLock);
         ResolveRecoveryConflictWithDatabase(dbId);
     }
+    NotifyGscDropDB(dbId, true);
 
     /* Drop pages for this database that are in the shared buffer cache */
     DropDatabaseBuffers(dbId);
@@ -2421,7 +2402,7 @@ void do_db_drop(Oid dbId, Oid tbSpcId)
     
     /* Clean out the xlog relcache too */
     XLogDropDatabase(dbId);
-
+    spc_drop_space_node(tbSpcId, dbId);
     /* And remove the physical files */
     if (!rmtree(dst_path, true)) {
         ereport(WARNING, (errmsg("some useless files may be left behind in old database directory \"%s\"", dst_path)));
@@ -2469,9 +2450,11 @@ void xlogRemoveRemainSegsByDropDB(Oid dbId, Oid tablespaceId)
 
 void xlog_db_drop(XLogRecPtr lsn, Oid dbId, Oid tbSpcId)
 {
+    (void)LWLockAcquire(g_instance.ckpt_cxt_ctl->snapshotBlockLock, LW_SHARED);
     UpdateMinRecoveryPoint(lsn, false);
     do_db_drop(dbId, tbSpcId);
     xlogRemoveRemainSegsByDropDB(dbId, tbSpcId);
+    LWLockRelease(g_instance.ckpt_cxt_ctl->snapshotBlockLock);
 }
 
 void dbase_redo(XLogReaderState* record)

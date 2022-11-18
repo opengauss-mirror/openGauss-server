@@ -44,6 +44,7 @@ static BuildErrorCode updateControlFile(ControlFileData* ControlFile);
 static BuildErrorCode sanityChecks(void);
 static void rewind_dw_file();
 static BuildErrorCode MoveOldXlogFiles(uint32 checkSeg, const char* newPath);
+static BuildErrorCode TruncateAndRemoveXLog(XLogRecPtr endPtr, uint32 timeLine);
 
 static ControlFileData ControlFile_target;
 static ControlFileData ControlFile_source;
@@ -459,6 +460,12 @@ BuildErrorCode gs_increment_build(const char* pgdata, const char* connstr, char*
         /* Exited normally, we're happy! */
     }
 
+    /* truncate XLOG after xlog end */
+    pg_log(PG_PROGRESS, "truncating and removing old xlog files\n");
+    rv = TruncateAndRemoveXLog(endrec, timeline);
+    PG_CHECKRETURN_AND_RETURN(rv);
+    pg_log(PG_PROGRESS, "truncate and remove old xlog files success\n");
+
     /* Create backup lable file */
     pg_log(PG_PROGRESS, "creating backup label and updating control file\n");
     rv = createBackupLabel(chkptredo, chkpttli, chkptrec);
@@ -484,6 +491,11 @@ BuildErrorCode gs_increment_build(const char* pgdata, const char* connstr, char*
     if (access(bkup_file, F_OK) == 0) {
         delete_all_file(bkup_file, true);
         PG_CHECKBUILD_AND_RETURN();
+    }
+
+    if (IS_CROSS_CLUSTER_BUILD && !RenameTblspcDir(datadir_target)) {
+        pg_fatal("failed to rename tablespace dir for cross cluster build.\n");
+        return BUILD_FATAL;
     }
 
     if (datadir_target != NULL) {
@@ -821,6 +833,96 @@ static BuildErrorCode MoveOldXlogFiles(uint32 checkSeg, const char* newPath)
                     (void)closedir(xlogDir);
                     return BUILD_ERROR;
                 }
+            }
+        }
+    }
+    (void)closedir(xlogDir);
+    return BUILD_SUCCESS;
+}
+
+static BuildErrorCode TruncateAndRemoveXLog(XLogRecPtr endPtr, uint32 timeLine)
+{
+    uint32 endOff;
+    XLogSegNo segNo;
+    char xlogFileName[MAXFNAMELEN] = {0};
+    char xlogFilePath[MAXPGPATH] = {0};
+    char xlogLocation[MAXPGPATH] = {0};
+    char realXlogPath[PATH_MAX] = {0};
+    DIR *xlogDir = NULL;
+    struct dirent *dirEnt = NULL;
+    char *writeContent = NULL;
+    uint32 truncateLength = 0;
+    int fd = -1;
+    int rc = 0;
+
+    /* truncate xlog file */
+    XLByteToSeg(endPtr, segNo);
+    XLogFileName(xlogFileName, MAXFNAMELEN, timeLine, segNo);
+    endOff = (uint32)(endPtr) % XLogSegSize;
+
+    if (endOff > 0) {
+        rc = snprintf_s(xlogFilePath, MAXPGPATH, MAXPGPATH - 1, "%s/pg_xlog/%s", datadir_target, xlogFileName);
+        securec_check_ss_c(rc, "\0", "\0");
+
+        fd = open(xlogFilePath, O_RDWR | PG_BINARY, S_IRUSR | S_IWUSR);
+        if (fd < 0) {
+            pg_log(PG_ERROR, "open xlog file %s failed when truncate old xlog file.\n", xlogFilePath);
+            return BUILD_ERROR;
+        }
+
+        if (lseek(fd, (off_t)endOff, SEEK_SET) < 0) {
+            close(fd);
+            pg_log(PG_ERROR, "lseek xlog file %s failed when truncate old xlog file.\n", xlogFilePath);
+            return BUILD_ERROR;
+        }
+
+        truncateLength = XLogSegSize - endOff;
+        writeContent = (char *)pg_malloc0(truncateLength);
+        if (write(fd, writeContent, truncateLength) != truncateLength) {
+            close(fd);
+            pg_free(writeContent);
+            pg_log(PG_ERROR, "write file %s failed when truncate old xlog file.\n", xlogFilePath);
+            return BUILD_ERROR;
+        }
+        if (fsync(fd) != 0) {
+            close(fd);
+            pg_free(writeContent);
+            pg_log(PG_ERROR, "fsync file %s failed when truncate old xlog file.\n", xlogFilePath);
+            return BUILD_ERROR;
+        }
+        if (close(fd) != 0) {
+            pg_free(writeContent);
+            pg_log(PG_ERROR, "close file %s failed when truncate old xlog file.\n", xlogFilePath);
+            return BUILD_ERROR;
+        }
+        pg_free(writeContent);
+    }
+
+    /* remove xlog files */
+    rc = snprintf_s(xlogLocation, MAXPGPATH, MAXPGPATH - 1, "%s/%s", datadir_target, "pg_xlog");
+    securec_check_ss_c(rc, "\0", "\0");
+    if (realpath(xlogLocation, realXlogPath) == NULL && realXlogPath[0] == '\0') {
+        pg_log(PG_FATAL, "could not get canonical path for file \"%s\": %s in truncate\n", xlogLocation,
+            gs_strerror(errno));
+        return BUILD_FATAL;
+    }
+
+    xlogDir = opendir(realXlogPath);
+    if (!xlogDir) {
+        pg_log(PG_ERROR, "open xlog dir %s failed when remove old xlog files.\n", realXlogPath);
+        return BUILD_ERROR;
+    }
+    while ((dirEnt = readdir(xlogDir)) != NULL) {
+        if (strlen(dirEnt->d_name) != 24 || strspn(dirEnt->d_name, "0123456789ABCDEF") != 24) {
+            continue;
+        }
+        if (strcmp(dirEnt->d_name, xlogFileName) > 0 || (endOff == 0 && strcmp(dirEnt->d_name, xlogFileName) == 0)) {
+            rc = snprintf_s(xlogFilePath, MAXPGPATH, MAXPGPATH - 1, "%s/pg_xlog/%s", datadir_target, dirEnt->d_name);
+            securec_check_ss_c(rc, "\0", "\0");
+            rc = unlink(xlogFilePath);
+            if (rc != 0) {
+                pg_log(PG_ERROR, "remove %s failed when truncate old xlog file.\n", xlogFilePath);
+                return BUILD_ERROR;
             }
         }
     }

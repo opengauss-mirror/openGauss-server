@@ -964,10 +964,15 @@ void printtupStream(TupleTableSlot *slot, DestReceiver *self)
         if (thisState->format == 0) {
             /* Text output */
             char *outputstr = NULL;
-
+#ifndef ENABLE_MULTIPLE_NODES
+            t_thrd.xact_cxt.callPrint = true;
+#endif
             outputstr = OutputFunctionCall(&thisState->finfo, attr);
             pq_sendcountedtext(buf, outputstr, strlen(outputstr), false);
             pfree(outputstr);
+#ifndef ENABLE_MULTIPLE_NODES
+            t_thrd.xact_cxt.callPrint = false;
+#endif
         } else {
             /* Binary output */
             bytea *outputbytes = NULL;
@@ -1102,7 +1107,9 @@ void printtup(TupleTableSlot *slot, DestReceiver *self)
             if (thisState->format == 0) {
                 /* Text output */
                 char *outputstr = NULL;
-
+#ifndef ENABLE_MULTIPLE_NODES
+                t_thrd.xact_cxt.callPrint = true;
+#endif
                 outputstr = OutputFunctionCall(&thisState->finfo, attr);
                 if (thisState->typisvarlena && self->forAnalyzeSampleTuple &&
                     (typeinfo->attrs[i]->atttypid == BYTEAOID || typeinfo->attrs[i]->atttypid == CHAROID ||
@@ -1134,6 +1141,9 @@ void printtup(TupleTableSlot *slot, DestReceiver *self)
                     outputstr = TextDatumGetCString(str);
                     pfree(result);
                 }
+#ifndef ENABLE_MULTIPLE_NODES
+                t_thrd.xact_cxt.callPrint = false;
+#endif
                 pq_sendcountedtext(buf, outputstr, strlen(outputstr), false);
                 pfree(outputstr);
             } else {

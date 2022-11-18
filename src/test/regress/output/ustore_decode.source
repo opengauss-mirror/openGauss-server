@@ -7,6 +7,7 @@ SELECT 'init' FROM pg_create_logical_replication_slot('ustore_slot', 'mppdb_deco
 create table t1 (a int, b text) with (storage_type = ustore);
 insert into t1 values (generate_series(1, 10), 'abc');
 SELECT data FROM pg_logical_slot_get_changes('ustore_slot', NULL, NULL);
+--?.*
 --?.*data
 --?.*
 --?.*BEGIN ?.*
@@ -46,6 +47,7 @@ SELECT data FROM pg_logical_slot_get_changes('ustore_slot', NULL, NULL);
 alter table t1 add column c int;
 insert into t1 values (generate_series(11, 20), 'efg', 1);
 SELECT data FROM pg_logical_slot_get_changes('ustore_slot', NULL, NULL);
+--?.*
 --?.*data
 --?.*
 --?.*BEGIN ?.*
@@ -69,13 +71,14 @@ SELECT data FROM pg_logical_slot_get_changes('ustore_slot', NULL, NULL);
 --?.*data
 --?.*
 --?.*BEGIN ?.*
- {"table_name":"public.t1","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":["a","b"],"old_keys_type":["integer","text"],"old_keys_val":["3","'abc'"]}
+ {"table_name":"public.t1","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":["a","b","c"],"old_keys_type":["integer","text","integer"],"old_keys_val":["3","'abc'","null"]}
 --?.*COMMIT ?.* CSN ?.*
 (3 rows)
 
 create table t2 (a int, b text, c int) with (storage_type = ustore);
 COPY t2 from '@abs_srcdir@/data/ustore_decode.data';
 SELECT data FROM pg_logical_slot_get_changes('ustore_slot', NULL, NULL);
+--?.*
 --?.*data
 --?.*
 --?.*BEGIN ?.*

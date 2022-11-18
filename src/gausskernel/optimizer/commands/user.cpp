@@ -113,7 +113,7 @@ static bool CheckPasswordComplexity(
     const char* roleID, char* newPasswd, char* oldPasswd, bool isCreaterole);
 static void AddAuthHistory(Oid roleID, const char* rolename, const char* passwd, int operatType, const char* salt);
 static void DropAuthHistory(Oid roleID);
-
+static inline void check_iteration_count(int iteration_count);
 /* Check weak password */
 static bool is_weak_password(const char* password);
 static void check_weak_password(char *Password);
@@ -148,6 +148,16 @@ void initWaitCountCell(
 void initWaitCount(Oid userid);
 static inline void clean_role_password(const DefElem* dpassword);
 
+static inline void check_iteration_count(int iteration_count)
+{
+    if (iteration_count < ITERATION_COUNT || iteration_count > MAX_ITERATION_COUNT) {
+        ereport(NOTICE,
+            (errcode(ERRCODE_INVALID_PASSWORD),
+                errmsg("The iteration value of password is not recommended."
+                    "Setting the iteration value too small reduces the security of the password, "
+                    "and setting it too large results in performance degradation.")));
+    }
+}
 /* Check if current user has createrole privileges */
 static bool have_createrole_privilege(void)
 {
@@ -326,7 +336,7 @@ void initSqlCountUser()
 {
     ResourceOwner currentOwner = t_thrd.utils_cxt.CurrentResourceOwner;
     ResourceOwner tmpOwner;
-    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "ForSqlCount",
+    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(currentOwner, "ForSqlCount",
         THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER));
 
     Relation relation = heap_open(AuthIdRelationId, AccessShareLock);
@@ -1303,12 +1313,20 @@ void CreateRole(CreateRoleStmt* stmt)
         }
         sha_bytes_to_hex64((uint8*)salt_bytes, salt_string);
         /* Database Security: Support password complexity */
-        if (u_sess->attr.attr_security.Password_policy == DEFAULT_PASSWORD_POLICY &&
-            !CheckPasswordComplexity(stmt->role, password, NULL, true)) {
+        if (u_sess->attr.attr_security.Password_policy == DEFAULT_PASSWORD_POLICY) {
+            if (!CheckPasswordComplexity(stmt->role, password, NULL, true)) {
+                str_reset(password);
+                ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_PASSWORD),
+                        errmsg("The password does not satisfy the complexity requirement")));
+            }
+        } else if (isStrHasInvalidCharacter(password)) {
             str_reset(password);
-            ereport(ERROR,
-                (errcode(ERRCODE_INVALID_PASSWORD),
-                    errmsg("The password does not satisfy the complexity requirement")));
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PASSWORD),
+                errmsg("Password cannot contain characters except numbers, alphabetic characters and "
+                       "specified special characters."),
+                errcause("Password contain invalid characters."),
+                erraction("Use valid characters in password.")));
         }
 
         new_record[Anum_pg_authid_rolpassword - 1] =
@@ -2812,14 +2830,24 @@ void AlterRole(AlterRoleStmt* stmt)
         if (!(authidPasswdIsNull || NULL == (void*)authidPasswdDatum)) {
             oldPasswd = TextDatumGetCString(authidPasswdDatum);
         }
-        if (DEFAULT_PASSWORD_POLICY == u_sess->attr.attr_security.Password_policy &&
-            !CheckPasswordComplexity(stmt->role, password, oldPasswd, false)) {
+        if (u_sess->attr.attr_security.Password_policy == DEFAULT_PASSWORD_POLICY) {
+            if (!CheckPasswordComplexity(stmt->role, password, oldPasswd, false)) {
+                str_reset(password);
+                str_reset(replPasswd);
+                str_reset(oldPasswd);
+                ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_PASSWORD),
+                        errmsg("The password does not satisfy the complexity requirement")));
+            }
+        } else if (isStrHasInvalidCharacter(password)) {
             str_reset(password);
             str_reset(replPasswd);
             str_reset(oldPasswd);
-            ereport(ERROR,
-                (errcode(ERRCODE_INVALID_PASSWORD),
-                    errmsg("The password does not satisfy the complexity requirement")));
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PASSWORD),
+                errmsg("Password cannot contain characters except numbers, alphabetic characters and "
+                       "specified special characters."),
+                errcause("Password contain invalid characters."),
+                erraction("Use valid characters in password.")));
         }
         retval = RAND_priv_bytes((unsigned char*)salt_bytes, (GS_UINT32)SALT_LENGTH);
         if (retval != 1) {
@@ -4235,7 +4263,17 @@ static bool IsSpecialCharacter(char ch)
     return false;
 }
 
-
+bool isStrHasInvalidCharacter(const char* str)
+{
+    while (*str != '\0') {
+        if (isalnum(*str) || IsSpecialCharacter(*str)) {
+            str++;
+        } else {
+            return true;
+        }
+    }
+    return false;
+}
 
 static void CalculateTheNumberOfAllTypesOfCharacters(const char* ptr, int *kinds, bool *include_unusual_character)
 {
@@ -4397,6 +4435,9 @@ static bool CheckPasswordComplexity(const char* roleID, char* newPasswd, char* o
                 (errcode(ERRCODE_INVALID_PASSWORD),
                     errmsg("New password should not be empty.")));
         }
+        int iteration_count = 0;
+        iteration_count = get_iteration_by_password(newPasswd);
+        check_iteration_count(iteration_count);
         ereport(NOTICE,
             (errcode(ERRCODE_INVALID_PASSWORD),
                 errmsg("Using encrypted password directly now and it is not recommended."),
@@ -5128,7 +5169,7 @@ void TryLockAccount(Oid roleID, int extrafails, bool superlock)
 
     /* if the relation is valid, get the tuple of roleID*/
     if (RelationIsValid(pg_user_status_rel)) {
-        LockRelationOid(UserStatusRelationId, RowExclusiveLock);
+        LockRelationOid(UserStatusRelationId, ShareUpdateExclusiveLock);
         pgstat_initstats(pg_user_status_rel);
         pg_user_status_dsc = RelationGetDescr(pg_user_status_rel);
         tuple = SearchSysCache1(USERSTATUSROLEID, PointerGetDatum(roleID));
@@ -5202,7 +5243,7 @@ void TryLockAccount(Oid roleID, int extrafails, bool superlock)
             ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("The tuple of pg_user_status not found")));
         }
 
-        heap_close(pg_user_status_rel, RowExclusiveLock);
+        heap_close(pg_user_status_rel, ShareUpdateExclusiveLock);
 
     } else {
         ereport(WARNING, (errmsg("the relation pg_user_status is invalid")));
@@ -5287,7 +5328,7 @@ bool TryUnlockAccount(Oid roleID, bool superunlock, bool isreset)
 
     /* if the relation is valid, get the tuple of roleID */
     if (RelationIsValid(pg_user_status_rel)) {
-        LockRelationOid(UserStatusRelationId, RowExclusiveLock);
+        LockRelationOid(UserStatusRelationId, ShareUpdateExclusiveLock);
         pgstat_initstats(pg_user_status_rel);
         pg_user_status_dsc = RelationGetDescr(pg_user_status_rel);
 
@@ -5350,7 +5391,7 @@ bool TryUnlockAccount(Oid roleID, bool superunlock, bool isreset)
         AcceptInvalidationMessages();
         (void)GetCurrentCommandId(true);
         CommandCounterIncrement();
-        heap_close(pg_user_status_rel, RowExclusiveLock);
+        heap_close(pg_user_status_rel, ShareUpdateExclusiveLock);
         if (unlockflag) {
             pgaudit_lock_or_unlock_user(false, rolename);
         }
@@ -5391,7 +5432,7 @@ void TryUnlockAllAccounts(void)
 
     /* if the relation is valid, get the tuple of roleID */
     if (RelationIsValid(pg_user_status_rel)) {
-        LockRelationOid(UserStatusRelationId, RowExclusiveLock);
+        LockRelationOid(UserStatusRelationId, ShareUpdateExclusiveLock);
         pgstat_initstats(pg_user_status_rel);
         pg_user_status_dsc = RelationGetDescr(pg_user_status_rel);
         scan = tableam_scan_begin(pg_user_status_rel, SnapshotNow, 0, NULL);
@@ -5433,7 +5474,7 @@ void TryUnlockAllAccounts(void)
         AcceptInvalidationMessages();
         (void)GetCurrentCommandId(true);
         CommandCounterIncrement();
-        heap_close(pg_user_status_rel, NoLock);
+        heap_close(pg_user_status_rel, ShareUpdateExclusiveLock);
     } else {
         ereport(WARNING, (errmsg("the relation pg_user_status is invalid")));
     }
@@ -5461,6 +5502,7 @@ static void UpdateUnlockAccountTuples(HeapTuple tuple, Relation rel, TupleDesc t
     new_tuple =
         (HeapTuple) tableam_tops_modify_tuple(tuple, tupledesc, user_status_record, user_status_record_nulls, user_status_record_repl);
     heap_inplace_update(rel, new_tuple);
+    CacheInvalidateHeapTupleInplace(rel, new_tuple);
     tableam_tops_free_tuple(new_tuple);
 }
 
@@ -5604,7 +5646,7 @@ void SetAccountPasswordExpired(Oid roleID, bool expired)
 
     pg_user_status_rel = RelationIdGetRelation(UserStatusRelationId);
     if (RelationIsValid(pg_user_status_rel)) { 
-        LockRelationOid(UserStatusRelationId, RowExclusiveLock);
+        LockRelationOid(UserStatusRelationId, ShareUpdateExclusiveLock);
         pgstat_initstats(pg_user_status_rel);
         pg_user_status_dsc = RelationGetDescr(pg_user_status_rel);
         HeapTuple tuple = SearchSysCache1(USERSTATUSROLEID, PointerGetDatum(roleID));
@@ -5618,13 +5660,14 @@ void SetAccountPasswordExpired(Oid roleID, bool expired)
                 heap_modify_tuple(tuple, pg_user_status_dsc, userStatusRecord,
                                   user_status_record_nulls, user_status_record_repl);
             simple_heap_update(pg_user_status_rel, &new_tuple->t_self, new_tuple);
+            CatalogUpdateIndexes(pg_user_status_rel, new_tuple);
             heap_freetuple_ext(new_tuple);
             ReleaseSysCache(tuple);
         }
         AcceptInvalidationMessages();
         (void)GetCurrentCommandId(true);
         CommandCounterIncrement();
-        heap_close(pg_user_status_rel, RowExclusiveLock);
+        heap_close(pg_user_status_rel, ShareUpdateExclusiveLock);
     } else {
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("the relation pg_user_status is invalid")));
     }
@@ -5910,6 +5953,7 @@ Datum calculate_encrypted_combined_password(const char* password, const char* ro
     Datum datum_value;
     errno_t rc = EOK;
 
+    check_iteration_count(u_sess->attr.attr_security.auth_iteration_count);
     /* For PG ecological compatibility, we stored both sha256 and md5 password. */
     if (!pg_sha256_encrypt(password,
             salt_string,
@@ -5965,6 +6009,7 @@ Datum calculate_encrypted_sha256_password(const char* password, const char* roln
     Datum datum_value;
     errno_t rc = EOK;
 
+    check_iteration_count(u_sess->attr.attr_security.auth_iteration_count);
     if (!pg_sha256_encrypt(password,
         salt_string,
         strlen(salt_string),
@@ -6007,6 +6052,7 @@ static Datum gs_calculate_encrypted_sm3_password(const char* password, const cha
     Datum datum_value;
     errno_t rc = EOK;
 
+    check_iteration_count(u_sess->attr.attr_security.auth_iteration_count);
     if (!GsSm3Encrypt(password,
         salt_string,
         strlen(salt_string),

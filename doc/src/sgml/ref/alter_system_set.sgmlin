@@ -11,6 +11,8 @@
 <refsynopsisdiv>
 <synopsis>
 ALTER SYSTEM SET { GUC_name } TO { GUC_value };
+
+NOTICE: only supported in opengauss, not supported in distributeGauss or privateGauss.
 </synopsis>
 </refsynopsisdiv>
 </refentry>

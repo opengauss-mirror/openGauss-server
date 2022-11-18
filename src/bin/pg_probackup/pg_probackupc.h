@@ -161,7 +161,6 @@ extern int validate_one_page(Page page, BlockNumber absolute_blkno,
                              uint32 checksum_version);
 
 /* return codes for validate_one_page */
-/* TODO: use enum */
 #define PAGE_IS_VALID (-1)
 #define PAGE_IS_NOT_FOUND (-2)
 #define PAGE_IS_ZEROED (-3)

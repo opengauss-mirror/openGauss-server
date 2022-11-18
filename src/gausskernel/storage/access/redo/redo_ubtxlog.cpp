@@ -1288,7 +1288,7 @@ void UBTreeXlogPrunePageOperatorPage(RedoBufferInfo* buffer, void* recorddata)
     /* Set up flags and try to repair page  fragmentation */
     UBTreePagePruneExecute(page, (OffsetNumber *)(((char *)xlrec) + SizeOfUBTreePrunePage), xlrec->count, NULL);
 
-    UBTreePageRepairFragmentation(page);
+    UBTreePageRepairFragmentation(NULL, buffer->blockinfo.blkno, page);
 
     /*
      * Update the page's pd_prune_xid field to either zero, or the lowest

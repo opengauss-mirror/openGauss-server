@@ -29,14 +29,13 @@
 #include "catalog/indexing.h"
 #include "catalog/pg_partition_fn.h"
 #include "catalog/pg_snapshot.h"
+#include "client_logic/client_logic.h"
 #include "commands/tablecmds.h"
 #include "commands/matview.h"
 #include "executor/node/nodeModifyTable.h"
 #include "fmgr.h"
 #include "nodes/plannodes.h"
 #include "nodes/makefuncs.h"
-#include "nodes/nodeFuncs.h"
-#include "optimizer/clauses.h"
 #include "parser/parse_coerce.h"
 #include "parser/parse_collate.h"
 #include "parser/parse_expr.h"
@@ -53,6 +52,9 @@
 
 #include "storage/tcap.h"
 #include "catalog/pg_constraint.h"
+
+extern char* ExecBuildSlotValueDescription(
+    Oid reloid, TupleTableSlot* slot, TupleDesc tupdesc, Bitmapset* modifiedCols, int maxfieldlen);
 
 static bool TvIsContainsForeignKey(Oid relid)
 {
@@ -123,9 +125,8 @@ static bool TvFeatureSupport(Oid relid, char **errstr, bool isTimecapsuleTable)
     Form_pg_class classForm;
 
     if (!RelationIsValid(rel)) {
-        ereport(
-            ERROR, (errcode(ERRCODE_RELATION_OPEN_ERROR), 
-                errmsg("could not open relation with OID %u", relid)));
+        ereport(ERROR, (errcode(ERRCODE_RELATION_OPEN_ERROR),
+            errmsg("could not open relation with OID %u", relid)));
     }
 
     classForm = rel->rd_rel;
@@ -155,6 +156,8 @@ static bool TvFeatureSupport(Oid relid, char **errstr, bool isTimecapsuleTable)
         *errstr = "timecapsule feature does not support in non READ COMMITTED transaction";
     } else if (TvForeignKeyCheck(relid) && isTimecapsuleTable) {
         *errstr = "timecapsule feature does not support the table included foreign key or referenced by foreign key";
+    } else if (IsFullEncryptedRel(rel)) {
+        *errstr = "timecapsule feature does not support full encrypted table";
     } else {
         *errstr = NULL;
     }
@@ -210,9 +213,7 @@ Node *TvTransformVersionExpr(ParseState *pstate, TvVersionType tvtype, Node *tvv
 
     verExpr = transformExpr(pstate, tvver);
     if (checkExprHasSubLink(verExpr)) {
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_OPERATION),
-                errmsg("timecapsule clause not support sublink.")));
+        ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION), errmsg("timecapsule clause not support sublink.")));
     }
     
     if (tvtype == TV_VERSION_TIMESTAMP) {
@@ -256,7 +257,7 @@ static Const *TvEvalVerExpr(TvVersionType tvtype, Node *tvver)
  * We use the round-down way to obtain snapshots. that is,
  *     select SnpXmin from gs_txn_snapshot where snptime <= :tz order by snptime desc limit 1;
  */
-TransactionId TvFetchSnpxminRecycle(TimestampTz tz)
+TransactionId TvFetchSnpxminRecycle()
 {
     Relation rel;
     SysScanDesc sd;
@@ -264,18 +265,19 @@ TransactionId TvFetchSnpxminRecycle(TimestampTz tz)
     HeapTuple tup;
     Datum value;
     bool isnull = false;
-    TransactionId snapxmin = FirstNormalTransactionId;
+    TransactionId snapxmin = InvalidTransactionId;
 
     rel = heap_open(SnapshotRelationId, AccessShareLock);
 
-    ScanKeyInit(&skey[0], Anum_pg_snapshot_snptime, BTLessEqualStrategyNumber, 
-        F_TIMESTAMP_LE, TimestampTzGetDatum(tz));
+    ScanKeyInit(&skey[0], Anum_pg_snapshot_snpxmin, BTGreaterEqualStrategyNumber,
+        F_INT8GE, Int64GetDatum(FirstNormalTransactionId));
 
-    sd = systable_beginscan(rel, SnapshotTimeCsnIndexId, true, NULL, 1, skey);
+    sd = systable_beginscan(rel, SnapshotXminIndexId, true, NULL, 1, skey);
     tup = systable_getnext(sd);
     /* Limit 1 */
     if (tup == NULL) {
-        elog(WARNING, "cannot find the restore point, return FirstNormalTransactionId, prevent undo recycle move");
+        ereport(LOG, (errmodule(MOD_TIMECAPSULE),
+            errmsg("cannot find the recent restore point greate and equal 3 in timecapsule systable, return 0.")));
     } else {
         value = heap_getattr(tup, Anum_pg_snapshot_snpxmin, RelationGetDescr(rel), &isnull);
         snapxmin = Int64GetDatum(value);
@@ -285,6 +287,45 @@ TransactionId TvFetchSnpxminRecycle(TimestampTz tz)
     heap_close(rel, AccessShareLock);
 
     return snapxmin;
+}
+
+void TvFetchSnpTzXmin(Relation rel)
+{
+    const int stringLen = 128;
+    SysScanDesc sdXmin;
+    ScanKeyData skeyXmin[3];
+    HeapTuple tupXmin;
+
+    ScanKeyInit(&skeyXmin[0], Anum_pg_snapshot_snpxmin, BTGreaterEqualStrategyNumber,
+        F_INT8GE, Int64GetDatum(FirstNormalTransactionId));
+
+    sdXmin = systable_beginscan(rel, SnapshotXminIndexId, true, NULL, 1, skeyXmin);
+    tupXmin = systable_getnext(sdXmin);
+
+    TupleDesc tupDesc = RelationGetDescr(rel);
+
+    /* Limit 1  print xmin */
+    char *valDescXmin = NULL;
+    int countXmin = 0;
+
+    while ((tupXmin = systable_getnext(sdXmin)) != NULL) {
+        countXmin++;
+        int natts = tupDesc->natts;
+        bool *boolNulls = (bool *)palloc0((uint32)natts * sizeof(bool));
+        TupleTableSlot* slot = MakeSingleTupleTableSlot(tupDesc, false, TAM_HEAP);
+        heap_deform_tuple(tupXmin, tupDesc, slot->tts_values, boolNulls);
+        pfree(boolNulls);
+        slot->tts_tuple = (Tuple)tupXmin;
+        valDescXmin = ExecBuildSlotValueDescription(RelationGetRelid(rel), slot, tupDesc, NULL, stringLen);
+        ExecDropSingleTupleTableSlot(slot);
+        simple_heap_delete(rel, &tupXmin->t_self);
+        ereport(DEBUG1, (errmodule(MOD_TIMECAPSULE),
+            errmsg("TvFetchSnptimeRecycle, countXmin is %d, TranId is %lu, undo_retention_time is %d, tup is %s",
+                countXmin, GetCurrentTransactionId(), u_sess->attr.attr_storage.undo_retention_time, valDescXmin)));
+    }
+    systable_endscan(sdXmin);
+
+    return;
 }
 
 /*
@@ -315,8 +356,9 @@ static void TvFetchSnapTz(TimestampTz tz, Snapshot snap)
     tup = systable_getnext(sd);
     /* Limit 1 */
     if (tup == NULL) {
-        ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), 
-            errmsg("cannot find the restore point")));
+        TvFetchSnpTzXmin(rel);
+        ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
+            errmsg("cannot find the restore point, timecapsule time is too old, please check and use correct time")));
     }
 
     value = heap_getattr(tup, Anum_pg_snapshot_snpsnapshot, RelationGetDescr(rel), &isnull);
@@ -361,8 +403,8 @@ static void TvFetchSnapCsn(int64 csn, Snapshot snap)
 
     tup = systable_getnext(sd);
     if (tup == NULL) {
-        ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), 
-            errmsg("restore point not found")));
+        ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
+            errmsg("cannot find the restore point, timecapsule csn is too old, please check and use correct csn")));
     }
 
     /* Limit 1 */
@@ -426,13 +468,20 @@ static Snapshot TvGetSnap(Relation relation, TvVersionType tvtype, Node *tvver)
     return snap;
 }
 
-static void TvValidateRelDDL(Oid relid, CommitSeqNo snapcsn)
+static void TvValidateRelDDL(Oid relid, CommitSeqNo snapcsn, TransactionId snapxmin)
 {
     Relation rel = RelationIdGetRelation(relid);
     if (!RelationIsValid(rel)) {
-        ereport(
-            ERROR, (errcode(ERRCODE_RELATION_OPEN_ERROR), 
-                errmsg("could not open relation with OID %u", relid)));
+        ereport(ERROR, (errcode(ERRCODE_RELATION_OPEN_ERROR),
+            errmsg("could not open relation with OID %u", relid)));
+    }
+
+    if (TransactionIdPrecedes(snapxmin, g_instance.undo_cxt.globalRecycleXid)) {
+        ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), 
+            errmsg("Snapshot too old, snapshot csn is %lu, xmin is %lu, less than globalRecycleXid %lu, "
+                "globalOldestXminInFlashback is %lu,",
+                snapcsn, snapxmin, g_instance.undo_cxt.globalRecycleXid,
+                g_instance.flashback_cxt.globalOldestXminInFlashback)));
     }
 
     if (RelationGetChangecsn(rel) >= snapcsn) {
@@ -459,6 +508,8 @@ Snapshot TvChooseScanSnap(Relation relation, Scan *scan, ScanState *ss)
 
     if (likely(tcc == NULL)) {
         return snap;
+    } else if (ss->timecapsuleSnapshot != NULL) {
+        return ss->timecapsuleSnapshot;
     } else {
         bool isnull = false;
         ExprContext *econtext;
@@ -472,7 +523,12 @@ Snapshot TvChooseScanSnap(Relation relation, Scan *scan, ScanState *ss)
             -1, InvalidOid, 8, val, isnull, true);
 
         snap = TvGetSnap(relation, tcc->tvtype, (Node *)con);
-        TvValidateRelDDL(rte->relid, snap->snapshotcsn);
+        TvValidateRelDDL(rte->relid, snap->snapshotcsn, snap->xmin);
+        ereport(DEBUG1, (errmodule(MOD_TIMECAPSULE),
+            errmsg("timecapsule snapshot info: xmax is %lu, xmin is %lu, csn is %lu.",
+                snap->xmax, snap->xmin, snap->snapshotcsn)));
+        ss->timecapsuleSnapshot = snap;
+        u_sess->exec_cxt.isFlashBack = true;
 
         FreeExprContext(econtext, true);
         pfree(con);
@@ -529,7 +585,7 @@ void TvUheapDeleteDeltaRel(Relation rel, Relation partRel, Partition p, Snapshot
     sd = tableam_scan_begin(relRel, snap, 0, NULL);
     while ((tup = (UHeapTuple)tableam_scan_getnexttuple(sd, ForwardScanDirection)) != NULL) {
         SimpleUHeapDelete(relRel, &tup->ctid, snapshotNow, &oldslot, &tmfdXmin);
-        ExecDeleteIndexTuples(oldslot, &tup->ctid, estate, relRel, p, NULL, false);
+        ExecDeleteIndexTuples(oldslot, &tup->ctid, estate, relRel, p, NULL, false, false);
         if (relRel != NULL && relRel->rd_mlogoid != InvalidOid) {
             insert_into_mlog_table(relRel, relRel->rd_mlogoid, NULL, &tup->ctid, tmfdXmin, 'D');
         }
@@ -972,7 +1028,8 @@ void TvRestoreVersion(TimeCapsuleStmt *stmt)
      * 2. Get restore point snapshot.
      */
     snap = TvGetSnap(rel, stmt->tvtype, stmt->tvver);
-    TvValidateRelDDL(RelationGetRelid(rel), snap->snapshotcsn);
+    TvValidateRelDDL(RelationGetRelid(rel), snap->snapshotcsn, snap->xmin);
+    u_sess->exec_cxt.isFlashBack = true;
 
     /*
      * 3. Delete delta tuples that inserted after restore point.

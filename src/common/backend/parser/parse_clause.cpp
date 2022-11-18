@@ -740,6 +740,11 @@ static TimeCapsuleClause* transformRangeTimeCapsule(ParseState* pstate, RangeTim
                 parser_errposition(pstate, rtc->location)));
     }
 
+    if (RecoveryInProgress()) {
+        ereport(ERROR, (errcode(ERRCODE_OPERATE_FAILED),
+            errmsg("cannot execute TimeCapsule Query in recovery state")));
+    }
+
     timeCapsule = makeNode(TimeCapsuleClause);
 
     timeCapsule->tvver = TvTransformVersionExpr(pstate, rtc->tvtype, rtc->tvver);
@@ -841,6 +846,7 @@ Node* transformFromClauseItem(ParseState* pstate, Node* n, RangeTblEntry** top_r
              * so anything fixed on sw_backup could also fix back to (RangeSubselect*)n.
              * */
             ((RangeSubselect*)n)->alias->aliasname = ((RangeSubselect*)sw_backup)->alias->aliasname;
+            rte->eref->aliasname = ((RangeSubselect*)sw_backup)->alias->aliasname;
         }
 
         return (Node*)rtr;

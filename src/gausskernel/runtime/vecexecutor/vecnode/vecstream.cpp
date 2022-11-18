@@ -437,8 +437,11 @@ VecStreamState* ExecInitVecStream(Stream* node, EState* estate, int eflags)
     state->vector_output = true;
     state->StreamScan = ScanStreamByLibcomm;
 
-    if (STREAM_IS_LOCAL_NODE(node->smpDesc.distriType))
+    if (STREAM_IS_LOCAL_NODE(node->smpDesc.distriType)) {
         state->StreamScan = ScanMemoryStream;
+        /* local stream do not support merge sort */
+        ((Stream*)(state->ss.ps.plan))->sort = NULL;
+    }
 
     state->StreamDeserialize = get_batch_from_conn_buffer;
 

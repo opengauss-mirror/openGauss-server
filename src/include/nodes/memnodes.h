@@ -90,10 +90,10 @@ typedef struct MemoryContextData {
 
 #define MemoryContextLock(context)                                                                       \
     do {                                                                                                 \
-        START_CRIT_SECTION();                                                                            \
+        HOLD_INTERRUPTS();                                                                            \
         int err = pthread_rwlock_wrlock(&((MemoryContextData*)(context))->lock);                         \
         if (err != 0) {                                                                                  \
-            END_CRIT_SECTION();                                                                          \
+            RESUME_INTERRUPTS();                                                                          \
             ereport(ERROR,                                                                               \
                     (errcode(ERRCODE_LOCK_NOT_AVAILABLE),                                                \
                      errmsg("system call failed when lock, errno:%d.", err)));                           \
@@ -104,12 +104,12 @@ typedef struct MemoryContextData {
     do {                                                                                                 \
         int unlock_err = pthread_rwlock_unlock(&((MemoryContextData*)(context))->lock);                  \
         if (unlock_err != 0) {                                                                           \
-            END_CRIT_SECTION();                                                                          \
+            RESUME_INTERRUPTS();                                                                          \
             ereport(PANIC,                                                                               \
                     (errcode(ERRCODE_LOCK_NOT_AVAILABLE),                                                \
                      errmsg("system call failed when unlock, errno:%d.", unlock_err)));                  \
         }                                                                                                \
-        END_CRIT_SECTION();                                                                              \
+        RESUME_INTERRUPTS();                                                                              \
     } while (0)
 
 typedef struct AllocBlockData* AllocBlock; /* forward reference */
@@ -291,5 +291,12 @@ extern MemoryProtectFuncDef SharedFunctions;
             IsA((context), MemalignSharedAllocSetContext)))
 
 #define AllocSetContextUsedSpace(aset) ((aset)->totalSpace - (aset)->freeSpace)
+
+typedef struct SessMemoryUsage {
+    uint64 sessid;
+    int64 usedSize;
+    int state;
+} SessMemoryUsage;
+
 #endif /* MEMNODES_H */
 

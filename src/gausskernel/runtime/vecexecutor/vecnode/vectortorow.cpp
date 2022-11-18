@@ -75,7 +75,7 @@ void DevectorizeOneColumn(VecToRowState* state, ScalarVector* pColumn, int rows,
                 break;
             }
             case NAMEOID: {
-                state->m_ttsvalues[k] = PointerGetDatum(val);
+                state->m_ttsvalues[k] = PointerGetDatum(VARDATA_ANY(val));
                 break;
             }
             case UNKNOWNOID: {
@@ -188,7 +188,6 @@ void RecordCstorePartNum(VecToRowState* state, const VecToRow* node)
     } else {
         switch (nodeTag(outerPlan(node))) {
             case T_CStoreScan:
-            case T_DfsIndexScan:
             case T_CStoreIndexScan:
             case T_CStoreIndexCtidScan:
             case T_CStoreIndexHeapScan:

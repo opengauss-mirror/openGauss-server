@@ -404,16 +404,8 @@ select * from "TEST"."Test_Table";
 
 set current_schema=information_schema;
 create table test_info(a int, b int);
-insert into test_info values(1,2),(2,3),(3,4),(4,5);
-\d+ test_info
-                Table "information_schema.test_info"
- Column |  Type   | Modifiers | Storage | Stats target | Description 
---------+---------+-----------+---------+--------------+-------------
- a      | integer |           | plain   |              | 
- b      | integer |           | plain   |              | 
-Has OIDs: no
-Options: orientation=row, compression=no
-
+ERROR:  permission denied to create "information_schema.test_info"
+DETAIL:  System catalog modifications are currently disallowed.
 \d+ sql_features
                         Table "information_schema.sql_features"
       Column      |      Type      | Modifiers | Storage  | Stats target | Description 
@@ -443,20 +435,6 @@ select count(*) from sql_features;
    672
 (1 row)
 
-explain (verbose on, costs off) select * from test_info;
-                QUERY PLAN                
-------------------------------------------
- Seq Scan on information_schema.test_info
-   Output: a, b
-(2 rows)
-
-select count(*) from test_info;
- count 
--------
-     4
-(1 row)
-
-drop table test_info;
 reset current_schema;
 create table t_serial(a int, b serial);
 NOTICE:  CREATE TABLE will create implicit sequence "t_serial_b_seq" for serial column "t_serial.b"

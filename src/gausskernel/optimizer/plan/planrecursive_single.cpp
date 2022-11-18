@@ -169,15 +169,6 @@ static void setRecursiveRteplanRefByType(Plan* node, RecursiveRefContext* contex
          * If we found we have operators that do not support recursive-execution we
          * mark the stream-recursive unsupported
          */
-        case T_DfsScan:
-        case T_DfsIndexScan: {
-            errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
-                NOTPLANSHIPPING_LENGTH,
-                "Recursive CTE contains DFS Scan is not shippable CTE plan node id[%d]",
-                runode->plan.plan_node_id);
-            securec_check_ss_c(sprintf_rc, "\0", "\0");
-            mark_stream_unsupport();
-        } break;
         case T_Stream: {
             Stream* stream = (Stream*)node;
             elog(DEBUG1, "set plan ref for stream node %d", GET_PLAN_NODEID(stream));

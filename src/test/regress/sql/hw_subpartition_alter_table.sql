@@ -146,6 +146,47 @@ delete from hash_hash where col_1 is null;
 alter table hash_hash VALIDATE CONSTRAINT con_hash_hash; --success
 
 drop table hash_hash cascade;
+
+drop table if exists list_range_01;
+create table list_range_01
+(c1 int,
+ c2 date,
+ c3 char(10),
+ c4 varchar2(50),
+ c5 number(10,2),
+ c6 clob,
+ c7 text
+ )partition by list(c3)
+ subpartition by range(c1)
+(
+  partition p_201901 values ( '201901')
+  (
+  subpartition p_201901_a values less than (10),
+  subpartition p_201901_b values less than (20)
+  ),
+  partition p_201902 values ( '201902' )
+  (
+  subpartition p_201902_a values less than (10),
+  subpartition p_201902_b values less than (20)
+  ),
+  partition p_201903 values ( '201903')
+  (
+  subpartition p_201903_a values less than (10),
+  subpartition p_201903_b values less than (20)
+  ),
+  partition p_201900 values ( default )
+  (
+  subpartition p_201900_a values less than (10),
+  subpartition p_201900_b values less than (20),
+  subpartition p_201900_c values less than (50),
+  subpartition p_201900_d values less than (maxvalue)
+  )
+)DISABLE ROW MOVEMENT;
+
+alter table list_range_01 modify (c7 varchar2(100),c6 text);
+
+drop table if exists list_range_01;
+
 -- clean
 DROP SCHEMA subpartition_alter_table CASCADE;
 

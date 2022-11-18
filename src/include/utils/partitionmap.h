@@ -103,7 +103,7 @@ extern int partOidGetPartSequence(Relation rel, Oid partOid);
 extern Oid getListPartitionOid(PartitionMap* partitionmap, Const** partKeyValue, int* partIndex, bool topClosed);
 extern Oid getHashPartitionOid(PartitionMap* partitionmap, Const** partKeyValue, int* partIndex, bool topClosed);
 extern Oid getRangePartitionOid(PartitionMap* partitionmap, Const** partKeyValue, int* partIndex, bool topClosed);
-extern Oid GetPartitionOidByParam(Relation relation, Param *paramArg, ParamExternData *prm);
+extern Oid GetPartitionOidByParam(PartitionMap* partitionmap, Param *paramArg, ParamExternData *prm);
 extern List* getRangePartitionBoundaryList(Relation rel, int sequence);
 extern List* getListPartitionBoundaryList(Relation rel, int sequence);
 extern List* getHashPartitionBoundaryList(Relation rel, int sequence);

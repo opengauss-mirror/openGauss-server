@@ -65,7 +65,8 @@
 
 static TupleTableSlot* BitmapHbucketTblNext(BitmapHeapScanState* node);
 static TupleTableSlot* BitmapHeapTblNext(BitmapHeapScanState* node);
-bool heapam_scan_bitmap_next_block(TableScanDesc scan, TBMIterateResult* tbmres);
+bool heapam_scan_bitmap_next_block(TableScanDesc scan, TBMIterateResult* tbmres,
+    bool* has_cur_xact_write = NULL);
 static void ExecInitPartitionForBitmapHeapScan(BitmapHeapScanState* scanstate, EState* estate);
 static void ExecInitNextPartitionForBitmapHeapScan(BitmapHeapScanState* node);
 void BitmapHeapPrefetchNext(
@@ -175,13 +176,13 @@ static bool TableScanBitmapNextTuple(TableScanDesc scan, TBMIterateResult *tbmre
     }
 }
 
-static bool TableScanBitmapNextBlock(TableScanDesc scan, TBMIterateResult *tbmres)
+static bool TableScanBitmapNextBlock(TableScanDesc scan, TBMIterateResult *tbmres, bool* has_cur_xact_write)
 {
     bool isUstore = RelationIsUstoreFormat(scan->rs_rd);
     if (isUstore) {
-        return UHeapScanBitmapNextBlock(scan, tbmres);
+        return UHeapScanBitmapNextBlock(scan, tbmres, has_cur_xact_write);
     } else {
-        return heapam_scan_bitmap_next_block(scan, tbmres);
+        return heapam_scan_bitmap_next_block(scan, tbmres, has_cur_xact_write);
     }
 }
 
@@ -245,6 +246,19 @@ static int TableScanBitmapNextTargetRel(TableScanDesc scan, BitmapHeapScanState 
     return (result ? 0 : -1);
 }
 
+static void CheckUstoreShowAnyTupleMode(TableScanDesc scan)
+{
+    if (scan == NULL) {
+        return;
+    }
+    if (!RelationIsUstoreFormat(scan->rs_rd)) {
+        return;
+    }
+    if (u_sess->attr.attr_common.XactReadOnly && u_sess->attr.attr_storage.enable_show_any_tuples) {
+        ereport(ERROR, (errmodule(MOD_USTORE), errmsg("ustore bitmap scan is not supported in show any tuple mode")));
+    }
+}
+
 /* ----------------------------------------------------------------
  *		BitmapHeapNext
  *
@@ -298,6 +312,7 @@ static TupleTableSlot* BitmapHeapTblNext(BitmapHeapScanState* node)
      * a LIMIT.
      */
     if (tbm == NULL) {
+        CheckUstoreShowAnyTupleMode(scan);
         tbm = (TIDBitmap*)MultiExecProcNode(outerPlanState(node));
 
         if (tbm == NULL || !IsA(tbm, TIDBitmap)) {
@@ -381,7 +396,7 @@ static TupleTableSlot* BitmapHeapTblNext(BitmapHeapScanState* node)
             /*
              * Fetch the current table page and identify candidate tuples.
              */
-            if (!TableScanBitmapNextBlock(scan, tbmres)) {
+            if (!TableScanBitmapNextBlock(scan, tbmres, &node->ss.ps.state->have_current_xact_date)) {
                 node->tbmres = tbmres = NULL;
                 continue;
             }
@@ -471,7 +486,7 @@ static TupleTableSlot* BitmapHeapTblNext(BitmapHeapScanState* node)
  * builds an array indicating which tuples on the page are both potentially
  * interesting according to the bitmap, and visible according to the snapshot.
  */
-bool heapam_scan_bitmap_next_block(TableScanDesc scan, TBMIterateResult* tbmres)
+bool heapam_scan_bitmap_next_block(TableScanDesc scan, TBMIterateResult* tbmres, bool* has_cur_xact_write)
 {
     HeapScanDesc hscan = (HeapScanDesc) scan;
     BlockNumber page = tbmres->blockno;
@@ -540,7 +555,8 @@ bool heapam_scan_bitmap_next_block(TableScanDesc scan, TBMIterateResult* tbmres)
             HeapTupleData heapTuple;
 
             ItemPointerSet(&tid, page, offnum);
-            if (heap_hot_search_buffer(&tid, hscan->rs_base.rs_rd, buffer, snapshot, &heapTuple, NULL, NULL, true))
+            if (heap_hot_search_buffer(&tid, hscan->rs_base.rs_rd, buffer, snapshot, &heapTuple, NULL, NULL, true,
+                                       has_cur_xact_write))
                 hscan->rs_base.rs_vistuples[ntup++] = ItemPointerGetOffsetNumber(&tid);
         }
     } else {
@@ -723,7 +739,7 @@ static inline void InitBitmapHeapScanNextMtd(BitmapHeapScanState* bmstate)
     bmstate->ss.ScanNextMtd = (ExecScanAccessMtd)BitmapHeapTblNext;
 }
 
-TableScanDesc UHeapBeginScan(Relation relation, Snapshot snapshot, int nkeys);
+TableScanDesc UHeapBeginScan(Relation relation, Snapshot snapshot, int nkeys, ParallelHeapScanDesc parallel_scan);
 
 
 /* ----------------------------------------------------------------
@@ -841,9 +857,11 @@ BitmapHeapScanState* ExecInitBitmapHeapScan(BitmapHeapScan* node, EState* estate
                     if (TransactionIdPrecedes(FirstNormalTransactionId, scanSnap->xmax) &&
                         !TransactionIdIsCurrentTransactionId(relfrozenxid64) &&
                         TransactionIdPrecedes(scanSnap->xmax, relfrozenxid64)) {
-                        ereport(ERROR,
-                                (errcode(ERRCODE_SNAPSHOT_INVALID),
-                                 (errmsg("Snapshot too old."))));
+                        ereport(ERROR, (errcode(ERRCODE_SNAPSHOT_INVALID),
+                            (errmsg("Snapshot too old, BitmapHeapScan is PartTbl, the info: snapxmax is %lu, "
+                                "snapxmin is %lu, csn is %lu, relfrozenxid64 is %lu, globalRecycleXid is %lu.",
+                                scanSnap->xmax, scanSnap->xmin, scanSnap->snapshotcsn, relfrozenxid64,
+                                g_instance.undo_cxt.globalRecycleXid))));
                     }
                 }
 
@@ -866,13 +884,15 @@ BitmapHeapScanState* ExecInitBitmapHeapScan(BitmapHeapScan* node, EState* estate
                 if (TransactionIdPrecedes(FirstNormalTransactionId, scanSnap->xmax) &&
                     !TransactionIdIsCurrentTransactionId(relfrozenxid64) &&
                     TransactionIdPrecedes(scanSnap->xmax, relfrozenxid64)) {
-                    ereport(ERROR,
-                            (errcode(ERRCODE_SNAPSHOT_INVALID),
-                             (errmsg("Snapshot too old."))));
+                    ereport(ERROR, (errcode(ERRCODE_SNAPSHOT_INVALID),
+                        (errmsg("Snapshot too old, BitmapHeapScan is not PartTbl, the info: snapxmax is %lu, "
+                            "snapxmin is %lu, csn is %lu, relfrozenxid64 is %lu, globalRecycleXid is %lu.",
+                            scanSnap->xmax, scanSnap->xmin, scanSnap->snapshotcsn, relfrozenxid64,
+                            g_instance.undo_cxt.globalRecycleXid))));
                 }
             }
 
-            scanstate->ss.ss_currentScanDesc = UHeapBeginScan(currentRelation, scanSnap, 0);
+            scanstate->ss.ss_currentScanDesc = UHeapBeginScan(currentRelation, scanSnap, 0, NULL);
         }
     }
     if (scanstate->ss.ss_currentScanDesc == NULL) {
@@ -948,6 +968,11 @@ static void ExecInitNextPartitionForBitmapHeapScan(BitmapHeapScanState* node)
     Assert(PointerIsValid(node->ss.ss_currentPartition));
     releaseDummyRelation(&(node->ss.ss_currentPartition));
 
+    BitmapHeapScanState* bitmapState = node;
+    BitmapHeapScan* bitmpHeapScan = (BitmapHeapScan*)node->ss.ps.plan;
+    Snapshot scanSnap;
+    scanSnap = TvChooseScanSnap(currentpartitionrel, &bitmpHeapScan->scan, &bitmapState->ss);
+
     if (currentpartitionrel->partMap != NULL) {
         Partition currentSubPartition = NULL;
         List* currentSubPartitionList = NULL;
@@ -963,13 +988,13 @@ static void ExecInitNextPartitionForBitmapHeapScan(BitmapHeapScanState* node)
 
         /* Initialize scan descriptor. */
         node->ss.ss_currentScanDesc =
-            scan_handler_tbl_beginscan_bm(currentSubPartitionRel, node->ss.ps.state->es_snapshot, 0, NULL, &node->ss);
+            scan_handler_tbl_beginscan_bm(currentSubPartitionRel, scanSnap, 0, NULL, &node->ss);
     } else {
         node->ss.ss_currentPartition = currentpartitionrel;
 
         /* Initialize scan descriptor. */
         node->ss.ss_currentScanDesc =
-            scan_handler_tbl_beginscan_bm(currentpartitionrel, node->ss.ps.state->es_snapshot, 0, NULL, &node->ss);
+            scan_handler_tbl_beginscan_bm(currentpartitionrel, scanSnap, 0, NULL, &node->ss);
     }
 }
 
@@ -1027,7 +1052,7 @@ static void ExecInitPartitionForBitmapHeapScan(BitmapHeapScanState* scanstate, E
             Oid tablepartitionid = InvalidOid;
             int partSeq = lfirst_int(cell);
             /* add table partition to list */
-            tablepartitionid = getPartitionOidFromSequence(currentRelation, partSeq);
+            tablepartitionid = getPartitionOidFromSequence(currentRelation, partSeq, plan->scan.pruningInfo->partMap);
             tablepartition = partitionOpen(currentRelation, tablepartitionid, lock);
             scanstate->ss.partitions = lappend(scanstate->ss.partitions, tablepartition);
 

@@ -25,8 +25,8 @@ set(log_LINK_LIBS libelog.a libpgport.a -lcrypt -ldl -lm -lssl -lcrypto -l${SECU
 add_bintarget(gs_log TGT_log_SRC TGT_log_INC "${log_DEF_OPTIONS}" "${log_COMPILE_OPTIONS}" "${log_LINK_OPTIONS}" "${log_LINK_LIBS}")
 add_dependencies(gs_log elog_static pgport_static)
 target_link_directories(gs_log PUBLIC
-    ${LIBOPENSSL_LIB_PATH} ${PROTOBUF_LIB_PATH} ${CMAKE_BINARY_DIR}/lib
-    ${LIBPARQUET_LIB_PATH} ${LIBCURL_LIB_PATH} ${ZLIB_LIB_PATH} ${LIBOBS_LIB_PATH}
+    ${LIBOPENSSL_LIB_PATH} ${CMAKE_BINARY_DIR}/lib
+    ${LIBCURL_LIB_PATH} ${ZLIB_LIB_PATH} ${LIBOBS_LIB_PATH}
     ${LIBCGROUP_LIB_PATH} ${LIBEDIT_LIB_PATH} ${LIBCGROUP_LIB_PATH} ${KERBEROS_LIB_PATH} ${SECURE_LIB_PATH}
 )
 install(TARGETS gs_log RUNTIME DESTINATION bin)

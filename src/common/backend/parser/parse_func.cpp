@@ -1399,6 +1399,30 @@ FuncCandidateList func_select_candidate(int nargs, Oid* input_typeids, FuncCandi
     if (ncandidates == 1)
         return candidates;
 
+#ifndef ENABLE_MULTIPLE_NODES
+    Oid caller_pkg_oid = InvalidOid;
+    if (OidIsValid(u_sess->plsql_cxt.running_pkg_oid)) {
+        caller_pkg_oid = u_sess->plsql_cxt.running_pkg_oid;
+    } else if (u_sess->plsql_cxt.curr_compile_context != NULL &&
+        u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package != NULL) {
+        caller_pkg_oid = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->pkg_oid;
+    }
+    nbestMatch = 0;
+    ncandidates = 0;
+    last_candidate = NULL;
+    for (current_candidate = candidates; current_candidate != NULL; current_candidate = current_candidate->next) {
+        nmatch = 0;
+        if (current_candidate->packageOid == caller_pkg_oid) {
+            nmatch++;
+        }
+        keep_candidate(nmatch, nbestMatch, current_candidate, last_candidate, candidates, ncandidates);
+    }
+    if (last_candidate) /* terminate rebuilt list */
+        last_candidate->next = NULL;
+    if (ncandidates == 1)
+        return candidates;
+#endif
+
     return NULL; /* failed to select a best candidate */
 } /* func_select_candidate() */
 
@@ -1528,7 +1552,7 @@ FuncDetailCode func_get_detail(List* funcname, List* fargs, List* fargnames, int
     if (enable_out_param_override()) {
         /* For A compatiablity, CALL statement only can invoke Procedure in SQL or Function in PLSQL, */ 
         /* and SELECT statement can only invoke Function. but now it does't distinguish for compatible with the old code.*/
-        raw_candidates = FuncnameGetCandidates(funcname, nargs, fargnames, expand_variadic, expand_defaults, false, true, PROKIND_UNKNOWN);
+        raw_candidates = FuncnameGetCandidates(funcname, nargs, fargnames, expand_variadic, expand_defaults, false, true, PROKIND_UNKNOWN, false);
     } else {
         /* Get list of possible candidates from namespace search */
         raw_candidates = FuncnameGetCandidates(funcname, nargs, fargnames, expand_variadic, expand_defaults, false);

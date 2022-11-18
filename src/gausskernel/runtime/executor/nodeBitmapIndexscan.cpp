@@ -474,6 +474,12 @@ static void ExecInitNextPartitionForBitmapIndexScan(BitmapIndexScanState* node)
 
     node->ss.ss_currentScanDesc = NULL;
 
+    BitmapIndexScanState* bitmapIndexScanStat = node;
+    BitmapIndexScan* bitmapIndexScan = (BitmapIndexScan*)node->ss.ps.plan;
+    Snapshot scanSnap;
+    scanSnap = TvChooseScanSnap(bitmapIndexScanStat->biss_RelationDesc,
+        &bitmapIndexScan->scan, &bitmapIndexScanStat->ss);
+
     Oid heapOid = node->biss_RelationDesc->rd_index->indrelid;
     Relation heapRelation = heap_open(heapOid, AccessShareLock);
     if (RelationIsSubPartitioned(heapRelation)) {
@@ -494,7 +500,7 @@ static void ExecInitNextPartitionForBitmapIndexScan(BitmapIndexScanState* node)
 
     /* Initialize scan descriptor. */
     node->biss_ScanDesc = scan_handler_idx_beginscan_bitmap(
-        node->biss_CurrentIndexPartition, node->ss.ps.state->es_snapshot, node->biss_NumScanKeys, (ScanState*)node);
+        node->biss_CurrentIndexPartition, scanSnap, node->biss_NumScanKeys, (ScanState*)node);
 
     heap_close(heapRelation, AccessShareLock);
 
@@ -535,7 +541,6 @@ void ExecInitPartitionForBitmapIndexScan(BitmapIndexScanState* indexstate, EStat
                     resultPlan = estate->pruningResult;
                 } else {
                     resultPlan = GetPartitionInfo(plan->scan.pruningInfo, estate, rel);
-                    destroyPruningResult(estate->pruningResult);
                     estate->pruningResult = resultPlan;
                 }
             } else {
@@ -561,7 +566,7 @@ void ExecInitPartitionForBitmapIndexScan(BitmapIndexScanState* indexstate, EStat
             List* partitionIndexOidList = NIL;
 
             /* get index partition list for the special index */
-            tablepartitionid = getPartitionOidFromSequence(rel, partSeq);
+            tablepartitionid = getPartitionOidFromSequence(rel, partSeq, plan->scan.pruningInfo->partMap);
             tablePartition = partitionOpen(rel, tablepartitionid, lock);
 
             if (RelationIsSubPartitioned(rel)) {

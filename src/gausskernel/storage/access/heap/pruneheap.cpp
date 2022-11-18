@@ -104,7 +104,9 @@ void heap_page_prune_opt(Relation relation, Buffer buffer)
      * Keep prune page can be done in single mode (standlone --single), so just in PostmasterEnvironment.
      */
     if ((t_thrd.xact_cxt.useLocalSnapshot && IsPostmasterEnvironment) ||
-        g_instance.attr.attr_storage.IsRoachStandbyCluster || u_sess->attr.attr_common.upgrade_mode == 1)
+        g_instance.attr.attr_storage.IsRoachStandbyCluster ||
+        u_sess->attr.attr_common.upgrade_mode == 1 ||
+        g_instance.streaming_dr_cxt.isInSwitchover)
         return;
 
     /*
@@ -383,10 +385,6 @@ static int heap_prune_chain(Relation relation, Buffer buffer, OffsetNumber rooto
              * either here or while following a chain below.  Whichever path
              * gets there first will mark the tuple unused.
              */
-            if (u_sess->attr.attr_storage.enable_debug_vacuum) {
-                t_thrd.utils_cxt.pRelatedRel = relation;
-            }
-
             if (HeapTupleSatisfiesVacuum(&tup, oldest_xmin, buffer) == HEAPTUPLE_DEAD &&
                 !HeapTupleHeaderIsHotUpdated(htup)) {
 
@@ -397,12 +395,7 @@ static int heap_prune_chain(Relation relation, Buffer buffer, OffsetNumber rooto
                 heap_prune_record_unused(prstate, rootoffnum);
                 HeapTupleHeaderAdvanceLatestRemovedXid(&tup, &prstate->latestRemovedXid);
                 ndeleted++;
-
-                if (u_sess->attr.attr_storage.enable_debug_vacuum) {
-                    elogVacuumInfo(relation, &tup, "heap_prune_chain", oldest_xmin);
-                }
             }
-            t_thrd.utils_cxt.pRelatedRel = NULL;
             gstrace_exit(GS_TRC_ID_heap_prune_chain);
             /* Nothing more to do */
             return ndeleted;
@@ -480,10 +473,6 @@ static int heap_prune_chain(Relation relation, Buffer buffer, OffsetNumber rooto
          * Check tuple's visibility status.
          */
         tupdead = recent_dead = false;
-
-        if (u_sess->attr.attr_storage.enable_debug_vacuum) {
-            t_thrd.utils_cxt.pRelatedRel = relation;
-        }
         switch (HeapTupleSatisfiesVacuum(&tup, oldest_xmin, buffer)) {
             case HEAPTUPLE_DEAD:
                 keepInvisible = HeapKeepInvisibleTuple(&tup, RelationGetDescr(relation));
@@ -525,8 +514,6 @@ static int heap_prune_chain(Relation relation, Buffer buffer, OffsetNumber rooto
                                 errmsg("unexpected HeapTupleSatisfiesVacuum result")));
                 break;
         }
-
-        t_thrd.utils_cxt.pRelatedRel = NULL;
         /*
          * Remember the last DEAD tuple seen.  We will advance past
          * RECENTLY_DEAD tuples just in case there's a DEAD one after them;

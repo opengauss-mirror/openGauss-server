@@ -12,7 +12,8 @@ ERROR:  replication slot "regression_slot" already exists
 -- fail because of an invalid name
 SELECT 'init' FROM pg_create_logical_replication_slot('Invalid Name', 'test_decoding');
 ERROR:  replication slot name "Invalid Name" contains invalid character
-HINT:  Replication slot names may only contain lower letters, numbers and the underscore character.
+HINT:  Replication slot names may only contain lower letters, numbers and the 4 following special characters: '_', '?', '.', '-'.
+'.' and '..' are also not allowed to be slot names independently.
 -- fail twice because of an invalid parameter values
 SELECT 'init' FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL, 'include-xids', 'frakbar');
 ERROR:  could not parse value "frakbar" for parameter "include-xids"
@@ -63,6 +64,7 @@ INSERT INTO replication_example(somedata, text) VALUES (3, 3);
 COMMIT;
 -- collect all changes
 SELECT data FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL, 'include-xids', '0', 'skip-empty-xacts', '1');
+--?.*
                                                   data                                                   
 ---------------------------------------------------------------------------------------------------------
  BEGIN
@@ -110,6 +112,7 @@ INSERT INTO tr_sub(path) VALUES ('1-top-2-#1');
 RELEASE SAVEPOINT b;
 COMMIT;
 SELECT data FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL, 'include-xids', '0', 'skip-empty-xacts', '1');
+--?.*
                                  data                                 
 ----------------------------------------------------------------------
  BEGIN
@@ -245,6 +248,8 @@ WHERE id = 1;
 SELECT data FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL, 'include-xids', '0', 'skip-empty-xacts', '1');
 --?.*
 --?.*
+--?.*
+--?.*
  BEGIN
  table public.table_without_key: INSERT: id[integer]:1 data[integer]:1
  table public.table_without_key: INSERT: id[integer]:2 data[integer]:2
@@ -304,6 +309,9 @@ update bmsql_order_line set ol_dist_info='ss' where ol_w_id =1;
 delete from bmsql_order_line;
 -- done, free logical replication slot
 SELECT data FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL, 'include-xids', '0', 'skip-empty-xacts', '1');
+--?.*
+--?.*
+--?.*
 --?.*
 --?.*
  BEGIN

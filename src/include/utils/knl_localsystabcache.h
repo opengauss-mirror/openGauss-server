@@ -87,10 +87,18 @@ public:
         }
     }
 
+    void RemoveAllTailElements()
+    {
+        for (int cache_id = 0; cache_id < SysCacheSize; cache_id++) {
+            local_systupcaches[cache_id]->RemoveTailListElements();
+            local_systupcaches[cache_id]->RemoveRandomTailTupleElements();
+        }
+    }
+
     void CatalogCacheFlushCatalogLocal(Oid rel_oid)
     {
         for (int cache_id = 0; cache_id < SysCacheSize; cache_id++) {
-            Assert(cacheinfo[cache_id].reloid == local_systupcaches[cache_id]->GetCCRelOid() && m_is_inited);
+            Assert(cacheinfo[cache_id].reloid == local_systupcaches[cache_id]->GetCCRelOid());
             if (cacheinfo[cache_id].reloid == rel_oid) {
                 /* Yes, so flush all its contents */
                 local_systupcaches[cache_id]->ResetCatalogCache();
@@ -111,20 +119,11 @@ public:
         }
     }
 
-    void CatCacheCallBack(Oid rel_oid)
-    {
-        for (int cache_id = 0; cache_id < SysCacheSize; cache_id++) {
-            Assert(cacheinfo[cache_id].reloid == local_systupcaches[cache_id]->GetCCRelOid() && m_is_inited);
-            if (cacheinfo[cache_id].reloid == rel_oid) {
-                CallThreadSyscacheCallbacks(cache_id, 0);
-            }
-        }
-    }
 
     void SessionCatCacheCallBack(Oid rel_oid)
     {
         for (int cache_id = 0; cache_id < SysCacheSize; cache_id++) {
-            Assert(cacheinfo[cache_id].reloid == local_systupcaches[cache_id]->GetCCRelOid() && m_is_inited);
+            Assert(cacheinfo[cache_id].reloid == local_systupcaches[cache_id]->GetCCRelOid());
             if (cacheinfo[cache_id].reloid == rel_oid) {
                 CallSessionSyscacheCallbacks(cache_id, 0);
             }

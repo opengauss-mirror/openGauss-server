@@ -57,6 +57,7 @@ typedef struct Dllist {
 	Dlelem	   *dll_tail;
     uint64      dll_len;
 } Dllist;
+extern void DLRemove(Dlelem* e); /* removes node from list */
 
 class DllistWithLock : public BaseObject {
 public:
@@ -73,7 +74,12 @@ public:
     Dlelem* RemoveHeadNoLock();
     Dlelem* RemoveTail();
     bool IsEmpty();
-    Dlelem* GetHead();
+    Dlelem* GetHead()
+    {
+        Dlelem* head = NULL;
+        head = m_list.dll_head;
+        return head;
+    }
     void GetLock();
     void ReleaseLock();
 
@@ -81,7 +87,10 @@ public:
     {
         return m_list.dll_len;
     }
-
+    Dllist *GetList()
+    {
+        return &m_list;
+    }
 private:
     slock_t m_lock;
     Dllist m_list;

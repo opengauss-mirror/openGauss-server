@@ -164,7 +164,7 @@ inline void ResetTrackMemoryStructure()
 
 bool TrackMemoryInfoInit(char* context_name)
 {
-    if (pthread_rwlock_wrlock(&g_instance.stat_cxt.track_memory_lock) != 0) {
+    if (PthreadRWlockTryWrlock(t_thrd.utils_cxt.CurrentResourceOwner, &g_instance.stat_cxt.track_memory_lock) != 0) {
         return false;
     }
 
@@ -188,7 +188,7 @@ bool TrackMemoryInfoInit(char* context_name)
 
     /* context_name is "" means stop this track. */
     if (trim(context_name)[0] == '\0') {
-        (void)pthread_rwlock_unlock(&g_instance.stat_cxt.track_memory_lock);
+        PthreadRWlockUnlock(t_thrd.utils_cxt.CurrentResourceOwner, &g_instance.stat_cxt.track_memory_lock);
         (void)MemoryContextSwitchTo(oldContext);
         return true;
     }
@@ -203,14 +203,14 @@ bool TrackMemoryInfoInit(char* context_name)
      */
     if (!ParseTrackMemory(context_name)) {
         ResetTrackMemoryStructure();
-        (void)pthread_rwlock_unlock(&g_instance.stat_cxt.track_memory_lock);
+        PthreadRWlockUnlock(t_thrd.utils_cxt.CurrentResourceOwner, &g_instance.stat_cxt.track_memory_lock);
         (void)MemoryContextSwitchTo(oldContext);
         return false;
     }
 
     g_instance.stat_cxt.track_memory_inited = true;
 
-    (void)pthread_rwlock_unlock(&g_instance.stat_cxt.track_memory_lock);
+    PthreadRWlockUnlock(t_thrd.utils_cxt.CurrentResourceOwner, &g_instance.stat_cxt.track_memory_lock);
 
     (void)MemoryContextSwitchTo(oldContext);
 
@@ -357,12 +357,12 @@ MemoryAllocDetailList* GetMemoryTrackInfo()
     bool found = false;
     errno_t rc;
 
-    if (pthread_rwlock_wrlock(&g_instance.stat_cxt.track_memory_lock) != 0) {
+    if (PthreadRWlockTryWrlock(t_thrd.utils_cxt.CurrentResourceOwner, &g_instance.stat_cxt.track_memory_lock) != 0) {
         return NULL;
     }
 
     if (g_instance.stat_cxt.track_memory_inited == false) {
-        (void)pthread_rwlock_unlock(&g_instance.stat_cxt.track_memory_lock);
+        PthreadRWlockUnlock(t_thrd.utils_cxt.CurrentResourceOwner, &g_instance.stat_cxt.track_memory_lock);
         return NULL;
     }
 
@@ -395,7 +395,7 @@ MemoryAllocDetailList* GetMemoryTrackInfo()
         }
     }
 
-    (void)pthread_rwlock_unlock(&g_instance.stat_cxt.track_memory_lock);
+    PthreadRWlockUnlock(t_thrd.utils_cxt.CurrentResourceOwner, &g_instance.stat_cxt.track_memory_lock);
 
     MemoryAllocDetail* node = NULL;
     result.next = NULL;

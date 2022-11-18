@@ -541,7 +541,7 @@ CREATE_DESC:
      * Initialize the segment descriptor in SMgrRelationData.
      */
     SegmentDesc *fork_desc =
-        (SegmentDesc *)MemoryContextAlloc(LocalSmgrStorageMemoryCxt(), sizeof(SegmentDesc));
+        (SegmentDesc *)MemoryContextAlloc(LocalSmgrStorageMemoryCxt(false), sizeof(SegmentDesc));
     fork_desc->head_blocknum = fork_head_blocknum;
     fork_desc->timeline = seg_get_drop_timeline();
     SegmentCheck(fork_head_blocknum >= DF_MAP_GROUP_SIZE);
@@ -879,7 +879,7 @@ static bool bucket_open_segment(SMgrRelation reln, int forknum, bool create, XLo
     }
 
     SegmentDesc *seg_desc =
-        (SegmentDesc *)MemoryContextAlloc(LocalSmgrStorageMemoryCxt(), sizeof(SegmentDesc));
+        (SegmentDesc *)MemoryContextAlloc(LocalSmgrStorageMemoryCxt(false), sizeof(SegmentDesc));
     seg_desc->head_blocknum = head_blocknum;
     seg_desc->timeline = seg_get_drop_timeline();
     SegmentCheck(head_blocknum >= DF_MAP_GROUP_SIZE);
@@ -1079,11 +1079,12 @@ BlockNumber bucket_totalblocks(SMgrRelation reln, ForkNumber forknum, Buffer mai
     return result;
 }
 
-SegPageLocation seg_get_physical_location(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum)
+SegPageLocation seg_get_physical_location(RelFileNode rnode, ForkNumber forknum, BlockNumber blocknum,
+                                          bool check_standby)
 {
     SMgrRelation reln;
 
-    if (RecoveryInProgress()) {
+    if (check_standby && RecoveryInProgress()) {
         ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg("recovery is in progress"),
                         errhint("cannot get segment address translation during recovery")));
     }
@@ -1856,3 +1857,40 @@ void seg_physical_write(SegSpace *spc, RelFileNode &rNode, ForkNumber forknum, B
 
     spc_write_block(spc, rNode, forknum, buffer, blocknum);
 }
+
+static bool check_meta_data(BlockNumber extent, uint32 extent_size, uint32* offset_block)
+{
+    if (extent < DF_MAP_HEAD_PAGE + 1 || extent_size == EXTENT_1) {
+        return true;
+    }
+    extent -= DF_MAP_HEAD_PAGE + 1;
+    BlockNumber group_total_blocks = DF_MAP_GROUP_SIZE + IPBLOCK_GROUP_SIZE + DF_MAP_GROUP_EXTENTS * extent_size;
+    BlockNumber group_offset = extent % group_total_blocks;
+
+    if (group_offset < DF_MAP_GROUP_SIZE + IPBLOCK_GROUP_SIZE) {
+        return true;
+    }
+    *offset_block = (group_offset - DF_MAP_GROUP_SIZE - IPBLOCK_GROUP_SIZE) % extent_size;
+    return false;
+}
+
+bool repair_check_physical_type(uint32 spcNode, uint32 dbNode, int32 forkNum, uint32 *relNode, uint32 *blockNum)
+{
+    uint32 offset_blocks;
+    if (!check_meta_data(*blockNum, EXTENT_TYPE_TO_SIZE(*relNode), &offset_blocks)) {
+        SegSpace *spc = spc_open(spcNode, dbNode, false);
+        SegExtentGroup *seg = &spc->extent_group[EXTENT_TYPE_TO_GROUPID(*relNode)][forkNum];
+        ExtentInversePointer iptr = RepairGetInversePointer(seg, *blockNum);
+        if (!InversePointerIsValid(iptr)) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            (errmsg("Blocknum %u is Invalid. \n", *blockNum))));
+        }
+        RelFileNode logic_node = get_segment_logic_rnode(spc, iptr.owner, seg->forknum);
+        uint32 extent_id = SPC_INVRSPTR_GET_SPECIAL_DATA(iptr);
+        *blockNum = ExtentIdToLogicBlockNum(extent_id) + offset_blocks;
+        *relNode = logic_node.relNode;
+        return true;
+    }
+    return false;
+}
+

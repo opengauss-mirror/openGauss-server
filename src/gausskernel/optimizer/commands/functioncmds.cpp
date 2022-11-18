@@ -95,7 +95,6 @@ typedef struct PendingLibraryDelete {
 static void AlterFunctionOwner_internal(Relation rel, HeapTuple tup, Oid newOwnerId);
 static void checkAllowAlter(HeapTuple tup);
 static int2vector* GetDefaultArgPos(List* defargpos);
-
 /*
  *	 Examine the RETURNS clause of the CREATE FUNCTION statement
  *	 and return information about it as *prorettype_p and *returnsSet.
@@ -427,7 +426,7 @@ static void examine_parameter_list(List* parameters, Oid languageOid, const char
         if (fp->defexpr) {
 #ifndef ENABLE_MULTIPLE_NODES
             if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT 
-                && (fp->mode == FUNC_PARAM_OUT || fp->mode == FUNC_PARAM_INOUT)) {
+                && (fp->mode == FUNC_PARAM_OUT && enable_out_param_override())) {
                 ereport(ERROR,
                     (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
                     errmsg("The out/inout Parameter can't have default value.")));
@@ -641,6 +640,7 @@ static void compute_attributes_sql_style(const List* options, List** as, char** 
     ListCell* option = NULL;
     DefElem* as_item = NULL;
     DefElem* language_item = NULL;
+    DefElem* plsql_language_item = NULL;
     DefElem* windowfunc_item = NULL;
     DefElem* volatility_item = NULL;
     DefElem* strict_item = NULL;
@@ -668,6 +668,10 @@ static void compute_attributes_sql_style(const List* options, List** as, char** 
             if (windowfunc_item != NULL)
                 ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("conflicting or redundant options")));
             windowfunc_item = defel;
+        } else if (strcmp(defel->defname, "plsqllanguage") == 0) {
+            if (plsql_language_item != NULL)
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("conflicting or redundant options")));
+            plsql_language_item = defel;
         } else if (compute_common_attribute(defel,
                        &volatility_item,
                        &strict_item,
@@ -692,6 +696,10 @@ static void compute_attributes_sql_style(const List* options, List** as, char** 
     else {
         ereport(ERROR, (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION), errmsg("no function body specified")));
         *as = NIL; /* keep compiler quiet */
+    }
+
+    if (plsql_language_item != NULL) {
+        language_item = plsql_language_item;
     }
 
     if (language_item != NULL)
@@ -873,6 +881,45 @@ static void CheckWindowFuncValid(Oid languageOid, const char* prosrc_str)
     }
 }
 
+static bool isForbiddenSchema (Oid namespaceId)
+{
+    return IsPackageSchemaOid(namespaceId) || namespaceId == PG_DB4AI_NAMESPACE;
+}
+
+void CheckCreateFunctionPrivilege(Oid namespaceId, const char* funcname)
+{
+    if (!IsInitdb && !u_sess->attr.attr_common.IsInplaceUpgrade && isForbiddenSchema(namespaceId)) {
+        ereport(ERROR,
+            (errmodule(MOD_PLSQL), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Permission denied to create function \"%s\"", funcname),
+                errdetail("Object creation is not supported for %s schema.", get_namespace_name(namespaceId)),
+                errcause("The schema in the package does not support object creation.."),
+                erraction("Please create an object in another schema.")));
+    }
+
+    if (!isRelSuperuser() &&
+        (namespaceId == PG_CATALOG_NAMESPACE ||
+        namespaceId == PG_PUBLIC_NAMESPACE ||
+        namespaceId == PG_DB4AI_NAMESPACE)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                errmsg("permission denied to create function \"%s\"", funcname),
+                errhint("must be %s to create a function in %s schema.",
+                    g_instance.attr.attr_security.enablePrivilegesSeparate ? "initial user" : "sysadmin",
+                    get_namespace_name(namespaceId))));
+    }
+
+    if (!IsInitdb && !u_sess->attr.attr_common.IsInplaceUpgrade &&
+        !g_instance.attr.attr_common.allow_create_sysobject &&
+        IsSysSchema(namespaceId)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                errmsg("permission denied to create function \"%s\"", funcname),
+                errhint("not allowd to create a function in %s schema when allow_create_sysobject is off.",
+                    get_namespace_name(namespaceId))));
+    }
+}
+
 /*
  * CreateFunction
  *	 Execute a CREATE FUNCTION utility statement.
@@ -964,22 +1011,8 @@ void CreateFunction(CreateFunctionStmt* stmt, const char* queryString, Oid pkg_o
         ReleaseSysCache(tuple);
     }
 
-    if (!IsInitdb && !u_sess->attr.attr_common.IsInplaceUpgrade && IsPackageSchemaOid(namespaceId)) {
-        ereport(ERROR,
-            (errmodule(MOD_PLSQL), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("Permission denied to create function \"%s\"", funcname),
-                errdetail("Object creation is not supported for %s schema.", get_namespace_name(namespaceId)),
-                errcause("The schema in the package does not support object creation.."),
-                erraction("Please create an object in another schema.")));
-    }
+    CheckCreateFunctionPrivilege(namespaceId, funcname);
     bool anyResult = CheckCreatePrivilegeInNamespace(namespaceId, GetUserId(), CREATE_ANY_FUNCTION);
-    if (namespaceId == PG_PUBLIC_NAMESPACE && !isRelSuperuser()) {
-        ereport(ERROR,
-            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-                errmsg("permission denied to create function \"%s\"", funcname),
-                errhint("must be %s to create a function in public schema.",
-                    g_instance.attr.attr_security.enablePrivilegesSeparate  ? "initial user" : "sysadmin")));
-    }
 
     //@Temp Table. Lock Cluster after determine whether is a temp object,
     // so we can decide if locking other coordinator
@@ -1009,6 +1042,14 @@ void CreateFunction(CreateFunctionStmt* stmt, const char* queryString, Oid pkg_o
     compute_attributes_sql_style((const List*)stmt->options, &as_clause, &language, &isWindowFunc, &volatility,
         &isStrict, &security, &isLeakProof, &proconfig, &procost, &prorows, &fenced, &shippable, &package);
 
+    if (strcasecmp(language, "plsql") == 0) {
+        language = strVal(makeString("plpgsql"));
+        ereport(WARNING, (errcode(ERRCODE_UNEXPECTED_NODE_STATE),
+                          (errmsg("Due to compatibility issues, plsql language has been replaced by plpgsql language. "
+                                  "Do not use plsql language in the future."),
+                           errdetail("N/A."), errcause("Compatibility issues."),
+                           erraction("Use plpgsql to replace the plsql language."))));
+    }
     /* Look up the language and validate permissions */
     languageTuple = SearchSysCache1(LANGNAME, PointerGetDatum(language));
     if (!HeapTupleIsValid(languageTuple))
@@ -1017,7 +1058,9 @@ void CreateFunction(CreateFunctionStmt* stmt, const char* queryString, Oid pkg_o
                                             : 0)));
 
     languageOid = HeapTupleGetOid(languageTuple);
-
+    if (strcasecmp(get_language_name(languageOid), "plpgsql") != 0) {
+        u_sess->plsql_cxt.isCreateFunction = false;
+    }
 #ifdef ENABLE_MULTIPLE_NODES
     if (languageOid == JavalanguageId) {
         /*
@@ -1162,6 +1205,7 @@ void CreateFunction(CreateFunctionStmt* stmt, const char* queryString, Oid pkg_o
         stmt->isPrivate);
     u_sess->plsql_cxt.procedure_start_line = 0;
     u_sess->plsql_cxt.procedure_first_line = 0;
+    u_sess->plsql_cxt.isCreateFunction = false;
     if (u_sess->plsql_cxt.debug_query_string != NULL && !OidIsValid(pkg_oid)) {
         pfree_ext(u_sess->plsql_cxt.debug_query_string);
     }
@@ -1842,9 +1886,22 @@ void AlterFunction(AlterFunctionStmt* stmt)
     DefElem* shippable_item = NULL;
     DefElem* package_item = NULL;
     bool isNull = false;
-    rel = heap_open(ProcedureRelationId, RowExclusiveLock);
 
     funcOid = LookupFuncNameTypeNames(stmt->func->funcname, stmt->func->funcargs, false);
+#ifndef ENABLE_MULTIPLE_NODES
+    char* schemaName = NULL;
+    char* pkgname = NULL;
+    char* procedureName = NULL;
+    DeconstructQualifiedName(stmt->func->funcname, &schemaName, &procedureName, &pkgname);
+    if (schemaName == NULL) {
+        tup = SearchSysCache1(PROCOID, ObjectIdGetDatum(funcOid));
+        procForm = (Form_pg_proc)GETSTRUCT(tup);
+        schemaName = get_namespace_name(procForm->pronamespace);
+        ReleaseSysCache(tup);
+    }
+    LockProcName(schemaName, pkgname, procedureName);
+#endif
+    rel = heap_open(ProcedureRelationId, RowExclusiveLock);
     /* if the function is a builtin function, its Oid is less than 10000.
      * we can't allow alter the builtin functions
      */
@@ -2520,12 +2577,13 @@ Oid AlterFunctionNamespace_oid(Oid procOid, Oid nspOid)
     CheckSetNamespace(oldNspOid, nspOid, ProcedureRelationId, procOid);
 
     /* disallow move objects into public schemas for non-admin user */
-    if (nspOid == PG_PUBLIC_NAMESPACE && !isRelSuperuser()) {
+    if ((nspOid == PG_PUBLIC_NAMESPACE || nspOid == PG_DB4AI_NAMESPACE) && !isRelSuperuser()) {
         ereport(ERROR,
                 (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), 
                  errmsg("permission denied to move objects into public schema"),
-                 errhint("must be %s to move objects into public schema.",
-                         g_instance.attr.attr_security.enablePrivilegesSeparate ? "initial user" : "sysadmin")));
+                 errhint("must be %s to move objects into %s schema.",
+                         g_instance.attr.attr_security.enablePrivilegesSeparate ? "initial user" : "sysadmin",
+                         get_namespace_name(nspOid))));
     }
 
     /* check for duplicate name (more friendly than unique-index failure) */

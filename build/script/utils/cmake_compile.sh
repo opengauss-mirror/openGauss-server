@@ -30,7 +30,7 @@ function read_gaussdb_version()
     echo "${gaussdb_name_for_package}-${version_number}" > version.cfg
     #auto read the number from kernal globals.cpp, no need to change it here
 }
-  
+
 ###################################
 # get version number from globals.cpp
 ##################################
@@ -64,7 +64,7 @@ function get_kernel_commitid()
 {
     export PATH=${BUILD_DIR}:$PATH
     export LD_LIBRARY_PATH=$GAUSSHOME/lib:$LD_LIBRARY_PATH
-    commitid=$(LD_PRELOAD=''  ${BUILD_DIR}/bin/gaussdb -V | awk '{print $5}' | cut -d ")" -f 1)
+    commitid=$(LD_PRELOAD='' ${BUILD_DIR}/bin/gaussdb -V | awk '{print $5}' | cut -d ")" -f 1)
     echo "${commitid}" >>${SCRIPT_DIR}/version.cfg
     echo "End insert commitid into version.cfg" >> "$LOG_FILE" 2>&1
 }
@@ -96,6 +96,7 @@ function make_license_control()
         die "modify '$gaussdb_version_file' failed."
     fi
 }
+
 function make_gaussdb_kernel()
 {
     export BUILD_TUPLE=${PLATFORM_ARCH}
@@ -125,10 +126,9 @@ function make_gaussdb_kernel()
     if [ $? -ne 0 ]; then
         die "make install failed."
     fi
-    
+
     echo "End make install gaussdb server" >> "$LOG_FILE" 2>&1
 }
-
 
 #######################################################################
 ##install gaussdb database contained server,client and libpq
@@ -148,23 +148,20 @@ function install_gaussdb()
         echo "WARNING: do not separate symbol in debug mode!"
     fi
 
-    if [ "$product_mode" != "opengauss" ]; then
-        die "the product mode can only be opengauss!"
+    if [ "$product_mode" != "opengauss" -a "$product_mode" != "lite" ]; then
+        die "the product mode can only be opengauss, lite!"
     fi
 
     echo "build gaussdb kernel." >> "$LOG_FILE" 2>&1
     make_gaussdb_kernel
     echo "build gaussdb kernel success." >> "$LOG_FILE" 2>&1
-    
+
     chmod 444 ${BUILD_DIR}/bin/cluster_guc.conf
     dos2unix ${BUILD_DIR}/bin/cluster_guc.conf > /dev/null 2>&1
 
     #insert the commitid to version.cfg as the upgrade app path specification
     get_kernel_commitid
 }
-
-
-
 
 #######################################################################
 ##install gaussdb database and others

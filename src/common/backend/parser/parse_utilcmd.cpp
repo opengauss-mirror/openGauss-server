@@ -265,6 +265,16 @@ Oid *namespaceid, bool isFirstNode)
      */
     if (stmt->if_not_exists && OidIsValid(existing_relid)) {
         bool exists_ok = true;
+
+        /*
+		 * If we are in an extension script, insist that the pre-existing
+		 * object be a member of the extension, to avoid security risks.
+		 */
+        ObjectAddress address;
+
+        ObjectAddressSet(address, RelationRelationId, existing_relid);
+        checkMembershipInCurrentExtension(&address);
+
         /* 
          * Emit the right error or warning message for a "CREATE" command issued on a exist relation.
          * remote node : should have relation if recieve "IF NOT EXISTS" stmt.
@@ -1605,11 +1615,10 @@ static void transformTableLikeClause(
                                 list_make1(makeString(NameStr(column_settings_rel_data->column_key_name)));
                         def->clientLogicColumnRef->columnEncryptionAlgorithmType = static_cast<EncryptionType>(columns_rel_data->encryption_type);
                         def->clientLogicColumnRef->orig_typname = makeTypeNameFromOid(columns_rel_data->data_type_original_oid,
-                                                columns_rel_data->data_type_original_mod);;
+                                                columns_rel_data->data_type_original_mod);
                         def->clientLogicColumnRef->dest_typname =
                             makeTypeNameFromOid(attribute->atttypid, attribute->atttypmod);
-                        def->typname = makeTypeNameFromOid(columns_rel_data->data_type_original_oid,
-                            columns_rel_data->data_type_original_mod);
+                        def->typname = makeTypeNameFromOid(attribute->atttypid, attribute->atttypmod);
                         ReleaseSysCache(col_tup);
                         ReleaseSysCache(col_setting_tup);
                     }
@@ -3668,7 +3677,6 @@ IndexStmt* transformIndexStmt(Oid relid, IndexStmt* stmt, const char* queryStrin
                     errmsg("cross-bucket index does not support column store")));
         }
     } else {
-        bool isDfsStore = RelationIsDfsStore(rel);
         const bool isPsortMothed = (0 == pg_strcasecmp(stmt->accessMethod, DEFAULT_CSTORE_INDEX_TYPE));
 
         /* check if this is the cstore btree index */
@@ -3715,11 +3723,6 @@ IndexStmt* transformIndexStmt(Oid relid, IndexStmt* stmt, const char* queryStrin
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("access method \"%s\" does not support column store", stmt->accessMethod)));
-        } else if (isColStore && isCGinBtreeMethod && isDfsStore) {
-            /* dfs store does not support cginbtree index currently */
-            ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("access method \"%s\" does not support dfs store", stmt->accessMethod)));
         }
     }
 
@@ -4279,6 +4282,13 @@ List* transformAlterTableStmt(Oid relid, AlterTableStmt* stmt, const char* query
                             (errcode(ERRCODE_INVALID_OPERATION),
                                 errmodule(MOD_OPT),
                                 errmsg("can not add partition against NON-PARTITIONED table")));
+
+                    if (rel->partMap->type != PART_TYPE_RANGE) {
+                        ereport(ERROR,
+                            (errcode(ERRCODE_INVALID_OPERATION),
+                                errmodule(MOD_OPT),
+                                errmsg("Only support add start/end partition on RANGE-PARTITIONED table")));
+                    }
 
                     /* get partition number */
                     partNum = getNumberOfPartitions(rel);

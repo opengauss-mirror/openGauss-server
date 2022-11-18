@@ -73,6 +73,7 @@ extern "C" Datum complex_in(PG_FUNCTION_ARGS);
 extern "C" Datum complex_out(PG_FUNCTION_ARGS);
 extern "C" Datum complex_recv(PG_FUNCTION_ARGS);
 extern "C" Datum complex_send(PG_FUNCTION_ARGS);
+extern "C" Datum query_get_unique_sql_id(PG_FUNCTION_ARGS);
 
 /***************************UDF CREM**************************/
 
@@ -347,6 +348,7 @@ PG_FUNCTION_INFO_V1(complex_in);
 PG_FUNCTION_INFO_V1(complex_out);
 PG_FUNCTION_INFO_V1(complex_recv);
 PG_FUNCTION_INFO_V1(complex_send);
+PG_FUNCTION_INFO_V1(query_get_unique_sql_id);
 
 /*
  * Distance from a point to a path
@@ -2919,3 +2921,35 @@ Datum complex_send(PG_FUNCTION_ARGS)
     pq_sendfloat8(&buf, complex->y);
     PG_RETURN_BYTEA_P(pq_endtypsend(&buf));
 }
+
+extern bool analyze_requires_snapshot(Node* parseTree);
+
+Datum query_get_unique_sql_id(PG_FUNCTION_ARGS)
+{
+    char* query_string = text_to_cstring(PG_GETARG_TEXT_PP(0));
+    List* parsetree_list = pg_parse_query(query_string);
+    List* querytree_list = NIL;
+    bool snapshot_set = false;
+    if (parsetree_list == NIL || list_length(parsetree_list) > 1) {
+        ereport(ERROR,
+            (errcode(ERRCODE_SYNTAX_ERROR), errmsg("only support single statement")));
+    }
+    Node* raw_parse_tree = (Node*)linitial(parsetree_list);
+    if (analyze_requires_snapshot(raw_parse_tree)) {
+        PushActiveSnapshot(GetTransactionSnapshot());
+        snapshot_set = true;
+    }
+    u_sess->unique_sql_cxt.is_top_unique_sql = false;
+    querytree_list = pg_analyze_and_rewrite(raw_parse_tree, query_string, NULL, 0);
+    u_sess->unique_sql_cxt.is_top_unique_sql = true;
+    Query* query = (Query*)linitial(querytree_list);
+    uint64 query_id = query->uniqueSQLId;
+    if (snapshot_set) {
+        PopActiveSnapshot();
+    }
+    list_free_deep(parsetree_list);
+    list_free_deep(querytree_list);
+    pfree_ext(query_string);
+    PG_RETURN_INT64((int64)query_id);
+}
+

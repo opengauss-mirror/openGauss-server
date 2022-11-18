@@ -1220,3 +1220,24 @@ SELECT * FROM
   ON true;
 
 rollback;
+
+-- If we didn't declare the "lateral" keyword before in delete clause with subqueries,
+-- "hasLateralRTEs" in "PlannerInfo" won't be set to true.
+-- And then there will be mistakes in "Assert(root->hasLateralRTEs);".
+-- Modify it to "subqueries in USING can see the result relation only via LATERAL"
+-- can avoid the above mistakes.
+DROP TABLE IF EXISTS int4_tbl;
+CREATE TABLE int4_tbl(f1 int4);
+INSERT INTO int4_tbl(f1) VALUES ('   0  ');
+INSERT INTO int4_tbl(f1) VALUES ('123456     ');
+INSERT INTO int4_tbl(f1) VALUES ('    -123456');
+INSERT INTO int4_tbl(f1) VALUES (' 2147483647');
+INSERT INTO int4_tbl(f1) VALUES ('-2147483647');
+
+create temp table xx1 as select f1 as x1, -f1 as x2 from int4_tbl;
+update xx1 set x2 = f1 from (select * from int4_tbl where f1 = x1) ss;
+update xx1 set x2 = f1 from (select * from int4_tbl where f1 = xx1.x1) ss;
+delete from xx1 using (select * from int4_tbl where f1 = x1) ss;
+delete from xx1 using (select * from int4_tbl where f1 = xx1.x1) ss;
+
+DROP TABLE int4_tbl;

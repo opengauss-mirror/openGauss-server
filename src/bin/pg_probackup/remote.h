@@ -12,14 +12,14 @@
 
 typedef struct RemoteConfig
 {
-	const char* proto;
-	char* host;
-	char* port;
-	char* path;
-	char* libpath;
-	char* user;
-	char *ssh_config;
-	char *ssh_options;
+    const char* proto;
+    char* host;
+    char* port;
+    char* path;
+    char* libpath;
+    char* user;
+    char *ssh_config;
+    char *ssh_options;
 } RemoteConfig;
 
 #endif

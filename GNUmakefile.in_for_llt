@@ -82,23 +82,13 @@ redochecksmall: all
 
 redischeck: all
 
-dfsredischeck: all
-
-orccheckxian: all
-
-orccheckusa: all
-
-orcchecksmall: all
-
-dfscheck: all
-
 obscheck: all
 
 obsorccheck: all
 
 securitycheck: all
 
-check fastcheck fastcheck_inplace fastcheck_parallel_initdb qunitcheck redischeck redocheck redochecksmall orccheckxian orccheckusa orcchecksmall dfscheck obscheck obsorccheck securitycheck dfsredischeck installcheck installcheck-parallel 2pccheck:
+check fastcheck fastcheck_inplace fastcheck_parallel_initdb qunitcheck redischeck redocheck redochecksmall orccheckxian orccheckusa orcchecksmall obscheck obsorccheck securitycheck installcheck installcheck-parallel 2pccheck:
 	$(MAKE) -C src/test/regress $@
 
 #llt include all low level test

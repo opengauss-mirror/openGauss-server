@@ -49,6 +49,7 @@ typedef struct SMgrRelationData {
 
     /* pointer to owning pointer, or NULL if none */
     struct SMgrRelationData** smgr_owner;
+    uint64 xact_seqno;
 
     /*
      * These next three fields are not actually used or manipulated by smgr,
@@ -143,7 +144,6 @@ extern void smgrsetowner(SMgrRelation* owner, SMgrRelation reln);
 extern void smgrclearowner(SMgrRelation* owner, SMgrRelation reln);
 extern void smgrclose(SMgrRelation reln, BlockNumber blockNum = InvalidBlockNumber);
 extern void smgrcloseall(void);
-extern void smgrcleanblocknumall(void);
 extern void smgrclosenode(const RelFileNodeBackend& rnode);
 extern void smgrcreate(SMgrRelation reln, ForkNumber forknum, bool isRedo);
 extern void smgrdounlink(SMgrRelation reln, bool isRedo, BlockNumber blockNum = InvalidBlockNumber);

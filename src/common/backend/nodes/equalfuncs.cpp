@@ -480,6 +480,7 @@ static bool _equalCaseExpr(const CaseExpr* a, const CaseExpr* b)
     COMPARE_NODE_FIELD(args);
     COMPARE_NODE_FIELD(defresult);
     COMPARE_LOCATION_FIELD(location);
+    COMPARE_SCALAR_FIELD(fromDecode);
 
     return true;
 }

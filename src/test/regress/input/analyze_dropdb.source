@@ -1,4 +1,4 @@
-﻿-- drop database after analyze in CN2
+-- drop database after analyze in CN2
 CREATE DATABASE my_db1;
 \c my_db1
 create table tt1(a int);

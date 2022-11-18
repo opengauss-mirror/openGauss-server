@@ -72,16 +72,11 @@ ParallelReorderBufferTXN *ParallelReorderBufferGetOldestTXN(ParallelReorderBuffe
     return txn;
 }
 
-void tuple_to_stringinfo(StringInfo s, TupleDesc tupdesc, HeapTuple tuple, bool skip_nulls)
+void tuple_to_stringinfo(Relation relation, StringInfo s, TupleDesc tupdesc, HeapTuple tuple, bool isOld)
 {
-    if (HEAP_TUPLE_IS_COMPRESSED(tuple->t_data))
+    if ((tuple->tupTableType == HEAP_TUPLE) && (HEAP_TUPLE_IS_COMPRESSED(tuple->t_data) ||
+        (int)HeapTupleHeaderGetNatts(tuple->t_data, tupdesc) > tupdesc->natts)) {
         return;
-
-    Oid oid = 0;
-
-    /* print oid of tuple, it's not included in the TupleDesc */
-    if ((oid = HeapTupleHeaderGetOid(tuple->t_data)) != InvalidOid) {
-        appendStringInfo(s, " oid[oid]:%u", oid);
     }
 
     /* print all columns individually */
@@ -95,7 +90,7 @@ void tuple_to_stringinfo(StringInfo s, TupleDesc tupdesc, HeapTuple tuple, bool 
 
         attr = tupdesc->attrs[natt];
 
-        if (attr->attisdropped || attr->attnum < 0)
+        if (attr->attisdropped || attr->attnum < 0 || (isOld && !IsRelationReplidentKey(relation, attr->attnum)))
             continue;
 
         typid = attr->atttypid;
@@ -105,10 +100,6 @@ void tuple_to_stringinfo(StringInfo s, TupleDesc tupdesc, HeapTuple tuple, bool 
             origval = heap_getattr(tuple, natt + 1, tupdesc, &isnull);
         } else {
             origval = uheap_getattr((UHeapTuple)tuple, natt + 1, tupdesc, &isnull);
-        }
-
-        if (isnull && skip_nulls) {
-            continue;
         }
 
         /* print attribute name */
@@ -226,6 +217,7 @@ void parallel_decode_change_to_text(Relation relation, ParallelReorderBufferChan
     char *schema = get_namespace_name(class_form->relnamespace);
     char *table = NameStr(class_form->relname);
     if (FilterWhiteList(schema, table, slotId, old, data->context)) {
+        logChange->type = LOGICAL_LOG_EMPTY;
         return;
     }
 
@@ -245,7 +237,7 @@ void parallel_decode_change_to_text(Relation relation, ParallelReorderBufferChan
             if (change->data.tp.newtuple == NULL)
                 appendStringInfoString(logChange->out, " (no-tuple-data)");
             else
-                tuple_to_stringinfo(logChange->out, tupdesc, &change->data.tp.newtuple->tuple, false);
+                tuple_to_stringinfo(relation, logChange->out, tupdesc, &change->data.tp.newtuple->tuple, false);
             break;
 
         case PARALLEL_REORDER_BUFFER_CHANGE_UPDATE:
@@ -253,14 +245,14 @@ void parallel_decode_change_to_text(Relation relation, ParallelReorderBufferChan
             appendStringInfoString(logChange->out, " UPDATE:");
             if (change->data.tp.oldtuple != NULL) {
                 appendStringInfoString(logChange->out, " old-key:");
-                tuple_to_stringinfo(logChange->out, tupdesc, &change->data.tp.oldtuple->tuple, true);
+                tuple_to_stringinfo(relation, logChange->out, tupdesc, &change->data.tp.oldtuple->tuple, true);
                 appendStringInfoString(logChange->out, " new-tuple:");
             }
 
             if (change->data.tp.newtuple == NULL)
                 appendStringInfoString(logChange->out, " (no-tuple-data)");
             else
-                tuple_to_stringinfo(logChange->out, tupdesc, &change->data.tp.newtuple->tuple, false);
+                tuple_to_stringinfo(relation, logChange->out, tupdesc, &change->data.tp.newtuple->tuple, false);
             break;
 
         case PARALLEL_REORDER_BUFFER_CHANGE_DELETE:
@@ -272,7 +264,7 @@ void parallel_decode_change_to_text(Relation relation, ParallelReorderBufferChan
                 appendStringInfoString(logChange->out, " (no-tuple-data)");
             /* In DELETE, only the replica identity is present; display that */
             else
-                tuple_to_stringinfo(logChange->out, tupdesc, &change->data.tp.oldtuple->tuple, true);
+                tuple_to_stringinfo(relation, logChange->out, tupdesc, &change->data.tp.oldtuple->tuple, true);
             break;
 
         default:
@@ -288,8 +280,8 @@ void parallel_decode_change_to_text(Relation relation, ParallelReorderBufferChan
     MemoryContextReset(data->context);
 }
 
-static void TupleToJsoninfo(
-    cJSON* cols_name, cJSON* cols_type, cJSON* cols_val, TupleDesc tupdesc, HeapTuple tuple, bool skip_nulls)
+static void TupleToJsoninfo(Relation relation, cJSON* cols_name, cJSON* cols_type, cJSON* cols_val, TupleDesc tupdesc,
+    HeapTuple tuple, bool isOld)
 {
     if ((tuple->tupTableType == HEAP_TUPLE) && (HEAP_TUPLE_IS_COMPRESSED(tuple->t_data) ||
         (int)HeapTupleHeaderGetNatts(tuple->t_data, tupdesc) > tupdesc->natts)) {
@@ -299,7 +291,7 @@ static void TupleToJsoninfo(
     /* print all columns individually */
     for (int natt = 0; natt < tupdesc->natts; natt++) {
         Form_pg_attribute attr = tupdesc->attrs[natt]; /* the attribute itself */
-        if (attr->attisdropped || attr->attnum < 0) {
+        if (attr->attisdropped || attr->attnum < 0 || (isOld && !IsRelationReplidentKey(relation, attr->attnum))) {
             continue;
         }
 
@@ -312,9 +304,6 @@ static void TupleToJsoninfo(
             origval = heap_getattr(tuple, natt + 1, tupdesc, &isnull);
         } else {
             origval = uheap_getattr((UHeapTuple)tuple, natt + 1, tupdesc, &isnull);
-        }
-        if (isnull && skip_nulls) {
-            continue;
         }
 
         /* print attribute name */
@@ -380,6 +369,7 @@ void parallel_decode_change_to_json(Relation relation, ParallelReorderBufferChan
     char *schema = get_namespace_name(class_form->relnamespace);
     char *table = NameStr(class_form->relname);
     if (FilterWhiteList(schema, table, slotId, old, data->context)) {
+        logChange->type = LOGICAL_LOG_EMPTY;
         return;
     }
 
@@ -414,25 +404,29 @@ void parallel_decode_change_to_json(Relation relation, ParallelReorderBufferChan
         case PARALLEL_REORDER_BUFFER_CHANGE_UINSERT:
             opType = cJSON_CreateString("INSERT");
             if (change->data.tp.newtuple != NULL) {
-                TupleToJsoninfo(columnsName, columnsType, columnsVal, tupdesc, &change->data.tp.newtuple->tuple, false);
+                TupleToJsoninfo(relation, columnsName, columnsType, columnsVal, tupdesc,
+                    &change->data.tp.newtuple->tuple, false);
             }
             break;
         case PARALLEL_REORDER_BUFFER_CHANGE_UPDATE:
         case PARALLEL_REORDER_BUFFER_CHANGE_UUPDATE:
             opType = cJSON_CreateString("UPDATE");
             if (change->data.tp.oldtuple != NULL) {
-                TupleToJsoninfo(oldKeysName, oldKeysType, oldKeysVal, tupdesc, &change->data.tp.oldtuple->tuple, true);
+                TupleToJsoninfo(relation, oldKeysName, oldKeysType, oldKeysVal, tupdesc,
+                    &change->data.tp.oldtuple->tuple, true);
             }
 
             if (change->data.tp.newtuple != NULL) {
-                TupleToJsoninfo(columnsName, columnsType, columnsVal, tupdesc, &change->data.tp.newtuple->tuple, false);
+                TupleToJsoninfo(relation, columnsName, columnsType, columnsVal, tupdesc,
+                    &change->data.tp.newtuple->tuple, false);
             }
             break;
         case PARALLEL_REORDER_BUFFER_CHANGE_DELETE:
         case PARALLEL_REORDER_BUFFER_CHANGE_UDELETE:
             opType = cJSON_CreateString("DELETE");
             if (change->data.tp.oldtuple != NULL) {
-                TupleToJsoninfo(oldKeysName, oldKeysType, oldKeysVal, tupdesc, &change->data.tp.oldtuple->tuple, true);
+                TupleToJsoninfo(relation, oldKeysName, oldKeysType, oldKeysVal, tupdesc,
+                    &change->data.tp.oldtuple->tuple, true);
             }
             /* if there was no PK, we only know that a delete happened */
             break;
@@ -485,7 +479,7 @@ static inline bool AppendInvalidations(StringInfo s, TupleDesc tupdesc, HeapTupl
 }
 
 /* decode a tuple into binary style */
-static void AppendTuple(StringInfo s, TupleDesc tupdesc, HeapTuple tuple, bool skipNulls)
+static void AppendTuple(Relation relation, StringInfo s, TupleDesc tupdesc, HeapTuple tuple, bool isOld)
 {
     if (AppendInvalidations(s, tupdesc, tuple)) {
         return;
@@ -495,7 +489,7 @@ static void AppendTuple(StringInfo s, TupleDesc tupdesc, HeapTuple tuple, bool s
     pq_sendint16(s, (uint16)(tupdesc->natts));
     for (int natt = 0; natt < tupdesc->natts; natt++) {
         Form_pg_attribute attr = tupdesc->attrs[natt];
-        if (attr->attisdropped || attr->attnum < 0) {
+        if (attr->attisdropped || attr->attnum < 0 || (isOld && !IsRelationReplidentKey(relation, attr->attnum))) {
             continue;
         }
 
@@ -506,9 +500,6 @@ static void AppendTuple(StringInfo s, TupleDesc tupdesc, HeapTuple tuple, bool s
             origval = heap_getattr(tuple, natt + 1, tupdesc, &isnull);
         } else {
             origval = uheap_getattr((UHeapTuple)tuple, natt + 1, tupdesc, &isnull);
-        }
-        if (isnull && skipNulls) {
-            continue;
         }
         attrNum++;
         const char *columnName = quote_identifier(NameStr(attr->attname));
@@ -553,6 +544,7 @@ void parallel_decode_change_to_bin(Relation relation, ParallelReorderBufferChang
     char *schema = get_namespace_name(class_form->relnamespace);
     char *table = NameStr(class_form->relname);
     if (FilterWhiteList(schema, table, slotId, old, data->context)) {
+        logChange->type = LOGICAL_LOG_EMPTY;
         return;
     }
 
@@ -567,7 +559,7 @@ void parallel_decode_change_to_bin(Relation relation, ParallelReorderBufferChang
             AppendRelation(logChange->out, tupdesc, schema, table);
             if (change->data.tp.newtuple != NULL) {
                 appendStringInfoChar(logChange->out, 'N');
-                AppendTuple(logChange->out, tupdesc, &change->data.tp.newtuple->tuple, false);
+                AppendTuple(relation, logChange->out, tupdesc, &change->data.tp.newtuple->tuple, false);
             }
             break;
 
@@ -578,11 +570,11 @@ void parallel_decode_change_to_bin(Relation relation, ParallelReorderBufferChang
 
             if (change->data.tp.newtuple != NULL) {
                 appendStringInfoChar(logChange->out, 'N');
-                AppendTuple(logChange->out, tupdesc, &change->data.tp.newtuple->tuple, false);
+                AppendTuple(relation, logChange->out, tupdesc, &change->data.tp.newtuple->tuple, false);
             }
             if (change->data.tp.oldtuple != NULL) {
                 appendStringInfoChar(logChange->out, 'O');
-                AppendTuple(logChange->out, tupdesc, &change->data.tp.oldtuple->tuple, true);
+                AppendTuple(relation, logChange->out, tupdesc, &change->data.tp.oldtuple->tuple, true);
             }
             break;
 
@@ -593,7 +585,7 @@ void parallel_decode_change_to_bin(Relation relation, ParallelReorderBufferChang
             /* if there was no PK, we only know that a delete happened */
             if (change->data.tp.oldtuple != NULL) {
                 appendStringInfoChar(logChange->out, 'O');
-                AppendTuple(logChange->out, tupdesc, &change->data.tp.oldtuple->tuple, true);
+                AppendTuple(relation, logChange->out, tupdesc, &change->data.tp.oldtuple->tuple, true);
             }
             break;
 
@@ -629,8 +621,8 @@ logicalLog* GetLogicalLog(ParallelDecodeWorker *worker)
                 worker->freeGetLogicalLogHead = head->freeNext;
             } else {
                 (void)pg_atomic_add_fetch_u32(&g_Logicaldispatcher[slotId].curLogNum, 1);
-                oldCtx = MemoryContextSwitchTo(g_instance.comm_cxt.pdecode_cxt[slotId].parallelDecodeCtx);
-                logChange = (logicalLog *)palloc(sizeof(logicalLog));
+                oldCtx = MemoryContextSwitchTo(g_instance.comm_cxt.pdecode_cxt[slotId].logicalLogCtx);
+                logChange = (logicalLog *)palloc0(sizeof(logicalLog));
                 logChange->out = NULL;
                 logChange->freeNext = NULL;
                 MemoryContextSwitchTo(oldCtx);
@@ -639,57 +631,88 @@ logicalLog* GetLogicalLog(ParallelDecodeWorker *worker)
     } while (logChange == NULL);
 
     logChange->type = LOGICAL_LOG_EMPTY;
-
-    if (logChange->out) {
+    logChange->toast_hash = NULL;
+    logChange->nsubxacts = 0;
+    logChange->subXids = NULL;
+    if (logChange->out != NULL && logChange->out->data != NULL) {
         resetStringInfo(logChange->out);
+    } else if (logChange->out != NULL && logChange->out->data == NULL) {
+        oldCtx = MemoryContextSwitchTo(g_instance.comm_cxt.pdecode_cxt[slotId].logicalLogCtx);
+        initStringInfo(logChange->out);
+        MemoryContextSwitchTo(oldCtx);
     } else {
-        oldCtx = MemoryContextSwitchTo(g_instance.comm_cxt.pdecode_cxt[slotId].parallelDecodeCtx);
+        oldCtx = MemoryContextSwitchTo(g_instance.comm_cxt.pdecode_cxt[slotId].logicalLogCtx);
         logChange->out = makeStringInfo();
         MemoryContextSwitchTo(oldCtx);
     }
     return logChange;
 }
 
+static bool IsLogicalLogStored(logicalLog *logChange)
+{
+    bool res = false;
+    switch (logChange->type) {
+        case LOGICAL_LOG_DML:
+        case LOGICAL_LOG_NEW_CID:
+        case LOGICAL_LOG_MISSING_CHUNK:
+            res = true;
+            break;
+        default:
+            break;
+    }
+    return res;
+}
+
 /*
  * Set logical log to cache.
  */
-void FreeLogicalLog(logicalLog *logChange, int slotId)
+void FreeLogicalLog(ParallelReorderBuffer *rb, logicalLog *logChange, int slotId, bool nocache)
 {
-    logicalLog *oldHead =
-        (logicalLog *)pg_atomic_read_uintptr((uintptr_t *)&g_Logicaldispatcher[slotId].freeLogicalLogHead);
+    if (logChange->toast_hash != NULL) {
+        ParallelReorderBufferToastReset(&logChange->toast_hash, slotId);
+    }
+
+    if (logChange->nsubxacts != 0 && logChange->subXids != NULL) {
+        pfree_ext(logChange->subXids);
+        logChange->nsubxacts = 0;
+    }
+    /* a half of GB */
+    const uint32 halfGB = 1024L * 1024L * 1024L / 2;
     uint32 curLogNum = g_Logicaldispatcher[slotId].curLogNum;
 
     /* If the palloced memory exceeds the threshold, we just free it instead of cache it. */
-    if (curLogNum >= max_decode_cache_num) {
-        if (logChange->out != NULL && logChange->out->data != NULL) {
-            FreeStringInfo(logChange->out);
+    if (curLogNum >= max_decode_cache_num || nocache ||
+        (g_Logicaldispatcher[slotId].pOptions.max_reorderbuffer_in_memory > 0 &&
+        rb->size >= (Size)g_Logicaldispatcher[slotId].pOptions.max_reorderbuffer_in_memory * halfGB)) {
+        if (IsLogicalLogStored(logChange)) {
+            ParallelReorderBufferUpdateMemory(rb, logChange, slotId, false);
+        }
+        if (logChange->out != NULL) {
+            DestroyStringInfo(logChange->out);
         }
         pfree(logChange);
         (void)pg_atomic_sub_fetch_u32(&g_Logicaldispatcher[slotId].curLogNum, 1);
         return;
     }
+    logicalLog *oldHead = NULL;
     do {
+        oldHead =
+            (logicalLog *)pg_atomic_read_uintptr((uintptr_t *)&g_Logicaldispatcher[slotId].freeLogicalLogHead);
         if (logChange->out != NULL) {
-            resetStringInfo(logChange->out);
-            errno_t rc = memset_s(logChange->out->data, logChange->out->maxlen, 0, logChange->out->maxlen);
-            securec_check(rc, "\0", "\0");
+            if (IsLogicalLogStored(logChange)) {
+                ParallelReorderBufferUpdateMemory(rb, logChange, slotId, false);
+            }
+            int curSize = logChange->out->maxlen;
+            const int initSize = 1024;
+            if (curSize > initSize) {
+                FreeStringInfo(logChange->out);
+                logChange->out->maxlen = 0;
+            }
         }
+        logChange->type = LOGICAL_LOG_EMPTY;
         logChange->freeNext = oldHead;
-
     } while (!pg_atomic_compare_exchange_uintptr((uintptr_t *)&(g_Logicaldispatcher[slotId].freeLogicalLogHead),
         (uintptr_t *)&oldHead, (uintptr_t)logChange));
-}
-
-/*
- * The parser thread polls and puts tuples into the decoder queue in LSN order.
- * When there is a log that does not need to be parsed, the empty logical log should
- * also be inserted into the queue to ensure that the order is preserved when the slicer
- * polls to obtain the logical log.
- */
-void setVoidLogicalLog2queue(ParallelDecodeWorker *worker)
-{
-    logicalLog *logChange = GetLogicalLog(worker);
-    LogicalQueuePut(worker->LogicalLogQueue, logChange);
 }
 
 Snapshot GetLocalSnapshot(MemoryContext ctx)
@@ -717,13 +740,12 @@ Snapshot GetLocalSnapshot(MemoryContext ctx)
 }
 
 /*
- * decode insert,update,delete record to logical log.
- * put logical log to queue and waiting for walsender thread send it.
+ * Decode insert,update,delete record to logical log.
+ * Put logical log to queue and waiting for walsender thread send it.
  */
-void setIUDToLogicalQueue(ParallelReorderBufferChange* change, ParallelLogicalDecodingContext* ctx,
+logicalLog* getIUDLogicalLog(ParallelReorderBufferChange* change, ParallelLogicalDecodingContext* ctx,
     ParallelDecodeWorker *worker)
 {
-    Oid reloid = InvalidOid;
     Oid partitionReltoastrelid = InvalidOid;
     Relation relation = NULL;
     int slotId = worker->slotId;
@@ -733,19 +755,22 @@ void setIUDToLogicalQueue(ParallelReorderBufferChange* change, ParallelLogicalDe
     }
     u_sess->utils_cxt.HistoricSnapshot->snapshotcsn = change->data.tp.snapshotcsn;
     bool isSegment = IsSegmentFileNode(change->data.tp.relnode);
-    reloid = RelidByRelfilenode(change->data.tp.relnode.spcNode, change->data.tp.relnode.relNode, isSegment);
-    if (reloid == InvalidOid) {
-        reloid = PartitionRelidByRelfilenode(change->data.tp.relnode.spcNode,
-            change->data.tp.relnode.relNode, partitionReltoastrelid, NULL, isSegment);
+    Oid reloid = HeapGetRelid(change->data.tp.relnode.spcNode, change->data.tp.relnode.relNode,
+        partitionReltoastrelid, NULL, isSegment);
+    logicalLog* logChange = NULL;
+
+    if (change->missingChunk) {
+        logChange = GetLogicalLog(worker);
+        logChange->type = LOGICAL_LOG_MISSING_CHUNK;
+        logChange->xid = change->xid;
+        logChange->lsn = change->lsn;
+        return logChange;
     }
     /*
      * Catalog tuple without data, emitted while catalog was
      * in the process of being rewritten.
      */
-    if (change->data.tp.newtuple == NULL && change->data.tp.oldtuple == NULL) {
-        setVoidLogicalLog2queue(worker);
-        return;
-    } else if (reloid == InvalidOid) {
+    if (reloid == InvalidOid) {
         /*
          * description:
          * When we try to decode a table who is already dropped.
@@ -754,29 +779,29 @@ void setIUDToLogicalQueue(ParallelReorderBufferChange* change, ParallelLogicalDe
          * that the logical logs obtained by the walsender are in order.
          */
         ereport(DEBUG1, (errmsg("could not lookup relation %s", relpathperm(change->data.tp.relnode, MAIN_FORKNUM))));
-        setVoidLogicalLog2queue(worker);
-        return;
+        logChange = GetLogicalLog(worker);
+        return logChange;
     }
     /*
      * Do not decode private tables, otherwise there will be security problems.
      */
     if (is_role_independent(FindRoleid(reloid))) {
-        setVoidLogicalLog2queue(worker);
-        return;
+        logChange = GetLogicalLog(worker);
+        return logChange;
     }
 
     relation = RelationIdGetRelation(reloid);
     if (relation == NULL) {
         ereport(DEBUG1, (errmsg("could open relation descriptor %s",
             relpathperm(change->data.tp.relnode, MAIN_FORKNUM))));
-        setVoidLogicalLog2queue(worker);
-        return;
+        logChange = GetLogicalLog(worker);
+        return logChange;
     }
 
     if (CSTORE_NAMESPACE == get_rel_namespace(RelationGetRelid(relation))) {
-        setVoidLogicalLog2queue(worker);
         RelationClose(relation);
-        return;
+        logChange = GetLogicalLog(worker);
+        return logChange;
     }
 
     if (RelationIsLogicallyLogged(relation)) {
@@ -789,21 +814,22 @@ void setIUDToLogicalQueue(ParallelReorderBufferChange* change, ParallelLogicalDe
          
         if (relation->rd_rel->relkind == RELKIND_SEQUENCE) {
         } else if (!IsToastRelation(relation)) { /* user-triggered change */
-            logicalLog *logChange = GetLogicalLog(worker);
+            logChange = GetLogicalLog(worker);
             g_Logicaldispatcher[slotId].pOptions.decode_change(relation, change, logChange, ctx, slotId);
-            LogicalQueuePut(worker->LogicalLogQueue, logChange);
             RelationClose(relation);
-            return;
+            return logChange;
         }
     }
-    setVoidLogicalLog2queue(worker);
+
     RelationClose(relation);
+    logChange = GetLogicalLog(worker);
+    return logChange;
 }
 
 /*
- * decode commit or abort change.
+ * Decode commit or abort change.
  */
-static void ParallelDecodeCommitOrAbort(ParallelReorderBufferChange* change, ParallelDecodeWorker *worker,
+static logicalLog* ParallelDecodeCommitOrAbort(ParallelReorderBufferChange* change, ParallelDecodeWorker *worker,
     LogicalLogType logType)
 {
     logicalLog *logChange = GetLogicalLog(worker);
@@ -817,49 +843,78 @@ static void ParallelDecodeCommitOrAbort(ParallelReorderBufferChange* change, Par
     logChange->commitTime = change->commitTime;
     int slotId = worker->slotId;
     Size subXidSize = sizeof(TransactionId) * change->nsubxacts;
-    if (subXidSize > 0) {
-        MemoryContext oldCtx = MemoryContextSwitchTo(g_instance.comm_cxt.pdecode_cxt[slotId].parallelDecodeCtx);
+    if (subXidSize > 0 && change->subXids != NULL) {
+        MemoryContext oldCtx = MemoryContextSwitchTo(g_instance.comm_cxt.pdecode_cxt[slotId].logicalLogCtx);
         logChange->subXids = (TransactionId *)palloc0(subXidSize);
         MemoryContextSwitchTo(oldCtx);
         errno_t rc = memcpy_s(logChange->subXids, subXidSize, change->subXids, subXidSize);
         securec_check(rc, "", "");
+        pfree(change->subXids);
+        change->subXids = NULL;
     }
-    LogicalQueuePut(worker->LogicalLogQueue, logChange);
+
+    return logChange;
 }
 
 /*
- * decode change tuple, put it into logical queue.
+ * Decode subtransactions assigment.
  */
-void ParallelDecodeChange(ParallelReorderBufferChange* change, ParallelLogicalDecodingContext* ctx,
+logicalLog *ParallelDecodeAssignment(ParallelReorderBufferChange* change, ParallelDecodeWorker *worker)
+{
+    logicalLog *logChange = GetLogicalLog(worker);
+    logChange->xid = change->xid;
+    logChange->lsn = change->lsn;
+    logChange->nsubxacts = change->nsubxacts;
+    logChange->type = LOGICAL_LOG_ASSIGNMENT;
+    int slotId = worker->slotId;
+    if (change->nsubxacts > 0 && change->subXids != NULL) {
+        Size subXidSize = sizeof(TransactionId) * INT2SIZET(change->nsubxacts);
+        logChange->subXids = (TransactionId *)MemoryContextAllocZero(
+            g_instance.comm_cxt.pdecode_cxt[slotId].logicalLogCtx, subXidSize);
+        errno_t rc = memcpy_s(logChange->subXids, subXidSize, change->subXids, subXidSize);
+        securec_check(rc, "", "");
+        pfree_ext(change->subXids);
+    }
+    return logChange;
+}
+
+/*
+ * Decode change tuple, put it into logical queue.
+ */
+logicalLog* ParallelDecodeChange(ParallelReorderBufferChange* change, ParallelLogicalDecodingContext* ctx,
     ParallelDecodeWorker *worker)
 {
     u_sess->attr.attr_common.extra_float_digits = LOGICAL_DECODE_EXTRA_FLOAT_DIGITS;
+    logicalLog* logChange = NULL;
     switch (change->action) {
         case PARALLEL_REORDER_BUFFER_INVALIDATIONS_MESSAGE: {
             for (int i = 0; i < change->ninvalidations; i++) {
                 LocalExecuteThreadAndSessionInvalidationMessage(&change->invalidations[i]);
             }
+            if (change->ninvalidations > 0) {
+                pfree(change->invalidations);
+                change->invalidations = NULL;
+            }
             break;
         }
 
         case PARALLEL_REORDER_BUFFER_CHANGE_COMMIT: {
-            ParallelDecodeCommitOrAbort(change, worker, LOGICAL_LOG_COMMIT);
+            logChange = ParallelDecodeCommitOrAbort(change, worker, LOGICAL_LOG_COMMIT);
             break;
         }
 
         case PARALLEL_REORDER_BUFFER_CHANGE_ABORT: {
-            ParallelDecodeCommitOrAbort(change, worker, LOGICAL_LOG_ABORT);
+            logChange = ParallelDecodeCommitOrAbort(change, worker, LOGICAL_LOG_ABORT);
             break;
         }
 
         case PARALLEL_REORDER_BUFFER_CHANGE_RUNNING_XACT: {
-            logicalLog *logChange = GetLogicalLog(worker);
+            logChange = GetLogicalLog(worker);
             logChange->lsn = change->lsn;
             logChange->xid = change->xid;
             logChange->oldestXmin = change->oldestXmin;
             logChange->type = LOGICAL_LOG_RUNNING_XACTS;
             logChange->csn = change->csn;
-            LogicalQueuePut(worker->LogicalLogQueue, logChange);
             break;
         }
 
@@ -869,30 +924,35 @@ void ParallelDecodeChange(ParallelReorderBufferChange* change, ParallelLogicalDe
         case PARALLEL_REORDER_BUFFER_CHANGE_UINSERT:
         case PARALLEL_REORDER_BUFFER_CHANGE_UUPDATE:
         case PARALLEL_REORDER_BUFFER_CHANGE_UDELETE: {
-            setIUDToLogicalQueue(change, ctx, worker);
+            logChange = getIUDLogicalLog(change, ctx, worker);
             break;
         }
 
         case PARALLEL_REORDER_BUFFER_CHANGE_CONFIRM_FLUSH: {
-            logicalLog *logChange = GetLogicalLog(worker);
+            logChange = GetLogicalLog(worker);
             logChange->lsn = change->lsn;
             logChange->type = LOGICAL_LOG_CONFIRM_FLUSH;
-            LogicalQueuePut(worker->LogicalLogQueue, logChange);
             break;
         }
         case PARALLEL_REORDER_BUFFER_NEW_CID: {
-            logicalLog *logChange = GetLogicalLog(worker);
+            logChange = GetLogicalLog(worker);
             logChange->xid = change->xid;
+            logChange->lsn = change->lsn;
             logChange->type = LOGICAL_LOG_NEW_CID;
-            LogicalQueuePut(worker->LogicalLogQueue, logChange);
+            break;
+        }
+        case PARALLEL_REORDER_BUFFER_ASSIGNMENT: {
+            logChange = ParallelDecodeAssignment(change, worker);
             break;
         }
     }
+    return logChange;
 }
 
 ParallelStatusData *GetParallelDecodeStatus(uint32 *num)
 {
     const uint32 slotNum = 20;
+    const uint32 upperPart = 32;
     ParallelStatusData *result = (ParallelStatusData *)palloc0(slotNum * sizeof(ParallelStatusData));
     uint32 id = 0;
     for (uint32 i = 0; i < slotNum; i++) {
@@ -907,18 +967,45 @@ ParallelStatusData *GetParallelDecodeStatus(uint32 *num)
         StringInfoData decodeQueueLen;
         initStringInfo(&readQueueLen);
         initStringInfo(&decodeQueueLen);
+        bool escape = false;
+        knl_g_parallel_decode_context *pDecodeCxt = &g_instance.comm_cxt.pdecode_cxt[i];
+
+        if (!g_Logicaldispatcher[i].active || g_Logicaldispatcher[i].abnormal) {
+            continue;
+        }
         for (int j = 0; j < result[id].parallelDecodeNum; j++) {
+            SpinLockAcquire(&pDecodeCxt->destroy_lock);
             ParallelDecodeWorker *worker = g_Logicaldispatcher[i].decodeWorkers[j];
+            if (!g_Logicaldispatcher[i].active || g_Logicaldispatcher[i].abnormal || worker == NULL) {
+                escape = true;
+                SpinLockRelease(&pDecodeCxt->destroy_lock);
+                break;
+            }
             LogicalQueue *readQueue = worker->changeQueue;
+            if (!g_Logicaldispatcher[i].active || g_Logicaldispatcher[i].abnormal || readQueue == NULL) {
+                escape = true;
+                SpinLockRelease(&pDecodeCxt->destroy_lock);
+                break;
+            }
+            uint32 rmask = readQueue->mask;
             uint32 readHead = pg_atomic_read_u32(&readQueue->writeHead);
             uint32 readTail = pg_atomic_read_u32(&readQueue->readTail);
-            uint32 readCnt = COUNT(readHead, readTail, readQueue->mask);
+            uint32 readCnt = COUNT(readHead, readTail, rmask);
+            SpinLockRelease(&pDecodeCxt->destroy_lock);
             appendStringInfo(&readQueueLen, "queue%d: %u", j, readCnt);
 
+            SpinLockAcquire(&pDecodeCxt->destroy_lock);
             LogicalQueue *decodeQueue = worker->LogicalLogQueue;
+            if (!g_Logicaldispatcher[i].active || g_Logicaldispatcher[i].abnormal || decodeQueue == NULL) {
+                escape = true;
+                SpinLockRelease(&pDecodeCxt->destroy_lock);
+                break;
+            }
+            uint32 dmask = decodeQueue->mask;
             uint32 decodeHead = pg_atomic_read_u32(&decodeQueue->writeHead);
             uint32 decodeTail = pg_atomic_read_u32(&decodeQueue->readTail);
-            uint32 decodeCnt = COUNT(decodeHead, decodeTail, decodeQueue->mask);
+            uint32 decodeCnt = COUNT(decodeHead, decodeTail, dmask);
+            SpinLockRelease(&pDecodeCxt->destroy_lock);
             appendStringInfo(&decodeQueueLen, "queue%d: %u", j, decodeCnt);
 
             if (j < result[id].parallelDecodeNum - 1) {
@@ -926,12 +1013,23 @@ ParallelStatusData *GetParallelDecodeStatus(uint32 *num)
                 appendStringInfoString(&decodeQueueLen, ", ");
             }
         }
+        if (escape) {
+            FreeStringInfo(&readQueueLen);
+            FreeStringInfo(&decodeQueueLen);
+            continue;
+        }
         rc = memcpy_s(result[id].readQueueLen, QUEUE_RESULT_LEN, readQueueLen.data, readQueueLen.len);
         securec_check(rc, "", "");
         rc = memcpy_s(result[id].decodeQueueLen, QUEUE_RESULT_LEN, decodeQueueLen.data, decodeQueueLen.len);
         securec_check(rc, "", "");
         FreeStringInfo(&readQueueLen);
         FreeStringInfo(&decodeQueueLen);
+
+        rc =  snprintf_s(result[id].readerLsn, MAXFNAMELEN, MAXFNAMELEN - 1, "%X/%X",
+            (uint32)(g_Logicaldispatcher[i].sentPtr >> upperPart), (uint32)g_Logicaldispatcher[i].sentPtr);
+        securec_check_ss(rc, "\0", "\0");
+        result[id].workingTxnCnt = g_Logicaldispatcher[i].workingTxnCnt;
+        result[id].workingTxnMemory = g_Logicaldispatcher[i].workingTxnMemory;
         id++;
     }
     *num = id;

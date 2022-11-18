@@ -802,6 +802,9 @@ void ExecRefreshMatViewInc(RefreshMatViewStmt *stmt, const char *queryString,
     QueryDesc* queryDesc = NULL;
     bool isTimeNULL = false;
     Datum curtime;
+    Oid save_userid;
+    int save_sec_context;
+    int save_nestlevel;
 
     /* Get current timestamp */
     curtime = DirectFunctionCall1(timestamptz_timestamp, GetCurrentTimestamp());
@@ -822,6 +825,15 @@ void ExecRefreshMatViewInc(RefreshMatViewStmt *stmt, const char *queryString,
     }
 
     matviewRel = heap_open(matviewOid, ExclusiveLock);
+
+    /*
+     * Switch to the owner's userid, so that any functions are run as that
+     * user.  Also lock down security-restricted operations and arrange to
+     * make GUC variable changes local to this command.
+     */
+    GetUserIdAndSecContext(&save_userid, &save_sec_context);
+    SetUserIdAndSecContext(matviewRel->rd_rel->relowner, save_sec_context | SECURITY_RESTRICTED_OPERATION);
+    save_nestlevel = NewGUCNestLevel();
 
     /* Make sure it is a materialized view. */
     if (matviewRel->rd_rel->relkind != RELKIND_MATVIEW) {
@@ -880,6 +892,12 @@ void ExecRefreshMatViewInc(RefreshMatViewStmt *stmt, const char *queryString,
 
     heap_close(matviewRel, NoLock);
 
+    /* Roll back any GUC changes */
+    AtEOXact_GUC(false, save_nestlevel);
+
+    /* Restore userid and security context */
+    SetUserIdAndSecContext(save_userid, save_sec_context);
+
     return;
 }
 
@@ -898,6 +916,9 @@ void ExecRefreshIncMatViewAll(RefreshMatViewStmt *stmt, const char *queryString,
     PlannedStmt* plan = NULL;
     QueryDesc* queryDesc = NULL;
     Datum curtime;
+    Oid save_userid;
+    int save_sec_context;
+    int save_nestlevel;
 
     /* Get current timestamp */
     curtime = DirectFunctionCall1(timestamptz_timestamp, GetCurrentTimestamp());
@@ -911,6 +932,15 @@ void ExecRefreshIncMatViewAll(RefreshMatViewStmt *stmt, const char *queryString,
                                            RangeVarCallbackOwnsTable, NULL);
     mapid = DatumGetObjectId(get_matview_mapid(matviewOid));
     matviewRel = heap_open(matviewOid, AccessExclusiveLock);
+
+    /*
+     * Switch to the owner's userid, so that any functions are run as that
+     * user.  Also lock down security-restricted operations and arrange to
+     * make GUC variable changes local to this command.
+     */
+    GetUserIdAndSecContext(&save_userid, &save_sec_context);
+    SetUserIdAndSecContext(matviewRel->rd_rel->relowner, save_sec_context | SECURITY_RESTRICTED_OPERATION);
+    save_nestlevel = NewGUCNestLevel();
 
     /* Make sure it is a materialized view. */
     if (matviewRel->rd_rel->relkind != RELKIND_MATVIEW) {
@@ -975,6 +1005,12 @@ void ExecRefreshIncMatViewAll(RefreshMatViewStmt *stmt, const char *queryString,
 
     heap_close(matviewRel, NoLock);
 
+    /* Roll back any GUC changes */
+    AtEOXact_GUC(false, save_nestlevel);
+
+    /* Restore userid and security context */
+    SetUserIdAndSecContext(save_userid, save_sec_context);
+
     return;
 }
 
@@ -990,6 +1026,9 @@ void ExecRefreshCtasMatViewAll(RefreshMatViewStmt *stmt, const char *queryString
     Oid OIDNewHeap;
     DestReceiver *dest = NULL;
     Datum curtime;
+    Oid save_userid;
+    int save_sec_context;
+    int save_nestlevel;
 
     curtime = DirectFunctionCall1(timestamptz_timestamp, GetCurrentTimestamp());
 
@@ -1000,6 +1039,15 @@ void ExecRefreshCtasMatViewAll(RefreshMatViewStmt *stmt, const char *queryString
                                           AccessExclusiveLock, false, false, false, false,
                                           RangeVarCallbackOwnsTable, NULL);
     matviewRel = heap_open(matviewOid, NoLock);
+
+    /*
+     * Switch to the owner's userid, so that any functions are run as that
+     * user.  Also lock down security-restricted operations and arrange to
+     * make GUC variable changes local to this command.
+     */
+    GetUserIdAndSecContext(&save_userid, &save_sec_context);
+    SetUserIdAndSecContext(matviewRel->rd_rel->relowner, save_sec_context | SECURITY_RESTRICTED_OPERATION);
+    save_nestlevel = NewGUCNestLevel();
 
     /* Make sure it is a materialized view. */
     if (matviewRel->rd_rel->relkind != RELKIND_MATVIEW) {
@@ -1087,6 +1135,12 @@ void ExecRefreshCtasMatViewAll(RefreshMatViewStmt *stmt, const char *queryString
     finish_heap_swap(matviewOid, OIDNewHeap, false, false, true, u_sess->utils_cxt.RecentXmin, GetOldestMultiXactId());
 
     RelationCacheInvalidateEntry(matviewOid);
+
+    /* Roll back any GUC changes */
+    AtEOXact_GUC(false, save_nestlevel);
+
+    /* Restore userid and security context */
+    SetUserIdAndSecContext(save_userid, save_sec_context);
 }
 
 bool isIncMatView(RangeVar *rv)

@@ -138,13 +138,6 @@ PlannedStmt* pgxc_planner(Query* query, int cursorOptions, ParamListInfo boundPa
         set_stream_off();
     }
 
-    if (u_sess->SPI_cxt._connected >= 0) {
-        errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
-            NOTPLANSHIPPING_LENGTH,
-            "queries in procedure and function do not support stream.");
-        securec_check_ss_c(sprintf_rc, "\0", "\0");
-        set_stream_off();
-    }
 #endif
     /*
      * we will create plan with stream first, and if it is not support stream,
@@ -443,14 +436,12 @@ void pgxc_handle_unsupported_stmts(Query* query)
 bool contains_temp_tables(List* rtable)
 {
     ListCell* item = NULL;
-    char rel_persistence;
 
     foreach (item, rtable) {
         RangeTblEntry* rte = (RangeTblEntry*)lfirst(item);
 
         if (rte->rtekind == RTE_RELATION) {
-            rel_persistence = get_rel_persistence(rte->relid);
-            if (rel_persistence == RELPERSISTENCE_TEMP || rel_persistence == RELPERSISTENCE_GLOBAL_TEMP)
+            if (IsTempTable(rte->relid, true))
                 return true;
         } else if (rte->rtekind == RTE_SUBQUERY && contains_temp_tables(rte->subquery->rtable))
             return true;

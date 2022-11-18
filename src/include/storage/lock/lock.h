@@ -479,12 +479,6 @@ typedef struct LOCALLOCK {
 
 #define LOCALLOCK_LOCKMETHOD(llock) ((llock).tag.lock.locktag_lockmethodid)
 
-typedef struct GlobalSessionId {
-    uint64 sessionId;  /* Increasing sequence num */
-    uint32 nodeId;     /* the number of the send node */
-    /* Used to identify the latest global sessionid during pooler reuse */
-    uint64 seq;
-} GlobalSessionId;
 /*
  * These structures hold information passed from lmgr internals to the lock
  * listing user-level functions (in lockfuncs.c).

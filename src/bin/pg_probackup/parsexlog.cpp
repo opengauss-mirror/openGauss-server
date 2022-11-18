@@ -49,11 +49,11 @@ static const char *RmgrNames[RM_MAX_ID + 1] = {
  * field. We use 3 for the opcode, and one about an optional flag variable.
  */
 #define XLOG_XACT_COMMIT    0x00
-/* only keep same with the kernel  #define XLOG_XACT_PREPARE			0x10  is not used in the pg_probackup*/
+/* only keep same with the kernel  #define XLOG_XACT_PREPARE        0x10  is not used in the pg_probackup */
 #define XLOG_XACT_ABORT     0x20
 #define XLOG_XACT_COMMIT_PREPARED       0x30
 #define XLOG_XACT_ABORT_PREPARED        0x40
-/* only keep same with the kernel #define XLOG_XACT_ASSIGNMENT		0x50  is not used in the pg_probackup*/
+/* only keep same with the kernel #define XLOG_XACT_ASSIGNMENT      0x50  is not used in the pg_probackup */
 /* free opcode 0x60 */
 #define XLOG_XACT_ABORT_WITH_XID        0x70
 

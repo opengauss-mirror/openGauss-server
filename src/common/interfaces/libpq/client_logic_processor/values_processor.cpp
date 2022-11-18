@@ -138,6 +138,10 @@ static bool process_inside_value(const StatementData *statement_data, RawValue *
     rc = memset_s(err_msg, MAX_ERRMSG_LENGTH, 0, MAX_ERRMSG_LENGTH);
     securec_check_c(rc, "\0", "\0");
     if (!raw_value->process(cached_column, err_msg)) {
+        if (statement_data->conn->errorMessage.len != 0) {
+            return false;
+        }
+
         if (strlen(err_msg) == 0) {
             printfPQExpBuffer(&statement_data->conn->errorMessage,
                 libpq_gettext("ERROR(CLIENT): failed to process data of processed column\n"));
@@ -383,7 +387,6 @@ DecryptDataRes ValuesProcessor::deprocess_value(PGconn *conn, const unsigned cha
          * if the size is smaller the size of Oid, so setting oid is not there
          * and this is an error
          */
-        fprintf(stderr, "ERROR(CLIENT): wrong value for processed column\n");
         if (format == 0) {
             libpq_free(unescaped_processed_data);
         }

@@ -50,6 +50,7 @@ typedef struct {
     }
 } UndoRecordHeader;
 
+#define MAX_UNDORECORD_DUMPSIZE 1048576
 #define SIZE_OF_UNDO_RECORD_HEADER (offsetof(UndoRecordHeader, uinfo) + sizeof(uint8)) // 22
 
 /*
@@ -230,10 +231,21 @@ public:
     {
         return needInsert_;
     }
-
+    inline bool IsCopy()
+    {
+        return isCopy_;
+    }
     inline UndoRecPtr Prevurp2()
     {
         return wtxn_.prevurp;
+    }
+    inline MemoryContext mem_context()
+    {
+        return mem_context_;
+    }
+    inline UndoRecordSize PayLoadLen()
+    {
+        return wpay_.payloadlen;
     }
 
     // Setter
@@ -306,6 +318,18 @@ public:
     {
         needInsert_ = needInsert;
     }
+    inline void SetCopy(bool isCopy)
+    {
+        isCopy_ = isCopy;
+    }
+    inline void SetMemoryContext(MemoryContext mem_cxt)
+    {
+        mem_context_ = mem_cxt;
+    }
+    inline void SetPayLoadLen(UndoRecordSize len)
+    {
+        wpay_.payloadlen = len;
+    }
 
 private:
     int index_;
@@ -323,6 +347,8 @@ private:
     int bufidx_;
 
     bool needInsert_;
+    bool isCopy_;
+    MemoryContext mem_context_;
 }; // class UndoRecord
 
 inline bool UndoRecord::ContainSubXact()
@@ -362,12 +388,15 @@ typedef bool (*SatisfyUndoRecordCallback)(_in_ UndoRecord *urec, _in_ BlockNumbe
  * Returns the UNDO_RET_SUCC if found, otherwise, return UNDO_RET_FAIL.
  */
 UndoTraversalState FetchUndoRecord(__inout UndoRecord *urec, _in_ SatisfyUndoRecordCallback callback,
-    _in_ BlockNumber blkno, _in_ OffsetNumber offset, _in_ TransactionId xid, bool isNeedByPass = false);
+    _in_ BlockNumber blkno, _in_ OffsetNumber offset, _in_ TransactionId xid, bool isNeedByPass,
+    TransactionId *lastXid);
 
 /*
  * Example: satisfied callback function.
  */
 bool InplaceSatisfyUndoRecord(_in_ UndoRecord *urec, _in_ BlockNumber blkno, _in_ OffsetNumber offset,
     _in_ TransactionId xid);
+
+void PrevDumpUndoRecord(UndoRecord *urec);
 
 #endif // __KNL_UUNDORECORD_H__

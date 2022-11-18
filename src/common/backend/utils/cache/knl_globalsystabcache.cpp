@@ -48,6 +48,8 @@ void GlobalSysTabCache::Init()
 {
     Assert(!m_isInited);
     MemoryContext old = MemoryContextSwitchTo(m_dbEntry->GetRandomMemCxt());
+
+    /* allocate GlobalSysTabCache array for each tobe cached DB objects */
     m_systab_locks = (pthread_rwlock_t *)palloc0(sizeof(pthread_rwlock_t) * SysCacheSize);
     m_global_systupcaches = (GlobalSysTupCache **)palloc0(sizeof(GlobalSysTupCache *) * SysCacheSize);
 
@@ -140,12 +142,14 @@ GlobalSysTupCache *GlobalSysTabCache::CacheIdGetGlobalSysTupCache(int cache_id)
             m_global_systupcaches[cache_id] = New(m_dbEntry->GetRandomMemCxt()) GlobalSysTupCache(
                 m_dbOid, cache_id, m_isShared, m_dbEntry);
             m_global_systupcaches[cache_id]->SetStatInfoPtr(&m_tup_count, &m_tup_space);
+            m_dbEntry->MemoryEstimateAdd(GetMemoryChunkSpace(m_global_systupcaches[cache_id]));
         }
         m_global_systupcaches[cache_id]->Init();
     }
     PthreadRWlockUnlock(LOCAL_SYSDB_RESOWNER, &m_systab_locks[cache_id]);
 #endif
 
+    /* if GSC is already setup, just return the cache handler */
     if (likely(m_global_systupcaches[cache_id]->Inited())) {
         return m_global_systupcaches[cache_id];
     }

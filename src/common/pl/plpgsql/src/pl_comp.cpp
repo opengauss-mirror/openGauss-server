@@ -137,6 +137,16 @@ static bool plpgsql_check_search_path(PLpgSQL_function* func, HeapTuple proc_tup
     return check_search_path_interface(func->fn_searchpath->schemas, proc_tup);
 }
 
+void increase_exec_refcount(PLpgSQL_function* func)
+{
+    func->ref_count++;
+}
+ 
+void decrease_exec_refcount(PLpgSQL_function* func)
+{
+    func->ref_count--;
+}
+ 
 PLpgSQL_function* plpgsql_compile(FunctionCallInfo fcinfo, bool for_validator)
 {
     Oid func_oid = fcinfo->flinfo->fn_oid;
@@ -270,9 +280,9 @@ recheck:
     /*
      * Save pointer in FmgrInfo to avoid search on subsequent calls
      */
+    increase_exec_refcount(func);
     fcinfo->flinfo->fn_extra = (void*)func;
     restoreCallFromPkgOid(old_value);
-
     /*
      * Finally return the compiled function
      */
@@ -475,26 +485,20 @@ void clearCompileContext(PLpgSQL_compile_context* compile_cxt)
     pfree_ext(compile_cxt);
 }
 
-void clearCompileContextList(const int releaseLength)
+void clearCompileContextList(const int saveLength)
 {
     if (u_sess->plsql_cxt.compile_context_list == NULL) {
         return ;
     }
-    ListCell* lc = list_head(u_sess->plsql_cxt.compile_context_list);
+    ListCell* lc = NULL;
     PLpgSQL_compile_context* compile_cxt = NULL;
     int len = list_length(u_sess->plsql_cxt.compile_context_list);
-    int i = len;
-    while (lc != NULL) {
-        i--;
-        ListCell* newlc = lnext(lc);
-        if (i < len - releaseLength) {
-            lc = newlc;
-            continue;
-        }
+    while (len > saveLength) {
+        lc = list_head(u_sess->plsql_cxt.compile_context_list);
         compile_cxt = (PLpgSQL_compile_context*)lfirst(lc);
         u_sess->plsql_cxt.compile_context_list = list_delete(u_sess->plsql_cxt.compile_context_list, compile_cxt);
         clearCompileContext(compile_cxt);
-        lc = newlc;
+        len--;
     }
 }
 
@@ -732,6 +736,7 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
      */
     curr_compile->compile_tmp_cxt = MemoryContextSwitchTo(curr_compile->compile_cxt);
     func->fn_signature = pstrdup(signature);
+    func->type = T_PLpgSQL_FUNCTION;
     func->is_private = BoolGetDatum(proisprivatedatum);
     /*
      * if function belong to a package, it will use package search path.
@@ -753,7 +758,7 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
     func->invalItems = NIL;
     func->is_autonomous = false;
     func->is_insert_gs_source = false;
-
+    func->ref_count = 0;
     func->pkg_oid = pkgoid;
     func->fn_searchpath->addCatalog = true;
     func->fn_searchpath->addTemp = true;
@@ -943,9 +948,10 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
              * directly to it.	If there's more than one, build a row that
              * holds all of them.
              */
-            if (num_out_args == 1) {
+            if (num_out_args == 1 && !is_function_with_plpgsql_language_and_outparam(func->fn_oid)) {
                 func->out_param_varno = out_arg_variables[0]->dno;
-            } else if (num_out_args > 1) {
+            } else if (num_out_args > 1 || (num_out_args == 1 &&
+                is_function_with_plpgsql_language_and_outparam(func->fn_oid))) {
                 PLpgSQL_row* row = build_row_from_vars(out_arg_variables, num_out_args);
                 row->isImplicit = true;
 
@@ -1059,11 +1065,11 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
                         errhint("The arguments of the trigger can be accessed through TG_NARGS and TG_ARGV instead.")));
             }
             /* Add the record for referencing NEW */
-            rec = plpgsql_build_record("new", 0, true);
+            rec = plpgsql_build_record("new", 0, true, NULL);
             func->new_varno = rec->dno;
 
             /* Add the record for referencing OLD */
-            rec = plpgsql_build_record("old", 0, true);
+            rec = plpgsql_build_record("old", 0, true, NULL);
             func->old_varno = rec->dno;
 
             /* Add the variable tg_name */
@@ -1825,6 +1831,11 @@ static Node* resolve_column_ref(ParseState* pstate, PLpgSQL_expr* expr, ColumnRe
         }
         if (pkg != NULL) {
             PLpgSQL_nsitem* pkgPublicNs = plpgsql_ns_lookup(pkg->public_ns, false, nse->name, NULL, NULL, NULL);
+            if (unlikely(pkgPublicNs == NULL)) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_UNDEFINED_PACKAGE),
+                        (errmsg("not found package variable %s", nse->name))));
+            }
             nse->itemtype = pkgPublicNs->itemtype;
         } else {
             ereport(ERROR,
@@ -1962,6 +1973,15 @@ static Node* make_datum_param(PLpgSQL_expr* expr, int dno, int location)
         estate = NULL;
         datum = expr->func->datums[dno];
     }
+#ifndef ENABLE_MULTIPLE_NODES
+    bool isPkgNestTableVar = datum->ispkg && datum->dtype == PLPGSQL_DTYPE_VAR
+                             && ((PLpgSQL_var*)datum)->nest_table != NULL;
+    if (unlikely(u_sess->is_autonomous_session && isPkgNestTableVar)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("Un-support feature: nest tableof variable \"%s\" not support pass through autonm function",
+                ((PLpgSQL_var*)datum)->refname)));
+    }
+#endif
     /*
     * Bitmapset must be allocated in function's permanent memory context
     */
@@ -1972,11 +1992,11 @@ static Node* make_datum_param(PLpgSQL_expr* expr, int dno, int location)
     param = makeNode(Param);
     param->paramkind = PARAM_EXTERN;
     param->paramid = dno + 1;
-    Oid tableOfIndexType = InvalidOid;
+    List* tableOfIndexType = NULL;
     exec_get_datum_type_info(estate, datum, &param->paramtype, &param->paramtypmod, &param->paramcollid,
         &tableOfIndexType, expr->func);
     param->location = location;
-    param->tableOfIndexType = tableOfIndexType;
+    param->tableOfIndexTypeList = tableOfIndexType;
     if (datum->dtype == PLPGSQL_DTYPE_RECORD) {
         param->recordVarTypOid = ((PLpgSQL_row*)datum)->recordVarTypOid;
     } else {
@@ -2002,6 +2022,10 @@ HeapTuple getPLpgsqlVarTypeTup(char* word)
             }
             if (ns != NULL && ns->itemtype == PLPGSQL_NSTYPE_VAR) {
                 PLpgSQL_var* var = (PLpgSQL_var*)pkg->datums[ns->itemno];
+                if (OidIsValid(var->datatype->tableOfIndexType)) {
+                    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("not support ref table of variable as procedure argument type")));
+                }
                 if (OidIsValid(var->datatype->typoid)) {
                     HeapTuple typeTup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(var->datatype->typoid));
                     return typeTup;
@@ -2011,17 +2035,34 @@ HeapTuple getPLpgsqlVarTypeTup(char* word)
     } else {
         if (ns != NULL && ns->itemtype == PLPGSQL_NSTYPE_VAR) {
             PLpgSQL_var* var = (PLpgSQL_var*)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[ns->itemno];
+            if (OidIsValid(var->datatype->tableOfIndexType)) {
+                ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("not support ref table of variable as procedure argument type")));
+            }
             if (OidIsValid(var->datatype->typoid)) {
                 HeapTuple typeTup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(var->datatype->typoid));
                 return typeTup;
             }
         }
     }
-    
+
     return NULL;
 }
 
-HeapTuple FindRowVarColType(List* nameList)
+void getTableofTypeFromVar(PLpgSQL_var* var, int* collectionType, Oid* tableofIndexType)
+{
+    if (OidIsValid(var->datatype->tableOfIndexType)) {
+        if (tableofIndexType == NULL) {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("not support ref table of variable as procedure argument type")));
+        } else {
+            *collectionType = var->datatype->collectionType;
+            *tableofIndexType = var->datatype->tableOfIndexType;
+        }
+    }
+}
+
+HeapTuple FindRowVarColType(List* nameList, int* collectionType, Oid* tableofIndexType)
 {
     if (u_sess->plsql_cxt.curr_compile_context == NULL) {
         return NULL;
@@ -2081,6 +2122,7 @@ HeapTuple FindRowVarColType(List* nameList)
             if (datum->dtype == PLPGSQL_DTYPE_VAR) {
                 /* scalar variable, just return the datatype */
                 typOid = ((PLpgSQL_var*)datum)->datatype->typoid;
+                getTableofTypeFromVar((PLpgSQL_var*)datum, collectionType, tableofIndexType);
             } else if (datum->dtype == PLPGSQL_DTYPE_ROW) {
                 /* row variable, need to build a new one */
                 typOid = ((PLpgSQL_row*)datum)->rowtupdesc->tdtypeid;
@@ -3131,7 +3173,7 @@ PLpgSQL_type* plpgsql_parse_wordrowtype(char* ident)
         char message[MAXSTRLEN]; 
         errno_t rc = 0;
         rc = sprintf_s(message, MAXSTRLEN, "relation \"%s\" does not exist when parse word.", ident);
-        securec_check_ss_c(rc, "", "");
+        securec_check_ss(rc, "", "");
         InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc, true);
         ereport(ERROR,
             (errmodule(MOD_PLSQL),
@@ -3470,7 +3512,7 @@ PLpgSQL_variable* plpgsql_build_variable(const char* refname, int lineno, PLpgSQ
             /* "record" type -- build a record variable */
             PLpgSQL_rec* rec = NULL;
 
-            rec = plpgsql_build_record(refname, lineno, add2namespace);
+            rec = plpgsql_build_record(refname, lineno, add2namespace, NULL);
             rec->addNamespace = add2namespace;
             rec->varname = varname == NULL ? NULL : pstrdup(varname);
             result = (PLpgSQL_variable*)rec;
@@ -3590,7 +3632,7 @@ PLpgSQL_variable* plpgsql_build_tableType(const char* refname, int lineno, PLpgS
 /*
  * Build empty named record variable, and optionally add it to namespace
  */
-PLpgSQL_rec* plpgsql_build_record(const char* refname, int lineno, bool add2namespace)
+PLpgSQL_rec* plpgsql_build_record(const char* refname, int lineno, bool add2namespace, TupleDesc tupleDesc)
 {
     PLpgSQL_rec* rec = NULL;
     int varno;
@@ -3600,7 +3642,8 @@ PLpgSQL_rec* plpgsql_build_record(const char* refname, int lineno, bool add2name
     rec->refname = pstrdup(refname);
     rec->lineno = lineno;
     rec->tup = NULL;
-    rec->tupdesc = NULL;
+    rec->tupdesc = tupleDesc;
+    rec->freetupdesc = (tupleDesc != NULL) ? true : false;
     rec->freetup = false;
     varno = plpgsql_adddatum((PLpgSQL_datum*)rec);
     char* pkgname = NULL;
@@ -3821,17 +3864,22 @@ PLpgSQL_row* build_row_from_tuple_desc(const char* rowname, int lineno, TupleDes
                         errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
                         errmsg("The %dth column in %s record variable does't have alias.", (i + 1), rowname)));
         }
-		
-        StringInfoData info;
-        initStringInfo(&info);
-        appendStringInfo(&info, "%s.%s", rowname, att_name);
 
-        PLpgSQL_type* type = plpgsql_build_datatype(pg_att_form->atttypid, pg_att_form->atttypmod, pg_att_form->attcollation);
-        PLpgSQL_variable* var = plpgsql_build_variable(info.data, lineno, type, false);
-        pfree(info.data);
+        if (!pg_att_form->attisdropped) {
+            StringInfoData info;
+            initStringInfo(&info);
+            appendStringInfo(&info, "%s.%s", rowname, att_name);
 
-        row->fieldnames[i] = pstrdup(att_name);
-        row->varnos[i] = var->dno;
+            PLpgSQL_type* type = plpgsql_build_datatype(pg_att_form->atttypid, pg_att_form->atttypmod, pg_att_form->attcollation);
+            PLpgSQL_variable* var = plpgsql_build_variable(info.data, lineno, type, false);
+            pfree(info.data);
+
+            row->fieldnames[i] = pstrdup(att_name);
+            row->varnos[i] = var->dno;
+        } else {
+            row->fieldnames[i] = NULL;
+            row->varnos[i] = -1;
+        }        
 
         TupleDescInitEntry(row->rowtupdesc, i + 1, att_name, pg_att_form->atttypid, pg_att_form->atttypmod, 0);
     }
@@ -4187,7 +4235,7 @@ int plpgsql_recognize_err_condition(const char* condname, bool allow_sqlstate)
     char message[MAXSTRLEN]; 
     errno_t rc = 0;
     rc = sprintf_s(message, MAXSTRLEN, "unrecognized exception condition \"%s\"", condname);
-    securec_check_ss_c(rc, "", "");
+    securec_check_ss(rc, "", "");
     InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
     ereport(ERROR,
         (errmodule(MOD_PLSQL),
@@ -4240,7 +4288,7 @@ PLpgSQL_condition* plpgsql_parse_err_condition(char* condname)
         char message[MAXSTRLEN]; 
         errno_t rc = 0;
         rc = sprintf_s(message, MAXSTRLEN, "unrecognized exception condition \"%s\"", condname);
-        securec_check_ss_c(rc, "", "");
+        securec_check_ss(rc, "", "");
         InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
         ereport(ERROR,
             (errmodule(MOD_PLSQL),
@@ -4397,7 +4445,7 @@ void plpgsql_HashTableInit(void)
     ctl.hash = tag_hash;
     ctl.hcxt = u_sess->cache_mem_cxt;
     u_sess->plsql_cxt.plpgsql_pkg_HashTable =
-        hash_create("PLpgSQL package cache", PKGS_PER_USER, &ctl, HASH_ELEM | HASH_PACKAGE | HASH_CONTEXT);
+        hash_create("PLpgSQL package cache", PKGS_PER_USER, &ctl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
 }
 
 static PLpgSQL_function* plpgsql_HashTableLookup(PLpgSQL_func_hashkey* func_key)
@@ -4511,7 +4559,7 @@ static void plpgsql_append_dlcell(plpgsql_HashEnt* entity)
             head_entity = (headcell == NULL) ? NULL : (plpgsql_HashEnt*)lfirst(headcell);
             func = (head_entity  == NULL) ? NULL : head_entity->function;
         }
-        if (func == NULL || func->use_count != 0) {
+        if (func == NULL || func->use_count != 0 || func->ref_count != 0) {
             break;
         }
 
@@ -4622,6 +4670,22 @@ bool plpgsql_check_insert_colocate(
         }
     }
     return true;
+}
+
+/*
+ * Get the attribute and check for dropped column
+ */
+bool is_row_attr_dropped(PLpgSQL_row* row, int i)
+{  
+    if (row->rowtupdesc == NULL) {
+        return false;
+    }
+    
+    Form_pg_attribute attr = row->rowtupdesc->attrs[i];
+    if ((attr != NULL && attr->attisdropped) || row->varnos[i] < 0) {
+        return true;
+    }
+    return false;
 }
 
 /* Try to find field word2 and word3 of a row variable, if find, return ture */
@@ -4746,6 +4810,10 @@ TupleDesc getCursorTupleDesc(PLpgSQL_expr* expr, bool isOnlySelect, bool isOnlyP
     PG_TRY();
     {
         List* parsetreeList = pg_parse_query(expr->query);
+        if (parsetreeList == NULL) {
+            ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                            errmsg("unexpected null parsetree list")));
+        }
         ListCell* cell = NULL;
         List* queryList = NIL;
         foreach(cell, parsetreeList) {
@@ -4774,6 +4842,10 @@ TupleDesc getCursorTupleDesc(PLpgSQL_expr* expr, bool isOnlySelect, bool isOnlyP
             }
             queryList = pg_analyze_and_rewrite_params(parsetree, expr->query, 
                 (ParserSetupHook)plpgsql_parser_setup, (void*)expr);
+        }
+        if (queryList == NULL) {
+            ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                            errmsg("unexpected null query list")));
         }
         Query* query = (Query*)linitial(queryList);
         Assert(IsA(query, Query));

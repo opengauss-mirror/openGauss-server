@@ -38,7 +38,6 @@
 #include "gssignal/gs_signal.h"
 #include "storage/pmsignal.h"
 #include "access/gtm.h"
-#include "access/dfs/dfs_am.h"
 #include "access/ustore/undo/knl_uundoapi.h"
 #include "workload/workload.h"
 #include "postmaster/syslogger.h"
@@ -85,7 +84,6 @@ static const pg_on_exit_callback on_sess_exit_list[] = {
     ShutdownPostgres,
     PGXCNodeCleanAndRelease,
     PlDebugerCleanUp,
-    cleanGPCPlanProcExit,
 #ifdef ENABLE_MOT
     /*
      * 1. Must come after ShutdownPostgres(), in case there is abort/rollback callback.
@@ -158,13 +156,13 @@ void proc_exit_prepare(int code);
  */
 void proc_exit(int code)
 {
-    DynamicFileList* file_scanner = NULL;
-
     if (t_thrd.utils_cxt.backend_reserved) {
         ereport(DEBUG2, (errmodule(MOD_MEM),
             errmsg("[BackendReservedExit] current thread role is: %d, used memory is: %d MB\n",
             t_thrd.role, t_thrd.utils_cxt.trackedMemChunks)));
     }
+
+    AtEOXact_SysDBCache(false);
 
     audit_processlogout_unified();
 
@@ -251,9 +249,6 @@ void proc_exit(int code)
     }
     RemoveFromDnHashTable();
 
-    /* Clean up Dfs Reader stuffs */
-    CleanupDfsHandlers(true);
-
     BgworkerListSyncQuit();
 
     /* Clean up Allocated descs */
@@ -320,22 +315,8 @@ void proc_exit(int code)
         if (t_thrd.postmaster_cxt.redirection_done)
             ereport(LOG, (errmsg("Gaussdb exit(%d)", code)));
 
-        while (file_list != NULL) {
-            file_scanner = file_list;
-            file_list = file_list->next;
-#ifndef ENABLE_MEMORY_CHECK
-            /* 
-             * in the senario of ImmediateShutdown, it is not safe to close plugin 
-             * as PM thread will not wait for all children threads exist(will send SIGQUIT signal) referring to pmdie
-             */
-            if (g_instance.status != ImmediateShutdown) {
-                (void)pg_dlclose(file_scanner->handle);
-            }
-#endif
-            pfree((char*)file_scanner);
-            file_scanner = NULL;
-        }
-        file_list = file_tail = NULL;
+        /* release all library at proc exit. */
+        internal_delete_library();
 
         if (u_sess->attr.attr_resource.use_workload_manager)
             gscgroup_free();
@@ -392,6 +373,15 @@ void proc_exit_prepare(int code)
     sigset_t old_sigset;
 
     PreventInterrupt();
+
+    /* Close in advance to prevent other problems when the thread is closed */
+    if (EnableLocalSysCache()) {
+        /* close interxact files */
+        closeAllVfds(true);
+        CloseAllTempFile(true);
+    }
+    closeAllVfds();
+    CloseAllTempFile(false);
 
     /*
      * Also clear the error context stack, to prevent error callbacks from
@@ -484,6 +474,9 @@ void sess_exit_prepare(int code)
 
     if (!EnableLocalSysCache()) {
         closeAllVfds();
+    } else {
+        /* close interxact files */
+        closeAllVfds(true);
     }
 
     PreventInterrupt();
@@ -501,7 +494,8 @@ void sess_exit_prepare(int code)
 
     for (; u_sess->on_sess_exit_index < on_sess_exit_size; u_sess->on_sess_exit_index++) {
         if (EnableLocalSysCache() && on_sess_exit_list[u_sess->on_sess_exit_index] == AtProcExit_Files) {
-            // we close this only on proc exit
+            /* unlink interxact files */
+            DestroyAllVfds(true);
             continue;
         }
         (*on_sess_exit_list[u_sess->on_sess_exit_index])(code, UInt32GetDatum(NULL));

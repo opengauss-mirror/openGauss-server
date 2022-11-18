@@ -11,18 +11,3 @@ set(executor_COMPILE_OPTIONS ${OPTIMIZE_OPTIONS} ${OS_OPTIONS} ${PROTECT_OPTIONS
 list(REMOVE_ITEM executor_COMPILE_OPTIONS -fno-omit-frame-pointer)
 set(executor_LINK_OPTIONS ${BIN_LINK_OPTIONS})
 add_static_objtarget(gausskernel_runtime_codegen_executor TGT_executor_SRC TGT_executor_INC "${executor_DEF_OPTIONS}" "${executor_COMPILE_OPTIONS}" "${executor_LINK_OPTIONS}")
-target_link_libraries(gausskernel_runtime_codegen_executor PUBLIC -lncurses -lrt -ldl -lm)
-
-SET(llvm_libs_var "")
-if(${ENABLE_LLVM_COMPILE})
-    execute_process(
-        COMMAND ${LLVM_CONFIG} --libs
-        RESULT_VARIABLE llvm_libs_ret
-        OUTPUT_VARIABLE llvm_libs_var
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
-endif()
-separate_arguments(llvm_libs UNIX_COMMAND ${llvm_libs_var})
-
-target_link_libraries(gausskernel_runtime_codegen_executor PUBLIC  ${llvm_libs})
-target_link_directories(gausskernel_runtime_codegen_executor PUBLIC ${LIBLLVM_LIB_PATH})

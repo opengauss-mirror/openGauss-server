@@ -897,7 +897,8 @@ TableScanDesc scan_handler_tbl_beginscan_sampling(Relation relation, Snapshot sn
         allow_strat, allow_sync, rangeScanInRedis);
 }
 
-Tuple scan_handler_tbl_getnext(TableScanDesc scan, ScanDirection direction, Relation rel)
+Tuple scan_handler_tbl_getnext(TableScanDesc scan, ScanDirection direction, Relation rel,
+    bool* has_cur_xact_write)
 {
     Assert(scan != NULL);
     if (unlikely(RELATION_CREATE_BUCKET(scan->rs_rd))) {
@@ -907,7 +908,7 @@ Tuple scan_handler_tbl_getnext(TableScanDesc scan, ScanDirection direction, Rela
         }
         return (Tuple) switch_and_scan_next_tbl_hbkt(scan, direction);
     } else {
-        return tableam_scan_getnexttuple(scan, direction);
+        return tableam_scan_getnexttuple(scan, direction, has_cur_xact_write);
     }
 }
 

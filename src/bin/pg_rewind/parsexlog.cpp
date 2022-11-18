@@ -234,9 +234,8 @@ BuildErrorCode findCommonCheckpoint(const char* datadir, TimeLineID tli, XLogRec
                 CloseXlogFile();
                 return increment_return_code;
             }
-            current_time = localGetCurrentTimestamp();
         }
-
+        current_time = localGetCurrentTimestamp();
         /* Walk backwards to previous record. */
         searchptr = record->xl_prev;
     }

@@ -194,7 +194,7 @@ static void WaitForReplicationWorkerAttach()
     int timeout = WAIT_SUB_WORKER_ATTACH_TIMEOUT;
     while (timeout > 0) {
         CHECK_FOR_INTERRUPTS();
-        LWLockAcquire(LogicalRepWorkerLock, LW_SHARED);
+        (void)LWLockAcquire(LogicalRepWorkerLock, LW_SHARED);
 
         if (t_thrd.applylauncher_cxt.applyLauncherShm->startingWorker == NULL) {
             /* worker has started, we are done */
@@ -210,16 +210,21 @@ static void WaitForReplicationWorkerAttach()
 
     if (timeout <= 0) {
         /* worker took too long time to start */
-        LWLockAcquire(LogicalRepWorkerLock, LW_EXCLUSIVE);
-        LogicalRepWorker *worker = t_thrd.applylauncher_cxt.applyLauncherShm->startingWorker;
-        ereport(WARNING, (errmsg("Apply worker with sub id:%u took too long time to start, so canceled it",
-            worker->subid)));
-        worker->dbid = InvalidOid;
-        worker->userid = InvalidOid;
-        worker->subid = InvalidOid;
-        worker->proc = NULL;
-        worker->workerLaunchTime = 0;
-        t_thrd.applylauncher_cxt.applyLauncherShm->startingWorker = NULL;
+        (void)LWLockAcquire(LogicalRepWorkerLock, LW_EXCLUSIVE);
+        /*
+         * There is a little chance that the startingWorker become NULL after timeout, so we need to check NULL again.
+         */
+        if (t_thrd.applylauncher_cxt.applyLauncherShm->startingWorker != NULL) {
+            LogicalRepWorker *worker = t_thrd.applylauncher_cxt.applyLauncherShm->startingWorker;
+            ereport(WARNING, (errmsg("Apply worker with sub id:%u took too long time to start, so canceled it",
+                worker->subid)));
+            worker->dbid = InvalidOid;
+            worker->userid = InvalidOid;
+            worker->subid = InvalidOid;
+            worker->proc = NULL;
+            worker->workerLaunchTime = 0;
+            t_thrd.applylauncher_cxt.applyLauncherShm->startingWorker = NULL;
+        }
         LWLockRelease(LogicalRepWorkerLock);
     }
 }
@@ -245,7 +250,7 @@ static void logicalrep_worker_launch(Oid dbid, Oid subid, const char *subname, O
      * We need to do the modification of the shared memory under lock so that
      * we have consistent view.
      */
-    LWLockAcquire(LogicalRepWorkerLock, LW_EXCLUSIVE);
+    (void)LWLockAcquire(LogicalRepWorkerLock, LW_EXCLUSIVE);
 
     /* Find unused worker slot. */
     for (slot = 0; slot < g_instance.attr.attr_storage.max_logical_replication_workers; slot++) {
@@ -287,7 +292,7 @@ void logicalrep_worker_stop(Oid subid)
 {
     LogicalRepWorker *worker;
 
-    LWLockAcquire(LogicalRepWorkerLock, LW_SHARED);
+    (void)LWLockAcquire(LogicalRepWorkerLock, LW_SHARED);
 
     worker = logicalrep_worker_find(subid);
     /* No worker, nothing to do. */
@@ -316,7 +321,7 @@ void logicalrep_worker_stop(Oid subid)
         ResetLatch(&t_thrd.proc->procLatch);
 
         /* Recheck worker status. */
-        LWLockAcquire(LogicalRepWorkerLock, LW_SHARED);
+        (void)LWLockAcquire(LogicalRepWorkerLock, LW_SHARED);
 
         /*
          * Worker is no longer associated with subscription.  It must have
@@ -354,7 +359,7 @@ void logicalrep_worker_stop(Oid subid)
             proc_exit(1);
 
         ResetLatch(&t_thrd.proc->procLatch);
-        LWLockAcquire(LogicalRepWorkerLock, LW_SHARED);
+        (void)LWLockAcquire(LogicalRepWorkerLock, LW_SHARED);
     }
     LWLockRelease(LogicalRepWorkerLock);
 }
@@ -365,7 +370,7 @@ void logicalrep_worker_stop(Oid subid)
 void logicalrep_worker_attach()
 {
     /* Block concurrent access. */
-    LWLockAcquire(LogicalRepWorkerLock, LW_EXCLUSIVE);
+    (void)LWLockAcquire(LogicalRepWorkerLock, LW_EXCLUSIVE);
     if (t_thrd.applylauncher_cxt.applyLauncherShm->startingWorker == NULL) {
         LWLockRelease(LogicalRepWorkerLock);
         /* no worker entry for me, go away */
@@ -401,7 +406,7 @@ void logicalrep_worker_attach()
 static void logicalrep_worker_detach(void)
 {
     /* Block concurrent access. */
-    LWLockAcquire(LogicalRepWorkerLock, LW_EXCLUSIVE);
+    (void)LWLockAcquire(LogicalRepWorkerLock, LW_EXCLUSIVE);
 
     t_thrd.applyworker_cxt.curWorker->dbid = InvalidOid;
     t_thrd.applyworker_cxt.curWorker->userid = InvalidOid;
@@ -432,7 +437,7 @@ static void logicalrep_worker_onexit(int code, Datum arg)
     (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_disconnect();
     logicalrep_worker_detach();
     if (t_thrd.applylauncher_cxt.applyLauncherShm->applyLauncherPid != 0) {
-        gs_signal_send(t_thrd.applylauncher_cxt.applyLauncherShm->applyLauncherPid, SIGUSR1);
+        (void)gs_signal_send(t_thrd.applylauncher_cxt.applyLauncherShm->applyLauncherPid, SIGUSR1);
     }
 }
 
@@ -440,7 +445,7 @@ static void logicalrep_worker_onexit(int code, Datum arg)
 static void logicalrepLauncherSighub(SIGNAL_ARGS)
 {
     int saveErrno = errno;
-    t_thrd.applylauncher_cxt.got_SIGHUP = true;
+    t_thrd.applylauncher_cxt.got_SIGHUP = TRUE;
 
     if (t_thrd.proc) {
         SetLatch(&t_thrd.proc->procLatch);
@@ -456,7 +461,7 @@ static void logicalrep_launcher_sigusr2(SIGNAL_ARGS)
 {
     int save_errno = errno;
 
-    t_thrd.applylauncher_cxt.newWorkerRequest = true;
+    t_thrd.applylauncher_cxt.newWorkerRequest = TRUE;
     if (t_thrd.proc) {
         SetLatch(&t_thrd.proc->procLatch);
     }
@@ -586,18 +591,19 @@ void ApplyLauncherMain()
      * backend, so we use the same signal handling.  See equivalent code in
      * tcop/postgres.c.
      */
-    gspqsignal(SIGHUP, logicalrepLauncherSighub);
-    gspqsignal(SIGINT, StatementCancelHandler);
-    gspqsignal(SIGTERM, die);
+    (void)gspqsignal(SIGHUP, logicalrepLauncherSighub);
+    (void)gspqsignal(SIGINT, StatementCancelHandler);
+    (void)gspqsignal(SIGTERM, die);
 
-    gspqsignal(SIGQUIT, quickdie);
-    gspqsignal(SIGALRM, handle_sig_alarm);
+    (void)gspqsignal(SIGQUIT, quickdie);
+    (void)gspqsignal(SIGALRM, handle_sig_alarm);
 
-    gspqsignal(SIGPIPE, SIG_IGN);
-    gspqsignal(SIGUSR1, LogicalrepLauncherSigusr1);
-    gspqsignal(SIGUSR2, logicalrep_launcher_sigusr2);
-    gspqsignal(SIGFPE, FloatExceptionHandler);
-    gspqsignal(SIGCHLD, SIG_DFL);
+    (void)gspqsignal(SIGPIPE, SIG_IGN);
+    (void)gspqsignal(SIGUSR1, LogicalrepLauncherSigusr1);
+    (void)gspqsignal(SIGUSR2, logicalrep_launcher_sigusr2);
+    (void)gspqsignal(SIGFPE, FloatExceptionHandler);
+    (void)gspqsignal(SIGCHLD, SIG_DFL);
+    (void)gspqsignal(SIGURG, print_stack);
 
     /* Early initialization */
     BaseInit();
@@ -612,14 +618,14 @@ void ApplyLauncherMain()
     InitProcess();
 #endif
 
+    /* Unblock signals (they were blocked when the postmaster forked us) */
+    gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
+    (void)gs_signal_unblock_sigusr2();
+
     t_thrd.proc_cxt.PostInit->SetDatabaseAndUser(DEFAULT_DATABASE, InvalidOid, username);
     t_thrd.proc_cxt.PostInit->InitApplyLauncher();
 
     SetProcessingMode(NormalProcessing);
-
-    /* Unblock signals (they were blocked when the postmaster forked us) */
-    gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
-    (void)gs_signal_unblock_sigusr2();
 
     /*
      * If an exception is encountered, processing resumes here.
@@ -660,7 +666,6 @@ void ApplyLauncherMain()
 
         CHECK_FOR_INTERRUPTS();
         now = GetCurrentTimestamp();
-
         /*
          * Limit the start retry to once a wal_retrieve_retry_interval, but if it's a request from
          * CREATE/ALTER subscription, we will try to launch worker immediately.
@@ -668,7 +673,7 @@ void ApplyLauncherMain()
         if (t_thrd.applylauncher_cxt.newWorkerRequest ||
             TimestampDifferenceExceeds(last_start_time, now, wal_retrieve_retry_interval)) {
             if (t_thrd.applylauncher_cxt.newWorkerRequest) {
-                t_thrd.applylauncher_cxt.newWorkerRequest = false;
+                t_thrd.applylauncher_cxt.newWorkerRequest = FALSE;
             }
             /* Use temporary context for the database list and worker info. */
             subctx = AllocSetContextCreate(TopMemoryContext, "Logical Replication Launcher sublist",
@@ -688,7 +693,7 @@ void ApplyLauncherMain()
                     continue;
                 }
 
-                LWLockAcquire(LogicalRepWorkerLock, LW_SHARED);
+                (void)LWLockAcquire(LogicalRepWorkerLock, LW_SHARED);
                 w = logicalrep_worker_find(sub->oid);
                 LWLockRelease(LogicalRepWorkerLock);
 
@@ -732,7 +737,7 @@ void ApplyLauncherMain()
             proc_exit(1);
 
         if (t_thrd.applylauncher_cxt.got_SIGHUP) {
-            t_thrd.applylauncher_cxt.got_SIGHUP = false;
+            t_thrd.applylauncher_cxt.got_SIGHUP = FALSE;
             ProcessConfigFile(PGC_SIGHUP);
         }
 
@@ -789,9 +794,9 @@ Datum pg_stat_get_subscription(PG_FUNCTION_ARGS)
     MemoryContextSwitchTo(oldcontext);
 
     /* Make sure we get consistent view of the workers. */
-    LWLockAcquire(LogicalRepWorkerLock, LW_SHARED);
+    (void)LWLockAcquire(LogicalRepWorkerLock, LW_SHARED);
 
-    for (i = 0; i <= g_instance.attr.attr_storage.max_logical_replication_workers; i++) {
+    for (i = 0; i < g_instance.attr.attr_storage.max_logical_replication_workers; i++) {
         /* for each row */
         Datum values[PG_STAT_GET_SUBSCRIPTION_COLS];
         bool nulls[PG_STAT_GET_SUBSCRIPTION_COLS];

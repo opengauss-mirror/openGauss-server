@@ -44,21 +44,44 @@ static bool IsRelationStoreInglobal(Relation rel);
 
 LocalTabDefCache::LocalTabDefCache()
 {
-    ResetInitFlag();
+    ResetInitFlag(true);
 }
 
-static void SetGttInfo(Relation rel)
+static void SetGttInfo(Relation rel, bool from_local)
 {
-    if (rel->rd_rel->relpersistence == RELPERSISTENCE_GLOBAL_TEMP && rel->rd_backend != BackendIdForTempRelations) {
-        RelationCloseSmgr(rel);
-        rel->rd_backend = BackendIdForTempRelations;
-        BlockNumber relpages = 0;
-        double reltuples = 0;
-        BlockNumber relallvisible = 0;
-        get_gtt_relstats(RelationGetRelid(rel), &relpages, &reltuples, &relallvisible, NULL);
-        rel->rd_rel->relpages = (float8)relpages;
-        rel->rd_rel->reltuples = (float8)reltuples;
-        rel->rd_rel->relallvisible = (int4)relallvisible;
+    if (rel->rd_rel->relpersistence != RELPERSISTENCE_GLOBAL_TEMP) {
+        return;
+    }
+
+    /* if come from global or in threadpool mode, must reflush it */
+    if (!IS_THREAD_POOL_WORKER && from_local) {
+        return;
+    }
+
+    /* in same transaction by xact_seqno, and backend is same, so just return is ok */
+    if (rel->rd_smgr != NULL && rel->rd_smgr->xact_seqno == t_thrd.lsc_cxt.xact_seqno &&
+        rel->rd_backend == BackendIdForTempRelations) {
+        return;
+    }
+
+    RelationCloseSmgr(rel);
+    pfree_ext(rel->rd_amcache);
+
+    rel->rd_backend = BackendIdForTempRelations;
+    BlockNumber relpages = 0;
+    double reltuples = 0;
+    BlockNumber relallvisible = 0;
+    get_gtt_relstats(RelationGetRelid(rel), &relpages, &reltuples, &relallvisible, NULL);
+    rel->rd_rel->relpages = (float8)relpages;
+    rel->rd_rel->reltuples = (float8)reltuples;
+    rel->rd_rel->relallvisible = (int4)relallvisible;
+
+    Assert(rel->rd_rel->relfilenode != InvalidOid);
+    Oid newrelnode = gtt_fetch_current_relfilenode(RelationGetRelid(rel));
+    if (newrelnode != InvalidOid && newrelnode != rel->rd_rel->relfilenode) {
+        rel->rd_node.relNode = newrelnode;
+    } else {
+        rel->rd_node.relNode = rel->rd_rel->relfilenode;
     }
 }
 
@@ -74,7 +97,7 @@ Relation LocalTabDefCache::SearchRelationFromLocal(Oid rel_oid)
     Assert(entry->rel->rd_node.spcNode != InvalidOid);
     Assert(entry->rel->rd_node.relNode != InvalidOid);
     Assert(entry->rel->rd_islocaltemp == false);
-    SetGttInfo(entry->rel);
+    SetGttInfo(entry->rel, true);
     return entry->rel;
 }
 
@@ -315,7 +338,7 @@ static void SpecialWorkForLocalRel(Relation rel)
     if (RelationIsIndex(rel)) {
         rel->rd_aminfo = (RelationAmInfo *)MemoryContextAllocZero(rel->rd_indexcxt, sizeof(RelationAmInfo));
     }
-    SetGttInfo(rel);
+    SetGttInfo(rel, false);
 
     if (unlikely(rel->rd_rel->relkind == RELKIND_MATVIEW) && !rel->rd_isscannable && !heap_is_matview_init_state(rel)) {
         /* matview may open smgr, whatever, we dont care */
@@ -325,6 +348,14 @@ static void SpecialWorkForLocalRel(Relation rel)
     Assert(rel->rd_mlogoid == InvalidOid ||
         rel->rd_mlogoid == find_matview_mlog_table(rel->rd_id) ||
         find_matview_mlog_table(rel->rd_id) == InvalidOid);
+    /* modify rel->rd_bucketmapsize */
+    if (rel->storage_type == SEGMENT_PAGE) {
+        if (BUCKET_OID_IS_VALID(rel->rd_bucketoid) && RelationIsRelation(rel)) {
+            rel->rd_bucketmapsize = searchBucketMapSizeByOid(rel->rd_bucketoid);
+        } else if (RelationIsRelation(rel) && rel->rd_locator_info != NULL) {
+            rel->rd_bucketmapsize = rel->rd_locator_info->buckets_cnt;
+        }
+    }
     RelationInitPhysicalAddr(rel);
     Assert(rel->rd_node.spcNode != InvalidOid);
     Assert(rel->rd_node.relNode != InvalidOid);
@@ -368,9 +399,6 @@ void LocalTabDefCache::Init()
     relcacheInvalsReceived = 0;
     initFileRelationIds = NIL;
     RelCacheNeedEOXActWork = false;
-
-    g_bucketmap_cache = NIL;
-    max_bucket_map_size = BUCKET_MAP_SIZE;
 
     EOXactTupleDescArray = NULL;
     NextEOXactTupleDescNum = 0;
@@ -650,8 +678,7 @@ void LocalTabDefCache::InitPhase3(void)
                     uint32 hash_value = oid_hash((void *)&(rel->rd_id), sizeof(Oid));
                     InsertRelationIntoGlobal(rel, hash_value);
                 }
-                bucket_elt = DLGetHead(m_bucket_list.GetActiveBucketList());
-                elt = NULL;
+                elt = DLGetHead(&bucket_entry->cc_bucket);
             }
         }
     }
@@ -694,6 +721,9 @@ void LocalTabDefCache::InvalidateGlobalRelation(Oid db_id, Oid rel_oid, bool is_
 
 void LocalTabDefCache::InvalidateRelationAll()
 {
+    if (!m_is_inited_phase2) {
+        return;
+    }
     /*
      * Reload relation mapping data before starting to reconstruct cache.
      */
@@ -722,6 +752,7 @@ void LocalTabDefCache::InvalidateRelationAll()
                 /* Delete this entry immediately */
                 Assert(!rel->rd_isnailed);
                 RelationClearRelation(rel, false);
+                elt = DLGetHead(&bucket_entry->cc_bucket);
             } else {
                 /*
                  * If it's a mapped rel, immediately update its rd_node in
@@ -742,6 +773,9 @@ void LocalTabDefCache::InvalidateRelationAll()
                  * next in no particular order; and everything else goes to the
                  * back of rebuildList.
                  */
+                if (list_member_ptr(rebuildFirstList, rel) || list_member_ptr(rebuildList, rel)) {
+                    continue;
+                }
                 if (RelationGetRelid(rel) == RelationRelationId)
                     rebuildFirstList = lcons(rel, rebuildFirstList);
                 else if (RelationGetRelid(rel) == ClassOidIndexId)
@@ -789,7 +823,14 @@ void LocalTabDefCache::InvalidateRelationNodeList()
             elt = DLGetSucc(elt);
             Relation rel = entry->rel;
             if (rel->rd_locator_info != NULL) {
+                Assert(!rel->rd_isnailed);
+                bool clear = RelationHasReferenceCountZero(rel) &&
+                    !(RelationIsIndex(rel) && rel->rd_refcnt > 0 && rel->rd_indexcxt != NULL);
                 RelationClearRelation(rel, !RelationHasReferenceCountZero(rel));
+                if (!clear) {
+                    elt = DLGetHead(&bucket_entry->cc_bucket);
+                    continue;
+                }
             }
         }
     }
@@ -797,6 +838,10 @@ void LocalTabDefCache::InvalidateRelationNodeList()
 
 void LocalTabDefCache::InvalidateRelationBucketsAll()
 {
+    Assert(m_is_inited_phase2);
+    if (!m_is_inited_phase2) {
+        return;
+    }
     Dlelem *bucket_elt;
     forloopactivebucketlist(bucket_elt, m_bucket_list.GetActiveBucketList()) {
         Dlelem *elt;
@@ -837,7 +882,7 @@ void LocalTabDefCache::AtEOXact_FreeTupleDesc()
         Assert(EOXactTupleDescArray != NULL);
         for (int i = 0; i < NextEOXactTupleDescNum; i++) {
             Assert(EOXactTupleDescArray[i]->tdrefcount == 0);
-            FreeTupleDesc(EOXactTupleDescArray[i]);
+            FreeTupleDesc(EOXactTupleDescArray[i], false);
         }
         pfree_ext(EOXactTupleDescArray);
     }
@@ -927,6 +972,7 @@ void LocalTabDefCache::AtEOXact_RelationCache(bool isCommit)
                     rel->rd_createSubid = InvalidSubTransactionId;
                 else if (RelationHasReferenceCountZero(rel)) {
                     RelationClearRelation(rel, false);
+                    elt = DLGetHead(&bucket_entry->cc_bucket);
                     continue;
                 } else {
                     /*
@@ -959,6 +1005,7 @@ void LocalTabDefCache::AtEOXact_RelationCache(bool isCommit)
             }
             if (rel->partMap != NULL && unlikely(rel->partMap->isDirty)) {
                 RelationClearRelation(rel, false);
+                elt = DLGetHead(&bucket_entry->cc_bucket);
             }
         }
     }
@@ -1002,6 +1049,7 @@ void LocalTabDefCache::AtEOSubXact_RelationCache(bool isCommit, SubTransactionId
                     rel->rd_createSubid = parentSubid;
                 else if (RelationHasReferenceCountZero(rel)) {
                     RelationClearRelation(rel, false);
+                    elt = DLGetHead(&bucket_entry->cc_bucket);
                     continue;
                 } else {
                     /*
@@ -1108,7 +1156,7 @@ Relation LocalTabDefCache::RelationIdGetRelation(Oid rel_oid)
     return rd;
 }
 
-void LocalTabDefCache::ResetInitFlag()
+void LocalTabDefCache::ResetInitFlag(bool include_shared)
 {
     m_bucket_list.ResetContent();
     invalid_entries.ResetInitFlag();
@@ -1120,8 +1168,10 @@ void LocalTabDefCache::ResetInitFlag()
     initFileRelationIds = NIL;
     RelCacheNeedEOXActWork = false;
 
-    g_bucketmap_cache = NIL;
-    max_bucket_map_size = 0;
+    if (include_shared) {
+        g_bucketmap_cache = NIL;
+        max_bucket_map_size = BUCKET_MAP_SIZE;
+    }
 
     EOXactTupleDescArray = NULL;
     NextEOXactTupleDescNum = 0;

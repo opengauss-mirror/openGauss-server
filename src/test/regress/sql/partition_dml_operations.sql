@@ -1,3 +1,7 @@
+DROP SCHEMA partition_dml_operations CASCADE;
+CREATE SCHEMA partition_dml_operations;
+SET CURRENT_SCHEMA TO partition_dml_operations;
+
 --select
 create table tsource(ld int not null,sd int not null,jname varchar2) partition by range(ld)
 (
@@ -702,3 +706,18 @@ partition by list(id) subpartition by range(sd)(
 
 select * from lm_list_range partition for(5,34);
 drop table lm_list_range;
+
+drop table if exists tsource;
+create table  if not exists tsource(fd int,sd int,ttime date)partition by range (ttime)interval('1 day')
+(partition p1 values less than ('2022-02-01 00:00:00'),
+ partition p2 values less than ('2022-02-02 00:00:00'));
+create index pidx on tsource(fd);
+create index tidx on tsource(ttime);
+insert into tsource values(1,2,'2022-02-01 20:00:00'),(2,3,'2022-02-02 20:00:00');
+insert into tsource partition(p2) values(2,2,'2022-02-01 20:30:00');
+insert into tsource partition for('2022-02-01 11:30:00') values(2,3,'2022-02-01 20:31:00');
+insert into tsource partition for('2022-02-01 11:30:00'::date) values(2,3,'2022-02-01 20:31:00'); 
+drop table if exists tsource;
+
+DROP SCHEMA partition_dml_operations CASCADE;
+RESET CURRENT_SCHEMA; 

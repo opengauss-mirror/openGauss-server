@@ -119,13 +119,6 @@ void GetPlanNodePlainText(
                 }
             }
             break;
-        case T_DfsScan:
-            *pt_operation = "TABLE ACCESS";
-            if (((Scan*)plan)->isPartTbl)
-                *pname = *sname = *pt_options = "Partitioned Dfs Scan";
-            else
-                *pname = *sname = *pt_options = "Dfs Scan";
-            break;
         case T_CStoreScan:
             *pt_operation = "TABLE ACCESS";
             if (!((Scan*)plan)->tablesample) {
@@ -187,20 +180,6 @@ void GetPlanNodePlainText(
                 *pname = *sname = *pt_options = "Partitioned Bitmap Heap Scan";
             else
                 *pname = *sname = *pt_options = "Bitmap Heap Scan";
-            break;
-        case T_DfsIndexScan:
-            *pt_operation = "INDEX";
-            if (((Scan*)plan)->isPartTbl) {
-                if (((DfsIndexScan*)plan)->indexonly)
-                    *pname = *sname = *pt_options = "Partitioned Dfs Index Only Scan";
-                else
-                    *pname = *sname = *pt_options = "Partitioned Dfs Index Scan";
-            } else {
-                if (((DfsIndexScan*)plan)->indexonly)
-                    *pname = *sname = *pt_options = "Dfs Index Only Scan";
-                else
-                    *pname = *sname = "Dfs Index Scan";
-            }
             break;
         case T_CStoreIndexScan:
             *pt_operation = "INDEX";

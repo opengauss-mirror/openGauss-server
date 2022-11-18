@@ -118,7 +118,7 @@ static int deal_with_sigup()
          * dynamically modify the ha socket.
          */
         for (j = 1; j < MAX_REPLNODE_NUM; j++) {
-            if (t_thrd.postmaster_cxt.ReplConnChangeType[j] == OLD_REPL_CHANGE_IP_OR_PORT) {
+            if (t_thrd.postmaster_cxt.ReplConnChangeType[j] != NO_CHANGE) {
                 break;
             }
         }
@@ -291,7 +291,7 @@ void heartbeat_main(void)
     (void)gspqsignal(SIGPIPE, SIG_IGN);
     (void)gspqsignal(SIGUSR1, heartbeat_sigusr1_handler);
     (void)gspqsignal(SIGUSR2, SIG_IGN);
-
+    (void)gspqsignal(SIGURG, print_stack);
     /*
      * Reset some signals that are accepted by postmaster but not here
      */

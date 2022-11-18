@@ -46,15 +46,15 @@ If you want to debug DBMind in this directory, you should rename the name of sub
 fi
 
 # Check whether Python has been installed onto the OS.
-PYTHON=$(which python)
+PYTHON=$(which python3)
 if [[ "$?" != "0" ]]; then
     die "Not found the Python environment."
 fi
 
 # Check for the Python version.
-$PYTHON -c 'import sys; exit(sys.version_info[:2] >= (3, 6))'
+$PYTHON -c 'import sys; exit((3, 7) <= sys.version_info[:2] <= (3, 9))'
 if [[ "$?" != "1" ]]; then
-    die "Not supported Python (${PYTHON}) version: at least Python 3.6."
+    die "Not supported Python (${PYTHON}) version: Python 3.7 to Python 3.9 ."
 fi
 
 # Check for dependencies

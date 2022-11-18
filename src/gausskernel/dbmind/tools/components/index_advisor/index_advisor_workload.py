@@ -42,11 +42,12 @@ JSON_TYPE = False
 DRIVER = None
 BLANK = ' '
 SQL_TYPE = ['select', 'delete', 'insert', 'update']
-SQL_PATTERN = [r'\((\s*(\d+(\.\d+)?\s*)[,]?)+\)',  # match integer set in the IN collection
-               r'([^\\])\'((\')|(.*?([^\\])\'))',  # match all content in single quotes
+NUMBER_SET_PARTTERN = r'\((\s*(\-|\+)?\d+(\.\d+)?\s*)(,\s*(\-|\+)?\d+(\.\d+)?\s*)*[,]?\)'
+SQL_PATTERN = [r'([^\\])\'((\')|(.*?([^\\])\'))',  # match all content in single quotes
+               NUMBER_SET_PARTTERN,  # match integer set in the IN collection
                r'(([^<>]\s*=\s*)|([^<>]\s+))(\d+)(\.\d+)?']  # match single integer
-SQL_DISPLAY_PATTERN = [r'\((\s*(\d+(\.\d+)?\s*)[,]?)+\)',  # match integer set in the IN collection
-                       r'\'((\')|(.*?\'))',  # match all content in single quotes
+SQL_DISPLAY_PATTERN = [r'\'((\')|(.*?\'))',  # match all content in single quotes
+                       NUMBER_SET_PARTTERN,  # match integer set in the IN collection
                        r'([^\_\d])\d+(\.\d+)?']  # match single integer
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
@@ -115,6 +116,11 @@ class IndexItem:
         self.select_sql_num = 0
         self.index_type = index_type
         self.is_candidate = False
+
+    def update_positive_pos(self, position):
+        self.positive_pos.append(position)
+        if position in self.ineffective_pos:
+            self.ineffective_pos.remove(position)
 
     def __str__(self):
         return f'{self.table} {self.columns} {self.index_type}'
@@ -247,8 +253,6 @@ class IndexAdvisor:
         if len(self.index_cost_total) == 1:
             print("No optimal indexes generated!")
             return None
-        global MAX_INDEX_NUM
-        MAX_INDEX_NUM = MAX_INDEX_NUM or 10
         return candidate_indexes
 
     def filter_low_benefit_index(self, opt_indexes):
@@ -300,7 +304,7 @@ class IndexAdvisor:
                                             - sql_info['deleteRatio'], 2)
         self.display_detail_info['recommendIndexes'].append(sql_info)
 
-    def computer_index_optimization_info(self, index, table_name, statement, opt_indexes):
+    def computer_index_optimization_info(self, index, table_name, statement):
         if self.multi_iter_mode:
             cost_list_pos = index.atomic_pos
         else:
@@ -322,15 +326,15 @@ class IndexAdvisor:
                 sql_detail['sql'] = self.workload_info[0][pos].statement
                 sql_detail['sqlCount'] = int(round(sql_count))
                 if category == 1:
-                    sql_optimzed = (self.workload_info[0][pos].cost_list[0] -
-                                    self.workload_info[0][pos].cost_list[cost_list_pos]) / \
-                        self.workload_info[0][pos].cost_list[cost_list_pos]
-                    sql_detail['optimized'] = '%.3f' % sql_optimzed
+                    sql_optimized = (self.workload_info[0][pos].cost_list[0] -
+                                     self.workload_info[0][pos].cost_list[cost_list_pos]) / \
+                                    self.workload_info[0][pos].cost_list[cost_list_pos]
+                    sql_detail['optimized'] = '%.3f' % sql_optimized
                 sql_detail['correlationType'] = category
                 sql_info['sqlDetails'].append(sql_detail)
         self.record_info(index, sql_info, cost_list_pos, table_name, statement)
 
-    def display_advise_indexes_info(self, opt_indexes, show_detail):
+    def display_advise_indexes_info(self, show_detail):
         index_current_storage = 0
         cnt = 0
         self.display_detail_info['recommendIndexes'] = []
@@ -347,16 +351,16 @@ class IndexAdvisor:
             # display determine indexes
             table_name = index.table.split('.')[-1]
             index_name = 'idx_%s_%s%s' % (table_name, (index.index_type
-                                                      + '_' if index.index_type else '') \
-                                          ,'_'.join(index.columns.split(', ')))
+                                                       + '_' if index.index_type else '') \
+                                              , '_'.join(index.columns.split(', ')))
             statement = 'CREATE INDEX %s ON %s%s%s;' % (index_name, index.table,
-                                           '(' + index.columns + ')',
-                                           (' '+index.index_type if index.index_type else ''))
+                                                        '(' + index.columns + ')',
+                                                        (' ' + index.index_type if index.index_type else ''))
             print(statement)
             if show_detail:
                 # record detailed SQL optimization information for each index
                 self.computer_index_optimization_info(
-                    index, table_name, statement, opt_indexes)
+                    index, table_name, statement)
 
     def generate_incremental_index(self, history_advise_indexes):
         self.integrate_indexes = copy.copy(history_advise_indexes)
@@ -435,7 +439,7 @@ def load_workload(file_path):
     wd_dict = {}
     workload = []
     global BLANK
-    with open(file_path, 'r') as file:
+    with open(file_path, 'r', errors='ignore') as file:
         raw_text = ''.join(file.readlines())
         sqls = raw_text.split(';')
         for sql in sqls:
@@ -481,7 +485,7 @@ def workload_compression(input_path):
     compressed_workload = []
     total_num = 0
     if JSON_TYPE:
-        with open(input_path, 'r') as file:
+        with open(input_path, 'r', errors='ignore') as file:
             templates = json.load(file)
     else:
         workload = load_workload(input_path)
@@ -756,13 +760,10 @@ def find_subsets_num(config, atomic_config_total):
 # infer the total cost of workload for a config according to the cost of atomic configs
 def infer_workload_cost(workload, config, atomic_config_total):
     total_cost = 0
-    is_computed = False
     atomic_subsets_num, cur_index_atomic_pos = find_subsets_num(
         config, atomic_config_total)
     if len(atomic_subsets_num) == 0:
         raise ValueError("No atomic configs found for current config!")
-    if not config[-1].total_sql_num:
-        is_computed = True
     for ind, obj in enumerate(workload):
         if max(atomic_subsets_num) >= len(obj.cost_list):
             raise ValueError("Wrong atomic config for current query!")
@@ -773,10 +774,6 @@ def infer_workload_cost(workload, config, atomic_config_total):
                 min_cost = obj.cost_list[num]
         total_cost += min_cost
 
-        # record ineffective sql and negative sql for candidate indexes
-        if is_computed:
-            ExecuteFactory.record_ineffective_negative_sql(
-                config[-1], obj, ind)
     return total_cost, cur_index_atomic_pos
 
 
@@ -906,7 +903,7 @@ def get_last_indexes_result(input_path):
     integrate_indexes = {'historyIndexes': {}}
     if os.path.exists(last_indexes_result_file):
         try:
-            with open(last_indexes_result_file, 'r') as file:
+            with open(last_indexes_result_file, 'r', errors='ignore') as file:
                 integrate_indexes['historyIndexes'] = json.load(file)
         except json.JSONDecodeError:
             return integrate_indexes
@@ -923,7 +920,7 @@ def index_advisor_workload(history_advise_indexes, db, workload_file_path,
         opt_indexes = index_advisor.simple_index_advisor()
     if opt_indexes:
         index_advisor.filter_low_benefit_index(opt_indexes)
-        index_advisor.display_advise_indexes_info(opt_indexes, show_detail)
+        index_advisor.display_advise_indexes_info(show_detail)
 
     index_advisor.generate_incremental_index(history_advise_indexes)
     history_invalid_indexes = {}

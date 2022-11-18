@@ -172,6 +172,7 @@ unsigned long DeleteFusion::ExecDelete(Relation rel, ResultRelInfo* resultRelInf
                 exec_index_tuples_state.targetPartRel = RELATION_IS_PARTITIONED(rel) ? partRel : NULL;
                 exec_index_tuples_state.p = RELATION_IS_PARTITIONED(rel) ? part : NULL;
                 exec_index_tuples_state.conflict = NULL;
+                exec_index_tuples_state.rollbackIndex = false;
                 tableam_tops_exec_delete_index_tuples(oldslot, bucket_rel == NULL ? destRel : bucket_rel, NULL,
                     &((HeapTuple)oldtup)->t_self, exec_index_tuples_state, modifiedIdxAttrs);
                 if (oldslot) {
@@ -240,6 +241,7 @@ unsigned long DeleteFusion::ExecDelete(Relation rel, ResultRelInfo* resultRelInf
 
 bool DeleteFusion::execute(long max_rows, char *completionTag)
 {
+    MemoryContext oldContext = MemoryContextSwitchTo(m_local.m_tmpContext);
     bool success = false;
     errno_t errorno = EOK;
 
@@ -293,6 +295,7 @@ bool DeleteFusion::execute(long max_rows, char *completionTag)
             snprintf_s(completionTag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1, "DELETE %ld", nprocessed);
     }
     securec_check_ss(errorno, "\0", "\0");
+    MemoryContextSwitchTo(oldContext);
 
     return success;
 }

@@ -63,6 +63,8 @@
 
 #define TUPLE_OVERHEAD(colorsort) ((colorsort) ? 24 : 8)
 
+const int64 max_unknown_offset = 10000;
+
 typedef enum {
     CONSTRAINT_EXCLUSION_OFF,      /* do not use c_e */
     CONSTRAINT_EXCLUSION_ON,       /* apply c_e to all rels */
@@ -71,11 +73,11 @@ typedef enum {
 
 extern void init_plan_cost(Plan* plan);
 extern void cost_insert(Path* path, bool vectorized, Cost input_cost, double tuples, int width, Cost comparison_cost,
-    int modify_mem, int dop, Oid resultRelOid, bool isDfsStore, OpMemInfo* mem_info);
+    int modify_mem, int dop, Oid resultRelOid, OpMemInfo* mem_info);
 extern void cost_delete(Path* path, bool vectorized, Cost input_cost, double tuples, int width, Cost comparison_cost,
-    int modify_mem, int dop, Oid resultRelOid, bool isDfsStore, OpMemInfo* mem_info);
+    int modify_mem, int dop, Oid resultRelOid, OpMemInfo* mem_info);
 extern void cost_update(Path* path, bool vectorized, Cost input_cost, double tuples, int width, Cost comparison_cost,
-    int modify_mem, int dop, Oid resultRelOid, bool isDfsStore, OpMemInfo* mem_info);
+    int modify_mem, int dop, Oid resultRelOid, OpMemInfo* mem_info);
 
 extern double clamp_row_est(double nrows);
 extern double index_pages_fetched(
@@ -84,7 +86,6 @@ extern void cost_seqscan(Path* path, PlannerInfo* root, RelOptInfo* baserel, Par
 extern void cost_resultscan(Path *path, PlannerInfo *root, RelOptInfo *baserel, ParamPathInfo *param_info);
 extern void cost_samplescan(Path* path, PlannerInfo* root, RelOptInfo* baserel, ParamPathInfo* param_info);
 extern void cost_cstorescan(Path* path, PlannerInfo* root, RelOptInfo* baserel);
-extern void cost_dfsscan(Path* path, PlannerInfo* root, RelOptInfo* baserel);
 #ifdef ENABLE_MULTIPLE_NODES
 extern void cost_tsstorescan(Path *path, PlannerInfo *root, RelOptInfo *baserel);
 #endif   /* ENABLE_MULTIPLE_NODES */
@@ -151,6 +152,9 @@ extern void set_values_size_estimates(PlannerInfo* root, RelOptInfo* rel);
 extern void set_cte_size_estimates(PlannerInfo* root, RelOptInfo* rel, Plan* cteplan);
 extern void set_foreign_size_estimates(PlannerInfo* root, RelOptInfo* rel);
 extern void set_result_size_estimates(PlannerInfo *root, RelOptInfo *rel);
+extern double adjust_limit_row_count(double lefttree_rows);
+extern void estimate_limit_offset_count(PlannerInfo* root, int64* offset_est, int64* count_est,
+    RelOptInfo* final_rel = NULL, bool* fix_param = NULL);
 
 /*
  * prototypes for clausesel.c

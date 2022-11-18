@@ -79,10 +79,6 @@ static char *ReplaceSWCTEOutSrting(ParseState *pstate, RangeTblEntry *rte, char 
     char *result = NULL;
     char *relname = NULL;
 
-    if (pstate->parentParseState != NULL) {
-        return label;
-    }
-
     foreach(lc, rte->origin_index) {
         int index = (int)lfirst_int(lc);
         RangeTblEntry *old_rte = (RangeTblEntry *)list_nth(pstate->p_rtable, index - 1);

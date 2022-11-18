@@ -272,6 +272,7 @@ int StandbyReadPageforPrimary(RepairBlockKey key, uint32 blocksize, uint64 lsn, 
         return REMOTE_READ_BLCKSZ_NOT_SAME;
 
     int ret_code = REMOTE_READ_OK;
+    BlockNumber checksum_block = key.blocknum;
 
     /* wait request lsn for replay */
     if (RecoveryInProgress()) {
@@ -286,9 +287,10 @@ int StandbyReadPageforPrimary(RepairBlockKey key, uint32 blocksize, uint64 lsn, 
                             key.relfilenode.bucketNode, key.relfilenode.opt};
 
     if (NULL != pblk) {
-        SegPageLocation loc = seg_get_physical_location(relfilenode, key.forknum, key.blocknum);
+        SegPageLocation loc = seg_get_physical_location(relfilenode, key.forknum, key.blocknum, false);
         uint8 standby_relNode = (uint8) EXTENT_SIZE_TO_TYPE(loc.extent_size);
         BlockNumber standby_block = loc.blocknum;
+        checksum_block = loc.blocknum;
         if (standby_relNode != pblk->relNode || standby_block != pblk->block) {
             ereport(ERROR, (errmodule(MOD_REMOTE),
                     errmsg("Standby page file is invalid! Standby relnode is %u, "
@@ -351,7 +353,7 @@ int StandbyReadPageforPrimary(RepairBlockKey key, uint32 blocksize, uint64 lsn, 
 
     if (ret_code == REMOTE_READ_OK) {
         *pagedata = pageData;
-        PageSetChecksumInplace((Page) VARDATA(*pagedata), key.blocknum);
+        PageSetChecksumInplace((Page) VARDATA(*pagedata), checksum_block);
     }
 
     return ret_code;
@@ -676,7 +678,6 @@ int ReadFileForRemote(RemoteReadFileKey *key, XLogRecPtr lsn, bytea** fileData, 
         for (i = blk_start, j = 0; i < blk_end; i++, j++) {
             ret_code = ReadFileByReadDisk(spc, key, bufBlock, i);
             if (ret_code != REMOTE_READ_OK) {
-                pfree(bufBlock);
                 pfree(pageData);
                 ereport(ERROR, (errmodule(MOD_REMOTE), errmsg("repair file failed, read block %u error, retcode=%d",
                     i, rc)));

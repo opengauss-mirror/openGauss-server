@@ -101,6 +101,20 @@ typedef struct portalhashent {
         }                                                                                                          \
     } while (0)
 
+inline void ReleaseStreamGroup(Portal portal)
+{
+#ifndef ENABLE_MULTIPLE_NODES
+    if (!StreamThreadAmI()) {
+        portal->streamInfo.AttachToSession();
+        StreamNodeGroup::ReleaseStreamGroup(true);
+        portal->streamInfo.Reset();
+    }
+#else
+    /* multinode do nothing */
+    return;
+#endif
+}
+
 /* -------------------portal_mem_cxt---------------------------------
  *				   public portal interface functions
  * ----------------------------------------------------------------
@@ -194,7 +208,7 @@ Node* PortalListGetPrimaryStmt(List* stmts)
  *
  * dupSilent: if true, don't even emit a WARNING.
  */
-Portal CreatePortal(const char* name, bool allowDup, bool dupSilent, bool is_from_spi)
+Portal CreatePortal(const char* name, bool allowDup, bool dupSilent, bool is_from_spi, bool is_from_pbe)
 {
     Portal portal;
 
@@ -207,6 +221,14 @@ Portal CreatePortal(const char* name, bool allowDup, bool dupSilent, bool is_fro
         if (dupSilent == false)
             ereport(WARNING, (errcode(ERRCODE_DUPLICATE_CURSOR), errmsg("closing existing cursor \"%s\"", name)));
         PortalDrop(portal, false);
+    }
+
+    // The default unnamed Portal should be dropped when Named Portal is created.
+    if (is_from_pbe && name[0] != '\0') {
+        Portal defaultPortal = GetPortalByName("");
+        if (PortalIsValid(defaultPortal)) {
+            PortalDrop(defaultPortal, false);
+        }
     }
 
     /* make new portal structure */
@@ -244,6 +266,8 @@ Portal CreatePortal(const char* name, bool allowDup, bool dupSilent, bool is_fro
     securec_check(rc, "\0", "\0");
     portal->funcUseCount = 0;
     portal->hasStreamForPlpgsql = false;
+    portal->have_rollback_transaction = false;
+
 #ifndef ENABLE_MULTIPLE_NODES
     portal->streamInfo.Reset();
     portal->isAutoOutParam = false;
@@ -515,6 +539,8 @@ void PortalDrop(Portal portal, bool isTopCommit)
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("portal is NULL")));
     }
 
+    u_sess->exec_cxt.isFlashBack = false;
+
     /*
      * Allow portalcmds.c to clean up the state it knows about, in particular
      * shutting down the executor if still active.	This step potentially runs
@@ -593,20 +619,7 @@ void PortalDrop(Portal portal, bool isTopCommit)
         portal->holdStore = NULL;
     }
 
-#ifndef ENABLE_MULTIPLE_NODES
-    if (!StreamThreadAmI()) {
-        portal->streamInfo.AttachToSession();
-        if (u_sess->stream_cxt.global_obj != NULL) {
-            StreamTopConsumerIam();
-            /* Set sync point for waiting all stream threads complete. */
-            StreamNodeGroup::syncQuit(STREAM_COMPLETE);
-            UnRegisterStreamSnapshots();
-            StreamNodeGroup::destroy(STREAM_COMPLETE);
-        }
-        // reset some flag related to stream
-        ResetStreamEnv();
-    }
-#endif
+    ReleaseStreamGroup(portal);
 
     /* delete tuplestore storage, if any */
 #ifndef ENABLE_MULTIPLE_NODES
@@ -668,14 +681,14 @@ void PortalHashTableDeleteAll(void)
 /*
  * "Hold" a portal.  Prepare it for access by later transactions.
  */
-void HoldPortal(Portal portal)
+void HoldPortal(Portal portal, bool is_rollback)
 {
     /*
      * Note that PersistHoldablePortal() must release all resources
      * used by the portal that are local to the creating transaction.
      */
     PortalCreateHoldStore(portal);
-    PersistHoldablePortal(portal);
+    PersistHoldablePortal(portal, is_rollback);
 
     /* drop cached plan reference, if any */
     PortalReleaseCachedPlan(portal);
@@ -888,6 +901,17 @@ void AtAbort_Portals(bool STP_rollback)
          * commit and rollback patch.
          */
         if(portal->status != PORTAL_ACTIVE) {
+#ifndef ENABLE_MULTIPLE_NODES
+            /*
+             * estate is under the queryDesc, and stream threads use it.
+             * we should wait all stream threads exit to cleanup queryDesc.
+             */
+            if (!StreamThreadAmI()) {
+                portal->streamInfo.AttachToSession();
+                StreamNodeGroup::ReleaseStreamGroup(true, STREAM_ERROR);
+                portal->streamInfo.Reset();
+            }
+#endif
             MemoryContextDeleteChildren(PortalGetHeapMemory(portal));
         }
     }
@@ -1100,7 +1124,9 @@ void AtSubAbort_Portals(SubTransactionId mySubid, SubTransactionId parentSubid,
              * upcoming transaction-wide cleanup; they will be gone before we run
              * PortalDrop.
              */
-             portal->resowner = NULL;
+            portal->resowner = NULL;
+
+            ReleaseStreamGroup(portal);
 
             /*
              * Although we can't delete the portal data structure proper, we can
@@ -1120,6 +1146,7 @@ void AtSubAbort_Portals(SubTransactionId mySubid, SubTransactionId parentSubid,
              * don't destory its memory context.
              */
             if (portal->status != PORTAL_ACTIVE) {
+                ReleaseStreamGroup(portal);
                 MemoryContextDeleteChildren(PortalGetHeapMemory(portal));
             }
         }
@@ -1332,7 +1359,7 @@ void ResetPortalCursor(SubTransactionId mySubid, Oid funOid, int funUseCount, bo
  * be normal practice anyway.)
  */
 void
-HoldPinnedPortals(void)
+HoldPinnedPortals(bool is_rollback)
 {
     HASH_SEQ_STATUS status;
     PortalHashEnt *hentry = NULL;
@@ -1363,8 +1390,8 @@ HoldPinnedPortals(void)
             if (portal->status != PORTAL_READY)
                 ereport(ERROR, (errmsg("pinned portal(%s) is not ready to be auto-held, with status[%d]",
                                 portal->name, portal->status)));
-       
-            HoldPortal(portal);
+
+            HoldPortal(portal, is_rollback);
             portal->autoHeld = true;
         }
     }

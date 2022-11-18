@@ -1,0 +1,166 @@
+testtx1 : 10
+1
+testtx1 : 10
+abc
+def
+id: 1
+name: abc
+id: 1
+name: abc
+id: 1
+name: abc
+********************Tx without opts: Scenario 1********************
+----------IN TX1: update and select----------
+f1:1, f2:华为, f3:223.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:true
+f1:2, f2:研究所, f3:23.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:false
+----------IN TX2: select, and TX1 not commit ----------
+f1:1, f2:华为, f3:123.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:true
+f1:2, f2:研究所, f3:123.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:false
+----------IN DB: select, after TX1 rollback and TX2 commit----------
+f1:1, f2:华为, f3:123.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:true
+f1:2, f2:研究所, f3:123.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:false
+********************Tx without opts: Scenario 2********************
+----------IN TX1: update and select----------
+f1:1, f2:华为, f3:223.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:true
+f1:2, f2:研究所, f3:23.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:false
+----------IN TX2: update and select, and after TX1 roolback ----------
+f1:1, f2:华为, f3:423.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:true
+f1:2, f2:研究所, f3:-176.7, f4:2022-02-08 10:30:43.31 +0800 CST, f5:false
+----------IN DB: select, after TX1 rollback and TX2 not commit----------
+f1:1, f2:华为, f3:123.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:true
+f1:2, f2:研究所, f3:123.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:false
+----------IN DB: select, after TX1 rollback and TX2 commit----------
+f1:1, f2:华为, f3:423.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:true
+f1:2, f2:研究所, f3:-176.7, f4:2022-02-08 10:30:43.31 +0800 CST, f5:false
+********************Tx without opts: Scenario 3********************
+----------IN TX1: update and select----------
+f1:1, f2:华为, f3:223.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:true
+f1:2, f2:研究所, f3:23.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:false
+----------IN TX2: update and select, and after TX1 commit ----------
+f1:1, f2:华为, f3:523.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:true
+f1:2, f2:研究所, f3:-276.7, f4:2022-02-08 10:30:43.31 +0800 CST, f5:false
+----------IN DB: select, after TX1 commit and TX2 not commit----------
+f1:1, f2:华为, f3:223.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:true
+f1:2, f2:研究所, f3:23.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:false
+----------IN DB: select, after TX1 commit and TX2 commit----------
+f1:1, f2:华为, f3:523.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:true
+f1:2, f2:研究所, f3:-276.7, f4:2022-02-08 10:30:43.31 +0800 CST, f5:false
+********************Tx with opts: Scenario 1********************
+****ISOLATION LEVEL:Read Uncommitted****
+----------IN TX1: update and select----------
+f1:1, f2:华为, f3:223.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:true
+f1:2, f2:研究所, f3:23.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:false
+----------IN TX2: select, and TX1 not commit ----------
+f1:1, f2:华为, f3:123.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:true
+f1:2, f2:研究所, f3:123.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:false
+----------IN DB: select, after TX1 rollback and TX2 commit----------
+f1:1, f2:华为, f3:123.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:true
+f1:2, f2:研究所, f3:123.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:false
+****ISOLATION LEVEL:Read Committed****
+----------IN TX1: update and select----------
+f1:1, f2:华为, f3:223.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:true
+f1:2, f2:研究所, f3:23.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:false
+----------IN TX2: select, and TX1 not commit ----------
+f1:1, f2:华为, f3:123.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:true
+f1:2, f2:研究所, f3:123.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:false
+----------IN DB: select, after TX1 rollback and TX2 commit----------
+f1:1, f2:华为, f3:123.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:true
+f1:2, f2:研究所, f3:123.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:false
+****ISOLATION LEVEL:Repeatable Read****
+----------IN TX1: update and select----------
+f1:1, f2:华为, f3:223.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:true
+f1:2, f2:研究所, f3:23.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:false
+----------IN TX2: select, and TX1 not commit ----------
+f1:1, f2:华为, f3:123.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:true
+f1:2, f2:研究所, f3:123.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:false
+----------IN DB: select, after TX1 rollback and TX2 commit----------
+f1:1, f2:华为, f3:123.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:true
+f1:2, f2:研究所, f3:123.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:false
+********************Tx with opts: Scenario 2********************
+****ISOLATION LEVEL:Read Uncommitted****
+----------IN TX1: update and select----------
+f1:1, f2:华为, f3:223.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:true
+f1:2, f2:研究所, f3:23.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:false
+----------IN TX2: update and select, and after TX1 roolback ----------
+f1:1, f2:华为, f3:423.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:true
+f1:2, f2:研究所, f3:-176.7, f4:2022-02-08 10:30:43.31 +0800 CST, f5:false
+----------IN DB: select, after TX1 rollback and TX2 not commit----------
+f1:1, f2:华为, f3:123.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:true
+f1:2, f2:研究所, f3:123.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:false
+----------IN DB: select, after TX1 rollback and TX2 commit----------
+f1:1, f2:华为, f3:423.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:true
+f1:2, f2:研究所, f3:-176.7, f4:2022-02-08 10:30:43.31 +0800 CST, f5:false
+****ISOLATION LEVEL:Read Committed****
+----------IN TX1: update and select----------
+f1:1, f2:华为, f3:523.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:true
+f1:2, f2:研究所, f3:-276.7, f4:2022-02-08 10:30:43.31 +0800 CST, f5:false
+----------IN TX2: update and select, and after TX1 roolback ----------
+f1:1, f2:华为, f3:723.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:true
+f1:2, f2:研究所, f3:-476.7, f4:2022-02-08 10:30:43.31 +0800 CST, f5:false
+----------IN DB: select, after TX1 rollback and TX2 not commit----------
+f1:1, f2:华为, f3:423.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:true
+f1:2, f2:研究所, f3:-176.7, f4:2022-02-08 10:30:43.31 +0800 CST, f5:false
+----------IN DB: select, after TX1 rollback and TX2 commit----------
+f1:1, f2:华为, f3:723.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:true
+f1:2, f2:研究所, f3:-476.7, f4:2022-02-08 10:30:43.31 +0800 CST, f5:false
+****ISOLATION LEVEL:Repeatable Read****
+----------IN TX1: update and select----------
+f1:1, f2:华为, f3:823.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:true
+f1:2, f2:研究所, f3:-576.7, f4:2022-02-08 10:30:43.31 +0800 CST, f5:false
+----------IN TX2: update and select, and after TX1 roolback ----------
+f1:1, f2:华为, f3:1023.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:true
+f1:2, f2:研究所, f3:-776.7, f4:2022-02-08 10:30:43.31 +0800 CST, f5:false
+----------IN DB: select, after TX1 rollback and TX2 not commit----------
+f1:1, f2:华为, f3:723.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:true
+f1:2, f2:研究所, f3:-476.7, f4:2022-02-08 10:30:43.31 +0800 CST, f5:false
+----------IN DB: select, after TX1 rollback and TX2 commit----------
+f1:1, f2:华为, f3:1023.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:true
+f1:2, f2:研究所, f3:-776.7, f4:2022-02-08 10:30:43.31 +0800 CST, f5:false
+********************Tx with opts: Scenario 3********************
+****ISOLATION LEVEL:Read Uncommitted****
+----------IN TX1: update and select----------
+f1:1, f2:华为, f3:523.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:true
+f1:2, f2:研究所, f3:-276.7, f4:2022-02-08 10:30:43.31 +0800 CST, f5:false
+----------IN TX2: update and select, and after TX1 commit ----------
+f1:1, f2:华为, f3:523.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:true
+f1:2, f2:研究所, f3:-276.7, f4:2022-02-08 10:30:43.31 +0800 CST, f5:false
+----------IN DB: select, after TX1 commit and TX2 not commit----------
+f1:1, f2:华为, f3:523.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:true
+f1:2, f2:研究所, f3:-276.7, f4:2022-02-08 10:30:43.31 +0800 CST, f5:false
+----------IN DB: select, after TX1 commit and TX2 commit----------
+f1:1, f2:华为, f3:523.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:true
+f1:2, f2:研究所, f3:-276.7, f4:2022-02-08 10:30:43.31 +0800 CST, f5:false
+****ISOLATION LEVEL:Read Committed****
+----------IN TX1: update and select----------
+f1:1, f2:华为, f3:523.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:true
+f1:2, f2:研究所, f3:-276.7, f4:2022-02-08 10:30:43.31 +0800 CST, f5:false
+----------IN TX2: update and select, and after TX1 commit ----------
+f1:1, f2:华为, f3:523.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:true
+f1:2, f2:研究所, f3:-276.7, f4:2022-02-08 10:30:43.31 +0800 CST, f5:false
+----------IN DB: select, after TX1 commit and TX2 not commit----------
+f1:1, f2:华为, f3:523.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:true
+f1:2, f2:研究所, f3:-276.7, f4:2022-02-08 10:30:43.31 +0800 CST, f5:false
+----------IN DB: select, after TX1 commit and TX2 commit----------
+f1:1, f2:华为, f3:523.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:true
+f1:2, f2:研究所, f3:-276.7, f4:2022-02-08 10:30:43.31 +0800 CST, f5:false
+****ISOLATION LEVEL:Repeatable Read****
+----------IN TX1: update and select----------
+f1:1, f2:华为, f3:523.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:true
+f1:2, f2:研究所, f3:-276.7, f4:2022-02-08 10:30:43.31 +0800 CST, f5:false
+----------IN TX2: update and select, and after TX1 commit ----------
+f1:1, f2:华为, f3:523.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:true
+f1:2, f2:研究所, f3:-276.7, f4:2022-02-08 10:30:43.31 +0800 CST, f5:false
+----------IN DB: select, after TX1 commit and TX2 not commit----------
+f1:1, f2:华为, f3:523.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:true
+f1:2, f2:研究所, f3:-276.7, f4:2022-02-08 10:30:43.31 +0800 CST, f5:false
+----------IN DB: select, after TX1 commit and TX2 commit----------
+f1:1, f2:华为, f3:523.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:true
+f1:2, f2:研究所, f3:-276.7, f4:2022-02-08 10:30:43.31 +0800 CST, f5:false
+********************Tx with opts and read only********************
+In a read-only transaction, cannot execute write operation.
+current transaction is aborted.
+********************Tx without opts and stmt********************
+f1:1, f2:华为, f3:423.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:true
+********************Tx with opts and stmt********************
+f1:1, f2:华为, f3:423.3, f4:2022-02-08 10:30:43.31 +0800 CST, f5:true
+PASS

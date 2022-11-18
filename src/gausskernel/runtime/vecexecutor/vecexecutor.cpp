@@ -39,7 +39,6 @@
 #include "vecexecutor/vecnodes.h"
 #include "vecexecutor/vecstream.h"
 #include "pgxc/pgxc.h"
-#include "vecexecutor/vecnodedfsindexscan.h"
 #include "vecexecutor/vecnodecstorescan.h"
 #include "vecexecutor/vecnodecstoreindexscan.h"
 #include "vecexecutor/vecnodecstoreindexctidscan.h"
@@ -91,11 +90,9 @@ VectorEngineFunc VectorEngineRunner[] = {
     reinterpret_cast<VectorEngineFunc>(ExecVecSort),
     reinterpret_cast<VectorEngineFunc>(ExecVecForeignScan),
     reinterpret_cast<VectorEngineFunc>(ExecCStoreScan),
-    reinterpret_cast<VectorEngineFunc>(ExecDfsScan),
 #ifdef ENABLE_MULTIPLE_NODES
     reinterpret_cast<VectorEngineFunc>(ExecTsStoreScan),
 #endif   /* ENABLE_MULTIPLE_NODES */
-    reinterpret_cast<VectorEngineFunc>(ExecDfsIndexScan),
     reinterpret_cast<VectorEngineFunc>(ExecCstoreIndexScan),
     reinterpret_cast<VectorEngineFunc>(ExecCstoreIndexCtidScan),
     reinterpret_cast<VectorEngineFunc>(ExecCstoreIndexHeapScan),

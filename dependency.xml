@@ -22,7 +22,7 @@
             <repoType>Generic</repoType>
             <id>
                 <offering>Huawei Secure C</offering>
-                <version>Huawei Secure C V100R001C01SPC010B002</version>
+                <version>Huawei Secure C V100R001C01SPC012B002</version>
             </id>
             <copies>
                 <copy>
@@ -36,7 +36,7 @@
             <repoType>Generic</repoType>
             <id>
                 <offering>DOPRA SSP</offering>
-                <version>DOPRA SSP V300R021C10SPC010B100</version>
+                <version>DOPRA SSP V300R022C00SPC050B200</version>
             </id>
             <copies>
                 <copy>
@@ -50,7 +50,7 @@
             <repoType>Generic</repoType>
             <id>
                 <offering>BiSheng JDK Enterprise</offering>
-                <version>BiSheng JDK Enterprise 2.1.0.320.B001</version>
+                <version>BiSheng JDK Enterprise 2.3.0.340.B003</version>
             </id>
             <copies>
                 <copy>

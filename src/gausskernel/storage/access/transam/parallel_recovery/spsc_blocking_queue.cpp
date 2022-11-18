@@ -183,10 +183,9 @@ void *SPSCBlockingQueueTop(SPSCBlockingQueue *queue)
             else
                 sleeptime = MAX_REDO_QUE_TAKE_DELAY;
             pg_usleep(sleeptime);
-        }
-
-        if (queue->callBackFunc != NULL) {
-            queue->callBackFunc();
+            if (queue->callBackFunc != NULL) {
+                queue->callBackFunc();
+            }
         }
     } while (COUNT(head, tail, queue->mask) == 0);
     t_thrd.page_redo_cxt.sleep_long = false;

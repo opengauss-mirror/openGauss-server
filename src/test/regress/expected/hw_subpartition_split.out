@@ -55,6 +55,20 @@ select * from list_list subpartition (p_201901_b) order by 1,2,3,4;
  201902     | 2         | 1       |         1
 (1 row)
 
+--error, conflict with subpartition name
+alter table list_list split subpartition p_201901_b values (2) into
+(
+	subpartition p_201902_a,
+	subpartition p_201901_c
+);
+ERROR:  resulting subpartition "p_201902_a" name conflicts with an existing subpartition
+--error, conflict with partition name
+alter table list_list split subpartition p_201901_b values (2) into
+(
+	subpartition p_201902,
+	subpartition p_201901_c
+);
+ERROR:  resulting subpartition "p_201902" name conflicts with an existing partition
 alter table list_list split subpartition p_201901_b values (2) into
 (
 	subpartition p_201901_b,
@@ -81,9 +95,9 @@ select * from list_list subpartition (p_201901_c) order by 1,2,3,4;
 select * from list_list partition (p_201901);
  month_code | dept_code | user_no | sales_amt 
 ------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+ 201902     | 1         | 1       |         1
  201902     | 2         | 1       |         1
- 201902     | 1         | 1       |         1
- 201902     | 1         | 1       |         1
 (3 rows)
 
 select * from list_list subpartition (p_201902_a) order by 1,2,3,4;
@@ -181,6 +195,20 @@ select * from range_range subpartition (p_201901_b) order by 1,2,3,4;
  201902     | 3         | 1       |         1
 (2 rows)
 
+--error, conflict with subpartition name
+alter table range_range split subpartition p_201901_b at (3) into
+(
+	subpartition p_201902_a,
+	subpartition p_201901_d
+);
+ERROR:  resulting subpartition "p_201902_a" name conflicts with an existing subpartition
+--error, conflict with partition name
+alter table range_range split subpartition p_201901_b at (3) into
+(
+	subpartition p_201902,
+	subpartition p_201901_d
+);
+ERROR:  resulting subpartition "p_201902" name conflicts with an existing partition
 alter table range_range split subpartition p_201901_b at (3) into
 (
 	subpartition p_201901_c,

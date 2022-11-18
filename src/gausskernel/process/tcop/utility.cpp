@@ -175,9 +175,6 @@ THR_LOCAL ProcessUtility_hook_type ProcessUtility_hook = NULL;
 #ifdef ENABLE_MULTIPLE_NODES
 static void analyze_tmptbl_debug_cn(Oid rel_id, Oid main_relid, VacuumStmt* stmt, bool iscommit);
 #endif
-/* @hdfs Get sheduling message for analyze command */
-extern List* CNSchedulingForAnalyze(
-    unsigned int* totalFilesNum, unsigned int* num_of_dns, Oid foreign_table_id, bool isglbstats);
 
 extern void begin_delta_merge(VacuumStmt* stmt);
 #ifdef ENABLE_MULTIPLE_NODES
@@ -247,7 +244,8 @@ bool IsSchemaInDistribution(const Oid namespaceOid)
 
 static bool foundPgstatPartititonOperations(AlterTableType subtype)
 {
-    return subtype == AT_TruncatePartition || subtype == AT_ExchangePartition || subtype == AT_DropPartition ||
+    return subtype == AT_TruncatePartition || subtype == AT_TruncateSubPartition ||
+        subtype == AT_ExchangePartition || subtype == AT_DropPartition ||
         subtype == AT_DropSubPartition;
 }
 
@@ -260,7 +258,8 @@ static bool foundPgstatPartititonOperations(AlterTableType subtype)
 static void report_utility_time(void* parse_tree)
 {
     ListCell* lc = NULL;
-    RangeVar* relation = NULL;
+    List* relations = NULL;
+    ListCell* cell = NULL;
 
     if (u_sess->attr.attr_sql.enable_save_datachanged_timestamp == false)
         return;
@@ -268,7 +267,9 @@ static void report_utility_time(void* parse_tree)
     if (!IS_SINGLE_NODE && !IS_PGXC_COORDINATOR)
         return;
 
-    if (nodeTag(parse_tree) != T_CopyStmt && nodeTag(parse_tree) != T_AlterTableStmt)
+    if (nodeTag(parse_tree) != T_CopyStmt
+        && nodeTag(parse_tree) != T_AlterTableStmt
+        && nodeTag(parse_tree) != T_TruncateStmt)
         return;
 
     if (nodeTag(parse_tree) == T_CopyStmt) {
@@ -277,7 +278,7 @@ static void report_utility_time(void* parse_tree)
             ereport(DEBUG1, (errmsg("\"copy to\" found")));
             return;
         }
-        relation = cs->relation;
+        relations = lappend(NULL, cs->relation);
     }
 
     if (nodeTag(parse_tree) == T_AlterTableStmt) {
@@ -295,11 +296,16 @@ static void report_utility_time(void* parse_tree)
             return;
         }
 
-        relation = ats->relation;
+        relations = lappend(NULL, ats->relation);
     }
 
-    if (relation == NULL) {
-        ereport(DEBUG1, (errmsg("relation is NULL in CopyStmt/AlterTableStmt")));
+    if (nodeTag(parse_tree) == T_TruncateStmt) {
+        TruncateStmt* ts = (TruncateStmt*)parse_tree;
+        relations = ts->relations;
+    }
+
+    if (relations == NULL) {
+        ereport(DEBUG1, (errmsg("relation is NULL in CopyStmt/AlterTableStmt/TruncateStmt")));
         return;
     }
 
@@ -309,18 +315,23 @@ static void report_utility_time(void* parse_tree)
 
     PG_TRY();
     {
-        rel = heap_openrv(relation, AccessShareLock);
+        foreach (cell, relations) {
+            RangeVar* relation = (RangeVar*)lfirst(cell);
 
-        Oid rid = rel->rd_id;
+            rel = heap_openrv(relation, AccessShareLock);
 
-        if (rel->rd_rel->relkind == RELKIND_RELATION && rid >= FirstNormalObjectId) {
-            if (rel->rd_rel->relpersistence == RELPERSISTENCE_PERMANENT ||
-                rel->rd_rel->relpersistence == RELPERSISTENCE_UNLOGGED) {
-                pgstat_report_data_changed(rid, STATFLG_RELATION, rel->rd_rel->relisshared);
+            Oid rid = rel->rd_id;
+
+            if (rel->rd_rel->relkind == RELKIND_RELATION && rid >= FirstNormalObjectId) {
+                if (rel->rd_rel->relpersistence == RELPERSISTENCE_PERMANENT ||
+                    rel->rd_rel->relpersistence == RELPERSISTENCE_GLOBAL_TEMP ||
+                    rel->rd_rel->relpersistence == RELPERSISTENCE_UNLOGGED) {
+                    pgstat_report_data_changed(rid, STATFLG_RELATION, rel->rd_rel->relisshared);
+                }
             }
-        }
 
-        heap_close(rel, AccessShareLock);
+            heap_close(rel, AccessShareLock);
+        }
     }
     PG_CATCH();
     {
@@ -503,10 +514,12 @@ static void check_xact_readonly(Node* parse_tree)
         case T_CreatePackageStmt:
         case T_CreatePackageBodyStmt:
         case T_CreatePublicationStmt:
-		case T_AlterPublicationStmt:
-		case T_CreateSubscriptionStmt:
-		case T_AlterSubscriptionStmt:
-		case T_DropSubscriptionStmt:
+        case T_AlterPublicationStmt:
+        case T_CreateSubscriptionStmt:
+        case T_AlterSubscriptionStmt:
+        case T_TimeCapsuleStmt:
+        case T_DropSubscriptionStmt:
+        case T_PurgeStmt:
             PreventCommandIfReadOnly(CreateCommandTag(parse_tree));
             break;
         case T_VacuumStmt: {
@@ -2158,7 +2171,6 @@ void CreateCommand(CreateStmt *parse_tree, const char *query_string, ParamListIn
 
             AlterTableCreateToastTable(rel_oid, toast_options, AccessShareLock);
             AlterCStoreCreateTables(rel_oid, toast_options, (CreateStmt*)stmt);
-            AlterDfsCreateTables(rel_oid, toast_options, (CreateStmt*)stmt);
             AlterCreateChainTables(rel_oid, toast_options, (CreateStmt *)stmt);
 #ifdef ENABLE_MULTIPLE_NODES
             Datum reloptions = transformRelOptions(
@@ -3643,6 +3655,7 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
         ExecuteTruncate((TruncateStmt*)parse_tree);
 #endif
                 u_sess->exec_cxt.isExecTrunc = false;
+                report_utility_time(parse_tree);
             }
             PG_CATCH();
             {
@@ -4656,6 +4669,28 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
             }
             PG_CATCH();
             {
+#ifndef ENABLE_MULTIPLE_NODES
+                CreateFunctionStmt* stmt = (CreateFunctionStmt*)parse_tree;
+                char* schemaname = NULL;
+                char* funcname = NULL;
+                DeconstructQualifiedName(stmt->funcname, &schemaname, &funcname, NULL);
+                Oid nspid = SchemaNameGetSchemaOid(schemaname, true);
+                if (!OidIsValid(nspid)) {
+                    ereport(WARNING,
+                        (errcode(ERRCODE_UNDEFINED_SCHEMA),
+                            errmsg("schema not defined, it may cause duplicate data."),
+                            errdetail("schema not exists.")));
+                }
+                if (!SKIP_GS_SOURCE && !IsInitdb && u_sess->plsql_cxt.isCreateFunction) {
+                    u_sess->plsql_cxt.isCreateFunction = false;
+                    if (stmt->isProcedure) {
+                        InsertGsSource(InvalidOid, nspid, funcname, "procedure", false);
+                    } else {
+                        InsertGsSource(InvalidOid, nspid, funcname, "function", false);
+                    }
+                }
+                
+#endif
                 if (u_sess->plsql_cxt.debug_query_string) {
                     pfree_ext(u_sess->plsql_cxt.debug_query_string);
                 }
@@ -10275,81 +10310,6 @@ void AssembleHybridMessage(char** query_string_with_info, const char* query_stri
     pfree_ext(query_len_const);
 }
 
-#ifdef ENABLE_MULTIPLE_NODES
-/*
- * @hdfs
- * get_scheduling_message
- *
- * In this function we call CNSchedulingForAnalyze to get scheduling information. The exact count of file which
- * will be analyzed is stored in totalFileCnt. At the same time,  CNSchedulingForAnalyze function selects a data
- * node to execute analyze operation. The selected datanode number is stored in nodeNo.
- */
-static char* get_scheduling_message(const Oid foreign_table_id, VacuumStmt* stmt)
-{
-    HDFSTableAnalyze* hdfs_table_analyze = makeNode(HDFSTableAnalyze);
-    List* dn_task = NIL; /* Get scheduling information */
-
-    /* get right scheduling messages for global stats. */
-    dn_task = CNSchedulingForAnalyze(&stmt->totalFileCnt, &stmt->DnCnt, foreign_table_id, true);
-
-    /* set default values.  */
-    hdfs_table_analyze->DnCnt = 0;
-    stmt->nodeNo = 0;
-    stmt->hdfsforeignMapDnList = NIL;
-
-    /*
-     * There is a risk that dn_task can be null. We mush process this situation
-     * It means that we call CNSchedulingForAnalyze failed.
-     */
-    if (dn_task != NIL) {
-        bool first = true;
-        ListCell* taskCell = NULL;
-
-        if (!IS_OBS_CSV_TXT_FOREIGN_TABLE(foreign_table_id)) {
-            SplitMap* task_map = NULL;
-            foreach (taskCell, dn_task) {
-                task_map = (SplitMap*)lfirst(taskCell);
-                if (task_map->splits != NIL) {
-                    /* we need to find the first dn which have filelist to get dndistinct for global stats. */
-                    if (first) {
-                        hdfs_table_analyze->DnCnt = stmt->DnCnt;
-                        stmt->nodeNo = task_map->nodeId;
-                        first = false;
-                    }
-
-                    /* get all nodeid which have filelist in order to get total reltuples from them later. */
-                    stmt->hdfsforeignMapDnList = lappend_int(stmt->hdfsforeignMapDnList, task_map->nodeId);
-                }
-            }
-        } else {
-            DistFdwDataNodeTask* task_map = NULL;
-            first = true;
-            foreach (taskCell, dn_task) {
-                task_map = (DistFdwDataNodeTask*)lfirst(taskCell);
-                if (NIL != task_map->task) {
-                    /* we need to find the first dn which have filelist to get dndistinct for global stats. */
-                    if (first) {
-                        hdfs_table_analyze->DnCnt = stmt->DnCnt;
-
-                        Oid nodeOid = get_pgxc_nodeoid(task_map->dnName);
-                        stmt->nodeNo = PGXCNodeGetNodeId(nodeOid, PGXC_NODE_DATANODE);
-                        first = false;
-                    }
-
-                    /* get all nodeid which have filelist in order to get total reltuples from them later. */
-                    stmt->hdfsforeignMapDnList = lappend_int(stmt->hdfsforeignMapDnList, stmt->nodeNo);
-                }
-            }
-        }
-    }
-
-    /* dn_task can be null when we call CNSchedulingForAnalyze failed */
-    hdfs_table_analyze->DnWorkFlow = dn_task;
-
-    return nodeToString(hdfs_table_analyze);
-}
-#endif
-
 /**
  * @Description: attatch sample rate to the query_string for global stats
  * @out query_string_with_info - the query string with analyze command and schedulingMessag
@@ -11088,313 +11048,6 @@ static void do_global_analyze_pgfdw_Rel(
 
 /**
  * @global stats
- * @Description: do analyze for one hdfs rel
- * @in stmt - the statment for analyze or vacuum command
- * @in rel_id - the relation oid for analyze or vacuum
- * @in deltarelid - the relation oid for delta table
- * @in query_string - the query string for analyze or vacuum command
- * @in is_replication - the flag identify the relation which analyze or vacuum is replication or not
- * @in has_var - the flag identify do analyze for one relation or all database
- * @in attnum - how many attribute num of the relation
- * @in sent_to_remote - identify if this statement has been sent to the nodes
- * @in is_top_level - is_top_level should be passed down from ProcessUtility
- * @in global_stats_context - the global stats context which create in caller, we will switch to it when we malloc
- * stadndistinct.
- * @return: void
- *
- * step 1: get estimate total rows from DNs
- * step 2: compute sample rate
- * step 3: get sample rows from DNs
- * step 4: get real total tuples from pg_class in DNs except replication table
- * step 5: get stadndistinct from DN1
- * step 6: compute statistics and update in pg_statistics
- */
-static void do_global_analyze_hdfs_rel(VacuumStmt* stmt, Oid rel_id, Oid deltarelid, const char* query_string,
-    bool is_replication, bool has_var, int attnum, bool sent_to_remote, bool is_top_level,
-    MemoryContext global_stats_context, int* table_num)
-{
-    VacuumStmt* delta_stmt = NULL;
-    char* query_string_with_info = NULL;
-    MemoryContext old_context = NULL;
-    int one_tuple_size1 = 0;
-    int one_tuple_size2 = 0;
-
-    if (!check_analyze_permission(rel_id)) {
-        (*table_num)--;
-        return;
-    }
-
-    /* get one_tuple_size for analyze memory control on cn */
-    if (*table_num == 1) {
-        Relation rel1 = relation_open(rel_id, AccessShareLock);
-        one_tuple_size1 = GetOneTupleSize(stmt, rel1);
-        relation_close(rel1, AccessShareLock);
-
-        Relation rel2 = relation_open(deltarelid, AccessShareLock);
-        one_tuple_size2 = GetOneTupleSize(stmt, rel2);
-        relation_close(rel2, AccessShareLock);
-    }
-
-    /*
-     * get delta relation information and make new VacuumStmt for
-     * get reltuples and dndistinct from dn for delta table.
-     */
-    Relation delta_rel = relation_open(deltarelid, AccessShareLock);
-    delta_stmt = makeNode(VacuumStmt);
-    delta_stmt->relation = makeNode(RangeVar);
-    delta_stmt->relation->relname = pstrdup(RelationGetRelationName(delta_rel));
-    delta_stmt->relation->schemaname = get_namespace_name(CSTORE_NAMESPACE);
-    delta_stmt->options = stmt->options;
-    delta_stmt->flags = stmt->flags;
-    delta_stmt->va_cols = (List*)copyObject(stmt->va_cols);
-    relation_close(delta_rel, AccessShareLock);
-
-    /*
-     * if it is a REPLICATION table, we set stmt->totalRowCnts = 0, then the sample rate=0, DNs send 0 rows to CN.
-     * then CN do not compute stats and just fetch stats from DN1. same for System Relation
-     */
-    if (is_replication) {
-        stmt->nodeNo = 0;
-        /* set inital value of totalRowCnts, because we will get real total row count from DN1 for replication later. */
-        stmt->pstGlobalStatEx[ANALYZEMAIN - 1].totalRowCnts = 0;
-        stmt->pstGlobalStatEx[ANALYZEDELTA - 1].totalRowCnts = 0;
-        stmt->pstGlobalStatEx[ANALYZECOMPLEX - 1].totalRowCnts = 0;
-        stmt->pstGlobalStatEx[ANALYZEMAIN - 1].topRowCnts = 0;
-        stmt->pstGlobalStatEx[ANALYZEDELTA - 1].topRowCnts = 0;
-        stmt->pstGlobalStatEx[ANALYZECOMPLEX - 1].topRowCnts = 0;
-        /* memory released after both main and delta finish */
-        stmt->pstGlobalStatEx[ANALYZEMAIN - 1].topMemSize =
-            DEFAULT_SAMPLE_ROWCNT * (one_tuple_size1 + one_tuple_size2) / 1024;
-        stmt->pstGlobalStatEx[ANALYZEDELTA - 1].topMemSize = 0;
-        stmt->pstGlobalStatEx[ANALYZECOMPLEX - 1].topMemSize = 0;
-        stmt->pstGlobalStatEx[ANALYZEMAIN - 1].num_samples = 0;
-        stmt->pstGlobalStatEx[ANALYZEDELTA - 1].num_samples = 0;
-        stmt->pstGlobalStatEx[ANALYZECOMPLEX - 1].num_samples = 0;
-        /* identify the current table is replication. */
-        stmt->pstGlobalStatEx[ANALYZEMAIN - 1].isReplication = true;
-        stmt->pstGlobalStatEx[ANALYZEDELTA - 1].isReplication = true;
-        stmt->pstGlobalStatEx[ANALYZECOMPLEX - 1].isReplication = true;
-    } else {
-        /* Set inital sampleRate, it means CN get estimate total row count from DN If sampleRate is -1. */
-        global_stats_set_samplerate(ANALYZEMAIN, stmt, NULL);
-        stmt->pstGlobalStatEx[ANALYZEMAIN - 1].isReplication = false;
-        stmt->pstGlobalStatEx[ANALYZEDELTA - 1].isReplication = false;
-        stmt->pstGlobalStatEx[ANALYZECOMPLEX - 1].isReplication = false;
-        stmt->pstGlobalStatEx[ANALYZEMAIN - 1].exec_query = true;
-        stmt->pstGlobalStatEx[ANALYZEDELTA - 1].exec_query = true;
-        stmt->pstGlobalStatEx[ANALYZECOMPLEX - 1].exec_query = true;
-        stmt->sampleTableRequired = false;
-
-        /*
-         * Create temp table on coordinator for analyze with relative-estimation or
-         * absolute-estimate with debuging.
-         */
-        analyze_tmptbl_debug_cn(rel_id, InvalidOid, stmt, false);
-        analyze_tmptbl_debug_cn(deltarelid, rel_id, stmt, true);
-
-        /* Attatch global info to the query_string for get estimate total rows. */
-        attatch_global_info(&query_string_with_info, stmt, query_string, has_var, ANALYZEMAIN, InvalidOid);
-
-        /*
-         * step 1: get estimate total rows from DNs
-         * we set sampleRate is -1 identify the action.
-         * if sampleRate more or equal 0, it means CN should get sample rows from DN.
-         */
-        DEBUG_START_TIMER;
-        (void)ExecRemoteVacuumStmt(stmt, query_string_with_info, sent_to_remote, ARQ_TYPE_TOTALROWCNTS, ANALYZEMAIN);
-        DEBUG_STOP_TIMER(
-            "Fetch estimate totalRowCount for table: %s, %s", stmt->relation->relname, delta_stmt->relation->relname);
-    }
-
-    /* workload client manager */
-    if (*table_num > 0) {
-        UtilityDesc desc;
-        errno_t rc = memset_s(&desc, sizeof(UtilityDesc), 0, sizeof(UtilityDesc));
-        securec_check(rc, "\0", "\0");
-        AdaptMem* mem_usage = &stmt->memUsage;
-        bool need_sort = false;
-
-        /* cn row count, no more than DEFAULT_SAMPLE_ROWCNT */
-        int cnRowCnts1 = (int)Min(DEFAULT_SAMPLE_ROWCNT, stmt->pstGlobalStatEx[ANALYZEMAIN - 1].totalRowCnts);
-        int cnRowCnts2 = (int)Min(DEFAULT_SAMPLE_ROWCNT, stmt->pstGlobalStatEx[ANALYZEDELTA - 1].totalRowCnts);
-        /* dn memsize (top) */
-        int top_mem_size = stmt->pstGlobalStatEx[ANALYZEMAIN - 1].topMemSize;
-
-        if (stmt->options & VACOPT_FULL) {
-            Relation rel = relation_open(rel_id, AccessShareLock);
-            if (rel->rd_rel->relhasclusterkey) {
-                SetSortMemInfo(&desc,
-                    cnRowCnts1 + cnRowCnts2,
-                    Max(one_tuple_size1, one_tuple_size2),
-                    true,
-                    false,
-                    u_sess->attr.attr_memory.work_mem);
-                need_sort = true;
-            }
-            relation_close(rel, AccessShareLock);
-        }
-
-        /* Get top row count of cn/dn */
-        top_mem_size = Max(top_mem_size, (cnRowCnts1 * one_tuple_size1 + cnRowCnts2 * one_tuple_size2) / 1024);
-        desc.query_mem[0] = (int)Max(desc.query_mem[0], BIG_MEM_RATIO * top_mem_size);
-        /* Adjust assigned query mem if it's too small */
-        desc.assigned_mem = Max(Max(desc.query_mem[0], STATEMENT_MIN_MEM * 1024L), desc.assigned_mem);
-        desc.cost = (double)(desc.query_mem[0] / PAGE_SIZE) * u_sess->attr.attr_sql.seq_page_cost;
-
-        if (*table_num > 1) {
-            desc.query_mem[0] = Max(desc.query_mem[0], STATEMENT_MIN_MEM * 1024L);
-            /* Adjust assigned query mem if it's too small */
-            desc.assigned_mem = Max(Max(desc.query_mem[0], STATEMENT_MIN_MEM * 1024L), desc.assigned_mem);
-            desc.cost = g_instance.cost_cxt.disable_cost;
-        }
-        if (desc.query_mem[1] == 0)
-            desc.query_mem[1] = desc.query_mem[0];
-
-        WLMInitQueryPlan((QueryDesc*)&desc, false);
-        dywlm_client_manager((QueryDesc*)&desc, false);
-        if (need_sort)
-            AdjustIdxMemInfo(mem_usage, &desc);
-
-        /* set 0 for only send to wlm at first time */
-        *table_num = 0;
-    }
-
-    /*
-     * step 2: compute sample rate for normal table.
-     * compute sample rate for HDFS table(include dfs/delta/complex table).
-     */
-    (void)compute_sample_size(stmt, 0, NULL, rel_id, ANALYZEMAIN - 1);
-    (void)compute_sample_size(stmt, 0, NULL, deltarelid, ANALYZEDELTA - 1);
-    (void)compute_sample_size(stmt, 0, NULL, rel_id, ANALYZECOMPLEX - 1);
-    elog(DEBUG1,
-        "Step 2: Compute sample rate[%.12f][%.12f][%.12f] for DFS table.",
-        stmt->pstGlobalStatEx[ANALYZEMAIN - 1].sampleRate,
-        stmt->pstGlobalStatEx[ANALYZEDELTA - 1].sampleRate,
-        stmt->pstGlobalStatEx[ANALYZECOMPLEX - 1].sampleRate);
-
-    /* Attatch global info to the query_string. for get sample. */
-    attatch_global_info(&query_string_with_info, stmt, query_string, has_var, ANALYZEMAIN, InvalidOid);
-    elog(DEBUG1,
-        "Analyzing [%s], oid is [%d], the messege is [%s]",
-        stmt->relation->relname,
-        rel_id,
-        query_string_with_info);
-
-    /*
-     * We only send query string to all datanodes in two cases:
-     * 1. for replication table;
-     * 2. there is no split map of all datanodes for hdfs foreign tables.
-     */
-    if (stmt->pstGlobalStatEx[ANALYZEMAIN - 1].isReplication) {
-        ExecUtilityStmtOnNodes(query_string_with_info, NULL, sent_to_remote, true, EXEC_ON_DATANODES, false);
-    } else {
-        /* step 3: get sample rows and real total rows from DNs */
-        DEBUG_START_TIMER;
-        stmt->sampleRows = ExecRemoteVacuumStmt(stmt, query_string_with_info, sent_to_remote, ARQ_TYPE_SAMPLE, ANALYZEMAIN);
-        DEBUG_STOP_TIMER(
-            "Get sample rows from all DNs for table: %s, %s", stmt->relation->relname, delta_stmt->relation->relname);
-    }
-
-    PopActiveSnapshot();
-    /*
-     * It will swich CurrentMemoryContext to t_thrd.top_mem_cxt after call CommitTransactionCommand(),
-     * and swich to u_sess->top_transaction_mem_cxt after call StartTransactionCommand().
-     */
-    CommitTransactionCommand();
-    StartTransactionCommand();
-    PushActiveSnapshot(GetTransactionSnapshot());
-
-    /* step 4: get stadndistinct from DN1. */
-    /* current memctx is u_sess->top_transaction_mem_cxt, we will malloc memory for stadndistinct, so we must switch to
-     * global_stats_context. */
-    old_context = MemoryContextSwitchTo(global_stats_context);
-
-    DEBUG_START_TIMER;
-    /* get dndistinct from dn1 for delta table. */
-    delta_stmt->tableidx = ANALYZEDELTA - 1;
-    /* get some statistic info which have collected for delta table. */
-    delta_stmt->pstGlobalStatEx[delta_stmt->tableidx].totalRowCnts =
-        stmt->pstGlobalStatEx[delta_stmt->tableidx].totalRowCnts;
-    delta_stmt->pstGlobalStatEx[delta_stmt->tableidx].eAnalyzeMode = ANALYZEDELTA;
-    delta_stmt->pstGlobalStatEx[delta_stmt->tableidx].isReplication =
-        stmt->pstGlobalStatEx[delta_stmt->tableidx].isReplication;
-    /* set inital value of dndistinct. */
-    set_dndistinct_coors(delta_stmt, attnum);
-
-    /* fetch dndistinct from dn1 and copy to stmt using for vacuum later. */
-    FetchGlobalStatistics(delta_stmt, deltarelid, stmt->relation, is_replication);
-    stmt->pstGlobalStatEx[ANALYZEDELTA - 1].eAnalyzeMode = ANALYZEDELTA;
-    stmt->pstGlobalStatEx[delta_stmt->tableidx].totalRowCnts =
-        delta_stmt->pstGlobalStatEx[delta_stmt->tableidx].totalRowCnts;
-    stmt->pstGlobalStatEx[delta_stmt->tableidx].dndistinct = delta_stmt->pstGlobalStatEx[delta_stmt->tableidx].dndistinct;
-    stmt->pstGlobalStatEx[delta_stmt->tableidx].correlations =
-        delta_stmt->pstGlobalStatEx[delta_stmt->tableidx].correlations;
-    stmt->pstGlobalStatEx[delta_stmt->tableidx].attnum = delta_stmt->pstGlobalStatEx[delta_stmt->tableidx].attnum;
-
-    /* get dndistinct from dn1 for dfs table. */
-    stmt->tableidx = ANALYZEMAIN - 1;
-    stmt->pstGlobalStatEx[stmt->tableidx].eAnalyzeMode = ANALYZEMAIN;
-    set_dndistinct_coors(stmt, attnum);
-    /* there is no tuples, we need not go on continue. */
-    FetchGlobalStatistics(stmt, rel_id, NULL, is_replication);
-
-    /* get dndistinct from dn1 for complex table. */
-    stmt->tableidx = ANALYZECOMPLEX - 1;
-    stmt->pstGlobalStatEx[stmt->tableidx].eAnalyzeMode = ANALYZECOMPLEX;
-    set_dndistinct_coors(stmt, attnum);
-    /* there is no tuples, we need not go on continue. */
-    FetchGlobalStatistics(stmt, rel_id, NULL, is_replication);
-    DEBUG_STOP_TIMER(
-        "Fetch statistics from DN1 for table: %s, %s", stmt->relation->relname, delta_stmt->relation->relname);
-
-    /* malloc sample memory for complex table and copy sample rows from dfs table and delta table. */
-    if (!stmt->sampleTableRequired)
-        set_complex_sample(stmt);
-
-    (void)MemoryContextSwitchTo(old_context);
-    /* step 5: compute statistics and update in pg_statistics. */
-    vacuum(stmt, InvalidOid, true, NULL, is_top_level);
-
-    /*
-     * for VACUUM ANALYZE table where options=3, vacuum has set use_own_xacts true and already poped ActiveSnapshot,
-     * so we don't want to pop again.
-     */
-    if (ActiveSnapshotSet())
-        PopActiveSnapshot();
-
-    CommitTransactionCommand();
-    StartTransactionCommand();
-    PushActiveSnapshot(GetTransactionSnapshot());
-
-    if (stmt->tmpSampleTblNameList && log_min_messages > DEBUG1) {
-        dropSampleTable(get_sample_tblname(ANALYZEMAIN, stmt->tmpSampleTblNameList));
-        dropSampleTable(get_sample_tblname(ANALYZEDELTA, stmt->tmpSampleTblNameList));
-
-        /*
-         * Drop table is twophase-transaction, if dn fault at this time,
-         * current transaction don't be cleanned immadiately. So we should commit the transaction and
-         * Start a new transaction.
-         */
-        PopActiveSnapshot();
-        CommitTransactionCommand();
-        StartTransactionCommand();
-        PushActiveSnapshot(GetTransactionSnapshot());
-    }
-
-    /* Notify the other CN nodes if do analyze/vacuum one relation and the relation is not temporary. */
-    if (has_var && !IsTempTable(rel_id)) {
-        notify_other_cn_get_statistics(query_string_with_info, sent_to_remote);
-    }
-
-    if (query_string_with_info != NULL) {
-        pfree_ext(query_string_with_info);
-        query_string_with_info = NULL;
-    }
-    return;
-}
-
-/**
- * @global stats
  * @Description: do analyze for one rel
  * @in stmt - the statment for analyze or vacuum command
  * @in rel_id - the relation oid for analyze or vacuum
@@ -11432,13 +11085,6 @@ static void do_global_analyze_rel(VacuumStmt* stmt, Oid rel_id, const char* quer
         one_tuple_size = GetOneTupleSize(stmt, rel);
         relation_close(rel, AccessShareLock);
     }
-
-    /*
-     * Call scheduler to get datanode which will execute analyze operation
-     * and file list.
-     */
-    if (stmt->isForeignTables && !stmt->isPgFdwForeignTables)
-        foreign_tbl_schedul_message = get_scheduling_message(rel_id, stmt);
 
     /*
      * if it is a REPLICATION table, we set stmt->totalRowCnts = 0, then the sample rate=0, DNs send 0 rows to CN.
@@ -11816,23 +11462,7 @@ static void do_global_analyze_mpp_table(VacuumStmt* stmt, const char* query_stri
         {
             stmt->relation->schemaname = get_namespace_name(RelationGetNamespace(rel));
 
-            /* do analyze for HDFS table. */
-            if (!(stmt->isForeignTables && IsHDFSTableAnalyze(rel_id)) && RelationIsDfsStore(rel)) {
-                Oid deltaRelId = rel->rd_rel->reldeltarelid;
-
-                relation_close(rel, AccessShareLock);
-                do_global_analyze_hdfs_rel(stmt,
-                    rel_id,
-                    deltaRelId,
-                    query_string,
-                    is_replication,
-                    has_var,
-                    attnum,
-                    sent_to_remote,
-                    is_top_level,
-                    global_stats_context,
-                    &table_num);
-            } else if (IsPGFDWTableAnalyze(rel_id)) {
+            if (IsPGFDWTableAnalyze(rel_id)) {
                 relation_close(rel, AccessShareLock);
                 /* do analyze for openGauss foreign table. */
                 do_global_analyze_pgfdw_Rel(stmt, rel_id, query_string, has_var, sent_to_remote, is_top_level);
@@ -12694,22 +12324,11 @@ void EstIdxMemInfo(Relation rel, RangeVar* relation, UtilityDesc* desc, IndexInf
         strncmp(access_method, "psort", strlen("psort")))
         return;
 
-    /* for hdfs table, we should set to get estimated rows from complex table */
-    if (RelationIsPAXFormat(rel))
-        mode = ANALYZEMAIN;
-
     /* Set inital sampleRate, it means CN get estimate total row count from DN If sampleRate is -1. */
     global_stats_set_samplerate(mode, stmt, NULL);
     if (mode == ANALYZENORMAL) {
         stmt->pstGlobalStatEx[ANALYZENORMAL].isReplication = false;
         stmt->pstGlobalStatEx[ANALYZENORMAL].exec_query = true;
-    } else {
-        stmt->pstGlobalStatEx[ANALYZEMAIN - 1].isReplication = false;
-        stmt->pstGlobalStatEx[ANALYZEDELTA - 1].isReplication = false;
-        stmt->pstGlobalStatEx[ANALYZECOMPLEX - 1].isReplication = false;
-        stmt->pstGlobalStatEx[ANALYZEMAIN - 1].exec_query = true;
-        stmt->pstGlobalStatEx[ANALYZEDELTA - 1].exec_query = true;
-        stmt->pstGlobalStatEx[ANALYZECOMPLEX - 1].exec_query = true;
     }
     stmt->sampleTableRequired = false;
 
@@ -12734,9 +12353,7 @@ void EstIdxMemInfo(Relation rel, RangeVar* relation, UtilityDesc* desc, IndexInf
 
     (void)ExecRemoteVacuumStmt(stmt, query_string_with_info, false, ARQ_TYPE_TOTALROWCNTS, mode, rel->rd_id);
 
-    /* For hdfs table, we only create index on main table */
-    double maxRowCnt = (mode == ANALYZENORMAL) ? stmt->pstGlobalStatEx[ANALYZENORMAL].topRowCnts :
-                                                 stmt->pstGlobalStatEx[ANALYZEMAIN - 1].topRowCnts;
+    double maxRowCnt = stmt->pstGlobalStatEx[ANALYZENORMAL].topRowCnts;
     double sortRowCnt = maxRowCnt;
     int32 width = 0;
 
@@ -12804,9 +12421,8 @@ void SetSortMemInfo(
         max_mem = available_mem = default_size;
 
     if (copy_rel != NULL) {
-        bool is_dfs_table = RelationIsPAXFormat(copy_rel);
         Oid rel_oid = copy_rel->rd_id;
-        cost_insert(&sort_path, vectorized, 0.0, row_count, width, 0.0, available_mem, 1, rel_oid, is_dfs_table, &mem_info);
+        cost_insert(&sort_path, vectorized, 0.0, row_count, width, 0.0, available_mem, 1, rel_oid, &mem_info);
     } else {
         cost_sort(&sort_path, NIL, 0.0, row_count, width, 0.0, available_mem, -1.0, vectorized, 1, &mem_info, index_sort);
     }
@@ -13272,12 +12888,67 @@ static bool LoadDataHasWhenExpr(LoadStmt* stmt)
     return false;
 }
 
+static bool IsFixedFormatForTransformLoadSql(LoadStmt* stmt)
+{
+    ListCell* option = NULL;
+    bool is_fixed = false;
+
+    foreach (option, stmt->rel_options) {
+        DefElem* def = (DefElem*)lfirst(option);
+        if (strcmp(def->defname, "fields_list") != 0) {
+            continue;
+        }
+        List* field_list = (List *)def->arg;
+        ListCell* option_col = NULL;
+        foreach (option_col, field_list) {
+            SqlLoadColExpr* coltem = (SqlLoadColExpr *)lfirst(option_col);
+            if (coltem->scalar_spec == NULL) {
+                continue;
+            }
+            SqlLoadScalarSpec* scalarSpec = (SqlLoadScalarSpec *)coltem->scalar_spec;
+            if (scalarSpec->position_info) {
+                is_fixed = true;
+            }
+        }
+    }
+
+    return is_fixed;
+}
+
+
+static bool IsCSVFormatForTransformLoadSql(LoadStmt* stmt)
+{
+    ListCell* option = NULL;
+    bool is_csv = false;
+
+    foreach (option, stmt->rel_options) {
+        DefElem* def = (DefElem*)lfirst(option);
+        if (strcmp(def->defname, "fields_csv") == 0) {
+            if (stmt->is_only_special_filed == false) {
+                is_csv = true;
+                break;
+            }
+        } else if (strcmp(def->defname, "optionally_enclosed_by") == 0) {
+            if (stmt->is_only_special_filed == false) {
+                is_csv = true;
+                break;
+            }
+        }
+    }
+
+    return is_csv;
+}
 
 static void TransformPreLoadOptions(LoadStmt* stmt, StringInfo buf)
 {
     ListCell* option = NULL;
-
     int64 errors = 0;
+
+    bool is_csv = IsCSVFormatForTransformLoadSql(stmt);
+    bool is_fixed = IsFixedFormatForTransformLoadSql(stmt);
+    if (!is_csv && !is_fixed && stmt->is_only_special_filed == false) {
+        appendStringInfo(buf, "USEEOF WITHOUT ESCAPING ");
+    }
 
     foreach (option, stmt->pre_load_options) {
         DefElem* def = (DefElem*)lfirst(option);

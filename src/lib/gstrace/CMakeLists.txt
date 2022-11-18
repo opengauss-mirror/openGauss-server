@@ -37,9 +37,6 @@ list(REMOVE_ITEM gstrace_DEF_OPTIONS -D_GNU_SOURCE)
 set(gstrace_COMPILE_OPTIONS ${OPTIMIZE_OPTIONS} -ftls-model=initial-exec ${OS_OPTIONS} ${PROTECT_OPTIONS} ${WARNING_OPTIONS} ${LIB_SECURE_OPTIONS} ${CHECK_OPTIONS})
 set(gstrace_LINK_OPTIONS ${LIB_LINK_OPTIONS})
 add_static_libtarget(gstrace TGT_gstrace_SRC "" "${gstrace_DEF_OPTIONS}" "${gstrace_COMPILE_OPTIONS}")
-add_dependencies(gstrace_static pgport_static)
-add_custom_command(TARGET gstrace_static POST_BUILD 
-    COMMAND /usr/bin/ar qs ${CMAKE_BINARY_DIR}/lib/libgstrace.a ${CMAKE_BINARY_DIR}/lib/libpgport.a
-)
+
 add_static_objtarget(lib_gstrace_common TGT_gstrace_SRC "" "${gstrace_DEF_OPTIONS}" "${gstrace_COMPILE_OPTIONS}" "${gstrace_LINK_OPTIONS}")
 

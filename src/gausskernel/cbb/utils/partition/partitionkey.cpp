@@ -357,26 +357,40 @@ bool targetListHasPartitionKey(List* targetList, Oid partitiondtableid)
     bool ret = false;
     Relation rel;
 
-    rel = heap_open(partitiondtableid, NoLock);
+    rel = heap_open(partitiondtableid, AccessShareLock);
     if (RELATION_IS_PARTITIONED(rel)) {
         if (RelationIsSubPartitioned(rel)) {
             ret = IsPartkeyInTargetList(rel, targetList);
             if (!ret) {
                 List *partOidList = relationGetPartitionOidList(rel);
-                Oid partOid = list_nth_oid(partOidList, 0);
+                ListCell *cell = NULL;
+                Oid partOid = InvalidOid;
+                foreach (cell, partOidList) {
+                    partOid = lfirst_oid(cell);
+                    if (ConditionalLockPartitionOid(rel->rd_id, partOid, AccessShareLock)) {
+                        break;
+                    }
+                    if (cell->next == NULL) {
+                        ereport(ERROR,
+                            (errcode(ERRCODE_LOCK_NOT_AVAILABLE),
+                                errmsg("cannot check partkey for relation \"%s\"", RelationGetRelationName(rel)),
+                                errdetail("all partitions of the target relation hold the lock")));
+                    }
+                }
+
                 Partition part = partitionOpen(rel, partOid, NoLock);
                 Relation partRel = partitionGetRelation(rel, part);
 
                 ret = IsPartkeyInTargetList(partRel, targetList);
 
                 releaseDummyRelation(&partRel);
-                partitionClose(rel, part, NoLock);
+                partitionClose(rel, part, AccessShareLock);
             }
         } else {
             ret = IsPartkeyInTargetList(rel, targetList);
         }
     }
-    heap_close(rel, NoLock);
+    heap_close(rel, AccessShareLock);
     return ret;
 }
 
@@ -502,7 +516,7 @@ static Oid GetPartitionOidFromPartitionKeyValuesList(Relation rel, List *partiti
     if (rel->partMap->type == PART_TYPE_LIST) {
         ListPartitionDefState *listPartDef = NULL;
         listPartDef = makeNode(ListPartitionDefState);
-        listPartDef->boundary = partitionKeyValuesList;
+        listPartDef->boundary = (List *)copyObject(partitionKeyValuesList);
         listPartDef->boundary = transformListPartitionValue(pstate, listPartDef->boundary, false, true);
         listPartDef->boundary = transformIntoTargetType(
             rel->rd_att->attrs, (((ListPartitionMap *)rel->partMap)->partitionKey)->values[0], listPartDef->boundary);
@@ -515,7 +529,7 @@ static Oid GetPartitionOidFromPartitionKeyValuesList(Relation rel, List *partiti
     } else if (rel->partMap->type == PART_TYPE_HASH) {
         HashPartitionDefState *hashPartDef = NULL;
         hashPartDef = makeNode(HashPartitionDefState);
-        hashPartDef->boundary = partitionKeyValuesList;
+        hashPartDef->boundary = (List *)copyObject(partitionKeyValuesList);
         hashPartDef->boundary = transformListPartitionValue(pstate, hashPartDef->boundary, false, true);
         hashPartDef->boundary = transformIntoTargetType(
             rel->rd_att->attrs, (((HashPartitionMap *)rel->partMap)->partitionKey)->values[0], hashPartDef->boundary);
@@ -528,7 +542,7 @@ static Oid GetPartitionOidFromPartitionKeyValuesList(Relation rel, List *partiti
     } else if (rel->partMap->type == PART_TYPE_RANGE || rel->partMap->type == PART_TYPE_INTERVAL) {
         RangePartitionDefState *rangePartDef = NULL;
         rangePartDef = makeNode(RangePartitionDefState);
-        rangePartDef->boundary = partitionKeyValuesList;
+        rangePartDef->boundary = (List *)copyObject(partitionKeyValuesList);
 
         transformPartitionValue(pstate, (Node *)rangePartDef, false);
 
@@ -598,7 +612,7 @@ static void CheckPartitionValuesList(Relation rel, List *subPartitionKeyValuesLi
 {
     int len = 0;
 
-    if (rel->partMap->type == PART_TYPE_RANGE) {
+    if (rel->partMap->type == PART_TYPE_RANGE || rel->partMap->type == PART_TYPE_INTERVAL) {
         len = (((RangePartitionMap *)rel->partMap)->partitionKey)->dim1;
     } else if (rel->partMap->type == PART_TYPE_LIST) {
         len = (((ListPartitionMap *)rel->partMap)->partitionKey)->dim1;

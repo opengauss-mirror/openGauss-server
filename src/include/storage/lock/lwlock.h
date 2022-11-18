@@ -18,6 +18,7 @@
 #include "lib/ilist.h"
 #include "nodes/pg_list.h"
 #include "storage/lock/s_lock.h"
+#include "storage/smgr/relfilenode.h"
 #include "utils/atomic.h"
 #include "gs_thread.h"
 
@@ -219,7 +220,7 @@ enum BuiltinTrancheIds
     LWTRANCHE_USPACE_TRANSGRP_MAPPING,
     LWTRANCHE_PROC_XACT_MAPPING,
     LWTRANCHE_ASP_MAPPING,
-    LWTRANCHE_GlobalSeq, 
+    LWTRANCHE_GlobalSeq,
     LWTRANCHE_GWC_MAPPING,
     LWTRANCHE_NORMALIZED_SQL,
     LWTRANCHE_START_BLOCK_MAPPING,
@@ -238,6 +239,7 @@ enum BuiltinTrancheIds
     LWTRANCHE_MULTIXACTMEMBER_CTL,
     LWTRANCHE_OLDSERXID_SLRU_CTL,
     LWTRANCHE_WAL_INSERT,
+    LWTRANCHE_IO_BLOCKED,
     LWTRANCHE_DOUBLE_WRITE,
     LWTRANCHE_DW_SINGLE_FIRST,   /* single flush dw file, first version pos lock */
     LWTRANCHE_DW_SINGLE_SECOND,   /* single flush dw file, second version pos lock */
@@ -251,7 +253,7 @@ enum BuiltinTrancheIds
     LWTRANCHE_MPFL,
     LWTRANCHE_GTT_CTL, // For GTT
     LWTRANCHE_PLDEBUG, // For Pldebugger
-    LWTRANCHE_NGROUP_MAPPING,    
+    LWTRANCHE_NGROUP_MAPPING,
     LWTRANCHE_MATVIEW_SEQNO,
     LWTRANCHE_IO_STAT,
     LWTRANCHE_WAL_FLUSH_WAIT,
@@ -287,9 +289,10 @@ enum BuiltinTrancheIds
 typedef enum LWLockMode {
     LW_EXCLUSIVE,
     LW_SHARED,
-    LW_WAIT_UNTIL_FREE /* A special mode used in PGPROC->lwlockMode,
-                        * when waiting for lock to become free. Not
-                        * to be used as LWLockAcquire argument */
+    LW_WAIT_UNTIL_FREE, /* A special mode used in PGPROC->lwlockMode,
+                         * when waiting for lock to become free. Not
+                         * to be used as LWLockAcquire argument */
+    LW_NOLOCK
 } LWLockMode;
 
 /* To avoid pointer misuse during hash search, we wrapper the LWLock* in the following structure. */
@@ -318,6 +321,13 @@ typedef struct LWLock {
     pg_atomic_uint32 listlock;
 #endif
 } LWLock;
+
+typedef struct GlobalSessionId {
+    uint64 sessionId;  /* Increasing sequence num */
+    uint32 nodeId;     /* the number of the send node */
+    /* Used to identify the latest global sessionid during pooler reuse */
+    uint64 seq;
+} GlobalSessionId;
 
 /*
  * All the LWLock structs are allocated as an array in shared memory.
@@ -374,7 +384,8 @@ typedef struct LWLockHandle {
 extern void DumpLWLockInfo();
 extern LWLock* LWLockAssign(int trancheId);
 extern void LWLockInitialize(LWLock* lock, int tranche_id);
-extern bool LWLockAcquire(LWLock* lock, LWLockMode mode, bool need_update_lockid = false);
+extern bool LWLockAcquire(LWLock* lock, LWLockMode mode, bool need_update_lockid = false,
+    volatile BufferTag* tag = NULL);
 extern bool LWLockConditionalAcquire(LWLock* lock, LWLockMode mode);
 extern bool LWLockAcquireOrWait(LWLock* lock, LWLockMode mode);
 extern void LWLockRelease(LWLock* lock);
@@ -382,6 +393,7 @@ extern void LWLockReleaseClearVar(LWLock* lock, uint64* valptr, uint64 val);
 extern void LWLockReleaseAll(void);
 extern bool LWLockHeldByMe(LWLock* lock);
 extern bool LWLockHeldByMeInMode(LWLock* lock, LWLockMode mode);
+extern LWLockMode LWLockHeldMode(LWLock *lock);
 extern void LWLockReset(LWLock* lock);
 
 extern void LWLockOwn(LWLock* lock);
@@ -419,9 +431,11 @@ extern void wakeup_victim(LWLock *lock, ThreadId victim_tid);
 extern int *get_held_lwlocks_num(void);
 extern uint32 get_held_lwlocks_maxnum(void);
 extern void* get_held_lwlocks(void);
+extern void* get_lwlock_held_times(void);
 extern void copy_held_lwlocks(void* heldlocks, lwlock_id_mode* dst, int num_heldlocks);
 extern const char* GetLWLockIdentifier(uint32 classId, uint16 eventId);
 extern LWLockMode GetHeldLWLockMode(LWLock* lock);
+extern char* BuftagToString(const BufferTag* buftag);
 
 extern const char** LWLockTrancheArray;
 extern int LWLockTranchesAllocated;

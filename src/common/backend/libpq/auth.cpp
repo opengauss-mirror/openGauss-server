@@ -355,6 +355,7 @@ void ClientAuthentication(Port* port)
     char token[TOKEN_LENGTH + 1] = {0};
     errno_t rc = EOK;
     int retval = 0;
+    bool needCheckLockStatus = false;
 
     /*
      * Get the authentication method to use for this frontend/database
@@ -617,6 +618,7 @@ void ClientAuthentication(Port* port)
             }
             sendAuthRequest(port, AUTH_REQ_MD5);
             status = recv_and_check_password_packet(port);
+            needCheckLockStatus = true;
             break;
         /* Database Security:  Support SHA256.*/
         case uaSHA256:
@@ -645,6 +647,7 @@ void ClientAuthentication(Port* port)
                 sendAuthRequest(port, AUTH_REQ_SM3);
             }
             status = recv_and_check_password_packet(port);
+            needCheckLockStatus = true;
             break;
         case uaPAM:
 #ifdef USE_PAM
@@ -691,7 +694,7 @@ void ClientAuthentication(Port* port)
     }
 
     /* Database Security: Support lock/unlock account */
-    if (!AM_NOT_HADR_SENDER) {
+    if (!AM_NOT_HADR_SENDER && needCheckLockStatus) {
         /*
          * Disable immediate response to SIGTERM/SIGINT/timeout interrupts as there are
          * some cache and memory operations which can not be interrupted. And nothing will

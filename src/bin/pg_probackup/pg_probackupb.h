@@ -477,7 +477,7 @@ typedef struct BackupPageHeader2
 #define GetXLogRecPtr(segno, offset, wal_segsz_bytes, dest) \
     XLogSegNoOffsetToRecPtr(segno, offset, dest)
 #define GetXLogFileName(fname, len, tli, logSegNo, wal_segsz_bytes) \
-    XLogFileName(fname, len, tli, logSegNo )
+    XLogFileName(fname, len, tli, logSegNo)
 #define IsInXLogSeg(xlrp, logSegNo, wal_segsz_bytes) \
     XLByteInSeg(xlrp, logSegNo)
 

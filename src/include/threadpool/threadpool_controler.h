@@ -80,6 +80,7 @@ public:
     void ShutDownThreads(bool forceWait = false);
     int DispatchSession(Port* port);
     void AddWorkerIfNecessary();
+    void AddWorkerIfNoWorker();
     void SetThreadPoolInfo();
     int GetThreadNum();
     ThreadPoolStat* GetThreadPoolStat(uint32* num);
@@ -109,14 +110,19 @@ public:
 
     inline int GetStreamThreadNum()
     {
-        return m_maxStreamPoolSize;
+        return m_streamThreadNum;
     }
 
     inline float GetStreamProcRatio()
     {
         return m_streamProcRatio;
     }
-	
+
+    inline int GetThreadActualNum()
+    {
+        return m_threadNum;
+    }
+
 	void BindThreadToAllAvailCpu(ThreadId thread) const;
     void EnableAdjustPool();
     static int ParseRangeStr(char* attr, bool* arr, int totalNum, char* bindtype);
@@ -148,6 +154,7 @@ private:
     cpu_set_t m_cpuset;
     int m_groupNum;
     int m_threadNum;
+    int m_streamThreadNum;
     int m_maxPoolSize;
     int m_maxStreamPoolSize;
     float m_streamProcRatio;

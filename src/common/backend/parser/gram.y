@@ -433,7 +433,7 @@ static int errstate;
 				opt_class opt_inline_handler opt_validator validator_clause
 				opt_collate
 
-%type <range>	qualified_name insert_target OptConstrFromTable opt_index_name insert_partition_clause update_delete_partition_clause
+%type <range>	qualified_name insert_target OptConstrFromTable opt_index_name insert_partition_clause update_delete_partition_clause specify_partition_clause
 
 %type <str>		all_Op MathOp
 
@@ -1223,15 +1223,16 @@ stmt :
  *****************************************************************************/
 
 CreateRoleStmt:
-			CREATE ROLE RoleId opt_with OptRoleList
+			CREATE ROLE RoleId opt_with {u_sess->parser_cxt.isForbidTruncate = true;} OptRoleList
 				{
 					CreateRoleStmt *n = makeNode(CreateRoleStmt);
 					n->stmt_type = ROLESTMT_ROLE;
 					if (!isRestoreMode)
 						IsValidIdent($3);
 					n->role = $3;
-					n->options = $5;
+					n->options = $6;
 					$$ = (Node *)n;
+					u_sess->parser_cxt.isForbidTruncate = false;
 				}
 		;
 
@@ -1542,14 +1543,15 @@ CreateOptRoleElem:
  *****************************************************************************/
 
 CreateUserStmt:
-			CREATE USER RoleId opt_with OptRoleList
+			CREATE USER RoleId opt_with {u_sess->parser_cxt.isForbidTruncate = true;} OptRoleList
 				{
 					CreateRoleStmt *n = makeNode(CreateRoleStmt);
 					n->stmt_type = ROLESTMT_USER;
 					IsValidIdent($3);
 					n->role = $3;
-					n->options = $5;
+					n->options = $6;
 					$$ = (Node *)n;
+					u_sess->parser_cxt.isForbidTruncate = false;
 				}
 		;
 
@@ -1561,14 +1563,15 @@ CreateUserStmt:
  *****************************************************************************/
 
 AlterRoleStmt:
-			ALTER ROLE RoleId opt_with AlterOptRoleList
+			ALTER ROLE RoleId opt_with {u_sess->parser_cxt.isForbidTruncate = true;} AlterOptRoleList
 				 {
 					AlterRoleStmt *n = makeNode(AlterRoleStmt);
 					n->role = $3;
 					n->action = +1;	/* add, if there are members */
-					n->options = $5;
+					n->options = $6;
 					n->lockstatus = DO_NOTHING;
 					$$ = (Node *)n;
+					u_sess->parser_cxt.isForbidTruncate = false;
 				 }
 			| ALTER ROLE RoleId opt_with ACCOUNT LOCK_P
 				{
@@ -1614,14 +1617,15 @@ AlterRoleSetStmt:
  *****************************************************************************/
 
 AlterUserStmt:
-			ALTER USER RoleId opt_with AlterOptRoleList
+			ALTER USER RoleId opt_with {u_sess->parser_cxt.isForbidTruncate = true;} AlterOptRoleList
 				 {
 					AlterRoleStmt *n = makeNode(AlterRoleStmt);
 					n->role = $3;
 					n->action = +1;	/* add, if there are members */
-					n->options = $5;
+					n->options = $6;
 					n->lockstatus = DO_NOTHING;
 					$$ = (Node *)n;
+					u_sess->parser_cxt.isForbidTruncate = false;
 				 }
 			| ALTER USER RoleId opt_with ACCOUNT LOCK_P
 				{
@@ -2139,20 +2143,22 @@ set_rest_more:  /* Generic SET syntaxes: */
 					n->args = list_make1(makeStringConst($2, @2));
 					$$ = n;
 				}
-			| ROLE ColId_or_Sconst PASSWORD password_string
+			| ROLE ColId_or_Sconst PASSWORD {u_sess->parser_cxt.isForbidTruncate = true;} password_string
 				{
+					u_sess->parser_cxt.isForbidTruncate = false;
 					VariableSetStmt *n = makeNode(VariableSetStmt);
 					n->kind = VAR_SET_ROLEPWD;
 					n->name = "role";
-					n->args = list_make2(makeStringConst($2, @2), makeStringConst($4, @4));
+					n->args = list_make2(makeStringConst($2, @2), makeStringConst($5, @5));
 					$$ = n;
 				}
-			| SESSION AUTHORIZATION ColId_or_Sconst PASSWORD password_string
+			| SESSION AUTHORIZATION ColId_or_Sconst PASSWORD {u_sess->parser_cxt.isForbidTruncate = true;} password_string
 				{
+					u_sess->parser_cxt.isForbidTruncate = false;
 					VariableSetStmt *n = makeNode(VariableSetStmt);
 					n->kind = VAR_SET_ROLEPWD;
 					n->name = "session_authorization";
-					n->args = list_make2(makeStringConst($3, @3), makeStringConst($5,@5));
+					n->args = list_make2(makeStringConst($3, @3), makeStringConst($6,@6));
 					$$ = n;
 				}
 			| SESSION AUTHORIZATION DEFAULT
@@ -8392,10 +8398,11 @@ AlterExtensionContentsStmt:
  *****************************************************************************/
 
 CreateWeakPasswordDictionaryStmt:
-        CREATE WEAK PASSWORD DICTIONARY opt_vals weak_password_string_list
+        CREATE WEAK PASSWORD DICTIONARY opt_vals {u_sess->parser_cxt.isForbidTruncate = true;} weak_password_string_list
                {
+                       u_sess->parser_cxt.isForbidTruncate = false;
                        CreateWeakPasswordDictionaryStmt *n = makeNode(CreateWeakPasswordDictionaryStmt);
-                       n->weak_password_string_list = $6;
+                       n->weak_password_string_list = $7;
                        $$ = (Node*)n;
                }
 			   ;
@@ -12903,7 +12910,11 @@ createfunc_opt_item:
 
 
 createproc_opt_item:
-			common_func_opt_item
+			 LANGUAGE ColId_or_Sconst
+				{
+					$$ = makeDefElem("plsqllanguage", (Node *)makeString("plpgsql"));
+				}
+			| common_func_opt_item
 				{
 					$$ = $1;
 				}
@@ -18218,7 +18229,7 @@ DeallocateStmt: DEALLOCATE name
 					}
 		;
 
-insert_partition_clause: update_delete_partition_clause
+insert_partition_clause: specify_partition_clause
 						{
 #ifdef ENABLE_MULTIPLE_NODES
 					    const char* message = "In distributed mode, insert/update/delete does not support specified partitions.";
@@ -18234,8 +18245,23 @@ insert_partition_clause: update_delete_partition_clause
 						}
 					| /* EMPTY */	{ $$ = NULL; }
 					;
+update_delete_partition_clause: specify_partition_clause
+						{
+#ifdef ENABLE_MULTIPLE_NODES
+					    const char* message = "In distributed mode, insert/update/delete does not support specified partitions.";
+						InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+						ereport(errstate,
+							(errmodule(MOD_PARSER),
+							  errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							  errmsg("In distributed mode, insert/update/delete does not support specified partitions."),
+							  errdetail("N/A"),errcause("Feature is not supported this operation."),
+							  erraction("Contact engineer to support.")));
+#endif
+							$$ = $1;
+						}
+						;
 
-update_delete_partition_clause: PARTITION '(' name ')'
+specify_partition_clause: PARTITION '(' name ')'
 						{
 							$$ = makeRangeVar(NULL, NULL, @3);
 							$$->partitionname = $3;
@@ -19539,6 +19565,16 @@ start_with_clause:
                 {
                     StartWithClause *n = makeNode(StartWithClause);
                     n->startWithExpr = $5;
+                    n->connectByExpr = $3;
+                    n->siblingsOrderBy = NULL;
+                    n->priorDirection = false;
+                    n->nocycle = true;
+                    $$ = (Node *) n;
+                }
+            | CONNECT_BY NOCYCLE a_expr
+                {
+                    StartWithClause *n = makeNode(StartWithClause);
+                    n->startWithExpr = NULL;
                     n->connectByExpr = $3;
                     n->siblingsOrderBy = NULL;
                     n->priorDirection = false;
@@ -21501,6 +21537,12 @@ c_expr:		columnref %prec UMINUS						        { $$ = $1; }
                                 {
                                     ColumnRef *col = (ColumnRef *)$3;
                                     col->prior = true;
+                                    /*
+                                     * Setting the location to a non-default 0
+                                     * to indicate that this is a parenthetical
+                                     * case of PRIOR reference.
+                                     */
+                                    col->location = 0;
                                     $$ = (Node *)col;
                                 }
                         | PRIOR '(' c_expr ',' func_arg_list ')'
@@ -23210,6 +23252,7 @@ case_expr:	CASE case_arg when_clause_list case_default END_P
 						c->arg = NULL;
 						c->args = NULL;
 						c->defresult = NULL;
+						c->fromDecode = true;
 
 						foreach(cell,$5)
 						{
@@ -23406,7 +23449,7 @@ target_el:	a_expr AS ColLabel
 
                                         ColumnRef* cr = (ColumnRef*) $1;
                                         /* PRIOR(x) in target list implies func call */
-                                        if (IsA($1, ColumnRef) && cr->prior) {
+                                        if (IsA($1, ColumnRef) && cr->prior && cr->location == 0) {
                                             FuncCall *fn = MakePriorAsFunc();
                                             cr->prior = false;
                                             fn->args = list_make1(cr);
@@ -25337,6 +25380,7 @@ makeNodeDecodeCondtion(Expr* firstCond,Expr* secondCond)
 	c->args = NULL;
 	c->args = lappend(c->args,w);
 	c->defresult = (Expr*)equal_oper;
+	c->fromDecode = true;
 
 	return (Expr*)c;
 }
@@ -25784,7 +25828,7 @@ makeCallFuncStmt(List* funcname,List* parameters, bool is_call)
 	if (clist->next)
 	{
 		has_overload_func = true;
-		if (!IsPackageFunction(funcname))
+        if (IsPackageFunction(funcname) == false && IsPackageSchemaOid(SchemaNameGetSchemaOid(schemaname, true)) == false)
 		{
 			const char* message = "function isn't exclusive ";
 			InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);

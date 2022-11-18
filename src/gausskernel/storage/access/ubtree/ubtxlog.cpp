@@ -955,6 +955,7 @@ bool IsUBTreeVacuum(const XLogReaderState *record)
 static void UBTreeXlogReusePage(XLogReaderState *record)
 {
     xl_btree_reuse_page *xlrec = (xl_btree_reuse_page *)XLogRecGetData(record);
+    XLogRecPtr lsn = record->EndRecPtr;
 
     /*
      * Btree reuse_page records exist to provide a conflict point when we
@@ -970,7 +971,7 @@ static void UBTreeXlogReusePage(XLogReaderState *record)
     RelFileNodeCopy(tmp_node, xlrec->node, XLogRecGetBucketId(record));
 
     if (InHotStandby && g_supportHotStandby) {
-        ResolveRecoveryConflictWithSnapshot(xlrec->latestRemovedXid, tmp_node);
+        ResolveRecoveryConflictWithSnapshot(xlrec->latestRemovedXid, tmp_node, lsn);
     }
 }
 
@@ -993,13 +994,14 @@ static void UBTreeXlogPrunePage(XLogReaderState* record)
     buffer.buf = InvalidBuffer;
     RelFileNode rnode;
     xl_ubtree_prune_page *xlrec = (xl_ubtree_prune_page*)XLogRecGetData(record);
+    XLogRecPtr lsn = record->EndRecPtr;
 
     if (!XLogRecGetBlockTag(record, 0, &rnode, NULL, NULL)) {
         /* Caller specified a bogus block_id */
         ereport(PANIC, (errmsg("failed to locate backup block with ID %d", 0)));
     }
     if (InHotStandby && TransactionIdIsValid(xlrec->latestRemovedXid))
-        ResolveRecoveryConflictWithSnapshot(xlrec->latestRemovedXid, rnode);
+        ResolveRecoveryConflictWithSnapshot(xlrec->latestRemovedXid, rnode, lsn);
 
     if (XLogReadBufferForRedo(record, 0, &buffer) == BLK_NEEDS_REDO) {
         UBTreeXlogPrunePageOperatorPage(&buffer, XLogRecGetData(record));
@@ -1027,6 +1029,21 @@ static void UBTree2XlogShiftBase(XLogReaderState* record)
 static void UBTree2XlogRecycleQueueInitPage(XLogReaderState *record)
 {
     xl_ubtree2_recycle_queue_init_page *xlrec = (xl_ubtree2_recycle_queue_init_page *)XLogRecGetData(record);
+
+    if (xlrec->currBlkno == 0) {
+        RedoBufferTag blockinfo;
+        if (!XLogRecGetBlockTag(record, xlrec->currBlkno, &(blockinfo.rnode), &(blockinfo.forknum), &(blockinfo.blkno),
+            &(blockinfo.pblk))) {
+            /* Caller specified a bogus block_id */
+            ereport(WARNING, (errmsg("init urq failed, locate backup block with ID %u", xlrec->currBlkno)));
+        } else {
+            SMgrRelation smgr = smgropen(blockinfo.rnode, InvalidBackendId);
+            if (smgrexists(smgr, FSM_FORKNUM)) {
+                smgrtruncate(smgr, FSM_FORKNUM, 0);
+            }
+            smgrclose(smgr);
+        }
+    }
 
     RedoBufferInfo buf;
     XLogInitBufferForRedo(record, UBTREE2_RECYCLE_QUEUE_INIT_PAGE_CURR_BLOCK_NUM, &buf);

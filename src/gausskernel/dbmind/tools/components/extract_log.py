@@ -11,15 +11,14 @@
 # MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 # See the Mulan PSL v2 for more details.
 
-import re
-import os
-import sys
 import argparse
 import json
+import os
 import random
+import re
+import sys
 import time
 from collections import deque
-from subprocess import Popen, PIPE
 
 SQL_TYPE = ['select ', 'delete ', 'insert ', 'update ']
 SQL_AMOUNT = 0
@@ -27,9 +26,10 @@ PLACEHOLDER = r'@@@'
 SAMPLE_NUM = 5
 IS_ALL_LATEST_SQL = False
 FILEHANDLES = 500
-SQL_PATTERN = [r'\((\s*(\d+(\.\d+)?\s*)[,]?)+\)',  # match integer set in the IN collection
-               r'([^\\])\'((\')|(.*?([^\\])\'))',  # match all content in single quotes
-               r'(([^<>]\s*=\s*)|([^<>]\s+))(\d+)(\.\d+)?']  # match single integer
+SQL_PATTERN = [r'([^\\])\'((\')|(.*?([^\\])\'))',  # match all content in single quotes
+               r'\((\s*(\-|\+)?\d+(\.\d+)?\s*)(,\s*(\-|\+)?\d+(\.\d+)?\s*)*\)',
+               # match integer set in the IN collection
+               r'(([<>=]+\s*)|(\s+))(\-|\+)?\d+(\.\d+)?']  # match single integer
 
 
 def truncate_template(templates, update_time, avg_update):
@@ -104,7 +104,8 @@ def get_workload_template(templates, sqls, args):
 
 def output_valid_sql(sql):
     is_quotation_valid = sql.count("'") % 2
-    if re.search(r'=([\s]+)?\$', sql):
+    if re.search(r'=([\s]+)?\$', sql) or re.search(r'[\s]+\((([\s]+)?\$[\d]+([\s]+)?)((,([\s]+)?\$[\d]+([\s]+)?)+)?\)',
+                                                   sql):
         return ''
     if 'from pg_' in sql.lower() or 'gs_index_advise' in sql.lower() or is_quotation_valid:
         return ''
@@ -169,7 +170,7 @@ def get_parsed_sql(file, filter_config, log_info_position):
                         SQL_AMOUNT += 1
                         sql_record.sqllist = []
                     sql = '' if len(sql.lower().strip(';').split(';', 1)) == 1 else \
-                    sql.lower().strip(';').split(';', 1)[1]
+                        sql.lower().strip(';').split(';', 1)[1]
                 if sql.lower().strip().strip(';').strip().endswith(('commit', 'rollback')) \
                         and threadid_position:
                     output_sql = output_valid_sql(sql.lower().strip().strip(';') \
@@ -214,17 +215,18 @@ def get_parsed_sql(file, filter_config, log_info_position):
 
 
 def get_start_position(start_time, file_path):
-    while start_time:
-        cmd = 'head -n $(cat %s | grep -m 1 -n "^%s" | awk -F : \'{print $1}\') %s | wc -c' % \
-              (file_path, start_time, file_path)
-        proc = Popen(cmd, stdout=PIPE, stderr=PIPE, shell=True)
-        std, err_msg = proc.communicate()
-        if proc.returncode == 0 and not err_msg:
-            return int(std)
-        elif len(start_time) > 13:
-            start_time = start_time[0: -3]
-        else:
-            break
+    time_pattern = re.compile(r'\d{4}-\d{1,2}-\d{1,2} \d{1,2}:\d{1,2}:\d{1,2}')
+    start_time_stamp = int(time.mktime(time.strptime(start_time, '%Y-%m-%d %H:%M:%S')))
+    start_position = 0
+    for line in open(file_path, 'r', errors='ignore'):
+        match_result = time_pattern.match(line)
+        if match_result:
+            matched_time = match_result.group()
+            current_time_stamp = int(time.mktime(time.strptime(matched_time, '%Y-%m-%d %H:%M:%S')))
+            if current_time_stamp >= start_time_stamp:
+                return start_position
+        start_position += len(line)
+
     return -1
 
 
@@ -257,6 +259,17 @@ class threadid_info:
         self.fileh.write(content)
 
 
+def generate_line(file):
+    templine = ''
+    for line in file:
+        if line.endswith('\r'):
+            templine += line[:-1]
+        else:
+            templine += line
+            yield templine
+            templine = ''
+
+
 # split the log to different files groupby the threadid with file handles below FILEHANDLES 
 def group_log_by_threadid(f, threadid_position):
     threadid = '000000'
@@ -266,14 +279,16 @@ def group_log_by_threadid(f, threadid_position):
     threadid_log_files = []
 
     try:
-        for line in f:
+        for line in generate_line(f):
             if not line.startswith('\t') and threadid_position:
-                try:
+                if len(line.strip().split()) > threadid_position:
                     threadid = line.strip().split()[threadid_position]
-                except IndexError:
-                    raise ValueError(f'wrong format for log line:{line.strip()}')
+                else:
+                    print(f'wrong format for log line:{line.strip()}')
+                    continue
                 if not threadid.isdigit():
-                    raise ValueError(f'invalid int value {threadid} for %p')
+                    print(f'wrong format for log line:{line.strip()}')
+                    continue
             if not threadid in threadid_log:
                 threadid_log_file = get_tempfile_name(threadid)
                 threadid_log_files.append(threadid_log_file)
@@ -339,7 +354,7 @@ def record_sql(valid_files, args, log_info_position, output_obj):
                 start_position = get_start_position(args.start_time, file_path)
                 if start_position == -1:
                     continue
-            with open(file_path) as f:
+            with open(file_path, errors='ignore') as f:
                 f.seek(start_position, 0)
                 threadid_log_files = group_log_by_threadid(f, log_info_position.get('p'))
             try:
@@ -350,17 +365,15 @@ def record_sql(valid_files, args, log_info_position, output_obj):
                 for threadid_log_file in threadid_log_files:
                     if os.path.isfile(threadid_log_file):
                         os.remove(threadid_log_file)
+            filter_config = {'user': args.U, 'database': args.d,
+                             'sql_amount': args.sql_amount, 'statement': args.statement}
             try:
-                with open(merged_log_file, mode='r') as f:
+                with open(merged_log_file, mode='r', errors='ignore') as f:
                     if isinstance(output_obj, dict):
                         get_workload_template(output_obj, split_transaction(
-                            get_parsed_sql(f, args.U, args.d,
-                                           args.sql_amount,
-                                           args.statement),
+                            get_parsed_sql(f, filter_config, log_info_position)
                         ), args)
                     else:
-                        filter_config = {'user': args.U, 'database': args.d,
-                                         'sql_amount': args.sql_amount, 'statement': args.statement}
                         for sql in get_parsed_sql(f, filter_config, log_info_position):
                             output_obj.write(sql + '\n')
             except Exception as ex:
@@ -383,7 +396,7 @@ def extract_sql_from_log(args):
             valid_files.insert(0, file)
     if args.json:
         try:
-            with open(args.f, 'r') as output_file:
+            with open(args.f, 'r', errors='ignore') as output_file:
                 templates = json.load(output_file)
         except (json.JSONDecodeError, FileNotFoundError) as e:
             templates = {}
@@ -417,11 +430,11 @@ def main(argv):
 
     args = arg_parser.parse_args(argv)
     if args.U:
-        if not 'u' in args.p:
+        if 'u' not in args.p:
             raise argparse.ArgumentTypeError(f"input parameter p '{args.p}' does not contain"
                                              " '%u' and U is not allowed.")
     if args.d:
-        if not 'd' in args.p:
+        if 'd' not in args.p:
             raise argparse.ArgumentTypeError(f"input parameter p '{args.p}' does not contain"
                                              " '%d' and d is not allowed.")
     if args.start_time:
@@ -430,19 +443,19 @@ def main(argv):
                                         time.strptime(args.start_time,
                                                       '%Y-%m-%d %H:%M:%S')
                                         )
-        if not 'm' in args.p:
+        if 'm' not in args.p:
             raise argparse.ArgumentTypeError(f"input parameter p '{args.p}' does not contain"
                                              " '%m' and start_time is not allowed.")
     if args.sql_amount is not None and args.sql_amount <= 0:
         raise argparse.ArgumentTypeError("sql_amount %s is an invalid positive int value" %
                                          args.sql_amount)
-    if args.max_reserved_period and args.max_reserved_period <= 0:
+    if args.max_reserved_period is not None and args.max_reserved_period <= 0:
         raise argparse.ArgumentTypeError("max_reserved_period %s is an invalid positive int value" %
                                          args.max_reserved_period)
-    if args.max_template_num and args.max_template_num <= 0:
+    if args.max_template_num is not None and args.max_template_num <= 0:
         raise argparse.ArgumentTypeError("max_template_num %s is an invalid positive int value" %
                                          args.max_template_num)
-    elif args.max_template_num and args.max_template_num > 5000:
+    elif args.max_template_num is not None and args.max_template_num > 5000:
         print('max_template_num %d above 5000 is not advised for time cost' % args.max_template_num)
     if not args.max_reserved_period:
         args.max_reserved_period = float('inf')

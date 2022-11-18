@@ -320,19 +320,6 @@ static Plan* set_plan_refs(PlannerInfo* root, Plan* plan, int rtoffset)
                 splan->tablesample = (TableSampleClause*)fix_scan_expr(root, (Node*)splan->tablesample, rtoffset);
             }
         } break;
-        case T_DfsScan: {
-            DfsScan* splan = (DfsScan*)plan;
-
-            splan->scanrelid += rtoffset;
-            splan->plan.targetlist = fix_scan_list(root, splan->plan.targetlist, rtoffset);
-            if (splan->plan.distributed_keys != NIL) {
-                splan->plan.distributed_keys = fix_scan_list(root, splan->plan.distributed_keys, rtoffset);
-            }
-            splan->plan.var_list = fix_scan_list(root, splan->plan.var_list, rtoffset);
-            splan->plan.qual = fix_scan_list(root, splan->plan.qual, rtoffset);
-            DfsPrivateItem* item = (DfsPrivateItem*)((DefElem*)linitial(splan->privateData))->arg;
-            fix_dfs_private_item(root, rtoffset, item);
-        } break;
         case T_IndexScan: {
             IndexScan* splan = (IndexScan*)plan;
 
@@ -370,24 +357,6 @@ static Plan* set_plan_refs(PlannerInfo* root, Plan* plan, int rtoffset)
             splan->cstorequal = fix_scan_list(root, splan->cstorequal, rtoffset);
             splan->baserelcstorequal = fix_scan_list(root, splan->baserelcstorequal, rtoffset);
             splan->indextlist = fix_scan_list(root, splan->indextlist, rtoffset);
-        } break;
-        case T_DfsIndexScan: {
-            DfsIndexScan* splan = (DfsIndexScan*)plan;
-
-            splan->scan.scanrelid += rtoffset;
-            splan->scan.plan.targetlist = fix_scan_list(root, splan->scan.plan.targetlist, rtoffset);
-            if (splan->scan.plan.distributed_keys != NIL) {
-                splan->scan.plan.distributed_keys = fix_scan_list(root, splan->scan.plan.distributed_keys, rtoffset);
-            }
-            splan->indextlist = fix_scan_list(root, splan->indextlist, rtoffset);
-            splan->scan.plan.qual = fix_scan_list(root, splan->scan.plan.qual, rtoffset);
-            splan->indexqual = fix_scan_list(root, splan->indexqual, rtoffset);
-            splan->indexqualorig = fix_scan_list(root, splan->indexqualorig, rtoffset);
-            splan->indexorderby = fix_scan_list(root, splan->indexorderby, rtoffset);
-            splan->indexorderbyorig = fix_scan_list(root, splan->indexorderbyorig, rtoffset);
-            splan->cstorequal = fix_scan_list(root, splan->cstorequal, rtoffset);
-            splan->indexScantlist = fix_scan_list(root, splan->indexScantlist, rtoffset);
-            splan->dfsScan = (DfsScan*)set_plan_refs(root, (Plan*)splan->dfsScan, rtoffset);
         } break;
         case T_BitmapIndexScan: {
             BitmapIndexScan* splan = (BitmapIndexScan*)plan;
@@ -2330,6 +2299,27 @@ void extract_query_dependencies(
     *hasHdfs = glob.vectorized;
 }
 
+static List *get_partition_indexoid_list(List *partitionOidList)
+{
+    if (partitionOidList == NULL) {
+        return NULL;
+    }
+    ListCell *cell = NULL;
+    List *indexOidList = NIL;
+    foreach (cell, partitionOidList) {
+        Oid partOid = (Oid)lfirst_oid(cell);
+        List *partIndexlist = searchPartitionIndexesByblid(partOid);
+        ListCell *indexCell = NULL;
+        foreach (indexCell, partIndexlist) {
+            HeapTuple partIndexTuple = (HeapTuple)lfirst(indexCell);
+            Oid indexOid = HeapTupleGetOid(partIndexTuple);
+            indexOidList = lappend_oid(indexOidList, indexOid);
+        }
+        freePartList(partIndexlist);
+    }
+    return indexOidList;
+}
+
 /*
  * Tree walker for extract_query_dependencies.
  *
@@ -2381,10 +2371,30 @@ static bool extract_query_dependencies_walker(Node* node, PlannerInfo* context)
                  * to false.
                  */
                 if (rte->ispartrel) {
-                    List* partitionOid = getPartitionObjectIdList(rte->relid, PART_OBJ_TYPE_TABLE_PARTITION);
-                    if (partitionOid != NULL) {
+                    List *partitionOid = getPartitionObjectIdList(rte->relid, PART_OBJ_TYPE_TABLE_PARTITION);
+                    Relation partTableRel = relation_open(rte->relid, AccessShareLock);
+                    if (RelationIsSubPartitioned(partTableRel)) {
+                        ListCell *cell = NULL;
+                        foreach (cell, partitionOid) {
+                            Oid partOid = (Oid)lfirst_oid(cell);
+                            List *subPartitionOidList =
+                                getPartitionObjectIdList(partOid, PART_OBJ_TYPE_TABLE_SUB_PARTITION);
+                            List *subPartIndexOidList = get_partition_indexoid_list(subPartitionOidList);
+                            // add subpartition index oid
+                            context->glob->relationOids = list_concat(context->glob->relationOids, subPartIndexOidList);
+                            // add subpartition oid
+                            context->glob->relationOids = list_concat(context->glob->relationOids, subPartitionOidList);
+                        }
+                        // add partition oid
+                        context->glob->relationOids = list_concat(context->glob->relationOids, partitionOid);
+                    } else {
+                        List *partIndexOidList = get_partition_indexoid_list(partitionOid);
+                        // add partition index oid
+                        context->glob->relationOids = list_concat(context->glob->relationOids, partIndexOidList);
+                        // add partition oid
                         context->glob->relationOids = list_concat(context->glob->relationOids, partitionOid);
                     }
+                    relation_close(partTableRel, AccessShareLock);
                 }
             }
         }

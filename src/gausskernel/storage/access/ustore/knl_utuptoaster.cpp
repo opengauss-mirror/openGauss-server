@@ -71,8 +71,17 @@ Oid UHeapGetNewOidWithIndex(Relation relation, Oid indexId, AttrNumber oidcolumn
 
         /* see notes above about using SnapshotAny */
         scan = systable_beginscan(relation, indexId, true, SnapshotAny, ATTR_FIRST, &key);
-        collides = UHeapSysIndexGetnextSlot(scan, ForwardScanDirection, slot);
-
+        collides = false;
+        while (UHeapSysIndexGetnextSlot(scan, ForwardScanDirection, slot)) {
+            bool isnull = false;
+            UHeapTuple ttup = ExecGetUHeapTupleFromSlot(slot);
+            Oid chunk_id = DatumGetObjectId(UHeapFastGetAttr(ttup, ATTR_FIRST, RelationGetDescr(relation), &isnull));
+            Assert(!isnull);
+            if (chunk_id == newOid) {
+                collides = true;
+                break;
+            }
+        }
         systable_endscan(scan);
     } while (collides);
     ExecDropSingleTupleTableSlot(slot);
@@ -490,7 +499,7 @@ UHeapTuple UHeapToastInsertOrUpdate(Relation relation, UHeapTuple newtup, UHeapT
      * increase the target tuple size, so that 'm' attributes aren't stored
      * externally unless really necessary.
      */
-    maxDataLen = UTOAST_TUPLE_TARGET_MAIN - hoff;
+    maxDataLen = MaxUHeapTupleSize(relation) - hoff;
 
     while (UHeapCalcTupleDataSize(tupleDesc, toastValues, toastIsNull, hoff, enableReverseBitmap,enableReserve) >
             maxDataLen && relation->rd_rel->reltoastrelid != InvalidOid) {
@@ -879,6 +888,8 @@ static void UHeapToastDeleteDatum(Relation rel, Datum value, int options)
     SysScanDesc toastscan;
     UHeapTuple toasttup;
     int2 bucketid;
+    bool found = false;
+    bool isnull = false;
 
     if (!VARATT_IS_EXTERNAL_ONDISK_B(attr))
         return;
@@ -915,7 +926,20 @@ static void UHeapToastDeleteDatum(Relation rel, Datum value, int options)
          * Have a chunk, delete it
          */
         toasttup = ExecGetUHeapTupleFromSlot(slot);
+        Oid chunk_id = DatumGetObjectId(UHeapFastGetAttr(toasttup, ATTR_FIRST, RelationGetDescr(toastrel), &isnull));
+        Assert(!isnull);
+        if (chunk_id != toastPointer.va_valueid) {
+            ereport(LOG, (errmsg("Delete toast chunk %u is not scan toast chunk %u of toast relation is %u, will skip",
+                chunk_id, toastPointer.va_valueid, toastPointer.va_toastrelid)));
+            continue;
+        }
+        found = true;
         SimpleUHeapDelete(toastrel, &toasttup->ctid, SnapshotToast);
+    }
+
+    if (!found) {
+        ereport(LOG, (errmsg("Toast chunk %u of toast relation %u delete 0 rows", toastPointer.va_valueid,
+            toastPointer.va_toastrelid)));
     }
 
     /*
@@ -982,6 +1006,13 @@ struct varlena *UHeapInternalToastFetchDatum(struct varatt_external toastPointer
          * Have a chunk, extract the sequence number and the data
          */
         ttup = ExecGetUHeapTupleFromSlot(slot);
+        Oid chunk_id = DatumGetObjectId(UHeapFastGetAttr(ttup, ATTR_FIRST, toastTupDesc, &isnull));
+        Assert(!isnull);
+        if (chunk_id != toastPointer.va_valueid) {
+            ereport(LOG, (errmsg("UHeapInternalToastFetchDatum find toast chunk %u is not scan toast chunk %u of toast "
+                "relation %u, will skip", chunk_id, toastPointer.va_valueid, toastPointer.va_toastrelid)));
+            continue;
+        }
         residx = DatumGetInt32(UHeapFastGetAttr(ttup, ATTR_SECOND, toastTupDesc, &isnull));
         Assert(!isnull);
         chunk = DatumGetPointer(UHeapFastGetAttr(ttup, ATTR_THIRD, toastTupDesc, &isnull));
@@ -1168,6 +1199,13 @@ struct varlena *UHeapInternalToastFetchDatumSlice(struct varatt_external toastPo
          * Have a chunk, extract the sequence number and the data
          */
         ttup = ExecGetUHeapTupleFromSlot(slot);
+        Oid chunk_id = DatumGetObjectId(UHeapFastGetAttr(ttup, ATTR_FIRST, toastTupDesc, &isnull));
+        Assert(!isnull);
+        if (chunk_id != toastPointer.va_valueid) {
+            ereport(LOG, (errmsg("UHeapInternalToastFetchDatumSlice find toast chunk %u is not scan toast chunk %u of "
+                "toast relation %u, will skip", chunk_id, toastPointer.va_valueid, toastPointer.va_toastrelid)));
+            continue;
+        }
         residx = DatumGetInt32(UHeapFastGetAttr(ttup, CHUNK_ID_ATTR, toastTupDesc, &isnull));
         Assert(!isnull);
         chunk = DatumGetPointer(UHeapFastGetAttr(ttup, CHUNK_DATA_ATTR, toastTupDesc, &isnull));
@@ -1278,8 +1316,19 @@ static bool UHeapToastRelValueidExists(Relation toastrel, Oid valueid)
      * Is there any such chunk?
      */
     toastscan = systable_beginscan(toastrel, toastrel->rd_rel->reltoastidxid, true, SnapshotAny, 1, &toastkey);
-    result = UHeapSysIndexGetnextSlot(toastscan, ForwardScanDirection, slot);
-
+    while (UHeapSysIndexGetnextSlot(toastscan, ForwardScanDirection, slot)) {
+        bool isnull = false;
+        UHeapTuple ttup = ExecGetUHeapTupleFromSlot(slot);
+        Oid chunk_id = DatumGetObjectId(UHeapFastGetAttr(ttup, ATTR_FIRST, RelationGetDescr(toastrel), &isnull));
+        Assert(!isnull);
+        if (chunk_id == valueid) {
+            result = true;
+            break;
+        } else {
+            ereport(LOG, (errmsg("UHeapToastRelValueidExists find toast chunk %u is not scan toast chunk %u of toast "
+                "relation %u, will skip", chunk_id, valueid, toastrel->rd_id)));
+        }
+    }
     systable_endscan(toastscan);
     ExecDropSingleTupleTableSlot(slot);
 

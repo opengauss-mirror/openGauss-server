@@ -175,7 +175,12 @@ Datum int16in(PG_FUNCTION_ARGS)
     char* str = PG_GETARG_CSTRING(0);
     int128 result;
 
-    (void)scanint16(str, false, &result);
+    if (A_FORMAT_VERSION_10C_V1) {
+        result = pg_strtoint128(str);
+    } else {
+        (void)scanint16(str, false, &result);
+    }
+
     PG_RETURN_INT128(result);
 }
 

@@ -199,7 +199,7 @@ static bool pg_decode_filter(LogicalDecodingContext* ctx, RepOriginId origin_id)
         return true;
     return false;
 }
-static void tuple_to_stringinfo(StringInfo s, TupleDesc tupdesc, HeapTuple tuple, bool skip_nulls)
+static void tuple_to_stringinfo(Relation relation, StringInfo s, TupleDesc tupdesc, HeapTuple tuple, bool isOld)
 {
     if (HEAP_TUPLE_IS_COMPRESSED(tuple->t_data))
         return;
@@ -237,16 +237,13 @@ static void tuple_to_stringinfo(StringInfo s, TupleDesc tupdesc, HeapTuple tuple
          * Don't print system columns, oid will already have been printed if
          * present.
          */
-        if (attr->attnum < 0)
+        if (attr->attnum < 0 || (isOld && !IsRelationReplidentKey(relation, attr->attnum)))
             continue;
 
         typid = attr->atttypid;
 
         /* get Datum from tuple */
         origval = heap_getattr(tuple, natt + 1, tupdesc, &isnull);
-
-        if (isnull && skip_nulls)
-            continue;
 
         /* print attribute name */
         appendStringInfoChar(s, ' ');
@@ -327,20 +324,20 @@ static void pg_decode_change(
             if (change->data.tp.newtuple == NULL)
                 appendStringInfoString(ctx->out, " (no-tuple-data)");
             else
-                tuple_to_stringinfo(ctx->out, tupdesc, &change->data.tp.newtuple->tuple, false);
+                tuple_to_stringinfo(relation, ctx->out, tupdesc, &change->data.tp.newtuple->tuple, false);
             break;
         case REORDER_BUFFER_CHANGE_UPDATE:
             appendStringInfoString(ctx->out, " UPDATE:");
             if (change->data.tp.oldtuple != NULL) {
                 appendStringInfoString(ctx->out, " old-key:");
-                tuple_to_stringinfo(ctx->out, tupdesc, &change->data.tp.oldtuple->tuple, true);
+                tuple_to_stringinfo(relation, ctx->out, tupdesc, &change->data.tp.oldtuple->tuple, true);
                 appendStringInfoString(ctx->out, " new-tuple:");
             }
 
             if (change->data.tp.newtuple == NULL)
                 appendStringInfoString(ctx->out, " (no-tuple-data)");
             else
-                tuple_to_stringinfo(ctx->out, tupdesc, &change->data.tp.newtuple->tuple, false);
+                tuple_to_stringinfo(relation, ctx->out, tupdesc, &change->data.tp.newtuple->tuple, false);
             break;
         case REORDER_BUFFER_CHANGE_DELETE:
             appendStringInfoString(ctx->out, " DELETE:");
@@ -350,7 +347,7 @@ static void pg_decode_change(
                 appendStringInfoString(ctx->out, " (no-tuple-data)");
             /* In DELETE, only the replica identity is present; display that */
             else
-                tuple_to_stringinfo(ctx->out, tupdesc, &change->data.tp.oldtuple->tuple, true);
+                tuple_to_stringinfo(relation, ctx->out, tupdesc, &change->data.tp.oldtuple->tuple, true);
             break;
         default:
             Assert(false);

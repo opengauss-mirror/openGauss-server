@@ -178,6 +178,19 @@ void statement_init_metric_context()
     }
 }
 
+/*
+ * for PBE case, now init statement handle in message 'B', but for JDBC application
+ * which sets fetch size, message looks like 'PBDES/ES/ES..', the handle will be commmitted
+ * after message 'S', so for 'ES/ES' will be no stmt handle in message 'E'.
+ */
+void statement_init_metric_context_if_needs()
+{
+    if (CURRENT_STMT_METRIC_HANDLE == NULL) {
+        statement_init_metric_context();
+        instr_stmt_report_start_time();
+    }
+}
+
 static void print_stmt_common_debug_log(int log_level)
 {
     ereport(log_level, (errmodule(MOD_INSTR), errmsg("*************** statement handle information************")));
@@ -211,6 +224,8 @@ static void print_stmt_basic_debug_log(int log_level)
     ereport(log_level, (errmodule(MOD_INSTR), errmsg("\t unique query: %s", CURRENT_STMT_METRIC_HANDLE->query)));
     ereport(log_level, (errmodule(MOD_INSTR),
         errmsg("\t slow query threshold: %ld", CURRENT_STMT_METRIC_HANDLE->slow_query_threshold)));
+    ereport(log_level, (errmodule(MOD_INSTR),
+        errmsg("\t slow query cause type: %u", CURRENT_STMT_METRIC_HANDLE->cause_type)));
     ereport(log_level, (errmodule(MOD_INSTR), errmsg("\t thread id: %lu", CURRENT_STMT_METRIC_HANDLE->tid)));
     ereport(log_level, (errmodule(MOD_INSTR), errmsg("\t transaction id: %lu", CURRENT_STMT_METRIC_HANDLE->txn_id)));
     ereport(log_level, (errmodule(MOD_INSTR),
@@ -400,7 +415,9 @@ void statement_commit_metirc_context()
         (u_sess->statement_cxt.statement_level[1] >= STMT_TRACK_L0 &&
         (CURRENT_STMT_METRIC_HANDLE->finish_time - CURRENT_STMT_METRIC_HANDLE->start_time) >=
         CURRENT_STMT_METRIC_HANDLE->slow_query_threshold &&
-        CURRENT_STMT_METRIC_HANDLE->slow_query_threshold >= 0))) {
+        CURRENT_STMT_METRIC_HANDLE->slow_query_threshold >= 0 &&
+        (!u_sess->attr.attr_common.track_stmt_parameter ||
+         (u_sess->attr.attr_common.track_stmt_parameter && CURRENT_STMT_METRIC_HANDLE->timeModel[0] > 0))))) {
         /* need to persist, put to suspend list */
         CURRENT_STMT_METRIC_HANDLE->next = u_sess->statement_cxt.suspendStatementList;
         u_sess->statement_cxt.suspendStatementList = CURRENT_STMT_METRIC_HANDLE;

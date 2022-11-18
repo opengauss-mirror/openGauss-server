@@ -836,8 +836,8 @@ static Query* tryTransformMergeInsertStmt(ParseState* pstate, MergeStmt* stmt)
     free_parsestate(insert_pstate);
     return insert_query;
 }
-#ifdef ENABLE_MULTIPLE_NODES
-static bool contain_subquery_walker(Node* node, void* context)
+
+bool contain_subquery_walker(Node* node, void* context)
 {
     if (node == NULL) {
         return false;
@@ -847,12 +847,7 @@ static bool contain_subquery_walker(Node* node, void* context)
     }
     return expression_tree_walker(node, (bool (*)())contain_subquery_walker, (void*)context);
 }
-
-static bool contain_subquery(Node* clause)
-{
-    return contain_subquery_walker(clause, NULL);
-}
-
+#ifdef ENABLE_MULTIPLE_NODES
 /*
  * cannot have Subquery in action's qual and targetlist
  * report error if we found any.
@@ -863,13 +858,13 @@ static void check_sublink_in_action(List* mergeActionList, bool is_insert_update
     /* check action's qual and target list */
     foreach (lc, mergeActionList) {
         MergeAction* action = (MergeAction*)lfirst(lc);
-        if (contain_subquery((Node*)action->qual)) {
+        if (contain_subquery_walker((Node*)action->qual, NULL)) {
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("Subquery in WHERE clauses are not yet supported for %s",
                         is_insert_update ? "INSERT ... ON DUPLICATE KEY UPDATE" : "MERGE INTO")));
         }
-        if (contain_subquery((Node*)action->targetList)) {
+        if (contain_subquery_walker((Node*)action->targetList, NULL)) {
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("Subquery in INSERT/UPDATE clauses are not yet supported for %s",
@@ -878,7 +873,6 @@ static void check_sublink_in_action(List* mergeActionList, bool is_insert_update
     }
 }
 #endif
-
 /*
  * get current namespace for columns in the range of relation, subquery
  * param idx is the index in RTE collection only including relation, subquery
@@ -1293,6 +1287,7 @@ Query* transformMergeStmt(ParseState* pstate, MergeStmt* stmt)
                 action->qual = transformWhereClause(pstate, mergeWhenClause->condition, "WHEN");
                 pstate->p_varnamespace = save_varnamespace;
                 pstate->use_level = false;
+                UpdateParseCheck(pstate, (Node*)action);
 
                 fixResTargetListWithTableNameRef(pstate->p_target_relation, stmt->relation, set_clause_list_copy);
                 mergeWhenClause->targetList = set_clause_list_copy;

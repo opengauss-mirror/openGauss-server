@@ -21,9 +21,13 @@
 
 bool sub_connect(char *conninfo, XLogRecPtr *startpoint, char *appname, int channel_identifier)
 {
-    const char *keys[5];
-    const char *vals[5];
+    const int numOfKeys = 6;
+    const char *keys[numOfKeys];
+    const char *vals[numOfKeys];
+    const int lengthOfConnTimeout = 8;
+    char timeout[lengthOfConnTimeout];
     int i = 0;
+    int ret;
 
     /*
      * We use the expand_dbname parameter to process the connection string (or
@@ -39,8 +43,15 @@ bool sub_connect(char *conninfo, XLogRecPtr *startpoint, char *appname, int chan
     vals[i] = "subscription";
     keys[++i] = "client_encoding";
     vals[i] = GetDatabaseEncodingName();
+    keys[++i] = "connect_timeout";
+    ret = snprintf_s(timeout, sizeof(timeout), sizeof(timeout) - 1, "%d",
+                     u_sess->attr.attr_storage.wal_receiver_connect_timeout);
+    securec_check_ss(ret, "\0", "\0");
+    vals[i] = (const char*)timeout;
     keys[++i] = NULL;
     vals[i] = NULL;
+
+    Assert(i == numOfKeys - 1);
 
     t_thrd.libwalreceiver_cxt.streamConn = PQconnectdbParams(keys, vals, true);
     if ((t_thrd.libwalreceiver_cxt.streamConn != NULL) && (t_thrd.libwalreceiver_cxt.streamConn->pgpass != NULL)) {

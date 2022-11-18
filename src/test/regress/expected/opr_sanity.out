@@ -2584,6 +2584,8 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  4704 | has_directory_privilege
  4705 | has_directory_privilege
  4767 | gs_read_block_from_remote
+ 4772 | gs_is_dw_io_blocked
+ 4773 | gs_block_dw_io
  4789 | remote_rto_stat
  4999 | remote_recovery_status
  5000 | get_instr_workload_info
@@ -2625,6 +2627,7 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  5254 | gs_get_session_memctx_detail
  5255 | gs_get_shared_memctx_detail
  5256 | gs_get_thread_memctx_detail
+ 5257 | gs_get_history_memory_detail
  5345 | pv_builtin_functions
  5519 | int1cmp
  5520 | hashint1
