@@ -1285,6 +1285,12 @@ static void transformColumnDefinition(CreateStmtContext* cxt, ColumnDef* column,
                 /* transformConstraintAttrs took care of these */
                 break;
             case CONSTR_AUTO_INCREMENT:
+                if (IsA(cxt->node, CreateForeignTableStmt) ||
+                    (cxt->rel != NULL && (IS_FOREIGNTABLE(cxt->rel) || IS_STREAM_TABLE(cxt->rel)))) {
+                    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("Un-support feature"),
+                        errdetail("auto_increment column is not supported in foreign table")));
+                }
                 if (column->is_serial) {
                     ereport(ERROR, (errcode(ERRCODE_OPERATE_NOT_SUPPORTED),
                         errmsg("The datatype of column '%s' does not support auto_increment", column->colname)));
