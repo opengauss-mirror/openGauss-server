@@ -546,7 +546,6 @@ void AlignMemoryAllocator::AllocSetDelete(MemoryContext context)
     AllocBlock block = NULL;
 
     AssertArg(AllocSetIsValid(set));
-    MemoryContextLock(context);
 
     if (set->blocks == NULL) {
         return;
@@ -555,6 +554,7 @@ void AlignMemoryAllocator::AllocSetDelete(MemoryContext context)
     block = set->blocks;
 
     if (is_shared) {
+        MemoryContextLock(context);
         func = &SharedFunctions;
     } else {
         if (context->session_id > 0)
@@ -598,7 +598,9 @@ void AlignMemoryAllocator::AllocSetDelete(MemoryContext context)
     set->freeSpace = 0;
     set->totalSpace = 0;
 
-    MemoryContextUnlock(context);
+    if (is_shared) {
+        MemoryContextUnlock(context);
+    }
 }
 
 /*
