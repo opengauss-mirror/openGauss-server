@@ -181,6 +181,11 @@ EXPLAIN (NUM_NODES OFF, NODES OFF, COSTS OFF)
 SELECT * FROM point_tbl WHERE f1 <@ '(-10,-10),(10,10)':: box ORDER BY f1 <-> '0,1';
 SELECT * FROM point_tbl WHERE f1 <@ '(-10,-10),(10,10)':: box ORDER BY f1 <-> '0,1';
 
+-- test for gist index building when buffering=on
+create table t(id int, c_point point);
+insert into t select id, point'(1, 2)' from (select * from generate_series(1, 200000) as id) as x;
+create index i on t using gist(c_point) with (buffering=on);
+
 RESET enable_seqscan;
 RESET enable_indexscan;
 RESET enable_bitmapscan;

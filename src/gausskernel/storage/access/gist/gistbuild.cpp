@@ -882,8 +882,11 @@ static void gistProcessEmptyingQueue(GISTBuildState *buildstate)
                 break;
             }
 
-            /* Free all the memory allocated during index tuple processing */
-            MemoryContextReset(buildstate->giststate->tempCxt);
+            /*
+             * MemoryContextReset will be called by caller, or caller of caller (for example, gistBuildCallback).
+             * Just reset after all utilities of relative pointers in buildstate->giststate->tempCxt is finished
+             * in case of memory leak.
+             */
         }
     }
 }
@@ -936,6 +939,7 @@ static void gistEmptyAllBuffers(GISTBuildState *buildstate)
         ereport(DEBUG2, (errmsg("emptied all buffers at level %d", i)));
     }
     (void)MemoryContextSwitchTo(oldCtx);
+    MemoryContextReset(buildstate->giststate->tempCxt);
 }
 
 /*
