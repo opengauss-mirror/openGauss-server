@@ -43,6 +43,19 @@ set codegen_cost_threshold = 10000 * 1;
 ERROR:  SET supported expr value only in B_FORMAT and enable_set_variable_b_format is on.
 set codegen_cost_threshold = (select 10000);
 ERROR:  SET supported expr value only in B_FORMAT and enable_set_variable_b_format is on.
+-- test type not support
+set codegen_cost_threshold = '1'::money;
+ERROR:  SET supported expr value only in B_FORMAT and enable_set_variable_b_format is on.
+set @@session.codegen_cost_threshold = '1'::money;
+ERROR:  syntax error at or near "@@"
+LINE 1: set @@session.codegen_cost_threshold = '1'::money;
+            ^
+set application_name = '00:00:01'::time;
+ERROR:  SET supported expr value only in B_FORMAT and enable_set_variable_b_format is on.
+set @@session.application_name = '00:00:01'::time;
+ERROR:  syntax error at or near "@@"
+LINE 1: set @@session.application_name = '00:00:01'::time;
+            ^
 create database test_set dbcompatibility 'b';
 \c test_set
 -- dbcompatibility is B Format, enable_set_variable_b_format=off
@@ -522,6 +535,15 @@ LINE 1: set global log_destination = stderr,syslog , @v1:= 1, @@code...
 set global log_destination = 'stderr', @v1:= 1, @@codegen_cost_threshold = 'aa';
 NOTICE:  global parameter log_destination has been set
 ERROR:  invalid value for parameter "codegen_cost_threshold": "aa"
+-- test type not support
+set codegen_cost_threshold = '1'::money;
+ERROR:  set value cannot be assigned to the money type
+set @@session.codegen_cost_threshold = '1'::money;
+ERROR:  set value cannot be assigned to the money type
+set application_name = '00:00:01'::time;
+ERROR:  set value cannot be assigned to the time without time zone type
+set @@session.application_name = '00:00:01'::time;
+ERROR:  set value cannot be assigned to the time without time zone type
 -- test procedure
 create table test_pro(a int);
 create or replace procedure pro1()
