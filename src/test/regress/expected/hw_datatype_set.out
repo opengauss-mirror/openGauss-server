@@ -4105,3 +4105,48 @@ select pg_catalog.pg_get_tabledef('t2');
  WITH (orientation=row, compression=no);
 (1 row)
 
+-- test '' as set member
+-- 1. define set type not include ''
+drop table if exists t1;
+create table t1 (c1 set('a', 'b') not null default '');
+NOTICE:  CREATE TABLE will create implicit set "t1_c1_set" for column "t1.c1"
+insert into t1 values ('');
+insert into t1 values (default);
+select c1, c1+0 from t1; -- expect value 0
+ c1 | ?column? 
+----+----------
+    |        0
+    |        0
+(2 rows)
+
+insert into t1 values ('a,,b'); -- expect error
+ERROR:  invalid input value for set t1_c1_set: ''
+LINE 1: insert into t1 values ('a,,b');
+                               ^
+CONTEXT:  referenced column: c1
+-- 2. define set type include ''
+drop table if exists t2;
+create table t2 (c1 set('a', '', 'b') default '');
+NOTICE:  CREATE TABLE will create implicit set "t2_c1_set" for column "t2.c1"
+insert into t2 values (''); -- expect value 0, not 2
+insert into t2 values (default);
+select c1, c1+0 from t2;
+ c1 | ?column? 
+----+----------
+    |        0
+    |        0
+(2 rows)
+
+insert into t2 values ('a,,b'); -- expect 2, not 0
+insert into t2 values (',a,b'); -- expect 2, not 0
+select c1, c1+0 from t2 order by 2;
+  c1  | ?column? 
+------+----------
+      |        0
+      |        0
+ a,,b |        7
+ a,,b |        7
+(4 rows)
+
+drop table t1;
+drop table t2;

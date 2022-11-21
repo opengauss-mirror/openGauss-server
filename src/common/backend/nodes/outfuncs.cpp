@@ -1134,7 +1134,7 @@ static void _outCommonRemoteQueryPart(StringInfo str, T* node)
         appendStringInfo(str, " :rq_param_types");
     }
     for (i = 0; i < node->rq_num_params; i++) {
-        appendStringInfo(str, " %d", node->rq_param_types[i]);    
+        appendStringInfo(str, " %d", node->rq_param_types[i]);
     }
     
     WRITE_BOOL_FIELD(rq_params_internal);
@@ -2139,18 +2139,25 @@ static void _outConst(StringInfo str, Const* node)
     } else {
         Oid typoutput;
         bool typIsVarlena = false;
-
-        /*
-         * For user-define type
-         *
-         * decode datum to string with Output functions identified by
-         * datatype since data type oid may be inconsistent on different
-         * nodes. the string will be translated to datum with inputfunction
-         * when we read the node string
+        /* For user-define set type: if the default value is ''(means empty
+         * set, not null), It should not be output as :udftypevalue <>.
+         * It will be taken as null value.
          */
-        appendStringInfo(str, " :udftypevalue ");
-        getTypeOutputInfo(node->consttype, &typoutput, &typIsVarlena);
-        _outToken(str, OidOutputFunctionCall(typoutput, node->constvalue));
+        if (type_is_set(node->consttype)) {
+            _outDatum(str, node->constvalue, node->constlen, node->constbyval);
+        } else {
+            /*
+             * For user-define type
+             *
+             * decode datum to string with Output functions identified by
+             * datatype since data type oid may be inconsistent on different
+             * nodes. the string will be translated to datum with inputfunction
+             * when we read the node string
+             */
+            appendStringInfo(str, " :udftypevalue ");
+            getTypeOutputInfo(node->consttype, &typoutput, &typIsVarlena);
+            _outToken(str, OidOutputFunctionCall(typoutput, node->constvalue));
+        }
     }
 
     WRITE_CFGINFO_FIELD(consttype, constvalue);
