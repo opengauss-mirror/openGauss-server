@@ -29,6 +29,16 @@
 
 #define GetDmsBufCtrl(id) (&t_thrd.storage_cxt.dmsBufCtl[(id)])
 
+#define DmsInitLatch(drid, _type, _oid, _idx, _parent_part, _part, _uid) \
+    do {                                                      \
+        (drid)->type = _type;                                 \
+        (drid)->uid = _uid;                                   \
+        (drid)->oid = _oid;                                   \
+        (drid)->index = _idx;                                 \
+        (drid)->parent_part = _parent_part;                   \
+        (drid)->part = _part;                                 \
+    } while (0)
+
 typedef struct SSBroadcastDDLLock {
     SSBroadcastOp type; // must be first
     LOCKTAG locktag;
@@ -56,5 +66,6 @@ int SSLockRelease(const LOCKTAG *locktag, LOCKMODE lockmode, bool sessionLock);
 void SSLockReleaseAll();
 void SSLockAcquireAll();
 void MarkReadPblk(int buf_id, const XLogPhyBlock *pblk);
+void TransformLockTagToDmsLatch(dms_drlatch_t* dlatch, const LOCKTAG locktag);
 
 #endif

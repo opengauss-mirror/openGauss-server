@@ -76,6 +76,12 @@ void InitDmsBufContext(dms_context_t* dmsBufCxt, BufferTag buftag)
     securec_check_c(err, "\0", "\0");
 }
 
+void TransformLockTagToDmsLatch(dms_drlatch_t* dlatch, const LOCKTAG locktag)
+{
+    DmsInitLatch(&dlatch->drid, locktag.locktag_type, locktag.locktag_field1, locktag.locktag_field2,
+        locktag.locktag_field3, locktag.locktag_field4, locktag.locktag_field5);
+}
+
 static void CalcSegDmsPhysicalLoc(BufferDesc* buf_desc, Buffer buffer)
 {
     if (IsSegmentFileNode(buf_desc->tag.rnode)) {
