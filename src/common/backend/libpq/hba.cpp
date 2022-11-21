@@ -2136,7 +2136,7 @@ void hba_getauthmethod(hbaPort* port)
 #ifdef ENABLE_MULTIPLE_NODES
     if (IsDSorHaWalSender() ) {
 #else        
-    if (IsDSorHaWalSender() && (is_node_internal_connection(port) || AM_WAL_HADR_SENDER)) {
+    if ((IsDSorHaWalSender() && is_node_internal_connection(port)) || AM_WAL_HADR_SENDER || (t_thrd.role == SW_SENDER)) {
 #endif        
         check_hba_replication(port);
     } else {

@@ -390,7 +390,7 @@ PlannedStmt* planner(Query* parse, int cursorOptions, ParamListInfo boundParams)
     return result;
 }
 
-static bool queryIsReadOnly(Query* query)
+bool queryIsReadOnly(Query* query)
 {
     if (IsA(query, Query)) {
         switch (query->commandType) {

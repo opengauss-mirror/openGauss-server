@@ -40,6 +40,7 @@
 
 #include "access/printtup.h"
 #include "access/xact.h"
+#include "access/xlogdefs.h"
 #include "access/ustore/undo/knl_uundoapi.h"
 #include "access/double_write.h"
 #include "catalog/namespace.h"
@@ -193,6 +194,10 @@ extern int optreset; /* might not be declared by system headers */
 #include "storage/file/fio_device.h"
 #include "storage/dss/dss_adaptor.h"
 #include "storage/dss/dss_log.h"
+#include "replication/libpqsw.h"
+#include "replication/walreceiver.h"
+#include "libpq/libpq-int.h"
+
 
 THR_LOCAL VerifyCopyCommandIsReparsed copy_need_to_be_reparse = NULL;
 
@@ -246,7 +251,6 @@ char* register_stack_base_ptr = NULL;
 extern THR_LOCAL DistInsertSelectState* distInsertSelectState;
 
 extern void InitQueryHashTable(void);
-
 /*
  * @hdfs
  * Define different mesage type used for exec_simple_query
@@ -2563,6 +2567,13 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
 
         set_ps_display(commandTag, false);
 
+        if (libpqsw_redirect()) {
+            // quick transfer to master
+            libpqsw_trace("we find new transfer cmdtag:%s sql:%s", commandTag, query_string);
+            libpqsw_process_query_message(commandTag, NULL, query_string);
+            return;
+        }
+
         BeginCommand(commandTag, dest);
 
         /*
@@ -2664,6 +2675,14 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
             /* sqladvisor collect query */
             collectSimpleQuery(query_string, isCollect);
             break;
+        }
+
+        if (libpqsw_process_query_message(commandTag, querytree_list, query_string, query_string_len)) {
+            libpqsw_trace("we find new transfer cmdtag:%s, sql:%s", commandTag, query_string);
+            CommandCounterIncrement();
+            finish_xact_command();
+            MemoryContextReset(OptimizerContext);
+            return;
         }
 
         plantree_list = pg_plan_queries(querytree_list, 0, NULL);
@@ -3762,9 +3781,14 @@ pass_parsing:
     /*
      * Send ParseComplete.
      */
-    if (t_thrd.postgres_cxt.whereToSendOutput == DestRemote)
-        pq_putemptymessage('1');
-
+    bool need_redirect = libpqsw_process_parse_message(commandTag, psrc->query_list);
+    if (need_redirect) {
+        libpqsw_trace("we find pbe new transfer cmdtag:%s, sql:%s", commandTag, psrc->query_string);
+    } else {
+        libpqsw_trace("we find pbe new select cmdtag:%s, sql:%s", commandTag, psrc->query_string);
+        if (t_thrd.postgres_cxt.whereToSendOutput == DestRemote)
+            pq_putemptymessage('1');
+    }
     /*
      * Emit duration logging if appropriate.
      */
@@ -8405,16 +8429,19 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
              */
             Port* MyProcPort = u_sess->proc_cxt.MyProcPort;
             if (IS_CLIENT_CONN_VALID(MyProcPort) && (!t_thrd.int_cxt.ClientConnectionLost)) {
-                /*
-                 * before send 'Z' to frontend, we should check if INTERRUPTS happends or not.
-                 * In SyncRepWaitForLSN() function, take HOLD_INTERRUPTS() to prevent interrupt happending and set
-                 * t_thrd.postgres_cxt.whereToSendOutput to 'DestNone' when t_thrd.int_cxt.ProcDiePending is true. Then
-                 * this session will not send 'Z' message to frontend and will not report error if it not check
-                 * interrupt. So frontend will be reveiving message forever and do nothing, which is wrong.
-                 */
-                CHECK_FOR_INTERRUPTS();
-                MyProcPort->protocol_config->fn_send_ready_for_query((CommandDest)t_thrd.postgres_cxt.whereToSendOutput);
+                if (libpqsw_need_end()) {
+                    /*
+                     * before send 'Z' to frontend, we should check if INTERRUPTS happends or not.
+                     * In SyncRepWaitForLSN() function, take HOLD_INTERRUPTS() to prevent interrupt happending and set
+                     * t_thrd.postgres_cxt.whereToSendOutput to 'DestNone' when t_thrd.int_cxt.ProcDiePending is true. Then
+                     * this session will not send 'Z' message to frontend and will not report error if it not check
+                     * interrupt. So frontend will be reveiving message forever and do nothing, which is wrong.
+                     */
+                    CHECK_FOR_INTERRUPTS();
+                    MyProcPort->protocol_config->fn_send_ready_for_query((CommandDest)t_thrd.postgres_cxt.whereToSendOutput);
+               }
             }
+            libpqsw_set_end(true);
 #ifdef ENABLE_MULTIPLE_NODES
             /*
              * Helps us catch any problems where we did not send down a snapshot
@@ -8444,7 +8471,6 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
             /* update our elapsed time statistics. */
             timeInfoRecordEnd();
         }
-
         /*
          * INSTR: when track type is TOP, we reset is_top_unique_sql to false,
          * for P messages,
@@ -8636,6 +8662,10 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 u_sess->proc_cxt.MyProcPort->gs_sock.idx,
                 u_sess->proc_cxt.MyProcPort->gs_sock.sid,
                 firstchar);
+
+        if (libpqsw_process_message(firstchar, &input_message)) {
+            continue;
+        }
 
         switch (firstchar) {
 #ifdef ENABLE_MULTIPLE_NODES
@@ -9241,6 +9271,13 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 statement_init_metric_context();
                 instr_stmt_report_trace_id(u_sess->trace_cxt.trace_id);
                 exec_parse_message(query_string, stmt_name, paramTypes, paramTypeNames, paramModes, numParams);
+                if (libpqsw_redirect() || libpqsw_get_set_command()) {
+                    ((RedirectManager*)t_thrd.libsw_cxt.redirect_manager)->push_message(firstchar,
+                        &input_message,
+                        true,
+                        libpqsw_get_set_command() ? RT_SET : RT_NORMAL
+                        );
+                }
                 statement_commit_metirc_context();
 
                 /*

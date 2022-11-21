@@ -26,6 +26,8 @@
  *		for the PQfn() call.  (This probably ought to go somewhere else...)
  * ----------------
  */
+#if 0
+// PQArgBlock struct already defined in libpq-fe.h, and struct both include in postgres.cpp, so disable there!
 typedef struct {
     int len;
     int isint;
@@ -34,6 +36,7 @@ typedef struct {
         int integer;
     } u;
 } PQArgBlock;
+#endif
 
 extern ProtocolExtensionConfig default_protocol_config;
 

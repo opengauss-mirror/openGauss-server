@@ -564,6 +564,21 @@ static int pqPutMsgBytes(const void* buf, size_t len, PGconn* conn)
     return 0;
 }
 
+int pqPutncharMsgEnd(PGconn* conn)
+{
+    /* Make message eligible to send */
+    conn->outCount = conn->outMsgEnd;
+
+    if (conn->outCount >= 8192) {
+        int toSend = conn->outCount - (conn->outCount % 8192);
+
+        if (pqSendSome(conn, toSend) < 0)
+            return EOF;
+        /* in nonblock mode, don't complain if unable to send it all */
+    }
+    return 0;
+}
+
 /*
  * pqPutMsgEnd: finish constructing a message and possibly send it
  *
@@ -586,19 +601,7 @@ int pqPutMsgEnd(PGconn* conn)
         msgLen = htonl(msgLen);
         check_memcpy_s(memcpy_s(conn->outBuffer + conn->outMsgStart, sizeof(uint32), &msgLen, 4));
     }
-
-    /* Make message eligible to send */
-    conn->outCount = conn->outMsgEnd;
-
-    if (conn->outCount >= 8192) {
-        int toSend = conn->outCount - (conn->outCount % 8192);
-
-        if (pqSendSome(conn, toSend) < 0)
-            return EOF;
-        /* in nonblock mode, don't complain if unable to send it all */
-    }
-
-    return 0;
+    return pqPutncharMsgEnd(conn);
 }
 
 /* ----------
