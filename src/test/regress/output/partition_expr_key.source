@@ -1,0 +1,859 @@
+drop database if exists part_expr_key_db;
+NOTICE:  database "part_expr_key_db" does not exist, skipping
+create database part_expr_key_db;
+\c part_expr_key_db
+--test error sql
+create table testrangepart(a int, b int) partition by range(a/2) (partition p0 values less than(100),partition p1 values less than(200));
+ERROR:  The / operator is not supported for Partition Expr
+create table testlistpart(a int, b int) partition by list(a/2) (partition p0 values(100,200),partition p1 values(300,400));
+ERROR:  The / operator is not supported for Partition Expr
+create table testhashpart(a int, b int) partition by hash(a/2) (partition p0 ,partition p1);
+ERROR:  The / operator is not supported for Partition Expr
+create table testrangepart(a int, b int) partition by range(int4mul(a,2)) (partition p0 values less than(100),partition p1 values less than(200));
+ERROR:  The int4mul func is not supported for Partition Expr
+create table testlistpart(a int, b int) partition by list(int4mul(a,2)) (partition p0 values(100,200),partition p1 values(300,400));
+ERROR:  The int4mul func is not supported for Partition Expr
+create table testhashpart(a int, b int) partition by hash(int4mul(a,2)) (partition p0 ,partition p1);
+ERROR:  The int4mul func is not supported for Partition Expr
+create table testrangepart(a int, b int) partition by range(a,b*2) (partition p0 values less than(100,1000),partition p1 values less than(200,2000));
+ERROR:  The multi partition expr keys are not supported.
+create table testrangepart(a int, b int) partition by range(a*2,b) (partition p0 values less than(100,1000),partition p1 values less than(200,2000));
+ERROR:  The multi partition expr keys are not supported.
+CREATE TABLE testrangepart(a date) PARTITION BY RANGE (a*2) INTERVAL ('1 month')
+(
+	PARTITION p0 VALUES LESS THAN ('2020-03-01'),
+	PARTITION p1 VALUES LESS THAN ('2020-04-01')
+);
+ERROR:  The partition expr key doesn't supprt value or interval partition
+--test partkeyexpr in pg_partition 
+create table testtmp1(a int, b int) partition by range(a) subpartition by range(b)
+(
+    partition p0 values less than(1000)(subpartition p00 values less than(100)),
+    partition p1 values less than(2000) (subpartition p10 values less than(200))
+);
+select count(partkeyexpr) from pg_partition where (parttype = 'r') and (parentid in (select oid from pg_class where relname = 'testtmp1'));
+ count 
+-------
+     0
+(1 row)
+
+select count(partkeyexpr) from pg_partition where (parttype = 'p') and (parentid in (select oid from pg_class where relname = 'testtmp1'));
+ count 
+-------
+     0
+(1 row)
+
+select count(partkeyexpr) from pg_partition where (parttype = 's') and (parentid in (select oid from pg_partition where (parttype = 'p') and (parentid in (select oid from pg_class where relname = 'testtmp1'))));
+ count 
+-------
+     0
+(1 row)
+
+create table testtmp2(a int, b int) partition by range(a) subpartition by range(b*2)
+(
+    partition p0 values less than(1000)(subpartition p00 values less than(100)),
+    partition p1 values less than(2000)(subpartition p10 values less than(200))
+);
+select count(partkeyexpr) from pg_partition where (parttype = 'r') and (parentid in (select oid from pg_class where relname = 'testtmp2'));
+ count 
+-------
+     0
+(1 row)
+
+select partkeyexpr from pg_partition where (parttype = 'p') and (parentid in (select oid from pg_class where relname = 'testtmp2'));
+                                                                                                                                                                                                                                                              partkeyexpr                                                                                                                                                                                                                                                              
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ {OPEXPR :opno 514 :opfuncid 141 :opresulttype 23 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 2 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 2 :location 80} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :ismaxvalue false :location 82 :constvalue 4 [ 2 0 0 0 0 0 0 0 ] :cursor_data  :row_count 0 :cur_dno -1 :is_open false :found false :not_found false :null_open false :null_fetch false}) :location 81}
+ {OPEXPR :opno 514 :opfuncid 141 :opresulttype 23 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 2 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 2 :location 80} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :ismaxvalue false :location 82 :constvalue 4 [ 2 0 0 0 0 0 0 0 ] :cursor_data  :row_count 0 :cur_dno -1 :is_open false :found false :not_found false :null_open false :null_fetch false}) :location 81}
+(2 rows)
+
+select count(partkeyexpr) from pg_partition where (parttype = 's') and (parentid in (select oid from pg_partition where (parttype = 'p') and (parentid in (select oid from pg_class where relname = 'testtmp2'))));
+ count 
+-------
+     0
+(1 row)
+
+create table testtmp3(a int, b int) partition by range(a*2) subpartition by range(b)
+(
+    partition p0 values less than(1000)(subpartition p00 values less than(100)),
+    partition p1 values less than(2000)(subpartition p10 values less than(200))
+);
+select partkeyexpr from pg_partition where (parttype = 'r') and (parentid in (select oid from pg_class where relname = 'testtmp3'));
+                                                                                                                                                                                                                                                              partkeyexpr                                                                                                                                                                                                                                                              
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ {OPEXPR :opno 514 :opfuncid 141 :opresulttype 23 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 1 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 1 :location 55} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :ismaxvalue false :location 57 :constvalue 4 [ 2 0 0 0 0 0 0 0 ] :cursor_data  :row_count 0 :cur_dno -1 :is_open false :found false :not_found false :null_open false :null_fetch false}) :location 56}
+(1 row)
+
+select count(partkeyexpr) from pg_partition where (parttype = 'p') and (parentid in (select oid from pg_class where relname = 'testtmp3'));
+ count 
+-------
+     0
+(1 row)
+
+select count(partkeyexpr) from pg_partition where (parttype = 's') and (parentid in (select oid from pg_partition where (parttype = 'p') and (parentid in (select oid from pg_class where relname = 'testtmp3'))));
+ count 
+-------
+     0
+(1 row)
+
+drop table testtmp1,testtmp2,testtmp3;
+create table testtab(a int, b int);
+--test range partition
+create table testrangepart(a int, b int) partition by range(abs(a*2))
+(
+    partition p0 values less than(100),
+    partition p1 values less than(200)
+);
+select partkeyexpr from pg_partition where (parttype = 'r') and (parentid in (select oid from pg_class where relname = 'testrangepart'));
+                                                                                                                                                                                                                                                                                                                                               partkeyexpr                                                                                                                                                                                                                                                                                                                                               
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ {FUNCEXPR :funcid 1397 :funcresulttype 23 :funcresulttype_orig -1 :funcretset false :funcformat 0 :funccollid 0 :inputcollid 0 :args ({OPEXPR :opno 514 :opfuncid 141 :opresulttype 23 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 1 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 1 :location 64} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :ismaxvalue false :location 66 :constvalue 4 [ 2 0 0 0 0 0 0 0 ] :cursor_data  :row_count 0 :cur_dno -1 :is_open false :found false :not_found false :null_open false :null_fetch false}) :location 65}) :location 60 :refSynOid 0}
+(1 row)
+
+insert into testrangepart values(-51,1),(49,2);
+insert into testrangepart values(-101,1);
+ERROR:  inserted partition key does not map to any table partition
+select * from testrangepart partition(p0);
+ a  | b 
+----+---
+ 49 | 2
+(1 row)
+
+select * from testrangepart partition(p1);
+  a  | b 
+-----+---
+ -51 | 1
+(1 row)
+
+select * from testrangepart where a = -51;
+  a  | b 
+-----+---
+ -51 | 1
+(1 row)
+
+update testrangepart set a = -48 where a = -51;
+select * from testrangepart partition(p0);
+  a  | b 
+-----+---
+  49 | 2
+ -48 | 1
+(2 rows)
+
+select * from testrangepart partition(p1);
+ a | b 
+---+---
+(0 rows)
+
+delete from testrangepart where a = -48 or a = 49;
+select * from testrangepart;
+ a | b 
+---+---
+(0 rows)
+
+insert into testtab values(-51,1),(51,2);
+insert into testrangepart select * from testtab;
+select * from testrangepart partition(p0);
+ a | b 
+---+---
+(0 rows)
+
+select * from testrangepart partition(p1);
+  a  | b 
+-----+---
+ -51 | 1
+  51 | 2
+(2 rows)
+
+delete from testtab;
+--test list partition
+create table testlistpart(a int, b int) partition by list(abs(a*2))
+(
+    partition p0 values(100,200),
+    partition p1 values(300,400)
+);
+select partkeyexpr from pg_partition where (parttype = 'r') and (parentid in (select oid from pg_class where relname = 'testlistpart'));
+                                                                                                                                                                                                                                                                                                                                               partkeyexpr                                                                                                                                                                                                                                                                                                                                               
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ {FUNCEXPR :funcid 1397 :funcresulttype 23 :funcresulttype_orig -1 :funcretset false :funcformat 0 :funccollid 0 :inputcollid 0 :args ({OPEXPR :opno 514 :opfuncid 141 :opresulttype 23 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 1 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 1 :location 62} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :ismaxvalue false :location 64 :constvalue 4 [ 2 0 0 0 0 0 0 0 ] :cursor_data  :row_count 0 :cur_dno -1 :is_open false :found false :not_found false :null_open false :null_fetch false}) :location 63}) :location 58 :refSynOid 0}
+(1 row)
+
+insert into testlistpart values(-50,1),(200,2);
+insert into testlistpart values(300,1);
+ERROR:  inserted partition key does not map to any table partition
+select * from testlistpart partition(p0);
+  a  | b 
+-----+---
+ -50 | 1
+(1 row)
+
+select * from testlistpart partition(p1);
+  a  | b 
+-----+---
+ 200 | 2
+(1 row)
+
+select * from testlistpart where a = -50;
+  a  | b 
+-----+---
+ -50 | 1
+(1 row)
+
+update testlistpart set a = -150 where a = -50;
+select * from testlistpart partition(p0);
+ a | b 
+---+---
+(0 rows)
+
+select * from testlistpart partition(p1);
+  a   | b 
+------+---
+  200 | 2
+ -150 | 1
+(2 rows)
+
+delete from testlistpart where a = -150 or a = 200;
+select * from testlistpart;
+ a | b 
+---+---
+(0 rows)
+
+insert into testtab values(-50,1),(200,2);
+insert into testlistpart select * from testtab;
+select * from testlistpart partition(p0);
+  a  | b 
+-----+---
+ -50 | 1
+(1 row)
+
+select * from testlistpart partition(p1);
+  a  | b 
+-----+---
+ 200 | 2
+(1 row)
+
+delete from testtab;
+--test hash partition
+create table testhashpart(a int, b int) partition by hash(abs(a*2)) (partition p0,partition p1);
+select partkeyexpr from pg_partition where (parttype = 'r') and (parentid in (select oid from pg_class where relname = 'testhashpart'));
+                                                                                                                                                                                                                                                                                                                                               partkeyexpr                                                                                                                                                                                                                                                                                                                                               
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ {FUNCEXPR :funcid 1397 :funcresulttype 23 :funcresulttype_orig -1 :funcretset false :funcformat 0 :funccollid 0 :inputcollid 0 :args ({OPEXPR :opno 514 :opfuncid 141 :opresulttype 23 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 1 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 1 :location 62} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :ismaxvalue false :location 64 :constvalue 4 [ 2 0 0 0 0 0 0 0 ] :cursor_data  :row_count 0 :cur_dno -1 :is_open false :found false :not_found false :null_open false :null_fetch false}) :location 63}) :location 58 :refSynOid 0}
+(1 row)
+
+insert into testhashpart values(-51,1),(50,2);
+select * from testhashpart partition(p0);
+ a  | b 
+----+---
+ 50 | 2
+(1 row)
+
+select * from testhashpart partition(p1);
+  a  | b 
+-----+---
+ -51 | 1
+(1 row)
+
+select * from testhashpart where a = -51;
+  a  | b 
+-----+---
+ -51 | 1
+(1 row)
+
+update testhashpart set a = -49 where a = -51;
+select * from testhashpart partition(p0);
+  a  | b 
+-----+---
+  50 | 2
+ -49 | 1
+(2 rows)
+
+select * from testhashpart partition(p1);
+ a | b 
+---+---
+(0 rows)
+
+delete from testhashpart where a = 50 or a = -49;
+select * from testhashpart;
+ a | b 
+---+---
+(0 rows)
+
+insert into testtab values(-51,1),(50,2);
+insert into testhashpart select * from testtab;
+select * from testhashpart partition(p0);
+ a  | b 
+----+---
+ 50 | 2
+(1 row)
+
+select * from testhashpart partition(p1);
+  a  | b 
+-----+---
+ -51 | 1
+(1 row)
+
+delete from testtab;
+--test range subpartition
+create table testrangesubpart(a int, b int) partition by range(a+b) subpartition by range(a-b)
+(
+    partition p0 values less than(1000)(subpartition p00 values less than(100)),
+    partition p1 values less than(2000)(subpartition p10 values less than(200))
+);
+select partkeyexpr from pg_partition where (parttype = 'r') and (parentid in (select oid from pg_class where relname = 'testrangesubpart'));
+                                                                                                                                                                           partkeyexpr                                                                                                                                                                           
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ {OPEXPR :opno 551 :opfuncid 177 :opresulttype 23 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 1 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 1 :location 63} {VAR :varno 1 :varattno 2 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 2 :location 65}) :location 64}
+(1 row)
+
+select partkeyexpr from pg_partition where (parttype = 'p') and (parentid in (select oid from pg_class where relname = 'testrangesubpart'));
+                                                                                                                                                                           partkeyexpr                                                                                                                                                                           
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ {OPEXPR :opno 555 :opfuncid 181 :opresulttype 23 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 1 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 1 :location 90} {VAR :varno 1 :varattno 2 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 2 :location 92}) :location 91}
+ {OPEXPR :opno 555 :opfuncid 181 :opresulttype 23 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 1 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 1 :location 90} {VAR :varno 1 :varattno 2 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 2 :location 92}) :location 91}
+(2 rows)
+
+insert into testrangesubpart values(500,401),(600,450);
+insert into testrangesubpart values(600,299);
+ERROR:  inserted partition key does not map to any table partition
+select * from testrangesubpart partition(p0);
+  a  |  b  
+-----+-----
+ 500 | 401
+(1 row)
+
+select * from testrangesubpart partition(p1);
+  a  |  b  
+-----+-----
+ 600 | 450
+(1 row)
+
+select * from testrangesubpart where a = 500;
+  a  |  b  
+-----+-----
+ 500 | 401
+(1 row)
+
+update testrangesubpart set a = 400 where a = 500;
+select * from testrangesubpart partition(p0);
+  a  |  b  
+-----+-----
+ 400 | 401
+(1 row)
+
+select * from testrangesubpart partition(p1);
+  a  |  b  
+-----+-----
+ 600 | 450
+(1 row)
+
+delete from testrangesubpart where a = 400 or a = 600;
+select * from testrangesubpart;
+ a | b 
+---+---
+(0 rows)
+
+insert into testtab values(500,401),(600,450);
+insert into testrangesubpart select * from testtab;
+select * from testrangesubpart partition(p0);
+  a  |  b  
+-----+-----
+ 500 | 401
+(1 row)
+
+select * from testrangesubpart partition(p1);
+  a  |  b  
+-----+-----
+ 600 | 450
+(1 row)
+
+delete from testtab;
+--test list subpartition
+create table testlistsubpart(a int, b int) partition by range(abs(a*2)) subpartition by list(abs(b*2)) (partition p0 values less than(1000)(subpartition p00 values(100)),partition p1 values less than(2000) (subpartition p10 values(200)));
+select partkeyexpr from pg_partition where (parttype = 'r') and (parentid in (select oid from pg_class where relname = 'testlistsubpart'));
+                                                                                                                                                                                                                                                                                                                                               partkeyexpr                                                                                                                                                                                                                                                                                                                                               
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ {FUNCEXPR :funcid 1397 :funcresulttype 23 :funcresulttype_orig -1 :funcretset false :funcformat 0 :funccollid 0 :inputcollid 0 :args ({OPEXPR :opno 514 :opfuncid 141 :opresulttype 23 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 1 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 1 :location 66} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :ismaxvalue false :location 68 :constvalue 4 [ 2 0 0 0 0 0 0 0 ] :cursor_data  :row_count 0 :cur_dno -1 :is_open false :found false :not_found false :null_open false :null_fetch false}) :location 67}) :location 62 :refSynOid 0}
+(1 row)
+
+select partkeyexpr from pg_partition where (parttype = 'p') and (parentid in (select oid from pg_class where relname = 'testlistsubpart'));
+                                                                                                                                                                                                                                                                                                                                               partkeyexpr                                                                                                                                                                                                                                                                                                                                               
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ {FUNCEXPR :funcid 1397 :funcresulttype 23 :funcresulttype_orig -1 :funcretset false :funcformat 0 :funccollid 0 :inputcollid 0 :args ({OPEXPR :opno 514 :opfuncid 141 :opresulttype 23 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 2 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 2 :location 97} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :ismaxvalue false :location 99 :constvalue 4 [ 2 0 0 0 0 0 0 0 ] :cursor_data  :row_count 0 :cur_dno -1 :is_open false :found false :not_found false :null_open false :null_fetch false}) :location 98}) :location 93 :refSynOid 0}
+ {FUNCEXPR :funcid 1397 :funcresulttype 23 :funcresulttype_orig -1 :funcretset false :funcformat 0 :funccollid 0 :inputcollid 0 :args ({OPEXPR :opno 514 :opfuncid 141 :opresulttype 23 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 2 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 2 :location 97} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :ismaxvalue false :location 99 :constvalue 4 [ 2 0 0 0 0 0 0 0 ] :cursor_data  :row_count 0 :cur_dno -1 :is_open false :found false :not_found false :null_open false :null_fetch false}) :location 98}) :location 93 :refSynOid 0}
+(2 rows)
+
+insert into testlistsubpart values(-499,-50),(600,-100);
+insert into testlistsubpart values(600,200);
+ERROR:  inserted partition key does not map to any table partition
+select * from testlistsubpart partition(p0);
+  a   |  b  
+------+-----
+ -499 | -50
+(1 row)
+
+select * from testlistsubpart partition(p1);
+  a  |  b   
+-----+------
+ 600 | -100
+(1 row)
+
+select * from testlistsubpart where a = -499;
+  a   |  b  
+------+-----
+ -499 | -50
+(1 row)
+
+update testlistsubpart set a = 499 where a = -499;
+select * from testlistsubpart partition(p0);
+  a  |  b  
+-----+-----
+ 499 | -50
+(1 row)
+
+select * from testlistsubpart partition(p1);
+  a  |  b   
+-----+------
+ 600 | -100
+(1 row)
+
+delete from testlistsubpart where a = 499 or a = 600;
+select * from testlistsubpart;
+ a | b 
+---+---
+(0 rows)
+
+insert into testtab values(-499,-50),(600,-100);
+insert into testlistsubpart select * from testtab;
+select * from testlistsubpart partition(p0);
+  a   |  b  
+------+-----
+ -499 | -50
+(1 row)
+
+select * from testlistsubpart partition(p1);
+  a  |  b   
+-----+------
+ 600 | -100
+(1 row)
+
+delete from testtab;
+--test hash subpartition
+create table testhashsubpart(a int, b int) partition by range(a) subpartition by hash(abs(b*2)) (partition p0 values less than(1000)(subpartition p00,subpartition p01),partition p1 values less than(2000) (subpartition p10,subpartition p11));
+select partkeyexpr from pg_partition where (parttype = 'r') and (parentid in (select oid from pg_class where relname = 'testhashsubpart'));
+ partkeyexpr 
+-------------
+ 
+(1 row)
+
+select partkeyexpr from pg_partition where (parttype = 'p') and (parentid in (select oid from pg_class where relname = 'testhashsubpart'));
+                                                                                                                                                                                                                                                                                                                                               partkeyexpr                                                                                                                                                                                                                                                                                                                                               
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ {FUNCEXPR :funcid 1397 :funcresulttype 23 :funcresulttype_orig -1 :funcretset false :funcformat 0 :funccollid 0 :inputcollid 0 :args ({OPEXPR :opno 514 :opfuncid 141 :opresulttype 23 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 2 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 2 :location 90} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :ismaxvalue false :location 92 :constvalue 4 [ 2 0 0 0 0 0 0 0 ] :cursor_data  :row_count 0 :cur_dno -1 :is_open false :found false :not_found false :null_open false :null_fetch false}) :location 91}) :location 86 :refSynOid 0}
+ {FUNCEXPR :funcid 1397 :funcresulttype 23 :funcresulttype_orig -1 :funcretset false :funcformat 0 :funccollid 0 :inputcollid 0 :args ({OPEXPR :opno 514 :opfuncid 141 :opresulttype 23 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 2 :vartype 23 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 2 :location 90} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :ismaxvalue false :location 92 :constvalue 4 [ 2 0 0 0 0 0 0 0 ] :cursor_data  :row_count 0 :cur_dno -1 :is_open false :found false :not_found false :null_open false :null_fetch false}) :location 91}) :location 86 :refSynOid 0}
+(2 rows)
+
+insert into testhashsubpart values(500,-400),(1600,450);
+select * from testhashsubpart partition(p0);
+  a  |  b   
+-----+------
+ 500 | -400
+(1 row)
+
+select * from testhashsubpart partition(p1);
+  a   |  b  
+------+-----
+ 1600 | 450
+(1 row)
+
+select * from testhashsubpart where a = 500;
+  a  |  b   
+-----+------
+ 500 | -400
+(1 row)
+
+update testhashsubpart set a = 400 where a = 500;
+select * from testhashsubpart partition(p0);
+  a  |  b   
+-----+------
+ 400 | -400
+(1 row)
+
+select * from testhashsubpart partition(p1);
+  a   |  b  
+------+-----
+ 1600 | 450
+(1 row)
+
+delete from testhashsubpart where a = 400 or a = 1600;
+select * from testhashsubpart;
+ a | b 
+---+---
+(0 rows)
+
+insert into testtab values(500,-400),(1600,450);
+insert into testhashsubpart select * from testtab;
+select * from testhashsubpart partition(p0);
+  a  |  b   
+-----+------
+ 500 | -400
+(1 row)
+
+select * from testhashsubpart partition(p1);
+  a   |  b  
+------+-----
+ 1600 | 450
+(1 row)
+
+delete from testtab;
+--test pg_get_tabledef and pg_dump
+create table testnormalsubpart(a int, b int) partition by range(a) subpartition by range(b)
+(
+    partition p0 values less than(1000)(subpartition p00 values less than(100)),
+    partition p1 values less than(2000)(subpartition p10 values less than(200))
+);
+select pg_get_tabledef('testrangepart');
+                        pg_get_tabledef                         
+----------------------------------------------------------------
+ SET search_path = public;                                     +
+ CREATE TABLE testrangepart (                                  +
+     a integer,                                                +
+     b integer                                                 +
+ )                                                             +
+ WITH (orientation=row, compression=no)                        +
+ PARTITION BY RANGE (abs((a * 2)))                             +
+ (                                                             +
+     PARTITION p0 VALUES LESS THAN (100) TABLESPACE pg_default,+
+     PARTITION p1 VALUES LESS THAN (200) TABLESPACE pg_default +
+ )                                                             +
+ ENABLE ROW MOVEMENT;
+(1 row)
+
+select pg_get_tabledef('testlistpart');
+                     pg_get_tabledef                      
+----------------------------------------------------------
+ SET search_path = public;                               +
+ CREATE TABLE testlistpart (                             +
+     a integer,                                          +
+     b integer                                           +
+ )                                                       +
+ WITH (orientation=row, compression=no)                  +
+ PARTITION BY LIST (abs((a * 2)))                        +
+ (                                                       +
+     PARTITION p0 VALUES (100,200) TABLESPACE pg_default,+
+     PARTITION p1 VALUES (300,400) TABLESPACE pg_default +
+ )                                                       +
+ ENABLE ROW MOVEMENT;
+(1 row)
+
+select pg_get_tabledef('testhashpart');
+             pg_get_tabledef             
+-----------------------------------------
+ SET search_path = public;              +
+ CREATE TABLE testhashpart (            +
+     a integer,                         +
+     b integer                          +
+ )                                      +
+ WITH (orientation=row, compression=no) +
+ PARTITION BY HASH (abs((a * 2)))       +
+ (                                      +
+     PARTITION p0 TABLESPACE pg_default,+
+     PARTITION p1 TABLESPACE pg_default +
+ )                                      +
+ ENABLE ROW MOVEMENT;
+(1 row)
+
+select pg_get_tabledef('testrangesubpart');
+                            pg_get_tabledef                            
+-----------------------------------------------------------------------
+ SET search_path = public;                                            +
+ CREATE TABLE testrangesubpart (                                      +
+     a integer,                                                       +
+     b integer                                                        +
+ )                                                                    +
+ WITH (orientation=row, compression=no)                               +
+ PARTITION BY RANGE ((a + b)) SUBPARTITION BY RANGE ((a - b))         +
+ (                                                                    +
+     PARTITION p0 VALUES LESS THAN (1000) TABLESPACE pg_default       +
+     (                                                                +
+         SUBPARTITION p00 VALUES LESS THAN (100) TABLESPACE pg_default+
+     ),                                                               +
+     PARTITION p1 VALUES LESS THAN (2000) TABLESPACE pg_default       +
+     (                                                                +
+         SUBPARTITION p10 VALUES LESS THAN (200) TABLESPACE pg_default+
+     )                                                                +
+ )                                                                    +
+ ENABLE ROW MOVEMENT;
+(1 row)
+
+select pg_get_tabledef('testlistsubpart');
+                            pg_get_tabledef                            
+-----------------------------------------------------------------------
+ SET search_path = public;                                            +
+ CREATE TABLE testlistsubpart (                                       +
+     a integer,                                                       +
+     b integer                                                        +
+ )                                                                    +
+ WITH (orientation=row, compression=no)                               +
+ PARTITION BY RANGE (abs((a * 2))) SUBPARTITION BY LIST (abs((b * 2)))+
+ (                                                                    +
+     PARTITION p0 VALUES LESS THAN (1000) TABLESPACE pg_default       +
+     (                                                                +
+         SUBPARTITION p00 VALUES (100) TABLESPACE pg_default          +
+     ),                                                               +
+     PARTITION p1 VALUES LESS THAN (2000) TABLESPACE pg_default       +
+     (                                                                +
+         SUBPARTITION p10 VALUES (200) TABLESPACE pg_default          +
+     )                                                                +
+ )                                                                    +
+ ENABLE ROW MOVEMENT;
+(1 row)
+
+select pg_get_tabledef('testhashsubpart');
+                        pg_get_tabledef                         
+----------------------------------------------------------------
+ SET search_path = public;                                     +
+ CREATE TABLE testhashsubpart (                                +
+     a integer,                                                +
+     b integer                                                 +
+ )                                                             +
+ WITH (orientation=row, compression=no)                        +
+ PARTITION BY RANGE (a) SUBPARTITION BY HASH (abs((b * 2)))    +
+ (                                                             +
+     PARTITION p0 VALUES LESS THAN (1000) TABLESPACE pg_default+
+     (                                                         +
+         SUBPARTITION p00 TABLESPACE pg_default,               +
+         SUBPARTITION p01 TABLESPACE pg_default                +
+     ),                                                        +
+     PARTITION p1 VALUES LESS THAN (2000) TABLESPACE pg_default+
+     (                                                         +
+         SUBPARTITION p10 TABLESPACE pg_default,               +
+         SUBPARTITION p11 TABLESPACE pg_default                +
+     )                                                         +
+ )                                                             +
+ ENABLE ROW MOVEMENT;
+(1 row)
+
+select pg_get_tabledef('testnormalsubpart');
+                            pg_get_tabledef                            
+-----------------------------------------------------------------------
+ SET search_path = public;                                            +
+ CREATE TABLE testnormalsubpart (                                     +
+     a integer,                                                       +
+     b integer                                                        +
+ )                                                                    +
+ WITH (orientation=row, compression=no)                               +
+ PARTITION BY RANGE (a) SUBPARTITION BY RANGE (b)                     +
+ (                                                                    +
+     PARTITION p0 VALUES LESS THAN (1000) TABLESPACE pg_default       +
+     (                                                                +
+         SUBPARTITION p00 VALUES LESS THAN (100) TABLESPACE pg_default+
+     ),                                                               +
+     PARTITION p1 VALUES LESS THAN (2000) TABLESPACE pg_default       +
+     (                                                                +
+         SUBPARTITION p10 VALUES LESS THAN (200) TABLESPACE pg_default+
+     )                                                                +
+ )                                                                    +
+ ENABLE ROW MOVEMENT;
+(1 row)
+
+drop table testrangepart;
+drop table testlistpart;
+drop table testhashpart;
+drop table testrangesubpart;
+drop table testlistsubpart;
+drop table testhashsubpart;
+drop table testnormalsubpart;
+drop table testtab;
+\c regression
+drop database if exists part_expr_key_db;
+create database part_expr_key_db;
+\c part_expr_key_db
+create table testrangepart(a int, b int) partition by range(abs(a*2))
+(
+    partition p0 values less than(100),
+    partition p1 values less than(200)
+);
+create table testlistpart(a int, b int) partition by list(abs(a*2))
+(
+    partition p0 values(100,200),
+    partition p1 values(300,400)
+);
+create table testhashpart(a int, b int) partition by hash(abs(a*2)) (partition p0,partition p1);
+create table testrangesubpart(a int, b int) partition by range(a+b) subpartition by range(a-b)
+(
+    partition p0 values less than(1000)(subpartition p00 values less than(100)),
+    partition p1 values less than(2000)(subpartition p10 values less than(200))
+);
+create table testlistsubpart(a int, b int) partition by range(abs(a*2)) subpartition by list(abs(b*2))
+(
+	partition p0 values less than(1000)(subpartition p00 values(100)),
+	partition p1 values less than(2000) (subpartition p10 values(200))
+);
+create table testhashsubpart(a int, b int) partition by range(a) subpartition by hash(abs(b*2))
+(
+	partition p0 values less than(1000)(subpartition p00,subpartition p01),
+	partition p1 values less than(2000) (subpartition p10,subpartition p11)
+);
+create table testnormalsubpart(a int, b int) partition by range(a) subpartition by range(b)
+(
+    partition p0 values less than(1000)(subpartition p00 values less than(100)),
+    partition p1 values less than(2000)(subpartition p10 values less than(200))
+);
+\! @abs_bindir@/gs_dump part_expr_key_db -p @portstring@ -f @abs_bindir@/gs_dump_partition_expr.sql >/dev/null 2>&1; echo $?
+0
+drop table testrangepart;
+drop table testlistpart;
+drop table testhashpart;
+drop table testrangesubpart;
+drop table testlistsubpart;
+drop table testhashsubpart;
+drop table testnormalsubpart;
+\! @abs_bindir@/gsql -p @portstring@ -d part_expr_key_db -f @abs_bindir@/gs_dump_partition_expr.sql >/dev/null 2>&1; echo $?
+0
+select pg_get_tabledef('testrangepart');
+                        pg_get_tabledef                         
+----------------------------------------------------------------
+ SET search_path = public;                                     +
+ CREATE TABLE testrangepart (                                  +
+     a integer,                                                +
+     b integer                                                 +
+ )                                                             +
+ WITH (orientation=row, compression=no)                        +
+ PARTITION BY RANGE (abs((a * 2)))                             +
+ (                                                             +
+     PARTITION p0 VALUES LESS THAN (100) TABLESPACE pg_default,+
+     PARTITION p1 VALUES LESS THAN (200) TABLESPACE pg_default +
+ )                                                             +
+ ENABLE ROW MOVEMENT;
+(1 row)
+
+select pg_get_tabledef('testlistpart');
+                     pg_get_tabledef                      
+----------------------------------------------------------
+ SET search_path = public;                               +
+ CREATE TABLE testlistpart (                             +
+     a integer,                                          +
+     b integer                                           +
+ )                                                       +
+ WITH (orientation=row, compression=no)                  +
+ PARTITION BY LIST (abs((a * 2)))                        +
+ (                                                       +
+     PARTITION p0 VALUES (100,200) TABLESPACE pg_default,+
+     PARTITION p1 VALUES (300,400) TABLESPACE pg_default +
+ )                                                       +
+ ENABLE ROW MOVEMENT;
+(1 row)
+
+select pg_get_tabledef('testhashpart');
+             pg_get_tabledef             
+-----------------------------------------
+ SET search_path = public;              +
+ CREATE TABLE testhashpart (            +
+     a integer,                         +
+     b integer                          +
+ )                                      +
+ WITH (orientation=row, compression=no) +
+ PARTITION BY HASH (abs((a * 2)))       +
+ (                                      +
+     PARTITION p0 TABLESPACE pg_default,+
+     PARTITION p1 TABLESPACE pg_default +
+ )                                      +
+ ENABLE ROW MOVEMENT;
+(1 row)
+
+select pg_get_tabledef('testrangesubpart');
+                            pg_get_tabledef                            
+-----------------------------------------------------------------------
+ SET search_path = public;                                            +
+ CREATE TABLE testrangesubpart (                                      +
+     a integer,                                                       +
+     b integer                                                        +
+ )                                                                    +
+ WITH (orientation=row, compression=no)                               +
+ PARTITION BY RANGE ((a + b)) SUBPARTITION BY RANGE ((a - b))         +
+ (                                                                    +
+     PARTITION p0 VALUES LESS THAN (1000) TABLESPACE pg_default       +
+     (                                                                +
+         SUBPARTITION p00 VALUES LESS THAN (100) TABLESPACE pg_default+
+     ),                                                               +
+     PARTITION p1 VALUES LESS THAN (2000) TABLESPACE pg_default       +
+     (                                                                +
+         SUBPARTITION p10 VALUES LESS THAN (200) TABLESPACE pg_default+
+     )                                                                +
+ )                                                                    +
+ ENABLE ROW MOVEMENT;
+(1 row)
+
+select pg_get_tabledef('testlistsubpart');
+                            pg_get_tabledef                            
+-----------------------------------------------------------------------
+ SET search_path = public;                                            +
+ CREATE TABLE testlistsubpart (                                       +
+     a integer,                                                       +
+     b integer                                                        +
+ )                                                                    +
+ WITH (orientation=row, compression=no)                               +
+ PARTITION BY RANGE (abs((a * 2))) SUBPARTITION BY LIST (abs((b * 2)))+
+ (                                                                    +
+     PARTITION p0 VALUES LESS THAN (1000) TABLESPACE pg_default       +
+     (                                                                +
+         SUBPARTITION p00 VALUES (100) TABLESPACE pg_default          +
+     ),                                                               +
+     PARTITION p1 VALUES LESS THAN (2000) TABLESPACE pg_default       +
+     (                                                                +
+         SUBPARTITION p10 VALUES (200) TABLESPACE pg_default          +
+     )                                                                +
+ )                                                                    +
+ ENABLE ROW MOVEMENT;
+(1 row)
+
+select pg_get_tabledef('testhashsubpart');
+                        pg_get_tabledef                         
+----------------------------------------------------------------
+ SET search_path = public;                                     +
+ CREATE TABLE testhashsubpart (                                +
+     a integer,                                                +
+     b integer                                                 +
+ )                                                             +
+ WITH (orientation=row, compression=no)                        +
+ PARTITION BY RANGE (a) SUBPARTITION BY HASH (abs((b * 2)))    +
+ (                                                             +
+     PARTITION p0 VALUES LESS THAN (1000) TABLESPACE pg_default+
+     (                                                         +
+         SUBPARTITION p00 TABLESPACE pg_default,               +
+         SUBPARTITION p01 TABLESPACE pg_default                +
+     ),                                                        +
+     PARTITION p1 VALUES LESS THAN (2000) TABLESPACE pg_default+
+     (                                                         +
+         SUBPARTITION p10 TABLESPACE pg_default,               +
+         SUBPARTITION p11 TABLESPACE pg_default                +
+     )                                                         +
+ )                                                             +
+ ENABLE ROW MOVEMENT;
+(1 row)
+
+select pg_get_tabledef('testnormalsubpart');
+                            pg_get_tabledef                            
+-----------------------------------------------------------------------
+ SET search_path = public;                                            +
+ CREATE TABLE testnormalsubpart (                                     +
+     a integer,                                                       +
+     b integer                                                        +
+ )                                                                    +
+ WITH (orientation=row, compression=no)                               +
+ PARTITION BY RANGE (a) SUBPARTITION BY RANGE (b)                     +
+ (                                                                    +
+     PARTITION p0 VALUES LESS THAN (1000) TABLESPACE pg_default       +
+     (                                                                +
+         SUBPARTITION p00 VALUES LESS THAN (100) TABLESPACE pg_default+
+     ),                                                               +
+     PARTITION p1 VALUES LESS THAN (2000) TABLESPACE pg_default       +
+     (                                                                +
+         SUBPARTITION p10 VALUES LESS THAN (200) TABLESPACE pg_default+
+     )                                                                +
+ )                                                                    +
+ ENABLE ROW MOVEMENT;
+(1 row)
+
+\c regression
+drop database if exists part_expr_key_db;

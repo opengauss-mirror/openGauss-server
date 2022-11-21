@@ -1913,6 +1913,53 @@ static List *GetSubpPartitionDefList(PartitionState *partTableState, ListCell *c
     return subPartitionList;
 }
 
+void UpdatePartKeyExpr(Relation rel, PartitionState *partTableState, Oid partOid)
+{
+    ParseState* pstate = NULL;
+    RangeTblEntry* rte = NULL;
+    HeapTuple partTuple = NULL;
+    pstate = make_parsestate(NULL);
+    rte = addRangeTableEntryForRelation(pstate, rel, NULL, false, true);
+    addRTEtoQuery(pstate, rte, true, true, true);
+    Relation pgPartitionRel = heap_open(PartitionRelationId, RowExclusiveLock);
+    if (OidIsValid(partOid))
+        partTuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(partOid));
+    else
+        partTuple = searchPgPartitionByParentIdCopy(PART_OBJ_TYPE_PARTED_TABLE, rel->rd_id);
+    if (!partTuple)
+        ereport(ERROR,(errcode(ERRCODE_PARTITION_ERROR),errmsg("The partition can't be found")));
+    bool isnull = false;
+    Datum val = fastgetattr(partTuple, Anum_pg_partition_partkeyexpr, RelationGetDescr(pgPartitionRel), &isnull);
+    if (isnull) {
+        if (OidIsValid(partOid))
+            ReleaseSysCache(partTuple);
+        else
+            heap_freetuple(partTuple);
+        heap_close(pgPartitionRel, RowExclusiveLock);
+        return;
+    }
+	// Oid* partitionKeyDataType = NULL;
+    Node* expr = transformExpr(pstate, (Node*)(linitial(partTableState->partitionKey)));
+    assign_expr_collations(pstate, expr);
+    bool nulls[Natts_pg_partition] = {false};
+    bool replaces[Natts_pg_partition] = {false};
+    Datum values[Natts_pg_partition] = {0};
+    replaces[Anum_pg_partition_partkeyexpr - 1] = true;
+    char* partkeyexpr = nodeToString(expr);
+    values[Anum_pg_partition_partkeyexpr - 1] = partkeyexpr ? CStringGetTextDatum(partkeyexpr) : CStringGetTextDatum("");
+    HeapTuple new_tuple = heap_modify_tuple(partTuple, RelationGetDescr(pgPartitionRel), values, nulls, replaces);
+    simple_heap_update(pgPartitionRel, &new_tuple->t_self, new_tuple);
+    CatalogUpdateIndexes(pgPartitionRel, new_tuple);
+    if (OidIsValid(partOid))
+        ReleaseSysCache(partTuple);
+    else
+        heap_freetuple(partTuple);
+    heap_freetuple_ext(new_tuple);
+    if (pgPartitionRel) {
+        heap_close(pgPartitionRel, RowExclusiveLock);
+    }
+}
+
 /* ----------------------------------------------------------------
  *		DefineRelation
  *				Creates a new relation.
@@ -2515,15 +2562,17 @@ Oid DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, bool isCTAS)
             ColumnRef *partitionKeyRef = (ColumnRef *)linitial(stmt->partTableState->partitionKey);
             ColumnRef *subPartitionKeyRef =
                 (ColumnRef *)linitial(stmt->partTableState->subPartitionState->partitionKey);
-            char *partitonKeyName = ((Value *)linitial(partitionKeyRef->fields))->val.str;
-            char *subPartitonKeyName = ((Value *)linitial(subPartitionKeyRef->fields))->val.str;
-            if (!strcmp(partitonKeyName, subPartitonKeyName)) {
-                ereport(
-                    ERROR,
-                    (errmodule(MOD_COMMAND), errcode(ERRCODE_DUPLICATE_OBJECT),
-                     errmsg("The two partition keys of a subpartition partition table are the same."), errdetail("N/A"),
-                     errcause("The two partition keys of a subpartition partition table cannot be the same."),
-                     erraction("Partition keys cannot be the same column.")));
+            if (IsA(partitionKeyRef,ColumnRef) && IsA(subPartitionKeyRef,ColumnRef)) {
+                char *partitonKeyName = ((Value *)linitial(partitionKeyRef->fields))->val.str;
+                char *subPartitonKeyName = ((Value *)linitial(subPartitionKeyRef->fields))->val.str;
+                if (!strcmp(partitonKeyName, subPartitonKeyName)) {
+                    ereport(
+                        ERROR,
+                        (errmodule(MOD_COMMAND), errcode(ERRCODE_DUPLICATE_OBJECT),
+                        errmsg("The two partition keys of a subpartition partition table are the same."), errdetail("N/A"),
+                        errcause("The two partition keys of a subpartition partition table cannot be the same."),
+                        erraction("Partition keys cannot be the same column.")));
+                }
             }
             foreach (cell, stmt->partTableState->partitionList) {
                 stmt->partTableState->subPartitionState->partitionList =
@@ -2890,6 +2939,20 @@ Oid DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, bool isCTAS)
 
     ereport(DEBUG1, (errmsg("Define relation <%s.%s>, reloid: %u, relfilenode: %u", stmt->relation->schemaname,
         stmt->relation->relname, relationId, rel->rd_node.relNode)));
+
+    if (stmt->partTableState) {
+        UpdatePartKeyExpr(rel, stmt->partTableState, InvalidOid);
+        if (stmt->partTableState->subPartitionState) {
+            List* partitionList = relationGetPartitionList(rel, NoLock);
+            ListCell* cell = NULL;
+            foreach (cell, partitionList) {
+                Partition partition = (Partition)(lfirst(cell));
+                UpdatePartKeyExpr(rel, stmt->partTableState->subPartitionState, partition->pd_id);
+            }
+            releasePartitionList(rel, &partitionList, NoLock);
+        }
+        CommandCounterIncrement();
+    }
     /*
      * Now add any newly specified column default and generation expressions
      * to the new relation.  These are passed to us in the form of raw
@@ -19173,6 +19236,7 @@ void checkPartNotInUse(Partition part, const char* stmt)
     }
 }
 
+extern Node* GetColumnRef(Node* key, bool* isExpr);
 /*
  * @@GaussDB@@
  * Target		: data partition
@@ -19201,9 +19265,13 @@ List* GetPartitionkeyPos(List* partitionkeys, List* schema)
     errno_t rc = EOK;
     rc = memset_s(is_exist, len * sizeof(bool), 0, len * sizeof(bool));
     securec_check(rc, "\0", "\0");
-
+    bool isExpr = false;
     foreach (partitionkey_cell, partitionkeys) {
-        ColumnRef* partitionkey_ref = (ColumnRef*)lfirst(partitionkey_cell);
+        ColumnRef* partitionkey_ref = (ColumnRef*)GetColumnRef((Node*)lfirst(partitionkey_cell),&isExpr);
+        if (!partitionkey_ref)
+            ereport(ERROR,(errcode(ERRCODE_UNDEFINED_COLUMN),(errmsg("The partition key doesn't have any column."))));
+        if (isExpr && partitionkeys->length > 1)
+            ereport(ERROR,(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),(errmsg("The multi partition expr keys are not supported."))));
         char* partitonkey_name = ((Value*)linitial(partitionkey_ref->fields))->val.str;
 
         foreach (schema_cell, schema) {

@@ -181,6 +181,79 @@ void InsertFusion::refreshParameterIfNecessary()
     }
 }
 
+extern HeapTuple searchPgPartitionByParentIdCopy(char parttype, Oid parentId);
+Tuple ComputePartKeyExprTuple(Relation rel, EState *estate, TupleTableSlot *slot, Tuple oldtuple, Relation partRel)
+{
+    Relation pgPartition = NULL;
+    HeapTuple partitionedTuple = NULL;
+    bool isnull = false;
+    Datum val = 0;
+    char* partkeystr = "";
+    Node* partkeyexpr = NULL;
+    Tuple newtuple = NULL;
+    Relation tmpRel = NULL;
+    pgPartition = relation_open(PartitionRelationId, AccessShareLock);
+    if (PointerIsValid(partRel))
+        partitionedTuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(partRel->rd_id));
+    else
+        partitionedTuple = searchPgPartitionByParentIdCopy(PART_OBJ_TYPE_PARTED_TABLE, rel->rd_id);
+    val = fastgetattr(partitionedTuple, Anum_pg_partition_partkeyexpr, pgPartition->rd_att, &isnull);
+    if (isnull) {
+        relation_close(pgPartition, AccessShareLock);
+        if (PointerIsValid(partRel))
+            ReleaseSysCache(partitionedTuple);
+        else
+            heap_freetuple(partitionedTuple);
+        return newtuple;
+    }
+	int2vector* partitionKey = NULL;
+	Oid* partitionKeyDataType = NULL;
+    partitionKey = getPartitionKeyAttrNo(
+        &(partitionKeyDataType), partitionedTuple, RelationGetDescr(pgPartition), RelationGetDescr(rel));
+    partkeystr = MemoryContextStrdup(LocalMyDBCacheMemCxt(), TextDatumGetCString(val));
+    relation_close(pgPartition, AccessShareLock);
+    if (pg_strcasecmp(partkeystr, "") != 0) {
+        partkeyexpr = (Node*)stringToNode_skip_extern_fields(partkeystr);                      
+    }
+    (void)lockNextvalWalker(partkeyexpr, NULL);
+    ExprState *exprstate = ExecPrepareExpr((Expr *)partkeyexpr, estate);
+    ExprContext *econtext;
+    econtext = GetPerTupleExprContext(estate);
+    econtext->ecxt_scantuple = slot;
+    isnull = false;
+    val = 0;
+    val = ExecEvalExpr(exprstate, econtext, &isnull, NULL);
+    Const** boundary = NULL;
+    if (PointerIsValid(partRel))
+        tmpRel = partRel;
+    else
+        tmpRel = rel;
+
+    if (tmpRel->partMap->type == PART_TYPE_RANGE)
+        boundary = ((RangePartitionMap*)(tmpRel->partMap))->rangeElements[0].boundary;
+    else if (tmpRel->partMap->type == PART_TYPE_LIST)
+        boundary = ((ListPartitionMap*)(tmpRel->partMap))->listElements[0].boundary;
+    else if (tmpRel->partMap->type == PART_TYPE_HASH)
+        boundary = ((HashPartitionMap*)(tmpRel->partMap))->hashElements[0].boundary;
+    else
+        ereport(ERROR, (errcode(ERRCODE_PARTITION_ERROR), errmsg("Unsupported partition type : %d", tmpRel->partMap->type)));
+
+    if (!isnull)
+        val = datumCopy(val, boundary[0]->constbyval, boundary[0]->constlen);
+    bool nulls[rel->rd_att->natts] = {false};
+    bool replaces[rel->rd_att->natts] = {false};
+    Datum values[rel->rd_att->natts] = {0};
+    values[partitionKey->values[0]-1] = val;
+    nulls[partitionKey->values[0]-1] = isnull;
+    replaces[partitionKey->values[0]-1] = true;
+    newtuple = tableam_tops_modify_tuple(oldtuple, rel->rd_att, values, nulls, replaces);
+    if (PointerIsValid(partRel))
+        ReleaseSysCache(partitionedTuple);
+    else
+        heap_freetuple(partitionedTuple);
+    return newtuple;
+}
+
 unsigned long InsertFusion::ExecInsert(Relation rel, ResultRelInfo* result_rel_info)
 {
     /*******************

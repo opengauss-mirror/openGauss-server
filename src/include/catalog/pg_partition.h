@@ -65,6 +65,7 @@ CATALOG(pg_partition,9016) BKI_ROWTYPE_OID(3790) BKI_SCHEMA_MACRO
     TransactionId  relfrozenxid64;
     TransactionId relminmxid;     /* all multixacts in this rel are >= this.
                                    * this is really a MultiXactId */
+    text partkeyexpr;
 } FormData_pg_partition;
 /* Size of fixed part of pg_partition tuples, not counting var-length fields */
 #define PARTITION_TUPLE_SIZE \
@@ -95,7 +96,7 @@ typedef FormData_pg_partition *Form_pg_partition;
 #define PART_OBJ_TYPE_TABLE_SUB_PARTITION 's'
 #define PART_OBJ_TYPE_INDEX_PARTITION    'x'
 
-#define Natts_pg_partition               29
+#define Natts_pg_partition               30
 #define Anum_pg_partition_relname        1
 #define Anum_pg_partition_parttype       2
 #define Anum_pg_partition_parentid       3
@@ -125,5 +126,6 @@ typedef FormData_pg_partition *Form_pg_partition;
 #define Anum_pg_partition_reloptions     27
 #define Anum_pg_partition_relfrozenxid64 28
 #define Anum_pg_partition_relminmxid     29
+#define Anum_pg_partition_partkeyexpr    30
 #endif/*PG_PARTITION_H*/
 

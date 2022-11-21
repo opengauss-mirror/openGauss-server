@@ -508,12 +508,19 @@ PruningResult* partitionPruningForExpr(PlannerInfo* root, RangeTblEntry* rte, Re
     context->GetPartitionMap = GetRelPartitionMap;
     context->pruningType = PruningPartition;
 
-    if (rel->partMap != NULL && (rel->partMap->type == PART_TYPE_LIST || rel->partMap->type == PART_TYPE_HASH)) {
-        // for List/Hash partitioned table
-        result = partitionEqualPruningWalker(rel->partMap->type, expr, context);
+    bool isnull = PartExprKeyIsNull(rel, NULL);
+    if (isnull) {
+        if (rel->partMap != NULL && (rel->partMap->type == PART_TYPE_LIST || rel->partMap->type == PART_TYPE_HASH)) {
+            // for List/Hash partitioned table
+            result = partitionEqualPruningWalker(rel->partMap->type, expr, context);
+        } else {
+            // for Range/Interval partitioned table
+            result = partitionPruningWalker(expr, context);
+        }
     } else {
-        // for Range/Interval partitioned table
-        result = partitionPruningWalker(expr, context);
+        result = makeNode(PruningResult);
+        result->state = PRUNING_RESULT_FULL;
+        result->isPbeSinlePartition = false;      
     }
 
     if (result->exprPart != NULL || result->paramArg != NULL) {

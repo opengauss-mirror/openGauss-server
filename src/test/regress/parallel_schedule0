@@ -1022,3 +1022,6 @@ test: row_count_function
 
 # show_warnings
 test: show_warnings
+
+# partition expression key
+test: partition_expr_key

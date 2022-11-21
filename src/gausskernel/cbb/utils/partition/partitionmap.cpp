@@ -1500,6 +1500,112 @@ Oid GetRootPartitionOid(Relation relation)
     return relid;
 }
 
+static char* CheckPartExprKey(HeapTuple partitioned_tuple, Relation pg_partition)
+{
+    bool isNull = false;
+    auto val = fastgetattr(partitioned_tuple, Anum_pg_partition_partkeyexpr, RelationGetDescr(pg_partition), &isNull);
+    char* partkeystr = NULL;
+    if (!isNull)
+        partkeystr = MemoryContextStrdup(LocalMyDBCacheMemCxt(), TextDatumGetCString(val));
+    return partkeystr;
+}
+
+static void BuildElementForPartKeyExpr(void* element, HeapTuple partTuple, TupleDesc pgPartitionTupledsc, 
+    char* partkeystr, char partstrategy)
+{
+    RangeElement* rangeEle = NULL;
+    ListPartElement* listEle = NULL;
+    HashPartElement* hashEle = NULL;
+    Node* partkeyexpr = NULL;
+    HeapTuple typeTuple = NULL;
+    Oid typoid = InvalidOid;
+    Form_pg_type pgTypeForm = NULL;
+    Datum boundaryRawVal = 0;
+    bool isNull = false;
+    List* boundary = NULL;
+    int counter = 0;
+    ListCell* cell = NULL;
+    Assert(PointerIsValid(element) && PointerIsValid(partTuple) && PointerIsValid(pgPartitionTupledsc) && PointerIsValid(partkeystr));
+    boundaryRawVal = tableam_tops_tuple_getattr(partTuple, Anum_pg_partition_boundaries, pgPartitionTupledsc, &isNull);
+    if (isNull) {
+        ereport(ERROR,
+            (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+                errmsg("null maxvalue for tuple %u", HeapTupleGetOid(partTuple))));
+    }
+    boundary = untransformPartitionBoundary(boundaryRawVal);
+    if (PART_STRATEGY_RANGE == partstrategy) {
+        Assert(boundary->length == 1);
+        rangeEle = (RangeElement*)element;
+        rangeEle->isInterval = false;
+        rangeEle->len = 1;
+        rangeEle->partitionOid = HeapTupleGetOid(partTuple);
+    } else if (PART_STRATEGY_LIST == partstrategy) {
+        listEle = (ListPartElement*)element;
+        listEle->len = list_length(boundary);
+        listEle->boundary = (Const**)palloc0(sizeof(Const*) * listEle->len);
+        listEle->partitionOid = HeapTupleGetOid(partTuple);
+    } else if (PART_STRATEGY_HASH == partstrategy) {
+        hashEle = (HashPartElement*)element;
+        hashEle->partitionOid = HeapTupleGetOid(partTuple);
+    } else {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("The partstrategy %c is not supported", partstrategy)));
+    }
+
+    partkeyexpr = (Node*)stringToNode_skip_extern_fields(partkeystr);
+    if (partkeyexpr->type == T_OpExpr)
+        typoid = ((OpExpr*)partkeyexpr)->opresulttype;
+    else if (partkeyexpr->type == T_FuncExpr)
+        typoid = ((FuncExpr*)partkeyexpr)->funcresulttype;
+    else
+        ereport(ERROR,
+            (errcode(ERRCODE_NODE_ID_MISSMATCH),
+                errmsg("The node type %d is wrong, it must be T_OpExpr or T_FuncExpr", partkeyexpr->type)));
+    Relation typeRel = heap_open(TypeRelationId, RowExclusiveLock);
+    typeTuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typoid));
+    pgTypeForm = (Form_pg_type)GETSTRUCT(typeTuple);
+    Oid typcollation = pgTypeForm->typcollation;
+    int32 typmod = pgTypeForm->typtypmod;
+    if (PART_STRATEGY_HASH == partstrategy)
+        typoid = INT4OID;
+
+    foreach (cell, boundary) {
+        int16 typlen = 0;
+        bool typbyval = false;
+        Oid func = InvalidOid;
+        Oid typelem = InvalidOid;
+        char typalign;
+        char typdelim;
+        Oid typioparam = InvalidOid;
+        Datum value;
+        Value* max_value = NULL;
+        max_value = (Value*)lfirst(cell);
+        /* deal with null */
+        if (!PointerIsValid(max_value->val.str) && (PART_STRATEGY_HASH != partstrategy)) {
+            if (PART_STRATEGY_RANGE == partstrategy)
+                rangeEle->boundary[counter++] = makeMaxConst(typoid, typmod, typcollation);
+            else
+                listEle->boundary[counter++] = makeMaxConst(typoid, typmod, typcollation);
+            continue;
+        }
+
+        /* get the typein function's oid of current type */
+        get_type_io_data(typoid, IOFunc_input, &typlen, &typbyval, &typalign, &typdelim, &typioparam, &func);
+        typelem = get_element_type(typoid);
+        value = OidFunctionCall3Coll(
+            func, typcollation, CStringGetDatum(max_value->val.str), ObjectIdGetDatum(typelem), Int32GetDatum(typmod));
+        /* save the output values */
+        if (PART_STRATEGY_RANGE == partstrategy)
+            rangeEle->boundary[counter++] = makeConst(typoid, typmod, typcollation, typlen, value, false, typbyval);
+        else if (PART_STRATEGY_LIST == partstrategy)
+            listEle->boundary[counter++] = makeConst(typoid, typmod, typcollation, typlen, value, false, typbyval);
+        else
+            hashEle->boundary[counter++] = makeConst(typoid, -1, InvalidOid, sizeof(int32), value, false, true);
+    }
+    list_free_ext(boundary);
+    ReleaseSysCache(typeTuple);
+    heap_close(typeRel, RowExclusiveLock);
+}
+
 static void BuildListPartitionMap(Relation relation, Form_pg_partition partitioned_form, HeapTuple partitioned_tuple,
     Relation pg_partition, List* partition_list)
 {
@@ -1549,6 +1655,7 @@ static void BuildListPartitionMap(Relation relation, Form_pg_partition partition
 
     /* iterate partition tuples, build RangeElement for per partition tuple */
     list_itr = 0;
+    char* partkeystr = CheckPartExprKey(partitioned_tuple, pg_partition);
     foreach (tuple_cell, partition_list) {
         partition_tuple = (HeapTuple)lfirst(tuple_cell);
         partition_form = (Form_pg_partition)GETSTRUCT(partition_tuple);
@@ -1562,14 +1669,18 @@ static void BuildListPartitionMap(Relation relation, Form_pg_partition partition
                     errmsg("Fail to build partitionmap for partitioned table \"%u\"", partition_form->parentid),
                     errdetail("Incorrect partition strategy for partition %u", HeapTupleGetOid(partition_tuple))));
         }
-
-        buildListElement(&(list_eles[list_itr]),
-            list_map->partitionKeyDataType,
-            list_map->partitionKey->dim1,
-            rootPartitionOid,
-            list_map->partitionKey,
-            partition_tuple,
-            RelationGetDescr(pg_partition));
+        if (!partkeystr || (pg_strcasecmp(partkeystr, "") == 0)) {
+            buildListElement(&(list_eles[list_itr]),
+                list_map->partitionKeyDataType,
+                list_map->partitionKey->dim1,
+                rootPartitionOid,
+                list_map->partitionKey,
+                partition_tuple,
+                RelationGetDescr(pg_partition));
+        } else {
+            BuildElementForPartKeyExpr(&(list_eles[list_itr]), partition_tuple, RelationGetDescr(pg_partition), 
+                partkeystr, PART_STRATEGY_LIST);
+        }
 
         list_itr++;
     }
@@ -1658,6 +1769,7 @@ static void BuildHashPartitionMap(Relation relation, Form_pg_partition partition
 
     /* iterate partition tuples, build RangeElement for per partition tuple */
     hash_itr = 0;
+    char* partkeystr = CheckPartExprKey(partitioned_tuple, pg_partition);
     foreach (tuple_cell, partition_list) {
         partition_tuple = (HeapTuple)lfirst(tuple_cell);
         partition_form = (Form_pg_partition)GETSTRUCT(partition_tuple);
@@ -1671,15 +1783,19 @@ static void BuildHashPartitionMap(Relation relation, Form_pg_partition partition
                     errmsg("Fail to build partitionmap for partitioned table \"%u\"", partition_form->parentid),
                     errdetail("Incorrect partition strategy for partition %u", HeapTupleGetOid(partition_tuple))));
         }
-
-        buildHashElement(&(hash_eles[hash_itr]),
-            hash_map->partitionKeyDataType,
-            hash_map->partitionKey->dim1,
-            rootPartitionOid,
-            hash_map->partitionKey,
-            partition_tuple,
-            RelationGetDescr(pg_partition));
-
+        if (!partkeystr || (pg_strcasecmp(partkeystr, "") == 0)) {
+            buildHashElement(&(hash_eles[hash_itr]),
+                hash_map->partitionKeyDataType,
+                hash_map->partitionKey->dim1,
+                rootPartitionOid,
+                hash_map->partitionKey,
+                partition_tuple,
+                RelationGetDescr(pg_partition));
+        } else {
+            BuildElementForPartKeyExpr(&(hash_eles[hash_itr]), partition_tuple, RelationGetDescr(pg_partition), 
+                partkeystr, PART_STRATEGY_HASH);
+        }
+    
         hash_itr++;
     }
 
@@ -1762,6 +1878,8 @@ static void buildRangePartitionMap(Relation relation, Form_pg_partition partitio
 
     /* iterate partition tuples, build RangeElement for per partition tuple */
     range_itr = 0;
+    Datum val = 0;
+    char* partkeystr = CheckPartExprKey(partitioned_tuple, pg_partition);
     foreach (tuple_cell, partition_list) {
         partition_tuple = (HeapTuple)lfirst(tuple_cell);
         partition_form = (Form_pg_partition)GETSTRUCT(partition_tuple);
@@ -1776,15 +1894,20 @@ static void buildRangePartitionMap(Relation relation, Form_pg_partition partitio
                     errmsg("Fail to build partitionmap for partitioned table \"%u\"", partition_form->parentid),
                     errdetail("Incorrect partition strategy for partition %u", HeapTupleGetOid(partition_tuple))));
         }
+        if (!partkeystr || (pg_strcasecmp(partkeystr, "") == 0)) {
+            BuildRangeElement(&(range_eles[range_itr]),
+                range_map->partitionKeyDataType,
+                range_map->partitionKey->dim1,
+                rootPartitionOid,
+                range_map->partitionKey,
+                partition_tuple,
+                RelationGetDescr(pg_partition),
+                partition_form->partstrategy == PART_STRATEGY_INTERVAL);
+        } else {
+            BuildElementForPartKeyExpr(&(range_eles[range_itr]), partition_tuple, RelationGetDescr(pg_partition), 
+                partkeystr, PART_STRATEGY_RANGE);
+        }
 
-        BuildRangeElement(&(range_eles[range_itr]),
-            range_map->partitionKeyDataType,
-            range_map->partitionKey->dim1,
-            rootPartitionOid,
-            range_map->partitionKey,
-            partition_tuple,
-            RelationGetDescr(pg_partition),
-            partition_form->partstrategy == PART_STRATEGY_INTERVAL);
         range_itr++;
     }
 
@@ -1800,6 +1923,30 @@ static void buildRangePartitionMap(Relation relation, Form_pg_partition partitio
 
     (void)MemoryContextSwitchTo(old_context);
     partitionMapDestroyRangeArray(range_eles, range_map->rangeElementsNum);
+}
+
+Const* transformDatum2ConstForPartKeyExpr(PartitionMap* partMap, Datum datumValue, bool isnull, Const* cnst)
+{
+    Const* boundary = NULL;
+    if (partMap->type == PART_TYPE_RANGE)
+        boundary = ((RangePartitionMap*)partMap)->rangeElements[0].boundary[0];
+    else if (partMap->type == PART_TYPE_LIST)
+        boundary = ((ListPartitionMap*)partMap)->listElements[0].boundary[0];
+    else if (partMap->type == PART_TYPE_HASH)
+        boundary = ((HashPartitionMap*)partMap)->hashElements[0].boundary[0];
+    else
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("The PartitionType %d is not supported for expression key partition", partMap->type)));
+    cnst->xpr.type = T_Const;
+    cnst->consttype = boundary->consttype;
+    cnst->consttypmod = boundary->consttypmod;
+    cnst->constcollid = boundary->constcollid;
+    cnst->constlen = boundary->constlen;
+    cnst->constvalue = isnull ? 0 : datumValue;
+    cnst->constisnull = isnull;
+    cnst->constbyval = boundary->constbyval;
+    cnst->location = -1; /* "unknown" */
+    cnst->ismaxvalue = false;
+    return cnst;    
 }
 
 /*
