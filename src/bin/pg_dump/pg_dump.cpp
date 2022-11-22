@@ -5606,12 +5606,12 @@ bool IsRbObject(Archive* fout, Oid classid, Oid objid, const char* objname)
     selectSourceSchema(fout, "pg_catalog");
 
     appendPQExpBuffer(query,
-        "SELECT pg_catalog.gs_is_recycle_object(%u, %u, NULL)",
+        "SELECT pg_catalog.gs_is_recycle_obj(%u, %u, NULL)",
         classid,
         objid);
     res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
 
-    colNum = PQfnumber(res, "gs_is_recycle_object");
+    colNum = PQfnumber(res, "gs_is_recycle_obj");
     recycleObject = gs_strdup(PQgetvalue(res, tupNum, colNum));
     if (strcmp(recycleObject, f) == 0) {
         isRecycleObj = false;
