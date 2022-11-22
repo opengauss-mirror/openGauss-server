@@ -1118,7 +1118,7 @@ static void preprocess_set_value(char *value, Oid settypoid, VarBit **result)
     bool hasEmpty = false;
     
     if (*value == '\0') {
-        hasEmpty = true;
+        return;
     } else {
         int len = strlen(value);
         if (*value == ',' || *(value + len - 1) == ',') {
@@ -1140,7 +1140,7 @@ static VarBit* get_set_in_result(Oid settypoid, char *setlabels)
     VarBit *result = NULL;
     char* next_token = NULL;
     char* labels = pstrdup(setlabels);
-    
+
     preprocess_set_value(setlabels, settypoid, &result);
 
     char* token = strtok_s(labels, SETLABELDELIMIT, &next_token);
