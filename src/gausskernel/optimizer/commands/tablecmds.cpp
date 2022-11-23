@@ -1491,12 +1491,19 @@ static void validateDfsTableDef(CreateStmt* stmt, bool isDfsTbl)
     }
 }
 
+static void check_sub_part_tbl_space(Oid ownerId, char* tablespacename, List* subPartitionDefState)
+{
+    ListCell* subspccell = NULL;
+    foreach(subspccell, subPartitionDefState) {
+        RangePartitionDefState* subpartitiondef = (RangePartitionDefState*)lfirst(subspccell);
+        char* subtablespacename = subpartitiondef->tablespacename;
+        CheckPartitionTablespace(subtablespacename, ownerId);
+    }
+}
+
 /* Check tablespace's permissions for partition */
 static void check_part_tbl_space(CreateStmt* stmt, Oid ownerId, bool dfsTablespace)
 {
-    Oid partitionTablespaceId;
-    bool isPartitionTablespaceDfs = false;
-    RangePartitionDefState* partitiondef = NULL;
     ListCell* spccell = NULL;
     /* check value partition table is created at DFS table space */
     if (stmt->partTableState->partitionStrategy == PART_STRATEGY_VALUE && !dfsTablespace)
@@ -1505,21 +1512,31 @@ static void check_part_tbl_space(CreateStmt* stmt, Oid ownerId, bool dfsTablespa
                 errmsg("Value partitioned table can only be created on DFS tablespace.")));
 
     foreach (spccell, stmt->partTableState->partitionList) {
-        partitiondef = (RangePartitionDefState*)lfirst(spccell);
-
-        if (partitiondef->tablespacename) {
-            partitionTablespaceId = get_tablespace_oid(partitiondef->tablespacename, false);
-            isPartitionTablespaceDfs = IsSpecifiedTblspc(partitionTablespaceId, FILESYSTEM_HDFS);
-            if (isPartitionTablespaceDfs) {
-                ereport(ERROR,
-                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("Partition can not be created on DFS tablespace.Only table-level tablespace can be "
-                               "DFS.DFS table only support partition strategy '%s' feature.",
-                            GetPartitionStrategyNameByType(PART_STRATEGY_VALUE))));
-            }
+        if (nodeTag(lfirst(spccell)) == T_RangePartitionDefState) {
+            RangePartitionDefState* partitiondef = (RangePartitionDefState*)lfirst(spccell);
+            char* tablespacename = partitiondef->tablespacename;
+            List* subPartitionDefState = partitiondef->subPartitionDefState;
+            CheckPartitionTablespace(tablespacename, ownerId);
+            check_sub_part_tbl_space(ownerId, tablespacename, subPartitionDefState);
+        } else if (nodeTag(lfirst(spccell)) == T_HashPartitionDefState) {
+            HashPartitionDefState* partitiondef = (HashPartitionDefState*)lfirst(spccell);
+            char* tablespacename = partitiondef->tablespacename;
+            List* subPartitionDefState = partitiondef->subPartitionDefState;
+            CheckPartitionTablespace(tablespacename, ownerId);
+            check_sub_part_tbl_space(ownerId, tablespacename, subPartitionDefState);
+        } else if (nodeTag(lfirst(spccell)) == T_ListPartitionDefState) {
+            ListPartitionDefState* partitiondef = (ListPartitionDefState*)lfirst(spccell);
+            char* tablespacename = partitiondef->tablespacename;
+            List* subPartitionDefState = partitiondef->subPartitionDefState;
+            CheckPartitionTablespace(tablespacename, ownerId);
+            check_sub_part_tbl_space(ownerId, tablespacename, subPartitionDefState);
+        } else {
+            ereport(ERROR, (errmodule(MOD_COMMAND), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Unknown PartitionDefState"),
+                errdetail("N/A"), errcause("The partition type is incorrect."),
+                erraction("Use the correct partition type.")));
+            break;
         }
-
-        CheckPartitionTablespace(partitiondef->tablespacename, ownerId);
     }
 }
 
