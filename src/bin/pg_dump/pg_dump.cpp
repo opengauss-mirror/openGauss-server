@@ -18091,7 +18091,8 @@ static void dumpViewSchema(
 
     /* set definer for CREATE VIEW statement */
     appendPQExpBuffer(q, "CREATE ");
-    if (tbinfo->rolname != NULL && strlen(tbinfo->rolname) > 0) {
+    if ((gdatcompatibility != NULL) && strcmp(gdatcompatibility, B_FORMAT) == 0 &&
+        tbinfo->rolname != NULL && strlen(tbinfo->rolname) > 0) {
         appendPQExpBuffer(q, " DEFINER = %s ", tbinfo->rolname);
     }
     appendPQExpBuffer(q, " VIEW %s(%s)", fmtId(tbinfo->dobj.name), schemainfo);
