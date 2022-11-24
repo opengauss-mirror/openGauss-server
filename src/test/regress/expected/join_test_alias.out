@@ -158,3 +158,22 @@ order by 1,2,3,4;
     |    |        |      |  2 | li | adjani | 2000 |  3 | li | adjani | 5000
 (5 rows)
 
+--CTE test
+create table cte_test(w_zip text);
+create table cte_test2(w_name text);
+create table cte_test3(d_id text);
+with alias1 as (select w_zip alias2 from cte_test) select w_name from cte_test2 union select d_id from cte_test3 full join alias1 on cte_test3.d_id>alias1.alias2;
+ w_name 
+--------
+(0 rows)
+
+-- CTE test with smp
+set query_dop = 4;
+with alias1 as (select w_zip alias2 from cte_test) select w_name from cte_test2 union select d_id from cte_test3 full join alias1 on cte_test3.d_id>alias1.alias2;
+ w_name 
+--------
+(0 rows)
+
+drop table cte_test;
+drop table cte_test2;
+drop table cte_test3;
