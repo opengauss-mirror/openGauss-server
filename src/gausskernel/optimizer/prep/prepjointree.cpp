@@ -3438,6 +3438,13 @@ static Node* reduce_inequality_fulljoins_jointree_recurse(PlannerInfo* root, Nod
             IncrementVarSublevelsUp(j1->quals, 2, 1);
             IncrementVarSublevelsUp(j2->quals, 2, 1);
 
+            /*
+            * Upper-level vars in subquery are now two level far to their parent
+            * than before.
+            */
+            IncrementVarSublevelsUp((Node*)setop1, 2, 1);
+            IncrementVarSublevelsUp((Node*)setop2, 2, 1);
+
             /* No quals in FromExpr. Search 'QUALS SHOULD BE HERE.' in this
              * source code file.
              */
