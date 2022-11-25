@@ -1012,3 +1012,4 @@ test: rename_table
 
 # debug instrument
 test: test_debug5
+test: fulljoin_rewrite
