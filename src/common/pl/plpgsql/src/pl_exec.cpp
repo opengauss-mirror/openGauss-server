@@ -3884,6 +3884,7 @@ static int exec_stmt_loop(PLpgSQL_execstate* estate, PLpgSQL_stmt_loop* stmt)
  */
 static int exec_stmt_while(PLpgSQL_execstate* estate, PLpgSQL_stmt_while* stmt)
 {
+    bool condition = stmt->condition;
     for (;;) {
         int rc;
         bool value = false;
@@ -3892,7 +3893,7 @@ static int exec_stmt_while(PLpgSQL_execstate* estate, PLpgSQL_stmt_while* stmt)
         value = exec_eval_boolean(estate, stmt->cond, &isnull);
         exec_eval_cleanup(estate);
 
-        if (isnull || !value) {
+        if (isnull || (!value && condition) || (value && !condition)) {
             break;
         }
 

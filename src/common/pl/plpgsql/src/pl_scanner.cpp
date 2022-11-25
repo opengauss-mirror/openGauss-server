@@ -131,6 +131,7 @@ static const ScanKeyword unreserved_keywords[] = {
     PG_KEYWORD("debug", K_DEBUG, UNRESERVED_KEYWORD) 
     PG_KEYWORD("detail", K_DETAIL, UNRESERVED_KEYWORD) 
     PG_KEYWORD("distinct", K_DISTINCT, UNRESERVED_KEYWORD) 
+    PG_KEYWORD("do", K_DO, UNRESERVED_KEYWORD)
     PG_KEYWORD("dump", K_DUMP, UNRESERVED_KEYWORD) 
     PG_KEYWORD("errcode", K_ERRCODE, UNRESERVED_KEYWORD) 
     PG_KEYWORD("error", K_ERROR, UNRESERVED_KEYWORD) 
@@ -170,6 +171,7 @@ static const ScanKeyword unreserved_keywords[] = {
     PG_KEYWORD("record", K_RECORD, UNRESERVED_KEYWORD)
     PG_KEYWORD("relative", K_RELATIVE, UNRESERVED_KEYWORD) 
     PG_KEYWORD("release", K_RELEASE, UNRESERVED_KEYWORD)
+    PG_KEYWORD("repeat", K_REPEAT, UNRESERVED_KEYWORD)
     PG_KEYWORD("replace", K_REPLACE, UNRESERVED_KEYWORD)
     PG_KEYWORD("result_oid", K_RESULT_OID, UNRESERVED_KEYWORD) 
     PG_KEYWORD("returned_sqlstate", K_RETURNED_SQLSTATE, UNRESERVED_KEYWORD)
@@ -187,6 +189,7 @@ static const ScanKeyword unreserved_keywords[] = {
     PG_KEYWORD("table", K_TABLE, UNRESERVED_KEYWORD)
     PG_KEYWORD("type", K_TYPE, UNRESERVED_KEYWORD)
     PG_KEYWORD("union", K_UNION, UNRESERVED_KEYWORD)
+    PG_KEYWORD("until", K_UNTIL, UNRESERVED_KEYWORD)
     PG_KEYWORD("use_column", K_USE_COLUMN, UNRESERVED_KEYWORD)
     PG_KEYWORD("use_variable", K_USE_VARIABLE, UNRESERVED_KEYWORD)
     PG_KEYWORD("variable_conflict", K_VARIABLE_CONFLICT, UNRESERVED_KEYWORD)
@@ -260,6 +263,9 @@ int plpgsql_yylex(void)
     if (tok1 == IDENT || tok1 == PARAM || tok1 == T_SQL_BULK_EXCEPTIONS) {
         int tok2;
         TokenAuxData aux2;
+        char* tok1_val = NULL;
+        if(tok1 == PARAM)
+            tok1_val = aux1.lval.str;
 
         tok2 = internal_yylex(&aux2);
         if (tok2 == '.') {
@@ -398,7 +404,21 @@ int plpgsql_yylex(void)
             } else if (aux1.lval.str[0] == ':' && tok1 == PARAM) {
                 /* Check place holder, it should be like :({identifier}|{integer})
                  * It is a placeholder in exec statement. */
-                tok1 = T_PLACEHOLDER;
+                if(u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
+                {
+                    if(pg_strcasecmp(tok1_val, ":loop") == 0)
+                        tok1 = T_LABELLOOP;
+                    else if(pg_strcasecmp(tok1_val, ":while") == 0)
+                        tok1 = T_LABELWHILE;
+                    else if(pg_strcasecmp(tok1_val, ":repeat") == 0)
+                        tok1 = T_LABELREPEAT;
+                    else
+                        tok1 = T_PLACEHOLDER;
+                }
+                else
+                {
+                    tok1 = T_PLACEHOLDER;
+                }
             } else {
                 tok1 = T_WORD;
             }
