@@ -3555,6 +3555,7 @@ static Node* reduce_inequality_fulljoins_jointree_recurse(PlannerInfo* root, Nod
                     } break;
                     default:
                         oldvar = (Node*)copyObject(node);
+                        oldvar = eval_const_expressions(root, oldvar);
                         break;
                 }
 
