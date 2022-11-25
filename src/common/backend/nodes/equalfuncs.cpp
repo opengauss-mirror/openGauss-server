@@ -664,6 +664,7 @@ static bool _equalTargetEntry(const TargetEntry* a, const TargetEntry* b)
     COMPARE_SCALAR_FIELD(resorigcol);
     COMPARE_SCALAR_FIELD(resjunk);
     COMPARE_SCALAR_FIELD(rtindex);
+    COMPARE_SCALAR_FIELD(isStartWithPseudo);
 
     return true;
 }

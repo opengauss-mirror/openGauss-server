@@ -1231,6 +1231,7 @@ void AddStartWithCTEPseudoReturnColumns(CommonTableExpr *cte,
 
         /* make pseudo return column's TLE */
         tle = makeTargetEntry((Expr *)expr, list_length(ctequery->targetList) + 1, att->colname, false);
+        tle->isStartWithPseudo = true;
 
         /* Add the pseudo return column to CTE's target list */
         ctequery->targetList = lappend(ctequery->targetList, tle);

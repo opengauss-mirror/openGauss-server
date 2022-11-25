@@ -3117,6 +3117,7 @@ static TargetEntry* _copyTargetEntry(const TargetEntry* from)
     COPY_SCALAR_FIELD(resorigcol);
     COPY_SCALAR_FIELD(resjunk);
     COPY_SCALAR_FIELD(rtindex);
+    COPY_SCALAR_FIELD(isStartWithPseudo);
 
     return newnode;
 }

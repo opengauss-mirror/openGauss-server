@@ -2849,6 +2849,9 @@ static void _outTargetEntry(StringInfo str, TargetEntry* node)
     if (t_thrd.proc->workingVersionNum >= MULTI_MODIFY_VERSION_NUM) {
         WRITE_UINT_FIELD(rtindex);
     }
+    if (t_thrd.proc->workingVersionNum >= MAT_VIEW_RECURSIVE_VERSION_NUM) {
+        WRITE_BOOL_FIELD(isStartWithPseudo);        
+    }
 }
 
 static void _outPseudoTargetEntry(StringInfo str, PseudoTargetEntry* node)

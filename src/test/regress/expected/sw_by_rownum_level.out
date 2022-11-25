@@ -178,3 +178,21 @@ select * from test_area CONNECT BY APPLE <= LENGTH('SOME TEXT');
 ERROR:  column "apple" does not exist
 LINE 2: select * from test_area CONNECT BY APPLE <= LENGTH('SOME TEX...
                                            ^
+-- materialized view with column name 'level' 'connect_by_isleaf' 'connect_by_iscycle'
+create table startwith_t(id int, level int, connect_by_isleaf int, connect_by_iscycle int);
+create materialized view startwith_mv as 
+    WITH RECURSIVE t(id, level, connect_by_isleaf, connect_by_iscycle) as (select * from startwith_t)
+    select t.id, t.connect_by_isleaf as level, t.level as connect_by_isleaf from t;
+select pg_get_viewdef('startwith_mv', true);
+                              pg_get_viewdef                              
+--------------------------------------------------------------------------
+  WITH RECURSIVE t(id, level, connect_by_isleaf, connect_by_iscycle) AS (+
+          SELECT  *                                                      +
+            FROM startwith_t                                             +
+         )                                                               +
+  SELECT t.id, t.connect_by_isleaf AS level, t.level AS connect_by_isleaf+
+    FROM t;
+(1 row)
+
+drop materialized view startwith_mv;
+drop table startwith_t;
