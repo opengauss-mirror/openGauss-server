@@ -128,6 +128,86 @@ where i_id <=(select w_id from bmsql_warehouse
 where bmsql_item.i_name not like 'sqltest_varchar_2' order by 1 limit 1)
 group by i_price;
 
+CREATE FUNCTION f1(text) RETURNS int LANGUAGE SQL IMMUTABLE AS $$ SELECT $1::int;$$;
+
+CREATE TABLE bmsql_history (
+hist_id int,
+h_c_id int,
+h_c_d_id int,
+h_c_w_id int,
+h_d_id int,
+h_w_id int,
+h_date timestamp(6),
+h_amount numeric(6,2),
+h_data varchar( 24)
+);
+
+insert into bmsql_history values('1','1','1','1','1','1',to_timestamp('2010-01-01 00:00:00','yyyy-mm-dd hh24:mi:ss'),'0.01','sqltest_varchar_1') ;
+insert into bmsql_history values('2','2','2','2','2','2',to_timestamp('2010-01-02 00:00:00','yyyy-mm-dd hh24:mi:ss'),'0.02','sqltest_varchar_2') ;
+insert into bmsql_history values('3','3','3','3','3','3',to_timestamp('2010-01-03 00:00:00','yyyy-mm-dd hh24:mi:ss'),'0.03','sqltest_varchar_3') ;
+insert into bmsql_history values('4','4','4','4','4','4',to_timestamp('2010-01-03 00:00:00','yyyy-mm-dd hh24:mi:ss'),'0.04','sqltest_varchar_4') ;
+insert into bmsql_history(hist_id) values('') ;
+
+explain (costs off) select f1('0') c1
+union
+select distinct i_id c2
+from bmsql_item
+where i_id not like (with tmp as (select distinct asin(0) as c1 from bmsql_history where bmsql_item.i_im_id <3)
+select * from tmp);
+
+select f1('0') c1
+union
+select distinct i_id c2
+from bmsql_item
+where i_id not like (with tmp as (select distinct asin(0) as c1 from bmsql_history where bmsql_item.i_im_id <3)
+select * from tmp);
+
+explain (costs off) select distinct i_id c2
+from bmsql_item
+where i_id not like (with tmp as (select distinct asin(0) as c1 from bmsql_history where bmsql_item.i_im_id <3)
+select * from tmp)
+union
+select f1('0') c1;
+
+select distinct i_id c2
+from bmsql_item
+where i_id not like (with tmp as (select distinct asin(0) as c1 from bmsql_history where bmsql_item.i_im_id <3)
+select * from tmp)
+union
+select f1('0') c1;
+
+select f1(0) c1
+union 
+select distinct var_pop(i_id) c2 
+from bmsql_item
+where i_id not like (with tmp as (select distinct asin(0) as c1 from bmsql_history where bmsql_item.i_im_id <3)
+select * from tmp);
+
+select distinct var_pop(i_id) c2 
+from bmsql_item
+where i_id not like (with tmp as (select distinct asin(0) as c1 from bmsql_history where bmsql_item.i_im_id <3)
+select * from tmp)
+union
+select f1(0) c1;
+
+CREATE TABLE bmsql_new_order (
+no_w_id int NOT NULL,
+no_d_id int NOT NULL,
+no_o_id int NOT NULL
+);
+insert into bmsql_new_order values('1','1','1');
+insert into bmsql_new_order values('2','2','2');
+insert into bmsql_new_order values('3','3','3');
+insert into bmsql_new_order values('4','4','4');
+insert into bmsql_new_order values('5','5','5');
+
+select count(*)
+from (select distinct greatest (no_d_id,no_d_id,no_d_id)
+from bmsql_new_order
+where no_o_id not in ( with tmp as (select w_id from bmsql_warehouse where bmsql_new_order.no_w_id >2 or w_id >=3) select * from tmp)) tb1,
+( select count(*) from bmsql_item group by i_im_id,i_im_id having i_im_id like f1('0')
+) tb2;
+
 --clean
 set search_path=public;
 drop schema test_smp cascade;

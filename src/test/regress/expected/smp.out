@@ -1283,13 +1283,158 @@ group by i_price;
       .01
 (1 row)
 
+CREATE FUNCTION f1(text) RETURNS int LANGUAGE SQL IMMUTABLE AS $$ SELECT $1::int;$$;
+CREATE TABLE bmsql_history (
+hist_id int,
+h_c_id int,
+h_c_d_id int,
+h_c_w_id int,
+h_d_id int,
+h_w_id int,
+h_date timestamp(6),
+h_amount numeric(6,2),
+h_data varchar( 24)
+);
+insert into bmsql_history values('1','1','1','1','1','1',to_timestamp('2010-01-01 00:00:00','yyyy-mm-dd hh24:mi:ss'),'0.01','sqltest_varchar_1') ;
+insert into bmsql_history values('2','2','2','2','2','2',to_timestamp('2010-01-02 00:00:00','yyyy-mm-dd hh24:mi:ss'),'0.02','sqltest_varchar_2') ;
+insert into bmsql_history values('3','3','3','3','3','3',to_timestamp('2010-01-03 00:00:00','yyyy-mm-dd hh24:mi:ss'),'0.03','sqltest_varchar_3') ;
+insert into bmsql_history values('4','4','4','4','4','4',to_timestamp('2010-01-03 00:00:00','yyyy-mm-dd hh24:mi:ss'),'0.04','sqltest_varchar_4') ;
+insert into bmsql_history(hist_id) values('') ;
+explain (costs off) select f1('0') c1
+union
+select distinct i_id c2
+from bmsql_item
+where i_id not like (with tmp as (select distinct asin(0) as c1 from bmsql_history where bmsql_item.i_im_id <3)
+select * from tmp);
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ HashAggregate
+   Group By Key: (0)
+   ->  Append
+         ->  Result
+         ->  Streaming(type: LOCAL GATHER dop: 1/4)
+               ->  HashAggregate
+                     Group By Key: bmsql_item.i_id
+                     ->  Streaming(type: LOCAL REDISTRIBUTE dop: 4/1)
+                           ->  HashAggregate
+                                 Group By Key: bmsql_item.i_id
+                                 ->  Seq Scan on bmsql_item
+                                       Filter: ((i_id)::text !~~ ((SubPlan 1))::text)
+                                       SubPlan 1
+                                         ->  Unique
+                                               ->  Result
+                                                     One-Time Filter: (bmsql_item.i_im_id < 3)
+                                                     ->  Seq Scan on bmsql_history
+(17 rows)
+
+select f1('0') c1
+union
+select distinct i_id c2
+from bmsql_item
+where i_id not like (with tmp as (select distinct asin(0) as c1 from bmsql_history where bmsql_item.i_im_id <3)
+select * from tmp);
+ c1 
+----
+  1
+  0
+  2
+(3 rows)
+
+explain (costs off) select distinct i_id c2
+from bmsql_item
+where i_id not like (with tmp as (select distinct asin(0) as c1 from bmsql_history where bmsql_item.i_im_id <3)
+select * from tmp)
+union
+select f1('0') c1;
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ HashAggregate
+   Group By Key: bmsql_item.i_id
+   ->  Append
+         ->  Streaming(type: LOCAL GATHER dop: 1/4)
+               ->  HashAggregate
+                     Group By Key: bmsql_item.i_id
+                     ->  Streaming(type: LOCAL REDISTRIBUTE dop: 4/1)
+                           ->  HashAggregate
+                                 Group By Key: bmsql_item.i_id
+                                 ->  Seq Scan on bmsql_item
+                                       Filter: ((i_id)::text !~~ ((SubPlan 1))::text)
+                                       SubPlan 1
+                                         ->  Unique
+                                               ->  Result
+                                                     One-Time Filter: (bmsql_item.i_im_id < 3)
+                                                     ->  Seq Scan on bmsql_history
+         ->  Result
+(17 rows)
+
+select distinct i_id c2
+from bmsql_item
+where i_id not like (with tmp as (select distinct asin(0) as c1 from bmsql_history where bmsql_item.i_im_id <3)
+select * from tmp)
+union
+select f1('0') c1;
+ c2 
+----
+  1
+  0
+  2
+(3 rows)
+
+select f1(0) c1
+union 
+select distinct var_pop(i_id) c2 
+from bmsql_item
+where i_id not like (with tmp as (select distinct asin(0) as c1 from bmsql_history where bmsql_item.i_im_id <3)
+select * from tmp);
+          c1           
+-----------------------
+                     0
+ .25000000000000000000
+(2 rows)
+
+select distinct var_pop(i_id) c2 
+from bmsql_item
+where i_id not like (with tmp as (select distinct asin(0) as c1 from bmsql_history where bmsql_item.i_im_id <3)
+select * from tmp)
+union
+select f1(0) c1;
+          c2           
+-----------------------
+                     0
+ .25000000000000000000
+(2 rows)
+
+CREATE TABLE bmsql_new_order (
+no_w_id int NOT NULL,
+no_d_id int NOT NULL,
+no_o_id int NOT NULL
+);
+insert into bmsql_new_order values('1','1','1');
+insert into bmsql_new_order values('2','2','2');
+insert into bmsql_new_order values('3','3','3');
+insert into bmsql_new_order values('4','4','4');
+insert into bmsql_new_order values('5','5','5');
+select count(*)
+from (select distinct greatest (no_d_id,no_d_id,no_d_id)
+from bmsql_new_order
+where no_o_id not in ( with tmp as (select w_id from bmsql_warehouse where bmsql_new_order.no_w_id >2 or w_id >=3) select * from tmp)) tb1,
+( select count(*) from bmsql_item group by i_im_id,i_im_id having i_im_id like f1('0')
+) tb2;
+ count 
+-------
+     0
+(1 row)
+
 --clean
 set search_path=public;
 drop schema test_smp cascade;
-NOTICE:  drop cascades to 6 other objects
+NOTICE:  drop cascades to 9 other objects
 DETAIL:  drop cascades to table test_smp.t1
 drop cascades to table test_smp.t2
 drop cascades to table test_smp.t3
 drop cascades to table test_smp.t4
 drop cascades to table test_smp.bmsql_item
 drop cascades to table test_smp.bmsql_warehouse
+drop cascades to function test_smp.f1(text)
+drop cascades to table test_smp.bmsql_history
+drop cascades to table test_smp.bmsql_new_order
