@@ -648,16 +648,16 @@ TupleTableSlot* ExecStartWithOp(StartWithOpState *node)
                     break;
                 }
 
-                tuplestore_puttupleslot(node->sw_workingTable, dstSlot);
-
                 /*
                  * check we need stop infinit recursive iteration if NOCYCLE is specified in
                  * ConnectByExpr, then return. Also, in case of cycle-report-error the ereport
                  * is processed inside of CheckCycleException()
                  */
                 if (CheckCycleExeception(node, dstSlot)) {
-                    break;
+                    continue;
                 }
+
+                tuplestore_puttupleslot(node->sw_workingTable, dstSlot);
             }
 
             /* report we have done material step for current StartWithOp node */
