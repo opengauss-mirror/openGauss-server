@@ -143,7 +143,7 @@ ChooseAdaptivePlan(CachedPlanSource *plansource, ParamListInfo boundParams)
         return false;
     }
 
-    if(!selec_gplan_by_hint(plansource)){
+    if(plansource->hasSubQuery || !selec_gplan_by_hint(plansource)){
         PMGR_ReleasePlanManager(plansource);
         return false;
     }
@@ -474,6 +474,7 @@ InsertPlan(CachedPlanSource *plansource,
         } else {
             plan->refcount++;
         }
+        plan->is_saved = true;
         plan->cpi = cpinfo;
 
         (void)MemoryContextSwitchTo(planMgr->context);
@@ -656,6 +657,25 @@ FindMatchedPlan(PlanManager *manager, PlannerInfo *queryRoot)
      * returning NULL.
      */
     return NULL;
+}
+
+bool ContainSubQuery(PlannerInfo* root)
+{
+    if (root->glob->subroots != NIL) {
+        return true;
+    }
+
+    /* 0 for other purpose, so start from 1 */
+    for (int i = 1; i < root->simple_rel_array_size; ++i) {
+        RelOptInfo* rel = root->simple_rel_array[i];
+        if (!rel) {
+            continue;
+        }
+        if (rel->rtekind == RTE_SUBQUERY) {
+            return true;
+        }
+    }
+    return false;
 }
 
 void
@@ -867,6 +887,11 @@ ActionHandle(CachedPlanSource *plansource,
                 SearchCandidatePlan(manager->candidatePlans, plan_key) == NULL) {
                 /* acquire an exclusive lock to update plan manager. */
                 ManagerLockSwitchTo(action, LW_EXCLUSIVE);
+
+                if (ContainSubQuery((PlannerInfo*)u_sess->pcache_cxt.explored_plan_info)) {
+                    manager->is_valid = false;
+                    plansource->hasSubQuery = true;
+                }
 
                 /*
                  * A valid save_xmin (!= 0) imples that the plan is temporary. To prevent

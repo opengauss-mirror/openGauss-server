@@ -288,6 +288,7 @@ CachedPlanSource* CreateCachedPlan(Node* raw_parse_tree, const char* query_strin
     plansource->sql_patch_sequence = pg_atomic_read_u64(&g_instance.cost_cxt.sql_patch_sequence_id);
     plansource->planManager = NULL;
     plansource->gpc_lockid = -1;
+    plansource->hasSubQuery = false;
 
 
 #ifdef ENABLE_MOT
