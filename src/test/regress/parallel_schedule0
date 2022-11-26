@@ -1013,3 +1013,6 @@ test: rename_table
 # debug instrument
 test: test_debug5
 test: fulljoin_rewrite
+
+# dolphin_guc_config
+test: dolphin_guc_config
