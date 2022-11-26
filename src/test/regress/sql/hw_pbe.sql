@@ -820,3 +820,33 @@ select * from bs_his order by period_name;
 drop FUNCTION test_func;
 drop table bs_his;
 drop table cs_his;
+
+-- pbe choose_adaptive_gplan
+create table tab_1103983(c1 int,c2 varchar,c3 text) ;
+insert into tab_1103983  values(generate_series(1, 500),generate_series(1, 500),generate_series(1, 100));
+insert into tab_1103983  values(generate_series(1, 50),generate_series(2, 30),generate_series(2, 30));
+insert into tab_1103983  values(generate_series(2, 30),generate_series(2, 50),generate_series(2, 30));
+insert into tab_1103983  values(generate_series(2, 30),generate_series(2, 30),generate_series(1, 50));
+insert into tab_1103983  values(generate_series(1, 100),null,null);
+insert into tab_1103983  values(generate_series(1, 500),generate_series(1, 500),generate_series(2, 100));
+create index on tab_1103983(c2,c3);
+
+analyze tab_1103983;
+
+prepare pbe_cagp as select  /*+ choose_adaptive_gplan */ t1.c1,max(t2.c3) from tab_1103983 t1 
+    join (select  /*+ choose_adaptive_gplan */ * from  tab_1103983 where c1=$1 and c2 = $2) t2 
+    on t1.c1 = t2.c1 
+    where t2.c2 = (select max(c2) from tab_1103983 where c2 = $1 ) 
+    and t1.c3 = $2
+    group by 1 
+    order by 1,2;
+
+execute pbe_cagp(1,1);
+execute pbe_cagp(3,3);
+execute pbe_cagp(4,4);
+execute pbe_cagp(5,1);
+execute pbe_cagp(7,8);
+execute pbe_cagp(10,10);
+
+deallocate pbe_cagp;
+drop table tab_1103983;
