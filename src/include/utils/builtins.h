@@ -1779,6 +1779,7 @@ extern Datum ledger_gchain_check(PG_FUNCTION_ARGS);
 extern Datum ledger_gchain_repair(PG_FUNCTION_ARGS);
 extern Datum ledger_gchain_archive(PG_FUNCTION_ARGS);
 extern Datum gs_is_recycle_object(PG_FUNCTION_ARGS);
+extern Datum gs_is_recycle_obj(PG_FUNCTION_ARGS);
 
 /* Oracle connect by */
 extern Datum sys_connect_by_path(PG_FUNCTION_ARGS);
