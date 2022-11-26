@@ -57,6 +57,6 @@ extern int SibglingsKeyCmpFast(Datum x, Datum y, SortSupport ssup);
 
 extern void markSWLevelBegin(StartWithOpState *node);
 extern void markSWLevelEnd(StartWithOpState *node, int64 rowCount);
-extern TupleTableSlot* GetStartWithSlot(RecursiveUnionState* node, TupleTableSlot* slot);
+extern TupleTableSlot* GetStartWithSlot(RecursiveUnionState* node, TupleTableSlot* slot, bool isRecursive);
 extern bool ExecStartWithRowLevelQual(RecursiveUnionState* node, TupleTableSlot* dstSlot);
 #endif /* NODECTESCAN_H */
