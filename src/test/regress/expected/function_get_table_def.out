@@ -788,7 +788,7 @@ select * from pg_get_tabledef('test');
  CREATE TABLE test (                                                         +
      a integer,                                                              +
      b timestamp without time zone DEFAULT now() ON UPDATE CURRENT_TIMESTAMP,+
-     c timestamp with time zone DEFAULT  ON UPDATE CURRENT_TIMESTAMP(5)      +
+     c timestamp with time zone ON UPDATE CURRENT_TIMESTAMP(5)               +
  )                                                                           +
  WITH (orientation=row, compression=no);
 (1 row)
