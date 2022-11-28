@@ -3135,7 +3135,7 @@ static void MarkBufferDirty(char *buffer, size_t len)
 
 static int parse_page_file(const char *filename, SegmentType type, const uint32 start_point, const uint32 number_read)
 {
-    if (type != SEG_HEAP && type != SEG_INDEX_BTREE) {
+    if (!IsCompressedFile(filename, strlen(filename))) {
         return parse_uncompressed_page_file(filename, type, start_point, number_read);
     }
 

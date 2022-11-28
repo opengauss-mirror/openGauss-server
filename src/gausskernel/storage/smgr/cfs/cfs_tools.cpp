@@ -63,12 +63,10 @@ size_t CfsReadCompressedPage(char *dst, size_t destLen, BlockNumber extent_offse
     }
     decltype(CfsExtentHeader::chunk_size) chunkSize = cfsExtentHeader->chunk_size;
     auto extentStart = (cfsReadStruct->extentCount * CFS_EXTENT_SIZE) * BLCKSZ;
-    uint8 allocatedChunks;
     uint8 nchunks;
     size_t tryCount = 0;
     do {
         CfsExtentAddress *cfsExtentAddress = GetExtentAddress(cfsExtentHeader, (uint16)extent_offset_blkno);
-        allocatedChunks = cfsExtentAddress->allocated_chunks;
         nchunks = cfsExtentAddress->nchunks;
 
         for (uint8 i = 0; i < nchunks; i++) {
@@ -107,15 +105,7 @@ size_t CfsReadCompressedPage(char *dst, size_t destLen, BlockNumber extent_offse
         }
     } while (true);
 
-    if (allocatedChunks > nchunks) {
-        auto currentWriteSize = nchunks * chunkSize;
-        errno_t rc = memset_s(dst + (uint32)currentWriteSize,
-                              destLen - (uint32)currentWriteSize,
-                              0,
-                              (uint32)(allocatedChunks - nchunks) * (uint32)chunkSize);
-        securec_check(rc, "", "");
-    }
-    return allocatedChunks * chunkSize;
+    return nchunks * chunkSize;
 }
 
 const size_t CUR_PAGE_SIZE = (uint32)getpagesize();

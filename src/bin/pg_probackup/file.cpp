@@ -1427,7 +1427,7 @@ static void fio_send_pages_impl(int out, char* buf)
                 * Optimize stdio buffer usage, fseek only when current position
                 * does not match the position of requested block.
                 */
-                if (current_pos != (int)(blknum*BLCKSZ))
+                if (current_pos != (int)(blknum * BLCKSZ))
                 {
                     current_pos = blknum*BLCKSZ;
                     if (fseek(in, current_pos, SEEK_SET) != 0)

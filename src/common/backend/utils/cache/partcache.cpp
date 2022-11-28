@@ -501,8 +501,11 @@ Partition PartitionBuildLocalPartition(const char *relname, Oid partid, Oid part
         PartitionInitPhysicalAddr(part);
         /* compressed option was set by PartitionInitPhysicalAddr if part->rd_options != NULL */
         if (part->rd_options == NULL && reloptions) {
+            (void)MemoryContextSwitchTo(oldcxt);
             StdRdOptions* options = (StdRdOptions*)(void *)default_reloptions(reloptions, false, RELOPT_KIND_HEAP);
             SetupPageCompressForRelation(&part->pd_node, &options->compress, PartitionGetPartitionName(part));
+            (void)MemoryContextSwitchTo(LocalMyDBCacheMemCxt());
+            pfree(options);
         }
     }
 
