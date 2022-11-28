@@ -638,7 +638,7 @@ test: bypass_preparedexecute_support
 test: sqlbypass_partition
 #test: sqlbypass_partition_prepare
 
-test: string_digit_to_numeric
+test: string_digit_to_numeric tablesample_3
 # Another group of parallel tests
 # ----------
 #test: collate tablesample tablesample_1 tablesample_2 matview

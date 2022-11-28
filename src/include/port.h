@@ -303,8 +303,9 @@ extern off_t ftello(FILE* stream);
 #endif
 
 extern double pg_erand48(unsigned short xseed[3]);
-extern long pg_lrand48(void);
-extern void pg_srand48(long seed);
+extern long pg_lrand48(unsigned short rand48_seed[3] = NULL);
+extern void pg_srand48(long seed, unsigned short rand48_seed[3] = NULL);
+extern void pg_srand48_default(unsigned short rand48_seed[3]);
 extern long free_list_lrand48(void);
 extern void free_list_srand48(long seed);
 extern void pg_reset_srand48(unsigned short xseed[3]);

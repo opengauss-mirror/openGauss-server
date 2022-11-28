@@ -69,17 +69,19 @@ double pg_erand48(unsigned short xseed[3])
     return ldexp((double)xseed[0], -48) + ldexp((double)xseed[1], -32) + ldexp((double)xseed[2], -16);
 }
 
-long pg_lrand48(void)
+long pg_lrand48(unsigned short rand48_seed[3])
 {
-    _dorand48(_rand48_seed);
-    return ((long)_rand48_seed[2] << 15) + ((long)_rand48_seed[1] >> 1);
+    unsigned short *rand_seed = rand48_seed == NULL ? _rand48_seed : rand48_seed;
+    _dorand48(rand_seed);
+    return ((long)rand_seed[2] << 15) + ((long)rand_seed[1] >> 1);
 }
 
-void pg_srand48(long seed)
+void pg_srand48(long seed, unsigned short rand48_seed[3])
 {
-    _rand48_seed[0] = RAND48_SEED_0;
-    _rand48_seed[1] = (unsigned short)seed;
-    _rand48_seed[2] = (unsigned short)((unsigned long)seed >> 16);
+    unsigned short *rand_seed = rand48_seed == NULL ? _rand48_seed : rand48_seed;
+    rand_seed[0] = RAND48_SEED_0;
+    rand_seed[1] = (unsigned short)seed;
+    rand_seed[2] = (unsigned short)((unsigned long)seed >> 16);
     _rand48_mult[0] = RAND48_MULT_0;
     _rand48_mult[1] = RAND48_MULT_1;
     _rand48_mult[2] = RAND48_MULT_2;
@@ -96,4 +98,11 @@ void pg_reset_srand48(unsigned short xseed[3])
 unsigned short* pg_get_srand48()
 {
     return _rand48_seed;
+}
+
+void pg_srand48_default(unsigned short rand48_seed[3])
+{
+    rand48_seed[0] = RAND48_SEED_0;
+    rand48_seed[1] = RAND48_SEED_1;
+    rand48_seed[2] = RAND48_SEED_2;
 }
