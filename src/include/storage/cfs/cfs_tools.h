@@ -47,6 +47,6 @@ CfsHeaderMap MMapHeader(FILE* fd, BlockNumber extentIndex, bool readOnly = false
 void MmapFree(CfsHeaderMap *cfsHeaderMap);
 
 
-size_t ReadBlockNumberOfCFile(FILE* compressFd);
+size_t ReadBlockNumberOfCFile(FILE* compressFd, off_t *curFileLen);
 
 #endif //OPENGAUSS_CFS_TOOLS_H

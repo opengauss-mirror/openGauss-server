@@ -1299,7 +1299,7 @@ static bool IsDCFPath(const char *pathname)
  * @param basepathlen subfix of path
  * @param statbuf path stat
  */
-static void SendRealFile(bool sizeOnly, char* pathbuf, int basepathlen, struct stat* statbuf)
+static int64 SendRealFile(bool sizeOnly, char* pathbuf, int basepathlen, struct stat* statbuf)
 {
     int64 size = 0;
     // we must ensure the page integrity when in IncrementalCheckpoint
@@ -1316,6 +1316,7 @@ static void SendRealFile(bool sizeOnly, char* pathbuf, int basepathlen, struct s
             SEND_DIR_ADD_SIZE(size, (*statbuf));
         }
     }
+    return size;
 }
 
 /*
@@ -1616,7 +1617,7 @@ static int64 sendDir(const char *path, int basepathlen, bool sizeonly, List *tab
             if (!skip_this_dir)
                 size += sendDir(pathbuf, basepathlen, sizeonly, tablespaces, sendtblspclinks);
         } else if (S_ISREG(statbuf.st_mode)) {
-            SendRealFile(sizeonly, pathbuf, basepathlen, &statbuf);
+            size += SendRealFile(sizeonly, pathbuf, basepathlen, &statbuf);
         } else
             ereport(WARNING, (errmsg("skipping special file \"%s\"", pathbuf)));
     }

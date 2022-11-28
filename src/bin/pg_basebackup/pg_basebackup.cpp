@@ -1044,7 +1044,7 @@ static void ReceiveAndUnpackTarFile(PGconn *conn, PGresult *res, int rownum)
             /*
              * regular file
              */
-            file = fopen(filename, IsCompressedFile(filename, strlen(filename)) ? "w+r+b" : "wb");
+            file = fopen(filename, IsCompressedFile(filename, strlen(filename)) ? "wb+" : "wb");
             if (NULL == file) {
                 pg_log(stderr, _("%s: could not create file \"%s\": %s\n"), progname, filename, strerror(errno));
                 disconnect_and_exit(1);

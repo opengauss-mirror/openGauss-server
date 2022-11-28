@@ -79,6 +79,7 @@ public:
 private:
     char initPath[MAXPGPATH];
     BlockNumber blockNumber;
+    BlockNumber extentIdx;
     CfsHeaderMap cfsHeaderMap;
     BlockNumber segmentNo;
     CfsExtentHeader* GetStruct(BlockNumber blockNum, CfsCompressOption *option = nullptr);

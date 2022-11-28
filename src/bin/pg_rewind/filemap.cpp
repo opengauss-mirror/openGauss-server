@@ -1022,7 +1022,7 @@ static char* datasegpath(RelFileNode rnode, ForkNumber forknum, BlockNumber segn
 
     path = relpathbackend_t((rnode), InvalidBackendId, (forknum));
     if (segno > 0 || forknum > MAX_FORKNUM) {
-        segpath = compress ? format_text("%s.%u", path, segno) : format_text("%s.%u" COMPRESS_STR, path, segno);
+        segpath = compress ? format_text("%s.%u" COMPRESS_STR, path, segno) : format_text("%s.%u", path, segno);
         pg_free(path);
         path = NULL;
         return segpath;
