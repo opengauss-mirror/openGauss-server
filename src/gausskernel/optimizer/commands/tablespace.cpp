@@ -1553,7 +1553,7 @@ static bool destroy_tablespace_directories(Oid tablespaceoid, bool redo)
      */
     dirdesc = AllocateDir(linkloc_with_version_dir);
     if (dirdesc == NULL) {
-        if (!FILE_POSSIBLY_DELETED(errno)) {
+        if (FILE_POSSIBLY_DELETED(errno)) {
             if (!redo)
                 ereport(WARNING,
                     (errcode_for_file_access(),
