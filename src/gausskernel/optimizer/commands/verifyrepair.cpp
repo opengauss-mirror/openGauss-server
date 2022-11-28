@@ -1613,8 +1613,8 @@ static bool PrimaryRepairSegFile_NonSegment(const RelFileNode &rd_node, RemoteRe
     int64 segpathlen = strlen(path) + SEGLEN + strlen(COMPRESS_STR);
     char *segpath = (char *)palloc0((Size)segpathlen);
     BlockNumber relSegSize = IS_COMPRESSED_RNODE(rd_node, MAIN_FORKNUM) ? CFS_LOGIC_BLOCKS_PER_FILE: RELSEG_SIZE;
-    uint32 seg_size  = (uint32)((seg_no < maxSegno || ((uint32)size % (relSegSize * BLCKSZ)) == 0) ?
-                        (relSegSize * BLCKSZ) : ((uint32)size % (relSegSize * BLCKSZ)));
+    uint32 seg_size  = (uint32)((seg_no < maxSegno || (size % (relSegSize * BLCKSZ)) == 0) ?
+                        (relSegSize * BLCKSZ) : (size % (relSegSize * BLCKSZ)));
 
     if (seg_no == 0) {
         rc = sprintf_s(segpath, (uint64)segpathlen, "%s%s", path,
@@ -1831,9 +1831,9 @@ bool gsRepairFile(Oid tableOid, char* path, int timeout)
     } else {
         BlockNumber relSegSize = IS_COMPRESSED_RNODE(relation->rd_node,
                                                      MAIN_FORKNUM) ? CFS_LOGIC_BLOCKS_PER_FILE: RELSEG_SIZE;
-        int32 maxSegno = ((int32)size % ((int64)relSegSize * BLCKSZ)) != 0
-                         ? (int32)size / ((int64)relSegSize * BLCKSZ)
-                         : ((int32)size / ((int64)relSegSize * BLCKSZ)) - 1;
+        int32 maxSegno = (int32)((size % ((int64)relSegSize * BLCKSZ)) != 0
+                                     ? (size / ((int64)relSegSize * BLCKSZ))
+                                     : (size / ((int64)relSegSize * BLCKSZ)) - 1);
 
         for (int32 i = 0; i <= maxSegno; i++) {
             bool repair = PrimaryRepairSegFile_NonSegment(relation->rd_node, &repairFileKey, firstPath, i, maxSegno,

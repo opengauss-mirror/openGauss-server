@@ -1854,7 +1854,7 @@ void StartPrepare(GlobalTransaction gxact)
         uint32 size = (uint32)(hdr_new.hdr.nabortrels * sizeof(ColFileNode));
         if (unlikely((long)(t_thrd.proc->workingVersionNum < PAGE_COMPRESSION_VERSION))) {
             /* commitrels will be free in ConvertToOldColFileNode */
-            registerData = (void *)ConvertToOldColFileNode(abortrels, hdr_new.hdr.ncommitrels);
+            registerData = (void *)ConvertToOldColFileNode(abortrels, hdr_new.hdr.nabortrels);
             size = hdr_new.hdr.nabortrels * sizeof(ColFileNodeRel);
         }
         save_state_data(registerData, size);

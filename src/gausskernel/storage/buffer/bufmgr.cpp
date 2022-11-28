@@ -6498,7 +6498,7 @@ void shared_buffer_write_error_callback(void *arg)
     if (buf_desc != NULL) {
         char *path = relpathperm(((BufferDesc *)buf_desc)->tag.rnode, ((BufferDesc *)buf_desc)->tag.forkNum);
         if (buf_desc->tag.rnode.opt) {
-            (void)errcontext("writing block %u of relation %s_pcd", buf_desc->tag.blockNum, path);
+            (void)errcontext("writing block %u of relation %s_compress", buf_desc->tag.blockNum, path);
         } else {
             (void)errcontext("writing block %u of relation %s", buf_desc->tag.blockNum, path);
         }

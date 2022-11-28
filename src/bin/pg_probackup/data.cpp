@@ -460,13 +460,13 @@ get_checksum_errormsg(Page page, char **errormsg, BlockNumber absolute_blkno)
  */
 static int32
 prepare_page(ConnectionArgs *conn_arg,
-                            pgFile *file, XLogRecPtr prev_backup_start_lsn,
-                            BlockNumber blknum, FILE *in,
-                            BackupMode backup_mode,
-                            Page page, bool strict,
-                            uint32 checksum_version,
-                            const char *from_fullpath,
-                            PageState *page_st, PageCompression *pageCompression, int &read_len)
+             pgFile *file, XLogRecPtr prev_backup_start_lsn,
+             BlockNumber blknum, FILE *in,
+             BackupMode backup_mode,
+             Page page, bool strict,
+             uint32 checksum_version,
+             const char *from_fullpath,
+             PageState *page_st, PageCompression *pageCompression, int &read_len)
 {
     int     try_again = PAGE_READ_ATTEMPTS;
     bool        page_is_valid = false;
@@ -2221,9 +2221,9 @@ send_pages(ConnectionArgs* conn_arg, const char *to_fullpath, const char *from_f
         PageState page_st;
         int read_len = -1;
         int rc = prepare_page(conn_arg, file, prev_backup_start_lsn,
-                                            blknum, in, backup_mode, curr_page,
-                                            true, checksum_version,
-                                            from_fullpath, &page_st, pageCompression, read_len);
+                              blknum, in, backup_mode, curr_page,
+                              true, checksum_version,
+                              from_fullpath, &page_st, pageCompression, read_len);
         if (rc == PageIsTruncated)
             break;
 

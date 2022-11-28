@@ -4604,8 +4604,11 @@ Relation RelationBuildLocalRelation(const char* relname, Oid relnamespace, Tuple
 
     /* compressed option was set by RelationInitPhysicalAddr if rel->rd_options != NULL */
     if (rel->rd_options == NULL && reloptions && SUPPORT_COMPRESSED(relkind, rel->rd_rel->relam)) {
+        (void)MemoryContextSwitchTo(oldcxt);
         StdRdOptions *options = (StdRdOptions *)(void*)default_reloptions(reloptions, false, RELOPT_KIND_HEAP);
         SetupPageCompressForRelation(&rel->rd_node, &options->compress, RelationGetRelationName(rel));
+        (void)MemoryContextSwitchTo(LocalMyDBCacheMemCxt());
+        pfree(options);
     }
 
 

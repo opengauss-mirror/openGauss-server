@@ -158,11 +158,11 @@ void Transpose8x16U(uint8 **src, uint8 **dst)
     matLine4x2.val[3] = vld1q_u8(src[7]);
     vst4q_u8(sptr4x2, matLine4x2);
 
-    matLine4x2.val[0] = vld1q_u8(src[4]);
-    matLine4x2.val[1] = vld1q_u8(src[5]);
-    matLine4x2.val[2] = vld1q_u8(src[6]);
-    matLine4x2.val[3] = vld1q_u8(src[7]);
-    vst4q_u8(sptr4x2, matLine4x2);
+    uint32x4x2_t dstLine04;
+    uint32x4x2_t dstLine15;
+    uint32x4x2_t dstLine26;
+    uint32x4x2_t dstLine37;
+    uint8 dstPtr[128];
 
     dstLine04.val[0] = vld1q_u32((uint32_t *)sptr4x1);
     dstLine04.val[1] = vld1q_u32((uint32_t *)sptr4x2);
