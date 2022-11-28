@@ -64,6 +64,7 @@ public:
     /* how many tuples in current page. */
     OffsetNumber curBlockMaxoffset;
     bool finished;
+    unsigned short rand48Seed[3];
     void (BaseTableSample::*nextSampleBlock_function)();
     void (BaseTableSample::*nextSampleTuple_function)();
 

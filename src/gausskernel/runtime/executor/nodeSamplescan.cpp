@@ -45,8 +45,6 @@
 #include "nodes/execnodes.h"
 #include "access/ustore/knl_uscan.h"
 
-static double sample_random_fract(void);
-
 /*
  * Description: Initialize relation descriptor for sample table scan.
  *
@@ -220,7 +218,9 @@ void BaseTableSample::getSeed()
     }
 
     if (seed > 0) {
-        gs_srandom(seed);
+        pg_srand48(seed, rand48Seed);
+    } else {
+        pg_srand48_default(rand48Seed);
     }
 }
 
@@ -273,7 +273,7 @@ void BaseTableSample::system_nextsampleblock()
 
     /* We should start from currentBlock + 1. */
     for (blockindex = currentBlock + 1; blockindex < totalBlockNum; blockindex++) {
-        if (sample_random_fract() < percent[SYSTEM_SAMPLE]) {
+        if ((((double)pg_lrand48(rand48Seed) + 1) / ((double)MAX_RANDOM_VALUE + 2)) < percent[SYSTEM_SAMPLE]) {
             break;
         }
     }
@@ -343,7 +343,7 @@ void BaseTableSample::bernoulli_nextsampletuple()
      * block.
      */
     for (; tupoffset <= curBlockMaxoffset; tupoffset++) {
-        if (sample_random_fract() < percent[BERNOULLI_SAMPLE]) {
+        if ((((double)pg_lrand48(rand48Seed) + 1) / ((double)MAX_RANDOM_VALUE + 2)) < percent[BERNOULLI_SAMPLE]) {
             break;
         }
     }
@@ -429,6 +429,11 @@ void BaseTableSample::resetSampleScan()
     currentBlock = InvalidBlockNumber;
     curBlockMaxoffset = InvalidOffsetNumber;
     finished = false;
+    if (seed > 0) {
+        pg_srand48(seed, rand48Seed);
+    } else {
+        pg_srand48_default(rand48Seed);
+    }
 }
 
 /*
@@ -1184,9 +1189,4 @@ void ColumnTableSample::scanVecSample(VectorBatch* pOutBatch)
             }
         }
     }
-}
-
-static double sample_random_fract(void)
-{
-    return ((double)gs_random() + 1) / ((double)MAX_RANDOM_VALUE + 2);
 }
