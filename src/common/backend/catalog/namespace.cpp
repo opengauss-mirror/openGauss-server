@@ -3172,6 +3172,7 @@ bool IsPackageFunction(List* funcname)
     Oid namespaceId = InvalidOid;
     char *pkgname = NULL;   
     bool isFirstFunction = true; 
+    bool isSynonymPkg = false;
 
     /* deconstruct the name list */
     DeconstructQualifiedName(funcname, &schemaname, &func_name, &pkgname);
@@ -3182,6 +3183,30 @@ bool IsPackageFunction(List* funcname)
         /* flag to indicate we need namespace search */
         namespaceId = InvalidOid;
         recomputeNamespacePath();
+    }
+
+    if (NULL != pkgname) {
+        if (OidIsValid(namespaceId)) {
+            if (OidIsValid(SysynonymPkgNameGetOid(pkgname, namespaceId))) {
+                 isSynonymPkg = true;
+            }
+        } else {
+            List* tempActiveSearchPath = NIL;
+            ListCell* l = NULL;
+
+            recomputeNamespacePath();
+
+            tempActiveSearchPath = list_copy(u_sess->catalog_cxt.activeSearchPath);
+            foreach (l, tempActiveSearchPath) {
+                Oid namespaceId = lfirst_oid(l);
+                if (OidIsValid(SysynonymPkgNameGetOid(pkgname, namespaceId))) {
+                   isSynonymPkg = true;
+                   list_free_ext(tempActiveSearchPath);
+                   break;
+                }
+            }
+            list_free_ext(tempActiveSearchPath);
+        }
     }
 
 #ifndef ENABLE_MULTIPLE_NODES
@@ -3204,27 +3229,28 @@ bool IsPackageFunction(List* funcname)
         } else {
             packageid = InvalidOid;
         }
-        if (OidIsValid(namespaceId)) {
-            /* Consider only procs in specified namespace */
-            if (procform->pronamespace != namespaceId)
-                continue;
-        } else {
-            /*
-             * Consider only procs that are in the search path and are not in
-             * the temp namespace.
-             */
-            ListCell* nsp = NULL;
+        if (!isSynonymPkg) {
+            if (OidIsValid(namespaceId)) {
+                /* Consider only procs in specified namespace */
+                if (procform->pronamespace != namespaceId)
+                    continue;
+            } else {
+                /*
+                 * Consider only procs that are in the search path and are not in
+                 * the temp namespace.
+                 */
+                ListCell* nsp = NULL;
 
-            foreach (nsp, u_sess->catalog_cxt.activeSearchPath) {
-                if (procform->pronamespace == lfirst_oid(nsp) &&
-                    procform->pronamespace != u_sess->catalog_cxt.myTempNamespace)
-                    break;
+                foreach (nsp, u_sess->catalog_cxt.activeSearchPath) {
+                    if (procform->pronamespace == lfirst_oid(nsp) &&
+                        procform->pronamespace != u_sess->catalog_cxt.myTempNamespace)
+                        break;
+                }
+
+                if (nsp == NULL)
+                    continue; /* proc is not in search path */
             }
-
-            if (nsp == NULL)
-                continue; /* proc is not in search path */
         }
-
         /* package function and not package function can not overload */
         proctup = t_thrd.lsc_cxt.FetchTupleFromCatCList(catlist, i);
         Datum ispackage = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_package, &isNull);

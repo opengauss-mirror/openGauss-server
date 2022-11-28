@@ -687,5 +687,57 @@ procedure p4();
 pv1 ty1;
 end pkg112;
 /
+
 drop package if exists pkg112;
 set behavior_compat_options='';
+
+--fix package synonym 
+DROP DATABASE IF EXISTS db;
+CREATE DATABASE db DBCOMPATIBILITY 'A';
+\c db
+CREATE USER pkg_user1 PASSWORD 'Abc@123456';
+grant all on database db to pkg_user1;
+CREATE USER pkg_user2 PASSWORD 'Abc@123456';
+grant all on database db to pkg_user2;
+
+create or replace synonym pkg_user2.syn1 for pkg_user1.pkg1;
+
+SET ROLE pkg_user1 PASSWORD 'Abc@123456';
+create or replace package pkg1 IS
+cons1 constant text := 'lili';
+PROCEDURE p1(p int);
+PROCEDURE p1(p text);
+end pkg1;
+/
+create or replace package body pkg1 IS
+PROCEDURE p1(p int) IS
+BEGIN
+raise info 'the number is %.',p;
+end;
+PROCEDURE p1(p text) IS
+BEGIN
+raise info 'the text is %.',p;
+end;
+end pkg1;
+/
+grant all privileges on package pkg1 to pkg_user2;
+
+SET ROLE pkg_user2 PASSWORD 'Abc@123456';
+create or replace package pkg2 IS
+PROCEDURE f1(p int);
+end pkg2;
+/
+create or replace package body pkg2 is
+PROCEDURE f1(p int) IS
+BEGIN
+syn1.p1(p);
+end;
+end pkg2;
+/
+call pkg2.f1(5);
+
+\c regression
+drop database db;
+drop user pkg_user1;
+drop user pkg_user2;
+
