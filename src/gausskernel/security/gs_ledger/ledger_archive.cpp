@@ -482,6 +482,7 @@ Datum ledger_hist_archive(PG_FUNCTION_ARGS)
 
         /* Do insertion for unified row. */
         simple_heap_insert(histRel, tuple);
+        CatalogUpdateIndexes(histRel,tuple);
         heap_freetuple(tuple);
 
         /*
