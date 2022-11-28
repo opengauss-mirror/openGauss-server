@@ -1,0 +1,11 @@
+show dolphin_server_port;
+show enable_dolphin_proto;
+
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "enable_dolphin_proto=on" > /dev/null 2>&1
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "dolphin_server_port=3310" > /dev/null 2>&1
+\! @abs_bindir@/gs_ctl stop -D @abs_srcdir@/tmp_check/datanode1 > /dev/null 2>&1
+\! @abs_bindir@/gs_ctl start -D @abs_srcdir@/tmp_check/datanode1 > /dev/null 2>&1
+\! sleep 5
+
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "show dolphin_server_port";
+\! @abs_bindir@/gsql -r -p @portstring@ -d postgres -c "show enable_dolphin_proto";

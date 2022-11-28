@@ -392,6 +392,22 @@ call doiterate(2);
 create or replace procedure doiterate(p1 int)
 as
 begin
+LABEL1:loop
+p1 := p1+1;
+if p1 < 10 then
+raise notice '123';
+end if;
+exit LABEL1;
+end loop LABEL1;
+end;
+/
+
+call doiterate(2);
+
+--success
+create or replace procedure doiterate(p1 int)
+as
+begin
 LAbEL1:
 loop
 p1 := p1+1;
@@ -1037,6 +1053,401 @@ drop schema test CASCADE;
 
 \c regression
 
+--error
+create or replace function while_test1() returns void as $$
+declare _i integer = 0; _r record;
+begin
+  raise notice '---1---';
+  while _i < 10 do
+    _i := _i + 1;
+    raise notice '%', _i;
+  end while;
+
+  raise notice '---2---';
+  <<lbl>>
+  while _i > 0 do
+    _i := _i - 1;
+    loop
+      raise notice '%', _i;
+      continue lbl when _i > 0;
+      exit lbl;
+    end loop;
+  end while;
+
+  raise notice '---3---';
+  the_while:
+  while _i < 10 do
+    _i := _i + 1;
+    continue the_while when _i % 2 = 0;
+    raise notice '%', _i;
+  end while the_while;
+
+  the_while1:while _i < 10 do
+    _i := _i + 1;
+    continue the_while1 when _i % 2 = 0;
+    raise notice '%', _i;
+  end while the_while1;
+
+  raise notice '---3---';
+  _i := 1;
+  while _i <= 3 loop
+    raise notice '%', _i;
+    _i := _i + 1;
+    continue when _i = 3;
+  end loop;
+end; $$ language plpgsql;
+
+--error
+create or replace function while_test1() returns void as $$
+declare _i integer = 0; _r record;
+begin
+  while _i < 10 do
+    _i := _i + 1;
+    raise notice '%', _i;
+  end while the_while;
+end; $$ language plpgsql;
+
+--error
+create or replace function while_test1() returns void as $$
+declare _i integer = 10; _r record;
+begin
+  <<lbl>>
+  while _i > 0 do
+    _i := _i - 1;
+    loop
+      raise notice '%', _i;
+      continue lbl when _i > 0;
+      exit lbl;
+    end loop;
+  end while lbl;
+end; $$ language plpgsql;
+
+--error
+create or replace function while_test1() returns void as $$
+declare _i integer = 0; _r record;
+begin
+  the_while:
+  while _i < 10 do
+    _i := _i + 1;
+    continue the_while when _i % 2 = 0;
+    raise notice '%', _i;
+  end while the_while;
+end; $$ language plpgsql;
+
+--success
+create or replace function while_test1() returns void as $$
+declare _i integer = 10; _r record;
+begin
+  <<lbl>>
+  while _i > 0 loop
+    _i := _i - 1;
+    loop
+      raise notice '%', _i;
+      continue lbl when _i > 0;
+      exit lbl;
+    end loop;
+  end loop lbl;
+end; $$ language plpgsql;
+
+select while_test1();
+drop function while_test1;
+\c b
+
+
+create or replace function while_test1() returns void as $$
+declare _i integer = 0; _r record;
+begin
+  raise notice '---1---';
+  while _i < 10 do
+    _i := _i + 1;
+    raise notice '%', _i;
+  end while;
+
+  raise notice '---2---';
+  <<lbl>>
+  while _i > 0 do
+    _i := _i - 1;
+    loop
+      raise notice '%', _i;
+      continue lbl when _i > 0;
+      exit lbl;
+    end loop;
+  end while;
+
+  raise notice '---3---';
+  the_while:
+  while _i < 10 do
+    _i := _i + 1;
+    continue the_while when _i % 2 = 0;
+    raise notice '%', _i;
+  end while the_while;
+
+  the_while1:while _i < 10 do
+    _i := _i + 1;
+    continue the_while1 when _i % 2 = 0;
+    raise notice '%', _i;
+  end while the_while1;
+
+  raise notice '---3---';
+  _i := 1;
+  while _i <= 3 loop
+    raise notice '%', _i;
+    _i := _i + 1;
+    continue when _i = 3;
+  end loop;
+end; $$ language plpgsql;
+
+select while_test1();
+
+--error
+create or replace function while_test1() returns void as $$
+declare _i integer = 0; _r record;
+begin
+  while _i < 10 do
+    _i := _i + 1;
+    raise notice '%', _i;
+  end while the_while;
+end; $$ language plpgsql;
+
+create or replace function while_test1() returns void as $$
+declare _i integer = 10; _r record;
+begin
+  <<lbl>>
+  while _i > 0 do
+    _i := _i - 1;
+    loop
+      raise notice '%', _i;
+      continue lbl when _i > 0;
+      exit lbl;
+    end loop;
+  end while lbl;
+end; $$ language plpgsql;
+
+select while_test1();
+
+create or replace function while_test1() returns void as $$
+declare _i integer = 10; _r record;
+begin
+  <<lbl>>
+  while _i > 0 loop
+    _i := _i - 1;
+    loop
+      raise notice '%', _i;
+      continue lbl when _i > 0;
+      exit lbl;
+    end loop;
+  end loop lbl;
+end; $$ language plpgsql;
+
+select while_test1();
+
+create or replace function while_test1() returns void as $$
+declare _i integer = 0; _r record;
+begin
+  the_while:
+  while _i < 10 do
+    _i := _i + 1;
+    continue the_while when _i % 2 = 0;
+    raise notice '%', _i;
+  end while the_while;
+end; $$ language plpgsql;
+
+select while_test1();
+
+--error
+create or replace function while_test1() returns void as $$
+declare _i integer = 0; _r record;
+begin
+  the_while:
+  while _i < 10 loop
+    _i := _i + 1;
+    continue the_while when _i % 2 = 0;
+    raise notice '%', _i;
+  end while the_while;
+end; $$ language plpgsql;
+
+--error
+create or replace function while_test1() returns void as $$
+declare _i integer = 0; _r record;
+begin
+  the_while:
+  while _i < 10 do
+    _i := _i + 1;
+    continue the_while when _i % 2 = 0;
+    raise notice '%', _i;
+  end loop the_while;
+end; $$ language plpgsql;
+
+create or replace procedure while_test2()
+as 
+declare _i integer = 0;
+BEGIN
+the_while:
+  while _i < 10 do
+    _i := _i + 1;
+    continue the_while when _i % 2 = 0;
+    raise notice '%', _i;
+  end while the_while;
+end; 
+/
+
+select while_test2();
+
+--error
+create or replace procedure while_test2()
+as 
+declare _i integer = 0;
+BEGIN
+the_while:
+  while _i < 10 loop
+    _i := _i + 1;
+    continue the_while when _i % 2 = 0;
+    raise notice '%', _i;
+  end while the_while;
+end; 
+/
+
+--error
+create or replace procedure while_test2()
+as 
+declare _i integer = 0;
+BEGIN
+  while _i < 10 do
+    _i := _i + 1;
+    continue the_while when _i % 2 = 0;
+    raise notice '%', _i;
+  end loop;
+end; 
+/
+
+--error
+create or replace procedure while_test2()
+as 
+declare _i integer = 0;
+BEGIN
+  while _i < 10 loop
+    _i := _i + 1;
+    continue the_while when _i % 2 = 0;
+    raise notice '%', _i;
+  end while;
+end; 
+/
+
+drop function while_test1;
+drop procedure while_test2;
+
+\c regression
+--error
+CREATE or replace PROCEDURE dorepeat(p1 INT)
+as 
+declare
+i int =0;
+BEGIN
+repeat
+i = i + 1;
+until i >p1 end repeat;
+raise notice '%',i;
+end;
+/
+--error
+CREATE or replace PROCEDURE dorepeat(p1 INT)
+as 
+declare
+i int =0;
+BEGIN
+<<label>>
+repeat
+i = i + 1;
+until i >p1 end repeat label;
+raise notice '%',i;
+end;
+/
+--error
+CREATE or replace PROCEDURE dorepeat(p1 INT)
+as 
+declare
+i int =0;
+BEGIN
+label:
+repeat
+i = i + 1;
+until i >p1 end repeat label;
+raise notice '%',i;
+end;
+/
+drop function if exists dorepeat;
+\c b
+
+--success
+CREATE or replace PROCEDURE dorepeat(p1 INT)
+as 
+declare
+i int =0;
+BEGIN
+repeat
+i = i + 1;
+until i >p1 end repeat;
+raise notice '%',i;
+end;
+/
+select dorepeat(5);
+--success
+CREATE or replace PROCEDURE dorepeat(p1 INT)
+as 
+declare
+i int =0;
+BEGIN
+<<label>>
+repeat
+i = i + 1;
+until i >p1 end repeat label;
+raise notice '%',i;
+end;
+/
+select dorepeat(5);
+--success
+CREATE or replace PROCEDURE dorepeat(p1 INT)
+as 
+declare
+i int =0;
+BEGIN
+label:
+repeat
+i = i + 1;
+until i >p1 end repeat label;
+raise notice '%',i;
+end;
+/
+select dorepeat(5);
+--success
+CREATE or replace PROCEDURE dorepeat(p1 INT)
+as
+declare
+i int =0;
+BEGIN
+label:repeat
+i = i + 1;
+until i >p1 end repeat label;
+raise notice '%',i;
+end;
+/
+select dorepeat(5);
+--error
+CREATE or replace PROCEDURE dorepeat(p1 INT)
+as 
+declare
+i int =0;
+BEGIN
+repeat:
+repeat
+i = i + 1;
+until i >p1 end repeat;
+raise notice '%',i;
+end;
+/
+
+drop function if exists dorepeat;
+\c regression
 drop database b;
 DROP USER test_c;
 DROP USER test_d;

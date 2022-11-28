@@ -136,3 +136,8 @@ end;
 
 -- Should succeed
 DROP TABLESPACE testspace;
+
+-- symlink location
+\! mkdir -p @testtablespace@/symlink/sym1
+\! ln -s @testtablespace@/symlink/sym1 @testtablespace@/symlink/sym2
+CREATE TABLESPACE test_symlink LOCATION '@testtablespace@/symlink/sym2';

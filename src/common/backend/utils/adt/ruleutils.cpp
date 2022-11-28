@@ -1641,7 +1641,7 @@ static int get_table_attribute(
                             find_nextval_seqoid_walker(adexpr, &tableinfo->autoinc_seqoid);
                             tableinfo->autoinc_attnum = attrdef->adnum;
                             appendStringInfo(buf, " %s", adsrc);
-                        } else {
+                        } else if (pg_strcasecmp(adsrc, "") != 0) {
                             appendStringInfo(buf, " DEFAULT %s", adsrc);
                         }
                         if (isOnUpdate) {

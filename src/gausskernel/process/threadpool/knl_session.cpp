@@ -1366,7 +1366,8 @@ void knl_session_init(knl_session_context* sess_cxt)
     sess_cxt->sess_ident.cn_sessid = 0;
     sess_cxt->sess_ident.cn_nodeid = 0;
     sess_cxt->sess_ident.cn_timeline = 0;
-
+    sess_cxt->statement_cxt.current_row_count = -1;
+    sess_cxt->statement_cxt.last_row_count = -1;
     MemoryContextUnSeal(sess_cxt->top_mem_cxt);
     /* workload manager session context init */
     sess_cxt->wlm_cxt = (knl_u_wlm_context*)palloc0(sizeof(knl_u_wlm_context));

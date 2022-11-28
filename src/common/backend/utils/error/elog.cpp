@@ -4344,6 +4344,7 @@ static char* mask_Password_internal(const char* query_string)
      * 14 - create/alter text search dictionary
      * 15 - for funCrypt
      * 16 - create/alter subscription(CREATE_ALTER_SUBSCRIPTION)
+     * 17 - set password (b compatibility)
      */
     int curStmtType = 0;
     int prevToken[5] = {0};
@@ -4618,9 +4619,14 @@ static char* mask_Password_internal(const char* query_string)
                         /* For create/alter data source: sensitive opt is 'password' */
                         curStmtType = 11;
                         currToken = IDENT;
+                    } else if (DB_IS_CMPT(B_FORMAT) && prevToken[0] == SET) {
+                        curStmtType = 17;
                     }
-                    isPassword = true;
-                    idx = 0;
+
+                    if (curStmtType != 17) {
+                        isPassword = true;
+                        idx = 0;
+                    }
                     break;
                 case BY:
                     isPassword = (curStmtType > 0 && prevToken[0] == IDENTIFIED);
@@ -4628,7 +4634,7 @@ static char* mask_Password_internal(const char* query_string)
                         idx = 0;
                     break;
                 case REPLACE:
-                    isPassword = (curStmtType == 3 || curStmtType == 4);
+                    isPassword = (curStmtType == 3 || curStmtType == 4 || curStmtType == 17);
                     if (isPassword)
                         idx = 0;
                     break;
@@ -4808,6 +4814,12 @@ static char* mask_Password_internal(const char* query_string)
                     curStmtType = 0;
                     isPassword = false;
                     idx = 0;
+                    break;
+                case 61: /* character '=' */
+                    /* for mask 'set password' in b compatibility */
+                    isPassword = (curStmtType == 17);
+                    if (isPassword)
+                        idx = 0;
                     break;
                 case FOREIGN:
                     if (prevToken[0] == CREATE || prevToken[0] == ALTER) {

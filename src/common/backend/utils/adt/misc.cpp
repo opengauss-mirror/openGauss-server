@@ -1040,3 +1040,9 @@ Datum pg_get_replica_identity_index(PG_FUNCTION_ARGS)
     else
         PG_RETURN_NULL();
 }
+
+/* Compatible with ROW_COUNT functions of B database */
+Datum b_database_row_count(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT64(u_sess->statement_cxt.last_row_count);
+}
