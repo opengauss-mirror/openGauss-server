@@ -6191,7 +6191,24 @@ static void RenameTableFeature(RenameStmt* stmt)
         if (relform->relkind == RELKIND_RELATION && relform->parttype == PARTTYPE_PARTITIONED_RELATION) {
             renamePartitionedTable(relid, modfytable);
         } else if (relform->relhastriggers && modfyNameSpace != orgiNameSpace) {
-            ereport(ERROR, (errcode(ERRCODE_INVALID_TABLE_DEFINITION), errmsg("Trigger in wrong schema on table %s", get_rel_name(relid))));
+            ScanKeyData key;
+            bool is_find = false;
+            HeapTuple tuple = NULL;
+            Relation tgrel = heap_open(TriggerRelationId, RowExclusiveLock);
+            ScanKeyInit(&key, Anum_pg_trigger_tgrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(relid));
+            SysScanDesc scan = systable_beginscan(tgrel, TriggerRelidNameIndexId, true, NULL, 1, &key);
+            while (HeapTupleIsValid(tuple = systable_getnext(scan))) {
+                Form_pg_trigger pg_trigger = (Form_pg_trigger)GETSTRUCT(tuple);
+                if (!pg_trigger->tgisinternal) {
+                    is_find = true;
+                    break;
+                }
+            }
+            systable_endscan(scan);
+            heap_close(tgrel, RowExclusiveLock);
+            if (is_find) {
+                ereport(ERROR, (errcode(ERRCODE_INVALID_TABLE_DEFINITION), errmsg("Trigger in wrong schema on table %s", get_rel_name(relid))));
+            }
         }
         /* Fix other dependent stuff */
         if (relform->relkind == RELKIND_RELATION || relform->relkind == RELKIND_MATVIEW) {
