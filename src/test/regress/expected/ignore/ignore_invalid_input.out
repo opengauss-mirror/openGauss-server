@@ -1,0 +1,790 @@
+-- test for insert/update ignore.
+create database sql_ignore_invalid_input_test dbcompatibility 'B';
+\c sql_ignore_invalid_input_test;
+set timezone to 'PRC';
+-- type: tinyint
+create table t_tinyint(c tinyint);
+insert /*+ ignore_error */ into t_tinyint values('12a34');
+insert /*+ ignore_error */ into t_tinyint values('12555a34');
+WARNING:  value "12555a34" is out of range for 8-bit integer. truncated automatically
+LINE 1: insert /*+ ignore_error */ into t_tinyint values('12555a34')...
+                                                         ^
+CONTEXT:  referenced column: c
+insert /*+ ignore_error */ into t_tinyint values('-12555a34');
+WARNING:  value "-12555a34" is out of range for 8-bit integer. truncated automatically
+LINE 1: insert /*+ ignore_error */ into t_tinyint values('-12555a34'...
+                                                         ^
+CONTEXT:  referenced column: c
+insert /*+ ignore_error */ into t_tinyint values('aaa123a34');
+insert /*+ ignore_error */ into t_tinyint values('abcde');
+select * from t_tinyint;
+  c  
+-----
+ 12
+ 255
+ 0
+ 0
+ 0
+(5 rows)
+
+update /*+ ignore_error */ t_tinyint set c = '12a34';
+-- type: smallint
+create table t_smallint(c smallint);
+insert /*+ ignore_error */ into t_smallint values ('12a34');
+insert /*+ ignore_error */ into t_smallint values ('123333333333333a34');
+WARNING:  value "123333333333333a34" is out of range for type smallint. truncated automatically
+LINE 1: ...nsert /*+ ignore_error */ into t_smallint values ('123333333...
+                                                             ^
+CONTEXT:  referenced column: c
+insert /*+ ignore_error */ into t_smallint values ('-123333333333333a34');
+WARNING:  value "-123333333333333a34" is out of range for type smallint. truncated automatically
+LINE 1: ...nsert /*+ ignore_error */ into t_smallint values ('-12333333...
+                                                             ^
+CONTEXT:  referenced column: c
+insert /*+ ignore_error */ into t_smallint values ('aaa1234a5');
+insert /*+ ignore_error */ into t_smallint values ('abcde');
+select * from t_smallint;
+   c    
+--------
+     12
+  32767
+ -32768
+      0
+      0
+(5 rows)
+
+update /*+ ignore_error */ t_smallint set c = '12a34';
+-- type: int4
+create table t_int(c int);
+insert /*+ ignore_error */ into t_int values ('12a34');
+insert /*+ ignore_error */ into t_int values ('123333333333333333333333333a34');
+WARNING:  value "123333333333333333333333333a34" is out of range for type integer. truncated automatically
+LINE 1: insert /*+ ignore_error */ into t_int values ('1233333333333...
+                                                      ^
+CONTEXT:  referenced column: c
+insert /*+ ignore_error */ into t_int values ('-123333333333333333333333333a34');
+WARNING:  value "-123333333333333333333333333a34" is out of range for type integer. truncated automatically
+LINE 1: insert /*+ ignore_error */ into t_int values ('-123333333333...
+                                                      ^
+CONTEXT:  referenced column: c
+insert /*+ ignore_error */ into t_int values ('aaa123a45');
+insert /*+ ignore_error */ into t_int values ('abcde');
+select * from t_int;
+      c      
+-------------
+          12
+  2147483647
+ -2147483648
+           0
+           0
+(5 rows)
+
+update /*+ ignore_error */ t_int set c = '12a34';
+-- type: bigint
+create table t_bigint(c bigint);
+insert /*+ ignore_error */ into t_bigint values ('12a34');
+insert /*+ ignore_error */ into t_bigint values ('123333333333333333333333333333333333333333333333333333333333333333333333333333333333333a34');
+WARNING:  value "123333333333333333333333333333333333333333333333333333333333333333333333333333333333333a34" is out of range for type bigint. truncated automatically
+LINE 1: insert /*+ ignore_error */ into t_bigint values ('1233333333...
+                                                         ^
+CONTEXT:  referenced column: c
+insert /*+ ignore_error */ into t_bigint values ('-123333333333333333333333333333333333333333333333333333333333333333333333333333333333333a34');
+WARNING:  value "-123333333333333333333333333333333333333333333333333333333333333333333333333333333333333a34" is out of range for type bigint. truncated automatically
+LINE 1: insert /*+ ignore_error */ into t_bigint values ('-123333333...
+                                                         ^
+CONTEXT:  referenced column: c
+insert /*+ ignore_error */ into t_bigint values ('aaa123a45');
+insert /*+ ignore_error */ into t_bigint values ('abcde');
+select * from t_bigint;
+          c           
+----------------------
+                   12
+  9223372036854775807
+ -9223372036854775808
+                    0
+                    0
+(5 rows)
+
+update /*+ ignore_error */ t_bigint set c = '12a34';
+-- type: float4
+create table t_float4(c float4);
+insert /*+ ignore_error */ into t_float4 values ('12.123a34');
+WARNING:  invalid input syntax for type real: "12.123a34". truncated automatically
+LINE 1: insert /*+ ignore_error */ into t_float4 values ('12.123a34'...
+                                                         ^
+CONTEXT:  referenced column: c
+insert /*+ ignore_error */ into t_float4 values ('123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333.123a34');
+WARNING:  value out of range: overflow
+LINE 1: insert /*+ ignore_error */ into t_float4 values ('1233333333...
+                                                         ^
+CONTEXT:  referenced column: c
+insert /*+ ignore_error */ into t_float4 values ('-123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333.123a34');
+WARNING:  value out of range: overflow
+LINE 1: insert /*+ ignore_error */ into t_float4 values ('-123333333...
+                                                         ^
+CONTEXT:  referenced column: c
+insert /*+ ignore_error */ into t_float4 values ('aaa123.12a45');
+WARNING:  invalid input syntax for type real: "aaa123.12a45". truncated automatically
+LINE 1: insert /*+ ignore_error */ into t_float4 values ('aaa123.12a...
+                                                         ^
+CONTEXT:  referenced column: c
+insert /*+ ignore_error */ into t_float4 values ('abcde');
+WARNING:  invalid input syntax for type real: "abcde". truncated automatically
+LINE 1: insert /*+ ignore_error */ into t_float4 values ('abcde');
+                                                         ^
+CONTEXT:  referenced column: c
+select * from t_float4;
+      c       
+--------------
+       12.123
+  3.40282e+38
+ -3.40282e+38
+            0
+            0
+(5 rows)
+
+update /*+ ignore_error */ t_float4 set c = '12a34';
+WARNING:  invalid input syntax for type real: "12a34". truncated automatically
+LINE 1: update /*+ ignore_error */ t_float4 set c = '12a34';
+                                                    ^
+CONTEXT:  referenced column: c
+-- type: float8
+create table t_float8(c float8);
+insert /*+ ignore_error */ into t_float8 values ('12.123a34');
+WARNING:  invalid input syntax for type double precision: "12.123a34". truncated automatically
+LINE 1: insert /*+ ignore_error */ into t_float8 values ('12.123a34'...
+                                                         ^
+CONTEXT:  referenced column: c
+insert /*+ ignore_error */ into t_float8 values ('3333333331892038097432987589432759843769348605436304758493758943758943758943759843756983760945860948605948765487689547893475893475918920380974329875894327598437693486054363047584937589437589437589437598437569837609458609486059487654876895478934758934759627346378267863475863875648365843734895749837589437589473988.18920380974329875894327598437693486054363047584937589437589437589437598437569837609458609486059487654876895478934758934759189203809743298758943275984376934860543630475849375894375894375894375984375698376094586094860594876548768954789347589347593874894375984aaa34');
+WARNING:  "3333333331892038097432987589432759843769348605436304758493758943758943758943759843756983760945860948605948765487689547893475893475918920380974329875894327598437693486054363047584937589437589437589437598437569837609458609486059487654876895478934758934759627346378267863475863875648365843734895749837589437589473988.18920380974329875894327598437693486054363047584937589437589437589437598437569837609458609486059487654876895478934758934759189203809743298758943275984376934860543630475849375894375894375894375984375698376094586094860594876548768954789347589347593874894375984aaa34" is out of range for type double precision
+LINE 1: insert /*+ ignore_error */ into t_float8 values ('3333333331...
+                                                         ^
+CONTEXT:  referenced column: c
+WARNING:  invalid input syntax for type double precision: "3333333331892038097432987589432759843769348605436304758493758943758943758943759843756983760945860948605948765487689547893475893475918920380974329875894327598437693486054363047584937589437589437589437598437569837609458609486059487654876895478934758934759627346378267863475863875648365843734895749837589437589473988.18920380974329875894327598437693486054363047584937589437589437589437598437569837609458609486059487654876895478934758934759189203809743298758943275984376934860543630475849375894375894375894375984375698376094586094860594876548768954789347589347593874894375984aaa34". truncated automatically
+LINE 1: insert /*+ ignore_error */ into t_float8 values ('3333333331...
+                                                         ^
+CONTEXT:  referenced column: c
+insert /*+ ignore_error */ into t_float8 values ('-3333333331892038097432987589432759843769348605436304758493758943758943758943759843756983760945860948605948765487689547893475893475918920380974329875894327598437693486054363047584937589437589437589437598437569837609458609486059487654876895478934758934759627346378267863475863875648365843734895749837589437589473988.18920380974329875894327598437693486054363047584937589437589437589437598437569837609458609486059487654876895478934758934759189203809743298758943275984376934860543630475849375894375894375894375984375698376094586094860594876548768954789347589347593874894375984aaa34');
+WARNING:  "-3333333331892038097432987589432759843769348605436304758493758943758943758943759843756983760945860948605948765487689547893475893475918920380974329875894327598437693486054363047584937589437589437589437598437569837609458609486059487654876895478934758934759627346378267863475863875648365843734895749837589437589473988.18920380974329875894327598437693486054363047584937589437589437589437598437569837609458609486059487654876895478934758934759189203809743298758943275984376934860543630475849375894375894375894375984375698376094586094860594876548768954789347589347593874894375984aaa34" is out of range for type double precision
+LINE 1: insert /*+ ignore_error */ into t_float8 values ('-333333333...
+                                                         ^
+CONTEXT:  referenced column: c
+WARNING:  invalid input syntax for type double precision: "-3333333331892038097432987589432759843769348605436304758493758943758943758943759843756983760945860948605948765487689547893475893475918920380974329875894327598437693486054363047584937589437589437589437598437569837609458609486059487654876895478934758934759627346378267863475863875648365843734895749837589437589473988.18920380974329875894327598437693486054363047584937589437589437589437598437569837609458609486059487654876895478934758934759189203809743298758943275984376934860543630475849375894375894375894375984375698376094586094860594876548768954789347589347593874894375984aaa34". truncated automatically
+LINE 1: insert /*+ ignore_error */ into t_float8 values ('-333333333...
+                                                         ^
+CONTEXT:  referenced column: c
+insert /*+ ignore_error */ into t_float8 values ('aaa123.12a45');
+WARNING:  invalid input syntax for type double precision: "aaa123.12a45". truncated automatically
+LINE 1: insert /*+ ignore_error */ into t_float8 values ('aaa123.12a...
+                                                         ^
+CONTEXT:  referenced column: c
+insert /*+ ignore_error */ into t_float8 values ('abcde');
+WARNING:  invalid input syntax for type double precision: "abcde". truncated automatically
+LINE 1: insert /*+ ignore_error */ into t_float8 values ('abcde');
+                                                         ^
+CONTEXT:  referenced column: c
+select * from t_float8;
+           c           
+-----------------------
+                12.123
+ 1.79769313486232e+308
+  2.2250738585072e-308
+                     0
+                     0
+(5 rows)
+
+update /*+ ignore_error */ t_float8 set c = '12a34';
+WARNING:  invalid input syntax for type double precision: "12a34". truncated automatically
+LINE 1: update /*+ ignore_error */ t_float8 set c = '12a34';
+                                                    ^
+CONTEXT:  referenced column: c
+-- type: numeric
+create table t_numeric(c numeric);
+insert /*+ ignore_error */ into t_numeric values ('12.123a34');
+WARNING:  invalid input syntax for type numeric: "12.123a34"
+LINE 1: insert /*+ ignore_error */ into t_numeric values ('12.123a34...
+                                                          ^
+CONTEXT:  referenced column: c
+insert /*+ ignore_error */ into t_numeric values ('333331892038097432987589432759843769348605436304758493758943758943758943759843756983760945860948605948765487689547893475893475918920380974329875894327598437693486054363047584937589437589437589437598437569837609458609486059487654876895478934758934759627346378267863475863875648365843734895749837589437589473988.18920380974329875894327598437693486054363047584937589437589437589437598437569837609458609486059487654876895478934758934759189203809743298758943275984376934860543630475849375894375894375894375984375698376094586094860594876548768954789347589347593874894375984aaa34');
+WARNING:  invalid input syntax for type numeric: "333331892038097432987589432759843769348605436304758493758943758943758943759843756983760945860948605948765487689547893475893475918920380974329875894327598437693486054363047584937589437589437589437598437569837609458609486059487654876895478934758934759627346378267863475863875648365843734895749837589437589473988.18920380974329875894327598437693486054363047584937589437589437589437598437569837609458609486059487654876895478934758934759189203809743298758943275984376934860543630475849375894375894375894375984375698376094586094860594876548768954789347589347593874894375984aaa34"
+LINE 1: insert /*+ ignore_error */ into t_numeric values ('333331892...
+                                                          ^
+CONTEXT:  referenced column: c
+insert /*+ ignore_error */ into t_numeric values ('-333331892038097432987589432759843769348605436304758493758943758943758943759843756983760945860948605948765487689547893475893475918920380974329875894327598437693486054363047584937589437589437589437598437569837609458609486059487654876895478934758934759627346378267863475863875648365843734895749837589437589473988.18920380974329875894327598437693486054363047584937589437589437589437598437569837609458609486059487654876895478934758934759189203809743298758943275984376934860543630475849375894375894375894375984375698376094586094860594876548768954789347589347593874894375984aaa34');
+WARNING:  invalid input syntax for type numeric: "-333331892038097432987589432759843769348605436304758493758943758943758943759843756983760945860948605948765487689547893475893475918920380974329875894327598437693486054363047584937589437589437589437598437569837609458609486059487654876895478934758934759627346378267863475863875648365843734895749837589437589473988.18920380974329875894327598437693486054363047584937589437589437589437598437569837609458609486059487654876895478934758934759189203809743298758943275984376934860543630475849375894375894375894375984375698376094586094860594876548768954789347589347593874894375984aaa34"
+LINE 1: insert /*+ ignore_error */ into t_numeric values ('-33333189...
+                                                          ^
+CONTEXT:  referenced column: c
+insert /*+ ignore_error */ into t_numeric values ('aaa123.12a45');
+insert /*+ ignore_error */ into t_numeric values ('abcde');
+select * from t_numeric;
+                                                                                                                                                                                                                                                                                            c                                                                                                                                                                                                                                                                                             
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   12.123
+  333331892038097432987589432759843769348605436304758493758943758943758943759843756983760945860948605948765487689547893475893475918920380974329875894327598437693486054363047584937589437589437589437598437569837609458609486059487654876895478934758934759627346378267863475863875648365843734895749837589437589473988.18920380974329875894327598437693486054363047584937589437589437589437598437569837609458609486059487654876895478934758934759189203809743298758943275984376934860543630475849375894375894375894375984375698376094586094860594876548768954789347589347593874894375984
+ -333331892038097432987589432759843769348605436304758493758943758943758943759843756983760945860948605948765487689547893475893475918920380974329875894327598437693486054363047584937589437589437589437598437569837609458609486059487654876895478934758934759627346378267863475863875648365843734895749837589437589473988.18920380974329875894327598437693486054363047584937589437589437589437598437569837609458609486059487654876895478934758934759189203809743298758943275984376934860543630475849375894375894375894375984375698376094586094860594876548768954789347589347593874894375984
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        0
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        0
+(5 rows)
+
+update /*+ ignore_error */ t_numeric set c = '12a34';
+WARNING:  invalid input syntax for type numeric: "12a34"
+LINE 1: update /*+ ignore_error */ t_numeric set c = '12a34';
+                                                     ^
+CONTEXT:  referenced column: c
+-- type: date
+create table t_date(c date);
+insert /*+ ignore_error */ into t_date values('12a34');
+WARNING:  invalid input syntax for type date: "12a34"
+LINE 1: insert /*+ ignore_error */ into t_date values('12a34');
+                                                      ^
+CONTEXT:  referenced column: c
+insert /*+ ignore_error */ into t_date values('123a34');
+WARNING:  invalid input syntax for type date: "123a34"
+LINE 1: insert /*+ ignore_error */ into t_date values('123a34');
+                                                      ^
+CONTEXT:  referenced column: c
+insert /*+ ignore_error */ into t_date values('12aaaaaaa34');
+WARNING:  invalid input syntax for type date: "12aaaaaaa34"
+LINE 1: insert /*+ ignore_error */ into t_date values('12aaaaaaa34')...
+                                                      ^
+CONTEXT:  referenced column: c
+insert /*+ ignore_error */ into t_date values('aaaaaaa12aaaaaaa34');
+WARNING:  invalid input syntax for type date: "aaaaaaa12aaaaaaa34"
+LINE 1: insert /*+ ignore_error */ into t_date values('aaaaaaa12aaaa...
+                                                      ^
+CONTEXT:  referenced column: c
+insert /*+ ignore_error */ into t_date values('abcde');
+WARNING:  invalid input syntax for type date: "abcde"
+LINE 1: insert /*+ ignore_error */ into t_date values('abcde');
+                                                      ^
+CONTEXT:  referenced column: c
+select * from t_date;
+     c      
+------------
+ 01-01-1970
+ 01-01-1970
+ 01-01-1970
+ 01-01-1970
+ 01-01-1970
+(5 rows)
+
+update /*+ ignore_error */ t_date set c = '12a34';
+WARNING:  invalid input syntax for type date: "12a34"
+LINE 1: update /*+ ignore_error */ t_date set c = '12a34';
+                                                  ^
+CONTEXT:  referenced column: c
+-- type: time
+create table t_time(c time);
+insert /*+ ignore_error */ into t_time values('12a34');
+WARNING:  invalid input syntax for type time: "12a34"
+LINE 1: insert /*+ ignore_error */ into t_time values('12a34');
+                                                      ^
+CONTEXT:  referenced column: c
+insert /*+ ignore_error */ into t_time values('123a34');
+WARNING:  invalid input syntax for type time: "123a34"
+LINE 1: insert /*+ ignore_error */ into t_time values('123a34');
+                                                      ^
+CONTEXT:  referenced column: c
+insert /*+ ignore_error */ into t_time values('12aaaaaaa34');
+WARNING:  invalid input syntax for type time: "12aaaaaaa34"
+LINE 1: insert /*+ ignore_error */ into t_time values('12aaaaaaa34')...
+                                                      ^
+CONTEXT:  referenced column: c
+insert /*+ ignore_error */ into t_time values('aaaaaaa12aaaaaaa34');
+WARNING:  invalid input syntax for type time: "aaaaaaa12aaaaaaa34"
+LINE 1: insert /*+ ignore_error */ into t_time values('aaaaaaa12aaaa...
+                                                      ^
+CONTEXT:  referenced column: c
+insert /*+ ignore_error */ into t_time values('abcde');
+WARNING:  invalid input syntax for type time: "abcde"
+LINE 1: insert /*+ ignore_error */ into t_time values('abcde');
+                                                      ^
+CONTEXT:  referenced column: c
+select * from t_time;
+    c     
+----------
+ 00:00:12
+ 00:00:00
+ 00:00:12
+ 00:00:00
+ 00:00:00
+(5 rows)
+
+update /*+ ignore_error */ t_time set c = '12a34';
+WARNING:  invalid input syntax for type time: "12a34"
+LINE 1: update /*+ ignore_error */ t_time set c = '12a34';
+                                                  ^
+CONTEXT:  referenced column: c
+-- type: timestamp
+create table t_timestamp(c timestamp);
+insert  /*+ ignore_error */ into t_timestamp values('12a34');
+WARNING:  invalid input syntax for type timestamp: "12a34"
+LINE 1: ...nsert  /*+ ignore_error */ into t_timestamp values('12a34');
+                                                              ^
+CONTEXT:  referenced column: c
+insert  /*+ ignore_error */ into t_timestamp values('abcde');
+WARNING:  invalid input syntax for type timestamp: "abcde"
+LINE 1: ...nsert  /*+ ignore_error */ into t_timestamp values('abcde');
+                                                              ^
+CONTEXT:  referenced column: c
+insert  /*+ ignore_error */ into t_timestamp values('aaaaaa12a34');
+WARNING:  invalid input syntax for type timestamp: "aaaaaa12a34"
+LINE 1: ...sert  /*+ ignore_error */ into t_timestamp values('aaaaaa12a...
+                                                             ^
+CONTEXT:  referenced column: c
+select * from t_timestamp;
+                c                
+---------------------------------
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+update /*+ ignore_error */ t_timestamp set c = '12a34';
+WARNING:  invalid input syntax for type timestamp: "12a34"
+LINE 1: update /*+ ignore_error */ t_timestamp set c = '12a34';
+                                                       ^
+CONTEXT:  referenced column: c
+-- type: timestamptz
+create table t_timestamptz(c timestamptz);
+insert  /*+ ignore_error */ into t_timestamptz values('12a34');
+WARNING:  invalid input syntax for type timestamp with time zone: "12a34"
+LINE 1: ...ert  /*+ ignore_error */ into t_timestamptz values('12a34');
+                                                              ^
+CONTEXT:  referenced column: c
+insert  /*+ ignore_error */ into t_timestamptz values('abcde');
+WARNING:  invalid input syntax for type timestamp with time zone: "abcde"
+LINE 1: ...ert  /*+ ignore_error */ into t_timestamptz values('abcde');
+                                                              ^
+CONTEXT:  referenced column: c
+insert  /*+ ignore_error */ into t_timestamptz values('aaaaaa12a34');
+WARNING:  invalid input syntax for type timestamp with time zone: "aaaaaa12a34"
+LINE 1: ...rt  /*+ ignore_error */ into t_timestamptz values('aaaaaa12a...
+                                                             ^
+CONTEXT:  referenced column: c
+select * from t_timestamptz;
+                  c                  
+-------------------------------------
+--?.*
+--?.*
+--?.*
+(3 rows)
+
+update /*+ ignore_error */ t_timestamptz set c = '12a34';
+WARNING:  invalid input syntax for type timestamp with time zone: "12a34"
+LINE 1: update /*+ ignore_error */ t_timestamptz set c = '12a34';
+                                                         ^
+CONTEXT:  referenced column: c
+-- type: timetz
+create table t_timetz(c timetz);
+insert /*+ ignore_error */ into t_timetz values('12a34');
+WARNING:  invalid input syntax for type time with time zone: "12a34"
+LINE 1: insert /*+ ignore_error */ into t_timetz values('12a34');
+                                                        ^
+CONTEXT:  referenced column: c
+insert /*+ ignore_error */ into t_timetz values('123a34');
+WARNING:  invalid input syntax for type time with time zone: "123a34"
+LINE 1: insert /*+ ignore_error */ into t_timetz values('123a34');
+                                                        ^
+CONTEXT:  referenced column: c
+insert /*+ ignore_error */ into t_timetz values('12aaaaaaa34');
+WARNING:  invalid input syntax for type time with time zone: "12aaaaaaa34"
+LINE 1: insert /*+ ignore_error */ into t_timetz values('12aaaaaaa34...
+                                                        ^
+CONTEXT:  referenced column: c
+insert /*+ ignore_error */ into t_timetz values('aaaaaaa12aaaaaaa34');
+WARNING:  invalid input syntax for type time with time zone: "aaaaaaa12aaaaaaa34"
+LINE 1: insert /*+ ignore_error */ into t_timetz values('aaaaaaa12aa...
+                                                        ^
+CONTEXT:  referenced column: c
+insert /*+ ignore_error */ into t_timetz values('abcde');
+WARNING:  invalid input syntax for type time with time zone: "abcde"
+LINE 1: insert /*+ ignore_error */ into t_timetz values('abcde');
+                                                        ^
+CONTEXT:  referenced column: c
+select * from t_timetz;
+      c      
+-------------
+ 00:00:12+00
+ 00:00:00+00
+ 00:00:12+00
+ 00:00:00+00
+ 00:00:00+00
+(5 rows)
+
+update /*+ ignore_error */ t_timetz set c = '12a34';
+WARNING:  invalid input syntax for type time with time zone: "12a34"
+LINE 1: update /*+ ignore_error */ t_timetz set c = '12a34';
+                                                    ^
+CONTEXT:  referenced column: c
+-- type: interval
+create table t_interval(c interval);
+insert /*+ ignore_error */ into t_interval values('12a34');
+WARNING:  invalid input syntax for type interval: "12a34"
+LINE 1: insert /*+ ignore_error */ into t_interval values('12a34');
+                                                          ^
+CONTEXT:  referenced column: c
+insert /*+ ignore_error */ into t_interval values('123a34');
+WARNING:  invalid input syntax for type interval: "123a34"
+LINE 1: insert /*+ ignore_error */ into t_interval values('123a34');
+                                                          ^
+CONTEXT:  referenced column: c
+insert /*+ ignore_error */ into t_interval values('12aaaaaaa34');
+WARNING:  invalid input syntax for type interval: "12aaaaaaa34"
+LINE 1: insert /*+ ignore_error */ into t_interval values('12aaaaaaa...
+                                                          ^
+CONTEXT:  referenced column: c
+insert /*+ ignore_error */ into t_interval values('aaaaaaa12aaaaaaa34');
+WARNING:  invalid input syntax for type interval: "aaaaaaa12aaaaaaa34"
+LINE 1: insert /*+ ignore_error */ into t_interval values('aaaaaaa12...
+                                                          ^
+CONTEXT:  referenced column: c
+insert /*+ ignore_error */ into t_interval values('abcde');
+WARNING:  invalid input syntax for type interval: "abcde"
+LINE 1: insert /*+ ignore_error */ into t_interval values('abcde');
+                                                          ^
+CONTEXT:  referenced column: c
+select * from t_interval;
+  c  
+-----
+ @ 0
+ @ 0
+ @ 0
+ @ 0
+ @ 0
+(5 rows)
+
+update /*+ ignore_error */ t_interval set c = '12a34';
+WARNING:  invalid input syntax for type interval: "12a34"
+LINE 1: update /*+ ignore_error */ t_interval set c = '12a34';
+                                                      ^
+CONTEXT:  referenced column: c
+-- type: tinterval
+create table t_tinterval(c tinterval);
+insert /*+ ignore_error */ into t_tinterval values('12a34');
+WARNING:  invalid input syntax for type tinterval: "12a34"
+LINE 1: insert /*+ ignore_error */ into t_tinterval values('12a34');
+                                                           ^
+CONTEXT:  referenced column: c
+insert /*+ ignore_error */ into t_tinterval values('123a34');
+WARNING:  invalid input syntax for type tinterval: "123a34"
+LINE 1: ...nsert /*+ ignore_error */ into t_tinterval values('123a34');
+                                                             ^
+CONTEXT:  referenced column: c
+insert /*+ ignore_error */ into t_tinterval values('12aaaaaaa34');
+WARNING:  invalid input syntax for type tinterval: "12aaaaaaa34"
+LINE 1: ...nsert /*+ ignore_error */ into t_tinterval values('12aaaaaaa...
+                                                             ^
+CONTEXT:  referenced column: c
+insert /*+ ignore_error */ into t_tinterval values('aaaaaaa12aaaaaaa34');
+WARNING:  invalid input syntax for type tinterval: "aaaaaaa12aaaaaaa34"
+LINE 1: ...nsert /*+ ignore_error */ into t_tinterval values('aaaaaaa12...
+                                                             ^
+CONTEXT:  referenced column: c
+insert /*+ ignore_error */ into t_tinterval values('abcde');
+WARNING:  invalid input syntax for type tinterval: "abcde"
+LINE 1: insert /*+ ignore_error */ into t_tinterval values('abcde');
+                                                           ^
+CONTEXT:  referenced column: c
+select * from t_tinterval;
+                                c                                
+-----------------------------------------------------------------
+ ["Thu Jan 01 08:00:00 1970 CST" "Thu Jan 01 08:00:00 1970 CST"]
+ ["Thu Jan 01 08:00:00 1970 CST" "Thu Jan 01 08:00:00 1970 CST"]
+ ["Thu Jan 01 08:00:00 1970 CST" "Thu Jan 01 08:00:00 1970 CST"]
+ ["Thu Jan 01 08:00:00 1970 CST" "Thu Jan 01 08:00:00 1970 CST"]
+ ["Thu Jan 01 08:00:00 1970 CST" "Thu Jan 01 08:00:00 1970 CST"]
+(5 rows)
+
+update /*+ ignore_error */ t_tinterval set c = '12a34';
+WARNING:  invalid input syntax for type tinterval: "12a34"
+LINE 1: update /*+ ignore_error */ t_tinterval set c = '12a34';
+                                                       ^
+CONTEXT:  referenced column: c
+-- type: smalldatetime
+create table t_smalldatetime(c smalldatetime);
+insert /*+ ignore_error */ into t_smalldatetime values('12a34');
+WARNING:  invalid input syntax for type smalldatetime: "12a34"
+LINE 1: ...rt /*+ ignore_error */ into t_smalldatetime values('12a34');
+                                                              ^
+CONTEXT:  referenced column: c
+insert /*+ ignore_error */ into t_smalldatetime values('123a34');
+WARNING:  invalid input syntax for type smalldatetime: "123a34"
+LINE 1: ...t /*+ ignore_error */ into t_smalldatetime values('123a34');
+                                                             ^
+CONTEXT:  referenced column: c
+insert /*+ ignore_error */ into t_smalldatetime values('12aaaaaaa34');
+WARNING:  invalid input syntax for type smalldatetime: "12aaaaaaa34"
+LINE 1: ...t /*+ ignore_error */ into t_smalldatetime values('12aaaaaaa...
+                                                             ^
+CONTEXT:  referenced column: c
+insert /*+ ignore_error */ into t_smalldatetime values('aaaaaaa12aaaaaaa34');
+WARNING:  invalid input syntax for type smalldatetime: "aaaaaaa12aaaaaaa34"
+LINE 1: ...t /*+ ignore_error */ into t_smalldatetime values('aaaaaaa12...
+                                                             ^
+CONTEXT:  referenced column: c
+insert /*+ ignore_error */ into t_smalldatetime values('abcde');
+WARNING:  invalid input syntax for type smalldatetime: "abcde"
+LINE 1: ...rt /*+ ignore_error */ into t_smalldatetime values('abcde');
+                                                              ^
+CONTEXT:  referenced column: c
+select * from t_smalldatetime;
+            c             
+--------------------------
+ Thu Jan 01 00:00:00 1970
+ Thu Jan 01 00:00:00 1970
+ Thu Jan 01 00:00:00 1970
+ Thu Jan 01 00:00:00 1970
+ Thu Jan 01 00:00:00 1970
+(5 rows)
+
+update /*+ ignore_error */ t_smalldatetime set c = '12a34';
+WARNING:  invalid input syntax for type smalldatetime: "12a34"
+LINE 1: update /*+ ignore_error */ t_smalldatetime set c = '12a34';
+                                                           ^
+CONTEXT:  referenced column: c
+-- type: uuid
+create table t_uuid(c uuid);
+insert /*+ ignore_error */ into t_uuid values('12a34');
+WARNING:  invalid input syntax for uuid: "12a34"
+LINE 1: insert /*+ ignore_error */ into t_uuid values('12a34');
+                                                      ^
+CONTEXT:  referenced column: c
+update /*+ ignore_error */ t_uuid set c = '12a34';
+WARNING:  invalid input syntax for uuid: "12a34"
+LINE 1: update /*+ ignore_error */ t_uuid set c = '12a34';
+                                                  ^
+CONTEXT:  referenced column: c
+select * from t_uuid;
+                  c                   
+--------------------------------------
+ 00000000-0000-0000-0000-000000000000
+(1 row)
+
+-- type: point
+create table t_point(c point);
+insert /*+ ignore_error */ into t_point values('12a34');
+WARNING:  invalid input syntax for type point: "12a34"
+LINE 1: insert /*+ ignore_error */ into t_point values('12a34');
+                                                       ^
+CONTEXT:  referenced column: c
+select * from t_point;
+   c   
+-------
+ (0,0)
+(1 row)
+
+update /*+ ignore_error */ t_point set c = '12a34';
+WARNING:  invalid input syntax for type point: "12a34"
+LINE 1: update /*+ ignore_error */ t_point set c = '12a34';
+                                                   ^
+CONTEXT:  referenced column: c
+select * from t_point;
+   c   
+-------
+ (0,0)
+(1 row)
+
+-- type: path
+create table t_path(c path);
+insert /*+ ignore_error */ into t_path values('12a34');
+WARNING:  invalid input syntax for type path: "12a34"
+LINE 1: insert /*+ ignore_error */ into t_path values('12a34');
+                                                      ^
+CONTEXT:  referenced column: c
+select * from t_path;
+    c    
+---------
+ ((0,0))
+(1 row)
+
+update /*+ ignore_error */ t_path set c = '12a34';
+WARNING:  invalid input syntax for type path: "12a34"
+LINE 1: update /*+ ignore_error */ t_path set c = '12a34';
+                                                  ^
+CONTEXT:  referenced column: c
+select * from t_path;
+    c    
+---------
+ ((0,0))
+(1 row)
+
+-- type: polygon
+create table t_polygon(c polygon);
+insert /*+ ignore_error */ into t_polygon values('12a34');
+WARNING:  invalid input syntax for type polygon: "12a34"
+LINE 1: insert /*+ ignore_error */ into t_polygon values('12a34');
+                                                         ^
+CONTEXT:  referenced column: c
+select * from t_polygon;
+    c    
+---------
+ ((0,0))
+(1 row)
+
+update /*+ ignore_error */ t_polygon set c = '12a34';
+WARNING:  invalid input syntax for type polygon: "12a34"
+LINE 1: update /*+ ignore_error */ t_polygon set c = '12a34';
+                                                     ^
+CONTEXT:  referenced column: c
+select * from t_polygon;
+    c    
+---------
+ ((0,0))
+(1 row)
+
+-- type: circle
+create table t_circle(c circle);
+insert /*+ ignore_error */ into t_circle values('12a34');
+WARNING:  invalid input syntax for type circle: "12a34"
+LINE 1: insert /*+ ignore_error */ into t_circle values('12a34');
+                                                        ^
+CONTEXT:  referenced column: c
+select * from t_circle;
+     c     
+-----------
+ <(0,0),0>
+(1 row)
+
+update /*+ ignore_error */ t_circle set c = '12a34';
+WARNING:  invalid input syntax for type circle: "12a34"
+LINE 1: update /*+ ignore_error */ t_circle set c = '12a34';
+                                                    ^
+CONTEXT:  referenced column: c
+select * from t_circle;
+     c     
+-----------
+ <(0,0),0>
+(1 row)
+
+-- type: lseg
+create table t_lseg(c lseg);
+insert /*+ ignore_error */ into t_lseg values('12a34');
+WARNING:  invalid input syntax for type lseg: "12a34"
+LINE 1: insert /*+ ignore_error */ into t_lseg values('12a34');
+                                                      ^
+CONTEXT:  referenced column: c
+select * from t_lseg;
+       c       
+---------------
+ [(0,0),(0,0)]
+(1 row)
+
+update /*+ ignore_error */ t_lseg set c = '12a34';
+WARNING:  invalid input syntax for type lseg: "12a34"
+LINE 1: update /*+ ignore_error */ t_lseg set c = '12a34';
+                                                  ^
+CONTEXT:  referenced column: c
+select * from t_lseg;
+       c       
+---------------
+ [(0,0),(0,0)]
+(1 row)
+
+-- type: box
+create table t_box(c box);
+insert /*+ ignore_error */ into t_box values('12a34');
+WARNING:  invalid input syntax for type box: "12a34"
+LINE 1: insert /*+ ignore_error */ into t_box values('12a34');
+                                                     ^
+CONTEXT:  referenced column: c
+select * from t_box;
+      c      
+-------------
+ (0,0),(0,0)
+(1 row)
+
+update /*+ ignore_error */ t_box set c = '12a34';
+WARNING:  invalid input syntax for type box: "12a34"
+LINE 1: update /*+ ignore_error */ t_box set c = '12a34';
+                                                 ^
+CONTEXT:  referenced column: c
+select * from t_box;
+      c      
+-------------
+ (0,0),(0,0)
+(1 row)
+
+-- type: json
+create table t_json(c json);
+insert /*+ ignore_error */ into t_json values('12a34');
+WARNING:  invalid input syntax for type json
+LINE 1: insert /*+ ignore_error */ into t_json values('12a34');
+                                                      ^
+CONTEXT:  referenced column: c
+select * from t_json;
+  c   
+------
+ null
+(1 row)
+
+update /*+ ignore_error */ t_json set c = '12a34';
+WARNING:  invalid input syntax for type json
+LINE 1: update /*+ ignore_error */ t_json set c = '12a34';
+                                                  ^
+CONTEXT:  referenced column: c
+select * from t_json;
+  c   
+------
+ null
+(1 row)
+
+-- type: jsonb
+create table t_jsonb(c jsonb);
+insert /*+ ignore_error */ into t_jsonb values('12a34');
+WARNING:  invalid input syntax for type json
+LINE 1: insert /*+ ignore_error */ into t_jsonb values('12a34');
+                                                       ^
+CONTEXT:  referenced column: c
+select * from t_jsonb;
+  c   
+------
+ null
+(1 row)
+
+update /*+ ignore_error */ t_jsonb set c = '12a34';
+WARNING:  invalid input syntax for type json
+LINE 1: update /*+ ignore_error */ t_jsonb set c = '12a34';
+                                                   ^
+CONTEXT:  referenced column: c
+select * from t_jsonb;
+  c   
+------
+ null
+(1 row)
+
+-- type: bit
+create table t_bit(c bit);
+insert /*+ ignore_error */ into t_bit values('12a34');
+WARNING:  "2" is not a valid binary digit
+LINE 1: insert /*+ ignore_error */ into t_bit values('12a34');
+                                                     ^
+CONTEXT:  referenced column: c
+select * from t_bit;
+ c 
+---
+ 0
+(1 row)
+
+update /*+ ignore_error */ t_bit set c = '12a34';
+WARNING:  "2" is not a valid binary digit
+LINE 1: update /*+ ignore_error */ t_bit set c = '12a34';
+                                                 ^
+CONTEXT:  referenced column: c
+select * from t_bit;
+ c 
+---
+ 0
+(1 row)
+
+-- restore context
+reset timezone;
+show timezone;
+ TimeZone 
+----------
+ PST8PDT
+(1 row)
+
+\c postgres
+drop database if exists sql_ignore_invalid_input_test;

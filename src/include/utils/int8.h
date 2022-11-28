@@ -22,7 +22,7 @@
 
 #include "fmgr.h"
 
-extern bool scanint8(const char* str, bool errorOK, int64* result);
+extern bool scanint8(const char* str, bool errorOK, int64* result, bool can_ignore = false);
 
 extern Datum int8in(PG_FUNCTION_ARGS);
 extern Datum int8out(PG_FUNCTION_ARGS);

@@ -252,8 +252,13 @@ Datum timestamp_in(PG_FUNCTION_ARGS)
         dterr = ParseDateTime(str, workbuf, sizeof(workbuf), field, ftype, MAXDATEFIELDS, &nf);
         if (dterr == 0)
             dterr = DecodeDateTime(field, ftype, nf, &dtype, tm, &fsec, &tz);
-        if (dterr != 0)
-            DateTimeParseError(dterr, str, "timestamp");
+        if (dterr != 0) {
+            DateTimeParseError(dterr, str, "timestamp", fcinfo->can_ignore);
+            /*
+             * if error ignorable, function DateTimeParseError reports warning instead, then return current timestamp.
+             */
+            PG_RETURN_TIMESTAMP(GetCurrentTimestamp());
+        }
 
         switch (dtype) {
             case DTK_DATE:
@@ -456,8 +461,11 @@ Datum smalldatetime_in(PG_FUNCTION_ARGS)
             dterr = DecodeDateTime(field, ftype, nf, &dtype, tm, &fsec, &tz);
             fsec = 0;
         }
-        if (dterr != 0)
-            DateTimeParseError(dterr, str, "smalldatetime");
+        if (dterr != 0) {
+            DateTimeParseError(dterr, str, "smalldatetime", fcinfo->can_ignore);
+            /* if error ignorable, return epoch time as result */
+            GetEpochTime(tm);
+        }
         if (tm->tm_sec >= 30) {
             sign = 1;
         }
@@ -768,8 +776,13 @@ Datum timestamptz_in(PG_FUNCTION_ARGS)
     dterr = ParseDateTime(str, workbuf, sizeof(workbuf), field, ftype, MAXDATEFIELDS, &nf);
     if (dterr == 0)
         dterr = DecodeDateTime(field, ftype, nf, &dtype, tm, &fsec, &tz);
-    if (dterr != 0)
-        DateTimeParseError(dterr, str, "timestamp with time zone");
+    if (dterr != 0) {
+        DateTimeParseError(dterr, str, "timestamp with time zone", fcinfo->can_ignore);
+        /*
+         * if error ignorable, function DateTimeParseError reports warning instead, then return current timestamp.
+         */
+        PG_RETURN_TIMESTAMP(GetCurrentTimestamp());
+    }
 
     switch (dtype) {
         case DTK_DATE:
@@ -930,7 +943,7 @@ Datum interval_in(PG_FUNCTION_ARGS)
 #endif
     int32        typmod = PG_GETARG_INT32(2);
     Interval     *result = NULL;
-    result = char_to_interval(str, typmod);
+    result = char_to_interval(str, typmod, fcinfo->can_ignore);
 
     AdjustIntervalForTypmod(result, typmod);
 

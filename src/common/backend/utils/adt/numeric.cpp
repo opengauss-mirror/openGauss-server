@@ -272,16 +272,20 @@ Datum numeric_in(PG_FUNCTION_ARGS)
     /*
      * Check for NaN
      */
+    int level = fcinfo->can_ignore ? WARNING : ERROR;
     if (pg_strncasecmp(cp, "NaN", 3) == 0) {
         res = make_result(&const_nan);
 
         /* Should be nothing left but spaces */
         cp += 3;
         while (*cp) {
-            if (!isspace((unsigned char)*cp))
-                ereport(ERROR,
+            if (!isspace((unsigned char)*cp)) {
+                ereport(level,
                     (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
                         errmsg("invalid input syntax for type numeric: \"%s\"", str)));
+                /* for this invalid input, if fcinfo->can_ignore == true, directly return 0 */
+                PG_RETURN_NUMERIC(0);
+            }
             cp++;
         }
     } else {
@@ -301,10 +305,15 @@ Datum numeric_in(PG_FUNCTION_ARGS)
          * together because we mustn't apply apply_typmod to a NaN.
          */
         while (*cp) {
-            if (!isspace((unsigned char)*cp))
-                ereport(ERROR,
+            if (!isspace((unsigned char)*cp)) {
+                ereport(level,
                     (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
                         errmsg("invalid input syntax for type numeric: \"%s\"", str)));
+                /* for this invalid input, if fcinfo->can_ignore == true, handle value only and
+                 * discard rest of invalid characters
+                 */
+                break;
+            }
             cp++;
         }
 
@@ -3165,7 +3174,7 @@ Datum numeric_float8(PG_FUNCTION_ARGS)
 
     tmp = DatumGetCString(DirectFunctionCall1(numeric_out_with_zero, NumericGetDatum(num)));
 
-    result = DirectFunctionCall1(float8in, CStringGetDatum(tmp));
+    result = DirectFunctionCall1Coll(float8in, InvalidOid, CStringGetDatum(tmp), fcinfo->can_ignore);
 
     pfree_ext(tmp);
 

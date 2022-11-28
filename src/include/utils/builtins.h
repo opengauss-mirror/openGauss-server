@@ -482,9 +482,9 @@ extern Datum pseudo_current_user(PG_FUNCTION_ARGS);
 extern uint64 pg_strtouint64(const char* str, char** endptr, int base);
 
 /* numutils.c */
-extern int32 pg_atoi(char* s, int size, int c);
-extern int16 pg_strtoint16(const char* s);
-extern int32 pg_strtoint32(const char* s);
+extern int32 pg_atoi(char* s, int size, int c, bool can_ignore);
+extern int16 pg_strtoint16(const char* s, bool can_ignore = false);
+extern int32 pg_strtoint32(const char* s, bool can_ignore);
 extern void pg_itoa(int16 i, char* a);
 extern void pg_ltoa(int32 l, char* a);
 extern void pg_ctoa(uint8 i, char* a);

@@ -48,8 +48,11 @@ typedef struct {
  *
  * If errorOK is false, ereport a useful error message if the string is bad.
  * If errorOK is true, just return "false" for bad input.
+ *
+ * Param can_ignore is true when using ignore hint, which will ignore errors of
+ * overflowing or invalid input.
  */
-bool scanint8(const char* str, bool errorOK, int64* result)
+bool scanint8(const char* str, bool errorOK, int64* result, bool can_ignore)
 {
     const char* ptr = str;
     int64 tmp = 0;
@@ -95,6 +98,13 @@ bool scanint8(const char* str, bool errorOK, int64* result)
         int8 digit = (*ptr++ - '0');
 
         if (unlikely(pg_mul_s64_overflow(tmp, 10, &tmp)) || unlikely(pg_sub_s64_overflow(tmp, digit, &tmp))) {
+            if (can_ignore) {
+                ereport(WARNING,
+                        (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                         errmsg("value \"%s\" is out of range for type %s. truncated automatically", str, "bigint")));
+                *result = neg ? PG_INT64_MIN : PG_INT64_MAX;
+                return true;
+            }
             if (errorOK)
                 return false;
             else
@@ -110,14 +120,15 @@ bool scanint8(const char* str, bool errorOK, int64* result)
     }
 
     if (unlikely(*ptr != '\0')) {
-        if (errorOK)
-            return false;
-        else
-            /* Empty string will be treated as NULL if sql_compatibility == A_FORMAT,
-                Other wise whitespace will be convert to 0 */
-            ereport(ERROR,
-                (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
-                    errmsg("invalid input syntax for type %s: \"%s\"", "bigint", str)));
+        if (!can_ignore) {
+            if (errorOK)
+                return false;
+            else
+                /* Empty string will be treated as NULL if sql_compatibility == A_FORMAT,
+                    Other wise whitespace will be convert to 0 */
+                ereport(ERROR, (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+                                errmsg("invalid input syntax for type %s: \"%s\"", "bigint", str)));
+        }
     }
 
     if (!neg) {
@@ -144,7 +155,7 @@ Datum int8in(PG_FUNCTION_ARGS)
     char* str = PG_GETARG_CSTRING(0);
     int64 result;
 
-    (void)scanint8(str, false, &result);
+    (void)scanint8(str, false, &result, fcinfo->can_ignore);
     PG_RETURN_INT64(result);
 }
 

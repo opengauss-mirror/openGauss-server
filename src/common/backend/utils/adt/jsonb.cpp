@@ -18,6 +18,7 @@
 #include "utils/json.h"
 #include "utils/jsonapi.h"
 #include "utils/jsonb.h"
+#include "knl/knl_thread.h"
 
 typedef struct JsonbInState {
     JsonbParseState *parseState;
@@ -43,7 +44,24 @@ Datum jsonb_in(PG_FUNCTION_ARGS)
     char *json = PG_GETARG_CSTRING(0);
     json = json == NULL ? pstrdup("") : json;
 
-    return jsonb_from_cstring(json, strlen(json));
+    Datum result;
+    PG_TRY();
+    {
+        result = jsonb_from_cstring(json, strlen(json));
+    }
+    PG_CATCH();
+    {
+        if (fcinfo->can_ignore) {
+            ereport(WARNING,
+                    (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+                     errmsg("invalid input syntax for type json")));
+            PG_RETURN_DATUM((Datum)DirectFunctionCall1(jsonb_in, CStringGetDatum("null")));
+        } else {
+            PG_RE_THROW();
+        }
+    }
+    PG_END_TRY();
+    return result;
 }
 
 /*

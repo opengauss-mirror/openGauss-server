@@ -178,9 +178,12 @@ Datum bit_in(PG_FUNCTION_ARGS)
         for (; *sp; sp++) {
             if (*sp == '1')
                 *r |= x;
-            else if (*sp != '0')
-                ereport(ERROR,
+            else if (*sp != '0') {
+                ereport(fcinfo->can_ignore ? WARNING : ERROR,
                     (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION), errmsg("\"%c\" is not a valid binary digit", *sp)));
+                /* if invalid input erro is ignorable, report warning and return a empty varbit */
+                PG_RETURN_DATUM((Datum)DirectFunctionCall3(bit_in, CStringGetDatum(""), ObjectIdGetDatum(0), Int32GetDatum(-1)));
+            }
 
             x >>= 1;
             if (x == 0) {
@@ -197,10 +200,13 @@ Datum bit_in(PG_FUNCTION_ARGS)
                 x = (bits8)(*sp - 'A') + 10;
             else if (*sp >= 'a' && *sp <= 'f')
                 x = (bits8)(*sp - 'a') + 10;
-            else
-                ereport(ERROR,
+            else {
+                ereport(fcinfo->can_ignore ? WARNING :ERROR,
                     (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
                         errmsg("\"%c\" is not a valid hexadecimal digit", *sp)));
+                /* if invalid input erro is ignorable, report warning and return a empty varbit */
+                PG_RETURN_DATUM((Datum)DirectFunctionCall3(bit_in, CStringGetDatum(""), ObjectIdGetDatum(0), Int32GetDatum(-1)));
+            }
 
             if (bc) {
                 *r++ |= x;
@@ -334,7 +340,7 @@ Datum bit(PG_FUNCTION_ARGS)
     if (len <= 0 || len > VARBITMAXLEN || len == VARBITLEN(arg))
         PG_RETURN_VARBIT_P(arg);
 
-    if (!isExplicit)
+    if (!isExplicit && !fcinfo->can_ignore)
         ereport(ERROR,
             (errcode(ERRCODE_STRING_DATA_LENGTH_MISMATCH),
                 errmsg("bit string length %d does not match type bit(%d)", VARBITLEN(arg), len)));
