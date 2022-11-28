@@ -59,7 +59,7 @@ bool open_join_children = true;
 bool will_shutdown = false;
 
 /* hard-wired binary version number */
-const uint32 GRAND_VERSION_NUM = 92831;
+const uint32 GRAND_VERSION_NUM = 92832;
 
 const uint32 DOLPHIN_ENABLE_DROP_NUM = 92830;
 const uint32 SQL_PATCH_VERSION_NUM = 92675;

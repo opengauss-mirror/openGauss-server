@@ -1015,3 +1015,6 @@ test: test_debug5
 
 # dolphin_guc_config
 test: dolphin_guc_config
+
+# row_count()
+test: row_count_function

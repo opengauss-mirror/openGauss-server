@@ -525,6 +525,31 @@ void ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count)
         }
     }
 
+    /* 
+     * Record the number of rows affected into the session, but only support 
+     * DML statement now
+     */
+    if(queryDesc!=NULL && queryDesc->estate!=NULL){
+        switch (queryDesc->operation) {
+            case CMD_INSERT:
+            case CMD_UPDATE:
+            case CMD_DELETE:
+            case CMD_MERGE:
+                u_sess->statement_cxt.current_row_count = queryDesc->estate->es_processed;
+                u_sess->statement_cxt.last_row_count = u_sess->statement_cxt.current_row_count;
+                break;
+            case CMD_SELECT:
+                u_sess->statement_cxt.current_row_count = -1;
+                u_sess->statement_cxt.last_row_count = u_sess->statement_cxt.current_row_count;
+                break;
+            default:
+                /* default set queryDesc->estate->es_processed */
+                u_sess->statement_cxt.current_row_count = queryDesc->estate->es_processed;
+                u_sess->statement_cxt.last_row_count = u_sess->statement_cxt.current_row_count;
+                break;
+        }
+    }
+
     u_sess->pcache_cxt.cur_stmt_name = old_stmt_name;
     u_sess->statement_cxt.executer_run_level--;
 }

@@ -1488,6 +1488,19 @@ void ProcessUtility(Node* parse_tree, const char* query_string, ParamListInfo pa
 #endif /* PGXC */
             completion_tag,
             isCTAS);
+    
+    /* 
+     * Record the number of rows affected into the session, but only support 
+     * DML statement now, for DDL statement, always set to 0
+     */
+    if(nodeTag(parse_tree) != T_ExecuteStmt) {
+        u_sess->statement_cxt.current_row_count = 0;
+        u_sess->statement_cxt.last_row_count = u_sess->statement_cxt.current_row_count;
+        /* If it is an EXECUTE statement here, the PortalRun function will be
+           called twice nested, and the right data will be modified when it is 
+           first executed (Generally in function ExecutorRun), so there do 
+           nothing when it is called again to avoid overwriting */
+    }
 }
 
 // @Temp Table.

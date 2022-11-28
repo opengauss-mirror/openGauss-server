@@ -295,6 +295,7 @@ bool DeleteFusion::execute(long max_rows, char *completionTag)
             snprintf_s(completionTag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1, "DELETE %ld", nprocessed);
     }
     securec_check_ss(errorno, "\0", "\0");
-
+    u_sess->statement_cxt.current_row_count = nprocessed;
+    u_sess->statement_cxt.last_row_count = u_sess->statement_cxt.current_row_count;
     return success;
 }

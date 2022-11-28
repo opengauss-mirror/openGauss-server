@@ -2260,7 +2260,8 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
      */
     char* sql_query_string = NULL;
     char* info_query_string = NULL;
-
+    u_sess->statement_cxt.last_row_count = u_sess->statement_cxt.current_row_count;
+    u_sess->statement_cxt.current_row_count = -1;
 #ifdef ENABLE_DISTRIBUTE_TEST
     if (IS_PGXC_COORDINATOR && IsConnFromCoord()) {
         if (TEST_STUB(NON_EXEC_CN_IS_DOWN, twophase_default_error_emit)) {
