@@ -227,40 +227,81 @@ bool is_err(char *err)
     return false;
 }
 
-static void setRdmaWorkConfig(dms_profile_t *profile)
-{
-    knl_instance_attr_dms *dms_attr = &g_instance.attr.attr_storage.dms_attr;
+static bool setBindCoreConfig(char *config, unsigned char *startCore, unsigned char *endCore) {
     char lowStr[MAX_CPU_STR_LEN] = {0};
     char highStr[MAX_CPU_STR_LEN] = {0};
     uint32_t offset = 0;
-    profile->rdma_rpc_use_busypoll = false;
-    profile->rdma_rpc_is_bind_core = false;
-    if (dms_attr->rdma_work_config == NULL || dms_attr->rdma_work_config[0] == '\0') {
-        return;
+
+    if (config == NULL || config[0] == '\0') {
+        return false;
     }
 
     // if number >= MAX_CPU_STR_LEN, it exceeded the number of CPUs.
-    splitDigitNumber(dms_attr->rdma_work_config, lowStr, MAX_CPU_STR_LEN, &offset);
-    splitDigitNumber(dms_attr->rdma_work_config + offset, highStr, MAX_CPU_STR_LEN, &offset);
+    splitDigitNumber(config, lowStr, MAX_CPU_STR_LEN, &offset);
+    splitDigitNumber(config + offset, highStr, MAX_CPU_STR_LEN, &offset);
     if (lowStr[0] != '\0' && highStr[0] != '\0') {
         // if number of decimal digits is less than DEFAULT_DIGIT_RADIX(5), The number range must be within Int64.
         char *err = NULL;
         int64 lowCpu = strtoll(lowStr, &err, DEFAULT_DIGIT_RADIX);
         int64 highCpu = strtoll(highStr, &err, DEFAULT_DIGIT_RADIX);
         if (lowCpu > highCpu) {
-            return;
+            return false;
         }
 
         // get cpu count
         int64 cpuCount = get_nprocs_conf();
         if (lowCpu >= cpuCount || highCpu >= cpuCount) {
-            return;
+            return false;
         }
 
+        *startCore = (uint8)lowCpu;
+        *endCore = (uint8)highCpu;
+        return true;
+    }
+
+    return false;
+}
+
+static void setRdmaWorkConfig(dms_profile_t *profile)
+{
+    knl_instance_attr_dms *dms_attr = &g_instance.attr.attr_storage.dms_attr;
+    profile->rdma_rpc_use_busypoll = false;
+    profile->rdma_rpc_is_bind_core = false;
+    if (dms_attr->rdma_work_config == NULL || dms_attr->rdma_work_config[0] == '\0') {
+        return;
+    }
+
+    if (setBindCoreConfig(dms_attr->rdma_work_config, &profile->rdma_rpc_bind_core_start,
+        &profile->rdma_rpc_bind_core_end)) {
         profile->rdma_rpc_use_busypoll = true;
         profile->rdma_rpc_is_bind_core = true;
-        profile->rdma_rpc_bind_core_start = (uint8)lowCpu;
-        profile->rdma_rpc_bind_core_end = (uint8)highCpu;
+    }
+}
+
+static void setScrlConfig(dms_profile_t *profile)
+{
+    knl_instance_attr_dms *dms_attr = &g_instance.attr.attr_storage.dms_attr;
+
+    profile->enable_scrlock = dms_attr->enable_scrlock;
+    if (profile->enable_scrlock == false) {
+        return;
+    }
+
+    profile->primary_inst_id = g_instance.dms_cxt.SSReformerControl.primaryInstId;
+    profile->enable_scrlock_secure_mode = dms_attr->enable_ssl;
+    profile->enable_scrlock_server_sleep_mode = dms_attr->enable_scrlock_sleep_mode;
+    profile->scrlock_worker_cnt = dms_attr->scrlock_worker_count;
+    profile->scrlock_server_port = dms_attr->scrlock_server_port;
+    profile->scrlock_log_level = u_sess->attr.attr_common.log_min_messages;
+
+    // server bind
+    (void)setBindCoreConfig(dms_attr->scrlock_server_bind_core_config, &profile->scrlock_server_bind_core_start,
+        &profile->scrlock_server_bind_core_end);
+    
+    // worker bind
+    if (setBindCoreConfig(dms_attr->scrlock_worker_bind_core_config, &profile->scrlock_worker_bind_core_start,
+        &profile->scrlock_worker_bind_core_end)) {
+        profile->enable_scrlock_worker_bind_core = true;
     }
 }
 
@@ -325,6 +366,7 @@ static void setDMSProfile(dms_profile_t* profile)
     profile->pipe_type = convertInterconnectType();
     profile->conn_created_during_init = TRUE;
     setRdmaWorkConfig(profile);
+    setScrlConfig(profile);
     SetOckLogPath(dms_attr, profile->ock_log_path);
     profile->inst_map = 0;
     profile->enable_reform = (unsigned char)dms_attr->enable_reform;

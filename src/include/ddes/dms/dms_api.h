@@ -716,6 +716,19 @@ typedef struct st_dms_profile {
     unsigned char rdma_rpc_bind_core_end;
     char ock_log_path[DMS_OCK_LOG_PATH_LEN];
     unsigned char enable_reform;
+    // scrlock
+    unsigned char enable_scrlock;
+    unsigned int primary_inst_id;
+    unsigned char enable_scrlock_secure_mode;   // enable ssl
+    unsigned int scrlock_log_level;
+    unsigned char enable_scrlock_worker_bind_core;
+    unsigned int scrlock_worker_cnt;
+    unsigned char scrlock_worker_bind_core_start;
+    unsigned char scrlock_worker_bind_core_end;
+    unsigned int scrlock_server_port;
+    unsigned char enable_scrlock_server_sleep_mode;
+    unsigned char scrlock_server_bind_core_start;
+    unsigned char scrlock_server_bind_core_end;
 } dms_profile_t;
 
 #define DMS_BUF_CTRL_IS_OWNER(ctrl) ((ctrl)->lock_mode == DMS_LOCK_EXCLUSIVE || \
