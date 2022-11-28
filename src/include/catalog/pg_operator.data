@@ -1909,6 +1909,8 @@ DATA(insert OID = 6563 ("<="      PGNSP PGUID b f f 25 3272 16 6558 6562 textset
 DESCR("less than or equal");
 DATA(insert OID = 6564 (">="      PGNSP PGUID b f f 25 3272 16 6557 6561 textsetge scalargtsel scalargtjoinsel));
 DESCR("greater than or equal");
+DATA(insert OID = 6565 ("-"       PGNSP PGUID l f f     0    16    16     0     0 boolum - -));
+DESCR("negate");
 
 /*
  * function prototypes

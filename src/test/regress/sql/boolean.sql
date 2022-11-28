@@ -202,6 +202,10 @@ SELECT '' AS "Not True", f1
    FROM BOOLTBL2
    WHERE f1 IS NOT TRUE;
 
+SELECT -2::bool;
+
+SELECT 1-2::bool;
+
 --
 -- Clean up
 -- Many tables are retained by the regression test, but these do not seem
