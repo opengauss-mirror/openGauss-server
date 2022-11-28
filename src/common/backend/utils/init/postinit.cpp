@@ -518,11 +518,14 @@ static void CheckConnAuthority(const char* name, bool am_superuser)
     if (IsUnderPostmaster && !IsAutoVacuumWorkerProcess() && !IsJobSchedulerProcess() && !IsJobWorkerProcess() &&
         !IsBgWorkerProcess() && !IsTxnSnapCapturerProcess() && !IsTxnSnapWorkerProcess() && !IsRbCleanerProcess() && !IsRbWorkerProcess() &&
          !IsCfsShrinkerProcess()) {
+        bool isLocalAddr = false;
+        if (u_sess->proc_cxt.MyProcPort != NULL) {
+            isLocalAddr = IsLocalAddr(u_sess->proc_cxt.MyProcPort);
+        }
+
         /* Database Security: Check privilege to connect to the database.
          * Only superuser on the local machine can connect to "template1".*/
-        if (IS_PGXC_COORDINATOR && IsConnFromApp() &&
-            (!am_superuser || !IsLocalAddr(u_sess->proc_cxt.MyProcPort)) &&
-            strcmp(name, "template1") == 0) {
+        if (strcmp(name, "template1") == 0 && IsConnFromApp() && !(am_superuser && isLocalAddr)) {
             ereport(FATAL,
                 (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                     errmsg("permission denied for database \"%s\"", name),
