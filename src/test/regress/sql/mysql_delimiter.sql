@@ -47,5 +47,11 @@ delimiter aa
 select 1aa
 delimiter ;
 
+delimiter de
+delimiter abcde
+select 1abc
+delimiter
+delimiter ;
+
 \c regression
 drop database my_test;

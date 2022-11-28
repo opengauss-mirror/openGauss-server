@@ -174,6 +174,8 @@ static char* get_correct_str(char*str, const char *delimiter_name, bool is_new_l
     bool is_delimiter = false;
     char *token = strstr(str_temp, "delimiter");
     errno_t rc = 0;
+    char* end_str = NULL;
+
     if(token != NULL) {
         is_delimiter = true;
         char* pos = str_temp;
@@ -187,12 +189,13 @@ static char* get_correct_str(char*str, const char *delimiter_name, bool is_new_l
         }
         if(is_delimiter) {
             char* end = pos + strlen("delimiter");
+            end_str = str + (end - str_temp);
             if(*end != ' ' && *end != '\0') {
                 is_delimiter = false;
             }
         }
     }
-    if (is_new_lines && is_delimiter && strstr(str, delimiter_name) == NULL) {
+    if (is_new_lines && is_delimiter && strstr(end_str, delimiter_name) == NULL) {
         Size slen1 = strlen(str) + strlen(delimiter_name) + DELIMITER_LENGTH;
         char* result1 = (char *) pg_malloc(slen1);
         rc = sprintf_s(result1, slen1, "%s %s", str, delimiter_name);
@@ -215,6 +218,14 @@ static char* get_correct_str(char*str, const char *delimiter_name, bool is_new_l
     char special_str = 0;
     char in;
     for (pos = str; pos < end_of_str; pos++) {
+        if (is_delimiter) {
+            int delimiter_length = strlen("delimiter");
+            while (delimiter_length > 0 && *pos != '\0') {
+                *temp++ = *pos++;
+                delimiter_length--;
+            }
+            is_delimiter = false;
+        }
         in = *pos;
         if (!special_str && is_match_delimiter_name(pos , delimiter_name)) {
             *temp++ =' ';

@@ -1138,6 +1138,7 @@ other			.
 							yyextra->is_hint_str = true;
 						}
 
+                        set_is_delimiter_name(yytext,yyscanner);
 						return keyword->value;
 					}
 
