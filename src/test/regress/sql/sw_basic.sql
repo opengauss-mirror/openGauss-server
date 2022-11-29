@@ -180,3 +180,16 @@ order siblings by id;
 
 reset enable_startwith_debug;
 reset client_min_messages;
+
+-- bugfixed I61AIW: cte+connect by error, cannot find relation
+create table temptest (col numeric(3));
+insert into temptest values ('1'),('2'),('3'),('4'),('');
+
+WITH alias5 AS ( SELECT alias1.col AS alias2 FROM temptest AS alias1 CONNECT BY nocycle alias1.col >= alias1.col ),
+    alias8 AS ( SELECT * FROM alias5 CONNECT BY nocycle PRIOR alias5.alias2 != alias5.alias2)
+    SELECT * FROM alias8, temptest CONNECT BY nocycle PRIOR temptest.col < temptest.col;
+
+WITH alias5 AS ( SELECT alias1.col AS alias2 FROM temptest AS alias1 CONNECT BY nocycle alias1.col >= alias1.col )
+SELECT * FROM alias5, temptest CONNECT BY nocycle PRIOR temptest.col < temptest.col;
+
+drop table temptest;
