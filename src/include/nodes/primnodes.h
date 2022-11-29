@@ -116,7 +116,8 @@ typedef struct IntoClause {
     char* tableSpaceName;    /* table space to use, or NULL */
     bool skipData;           /* true for WITH NO DATA */
     bool ivm;                /* true for WITH IVM */
-    char relkind;     /* RELKIND_RELATION or RELKIND_MATVIEW */
+    char relkind;            /* RELKIND_RELATION or RELKIND_MATVIEW */
+    List* userVarList;       /* user define variables list */
 #ifdef PGXC
     struct DistributeBy* distributeby; /* distribution to use, or NULL */
     struct PGXCSubCluster* subcluster; /* subcluster node members */

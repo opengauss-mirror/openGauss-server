@@ -33,6 +33,7 @@ test: pg_proc_test
 
 #test user_defined_variable
 test: set_user_defined_variables_test
+test: select_into_user_defined_variables
 
 test: set_system_variables_test
 

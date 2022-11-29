@@ -688,6 +688,12 @@ typedef struct SelectStmt {
     /* Eventually add fields for CORRESPONDING spec here */
 } SelectStmt;
 
+typedef struct SelectIntoVarList {
+    NodeTag type;
+    SubLink *sublink;
+    List *userVarList;
+} SelectIntoVarList;
+
 /* ----------------------
  *		CREATE TABLE AS Statement (a/k/a SELECT INTO)
  *

@@ -2305,6 +2305,7 @@ static IntoClause* _copyIntoClause(const IntoClause* from)
     COPY_SCALAR_FIELD(skipData);
     COPY_SCALAR_FIELD(ivm);
     COPY_SCALAR_FIELD(relkind);
+    COPY_NODE_FIELD(userVarList);
 #ifdef PGXC
     COPY_NODE_FIELD(distributeby);
     COPY_NODE_FIELD(subcluster);
@@ -4721,6 +4722,16 @@ static SelectStmt* _copySelectStmt(const SelectStmt* from)
     COPY_NODE_FIELD(larg);
     COPY_NODE_FIELD(rarg);
     COPY_SCALAR_FIELD(hasPlus);
+
+    return newnode;
+}
+
+static SelectIntoVarList* _copySelectIntoVarList(const SelectIntoVarList* from)
+{
+    SelectIntoVarList* newnode = makeNode(SelectIntoVarList);
+
+    COPY_NODE_FIELD(sublink);
+    COPY_NODE_FIELD(userVarList);
 
     return newnode;
 }
@@ -7577,6 +7588,9 @@ void* copyObject(const void* from)
             break;
         case T_SelectStmt:
             retval = _copySelectStmt((SelectStmt*)from);
+            break;
+        case T_SelectIntoVarList:
+            retval = _copySelectIntoVarList((SelectIntoVarList*)from);
             break;
         case T_SetOperationStmt:
             retval = _copySetOperationStmt((SetOperationStmt*)from);

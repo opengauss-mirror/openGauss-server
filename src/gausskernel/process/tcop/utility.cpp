@@ -8043,7 +8043,12 @@ const char* CreateCommandTag(Node* parse_tree)
             break;
 
         case T_SelectStmt:
-            tag = "SELECT";
+            if (((SelectStmt *)parse_tree)->intoClause != NULL &&
+                ((SelectStmt *)parse_tree)->intoClause->userVarList != NIL) {
+                tag = "SELECT INTO";
+            } else {
+                tag = "SELECT";
+            }
             break;
 
             /* utility statements --- same whether raw or cooked */

@@ -1845,7 +1845,9 @@ static IntoClause* _readIntoClause(void)
     READ_STRING_FIELD(tableSpaceName);
     READ_BOOL_FIELD(skipData);
     READ_CHAR_FIELD(relkind);
-
+    IF_EXIST(userVarList) {
+        READ_NODE_FIELD(userVarList);
+    }
     READ_DONE();
 }
 

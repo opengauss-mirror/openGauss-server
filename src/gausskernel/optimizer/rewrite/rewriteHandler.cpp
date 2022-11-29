@@ -3102,6 +3102,29 @@ List* QueryRewrite(Query* parsetree)
     return results;
 }
 
+Const* processResToConst(char* value, Oid atttypid)
+{
+    Const *con = NULL;
+    uint len = strlen(value);
+    char *str_value = (char *)palloc(len + 1);
+    errno_t rc = strncpy_s(str_value, len + 1, value, len + 1);
+    securec_check(rc, "\0", "\0");
+    str_value[len] = '\0';
+    Datum str_datum = CStringGetDatum(str_value);
+
+    /* convert value to const expression. */
+    if (atttypid == BOOLOID) {
+        if (strcmp(str_value, "t") == 0) {
+            con = makeConst(BOOLOID, -1, InvalidOid, sizeof(bool), BoolGetDatum(true), false, true);
+        } else {
+            con = makeConst(BOOLOID, -1, InvalidOid, sizeof(bool), BoolGetDatum(false), false, true);
+        }
+    } else {
+        con = makeConst(UNKNOWNOID, -1, InvalidOid, -2, str_datum, false, false);
+    }
+    return con;
+}
+
 #ifdef PGXC
 
 char* GetCreateViewStmt(Query* parsetree, CreateTableAsStmt* stmt)
@@ -3753,30 +3776,63 @@ Node* QueryRewriteNonConstant(Node *node)
     }
 
     char* value = (char *)linitial((List *)linitial(result->tuples));
-    uint len = strlen(value);
-    char* str_value = (char *)palloc(len + 1);
-    errno_t rc = strncpy_s(str_value, len + 1, value, len + 1);
-    securec_check(rc, "\0", "\0");
-    str_value[len] = '\0';
-    Datum str_datum = CStringGetDatum(str_value);
     Oid atttypid = result->atttypids[0];
-    
     /* convert value to const expression. */
-    if (atttypid == BOOLOID) {
-        if (strcmp(str_value, "t") == 0) {
-            con = makeConst(BOOLOID, -1, InvalidOid, sizeof(bool), BoolGetDatum(true), false, true);
-        } else {
-            con = makeConst(BOOLOID, -1, InvalidOid, sizeof(bool), BoolGetDatum(false), false, true);
-        }
-        res = (Node *)con;
-    } else {
-        con = makeConst(UNKNOWNOID, -1, InvalidOid, -2, str_datum, false, false);
-        res = type_transfer((Node *)con, atttypid, true);
-    }
+    con = processResToConst(value, atttypid);
+    res = atttypid == BOOLOID ? (Node *)con : type_transfer((Node *)con, atttypid, true);
 
     (*result->pub.rDestroy)((DestReceiver *)result);
 
     return res;
+}
+
+List* QueryRewriteSelectIntoVarList(Node *node)
+{
+    Query *parsetree = (Query *)((SubLink *)node)->subselect;
+    List *resList = NIL;
+    int res_len = parsetree->targetList->length;
+
+    StringInfo select_sql = makeStringInfo();
+    deparse_query(parsetree, select_sql, NIL, false, false);
+
+    StmtResult *result = execute_stmt(select_sql->data, true);
+    DestroyStringInfo(select_sql);
+
+    if (result->tuples == NULL) {
+        for (int i = 0; i < res_len; i++) {
+            Const *con = makeConst(UNKNOWNOID, -1, InvalidOid, -2, (Datum)0, true, false);
+            resList = lappend(resList, con);
+        }
+
+        (*result->pub.rDestroy)((DestReceiver *)result);
+        return resList;
+    }
+
+    if(result->tuples->length > 1) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_OPERATION),
+                errmsg("select result consisted of more than one row")));
+    }
+
+    ListCell *stmt_res_cur = list_head((List *)linitial(result->tuples));
+
+    for (int idx = 0; idx < res_len; idx++) {
+        if (result->isnulls[idx]) {
+            Const *con = makeConst(UNKNOWNOID, -1, InvalidOid, -2, (Datum)0, true, false);
+            resList = lappend(resList, con);
+        } else {
+            char *value = (char *)lfirst(stmt_res_cur);
+            Oid atttypid = result->atttypids[idx];
+            /* convert value to const expression. */
+            Const *con = processResToConst(value, atttypid);
+            Node* rnode  = atttypid == BOOLOID ? (Node*)con : type_transfer((Node *)con, atttypid, true);
+            resList = lappend(resList, rnode);
+            stmt_res_cur = lnext(stmt_res_cur);
+        }
+    }
+
+    (*result->pub.rDestroy)((DestReceiver *)result);
+    return resList;
 }
 
 #endif
