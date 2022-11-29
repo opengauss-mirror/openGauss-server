@@ -1093,25 +1093,28 @@ void CreateFunction(CreateFunctionStmt* stmt, const char* queryString, Oid pkg_o
         u_sess->plsql_cxt.isCreateFunction = false;
     }
 
-#ifdef ENABLE_MULTIPLE_NODES
     if (languageOid == JavalanguageId) {
+#ifdef ENABLE_MULTIPLE_NODES
         /*
          * single node dose not support Java UDF or other fenced functions.
          * check it here because users may not know the Java UDF is fenced by default,
          * so it's better to report detailed error messages for different senarios.
          */
         if (IS_SINGLE_NODE) {
-            ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("JAVA UDF is not yet supported in current version.")));
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("JAVA UDF is not yet supported in current version.")));
         }
 
         /* only support fenced mode Java UDF */
         if (!fenced) {
-            ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("Java UDF dose not support NOT FENCED functions.")));
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("Java UDF dose not support NOT FENCED functions.")));
         }
-    }
+#else
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("JAVA UDF is not yet supported in current version.")));
 #endif
+    }
 
     languageStruct = (Form_pg_language)GETSTRUCT(languageTuple);
 
