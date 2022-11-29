@@ -137,7 +137,7 @@ public:
     void outputStat(FILE* fp) override;
     void putIfUnexisted(pid_t pid, pid_t tid);
     void putFuncStatIfUnexisted(uint32_t func_id, func_stat* func_stat_map);
-    void mergeFiles(const char* outPath, size_t len);
+    trace_msg_code mergeFiles(const char* outPath, size_t len);
     void flushThreadFlows();
 
 private:
