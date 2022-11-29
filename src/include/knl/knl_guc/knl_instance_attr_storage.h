@@ -110,6 +110,12 @@ typedef struct knl_instance_attr_dms {
     bool enable_ssl;
     int inst_count;
     bool enable_log_level;
+    bool enable_scrlock;
+    bool enable_scrlock_sleep_mode;
+    char* scrlock_server_bind_core_config;
+    char* scrlock_worker_bind_core_config;
+    int scrlock_server_port;
+    int scrlock_worker_count;
 } knl_instance_attr_dms;
 
 typedef struct knl_instance_attr_storage {

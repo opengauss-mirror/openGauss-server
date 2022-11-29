@@ -596,6 +596,8 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  ss_enable_dss                                    | bool    |      |           | 
  ss_enable_log_level                              | bool    |      |           | 
  ss_enable_reform                                 | bool    |      |           | 
+ ss_enable_scrlock                                | bool    |      |           | 
+ ss_enable_srclock_sleep_mode                     | bool    |      |           | 
  ss_enable_ssl                                    | bool    |      |           | 
  ss_instance_id                                   | integer |      | 0         | 63
  ss_interconnect_channel_count                    | integer |      | 1         | 32
@@ -612,6 +614,10 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  ss_ock_log_path                                  | string  |      |           | 
  ss_rdma_work_config                              | string  |      |           | 
  ss_recv_msg_pool_size                            | integer | kB   | 1024      | 1048576
+ ss_scrlock_server_bind_core                      | string  |      |           | 
+ ss_scrlock_server_port                           | integer |      | 0         | 65535
+ ss_scrlock_worker_bind_core                      | string  |      |           | 
+ ss_scrlock_worker_count                          | integer |      | 2         | 16
  ss_work_thread_count                             | integer |      | 16        | 128
  standard_conforming_strings                      | bool    |      |           | 
  standby_shared_buffers_fraction                  | real    |      | 0.1       | 1
