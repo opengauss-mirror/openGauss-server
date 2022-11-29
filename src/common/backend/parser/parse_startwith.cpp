@@ -1482,10 +1482,7 @@ static void AddWithClauseToBranch(ParseState *pstate, SelectStmt *stmt, List *re
 
         foreach(lc2, clause->ctes) {
             CommonTableExpr *cte = (CommonTableExpr *)lfirst(lc2);
-
-            if (pg_strcasecmp(cte->ctename, info->relname) == 0) {
-                ctes = lappend(ctes, cte);
-            }
+            ctes = lappend(ctes, cte);
         }
 
         foreach(lc2, pstate->p_ctenamespace) {
