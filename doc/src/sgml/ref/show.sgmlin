@@ -10,7 +10,7 @@
 </refnamediv>
 <refsynopsisdiv>
 <synopsis>
-SHOW { configuration_parameter | CURRENT_SCHEMA | TIME ZONE | TRANSACTION ISOLATION LEVEL | SESSION AUTHORIZATION | ALL };
+SHOW { configuration_parameter | CURRENT_SCHEMA | TIME ZONE | TRANSACTION ISOLATION LEVEL | SESSION AUTHORIZATION | WARNINGS [LIMIT [offset,] row_count] | ERRORS [LIMIT [offset,] row_count] | ALL };
 </synopsis>
 </refsynopsisdiv>
 </refentry>
