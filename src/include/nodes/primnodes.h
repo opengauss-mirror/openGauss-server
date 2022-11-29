@@ -1254,6 +1254,7 @@ typedef struct TargetEntry {
                             * final target list */
     Index rtindex;         /* used when multiple modifying. It indicates the resultRelation 
                             * to which this TLE belongs. */
+    bool isStartWithPseudo; 
 } TargetEntry;
 
 /* mainly support Start with */

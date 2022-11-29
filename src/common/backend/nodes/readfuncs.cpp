@@ -2811,6 +2811,9 @@ static TargetEntry* _readTargetEntry(void)
     IF_EXIST(rtindex) {
         READ_UINT_FIELD(rtindex);
     }
+    IF_EXIST(isStartWithPseudo) {
+        READ_BOOL_FIELD(isStartWithPseudo);
+    }
 
     READ_DONE();
 }
