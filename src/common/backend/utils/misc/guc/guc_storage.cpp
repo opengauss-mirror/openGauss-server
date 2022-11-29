@@ -1071,7 +1071,7 @@ static void InitStorageConfigureNamesBool()
             NULL,
             NULL},
 
-        {{"ss_enable_srclock_sleep_mode",
+        {{"ss_enable_scrlock_sleep_mode",
             PGC_POSTMASTER,
             NODE_SINGLENODE,
             SHARED_STORAGE_OPTIONS,
