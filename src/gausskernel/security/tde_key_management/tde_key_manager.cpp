@@ -126,10 +126,15 @@ const TDEData* TDEKeyManager::get_dek(const char* cmk_id, const char* dek_cipher
 
 char* TDEKeyManager::get_cmk_id()
 {
-    if (u_sess->attr.attr_security.tde_cmk_id == NULL || strlen(u_sess->attr.attr_security.tde_cmk_id) == 0) {
+    if (!g_instance.attr.attr_security.enable_tde) {
+        ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+            errmsg("get cmk id failed for Transparent Data Encryption"),
+            errdetail("guc parameter enable_tde must be set for using TDE feature")));
+    }
+    if (u_sess->attr.attr_security.tde_cmk_id == NULL || strlen(u_sess->attr.attr_security.tde_cmk_id) != 36) {
         ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), 
             errmsg("get cmk id failed for Transparent Data Encryption"),
-            errdetail("guc parameter tde_cmk_id must be set correctly to use TDE feature")));
+            errdetail("guc parameter tde_cmk_id must be set correctly by KMS to use TDE feature")));
     }
     return u_sess->attr.attr_security.tde_cmk_id;
 }
