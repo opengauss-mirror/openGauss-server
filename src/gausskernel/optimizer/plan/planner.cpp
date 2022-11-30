@@ -6195,7 +6195,6 @@ static void compute_sorted_path_cost(PlannerInfo* root, double limit_tuples, int
     bool needs_stream = false;
     bool need_sort_for_grouping = false;
     errno_t rc = EOK;
-    bool is_replicate = (!IS_STREAM_PLAN || cheapest_path->locator_type == LOCATOR_TYPE_REPLICATED);
 
     rc = memset_s(&stream_p, sizeof(stream_p), 0, sizeof(stream_p));
     securec_check(rc, "\0", "\0");
@@ -6207,18 +6206,26 @@ static void compute_sorted_path_cost(PlannerInfo* root, double limit_tuples, int
         current_pathkeys = sorted_path->pathkeys;
         Distribution* distribution = ng_get_dest_distribution(sorted_path);
         ng_copy_distribution(&sorted_p->distribution, distribution);
+        sorted_p->dop = sorted_path->dop;
+        sorted_p->locator_type = sorted_path->locator_type;
     } else {
         copy_path_costsize(sorted_p, cheapest_path);
         sorted_p->distribute_keys = cheapest_path->distribute_keys;
         current_pathkeys = cheapest_path->pathkeys;
         Distribution* distribution = ng_get_dest_distribution(cheapest_path);
         ng_copy_distribution(&sorted_p->distribution, distribution);
+        sorted_p->dop = cheapest_path->dop;
+        sorted_p->locator_type = cheapest_path->locator_type;
     }
 
     if (!pathkeys_contained_in(root->group_pathkeys, current_pathkeys)) {
         current_pathkeys = root->group_pathkeys;
         need_sort_for_grouping = true;
     }
+
+    bool is_replicate = (!IS_STREAM_PLAN ||
+                         sorted_p->dop <= 1 ||
+                         sorted_p->locator_type == LOCATOR_TYPE_REPLICATED);
 
     if (is_replicate || !parse->hasAggs) {
         if (need_sort_for_grouping) {
