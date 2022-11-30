@@ -719,7 +719,7 @@ test: plpgsql_cursor_rowtype
 test: plpgsql_assign_list
 test: plpgsql_package_type plpgsql_package_param
 test: plpgsql_record_attrname
-test: plpgsql_insert_record
+test: plpgsql_insert_record plpgsql_condition_name
 test: hw_package_variable package_typmod_test
 test: autonomous_cursor
 test: plpgsql_reset_session
@@ -731,7 +731,6 @@ test: equivalence_class
 test: tsdb_delta2_compress
 test: tsdb_xor_compress
 #test: tsdb_aggregate
-
 
 test: readline
 test: hw_to_timestamp hw_view_privilege

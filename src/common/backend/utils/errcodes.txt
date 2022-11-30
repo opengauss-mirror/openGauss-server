@@ -238,7 +238,7 @@ Section: Class 26 - Invalid SQL Statement Name
 
 # (we take this to mean prepared statements
 26000    E    ERRCODE_INVALID_SQL_STATEMENT_NAME                             invalid_sql_statement_name
-26001    E    ERRCODE_SLOW_QUERY                                             SLOW_QUERY_statement_name
+26001    E    ERRCODE_SLOW_QUERY                                             slow_query_statement_name
 26002    E    ERRCODE_ACTIVE_SESSION_PROFILE                                 active_session_profile
 
 Section: Class 27 - Triggered Data Change Violation
@@ -392,7 +392,7 @@ Section: Class 42 - Syntax Error or Access Rule Violation
 42P15    E    ERRCODE_INVALID_SCHEMA_DEFINITION                              invalid_schema_definition
 42P16    E    ERRCODE_INVALID_TABLE_DEFINITION                               invalid_table_definition
 42P17    E    ERRCODE_INVALID_OBJECT_DEFINITION                              invalid_object_definition
-42P18    E    ERRCODE_INVALID_TEMP_OBJECTS                                   invalid temp objects(table, namespace)
+42P18    E    ERRCODE_INVALID_TEMP_OBJECTS                                   invalid_temp_objects (table, namespace)
 42P65    E    ERRCODE_INVALID_PACKAGE_DEFINITION                             invalid_package_definition
 42705    E    ERRCODE_UNDEFINED_KEY                                          undefined_key
 42711    E    ERRCODE_DUPLICATE_KEY                                          duplicate_key
@@ -535,7 +535,7 @@ XX009    E    ERRCODE_STREAM_DUPLICATE_QUERY_ID                              str
 XX010    E    ERRCODE_INVALID_BUFFER                                         invalid_buffer
 XX011    E    ERRCODE_INVALID_BUFFER_REFERENCE                               invalid_buffer_reference
 XX012    E    ERRCODE_NODE_ID_MISSMATCH							             node_id_missmatch
-XX013	 E    ERRCODE_CANNOT_MODIFY_XIDBASE				     cannot_modify_xidbasea
+XX013	 E    ERRCODE_CANNOT_MODIFY_XIDBASE				     cannot_modify_xidbase
 XX014    E    ERRCODE_UNEXPECTED_CHUNK_VALUE                                 unexpected_chunk_value
 XX015    E    ERRCODE_CN_RETRY_STUB                                          cn_retry_stub
 Section: Class CG - CodeGen Error
@@ -624,4 +624,4 @@ TS001    E    ERRCODE_TS_KEYTYPE_MISMATCH                                    col
 Section: Class SE - Security Error
 42714    E    ERRCODE_DUPLICATE_POLICY                                        duplicate_policy
 42715    E    ERRCODE_DUPLICATE_LABEL                                         duplicate_label
-SE001    E    ERRCODE_INVALID_AUDIT_LOG                                       invalid audit log
+SE001    E    ERRCODE_INVALID_AUDIT_LOG                                       invalid_audit_log
