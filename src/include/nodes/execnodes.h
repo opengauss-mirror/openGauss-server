@@ -40,6 +40,10 @@ namespace JitExec
 }
 #endif
 
+#define ATTACH_RIGHT_REF_STATE(planstate) if ((planstate) && (planstate)->ps_ExprContext && (planstate)->plan) {\
+    (planstate)->ps_ExprContext->rightRefState = (planstate)->plan->rightRefState; \
+}
+
 /* struct for utility statement mem usage */
 typedef struct UtilityDesc {
     double cost;      /* cost of utility statement */
@@ -215,6 +219,8 @@ typedef struct ExprContext {
     bool* vec_fun_sel;  // selection for vector set-result function.
     int current_row;
     bool can_ignore;    // indicates whether ERROR can be ignored when type casting
+
+    RightRefState* rightRefState;
 } ExprContext;
 
 /*
@@ -326,6 +332,7 @@ typedef struct ProjectionInfo {
     VectorBatch* pi_batch;
     vectarget_func jitted_vectarget; /* LLVM function pointer to point to the codegened targetlist expr function */
     VectorBatch* pi_setFuncBatch;
+    bool isUpsertHasRightRef;
 } ProjectionInfo;
 
 /*

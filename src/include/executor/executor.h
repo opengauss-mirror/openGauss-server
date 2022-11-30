@@ -298,6 +298,9 @@ extern TupleDesc ExecTypeFromTL(List* targetList, bool hasoid, bool markdropped 
 extern TupleDesc ExecCleanTypeFromTL(List* targetList, bool hasoid, TableAmType tam = TAM_HEAP);
 extern TupleDesc ExecTypeFromExprList(List* exprList, List* namesList, TableAmType tam = TAM_HEAP);
 extern void UpdateChangedParamSet(PlanState* node, Bitmapset* newchg);
+extern void InitOutputValues(RightRefState* refState, GenericExprState* targetArr[],
+                             Datum* values, bool* isnull, int targetCount, bool* hasExecs);
+extern void SortTargetListAsArray(RightRefState* refState, List* targetList, GenericExprState* targetArr[]);
 
 typedef struct TupOutputState {
     TupleTableSlot* slot;

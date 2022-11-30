@@ -51,6 +51,7 @@
 #include "utils/guc.h"
 #include "utils/guc_tables.h"
 
+extern Node* build_column_default(Relation rel, int attrno, bool isInsertCmd = false, bool needOnUpdate = false);
 extern Node* makeAConst(Value* v, int location);
 extern Value* makeStringValue(char* str);
 static Node* transformParamRef(ParseState* pstate, ParamRef* pref);
@@ -97,6 +98,44 @@ static Node* transformPrefixKey(ParseState* pstate, PrefixKey* pkey);
 
 #define OrientedIsCOLorPAX(rte) ((rte)->orientation == REL_COL_ORIENTED || (rte)->orientation == REL_PAX_ORIENTED)
 #define INDEX_KEY_MAX_PREFIX_LENGTH (int)2676
+
+
+static inline bool IsAutoIncrementColumn(TupleDesc rdAtt, int attrNo) 
+{
+    return rdAtt->constr && rdAtt->constr->cons_autoinc && rdAtt->constr->cons_autoinc->attnum == attrNo;
+}
+
+static void AddDefaultExprNode(ParseState* pstate)
+{
+    RightRefState* refState = pstate->rightRefState;
+    if (refState->isInsertHasRightRef) {
+        return;
+    }
+    pstate->rightRefState->isInsertHasRightRef = true;
+    
+    Relation relation = (Relation)linitial(pstate->p_target_relation);
+    TupleDesc rdAtt = relation->rd_att;
+    int fieldCnt = rdAtt->natts;
+    refState->constValues = (Const**)palloc0(sizeof(Const) * fieldCnt);
+    
+    for (int i = 0; i < fieldCnt; ++i) {
+        Form_pg_attribute attTup = rdAtt->attrs[i];
+        if (IsAutoIncrementColumn(rdAtt, i + 1)) {
+            refState->constValues[i] = makeConst(attTup->atttypid, -1, attTup->attcollation,
+                      attTup->attlen, (Datum)0, false, attTup->attbyval);
+        } else if (ISGENERATEDCOL(rdAtt, i)) {
+            refState->constValues[i] = nullptr;
+        } else {
+            Node* expr = build_column_default(relation, i + 1, true);
+            if (expr && IsA(expr, Const)) {
+                refState->constValues[i] = (Const*)expr;
+            } else {
+                refState->constValues[i] = nullptr;
+            }
+        }
+    }
+}
+
 /*
  * transformExpr -
  *	  Analyze and transform expressions. Type checking and type casting is
@@ -136,6 +175,13 @@ Node* transformExpr(ParseState* pstate, Node* expr)
     switch (nodeTag(expr)) {
         case T_ColumnRef:
             result = transformColumnRef(pstate, (ColumnRef*)expr);
+            if (IS_SUPPORT_RIGHT_REF(pstate->rightRefState)) {
+                if (pstate->rightRefState->isUpsert) {
+                    pstate->rightRefState->isUpsertHasRightRef = true;
+                } else {
+                    AddDefaultExprNode(pstate);
+                }
+            }
             break;
 
         case T_ParamRef:
