@@ -2925,7 +2925,7 @@ static void InitConfigureNamesInt()
             PGC_USERSET,
             NODE_SINGLENODE,
             STATS,
-            gettext_noop("Set the show warnings/error max store message sum"),
+            gettext_noop("Set the show error max store message sum"),
             NULL},
             &u_sess->dolphin_errdata_ctx.max_error_count,
             64,
@@ -9506,6 +9506,7 @@ void GetPGVariable(const char* name, const char* likename, DestReceiver* dest)
     }
 }
 
+#define NUM_SHOW_WARNINGS_COLUMNS 3
 TupleDesc GetPGVariableResultDesc(const char* name)
 {
     TupleDesc tupdesc;
@@ -9517,7 +9518,7 @@ TupleDesc GetPGVariableResultDesc(const char* name)
         TupleDescInitEntry(tupdesc, (AttrNumber)2, "setting", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)3, "description", TEXTOID, -1, 0);
     } else if (guc_name_compare(name, "show_warnings") == 0 || guc_name_compare(name, "show_errors") == 0) {
-        tupdesc = CreateTemplateTupleDesc(3, false, TAM_HEAP);
+        tupdesc = CreateTemplateTupleDesc(NUM_SHOW_WARNINGS_COLUMNS, false, TAM_HEAP);
         TupleDescInitEntry(tupdesc, (AttrNumber)1, "level", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)2, "code", INT4OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)3, "message", TEXTOID, -1, 0);

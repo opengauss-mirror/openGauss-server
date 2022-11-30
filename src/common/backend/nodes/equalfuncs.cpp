@@ -1831,6 +1831,8 @@ static bool _equalVariableShowStmt(const VariableShowStmt* a, const VariableShow
 {
     COMPARE_STRING_FIELD(name);
     COMPARE_STRING_FIELD(likename);
+    COMPARE_STRING_FIELD(offset);
+    COMPARE_STRING_FIELD(count);
 
     return true;
 }

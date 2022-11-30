@@ -5339,7 +5339,7 @@ void gramShowWarningsErrors(int offset, int count, DestReceiver *dest, bool isSh
     TupleDesc tupdesc;
 
     /* need a tuple descriptor representing three TEXT columns */
-    tupdesc = CreateTemplateTupleDesc(3, false, TAM_HEAP);
+    tupdesc = CreateTemplateTupleDesc(NUM_SHOW_WARNINGS_COLUMNS, false, TAM_HEAP);
     TupleDescInitEntry(tupdesc, (AttrNumber)1, "level", TEXTOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)2, "code", INT4OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)3, "message", TEXTOID, -1, 0);
@@ -5394,7 +5394,7 @@ void gramShowWarningsErrors(int offset, int count, DestReceiver *dest, bool isSh
         }
         limit--;
         currIdx++;
-        do_tup_output(tstate, values, 3, nulls, 3);
+        do_tup_output(tstate, values, NUM_SHOW_WARNINGS_COLUMNS, nulls, NUM_SHOW_WARNINGS_COLUMNS);
 
         /* clean up */
         pfree(DatumGetPointer(values[0]));
