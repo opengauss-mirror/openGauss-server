@@ -170,6 +170,7 @@ static bool check_and_assign_catalog_oids(List* elemlist);
 static const char* show_archive_command(void);
 bool check_enable_gtm_free(bool* newval, void** extra, GucSource source);
 static bool check_phony_autocommit(bool* newval, void** extra, GucSource source);
+static void assign_phony_autocommit(bool newval, void* extra);
 static bool check_enable_data_replicate(bool* newval, void** extra, GucSource source);
 static bool check_adio_debug_guc(bool* newval, void** extra, GucSource source);
 static bool check_adio_function_guc(bool* newval, void** extra, GucSource source);
@@ -521,13 +522,14 @@ static void InitStorageConfigureNamesBool()
             PGC_USERSET,
             NODE_ALL,
             CLIENT_CONN_STATEMENT,
-            gettext_noop("This parameter doesn't do anything."),
-            gettext_noop("It's just here so that we won't choke on SET AUTOCOMMIT TO ON from 7.3-vintage clients."),
+            gettext_noop("This parameter is only used in B compatibility."),
+            gettext_noop("Otherwise, it's just here so that we won't choke on SET AUTOCOMMIT TO ON from 7.3-vintage clients.\n"
+                        "This parameter is used to control whether the transactions are committed automatically in B compatibility."),
             GUC_NO_SHOW_ALL | GUC_NOT_IN_SAMPLE},
             &u_sess->attr.attr_storage.phony_autocommit,
             true,
             check_phony_autocommit,
-            NULL,
+            assign_phony_autocommit,
             NULL},
         /*
          * security requirements: system/ordinary users can not set current transaction to read-only,
@@ -4656,13 +4658,25 @@ void InitializeNumLwLockPartitions(void)
 
 static bool check_phony_autocommit(bool* newval, void** extra, GucSource source)
 {
-    if (!*newval) {
+    if (!*newval && (!OidIsValid(u_sess->proc_cxt.MyDatabaseId) || !DB_IS_CMPT(B_FORMAT))) {
         GUC_check_errcode(ERRCODE_FEATURE_NOT_SUPPORTED);
         GUC_check_errmsg("SET AUTOCOMMIT TO OFF is no longer supported");
         return false;
     }
 
     return true;
+}
+
+
+static void assign_phony_autocommit(bool newval, void* extra)
+{
+    /* change autocommit from false to on */
+    if (newval && u_sess->attr.attr_storage.phony_autocommit != newval) {
+        if (!IsTransactionDefaultState() && !EndTransactionBlock()) {
+            ereport(ERROR, (errmsg("end transaction failed")));
+        }
+    }
+    return;
 }
 
 static bool check_enable_data_replicate(bool* newval, void** extra, GucSource source)

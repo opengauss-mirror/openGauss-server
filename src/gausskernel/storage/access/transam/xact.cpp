@@ -8484,3 +8484,23 @@ static void AtEOXact_Proceed_PatchSeq()
         u_sess->opt_cxt.xact_modify_sql_patch = false;
     }
 }
+
+bool IsTransactionDefaultState()
+{
+    TransactionState s = CurrentTransactionState;
+    return s->blockState == TBLOCK_DEFAULT;
+}
+
+bool IsTransactionInProgressState()
+{
+    TransactionState s = CurrentTransactionState;
+    return s->blockState == TBLOCK_INPROGRESS;
+}
+
+void BeginTxnForAutoCommitOff()
+{
+    TransactionState s = CurrentTransactionState;
+    if (s->blockState == TBLOCK_STARTED) {
+        s->blockState = TBLOCK_INPROGRESS;
+    }
+}
