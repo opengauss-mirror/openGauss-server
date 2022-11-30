@@ -83,5 +83,35 @@ show warnings;
 -------+------+---------
 (0 rows)
 
+SELECT pg_advisory_unlock(1), pg_advisory_unlock_shared(2), pg_advisory_unlock(1, 1), pg_advisory_unlock_shared(2, 2);
+WARNING:  you don't own a lock of type ExclusiveLock
+CONTEXT:  referenced column: pg_advisory_unlock
+WARNING:  you don't own a lock of type ShareLock
+CONTEXT:  referenced column: pg_advisory_unlock_shared
+WARNING:  you don't own a lock of type ExclusiveLock
+CONTEXT:  referenced column: pg_advisory_unlock
+WARNING:  you don't own a lock of type ShareLock
+CONTEXT:  referenced column: pg_advisory_unlock_shared
+ pg_advisory_unlock | pg_advisory_unlock_shared | pg_advisory_unlock | pg_advisory_unlock_shared 
+--------------------+---------------------------+--------------------+---------------------------
+ f                  | f                         | f                  | f
+(1 row)
+
+show warnings;
+  level  | code |                  message                   
+---------+------+--------------------------------------------
+ Warning |   64 | you don't own a lock of type ExclusiveLock
+ Warning |   64 | you don't own a lock of type ShareLock
+ Warning |   64 | you don't own a lock of type ExclusiveLock
+ Warning |   64 | you don't own a lock of type ShareLock
+(4 rows)
+
+show warnings limit 2, 4;
+  level  | code |                  message                   
+---------+------+--------------------------------------------
+ Warning |   64 | you don't own a lock of type ExclusiveLock
+ Warning |   64 | you don't own a lock of type ShareLock
+(2 rows)
+
 \c postgres
 drop database if exists db_show_warnings;

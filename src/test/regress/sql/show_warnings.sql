@@ -26,5 +26,9 @@ set sql_note=false;
 select TEST_FUNC('abc'::clob);
 show warnings;
 
+SELECT pg_advisory_unlock(1), pg_advisory_unlock_shared(2), pg_advisory_unlock(1, 1), pg_advisory_unlock_shared(2, 2);
+show warnings;
+show warnings limit 2, 4;
+
 \c postgres
 drop database if exists db_show_warnings;
