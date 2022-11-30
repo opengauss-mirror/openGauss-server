@@ -100,3 +100,20 @@ when 5000 then 'high'
 when 2000 then 'medium'
 end between 'high' and 'high'
 order by 1,2,3,4;
+
+--CTE test
+create table cte_test(w_zip text);
+
+create table cte_test2(w_name text);
+
+create table cte_test3(d_id text);
+
+with alias1 as (select w_zip alias2 from cte_test) select w_name from cte_test2 union select d_id from cte_test3 full join alias1 on cte_test3.d_id>alias1.alias2;
+
+-- CTE test with smp
+set query_dop = 4;
+with alias1 as (select w_zip alias2 from cte_test) select w_name from cte_test2 union select d_id from cte_test3 full join alias1 on cte_test3.d_id>alias1.alias2;
+
+drop table cte_test;
+drop table cte_test2;
+drop table cte_test3;
