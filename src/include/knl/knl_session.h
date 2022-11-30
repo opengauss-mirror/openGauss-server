@@ -2383,8 +2383,8 @@ typedef struct knl_u_syscache_context {
 
 typedef struct knl_u_dolphin_errdata_context {
     MemoryContext dolphinErrorDataMemCxt;
-    ErrorDataArea* errorDataArea;// only for b database, using in show warnings,show errors
-    ErrorDataArea* lastErrorDataArea;
+    ErrorDataArea *errorDataArea;  // only for b database, using in show warnings,show errors
+    ErrorDataArea *lastErrorDataArea;
     bool sql_note;
     int max_error_count;
 } knl_u_dolphin_errdata_context;

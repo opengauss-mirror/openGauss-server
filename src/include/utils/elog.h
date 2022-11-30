@@ -537,14 +537,14 @@ extern void send_message_to_frontend(ErrorData* edata);
 enum enum_dolphin_error_level { B_NOTE, B_WARNING, B_ERROR, B_END };
 
 typedef struct ErrorDataArea {
-    List* sqlErrorDataList;
+    List *sqlErrorDataList;
     uint64 current_edata_count;
-    uint64* current_edata_count_by_level;
+    uint64 *current_edata_count_by_level;
 } ErrorDataArea;
 
-extern ErrorDataArea* initErrorDataArea();
+extern ErrorDataArea *initErrorDataArea();
 extern void resetErrorDataArea(bool);
-extern void pushErrorData(ErrorData*);
+extern void pushErrorData(ErrorData *);
 extern uint64 SqlErrorDataErrorCount();
 extern uint64 SqlErrorDataWarnCount();
 extern int SqlErrorDataCount();

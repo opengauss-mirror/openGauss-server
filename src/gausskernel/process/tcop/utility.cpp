@@ -5770,17 +5770,17 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
         } break;
 
         case T_VariableShowStmt: {
-            VariableShowStmt* n = (VariableShowStmt*)parse_tree;
+            VariableShowStmt *n = (VariableShowStmt *)parse_tree;
 
             if (strcmp(n->name, "show_warnings") == 0) {
                 gramShowWarningsErrors(n->offset, n->count, dest, FALSE);
-            } else if (strcmp(n->name, "show_warnings_count") == 0){
+            } else if (strcmp(n->name, "show_warnings_count") == 0) {
                 gramShowWarningsErrorsCount(dest, FALSE);
             } else if (strcmp(n->name, "show_errors") == 0) {
                 gramShowWarningsErrors(n->offset, n->count, dest, TRUE);
             } else if (strcmp(n->name, "show_errors_count") == 0) {
                 gramShowWarningsErrorsCount(dest, TRUE);
-            } else{
+            } else {
                 GetPGVariable(n->name, n->likename, dest);
             }
         } break;

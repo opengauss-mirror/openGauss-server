@@ -5210,93 +5210,97 @@ static void write_asplog(char *data, int len, bool end)
 typedef struct {
     enum_dolphin_error_level elevel;
     int errorcode;
-    char* message;
+    char *message;
 } DolphinErrorData;
 
-ErrorDataArea* initErrorDataArea(){
-    ErrorDataArea* errorDataArea = (ErrorDataArea*) palloc0(sizeof(ErrorDataArea));
-    errorDataArea->current_edata_count_by_level = (uint64*)palloc0(4 * sizeof(uint64));
-    errorDataArea->sqlErrorDataList= NIL;
+ErrorDataArea *initErrorDataArea()
+{
+    ErrorDataArea *errorDataArea = (ErrorDataArea *)palloc0(sizeof(ErrorDataArea));
+    errorDataArea->current_edata_count_by_level = (uint64 *)palloc0(4 * sizeof(uint64));
+    errorDataArea->sqlErrorDataList = NIL;
     errorDataArea->current_edata_count = 0;
-    for (int i = 0; i <= enum_dolphin_error_level::B_END; i++){
-        errorDataArea->current_edata_count_by_level[i]=0;
+    for (int i = 0; i <= enum_dolphin_error_level::B_END; i++) {
+        errorDataArea->current_edata_count_by_level[i] = 0;
     }
     return errorDataArea;
 }
 
-void cleanErrorDataArea(ErrorDataArea* errorDataArea){
-    Assert(errorDataArea!=NULL);
+void cleanErrorDataArea(ErrorDataArea *errorDataArea)
+{
+    Assert(errorDataArea != NULL);
     list_free_deep(errorDataArea->sqlErrorDataList);
     errorDataArea->sqlErrorDataList = NIL;
     errorDataArea->current_edata_count = 0;
-    for (int i = 0; i <= enum_dolphin_error_level::B_END; i++){
-        errorDataArea->current_edata_count_by_level[i]=0;
+    for (int i = 0; i <= enum_dolphin_error_level::B_END; i++) {
+        errorDataArea->current_edata_count_by_level[i] = 0;
     }
 }
 
-void copyErrorDataArea(ErrorDataArea* from, ErrorDataArea* to){
+void copyErrorDataArea(ErrorDataArea *from, ErrorDataArea *to)
+{
     cleanErrorDataArea(to);
 
     MemoryContext oldcontext;
 
     oldcontext = MemoryContextSwitchTo(u_sess->dolphin_errdata_ctx.dolphinErrorDataMemCxt);
 
-    ListCell * lc = NULL;
+    ListCell *lc = NULL;
     lc = list_head(from->sqlErrorDataList);
     foreach (lc, from->sqlErrorDataList) {
         DolphinErrorData *eData = (DolphinErrorData *)lfirst(lc);
-        DolphinErrorData* newErrData = (DolphinErrorData*)palloc(sizeof(DolphinErrorData));
+        DolphinErrorData *newErrData = (DolphinErrorData *)palloc(sizeof(DolphinErrorData));
         newErrData->elevel = eData->elevel;
         newErrData->errorcode = eData->errorcode;
         newErrData->message = pstrdup(eData->message);
         to->sqlErrorDataList = lappend(to->sqlErrorDataList, newErrData);
     }
     to->current_edata_count = from->current_edata_count;
-    for (int i = 0; i <= enum_dolphin_error_level::B_END; i++){
+    for (int i = 0; i <= enum_dolphin_error_level::B_END; i++) {
         to->current_edata_count_by_level[i] = from->current_edata_count_by_level[i];
     }
     MemoryContextSwitchTo(oldcontext);
 }
 
-void resetErrorDataArea(bool stacked){
+void resetErrorDataArea(bool stacked)
+{
     /* reset all count to zero and list to null */
     MemoryContext oldcontext;
     oldcontext = MemoryContextSwitchTo(u_sess->dolphin_errdata_ctx.dolphinErrorDataMemCxt);
-    ErrorDataArea* errorDataArea = u_sess->dolphin_errdata_ctx.errorDataArea;
-    ErrorDataArea* lastErrorDataArea = u_sess->dolphin_errdata_ctx.lastErrorDataArea;
-    if (stacked){
-        copyErrorDataArea(errorDataArea,lastErrorDataArea);
-    }else{
+    ErrorDataArea *errorDataArea = u_sess->dolphin_errdata_ctx.errorDataArea;
+    ErrorDataArea *lastErrorDataArea = u_sess->dolphin_errdata_ctx.lastErrorDataArea;
+    if (stacked) {
+        copyErrorDataArea(errorDataArea, lastErrorDataArea);
+    } else {
         cleanErrorDataArea(lastErrorDataArea);
     }
     cleanErrorDataArea(errorDataArea);
     MemoryContextSwitchTo(oldcontext);
 }
 
-enum_dolphin_error_level errorLevelToDolphin(int elevel){
-    if (elevel < WARNING){
+enum_dolphin_error_level errorLevelToDolphin(int elevel)
+{
+    if (elevel < WARNING) {
         return enum_dolphin_error_level::B_NOTE;
-    }
-    else if (elevel == WARNING){
+    } else if (elevel == WARNING) {
         return enum_dolphin_error_level::B_WARNING;
-    }
-    else {
+    } else {
         return enum_dolphin_error_level::B_ERROR;
     }
 }
 
-void pushErrorData(ErrorData* edata){
+void pushErrorData(ErrorData *edata)
+{
     MemoryContext oldcontext;
-    ErrorDataArea* errorDataArea = u_sess->dolphin_errdata_ctx.errorDataArea;
+    ErrorDataArea *errorDataArea = u_sess->dolphin_errdata_ctx.errorDataArea;
     oldcontext = MemoryContextSwitchTo(u_sess->dolphin_errdata_ctx.dolphinErrorDataMemCxt);
     if (u_sess->dolphin_errdata_ctx.max_error_count >= SqlErrorDataCount()) {
         if (u_sess->dolphin_errdata_ctx.sql_note == true ||
-                errorLevelToDolphin(edata->elevel) != enum_dolphin_error_level::B_NOTE) {
-            DolphinErrorData* dolphinErrorData = (DolphinErrorData*)palloc(sizeof(DolphinErrorData));
+            errorLevelToDolphin(edata->elevel) != enum_dolphin_error_level::B_NOTE) {
+            DolphinErrorData *dolphinErrorData = (DolphinErrorData *)palloc(sizeof(DolphinErrorData));
             dolphinErrorData->elevel = errorLevelToDolphin(edata->elevel);
             dolphinErrorData->errorcode = edata->sqlerrcode;
             dolphinErrorData->message = pstrdup(edata->message);
-            errorDataArea->sqlErrorDataList = lappend(errorDataArea->sqlErrorDataList,dolphinErrorData);
+            errorDataArea->sqlErrorDataList = lappend(errorDataArea->sqlErrorDataList, dolphinErrorData);
             errorDataArea->current_edata_count++;
             errorDataArea->current_edata_count_by_level[errorLevelToDolphin(edata->elevel)]++;
         }
@@ -5304,30 +5308,34 @@ void pushErrorData(ErrorData* edata){
     MemoryContextSwitchTo(oldcontext);
 }
 
-int32 SqlErrorDataErrorCount(ErrorDataArea* errorDataArea){
+int32 SqlErrorDataErrorCount(ErrorDataArea *errorDataArea)
+{
     return errorDataArea->current_edata_count_by_level[enum_dolphin_error_level::B_ERROR];
 }
 
-int32 SqlErrorDataWarnCount(ErrorDataArea* errorDataArea){
+int32 SqlErrorDataWarnCount(ErrorDataArea *errorDataArea)
+{
     return errorDataArea->current_edata_count_by_level[enum_dolphin_error_level::B_NOTE] +
-        errorDataArea->current_edata_count_by_level[enum_dolphin_error_level::B_WARNING] +
-        errorDataArea->current_edata_count_by_level[enum_dolphin_error_level::B_ERROR];
+           errorDataArea->current_edata_count_by_level[enum_dolphin_error_level::B_WARNING] +
+           errorDataArea->current_edata_count_by_level[enum_dolphin_error_level::B_ERROR];
 }
 
-int SqlErrorDataCount(){
+int SqlErrorDataCount()
+{
     return list_length(u_sess->dolphin_errdata_ctx.errorDataArea->sqlErrorDataList);
 }
 #define NUM_SHOW_WARNINGS_COLUMNS 3
 
 typedef struct {
-    ErrorDataArea * errorDataArea;
+    ErrorDataArea *errorDataArea;
     int currIdx;
     int limit;
-    ListCell* lc = NULL;
+    ListCell *lc = NULL;
 } ErrorDataAreaStatus;
 
-void gramShowWarningsErrors(int offset, int count, DestReceiver* dest, bool isShowErrors) {
-    TupOutputState* tstate = NULL;
+void gramShowWarningsErrors(int offset, int count, DestReceiver *dest, bool isShowErrors)
+{
+    TupOutputState *tstate = NULL;
     TupleDesc tupdesc;
 
     /* need a tuple descriptor representing three TEXT columns */
@@ -5338,10 +5346,10 @@ void gramShowWarningsErrors(int offset, int count, DestReceiver* dest, bool isSh
 
     /* prepare for projection of tuples */
     tstate = begin_tup_output_tupdesc(dest, tupdesc);
-    ErrorDataArea* errorDataArea = u_sess->dolphin_errdata_ctx.lastErrorDataArea;
+    ErrorDataArea *errorDataArea = u_sess->dolphin_errdata_ctx.lastErrorDataArea;
     int currIdx = 0;
     int limit = count;
-    ListCell* lc = NULL;
+    ListCell *lc = NULL;
     while (currIdx < list_length(errorDataArea->sqlErrorDataList)) {
         if (limit <= 0) {
             break;
@@ -5361,9 +5369,9 @@ void gramShowWarningsErrors(int offset, int count, DestReceiver* dest, bool isSh
         Assert(lc != NULL);
         DolphinErrorData *eData = (DolphinErrorData *)lfirst(lc);
         values[1] = Int32GetDatum(eData->errorcode);
-        if (eData->message){
+        if (eData->message) {
             values[2] = CStringGetTextDatum(eData->message);
-        }else{
+        } else {
             values[2] = CStringGetTextDatum("");
         }
         if (isShowErrors) {
@@ -5393,12 +5401,12 @@ void gramShowWarningsErrors(int offset, int count, DestReceiver* dest, bool isSh
         pfree(DatumGetPointer(values[2]));
     }
     end_tup_output(tstate);
-    copyErrorDataArea(u_sess->dolphin_errdata_ctx.lastErrorDataArea,u_sess->dolphin_errdata_ctx.errorDataArea);
+    copyErrorDataArea(u_sess->dolphin_errdata_ctx.lastErrorDataArea, u_sess->dolphin_errdata_ctx.errorDataArea);
 }
 
-void gramShowWarningsErrorsCount(DestReceiver* dest, bool isShowErrors)
+void gramShowWarningsErrorsCount(DestReceiver *dest, bool isShowErrors)
 {
-    TupOutputState* tstate = NULL;
+    TupOutputState *tstate = NULL;
     TupleDesc tupdesc;
     Datum values[1] = {0};
     bool isnull[1] = {false};
@@ -5409,7 +5417,7 @@ void gramShowWarningsErrorsCount(DestReceiver* dest, bool isShowErrors)
 
     /* prepare for projection of tuples */
     tstate = begin_tup_output_tupdesc(dest, tupdesc);
-    ErrorDataArea* errorDataArea = u_sess->dolphin_errdata_ctx.lastErrorDataArea;
+    ErrorDataArea *errorDataArea = u_sess->dolphin_errdata_ctx.lastErrorDataArea;
     if (isShowErrors) {
         values[0] = Int32GetDatum(SqlErrorDataErrorCount(errorDataArea));
     } else {
@@ -5417,5 +5425,5 @@ void gramShowWarningsErrorsCount(DestReceiver* dest, bool isShowErrors)
     }
     do_tup_output(tstate, values, 1, isnull, 1);
     end_tup_output(tstate);
-    copyErrorDataArea(u_sess->dolphin_errdata_ctx.lastErrorDataArea,u_sess->dolphin_errdata_ctx.errorDataArea);
+    copyErrorDataArea(u_sess->dolphin_errdata_ctx.lastErrorDataArea, u_sess->dolphin_errdata_ctx.errorDataArea);
 }
