@@ -715,6 +715,8 @@ typedef struct VariableShowStmt {
     NodeTag type;
     char* name;
     char* likename;
+    int offset;
+    int count;
 } VariableShowStmt;
 
 /* ----------------------

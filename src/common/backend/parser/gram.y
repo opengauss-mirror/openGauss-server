@@ -93,6 +93,7 @@
 #pragma GCC diagnostic ignored "-Wsign-compare"
 #pragma GCC diagnostic ignored "-Wunused-variable"
 
+#define MAX_ERROR_COUNT 65535
 #define MAXFNAMELEN		64
 #define isquote(C) ((C) == '\"')
 #ifndef ENABLE_MULTIPLE_NODES
@@ -892,7 +893,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 	SERIALIZABLE SERVER SESSION SESSION_USER SET SETS SETOF SHARE SHIPPABLE SHOW SHUTDOWN SIBLINGS
 	SIMILAR SIMPLE SIZE SKIP SLICE SMALLDATETIME SMALLDATETIME_FORMAT_P SMALLINT SNAPSHOT SOME SOURCE_P SPACE SPILL SPLIT STABLE STANDALONE_P START STARTWITH
 	STATEMENT STATEMENT_ID STATISTICS STDIN STDOUT STORAGE STORE_P STORED STRATIFY STREAM STRICT_P STRIP_P SUBPARTITION SUBSCRIPTION SUBSTRING
-	SYMMETRIC SYNONYM SYSDATE SYSID SYSTEM_P SYS_REFCURSOR
+	SYMMETRIC SYNONYM SYSDATE SYSID SYSTEM_P SYS_REFCURSOR SHOW_ERRORS
 
 	TABLE TABLES TABLESAMPLE TABLESPACE TARGET TEMP TEMPLATE TEMPORARY TERMINATED TEXT_P THAN THEN TIME TIME_FORMAT_P TIMECAPSULE TIMESTAMP TIMESTAMP_FORMAT_P TIMESTAMPDIFF TINYINT
 	TO TRAILING TRANSACTION TRANSFORM TREAT TRIGGER TRIM TRUE_P
@@ -904,7 +905,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 	VACUUM VALID VALIDATE VALIDATION VALIDATOR VALUE_P VALUES VARCHAR VARCHAR2 VARIABLES VARIADIC VARRAY VARYING VCGROUP
 	VERBOSE VERIFY VERSION_P VIEW VOLATILE
 
-	WAIT WEAK WHEN WHERE WHILE_P WHITESPACE_P WINDOW WITH WITHIN WITHOUT WORK WORKLOAD WRAPPER WRITE
+	WAIT WARNINGS WEAK WHEN WHERE WHILE_P WHITESPACE_P WINDOW WITH WITHIN WITHOUT WORK WORKLOAD WRAPPER WRITE
 
 	XML_P XMLATTRIBUTES XMLCONCAT XMLELEMENT XMLEXISTS XMLFOREST XMLPARSE
 	XMLPI XMLROOT XMLSERIALIZE
@@ -931,7 +932,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 			NOT_ENFORCED
 			VALID_BEGIN
 			DECLARE_CURSOR ON_UPDATE_TIME
-			START_WITH CONNECT_BY
+			START_WITH CONNECT_BY SHOW_ERRORS
 			END_OF_INPUT
 			END_OF_INPUT_COLON
 			END_OF_PROC
@@ -3015,7 +3016,159 @@ FunctionSetResetClause:
 
 
 VariableShowStmt:
-			SHOW var_name
+			SHOW WARNINGS
+				{
+#ifdef ENABLE_MULTIPLE_NODES
+					ereport(ERROR,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("Un-support feature"),
+							errdetail("Show warnings feature is unsupported on distributed mode.")));
+#else
+					if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
+					{
+						VariableShowStmt *n = makeNode(VariableShowStmt);
+						n->name = "show_warnings";
+						n->offset = 0;
+						n->count = MAX_ERROR_COUNT;
+						$$ = (Node *) n;
+					}
+#endif
+				}
+			| SHOW WARNINGS LIMIT Iconst
+				{
+#ifdef ENABLE_MULTIPLE_NODES
+					ereport(ERROR,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("Un-support feature"),
+							errdetail("Show warnings feature is unsupported on distributed mode.")));
+#else
+					if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
+					{
+						VariableShowStmt *n = makeNode(VariableShowStmt);
+						n->name = "show_warnings";
+						n->offset = 0;
+						n->count = $4;
+						$$ = (Node *) n;
+					}
+#endif
+				}
+			| SHOW WARNINGS LIMIT Iconst ',' Iconst
+				{
+#ifdef ENABLE_MULTIPLE_NODES
+					ereport(ERROR,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("Un-support feature"),
+							errdetail("Show warnings feature is unsupported on distributed mode.")));
+#else
+					if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
+					{
+						VariableShowStmt *n = makeNode(VariableShowStmt);
+						n->name = "show_warnings";
+						n->offset = $4;
+						n->count = $6;
+						$$ = (Node *) n;
+					}
+#endif
+				}
+			| SHOW IDENT '(' '*' ')' WARNINGS
+				{
+#ifdef ENABLE_MULTIPLE_NODES
+					ereport(ERROR,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("Un-support feature"),
+							errdetail("Show count(*) warnings feature is unsupported on distributed mode.")));
+#else
+					if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
+					{
+						if (strcmp($2, "count") != 0) {
+							const char* message = "Un-support feature";
+							InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+							ereport(errstate, (errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("Un-support function \"%s\" for show warnings", $2)));
+						}
+						VariableShowStmt *n = makeNode(VariableShowStmt);
+						n->name = "show_warnings_count";
+						$$ = (Node *) n;
+					}
+#endif
+				}
+			| SHOW_ERRORS
+				{
+#ifdef ENABLE_MULTIPLE_NODES
+					ereport(ERROR,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("Un-support feature"),
+							errdetail("Show errors feature is unsupported on distributed mode.")));
+#else
+					if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
+					{
+						VariableShowStmt *n = makeNode(VariableShowStmt);
+						n->name = "show_errors";
+						n->offset = 0;
+						n->count = MAX_ERROR_COUNT;
+						$$ = (Node *) n;
+					}
+#endif
+				}
+			| SHOW_ERRORS LIMIT Iconst
+				{
+#ifdef ENABLE_MULTIPLE_NODES
+					ereport(ERROR,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("Un-support feature"),
+							errdetail("Show errors feature is unsupported on distributed mode.")));
+#else
+					if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
+					{
+						VariableShowStmt *n = makeNode(VariableShowStmt);
+						n->name = "show_errors";
+						n->offset = 0;
+						n->count = $3;
+						$$ = (Node *) n;
+					}
+#endif
+				}
+			| SHOW_ERRORS LIMIT Iconst ',' Iconst
+				{
+#ifdef ENABLE_MULTIPLE_NODES
+					ereport(ERROR,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("Un-support feature"),
+							errdetail("Show errors feature is unsupported on distributed mode.")));
+#else
+					if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
+					{
+						VariableShowStmt *n = makeNode(VariableShowStmt);
+						n->name = "show_errors";
+						n->offset = $3;
+						n->count = $5;
+						$$ = (Node *) n;
+					}
+#endif
+				}
+			| SHOW IDENT '(' '*' ')' ERRORS
+				{
+#ifdef ENABLE_MULTIPLE_NODES
+					ereport(ERROR,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("Un-support feature"),
+							errdetail("Show count(*) errors feature is unsupported on distributed mode.")));
+#else
+					if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
+					{
+						if (strcmp($2, "count") != 0) {
+							const char* message = "Un-support feature";
+							InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+							ereport(errstate, (errcode(ERRCODE_SYNTAX_ERROR),
+							errmsg("Un-support function \"%s\" for show errors", $2)));
+						}
+						VariableShowStmt *n = makeNode(VariableShowStmt);
+						n->name = "show_errors_count";
+						$$ = (Node *) n;
+					}
+#endif
+				}
+			| SHOW var_name
 				{
 					VariableShowStmt *n = makeNode(VariableShowStmt);
 					n->name = $2;

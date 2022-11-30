@@ -2353,6 +2353,8 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
         pgstat_report_activity(STATE_RUNNING, sql_query_string);
         t_thrd.postgres_cxt.debug_query_string = sql_query_string;
     }
+
+    resetErrorDataArea(true);
     instr_stmt_report_start_time();
 
     /*

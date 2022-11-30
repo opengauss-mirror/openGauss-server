@@ -429,7 +429,9 @@ const char* sync_guc_variable_namelist[] = {"work_mem",
 #endif 
     "track_stmt_session_slot",
     "track_stmt_stat_level",
-    "track_stmt_details_size"
+    "track_stmt_details_size",
+    "sql_note",
+    "max_error_count"
     };
 
 static void set_config_sourcefile(const char* name, char* sourcefile, int sourceline);
@@ -1907,6 +1909,18 @@ static void InitConfigureNamesBool()
             NULL,
             NULL
         },
+        {{"sql_note",
+            PGC_USERSET,
+            NODE_SINGLENODE,
+            STATS,
+            gettext_noop("Set a switch with a message level lower than warnings"),
+            NULL},
+            &u_sess->dolphin_errdata_ctx.sql_note,
+            true,
+            NULL,
+            NULL,
+            NULL
+        },
         /* End-of-list marker */
         {{NULL,
             (GucContext)0,
@@ -2904,6 +2918,19 @@ static void InitConfigureNamesInt()
             0,
             0,
             10000000,
+            NULL,
+            NULL,
+            NULL},
+        {{"max_error_count",
+            PGC_USERSET,
+            NODE_SINGLENODE,
+            STATS,
+            gettext_noop("Set the show error max store message sum"),
+            NULL},
+            &u_sess->dolphin_errdata_ctx.max_error_count,
+            64,
+            0,
+            65535,
             NULL,
             NULL,
             NULL},
@@ -9489,6 +9516,7 @@ void GetPGVariable(const char* name, const char* likename, DestReceiver* dest)
     }
 }
 
+#define NUM_SHOW_WARNINGS_COLUMNS 3
 TupleDesc GetPGVariableResultDesc(const char* name)
 {
     TupleDesc tupdesc;
@@ -9499,6 +9527,14 @@ TupleDesc GetPGVariableResultDesc(const char* name)
         TupleDescInitEntry(tupdesc, (AttrNumber)1, "name", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)2, "setting", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)3, "description", TEXTOID, -1, 0);
+    } else if (guc_name_compare(name, "show_warnings") == 0 || guc_name_compare(name, "show_errors") == 0) {
+        tupdesc = CreateTemplateTupleDesc(NUM_SHOW_WARNINGS_COLUMNS, false, TAM_HEAP);
+        TupleDescInitEntry(tupdesc, (AttrNumber)1, "level", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)2, "code", INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)3, "message", TEXTOID, -1, 0);
+    } else if (guc_name_compare(name, "show_warnings_count") == 0 || guc_name_compare(name, "show_errors_count") == 0) {
+        tupdesc = CreateTemplateTupleDesc(1, false, TAM_HEAP);
+        TupleDescInitEntry(tupdesc, (AttrNumber)1, "count", INT4OID, -1, 0);
     } else {
         const char* varname = NULL;
 

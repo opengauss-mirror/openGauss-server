@@ -440,6 +440,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  max_compile_functions                            | integer |      | 1         | 2147483647
  max_concurrent_autonomous_transactions           | integer |      | 0         | 1024
  max_connections                                  | integer |      | 10        | 262143
+ max_error_count                                  | integer |      | 0         | 65535
  max_files_per_process                            | integer |      | 25        | 2147483647
  max_function_args                                | integer |      | 8192      | 8192
  max_identifier_length                            | integer |      | 63        | 63
@@ -588,6 +589,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  sql_compatibility                                | enum    |      |           | 
  sql_ignore_strategy                              | string  |      |           | 
  sql_inheritance                                  | bool    |      |           | 
+ sql_note                                         | bool    |      |           | 
  sql_use_spacelimit                               | integer | kB   | -1        | 2147483647
  ss_dss_conn_path                                 | string  |      |           | 
  ss_dss_vg_name                                   | string  |      |           | 

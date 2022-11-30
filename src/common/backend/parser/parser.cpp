@@ -564,6 +564,25 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
                     break;
             }
             break;
+        case SHOW:
+            /*
+             * SHOW ERRORS must be reduced to one token, to allow ERRORS as table / column alias.
+             */
+            GET_NEXT_TOKEN();
+
+            switch (next_token) {
+                case ERRORS:
+                    cur_token = SHOW_ERRORS;
+                    break;
+                default:
+                    /* save the lookahead token for next time */
+                    SET_LOOKAHEAD_TOKEN();
+                    /* and back up the output info to cur_token */
+                    lvalp->core_yystype = cur_yylval;
+                    *llocp = cur_yylloc;
+                    break;
+            }
+            break;
         default:
             break;
     }
