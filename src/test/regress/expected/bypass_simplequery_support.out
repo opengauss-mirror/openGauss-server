@@ -224,10 +224,10 @@ reset enable_indexonlyscan;
 --bypass though index only scan
 set enable_indexscan = off;
 explain select col1,col2 from test_bypass_sq1 where col1=0 and col2=0;
-                                                    QUERY PLAN                                                     
--------------------------------------------------------------------------------------------------------------------
+                                         QUERY PLAN                                          
+---------------------------------------------------------------------------------------------
  [Bypass]
- Index Only Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=10000000000.00..1000000000827.01 rows=1 width=8)
+ Index Only Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..8.27 rows=1 width=8)
    Index Cond: ((col1 = 0) AND (col2 = 0))
 (3 rows)
 
@@ -240,11 +240,11 @@ select col1,col2 from test_bypass_sq1 where col1=0 and col2=0;
 (3 rows)
 
 explain select col1,col2 from test_bypass_sq1 where col1=0 and col2=0 order by col1 limit 1;
-                                                       QUERY PLAN                                                        
--------------------------------------------------------------------------------------------------------------------------
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
  [Bypass]
- Limit  (cost=10000000000.00..1000000000827.01 rows=1 width=8)
-   ->  Index Only Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=10000000000.00..1000000000827.01 rows=1 width=8)
+ Limit  (cost=0.00..8.27 rows=1 width=8)
+   ->  Index Only Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..8.27 rows=1 width=8)
          Index Cond: ((col1 = 0) AND (col2 = 0))
 (4 rows)
 
@@ -255,11 +255,11 @@ select col1,col2 from test_bypass_sq1 where col1=0 and col2=0 order by col1 limi
 (1 row)
 
 explain select col1,col2 from test_bypass_sq1 where col1=0 and col2=0 order by col1 limit 0;
-                                                       QUERY PLAN                                                        
--------------------------------------------------------------------------------------------------------------------------
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
  [Bypass]
- Limit  (cost=10000000000.00..1000000000827.01 rows=1 width=8)
-   ->  Index Only Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=10000000000.00..1000000000827.01 rows=1 width=8)
+ Limit  (cost=0.00..8.27 rows=1 width=8)
+   ->  Index Only Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..8.27 rows=1 width=8)
          Index Cond: ((col1 = 0) AND (col2 = 0))
 (4 rows)
 
@@ -606,10 +606,10 @@ select * from test_bypass_sq1 where col1=1 and col2=2 order by col1 for update l
 --bypass though index only scan
 set enable_indexscan = off;
 explain select col1,col2 from  test_bypass_sq1 where col1=0 order by col2;
-                                                    QUERY PLAN                                                     
--------------------------------------------------------------------------------------------------------------------
+                                          QUERY PLAN                                          
+----------------------------------------------------------------------------------------------
  [Bypass]
- Index Only Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=10000000000.00..1000000002435.51 rows=6 width=8)
+ Index Only Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..24.36 rows=6 width=8)
    Index Cond: (col1 = 0)
 (3 rows)
 
@@ -623,10 +623,10 @@ select col1,col2 from  test_bypass_sq1 where col1=0 order by col2;
 (4 rows)
 
 explain select col2,col1 from test_bypass_sq1 where col2=2 order by col1;
-                                                    QUERY PLAN                                                     
--------------------------------------------------------------------------------------------------------------------
+                                          QUERY PLAN                                          
+----------------------------------------------------------------------------------------------
  [Bypass]
- Index Only Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=10000000000.00..1000000003706.26 rows=6 width=8)
+ Index Only Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..37.06 rows=6 width=8)
    Index Cond: (col2 = 2)
 (3 rows)
 
@@ -639,10 +639,10 @@ select col2,col1 from test_bypass_sq1 where col2=2 order by col1;
 (3 rows)
 
 explain select col1,col2 from test_bypass_sq1 where col1>0 order by col1;
-                                                     QUERY PLAN                                                      
----------------------------------------------------------------------------------------------------------------------
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
  [Bypass]
- Index Only Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=10000000000.00..1000000005105.76 rows=389 width=8)
+ Index Only Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..51.06 rows=389 width=8)
    Index Cond: (col1 > 0)
 (3 rows)
 
@@ -659,10 +659,10 @@ select col1,col2 from test_bypass_sq1 where col1>0 order by col1;
 (7 rows)
 
 explain select col1,col2 from test_bypass_sq1 where col1 is null and col2 is null;
-                                                    QUERY PLAN                                                     
--------------------------------------------------------------------------------------------------------------------
+                                         QUERY PLAN                                          
+---------------------------------------------------------------------------------------------
  [Bypass]
- Index Only Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=10000000000.00..1000000000827.01 rows=1 width=8)
+ Index Only Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..8.27 rows=1 width=8)
    Index Cond: ((col1 IS NULL) AND (col2 IS NULL))
 (3 rows)
 
@@ -673,11 +673,11 @@ select col1,col2 from test_bypass_sq1 where col1 is null and col2 is null;
 (1 row)
 
 explain select col2,col1 from test_bypass_sq1 where col1>0 order by col1 limit 3;
-                                                        QUERY PLAN                                                         
----------------------------------------------------------------------------------------------------------------------------
+                                              QUERY PLAN                                              
+------------------------------------------------------------------------------------------------------
  [Bypass]
- Limit  (cost=10000000000.00..17634961478.96 rows=3 width=8)
-   ->  Index Only Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=10000000000.00..1000000005105.76 rows=389 width=8)
+ Limit  (cost=0.00..0.39 rows=3 width=8)
+   ->  Index Only Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..51.06 rows=389 width=8)
          Index Cond: (col1 > 0)
 (4 rows)
 
@@ -690,10 +690,10 @@ select col2,col1 from test_bypass_sq1 where col1>0 order by col1 limit 3;
 (3 rows)
 
 explain select col1,col2 from test_bypass_sq1 where col2<5 order by col1;
-                                                     QUERY PLAN                                                      
----------------------------------------------------------------------------------------------------------------------
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
  [Bypass]
- Index Only Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=10000000000.00..1000000006089.26 rows=389 width=8)
+ Index Only Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..60.89 rows=389 width=8)
    Index Cond: (col2 < 5)
 (3 rows)
 
@@ -710,10 +710,10 @@ select col1,col2 from test_bypass_sq1 where col2<5 order by col1;
 (7 rows)
 
 explain select col1,col2 from test_bypass_sq1 where col1>=0 and col2>0 order by col1;
-                                                     QUERY PLAN                                                      
----------------------------------------------------------------------------------------------------------------------
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
  [Bypass]
- Index Only Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=10000000000.00..1000000004944.01 rows=130 width=8)
+ Index Only Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..49.44 rows=130 width=8)
    Index Cond: ((col1 >= 0) AND (col2 > 0))
 (3 rows)
 
@@ -734,11 +734,11 @@ select col1,col2 from test_bypass_sq1 where col1>=0 and col2>0 order by col1;
 (11 rows)
 
 explain select col1,col2 from test_bypass_sq1 where col1>=0 and col2>0 order by col1 limit 3;
-                                                        QUERY PLAN                                                         
----------------------------------------------------------------------------------------------------------------------------
+                                              QUERY PLAN                                              
+------------------------------------------------------------------------------------------------------
  [Bypass]
- Limit  (cost=10000000000.00..32846153960.25 rows=3 width=8)
-   ->  Index Only Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=10000000000.00..1000000004944.01 rows=130 width=8)
+ Limit  (cost=0.00..1.14 rows=3 width=8)
+   ->  Index Only Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..49.44 rows=130 width=8)
          Index Cond: ((col1 >= 0) AND (col2 > 0))
 (4 rows)
 
@@ -751,11 +751,11 @@ select col1,col2 from test_bypass_sq1 where col1>=0 and col2>0 order by col1 lim
 (3 rows)
 
 explain select col1,col2 from test_bypass_sq1 where col1>=0 and col2>0 order by col1 limit null;
-                                                        QUERY PLAN                                                         
----------------------------------------------------------------------------------------------------------------------------
+                                              QUERY PLAN                                              
+------------------------------------------------------------------------------------------------------
  [Bypass]
- Limit  (cost=10000000000.00..1000000004944.01 rows=130 width=8)
-   ->  Index Only Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=10000000000.00..1000000004944.01 rows=130 width=8)
+ Limit  (cost=0.00..49.44 rows=130 width=8)
+   ->  Index Only Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..49.44 rows=130 width=8)
          Index Cond: ((col1 >= 0) AND (col2 > 0))
 (4 rows)
 
