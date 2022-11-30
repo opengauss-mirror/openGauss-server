@@ -277,3 +277,8 @@ Datum boolor_statefunc(PG_FUNCTION_ARGS)
 {
     PG_RETURN_BOOL(PG_GETARG_BOOL(0) || PG_GETARG_BOOL(1));
 }
+
+Datum boolum(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_BOOL(PG_GETARG_BOOL(0));
+}

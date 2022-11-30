@@ -408,6 +408,7 @@ extern Datum i1tof8(PG_FUNCTION_ARGS);
 extern Datum f8toi1(PG_FUNCTION_ARGS);
 extern Datum int1_bool(PG_FUNCTION_ARGS);
 extern Datum bool_int1(PG_FUNCTION_ARGS);
+extern Datum boolum(PG_FUNCTION_ARGS);
 extern Datum int4_bpchar(PG_FUNCTION_ARGS);
 extern Datum int1_bpchar(PG_FUNCTION_ARGS);
 extern Datum int2_bpchar(PG_FUNCTION_ARGS);

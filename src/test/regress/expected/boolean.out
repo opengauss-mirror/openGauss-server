@@ -458,6 +458,18 @@ SELECT '' AS "Not True", f1
           | f
 (4 rows)
 
+SELECT -2::bool;
+ ?column? 
+----------
+ t
+(1 row)
+
+SELECT 1-2::bool;
+ ?column? 
+----------
+        0
+(1 row)
+
 --
 -- Clean up
 -- Many tables are retained by the regression test, but these do not seem
