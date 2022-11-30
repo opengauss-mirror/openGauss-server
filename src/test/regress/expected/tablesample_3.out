@@ -1,0 +1,328 @@
+create schema tablesample_schema4;
+set current_schema = tablesample_schema4;
+create table test_tablesample(id int, name text, salary numeric);
+create table test_tablesample2(id int, name text, salary numeric);
+insert into test_tablesample select generate_series(1, 3000), 'row'|| generate_series(1,3000), generate_series(1, 3000);
+insert into test_tablesample2 select * from test_tablesample;
+analyze test_tablesample;
+analyze test_tablesample2;
+-- union same query, should return only 1 row
+select count(*) from ((select * from test_tablesample tablesample BERNOULLI(5) REPEATABLE (200) limit 1) union (select * from test_tablesample tablesample BERNOULLI(5) REPEATABLE (200) limit 1));
+ count 
+-------
+     1
+(1 row)
+
+select count(*) from ((select * from test_tablesample tablesample SYSTEM(20) REPEATABLE (200) limit 1) union (select * from test_tablesample tablesample SYSTEM(20) REPEATABLE (200) limit 1));
+ count 
+-------
+     1
+(1 row)
+
+explain (costs off) select * from test_tablesample tablesample BERNOULLI(50) REPEATABLE (200) left join test_tablesample2 tablesample BERNOULLI(50) REPEATABLE (200) on test_tablesample.id=test_tablesample2.id where test_tablesample2.id is NULL;
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Hash Anti Join
+   Hash Cond: (test_tablesample.id = test_tablesample2.id)
+   ->  Sample Scan on test_tablesample
+         Sampling: bernoulli (50::real) REPEATABLE (200::double precision)
+   ->  Hash
+         ->  Sample Scan on test_tablesample2
+               Sampling: bernoulli (50::real) REPEATABLE (200::double precision)
+(7 rows)
+
+select * from test_tablesample tablesample BERNOULLI(50) REPEATABLE (200) left join test_tablesample2 tablesample BERNOULLI(50) REPEATABLE (200) on test_tablesample.id=test_tablesample2.id where test_tablesample2.id is NULL;
+ id | name | salary | id | name | salary 
+----+------+--------+----+------+--------
+(0 rows)
+
+set enable_hashjoin to off;
+explain (costs off) select * from test_tablesample tablesample BERNOULLI(50) REPEATABLE (200) left join test_tablesample2 tablesample BERNOULLI(50) REPEATABLE (200) on test_tablesample.id=test_tablesample2.id where test_tablesample2.id is NULL;
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Merge Anti Join
+   Merge Cond: (test_tablesample.id = test_tablesample2.id)
+   ->  Sort
+         Sort Key: test_tablesample.id
+         ->  Sample Scan on test_tablesample
+               Sampling: bernoulli (50::real) REPEATABLE (200::double precision)
+   ->  Sort
+         Sort Key: test_tablesample2.id
+         ->  Sample Scan on test_tablesample2
+               Sampling: bernoulli (50::real) REPEATABLE (200::double precision)
+(10 rows)
+
+select * from test_tablesample tablesample BERNOULLI(50) REPEATABLE (200) left join test_tablesample2 tablesample BERNOULLI(50) REPEATABLE (200) on test_tablesample.id=test_tablesample2.id where test_tablesample2.id is NULL;
+ id | name | salary | id | name | salary 
+----+------+--------+----+------+--------
+(0 rows)
+
+set enable_mergejoin to off;
+explain (costs off) select * from test_tablesample tablesample BERNOULLI(50) REPEATABLE (200) left join test_tablesample2 tablesample BERNOULLI(50) REPEATABLE (200) on test_tablesample.id=test_tablesample2.id where test_tablesample2.id is NULL;
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Nested Loop Anti Join
+   Join Filter: (test_tablesample.id = test_tablesample2.id)
+   ->  Sample Scan on test_tablesample
+         Sampling: bernoulli (50::real) REPEATABLE (200::double precision)
+   ->  Materialize
+         ->  Sample Scan on test_tablesample2
+               Sampling: bernoulli (50::real) REPEATABLE (200::double precision)
+(7 rows)
+
+select * from test_tablesample tablesample BERNOULLI(50) REPEATABLE (200) left join test_tablesample2 tablesample BERNOULLI(50) REPEATABLE (200) on test_tablesample.id=test_tablesample2.id where test_tablesample2.id is NULL;
+ id | name | salary | id | name | salary 
+----+------+--------+----+------+--------
+(0 rows)
+
+set enable_material to off;
+explain (costs off) select * from test_tablesample tablesample BERNOULLI(50) REPEATABLE (200) left join test_tablesample2 tablesample BERNOULLI(50) REPEATABLE (200) on test_tablesample.id=test_tablesample2.id where test_tablesample2.id is NULL;
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Nested Loop Anti Join
+   Join Filter: (test_tablesample.id = test_tablesample2.id)
+   ->  Sample Scan on test_tablesample
+         Sampling: bernoulli (50::real) REPEATABLE (200::double precision)
+   ->  Sample Scan on test_tablesample2
+         Sampling: bernoulli (50::real) REPEATABLE (200::double precision)
+(6 rows)
+
+select * from test_tablesample tablesample BERNOULLI(50) REPEATABLE (200) left join test_tablesample2 tablesample BERNOULLI(50) REPEATABLE (200) on test_tablesample.id=test_tablesample2.id where test_tablesample2.id is NULL;
+ id | name | salary | id | name | salary 
+----+------+--------+----+------+--------
+(0 rows)
+
+explain (costs off) select * from test_tablesample tablesample SYSTEM(50) REPEATABLE (200) left join test_tablesample2 tablesample SYSTEM(50) REPEATABLE (200) on test_tablesample.id=test_tablesample2.id where test_tablesample2.id is NULL;
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Nested Loop Anti Join
+   Join Filter: (test_tablesample.id = test_tablesample2.id)
+   ->  Sample Scan on test_tablesample
+         Sampling: system (50::real) REPEATABLE (200::double precision)
+   ->  Sample Scan on test_tablesample2
+         Sampling: system (50::real) REPEATABLE (200::double precision)
+(6 rows)
+
+select * from test_tablesample tablesample SYSTEM(50) REPEATABLE (200) left join test_tablesample2 tablesample SYSTEM(50) REPEATABLE (200) on test_tablesample.id=test_tablesample2.id where test_tablesample2.id is NULL;
+ id | name | salary | id | name | salary 
+----+------+--------+----+------+--------
+(0 rows)
+
+drop table test_tablesample;
+drop table test_tablesample2;
+create table test_tablesample(id int, name text, salary numeric) with (orientation=column);
+create table test_tablesample2(id int, name text, salary numeric) with (orientation=column);
+insert into test_tablesample values(generate_series(1, 50), 'row'|| generate_series(1,50), generate_series(1, 50));
+insert into test_tablesample2 values(generate_series(1, 50), 'row'|| generate_series(1,50), generate_series(1, 50));
+analyze test_tablesample;
+analyze test_tablesample2;
+-- union same query, should return only 1 row
+select count(*) from ((select * from test_tablesample tablesample BERNOULLI(10) REPEATABLE (200) limit 1) union (select * from test_tablesample tablesample BERNOULLI(10) REPEATABLE (200) limit 1));
+ count 
+-------
+     1
+(1 row)
+
+select count(*) from ((select * from test_tablesample tablesample SYSTEM(30) REPEATABLE (200) limit 1) union (select * from test_tablesample tablesample SYSTEM(30) REPEATABLE (200) limit 1));
+ count 
+-------
+     1
+(1 row)
+
+explain (costs off) select * from test_tablesample tablesample BERNOULLI(50) REPEATABLE (200) left join test_tablesample2 tablesample BERNOULLI(50) REPEATABLE (200) on test_tablesample.id=test_tablesample2.id where test_tablesample2.id is NULL;
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Nest Loop Anti Join
+         Join Filter: (test_tablesample.id = test_tablesample2.id)
+         ->  VecSample Scan on test_tablesample
+               Sampling: bernoulli (50::real) REPEATABLE (200::double precision)
+         ->  VecSample Scan on test_tablesample2
+               Sampling: bernoulli (50::real) REPEATABLE (200::double precision)
+(7 rows)
+
+select * from test_tablesample tablesample BERNOULLI(50) REPEATABLE (200) left join test_tablesample2 tablesample BERNOULLI(50) REPEATABLE (200) on test_tablesample.id=test_tablesample2.id where test_tablesample2.id is NULL;
+ id | name | salary | id | name | salary 
+----+------+--------+----+------+--------
+(0 rows)
+
+set enable_hashjoin to off;
+explain (costs off) select * from test_tablesample tablesample BERNOULLI(50) REPEATABLE (200) left join test_tablesample2 tablesample BERNOULLI(50) REPEATABLE (200) on test_tablesample.id=test_tablesample2.id where test_tablesample2.id is NULL;
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Nest Loop Anti Join
+         Join Filter: (test_tablesample.id = test_tablesample2.id)
+         ->  VecSample Scan on test_tablesample
+               Sampling: bernoulli (50::real) REPEATABLE (200::double precision)
+         ->  VecSample Scan on test_tablesample2
+               Sampling: bernoulli (50::real) REPEATABLE (200::double precision)
+(7 rows)
+
+select * from test_tablesample tablesample BERNOULLI(50) REPEATABLE (200) left join test_tablesample2 tablesample BERNOULLI(50) REPEATABLE (200) on test_tablesample.id=test_tablesample2.id where test_tablesample2.id is NULL;
+ id | name | salary | id | name | salary 
+----+------+--------+----+------+--------
+(0 rows)
+
+set enable_mergejoin to off;
+explain (costs off) select * from test_tablesample tablesample BERNOULLI(50) REPEATABLE (200) left join test_tablesample2 tablesample BERNOULLI(50) REPEATABLE (200) on test_tablesample.id=test_tablesample2.id where test_tablesample2.id is NULL;
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Nest Loop Anti Join
+         Join Filter: (test_tablesample.id = test_tablesample2.id)
+         ->  VecSample Scan on test_tablesample
+               Sampling: bernoulli (50::real) REPEATABLE (200::double precision)
+         ->  VecSample Scan on test_tablesample2
+               Sampling: bernoulli (50::real) REPEATABLE (200::double precision)
+(7 rows)
+
+select * from test_tablesample tablesample BERNOULLI(50) REPEATABLE (200) left join test_tablesample2 tablesample BERNOULLI(50) REPEATABLE (200) on test_tablesample.id=test_tablesample2.id where test_tablesample2.id is NULL;
+ id | name | salary | id | name | salary 
+----+------+--------+----+------+--------
+(0 rows)
+
+set enable_material to off;
+explain (costs off) select * from test_tablesample tablesample BERNOULLI(50) REPEATABLE (200) left join test_tablesample2 tablesample BERNOULLI(50) REPEATABLE (200) on test_tablesample.id=test_tablesample2.id where test_tablesample2.id is NULL;
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Nest Loop Anti Join
+         Join Filter: (test_tablesample.id = test_tablesample2.id)
+         ->  VecSample Scan on test_tablesample
+               Sampling: bernoulli (50::real) REPEATABLE (200::double precision)
+         ->  VecSample Scan on test_tablesample2
+               Sampling: bernoulli (50::real) REPEATABLE (200::double precision)
+(7 rows)
+
+select * from test_tablesample tablesample BERNOULLI(50) REPEATABLE (200) left join test_tablesample2 tablesample BERNOULLI(50) REPEATABLE (200) on test_tablesample.id=test_tablesample2.id where test_tablesample2.id is NULL;
+ id | name | salary | id | name | salary 
+----+------+--------+----+------+--------
+(0 rows)
+
+explain (costs off) select * from test_tablesample tablesample SYSTEM(50) REPEATABLE (200) left join test_tablesample2 tablesample SYSTEM(50) REPEATABLE (200) on test_tablesample.id=test_tablesample2.id where test_tablesample2.id is NULL;
+                                  QUERY PLAN                                  
+------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Nest Loop Anti Join
+         Join Filter: (test_tablesample.id = test_tablesample2.id)
+         ->  VecSample Scan on test_tablesample
+               Sampling: system (50::real) REPEATABLE (200::double precision)
+         ->  VecSample Scan on test_tablesample2
+               Sampling: system (50::real) REPEATABLE (200::double precision)
+(7 rows)
+
+select * from test_tablesample tablesample SYSTEM(50) REPEATABLE (200) left join test_tablesample2 tablesample SYSTEM(50) REPEATABLE (200) on test_tablesample.id=test_tablesample2.id where test_tablesample2.id is NULL;
+ id | name | salary | id | name | salary 
+----+------+--------+----+------+--------
+(0 rows)
+
+drop table test_tablesample;
+drop table test_tablesample2;
+create table test_tablesample(id int, name text, salary numeric) with (storage_type=ustore);
+create table test_tablesample2(id int, name text, salary numeric) with (storage_type=ustore);
+insert into test_tablesample select generate_series(1, 500), 'row'|| generate_series(1,500), generate_series(1, 500);
+insert into test_tablesample2 select * from test_tablesample;
+analyze test_tablesample;
+analyze test_tablesample2;
+-- union same query, should return only 1 row
+select count(*) from ((select * from test_tablesample tablesample BERNOULLI(10) REPEATABLE (200) limit 1) union (select * from test_tablesample tablesample BERNOULLI(10) REPEATABLE (200) limit 1));
+ count 
+-------
+     1
+(1 row)
+
+select count(*) from ((select * from test_tablesample tablesample SYSTEM(70) REPEATABLE (200) limit 1) union (select * from test_tablesample tablesample SYSTEM(70) REPEATABLE (200) limit 1));
+ count 
+-------
+     1
+(1 row)
+
+explain (costs off) select * from test_tablesample tablesample BERNOULLI(50) REPEATABLE (200) left join test_tablesample2 tablesample BERNOULLI(50) REPEATABLE (200) on test_tablesample.id=test_tablesample2.id where test_tablesample2.id is NULL;
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Nested Loop Anti Join
+   Join Filter: (test_tablesample.id = test_tablesample2.id)
+   ->  Sample Scan on test_tablesample
+         Sampling: bernoulli (50::real) REPEATABLE (200::double precision)
+   ->  Sample Scan on test_tablesample2
+         Sampling: bernoulli (50::real) REPEATABLE (200::double precision)
+(6 rows)
+
+select * from test_tablesample tablesample BERNOULLI(50) REPEATABLE (200) left join test_tablesample2 tablesample BERNOULLI(50) REPEATABLE (200) on test_tablesample.id=test_tablesample2.id where test_tablesample2.id is NULL;
+ id | name | salary | id | name | salary 
+----+------+--------+----+------+--------
+(0 rows)
+
+set enable_hashjoin to off;
+explain (costs off) select * from test_tablesample tablesample BERNOULLI(50) REPEATABLE (200) left join test_tablesample2 tablesample BERNOULLI(50) REPEATABLE (200) on test_tablesample.id=test_tablesample2.id where test_tablesample2.id is NULL;
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Nested Loop Anti Join
+   Join Filter: (test_tablesample.id = test_tablesample2.id)
+   ->  Sample Scan on test_tablesample
+         Sampling: bernoulli (50::real) REPEATABLE (200::double precision)
+   ->  Sample Scan on test_tablesample2
+         Sampling: bernoulli (50::real) REPEATABLE (200::double precision)
+(6 rows)
+
+select * from test_tablesample tablesample BERNOULLI(50) REPEATABLE (200) left join test_tablesample2 tablesample BERNOULLI(50) REPEATABLE (200) on test_tablesample.id=test_tablesample2.id where test_tablesample2.id is NULL;
+ id | name | salary | id | name | salary 
+----+------+--------+----+------+--------
+(0 rows)
+
+set enable_mergejoin to off;
+explain (costs off) select * from test_tablesample tablesample BERNOULLI(50) REPEATABLE (200) left join test_tablesample2 tablesample BERNOULLI(50) REPEATABLE (200) on test_tablesample.id=test_tablesample2.id where test_tablesample2.id is NULL;
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Nested Loop Anti Join
+   Join Filter: (test_tablesample.id = test_tablesample2.id)
+   ->  Sample Scan on test_tablesample
+         Sampling: bernoulli (50::real) REPEATABLE (200::double precision)
+   ->  Sample Scan on test_tablesample2
+         Sampling: bernoulli (50::real) REPEATABLE (200::double precision)
+(6 rows)
+
+select * from test_tablesample tablesample BERNOULLI(50) REPEATABLE (200) left join test_tablesample2 tablesample BERNOULLI(50) REPEATABLE (200) on test_tablesample.id=test_tablesample2.id where test_tablesample2.id is NULL;
+ id | name | salary | id | name | salary 
+----+------+--------+----+------+--------
+(0 rows)
+
+set enable_material to off;
+explain (costs off) select * from test_tablesample tablesample BERNOULLI(50) REPEATABLE (200) left join test_tablesample2 tablesample BERNOULLI(50) REPEATABLE (200) on test_tablesample.id=test_tablesample2.id where test_tablesample2.id is NULL;
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Nested Loop Anti Join
+   Join Filter: (test_tablesample.id = test_tablesample2.id)
+   ->  Sample Scan on test_tablesample
+         Sampling: bernoulli (50::real) REPEATABLE (200::double precision)
+   ->  Sample Scan on test_tablesample2
+         Sampling: bernoulli (50::real) REPEATABLE (200::double precision)
+(6 rows)
+
+select * from test_tablesample tablesample BERNOULLI(50) REPEATABLE (200) left join test_tablesample2 tablesample BERNOULLI(50) REPEATABLE (200) on test_tablesample.id=test_tablesample2.id where test_tablesample2.id is NULL;
+ id | name | salary | id | name | salary 
+----+------+--------+----+------+--------
+(0 rows)
+
+explain (costs off) select * from test_tablesample tablesample SYSTEM(50) REPEATABLE (200) left join test_tablesample2 tablesample SYSTEM(50) REPEATABLE (200) on test_tablesample.id=test_tablesample2.id where test_tablesample2.id is NULL;
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Nested Loop Anti Join
+   Join Filter: (test_tablesample.id = test_tablesample2.id)
+   ->  Sample Scan on test_tablesample
+         Sampling: system (50::real) REPEATABLE (200::double precision)
+   ->  Sample Scan on test_tablesample2
+         Sampling: system (50::real) REPEATABLE (200::double precision)
+(6 rows)
+
+select * from test_tablesample tablesample SYSTEM(50) REPEATABLE (200) left join test_tablesample2 tablesample SYSTEM(50) REPEATABLE (200) on test_tablesample.id=test_tablesample2.id where test_tablesample2.id is NULL;
+ id | name | salary | id | name | salary 
+----+------+--------+----+------+--------
+(0 rows)
+
+reset search_path;
+drop schema  tablesample_schema4 cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table tablesample_schema4.test_tablesample
+drop cascades to table tablesample_schema4.test_tablesample2
