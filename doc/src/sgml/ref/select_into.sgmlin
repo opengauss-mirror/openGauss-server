@@ -13,7 +13,7 @@
 [ WITH [ RECURSIVE ] with_query [, ...] ]
 SELECT [ ALL | DISTINCT [ ON ( expression [, ...] ) ] ]
     { * | {expression [ [ AS ] output_name ]} [, ...] }
-    INTO [ UNLOGGED ] [ TABLE ] new_table
+    INTO { [ UNLOGGED ] [ TABLE ] new_table | varlist }
     [ FROM from_item [, ...] ]
     [ WHERE condition ]
     [ GROUP BY expression [, ...] ]

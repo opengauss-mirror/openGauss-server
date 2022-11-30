@@ -283,22 +283,53 @@ Query* transformTopLevelStmt(ParseState* pstate, Node* parseTree, bool isFirstNo
         AssertEreport(stmt && IsA(stmt, SelectStmt) && stmt->larg == NULL, MOD_OPT, "failure to check parseTree");
 
         if (stmt->intoClause) {
-            CreateTableAsStmt* ctas = makeNode(CreateTableAsStmt);
+            if (stmt->intoClause->userVarList) {
+                UserSetElem* uset = makeNode(UserSetElem);
+                uset->name = stmt->intoClause->userVarList;
+                stmt->intoClause = NULL;
 
-            ctas->query = parseTree;
-            ctas->into = stmt->intoClause;
-            ctas->relkind = OBJECT_TABLE;
-            ctas->is_select_into = true;
+                SubLink* sl = makeNode(SubLink);
+                sl->subLinkType = EXPR_SUBLINK;
+                sl->testexpr = NULL;
+                sl->operName = NIL;
+                sl->subselect = (Node *)stmt;
+                sl->location = -1;
 
-            /*
-             * Remove the intoClause from the SelectStmt.  This makes it safe
-             * for transformSelectStmt to complain if it finds intoClause set
-             * (implying that the INTO appeared in a disallowed place).
-             */
-            stmt->intoClause = NULL;
+                SelectIntoVarList *sis = makeNode(SelectIntoVarList);
+                sis->sublink = sl;
+                sis->userVarList = uset->name;
 
-            parseTree = (Node*)ctas;
+                uset->val = (Expr *)sis;
+
+                VariableSetStmt* vss = makeNode(VariableSetStmt);
+                vss->kind = VAR_SET_DEFINED;
+                vss->name = "SELECT INTO VARLIST";
+                vss->defined_args = list_make1((Node *)uset);
+                vss->is_local = false;
+                vss->is_multiset = true;
+
+                VariableMultiSetStmt* vmss = makeNode(VariableMultiSetStmt);
+                vmss->args = list_make1((Node *)vss);
+                parseTree = (Node *)vmss;
+            } else {
+                CreateTableAsStmt* ctas = makeNode(CreateTableAsStmt);
+
+                ctas->query = parseTree;
+                ctas->into = stmt->intoClause;
+                ctas->relkind = OBJECT_TABLE;
+                ctas->is_select_into = true;
+
+                /*
+                 * Remove the intoClause from the SelectStmt.  This makes it safe
+                 * for transformSelectStmt to complain if it finds intoClause set
+                 * (implying that the INTO appeared in a disallowed place).
+                 */
+                stmt->intoClause = NULL;
+
+                parseTree = (Node*)ctas;
+            }
         }
+
     }
 
     if (u_sess->hook_cxt.transformStmtHook != NULL) {

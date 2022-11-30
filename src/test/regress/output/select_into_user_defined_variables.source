@@ -1,0 +1,400 @@
+-- error
+select 10 into @aa;
+ERROR:  syntax error at or near "into @"
+LINE 1: select 10 into @aa;
+                  ^
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "enable_set_variable_b_format=on" >/dev/null 2>&1
+\! sleep 1
+-- error
+select 10 into @aa;
+ERROR:  syntax error at or near "into @"
+LINE 1: select 10 into @aa;
+                  ^
+create database test dbcompatibility 'b';
+\c test
+show enable_set_variable_b_format;
+ enable_set_variable_b_format 
+------------------------------
+ on
+(1 row)
+
+drop table if exists t;
+NOTICE:  table "t" does not exist, skipping
+create table t(i int, t text, b bool, f float, bi bit(3), vbi bit varying(5));
+insert into t(i, t, b, f, bi, vbi)
+values(1, 'aaa', true, 1.11, B'101', B'00'),
+      (2, 'bbb', false, 2.22, B'100', B'10'),
+      (3, null, true, 3.33, B'101', B'00'),
+      (4, 'ddd', null, 4.44, B'100', B'10'),
+      (5, 'eee', false, null, B'101', B'00'),
+      (6, 'fff', true, 6.66, null, B'00'),
+      (7, 'ggg', false, 7.77, B'100', null),
+      (null, 'hhh', true, 8.88, B'101', B'10');
+select * from t;
+ i |  t  | b |  f   | bi  | vbi 
+---+-----+---+------+-----+-----
+ 1 | aaa | t | 1.11 | 101 | 00
+ 2 | bbb | f | 2.22 | 100 | 10
+ 3 |     | t | 3.33 | 101 | 00
+ 4 | ddd |   | 4.44 | 100 | 10
+ 5 | eee | f |      | 101 | 00
+ 6 | fff | t | 6.66 |     | 00
+ 7 | ggg | f | 7.77 | 100 | 
+   | hhh | t | 8.88 | 101 | 10
+(8 rows)
+
+--three places
+select 10,20 into @aa,@bb;
+select @aa,@bb;
+ @aa | @bb 
+-----+-----
+  10 |  20
+(1 row)
+
+select 20,10 into @aa,@bb for update;
+select @aa,@bb;
+ @aa | @bb 
+-----+-----
+  20 |  10
+(1 row)
+
+select 10,20 for update into @aa,@bb;
+select @aa,@bb;
+ @aa | @bb 
+-----+-----
+  10 |  20
+(1 row)
+
+--error
+select 10,20 into @aa into @bb; --more than one into_clause
+ERROR:  select statement can contain only one into_clause
+select * from t where i in (select 1 into @aa); --not allow here
+ERROR:  SELECT ... INTO is not allowed here
+select * from t limit 1 into @aa;  --too many columns
+ERROR:  number of variables must equal the number of columns
+select * from t into @aa,@bb,@cc,@dd,@ee,@ff;  --too many rows
+ERROR:  select result consisted of more than one row
+--values change
+select * from t where i=1 into @aa,@bb,@cc,@dd,@ee,@ff;
+select @aa,@bb,@cc,@dd,@ee,@ff;
+ @aa | @bb | @cc | @dd  | @ee | @ff 
+-----+-----+-----+------+-----+-----
+   1 | aaa |   1 | 1.11 | 101 | 00
+(1 row)
+
+select * from t where i=2 into @aa,@bb,@cc,@dd,@ee,@ff;
+select @aa,@bb,@cc,@dd,@ee,@ff;
+ @aa | @bb | @cc | @dd  | @ee | @ff 
+-----+-----+-----+------+-----+-----
+   2 | bbb |   0 | 2.22 | 100 | 10
+(1 row)
+
+select * from t where i=3 into @aa,@bb,@cc,@dd,@ee,@ff;
+select @aa,@bb,@cc,@dd,@ee,@ff;
+ @aa | @bb | @cc | @dd  | @ee | @ff 
+-----+-----+-----+------+-----+-----
+   3 |     |   1 | 3.33 | 101 | 00
+(1 row)
+
+select * from t where i=4 into @aa,@bb,@cc,@dd,@ee,@ff;
+select @aa,@bb,@cc,@dd,@ee,@ff;
+ @aa | @bb | @cc | @dd  | @ee | @ff 
+-----+-----+-----+------+-----+-----
+   4 | ddd |     | 4.44 | 100 | 10
+(1 row)
+
+select * from t where i=5 into @aa,@bb,@cc,@dd,@ee,@ff;
+select @aa,@bb,@cc,@dd,@ee,@ff;
+ @aa | @bb | @cc | @dd | @ee | @ff 
+-----+-----+-----+-----+-----+-----
+   5 | eee |   0 |     | 101 | 00
+(1 row)
+
+select * from t where i=6 into @aa,@bb,@cc,@dd,@ee,@ff;
+select @aa,@bb,@cc,@dd,@ee,@ff;
+ @aa | @bb | @cc | @dd  | @ee | @ff 
+-----+-----+-----+------+-----+-----
+   6 | fff |   1 | 6.66 |     | 00
+(1 row)
+
+select * from t where i=7 into @aa,@bb,@cc,@dd,@ee,@ff;
+select @aa,@bb,@cc,@dd,@ee,@ff;
+ @aa | @bb | @cc | @dd  | @ee | @ff 
+-----+-----+-----+------+-----+-----
+   7 | ggg |   0 | 7.77 | 100 | 
+(1 row)
+
+select * from t where i isnull into @aa,@bb,@cc,@dd,@ee,@ff;
+select @aa,@bb,@cc,@dd,@ee,@ff;
+ @aa | @bb | @cc | @dd  | @ee | @ff 
+-----+-----+-----+------+-----+-----
+     | hhh |   1 | 8.88 | 101 | 10
+(1 row)
+
+select * from t where i=100 into @aa,@bb,@cc,@dd,@ee,@ff;
+select @aa,@bb,@cc,@dd,@ee,@ff;
+ @aa | @bb | @cc | @dd | @ee | @ff 
+-----+-----+-----+-----+-----+-----
+     |     |     |     |     | 
+(1 row)
+
+--procedure stmt 1
+create or replace procedure my_pro()
+as
+begin
+select 1 into @my_var;
+end;
+/
+call my_pro();
+ my_pro 
+--------
+ 
+(1 row)
+
+select @my_var;
+ @my_var 
+---------
+       1
+(1 row)
+
+--procedure stmt 2
+create or replace procedure my_pro(in p_in int)
+as
+begin
+select p_in into @my_var;
+end;
+/
+call my_pro(2);
+ my_pro 
+--------
+ 
+(1 row)
+
+select @my_var;
+ @my_var 
+---------
+       2
+(1 row)
+
+--procedure stmt 3
+create or replace procedure my_pro(p_in int, out p_out int)
+as
+begin
+select p_in into p_out;
+end;
+/
+call my_pro(3, @my_var::int);
+select @my_var;
+ @my_var 
+---------
+       3
+(1 row)
+
+--procedure stmt 4
+create or replace procedure my_pro(inout p_inout int)
+as
+begin
+select p_inout+1 into p_inout;
+end;
+/
+call my_pro(@my_var::int);
+select @my_var;
+ @my_var 
+---------
+       4
+(1 row)
+
+--procedure stmt 5
+create or replace procedure inner_pro(inout a int, b int, inout c int)
+as
+begin
+select a*b,b*c into a,c;
+end
+/
+create or replace procedure outer_pro(d int)
+as
+begin
+select 3,5 into @x,@y;
+drop table if exists tb1;
+create table tb1(a int, b int);
+insert into tb1 values(@x, @y);
+call inner_pro(@x::int, d, @y::int);
+insert into tb1 values(@x, @y);
+end;
+/
+call outer_pro(10);
+NOTICE:  table "tb1" does not exist, skipping
+CONTEXT:  SQL statement "drop table if exists tb1"
+PL/pgSQL function outer_pro(integer) line 4 at SQL statement
+ outer_pro 
+-----------
+ 
+(1 row)
+
+select * from tb1;
+ a  | b  
+----+----
+  3 |  5
+ 30 | 50
+(2 rows)
+
+--prepare
+select 'select 1024 into @bb;' into @aa;
+prepare stmt as @aa;
+execute stmt;
+select @bb;
+ @bb  
+------
+ 1024
+(1 row)
+
+prepare stmt1 as select :p,:q into @aa,@bb;
+execute stmt1(1,2);
+select @aa,@bb;
+ @aa | @bb 
+-----+-----
+ 1   | 2
+(1 row)
+
+prepare stmt2 as select * from t where i in (:p,:q);
+execute stmt2(@aa,@bb);
+ i |  t  | b |  f   | bi  | vbi 
+---+-----+---+------+-----+-----
+ 1 | aaa | t | 1.11 | 101 | 00
+ 2 | bbb | f | 2.22 | 100 | 10
+(2 rows)
+
+execute stmt1('abcde', 'qwer');
+select @aa,@bb;
+  @aa  | @bb  
+-------+------
+ abcde | qwer
+(1 row)
+
+prepare stmt3 as select lengthb(:p);
+execute stmt3(@aa);
+ lengthb 
+---------
+       5
+(1 row)
+
+--triggers
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
+create table t1(a int);
+create or replace function tri_func1() returns trigger as
+$$
+begin
+    select @num + NEW.a into @num;
+    return NEW;
+end
+$$ LANGUAGE PLPGSQL;
+create trigger tri_insert_before before insert on t1 for each row execute procedure tri_func1();
+select 0 into @num;
+select @num;
+ @num 
+------
+    0
+(1 row)
+
+insert into t1 values(100);
+select @num;
+ @num 
+------
+  100
+(1 row)
+
+insert into t1 values(200);
+select @num;
+ @num 
+------
+  300
+(1 row)
+
+drop trigger tri_insert_before on t1;
+create trigger tri_update_before before update on t1 for each row execute procedure tri_func1();
+select 0 into @num;
+select @num;
+ @num 
+------
+    0
+(1 row)
+
+update t1 set a = 1000 where a = 100;
+select @num;
+ @num 
+------
+ 1000
+(1 row)
+
+update t1 set a = 2000 where a = 200;
+select @num;
+ @num 
+------
+ 3000
+(1 row)
+
+create or replace function tri_func2() returns trigger as
+$$
+declare
+begin
+    set @num = @num + OLD.a;
+    return OLD;
+end
+$$ LANGUAGE PLPGSQL;
+create trigger tri_update_after after update on t1 for each row execute procedure tri_func2();
+select 0 into @num;
+select @num;
+ @num 
+------
+    0
+(1 row)
+
+update t1 set a = 100 where a = 1000;
+select @num;
+ @num 
+------
+ 1100
+(1 row)
+
+update t1 set a = 200 where a = 2000;
+select @num;
+ @num 
+------
+ 3300
+(1 row)
+
+drop trigger tri_update_after on t1;
+create trigger tri_delete_after after delete on t1 for each row execute procedure tri_func2();
+select 0 into @num;
+select @num;
+ @num 
+------
+    0
+(1 row)
+
+delete t1 where a = 100;
+select @num;
+ @num 
+------
+  100
+(1 row)
+
+delete t1 where a = 200;
+select @num;
+ @num 
+------
+  300
+(1 row)
+
+drop trigger tri_delete_after on t1;
+\c regression
+drop database if exists test;
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "enable_set_variable_b_format=off" >/dev/null 2>&1
+\! sleep 1
+show enable_set_variable_b_format;
+ enable_set_variable_b_format 
+------------------------------
+ off
+(1 row)
+

@@ -163,6 +163,9 @@ void PrepareQuery(PrepareStmt* stmt, const char* queryString)
             /* OK */
             break;
         default:
+	    if (IsA(query->utilityStmt, VariableMultiSetStmt)) {
+                break;
+            }
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_PSTATEMENT_DEFINITION), errmsg("utility statements cannot be prepared")));
             break;

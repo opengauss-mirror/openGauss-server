@@ -136,6 +136,7 @@ static bool _equalIntoClause(const IntoClause* a, const IntoClause* b)
     COMPARE_SCALAR_FIELD(skipData);
     COMPARE_SCALAR_FIELD(ivm);
     COMPARE_SCALAR_FIELD(relkind);
+    COMPARE_NODE_FIELD(userVarList);
 
     return true;
 }

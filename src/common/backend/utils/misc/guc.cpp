@@ -9026,11 +9026,21 @@ void ExecSetVariableStmt(VariableSetStmt* stmt, ParamListInfo paramInfo)
                         elem->val = (Expr *)const_expression_to_const(QueryRewriteNonConstant(node));
                     }
 
-                    int ret = check_set_user_message(elem);
-                    if (ret == -1) {
-                        ereport(ERROR,
-                            (errcode(ERRCODE_INVALID_OPERATION), errmsg("invalid name or hash table is nill.")));
-                    }
+                    check_set_user_message(elem);
+                }
+            } else if (strcmp(stmt->name, "SELECT INTO VARLIST") == 0) {
+                ListCell *head = list_head(stmt->defined_args);
+                UserSetElem *elem = (UserSetElem *)lfirst(head);
+                Node *node = (Node *)copyObject(((SelectIntoVarList *)elem->val)->sublink);
+                node = simplify_subselect_expression(node, paramInfo);
+                List *val_list = QueryRewriteSelectIntoVarList(node);
+
+                ListCell *name_cur = NULL;
+                ListCell *val_cur = NULL;
+
+                forboth (name_cur, elem->name, val_cur, val_list) {
+                    Expr *var_expr = (Expr *)const_expression_to_const((Node *)lfirst(val_cur));
+                    check_variable_value_info(((UserVar *)lfirst(name_cur))->name, var_expr);
                 }
             }
             break;
@@ -12873,54 +12883,56 @@ void init_set_user_params_htab(void)
 /*
  * @Description: find user_deined variable in hash table
  * @IN elem: UserSetElem
- * @Return: 0: append success
- *          -1: append fail
+ * @Return: void
  * @See also:
  */
-int check_set_user_message(const UserSetElem *elem)
+void check_set_user_message(const UserSetElem *elem)
 {
     ListCell *head = NULL;
-    char *name = NULL;
+    foreach (head, elem->name) {
+        UserVar *n = (UserVar *)lfirst(head);
+        check_variable_value_info(n->name, elem->val);
+    }
+}
+
+/*
+ * @Description: check variable and value info in hash table
+ * @IN elem: UserSetElem
+ * @Return: void
+ * @See also:
+ */
+void check_variable_value_info(const char* var_name, const Expr* var_expr)
+{
     bool found = false;
 
-    if (nodeTag(elem->val) != T_Const) {
+    if (nodeTag(var_expr) != T_Const) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_OPERATION), errmsg("The value of user_defined variable must be a const")));
     }
 
     /* no hash table, we can only choose appending mode */
-    if (u_sess->utils_cxt.set_user_params_htab == NULL) {
-        return -1;
+    if (u_sess->utils_cxt.set_user_params_htab == NULL || !StringIsValid(var_name)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_OPERATION), errmsg("invalid name or hash table is null.")));
     }
 
-    foreach (head, elem->name) {
-        UserVar *n = (UserVar *)lfirst(head);
-        name = n->name;
-
-        if (!StringIsValid(name)) {
-            return -1;
-        }
-
-        GucUserParamsEntry *entry = (GucUserParamsEntry *)hash_search(u_sess->utils_cxt.set_user_params_htab,
-            name, HASH_ENTER, &found);
-        if (entry == NULL) {
-            ereport(ERROR,
-                (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("Failed to create user_defined entry due to out of memory")));
-        }
-
-        USE_MEMORY_CONTEXT(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB));
-
-        if (found) {
-            entry->value = (Const *)copyObject((Const *)(elem->val));
-        } else {
-            errno_t errval = strncpy_s(entry->name, sizeof(entry->name), name, sizeof(entry->name) - 1);
-            securec_check_errval(errval, , LOG);
-
-            entry->value = (Const *)copyObject((Const *)(elem->val));
-        }
+    GucUserParamsEntry *entry = (GucUserParamsEntry *)hash_search(u_sess->utils_cxt.set_user_params_htab,
+        var_name, HASH_ENTER, &found);
+    if (entry == NULL) {
+        ereport(ERROR,
+            (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("Failed to create user_defined entry due to out of memory")));
     }
 
-    return 0;
+    USE_MEMORY_CONTEXT(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB));
+
+    if (found) {
+        entry->value = (Const *)copyObject((Const *)(var_expr));
+    } else {
+        errno_t errval = strncpy_s(entry->name, sizeof(entry->name), var_name, sizeof(entry->name) - 1);
+        securec_check_errval(errval, , LOG);
+
+        entry->value = (Const *)copyObject((Const *)(var_expr));
+    }
 }
 
 /*get set commant in input_set_message*/

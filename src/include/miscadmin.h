@@ -38,6 +38,7 @@
  *	  Backend version and inplace upgrade staffs
  *****************************************************************************/
 
+extern const uint32 SELECT_INTO_VAR_VERSION_NUM;
 extern const uint32 LARGE_SEQUENCE_VERSION_NUM;
 extern const uint32 GRAND_VERSION_NUM;
 extern const uint32 DOLPHIN_ENABLE_DROP_NUM;

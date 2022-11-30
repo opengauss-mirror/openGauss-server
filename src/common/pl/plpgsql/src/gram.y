@@ -180,7 +180,7 @@ static  PLpgSQL_stmt	*make_case(int location, PLpgSQL_expr *t_expr,
 static	char			*NameOfDatum(PLwdatum *wdatum);
 static  char                    *CopyNameOfDatum(PLwdatum *wdatum);
 static	void			 check_assignable(PLpgSQL_datum *datum, int location);
-static	void			 read_into_target(PLpgSQL_rec **rec, PLpgSQL_row **row,
+static	bool			 read_into_target(PLpgSQL_rec **rec, PLpgSQL_row **row,
                                           bool *strict, bool bulk_collect);
 static	PLpgSQL_row		*read_into_scalar_list(char *initial_name,
                                                PLpgSQL_datum *initial_datum,
@@ -9001,6 +9001,7 @@ make_execsql_stmt(int firsttoken, int location)
     /* For support InsertStmt:Insert into table_name values record_var */
     bool insert_stmt = false;
     bool prev_values = false;
+    bool is_user_var = false;
     bool insert_record = false;
     bool insert_array_record = false; 
     int values_end_loc = -1;
@@ -9065,15 +9066,20 @@ make_execsql_stmt(int firsttoken, int location)
                 continue;	/* ALTER ... INTO is not an INTO-target */
             if (prev_tok == K_MERGE)
                 continue;	/* MERGE INTO is not an INTO-target */
-            if (have_into)
+            if (have_into || is_user_var)
                 yyerror("INTO specified more than once");
             have_into = true;
             if (!have_bulk_collect) {
                 into_start_loc = yylloc;
             }
             u_sess->plsql_cxt.curr_compile_context->plpgsql_IdentifierLookup = IDENTIFIER_LOOKUP_NORMAL;
-            read_into_target(&rec, &row, &have_strict, have_bulk_collect);
-            u_sess->plsql_cxt.curr_compile_context->plpgsql_IdentifierLookup = IDENTIFIER_LOOKUP_EXPR;
+	    is_user_var = read_into_target(&rec, &row, &have_strict, have_bulk_collect);
+            if (is_user_var) {
+                u_sess->plsql_cxt.curr_compile_context->plpgsql_IdentifierLookup = save_IdentifierLookup;
+                have_into = false;
+            } else {
+                u_sess->plsql_cxt.curr_compile_context->plpgsql_IdentifierLookup = IDENTIFIER_LOOKUP_EXPR;
+            }
         }
 
 	/*
@@ -10432,9 +10438,9 @@ read_into_using_add_tableelem(char **fieldnames, int *varnos, int *nfields, int 
 
 /*
  * Read the argument of an INTO clause.  On entry, we have just read the
- * INTO keyword.
+ * INTO keyword. If it is into_user_defined_variable_list_clause return true.
  */
-static void
+static bool
 read_into_target(PLpgSQL_rec **rec, PLpgSQL_row **row, bool *strict, bool bulk_collect)
 {
     int			tok;
@@ -10445,6 +10451,9 @@ read_into_target(PLpgSQL_rec **rec, PLpgSQL_row **row, bool *strict, bool bulk_c
     if (strict)
         *strict = true;
     tok = yylex();
+    if (tok == SET_USER_IDENT) {
+        return true;
+    }
     if (strict && tok == K_STRICT)
     {
         *strict = true;
@@ -10530,6 +10539,7 @@ read_into_target(PLpgSQL_rec **rec, PLpgSQL_row **row, bool *strict, bool bulk_c
             current_token_is_not_variable(tok);
             break;
     }
+    return false;
 }
 
 /*

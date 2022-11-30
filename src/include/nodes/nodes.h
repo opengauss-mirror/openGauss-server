@@ -394,6 +394,7 @@ typedef enum NodeTag {
     T_UpdateStmt,
     T_MergeStmt,
     T_SelectStmt,
+    T_SelectIntoVarList,
     T_AlterTableStmt,
     T_AlterTableCmd,
     T_AlterDomainStmt,

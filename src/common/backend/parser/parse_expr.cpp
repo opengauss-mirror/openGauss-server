@@ -69,6 +69,7 @@ static Node* transformUserVar(UserVar *uservar);
 static Node* transformFuncCall(ParseState* pstate, FuncCall* fn);
 static Node* transformCaseExpr(ParseState* pstate, CaseExpr* c);
 static Node* transformSubLink(ParseState* pstate, SubLink* sublink);
+static Node* transformSelectIntoVarList(ParseState* pstate, SelectIntoVarList* sis);
 static Node* transformArrayExpr(ParseState* pstate, A_ArrayExpr* a, Oid array_type, Oid element_type, int32 typmod);
 static Node* transformRowExpr(ParseState* pstate, RowExpr* r);
 static Node* transformCoalesceExpr(ParseState* pstate, CoalesceExpr* c);
@@ -265,6 +266,10 @@ Node* transformExpr(ParseState* pstate, Node* expr)
 
         case T_SubLink:
             result = transformSubLink(pstate, (SubLink*)expr);
+            break;
+
+	case T_SelectIntoVarList:
+            result = transformSelectIntoVarList(pstate, (SelectIntoVarList*)expr);
             break;
 
         case T_CaseExpr:
@@ -1861,6 +1866,31 @@ Node* transformSetVariableExpr(SetVariableExpr* set)
     result->value = (Expr*)copyObject(values);
 
     return (Node *)result;
+}
+
+static Node* transformSelectIntoVarList(ParseState* pstate, SelectIntoVarList* sis)
+{
+    SubLink* sublink = (SubLink *)sis->sublink;
+    Query* qtree = NULL;
+
+    if (IsA(sublink->subselect, Query)) {
+        return (Node *)sis;
+    }
+    pstate->p_hasSubLinks = true;
+    qtree = parse_sub_analyze(sublink->subselect, pstate, NULL, false, true);
+    
+    if (!IsA(qtree, Query) || qtree->commandType != CMD_SELECT || qtree->utilityStmt != NULL) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION), errmsg("unexpected non-SELECT command in SubLink")));
+    }
+    sublink->subselect = (Node*)qtree;
+    
+    if (list_length(qtree->targetList) != list_length(sis->userVarList)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_SYNTAX_ERROR),
+                errmsg("number of variables must equal the number of columns"),
+                parser_errposition(pstate, sublink->location)));
+    }
+    return (Node *)sis;
 }
 
 static Node* transformSubLink(ParseState* pstate, SubLink* sublink)

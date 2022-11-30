@@ -46,6 +46,7 @@
 #include "parser/parse_agg.h"
 #include "parser/parse_coerce.h"
 #include "parser/parse_func.h"
+#include "parser/parsetree.h"
 #include "pgxc/pgxc.h"
 #include "rewrite/rewriteManip.h"
 #include "tcop/tcopprot.h"
@@ -2398,6 +2399,59 @@ Node* estimate_expression_value(PlannerInfo* root, Node* node, EState* estate)
     context.case_val = NULL;  /* no CASE being examined */
     context.estimate = true;  /* unsafe transformations OK */
     return eval_const_expressions_mutator(node, &context);
+}
+
+/* --------------------
+ * simplify_subselect_expression
+ *
+ * Only for select ... into varlist statement.
+ *
+ * This function attempts to bind the value of parameter
+ * in the part of Select part without into_clause
+ * for the following process to calculate the value.
+ * --------------------
+ */
+Node* simplify_subselect_expression(Node* node, ParamListInfo boundParams)
+{
+    eval_const_expressions_context context;
+
+    context.boundParams = boundParams;
+    context.root = NULL;      /* for inlined-function dependencies */
+    context.active_fns = NIL; /* nothing being recursively simplified */
+    context.case_val = NULL;  /* no CASE being examined */
+    context.estimate = true; /* unsafe transformations OK */
+
+    Query *qt = (Query *)((SubLink *)node)->subselect;
+    List *fromList = qt->jointree->fromlist;
+    ListCell *fc = NULL;
+    foreach (fc, fromList) {
+        Node *jtnode = (Node *)lfirst(fc);
+        if (IsA(jtnode, RangeTblRef)) {
+            int varno = ((RangeTblRef *)jtnode)->rtindex;
+            RangeTblEntry *rte = rt_fetch(varno, qt->rtable);
+            if (rte->funcexpr != NULL && IsA(rte->funcexpr, FuncExpr)) {
+                rte->funcexpr = eval_const_expressions_mutator((Node *)rte->funcexpr, &context);
+            }
+        }
+    }
+
+    ListCell *lc = NULL;
+    AttrNumber attno = 1;
+    List *newTargetList = NIL;
+    foreach (lc, qt->targetList) {
+        TargetEntry *te = (TargetEntry *)lfirst(lc);
+        Node *tn = (Node *)te->expr;
+        if(IsA(tn, Param) || IsA(tn, OpExpr)) {
+            tn = eval_const_expressions_mutator(tn, &context);
+            te = makeTargetEntry((Expr *)tn, attno++, te->resname, false);
+            newTargetList = lappend(newTargetList, te);
+        }
+    }
+    if (newTargetList != NIL) {
+        qt->targetList = newTargetList;
+    }
+
+    return node;
 }
 
 Node* eval_const_expressions_mutator(Node* node, eval_const_expressions_context* context)

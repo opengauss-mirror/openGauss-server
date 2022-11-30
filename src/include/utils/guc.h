@@ -503,7 +503,8 @@ extern void init_set_params_htab(void);
 extern void init_set_user_params_htab(void);
 extern void make_set_message(void);
 extern int check_set_message_to_send(const VariableSetStmt* stmt, const char* queryString);
-extern int check_set_user_message(const UserSetElem *elem);
+extern void check_set_user_message(const UserSetElem *elem);
+extern void check_variable_value_info(const char* var_name, const Expr* var_expr);
 
 #define TRANS_ENCRYPT_SAMPLE_RNDM "1234567890ABCDEF"
 #define TRANS_ENCRYPT_SAMPLE_STRING "TRANS_ENCRY_SAMPLE_STRING"

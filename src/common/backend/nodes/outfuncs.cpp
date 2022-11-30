@@ -2074,6 +2074,9 @@ static void _outIntoClause(StringInfo str, IntoClause* node)
     if (t_thrd.proc->workingVersionNum >= MATVIEW_VERSION_NUM) {
         WRITE_CHAR_FIELD(relkind);
     }
+    if (t_thrd.proc->workingVersionNum >= SELECT_INTO_VAR_VERSION_NUM) {
+        WRITE_NODE_FIELD(userVarList);
+    }
 }
 
 static void _outVar(StringInfo str, Var* node)
