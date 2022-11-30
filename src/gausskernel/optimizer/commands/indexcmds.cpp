@@ -523,6 +523,14 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
 
     CheckCompressOption(&indexCreateSupport);
 
+    /* do not suppport to create compressed index for temp table. */
+    if ((indexCreateSupport.compressType != (int)COMPRESS_TYPE_NONE) &&
+        (relPersistence == RELPERSISTENCE_TEMP || relPersistence == RELPERSISTENCE_GLOBAL_TEMP)) {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("compressed index \"%s\" is not supported for temporary table,"
+            " please use uncompressed one instead", stmt->idxname)));
+    }
+
     /* Forbidden to create gin index on ustore table. */
     if (rel->rd_tam_type == TAM_USTORE) {
         if (strcmp(stmt->accessMethod, "btree") == 0) {
