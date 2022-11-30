@@ -464,4 +464,7 @@ extern void push_unlink_rel_to_hashtbl(ColFileNode *xnodes, int nrels);
 extern void XactCleanExceptionSubTransaction(SubTransactionId head);
 extern char* GetCurrentTransactionName();
 extern List* GetTransactionList(List *head);
+extern void BeginTxnForAutoCommitOff();
+extern bool IsTransactionInProgressState();
+extern bool IsTransactionDefaultState();
 #endif /* XACT_H */

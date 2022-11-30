@@ -2713,6 +2713,9 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
             ((ReindexStmt*)parsetree)->kind == OBJECT_DATABASE && IsPostmasterEnvironment)
             SetForceXidFromGTM(true);
 #endif
+        if (!u_sess->attr.attr_storage.phony_autocommit) {
+            BeginTxnForAutoCommitOff();
+        }
         /* SQL bypass */
         if (runOpfusionCheck) {
             (void)MemoryContextSwitchTo(oldcontext);
@@ -9304,6 +9307,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                     }
                 }
                 bool isQueryCompleted = false;
+                if (!u_sess->attr.attr_storage.phony_autocommit) {
+                    BeginTxnForAutoCommitOff();
+                }
                 if (OpFusion::process(FUSION_EXECUTE, &input_message, completionTag, true, &isQueryCompleted)) {
                     if(isQueryCompleted) {
                         CommandCounterIncrement();
@@ -11222,6 +11228,9 @@ static void exec_batch_bind_execute(StringInfo input_message)
      * we are already in one.
      */
     start_xact_command();
+    if (!u_sess->attr.attr_storage.phony_autocommit) {
+        BeginTxnForAutoCommitOff();
+    }
 
     if (ENABLE_WORKLOAD_CONTROL && SqlIsValid(t_thrd.postgres_cxt.debug_query_string) &&
         (IS_PGXC_COORDINATOR || IS_SINGLE_NODE) &&
