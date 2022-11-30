@@ -41,6 +41,7 @@
 #include "backup.h"
 #include "logging.h"
 
+#include "tool_common.h"
 #include "bin/elog.h"
 #include "file_ops.h"
 #include "catalog/catalog.h"
@@ -51,6 +52,7 @@
 #ifdef ENABLE_MOT
 #include "fetchmot.h"
 #endif
+
 
 /* Maximum number of digit in integer. Used to allocate memory to copy int to string */
 #define MAX_INT_SIZE 20
@@ -518,7 +520,7 @@ bool StartLogStreamer(
 
     Assert(!XLogRecPtrIsInvalid(param->startptr));
     /* Round off to even segment position */
-    param->startptr -= param->startptr % XLOG_SEG_SIZE;
+    param->startptr -= param->startptr % XLogSegSize;
 
 #ifndef WIN32
     /* Create our background pipe */
@@ -962,7 +964,7 @@ static bool ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
             if (forbid_write) {
                 file = fopen(filename, "ab");
             } else {
-                file = fopen(filename, "wb");
+                file = fopen(filename, IsCompressedFile(filename, strlen(filename)) ? "wb+" : "wb");
             }
             if (NULL == file) {
                 pg_log(PG_WARNING, _("could not create file \"%s\": %s\n"), filename, strerror(errno));
@@ -2343,7 +2345,7 @@ static bool backup_dw_file(const char* target_dir)
     char* unaligned_buf = NULL;
 
     /* Delete the dw file, if it exists. */
-    rc = snprintf_s(dw_file_path, PATH_MAX, PATH_MAX - 1, "%s/%s", target_dir, OLD_DW_FILE_NAME);
+    rc = snprintf_s(dw_file_path, PATH_MAX, PATH_MAX - 1, "%s/%s", target_dir, T_OLD_DW_FILE_NAME);
     securec_check_ss_c(rc, "\0", "\0");
     if (realpath(dw_file_path, real_file_path) == NULL) {
         if (real_file_path[0] == '\0') {
@@ -2357,7 +2359,7 @@ static bool backup_dw_file(const char* target_dir)
     securec_check_c(rc, "\0", "\0");
 
     /* Delete the dw build file, if it exists. */
-    rc = snprintf_s(dw_file_path, PATH_MAX, PATH_MAX - 1, "%s/%s", target_dir, DW_BUILD_FILE_NAME);
+    rc = snprintf_s(dw_file_path, PATH_MAX, PATH_MAX - 1, "%s/%s", target_dir, T_DW_BUILD_FILE_NAME);
     securec_check_ss_c(rc, "\0", "\0");
     if (realpath(dw_file_path, real_file_path) == NULL) {
         if (real_file_path[0] == '\0') {

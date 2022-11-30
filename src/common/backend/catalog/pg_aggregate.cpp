@@ -38,6 +38,8 @@
 
 static Oid lookup_agg_function(List* fnName, int nargs, Oid* input_types, Oid* rettype);
 
+typedef bool (*aggIsSupportedFunc)(const char* aggName);
+
 static void InternalAggIsSupported(const char *aggName)
 {
     static const char *supportList[] = {
@@ -49,7 +51,9 @@ static void InternalAggIsSupported(const char *aggName)
         "st_summarystatsagg",
         "st_union",
         "wm_concat",
-        "group_concat"
+        "group_concat",
+        "json_objectagg",
+        "json_arrayagg"
     };
 
     uint len = lengthof(supportList);
@@ -57,6 +61,11 @@ static void InternalAggIsSupported(const char *aggName)
         if (pg_strcasecmp(aggName, supportList[i]) == 0) {
             return;
         }
+    }
+
+    if (u_sess->hook_cxt.aggIsSupportedHook != NULL &&
+        ((aggIsSupportedFunc)(u_sess->hook_cxt.aggIsSupportedHook))(aggName)) {
+        return;
     }
 
     ereport(ERROR,

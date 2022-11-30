@@ -1,0 +1,59 @@
+SET CURRENT_SCHEMA TO segment_subpartition_split;
+select * from list_list subpartition (p_201902_a) order by 1,2,3,4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201903     | 1         | 1       |         1
+(1 row)
+
+select * from list_list subpartition (p_201902_b) order by 1,2,3,4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201903     | 2         | 1       |         1
+ 201903     | 3         | 1       |         1
+(2 rows)
+
+select * from list_list subpartition (p_201902_c) order by 1,2,3,4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+(0 rows)
+
+select * from range_range subpartition (p_201901_a) order by 1,2,3,4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 1         | 1       |         1
+(1 row)
+
+select * from range_range subpartition (p_201901_b) order by 1,2,3,4;
+ERROR:  subpartition "p_201901_b" of relation "range_range" does not exist
+select * from range_range subpartition (p_201901_c) order by 1,2,3,4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 2         | 1       |         1
+(1 row)
+
+select * from range_range subpartition (p_201901_d) order by 1,2,3,4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201902     | 3         | 1       |         1
+(1 row)
+
+select * from range_range subpartition (p_201902_a) order by 1,2,3,4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201903     | 1         | 1       |         1
+(1 row)
+
+select * from range_range subpartition (p_201902_b) order by 1,2,3,4;
+ERROR:  subpartition "p_201902_b" of relation "range_range" does not exist
+select * from range_range subpartition (p_201902_c) order by 1,2,3,4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201903     | 2         | 1       |         1
+(1 row)
+
+select * from range_range subpartition (p_201902_d) order by 1,2,3,4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201903     | 5         | 1       |         1
+(1 row)
+

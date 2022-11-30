@@ -132,7 +132,7 @@ const struct LWLOCK_PARTITION_DESC LWLockPartInfo[] = {
 #define NUM_SESSION_ROLEID_PARTITIONS 128
 
 #ifdef WIN32
-#define NUM_INDIVIDUAL_LWLOCKS           116 /* num should be same as lwlockname.txt */
+#define NUM_INDIVIDUAL_LWLOCKS           132 /* num should be same as lwlockname.txt */
 #endif
 
 /* Number of partitions the global package runtime state hashtable */

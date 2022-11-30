@@ -100,6 +100,8 @@
 #include "catalog/pg_hashbucket_fn.h"
 #include "gstrace/gstrace_infra.h"
 #include "gstrace/access_gstrace.h"
+#include "ddes/dms/ss_transaction.h"
+
 #ifdef ENABLE_MULTIPLE_NODES
 #include "tsdb/storage/ts_store_insert.h"
 #endif /* ENABLE_MULTIPLE_NODES */
@@ -145,7 +147,6 @@ static void ComputeNewXmaxInfomask(TransactionId xmax, uint16 old_infomask, uint
     uint16 *result_infomask, uint16 *result_infomask2);
 
 static void GetMultiXactIdHintBits(MultiXactId multi, uint16 *new_infomask, uint16 *new_infomask2);
-static TransactionId MultiXactIdGetUpdateXid(TransactionId xmax, uint16 t_infomask, uint16 t_infomask2);
 static bool DoesMultiXactIdConflict(MultiXactId multi, LockTupleMode lockmode);
 
 /* ----------------
@@ -7167,6 +7168,7 @@ static TM_Result heap_lock_updated_tuple_rec(Relation rel, ItemPointer tid, Tran
     uint16 old_infomask2;
     TransactionId xmax;
     TransactionId new_xmax;
+    TransactionId priorXmax = InvalidTransactionId;
     Buffer vmbuffer = InvalidBuffer;
     BlockNumber block;
     TM_Result result;
@@ -7195,16 +7197,36 @@ l4:
         CHECK_FOR_INTERRUPTS();
 
         /*
-		 * Before locking the buffer, pin the visibility map page if it
-		 * appears to be necessary.  Since we haven't got the lock yet,
-		 * someone else might be in the middle of changing this, so we'll need
-		 * to recheck after we have the lock.
-		 */
+         * Before locking the buffer, pin the visibility map page if it
+         * appears to be necessary.  Since we haven't got the lock yet,
+         * someone else might be in the middle of changing this, so we'll need
+         * to recheck after we have the lock.
+         */
         if (PageIsAllVisible(BufferGetPage(buf))) {
             visibilitymap_pin(rel, block, &vmbuffer);
         }
 
         LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
+
+        /*
+         * Check the tuple XMIN against prior XMAX, if any. If we reached the
+         * end of the chain, we're done, so return success.
+         */
+        if (TransactionIdIsValid(priorXmax) &&
+            !TransactionIdEquals(HeapTupleGetRawXmin(&mytup), priorXmax)) {
+            result = TM_Ok;
+            goto out_locked;
+        }
+
+        /*
+         * Also check Xmin: if this tuple was created by an aborted
+         * (sub)transaction, then we already locked the last live one in the
+         * chain, thus we're done, so return success.
+         */
+        if (TransactionIdDidAbort(HeapTupleGetRawXmin(&mytup))) {
+            result = TM_Ok;
+            goto out_locked;
+        }
 
         old_infomask = mytup.t_data->t_infomask;
         old_infomask2 = mytup.t_data->t_infomask2;
@@ -7369,6 +7391,7 @@ next:
         }
 
         /* tail recursion */
+        priorXmax = HeapTupleGetUpdateXid(&mytup);
         ItemPointerCopy(&(mytup.t_data->t_ctid), &tupid);
         UnlockReleaseBuffer(buf);
         if (vmbuffer != InvalidBuffer)
@@ -7769,8 +7792,11 @@ static void GetMultiXactIdHintBits(MultiXactId multi, uint16 *new_infomask, uint
  * Caller is expected to check the status of the updating transaction, if
  * necessary.
  */
-static TransactionId MultiXactIdGetUpdateXid(TransactionId xmax, uint16 t_infomask, uint16 t_infomask2)
+TransactionId MultiXactIdGetUpdateXid(TransactionId xmax, uint16 t_infomask, uint16 t_infomask2)
 {
+    if (SS_STANDBY_MODE) {
+        return SSMultiXactIdGetUpdateXid(xmax, t_infomask, t_infomask2);
+    }
     TransactionId updateXact = InvalidTransactionId;
     MultiXactMember *members = NULL;
     int nmembers;

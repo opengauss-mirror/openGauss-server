@@ -40,6 +40,7 @@
 #include "storage/lmgr.h"
 #include "storage/smgr/smgr.h"
 #include "storage/smgr/segment.h"
+#include "storage/file/fio_device.h"
 #include "utils/guc.h"
 #include "utils/hsearch.h"
 #include "utils/rel.h"
@@ -1550,7 +1551,7 @@ static void XLogRead(char *buf, TimeLineID tli, XLogRecPtr startptr, Size count)
 
             XLByteToSeg(recptr, t_thrd.xlog_cxt.sendSegNo);
 
-            errorno = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, XLOGDIR "/%08X%08X%08X", tli,
+            errorno = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/%08X%08X%08X", SS_XLOGDIR, tli,
                                  (uint32)((t_thrd.xlog_cxt.sendSegNo) / XLogSegmentsPerXLogId),
                                  (uint32)((t_thrd.xlog_cxt.sendSegNo) % XLogSegmentsPerXLogId));
             securec_check_ss(errorno, "", "");
@@ -1558,7 +1559,7 @@ static void XLogRead(char *buf, TimeLineID tli, XLogRecPtr startptr, Size count)
             t_thrd.xlog_cxt.sendFile = BasicOpenFile(path, O_RDONLY | PG_BINARY, 0);
 
             if (t_thrd.xlog_cxt.sendFile < 0) {
-                if (errno == ENOENT)
+                if (FILE_POSSIBLY_DELETED(errno))
                     ereport(ERROR, (errcode_for_file_access(),
                                     errmsg("requested WAL segment %s has already been removed", path)));
                 else
@@ -1573,7 +1574,7 @@ static void XLogRead(char *buf, TimeLineID tli, XLogRecPtr startptr, Size count)
             if (lseek(t_thrd.xlog_cxt.sendFile, (off_t)startoff, SEEK_SET) < 0) {
                 char path[MAXPGPATH];
 
-                errorno = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, XLOGDIR "/%08X%08X%08X", tli,
+                errorno = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/%08X%08X%08X", SS_XLOGDIR, tli,
                                      (uint32)((t_thrd.xlog_cxt.sendSegNo) / XLogSegmentsPerXLogId),
                                      (uint32)((t_thrd.xlog_cxt.sendSegNo) % XLogSegmentsPerXLogId));
                 securec_check_ss(errorno, "", "");
@@ -1597,7 +1598,7 @@ static void XLogRead(char *buf, TimeLineID tli, XLogRecPtr startptr, Size count)
         if (readbytes <= 0) {
             char path[MAXPGPATH];
 
-            errorno = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, XLOGDIR "/%08X%08X%08X", tli,
+            errorno = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/%08X%08X%08X", SS_XLOGDIR, tli,
                                  (uint32)((t_thrd.xlog_cxt.sendSegNo) / XLogSegmentsPerXLogId),
                                  (uint32)((t_thrd.xlog_cxt.sendSegNo) % XLogSegmentsPerXLogId));
             securec_check_ss(errorno, "", "");

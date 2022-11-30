@@ -44,6 +44,9 @@
 #include "utils/aiomem.h"
 #include "utils/plog.h"
 #include "securec_check.h"
+#include "storage/dss/fio_dss.h"
+#include "storage/file/fio_device.h"
+#include "storage/vfd.h"
 
 /*
  * The max size for single data file
@@ -222,20 +225,22 @@ void CUStorage::InitFileNamePrefix(_in_ const CFileNode& cFileNode)
     if (spcoid == GLOBALTABLESPACE_OID) {
         /* Shared system relations live in {datadir}/global */
         Assert(dboid == 0);
-        pathlen = strlen("global") + 1 + OIDCHARS + 1 + strlen(attr_name) + 1;
-        rc = snprintf_s(m_fileNamePrefix, sizeof(m_fileNamePrefix), pathlen, "global/%u_%s", reloid, attr_name);
+        pathlen = strlen(GLOTBSDIR) + 1 + OIDCHARS + 1 + strlen(attr_name) + 1;
+        rc = snprintf_s(m_fileNamePrefix, sizeof(m_fileNamePrefix), pathlen, "%s/%u_%s", GLOTBSDIR, reloid, attr_name);
         securec_check_ss(rc, "", "");
     } else if (spcoid == DEFAULTTABLESPACE_OID) {
         /* The default tablespace is {datadir}/base */
-        pathlen = strlen("base") + 1 + OIDCHARS + 1 + OIDCHARS + 1 + strlen(attr_name) + 1;
-        rc = snprintf_s(m_fileNamePrefix, sizeof(m_fileNamePrefix), pathlen, "base/%u/%u_%s", dboid, reloid, attr_name);
+        pathlen = strlen(DEFTBSDIR) + 1 + OIDCHARS + 1 + OIDCHARS + 1 + strlen(attr_name) + 1;
+        rc = snprintf_s(m_fileNamePrefix, sizeof(m_fileNamePrefix), pathlen, "%s/%u/%u_%s", DEFTBSDIR, dboid, reloid,
+            attr_name);
         securec_check_ss(rc, "", "");
     } else {
         /* All other tablespaces are accessed via symlinks */
         rc = snprintf_s(m_fileNamePrefix,
                         sizeof(m_fileNamePrefix),
                         sizeof(m_fileNamePrefix) - 1,
-                        "pg_tblspc/%u/%s_%s/%u/%u_%s",
+                        "%s/%u/%s_%s/%u/%u_%s",
+                        TBLSPCDIR,
                         spcoid,
                         TABLESPACE_VERSION_DIRECTORY,
                         g_instance.attr.attr_common.PGXCNodeName,
@@ -377,7 +382,32 @@ void CUStorage::SaveCU(char* write_buf, _in_ uint64 offset, _in_ int size, bool 
         }
         Assert(m_fd != FILE_INVALID);
 
-        int writtenBytes = FilePWrite(m_fd, write_buf, write_size, writeOffset);
+        /*
+         * DSS pwrite does not allow file offset beyond the end of the file,
+         * so we need fallocate first. In extend situation, lock is already
+         * acquire in previous step.
+         */
+        vfd *vfdcache = GetVfdCache();
+        int fd = vfdcache[m_fd].fd;
+        if (is_dss_fd(fd)) {
+            off_t fileSize = dss_get_file_size(m_fileName);
+            if ((off_t)writeOffset > fileSize) {
+                (void)dss_fallocate_file(fd, 0, fileSize, (off_t)writeOffset - fileSize);
+            }
+        }
+
+        int writtenBytes;
+        if (ENABLE_DSS) {
+            char *buffer_ori = (char*)palloc(BLCKSZ + write_size);
+            char *buffer_ali = (char*)BUFFERALIGN(buffer_ori);
+            rc = memcpy_s(buffer_ali, write_size, write_buf, write_size);
+            securec_check(rc, "", "");
+            writtenBytes = FilePWrite(m_fd, buffer_ali, write_size, (off_t)writeOffset);
+            pfree(buffer_ori);
+            buffer_ali = NULL;
+        } else {
+            writtenBytes = FilePWrite(m_fd, write_buf, write_size, (off_t)writeOffset);
+        }
         if (writtenBytes != write_size) {
             int align_size = is_2byte_align ? ALIGNOF_TIMESERIES_CUSIZE : ALIGNOF_CUSIZE;
             SaveCUReportIOError(tmpFileName, writeOffset, writtenBytes, write_size, size, align_size);
@@ -432,7 +462,18 @@ void CUStorage::OverwriteCU(
         }
 
         int nbytes = 0;
-        if ((nbytes = FilePWrite(m_fd, write_buf, write_size, writeOffset)) != write_size) {
+        if (ENABLE_DSS) {
+            char *buffer_ori = (char*)palloc(BLCKSZ + write_size);
+            char *buffer_ali = (char*)BUFFERALIGN(buffer_ori);
+            rc = memcpy_s(buffer_ali, write_size, write_buf, write_size);
+            securec_check(rc, "", "");
+            nbytes = FilePWrite(m_fd, buffer_ali, write_size, writeOffset);
+            pfree(buffer_ori);
+            buffer_ali = NULL;
+        } else {
+            nbytes = FilePWrite(m_fd, write_buf, write_size, writeOffset);
+        }
+        if (nbytes != write_size) {
             // just warning
             ereport(WARNING,
                     (errcode_for_file_access(),
@@ -1088,7 +1129,7 @@ uint64 GetColDataFileSize(Relation rel, int attid)
 
         if (stat(pathname, &fst) < 0) {
             /* pathname file is not exist */
-            if (errno == ENOENT)
+            if (FILE_POSSIBLY_DELETED(errno))
                 break;
             else
                 ereport(ERROR, (errcode_for_file_access(), errmsg("could not stat file \"%s\": %m", pathname)));

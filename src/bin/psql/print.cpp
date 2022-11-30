@@ -1951,7 +1951,8 @@ void printTableInit(
     content->ncolumns = ncolumns;
     content->nrows = nrows;
 
-    if (ncolumns * nrows + 1 <= 0) {
+    int64 res = (int64)ncolumns * (int64)nrows + 1L;
+    if (res >= (int64)PG_INT32_MAX) {
         fprintf(stderr, _("Error: Integer overflow when select execution.\n"));
         exit(EXIT_FAILURE);
     }

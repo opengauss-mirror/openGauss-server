@@ -438,7 +438,7 @@ void DumpFileFlowVisitor::removeAllTempFiles(map_flow::iterator it){
     }
 }
 
-void DumpFileFlowVisitor::mergeFiles(const char* outPath, size_t len)
+trace_msg_code DumpFileFlowVisitor::mergeFiles(const char* outPath, size_t len)
 {
     FILE* fpOut = NULL;
     map_flow::iterator it;
@@ -449,8 +449,7 @@ void DumpFileFlowVisitor::mergeFiles(const char* outPath, size_t len)
     fpOut = trace_fopen(outPath, "w+");
     if (fpOut == NULL) {
         this->removeAllTempFiles(mapFlows.begin());
-        printf("Cannot open file %s\n", outPath);
-        goto exit;
+        return TRACE_OPEN_OUTPUT_FILE_ERR;
     }
 
     if (!this->m_analyze) {
@@ -466,8 +465,9 @@ void DumpFileFlowVisitor::mergeFiles(const char* outPath, size_t len)
             FILE* fpIn = trace_fopen(tmpPath, "r");
             if (NULL == fpIn) {
                 this->removeAllTempFiles(it);
-                printf("Cannot open file %s\n", tmpPath);
-                goto exit;
+                (void)trace_fclose(fpOut);
+                free(buffer);
+                return TRACE_OPEN_TMP_FILE_ERR;
             }
 
             while ((charRead = getline(&buffer, &bufSize, fpIn)) != -1) {
@@ -483,10 +483,9 @@ void DumpFileFlowVisitor::mergeFiles(const char* outPath, size_t len)
     } else {
         outputStat(fpOut);
     }
-
-exit:
     free(buffer);
     (void)trace_fclose(fpOut);
+    return TRACE_OK;
 }
 
 // If the ThreadFlow for a given tid is not existed, then insert one to it.
@@ -1303,9 +1302,11 @@ static trace_msg_code formatDumpFileToFlow(const char* inputFile, size_t input_l
     DumpFileParser parser(inputFile, input_len);
     DumpFileFlowVisitor visitor(false);
     parser.acceptVisitor(&visitor);
-    ret = parser.parse();
+    if ((ret = parser.parse()) != TRACE_OK){
+        return ret;
+    }
     visitor.flushThreadFlows();
-    visitor.mergeFiles(outputFile, output_len);
+    ret = visitor.mergeFiles(outputFile, output_len);
 
     return ret;
 }
@@ -1318,8 +1319,10 @@ static trace_msg_code anlyzeDumpFile(
     DumpFileParser parser(inputFile, input_len);
     DumpFileFlowVisitor visitor(true, stepSize, outputFile, output_len);
     parser.acceptVisitor(&visitor);
-    ret = parser.parse();
-    visitor.mergeFiles(outputFile, output_len);
+    if ((ret = parser.parse()) != TRACE_OK){
+        return ret;
+    }
+    ret = visitor.mergeFiles(outputFile, output_len);
 
     return ret;
 }
@@ -1470,6 +1473,7 @@ trace_msg_t trace_message[] = {
     {TRACE_DISABLE_ERR, "Trace is disable."},
     {TRACE_OPEN_OUTPUT_FILE_ERR, "Failed to open trace output file."},
     {TRACE_OPEN_INPUT_FILE_ERR, "Failed to open trace input file."},
+    {TRACE_OPEN_TMP_FILE_ERR, "Failed to open temp file."},
     {TRACE_WRITE_BUFFER_HEADER_ERR, "Failed to write trace buffer header."},
     {TRACE_WRITE_CFG_HEADER_ERR, "Failed to write trace config header."},
     {TRACE_WRITE_BUFFER_ERR, "Failed to write trace buffer."},

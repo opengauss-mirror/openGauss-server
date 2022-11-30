@@ -899,6 +899,10 @@ static void transformLimitSortClause(ParseState* pstate, void* stmt, Query* qry,
     rlist =  forDel ? transformSortClause(pstate, ((DeleteStmt*)stmt)->sortClause, &qry->targetList, true, false) :
                 transformUpdateSortClause(pstate, (UpdateStmt*)stmt, qry);
 
+    /*
+     * For update statement, the effective range of sort clause is not optimized. For delete statement,
+     * sorting is performed only when limit or returning clause takes effect.
+     */
     if (qry->limitCount != NULL) {
         /* flag for discriminating rownum */
         Const *flag = makeNode(Const);
@@ -907,8 +911,10 @@ static void transformLimitSortClause(ParseState* pstate, void* stmt, Query* qry,
         flag->consttype = INT8OID;
         flag->consttypmod = -1;
         qry->limitOffset = (Node*)flag;
+        qry->sortClause = rlist;
+    } else if (!forDel || qry->returningList != NULL) {
+        qry->sortClause = rlist;
     }
-    qry->sortClause = rlist;
 }
 
 static void CheckUDRelations(ParseState* pstate, List* sortClause, Node* limitClause, List* returningList,
@@ -3657,6 +3663,49 @@ void fixResTargetListWithTableNameRef(Relation rd, RangeVar* rel, List* clause_l
     }
 }
 
+/* Merge the targetlists of multiple identical result relations into the one and change their rtindex. */
+static void MergeTargetList(List** targetLists, RangeTblEntry* rte1, int rtindex1,
+                            RangeTblEntry* rte2, int rtindex2)
+{
+    ListCell* l = NULL;
+
+    foreach (l, targetLists[rtindex2 - 1]) {
+        TargetEntry* tle = (TargetEntry*)lfirst(l);
+        tle->rtindex = (Index)rtindex1;
+        rte1->updatedCols = bms_add_member(rte1->updatedCols, tle->resno - FirstLowInvalidHeapAttributeNumber);
+        rte2->updatedCols = bms_del_member(rte2->updatedCols, tle->resno - FirstLowInvalidHeapAttributeNumber);
+    }
+    targetLists[rtindex1 - 1] = list_concat(targetLists[rtindex1 - 1], targetLists[rtindex2 - 1]);
+    targetLists[rtindex2 - 1] = NULL;
+}
+
+static void transformMultiTargetList(List* target_rangetblentry, List** targetLists)
+{
+    int rtindex1 = 1, rtindex2 = 1;
+    ListCell* l1;
+    ListCell* l2;
+
+    if (list_length(target_rangetblentry) <= 1) {
+        return;
+    }
+    foreach (l1, target_rangetblentry) {
+        RangeTblEntry* rte1 = (RangeTblEntry*)lfirst(l1);
+        rtindex2 = 0;
+
+        l2 = lnext(l1);
+        rtindex2 = rtindex1 + 1;
+        while (l2 != NULL) {
+            RangeTblEntry* rte2 = (RangeTblEntry*)lfirst(l2);
+            if (rte2->relid == rte1->relid) {
+                MergeTargetList(targetLists, rte1, rtindex1, rte2, rtindex2);
+            }
+            rtindex2++;
+            l2 = lnext(l2);
+        }
+        rtindex1++;
+    }
+}
+
 /*
  * If a relation has no column updated in the resultRelations, it is redundant
  * and remove it from the resultRelations.
@@ -3675,7 +3724,7 @@ static List* remove_update_redundant_relation(List* resultRelations, List* targe
     while (res != NULL) {
         res_next = lnext(res);
         target_rte = (RangeTblEntry*)lfirst(rte);
-        if (target_rte->updatedCols == NULL) {
+        if (bms_is_empty(target_rte->updatedCols)) {
             resultRelations = list_delete_cell(resultRelations, res, res_pre);
         } else {
             res_pre = res;
@@ -3756,7 +3805,7 @@ static Query* transformUpdateStmt(ParseState* pstate, UpdateStmt* stmt)
         qry->hasModifyingCTE = pstate->p_hasModifyingCTE;
     }
 
-    if (list_length(stmt->relationClause) > 1) {
+    if (list_length(stmt->relationClause) > 1 || !IsA(linitial(stmt->relationClause), RangeVar)) {
         /* add all relations from relationClause to resultRelations. */
         transformFromClause(pstate, stmt->relationClause, true, false, true);
         qry->resultRelations = pstate->p_updateRelations;
@@ -4072,7 +4121,12 @@ static List* transformUpdateTargetList(ParseState* pstate, List* qryTlist, List*
         tle->rtindex = rtindex;
         new_tle[rtindex - 1] = lappend(new_tle[rtindex - 1], tle);
     }
-    
+    /*
+     * If there are actually the same result relations by different alias
+     * or synonym in multiple update, merge their targetLists.
+     */
+    transformMultiTargetList(pstate->p_target_rangetblentry, new_tle);
+
     forboth (rb, pstate->p_target_rangetblentry, r, pstate->p_target_relation) {
         target_rte = (RangeTblEntry*)lfirst(rb);
         targetrel = (Relation)lfirst(r);
@@ -4084,6 +4138,7 @@ static List* transformUpdateTargetList(ParseState* pstate, List* qryTlist, List*
             tlist = list_concat(tlist, new_tle[i]);
         }
     }
+    pfree(new_tle);
     return tlist;
 }
 

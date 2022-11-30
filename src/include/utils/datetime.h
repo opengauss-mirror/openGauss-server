@@ -278,7 +278,7 @@ extern int DecodeInterval(
     char** field, const int* ftype, int nf, int range, int* dtype, struct pg_tm* tm, fsec_t* fsec);
 extern int DecodeISO8601Interval(char* str, int* dtype, struct pg_tm* tm, fsec_t* fsec);
 
-extern void DateTimeParseError(int dterr, const char* str, const char* datatype);
+extern void DateTimeParseError(int dterr, const char* str, const char* datatype, bool can_ignore = false);
 
 extern int DetermineTimeZoneOffset(struct pg_tm* tm, pg_tz* tzp);
 
@@ -302,7 +302,7 @@ extern void InstallTimeZoneAbbrevs(TimeZoneAbbrevTable* tbl);
 extern Datum pg_timezone_abbrevs(PG_FUNCTION_ARGS);
 extern Datum pg_timezone_names(PG_FUNCTION_ARGS);
 
-extern Interval *char_to_interval(char *str, int32 typmod);
+extern Interval *char_to_interval(char *str, int32 typmod, bool can_ignore = false);
 #endif // !FRONTEND_PARSER
 
 #endif /* DATETIME_H */

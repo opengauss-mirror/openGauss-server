@@ -61,7 +61,7 @@ Datum int2in(PG_FUNCTION_ARGS)
 {
     char* num = PG_GETARG_CSTRING(0);
 
-    PG_RETURN_INT16(pg_strtoint16(num));
+    PG_RETURN_INT16(pg_strtoint16(num, fcinfo->can_ignore));
 }
 
 /*
@@ -296,7 +296,7 @@ Datum int4in(PG_FUNCTION_ARGS)
 {
     char* num = PG_GETARG_CSTRING(0);
 
-    PG_RETURN_INT32(pg_strtoint32(num));
+    PG_RETURN_INT32(pg_strtoint32(num, fcinfo->can_ignore));
 }
 
 /*
@@ -1224,7 +1224,7 @@ Datum int1in(PG_FUNCTION_ARGS)
 {
     char* num = PG_GETARG_CSTRING(0);
 
-    PG_RETURN_UINT8((uint8)pg_atoi(num, sizeof(uint8), '\0'));
+    PG_RETURN_UINT8((uint8)pg_atoi(num, sizeof(uint8), '\0', fcinfo->can_ignore));
 }
 
 // int1out - converts uint8 to "num"

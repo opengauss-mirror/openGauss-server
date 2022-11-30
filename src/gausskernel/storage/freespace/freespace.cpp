@@ -588,6 +588,7 @@ static void fsm_extend(Relation rel, BlockNumber fsm_nblocks)
 {
     BlockNumber fsm_nblocks_now;
     Page pg;
+    char* unalign_buffer = NULL;
 
     ADIO_RUN()
     {
@@ -595,7 +596,12 @@ static void fsm_extend(Relation rel, BlockNumber fsm_nblocks)
     }
     ADIO_ELSE()
     {
-        pg = (Page)palloc(BLCKSZ);
+        if (ENABLE_DSS) {
+            unalign_buffer = (char*)palloc(BLCKSZ + ALIGNOF_BUFFER);
+            pg = (Page)BUFFERALIGN(unalign_buffer);
+        } else {
+            pg = (char*)palloc(BLCKSZ);
+        }
     }
     ADIO_END();
 
@@ -633,7 +639,7 @@ static void fsm_extend(Relation rel, BlockNumber fsm_nblocks)
 
     while (fsm_nblocks_now < fsm_nblocks) {
         if (IsSegmentFileNode(rel->rd_node)) {
-            Buffer buf = ReadBufferExtended(rel, FSM_FORKNUM, P_NEW, RBM_NORMAL, NULL);
+            Buffer buf = ReadBufferExtended(rel, FSM_FORKNUM, P_NEW, RBM_ZERO, NULL);
 #ifdef USE_ASSERT_CHECKING
             BufferDesc *buf_desc = GetBufferDescriptor(buf - 1);
             Assert(buf_desc->tag.blockNum == fsm_nblocks_now);
@@ -658,7 +664,11 @@ static void fsm_extend(Relation rel, BlockNumber fsm_nblocks)
     }
     ADIO_ELSE()
     {
-        pfree(pg);
+        if (ENABLE_DSS) {
+            pfree(unalign_buffer);
+        } else {
+            pfree(pg);
+        }
     }
     ADIO_END();
 }

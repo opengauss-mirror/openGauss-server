@@ -73,6 +73,8 @@ typedef struct knl_instance_attr_network {
     SSL_CTX* SSL_server_context;
     GS_UCHAR* server_key;
 #endif
+    bool enable_dolphin_proto;
+    int dolphin_server_port;
 } knl_instance_attr_network;
 
 #endif /* SRC_INCLUDE_KNL_KNL_INSTANCE_ATTR_NETWORK_H_ */

@@ -1000,6 +1000,7 @@ extern void RemoveTempNamespace();
 #endif 
 #define CacheIsProcOid(cc_id) ((cc_id) == PROCOID)
 #define IsBootingPgProc(rel) IsProcRelation(rel)
+#define IsBootingPgClass(rel) (RelationGetRelid(rel) == RelationRelationId)
 #define BootUsingBuiltinFunc true
 
 extern int errdetail_abort(void);

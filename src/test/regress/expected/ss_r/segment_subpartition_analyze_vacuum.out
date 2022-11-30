@@ -1,0 +1,9 @@
+SET CURRENT_SCHEMA TO segment_subpartition_analyze_vacuum;
+select * from range_list order by 1, 2, 3, 4;
+ month_code | dept_code | user_no | sales_amt 
+------------+-----------+---------+-----------
+ 201903     | 1         | 1       |         1
+ 201903     | 2         | 1       |         1
+ 201903     | 2         | 2       |         1
+(3 rows)
+

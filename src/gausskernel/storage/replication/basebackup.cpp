@@ -441,7 +441,7 @@ static void perform_base_backup(basebackup_options *opt, DIR *tblspcdir)
     XLByteToSeg(startptr, startSegNo);
     XLogSegNo lastRemovedSegno = XLogGetLastRemovedSegno();
     if (startSegNo <= lastRemovedSegno) {
-        startptr = (lastRemovedSegno + 1) * XLOG_SEG_SIZE;
+        startptr = (lastRemovedSegno + 1) * XLogSegSize;
     }
     SendXlogRecPtrResult(startptr);
 
@@ -584,7 +584,7 @@ static void perform_base_backup(basebackup_options *opt, DIR *tblspcdir)
             if (fstat(fileno(fp), &statbuf) != 0) {
                 ereport(ERROR, (errcode_for_file_access(), errmsg("could not stat file \"%s\": %m", pathbuf)));
             }
-            if (statbuf.st_size != XLogSegSize) {
+            if (statbuf.st_size != (off_t)XLogSegSize) {
                 CheckXLogRemoved(segno, tli);
                 ereport(ERROR, (errcode_for_file_access(), errmsg("unexpected WAL file size \"%s\"", walFiles[i])));
             }
@@ -601,11 +601,11 @@ static void perform_base_backup(basebackup_options *opt, DIR *tblspcdir)
 
                 len += cnt;
 
-                if (len == XLogSegSize)
+                if (len == (off_t)XLogSegSize)
                     break;
             }
 
-            if (len != XLogSegSize) {
+            if (len != (off_t)XLogSegSize) {
                 CheckXLogRemoved(segno, tli);
                 ereport(ERROR, (errcode_for_file_access(), errmsg("unexpected WAL file size \"%s\"", walFiles[i])));
             }
@@ -1130,9 +1130,15 @@ int64 sendTablespace(const char *path, bool sizeonly)
      * 'path' points to the tablespace location, but we only want to include
      * the version directory in it that belongs to us.
      */
-    rc = snprintf_s(relativedirname, sizeof(relativedirname), sizeof(relativedirname) - 1, "%s_%s",
-                    TABLESPACE_VERSION_DIRECTORY, g_instance.attr.attr_common.PGXCNodeName);
-    securec_check_ss(rc, "", "");
+    if (ENABLE_DSS) {
+        rc = snprintf_s(relativedirname, sizeof(relativedirname), sizeof(relativedirname) - 1, "%s",
+                        TABLESPACE_VERSION_DIRECTORY);
+        securec_check_ss(rc, "", "");
+    } else {
+        rc = snprintf_s(relativedirname, sizeof(relativedirname), sizeof(relativedirname) - 1, "%s_%s",
+                        TABLESPACE_VERSION_DIRECTORY, g_instance.attr.attr_common.PGXCNodeName);
+        securec_check_ss(rc, "", "");
+    }
 
     rc = snprintf_s(pathbuf, sizeof(pathbuf), sizeof(pathbuf) - 1, "%s/%s", path, relativedirname);
     securec_check_ss(rc, "", "");
@@ -1293,7 +1299,7 @@ static bool IsDCFPath(const char *pathname)
  * @param basepathlen subfix of path
  * @param statbuf path stat
  */
-static void SendRealFile(bool sizeOnly, char* pathbuf, int basepathlen, struct stat* statbuf)
+static int64 SendRealFile(bool sizeOnly, char* pathbuf, int basepathlen, struct stat* statbuf)
 {
     int64 size = 0;
     // we must ensure the page integrity when in IncrementalCheckpoint
@@ -1310,6 +1316,7 @@ static void SendRealFile(bool sizeOnly, char* pathbuf, int basepathlen, struct s
             SEND_DIR_ADD_SIZE(size, (*statbuf));
         }
     }
+    return size;
 }
 
 /*
@@ -1610,7 +1617,7 @@ static int64 sendDir(const char *path, int basepathlen, bool sizeonly, List *tab
             if (!skip_this_dir)
                 size += sendDir(pathbuf, basepathlen, sizeonly, tablespaces, sendtblspclinks);
         } else if (S_ISREG(statbuf.st_mode)) {
-            SendRealFile(sizeonly, pathbuf, basepathlen, &statbuf);
+            size += SendRealFile(sizeonly, pathbuf, basepathlen, &statbuf);
         } else
             ereport(WARNING, (errmsg("skipping special file \"%s\"", pathbuf)));
     }

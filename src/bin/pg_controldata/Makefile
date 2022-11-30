@@ -22,7 +22,8 @@ ifneq "$(MAKECMDGOALS)" "clean"
     endif
   endif
 endif
-OBJS= pg_controldata.o $(WIN32RES) $(top_builddir)/src/lib/elog/elog.a
+OBJS= pg_controldata.o $(WIN32RES) $(top_builddir)/src/lib/elog/elog.a \
+	$(top_builddir)/src/gausskernel/storage/dss/dss_adaptor.o
 
 override CPPFLAGS := -I$(libpq_srcdir) $(CPPFLAGS) -fPIC -fPIE 
 

@@ -394,9 +394,11 @@ Node* coerce_type(ParseState* pstate, Node* node, Oid inputTypeId, Oid targetTyp
          * as CSTRING.
          */
         if (!con->constisnull) {
-            newcon->constvalue = stringTypeDatum(targetType, DatumGetCString(con->constvalue), inputTypeMod);
+            newcon->constvalue = stringTypeDatum(targetType, DatumGetCString(con->constvalue), inputTypeMod,
+                                                 pstate != NULL && pstate->p_has_ignore);
         } else {
-            newcon->constvalue = stringTypeDatum(targetType, NULL, inputTypeMod);
+            newcon->constvalue =
+                stringTypeDatum(targetType, NULL, inputTypeMod, pstate != NULL && pstate->p_has_ignore);
         }
 
         cancel_parser_errposition_callback(&pcbstate);
@@ -2807,18 +2809,32 @@ Node *transferConstToAconst(Node *node)
                 const char *constr = value ? "t" : "f";
                 val = makeString((char*)constr);
             } break;
-        case UNKNOWNOID:
-            {
-                Const* con = (Const *)node;
-                Node* expr = coerce_type(NULL,(Node*)con , con->consttype, TEXTOID, -1, COERCION_IMPLICIT, COERCE_IMPLICIT_CAST, -1);
-                char* constr = TextDatumGetCString(((Const*)expr)->constvalue);
-                val = makeString(constr);
-            } break;
+        /*
+        * set configuration only support types above.
+        * if assigned value are not types above, will attempt to convert the type to text.
+        * if the type connot be converted to text also, an error is reported.
+        */
         default:
             {
-                char* constr = TextDatumGetCString(constval);
-                val = makeString(constr);
-            }  break;
+                PG_TRY();
+                {
+                    Const* con = (Const *)node;
+                    Node* expr = coerce_type(NULL,(Node*)con , con->consttype, TEXTOID, -1, COERCION_IMPLICIT, COERCE_IMPLICIT_CAST, -1);
+                    if (IsA(expr, Const) && (((Const*)expr)->consttype = TEXTOID)) {
+                        char* constr = TextDatumGetCString(((Const*)expr)->constvalue);
+                        val = makeString(constr);
+                    } else {
+                        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_FUNCTION), 
+                                        errmsg("set value cannot be assigned to the %s type", format_type_be(consttype))));
+                    }
+                }
+                PG_CATCH();
+                {
+                    ereport(ERROR, (errcode(ERRCODE_UNDEFINED_FUNCTION), 
+                                    errmsg("set value cannot be assigned to the %s type", format_type_be(consttype))));
+                }
+                PG_END_TRY();
+            } break;
     }
  
     result = makeAConst(val, -1);

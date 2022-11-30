@@ -1,0 +1,27 @@
+\l+
+--? .*
+--? .*
+--? .*
+--? music            | .* | SQL_ASCII | C           | C           |                   | 640 MB | pg_default |
+--? music_pg         | .* | SQL_ASCII | C           | C           |                   | 640 MB | pg_default |
+--? mydb             | .* | UTF8      | en_US.UTF-8 | en_US.UTF-8 |                   | 640 MB | pg_default |
+--? pl_test_pkg_func | .* | UTF8      | en_US.UTF-8 | en_US.UTF-8 |                   | 640 MB | pg_default |
+--? postgres         | .* | UTF8      | en_US.UTF-8 | en_US.UTF-8 |                   | 640 MB | pg_default | default administrative connection database
+--? regression       | .* | UTF8      | en_US.UTF-8 | en_US.UTF-8 |                   | 640 MB | pg_default |
+--? template0        | .* | UTF8      | en_US.UTF-8 | en_US.UTF-8 | .*| 640 MB | pg_default | default template for new databases
+--?                  | .* |           |             |             | .* |        |            |
+--? template1        | .* | UTF8      | en_US.UTF-8 | en_US.UTF-8 | .*| 640 MB | pg_default | unmodifiable empty database
+--?                  | .* |           |             |             | .* |        |            |
+(8 rows)
+
+select * from pg_ls_tmpdir();
+--? .*
+--? .*
+(0 rows)
+
+select * from pg_ls_waldir();
+--? .*
+--? .*
+--? 000000010000000000000001 | 1073741824 | .*
+(1 row)
+

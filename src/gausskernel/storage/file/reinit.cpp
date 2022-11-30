@@ -21,6 +21,7 @@
 #include "storage/copydir.h"
 #include "storage/smgr/fd.h"
 #include "storage/reinit.h"
+#include "storage/file/fio_device.h"
 #include "utils/hsearch.h"
 #include "utils/memutils.h"
 #ifdef PGXC
@@ -72,13 +73,11 @@ void ResetUnloggedRelations(int op)
     /*
      * First process unlogged files in pg_default ($PGDATA/base)
      */
-    ResetUnloggedRelationsInTablespaceDir("base", op);
-
+    ResetUnloggedRelationsInTablespaceDir(DEFTBSDIR, op);
     /*
      * Cycle through directories for all non-default tablespaces.
      */
-    spc_dir = AllocateDir("pg_tblspc");
-
+    spc_dir = AllocateDir(TBLSPCDIR);
     while ((spc_de = ReadDir(spc_dir, "pg_tblspc")) != NULL) {
         if (strcmp(spc_de->d_name, ".") == 0 || strcmp(spc_de->d_name, "..") == 0) {
             continue;
@@ -86,18 +85,30 @@ void ResetUnloggedRelations(int op)
 
 #ifdef PGXC
         /* Postgres-XC tablespaces include the node name in path */
-        rc = snprintf_s(temp_path,
-                        sizeof(temp_path),
-                        sizeof(temp_path) - 1,
-                        "pg_tblspc/%s/%s_%s",
-                        spc_de->d_name,
-                        TABLESPACE_VERSION_DIRECTORY,
-                        g_instance.attr.attr_common.PGXCNodeName);
+        if (ENABLE_DSS) {
+            rc = snprintf_s(temp_path,
+                            sizeof(temp_path),
+                            sizeof(temp_path) - 1,
+                            "%s/%s/%s",
+                            TBLSPCDIR,
+                            spc_de->d_name,
+                            TABLESPACE_VERSION_DIRECTORY);
+        } else {
+            rc = snprintf_s(temp_path,
+                            sizeof(temp_path),
+                            sizeof(temp_path) - 1,
+                            "%s/%s/%s_%s",
+                            TBLSPCDIR,
+                            spc_de->d_name,
+                            TABLESPACE_VERSION_DIRECTORY,
+                            g_instance.attr.attr_common.PGXCNodeName);
+        }
 #else
         rc = snprintf_s(temp_path,
                         sizeof(temp_path),
                         sizeof(temp_path) - 1,
-                        "pg_tblspc/%s/%s",
+                        "%s/%s/%s",
+                        TBLSPCDIR
                         spc_de->d_name,
                         TABLESPACE_VERSION_DIRECTORY);
 #endif

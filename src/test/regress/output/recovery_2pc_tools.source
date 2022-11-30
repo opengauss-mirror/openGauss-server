@@ -202,6 +202,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  dfs_partition_directory_length                   | integer |      | 92        | 7999
  dirty_page_percent_max                           | real    |      | 0.1       | 1
  disable_memory_protect                           | bool    |      |           | 
+ dolphin_server_port                              | integer |      | 1024      | 65535
  dw_file_num                                      | integer |      | 1         | 16
  dw_file_size                                     | integer |      | 32        | 256
  dynamic_library_path                             | string  |      |           | 
@@ -243,6 +244,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  enable_default_ustore_table                      | bool    |      |           | 
  enable_defer_calculate_snapshot                  | bool    |      |           | 
  enable_delta_store                               | bool    |      |           | 
+ enable_dolphin_proto                             | bool    |      |           | 
  enable_double_write                              | bool    |      |           | 
  enable_early_free                                | bool    |      |           | 
  enable_extrapolation_stats                       | bool    |      |           | 
@@ -587,6 +589,20 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  sql_ignore_strategy                              | string  |      |           | 
  sql_inheritance                                  | bool    |      |           | 
  sql_use_spacelimit                               | integer | kB   | -1        | 2147483647
+ ss_dss_conn_path                                 | string  |      |           | 
+ ss_dss_vg_name                                   | string  |      |           | 
+ ss_enable_catalog_centralized                    | bool    |      |           | 
+ ss_enable_dms                                    | bool    |      |           | 
+ ss_enable_dss                                    | bool    |      |           | 
+ ss_enable_log_level                              | bool    |      |           | 
+ ss_enable_reform                                 | bool    |      |           | 
+ ss_enable_scrlock                                | bool    |      |           | 
+ ss_enable_scrlock_sleep_mode                     | bool    |      |           | 
+ ss_enable_ssl                                    | bool    |      |           | 
+ ss_instance_id                                   | integer |      | 0         | 63
+ ss_interconnect_channel_count                    | integer |      | 1         | 32
+ ss_interconnect_type                             | string  |      |           | 
+ ss_interconnect_url                              | string  |      |           | 
  ssl                                              | bool    |      |           | 
  ssl_ca_file                                      | string  |      |           | 
  ssl_cert_file                                    | string  |      |           | 
@@ -595,6 +611,14 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  ssl_crl_file                                     | string  |      |           | 
  ssl_key_file                                     | string  |      |           | 
  ssl_renegotiation_limit                          | integer | kB   | 0         | 2147483647
+ ss_ock_log_path                                  | string  |      |           | 
+ ss_rdma_work_config                              | string  |      |           | 
+ ss_recv_msg_pool_size                            | integer | kB   | 1024      | 1048576
+ ss_scrlock_server_bind_core                      | string  |      |           | 
+ ss_scrlock_server_port                           | integer |      | 0         | 65535
+ ss_scrlock_worker_bind_core                      | string  |      |           | 
+ ss_scrlock_worker_count                          | integer |      | 2         | 16
+ ss_work_thread_count                             | integer |      | 16        | 128
  standard_conforming_strings                      | bool    |      |           | 
  standby_shared_buffers_fraction                  | real    |      | 0.1       | 1
  statement_timeout                                | integer | ms   | 0         | 2147483647

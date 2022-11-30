@@ -19,7 +19,8 @@
  */
 static bool ReadRewindCompressedInfo(FILE *file, RewindCompressInfo *rewindCompressInfo)
 {
-    auto result = ReadBlockNumberOfCFile(file);
+    off_t curFileLen = 0;
+    auto result = ReadBlockNumberOfCFile(file, &curFileLen);
     if (result >= MIN_COMPRESS_ERROR_RT) {
         return false;
     }
@@ -32,14 +33,22 @@ bool FetchSourcePca(unsigned char *header, size_t len, RewindCompressInfo *rewin
 {
     CfsExtentHeader *ptr = (CfsExtentHeader *)(void *)header;
     rewindCompressInfo->compressed = false;
-    if (len == sizeof(CfsExtentHeader)) {
-        rewindCompressInfo->compressed = true;
+    if (len != sizeof(CfsExtentHeader)) {
+        return rewindCompressInfo->compressed;
+    }
+
+    rewindCompressInfo->compressed = true;
+    if (fileSize == 0) {
+        rewindCompressInfo->newBlockNumber = 0;
+        rewindCompressInfo->oldBlockNumber = 0;
+    } else {
         BlockNumber fileBlockNum = (BlockNumber) fileSize / BLCKSZ;
         BlockNumber extentCount = fileBlockNum / CFS_EXTENT_SIZE;
         BlockNumber result = (extentCount - 1) * (CFS_EXTENT_SIZE - 1);
         rewindCompressInfo->newBlockNumber = result + ptr->nblocks;
         rewindCompressInfo->oldBlockNumber = 0;
     }
+
     return rewindCompressInfo->compressed;
 }
 
@@ -99,9 +108,15 @@ size_t PageCompression::ReadCompressedBuffer(BlockNumber blockNum, char *buffer,
 
 CfsExtentHeader* PageCompression::GetHeaderByExtentNumber(BlockNumber extentCount, CfsCompressOption *option)
 {
-    if (this->cfsHeaderMap.extentCount != extentCount || this->cfsHeaderMap.header == nullptr) {
+    if (this->cfsHeaderMap.extentCount != extentCount ||
+        this->cfsHeaderMap.header == nullptr) {
         MmapFree(&(cfsHeaderMap));
-        if (option) {
+        bool needExtend = (this->extentIdx == InvalidBlockNumber || extentCount > this->extentIdx);
+        /* need extend one extent */
+        if (needExtend) {
+            if (!option) {
+                return nullptr;
+            }
             auto extentOffset = ((extentCount + 1) * CFS_EXTENT_SIZE - 1) * BLCKSZ;
             if (fallocate(fileno(fd), 0, extentOffset, BLCKSZ) < 0) {
                 return nullptr;
@@ -111,9 +126,13 @@ CfsExtentHeader* PageCompression::GetHeaderByExtentNumber(BlockNumber extentCoun
             if (fallocate(fileno(fd), FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE, extentStart, allocateSize) < 0) {
                 return nullptr;
             }
+            this->extentIdx = extentCount;
         }
         auto curHeader = MMapHeader(this->fd, extentCount);
-        if (option) {
+        if (curHeader.header == MAP_FAILED) {
+            return nullptr;
+        }
+        if (needExtend) {
             curHeader.header->chunk_size = option->chunk_size;
             curHeader.header->algorithm = option->algorithm;
         }
@@ -128,13 +147,18 @@ CfsExtentHeader* PageCompression::GetHeaderByExtentNumber(BlockNumber extentCoun
 
 CfsExtentHeader* PageCompression::GetStruct(BlockNumber blockNum, CfsCompressOption *option)
 {
-    return PageCompression::GetHeaderByExtentNumber(blockNum / CFS_LOGIC_BLOCKS_PER_EXTENT, option);
+    return GetHeaderByExtentNumber(blockNum / CFS_LOGIC_BLOCKS_PER_EXTENT, option);
 }
 
 PageCompression::~PageCompression()
 {
     if (this->fd) {
         (void)fclose(this->fd);
+    }
+
+    if (this->cfsHeaderMap.pointer != nullptr) {
+        (void)munmap(this->cfsHeaderMap.pointer, this->cfsHeaderMap.mmapLen);
+        this->cfsHeaderMap.pointer = nullptr;
     }
 }
 
@@ -159,8 +183,12 @@ COMPRESS_ERROR_STATE PageCompression::Init(const char *filePath, BlockNumber inS
     this->blockNumber = 0;
     this->algorithm = 0;
     this->chunkSize = 0;
+    this->extentIdx = InvalidBlockNumber;
 
     errno_t rc = memset_s(&this->cfsHeaderMap, sizeof(CfsHeaderMap), 0, sizeof(CfsHeaderMap));
+    securec_check_ss_c(rc, "\0", "\0");
+
+    rc = snprintf_s(initPath, MAXPGPATH, MAXPGPATH - 1, "%s", filePath);
     securec_check_ss_c(rc, "\0", "\0");
 
     if (create) {
@@ -173,10 +201,16 @@ COMPRESS_ERROR_STATE PageCompression::Init(const char *filePath, BlockNumber inS
         return PCA_SEEK_ERROR;
     }
     off_t fileLen = ftell(this->fd);
+    if (fileLen % CFS_EXTENT_SIZE != 0) {
+        (void)fclose(file);
+        return NORMAL_READ_ERROR;
+    }
     if (fileLen > 0) {
         BlockNumber fileBlockNum = (BlockNumber) fileLen / BLCKSZ;
         BlockNumber extentCount = fileBlockNum / CFS_EXTENT_SIZE;
         BlockNumber result = (extentCount - 1) * (CFS_EXTENT_SIZE - 1);
+
+        this->extentIdx = extentCount - 1;
 
         /* read header of last extent */
         auto header = this->GetHeaderByExtentNumber(extentCount - 1);
@@ -225,10 +259,14 @@ bool PageCompression::WriteBufferToCurrentBlock(char *buf, BlockNumber blkNumber
         securec_check(rc, "", "");
     }
     size = realSize;
-    BlockNumber extentOffset = blkNumber % CFS_LOGIC_BLOCKS_PER_EXTENT;
+    BlockNumber logicBlockNumber = blkNumber % CFS_LOGIC_BLOCKS_PER_EXTENT;
+    BlockNumber extentOffset = (blkNumber / CFS_LOGIC_BLOCKS_PER_EXTENT) % CFS_EXTENT_COUNT_PER_FILE;
     int needChunks = size / (int32)chkSize;
+    if (logicBlockNumber >= cfsExtentHeader->nblocks) {
+        cfsExtentHeader->nblocks = logicBlockNumber + 1;
+    }
 
-    CfsExtentAddress *cfsExtentAddress = GetExtentAddress(cfsExtentHeader, (uint16)extentOffset);
+    CfsExtentAddress *cfsExtentAddress = GetExtentAddress(cfsExtentHeader, (uint16)logicBlockNumber);
 
     /* allocate chunks */
     if (cfsExtentAddress->allocated_chunks < needChunks) {
@@ -244,7 +282,8 @@ bool PageCompression::WriteBufferToCurrentBlock(char *buf, BlockNumber blkNumber
 
     for (int32 i = 0; i < needChunks; ++i) {
         char *buffer_pos = buf + (long)chkSize * i;
-        off_t seekPos = OffsetOfPageCompressChunk(chkSize, cfsExtentAddress->chunknos[i]);
+        off_t seekPos = OffsetOfPageCompressChunk(chkSize, cfsExtentAddress->chunknos[i]) +
+                        extentOffset * CFS_EXTENT_SIZE * BLCKSZ;
         int32 start = i;
         /* merge continuous write */
         while (i < needChunks - 1 && cfsExtentAddress->chunknos[i + 1] == cfsExtentAddress->chunknos[i] + 1) {

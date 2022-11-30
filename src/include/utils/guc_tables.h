@@ -102,6 +102,7 @@ enum config_group {
     TSDB,
     INSTRUMENTS_OPTIONS,
     CE_OPTIONS,
+    SHARED_STORAGE_OPTIONS,
 #ifdef PGXC
     DATA_NODES,
     GTM,

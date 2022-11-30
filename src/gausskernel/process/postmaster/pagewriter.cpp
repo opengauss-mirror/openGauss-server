@@ -1008,7 +1008,7 @@ static uint32 calculate_pagewriter_flush_num()
      * If the xlog generation speed is slower than dirty queue rec lsn update speed and not many dirty pages,
      * no need to scan too many dirty page, because the dirty page rec lsn is same.
      */
-    if (dirty_percent < HIGH_WATER && avg_lsn_rate < XLOG_SEG_SIZE * UPDATE_REC_XLOG_NUM &&
+    if (dirty_percent < HIGH_WATER && avg_lsn_rate < XLogSegSize * UPDATE_REC_XLOG_NUM &&
         lsn_target_percent < HIGH_WATER) {
         lsn_scan_factor = 1;
     }
@@ -2342,7 +2342,7 @@ PUSH_DIRTY:
         item->bucketNode = buf_desc->tag.rnode.bucketNode;
         item->forkNum = buf_desc->tag.forkNum;
         item->blockNum = buf_desc->tag.blockNum;
-        if (IsSegmentFileNode(buf_desc->tag.rnode)) {
+        if (IsSegmentFileNode(buf_desc->tag.rnode) || IS_COMPRESSED_RNODE(buf_desc->tag.rnode, buf_desc->tag.forkNum)) {
             *contain_hashbucket = true;
         }
 

@@ -14,6 +14,9 @@ test: recovery_2pc_tools
 test: sqlpatch_base
 test: sqlpatch_func
 
+#wlm
+test: workload_manager
+
 test: spm_adaptive_gplan
 test: smp
 test: alter_hw_package
@@ -908,7 +911,6 @@ test: dump_auto_increment
 #delete limit
 test: delete_limit
 
-
 # --------------------------
 # DB4AI
 # --------------------------
@@ -987,7 +989,7 @@ test: gs_dump_encrypt substr
 test: composite_datum_record mysql_function b_comments mysql_syntax mysql_delimiter
 
 test: join_test_alias alter_ctable_compress
-test: ignore/ignore_type_transform ignore/ignore_not_null_constraints ignore/ignore_unique_constraints ignore/ignore_no_matched_partition
+test: ignore/ignore_type_transform ignore/ignore_not_null_constraints ignore/ignore_unique_constraints ignore/ignore_no_matched_partition ignore/ignore_invalid_input
 
 test: pg_ls_dir
 test: cost_model
@@ -1010,3 +1012,9 @@ test: rename_table
 
 # debug instrument
 test: test_debug5
+
+# dolphin_guc_config
+test: dolphin_guc_config
+
+# row_count()
+test: row_count_function

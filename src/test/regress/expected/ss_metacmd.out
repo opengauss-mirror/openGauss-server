@@ -1,0 +1,87 @@
+DROP VIEW IF EXISTS SS_VIEW1 CASCADE;
+NOTICE:  view "ss_view1" does not exist, skipping
+DROP TABLE IF EXISTS SS_METACMD_TAB1 CASCADE;
+NOTICE:  table "ss_metacmd_tab1" does not exist, skipping
+CREATE TABLE SS_METACMD_TAB1 (ID INT NOT NULL PRIMARY KEY, NAME VARCHAR(128)) WITH(SEGMENT = ON);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "ss_metacmd_tab1_pkey" for table "ss_metacmd_tab1"
+CREATE VIEW SS_VIEW1 AS
+    SELECT * from SS_METACMD_TAB1;
+    
+INSERT INTO SS_METACMD_TAB1 VALUES (1, 'PAIR');
+COMMIT;
+WARNING:  there is no transaction in progress
+\dS+ SS_METACMD_TAB1
+                           Table "public.ss_metacmd_tab1"
+ Column |          Type          | Modifiers | Storage  | Stats target | Description 
+--------+------------------------+-----------+----------+--------------+-------------
+ id     | integer                | not null  | plain    |              | 
+ name   | character varying(128) |           | extended |              | 
+Indexes:
+    "ss_metacmd_tab1_pkey" PRIMARY KEY, btree (id) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, segment=on, compression=no
+
+\dS+ SS_VIEW1
+                        View "public.ss_view1"
+ Column |          Type          | Modifiers | Storage  | Description 
+--------+------------------------+-----------+----------+-------------
+ id     | integer                |           | plain    | 
+ name   | character varying(128) |           | extended | 
+View definition:
+ SELECT  *
+   FROM ss_metacmd_tab1;
+
+select pg_catalog.pg_table_size('SS_VIEW1');
+ pg_table_size 
+---------------
+             0
+(1 row)
+
+select pg_catalog.pg_table_size('SS_METACMD_TAB1');
+ pg_table_size 
+---------------
+          8192
+(1 row)
+
+select gs_xlogdump_xid('171794');
+ERROR:  unsupported gs_xlogdump_xid when enable dss.
+CONTEXT:  referenced column: gs_xlogdump_xid
+select gs_xlogdump_lsn('0/70230830', '0/7023AB80');
+ERROR:  unsupported gs_xlogdump_lsn when enable dss.
+CONTEXT:  referenced column: gs_xlogdump_lsn
+select gs_xlogdump_tablepath('+data/base/15114/4600', 0, 'heap');
+ERROR:  unsupported gs_xlogdump_tablepath when enable dss.
+CONTEXT:  referenced column: gs_xlogdump_tablepath
+select gs_xlogdump_parsepage_tablepath('+data/base/15114/4600', 0, 'heap', false);
+ERROR:  unsupported gs_xlogdump_parsepage_tablepath when enable dss.
+CONTEXT:  referenced column: gs_xlogdump_parsepage_tablepath
+drop TABLE if exists ss_range_range_ddl_001;
+NOTICE:  table "ss_range_range_ddl_001" does not exist, skipping
+CREATE TABLE ss_range_range_ddl_001
+(
+    col_1 int primary key USING INDEX TABLESPACE startend_tbs4, -- expected error
+    col_2 bigint NOT NULL ,
+    col_3 VARCHAR2 ( 30 ) NOT NULL ,
+    col_4 int generated always as(2*col_2) stored ,
+    col_5 bigint,
+    col_6 bool,
+    col_7 text,
+    col_8 decimal,
+    col_9 numeric(12,6),
+    col_10 date,
+    check (col_4 >= col_2)
+)
+with(FILLFACTOR=80,segment=on)
+PARTITION BY range (col_1) SUBPARTITION BY range (col_2)
+(
+    PARTITION p_range_1 values less than (-10 )
+    (
+        SUBPARTITION p_range_1_1 values less than ( 0),
+        SUBPARTITION p_range_1_2 values less than ( MAXVALUE )
+    )
+) ENABLE ROW MOVEMENT;
+ERROR:  tablespace "startend_tbs4" does not exist
+drop TABLE if exists ss_range_range_ddl_001;
+NOTICE:  table "ss_range_range_ddl_001" does not exist, skipping
+DROP VIEW IF EXISTS SS_VIEW1 CASCADE;
+DROP TABLE IF EXISTS SS_METACMD_TAB1 CASCADE;

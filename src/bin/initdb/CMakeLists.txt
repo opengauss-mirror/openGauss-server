@@ -5,6 +5,7 @@ execute_process(
     COMMAND ln -fs ${PROJECT_SRC_DIR}/common/backend/utils/mb/encnames.cpp ${CMAKE_CURRENT_SOURCE_DIR}/encnames.cpp
     COMMAND ln -fs ${PROJECT_SRC_DIR}/common/timezone/localtime.cpp ${CMAKE_CURRENT_SOURCE_DIR}/localtime.cpp
     COMMAND ln -fs ${PROJECT_SRC_DIR}/common/interfaces/libpq/pqsignal.cpp ${CMAKE_CURRENT_SOURCE_DIR}/pqsignal.cpp
+    COMMAND ln -fs ${PROJECT_SRC_DIR}/gausskernel/storage/dss/dss_adaptor.cpp ${CMAKE_CURRENT_SOURCE_DIR}/dss_adaptor.cpp
 )
 
 set(TGT_initdb_SRC
@@ -13,6 +14,8 @@ set(TGT_initdb_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/initdb.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/localtime.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/pqsignal.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ss_initdb.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/dss_adaptor.cpp
 )
 
 set(TGT_initdb_INC 

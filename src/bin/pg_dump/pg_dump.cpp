@@ -237,7 +237,7 @@ char* all_data_nodename_list = NULL;
 const uint32 USTORE_UPGRADE_VERSION = 92368;
 const uint32 PACKAGE_ENHANCEMENT = 92444;
 const uint32 SUBSCRIPTION_VERSION = 92580;
-const uint32 SUBSCRIPTION_BINARY_VERSION_NUM = 92606;
+const uint32 SUBSCRIPTION_BINARY_VERSION_NUM = 92656;
 
 #ifdef DUMPSYSLOG
 char* syslogpath = NULL;
@@ -5606,12 +5606,12 @@ bool IsRbObject(Archive* fout, Oid classid, Oid objid, const char* objname)
     selectSourceSchema(fout, "pg_catalog");
 
     appendPQExpBuffer(query,
-        "SELECT pg_catalog.gs_is_recycle_object(%u, %u, NULL)",
+        "SELECT pg_catalog.gs_is_recycle_obj(%u, %u, NULL)",
         classid,
         objid);
     res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
 
-    colNum = PQfnumber(res, "gs_is_recycle_object");
+    colNum = PQfnumber(res, "gs_is_recycle_obj");
     recycleObject = gs_strdup(PQgetvalue(res, tupNum, colNum));
     if (strcmp(recycleObject, f) == 0) {
         isRecycleObj = false;
@@ -18091,7 +18091,8 @@ static void dumpViewSchema(
 
     /* set definer for CREATE VIEW statement */
     appendPQExpBuffer(q, "CREATE ");
-    if (tbinfo->rolname != NULL && strlen(tbinfo->rolname) > 0) {
+    if ((gdatcompatibility != NULL) && strcmp(gdatcompatibility, B_FORMAT) == 0 &&
+        tbinfo->rolname != NULL && strlen(tbinfo->rolname) > 0) {
         appendPQExpBuffer(q, " DEFINER = %s ", tbinfo->rolname);
     }
     appendPQExpBuffer(q, " VIEW %s(%s)", fmtId(tbinfo->dobj.name), schemainfo);

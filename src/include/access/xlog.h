@@ -132,7 +132,9 @@ typedef enum WalLevel {
 #define XLogHintBitIsNeeded() (g_instance.attr.attr_storage.wal_log_hints)
 
 /* Do we need to WAL-log information required only for Hot Standby and logical replication? */
-#define XLogStandbyInfoActive() (g_instance.attr.attr_storage.wal_level >= WAL_LEVEL_HOT_STANDBY)
+#define XLogStandbyInfoActive()                                         \
+    (g_instance.attr.attr_storage.wal_level >= WAL_LEVEL_HOT_STANDBY && \
+        !g_instance.attr.attr_storage.dms_attr.enable_dms)
 /* Do we need to WAL-log information required only for logical replication? */
 #define XLogLogicalInfoActive() (g_instance.attr.attr_storage.wal_level >= WAL_LEVEL_LOGICAL)
 extern const char* DemoteModeDescs[];
@@ -249,6 +251,10 @@ struct WALInitSegLockPadded {
 #define LAZY_BACKWRITE 0x0400       /* lazy backwrite */
 #define PAGERANGE_BACKWRITE 0x0800  /* PageRangeBackWrite */
 
+#define CHECKPOINT_LEN (SizeOfXLogRecord + SizeOfXLogRecordDataHeaderShort + sizeof(CheckPoint))
+#define CHECKPOINTNEW_LEN (SizeOfXLogRecord + SizeOfXLogRecordDataHeaderShort + sizeof(CheckPointNew))
+#define CHECKPOINTPLUS_LEN (SizeOfXLogRecord + SizeOfXLogRecordDataHeaderShort + sizeof(CheckPointPlus))
+#define CHECKPOINTUNDO_LEN (SizeOfXLogRecord + SizeOfXLogRecordDataHeaderShort + sizeof(CheckPointUndo))
 
 /* Checkpoint statistics */
 typedef struct CheckpointStatsData {
@@ -663,6 +669,8 @@ extern bool RecoveryInProgress(void);
 extern bool HotStandbyActive(void);
 extern bool HotStandbyActiveInReplay(void);
 extern bool XLogInsertAllowed(void);
+extern bool SSXLogInsertAllowed(void);
+extern bool SSModifySharedLunAllowed(void);
 extern void GetXLogReceiptTime(TimestampTz* rtime, bool* fromStream);
 extern XLogRecPtr GetXLogReplayRecPtr(TimeLineID* targetTLI, XLogRecPtr* ReplayReadPtr = NULL);
 extern void SetXLogReplayRecPtr(XLogRecPtr readRecPtr, XLogRecPtr endRecPtr);
@@ -820,7 +828,6 @@ void ReadShareStorageCtlInfo(ShareStorageXLogCtl* ctlInfo);
 pg_crc32c CalShareStorageCtlInfoCrc(const ShareStorageXLogCtl *ctlInfo);
 int ReadXlogFromShareStorage(XLogRecPtr startLsn, char *buf, int expectReadLen);
 int WriteXlogToShareStorage(XLogRecPtr startLsn, char *buf, int writeLen);
-void FsyncXlogToShareStorage();
 Size SimpleValidatePage(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, char* page);
 void ShareStorageInit();
 void FindLastRecordCheckInfoOnShareStorage(XLogRecPtr *lastRecordPtr, pg_crc32 *lastRecordCrc,
@@ -832,6 +839,8 @@ void rename_recovery_conf_for_roach();
 bool CheckForFailoverTrigger(void);
 bool CheckForSwitchoverTrigger(void);
 void HandleCascadeStandbyPromote(XLogRecPtr *recptr);
+void update_dirty_page_queue_rec_lsn(XLogRecPtr current_insert_lsn, bool need_immediately_update = false);
+XLogRecord *ReadCheckpointRecord(XLogReaderState *xlogreader, XLogRecPtr RecPtr, int whichChkpt);
 
 extern XLogRecPtr XlogRemoveSegPrimary;
 
@@ -885,6 +894,12 @@ static inline void WakeupWalSemaphore(PGSemaphore sema)
     PGSemaphoreUnlock(sema);
 }
 
+static inline void FsyncXlogToShareStorage()
+{
+    Assert(g_instance.xlog_cxt.shareStorageopCtl.isInit && (g_instance.xlog_cxt.shareStorageopCtl.opereateIf != NULL));
+    g_instance.xlog_cxt.shareStorageopCtl.opereateIf->fsync();
+}
+
 /*
  * Options for enum values stored in other modules
  */
@@ -910,4 +925,7 @@ XLogRecPtr GetFlushMainStandby();
 extern bool RecoveryIsSuspend(void);
 
 extern void InitUndoCountThreshold();
+
+/* for recovery */
+void SSWriteInstanceControlFile(int fd, const char* buffer, int id, off_t size);
 #endif /* XLOG_H */

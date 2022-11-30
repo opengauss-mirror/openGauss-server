@@ -440,6 +440,11 @@ void redo_slot_create(const ReplicationSlotPersistentData *slotInfo, char* extra
  */
 Datum pg_create_logical_replication_slot(PG_FUNCTION_ARGS)
 {
+    if (ENABLE_DMS) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Not support create logical replication slot while DMS and DSS enabled")));
+    }
+
     Name name = PG_GETARG_NAME(0);
     Name plugin = PG_GETARG_NAME(1);
     errno_t rc = EOK;
@@ -490,6 +495,11 @@ Datum pg_create_logical_replication_slot(PG_FUNCTION_ARGS)
  */
 Datum pg_drop_replication_slot(PG_FUNCTION_ARGS)
 {
+    if (ENABLE_DMS) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("Not support drop replication slot while DMS and DSS enabled")));
+    }
+    
     Name name = PG_GETARG_NAME(0);
     bool for_backup = false;
     bool isLogical = false;

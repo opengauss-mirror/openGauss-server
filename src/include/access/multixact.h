@@ -23,6 +23,8 @@
 
 #define MaxMultiXactOffset UINT64CONST(0xFFFFFFFFFFFFFFFF)
 
+#define MULTIXACTDIR (g_instance.datadir_cxt.multixactDir)
+
 /* Number of SLRU buffers to use for multixact */
 #define NUM_MXACTOFFSET_BUFFERS 8
 #define NUM_MXACTMEMBER_BUFFERS 16
@@ -140,5 +142,6 @@ extern void multixact_redo(XLogReaderState* record);
 extern void multixact_desc(StringInfo buf, XLogReaderState* record);
 extern const char* multixact_type_name(uint8 subtype);
 extern void get_multixact_pageno(uint8 info, int64 *pageno, XLogReaderState *record);
+extern void SSMultiXactShmemClear(void);
 
 #endif /* MULTIXACT_H */

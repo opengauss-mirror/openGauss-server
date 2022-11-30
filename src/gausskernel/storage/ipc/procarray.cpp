@@ -120,6 +120,8 @@
 #include "access/multi_redo_api.h"
 #include "gstrace/gstrace_infra.h"
 #include "gstrace/storage_gstrace.h"
+#include "ddes/dms/ss_common_attr.h"
+#include "ddes/dms/ss_transaction.h"
 
 #ifdef ENABLE_UT
     #define static
@@ -1293,6 +1295,10 @@ bool TransactionIdIsInProgress(TransactionId xid, uint32* needSync, bool shortcu
         return false;
     }
 
+    if (SS_STANDBY_MODE) {
+        return SSTransactionIdIsInProgress(xid);
+    }
+
     /*
      * Also, we can handle our own transaction (and subtransactions) without
      * any access to shared memory.
@@ -1901,8 +1907,14 @@ RETRY:
             SetLocalSnapshotPreparedArray(snapshot);
             snapshot->gtm_snapshot_type = GTM_SNAPSHOT_TYPE_LOCAL;
         }
-        Snapshot result = GetLocalSnapshotData(snapshot);
-        snapshot->snapshotcsn = pg_atomic_read_u64(&t_thrd.xact_cxt.ShmemVariableCache->nextCommitSeqNo);
+
+        Snapshot result;
+        if (SS_STANDBY_MODE) {
+            result = SSGetSnapshotData(snapshot);
+        } else {
+            result = GetLocalSnapshotData(snapshot);
+            snapshot->snapshotcsn = pg_atomic_read_u64(&t_thrd.xact_cxt.ShmemVariableCache->nextCommitSeqNo);
+        }
 
         if (result) {
             if (GTM_LITE_MODE) {
@@ -3420,6 +3432,14 @@ bool CountOtherDBBackends(Oid databaseId, int* nbackends, int* nprepared)
     ThreadId wdrxdb_pids[MAXAUTOVACPIDS];
     int tries;
 
+    if (ENABLE_DMS && SS_PRIMARY_MODE) {
+        bool ret = SSCheckDbBackendsFromAllStandby(databaseId);
+        if (ret) {
+            *nbackends = *nprepared = 0;
+            return true;
+        }
+    }
+    
     /* 50 tries with 100ms sleep between tries makes 5 sec total wait */
     for (tries = 0; tries < 50; tries++) {
         int nworkers = 0;
@@ -4764,6 +4784,14 @@ void CalculateLocalLatestSnapshot(bool forceCalc)
         if (TransactionIdPrecedes(xmin, globalxmin))
             globalxmin = xmin;
 
+        if (ENABLE_DMS && SS_PRIMARY_MODE && SSGetOldestXminFromAllStandby()) {
+            TransactionId ss_oldest_xmin = pg_atomic_read_u64(&g_instance.dms_cxt.xminAck);
+            if (TransactionIdIsValid(ss_oldest_xmin) && TransactionIdIsNormal(ss_oldest_xmin) &&
+                TransactionIdPrecedes(ss_oldest_xmin, globalxmin)) {
+                globalxmin = ss_oldest_xmin;
+            }
+        }
+
         t_thrd.xact_cxt.ShmemVariableCache->xmin = xmin;
         t_thrd.xact_cxt.ShmemVariableCache->recentLocalXmin = globalxmin;
         if (GTM_FREE_MODE) {
@@ -5038,7 +5066,7 @@ TransactionId ListAllThreadGttFrozenxids(int maxSize, ThreadId *pids, Transactio
         *n = 0;
     }
 
-    if (RecoveryInProgress())
+    if (RecoveryInProgress() || SSIsServerModeReadOnly())
         return InvalidTransactionId;
 
     flags |= PROC_IS_AUTOVACUUM;
@@ -5122,4 +5150,30 @@ void UpdateXLogMaxCSN(CommitSeqNo xlogCSN)
         }
         LWLockRelease(XLogMaxCSNLock);
     }
+}
+
+/* Get the current oldestxmin, as there may be no transaction or no finished one */
+void GetOldestGlobalProcXmin(TransactionId *globalProcXmin)
+{
+    TransactionId globalxmin = MaxTransactionId;
+    *globalProcXmin = InvalidTransactionId;
+    ProcArrayStruct *arrayP = g_instance.proc_array_idx;
+    int *pgprocnos = arrayP->pgprocnos;
+    int numProcs = arrayP->numProcs;
+    (void)LWLockAcquire(ProcArrayLock, LW_SHARED);
+    for (int index = 0; index < numProcs; index++) {
+        int pgprocno = pgprocnos[index];
+        volatile PGXACT* pgxact = &g_instance.proc_base_all_xacts[pgprocno];
+        TransactionId xid;
+        if (pgxact->vacuumFlags & PROC_IN_VACUUM)
+            continue;
+
+        xid = pgxact->xmin;
+
+        if (TransactionIdIsNormal(xid) && TransactionIdPrecedesOrEquals(xid, globalxmin)) {
+            globalxmin = xid;
+            *globalProcXmin = globalxmin;
+        }
+    }
+    LWLockRelease(ProcArrayLock);
 }

@@ -300,11 +300,13 @@ Datum float4in(PG_FUNCTION_ARGS)
              * detect whether it's a "real" out-of-range condition by checking
              * to see if the result is zero or huge.
              */
-            if (val == 0.0 || val >= HUGE_VAL || val <= -HUGE_VAL)
-                ereport(ERROR,
-                    (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
-                        errmsg("\"%s\" is out of range for type real", orig_num)));
-        } else
+            if (val == 0.0 || val >= HUGE_VAL || val <= -HUGE_VAL) {
+                ereport((fcinfo->can_ignore ? WARNING : ERROR),
+                        (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                         errmsg("\"%s\" is out of range for type real", orig_num)));
+                val = (val == 0.0 ? 0 : (val >= HUGE_VAL ? FLT_MAX : FLT_MIN));
+            }
+        } else if (!fcinfo->can_ignore)
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
                     errmsg("invalid input syntax for type real: \"%s\"", orig_num)));
@@ -346,8 +348,8 @@ Datum float4in(PG_FUNCTION_ARGS)
     while (*endptr != '\0' && isspace((unsigned char)*endptr))
         endptr++;
 
-    /* if there is any junk left at the end of the string, bail out */
-    if (*endptr != '\0')
+    /* if there is any junk left at the end of the string, bail out. if can_ignore == true, discard junk and continue */
+    if (*endptr != '\0' && !fcinfo->can_ignore)
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
                 errmsg("invalid input syntax for type real: \"%s\"", orig_num)));
@@ -364,6 +366,11 @@ Datum float4in(PG_FUNCTION_ARGS)
         if (((float4)val) == 0.0 && val != 0) {
             ereport(WARNING, (errmsg("value out of range: underflow")));
             PG_RETURN_FLOAT4(0);
+        }
+        if (*endptr != '\0') {
+            ereport(WARNING,
+                    (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+                     errmsg("invalid input syntax for type real: \"%s\". truncated automatically", orig_num)));
         }
         PG_RETURN_FLOAT4((float4)val);
     }
@@ -529,11 +536,13 @@ Datum float8in(PG_FUNCTION_ARGS)
              * detect whether it's a "real" out-of-range condition by checking
              * to see if the result is zero or huge.
              */
-            if (val == 0.0 || val >= HUGE_VAL || val <= -HUGE_VAL)
-                ereport(ERROR,
-                    (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
-                        errmsg("\"%s\" is out of range for type double precision", orig_num)));
-        } else
+            if (val == 0.0 || val >= HUGE_VAL || val <= -HUGE_VAL) {
+                ereport(fcinfo->can_ignore ? WARNING : ERROR,
+                        (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                         errmsg("\"%s\" is out of range for type double precision", orig_num)));
+                val = (val == 0.0 ? 0 : (val >= HUGE_VAL ? DBL_MAX : DBL_MIN));
+            }
+        } else if (!fcinfo->can_ignore)
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
                     errmsg("invalid input syntax for type double precision: \"%s\"", orig_num)));
@@ -575,11 +584,18 @@ Datum float8in(PG_FUNCTION_ARGS)
     while (*endptr != '\0' && isspace((unsigned char)*endptr))
         endptr++;
 
-    /* if there is any junk left at the end of the string, bail out */
-    if (*endptr != '\0')
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
-                errmsg("invalid input syntax for type double precision: \"%s\"", orig_num)));
+    /* if there is any junk left at the end of the string, bail out. if can_ignore == true, discard junk and continue. */
+    if (*endptr != '\0') {
+        if (fcinfo->can_ignore) {
+            ereport(WARNING,
+                    (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+                     errmsg("invalid input syntax for type double precision: \"%s\". truncated automatically", orig_num)));
+        } else {
+            ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+                     errmsg("invalid input syntax for type double precision: \"%s\"", orig_num)));
+        }
+    }
 
     CHECKFLOATVAL(val, true, true);
 

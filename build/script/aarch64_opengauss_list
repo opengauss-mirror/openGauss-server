@@ -1,4 +1,10 @@
 [server]
+./bin/dsscmd
+./bin/dssserver
+./bin/perctrl
+./bin/dms_contrl.sh
+./bin/dss_clear.sh
+./bin/dss_contrl.sh
 ./bin/gsql
 ./bin/gaussdb
 ./bin/gstrace
@@ -824,6 +830,8 @@
 ./lib/libzstd.so*
 ./lib/libxgboost.so
 ./lib/libpagecompression.so*
+./lib/libdssapi.so
+./lib/libdms.so
 
 ./include/postgresql/server/postgres_ext.h
 ./include/postgresql/server/pg_config_os.h
@@ -1374,6 +1382,7 @@
 ./lib/libkrb5support_gauss.so*
 ./lib/libkrb5_gauss.so*
 ./lib/libcom_err_gauss.so*
+./lib/libcjson.so*
 [libpq]
 ./lib/libpq.a
 ./lib/libpq.so
@@ -1395,6 +1404,7 @@
 ./lib/libkrb5support_gauss.so*
 ./lib/libkrb5_gauss.so*
 ./lib/libcom_err_gauss.so*
+./lib/libcjson.so*
 ./include/gs_thread.h
 ./include/gs_threadlocal.h
 ./include/postgres_ext.h

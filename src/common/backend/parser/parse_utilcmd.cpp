@@ -291,6 +291,16 @@ Oid *namespaceid, bool isFirstNode)
      */
     if (stmt->if_not_exists && OidIsValid(existing_relid)) {
         bool exists_ok = true;
+
+        /*
+         * If we are in an extension script, insist that the pre-existing
+         * object be a member of the extension, to avoid security risks.
+         */
+        ObjectAddress address;
+
+        ObjectAddressSet(address, RelationRelationId, existing_relid);
+        checkMembershipInCurrentExtension(&address);
+
         /* 
          * Emit the right error or warning message for a "CREATE" command issued on a exist relation.
          * remote node : should have relation if recieve "IF NOT EXISTS" stmt.
@@ -1275,6 +1285,12 @@ static void transformColumnDefinition(CreateStmtContext* cxt, ColumnDef* column,
                 /* transformConstraintAttrs took care of these */
                 break;
             case CONSTR_AUTO_INCREMENT:
+                if (IsA(cxt->node, CreateForeignTableStmt) ||
+                    (cxt->rel != NULL && (IS_FOREIGNTABLE(cxt->rel) || IS_STREAM_TABLE(cxt->rel)))) {
+                    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("Un-support feature"),
+                        errdetail("auto_increment column is not supported in foreign table")));
+                }
                 if (column->is_serial) {
                     ereport(ERROR, (errcode(ERRCODE_OPERATE_NOT_SUPPORTED),
                         errmsg("The datatype of column '%s' does not support auto_increment", column->colname)));

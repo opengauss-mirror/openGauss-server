@@ -1029,18 +1029,29 @@ static void CreateStatTable(const char* query, const char* tablename)
 
 void SnapshotNameSpace::CreateSnapStatTables(void)
 {
-    const char* createTs = "create table snapshot.tables_snap_timestamp(snapshot_id bigint not null, db_name text, "
-                           "tablename text, start_ts timestamp with time zone, end_ts timestamp with time zone)";
+    StringInfoData createTs;
+    StringInfoData createSnapshot;
     const char* tablename1 = "tables_snap_timestamp";
-
-    CreateStatTable(createTs, tablename1);
-
-    const char* createSnapshot =
-        "create table snapshot.snapshot(snapshot_id bigint not null, "
-        "start_ts  timestamp with time zone, end_ts  timestamp with time zone, primary key (snapshot_id))";
     const char* tablename2 = "snapshot";
 
-    CreateStatTable(createSnapshot, tablename2);
+    initStringInfo(&createTs);
+    appendStringInfo(
+        &createTs, "create table snapshot.tables_snap_timestamp(snapshot_id bigint not null, db_name text, "
+        "tablename text, start_ts timestamp with time zone, end_ts timestamp with time zone)");
+    
+    initStringInfo(&createSnapshot);
+    appendStringInfo(
+        &createSnapshot, "create table snapshot.snapshot(snapshot_id bigint not null, "
+        "start_ts timestamp with time zone, end_ts timestamp with time zone, primary key (snapshot_id))");
+
+    // only allow create segment storage table when enable dss
+    if (ENABLE_DSS) {
+        appendStringInfo(&createTs, " with (segment = on)");
+        appendStringInfo(&createSnapshot, " with (segment = on)");
+    }
+
+    CreateStatTable(createTs.data, tablename1);
+    CreateStatTable(createSnapshot.data, tablename2);
 }
 
 static void DropIndexes(const char* indexName)
@@ -1103,6 +1114,10 @@ void SnapshotNameSpace::CreateTable(const char** views, int numViews, bool isSha
                     "create table snapshot.snap_%s(snapshot_id bigint, db_name text, %s)",
                     views[i],
                     snapColAttrType);
+            }
+            /* only allow create segment storage table when enable dss */
+            if (ENABLE_DSS) {
+                appendStringInfo(&query, " with (segment = on)");
             }
             if (!SnapshotNameSpace::ExecuteQuery(query.data, SPI_OK_UTILITY)) {
                 ereport(ERROR, (errmodule(MOD_WDR_SNAPSHOT), errcode(ERRCODE_DATA_EXCEPTION),

@@ -3117,6 +3117,7 @@ static TargetEntry* _copyTargetEntry(const TargetEntry* from)
     COPY_SCALAR_FIELD(resorigcol);
     COPY_SCALAR_FIELD(resjunk);
     COPY_SCALAR_FIELD(rtindex);
+    COPY_SCALAR_FIELD(isStartWithPseudo);
 
     return newnode;
 }
@@ -5231,6 +5232,16 @@ static DoStmt* _copyDoStmt(const DoStmt* from)
     return newnode;
 }
 
+static RenameCell *_copyRenameCell(const RenameCell *from)
+{
+    RenameCell *newnode = makeNode(RenameCell);
+
+    COPY_NODE_FIELD(original_name);
+    COPY_NODE_FIELD(modify_name);
+
+    return newnode;
+}
+
 static RenameStmt* _copyRenameStmt(const RenameStmt* from)
 {
     RenameStmt* newnode = makeNode(RenameStmt);
@@ -5244,6 +5255,8 @@ static RenameStmt* _copyRenameStmt(const RenameStmt* from)
     COPY_STRING_FIELD(newname);
     COPY_SCALAR_FIELD(behavior);
     COPY_SCALAR_FIELD(missing_ok);
+    COPY_NODE_FIELD(renameTargetList);
+    COPY_SCALAR_FIELD(renameTableflag);
 
     return newnode;
 }
@@ -6074,6 +6087,7 @@ static CreateRoleStmt* _copyCreateRoleStmt(const CreateRoleStmt* from)
 
     COPY_SCALAR_FIELD(stmt_type);
     COPY_STRING_FIELD(role);
+    COPY_SCALAR_FIELD(missing_ok);
     COPY_NODE_FIELD(options);
 
     return newnode;
@@ -7650,6 +7664,9 @@ void* copyObject(const void* from)
             break;
         case T_DoStmt:
             retval = _copyDoStmt((const DoStmt*)from);
+            break;
+        case T_RenameCell:
+            retval = _copyRenameCell((RenameCell*)from);
             break;
         case T_RenameStmt:
             retval = _copyRenameStmt((RenameStmt*)from);

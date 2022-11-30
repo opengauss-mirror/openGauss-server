@@ -585,5 +585,7 @@ bool UpdateFusion::execute(long max_rows, char *completionTag)
     }
     securec_check_ss(errorno, "\0", "\0");
     FreeExecutorStateForOpfusion(m_c_local.m_estate);
+    u_sess->statement_cxt.current_row_count = nprocessed;
+    u_sess->statement_cxt.last_row_count = u_sess->statement_cxt.current_row_count;
     return success;
 }

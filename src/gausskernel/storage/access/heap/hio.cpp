@@ -663,9 +663,10 @@ loop:
      */
     page = BufferGetPage(buffer);
     if (!PageIsNew(page)) {
-        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
-                        errmsg("page %u of relation \"%s\" should be empty but is not", BufferGetBlockNumber(buffer),
-                               RelationGetRelationName(relation))));
+        int elevel = ENABLE_DMS ? PANIC : ERROR;
+        ereport(elevel,
+            (errcode(ERRCODE_DATA_CORRUPTED), errmsg("page %u of relation \"%s\" should be empty but is not",
+            BufferGetBlockNumber(buffer), RelationGetRelationName(relation))));
     }
 
     phdr = (HeapPageHeader)page;
@@ -780,9 +781,10 @@ Buffer RelationGetNewBufferForBulkInsert(Relation relation, Size len, Size dict_
 
     page = BufferGetPage(buffer);
     if (!PageIsNew(page)) {
-        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
-                        errmsg("page %u of relation \"%s\" should be empty but is not", BufferGetBlockNumber(buffer),
-                               RelationGetRelationName(relation))));
+        int elevel = ENABLE_DMS ? PANIC : ERROR;
+        ereport(elevel,
+            (errcode(ERRCODE_DATA_CORRUPTED), errmsg("page %u of relation \"%s\" should be empty but is not",
+            BufferGetBlockNumber(buffer), RelationGetRelationName(relation))));
     }
 
     phdr = (HeapPageHeader)page;

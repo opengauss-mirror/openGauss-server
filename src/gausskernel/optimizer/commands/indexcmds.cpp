@@ -566,6 +566,16 @@ static void WaitForOlderSnapshots(TransactionId limitXmin)
     }
 }
 
+inline bool get_rel_segment(Relation rel)
+{
+    if (rel == NULL || rel->rd_options == NULL) {
+        return false;
+    }
+
+    StdRdOptions *opt = (StdRdOptions*)(rel->rd_options);
+    return opt->segment;
+}
+
 /*
  * DefineIndex
  *		Creates a new index.
@@ -672,6 +682,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
     lockmode = concurrent ? ShareUpdateExclusiveLock : ShareLock;
     rel = heap_open(relationId, lockmode);
 
+    bool segment = get_rel_segment(rel);
     TableCreateSupport indexCreateSupport{(int)COMPRESS_TYPE_NONE, false, false, false, false, false, true, false};
     ListCell *cell = NULL;
     foreach (cell, stmt->options) {
@@ -682,9 +693,10 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
     CheckCompressOption(&indexCreateSupport);
     /* do not suppport to create compressed index for temp table. */
     if ((indexCreateSupport.compressType != (int)COMPRESS_TYPE_NONE) &&
-        (relPersistence == RELPERSISTENCE_TEMP || relPersistence == RELPERSISTENCE_GLOBAL_TEMP)) {
+        (relPersistence == RELPERSISTENCE_TEMP || relPersistence == RELPERSISTENCE_GLOBAL_TEMP ||
+         relPersistence == RELPERSISTENCE_UNLOGGED || segment)) {
             ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("compressed index \"%s\" is not supported for temporary table,"
+            errmsg("compressed index \"%s\" is not supported for temporary table, unlogged table and segment table,"
             " please use uncompressed one instead", stmt->idxname)));
     }
 

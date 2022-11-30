@@ -49,7 +49,7 @@ constexpr uint32 COMPRESS_ADDRESS_FLUSH_CHUNKS = 5000;
 #define REL_SUPPORT_COMPRESSED(relation) SUPPORT_COMPRESSED((relation)->rd_rel->relkind, (relation)->rd_rel->relam)
 
 typedef uint32 pc_chunk_number_t;
-const uint32 PAGE_COMPRESSION_VERSION = 92765;
+const uint32 PAGE_COMPRESSION_VERSION = 92815;
 /*
  * layout of files for Page Compress:
  *

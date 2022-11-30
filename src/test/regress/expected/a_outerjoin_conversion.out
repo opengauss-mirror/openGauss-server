@@ -1528,6 +1528,47 @@ reset enable_mergejoin;
 reset enable_hashjoin;
 reset enable_seqscan;
 reset enable_index_nestloop;
+--test (+) with itself
+create table public.join_t1(col int, col2 int);
+create schema join_schema;
+create table join_schema.join_t1(col int, col2 int);
+insert into public.join_t1 values(1,11),(2,22);
+insert into join_schema.join_t1 values(1,10);
+--ok
+select * from public.join_t1, join_schema.join_t1  where public.join_t1.col (+)=join_schema.join_t1.col;
+ col | col2 | col | col2 
+-----+------+-----+------
+   1 |   11 |   1 |   10
+(1 row)
+
+select * from public.join_t1 t1, join_schema.join_t1 t2 where t1.col (+)=t2.col;
+ col | col2 | col | col2 
+-----+------+-----+------
+   1 |   11 |   1 |   10
+(1 row)
+
+select * from public.join_t1 t1 ,public.join_t1 t2  where t1.col (+)=t2.col2 order by t2.col;
+ col | col2 | col | col2 
+-----+------+-----+------
+     |      |   1 |   11
+     |      |   2 |   22
+(2 rows)
+
+select * from public.join_t1 t1 ,public.join_t1 t2  where t1.col (+)=t2.col order by t2.col;
+ col | col2 | col | col2 
+-----+------+-----+------
+   1 |   11 |   1 |   11
+   2 |   22 |   2 |   22
+(2 rows)
+
+--fail
+select * from public.join_t1 t1 ,public.join_t1 t2  where t1.col (+)=t1.col;
+ERROR:  "t1" is not allowed to outer join with itself.
+select * from public.join_t1 t1 ,public.join_t1 t2  where t1.col (+)=t1.col2;
+ERROR:  "t1" is not allowed to outer join with itself.
+drop table public.join_t1;
+drop table join_schema.join_t1;
+drop schema join_schema;
 drop view plus_v;
 drop function plus_join_test_1();
 drop table t1;

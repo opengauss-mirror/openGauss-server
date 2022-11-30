@@ -42,6 +42,7 @@
 #endif
 #endif
 
+#include "storage/file/fio_device.h"
 #include "securec_check.h"
 
 #ifndef FRONTEND
@@ -462,7 +463,7 @@ bool rmtree(const char* path, bool rmtopdir, bool noent_ok)
          * the bgwriter receives the message in time.
          */
         if (lstat(pathbuf, &statbuf) != 0) {
-            if (errno != ENOENT) {
+            if (!is_file_delete(errno)) {
 #ifndef FRONTEND
                 ereport(WARNING, (errmsg("could not stat file or directory \"%s\": %m", pathbuf)));
 #else

@@ -379,9 +379,16 @@ Datum box_in(PG_FUNCTION_ARGS)
     char* s = NULL;
     double x, y;
 
-    if ((!path_decode(FALSE, 2, str, &isopen, &s, &(box->high))) || (*s != '\0'))
-        ereport(ERROR,
+    if ((!path_decode(FALSE, 2, str, &isopen, &s, &(box->high))) || (*s != '\0')) {
+        ereport(fcinfo->can_ignore ? WARNING : ERROR,
             (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION), errmsg("invalid input syntax for type box: \"%s\"", str)));
+        /* if syntax error is ignorable, report warning and return box (0,0),(0,0) */
+        box->low.x = 0;
+        box->low.y = 0;
+        box->high.x = 0;
+        box->high.y = 0;
+        PG_RETURN_BOX_P(box);
+    }
 
     /* reorder corners if necessary... */
     if (box->high.x < box->low.x) {
@@ -1291,9 +1298,13 @@ Datum path_in(PG_FUNCTION_ARGS)
     int base_size;
     int depth = 0;
 
-    if ((npts = pair_count(str, ',')) <= 0)
-        ereport(ERROR,
+    int level = fcinfo->can_ignore ? WARNING : ERROR;
+    if ((npts = pair_count(str, ',')) <= 0) {
+        ereport(level,
             (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION), errmsg("invalid input syntax for type path: \"%s\"", str)));
+        /* if invalid syntax is ignorable, report warning and return path ((0,0)) */
+        PG_RETURN_DATUM((Datum)DirectFunctionCall1(path_in, CStringGetDatum("0,0")));
+    }
 
     s = str;
     while (isspace((unsigned char)*s)) {
@@ -1319,9 +1330,12 @@ Datum path_in(PG_FUNCTION_ARGS)
     path->npts = npts;
 
     if ((!path_decode(TRUE, npts, s, &isopen, &s, &(path->p[0]))) && (!((depth == 0) && (*s == '\0'))) &&
-        !((depth >= 1) && (*s == RDELIM)))
-        ereport(ERROR,
+        !((depth >= 1) && (*s == RDELIM))) {
+        ereport(level,
             (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION), errmsg("invalid input syntax for type path: \"%s\"", str)));
+        /* if invalid syntax is ignorable, report warning and return path ((0,0)) */
+        PG_RETURN_DATUM((Datum)DirectFunctionCall1(path_in, CStringGetDatum("0,0")));
+    }
 
     path->closed = (!isopen);
     /* prevent instability in unused pad bytes */
@@ -1659,9 +1673,13 @@ Datum point_in(PG_FUNCTION_ARGS)
     double x, y;
     char* s = NULL;
 
-    if (!pair_decode(str, &x, &y, &s) || (*s != '\0'))
-        ereport(ERROR,
+    if (!pair_decode(str, &x, &y, &s) || (*s != '\0')) {
+        ereport(fcinfo->can_ignore ? WARNING : ERROR,
             (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION), errmsg("invalid input syntax for type point: \"%s\"", str)));
+        /* if syntax error is ignorable, return point as (0,0) */
+        x = 0;
+        y = 0;
+    }
 
     point = (Point*)palloc(sizeof(Point));
 
@@ -1864,9 +1882,12 @@ Datum lseg_in(PG_FUNCTION_ARGS)
 
     lseg = (LSEG*)palloc(sizeof(LSEG));
 
-    if ((!path_decode(TRUE, 2, str, &isopen, &s, &(lseg->p[0]))) || (*s != '\0'))
-        ereport(ERROR,
+    if ((!path_decode(TRUE, 2, str, &isopen, &s, &(lseg->p[0]))) || (*s != '\0')) {
+        ereport(fcinfo->can_ignore ? WARNING : ERROR,
             (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION), errmsg("invalid input syntax for type lseg: \"%s\"", str)));
+        /* if syntax error is ignorable, reporting warning and return lseg [(0,0),(0,0)] */
+        PG_RETURN_DATUM((Datum)DirectFunctionCall1(box_in, CStringGetDatum("0,0,0,0")));
+    }
 
 #ifdef NOT_USED
     lseg->m = point_sl(&lseg->p[0], &lseg->p[1]);
@@ -3149,10 +3170,14 @@ Datum poly_in(PG_FUNCTION_ARGS)
     int isopen;
     char* s = NULL;
 
-    if ((npts = pair_count(str, ',')) <= 0)
-        ereport(ERROR,
+    int level = fcinfo->can_ignore ? WARNING : ERROR;
+    if ((npts = pair_count(str, ',')) <= 0) {
+        ereport(level,
             (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
                 errmsg("invalid input syntax for type polygon: \"%s\"", str)));
+        /* if invalid syntax error is ignorable, report warning and return '((0,0))' */
+        PG_RETURN_DATUM((Datum)DirectFunctionCall1(poly_in, CStringGetDatum("(0,0)")));
+    }
 
     base_size = sizeof(poly->p[0]) * npts;
     size = offsetof(POLYGON, p) + base_size;
@@ -3166,10 +3191,13 @@ Datum poly_in(PG_FUNCTION_ARGS)
     SET_VARSIZE(poly, size);
     poly->npts = npts;
 
-    if ((!path_decode(FALSE, npts, str, &isopen, &s, &(poly->p[0]))) || (*s != '\0'))
-        ereport(ERROR,
+    if ((!path_decode(FALSE, npts, str, &isopen, &s, &(poly->p[0]))) || (*s != '\0')) {
+        ereport(level,
             (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
                 errmsg("invalid input syntax for type polygon: \"%s\"", str)));
+        /* if invalid syntax error is ignorable, report warning and return '((0,0))' */
+        PG_RETURN_DATUM((Datum)DirectFunctionCall1(poly_in, CStringGetDatum("(0,0)")));
+    }
 
     make_bound_box(poly);
 
@@ -4115,9 +4143,7 @@ Datum circle_in(PG_FUNCTION_ARGS)
     }
 
     if (!pair_decode(s, &circle->center.x, &circle->center.y, &s))
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
-                errmsg("invalid input syntax for type circle: \"%s\"", str)));
+        goto syntax_error_handle;
 
     if (*s == DELIM)
         s++;
@@ -4126,9 +4152,7 @@ Datum circle_in(PG_FUNCTION_ARGS)
     }
 
     if ((!single_decode(s, &circle->radius, &s)) || (circle->radius < 0))
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
-                errmsg("invalid input syntax for type circle: \"%s\"", str)));
+        goto syntax_error_handle;
 
     while (depth > 0) {
         if ((*s == RDELIM) || ((*s == RDELIM_C) && (depth == 1))) {
@@ -4138,17 +4162,21 @@ Datum circle_in(PG_FUNCTION_ARGS)
                 s++;
             }
         } else
-            ereport(ERROR,
-                (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
-                    errmsg("invalid input syntax for type circle: \"%s\"", str)));
+            goto syntax_error_handle;
     }
 
     if (*s != '\0')
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
-                errmsg("invalid input syntax for type circle: \"%s\"", str)));
+        goto syntax_error_handle;
 
     PG_RETURN_CIRCLE_P(circle);
+
+syntax_error_handle:
+    int level = fcinfo->can_ignore ? WARNING : ERROR;
+    ereport(level,
+            (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+             errmsg("invalid input syntax for type circle: \"%s\"", str)));
+    /* if syntax error is ignorable, report warning and return circle '<(0,0),0>' */
+    PG_RETURN_DATUM((Datum)DirectFunctionCall1(circle_in, CStringGetDatum("0,0,0")));
 }
 
 /*		circle_out		-		convert a circle to external form.

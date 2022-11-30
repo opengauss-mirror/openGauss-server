@@ -190,6 +190,9 @@ extern int optreset; /* might not be declared by system headers */
 #include "storage/mot/jit_exec.h"
 #endif
 #include "commands/sqladvisor.h"
+#include "storage/file/fio_device.h"
+#include "storage/dss/dss_adaptor.h"
+#include "storage/dss/dss_log.h"
 
 THR_LOCAL VerifyCopyCommandIsReparsed copy_need_to_be_reparse = NULL;
 
@@ -2257,7 +2260,8 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
      */
     char* sql_query_string = NULL;
     char* info_query_string = NULL;
-
+    u_sess->statement_cxt.last_row_count = u_sess->statement_cxt.current_row_count;
+    u_sess->statement_cxt.current_row_count = -1;
 #ifdef ENABLE_DISTRIBUTE_TEST
     if (IS_PGXC_COORDINATOR && IsConnFromCoord()) {
         if (TEST_STUB(NON_EXEC_CN_IS_DOWN, twophase_default_error_emit)) {
@@ -3347,6 +3351,7 @@ static void exec_parse_message(const char* query_string, /* string to execute */
 #endif
     ExecNodes* single_exec_node = NULL;
     bool is_read_only = false;
+    bool is_ctas = false;
 
     gstrace_entry(GS_TRC_ID_exec_parse_message);
     /*
@@ -3645,6 +3650,7 @@ static void exec_parse_message(const char* query_string, /* string to execute */
         */
         if (query->utilityStmt != NULL && IsA(query->utilityStmt, CreateTableAsStmt)) {
             querytree_list = list_make1(query);
+            is_ctas = true;
         } else {
             querytree_list = pg_rewrite_query(query);
         }
@@ -3735,7 +3741,7 @@ static void exec_parse_message(const char* query_string, /* string to execute */
         is_read_only); /* fixed result */
 
      /* For ctas query, rewrite is not called in PARSE, so we must set invalidation to revalidate the cached plan. */
-    if (raw_parse_tree != NULL && IsA(raw_parse_tree, CreateTableAsStmt)) {
+    if (is_ctas) {
         psrc->is_valid = false;
     }
 
@@ -6885,7 +6891,7 @@ void process_postgres_switches(int argc, char* argv[], GucContext ctx, const cha
      * the common help() function in main/main.c.
      */
     initOptParseContext(&optCtxt);
-    while ((flag = getopt_r(argc, argv, "A:B:bc:C:D:d:EeFf:h:ijk:lN:nOo:Pp:r:S:sTt:v:W:g:Q:-:", &optCtxt)) != -1) {
+    while ((flag = getopt_r(argc, argv, "A:B:bc:C:D:d:EeFf:Gh:ijk:lN:nOo:Pp:r:S:sTt:v:W:g:Q:-:", &optCtxt)) != -1) {
         switch (flag) {
             case 'A':
                 SetConfigOption("debug_assertions", optCtxt.optarg, ctx, gucsource);
@@ -6932,6 +6938,16 @@ void process_postgres_switches(int argc, char* argv[], GucContext ctx, const cha
                 if (!set_plan_disabling_options(optCtxt.optarg, ctx, gucsource))
                     errs++;
                 break;
+
+            case 'G':
+                if (!singleuser) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_SYNTAX_ERROR),
+                        errmsg("-G can be used only in single user or bootstrap mode")));
+                }
+                EnableInitDBSegment = true;
+                break;
+
             case 'g':
                 SetConfigOption("xlog_file_path", optCtxt.optarg, ctx, gucsource);
                 break;
@@ -7663,6 +7679,17 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
          */
         CreateDataDirLockFile(false);
     }
+
+    /* Callback function for dss operator */
+    if (dss_device_init(g_instance.attr.attr_storage.dss_attr.ss_dss_conn_path,
+                    g_instance.attr.attr_storage.dss_attr.ss_enable_dss) != DSS_SUCCESS) {
+        ereport(FATAL, (errmsg("failed to init dss device")));
+        proc_exit(1);
+    }
+    if (ENABLE_DSS) {
+        dss_log_init();
+    }
+    initDSSConf();
 
     /* Early initialization */
     BaseInit();

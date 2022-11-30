@@ -309,7 +309,7 @@ bool errstart(int elevel, const char* filename, int lineno, const char* funcname
          */
         for (i = 0; i <= t_thrd.log_cxt.errordata_stack_depth; i++)
             elevel = Max(elevel, t_thrd.log_cxt.errordata[i].elevel);
-        if (elevel == FATAL && t_thrd.role == JOB_WORKER) {
+        if (elevel == FATAL && (t_thrd.role == JOB_WORKER || t_thrd.role == DMS_WORKER)) {
             elevel = ERROR;
         }
     }
@@ -851,11 +851,14 @@ int errcode_for_file_access(void)
 
             /* File not found */
         case ENOENT: /* No such file or directory */
+        case ERR_DSS_FILE_NOT_EXIST: /*  No such file in dss */
+        case ERR_DSS_DIR_NOT_EXIST: /* No such directory in dss */
             edata->sqlerrcode = ERRCODE_UNDEFINED_FILE;
             break;
 
             /* Duplicate file */
         case EEXIST: /* File exists */
+        case ERR_DSS_DIR_CREATE_DUPLICATED: /* File or directory already existed in DSS */
             edata->sqlerrcode = ERRCODE_DUPLICATE_FILE;
             break;
 
@@ -870,6 +873,7 @@ int errcode_for_file_access(void)
 
             /* Insufficient resources */
         case ENOSPC: /* No space left on device */
+        case ERR_DSS_NO_SPACE: /* No space left on dss */
             edata->sqlerrcode = ERRCODE_DISK_FULL;
             break;
 
@@ -4340,6 +4344,7 @@ static char* mask_Password_internal(const char* query_string)
      * 14 - create/alter text search dictionary
      * 15 - for funCrypt
      * 16 - create/alter subscription(CREATE_ALTER_SUBSCRIPTION)
+     * 17 - set password (b compatibility)
      */
     int curStmtType = 0;
     int prevToken[5] = {0};
@@ -4614,9 +4619,14 @@ static char* mask_Password_internal(const char* query_string)
                         /* For create/alter data source: sensitive opt is 'password' */
                         curStmtType = 11;
                         currToken = IDENT;
+                    } else if (DB_IS_CMPT(B_FORMAT) && prevToken[0] == SET) {
+                        curStmtType = 17;
                     }
-                    isPassword = true;
-                    idx = 0;
+
+                    if (curStmtType != 17) {
+                        isPassword = true;
+                        idx = 0;
+                    }
                     break;
                 case BY:
                     isPassword = (curStmtType > 0 && prevToken[0] == IDENTIFIED);
@@ -4624,7 +4634,7 @@ static char* mask_Password_internal(const char* query_string)
                         idx = 0;
                     break;
                 case REPLACE:
-                    isPassword = (curStmtType == 3 || curStmtType == 4);
+                    isPassword = (curStmtType == 3 || curStmtType == 4 || curStmtType == 17);
                     if (isPassword)
                         idx = 0;
                     break;
@@ -4804,6 +4814,12 @@ static char* mask_Password_internal(const char* query_string)
                     curStmtType = 0;
                     isPassword = false;
                     idx = 0;
+                    break;
+                case 61: /* character '=' */
+                    /* for mask 'set password' in b compatibility */
+                    isPassword = (curStmtType == 17);
+                    if (isPassword)
+                        idx = 0;
                     break;
                 case FOREIGN:
                     if (prevToken[0] == CREATE || prevToken[0] == ALTER) {

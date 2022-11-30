@@ -1043,6 +1043,10 @@ static void LogAccessExclusiveLocks(int nlocks, xl_standby_lock* locks)
  */
 void LogAccessExclusiveLock(Oid dbOid, Oid relOid)
 {
+    if (ENABLE_DMS) {
+        return;
+    }
+
     xl_standby_lock xlrec;
 
     xlrec.xid = GetTopTransactionId();
@@ -1063,6 +1067,10 @@ void LogAccessExclusiveLock(Oid dbOid, Oid relOid)
  */
 void LogAccessExclusiveLockPrepare(void)
 {
+    if (ENABLE_DMS) {
+        return;
+    }
+
     /*
      * Ensure that a TransactionId has been assigned to this transaction, for
      * two reasons, both related to lock release on the standby. First, we
@@ -1093,6 +1101,10 @@ static void LogReleaseAccessExclusiveLocks(int nlocks, xl_standby_lock* locks)
 
 void LogReleaseAccessExclusiveLock(TransactionId xid, Oid dbOid, Oid relOid)
 {
+    if (ENABLE_DMS) {
+        return;
+    }
+
     xl_standby_lock xlrec;
 
     xlrec.xid = xid;

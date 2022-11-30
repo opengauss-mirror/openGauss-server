@@ -188,8 +188,10 @@
 #define WRITE_CONFIG_LOCK_LEN (1024 * 1024)
 
 #ifdef EXEC_BACKEND
-#define CONFIG_EXEC_PARAMS "global/config_exec_params"
-#define CONFIG_EXEC_PARAMS_NEW "global/config_exec_params.new"
+#define CONFIG_EXEC_PARAMS (g_instance.attr.attr_storage.dss_attr.ss_enable_dss ? \
+                                           ((char*)"config_exec_params") : ((char*)"global/config_exec_params"))
+#define CONFIG_EXEC_PARAMS_NEW (g_instance.attr.attr_storage.dss_attr.ss_enable_dss ? \
+                                           ((char*)"config_exec_params.new") : ((char*)"global/config_exec_params.new"))
 #endif
 
 /* upper limit for GUC variables measured in kilobytes of memory */
@@ -218,7 +220,7 @@
 #define MS_PER_D (1000 * 60 * 60 * 24)
 #define H_PER_D 24
 #define AUDITFILE_THRESHOLD_LOWER_BOUND 100
-const uint32 AUDIT_THRESHOLD_VERSION_NUM = 92685;
+const uint32 AUDIT_THRESHOLD_VERSION_NUM = 92735;
 
 extern volatile bool most_available_sync;
 extern void SetThreadLocalGUC(knl_session_context* session);
@@ -445,6 +447,8 @@ static void assign_syslog_facility(int newval, void* extra);
 static void assign_syslog_ident(const char* newval, void* extra);
 static void assign_session_replication_role(int newval, void* extra);
 static bool check_client_min_messages(int* newval, void** extra, GucSource source);
+static bool check_default_transaction_isolation(int* newval, void** extra, GucSource source);
+static bool check_enable_stmt_track(bool* newval, void** extra, GucSource source);
 static bool check_debug_assertions(bool* newval, void** extra, GucSource source);
 #ifdef USE_BONJOUR
 static bool check_bonjour(bool* newval, void** extra, GucSource source);
@@ -999,6 +1003,8 @@ const char* const config_group_names[] = {
     gettext_noop("Instruments Options"),
     gettext_noop("Column Encryption"),
     gettext_noop("Compress Options"),
+    /* SHARED_STORAGE_OPTIONS */
+    gettext_noop("Shared Storage Options"),
 #ifdef PGXC
     /* DATA_NODES */
     gettext_noop("Datanodes and Connection Pooling"),
@@ -1125,7 +1131,7 @@ static void InitConfigureNamesBool()
             gettext_noop("Enable full/slow sql feature"), NULL},
             &u_sess->attr.attr_common.enable_stmt_track,
             true,
-            NULL,
+            check_enable_stmt_track,
             NULL,
             NULL},
         {{"track_stmt_parameter",
@@ -4056,7 +4062,7 @@ static void InitConfigureNamesEnum()
             &u_sess->attr.attr_common.DefaultXactIsoLevel,
             XACT_READ_COMMITTED,
             isolation_level_options,
-            NULL,
+            check_default_transaction_isolation,
             NULL,
             NULL},
 
@@ -5058,6 +5064,32 @@ static int guc_name_compare(const char* namea, const char* nameb)
     return 0;
 }
 
+static void parseDmsInstanceCount()
+{
+    if (!ENABLE_DMS) {
+        return;
+    }
+
+    char *dms_url = g_instance.attr.attr_storage.dms_attr.interconnect_url;
+    List *l = NULL;
+    char *url = pstrdup(dms_url);
+    if (!SplitIdentifierString(url, ',', &l)) {
+        pfree(url);
+        g_instance.attr.attr_storage.dms_attr.inst_count = 1;
+        return;
+    }
+
+    if (list_length(l) == 0 || list_length(l) > DMS_MAX_INSTANCE) {
+        pfree(url);
+        g_instance.attr.attr_storage.dms_attr.inst_count = 1;
+        return;
+    }
+
+    g_instance.attr.attr_storage.dms_attr.inst_count = list_length(l);
+    pfree(url);
+    return;
+}
+
 /*
  * Initiaize Postmaster level GUC options during postmaster proc.
  *
@@ -5072,6 +5104,11 @@ void InitializePostmasterGUC()
     g_instance.attr.attr_storage.enable_gtm_free = true;
 #endif
     g_instance.attr.attr_network.PoolerPort = g_instance.attr.attr_network.PostPortNumber + 1;
+    parseDmsInstanceCount();
+#ifndef USE_ASSERT_CHECKING
+    /* in Release, this param is ON and undisclosed */
+    g_instance.attr.attr_storage.dms_attr.enable_reform = true;
+#endif
 }
 
 /*
@@ -11193,6 +11230,23 @@ static bool check_client_min_messages(int* newval, void** extra, GucSource sourc
      */
     if (*newval > ERROR)
         *newval = ERROR;
+    return true;
+}
+
+static bool check_default_transaction_isolation(int *newval, void **extra, GucSource source)
+{
+    if (ENABLE_DMS && *newval != XACT_READ_COMMITTED) {
+        ereport(ERROR, (errmsg("Only support read committed transaction isolation level while DMS and DSS enabled")));
+        return false;
+    }
+    return true;
+}
+
+static bool check_enable_stmt_track(bool *newval, void **extra, GucSource source)
+{
+    if (ENABLE_DMS && !SS_MY_INST_IS_MASTER) {
+        *newval = false;
+    }
     return true;
 }
 

@@ -32,6 +32,7 @@
 #include "storage/smgr/smgr.h"
 #include "utils/resowner.h"
 #include "pgstat.h"
+#include "ddes/dms/ss_dms_bufmgr.h"
 
 /* 
  * Segment buffer, used for segment meta data, e.g., segment head, space map head. We separate segment
@@ -48,11 +49,20 @@ static const int TEN_MICROSECOND = 10;
 #define SegBufferIsPinned(bufHdr) ((bufHdr)->state & BUF_REFCOUNT_MASK)
 
 static BufferDesc *SegStrategyGetBuffer(uint32 *buf_state);
-static bool SegStartBufferIO(BufferDesc *buf, bool forInput);
-static void SegTerminateBufferIO(BufferDesc *buf, bool clear_dirty, uint32 set_flag_bits);
 
 extern PrivateRefCountEntry *GetPrivateRefCountEntry(Buffer buffer, bool create, bool do_move);
 extern void ForgetPrivateRefCountEntry(PrivateRefCountEntry *ref);
+
+void SetInProgressFlags(BufferDesc *bufDesc, bool input)
+{
+    InProgressBuf = bufDesc;
+    isForInput = input;
+}
+
+bool HasInProgressBuf(void)
+{
+    return InProgressBuf != NULL;
+}
 
 void AbortSegBufferIO(void)
 {
@@ -99,7 +109,7 @@ static bool SegStartBufferIO(BufferDesc *buf, bool forInput)
     return true;
 }
 
-static void SegTerminateBufferIO(BufferDesc *buf, bool clear_dirty, uint32 set_flag_bits)
+void SegTerminateBufferIO(BufferDesc *buf, bool clear_dirty, uint32 set_flag_bits)
 {
     SegmentCheck(buf == InProgressBuf);
 
@@ -144,6 +154,9 @@ bool SegPinBuffer(BufferDesc *buf)
     ereport(DEBUG5, (errmodule(MOD_SEGMENT_PAGE),
                      errmsg("[SegPinBuffer] (%u %u %u %d) %d %u ", buf->tag.rnode.spcNode, buf->tag.rnode.dbNode,
                             buf->tag.rnode.relNode, buf->tag.rnode.bucketNode, buf->tag.forkNum, buf->tag.blockNum)));
+    
+    ResourceOwnerEnlargeBuffers(t_thrd.utils_cxt.CurrentResourceOwner);
+
     bool result;
     PrivateRefCountEntry * ref = GetPrivateRefCountEntry(BufferDescriptorGetBuffer(buf), true, true);
     SegmentCheck(ref != NULL);
@@ -169,8 +182,6 @@ bool SegPinBuffer(BufferDesc *buf)
     }
 
     ref->refcount++;
-
-    ResourceOwnerEnlargeBuffers(t_thrd.utils_cxt.CurrentResourceOwner);
     ResourceOwnerRememberBuffer(t_thrd.utils_cxt.CurrentResourceOwner, BufferDescriptorGetBuffer(buf));
 
     return result;
@@ -371,9 +382,83 @@ void ReportInvalidPage(RepairBlockKey key)
     return;
 }
 
+void ReadSegBufferForCheck(BufferDesc* bufHdr, ReadBufferMode mode, SegSpace *spc, Block bufBlock)
+{
+    if (spc == NULL) {
+        bool found;
+        SegSpcTag tag = {.spcNode = bufHdr->tag.rnode.spcNode, .dbNode = bufHdr->tag.rnode.dbNode};
+        SegmentCheck(t_thrd.storage_cxt.SegSpcCache != NULL);
+        spc = (SegSpace *)hash_search(t_thrd.storage_cxt.SegSpcCache, (void *)&tag, HASH_FIND, &found);
+        SegmentCheck(found);
+    }
+
+    seg_physical_read(spc, bufHdr->tag.rnode, bufHdr->tag.forkNum, bufHdr->tag.blockNum, (char *)bufBlock);
+    if (!PageIsVerified((char *)bufBlock, bufHdr->tag.blockNum)) {
+        ereport(PANIC, (errmsg("[%d/%d/%d/%d %d-%d] verified failed",
+            bufHdr->tag.rnode.spcNode, bufHdr->tag.rnode.dbNode, bufHdr->tag.rnode.relNode,
+            bufHdr->tag.rnode.bucketNode, bufHdr->tag.forkNum, bufHdr->tag.blockNum)));
+    }
+
+    if (!PageIsSegmentVersion(bufBlock) && !PageIsNew(bufBlock)) {
+        ereport(PANIC, (errmsg("[%d/%d/%d/%d %d-%d] page version is %d",
+            bufHdr->tag.rnode.spcNode, bufHdr->tag.rnode.dbNode, bufHdr->tag.rnode.relNode,
+            bufHdr->tag.rnode.bucketNode, bufHdr->tag.forkNum, bufHdr->tag.blockNum,
+            PageGetPageLayoutVersion(bufBlock))));
+    }
+}
+
+Buffer ReadSegBufferForDMS(BufferDesc* bufHdr, ReadBufferMode mode, SegSpace *spc)
+{
+    if (spc == NULL) {
+        bool found;
+        SegSpcTag tag = {.spcNode = bufHdr->tag.rnode.spcNode, .dbNode = bufHdr->tag.rnode.dbNode};
+        SegmentCheck(t_thrd.storage_cxt.SegSpcCache != NULL);
+        spc = (SegSpace *)hash_search(t_thrd.storage_cxt.SegSpcCache, (void *)&tag, HASH_FIND, &found);
+        SegmentCheck(found);
+        ereport(DEBUG1, (errmsg("Fetch cached SegSpace success, spcNode:%u dbNode:%u.", bufHdr->tag.rnode.spcNode,
+            bufHdr->tag.rnode.dbNode)));
+    }
+
+    char *bufBlock = (char *)BufHdrGetBlock(bufHdr);
+    if (mode == RBM_ZERO_AND_LOCK || mode == RBM_ZERO_AND_CLEANUP_LOCK || mode == RBM_ZERO) {
+        errno_t er = memset_s((char *)bufBlock, BLCKSZ, 0, BLCKSZ);
+        securec_check(er, "", "");
+    } else {
+        seg_physical_read(spc, bufHdr->tag.rnode, bufHdr->tag.forkNum, bufHdr->tag.blockNum, bufBlock);
+        ereport(DEBUG1,
+            (errmsg("DMS SegPage ReadBuffer success, bufid:%d, blockNum:%u of reln:%s mode %d.",
+                bufHdr->buf_id, bufHdr->tag.blockNum, relpathperm(bufHdr->tag.rnode, bufHdr->tag.forkNum), (int)mode)));
+        if (!PageIsVerified(bufBlock, bufHdr->tag.blockNum)) {
+            RepairBlockKey key;
+            key.relfilenode = bufHdr->tag.rnode;
+            key.forknum = bufHdr->tag.forkNum;
+            key.blocknum = bufHdr->tag.blockNum;
+            ReportInvalidPage(key);
+            return InvalidBuffer;
+        }
+
+        if (!PageIsSegmentVersion(bufBlock) && !PageIsNew(bufBlock)) {
+            ereport(PANIC, (errmsg("Read DMS SegPage buffer, block %u of relation %s, but page version is %d",
+                bufHdr->tag.blockNum, relpathperm(bufHdr->tag.rnode, bufHdr->tag.forkNum),
+                PageGetPageLayoutVersion(bufBlock))));
+        }
+    }
+
+    bufHdr->lsn_on_disk = PageGetLSN(bufBlock);
+#ifdef USE_ASSERT_CHECKING
+    bufHdr->lsn_dirty = InvalidXLogRecPtr;
+#endif
+    SegTerminateBufferIO(bufHdr, false, BM_VALID);
+    SegmentCheck(SegBufferIsPinned(bufHdr));
+    return BufferDescriptorGetBuffer(bufHdr);
+}
+
 Buffer ReadBufferFast(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum, BlockNumber blockNum, ReadBufferMode mode)
 {
     bool found = false;
+
+    /* Make sure we will have room to remember the buffer pin */
+    ResourceOwnerEnlargeBuffers(t_thrd.utils_cxt.CurrentResourceOwner);
 
     BufferDesc *bufHdr = SegBufferAlloc(spc, rnode, forkNum, blockNum, &found);
 
@@ -381,7 +466,51 @@ Buffer ReadBufferFast(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum, Bloc
         SegmentCheck(!(pg_atomic_read_u32(&bufHdr->state) & BM_VALID));
 
         char *bufBlock = (char *)BufHdrGetBlock(bufHdr);
-        if (mode == RBM_ZERO_AND_LOCK || mode == RBM_ZERO_AND_CLEANUP_LOCK) {
+
+        if (ENABLE_DMS && mode != RBM_FOR_REMOTE) {
+            Assert(!(pg_atomic_read_u32(&bufHdr->state) & BM_VALID));
+
+            do {
+                bool startio;
+                if (LWLockHeldByMe(bufHdr->io_in_progress_lock)) {
+                    startio = true;
+                } else {
+                    startio = SegStartBufferIO(bufHdr, true);
+                }
+
+                if (!startio) {
+                    Assert(pg_atomic_read_u32(&bufHdr->state) & BM_VALID);
+                    found = true;
+                    goto found_branch;
+                }
+
+                dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(bufHdr->buf_id);
+                if (!LockModeCompatible(buf_ctrl, LW_SHARED)) {
+                    if (!StartReadPage(bufHdr, LW_SHARED)) {
+                        SegTerminateBufferIO((BufferDesc *)bufHdr, false, 0);
+                        // when reform fail, should return InvalidBuffer to reform proc thread
+                        if (AmDmsReformProcProcess() && dms_reform_failed()) {
+                            return InvalidBuffer;
+                        }
+
+                        pg_usleep(5000L);
+                        continue;
+                    }
+                } else {
+                    /*
+                    * previous attempts to read the buffer must have failed,
+                    * but DRC has been created, so load page directly again
+                    */
+                    Assert(pg_atomic_read_u32(&bufHdr->state) & BM_IO_ERROR);
+                    buf_ctrl->state |= BUF_NEED_LOAD;
+                }
+
+                break;
+            } while (true);
+            return TerminateReadSegPage(bufHdr, mode, spc);
+        }
+
+        if (mode == RBM_ZERO_AND_LOCK || mode == RBM_ZERO_AND_CLEANUP_LOCK || mode == RBM_ZERO) {
             errno_t er = memset_s((char *)bufBlock, BLCKSZ, 0, BLCKSZ);
             securec_check(er, "", "");
         } else {
@@ -407,8 +536,14 @@ Buffer ReadBufferFast(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum, Bloc
         SegTerminateBufferIO(bufHdr, false, BM_VALID);
     }
 
+found_branch:
     if (mode == RBM_ZERO_AND_LOCK || mode == RBM_ZERO_AND_CLEANUP_LOCK) {
-        LWLockAcquire(BufferDescriptorGetContentLock(bufHdr), LW_EXCLUSIVE);
+        if (ENABLE_DMS) {
+            GetDmsBufCtrl(bufHdr->buf_id)->state |= BUF_READ_MODE_ZERO_LOCK;
+            LockBuffer(BufferDescriptorGetBuffer(bufHdr), BUFFER_LOCK_EXCLUSIVE);
+        } else {
+            LWLockAcquire(BufferDescriptorGetContentLock(bufHdr), LW_EXCLUSIVE);
+        }
     }
 
     SegmentCheck(SegBufferIsPinned(bufHdr));
@@ -513,7 +648,19 @@ BufferDesc *SegBufferAlloc(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum,
         old_flags = buf_state & BUF_FLAG_MASK;
 
         if (BUF_STATE_GET_REFCOUNT(buf_state) == 1 && !(old_flags & BM_DIRTY)) {
-            break;
+            if (ENABLE_DMS && (old_flags & BM_TAG_VALID)) {
+                /*
+                * notify DMS to release drc owner. if failed, can't recycle this buffer.
+                * release owner procedure is in buf header lock, it's not reasonable,
+                * need to improve.
+                */
+                if (DmsReleaseOwner(old_tag, buf->buf_id)) {
+                    ClearReadHint(buf->buf_id, true);
+                    break;
+                }
+            } else {
+                break;
+            }
         }
         UnlockBufHdr(buf, buf_state);
         BufTableDelete(&new_tag, new_hash);
@@ -529,6 +676,10 @@ BufferDesc *SegBufferAlloc(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum,
                    BUF_USAGECOUNT_MASK);
     buf_state |= BM_TAG_VALID | BM_PERMANENT | BUF_USAGECOUNT_ONE;
     UnlockBufHdr(buf, buf_state);
+
+    if (ENABLE_DMS) {
+        GetDmsBufCtrl(buf->buf_id)->lock_mode = DMS_LOCK_NULL;
+    }
 
     if (old_flag_valid) {
         BufTableDelete(&old_tag, old_hash);

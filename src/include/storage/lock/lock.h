@@ -475,6 +475,7 @@ typedef struct LOCALLOCK {
     int numLockOwners;          /* # of relevant ResourceOwners */
     int maxLockOwners;          /* allocated size of array */
     bool holdsStrongLockCount;  /* bumped FastPathStrongRelatonLocks */
+    bool ssLock;                /* distribute lock in shared storage mode */
     LOCALLOCKOWNER* lockOwners; /* dynamically resizable array */
 } LOCALLOCK;
 

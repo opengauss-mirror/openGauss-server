@@ -96,6 +96,14 @@ DETAIL:  Orientation type orc is not supported for auto_increment
 CREATE TABLE test_create_autoinc_err(id INTEGER auto_increment, name varchar(200),a int, primary key(id)) with (ORIENTATION=timeseries);
 ERROR:  Un-supported feature
 DETAIL:  Orientation type timeseries is not supported for auto_increment
+CREATE FOREIGN TABLE t_table_0020 (
+  col01 integer AUTO_INCREMENT NOT NULL,
+  col02 float,
+  col03 int,
+  PRIMARY KEY (col01,col02,col03)
+) server gsmpp_server;
+ERROR:  Un-support feature
+DETAIL:  auto_increment column is not supported in foreign table
 --test different type with auto_increment start value
 CREATE TABLE test_create_autoinc(id bool auto_increment primary key, name varchar(200),a int) auto_increment=1;
 NOTICE:  CREATE TABLE will create implicit sequence "test_create_autoinc_id_seq" for serial column "test_create_autoinc.id"

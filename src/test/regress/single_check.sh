@@ -116,6 +116,31 @@ function real_regresscheck_single_audit()
     $pg_regress_check --dlpath=$DL_PATH $EXTRA_REGRESS_OPTS $3 -b $TEMP_INSTALL --abs_gausshome=\'$PREFIX_HOME\' --single_node --schedule=$SCHEDULE -w --keep_last_data=$keep_last_data --temp-config=$TEMP_CONFIG $MAXCONNOPT --regconf=$REGCONF
 }
 
+function real_regresscheck_single_ss()
+{
+    set_hotpatch_env
+    set_common_env $1 $2
+
+    if [ -d $TEMP_INSTALL ];then
+        rm -rf $TEMP_INSTALL
+    fi
+    sh ${TOP_DIR}/src/test/ss/conf_start_dss_inst.sh 1 $TEMP_INSTALL ${HOME}/ss_fastcheck_disk
+    echo "regresscheck_ss_single: $pg_regress_check --dlpath=$DL_PATH $EXTRA_REGRESS_OPTS $3 -b $TEMP_INSTALL --abs_gausshome=\'$PREFIX_HOME\' --single_node --schedule=$SCHEDULE -w --keep_last_data=$keep_last_data --temp-config=$TEMP_CONFIG $MAXCONNOPT --regconf=$REGCONF --enable_ss"
+    $pg_regress_check --dlpath=$DL_PATH $EXTRA_REGRESS_OPTS $3 -b $TEMP_INSTALL --abs_gausshome=\'$PREFIX_HOME\' --single_node --schedule=$SCHEDULE -w --keep_last_data=$keep_last_data --temp-config=$TEMP_CONFIG $MAXCONNOPT --regconf=$REGCONF --enable_ss --enable-segment
+}
+
+function real_regresscheck_ss()
+{
+    set_hotpatch_env
+    set_common_env $1 $2
+
+    if [ -d $TEMP_INSTALL ];then
+        rm -rf $TEMP_INSTALL
+    fi
+    sh ${TOP_DIR}/src/test/ss/conf_start_dss_inst.sh 2 $TEMP_INSTALL ${HOME}/ss_fastcheck_disk
+    echo "regresscheck_ss: $pg_regress_check --dlpath=$DL_PATH $EXTRA_REGRESS_OPTS $3 -b $TEMP_INSTALL --abs_gausshome=\'$PREFIX_HOME\' --single_node --schedule=$SCHEDULE -w --keep_last_data=$keep_last_data --temp-config=$TEMP_CONFIG $MAXCONNOPT --regconf=$REGCONF --ss_standby_read"
+    $pg_regress_check --dlpath=$DL_PATH $EXTRA_REGRESS_OPTS $3 -b $TEMP_INSTALL --abs_gausshome=\'$PREFIX_HOME\' --single_node --schedule=$SCHEDULE -w --keep_last_data=$keep_last_data --temp-config=$TEMP_CONFIG $MAXCONNOPT --regconf=$REGCONF --ss_standby_read --enable-segment
+}
 
 function real_regresscheck_single_mot()
 {
@@ -229,9 +254,18 @@ function real_hacheck()
             sh ./run_ha_multi_single_mot.sh 1 ${part} ;;
         hacheck_single_paxos)
             sh ./run_paxos_single.sh ;;
+        hacheck_ss_all)
+            sh ./run_ha_single_ss.sh ;;
         *)
             echo "module $module is not valid" ;;
     esac
+}
+
+function check_gs_probackup()
+{
+    REGRESS_PATH=$ROOT_CODE_PATH/${OPENGS}/src/test/regress
+    cd ${REGRESS_PATH}/
+    sh ${REGRESS_PATH}/gs_probackup.sh;
 }
 
 #These only used for *check cmd.
@@ -389,6 +423,15 @@ case $DO_CMD in
     --fastcheck_lite|fastcheck_lite)
         args_val="-d 1 -c 0 -p $p -r 1 "
         real_regresscheck_single parallel_schedule.lite$part make_fastcheck_postgresql.conf "${args_val}" ;;
+    --fastcheck_single_ss|fastcheck_single_ss)
+        args_val="-d 1 -c 0 -p $p -r 1 "
+        real_regresscheck_single_ss parallel_scheduleSS make_fastcheck_ss_postgresql.conf "${args_val}" ;;
+    --fastcheck_ss|fastcheck_ss)
+        args_val="-d 2 -c 0 -p $p -r 1 "
+        real_regresscheck_ss parallel_schedule_ss_read$part make_fastcheck_ss_postgresql.conf "${args_val}" ;;
+    --fastcheck_gs_probackup|fastcheck_gs_probackup)
+        args_val=$(echo $DO_CMD | sed 's\--\\g')
+        check_gs_probackup;;
 
     --upgradecheck_single|upgradecheck_single)
         args_val="-d 1 -c 0 -p $p -r 1 "
@@ -406,7 +449,7 @@ case $DO_CMD in
     --wlmcheck_single|wlmcheck_single)
         args_val="-d 6 -c 3 -p $p -r ${runtest}"
         real_wmlcheck parallel_schedule${part}.wlm make_wlmcheck_postgresql.conf "${args_val}" ;;
-    --hacheck_single_all|hacheck_single_all|--hacheck_single|hacheck_single|--hacheck_multi_single|hacheck_multi_single|--hacheck_multi_single_mot|hacheck_multi_single_mot|--hacheck_decode|hacheck_decode|--hacheck_single_paxos|hacheck_single_paxos)
+    --hacheck_single_all|hacheck_single_all|--hacheck_single|hacheck_single|--hacheck_multi_single|hacheck_multi_single|--hacheck_multi_single_mot|hacheck_multi_single_mot|--hacheck_decode|hacheck_decode|--hacheck_single_paxos|hacheck_single_paxos|--hacheck_ss_all|hacheck_ss_all)
         args_val=$(echo $DO_CMD | sed 's\--\\g')
         real_hacheck "${args_val}";;
     --fastcheck_ledger_single|fastcheck_ledger_single)

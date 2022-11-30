@@ -68,10 +68,13 @@ decimalLength32(const uint32 v)
  * c, if not 0, is a terminator character that may appear after the
  * integer (plus whitespace).  If 0, the string must end after the integer.
  *
+ * can_ignore, if is true, means the input s will be truncated when its value
+ * is invalid for integer.
+ *
  * Unlike plain atoi(), this will throw ereport() upon bad input format or
  * overflow.
  */
-int32 pg_atoi(char* s, int size, int c)
+int32 pg_atoi(char* s, int size, int c, bool can_ignore)
 {
     long l;
     char* badp = NULL;
@@ -119,22 +122,39 @@ int32 pg_atoi(char* s, int size, int c)
                 /* won't get ERANGE on these with 64-bit longs... */
                 || l < INT_MIN || l > INT_MAX
 #endif
-            )
-                ereport(ERROR,
-                    (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
-                        errmsg("value \"%s\" is out of range for type integer", s)));
+            ) {
+                if (!can_ignore) {
+                    ereport(ERROR,
+                            (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                             errmsg("value \"%s\" is out of range for type integer", s)));
+                }
+                ereport(WARNING,
+                        (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                         errmsg("value \"%s\" is out of range for type integer. truncated automatically", s)));
+                l = l < INT_MIN ? INT_MIN : INT_MAX;
+            }
             break;
         case sizeof(int16):
-            if (errno == ERANGE || l < SHRT_MIN || l > SHRT_MAX)
-                ereport(ERROR,
-                    (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
-                        errmsg("value \"%s\" is out of range for type smallint", s)));
+            if (errno == ERANGE || l < SHRT_MIN || l > SHRT_MAX) {
+                if (!can_ignore) {
+                    ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                                    errmsg("value \"%s\" is out of range for type smallint", s)));
+                }
+                ereport(WARNING, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                                  errmsg("value \"%s\" is out of range for type smallint. truncated automatically", s)));
+                l = l < SHRT_MIN ? SHRT_MIN : SHRT_MAX;
+            }
             break;
         case sizeof(uint8):
-            if (errno == ERANGE || l < 0 || l > UCHAR_MAX)
-                ereport(ERROR,
-                    (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
-                        errmsg("value \"%s\" is out of range for 8-bit integer", s)));
+            if (errno == ERANGE || l < 0 || l > UCHAR_MAX) {
+                if (!can_ignore) {
+                    ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                                    errmsg("value \"%s\" is out of range for 8-bit integer", s)));
+                }
+                ereport(WARNING, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                                errmsg("value \"%s\" is out of range for 8-bit integer. truncated automatically", s)));
+                l = l < 0 ? 0 : UCHAR_MAX;
+            }
             break;
         default:
             ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("unsupported result size: %d", size)));
@@ -165,7 +185,7 @@ int32 pg_atoi(char* s, int size, int c)
  * representation of the most negative number, which can't be represented as a
  * positive number.
  */
-int16 pg_strtoint16(const char* s)
+int16 pg_strtoint16(const char* s, bool can_ignore)
 {
     const char* ptr = s;
     int16 tmp = 0;
@@ -217,9 +237,13 @@ int16 pg_strtoint16(const char* s)
     return tmp;
 
 out_of_range:
-    ereport(ERROR,
-        (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
-            errmsg("value \"%s\" is out of range for type %s", s, "smallint")));
+    if (!can_ignore) {
+        ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                        errmsg("value \"%s\" is out of range for type %s", s, "smallint")));
+    }
+    ereport(WARNING, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                    errmsg("value \"%s\" is out of range for type %s. truncated automatically", s, "smallint")));
+    return neg ? PG_INT16_MIN : PG_INT16_MAX;
 
 invalid_syntax:
     ereport(ERROR,
@@ -237,7 +261,7 @@ invalid_syntax:
  * representation of the most negative number, which can't be represented as a
  * positive number.
  */
-int32 pg_strtoint32(const char* s)
+int32 pg_strtoint32(const char* s, bool can_ignore)
 {
     const char* ptr = s;
     int32 tmp = 0;
@@ -289,9 +313,14 @@ int32 pg_strtoint32(const char* s)
     return tmp;
 
 out_of_range:
-    ereport(ERROR,
-        (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
-            errmsg("value \"%s\" is out of range for type %s", s, "integer")));
+    if (!can_ignore) {
+        ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                        errmsg("value \"%s\" is out of range for type %s", s, "integer")));
+    }
+    ereport(WARNING, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                    errmsg("value \"%s\" is out of range for type %s. truncated automatically", s, "integer")));
+    return neg ? PG_INT32_MIN : PG_INT32_MAX;
+
 
 invalid_syntax:
     ereport(ERROR,

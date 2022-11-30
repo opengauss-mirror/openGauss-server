@@ -27,6 +27,7 @@ execute_process(
     COMMAND ln -fs ${PROJECT_SRC_DIR}/gausskernel/storage/access/rmgrdesc/undologdesc.cpp ${CMAKE_CURRENT_SOURCE_DIR}/undologdesc.cpp
     COMMAND ln -fs ${PROJECT_SRC_DIR}/gausskernel/storage/access/rmgrdesc/replorigindesc.cpp ${CMAKE_CURRENT_SOURCE_DIR}/replorigindesc.cpp
     COMMAND ln -fs ${PROJECT_SRC_DIR}/gausskernel/storage/smgr/cfs/cfs_mddesc.cpp ${CMAKE_CURRENT_SOURCE_DIR}/cfs_mddesc.cpp
+    COMMAND ln -fs ${PROJECT_SRC_DIR}/gausskernel/storage/dss/dss_adaptor.cpp ${CMAKE_CURRENT_SOURCE_DIR}/dss_adaptor.cpp
 )
 
 AUX_SOURCE_DIRECTORY(${CMAKE_CURRENT_SOURCE_DIR} TGT_xlogdump_SRC)

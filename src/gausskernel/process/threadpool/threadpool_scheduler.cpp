@@ -95,6 +95,7 @@ void TpoolSchedulerMain(ThreadPoolScheduler *scheduler)
         reloadConfigFileIfNecessary();
         scheduler->DynamicAdjustThreadPool();
         scheduler->GPCScheduleCleaner(&gpc_count);
+        scheduler->CheckGroupHang();
         g_threadPoolControler->GetSessionCtrl()->CheckSessionTimeout();
 #ifndef ENABLE_MULTIPLE_NODES
         g_threadPoolControler->GetSessionCtrl()->CheckIdleInTransactionSessionTimeout();
@@ -157,6 +158,15 @@ void ThreadPoolScheduler::GPCScheduleCleaner(int* gpc_count)
     (*gpc_count)++;
 }
 
+void ThreadPoolScheduler::CheckGroupHang()
+{
+    for (int i = 0; i < m_groupNum; i++) {
+        if (pmState == PM_RUN) {
+            m_groups[i]->CheckGroupHang();
+        }
+    }
+}
+
 void ThreadPoolScheduler::ShutDown() const
 {
     if (m_tid != 0)
@@ -167,12 +177,12 @@ void ThreadPoolScheduler::AdjustWorkerPool(int idx)
 {
     ThreadPoolGroup* group = m_groups[idx];
     /* When no idle worker and no task has been processed, the system may hang. */
-    if (group->IsGroupHang()) {
+    if (group->IsGroupTooBusy()) {
         m_hangTestCount[idx]++;
         m_freeTestCount[idx] = 0;
         EnlargeWorkerIfNecessage(idx);
     } else {
-        group->SetGroupHanged(false);
+        group->SetGroupTooBusy(false);
         m_hangTestCount[idx] = 0;
         m_freeTestCount[idx]++;
         ReduceWorkerIfNecessary(idx);
@@ -208,7 +218,7 @@ void ThreadPoolScheduler::EnlargeWorkerIfNecessage(int groupIdx)
             "and the thread num in pool exceed maximum, "
             "so we need to close all new sessions.", MAX_HANG_TIME);
         /* set flag for don't accept new session */
-        group->SetGroupHanged(true);
+        group->SetGroupTooBusy(true);
     }
 }
 

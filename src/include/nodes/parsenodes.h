@@ -1075,6 +1075,7 @@ typedef struct CreateRoleStmt {
     RoleStmtType stmt_type; /* ROLE/USER/GROUP */
     char* role;             /* role name */
     List* options;          /* List of DefElem nodes */
+    bool missing_ok;        /* skip error if a role is exists */
 } CreateRoleStmt;
 
 /* ----------------------

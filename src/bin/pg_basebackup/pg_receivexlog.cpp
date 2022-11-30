@@ -167,7 +167,7 @@ static XLogRecPtr FindStreamingStart(XLogRecPtr currentpos, uint32 currenttimeli
             disconnect_and_exit(1);
         }
 
-        if (statbuf.st_size == XLOG_SEG_SIZE) {
+        if (statbuf.st_size == (off_t)XLogSegSize) {
             /* Completed segment */
             if (segno > high_segno) {
                 high_segno = segno;
@@ -277,7 +277,7 @@ static void StreamLog(void)
     /*
      * Always start streaming at the beginning of a segment
      */
-    startpos -= startpos % XLOG_SEG_SIZE;
+    startpos -= startpos % XLogSegSize;
 
     /*
      * Start the replication

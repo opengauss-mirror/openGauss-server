@@ -49,6 +49,7 @@
 #include "executor/exec/execStream.h"
 #include "instruments/instr_event.h"
 #include "instruments/instr_statement.h"
+#include "ddes/dms/ss_dms_bufmgr.h"
 
 #define NLOCKENTS()                                           \
     mul_size(g_instance.attr.attr_storage.max_locks_per_xact, \
@@ -134,6 +135,8 @@ static PROCLOCK *FastPathGetRelationLockEntry(LOCALLOCK *locallock);
 static LockAcquireResult LockAcquireExtendedXC(const LOCKTAG *locktag, LOCKMODE lockmode, bool sessionLock,
                                                bool dontWait, bool reportMemoryError, bool only_increment,
                                                bool allow_con_update = false, int waitSec = 0);
+static bool SSDmsLockAcquire(LOCALLOCK *locallock, bool dontWait, int waitSec);
+static void SSDmsLockRelease(LOCALLOCK *locallock);
 
 #if defined(LOCK_DEBUG) || defined(USE_ASSERT_CHECKING)
 
@@ -709,6 +712,7 @@ static LockAcquireResult LockAcquireExtendedXC(const LOCKTAG *locktag, LOCKMODE 
         locallock->numLockOwners = 0;
         locallock->maxLockOwners = 8;
         locallock->holdsStrongLockCount = FALSE;
+        locallock->ssLock = FALSE;
         locallock->lockOwners = NULL; /* in case next line fails */
         locallock->lockOwners =
             (LOCALLOCKOWNER *)MemoryContextAlloc(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE),
@@ -758,6 +762,15 @@ static LockAcquireResult LockAcquireExtendedXC(const LOCKTAG *locktag, LOCKMODE 
         log_lock = true;
     }
 
+    /* First we try to get dms lock in shared storage mode */
+    if (ENABLE_DMS && (locktag->locktag_type < (uint8)LOCKTAG_PAGE || locktag->locktag_type == (uint8)LOCKTAG_OBJECT) &&
+        !RecoveryInProgress()) {
+        bool ret = SSDmsLockAcquire(locallock, dontWait, waitSec);
+        if (!ret) {
+            instr_stmt_report_lock(LOCK_END, NoLock);
+            return LOCKACQUIRE_NOT_AVAIL;
+        }
+    }
     /*
      * Attempt to take lock via fast path, if eligible.  But if we remember
      * having filled up the fast path array, we don't attempt to make any
@@ -814,6 +827,7 @@ static LockAcquireResult LockAcquireExtendedXC(const LOCKTAG *locktag, LOCKMODE 
         BeginStrongLockAcquire(locallock, fasthashcode);
         if (!FastPathTransferRelationLocks(lockMethodTable, locktag, hashcode)) {
             AbortStrongLockAcquire();
+            SSDmsLockRelease(locallock);
             instr_stmt_report_lock(LOCK_END, NoLock);
             if (reportMemoryError)
                 ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of shared memory"),
@@ -845,6 +859,7 @@ static LockAcquireResult LockAcquireExtendedXC(const LOCKTAG *locktag, LOCKMODE 
     if (proclock == NULL) {
         AbortStrongLockAcquire();
         LWLockRelease(partitionLock);
+        SSDmsLockRelease(locallock);
         instr_stmt_report_lock(LOCK_END, NoLock);
         if (reportMemoryError)
             ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of shared memory"),
@@ -999,6 +1014,7 @@ static LockAcquireResult LockAcquireExtendedXC(const LOCKTAG *locktag, LOCKMODE 
             LOCK_PRINT("LockAcquire: INCONSISTENT", lock, lockmode);
             /* Should we retry ? */
             LWLockRelease(partitionLock);
+            SSDmsLockRelease(locallock);
             instr_stmt_report_lock(LOCK_END, NoLock);
             ereport(ERROR, (errcode(ERRCODE_LOCK_NOT_AVAILABLE), errmsg("LockAcquire failed")));
         }
@@ -1220,6 +1236,10 @@ static void RemoveLocalLock(LOCALLOCK *locallock)
     }
     if (!hash_search(t_thrd.storage_cxt.LockMethodLocalHash, (void *)&(locallock->tag), HASH_REMOVE, NULL))
         ereport(WARNING, (errmsg("locallock table corrupted")));
+
+    if (!RecoveryInProgress()) {
+        SSDmsLockRelease(locallock);
+    }
 }
 
 bool inline IsInSameLockGroup(const PROCLOCK *proclock1, const PROCLOCK *proclock2)
@@ -1731,6 +1751,7 @@ static void WaitOnLock(LOCALLOCK *locallock, ResourceOwner owner, bool allow_con
             set_ps_display(new_status, false);
             pfree(new_status);
         }
+        SSDmsLockRelease(locallock);
         instr_stmt_report_lock(LOCK_WAIT_END);
         instr_stmt_report_lock(LOCK_END, NoLock);
 
@@ -4010,4 +4031,75 @@ int LockWaiterCount(const LOCKTAG *locktag)
     LWLockRelease(partitionLock);
 
     return waiters;
+}
+
+static bool SSDmsLockAcquire(LOCALLOCK *locallock, bool dontWait, int waitSec)
+{
+    dms_context_t dms_ctx;
+    dms_drlatch_t dlatch;
+    bool ret = true;
+    bool timeout = true;
+    bool skipAcquire = false;
+    int waitMilliSec = 0;
+
+    InitDmsContext(&dms_ctx);
+    TransformLockTagToDmsLatch(&dlatch, locallock->tag.lock);
+
+    PG_TRY();
+    {
+        do {
+            if (locallock->tag.mode < AccessExclusiveLock && SS_NORMAL_STANDBY) {
+                ret = dms_latch_timed_s(&dms_ctx, &dlatch, SS_ACQUIRE_LOCK_DO_NOT_WAIT, (unsigned char)false);
+            } else if (locallock->tag.mode >= AccessExclusiveLock && SS_NORMAL_PRIMARY) {
+                ret = dms_latch_timed_x(&dms_ctx, &dlatch, SS_ACQUIRE_LOCK_DO_NOT_WAIT);
+            } else {
+                skipAcquire = true;
+            }
+
+            // acquire failed, and need wait
+            if (!dontWait && !ret) {
+                CHECK_FOR_INTERRUPTS();
+
+                // first entry
+                if (waitMilliSec == 0) {
+                    LOCK_PRINT("WaitOnLock: sleeping on ss_lock start", locallock->lock, locallock->tag.mode);
+                    instr_stmt_report_lock(LOCK_WAIT_START, locallock->tag.mode, &locallock->tag.lock);
+                }
+                timeout = (waitSec == 0) ? false : (waitMilliSec >= waitSec * MILLISEC2SEC);
+                pg_usleep(SS_ACQUIRE_LOCK_RETRY_INTERVAL * MICROSEC2MILLISEC);  // 50 ms
+                waitMilliSec += SS_ACQUIRE_LOCK_RETRY_INTERVAL;
+            }
+        } while (!timeout && !ret);
+    }
+    PG_CATCH();
+    {
+        instr_stmt_report_lock(LOCK_WAIT_END);
+        instr_stmt_report_lock(LOCK_END, NoLock);
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+
+    if (waitMilliSec != 0) {
+        instr_stmt_report_lock(LOCK_WAIT_END);
+        LOCK_PRINT("WaitOnLock: sleeping on ss_lock end", locallock->lock, locallock->tag.mode);
+    }
+
+    locallock->ssLock = ret && !skipAcquire;
+    return ret;
+}
+
+static void SSDmsLockRelease(LOCALLOCK *locallock)
+{
+    dms_context_t dms_ctx;
+    dms_drlatch_t dlatch;
+
+    if (!locallock->ssLock) {
+        return;
+    }
+
+    InitDmsContext(&dms_ctx);
+    TransformLockTagToDmsLatch(&dlatch, locallock->tag.lock);
+
+    locallock->ssLock = FALSE;
+    dms_unlatch(&dms_ctx, &dlatch);
 }

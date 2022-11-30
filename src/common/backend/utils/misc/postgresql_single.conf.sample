@@ -258,9 +258,8 @@ max_wal_senders = 4		# max number of walsender processes
 wal_keep_segments = 16		# in logfile segments, 16MB each; 0 disables
 #wal_sender_timeout = 6s	# in milliseconds; 0 disables
 enable_slot_log = off
-max_replication_slots = 8	# max number of replication slots.i
-				# The value belongs to [1,7].
-				# (change requires restart)
+max_replication_slots = 8
+
 #max_changes_in_memory = 4096
 #max_cached_tuplebufs = 8192
 
@@ -810,3 +809,28 @@ job_queue_processes = 10        # Number of concurrent jobs, optional: [0..1000]
 #plsql_show_all_error=off
 #enable_seqscan_fusion = off
 #enable_cachedplan_mgr=on
+
+#------------------------------------------------------------------------------
+# SHARED STORAGE OPTIONS
+#------------------------------------------------------------------------------
+#ss_enable_dms = off
+#ss_enable_dss = off
+#ss_enable_reform = on
+#ss_enable_ssl = on
+#ss_enable_catalog_centralized = on
+#ss_instance_id = 0
+#ss_dss_vg_name = ''
+#ss_dss_conn_path = ''
+#ss_interconnect_channel_count = 16
+#ss_work_thread_count = 32
+#ss_recv_msg_pool_size = 16MB
+#ss_interconnect_type = 'TCP'
+#ss_interconnect_url = '0:127.0.0.1:1611'
+#ss_rdma_work_config = ''
+#ss_ock_log_path = ''
+#ss_enable_scrlock = off
+#ss_enable_scrlock_sleep_mode = on
+#ss_scrlock_server_port = 8000
+#ss_scrlock_worker_count = 2
+#ss_scrlock_worker_bind_core = ''
+#ss_scrlock_server_bind_core = ''

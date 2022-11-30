@@ -104,6 +104,7 @@ void CreateSchemaCommand(CreateSchemaStmt* stmt, const char* queryString)
     int save_sec_context;
     AclResult aclresult;
     char* queryStringwithinfo = (char*)queryString;
+    ObjectAddress address;
 
     GetUserIdAndSecContext(&saved_uid, &save_sec_context);
     if (IsExistPackageName(schemaName)) {
@@ -220,10 +221,19 @@ void CreateSchemaCommand(CreateSchemaStmt* stmt, const char* queryString)
 
     /* make sure there is no existing namespace of same name */
     if (stmt->missing_ok) {
-        if (SearchSysCacheExists1(NAMESPACENAME, PointerGetDatum(schemaName))) {
+        namespaceId = get_namespace_oid(schemaName, true);
+        if (OidIsValid(namespaceId)) {
+            /*
+             * If we are in an extension script, insist that the pre-existing
+             * object be a member of the extension, to avoid security risks.
+             */
+            ObjectAddressSet(address, NamespaceRelationId, namespaceId);
+            checkMembershipInCurrentExtension(&address);
+
+            /* OK to skip */
             ereport(NOTICE, (errmsg("schema \"%s\" already exists,skipping", schemaName)));
             return;
-        }
+	}
     } 
 
     /* Create the schema's namespace */

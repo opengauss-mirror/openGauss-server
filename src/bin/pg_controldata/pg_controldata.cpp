@@ -27,17 +27,29 @@
 #include "access/xlog.h"
 #include "catalog/pg_control.h"
 #include "bin/elog.h"
+#include "getopt_long.h"
+#include "storage/dss/dss_adaptor.h"
+#include "storage/file/fio_device.h"
+
 #define FirstNormalTransactionId ((TransactionId)3)
 #define TransactionIdIsNormal(xid) ((xid) >= FirstNormalTransactionId)
 
-static void usage(const char* progname)
+static const char *progname;
+static bool enable_dss = false;
+
+static void usage(const char* prog_name)
 {
-    printf(_("%s displays control information of a openGauss database cluster.\n\n"), progname);
+    printf(_("%s displays control information of a openGauss database cluster.\n\n"), prog_name);
     printf(_("Usage:\n"));
-    printf(_("  %s [OPTION] [DATADIR]\n"), progname);
+    printf(_("  %s [OPTION] [DATADIR]\n"), prog_name);
     printf(_("\nOptions:\n"));
-    printf(_("  -V, --version  output version information, then exit\n"));
-    printf(_("  -?, --help     show this help, then exit\n"));
+    printf(_("  -I, --instance-id=INSTANCE_ID\n"));
+    printf(_("                    display information of specified instance (default all)\n"));
+    printf(_("      --enable-dss  enable shared storage mode\n"));
+    printf(_("      --socketpath=SOCKETPATH\n"));
+    printf(_("                    dss connect socket file path\n"));
+    printf(_("  -V, --version     output version information, then exit\n"));
+    printf(_("  -?, --help        show this help, then exit\n"));
     printf(_("\nIf no data directory (DATADIR) is specified, "
              "the environment variable PGDATA\nis used.\n"));
 #if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
@@ -87,86 +99,29 @@ static const char* wal_level_str(WalLevel wal_level)
     return _("unrecognized wal_level");
 }
 
-int main(int argc, char* argv[])
+static void exit_safely(int returnCode)
 {
-    ControlFileData ControlFile;
-    int fd = -1;
-    char ControlFilePath[MAXPGPATH];
-    char* DataDir = NULL;
+    if (progname != NULL) {
+        free((char*)progname);
+        progname = NULL;
+    }
+    exit(returnCode);
+}
+
+static void display_data(ControlFileData ControlFile, int instance_id)
+{
     pg_crc32c crc; /* pg_crc32c as same as pg_crc32 */
     time_t time_tmp;
     char pgctime_str[128];
     char ckpttime_str[128];
     char sysident_str[32];
     const char* strftime_fmt = "%c";
-    const char* progname = NULL;
     int sret = 0;
 
-    set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("pg_controldata"));
-
-    progname = get_progname(argv[0]);
-
-    if (argc > 1) {
-        if (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-?") == 0) {
-            usage(progname);
-            if (progname != NULL) {
-                free((char*)progname);
-                progname = NULL;
-            }
-            exit(0);
-        }
-        if (strcmp(argv[1], "--version") == 0 || strcmp(argv[1], "-V") == 0) {
-#ifdef ENABLE_MULTIPLE_NODES
-            puts("pg_controldata (PostgreSQL) " PG_VERSION);
-#else
-            puts("pg_controldata (openGauss) " PG_VERSION);
-#endif
-            if (progname != NULL) {
-                free((char*)progname);
-                progname = NULL;
-            }
-            exit(0);
-        }
+    /* display instance id in shared storage mode */
+    if (enable_dss) {
+        printf(_("\npg_control data (instance id %d)\n\n"), instance_id);
     }
-
-    if (argc > 1) {
-        DataDir = argv[1];
-    } else {
-        DataDir = getenv("PGDATA");
-    }
-    if (DataDir == NULL) {
-        fprintf(stderr, _("%s: no data directory specified\n"), progname);
-        fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname);
-        if (progname != NULL) {
-            free((char*)progname);
-            progname = NULL;
-        }
-        exit(1);
-    }
-    check_env_value_c(DataDir);
-    sret = snprintf_s(ControlFilePath, MAXPGPATH, MAXPGPATH - 1, "%s/global/pg_control", DataDir);
-    securec_check_ss_c(sret, "\0", "\0");
-
-    if ((fd = open(ControlFilePath, O_RDONLY | PG_BINARY, 0)) == -1) {
-        fprintf(
-            stderr, _("%s: could not open file \"%s\" for reading: %s\n"), progname, ControlFilePath, strerror(errno));
-        if (progname != NULL) {
-            free((char*)progname);
-            progname = NULL;
-        }
-        exit(2);
-    }
-
-    if (read(fd, &ControlFile, sizeof(ControlFileData)) != sizeof(ControlFileData)) {
-        fprintf(stderr, _("%s: could not read file \"%s\": %s\n"), progname, ControlFilePath, strerror(errno));
-        close(fd);
-        if (progname != NULL) {
-            free((char*)progname);
-            progname = NULL;
-        }
-        exit(2);
-    }
-    close(fd);
 
     /* Check the CRC. */
     /* using CRC32C since 923 */
@@ -231,7 +186,7 @@ int main(int argc, char* argv[])
     printf(_("Latest checkpoint's oldestXID:        " XID_FMT "\n"), ControlFile.checkPointCopy.oldestXid);
     printf(_("Latest checkpoint's oldestXID's DB:   %u\n"), ControlFile.checkPointCopy.oldestXidDB);
     printf(_("Latest checkpoint's oldestActiveXID:  " XID_FMT "\n"), ControlFile.checkPointCopy.oldestActiveXid);
-    printf(_("Latest checkpoint's remove lsn:          %X/%X\n"),
+    printf(_("Latest checkpoint's remove lsn:       %X/%X\n"),
         (uint32)(ControlFile.checkPointCopy.remove_seg >> 32),
         (uint32)ControlFile.checkPointCopy.remove_seg);
     printf(_("Time of latest checkpoint:            %s\n"), ckpttime_str);
@@ -265,6 +220,151 @@ int main(int argc, char* argv[])
     printf(
         _("Float8 argument passing:              %s\n"), (ControlFile.float8ByVal ? _("by value") : _("by reference")));
     printf(_("Database system TimeLine:             %u\n"), ControlFile.timeline);
+}
+
+int main(int argc, char* argv[])
+{
+    ControlFileData ControlFile;
+    int fd = -1;
+    bool display_all = true;
+    char ControlFilePath[MAXPGPATH];
+    char* DataDir = NULL;
+    char* socketpath = NULL;
+    int sret = 0;
+    int seekpos;
+    int option_value;
+    int option_index;
+    int display_id;
+    int ss_nodeid = MIN_INSTANCEID;
+    off_t ControlFileSize;
+
+    static struct option long_options[] = {{"enable-dss", no_argument, NULL, 1},
+        {"socketpath", required_argument, NULL, 2}};
+
+    set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("pg_controldata"));
+
+    progname = get_progname(argv[0]);
+
+    if (argc > 1) {
+        if (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-?") == 0) {
+            usage(progname);
+            exit_safely(0);
+        }
+        if (strcmp(argv[1], "--version") == 0 || strcmp(argv[1], "-V") == 0) {
+#ifdef ENABLE_MULTIPLE_NODES
+            puts("pg_controldata (PostgreSQL) " PG_VERSION);
+#else
+            puts("pg_controldata (openGauss) " PG_VERSION);
+#endif
+            exit_safely(0);
+        }
+    }
+
+    while ((option_value = getopt_long(argc, argv, "I:V", long_options, &option_index)) != -1) {
+        switch (option_value) {
+            case 'I':
+                if (atoi(optarg) < MIN_INSTANCEID || atoi(optarg) > MAX_INSTANCEID) {
+                    fprintf(stderr, _("%s: unexpected node id specified, valid range is %d - %d\n"),
+                            progname, MIN_INSTANCEID, MAX_INSTANCEID);
+                    exit_safely(1);
+                }
+                ss_nodeid = atoi(optarg);
+                display_all = false;
+                break;
+            case 1:
+                enable_dss = true;
+                break;
+            case 2:
+                enable_dss = true;
+                socketpath = strdup(optarg);
+                break;
+            default:
+                /* getopt_long already emitted a complaint */
+                fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname);
+                exit_safely(1);
+        }
+    }
+
+    if (optind < argc) {
+        DataDir = argv[optind];
+    } else {
+        DataDir = getenv("PGDATA");
+    }
+    if (DataDir == NULL) {
+        fprintf(stderr, _("%s: no data directory specified\n"), progname);
+        fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname);
+        exit_safely(1);
+    }
+    check_env_value_c(DataDir);
+
+    if (enable_dss) {
+        if (socketpath == NULL) {
+            fprintf(stderr, _("%s: socketpath cannot be NULL when enable dss\n"), progname);
+            exit_safely(1);
+        }
+
+        if (DataDir[0] != '+') {
+            fprintf(stderr, _("%s: DATADIR should be specified when enable dss\n"), progname);
+            exit_safely(1);
+        }
+    }
+
+    // dss device init
+    if (dss_device_init(socketpath, enable_dss) != DSS_SUCCESS) {
+        fprintf(stderr, _("failed to init dss device\n"));
+        exit_safely(1);
+    }
+
+    if (enable_dss) {
+        // in shared storage mode, the cluster contains only one pg_control file
+        sret = snprintf_s(ControlFilePath, MAXPGPATH, MAXPGPATH - 1, "%s/pg_control", DataDir);
+    } else {
+        sret = snprintf_s(ControlFilePath, MAXPGPATH, MAXPGPATH - 1, "%s/global/pg_control", DataDir);
+    }
+    securec_check_ss_c(sret, "\0", "\0");
+
+    fd = open(ControlFilePath, O_RDONLY | PG_BINARY, 0);
+    if (fd < 0) {
+        fprintf(
+            stderr, _("%s: could not open file \"%s\" for reading: %s\n"), progname, ControlFilePath, strerror(errno));
+        exit_safely(2);
+    }
+
+    if ((ControlFileSize = lseek(fd, 0, SEEK_END)) < 0) {
+        fprintf(stderr, _("%s: could not get \"%s\" size: %s\n"), progname, ControlFilePath, strerror(errno));
+        close(fd);
+        exit_safely(2);
+    }
+
+    display_id = ss_nodeid;
+    seekpos = (int)BLCKSZ * ss_nodeid;
+    if (seekpos >= ControlFileSize) {
+        fprintf(stderr, _("%s: cound not read beyond end of file \"%s\", file_size: %ld, instance_id: %d\n"),
+                progname, ControlFilePath, ControlFileSize, ss_nodeid);
+        close(fd);
+        exit_safely(2);
+    }
+
+    do {
+        if (lseek(fd, (off_t)seekpos, SEEK_SET) < 0) {
+            fprintf(stderr, _("%s: could not seek in \"%s\" to offset %d: %s\n"),
+                    progname, ControlFilePath, seekpos, strerror(errno));
+            close(fd);
+            exit_safely(2);
+        }
+
+        if (read(fd, &ControlFile, sizeof(ControlFileData)) != sizeof(ControlFileData)) {
+            fprintf(stderr, _("%s: could not read file \"%s\": %s\n"), progname, ControlFilePath, strerror(errno));
+            close(fd);
+            exit_safely(2);
+        }
+
+        display_data(ControlFile, display_id);
+        seekpos += BLCKSZ;
+        display_id = display_id + 1;
+    } while (display_all && seekpos < ControlFileSize);
+
+    close(fd);
     if (progname != NULL) {
         free((char*)progname);
         progname = NULL;

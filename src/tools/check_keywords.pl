@@ -35,7 +35,7 @@ $keyword_categories{'col_name_keyword'}       = 'COL_NAME_KEYWORD';
 $keyword_categories{'type_func_name_keyword'} = 'TYPE_FUNC_NAME_KEYWORD';
 $keyword_categories{'reserved_keyword'}       = 'RESERVED_KEYWORD';
 
-my $gram_filename = "$path/src/backend/parser/gram.y";
+my $gram_filename = "$path/src/common/backend/parser/gram.y";
 open(GRAM, $gram_filename) || die("Could not open : $gram_filename");
 
 my ($S, $s, $k, $n, $kcat);

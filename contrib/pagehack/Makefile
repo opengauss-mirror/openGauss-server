@@ -1,6 +1,7 @@
 # contrib/pagehack/Makefile
 MODULE_big	= pagehack
-OBJS		= pagehack.o
+OBJS		= pagehack.o \
+	$(top_builddir)/src/gausskernel/storage/dss/dss_adaptor.o
 
 # executable program, even there is no database server/client
 PROGRAM = pagehack

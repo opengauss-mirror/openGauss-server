@@ -36,6 +36,7 @@ typedef struct ShowBackendRow
     char        zratio[20];
     char        start_lsn[20];
     char        stop_lsn[20];
+    char        type[20];
     const char *status;
 } ShowBackendRow;
 
@@ -56,11 +57,12 @@ typedef struct ShowArchiveRow
 
 static void show_instance_start(void);
 static void show_instance_end(void);
-static void show_instance(const char *instance_name, time_t requested_backup_id, bool show_name);
+static void show_instance(InstanceConfig *instance, time_t requested_backup_id, bool show_name);
 static void print_backup_json_object(PQExpBuffer buf, pgBackup *backup);
 static int show_backup(const char *instance_name, time_t requested_backup_id);
 
-static void show_instance_plain(const char *instance_name, parray *backup_list, bool show_name);
+static void show_instance_plain(const char *instance_name, device_type_t instance_type,
+                                parray *backup_list, bool show_name);
 static void show_instance_json(const char *instance_name, parray *backup_list);
 
 static void show_instance_archive(InstanceConfig *instance);
@@ -110,7 +112,7 @@ do_show(const char *instance_name, time_t requested_backup_id, bool show_archive
             if (show_archive)
                 show_instance_archive(instance);
             else
-                show_instance(instance->name, INVALID_BACKUP_ID, true);
+                show_instance(instance, INVALID_BACKUP_ID, true);
         }
         show_instance_end();
 
@@ -124,17 +126,17 @@ do_show(const char *instance_name, time_t requested_backup_id, bool show_archive
              requested_backup_id == INVALID_BACKUP_ID)
     {
         show_instance_start();
+        InstanceConfig *instance = readInstanceConfigFile(instance_name);
 
         if (show_archive)
         {
-            InstanceConfig *instance = readInstanceConfigFile(instance_name);
             if (instance == NULL) {
                 return 0;
             }
             show_instance_archive(instance);
         }
         else
-            show_instance(instance_name, requested_backup_id, false);
+            show_instance(instance, requested_backup_id, false);
 
         show_instance_end();
 
@@ -324,14 +326,18 @@ show_instance_end(void)
  * Show brief meta information about all backups in the backup instance.
  */
 static void
-show_instance(const char *instance_name, time_t requested_backup_id, bool show_name)
+show_instance(InstanceConfig *instance, time_t requested_backup_id, bool show_name)
 {
     parray       *backup_list;
+    const char *instance_name;
+    device_type_t instance_type;
 
+    instance_name = instance->name;
+    instance_type = instance->dss.enable_dss ? DEV_TYPE_DSS : DEV_TYPE_FILE;
     backup_list = catalog_get_backup_list(instance_name, requested_backup_id);
 
     if (show_format == SHOW_PLAIN)
-        show_instance_plain(instance_name, backup_list, show_name);
+        show_instance_plain(instance_name, instance_type, backup_list, show_name);
     else if (show_format == SHOW_JSON)
         show_instance_json(instance_name, backup_list);
     else
@@ -553,18 +559,18 @@ static void process_time(pgBackup *backup, ShowBackendRow *row)
  * Show instance backups in plain format.
  */
 static void
-show_instance_plain(const char *instance_name, parray *backup_list, bool show_name)
+show_instance_plain(const char *instance_name, device_type_t instance_type,  parray *backup_list, bool show_name)
 {
-#define SHOW_FIELDS_COUNT 14
+#define SHOW_FIELDS_COUNT 15
     int            i;
     const char *names[SHOW_FIELDS_COUNT] =
                     { "Instance", "Version", "ID", "Recovery Time",
                       "Mode", "WAL Mode", "TLI", "Time", "Data", "WAL",
-                      "Zratio", "Start LSN", "Stop LSN", "Status" };
+                      "Zratio", "Start LSN", "Stop LSN", "Type", "Status" };
     const char *field_formats[SHOW_FIELDS_COUNT] =
                     { " %-*s ", " %-*s ", " %-*s ", " %-*s ",
                       " %-*s ", " %-*s ", " %-*s ", " %*s ", " %*s ", " %*s ",
-                      " %*s ", " %-*s ", " %-*s ", " %-*s "};
+                      " %*s ", " %-*s ", " %-*s ", " %-*s ", " %-*s "};
     uint32        widths[SHOW_FIELDS_COUNT];
     uint32        widths_sum = 0;
     ShowBackendRow *rows = NULL;
@@ -690,6 +696,12 @@ show_instance_plain(const char *instance_name, parray *backup_list, bool show_na
         widths[cur] = Max(widths[cur], strlen(row->stop_lsn));
         cur++;
 
+        /* Type (FILE OR DSS) */
+        rc = snprintf_s(row->type, lengthof(row->type), lengthof(row->type) - 1, "%s", dev2str(instance_type));
+        securec_check_ss_c(rc, "\0", "\0");
+        widths[cur] = Max(widths[cur], (uint32)strlen(row->type));
+        cur++;
+
         /* Status */
         row->status = status2str(backup->status);
         widths[cur] = Max(widths[cur], strlen(row->status));
@@ -776,6 +788,10 @@ show_instance_plain(const char *instance_name, parray *backup_list, bool show_na
 
         appendPQExpBuffer(&show_buf, field_formats[cur], widths[cur],
                           row->stop_lsn);
+        cur++;
+
+        appendPQExpBuffer(&show_buf, field_formats[cur], widths[cur],
+                          row->type);
         cur++;
 
         appendPQExpBuffer(&show_buf, field_formats[cur], widths[cur],

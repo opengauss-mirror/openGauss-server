@@ -47,6 +47,7 @@
 #include "pg_trace.h"
 #include "storage/smgr/fd.h"
 #include "storage/proc.h"
+#include "storage/file/fio_device.h"
 #ifdef USE_ASSERT_CHECKING
 #include "utils/builtins.h"
 #endif /* USE_ASSERT_CHECKING */
@@ -534,6 +535,11 @@ static void CLogSetStatusBit(TransactionId xid, CLogXidStatus status, XLogRecPtr
     if (t_thrd.xlog_cxt.InRecovery && status == CLOG_XID_STATUS_SUB_COMMITTED && curval == CLOG_XID_STATUS_COMMITTED)
         return;
 
+    if (SS_STANDBY_MODE) {
+        ereport(WARNING, (errmodule(MOD_DMS), errmsg("DMS standby can't set clog status")));
+        return;
+    }
+
     /*
      * Current state change should be from 0 or subcommitted to target state
      * or we should already be there when replaying changes during recovery.
@@ -663,7 +669,7 @@ void CLOGShmemInit(void)
         rc = sprintf_s(name, SLRU_MAX_NAME_LENGTH, "%s%d", "CLOG Ctl", i);
         securec_check_ss(rc, "", "");
         SimpleLruInit(ClogCtl(i), name, (int)LWTRANCHE_CLOG_CTL, (int)CLOGShmemBuffers(), CLOG_LSNS_PER_PAGE,
-                      CBufMappingPartitionLockByIndex(i), "pg_clog");
+                      CBufMappingPartitionLockByIndex(i), CLOGDIR);
     }
 }
 
@@ -749,6 +755,11 @@ void StartupCLOG(void)
 void TrimCLOG(void)
 {
     if (u_sess->attr.attr_storage.ustore_verify_level == USTORE_VERIFY_WHITEBOX) {
+        return;
+    }
+
+    if (SS_STANDBY_MODE && !SS_STANDBY_PROMOTING) {
+        ereport(WARNING, (errmodule(MOD_DMS), errmsg("DMS standby can't trim clog status")));
         return;
     }
 
@@ -841,7 +852,7 @@ int ClogSegCurMaxPageNo(char *path, int64 pageno)
      */
     int fd = BasicOpenFile(path, O_RDONLY | PG_BINARY, S_IRUSR | S_IWUSR);
     if (fd < 0) {
-        if (errno != ENOENT) {
+        if (!FILE_POSSIBLY_DELETED(errno)) {
             Assert(!t_thrd.xlog_cxt.InRecovery);
             LWLockRelease(ClogCtl(pageno)->shared->control_lock);
             ereport(ERROR, (errcode(ERRCODE_IO_ERROR), errmsg("Open file %s failed. %s\n", path, strerror(errno))));
@@ -1272,4 +1283,18 @@ Datum gs_fault_inject(PG_FUNCTION_ARGS)
     ereport(WARNING, (errmsg("unsupported fault injection")));
     PG_RETURN_INT64(0);
 #endif
+}
+
+void SSCLOGShmemClear(void)
+{
+    int i = 0;
+    int rc = 0;
+    char name[SLRU_MAX_NAME_LENGTH];
+
+    for (i = 0; i < NUM_CLOG_PARTITIONS; i++) {
+        rc = sprintf_s(name, SLRU_MAX_NAME_LENGTH, "%s%d", "CLOG Ctl", i);
+        securec_check_ss(rc, "", "");
+        SimpleLruSetPageEmpty(ClogCtl(i), name, (int)LWTRANCHE_CLOG_CTL, (int)CLOGShmemBuffers(), CLOG_LSNS_PER_PAGE,
+            CBufMappingPartitionLockByIndex(i), CLOGDIR);
+    }
 }

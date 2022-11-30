@@ -68,7 +68,7 @@
 
 static AbsoluteTime tm2abstime(struct pg_tm* tm, int tz);
 static void reltime2tm(RelativeTime time, struct pg_tm* tm);
-static void parsetinterval(char* i_string, AbsoluteTime* i_start, AbsoluteTime* i_end);
+static void parsetinterval(char* i_string, AbsoluteTime* i_start, AbsoluteTime* i_end, bool can_ignore = false);
 
 extern TimestampTz GetCurrentStmtsysTimestamp(void);
 
@@ -659,7 +659,7 @@ Datum tintervalin(PG_FUNCTION_ARGS)
     TimeInterval tinterval;
     AbsoluteTime i_start, i_end, t1, t2;
 
-    parsetinterval(tintervalstr, &t1, &t2);
+    parsetinterval(tintervalstr, &t1, &t2, fcinfo->can_ignore);
 
     tinterval = (TimeInterval)palloc(sizeof(TimeIntervalData));
 
@@ -1325,7 +1325,7 @@ Datum tintervalend(PG_FUNCTION_ARGS)
  *
  *		e.g.  [  '  Jan 18 1902'   'Jan 1 00:00:00 1970']
  */
-static void parsetinterval(char* i_string, AbsoluteTime* i_start, AbsoluteTime* i_end)
+static void parsetinterval(char* i_string, AbsoluteTime* i_start, AbsoluteTime* i_end, bool can_ignore)
 {
     char *p = NULL, *p1 = NULL;
     char c;
@@ -1419,10 +1419,18 @@ static void parsetinterval(char* i_string, AbsoluteTime* i_start, AbsoluteTime* 
     return;
 
 bogus:
-    ereport(ERROR,
-        (errcode(ERRCODE_INVALID_DATETIME_FORMAT),
-            errmsg("invalid input syntax for type tinterval: \"%s\"", i_string)));
-    *i_start = *i_end = INVALID_ABSTIME; /* keep compiler quiet */
+    if (can_ignore) {
+        ereport(WARNING,
+                (errcode(ERRCODE_INVALID_DATETIME_FORMAT),
+                 errmsg("invalid input syntax for type tinterval: \"%s\"", i_string)));
+        /* ignorable syntax error. returning epoch time '1970-01-01 00:00:00' */
+        *i_start = *i_end = 0;
+        return;
+    } else {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_DATETIME_FORMAT),
+                        errmsg("invalid input syntax for type tinterval: \"%s\"", i_string)));
+        *i_start = *i_end = INVALID_ABSTIME; /* keep compiler quiet */
+    }
 }
 
 /*****************************************************************************

@@ -72,6 +72,7 @@
 #include "storage/procsignal.h"
 #include "storage/sinvaladt.h"
 #include "storage/smgr/smgr.h"
+#include "storage/file/fio_device.h"
 #include "tcop/tcopprot.h"
 #include "threadpool/threadpool.h"
 #include "utils/acl.h"
@@ -517,11 +518,14 @@ static void CheckConnAuthority(const char* name, bool am_superuser)
     if (IsUnderPostmaster && !IsAutoVacuumWorkerProcess() && !IsJobSchedulerProcess() && !IsJobWorkerProcess() &&
         !IsBgWorkerProcess() && !IsTxnSnapCapturerProcess() && !IsTxnSnapWorkerProcess() && !IsRbCleanerProcess() && !IsRbWorkerProcess() &&
          !IsCfsShrinkerProcess()) {
+        bool isLocalAddr = false;
+        if (u_sess->proc_cxt.MyProcPort != NULL) {
+            isLocalAddr = IsLocalAddr(u_sess->proc_cxt.MyProcPort);
+        }
+
         /* Database Security: Check privilege to connect to the database.
          * Only superuser on the local machine can connect to "template1".*/
-        if (IS_PGXC_COORDINATOR && IsConnFromApp() &&
-            (!am_superuser || !IsLocalAddr(u_sess->proc_cxt.MyProcPort)) &&
-            strcmp(name, "template1") == 0) {
+        if (strcmp(name, "template1") == 0 && IsConnFromApp() && !(am_superuser && isLocalAddr)) {
             ereport(FATAL,
                 (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                     errmsg("permission denied for database \"%s\"", name),
@@ -609,7 +613,9 @@ void BaseInit(void)
     InitSync();
     smgrinit();
     InitBufferPoolAccess();
-    undo::UndoLogInit();
+    if (!ENABLE_DSS) {
+        undo::UndoLogInit();
+    }
 }
 
 /* -------------------------------------
@@ -2657,7 +2663,7 @@ void PostgresInitializer::SetDatabasePath()
         securec_check_ss(rcs, "\0", "\0");
 
         pgaudit_user_login(FALSE, (char*)m_username, m_details);
-        if (errno == ENOENT)
+        if (FILE_POSSIBLY_DELETED(errno))
             ereport(FATAL,
                 (errcode(ERRCODE_UNDEFINED_DATABASE),
                     errmsg("database \"%s\" does not exist", m_dbname),
@@ -2915,5 +2921,3 @@ void PostgresInitializer::InitBarrierCreator()
 
     return;
 }
-
-

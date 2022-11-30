@@ -105,6 +105,7 @@
 #include "commands/sequence.h"
 #include "postmaster/bgworker.h"
 #include "replication/walreceiver.h"
+#include "ddes/dms/ss_common_attr.h"
 #ifdef ENABLE_MULTIPLE_NODES
 #include "tsdb/cache/queryid_cachemgr.h"
 #include "tsdb/cache/part_cachemgr.h"
@@ -858,7 +859,7 @@ static void AssignTransactionId(TransactionState s)
         log_unknown_top = true;
 
     /* allocate undo zone before generate a new xid. */
-    if (!isSubXact && IsUnderPostmaster) {
+    if (!isSubXact && IsUnderPostmaster && !ENABLE_DSS) {
         undo::AllocateUndoZone();
         pg_memory_barrier();
     }
@@ -1453,6 +1454,10 @@ void UpdateNextMaxKnownCSN(CommitSeqNo csn)
      * GTM mode update nextCommitSeqNo in UpdateCSNAtTransactionCommit.
      * GTM-Lite mode update nextCommitSeqNo in this function.
      */
+    if (ENABLE_DMS) {
+        return;
+    }
+
     if (!GTM_LITE_MODE) {
         return;
     }
@@ -2451,6 +2456,17 @@ static void StartTransaction(bool begin_on_gtm)
             u_sess->attr.attr_common.XactReadOnly = false;
         }
     }
+
+    if (ENABLE_DMS) {
+        if (u_sess->attr.attr_common.DefaultXactIsoLevel != XACT_READ_COMMITTED) {
+            ereport(ERROR,
+                (errmsg("Only support read committed transcation isolation level while DMS and DSS enabled.")));
+        }
+        if (!SS_MY_INST_IS_MASTER) {
+            u_sess->attr.attr_common.XactReadOnly = true;
+        }
+    }
+
     u_sess->attr.attr_storage.XactDeferrable = u_sess->attr.attr_storage.DefaultXactDeferrable;
 #ifdef PGXC
     /* PGXC - PGXC doesn't support 9.1 serializable transactions. They are

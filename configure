@@ -3710,8 +3710,12 @@ case ${wal_segsize} in
  16) ;;
  32) ;;
  64) ;;
-  *) { { $as_echo "$as_me:$LINENO: error: Invalid WAL segment size. Allowed values are 1,2,4,8,16,32,64." >&5
-$as_echo "$as_me: error: Invalid WAL segment size. Allowed values are 1,2,4,8,16,32,64." >&2;}
+ 128) ;;
+ 256) ;;
+ 512) ;;
+ 1024) ;;
+  *) { { $as_echo "$as_me:$LINENO: error: Invalid WAL segment size. Allowed values are 1,2,4,8,16,32,64,128,256,512,1024." >&5
+$as_echo "$as_me: error: Invalid WAL segment size. Allowed values are 1,2,4,8,16,32,64,128,256,512,1024." >&2;}
    { (exit 1); exit 1; }; }
 esac
 { $as_echo "$as_me:$LINENO: result: ${wal_segsize}MB" >&5
@@ -3722,6 +3726,18 @@ cat >>confdefs.h <<_ACEOF
 #define XLOG_SEG_SIZE (${wal_segsize} * 1024 * 1024)
 _ACEOF
 
+# Set number of MAX_ALLOC_SEGNUM in extreme_rto
+if test "${wal_segsize}" -lt 512; then
+  MAX_ALLOC_SEGNUM=4
+elif test "${wal_segsize}" -ge 512 -a "${wal_segsize}" -lt 1024; then
+  MAX_ALLOC_SEGNUM=2
+else
+  MAX_ALLOC_SEGNUM=1
+fi
+
+cat >>confdefs.h <<_ACEOF
+#define MAX_ALLOC_SEGNUM ${MAX_ALLOC_SEGNUM}
+_ACEOF
 
 #
 # C compiler

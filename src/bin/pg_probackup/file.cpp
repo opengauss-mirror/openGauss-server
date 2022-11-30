@@ -15,6 +15,7 @@
 
 #include "file.h"
 #include "storage/checksum.h"
+#include "storage/file/fio_device.h"
 #include "common/fe_memutils.h"
 
 #define PRINTF_BUF_SIZE  1024
@@ -209,6 +210,12 @@ bool fio_is_remote_simple(fio_location location)
                                 && location != FIO_LOCAL_HOST
                                 && location != MyLocation;
     return is_remote;
+}
+
+/* Check if specified location is  for current node */
+bool fio_is_dss(fio_location location)
+{
+    return location == FIO_DSS_HOST;
 }
 
 /* Try to read specified amount of bytes unless error or EOF are encountered */
@@ -546,7 +553,7 @@ int fio_fprintf(FILE* f, char const* format, ...)
     return rc;
 }
 
-/* Flush stream data (does nothing for remote file) */
+/* Flush stream data (does nothing for remote file and dss file) */
 int fio_fflush(FILE* f)
 {
     int rc = 0;
@@ -697,9 +704,22 @@ int fio_seek(int fd, off_t offs)
 /* Write data to stdio file */
 size_t fio_fwrite(FILE* f, void const* buf, size_t size)
 {
-    return fio_is_remote_file(f)
-            ? fio_write(fio_fileno(f), buf, size)
-            : fwrite(buf, 1, size, f);
+    if (fio_is_remote_file(f))
+    {
+        return (size_t)fio_write(fio_fileno(f), buf, size);
+    }
+    else if (is_dss_file_dec(f))
+    {
+        /* size must be multiples of ALIGNOF_BUFFER in dss */
+        char align_buf[size] __attribute__((__aligned__(ALIGNOF_BUFFER))); /* need to be aligned */
+        errno_t rc = memcpy_s(align_buf, size, buf, size);
+        securec_check_c(rc, "\0", "\0");
+        return dss_fwrite_file(align_buf, 1, size, f);
+    }
+    else
+    {
+        return fwrite(buf, 1, size, f);
+    }
 }
 
 /* Write data to the file */
@@ -728,10 +748,7 @@ int32
 fio_decompress(void* dst, void const* src, size_t size, int compress_alg)
 {
     const char *errormsg = NULL;
-    int32 uncompressed_size = do_decompress(dst, BLCKSZ,
-                                                                            src,
-                                                                            size,
-                                                                            (CompressAlg)compress_alg, &errormsg);
+    int32 uncompressed_size = do_decompress(dst, BLCKSZ, src, size, (CompressAlg)compress_alg, &errormsg);
     if (uncompressed_size < 0 && errormsg != NULL)
     {
         elog(WARNING, "An error occured during decompressing block: %s", errormsg);
@@ -766,12 +783,13 @@ ssize_t fio_fwrite_compressed(FILE* f, void const* buf, size_t size, int compres
     }
     else
     {
+        /* operate is same in local mode and dss mode */
         char uncompressed_buf[BLCKSZ];
         int32 uncompressed_size = fio_decompress(uncompressed_buf, buf, size, compress_alg);
 
         return (uncompressed_size < 0)
                     ? uncompressed_size
-                    : fwrite(uncompressed_buf, 1, uncompressed_size, f);
+                    : fio_fwrite(f, uncompressed_buf, uncompressed_size);
     }
 }
 
@@ -983,6 +1001,11 @@ int fio_sync(char const* path, fio_location location)
 
         return 0;
     }
+    else if (is_dss_file(path))
+    {
+        /* nothing to do in dss mode, data are already sync to disk */
+        return 0;
+    }
     else
     {
         int fd;
@@ -1027,7 +1050,7 @@ pg_crc32 fio_get_crc32(const char *file_path, fio_location location, bool decomp
     else
     {
 #ifdef HAVE_LIBZ                        
-        if (decompress)
+        if (decompress && !IsDssMode())
             return pgFileGetCRCgz(file_path, true, true);
         else
 #endif
@@ -1080,6 +1103,7 @@ int fio_mkdir(const char* path, int mode, fio_location location)
     }
     else
     {
+        /* operate is same in local mode and dss mode */
         return dir_create_dir(path, mode);
     }
 }
@@ -1113,7 +1137,7 @@ int fio_chmod(char const* path, int mode, fio_location location)
  */
 static void fio_load_file(int out, char const* path)
 {
-    int fd = open(path, O_RDONLY);
+    int fd = open(path, O_RDONLY, 0);
     fio_header hdr;
     void* buf = NULL;
 
@@ -1403,7 +1427,7 @@ static void fio_send_pages_impl(int out, char* buf)
                 * Optimize stdio buffer usage, fseek only when current position
                 * does not match the position of requested block.
                 */
-                if (current_pos != (int)(blknum*BLCKSZ))
+                if (current_pos != (int)(blknum * BLCKSZ))
                 {
                     current_pos = blknum*BLCKSZ;
                     if (fseek(in, current_pos, SEEK_SET) != 0)
@@ -2098,8 +2122,8 @@ fio_get_lsn_map(const char *fullpath, uint32 checksum_version,
     }
     else
     {
-        lsn_map = get_lsn_map(fullpath, checksum_version, n_blocks,
-                                                shift_lsn, segmentno);
+        /* operate is same in local mode and dss mode */
+        lsn_map = get_lsn_map(fullpath, checksum_version, n_blocks, shift_lsn, segmentno);
     }
 
     return lsn_map;
@@ -2152,6 +2176,7 @@ pid_t fio_check_postmaster(const char *pgdata, fio_location location)
         return hdr.arg;
     }
     else
+        /* operate is same in local mode and dss mode */
         return check_postmaster(pgdata);
 }
 
@@ -2188,6 +2213,7 @@ fio_delete(mode_t mode, const char *fullpath, fio_location location)
 
     }
     else
+        /* operate is same in local mode and dss mode */
         pgFileDelete(mode, fullpath);
 }
 

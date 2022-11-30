@@ -391,7 +391,11 @@ int NumLWLocks(void)
     numLocks += NUM_CLOG_PARTITIONS * CLOGShmemBuffers();
 
     /* multixact.c needs two SLRU areas */
-    numLocks += NUM_MXACTOFFSET_BUFFERS + NUM_MXACTMEMBER_BUFFERS;
+    if (ENABLE_DSS) {
+        numLocks += DSS_MAX_MXACTOFFSET + DSS_MAX_MXACTMEMBER;
+    } else {
+        numLocks += NUM_MXACTOFFSET_BUFFERS + NUM_MXACTMEMBER_BUFFERS;
+    }
 
     /* async.c needs one per Async buffer */
     numLocks += NUM_ASYNC_BUFFERS;

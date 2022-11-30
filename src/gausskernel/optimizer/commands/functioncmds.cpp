@@ -1092,6 +1092,7 @@ void CreateFunction(CreateFunctionStmt* stmt, const char* queryString, Oid pkg_o
     if (strcasecmp(get_language_name(languageOid), "plpgsql") != 0) {
         u_sess->plsql_cxt.isCreateFunction = false;
     }
+
 #ifdef ENABLE_MULTIPLE_NODES
     if (languageOid == JavalanguageId) {
         /*

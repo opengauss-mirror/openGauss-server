@@ -409,6 +409,7 @@ typedef struct CachedPlanSource {
     PlanManager *planManager;
     int gpc_lockid;
     int nextval_default_expr_type;
+    bool hasSubQuery;
 } CachedPlanSource;
 
 /*

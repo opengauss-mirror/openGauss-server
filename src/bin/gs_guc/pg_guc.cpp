@@ -1297,6 +1297,11 @@ do_gucset(const char *action_type, const char *data_dir)
     int func_status = -1;
     int result_status = SUCCESS;
 
+    int ss_lines_index = 0;
+    int ss_optvalue_off = 0;
+    int ss_optvalue_len = 0;
+    char ss_enable_dss[MAX_VALUE_LEN] = {0x00};
+    
     FileLock filelock = {NULL, 0};
     UpdateOrAddParameter updateoradd = UPDATE_PARAMETER;
 
@@ -1324,6 +1329,13 @@ do_gucset(const char *action_type, const char *data_dir)
 
     if (NULL == opt_lines)
         return FAILURE;
+    
+    ss_lines_index = find_gucoption(opt_lines, "ss_enable_dss", NULL, NULL, &ss_optvalue_off, &ss_optvalue_len);
+    if (INVALID_LINES_IDX != ss_lines_index) {
+        rc = strncpy_s(ss_enable_dss, MAX_VALUE_LEN,
+                       (opt_lines[ss_lines_index] + ss_optvalue_off), (size_t)ss_optvalue_len);
+        securec_check_c(rc, "\0", "\0");
+    }
 
     for (i = 0; i < config_param_number; i++)
     {
@@ -1332,6 +1344,18 @@ do_gucset(const char *action_type, const char *data_dir)
             freefile(opt_lines);
             GS_FREE(tmpAZStr);
             write_stderr( _("%s: invalid input parameters\n"), progname);
+            return FAILURE;
+        }
+
+        if (strncmp(ss_enable_dss, "on", strlen("on")) == 0 &&
+            ((strncmp(config_param[i], "archive_mode", strlen("archive_mode")) == 0 &&
+            strncmp(config_value[i], "on", strlen("on")) == 0) ||
+            (strncmp(config_param[i], "archive_command", strlen("archive_command")) == 0 &&
+            config_value[i] != NULL))) {
+            release_file_lock(&filelock);
+            freefile(opt_lines);
+            GS_FREE(tmpAZStr);
+            write_stderr(_("%s: Not support archive function while DMS and DSS enabled\n"), progname);
             return FAILURE;
         }
 

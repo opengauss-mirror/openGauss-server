@@ -19,6 +19,12 @@ set session codegen_cost_threshold = 10000 * 1;
 set codegen_cost_threshold = 10000 * 1;
 set codegen_cost_threshold = (select 10000);
 
+-- test type not support
+set codegen_cost_threshold = '1'::money;
+set @@session.codegen_cost_threshold = '1'::money;
+set application_name = '00:00:01'::time;
+set @@session.application_name = '00:00:01'::time;
+
 create database test_set dbcompatibility 'b';
 \c test_set
 -- dbcompatibility is B Format, enable_set_variable_b_format=off
@@ -242,6 +248,12 @@ set global log_destination = stderr,syslog;
 set global log_destination = stderr,syslog , @v1:= 1, @@codegen_cost_threshold = 10000;
 set global log_destination = stderr,syslog , @v1:= 1, @@codegen_cost_threshold = aa;
 set global log_destination = 'stderr', @v1:= 1, @@codegen_cost_threshold = 'aa';
+
+-- test type not support
+set codegen_cost_threshold = '1'::money;
+set @@session.codegen_cost_threshold = '1'::money;
+set application_name = '00:00:01'::time;
+set @@session.application_name = '00:00:01'::time;
 
 -- test procedure
 create table test_pro(a int);

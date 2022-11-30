@@ -9,6 +9,7 @@ execute_process(
     COMMAND ln -fs ${PROJECT_SRC_DIR}/bin/pg_basebackup/receivelog.cpp ${CMAKE_CURRENT_SOURCE_DIR}/receivelog.cpp
     COMMAND ln -fs ${PROJECT_SRC_DIR}/bin/pg_basebackup/streamutil.cpp ${CMAKE_CURRENT_SOURCE_DIR}/streamutil.cpp
     COMMAND ln -fs ${PROJECT_SRC_DIR}/gausskernel/storage/access/transam/xlogreader.cpp ${CMAKE_CURRENT_SOURCE_DIR}/xlogreader.cpp
+    COMMAND ln -fs ${PROJECT_SRC_DIR}/gausskernel/storage/dss/dss_adaptor.cpp ${CMAKE_CURRENT_SOURCE_DIR}/dss_adaptor.cpp
 )
 
 AUX_SOURCE_DIRECTORY(${CMAKE_CURRENT_SOURCE_DIR} TGT_probackup_SRC)

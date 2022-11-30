@@ -446,6 +446,7 @@ static void help(const char* progname)
 #endif
     printf(_("  -r FILENAME        send stdout and stderr to given file\n"));
     printf(_("  -x NUM             internal use\n"));
+    printf(_("  -G                 store tables in segment page while initdb\n"));
 
 #ifdef ENABLE_MULTIPLE_NODES
     printf(_("\nNode options:\n"));

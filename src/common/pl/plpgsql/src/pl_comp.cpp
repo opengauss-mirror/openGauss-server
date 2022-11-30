@@ -102,21 +102,6 @@ extern bool is_func_need_cache(Oid funcid, const char* func_name);
 extern bool plpgsql_check_insert_colocate(
     Query* query, List* qry_part_attr_num, List* trig_part_attr_num, PLpgSQL_function* func);
 
-typedef int (*plsql_parser)(void);
-static inline plsql_parser PlsqlParser()
-{
-    int (*plsql_parser_hook)(void) = plpgsql_yyparse;
-#ifndef ENABLE_MULTIPLE_NODES
-    if (u_sess->attr.attr_sql.enable_custom_parser) {
-        int id = GetCustomParserId();
-        if (id >= 0 && g_instance.plsql_parser_hook[id] != NULL) {
-            plsql_parser_hook = (int(*)(void))g_instance.plsql_parser_hook[id];
-        }
-    }
-#endif
-    return plsql_parser_hook;
-}
-
 /* ----------
  * plpgsql_compile		Make an execution tree for a PL/pgSQL function.
  *
@@ -1172,7 +1157,7 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
      */
     bool saved_flag = u_sess->plsql_cxt.have_error;
     u_sess->plsql_cxt.have_error = false;
-    parse_rc = (*PlsqlParser())();
+    parse_rc = plpgsql_yyparse();
 #ifndef ENABLE_MULTIPLE_NODES
     if (u_sess->plsql_cxt.have_error && u_sess->attr.attr_common.plsql_show_all_error) {
         u_sess->plsql_cxt.have_error = false;
@@ -1475,7 +1460,7 @@ PLpgSQL_function* plpgsql_compile_inline(char* proc_source)
     /*
      * Now parse the function's text
      */
-    parse_rc = (*PlsqlParser())();
+    parse_rc = plpgsql_yyparse();
     if (parse_rc != 0) {
         ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
                 errmsg("Syntax parsing error, plpgsql parser returned %d", parse_rc)));

@@ -1061,6 +1061,8 @@ Datum fmgr_sql(PG_FUNCTION_ARGS)
         u_sess->opt_cxt.is_stream_support = true;
     }
 #else
+    bool outer_is_stream = u_sess->opt_cxt.is_stream;
+    bool outer_is_stream_support = u_sess->opt_cxt.is_stream_support;
     int outerDop = u_sess->opt_cxt.query_dop;
     u_sess->opt_cxt.query_dop = 1;
 #endif
@@ -1400,6 +1402,8 @@ Datum fmgr_sql(PG_FUNCTION_ARGS)
         u_sess->opt_cxt.is_stream_support = outer_is_stream_support;
     }
 #else
+    u_sess->opt_cxt.is_stream = outer_is_stream;
+    u_sess->opt_cxt.is_stream_support = outer_is_stream_support;
     u_sess->opt_cxt.query_dop = outerDop;
 #endif
     t_thrd.codegen_cxt.g_runningInFmgr = old_running_in_fmgr;
@@ -1576,7 +1580,6 @@ bool check_sql_fn_retval(Oid func_id, Oid ret_type, List* query_tree_list, bool*
     Oid res_type;
     ListCell* lc = NULL;
     bool gs_encrypted_proc_was_created = false;
-    AssertArg(!IsPolymorphicType(ret_type));
     CommandCounterIncrement();
     if (modify_target_list != NULL)
         *modify_target_list = false; /* initialize for no change */

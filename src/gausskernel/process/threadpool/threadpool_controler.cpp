@@ -882,7 +882,7 @@ int ThreadPoolControler::DispatchSession(Port* port)
         return STATUS_ERROR;
     }
     /* if this group is hanged, we don't accept new session */
-    if (grp->IsGroupHanged()) {
+    if (grp->isGroupAlreadyTooBusy()) {
         ereport(WARNING, 
                 (errmodule(MOD_THREAD_POOL), 
                     errmsg("Group[%d] is too busy to add new session for now.", grp->GetGroupId())));

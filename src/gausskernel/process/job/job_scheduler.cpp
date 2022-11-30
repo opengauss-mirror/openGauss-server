@@ -709,7 +709,7 @@ static void ScanExpireJobs()
     HeapTuple tuple = NULL;
     MemoryContext oldCtx = NULL;
     int jobStatus = JOB_WORKER_INACTIVE;
-    Datum curtime = DirectFunctionCall1(timestamptz_timestamp, GetCurrentTimestamp());
+    Datum curtime = TimestampGetDatum(GetCurrentTimestamp());
 
     StartTransactionCommand();
 

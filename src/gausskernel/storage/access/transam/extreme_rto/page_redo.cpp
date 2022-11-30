@@ -69,6 +69,7 @@
 #include "replication/walreceiver.h"
 #include "replication/datareceiver.h"
 #include "pgxc/barrier.h"
+#include "storage/file/fio_device.h"
 #ifdef ENABLE_MOT
 #include "storage/mot/mot_fdw.h"
 #endif
@@ -1632,7 +1633,7 @@ void ResetRtoXlogReadBuf(XLogRecPtr targetPagePtr)
         XLogSegNo segno;
         XLByteToSeg(targetPagePtr, segno);
         g_recordbuffer->xlogsegarray[g_recordbuffer->applyindex].segno = segno;
-        g_recordbuffer->xlogsegarray[g_recordbuffer->applyindex].readlen = targetPagePtr % XLOG_SEG_SIZE;
+        g_recordbuffer->xlogsegarray[g_recordbuffer->applyindex].readlen = targetPagePtr % XLogSegSize;
 
         pg_atomic_write_u32(&(g_recordbuffer->readindex), g_recordbuffer->applyindex);
         pg_atomic_write_u32(&(g_recordbuffer->xlogsegarray[g_recordbuffer->readindex].bufState), APPLYING);
@@ -1652,7 +1653,7 @@ RecordBufferAarray *GetCurrentSegmentBuf(XLogRecPtr targetPagePtr)
     if (bufState != APPLYING) {
         return NULL;
     }
-    uint32 targetPageOff = (targetPagePtr % XLOG_SEG_SIZE);
+    uint32 targetPageOff = (targetPagePtr % XLogSegSize);
     XLogSegNo targetSegNo;
     XLByteToSeg(targetPagePtr, targetSegNo);
     if (cursegbuffer->segno == targetSegNo) {
@@ -1734,7 +1735,7 @@ void XLogReadWorkerSegFallback(XLogSegNo lastRplSegNo)
     pg_atomic_write_u32(&(readseg->bufState), APPLIED);
     applyseg->segno = lastRplSegNo;
     applyseg->readlen = applyseg->segoffset;
-    errorno = memset_s(applyseg->readsegbuf, XLOG_SEG_SIZE, 0, XLOG_SEG_SIZE);
+    errorno = memset_s(applyseg->readsegbuf, XLogSegSize, 0, XLogSegSize);
     securec_check(errorno, "", "");
 }
 
@@ -2072,9 +2073,9 @@ static void XLogReadWorkRun()
 
     writeoffset = readseg->readlen;
     if (targetSegNo != readseg->segno) {
-        reqlen = XLOG_SEG_SIZE - writeoffset;
+        reqlen = XLogSegSize - writeoffset;
     } else {
-        uint32 targetPageOff = receivedUpto % XLOG_SEG_SIZE;
+        uint32 targetPageOff = receivedUpto % XLogSegSize;
         if (targetPageOff <= writeoffset) {
             pg_usleep(sleepTime);
             return;
@@ -2092,7 +2093,7 @@ static void XLogReadWorkRun()
 
     waitcount = 0;
     char *readBuf = readseg->readsegbuf + writeoffset;
-    XLogRecPtr targetSartPtr = readseg->segno * XLOG_SEG_SIZE + writeoffset;
+    XLogRecPtr targetSartPtr = readseg->segno * XLogSegSize + writeoffset;
     uint32 readlen = 0;
     GetRedoStartTime(g_redoWorker->timeCostList[TIME_COST_STEP_2]);
     bool result = XLogReadFromWriteBuffer(targetSartPtr, reqlen, readBuf, &readlen);
@@ -2102,7 +2103,7 @@ static void XLogReadWorkRun()
     }
 
     pg_atomic_write_u32(&(readseg->readlen), (writeoffset + readlen));
-    if (readseg->readlen == XLOG_SEG_SIZE) {
+    if (readseg->readlen == XLogSegSize) {
         GetRedoStartTime(g_redoWorker->timeCostList[TIME_COST_STEP_3]);
         InitReadBuf(readindex + 1, readseg->segno + 1);
         CountRedoTime(g_redoWorker->timeCostList[TIME_COST_STEP_3]);

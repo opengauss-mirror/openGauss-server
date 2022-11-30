@@ -2577,7 +2577,7 @@ Datum GetTypeZeroValue(Form_pg_attribute att_tup)
         }
         case SMALLDATETIMEOID: {
             result = (Datum)DirectFunctionCall3(
-                smalldatetime_in, CStringGetDatum("1970-01-01 08:00:00"), ObjectIdGetDatum(0), Int32GetDatum(-1));
+                smalldatetime_in, CStringGetDatum("1970-01-01 00:00:00"), ObjectIdGetDatum(0), Int32GetDatum(-1));
             break;
         }
         case DATEOID: {
@@ -2623,8 +2623,7 @@ Datum GetTypeZeroValue(Form_pg_attribute att_tup)
             break;
         }
         case XMLOID: {
-            result = (Datum)DirectFunctionCall1(xml_in, CStringGetDatum(""));
-            (Datum)DirectFunctionCall1(numeric_in, CStringGetDatum("0"));
+            result = (Datum)DirectFunctionCall1(xml_in, CStringGetDatum("null"));
             break;
         }
         case BITOID: {

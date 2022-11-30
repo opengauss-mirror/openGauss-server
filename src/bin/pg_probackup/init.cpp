@@ -125,7 +125,7 @@ do_add_instance(InstanceConfig *instance)
 	config_set_opt(instance_options, &instance_config.remote.ssh_config,
 				   SOURCE_DEFAULT);
 
-	/* pgdata was set through command line */
+	/* pgdata and vgname were set through command line */
 	do_set_config(true);
 
 	elog(INFO, "Instance '%s' successfully inited", instance_name);

@@ -1,0 +1,111 @@
+--
+-- replace function with two arguments
+--
+select replace('string', '');
+ replace 
+---------
+ string
+(1 row)
+
+select replace('string', 'i');
+ replace 
+---------
+ strng
+(1 row)
+
+select replace('string', 'in');
+ replace 
+---------
+ strg
+(1 row)
+
+select replace('string', 'ing');
+ replace 
+---------
+ str
+(1 row)
+
+select replace('', 'ing');
+ replace 
+---------
+ 
+(1 row)
+
+select replace(NULL, 'ing');
+ replace 
+---------
+ 
+(1 row)
+
+select replace('ing', '');
+ replace 
+---------
+ ing
+(1 row)
+
+select replace('ing', NULL);
+ replace 
+---------
+ ing
+(1 row)
+
+select replace('', '');
+ replace 
+---------
+ 
+(1 row)
+
+select replace(NULL, NULL);
+ replace 
+---------
+ 
+(1 row)
+
+select replace(123, '1');
+ replace 
+---------
+ 23
+(1 row)
+
+select replace('123', 1);
+ replace 
+---------
+ 23
+(1 row)
+
+select replace(123, 1);
+ replace 
+---------
+ 23
+(1 row)
+
+select replace('abc\nabc', '\n');
+ replace 
+---------
+ abcabc
+(1 row)
+
+select replace('abc\nabc', E'\n');
+ replace  
+----------
+ abc\nabc
+(1 row)
+
+select replace(E'abc\nabc', E'\n');
+ replace 
+---------
+ abcabc
+(1 row)
+
+select replace('~!@#$%^&*()', '!@');
+  replace  
+-----------
+ ~#$%^&*()
+(1 row)
+
+select replace('高斯', '高');
+ replace 
+---------
+ 斯
+(1 row)
+

@@ -43,7 +43,8 @@ public:
     }
     ~LSCCloseCheck()
     {
-        Assert(!EnableGlobalSysCache() || m_lsc_closed || g_instance.distribute_test_param_instance->elevel == PANIC);
+        Assert(!EnableGlobalSysCache() || m_lsc_closed || t_thrd.role == DMS_WORKER ||
+                g_instance.distribute_test_param_instance->elevel == PANIC);
     }
     void setCloseFlag(bool value)
     {
@@ -213,6 +214,14 @@ void CreateLocalSysDBCache()
 #endif
     }
 }
+
+#if defined(USE_ASSERT_CHECKING) && !defined(ENABLE_MEMORY_CHECK)
+void CloseLSCCheck()
+{
+    lsc_close_check.setCloseFlag(true);
+}
+#endif
+
 static void ReleaseBadPtrList(bool isCommit);
 static void ThreadNodeGroupCallback(Datum arg, int cacheid, uint32 hashvalue)
 {

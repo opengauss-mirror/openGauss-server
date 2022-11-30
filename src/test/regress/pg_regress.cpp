@@ -444,6 +444,10 @@ static bool change_password = false;
 /* Only init database, for inplace upgrade test use */
 static bool init_database = false;
 
+/* for shared storage test use */
+static bool enable_ss = false;
+static bool ss_standby_read = false;
+
 /* Do inplace upgrade before run regression tests */
 static bool inplace_upgrade = false;
 static bool parallel_initdb = false;
@@ -1222,6 +1226,14 @@ static void stop_postmaster(void)
 #endif
 
         postmaster_running = false;
+        if (enable_ss) {
+            printf("stop DSS now!\n");
+            int ret = system("ps ux | grep dssserver | grep -v grep | awk '{print $2}' | xargs kill -9");
+            if (ret != 0) {
+                fprintf(stderr, _("\n could not stop dss: exit code was %d\n"), ret);
+                exit(2); /* not exit(), that would be recursive */
+            }
+        }
     }
 }
 
@@ -1421,6 +1433,38 @@ static void start_single_node()
     free(data_folder);
 }
 
+/* Start single datanode for test */
+static void start_ss_node(int i)
+{
+    char buf[MAXPGPATH * 4];
+    int port_number = myinfo.dn_port[i];
+    char* data_folder = get_node_info_name(i, DATANODE, false);
+
+    (void)snprintf(buf,
+                   sizeof(buf),
+                   SYSTEMQUOTE "\"%s/gaussdb\" -p %d -D \"%s/%s\" -c log_statement=all -c logging_collector=true -c "
+                               "\"listen_addresses=%s\" & > \"%s/log/postmaster_%s.log\" 2>&1" SYSTEMQUOTE,
+                               bindir,
+                               port_number,
+                               temp_install,
+                               data_folder,
+                               hostname ? hostname : "*",
+                               outputdir,
+                               data_folder);
+    header(_("\nstart cmd is : %s\n"), buf);
+    PID_TYPE datanode_pid = spawn_process(buf);
+    if (datanode_pid == INVALID_PID) {
+        fprintf(stderr, _("\n%s: could not spawn postmaster: %s\n"), progname, strerror(errno));
+        exit_nicely(2);
+    }
+
+    printf("start %dth node: node_pid %d.\n", i, datanode_pid);
+
+    myinfo.dn_pid[i] = datanode_pid;
+
+    free(data_folder);
+}
+
 /*
  * Start given node
  */
@@ -1474,7 +1518,7 @@ static void start_my_node(int i, int type, bool is_main, bool standby, int upgra
             data_folder,
             upgrade_from == 0 ? "0" : grayscale_upgrade == -1 ? "1" : "2");
 #endif
-        
+
         FILE* fstream = NULL;
         char buf[50];
         memset(buf, 0, sizeof(buf));
@@ -1892,12 +1936,23 @@ static void initdb_node_info(bool standby)
 
     for (i = 0; i < myinfo.dn_num; i++) {
         char buf[MAXPGPATH * 4];
+        char ss_extra_args[MAXPGPATH] = {0};
+
+        (void)snprintf(ss_extra_args,
+            sizeof(ss_extra_args),
+            SYSTEMQUOTE "--vgname=\"+data,+log%i\" --enable-dss --dms_url=\"%s\" -I %d "
+                "--socketpath=\"UDS:%s/dss_home%d/.dss_unix_d_socket\"" SYSTEMQUOTE,
+            i,
+            ss_standby_read ? "0:127.0.0.1:1611,1:127.0.0.1:1711" : "0:127.0.0.1:1611",
+            i,
+            temp_install,
+            i);
 
         char* data_folder = get_node_info_name(i, DATANODE, false);
         char* data_folder2 = get_node_info_name(i, DATANODE, true);
         (void)snprintf(buf,
             sizeof(buf),
-            SYSTEMQUOTE "\"%s/gs_initdb\" --nodename %s %s -w \"gauss@123\" -D \"%s/%s\" -L \"%s\" --noclean%s%s > "
+            SYSTEMQUOTE "\"%s/gs_initdb\" --nodename %s %s -w \"gauss@123\" -D \"%s/%s\" -L \"%s\" %s --noclean%s%s > "
                         "\"%s/log/initdb.log\" 2>&1" SYSTEMQUOTE,
             bindir,
             data_folder2,
@@ -1905,6 +1960,7 @@ static void initdb_node_info(bool standby)
             temp_install,
             data_folder,
             datadir,
+            enable_ss ? ss_extra_args : "",
             debug ? " --debug" : "",
             nolocale ? " --no-locale" : "",
             outputdir);
@@ -2303,7 +2359,7 @@ static void psql_command(const char* database, const char* query, ...)
     /* And now we can build and execute the shell command */
     (void)snprintf(psql_cmd,
         sizeof(psql_cmd),
-        SYSTEMQUOTE "\"%s%sgsql\" -X %s -p %d -c \"%s\" \"%s\"" SYSTEMQUOTE,
+        SYSTEMQUOTE "\"%s%sgsql\" -X %s -p %d -c \"%s\" -d \"%s\"" SYSTEMQUOTE,
         psqldir ? psqldir : "",
         psqldir ? "/" : "",
         super_user_altered ? "" : (passwd_altered ? "-U upcheck -W Gauss@123" : "-U upcheck -W gauss@123"),
@@ -4867,7 +4923,11 @@ static void run_schedule(const char* schedule, test_function tfunc, diag_functio
 
                 REGR_START_TIMER_TEMP(0);
 
-                pids[0] = (tfunc)(tests[0], &resultfiles[0], &expectfiles[0], &tags[0], use_jdbc_client);
+                if (!ss_standby_read) {
+                    pids[0] = (tfunc)(tests[0], &resultfiles[0], &expectfiles[0], &tags[0], use_jdbc_client);
+                } else {
+                    pids[0] = (tfunc)(tests[0], &resultfiles[0], &expectfiles[0], &tags[0], false);
+                }
             }
 
             wait_for_tests(pids, statuses, NULL, 1);
@@ -4891,7 +4951,11 @@ static void run_schedule(const char* schedule, test_function tfunc, diag_functio
                     REGR_START_TIMER;
 
                     /* Invoke the single test file */
-                    pids[i] = (tfunc)(tests[i], &resultfiles[i], &expectfiles[i], &tags[i], use_jdbc_client);
+                    if (!ss_standby_read) {
+                        pids[i] = (tfunc)(tests[i], &resultfiles[i], &expectfiles[i], &tags[i], use_jdbc_client);
+                    } else {
+                        pids[i] = (tfunc)(tests[i], &resultfiles[i], &expectfiles[i], &tags[i], false);
+                    }
                     i++;
                 }
 
@@ -4942,7 +5006,11 @@ static void run_schedule(const char* schedule, test_function tfunc, diag_functio
 
                     REGR_START_TIMER_TEMP(i);
 
-                    pids[i] = (tfunc)(tests[i], &resultfiles[i], &expectfiles[i], &tags[i], use_jdbc_client);
+                    if (!ss_standby_read) {
+                        pids[i] = (tfunc)(tests[i], &resultfiles[i], &expectfiles[i], &tags[i], use_jdbc_client);
+                    } else {
+                        pids[i] = (tfunc)(tests[i], &resultfiles[i], &expectfiles[i], &tags[i], false);
+                    }
 
                     i++;
                 }
@@ -4986,6 +5054,151 @@ static void run_schedule(const char* schedule, test_function tfunc, diag_functio
             status_end();
 
             g_uiCurLineBufIdx = 0;
+        }
+        if (ss_standby_read) {
+            if (num_tests == 1) {
+                if (bscript) {
+                    bscript = false;
+
+                    status(_("script %-22s .... "), tests[0]);
+                    REGR_START_TIMER_TEMP(0);
+
+                    pids[0] = scriptExecute(tests[0], &resultfiles[0], &expectfiles[0], &tags[0]);
+                } else {
+                    if (isSystemTableDDL) {
+                        status(_("system_table_ddl_test %-24s .... "), tests[0]);
+                    } else if (isPlanAndProto) {
+                        status(_("plan_proto_test %-24s .... "), tests[0]);
+                    } else if (use_jdbc_client) {
+                        status(_("jdbc test %-24s .... "), tests[0]);
+                    } else {
+                        status(_("test %-24s .... "), tests[0]);
+                    }
+                    makeNestedDirectory(tests[0]);
+
+                    REGR_START_TIMER_TEMP(0);
+
+                    pids[0] = (tfunc)(tests[0], &resultfiles[0], &expectfiles[0], &tags[0], true);
+                }
+
+                wait_for_tests(pids, statuses, NULL, 1);
+                REGR_STOP_TIMER_TEMP(0);
+                REGR_PRINT_ONEGROUP_ELAPSED_TIME;
+                /* status line is finished below */
+            } else if (max_connections > 0 && max_connections < num_tests) {
+                int oldest = 0;
+
+                i = 0;
+
+                do {
+                    while (i < num_tests) {
+                        if (i - oldest >= max_connections) {
+                            wait_for_tests(pids + oldest, statuses + oldest, tests + oldest, i - oldest);
+                            oldest = i;
+                        }
+
+                        makeNestedDirectory(tests[i]);
+
+                        REGR_START_TIMER;
+
+                        /* Invoke the single test file */
+                        pids[i] = (tfunc)(tests[i], &resultfiles[i], &expectfiles[i], &tags[i], true);
+                        i++;
+                    }
+
+                    if (false == bBuffReloadReq)
+                        break;
+
+                    /* Resetting the flag */
+                    bBuffReloadReq = false;
+
+                    iRet = regrReloadAndParseLineBuffer(&bBuffReloadReq,
+                                                        &bHalfReadTest,
+                                                        &pcLastSpace,
+                                                        scf,
+                                                        &num_tests,
+                                                        &iMaxParallelTests,
+                                                        &tests,
+                                                        &resultfiles,
+                                                        &expectfiles,
+                                                        &tags,
+                                                        &pids,
+                                                        &statuses);
+                    if (iRet == REGR_EOF_REACHED) {
+                        break;
+                    }
+
+                    if (iRet != REGR_SUCCESS) {
+                        goto LB_ERR_HNDL_LVL_4;
+                    }
+                } while (true);
+                if (isSystemTableDDL) {
+                    status(_("parallel group (%d system_table_ddl_tests, in groups of %d): "), num_tests, max_connections);
+                } else if (isPlanAndProto) {
+                    status(_("parallel group (%d plan_proto_tests, in groups of %d): "), num_tests, max_connections);
+                } else {
+                    status(_("parallel group (%d tests, in groups of %d): "), num_tests, max_connections);
+                }
+
+                wait_for_tests(pids + oldest, statuses + oldest, tests + oldest, i - oldest);
+                status_end();
+
+                g_uiCurLineBufIdx = 0;
+            } else {
+                i = 0;
+
+                do {
+                    while (i < num_tests) {
+                        makeNestedDirectory(tests[i]);
+
+                        REGR_START_TIMER_TEMP(i);
+
+                        pids[i] = (tfunc)(tests[i], &resultfiles[i], &expectfiles[i], &tags[i], true);
+
+                        i++;
+                    }
+
+                    if (false == bBuffReloadReq)
+                        break;
+
+                    /* Resetting the flag */
+                    bBuffReloadReq = false;
+
+                    iRet = regrReloadAndParseLineBuffer(&bBuffReloadReq,
+                                                        &bHalfReadTest,
+                                                        &pcLastSpace,
+                                                        scf,
+                                                        &num_tests,
+                                                        &iMaxParallelTests,
+                                                        &tests,
+                                                        &resultfiles,
+                                                        &expectfiles,
+                                                        &tags,
+                                                        &pids,
+                                                        &statuses);
+                    if (iRet == REGR_EOF_REACHED) {
+                        break;
+                    }
+
+                    if (iRet != REGR_SUCCESS) {
+                        goto LB_ERR_HNDL_LVL_4;
+                    }
+                } while (true);
+                if (isSystemTableDDL) {
+                    status(_("parallel group (%d system_table_ddl_tests): "), num_tests);
+                } else if (isPlanAndProto) {
+                    status(_("parallel group (%d plan_proto_tests): "), num_tests);
+                } else {
+                    status(_("parallel group (%d tests): "), num_tests);
+                }
+
+                wait_for_tests(pids, statuses, tests, num_tests);
+                REGR_PRINT_ONEGROUP_ELAPSED_TIME;
+                status_end();
+
+                g_uiCurLineBufIdx = 0;
+            }
+            num_tests *= 2;
         }
 
         /* Check results for all tests */
@@ -5248,7 +5461,7 @@ static void check_global_variables()
     }
 }
 
-#define BASE_PGXC_LIKE_MACRO_NUM 1394
+#define BASE_PGXC_LIKE_MACRO_NUM 1393
 static void check_pgxc_like_macros()
 {
 #ifdef BUILD_BY_CMAKE 
@@ -5329,6 +5542,18 @@ static void open_result_files(void)
     }
     if (!directory_exists(file)) {
         make_directory(file);
+    }
+    if (ss_standby_read) {
+        rc = snprintf_s(file, sizeof(file), sizeof(file) - 1, "%s/results/ss_wr", outputdir);
+        securec_check_ss_c(rc, "", "");
+        if (!directory_exists(file)) {
+            make_directory(file);
+        }
+        rc = snprintf_s(file, sizeof(file), sizeof(file) - 1, "%s/results/ss_r", outputdir);
+        securec_check_ss_c(rc, "", "");
+        if (!directory_exists(file)) {
+            make_directory(file);
+        }
     }
 }
 
@@ -5454,6 +5679,8 @@ static void help(void)
     printf(_("  --use-existing            use an existing installation\n"));
     printf(_("  --launcher=CMD            use CMD as launcher of gsql\n"));
     printf(_("  --skip_environment_cleanup do not clean generated sql scripts\n"));
+    printf(_("  --enable_ss               test shared storage mode\n"));
+    printf(_("  --ss_standby_read         test standby read in shared storage mode\n"));
     printf(_("\n"));
     printf(_("Options for \"temp-install\" mode:\n"));
     printf(_("  --no-locale               use C locale\n"));
@@ -6207,11 +6434,22 @@ static void start_postmaster(void)
             start_my_node(i, DATANODE, false, standby_defined, upgrade_from);
         }
     } else {
-        assert(0 == myinfo.co_num && 1 == myinfo.dn_num);
-        start_single_node();
+        if (!enable_ss) {
+            assert(0 == myinfo.co_num && 1 == myinfo.dn_num);
+            start_single_node();
+        } else {
+            start_ss_node(0);
+            if (ss_standby_read) {
+                start_ss_node(1);
+            }
+        }
     }
 
-    pg_usleep(10000000L);
+    if (!enable_ss) {
+        pg_usleep(10000000L);
+    } else {
+        pg_usleep(100000000L);
+    }
 
     /*
      * Wait till postmaster is able to accept connections (normally only a
@@ -6377,6 +6615,8 @@ int regression_main(int argc, char* argv[], init_function ifunc, test_function t
         {"skip_environment_cleanup", no_argument, NULL, 61},
         {"ecpg", no_argument, NULL, 62},
         {"dbcmpt", required_argument, NULL, 63},
+        {"enable_ss", no_argument, NULL, 64},
+        {"ss_standby_read", no_argument, NULL, 65},
         {NULL, 0, NULL, 0}
     };
 
@@ -6665,6 +6905,13 @@ int regression_main(int argc, char* argv[], init_function ifunc, test_function t
             case 63:
                 g_db_compatibility = strdup(optarg);
                 break;
+            case 64:
+                enable_ss = true;
+                break;
+            case 65:
+                ss_standby_read = true;
+                enable_ss = true;
+                break;
             default:
                 /* getopt_long already emitted a complaint */
                 fprintf(stderr, _("\nTry \"%s -h\" for more information.\n"), progname);
@@ -6799,15 +7046,15 @@ int regression_main(int argc, char* argv[], init_function ifunc, test_function t
         if (myinfo.keep_data == false) {
             if (only_install == false) {
 #ifndef ENABLE_LLT
-                if (directory_exists(temp_install)) {
-                    header(_("removing existing temp installation"));
-                    (void)rmtree(temp_install, true);
+                if (!enable_ss) {
+                    if (directory_exists(temp_install)) {
+                        header(_("removing existing temp installation"));
+                        (void)rmtree(temp_install, true);
+                    }
+                    header(_("creating temporary installation"));
+                    /* make the temp install top directory */
+                    make_directory(temp_install);
                 }
-
-                header(_("creating temporary installation"));
-
-                /* make the temp install top directory */
-                make_directory(temp_install);
 #endif
 
                 /* and a directory for log files */
@@ -7241,12 +7488,17 @@ int regression_main(int argc, char* argv[], init_function ifunc, test_function t
 
         if (!g_bEnableDiagCollection)
             dfunc = NULL;
+
+        test_function tmpfunc = tfunc;
+        if (ss_standby_read) {
+            tmpfunc = psql_ss_start_test;
+        }
         for (ssl = schedulelist; ssl != NULL; ssl = ssl->next) {
-            run_schedule(ssl->str, tfunc, dfunc);
+            run_schedule(ssl->str, tmpfunc, dfunc);
         }
 
         for (ssl = extra_tests; ssl != NULL; ssl = ssl->next) {
-            run_single_test(ssl->str, tfunc, dfunc);
+            run_single_test(ssl->str, tmpfunc, dfunc);
         }
 
         (void)gettimeofday(&end_time, NULL);

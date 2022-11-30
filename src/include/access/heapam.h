@@ -348,6 +348,7 @@ extern void heap_inplace_update(Relation relation, HeapTuple tuple, bool waitFlu
 extern bool heap_freeze_tuple(HeapTuple tuple, TransactionId cutoff_xid, TransactionId cutoff_multi,
     bool *changedMultiXid = NULL);
 extern bool heap_tuple_needs_freeze(HeapTuple tuple, TransactionId cutoff_xid, MultiXactId cutoff_multi, Buffer buf);
+extern TransactionId MultiXactIdGetUpdateXid(TransactionId xmax, uint16 t_infomask, uint16 t_infomask2);
 
 extern Oid simple_heap_insert(Relation relation, HeapTuple tup);
 extern void simple_heap_delete(Relation relation, ItemPointer tid, int options = 0, bool allow_update_self = false);

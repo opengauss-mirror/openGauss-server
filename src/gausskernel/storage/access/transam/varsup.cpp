@@ -135,6 +135,10 @@ TransactionId GetNewTransactionId(bool isSubXact)
         ereport(ERROR, (errcode(ERRCODE_INVALID_TRANSACTION_INITIATION),
                 errmsg("cannot assign TransactionIds during streaming disaster recovery")));
     }
+    if (SSIsServerModeReadOnly()) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_TRANSACTION_INITIATION),
+                        errmsg("cannot assign TransactionIds at Standby with DMS enabled")));
+    }
 
     (void)LWLockAcquire(XidGenLock, LW_EXCLUSIVE);
     xid = t_thrd.xact_cxt.ShmemVariableCache->nextXid;
@@ -346,6 +350,9 @@ Oid GetNewObjectId(bool IsToastRel)
     if (RecoveryInProgress())
         ereport(ERROR, (errcode(ERRCODE_INVALID_TRANSACTION_INITIATION), errmsg("cannot assign OIDs during recovery")));
 
+    if (SSIsServerModeReadOnly()) {
+        ereport(ERROR, (errmsg("cannot assign OIDs at Standby with DMS enabled")));
+    }
     /*
      * During inplace or online upgrade, if newly added system objects are
      * to be pinned, we set their oids by GUC parameters, such as

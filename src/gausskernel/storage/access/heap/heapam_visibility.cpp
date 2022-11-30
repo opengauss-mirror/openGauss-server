@@ -75,6 +75,7 @@
 #include "utils/combocid.h"
 #include "utils/snapmgr.h"
 #include "commands/vacuum.h"
+#include "ddes/dms/ss_common_attr.h"
 
 /* Log SetHintBits() */
 static inline void LogSetHintBit(HeapTupleHeader tuple, Buffer buffer, uint16 infomask)
@@ -149,6 +150,9 @@ static inline void LogSetHintBit(HeapTupleHeader tuple, Buffer buffer, uint16 in
  */
 static inline void SetHintBits(HeapTupleHeader tuple, Buffer buffer, uint16 infomask, TransactionId xid)
 {
+    if (SS_STANDBY_MODE) {
+        return;
+    }
 #ifdef PGXC
     // The following scenario may use local snapshot, so do not set hint bits.
     // Notice: we don't support two or more bits within infomask.

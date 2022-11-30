@@ -95,6 +95,7 @@
 #include "storage/procarray.h"
 #include "storage/lmgr.h"
 #include "storage/xlog_share_storage/xlog_share_storage.h"
+#include "storage/file/fio_device.h"
 #include "tcop/tcopprot.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
@@ -4656,6 +4657,7 @@ retry:
         uint32 startoff;
         int segbytes;
         int readbytes;
+        bool need_read = true;
 
         startoff = recptr % XLogSegSize;
 
@@ -4677,7 +4679,7 @@ retry:
                  * asked for a too old WAL segment that has already been
                  * removed or recycled.
                  */
-                if (errno == ENOENT) {
+                if (FILE_POSSIBLY_DELETED(errno)) {
                     /* we suppose wal segments removed happend when we can't open the xlog file. */
                     WalSegmemtRemovedhappened = true;
                     ereport(ERROR,
@@ -4715,7 +4717,27 @@ retry:
         }
 
         pgstat_report_waitevent(WAIT_EVENT_WAL_READ);
-        readbytes = read(t_thrd.walsender_cxt.sendFile, p, segbytes);
+        /* consider O_DIRECT in dss mode */
+        if (is_dss_fd(t_thrd.walsender_cxt.sendFile)) {
+            off_t oldStartPos = dss_seek_file(t_thrd.walsender_cxt.sendFile, 0, SEEK_CUR);
+            off_t movePos = oldStartPos % ALIGNOF_BUFFER;
+            off_t newStartPos = oldStartPos - movePos;
+            /* change current access position to newStartPos for O_DIRECT read */
+            if (movePos != 0) {
+                (void)dss_seek_file(t_thrd.walsender_cxt.sendFile, newStartPos, SEEK_SET);
+                char *new_buff = (char*)palloc(movePos + segbytes);
+                int new_read = read(t_thrd.walsender_cxt.sendFile, new_buff, movePos + segbytes);
+                readbytes = new_read - (int)movePos;
+                errno_t rc = memcpy_s(p, readbytes, new_buff + movePos, readbytes);
+                securec_check(rc, "\0", "\0");
+                pfree(new_buff);
+                need_read = false;
+            }
+        }
+
+        if (need_read) {
+            readbytes = read(t_thrd.walsender_cxt.sendFile, p, segbytes);
+        }
         pgstat_report_waitevent(WAIT_EVENT_END);
         if (readbytes <= 0) {
             (void)close(t_thrd.walsender_cxt.sendFile);
@@ -6035,7 +6057,7 @@ Datum gs_paxos_stat_replication(PG_FUNCTION_ARGS)
             securec_check_ss(ret, "\0", "\0");
             values[j++] = CStringGetTextDatum(location);
             /* sync_percent */
-            uint64 coundWindow = ((uint64)WalGetSyncCountWindow() * XLOG_SEG_SIZE);
+            uint64 coundWindow = ((uint64)WalGetSyncCountWindow() * XLogSegSize);
             if (XLogDiff(sndFlush, flush) < coundWindow) {
                 syncStart = InvalidXLogRecPtr;
             } else {
@@ -7009,7 +7031,7 @@ static void WalSndSetPercentCountStartLsn(XLogRecPtr startLsn)
 /* Set start send lsn for current walsender (only called in walsender) */
 static void WalSndRefreshPercentCountStartLsn(XLogRecPtr currentMaxLsn, XLogRecPtr currentDoneLsn)
 {
-    uint64 coundWindow = ((uint64)WalGetSyncCountWindow() * XLOG_SEG_SIZE);
+    uint64 coundWindow = ((uint64)WalGetSyncCountWindow() * XLogSegSize);
     volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
     XLogRecPtr baseStartLsn = InvalidXLogRecPtr;
 

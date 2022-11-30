@@ -30,7 +30,8 @@ ifneq "$(MAKECMDGOALS)" "clean"
     endif
   endif
 endif
-OBJS=	initdb.o findtimezone.o localtime.o encnames.o pqsignal.o $(WIN32RES) $(top_builddir)/src/lib/elog/elog.a
+OBJS=	initdb.o findtimezone.o ss_initdb.o localtime.o encnames.o pqsignal.o $(WIN32RES) $(top_builddir)/src/lib/elog/elog.a \
+	$(top_builddir)/src/gausskernel/storage/dss/dss_adaptor.o
 all: gs_initdb
 
 gs_initdb: $(OBJS) | submake-libpgport

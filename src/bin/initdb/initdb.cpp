@@ -59,6 +59,11 @@
 #include "getopt_long.h"
 #include "miscadmin.h"
 #include "bin/elog.h"
+#include "catalog/pg_control.h"
+#include "storage/dss/dss_adaptor.h"
+#include "ss_initdb.h"
+#include "storage/smgr/smgr.h"
+#include "storage/file/fio_device.h"
 
 #ifdef ENABLE_MULTIPLE_NODES
 #include "distribute_core.h"
@@ -75,6 +80,7 @@
  * Note that this macro must be the same to fd.h
  */
 #define PG_TEMP_FILES_DIR "pgsql_tmp"
+#define SS_PG_TEMP_FILES_DIR "ss_pgsql_tmp"
 #define RESULT_LENGTH 20
 #define BUF_LENGTH 64
 #define PG_CAST_CHAR_LENGTH 1024
@@ -148,6 +154,11 @@ static char* lc_time = "";
 static char* lc_messages = "";
 static const char* default_text_search_config = "";
 static char* username = "";
+static char* vgname = "";
+static char* vgdata = "";
+static char* vglog = "";
+static char* socketpath = NULL;
+static bool enable_dss = false;
 static bool pwprompt = false;
 static char* pwfilename = NULL;
 static const char* authmethodhost = "";
@@ -262,9 +273,9 @@ static const char* raw_backend_options = "--single "
 static char bin_path[MAXPGPATH];
 static char backend_exec[MAXPGPATH];
 
-static void* pg_malloc(size_t size);
+void* pg_malloc(size_t size);
 static char* xstrdup(const char* s);
-static char** replace_token(char** lines, const char* token, const char* replacement);
+char** replace_token(char** lines, const char* token, const char* replacement);
 
 #ifndef HAVE_UNIX_SOCKETS
 static char** filter_lines_with_token(char** lines, const char* token);
@@ -277,7 +288,7 @@ static void pre_sync_fname(char *fname, bool isdir);
 static void fsync_fname(char *fname, bool isdir);
 #endif
 static FILE* popen_check(const char* command, const char* mode);
-static void exit_nicely(void);
+void exit_nicely(void);
 static char* get_id(void);
 static char* get_encoding_id(char* encoding_name);
 static void set_input(char** dest, const char* filename);
@@ -473,7 +484,7 @@ void check_env_value(const char* input_env_value)
  * Note that we can't call exit_nicely() on a memory failure, as it calls
  * rmtree() which needs memory allocation. So we just exit with a bang.
  */
-static void* pg_malloc(size_t size)
+void* pg_malloc(size_t size)
 {
     void* result = NULL;
 
@@ -507,7 +518,7 @@ static char* xstrdup(const char* s)
  * This does most of what sed was used for in the shell script, but
  * doesn't need any regexp stuff.
  */
-static char** replace_token(char** lines, const char* token, const char* replacement)
+char** replace_token(char** lines, const char* token, const char* replacement)
 {
     int numlines = 1;
     int i;
@@ -802,7 +813,7 @@ pre_sync_fname(char *fname, bool isdir)
 #if defined(HAVE_SYNC_FILE_RANGE) || (defined(USE_POSIX_FADVISE) && defined(POSIX_FADV_DONTNEED))
     int fd;
     
-    fd = open(fname, O_RDONLY | PG_BINARY);
+    fd = open(fname, O_RDONLY | PG_BINARY, 0);
 
     /*
      * Some OSs don't allow us to open directories at all (Windows returns
@@ -851,9 +862,9 @@ fsync_fname(char *fname, bool isdir)
      * cases here
      */
     if (!isdir)
-        fd = open(fname, O_RDWR | PG_BINARY);
+        fd = open(fname, O_RDWR | PG_BINARY, 0);
     else
-        fd = open(fname, O_RDONLY | PG_BINARY);
+        fd = open(fname, O_RDONLY | PG_BINARY, 0);
 
     /*
      * Some OSs don't allow us to open directories at all (Windows returns
@@ -906,11 +917,42 @@ static FILE* popen_check(const char* command, const char* mode)
     return cmdfd;
 }
 
+static void rm_dss_dir(char *path)
+{
+    char filepath[MAXPGPATH];
+    dirent *ent = NULL;
+    struct stat statbuf;
+    DIR *dir = opendir(path);
+    if (dir == NULL) {
+        return;
+    }
+
+    while ((ent = gs_readdir(dir)) != NULL) {
+        if (strcmp(ent->d_name, ".") != 0 && strcmp(ent->d_name, "..") != 0 &&
+            strcmp(ent->d_name, ".recycle") != 0) {
+            int nRet = snprintf_s(filepath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", path, ent->d_name);
+            securec_check_ss_c(nRet, "\0", "\0");
+
+            if (lstat(filepath, &statbuf) != 0) {
+                continue;
+            }
+
+            if (S_ISDIR(statbuf.st_mode)) {
+                rm_dss_dir(filepath);
+            } else {
+                (void)unlink(filepath);
+            }
+        }
+    }
+
+    (void)closedir(dir);
+}
+
 /*
  * clean up any files we created on failure
  * if we created the data directory remove it too
  */
-static void exit_nicely(void)
+void exit_nicely(void)
 {
     if (!noclean) {
         if (made_new_pgdata) {
@@ -932,6 +974,17 @@ static void exit_nicely(void)
             if (!rmtree(xlog_dir, false))
                 write_stderr(_("%s: failed to remove contents of transaction log directory\n"), progname);
         }
+
+        if (enable_dss) {
+            write_stderr(_("%s: removing dss directory \"%s\"\n"), progname, vgname);
+            if (strlen(vgdata) > 0) {
+                rm_dss_dir(vgdata);
+            }
+            if (strlen(vglog) > 0) {
+                rm_dss_dir(vglog);
+            }
+        }
+
         /* otherwise died during startup, do nothing! */
     } else {
         if (made_new_pgdata || found_existing_pgdata)
@@ -1228,6 +1281,35 @@ static void CreatePGDefaultTempDir()
         exit_nicely();
     }
     FREE_AND_RESET(path);
+
+    /* Create specific pgsql_tmp dir in sharedstorage mode
+     *
+     * Files in pgsql_tmp are temporary and may be big in some complicated
+     * condition, so it's best to storeage it in file system. Therefore we
+     * will create a specific dir in PGDATA when we enable dss mode. The
+     * path can not be customized now, but we may remove this limit in the
+     * future.
+     */
+    if (enable_dss) {
+        size_t length = strlen(pg_data) + strlen(SS_PG_TEMP_FILES_DIR) + 13;
+        char *ss_path = (char*)pg_malloc(length);
+        rc = sprintf_s(ss_path, length,
+            "%s/%s",
+            pg_data,
+            SS_PG_TEMP_FILES_DIR);
+        securec_check_ss_c(rc, ss_path, "\0");
+
+        if (mkdir(ss_path, S_IRWXU) < 0) {
+            char errBuffer[ERROR_LIMIT_LEN];
+            write_stderr(_("%s: could not mkdir \"%s\": %s\n"),
+                progname,
+                ss_path,
+                pqStrerror(errno, errBuffer, ERROR_LIMIT_LEN));
+            FREE_AND_RESET(ss_path);
+            exit_nicely();
+        }
+        FREE_AND_RESET(ss_path);
+    }
 }
 
 /*
@@ -1280,13 +1362,16 @@ static void test_config_settings(void)
 
     static const int trial_conns[] = {100, 50, 40, 30, 20, 10};
     static const int trial_bufs[] = {
-        4096, 3584, 3072, 2560, 2048, 1536, 1000, 900, 800, 700, 600, 500, 400, 300, 200, 100, 50};
+        131072, 4096, 3584, 3072, 2560, 2048, 1536, 1000, 900, 800, 700, 600, 500, 400, 300, 200, 100, 50};
 
     char cmd[MAXPGPATH];
     const int connslen = sizeof(trial_conns) / sizeof(int);
     const int bufslen = sizeof(trial_bufs) / sizeof(int);
     int nRet = 0;
     int i, status, test_conns, test_buffs, ok_buffers = 0;
+    char** conflines;
+    char path[MAXPGPATH];
+    char repltok[TZ_STRLEN_MAX + 100];
 
     printf(_("selecting default max_connections ... "));
     (void)fflush(stdout);
@@ -1323,6 +1408,15 @@ static void test_config_settings(void)
 
     printf("%d\n", n_connections);
 
+    nRet = sprintf_s(path, sizeof(path), "%s/postgresql.conf", pg_data);
+    securec_check_ss_c(nRet, "\0", "\0");
+
+    /* read postgresql.conf in pg_data, so the config setting can be retained */
+    conflines = readfile(path);
+    nRet = sprintf_s(repltok, sizeof(repltok), "max_connections = %d", n_connections);
+    securec_check_ss_c(nRet, "\0", "\0");
+    conflines = replace_token(conflines, "#max_connections = 100", repltok);
+
     printf(_("selecting default shared_buffers ... "));
     (void)fflush(stdout);
 
@@ -1354,10 +1448,19 @@ static void test_config_settings(void)
     }
     n_buffers = test_buffs;
 
-    if ((n_buffers * (BLCKSZ / 1024)) % 1024 == 0)
+    if ((n_buffers * (BLCKSZ / 1024)) % 1024 == 0) {
         printf("%dMB\n", (n_buffers * (BLCKSZ / 1024)) / 1024);
-    else
+        nRet = sprintf_s(repltok, sizeof(repltok), "shared_buffers = %dMB", (n_buffers * (BLCKSZ / 1024)) / 1024);
+    } else {
         printf("%dkB\n", n_buffers * (BLCKSZ / 1024));
+        nRet = sprintf_s(repltok, sizeof(repltok), "shared_buffers = %dkB", n_buffers * (BLCKSZ / 1024));
+    }
+    securec_check_ss_c(nRet, "\0", "\0");
+    conflines = replace_token(conflines, "#shared_buffers = 32MB", repltok);
+
+    writefile(path, conflines);
+    (void)chmod(path, S_IRUSR | S_IWUSR);
+    FREE_AND_RESET(conflines);
 }
 
 /*
@@ -1378,24 +1481,13 @@ static void setup_config(void)
     char* buf_default_text_search_config = NULL;
     char* buf_nodename = NULL;
     char* buf_default_timezone = NULL;
+    char* buf_socketpath = NULL;
 
     fputs(_("creating configuration files ... "), stdout);
     (void)fflush(stdout);
 
     /* postgresql.conf */
-
     conflines = readfile(conf_file);
-
-    nRet = sprintf_s(repltok, sizeof(repltok), "max_connections = %d", n_connections);
-    securec_check_ss_c(nRet, "\0", "\0");
-    conflines = replace_token(conflines, "#max_connections = 100", repltok);
-
-    if ((n_buffers * (BLCKSZ / 1024)) % 1024 == 0)
-        nRet = sprintf_s(repltok, sizeof(repltok), "shared_buffers = %dMB", (n_buffers * (BLCKSZ / 1024)) / 1024);
-    else
-        nRet = sprintf_s(repltok, sizeof(repltok), "shared_buffers = %dkB", n_buffers * (BLCKSZ / 1024));
-    securec_check_ss_c(nRet, "\0", "\0");
-    conflines = replace_token(conflines, "#shared_buffers = 32MB", repltok);
 
 #if DEF_PGPORT != 5432
     nRet = sprintf_s(repltok, sizeof(repltok), "#port = %d", DEF_PGPORT);
@@ -1479,6 +1571,28 @@ static void setup_config(void)
         securec_check_ss_c(nRet, "\0", "\0");
         conflines = append_token(conflines, repltok);
         FREE_AND_RESET(buf_xlog_file_path);
+    }
+
+    if (strlen(vgdata) != 0) {
+        nRet = sprintf_s(repltok, sizeof(repltok), "ss_dss_vg_name = '%s'", vgdata);
+        securec_check_ss_c(nRet, "\0", "\0");
+        conflines = replace_token(conflines, "#ss_dss_vg_name = ''", repltok);
+    }
+
+    if (socketpath != NULL) {
+        buf_socketpath = escape_quotes(socketpath);
+        nRet = sprintf_s(repltok, sizeof(repltok), "ss_dss_conn_path = '%s'", buf_socketpath);
+        securec_check_ss_c(nRet, "\0", "\0");
+        conflines = replace_token(conflines, "#ss_dss_conn_path = ''", repltok);
+        FREE_AND_RESET(buf_socketpath);
+    }
+
+    if (enable_dss) {
+        nRet = strcpy_s(repltok, sizeof(repltok), "ss_enable_dss = on");
+        securec_check_c(nRet, "\0", "\0");
+        conflines = replace_token(conflines, "#ss_enable_dss = off", repltok);
+
+        conflines = ss_addnodeparmater(conflines);
     }
 
     nRet = sprintf_s(path, sizeof(path), "%s/postgresql.conf", pg_data);
@@ -1722,9 +1836,11 @@ static void bootstrap_template1(void)
     securec_check_ss_c(nRet, "\0", "\0");
 
     PG_CMD_OPEN;
-
+    
     for (line = bki_lines; *line != NULL; line++) {
-        PG_CMD_PUTS(*line);
+        if (ss_need_mkclusterdir) {
+            PG_CMD_PUTS(*line);
+        }
         FREE_AND_RESET(*line);
     }
 
@@ -3681,6 +3797,7 @@ static void usage(const char* prog_name)
 #ifndef ENABLE_MULTIPLE_NODES
     printf(_("  -c, --enable-dcf          enable DCF mode\n"));
 #endif
+    printf(_("      --enable-dss          enable shared storage mode\n"));
     printf(_(" [-D, --pgdata=]DATADIR     location for this database cluster\n"));
 #ifdef ENABLE_MULTIPLE_NODES
     printf(_("      --nodename=NODENAME   name of openGauss node initialized\n"));
@@ -3688,6 +3805,9 @@ static void usage(const char* prog_name)
 #else
     printf(_("      --nodename=NODENAME   name of single node initialized\n"));
 #endif
+    printf(_("      --vgname=VGNAME       name of dss volume group\n"));
+    printf(_("      --socketpath=SOCKETPATH\n"
+             "                            dss connect socket file path\n"));
     printf(_("  -E, --encoding=ENCODING   set default encoding for new databases\n"));
     printf(_("      --locale=LOCALE       set default locale for new databases\n"));
     printf(_("      --dbcompatibility=DBCOMPATIBILITY   set default dbcompatibility for new database\n"));
@@ -3771,6 +3891,36 @@ static bool is_file_exist(const char* path)
     return isExist;
 }
 
+static void parse_vgname_args(char* args)
+{
+    vgname = xstrdup(args);
+    enable_dss = true;
+    if (strstr(vgname, "/") != NULL) {
+        fprintf(stderr, "invalid token \"/\" in vgname");
+        exit(1);
+    }
+
+    char *comma = strstr(vgname, ",");
+    if (comma == NULL) {
+        vgdata = vgname;
+        vglog = (char *)"";
+        return;
+    }
+
+    vgdata = xstrdup(vgname);
+    comma = strstr(vgdata, ",");
+    comma[0] = '\0';
+    vglog = comma + 1;
+    if (strstr(vgdata, ",") != NULL) {
+        fprintf(stderr, "invalid vgname args, should be two volume group names, example: \"+data,+log\"");
+        exit(1);
+    }
+    if (strstr(vglog, ",") != NULL) {
+        fprintf(stderr, "invalid vgname args, should be two volume group names, example: \"+data,+log\"");
+        exit(1);
+    }
+}
+
 int main(int argc, char* argv[])
 {
     /*
@@ -3815,6 +3965,10 @@ int main(int argc, char* argv[])
 #endif
         {"dbcompatibility", required_argument, NULL, 13},
         {"bucketlength", required_argument, NULL, 14},
+        {"vgname", required_argument, NULL, 15},
+        {"socketpath", required_argument, NULL, 16},
+        {"enable-dss", no_argument, NULL, 17},
+        {"dms_url", required_argument, NULL, 18},
         {NULL, 0, NULL, 0}};
 
     int c, i, ret;
@@ -3886,9 +4040,9 @@ int main(int argc, char* argv[])
 
     /* process command-line options */
 #ifdef ENABLE_LITE_MODE
-    while ((c = getopt_long(argc, argv, "cdD:E:L:nNU:WA:SsT:X:C:w:H:g:", long_options, &option_index)) != -1) {
+    while ((c = getopt_long(argc, argv, "cdD:E:L:nNU:WA:SsT:X:C:w:H:g:I:", long_options, &option_index)) != -1) {
 #else
-    while ((c = getopt_long(argc, argv, "cdD:E:L:nU:WA:SsT:X:C:w:H:g:", long_options, &option_index)) != -1) {
+    while ((c = getopt_long(argc, argv, "cdD:E:L:nU:WA:SsT:X:C:w:H:g:I:", long_options, &option_index)) != -1) {
 #endif
 #define FREE_NOT_STATIC_ZERO_STRING(s)        \
     do {                                      \
@@ -4073,6 +4227,14 @@ int main(int argc, char* argv[])
                 check_input_spec_char(optarg);
                 host_ip = xstrdup(optarg);
                 break;
+            case 'I':
+                if (atoi(optarg) < MIN_INSTANCEID || atoi(optarg) > MAX_INSTANCEID) {
+                    write_stderr(_("unexpected node id specified, valid range is %d - %d.\n"),
+                                 MIN_INSTANCEID, MAX_INSTANCEID);
+                    exit(1);
+                }
+                ss_nodeid = atoi(optarg);
+                break;
 #ifdef PGXC
             case 12:
                 FREE_NOT_STATIC_ZERO_STRING(nodename);
@@ -4093,7 +4255,25 @@ int main(int argc, char* argv[])
                 }
                 g_bucket_len = atoi(optarg);
                 break;
-
+            case 15:
+                FREE_NOT_STATIC_ZERO_STRING(vgname);
+                FREE_NOT_STATIC_ZERO_STRING(vgdata);
+                FREE_NOT_STATIC_ZERO_STRING(vglog);
+                parse_vgname_args(optarg);
+                break;
+            case 16:
+                FREE_NOT_STATIC_ZERO_STRING(socketpath);
+                socketpath = xstrdup(optarg);
+                enable_dss = true;
+                break;
+            case 17:
+                enable_dss = true;
+                break;
+            case 18:
+                FREE_NOT_STATIC_ZERO_STRING(ss_nodedatainfo);
+                check_input_spec_char(optarg);
+                ss_nodedatainfo = xstrdup(optarg);
+                break;
             default:
                 /* getopt_long already emitted a complaint */
                 write_stderr(_("Try \"%s --help\" for more information.\n"), progname);
@@ -4101,7 +4281,10 @@ int main(int argc, char* argv[])
         }
 #undef FREE_NOT_STATIC_ZERO_STRING
     }
-
+    
+    /* check nodedata.cfg and node_id */
+    ss_issharedstorage = ss_check_nodedatainfo();
+    
     if (default_text_search_config_tmp != NULL)
         default_text_search_config = default_text_search_config_tmp;
     if (authmethodhost_tmp != NULL)
@@ -4460,6 +4643,12 @@ int main(int argc, char* argv[])
 
     (void)umask(S_IRWXG | S_IRWXO);
 
+    // dss device init
+    if (dss_device_init(socketpath, enable_dss) != DSS_SUCCESS) {
+        write_stderr(_("failed to init dss device"));
+        exit_nicely();
+    }
+
     // log output redirect
     init_log(PROG_NAME);
 
@@ -4577,10 +4766,21 @@ int main(int argc, char* argv[])
         }
     }
 
+    if (ss_issharedstorage && (ss_check_shareddir(vgdata))) {
+        ss_need_mkclusterdir = false;
+    }
+
     /* Create transaction log symlink, if required */
     if (strcmp(xlog_dir, "") != 0) {
         char linkloc[MAXPGPATH] = {'\0'};
 
+        /* check if specify xlog directory in shared storage mode */
+        if (enable_dss) {
+            write_stderr(_("%s: can not specify transaction log directory "
+                         "location in shared storage mode\n"), progname);
+            exit_nicely();
+        }
+        
         /* clean up xlog directory name, check it's absolute */
         canonicalize_path(xlog_dir);
         if (!is_absolute_path(xlog_dir)) {
@@ -4664,46 +4864,50 @@ int main(int argc, char* argv[])
         exit_nicely();
 #endif
     }
+    
+    if (enable_dss && ss_issharedstorage) {
+        ss_mkdirdir(ss_nodeid, pg_data, vgdata, vglog, ss_need_mkclusterdir);
+    } else {
+        /* Create required subdirectories */
+        printf(_("creating subdirectories ... in ordinary occasion"));
+        (void)fflush(stdout);
 
-    /* Create required subdirectories */
-    printf(_("creating subdirectories ... "));
-    (void)fflush(stdout);
+        for (i = 0; (unsigned int)(i) < lengthof(subdirs); i++) {
+            char* path = NULL;
+            errno_t sret = 0;
+            size_t len = 0;
 
-    for (i = 0; (unsigned int)(i) < lengthof(subdirs); i++) {
-        char* path = NULL;
-        errno_t sret = 0;
-        size_t len = 0;
+            /*
+            * -X means using user define xlog directory, and will create symbolic pg_xlog
+            * under pg_data directory, So no need to create these sub-directories again.
+            */
+            if (pg_strcasecmp(xlog_dir, "") != 0 && (pg_strcasecmp(subdirs[i], "pg_xlog") == 0)) {
+                continue;
+            }
 
-        /*
-         * -X means using user define xlog directory, and will create symbolic pg_xlog
-         * under pg_data directory, So no need to create these sub-directories again.
-         */
-        if (pg_strcasecmp(xlog_dir, "") != 0 && (pg_strcasecmp(subdirs[i], "pg_xlog") == 0)) {
-            continue;
-        }
+            len = strlen(pg_data) + strlen(subdirs[i]) + 2;
+            path = (char*)pg_malloc(len);
 
-        len = strlen(pg_data) + strlen(subdirs[i]) + 2;
-        path = (char*)pg_malloc(len);
+            sret = sprintf_s(path, len, "%s/%s", pg_data, subdirs[i]);
+            securec_check_ss_c(sret, path, "\0");
 
-        sret = sprintf_s(path, len, "%s/%s", pg_data, subdirs[i]);
-        securec_check_ss_c(sret, path, "\0");
+            /*
+            * The parent directory already exists, so we only need mkdir() not
+            * pg_mkdir_p() here, which avoids some failure modes; cf bug #13853.
+            */
+            if (mkdir(path, S_IRWXU) < 0) {
+                char errBuffer[ERROR_LIMIT_LEN];
+                fprintf(stderr,
+                    _("%s: could not create directory \"%s\": %s\n"),
+                    progname,
+                    path,
+                    pqStrerror(errno, errBuffer, ERROR_LIMIT_LEN));
 
-        /*
-         * The parent directory already exists, so we only need mkdir() not
-         * pg_mkdir_p() here, which avoids some failure modes; cf bug #13853.
-         */
-        if (mkdir(path, S_IRWXU) < 0) {
-            char errBuffer[ERROR_LIMIT_LEN];
-            fprintf(stderr,
-                _("%s: could not create directory \"%s\": %s\n"),
-                progname,
-                path,
-                pqStrerror(errno, errBuffer, ERROR_LIMIT_LEN));
-
+                FREE_AND_RESET(path);
+                exit_nicely();
+            }
             FREE_AND_RESET(path);
-            exit_nicely();
         }
-        FREE_AND_RESET(path);
     }
 
     if (strlen(new_xlog_file_path) == 0) {
@@ -4738,87 +4942,103 @@ int main(int argc, char* argv[])
             }
         }
     }
-    
-    /* create or check pg_location path */
-    mkdirForPgLocationDir();
-    check_ok();
+
+    if (enable_dss) {
+        size_t total_len = strlen(boot_options) + BUF_LENGTH;
+        char *options = (char*)pg_malloc(total_len);
+        errno_t sret = sprintf_s(options, total_len, "%s -c segment_buffers=128MB -G", boot_options);
+        securec_check_ss_c(sret, options, "\0");
+        boot_options = options;
+
+        total_len = strlen(backend_options) + BUF_LENGTH;
+        options = (char*)pg_malloc(total_len);
+        sret = sprintf_s(options, total_len, "%s -c segment_buffers=128MB -G", backend_options);
+        securec_check_ss_c(sret, options, "\0");
+        backend_options = options;
+    }
+
+    if (ss_need_mkclusterdir) {
+        /* create or check pg_location path */
+        mkdirForPgLocationDir();
+        check_ok();
+    }
 
     /* Top level PG_VERSION is checked by bootstrapper, so make it first */
     write_version_file(NULL);
 
     create_pg_lockfiles();
 
-    /* Select suitable configuration settings */
+    /* Create all the text config files and select suitable configuration setting */
     set_null_conf();
-    test_config_settings();
-
-    /* Now create all the text config files */
     setup_config();
+    test_config_settings();
 
     /* Init undo subsystem meta. */
     InitUndoSubsystemMeta();
 
     /* Bootstrap template1 */
     bootstrap_template1();
+    
+    if (ss_need_mkclusterdir) {
+        /*
+        * Make the per-database PG_VERSION for template1 only after init'ing it
+        */
+        write_version_file("base/1");
 
-    /*
-     * Make the per-database PG_VERSION for template1 only after init'ing it
-     */
-    write_version_file("base/1");
+        CreatePGDefaultTempDir();
 
-    CreatePGDefaultTempDir();
+        /* Create the stuff we don't need to use bootstrap mode for */
 
-    /* Create the stuff we don't need to use bootstrap mode for */
+        setup_auth();
+        get_set_pwd();
 
-    setup_auth();
-    get_set_pwd();
-
-    setup_depend();
-    load_plpgsql();
-    setup_sysviews();
+        setup_depend();
+        load_plpgsql();
+        setup_sysviews();
 #ifdef ENABLE_PRIVATEGAUSS
-    setup_privsysviews();
+        setup_privsysviews();
 #endif
-    setup_perfviews();
+        setup_perfviews();
 
 #ifdef PGXC
-    /* Initialize catalog information about the node self */
-    setup_nodeself();
+        /* Initialize catalog information about the node self */
+        setup_nodeself();
 #endif
 
-    setup_description();
+        setup_description();
 
-    setup_collation();
+        setup_collation();
 
-    setup_conversion();
+        setup_conversion();
 
-    setup_dictionary();
+        setup_dictionary();
 
-    setup_privileges();
+        setup_privileges();
 
-    setup_bucketmap_len();
+        setup_bucketmap_len();
 
-    setup_schema();
+        setup_schema();
 
-    load_supported_extension();
+        load_supported_extension();
 
-    setup_update();
+        setup_update();
 
 #ifndef ENABLE_MULTIPLE_NODES
-    setup_snapshots();
+        setup_snapshots();
 #endif
 
-    vacuum_db();
+        vacuum_db();
 
-    make_template0();
+        make_template0();
 
-    make_postgres();
+        make_postgres();
 
 #ifdef PGXC
-    vacuumfreeze("template0");
-    vacuumfreeze("template1");
-    vacuumfreeze("postgres");
+        vacuumfreeze("template0");
+        vacuumfreeze("template1");
+        vacuumfreeze("postgres");
 #endif
+    }
 
 #ifdef ENABLE_LITE_MODE
     if (do_sync)
@@ -4907,10 +5127,10 @@ int main(int argc, char* argv[])
 
 static bool isDirectory(const char* basepath, const char* name)
 {
-    struct stat buf;
     char* path = NULL;
     int nRet = 0;
     size_t len = 0;
+    struct stat buf;
 
     len = strlen(basepath) + strlen(name) + 2;
     path = (char*)pg_malloc(len);
@@ -4946,7 +5166,7 @@ static bool isMountDirCorrect(const char* basepath, const char* name)
     securec_check_ss_c(nRet, path, "\0");
 
     if ((chk_mount_dir = opendir(path)) != NULL) {
-        while ((de_mount = gs_readdir(chk_mount_dir)) != NULL) {
+        while ((de_mount = readdir(chk_mount_dir)) != NULL) {
             if (strcmp(".", de_mount->d_name) == 0 || strcmp("..", de_mount->d_name) == 0) {
                 /* skip this and parent directory */
                 continue;
@@ -4977,17 +5197,22 @@ static void mkdirForPgLocationDir()
     char* path = NULL;
     int nRet = 0;
     size_t len = 0;
+    char* datadir = pg_data;
 
-    len = strlen(pg_data) + strlen("pg_location") + 2;
+    if (enable_dss) {
+        datadir = vgdata;
+    }
+
+    len = strlen(datadir) + 1 + strlen("pg_location") + 1;
     path = (char*)pg_malloc(len);
 
-    nRet = sprintf_s(path, len, "%s/pg_location", pg_data);
+    nRet = sprintf_s(path, len, "%s/pg_location", datadir);
     securec_check_ss_c(nRet, "\0", "\0");
 
     switch (pg_check_dir(path)) {
         case 0:
             /* directory not there, must create it */
-            if (pg_mkdir_p(path, S_IRWXU) != 0) {
+            if (mkdir(path, S_IRWXU) < 0) {
                 char errBuffer[ERROR_LIMIT_LEN];
                 write_stderr(_("%s: could not create directory \"%s\": %s\n"),
                     progname,
@@ -5001,7 +5226,7 @@ static void mkdirForPgLocationDir()
 
         case 1:
             /* Present but empty, fix permissions and use it */
-            if (chmod(path, S_IRWXU) != 0) {
+            if (is_dss_file(path) != 0 && chmod(path, S_IRWXU) != 0) {
                 char errBuffer[ERROR_LIMIT_LEN];
                 write_stderr(_("%s: could not change permissions of directory \"%s\": %s\n"),
                     progname,
@@ -5016,7 +5241,7 @@ static void mkdirForPgLocationDir()
         case 2:
             /* Present and not empty */
             {
-                DIR* chk_pg_location_dir = NULL;
+                DIR *chk_pg_location_dir = NULL;
                 struct dirent* de_pg_location = NULL;
 
                 if ((chk_pg_location_dir = opendir(path)) != NULL) {

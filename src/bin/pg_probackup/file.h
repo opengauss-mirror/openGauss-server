@@ -74,7 +74,8 @@ typedef enum
     FIO_LOCAL_HOST,  /* data is locate at local host */
     FIO_DB_HOST,     /* data is located at Postgres server host */
     FIO_BACKUP_HOST, /* data is located at backup host */
-    FIO_REMOTE_HOST  /* date is located at remote host */
+    FIO_REMOTE_HOST, /* date is located at remote host */
+    FIO_DSS_HOST     /* data is located at dss storage, it can be visit in local host */
 } fio_location;
 
 #define FIO_FDMAX 64
@@ -101,6 +102,7 @@ extern __thread int fio_stdin;
 
 /* Check if FILE handle is local or remote (created by FIO) */
 #define fio_is_remote_file(file) ((size_t)(file) <= FIO_FDMAX)
+extern bool    fio_is_dss(fio_location location);
 extern ssize_t fio_read_all(int fd, void* buf, size_t size);
 extern ssize_t fio_write_all(int fd, void const* buf, size_t size);
 extern void    fio_redirect(int in, int out, int err);

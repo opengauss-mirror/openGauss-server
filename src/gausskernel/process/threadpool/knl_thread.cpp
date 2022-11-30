@@ -1392,6 +1392,8 @@ static void knl_t_storage_init(knl_t_storage_context* storage_cxt)
     storage_cxt->statement_fin_time = 0;
     storage_cxt->statement_fin_time2 = 0;
     storage_cxt->pageCopy = NULL;
+    storage_cxt->pageCopy_ori = NULL;
+    storage_cxt->segPageCopyOri = NULL;
 
     storage_cxt->isSwitchoverLockHolder = false;
     storage_cxt->num_held_lwlocks = 0;
@@ -1423,6 +1425,7 @@ static void knl_t_storage_init(knl_t_storage_context* storage_cxt)
     storage_cxt->max_safe_fds = 32;
     storage_cxt->max_userdatafiles = 8192 - 1000;
     storage_cxt->timeoutRemoteOpera = 0;
+    storage_cxt->dmsBufCtl = NULL;
 }
 
 static void knl_t_port_init(knl_t_port_context* port_cxt)

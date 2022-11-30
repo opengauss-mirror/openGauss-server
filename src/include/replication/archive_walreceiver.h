@@ -32,8 +32,8 @@
 #include "replication/slot.h"
 
 
-extern int32 pg_atoi(char* s, int size, int c);
-extern int32 pg_strtoint32(const char* s);
+extern int32 pg_atoi(char* s, int size, int c, bool can_ignore);
+extern int32 pg_strtoint32(const char* s, bool can_ignore);
 /* Prototypes for interface functions */
 
 extern bool archive_connect(char* conninfo, XLogRecPtr* startpoint, char* slotname, int channel_identifier);

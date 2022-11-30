@@ -495,6 +495,10 @@ void MultiXactIdSetOldestMember(void)
  */
 static void MultiXactIdSetOldestVisible(void)
 {
+    if (ENABLE_DMS && t_thrd.role == DMS_WORKER) {
+        return;
+    }
+
     if (!MultiXactIdIsValid(t_thrd.shemem_ptr_cxt.OldestVisibleMXactId[t_thrd.proc_cxt.MyBackendId])) {
         MultiXactId oldestMXact;
         int i;
@@ -761,6 +765,11 @@ static MultiXactId CreateMultiXactId(int nmembers, MultiXactMember *members)
  */
 static void RecordNewMultiXact(MultiXactId multi, MultiXactOffset offset, int nmembers, TransactionId *xidsWithStatus)
 {
+    if (SS_STANDBY_MODE) {
+        ereport(WARNING, (errmodule(MOD_DMS), errmsg("DMS standby can't set newmultixact status")));
+        return;
+    }
+
     int64 pageno;
     int64 prev_pageno;
     int entryno;
@@ -1177,6 +1186,10 @@ static MultiXactId mXactCacheGetBySet(int nmembers, MultiXactMember *members)
  */
 static int mXactCacheGetById(MultiXactId multi, MultiXactMember **members)
 {
+    if (ENABLE_DMS && t_thrd.role == DMS_WORKER) {
+        return -1;
+    }
+
     mXactCacheEnt *entry = NULL;
     errno_t rc = EOK;
 
@@ -1209,6 +1222,10 @@ static int mXactCacheGetById(MultiXactId multi, MultiXactMember **members)
  */
 static void mXactCachePut(MultiXactId multi, int nmembers, MultiXactMember *members)
 {
+    if (ENABLE_DMS && t_thrd.role == DMS_WORKER) {
+        return;
+    }
+
     mXactCacheEnt *entry = NULL;
     errno_t rc = EOK;
 
@@ -1422,8 +1439,13 @@ Size MultiXactShmemSize(void)
     add_size(sizeof(MultiXactStateData), mul_size(sizeof(MultiXactId) * 2, MaxOldestSlot))
 
     size = SHARED_MULTIXACT_STATE_SIZE;
-    size = add_size(size, SimpleLruShmemSize(NUM_MXACTOFFSET_BUFFERS, 0));
-    size = add_size(size, SimpleLruShmemSize(NUM_MXACTMEMBER_BUFFERS, 0));
+    if (ENABLE_DSS) {
+        size = add_size(size, SimpleLruShmemSize(DSS_MAX_MXACTOFFSET, 0));
+        size = add_size(size, SimpleLruShmemSize(DSS_MAX_MXACTMEMBER, 0));
+    } else {
+        size = add_size(size, SimpleLruShmemSize(NUM_MXACTOFFSET_BUFFERS, 0));
+        size = add_size(size, SimpleLruShmemSize(NUM_MXACTMEMBER_BUFFERS, 0));
+    }
 
     return size;
 }
@@ -1432,15 +1454,29 @@ void MultiXactShmemInit(void)
 {
     bool found = false;
     errno_t rc = EOK;
+    char path[MAXPGPATH];
 
     debug_elog2(DEBUG2, "Shared Memory Init for MultiXact");
 
-    SimpleLruInit(t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl, GetBuiltInTrancheName(LWTRANCHE_MULTIXACTOFFSET_CTL),
-                  LWTRANCHE_MULTIXACTOFFSET_CTL, NUM_MXACTOFFSET_BUFFERS, 0, MultiXactOffsetControlLock,
-                  "pg_multixact/offsets");
-    SimpleLruInit(t_thrd.shemem_ptr_cxt.MultiXactMemberCtl, GetBuiltInTrancheName(LWTRANCHE_MULTIXACTMEMBER_CTL),
-                  LWTRANCHE_MULTIXACTMEMBER_CTL, NUM_MXACTMEMBER_BUFFERS, 0, MultiXactMemberControlLock,
-                  "pg_multixact/members");
+    rc = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/offsets", MULTIXACTDIR);
+    securec_check_ss(rc, "\0", "\0");
+    if (ENABLE_DSS) {
+        SimpleLruInit(t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl, GetBuiltInTrancheName(LWTRANCHE_MULTIXACTOFFSET_CTL),
+            LWTRANCHE_MULTIXACTOFFSET_CTL, DSS_MAX_MXACTOFFSET, 0, MultiXactOffsetControlLock, path);
+    } else {
+        SimpleLruInit(t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl, GetBuiltInTrancheName(LWTRANCHE_MULTIXACTOFFSET_CTL),
+            LWTRANCHE_MULTIXACTOFFSET_CTL, NUM_MXACTOFFSET_BUFFERS, 0, MultiXactOffsetControlLock, path);
+    }
+
+    rc = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/members", MULTIXACTDIR);
+    securec_check_ss(rc, "\0", "\0");
+    if (ENABLE_DSS) {
+        SimpleLruInit(t_thrd.shemem_ptr_cxt.MultiXactMemberCtl, GetBuiltInTrancheName(LWTRANCHE_MULTIXACTMEMBER_CTL),
+            LWTRANCHE_MULTIXACTMEMBER_CTL, DSS_MAX_MXACTMEMBER, 0, MultiXactMemberControlLock, path);
+    } else {
+        SimpleLruInit(t_thrd.shemem_ptr_cxt.MultiXactMemberCtl, GetBuiltInTrancheName(LWTRANCHE_MULTIXACTMEMBER_CTL),
+            LWTRANCHE_MULTIXACTMEMBER_CTL, NUM_MXACTMEMBER_BUFFERS, 0, MultiXactMemberControlLock, path);
+    }
 
     /* Initialize our shared state struct */
     t_thrd.shemem_ptr_cxt.MultiXactState = (MultiXactStateData *)ShmemInitStruct("Shared MultiXact State",
@@ -1936,6 +1972,11 @@ static bool SlruScanDirCbFindEarliest(SlruCtl ctl, const char* filename, int64 s
  */
 void TruncateMultiXact(MultiXactId oldestMXact)
 {
+    if (SS_STANDBY_MODE) {
+        ereport(WARNING, (errmodule(MOD_DMS), errmsg("DMS standby can't truncate multixact status")));
+        return;
+    }
+
     MultiXactOffset oldestOffset;
 
 #ifndef ENABLE_MULTIPLE_NODES
@@ -2127,4 +2168,24 @@ void multixact_redo(XLogReaderState *record)
     } else {
         ereport(PANIC, (errmsg("multixact_redo: unknown op code %u", (uint32)info)));
     }
+}
+
+void SSMultiXactShmemClear(void)
+{
+    errno_t rc = EOK;
+    char path[MAXPGPATH];
+
+    debug_elog2(DEBUG2, "Shared Memory Init for MultiXact");
+
+    rc = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/offsets", MULTIXACTDIR);
+    securec_check_ss(rc, "\0", "\0");
+    SimpleLruSetPageEmpty(t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl,
+        GetBuiltInTrancheName(LWTRANCHE_MULTIXACTOFFSET_CTL), LWTRANCHE_MULTIXACTOFFSET_CTL, DSS_MAX_MXACTOFFSET, 0,
+        MultiXactOffsetControlLock, path);
+
+    rc = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/members", MULTIXACTDIR);
+    securec_check_ss(rc, "\0", "\0");
+    SimpleLruSetPageEmpty(t_thrd.shemem_ptr_cxt.MultiXactMemberCtl,
+        GetBuiltInTrancheName(LWTRANCHE_MULTIXACTMEMBER_CTL), LWTRANCHE_MULTIXACTMEMBER_CTL, DSS_MAX_MXACTMEMBER, 0,
+        MultiXactMemberControlLock, path);
 }

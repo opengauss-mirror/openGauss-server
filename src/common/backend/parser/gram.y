@@ -884,7 +884,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 	QUERY QUOTE
 
 	RANDOMIZED RANGE RATIO RAW READ REAL REASSIGN REBUILD RECHECK RECURSIVE RECYCLEBIN REDISANYVALUE REF REFERENCES REFRESH REINDEX REJECT_P
-	RELATIVE_P RELEASE RELOPTIONS REMOTE_P REMOVE RENAME REPEATABLE REPLACE REPLICA
+	RELATIVE_P RELEASE RELOPTIONS REMOTE_P REMOVE RENAME REPEAT REPEATABLE REPLACE REPLICA
 	RESET RESIZE RESOURCE RESTART RESTRICT RETURN RETURNING RETURNS REUSE REVOKE RIGHT ROLE ROLES ROLLBACK ROLLUP
 	ROTATION ROW ROWNUM ROWS ROWTYPE_P RULE
 
@@ -904,7 +904,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 	VACUUM VALID VALIDATE VALIDATION VALIDATOR VALUE_P VALUES VARCHAR VARCHAR2 VARIABLES VARIADIC VARRAY VARYING VCGROUP
 	VERBOSE VERIFY VERSION_P VIEW VOLATILE
 
-	WAIT WEAK WHEN WHERE WHITESPACE_P WINDOW WITH WITHIN WITHOUT WORK WORKLOAD WRAPPER WRITE
+	WAIT WEAK WHEN WHERE WHILE_P WHITESPACE_P WINDOW WITH WITHIN WITHOUT WORK WORKLOAD WRAPPER WRITE
 
 	XML_P XMLATTRIBUTES XMLCONCAT XMLELEMENT XMLEXISTS XMLFOREST XMLPARSE
 	XMLPI XMLROOT XMLSERIALIZE
@@ -1639,6 +1639,18 @@ CreateUserStmt:
 					IsValidIdentUsername($3);
 					n->role = $3;
 					n->options = $6;
+					n->missing_ok = false;
+					$$ = (Node *)n;
+					u_sess->parser_cxt.isForbidTruncate = false;
+				}
+			| CREATE USER IF_P NOT EXISTS RoleId opt_with {u_sess->parser_cxt.isForbidTruncate = true;} OptRoleList
+				{
+					CreateRoleStmt *n = makeNode(CreateRoleStmt);
+					n->stmt_type = ROLESTMT_USER;
+					IsValidIdentUsername($6);
+					n->role = $6;
+					n->options = $9;
+					n->missing_ok = true;
 					$$ = (Node *)n;
 					u_sess->parser_cxt.isForbidTruncate = false;
 				}
@@ -1831,6 +1843,7 @@ CreateGroupStmt:
 					n->stmt_type = ROLESTMT_GROUP;
 					n->role = $3;
 					n->options = $5;
+					n->missing_ok = false;
 					$$ = (Node *)n;
 				}
 		;
@@ -2027,7 +2040,17 @@ OptSchemaEltList:
 		;
 
 OptBlockchainWith:
-			WITH BLOCKCHAIN							{ $$ = true; }
+			WITH BLOCKCHAIN
+			    {
+                    if (ENABLE_DMS) {
+			            const char* message = "BLOCKCHAIN is not supported while DMS and DSS enabled";
+			            InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+			            ereport(errstate, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), 
+				                errmsg("BLOCKCHAIN is not supported while DMS and DSS enabled")));
+					}
+
+                    $$ = true;
+			    }
 			| /* EMPTY */							{ $$ = false; }
 		;
 
@@ -2049,7 +2072,17 @@ AlterSchemaStmt:
 			;
 
 OptAlterToBlockchain:
-			WITH BLOCKCHAIN							{ $$ = true; }
+			WITH BLOCKCHAIN
+			    {
+                    if (ENABLE_DMS) {
+			            const char* message = "BLOCKCHAIN is not supported while DMS and DSS enabled";
+			            InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+			            ereport(errstate, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), 
+				                errmsg("BLOCKCHAIN is not supported while DMS and DSS enabled")));
+					}
+
+                    $$ = true;
+			    }
 			| WITHOUT BLOCKCHAIN					{ $$ = false; }
 		;
 
@@ -8656,6 +8689,11 @@ CreateMatViewStmt:
                                 errmsg("It's not supported to specify distribute key on incremental materialized views")));
                    }
 #endif
+                   if (ENABLE_DMS) {
+                        ereport(errstate, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("matview is not supported while DMS and DSS enabled.")));
+                   }
+                    
 				   $6->ivm = $3;
 				   $$ = (Node *) ctas;
 			   }
@@ -13830,7 +13868,7 @@ pkg_body_subprogram: {
                             }
                             continue;
                         }
-						if (tok == LOOP || tok == IF_P || tok == CASE)
+						if (tok == LOOP || tok == IF_P || tok == CASE || tok == WHILE_P || tok == REPEAT)
 						{
 							continue;
 						}
@@ -14440,7 +14478,9 @@ subprogram_body: 	{
 						if (!(tok == ';'  || (tok == 0 || tok == END_OF_PROC))
 							&& tok != IF_P
 							&& tok != CASE
-							&& tok != LOOP)
+							&& tok != LOOP
+							&& tok != WHILE_P
+							&& tok != REPEAT)
 						{
 							tok = END_P;
 							continue;
@@ -16641,14 +16681,28 @@ TransactionStmt:
 					$$ = (Node *)n;
 				}
 			| PREPARE TRANSACTION Sconst
-				{
+				{   
+					if (ENABLE_DMS) {
+			            const char* message = "PREPARE TRANSACTION is not supported while DMS and DSS enabled";
+			            InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+			            ereport(errstate, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), 
+				                errmsg("PREPARE TRANSACTION is not supported while DMS and DSS enabled")));
+					}
+
 					TransactionStmt *n = makeNode(TransactionStmt);
 					n->kind = TRANS_STMT_PREPARE;
 					n->gid = $3;
 					$$ = (Node *)n;
 				}
 			| COMMIT PREPARED Sconst
-				{
+				{   
+					if (ENABLE_DMS) {
+			            const char* message = "COMMIT TRANSACTION is not supported while DMS and DSS enabled";
+			            InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+			            ereport(errstate, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), 
+				                errmsg("COMMIT TRANSACTION is not supported while DMS and DSS enabled")));
+					}
+
 					TransactionStmt *n = makeNode(TransactionStmt);
 					n->kind = TRANS_STMT_COMMIT_PREPARED;
 					n->gid = $3;
@@ -16656,7 +16710,14 @@ TransactionStmt:
 					$$ = (Node *)n;
 				}
 			| COMMIT PREPARED Sconst WITH Sconst
-				{
+				{   
+					if (ENABLE_DMS) {
+			            const char* message = "COMMIT TRANSACTION is not supported while DMS and DSS enabled";
+			            InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+			            ereport(errstate, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), 
+				                errmsg("COMMIT TRANSACTION is not supported while DMS and DSS enabled")));
+					}
+
 					TransactionStmt *n = makeNode(TransactionStmt);
 					n->kind = TRANS_STMT_COMMIT_PREPARED;
 					n->gid = $3;
@@ -16664,7 +16725,14 @@ TransactionStmt:
 					$$ = (Node *)n;
 				}
 			| ROLLBACK PREPARED Sconst
-				{
+				{   
+					if (ENABLE_DMS) {
+			            const char* message = "ROLLBACK TRANSACTION is not supported while DMS and DSS enabled";
+			            InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+			            ereport(errstate, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), 
+				                errmsg("ROLLBACK TRANSACTION is not supported while DMS and DSS enabled")));
+					}
+
 					TransactionStmt *n = makeNode(TransactionStmt);
 					n->kind = TRANS_STMT_ROLLBACK_PREPARED;
 					n->gid = $3;
@@ -20316,17 +20384,25 @@ UpdateStmt: opt_with_clause UPDATE hint_string from_list
 				{
 					UpdateStmt *n = makeNode(UpdateStmt);
 					n->relation = NULL;
-					if (list_length($4) > 1) {
 #ifdef ENABLE_MULTIPLE_NODES
+					if (list_length($4) > 1) {
 						ereport(errstate, 
 							    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 								 errmsg("multi-relation update is not yet supported.")));
-#endif
-						if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT)
+					}
+					if (!IsA(linitial($4), RangeVar)) {
+							ereport(errstate,
+								    (errcode(ERRCODE_SYNTAX_ERROR),
+								     errmsg("invalid target relation name."),
+								     parser_errposition(@4)));
+					}
+#else
+					if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT) {
+						if (list_length($4) > 1) {
 							ereport(errstate, 
 									(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 									 errmsg("multi-relation update only support in B-format database")));
-					} else {
+						}
 						if (!IsA(linitial($4), RangeVar)) {
 							ereport(errstate,
 								    (errcode(ERRCODE_SYNTAX_ERROR),
@@ -20334,6 +20410,7 @@ UpdateStmt: opt_with_clause UPDATE hint_string from_list
 								     parser_errposition(@4)));
 						}
 					}
+#endif
 					n->relationClause = $4;
 					n->targetList = $6;
 					n->fromClause = $7;
@@ -25900,16 +25977,16 @@ unreserved_keyword:
 			| AT
 			| ATTRIBUTE
 			| AUDIT
-			| AUTO_INCREMENT
 			| AUTOEXTEND
 			| AUTOMAPPED
+			| AUTO_INCREMENT
 			| BACKWARD
 /* PGXC_BEGIN */
 			| BARRIER
 /* PGXC_END */
 			| BEFORE
-			| BEGIN_NON_ANOYBLOCK
 			| BEGIN_P
+			| BEGIN_NON_ANOYBLOCK
 			| BLANKS
 			| BLOB_P
 			| BLOCKCHAIN
@@ -25951,9 +26028,10 @@ unreserved_keyword:
 			| CONSTRAINTS
 			| CONTENT_P
 			| CONTINUE_P
+			| CONTVIEW
 			| CONVERSION_P
-            | CONTVIEW
 			| COORDINATOR
+			| COORDINATORS
 			| COPY
 			| COST
 			| CSV
@@ -25967,8 +26045,8 @@ unreserved_keyword:
 			| DATANODE
 			| DATANODES
 			| DATATYPE_CL
-			| DAY_P
 			| DATE_FORMAT_P
+			| DAY_P
 			| DBCOMPATIBILITY_P
 			| DEALLOCATE
 			| DECLARE
@@ -25996,6 +26074,7 @@ unreserved_keyword:
 			| DROP
 			| DUPLICATE
 			| EACH
+			| ELASTIC
 			| ENABLE_P
 			| ENCLOSED
 			| ENCODING
@@ -26022,10 +26101,11 @@ unreserved_keyword:
 			| FAMILY
 			| FAST
 			| FEATURES 			// DB4AI
+			| FENCED
 			| FIELDS
 			| FILEHEADER_P
-			| FILL_MISSING_FIELDS
 			| FILLER
+			| FILL_MISSING_FIELDS
 			| FILTER
 			| FIRST_P
 			| FIXED_P
@@ -26063,10 +26143,10 @@ unreserved_keyword:
 			| INITRANS
 			| INLINE_P
 			| INPUT_P
-			| INTERNAL
 			| INSENSITIVE
 			| INSERT
 			| INSTEAD
+			| INTERNAL
 			| INVOKER
 			| IP
 			| ISNULL
@@ -26093,8 +26173,8 @@ unreserved_keyword:
 			| LOG_P
 			| LOGGING
 			| LOGIN_ANY
-			| LOGIN_SUCCESS
 			| LOGIN_FAILURE
+			| LOGIN_SUCCESS
 			| LOGOUT
 			| LOOP
 			| MAPPING
@@ -26169,6 +26249,7 @@ unreserved_keyword:
 			| PREPARED
 			| PRESERVE
 			| PRIOR
+			| PRIORER
 			| PRIVATE
 			| PRIVILEGE
 			| PRIVILEGES
@@ -26199,6 +26280,7 @@ unreserved_keyword:
 			| REMOTE_P
 			| REMOVE
 			| RENAME
+			| REPEAT
 			| REPEATABLE
 			| REPLACE
 			| REPLICA
@@ -26217,6 +26299,7 @@ unreserved_keyword:
 			| ROLLUP
 			| ROTATION
 			| ROWS
+			| ROWTYPE_P
 			| RULE
 			| SAMPLE
 			| SAVEPOINT
@@ -26225,6 +26308,7 @@ unreserved_keyword:
 			| SEARCH
 			| SECOND_P
 			| SECURITY
+			| SEPARATOR_P
 			| SEQUENCE
 			| SEQUENCES
 			| SERIALIZABLE
@@ -26232,7 +26316,6 @@ unreserved_keyword:
 			| SESSION
 			| SET
 			| SETS
-			| SEPARATOR_P
 			| SHARE
 			| SHIPPABLE
 			| SHOW
@@ -26266,8 +26349,8 @@ unreserved_keyword:
 			| SUBPARTITION
 			| SUBSCRIPTION
 			| SYNONYM
-			| SYS_REFCURSOR					{ $$ = "refcursor"; }
 			| SYSID
+			| SYS_REFCURSOR					{ $$ = "refcursor"; }
 			| SYSTEM_P
 			| TABLES
 			| TABLESPACE
@@ -26278,8 +26361,8 @@ unreserved_keyword:
 			| TERMINATED
 			| TEXT_P
 			| THAN
-			| TIME_FORMAT_P
 			| TIMESTAMP_FORMAT_P
+			| TIME_FORMAT_P
 			| TRANSACTION
 			| TRANSFORM
 			| TRIGGER
@@ -26310,11 +26393,13 @@ unreserved_keyword:
 			| VALUE_P
 			| VARIABLES
 			| VARYING
+			| VCGROUP
 			| VERSION_P
 			| VIEW
 			| VOLATILE
 			| WAIT
 			| WEAK
+			| WHILE_P
 			| WHITESPACE_P
 			| WITHIN
 			| WITHOUT
@@ -26560,8 +26645,8 @@ reserved_keyword:
 			| MAXVALUE
 			| MINUS_P
 			| MODIFY_P
+			| NOCYCLE
 			| NOT
-                        | NOCYCLE
 			| NULL_P
 			| OFFSET
 			| ON

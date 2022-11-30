@@ -1,5 +1,8 @@
 #This is the main CMAKE for build all pagehack.
 # pagehack
+execute_process(
+    COMMAND ln -fs ${PROJECT_SRC_DIR}/gausskernel/storage/dss/dss_adaptor.cpp ${CMAKE_CURRENT_SOURCE_DIR}/dss_adaptor.cpp
+)
 AUX_SOURCE_DIRECTORY(${CMAKE_CURRENT_SOURCE_DIR} TGT_pagehack_SRC)
 set(TGT_pagehack_INC
     ${TGT_pq_INC} ${ZSTD_INCLUDE_PATH} ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_SRC_DIR}/lib/gstrace ${PROJECT_SRC_DIR}/lib/page_compression

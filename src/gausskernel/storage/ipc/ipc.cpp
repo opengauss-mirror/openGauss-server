@@ -65,6 +65,7 @@ extern "C" {
 /* postmaster need wait some thread in immediate shutdown */
 #define NUMWAITTHREADS 1
 #define WAITTIME 15
+#define WAIT_DMS_INIT_TIMEOUT 100
 
 volatile unsigned int alive_threads_waitted = NUMWAITTHREADS;
 
@@ -158,6 +159,14 @@ void proc_exit(int code)
 {
     DynamicFileList* file_scanner = NULL;
 
+    if (ENABLE_DMS && t_thrd.proc_cxt.MyProcPid == PostmasterPid) {
+        // add cnt to avoid DmsCallbackThreadShmemInit to use UsedShmemSegAddr
+        (void)pg_atomic_add_fetch_u32(&g_instance.dms_cxt.inProcExitCnt, 1);
+        while (pg_atomic_read_u32(&g_instance.dms_cxt.inDmsThreShmemInitCnt) > 0) {
+            // if some threads call DmsCallbackThreadShmemInit, wait until they finish
+            pg_usleep(WAIT_DMS_INIT_TIMEOUT);
+        }
+    }
     if (t_thrd.utils_cxt.backend_reserved) {
         ereport(DEBUG2, (errmodule(MOD_MEM),
             errmsg("[BackendReservedExit] current thread role is: %d, used memory is: %d MB\n",
@@ -254,12 +263,12 @@ void proc_exit(int code)
     /* Clean up Allocated descs */
     FreeAllAllocatedDescs();
 
-    /* Clean up everything that must be cleaned up */
-    proc_exit_prepare(code);
-
     if (u_sess->SPI_cxt.autonomous_session) {
         DestoryAutonomousSession(true);
     }
+
+    /* Clean up everything that must be cleaned up */
+    proc_exit_prepare(code);
 
     /*
      * Protect the node group incase the ShutPostgres Callback function

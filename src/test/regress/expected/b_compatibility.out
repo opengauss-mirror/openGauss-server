@@ -1033,6 +1033,26 @@ NOTICE:  123
 create or replace procedure doiterate(p1 int)
 as
 begin
+LABEL1:loop
+p1 := p1+1;
+if p1 < 10 then
+raise notice '123';
+end if;
+exit LABEL1;
+end loop LABEL1;
+end;
+/
+call doiterate(2);
+NOTICE:  123
+ doiterate 
+-----------
+ 
+(1 row)
+
+--success
+create or replace procedure doiterate(p1 int)
+as
+begin
 LAbEL1:
 loop
 p1 := p1+1;
@@ -1739,6 +1759,651 @@ NOTICE:  drop cascades to 3 other objects
 DETAIL:  drop cascades to function test.func1()
 drop cascades to function test.debug(integer,integer)
 drop cascades to function test.call(integer,integer)
+\c regression
+--error
+create or replace function while_test1() returns void as $$
+declare _i integer = 0; _r record;
+begin
+  raise notice '---1---';
+  while _i < 10 do
+    _i := _i + 1;
+    raise notice '%', _i;
+  end while;
+
+  raise notice '---2---';
+  <<lbl>>
+  while _i > 0 do
+    _i := _i - 1;
+    loop
+      raise notice '%', _i;
+      continue lbl when _i > 0;
+      exit lbl;
+    end loop;
+  end while;
+
+  raise notice '---3---';
+  the_while:
+  while _i < 10 do
+    _i := _i + 1;
+    continue the_while when _i % 2 = 0;
+    raise notice '%', _i;
+  end while the_while;
+
+  the_while1:while _i < 10 do
+    _i := _i + 1;
+    continue the_while1 when _i % 2 = 0;
+    raise notice '%', _i;
+  end while the_while1;
+
+  raise notice '---3---';
+  _i := 1;
+  while _i <= 3 loop
+    raise notice '%', _i;
+    _i := _i + 1;
+    continue when _i = 3;
+  end loop;
+end; $$ language plpgsql;
+ERROR:  'while-do' is only supported in database which dbcompatibility='B'.
+CONTEXT:  compilation of PL/pgSQL function "while_test1" near line 4
+--error
+create or replace function while_test1() returns void as $$
+declare _i integer = 0; _r record;
+begin
+  while _i < 10 do
+    _i := _i + 1;
+    raise notice '%', _i;
+  end while the_while;
+end; $$ language plpgsql;
+ERROR:  'while-do' is only supported in database which dbcompatibility='B'.
+CONTEXT:  compilation of PL/pgSQL function "while_test1" near line 2
+--error
+create or replace function while_test1() returns void as $$
+declare _i integer = 10; _r record;
+begin
+  <<lbl>>
+  while _i > 0 do
+    _i := _i - 1;
+    loop
+      raise notice '%', _i;
+      continue lbl when _i > 0;
+      exit lbl;
+    end loop;
+  end while lbl;
+end; $$ language plpgsql;
+ERROR:  'while-do' is only supported in database which dbcompatibility='B'.
+CONTEXT:  compilation of PL/pgSQL function "while_test1" near line 2
+--error
+create or replace function while_test1() returns void as $$
+declare _i integer = 0; _r record;
+begin
+  the_while:
+  while _i < 10 do
+    _i := _i + 1;
+    continue the_while when _i % 2 = 0;
+    raise notice '%', _i;
+  end while the_while;
+end; $$ language plpgsql;
+ERROR:  'label:' is only supported in database which dbcompatibility='B'.
+CONTEXT:  compilation of PL/pgSQL function "while_test1" near line 2
+--success
+create or replace function while_test1() returns void as $$
+declare _i integer = 10; _r record;
+begin
+  <<lbl>>
+  while _i > 0 loop
+    _i := _i - 1;
+    loop
+      raise notice '%', _i;
+      continue lbl when _i > 0;
+      exit lbl;
+    end loop;
+  end loop lbl;
+end; $$ language plpgsql;
+select while_test1();
+NOTICE:  9
+CONTEXT:  referenced column: while_test1
+NOTICE:  8
+CONTEXT:  referenced column: while_test1
+NOTICE:  7
+CONTEXT:  referenced column: while_test1
+NOTICE:  6
+CONTEXT:  referenced column: while_test1
+NOTICE:  5
+CONTEXT:  referenced column: while_test1
+NOTICE:  4
+CONTEXT:  referenced column: while_test1
+NOTICE:  3
+CONTEXT:  referenced column: while_test1
+NOTICE:  2
+CONTEXT:  referenced column: while_test1
+NOTICE:  1
+CONTEXT:  referenced column: while_test1
+NOTICE:  0
+CONTEXT:  referenced column: while_test1
+ while_test1 
+-------------
+ 
+(1 row)
+
+drop function while_test1;
+\c b
+create or replace function while_test1() returns void as $$
+declare _i integer = 0; _r record;
+begin
+  raise notice '---1---';
+  while _i < 10 do
+    _i := _i + 1;
+    raise notice '%', _i;
+  end while;
+
+  raise notice '---2---';
+  <<lbl>>
+  while _i > 0 do
+    _i := _i - 1;
+    loop
+      raise notice '%', _i;
+      continue lbl when _i > 0;
+      exit lbl;
+    end loop;
+  end while;
+
+  raise notice '---3---';
+  the_while:
+  while _i < 10 do
+    _i := _i + 1;
+    continue the_while when _i % 2 = 0;
+    raise notice '%', _i;
+  end while the_while;
+
+  the_while1:while _i < 10 do
+    _i := _i + 1;
+    continue the_while1 when _i % 2 = 0;
+    raise notice '%', _i;
+  end while the_while1;
+
+  raise notice '---3---';
+  _i := 1;
+  while _i <= 3 loop
+    raise notice '%', _i;
+    _i := _i + 1;
+    continue when _i = 3;
+  end loop;
+end; $$ language plpgsql;
+select while_test1();
+NOTICE:  ---1---
+CONTEXT:  referenced column: while_test1
+NOTICE:  1
+CONTEXT:  referenced column: while_test1
+NOTICE:  2
+CONTEXT:  referenced column: while_test1
+NOTICE:  3
+CONTEXT:  referenced column: while_test1
+NOTICE:  4
+CONTEXT:  referenced column: while_test1
+NOTICE:  5
+CONTEXT:  referenced column: while_test1
+NOTICE:  6
+CONTEXT:  referenced column: while_test1
+NOTICE:  7
+CONTEXT:  referenced column: while_test1
+NOTICE:  8
+CONTEXT:  referenced column: while_test1
+NOTICE:  9
+CONTEXT:  referenced column: while_test1
+NOTICE:  10
+CONTEXT:  referenced column: while_test1
+NOTICE:  ---2---
+CONTEXT:  referenced column: while_test1
+NOTICE:  9
+CONTEXT:  referenced column: while_test1
+NOTICE:  8
+CONTEXT:  referenced column: while_test1
+NOTICE:  7
+CONTEXT:  referenced column: while_test1
+NOTICE:  6
+CONTEXT:  referenced column: while_test1
+NOTICE:  5
+CONTEXT:  referenced column: while_test1
+NOTICE:  4
+CONTEXT:  referenced column: while_test1
+NOTICE:  3
+CONTEXT:  referenced column: while_test1
+NOTICE:  2
+CONTEXT:  referenced column: while_test1
+NOTICE:  1
+CONTEXT:  referenced column: while_test1
+NOTICE:  0
+CONTEXT:  referenced column: while_test1
+NOTICE:  ---3---
+CONTEXT:  referenced column: while_test1
+NOTICE:  1
+CONTEXT:  referenced column: while_test1
+NOTICE:  3
+CONTEXT:  referenced column: while_test1
+NOTICE:  5
+CONTEXT:  referenced column: while_test1
+NOTICE:  7
+CONTEXT:  referenced column: while_test1
+NOTICE:  9
+CONTEXT:  referenced column: while_test1
+NOTICE:  ---3---
+CONTEXT:  referenced column: while_test1
+NOTICE:  1
+CONTEXT:  referenced column: while_test1
+NOTICE:  2
+CONTEXT:  referenced column: while_test1
+NOTICE:  3
+CONTEXT:  referenced column: while_test1
+ while_test1 
+-------------
+ 
+(1 row)
+
+--error
+create or replace function while_test1() returns void as $$
+declare _i integer = 0; _r record;
+begin
+  while _i < 10 do
+    _i := _i + 1;
+    raise notice '%', _i;
+  end while the_while;
+end; $$ language plpgsql;
+ERROR:  end label "the_while" specified for unlabelled block
+LINE 7:   end while the_while;
+                    ^
+create or replace function while_test1() returns void as $$
+declare _i integer = 10; _r record;
+begin
+  <<lbl>>
+  while _i > 0 do
+    _i := _i - 1;
+    loop
+      raise notice '%', _i;
+      continue lbl when _i > 0;
+      exit lbl;
+    end loop;
+  end while lbl;
+end; $$ language plpgsql;
+select while_test1();
+NOTICE:  9
+CONTEXT:  referenced column: while_test1
+NOTICE:  8
+CONTEXT:  referenced column: while_test1
+NOTICE:  7
+CONTEXT:  referenced column: while_test1
+NOTICE:  6
+CONTEXT:  referenced column: while_test1
+NOTICE:  5
+CONTEXT:  referenced column: while_test1
+NOTICE:  4
+CONTEXT:  referenced column: while_test1
+NOTICE:  3
+CONTEXT:  referenced column: while_test1
+NOTICE:  2
+CONTEXT:  referenced column: while_test1
+NOTICE:  1
+CONTEXT:  referenced column: while_test1
+NOTICE:  0
+CONTEXT:  referenced column: while_test1
+ while_test1 
+-------------
+ 
+(1 row)
+
+create or replace function while_test1() returns void as $$
+declare _i integer = 10; _r record;
+begin
+  <<lbl>>
+  while _i > 0 loop
+    _i := _i - 1;
+    loop
+      raise notice '%', _i;
+      continue lbl when _i > 0;
+      exit lbl;
+    end loop;
+  end loop lbl;
+end; $$ language plpgsql;
+select while_test1();
+NOTICE:  9
+CONTEXT:  referenced column: while_test1
+NOTICE:  8
+CONTEXT:  referenced column: while_test1
+NOTICE:  7
+CONTEXT:  referenced column: while_test1
+NOTICE:  6
+CONTEXT:  referenced column: while_test1
+NOTICE:  5
+CONTEXT:  referenced column: while_test1
+NOTICE:  4
+CONTEXT:  referenced column: while_test1
+NOTICE:  3
+CONTEXT:  referenced column: while_test1
+NOTICE:  2
+CONTEXT:  referenced column: while_test1
+NOTICE:  1
+CONTEXT:  referenced column: while_test1
+NOTICE:  0
+CONTEXT:  referenced column: while_test1
+ while_test1 
+-------------
+ 
+(1 row)
+
+create or replace function while_test1() returns void as $$
+declare _i integer = 0; _r record;
+begin
+  the_while:
+  while _i < 10 do
+    _i := _i + 1;
+    continue the_while when _i % 2 = 0;
+    raise notice '%', _i;
+  end while the_while;
+end; $$ language plpgsql;
+select while_test1();
+NOTICE:  1
+CONTEXT:  referenced column: while_test1
+NOTICE:  3
+CONTEXT:  referenced column: while_test1
+NOTICE:  5
+CONTEXT:  referenced column: while_test1
+NOTICE:  7
+CONTEXT:  referenced column: while_test1
+NOTICE:  9
+CONTEXT:  referenced column: while_test1
+ while_test1 
+-------------
+ 
+(1 row)
+
+--error
+create or replace function while_test1() returns void as $$
+declare _i integer = 0; _r record;
+begin
+  the_while:
+  while _i < 10 loop
+    _i := _i + 1;
+    continue the_while when _i % 2 = 0;
+    raise notice '%', _i;
+  end while the_while;
+end; $$ language plpgsql;
+ERROR:  while-loop syntax is mixed with while-do syntax
+LINE 5:   while _i < 10 loop
+          ^
+--error
+create or replace function while_test1() returns void as $$
+declare _i integer = 0; _r record;
+begin
+  the_while:
+  while _i < 10 do
+    _i := _i + 1;
+    continue the_while when _i % 2 = 0;
+    raise notice '%', _i;
+  end loop the_while;
+end; $$ language plpgsql;
+ERROR:  while-loop syntax is mixed with while-do syntax
+LINE 5:   while _i < 10 do
+          ^
+create or replace procedure while_test2()
+as 
+declare _i integer = 0;
+BEGIN
+the_while:
+  while _i < 10 do
+    _i := _i + 1;
+    continue the_while when _i % 2 = 0;
+    raise notice '%', _i;
+  end while the_while;
+end; 
+/
+select while_test2();
+NOTICE:  1
+CONTEXT:  referenced column: while_test2
+NOTICE:  3
+CONTEXT:  referenced column: while_test2
+NOTICE:  5
+CONTEXT:  referenced column: while_test2
+NOTICE:  7
+CONTEXT:  referenced column: while_test2
+NOTICE:  9
+CONTEXT:  referenced column: while_test2
+ while_test2 
+-------------
+ 
+(1 row)
+
+--error
+create or replace procedure while_test2()
+as 
+declare _i integer = 0;
+BEGIN
+the_while:
+  while _i < 10 loop
+    _i := _i + 1;
+    continue the_while when _i % 2 = 0;
+    raise notice '%', _i;
+  end while the_while;
+end; 
+/
+ERROR:  while-loop syntax is mixed with while-do syntax
+LINE 5:   while _i < 10 loop
+          ^
+QUERY:  
+declare _i integer = 0;
+BEGIN
+the_while:
+  while _i < 10 loop
+    _i := _i + 1;
+    continue the_while when _i % 2 = 0;
+    raise notice '%', _i;
+  end while the_while;
+end
+--error
+create or replace procedure while_test2()
+as 
+declare _i integer = 0;
+BEGIN
+  while _i < 10 do
+    _i := _i + 1;
+    continue the_while when _i % 2 = 0;
+    raise notice '%', _i;
+  end loop;
+end; 
+/
+ERROR:  'while-do' is only supported in database which dbcompatibility='B'.
+LINE 4:   while _i < 10 do
+          ^
+QUERY:  
+declare _i integer = 0;
+BEGIN
+  while _i < 10 do
+    _i := _i + 1;
+    continue the_while when _i % 2 = 0;
+    raise notice '%', _i;
+  end loop;
+end
+--error
+create or replace procedure while_test2()
+as 
+declare _i integer = 0;
+BEGIN
+  while _i < 10 loop
+    _i := _i + 1;
+    continue the_while when _i % 2 = 0;
+    raise notice '%', _i;
+  end while;
+end; 
+/
+ERROR:  while-loop syntax is mixed with while-do syntax
+LINE 4:   while _i < 10 loop
+          ^
+QUERY:  
+declare _i integer = 0;
+BEGIN
+  while _i < 10 loop
+    _i := _i + 1;
+    continue the_while when _i % 2 = 0;
+    raise notice '%', _i;
+  end while;
+end
+drop function while_test1;
+drop procedure while_test2;
+\c regression
+--error
+CREATE or replace PROCEDURE dorepeat(p1 INT)
+as 
+declare
+i int =0;
+BEGIN
+repeat
+i = i + 1;
+until i >p1 end repeat;
+raise notice '%',i;
+end;
+/
+ERROR:  'repeat' is only supported in database which dbcompatibility='B'.
+CONTEXT:  compilation of PL/pgSQL function "dorepeat" near line 6
+--error
+CREATE or replace PROCEDURE dorepeat(p1 INT)
+as 
+declare
+i int =0;
+BEGIN
+<<label>>
+repeat
+i = i + 1;
+until i >p1 end repeat label;
+raise notice '%',i;
+end;
+/
+ERROR:  'repeat' is only supported in database which dbcompatibility='B'.
+CONTEXT:  compilation of PL/pgSQL function "dorepeat" near line 7
+--error
+CREATE or replace PROCEDURE dorepeat(p1 INT)
+as 
+declare
+i int =0;
+BEGIN
+label:
+repeat
+i = i + 1;
+until i >p1 end repeat label;
+raise notice '%',i;
+end;
+/
+ERROR:  'label:' is only supported in database which dbcompatibility='B'.
+CONTEXT:  compilation of PL/pgSQL function "dorepeat" near line 3
+drop function if exists dorepeat;
+NOTICE:  function dorepeat() does not exist, skipping
+\c b
+--success
+CREATE or replace PROCEDURE dorepeat(p1 INT)
+as 
+declare
+i int =0;
+BEGIN
+repeat
+i = i + 1;
+until i >p1 end repeat;
+raise notice '%',i;
+end;
+/
+select dorepeat(5);
+NOTICE:  6
+CONTEXT:  referenced column: dorepeat
+ dorepeat 
+----------
+ 
+(1 row)
+
+--success
+CREATE or replace PROCEDURE dorepeat(p1 INT)
+as 
+declare
+i int =0;
+BEGIN
+<<label>>
+repeat
+i = i + 1;
+until i >p1 end repeat label;
+raise notice '%',i;
+end;
+/
+select dorepeat(5);
+NOTICE:  6
+CONTEXT:  referenced column: dorepeat
+ dorepeat 
+----------
+ 
+(1 row)
+
+--success
+CREATE or replace PROCEDURE dorepeat(p1 INT)
+as 
+declare
+i int =0;
+BEGIN
+label:
+repeat
+i = i + 1;
+until i >p1 end repeat label;
+raise notice '%',i;
+end;
+/
+select dorepeat(5);
+NOTICE:  6
+CONTEXT:  referenced column: dorepeat
+ dorepeat 
+----------
+ 
+(1 row)
+
+--success
+CREATE or replace PROCEDURE dorepeat(p1 INT)
+as
+declare
+i int =0;
+BEGIN
+label:repeat
+i = i + 1;
+until i >p1 end repeat label;
+raise notice '%',i;
+end;
+/
+select dorepeat(5);
+NOTICE:  6
+CONTEXT:  referenced column: dorepeat
+ dorepeat 
+----------
+ 
+(1 row)
+
+--error
+CREATE or replace PROCEDURE dorepeat(p1 INT)
+as 
+declare
+i int =0;
+BEGIN
+repeat:
+repeat
+i = i + 1;
+until i >p1 end repeat;
+raise notice '%',i;
+end;
+/
+ERROR:  The label name is invalid
+LINE 5: repeat:
+              ^
+QUERY:  
+declare
+i int =0;
+BEGIN
+repeat:
+repeat
+i = i + 1;
+until i >p1 end repeat;
+raise notice '%',i;
+end
+drop function if exists dorepeat;
 \c regression
 drop database b;
 DROP USER test_c;

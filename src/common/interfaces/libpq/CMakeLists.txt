@@ -50,6 +50,8 @@ execute_process(
     COMMAND ln -fs ${PROJECT_SRC_DIR}/common/backend/libpq/md5.cpp ${CMAKE_CURRENT_SOURCE_DIR}/md5.cpp
     COMMAND ln -fs ${PROJECT_SRC_DIR}/common/backend/libpq/sha2.cpp ${CMAKE_CURRENT_SOURCE_DIR}/sha2.cpp
     COMMAND ln -fs ${PROJECT_SRC_DIR}/common/port/pgstrcasecmp.cpp ${CMAKE_CURRENT_SOURCE_DIR}/pgstrcasecmp.cpp
+    COMMAND ln -fs ${PROJECT_SRC_DIR}/gausskernel/storage/file/fio_device.cpp ${CMAKE_CURRENT_SOURCE_DIR}/fio_device.cpp
+    COMMAND ln -fs ${PROJECT_SRC_DIR}/gausskernel/storage/dss/fio_dss.cpp ${CMAKE_CURRENT_SOURCE_DIR}/fio_dss.cpp
 )
 
 # libpq.a
@@ -87,6 +89,9 @@ list(APPEND TGT_pq_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/frontend_parser/fe-wchar.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/frontend_parser/frontend_mbutils.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/frontend_parser/wstrncmp.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/fio_device.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/fio_dss.cpp
+
 )
 
 set(TGT_pq_INC 
@@ -98,6 +103,7 @@ set(TGT_pq_INC
     ${LIBEDIT_INCLUDE_PATH}
     ${ZLIB_INCLUDE_PATH}
     ${PROJECT_SRC_DIR}/include/libpq
+    ${PROJECT_SRC_DIR}/include/storage/file
 if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON")    
     ${JAVA_HOME}/include 
     ${JAVA_HOME}/include/linux
@@ -142,6 +148,8 @@ execute_process(
     COMMAND ln -fs ${PROJECT_SRC_DIR}/common/interfaces/libpq/fe-protocol2.cpp ${CMAKE_CURRENT_SOURCE_DIR}/libpq_ce/fe-protocol2.cpp
     COMMAND ln -fs ${PROJECT_SRC_DIR}/common/interfaces/libpq/fe-protocol3.cpp ${CMAKE_CURRENT_SOURCE_DIR}/libpq_ce/fe-protocol3.cpp
     COMMAND ln -fs ${PROJECT_SRC_DIR}/common/interfaces/libpq/fe-secure.cpp ${CMAKE_CURRENT_SOURCE_DIR}/libpq_ce/fe-secure.cpp
+    COMMAND ln -fs ${PROJECT_SRC_DIR}/gausskernel/storage/file/fio_device.cpp ${CMAKE_CURRENT_SOURCE_DIR}/fio_device.cpp
+    COMMAND ln -fs ${PROJECT_SRC_DIR}/gausskernel/storage/dss/fio_dss.cpp ${CMAKE_CURRENT_SOURCE_DIR}/fio_dss.cpp
 )
 
 SET(TGT_pq_ce_INC
@@ -187,6 +195,9 @@ list(APPEND TGT_pq_ce_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/gs_syscall_lock.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/gs_readdir.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/cl_state.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/fio_device.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/fio_dss.cpp
+
 )
 set(pq_ce_DEF_OPTIONS  ${MACRO_OPTIONS} -DFRONTEND -DFRONTEND_PARSER -DUNSAFE_STAT_OK -DHAVE_CE -DWORDS_BIGENDIAN -DSO_MAJOR_VERSION=5)
 set(pq_ce_COMPILE_OPTIONS ${OPTIMIZE_OPTIONS} ${OS_OPTIONS} ${PROTECT_OPTIONS} ${WARNING_OPTIONS} ${LIB_SECURE_OPTIONS} ${CHECK_OPTIONS} -fstack-protector-all)

@@ -39,6 +39,11 @@ execute_process(
     COMMAND ln -fs ${CMAKE_CURRENT_SOURCE_DIR}/crc32_arm_parallel.S ${CMAKE_CURRENT_SOURCE_DIR}/port_srv/crc32_arm_parallel.S
 )
 
+execute_process(
+    COMMAND ln -fs ${PROJECT_SRC_DIR}/gausskernel/storage/file/fio_device.cpp ${CMAKE_CURRENT_SOURCE_DIR}/fio_device.cpp
+    COMMAND ln -fs ${PROJECT_SRC_DIR}/gausskernel/storage/dss/fio_dss.cpp ${CMAKE_CURRENT_SOURCE_DIR}/fio_dss.cpp
+)
+
 list(APPEND TGT_port_SRC 
     ${CMAKE_CURRENT_SOURCE_DIR}/fls.cpp 
     ${CMAKE_CURRENT_SOURCE_DIR}/strlcat.cpp 
@@ -71,7 +76,10 @@ list(APPEND TGT_port_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/gs_strerror.cpp 
     ${CMAKE_CURRENT_SOURCE_DIR}/gs_syscall_lock.cpp 
     ${CMAKE_CURRENT_SOURCE_DIR}/gs_system.cpp 
-    ${CMAKE_CURRENT_SOURCE_DIR}/cipher.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/cipher.cpp 
+    ${CMAKE_CURRENT_SOURCE_DIR}/tool_common.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/fio_device.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/fio_dss.cpp
 )
 
 # aarch64
@@ -138,6 +146,8 @@ list(APPEND TGT_pgport_srv_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/port_srv/gs_syscall_lock.cpp 
     ${CMAKE_CURRENT_SOURCE_DIR}/port_srv/gs_system.cpp 
     ${CMAKE_CURRENT_SOURCE_DIR}/port_srv/cipher.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/fio_device.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/fio_dss.cpp
 )
 
 # aarch64
@@ -199,6 +209,8 @@ set(TGT_pgport_tool_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/gs_syscall_lock.cpp 
     ${CMAKE_CURRENT_SOURCE_DIR}/gs_system.cpp 
     ${CMAKE_CURRENT_SOURCE_DIR}/cipher.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/fio_device.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/fio_dss.cpp
 )
 SET(TGT_pgport_tool_INC 
     ${PROJECT_SRC_DIR}/common/backend

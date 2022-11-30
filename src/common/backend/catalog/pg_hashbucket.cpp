@@ -1161,8 +1161,10 @@ HeapTuple HbktModifyRelationRelfilenode(HeapTuple reltup, DataTransferType trans
         newrelfilenode = GetNewRelFileNode(indexrel->rd_rel->reltablespace, NULL, indexrel->rd_rel->relpersistence);
         bucketNode = InvalidBktId;
     } else {
+        Oid database_id = (ConvertToRelfilenodeTblspcOid(indexrel->rd_rel->reltablespace) == GLOBALTABLESPACE_OID) ?
+            InvalidOid : u_sess->proc_cxt.MyDatabaseId;
         newrelfilenode = seg_alloc_segment(ConvertToRelfilenodeTblspcOid(indexrel->rd_rel->reltablespace),
-            u_sess->proc_cxt.MyDatabaseId, isBucket, InvalidBlockNumber);
+            database_id, isBucket, InvalidBlockNumber);
         bucketNode = SegmentBktId;
     }
     rnode = indexrel->rd_node;

@@ -3473,7 +3473,8 @@ static void autovac_report_activity(autovac_table* tab)
  */
 bool AutoVacuumingActive(void)
 {
-    if (!u_sess->attr.attr_storage.autovacuum_start_daemon || !u_sess->attr.attr_common.pgstat_track_counts)
+    if (!u_sess->attr.attr_storage.autovacuum_start_daemon || !u_sess->attr.attr_common.pgstat_track_counts ||
+        SSIsServerModeReadOnly())
         return false;
     return true;
 }

@@ -54,6 +54,7 @@
 #include "fetch.h"
 #include "common/fe_memutils.h"
 #include "logging.h"
+#include "tool_common.h"
 
 #ifdef ENABLE_MOT
 #include "fetchmot.h"
@@ -79,6 +80,7 @@
 #ifdef ENABLE_UT
 #define static
 #endif
+
 
 /* PID can be negative for standalone backend */
 typedef long pgpid_t;
@@ -2136,6 +2138,11 @@ static void do_failover(uint32 term)
         pg_log(PG_WARNING,
             _(" cannot failover server; "
               "server is not in standby or cascade standby mode\n"));
+        exit(1);
+    }
+
+    if (g_dcfEnabled) {
+        pg_log(PG_WARNING, _("Failover is not supported in dcf mode.\n"));
         exit(1);
     }
 
@@ -6720,6 +6727,7 @@ int main(int argc, char** argv)
         do_wait = false;
     }
 
+    initDataPathStruct(false);
     SetConfigFilePath();
 
     pg_host = getenv("PGHOST");

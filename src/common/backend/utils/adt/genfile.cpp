@@ -38,6 +38,7 @@
 #include "utils/lsyscache.h"
 #include "catalog/pg_partition_fn.h"
 #include "storage/cfs/cfs_buffers.h"
+#include "storage/file/fio_device.h"
 
 typedef struct {
     char* location;
@@ -100,6 +101,16 @@ static char* convert_and_check_filename(text* arg)
     return filename;
 }
 
+static bool IsCheckFileBlank(FILE* file, const char* filename)
+{
+    int rc = fseeko(file, 0L, SEEK_END);
+    if (rc != 0) {
+        ereport(ERROR, (errcode_for_file_access(), errmsg("could not seek in file \"%s\": %m", filename)));
+    }
+
+    return (ftell(file) == 0);
+}
+
 /*
  * Read a section of a file, returning it as bytea
  *
@@ -119,6 +130,7 @@ bytea* read_binary_file(const char* filename, int64 seek_offset, int64 bytes_to_
     int retryCnt = 0;
     errno_t rc = 0;
     UndoFileType undoFileType = UNDO_INVALID;
+    bool isCompressed = IsCompressedFile(filename, strlen(filename));
 
     if (bytes_to_read < 0) {
         if (seek_offset < 0)
@@ -149,11 +161,18 @@ bytea* read_binary_file(const char* filename, int64 seek_offset, int64 bytes_to_
     }
 
     /* do not need to check if table is compressed table file */
-    isNeedCheck =
-        is_row_data_file(filename, &segNo, &undoFileType) && !IsCompressedFile(filename, strlen(filename));
+    isNeedCheck = is_row_data_file(filename, &segNo, &undoFileType) && !isCompressed;
     ereport(DEBUG1, (errmsg("read_binary_file, filename is %s, isNeedCheck is %d", filename, isNeedCheck)));
 
     buf = (bytea*)palloc((Size)bytes_to_read + VARHDRSZ);
+    if (isCompressed && IsCheckFileBlank(file, filename)) {
+        rc = memset_s(VARDATA(buf), bytes_to_read, 0, bytes_to_read);
+        securec_check_c(rc, "", "");
+
+        SET_VARSIZE(buf, bytes_to_read + VARHDRSZ);
+        FreeFile(file);
+        return buf;
+    }
 
 recheck:
     if (fseeko(file, (off_t)seek_offset, (seek_offset >= 0) ? SEEK_SET : SEEK_END) != 0)
@@ -339,6 +358,7 @@ Datum pg_read_binary_file_all(PG_FUNCTION_ARGS)
 struct CompressAddressItemState {
     uint32 blkno;
     int segmentNo;
+    off_t fileLen;
     CfsHeaderMap rbStruct;
     FILE *compressedFd;
 };
@@ -362,9 +382,9 @@ static void ReadBinaryFileBlocksFirstCall(PG_FUNCTION_ARGS, int32 startBlockNum,
     CompressAddressItemState* itemState = (CompressAddressItemState*)palloc(sizeof(CompressAddressItemState));
 
     /* save mmap to inter_call_data->pcMap */
-
+    itemState->fileLen = 0;
     FILE *compressedFd = AllocateFile((const char *)path, "rb");
-    auto blockNumber = ReadBlockNumberOfCFile(compressedFd);
+    auto blockNumber = ReadBlockNumberOfCFile(compressedFd, &itemState->fileLen);
     if (blockNumber >= MIN_COMPRESS_ERROR_RT) {
         ereport(ERROR, (ERRCODE_INVALID_PARAMETER_VALUE,
                         errmsg("can not read actual block from %s, error code: %lu,", path, blockNumber)));
@@ -970,7 +990,7 @@ Datum pg_read_binary_file_blocks(PG_FUNCTION_ARGS)
     int32 startBlockNum = PG_GETARG_INT32(1);
     int32 blockCount = PG_GETARG_INT32(2);
 
-    if (startBlockNum < 0 || blockCount <= 0 || startBlockNum + blockCount > RELSEG_SIZE) {
+    if (startBlockNum < 0 || blockCount < 0 || startBlockNum + blockCount > RELSEG_SIZE) {
         ereport(ERROR, (ERRCODE_INVALID_PARAMETER_VALUE,
                         errmsg("invalid blocknum \"%d\" or block count \"%d\"", startBlockNum, blockCount)));
     }
@@ -986,28 +1006,31 @@ Datum pg_read_binary_file_blocks(PG_FUNCTION_ARGS)
 
     if (fctx->call_cntr < fctx->max_calls) {
         bytea *buf = (bytea *)palloc(BLCKSZ + VARHDRSZ);
-        BlockNumber extentCount = itemState->blkno / CFS_LOGIC_BLOCKS_PER_EXTENT;
-        if (itemState->rbStruct.extentCount != extentCount || itemState->rbStruct.header == NULL) {
-            MmapFree(&itemState->rbStruct);
-            auto curHeader = MMapHeader(itemState->compressedFd, extentCount, true);
+        size_t len = 0;
+        if (itemState->fileLen > 0) {
+            BlockNumber extentCount = itemState->blkno / CFS_LOGIC_BLOCKS_PER_EXTENT;
+            if (itemState->rbStruct.extentCount != extentCount || itemState->rbStruct.header == NULL) {
+                MmapFree(&itemState->rbStruct);
+                auto curHeader = MMapHeader(itemState->compressedFd, extentCount, true);
 
-            itemState->rbStruct.header = curHeader.header;
-            itemState->rbStruct.extentCount = curHeader.extentCount;
-            itemState->rbStruct.pointer = curHeader.pointer;
-            itemState->rbStruct.mmapLen = curHeader.mmapLen;
+
+                itemState->rbStruct.header = curHeader.header;
+                itemState->rbStruct.extentCount = curHeader.extentCount;
+                itemState->rbStruct.pointer = curHeader.pointer;
+                itemState->rbStruct.mmapLen = curHeader.mmapLen;
+            }
+
+            CfsReadStruct cfsReadStruct{itemState->compressedFd, itemState->rbStruct.header, extentCount};
+            len = CfsReadCompressedPage(VARDATA(buf), BLCKSZ, itemState->blkno % CFS_LOGIC_BLOCKS_PER_EXTENT,
+                                        &cfsReadStruct, CFS_LOGIC_BLOCKS_PER_FILE * itemState->segmentNo + itemState->blkno);
         }
-
-        CfsReadStruct cfsReadStruct{itemState->compressedFd, itemState->rbStruct.header, extentCount};
-        size_t len = CfsReadCompressedPage(VARDATA(buf), BLCKSZ,
-            itemState->blkno % CFS_LOGIC_BLOCKS_PER_EXTENT, &cfsReadStruct,
-            CFS_LOGIC_BLOCKS_PER_FILE * itemState->segmentNo + itemState->blkno);
         SET_VARSIZE(buf, len + VARHDRSZ);
         Datum values[6];
         values[0] = PG_GETARG_DATUM(0);
         values[1] = Int32GetDatum(itemState->blkno);
         values[2] = Int32GetDatum(len);
-        values[3] = Int32GetDatum(itemState->rbStruct.header->algorithm);
-        values[4] = Int32GetDatum(itemState->rbStruct.header->chunk_size);
+        values[3] = Int32GetDatum(itemState->fileLen == 0 ? 0 : itemState->rbStruct.header->algorithm);
+        values[4] = Int32GetDatum(itemState->fileLen == 0 ? 0 : itemState->rbStruct.header->chunk_size);
         values[5] = PointerGetDatum(buf);
 
         /* Build and return the result tuple. */
@@ -1402,7 +1425,7 @@ Datum pg_ls_waldir(PG_FUNCTION_ARGS)
     if (!superuser() && !isMonitoradmin(GetUserId()))
         ereport(ERROR,
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("only system/monitor admin can check WAL directory!")));
-    return pg_ls_dir_files(fcinfo, XLOGDIR, false);
+    return pg_ls_dir_files(fcinfo, SS_XLOGDIR, false);
 }
 
 /*
@@ -1415,8 +1438,11 @@ static Datum pg_ls_tmpdir(FunctionCallInfo fcinfo, Oid tblspc)
         ereport(ERROR,
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                 errmsg("only system/monitor admin can check pgsql_tmp directory!")));
-    if (!SearchSysCacheExists1(TABLESPACEOID, ObjectIdGetDatum(tblspc)))
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("tablespace with OID %u does not exist", tblspc)));
+    if (OidIsValid(tblspc)) {
+        if (!SearchSysCacheExists1(TABLESPACEOID, ObjectIdGetDatum(tblspc)))
+            ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("tablespace with OID %u does not exist", tblspc)));
+    }
 
     TempTablespacePath(path, tblspc);
     return pg_ls_dir_files(fcinfo, path, true);
@@ -1428,7 +1454,11 @@ static Datum pg_ls_tmpdir(FunctionCallInfo fcinfo, Oid tblspc)
  */
 Datum pg_ls_tmpdir_noargs(PG_FUNCTION_ARGS)
 {
-    return pg_ls_tmpdir(fcinfo, DEFAULTTABLESPACE_OID);
+    if (!ENABLE_DSS) {
+        return pg_ls_tmpdir(fcinfo, DEFAULTTABLESPACE_OID);
+    } else {
+        return pg_ls_tmpdir(fcinfo, InvalidOid);
+    }
 }
 
 /*

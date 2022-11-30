@@ -26,6 +26,7 @@
      strspn(fname, "0123456789ABCDEF") == XLOG_FNAME_LEN &&        \
      strcmp((fname) + XLOG_FNAME_LEN, ".gz.part") == 0)
 
+#define IsDssMode() (instance_config.dss.enable_dss == true)
 #define IsSshProtocol() (instance_config.remote.host && strcmp(instance_config.remote.proto, "ssh") == 0)
 
 /* directory options */
@@ -145,8 +146,7 @@ extern int do_delete_instance(void);
 extern void do_delete_status(InstanceConfig *instance_config, const char *status);
 
 /* in fetch.c */
-extern char *slurpFile(const char *datadir,
-                       const char *path,
+extern char *slurpFile(const char *fullpath,
                        size_t *filesize,
                        bool safe,
                        fio_location location);
@@ -280,7 +280,7 @@ extern int dir_create_dir(const char *path, mode_t mode);
 extern bool dir_is_empty(const char *path, fio_location location);
 
 extern bool fileExists(const char *path, fio_location location);
-extern size_t pgFileSize(const char *path);
+extern off_t pgFileSize(const char *path);
 
 extern pgFile *pgFileNew(const char *path, const char *rel_path,
                          bool follow_symlink, int external_dir_num,
@@ -327,9 +327,8 @@ extern size_t restore_data_file_internal(FILE *in, FILE *out, pgFile *file, uint
                                          const char *from_fullpath, const char *to_fullpath, int nblocks,
                                          datapagemap_t *map, PageState *checksum_map, int checksum_version,
                                          datapagemap_t *lsn_map, BackupPageHeader2 *headers);
-extern size_t restore_non_data_file(parray *parent_chain, pgBackup *dest_backup,
-                                    pgFile *dest_file, FILE *out, const char *to_fullpath,
-                                    bool already_exists);
+extern size_t restore_non_data_file(parray *parent_chain, pgBackup *dest_backup, pgFile *dest_file, FILE *out,
+                                    const char *to_fullpath, bool already_exists);
 extern void restore_non_data_file_internal(FILE *in, FILE *out, pgFile *file,
                                            const char *from_fullpath, const char *to_fullpath);
 extern bool create_empty_file(fio_location from_location, const char *to_root,
@@ -381,10 +380,14 @@ extern XLogRecPtr get_checkpoint_location(PGconn *conn);
 extern uint64 get_system_identifier(const char *pgdata_path);
 extern uint64 get_remote_system_identifier(PGconn *conn);
 extern uint32 get_data_checksum_version(bool safe);
-extern pg_crc32c get_pgcontrol_checksum(const char *pgdata_path);
+extern pg_crc32c get_pgcontrol_checksum(const char *fullpath);
 extern uint32 get_xlog_seg_size(char *pgdata_path);
 extern void get_redo(const char *pgdata_path, RedoParams *redo);
-extern void set_min_recovery_point(pgFile *file, const char *backup_path,
+extern void parse_vgname_args(const char* args);
+extern bool is_ss_xlog(const char *ss_dir);
+extern void ss_createdir(const char *ss_dir, const char *vgdata, const char *vglog);
+extern char* xstrdup(const char* s);
+extern void set_min_recovery_point(pgFile *file, const char *fullpath,
                                    XLogRecPtr stop_backup_lsn);
 extern void copy_pgcontrol_file(const char *from_fullpath, fio_location from_location,
                     const char *to_fullpath, fio_location to_location, pgFile *file);
@@ -392,6 +395,8 @@ extern void copy_pgcontrol_file(const char *from_fullpath, fio_location from_loc
 extern void time2iso(char *buf, size_t len, time_t time);
 extern const char *status2str(BackupStatus status);
 extern BackupStatus str2status(const char *status);
+extern const char *dev2str(device_type_t type);
+extern device_type_t str2dev(const char *dev);
 extern const char *base36enc(long unsigned int value);
 extern char *base36enc_dup(long unsigned int value);
 extern long unsigned int base36dec(const char *text);

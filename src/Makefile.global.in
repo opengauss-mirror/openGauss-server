@@ -297,6 +297,8 @@ ifeq ($(with_3rd), NONE)
   MYFDW_HOME    = $(top_builddir)/dependency/mysql_fdw
   ORCFDW_HOME   = $(top_builddir)/dependency/oracle_fdw
   DCF_HOME = $(top_builddir)/$(COMPONENTPATH)/dcf
+  DSS_HOME = $(top_builddir)/$(COMPONENTPATH)/dss
+  DMS_HOME = $(top_builddir)/$(COMPONENTPATH)/dms
 else
   BINARYPATH = kernel/dependency
   PLATFORMPATH = kernel/platform
@@ -345,6 +347,8 @@ endif
   MYFDW_HOME = $(with_3rd)/$(BINARYPATH)/mysql_fdw
   ORCFDW_HOME = $(with_3rd)/$(BINARYPATH)/oracle_fdw
   DCF_HOME = $(with_3rd)/kernel/component/dcf
+  DSS_HOME = $(with_3rd)/kernel/component/dss
+  DMS_HOME = $(with_3rd)/kernel/component/dms
 endif
 
 ifeq ($(with_openeuler_os), yes)
@@ -632,6 +636,17 @@ MASSTREE_LIB_PATH = $(MASSTREE_HOME)/lib
 #############################################################################
 DCF_INCLUDE_PATH = $(DCF_HOME)/include
 DCF_LIB_PATH = $(DCF_HOME)/lib
+
+#############################################################################
+# dss component
+#############################################################################
+DSS_BIN_PATH = $(DSS_HOME)/bin
+DSS_LIB_PATH = $(DSS_HOME)/lib
+
+#############################################################################
+# dms component
+#############################################################################
+DMS_LIB_PATH = $(DMS_HOME)/lib
 
 ############################################################################
 #

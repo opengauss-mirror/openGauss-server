@@ -28,6 +28,8 @@
 #include <dirent.h>
 #include <limits.h>
 #include <stddef.h>
+#include "storage/file/fio_device.h"
+
 
 #ifndef LEN_D_NAME
 #define LEN_D_NAME offsetof(struct dirent, d_name)

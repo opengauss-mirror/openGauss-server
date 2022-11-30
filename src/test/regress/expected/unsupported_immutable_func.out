@@ -1,0 +1,16 @@
+drop procedure procedure_name_immutable;
+ERROR:  function procedure_name_immutable does not exist
+create or replace procedure procedure_name_immutable
+IMMUTABLE
+NOT SHIPPABLE NOT LEAKPROOF
+STRICT EXTERNAL
+SECURITY INVOKER PACKAGE
+COST 480 ROWS 528
+IS
+begin
+NULL;
+rollback;
+end;
+/
+NOTICE:  Immutable function will be shippable anyway.
+ERROR:  ROWS is not applicable when function does not return a set

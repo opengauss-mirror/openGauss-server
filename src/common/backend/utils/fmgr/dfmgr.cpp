@@ -28,6 +28,7 @@
 #include "utils/hsearch.h"
 #include "utils/memutils.h"
 #include "utils/syscall_lock.h"
+#include "storage/file/fio_device.h"
 
 /* Max size of error message of dlopen   */
 #define DLERROR_MSG_MAX_LEN 512

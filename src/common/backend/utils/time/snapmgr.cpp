@@ -59,6 +59,10 @@
 #include "utils/memutils.h"
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
+#include "ddes/dms/ss_common_attr.h"
+#include "ddes/dms/ss_transaction.h"
+#include "storage/file/fio_device.h"
+
 #ifdef PGXC
 #include "pgxc/pgxc.h"
 #endif
@@ -82,19 +86,21 @@ typedef struct ActiveSnapshotElt {
 static THR_LOCAL bool RegisterStreamSnapshot = false;
 
 /* Define pathname of exported-snapshot files */
-#define SNAPSHOT_EXPORT_DIR "pg_snapshots"
+#define SNAPSHOT_EXPORT_DIR (g_instance.datadir_cxt.snapshotsDir)
 
 /* Structure holding info about exported snapshot. */
 typedef struct ExportedSnapshot {
     char *snapfile;
     Snapshot snapshot;
 } ExportedSnapshot;
+
 #define XactExportFilePath(path, xid, num, suffix) \
     {                                              \
         int rc = snprintf_s(path,                  \
             sizeof(path),                          \
             sizeof(path) - 1,                      \
-            SNAPSHOT_EXPORT_DIR "/%08X%08X-%d%s",  \
+            "%s/%08X%08X-%d%s",                    \
+            (g_instance.datadir_cxt.snapshotsDir), \
             (uint32)((xid) >> 32),                 \
             (uint32)(xid),                         \
             (num),                                 \
@@ -175,7 +181,7 @@ bool IsXidVisibleInGtmLiteLocalSnapshot(TransactionId xid, Snapshot snapshot,
     return false;
 }
 
-static void RecheckXidFinish(TransactionId xid, CommitSeqNo csn)
+void RecheckXidFinish(TransactionId xid, CommitSeqNo csn)
 {
     if (TransactionIdIsInProgress(xid)) {
         ereport(defence_errlevel(), (errmsg("transaction id %lu is still running, "
@@ -208,7 +214,11 @@ bool XidVisibleInSnapshot(TransactionId xid, Snapshot snapshot, TransactionIdSta
 #endif
 
 loop:
-    csn = TransactionIdGetCommitSeqNo(xid, false, true, false, snapshot);
+    if (SS_STANDBY_MODE) {
+        csn = SSTransactionIdGetCommitSeqNo(xid, false, true, false, snapshot, sync);
+    } else {
+        csn = TransactionIdGetCommitSeqNo(xid, false, true, false, snapshot);
+    }
 
 #ifdef XIDVIS_DEBUG
     ereport(DEBUG1,
@@ -228,6 +238,10 @@ loop:
         else
             return false;
     } else if (COMMITSEQNO_IS_COMMITTING(csn)) {
+        /* SS master node would've already sync-waited, so this should never happen */
+        if (SS_STANDBY_MODE) {
+            ereport(FATAL, (errmsg("SS xid %lu's csn %lu is still COMMITTING after Master txn waited.", xid, csn)));
+        }
         if (looped) {
             ereport(DEBUG1, (errmsg("transaction id %lu's csn %ld is changed to ABORT after lockwait.", xid, csn)));
             /* recheck if transaction id is finished */
@@ -346,9 +360,17 @@ bool CommittedXidVisibleInSnapshot(TransactionId xid, Snapshot snapshot, Buffer 
     }
 
 loop:
-    csn = TransactionIdGetCommitSeqNo(xid, true, true, false, snapshot);
+    if (SS_STANDBY_MODE) {
+        csn = SSTransactionIdGetCommitSeqNo(xid, true, true, false, snapshot, NULL);
+    } else {
+        csn = TransactionIdGetCommitSeqNo(xid, true, true, false, snapshot);
+    }
 
     if (COMMITSEQNO_IS_COMMITTING(csn)) {
+        /* SS master node would've already sync-waited, so this should never happen */
+        if (SS_STANDBY_MODE) {
+            ereport(FATAL, (errmsg("SS xid %lu's csn %lu is still COMMITTING after Master txn waited.", xid, csn)));
+        }
         if (looped) {
             ereport(WARNING,
                 (errmsg("committed transaction id %lu's csn %lu"
@@ -1544,7 +1566,7 @@ void ImportSnapshot(const char* idstr)
             ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid snapshot identifier: \"%s\"", idstr)));
 
     /* OK, read the file */
-    int rc = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, SNAPSHOT_EXPORT_DIR "/%s", idstr);
+    int rc = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/%s", SNAPSHOT_EXPORT_DIR, idstr);
     securec_check_ss(rc, "", "");
 
     f = AllocateFile(path, PG_BINARY_R);
@@ -1668,7 +1690,7 @@ void DeleteAllExportedSnapshotFiles(void)
         if (strcmp(s_de->d_name, ".") == 0 || strcmp(s_de->d_name, "..") == 0)
             continue;
 
-        rc = snprintf_s(buf, MAXPGPATH, MAXPGPATH - 1, SNAPSHOT_EXPORT_DIR "/%s", s_de->d_name);
+        rc = snprintf_s(buf, MAXPGPATH, MAXPGPATH - 1, "%s/%s", SNAPSHOT_EXPORT_DIR, s_de->d_name);
         securec_check_ss(rc, "", "");
         /* Again, unlink failure is not worthy of FATAL */
         if (unlink(buf))

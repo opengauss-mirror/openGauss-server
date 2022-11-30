@@ -477,6 +477,8 @@ static BuildErrorCode receiveFileChunks(const char* sql, FILE* file)
             chunkSize = (int32)ntohl((uint32)chunkSize);
             bool rebuild = *PQgetvalue(res, 0, 6) != 0;
             CompressedFileInit(filename, rebuild);
+            pg_free(filename);
+            filename = NULL;
             /* fetch result */
             FetchCompressedFile(chunk, (uint32)chunkoff, (int32)chunkspace, (uint16)chunkSize, (uint8)algorithm);
         }

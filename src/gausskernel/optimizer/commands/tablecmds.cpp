@@ -2221,6 +2221,10 @@ Oid DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, bool isCTAS)
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
             errmsg("hasuids is not supported in current version!")));
     }
+    if (ENABLE_DMS && relhasuids) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("hasuids is not supported under Shared Storage.")));
+    }
     if (std_opt != NULL) {
         RowTblCheckHashBucketOption(stmt->options, std_opt);
         if ((std_opt->segment)) {
@@ -2736,7 +2740,24 @@ Oid DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, bool isCTAS)
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("The table %s do not support segment storage", stmt->relation->relname)));
     }
-    
+
+    if (ENABLE_DMS) {
+        if ((relkind == RELKIND_RELATION && storage_type != SEGMENT_PAGE) ||
+            relkind == RELKIND_MATVIEW ||
+            pg_strcasecmp(storeChar, ORIENTATION_ROW) != 0 ||
+            relkind == RELKIND_FOREIGN_TABLE ||
+            stmt->relation->relpersistence == RELPERSISTENCE_UNLOGGED ||
+            stmt->relation->relpersistence == RELPERSISTENCE_TEMP ||
+            stmt->relation->relpersistence == RELPERSISTENCE_GLOBAL_TEMP ||
+            pg_strcasecmp(COMPRESSION_NO, StdRdOptionsGetStringData(std_opt, compression, COMPRESSION_NO)) != 0 ||
+            IsCompressedByCmprsInPgclass((RelCompressType)stmt->row_compress)) {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Only support segment storage type and ASTORE while DMS and DSS enabled.\n"
+                "Foreign table, matview, temp table or unlogged table is not supported.\nCompression is not "
+                "supported.")));
+        }
+    }
+
     /*
      * Create the relation.  Inherited defaults and constraints are passed in
      * for immediate handling --- since they don't need parsing, they can be
@@ -15314,6 +15335,10 @@ static void ATExecSetRelOptions(Relation rel, List* defList, AlterTableType oper
                 ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION),
                     errmsg("table with oids cannot add or modify hasuids by ALTER TABLE command.")));
             }
+            if (ENABLE_DMS && newRelHasUids) {
+                ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION),
+                    errmsg("table under Shared Storage cannot add or modify hasuids by ALTER TABLE command.")));
+            }
             if (RelationIsColStore(rel)) {
                 /* un-supported options. dont care its values */
                 ForbidToSetOptionsForColTbl(defList);
@@ -15613,8 +15638,10 @@ static void ATExecSetTableSpaceForPartitionP3(Oid tableOid, Oid partOid, Oid new
     } else {
         newcbi = RelationIsCrossBucketIndex(rel);
         isbucket = BUCKET_OID_IS_VALID(rel->rd_bucketoid) && !newcbi;
+        Oid database_id = (ConvertToRelfilenodeTblspcOid(newTableSpace) == GLOBALTABLESPACE_OID) ?
+            InvalidOid : u_sess->proc_cxt.MyDatabaseId;
         newrelfilenode = seg_alloc_segment(ConvertToRelfilenodeTblspcOid(newTableSpace),
-                                           u_sess->proc_cxt.MyDatabaseId, isbucket, InvalidBlockNumber);
+                                           database_id, isbucket, InvalidBlockNumber);
     }
     partRel = partitionGetRelation(rel, part);
     /* make sure we create the right underlying storage for cross-bucket index */
@@ -15901,6 +15928,7 @@ static void JudgeSmgrDsync(char relpersistence, bool copying_initfork, SMgrRelat
 static void copy_relation_data(Relation rel, SMgrRelation* dstptr, ForkNumber forkNum, char relpersistence)
 {
     char* buf = NULL;
+    char* unalign_buffer = NULL;
     Page page;
     bool use_wal = false;
     bool copying_initfork = false;
@@ -15925,7 +15953,12 @@ static void copy_relation_data(Relation rel, SMgrRelation* dstptr, ForkNumber fo
     }
     ADIO_ELSE()
     {
-        buf = (char*)palloc(BLCKSZ);
+        if (ENABLE_DSS) {
+            unalign_buffer = (char*)palloc(BLCKSZ + ALIGNOF_BUFFER);
+            buf = (char*)BUFFERALIGN(unalign_buffer);
+        } else {
+            buf = (char*)palloc(BLCKSZ);
+        }
     }
     ADIO_END();
     page = (Page)buf;
@@ -16062,7 +16095,11 @@ static void copy_relation_data(Relation rel, SMgrRelation* dstptr, ForkNumber fo
     }
     ADIO_ELSE()
     {
-        pfree_ext(buf);
+        if (ENABLE_DSS) {
+            pfree_ext(unalign_buffer);
+        } else {
+            pfree_ext(buf);
+        }
     }
     ADIO_END();
 
@@ -16074,6 +16111,7 @@ static void mergeHeapBlock(Relation src, Relation dest, ForkNumber forkNum, char
     bool destHasFSM)
 {
     char* buf = NULL;
+    char* unaligned_buffer = NULL;
     char* bufToWrite = NULL;
     Page page = NULL;
     bool use_wal = false;
@@ -16102,7 +16140,12 @@ static void mergeHeapBlock(Relation src, Relation dest, ForkNumber forkNum, char
     }
     ADIO_ELSE()
     {
-        buf = (char*)palloc(BLCKSZ);
+        if (ENABLE_DSS) {
+            unaligned_buffer = (char*)palloc(BLCKSZ + ALIGNOF_BUFFER);
+            buf = (char*)BUFFERALIGN(unaligned_buffer);
+        } else {
+            buf = (char*)palloc(BLCKSZ);
+        }
     }
     ADIO_END();
     page = (Page)buf;
@@ -16285,7 +16328,11 @@ static void mergeHeapBlock(Relation src, Relation dest, ForkNumber forkNum, char
     }
     ADIO_ELSE()
     {
-        pfree_ext(buf);
+        if (ENABLE_DSS) {
+            pfree_ext(unaligned_buffer);
+        } else {
+            pfree_ext(buf);
+        }
     }
     ADIO_END();
 

@@ -108,19 +108,23 @@ List* raw_parser(const char* str, List** query_string_locationlist)
     return yyextra.parsetree;
 }
 
-#define GET_NEXT_TOKEN()                                                                 \
+#define GET_NEXT_TOKEN_WITHOUT_YY()                                                      \
     do {                                                                                 \
-        cur_yylval = lvalp->core_yystype;                                                \
-        cur_yylloc = *llocp;                                                             \
         if (yyextra->lookahead_num != 0) {                                               \
             next_token = yyextra->lookahead_token[yyextra->lookahead_num - 1];           \
             lvalp->core_yystype = yyextra->lookahead_yylval[yyextra->lookahead_num - 1]; \
             *llocp = yyextra->lookahead_yylloc[yyextra->lookahead_num - 1];              \
             yyextra->lookahead_num--;                                                    \
-            Assert(yyextra->lookahead_num == 0);                                         \
         } else {                                                                         \
             next_token = core_yylex(&(lvalp->core_yystype), llocp, yyscanner);           \
         }                                                                                \
+    } while (0)
+
+#define GET_NEXT_TOKEN()                                                                 \
+    do {                                                                                 \
+        cur_yylval = lvalp->core_yystype;                                                \
+        cur_yylloc = *llocp;                                                             \
+        GET_NEXT_TOKEN_WITHOUT_YY();                                                     \
     } while (0)
 
 #define SET_LOOKAHEAD_TOKEN()                               \
@@ -428,17 +432,20 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
             /*
              * DECLARE foo CUROSR must be looked ahead, and if determined as a DECLARE_CURSOR, we should set the yylaval
              * and yylloc back, letting the parser read the cursor name correctly.
+             * here we may still have token in lookahead_token, so use GET_NEXT_TOKEN to get
              */
-            cur_yylval = lvalp->core_yystype;
-            cur_yylloc = *llocp;
-            next_token = core_yylex(&(lvalp->core_yystype), llocp, yyscanner);
+            GET_NEXT_TOKEN();
             /* get first token after DECLARE. We don't care what it is */
             yyextra->lookahead_token[1] = next_token;
             yyextra->lookahead_yylval[1] = lvalp->core_yystype;
             yyextra->lookahead_yylloc[1] = *llocp;
 
-            /* get the second token after DECLARE. If it is cursor grammer, we are sure that this is a cursr stmt */
-            next_token = core_yylex(&(lvalp->core_yystype), llocp, yyscanner);
+            /* 
+             * get the second token after DECLARE. If it is cursor grammer, we are sure that this is a cursr stmt
+             * in fact we don't have any lookahead_token here for sure, cause MAX_LOOKAHEAD_NUM is 2.
+             * but maybe someday MAX_LOOKAHEAD_NUM increase, so we still use GET_NEXT_TOKEN_WITHOUT_SET_CURYY
+             */
+            GET_NEXT_TOKEN_WITHOUT_YY();
             yyextra->lookahead_token[0] = next_token;
             yyextra->lookahead_yylval[0] = lvalp->core_yystype;
             yyextra->lookahead_yylloc[0] = *llocp;
@@ -523,35 +530,38 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
             }
             break;
         case ON:
-            cur_yylval = lvalp->core_yystype;
-            cur_yylloc = *llocp;
-            next_token = core_yylex(&(lvalp->core_yystype), llocp, yyscanner);
+            /* here we may still have token in lookahead_token, so use GET_NEXT_TOKEN to get */
+            GET_NEXT_TOKEN();
             /* get first token after ON (Normal UPDATE). We don't care what it is */
             yyextra->lookahead_token[1] = next_token;
             yyextra->lookahead_yylval[1] = lvalp->core_yystype;
             yyextra->lookahead_yylloc[1] = *llocp;
 
-            /* get the second token after ON. */
-            next_token = core_yylex(&(lvalp->core_yystype), llocp, yyscanner);
+            /*
+             * get the second token after ON.
+             * in fact we don't have any lookahead_token here for sure, cause MAX_LOOKAHEAD_NUM is 2.
+             * but maybe someday MAX_LOOKAHEAD_NUM increase, so we still use GET_NEXT_TOKEN_WITHOUT_SET_CURYY
+             */
+            GET_NEXT_TOKEN_WITHOUT_YY();
             yyextra->lookahead_token[0] = next_token;
             yyextra->lookahead_yylval[0] = lvalp->core_yystype;
             yyextra->lookahead_yylloc[0] = *llocp;
             yyextra->lookahead_num = 2;
             switch (next_token) {
-            case CURRENT_TIMESTAMP:
-            case CURRENT_TIME:
-            case CURRENT_DATE:
-            case LOCALTIME:
-            case LOCALTIMESTAMP:
-                cur_token = ON_UPDATE_TIME;
-                lvalp->core_yystype = cur_yylval;
-                *llocp = cur_yylloc;
-                break;
-            default:
-                /* and back up the output info to cur_token */
-                lvalp->core_yystype = cur_yylval;
-                *llocp = cur_yylloc;
-                break;
+                case CURRENT_TIMESTAMP:
+                case CURRENT_TIME:
+                case CURRENT_DATE:
+                case LOCALTIME:
+                case LOCALTIMESTAMP:
+                    cur_token = ON_UPDATE_TIME;
+                    lvalp->core_yystype = cur_yylval;
+                    *llocp = cur_yylloc;
+                    break;
+                default:
+                    /* and back up the output info to cur_token */
+                    lvalp->core_yystype = cur_yylval;
+                    *llocp = cur_yylloc;
+                    break;
             }
             break;
         default:

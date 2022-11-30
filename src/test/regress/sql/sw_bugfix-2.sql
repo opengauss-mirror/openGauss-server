@@ -623,3 +623,28 @@ insert into dts_t1 values(2,2,2);
 select c1,prior c2,c2 from dts_t1 start with c1=1 connect by prior c2+1=c2 ;
 select c1,c2 from dts_t1 start with c1=1 connect by prior c2+1=c2 ;
 drop table dts_t1;
+
+-- test rownum/level appear in connect by clause
+DROP TABLE IF EXISTS RLTEST;
+CREATE TABLE RLTEST(
+    A CHAR(1),
+    B CHAR(1)
+);
+INSERT INTO RLTEST VALUES('1','2'),('2','3'),('3','1'),('4','5'),('5','6'),('7','8');
+SELECT * FROM RLTEST START WITH A=1 CONNECT BY PRIOR B=A AND (1=1 OR ROWNUM=1);
+SELECT * FROM RLTEST START WITH A=1 CONNECT BY NOCYCLE PRIOR B=A AND (1=1 OR ROWNUM=1);
+SELECT * FROM RLTEST CONNECT BY (PRIOR a = b) AND (LEVEL < 2) AND (ROWNUM < 2);
+SELECT * FROM RLTEST CONNECT BY (PRIOR a = b) AND (LEVEL < 2 OR ROWNUM < 2);
+SELECT * FROM RLTEST CONNECT BY (LEVEL < 1 OR ROWNUM < 2);
+SELECT * FROM RLTEST CONNECT BY PRIOR B=A AND ROWNUM = LENGTH(LEVEL);
+SELECT * FROM RLTEST CONNECT BY NOCYCLE PRIOR B=A AND (MOD(ROWNUM+1,2) = 0);
+SELECT * FROM RLTEST CONNECT BY PRIOR B=A OR (LEVEL < 1 OR ROWNUM < 2);
+SELECT * FROM RLTEST CONNECT BY PRIOR B=A AND (LEVEL=1 OR B<10) AND (ROWNUM<3 OR PRIOR A=B);
+SELECT * FROM RLTEST CONNECT BY PRIOR B=A OR (MOD(ROWNUM+1,2) = 0);
+DROP TABLE RLTEST;
+create table nocycle_tbl(id int, lid int, name text);
+insert into nocycle_tbl values (1,3,'A'),(2,1,'B'),(3,2,'C'),(4,2,'D');
+select * from nocycle_tbl connect by nocycle prior id=lid start with id=1;
+select * from nocycle_tbl connect by nocycle prior id=lid start with id=1 order siblings by id;
+select * from nocycle_tbl connect by nocycle prior id=lid start with id=1 order siblings by id desc;
+drop table nocycle_tbl;

@@ -1163,6 +1163,10 @@ void InitCatCachePhase2(CatCache* cache, bool touch_index)
  */
 bool IndexScanOK(int cache_id)
 {
+    if (SS_STANDBY_MODE) {
+        return false;
+    }
+
     switch (cache_id) {
         case INDEXRELID:
 

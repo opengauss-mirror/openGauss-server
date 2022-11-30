@@ -1212,6 +1212,9 @@ NON_EXEC_STATIC void ActiveSessionCollectMain()
     pgstat_report_appname("Asp");
     ereport(LOG, ( errmsg("ASP thread start")));
     pgstat_report_activity(STATE_IDLE, NULL);
+    if (g_instance.attr.attr_storage.dms_attr.enable_dms && !SS_MY_INST_IS_MASTER) {
+        u_sess->attr.attr_common.enable_asp = false;
+    }
     SubAspWorker();
 }
 

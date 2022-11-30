@@ -213,7 +213,7 @@ SyncWaitRet SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
      * sync replication standby names defined. Note that those standbys don't
      * need to be connected.
      */
-    if (!u_sess->attr.attr_storage.enable_stream_replication || !SyncRepRequested() ||
+    if (ENABLE_DMS || !u_sess->attr.attr_storage.enable_stream_replication || !SyncRepRequested() ||
         !SyncStandbysDefined() || (t_thrd.postmaster_cxt.HaShmData->current_mode == NORMAL_MODE))
         return NOT_REQUEST;
 

@@ -19,7 +19,7 @@
 #include "utils/builtins.h"
 #include "utils/uuid.h"
 
-static void string_to_uuid(const char* source, pg_uuid_t* uuid);
+static void string_to_uuid(const char* source, pg_uuid_t* uuid, bool can_ignore = false);
 static int uuid_internal_cmp(const pg_uuid_t* arg1, const pg_uuid_t* arg2);
 
 Datum uuid_in(PG_FUNCTION_ARGS)
@@ -28,7 +28,7 @@ Datum uuid_in(PG_FUNCTION_ARGS)
     pg_uuid_t* uuid = NULL;
 
     uuid = (pg_uuid_t*)palloc(sizeof(*uuid));
-    string_to_uuid(uuid_str, uuid);
+    string_to_uuid(uuid_str, uuid, fcinfo->can_ignore);
     PG_RETURN_UUID_P(uuid);
 }
 
@@ -68,7 +68,7 @@ Datum uuid_out(PG_FUNCTION_ARGS)
  * (The canonical format 8x-4x-4x-4x-12x, where "nx" means n hexadecimal
  * digits, is the only one used for output.)
  */
-static void string_to_uuid(const char* source, pg_uuid_t* uuid)
+static void string_to_uuid(const char* source, pg_uuid_t* uuid, bool can_ignore)
 {
     const char* src = source;
     bool braces = false;
@@ -111,6 +111,14 @@ static void string_to_uuid(const char* source, pg_uuid_t* uuid)
     return;
 
 syntax_error:
+    if (can_ignore) {
+        /* if invalid syntax error is ignorable, report warning and return '00000000-0000-0000-0000-000000000000' */
+        ereport(
+            WARNING, (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION), errmsg("invalid input syntax for uuid: \"%s\"", source)));
+        rc = memset_s(uuid->data, UUID_LEN, 0, UUID_LEN);
+        securec_check(rc, "\0", "\0");
+        return;
+    }
     ereport(
         ERROR, (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION), errmsg("invalid input syntax for uuid: \"%s\"", source)));
 }

@@ -31,7 +31,9 @@
 #include "storage/smgr/fd.h"
 #include "storage/smgr/knl_usync.h"
 #include "storage/smgr/segment.h"
+#include "storage/file/fio_device.h"
 #include "postmaster/pagerepair.h"
+#include "ddes/dms/ss_common_attr.h"
 
 static const mode_t SEGMENT_FILE_MODE = S_IWUSR | S_IRUSR;
 
@@ -41,6 +43,7 @@ static void df_open_target_files(SegLogicFile *sf, int targetno);
 
 static char *slice_filename(const char *filename, int sliceno);
 void df_extend_internal(SegLogicFile *sf);
+void df_extend_file_vector(SegLogicFile *sf);
 
 /*
  * We can not use virtual fd because space data files are accessed by multi-thread.
@@ -137,6 +140,65 @@ void df_create_file(SegLogicFile *sf, bool redo)
     pfree(filename);
 }
 
+/*
+ * Refreshes segfile's total blocks and compare to target block. Returns true if total block num holds target.
+ */
+bool df_ss_update_segfile_size(SegLogicFile *sf, BlockNumber target_block)
+{
+    if (!ENABLE_DMS) {
+        return false;
+    }
+
+    uint32 flags = O_RDWR | PG_BINARY;
+    if (sf->file_num == 0) {
+        char *filename = slice_filename(sf->filename, 0);
+        int fd = dv_open_file(filename, flags, (int)SEGMENT_FILE_MODE);
+        if (fd < 0) {
+            ereport(LOG,
+                (errmodule(MOD_SEGMENT_PAGE), errmsg("File \"%s\" does not exist, stop read here.", filename)));
+            pfree(filename);
+            return false;
+        }
+        
+        sf->file_num++;
+        sf->segfiles[0].fd = fd;
+        sf->segfiles[0].sliceno = 0;
+    }
+
+    int sliceno = sf->file_num - 1;
+    int fd = sf->segfiles[sliceno].fd;
+    off_t size = lseek(fd, 0L, SEEK_END);
+    sf->total_blocks = (uint32)(sliceno * DF_FILE_SLICE_BLOCKS + size / BLCKSZ); /* size of full slices + last slice */
+
+    while (size == DF_FILE_SLICE_SIZE) {
+        sliceno = sf->file_num;
+        char *filename = slice_filename(sf->filename, sf->file_num); /* needed if primary created new slice */
+        if (sliceno >= sf->vector_capacity) {
+            df_extend_file_vector(sf);
+        }
+        fd = dv_open_file(filename, flags, (int)SEGMENT_FILE_MODE);
+        if (fd < 0) {
+            ereport(LOG,
+                (errmodule(MOD_SEGMENT_PAGE), errmsg("File \"%s\" does not exist, stop read here.", filename)));
+            pfree(filename);
+            break;
+        }
+
+        sf->segfiles[sliceno].fd = fd;
+        sf->segfiles[sliceno].sliceno = sliceno;
+
+        size = lseek(fd, 0L, SEEK_END);
+        sf->total_blocks += (uint32)(size / BLCKSZ);
+        sf->file_num++;
+    }
+
+    if (sf->total_blocks <= target_block) {
+        return false;
+    }
+    
+    return true;
+}
+
 static SegPhysicalFile df_get_physical_file(SegLogicFile *sf, int sliceno, BlockNumber target_block)
 {
     AutoMutexLock filelock(&sf->filelock);
@@ -147,7 +209,7 @@ static SegPhysicalFile df_get_physical_file(SegLogicFile *sf, int sliceno, Block
             (errcode(ERRCODE_DATA_EXCEPTION), errmsg("df_get_physical_file target_block is InvalidBlockNumber!\n")));
     }
 
-    if (sf->total_blocks <= target_block) {
+    if (sf->total_blocks <= target_block && !df_ss_update_segfile_size(sf, target_block)) {
         ereport(LOG,
                 (errmodule(MOD_SEGMENT_PAGE), errmsg("Try to access file %s block %u, exceeds the file total blocks %u",
                                                      sf->filename, target_block, sf->total_blocks)));
@@ -365,7 +427,7 @@ static void df_open_target_files(SegLogicFile *sf, int targetno)
         }
         int fd = dv_open_file(filename, flags, SEGMENT_FILE_MODE);
         if (fd < 0) {
-            if (errno != ENOENT) {
+            if (!FILE_POSSIBLY_DELETED(errno)) {
                 ereport(PANIC, (errcode_for_file_access(), errmsg("could not open file \"%s\": %m", filename)));
             }
             // The file does not exist, break.
@@ -649,10 +711,10 @@ void df_unlink(SegLogicFile *sf)
 
         char *path = slice_filename(sf->filename, i);
         int ret = unlink(path);
-        pfree(path);
         if (ret < 0) {
-            ereport(ERROR, (errmsg("Could not remove file %s", path)));
+            ereport(ERROR, (errmsg("Could not remove file %s, errno : %d", path, errno)));
         }
+        pfree(path);
         sf->file_num--;
     }
     sf->file_num = 0;

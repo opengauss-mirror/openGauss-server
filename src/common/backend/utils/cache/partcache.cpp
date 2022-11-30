@@ -501,8 +501,11 @@ Partition PartitionBuildLocalPartition(const char *relname, Oid partid, Oid part
         PartitionInitPhysicalAddr(part);
         /* compressed option was set by PartitionInitPhysicalAddr if part->rd_options != NULL */
         if (part->rd_options == NULL && reloptions) {
+            (void)MemoryContextSwitchTo(oldcxt);
             StdRdOptions* options = (StdRdOptions*)(void *)default_reloptions(reloptions, false, RELOPT_KIND_HEAP);
             SetupPageCompressForRelation(&part->pd_node, &options->compress, PartitionGetPartitionName(part));
+            (void)MemoryContextSwitchTo(LocalMyDBCacheMemCxt());
+            pfree(options);
         }
     }
 
@@ -1769,8 +1772,10 @@ void PartitionSetNewRelfilenode(Relation parent, Partition part, TransactionId f
         /* segment storage */
         Assert(parent->storage_type == SEGMENT_PAGE);
         isbucket = BUCKET_OID_IS_VALID(parent->rd_bucketoid) && !RelationIsCrossBucketIndex(parent);
+        Oid database_id = (ConvertToRelfilenodeTblspcOid(part->pd_part->reltablespace) == GLOBALTABLESPACE_OID) ?
+            InvalidOid : u_sess->proc_cxt.MyDatabaseId;
         newrelfilenode = seg_alloc_segment(ConvertToRelfilenodeTblspcOid(part->pd_part->reltablespace),
-                                           u_sess->proc_cxt.MyDatabaseId, isbucket, InvalidBlockNumber);
+                                           database_id, isbucket, InvalidBlockNumber);
     }
 
 

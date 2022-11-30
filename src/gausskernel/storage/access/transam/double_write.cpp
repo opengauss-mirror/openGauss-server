@@ -30,6 +30,8 @@
 #include "access/double_write.h"
 #include "storage/smgr/smgr.h"
 #include "storage/smgr/segment.h"
+#include "storage/dss/dss_adaptor.h"
+#include "storage/file/fio_device.h"
 #include "pgstat.h"
 #include "utils/palloc.h"
 #include "gstrace/gstrace_infra.h"
@@ -38,6 +40,7 @@
 #include "postmaster/bgwriter.h"
 #include "knl/knl_thread.h"
 #include "tde_key_management/tde_key_storage.h"
+#include "ddes/dms/ss_dms_recovery.h"
 
 #ifdef ENABLE_UT
 #define static
@@ -1650,6 +1653,14 @@ void dw_recover_batch_meta_file(int fd, dw_batch_meta_file *batch_meta_file)
 
 void dw_remove_batch_meta_file()
 {
+    knl_g_dw_context *dw_cxt = &g_instance.dw_batch_cxt;
+    if (ENABLE_DSS && dw_cxt->fd > 0) {
+        int rc = close(dw_cxt->fd);
+        if (rc == -1) {
+            ereport(ERROR, (errcode_for_file_access(), errmodule(MOD_DW), errmsg("DW file close failed")));
+        }
+    }
+
     ereport(LOG, (errmodule(MOD_DW), errmsg("start remove dw_batch_meta_file.")));
     dw_remove_file(DW_META_FILE);
 }
@@ -2050,6 +2061,9 @@ void dw_transfer_phybuffer_addr(const BufferDesc *buf_desc, BufferTag *buf_tag)
         if (buf_desc->seg_fileno != EXTENT_INVALID) {
             // buffer descriptor contains the physical location
             Assert(buf_desc->seg_fileno <= EXTENT_TYPES && buf_desc->seg_fileno > EXTENT_INVALID);
+            buf_tag->rnode.relNode = buf_desc->seg_fileno;
+            buf_tag->blockNum = buf_desc->seg_blockno;
+        } else if (ENABLE_REFORM && SS_BEFORE_RECOVERY) {
             buf_tag->rnode.relNode = buf_desc->seg_fileno;
             buf_tag->blockNum = buf_desc->seg_blockno;
         } else {
