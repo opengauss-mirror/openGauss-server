@@ -260,3 +260,29 @@ drop table force_vector_test5;
 drop table force_vector_test6;
 drop function func_add_sql;
 drop schema force_vector_engine cascade;
+-- Do not use vectorization engine
+\c regression
+create table force_vector_sysdomain(a information_schema.cardinal_number, b int);
+insert into force_vector_sysdomain values(10, 20);
+select a,b from force_vector_sysdomain;
+ a  | b  
+----+----
+ 10 | 20
+(1 row)
+
+set try_vector_engine_strategy='force';
+select a,b from force_vector_sysdomain;
+ a  | b  
+----+----
+ 10 | 20
+(1 row)
+
+set try_vector_engine_strategy='optimal';
+select a,b from force_vector_sysdomain;
+ a  | b  
+----+----
+ 10 | 20
+(1 row)
+
+drop table force_vector_sysdomain;
+set try_vector_engine_strategy='off';
