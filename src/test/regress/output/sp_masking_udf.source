@@ -172,15 +172,17 @@ CREATE FUNCTION java_upperstring(VARCHAR)
 RETURNS VARCHAR
 AS 'Example.upperString'
 LANGUAGE JAVA;
+ERROR:  JAVA UDF is not yet supported in current version.
 set role p1 password 'udftest@123';
 CREATE RESOURCE LABEL namecol ADD COLUMN(udftest.users.Name);
 CREATE MASKING POLICY pol_name public.java_upperstring ON LABEL(namecol);
-ERROR:  failed to mask
-DETAIL:  wrong masking function  
+ERROR:  Don't find function which can be used by masking
+DETAIL:  function should be created by poladmin or function is not found
 drop RESOURCE LABEL namecol;
 \c
 --drop udf
 drop FUNCTION java_upperstring;
+ERROR:  function java_upperstring does not exist
 drop masking policy pol_creditcard;
 drop masking policy pol_sal;
 drop masking policy pol_phone;

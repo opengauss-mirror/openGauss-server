@@ -15,8 +15,9 @@ CREATE FUNCTION java_getSystemProperty(VARCHAR)
 	RETURNS VARCHAR
 	AS 'java.lang.System.getProperty'
 	LANGUAGE java NOT FENCED;
+ERROR:  JAVA UDF is not yet supported in current version.
 CREATE FUNCTION java_getSystemProperty(VARCHAR)
 	RETURNS VARCHAR
 	AS 'java.lang.System.getProperty'
 	LANGUAGE java FENCED;
-ERROR:  function "java_getsystemproperty" already exists with same argument types
+ERROR:  JAVA UDF is not yet supported in current version.
