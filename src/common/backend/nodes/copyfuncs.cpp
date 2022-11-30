@@ -5659,8 +5659,8 @@ static VariableShowStmt* _copyVariableShowStmt(const VariableShowStmt* from)
 
     COPY_STRING_FIELD(name);
     COPY_STRING_FIELD(likename);
-    COPY_STRING_FIELD(offset);
-    COPY_STRING_FIELD(count);
+    COPY_SCALAR_FIELD(offset);
+    COPY_SCALAR_FIELD(count);
 
     return newnode;
 }
