@@ -1,0 +1,1 @@
+update pg_proc set prokind = 'f' where oid = 3991;

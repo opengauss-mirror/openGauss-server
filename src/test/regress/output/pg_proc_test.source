@@ -28,3 +28,9 @@ select provariadic,oid, proname from pg_proc where arraycontains(proargmodes::ch
         2276 | 7109 | db4ai_predict_by_float8_array
 (25 rows)
 
+select prokind,length(prokind),count(*) from pg_proc where oid < 16384 group by prokind;
+ prokind | length | count 
+---------+--------+-------
+--? f       |      1 |  .*
+(1 row)
+
