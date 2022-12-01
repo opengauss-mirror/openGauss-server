@@ -174,7 +174,9 @@ static char* get_correct_str(char*str, const char *delimiter_name, bool is_new_l
     bool is_delimiter = false;
     char *token = strstr(str_temp, "delimiter");
     errno_t rc = 0;
-    char* end_str = NULL;
+    char *end = NULL;
+    bool quoted = false;
+    char quoted_type = 0;
 
     if(token != NULL) {
         is_delimiter = true;
@@ -188,21 +190,64 @@ static char* get_correct_str(char*str, const char *delimiter_name, bool is_new_l
             }
         }
         if(is_delimiter) {
-            char* end = pos + strlen("delimiter");
-            end_str = str + (end - str_temp);
+            end = pos + strlen("delimiter");
             if(*end != ' ' && *end != '\0') {
                 is_delimiter = false;
             }
         }
     }
-    if (is_new_lines && is_delimiter && strstr(end_str, delimiter_name) == NULL) {
-        Size slen1 = strlen(str) + strlen(delimiter_name) + DELIMITER_LENGTH;
-        char* result1 = (char *) pg_malloc(slen1);
-        rc = sprintf_s(result1, slen1, "%s %s", str, delimiter_name);
+    if (is_new_lines && is_delimiter) {
+        /* 是delimiter命令，进行赋值，采用第一个参数。*/
+        Size deliSlen = strlen(str) + strlen(delimiter_name) + DELIMITER_LENGTH;
+        char *deliResultTemp = (char *)pg_malloc(deliSlen);
+        char *start = deliResultTemp;
+        int length = end - str_temp;
+        char *deliStrTemp = pg_strdup(str);
+        char *temp_pos = deliStrTemp;
+        bool is_spec_type = false;
+        while(length--) {
+            *start++ = *temp_pos++;
+        }
+        *start++ = ' ';
+        while(*temp_pos == ' ') {
+            temp_pos++;
+        }
+        if (*temp_pos != '\0') {
+            if (*temp_pos != ';') {
+                if (*temp_pos == '\'' || *temp_pos == '\"' || *temp_pos == '`') {
+                    quoted_type = *temp_pos;
+                    *start++ = *temp_pos++;
+                    quoted = false;
+                }
+                /* 判断是不是特殊字符 */
+                if (!((*temp_pos == '\'' || *temp_pos == '\"' || *temp_pos == '`')) && !((*temp_pos >= 'a' && *temp_pos <='z') || (*temp_pos >= 'A' && *temp_pos <= 'Z'))) {
+                    is_spec_type = true;
+                    *start++ = *temp_pos++;
+                }
+                for (; *temp_pos; temp_pos++) {
+                    bool is_spec = (!((*temp_pos == '\'' || *temp_pos == '\"' || *temp_pos == '`')) && !((*temp_pos >= 'a' && *temp_pos <='z') || (*temp_pos >= 'A' && *temp_pos <= 'Z'))) ? true : false;
+                    if ((is_spec_type && !is_spec) || (!is_spec_type && is_spec))
+                        break;
+                    *start++ = *temp_pos;
+                    if ((!quoted && *temp_pos == ' ') || (quoted && *temp_pos == quoted_type)) 
+                        break;
+                }
+            } else {
+                *start++ = *temp_pos++;
+            }
+        }
+
+        *start = '\0';
+        char* deliResult = (char *) pg_malloc(deliSlen);
+        rc = sprintf_s(deliResult, deliSlen, "%s %s", deliResultTemp, delimiter_name);
         securec_check_ss_c(rc, "", ""); 
         free(str_temp);
         str_temp =NULL;
-        return result1;
+        free(deliStrTemp);
+        deliStrTemp =NULL;
+        free(deliResultTemp);
+        deliResultTemp =NULL;
+        return deliResult;
     } 
     free(str_temp);
     str_temp =NULL;
@@ -218,14 +263,6 @@ static char* get_correct_str(char*str, const char *delimiter_name, bool is_new_l
     char special_str = 0;
     char in;
     for (pos = str; pos < end_of_str; pos++) {
-        if (is_delimiter) {
-            int delimiter_length = strlen("delimiter");
-            while (delimiter_length > 0 && *pos != '\0') {
-                *temp++ = *pos++;
-                delimiter_length--;
-            }
-            is_delimiter = false;
-        }
         in = *pos;
         if (!special_str && is_match_delimiter_name(pos , delimiter_name)) {
             *temp++ =' ';

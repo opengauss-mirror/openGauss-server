@@ -34,8 +34,8 @@ delimiter ;Mysql
 --Test other
 delimiter sds;
 delimiter aasds
-select 1aa
-delimiter ;aa
+select 1aasds
+delimiter ;aasds
 
 --
 delimiter asd ss;
@@ -49,7 +49,10 @@ delimiter ;
 
 delimiter de
 delimiter abcde
-select 1abc
+select 1abcde
+delimiter zz sdsd aasds
+delimiter kkasda "sdsd" sdsda
+select 1kkasda
 delimiter
 delimiter ;
 

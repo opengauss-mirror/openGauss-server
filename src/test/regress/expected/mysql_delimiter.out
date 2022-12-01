@@ -47,8 +47,8 @@ delimiter ;//
 --Test delimiter length
 delimiter aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa;
 ERROR:  syntax error at or near ";"
-LINE 1: delimiter aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa;
-                                                      ^
+LINE 1: delimiter aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ;
+                                                       ^
 --Test delimiter %
 delimiter %;
 select 1%
@@ -70,13 +70,13 @@ delimiter ;Mysql
 --Test other
 delimiter sds;
 delimiter aasds
-select 1aa
+select 1aasds
  ?column? 
 ----------
         1
 (1 row)
 
-delimiter ;aa
+delimiter ;aasds
 --
 delimiter asd ss;
 select 1asd
@@ -97,16 +97,24 @@ select 1aa
 delimiter ;
 delimiter de
 delimiter abcde
-select 1abc
+select 1abcde
+ ?column? 
+----------
+        1
+(1 row)
+
+delimiter zz sdsd aasds
+delimiter kkasda "sdsd" sdsda
+select 1kkasda
  ?column? 
 ----------
         1
 (1 row)
 
 delimiter
-ERROR:  syntax error at or near "abc"
-LINE 1: delimiter abc
-                  ^
+ERROR:  syntax error at or near "kkasda"
+LINE 1: delimiter  kkasda
+                   ^
 delimiter ;
 \c regression
 drop database my_test;
