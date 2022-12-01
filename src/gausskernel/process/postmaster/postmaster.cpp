@@ -1139,6 +1139,50 @@ void initKnlRTOContext(void)
 }
 
 /*
+ * check if a required_argument option has a void argument
+ */
+void check_short_optOfVoid(char *optstring, int argc, char *const *argv)
+{
+    int i;
+    for (i = 0; i < argc; i++) {
+        char *optstr = argv[i];
+        int is_only_shortbar;
+        if (strlen(optstr) == 1) {
+            is_only_shortbar = optstr[0] == '-' ? 1 : 0;
+        } else {
+            is_only_shortbar = 0;
+        }
+        if (is_only_shortbar) {
+            fprintf(stderr, _("[%s] FATAL: The option '-' is not a valid option.\n"), progname);
+            exit(1);
+        }
+
+        char *oli = strchr(optstring, optstr[1]);
+        int is_shortopt_with_space;
+        if (oli != NULL && strlen(optstr) >= 1 && strlen(oli) >= 2) {
+            is_shortopt_with_space =
+                optstr[0] == '-' && oli != NULL && oli[1] == ':' && oli[2] != ':' && optstr[2] == '\0';
+        } else {
+            is_shortopt_with_space = 0;
+        }
+        if (is_shortopt_with_space) {
+            if (i == argc - 1) {
+                fprintf(stderr, _("[%s] FATAL: The option '-%c' need a parameter.\n"), progname, optstr[1]);
+                exit(1);
+            }
+
+            char *next_optstr = argv[i + 1];
+            char *next_oli = strchr(optstring, next_optstr[1]);
+            int is_arg_optionform = next_optstr[0] == '-' && next_oli != NULL;
+            if (is_arg_optionform) {
+                fprintf(stderr, _("[%s] FATAL: The option '-%c' need a parameter.\n"), progname, optstr[1]);
+                exit(1);
+            }
+        }
+    }
+}
+
+/*
  * Postmaster main entry point
  */
 int PostmasterMain(int argc, char* argv[])
@@ -1227,6 +1271,8 @@ int PostmasterMain(int argc, char* argv[])
     SetcbForGetLCName(GetLogicClusterForAlarm);
 
     optCtxt.opterr = 1;
+
+    check_short_optOfVoid("A:B:bc:C:D:d:EeFf:h:ijk:lM:N:nOo:Pp:Rr:S:sTt:u:W:g:X:-:", argc, argv);
 
     /*
      * Parse command-line options.	CAUTION: keep this in sync with

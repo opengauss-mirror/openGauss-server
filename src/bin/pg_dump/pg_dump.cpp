@@ -1344,6 +1344,45 @@ void getopt_dump(int argc, char** argv, struct option options[], int* result)
     char* listFileName = NULL;
     bool if_compress = false;
 
+        /* check if a required_argument option has a void argument */
+    char optstring[] = "abcCE:f:F:g:h:n:N:oOp:q:RsS:t:T:U:vwW:xZ:";
+    for (int i = 0; i < argc; i++) {
+        char *optstr = argv[i];
+        int is_only_shortbar;
+        if (strlen(optstr) == 1) {
+            is_only_shortbar = optstr[0] == '-' ? 1 : 0;
+        } else {
+            is_only_shortbar = 0;
+        }
+        if (is_only_shortbar) {
+            fprintf(stderr, _("%s: The option '-' is not a valid option.\n"), progname);
+            exit(1);
+        }
+
+        char *oli = strchr(optstring, optstr[1]);
+        int is_shortopt_with_space;
+        if (oli != NULL && strlen(optstr) >= 1 && strlen(oli) >= 2) {
+            is_shortopt_with_space =
+                optstr[0] == '-' && oli != NULL && oli[1] == ':' && oli[2] != ':' && optstr[2] == '\0';
+        } else {
+            is_shortopt_with_space = 0;
+        }
+        if (is_shortopt_with_space) {
+            if (i == argc - 1) {
+                fprintf(stderr, _("%s: The option '-%c' requires a parameter.\n"), progname, optstr[1]);
+                exit(1);
+            }
+            
+            char *next_optstr = argv[i + 1];
+            char *next_oli = strchr(optstring, next_optstr[1]);
+            int is_arg_optionform = next_optstr[0] == '-' && next_oli != NULL;
+            if (is_arg_optionform) {
+                fprintf(stderr, _("%s: The option '-%c' requires a parameter.\n"), progname, optstr[1]);
+                exit(1);
+            }
+        }
+    }
+
     while ((c = getopt_long(argc, argv, "abcCE:f:F:g:h:n:N:oOp:q:RsS:t:T:U:vwW:xZ:", options, result)) != -1) {
         switch (c) {
             case 'a': /* Dump data only */

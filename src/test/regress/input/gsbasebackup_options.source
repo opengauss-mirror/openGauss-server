@@ -1,0 +1,15 @@
+\! mkdir @abs_srcdir@/tmp_check/bktempdir/
+\! @abs_bindir@/gs_basebackup -h localhost -p -D @abs_srcdir@/tmp_check/bktempdir/
+\! rm -rf @abs_srcdir@/tmp_check/bktempdir
+\! mkdir @abs_srcdir@/tmp_check/bktempdir/
+\! @abs_bindir@/gs_basebackup -h localhost -D @abs_srcdir@/tmp_check/bktempdir/ -p
+\! rm -rf @abs_srcdir@/tmp_check/bktempdir
+\! mkdir @abs_srcdir@/tmp_check/bktempdir/
+\! @abs_bindir@/gs_basebackup -h localhost -p @portstring@d -D @abs_srcdir@/tmp_check/bktempdir/
+\! rm -rf @abs_srcdir@/tmp_check/bktempdir
+\! mkdir @abs_srcdir@/tmp_check/bktempdir/
+\! @abs_bindir@/gs_basebackup -hlocalhost -p@portstring@ -D@abs_srcdir@/tmp_check/bktempdir/ 2>&1 |grep successfully
+\! rm -rf @abs_srcdir@/tmp_check/bktempdir
+\! mkdir @abs_srcdir@/tmp_check/bktempdir/
+\! @abs_bindir@/gs_basebackup -h localhost -p @portstring@ -D @abs_srcdir@/tmp_check/bktempdir/ 2>&1 |grep successfully
+\! rm -rf @abs_srcdir@/tmp_check/bktempdir

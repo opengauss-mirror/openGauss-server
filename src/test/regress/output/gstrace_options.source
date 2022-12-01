@@ -1,0 +1,22 @@
+\! @abs_bindir@/gstrace start -p | grep GAUSS-TRACE
+[GAUSS-TRACE] Parameter is not correct.
+\! @abs_bindir@/gstrace stop -p | grep GAUSS-TRACE
+[GAUSS-TRACE] Parameter is not correct.
+\! @abs_bindir@/gstrace start -p 65534 | grep GAUSS-TRACE
+[GAUSS-TRACE] Trace process does not exist.
+\! @abs_bindir@/gstrace stop -p 65534 | grep GAUSS-TRACE
+[GAUSS-TRACE] Trace process does not exist.
+\! @abs_bindir@/gstrace start -p @portstring@s | grep GAUSS-TRACE
+[GAUSS-TRACE] Parameter is not correct.
+\! @abs_bindir@/gstrace stop -p @portstring@s | grep GAUSS-TRACE
+[GAUSS-TRACE] Parameter is not correct.
+\! @abs_bindir@/gstrace start -p@portstring@ | grep GAUSS-TRACE
+[GAUSS-TRACE] start Success!
+\! @abs_bindir@/gstrace stop -p@portstring@ | grep GAUSS-TRACE
+[GAUSS-TRACE] stop Success!
+\! @abs_bindir@/gstrace start -p @portstring@ | grep GAUSS-TRACE
+[GAUSS-TRACE] start Success!
+\! @abs_bindir@/gstrace dump -p 65534 -o tmptest.o | grep GAUSS-TRACE
+[GAUSS-TRACE] Trace process does not exist.
+\! @abs_bindir@/gstrace stop -p @portstring@ | grep GAUSS-TRACE
+[GAUSS-TRACE] stop Success!
