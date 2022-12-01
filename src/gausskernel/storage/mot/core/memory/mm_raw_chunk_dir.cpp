@@ -22,7 +22,7 @@
  * -------------------------------------------------------------------------
  */
 
-#include <string.h>
+#include <cstring>
 
 #include "mm_raw_chunk_dir.h"
 #include "mm_def.h"
@@ -489,7 +489,7 @@ extern "C" void MemRawChunkDirDump()
 {
     MOT::StringBufferApply([](MOT::StringBuffer* stringBuffer) {
         MOT::MemRawChunkDirToString(0, "Debug Dump", stringBuffer);
-        fprintf(stderr, "%s", stringBuffer->m_buffer);
-        fflush(stderr);
+        (void)fprintf(stderr, "%s", stringBuffer->m_buffer);
+        (void)fflush(stderr);
     });
 }

@@ -54,6 +54,10 @@ public:
     ~CompactHandler()
     {
         EndCompaction();
+        m_curr = nullptr;
+        m_orig = nullptr;
+        m_logPrefix = nullptr;
+        m_compactedPools = nullptr;
     }
     /**
      * @brief Prepares orig for compaction, calculates fragmentation percent, initializes addrMap and set
@@ -64,7 +68,7 @@ public:
      */
     void EndCompaction();
 
-    bool IsCompactionNeeded()
+    bool IsCompactionNeeded() const
     {
         return m_compactionNeeded;
     }
@@ -72,7 +76,7 @@ public:
     /** @brief Reallocates the object. Allocates a new memory buffer and calls the copy constructor of T.
      */
     template <typename T>
-    T* CompactObj(T const* obj)
+    T* CompactObj(T* obj)
     {
         T* res = nullptr;
 
@@ -103,6 +107,9 @@ public:
             state = PAS_NONE;
             obj->~T();
             op->Release(oix, &state);
+#ifdef ENABLE_MEMORY_CHECK
+            free(((uint8_t*)obj) - MEMCHECK_METAINFO_SIZE);
+#endif
         }
 
         return res;

@@ -2358,6 +2358,8 @@ extern void getSessionID(char* sessid, pg_time_t startTime, ThreadId Threadid);
 extern void getThrdID(char* thrdid, pg_time_t startTime, ThreadId Threadid);
 
 #define NUM_MOT_SESSION_MEMORY_DETAIL_ELEM 4
+#define NUM_MOT_JIT_DETAIL_ELEM 11
+#define NUM_MOT_JIT_PROFILE_ELEM 12
 
 typedef struct MotSessionMemoryDetail {
     ThreadId threadid;
@@ -2383,8 +2385,39 @@ typedef struct MotMemoryDetailPad {
     MotMemoryDetail* memoryDetail;
 } MotMemoryDetailPad;
 
+typedef struct MotJitDetail {
+    Oid procOid;
+    char* query;
+    char* nameSpace;
+    char* jittableStatus;
+    char* validStatus;
+    TimestampTz lastUpdatedTimestamp;
+    char* planType;
+    int64 codegenTime;
+    int64 verifyTime;
+    int64 finalizeTime;
+    int64 compileTime;
+} MotJitDetail;
+
+typedef struct MotJitProfile {
+    Oid procOid;
+    int32 id;
+    int32 parentId;
+    char* query;
+    char* nameSpace;
+    float4 weight;
+    int64 totalTime;
+    int64 selfTime;
+    int64 childGrossTime;
+    int64 childNetTime;
+    int64 defVarsTime;
+    int64 initVarsTime;
+} MotJitProfile;
+
 extern MotSessionMemoryDetail* GetMotSessionMemoryDetail(uint32* num);
 extern MotMemoryDetail* GetMotMemoryDetail(uint32* num, bool isGlobal);
+extern MotJitDetail* GetMotJitDetail(uint32* num);
+extern MotJitProfile* GetMotJitProfile(uint32* num);
 
 #ifdef MEMORY_CONTEXT_CHECKING
 typedef enum { STANDARD_DUMP, SHARED_DUMP } DUMP_TYPE;

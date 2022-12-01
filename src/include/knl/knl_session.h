@@ -2568,20 +2568,18 @@ namespace MOT {
 }
 
 namespace JitExec {
-    struct JitContext;
+    struct MotJitContext;
     struct JitContextPool;
 }
 
-namespace tvm {
+namespace llvm_util {
     class JitIf;
+    class JitLoop;
     class JitWhile;
     class JitDoWhile;
-}
-
-namespace llvm {
-    class JitIf;
-    class JitWhile;
-    class JitDoWhile;
+    class JitFor;
+    class JitSwitchCase;
+    class JitTryCatch;
 }
 
 typedef struct knl_u_mot_context {
@@ -2596,14 +2594,23 @@ typedef struct knl_u_mot_context {
     // JIT
     JitExec::JitContextPool* jit_session_context_pool;
     uint32_t jit_context_count;
-    llvm::JitIf* jit_llvm_if_stack;
-    llvm::JitWhile* jit_llvm_while_stack;
-    llvm::JitDoWhile* jit_llvm_do_while_stack;
-    tvm::JitIf* jit_tvm_if_stack;
-    tvm::JitWhile* jit_tvm_while_stack;
-    tvm::JitDoWhile* jit_tvm_do_while_stack;
-    JitExec::JitContext* jit_context;
+    llvm_util::JitIf* jit_llvm_if_stack;
+    llvm_util::JitLoop* jit_llvm_loop_stack;
+    llvm_util::JitWhile* jit_llvm_while_stack;
+    llvm_util::JitDoWhile* jit_llvm_do_while_stack;
+    llvm_util::JitFor* jit_llvm_for_stack;
+    llvm_util::JitSwitchCase* jit_llvm_switch_case_stack;
+    llvm_util::JitTryCatch* jit_llvm_try_catch_stack;
+
+    JitExec::MotJitContext* jit_context;
     MOT::TxnManager* jit_txn;
+    int jit_compile_depth;
+    int jit_parse_error;
+    void* jit_pg_query;
+    void* jit_ns_stack;
+    void* jit_session_source_map;
+    bool jit_xact_callback_registered;
+    int jit_codegen_error;
 } knl_u_mot_context;
 #endif
 
@@ -2877,6 +2884,10 @@ extern bool stp_set_commit_rollback_err_msg(stp_xact_err_type type);
 extern bool enable_out_param_override();
 
 extern THR_LOCAL knl_session_context* u_sess;
+
+#ifdef ENABLE_MOT
+extern void knl_u_mot_init(knl_u_mot_context* mot_cxt);
+#endif
 
 inline bool stp_disable_xact_and_set_err_msg(bool *save_commit_rollback_state, stp_xact_err_type type) 
 {

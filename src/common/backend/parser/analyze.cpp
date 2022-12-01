@@ -90,6 +90,10 @@
 #include "db4ai/create_model.h"
 #include "db4ai/hyperparameter_validation.h"
 
+#ifdef ENABLE_MOT
+#include "storage/mot/jit_exec.h"
+#endif
+
 #ifndef ENABLE_MULTIPLE_NODES
 #include "optimizer/clauses.h"
 #endif
@@ -1314,6 +1318,11 @@ void CheckTablesStorageEngine(Query* qry, StorageEngineType* type)
         }
     }
 
+    /* MOT JIT: check if this is an invoke MOT JITted SP */
+    if (JitExec::IsInvokeReadyFunction(qry)) {
+        context.isMotTable = true;
+    }
+
     /* add root query to query stack list */
     context.queryNodes = lappend(context.queryNodes, qry);
 
@@ -1327,110 +1336,6 @@ void CheckTablesStorageEngine(Query* qry, StorageEngineType* type)
     } else if (context.isMotTable) {
         *type = SE_TYPE_MOT;
     }
-}
-
-/*
- * @brief: Expression_tree_walker callback function.
- * Checks the query and all sub queries to identify if there is update on indexed column.
- */
-static bool MotIndexedColumnUpdateWalker(Node* node, UpdateDetectorContext* context)
-{
-    if (node == NULL) {
-        return false;
-    }
-
-    if (IsA(node, RangeTblRef)) {
-        RangeTblRef* rtr = (RangeTblRef*)node;
-        Query* qry = (Query*)llast(context->queryNodes);
-        RangeTblEntry* rte = rt_fetch(rtr->rtindex, qry->rtable);
-        if (qry->commandType == CMD_UPDATE && rte->rtekind == RTE_RELATION && rte->relkind == RELKIND_FOREIGN_TABLE &&
-            isMOTFromTblOid(rte->relid)) {
-            Relation rel = relation_open(rte->relid, AccessShareLock);
-            Bitmapset* idx_bmps = RelationGetIndexAttrBitmap(rel, INDEX_ATTR_BITMAP_ALL);
-            relation_close(rel, NoLock);
-            if (idx_bmps == NULL) {
-                return false;
-            }
-            ListCell* target = NULL;
-            foreach (target, qry->targetList) {
-                TargetEntry* entry = (TargetEntry*)lfirst(target);
-                if (entry->resjunk) {
-                    continue;
-                }
-                if (bms_is_member(entry->resno - FirstLowInvalidHeapAttributeNumber, idx_bmps)) {
-                    context->isIndexedColumnUpdate = true;
-                }
-            }
-            bms_free(idx_bmps);
-        }
-        return false;
-    }
-
-    if (IsA(node, Query)) {
-        /* Recurse into subselects */
-        bool result = false;
-        context->queryNodes = lappend(context->queryNodes, (Query*)node);
-        context->sublevelsUp++;
-        result = query_tree_walker((Query*)node, (bool (*)())MotIndexedColumnUpdateWalker, (void*)context, 0);
-        context->sublevelsUp--;
-        context->queryNodes = list_delete(context->queryNodes, llast(context->queryNodes));
-        return result;
-    }
-
-    return expression_tree_walker(node, (bool (*)())MotIndexedColumnUpdateWalker, (void*)context);
-}
-
-/*
- * @brief: Analyze a query to check if there is update on indexed column of MOT table.
- * @input: Query to be analyzed.
- * @output: True/false.
- */
-bool CheckMotIndexedColumnUpdate(Query* qry)
-{
-    UpdateDetectorContext context;
-    context.queryNodes = NIL;
-    context.sublevelsUp = 0;
-    context.isIndexedColumnUpdate = false;
-
-    /* check root node RTEs in case of non RangeTblRef nodes */
-    List* rtable = qry->rtable;
-    ListCell* lc = NULL;
-    foreach (lc, rtable) {
-        RangeTblEntry* rte = (RangeTblEntry*)lfirst(lc);
-        if (qry->commandType == CMD_UPDATE && rte->rtekind == RTE_RELATION && rte->relkind == RELKIND_FOREIGN_TABLE &&
-            isMOTFromTblOid(rte->relid)) {
-            Relation rel = relation_open(rte->relid, AccessShareLock);
-            Bitmapset* idx_bmps = RelationGetIndexAttrBitmap(rel, INDEX_ATTR_BITMAP_ALL);
-            relation_close(rel, NoLock);
-            if (idx_bmps == NULL) {
-                return false;
-            }
-            ListCell* target = NULL;
-            foreach (target, qry->targetList) {
-                TargetEntry* entry = (TargetEntry*)lfirst(target);
-                /* Junk entry is temporary and won't affect the db. in addition, entry->resno might be wrong.
-                 * We should ignore it.
-                 * More info in src/backend/executor/execJunk.cpp
-                 */
-                if (entry->resjunk) {
-                    continue;
-                }
-                if (bms_is_member(entry->resno - FirstLowInvalidHeapAttributeNumber, idx_bmps)) {
-                    bms_free(idx_bmps);
-                    return true;
-                }
-            }
-            bms_free(idx_bmps);
-        }
-    }
-
-    /* add root query to query stack list */
-    context.queryNodes = lappend(context.queryNodes, qry);
-
-    /* recursive walk on the query */
-    (void)query_or_expression_tree_walker((Node*)qry, (bool (*)())MotIndexedColumnUpdateWalker, (void*)&context, 0);
-
-    return context.isIndexedColumnUpdate;
 }
 #endif
 

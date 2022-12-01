@@ -25,15 +25,15 @@
 #include "redo_log_handler_type.h"
 #include "utilities.h"
 
-#include <string.h>
+#include <cstring>
 
 namespace MOT {
 DECLARE_LOGGER(RedoLogHandlerType, RedoLog)
 
-static const char* NONE_STR = "none";
-static const char* SYNC_REDO_LOG_HANDLER_STR = "synchronous";
-static const char* SEGMENTED_GROUP_SYNC_REDO_LOG_HANDLER_STR = "segmented_group_synchronous";
-static const char* INVALID_REDO_LOG_HANDLER_STR = "INVALID";
+static const char* const NONE_STR = "none";
+static const char* const SYNC_REDO_LOG_HANDLER_STR = "synchronous";
+static const char* const SEGMENTED_GROUP_SYNC_REDO_LOG_HANDLER_STR = "segmented_group_synchronous";
+static const char* const INVALID_REDO_LOG_HANDLER_STR = "INVALID";
 
 static const char* redoLogHandlerTypeNames[] = {
     NONE_STR, SYNC_REDO_LOG_HANDLER_STR, SEGMENTED_GROUP_SYNC_REDO_LOG_HANDLER_STR};
@@ -43,7 +43,7 @@ RedoLogHandlerType RedoLogHandlerTypeFromString(const char* redoLogHandlerType)
     RedoLogHandlerType handlerType = RedoLogHandlerType::INVALID_REDO_LOG_HANDLER;
 
     if (strcmp(redoLogHandlerType, NONE_STR) == 0) {
-        handlerType = RedoLogHandlerType::NONE;
+        handlerType = RedoLogHandlerType::NONE_REDO_LOG_HANDLER;
     } else if (strcmp(redoLogHandlerType, SYNC_REDO_LOG_HANDLER_STR) == 0) {
         handlerType = RedoLogHandlerType::SYNC_REDO_LOG_HANDLER;
     } else if (strcmp(redoLogHandlerType, SEGMENTED_GROUP_SYNC_REDO_LOG_HANDLER_STR) == 0) {

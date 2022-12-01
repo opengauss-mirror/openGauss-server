@@ -174,10 +174,11 @@ private:
         uint64_t maxReserveMemoryMb = globalMemoryMb + localMemoryMb + sessionLargeStoreMb;
 
         // if the total memory is less than the required minimum, then issue a warning, fix it and return
-        if (maxReserveMemoryMb < motCfg.MOT_MIN_MEMORY_USAGE_MB) {
+        if (maxReserveMemoryMb < MOT::MOTConfiguration::MOT_MIN_MEMORY_USAGE_MB) {
             MOT_LOG_WARN("MOT memory limits are too low, adjusting values");
             // we use current total as zero to force session large store zero value
-            result = ConfigureMemoryLimits(motCfg.MOT_MIN_MEMORY_USAGE_MB, 0, globalMemoryMb, localMemoryMb);
+            result =
+                ConfigureMemoryLimits(MOT::MOTConfiguration::MOT_MIN_MEMORY_USAGE_MB, 0, globalMemoryMb, localMemoryMb);
             return result;
         }
 
@@ -233,14 +234,16 @@ private:
                 // this can happen only if system memory is less than 2GB, we still allow minor breach
                 MOT_LOG_WARN("Using minimal memory limits in MOT Engine due to system total memory restrictions");
                 // we use current total as zero to force session large store zero value
-                result = ConfigureMemoryLimits(motCfg.MOT_MIN_MEMORY_USAGE_MB, 0, globalMemoryMb, localMemoryMb);
+                result = ConfigureMemoryLimits(
+                    MOT::MOTConfiguration::MOT_MIN_MEMORY_USAGE_MB, 0, globalMemoryMb, localMemoryMb);
             } else {
                 newTotalMemoryMb = upperLimitMb - dynamicGapMb;
-                if (newTotalMemoryMb < motCfg.MOT_MIN_MEMORY_USAGE_MB) {
+                if (newTotalMemoryMb < MOT::MOTConfiguration::MOT_MIN_MEMORY_USAGE_MB) {
                     // in extreme cases we allow a minor breach of the dynamic gap
                     MOT_LOG_TRACE("Using minimal memory limits in MOT Engine due to GaussDB memory usage restrictions");
                     // we use current total as zero to force session large store zero value
-                    result = ConfigureMemoryLimits(motCfg.MOT_MIN_MEMORY_USAGE_MB, 0, globalMemoryMb, localMemoryMb);
+                    result = ConfigureMemoryLimits(
+                        MOT::MOTConfiguration::MOT_MIN_MEMORY_USAGE_MB, 0, globalMemoryMb, localMemoryMb);
                 } else {
                     MOT_LOG_TRACE("Adjusting memory limits in MOT Engine due to GaussDB memory usage restrictions");
                     result = ConfigureMemoryLimits(newTotalMemoryMb, maxReserveMemoryMb, globalMemoryMb, localMemoryMb);
@@ -284,13 +287,13 @@ private:
         }
 
         // when current total memory is zero we use the minimum allowed, and also when minimum values are breached
-        if ((newGlobalMemoryMb < motCfg.MIN_MAX_MOT_GLOBAL_MEMORY_MB) ||
-            (newLocalMemoryMb < motCfg.MIN_MAX_MOT_LOCAL_MEMORY_MB)) {
+        if ((newGlobalMemoryMb < MOT::MOTConfiguration::MIN_MAX_MOT_GLOBAL_MEMORY_MB) ||
+            (newLocalMemoryMb < MOT::MOTConfiguration::MIN_MAX_MOT_LOCAL_MEMORY_MB)) {
             if (currentTotalMemoryMb > 0) {
                 MOT_LOG_TRACE("Adjusted values breach minimum restrictions, falling back to minimum values");
             }
-            newGlobalMemoryMb = motCfg.MIN_MAX_MOT_GLOBAL_MEMORY_MB;
-            newLocalMemoryMb = motCfg.MIN_MAX_MOT_LOCAL_MEMORY_MB;
+            newGlobalMemoryMb = MOT::MOTConfiguration::MIN_MAX_MOT_GLOBAL_MEMORY_MB;
+            newLocalMemoryMb = MOT::MOTConfiguration::MIN_MAX_MOT_LOCAL_MEMORY_MB;
             newSessionLargeStoreMemoryMb = 0;
         }
 
@@ -303,15 +306,30 @@ private:
 
         // stream into MOT new definitions
         MOT::mot_string memCfg;
-        memCfg.format("%" PRIu64 " MB", newGlobalMemoryMb);
-        bool result = AddExtStringConfigItem("", "max_mot_global_memory", memCfg.c_str());
+        bool result = memCfg.format("%" PRIu64 " MB", newGlobalMemoryMb);
+        if (!result) {
+            MOT_REPORT_ERROR(
+                MOT_ERROR_INTERNAL, "Load Configuration", "Failed to format global memory configuration string");
+        } else {
+            result = AddExtStringConfigItem("", "max_mot_global_memory", memCfg.c_str());
+        }
         if (result) {
-            memCfg.format("%" PRIu64 " MB", newLocalMemoryMb);
-            result = AddExtStringConfigItem("", "max_mot_local_memory", memCfg.c_str());
+            result = memCfg.format("%" PRIu64 " MB", newLocalMemoryMb);
+            if (!result) {
+                MOT_REPORT_ERROR(
+                    MOT_ERROR_INTERNAL, "Load Configuration", "Failed to format local memory configuration string");
+            } else {
+                result = AddExtStringConfigItem("", "max_mot_local_memory", memCfg.c_str());
+            }
         }
         if (result && (motCfg.m_sessionLargeBufferStoreSizeMB != newSessionLargeStoreMemoryMb)) {
-            memCfg.format("%" PRIu64 " MB", newSessionLargeStoreMemoryMb);
-            result = AddExtStringConfigItem("", "session_large_buffer_store_size", memCfg.c_str());
+            result = memCfg.format("%" PRIu64 " MB", newSessionLargeStoreMemoryMb);
+            if (!result) {
+                MOT_REPORT_ERROR(
+                    MOT_ERROR_INTERNAL, "Load Configuration", "Failed to format session memory configuration string");
+            } else {
+                result = AddExtStringConfigItem("", "session_large_buffer_store_size", memCfg.c_str());
+            }
         }
 
         // Reset pre-allocation to zero, as it may be invalid now

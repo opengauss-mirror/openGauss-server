@@ -9,15 +9,19 @@ NOTICE:  The encrypted password contains MD5 ciphertext, which is not secure.
 CREATE FOREIGN TABLE merge_privs_target (id integer, balance integer) SERVER mot_server ;
 CREATE FOREIGN TABLE merge_privs_source (id integer, delta integer) SERVER mot_server ;
 ALTER TABLE merge_privs_target OWNER TO merge_privs;
-ERROR:  "merge_privs_target" is a mot, which does not support alter table.
+ERROR:  "merge_privs_target" is not a table
+HINT:  Use ALTER FOREIGN TABLE to alter a foreign table.
 ALTER TABLE merge_privs_source OWNER TO merge_privs;
-ERROR:  "merge_privs_source" is a mot, which does not support alter table.
+ERROR:  "merge_privs_source" is not a table
+HINT:  Use ALTER FOREIGN TABLE to alter a foreign table.
 CREATE FOREIGN TABLE merge_privs_source2 (id integer, delta integer) SERVER mot_server ;
 CREATE FOREIGN TABLE merge_privs_target2 (id integer, balance integer) SERVER mot_server ;
 ALTER TABLE merge_privs_target2 OWNER TO merge_no_privs;
-ERROR:  "merge_privs_target2" is a mot, which does not support alter table.
+ERROR:  "merge_privs_target2" is not a table
+HINT:  Use ALTER FOREIGN TABLE to alter a foreign table.
 ALTER TABLE merge_privs_source2 OWNER TO merge_no_privs;
-ERROR:  "merge_privs_source2" is a mot, which does not support alter table.
+ERROR:  "merge_privs_source2" is not a table
+HINT:  Use ALTER FOREIGN TABLE to alter a foreign table.
 -- merge_no_privs has INSERT permission for merge_privs_target, but has no SELECT permission for merge_privs_target
 GRANT INSERT ON merge_privs_target TO merge_no_privs;
 SET SESSION AUTHORIZATION merge_no_privs PASSWORD 'merge@123';

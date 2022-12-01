@@ -29,7 +29,7 @@
 #include "iconfig_change_listener.h"
 #include "numeric_statistic_variable.h"
 #include "statistics_provider.h"
-#include "stats/frequency_statistic_variable.h"
+#include "frequency_statistic_variable.h"
 #include "typed_statistics_generator.h"
 
 namespace MOT {
@@ -239,14 +239,14 @@ public:
      * @brief Derives classes should react to a notification that configuration changed. New
      * configuration is accessible via the ConfigManager.
      */
-    virtual void OnConfigChange();
+    void OnConfigChange() override;
 
 private:
     /** @brief Constructor. */
     DbSessionStatisticsProvider();
 
     /** @brief Destructor. */
-    virtual ~DbSessionStatisticsProvider();
+    ~DbSessionStatisticsProvider() override;
 
     /** @brief Registers the provider in the manager. */
     void RegisterProvider();

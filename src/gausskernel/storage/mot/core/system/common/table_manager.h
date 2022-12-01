@@ -30,7 +30,7 @@
 #include "utilities.h"
 #include "rw_lock.h"
 
-#include <stdint.h>
+#include <cstdint>
 #include <map>
 #include <list>
 #include <mutex>
@@ -61,16 +61,16 @@ public:
      * @param sessionContext The session context for the operation.
      * @return Zero if the operation succeeded or an error code.
      */
-    inline RC DropTable(Table* table, SessionContext* sessionContext)
+    inline RC DropTable(Table* table, TxnManager* txn)
     {
         if (table == nullptr) {
             return RC_ERROR;
         }
 
         MOT_LOG_INFO("Dropping table %s", table->GetLongTableName().c_str());
-        RC status = DropTableInternal(table, sessionContext);
+        DropTableInternal(table, txn);
         delete table;
-        return status;
+        return RC_OK;
     }
 
     /**
@@ -100,7 +100,7 @@ public:
      * @return The table object or null pointer if not found.
      * @note It is assumed that the envelope guards against concurrent removal of the table.
      */
-    inline Table* GetTableSafeByExId(ExternalTableId tableId)
+    inline Table* GetTableSafeByExId(ExternalTableId tableId, bool wrLock = false)
     {
         Table* table = nullptr;
         m_rwLock.RdLock();
@@ -108,7 +108,11 @@ public:
         if (it != m_tablesByExId.end()) {
             table = it->second;
             if (table != nullptr) {
-                table->RdLock();
+                if (wrLock) {
+                    table->WrLock();
+                } else {
+                    table->RdLock();
+                }
             }
         }
         m_rwLock.RdUnlock();
@@ -185,16 +189,15 @@ public:
      * @param[out] tablesQueue Receives all the tables.
      * @return The number of tables added.
      */
-    inline uint32_t AddTablesToList(std::list<Table*>& tablesQueue)
+    inline void AddTablesToList(std::list<Table*>& tablesQueue)
     {
         m_rwLock.RdLock();
-        for (InternalTableMap::iterator it = m_tablesById.begin(); it != m_tablesById.end(); ++it) {
+        for (ExternalTableMap::iterator it = m_tablesByExId.begin(); it != m_tablesByExId.end(); (void)++it) {
             tablesQueue.push_back(it->second);
             // lock the table, so it won't get deleted/truncated
             it->second->RdLock();
         }
         m_rwLock.RdUnlock();
-        return (uint32_t)tablesQueue.size();
     }
 
     /** @brief Clears all object-pool table caches for the current thread. */
@@ -208,17 +211,17 @@ private:
      * @brief Helper method for table dropping.
      * @param table The table to delete.
      * @param sessionContext The session context for the operation.
-     * @return Zero if the operation succeeded or an error code.
+     * @return void.
      */
-    inline RC DropTableInternal(Table* table, SessionContext* sessionContext)
+    inline void DropTableInternal(Table* table, TxnManager* txn)
     {
         m_rwLock.WrLock();
-        m_tablesById.erase(table->GetTableId());
-        m_tablesByExId.erase(table->GetTableExId());
-        m_tablesByName.erase(table->GetLongTableName());
+        (void)m_tablesById.erase(table->GetTableId());
+        (void)m_tablesByExId.erase(table->GetTableExId());
+        (void)m_tablesByName.erase(table->GetLongTableName());
         m_rwLock.WrUnlock();
-        sessionContext->GetTxnManager()->RemoveTableFromStat(table);
-        return table->DropImpl();
+        txn->RemoveTableFromStat(table);
+        table->DropImpl();
     }
 
     /** @typedef internal table map */

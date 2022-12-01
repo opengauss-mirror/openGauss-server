@@ -28,16 +28,18 @@
 #include <mutex>
 #include <set>
 #include <atomic>
+#include <thread>
 #include <vector>
 #include <pthread.h>
 #include <list>
+#include <condition_variable>
 #include "global.h"
 #include "buffer.h"
 #include "mm_gc_manager.h"
+#include "thread_utils.h"
 
 namespace MOT {
-const int CHECKPOINT_BUFFER_SIZE = 4096 * 1000;
-
+using DeletePair = std::pair<PrimarySentinel*, Row*>;
 /**
  * @class CheckpointManagerCallbacks
  * @brief This class describes the interface for callback methods
@@ -45,6 +47,11 @@ const int CHECKPOINT_BUFFER_SIZE = 4096 * 1000;
  */
 class CheckpointManagerCallbacks {
 public:
+    /**
+     * @brief Returns the configured number of checkpoint workers.
+     */
+    virtual uint32_t GetNumWorkers() const = 0;
+
     /**
      * @brief Checkpoint task completion callback
      * @param checkpointId The checkpoint's id.
@@ -55,10 +62,19 @@ public:
     virtual void TaskDone(Table* table, uint32_t numSegs, bool success) = 0;
 
     /**
-     * @brief Checks if the thread should terminate it work
-     * @return True if the the thread should stop.
+     * @brief returns the current in progress checkpoint working dir.
      */
-    virtual bool ShouldStop() const = 0;
+    virtual std::string& GetWorkingDir() = 0;
+
+    /**
+     * @brief returns the tasks list.
+     */
+    virtual std::list<Table*>& GetTasksList() = 0;
+
+    /**
+     * @brief returns the current NA bit.
+     */
+    virtual bool GetNotAvailableBit() const = 0;
 
     /**
      * @brief Checkpoint task error callback
@@ -67,6 +83,8 @@ public:
      * @param optionalMsg An optional message to display.
      */
     virtual void OnError(int errCode, const char* errMsg, const char* optionalMsg = nullptr) = 0;
+
+    virtual ThreadNotifier& GetThreadNotifier() = 0;
 
     virtual ~CheckpointManagerCallbacks()
     {}
@@ -78,34 +96,33 @@ public:
  */
 class CheckpointWorkerPool {
 public:
-    CheckpointWorkerPool(int n, bool b, std::list<Table*>& l, uint32_t s, uint64_t id, CheckpointManagerCallbacks& m)
-        : m_numWorkers(n), m_tasksList(l), m_checkpointId(id), m_na(b), m_cpManager(m), m_checkpointSegsize(s)
-    {
-        Start();
-    }
+    CheckpointWorkerPool(CheckpointManagerCallbacks& cbs, uint32_t segSize)
+        : m_cpManager(cbs), m_checkpointSegsize(segSize)
+    {}
 
     ~CheckpointWorkerPool();
 
-    void Start();
+    bool Start();
 
     enum ErrCodes { SUCCESS = 0, FILE_IO = 1, MEMORY = 2, TABLE = 3, INDEX = 4, CALC = 5 };
-
     static constexpr uint16_t DELETE_LIST_SIZE = 1000;
+    static constexpr uint16_t MAX_ITERS_COUNT = 10000;
 
 private:
     /**
-     * @brief The main worker function
+     * @brief The main worker function.
      */
-    void WorkerFunc();
+    void WorkerFunc(uint32_t workerId);
 
     /**
      * @brief Appends a row to the buffer. The buffer will be flushed in case it is full.
      * @param buffer The buffer to fill.
      * @param row The row to write.
      * @param fd The file descriptor to write to.
+     * @param the row's transaction id.
      * @return Boolean value denoting success or failure.
      */
-    bool Write(Buffer* buffer, Row* row, int fd);
+    bool Write(Buffer* buffer, Row* row, int fd, uint64_t transactionId);
 
     /**
      * @brief Checkpoints a row, according to whether a stable version exists or not.
@@ -116,19 +133,14 @@ private:
      * @param isDeleted The row delete status.
      * @return -1 on error, 0 if nothing was written and 1 if the row was written.
      */
-    int Checkpoint(Buffer* buffer, Sentinel* sentinel, int fd, uint16_t threadId, bool& isDeleted);
+    int Checkpoint(
+        Buffer* buffer, PrimarySentinel* sentinel, int fd, uint16_t threadId, bool& isDeleted, Row*& deletedVersion);
 
     /**
      * @brief Pops a task (table pointer) from the tasks queue.
      * @return the address of the pop'd table, or nullptr if the queue was empty.
      */
     Table* GetTask();
-
-    /**
-     * @brief Creates a checkpoint id for the current checkpoint
-     * @return Boolean value denoting success or failure.
-     */
-    bool SetCheckpointId();
 
     /**
      * @brief Initializes a checkpoint file
@@ -150,8 +162,8 @@ private:
      */
     bool FinishFile(int& fd, uint32_t tableId, uint64_t numOps, uint64_t exId);
 
-    void ExecuteMicroGcTransaction(
-        Sentinel** deletedList, GcManager* gcSession, Table* table, uint16_t& deletedCounter, uint16_t limit);
+    bool ExecuteMicroGcTransaction(
+        DeletePair* deletedList, GcManager* gcSession, Table* table, uint16_t& deletedCounter, uint16_t limit);
 
     /**
      * @brief Writes table metadata to the metadata file.
@@ -171,30 +183,31 @@ private:
      * @param numOps The number of rows written.
      * @return Returns the error code of type ErrCodes.
      */
-    ErrCodes WriteTableDataFile(Table* table, Buffer* buffer, Sentinel** deletedList, GcManager* gcSession,
+    ErrCodes WriteTableDataFile(Table* table, Buffer* buffer, DeletePair* deletedList, GcManager* gcSession,
         uint16_t threadId, uint32_t& maxSegId, uint64_t& numOps);
+
+    /* @brief Checks whether we should continue to iterate on a table.
+     * Recreates the iterator when the number of iterations exceeds a threshold.
+     * @param index the index to iterate on.
+     * @param it iterators's pointer.
+     * @param numIterations The current number of iterations.
+     * @param threadId The thread id.
+     * @param gcSession GC manager object.
+     * @param err returned error code.
+     */
+    bool KeepIterating(Index* index, IndexIterator*& it, uint32_t& numIterations, uint16_t threadId,
+        GcManager* gcSession, ErrCodes& err);
 
     bool FlushBuffer(int fd, Buffer* buffer);
 
-    // Workers
-    void* m_workers;
+    // Worker thread contexts
+    std::vector<ThreadContext*> m_workerContexts;
 
-    volatile std::atomic<uint32_t> m_numWorkers;
-
-    // Holds tables to checkpoint
-    std::list<Table*>& m_tasksList;
+    // Workers threads
+    std::vector<std::thread> m_workers;
 
     // Guards tasksList pops
     std::mutex m_tasksLock;
-
-    // The directory in which checkpoint files will be saved in
-    std::string m_workingDir;
-
-    // Checkpoint's id
-    uint64_t m_checkpointId;
-
-    // The current NotAvailable bit
-    bool m_na;
 
     // Checkpoint manager callbacks
     CheckpointManagerCallbacks& m_cpManager;

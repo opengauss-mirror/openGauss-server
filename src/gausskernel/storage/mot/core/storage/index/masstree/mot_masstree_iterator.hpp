@@ -30,6 +30,8 @@
 #include "key.h"
 
 namespace Masstree {
+using namespace MOT;
+
 template <typename P>
 void basic_table<P>::iteratorScan(const char* keybuf, uint32_t keylen, const bool& matchKey, void* const& it,
     const bool& forwardDirection, bool& result, const uint32_t& pid)
@@ -89,10 +91,6 @@ private:
     /** @var Search key (in Masstree's key format). */
     key_type m_key;
 
-    /** @var Masstree instance (basic_table<P>) pointer. */
-    // IDAN: TODO: Not is use. Check performance after removing t
-    table_type* m_table;
-
     /** @var Thread info pointer. */
     threadinfo_type* m_ti;
 
@@ -127,7 +125,6 @@ private:
     {
         errno_t erc;
         m_searchKey = &m_motKey;
-        m_table = table;
         m_ti = ti;
         m_stack.root_ = table->root_;
         m_entry = leafvalue_type::make_empty();
@@ -162,12 +159,13 @@ private:
         bool found = false;
         while (true) {
             m_state = m_stack.find_initial(m_helper, m_key, m_matchKey, found, m_entry, *m_ti);
-            if (m_state != mystack_type::scan_down)
+            if (m_state != mystack_type::scan_down) {
                 break;
+            }
             m_key.shift();
         }
         m_foundInitial = true;
-        Next();
+        (void)Next();
 
         return found;
     }
@@ -227,7 +225,7 @@ public:
     /**
      * @brief Default constructor.
      */
-    MasstreeIterator(void) : m_table(nullptr), m_ti(nullptr), m_state(0), m_done(true)
+    MasstreeIterator(void) : m_ti(nullptr), m_state(0), m_done(true), m_foundInitial(false), m_matchKey(false)
     {}
 
     /**
@@ -235,6 +233,7 @@ public:
      */
     ~MasstreeIterator(void)
     {
+        m_ti = nullptr;
         m_searchKey = nullptr;
     }
 
@@ -255,9 +254,9 @@ public:
         if (m_foundInitial) {
             m_stack.ki_ = m_helper.next(m_stack.ki_);
             m_state = m_stack.find_next(m_helper, m_key, m_entry);
-            Next();
+            (void)Next();
         } else {
-            Begin();
+            (void)Begin();
         }
         return this;
     }
@@ -289,9 +288,7 @@ public:
      *  @brief Destroy instance
      */
     void Destroy(void)
-    {
-        delete this;
-    }
+    {}
 
     /** @brief Getter for searchKey pointer
      *  @return SearchKey (if valid) or null if not.

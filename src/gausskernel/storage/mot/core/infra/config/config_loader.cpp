@@ -25,7 +25,7 @@
 #include "global.h"
 #include "config_loader.h"
 
-#include <string.h>
+#include <cstring>
 
 namespace MOT {
 

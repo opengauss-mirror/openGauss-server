@@ -26,7 +26,7 @@
 #include "mot_error.h"
 #include "logger.h"
 
-#include <stdarg.h>
+#include <cstdarg>
 
 namespace MOT {
 DECLARE_LOGGER(Infra, Infra)

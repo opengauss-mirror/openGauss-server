@@ -40,8 +40,9 @@
 #include "mm_gc_manager.h"
 #include "bitmapset.h"
 #include "txn_ddl_access.h"
+#include "sub_txn_mgr.h"
 #include "mm_session_api.h"
-#include "commit_sequence_number.h"
+#include "mm_buffer_api.h"
 
 namespace MOT {
 class MOTContext;
@@ -56,6 +57,9 @@ class InsItem;
 class LoggerTask;
 class Key;
 class Index;
+class TxnTable;
+class DummyIndex;
+class TxnIxColUpdate;
 
 class TransactionIdManager {
 public:
@@ -65,11 +69,11 @@ public:
     ~TransactionIdManager()
     {}
 
-    /** @brief Used to enforce the last transaction id value (used after recovery). */
+    /** @brief Used to enforce the last transaction id value at the end of the recovery. */
     void SetId(uint64_t value)
     {
         if (m_id.load() < value) {
-            m_id = value;
+            m_id.store(value);
         }
     }
 
@@ -79,7 +83,7 @@ public:
         uint64_t current = 0;
         uint64_t next = 0;
         do {
-            current = m_id;
+            current = m_id.load();
             next = current + 1;
         } while (!m_id.compare_exchange_strong(current, next, std::memory_order_acq_rel));
         return next;
@@ -88,7 +92,7 @@ public:
     /** @brief Get the current id. This method does not change the value of the current id. */
     inline uint64_t GetCurrentId() const
     {
-        return m_id;
+        return m_id.load();
     }
 
 private:
@@ -113,15 +117,16 @@ public:
      * @brief Constructor.
      * @param session_context The owning session's context.
      */
-    TxnManager(SessionContext* sessionContext);
+    explicit TxnManager(SessionContext* sessionContext, bool global = false);
 
     /**
      * @brief Initializes the object
      * @param threadId The logical identifier of the thread executing this transaction.
      * @param connectionId The logical identifier of the connection executing this transaction.
+     * @param isRecoveryTxn Type of txnManager.
      * @return Boolean value denoting success or failure.
      */
-    bool Init(uint64_t threadId, uint64_t connectionId, bool isLightTxn = false);
+    bool Init(uint64_t threadId, uint64_t connectionId, bool isRecoveryTxn, bool isLightTxn = false);
 
     /**
      * @brief Override placement-new operator.
@@ -145,9 +150,22 @@ public:
         return m_threadId;
     }  // Attention: this may be invalid in thread-pooled envelope!
 
+    inline void SetThdId(uint64_t tid)
+    {
+        m_threadId = tid;
+        if (m_gcSession != nullptr) {
+            m_gcSession->SetThreadId(tid);
+        }
+    }
+
     inline uint64_t GetConnectionId() const
     {
         return m_connectionId;
+    }
+
+    inline void SetConnectionId(uint64_t id)
+    {
+        m_connectionId = id;
     }
 
     inline uint64_t GetCommitSequenceNumber() const
@@ -190,13 +208,96 @@ public:
         return m_replayLsn;
     }
 
+    bool IsReadOnlyTxn() const;
+
+    bool hasDDL() const;
+
     void RemoveTableFromStat(Table* t);
 
     /**
      * @brief Start transaction, set transaction id and isolation level.
+     * @return void.
+     */
+    void StartTransaction(uint64_t transactionId, int isolationLevel);
+
+    /**
+     * @brief Start sub transaction, set sub-transaction Id and isolation level.
+     * @return void.
+     */
+    void StartSubTransaction(uint64_t subTransactionId, int isolationLevel);
+
+    /**
+     * @brief Commit sub transaction.
+     * @return void.
+     */
+    void CommitSubTransaction(uint64_t subTransactionId);
+
+    /**
+     * @brief Rollback sub transaction.
      * @return Result code denoting success or failure.
      */
-    RC StartTransaction(uint64_t transactionId, int isolationLevel);
+    RC RollbackSubTransaction(uint64_t subTransactionId);
+
+    void SetTxnOper(SubTxnOperType subOper)
+    {
+        m_subTxnManager.SetSubTxnOper(subOper);
+    }
+
+    bool IsSubTxnStarted() const
+    {
+        return m_subTxnManager.IsSubTxnStarted();
+    }
+
+    bool IsTxnAborted() const
+    {
+        return m_isTxnAborted;
+    }
+
+    void SetTxnAborted()
+    {
+        m_isTxnAborted = true;
+    }
+
+    void SetHasCommitedSubTxnDDL()
+    {
+        m_hasCommitedSubTxnDDL = true;
+    }
+
+    bool HasCommitedSubTxnDDL() const
+    {
+        return m_hasCommitedSubTxnDDL;
+    }
+
+    /**
+     * @brief Checks if the transaction has any modifications in disk engine as well.
+     * Attention: This flag is set only in validate commit phase, so this interface should not be used before that.
+     * Used only by RedoLogWriter to mark the transaction as a cross engine transaction. Recovery needs to know if
+     * the transaction is MOT only or Cross Engine transaction.
+     */
+    bool IsCrossEngineTxn() const
+    {
+        return m_isCrossEngineTxn;
+    }
+
+    /**
+     * @brief Sets the flag to indicate that the transaction has modifications in disk engine. This is set only
+     * during the validate commit phase (before writing redo) to indicate that the transaction has already inserted
+     * XLOG records for the modifications done in the disk engine.
+     */
+    void MarkAsCrossEngineTxn()
+    {
+        m_isCrossEngineTxn = true;
+    }
+
+    bool IsRecoveryTxn() const
+    {
+        return m_isRecoveryTxn;
+    }
+
+    bool IsUpdateIndexColumn() const
+    {
+        return m_hasIxColUpd;
+    }
 
     /**
      * @brief Performs pre-commit validation (OCC validation).
@@ -275,25 +376,17 @@ public:
     /**
      * @brief Inserts a row and updates all affected indices.
      * @param row The row to insert.
-     * @param insItem The affected index keys.
-     * @param insItemSize The number of affected index keys.
+     * @param isUpdateColumn Indicate whether the insert source is update column
      * @return Return code denoting the execution result.
      */
-    RC InsertRow(Row* row);
+    RC InsertRow(Row* row, Key* updateColumnKey = nullptr);
+
+    RC InsertRecoveredRow(Row* row);
 
     InsItem* GetNextInsertItem(Index* index = nullptr);
     Key* GetTxnKey(Index* index);
 
-    void DestroyTxnKey(Key* key) const
-    {
-        MemSessionFree(key);
-    }
-
-    /**
-     * @brief Delete a row
-     * @return Return code denoting the execution result.
-     */
-    RC RowDel();
+    void DestroyTxnKey(Key* key) const;
 
     /**
      * @brief Searches for a row in the local cache by a primary key.
@@ -305,7 +398,7 @@ public:
      * @param currentKey The primary key by which to search the row.
      * @return The row or null pointer if none was found.
      */
-    Row* RowLookupByKey(Table* const& table, const AccessType type, MOT::Key* const currentKey);
+    Row* RowLookupByKey(Table* const& table, const AccessType type, MOT::Key* const currentKey, RC& rc);
 
     /**
      * @brief Searches for a row in the local cache by a row.
@@ -319,6 +412,8 @@ public:
      */
     Row* RowLookup(const AccessType type, Sentinel* const& originalSentinel, RC& rc);
 
+    bool IsRowExist(Sentinel* const& sentinel, RC& rc);
+
     /**
      * @brief Searches for a row in the local cache by a row.
      * @detail Rows may be updated concurrently, so the cache layer needs to be
@@ -331,18 +426,6 @@ public:
      */
     RC AccessLookup(const AccessType type, Sentinel* const& originalSentinel, Row*& localRow);
 
-    /**
-     * @brief Searches in the cache for the row following a secondary index item.
-     * @param table The table in which the row is to be searched.
-     * @param type The purpose for retrieving the row.
-     * @param[in,out] curr_item The secondary index item. The secondary index
-     * item is advanced to the next item.
-     * @return The cached row or the original row stored in the secondary index
-     * item if none was found in the cache (in which case the original row is
-     * stored in the cache for subsequent searches).
-     */
-    inline Row* RowLookupSecondaryNextSame(Table* table, AccessType type, void*& curr_item);
-
     RC DeleteLastRow();
 
     /**
@@ -352,17 +435,16 @@ public:
      */
     RC UpdateLastRowState(AccessType state);
 
-    void CommitSecondaryItems();
+    void UndoLocalDMLChanges();
 
-    Row* RemoveKeyFromIndex(Row* row, Sentinel* sentinel);
+    void RollbackInsert(Access* ac);
 
-    void UndoInserts();
-
-    RC RollbackInsert(Access* ac);
     void RollbackSecondaryIndexInsert(Index* index);
+
     void RollbackDDLs();
 
-    RC OverwriteRow(Row* updatedRow, BitmapSet& modifiedColumns);
+    RC OverwriteRow(Row* updatedRow, const BitmapSet& modifiedColumns);
+    RC UpdateRow(const BitmapSet& modifiedColumns, TxnIxColUpdate* colUpd);
 
     /**
      * @brief Updates the value in a single field in a row.
@@ -370,16 +452,23 @@ public:
      * @param attr_id The column identifier.
      * @param attr_value The new field value.
      */
-    void UpdateRow(Row* row, const int attr_id, double attr_value);
-    void UpdateRow(Row* row, const int attr_id, uint64_t attr_value);
+    RC UpdateRow(Row* row, const int attr_id, double attr_value);
+    RC UpdateRow(Row* row, const int attr_id, uint64_t attr_value);
+
+    Row* GetLastAccessedDraft();
 
     /**
      * @brief Retrieves the latest epoch seen by this transaction.
      * @return The latest epoch.
      */
-    inline uint64_t GetLatestEpoch() const
+    inline uint64_t GetVisibleCSN() const
     {
-        return m_latestEpoch;
+        return m_visibleCSN;
+    }
+
+    inline void SetVisibleCSN(uint64_t csn)
+    {
+        m_visibleCSN = csn;
     }
 
     /**
@@ -400,7 +489,7 @@ public:
      * @brief Retrieves the transaction isolation level.
      * @return The transaction isolation level.
      */
-    inline int GetTxnIsoLevel() const
+    inline ISOLATION_LEVEL GetIsolationLevel() const
     {
         return m_isolationLevel;
     }
@@ -408,7 +497,13 @@ public:
     /**
      * @brief Sets the transaction isolation level.
      */
-    void SetTxnIsoLevel(int envelopeIsoLevel);
+    inline void SetIsolationLevel(int envelopeIsoLevel)
+    {
+        m_isolationLevel = static_cast<ISOLATION_LEVEL>(envelopeIsoLevel);
+        if (m_isolationLevel == SERIALIZABLE) {
+            m_isolationLevel = REPEATABLE_READ;
+        }
+    }
 
     inline void IncStmtCount()
     {
@@ -430,22 +525,33 @@ public:
         return m_surrogateGen.GetCurrentCount();
     }
 
-    inline void GcSessionStart()
+    RC GcSessionStart(uint64_t csn = 0)
     {
-        m_gcSession->GcStartTxn();
+        return m_gcSession->GcStartTxn(csn);
     }
 
-    void GcSessionRecordRcu(
-        uint32_t index_id, void* object_ptr, void* object_pool, DestroyValueCbFunc cb, uint32_t obj_size);
+    void GcSessionRecordRcu(GC_QUEUE_TYPE m_type, uint32_t index_id, void* object_ptr, void* object_pool,
+        DestroyValueCbFunc cb, uint32_t obj_size, uint64_t csn = 0);
 
     inline void GcSessionEnd()
     {
         m_gcSession->GcEndTxn();
     }
 
+    inline void GcSessionEndRecovery()
+    {
+        m_gcSession->GcRecoveryEndTxn();
+    }
+
+    inline void GcEndStatement()
+    {
+        MOT_ASSERT(IsReadOnlyTxn());
+        m_gcSession->GcEndStatement();
+    }
+
     inline void GcAddSession()
     {
-        if (m_isLightSession == true) {
+        if (m_isLightSession) {
             return;
         }
         m_gcSession->AddToGcList();
@@ -453,13 +559,13 @@ public:
 
     inline void GcRemoveSession()
     {
-        if (m_isLightSession == true) {
+        if (m_isLightSession) {
             return;
         }
         m_gcSession->GcCleanAll();
         m_gcSession->RemoveFromGcList(m_gcSession);
         m_gcSession->~GcManager();
-        MemSessionFree(m_gcSession);
+        MemFree(m_gcSession, m_global);
         m_gcSession = nullptr;
     }
     void RedoWriteAction(bool isCommit);
@@ -469,6 +575,30 @@ public:
         return m_gcSession;
     }
 
+    inline bool GetSnapshotStatus() const
+    {
+        return m_isSnapshotTaken;
+    }
+
+    inline void SetSnapshotStatus(bool status)
+    {
+        m_isSnapshotTaken = status;
+    }
+
+    inline void FinishStatement()
+    {
+        if (GetIsolationLevel() == READ_COMMITED) {
+            SetVisibleCSN(0);
+            m_isSnapshotTaken = false;
+            // For read-only transactions allow GC to reclaim data between statements
+            if (IsReadOnlyTxn()) {
+                GcEndStatement();
+            }
+        }
+        IncStmtCount();
+    }
+
+    RC SetSnapshot();
     /**
      * @brief Sets or clears the validate-no-wait flag in OccTransactionManager.
      * @detail Determines whether to call Access::lock() or
@@ -482,6 +612,53 @@ public:
 
     bool IsUpdatedInCurrStmt();
 
+    Key* GetLocalKey() const
+    {
+        return m_key;
+    }
+
+    void SetReservedChunks(size_t chunks)
+    {
+        m_reservedChunks += chunks;
+    }
+
+    void DecReservedChunks(size_t chunks)
+    {
+        if (m_reservedChunks > chunks) {
+            (void)MemBufferUnreserveGlobal(chunks);
+            m_reservedChunks -= chunks;
+        } else {
+            (void)MemBufferUnreserveGlobal(0);
+            m_reservedChunks = 0;
+        }
+    }
+
+    void ClearReservedChunks()
+    {
+        if (m_reservedChunks > 0) {
+            (void)MemBufferUnreserveGlobal(0);
+            m_reservedChunks = 0;
+        }
+    }
+
+    inline void SetCheckpointCommitEnded(bool value)
+    {
+        m_checkpointCommitEnded = value;
+    }
+
+    Table* GetTableByExternalId(uint64_t id);
+    Index* GetIndexByExternalId(uint64_t tableId, uint64_t indexId);
+    RC CreateTxnTable(Table* table, TxnTable*& txnTable);
+    Table* GetTxnTable(uint64_t tableId);
+    RC CreateTable(Table* table);
+    RC DropTable(Table* table);
+    RC CreateIndex(Table* table, Index* index, bool isPrimary);
+    RC DropIndex(Index* index);
+    RC TruncateTable(Table* table);
+    RC AlterTableAddColumn(Table* table, Column* newColumn);
+    RC AlterTableDropColumn(Table* table, Column* col);
+    RC AlterTableRenameColumn(Table* table, Column* col, char* newname);
+
 private:
     static constexpr uint32_t SESSION_ID_BITS = 32;
 
@@ -489,7 +666,7 @@ private:
      * @brief Apply all transactional DDL changes. DDL changes are not handled
      * by occ.
      */
-    void CleanDDLChanges();
+    void ApplyDDLChanges();
 
     /**
      * @brief Reclaims all resources associated with the transaction and
@@ -509,6 +686,10 @@ private:
 
     void RollbackInternal(bool isPrepared);
 
+    RC TruncateIndexes(TxnTable* txnTable);
+
+    void ReclaimAccessSecondaryDelKey(Access* ac);
+
     // Disable class level new operator
     /** @cond EXCLUDE_DOC */
     void* operator new(std::size_t size) = delete;
@@ -526,23 +707,13 @@ private:
     friend class OccTransactionManager;
     friend class SessionContext;
 
-public:
-    Table* GetTableByExternalId(uint64_t id);
-    Index* GetIndexByExternalId(uint64_t table_id, uint64_t index_id);
-    RC CreateTable(Table* table);
-    RC DropTable(Table* table);
-    RC CreateIndex(Table* table, Index* index, bool is_primary);
-    RC DropIndex(Index* index);
-    RC TruncateTable(Table* table);
-
-private:
     /** @var The latest epoch seen. */
-    uint64_t m_latestEpoch;
+    uint64_t m_visibleCSN = 0;
 
-    /** @vat The logical identifier of the thread executing this transaction. */
+    /** @var The logical identifier of the thread executing this transaction. */
     uint64_t m_threadId;
 
-    /** @vat The logical identifier of the connection executing this transaction. */
+    /** @var The logical identifier of the connection executing this transaction. */
     uint64_t m_connectionId;
 
     /** @var Owning session context. */
@@ -562,6 +733,9 @@ private:
     /** @var Checkpoint not available capture during being transaction. */
     volatile bool m_checkpointNABit;
 
+    /** @var Indicates if the checkpoint EndCommit was called. */
+    volatile bool m_checkpointCommitEnded;
+
     /** @var CSN taken at the commit stage. */
     uint64_t m_csn;
 
@@ -576,25 +750,46 @@ private:
 
     bool m_flushDone;
 
-    /** @var internal_transaction_id Generated by txn_manager. */
-    /** It is a concatenation of session_id and a counter */
+    /** @var Unique Internal transaction id (Used only for redo and recovery). */
     uint64_t m_internalTransactionId;
 
     uint32_t m_internalStmtCount;
 
-    /** @brief Transaction state.
-     * this state only reflects the envelope states to avoid invalid transitions
+    /**
+     * @brief Transaction state.
+     * This state only reflects the envelope states to avoid invalid transitions.
      * Transaction state machine is managed by the envelope!
      */
     TxnState m_state;
 
-    int m_isolationLevel;
+    ISOLATION_LEVEL m_isolationLevel;
+
+    bool m_isSnapshotTaken = false;
+
+    bool m_isTxnAborted;
+
+    bool m_hasCommitedSubTxnDDL;
+
+    /**
+     * @var Indicates whether this is a cross engine (write) transaction which has modifications in disk engine also.
+     * Attention: This is set only during XACT_EVENT_COMMIT callback so that this information is written in the redo
+     * and used in the recovery. So this should not be used/queried before XACT_EVENT_COMMIT phase.
+     * Used only by RedoLogWriter to mark the transaction as a cross engine transaction. Recovery needs to know if
+     * the transaction is MOT only or Cross Engine transaction.
+     */
+    bool m_isCrossEngineTxn;
+
+    bool m_isRecoveryTxn = false;
+
+    bool m_hasIxColUpd = false;
 
 public:
     /** @var Transaction cache (OCC optimization). */
-    MemSessionPtr<TxnAccess> m_accessMgr;
+    TxnAccess* m_accessMgr;
 
     TxnDDLAccess* m_txnDdlAccess;
+
+    SubTxnMgr m_subTxnManager;
 
     MOT::Key* m_key;
 
@@ -610,6 +805,32 @@ public:
 
     /** @var holds query states from MOTAdaptor */
     std::unordered_map<uint64_t, uint64_t> m_queryState;
+
+    size_t m_reservedChunks;
+
+    // use global or local memory allocators
+    bool m_global;
+
+    MOT::DummyIndex* m_dummyIndex;
+};
+
+class TxnIxColUpdate {
+public:
+    MOT::Index* m_ix[MAX_NUM_INDEXES] = {nullptr};
+    MOT::Key* m_oldKeys[MAX_NUM_INDEXES] = {nullptr};
+    MOT::Key* m_newKeys[MAX_NUM_INDEXES] = {nullptr};
+    TxnManager* m_txn = nullptr;
+    Table* m_tab = nullptr;
+    uint8_t* m_modBitmap;
+    uint16_t m_arrLen = 0;
+    uint64_t m_cols = 0;
+    UpdateIndexColumnType m_hasIxColUpd = UpdateIndexColumnType::UPDATE_COLUMN_NONE;
+
+    TxnIxColUpdate(Table* tab, TxnManager* txn, uint8_t* modBitmap, UpdateIndexColumnType hasIxColUpd);
+    ~TxnIxColUpdate();
+
+    RC InitAndBuildOldKeys(Row* row);
+    RC FilterColumnUpdate(Row* row);
 };
 }  // namespace MOT
 

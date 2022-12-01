@@ -100,6 +100,10 @@ else
 #	CFLAGS += -O0 -DDEBUG
 	CFLAGS += -DDEBUG
 endif
+else
+ifeq ($(enable_cassert), yes)
+	CFLAGS += -DDEBUG
+endif
 endif
 
 CFLAGS += -faligned-new
@@ -120,7 +124,6 @@ CFLAGS += -D$(MODE)
 CFLAGS += -fno-exceptions
 # disable RTTI usage
 CFLAGS += -fno-rtti
-# TODO: enable
 #CFLAGS += -Woverloaded-virtual
 CFLAGS += -Wnon-virtual-dtor
 ifeq ($(ISOLATION), yes)
@@ -181,7 +184,7 @@ objfiles.txt: Makefile $(OBJS)
 	@touch $@
 
 $(OBJ_DIR)/%.o: %.cpp
-	@$(CC) -c $(CFLAGS) $(CPPFLAGS) -MMD -MP -MF"$(patsubst %.o,%.d,$@)" -MT"$@" -o $@ $<
+	@$(CC) -c $(CFLAGS) $(CPPFLAGS) $(CXXFLAGS) -MMD -MP -MF"$(patsubst %.o,%.d,$@)" -MT"$@" -o $@ $<
 
 .PHONY: clean
 
@@ -193,6 +196,8 @@ buildrepo:
 
 .PHONY: show
 show:
+	@echo "UNDERPG=${UNDERPG}"
+	@echo "enable_cassert=${enable_cassert}"
 	@echo "CC_VERSION=${CC_VERSION}"
 	@echo "CC=${CC}"
 	@echo
@@ -203,6 +208,8 @@ show:
 	@echo "SRC_DIRS=${SRC_DIRS}"
 	@echo
 	@echo "CPPFLAGS=${CPPFLAGS}"
+	@echo
+	@echo "CXXFLAGS=${CXXFLAGS}"
 	@echo
 	@echo "CFLAGS=${CFLAGS}"
 	@echo

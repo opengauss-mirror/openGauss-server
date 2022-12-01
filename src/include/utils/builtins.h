@@ -1748,6 +1748,8 @@ extern Datum hypopg_reset_index(PG_FUNCTION_ARGS);
 extern Datum mot_global_memory_detail(PG_FUNCTION_ARGS);
 extern Datum mot_local_memory_detail(PG_FUNCTION_ARGS);
 extern Datum mot_session_memory_detail(PG_FUNCTION_ARGS);
+extern Datum mot_jit_detail(PG_FUNCTION_ARGS);
+extern Datum mot_jit_profile(PG_FUNCTION_ARGS);
 
 /* UBtree index */
 Datum gs_index_verify(PG_FUNCTION_ARGS);

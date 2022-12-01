@@ -31,7 +31,7 @@
 #include "log_level_formatter.h"
 
 #include <unistd.h>
-#include <stdlib.h>
+#include <cstdlib>
 #include <algorithm>
 
 namespace MOT {
@@ -258,17 +258,18 @@ bool ConfigManager::InitLoad()
             MOT_LOG_ERROR_STACK("Failed to load configuration (MOT engine continues to load):");
         }
         ClearErrorStack();  // reset error state
-        result = true;      // nevertheless we continue with default configuration
-    } else {
-        // trigger update from just-loaded configuration (only to this specific listener).
-        MOT_LOG_DEBUG("Reloaded MOTConfiguration from main configuration");
-        MOTConfiguration& motCfg = GetGlobalConfiguration();
-        motCfg.OnConfigChange();
 
-        // now the main configuration is fully loaded, so let's validate it
-        if (motCfg.IsValid()) {
-            result = true;
-        }
+        // nevertheless we continue with default configuration
+    }
+
+    // trigger update from just-loaded configuration (only to this specific listener).
+    MOT_LOG_DEBUG("Reloaded MOTConfiguration from main configuration");
+    MOTConfiguration& motCfg = GetGlobalConfiguration();
+    motCfg.OnConfigChange();
+
+    // now the main configuration is fully loaded, so let's validate it
+    if (motCfg.IsValid()) {
+        result = true;
     }
     return result;
 }
@@ -291,7 +292,7 @@ bool ConfigManager::Initialize(char** argv, int argc)
 
     char* envvar = getenv("MOT_DEBUG_CFG_LOAD");
     if (envvar && (strcmp(envvar, "TRUE") == 0)) {
-        SetLogComponentLogLevel("Configuration", LogLevel::LL_DEBUG);
+        (void)SetLogComponentLogLevel("Configuration", LogLevel::LL_DEBUG);
     }
 
     // add command line configuration loader
@@ -366,15 +367,22 @@ bool ConfigManager::ReloadConfig(bool ignoreErrors /* = true */)
     for (uint32_t i = 0; i < m_configLoaderCount; ++i) {
         ConfigLoader* configLoader = m_configLoaders[i];
         ConfigTree* configTree = configLoader->Load();
-        if (configTree != nullptr) {
-            MOT_LOG_DEBUG("Adding configuration tree %p with priority %u from configuration loader %s",
-                configTree,
-                configTree->GetPriority(),
-                configLoader->GetName());
-            m_layeredConfigTree.AddConfigTree(configTree);
-        } else {
+        if (configTree == nullptr) {
             MOT_LOG_WARN("Failed to load configuration tree from configuration loader %s, configuration from this "
-                         "loader will be ignored. Please fix configuration and trigger reload.",
+                         "loader will be ignored. Please fix configuration and reload.",
+                configLoader->GetName());
+            if (!ignoreErrors) {
+                result = false;
+            }
+            continue;
+        }
+        MOT_LOG_DEBUG("Adding configuration tree %p with priority %u from configuration loader %s",
+            configTree,
+            configTree->GetPriority(),
+            configLoader->GetName());
+        if (!m_layeredConfigTree.AddConfigTree(configTree)) {
+            MOT_LOG_WARN("Failed to add configuration tree from configuration loader %s, configuration from this "
+                         "loader will be ignored. Please fix configuration and reload.",
                 configLoader->GetName());
             if (!ignoreErrors) {
                 result = false;
@@ -384,7 +392,7 @@ bool ConfigManager::ReloadConfig(bool ignoreErrors /* = true */)
 
     // print loaded configuration
     LogLevel logLevel = LogLevel::LL_TRACE;
-    GetLayeredConfigTree()->GetUserConfigValue("Log.cfg_startup_log_level", logLevel, false);
+    logLevel = GetLayeredConfigTree()->GetUserConfigValue("Log.cfg_startup_log_level", logLevel, false);
     if (MOT_CHECK_LOG_LEVEL(logLevel)) {
         GetLayeredConfigTree()->Print(logLevel);
     }

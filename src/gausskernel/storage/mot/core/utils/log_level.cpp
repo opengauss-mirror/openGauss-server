@@ -26,14 +26,14 @@
 #include "logger.h"
 #include "mot_log.h"
 
-#include <string.h>
+#include <cstring>
 
 namespace MOT {
 DECLARE_LOGGER(LogLevel, Utilities)
 
 extern LogLevel LogLevelFromString(const char* logLevelStr)
 {
-    LogLevel logLevel = LogLevel::LL_INFO;  // default value if parsing fails
+    LogLevel logLevel = LogLevel::LL_INVALID;
 
     MOT_LOG_DEBUG("Parsing log level: %s", logLevelStr);
     if (strcmp(logLevelStr, "PANIC") == 0) {
@@ -88,5 +88,13 @@ extern const char* LogLevelToString(LogLevel logLevel)
         default:
             return "INVALID";
     }
+}
+
+extern bool ValidateLogLevel(const char* logLevelStr)
+{
+    if (LogLevelFromString(logLevelStr) == LogLevel::LL_INVALID) {
+        return false;
+    }
+    return true;
 }
 }  // namespace MOT

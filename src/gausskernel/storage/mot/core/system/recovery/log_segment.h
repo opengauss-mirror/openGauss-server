@@ -28,8 +28,11 @@
 #include "redo_log_global.h"
 #include "redo_log_writer.h"
 #include "serializable.h"
+#include "spsc_allocator.h"
 
 namespace MOT {
+class RedoLogTransactionPlayer;
+
 /**
  * @struct LogSegment
  * @brief encapsulates a chunk of logging data
@@ -43,20 +46,36 @@ struct LogSegment : public Serializable {
 
     uint64_t m_replayLsn;
 
+    SPSCVarSizeAllocator* m_allocator;
+
+    RedoLogTransactionPlayer* m_player;
+
+    LogSegment() : m_data(nullptr), m_len(0), m_replayLsn(0), m_allocator(nullptr), m_player(nullptr)
+    {}
+
     ~LogSegment()
     {
         if (m_data != nullptr) {
-            delete[] m_data;
+            if (m_allocator == nullptr) {
+                delete[] m_data;
+            } else {
+                m_allocator->Release(m_data);
+                m_allocator = nullptr;
+            }
+            m_data = nullptr;
         }
+        m_player = nullptr;
+        m_allocator = nullptr;
     }
 
-    /**
-     * @brief checks if this log segment is part of a two-phase transaction
-     * @return Boolean value denoting if it is part of a two-phase transaction or not.
-     */
-    bool IsTwoPhase()
+    inline void SetPlayer(RedoLogTransactionPlayer* player)
     {
-        return (m_controlBlock.m_opCode == PREPARE_TX || m_controlBlock.m_opCode == COMMIT_PREPARED_TX);
+        m_player = player;
+    }
+
+    inline RedoLogTransactionPlayer* GetPlayer() const
+    {
+        return m_player;
     }
 
     /**

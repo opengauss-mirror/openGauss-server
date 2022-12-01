@@ -51,8 +51,11 @@ struct MemBufferHeap {
     /** @var The size of class of buffers managed by this heap. */
     MemBufferClass m_bufferClass;  // L1 offset [8-9]
 
+    /** @var Specifies whether the heap is in reserve mode. */
+    uint8_t m_inReserveMode;  // L1 offset [9-10]
+
     /** @var Pad next member to 4 bytes alignment. */
-    uint8_t m_padding2[3];  // L1 offset [9-12]
+    uint8_t m_padding2[2];  // L1 offset [10-12]
 
     /** @var The number of buffers in each chunk in this heap. */
     uint32_t m_maxBuffersInChunk;  // L1 offset [12-16]
@@ -91,14 +94,17 @@ struct MemBufferHeap {
     /** @var List of all full chunks. */
     MemBufferChunkHeader* m_fullChunkList;  // L1 offset [0-8]
 
+    /** @var List of reserved chunks. */
+    MemBufferChunkHeader* m_reserveChunkList;  // L1 offset [8-16]
+
     /** @var The number of chunks currently allocated by this heap. */
-    uint64_t m_allocatedChunkCount;  // L1 offset [8-16]
+    uint64_t m_allocatedChunkCount;  // L1 offset [16-24]
 
     /** @var The number of buffers currently allocated by this heap. */
-    uint64_t m_allocatedBufferCount;  // L1 offset [16-24]
+    uint64_t m_allocatedBufferCount;  // L1 offset [24-32]
 
     /** @var Padding to round off the size to L1 cache line aligned size. */
-    uint8_t m_padding5[40];  // L1 offset [24-64]
+    uint8_t m_padding5[32];  // L1 offset [32-64]
 };
 
 static_assert(sizeof(MemBufferHeap) == L1_ALIGNED_SIZEOF(MemBufferHeap),
@@ -176,6 +182,23 @@ extern MemBufferChunkHeader* MemBufferHeapSnapshotChunk(MemBufferHeap* bufferHea
  * @param bufferList The list of the buffers to free.
  */
 extern void MemBufferHeapFreeMultiple(MemBufferHeap* bufferHeap, MemBufferList* bufferList);
+
+/**
+ * @brief Reserve memory for current session. While in reserve-mode, released chunks are kept in the current session's
+ * reserve, rather than being released to global memory.
+ * @param bufferHeap The buffer heap.
+ * @param bufferCount The number of buffers to reserve.
+ * @return Zero on success, otherwise error code on failure.
+ */
+extern int MemBufferHeapReserve(MemBufferHeap* bufferHeap, uint32_t bufferCount);
+
+/**
+ * @brief Release all global memory reserved for current session for a specific buffer class.
+ * @param bufferHeap The buffer heap.
+ * @param bufferClass The buffer class for which an existing reservation is to be released.
+ * @return Zero on success, otherwise error code on failure.
+ */
+extern int MemBufferHeapUnreserve(MemBufferHeap* bufferHeap);
 
 /**
  * @brief Prints a buffer heap into log.

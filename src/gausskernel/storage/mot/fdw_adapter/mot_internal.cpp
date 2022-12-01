@@ -43,6 +43,7 @@
 #include "utils/date.h"
 
 #include "mot_internal.h"
+#include "mot_fdw_helpers.h"
 #include "row.h"
 #include "log_statistics.h"
 #include "spin_lock.h"
@@ -65,30 +66,25 @@
 #include "jit_statistics.h"
 #include "gaussdb_config_loader.h"
 
-#define IS_CHAR_TYPE(oid) (oid == VARCHAROID || oid == BPCHAROID || oid == TEXTOID || oid == CLOBOID || oid == BYTEAOID)
-#define IS_INT_TYPE(oid)                                                                                           \
-    (oid == BOOLOID || oid == CHAROID || oid == INT8OID || oid == INT2OID || oid == INT4OID || oid == FLOAT4OID || \
-        oid == FLOAT8OID || oid == INT1OID || oid == DATEOID || oid == TIMEOID || oid == TIMESTAMPOID ||           \
-        oid == TIMESTAMPTZOID)
-
 MOT::MOTEngine* MOTAdaptor::m_engine = nullptr;
-static XLOGLogger xlogger;
+static XLOGLogger g_xlogger;
+static SnapshotManager g_snapshotMgr;
 
 // enable MOT Engine logging facilities
 DECLARE_LOGGER(InternalExecutor, FDW)
 
-/** @brief on_proc_exit() callback for cleaning up current thread - only when thread pool is ENABLED. */
-static void MOTCleanupThread(int status, Datum ptr);
-
-/** @brief Helper for cleaning up all JIT context objects stored in all CachedPlanSource of the current session. */
-static void DestroySessionJitContexts();
-
 // in a thread-pooled environment we need to ensure thread-locals are initialized properly
-static inline void EnsureSafeThreadAccessInline()
+static inline bool EnsureSafeThreadAccessInline(bool throwError = true)
 {
     if (MOTCurrThreadId == INVALID_THREAD_ID) {
         MOT_LOG_DEBUG("Initializing safe thread access for current thread");
-        MOT::AllocThreadId();
+        if (MOT::AllocThreadId() == INVALID_THREAD_ID) {
+            MOT_LOG_ERROR("Failed to allocate thread identifier");
+            if (throwError) {
+                ereport(ERROR, (errmodule(MOD_MOT), errmsg("Failed to allocate thread identifier")));
+            }
+            return false;
+        }
         // register for cleanup only once - not having a current thread id is the safe indicator we never registered
         // proc-exit callback for this thread
         if (g_instance.attr.attr_common.enable_thread_pool) {
@@ -97,134 +93,27 @@ static inline void EnsureSafeThreadAccessInline()
         }
     }
     if (MOTCurrentNumaNodeId == MEM_INVALID_NODE) {
-        MOT::InitCurrentNumaNodeId();
-    }
-    MOT::InitMasstreeThreadinfo();
-}
-
-extern void EnsureSafeThreadAccess()
-{
-    EnsureSafeThreadAccessInline();
-}
-
-static void DestroySession(MOT::SessionContext* sessionContext)
-{
-    MOT_ASSERT(MOTAdaptor::m_engine);
-    MOT_LOG_DEBUG("Destroying session context %p, connection_id %u", sessionContext, sessionContext->GetConnectionId());
-
-    if (u_sess->mot_cxt.jit_session_context_pool) {
-        JitExec::FreeSessionJitContextPool(u_sess->mot_cxt.jit_session_context_pool);
-    }
-    MOT::GetSessionManager()->DestroySessionContext(sessionContext);
-}
-
-// Global map of PG session identification (required for session statistics)
-// This approach is safer than saving information in the session context
-static pthread_spinlock_t sessionDetailsLock;
-typedef std::map<MOT::SessionId, pair<::ThreadId, pg_time_t>> SessionDetailsMap;
-static SessionDetailsMap sessionDetailsMap;
-
-static void InitSessionDetailsMap()
-{
-    pthread_spin_init(&sessionDetailsLock, 0);
-}
-
-static void DestroySessionDetailsMap()
-{
-    pthread_spin_destroy(&sessionDetailsLock);
-}
-
-static void RecordSessionDetails()
-{
-    MOT::SessionId sessionId = u_sess->mot_cxt.session_id;
-    if (sessionId != INVALID_SESSION_ID) {
-        pthread_spin_lock(&sessionDetailsLock);
-        sessionDetailsMap.emplace(sessionId, std::make_pair(t_thrd.proc->pid, t_thrd.proc->myStartTime));
-        pthread_spin_unlock(&sessionDetailsLock);
-    }
-}
-
-static void ClearSessionDetails(MOT::SessionId sessionId)
-{
-    if (sessionId != INVALID_SESSION_ID) {
-        pthread_spin_lock(&sessionDetailsLock);
-        SessionDetailsMap::iterator itr = sessionDetailsMap.find(sessionId);
-        if (itr != sessionDetailsMap.end()) {
-            sessionDetailsMap.erase(itr);
-        }
-        pthread_spin_unlock(&sessionDetailsLock);
-    }
-}
-
-inline void ClearCurrentSessionDetails()
-{
-    ClearSessionDetails(u_sess->mot_cxt.session_id);
-}
-
-static void GetSessionDetails(MOT::SessionId sessionId, ::ThreadId* gaussSessionId, pg_time_t* sessionStartTime)
-{
-    // although we have the PGPROC in the user data of the session context, we prefer not to use
-    // it due to safety (in some unknown constellation we might hold an invalid pointer)
-    // it is much safer to save a copy of the two required fields
-    pthread_spin_lock(&sessionDetailsLock);
-    SessionDetailsMap::iterator itr = sessionDetailsMap.find(sessionId);
-    if (itr != sessionDetailsMap.end()) {
-        *gaussSessionId = itr->second.first;
-        *sessionStartTime = itr->second.second;
-    }
-    pthread_spin_unlock(&sessionDetailsLock);
-}
-
-// provide safe session auto-cleanup in case of missing session closure
-// This mechanism relies on the fact that when a session ends, eventually its thread is terminated
-// ATTENTION: in thread-pooled envelopes this assumption no longer holds true, since the container thread keeps
-// running after the session ends, and a session might run each time on a different thread, so we
-// disable this feature, instead we use this mechanism to generate thread-ended event into the MOT Engine
-static pthread_key_t sessionCleanupKey;
-
-static void SessionCleanup(void* key)
-{
-    MOT_ASSERT(!g_instance.attr.attr_common.enable_thread_pool);
-
-    // in order to ensure session-id cleanup for session 0 we use positive values
-    MOT::SessionId sessionId = (MOT::SessionId)(((uint64_t)key) - 1);
-    if (sessionId != INVALID_SESSION_ID) {
-        MOT_LOG_WARN("Encountered unclosed session %u (missing call to DestroyTxn()?)", (unsigned)sessionId);
-        ClearSessionDetails(sessionId);
-        MOT_LOG_DEBUG("SessionCleanup(): Calling DestroySessionJitContext()");
-        DestroySessionJitContexts();
-        if (MOTAdaptor::m_engine) {
-            MOT::SessionContext* sessionContext = MOT::GetSessionManager()->GetSessionContext(sessionId);
-            if (sessionContext != nullptr) {
-                DestroySession(sessionContext);
+        if (!MOT::InitCurrentNumaNodeId()) {
+            MOT_LOG_ERROR("Failed to allocate NUMA node identifier");
+            if (throwError) {
+                ereport(ERROR, (errmodule(MOD_MOT), errmsg("Failed to allocate NUMA node identifier")));
             }
-            // since a call to on_proc_exit(destroyTxn) was probably missing, we should also cleanup thread-locals
-            // pay attention that if we got here it means the thread pool is disabled, so we must ensure thread-locals
-            // are cleaned up right now. Due to these complexities, onCurrentThreadEnding() was designed to be proof
-            // for repeated calls.
-            MOTAdaptor::m_engine->OnCurrentThreadEnding();
+            return false;
         }
     }
+    if (!MOT::InitMasstreeThreadinfo()) {
+        MOT_LOG_ERROR("Failed to initialize thread-local masstree info");
+        if (throwError) {
+            ereport(ERROR, (errmodule(MOD_MOT), errmsg("Failed to initialize thread-local masstree info")));
+        }
+        return false;
+    }
+    return true;
 }
 
-static void InitSessionCleanup()
+extern bool EnsureSafeThreadAccess(bool throwError /* = true */)
 {
-    pthread_key_create(&sessionCleanupKey, SessionCleanup);
-}
-
-static void DestroySessionCleanup()
-{
-    pthread_key_delete(sessionCleanupKey);
-}
-
-static void ScheduleSessionCleanup()
-{
-    pthread_setspecific(sessionCleanupKey, (const void*)(uint64_t)(u_sess->mot_cxt.session_id + 1));
-}
-
-static void CancelSessionCleanup()
-{
-    pthread_setspecific(sessionCleanupKey, nullptr);
+    return EnsureSafeThreadAccessInline(throwError);
 }
 
 static GaussdbConfigLoader* gaussdbConfigLoader = nullptr;
@@ -268,7 +157,7 @@ void MOTAdaptor::Init()
     }
 
     if (!m_engine->LoadConfig()) {
-        m_engine->RemoveConfigLoader(gaussdbConfigLoader);
+        (void)m_engine->RemoveConfigLoader(gaussdbConfigLoader);
         delete gaussdbConfigLoader;
         gaussdbConfigLoader = nullptr;
         MOT::MOTEngine::DestroyInstance();
@@ -285,17 +174,17 @@ void MOTAdaptor::Init()
     if ((g_instance.attr.attr_memory.max_process_memory < (int32)maxReserveMemoryKb) ||
         ((g_instance.attr.attr_memory.max_process_memory - maxReserveMemoryKb) < MIN_DYNAMIC_PROCESS_MEMORY)) {
         // we allow one extreme case: GaussDB is configured to its limit, and zero memory is left for us
-        if (maxReserveMemoryKb <= motCfg.MOT_MIN_MEMORY_USAGE_MB * KILO_BYTE) {
+        if (maxReserveMemoryKb <= MOT::MOTConfiguration::MOT_MIN_MEMORY_USAGE_MB * KILO_BYTE) {
             MOT_LOG_WARN("Allowing MOT to work in minimal memory mode");
         } else {
-            m_engine->RemoveConfigLoader(gaussdbConfigLoader);
+            (void)m_engine->RemoveConfigLoader(gaussdbConfigLoader);
             delete gaussdbConfigLoader;
             gaussdbConfigLoader = nullptr;
             MOT::MOTEngine::DestroyInstance();
             elog(FATAL,
                 "The value of pre-reserved memory for MOT engine is not reasonable: "
                 "Request for a maximum of %" PRIu64 " KB global memory, and %" PRIu64
-                " KB session memory (total of %" PRIu64 " KB) is invalid since max_process_memory is %u KB",
+                " KB session memory (total of %" PRIu64 " KB) is invalid since max_process_memory is %d KB",
                 globalMemoryKb,
                 localMemoryKb,
                 maxReserveMemoryKb,
@@ -304,7 +193,7 @@ void MOTAdaptor::Init()
     }
 
     if (!m_engine->Initialize()) {
-        m_engine->RemoveConfigLoader(gaussdbConfigLoader);
+        (void)m_engine->RemoveConfigLoader(gaussdbConfigLoader);
         delete gaussdbConfigLoader;
         gaussdbConfigLoader = nullptr;
         MOT::MOTEngine::DestroyInstance();
@@ -312,7 +201,7 @@ void MOTAdaptor::Init()
     }
 
     if (!JitExec::JitStatisticsProvider::CreateInstance()) {
-        m_engine->RemoveConfigLoader(gaussdbConfigLoader);
+        (void)m_engine->RemoveConfigLoader(gaussdbConfigLoader);
         delete gaussdbConfigLoader;
         gaussdbConfigLoader = nullptr;
         MOT::MOTEngine::DestroyInstance();
@@ -320,10 +209,17 @@ void MOTAdaptor::Init()
     }
 
     // make sure current thread is cleaned up properly when thread pool is enabled
-    EnsureSafeThreadAccessInline();
+    // avoid throwing errors on failure
+    if (!EnsureSafeThreadAccessInline(false)) {
+        (void)m_engine->RemoveConfigLoader(gaussdbConfigLoader);
+        delete gaussdbConfigLoader;
+        gaussdbConfigLoader = nullptr;
+        MOT::MOTEngine::DestroyInstance();
+        elog(FATAL, "Failed to initialize thread-local data.");
+    }
 
     if (motCfg.m_enableRedoLog && motCfg.m_loggerType == MOT::LoggerType::EXTERNAL_LOGGER) {
-        m_engine->GetRedoLogHandler()->SetLogger(&xlogger);
+        m_engine->GetRedoLogHandler()->SetLogger(&g_xlogger);
         m_engine->GetRedoLogHandler()->SetWalWakeupFunc(WakeupWalWriter);
     }
 
@@ -332,6 +228,10 @@ void MOTAdaptor::Init()
         InitSessionCleanup();
     }
     InitKeyOperStateMachine();
+
+    MOT_LOG_INFO("Switching to External snapshot manager");
+    m_engine->SetCSNManager(&g_snapshotMgr);
+
     m_initialized = true;
 }
 
@@ -354,12 +254,13 @@ void MOTAdaptor::Destroy()
     }
     DestroySessionDetailsMap();
     if (gaussdbConfigLoader != nullptr) {
-        m_engine->RemoveConfigLoader(gaussdbConfigLoader);
+        (void)m_engine->RemoveConfigLoader(gaussdbConfigLoader);
         delete gaussdbConfigLoader;
         gaussdbConfigLoader = nullptr;
     }
 
-    EnsureSafeThreadAccessInline();
+    // avoid throwing errors and ignore them at this phase
+    (void)EnsureSafeThreadAccessInline(false);
     MOT::MOTEngine::DestroyInstance();
     m_engine = nullptr;
     knl_thread_mot_init();  // reset all thread-locals, mandatory for standby switch-over
@@ -410,87 +311,10 @@ MOT::TxnManager* MOTAdaptor::InitTxnManager(
         }
 
         u_sess->mot_cxt.txn_manager = session_ctx->GetTxnManager();
-        elog(DEBUG1, "Init TXN_MAN for thread %u", MOTCurrThreadId);
+        elog(DEBUG1, "Init TXN_MAN for thread %" PRIu16, MOTCurrThreadId);
     }
 
     return u_sess->mot_cxt.txn_manager;
-}
-
-static void DestroySessionJitContexts()
-{
-    // we must release all JIT context objects associated with this session now.
-    // it seems that when thread pool is disabled, all cached plan sources for the session are not
-    // released explicitly, but rather implicitly as part of the release of the memory context of the session.
-    // in any case, we guard against repeated destruction of the JIT context by nullifying it
-    MOT_LOG_DEBUG("Cleaning up all JIT context objects for current session");
-    CachedPlanSource* psrc = u_sess->pcache_cxt.first_saved_plan;
-    while (psrc != nullptr) {
-        if (psrc->mot_jit_context != nullptr) {
-            MOT_LOG_DEBUG("DestroySessionJitContexts(): Calling DestroyJitContext(%p)", psrc->mot_jit_context);
-            JitExec::DestroyJitContext(psrc->mot_jit_context);
-            psrc->mot_jit_context = nullptr;
-        }
-        psrc = psrc->next_saved;
-    }
-    MOT_LOG_DEBUG("DONE Cleaning up all JIT context objects for current session");
-}
-
-/** @brief Notification from thread pool that a session ended (only when thread pool is ENABLED). */
-extern void MOTOnSessionClose()
-{
-    MOT_LOG_TRACE("Received session close notification (current session id: %u, current connection id: %u)",
-        u_sess->mot_cxt.session_id,
-        u_sess->mot_cxt.connection_id);
-    if (u_sess->mot_cxt.session_id != INVALID_SESSION_ID) {
-        ClearCurrentSessionDetails();
-        MOT_LOG_DEBUG("MOTOnSessionClose(): Calling DestroySessionJitContexts()");
-        DestroySessionJitContexts();
-        if (!MOTAdaptor::m_engine) {
-            MOT_LOG_ERROR("MOTOnSessionClose(): MOT engine is not initialized");
-        } else {
-            EnsureSafeThreadAccessInline();  // this is ok, it wil be cleaned up when thread exits
-            MOT::SessionContext* sessionContext = u_sess->mot_cxt.session_context;
-            if (sessionContext == nullptr) {
-                MOT_LOG_WARN("Received session close notification, but no current session is found. Current session id "
-                             "is %u. Request ignored.",
-                    u_sess->mot_cxt.session_id);
-            } else {
-                DestroySession(sessionContext);
-                MOT_ASSERT(u_sess->mot_cxt.session_id == INVALID_SESSION_ID);
-            }
-        }
-    }
-}
-
-/** @brief Notification from thread pool that a pooled thread ended (only when thread pool is ENABLED). */
-static void MOTOnThreadShutdown()
-{
-    if (!MOTAdaptor::m_initialized) {
-        return;
-    }
-
-    MOT_LOG_TRACE("Received thread shutdown notification");
-    if (!MOTAdaptor::m_engine) {
-        MOT_LOG_ERROR("MOTOnThreadShutdown(): MOT engine is not initialized");
-    } else {
-        MOTAdaptor::m_engine->OnCurrentThreadEnding();
-    }
-    knl_thread_mot_init();  // reset all thread locals
-}
-
-/**
- * @brief on_proc_exit() callback to handle thread-cleanup - regardless of whether thread pool is enabled or not.
- * registration to on_proc_exit() is triggered by first call to EnsureSafeThreadAccessInline().
- */
-static void MOTCleanupThread(int status, Datum ptr)
-{
-    MOT_ASSERT(g_instance.attr.attr_common.enable_thread_pool);
-    MOT_LOG_TRACE("Received thread cleanup notification (thread-pool ON)");
-
-    // when thread pool is used we just cleanup current thread
-    // this might be a duplicate because thread pool also calls MOTOnThreadShutdown() - this is still ok
-    // because we guard against repeated calls in MOTEngine::onCurrentThreadEnding()
-    MOTOnThreadShutdown();
 }
 
 void MOTAdaptor::DestroyTxn(int status, Datum ptr)
@@ -512,8 +336,10 @@ void MOTAdaptor::DestroyTxn(int status, Datum ptr)
     if (session != MOT_GET_CURRENT_SESSION_CONTEXT()) {
         MOT_LOG_WARN("Ignoring request to delete session context: already deleted");
     } else if (session != nullptr) {
-        elog(DEBUG1, "Destroy SessionContext, connection_id = %u \n", session->GetConnectionId());
-        EnsureSafeThreadAccessInline();  // may be accessed from new thread pool worker
+        elog(DEBUG1, "Destroy SessionContext, connection_id = %u", session->GetConnectionId());
+        // initialize thread data, since this call may be accessed from new thread pool worker
+        // avoid throwing errors and ignore them at this phase
+        (void)EnsureSafeThreadAccessInline(false);
         MOT::GcManager* gc = MOT_GET_CURRENT_SESSION_CONTEXT()->GetTxnManager()->GetGcSession();
         if (gc != nullptr) {
             gc->GcEndTxn();
@@ -527,7 +353,7 @@ void MOTAdaptor::DestroyTxn(int status, Datum ptr)
 
 MOT::RC MOTAdaptor::ValidateCommit()
 {
-    EnsureSafeThreadAccessInline();
+    (void)EnsureSafeThreadAccessInline();
     MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
     if (!IS_PGXC_COORDINATOR) {
         return txn->ValidateCommit();
@@ -539,7 +365,7 @@ MOT::RC MOTAdaptor::ValidateCommit()
 
 void MOTAdaptor::RecordCommit(uint64_t csn)
 {
-    EnsureSafeThreadAccessInline();
+    (void)EnsureSafeThreadAccessInline();
     MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
     txn->SetCommitSequenceNumber(csn);
     if (!IS_PGXC_COORDINATOR) {
@@ -551,7 +377,7 @@ void MOTAdaptor::RecordCommit(uint64_t csn)
 
 MOT::RC MOTAdaptor::Commit(uint64_t csn)
 {
-    EnsureSafeThreadAccessInline();
+    (void)EnsureSafeThreadAccessInline();
     MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
     txn->SetCommitSequenceNumber(csn);
     if (!IS_PGXC_COORDINATOR) {
@@ -562,9 +388,19 @@ MOT::RC MOTAdaptor::Commit(uint64_t csn)
     }
 }
 
+bool MOTAdaptor::IsTxnWriteSetEmpty()
+{
+    (void)EnsureSafeThreadAccessInline();
+    MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
+    if (txn->m_txnDdlAccess->Size() > 0 or txn->m_accessMgr->Size() > 0) {
+        return false;
+    }
+    return true;
+}
+
 void MOTAdaptor::EndTransaction()
 {
-    EnsureSafeThreadAccessInline();
+    (void)EnsureSafeThreadAccessInline();
     MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
     // Nothing to do in coordinator
     if (!IS_PGXC_COORDINATOR) {
@@ -574,7 +410,7 @@ void MOTAdaptor::EndTransaction()
 
 void MOTAdaptor::Rollback()
 {
-    EnsureSafeThreadAccessInline();
+    (void)EnsureSafeThreadAccessInline();
     MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
     if (!IS_PGXC_COORDINATOR) {
         txn->Rollback();
@@ -585,7 +421,7 @@ void MOTAdaptor::Rollback()
 
 MOT::RC MOTAdaptor::Prepare()
 {
-    EnsureSafeThreadAccessInline();
+    (void)EnsureSafeThreadAccessInline();
     MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
     if (!IS_PGXC_COORDINATOR) {
         return txn->Prepare();
@@ -597,7 +433,7 @@ MOT::RC MOTAdaptor::Prepare()
 
 void MOTAdaptor::CommitPrepared(uint64_t csn)
 {
-    EnsureSafeThreadAccessInline();
+    (void)EnsureSafeThreadAccessInline();
     MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
     txn->SetCommitSequenceNumber(csn);
     if (!IS_PGXC_COORDINATOR) {
@@ -609,7 +445,7 @@ void MOTAdaptor::CommitPrepared(uint64_t csn)
 
 void MOTAdaptor::RollbackPrepared()
 {
-    EnsureSafeThreadAccessInline();
+    (void)EnsureSafeThreadAccessInline();
     MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
     if (!IS_PGXC_COORDINATOR) {
         txn->RollbackPrepared();
@@ -620,7 +456,7 @@ void MOTAdaptor::RollbackPrepared()
 
 MOT::RC MOTAdaptor::InsertRow(MOTFdwStateSt* fdwState, TupleTableSlot* slot)
 {
-    EnsureSafeThreadAccessInline();
+    (void)EnsureSafeThreadAccessInline();
     uint8_t* newRowData = nullptr;
     fdwState->m_currTxn->SetTransactionId(fdwState->m_txnId);
     MOT::Table* table = fdwState->m_table;
@@ -643,8 +479,10 @@ MOT::RC MOTAdaptor::InsertRow(MOTFdwStateSt* fdwState, TupleTableSlot* slot)
 
 MOT::RC MOTAdaptor::UpdateRow(MOTFdwStateSt* fdwState, TupleTableSlot* slot, MOT::Row* currRow)
 {
-    EnsureSafeThreadAccessInline();
+    (void)EnsureSafeThreadAccessInline();
     MOT::RC rc;
+    MOT::TxnIxColUpdate colUpd(
+        fdwState->m_table, fdwState->m_currTxn, fdwState->m_attrsModified, fdwState->m_hasIndexedColUpdate);
 
     do {
         fdwState->m_currTxn->SetTransactionId(fdwState->m_txnId);
@@ -652,11 +490,25 @@ MOT::RC MOTAdaptor::UpdateRow(MOTFdwStateSt* fdwState, TupleTableSlot* slot, MOT
         if (rc != MOT::RC::RC_OK) {
             break;
         }
-        uint8_t* rowData = const_cast<uint8_t*>(currRow->GetData());
+        MOT::Row* currDraft = fdwState->m_currTxn->GetLastAccessedDraft();
+        if (unlikely(fdwState->m_hasIndexedColUpdate != MOT::UpdateIndexColumnType::UPDATE_COLUMN_NONE)) {
+            rc = colUpd.InitAndBuildOldKeys(currDraft);
+            if (rc != MOT::RC::RC_OK) {
+                break;
+            }
+        }
+        uint8_t* rowData = const_cast<uint8_t*>(currDraft->GetData());
         PackUpdateRow(slot, fdwState->m_table, fdwState->m_attrsModified, rowData);
         MOT::BitmapSet modified_columns(fdwState->m_attrsModified, fdwState->m_table->GetFieldCount() - 1);
-
-        rc = fdwState->m_currTxn->OverwriteRow(currRow, modified_columns);
+        if (unlikely(fdwState->m_hasIndexedColUpdate)) {
+            rc = colUpd.FilterColumnUpdate(currDraft);
+            if (rc != MOT::RC::RC_OK) {
+                break;
+            }
+            rc = fdwState->m_currTxn->UpdateRow(modified_columns, &colUpd);
+        } else {
+            rc = fdwState->m_currTxn->OverwriteRow(currDraft, modified_columns);
+        }
     } while (0);
 
     return rc;
@@ -664,10 +516,19 @@ MOT::RC MOTAdaptor::UpdateRow(MOTFdwStateSt* fdwState, TupleTableSlot* slot, MOT
 
 MOT::RC MOTAdaptor::DeleteRow(MOTFdwStateSt* fdwState, TupleTableSlot* slot)
 {
-    EnsureSafeThreadAccessInline();
+    (void)EnsureSafeThreadAccessInline();
     fdwState->m_currTxn->SetTransactionId(fdwState->m_txnId);
     MOT::RC rc = fdwState->m_currTxn->DeleteLastRow();
     return rc;
+}
+
+bool MOTAdaptor::IsColumnIndexed(int16_t colId, MOT::Table* table)
+{
+    MOT::Column* col = table->GetField(colId);
+    if (col != nullptr && col->IsUsedByIndex()) {
+        return true;
+    }
+    return false;
 }
 
 // NOTE: colId starts from 1
@@ -705,8 +566,9 @@ MatchIndex* MOTAdaptor::GetBestMatchIndex(MOTFdwStateSt* festate, MatchIndexArr*
             double cost = marr->m_idx[i]->GetCost(numClauses);
             if (cost < bestCost) {
                 if (bestI < MAX_NUM_INDEXES) {
-                    if (marr->m_idx[i]->GetNumMatchedCols() < marr->m_idx[bestI]->GetNumMatchedCols())
+                    if (marr->m_idx[i]->GetNumMatchedCols() < marr->m_idx[bestI]->GetNumMatchedCols()) {
                         continue;
+                    }
                 }
                 bestCost = cost;
                 bestI = i;
@@ -727,13 +589,15 @@ MatchIndex* MOTAdaptor::GetBestMatchIndex(MOTFdwStateSt* festate, MatchIndexArr*
 
                         if (j > 0 && best->m_opers[k][j - 1] != KEY_OPER::READ_KEY_EXACT &&
                             !list_member(festate->m_localConds, best->m_parentColMatch[k][j])) {
-                            if (setLocal)
+                            if (setLocal) {
                                 festate->m_localConds = lappend(festate->m_localConds, best->m_parentColMatch[k][j]);
+                            }
                         }
                     } else if (!list_member(festate->m_localConds, best->m_parentColMatch[k][j]) &&
                                !list_member(best->m_remoteCondsOrig, best->m_parentColMatch[k][j])) {
-                        if (setLocal)
+                        if (setLocal) {
                             festate->m_localConds = lappend(festate->m_localConds, best->m_parentColMatch[k][j]);
+                        }
                         best->m_colMatch[k][j] = nullptr;
                         best->m_parentColMatch[k][j] = nullptr;
                     }
@@ -781,7 +645,7 @@ void MOTAdaptor::OpenCursor(Relation rel, MOTFdwStateSt* festate)
     bool forwardDirection = true;
     bool found = false;
 
-    EnsureSafeThreadAccessInline();
+    (void)EnsureSafeThreadAccessInline();
 
     // GetTableByExternalId cannot return nullptr at this stage, because it is protected by envelope's table lock.
     festate->m_table = festate->m_currTxn->GetTableByExternalId(rel->rd_id);
@@ -790,57 +654,39 @@ void MOTAdaptor::OpenCursor(Relation rel, MOTFdwStateSt* festate)
         // this scan all keys case
         // we need to open both cursors on start and end to prevent
         // infinite scan in case "insert into table A ... as select * from table A ...
-        if (festate->m_bestIx == nullptr) {
-            int fIx, bIx;
-            uint8_t* buf = nullptr;
+        if (festate->m_bestIx == nullptr || festate->m_bestIx->m_fullScan) {
             // assumption that primary index cannot be changed, can take it from
             // table and not look on ddl_access
-            MOT::Index* ix = festate->m_table->GetPrimaryIndex();
+            MOT::Index* ix = festate->m_bestIx ? festate->m_bestIx->m_ix : festate->m_table->GetPrimaryIndex();
             uint16_t keyLength = ix->GetKeyLength();
 
-            if (festate->m_order == SORTDIR_ENUM::SORTDIR_ASC) {
-                fIx = 0;
-                bIx = 1;
+            if (festate->m_order == SortDir::SORTDIR_ASC) {
+                festate->m_cursor[0] = ix->Begin(festate->m_currTxn->GetThdId());
                 festate->m_forwardDirectionScan = true;
+                festate->m_cursor[1] = nullptr;
             } else {
-                fIx = 1;
-                bIx = 0;
+                festate->m_stateKey[0].InitKey(keyLength);
+                uint8_t* buf = festate->m_stateKey[0].GetKeyBuf();
+                errno_t erc = memset_s(buf, keyLength, 0xff, keyLength);
+                securec_check(erc, "\0", "\0");
+                festate->m_cursor[0] =
+                    ix->Search(&festate->m_stateKey[0], false, false, festate->m_currTxn->GetThdId(), found);
                 festate->m_forwardDirectionScan = false;
+                festate->m_cursor[1] = nullptr;
             }
-
-            festate->m_cursor[fIx] = festate->m_table->Begin(festate->m_currTxn->GetThdId());
-
-            festate->m_stateKey[bIx].InitKey(keyLength);
-            buf = festate->m_stateKey[bIx].GetKeyBuf();
-            errno_t erc = memset_s(buf, keyLength, 0xff, keyLength);
-            securec_check(erc, "\0", "\0");
-            festate->m_cursor[bIx] =
-                ix->Search(&festate->m_stateKey[bIx], false, false, festate->m_currTxn->GetThdId(), found);
             break;
         }
 
         for (int i = 0; i < 2; i++) {
             if (i == 1 && festate->m_bestIx->m_end < 0) {
-                if (festate->m_forwardDirectionScan) {
-                    uint8_t* buf = nullptr;
-                    MOT::Index* ix = festate->m_bestIx->m_ix;
-                    uint16_t keyLength = ix->GetKeyLength();
-
-                    festate->m_stateKey[1].InitKey(keyLength);
-                    buf = festate->m_stateKey[1].GetKeyBuf();
-                    errno_t erc = memset_s(buf, keyLength, 0xff, keyLength);
-                    securec_check(erc, "\0", "\0");
-                    festate->m_cursor[1] =
-                        ix->Search(&festate->m_stateKey[1], false, false, festate->m_currTxn->GetThdId(), found);
-                } else {
-                    festate->m_cursor[1] = festate->m_bestIx->m_ix->Begin(festate->m_currTxn->GetThdId());
-                }
+                festate->m_cursor[1] = nullptr;
                 break;
             }
 
             KEY_OPER oper = (i == 0 ? festate->m_bestIx->m_ixOpers[0] : festate->m_bestIx->m_ixOpers[1]);
 
-            forwardDirection = ((oper & ~KEY_OPER_PREFIX_BITMASK) < KEY_OPER::READ_KEY_OR_PREV);
+            forwardDirection = ((static_cast<uint8_t>(oper) & ~KEY_OPER_PREFIX_BITMASK) <
+                                static_cast<uint8_t>(KEY_OPER::READ_KEY_OR_PREV));
 
             CreateKeyBuffer(rel, festate, i);
 
@@ -878,7 +724,7 @@ void MOTAdaptor::OpenCursor(Relation rel, MOTFdwStateSt* festate)
                     break;
 
                 default:
-                    elog(INFO, "Invalid key operation: %u", oper);
+                    elog(INFO, "Invalid key operation: %" PRIu8, static_cast<uint8_t>(oper));
                     break;
             }
 
@@ -893,6 +739,11 @@ void MOTAdaptor::OpenCursor(Relation rel, MOTFdwStateSt* festate)
             }
         }
     } while (0);
+    for (int i = 0; i < 2; i++) {
+        if (festate->m_cursor[i] != nullptr) {
+            festate->m_currTxn->m_queryState[(uint64_t)festate->m_cursor[i]] = (uint64_t)(festate->m_cursor[i]);
+        }
+    }
 }
 
 static void VarLenFieldType(
@@ -913,7 +764,7 @@ static void VarLenFieldType(
                 }
                 /* fall through */
             case 'e':
-#ifdef USE_ASSERT_CHECKING
+#ifdef MOT_SUPPORT_TEXT_FIELD
                 if (typoid == TEXTOID)
                     *typeLen = colLen = MAX_VARCHAR_LEN;
 #endif
@@ -1023,7 +874,7 @@ static MOT::RC TableFieldType(
     return res;
 }
 
-void MOTAdaptor::ValidateCreateIndex(IndexStmt* stmt, MOT::Table* table, MOT::TxnManager* txn)
+static void ValidateCreateIndex(IndexStmt* stmt, MOT::Table* table, MOT::TxnManager* txn)
 {
     if (stmt->primary) {
         if (!table->IsTableEmpty(txn->GetThdId())) {
@@ -1032,19 +883,16 @@ void MOTAdaptor::ValidateCreateIndex(IndexStmt* stmt, MOT::Table* table, MOT::Tx
                     errcode(ERRCODE_FDW_ERROR),
                     errmsg(
                         "Table %s is not empty, create primary index is not allowed", table->GetTableName().c_str())));
-            return;
         }
-    } else if (table->GetNumIndexes() == MAX_NUM_INDEXES) {
+    } else if (table->GetNumIndexes() >= MAX_NUM_INDEXES) {
         ereport(ERROR,
             (errmodule(MOD_MOT),
                 errcode(ERRCODE_FDW_TOO_MANY_INDEXES),
                 errmsg("Can not create index, max number of indexes %u reached", MAX_NUM_INDEXES)));
-        return;
     }
 
     if (strcmp(stmt->accessMethod, "btree") != 0) {
         ereport(ERROR, (errmodule(MOD_MOT), errmsg("MOT supports indexes of type BTREE only (btree or btree_art)")));
-        return;
     }
 
     if (list_length(stmt->indexParams) > (int)MAX_KEY_COLUMNS) {
@@ -1054,14 +902,13 @@ void MOTAdaptor::ValidateCreateIndex(IndexStmt* stmt, MOT::Table* table, MOT::Tx
                 errmsg("Can't create index"),
                 errdetail(
                     "Number of columns exceeds %d max allowed %u", list_length(stmt->indexParams), MAX_KEY_COLUMNS)));
-        return;
     }
 }
 
 MOT::RC MOTAdaptor::CreateIndex(IndexStmt* stmt, ::TransactionId tid)
 {
     MOT::RC res;
-    EnsureSafeThreadAccessInline();
+    (void)EnsureSafeThreadAccessInline();
     MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
     txn->SetTransactionId(tid);
     MOT::Table* table = txn->GetTableByExternalId(stmt->relation->foreignOid);
@@ -1074,7 +921,18 @@ MOT::RC MOTAdaptor::CreateIndex(IndexStmt* stmt, ::TransactionId tid)
         return MOT::RC_ERROR;
     }
 
-    ValidateCreateIndex(stmt, table, txn);
+    table->GetOrigTable()->WrLock();
+
+    PG_TRY();
+    {
+        ValidateCreateIndex(stmt, table, txn);
+    }
+    PG_CATCH();
+    {
+        table->GetOrigTable()->Unlock();
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
 
     elog(LOG,
         "creating %s index %s (OID: %u), for table: %s",
@@ -1093,23 +951,45 @@ MOT::RC MOTAdaptor::CreateIndex(IndexStmt* stmt, ::TransactionId tid)
     // check if we have primary and delete previous definition
     if (stmt->primary) {
         index_order = MOT::IndexOrder::INDEX_ORDER_PRIMARY;
+    } else {
+        if (stmt->unique) {
+            index_order = MOT::IndexOrder::INDEX_ORDER_SECONDARY_UNIQUE;
+        }
     }
 
     index = MOT::IndexFactory::CreateIndex(index_order, indexing_method, flavor);
     if (index == nullptr) {
+        table->GetOrigTable()->Unlock();
         report_pg_error(MOT::RC_ABORT);
         return MOT::RC_ABORT;
     }
     index->SetExtId(stmt->indexOid);
-    index->SetNumTableFields((uint32_t)table->GetFieldCount());
+    if (!index->SetNumTableFields((uint32_t)table->GetFieldCount())) {
+        table->GetOrigTable()->Unlock();
+        delete index;
+        report_pg_error(MOT::RC_ABORT);
+        return MOT::RC_ABORT;
+    }
+
     int count = 0;
 
     ListCell* lc = nullptr;
     foreach (lc, stmt->indexParams) {
         IndexElem* ielem = (IndexElem*)lfirst(lc);
+        if (ielem->expr != nullptr) {
+            table->GetOrigTable()->Unlock();
+            delete index;
+            ereport(ERROR,
+                (errmodule(MOD_MOT),
+                    errcode(ERRCODE_INVALID_COLUMN_DEFINITION),
+                    errmsg("Can't create index on field"),
+                    errdetail("Expressions are not supported")));
+            return MOT::RC_ERROR;
+        }
 
         uint64_t colid = table->GetFieldId((ielem->name != nullptr ? ielem->name : ielem->indexcolname));
         if (colid == (uint64_t)-1) {  // invalid column
+            table->GetOrigTable()->Unlock();
             delete index;
             ereport(ERROR,
                 (errmodule(MOD_MOT),
@@ -1123,6 +1003,7 @@ MOT::RC MOTAdaptor::CreateIndex(IndexStmt* stmt, ::TransactionId tid)
 
         // Temp solution for NULLs, do not allow index creation on column that does not carry not null flag
         if (!MOT::GetGlobalConfiguration().m_allowIndexOnNullableColumn && !col->m_isNotNull) {
+            table->GetOrigTable()->Unlock();
             delete index;
             ereport(ERROR,
                 (errmodule(MOD_MOT),
@@ -1134,6 +1015,7 @@ MOT::RC MOTAdaptor::CreateIndex(IndexStmt* stmt, ::TransactionId tid)
 
         // Temp solution, we have to support DECIMAL and NUMERIC indexes as well
         if (col->m_type == MOT::MOT_CATALOG_FIELD_TYPES::MOT_TYPE_DECIMAL) {
+            table->GetOrigTable()->Unlock();
             delete index;
             ereport(ERROR,
                 (errmodule(MOD_MOT),
@@ -1143,6 +1025,7 @@ MOT::RC MOTAdaptor::CreateIndex(IndexStmt* stmt, ::TransactionId tid)
             return MOT::RC_ERROR;
         }
         if (col->m_keySize > MAX_KEY_SIZE) {
+            table->GetOrigTable()->Unlock();
             delete index;
             ereport(ERROR,
                 (errmodule(MOD_MOT),
@@ -1160,12 +1043,18 @@ MOT::RC MOTAdaptor::CreateIndex(IndexStmt* stmt, ::TransactionId tid)
     index->SetNumIndexFields(count);
 
     if ((res = index->IndexInit(keyLength, stmt->unique, stmt->idxname, nullptr)) != MOT::RC_OK) {
+        table->GetOrigTable()->Unlock();
         delete index;
         report_pg_error(res);
         return res;
     }
 
     res = txn->CreateIndex(table, index, stmt->primary);
+    if (res == MOT::RC_OK) {
+        MOT::MOTEngine::GetInstance()->NotifyDDLEvent(
+            index->GetExtId(), MOT::DDL_ACCESS_CREATE_INDEX, MOT::TxnDDLPhase::TXN_DDL_PHASE_EXEC);
+    }
+    table->GetOrigTable()->Unlock();
     if (res != MOT::RC_OK) {
         delete index;
         if (res == MOT::RC_TABLE_EXCEEDS_MAX_INDEXES) {
@@ -1174,13 +1063,61 @@ MOT::RC MOTAdaptor::CreateIndex(IndexStmt* stmt, ::TransactionId tid)
                     errcode(ERRCODE_FDW_TOO_MANY_INDEXES),
                     errmsg("Can not create index, max number of indexes %u reached", MAX_NUM_INDEXES)));
             return MOT::RC_TABLE_EXCEEDS_MAX_INDEXES;
-        } else {
-            report_pg_error(txn->m_err, stmt->idxname, txn->m_errMsgBuf);
-            return MOT::RC_UNIQUE_VIOLATION;
         }
+        report_pg_error(txn->m_err, stmt->idxname, txn->m_errMsgBuf);
+        return MOT::RC_UNIQUE_VIOLATION;
     }
 
     return MOT::RC_OK;
+}
+
+static void CalculateDecimalColumnTypeLen(MOT::MOT_CATALOG_FIELD_TYPES colType, ColumnDef* colDef, int16& typeLen)
+{
+    if (colType == MOT::MOT_CATALOG_FIELD_TYPES::MOT_TYPE_DECIMAL) {
+        if (list_length(colDef->typname->typmods) > 0) {
+            bool canMakeShort = true;
+            int precision = 0;
+            int scale = 0;
+            int count = 0;
+
+            ListCell* c = nullptr;
+            foreach (c, colDef->typname->typmods) {
+                Node* d = (Node*)lfirst(c);
+                if (!IsA(d, A_Const)) {
+                    canMakeShort = false;
+                    break;
+                }
+                A_Const* ac = (A_Const*)d;
+
+                if (ac->val.type != T_Integer) {
+                    canMakeShort = false;
+                    break;
+                }
+
+                if (count == 0) {
+                    precision = ac->val.val.ival;
+                } else {
+                    scale = ac->val.val.ival;
+                }
+
+                count++;
+            }
+
+            if (canMakeShort) {
+                int len = 0;
+
+                len += scale / DEC_DIGITS;
+                len += (scale % DEC_DIGITS > 0 ? 1 : 0);
+
+                precision -= scale;
+
+                len += precision / DEC_DIGITS;
+                len += (precision % DEC_DIGITS > 0 ? 1 : 0);
+
+                typeLen = sizeof(MOT::DecimalSt) + len * sizeof(NumericDigit);
+            }
+        }
+    }
 }
 
 void MOTAdaptor::AddTableColumns(MOT::Table* table, List* tableElts, bool& hasBlob)
@@ -1214,51 +1151,7 @@ void MOTAdaptor::AddTableColumns(MOT::Table* table, List* tableElts, bool& hasBl
         }
         hasBlob |= isBlob;
 
-        if (colType == MOT::MOT_CATALOG_FIELD_TYPES::MOT_TYPE_DECIMAL) {
-            if (list_length(colDef->typname->typmods) > 0) {
-                bool canMakeShort = true;
-                int precision = 0;
-                int scale = 0;
-                int count = 0;
-
-                ListCell* c = nullptr;
-                foreach (c, colDef->typname->typmods) {
-                    Node* d = (Node*)lfirst(c);
-                    if (!IsA(d, A_Const)) {
-                        canMakeShort = false;
-                        break;
-                    }
-                    A_Const* ac = (A_Const*)d;
-
-                    if (ac->val.type != T_Integer) {
-                        canMakeShort = false;
-                        break;
-                    }
-
-                    if (count == 0) {
-                        precision = ac->val.val.ival;
-                    } else {
-                        scale = ac->val.val.ival;
-                    }
-
-                    count++;
-                }
-
-                if (canMakeShort) {
-                    int len = 0;
-
-                    len += scale / DEC_DIGITS;
-                    len += (scale % DEC_DIGITS > 0 ? 1 : 0);
-
-                    precision -= scale;
-
-                    len += precision / DEC_DIGITS;
-                    len += (precision % DEC_DIGITS > 0 ? 1 : 0);
-
-                    typeLen = sizeof(MOT::DecimalSt) + len * sizeof(NumericDigit);
-                }
-            }
-        }
+        CalculateDecimalColumnTypeLen(colType, colDef, typeLen);
 
         res = table->AddColumn(colDef->colname, typeLen, colType, colDef->is_not_null, typoid);
         if (res != MOT::RC_OK) {
@@ -1274,7 +1167,7 @@ MOT::RC MOTAdaptor::CreateTable(CreateForeignTableStmt* stmt, ::TransactionId ti
 {
     bool hasBlob = false;
     MOT::Index* primaryIdx = nullptr;
-    EnsureSafeThreadAccessInline();
+    (void)EnsureSafeThreadAccessInline();
     MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__, tid);
     MOT::Table* table = nullptr;
     MOT::RC res = MOT::RC_ERROR;
@@ -1305,16 +1198,16 @@ MOT::RC MOTAdaptor::CreateTable(CreateForeignTableStmt* stmt, ::TransactionId ti
                     errmsg("database with OID %u does not exist", u_sess->proc_cxt.MyDatabaseId)));
             break;
         }
-        tname.append(dbname);
-        tname.append("_");
+        (void)tname.append(dbname);
+        (void)tname.append("_");
         if (stmt->base.relation->schemaname != nullptr) {
-            tname.append(stmt->base.relation->schemaname);
+            (void)tname.append(stmt->base.relation->schemaname);
         } else {
-            tname.append("#");
+            (void)tname.append("#");
         }
 
-        tname.append("_");
-        tname.append(stmt->base.relation->relname);
+        (void)tname.append("_");
+        (void)tname.append(stmt->base.relation->relname);
 
         if (!table->Init(stmt->base.relation->relname, tname.c_str(), columnCount, stmt->base.relation->foreignOid)) {
             delete table;
@@ -1362,6 +1255,13 @@ MOT::RC MOTAdaptor::CreateTable(CreateForeignTableStmt* stmt, ::TransactionId ti
             break;
         }
 
+        if (!table->InitTombStonePool()) {
+            delete table;
+            table = nullptr;
+            report_pg_error(MOT::RC_MEMORY_ALLOCATION_ERROR);
+            break;
+        }
+
         elog(LOG,
             "creating table %s (OID: %u), num columns: %u, tuple: %u",
             table->GetLongTableName().c_str(),
@@ -1381,12 +1281,19 @@ MOT::RC MOTAdaptor::CreateTable(CreateForeignTableStmt* stmt, ::TransactionId ti
         primaryIdx = MOT::IndexFactory::CreatePrimaryIndexEx(
             MOT::IndexingMethod::INDEXING_METHOD_TREE, DEFAULT_TREE_FLAVOR, 8, table->GetLongTableName(), res, nullptr);
         if (res != MOT::RC_OK) {
-            txn->DropTable(table);
+            (void)txn->DropTable(table);
             report_pg_error(res);
             break;
         }
         primaryIdx->SetExtId(stmt->base.relation->foreignOid + 1);
-        primaryIdx->SetNumTableFields(columnCount);
+        if (!primaryIdx->SetNumTableFields(columnCount)) {
+            res = MOT::RC_MEMORY_ALLOCATION_ERROR;
+            (void)txn->DropTable(table);
+            delete primaryIdx;
+            report_pg_error(res);
+            break;
+        }
+
         primaryIdx->SetNumIndexFields(1);
         primaryIdx->SetLenghtKeyFields(0, -1, 8);
         primaryIdx->SetFakePrimary(true);
@@ -1397,11 +1304,14 @@ MOT::RC MOTAdaptor::CreateTable(CreateForeignTableStmt* stmt, ::TransactionId ti
 
     if (res != MOT::RC_OK) {
         if (table != nullptr) {
-            txn->DropTable(table);
+            (void)txn->DropTable(table);
         }
         if (primaryIdx != nullptr) {
             delete primaryIdx;
         }
+    } else {
+        MOT::MOTEngine::GetInstance()->NotifyDDLEvent(
+            table->GetTableExId(), MOT::DDL_ACCESS_CREATE_TABLE, MOT::TxnDDLPhase::TXN_DDL_PHASE_EXEC);
     }
 
     return res;
@@ -1410,7 +1320,7 @@ MOT::RC MOTAdaptor::CreateTable(CreateForeignTableStmt* stmt, ::TransactionId ti
 MOT::RC MOTAdaptor::DropIndex(DropForeignStmt* stmt, ::TransactionId tid)
 {
     MOT::RC res = MOT::RC_OK;
-    EnsureSafeThreadAccessInline();
+    (void)EnsureSafeThreadAccessInline();
     MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
     txn->SetTransactionId(tid);
 
@@ -1418,8 +1328,18 @@ MOT::RC MOTAdaptor::DropIndex(DropForeignStmt* stmt, ::TransactionId tid)
 
     // get table
     do {
-        MOT::Index* index = txn->GetIndexByExternalId(stmt->reloid, stmt->indexoid);
+        MOT::Table* table = txn->GetTableByExternalId(stmt->reloid);
+        if (table == nullptr) {
+            ereport(ERROR,
+                (errmodule(MOD_MOT),
+                    errcode(ERRCODE_UNDEFINED_TABLE),
+                    errmsg("Table not found for oid %u", stmt->reloid)));
+            return MOT::RC_ERROR;
+        }
+        table->GetOrigTable()->WrLock();
+        MOT::Index* index = table->GetIndexByExtId(stmt->indexoid);
         if (index == nullptr) {
+            table->GetOrigTable()->Unlock();
             elog(LOG,
                 "Drop index %s error, index oid %u of table oid %u not found.",
                 stmt->name,
@@ -1427,14 +1347,15 @@ MOT::RC MOTAdaptor::DropIndex(DropForeignStmt* stmt, ::TransactionId tid)
                 stmt->reloid);
             res = MOT::RC_INDEX_NOT_FOUND;
         } else if (index->IsPrimaryKey()) {
+            table->GetOrigTable()->Unlock();
             elog(LOG, "Drop primary index is not supported, failed to drop index: %s", stmt->name);
         } else {
-            MOT::Table* table = index->GetTable();
-            uint64_t table_relid = table->GetTableExId();
-            JitExec::PurgeJitSourceCache(table_relid, false);
-            table->WrLock();
             res = txn->DropIndex(index);
-            table->Unlock();
+            if (res == MOT::RC_OK) {
+                MOT::MOTEngine::GetInstance()->NotifyDDLEvent(
+                    table->GetTableExId(), MOT::DDL_ACCESS_DROP_INDEX, MOT::TxnDDLPhase::TXN_DDL_PHASE_EXEC);
+            }
+            table->GetOrigTable()->Unlock();
         }
     } while (0);
 
@@ -1455,12 +1376,238 @@ MOT::RC MOTAdaptor::DropTable(DropForeignStmt* stmt, ::TransactionId tid)
             res = MOT::RC_TABLE_NOT_FOUND;
             elog(LOG, "Drop table %s error, table oid %u not found.", stmt->name, stmt->reloid);
         } else {
-            uint64_t table_relid = tab->GetTableExId();
-            JitExec::PurgeJitSourceCache(table_relid, false);
+            tab->GetOrigTable()->WrLock();
             res = txn->DropTable(tab);
+            if (res == MOT::RC_OK) {
+                MOT::MOTEngine::GetInstance()->NotifyDDLEvent(
+                    tab->GetTableExId(), MOT::DDL_ACCESS_DROP_TABLE, MOT::TxnDDLPhase::TXN_DDL_PHASE_EXEC);
+            }
+            tab->GetOrigTable()->Unlock();
         }
     } while (0);
 
+    return res;
+}
+
+MOT::RC MOTAdaptor::AlterTableAddColumn(AlterForeingTableCmd* cmd, TransactionId tid)
+{
+    MOT::RC res = MOT::RC_OK;
+    MOT::Table* tab = nullptr;
+    MOT::Column* newColumn = nullptr;
+    int16 typeLen = 0;
+    ColumnDef* colDef = (ColumnDef*)cmd->def;
+    (void)EnsureSafeThreadAccessInline();
+
+    MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
+    txn->SetTransactionId(tid);
+    do {
+        bool isBlob = false;
+        Oid typoid = InvalidOid;
+        MOT::MOT_CATALOG_FIELD_TYPES colType;
+        tab = txn->GetTableByExternalId(cmd->rel->rd_id);
+        if (tab == nullptr) {
+            elog(LOG,
+                "Alter table add column %s error, table oid %u not found.",
+                NameStr(cmd->rel->rd_rel->relname),
+                cmd->rel->rd_id);
+            break;
+        }
+
+        res = TableFieldType(colDef, colType, &typeLen, typoid, isBlob);
+        if (res != MOT::RC_OK) {
+            report_pg_error(res, colDef, (void*)(int64)typeLen);
+            break;
+        }
+
+        CalculateDecimalColumnTypeLen(colType, colDef, typeLen);
+
+        // check default value
+        size_t dftSize = 0;
+        uintptr_t dftSrc = 0;
+        Datum dftValue = 0;
+        bytea* txt = nullptr;
+        bool shouldFreeTxt = false;
+        bool isNull = false;
+        bool hasDefault = false;
+        char buf[DECIMAL_MAX_SIZE];
+        MOT::DecimalSt* d = (MOT::DecimalSt*)buf;
+        if (cmd->defValue != nullptr) {
+            if (contain_volatile_functions((Node*)cmd->defValue)) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_FDW_OPERATION_NOT_SUPPORTED),
+                        errmodule(MOD_MOT),
+                        errmsg("Add column does not support volatile default value")));
+                break;
+            }
+
+            EState* estate = CreateExecutorState();
+            ExprState* exprstate = ExecInitExpr(expression_planner(cmd->defValue), NULL);
+            ExprContext* econtext = GetPerTupleExprContext(estate);
+
+            MemoryContext newcxt = GetPerTupleMemoryContext(estate);
+            MemoryContext oldcxt = MemoryContextSwitchTo(newcxt);
+            dftValue = ExecEvalExpr(exprstate, econtext, &isNull, NULL);
+            (void)MemoryContextSwitchTo(oldcxt);
+            if (!isNull) {
+                hasDefault = true;
+                switch (exprstate->resultType) {
+                    case BYTEAOID:
+                    case TEXTOID:
+                    case VARCHAROID:
+                    case CLOBOID:
+                    case BPCHAROID: {
+                        txt = DatumGetByteaP(dftValue);
+                        dftSize = VARSIZE(txt) - VARHDRSZ;  // includes header len VARHDRSZ
+                        dftSrc = (uintptr_t)VARDATA(txt);
+                        shouldFreeTxt = true;
+                        break;
+                    }
+                    case NUMERICOID: {
+                        Numeric n = DatumGetNumeric(dftValue);
+                        if (NUMERIC_NDIGITS(n) > DECIMAL_MAX_DIGITS) {
+                            ereport(ERROR,
+                                (errmodule(MOD_MOT),
+                                    errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                                    errmsg("Value exceeds maximum precision: %d", NUMERIC_MAX_PRECISION)));
+                            break;
+                        }
+                        PGNumericToMOT(n, *d);
+                        dftSize = DECIMAL_SIZE(d);
+                        dftSrc = (uintptr_t)d;
+                        break;
+                    }
+                    default:
+                        dftSize = typeLen;
+                        dftSrc = (uintptr_t)dftValue;
+                        break;
+                }
+            }
+            FreeExecutorState(estate);
+        }
+        tab->GetOrigTable()->WrLock();
+        res = tab->CreateColumn(
+            newColumn, colDef->colname, typeLen, colType, colDef->is_not_null, typoid, hasDefault, dftSrc, dftSize);
+        if (res != MOT::RC_OK) {
+            tab->GetOrigTable()->Unlock();
+            report_pg_error(res, colDef, (void*)(int64)typeLen);
+            break;
+        }
+        if (newColumn != nullptr) {
+            res = txn->AlterTableAddColumn(tab, newColumn);
+            if (res == MOT::RC_OK) {
+                MOT::MOTEngine::GetInstance()->NotifyDDLEvent(
+                    tab->GetTableExId(), MOT::DDL_ACCESS_ADD_COLUMN, MOT::TxnDDLPhase::TXN_DDL_PHASE_EXEC);
+            }
+        }
+        tab->GetOrigTable()->Unlock();
+        // free if allocated
+        if (shouldFreeTxt && (char*)dftSrc != (char*)txt) {
+            pfree(txt);
+        }
+    } while (false);
+    if (res != MOT::RC_OK) {
+        if (newColumn != nullptr) {
+            delete newColumn;
+        }
+        report_pg_error(res, colDef, (void*)tab);
+    }
+    return res;
+}
+
+MOT::RC MOTAdaptor::AlterTableDropColumn(AlterForeingTableCmd* cmd, TransactionId tid)
+{
+    MOT::RC res = MOT::RC_OK;
+    (void)EnsureSafeThreadAccessInline();
+
+    MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
+    txn->SetTransactionId(tid);
+    do {
+        MOT::Table* tab = txn->GetTableByExternalId(cmd->rel->rd_id);
+        if (tab == nullptr) {
+            elog(LOG,
+                "Alter table add column %s error, table oid %u not found.",
+                NameStr(cmd->rel->rd_rel->relname),
+                cmd->rel->rd_id);
+            break;
+        }
+        tab->GetOrigTable()->WrLock();
+        uint64_t colId = tab->GetFieldId(cmd->name);
+        if (colId == (uint64_t)-1) {
+            tab->GetOrigTable()->Unlock();
+            ereport(ERROR,
+                (errcode(ERRCODE_FDW_COLUMN_NAME_NOT_FOUND),
+                    errmodule(MOD_MOT),
+                    errmsg("Column %s not found", cmd->name)));
+            break;
+        }
+        MOT::Column* col = tab->GetField(colId);
+        if (col->IsUsedByIndex()) {
+            tab->GetOrigTable()->Unlock();
+            ereport(ERROR,
+                (errcode(ERRCODE_FDW_DROP_INDEXED_COLUMN_NOT_ALLOWED),
+                    errmodule(MOD_MOT),
+                    errmsg("Drop column %s is not allowed, used by one or more indexes", cmd->name)));
+            break;
+        }
+        res = txn->AlterTableDropColumn(tab, col);
+        if (res == MOT::RC_OK) {
+            MOT::MOTEngine::GetInstance()->NotifyDDLEvent(
+                tab->GetTableExId(), MOT::DDL_ACCESS_DROP_COLUMN, MOT::TxnDDLPhase::TXN_DDL_PHASE_EXEC);
+        }
+        tab->GetOrigTable()->Unlock();
+    } while (false);
+    if (res != MOT::RC_OK) {
+        report_pg_error(res);
+    }
+    return res;
+}
+
+MOT::RC MOTAdaptor::AlterTableRenameColumn(RenameForeingTableCmd* cmd, TransactionId tid)
+{
+    MOT::RC res = MOT::RC_OK;
+    (void)EnsureSafeThreadAccessInline();
+
+    MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
+    txn->SetTransactionId(tid);
+    do {
+        MOT::Table* tab = txn->GetTableByExternalId(cmd->relid);
+        if (tab == nullptr) {
+            elog(LOG, "Alter table rename column error, table oid %u not found.", cmd->relid);
+            break;
+        }
+        tab->GetOrigTable()->WrLock();
+        uint64_t colId = tab->GetFieldId(cmd->oldname);
+        if (colId == (uint64_t)-1) {
+            tab->GetOrigTable()->Unlock();
+            ereport(ERROR,
+                (errcode(ERRCODE_FDW_COLUMN_NAME_NOT_FOUND),
+                    errmodule(MOD_MOT),
+                    errmsg("Column %s not found", cmd->oldname)));
+            break;
+        }
+        uint16_t len = strlen(cmd->newname);
+        if (len >= MOT::Column::MAX_COLUMN_NAME_LEN) {
+            tab->GetOrigTable()->Unlock();
+            ereport(ERROR,
+                (errcode(ERRCODE_INVALID_COLUMN_DEFINITION),
+                    errmodule(MOD_MOT),
+                    errmsg("Column definition of %s is not supported", cmd->newname),
+                    errdetail("Column name %s exceeds max name size %u",
+                        cmd->newname,
+                        (uint32_t)MOT::Column::MAX_COLUMN_NAME_LEN)));
+            break;
+        }
+        MOT::Column* col = tab->GetField(colId);
+        res = txn->AlterTableRenameColumn(tab, col, cmd->newname);
+        if (res == MOT::RC_OK) {
+            MOT::MOTEngine::GetInstance()->NotifyDDLEvent(
+                tab->GetTableExId(), MOT::DDL_ACCESS_RENAME_COLUMN, MOT::TxnDDLPhase::TXN_DDL_PHASE_EXEC);
+        }
+        tab->GetOrigTable()->Unlock();
+    } while (false);
+    if (res != MOT::RC_OK) {
+        report_pg_error(res);
+    }
     return res;
 }
 
@@ -1469,7 +1616,7 @@ MOT::RC MOTAdaptor::TruncateTable(Relation rel, ::TransactionId tid)
     MOT::RC res = MOT::RC_OK;
     MOT::Table* tab = nullptr;
 
-    EnsureSafeThreadAccessInline();
+    (void)EnsureSafeThreadAccessInline();
 
     MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
     txn->SetTransactionId(tid);
@@ -1482,26 +1629,28 @@ MOT::RC MOTAdaptor::TruncateTable(Relation rel, ::TransactionId tid)
             break;
         }
 
-        JitExec::PurgeJitSourceCache(rel->rd_id, true);
-        tab->WrLock();
+        tab->GetOrigTable()->WrLock();
         res = txn->TruncateTable(tab);
-        tab->Unlock();
+        if (res == MOT::RC_OK) {
+            MOT::MOTEngine::GetInstance()->NotifyDDLEvent(
+                tab->GetTableExId(), MOT::DDL_ACCESS_TRUNCATE_TABLE, MOT::TxnDDLPhase::TXN_DDL_PHASE_EXEC);
+        }
+        tab->GetOrigTable()->Unlock();
     } while (0);
 
     return res;
 }
 
-MOT::RC MOTAdaptor::VacuumTable(Relation rel, ::TransactionId tid)
+void MOTAdaptor::VacuumTable(Relation rel, ::TransactionId tid)
 {
-    MOT::RC res = MOT::RC_OK;
     MOT::Table* tab = nullptr;
-    EnsureSafeThreadAccessInline();
+    (void)EnsureSafeThreadAccessInline();
     MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
     txn->SetTransactionId(tid);
 
     elog(LOG, "vacuuming table %s, oid: %u", NameStr(rel->rd_rel->relname), rel->rd_id);
     do {
-        tab = MOT::GetTableManager()->GetTableSafeByExId(rel->rd_id);
+        tab = MOT::GetTableManager()->GetTableSafeByExId(rel->rd_id, true);
         if (tab == nullptr) {
             elog(LOG, "Vacuum table %s error, table oid %u not found.", NameStr(rel->rd_rel->relname), rel->rd_id);
             break;
@@ -1510,16 +1659,16 @@ MOT::RC MOTAdaptor::VacuumTable(Relation rel, ::TransactionId tid)
         tab->Compact(txn);
         tab->Unlock();
     } while (0);
-    return res;
 }
 
 uint64_t MOTAdaptor::GetTableIndexSize(uint64_t tabId, uint64_t ixId)
 {
     uint64_t res = 0;
-    EnsureSafeThreadAccessInline();
+    (void)EnsureSafeThreadAccessInline();
     MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
     MOT::Table* tab = nullptr;
     MOT::Index* ix = nullptr;
+    uint64_t netTotal = 0;
 
     do {
         tab = txn->GetTableByExternalId(tabId);
@@ -1540,9 +1689,10 @@ uint64_t MOTAdaptor::GetTableIndexSize(uint64_t tabId, uint64_t ixId)
                         errmsg("Get index size error, index oid %lu for table oid %lu not found.", ixId, tabId)));
                 break;
             }
-            res = ix->GetIndexSize();
-        } else
-            res = tab->GetTableSize();
+            res = ix->GetIndexSize(netTotal);
+        } else {
+            res = tab->GetTableSize(netTotal);
+        }
     } while (0);
 
     return res;
@@ -1550,21 +1700,15 @@ uint64_t MOTAdaptor::GetTableIndexSize(uint64_t tabId, uint64_t ixId)
 
 MotMemoryDetail* MOTAdaptor::GetMemSize(uint32_t* nodeCount, bool isGlobal)
 {
-    EnsureSafeThreadAccessInline();
+    (void)EnsureSafeThreadAccessInline();
     MotMemoryDetail* result = nullptr;
     *nodeCount = 0;
 
     /* We allocate an array of size (m_nodeCount + 1) to accommodate one aggregated entry of all global pools. */
     uint32_t statsArraySize = MOT::g_memGlobalCfg.m_nodeCount + 1;
     MOT::MemRawChunkPoolStats* chunkPoolStatsArray =
-        (MOT::MemRawChunkPoolStats*)palloc(statsArraySize * sizeof(MOT::MemRawChunkPoolStats));
+        (MOT::MemRawChunkPoolStats*)palloc0(statsArraySize * sizeof(MOT::MemRawChunkPoolStats));
     if (chunkPoolStatsArray != nullptr) {
-        errno_t erc = memset_s(chunkPoolStatsArray,
-            statsArraySize * sizeof(MOT::MemRawChunkPoolStats),
-            0,
-            statsArraySize * sizeof(MOT::MemRawChunkPoolStats));
-        securec_check(erc, "\0", "\0");
-
         uint32_t realStatsEntries;
         if (isGlobal) {
             realStatsEntries = MOT::MemRawChunkStoreGetGlobalStats(chunkPoolStatsArray, statsArraySize);
@@ -1574,7 +1718,7 @@ MotMemoryDetail* MOTAdaptor::GetMemSize(uint32_t* nodeCount, bool isGlobal)
 
         MOT_ASSERT(realStatsEntries <= statsArraySize);
         if (realStatsEntries > 0) {
-            result = (MotMemoryDetail*)palloc(realStatsEntries * sizeof(MotMemoryDetail));
+            result = (MotMemoryDetail*)palloc0(realStatsEntries * sizeof(MotMemoryDetail));
             if (result != nullptr) {
                 for (uint32_t node = 0; node < realStatsEntries; ++node) {
                     result[node].numaNode = chunkPoolStatsArray[node].m_node;
@@ -1592,17 +1736,17 @@ MotMemoryDetail* MOTAdaptor::GetMemSize(uint32_t* nodeCount, bool isGlobal)
 
 MotSessionMemoryDetail* MOTAdaptor::GetSessionMemSize(uint32_t* sessionCount)
 {
-    EnsureSafeThreadAccessInline();
+    (void)EnsureSafeThreadAccessInline();
     MotSessionMemoryDetail* result = nullptr;
     *sessionCount = 0;
 
     uint32_t session_count = MOT::g_memGlobalCfg.m_maxThreadCount;
     MOT::MemSessionAllocatorStats* session_stats_array =
-        (MOT::MemSessionAllocatorStats*)palloc(session_count * sizeof(MOT::MemSessionAllocatorStats));
+        (MOT::MemSessionAllocatorStats*)palloc0(session_count * sizeof(MOT::MemSessionAllocatorStats));
     if (session_stats_array != nullptr) {
         uint32_t real_session_count = MOT::MemSessionGetAllStats(session_stats_array, session_count);
         if (real_session_count > 0) {
-            result = (MotSessionMemoryDetail*)palloc(real_session_count * sizeof(MotSessionMemoryDetail));
+            result = (MotSessionMemoryDetail*)palloc0(real_session_count * sizeof(MotSessionMemoryDetail));
             if (result != nullptr) {
                 for (uint32_t session_index = 0; session_index < real_session_count; ++session_index) {
                     GetSessionDetails(session_stats_array[session_index].m_sessionId,
@@ -1625,7 +1769,7 @@ void MOTAdaptor::CreateKeyBuffer(Relation rel, MOTFdwStateSt* festate, int start
 {
     uint8_t* buf = nullptr;
     uint8_t pattern = 0x00;
-    EnsureSafeThreadAccessInline();
+    (void)EnsureSafeThreadAccessInline();
     int16_t num = festate->m_bestIx->m_ix->GetNumFields();
     const uint16_t* fieldLengths = festate->m_bestIx->m_ix->GetLengthKeyFields();
     const int16_t* orgCols = festate->m_bestIx->m_ix->GetColumnKeyFields();
@@ -1671,7 +1815,7 @@ void MOTAdaptor::CreateKeyBuffer(Relation rel, MOTFdwStateSt* festate, int start
             break;
 
         default:
-            elog(LOG, "Invalid key operation: %u", oper);
+            elog(LOG, "Invalid key operation: %" PRIu8, static_cast<uint8_t>(oper));
             break;
     }
 
@@ -1709,7 +1853,7 @@ void MOTAdaptor::CreateKeyBuffer(Relation rel, MOTFdwStateSt* festate, int start
 
                         case KEY_OPER::READ_KEY_EXACT:
                         default:
-                            elog(LOG, "Invalid key operation: %u", oper);
+                            elog(LOG, "Invalid key operation: %" PRIu8, static_cast<uint8_t>(oper));
                             break;
                     }
                 }
@@ -1725,7 +1869,7 @@ void MOTAdaptor::CreateKeyBuffer(Relation rel, MOTFdwStateSt* festate, int start
             }
         } else {
             MOT_ASSERT((offset + fieldLengths[i]) <= keyLength);
-            festate->m_stateKey[start].FillPattern(pattern, fieldLengths[i], offset);
+            (void)festate->m_stateKey[start].FillPattern(pattern, fieldLengths[i], offset);
         }
 
         offset += fieldLengths[i];
@@ -1737,7 +1881,7 @@ void MOTAdaptor::CreateKeyBuffer(Relation rel, MOTFdwStateSt* festate, int start
 bool MOTAdaptor::IsScanEnd(MOTFdwStateSt* festate)
 {
     bool res = false;
-    EnsureSafeThreadAccessInline();
+    (void)EnsureSafeThreadAccessInline();
 
     // festate->cursor[1] (end iterator) might be NULL (in case it is not in use). If this is the case, return false
     // (which means we have not reached the end yet)
@@ -1773,7 +1917,7 @@ bool MOTAdaptor::IsScanEnd(MOTFdwStateSt* festate)
 void MOTAdaptor::PackRow(TupleTableSlot* slot, MOT::Table* table, uint8_t* attrs_used, uint8_t* destRow)
 {
     errno_t erc;
-    EnsureSafeThreadAccessInline();
+    (void)EnsureSafeThreadAccessInline();
     HeapTuple srcData = (HeapTuple)slot->tts_tuple;
     TupleDesc tupdesc = slot->tts_tupleDescriptor;
     bool hasnulls = HeapTupleHasNulls(srcData);
@@ -1806,7 +1950,7 @@ void MOTAdaptor::PackRow(TupleTableSlot* slot, MOT::Table* table, uint8_t* attrs
 
 void MOTAdaptor::PackUpdateRow(TupleTableSlot* slot, MOT::Table* table, const uint8_t* attrs_used, uint8_t* destRow)
 {
-    EnsureSafeThreadAccessInline();
+    (void)EnsureSafeThreadAccessInline();
     TupleDesc tupdesc = slot->tts_tupleDescriptor;
     uint8_t* bits;
     uint64_t i = 0;
@@ -1833,7 +1977,7 @@ void MOTAdaptor::PackUpdateRow(TupleTableSlot* slot, MOT::Table* table, const ui
 
 void MOTAdaptor::UnpackRow(TupleTableSlot* slot, MOT::Table* table, const uint8_t* attrs_used, uint8_t* srcRow)
 {
-    EnsureSafeThreadAccessInline();
+    (void)EnsureSafeThreadAccessInline();
     TupleDesc tupdesc = slot->tts_tupleDescriptor;
     uint64_t i = 0;
 
@@ -1841,9 +1985,9 @@ void MOTAdaptor::UnpackRow(TupleTableSlot* slot, MOT::Table* table, const uint8_
     uint64_t cols = table->GetFieldCount() - 1;
 
     for (; i < cols; i++) {
-        if (BITMAP_GET(attrs_used, i))
+        if (BITMAP_GET(attrs_used, i)) {
             MOTToDatum(table, tupdesc->attrs[i], srcRow, &(slot->tts_values[i]), &(slot->tts_isnull[i]));
-        else {
+        } else {
             slot->tts_isnull[i] = true;
             slot->tts_values[i] = PointerGetDatum(nullptr);
         }
@@ -1853,7 +1997,7 @@ void MOTAdaptor::UnpackRow(TupleTableSlot* slot, MOT::Table* table, const uint8_
 // useful functions for data conversion: utils/fmgr/gmgr.cpp
 void MOTAdaptor::MOTToDatum(MOT::Table* table, const Form_pg_attribute attr, uint8_t* data, Datum* value, bool* is_null)
 {
-    EnsureSafeThreadAccessInline();
+    (void)EnsureSafeThreadAccessInline();
     if (!BITMAP_GET(data, (attr->attnum - 1))) {
         *is_null = true;
         *value = PointerGetDatum(nullptr);
@@ -1875,8 +2019,10 @@ void MOTAdaptor::MOTToDatum(MOT::Table* table, const Form_pg_attribute attr, uin
             col->Unpack(data, &tmp, len);
 
             bytea* result = (bytea*)palloc(len + VARHDRSZ);
-            errno_t erc = memcpy_s(VARDATA(result), len, (uint8_t*)tmp, len);
-            securec_check(erc, "\0", "\0");
+            if (len > 0) {
+                errno_t erc = memcpy_s(VARDATA(result), len, (uint8_t*)tmp, len);
+                securec_check(erc, "\0", "\0");
+            }
             SET_VARSIZE(result, len + VARHDRSZ);
 
             *value = PointerGetDatum(result);
@@ -1897,7 +2043,7 @@ void MOTAdaptor::MOTToDatum(MOT::Table* table, const Form_pg_attribute attr, uin
 
 void MOTAdaptor::DatumToMOT(MOT::Column* col, Datum datum, Oid type, uint8_t* data)
 {
-    EnsureSafeThreadAccessInline();
+    (void)EnsureSafeThreadAccessInline();
     switch (type) {
         case BYTEAOID:
         case TEXTOID:
@@ -1907,7 +2053,12 @@ void MOTAdaptor::DatumToMOT(MOT::Column* col, Datum datum, Oid type, uint8_t* da
             bytea* txt = DatumGetByteaP(datum);
             size_t size = VARSIZE(txt);  // includes header len VARHDRSZ
             char* src = VARDATA(txt);
-            col->Pack(data, (uintptr_t)src, size - VARHDRSZ);
+            if (!col->Pack(data, (uintptr_t)src, size - VARHDRSZ)) {
+                ereport(ERROR,
+                    (errmodule(MOD_MOT),
+                        errcode(ERRCODE_STRING_DATA_RIGHT_TRUNCATION),
+                        errmsg("value too long for column size (%d)", (int)(col->m_size - VARHDRSZ))));
+            }
 
             if ((char*)datum != (char*)txt) {
                 pfree(txt);
@@ -1928,17 +2079,16 @@ void MOTAdaptor::DatumToMOT(MOT::Column* col, Datum datum, Oid type, uint8_t* da
                 break;
             }
             PGNumericToMOT(n, *d);
-            col->Pack(data, (uintptr_t)d, DECIMAL_SIZE(d));
-
+            (void)col->Pack(data, (uintptr_t)d, DECIMAL_SIZE(d));  // simple types packing cannot fail
             break;
         }
         default:
-            col->Pack(data, datum, col->m_size);
+            (void)col->Pack(data, datum, col->m_size);  // no verification required
             break;
     }
 }
 
-inline void MOTAdaptor::VarcharToMOTKey(
+void MOTAdaptor::VarcharToMOTKey(
     MOT::Column* col, Oid datumType, Datum datum, Oid colType, uint8_t* data, size_t len, KEY_OPER oper, uint8_t fill)
 {
     bool noValue = false;
@@ -1963,11 +2113,6 @@ inline void MOTAdaptor::VarcharToMOTKey(
     bytea* txt = DatumGetByteaP(datum);
     size_t size = VARSIZE(txt);  // includes header len VARHDRSZ
     char* src = VARDATA(txt);
-
-    if (size > len) {
-        size = len;
-    }
-
     size -= VARHDRSZ;
     if (oper == KEY_OPER::READ_KEY_LIKE) {
         if (src[size - 1] == '%') {
@@ -1983,14 +2128,20 @@ inline void MOTAdaptor::VarcharToMOTKey(
     } else if (colType == BPCHAROID) {  // handle padding for blank-padded type
         fill = 0x20;
     }
-    col->PackKey(data, (uintptr_t)src, size, fill);
 
+    // if the length of search value is bigger than a column key size (len)
+    // we make key only from a part that equals column key length
+    // this will override the column delimiter exactly by one char from search value
+    if (size > len) {
+        size = len;
+    }
+    (void)col->PackKey(data, (uintptr_t)src, size, fill);
     if ((char*)datum != (char*)txt) {
         pfree(txt);
     }
 }
 
-inline void MOTAdaptor::FloatToMOTKey(MOT::Column* col, Oid datumType, Datum datum, uint8_t* data)
+void MOTAdaptor::FloatToMOTKey(MOT::Column* col, Oid datumType, Datum datum, uint8_t* data)
 {
     if (datumType == FLOAT8OID) {
         MOT::DoubleConvT dc;
@@ -1998,64 +2149,64 @@ inline void MOTAdaptor::FloatToMOTKey(MOT::Column* col, Oid datumType, Datum dat
         dc.m_r = (uint64_t)datum;
         fc.m_v = (float)dc.m_v;
         uint64_t u = (uint64_t)fc.m_r;
-        col->PackKey(data, u, col->m_size);
+        (void)col->PackKey(data, u, col->m_size);
     } else {
-        col->PackKey(data, datum, col->m_size);
+        (void)col->PackKey(data, datum, col->m_size);
     }
 }
 
-inline void MOTAdaptor::NumericToMOTKey(MOT::Column* col, Oid datumType, Datum datum, uint8_t* data)
+void MOTAdaptor::NumericToMOTKey(MOT::Column* col, Oid datumType, Datum datum, uint8_t* data)
 {
     Numeric n = DatumGetNumeric(datum);
     char buf[DECIMAL_MAX_SIZE];
     MOT::DecimalSt* d = (MOT::DecimalSt*)buf;
     PGNumericToMOT(n, *d);
-    col->PackKey(data, (uintptr_t)d, DECIMAL_SIZE(d));
+    (void)col->PackKey(data, (uintptr_t)d, DECIMAL_SIZE(d));
 }
 
-inline void MOTAdaptor::TimestampToMOTKey(MOT::Column* col, Oid datumType, Datum datum, uint8_t* data)
+void MOTAdaptor::TimestampToMOTKey(MOT::Column* col, Oid datumType, Datum datum, uint8_t* data)
 {
     if (datumType == TIMESTAMPTZOID) {
         Timestamp result = DatumGetTimestamp(DirectFunctionCall1(timestamptz_timestamp, datum));
-        col->PackKey(data, result, col->m_size);
+        (void)col->PackKey(data, result, col->m_size);
     } else if (datumType == DATEOID) {
         Timestamp result = DatumGetTimestamp(DirectFunctionCall1(date_timestamp, datum));
-        col->PackKey(data, result, col->m_size);
+        (void)col->PackKey(data, result, col->m_size);
     } else {
-        col->PackKey(data, datum, col->m_size);
+        (void)col->PackKey(data, datum, col->m_size);
     }
 }
 
-inline void MOTAdaptor::TimestampTzToMOTKey(MOT::Column* col, Oid datumType, Datum datum, uint8_t* data)
+void MOTAdaptor::TimestampTzToMOTKey(MOT::Column* col, Oid datumType, Datum datum, uint8_t* data)
 {
     if (datumType == TIMESTAMPOID) {
         TimestampTz result = DatumGetTimestampTz(DirectFunctionCall1(timestamp_timestamptz, datum));
-        col->PackKey(data, result, col->m_size);
+        (void)col->PackKey(data, result, col->m_size);
     } else if (datumType == DATEOID) {
         TimestampTz result = DatumGetTimestampTz(DirectFunctionCall1(date_timestamptz, datum));
-        col->PackKey(data, result, col->m_size);
+        (void)col->PackKey(data, result, col->m_size);
     } else {
-        col->PackKey(data, datum, col->m_size);
+        (void)col->PackKey(data, datum, col->m_size);
     }
 }
 
-inline void MOTAdaptor::DateToMOTKey(MOT::Column* col, Oid datumType, Datum datum, uint8_t* data)
+void MOTAdaptor::DateToMOTKey(MOT::Column* col, Oid datumType, Datum datum, uint8_t* data)
 {
     if (datumType == TIMESTAMPOID) {
         DateADT result = DatumGetDateADT(DirectFunctionCall1(timestamp_date, datum));
-        col->PackKey(data, result, col->m_size);
+        (void)col->PackKey(data, result, col->m_size);
     } else if (datumType == TIMESTAMPTZOID) {
         DateADT result = DatumGetDateADT(DirectFunctionCall1(timestamptz_date, datum));
-        col->PackKey(data, result, col->m_size);
+        (void)col->PackKey(data, result, col->m_size);
     } else {
-        col->PackKey(data, datum, col->m_size);
+        (void)col->PackKey(data, datum, col->m_size);
     }
 }
 
 void MOTAdaptor::DatumToMOTKey(
     MOT::Column* col, Oid datumType, Datum datum, Oid colType, uint8_t* data, size_t len, KEY_OPER oper, uint8_t fill)
 {
-    EnsureSafeThreadAccessInline();
+    (void)EnsureSafeThreadAccessInline();
     switch (colType) {
         case BYTEAOID:
         case TEXTOID:
@@ -2080,116 +2231,7 @@ void MOTAdaptor::DatumToMOTKey(
             DateToMOTKey(col, datumType, datum, data);
             break;
         default:
-            col->PackKey(data, datum, col->m_size);
+            (void)col->PackKey(data, datum, col->m_size);
             break;
     }
-}
-
-MOTFdwStateSt* InitializeFdwState(void* fdwState, List** fdwExpr, uint64_t exTableID)
-{
-    MOTFdwStateSt* state = (MOTFdwStateSt*)palloc0(sizeof(MOTFdwStateSt));
-    List* values = (List*)fdwState;
-
-    state->m_allocInScan = true;
-    state->m_foreignTableId = exTableID;
-    if (list_length(values) > 0) {
-        ListCell* cell = list_head(values);
-        int type = ((Const*)lfirst(cell))->constvalue;
-        if (type != FDW_LIST_STATE) {
-            return state;
-        }
-        cell = lnext(cell);
-        state->m_cmdOper = (CmdType)((Const*)lfirst(cell))->constvalue;
-        cell = lnext(cell);
-        state->m_order = (SORTDIR_ENUM)((Const*)lfirst(cell))->constvalue;
-        cell = lnext(cell);
-        state->m_hasForUpdate = (bool)((Const*)lfirst(cell))->constvalue;
-        cell = lnext(cell);
-        state->m_foreignTableId = ((Const*)lfirst(cell))->constvalue;
-        cell = lnext(cell);
-        state->m_numAttrs = ((Const*)lfirst(cell))->constvalue;
-        cell = lnext(cell);
-        state->m_ctidNum = ((Const*)lfirst(cell))->constvalue;
-        cell = lnext(cell);
-        state->m_numExpr = ((Const*)lfirst(cell))->constvalue;
-        cell = lnext(cell);
-
-        int len = BITMAP_GETLEN(state->m_numAttrs);
-        state->m_attrsUsed = (uint8_t*)palloc0(len);
-        state->m_attrsModified = (uint8_t*)palloc0(len);
-        BitmapDeSerialize(state->m_attrsUsed, len, &cell);
-
-        if (cell != NULL) {
-            state->m_bestIx = &state->m_bestIxBuf;
-            state->m_bestIx->Deserialize(cell, exTableID);
-        }
-
-        if (fdwExpr != NULL && *fdwExpr != NULL) {
-            ListCell* c = NULL;
-            int i = 0;
-
-            // divide fdw expr to param list and original expr
-            state->m_remoteCondsOrig = NULL;
-
-            foreach (c, *fdwExpr) {
-                if (i < state->m_numExpr) {
-                    i++;
-                    continue;
-                } else {
-                    state->m_remoteCondsOrig = lappend(state->m_remoteCondsOrig, lfirst(c));
-                }
-            }
-
-            *fdwExpr = list_truncate(*fdwExpr, state->m_numExpr);
-        }
-    }
-    return state;
-}
-
-void* SerializeFdwState(MOTFdwStateSt* state)
-{
-    List* result = NULL;
-
-    // set list type to FDW_LIST_STATE
-    result = lappend(result, makeConst(INT4OID, -1, InvalidOid, 4, FDW_LIST_STATE, false, true));
-    result = lappend(result, makeConst(INT4OID, -1, InvalidOid, 4, Int32GetDatum(state->m_cmdOper), false, true));
-    result = lappend(result, makeConst(INT1OID, -1, InvalidOid, 4, Int8GetDatum(state->m_order), false, true));
-    result = lappend(result, makeConst(BOOLOID, -1, InvalidOid, 1, BoolGetDatum(state->m_hasForUpdate), false, true));
-    result =
-        lappend(result, makeConst(INT4OID, -1, InvalidOid, 4, Int32GetDatum(state->m_foreignTableId), false, true));
-    result = lappend(result, makeConst(INT4OID, -1, InvalidOid, 4, Int32GetDatum(state->m_numAttrs), false, true));
-    result = lappend(result, makeConst(INT4OID, -1, InvalidOid, 4, Int32GetDatum(state->m_ctidNum), false, true));
-    result = lappend(result, makeConst(INT2OID, -1, InvalidOid, 2, Int16GetDatum(state->m_numExpr), false, true));
-    int len = BITMAP_GETLEN(state->m_numAttrs);
-    result = BitmapSerialize(result, state->m_attrsUsed, len);
-
-    if (state->m_bestIx != nullptr) {
-        state->m_bestIx->Serialize(&result);
-    }
-    ReleaseFdwState(state);
-    return result;
-}
-
-void ReleaseFdwState(MOTFdwStateSt* state)
-{
-    CleanCursors(state);
-
-    if (state->m_currTxn) {
-        state->m_currTxn->m_queryState.erase((uint64_t)state);
-    }
-
-    if (state->m_bestIx && state->m_bestIx != &state->m_bestIxBuf)
-        pfree(state->m_bestIx);
-
-    if (state->m_remoteCondsOrig != nullptr)
-        list_free(state->m_remoteCondsOrig);
-
-    if (state->m_attrsUsed != NULL)
-        pfree(state->m_attrsUsed);
-
-    if (state->m_attrsModified != NULL)
-        pfree(state->m_attrsModified);
-
-    state->m_table = NULL;
-    pfree(state);
 }

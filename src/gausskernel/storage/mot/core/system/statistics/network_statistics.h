@@ -199,14 +199,14 @@ public:
      * @brief Derives classes should react to a notification that configuration changed. New
      * configuration is accessible via the ConfigManager.
      */
-    virtual void OnConfigChange();
+    void OnConfigChange() override;
 
 private:
     /** @brief Constructor. */
     NetworkStatisticsProvider();
 
     /** @brief Destructor. */
-    virtual ~NetworkStatisticsProvider();
+    ~NetworkStatisticsProvider() override;
 
     /** @brief Registers the provider in the manager. */
     void RegisterProvider();

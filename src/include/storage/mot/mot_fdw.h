@@ -26,6 +26,7 @@
 #ifndef MOT_FDW_H
 #define MOT_FDW_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 /** @brief Initializes MOT engine. */
@@ -81,5 +82,15 @@ extern void MOTCheckpointFetchUnlock();
  */
 extern bool MOTCheckpointExists(
     char* ctrlFilePath, size_t ctrlLen, char* checkpointDir, size_t checkpointLen, size_t& basePathLen);
+
+/**
+ * The following helpers APIs are used for validating MOT GUC parameters.
+ */
+extern bool MOTValidateLogLevel(const char* logLevelStr);
+extern bool MOTValidateAffinityMode(const char* affinityModeStr);
+extern bool MOTValidateMemReserveMode(const char* reserveModeStr);
+extern bool MOTValidateMemStorePolicy(const char* storePolicyStr);
+extern bool MOTValidateMemAllocPolicy(const char* allocPolicyStr);
+extern void MOTCheckTransactionAborted();
 
 #endif  // MOT_FDW_H

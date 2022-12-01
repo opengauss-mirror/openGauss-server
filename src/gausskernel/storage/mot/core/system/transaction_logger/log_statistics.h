@@ -30,7 +30,7 @@
 #include "iconfig_change_listener.h"
 #include "numeric_statistic_variable.h"
 #include "statistics_provider.h"
-#include "stats/frequency_statistic_variable.h"
+#include "frequency_statistic_variable.h"
 #include "typed_statistics_generator.h"
 
 namespace MOT {
@@ -79,13 +79,6 @@ private:
 };
 
 class LogStatisticsProvider : public StatisticsProvider, public IConfigChangeListener {
-private:
-    LogStatisticsProvider();
-    virtual ~LogStatisticsProvider();
-
-    /** @brief Registers the provider in the manager. */
-    void RegisterProvider();
-
 public:
     /**
      * @brief Creates singleton instance. Must be called once during engine startup.
@@ -133,9 +126,15 @@ public:
      * @brief Derives classes should react to a notification that configuration changed. New
      * configuration is accessible via the ConfigManager.
      */
-    virtual void OnConfigChange();
+    void OnConfigChange() override;
 
 private:
+    LogStatisticsProvider();
+    ~LogStatisticsProvider() override;
+
+    /** @brief Registers the provider in the manager. */
+    void RegisterProvider();
+
     /** @var The single instance. */
     static LogStatisticsProvider* m_provider;
     static TypedStatisticsGenerator<LogThreadStatistics, LogGlobalStatistics> m_generator;

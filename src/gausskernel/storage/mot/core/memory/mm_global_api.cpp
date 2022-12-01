@@ -23,9 +23,9 @@
  * -------------------------------------------------------------------------
  */
 
-#include <stdint.h>
+#include <cstdint>
 #include <pthread.h>
-#include <string.h>
+#include <cstring>
 
 #include "mm_global_api.h"
 #include "mm_cfg.h"
@@ -66,7 +66,6 @@ extern int MemGlobalApiInit()
 {
     MOT_LOG_TRACE("Initializing Global Memory API");
     int result = GlobalAllocatorsInit();
-
     if (result == 0) {
         MOT_LOG_TRACE("Global Memory API initialized successfully");
     } else {
@@ -86,7 +85,7 @@ extern void MemGlobalApiDestroy()
 
 inline void* MemGlobalAllocInline(uint64_t objectSizeBytes, uint32_t alignment, int node)
 {
-    void* object = NULL;
+    void* object = nullptr;
     if (objectSizeBytes <= MEM_SESSION_MAX_ALLOC_SIZE) {
         MemLockAcquire(&globalAllocators[node]->m_lock);
         if (alignment > 0) {
@@ -95,17 +94,21 @@ inline void* MemGlobalAllocInline(uint64_t objectSizeBytes, uint32_t alignment, 
             object = MemSessionAllocatorAlloc(&globalAllocators[node]->m_allocator, objectSizeBytes);
         }
         MemLockRelease(&globalAllocators[node]->m_lock);
-    } else {
+    } else if ((alignment == 0) || ((PAGE_SIZE_BYTES % alignment) == 0)) {
+        // page size is a multiple of required alignment
+        // allocate as a large/huge allocation, since we have native page alignment
         MOT_LOG_DEBUG("Trying to allocate %" PRIu64 " global memory bytes as huge memory", objectSizeBytes);
         object = MemHugeAlloc(objectSizeBytes,
             node,
             MEM_ALLOC_GLOBAL,
             &(globalAllocators[node]->m_allocator.m_hugeChunkList),
             &globalAllocators[node]->m_lock);
-    }
-
-    if (object != NULL) {
-        // MemoryStatisticsProvider::getInstance().addNodeObjectsAllocated(node, objectSizeBytes);
+    } else {
+        MOT_REPORT_ERROR(MOT_ERROR_INVALID_MEMORY_SIZE,
+            "Global Memory Allocation",
+            "Unsupported alignment %u and size %" PRIu64 " for aligned allocations",
+            alignment,
+            objectSizeBytes);
     }
 
     return object;
@@ -133,7 +136,7 @@ extern void* MemGlobalAllocAlignedOnNode(uint64_t objectSizeBytes, uint32_t alig
 
 static void* MemGlobalReallocSmall(void* object, uint64_t newSizeBytes, MemReallocFlags flags, int node)
 {
-    void* newObject = NULL;
+    void* newObject = nullptr;
     errno_t erc;
 
     if (newSizeBytes <= MEM_SESSION_MAX_ALLOC_SIZE) {
@@ -142,7 +145,7 @@ static void* MemGlobalReallocSmall(void* object, uint64_t newSizeBytes, MemReall
         newObject = MemSessionAllocatorRealloc(&globalAllocators[node]->m_allocator, object, newSizeBytes, flags);
         MemLockRelease(&globalAllocators[node]->m_lock);
     } else {
-        MOT_LOG_TRACE("Reallocating %" PRIu64 " global memory bytes from global allocator %d into huge buffer",
+        MOT_LOG_DEBUG("Reallocating %" PRIu64 " global memory bytes from global allocator %d into huge buffer",
             newSizeBytes,
             node);
         newObject = MemGlobalAlloc(newSizeBytes);
@@ -179,7 +182,7 @@ static void* MemGlobalReallocSmall(void* object, uint64_t newSizeBytes, MemReall
 static void* MemGlobalReallocHuge(
     void* object, uint64_t newSizeBytes, MemReallocFlags flags, MemRawChunkHeader* rawChunk, int node)
 {
-    void* newObject = NULL;
+    void* newObject = nullptr;
     errno_t erc;
 
     if (newSizeBytes > MEM_SESSION_MAX_ALLOC_SIZE) {
@@ -227,21 +230,31 @@ static void* MemGlobalReallocHuge(
 
 extern void* MemGlobalRealloc(void* object, uint64_t newSizeBytes, MemReallocFlags flags)
 {
-    void* result = NULL;
-
-    // we search the object's chunk so we can tell to which node it belongs
-    MemRawChunkHeader* chunk = (MemRawChunkHeader*)MemRawChunkDirLookup(object);
-    if (unlikely(chunk == NULL)) {
-        MOT_LOG_ERROR("Attempt to free corrupt global object %p: source chunk not found", object);
+    void* result = nullptr;
+    if (object == nullptr) {
+        result = MemGlobalAlloc(newSizeBytes);
+        if (result != nullptr) {
+            if (flags == MEM_REALLOC_ZERO) {
+                errno_t erc = memset_s(result, newSizeBytes, 0, newSizeBytes);
+                securec_check(erc, "\0", "\0");
+            }
+        }
     } else {
-        if (likely(chunk->m_chunkType == MEM_CHUNK_TYPE_SMALL_OBJECT)) {
-            MemGlobalReallocSmall(object, newSizeBytes, flags, chunk->m_node);
-        } else if (chunk->m_chunkType == MEM_CHUNK_TYPE_HUGE_OBJECT) {
-            MemGlobalReallocHuge(object, newSizeBytes, flags, chunk, chunk->m_node);
+        // we search the object's chunk so we can tell to which node it belongs
+        MemRawChunkHeader* chunk = (MemRawChunkHeader*)MemRawChunkDirLookup(object);
+        if (unlikely(chunk == nullptr)) {
+            MOT_LOG_ERROR("Attempt to free corrupt global object %p: source chunk not found", object);
         } else {
-            MOT_LOG_ERROR("Attempt to free invalid global object %p: source chunk type %s is not a small object chunk",
-                object,
-                MemChunkTypeToString(chunk->m_chunkType));
+            if (likely(chunk->m_chunkType == MEM_CHUNK_TYPE_SMALL_OBJECT)) {
+                result = MemGlobalReallocSmall(object, newSizeBytes, flags, chunk->m_node);
+            } else if (chunk->m_chunkType == MEM_CHUNK_TYPE_HUGE_OBJECT) {
+                result = MemGlobalReallocHuge(object, newSizeBytes, flags, chunk, chunk->m_node);
+            } else {
+                MOT_LOG_ERROR(
+                    "Attempt to free invalid global object %p: source chunk type %s is not a small object chunk",
+                    object,
+                    MemChunkTypeToString(chunk->m_chunkType));
+            }
         }
     }
     return result;
@@ -251,7 +264,7 @@ extern void MemGlobalFree(void* object)
 {
     // we search the object's chunk so we can tell to which node it belongs
     MemRawChunkHeader* chunk = (MemRawChunkHeader*)MemRawChunkDirLookup(object);
-    if (unlikely(chunk == NULL)) {
+    if (unlikely(chunk == nullptr)) {
         MOT_LOG_ERROR("Attempt to free corrupt global object %p: source chunk not found", object);
     } else {
         int node = chunk->m_node;
@@ -341,11 +354,12 @@ extern uint32_t MemGlobalGetAllStats(MemGlobalAllocatorStats* globalStatsArray, 
         MemGlobalAllocator* objectAllocator = globalAllocators[node];
         if (objectAllocator) {
             MemGlobalAllocatorStats* stats = &globalStatsArray[entriesReported];
-            MemLockAcquire(&objectAllocator->m_lock);
-            MemSessionAllocatorGetStats(&objectAllocator->m_allocator, stats);
-            MemLockRelease(&objectAllocator->m_lock);
-            if (++entriesReported == nodeCount) {
-                break;
+            if (MemLockTryAcquire(&objectAllocator->m_lock) == MOT_NO_ERROR) {
+                MemSessionAllocatorGetStats(&objectAllocator->m_allocator, stats);
+                MemLockRelease(&objectAllocator->m_lock);
+                if (++entriesReported == nodeCount) {
+                    break;
+                }
             }
         }
     }
@@ -400,12 +414,13 @@ extern void MemGlobalPrintSummary(const char* name, LogLevel logLevel, bool full
                 aggStats.m_realUsedSize / MEGA_BYTE);
 
             if (fullReport) {
-                double memUtilInternal = ((double)aggStats.m_usedSize) / ((double)aggStats.m_realUsedSize) * 100.0;
-                double memUtilExternal = ((double)aggStats.m_usedSize) / aggStats.m_reservedSize * 100.0;
+                double memUtilInternal = (((double)aggStats.m_usedSize) / ((double)aggStats.m_realUsedSize)) * 100.0;
+                double memUtilExternal = (((double)aggStats.m_usedSize) / aggStats.m_reservedSize) * 100.0;
                 uint32_t minRequiredChunks =
                     (aggStats.m_usedSize + MEM_CHUNK_SIZE_MB * MEGA_BYTE - 1) / (MEM_CHUNK_SIZE_MB * MEGA_BYTE);
-                double maxUtilExternal =
-                    ((double)aggStats.m_usedSize) / (minRequiredChunks * MEM_CHUNK_SIZE_MB * MEGA_BYTE) * 100.0;
+                double maxUtilExternal = (((double)aggStats.m_usedSize) /
+                                             static_cast<uint64_t>(minRequiredChunks * MEM_CHUNK_SIZE_MB * MEGA_BYTE)) *
+                                         100.0;
 
                 MOT_LOG(logLevel,
                     "Global Memory API %s [Peak]:    Reserved = %" PRIu64 " MB, Requested = %" PRIu64
@@ -488,7 +503,7 @@ static void GlobalAllocatorsDestroy()
     if (globalAllocators != nullptr) {
         for (uint32_t i = 0; i < g_memGlobalCfg.m_nodeCount; ++i) {
             if (globalAllocators[i] != nullptr) {
-                MemLockDestroy(&globalAllocators[i]->m_lock);
+                (void)MemLockDestroy(&globalAllocators[i]->m_lock);
                 MemSessionAllocatorDestroy(&globalAllocators[i]->m_allocator);
                 MemNumaFreeLocal(globalAllocators[i], sizeof(MemGlobalAllocator), i);
                 globalAllocators[i] = nullptr;
@@ -540,15 +555,15 @@ extern "C" void MemGlobalApiDump()
 {
     MOT::StringBufferApply([](MOT::StringBuffer* stringBuffer) {
         MOT::MemGlobalApiToString(0, "Debug Dump", stringBuffer, MOT::MEM_REPORT_DETAILED);
-        fprintf(stderr, "%s", stringBuffer->m_buffer);
-        fflush(stderr);
+        (void)fprintf(stderr, "%s", stringBuffer->m_buffer);
+        (void)fflush(stderr);
     });
 }
 
 extern "C" int MemGlobalApiAnalyze(void* buffer)
 {
     for (uint32_t i = 0; i < MOT::g_memGlobalCfg.m_nodeCount; ++i) {
-        fprintf(stderr, "Searching buffer %p in global allocator %u...\n", buffer, i);
+        (void)fprintf(stderr, "Searching buffer %p in global allocator %u...\n", buffer, i);
         if (MOT::globalAllocators[i]) {
             if (MemSessionAllocatorAnalyze(MOT::globalAllocators[i], buffer)) {
                 return 1;

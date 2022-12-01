@@ -26,7 +26,11 @@
 
 namespace MOT {
 FileLineReader::FileLineReader(const char* configFilePath)
-    : m_configFilePath(configFilePath), m_configFile(configFilePath), m_lineItr(NULL), m_lineNumber(0)
+    : m_configFilePath(configFilePath),
+      m_configFile(configFilePath),
+      m_lineItr(NULL),
+      m_lineNumber(0),
+      m_initialized(false)
 {
     ParseFile();
 }
@@ -36,14 +40,18 @@ FileLineReader::~FileLineReader()
 
 void FileLineReader::ParseFile()
 {
-    if (m_configFile) {
+    if (m_configFile.is_open()) {
         std::string line;
         while (std::getline(m_configFile, line)) {
-            m_lines.push_back(line.c_str());
+            if (!m_lines.push_back(line.c_str())) {
+                m_initialized = false;
+                return;
+            }
         }
 
         m_lineItr = m_lines.cbegin();
         m_lineNumber = 1;
+        m_initialized = true;
     } else {
         m_lineItr = m_lines.cend();
     }

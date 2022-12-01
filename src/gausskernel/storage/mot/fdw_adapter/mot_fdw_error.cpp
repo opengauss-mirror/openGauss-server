@@ -71,7 +71,7 @@ static const MotErrToPGErrSt MM_ERRCODE_TO_PG[] = {
         "Can't create index",
         "Total number of indexes for table %s is greater than the maximum number if indexes allowed %u"},
     // RC_TXN_EXCEEDS_MAX_DDLS,
-    {ERRCODE_FDW_TOO_MANY_DDL_CHANGES_IN_TRANSACTION_NOT_ALLOWED,
+    {ERRCODE_FDW_TOO_MANY_DDL_CHANGES_IN_TRANSACTION,
         "Cannot execute statement",
         "Maximum number of DDLs per transactions reached the maximum %u"},
     // RC_UNIQUE_VIOLATION
@@ -86,11 +86,15 @@ static const MotErrToPGErrSt MM_ERRCODE_TO_PG[] = {
     {ERRCODE_FDW_ERROR, "Unknown error has occurred", nullptr},
     // RC_LOCAL_ROW_DELETED
     {ERRCODE_FDW_ERROR, "Unknown error has occurred", nullptr},
+    // RC_PRIMARY_SENTINEL_NOT_MAPPED
+    {ERRCODE_FDW_ERROR, "Unknown error has occurred", nullptr},
     // RC_INSERT_ON_EXIST
     {ERRCODE_FDW_ERROR, "Unknown error has occurred", nullptr},
     // RC_INDEX_RETRY_INSERT
     {ERRCODE_FDW_ERROR, "Unknown error has occurred", nullptr},
     // RC_INDEX_DELETE
+    {ERRCODE_FDW_ERROR, "Unknown error has occurred", nullptr},
+    // RC_GC_INFO_REMOVE
     {ERRCODE_FDW_ERROR, "Unknown error has occurred", nullptr},
     // RC_LOCAL_ROW_NOT_VISIBLE
     {ERRCODE_FDW_ERROR, "Unknown error has occurred", nullptr},
@@ -98,17 +102,24 @@ static const MotErrToPGErrSt MM_ERRCODE_TO_PG[] = {
     {ERRCODE_OUT_OF_LOGICAL_MEMORY, "Memory is temporarily unavailable", nullptr},
     // RC_ILLEGAL_ROW_STATE
     {ERRCODE_FDW_ERROR, "Unknown error has occurred", nullptr},
-    // RC_NULL_VOILATION
+    // RC_NULL_VIOLATION
     {ERRCODE_FDW_ERROR,
         "Null constraint violated",
         "NULL value cannot be inserted into non-null column %s at table %s"},
     // RC_PANIC
     {ERRCODE_FDW_ERROR, "Critical error", "Critical error: %s"},
+    // RC_JIT_SP_EXCEPTION
+    {ERRCODE_FDW_ERROR, "JIT stored procedure exception thrown", nullptr},
+    // RC_TXN_ABORTED
+    {ERRCODE_FDW_ERROR, "Current transaction is aborted", nullptr},
+    // RC_CONCURRENT_MODIFICATION
+    {ERRCODE_T_R_SERIALIZATION_FAILURE, "Concurrent modification occurred", nullptr},
+    // RC_STATEMENT_CANCELED
+    {ERRCODE_QUERY_CANCELED, "canceling statement due to user request", nullptr},
     // RC_NA
     {ERRCODE_FDW_OPERATION_NOT_SUPPORTED, "A checkpoint is in progress - cannot truncate table.", nullptr},
     // RC_MAX_VALUE
-    {ERRCODE_FDW_ERROR, "Unknown error has occurred", nullptr}
-};
+    {ERRCODE_FDW_ERROR, "Unknown error has occurred", nullptr}};
 
 static_assert(sizeof(MM_ERRCODE_TO_PG) / sizeof(MotErrToPGErrSt) == MOT::RC_MAX_VALUE + 1,
     "Not all MOT engine error codes (RC) is mapped to PG error codes");
@@ -195,7 +206,7 @@ void report_pg_error(MOT::RC rc, void* arg1, void* arg2, void* arg3, void* arg4,
                 (errmodule(MOD_MOT),
                     errcode(err->m_pgErr),
                     errmsg("%s", err->m_msg),
-                    errdetail(err->m_detail, ((MOT::Table*)arg1)->GetTableName(), MAX_NUM_INDEXES)));
+                    errdetail(err->m_detail, ((MOT::Table*)arg1)->GetTableName().c_str(), MAX_NUM_INDEXES)));
             break;
         case MOT::RC_TXN_EXCEEDS_MAX_DDLS:
             ereport(ERROR,
@@ -217,10 +228,12 @@ void report_pg_error(MOT::RC rc, void* arg1, void* arg2, void* arg3, void* arg4,
             ereport(ERROR, (errmodule(MOD_MOT), errcode(err->m_pgErr), errmsg(err->m_msg, (char*)arg1)));
             break;
 
-            // following errors are internal and should not get to an upper layer
+        // following errors are internal and should not get to an upper layer
+        case MOT::RC_GC_INFO_REMOVE:
         case MOT::RC_LOCAL_ROW_FOUND:
         case MOT::RC_LOCAL_ROW_NOT_FOUND:
         case MOT::RC_LOCAL_ROW_DELETED:
+        case MOT::RC_PRIMARY_SENTINEL_NOT_MAPPED:
         case MOT::RC_INSERT_ON_EXIST:
         case MOT::RC_INDEX_RETRY_INSERT:
         case MOT::RC_INDEX_DELETE:

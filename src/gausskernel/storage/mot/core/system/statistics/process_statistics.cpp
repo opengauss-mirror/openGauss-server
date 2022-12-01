@@ -50,9 +50,9 @@ ProcessStatisticsProvider::ProcessStatisticsProvider()
 {
     // register
     if (m_enable) {
-        StatisticsManager::GetInstance().RegisterStatisticsProvider(this);
+        (void)StatisticsManager::GetInstance().RegisterStatisticsProvider(this);
     }
-    ConfigManager::GetInstance().AddConfigChangeListener(this);
+    (void)ConfigManager::GetInstance().AddConfigChangeListener(this);
 
     // take initial snapshot
     SnapshotCpuStats(m_lastCpu, m_lastSysCpu, m_lastUserCpu);
@@ -80,18 +80,18 @@ ProcessStatisticsProvider::ProcessStatisticsProvider()
 
 ProcessStatisticsProvider::~ProcessStatisticsProvider()
 {
-    ConfigManager::GetInstance().RemoveConfigChangeListener(this);
+    (void)ConfigManager::GetInstance().RemoveConfigChangeListener(this);
     if (m_enable) {
-        StatisticsManager::GetInstance().UnregisterStatisticsProvider(this);
+        (void)StatisticsManager::GetInstance().UnregisterStatisticsProvider(this);
     }
 }
 
 void ProcessStatisticsProvider::RegisterProvider()
 {
     if (m_enable) {
-        StatisticsManager::GetInstance().RegisterStatisticsProvider(this);
+        (void)StatisticsManager::GetInstance().RegisterStatisticsProvider(this);
     }
-    ConfigManager::GetInstance().AddConfigChangeListener(this);
+    (void)ConfigManager::GetInstance().AddConfigChangeListener(this);
 }
 
 bool ProcessStatisticsProvider::CreateInstance()
@@ -140,9 +140,9 @@ void ProcessStatisticsProvider::OnConfigChange()
     if (m_enable != GetGlobalConfiguration().m_enableProcessStatistics) {
         m_enable = GetGlobalConfiguration().m_enableProcessStatistics;
         if (m_enable) {
-            StatisticsManager::GetInstance().RegisterStatisticsProvider(this);
+            (void)StatisticsManager::GetInstance().RegisterStatisticsProvider(this);
         } else {
-            StatisticsManager::GetInstance().UnregisterStatisticsProvider(this);
+            (void)StatisticsManager::GetInstance().UnregisterStatisticsProvider(this);
         }
     }
 }
@@ -192,11 +192,11 @@ static void GetMemValues(unsigned long long& vmem, unsigned long long& pmem)
                 break;
             }
         }
-        fclose(file);
+        (void)fclose(file);
     }
 }
 
-void ProcessStatisticsProvider::SnapshotCpuStats(clock_t& cpu, clock_t& sysCpu, clock_t& userCpu)
+void ProcessStatisticsProvider::SnapshotCpuStats(clock_t& cpu, clock_t& sysCpu, clock_t& userCpu) const
 {
     struct tms timeSample;
     cpu = times(&timeSample);
@@ -209,7 +209,7 @@ void ProcessStatisticsProvider::SnapshotCpuStats(clock_t& cpu, clock_t& sysCpu, 
 }
 
 bool ProcessStatisticsProvider::SnapMemoryIOStats(
-    uint64_t& minorFaults, uint64_t& majorFaults, uint64_t& inputOps, uint64_t& outputOps, uint64_t& maxRss)
+    uint64_t& minorFaults, uint64_t& majorFaults, uint64_t& inputOps, uint64_t& outputOps, uint64_t& maxRss) const
 {
     bool result = false;
     struct rusage usage;
@@ -269,7 +269,7 @@ void ProcessStatisticsProvider::PrintMemoryInfo()
                 text,
                 lib);
         }
-        fclose(f);
+        (void)fclose(f);
     }
 
     // third way: from /proc/self/status
@@ -296,8 +296,8 @@ void ProcessStatisticsProvider::PrintTotalCpuUsage()
         percentSys = -1.0;
         percentUser = -1.0;
     } else {
-        percentSys = ((double)(sysCpu - m_lastSysCpu)) / (cpu - m_lastCpu) / m_processorCount * 100.0f;
-        percentUser = ((double)(userCpu - m_lastUserCpu)) / (cpu - m_lastCpu) / m_processorCount * 100.0f;
+        percentSys = ((((double)(sysCpu - m_lastSysCpu)) / (cpu - m_lastCpu)) / m_processorCount) * 100.0f;
+        percentUser = ((((double)(userCpu - m_lastUserCpu)) / (cpu - m_lastCpu)) / m_processorCount) * 100.0f;
         percent = percentSys + percentUser;
     }
 

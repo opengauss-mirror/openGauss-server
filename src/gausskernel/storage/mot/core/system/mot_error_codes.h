@@ -92,4 +92,10 @@
 /** @define Error code denoting system is in invalid state. */
 #define MOT_ERROR_INVALID_STATE 11
 
+/** @define Error code denoting concurrent modification. */
+#define MOT_ERROR_CONCURRENT_MODIFICATION 12
+
+/** @define Error code denoting cancel request by user due to statement timeout. */
+#define MOT_ERROR_STATEMENT_CANCELED 13
+
 #endif /* MOT_ERROR_CODES_H */

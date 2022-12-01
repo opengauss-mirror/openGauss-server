@@ -24,6 +24,7 @@
 
 #ifndef CHECKPOINT_CTRLFILE_H
 #define CHECKPOINT_CTRLFILE_H
+
 #include "table.h"
 
 namespace MOT {
@@ -44,7 +45,7 @@ public:
     bool Init();
 
     struct CtrlFileElem {
-        CtrlFileElem(uint64_t id = invalidId, uint64_t lsn = invalidId, uint64_t replay = invalidId,
+        explicit CtrlFileElem(uint64_t id = INVALID_ID, uint64_t lsn = INVALID_ID, uint64_t replay = INVALID_ID,
             uint64_t maxTxnId = 0, uint32_t ver = MetadataProtoVersion::METADATA_VER_CURR)
             : checkpointId(id),
               lsn(lsn),
@@ -56,9 +57,9 @@ public:
 
         void Init()
         {
-            checkpointId = invalidId;
-            lsn = invalidId;
-            lastReplayLsn = invalidId;
+            checkpointId = INVALID_ID;
+            lsn = INVALID_ID;
+            lastReplayLsn = INVALID_ID;
             maxTransactionId = 0;
             metaVersion = MetadataProtoVersion::METADATA_VER_CURR;
             padding = 0;
@@ -94,21 +95,26 @@ public:
         return m_ctrlFileData.entry[0].metaVersion;
     }
 
+    uint64_t GetMaxTransactionId() const
+    {
+        return m_ctrlFileData.entry[0].maxTransactionId;
+    }
+
     /**
      * @brief Performs a durable update of the checkpoint id in the file
      * @param id The checkpoint's id.
      * @return  Boolean value denoting success or failure.
      */
-    bool Update(uint64_t id, uint64_t lsn, uint64_t lastReplayLsn);
+    bool Update(uint64_t id, uint64_t lsn, uint64_t lastReplayLsn, uint64_t maxTxnId);
 
     bool IsValid() const
     {
         return m_valid;
     }
 
-    void Print();
+    void Print() const;
 
-    static const uint64_t invalidId = (uint64_t)(-1);
+    static const uint64_t INVALID_ID = (uint64_t)(-1);
 
     static constexpr const char* CTRL_FILE_NAME = "mot.ctrl";
 
@@ -129,8 +135,6 @@ private:
     static bool initialized;
 
     static CheckpointControlFile* ctrlfileInst;
-
-    const char* m_defaultDir = "/tmp";
 
     std::string m_fullPath;
 

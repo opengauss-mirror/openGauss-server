@@ -28,9 +28,10 @@
 #include "mm_def.h"
 #include "utilities.h"
 #include "mot_error.h"
+#include "mot_engine.h"
 
-#include <stdlib.h>
-#include <string.h>
+#include <cstdlib>
+#include <cstring>
 
 namespace MOT {
 
@@ -80,7 +81,8 @@ extern void* MemRawChunkStoreAllocGlobal(int node)
     void* chunk = MemRawChunkPoolAlloc(globalChunkPools[node]);
     if (chunk == NULL) {
         // reached high black mark in this pool, continue attempt in round robin
-        for (int i = (node + 1) % g_memGlobalCfg.m_nodeCount; i != node; i = (i + 1) % g_memGlobalCfg.m_nodeCount) {
+        for (uint32_t i = ((uint32_t)node + 1) % g_memGlobalCfg.m_nodeCount; i != (uint32_t)node;
+             i = (i + 1) % g_memGlobalCfg.m_nodeCount) {
             chunk = MemRawChunkPoolAlloc(globalChunkPools[i]);
             if (chunk != NULL) {
                 break;
@@ -102,7 +104,8 @@ extern void* MemRawChunkStoreAllocLocal(int node)
     void* chunk = MemRawChunkPoolAlloc(localChunkPools[node]);
     if (chunk == NULL) {
         // reached high black mark in this pool, continue attempt in round robin
-        for (int i = (node + 1) % g_memGlobalCfg.m_nodeCount; i != node; i = (i + 1) % g_memGlobalCfg.m_nodeCount) {
+        for (uint32_t i = ((uint32_t)node + 1) % g_memGlobalCfg.m_nodeCount; i != (uint32_t)node;
+             i = (i + 1) % g_memGlobalCfg.m_nodeCount) {
             chunk = MemRawChunkPoolAlloc(localChunkPools[i]);
             if (chunk != NULL) {
                 break;
@@ -127,6 +130,53 @@ extern void MemRawChunkStoreFreeGlobal(void* chunk, int node)
 extern void MemRawChunkStoreFreeLocal(void* chunk, int node)
 {
     MemRawChunkPoolFree(localChunkPools[node], chunk);
+}
+
+extern int MemRawChunkStoreReserveGlobal(int node, uint32_t chunkCount)
+{
+    int result = 0;
+    uint32_t chunksReserved = MemRawChunkPoolReserveSession(globalChunkPools[node], chunkCount);
+    if (chunksReserved < chunkCount) {
+        uint32_t chunksRequired = chunkCount - chunksReserved;
+        // reached high black mark in this pool, continue attempt in round robin
+        for (uint32_t i = ((uint32_t)node + 1) % g_memGlobalCfg.m_nodeCount; i != (uint32_t)node;
+             i = (i + 1) % g_memGlobalCfg.m_nodeCount) {
+            chunksReserved += MemRawChunkPoolReserveSession(globalChunkPools[i], chunksRequired);
+            if (chunksReserved == chunkCount) {
+                break;
+            } else {
+                chunksRequired = chunkCount - chunksReserved;
+                if (MOT::MOTEngine::GetInstance()->IsSoftMemoryLimitReached()) {
+                    // stop reserving, we are out of memory
+                    MOT_LOG_WARN(
+                        "Stopping reservation for current session on chunk store due to global emergency state");
+                    break;
+                }
+            }
+        }
+    }
+
+    if (chunksReserved < chunkCount) {
+        // release all reservation and return error
+        MemRawChunkStoreUnreserveGlobal(node, 0);
+        MOT_REPORT_ERROR(MOT_ERROR_OOM,
+            "N/A",
+            "Failed to reserve %u chunks for current session: All global chunk pools are depleted");
+        result = MOT_ERROR_OOM;
+    }
+    return result;
+}
+
+extern void MemRawChunkStoreUnreserveGlobal(int node, uint32_t chunkCount)
+{
+    uint32_t count = 0;
+    // unreserve on al pools
+    for (uint32_t i = 0; i < g_memGlobalCfg.m_nodeCount; ++i) {
+        count += MemRawChunkPoolUnreserveSession(globalChunkPools[i], chunkCount);
+        if (chunkCount > 0 && count == chunkCount) {
+            break;
+        }
+    }
 }
 
 extern void MemRawChunkStorePrint(
@@ -258,11 +308,11 @@ static int InitChunkPools(MemRawChunkPool** chunkPools, MemReserveMode reserveMo
             ((double)chunkReserveCount) * MEM_CHUNK_SIZE_MB / KILO_BYTE,
             MemReserveModeToString(reserveMode));
 
-        char name[32];
-        erc = snprintf_s(name, sizeof(name), sizeof(name) - 1, "%s[%u]", nameCapital, i);
+        char tmpName[32];
+        erc = snprintf_s(tmpName, sizeof(tmpName), sizeof(tmpName) - 1, "%s[%u]", nameCapital, i);
         securec_check_ss(erc, "\0", "\0");
         result = MemRawChunkPoolInit(chunkPools[i],
-            name,
+            tmpName,
             i,
             allocType,
             chunkReserveCount,
@@ -327,8 +377,8 @@ static int MemRawChunkStoreInitGlobal(MemReserveMode reserveMode, MemStorePolicy
 {
     int result = 0;
     MOT_LOG_TRACE("Initializing global chunk pools");
-    uint64_t chunkReserveCount = g_memGlobalCfg.m_minGlobalMemoryMb / MEM_CHUNK_SIZE_MB / g_memGlobalCfg.m_nodeCount;
-    uint64_t highBlackMark = g_memGlobalCfg.m_maxGlobalMemoryMb / MEM_CHUNK_SIZE_MB / g_memGlobalCfg.m_nodeCount;
+    uint64_t chunkReserveCount = (g_memGlobalCfg.m_minGlobalMemoryMb / MEM_CHUNK_SIZE_MB) / g_memGlobalCfg.m_nodeCount;
+    uint64_t highBlackMark = (g_memGlobalCfg.m_maxGlobalMemoryMb / MEM_CHUNK_SIZE_MB) / g_memGlobalCfg.m_nodeCount;
     uint64_t highRedMark = highBlackMark * g_memGlobalCfg.m_highRedMarkPercent / 100;
 
     globalChunkPools = (MemRawChunkPool**)calloc(g_memGlobalCfg.m_nodeCount, sizeof(MemRawChunkPool*));
@@ -374,8 +424,8 @@ static int MemRawChunkStoreInitLocal(MemReserveMode reserveMode, MemStorePolicy 
 {
     int result = 0;
     MOT_LOG_TRACE("Initializing local chunk pools");
-    uint64_t chunkReserveCount = g_memGlobalCfg.m_minLocalMemoryMb / MEM_CHUNK_SIZE_MB / g_memGlobalCfg.m_nodeCount;
-    uint64_t highBlackMark = g_memGlobalCfg.m_maxLocalMemoryMb / MEM_CHUNK_SIZE_MB / g_memGlobalCfg.m_nodeCount;
+    uint64_t chunkReserveCount = (g_memGlobalCfg.m_minLocalMemoryMb / MEM_CHUNK_SIZE_MB) / g_memGlobalCfg.m_nodeCount;
+    uint64_t highBlackMark = (g_memGlobalCfg.m_maxLocalMemoryMb / MEM_CHUNK_SIZE_MB) / g_memGlobalCfg.m_nodeCount;
     uint64_t highRedMark = highBlackMark;  // no emergency state for local pools
 
     localChunkPools = (MemRawChunkPool**)calloc(g_memGlobalCfg.m_nodeCount, sizeof(MemRawChunkPool*));
@@ -425,7 +475,7 @@ extern "C" void MemRawChunkStoreDump()
 {
     MOT::StringBufferApply([](MOT::StringBuffer* stringBuffer) {
         MOT::MemRawChunkStoreToString(0, "Debug Dump", stringBuffer, MOT::MEM_REPORT_DETAILED);
-        fprintf(stderr, "%s", stringBuffer->m_buffer);
+        (void)fprintf(stderr, "%s", stringBuffer->m_buffer);
     });
 }
 

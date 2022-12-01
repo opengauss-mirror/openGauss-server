@@ -25,14 +25,14 @@
 #ifndef MM_DEF_H
 #define MM_DEF_H
 
-#include <stdint.h>
-#include <stddef.h>
+#include <cstdint>
+#include <cstddef>
 #include <string>
 
 #include "type_formatter.h"
 
 /** @define General alignment macro. */
-#define MEM_ALIGN(size, align) (((size) + (align)-1) / (align) * (align))
+#define MEM_ALIGN(size, align) ((((size) + (align) - 1) / (align)) * (align))
 
 /** @define L1 Cache line size in  bytes. */
 #define L1_CACHE_LINE 64
@@ -53,13 +53,13 @@
  * @define Utility macro for defining L1 cache line aligned structure size (rounds up to next cache
  * line alignment).
  */
-#define L1_ALIGNED_SIZEOF(T) ((sizeof(T) + L1_CACHE_LINE - 1) / L1_CACHE_LINE * L1_CACHE_LINE)
+#define L1_ALIGNED_SIZEOF(T) (((sizeof(T) + L1_CACHE_LINE - 1) / L1_CACHE_LINE) * L1_CACHE_LINE)
 
 /**
  * @define Utility macro for defining L1 cache line aligned structure start address (rounds up to
  * next cache line alignment).
  */
-#define L1_ALIGNED_PTR(P) ((((uintptr_t)(P)) + L1_CACHE_LINE - 1) / L1_CACHE_LINE * L1_CACHE_LINE)
+#define L1_ALIGNED_PTR(P) (((((uintptr_t)(P)) + L1_CACHE_LINE - 1) / L1_CACHE_LINE) * L1_CACHE_LINE)
 
 /** @define Half L1 Cache line size in  bytes. */
 #define HALF_L1_CACHE_LINE (L1_CACHE_LINE / 2)
@@ -68,7 +68,7 @@
  * @define Utility macro for defining L1 cache line aligned structure size (rounds up to next half
  * cache line alignment).
  */
-#define HALF_L1_ALIGNED_SIZEOF(T) ((sizeof(T) + HALF_L1_CACHE_LINE - 1) / HALF_L1_CACHE_LINE * HALF_L1_CACHE_LINE)
+#define HALF_L1_ALIGNED_SIZEOF(T) (((sizeof(T) + HALF_L1_CACHE_LINE - 1) / HALF_L1_CACHE_LINE) * HALF_L1_CACHE_LINE)
 
 /** @define Constant for one kilobyte. */
 #define KILO_BYTE 1024
@@ -98,7 +98,7 @@
 #define PAGE_SIZE_BYTES (PAGE_SIZE_KB * KILO_BYTE)
 
 /** @define Utility macro for calculating page aligned sizes (rounds up to next page size). */
-#define PAGE_ALIGNED_SIZE(size) (((size) + PAGE_SIZE_BYTES - 1) / PAGE_SIZE_BYTES * PAGE_SIZE_BYTES)
+#define PAGE_ALIGNED_SIZE(size) ((((size) + PAGE_SIZE_BYTES - 1) / PAGE_SIZE_BYTES) * PAGE_SIZE_BYTES)
 
 // System Limits
 
@@ -189,6 +189,13 @@ extern MemReserveMode MemReserveModeFromString(const char* reserveModeStr);
 extern const char* MemReserveModeToString(MemReserveMode reserveMode);
 
 /**
+ * @brief Validates the memory reserve mode string value.
+ * @param reserveModeStr The reserve mode string.
+ * @return True if memory reserve mode is valid, otherwise false.
+ */
+extern bool ValidateMemReserveMode(const char* reserveModeStr);
+
+/**
  * @class TypeFormatter<MemReserveMode>
  * @brief Specialization of TypeFormatter<T> with [ T = MemReserveMode ].
  */
@@ -244,6 +251,13 @@ extern MemStorePolicy MemStorePolicyFromString(const char* storePolicyStr);
  * @return The memory storage policy string.
  */
 extern const char* MemStorePolicyToString(MemStorePolicy storePolicy);
+
+/**
+ * @brief Validates the memory storage policy string value.
+ * @param storePolicyStr The storage policy string.
+ * @return True if storage policy is valid, otherwise false.
+ */
+extern bool ValidateMemStorePolicy(const char* storePolicyStr);
 
 /**
  * @class TypeFormatter<MemStorePolicy>
@@ -336,6 +350,13 @@ extern MemAllocPolicy MemAllocPolicyFromString(const char* allocPolicyStr);
  * @return The memory allocation policy string.
  */
 extern const char* MemAllocPolicyToString(MemAllocPolicy allocPolicy);
+
+/**
+ * @brief Validates the allocation policy string value.
+ * @param allocPolicyStr The memory allocation policy string.
+ * @return True if allocation policy is valid, otherwise false.
+ */
+extern bool ValidateMemAllocPolicy(const char* allocPolicyStr);
 
 /**
  * @class TypeFormatter<MemAllocPolicy>

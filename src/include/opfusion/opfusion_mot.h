@@ -30,28 +30,38 @@
 #ifdef ENABLE_MOT
 class MotJitSelectFusion : public OpFusion {
 public:
-    MotJitSelectFusion(MemoryContext context, CachedPlanSource *psrc, List *plantree_list, ParamListInfo params);
+    MotJitSelectFusion(MemoryContext context, CachedPlanSource* psrc, List* plantree_list, ParamListInfo params);
 
-    ~MotJitSelectFusion() {};
+    ~MotJitSelectFusion()
+    {}
 
-    bool execute(long max_rows, char *completionTag);
+    bool execute(long max_rows, char* completionTag);
 
     void InitLocals(ParamListInfo params);
 
     void InitGlobals();
+
+private:
+    struct MotJitSelectFusionGlobalVariable {
+        int64 m_limitCount;
+        int64 m_limitOffset;
+    };
+    MotJitSelectFusionGlobalVariable* m_c_global;
 };
 
 class MotJitModifyFusion : public OpFusion {
 public:
-    MotJitModifyFusion(MemoryContext context, CachedPlanSource *psrc, List *plantree_list, ParamListInfo params);
+    MotJitModifyFusion(MemoryContext context, CachedPlanSource* psrc, List* plantree_list, ParamListInfo params);
 
-    ~MotJitModifyFusion() {};
+    ~MotJitModifyFusion()
+    {}
 
-    bool execute(long max_rows, char *completionTag);
+    bool execute(long max_rows, char* completionTag);
 
     void InitLocals(ParamListInfo params);
 
     void InitGlobals();
+
 private:
     struct MotJitModifyFusionLocaleVariable {
         CmdType m_cmdType;

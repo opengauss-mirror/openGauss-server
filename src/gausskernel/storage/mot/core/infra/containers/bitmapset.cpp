@@ -23,7 +23,6 @@
  */
 
 #include "bitmapset.h"
-#include "debug_utils.h"
 #include "global.h"
 #include <stdlib.h>
 #include <string.h>
@@ -40,7 +39,9 @@ BitmapSet::BitmapSet(uint8_t* data, uint16_t size) : m_data(data), m_size(size),
 {}
 
 BitmapSet::~BitmapSet()
-{}
+{
+    m_data = nullptr;
+}
 
 void BitmapSet::Init(uint8_t* data, uint16_t size)
 {
@@ -70,7 +71,7 @@ void BitmapSet::Clear()
     securec_check(erc, "\0", "\0");
 }
 
-bool BitmapSet::IsClear()
+bool BitmapSet::IsClear() const
 {
     uint16_t numBytes = GetLength();
     for (uint16_t i = 0; i < numBytes; i++)
@@ -83,19 +84,19 @@ bool BitmapSet::IsClear()
 void BitmapSet::SetBit(uint16_t bit)
 {
     MOT_ASSERT(bit < m_size);
-    m_data[GetByteIndex(bit)] |= (1 << (bit & 0x07));
+    m_data[GetByteIndex(bit)] |= (1U << (bit & 0x07));
 }
 
 void BitmapSet::UnsetBit(uint16_t bit)
 {
     MOT_ASSERT(bit < m_size);
-    m_data[GetByteIndex(bit)] &= ~(1 << (bit & 0x07));
+    m_data[GetByteIndex(bit)] &= ~(1U << (bit & 0x07));
 }
 
-uint8_t BitmapSet::GetBit(uint16_t bit)
+bool BitmapSet::GetBit(uint16_t bit) const
 {
     MOT_ASSERT(bit < m_size);
-    return (m_data[GetByteIndex(bit)] & (1 << (bit & 0x07))) != 0;
+    return (m_data[GetByteIndex(bit)] & (1U << (bit & 0x07))) != 0;
 }
 
 uint16_t BitmapSet::GetByteIndex(uint16_t bit)
@@ -103,7 +104,7 @@ uint16_t BitmapSet::GetByteIndex(uint16_t bit)
     return (bit >> 3);
 }
 
-void BitmapSet::operator|=(BitmapSet bitmapSet)
+void BitmapSet::operator|=(const BitmapSet& bitmapSet)
 {
     uint16_t length = GetLength();
     for (uint16_t i = 0; i < length; i++) {
@@ -111,7 +112,7 @@ void BitmapSet::operator|=(BitmapSet bitmapSet)
     }
 }
 
-void BitmapSet::operator&=(BitmapSet bitmapSet)
+void BitmapSet::operator&=(const BitmapSet& bitmapSet)
 {
     uint16_t length = GetLength();
     for (uint16_t i = 0; i < length; i++) {
@@ -122,11 +123,14 @@ void BitmapSet::operator&=(BitmapSet bitmapSet)
 BitmapSet::BitmapSetIterator::BitmapSetIterator(const BitmapSet& bitmapSet)
     : m_bms(&bitmapSet), m_data(m_bms->m_data), m_bitIndex(-1), m_byteCache(0), m_isSetCache(false)
 {
-    Next();
+    (void)Next();
 }
 
 BitmapSet::BitmapSetIterator::~BitmapSetIterator()
-{}
+{
+    m_bms = nullptr;
+    m_data = nullptr;
+}
 
 bool BitmapSet::BitmapSetIterator::Start()
 {

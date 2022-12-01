@@ -378,7 +378,6 @@ private:
     void FreeDeadCts();
     void HandleDeadGlobalCatCTup(GlobalCatCTup *ct);
     void RemoveTailTupleElements(Index hash_index);
-    void InvalidLSC(uint32 hash_value);
 
     void FreeDeadCls();
     void HandleDeadGlobalCatCList(GlobalCatCList *cl);

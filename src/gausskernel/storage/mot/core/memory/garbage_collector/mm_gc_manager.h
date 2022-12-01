@@ -30,118 +30,19 @@
 #include "utilities.h"
 #include "memory_statistics.h"
 #include "mm_session_api.h"
+#include "mm_gc_queue.h"
+#include <vector>
 #include "object_pool.h"
 
 namespace MOT {
 class GcManager;
 
-typedef uint64_t GcEpochType;
-typedef int64_t GcSignedEpochType;
-typedef MOT::spin_lock GcLock;
-
-/** @def GC callback function signature   */
-typedef uint32_t (*DestroyValueCbFunc)(void*, void*, bool);
-extern volatile GcEpochType g_gcGlobalEpoch;
 extern volatile GcEpochType g_gcActiveEpoch;
 extern GcLock g_gcGlobalEpochLock;
 
-inline uint64_t GetGlobalEpoch()
-{
-    return g_gcGlobalEpoch;
-}
+uint64_t GetGlobalEpoch();
 
-/**
- * @struct LimboGroup
- * @brief Contains capacity elements and handle push/pop operations
- */
-struct LimboGroup {
-    typedef GcEpochType EpochType;
-    typedef GcSignedEpochType SignedEpochType;
-
-    /**
-     * @struct LimboElement
-     * @brief Contains all the necessary members to reclaim the object
-     */
-    struct LimboElement {
-        void* m_objectPtr;
-
-        void* m_objectPool;
-
-        DestroyValueCbFunc m_cb;
-
-        EpochType m_epoch;
-
-        uint32_t m_indexId;
-    };
-
-    static_assert(sizeof(LimboElement) > (sizeof(LimboGroup*) + sizeof(EpochType) + 2 * sizeof(unsigned)),
-        "ERROR:Please Modify group size!");
-
-    static constexpr uint32_t GROUP_SIZE = 8 * KILO_BYTE - sizeof(LimboElement);
-
-    /** Calculate the capacity of the group for minimal memory overhead (S-1/S)
-     * Where a single element is at least larger from the rest of the Struct members
-     */
-    static constexpr uint32_t CAPACITY = GROUP_SIZE / sizeof(LimboElement);
-
-    unsigned m_head;
-
-    unsigned m_tail;
-
-    EpochType m_epoch;
-
-    LimboGroup* m_next;
-
-    LimboElement m_elements[CAPACITY];
-
-    LimboGroup() : m_head(0), m_tail(0), m_next()
-    {}
-
-    EpochType FirstEpoch() const
-    {
-        MOT_ASSERT(m_head != m_tail);
-        return m_elements[m_head].m_epoch;
-    }
-
-    /**
-     * @brief Push an element to the list, if the epoch is new create a new dummy element
-     * @param indexId Element index-id
-     * @param objectPtr Pointer to reclaim
-     * @param objectPool Memory pool (optional)
-     * @param cb Callback function
-     * @param epoch Recorded epoch
-     */
-    void PushBack(uint32_t indexId, void* objectPtr, void* objectPool, DestroyValueCbFunc cb, GcEpochType epoch)
-    {
-        MOT_ASSERT(m_tail + 2 <= CAPACITY);
-        if (m_head == m_tail || m_epoch != epoch) {
-            m_elements[m_tail].m_objectPtr = nullptr;
-            m_elements[m_tail].m_epoch = epoch;
-            m_epoch = epoch;
-            ++m_tail;
-        }
-        m_elements[m_tail].m_indexId = indexId;
-        m_elements[m_tail].m_objectPtr = objectPtr;
-        m_elements[m_tail].m_objectPool = objectPool;
-        m_elements[m_tail].m_cb = cb;
-        ++m_tail;
-    }
-
-    /** @brief Clean all element until epochBound
-     *  @param ti GcManager object to clean
-     *  @param epochBound Epoch boundary to limit cleanup
-     *  @param count Max items to clean
-     */
-    inline unsigned CleanUntil(GcManager& ti, GcEpochType epochBound, unsigned count);
-
-    /**
-     * @brief Clean All elements from the current GC manager tagged with index_id
-     * @param ti GcManager object to clean
-     * @param indexId Index Identifier to clean
-     * @return Number of elements cleaned
-     */
-    inline unsigned CleanIndexItemPerGroup(GcManager& ti, uint32_t indexId, bool dropIndex);
-};
+uint64_t GetCurrentSnapshotCSN();
 
 static const char* const enGcTypes[] = {
     stringify(GC_MAIN), stringify(GC_INDEX), stringify(GC_LOG), stringify(GC_CHECKPOINT)};
@@ -154,18 +55,11 @@ class alignas(64) GcManager {
 public:
     ~GcManager()
     {
-        LimboGroup* temp = m_limboHead;
-        LimboGroup* next = nullptr;
-        while (temp) {
-            next = temp->m_next;
-            DestroyLimboGroup(temp);
-            temp = next;
-        }
-
         if (m_limboGroupPool) {
             ObjAllocInterface::FreeObjPool(&m_limboGroupPool);
         }
         m_limboGroupPool = nullptr;
+        m_next = nullptr;
     }
 
     GcManager(const GcManager&) = delete;
@@ -173,7 +67,7 @@ public:
     GcManager& operator=(const GcManager&) = delete;
 
     /** @var GC managers types   */
-    enum GC_TYPE : uint8_t { GC_MAIN, GC_INDEX, GC_LOG, GC_CHECKPOINT };
+    enum class GC_TYPE : uint8_t { GC_MAIN, GC_INDEX, GC_RECOVERY, GC_CHECKPOINT };
 
     /** @var List of all GC Managers */
     static GcManager* allGcManagers;
@@ -193,22 +87,64 @@ public:
      * @param rcuMaxFreeCount How many objects to reclaim
      * @return Pointer to instance of a GC manager
      */
-    static GcManager* Make(GC_TYPE purpose, int threadId, int rcuMaxFreeCount = MASSTREE_OBJECT_COUNT_PER_CLEANUP);
-
+    static GcManager* Make(GC_TYPE purpose, int threadId, bool global = false);
     /**
      * @brief Add Current manager to the global list
      */
     inline void AddToGcList()
     {
-        if (m_isGcEnabled == false) {
-            return;
-        }
         g_gcGlobalEpochLock.lock();
         m_next = allGcManagers;
         allGcManagers = this;
         g_gcGlobalEpochLock.unlock();
     }
 
+    /** @brief Reserver GC Memory */
+    bool ReserveGCMemory(uint32_t elements);
+
+    /** @brief Reserver GC Memory for specific queue */
+    bool ReserveGCMemoryPerQueue(GC_QUEUE_TYPE queueId, uint32_t elements, bool reserveGroups = false);
+
+    /** @brief Reserver GC Memory for transaction rollback */
+    bool ReserveGCRollbackMemory(uint32_t elements);
+
+    /** @brief allocate multiple limbo groups */
+    LimboGroup* AllocLimboGroups(uint32_t limboGroups);
+
+    /** @brief allocate limbo group */
+    LimboGroup* CreateNewLimboGroup()
+    {
+        LimboGroup* group = m_limboGroupPool->Alloc<LimboGroup>();
+        if (group == nullptr) {
+            MOT_REPORT_ERROR(
+                MOT_ERROR_OOM, "Create LimboGroup", "Failed to create new LimboGroup in Thread %d", GetThreadId());
+        } else {
+            m_limboGroupAllocations++;
+        }
+        return group;
+    }
+
+    /** @brief allocate limbo group from reserved pool */
+    LimboGroup* AllocLimboGroupFromReserved()
+    {
+        return m_reservedManager.AllocLimboGroup();
+    }
+
+    /** @brief release limbo group */
+    void DestroyLimboGroup(LimboGroup* obj)
+    {
+        m_limboGroupPool->Release<LimboGroup>(obj);
+        m_limboGroupAllocations--;
+    }
+
+    void ClearLimboGroupCache()
+    {
+        if (m_global) {
+            m_limboGroupPool->ClearThreadCache();
+        } else {
+            m_limboGroupPool->ClearFreeCache();
+        }
+    }
     /** @brief remove manager from global list   */
     void RemoveFromGcList(GcManager* ti);
 
@@ -218,7 +154,12 @@ public:
     /** @brief Print report of all threads   */
     static void ReportGcAll();
 
-    int GetThreadId() const
+    void SetThreadId(uint16_t threadId)
+    {
+        m_tid = threadId;
+    }
+
+    uint16_t GetThreadId() const
     {
         return m_tid;
     }
@@ -228,12 +169,12 @@ public:
         m_purpose = type;
     }
 
-    const char* GetGcTypeStr()
+    const char* GetGcTypeStr() const
     {
-        return enGcTypes[m_purpose];
+        return enGcTypes[static_cast<uint8_t>(m_purpose)];
     }
 
-    GC_TYPE GetGcType()
+    GC_TYPE GetGcType() const
     {
         return m_purpose;
     }
@@ -253,14 +194,69 @@ public:
         m_gcEpoch = 0;
     }
 
-    void GcStartTxn()
+    uint64_t GetCurrentEpoch() const
     {
+        return m_gcEpoch;
+    }
 
-        if (m_isGcEnabled == true and m_isTxnStarted == false) {
-            m_isTxnStarted = true;
-            if (m_gcEpoch != GetGlobalEpoch())
-                m_gcEpoch = GetGlobalEpoch();
+    bool IsGcSnapshotTaken() const
+    {
+        return m_isTxnSnapshotTaken;
+    }
+
+    /** @brief Start GC session   */
+    RC GcStartTxn(uint64_t csn = 0)
+    {
+        RC rc = RC_OK;
+
+        if (!m_isTxnSnapshotTaken) {
+            m_isTxnSnapshotTaken = true;
+            m_isGcSessionStarted = true;
+            if (csn) {
+                m_gcEpoch = csn;
+            } else {
+                // local guard the current epoch acquisition for correct minimum calculation
+                m_managerLock.lock();
+                if (GetGcType() == GC_TYPE::GC_CHECKPOINT || GetGcType() == GC_TYPE::GC_RECOVERY) {
+                    m_gcEpoch = GetGlobalEpoch();
+                } else {
+                    m_gcEpoch = GetCurrentSnapshotCSN();
+                }
+                m_managerLock.unlock();
+            }
+            bool res = ReserveGCMemory(LIMBO_GROUP_INIT_SIZE * LimboGroup::CAPACITY);
+            if (!res) {
+                MOT_REPORT_ERROR(MOT_ERROR_OOM,
+                    "Transaction Execution",
+                    "GC Failed to refill %d elements  (while reallocating)",
+                    LIMBO_GROUP_INIT_SIZE * LimboGroup::CAPACITY);
+                SetLastError(MOT_ERROR_OOM, MOT_SEVERITY_ERROR);
+                return RC::RC_MEMORY_ALLOCATION_ERROR;
+            }
         }
+        return rc;
+    }
+
+    /**
+     * @brief Signal to the Gc manager that a transaction is re-started in terms of reclaimable memory usage
+     */
+    void GcReinitEpoch();
+
+    /**
+     * @brief Signal to the Gc manger that a statement in a read-only transaction has ended.
+     * and remove yourself from the barrier
+     */
+    void GcEndStatement()
+    {
+        m_isTxnSnapshotTaken = false;
+        m_gcEpoch = 0;
+    }
+
+    void GcRecoveryEndTxn()
+    {
+        m_isTxnSnapshotTaken = false;
+        m_isGcSessionStarted = false;
+        m_gcEpoch = 0;
     }
 
     /**
@@ -268,16 +264,23 @@ public:
      */
     void GcEndTxn()
     {
-        if (m_isGcEnabled == false || m_isTxnStarted == false) {
+        if (!m_isGcSessionStarted) {
             return;
         }
-        // Always lock before quicese to allow drop-table/check-point operations
+        ValidateAllocations();
+        // Always lock before quiesce to allow drop-table/check-point operations
         if (m_managerLock.try_lock()) {
             RunQuicese();
             m_managerLock.unlock();
         }
+        m_isTxnSnapshotTaken = false;
+        m_isGcSessionStarted = false;
         m_gcEpoch = 0;
-        m_isTxnStarted = false;
+#ifdef GC_MASSTREE_DEBUG
+        m_mastreeElements = 0;
+#endif
+        GcCleanRollbackMemory();
+        ValidateAllocations();
     }
 
     /**
@@ -286,88 +289,36 @@ public:
      *        2. Perform reclamation if possible
      *        3. Check hard-limit
      */
-    void RunQuicese()
-    {
-        // Update values from cleanIndexItemPerGroup flow
-        if (m_totalLimboSizeInBytesByCleanIndex) {
-            m_totalLimboSizeInBytes -= m_totalLimboSizeInBytesByCleanIndex;
-            m_totalLimboReclaimedSizeInBytes += m_totalLimboSizeInBytesByCleanIndex;
-            m_totalLimboSizeInBytesByCleanIndex = 0;
-        }
-
-        // Increase Local epoch when the threashold is reached
-        if (m_totalLimboSizeInBytes > m_limboSizeLimit) {
-            m_gcEpoch++;
-        }
-        // if local epoch is greater then global set the global and calculate minimum
-        if (m_gcEpoch > g_gcGlobalEpoch) {
-            SetGlobalEpoch(m_gcEpoch);
-        }
-        // Perform reclamation if possible
-        Quiesce();
-
-        // If we still exceed the high size limit, (e.g. we had a major gc addition in this txn run), clean all elements
-        // (up to epoch limitation)
-        if (m_totalLimboSizeInBytes > m_limboSizeLimitHigh) {
-            HardQuiesce(m_totalLimboInuseElements);
-            ShrinkMem();
-        }
-    }
-
-    inline void Quiesce()
-    {
-        if (m_performGcEpoch != g_gcActiveEpoch)
-            HardQuiesce(m_rcuFreeCount);
-    }
+    void RunQuicese();
 
     /** @brief Clean all object at the end of the session */
-    inline void GcCleanAll()
-    {
-        if (m_isGcEnabled == false) {
-            return;
-        }
-        uint32_t inuseElements = m_totalLimboInuseElements;
-        // Increase the global epoch to insure all elements are from a lower epoch
-        while (m_totalLimboSizeInBytes > 0) {
-            SetGlobalEpoch(GetGlobalEpoch() + 1);
-            m_managerLock.lock();
-            HardQuiesce(m_totalLimboInuseElements);
-            m_managerLock.unlock();
-            // every 200ms
-            usleep(200 * 1000);
-        }
-        m_managerLock.lock();
-        ShrinkMem();
-        m_managerLock.unlock();
-        MOT_LOG_DEBUG("Entity:%s THD_ID:%d closed session cleaned %d elements from limbo!\n",
-            enGcTypes[m_purpose],
-            m_tid,
-            inuseElements);
-    }
+    void GcCleanAll();
 
     /** @brief Clean all object at the end of the session */
     inline void GcCheckPointClean()
     {
-        if (m_isGcEnabled == false) {
-            return;
-        }
-
-        // End CP Txn
-        m_gcEpoch = 0;
-        m_isTxnStarted = false;
+        uint64_t inuseElements = 0;
+        bool isBarrierReached = false;
 
         // Increase the global epoch to insure all elements are from a lower epoch
-        SetGlobalEpoch(GetGlobalEpoch() + 1);
+        SetActiveEpoch(isBarrierReached, GetThreadId());
         m_managerLock.lock();
-        HardQuiesce(m_totalLimboInuseElements);
+        for (uint32_t queue = 0; queue < m_GcQueues.size(); ++queue) {
+            m_GcQueues[queue].SetPerformGcEpoch(g_gcActiveEpoch);
+            inuseElements += m_GcQueues[queue].m_stats.m_totalLimboInuseElements;
+            m_GcQueues[queue].HardQuiesce(m_GcQueues[queue].m_stats.m_totalLimboInuseElements);
+            m_GcQueues[queue].RegisterDeletedSentinels();
+        }
+        GcMaintenance();
         m_managerLock.unlock();
 
 #ifdef MOT_DEBUG
-        uint32_t inuseElements = m_totalLimboInuseElements;
-        uint32_t cleandObjects = inuseElements - m_totalLimboInuseElements;
+        uint64_t cleandObjects = inuseElements - GetTotalLimboInuseElements();
         if (cleandObjects) {
-            MOT_LOG_INFO(
-                "Entity:%s THD_ID:%d cleaned %d elements from limbo!\n", enGcTypes[m_purpose], m_tid, (cleandObjects));
+            MOT_LOG_DEBUG("Entity:%s THD_ID:%u cleaned %lu elements from limbo!",
+                enGcTypes[static_cast<uint8_t>(m_purpose)],
+                m_tid,
+                cleandObjects);
         }
 #endif
     }
@@ -380,208 +331,223 @@ public:
      * @param cb Callback function
      * @param objSize Size of the object
      */
-    void GcRecordObject(uint32_t indexId, void* objectPtr, void* objectPool, DestroyValueCbFunc cb, uint32_t objSize)
+    void GcRecordObject(GC_QUEUE_TYPE m_type, uint32_t indexId, void* objectPtr, void* objectPool,
+        DestroyValueCbFunc cb, uint32_t objSize, GcEpochType csn = 0)
     {
-        if (m_isGcEnabled == false) {
-            return;
+        uint64_t epoch = csn;
+        if (!csn) {
+            epoch = GetGlobalEpoch();
         }
-        if (m_limboTail->m_tail + 2 > LimboGroup::CAPACITY) {
-            bool res = RefillLimboGroup();
-            if (res == false) {
-                MOT_REPORT_ERROR(MOT_ERROR_OOM, "GC Operation", "Failed to refill limbo group");
-                return;
-            }
-        }
-        uint64_t epoch = GetGlobalEpoch();
-        m_limboTail->PushBack(indexId, objectPtr, objectPool, cb, epoch);
-        ++m_totalLimboInuseElements;
-        m_totalLimboSizeInBytes += objSize;
-        m_totalLimboRetiredSizeInBytes += objSize;  // stats
-        MemoryStatisticsProvider::m_provider->AddGCRetiredBytes(objSize);
+
+        m_GcQueues[static_cast<uint8_t>(m_type)].PushBack(indexId, objectPtr, objectPool, cb, objSize, epoch);
+        MemoryStatisticsProvider::GetInstance().AddGCRetiredBytes(objSize);
     }
 
-    /** @brief Try to upgrade the global epoch or let other thread do it */
-    void SetGlobalEpoch(GcEpochType e)
+    /** @brief Try to upgrade the global minimum or let other thread do it   */
+    void SetActiveEpoch(bool& isBarrierReached, const uint16_t tid)
     {
+        isBarrierReached = false;
+        uint32_t activeConnections = 0;
+        uint16_t latestActiveTid = static_cast<uint16_t>(-1);
         bool rc = g_gcGlobalEpochLock.try_lock();
-        if (rc == true) {
-            if (GcSignedEpochType(e - g_gcGlobalEpoch) > 0) {
-                g_gcGlobalEpoch = e;
-                g_gcActiveEpoch = GcManager::MinActiveEpoch();
+        if (rc) {
+            g_gcActiveEpoch = GcManager::MinActiveEpoch(activeConnections, latestActiveTid);
+            if (activeConnections <= 1) {
+                // Either no active connections or i am seeing myself
+                if (activeConnections == 0 or latestActiveTid == tid) {
+                    // Self view
+                    isBarrierReached = true;
+                }
             }
             g_gcGlobalEpochLock.unlock();
         }
-    }
-
-    /** @brief realloc limbo group */
-    bool RefillLimboGroup();
-
-    /** @brief allocate limbo group */
-    LimboGroup* CreateNewLimboGroup()
-    {
-        LimboGroup* group = m_limboGroupPool->Alloc<LimboGroup>();
-        if (group == nullptr) {
-            MOT_REPORT_ERROR(
-                MOT_ERROR_OOM, "Create LimboGroup", "Failed to create new LimboGroup in Thread %d", GetThreadId());
-        }
-        return group;
-    }
-
-    /** @brief release limbo group */
-    void DestroyLimboGroup(LimboGroup* obj)
-    {
-        m_limboGroupPool->Release<LimboGroup>(obj);
-    }
-
-    /** @brief shrink limbogroups memory */
-    inline void ShrinkMem()
-    {
-        if (m_limboGroupAllocations > 1) {
-
-            LimboGroup* temp = m_limboTail->m_next;
-            LimboGroup* next = nullptr;
-            while (temp) {
-                next = temp->m_next;
-                DestroyLimboGroup(temp);
-                temp = next;
-                m_limboGroupAllocations--;
-            }
-            m_limboTail->m_next = nullptr;
-        }
-    }
-
-    /** @brief null destructor callback function
-     *  @param buf Ignored
-     *  @param buf2 Ignored
-     *  @param dropIndex Ignored
-     *  @return 0 (for success)
-     */
-    static uint32_t NullDtor(void* buf, void* buf2, bool dropIndex)
-    {
-        return 0;
     }
 
     /** @brief API for global index cleanup - used by vacuum/drop table
      *  @param indexId Index identifier
      *  @return True for success
      */
-    static inline bool ClearIndexElements(uint32_t indexId, bool dropIndex = true);
+    static inline void ClearIndexElements(
+        uint32_t indexId, GC_OPERATION_TYPE oper = GC_OPERATION_TYPE::GC_OPER_DROP_INDEX);
 
-    int GetFreeCount() const
+    uint64_t inline GetTotalLimboInuseElements() const
     {
-        return m_rcuFreeCount;
+        uint64_t totalLimboInuseElements = 0;
+        for (uint32_t queue = 0; queue < m_GcQueues.size(); ++queue) {
+            totalLimboInuseElements += m_GcQueues[queue].m_stats.m_totalLimboInuseElements;
+        }
+        return totalLimboInuseElements;
     }
 
+    uint64_t inline GetLimboInuseElementsByQueue(GC_QUEUE_TYPE queue) const
+    {
+        return m_GcQueues[static_cast<uint8_t>(queue)].m_stats.m_totalLimboInuseElements;
+    }
+
+    uint32_t inline GetLimboGroupAllocations() const
+    {
+        uint32_t limboGroupAllocations = 0;
+        for (uint32_t queue = 0; queue < m_GcQueues.size(); ++queue) {
+            limboGroupAllocations += m_GcQueues[queue].m_stats.m_limboGroupAllocations;
+        }
+        return limboGroupAllocations;
+    }
+
+    void inline ValidateAllocations() const
+    {
+        MOT_ASSERT(m_limboGroupAllocations - m_reservedManager.GetLimboAlloctions() == GetLimboGroupAllocations());
+    }
+
+    uint32_t GetFreeAllocations() const
+    {
+        uint32_t freeAllocations = 0;
+        for (uint32_t queue = 0; queue < m_GcQueues.size(); ++queue) {
+            freeAllocations += m_GcQueues[queue].GetFreeAllocations();
+        }
+        return freeAllocations;
+    }
+
+    uint32_t GetFreeAllocationsPerQueue(GC_QUEUE_TYPE queueId) const
+    {
+        return m_GcQueues[static_cast<uint8_t>(queueId)].GetFreeAllocations();
+    }
+
+    uint64_t inline GetTotalLimboReclaimedSizeInBytes()
+    {
+        uint64_t totalLimboReclaimedSizeInBytes = 0;
+        for (uint32_t queue = 0; queue < m_GcQueues.size(); ++queue) {
+            totalLimboReclaimedSizeInBytes += m_GcQueues[queue].m_stats.m_totalLimboReclaimedSizeInBytes;
+        }
+        return totalLimboReclaimedSizeInBytes;
+    }
+
+    uint64_t inline GetTotalLimboRetiredSizeInBytes()
+    {
+        uint64_t totalLimboRetiredSizeInBytes = 0;
+        for (uint32_t queue = 0; queue < m_GcQueues.size(); ++queue) {
+            totalLimboRetiredSizeInBytes += m_GcQueues[queue].m_stats.m_totalLimboRetiredSizeInBytes;
+        }
+        return totalLimboRetiredSizeInBytes;
+    }
+
+    inline void GcMaintenance()
+    {
+        for (uint32_t queue = 0; queue < m_GcQueues.size(); ++queue) {
+            m_GcQueues[queue].Maintenance();
+        }
+    }
+
+    void GcCleanRollbackMemory()
+    {
+        uint32_t allocations = m_reservedManager.GetFreeAllocations();
+        if (allocations) {
+            LimboGroup* head = m_reservedManager.AllocLimboGroup();
+            while (head) {
+                DestroyLimboGroup(head);
+                head = m_reservedManager.AllocLimboGroup();
+            }
+            m_reservedManager.Clear();
+            if (allocations > GcQueue::LIMBO_GROUP_SHRINK_THRESHOLD) {
+                ClearLimboGroupCache();
+            }
+        }
+    }
+
+    static constexpr int LIMBO_GROUP_INIT_SIZE = 4;
+    static constexpr int64_t INVALID_EPOCH = -1;
+    static constexpr uint16_t GC_CLEAN_SLEEP = 20 * 1000;
+    static constexpr uint16_t GC_CLEAN_SESSION_SLEEP = 50;
+
 private:
+    /** @var Vector of priority queues   */
+    std::vector<GcQueue> m_GcQueues;
+
     /** @var Current snapshot of the global epoch   */
     GcEpochType m_gcEpoch;
-
-    /** @var Calculated perform epoch   */
-    GcEpochType m_performGcEpoch;
-
-    /** @var Limbo group HEAD   */
-    LimboGroup* m_limboHead = nullptr;
-
-    /** @var Limbo group TAIL   */
-    LimboGroup* m_limboTail = nullptr;
-
-    /** @var Limbo group memory pool */
-    ObjAllocInterface* m_limboGroupPool = nullptr;
-
-    /** @var Next manager in the global list */
-    GcManager* m_next = nullptr;
 
     /** @var Manager local row   */
     GcLock m_managerLock;
 
-    /** @var Flag for feature availability   */
-    bool m_isGcEnabled = false;
+    /** @var Limbo group memory pool */
+    ObjAllocInterface* m_limboGroupPool = nullptr;
 
-    /** @var Flag to signal if we started a transaction   */
-    bool m_isTxnStarted = false;
+    GcReservedMemoryPool m_reservedManager;
 
-    /** @var RCU free count   */
-    uint16_t m_rcuFreeCount;
-
-    /** @var Total limbo elements in use */
-    uint32_t m_totalLimboInuseElements;
-
-    /**@var Total size of limbo in bytes   */
-    uint32_t m_totalLimboSizeInBytes;
-
-    /** @var Total clean object by clean index in bytes   */
-    uint32_t m_totalLimboSizeInBytesByCleanIndex;
-
-    /** @var Total reclaimed objects in bytes   */
-    uint32_t m_totalLimboReclaimedSizeInBytes;
-
-    /** @var Total retired object in bytes   */
-    uint32_t m_totalLimboRetiredSizeInBytes;
-
-    /** @var Limbo size limit   */
-    uint32_t m_limboSizeLimit;
-
-    /** @var Limbo size hard limit   */
-    uint32_t m_limboSizeLimitHigh;
+    /** @var Next manager in the global list */
+    GcManager* m_next = nullptr;
 
     /** @var Number of allocations   */
-    uint16_t m_limboGroupAllocations;
+    uint32_t m_limboGroupAllocations;
 
     /** @var Thread identification   */
     uint16_t m_tid;
 
+    /** @var Flag to signal if we took a snapshot  */
+    bool m_isTxnSnapshotTaken = false;
+
+    /** @var Flag to signal if we started a transaction   */
+    bool m_isGcSessionStarted = false;
+
+    /** @var Flag to signal if we reached a threshold   */
+    bool m_isThresholdReached = false;
+
     /** @var GC manager type   */
     GC_TYPE m_purpose;
+
+    bool m_global;
 
     /** @brief Calculate the minimum epoch among all active GC Managers.
      *  @return The minimum epoch among all active GC Managers.
      */
-    static inline GcEpochType MinActiveEpoch();
-
-    inline uint32_t GetOccupiedElements() const
-    {
-        return m_totalLimboInuseElements;
-    }
+    static inline GcEpochType MinActiveEpoch(uint32_t& activeConnections, uint16_t& tid);
 
     /** @brief Constructor   */
-    inline GcManager(GC_TYPE purpose, int index, int rcuMaxFreeCount);
+    inline GcManager(GC_TYPE purpose, int threadId, bool global = false);
 
     /** @brief Initialize GC Manager's structures.
      *  @return True for success
      */
     bool Initialize();
 
-    /** @brief Clean\reclaim elements from Limbo groups   */
-    void HardQuiesce(uint32_t numOfElementsToClean);
-
     /** @brief Remove all elements of elements of a specific index from all Limbo groups and reclaim them */
-    void CleanIndexItems(uint32_t indexId, bool dropIndex);
-    friend struct LimboGroup;
+    void CleanIndexItems(uint32_t indexId, GC_OPERATION_TYPE oper);
 
     DECLARE_CLASS_LOGGER()
 };
 
-inline GcEpochType GcManager::MinActiveEpoch()
+inline GcEpochType GcManager::MinActiveEpoch(uint32_t& activeConnections, uint16_t& tid)
 {
-    GcEpochType ae = g_gcGlobalEpoch;
+    GcEpochType minimalEpoch = static_cast<GcEpochType>(INVALID_EPOCH);
+    activeConnections = 0;
     for (GcManager* ti = allGcManagers; ti; ti = ti->Next()) {
         Prefetch((const void*)ti->Next());
-        GcEpochType te = ti->m_gcEpoch;
-        if (te && (GcSignedEpochType(te - ae) < 0))
-            ae = te;
+        GcEpochType currentEpoch = ti->m_gcEpoch;
+        if (currentEpoch > 0) {
+            activeConnections++;
+            tid = ti->GetThreadId();
+            if (currentEpoch < minimalEpoch) {
+                minimalEpoch = currentEpoch;
+            }
+        }
     }
-    return ae;
+
+    // If all sessions are closed the min_epoch is the current clock
+    // We can declare that we passed a barrier
+    if (GcSignedEpochType(minimalEpoch) == INVALID_EPOCH) {
+        return GetGlobalEpoch();
+    }
+
+    return minimalEpoch;
 }
 
-inline bool GcManager::ClearIndexElements(uint32_t indexId, bool dropIndex)
+inline void GcManager::ClearIndexElements(uint32_t indexId, GC_OPERATION_TYPE oper)
 {
     g_gcGlobalEpochLock.lock();
     for (GcManager* gcManager = allGcManagers; gcManager; gcManager = gcManager->Next()) {
         Prefetch((const void*)gcManager->Next());
-        gcManager->CleanIndexItems(indexId, dropIndex);
+        gcManager->CleanIndexItems(indexId, oper);
     }
     g_gcGlobalEpochLock.unlock();
-    return true;
 }
 }  // namespace MOT
 #endif /* MM_GC_MANAGER */

@@ -31,7 +31,7 @@
 namespace MOT {
 enum class RedoLogHandlerType : uint32_t {
     /** @var Denotes no redo log. */
-    NONE = 0,
+    NONE_REDO_LOG_HANDLER = 0,
 
     /** @var Denotes SynchronousRedoLogHandler. */
     SYNC_REDO_LOG_HANDLER,

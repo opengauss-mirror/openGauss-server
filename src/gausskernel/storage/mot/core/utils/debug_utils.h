@@ -25,9 +25,9 @@
 #ifndef DEBUG_UTILS_H
 #define DEBUG_UTILS_H
 
-#include <assert.h>
-#include <stddef.h>
-#include <stdarg.h>
+#include <cassert>
+#include <cstddef>
+#include <cstdarg>
 
 #include "log_level.h"
 

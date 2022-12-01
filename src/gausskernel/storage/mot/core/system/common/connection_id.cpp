@@ -41,13 +41,13 @@ static pthread_spinlock_t connectionIdLock;
 static enum ConnectionIdInitPhase { INIT, LOCK_INIT, ARRAY_ALLOC, DONE } initPhase = INIT;
 
 // the bit index is counted from MSB[0] to LSB[63]!
-#define CONNECTION_ID_BIT_AT(bitIndex) (((uint64_t)1) << (CONNECTIONS_PER_WORD - (bitIndex)-1))
+#define CONNECTION_ID_BIT_AT(bitIndex) (((uint64_t)1) << ((CONNECTIONS_PER_WORD - (bitIndex)) - 1))
 #define IS_CONNECTION_ID_BIT_SET(arrayIndex, bitIndex) \
     (connectionIdBitsetArray[arrayIndex] & CONNECTION_ID_BIT_AT(bitIndex))
 #define RAISE_CONNECTION_ID_BIT(arrayIndex, bitIndex) \
-    connectionIdBitsetArray[arrayIndex] |= CONNECTION_ID_BIT_AT(bitIndex)
+    (connectionIdBitsetArray[arrayIndex] |= CONNECTION_ID_BIT_AT(bitIndex))
 #define CLEAR_CONNECTION_ID_BIT(arrayIndex, bitIndex) \
-    connectionIdBitsetArray[arrayIndex] &= ~CONNECTION_ID_BIT_AT(bitIndex)
+    (connectionIdBitsetArray[arrayIndex] &= ~CONNECTION_ID_BIT_AT(bitIndex))
 
 // pay attention: the bit set is inverted - "0" means occupied and "1" means free for usage
 #define MARK_CONNECTION_ID_USED(arrayIndex, bitIndex) CLEAR_CONNECTION_ID_BIT(arrayIndex, bitIndex)
@@ -139,7 +139,7 @@ extern void DestroyConnectionIdPool()
             free(connectionIdBitsetArray);
             // fall through
         case LOCK_INIT:
-            pthread_spin_destroy(&connectionIdLock);
+            (void)pthread_spin_destroy(&connectionIdLock);
             // fall through
         default:
             break;
@@ -151,7 +151,7 @@ extern ConnectionId AllocConnectionId()
 {
     ConnectionId result = INVALID_CONNECTION_ID;
 
-    pthread_spin_lock(&connectionIdLock);
+    (void)pthread_spin_lock(&connectionIdLock);
     for (uint32_t arrayIndex = 0; arrayIndex < connectionIdArraySize; ++arrayIndex) {
         if (connectionIdBitsetArray[arrayIndex] != 0) {
             uint32_t bitIndex = __builtin_clzll(connectionIdBitsetArray[arrayIndex]);
@@ -169,7 +169,7 @@ extern ConnectionId AllocConnectionId()
             break;
         }
     }
-    pthread_spin_unlock(&connectionIdLock);
+    (void)pthread_spin_unlock(&connectionIdLock);
 
     if (result == INVALID_CONNECTION_ID) {
         MOT_REPORT_ERROR(MOT_ERROR_RESOURCE_LIMIT,
@@ -186,11 +186,11 @@ extern ConnectionId AllocConnectionIdHighest()
 {
     ConnectionId result = INVALID_CONNECTION_ID;
 
-    pthread_spin_lock(&connectionIdLock);
+    (void)pthread_spin_lock(&connectionIdLock);
     // since bit-set computation is tedious in case maxThreadCount is not a full multiple of 64, we do it in the
     // opposite way
     for (uint32_t i = 0; i < maxConnectionCount; ++i) {
-        ConnectionId connectionId = maxConnectionCount - i - 1;
+        ConnectionId connectionId = (maxConnectionCount - i) - 1;
         uint32_t arrayIndex = connectionId / CONNECTIONS_PER_WORD;
         uint32_t bitIndex = connectionId % CONNECTIONS_PER_WORD;
         if (IS_CONNECTION_ID_FREE(arrayIndex, bitIndex)) {
@@ -199,7 +199,7 @@ extern ConnectionId AllocConnectionIdHighest()
             break;
         }
     }
-    pthread_spin_unlock(&connectionIdLock);
+    (void)pthread_spin_unlock(&connectionIdLock);
 
     if (result == INVALID_CONNECTION_ID) {
         MOT_REPORT_ERROR(MOT_ERROR_RESOURCE_LIMIT,
@@ -217,11 +217,11 @@ extern void FreeConnectionId(ConnectionId connectionId)
     uint32_t arrayIndex = connectionId / CONNECTIONS_PER_WORD;
     uint32_t bitIndex = connectionId % CONNECTIONS_PER_WORD;
 
-    pthread_spin_lock(&connectionIdLock);
+    (void)pthread_spin_lock(&connectionIdLock);
     MOT_ASSERT(IS_CONNECTION_ID_USED(arrayIndex, bitIndex));
     MARK_CONNECTION_ID_FREE(arrayIndex, bitIndex);
     MOT_ATOMIC_DEC(currentConnectionCount);
-    pthread_spin_unlock(&connectionIdLock);
+    (void)pthread_spin_unlock(&connectionIdLock);
     MOT_LOG_TRACE("De-allocated internal connection id %u", connectionId);
 }
 

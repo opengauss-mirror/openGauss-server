@@ -27,6 +27,7 @@
 
 #include "redo_log_writer.h"
 #include "log_segment.h"
+#include "spsc_allocator.h"
 
 namespace MOT {
 /**
@@ -42,11 +43,16 @@ public:
     }
 
     ~RedoLogTransactionIterator()
-    {}
+    {
+        m_buffer = nullptr;
+    }
 
     bool Next();
 
-    bool End();
+    inline bool End() const
+    {
+        return (m_position >= m_bufferLength);
+    }
 
     inline uint64_t GetExternalTransactionId() const
     {
@@ -73,9 +79,14 @@ public:
         return m_txnLength;
     }
 
+    inline const EndSegmentBlock& GetEndSegmentBlock() const
+    {
+        return m_endSegment;
+    }
+
     void* GetTransactionEntry();
 
-    LogSegment* AllocRedoSegment(uint64_t replayLsn);
+    LogSegment* AllocRedoSegment(uint64_t replayLsn, SPSCVarSizeAllocator* allocator = nullptr);
 
 private:
     char* m_buffer;

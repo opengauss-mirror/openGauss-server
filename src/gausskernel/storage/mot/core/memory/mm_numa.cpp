@@ -23,7 +23,7 @@
  * -------------------------------------------------------------------------
  */
 
-#include <string.h>
+#include <cstring>
 
 #include "mm_numa.h"
 #include "mm_cfg.h"
@@ -66,8 +66,8 @@ static void UpdateLocalStats(uint64_t size, int node)
             peak = peakLocalMemoryBytes[node];  // retry
         }
     }
-    MemoryStatisticsProvider::m_provider->AddNumaLocalAllocated(size);
-    DetailedMemoryStatisticsProvider::m_provider->AddNumaLocalAllocated(node, size);
+    MemoryStatisticsProvider::GetInstance().AddNumaLocalAllocated(size);
+    DetailedMemoryStatisticsProvider::GetInstance().AddNumaLocalAllocated(node, size);
 }
 
 static void UpdateGlobalStats(uint64_t size)
@@ -82,7 +82,7 @@ static void UpdateGlobalStats(uint64_t size)
             peak = peakGlobalMemoryBytes;  // retry
         }
     }
-    MemoryStatisticsProvider::m_provider->AddNumaInterleavedAllocated(size);
+    MemoryStatisticsProvider::GetInstance().AddNumaInterleavedAllocated(size);
 }
 
 extern void MemNumaInit()
@@ -238,8 +238,8 @@ extern void MemNumaFreeLocal(void* buf, uint64_t size, int node)
     }
     uint64_t memUsed = MOT_ATOMIC_SUB(localMemUsedBytes[node], size);
     MOT_LOG_DIAG1("Decreased local node %d memory usage to %" PRIu64 " bytes", node, memUsed);
-    MemoryStatisticsProvider::m_provider->AddNumaLocalAllocated(-((int64_t)size));
-    DetailedMemoryStatisticsProvider::m_provider->AddNumaLocalAllocated(node, -((int64_t)size));
+    MemoryStatisticsProvider::GetInstance().AddNumaLocalAllocated(-((int64_t)size));
+    DetailedMemoryStatisticsProvider::GetInstance().AddNumaLocalAllocated(node, -((int64_t)size));
 }
 
 extern void MemNumaFreeGlobal(void* buf, uint64_t size)
@@ -251,7 +251,7 @@ extern void MemNumaFreeGlobal(void* buf, uint64_t size)
     }
     uint64_t memUsed = MOT_ATOMIC_SUB(globalMemUsedBytes, size);
     MOT_LOG_DIAG1("Decreased global memory usage to %" PRIu64 " bytes", memUsed);
-    MemoryStatisticsProvider::m_provider->AddNumaInterleavedAllocated(-((int64_t)size));
+    MemoryStatisticsProvider::GetInstance().AddNumaInterleavedAllocated(-((int64_t)size));
 }
 
 extern void MemNumaGetStats(MemNumaStats* stats)
@@ -272,27 +272,27 @@ extern void MemNumaFormatStats(int indent, const char* name, StringBuffer* strin
 {
     StringBufferAppend(stringBuffer, "%*sKernel allocation %s report:\n", indent, "", name);
     if (reportMode == MEM_REPORT_SUMMARY) {
-        uint64_t localMemUsedBytes = 0;
-        uint64_t localPeakMemUsedBytes = 0;
+        uint64_t localUsedBytes = 0;
+        uint64_t localPeakUsedBytes = 0;
         for (uint32_t i = 0; i < g_memGlobalCfg.m_nodeCount; ++i) {
-            localMemUsedBytes += stats->m_localMemUsedBytes[i];
-            localPeakMemUsedBytes += stats->m_peakLocalMemoryBytes[i];
+            localUsedBytes += stats->m_localMemUsedBytes[i];
+            localPeakUsedBytes += stats->m_peakLocalMemoryBytes[i];
         }
         StringBufferAppend(stringBuffer,
-            "%*sGlobal memory usage: Current = %" PRIu64 " MB, Peak = %" PRIu64 " MB\n",
+            "%*sNUMA Interleaved memory usage: Current = %" PRIu64 " MB, Peak = %" PRIu64 " MB\n",
             indent + PRINT_REPORT_INDENT,
             "",
             stats->m_globalMemUsedBytes / MEGA_BYTE,
             stats->m_peakGlobalMemoryBytes / MEGA_BYTE);
         StringBufferAppend(stringBuffer,
-            "%*sLocal memory usage: Current = %" PRIu64 " MB, Peak = %" PRIu64 " MB\n",
+            "%*sNUMA Local memory usage: Current = %" PRIu64 " MB, Peak = %" PRIu64 " MB\n",
             indent + PRINT_REPORT_INDENT,
             "",
-            localMemUsedBytes / MEGA_BYTE,
-            localPeakMemUsedBytes / MEGA_BYTE);
+            localUsedBytes / MEGA_BYTE,
+            localPeakUsedBytes / MEGA_BYTE);
     } else {
         StringBufferAppend(stringBuffer,
-            "%*sGlobal memory usage: Current = %" PRIu64 " MB, Peak = %" PRIu64 " MB\n",
+            "%*sNUMA Interleaved memory usage: Current = %" PRIu64 " MB, Peak = %" PRIu64 " MB\n",
             indent + PRINT_REPORT_INDENT,
             "",
             stats->m_globalMemUsedBytes / MEGA_BYTE,
@@ -301,7 +301,7 @@ extern void MemNumaFormatStats(int indent, const char* name, StringBuffer* strin
         for (uint32_t i = 0; i < g_memGlobalCfg.m_nodeCount; ++i) {
             if (stats->m_peakLocalMemoryBytes[i] > 0) {
                 StringBufferAppend(stringBuffer,
-                    "%*sLocal memory usage: Current = %" PRIu64 " MB, Peak = %" PRIu64 " MB\n",
+                    "%*sNUMA Local memory usage: Current = %" PRIu64 " MB, Peak = %" PRIu64 " MB\n",
                     indent + PRINT_REPORT_INDENT,
                     "",
                     stats->m_localMemUsedBytes[i] / MEGA_BYTE,
@@ -355,6 +355,6 @@ extern "C" void MemNumaDump()
 {
     MOT::StringBufferApply([](MOT::StringBuffer* stringBuffer) {
         MOT::MemNumaToString(0, "Debug Dump", stringBuffer, MOT::MEM_REPORT_DETAILED);
-        fprintf(stderr, "%s", stringBuffer->m_buffer);
+        (void)fprintf(stderr, "%s", stringBuffer->m_buffer);
     });
 }

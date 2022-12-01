@@ -25,9 +25,9 @@
 #ifndef STRING_BUFFER_H
 #define STRING_BUFFER_H
 
-#include <stdint.h>
-#include <stdlib.h>
-#include <stdarg.h>
+#include <cstdint>
+#include <cstdlib>
+#include <cstdarg>
 
 namespace MOT {
 /**
@@ -58,6 +58,8 @@ struct StringBuffer {
         /** @var Buffer size is fixed. */
         FIXED
     } m_growMethod;
+
+    static constexpr uint32_t GROWTH_FACTOR = 2;
 };
 
 /**
@@ -152,10 +154,10 @@ extern void StringBufferAppendN(StringBuffer* stringBuffer, const char* str, int
  * @param[opt] initialSize The initial string buffer size.
  */
 template <typename Functor>
-inline void StringBufferApply(Functor functor, uint32_t initialSize = 1024)
+inline void StringBufferApply(const Functor& functor, uint32_t initialSize = 1024)
 {
     StringBuffer sb = {0};
-    StringBufferInit(&sb, initialSize, 2, MOT::StringBuffer::MULTIPLY);
+    StringBufferInit(&sb, initialSize, StringBuffer::GROWTH_FACTOR, MOT::StringBuffer::MULTIPLY);
     functor(&sb);
     StringBufferDestroy(&sb);
 }
@@ -169,7 +171,7 @@ inline void StringBufferApply(Functor functor, uint32_t initialSize = 1024)
  * @param length The fixed string buffer length.
  */
 template <typename Functor>
-inline void StringBufferApplyFixed(Functor functor, char* buffer, uint32_t length)
+inline void StringBufferApplyFixed(const Functor& functor, char* buffer, uint32_t length)
 {
     StringBuffer sb = {0};
     StringBufferInitFixed(&sb, buffer, length);

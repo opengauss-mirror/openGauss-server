@@ -22,7 +22,7 @@
  * -------------------------------------------------------------------------
  */
 
-#include <string.h>
+#include <cstring>
 #include "logger_type.h"
 #include "utilities.h"
 

@@ -29,7 +29,7 @@
 #include "mot_error.h"
 
 #include <pthread.h>
-#include <errno.h>
+#include <cerrno>
 
 namespace MOT {
 /** @struct MemLock L1-cache line isolated lock. */
@@ -99,7 +99,7 @@ inline int MemLockDestroy(MemLock* lock)
  */
 inline void MemLockAcquire(MemLock* lock)
 {
-    pthread_spin_lock(&lock->m_lock);
+    (void)pthread_spin_lock(&lock->m_lock);
 }
 
 /**
@@ -109,7 +109,7 @@ inline void MemLockAcquire(MemLock* lock)
  */
 inline int MemLockTryAcquire(MemLock* lock)
 {
-    int result = 0;
+    int result = MOT_NO_ERROR;
     int rc = pthread_spin_trylock(&lock->m_lock);
     if (rc != 0) {
         if (rc == EBUSY) {
@@ -128,7 +128,7 @@ inline int MemLockTryAcquire(MemLock* lock)
  */
 inline void MemLockRelease(MemLock* lock)
 {
-    pthread_spin_unlock(&lock->m_lock);
+    (void)pthread_spin_unlock(&lock->m_lock);
 }
 }  // namespace MOT
 

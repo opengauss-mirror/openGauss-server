@@ -22,7 +22,7 @@
 // forward declaration
 namespace JitExec
 {
-    struct JitContext;
+    struct MotJitContext;
 }
 #endif
 
@@ -58,7 +58,7 @@ typedef struct QueryDesc {
     struct Instrumentation* totaltime; /* total time spent in ExecutorRun */
     bool executed;                     /* if the query already executed */
 #ifdef ENABLE_MOT
-    JitExec::JitContext* mot_jit_context;   /* MOT JIT context required for executing LLVM jitted code */
+    JitExec::MotJitContext* mot_jit_context;   /* MOT JIT context required for executing LLVM jitted code */
 #endif
 } QueryDesc;
 
@@ -66,7 +66,7 @@ typedef struct QueryDesc {
 #ifdef ENABLE_MOT
 extern QueryDesc* CreateQueryDesc(PlannedStmt* plannedstmt, const char* sourceText, Snapshot snapshot,
     Snapshot crosscheck_snapshot, DestReceiver* dest, ParamListInfo params, int instrument_options,
-    JitExec::JitContext* mot_jit_context = nullptr);
+    JitExec::MotJitContext* motJitContext = nullptr);
 #else
 extern QueryDesc* CreateQueryDesc(PlannedStmt* plannedstmt, const char* sourceText, Snapshot snapshot,
     Snapshot crosscheck_snapshot, DestReceiver* dest, ParamListInfo params, int instrument_options);

@@ -36,12 +36,14 @@ JitThreadStatistics::JitThreadStatistics(uint64_t threadId, void* inplaceBuffer)
       m_execQueryCount(MakeName("jit-exec", threadId).c_str()),
       m_invokeQueryCount(MakeName("jit-invoke", threadId).c_str()),
       m_execFailQueryCount(MakeName("jit-exec-fail", threadId).c_str()),
-      m_execAbortQueryCount(MakeName("jit-exec-abort", threadId).c_str())
+      m_execAbortQueryCount(MakeName("jit-exec-abort", threadId).c_str()),
+      m_sessionBytes(MakeName("jit-session-bytes", threadId).c_str(), KILO_BYTE, "KB")
 {
     RegisterStatistics(&m_execQueryCount);
     RegisterStatistics(&m_invokeQueryCount);
     RegisterStatistics(&m_execFailQueryCount);
     RegisterStatistics(&m_execAbortQueryCount);
+    RegisterStatistics(&m_sessionBytes);
 }
 
 JitGlobalStatistics::JitGlobalStatistics(GlobalStatistics::NamingScheme namingScheme)
@@ -54,7 +56,8 @@ JitGlobalStatistics::JitGlobalStatistics(GlobalStatistics::NamingScheme namingSc
       m_codeGenErrorQueryCount(MakeName("code-gen-error-queries", namingScheme).c_str(), 1, "queries"),
       m_codeCloneQueryCount(MakeName("code-clone-queries", namingScheme).c_str(), 1, "queries"),
       m_codeCloneErrorQueryCount(MakeName("code-clone-error-queries", namingScheme).c_str(), 1, "queries"),
-      m_codeExpiredQueryCount(MakeName("code-expired-queries", namingScheme).c_str(), 1, "queries")
+      m_codeExpiredQueryCount(MakeName("code-expired-queries", namingScheme).c_str(), 1, "queries"),
+      m_globalBytes(MakeName("jit-global-bytes", namingScheme).c_str(), KILO_BYTE, "KB")
 {
     RegisterStatistics(&m_jittableQueryCount);
     RegisterStatistics(&m_unjittableLimitQueryCount);
@@ -65,6 +68,7 @@ JitGlobalStatistics::JitGlobalStatistics(GlobalStatistics::NamingScheme namingSc
     RegisterStatistics(&m_codeCloneQueryCount);
     RegisterStatistics(&m_codeCloneErrorQueryCount);
     RegisterStatistics(&m_codeExpiredQueryCount);
+    RegisterStatistics(&m_globalBytes);
 }
 
 MOT::TypedStatisticsGenerator<JitThreadStatistics, JitGlobalStatistics> JitStatisticsProvider::m_generator;
@@ -76,18 +80,18 @@ JitStatisticsProvider::JitStatisticsProvider()
 
 JitStatisticsProvider::~JitStatisticsProvider()
 {
-    MOT::ConfigManager::GetInstance().RemoveConfigChangeListener(this);
+    (void)MOT::ConfigManager::GetInstance().RemoveConfigChangeListener(this);
     if (m_enable) {
-        MOT::StatisticsManager::GetInstance().UnregisterStatisticsProvider(this);
+        (void)MOT::StatisticsManager::GetInstance().UnregisterStatisticsProvider(this);
     }
 }
 
 void JitStatisticsProvider::RegisterProvider()
 {
     if (m_enable) {
-        MOT::StatisticsManager::GetInstance().RegisterStatisticsProvider(this);
+        (void)MOT::StatisticsManager::GetInstance().RegisterStatisticsProvider(this);
     }
-    MOT::ConfigManager::GetInstance().AddConfigChangeListener(this);
+    (void)MOT::ConfigManager::GetInstance().AddConfigChangeListener(this);
 }
 
 bool JitStatisticsProvider::CreateInstance()
@@ -135,9 +139,9 @@ void JitStatisticsProvider::OnConfigChange()
     if (m_enable != MOT::GetGlobalConfiguration().m_enableJitStatistics) {
         m_enable = MOT::GetGlobalConfiguration().m_enableJitStatistics;
         if (m_enable) {
-            MOT::StatisticsManager::GetInstance().RegisterStatisticsProvider(this);
+            (void)MOT::StatisticsManager::GetInstance().RegisterStatisticsProvider(this);
         } else {
-            MOT::StatisticsManager::GetInstance().UnregisterStatisticsProvider(this);
+            (void)MOT::StatisticsManager::GetInstance().UnregisterStatisticsProvider(this);
         }
     }
 }

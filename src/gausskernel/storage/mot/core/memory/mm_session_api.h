@@ -30,7 +30,7 @@
 #include "mm_session_allocator.h"
 #include "connection_id.h"
 
-#include <stdint.h>
+#include <cstdint>
 #include <utility>
 
 namespace MOT {
@@ -316,8 +316,10 @@ public:
      */
     MemSessionPtr<T>& operator=(MemSessionPtr<T>&& right)
     {
-        Reset(right.m_ptr);
-        right.m_ptr = nullptr;
+        if (this != &right) {
+            Reset(right.m_ptr);
+            right.m_ptr = nullptr;
+        }
         return *this;
     }
 
@@ -328,9 +330,9 @@ public:
     template <class Other>
     inline operator MemSessionPtr<Other>()
     {
-        T* m_ptr = this->m_ptr;
+        T* ptr = this->m_ptr;
         this->m_ptr = nullptr;
-        return MemSessionPtr<Other>(static_cast<Other*>(m_ptr));
+        return MemSessionPtr<Other>(static_cast<Other*>(ptr));
     }
 
     /**

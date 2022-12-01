@@ -51,8 +51,14 @@ static bool ParsePropsSectionName(const mot_string& line, mot_string& sectionPat
                 keyValuePart.trim();
             }
         } else {
-            sectionPath.assign("");
-            keyValuePart.assign(line);
+            if (!sectionPath.assign("")) {
+                MOT_REPORT_ERROR(MOT_ERROR_OOM, "Load Configuration", "Failed to assign to string sectionPath");
+                return false;
+            }
+            if (!keyValuePart.assign(line)) {
+                MOT_REPORT_ERROR(MOT_ERROR_OOM, "Load Configuration", "Failed to assign to string keyValuePart");
+                return false;
+            }
             keyValuePart.trim();
         }
     }
@@ -177,6 +183,12 @@ ConfigTree* PropsConfigFileLoader::LoadConfigFile(const char* configFilePath)
         return configTree;
     }
 
+    if (!reader.IsInitialized()) {
+        MOT_LOG_WARN("Failed to load all data from configuration file %s: out of memory", configFilePath);
+        // we return an empty tree to avoid errors during startup, but a warning is still issued
+        return configTree;
+    }
+
     while (!reader.Eof() && !parseError) {
         // parse next non-empty line
         if (!line.assign(reader.GetLine().c_str())) {
@@ -202,7 +214,7 @@ ConfigTree* PropsConfigFileLoader::LoadConfigFile(const char* configFilePath)
 
             // parse the key-value part
             if (!ConfigFileParser::ParseKeyValue(
-                keyValuePart, sectionFullName, key, value, arrayIndex, hasArrayIndex)) {
+                    keyValuePart, sectionFullName, key, value, arrayIndex, hasArrayIndex)) {
                 // key-value line malformed
                 PROPS_REPORT_PARSE_ERROR_AND_BREAK(MOT_ERROR_INVALID_CFG,
                     "Failed to parse configuration file %s at line %u: %s (key/value malformed)",
@@ -226,7 +238,7 @@ ConfigTree* PropsConfigFileLoader::LoadConfigFile(const char* configFilePath)
                 }
             } else {
                 if (!AddPropsArrayConfigItem(
-                    configFilePath, reader, line, currentSection, sectionFullName, key, value, arrayIndex)) {
+                        configFilePath, reader, line, currentSection, sectionFullName, key, value, arrayIndex)) {
                     PROPS_REPORT_PARSE_ERROR_AND_BREAK(MOT_ERROR_OOM,
                         "Failed to add array item with arrayIndex %lu in configuration file %s at line %u: %s",
                         arrayIndex,

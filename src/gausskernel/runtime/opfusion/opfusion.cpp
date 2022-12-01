@@ -271,7 +271,8 @@ FusionType OpFusion::getFusionType(CachedPlan *plan, ParamListInfo params, List 
 
     FusionType result = NONE_FUSION;
 #ifdef ENABLE_MOT
-    if (plan && plan->mot_jit_context && JitExec::IsMotCodegenEnabled()) {
+    if (plan && plan->mot_jit_context && JitExec::IsJitContextValid(plan->mot_jit_context) &&
+        JitExec::IsMotCodegenEnabled()) {
         result = GetMotFusionType(planned_stmt);
     } else {
 #endif
@@ -340,17 +341,10 @@ void OpFusion::executeInit()
         ExecCheckXactReadOnly(m_global->m_planstmt);
     }
 
-#ifdef ENABLE_MOT
-    if (!(u_sess->exec_cxt.CurrentOpFusionObj->m_global->m_cacheplan &&
-        u_sess->exec_cxt.CurrentOpFusionObj->m_global->m_cacheplan->storageEngineType == SE_TYPE_MOT)) {
-#endif
-        if (m_local.m_snapshot == NULL) {
-            m_local.m_snapshot = RegisterSnapshot(GetTransactionSnapshot());
-        }
-        PushActiveSnapshot(m_local.m_snapshot);
-#ifdef ENABLE_MOT
+    if (m_local.m_snapshot == NULL) {
+        m_local.m_snapshot = RegisterSnapshot(GetTransactionSnapshot());
     }
-#endif
+    PushActiveSnapshot(m_local.m_snapshot);
 }
 
 void OpFusion::auditRecord()
@@ -386,24 +380,17 @@ void OpFusion::auditRecord()
 
 bool OpFusion::executeEnd(const char *portal_name, bool *isQueryCompleted)
 {
-#ifdef ENABLE_MOT
-    if (!(u_sess->exec_cxt.CurrentOpFusionObj->m_global->m_cacheplan &&
-        u_sess->exec_cxt.CurrentOpFusionObj->m_global->m_cacheplan->storageEngineType == SE_TYPE_MOT)) {
-#endif
-        opfusion_executeEnd(m_global->m_planstmt,
-            ((m_global->m_psrc == NULL) ? NULL : (m_global->m_psrc->query_string)), GetActiveSnapshot());
-        const char *query_string = t_thrd.postgres_cxt.debug_query_string;
-        if (query_string == NULL && m_global->m_psrc != NULL) {
-            query_string = m_global->m_psrc->query_string;
-        }
-        if (m_local.m_ledger_hash_exist && query_string != NULL) {
-            opfusion_ledger_ExecutorEnd(m_local.m_optype, m_global->m_reloid, query_string, m_local.m_ledger_relhash);
-        }
-
-        PopActiveSnapshot();
-#ifdef ENABLE_MOT
+    opfusion_executeEnd(m_global->m_planstmt,
+        ((m_global->m_psrc == NULL) ? NULL : (m_global->m_psrc->query_string)), GetActiveSnapshot());
+    const char *query_string = t_thrd.postgres_cxt.debug_query_string;
+    if (query_string == NULL && m_global->m_psrc != NULL) {
+        query_string = m_global->m_psrc->query_string;
     }
-#endif
+    if (m_local.m_ledger_hash_exist && query_string != NULL) {
+        opfusion_ledger_ExecutorEnd(m_local.m_optype, m_global->m_reloid, query_string, m_local.m_ledger_relhash);
+    }
+
+    PopActiveSnapshot();
 
 #ifdef MEMORY_CONTEXT_CHECKING
     /* Check all memory contexts when executor starts */

@@ -48,15 +48,15 @@ CheckpointManager::CheckpointManager()
       m_numCpTasks(0),
       m_numThreads(GetGlobalConfiguration().m_checkpointWorkers),
       m_cpSegThreshold(GetGlobalConfiguration().m_checkpointSegThreshold),
-      m_stopFlag(false),
       m_checkpointEnded(false),
       m_checkpointError(0),
       m_errorSet(false),
       m_counters{{0}},
       m_lsn(0),
-      m_id(CheckpointControlFile::invalidId),
-      m_inProgressId(CheckpointControlFile::invalidId),
+      m_id(CheckpointControlFile::INVALID_ID),
+      m_inProgressId(CheckpointControlFile::INVALID_ID),
       m_lastReplayLsn(0),
+      m_workingDir(""),
       m_inProcessTxnsLsn(0),
       m_numSerializedEntries(0)
 {}
@@ -68,38 +68,60 @@ bool CheckpointManager::Initialize()
         MOT_LOG_ERROR("Failed to initialize CheckpointManager, could not init rwlock (%d)", initRc);
         return false;
     }
+    if (GetGlobalConfiguration().m_enableCheckpoint) {
+        m_checkpointers = new (std::nothrow) CheckpointWorkerPool(*this, m_cpSegThreshold);
+        if (m_checkpointers == nullptr) {
+            MOT_LOG_ERROR("Failed to allocate CheckpointWorkerPool");
+            return false;
+        }
 
+        if (!m_checkpointers->Start()) {
+            MOT_LOG_ERROR("Failed to spawn checkpoint worker threads");
+            return false;
+        }
+    }
     return true;
 }
 
 void CheckpointManager::ResetFlags()
 {
     m_checkpointEnded = false;
-    m_stopFlag = false;
     m_errorSet = false;
 }
 
 CheckpointManager::~CheckpointManager()
 {
-    if (m_checkpointers != nullptr) {
-        delete m_checkpointers;
-        m_checkpointers = nullptr;
-    }
+    DestroyCheckpointers();
     (void)pthread_rwlock_destroy(&m_fetchLock);
+    m_redoLogHandler = nullptr;
 }
 
 bool CheckpointManager::CreateSnapShot()
 {
     if (!CheckpointManager::CreateCheckpointId(m_inProgressId)) {
         MOT_LOG_ERROR("Could not begin checkpoint, checkpoint id creation failed");
-        OnError(CheckpointWorkerPool::ErrCodes::CALC, "Could not begin checkpoint, checkpoint id creation failed");
+        OnError(
+            CheckpointWorkerPool::ErrCodes::CALC, "Could not begin checkpoint, checkpoint id creation failed", nullptr);
         return false;
     }
 
     MOT_LOG_INFO("Creating MOT checkpoint snapshot: id: %lu", m_inProgressId);
     if (m_phase != CheckpointPhase::REST) {
         MOT_LOG_ERROR("Could not begin checkpoint, checkpoint is already running");
-        OnError(CheckpointWorkerPool::ErrCodes::CALC, "Could not begin checkpoint, checkpoint is already running");
+        OnError(
+            CheckpointWorkerPool::ErrCodes::CALC, "Could not begin checkpoint, checkpoint is already running", nullptr);
+        return false;
+    }
+
+    if (!CheckpointUtils::SetWorkingDir(m_workingDir, m_inProgressId)) {
+        MOT_LOG_ERROR("failed to setup working dir");
+        OnError(CheckpointWorkerPool::ErrCodes::FILE_IO, "failed to setup working dir", nullptr);
+        return false;
+    }
+
+    if (!CheckpointManager::CreateCheckpointDir(m_workingDir)) {
+        MOT_LOG_ERROR("failed to create working dir: %s", m_workingDir.c_str());
+        OnError(CheckpointWorkerPool::ErrCodes::FILE_IO, "failed to create working dir", m_workingDir.c_str());
         return false;
     }
 
@@ -115,23 +137,25 @@ bool CheckpointManager::CreateSnapShot()
     m_lock.WrUnlock();
 
     while (m_phase != CheckpointPhase::RESOLVE) {
-        usleep(50000L);
+        (void)usleep(50000L);
     }
 
     // Ensure that all the transactions that started commit in PREPARE phase are completed.
     WaitPrevPhaseCommittedTxnComplete();
+
+    // Lock the recovery manager from obtaining any more segments (relevant to standby only)
+    // Flush will be a no-op on the primary
+    GetRecoveryManager()->Lock();
+    GetRecoveryManager()->Flush();
 
     // Now in RESOLVE phase, no transaction is allowed to start the commit.
     // It is safe now to obtain a list of all tables to included in this checkpoint.
     // The tables are read locked in order to avoid drop/truncate during checkpoint.
     FillTasksQueue();
 
-    if (!CreateCheckpointDir()) {
-        return false;
-    }
-
-    if (!CreateTpcRecoveryFile()) {
-        OnError(CheckpointWorkerPool::ErrCodes::FILE_IO, "Failed to create tpc recovery file");
+    if (!CreatePendingRecoveryDataFile()) {
+        MOT_LOG_ERROR("Failed to create the pending recovery data file");
+        OnError(CheckpointWorkerPool::ErrCodes::FILE_IO, "Failed to create the pending recovery data file", nullptr);
         return false;
     }
 
@@ -145,7 +169,7 @@ bool CheckpointManager::CreateSnapShot()
 
 bool CheckpointManager::SnapshotReady(uint64_t lsn)
 {
-    MOT_LOG_INFO("MOT snapshot ready. id: %lu, lsn: %lu", m_inProgressId, m_lsn);
+    MOT_LOG_INFO("MOT checkpoint snapshot ready [%lu:%lu]", m_inProgressId, lsn);
     if (m_phase != CheckpointPhase::CAPTURE) {
         MOT_LOG_ERROR("BAD Checkpoint state. Checkpoint ID: %lu, expected: 'CAPTURE', actual: %s",
             m_inProgressId,
@@ -153,8 +177,11 @@ bool CheckpointManager::SnapshotReady(uint64_t lsn)
         m_errorSet = true;
     } else {
         SetLsn(lsn);
-        if (m_redoLogHandler != nullptr)
+        if (m_redoLogHandler != nullptr) {
             m_redoLogHandler->WrUnlock();
+        }
+        // release the recovery manager's lock
+        GetRecoveryManager()->Unlock();
         MOT_LOG_DEBUG("Checkpoint snapshot ready. Checkpoint ID: %lu, LSN: %lu", m_inProgressId, GetLsn());
     }
     return !m_errorSet;
@@ -164,8 +191,9 @@ bool CheckpointManager::BeginCheckpoint()
 {
     MOT_LOG_INFO("MOT begin checkpoint capture. id: %lu, lsn: %lu", m_inProgressId, m_lsn);
     Capture();
+
     while (!m_checkpointEnded) {
-        usleep(100000L);
+        (void)usleep(100000L);
         if (m_finishedTasks.empty() == false) {
             std::lock_guard<std::mutex> guard(m_tasksMutex);
             UnlockAndClearTables(m_finishedTasks);
@@ -253,15 +281,16 @@ void CheckpointManager::BeginCommit(TxnManager* txn)
     // want them to be written to the redo-log before we take the
     // redo-log LSN (redo-point). The redo-point will be taken by the
     // envelope after we reach the CAPTURE phase.
+    txn->SetCheckpointCommitEnded(false);
     m_lock.RdLock();
     while (!MOTEngine::GetInstance()->IsRecovering() && m_phase == CheckpointPhase::RESOLVE) {
         m_lock.RdUnlock();
-        usleep(5000);
+        (void)usleep(5000);
         m_lock.RdLock();
     }
     txn->m_checkpointPhase = m_phase;
     txn->m_checkpointNABit = !m_availableBit;
-    m_counters[m_cntBit].fetch_add(1);
+    (void)m_counters[m_cntBit].fetch_add(1);
     m_lock.RdUnlock();
 }
 
@@ -271,11 +300,11 @@ void CheckpointManager::FreePreAllocStableRows(TxnManager* txn)
     const Access* access = nullptr;
     for (const auto& ra_pair : orderedSet) {
         access = ra_pair.second;
-        if (access->m_type == RD || access->m_type == INS) {
+        if (access->m_type == RD || (access->m_type == INS && access->m_params.IsUpgradeInsert() == false)) {
             continue;
         }
         if (access->m_params.IsPrimarySentinel()) {
-            Sentinel* s = access->GetRowFromHeader()->GetPrimarySentinel();
+            PrimarySentinel* s = access->GetRowFromHeader()->GetPrimarySentinel();
             MOT_ASSERT(s != nullptr);
             if (s->GetStablePreAllocStatus()) {
                 CheckpointUtils::DestroyStableRow(s->GetStable());
@@ -292,20 +321,20 @@ void CheckpointManager::EndCommit(TxnManager* txn)
         return;
     }
 
+    txn->SetCheckpointCommitEnded(true);
     m_lock.RdLock();
     CheckpointPhase current_phase = m_phase;
     if (txn->m_checkpointPhase == m_phase) {  // current phase
-        m_counters[m_cntBit].fetch_sub(1);
+        (void)m_counters[m_cntBit].fetch_sub(1);
     } else {  // previous phase
-        m_counters[!m_cntBit].fetch_sub(1);
+        (void)m_counters[!m_cntBit].fetch_sub(1);
     }
-    if (txn->m_replayLsn != 0 && MOTEngine::GetInstance()->IsRecovering()) {
+    if (txn->GetReplayLsn() != 0 && MOTEngine::GetInstance()->IsRecovering()) {
         // Update the last replay LSN in recovery manager in case of redo replay.
         // This is needed for getting the last replay LSN during checkpoint in standby.
         GetRecoveryManager()->SetLastReplayLsn(txn->GetReplayLsn());
     }
     m_lock.RdUnlock();
-
     if (m_counters[!m_cntBit] == 0 && IsAutoCompletePhase()) {
         m_lock.WrLock();
         // If the state was not change by another thread in the meanwhile,
@@ -322,7 +351,7 @@ void CheckpointManager::WaitPrevPhaseCommittedTxnComplete()
     m_lock.RdLock();
     while (m_counters[!m_cntBit] != 0) {
         m_lock.RdUnlock();
-        usleep(10000);
+        (void)usleep(10000);
         m_lock.RdLock();
     }
     m_lock.RdUnlock();
@@ -363,7 +392,10 @@ void CheckpointManager::MoveToNextPhase()
             // Get the current last replay LSN from recovery manager and use it as m_lastReplayLsn
             // for the current checkpoint. If the system recovers from disk after this checkpoint,
             // it is safe to ignore any redo replay before this LSN.
-            SetLastReplayLsn(std::max(m_inProcessTxnsLsn, GetRecoveryManager()->GetLastReplayLsn()));
+            SetLastReplayLsn(GetRecoveryManager()->GetLastReplayLsn());
+            MOT_LOG_TRACE("MOT checkpoint setting lastReplayLsn as %lu (standby)", m_lastReplayLsn);
+        } else {
+            MOT_LOG_TRACE("MOT checkpoint setting lastReplayLsn as %lu (primary)", m_lastReplayLsn);
         }
     }
 
@@ -388,6 +420,8 @@ const char* CheckpointManager::PhaseToString(CheckpointPhase phase)
             return "CAPTURE";
         case COMPLETE:
             return "COMPLETE";
+        default:
+            break;
     }
     return "UNKNOWN";
 }
@@ -396,11 +430,13 @@ bool CheckpointManager::PreAllocStableRow(TxnManager* txnMan, Row* origRow, Acce
 {
     CheckpointPhase startPhase = txnMan->m_checkpointPhase;
     MOT_ASSERT(startPhase != RESOLVE || MOTEngine::GetInstance()->IsRecovering());
-    Sentinel* s = origRow->GetPrimarySentinel();
+    PrimarySentinel* s = static_cast<PrimarySentinel*>(origRow->GetPrimarySentinel());
     MOT_ASSERT(s != nullptr);
-
+    if (origRow->GetRowType() == RowType::TOMBSTONE) {
+        return true;
+    }
     bool statusBit = s->GetStableStatus();
-    if (startPhase == CAPTURE && type != INS && statusBit == !m_availableBit) {
+    if (startPhase == CAPTURE && statusBit == !m_availableBit) {
         MOT_ASSERT(s->GetStablePreAllocStatus() == false);
         if (!CheckpointUtils::CreateStableRow(origRow)) {
             MOT_LOG_ERROR("Failed to create stable row");
@@ -412,11 +448,12 @@ bool CheckpointManager::PreAllocStableRow(TxnManager* txnMan, Row* origRow, Acce
     return true;
 }
 
-void CheckpointManager::ApplyWrite(TxnManager* txnMan, Row* origRow, AccessType type)
+void CheckpointManager::ApplyWrite(TxnManager* txnMan, Row* origRow, const Access* access)
 {
+    AccessType type = access->m_type;
     CheckpointPhase startPhase = txnMan->m_checkpointPhase;
     MOT_ASSERT(startPhase != RESOLVE || MOTEngine::GetInstance()->IsRecovering());
-    Sentinel* s = origRow->GetPrimarySentinel();
+    PrimarySentinel* s = static_cast<PrimarySentinel*>(origRow->GetPrimarySentinel());
     MOT_ASSERT(s != nullptr);
 
     bool statusBit = s->GetStableStatus();
@@ -440,7 +477,7 @@ void CheckpointManager::ApplyWrite(TxnManager* txnMan, Row* origRow, AccessType 
             }
             break;
         case CAPTURE:
-            if (type == INS) {
+            if (type == INS && (access->m_params.IsUpgradeInsert() == false || origRow->IsRowDeleted())) {
                 s->SetStableStatus(m_availableBit);
             } else {
                 if (statusBit == !m_availableBit) {
@@ -465,7 +502,8 @@ void CheckpointManager::FillTasksQueue()
 {
     if (!m_tasksList.empty()) {
         MOT_LOG_ERROR("CheckpointManager::fillTasksQueue: queue is not empty!");
-        OnError(CheckpointWorkerPool::ErrCodes::CALC, "CheckpointManager::fillTasksQueue: queue is not empty!");
+        OnError(
+            CheckpointWorkerPool::ErrCodes::CALC, "CheckpointManager::fillTasksQueue: queue is not empty!", nullptr);
         return;
     }
     GetTableManager()->AddTablesToList(m_tasksList);
@@ -477,7 +515,7 @@ void CheckpointManager::FillTasksQueue()
 void CheckpointManager::UnlockAndClearTables(std::list<Table*>& tables)
 {
     std::list<Table*>::iterator it;
-    for (it = tables.begin(); it != tables.end(); ++it) {
+    for (it = tables.begin(); it != tables.end(); (void)++it) {
         Table* table = *it;
         if (table != nullptr) {
             table->Unlock();
@@ -491,7 +529,7 @@ void CheckpointManager::TaskDone(Table* table, uint32_t numSegs, bool success)
     MOT_ASSERT(table);
     if (success) { /* only successful tasks are added to the map file */
         if (table == nullptr) {
-            OnError(CheckpointWorkerPool::ErrCodes::MEMORY, "Got a null table on task done");
+            OnError(CheckpointWorkerPool::ErrCodes::MEMORY, "Got a null table on task done", nullptr);
             return;
         }
         MapFileEntry* entry = new (std::nothrow) MapFileEntry();
@@ -503,13 +541,14 @@ void CheckpointManager::TaskDone(Table* table, uint32_t numSegs, bool success)
             m_mapfileInfo.push_back(entry);
             m_finishedTasks.push_back(table);
         } else {
-            OnError(CheckpointWorkerPool::ErrCodes::MEMORY, "Failed to allocate map file entry");
+            OnError(CheckpointWorkerPool::ErrCodes::MEMORY, "Failed to allocate map file entry", nullptr);
             return;
         }
     }
 
     if (--m_numCpTasks == 0) {
         m_checkpointEnded = true;
+        m_notifier.SetState(ThreadNotifier::ThreadState::SLEEP);
     }
 }
 
@@ -517,17 +556,17 @@ void CheckpointManager::CompleteCheckpoint()
 {
     CheckpointControlFile* ctrlFile = CheckpointControlFile::GetCtrlFile();
     if (ctrlFile == nullptr) {
-        OnError(CheckpointWorkerPool::ErrCodes::MEMORY, "Failed to retrieve control file object");
+        OnError(CheckpointWorkerPool::ErrCodes::MEMORY, "Failed to retrieve control file object", nullptr);
         return;
     }
 
     if (!CreateCheckpointMap()) {
-        OnError(CheckpointWorkerPool::ErrCodes::FILE_IO, "Failed to create map file");
+        OnError(CheckpointWorkerPool::ErrCodes::FILE_IO, "Failed to create map file", nullptr);
         return;
     }
 
     if (!ctrlFile->IsValid()) {
-        OnError(CheckpointWorkerPool::ErrCodes::FILE_IO, "Invalid control file");
+        OnError(CheckpointWorkerPool::ErrCodes::FILE_IO, "Invalid control file", nullptr);
         return;
     }
 
@@ -535,12 +574,12 @@ void CheckpointManager::CompleteCheckpoint()
     (void)pthread_rwlock_wrlock(&m_fetchLock);
     do {
         if (!CreateEndFile()) {
-            OnError(CheckpointWorkerPool::ErrCodes::FILE_IO, "Failed to create completion file");
+            OnError(CheckpointWorkerPool::ErrCodes::FILE_IO, "Failed to create completion file", nullptr);
             break;
         }
 
-        if (!ctrlFile->Update(m_inProgressId, GetLsn(), GetLastReplayLsn())) {
-            OnError(CheckpointWorkerPool::ErrCodes::FILE_IO, "Failed to update control file");
+        if (!ctrlFile->Update(m_inProgressId, GetLsn(), GetLastReplayLsn(), GetTxnIdManager().GetCurrentId())) {
+            OnError(CheckpointWorkerPool::ErrCodes::FILE_IO, "Failed to update control file", nullptr);
             break;
         }
 
@@ -555,46 +594,32 @@ void CheckpointManager::CompleteCheckpoint()
     }
 
     RemoveOldCheckpoints(m_inProgressId);
-    m_inProcessTxnsLsn = 0;
-    m_numSerializedEntries = 0;
-    MOT_LOG_INFO("Checkpoint [%lu] completed", m_inProgressId);
+    MOT_LOG_INFO("MOT checkpoint [%lu:%lu:%lu] completed", m_inProgressId, GetLsn(), GetLastReplayLsn());
 }
 
 void CheckpointManager::DestroyCheckpointers()
 {
     if (m_checkpointers != nullptr) {
+        m_notifier.Notify(ThreadNotifier::ThreadState::TERMINATE);
         delete m_checkpointers;
         m_checkpointers = nullptr;
     }
 }
 
-void CheckpointManager::CreateCheckpointers()
-{
-    m_checkpointers = new (std::nothrow)
-        CheckpointWorkerPool(m_numThreads, !m_availableBit, m_tasksList, m_cpSegThreshold, m_inProgressId, *this);
-}
-
 void CheckpointManager::Capture()
 {
-    MOT_LOG_DEBUG("CheckpointManager::capture");
-
     if (m_numCpTasks == 0) {
         MOT_LOG_INFO("No tasks in queue - empty checkpoint");
         m_checkpointEnded = true;
     } else {
-        DestroyCheckpointers();
-        CreateCheckpointers();
-        if (m_checkpointers == nullptr) {
-            OnError(CheckpointWorkerPool::ErrCodes::MEMORY, "failed to spawn checkpoint threads");
-            return;
-        }
+        m_notifier.Notify(ThreadNotifier::ThreadState::ACTIVE);
     }
 }
 
 void CheckpointManager::RemoveOldCheckpoints(uint64_t curCheckcpointId)
 {
     std::string workingDir = "";
-    if (CheckpointUtils::GetWorkingDir(workingDir) == false) {
+    if (!CheckpointUtils::GetWorkingDir(workingDir)) {
         MOT_LOG_ERROR("RemoveOldCheckpoints: failed to get the working dir");
         return;
     }
@@ -602,11 +627,11 @@ void CheckpointManager::RemoveOldCheckpoints(uint64_t curCheckcpointId)
     DIR* dir = opendir(workingDir.c_str());
     if (dir) {
         struct dirent* p;
-        while ((p = readdir(dir))) {
+        while ((p = readdir(dir)) != nullptr) {
             /* Skip the names "." and ".." and anything that is not chkpt_ */
             if (!strcmp(p->d_name, ".") || !strcmp(p->d_name, "..") ||
-                strncmp(p->d_name, CheckpointUtils::dirPrefix, strlen(CheckpointUtils::dirPrefix)) ||
-                strlen(p->d_name) <= strlen(CheckpointUtils::dirPrefix)) {
+                strncmp(p->d_name, CheckpointUtils::CKPT_DIR_PREFIX, strlen(CheckpointUtils::CKPT_DIR_PREFIX)) ||
+                strlen(p->d_name) <= strlen(CheckpointUtils::CKPT_DIR_PREFIX)) {
                 continue;
             }
 
@@ -615,7 +640,7 @@ void CheckpointManager::RemoveOldCheckpoints(uint64_t curCheckcpointId)
                 continue;
             }
 
-            uint64_t chkptId = strtoll(p->d_name + strlen(CheckpointUtils::dirPrefix), NULL, 10);
+            uint64_t chkptId = strtoll(p->d_name + strlen(CheckpointUtils::CKPT_DIR_PREFIX), NULL, 10);
             if (chkptId == curCheckcpointId) {
                 MOT_LOG_DEBUG("RemoveOldCheckpoints: exclude %lu", chkptId);
                 continue;
@@ -623,7 +648,7 @@ void CheckpointManager::RemoveOldCheckpoints(uint64_t curCheckcpointId)
             MOT_LOG_DEBUG("RemoveOldCheckpoints: removing %lu", chkptId);
             RemoveCheckpointDir(chkptId);
         }
-        closedir(dir);
+        (void)closedir(dir);
     } else {
         MOT_LOG_ERROR("RemoveOldCheckpoints: failed to open dir: %s, error %d - %s",
             workingDir.c_str(),
@@ -635,7 +660,7 @@ void CheckpointManager::RemoveOldCheckpoints(uint64_t curCheckcpointId)
 void CheckpointManager::RemoveCheckpointDir(uint64_t checkpointId)
 {
     errno_t erc;
-    char buf[CheckpointUtils::maxPath];
+    char buf[CheckpointUtils::MAX_PATH];
     std::string oldCheckpointDir;
     if (!CheckpointUtils::SetWorkingDir(oldCheckpointDir, checkpointId)) {
         MOT_LOG_ERROR("removeCheckpointDir: failed to set working directory");
@@ -645,29 +670,38 @@ void CheckpointManager::RemoveCheckpointDir(uint64_t checkpointId)
     DIR* dir = opendir(oldCheckpointDir.c_str());
     if (dir != nullptr) {
         struct dirent* p;
-        while ((p = readdir(dir))) {
+        while ((p = readdir(dir)) != nullptr) {
             /* Skip the names "." and ".." */
-            if (!strcmp(p->d_name, ".") || !strcmp(p->d_name, ".."))
+            if (!strcmp(p->d_name, ".") || !strcmp(p->d_name, "..")) {
                 continue;
+            }
 
             struct stat statbuf = {0};
-            erc = memset_s(buf, CheckpointUtils::maxPath, 0, CheckpointUtils::maxPath);
+            erc = memset_s(buf, CheckpointUtils::MAX_PATH, 0, CheckpointUtils::MAX_PATH);
             securec_check(erc, "\0", "\0");
             erc = snprintf_s(buf,
-                CheckpointUtils::maxPath,
-                CheckpointUtils::maxPath - 1,
+                CheckpointUtils::MAX_PATH,
+                CheckpointUtils::MAX_PATH - 1,
                 "%s/%s",
                 oldCheckpointDir.c_str(),
                 p->d_name);
             securec_check_ss(erc, "\0", "\0");
             if (!stat(buf, &statbuf) && S_ISREG(statbuf.st_mode)) {
                 MOT_LOG_DEBUG("removeCheckpointDir: deleting %s", buf);
-                unlink(buf);
+                if (unlink(buf) != 0) {
+                    MOT_LOG_ERROR(
+                        "removeCheckpointDir: failed to remove file %s, error %d:%s", buf, errno, gs_strerror(errno));
+                }
             }
         }
-        closedir(dir);
+        (void)closedir(dir);
         MOT_LOG_DEBUG("removeCheckpointDir: removing dir %s", oldCheckpointDir.c_str());
-        rmdir(oldCheckpointDir.c_str());
+        if (rmdir(oldCheckpointDir.c_str()) != 0) {
+            MOT_LOG_ERROR("removeCheckpointDir: failed to remove directory %s, error %d:%s",
+                oldCheckpointDir.c_str(),
+                errno,
+                gs_strerror(errno));
+        }
     } else {
         MOT_LOG_ERROR("removeCheckpointDir: failed to open dir: %s, error %d - %s",
             oldCheckpointDir.c_str(),
@@ -680,15 +714,10 @@ bool CheckpointManager::CreateCheckpointMap()
 {
     int fd = -1;
     std::string fileName;
-    std::string workingDir;
     bool ret = false;
 
     do {
-        if (!CheckpointUtils::SetWorkingDir(workingDir, m_inProgressId)) {
-            break;
-        }
-
-        CheckpointUtils::MakeMapFilename(fileName, workingDir, m_inProgressId);
+        CheckpointUtils::MakeMapFilename(fileName, m_workingDir, m_inProgressId);
         if (!CheckpointUtils::OpenFileWrite(fileName, fd)) {
             MOT_LOG_ERROR("createCheckpointMap: failed to create file '%s' - %d - %s",
                 fileName.c_str(),
@@ -697,27 +726,35 @@ bool CheckpointManager::CreateCheckpointMap()
             break;
         }
 
-        CheckpointUtils::MapFileHeader mapFileHeader{CP_MGR_MAGIC, m_mapfileInfo.size()};
-        size_t wrStat = CheckpointUtils::WriteFile(fd, (char*)&mapFileHeader, sizeof(CheckpointUtils::MapFileHeader));
+        CheckpointUtils::MapFileHeader mapFileHeader{CheckpointUtils::HEADER_MAGIC, m_mapfileInfo.size()};
+        size_t wrStat =
+            CheckpointUtils::WriteFile(fd, (const char*)&mapFileHeader, sizeof(CheckpointUtils::MapFileHeader));
         if (wrStat != sizeof(CheckpointUtils::MapFileHeader)) {
             MOT_LOG_ERROR(
                 "createCheckpointMap: failed to write map file's header (%d) %d %s", wrStat, errno, gs_strerror(errno));
+            (void)CheckpointUtils::CloseFile(fd);
             break;
         }
 
-        int i = 0;
-        for (std::list<MapFileEntry*>::iterator it = m_mapfileInfo.begin(); it != m_mapfileInfo.end(); ++it) {
+        size_t entryCount = 0;
+        for (std::list<MapFileEntry*>::iterator it = m_mapfileInfo.begin(); it != m_mapfileInfo.end(); (void)++it) {
             MapFileEntry* entry = *it;
-            if (CheckpointUtils::WriteFile(fd, (char*)entry, sizeof(MapFileEntry)) != sizeof(MapFileEntry)) {
+            if (CheckpointUtils::WriteFile(fd, (const char*)entry, sizeof(MapFileEntry)) != sizeof(MapFileEntry)) {
                 MOT_LOG_ERROR("createCheckpointMap: failed to write map file entry");
-                break;
+                break;  // break out of for loop
             }
             delete entry;
-            i++;
+            entryCount++;
+        }
+
+        if (entryCount != m_mapfileInfo.size()) {
+            (void)CheckpointUtils::CloseFile(fd);
+            break;
         }
 
         if (CheckpointUtils::FlushFile(fd)) {
             MOT_LOG_ERROR("createCheckpointMap: failed to flush map file");
+            (void)CheckpointUtils::CloseFile(fd);
             break;
         }
 
@@ -733,46 +770,27 @@ bool CheckpointManager::CreateCheckpointMap()
 
 void CheckpointManager::OnError(int errCode, const char* errMsg, const char* optionalMsg)
 {
-    m_stopFlag = true;
-    m_errorReportLock.lock();
+    std::lock_guard<spin_lock> lock(m_errorReportLock);
     if (!m_errorSet) {
         m_checkpointError = errCode;
         m_errorMessage.clear();
-        m_errorMessage.append(errMsg);
+        (void)m_errorMessage.append(errMsg);
         if (optionalMsg != nullptr) {
-            m_errorMessage.append(" ");
-            m_errorMessage.append(optionalMsg);
+            (void)m_errorMessage.append(" ");
+            (void)m_errorMessage.append(optionalMsg);
         }
         m_errorSet = true;
         m_checkpointEnded = true;
     }
-    m_errorReportLock.unlock();
-}
-
-bool CheckpointManager::CreateCheckpointDir()
-{
-    std::string workingDir;
-
-    if (!CheckpointUtils::SetWorkingDir(workingDir, m_inProgressId)) {
-        OnError(CheckpointWorkerPool::ErrCodes::FILE_IO, "failed to setup working dir");
-        return false;
-    }
-
-    if (!CheckpointManager::CreateCheckpointDir(workingDir)) {
-        OnError(CheckpointWorkerPool::ErrCodes::FILE_IO, "failed to create working dir", workingDir.c_str());
-        return false;
-    }
-
-    return true;
 }
 
 bool CheckpointManager::CreateCheckpointId(uint64_t& checkpointId)
 {
-    if (CheckpointControlFile::GetCtrlFile() == nullptr)
+    if (CheckpointControlFile::GetCtrlFile() == nullptr) {
         return false;
+    }
 
     uint64_t curId = CheckpointControlFile::GetCtrlFile()->GetId();
-    MOT::MOTEngine* engine = MOT::MOTEngine::GetInstance();
     checkpointId = time(nullptr);
     while (true) {
         if (checkpointId == curId) {
@@ -781,7 +799,7 @@ bool CheckpointManager::CreateCheckpointId(uint64_t& checkpointId)
             break;
         }
     }
-    MOT_LOG_DEBUG("createCheckpointId: %lu ,id:%lu", checkpointId, curId);
+    MOT_LOG_DEBUG("createCheckpointId: %lu, curId: %lu", checkpointId, curId);
     return true;
 }
 
@@ -794,7 +812,7 @@ bool CheckpointManager::GetCheckpointDirName(std::string& dirName)
     return true;
 }
 
-bool CheckpointManager::GetCheckpointWorkingDir(std::string& workingDir)
+bool CheckpointManager::GetCheckpointWorkingDir(std::string& workingDir) const
 {
     if (!CheckpointUtils::GetWorkingDir(workingDir)) {
         MOT_LOG_ERROR("Could not obtain working directory");
@@ -803,7 +821,7 @@ bool CheckpointManager::GetCheckpointWorkingDir(std::string& workingDir)
     return true;
 }
 
-bool CheckpointManager::CreateCheckpointDir(std::string& dir)
+bool CheckpointManager::CreateCheckpointDir(const std::string& dir)
 {
     if (mkdir(dir.c_str(), S_IRWXU)) { /* 0700 */
         MOT_LOG_DEBUG("Failed to create dir %s (%d:%s)", dir.c_str(), errno, gs_strerror(errno));
@@ -812,191 +830,96 @@ bool CheckpointManager::CreateCheckpointDir(std::string& dir)
     return true;
 }
 
-bool CheckpointManager::CreateTpcRecoveryFile()
+bool CheckpointManager::CreatePendingRecoveryDataFile()
 {
     int fd = -1;
     std::string fileName;
-    std::string workingDir;
     bool ret = false;
 
-    // This lock is held while serializing the in-process transactions by checkpoint.
-    MOTEngine::GetInstance()->GetInProcessTransactions().Lock();
-
     do {
-        if (MOTEngine::GetInstance()->GetInProcessTransactions().GetNumTxns() == 0) {
-            ret = true;
-            break;
-        }
-
-        if (!CheckpointUtils::SetWorkingDir(workingDir, m_inProgressId)) {
-            break;
-        }
-
-        CheckpointUtils::MakeTpcFilename(fileName, workingDir, m_inProgressId);
+        CheckpointUtils::MakeIpdFilename(fileName, m_workingDir, m_inProgressId);
         if (!CheckpointUtils::OpenFileWrite(fileName, fd)) {
-            MOT_LOG_ERROR("CreateTpcRecoveryFile: failed to create file '%s' [%d %s]",
+            MOT_LOG_ERROR("CreatePendingRecoveryDataFile: Failed to create file '%s' - %d - %s",
                 fileName.c_str(),
                 errno,
                 gs_strerror(errno));
             break;
         }
 
-        m_inProcessTxnsLsn = MOTEngine::GetInstance()->GetInProcessTransactions().GetReplayLsn();
+        CheckpointUtils::PendingTxnDataFileHeader ptdFileHeader;
+        ptdFileHeader.m_magic = CheckpointUtils::HEADER_MAGIC;
+        ptdFileHeader.m_numEntries = 0;  // will be filled later on
 
-        CheckpointUtils::TpcFileHeader tpcFileHeader;
-        tpcFileHeader.m_magic = CP_MGR_MAGIC;
-        tpcFileHeader.m_numEntries = 0;
-
-        if (!CheckpointUtils::SeekFile(fd, sizeof(CheckpointUtils::TpcFileHeader))) {
-            MOT_LOG_ERROR("CreateTpcRecoveryFile: failed to seek in file");
+        if (lseek(fd, sizeof(CheckpointUtils::PendingTxnDataFileHeader), SEEK_SET) !=
+            sizeof(CheckpointUtils::PendingTxnDataFileHeader)) {
+            MOT_LOG_ERROR("CreatePendingRecoveryDataFile: lseek (1) failed [%d %s]", errno, gs_strerror(errno));
+            (void)CheckpointUtils::CloseFile(fd);
             break;
         }
 
-        if (MOTEngine::GetInstance()->GetInProcessTransactions().GetNumTxns() > 0 &&
-            SerializeInProcessTxns(fd) != RC_OK) {
-            MOT_LOG_ERROR("CreateTpcRecoveryFile: failed to serialize transactions [%d %s]", errno, gs_strerror(errno));
+        uint64_t serializeStatus = GetRecoveryManager()->SerializePendingRecoveryData(fd);
+        if (serializeStatus == (uint64_t)(-1)) {
+            MOT_LOG_ERROR(
+                "CreatePendingRecoveryDataFile: Failed to serialize transactions [%d %s]", errno, gs_strerror(errno));
+            (void)CheckpointUtils::CloseFile(fd);
             break;
         }
 
-        if (!CheckpointUtils::SeekFile(fd, 0)) {
-            MOTEngine::GetInstance()->GetInProcessTransactions().Unlock();
-            MOT_LOG_ERROR("CreateTpcRecoveryFile: failed to seek in file");
+        ptdFileHeader.m_numEntries = serializeStatus;
+        if (lseek(fd, 0, SEEK_SET) != 0) {
+            MOT_LOG_ERROR("CreatePendingRecoveryDataFile: lseek (2) failed [%d %s]", errno, gs_strerror(errno));
+            (void)CheckpointUtils::CloseFile(fd);
             break;
         }
 
-        tpcFileHeader.m_numEntries = m_numSerializedEntries;
-
-        size_t wrStat = CheckpointUtils::WriteFile(fd, (char*)&tpcFileHeader, sizeof(CheckpointUtils::TpcFileHeader));
-        if (wrStat != sizeof(CheckpointUtils::TpcFileHeader)) {
-            MOT_LOG_ERROR("CreateTpcRecoveryFile: failed to update tpc file's header (%d) [%d %s]",
+        size_t wrStat = CheckpointUtils::WriteFile(
+            fd, (const char*)&ptdFileHeader, sizeof(CheckpointUtils::PendingTxnDataFileHeader));
+        if (wrStat != sizeof(CheckpointUtils::PendingTxnDataFileHeader)) {
+            MOT_LOG_ERROR("CreatePendingRecoveryDataFile: Failed to write file's header (%d) [%d %s]",
                 wrStat,
                 errno,
                 gs_strerror(errno));
+            (void)CheckpointUtils::CloseFile(fd);
             break;
         }
 
         if (CheckpointUtils::FlushFile(fd)) {
-            MOT_LOG_ERROR("CreateTpcRecoveryFile: failed to flush map file");
+            MOT_LOG_ERROR("CreatePendingRecoveryDataFile: Failed to flush map file");
+            (void)CheckpointUtils::CloseFile(fd);
             break;
         }
 
         if (CheckpointUtils::CloseFile(fd)) {
-            MOT_LOG_ERROR("CreateTpcRecoveryFile: failed to close map file");
+            MOT_LOG_ERROR("CreatePendingRecoveryDataFile: Failed to close map file");
             break;
         }
-
-        MOT_LOG_INFO("Created tpc file with %lu entries", m_numSerializedEntries);
         ret = true;
+        MOT_LOG_INFO("CreatePendingRecoveryDataFile: Serialized %d entries", serializeStatus);
     } while (0);
-
-    MOTEngine::GetInstance()->GetInProcessTransactions().Unlock();
     return ret;
 }
-
-RC CheckpointManager::SerializeInProcessTxns(int fd)
-{
-    if (fd == -1) {
-        MOT_LOG_ERROR("SerializeInProcessTxns: bad fd");
-        return RC_ERROR;
-    }
-
-    m_numSerializedEntries = 0;
-    auto serializeLambda = [this, fd](RedoLogTransactionSegments* segments, uint64_t) -> RC {
-        errno_t erc;
-        LogSegment* segment = segments->GetSegment(segments->GetCount() - 1);
-        size_t bufSize = 0;
-        char* buf = nullptr;
-        CheckpointUtils::TpcEntryHeader header;
-        uint64_t csn = segment->m_controlBlock.m_csn;
-        for (uint32_t i = 0; i < segments->GetCount(); i++) {
-            segment = segments->GetSegment(i);
-            size_t sz = segment->SerializeSize();
-            if (buf == nullptr) {
-                buf = (char*)malloc(sz);
-                MOT_LOG_DEBUG("SerializeInProcessTxns: alloc %lu - %p", sz, buf);
-                bufSize = sz;
-            } else if (sz > bufSize) {
-                char* bufTmp = (char*)malloc(sz);
-                if (bufTmp == nullptr) {
-                    free(buf);
-                    buf = nullptr;
-                } else {
-                    erc = memcpy_s(bufTmp, sz, buf, bufSize);
-                    securec_check(erc, "\0", "\0");
-                    free(buf);
-                    buf = bufTmp;
-                }
-                MOT_LOG_DEBUG("SerializeInProcessTxns: realloc %lu - %p", sz, buf);
-                bufSize = sz;
-            }
-
-            if (buf == nullptr) {
-                MOT_LOG_ERROR("SerializeInProcessTxns: failed to allocate buffer (%lu bytes)", sz);
-                return RC_ERROR;
-            }
-
-            header.m_magic = CP_MGR_MAGIC;
-            header.m_len = bufSize;
-            segment->Serialize(buf);
-            size_t wrStat = CheckpointUtils::WriteFile(fd, (char*)&header, sizeof(CheckpointUtils::TpcEntryHeader));
-            if (wrStat != sizeof(CheckpointUtils::TpcEntryHeader)) {
-                MOT_LOG_ERROR("SerializeInProcessTxns: failed to write header (wrote %lu) [%d:%s]",
-                    wrStat,
-                    errno,
-                    gs_strerror(errno));
-                free(buf);
-                return RC_ERROR;
-            }
-
-            wrStat = CheckpointUtils::WriteFile(fd, buf, bufSize);
-            if (wrStat != bufSize) {
-                MOT_LOG_ERROR("SerializeInProcessTxns: failed to write %lu bytes to file (wrote %lu) [%d:%s]",
-                    bufSize,
-                    wrStat,
-                    errno,
-                    gs_strerror(errno));
-                free(buf);
-                return RC_ERROR;
-            }
-
-            m_numSerializedEntries++;
-            MOT_LOG_DEBUG("SerializeInProcessTxns: wrote seg %p %lu bytes", segment, bufSize);
-        }
-        if (buf != nullptr) {
-            free(buf);
-        }
-        return RC_OK;
-    };
-
-    return MOTEngine::GetInstance()->GetInProcessTransactions().ForEachTransactionNoLock(serializeLambda);
-}
-
 bool CheckpointManager::CreateEndFile()
 {
     int fd = -1;
     std::string fileName;
-    std::string workingDir;
     bool ret = false;
 
     do {
-        if (!CheckpointUtils::SetWorkingDir(workingDir, m_inProgressId)) {
-            break;
-        }
-
-        CheckpointUtils::MakeEndFilename(fileName, workingDir, m_inProgressId);
+        CheckpointUtils::MakeEndFilename(fileName, m_workingDir, m_inProgressId);
         if (!CheckpointUtils::OpenFileWrite(fileName, fd)) {
             MOT_LOG_ERROR(
-                "CreateEndFile: failed to create file '%s' - %d - %s", fileName.c_str(), errno, gs_strerror(errno));
+                "CreateEndFile: Failed to create file '%s' - %d - %s", fileName.c_str(), errno, gs_strerror(errno));
             break;
         }
 
         if (CheckpointUtils::FlushFile(fd)) {
-            MOT_LOG_ERROR("CreateEndFile: failed to flush map file");
+            MOT_LOG_ERROR("CreateEndFile: Failed to flush end file");
+            (void)CheckpointUtils::CloseFile(fd);
             break;
         }
 
         if (CheckpointUtils::CloseFile(fd)) {
-            MOT_LOG_ERROR("CreateEndFile: failed to close map file");
+            MOT_LOG_ERROR("CreateEndFile: Failed to close end file");
             break;
         }
         ret = true;

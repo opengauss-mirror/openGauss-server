@@ -49,6 +49,9 @@
 #endif
 #include "replication/walreceiver.h"
 #include "optimizer/gplanmgr.h"
+#ifdef ENABLE_MOT
+#include "storage/mot/jit_exec.h"
+#endif
 
 #define CLUSTER_EXPANSION_BASE 2
 
@@ -66,6 +69,69 @@ static void CopyPlanForGPCIfNecessary(CachedPlanSource* psrc, Portal portal)
         portal->stmts = CopyLocalStmt(portal->cplan->stmt_list, u_sess->temp_mem_cxt, &tmpCxt);
     }
 }
+
+#ifdef ENABLE_MOT
+void TryMotJitCodegenQuery(const char* queryString, CachedPlanSource* psrc, Query* query)
+{
+    // Try to generate LLVM jitted code - first cleanup jit of previous run.
+    if (psrc->mot_jit_context != NULL) {
+        if (JitExec::IsJitContextPendingCompile(psrc->mot_jit_context) ||
+            JitExec::IsJitContextDoneCompile(psrc->mot_jit_context)) {
+            return;
+        }
+
+        // NOTE: context is cleaned up during end of session, this should not happen,
+        // maybe a warning should be issued
+        Assert(false);
+        ereport(WARNING, (errmsg("Cached Plan Source already has a MOT JIT Context, destroying the residual context")));
+        JitExec::DestroyJitContext(psrc->mot_jit_context, true);
+        psrc->mot_jit_context = NULL;
+        Assert(psrc->opFusionObj == NULL);
+    }
+
+    if (query == NULL) {
+        if (list_length(psrc->query_list) != 1) {
+            elog(DEBUG2, "Plan source does not have exactly one query");
+            return;
+        }
+        query = (Query*)linitial(psrc->query_list);
+        if (query == NULL) {
+            elog(DEBUG2, "No query object present for MOT JIT");
+            return;
+        }
+    }
+
+    if ((query->commandType != CMD_SELECT) && (query->commandType != CMD_INSERT) &&
+        (query->commandType != CMD_UPDATE) && (query->commandType != CMD_DELETE)) {
+        elog(DEBUG2, "Query is not SELECT|INSERT|UPDATE|DELETE");
+        return;
+    }
+
+    if (JitExec::IsMotCodegenPrintEnabled()) {
+        elog(LOG, "Attempting to generate MOT jitted code for query: %s\n", queryString);
+    }
+
+    Assert(psrc->opFusionObj == NULL && psrc->mot_jit_context == NULL);
+    u_sess->mot_cxt.jit_codegen_error = 0;
+    psrc->mot_jit_context = JitExec::TryJitCodegenQuery(query, queryString);
+    if (psrc->mot_jit_context != NULL) {
+        if (JitExec::IsJitContextValid(psrc->mot_jit_context)) {
+            psrc->is_checked_opfusion = false;
+        }
+    } else {
+        if (JitExec::IsMotCodegenPrintEnabled()) {
+            elog(LOG, "Failed to generate jitted MOT function for query %s\n", queryString);
+        }
+        if (u_sess->mot_cxt.jit_codegen_error == ERRCODE_QUERY_CANCELED) {
+            // If JIT compilation failed due to cancel request, we need to ereport. JIT source will be in error state,
+            // but checkedMotJitCodegen will still be false so that the JIT compilation will be triggered on next
+            // attempt.
+            Assert(!psrc->checkedMotJitCodegen);
+            ereport(ERROR, (errcode(ERRCODE_QUERY_CANCELED), errmsg("canceling statement due to user request")));
+        }
+    }
+}
+#endif
 
 /*
  * Implements the 'PREPARE' utility statement.
@@ -134,6 +200,21 @@ void PrepareQuery(PrepareStmt* stmt, const char* queryString)
 
     query = parse_analyze_varparams((Node*)copyObject(stmt->query), queryString, &argtypes, &nargs);
 
+#ifdef ENABLE_MOT
+    /* check cross engine queries  */
+    StorageEngineType storageEngineType = SE_TYPE_UNSPECIFIED;
+    CheckTablesStorageEngine(query, &storageEngineType);
+    SetCurrentTransactionStorageEngine(storageEngineType);
+    /* set the plan's storage engine */
+    plansource->storageEngineType = storageEngineType;
+
+    /* gpc does not support MOT engine */
+    if (ENABLE_CN_GPC && plansource->gpc.status.IsSharePlan() &&
+        (storageEngineType == SE_TYPE_MOT || storageEngineType == SE_TYPE_MIXED)) {
+        plansource->gpc.status.SetKind(GPC_UNSHARED);
+    }
+#endif
+
     if (ENABLE_CN_GPC && plansource->gpc.status.IsSharePlan() && contains_temp_tables(query->rtable)) {
         /* temp table unsupport shared */
         plansource->gpc.status.SetKind(GPC_UNSHARED);
@@ -191,6 +272,15 @@ void PrepareQuery(PrepareStmt* stmt, const char* queryString)
      * Save the results.
      */
     StorePreparedStatement(stmt->name, plansource, true);
+
+#ifdef ENABLE_MOT
+    // Try MOT JIT code generation only after the plan source is saved.
+    if ((plansource->storageEngineType == SE_TYPE_MOT || plansource->storageEngineType == SE_TYPE_UNSPECIFIED) &&
+        !IS_PGXC_COORDINATOR && JitExec::IsMotCodegenEnabled()) {
+        // MOT JIT code generation
+        TryMotJitCodegenQuery(queryString, plansource, query);
+    }
+#endif
 }
 
 /*
@@ -244,6 +334,19 @@ void ExecuteQuery(ExecuteStmt* stmt, IntoClause* intoClause, const char* querySt
     }
 
     OpFusion::clearForCplan((OpFusion*)psrc->opFusionObj, psrc);
+
+#ifdef ENABLE_MOT
+    /*
+     * MOT JIT Execution:
+     * Assist in distinguishing query boundaries in case of range query when client uses batches. This allows us to
+     * know a new query started, and in case a previous execution did not fetch all records (since user is working in
+     * batch-mode, and can decide to quit fetching in the middle), using this information we can infer this is a new
+     * scan, and old scan state should be discarded.
+     */
+    if (psrc->mot_jit_context != NULL) {
+        JitResetScan(psrc->mot_jit_context);
+    }
+#endif
 
     if (psrc->opFusionObj != NULL) {
         Assert(psrc->cplan == NULL);

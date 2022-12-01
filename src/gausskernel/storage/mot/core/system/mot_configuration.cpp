@@ -47,9 +47,6 @@ constexpr uint64_t MOTConfiguration::SCALE_SECONDS;
 constexpr bool MOTConfiguration::DEFAULT_ENABLE_REDO_LOG;
 constexpr LoggerType MOTConfiguration::DEFAULT_LOGGER_TYPE;
 constexpr RedoLogHandlerType MOTConfiguration::DEFAULT_REDO_LOG_HANDLER_TYPE;
-constexpr uint32_t MOTConfiguration::DEFAULT_ASYNC_REDO_LOG_BUFFER_ARRAY_COUNT;
-constexpr uint32_t MOTConfiguration::MIN_ASYNC_REDO_LOG_BUFFER_ARRAY_COUNT;
-constexpr uint32_t MOTConfiguration::MAX_ASYNC_REDO_LOG_BUFFER_ARRAY_COUNT;
 constexpr bool MOTConfiguration::DEFAULT_ENABLE_GROUP_COMMIT;
 constexpr uint64_t MOTConfiguration::DEFAULT_GROUP_COMMIT_SIZE;
 constexpr uint64_t MOTConfiguration::MIN_GROUP_COMMIT_SIZE;
@@ -74,6 +71,13 @@ constexpr uint32_t MOTConfiguration::DEFAULT_CHECKPOINT_RECOVERY_WORKERS;
 constexpr uint32_t MOTConfiguration::MIN_CHECKPOINT_RECOVERY_WORKERS;
 constexpr uint32_t MOTConfiguration::MAX_CHECKPOINT_RECOVERY_WORKERS;
 constexpr bool MOTConfiguration::DEFAULT_ENABLE_LOG_RECOVERY_STATS;
+constexpr RecoveryMode MOTConfiguration::DEFAULT_RECOVERY_MODE;
+constexpr uint32_t MOTConfiguration::DEFAULT_PARALLEL_RECOVERY_WORKERS;
+constexpr uint32_t MOTConfiguration::MIN_PARALLEL_RECOVERY_WORKERS;
+constexpr uint32_t MOTConfiguration::MAX_PARALLEL_RECOVERY_WORKERS;
+constexpr uint32_t MOTConfiguration::DEFAULT_PARALLEL_RECOVERY_QUEUE_SIZE;
+constexpr uint32_t MOTConfiguration::MIN_PARALLEL_RECOVERY_QUEUE_SIZE;
+constexpr uint32_t MOTConfiguration::MAX_PARALLEL_RECOVERY_QUEUE_SIZE;
 // machine configuration members
 constexpr uint16_t MOTConfiguration::DEFAULT_NUMA_NODES;
 constexpr uint16_t MOTConfiguration::DEFAULT_CORES_PER_CPU;
@@ -169,11 +173,16 @@ constexpr uint64_t MOTConfiguration::MIN_GC_HIGH_RECLAIM_THRESHOLD_BYTES;
 constexpr uint64_t MOTConfiguration::MAX_GC_HIGH_RECLAIM_THRESHOLD_BYTES;
 // JIT configuration members
 constexpr bool MOTConfiguration::DEFAULT_ENABLE_MOT_CODEGEN;
-constexpr bool MOTConfiguration::DEFAULT_FORCE_MOT_PSEUDO_CODEGEN;
+constexpr bool MOTConfiguration::DEFAULT_ENABLE_MOT_QUERY_CODEGEN;
+constexpr bool MOTConfiguration::DEFAULT_ENABLE_MOT_SP_CODEGEN;
+constexpr const char* MOTConfiguration::DEFAULT_MOT_SP_CODEGEN_ALLOWED;
+constexpr const char* MOTConfiguration::DEFAULT_MOT_SP_CODEGEN_PROHIBITED;
+constexpr const char* MOTConfiguration::DEFAULT_MOT_PURE_SP_CODEGEN;
 constexpr bool MOTConfiguration::DEFAULT_ENABLE_MOT_CODEGEN_PRINT;
 constexpr uint32_t MOTConfiguration::DEFAULT_MOT_CODEGEN_LIMIT;
 constexpr uint32_t MOTConfiguration::MIN_MOT_CODEGEN_LIMIT;
 constexpr uint32_t MOTConfiguration::MAX_MOT_CODEGEN_LIMIT;
+constexpr bool MOTConfiguration::DEFAULT_ENABLE_MOT_CODEGEN_PROFILE;
 // storage configuration
 constexpr bool MOTConfiguration::DEFAULT_ALLOW_INDEX_ON_NULLABLE_COLUMN;
 constexpr IndexTreeFlavor MOTConfiguration::DEFAULT_INDEX_TREE_FLAVOR;
@@ -185,7 +194,8 @@ constexpr uint64_t MOTConfiguration::MAX_CFG_MONITOR_PERIOD_SECONDS;
 constexpr bool MOTConfiguration::DEFAULT_RUN_INTERNAL_CONSISTENCY_VALIDATION;
 constexpr uint64_t MOTConfiguration::DEFAULT_TOTAL_MEMORY_MB;
 
-static constexpr unsigned int MAX_NUMA_NODES = 16u;
+static constexpr int MAX_NUMA_NODES = 16;
+
 #define IS_HYPER_THREAD_CMD "lscpu | grep \"Thread(s) per core:\" |  awk '{print $4}'"
 
 static bool ParseLoggerType(
@@ -256,6 +266,19 @@ static bool ParseRedoLogHandlerType(const std::string& cfgName, const std::strin
     return result;
 }
 
+static bool ParseRecoveryMode(const std::string& cfgName, const std::string& variableName, const std::string& newValue,
+    RecoveryMode* variableValue)
+{
+    bool result = (cfgName == variableName);
+    if (result) {
+        *variableValue = RecoveryModeFromString(newValue.c_str());
+        if (*variableValue == RecoveryMode::RECOVERY_INVALID) {
+            result = false;
+        }
+    }
+    return result;
+}
+
 static bool ParseBool(
     const std::string& cfgName, const std::string& variableName, const std::string& newValue, bool* variableValue)
 {
@@ -305,7 +328,7 @@ static bool ParseUint16(
 {
     bool result = (cfgName == variableName);
     if (result) {
-        *variableValue = (uint16_t)std::stoul(newValue);
+        *variableValue = static_cast<uint16_t>(std::stoul(newValue));
         MOT_ASSERT(!newValue.empty());
     }
     return result;
@@ -365,8 +388,8 @@ bool MOTConfiguration::FindNumaNodes(int* maxNodes)
         return false;
     }
 
-    if ((unsigned int)*maxNodes >= MAX_NUMA_NODES) {
-        MOT_LOG_ERROR("sys_numa_num_configured_nodes() => %d, while MAX_NUMA_NODES=%u - cannot proceed",
+    if (*maxNodes >= MAX_NUMA_NODES) {
+        MOT_LOG_ERROR("sys_numa_num_configured_nodes() => %d, while MAX_NUMA_NODES=%d - cannot proceed",
             *maxNodes,
             MAX_NUMA_NODES);
         return false;
@@ -392,20 +415,20 @@ bool MOTConfiguration::FindNumProcessors(uint16_t* maxCoresPerNode, CpuNodeMap* 
             MOT_LOG_ERROR("Invalid NUMA configuration numa_node_of_cpu(%d) => %d", i, node);
             return false;
         }
-        if ((unsigned int)node >= MAX_NUMA_NODES) {
+        if (node >= MAX_NUMA_NODES) {
             MOT_LOG_ERROR(
-                "CPU %d is located in node %d, while MAX_NUMA_NODES=%u - cannot proceed", i, node, MAX_NUMA_NODES);
+                "CPU %d is located in node %d, while MAX_NUMA_NODES=%d - cannot proceed", i, node, MAX_NUMA_NODES);
             return false;
         }
         cpusPerNode[node]++;
         (*cpuNodeMapper)[i] = node;
-        (*cpuOsMapper)[node].insert(i);
+        (void)(*cpuOsMapper)[node].insert(i);
     }
 
     // dynamically calculate number of CPU cores per NUMA node instead of hard-coded config value
     if (maxCoresPerNode != nullptr) {
         *maxCoresPerNode = 0;
-        for (unsigned int j = 0; j < MAX_NUMA_NODES; j++) {
+        for (int j = 0; j < MAX_NUMA_NODES; j++) {
             if (cpusPerNode[j] > *maxCoresPerNode) {
                 *maxCoresPerNode = cpusPerNode[j];
             }
@@ -415,21 +438,21 @@ bool MOTConfiguration::FindNumProcessors(uint16_t* maxCoresPerNode, CpuNodeMap* 
     return true;
 }
 
-void MOTConfiguration::SetMaskToAllCoresinNumaSocket(cpu_set_t& mask, uint64_t threadId)
+void MOTConfiguration::SetMaskToAllCoresinNumaSocketByCoreId(cpu_set_t& mask, int coreId)
 {
-    int nodeId = GetCpuNode(threadId);
+    int nodeId = GetCpuNode(coreId);
     auto nodeMap = m_osCpuMap[nodeId];
-    for (auto it = nodeMap.begin(); it != nodeMap.end(); ++it) {
+    for (auto it = nodeMap.begin(); it != nodeMap.end(); (void)++it) {
         if (MotSysNumaCpuAllowed(*it)) {
             CPU_SET(*it, &mask);
         }
     }
 }
 
-void MOTConfiguration::SetMaskToAllCoresinNumaSocket2(cpu_set_t& mask, int nodeId)
+void MOTConfiguration::SetMaskToAllCoresinNumaSocketByNodeId(cpu_set_t& mask, int nodeId)
 {
     auto nodeMap = m_osCpuMap[nodeId];
-    for (auto it = nodeMap.begin(); it != nodeMap.end(); ++it) {
+    for (auto it = nodeMap.begin(); it != nodeMap.end(); (void)++it) {
         if (MotSysNumaCpuAllowed(*it)) {
             CPU_SET(*it, &mask);
         }
@@ -440,7 +463,6 @@ MOTConfiguration::MOTConfiguration()
     : m_enableRedoLog(DEFAULT_ENABLE_REDO_LOG),
       m_loggerType(DEFAULT_LOGGER_TYPE),
       m_redoLogHandlerType(DEFAULT_REDO_LOG_HANDLER_TYPE),
-      m_asyncRedoLogBufferArrayCount(DEFAULT_ASYNC_REDO_LOG_BUFFER_ARRAY_COUNT),
       m_enableGroupCommit(DEFAULT_ENABLE_GROUP_COMMIT),
       m_groupCommitSize(DEFAULT_GROUP_COMMIT_SIZE),
       m_groupCommitTimeoutUSec(DEFAULT_GROUP_COMMIT_TIMEOUT_USEC),
@@ -449,6 +471,9 @@ MOTConfiguration::MOTConfiguration()
       m_checkpointDir(DEFAULT_CHECKPOINT_DIR),
       m_checkpointSegThreshold(DEFAULT_CHECKPOINT_SEGSIZE_BYTES),
       m_checkpointWorkers(DEFAULT_CHECKPOINT_WORKERS),
+      m_recoveryMode(DEFAULT_RECOVERY_MODE),
+      m_parallelRecoveryWorkers(DEFAULT_PARALLEL_RECOVERY_WORKERS),
+      m_parallelRecoveryQueueSize(DEFAULT_PARALLEL_RECOVERY_QUEUE_SIZE),
       m_checkpointRecoveryWorkers(DEFAULT_CHECKPOINT_RECOVERY_WORKERS),
       m_abortBufferEnable(true),
       m_preAbort(true),
@@ -492,18 +517,23 @@ MOTConfiguration::MOTConfiguration()
       m_sessionLargeBufferStoreSizeMB(DEFAULT_SESSION_LARGE_BUFFER_STORE_SIZE_MB),
       m_sessionLargeBufferStoreMaxObjectSizeMB(DEFAULT_SESSION_LARGE_BUFFER_STORE_MAX_OBJECT_SIZE_MB),
       m_sessionMaxHugeObjectSizeMB(DEFAULT_SESSION_MAX_HUGE_OBJECT_SIZE_MB),
-      m_gcEnable(DEFAULT_GC_ENABLE),
       m_gcReclaimThresholdBytes(DEFAULT_GC_RECLAIM_THRESHOLD_BYTES),
       m_gcReclaimBatchSize(DEFAULT_GC_RECLAIM_BATCH_SIZE),
       m_gcHighReclaimThresholdBytes(DEFAULT_GC_HIGH_RECLAIM_THRESHOLD_BYTES),
       m_enableCodegen(DEFAULT_ENABLE_MOT_CODEGEN),
-      m_forcePseudoCodegen(DEFAULT_FORCE_MOT_PSEUDO_CODEGEN),
+      m_enableQueryCodegen(DEFAULT_ENABLE_MOT_QUERY_CODEGEN),
+      m_enableSPCodegen(DEFAULT_ENABLE_MOT_SP_CODEGEN),
+      m_spCodegenAllowed(DEFAULT_MOT_SP_CODEGEN_ALLOWED),
+      m_spCodegenProhibited(DEFAULT_MOT_SP_CODEGEN_PROHIBITED),
+      m_pureSPCodegen(DEFAULT_MOT_PURE_SP_CODEGEN),
       m_enableCodegenPrint(DEFAULT_ENABLE_MOT_CODEGEN_PRINT),
       m_codegenLimit(DEFAULT_MOT_CODEGEN_LIMIT),
+      m_enableCodegenProfile(DEFAULT_ENABLE_MOT_CODEGEN_PROFILE),
       m_allowIndexOnNullableColumn(DEFAULT_ALLOW_INDEX_ON_NULLABLE_COLUMN),
       m_indexTreeFlavor(DEFAULT_INDEX_TREE_FLAVOR),
       m_configMonitorPeriodSeconds(DEFAULT_CFG_MONITOR_PERIOD_SECONDS),
       m_runInternalConsistencyValidation(DEFAULT_RUN_INTERNAL_CONSISTENCY_VALIDATION),
+      m_runInternalMvccConsistencyValidation(DEFAULT_RUN_INTERNAL_CONSISTENCY_VALIDATION),
       m_totalMemoryMb(DEFAULT_TOTAL_MEMORY_MB),
       m_suppressLog(0),
       m_loadExtraParams(false)
@@ -516,7 +546,7 @@ void MOTConfiguration::Initialize()
     MotSysNumaInit();
     int numa = DEFAULT_NUMA_NODES;
     if (FindNumaNodes(&numa)) {
-        m_numaNodes = (uint16_t)numa;
+        m_numaNodes = static_cast<uint16_t>(numa);
     } else {
         MOT_LOG_WARN("Failed to infer the number of NUMA nodes on current machine, defaulting to %d", numa);
         m_numaAvailable = false;
@@ -526,7 +556,7 @@ void MOTConfiguration::Initialize()
     if (FindNumProcessors(&cores, &m_cpuNodeMapper, &m_osCpuMap)) {
         m_coresPerCpu = cores;
     } else {
-        MOT_LOG_WARN("Failed to infer the number of cores on the current machine, defaulting to %u", (unsigned)cores);
+        MOT_LOG_WARN("Failed to infer the number of cores on the current machine, defaulting to %" PRIu16, cores);
         m_numaAvailable = false;
     }
 
@@ -546,7 +576,6 @@ bool MOTConfiguration::SetFlag(const std::string& name, const std::string& value
     if (ParseBool(name, "enable_redo_log", value, &m_enableRedoLog)) {
     } else if (ParseLoggerType(name, "logger_type", value, &m_loggerType)) {
     } else if (ParseRedoLogHandlerType(name, "redo_log_handler_type", value, &m_redoLogHandlerType)) {
-    } else if (ParseUint32(name, "async_log_buffer_count", value, &m_asyncRedoLogBufferArrayCount)) {
     } else if (ParseBool(name, "enable_group_commit", value, &m_enableGroupCommit)) {
     } else if (ParseUint64(name, "group_commit_size", value, &m_groupCommitSize)) {
     } else if (ParseUint64(name, "group_commit_timeout_usec", value, &m_groupCommitTimeoutUSec)) {
@@ -556,6 +585,9 @@ bool MOTConfiguration::SetFlag(const std::string& name, const std::string& value
     } else if (ParseUint64(name, "checkpoint_segsize", value, &m_checkpointSegThreshold)) {
     } else if (ParseUint32(name, "checkpoint_workers", value, &m_checkpointWorkers)) {
     } else if (ParseUint32(name, "checkpoint_recovery_workers", value, &m_checkpointRecoveryWorkers)) {
+    } else if (ParseRecoveryMode(name, "recovery_mode", value, &m_recoveryMode)) {
+    } else if (ParseUint32(name, "parallel_recovery_workers", value, &m_parallelRecoveryWorkers)) {
+    } else if (ParseUint32(name, "parallel_recovery_queue_size", value, &m_parallelRecoveryQueueSize)) {
     } else if (ParseBool(name, "abort_buffer_enable", value, &m_abortBufferEnable)) {
     } else if (ParseBool(name, "pre_abort", value, &m_preAbort)) {
     } else if (ParseValidation(name, "validation_lock", value, &m_validationLock)) {
@@ -598,9 +630,11 @@ bool MOTConfiguration::SetFlag(const std::string& name, const std::string& value
                    &m_sessionLargeBufferStoreMaxObjectSizeMB)) {
     } else if (ParseUint64(name, "session_max_huge_object_size_mb", value, &m_sessionMaxHugeObjectSizeMB)) {
     } else if (ParseBool(name, "enable_mot_codegen", value, &m_enableCodegen)) {
-    } else if (ParseBool(name, "force_mot_pseudo_codegen", value, &m_forcePseudoCodegen)) {
+    } else if (ParseBool(name, "enable_mot_query_codegen", value, &m_enableQueryCodegen)) {
+    } else if (ParseBool(name, "enable_mot_sp_codegen", value, &m_enableSPCodegen)) {
     } else if (ParseBool(name, "enable_mot_codegen_print", value, &m_enableCodegenPrint)) {
     } else if (ParseUint32(name, "mot_codegen_limit", value, &m_codegenLimit)) {
+    } else if (ParseBool(name, "enable_mot_codegen_profile", value, &m_enableCodegenProfile)) {
     } else if (ParseBool(name, "allow_index_on_nullable_column", value, &m_allowIndexOnNullableColumn)) {
     } else if (ParseIndexTreeFlavor(name, "index_tree_flavor", value, &m_indexTreeFlavor)) {
     } else if (ParseUint64(name, "config_monitor_period_seconds", value, &m_configMonitorPeriodSeconds)) {
@@ -625,18 +659,18 @@ int MOTConfiguration::GetCpuNode(int cpu) const
     return (itr != m_cpuNodeMapper.end()) ? itr->second : -1;
 }
 
-uint16_t MOTConfiguration::GetCoreByConnidFP(uint16_t cpu) const
+int MOTConfiguration::GetCoreByConnidFP(int cpu) const
 {
-    uint16_t numOfRealCores = (IsHyperThread() == true) ? m_coresPerCpu / 2 : m_coresPerCpu;  // 2 is for HyperThread
+    int numOfRealCores = (IsHyperThread()) ? m_coresPerCpu / 2 : m_coresPerCpu;  // 2 is for HyperThread
     // Lets pin physical first
-    // cpu is already modulu of(numaNodes*num_cores)
-    if (cpu < m_numaNodes * numOfRealCores) {
-        cpu = cpu % (m_numaNodes * numOfRealCores);
-        uint16_t coreIndex = cpu % numOfRealCores;
-        uint16_t numaId = cpu / numOfRealCores;
+    // cpu is already modulo of (numaNodes * num_cores)
+    if (cpu < ((int)m_numaNodes * numOfRealCores)) {
+        cpu = cpu % ((int)m_numaNodes * numOfRealCores);
+        int coreIndex = cpu % numOfRealCores;
+        int numaId = cpu / numOfRealCores;
         int counter = 0;
         auto coreSet = m_osCpuMap.find(numaId);
-        for (auto it = coreSet->second.begin(); it != coreSet->second.end(); ++it) {
+        for (auto it = coreSet->second.begin(); it != coreSet->second.end(); (void)++it) {
             if (counter == coreIndex) {
                 return *it;
             }
@@ -651,10 +685,9 @@ uint16_t MOTConfiguration::GetCoreByConnidFP(uint16_t cpu) const
 
 int MOTConfiguration::GetMappedCore(int logicId) const
 {
-
     int counter = 0;
-    for (auto it = m_osCpuMap.begin(); it != m_osCpuMap.end(); ++it) {
-        for (auto it2 = (*it).second.begin(); it2 != (*it).second.end(); ++it2) {
+    for (auto it = m_osCpuMap.begin(); it != m_osCpuMap.end(); (void)++it) {
+        for (auto it2 = (*it).second.begin(); it2 != (*it).second.end(); (void)++it2) {
             if (counter == logicId) {
                 return *it2;
             }
@@ -662,6 +695,22 @@ int MOTConfiguration::GetMappedCore(int logicId) const
         }
     }
     return -1;
+}
+
+int MOTConfiguration::GetCoreFromNumaNodeByIndex(int numaId, int logicId) const
+{
+    auto coreSet = m_osCpuMap.find(numaId);
+    if (coreSet != m_osCpuMap.end()) {
+        int counter = 0;
+        for (auto it = coreSet->second.begin(); it != coreSet->second.end(); (void)++it) {
+            if (counter == logicId) {
+                return *it;
+            }
+            counter++;
+        }
+    }
+
+    return INVALID_CPU_ID;
 }
 
 #define UPDATE_BOOL_CFG(var, cfgPath, defaultValue) \
@@ -887,6 +936,9 @@ void MOTConfiguration::LoadConfig()
     MOT_LOG_TRACE("Loading main configuration");
     const LayeredConfigTree* cfg = ConfigManager::GetInstance().GetLayeredConfigTree();
 
+    // load component log levels so we can enable traces in this logger
+    UpdateComponentLogLevel();
+
     // logger configuration
     if (m_loadExtraParams) {
         UPDATE_BOOL_CFG(m_enableRedoLog, "enable_redo_log", DEFAULT_ENABLE_REDO_LOG);
@@ -897,11 +949,6 @@ void MOTConfiguration::LoadConfig()
     // overridden by the external configuration loader GaussdbConfigLoader (so in effect whatever is defined in
     // mot.conf is discarded). See GaussdbConfigLoader::ConfigureRedoLogHandler() for more details.
     UPDATE_USER_CFG(m_redoLogHandlerType, "redo_log_handler_type", DEFAULT_REDO_LOG_HANDLER_TYPE);
-    UPDATE_INT_CFG(m_asyncRedoLogBufferArrayCount,
-        "async_log_buffer_count",
-        DEFAULT_ASYNC_REDO_LOG_BUFFER_ARRAY_COUNT,
-        MIN_ASYNC_REDO_LOG_BUFFER_ARRAY_COUNT,
-        MAX_ASYNC_REDO_LOG_BUFFER_ARRAY_COUNT);
 
     // commit configuration
     UPDATE_BOOL_CFG(m_enableGroupCommit, "enable_group_commit", DEFAULT_ENABLE_GROUP_COMMIT);
@@ -922,7 +969,7 @@ void MOTConfiguration::LoadConfig()
         UPDATE_BOOL_CFG(m_enableCheckpoint, "enable_checkpoint", DEFAULT_ENABLE_CHECKPOINT);
     }
 
-    if (!m_enableCheckpoint && m_enableRedoLog) {
+    if (!m_enableCheckpoint && !m_enableRedoLog) {
         if (m_suppressLog == 0) {
             MOT_LOG_WARN("Disabling redo_log forcibly as the checkpoint is disabled");
         }
@@ -948,6 +995,34 @@ void MOTConfiguration::LoadConfig()
         DEFAULT_CHECKPOINT_RECOVERY_WORKERS,
         MIN_CHECKPOINT_RECOVERY_WORKERS,
         MAX_CHECKPOINT_RECOVERY_WORKERS);
+
+    if (m_loadExtraParams) {
+        UPDATE_USER_CFG(m_recoveryMode, "recovery_mode", DEFAULT_RECOVERY_MODE);
+    }
+
+    UPDATE_INT_CFG(m_parallelRecoveryWorkers,
+        "parallel_recovery_workers",
+        DEFAULT_PARALLEL_RECOVERY_WORKERS,
+        MIN_PARALLEL_RECOVERY_WORKERS,
+        MAX_PARALLEL_RECOVERY_WORKERS);
+
+    UPDATE_INT_CFG(m_parallelRecoveryQueueSize,
+        "parallel_recovery_queue_size",
+        DEFAULT_PARALLEL_RECOVERY_QUEUE_SIZE,
+        MIN_PARALLEL_RECOVERY_QUEUE_SIZE,
+        MAX_PARALLEL_RECOVERY_QUEUE_SIZE);
+
+    if (m_parallelRecoveryQueueSize < m_parallelRecoveryWorkers) {
+        if (m_suppressLog == 0) {
+            MOT_LOG_WARN("Invalid recovery configuration: parallel_recovery_queue_size (%" PRIu32 ") is lesser than "
+                         "parallel_recovery_workers (%" PRIu32 "), changing parallel_recovery_queue_size to (%" PRIu32
+                         ")",
+                m_parallelRecoveryQueueSize,
+                m_parallelRecoveryWorkers,
+                m_parallelRecoveryWorkers);
+        }
+        m_parallelRecoveryQueueSize = m_parallelRecoveryWorkers;  // At least one transaction per processor
+    }
 
     // Tx configuration - not configurable yet
     if (m_loadExtraParams) {
@@ -983,7 +1058,7 @@ void MOTConfiguration::LoadConfig()
 
     // log configuration
     UPDATE_USER_CFG(m_logLevel, "log_level", DEFAULT_LOG_LEVEL);
-    SetGlobalLogLevel(m_logLevel);
+    (void)SetGlobalLogLevel(m_logLevel);
     if (m_loadExtraParams) {
         UPDATE_USER_CFG(m_numaErrorsLogLevel, "numa_errors_log_level", DEFAULT_NUMA_ERRORS_LOG_LEVEL);
         UPDATE_USER_CFG(m_numaWarningsLogLevel, "numa_warnings_log_level", DEFAULT_NUMA_WARNINGS_LOG_LEVEL);
@@ -994,7 +1069,6 @@ void MOTConfiguration::LoadConfig()
     LoadMemConfig();
 
     // GC configuration
-    UPDATE_BOOL_CFG(m_gcEnable, "enable_gc", DEFAULT_GC_ENABLE);
     UPDATE_ABS_MEM_CFG(m_gcReclaimThresholdBytes,
         "reclaim_threshold",
         DEFAULT_GC_RECLAIM_THRESHOLD,
@@ -1015,10 +1089,19 @@ void MOTConfiguration::LoadConfig()
 
     // JIT configuration
     UPDATE_BOOL_CFG(m_enableCodegen, "enable_mot_codegen", DEFAULT_ENABLE_MOT_CODEGEN);
-    UPDATE_BOOL_CFG(m_forcePseudoCodegen, "force_mot_pseudo_codegen", DEFAULT_FORCE_MOT_PSEUDO_CODEGEN);
+    UPDATE_BOOL_CFG(m_enableQueryCodegen, "enable_mot_query_codegen", DEFAULT_ENABLE_MOT_QUERY_CODEGEN);
+    UPDATE_BOOL_CFG(m_enableSPCodegen, "enable_mot_sp_codegen", DEFAULT_ENABLE_MOT_SP_CODEGEN);
+
+    if (m_loadExtraParams) {
+        UPDATE_STRING_CFG(m_spCodegenAllowed, "mot_sp_codegen_allowed", DEFAULT_MOT_SP_CODEGEN_ALLOWED);
+        UPDATE_STRING_CFG(m_spCodegenProhibited, "mot_sp_codegen_prohibited", DEFAULT_MOT_SP_CODEGEN_PROHIBITED);
+        UPDATE_STRING_CFG(m_pureSPCodegen, "mot_pure_sp_codegen", DEFAULT_MOT_PURE_SP_CODEGEN);
+    }
+
     UPDATE_BOOL_CFG(m_enableCodegenPrint, "enable_mot_codegen_print", DEFAULT_ENABLE_MOT_CODEGEN_PRINT);
     UPDATE_INT_CFG(
         m_codegenLimit, "mot_codegen_limit", DEFAULT_MOT_CODEGEN_LIMIT, MIN_MOT_CODEGEN_LIMIT, MAX_MOT_CODEGEN_LIMIT);
+    UPDATE_BOOL_CFG(m_enableCodegenProfile, "enable_mot_codegen_profile", DEFAULT_ENABLE_MOT_CODEGEN_PROFILE);
 
     // storage configuration
     if (m_loadExtraParams) {
@@ -1038,10 +1121,10 @@ void MOTConfiguration::LoadConfig()
         UPDATE_BOOL_CFG(m_runInternalConsistencyValidation,
             "internal_consistency_validation",
             DEFAULT_RUN_INTERNAL_CONSISTENCY_VALIDATION);
+        UPDATE_BOOL_CFG(m_runInternalMvccConsistencyValidation,
+            "internal_mvcc_consistency_validation",
+            DEFAULT_RUN_INTERNAL_CONSISTENCY_VALIDATION);
     }
-
-    // load component log levels
-    UpdateComponentLogLevel();
 
     MOT_LOG_TRACE("Main configuration loaded");
 }
@@ -1083,7 +1166,7 @@ void MOTConfiguration::UpdateMemConfigItem(uint64_t& oldValue, const char* name,
         UpdateIntConfigItem(oldValue, defaultValueBytes / scale, name, lowerBound, upperBound);
     } else {
         // now we carefully examine the value type
-        ConfigValue* cfgValue = (ConfigValue*)cfgItem;
+        const ConfigValue* cfgValue = (const ConfigValue*)cfgItem;
         if (cfgValue->IsIntegral()) {
             // only a number was specified, so it is interpreted as bytes
             uint64_t memoryValueBytes =
@@ -1155,7 +1238,7 @@ void MOTConfiguration::UpdateTimeConfigItem(uint64_t& oldValue, const char* name
         UpdateIntConfigItem(oldValue, defaultValueUSecs / scale, name, lowerBound, upperBound);
     } else {
         // now we carefully examine the value type
-        ConfigValue* cfgValue = (ConfigValue*)cfgItem;
+        const ConfigValue* cfgValue = (const ConfigValue*)cfgItem;
         if (cfgValue->IsIntegral()) {
             // only a number was specified, so it is interpreted as micro-seconds
             uint64_t timeValueUSecs = cfg->GetIntegerConfigValue<uint64_t>(name, defaultValueUSecs, m_suppressLog == 0);
@@ -1212,7 +1295,7 @@ void MOTConfiguration::UpdateComponentLogLevel()
                         componentName.c_str(),
                         TypeFormatter<LogLevel>::ToString(componentLevel, logLevelStr));
                 }
-                SetLogComponentLogLevel(componentName.c_str(), componentLevel);
+                (void)SetLogComponentLogLevel(componentName.c_str(), componentLevel);
             }
 
             // all configuration values are logger configuration pairs (loggerName=log_level)
@@ -1238,7 +1321,7 @@ void MOTConfiguration::UpdateComponentLogLevel()
                             componentName.c_str(),
                             TypeFormatter<LogLevel>::ToString(loggerLevel, logLevelStr));
                     }
-                    SetLoggerLogLevel(componentName.c_str(), loggerName.c_str(), loggerLevel);
+                    (void)SetLoggerLogLevel(componentName.c_str(), loggerName.c_str(), loggerLevel);
                 }
                 ++loggerItr;
             }
@@ -1278,12 +1361,16 @@ int MOTConfiguration::ParseMemoryPercent(const char* memoryValue)
         MOT_LOG_WARN("Invalid memory value format: %s (percentage value not in the range [0, 100])", memoryValue);
     } else {
         mot_string extra(endptr + 1);
-        extra.trim();
-        if (extra.length() != 0) {
-            MOT_LOG_WARN("Invalid memory value format: %s (trailing characters after %%)", memoryValue);
+        if (!extra.is_valid()) {
+            MOT_LOG_ERROR("Failed to allocate memory string: %s", endptr + 1);
         } else {
-            MOT_LOG_TRACE("Parsed percentage: %d%%", percent);
-            result = percent;
+            extra.trim();
+            if (extra.length() != 0) {
+                MOT_LOG_WARN("Invalid memory value format: %s (trailing characters after %%)", memoryValue);
+            } else {
+                MOT_LOG_TRACE("Parsed percentage: %d%%", percent);
+                result = percent;
+            }
         }
     }
     return result;
@@ -1314,7 +1401,7 @@ uint64_t MOTConfiguration::ParseMemoryPercentTotal(const char* memoryValue, uint
         memoryValueBytes = m_totalMemoryMb * MEGA_BYTE * percent / 100;
         if (m_suppressLog == 0) {
             MOT_LOG_INFO(
-                "Loaded %s: %d%% from total = %" PRIu64 " MB", cfgPath, percent, memoryValueBytes / 1024ul / 1024ul);
+                "Loaded %s: %d%% from total = %" PRIu64 " MB", cfgPath, percent, (memoryValueBytes / 1024ul) / 1024ul);
         }
     } else {
         MOT_LOG_WARN("Invalid %s memory format: illegal percent specification", cfgPath);
@@ -1330,39 +1417,40 @@ uint64_t MOTConfiguration::ParseMemoryUnit(const char* memoryValue, uint64_t def
     if (endptr == memoryValue) {
         MOT_LOG_WARN("Invalid %s memory value format: %s (expecting value digits)", cfgPath, memoryValue);
     } else if (*endptr == 0) {
-        MOT_LOG_TRACE("Missing %s memory value units: bytes assumed", cfgPath, memoryValue);
-        memoryValueBytes = value;
+        MOT_LOG_TRACE("Missing %s memory value units: %s (kilobytes assumed)", cfgPath, memoryValue);
+        memoryValueBytes = ((uint64_t)value) * 1024;
     } else {
         // get unit type and convert to mega-bytes
         mot_string suffix(endptr);
-        suffix.trim();
-        if (suffix.compare_no_case("TB") == 0) {
-            MOT_LOG_TRACE("Loaded %s: %u TB", cfgPath, value);
-            memoryValueBytes = ((uint64_t)value) * 1024ull * 1024ull * 1024ull * 1024ull;
-        } else if (suffix.compare_no_case("GB") == 0) {
-            MOT_LOG_TRACE("Loaded %s: %u GB", cfgPath, value);
-            memoryValueBytes = ((uint64_t)value) * 1024ull * 1024ull * 1024ull;
-        } else if (suffix.compare_no_case("MB") == 0) {
-            MOT_LOG_TRACE("Loaded %s: %u MB", cfgPath, value);
-            memoryValueBytes = ((uint64_t)value) * 1024ull * 1024ull;
-        } else if (suffix.compare_no_case("KB") == 0) {
-            MOT_LOG_TRACE("Loaded %s: %u KB", cfgPath, value);
-            memoryValueBytes = ((uint64_t)value) * 1024;
-        } else if (suffix.compare_no_case("bytes") == 0) {
-            MOT_LOG_TRACE("Loaded %s: %u bytes", cfgPath, value);
-            memoryValueBytes = value;
+        if (!suffix.is_valid()) {
+            MOT_LOG_ERROR("Failed to allocate memory string: %s", endptr);
         } else {
-            MOT_LOG_WARN("Invalid %s memory value format: %s (invalid unit specifier '%s' - should be one of TB, GB, "
-                         "MB, KB or bytes)",
-                cfgPath,
-                memoryValue,
-                suffix.c_str());
+            suffix.trim();
+            if (suffix.compare_no_case("TB") == 0) {
+                MOT_LOG_TRACE("Loaded %s: %u TB", cfgPath, value);
+                memoryValueBytes = ((uint64_t)value) * 1024ull * 1024ull * 1024ull * 1024ull;
+            } else if (suffix.compare_no_case("GB") == 0) {
+                MOT_LOG_TRACE("Loaded %s: %u GB", cfgPath, value);
+                memoryValueBytes = ((uint64_t)value) * 1024ull * 1024ull * 1024ull;
+            } else if (suffix.compare_no_case("MB") == 0) {
+                MOT_LOG_TRACE("Loaded %s: %u MB", cfgPath, value);
+                memoryValueBytes = ((uint64_t)value) * 1024ull * 1024ull;
+            } else if (suffix.compare_no_case("KB") == 0) {
+                MOT_LOG_TRACE("Loaded %s: %u KB", cfgPath, value);
+                memoryValueBytes = ((uint64_t)value) * 1024;
+            } else {
+                MOT_LOG_WARN("Invalid %s memory value format: %s (invalid unit specifier '%s' - should be one of TB, "
+                             "GB, MB or KB)",
+                    cfgPath,
+                    memoryValue,
+                    suffix.c_str());
+            }
         }
     }
     return memoryValueBytes;
 }
 
-static inline bool IsTimeUnitDays(mot_string& suffix)
+static inline bool IsTimeUnitDays(const mot_string& suffix)
 {
     if ((suffix.compare_no_case("d") == 0) || (suffix.compare_no_case("days") == 0) ||
         (suffix.compare_no_case("day") == 0)) {
@@ -1371,7 +1459,7 @@ static inline bool IsTimeUnitDays(mot_string& suffix)
     return false;
 }
 
-static inline bool IsTimeUnitHours(mot_string& suffix)
+static inline bool IsTimeUnitHours(const mot_string& suffix)
 {
     if ((suffix.compare_no_case("h") == 0) || (suffix.compare_no_case("hours") == 0) ||
         (suffix.compare_no_case("hour") == 0)) {
@@ -1380,7 +1468,7 @@ static inline bool IsTimeUnitHours(mot_string& suffix)
     return false;
 }
 
-static inline bool IsTimeUnitMinutes(mot_string& suffix)
+static inline bool IsTimeUnitMinutes(const mot_string& suffix)
 {
     if ((suffix.compare_no_case("m") == 0) || (suffix.compare_no_case("mins") == 0) ||
         (suffix.compare_no_case("minutes") == 0) || (suffix.compare_no_case("min") == 0) ||
@@ -1390,7 +1478,7 @@ static inline bool IsTimeUnitMinutes(mot_string& suffix)
     return false;
 }
 
-static inline bool IsTimeUnitSeconds(mot_string& suffix)
+static inline bool IsTimeUnitSeconds(const mot_string& suffix)
 {
     if ((suffix.compare_no_case("s") == 0) || (suffix.compare_no_case("secs") == 0) ||
         (suffix.compare_no_case("seconds") == 0) || (suffix.compare_no_case("sec") == 0) ||
@@ -1400,7 +1488,7 @@ static inline bool IsTimeUnitSeconds(mot_string& suffix)
     return false;
 }
 
-static inline bool IsTimeUnitMilliSeconds(mot_string& suffix)
+static inline bool IsTimeUnitMilliSeconds(const mot_string& suffix)
 {
     if ((suffix.compare_no_case("ms") == 0) || (suffix.compare_no_case("millis") == 0) ||
         (suffix.compare_no_case("milliseconds") == 0) || (suffix.compare_no_case("milli") == 0) ||
@@ -1410,7 +1498,7 @@ static inline bool IsTimeUnitMilliSeconds(mot_string& suffix)
     return false;
 }
 
-static inline bool IsTimeUnitMicroSeconds(mot_string& suffix)
+static inline bool IsTimeUnitMicroSeconds(const mot_string& suffix)
 {
     if ((suffix.compare_no_case("us") == 0) || (suffix.compare_no_case("micros") == 0) ||
         (suffix.compare_no_case("microseconds") == 0) || (suffix.compare_no_case("micro") == 0) ||
@@ -1428,35 +1516,37 @@ uint64_t MOTConfiguration::ParseTimeValueMicros(const char* timeValue, uint64_t 
     if (endptr == timeValue) {
         MOT_LOG_WARN("Invalid %s time value format: %s (expecting value digits)", cfgPath, timeValue);
     } else if (*endptr == 0) {
-        MOT_LOG_WARN("Invalid %s time value format: %s (expecting unit type after value)", cfgPath, timeValue);
+        MOT_LOG_TRACE("Missing %s time value units: %s (milliseconds assumed)", cfgPath, timeValue);
+        timeValueMicros = ((uint64_t)value) * 1000ull;
     } else {
         // get unit type and convert to micro-seconds
         mot_string suffix(endptr);
-        suffix.trim();
-        if (IsTimeUnitDays(suffix)) {
-            MOT_LOG_TRACE("Loaded %s: %u days", cfgPath, value);
-            timeValueMicros = ((uint64_t)value) * 24ull * 60ull * 60ull * 1000ull * 1000ull;
-        } else if (IsTimeUnitHours(suffix)) {
-            MOT_LOG_TRACE("Loaded %s: %u hours", cfgPath, value);
-            timeValueMicros = ((uint64_t)value) * 60ull * 60ull * 1000ull * 1000ull;
-        } else if (IsTimeUnitMinutes(suffix)) {
-            MOT_LOG_TRACE("Loaded %s: %u minutes", cfgPath, value);
-            timeValueMicros = ((uint64_t)value) * 60ull * 1000ull * 1000ull;
-        } else if (IsTimeUnitSeconds(suffix)) {
-            MOT_LOG_TRACE("Loaded %s: %u seconds", cfgPath, value);
-            timeValueMicros = ((uint64_t)value) * 1000ull * 1000ull;
-        } else if (IsTimeUnitMilliSeconds(suffix)) {
-            MOT_LOG_TRACE("Loaded %s: %u milli-seconds", cfgPath, value);
-            timeValueMicros = ((uint64_t)value) * 1000ull;
-        } else if (IsTimeUnitMicroSeconds(suffix)) {
-            MOT_LOG_TRACE("Loaded %s: %u micro-seconds", cfgPath, value);
-            timeValueMicros = ((uint64_t)value);
+        if (!suffix.is_valid()) {
+            MOT_LOG_ERROR("Failed to allocate time unit string: %s", endptr);
         } else {
-            MOT_LOG_WARN("Invalid %s time value format: %s (invalid unit specifier '%s' - should be one of d, h, m, s, "
-                         "ms or us)",
-                cfgPath,
-                timeValue,
-                suffix.c_str());
+            suffix.trim();
+            if (IsTimeUnitDays(suffix)) {
+                MOT_LOG_TRACE("Loaded %s: %u days", cfgPath, value);
+                timeValueMicros = ((uint64_t)value) * 24ull * 60ull * 60ull * 1000ull * 1000ull;
+            } else if (IsTimeUnitHours(suffix)) {
+                MOT_LOG_TRACE("Loaded %s: %u hours", cfgPath, value);
+                timeValueMicros = ((uint64_t)value) * 60ull * 60ull * 1000ull * 1000ull;
+            } else if (IsTimeUnitMinutes(suffix)) {
+                MOT_LOG_TRACE("Loaded %s: %u minutes", cfgPath, value);
+                timeValueMicros = ((uint64_t)value) * 60ull * 1000ull * 1000ull;
+            } else if (IsTimeUnitSeconds(suffix)) {
+                MOT_LOG_TRACE("Loaded %s: %u seconds", cfgPath, value);
+                timeValueMicros = ((uint64_t)value) * 1000ull * 1000ull;
+            } else if (IsTimeUnitMilliSeconds(suffix)) {
+                MOT_LOG_TRACE("Loaded %s: %u milli-seconds", cfgPath, value);
+                timeValueMicros = ((uint64_t)value) * 1000ull;
+            } else {
+                MOT_LOG_WARN("Invalid %s time value format: %s (invalid unit specifier '%s' - should be one of d, h, "
+                             "m, s or ms)",
+                    cfgPath,
+                    timeValue,
+                    suffix.c_str());
+            }
         }
     }
     return timeValueMicros;

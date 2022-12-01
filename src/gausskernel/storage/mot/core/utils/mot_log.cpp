@@ -28,10 +28,10 @@
 #include "session_context.h"
 #include "mm_api.h"
 
-#include <stdio.h>
+#include <cstdio>
 #include <sys/time.h>
-#include <math.h>
-#include <string.h>
+#include <cmath>
+#include <cstring>
 
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
@@ -141,7 +141,7 @@ static void MOTWriteToFileSink(const char* line, size_t size, void* userData)
 {
     FILE* fileSink = (FILE*)userData;
     if (fileSink != nullptr) {
-        fwrite(line, 1, size, fileSink);
+        (void)fwrite(line, 1, size, fileSink);
     }
 }
 
@@ -149,7 +149,7 @@ static void MOTFormatToFileSink(const char* format, va_list args, void* userData
 {
     FILE* fileSink = (FILE*)userData;
     if (fileSink != nullptr) {
-        vfprintf(fileSink, format, args);
+        (void)vfprintf(fileSink, format, args);
     }
 }
 
@@ -157,7 +157,7 @@ static void MOTFlushFileSink(void* userData)
 {
     FILE* fileSink = (FILE*)userData;
     if (fileSink != nullptr) {
-        fflush(fileSink);
+        (void)fflush(fileSink);
     }
 }
 
@@ -187,7 +187,7 @@ extern void SetLogSink(MotLogSinkType logSinkType, MOTLogSink* logSink /* = null
             break;
 
         default:
-            fprintf(stderr,
+            (void)fprintf(stderr,
                 "[MOT Logger Error] Request to configure log sink denied: Invalid logger sink type %d",
                 (int)logSinkType);
             break;
@@ -285,7 +285,8 @@ static inline void MOTAppendLogLineV(const char* format, va_list args)
 #elif defined(ENABLE_LONG_LOG_LINE) && (LONG_LOG_LINE_MODE == LONG_LOG_LINE_STRING_BUFFER)
             // log data is too long for log line, so we create an emergency buffer
             LOG_LINE_BUF = (StringBuffer*)malloc(sizeof(StringBuffer));
-            StringBufferInit(LOG_LINE_BUF, MOT_MAX_LOG_LINE_LENGTH, 2, StringBuffer::Multiply);
+            StringBufferInit(
+                LOG_LINE_BUF, MOT_MAX_LOG_LINE_LENGTH, StringBuffer::GROWTH_FACTOR, StringBuffer::MULTIPLY);
 
             // copy what was formatted up until this call, and format on string buffer
             StringBufferAppendN(LOG_LINE_BUF, LOG_LINE, LOG_LINE_POS);
@@ -319,7 +320,7 @@ static inline void MOTEndLogLine()
 #elif defined(ENABLE_LONG_LOG_LINE) && (LONG_LOG_LINE_MODE == LONG_LOG_LINE_STRING_BUFFER)
         // if we overflowed then we print the string buffer and cleanup
         StringBufferAppend(LOG_LINE_BUF, "\n");
-        MOTWriteToLogSink(LOG_LINE_BUF->_buffer, logLineBuf->m_pos);
+        MOTWriteToLogSink(LOG_LINE_BUF->m_buffer, LOG_LINE_BUF->m_pos);
         StringBufferDestroy(LOG_LINE_BUF);
         LOG_LINE_BUF = nullptr;
 #else
@@ -344,7 +345,7 @@ static inline const char* MOTFormatLogTime(char* buffer, size_t len)
     struct tm* tmInfo;
     struct timeval tv;
     struct tm localTime;
-    gettimeofday(&tv, NULL);
+    (void)gettimeofday(&tv, nullptr);
 
     long int millisec = lrint(tv.tv_usec / 1000.0);  // Round to nearest millisec
     if (millisec >= 1000) {                          // Allow for rounding up to nearest second
@@ -356,7 +357,7 @@ static inline const char* MOTFormatLogTime(char* buffer, size_t len)
 
     // format time
     size_t offset = strftime(buffer, len, "%Y-%m-%d %H:%M:%S", tmInfo);
-    errno_t erc = snprintf_s(buffer + offset, len - offset, len - offset - 1, ".%03d", (int)millisec);
+    errno_t erc = snprintf_s(buffer + offset, len - offset, (len - offset) - 1, ".%03d", (int)millisec);
     securec_check_ss(erc, "\0", "\0");
     return buffer;
 }
@@ -443,6 +444,11 @@ extern void MOTLogAppend(const char* format, ...)
     MOTAppendLogLineV(format, args);
 
     va_end(args);
+}
+
+extern void MOTLogAppendV(const char* format, va_list args)
+{
+    MOTAppendLogLineV(format, args);
 }
 
 extern void MOTLogEnd()

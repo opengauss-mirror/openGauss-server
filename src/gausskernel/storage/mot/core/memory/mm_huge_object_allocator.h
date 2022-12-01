@@ -31,7 +31,7 @@
 #include "string_buffer.h"
 #include "utilities.h"
 
-#include <stddef.h>
+#include <cstddef>
 
 namespace MOT {
 

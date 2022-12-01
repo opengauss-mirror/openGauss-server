@@ -93,6 +93,20 @@ struct MemRawChunkPool {
 
     /** @var Private data for managing asynchronous memory reservation. */
     void* m_asyncReserveData;
+
+    /** @struct Per-session reservation data. */
+    struct SessionReserve {
+        /** @var Reservation mode flag. */
+        uint32_t m_inReserveMode;
+
+        /** @var Amount of reserved chunks. */
+        uint32_t m_chunkCount;
+
+        /** @var Reserved chunk list. */
+        MemRawChunkHeader* m_reservedChunks;
+    };
+    /** @var Per-session reservation. */
+    SessionReserve* m_sessionReservation;
 };
 
 /**
@@ -177,6 +191,21 @@ extern MemRawChunkHeader* MemRawChunkPoolAlloc(MemRawChunkPool* chunkPool);
  * @param chunkHeader The header of the chunk to be deallocated.
  */
 extern void MemRawChunkPoolFree(MemRawChunkPool* chunkPool, void* chunkHeader);
+
+/**
+ * @brief Reserve global memory for current session. While in reserve-mode, released chunks  are kept in the current
+ * session's reserve, rather than being released to global memory.
+ * @param chunkPool The chunk pool.
+ * @param chunkCount The number of chunks to reserve.
+ * @return The number of chunks reserved.
+ */
+extern uint32_t MemRawChunkPoolReserveSession(MemRawChunkPool* chunkPool, uint32_t chunkCount);
+
+/**
+ * @brief Release all global memory reserved for current session.
+ * @param chunkPool The chunk pool.
+ */
+extern uint32_t MemRawChunkPoolUnreserveSession(MemRawChunkPool* chunkPool, uint32_t chunkCount);
 
 /**
  * @brief Prints a chunk pool into log.

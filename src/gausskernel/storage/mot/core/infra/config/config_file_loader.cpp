@@ -76,11 +76,17 @@ bool ConfigFileLoader::HasChanged()
 mot_string ConfigFileLoader::ComposeFullName(const char* typeName, const char* name, const char* configFilePath)
 {
     mot_string result;
-    result.format("%s[%s]@%s", typeName, name, configFilePath);
+    if (!result.format("%s[%s]@%s", typeName, name, configFilePath)) {
+        MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
+            "Load Configuration",
+            "Failed to format configuration file loader name: %s",
+            configFilePath);
+        // this is not a critical error, we continue with ill-formatted configuration loader name
+    }
     return result;
 }
 
-uint64_t ConfigFileLoader::GetFileModificationTime()
+uint64_t ConfigFileLoader::GetFileModificationTime() const
 {
     uint64_t filetime = 0;
     struct stat buf;

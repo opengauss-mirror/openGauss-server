@@ -41,12 +41,17 @@ public:
      * @param argc Number of command-line arguments.
      */
     CmdLineConfigLoader(char** argv, int argc)
-        : ConfigLoader("CmdLine", CMDLINE_CONFIG_PRIORITY), m_cmdlineConfigTree(ParseCmdLine(argv, argc))
+        : ConfigLoader("CmdLine", CMDLINE_CONFIG_PRIORITY), m_cmdlineConfigTree(ParseCmdLine(argv, argc)), m_owner(true)
     {}
 
     /** @brief Destructor. */
     ~CmdLineConfigLoader() override
-    {}
+    {
+        if (m_owner) {
+            delete m_cmdlineConfigTree;
+        }
+        m_cmdlineConfigTree = nullptr;
+    }
 
 protected:
     /**
@@ -55,12 +60,16 @@ protected:
      */
     ConfigTree* LoadConfig() override
     {
+        m_owner = false;
         return m_cmdlineConfigTree;
     }
 
 private:
     /** @var Cached configuration, loaded only once and never modified. */
     ConfigTree* m_cmdlineConfigTree;
+
+    /** @var Specifies if m_cmdlineConfigTree should be freed or not. */
+    bool m_owner = false;
 
     /**
      * @brief Parses the command line arguments.

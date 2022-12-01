@@ -119,7 +119,7 @@ static void ExecEndPlan(PlanState *planstate, EState *estate);
 static void ExecCollectMaterialForSubplan(EState *estate);
 #ifdef ENABLE_MOT
 static void ExecutePlan(EState *estate, PlanState *planstate, CmdType operation, bool sendTuples, long numberTuples,
-    ScanDirection direction, DestReceiver *dest, JitExec::JitContext* mot_jit_context);
+    ScanDirection direction, DestReceiver *dest, JitExec::MotJitContext* motJitContext);
 #else
 static void ExecutePlan(EState *estate, PlanState *planstate, CmdType operation, bool sendTuples, long numberTuples,
     ScanDirection direction, DestReceiver *dest);
@@ -2130,7 +2130,7 @@ static void ExecCollectMaterialForSubplan(EState *estate)
  */
 #ifdef ENABLE_MOT
 static void ExecutePlan(EState *estate, PlanState *planstate, CmdType operation, bool sendTuples, long numberTuples,
-    ScanDirection direction, DestReceiver *dest, JitExec::JitContext* motJitContext)
+    ScanDirection direction, DestReceiver *dest, JitExec::MotJitContext* motJitContext)
 #else
 static void ExecutePlan(EState *estate, PlanState *planstate, CmdType operation, bool sendTuples, long numberTuples,
     ScanDirection direction, DestReceiver *dest)
@@ -2195,7 +2195,8 @@ static void ExecutePlan(EState *estate, PlanState *planstate, CmdType operation,
 #ifdef ENABLE_MOT
         if (unlikely(recursive_early_stop)) {
             slot = NULL;
-        } else if (motJitContext && !IS_PGXC_COORDINATOR && JitExec::IsMotCodegenEnabled()) {
+        } else if (motJitContext && JitExec::IsJitContextValid(motJitContext) && !IS_PGXC_COORDINATOR &&
+            JitExec::IsMotCodegenEnabled()) {
             // MOT LLVM
             int scanEnded = 0;
             if (!motFinishedExecution) {

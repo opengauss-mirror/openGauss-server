@@ -23,7 +23,7 @@
  */
 
 #include "config_value_type.h"
-#include "string.h"
+#include <cstring>
 
 namespace MOT {
 static const char* CONFIG_VALUE_INT64_STR = "int64";

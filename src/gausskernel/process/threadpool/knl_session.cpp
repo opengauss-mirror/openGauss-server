@@ -1315,7 +1315,7 @@ static void knl_u_ps_init(knl_u_ps_context* ps_cxt)
 }
 
 #ifdef ENABLE_MOT
-static void knl_u_mot_init(knl_u_mot_context* mot_cxt)
+void knl_u_mot_init(knl_u_mot_context* mot_cxt)
 {
     Assert(mot_cxt != NULL);
     mot_cxt->callbacks_set = false;
@@ -1328,11 +1328,15 @@ static void knl_u_mot_init(knl_u_mot_context* mot_cxt)
     mot_cxt->jit_llvm_if_stack = NULL;
     mot_cxt->jit_llvm_while_stack = NULL;
     mot_cxt->jit_llvm_do_while_stack = NULL;
-    mot_cxt->jit_tvm_if_stack = NULL;
-    mot_cxt->jit_tvm_while_stack = NULL;
-    mot_cxt->jit_tvm_do_while_stack = NULL;
     mot_cxt->jit_context = NULL;
     mot_cxt->jit_txn = NULL;
+    mot_cxt->jit_compile_depth = 0;
+    mot_cxt->jit_parse_error = 0;
+    mot_cxt->jit_pg_query = NULL;
+    mot_cxt->jit_ns_stack = NULL;
+    mot_cxt->jit_session_source_map = NULL;
+    mot_cxt->jit_xact_callback_registered = false;
+    mot_cxt->jit_codegen_error = 0;
 }
 #endif
 

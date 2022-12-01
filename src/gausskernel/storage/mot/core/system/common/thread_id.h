@@ -25,7 +25,7 @@
 #ifndef THREAD_ID_H
 #define THREAD_ID_H
 
-#include <stdint.h>
+#include <cstdint>
 #include "libintl.h"
 #include "postgres.h"
 #include "knl/knl_thread.h"

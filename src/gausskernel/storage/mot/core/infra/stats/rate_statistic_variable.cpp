@@ -36,7 +36,7 @@ void RateStatisticVariable::Summarize(bool updateTstamp)
     m_countSaved = m_count;
     m_sumSaved = m_sum;
     m_intervalSeconds = CpuCyclesLevelTime::CyclesToSeconds(m_tstamp - m_initTstamp);
-    m_rate = ((double)(m_sumSaved)) / m_intervalSeconds / m_factor;
+    m_rate = (((double)(m_sumSaved)) / m_intervalSeconds) / m_factor;
     m_frequency = ((double)(m_countSaved)) / m_intervalSeconds;
 }
 

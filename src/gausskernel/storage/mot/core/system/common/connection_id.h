@@ -25,7 +25,7 @@
 #ifndef CONNECTION_ID_H
 #define CONNECTION_ID_H
 
-#include <stdint.h>
+#include <cstdint>
 
 namespace MOT {
 // In Thread-Pooled environments we need a reusable connection id (not a running number like

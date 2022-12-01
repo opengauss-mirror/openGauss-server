@@ -30,7 +30,7 @@
 #include "utilities.h"
 #include "mm_session_allocator.h"
 
-#include <stddef.h>
+#include <cstddef>
 
 // unlike session-local memory API, which provides session-local objects that can be used only in session context,
 // global memory API provides objects that can be allocated by one thread, and be used and deallocated by other threads.

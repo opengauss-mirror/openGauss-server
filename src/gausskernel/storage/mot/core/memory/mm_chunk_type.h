@@ -25,7 +25,7 @@
 #ifndef MM_CHUNK_TYPE_H
 #define MM_CHUNK_TYPE_H
 
-#include <stdint.h>
+#include <cstdint>
 
 namespace MOT {
 

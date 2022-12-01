@@ -48,6 +48,10 @@
 #include "commands/sqladvisor.h"
 #include "distributelayer/streamMain.h"
 
+#ifdef ENABLE_MOT
+#include "storage/mot/jit_exec.h"
+#endif
+
 THR_LOCAL uint32 SPI_processed = 0;
 THR_LOCAL SPITupleTable *SPI_tuptable = NULL;
 THR_LOCAL int SPI_result;
@@ -56,6 +60,11 @@ static Portal SPI_cursor_open_internal(const char *name, SPIPlanPtr plan, ParamL
                                        bool isCollectParam = false);
 
 void _SPI_prepare_plan(const char *src, SPIPlanPtr plan);
+
+#ifdef ENABLE_MOT
+static bool _SPI_prepare_plan_guarded(const char *src, SPIPlanPtr plan, parse_query_func parser);
+#endif
+
 #ifdef PGXC
 static void _SPI_pgxc_prepare_plan(const char *src, List *src_parsetree, SPIPlanPtr plan, parse_query_func parser);
 #endif
@@ -77,6 +86,7 @@ static void _SPI_cursor_operation(Portal portal, FetchDirection direction, long 
 static SPIPlanPtr _SPI_make_plan_non_temp(SPIPlanPtr plan);
 static SPIPlanPtr _SPI_save_plan(SPIPlanPtr plan);
 
+static MemoryContext _SPI_execmem(void);
 static MemoryContext _SPI_procmem(void);
 static bool _SPI_checktuples(void);
 extern void ClearVacuumStmt(VacuumStmt *stmt);
@@ -1027,7 +1037,19 @@ SPIPlanPtr SPI_prepare_params(const char *src, ParserSetupHook parserSetup, void
     plan.spi_key = INVALID_SPI_KEY;
     plan.id = (uint32)-1;
 
+#ifdef ENABLE_MOT
+    if (u_sess->mot_cxt.jit_compile_depth > 0) {
+        if (!_SPI_prepare_plan_guarded(src, &plan, parser)) {
+            _SPI_end_call(true);
+            SPI_result = SPI_ERROR_ARGUMENT;
+            return NULL;
+        }
+    } else {
+        _SPI_prepare_plan(src, &plan, parser);
+    }
+#else
     _SPI_prepare_plan(src, &plan, parser);
+#endif
 
     /* copy plan to procedure context */
     SPIPlanPtr result = _SPI_make_plan_non_temp(&plan);
@@ -2204,6 +2226,29 @@ void spi_printtup(TupleTableSlot *slot, DestReceiver *self)
 /*
  * Static functions
  */
+#ifdef ENABLE_MOT
+static bool _SPI_prepare_plan_guarded(const char *src, SPIPlanPtr plan, parse_query_func parser)
+{
+    bool result = true;
+    PG_TRY();
+    {
+        _SPI_prepare_plan(src, plan, parser);
+    }
+    PG_CATCH();
+    {
+        // report error and reset error state, but first switch back to executor memory context
+        _SPI_execmem();
+        ErrorData* edata = CopyErrorData();
+        JitExec::JitReportParseError(edata, src);
+        FlushErrorState();
+        FreeErrorData(edata);
+        result = false;
+    }
+    PG_END_TRY();
+    return result;
+}
+#endif
+
 /*
  * Parse and analyze a querystring.
  *
@@ -2742,8 +2787,14 @@ static int _SPI_execute_plan0(SPIPlanPtr plan, ParamListInfo paramLI, Snapshot s
                 }
 #endif
 
+#ifdef ENABLE_MOT
+                qdesc = CreateQueryDesc((PlannedStmt *)stmt, plansource->query_string, snap, crosscheck_snapshot, dest,
+                    paramLI, 0, plansource->mot_jit_context);
+#else
                 qdesc = CreateQueryDesc((PlannedStmt *)stmt, plansource->query_string, snap, crosscheck_snapshot, dest,
                     paramLI, 0);
+#endif
+
                 res = _SPI_pquery(qdesc, fire_triggers, canSetTag ? tcount : 0, from_lock);
                 ResourceOwner tmp = t_thrd.utils_cxt.CurrentResourceOwner;
                 t_thrd.utils_cxt.CurrentResourceOwner = oldOwner;
@@ -3350,6 +3401,11 @@ void _SPI_hold_cursor(bool is_rollback)
     _SPI_end_call(true);
 }
 
+static MemoryContext _SPI_execmem(void)
+{
+    return MemoryContextSwitchTo(u_sess->SPI_cxt._current->execCxt);
+}
+
 static MemoryContext _SPI_procmem(void)
 {
     return MemoryContextSwitchTo(u_sess->SPI_cxt._current->procCxt);
@@ -3368,7 +3424,7 @@ int _SPI_begin_call(bool execmem)
     }
 
     if (execmem) { /* switch to the Executor memory context */
-        MemoryContextSwitchTo(u_sess->SPI_cxt._current->execCxt);
+        _SPI_execmem();
     }
 
     return 0;

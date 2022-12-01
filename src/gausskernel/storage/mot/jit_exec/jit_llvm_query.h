@@ -38,6 +38,7 @@
 
 #include "storage/mot/jit_exec.h"
 #include "jit_common.h"
+#include "jit_llvm_util.h"
 
 namespace JitExec {
 /** @struct Holds instructions that evaluate in runtime to begin and end iterators of a cursor. */
@@ -50,19 +51,7 @@ struct JitLlvmRuntimeCursor {
 };
 
 /** @struct Code generation context. */
-struct JitLlvmCodeGenContext {
-    // primitive types
-    llvm::IntegerType* BOOL_T;
-    llvm::IntegerType* INT8_T;
-    llvm::IntegerType* INT16_T;
-    llvm::IntegerType* INT32_T;
-    llvm::IntegerType* INT64_T;
-    llvm::Type* VOID_T;
-    llvm::Type* FLOAT_T;
-    llvm::Type* DOUBLE_T;
-    llvm::PointerType* STR_T;
-    llvm::IntegerType* DATUM_T;
-
+struct JitLlvmCodeGenContext : public llvm_util::LlvmCodeGenContext {
     // PG Types
     llvm::StructType* ParamExternDataType;
     llvm::StructType* ParamListInfoDataType;
@@ -89,8 +78,10 @@ struct JitLlvmCodeGenContext {
     llvm::FunctionCallee initKeyFunc;
     llvm::FunctionCallee getColumnAtFunc;
 
-    llvm::FunctionCallee setExprArgIsNullFunc;
-    llvm::FunctionCallee getExprArgIsNullFunc;
+    llvm::FunctionCallee m_getExprIsNullFunc;
+    llvm::FunctionCallee m_setExprIsNullFunc;
+    llvm::FunctionCallee m_getExprCollationFunc;
+    llvm::FunctionCallee m_setExprCollationFunc;
     llvm::FunctionCallee getDatumParamFunc;
     llvm::FunctionCallee readDatumColumnFunc;
     llvm::FunctionCallee writeDatumColumnFunc;
@@ -119,6 +110,7 @@ struct JitLlvmCodeGenContext {
     llvm::FunctionCallee beginIteratorFunc;
     llvm::FunctionCallee createEndIteratorFunc;
     llvm::FunctionCallee isScanEndFunc;
+    llvm::FunctionCallee CheckRowExistsInIteratorFunc;
     llvm::FunctionCallee getRowFromIteratorFunc;
     llvm::FunctionCallee destroyIteratorFunc;
 
@@ -151,9 +143,8 @@ struct JitLlvmCodeGenContext {
     llvm::FunctionCallee getAggValueFunc;
     llvm::FunctionCallee setAggValueFunc;
 
-    llvm::FunctionCallee resetAggMaxMinNullFunc;
-    llvm::FunctionCallee setAggMaxMinNotNullFunc;
-    llvm::FunctionCallee getAggMaxMinIsNullFunc;
+    llvm::FunctionCallee getAggValueIsNullFunc;
+    llvm::FunctionCallee setAggValueIsNullFunc;
 
     llvm::FunctionCallee prepareDistinctSetFunc;
     llvm::FunctionCallee insertDistinctItemFunc;
@@ -172,23 +163,12 @@ struct JitLlvmCodeGenContext {
     llvm::FunctionCallee GetSubQuerySearchKeyFunc;
     llvm::FunctionCallee GetSubQueryEndIteratorKeyFunc;
     llvm::FunctionCallee GetConstAtFunc;
+    llvm::FunctionCallee GetInvokeParamListInfoFunc;
+    llvm::FunctionCallee SetParamValueFunc;
+    llvm::FunctionCallee InvokeStoredProcedureFunc;
+    llvm::FunctionCallee ConvertViaStringFunc;
 
-    // builtins
-#define APPLY_UNARY_OPERATOR(funcid, name) llvm::FunctionCallee _builtin_##name;
-#define APPLY_BINARY_OPERATOR(funcid, name) llvm::FunctionCallee _builtin_##name;
-#define APPLY_TERNARY_OPERATOR(funcid, name) llvm::FunctionCallee _builtin_##name;
-#define APPLY_UNARY_CAST_OPERATOR(funcid, name) APPLY_UNARY_OPERATOR(funcid, name)
-#define APPLY_BINARY_CAST_OPERATOR(funcid, name) APPLY_BINARY_OPERATOR(funcid, name)
-#define APPLY_TERNARY_CAST_OPERATOR(funcid, name) APPLY_TERNARY_OPERATOR(funcid, name)
-
-    APPLY_OPERATORS()
-
-#undef APPLY_UNARY_OPERATOR
-#undef APPLY_BINARY_OPERATOR
-#undef APPLY_TERNARY_OPERATOR
-#undef APPLY_UNARY_CAST_OPERATOR
-#undef APPLY_BINARY_CAST_OPERATOR
-#undef APPLY_TERNARY_CAST_OPERATOR
+    llvm::FunctionCallee EmitProfileDataFunc;
 
     // locals
     llvm::Value* rows_processed;
@@ -229,9 +209,10 @@ struct JitLlvmCodeGenContext {
     uint32_t m_constCount;
     Const* m_constValues;
 
-    dorado::GsCodeGen* _code_gen;
-    dorado::GsCodeGen::LlvmBuilder* _builder;
-    llvm::Function* m_jittedQuery;
+    JitParamInfo* m_paramInfo;
+    uint32_t m_paramCount;
+
+    const char* m_queryString;
 };
 
 extern int AllocateConstId(JitLlvmCodeGenContext* ctx, int type, Datum value, bool isNull);

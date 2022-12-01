@@ -30,6 +30,10 @@
 #include "key.h"
 #include "index_iterator.h"
 #include "txn.h"
+#include "sentinel.h"
+#include "primary_sentinel.h"
+#include "secondary_sentinel.h"
+#include "secondary_sentinel_unique.h"
 #include "object_pool.h"
 #include "utilities.h"
 
@@ -52,11 +56,15 @@ protected:
      * @param indexing_method The method used for indexing (hash or tree).
      */
     Index(IndexOrder indexOrder, IndexingMethod indexingMethod)
-        : m_indexOrder(indexOrder),
+        : m_keyLength(0),
+          m_indexOrder(indexOrder),
           m_indexingMethod(indexingMethod),
           m_indexExtId(0),
+          m_startCSN(-1),
+          m_indexId(0),
           m_keyPool(nullptr),
           m_sentinelPool(nullptr),
+          m_sSentinelVersionPool(nullptr),
           m_table(nullptr)
     {}
 
@@ -68,14 +76,22 @@ public:
     {
         if (m_keyPool != nullptr) {
             ObjAllocInterface::FreeObjPool(&m_keyPool);
+            m_keyPool = nullptr;
         }
         if (m_sentinelPool != nullptr) {
             ObjAllocInterface::FreeObjPool(&m_sentinelPool);
+            m_sentinelPool = nullptr;
+        }
+        if (m_sSentinelVersionPool != nullptr) {
+            ObjAllocInterface::FreeObjPool(&m_sSentinelVersionPool);
+            m_sSentinelVersionPool = nullptr;
         }
         if (m_colBitmap != nullptr) {
             delete[] m_colBitmap;
             m_colBitmap = nullptr;
         }
+
+        m_table = nullptr;
     }
 
     Index* CloneEmpty();
@@ -99,8 +115,10 @@ public:
         if (m_indexExtId == 0) {
             m_indexExtId = m_indexId;
         }
-        if (m_keyLength > MAX_KEY_SIZE)
+
+        if (m_keyLength > MAX_KEY_SIZE) {
             return RC_INDEX_EXCEEDS_MAX_SIZE;
+        }
 
         m_keyPool = ObjAllocInterface::GetObjPool(sizeof(Key) + ALIGN8(m_keyLength), false);
         if (m_keyPool == nullptr) {
@@ -108,7 +126,23 @@ public:
                 MOT_ERROR_OOM, "Index Initialization", "Failed to allocate key pool for index %s", name.c_str());
             return RC_MEMORY_ALLOCATION_ERROR;  // safe cleanup during destructor
         }
-        m_sentinelPool = ObjAllocInterface::GetObjPool(sizeof(Sentinel), false);
+        if (m_indexOrder == IndexOrder::INDEX_ORDER_PRIMARY) {
+            m_sentinelPool = ObjAllocInterface::GetObjPool(sizeof(PrimarySentinel), false);
+        } else {
+            if (m_unique) {
+                m_sSentinelVersionPool = ObjAllocInterface::GetObjPool(sizeof(PrimarySentinelNode), false);
+                if (m_sSentinelVersionPool == nullptr) {
+                    MOT_REPORT_ERROR(MOT_ERROR_OOM,
+                        "Index Initialization",
+                        "Failed to allocate sentinel pool for index %s",
+                        name.c_str());
+                    return RC_MEMORY_ALLOCATION_ERROR;  // safe cleanup during destructor
+                }
+                m_sentinelPool = ObjAllocInterface::GetObjPool(sizeof(SecondarySentinelUnique), false);
+            } else {
+                m_sentinelPool = ObjAllocInterface::GetObjPool(sizeof(SecondarySentinel), false);
+            }
+        }
         if (m_sentinelPool == nullptr) {
             MOT_REPORT_ERROR(
                 MOT_ERROR_OOM, "Index Initialization", "Failed to allocate sentinel pool for index %s", name.c_str());
@@ -120,8 +154,9 @@ public:
     inline bool IsKeySizeValid(uint32_t len, bool isUnique) const
     {
         len += (isUnique ? 0 : 8);
-        if (len > MAX_KEY_SIZE)
+        if (len > MAX_KEY_SIZE) {
             return false;
+        }
 
         return true;
     }
@@ -134,31 +169,158 @@ public:
     /**
      * @brief Clears object pool thread level cache
      */
-    void ClearThreadMemoryCache()
+    virtual void ClearThreadMemoryCache()
     {
-        if (m_keyPool != nullptr)
+        if (m_keyPool != nullptr) {
             m_keyPool->ClearThreadCache();
-        if (m_sentinelPool != nullptr)
-            m_sentinelPool->ClearThreadCache();
-    }
-
-    void ClearFreeCache()
-    {
-        if (m_keyPool != nullptr)
-            m_keyPool->ClearFreeCache();
-        if (m_sentinelPool != nullptr)
-            m_sentinelPool->ClearFreeCache();
-    }
-
-    static uint32_t SentinelDtor(void* buf, void* buf2, bool drop_index)
-    {
-        // If drop_index == true, all index's pools are going to be cleaned, so we skip the release here
-        Sentinel* sent = reinterpret_cast<Sentinel*>(buf);
-        Index* ind = sent->GetIndex();
-        uint32_t size = ind->m_sentinelPool->m_size;
-        if (drop_index == false) {
-            ind->m_sentinelPool->Release(buf);
         }
+        if (m_sentinelPool != nullptr) {
+            m_sentinelPool->ClearThreadCache();
+        }
+        if (m_sSentinelVersionPool != nullptr) {
+            m_sSentinelVersionPool->ClearThreadCache();
+        }
+    }
+
+    /**
+     * @brief Clears object pool level cache
+     */
+    virtual void ClearFreeCache()
+    {
+        if (m_keyPool != nullptr) {
+            m_keyPool->ClearFreeCache();
+        }
+        if (m_sentinelPool != nullptr) {
+            m_sentinelPool->ClearFreeCache();
+        }
+        if (m_sSentinelVersionPool != nullptr) {
+            m_sSentinelVersionPool->ClearFreeCache();
+        }
+    }
+
+    /**
+     * @brief Allocate sentinel from memory pool
+     */
+    Sentinel* SentinelAlloc()
+    {
+        switch (m_indexOrder) {
+            case IndexOrder::INDEX_ORDER_PRIMARY:
+                return m_sentinelPool->Alloc<PrimarySentinel>();
+            case IndexOrder::INDEX_ORDER_SECONDARY:
+                return m_sentinelPool->Alloc<SecondarySentinel>();
+            case IndexOrder::INDEX_ORDER_SECONDARY_UNIQUE:
+                return m_sentinelPool->Alloc<SecondarySentinelUnique>();
+            default:
+                break;
+        }
+        return nullptr;
+    }
+
+    /**
+     * @brief Release sentinel to memory pool
+     */
+    void SentinelRelease(Sentinel* sentinel)
+    {
+        switch (m_indexOrder) {
+            case IndexOrder::INDEX_ORDER_PRIMARY:
+                m_sentinelPool->Release<PrimarySentinel>(static_cast<PrimarySentinel*>(sentinel));
+                break;
+            case IndexOrder::INDEX_ORDER_SECONDARY:
+                m_sentinelPool->Release<SecondarySentinel>(static_cast<SecondarySentinel*>(sentinel));
+                break;
+            case IndexOrder::INDEX_ORDER_SECONDARY_UNIQUE:
+                m_sentinelPool->Release<SecondarySentinelUnique>(static_cast<SecondarySentinelUnique*>(sentinel));
+                break;
+            default:
+                break;
+        }
+    }
+
+    void ReclaimSentinel(Sentinel* sentinel);
+
+    /**
+     * @brief Allocate the sentinel node from the memory pool
+     * @return pointer to the newly allocated node
+     */
+    PrimarySentinelNode* SentinelNodeAlloc()
+    {
+        return m_sSentinelVersionPool->Alloc<PrimarySentinelNode>();
+    }
+
+    /**
+     * @brief Release the sentinel node to the memory pool
+     *  @param node pointer to the node we want to reclaim
+     * @return
+     */
+    void SentinelNodeRelease(PrimarySentinelNode* node)
+    {
+        m_sSentinelVersionPool->Release<PrimarySentinelNode>(node);
+    }
+
+    /**
+     * @brief GC callback function for sentinel reclamation
+     *  @param gcElement element with all the necessary meta-data
+     *  @param oper Current GC operation
+     *  @param unused part of the function pointer signature
+     * @return The name of the index.
+     */
+    static uint32_t SentinelDtor(void* gcElement, void* oper, void* aux)
+    {
+        GC_OPERATION_TYPE gcOperType = (*(GC_OPERATION_TYPE*)oper);
+        LimboElement* elem = reinterpret_cast<LimboElement*>(gcElement);
+        // If drop_index == true, all index's pools are going to be cleaned, so we skip the release here
+        Sentinel* sent = reinterpret_cast<Sentinel*>(elem->m_objectPtr);
+        Index* ind = sent->GetIndex();
+        uint32_t gcSlot = 0;
+        uint32_t size = ind->m_sentinelPool->m_size;
+        if (sent->IsPrimaryIndex()) {
+            PrimarySentinel* ps = reinterpret_cast<PrimarySentinel*>(sent);
+            gcSlot = ps->GetGcInfo().RefCountUpdate(DEC);
+            if ((gcSlot == 1) and ps->IsSentinelRemovable()) {
+                if (gcOperType != GC_OPERATION_TYPE::GC_OPER_DROP_INDEX) {
+                    MOT_LOG_DEBUG(
+                        "SentinelDtor Deleting  %p startCSN %lu CSN %lu ", (void*)sent, ps->GetStartCSN(), elem->m_csn);
+                    ind->ReclaimSentinel(sent);
+                } else {
+                    MOT_LOG_DEBUG(
+                        "SentinelDtor Skipping %p startCSN %lu CSN %lu", (void*)sent, ps->GetStartCSN(), elem->m_csn);
+                }
+            }
+        } else {
+            if (gcOperType != GC_OPERATION_TYPE::GC_OPER_DROP_INDEX) {
+                ind->ReclaimSentinel(sent);
+            }
+        }
+        return size;
+    }
+
+    /**
+     * @brief a callback function to remove and destroy a deleted version chain.
+     * @param gcElement A place holder for the gc element metadata.
+     * @param oper GC operation for the current element
+     * @param aux a pointer to the GC delete vector
+     * @return size of cleaned element
+     */
+    static uint32_t DeleteKeyDtor(void* gcElement, void* oper, void* aux)
+    {
+        GC_OPERATION_TYPE gcOperType = (*(GC_OPERATION_TYPE*)oper);
+        LimboElement* elem = reinterpret_cast<LimboElement*>(gcElement);
+        GcQueue::DeleteVector* deleteVector = static_cast<GcQueue::DeleteVector*>(aux);
+        // If drop_index == true, all index's pools are going to be cleaned, so we skip the release here
+        Sentinel* sentinel = reinterpret_cast<Sentinel*>(elem->m_objectPtr);
+        Key* key = reinterpret_cast<Key*>(elem->m_objectPool);
+        Index* index_ = sentinel->GetIndex();
+        uint32_t size = index_->m_sentinelPool->m_size;
+        if (unlikely(gcOperType == GC_OPERATION_TYPE::GC_OPER_DROP_INDEX)) {
+            return size;
+        }
+        RC rc = sentinel->RefCountUpdate(DEC);
+        if (rc == RC::RC_INDEX_DELETE) {
+            Sentinel* outputSen = index_->IndexRemove(key, 0);
+            MOT_ASSERT(outputSen == sentinel);
+            deleteVector->push_back(outputSen);
+        }
+        index_->DestroyKey(key);
         return size;
     }
 
@@ -213,7 +375,7 @@ public:
     /**
      * @brief Re-initialize index back to empty and compacted one.
      */
-    virtual RC ReInitIndex() = 0;
+    virtual RC ReInitIndex(bool isDrop) = 0;
 
     // Iterator API
     /**
@@ -500,7 +662,7 @@ public:
         return ((m_indexOrder == IndexOrder::INDEX_ORDER_PRIMARY && m_fake) ? true : false);
     }
 
-    inline bool IsUnique()
+    inline bool IsUnique() const
     {
         return m_unique;
     }
@@ -515,25 +677,53 @@ public:
         return m_isCommited;
     }
 
+    inline void SetSnapshot(uint64_t csn)
+    {
+        m_startCSN = csn;
+    }
+
+    inline uint64_t GetSnapshot() const
+    {
+        return m_startCSN;
+    }
+
     inline bool SetNumTableFields(uint32_t num)
     {
-        bool result = false;
-        m_colBitmap = new (std::nothrow) uint8_t[BITMAP_GETLEN(num)]{0};
+        int bLen = BITMAP_GETLEN(num);
+        int oldLen = BITMAP_GETLEN(m_numTableFields);
+        uint8_t* tmp = nullptr;
+        bool needAlloc = false;
         if (m_colBitmap != nullptr) {
-            m_numTableFields = num;
-            result = true;
+            if (bLen != oldLen) {
+                needAlloc = true;
+            }
         } else {
-            MOT_REPORT_ERROR(MOT_ERROR_OOM, "Index Initialization", "Failed to allocate %u bytes for null bitmap", num);
+            needAlloc = true;
         }
-        return result;
+        if (needAlloc) {
+            tmp = new (std::nothrow) uint8_t[bLen]{0};
+            if (tmp == nullptr) {
+                MOT_REPORT_ERROR(
+                    MOT_ERROR_OOM, "Index Initialization", "Failed to allocate %u bytes for null bitmap", num);
+                return false;
+            }
+            if (m_colBitmap != nullptr) {
+                errno_t erc = memcpy_s(tmp, bLen, m_colBitmap, oldLen);
+                securec_check(erc, "\0", "\0");
+                delete[] m_colBitmap;
+            }
+            m_colBitmap = tmp;
+        }
+        m_numTableFields = num;
+        return true;
     }
 
     inline void SetNumIndexFields(uint32_t num)
     {
-        if (num > MAX_KEY_COLUMNS)
+        if (num > MAX_KEY_COLUMNS) {
             return;
-        else
-            m_numKeyFields = num;
+        }
+        m_numKeyFields = num;
     }
 
     inline bool IsFieldPresent(int16_t colid) const
@@ -559,7 +749,8 @@ public:
     inline void AdjustKey(Key* key, uint8_t pattern) const
     {
         if (!m_unique) {
-            key->FillPattern(pattern, NON_UNIQUE_INDEX_SUFFIX_LEN, m_keyLength - NON_UNIQUE_INDEX_SUFFIX_LEN);
+            MOT_ASSERT(m_keyLength <= key->GetKeyLength());
+            (void)key->FillPattern(pattern, NON_UNIQUE_INDEX_SUFFIX_LEN, m_keyLength - NON_UNIQUE_INDEX_SUFFIX_LEN);
         }
     }
 
@@ -598,6 +789,11 @@ public:
         return m_sentinelPool->m_size;
     }
 
+    inline uint32_t GetSecondarySentinelObjSizeFromPool() const
+    {
+        return m_sSentinelVersionPool->m_size;
+    }
+
     inline void SetUnique(bool unique)
     {
         m_unique = unique;
@@ -608,11 +804,11 @@ public:
         return m_unique;
     }
 
-    void Truncate(bool isDrop);
+    RC Truncate(bool isDrop);
 
-    void Compact(Table* table, uint32_t pid);
+    virtual void Compact(Table* table, uint32_t pid);
 
-    virtual uint64_t GetIndexSize();
+    virtual uint64_t GetIndexSize(uint64_t& netTotal);
 
     // Index API
     /**
@@ -626,7 +822,7 @@ public:
      * @return A previously existing row already mapped to the specified key or null pointer if a new
      * row was inserted.
      */
-    bool IndexInsert(Sentinel*& outputSentinel, const Key* key, uint32_t pid, RC& rc);
+    bool IndexInsert(Sentinel*& outputSentinel, const Key* key, uint32_t pid, RC& rc, bool isRecovery = false);
     Sentinel* IndexInsert(const Key* key, Row* row, uint32_t pid);
 
     /**
@@ -679,6 +875,8 @@ protected:
 
     /** @var Specifies external index identifier. */
     uint64_t m_indexExtId;
+    /** @var The creation snapshot of the index */
+    uint64_t m_startCSN;
 
     /** @var Global atomic index identifier. */
     static std::atomic<uint32_t> m_indexCounter;
@@ -696,6 +894,7 @@ protected:
 
     ObjAllocInterface* m_keyPool;
     ObjAllocInterface* m_sentinelPool;
+    ObjAllocInterface* m_sSentinelVersionPool;
 
     Table* m_table;
 
@@ -729,72 +928,6 @@ protected:
     virtual Sentinel* IndexRemoveImpl(const Key* key, uint32_t pid) = 0;
 
     DECLARE_CLASS_LOGGER()
-};
-
-/**
- * @class MOTIndexArr
- * @brief This class contains a temporary copy of index array of the table.
- */
-class MOTIndexArr {
-public:
-    explicit MOTIndexArr(MOT::Table* table);
-
-    ~MOTIndexArr()
-    {}
-
-    MOT::Index* GetIndex(uint16_t ix)
-    {
-        if (likely(ix < m_numIndexes)) {
-            return m_indexArr[ix];
-        }
-
-        return nullptr;
-    }
-
-    uint16_t GetIndexIx(uint16_t ix)
-    {
-        if (likely(ix < m_numIndexes)) {
-            return m_origIx[ix];
-        }
-
-        return MAX_NUM_INDEXES;
-    }
-
-    void Add(uint16_t ix, MOT::Index* index)
-    {
-        if (likely(m_numIndexes < MAX_NUM_INDEXES)) {
-            m_indexArr[m_numIndexes] = index;
-            m_origIx[m_numIndexes] = ix;
-            m_numIndexes++;
-        }
-    }
-
-    uint16_t GetNumIndexes()
-    {
-        return m_numIndexes;
-    }
-
-    MOT::Table* GetTable()
-    {
-        return m_table;
-    }
-
-    void SetRowPool(MOT::ObjAllocInterface* rowPool)
-    {
-        m_rowPool = rowPool;
-    }
-
-    MOT::ObjAllocInterface* GetRowPool()
-    {
-        return m_rowPool;
-    }
-
-private:
-    MOT::Index* m_indexArr[MAX_NUM_INDEXES];
-    MOT::Table* m_table;
-    MOT::ObjAllocInterface* m_rowPool;
-    uint16_t m_origIx[MAX_NUM_INDEXES];
-    uint16_t m_numIndexes;
 };
 }  // namespace MOT
 

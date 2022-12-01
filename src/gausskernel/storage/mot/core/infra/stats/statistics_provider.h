@@ -74,18 +74,6 @@ constexpr uint32_t STAT_OPT_DEFAULT = (STAT_OPT_SCOPE_GLOBAL | STAT_OPT_PERIOD_T
 class StatisticsProvider {
 public:
     /**
-     * @brief Constructor
-     * @param name The unique name that identifies the provider.
-     * @param generator The statistics generator.
-     * @param enable Specifies whether the statistics provider is enabled.
-     * @param[opt] extended Specifies whether extended statistics are printed by this provider.
-     */
-    StatisticsProvider(const char* name, StatisticsGenerator* generator, bool enable, bool extended = false);
-
-    /** @brief Destructor. */
-    virtual ~StatisticsProvider();
-
-    /**
      * @brief Initializes the object.
      * @return True if initialization succeeded, otherwise false.
      */
@@ -151,9 +139,22 @@ public:
 
 protected:
     /**
+     * @brief Constructor
+     * @param name The unique name that identifies the provider.
+     * @param generator The statistics generator.
+     * @param enable Specifies whether the statistics provider is enabled.
+     * @param[opt] extended Specifies whether extended statistics are printed by this provider.
+     */
+    StatisticsProvider(const char* name, StatisticsGenerator* generator, bool enable, bool extended = false);
+
+    /** @brief Destructor. */
+    virtual ~StatisticsProvider();
+
+    /**
      * @brief Allow deriving class to print more non-standard statistics
      */
-    virtual void PrintStatisticsEx(){};
+    virtual void PrintStatisticsEx()
+    {}
 
     /**
      * @brief Retrieves thread-level statistics.
@@ -265,7 +266,7 @@ private:
      * @param statId Ordinal statistic variable identifier.
      * @param logLevel Printing log level.
      */
-    void PrintGlobalStats(uint32_t statOpts, uint32_t statId, LogLevel logLevel);
+    void PrintGlobalStats(uint32_t statOpts, uint32_t statId, LogLevel logLevel) const;
 
     /**
      * @brief Reclaims all resources associated with a thread statistics object.

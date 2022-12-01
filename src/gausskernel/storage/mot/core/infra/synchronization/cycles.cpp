@@ -26,7 +26,7 @@
 #include "cycles.h"
 
 #include <sys/time.h>
-#include <math.h>
+#include <cmath>
 
 #include "utilities.h"
 

@@ -80,7 +80,7 @@ bool ConfigItem::Initialize(const char* path, const char* name)
     return result;
 }
 
-uint32_t ConfigItem::ComputeDepth()
+uint32_t ConfigItem::ComputeDepth() const
 {
     uint32_t result = 0;
     if (m_fullPathName.compare(PATH_SEP_STR) != 0) {

@@ -42,7 +42,7 @@ namespace MOT {
 template <typename T, typename Allocator>
 struct mot_list_element {
     /** @brief Default constructor. */
-    mot_list_element() : _prev(nullptr), _next(nullptr)
+    mot_list_element() : _item(), _prev(nullptr), _next(nullptr)
     {}
 
     /** @brief Destructor. */
@@ -50,6 +50,7 @@ struct mot_list_element {
     {
         _prev = nullptr;
         _next = nullptr;
+        SetNullIfPtr(_item);
     }
 
     /** @brief Destroys recursively the element list. */
@@ -95,7 +96,8 @@ private:
 
 public:
     /** @brief Copy constructor. */
-    mot_list_iterator(const mot_list_iterator& other) : _itr(other._itr)
+    mot_list_iterator(const mot_list_iterator& other)
+        : std::iterator<std::bidirectional_iterator_tag, T>(other), _itr(other._itr)
     {}
 
     /**
@@ -184,7 +186,8 @@ private:
 
 public:
     /** @brief Copy constructor. */
-    mot_list_const_iterator(const mot_list_const_iterator& other) : _itr(other._itr)
+    mot_list_const_iterator(const mot_list_const_iterator& other)
+        : std::iterator<std::bidirectional_iterator_tag, T>(other), _itr(other._itr)
     {}
 
     /**
@@ -547,7 +550,7 @@ private:
                 MOT_ERROR_RESOURCE_LIMIT, "", "Cannot allocate list item, reached size limit %u", _size_limit);
         } else {
             void* buf = Allocator::allocate(sizeof(element_type));
-            if (!buf) {
+            if (buf == nullptr) {
                 mot_infra_report_error(MOT_ERROR_OOM, "", "Failed to allocate list item");
             } else {
                 result = new (buf) element_type();

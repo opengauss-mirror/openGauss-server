@@ -33,7 +33,5 @@ const char* IndexTreeFlavorToString(const IndexTreeFlavor& indexTreeFlavor)
         default:
             return "InvalidFlavor";
     }
-
-    return "InvalidFlavor";
 }
 }  // namespace MOT

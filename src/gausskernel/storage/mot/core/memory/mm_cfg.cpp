@@ -39,7 +39,7 @@ namespace MOT {
 DECLARE_LOGGER(MemCfg, Memory)
 
 MemCfg g_memGlobalCfg;
-static int memCfgInitOnce = 0;  // initialize only once
+static bool g_memCfgInitOnce = false;  // initialize only once
 
 static uint64_t totalMemoryMb = 0;
 static uint64_t availableMemoryMb = 0;
@@ -48,10 +48,10 @@ static int ValidateCfg();
 
 extern int MemCfgInit()
 {
-    if (memCfgInitOnce) {
+    if (g_memCfgInitOnce) {
         return 0;  // already initialized successfully
     }
-    memCfgInitOnce = 1;
+    g_memCfgInitOnce = true;
     MOT_LOG_TRACE("Loading MM configuration");
 
     int res = InitTotalAvailMemory();
@@ -68,7 +68,7 @@ extern int MemCfgInit()
     g_memGlobalCfg.m_maxConnectionCount = motCfg.m_maxConnections;
     g_memGlobalCfg.m_maxThreadsPerNode = g_memGlobalCfg.m_maxThreadCount / g_memGlobalCfg.m_nodeCount;
 
-    g_memGlobalCfg.m_lazyLoadChunkDirectory = motCfg.m_lazyLoadChunkDirectory;
+    g_memGlobalCfg.m_lazyLoadChunkDirectory = static_cast<uint32_t>(motCfg.m_lazyLoadChunkDirectory);
 
     g_memGlobalCfg.m_maxGlobalMemoryMb = motCfg.m_globalMemoryMaxLimitMB;
     g_memGlobalCfg.m_minGlobalMemoryMb = motCfg.m_globalMemoryMinLimitMB;
@@ -126,7 +126,7 @@ extern int MemCfgInit()
 extern void MemCfgDestroy()
 {
     // currently nothing else than reset initialized flag
-    memCfgInitOnce = false;
+    g_memCfgInitOnce = false;
 }
 
 extern void MemCfgPrint(const char* name, LogLevel logLevel)
@@ -247,6 +247,33 @@ static int InitTotalAvailMemory()
     return result;
 }
 
+static int ComputeValidMaxObjectSizeMB(uint64_t& maxObjectSizeMB)
+{
+    // NOTE: we arrive here since the configured max object size is invalid (either zero or too high)
+    // the maximum object size cannot exceed 1/8 of the store size
+    uint64_t maxObjectSizeMBUpperBound =
+        g_memGlobalCfg.m_sessionLargeBufferStoreSizeMb / MEM_SESSION_MAX_LARGE_OBJECT_FACTOR;
+    MOT_LOG_TRACE("Max object size upper bound is %" PRIu64 " MB", maxObjectSizeMBUpperBound);
+
+    // the maximum size must be a power of two
+    maxObjectSizeMB = ComputeNearestLowPow2(maxObjectSizeMBUpperBound);
+    MOT_LOG_TRACE("Computed valid max object size: %" PRIu64 " MB", maxObjectSizeMB);
+
+    // check for any computation error
+    if ((maxObjectSizeMB < MOTConfiguration::MIN_SESSION_LARGE_BUFFER_STORE_MAX_OBJECT_SIZE_MB * MEGA_BYTE) ||
+        (maxObjectSizeMB > MOTConfiguration::MAX_SESSION_LARGE_BUFFER_STORE_MAX_OBJECT_SIZE_MB * MEGA_BYTE)) {
+        // we print and return error because this is an internal bug
+        MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
+            "MM Layer Configuration Validation",
+            "Maximum computed object size %" PRIu64 " exceeds allowed bounds [%" PRIu64 " MB, %" PRIu64 " MB]",
+            maxObjectSizeMB,
+            MOTConfiguration::MIN_SESSION_LARGE_BUFFER_STORE_MAX_OBJECT_SIZE_MB,
+            MOTConfiguration::MAX_SESSION_LARGE_BUFFER_STORE_MAX_OBJECT_SIZE_MB);
+        return MOT_ERROR_INTERNAL;
+    }
+    return MOT_NO_ERROR;
+}
+
 static int ValidateCfg()
 {
     // check node count limit
@@ -337,21 +364,29 @@ static int ValidateCfg()
     // validate maximum large object size (issue warning and rectify)
     if (g_memGlobalCfg.m_sessionLargeBufferStoreMaxObjectSizeMb >
         g_memGlobalCfg.m_sessionLargeBufferStoreSizeMb / MEM_SESSION_MAX_LARGE_OBJECT_FACTOR) {
-        MOT_LOG_WARN("Invalid memory configuration: maximum object size %u MB in large buffer store is too big, value "
-                     "will be truncated to %u MB.",
+        uint64_t maxObjectSizeMB = 0;
+        int result = ComputeValidMaxObjectSizeMB(maxObjectSizeMB);
+        if (result != MOT_NO_ERROR) {
+            return result;
+        }
+        MOT_LOG_WARN("Invalid memory configuration: maximum object size %" PRIu64
+                     " MB in large buffer store is too big, value will be truncated to %" PRIu64 " MB.",
             g_memGlobalCfg.m_sessionLargeBufferStoreMaxObjectSizeMb,
-            g_memGlobalCfg.m_sessionLargeBufferStoreSizeMb / MEM_SESSION_MAX_LARGE_OBJECT_FACTOR);
-        g_memGlobalCfg.m_sessionLargeBufferStoreMaxObjectSizeMb =
-            g_memGlobalCfg.m_sessionLargeBufferStoreSizeMb / MEM_SESSION_MAX_LARGE_OBJECT_FACTOR;
+            maxObjectSizeMB);
+        g_memGlobalCfg.m_sessionLargeBufferStoreMaxObjectSizeMb = maxObjectSizeMB;
     }
 
     if ((g_memGlobalCfg.m_sessionLargeBufferStoreMaxObjectSizeMb == 0) &&
         (g_memGlobalCfg.m_sessionLargeBufferStoreSizeMb > 0)) {
+        uint64_t maxObjectSizeMB = 0;
+        int result = ComputeValidMaxObjectSizeMB(maxObjectSizeMB);
+        if (result != MOT_NO_ERROR) {
+            return result;
+        }
         MOT_LOG_WARN("Invalid memory configuration: maximum object size in large buffer store is zero, value will be "
-                     "rectified to %u MB.",
-            g_memGlobalCfg.m_sessionLargeBufferStoreSizeMb / MEM_SESSION_MAX_LARGE_OBJECT_FACTOR);
-        g_memGlobalCfg.m_sessionLargeBufferStoreMaxObjectSizeMb =
-            g_memGlobalCfg.m_sessionLargeBufferStoreSizeMb / MEM_SESSION_MAX_LARGE_OBJECT_FACTOR;
+                     "rectified to %" PRIu64 " MB.",
+            maxObjectSizeMB);
+        g_memGlobalCfg.m_sessionLargeBufferStoreMaxObjectSizeMb = maxObjectSizeMB;
     }
 
     return 0;
@@ -362,7 +397,7 @@ extern "C" void MemCfgDump()
 {
     MOT::StringBufferApply([](MOT::StringBuffer* stringBuffer) {
         MOT::MemCfgToString(0, "Debug Dump", stringBuffer);
-        fprintf(stderr, "%s", stringBuffer->m_buffer);
-        fflush(stderr);
+        (void)fprintf(stderr, "%s", stringBuffer->m_buffer);
+        (void)fflush(stderr);
     });
 }

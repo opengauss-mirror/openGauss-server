@@ -36,7 +36,7 @@
 // forward declaration for MOT JitContext
 namespace JitExec
 {
-    struct JitContext;
+    struct MotJitContext;
 }
 #endif
 
@@ -649,7 +649,7 @@ typedef struct EState {
 
     bool isRowTriggerShippable; /* true if all row triggers are shippable. */
 #ifdef ENABLE_MOT
-    JitExec::JitContext* mot_jit_context;   /* MOT JIT context required for executing LLVM jitted code */
+    JitExec::MotJitContext* mot_jit_context;   /* MOT JIT context required for executing LLVM jitted code */
 #endif
 
     PruningResult* pruningResult;

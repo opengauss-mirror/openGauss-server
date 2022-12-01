@@ -1,6 +1,5 @@
 /*
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
- * Portions Copyright (c) 2010-2012, PostgreSQL Global Development Group
  *
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -72,13 +71,13 @@
 #include "storage/ipc.h"
 
 #include "mot_internal.h"
+#include "mot_fdw_helpers.h"
 #include "storage/mot/jit_exec.h"
 #include "mot_engine.h"
 #include "table.h"
 #include "txn.h"
 #include "checkpoint_manager.h"
 #include <queue>
-#include "recovery_manager.h"
 #include "redo_log_handler_type.h"
 #include "ext_config_loader.h"
 #include "utilities.h"
@@ -95,13 +94,10 @@ struct MOTFdwOption {
 };
 
 /*
- * Valid options for file_fdw.
+ * Valid options for mot_fdw.
  * These options are based on the options for COPY FROM command.
  * But note that force_not_null is handled as a boolean option attached to
  * each column, not as a table option.
- *
- * Note: If you are adding new option for user mapping, you need to modify
- * fileGetOptions(), which currently doesn't bother to look at user mappings.
  */
 static const struct MOTFdwOption valid_options[] = {
 
@@ -163,28 +159,15 @@ static void MOTNotifyForeignConfigChange();
 
 static void MOTCheckpointCallback(CheckpointEvent checkpointEvent, uint64_t lsn, void* arg);
 
-/*
- * Helper functions
- */
-static bool IsValidOption(const char* option, Oid context);
 static void MOTValidateTableDef(Node* obj);
 static int MOTIsForeignRelationUpdatable(Relation rel);
-static void InitMOTHandler();
-MOTFdwStateSt* InitializeFdwState(void* fdwState, List** fdwExpr, uint64_t exTableId);
-void* SerializeFdwState(MOTFdwStateSt* fdwState);
-void ReleaseFdwState(MOTFdwStateSt* fdwState);
-void CleanCursors(MOTFdwStateSt* state);
-void CleanQueryStatesOnError(MOT::TxnManager* txn);
-
-/* Query */
-bool IsMOTExpr(
-    RelOptInfo* baserel, MOTFdwStateSt* state, MatchIndexArr* marr, Expr* expr, Expr** result, bool setLocal);
-inline bool IsNotEqualOper(OpExpr* op);
 
 static int MOTGetFdwType()
 {
     return MOT_ORC;
 }
+
+static void InitMOTHandler();
 
 void MOTRecover()
 {
@@ -193,7 +176,7 @@ void MOTRecover()
         return;
     }
 
-    EnsureSafeThreadAccess();
+    (void)EnsureSafeThreadAccess();
     if (!MOT::MOTEngine::GetInstance()->StartRecovery()) {
         // we treat errors fatally.
         ereport(FATAL, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("MOT checkpoint recovery failed.")));
@@ -213,9 +196,8 @@ void MOTRecoveryDone()
         return;
     }
 
-    EnsureSafeThreadAccess();
+    (void)EnsureSafeThreadAccess();
     if (!MOT::MOTEngine::GetInstance()->EndRecovery()) {
-
         ereport(FATAL, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("MOT recovery failed.")));
     }
 }
@@ -229,7 +211,7 @@ void MOTBeginRedoRecovery()
         return;
     }
 
-    EnsureSafeThreadAccess();
+    (void)EnsureSafeThreadAccess();
     if (!MOT::MOTEngine::GetInstance()->CreateRecoverySessionContext()) {
         // we treat errors fatally.
         ereport(FATAL, (errmsg("MOTBeginRedoRecovery: failed to create session context.")));
@@ -248,28 +230,24 @@ void MOTEndRedoRecovery()
         return;
     }
 
-    EnsureSafeThreadAccess();
+    (void)EnsureSafeThreadAccess();
     MOT::MOTEngine::GetInstance()->DestroyRecoverySessionContext();
     knl_thread_mot_init();  // reset all thread locals
 }
 
 /*
- * This function should be called upon startup in order to enable xlog replay into
- * mot. We call it in mot_fdw_handler just in case
+ * Initializes the engine.
  */
 void InitMOT()
 {
-    if (MOTAdaptor::m_initialized) {
-        // MOT is already initialized, probably it's primary switch-over to standby.
-        return;
-    }
-
     InitMOTHandler();
-    JitExec::JitInitialize();
+
+    // if JIT initialization failed we continue anyway without JIT
+    (void)JitExec::JitInitialize();
 }
 
-/**
- * Shutdown the engine
+/*
+ * Shutdown the engine.
  */
 void TermMOT()
 {
@@ -318,7 +296,6 @@ Datum mot_fdw_handler(PG_FUNCTION_ARGS)
     fdwroutine->NotifyForeignConfigChange = MOTNotifyForeignConfigChange;
 
     if (!u_sess->mot_cxt.callbacks_set) {
-        GetCurrentTransactionIdIfAny();
         RegisterXactCallback(MOTXactCallback, NULL);
         RegisterSubXactCallback(MOTSubxactCallback, NULL);
         u_sess->mot_cxt.callbacks_set = true;
@@ -326,7 +303,8 @@ Datum mot_fdw_handler(PG_FUNCTION_ARGS)
 
     PG_TRY();
     {
-        MOTAdaptor::InitTxnManager(__FUNCTION__);
+        // we don't care if null is returned when the engine is not created yet
+        (void)MOTAdaptor::InitTxnManager(__FUNCTION__);
     }
     PG_CATCH();
     {
@@ -337,8 +315,24 @@ Datum mot_fdw_handler(PG_FUNCTION_ARGS)
 }
 
 /*
+ * Check if the provided option is one of the valid options.
+ * context is the Oid of the catalog holding the object the option is for.
+ */
+static bool IsValidOption(const char* option, Oid context)
+{
+    const struct MOTFdwOption* opt;
+
+    for (opt = valid_options; opt->m_optname; opt++) {
+        if (context == opt->m_optcontext && strcmp(opt->m_optname, option) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/*
  * Validate the generic options given to a FOREIGN DATA WRAPPER, SERVER,
- * USER MAPPING or FOREIGN TABLE that uses file_fdw.
+ * USER MAPPING or FOREIGN TABLE that uses mot_fdw.
  *
  * Raise an ERROR if the option or its value is considered invalid.
  */
@@ -388,21 +382,6 @@ Datum mot_fdw_validator(PG_FUNCTION_ARGS)
 }
 
 /*
- * Check if the provided option is one of the valid options.
- * context is the Oid of the catalog holding the object the option is for.
- */
-static bool IsValidOption(const char* option, Oid context)
-{
-    const struct MOTFdwOption* opt;
-
-    for (opt = valid_options; opt->m_optname; opt++) {
-        if (context == opt->m_optcontext && strcmp(opt->m_optname, option) == 0)
-            return true;
-    }
-    return false;
-}
-
-/*
  * Check if there is any memory management module error.
  * If there is any, abort the whole transaction.
  */
@@ -417,13 +396,18 @@ static void MemoryEreportError()
 }
 
 /*
- *
+ * Estimates the number of rows and width of the result of the scan on the MOT table.
  */
 static void MOTGetForeignRelSize(PlannerInfo* root, RelOptInfo* baserel, Oid foreigntableid)
 {
     MOTFdwStateSt* planstate = (MOTFdwStateSt*)palloc0(sizeof(MOTFdwStateSt));
     ForeignTable* ftable = GetForeignTable(foreigntableid);
     MOT::TxnManager* currTxn = GetSafeTxn(__FUNCTION__);
+
+    if (IsTxnInAbortState(currTxn)) {
+        raiseAbortTxnError();
+    }
+
     Bitmapset* attrs = nullptr;
     ListCell* lc = nullptr;
     bool needWholeRow = false;
@@ -475,8 +459,6 @@ static void MOTGetForeignRelSize(PlannerInfo* root, RelOptInfo* baserel, Oid for
 
     baserel->rows = planstate->m_table->GetRowCount();
     baserel->tuples = planstate->m_table->GetRowCount();
-    if (baserel->rows == 0)
-        baserel->rows = baserel->tuples = 100000;
     planstate->m_startupCost = 0.1;
     planstate->m_totalCost = baserel->rows * planstate->m_startupCost;
 
@@ -487,10 +469,11 @@ static bool IsOrderingApplicable(PathKey* pathKey, RelOptInfo* rel, MOT::Index* 
 {
     bool res = false;
 
-    if (ord->m_order == SORTDIR_ENUM::SORTDIR_NONE)
+    if (ord->m_order == SortDir::SORTDIR_NONE) {
         ord->m_order = SORT_STRATEGY(pathKey->pk_strategy);
-    else if (ord->m_order != SORT_STRATEGY(pathKey->pk_strategy))
+    } else if (ord->m_order != SORT_STRATEGY(pathKey->pk_strategy)) {
         return res;
+    }
 
     do {
         const int16_t* cols = ix->GetColumnKeyFields();
@@ -501,8 +484,16 @@ static bool IsOrderingApplicable(PathKey* pathKey, RelOptInfo* rel, MOT::Index* 
             EquivalenceMember* em = (EquivalenceMember*)lfirst(lcEm);
 
             if (bms_equal(em->em_relids, rel->relids)) {
+                Var* v = nullptr;
                 if (IsA(em->em_expr, Var)) {
-                    Var* v = (Var*)(em->em_expr);
+                    v = (Var*)(em->em_expr);
+                } else if (IsA(em->em_expr, RelabelType)) {
+                    RelabelType* rv = (RelabelType*)(em->em_expr);
+                    if (rv->relabelformat == COERCE_DONTCARE && IsA(rv->arg, Var)) {
+                        v = (Var*)(rv->arg);
+                    }
+                }
+                if (v != nullptr) {
                     int i = 0;
                     for (; i < numKeyCols; i++) {
                         if (cols[i] == v->varattno) {
@@ -532,7 +523,7 @@ static bool IsOrderingApplicable(PathKey* pathKey, RelOptInfo* rel, MOT::Index* 
 }
 
 /*
- *
+ * Creates possible scan paths for a scan on the MOT table.
  */
 static void MOTGetForeignPaths(PlannerInfo* root, RelOptInfo* baserel, Oid foreigntableid)
 {
@@ -546,12 +537,18 @@ static void MOTGetForeignPaths(PlannerInfo* root, RelOptInfo* baserel, Oid forei
     Path* fpReg = nullptr;
     Path* fpIx = nullptr;
     bool hasRegularPath = false;
+    MOT::Index* pix = planstate->m_table->GetPrimaryIndex();
+    double ntuples = baserel->tuples;
 
-    planstate->m_order = SORTDIR_ENUM::SORTDIR_ASC;
+    ntuples = ntuples * clauselist_selectivity(root, baserel->baserestrictinfo, 0, JOIN_INNER, nullptr);
+    baserel->rows = clamp_row_est(ntuples);
+    planstate->m_order = SortDir::SORTDIR_ASC;
     // first create regular path based on relation restrictions
     foreach (lc, baserel->baserestrictinfo) {
         RestrictInfo* ri = (RestrictInfo*)lfirst(lc);
-
+        if (ri->pseudoconstant) {
+            continue;
+        }
         if (!IsMOTExpr(baserel, planstate, &marr, ri->clause, nullptr, true)) {
             planstate->m_localConds = lappend(planstate->m_localConds, ri->clause);
         }
@@ -562,10 +559,6 @@ static void MOTGetForeignPaths(PlannerInfo* root, RelOptInfo* baserel, Oid forei
     if (best != nullptr) {
         OrderSt ord;
         ord.init();
-        double ntuples = best->m_cost;
-        ntuples = ntuples * clauselist_selectivity(root, bestClause, 0, JOIN_INNER, nullptr);
-        ntuples = clamp_row_est(ntuples);
-        baserel->rows = baserel->tuples = ntuples;
         planstate->m_startupCost = 0.001;
         planstate->m_totalCost = best->m_cost;
         planstate->m_bestIx = best;
@@ -581,15 +574,13 @@ static void MOTGetForeignPaths(PlannerInfo* root, RelOptInfo* baserel, Oid forei
         if (!best->CanApplyOrdering(ord.m_cols)) {
             list_free(usablePathkeys);
             usablePathkeys = nullptr;
-        } else if (!best->AdjustForOrdering((ord.m_order == SORTDIR_ENUM::SORTDIR_DESC))) {
+        } else if (!best->AdjustForOrdering((ord.m_order == SortDir::SORTDIR_DESC))) {
             list_free(usablePathkeys);
             usablePathkeys = nullptr;
         }
-        best = nullptr;
     } else if (list_length(root->query_pathkeys) > 0) {
         OrderSt ord;
         ord.init();
-        MOT::Index* ix = planstate->m_table->GetPrimaryIndex();
         List* keys;
 
         if (root->query_level == 1)
@@ -600,7 +591,7 @@ static void MOTGetForeignPaths(PlannerInfo* root, RelOptInfo* baserel, Oid forei
         foreach (lc, keys) {
             PathKey* pathkey = (PathKey*)lfirst(lc);
 
-            if (!pathkey->pk_eclass->ec_has_volatile && IsOrderingApplicable(pathkey, baserel, ix, &ord)) {
+            if (!pathkey->pk_eclass->ec_has_volatile && IsOrderingApplicable(pathkey, baserel, pix, &ord)) {
                 usablePathkeys = lappend(usablePathkeys, pathkey);
             }
         }
@@ -613,18 +604,26 @@ static void MOTGetForeignPaths(PlannerInfo* root, RelOptInfo* baserel, Oid forei
                 usablePathkeys = nullptr;
             }
         } else
-            planstate->m_order = SORTDIR_ENUM::SORTDIR_ASC;
+            planstate->m_order = SortDir::SORTDIR_ASC;
     }
 
+    ereport(DEBUG1,
+        (errmodule(MOD_MOT),
+            errmsg("FP regular for %s [rows: %f, scost: %f, tcost: %f] ix: %s",
+                planstate->m_table->GetTableName().c_str(),
+                baserel->rows,
+                planstate->m_startupCost,
+                planstate->m_totalCost,
+                (best ? best->m_ix->GetName().c_str() : "SCAN"))));
     fpReg = (Path*)create_foreignscan_path(root,
         baserel,
         planstate->m_startupCost,
         planstate->m_totalCost,
         usablePathkeys,
-        nullptr,  /* no outer rel either */
-        nullptr,  // private data will be assigned later
+        nullptr, /* no outer rel either */
+        (best ? lappend(nullptr, (void*)best) : nullptr),
         0);
-
+    best = nullptr;
     foreach (lc, baserel->pathlist) {
         Path* path = (Path*)lfirst(lc);
         if (IsA(path, IndexPath) && path->param_info == nullptr) {
@@ -636,68 +635,139 @@ static void MOTGetForeignPaths(PlannerInfo* root, RelOptInfo* baserel, Oid forei
         add_path(root, baserel, fpReg);
     set_cheapest(baserel);
 
-    if (!IS_PGXC_COORDINATOR && list_length(baserel->cheapest_parameterized_paths) > 0) {
-        foreach (lc, baserel->cheapest_parameterized_paths) {
+    int arrLen = list_length(baserel->pathlist);
+    Path* fpIxArr[arrLen + 1];
+    int fpIxCount = 0;
+    if (!IS_PGXC_COORDINATOR && arrLen > 0) {
+        double prevCost = 0.0;
+        foreach (lc, baserel->pathlist) {
             bestPath = (Path*)lfirst(lc);
-            if (IsA(bestPath, IndexPath) && bestPath->param_info) {
+            if (IsA(bestPath, IndexPath)) {
+                ListCell* lcp = nullptr;
+                OrderSt ord;
                 IndexPath* ip = (IndexPath*)bestPath;
+                MOT::Index* six = nullptr;
+
+                ord.init();
                 bestClause = ip->indexclauses;
-                break;
-            }
-        }
-        usablePathkeys = nullptr;
-    }
+                usablePathkeys = nullptr;
+                marr.Clear();
+                marr.m_ixOid = ip->indexinfo->indexoid;
+                best = nullptr;
+                ereport(DEBUG1,
+                    (errmodule(MOD_MOT),
+                        errmsg("Index path %s (cnum %d) for oid %u [rows: %f, scost: %f, tcost: %f]",
+                            (ip->path.param_info ? "with params" : "without params"),
+                            list_length(bestClause),
+                            ip->indexinfo->indexoid,
+                            ip->path.rows,
+                            ip->path.startup_cost,
+                            ip->path.total_cost)));
 
-    if (bestClause != nullptr) {
-        marr.Clear();
+                if (bestClause != nullptr) {
+                    foreach (lcp, bestClause) {
+                        RestrictInfo* ri = (RestrictInfo*)lfirst(lcp);
+                        if (ri->pseudoconstant) {
+                            continue;
+                        }
+                        // In case we use index params DO NOT add it to envelope filter.
+                        (void)IsMOTExpr(baserel, planstate, &marr, ri->clause, nullptr, false);
+                    }
 
-        foreach (lc, bestClause) {
-            RestrictInfo* ri = (RestrictInfo*)lfirst(lc);
-
-            // In case we use index params DO NOT add it to envelope filter.
-            (void)IsMOTExpr(baserel, planstate, &marr, ri->clause, nullptr, false);
-        }
-
-        best = MOTAdaptor::GetBestMatchIndex(planstate, &marr, list_length(bestClause), false);
-        if (best != nullptr) {
-            OrderSt ord;
-            ord.init();
-            double ntuples = best->m_cost;
-            ntuples = ntuples * clauselist_selectivity(root, bestClause, 0, JOIN_INNER, nullptr);
-            ntuples = clamp_row_est(ntuples);
-            baserel->rows = baserel->tuples = ntuples;
-            planstate->m_paramBestIx = best;
-            planstate->m_startupCost = 0.001;
-            planstate->m_totalCost = best->m_cost;
-
-            foreach (lc, root->query_pathkeys) {
-                PathKey* pathkey = (PathKey*)lfirst(lc);
-                if (!pathkey->pk_eclass->ec_has_volatile && IsOrderingApplicable(pathkey, baserel, best->m_ix, &ord)) {
-                    usablePathkeys = lappend(usablePathkeys, pathkey);
+                    best = MOTAdaptor::GetBestMatchIndex(planstate, &marr, list_length(bestClause), false);
                 }
+                if (best != nullptr) {
+                    six = best->m_ix;
+                    if (best->m_ix->GetExtId() == ip->indexinfo->indexoid) {
+                        baserel->rows = clamp_row_est(ip->indexselectivity * ip->path.parent->tuples);
+                        planstate->m_startupCost = 0.0;
+                        planstate->m_totalCost = ip->indextotalcost;
+                    } else {
+                        ntuples = baserel->tuples;
+                        ntuples = ntuples * clauselist_selectivity(root, bestClause, 0, JOIN_INNER, nullptr);
+                        baserel->rows = clamp_row_est(ntuples);
+                        planstate->m_startupCost = 0.001;
+                        planstate->m_totalCost = ip->indextotalcost;
+                    }
+                    if (prevCost == planstate->m_totalCost) {
+                        planstate->m_totalCost += 0.01;
+                    }
+                    prevCost = planstate->m_totalCost;
+                    foreach (lcp, ip->path.pathkeys) {
+                        PathKey* pathkey = (PathKey*)lfirst(lcp);
+                        if (!pathkey->pk_eclass->ec_has_volatile &&
+                            IsOrderingApplicable(pathkey, baserel, best->m_ix, &ord)) {
+                            usablePathkeys = lappend(usablePathkeys, pathkey);
+                        }
+                    }
+
+                    if (!best->CanApplyOrdering(ord.m_cols)) {
+                        list_free(usablePathkeys);
+                        usablePathkeys = nullptr;
+                    } else if (!best->AdjustForOrdering((ord.m_order == SortDir::SORTDIR_DESC))) {
+                        list_free(usablePathkeys);
+                        usablePathkeys = nullptr;
+                    }
+
+                    if (ip->path.param_info == nullptr) {
+                        hasRegularPath = false;
+                    }
+                } else {
+                    int pos = -1;
+
+                    best = (MatchIndex*)palloc0(sizeof(MatchIndex));
+                    six = planstate->m_table->GetIndexByExtIdWithPos(ip->indexinfo->indexoid, pos);
+                    MOT_ASSERT(six != nullptr);
+                    best->Init();
+                    best->m_ix = six;
+                    best->m_fullScan = true;
+                    best->m_ixPosition = pos;
+                    foreach (lcp, ip->path.pathkeys) {
+                        PathKey* pathkey = (PathKey*)lfirst(lcp);
+                        if (!pathkey->pk_eclass->ec_has_volatile && IsOrderingApplicable(pathkey, baserel, six, &ord)) {
+                            usablePathkeys = lappend(usablePathkeys, pathkey);
+                        }
+                    }
+
+                    if (list_length(usablePathkeys) > 0) {
+                        if (ord.m_cols[0] != 0)
+                            best->m_order = ord.m_order;
+                        else {
+                            list_free(usablePathkeys);
+                            usablePathkeys = nullptr;
+                        }
+                    }
+
+                    bestClause = baserel->baserestrictinfo;
+                    ntuples = baserel->tuples;
+                    ntuples = ntuples * clauselist_selectivity(root, bestClause, 0, JOIN_INNER, nullptr);
+                    baserel->rows = clamp_row_est(ntuples);
+                    planstate->m_startupCost = 0.0;
+                    planstate->m_totalCost = ip->path.total_cost;
+                }
+                fpIx = (Path*)create_foreignscan_path(root,
+                    baserel,
+                    planstate->m_startupCost,
+                    planstate->m_totalCost,
+                    usablePathkeys,
+                    nullptr, /* no outer rel either */
+                    lappend(nullptr, (void*)best),
+                    ip->path.dop);
+
+                fpIx->param_info = bestPath->param_info;
+                ereport(DEBUG1,
+                    (errmodule(MOD_MOT),
+                        errmsg("FP index for %s [rows: %f, scost: %f, tcost: %f] ix: %s",
+                            planstate->m_table->GetTableName().c_str(),
+                            baserel->rows,
+                            planstate->m_startupCost,
+                            planstate->m_totalCost,
+                            six->GetName().c_str())));
+                fpIxArr[fpIxCount] = fpIx;
+                fpIxCount++;
             }
-
-            if (!best->CanApplyOrdering(ord.m_cols)) {
-                list_free(usablePathkeys);
-                usablePathkeys = nullptr;
-            } else if (!best->AdjustForOrdering((ord.m_order == SORTDIR_ENUM::SORTDIR_DESC))) {
-                list_free(usablePathkeys);
-                usablePathkeys = nullptr;
-            }
-
-            fpIx = (Path*)create_foreignscan_path(root,
-                baserel,
-                planstate->m_startupCost,
-                planstate->m_totalCost,
-                usablePathkeys,
-                nullptr,  /* no outer rel either */
-                nullptr,  // private data will be assigned later
-                0);
-
-            fpIx->param_info = bestPath->param_info;
         }
     }
-
     List* newPath = nullptr;
     List* origPath = baserel->pathlist;
     // disable index path
@@ -713,13 +783,14 @@ static void MOTGetForeignPaths(PlannerInfo* root, RelOptInfo* baserel, Oid forei
     baserel->pathlist = newPath;
     if (hasRegularPath)
         add_path(root, baserel, fpReg);
-    if (fpIx != nullptr)
-        add_path(root, baserel, fpIx);
+    for (int i = 0; i < fpIxCount; i++) {
+        add_path(root, baserel, fpIxArr[i]);
+    }
     set_cheapest(baserel);
 }
 
 /*
- *
+ * Creates ForeignScanPlan for the selected best path.
  */
 static ForeignScan* MOTGetForeignPlan(
     PlannerInfo* root, RelOptInfo* baserel, Oid foreigntableid, ForeignPath* best_path, List* tlist, List* scan_clauses)
@@ -730,6 +801,17 @@ static ForeignScan* MOTGetForeignPlan(
     List* tmpLocal = nullptr;
     List* remote = nullptr;
 
+    MatchIndex* mix =
+        (MatchIndex*)(list_length(best_path->fdw_private) > 0 ? linitial(best_path->fdw_private) : nullptr);
+    planstate->m_paramBestIx = best_path->path.param_info ? mix : nullptr;
+    ereport(DEBUG1,
+        (errmodule(MOD_MOT),
+            errmsg("Plan for %s [rows: %f, scost: %f, tcost: %f] ix: %s",
+                planstate->m_table->GetTableName().c_str(),
+                best_path->path.rows,
+                best_path->path.startup_cost,
+                best_path->path.total_cost,
+                (mix ? mix->m_ix->GetName().c_str() : "SCAN"))));
     if (best_path->path.param_info && planstate->m_paramBestIx) {
         if (planstate->m_bestIx != nullptr) {
             planstate->m_bestIx->Clean(planstate);
@@ -737,9 +819,18 @@ static ForeignScan* MOTGetForeignPlan(
         }
         planstate->m_bestIx = planstate->m_paramBestIx;
         planstate->m_paramBestIx = nullptr;
+    } else if (planstate->m_bestIx != mix) {
+        if (planstate->m_bestIx != nullptr) {
+            planstate->m_bestIx->Clean(planstate);
+            pfree(planstate->m_bestIx);
+        }
+        planstate->m_bestIx = mix;
     }
 
     if (planstate->m_bestIx != nullptr) {
+        if (planstate->m_bestIx->m_fullScan) {
+            planstate->m_order = planstate->m_bestIx->m_order;
+        }
         planstate->m_numExpr = list_length(planstate->m_bestIx->m_remoteConds);
         remote = list_concat(planstate->m_bestIx->m_remoteConds, planstate->m_bestIx->m_remoteCondsOrig);
 
@@ -756,29 +847,19 @@ static ForeignScan* MOTGetForeignPlan(
 
     foreach (lc, scan_clauses) {
         RestrictInfo* ri = (RestrictInfo*)lfirst(lc);
-
-        // add OR conditions which where not handled by previous functions
-        if (ri->orclause != nullptr)
-            planstate->m_localConds = lappend(planstate->m_localConds, ri->clause);
-        else if (IsA(ri->clause, BoolExpr)) {
-            BoolExpr* e = (BoolExpr*)ri->clause;
-
-            if (e->boolop == NOT_EXPR)
-                planstate->m_localConds = lappend(planstate->m_localConds, ri->clause);
-        } else if (IsA(ri->clause, OpExpr)) {
+        if (ri->pseudoconstant) {
+            continue;
+        }
+        if (IsA(ri->clause, OpExpr)) {
             OpExpr* e = (OpExpr*)ri->clause;
 
             if (IsNotEqualOper(e))
                 planstate->m_localConds = lappend(planstate->m_localConds, ri->clause);
             else if (!list_member(remote, e))
                 planstate->m_localConds = lappend(planstate->m_localConds, ri->clause);
+        } else {
+            planstate->m_localConds = lappend(planstate->m_localConds, ri->clause);
         }
-    }
-
-    foreach (lc, tmpLocal) {
-        Expr* e = (Expr*)lfirst(lc);
-        if (!list_member(planstate->m_localConds, e))
-            planstate->m_localConds = lappend(planstate->m_localConds, e);
     }
 
     if (tmpLocal != nullptr)
@@ -800,8 +881,7 @@ static ForeignScan* MOTGetForeignPlan(
 }
 
 /*
- *
- *		Produce extra output for EXPLAIN
+ * Produce extra output for EXPLAIN of a scan on the MOT table.
  */
 static void MOTExplainForeignScan(ForeignScanState* node, ExplainState* es)
 {
@@ -809,9 +889,9 @@ static void MOTExplainForeignScan(ForeignScanState* node, ExplainState* es)
     bool isLocal = false;
     ForeignScan* fscan = (ForeignScan*)node->ss.ps.plan;
 
-    if (node->fdw_state != nullptr)
+    if (node->fdw_state != nullptr) {
         festate = (MOTFdwStateSt*)node->fdw_state;
-    else {
+    } else {
         festate =
             InitializeFdwState(fscan->fdw_private, &fscan->fdw_exprs, RelationGetRelid(node->ss.ss_currentRelation));
         isLocal = true;
@@ -856,7 +936,7 @@ static void MOTExplainForeignScan(ForeignScanState* node, ExplainState* es)
 }
 
 /*
- *
+ * Initiates a scan on the MOT table.
  */
 static void MOTBeginForeignScan(ForeignScanState* node, int eflags)
 {
@@ -869,16 +949,17 @@ static void MOTBeginForeignScan(ForeignScanState* node, int eflags)
     MOTAdaptor::GetCmdOper(festate);
     festate->m_txnId = GetCurrentTransactionIdIfAny();
     festate->m_currTxn = GetSafeTxn(__FUNCTION__);
-    festate->m_currTxn->IncStmtCount();
-    festate->m_currTxn->m_queryState[(uint64_t)festate] = (uint64_t)festate;
     festate->m_table = festate->m_currTxn->GetTableByExternalId(RelationGetRelid(node->ss.ss_currentRelation));
     node->fdw_state = festate;
     if (node->ss.ps.state->es_result_relation_info &&
         RelationGetRelid(node->ss.ps.state->es_result_relation_info->ri_RelationDesc) ==
             RelationGetRelid(node->ss.ss_currentRelation))
         node->ss.ps.state->es_result_relation_info->ri_FdwState = festate;
-    festate->m_currTxn->SetTxnIsoLevel(u_sess->utils_cxt.XactIsoLevel);
+    festate->m_currTxn->SetIsolationLevel(u_sess->utils_cxt.XactIsoLevel);
 
+    if (IsTxnInAbortState(festate->m_currTxn)) {
+        raiseAbortTxnError();
+    }
     foreach (t, node->ss.ps.plan->targetlist) {
         TargetEntry* tle = (TargetEntry*)lfirst(t);
         Var* v = (Var*)tle->expr;
@@ -894,13 +975,14 @@ static void MOTBeginForeignModify(
 {
     MOTFdwStateSt* festate = nullptr;
 
+    (void)GetCurrentTransactionId();
+
     if (fdwPrivate != nullptr && resultRelInfo->ri_FdwState == nullptr) {
         isMemoryLimitReached();
         festate = InitializeFdwState(fdwPrivate, nullptr, RelationGetRelid(resultRelInfo->ri_RelationDesc));
         festate->m_allocInScan = false;
         festate->m_txnId = GetCurrentTransactionIdIfAny();
         festate->m_currTxn = GetSafeTxn(__FUNCTION__);
-        festate->m_currTxn->m_queryState[(uint64_t)festate] = (uint64_t)festate;
         festate->m_table = festate->m_currTxn->GetTableByExternalId(RelationGetRelid(resultRelInfo->ri_RelationDesc));
         resultRelInfo->ri_FdwState = festate;
     } else {
@@ -920,7 +1002,7 @@ static void MOTBeginForeignModify(
         int len = BITMAP_GETLEN(festate->m_numAttrs);
         if (fdwPrivate != nullptr) {
             ListCell* cell = list_head(fdwPrivate);
-            BitmapDeSerialize(festate->m_attrsModified, len, &cell);
+            BitmapDeSerialize(festate->m_attrsModified, len, festate->m_hasIndexedColUpdate, &cell);
 
             for (int i = 0; i < festate->m_numAttrs; i++) {
                 if (BITMAP_GET(festate->m_attrsModified, i)) {
@@ -934,12 +1016,15 @@ static void MOTBeginForeignModify(
             securec_check(erc, "\0", "\0");
         }
     }
+    if (IsTxnInAbortState(festate->m_currTxn)) {
+        raiseAbortTxnError();
+    }
     // Update FDW operation
     festate->m_ctidNum =
         ExecFindJunkAttributeInTlist(mtstate->mt_plans[subplanIndex]->plan->targetlist, MOT_REC_TID_NAME);
     festate->m_cmdOper = mtstate->operation;
     MOTAdaptor::GetCmdOper(festate);
-    festate->m_currTxn->SetTxnIsoLevel(u_sess->utils_cxt.XactIsoLevel);
+    festate->m_currTxn->SetIsolationLevel(u_sess->utils_cxt.XactIsoLevel);
 }
 
 static TupleTableSlot* IterateForeignScanStopAtFirst(
@@ -950,15 +1035,15 @@ static TupleTableSlot* IterateForeignScanStopAtFirst(
     festate->m_execExprs = (List*)ExecInitExpr((Expr*)fscan->fdw_exprs, (PlanState*)node);
     festate->m_econtext = node->ss.ps.ps_ExprContext;
     MOTAdaptor::CreateKeyBuffer(node->ss.ss_currentRelation, festate, 0);
-    MOT::Sentinel* Sentinel =
+    MOT::Sentinel* sentinel =
         festate->m_bestIx->m_ix->IndexReadSentinel(&festate->m_stateKey[0], festate->m_currTxn->GetThdId());
-    MOT::Row* currRow = festate->m_currTxn->RowLookup(festate->m_internalCmdOper, Sentinel, rc);
+    MOT::Row* currRow = festate->m_currTxn->RowLookup(festate->m_internalCmdOper, sentinel, rc);
 
     if (currRow != NULL) {
         MOTAdaptor::UnpackRow(slot, festate->m_table, festate->m_attrsUsed, const_cast<uint8_t*>(currRow->GetData()));
         node->ss.is_scan_end = true;
         fscan->scan.scan_qual_optimized = true;
-        ExecStoreVirtualTuple(slot);
+        (void)ExecStoreVirtualTuple(slot);
         if (festate->m_ctidNum > 0) {
             HeapTuple resultTup = ExecFetchSlotTuple(slot);
             MOTRecConvertSt cv;
@@ -972,6 +1057,12 @@ static TupleTableSlot* IterateForeignScanStopAtFirst(
         return slot;
     }
     if (rc != MOT::RC_OK) {
+        if (rc == MOT::RC_ABORT) {
+            abortParentTransactionParamsNoDetail(ERRCODE_T_R_SERIALIZATION_FAILURE,
+                "Commit: could not serialize access due to concurrent update(%d)",
+                0);
+            return nullptr;
+        }
         if (MOT_IS_SEVERE()) {
             MOT_REPORT_ERROR(MOT_ERROR_INTERNAL, "MOTIterateForeignScan", "Failed to lookup row");
             MOT_LOG_ERROR_STACK("Failed to lookup row");
@@ -987,7 +1078,7 @@ static TupleTableSlot* IterateForeignScanStopAtFirst(
 }
 
 /*
- *
+ * Iterates to fetch the next row or null to indicate the end of the scan.
  */
 static TupleTableSlot* MOTIterateForeignScan(ForeignScanState* node)
 {
@@ -1037,10 +1128,16 @@ static TupleTableSlot* MOTIterateForeignScan(ForeignScanState* node)
     }
 
     do {
-        MOT::Sentinel* Sentinel = festate->m_cursor[0]->GetPrimarySentinel();
-        currRow = festate->m_currTxn->RowLookup(festate->m_internalCmdOper, Sentinel, rc);
+        MOT::Sentinel* sentinel = festate->m_cursor[0]->GetPrimarySentinel();
+        currRow = festate->m_currTxn->RowLookup(festate->m_internalCmdOper, sentinel, rc);
         if (currRow == NULL) {
             if (rc != MOT::RC_OK) {
+                if (rc == MOT::RC_ABORT) {
+                    abortParentTransactionParamsNoDetail(ERRCODE_T_R_SERIALIZATION_FAILURE,
+                        "Commit: could not serialize access due to concurrent update(%d)",
+                        0);
+                    return NULL;
+                }
                 if (MOT_IS_SEVERE()) {
                     MOT_REPORT_ERROR(MOT_ERROR_INTERNAL, "MOTIterateForeignScan", "Failed to lookup row");
                     MOT_LOG_ERROR_STACK("Failed to lookup row");
@@ -1072,7 +1169,7 @@ static TupleTableSlot* MOTIterateForeignScan(ForeignScanState* node)
     } while (festate->m_cursor[0]->IsValid());
 
     if (found) {
-        ExecStoreVirtualTuple(slot);
+        (void)ExecStoreVirtualTuple(slot);
 
         if (festate->m_ctidNum > 0) {
             HeapTuple resultTup = ExecFetchSlotTuple(slot);
@@ -1096,7 +1193,10 @@ static TupleTableSlot* MOTIterateForeignScan(ForeignScanState* node)
 static void MOTReScanForeignScan(ForeignScanState* node)
 {
     MOTFdwStateSt* festate = (MOTFdwStateSt*)node->fdw_state;
-
+    MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
+    if (IsTxnInAbortState(txn)) {
+        raiseAbortTxnError();
+    }
     bool stopAtFirst = (festate->m_bestIx && festate->m_bestIx->m_ixOpers[0] == KEY_OPER::READ_KEY_EXACT &&
                         festate->m_bestIx->m_ix->GetUnique() == true);
 
@@ -1181,8 +1281,8 @@ static int MOTAcquireSampleRowsFunc(Relation relation, int elevel, HeapTuple* ro
     while (cursor->IsValid()) {
         row = NULL;
 
-        MOT::Sentinel* Sentinel = cursor->GetPrimarySentinel();
-        row = currTxn->RowLookup(MOT::AccessType::RD, Sentinel, rc);
+        MOT::Sentinel* sentinel = cursor->GetPrimarySentinel();
+        row = currTxn->RowLookup(MOT::AccessType::RD, sentinel, rc);
         cursor->Next();
 
         if (row == NULL) {
@@ -1205,8 +1305,9 @@ static int MOTAcquireSampleRowsFunc(Relation relation, int elevel, HeapTuple* ro
              * of the relation.  Same algorithm as in acquire_sample_rows in
              * analyze.c; see Jeff Vitter's paper.
              */
-            if (rowstoskip < 0)
+            if (rowstoskip < 0) {
                 rowstoskip = anl_get_next_S(samplerows, targrows, &rstate);
+            }
 
             if (rowstoskip <= 0) {
                 /* Choose a random reservoir element to replace. */
@@ -1228,7 +1329,7 @@ static int MOTAcquireSampleRowsFunc(Relation relation, int elevel, HeapTuple* ro
              */
             (void)ExecClearTuple(slot);
             MOTAdaptor::UnpackRow(slot, table, attrsUsed, const_cast<uint8_t*>(row->GetData()));
-            ExecStoreVirtualTuple(slot);
+            (void)ExecStoreVirtualTuple(slot);
             rows[pos] = ExecCopySlotTuple(slot);
         }
     }
@@ -1273,7 +1374,57 @@ static bool MOTAnalyzeForeignTable(Relation relation, AcquireSampleRowsFunc* fun
     return true;
 }
 
-List* MOTPlanForeignModify(PlannerInfo* root, ModifyTable* plan, ::Index resultRelation, int subplanIndex)
+static void PrepareAttributeList(ModifyTable* plan, RangeTblEntry* rte, Relation rel, MOTFdwStateSt* fdwState,
+    MOT::Table* table, uint8_t* ptrAttrsModify, MOT::UpdateIndexColumnType& ixUpd)
+{
+    TupleDesc desc = RelationGetDescr(rel);
+    switch (plan->operation) {
+        case CMD_INSERT: {
+            for (int i = 0; i < desc->natts; i++) {
+                if (!desc->attrs[i]->attisdropped) {
+                    BITMAP_SET(ptrAttrsModify, (desc->attrs[i]->attnum - 1));
+                }
+            }
+            break;
+        }
+        case CMD_UPDATE: {
+            for (int i = 0; i < desc->natts; i++) {
+                if (bms_is_member(desc->attrs[i]->attnum - FirstLowInvalidHeapAttributeNumber, rte->updatedCols)) {
+                    if (MOTAdaptor::IsColumnIndexed(desc->attrs[i]->attnum, table)) {
+                        if (table->GetPrimaryIndex()->IsFieldPresent(desc->attrs[i]->attnum)) {
+                            ixUpd = MOT::UpdateIndexColumnType::UPDATE_COLUMN_PRIMARY;
+                            ereport(ERROR,
+                                (errcode(ERRCODE_FDW_UPDATE_INDEXED_FIELD_NOT_SUPPORTED),
+                                    errmodule(MOD_MOT),
+                                    errmsg("Update of primary key column is not supported for memory table")));
+                        } else {
+                            ixUpd = MOT::UpdateIndexColumnType::UPDATE_COLUMN_SECONDARY;
+                        }
+                    }
+                    BITMAP_SET(ptrAttrsModify, (desc->attrs[i]->attnum - 1));
+                }
+            }
+            if (fdwState != nullptr) {
+                fdwState->m_hasIndexedColUpdate = ixUpd;
+            }
+            break;
+        }
+        case CMD_DELETE: {
+            if (list_length(plan->returningLists) > 0) {
+                for (int i = 0; i < desc->natts; i++) {
+                    if (!desc->attrs[i]->attisdropped) {
+                        BITMAP_SET(ptrAttrsModify, (desc->attrs[i]->attnum - 1));
+                    }
+                }
+            }
+            break;
+        }
+        default:
+            break;
+    }
+}
+
+static List* MOTPlanForeignModify(PlannerInfo* root, ModifyTable* plan, ::Index resultRelation, int subplanIndex)
 {
     switch (plan->operation) {
         case CMD_INSERT:
@@ -1290,7 +1441,16 @@ List* MOTPlanForeignModify(PlannerInfo* root, ModifyTable* plan, ::Index resultR
     TupleDesc desc = RelationGetDescr(rel);
     uint8_t attrsModify[BITMAP_GETLEN(desc->natts)];
     uint8_t* ptrAttrsModify = attrsModify;
+    MOT::UpdateIndexColumnType ixUpd = MOT::UpdateIndexColumnType::UPDATE_COLUMN_NONE;
     MOT::TxnManager* currTxn = GetSafeTxn(__FUNCTION__);
+
+    if (IsTxnInAbortState(currTxn)) {
+        raiseAbortTxnError();
+    }
+
+    errno_t erc = memset_s(attrsModify, BITMAP_GETLEN(desc->natts), 0, BITMAP_GETLEN(desc->natts));
+    securec_check(erc, "\0", "\0");
+
     MOT::Table* table = currTxn->GetTableByExternalId(RelationGetRelid(rel));
 
     if ((int)resultRelation < root->simple_rel_array_size && root->simple_rel_array[resultRelation] != nullptr) {
@@ -1313,46 +1473,14 @@ List* MOTPlanForeignModify(PlannerInfo* root, ModifyTable* plan, ::Index resultR
         int len = BITMAP_GETLEN(fdwState->m_numAttrs);
         fdwState->m_attrsUsed = (uint8_t*)palloc0(len);
         fdwState->m_attrsModified = (uint8_t*)palloc0(len);
+        ptrAttrsModify = fdwState->m_attrsUsed;
     }
 
-    switch (plan->operation) {
-        case CMD_INSERT: {
-            for (int i = 0; i < desc->natts; i++) {
-                if (!desc->attrs[i]->attisdropped) {
-                    BITMAP_SET(fdwState->m_attrsUsed, (desc->attrs[i]->attnum - 1));
-                }
-            }
-            break;
-        }
-        case CMD_UPDATE: {
-            errno_t erc = memset_s(attrsModify, BITMAP_GETLEN(desc->natts), 0, BITMAP_GETLEN(desc->natts));
-            securec_check(erc, "\0", "\0");
-            for (int i = 0; i < desc->natts; i++) {
-                if (bms_is_member(desc->attrs[i]->attnum - FirstLowInvalidHeapAttributeNumber, rte->updatedCols)) {
-                    BITMAP_SET(ptrAttrsModify, (desc->attrs[i]->attnum - 1));
-                }
-            }
-            break;
-        }
-        case CMD_DELETE: {
-            if (list_length(plan->returningLists) > 0) {
-                errno_t erc = memset_s(attrsModify, BITMAP_GETLEN(desc->natts), 0, BITMAP_GETLEN(desc->natts));
-                securec_check(erc, "\0", "\0");
-                for (int i = 0; i < desc->natts; i++) {
-                    if (!desc->attrs[i]->attisdropped) {
-                        BITMAP_SET(ptrAttrsModify, (desc->attrs[i]->attnum - 1));
-                    }
-                }
-            }
-            break;
-        }
-        default:
-            break;
-    }
+    PrepareAttributeList(plan, rte, rel, fdwState, table, ptrAttrsModify, ixUpd);
 
     heap_close(rel, NoLock);
 
-    return ((fdwState == nullptr) ? (List*)BitmapSerialize(nullptr, attrsModify, BITMAP_GETLEN(desc->natts))
+    return ((fdwState == nullptr) ? (List*)BitmapSerialize(nullptr, attrsModify, BITMAP_GETLEN(desc->natts), ixUpd)
                                   : (List*)SerializeFdwState(fdwState));
 }
 
@@ -1361,6 +1489,9 @@ static TupleTableSlot* MOTExecForeignInsert(
 {
     MOTFdwStateSt* fdwState = (MOTFdwStateSt*)resultRelInfo->ri_FdwState;
     MOT::RC rc = MOT::RC_OK;
+
+    // CopyFrom will call MOTExecForeignInsert directly, not through MOTBeginForeignModify.
+    (void)GetCurrentTransactionId();
 
     if (MOTAdaptor::m_engine->IsSoftMemoryLimitReached() && fdwState != nullptr) {
         CleanQueryStatesOnError(fdwState->m_currTxn);
@@ -1388,12 +1519,16 @@ static TupleTableSlot* MOTExecForeignInsert(
         resultRelInfo->ri_FdwState = fdwState;
     }
 
+    if (IsTxnInAbortState(fdwState->m_currTxn)) {
+        raiseAbortTxnError();
+    }
+
     if ((rc = MOTAdaptor::InsertRow(fdwState, slot)) == MOT::RC_OK) {
         estate->es_processed++;
-        if (resultRelInfo->ri_projectReturning)
+        if (resultRelInfo->ri_projectReturning) {
             return slot;
-        else
-            return nullptr;
+        }
+        return nullptr;
     } else {
         if (MOT_IS_SEVERE()) {
             MOT_REPORT_ERROR(MOT_ERROR_INTERNAL, "MOTExecForeignInsert", "Failed to insert row");
@@ -1491,14 +1626,8 @@ static TupleTableSlot* MOTExecForeignDelete(
         return nullptr;
     }
 
+    // this can happen only on double delete of the same row in the same query
     if (currRow == nullptr) {
-        // This case handle multiple updates of the same row in one query
-        if (fdwState->m_currTxn->IsUpdatedInCurrStmt()) {
-            return nullptr;
-        }
-        elog(ERROR, "MOTExecForeignDelete failed to fetch row");
-        CleanQueryStatesOnError(fdwState->m_currTxn);
-        report_pg_error(((rc == MOT::RC_OK) ? MOT::RC_ERROR : rc));
         return nullptr;
     }
 
@@ -1506,7 +1635,7 @@ static TupleTableSlot* MOTExecForeignDelete(
         if (resultRelInfo->ri_projectReturning) {
             MOTAdaptor::UnpackRow(
                 slot, fdwState->m_table, fdwState->m_attrsUsed, const_cast<uint8_t*>(currRow->GetData()));
-            ExecStoreVirtualTuple(slot);
+            (void)ExecStoreVirtualTuple(slot);
             return slot;
         } else {
             estate->es_processed++;
@@ -1527,7 +1656,7 @@ static void MOTEndForeignModify(EState* estate, ResultRelInfo* resultRelInfo)
 {
     MOTFdwStateSt* fdwState = (MOTFdwStateSt*)resultRelInfo->ri_FdwState;
 
-    if (fdwState->m_allocInScan == false) {
+    if (!fdwState->m_allocInScan) {
         ReleaseFdwState(fdwState);
         resultRelInfo->ri_FdwState = NULL;
     }
@@ -1535,8 +1664,14 @@ static void MOTEndForeignModify(EState* estate, ResultRelInfo* resultRelInfo)
 
 static void MOTXactCallback(XactEvent event, void* arg)
 {
-    int rc = MOT::RC_OK;
+    if (event == XACT_EVENT_POST_COMMIT_CLEANUP) {
+        // Nothing to do. XACT_EVENT_POST_COMMIT_CLEANUP is only applicable for JITXactCallback.
+        return;
+    }
+
+    MOT::RC rc = MOT::RC_OK;
     MOT::TxnManager* txn = nullptr;
+    int saveInterruptHoldoffCount = t_thrd.int_cxt.InterruptHoldoffCount;
 
     PG_TRY();
     {
@@ -1544,15 +1679,18 @@ static void MOTXactCallback(XactEvent event, void* arg)
     }
     PG_CATCH();
     {
+        /*
+         * handle ereport error will reset InterruptHoldoffCount issue,
+         * if not handle, caller may fail on assert
+         */
+        t_thrd.int_cxt.InterruptHoldoffCount = saveInterruptHoldoffCount;
         switch (event) {
             case XACT_EVENT_ABORT:
             case XACT_EVENT_ROLLBACK_PREPARED:
             case XACT_EVENT_PREROLLBACK_CLEANUP:
-                elog(LOG, "Failed to get MOT transaction manager during abort.");
                 return;
             default:
                 PG_RE_THROW();
-                return;
         }
     }
     PG_END_TRY();
@@ -1566,7 +1704,9 @@ static void MOTXactCallback(XactEvent event, void* arg)
 
     elog(DEBUG2, "xact_callback event %u, transaction state %u, tid %lu", event, txnState, tid);
 
-    if (event == XACT_EVENT_START) {
+    if (event == XACT_EVENT_STMT_FINISH) {
+        txn->FinishStatement();
+    } else if (event == XACT_EVENT_START) {
         elog(DEBUG2, "XACT_EVENT_START, tid %lu", tid);
         if (txnState == MOT::TxnState::TXN_START) {
             // Double start!!!
@@ -1597,13 +1737,28 @@ static void MOTXactCallback(XactEvent event, void* arg)
 
         elog(DEBUG2, "XACT_EVENT_COMMIT, tid %lu", tid);
 
+        if (!IsTransactionBlock() && txn->IsTxnAborted()) {
+            elog(DEBUG2, "Implicit transaction aborted by sub-transaction");
+            txn->SetTxnState(MOT::TxnState::TXN_ROLLBACK);
+            return;
+        }
+
+        if (txn->IsTxnAborted()) {
+            raiseAbortTxnError();
+        }
+
+        if (IsMixedEngineUsed() && t_thrd.xlog_cxt.XactLastRecEnd != InvalidXLogRecPtr) {
+            elog(DEBUG2, "XACT_EVENT_COMMIT, marking tid %lu as cross engine transaction", tid);
+            txn->MarkAsCrossEngineTxn();
+        }
+
         rc = MOTAdaptor::ValidateCommit();
         if (rc != MOT::RC_OK) {
             elog(DEBUG2, "commit failed");
             elog(DEBUG2, "Abort parent transaction from MOT commit, tid %lu", tid);
             MemoryEreportError();
             abortParentTransactionParamsNoDetail(ERRCODE_T_R_SERIALIZATION_FAILURE,
-                "Commit: could not serialize access due to concurrent update(%d)",
+                "Commit: could not serialize access due to concurrent update(%u)",
                 txnState);
         }
         txn->SetTxnState(MOT::TxnState::TXN_COMMIT);
@@ -1613,8 +1768,17 @@ static void MOTXactCallback(XactEvent event, void* arg)
             return;
         }
 
+        if (txn->IsTxnAborted()) {
+            elog(DEBUG2, "Implicit transaction aborted by sub-transaction");
+            return;
+        }
+
         MOT_ASSERT(txnState == MOT::TxnState::TXN_COMMIT || txnState == MOT::TxnState::TXN_PREPARE);
         elog(DEBUG2, "XACT_EVENT_RECORD_COMMIT, tid %lu", tid);
+
+        if (MOTAdaptor::IsTxnWriteSetEmpty()) {
+            return;
+        }
 
         // Need to get the envelope CSN for cross transaction support.
         uint64_t csn = MOT::GetCSNManager().GetNextCSN();
@@ -1655,6 +1819,12 @@ static void MOTXactCallback(XactEvent event, void* arg)
             MOTAdaptor::CommitPrepared(csn);
         } else if (txnState == MOT::TxnState::TXN_START) {
             elog(DEBUG2, "XACT_EVENT_COMMIT_PREPARED, tid %lu", tid);
+
+            if (IsMixedEngineUsed() && t_thrd.xlog_cxt.XactLastRecEnd != InvalidXLogRecPtr) {
+                elog(DEBUG2, "XACT_EVENT_COMMIT_PREPARED, marking tid %lu as cross engine transaction", tid);
+                txn->MarkAsCrossEngineTxn();
+            }
+
             // Need to get the envelope CSN for cross transaction support.
             uint64_t csn = MOT::GetCSNManager().GetNextCSN();
             rc = MOTAdaptor::Commit(csn);
@@ -1688,6 +1858,60 @@ static void MOTXactCallback(XactEvent event, void* arg)
 
 static void MOTSubxactCallback(SubXactEvent event, SubTransactionId mySubid, SubTransactionId parentSubid, void* arg)
 {
+    MOT::TxnManager* txn = nullptr;
+    MOT::RC rc = MOT::RC_OK;
+    bool hasCommitedSubTxn = false;
+    int savedInterruptHoldoffCount = t_thrd.int_cxt.InterruptHoldoffCount;
+    PG_TRY();
+    {
+        txn = GetSafeTxn(__FUNCTION__);
+    }
+    PG_CATCH();
+    {
+        /*
+         * handle ereport error will reset InterruptHoldoffCount issue,
+         * if not handle, caller may fail on assert
+         */
+        t_thrd.int_cxt.InterruptHoldoffCount = savedInterruptHoldoffCount;
+        switch (event) {
+            case SUBXACT_EVENT_ABORT_SUB:
+                return;
+            default:
+                PG_RE_THROW();
+        }
+    }
+    PG_END_TRY();
+
+    switch (event) {
+        case SUBXACT_EVENT_START_SUB:
+            elog(DEBUG2, "Start sub transaction %lu, parent %lu", mySubid, parentSubid);
+            if (txn->IsTxnAborted()) {
+                raiseAbortTxnError();
+            }
+            txn->StartSubTransaction(mySubid, u_sess->utils_cxt.XactIsoLevel);
+            break;
+        case SUBXACT_EVENT_COMMIT_SUB:
+            elog(DEBUG2, "Commit sub transaction %lu, parent %lu", mySubid, parentSubid);
+            if (txn->IsTxnAborted() && txn->HasCommitedSubTxnDDL()) {
+                raiseAbortTxnError();
+            }
+            txn->CommitSubTransaction(mySubid);
+            break;
+        case SUBXACT_EVENT_ABORT_SUB:
+            elog(DEBUG2, "Abort sub transaction %lu, parent %lu", mySubid, parentSubid);
+            rc = txn->RollbackSubTransaction(mySubid);
+            hasCommitedSubTxn = txn->HasCommitedSubTxnDDL();
+            if (rc != MOT::RC_OK) {
+                MOTAdaptor::Rollback();
+                txn->SetTxnAborted();
+                if (hasCommitedSubTxn) {
+                    txn->SetHasCommitedSubTxnDDL();
+                }
+            }
+            break;
+        default:
+            break;
+    }
     return;
 }
 
@@ -1750,12 +1974,16 @@ static void MOTCheckpointCallback(CheckpointEvent checkpointEvent, uint64_t lsn,
     }
 }
 
-/* @MOT
- * brief: Validate table definition
- * input param @obj: A Obj including infomation to validate when alter tabel and create table.
+/*
+ * @brief: Validate table definition
+ * @param obj: A Obj including infomation to validate when alter tabel and create table.
  */
 static void MOTValidateTableDef(Node* obj)
 {
+    MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
+    if (IsTxnInAbortState(txn)) {
+        raiseAbortTxnError();
+    }
     ::TransactionId tid = GetCurrentTransactionId();
     if (obj == nullptr) {
         return;
@@ -1765,22 +1993,65 @@ static void MOTValidateTableDef(Node* obj)
         case T_AlterTableStmt: {
             AlterTableStmt* ats = (AlterTableStmt*)obj;
             AlterTableCmd* cmd = NULL;
-            bool allow = false;
-            if (list_length(ats->cmds) == 1) {
-                ListCell* cell = list_head(ats->cmds);
-                cmd = (AlterTableCmd*)lfirst(cell);
-                if (cmd->subtype == AT_ChangeOwner) {
-                    allow = true;
-                } else if (cmd->subtype == AT_AddIndex) {
-                    allow = true;
+            ListCell* lc = nullptr;
+            foreach (lc, ats->cmds) {
+                bool allow = true;
+                cmd = (AlterTableCmd*)lfirst(lc);
+                switch (cmd->subtype) {
+                    case AT_ChangeOwner:
+                    case AT_AddIndex:
+                    case AT_AddColumn:
+                    case AT_DropColumn:
+                        break;
+                    default:
+                        allow = false;
+                        break;
+                }
+                if (allow == false) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_FDW_OPERATION_NOT_SUPPORTED),
+                            errmodule(MOD_MOT),
+                            errmsg("Alter table operation '%s' is not supported for memory table.",
+                                CreateAlterTableCommandTag(cmd->subtype))));
+                    break;
                 }
             }
-            if (allow == false) {
-                ereport(ERROR,
-                    (errcode(ERRCODE_FDW_OPERATION_NOT_SUPPORTED),
-                        errmodule(MOD_MOT),
-                        errmsg("Alter table operation is not supported for memory table.")));
+            break;
+        }
+        case T_AlterForeingTableCmd: {
+            isMemoryLimitReached();
+            AlterForeingTableCmd* cmd = (AlterForeingTableCmd*)obj;
+            switch (cmd->subtype) {
+                case AT_AddColumn:
+                    elog(LOG,
+                        "Alter table %s add column %s start",
+                        NameStr(cmd->rel->rd_rel->relname),
+                        ((ColumnDef*)cmd->def)->colname);
+                    (void)MOTAdaptor::AlterTableAddColumn(cmd, tid);
+                    elog(LOG,
+                        "Alter table %s add column %s end",
+                        NameStr(cmd->rel->rd_rel->relname),
+                        ((ColumnDef*)cmd->def)->colname);
+                    break;
+                case AT_DropColumn:
+                    elog(LOG, "Alter table %s drop column %s start", NameStr(cmd->rel->rd_rel->relname), cmd->name);
+                    (void)MOTAdaptor::AlterTableDropColumn(cmd, tid);
+                    elog(LOG, "Alter table %s drop column %s end", NameStr(cmd->rel->rd_rel->relname), cmd->name);
+                    break;
+                case AT_UnusableIndex:
+                    ereport(ERROR,
+                        (errcode(ERRCODE_FDW_OPERATION_NOT_SUPPORTED),
+                            errmodule(MOD_MOT),
+                            errmsg("Unusable operation is not supported for memory table.")));
+                    break;
+                default:
+                    break;
             }
+
+            if (!IsTransactionBlock()) {
+                txn->SetHasCommitedSubTxnDDL();
+            }
+
             break;
         }
         case T_CreateForeignTableStmt: {
@@ -1792,12 +2063,22 @@ static void MOTValidateTableDef(Node* obj)
                         errmsg("Cannot create MOT tables while incremental checkpoint is enabled.")));
             }
 
-            MOTAdaptor::CreateTable((CreateForeignTableStmt*)obj, tid);
+            (void)MOTAdaptor::CreateTable((CreateForeignTableStmt*)obj, tid);
+
+            if (!IsTransactionBlock()) {
+                txn->SetHasCommitedSubTxnDDL();
+            }
+
             break;
         }
         case T_IndexStmt: {
             isMemoryLimitReached();
-            MOTAdaptor::CreateIndex((IndexStmt*)obj, tid);
+            (void)MOTAdaptor::CreateIndex((IndexStmt*)obj, tid);
+
+            if (!IsTransactionBlock()) {
+                txn->SetHasCommitedSubTxnDDL();
+            }
+
             break;
         }
         case T_ReindexStmt: {
@@ -1811,15 +2092,46 @@ static void MOTValidateTableDef(Node* obj)
             DropForeignStmt* stmt = (DropForeignStmt*)obj;
             switch (stmt->relkind) {
                 case RELKIND_INDEX:
-                    MOTAdaptor::DropIndex(stmt, tid);
+                    (void)MOTAdaptor::DropIndex(stmt, tid);
                     break;
 
                 case RELKIND_RELATION:
-                    MOTAdaptor::DropTable(stmt, tid);
+                    (void)MOTAdaptor::DropTable(stmt, tid);
                     break;
                 default:
                     break;
             }
+
+            if (!IsTransactionBlock()) {
+                txn->SetHasCommitedSubTxnDDL();
+            }
+
+            break;
+        }
+        case T_RenameForeingTableCmd: {
+            RenameForeingTableCmd* cmd = (RenameForeingTableCmd*)obj;
+            switch (cmd->renameType) {
+                case OBJECT_COLUMN:
+                    (void)MOTAdaptor::AlterTableRenameColumn(cmd, tid);
+                    break;
+                default:
+                    ereport(ERROR,
+                        (errcode(ERRCODE_FDW_OPERATION_NOT_SUPPORTED),
+                            errmodule(MOD_MOT),
+                            errmsg("Rename operation type %d is not supported for memory table.", cmd->renameType)));
+            }
+
+            if (!IsTransactionBlock()) {
+                txn->SetHasCommitedSubTxnDDL();
+            }
+
+            break;
+        }
+        case T_RenameStmt: {
+            ereport(ERROR,
+                (errcode(ERRCODE_FDW_OPERATION_NOT_SUPPORTED),
+                    errmodule(MOD_MOT),
+                    errmsg("Rename operation is not supported for memory table.")));
             break;
         }
         default:
@@ -1830,6 +2142,10 @@ static void MOTValidateTableDef(Node* obj)
 static void MOTTruncateForeignTable(TruncateStmt* stmt, Relation rel)
 {
     ::TransactionId tid = GetCurrentTransactionId();
+    MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
+    if (IsTxnInAbortState(txn)) {
+        raiseAbortTxnError();
+    }
     MOT::RC rc = MOTAdaptor::TruncateTable(rel, tid);
     if (rc != MOT::RC_OK) {
         MOT_LOG_ERROR_STACK("Failed to truncate table");
@@ -1914,6 +2230,10 @@ static void InitMOTHandler()
         // Register CLOG callback to our recovery manager.
         MOT::GetRecoveryManager()->SetCommitLogCallback(&GetTransactionStateCallback);
         MOTAdaptor::m_callbacks_initialized = true;
+    } else {
+        elog(WARNING,
+            "Incremental Checkpoint is enabled, cannot create and operate on MOT tables "
+            "(MOT does not support incremental checkpoint)");
     }
 }
 
@@ -1948,7 +2268,7 @@ bool MOTCheckpointExists(
         return false;
     }
 
-    if (checkpointManager->GetId() == MOT::CheckpointControlFile::invalidId) {
+    if (checkpointManager->GetId() == MOT::CheckpointControlFile::INVALID_ID) {
         return false;
     }
 
@@ -1979,446 +2299,35 @@ bool MOTCheckpointExists(
     return true;
 }
 
-inline bool IsNotEqualOper(OpExpr* op)
+bool MOTValidateLogLevel(const char* logLevelStr)
 {
-    switch (op->opno) {
-        case INT48NEOID:
-        case BooleanNotEqualOperator:
-        case 402:
-        case INT8NEOID:
-        case INT84NEOID:
-        case INT4NEOID:
-        case INT2NEOID:
-        case 531:
-        case INT24NEOID:
-        case INT42NEOID:
-        case 561:
-        case 567:
-        case 576:
-        case 608:
-        case 644:
-        case FLOAT4NEOID:
-        case 630:
-        case 5514:
-        case 643:
-        case FLOAT8NEOID:
-        case 713:
-        case 812:
-        case 901:
-        case BPCHARNEOID:
-        case 1071:
-        case DATENEOID:
-        case 1109:
-        case 1551:
-        case FLOAT48NEOID:
-        case FLOAT84NEOID:
-        case 1321:
-        case 1331:
-        case 1501:
-        case 1586:
-        case 1221:
-        case 1202:
-        case NUMERICNEOID:
-        case 1785:
-        case 1805:
-        case INT28NEOID:
-        case INT82NEOID:
-        case 1956:
-        case 3799:
-        case TIMESTAMPNEOID:
-        case 2350:
-        case 2363:
-        case 2376:
-        case 2389:
-        case 2539:
-        case 2545:
-        case 2973:
-        case 3517:
-        case 3630:
-        case 3677:
-        case 2989:
-        case 3883:
-        case 5551:
-            return true;
+    return MOT::ValidateLogLevel(logLevelStr);
+}
 
-        default:
-            return false;
+bool MOTValidateAffinityMode(const char* affinityModeStr)
+{
+    return MOT::ValidateAffinityMode(affinityModeStr);
+}
+
+bool MOTValidateMemReserveMode(const char* reserveModeStr)
+{
+    return MOT::ValidateMemReserveMode(reserveModeStr);
+}
+
+bool MOTValidateMemStorePolicy(const char* storePolicyStr)
+{
+    return MOT::ValidateMemStorePolicy(storePolicyStr);
+}
+
+bool MOTValidateMemAllocPolicy(const char* allocPolicyStr)
+{
+    return MOT::ValidateMemAllocPolicy(allocPolicyStr);
+}
+
+void MOTCheckTransactionAborted()
+{
+    if (u_sess->mot_cxt.txn_manager != nullptr && u_sess->mot_cxt.txn_manager->IsTxnAborted() &&
+        u_sess->mot_cxt.txn_manager->HasCommitedSubTxnDDL()) {
+        raiseAbortTxnError();
     }
-}
-
-inline void RevertKeyOperation(KEY_OPER& oper)
-{
-    if (oper == KEY_OPER::READ_KEY_BEFORE) {
-        oper = KEY_OPER::READ_KEY_AFTER;
-    } else if (oper == KEY_OPER::READ_KEY_OR_PREV) {
-        oper = KEY_OPER::READ_KEY_OR_NEXT;
-    } else if (oper == KEY_OPER::READ_KEY_AFTER) {
-        oper = KEY_OPER::READ_KEY_BEFORE;
-    } else if (oper == KEY_OPER::READ_KEY_OR_NEXT) {
-        oper = KEY_OPER::READ_KEY_OR_PREV;
-    }
-    return;
-}
-
-inline bool GetKeyOperation(OpExpr* op, KEY_OPER& oper)
-{
-    switch (op->opno) {
-        case FLOAT8EQOID:
-        case FLOAT4EQOID:
-        case INT2EQOID:
-        case INT4EQOID:
-        case INT8EQOID:
-        case INT24EQOID:
-        case INT42EQOID:
-        case INT84EQOID:
-        case INT48EQOID:
-        case INT28EQOID:
-        case INT82EQOID:
-        case FLOAT48EQOID:
-        case FLOAT84EQOID:
-        case 5513:  // INT1EQ
-        case BPCHAREQOID:
-        case TEXTEQOID:
-        case 92:    // CHAREQ
-        case 2536:  // timestampVStimestamptz
-        case 2542:  // timestamptzVStimestamp
-        case 2347:  // dateVStimestamp
-        case 2360:  // dateVStimestamptz
-        case 2373:  // timestampVSdate
-        case 2386:  // timestamptzVSdate
-        case TIMESTAMPEQOID:
-            oper = KEY_OPER::READ_KEY_EXACT;
-            break;
-        case FLOAT8LTOID:
-        case FLOAT4LTOID:
-        case INT2LTOID:
-        case INT4LTOID:
-        case INT8LTOID:
-        case INT24LTOID:
-        case INT42LTOID:
-        case INT84LTOID:
-        case INT48LTOID:
-        case INT28LTOID:
-        case INT82LTOID:
-        case FLOAT48LTOID:
-        case FLOAT84LTOID:
-        case 5515:  // INT1LT
-        case 1058:  // BPCHARLT
-        case 631:   // CHARLT
-        case TEXTLTOID:
-        case 2534:  // timestampVStimestamptz
-        case 2540:  // timestamptzVStimestamp
-        case 2345:  // dateVStimestamp
-        case 2358:  // dateVStimestamptz
-        case 2371:  // timestampVSdate
-        case 2384:  // timestamptzVSdate
-        case TIMESTAMPLTOID:
-            oper = KEY_OPER::READ_KEY_BEFORE;
-            break;
-        case FLOAT8LEOID:
-        case FLOAT4LEOID:
-        case INT2LEOID:
-        case INT4LEOID:
-        case INT8LEOID:
-        case INT24LEOID:
-        case INT42LEOID:
-        case INT84LEOID:
-        case INT48LEOID:
-        case INT28LEOID:
-        case INT82LEOID:
-        case FLOAT48LEOID:
-        case FLOAT84LEOID:
-        case 5516:  // INT1LE
-        case 1059:  // BPCHARLE
-        case 632:   // CHARLE
-        case 665:   // TEXTLE
-        case 2535:  // timestampVStimestamptz
-        case 2541:  // timestamptzVStimestamp
-        case 2346:  // dateVStimestamp
-        case 2359:  // dateVStimestamptz
-        case 2372:  // timestampVSdate
-        case 2385:  // timestamptzVSdate
-        case TIMESTAMPLEOID:
-            oper = KEY_OPER::READ_KEY_OR_PREV;
-            break;
-        case FLOAT8GTOID:
-        case FLOAT4GTOID:
-        case INT2GTOID:
-        case INT4GTOID:
-        case INT8GTOID:
-        case INT24GTOID:
-        case INT42GTOID:
-        case INT84GTOID:
-        case INT48GTOID:
-        case INT28GTOID:
-        case INT82GTOID:
-        case FLOAT48GTOID:
-        case FLOAT84GTOID:
-        case 5517:       // INT1GT
-        case 1060:       // BPCHARGT
-        case 633:        // CHARGT
-        case TEXTGTOID:  // TEXTGT
-        case 2538:       // timestampVStimestamptz
-        case 2544:       // timestamptzVStimestamp
-        case 2349:       // dateVStimestamp
-        case 2362:       // dateVStimestamptz
-        case 2375:       // timestampVSdate
-        case 2388:       // timestamptzVSdate
-        case TIMESTAMPGTOID:
-            oper = KEY_OPER::READ_KEY_AFTER;
-            break;
-        case FLOAT8GEOID:
-        case FLOAT4GEOID:
-        case INT2GEOID:
-        case INT4GEOID:
-        case INT8GEOID:
-        case INT24GEOID:
-        case INT42GEOID:
-        case INT84GEOID:
-        case INT48GEOID:
-        case INT28GEOID:
-        case INT82GEOID:
-        case FLOAT48GEOID:
-        case FLOAT84GEOID:
-        case 5518:  // INT1GE
-        case 1061:  // BPCHARGE
-        case 634:   // CHARGE
-        case 667:   // TEXTGE
-        case 2537:  // timestampVStimestamptz
-        case 2543:  // timestamptzVStimestamp
-        case 2348:  // dateVStimestamp
-        case 2361:  // dateVStimestamptz
-        case 2374:  // timestampVSdate
-        case 2387:  // timestamptzVSdate
-        case TIMESTAMPGEOID:
-            oper = KEY_OPER::READ_KEY_OR_NEXT;
-            break;
-        case OID_TEXT_LIKE_OP:
-        case OID_BPCHAR_LIKE_OP:
-            oper = KEY_OPER::READ_KEY_LIKE;
-            break;
-        default:
-            oper = KEY_OPER::READ_INVALID;
-            break;
-    }
-
-    return (oper != KEY_OPER::READ_INVALID);
-}
-
-bool IsSameRelation(Expr* expr, uint32_t id)
-{
-    switch (expr->type) {
-        case T_Param:
-        case T_Const: {
-            return false;
-        }
-        case T_Var: {
-            return (((Var*)expr)->varno == id);
-        }
-        case T_OpExpr: {
-            OpExpr* op = (OpExpr*)expr;
-            bool l = IsSameRelation((Expr*)linitial(op->args), id);
-            bool r = IsSameRelation((Expr*)lsecond(op->args), id);
-            return (l || r);
-        }
-        case T_FuncExpr: {
-            FuncExpr* func = (FuncExpr*)expr;
-
-            if (func->funcformat == COERCE_IMPLICIT_CAST || func->funcformat == COERCE_EXPLICIT_CAST) {
-                return IsSameRelation((Expr*)linitial(func->args), id);
-            } else if (list_length(func->args) == 0) {
-                return false;
-            } else {
-                return true;
-            }
-        }
-        case T_RelabelType: {
-            return IsSameRelation(((RelabelType*)expr)->arg, id);
-        }
-        default:
-            return true;
-    }
-}
-
-bool IsMOTExpr(RelOptInfo* baserel, MOTFdwStateSt* state, MatchIndexArr* marr, Expr* expr, Expr** result, bool setLocal)
-{
-    /*
-     * We only support the following operators and data types.
-     */
-    bool isOperatorMOTReady = false;
-
-    switch (expr->type) {
-        case T_Const: {
-            if (result != nullptr)
-                *result = expr;
-            isOperatorMOTReady = true;
-            break;
-        }
-
-        case T_Var: {
-            if (result != nullptr)
-                *result = expr;
-            isOperatorMOTReady = true;
-            break;
-        }
-        case T_Param: {
-            if (result != nullptr)
-                *result = expr;
-            isOperatorMOTReady = true;
-            break;
-        }
-        case T_OpExpr: {
-            KEY_OPER oper;
-            OpExpr* op = (OpExpr*)expr;
-            Expr* l = (Expr*)linitial(op->args);
-
-            if (list_length(op->args) == 1) {
-                isOperatorMOTReady = IsMOTExpr(baserel, state, marr, l, &l, setLocal);
-                break;
-            }
-
-            Expr* r = (Expr*)lsecond(op->args);
-            isOperatorMOTReady = IsMOTExpr(baserel, state, marr, l, &l, setLocal);
-            isOperatorMOTReady &= IsMOTExpr(baserel, state, marr, r, &r, setLocal);
-
-            // handles case when column = column|const <oper> column|const
-            if (result != nullptr && isOperatorMOTReady) {
-                if (IsA(l, Var) && IsA(r, Var) && ((Var*)l)->varno == ((Var*)r)->varno)
-                    isOperatorMOTReady = false;
-                break;
-            }
-
-            isOperatorMOTReady &= GetKeyOperation(op, oper);
-            if (isOperatorMOTReady && marr != nullptr) {
-                Var* v = nullptr;
-                Expr* e = nullptr;
-
-                // this covers case when baserel.a = t2.a <==> t2.a = baserel.a both will be of type Var
-                // we have to choose as Expr t2.a cause it will be replaced later with a Param type
-                if (IsA(l, Var)) {
-                    if (!IsA(r, Var)) {
-                        if (IsSameRelation(r, ((Var*)l)->varno)) {
-                            isOperatorMOTReady = false;
-                            break;
-                        }
-                        v = (Var*)l;
-                        e = r;
-                    } else {
-                        if (((Var*)l)->varno == ((Var*)r)->varno) {  // same relation
-                            return false;
-                        } else if (bms_is_member(((Var*)l)->varno, baserel->relids)) {
-                            v = (Var*)l;
-                            e = r;
-                        } else {
-                            v = (Var*)r;
-                            e = l;
-                            RevertKeyOperation(oper);
-                        }
-                    }
-                } else if (IsA(r, Var)) {
-                    if (IsSameRelation(l, ((Var*)r)->varno)) {
-                        isOperatorMOTReady = false;
-                        break;
-                    }
-                    v = (Var*)r;
-                    e = l;
-                    RevertKeyOperation(oper);
-                } else {
-                    isOperatorMOTReady = false;
-                    break;
-                }
-
-                if (oper == KEY_OPER::READ_KEY_LIKE) {
-                    if (!IsA(e, Const))
-                        return false;
-
-                    // we support only prefix search: 'abc%' or 'abc', the last transforms into equal
-                    Const* c = (Const*)e;
-                    if (DatumGetPointer(c->constvalue) == NULL)
-                        return false;
-
-                    int len = 0;
-                    char* s = DatumGetPointer(c->constvalue);
-                    int i = 0;
-
-                    if (c->constlen > 0)
-                        len = c->constlen;
-                    else if (c->constlen == -1) {
-                        struct varlena* vs = (struct varlena*)DatumGetPointer(c->constvalue);
-                        s = VARDATA(c->constvalue);
-                        len = VARSIZE_ANY(vs) - VARHDRSZ;
-                    } else if (c->constlen == -2) {
-                        len = strlen(s);
-                    }
-
-                    for (; i < len; i++) {
-                        if (s[i] == '%')
-                            break;
-
-                        if (s[i] == '_')  // we do not support single char pattern
-                            return false;
-                    }
-
-                    if (i < len - 1)
-                        return false;
-                }
-                isOperatorMOTReady = MOTAdaptor::SetMatchingExpr(state, marr, v->varoattno, oper, e, expr, setLocal);
-            }
-            break;
-        }
-        case T_FuncExpr: {
-            FuncExpr* func = (FuncExpr*)expr;
-
-            if (func->funcformat == COERCE_IMPLICIT_CAST || func->funcformat == COERCE_EXPLICIT_CAST) {
-                isOperatorMOTReady = IsMOTExpr(baserel, state, marr, (Expr*)linitial(func->args), result, setLocal);
-            } else if (list_length(func->args) == 0) {
-                isOperatorMOTReady = true;
-            }
-
-            break;
-        }
-        case T_RelabelType: {
-            isOperatorMOTReady = IsMOTExpr(baserel, state, marr, ((RelabelType*)expr)->arg, result, setLocal);
-            break;
-        }
-        default: {
-            isOperatorMOTReady = false;
-            break;
-        }
-    }
-
-    return isOperatorMOTReady;
-}
-
-uint16_t MOTTimestampToStr(uintptr_t src, char* destBuf, size_t len)
-{
-    char* tmp = nullptr;
-    Timestamp timestamp = DatumGetTimestamp(src);
-    tmp = DatumGetCString(DirectFunctionCall1(timestamp_out, timestamp));
-    errno_t erc = snprintf_s(destBuf, len, len - 1, tmp);
-    pfree_ext(tmp);
-    securec_check_ss(erc, "\0", "\0");
-    return erc;
-}
-
-uint16_t MOTTimestampTzToStr(uintptr_t src, char* destBuf, size_t len)
-{
-    char* tmp = nullptr;
-    TimestampTz timestamp = DatumGetTimestampTz(src);
-    tmp = DatumGetCString(DirectFunctionCall1(timestamptz_out, timestamp));
-    errno_t erc = snprintf_s(destBuf, len, len - 1, tmp);
-    pfree_ext(tmp);
-    securec_check_ss(erc, "\0", "\0");
-    return erc;
-}
-
-uint16_t MOTDateToStr(uintptr_t src, char* destBuf, size_t len)
-{
-    char* tmp = nullptr;
-    DateADT date = DatumGetDateADT(src);
-    tmp = DatumGetCString(DirectFunctionCall1(date_out, date));
-    errno_t erc = snprintf_s(destBuf, len, len - 1, tmp);
-    pfree_ext(tmp);
-    securec_check_ss(erc, "\0", "\0");
-    return erc;
 }

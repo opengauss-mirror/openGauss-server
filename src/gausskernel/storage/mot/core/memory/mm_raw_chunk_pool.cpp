@@ -35,7 +35,7 @@
 #include "mm_cfg.h"
 #include "mot_engine.h"
 
-#include <stdlib.h>
+#include <cstdlib>
 
 namespace MOT {
 
@@ -158,6 +158,20 @@ extern int MemRawChunkPoolInit(MemRawChunkPool* chunkPool, const char* poolName,
         }
     }
 
+    // allocate session reservation buffer
+    size_t allocSize = sizeof(MemRawChunkPool::SessionReserve) * GetMaxConnectionCount();
+    chunkPool->m_sessionReservation = (MemRawChunkPool::SessionReserve*)malloc(allocSize);
+    if (chunkPool->m_sessionReservation == nullptr) {
+        MOT_REPORT_ERROR(MOT_ERROR_OOM,
+            "Chunk Pool Initialization",
+            "Failed to allocate %u bytes for session reservation",
+            (unsigned)allocSize);
+        result = MOT_ERROR_OOM;
+    } else {
+        erc = memset_s(chunkPool->m_sessionReservation, allocSize, 0, allocSize);
+        securec_check(erc, "\0", "\0");
+    }
+
     if (result != 0) {
         // safe cleanup
         MemRawChunkPoolDestroy(chunkPool);
@@ -181,6 +195,25 @@ extern void MemRawChunkPoolAbortReserve(MemRawChunkPool* chunkPool)
 extern void MemRawChunkPoolDestroy(MemRawChunkPool* chunkPool)
 {
     MOT_LOG_TRACE("Destroying chunk pool %s on node %d", chunkPool->m_poolName, chunkPool->m_node);
+
+    // free all chunks in all reservations
+    if (chunkPool->m_sessionReservation != nullptr) {
+        uint32_t maxConns = GetMaxConnectionCount();
+        for (uint32_t i = 0; i < maxConns; ++i) {
+            MemRawChunkPool::SessionReserve& sessionReserve = chunkPool->m_sessionReservation[i];
+            if (sessionReserve.m_inReserveMode) {
+                sessionReserve.m_inReserveMode = 0;
+                MemRawChunkHeader* itr = sessionReserve.m_reservedChunks;
+                while (itr != nullptr) {
+                    MemRawChunkHeader* next = itr->m_nextChunk;
+                    MemRawChunkPoolFree(chunkPool, itr);
+                    itr = next;
+                }
+            }
+        }
+        free(chunkPool->m_sessionReservation);
+        chunkPool->m_sessionReservation = nullptr;
+    }
 
     // free all chunks
     if (chunkPool->m_nodeBuffer != NULL) {
@@ -228,6 +261,20 @@ static uint32_t MemRawChunkPoolSecureChunks(MemRawChunkPool* chunkPool, uint32_t
 
 extern MemRawChunkHeader* MemRawChunkPoolAlloc(MemRawChunkPool* chunkPool)
 {
+    // check first session reservation
+    ConnectionId connId = MOT_GET_CURRENT_CONNECTION_ID();
+    if (connId != INVALID_CONNECTION_ID) {
+        MemRawChunkPool::SessionReserve* sessionReserve = &chunkPool->m_sessionReservation[connId];
+        if (sessionReserve->m_inReserveMode) {
+            MemRawChunkHeader* chunkHeader = sessionReserve->m_reservedChunks;
+            if (chunkHeader != nullptr) {
+                sessionReserve->m_reservedChunks = chunkHeader->m_nextChunk;
+                --sessionReserve->m_chunkCount;
+                return chunkHeader;
+            }
+        }
+    }
+
     // allocate one header
     MemRawChunkHeader* chunkHeader = (MemRawChunkHeader*)MemLFStackPop(&chunkPool->m_chunkAllocStack);
     if (chunkHeader == NULL) {
@@ -261,7 +308,7 @@ extern MemRawChunkHeader* MemRawChunkPoolAlloc(MemRawChunkPool* chunkPool)
                     // the actual amount pushed can theoretically be less than allocated, so update the total count
                     if (chunksPushed != chunksAllocated - 1) {
                         MOT_ASSERT(chunksPushed < chunksAllocated - 1);
-                        MOT_ATOMIC_SUB(chunkPool->m_totalChunkCount, chunksAllocated - chunksPushed - 1);
+                        MOT_ATOMIC_SUB(chunkPool->m_totalChunkCount, (chunksAllocated - chunksPushed) - 1);
                         MOT_LOG_DEBUG(
                             "Allocated %u chunks, but were able to push only %u, total count updated accordingly",
                             chunksAllocated,
@@ -281,12 +328,12 @@ extern MemRawChunkHeader* MemRawChunkPoolAlloc(MemRawChunkPool* chunkPool)
     } else if (chunkPool->m_subChunkPool == NULL) {
         // report statistics only for un-cascaded chunk pools
         if (chunkPool->m_allocType == MEM_ALLOC_GLOBAL) {
-            MemoryStatisticsProvider::m_provider->AddGlobalChunksUsed(MEM_CHUNK_SIZE_MB * MEGA_BYTE);
-            DetailedMemoryStatisticsProvider::m_provider->AddGlobalChunksUsed(
+            MemoryStatisticsProvider::GetInstance().AddGlobalChunksUsed(MEM_CHUNK_SIZE_MB * MEGA_BYTE);
+            DetailedMemoryStatisticsProvider::GetInstance().AddGlobalChunksUsed(
                 chunkPool->m_node, MEM_CHUNK_SIZE_MB * MEGA_BYTE);
         } else {
-            MemoryStatisticsProvider::m_provider->AddLocalChunksUsed(MEM_CHUNK_SIZE_MB * MEGA_BYTE);
-            DetailedMemoryStatisticsProvider::m_provider->AddLocalChunksUsed(
+            MemoryStatisticsProvider::GetInstance().AddLocalChunksUsed(MEM_CHUNK_SIZE_MB * MEGA_BYTE);
+            DetailedMemoryStatisticsProvider::GetInstance().AddLocalChunksUsed(
                 chunkPool->m_node, MEM_CHUNK_SIZE_MB * MEGA_BYTE);
         }
     }
@@ -313,6 +360,18 @@ extern void MemRawChunkPoolFree(MemRawChunkPool* chunkPool, void* chunk)
 {
     MemRawChunkHeader* chunkHeader = (MemRawChunkHeader*)chunk;
     chunkHeader->m_chunkType = MEM_CHUNK_TYPE_RAW;
+
+    // check first session reservation
+    ConnectionId connId = MOT_GET_CURRENT_CONNECTION_ID();
+    if (connId != INVALID_CONNECTION_ID) {
+        MemRawChunkPool::SessionReserve* sessionReserve = &chunkPool->m_sessionReservation[connId];
+        if (sessionReserve->m_inReserveMode) {
+            chunkHeader->m_nextChunk = sessionReserve->m_reservedChunks;
+            sessionReserve->m_reservedChunks = chunkHeader;
+            ++sessionReserve->m_chunkCount;
+            return;
+        }
+    }
 
     bool shouldPush = true;
     if (chunkPool->m_storePolicy == MEM_STORE_COMPACT) {
@@ -358,15 +417,78 @@ extern void MemRawChunkPoolFree(MemRawChunkPool* chunkPool, void* chunk)
     if (chunkPool->m_subChunkPool == NULL) {
         // report statistics only for un-cascaded chunk pools
         if (chunkPool->m_allocType == MEM_ALLOC_GLOBAL) {
-            MemoryStatisticsProvider::m_provider->AddGlobalChunksUsed(-((int64_t)MEM_CHUNK_SIZE_MB * MEGA_BYTE));
-            DetailedMemoryStatisticsProvider::m_provider->AddGlobalChunksUsed(
+            MemoryStatisticsProvider::GetInstance().AddGlobalChunksUsed(-((int64_t)MEM_CHUNK_SIZE_MB * MEGA_BYTE));
+            DetailedMemoryStatisticsProvider::GetInstance().AddGlobalChunksUsed(
                 chunkPool->m_node, -((int64_t)MEM_CHUNK_SIZE_MB * MEGA_BYTE));
         } else {
-            MemoryStatisticsProvider::m_provider->AddLocalChunksUsed(-((int64_t)MEM_CHUNK_SIZE_MB * MEGA_BYTE));
-            DetailedMemoryStatisticsProvider::m_provider->AddLocalChunksUsed(
+            MemoryStatisticsProvider::GetInstance().AddLocalChunksUsed(-((int64_t)MEM_CHUNK_SIZE_MB * MEGA_BYTE));
+            DetailedMemoryStatisticsProvider::GetInstance().AddLocalChunksUsed(
                 chunkPool->m_node, -((int64_t)MEM_CHUNK_SIZE_MB * MEGA_BYTE));
         }
     }
+}
+
+extern uint32_t MemRawChunkPoolReserveSession(MemRawChunkPool* chunkPool, uint32_t chunkCount)
+{
+    ConnectionId connId = MOT_GET_CURRENT_CONNECTION_ID();
+    if (connId == INVALID_CONNECTION_ID) {
+        MOT_LOG_WARN("Ignoring attempt to reserve global memory for current session: missing connection identifier");
+        return 0;
+    }
+    MemRawChunkPool::SessionReserve* sessionReserve = &chunkPool->m_sessionReservation[connId];
+
+    // first reset reserve mode for current session, then allocate chunks and reserve them
+    // NOTE: We might have leftovers from a prior reservation
+    sessionReserve->m_inReserveMode = 0;
+    while (sessionReserve->m_chunkCount < chunkCount) {
+        MemRawChunkHeader* chunk = MemRawChunkPoolAlloc(chunkPool);
+        if (chunk != nullptr) {
+            chunk->m_nextChunk = sessionReserve->m_reservedChunks;
+            sessionReserve->m_reservedChunks = chunk;
+            ++sessionReserve->m_chunkCount;
+            if (MOT_ATOMIC_LOAD(chunkPool->m_emergencyMode) != 0) {
+                // pool entered emergency state, so stop reserving on this pool
+                MOT_LOG_TRACE("Stopping reservation for current session on chunk pool %s due to emergency state",
+                    chunkPool->m_poolName);
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+    // NOTE: even if we were not able to reserve even one chunk, we still raise reserve mode flag. Caller is
+    // responsible to reset reserve mode back to zero.
+    sessionReserve->m_inReserveMode = 1;
+
+    // a prior reservation may have left more than needed, so we return the minimum
+    return std::min(sessionReserve->m_chunkCount, chunkCount);
+}
+
+extern uint32_t MemRawChunkPoolUnreserveSession(MemRawChunkPool* chunkPool, uint32_t chunkCount)
+{
+    ConnectionId connId = MOT_GET_CURRENT_CONNECTION_ID();
+    if (connId == INVALID_CONNECTION_ID) {
+        MOT_LOG_WARN("Ignoring attempt to unreserve global memory for current session: missing connection identifier");
+        return 0;
+    }
+    uint32_t count = 0;
+    MemRawChunkPool::SessionReserve* sessionReserve = &chunkPool->m_sessionReservation[connId];
+
+    sessionReserve->m_inReserveMode = 0;
+    while (sessionReserve->m_reservedChunks != nullptr) {
+        MemRawChunkHeader* chunk = sessionReserve->m_reservedChunks;
+        sessionReserve->m_reservedChunks = chunk->m_nextChunk;
+        MemRawChunkPoolFree(chunkPool, chunk);
+        count++;
+        if (chunkCount > 0 && count == chunkCount) {
+            break;
+        }
+    }
+    sessionReserve->m_chunkCount -= count;
+    if (sessionReserve->m_chunkCount != 0) {
+        sessionReserve->m_inReserveMode = 1;
+    }
+    return count;
 }
 
 extern void MemRawChunkPoolPrint(const char* name, LogLevel logLevel, MemRawChunkPool* chunkPool,
@@ -466,8 +588,13 @@ static void StopAsyncChunkReserve(AsyncReserveData* asyncReserveData, uint32_t t
         taskCount,
         chunkPool->m_poolName,
         chunkPool->m_node);
+    int rc = 0;
     for (uint32_t i = 0; i < taskCount; ++i) {
-        pthread_join(asyncReserveData->m_reserveThreads[i], NULL);
+        rc = pthread_join(asyncReserveData->m_reserveThreads[i], NULL);
+        if (rc) {
+            MOT_REPORT_SYSTEM_ERROR_CODE(
+                rc, pthread_join, "Async chunk reserve ending", "Failed to join memory reservation thread");
+        }
     }
     MOT_LOG_WARN("All pre-allocation threads aborted");
 }
@@ -618,7 +745,7 @@ static int ReserveChunksWait(MemRawChunkPool* chunkPool, uint32_t reserveChunkCo
     if (result == 0) {
         uint64_t endTime = GetSysClock();
         double workTimeSeconds = CpuCyclesLevelTime::CyclesToSeconds(endTime - asyncReserveData->m_startTime);
-        double memGb = reserveChunkCount * MEM_CHUNK_SIZE_MB / 1024.0f;
+        double memGb = (static_cast<double>(reserveChunkCount) * MEM_CHUNK_SIZE_MB) / 1024.0f;
         MOT_LOG_TRACE("Finished reserving %u chunks (%0.2f GB) for chunk pool %s on node %d within %0.4f seconds",
             reserveChunkCount,
             memGb,
@@ -695,14 +822,15 @@ static void FreeChunk(MemRawChunkPool* chunkPool, MemRawChunkHeader* chunkHeader
                         (unsigned)g_memGlobalCfg.m_chunkAllocPolicy);
                     return;
                 }
-                MemoryStatisticsProvider::m_provider->AddGlobalChunksReserved(
+                MemoryStatisticsProvider::GetInstance().AddGlobalChunksReserved(
                     -((int64_t)MEM_CHUNK_SIZE_MB * MEGA_BYTE));
-                DetailedMemoryStatisticsProvider::m_provider->AddGlobalChunksReserved(
+                DetailedMemoryStatisticsProvider::GetInstance().AddGlobalChunksReserved(
                     chunkPool->m_node, -((int64_t)MEM_CHUNK_SIZE_MB * MEGA_BYTE));
             } else {
                 MemNumaFreeLocal(chunkHeader, MEM_CHUNK_SIZE_MB * MEGA_BYTE, chunkPool->m_node);
-                MemoryStatisticsProvider::m_provider->AddLocalChunksReserved(-((int64_t)MEM_CHUNK_SIZE_MB * MEGA_BYTE));
-                DetailedMemoryStatisticsProvider::m_provider->AddLocalChunksReserved(
+                MemoryStatisticsProvider::GetInstance().AddLocalChunksReserved(
+                    -((int64_t)MEM_CHUNK_SIZE_MB * MEGA_BYTE));
+                DetailedMemoryStatisticsProvider::GetInstance().AddLocalChunksReserved(
                     chunkPool->m_node, -((int64_t)MEM_CHUNK_SIZE_MB * MEGA_BYTE));
             }
         }
@@ -770,7 +898,7 @@ static MemRawChunkHeader* AllocateChunkFromKernel(MemRawChunkPool* chunkPool, si
             return nullptr;
         }
         if (chunk) {
-            MemoryStatisticsProvider::m_provider->AddGlobalChunksReserved(allocSize);
+            MemoryStatisticsProvider::GetInstance().AddGlobalChunksReserved(allocSize);
         }
     } else {
         if (g_memGlobalCfg.m_chunkAllocPolicy == MEM_ALLOC_POLICY_NATIVE) {
@@ -784,8 +912,8 @@ static MemRawChunkHeader* AllocateChunkFromKernel(MemRawChunkPool* chunkPool, si
             chunk = (MemRawChunkHeader*)MemNumaAllocAlignedLocal(allocSize, align, chunkPool->m_node);
         }
         if (chunk) {
-            MemoryStatisticsProvider::m_provider->AddLocalChunksReserved(allocSize);
-            DetailedMemoryStatisticsProvider::m_provider->AddLocalChunksReserved(chunkPool->m_node, allocSize);
+            MemoryStatisticsProvider::GetInstance().AddLocalChunksReserved(allocSize);
+            DetailedMemoryStatisticsProvider::GetInstance().AddLocalChunksReserved(chunkPool->m_node, allocSize);
         }
     }
     return chunk;
@@ -1042,7 +1170,7 @@ static void* ReserveWorker(void* param)
     knl_thread_mot_init();
 
     if (workerId > 0) {  // first worker is invoked in caller context and not spawned in a new thread
-        AllocThreadId();
+        (void)AllocThreadId();
     }
 
     // we must be affined to the correct NUMA node for native allocation policy
@@ -1067,7 +1195,6 @@ static void* ReserveWorker(void* param)
 #else
     int result = AllocateChunks(chunkPool, reserveParam->m_chunkCount);
 #endif
-
     if (result == 0) {
         MOT_LOG_TRACE("Chunk reservation worker %u for chunk pool %s on node %d finished successfully",
             workerId,
@@ -1112,8 +1239,8 @@ extern "C" void MemRawChunkPoolDump(void* arg)
 
     MOT::StringBufferApply([chunkPool](MOT::StringBuffer* stringBuffer) {
         MOT::MemRawChunkPoolToString(0, "Debug Dump", chunkPool, stringBuffer, MOT::MEM_REPORT_DETAILED);
-        fprintf(stderr, "%s", stringBuffer->m_buffer);
-        fflush(stdout);
+        (void)fprintf(stderr, "%s", stringBuffer->m_buffer);
+        (void)fflush(stdout);
     });
 }
 
@@ -1129,7 +1256,7 @@ extern "C" int MemRawChunkPoolAnalyze(void* pool, void* buffer)
     MOT::MemLFStackNode* itr = chunkPool->m_chunkAllocStack.m_head.m_node;
     while (itr != NULL) {
         if ((void*)itr->m_value == chunk) {
-            fprintf(stderr,
+            (void)fprintf(stderr,
                 "Buffer %p found in chunk %p found in chunk pool %s allocation stack\n",
                 buffer,
                 chunk,

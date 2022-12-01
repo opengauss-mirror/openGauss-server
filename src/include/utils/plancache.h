@@ -28,7 +28,7 @@
 // forward declaration for MOT JitContext
 namespace JitExec
 {
-    struct JitContext;
+    struct MotJitContext;
 }
 #endif
 
@@ -376,7 +376,8 @@ typedef struct CachedPlanSource {
     bool is_oneshot;  /* is it a "oneshot" plan? */
 #ifdef ENABLE_MOT
     StorageEngineType storageEngineType;    /* which storage engine is used*/
-    JitExec::JitContext* mot_jit_context;   /* MOT JIT context required for executing LLVM jitted code */
+    bool checkedMotJitCodegen;
+    JitExec::MotJitContext* mot_jit_context;   /* MOT JIT context required for executing LLVM jitted code */
 #endif
     int generation;   /* increments each time we create a plan */
     /* If CachedPlanSource has been saved, it is a member of a global list */
@@ -432,7 +433,7 @@ typedef struct CachedPlan {
 
 #ifdef ENABLE_MOT
     StorageEngineType storageEngineType;    /* which storage engine is used*/
-    JitExec::JitContext* mot_jit_context;   /* MOT JIT context required for executing LLVM jitted code */
+    JitExec::MotJitContext* mot_jit_context;   /* MOT JIT context required for executing LLVM jitted code */
 #endif
 
     bool dependsOnRole;       /* is plan specific to that role? */

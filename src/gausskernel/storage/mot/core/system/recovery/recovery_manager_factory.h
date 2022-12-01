@@ -25,14 +25,23 @@
 #ifndef RECOVERY_MANAGER_FACTORY_H
 #define RECOVERY_MANAGER_FACTORY_H
 
-#include "recovery_manager.h"
+#include "recovery_mode.h"
+#include "mtls_recovery_manager.h"
 
 namespace MOT {
 class RecoveryManagerFactory {
 public:
     static IRecoveryManager* CreateRecoveryManager()
     {
-        return new (std::nothrow) RecoveryManager();
+        IRecoveryManager* recoveryManager = nullptr;
+        switch (GetGlobalConfiguration().m_recoveryMode) {
+            case RecoveryMode::MTLS:
+                recoveryManager = new (std::nothrow) MTLSRecoveryManager();
+                break;
+            default:
+                break;
+        }
+        return recoveryManager;
     }
 
 private:

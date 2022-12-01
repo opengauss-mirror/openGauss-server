@@ -54,8 +54,8 @@ extern int MemBufferAllocatorInit(MemBufferAllocator* bufferAllocator, int node,
     int result = 0;
     uint64_t chunkSnapshotSize = sizeof(MemBufferChunkSnapshot) *
                                  g_memGlobalCfg.m_maxThreadCount;  // this is a bit too much, but code is simpler
-    uint64_t freeListArraySize = sizeof(MemBufferList) *
-                                 g_memGlobalCfg.m_maxThreadCount;  // this is too much, but code is simpler
+    uint64_t freeListArraySize =
+        sizeof(MemBufferList) * g_memGlobalCfg.m_maxThreadCount;  // this is too much, but code is simpler
 
     freeListArraySize = L1_ALIGN(freeListArraySize);  // L1 Cache line aligned size
 
@@ -78,6 +78,7 @@ extern int MemBufferAllocatorInit(MemBufferAllocator* bufferAllocator, int node,
     } else {
         // initialize all pointers
         bufferAllocator->m_bufferHeap = (MemBufferHeap*)inplaceBuffer;
+        MOT_ASSERT((uintptr_t)(bufferAllocator->m_bufferHeap) == L1_ALIGNED_PTR(bufferAllocator->m_bufferHeap));
         bufferAllocator->m_chunkSnapshots = (MemBufferChunkSnapshot*)(bufferAllocator->m_bufferHeap + 1);
         MOT_ASSERT((uintptr_t)(bufferAllocator->m_chunkSnapshots) == L1_ALIGNED_PTR(bufferAllocator->m_chunkSnapshots));
         bufferAllocator->m_freeListArray =
@@ -179,7 +180,8 @@ extern MemBufferHeader* MemBufferChunkSnapshotAllocBuffer(MemBufferChunkSnapshot
                 uint64_t freeBufferIndex = __builtin_clzll(chunkHeader->m_freeBitset[i]);
                 chunkHeader->m_freeBitset[i] &= ~(((uint64_t)1) << (63 - freeBufferIndex));
                 ++chunkHeader->m_allocatedCount;
-                bufferHeader = MM_CHUNK_BUFFER_HEADER_AT(chunkSnapshot->m_realChunkHeader, (i << 6) + freeBufferIndex);
+                bufferHeader =
+                    MM_CHUNK_BUFFER_HEADER_AT(chunkSnapshot->m_realChunkHeader, ((uint64_t)i << 6) + freeBufferIndex);
                 break;
             }
             ++chunkSnapshot->m_bitsetIndex;
@@ -212,7 +214,6 @@ static MemBufferChunkHeader* RefillGetChunkHeader(
         if (chunkHeader != NULL) {
             MOT_LOG_DEBUG("allocated chunk from pool");
             MemBufferChunkInit(chunkHeader,
-                chunkHeader->m_node,
                 bufferAllocator->m_bufferHeap->m_allocType,
                 bufferAllocator->m_bufferHeap->m_node,
                 bufferAllocator->m_bufferHeap->m_bufferClass);
@@ -339,6 +340,51 @@ extern void MemBufferAllocatorFree(MemBufferAllocator* bufferAllocator, void* bu
             }
         }
     }
+}
+
+extern int MemBufferAllocatorReserve(MemBufferAllocator* bufferAllocator, uint32_t chunkCount)
+{
+    // we calculate how much memory is required and then order our local heap to load chunks from the chunk pool
+    int result = 0;
+    MOTThreadId threadId = MOTCurrThreadId;
+    if (unlikely(threadId == INVALID_THREAD_ID)) {
+        MemBufferAllocatorIssueError(MOT_ERROR_INTERNAL,
+            "Reserve Memory",
+            "Invalid attempt to reserve memory without current thread identifier");
+        result = MOT_ERROR_INTERNAL;
+    } else {
+        MemBufferChunkSnapshot* chunkSnapshot = &bufferAllocator->m_chunkSnapshots[threadId];
+        if (chunkSnapshot != nullptr) {
+            MemBufferChunkHeader* chunkHeader = &chunkSnapshot->m_chunkHeaderSnapshot;
+            // in this case we already reserved chunk which was not used
+            // decrement number of required chunks
+            if (chunkHeader->m_allocatedCount == 0) {
+                --chunkCount;
+            }
+        }
+        if (chunkCount > 0) {
+            uint32_t bufferCount = chunkCount * bufferAllocator->m_bufferHeap->m_maxBuffersInChunk;
+            result = MemBufferHeapReserve(bufferAllocator->m_bufferHeap, bufferCount);
+        }
+    }
+
+    return result;
+}
+
+extern int MemBufferAllocatorUnreserve(MemBufferAllocator* bufferAllocator)
+{
+    int result = 0;
+    MOTThreadId threadId = MOTCurrThreadId;
+    if (unlikely(threadId == INVALID_THREAD_ID)) {
+        MemBufferAllocatorIssueError(MOT_ERROR_INTERNAL,
+            "Unreserve Memory",
+            "Invalid attempt to unreserve memory without current thread identifier");
+        result = MOT_ERROR_INTERNAL;
+    } else {
+        result = MemBufferHeapUnreserve(bufferAllocator->m_bufferHeap);
+    }
+
+    return result;
 }
 
 static void MemChunkSnapshotClearThreadCache(MemBufferAllocator* bufferAllocator, MOTThreadId threadId)
@@ -500,10 +546,10 @@ extern void MemBufferAllocatorToString(int indent, const char* name, MemBufferAl
                 MemBufferList* freeList = &bufferAllocator->m_freeListArray[i];
                 if (freeList->m_count > 0) {
                     const uint32_t nameLen = 32;
-                    char name[nameLen];
-                    erc = snprintf_s(name, nameLen, nameLen - 1, "TID %u Free", i);
+                    char tmpName[nameLen];
+                    erc = snprintf_s(tmpName, nameLen, nameLen - 1, "TID %u Free", i);
                     securec_check_ss(erc, "\0", "\0");
-                    MemBufferListToString(indent + PRINT_REPORT_INDENT, name, freeList, stringBuffer);
+                    MemBufferListToString(indent + PRINT_REPORT_INDENT, tmpName, freeList, stringBuffer);
                     StringBufferAppend(stringBuffer, "\n");
                 }
             }
@@ -522,8 +568,8 @@ extern "C" void MemBufferAllocatorDump(void* arg)
 
     MOT::StringBufferApply([bufferAllocator](MOT::StringBuffer* stringBuffer) {
         MOT::MemBufferAllocatorToString(0, "Debug Dump", bufferAllocator, stringBuffer, MOT::MEM_REPORT_DETAILED);
-        fprintf(stderr, "%s", stringBuffer->m_buffer);
-        fflush(stderr);
+        (void)fprintf(stderr, "%s", stringBuffer->m_buffer);
+        (void)fflush(stderr);
     });
 }
 
@@ -539,7 +585,7 @@ extern "C" int MemBufferAllocatorAnalyze(void* allocator, void* buffer)
             MOT::MemBufferHeader* bufferHeader = MOT::MemBufferChunkGetBufferHeader(chunkHeader, buffer);
             if (bufferHeader) {
                 bool isAllocated = MOT::MemBufferChunkIsAllocated(chunkHeader, bufferHeader);
-                fprintf(stderr,
+                (void)fprintf(stderr,
                     "Found %s buffer %p in position %" PRIu64
                     " at chunk snapshot for thread %u of buffer allocator [node=%d, buffer-size=%s]\n",
                     isAllocated ? "allocated" : "free",
@@ -560,7 +606,7 @@ extern "C" int MemBufferAllocatorAnalyze(void* allocator, void* buffer)
             MOT::MemBufferHeader* itr = bufferAllocator->m_freeListArray[i].m_head;
             while (itr && !found) {
                 if (itr->m_buffer == buffer) {
-                    fprintf(stderr,
+                    (void)fprintf(stderr,
                         "Found buffer %p in free list for thread %u of buffer allocator [node=%d, buffer-size=%s]\n",
                         buffer,
                         i,

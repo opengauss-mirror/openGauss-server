@@ -18,7 +18,7 @@ SELECT * FROM products ORDER BY id;
 
 -- The next command should fail as the primary key is immutable.
 UPDATE products SET id=42 where price=120.0;
-ERROR:  Update of indexed column is not supported for memory table
+ERROR:  Update of primary key column is not supported for memory table
 SELECT * FROM products ORDER BY id;
  id | price  
 ----+--------

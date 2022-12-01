@@ -27,9 +27,9 @@
 
 #include "log_level.h"
 
-#include <stdarg.h>
-#include <stddef.h>
-#include <stdio.h>
+#include <cstdarg>
+#include <cstddef>
+#include <cstdio>
 
 /**
  * @define LOGGER_INDENT_SIZE The number bytes required to maintain indentation in multi-line log
@@ -155,6 +155,11 @@ extern void MOTLogBegin(LogLevel logLevel, const char* loggerName, const char* f
 extern void MOTLogAppend(const char* format, ...);
 
 /**
+ * @brief Appends a message to a continued printing sequence.
+ **/
+extern void MOTLogAppendV(const char* format, va_list args);
+
+/**
  * @brief Terminates a continued printing sequence.
  */
 extern void MOTLogEnd();
@@ -201,6 +206,18 @@ extern void MOTPrintCallStack(LogLevel logLevel, const char* loggerName, int opt
 /** @define Utility macro for checking whether the log level of the current logger is sufficient for printing. */
 #define MOT_CHECK_LOG_LEVEL(logLevel) MOT::CheckLogLevelInline(logLevel, MOT_LOGGER_LEVEL)
 
+/** @define Utility macro for checking whether the current logger can print TRACE-level messages. */
+#define MOT_CHECK_TRACE_LOG_LEVEL() MOT_CHECK_LOG_LEVEL(MOT::LogLevel::LL_TRACE)
+
+/** @define Utility macro for checking whether the current logger can print DEBUG-level messages. */
+#define MOT_CHECK_DEBUG_LOG_LEVEL() MOT_CHECK_LOG_LEVEL(MOT::LogLevel::LL_DEBUG)
+
+/** @define Utility macro for checking whether the current logger can print DIAG1-level messages. */
+#define MOT_CHECK_DIAG1_LOG_LEVEL() MOT_CHECK_LOG_LEVEL(MOT::LogLevel::LL_DIAG1)
+
+/** @define Utility macro for checking whether the current logger can print DIAG2-level messages. */
+#define MOT_CHECK_DIAG2_LOG_LEVEL() MOT_CHECK_LOG_LEVEL(MOT::LogLevel::LL_DIAG2)
+
 /** @define Begins a log printing in continuation. */
 #define MOT_LOG_BEGIN(logLevel, format, ...)                                     \
     if (MOT_CHECK_LOG_LEVEL(logLevel)) {                                         \
@@ -211,6 +228,12 @@ extern void MOTPrintCallStack(LogLevel logLevel, const char* loggerName, int opt
 #define MOT_LOG_APPEND(logLevel, format, ...)     \
     if (MOT_CHECK_LOG_LEVEL(logLevel)) {          \
         MOT::MOTLogAppend(format, ##__VA_ARGS__); \
+    }
+
+/** @define Adds a log message to log printing in continuation. */
+#define MOT_LOG_APPEND_V(logLevel, format, args) \
+    if (MOT_CHECK_LOG_LEVEL(logLevel)) {         \
+        MOT::MOTLogAppendV(format, args);        \
     }
 
 /** @define Ends a log printing in continuation. */

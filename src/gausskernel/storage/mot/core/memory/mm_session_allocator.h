@@ -78,11 +78,11 @@ struct PACKED MemSessionChunkHeader {
  * @brief Initializes a session chunk header.
  * @param chunk The chunk header to initialize.
  * @param chunkType The type of the chunk to use (can be session or global small object).
- * @param nodeId The NUMA node identifier with which the chunk is associated.
+ * @param allocatorNode The NUMA node identifier with which the chunk is associated.
  * @param allocType The type of the allocation to use (can be session local or global object).
  */
 extern void MemSessionChunkInit(
-    MemSessionChunkHeader* chunk, MemChunkType chunkType, int nodeId, MemAllocType allocType);
+    MemSessionChunkHeader* chunk, MemChunkType chunkType, int allocatorNode, MemAllocType allocType);
 
 /** @struct MemSessionObjectSize Object size helper struct. */
 struct PACKED MemSessionObjectSize {

@@ -42,9 +42,9 @@ void LevelStatisticVariable::Summarize(bool updateTstamp)
 void LevelStatisticVariable::Print(LogLevel logLevel) const
 {
     MOT_LOG(logLevel,
-        "%s={ current level: %" PRId64 " %s, peak: %" PRIu64 " %s [%" PRIu64 " samples] }",
+        "%s={ current level: %" PRIu64 " %s, peak: %" PRIu64 " %s [%" PRIu64 " samples] }",
         m_name,
-        m_levelSaved / m_factor,
+        static_cast<uint64_t>(m_levelSaved) / m_factor,
         m_units,
         m_peakSaved / m_factor,
         m_units,

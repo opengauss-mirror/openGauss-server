@@ -22,7 +22,7 @@
  * -------------------------------------------------------------------------
  */
 
-#include <string.h>
+#include <cstring>
 
 #include "global.h"
 #include "mm_huge_object_allocator.h"
@@ -36,9 +36,9 @@ namespace MOT {
 DECLARE_LOGGER(HugeAlloc, Memory)
 
 // Memory Usage Counters
-static uint64_t memUsedBytes[MEM_MAX_NUMA_NODES];
-static uint64_t memRequestedBytes[MEM_MAX_NUMA_NODES];
-static uint64_t objectCount[MEM_MAX_NUMA_NODES];
+static uint64_t g_memUsedBytes[MEM_MAX_NUMA_NODES];
+static uint64_t g_memRequestedBytes[MEM_MAX_NUMA_NODES];
+static uint64_t g_objectCount[MEM_MAX_NUMA_NODES];
 static void MemSessionRecordHugeChunk(
     MemVirtualHugeChunkHeader* chunkHeader, MemVirtualHugeChunkHeader** chunkHeaderList);
 static void MemSessioUnrecordHugeChunk(
@@ -46,11 +46,11 @@ static void MemSessioUnrecordHugeChunk(
 
 extern void MemHugeInit()
 {
-    errno_t erc = memset_s(memUsedBytes, sizeof(memUsedBytes), 0, sizeof(memUsedBytes));
+    errno_t erc = memset_s(g_memUsedBytes, sizeof(g_memUsedBytes), 0, sizeof(g_memUsedBytes));
     securec_check(erc, "\0", "\0");
-    erc = memset_s(memRequestedBytes, sizeof(memRequestedBytes), 0, sizeof(memRequestedBytes));
+    erc = memset_s(g_memRequestedBytes, sizeof(g_memRequestedBytes), 0, sizeof(g_memRequestedBytes));
     securec_check(erc, "\0", "\0");
-    erc = memset_s(objectCount, sizeof(objectCount), 0, sizeof(objectCount));
+    erc = memset_s(g_objectCount, sizeof(g_objectCount), 0, sizeof(g_objectCount));
     securec_check(erc, "\0", "\0");
 }
 
@@ -82,9 +82,9 @@ extern void* MemHugeAlloc(uint64_t size, int node, MemAllocType allocType, MemVi
             chunkHeader->m_chunk = chunk;
             MemRawChunkDirInsertEx(chunk, alignedSize / (MEM_CHUNK_SIZE_MB * MEGA_BYTE), chunkHeader);
 
-            MOT_ATOMIC_ADD(memUsedBytes[node], alignedSize);
-            MOT_ATOMIC_ADD(memRequestedBytes[node], size);
-            MOT_ATOMIC_INC(objectCount[node]);
+            MOT_ATOMIC_ADD(g_memUsedBytes[node], alignedSize);
+            MOT_ATOMIC_ADD(g_memRequestedBytes[node], size);
+            MOT_ATOMIC_INC(g_objectCount[node]);
 
             if (lock != nullptr) {
                 MemLockAcquire(lock);
@@ -120,9 +120,9 @@ extern void MemHugeFree(MemVirtualHugeChunkHeader* chunkHeader, void* object,
         MemLockRelease(lock);
     }
 
-    MOT_ATOMIC_SUB(memUsedBytes[chunkHeader->m_node], chunkHeader->m_chunkSizeBytes);
-    MOT_ATOMIC_SUB(memRequestedBytes[chunkHeader->m_node], chunkHeader->m_objectSizeBytes);
-    MOT_ATOMIC_DEC(objectCount[chunkHeader->m_node]);
+    MOT_ATOMIC_SUB(g_memUsedBytes[chunkHeader->m_node], chunkHeader->m_chunkSizeBytes);
+    MOT_ATOMIC_SUB(g_memRequestedBytes[chunkHeader->m_node], chunkHeader->m_objectSizeBytes);
+    MOT_ATOMIC_DEC(g_objectCount[chunkHeader->m_node]);
 
     // clear the chunk directory
     MemRawChunkDirRemoveEx(object, chunkHeader->m_chunkSizeBytes / (MEM_CHUNK_SIZE_MB * MEGA_BYTE));
@@ -143,16 +143,41 @@ extern void* MemHugeRealloc(MemVirtualHugeChunkHeader* chunkHeader, void* object
     errno_t erc;
     // locate the proper list to see if the size still fits
     void* newObject = NULL;
+    uint64_t objectSizeBytes = chunkHeader->m_objectSizeBytes;
     if (chunkHeader->m_chunkSizeBytes >= newSizeBytes) {  // new object fits
         newObject = object;                               // size fits, we are done
-        MOT_ATOMIC_SUB(memRequestedBytes[chunkHeader->m_node], chunkHeader->m_objectSizeBytes);
-        MOT_ATOMIC_ADD(memRequestedBytes[chunkHeader->m_node], newSizeBytes);
+        MOT_ATOMIC_SUB(g_memRequestedBytes[chunkHeader->m_node], chunkHeader->m_objectSizeBytes);
+        MOT_ATOMIC_ADD(g_memRequestedBytes[chunkHeader->m_node], newSizeBytes);
         chunkHeader->m_objectSizeBytes = newSizeBytes;
+
+        // attention: when object is reallocated in-place we treat flags a bit differently, but achieve the
+        // same effect, so MEM_REALLOC_COPY has no effect
+        if (flags == MEM_REALLOC_ZERO) {
+            erc = memset_s(newObject, newSizeBytes, 0, newSizeBytes);
+            securec_check(erc, "\0", "\0");
+        } else if (flags == MEM_REALLOC_COPY_ZERO) {
+            // attention: new size may be smaller
+            if (newSizeBytes > objectSizeBytes) {
+                erc = memset_s(((char*)newObject) + objectSizeBytes,
+                    newSizeBytes - objectSizeBytes,
+                    0,
+                    newSizeBytes - objectSizeBytes);
+                securec_check(erc, "\0", "\0");
+            } else {
+#ifdef MOT_DEBUG
+                // set dead land pattern in the reduced tail of the object
+                erc = memset_s(((char*)newObject) + newSizeBytes,
+                    chunkHeader->m_chunkSizeBytes - newSizeBytes,
+                    MEM_DEAD_LAND,
+                    objectSizeBytes - newSizeBytes);
+                securec_check(erc, "\0", "\0");
+#endif
+            }
+        }
     } else {
         // allocate new object, copy/zero data if required and free old object
         newObject = MemHugeAlloc(newSizeBytes, chunkHeader->m_node, chunkHeader->m_allocType, chunkHeaderList, lock);
         if (newObject != NULL) {
-            uint64_t objectSizeBytes = chunkHeader->m_objectSizeBytes;
             if (flags == MEM_REALLOC_COPY) {
                 // attention: new object size may be smaller
                 erc = memcpy_s(newObject, newSizeBytes, object, std::min(newSizeBytes, objectSizeBytes));
@@ -212,9 +237,9 @@ extern void MemHugeGetStats(MemHugeAllocStats* stats)
     errno_t erc = memset_s(stats, sizeof(MemHugeAllocStats), 0, sizeof(MemHugeAllocStats));
     securec_check(erc, "\0", "\0");
     for (uint32_t i = 0; i < g_memGlobalCfg.m_nodeCount; ++i) {
-        stats->m_memUsedBytes[i] = MOT_ATOMIC_LOAD(memUsedBytes[i]);
-        stats->m_memRequestedBytes[i] = MOT_ATOMIC_LOAD(memRequestedBytes[i]);
-        stats->m_objectCount[i] = MOT_ATOMIC_LOAD(objectCount[i]);
+        stats->m_memUsedBytes[i] = MOT_ATOMIC_LOAD(g_memUsedBytes[i]);
+        stats->m_memRequestedBytes[i] = MOT_ATOMIC_LOAD(g_memRequestedBytes[i]);
+        stats->m_objectCount[i] = MOT_ATOMIC_LOAD(g_objectCount[i]);
     }
 }
 

@@ -25,18 +25,22 @@
 #ifndef JIT_HELPERS_H
 #define JIT_HELPERS_H
 
-#include "jit_pgproc.h"
+#include "postgres.h"
+#include "nodes/params.h"
 #include "mot_engine.h"
 
 /*---------------------------  LLVM Access Helpers ---------------------------*/
 extern "C" {
-
 /**
  * @brief Issue debug log message.
  * @param function The function name.
  * @param msg The log message.
  */
 void debugLog(const char* function, const char* msg);
+void debugLogInt(const char* msg, int arg);
+void debugLogString(const char* msg, const char* arg);
+void debugLogStringDatum(const char* msg, int64_t arg);
+void debugLogDatum(const char* msg, Datum value, int isNull, int type);
 
 /*---------------------------  Engine Access Helpers ---------------------------*/
 /**
@@ -82,46 +86,54 @@ void InitKey(MOT::Key* key, MOT::Index* index);
 MOT::Column* getColumnAt(MOT::Table* table, int table_colid);
 
 /**
- * @brief Marks expression evaluated to null or not in the specified argument position.
- * @param arg_pos The ordinal position of the expression.
+ * @brief Marks expression evaluated to null or not.
  * @param isnull Specifies whether the expression evaluated to null.
  */
-void setExprArgIsNull(int arg_pos, int isnull);
+void SetExprIsNull(int isnull);
 
 /**
- * @brief Queries whether an expression in the specified argument position evaluated to null.
- * @param arg_pos The ordinal position of the expression.
- * @return Non-zero value if the expression in the specified argument position evaluated to null,
- * otherwise zero.
+ * @brief Queries whether an expression evaluated to null.
+ * @return Non-zero value if the expression evaluated to null, otherwise zero.
  */
-int getExprArgIsNull(int arg_pos);
+int GetExprIsNull();
+
+/** @brief Sets last evaluated expression collation. */
+void SetExprCollation(int collationId);
+
+/** @brief Retrieves last evaluated expression collation. */
+int GetExprCollation();
 
 /**
  * @brief Retrieves a pooled constant by its identifier.
  * @param constId The identifier of the constant value.
- * @param argPos The ordinal position of the enveloping parameter expression.
  * @return The constant value.
  */
-Datum GetConstAt(int constId, int argPos);
+Datum GetConstAt(int constId);
 
 /**
  * @brief Retrieves a datum parameter from parameters array.
  * @param params The parameter array.
  * @param paramid The zero-based index of the parameter to retrieve.
- * @param arg_pos The ordinal position of the enveloping parameter expression.
  * @return The parameter value.
  */
-Datum getDatumParam(ParamListInfo params, int paramid, int arg_pos);
+Datum getDatumParam(ParamListInfo params, int paramid);
 
 /**
  * @brief Reads a column value from a row.
  * @param table The originating table of the row.
  * @param row The row from which the column value is to be retrieved.
  * @param colid The zero-based index of the column to retrieve.
- * @param arg_pos The ordinal position of the enveloping VAR expression.
+ * @param innerRow Specified whether datum is read from inner row or not (relevant only for direct row access).
+ * @param subQueryIndex Specifies whether datum is read from sub=query result (relevant only for direct row access).
  * @return The column value.
  */
-Datum readDatumColumn(MOT::Table* table, MOT::Row* row, int colid, int arg_pos);
+Datum readDatumColumn(MOT::Table* table, MOT::Row* row, int colid, int innerRow, int subQueryIndex);
+
+/**
+ * @brief Queries whether the directly-accessed row was concurrently deleted.
+ * @return Non-zero value if the row was deleted.
+ */
+int IsDirectRowDeleted(int innerRow);
 
 /**
  * @brief Writes a column value into a row.
@@ -145,28 +157,18 @@ void buildDatumKey(
     MOT::Column* column, MOT::Key* key, Datum value, int index_colid, int offset, int size, int value_type);
 
 /*---------------------------  Invoke PG Operators ---------------------------*/
-// cast operators retain first null parameter as null result
-// other operator will crash if null is provided
-#define APPLY_UNARY_OPERATOR(funcid, name) Datum invoke_##name(Datum arg, int arg_pos);
+Datum JitInvokePGFunction0(PGFunction fptr, int collationId);
+Datum JitInvokePGFunction1(PGFunction fptr, int collationId, int isStrict, Datum arg, int isnull, Oid argType);
+Datum JitInvokePGFunction2(PGFunction fptr, int collationId, int isStrict, Datum arg1, int isnull1, Oid argType1,
+    Datum arg2, int isnull2, Oid argType2);
+Datum JitInvokePGFunction3(PGFunction fptr, int collationId, int isStrict, Datum arg1, int isnull1, Oid argType1,
+    Datum arg2, int isnull2, Oid argType2, Datum arg3, int isnull3, Oid argType3);
+Datum JitInvokePGFunctionN(
+    PGFunction fptr, int collationId, int isStrict, Datum* args, int* isnull, Oid* argTypes, int argCount);
 
-#define APPLY_UNARY_CAST_OPERATOR(funcid, name) Datum invoke_##name(Datum arg, int arg_pos);
-
-#define APPLY_BINARY_OPERATOR(funcid, name) Datum invoke_##name(Datum lhs, Datum rhs, int arg_pos);
-
-#define APPLY_BINARY_CAST_OPERATOR(funcid, name) Datum invoke_##name(Datum lhs, Datum rhs, int arg_pos);
-
-#define APPLY_TERNARY_OPERATOR(funcid, name) Datum invoke_##name(Datum arg1, Datum arg2, Datum arg3, int arg_pos);
-
-#define APPLY_TERNARY_CAST_OPERATOR(funcid, name) Datum invoke_##name(Datum arg1, Datum arg2, Datum arg3, int arg_pos);
-
-APPLY_OPERATORS()
-
-#undef APPLY_UNARY_OPERATOR
-#undef APPLY_BINARY_OPERATOR
-#undef APPLY_TERNARY_OPERATOR
-#undef APPLY_UNARY_CAST_OPERATOR
-#undef APPLY_BINARY_CAST_OPERATOR
-#undef APPLY_TERNARY_CAST_OPERATOR
+/*---------------------------  Memory Allocation ---------------------------*/
+uint8_t* JitMemSessionAlloc(uint32_t size);
+void JitMemSessionFree(uint8_t* ptr);
 
 /*---------------------------  BitmapSet Helpers ---------------------------*/
 /**
@@ -203,9 +205,11 @@ int writeRow(MOT::Row* row, MOT::BitmapSet* bmp);
  * @param table The table to search.
  * @param key The key by which the row is to be searched.
  * @param access_mode_value The required row access mode.
+ * @param innerRow Specified whether searching for an inner row (relevant only for direct row access).
+ * @param subQueryIndex Specifies whether searching for a sub-query row (relevant only for direct row access).
  * @return The requested row, or NULL if the row was not found, or some other failure occurred.
  */
-MOT::Row* searchRow(MOT::Table* table, MOT::Key* key, int access_mode_value);
+MOT::Row* searchRow(MOT::Table* table, MOT::Key* key, int access_mode_value, int innerRow, int subQueryIndex);
 
 /**
  * @brief Creates a new table row.
@@ -234,6 +238,8 @@ int deleteRow();
  * @param row The row.
  */
 void setRowNullBits(MOT::Table* table, MOT::Row* row);
+
+int setConstNullBit(MOT::Table* table, MOT::Row* row, int table_colid, int isnull);
 
 /**
  * @brief Sets the null bit of a row column according to the lastly evaluated expression.
@@ -309,8 +315,8 @@ void adjustKey(MOT::Key* key, MOT::Index* index, unsigned char pattern);
  * @brief Searches an iterator for a range scan.
  * @param index The index in which to search the iterator.
  * @param key The search key.
- * @param forward_scan Specifies whether this is a forward scan. If true then a forward iterator is
- * created (such that the an iterator pointing to the value succeeding the lower bound is returned).
+ * @param forward_scan Specifies whether this is a forward scan. If true then a forward iterator is created (such that
+ * the an iterator pointing to the value succeeding the lower bound is returned).
  * @return The resulting iterator, or NULL if failed.
  */
 MOT::IndexIterator* searchIterator(MOT::Index* index, MOT::Key* key, int forward_scan, int include_bound);
@@ -326,8 +332,8 @@ MOT::IndexIterator* beginIterator(MOT::Index* index);
  * @brief Creates an end-iterator for a range scan.
  * @param index The index in which to search the iterator.
  * @param key The search key.
- * @param forward_scan Specifies whether this is a forward scan. If true then a reverse iterator is
- * created (such that the an iterator pointing to the value preceeding the upper bound is returned).
+ * @param forward_scan Specifies whether this is a forward scan. If true then a reverse iterator is created (such that
+ * the iterator pointing to the value preceding the upper bound is returned).
  * @return The resulting iterator, or NULL if failed.
  */
 MOT::IndexIterator* createEndIterator(MOT::Index* index, MOT::Key* key, int forward_scan, int include_bound);
@@ -343,16 +349,28 @@ MOT::IndexIterator* createEndIterator(MOT::Index* index, MOT::Key* key, int forw
 int isScanEnd(MOT::Index* index, MOT::IndexIterator* itr, MOT::IndexIterator* end_itr, int forward_scan);
 
 /**
- * @brief Retrieves a row from an iterator during a range scan.
+ * @brief Checks whether there is another row during range scan. Cursor is advanced.
+ * @param index The index on which the range scan is performed.
+ * @param itr The begin iterator.
+ * @param endItr The end iterator.
+ * @param forwardScan Specifies whether this is a forward scan.
+ * @return Non-zero value if a row was found, or zero if end of scan reached, or some other failure occurred.
+ */
+int CheckRowExistsInIterator(MOT::Index* index, MOT::IndexIterator* itr, MOT::IndexIterator* endItr, int forwardScan);
+
+/**
+ * @brief Retrieves a row from an iterator during a range scan. Cursor is advanced.
  * @param index The index on which the range scan is performed.
  * @param itr The begin iterator.
  * @param end_itr The end iterator.
  * @param access_mode The required row access mode.
  * @param forward_iterator Specifies whether this is a forward scan.
+ * @param innerRow Specifies whether searching for inner row (relevant only for direct row access).
+ * @param subQueryIndex Specifies whether searching for a sub-query row (relevant only for direct row access).
  * @return The resulting row, or NULL if end of scan reached, or some other failure occurred.
  */
-MOT::Row* getRowFromIterator(
-    MOT::Index* index, MOT::IndexIterator* itr, MOT::IndexIterator* end_itr, int access_mode, int forward_scan);
+MOT::Row* getRowFromIterator(MOT::Index* index, MOT::IndexIterator* itr, MOT::IndexIterator* end_itr, int access_mode,
+    int forward_scan, int innerRow, int subQueryIndex);
 
 /**
  * @brief Destroys an iterator.
@@ -472,46 +490,42 @@ int getStateLimitCounter();
  * @param element_type The Oid of the element type of the array.
  * @param element_count The number of elements in the array.
  */
-void prepareAvgArray(int element_type, int element_count);
+void prepareAvgArray(int aggIndex, int element_type, int element_count);
 
 /** @brief Saves an intermediate AVG() aggregate operator accumulation. */
-Datum loadAvgArray();
+Datum loadAvgArray(int aggIndex);
 
 /** @brief Saves an intermediate AVG() aggregate operator accumulation. */
-void saveAvgArray(Datum avg_array);
+void saveAvgArray(int aggIndex, Datum avg_array);
 
 /** @brief Computes the average value from a final AVG() aggregate operator accumulation. */
-Datum computeAvgFromArray(int element_type);
+Datum computeAvgFromArray(int aggIndex, int element_type);
 
 /*---------------------------  Generic Aggregate Helpers ---------------------------*/
 /** @brief Initializes a aggregated value to zero. */
-void resetAggValue(int element_type);
+void resetAggValue(int aggIndex, int element_type);
 
 /** @brief Retrieves the value of the aggregated value used to implement SUM/MAX/MIN/COUNT() operators. */
-Datum getAggValue();
+Datum getAggValue(int aggIndex);
 
 /** @brief Retrieves the value of the aggregated value used to implement SUM/MAX/MIN/COUNT() operators. */
-void setAggValue(Datum new_value);
+void setAggValue(int aggIndex, Datum new_value);
 
-/*---------------------------  Min/Max Aggregate Helpers ---------------------------*/
-/** @brief Resets the flag recording whether a MAX/MIN value was aggregated (or it is still null). */
-void resetAggMaxMinNull();
+/** @brief Retrieves the flag recording whether SUM/MAX/MIN/COUNT() value was aggregated (or it is still null). */
+int getAggValueIsNull(int aggIndex);
 
-/** @brief Records that a MAX/MIN value was aggregated. */
-void setAggMaxMinNotNull();
-
-/** @brief Retrieves the flag recording whether a MAX/MIN value was aggregated (or it is still null). */
-int getAggMaxMinIsNull();
+/** @brief Sets the flag recording whether SUM/MAX/MIN/COUNT() value was aggregated (or it is still null). */
+int setAggValueIsNull(int aggIndex, int isNull);
 
 /*---------------------------  Distinct Aggregate Helpers ---------------------------*/
 /** @brief Prepares a set of distinct items for DISTINCT() operator. */
-void prepareDistinctSet(int element_type);
+void prepareDistinctSet(int aggIndex, int element_type);
 
 /** @brief Adds an items to the distinct item set. Returns non-zero value if item was added. */
-int insertDistinctItem(int element_type, Datum item);
+int insertDistinctItem(int aggIndex, int element_type, Datum item);
 
 /** @brief Destroys the set of distinct items for DISTINCT() operator. */
-void destroyDistinctSet(int element_type);
+void destroyDistinctSet(int aggIndex, int element_type);
 
 /**
  * @brief Resets a tuple datum to zero value.
@@ -525,18 +539,18 @@ void resetTupleDatum(TupleTableSlot* slot, int tupleColumnId, int zeroType);
  * @brief Reads a tuple datum.
  * @param slot The tuple.
  * @param tuple_colid The zero-based column index of the tuple from which the datum is to be read.
- * @param arg_pos The ordinal position of the enveloping expression.
  * @return The datum read from the tuple.
  */
-Datum readTupleDatum(TupleTableSlot* slot, int tuple_colid, int arg_pos);
+Datum readTupleDatum(TupleTableSlot* slot, int tuple_colid);
 
 /**
  * @brief Writes datum into a tuple.
  * @param slot The tuple.
  * @param tuple_colid The zero-based column index of the tuple into which the datum is to be written.
  * @param datum The datum to be written into the tuple.
+ * @param isnull Specifies whether the datum is null.
  */
-void writeTupleDatum(TupleTableSlot* slot, int tuple_colid, Datum datum);
+void writeTupleDatum(TupleTableSlot* slot, int tuple_colid, Datum datum, int isnull);
 
 /**
  * @brief Reads the datum result of a sub-query.
@@ -565,6 +579,187 @@ MOT::Key* GetSubQuerySearchKey(int subQueryIndex);
 
 /** @brief Retrieves the end-iterator key of a sub-query (LLVM only). */
 MOT::Key* GetSubQueryEndIteratorKey(int subQueryIndex);
+
+/*---------------------------  LLVM try/catch Helpers for stored procedures ---------------------------*/
+
+/**
+ * @brief Called when entering a try-catch block.
+ * @return Zero when processing the try-block, a positive value when processing a throws exception, and negative value
+ * if an error occurred.
+ */
+int8_t* LlvmPushExceptionFrame();
+
+/** @brief Retrieves the jump buffer to the deepest exception frame. */
+int8_t* LlvmGetCurrentExceptionFrame();
+
+/** @brief Called when leaving a try-catch block. */
+int LlvmPopExceptionFrame();
+
+/** @brief Throws an exception value. */
+void LlvmThrowException(int exceptionValue);
+
+/**
+ * @brief Re-throws the recently thrown exception value (only in catch block).
+ */
+void LlvmRethrowException();
+
+/** @brief Retrieves the recently thrown exception value (only in catch block). */
+int LlvmGetExceptionValue();
+
+/** @brief Retrieves the recently thrown exception status (only in catch block). */
+int LlvmGetExceptionStatus();
+
+/** @brief Sets the recently thrown exception status as handled (only in try/catch block). */
+void LlvmResetExceptionStatus();
+
+/** @brief Sets the recently thrown exception value to zero. */
+void LlvmResetExceptionValue();
+
+/** @brief Called when a try-catch block did not handle the current exception. */
+void LlvmUnwindExceptionFrame();
+
+/** @brief Cleans up exception stack due to normal return. */
+void LlvmClearExceptionStack();
+
+/** @brief Helper for debugging. */
+void LLvmPrintFrame(const char* msg, int8_t* frame);
+
+/*---------------------------  Stored Procedure Helpers ---------------------------*/
+/** @brief Abort executed stored procedure with this error code. . */
+void JitAbortFunction(int errorCode);
+
+/** @brief Queries whether any of the given parameters is null. */
+int JitHasNullParam(ParamListInfo params);
+
+/** @brief Queries the number of parameters stored in the given parameter list. */
+int JitGetParamCount(ParamListInfo params);
+
+/** @brief Retrieves the parameter at the specified position from the given parameter list. */
+Datum JitGetParamAt(ParamListInfo params, int paramId);
+
+/** @brief Queries whether the parameter in the given index is null. */
+int JitIsParamNull(ParamListInfo params, int paramId);
+
+/** @brief Retrieves the parameter at the specified position from the given parameter list. */
+Datum* JitGetParamAtRef(ParamListInfo params, int paramId);
+
+/** @brief Queries whether the parameter in the given index is null. */
+bool* JitIsParamNullRef(ParamListInfo params, int paramId);
+
+/** @brief Gets the parameter list associated with the current JIT context used for invoking a stored procedure. */
+ParamListInfo GetInvokeParamListInfo();
+
+/** @brief Destroys a parameter array. */
+void DestroyParamListInfo(ParamListInfo params);
+
+/** @brief Sets a parameter value in the given parameter list. */
+void SetParamValue(ParamListInfo params, int paramId, int paramType, Datum datum, int isNull);
+
+/** @brief Sets a parameter value in the given stored procedure sub-query. */
+void SetSPSubQueryParamValue(int subQueryId, int id, int type, Datum value, int isNull);
+
+/** @brief Invoke the stored procedure referred by the current invoke context. */
+int InvokeStoredProcedure();
+
+/** @brief Queries whether the given slot contains a composite result tuple. */
+int IsCompositeResult(TupleTableSlot* slot);
+
+/** @brief Create datum array for result heap tuple (composite return value). */
+Datum* CreateResultDatums();
+
+/** @brief Create null array for result heap tuple (composite return value). */
+bool* CreateResultNulls();
+
+/** @brief Set result value for result heap tuple (composite return value). */
+void SetResultValue(Datum* datums, bool* nulls, int index, Datum value, int isNull);
+
+/** @brief Creates a result heap tuple for the currently executing jitted stored procedure. */
+Datum CreateResultHeapTuple(Datum* dvalues, bool* nulls);
+
+/** @brief Sets a datum value in a result slot at the given index. */
+void SetSlotValue(TupleTableSlot* slot, int tupleColId, Datum value, int isNull);
+
+/** @brief Retrieves the datum value in a result slot at the given index. */
+Datum GetSlotValue(TupleTableSlot* slot, int tupleColId);
+
+/** @brief Retrieves the datum is-null property in a result slot at the given index. */
+int GetSlotIsNull(TupleTableSlot* slot, int tupleColId);
+
+/** @brief Retrieves the current sub-transaction id. */
+SubTransactionId JitGetCurrentSubTransactionId();
+
+/** @brief Releases all JIT SP active and open sub-transactions. */
+void JitReleaseAllSubTransactions(bool rollback, SubTransactionId untilSubXid);
+
+/** @brief Execute required code at beginning of statement block with exceptions. */
+void JitBeginBlockWithExceptions();
+
+/** @brief Execute required code at end of statement block with exceptions. */
+void JitEndBlockWithExceptions();
+
+/** @brief Execute required code exception handler. */
+void JitCleanupBlockAfterException();
+
+/** @brief Sets the current exception origin. */
+void JitSetExceptionOrigin(int origin);
+
+/** @brief Retrieves the current exception origin. */
+int JitGetExceptionOrigin();
+
+/** @brief Retrieves reference to the current exception origin variable. */
+int* JitGetExceptionOriginRef();
+
+/** @brief Do all clean-up required before returning from jitted SP. */
+void JitCleanupBeforeReturn(SubTransactionId initSubTxnId);
+
+/** @brief Executes a sub-query invoked from a stored procedure. */
+int JitExecSubQuery(int subQueryId, int tcount);
+
+/** @brief Release resources used during execution of non-jittable sub-query. */
+void JitReleaseNonJitSubQueryResources(int subQueryId);
+
+/** @brief Retrieves the number of tuples processes by the last sub-query invoked from a stored procedure. */
+int JitGetTuplesProcessed(int subQueryId);
+
+/** @brief Retrieves datum value from the result tuple of the last sub-query invoked from a stored procedure. */
+Datum JitGetSubQuerySlotValue(int subQueryId, int tupleColId);
+
+/** @brief Retrieves datum is-null from the result tuple of the last sub-query invoked from a stored procedure. */
+int JitGetSubQuerySlotIsNull(int subQueryId, int tupleColId);
+
+/** @brief Retrieves the result heap tuple associated with the composite sub-query. */
+HeapTuple JitGetSubQueryResultHeapTuple(int subQueryId);
+
+/** @brief Retrieves the datum at the given position in the heap tuple. */
+Datum JitGetHeapTupleValue(HeapTuple tuple, int subQueryId, int columnId, int* isNull);
+
+/** @brief Get the execution result of a non-jittable SP query. */
+int JitGetSpiResult(int subQueryId);
+
+/** @brief Converts one datum type to another via string. */
+Datum JitConvertViaString(Datum value, Oid resultType, Oid targetType, int typeMod);
+
+/** @brief Cast datum value. */
+Datum JitCastValue(Datum value, Oid sourceType, Oid targetType, int typeMod, int coercePath, Oid funcId,
+    int coercePath2, Oid funcId2, int nargs, int typeByVal);
+
+/** @brief Saves error information of called function without exception block. */
+void JitSaveErrorInfo(Datum errorMessage, int sqlState, Datum sqlStateString);
+
+/** @brief Retrieves the error message associated with the last SQL error. */
+Datum JitGetErrorMessage();
+
+/** @brief Retrieves the SQL state associated with the last SQL error. */
+int JitGetSqlState();
+
+/** @brief Retrieves the SQL state (string-form) associated with the last SQL error. */
+Datum JitGetSqlStateString();
+
+/** @brief Converts int value to inverse Boolean datum value. */
+Datum JitGetDatumIsNotNull(int isNull);
+
+/** @brief Emit profile data. */
+void EmitProfileData(uint32_t functionId, uint32_t regionId, int beginRegion);
 }  // extern "C"
 
 #endif

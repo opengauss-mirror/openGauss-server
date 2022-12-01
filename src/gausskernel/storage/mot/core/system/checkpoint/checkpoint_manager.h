@@ -47,7 +47,7 @@ class CheckpointManager : public CheckpointManagerCallbacks {
 public:
     CheckpointManager();
 
-    virtual ~CheckpointManager();
+    ~CheckpointManager() override;
 
     bool Initialize();
 
@@ -107,7 +107,12 @@ public:
      * @brief Sets stable row according to the checkpoint state.
      * @param txn Transaction's TxnManger pointer.
      */
-    void ApplyWrite(TxnManager* txnMan, Row* origRow, AccessType type);
+    void ApplyWrite(TxnManager* txnMan, Row* origRow, const Access* access);
+
+    uint32_t GetNumWorkers() const override
+    {
+        return m_numThreads;
+    }
 
     /**
      * @brief Checkpoint task completion callback
@@ -116,11 +121,21 @@ public:
      * @param numSegs number of segments written.
      * @param success Indicates a success or a failure.
      */
-    virtual void TaskDone(Table* table, uint32_t numSegs, bool success);
+    void TaskDone(Table* table, uint32_t numSegs, bool success) override;
 
-    virtual bool ShouldStop() const
+    std::string& GetWorkingDir() override
     {
-        return m_stopFlag;
+        return m_workingDir;
+    }
+
+    bool GetNotAvailableBit() const override
+    {
+        return !m_availableBit;
+    }
+
+    std::list<Table*>& GetTasksList() override
+    {
+        return m_tasksList;
     }
 
     /**
@@ -129,7 +144,12 @@ public:
      * @param errMsg The error's message.
      * @param optionalMsg An optional message to display.
      */
-    virtual void OnError(int errCode, const char* errMsg, const char* optionalMsg = nullptr);
+    void OnError(int errCode, const char* errMsg, const char* optionalMsg) override;
+
+    ThreadNotifier& GetThreadNotifier() override
+    {
+        return m_notifier;
+    }
 
     /**
      * @brief Deletes 'old' checkpoint directories
@@ -159,9 +179,9 @@ public:
      * @param dir The directory path to create
      * @return Boolean value denoting success or failure.
      */
-    static bool CreateCheckpointDir(std::string& dir);
+    static bool CreateCheckpointDir(const std::string& dir);
 
-    uint64_t GetId()
+    uint64_t GetId() const
     {
         return m_id;
     }
@@ -171,7 +191,7 @@ public:
         m_id = id;
     }
 
-    uint64_t GetLastReplayLsn()
+    uint64_t GetLastReplayLsn() const
     {
         return m_lastReplayLsn;
     }
@@ -188,7 +208,7 @@ public:
 
     bool GetCheckpointDirName(std::string& dirName);
 
-    bool GetCheckpointWorkingDir(std::string& workingDir);
+    bool GetCheckpointWorkingDir(std::string& workingDir) const;
 
     CheckpointManager(const CheckpointManager& orig) = delete;
 
@@ -225,7 +245,9 @@ private:
     CheckpointWorkerPool* m_checkpointers = nullptr;
 
     // Number of threads to run
-    int m_numThreads;
+    uint32_t m_numThreads;
+
+    ThreadNotifier m_notifier;
 
     // mutex for safeguarding mapfile and tasks queues access
     std::mutex m_tasksMutex;
@@ -234,9 +256,6 @@ private:
 
     // Checkpoint segments size threshold
     uint32_t m_cpSegThreshold;
-
-    // Signal working threads to exit
-    volatile bool m_stopFlag;
 
     // Indicates checkpoint has ended
     volatile bool m_checkpointEnded;
@@ -268,6 +287,9 @@ private:
     // last seen recovery lsn
     uint64_t m_lastReplayLsn;
 
+    // Current working dir
+    std::string m_workingDir;
+
     // The most recent segment's lsn that was inserted to the in-process map
     uint64_t m_inProcessTxnsLsn;
 
@@ -292,7 +314,7 @@ private:
         m_lsn = lsn;
     }
 
-    uint64_t GetLsn()
+    uint64_t GetLsn() const
     {
         return m_lsn;
     }
@@ -310,12 +332,6 @@ private:
     }
 
     /**
-     * @brief Creates the checkpoint directory.
-     * @return Boolean value denoting success or failure.
-     */
-    bool CreateCheckpointDir();
-
-    /**
      * @brief Performs checkpoint completion tasks:
      * updates control file, creates the map file
      * and 2pc recovery file
@@ -323,7 +339,7 @@ private:
     void CompleteCheckpoint();
 
     /**
-     * @brief Performs the checkpoint's Capture phase
+     * @brief Performs the checkpoint's Capture phase.
      */
     void Capture();
 
@@ -345,11 +361,6 @@ private:
     void DestroyCheckpointers();
 
     /**
-     * @brief Creates the checkpoint threads
-     */
-    void CreateCheckpointers();
-
-    /**
      * @brief Ensures that before moving to a new state, all transactions that
      * started committing on previous phase will complete. This is needed
      * in order to ensure that previous counter is zeroed before moving
@@ -363,10 +374,10 @@ private:
 
     inline bool IsAutoCompletePhase() const
     {
-        if (m_phase == PREPARE)
+        if (m_phase == PREPARE) {
             return true;
-        else
-            return false;
+        }
+        return false;
     }
 
     /**
@@ -377,23 +388,16 @@ private:
     bool CreateCheckpointMap();
 
     /**
-     * @brief Saves the in-process transaction data for 2pc recovery
-     * purposes during the checkpoint.
+     * @brief Saves pending transaction data.
      * @return Boolean value denoting success or failure.
      */
-    bool CreateTpcRecoveryFile();
+    bool CreatePendingRecoveryDataFile();
 
     /**
      * @brief Creates a file that indicates checkpoint completion.
      * @return Boolean value denoting success or failure.
      */
     bool CreateEndFile();
-
-    /**
-     * @brief Serializes inProcess transactions to disk
-     * @return RC value denoting the status of the operation.
-     */
-    RC SerializeInProcessTxns(int fd);
 
     void ResetFlags();
 

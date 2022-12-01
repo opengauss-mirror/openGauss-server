@@ -26,7 +26,7 @@
 #ifndef MOT_CPU_CYCLE_LEVEL_TIME_H
 #define MOT_CPU_CYCLE_LEVEL_TIME_H
 
-#include <stdint.h>
+#include <cstdint>
 
 namespace MOT {
 /**

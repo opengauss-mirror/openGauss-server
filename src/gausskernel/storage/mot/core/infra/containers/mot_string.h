@@ -30,11 +30,11 @@
 #include "infra.h"
 #include "mot_error_codes.h"
 
-#include <string.h>
-#include <stdio.h>
-#include <stdarg.h>
-#include <wchar.h>
-#include <ctype.h>
+#include <cstring>
+#include <cstdio>
+#include <cstdarg>
+#include <cwchar>
+#include <cctype>
 
 #include <utility>
 
@@ -52,6 +52,8 @@ public:
      * @brief Default constructor.
      * @param size_limit The upper size limit for the string length.
      * @param capacity The initial capacity for the string.
+     * @note Caller needs to call @ref is_valid() in order to validate that the constructor allocated memory
+     * successfully as requested.
      */
     explicit mot_basic_string(uint32_t sizeLimit = DEFAULT_SIZE_LIMIT, uint32_t capacity = INIT_CAPACITY)
         : _str(nullptr), _size(0), _capacity(0), _size_limit(sizeLimit)
@@ -68,6 +70,8 @@ public:
     /**
      * @brief Copy constructor.
      * @param other The object to copy the string from.
+     * @note Caller needs to call @ref is_valid() in order to validate that the constructor allocated memory
+     * successfully as requested.
      */
     mot_basic_string(const mot_basic_string& other) : mot_basic_string(other._size_limit, other._capacity)
     {
@@ -91,27 +95,36 @@ public:
     /**
      * @brief Constructs a string object from another null-terminated c-string.
      * @param str The string with which the object is to be initialized.
+     * @note Caller needs to call @ref is_valid() in order to validate that the constructor allocated memory
+     * successfully as requested.
      */
     mot_basic_string(const char* str) : mot_basic_string()  // call default constructor
     {
-        assign(str);
+        if (!assign(str)) {
+            mot_infra_report_error(MOT_ERROR_OOM, "", "Failed to construct string: %s", str);
+        }
     }
 
     /**
      * @brief Constructs a string object from another c-string.
      * @param str The string with which the object is to be initialized.
      * @param n The number of character to copy from the source string.
+     * @note Caller needs to call @ref is_valid() in order to validate that the constructor allocated memory
+     * successfully as requested.
      */
     mot_basic_string(const char* str, size_t n) : mot_basic_string()  // call default constructor
     {
-        assign(str, n);
+        if (!assign(str, n)) {
+            mot_infra_report_error(MOT_ERROR_OOM, "", "Failed to construct %zu chars string: %.*s", n, n, str);
+        }
     }
 
     /** @brief Destructor. */
     ~mot_basic_string() noexcept
     {
-        if (_str) {
+        if (_str != nullptr) {
             Allocator::free(_str);
+            _str = nullptr;
         }
     }
 
@@ -297,7 +310,7 @@ public:
             } else {
                 uint32_t trailingWhitespaceCount = count_trail_ws();
                 uint32_t orgSize = _size;
-                _size = _size - leadingWhitespaceCount - trailingWhitespaceCount;
+                _size = (_size - leadingWhitespaceCount) - trailingWhitespaceCount;
                 errno_t erc = memmove_s(_str, orgSize, _str + leadingWhitespaceCount, _size);
                 securec_check(erc, "\0", "\0");
             }
@@ -478,8 +491,8 @@ public:
             upto_pos = _size;
         }
         for (uint32_t i = 0; i < upto_pos; ++i) {
-            if (_str[upto_pos - i - 1] == c) {
-                return upto_pos - i - 1;
+            if (_str[(upto_pos - i) - 1] == c) {
+                return (upto_pos - i) - 1;
             }
         }
         return npos;
@@ -583,7 +596,7 @@ private:
                 _size_limit);
         } else {
             // align and check with limit
-            uint32_t alignedCapacity = (new_capacity + ALIGNMENT - 1) / ALIGNMENT * ALIGNMENT;
+            uint32_t alignedCapacity = ((new_capacity + ALIGNMENT - 1) / ALIGNMENT) * ALIGNMENT;
             if (alignedCapacity > _size_limit) {
                 mot_infra_report_error(MOT_ERROR_RESOURCE_LIMIT,
                     "",
@@ -615,7 +628,7 @@ private:
             } else {
                 newPtr = Allocator::allocate(selectedCapacity);
             }
-            if (newPtr != NULL) {
+            if (newPtr != nullptr) {
                 _str = (char*)newPtr;
                 _capacity = selectedCapacity;
                 result = true;

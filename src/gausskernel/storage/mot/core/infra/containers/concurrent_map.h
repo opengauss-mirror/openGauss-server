@@ -49,12 +49,12 @@ public:
      * @param rwlock The lock to manage.
      * @param lock_mode Specifies whether locking for read or write.
      */
-    inline ScopedRWLock(pthread_rwlock_t* rwlock, RWLockMode lock_mode) : _rwlock(rwlock)
+    ScopedRWLock(pthread_rwlock_t* rwlock, RWLockMode lock_mode) : _rwlock(rwlock)
     {
         if (lock_mode == RWLockRead) {
-            pthread_rwlock_rdlock(_rwlock);
+            (void)pthread_rwlock_rdlock(_rwlock);
         } else {
-            pthread_rwlock_wrlock(_rwlock);
+            (void)pthread_rwlock_wrlock(_rwlock);
         }
     }
 
@@ -63,16 +63,10 @@ public:
      */
     ~ScopedRWLock()
     {
-        pthread_rwlock_unlock(_rwlock);
+        (void)pthread_rwlock_unlock(_rwlock);
         _rwlock = nullptr;
     }
 };
-
-/** @define Helper macro for scoped-locking a read-write lock for reading purposes (shared-access). */
-#define SCOPED_RWLOCK_READ(rwlock) ScopedRWLock _scoped_read_lock(rwlock, ScopedRWLock::RWLockRead);
-
-/** @define Helper macro for scoped-locking a read-write lock for writing purposes (unique access). */
-#define SCOPED_RWLOCK_WRITE(rwlock) ScopedRWLock _scoped_read_lock(rwlock, ScopedRWLock::RWLockWrite);
 
 /**
  * @class ConcurrentMap<id_t, obj_t>
@@ -97,13 +91,13 @@ public:
     /** @brief Constructor. */
     ConcurrentMap()
     {
-        pthread_rwlock_init(&_rwlock, NULL);
+        (void)pthread_rwlock_init(&_rwlock, NULL);
     }
 
     /** @brief Destruct. */
     ~ConcurrentMap()
     {
-        pthread_rwlock_destroy(&_rwlock);
+        (void)pthread_rwlock_destroy(&_rwlock);
     }
 
     /**
@@ -115,7 +109,7 @@ public:
      */
     inline bool insert(const id_t& id, obj_t& obj)
     {
-        SCOPED_RWLOCK_WRITE(&_rwlock);
+        ScopedRWLock _scoped_lock(&_rwlock, ScopedRWLock::RWLockWrite);
         std::pair<map_itr_t, bool> pairib = _obj_map.insert(typename obj_map_t::value_type(id, obj));
         return pairib.second;
     }
@@ -128,7 +122,7 @@ public:
      */
     inline bool get(const id_t& id, obj_t* obj)
     {
-        SCOPED_RWLOCK_READ(&_rwlock);
+        ScopedRWLock _scoped_lock(&_rwlock, ScopedRWLock::RWLockRead);
         bool result = false;
         map_itr_t itr = _obj_map.find(id);
         if (itr != _obj_map.end()) {
@@ -145,11 +139,11 @@ public:
      */
     inline bool remove(const id_t& id)
     {
-        SCOPED_RWLOCK_WRITE(&_rwlock);
+        ScopedRWLock _scoped_lock(&_rwlock, ScopedRWLock::RWLockWrite);
         bool result = false;
         map_itr_t itr = _obj_map.find(id);
         if (itr != _obj_map.end()) {
-            _obj_map.erase(itr);
+            (void)_obj_map.erase(itr);
             result = true;
         }
         return result;
@@ -171,7 +165,7 @@ public:
      */
     inline size_t size()
     {
-        SCOPED_RWLOCK_READ(&_rwlock);
+        ScopedRWLock _scoped_lock(&_rwlock, ScopedRWLock::RWLockRead);
         return _obj_map.size();
     }
 
@@ -181,7 +175,7 @@ public:
      */
     inline bool empty()
     {
-        SCOPED_RWLOCK_READ(&_rwlock);
+        ScopedRWLock _scoped_lock(&_rwlock, ScopedRWLock::RWLockRead);
         return _obj_map.empty();
     }
 
@@ -191,7 +185,7 @@ public:
     /** @brief Thread-safe visiting of the container elements. */
     inline void for_each(functor f)
     {
-        SCOPED_RWLOCK_READ(&_rwlock);
+        ScopedRWLock _scoped_lock(&_rwlock, ScopedRWLock::RWLockRead);
         map_itr_t itr = _obj_map.begin();
         while (itr != _obj_map.end()) {
             f(itr->first, itr->second);

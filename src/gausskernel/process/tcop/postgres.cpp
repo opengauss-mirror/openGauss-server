@@ -1269,9 +1269,7 @@ PlannedStmt* pg_plan_query(Query* querytree, int cursorOptions, ParamListInfo bo
 
     /* Planner must have a snapshot in case it calls user-defined functions. */
     if (!GTM_LITE_MODE) {  /* Skip if GTMLite */
-#ifndef ENABLE_MOT  /* To support skipping snapshot in case of MOT tables. */
        Assert(ActiveSnapshotSet());
-#endif
     }
     TRACE_POSTGRESQL_QUERY_PLAN_START();
 
@@ -2645,16 +2643,6 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
         }
         SetCurrentTransactionStorageEngine(storageEngineType);
 
-        if (!IsTransactionExitStmt(parsetree) && storageEngineType == SE_TYPE_MIXED) {
-            ereport(ERROR, (errcode(ERRCODE_FDW_CROSS_STORAGE_ENGINE_QUERY_NOT_SUPPORTED), errmodule(MOD_MOT),
-                    errmsg("Cross storage engine query is not supported")));
-        }
-
-        if (!IsTransactionExitStmt(parsetree) && IsMixedEngineUsed()) {
-            ereport(ERROR, (errcode(ERRCODE_FDW_CROSS_STORAGE_ENGINE_TRANSACTION_NOT_SUPPORTED), errmodule(MOD_MOT),
-                    errmsg("Cross storage engine transaction is not supported")));
-        }
-
         /* block MOT engine queries in sub-transactions */
         if (!IsTransactionExitStmt(parsetree) && IsMOTEngineUsedInParentTransaction() && IsMOTEngineUsed()) {
             ereport(ERROR, (errcode(ERRCODE_FDW_OPERATION_NOT_SUPPORTED), errmodule(MOD_MOT),
@@ -2665,13 +2653,6 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
             /* Explicit prepare transaction is not supported for memory table */
             ereport(ERROR, (errcode(ERRCODE_FDW_OPERATION_NOT_SUPPORTED), errmodule(MOD_MOT),
                     errmsg("Explicit prepare transaction is not supported for memory table")));
-        }
-
-        /* check for MOT update of indexed field. Can check only the querytree head, no need for drill down */
-        if (!IsTransactionExitStmt(parsetree) &&
-                (querytree_list != NULL && CheckMotIndexedColumnUpdate((Query*)linitial(querytree_list)))) {
-            ereport(ERROR, (errcode(ERRCODE_FDW_UPDATE_INDEXED_FIELD_NOT_SUPPORTED), errmodule(MOD_MOT),
-                    errmsg("Update of indexed column is not supported for memory table")));
         }
 #endif
         
@@ -3310,30 +3291,6 @@ static void exec_plan_with_params(StringInfo input_message)
 }
 #endif
 
-#ifdef ENABLE_MOT
-static void TryMotJitCodegenQuery(const char* queryString, CachedPlanSource* psrc, Query* query)
-{
-    // Try to generate LLVM jitted code - first cleanup jit of previous run.
-    if (psrc->mot_jit_context != NULL) {
-        // NOTE: context is cleaned up during end of session, this should not happen,
-        // maybe a warning should be issued
-        psrc->mot_jit_context = NULL;
-    }
-
-    if (JitExec::IsMotCodegenPrintEnabled()) {
-        elog(LOG, "Attempting to generate MOT jitted code for query: %s\n", queryString);
-    }
-
-    JitExec::JitPlan* jitPlan = JitExec::IsJittable(query, queryString);
-    if (jitPlan != NULL) {
-        psrc->mot_jit_context = JitExec::JitCodegenQuery(query, queryString, jitPlan);
-        if ((psrc->mot_jit_context == NULL) && JitExec::IsMotCodegenPrintEnabled()) {
-            elog(LOG, "Failed to generate jitted MOT function for query %s\n", queryString);
-        }
-    }
-}
-#endif
-
 #ifdef ENABLE_MULTIPLE_NODES
 /* get param oid from paramTypeNames, and save into paramTypes. */
 static void GetParamOidFromName(char** paramTypeNames, Oid* paramTypes, int numParams)
@@ -3372,6 +3329,7 @@ static void exec_parse_message(const char* query_string, /* string to execute */
     List* parsetree_list = NULL;
     Node* raw_parse_tree = NULL;
     const char* commandTag = NULL;
+    Query* query = NULL;
     List* querytree_list = NULL;
     CachedPlanSource* psrc = NULL;
     bool is_named = false;
@@ -3555,7 +3513,6 @@ static void exec_parse_message(const char* query_string, /* string to execute */
             (errcode(ERRCODE_SYNTAX_ERROR), errmsg("cannot insert multiple commands into a prepared statement")));
 
     if (parsetree_list != NIL) {
-        Query* query = NULL;
         bool snapshot_set = false;
         int i;
 
@@ -3629,23 +3586,10 @@ static void exec_parse_message(const char* query_string, /* string to execute */
         /* set the plan's storage engine */
         psrc->storageEngineType = storageEngineType;
 
-        if (!IsTransactionExitStmt(raw_parse_tree) && storageEngineType == SE_TYPE_MIXED) {
-            ereport(ERROR, (errcode(ERRCODE_FDW_CROSS_STORAGE_ENGINE_QUERY_NOT_SUPPORTED), errmodule(MOD_MOT),
-                    errmsg("Cross storage engine query is not supported")));
-        }
-
-        if (psrc->storageEngineType == SE_TYPE_MOT && !IS_PGXC_COORDINATOR && JitExec::IsMotCodegenEnabled()) {
-            // MOT LLVM
-            TryMotJitCodegenQuery(query_string, psrc, query);
-        }
         /* gpc does not support MOT engine */
         if (ENABLE_CN_GPC && psrc->gpc.status.IsSharePlan() &&
-            (psrc->storageEngineType == SE_TYPE_MOT || psrc->storageEngineType == SE_TYPE_MIXED)) {
+            (storageEngineType == SE_TYPE_MOT || storageEngineType == SE_TYPE_MIXED)) {
             psrc->gpc.status.SetKind(GPC_UNSHARED);
-        }
-        if (!IsTransactionExitStmt(raw_parse_tree) && CheckMotIndexedColumnUpdate(query)) {
-            ereport(ERROR, (errcode(ERRCODE_FDW_UPDATE_INDEXED_FIELD_NOT_SUPPORTED), errmodule(MOD_MOT),
-                    errmsg("Update of indexed column is not supported for memory table")));
         }
 #endif
 
@@ -3795,6 +3739,15 @@ static void exec_parse_message(const char* query_string, /* string to execute */
         u_sess->pcache_cxt.unnamed_stmt_psrc = psrc;
     }
 
+#ifdef ENABLE_MOT
+    // Try MOT JIT code generation only after the plan source is saved.
+    if (query != NULL && (psrc->storageEngineType == SE_TYPE_MOT || psrc->storageEngineType == SE_TYPE_UNSPECIFIED) &&
+        !IS_PGXC_COORDINATOR && JitExec::IsMotCodegenEnabled()) {
+        // MOT JIT code generation
+        TryMotJitCodegenQuery(query_string, psrc, query);
+    }
+#endif
+
     MemoryContextSwitchTo(oldcontext);
 
 pass_parsing:
@@ -3895,12 +3848,7 @@ static int getSingleNodeIdx(StringInfo input_message, CachedPlanSource* psrc, co
      * snapshot active till we're done, so that plancache.c doesn't have to
      * take new ones.
      */
-#ifdef ENABLE_MOT
-    if (!(psrc->storageEngineType == SE_TYPE_MOT) && !GTM_LITE_MODE &&
-        (numParams > 0 || analyze_requires_snapshot(psrc->raw_parse_tree))) {
-#else
     if (!GTM_LITE_MODE && (numParams > 0 || analyze_requires_snapshot(psrc->raw_parse_tree))) {
-#endif
         PushActiveSnapshot(GetTransactionSnapshot());
         snapshot_set = true;
     }
@@ -4445,10 +4393,6 @@ static void exec_bind_message(StringInfo input_message)
 #ifdef ENABLE_MOT
     /* set transaction storage engine and check for cross transaction violation */
     SetCurrentTransactionStorageEngine(psrc->storageEngineType);
-    if (!IsTransactionExitStmt(psrc->raw_parse_tree) && IsMixedEngineUsed()) {
-        ereport(ERROR, (errcode(ERRCODE_FDW_CROSS_STORAGE_ENGINE_TRANSACTION_NOT_SUPPORTED), errmodule(MOD_MOT),
-            errmsg("Cross storage engine transaction is not supported")));
-    }
 
     /* block MOT engine queries in sub-transactions */
     if (!IsTransactionExitStmt(psrc->raw_parse_tree) && IsMOTEngineUsedInParentTransaction() && IsMOTEngineUsed()) {
@@ -4694,12 +4638,7 @@ static void exec_bind_message(StringInfo input_message)
      * snapshot active till we're done, so that plancache.c doesn't have to
      * take new ones.
      */
-#ifdef ENABLE_MOT
-    if (!(psrc->storageEngineType == SE_TYPE_MOT) &&
-        (numParams > 0 || analyze_requires_snapshot(psrc->raw_parse_tree))) {
-#else
     if (numParams > 0 || analyze_requires_snapshot(psrc->raw_parse_tree)) {
-#endif
         PushActiveSnapshot(GetTransactionSnapshot());
         snapshot_set = true;
     }
@@ -5752,6 +5691,10 @@ void finish_xact_command(void)
         if (SHOW_DEBUG_MESSAGE()) {
             ereport(DEBUG3, (errmsg_internal("CommitTransactionCommand")));
         }
+
+#ifdef ENABLE_MOT
+        CallXactCallbacks(XACT_EVENT_STMT_FINISH);
+#endif
 
         CommitTransactionCommand();
 
@@ -10608,6 +10551,19 @@ static void exec_one_in_batch(CachedPlanSource* psrc, ParamListInfo params, int 
 
     OpFusion::clearForCplan((OpFusion*)psrc->opFusionObj, psrc);
 
+#ifdef ENABLE_MOT
+    /*
+     * MOT JIT Execution:
+     * Assist in distinguishing query boundaries in case of range query when client uses batches. This allows us to
+     * know a new query started, and in case a previous execution did not fetch all records (since user is working in
+     * batch-mode, and can decide to quit fetching in the middle), using this information we can infer this is a new
+     * scan, and old scan state should be discarded.
+     */
+    if (psrc->mot_jit_context != NULL) {
+        JitResetScan(psrc->mot_jit_context);
+    }
+#endif
+
     if (psrc->opFusionObj != NULL) {
         (void)RevalidateCachedQuery(psrc);
         OpFusion *opFusionObj = (OpFusion *)(psrc->opFusionObj);
@@ -10695,19 +10651,6 @@ static void exec_one_in_batch(CachedPlanSource* psrc, ParamListInfo params, int 
         if (*gpcCopyStmts != NULL)
             portal->stmts = *gpcCopyStmts;
     }
-
-#ifdef ENABLE_MOT
-    /*
-     * MOT JIT Execution:
-     * Assist in distinguishing query boundaries in case of range query when client uses batches. This allows us to
-     * know a new query started, and in case a previous execution did not fetch all records (since user is working in
-     * batch-mode, and can decide to quit fetching in the middle), using this information we can infer this is a new
-     * scan, and old scan state should be discarded.
-     */
-    if (psrc->mot_jit_context != NULL) {
-        JitResetScan(psrc->mot_jit_context);
-    }
-#endif
 
     bool checkSQLBypass  = IS_PGXC_DATANODE && !psrc->gpc.status.InShareTable() &&
                            (psrc->cplan == NULL) && (psrc->is_checked_opfusion == false);

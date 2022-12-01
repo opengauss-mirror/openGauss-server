@@ -176,11 +176,12 @@ extern void MemSessionLargeBufferPoolFree(
     MemSessionLargeBufferPool* bufferPool, void* buffer, MemSessionLargeBufferHeader** bufferHeaderList)
 {
     // locate the proper list
+    bool bufferFound = false;
     MOT_LOG_DEBUG("Freeing large buffer %p", buffer);
     for (uint32_t i = 0; i < bufferPool->m_bufferListCount; ++i) {
         int bufferIndex = MemSessionLargeBufferListGetIndex(bufferPool->m_bufferLists[i], buffer);
         if (bufferIndex != -1) {
-            MOT_LOG_DEBUG("Freeing large buffer %p into buffer list %u (real size %u)",
+            MOT_LOG_DEBUG("Freeing large buffer %p into buffer list %u (real size %" PRIu64 ")",
                 buffer,
                 i,
                 bufferPool->m_bufferLists[i]->m_bufferSize);
@@ -188,8 +189,13 @@ extern void MemSessionLargeBufferPoolFree(
                 (MemSessionLargeBufferHeader*)(bufferPool->m_bufferLists[i]->m_bufferHeaderList + bufferIndex);
             MemSessionUnrecordLargeBuffer(bufferHeader, bufferHeaderList);
             MemSessionLargeBufferListFree(bufferPool->m_bufferLists[i], bufferHeader);
+            bufferFound = true;
             break;
         }
+    }
+    if (!bufferFound) {
+        MOT_LOG_PANIC("Free of invalid session large buffer %p", buffer);
+        MOTAbort(buffer);
     }
 }
 
@@ -207,11 +213,37 @@ extern void* MemSessionLargeBufferPoolRealloc(MemSessionLargeBufferPool* bufferP
             MemSessionLargeBufferHeader* bufferHeader =
                 (MemSessionLargeBufferHeader*)(bufferPool->m_bufferLists[i]->m_bufferHeaderList +
                                                (uint32_t)bufferIndex);
+            uint64_t objectSizeBytes = bufferHeader->m_realObjectSize;
             if (bufferPool->m_bufferLists[i]->m_bufferSize >= newSizeBytes) {
                 // new size fits in existing buffer, so just update real size, and return current buffer
                 bufferHeader->m_realObjectSize = newSizeBytes;
                 newBuffer = buffer;
                 MOT_LOG_DEBUG("Large buffer %p is big enough for reallocation", buffer);
+
+                // attention: when object is reallocated in-place we treat flags a bit differently, but achieve the
+                // same effect, so MEM_REALLOC_COPY has no effect
+                if (flags == MEM_REALLOC_ZERO) {
+                    erc = memset_s(newBuffer, newSizeBytes, 0, newSizeBytes);
+                    securec_check(erc, "\0", "\0");
+                } else if (flags == MEM_REALLOC_COPY_ZERO) {
+                    // attention: new size may be smaller
+                    if (newSizeBytes > objectSizeBytes) {
+                        erc = memset_s(((char*)newBuffer) + objectSizeBytes,
+                            newSizeBytes - objectSizeBytes,
+                            0,
+                            newSizeBytes - objectSizeBytes);
+                        securec_check(erc, "\0", "\0");
+                    } else {
+#ifdef MOT_DEBUG
+                        // set dead land pattern in the reduced tail of the object
+                        erc = memset_s(((char*)newBuffer) + newSizeBytes,
+                            bufferPool->m_bufferLists[i]->m_bufferSize - newSizeBytes,
+                            MEM_DEAD_LAND,
+                            objectSizeBytes - newSizeBytes);
+                        securec_check(erc, "\0", "\0");
+#endif
+                    }
+                }
             } else {
                 // new size does not fit in existing buffer, so allocate new buffer, and copy/zero data if required and
                 // free old buffer
@@ -219,7 +251,6 @@ extern void* MemSessionLargeBufferPoolRealloc(MemSessionLargeBufferPool* bufferP
                 newBuffer = MemSessionLargeBufferPoolAlloc(bufferPool, newSizeBytes, bufferHeaderList);
                 if (newBuffer != nullptr) {
                     MOT_LOG_DEBUG("Reallocated buffer %p into %p", buffer, newBuffer);
-                    uint64_t objectSizeBytes = bufferHeader->m_realObjectSize;
                     if (flags == MEM_REALLOC_COPY) {
                         // attention: new size may be smaller than object size
                         erc = memcpy_s(newBuffer, newSizeBytes, buffer, std::min(newSizeBytes, objectSizeBytes));
@@ -287,12 +318,18 @@ static void MemSessionUnrecordLargeBuffer(
 extern uint64_t MemSessionLargeBufferPoolGetObjectSize(MemSessionLargeBufferPool* bufferPool, void* buffer)
 {
     uint64_t result = 0;
+    bool objectFound = false;
     for (uint32_t i = 0; i < bufferPool->m_bufferListCount; ++i) {
         int bufferIndex = MemSessionLargeBufferListGetIndex(bufferPool->m_bufferLists[i], buffer);
         if (bufferIndex != -1) {
             result = MemSessionLargeBufferListGetRealObjectSize(bufferPool->m_bufferLists[i], buffer);
+            objectFound = true;
             break;
         }
+    }
+    if (!objectFound) {
+        MOT_LOG_PANIC("Failed to get real size of invalid session large buffer %p", buffer);
+        MOTAbort(buffer);
     }
     return result;
 }
@@ -406,9 +443,17 @@ static int InitPoolLists(MemSessionLargeBufferPool* bufferPool)
 
     // allocate array of lists
     bufferPool->m_bufferListCount = ComputeBufferListCount(bufferPool->m_maxObjectSizeBytes);
-    MOT_LOG_TRACE("Found %u buffer lists according to max object size %" PRIu64,
+    MOT_LOG_TRACE("Found %u buffer lists according to max object size %" PRIu64 " bytes",
         bufferPool->m_bufferListCount,
         bufferPool->m_maxObjectSizeBytes);
+    if (bufferPool->m_bufferListCount == 0) {
+        MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
+            "Session Large Buffer Pool Initialization",
+            "Failed to compute list count for object size %" PRIu64 " bytes",
+            bufferPool->m_maxObjectSizeBytes);
+        return MOT_ERROR_INTERNAL;
+    }
+
     uint64_t allocSize = sizeof(MemSessionLargeBufferList*) * bufferPool->m_bufferListCount;
     bufferPool->m_bufferLists = (MemSessionLargeBufferList**)MemNumaAllocLocal(allocSize, bufferPool->m_node);
     if (unlikely(bufferPool->m_bufferLists == nullptr)) {
@@ -519,8 +564,8 @@ extern "C" void MemSessionLargeBufferPoolDump(void* arg)
 
     MOT::StringBufferApply([pool](MOT::StringBuffer* stringBuffer) {
         MOT::MemSessionLargeBufferPoolToString(0, "Debug Dump", pool, stringBuffer, MOT::MEM_REPORT_DETAILED);
-        fprintf(stderr, "%s", stringBuffer->m_buffer);
-        fflush(stderr);
+        (void)fprintf(stderr, "%s", stringBuffer->m_buffer);
+        (void)fflush(stderr);
     });
 }
 
@@ -530,7 +575,7 @@ extern "C" int MemSessionLargeBufferPoolAnalyze(void* pool, void* buffer)
     MOT::MemSessionLargeBufferPool* bufferPool = (MOT::MemSessionLargeBufferPool*)pool;
     for (uint32_t i = 0; i < bufferPool->m_bufferListCount; ++i) {
         if (MemSessionLargeBufferListAnalyze(bufferPool->m_bufferLists[i], buffer)) {
-            fprintf(
+            (void)fprintf(
                 stderr, "Buffer %p found in session large buffer list %u on node %d\n", buffer, i, bufferPool->m_node);
             found = 1;
             break;

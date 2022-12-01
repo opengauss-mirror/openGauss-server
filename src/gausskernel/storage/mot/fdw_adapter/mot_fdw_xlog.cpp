@@ -31,7 +31,6 @@
 #include "access/xlog.h"
 #include "mot_fdw_xlog.h"
 #include "mot_engine.h"
-#include "recovery_manager.h"
 #include "miscadmin.h"
 
 bool IsValidEntry(uint8 code)
@@ -41,7 +40,7 @@ bool IsValidEntry(uint8 code)
 
 void RedoTransactionCommit(TransactionId xid, void* arg)
 {
-    MOT::GetRecoveryManager()->CommitRecoveredTransaction((uint64_t)xid);
+    (void)MOT::GetRecoveryManager()->CommitTransaction((uint64_t)xid);
 }
 
 MOT::TxnCommitStatus GetTransactionStateCallback(uint64_t transactionId)
@@ -68,7 +67,7 @@ void MOTRedo(XLogReaderState* record)
     size_t len = XLogRecGetDataLen(record);
     uint64_t lsn = record->EndRecPtr;
     if (!IsValidEntry(recordType)) {
-        elog(ERROR, "MOTRedo: invalid op code %u", recordType);
+        elog(ERROR, "MOTRedo: invalid op code %" PRIu8, recordType);
     }
     if (MOT::GetRecoveryManager()->IsErrorSet() || !MOT::GetRecoveryManager()->ApplyRedoLog(lsn, data, len)) {
         // we treat errors fatally.
@@ -86,7 +85,7 @@ uint64_t XLOGLogger::AddToLog(uint8_t* data, uint32_t size)
     START_CRIT_SECTION();
     XLogBeginInsert();
     XLogRegisterData((char*)data, size);
-    XLogInsert(RM_MOT_ID, MOT_REDO_DATA);
+    (void)XLogInsert(RM_MOT_ID, MOT_REDO_DATA);
     END_CRIT_SECTION();
     return size;
 }

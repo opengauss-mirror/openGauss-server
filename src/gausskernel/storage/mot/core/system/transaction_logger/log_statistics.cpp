@@ -61,18 +61,18 @@ LogStatisticsProvider::LogStatisticsProvider()
 
 LogStatisticsProvider::~LogStatisticsProvider()
 {
-    ConfigManager::GetInstance().RemoveConfigChangeListener(this);
+    (void)ConfigManager::GetInstance().RemoveConfigChangeListener(this);
     if (m_enable) {
-        StatisticsManager::GetInstance().UnregisterStatisticsProvider(this);
+        (void)StatisticsManager::GetInstance().UnregisterStatisticsProvider(this);
     }
 }
 
 void LogStatisticsProvider::RegisterProvider()
 {
     if (m_enable) {
-        StatisticsManager::GetInstance().RegisterStatisticsProvider(this);
+        (void)StatisticsManager::GetInstance().RegisterStatisticsProvider(this);
     }
-    ConfigManager::GetInstance().AddConfigChangeListener(this);
+    (void)ConfigManager::GetInstance().AddConfigChangeListener(this);
 }
 
 bool LogStatisticsProvider::CreateInstance()
@@ -119,9 +119,9 @@ void LogStatisticsProvider::OnConfigChange()
     if (m_enable != GetGlobalConfiguration().m_enableLogStatistics) {
         m_enable = GetGlobalConfiguration().m_enableLogStatistics;
         if (m_enable) {
-            StatisticsManager::GetInstance().RegisterStatisticsProvider(this);
+            (void)StatisticsManager::GetInstance().RegisterStatisticsProvider(this);
         } else {
-            StatisticsManager::GetInstance().UnregisterStatisticsProvider(this);
+            (void)StatisticsManager::GetInstance().UnregisterStatisticsProvider(this);
         }
     }
 }

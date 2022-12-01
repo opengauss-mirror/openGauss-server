@@ -1,0 +1,949 @@
+--T0
+drop foreign table test_new_gc;
+ERROR:  foreign table "test_new_gc" does not exist
+create foreign table test_new_gc (x int, y int not null, z int not null,data int,
+primary key(x)
+);
+NOTICE:  CREATE FOREIGN TABLE / PRIMARY KEY will create constraint "test_new_gc_pkey" for foreign table "test_new_gc"
+create index idx1 on test_new_gc (y);
+create index idx2 on test_new_gc (z);
+begin;
+insert into test_new_gc (x,y,z,data) values (1,2,3,0);
+select * from test_new_gc where x=1;
+ x | y | z | data 
+---+---+---+------
+ 1 | 2 | 3 |    0
+(1 row)
+
+select * from test_new_gc where y=2;
+ x | y | z | data 
+---+---+---+------
+ 1 | 2 | 3 |    0
+(1 row)
+
+select * from test_new_gc where z=3;
+ x | y | z | data 
+---+---+---+------
+ 1 | 2 | 3 |    0
+(1 row)
+
+update test_new_gc set data=100 where z=3;
+select * from test_new_gc where x=1;
+ x | y | z | data 
+---+---+---+------
+ 1 | 2 | 3 |  100
+(1 row)
+
+select * from test_new_gc where y=2;
+ x | y | z | data 
+---+---+---+------
+ 1 | 2 | 3 |  100
+(1 row)
+
+select * from test_new_gc where z=3;
+ x | y | z | data 
+---+---+---+------
+ 1 | 2 | 3 |  100
+(1 row)
+
+commit;
+begin;
+update test_new_gc set data=200 where x=1;
+select * from test_new_gc where x=1;
+ x | y | z | data 
+---+---+---+------
+ 1 | 2 | 3 |  200
+(1 row)
+
+select * from test_new_gc where y=2;
+ x | y | z | data 
+---+---+---+------
+ 1 | 2 | 3 |  200
+(1 row)
+
+select * from test_new_gc where z=3;
+ x | y | z | data 
+---+---+---+------
+ 1 | 2 | 3 |  200
+(1 row)
+
+commit;
+--T1
+drop foreign table test_new_gc;
+create foreign table test_new_gc (x int, y int not null, z int not null, data int,
+primary key(x)
+);
+NOTICE:  CREATE FOREIGN TABLE / PRIMARY KEY will create constraint "test_new_gc_pkey" for foreign table "test_new_gc"
+create index idx1 on test_new_gc (y);
+create index idx2 on test_new_gc (z);
+begin;
+insert into test_new_gc (x,y,z,data) values (1,2,3,0);
+select * from test_new_gc where x=1;
+ x | y | z | data 
+---+---+---+------
+ 1 | 2 | 3 |    0
+(1 row)
+
+select * from test_new_gc where y=2;
+ x | y | z | data 
+---+---+---+------
+ 1 | 2 | 3 |    0
+(1 row)
+
+select * from test_new_gc where z=3;
+ x | y | z | data 
+---+---+---+------
+ 1 | 2 | 3 |    0
+(1 row)
+
+update test_new_gc set data=100 where x=1;
+select * from test_new_gc where x=1;
+ x | y | z | data 
+---+---+---+------
+ 1 | 2 | 3 |  100
+(1 row)
+
+select * from test_new_gc where y=2;
+ x | y | z | data 
+---+---+---+------
+ 1 | 2 | 3 |  100
+(1 row)
+
+select * from test_new_gc where z=3;
+ x | y | z | data 
+---+---+---+------
+ 1 | 2 | 3 |  100
+(1 row)
+
+commit;
+begin;
+update test_new_gc set data=200 where y=2;
+select * from test_new_gc where x=1;
+ x | y | z | data 
+---+---+---+------
+ 1 | 2 | 3 |  200
+(1 row)
+
+select * from test_new_gc where y=2;
+ x | y | z | data 
+---+---+---+------
+ 1 | 2 | 3 |  200
+(1 row)
+
+select * from test_new_gc where z=3;
+ x | y | z | data 
+---+---+---+------
+ 1 | 2 | 3 |  200
+(1 row)
+
+commit;
+--T2
+drop foreign table test_new_gc;
+create foreign table test_new_gc (x int, y int not null, z int not null,
+primary key(x)
+);
+NOTICE:  CREATE FOREIGN TABLE / PRIMARY KEY will create constraint "test_new_gc_pkey" for foreign table "test_new_gc"
+create index idx1 on test_new_gc (y);
+create index idx2 on test_new_gc (z);
+begin;
+insert into test_new_gc (x,y,z) values (1,2,3);
+select * from test_new_gc where x=1;
+ x | y | z 
+---+---+---
+ 1 | 2 | 3
+(1 row)
+
+select * from test_new_gc where y=2;
+ x | y | z 
+---+---+---
+ 1 | 2 | 3
+(1 row)
+
+select * from test_new_gc where z=3;
+ x | y | z 
+---+---+---
+ 1 | 2 | 3
+(1 row)
+
+delete from test_new_gc where z=3;
+select * from test_new_gc where x=1;
+ x | y | z 
+---+---+---
+(0 rows)
+
+select * from test_new_gc where y=2;
+ x | y | z 
+---+---+---
+(0 rows)
+
+select * from test_new_gc where z=3;
+ x | y | z 
+---+---+---
+(0 rows)
+
+commit;
+select * from test_new_gc where x=1;
+ x | y | z 
+---+---+---
+(0 rows)
+
+select * from test_new_gc where y=2;
+ x | y | z 
+---+---+---
+(0 rows)
+
+select * from test_new_gc where z=3;
+ x | y | z 
+---+---+---
+(0 rows)
+
+--T3
+drop foreign table test_new_gc;
+create foreign table test_new_gc (x int, y int not null, z int not null,
+primary key(x)
+);
+NOTICE:  CREATE FOREIGN TABLE / PRIMARY KEY will create constraint "test_new_gc_pkey" for foreign table "test_new_gc"
+create index idx1 on test_new_gc (y);
+create index idx2 on test_new_gc (z);
+insert into test_new_gc (x,y,z) values (1,2,3);
+begin;
+select * from test_new_gc where x=1;
+ x | y | z 
+---+---+---
+ 1 | 2 | 3
+(1 row)
+
+select * from test_new_gc where y=2;
+ x | y | z 
+---+---+---
+ 1 | 2 | 3
+(1 row)
+
+select * from test_new_gc where z=3;
+ x | y | z 
+---+---+---
+ 1 | 2 | 3
+(1 row)
+
+delete from test_new_gc where z=3;
+select * from test_new_gc where x=1;
+ x | y | z 
+---+---+---
+(0 rows)
+
+select * from test_new_gc where y=2;
+ x | y | z 
+---+---+---
+(0 rows)
+
+select * from test_new_gc where z=3;
+ x | y | z 
+---+---+---
+(0 rows)
+
+commit;
+--T4 Duplicates
+delete from test_new_gc;
+insert into test_new_gc (x,y,z) values (1,2,3);
+insert into test_new_gc (x,y,z) values (1,2,3);
+ERROR:  duplicate key value violates unique constraint "test_new_gc_pkey"
+DETAIL:  Key (x)=(1) already exists.
+--T5 Blocked Duplicates
+delete from test_new_gc;
+begin;
+insert into test_new_gc (x,y,z) values (1,2,3);
+insert into test_new_gc (x,y,z) values (1,2,3);
+ERROR:  duplicate key value violates unique constraint "test_new_gc_pkey"
+DETAIL:  Key (x)=(1) already exists.
+commit;
+--T5.1 unique index duplicates!
+drop foreign table test_new_gc;
+create foreign table test_new_gc (x int, y int not null, z int not null,
+primary key(x)
+);
+NOTICE:  CREATE FOREIGN TABLE / PRIMARY KEY will create constraint "test_new_gc_pkey" for foreign table "test_new_gc"
+create index idx1 on test_new_gc (y);
+create unique index idx2 on test_new_gc (z);
+insert into test_new_gc (x,y,z) values (1,2,3);
+insert into test_new_gc (x,y,z) values (2,3,3);
+ERROR:  duplicate key value violates unique constraint "idx2"
+DETAIL:  Key (z)=(3) already exists.
+--T5.2 unique index duplicates!
+drop foreign table test_new_gc;
+create foreign table test_new_gc (x int, y int not null, z int not null,
+primary key(x)
+);
+NOTICE:  CREATE FOREIGN TABLE / PRIMARY KEY will create constraint "test_new_gc_pkey" for foreign table "test_new_gc"
+create index idx1 on test_new_gc (y);
+create unique index idx2 on test_new_gc (z);
+begin;
+insert into test_new_gc (x,y,z) values (1,2,3);
+insert into test_new_gc (x,y,z) values (2,3,3);
+ERROR:  duplicate key value violates unique constraint "idx2"
+DETAIL:  Key (z)=(3) already exists.
+commit;
+--T6 Insert-Delete-Insert All in A block
+drop foreign table test_new_gc;
+create foreign table test_new_gc (x int, y int not null, z int not null, data int,
+primary key(x)
+);
+NOTICE:  CREATE FOREIGN TABLE / PRIMARY KEY will create constraint "test_new_gc_pkey" for foreign table "test_new_gc"
+create index idx1 on test_new_gc (y);
+create index idx2 on test_new_gc (z);
+begin;
+insert into test_new_gc (x,y,z) values (1,2,3);
+delete from test_new_gc where x=1;
+insert into test_new_gc (x,y,z) values (1,2,3);
+delete from test_new_gc where x=1;
+insert into test_new_gc (x,y,z) values (1,2,3);
+delete from test_new_gc where x=1;
+insert into test_new_gc (x,y,z) values (1,2,3);
+delete from test_new_gc where x=1;
+commit;
+select * from test_new_gc where x=1;
+ x | y | z | data 
+---+---+---+------
+(0 rows)
+
+select * from test_new_gc where y=2;
+ x | y | z | data 
+---+---+---+------
+(0 rows)
+
+select * from test_new_gc where z=3;
+ x | y | z | data 
+---+---+---+------
+(0 rows)
+
+--T6.1 Insert-Delete-Insert All in A block - unique index
+drop foreign table test_new_gc;
+create foreign table test_new_gc (x int, y int not null, z int not null,data int,
+primary key(x)
+);
+NOTICE:  CREATE FOREIGN TABLE / PRIMARY KEY will create constraint "test_new_gc_pkey" for foreign table "test_new_gc"
+create index idx1 on test_new_gc (y);
+create unique index idx2 on test_new_gc (z);
+begin;
+insert into test_new_gc (x,y,z) values (1,2,3);
+delete from test_new_gc where x=1;
+insert into test_new_gc (x,y,z) values (1,2,3);
+delete from test_new_gc where x=1;
+insert into test_new_gc (x,y,z) values (1,2,3);
+delete from test_new_gc where x=1;
+insert into test_new_gc (x,y,z) values (1,2,3);
+delete from test_new_gc where x=1;
+commit;
+select * from test_new_gc where x=1;
+ x | y | z | data 
+---+---+---+------
+(0 rows)
+
+select * from test_new_gc where y=2;
+ x | y | z | data 
+---+---+---+------
+(0 rows)
+
+select * from test_new_gc where z=3;
+ x | y | z | data 
+---+---+---+------
+(0 rows)
+
+--T7 Insert-Delete-Insert All in A block II
+drop foreign table test_new_gc;
+create foreign table test_new_gc (x int, y int not null, z int not null,
+primary key(x)
+);
+NOTICE:  CREATE FOREIGN TABLE / PRIMARY KEY will create constraint "test_new_gc_pkey" for foreign table "test_new_gc"
+create index idx1 on test_new_gc (y);
+create index idx2 on test_new_gc (z);
+begin;
+insert into test_new_gc (x,y,z) values (1,2,3);
+delete from test_new_gc where x=1;
+insert into test_new_gc (x,y,z) values (1,2,3);
+delete from test_new_gc where x=1;
+insert into test_new_gc (x,y,z) values (1,2,3);
+delete from test_new_gc where x=1;
+insert into test_new_gc (x,y,z) values (1,2,88);
+commit;
+select * from test_new_gc where x=1;
+ x | y | z  
+---+---+----
+ 1 | 2 | 88
+(1 row)
+
+select * from test_new_gc where y=2;
+ x | y | z  
+---+---+----
+ 1 | 2 | 88
+(1 row)
+
+select * from test_new_gc where z=88;
+ x | y | z  
+---+---+----
+ 1 | 2 | 88
+(1 row)
+
+--T7.1 Insert-Delete-Insert All in A block II - unique
+drop foreign table test_new_gc;
+create foreign table test_new_gc (x int, y int not null, z int not null,
+primary key(x)
+);
+NOTICE:  CREATE FOREIGN TABLE / PRIMARY KEY will create constraint "test_new_gc_pkey" for foreign table "test_new_gc"
+create index idx1 on test_new_gc (y);
+create unique index idx2 on test_new_gc (z);
+begin;
+insert into test_new_gc (x,y,z) values (1,2,3);
+delete from test_new_gc where x=1;
+insert into test_new_gc (x,y,z) values (1,2,3);
+delete from test_new_gc where x=1;
+insert into test_new_gc (x,y,z) values (1,2,3);
+delete from test_new_gc where x=1;
+insert into test_new_gc (x,y,z) values (1,2,88);
+commit;
+select * from test_new_gc where x=1;
+ x | y | z  
+---+---+----
+ 1 | 2 | 88
+(1 row)
+
+select * from test_new_gc where y=2;
+ x | y | z  
+---+---+----
+ 1 | 2 | 88
+(1 row)
+
+select * from test_new_gc where z=3;
+ x | y | z 
+---+---+---
+(0 rows)
+
+select * from test_new_gc where z=88;
+ x | y | z  
+---+---+----
+ 1 | 2 | 88
+(1 row)
+
+--New Delete Design
+--T8 Insert-Begin-Delete-Insert-Rollback
+drop foreign table test_new_gc;
+create foreign table test_new_gc (x int, y int not null, z int not null, data int,
+primary key(x)
+);
+NOTICE:  CREATE FOREIGN TABLE / PRIMARY KEY will create constraint "test_new_gc_pkey" for foreign table "test_new_gc"
+create index idx1 on test_new_gc (y);
+create index idx2 on test_new_gc (z);
+insert into test_new_gc (x,y,z) values (1,2,3);
+begin;
+delete from test_new_gc where x=1;
+select * from test_new_gc where x=1;
+ x | y | z | data 
+---+---+---+------
+(0 rows)
+
+select * from test_new_gc where y=2;
+ x | y | z | data 
+---+---+---+------
+(0 rows)
+
+select * from test_new_gc where z=3;
+ x | y | z | data 
+---+---+---+------
+(0 rows)
+
+insert into test_new_gc (x,y,z) values (1,2,4);
+select * from test_new_gc where x=1;
+ x | y | z | data 
+---+---+---+------
+ 1 | 2 | 4 |     
+(1 row)
+
+select * from test_new_gc where y=2;
+ x | y | z | data 
+---+---+---+------
+ 1 | 2 | 4 |     
+(1 row)
+
+select * from test_new_gc where z=3;
+ x | y | z | data 
+---+---+---+------
+(0 rows)
+
+select * from test_new_gc where z=4;
+ x | y | z | data 
+---+---+---+------
+ 1 | 2 | 4 |     
+(1 row)
+
+rollback;
+select * from test_new_gc where x=1;
+ x | y | z | data 
+---+---+---+------
+ 1 | 2 | 3 |     
+(1 row)
+
+select * from test_new_gc where y=2;
+ x | y | z | data 
+---+---+---+------
+ 1 | 2 | 3 |     
+(1 row)
+
+select * from test_new_gc where z=3;
+ x | y | z | data 
+---+---+---+------
+ 1 | 2 | 3 |     
+(1 row)
+
+--T8.1 Insert-Begin-Delete-Insert-Rollback - unique
+drop foreign table test_new_gc;
+create foreign table test_new_gc (x int, y int not null, z int not null, data int,
+primary key(x)
+);
+NOTICE:  CREATE FOREIGN TABLE / PRIMARY KEY will create constraint "test_new_gc_pkey" for foreign table "test_new_gc"
+create index idx1 on test_new_gc (y);
+create unique index idx2 on test_new_gc (z);
+insert into test_new_gc (x,y,z) values (1,2,3);
+begin;
+delete from test_new_gc where x=1;
+select * from test_new_gc where x=1;
+ x | y | z | data 
+---+---+---+------
+(0 rows)
+
+select * from test_new_gc where y=2;
+ x | y | z | data 
+---+---+---+------
+(0 rows)
+
+select * from test_new_gc where z=3;
+ x | y | z | data 
+---+---+---+------
+(0 rows)
+
+insert into test_new_gc (x,y,z) values (1,2,4);
+select * from test_new_gc where x=1;
+ x | y | z | data 
+---+---+---+------
+ 1 | 2 | 4 |     
+(1 row)
+
+select * from test_new_gc where y=2;
+ x | y | z | data 
+---+---+---+------
+ 1 | 2 | 4 |     
+(1 row)
+
+select * from test_new_gc where z=4;
+ x | y | z | data 
+---+---+---+------
+ 1 | 2 | 4 |     
+(1 row)
+
+rollback;
+select * from test_new_gc where x=1;
+ x | y | z | data 
+---+---+---+------
+ 1 | 2 | 3 |     
+(1 row)
+
+select * from test_new_gc where y=2;
+ x | y | z | data 
+---+---+---+------
+ 1 | 2 | 3 |     
+(1 row)
+
+select * from test_new_gc where z=3;
+ x | y | z | data 
+---+---+---+------
+ 1 | 2 | 3 |     
+(1 row)
+
+--T9 Insert-Begin-Delete-Insert-Rollback
+drop foreign table test_new_gc;
+create foreign table test_new_gc (x int, y int not null, z int not null, data int,
+primary key(x)
+);
+NOTICE:  CREATE FOREIGN TABLE / PRIMARY KEY will create constraint "test_new_gc_pkey" for foreign table "test_new_gc"
+create index idx1 on test_new_gc (y);
+create index idx2 on test_new_gc (z);
+insert into test_new_gc (x,y,z) values (1,2,3);
+begin;
+delete from test_new_gc where x=1;
+select * from test_new_gc where x=1;
+ x | y | z | data 
+---+---+---+------
+(0 rows)
+
+select * from test_new_gc where y=2;
+ x | y | z | data 
+---+---+---+------
+(0 rows)
+
+select * from test_new_gc where z=3;
+ x | y | z | data 
+---+---+---+------
+(0 rows)
+
+insert into test_new_gc (x,y,z) values (1,2,4);
+select * from test_new_gc where x=1;
+ x | y | z | data 
+---+---+---+------
+ 1 | 2 | 4 |     
+(1 row)
+
+select * from test_new_gc where y=2;
+ x | y | z | data 
+---+---+---+------
+ 1 | 2 | 4 |     
+(1 row)
+
+select * from test_new_gc where z=3;
+ x | y | z | data 
+---+---+---+------
+(0 rows)
+
+select * from test_new_gc where z=4;
+ x | y | z | data 
+---+---+---+------
+ 1 | 2 | 4 |     
+(1 row)
+
+delete from test_new_gc where y=2;
+select * from test_new_gc where x=1;
+ x | y | z | data 
+---+---+---+------
+(0 rows)
+
+select * from test_new_gc where y=2;
+ x | y | z | data 
+---+---+---+------
+(0 rows)
+
+select * from test_new_gc where z=4;
+ x | y | z | data 
+---+---+---+------
+(0 rows)
+
+insert into test_new_gc (x,y,z) values (1,2,5);
+select * from test_new_gc where x=1;
+ x | y | z | data 
+---+---+---+------
+ 1 | 2 | 5 |     
+(1 row)
+
+select * from test_new_gc where y=2;
+ x | y | z | data 
+---+---+---+------
+ 1 | 2 | 5 |     
+(1 row)
+
+select * from test_new_gc where z=3;
+ x | y | z | data 
+---+---+---+------
+(0 rows)
+
+select * from test_new_gc where z=4;
+ x | y | z | data 
+---+---+---+------
+(0 rows)
+
+select * from test_new_gc where z=5;
+ x | y | z | data 
+---+---+---+------
+ 1 | 2 | 5 |     
+(1 row)
+
+delete from test_new_gc where z=5;
+select * from test_new_gc where x=1;
+ x | y | z | data 
+---+---+---+------
+(0 rows)
+
+select * from test_new_gc where y=2;
+ x | y | z | data 
+---+---+---+------
+(0 rows)
+
+select * from test_new_gc where z=5;
+ x | y | z | data 
+---+---+---+------
+(0 rows)
+
+commit;
+--T10
+drop foreign table test_new;
+ERROR:  foreign table "test_new" does not exist
+create foreign table test_new (i int primary key, x int);
+NOTICE:  CREATE FOREIGN TABLE / PRIMARY KEY will create constraint "test_new_pkey" for foreign table "test_new"
+insert into test_new values (generate_series(1,100));
+begin;
+update test_new set x = i+1;
+delete from test_new where i = 3;
+select * from test_new where i = 3;
+ i | x 
+---+---
+(0 rows)
+
+commit;
+--T11
+drop foreign table test_new;
+create foreign table test_new (i int , x int);
+insert into test_new values (generate_series(1,100));
+begin;
+update test_new set x = i+1;
+delete from test_new where x % 3 = 0;
+insert into test_new values (3,333);
+end;
+drop foreign table test_new;
+--T12 Inserts Tests
+drop foreign table test_new_gc;
+create foreign table test_new_gc (x int, y int not null, z int not null, data int,
+primary key(x)
+);
+NOTICE:  CREATE FOREIGN TABLE / PRIMARY KEY will create constraint "test_new_gc_pkey" for foreign table "test_new_gc"
+create index idx1 on test_new_gc (y);
+create unique index idx2 on test_new_gc (z);
+insert into test_new_gc (x,y,z) values (1,2,3);
+begin;
+delete from test_new_gc where x=1;
+select * from test_new_gc where x=1;
+ x | y | z | data 
+---+---+---+------
+(0 rows)
+
+select * from test_new_gc where y=2;
+ x | y | z | data 
+---+---+---+------
+(0 rows)
+
+select * from test_new_gc where z=3;
+ x | y | z | data 
+---+---+---+------
+(0 rows)
+
+insert into test_new_gc (x,y,z) values (1,2,4);
+select * from test_new_gc where x=1;
+ x | y | z | data 
+---+---+---+------
+ 1 | 2 | 4 |     
+(1 row)
+
+select * from test_new_gc where y=2;
+ x | y | z | data 
+---+---+---+------
+ 1 | 2 | 4 |     
+(1 row)
+
+select * from test_new_gc where z=3;
+ x | y | z | data 
+---+---+---+------
+(0 rows)
+
+select * from test_new_gc where z=4;
+ x | y | z | data 
+---+---+---+------
+ 1 | 2 | 4 |     
+(1 row)
+
+commit;
+select * from test_new_gc where x=1;
+ x | y | z | data 
+---+---+---+------
+ 1 | 2 | 4 |     
+(1 row)
+
+select * from test_new_gc where y=2;
+ x | y | z | data 
+---+---+---+------
+ 1 | 2 | 4 |     
+(1 row)
+
+select * from test_new_gc where z=4;
+ x | y | z | data 
+---+---+---+------
+ 1 | 2 | 4 |     
+(1 row)
+
+--T13 Inserts Tests II 
+drop foreign table test_new_gc;
+create foreign table test_new_gc (x int, y int not null, z int  not null,data int,
+primary key(x)
+);
+NOTICE:  CREATE FOREIGN TABLE / PRIMARY KEY will create constraint "test_new_gc_pkey" for foreign table "test_new_gc"
+create index idx1 on test_new_gc (y);
+create unique index idx2 on test_new_gc (z);
+insert into test_new_gc (x,y,z) values (1,2,3);
+begin;
+delete from test_new_gc where x=1;
+select * from test_new_gc where x=1;
+ x | y | z | data 
+---+---+---+------
+(0 rows)
+
+select * from test_new_gc where y=2;
+ x | y | z | data 
+---+---+---+------
+(0 rows)
+
+select * from test_new_gc where z=3;
+ x | y | z | data 
+---+---+---+------
+(0 rows)
+
+insert into test_new_gc (x,y,z) values (1,2,4);
+select * from test_new_gc where x=1;
+ x | y | z | data 
+---+---+---+------
+ 1 | 2 | 4 |     
+(1 row)
+
+select * from test_new_gc where y=2;
+ x | y | z | data 
+---+---+---+------
+ 1 | 2 | 4 |     
+(1 row)
+
+select * from test_new_gc where z=3;
+ x | y | z | data 
+---+---+---+------
+(0 rows)
+
+select * from test_new_gc where z=4;
+ x | y | z | data 
+---+---+---+------
+ 1 | 2 | 4 |     
+(1 row)
+
+delete from test_new_gc where y=2;
+select * from test_new_gc where x=1;
+ x | y | z | data 
+---+---+---+------
+(0 rows)
+
+select * from test_new_gc where y=2;
+ x | y | z | data 
+---+---+---+------
+(0 rows)
+
+select * from test_new_gc where z=4;
+ x | y | z | data 
+---+---+---+------
+(0 rows)
+
+insert into test_new_gc (x,y,z) values (1,2,5);
+select * from test_new_gc where x=1;
+ x | y | z | data 
+---+---+---+------
+ 1 | 2 | 5 |     
+(1 row)
+
+select * from test_new_gc where y=2;
+ x | y | z | data 
+---+---+---+------
+ 1 | 2 | 5 |     
+(1 row)
+
+select * from test_new_gc where z=3;
+ x | y | z | data 
+---+---+---+------
+(0 rows)
+
+select * from test_new_gc where z=4;
+ x | y | z | data 
+---+---+---+------
+(0 rows)
+
+select * from test_new_gc where z=5;
+ x | y | z | data 
+---+---+---+------
+ 1 | 2 | 5 |     
+(1 row)
+
+delete from test_new_gc where z=5;
+select * from test_new_gc where x=1;
+ x | y | z | data 
+---+---+---+------
+(0 rows)
+
+select * from test_new_gc where y=2;
+ x | y | z | data 
+---+---+---+------
+(0 rows)
+
+select * from test_new_gc where z=5;
+ x | y | z | data 
+---+---+---+------
+(0 rows)
+
+insert into test_new_gc (x,y,z) values (1,2,100);
+commit;
+select * from test_new_gc where x=1;
+ x | y |  z  | data 
+---+---+-----+------
+ 1 | 2 | 100 |     
+(1 row)
+
+select * from test_new_gc where y=2;
+ x | y |  z  | data 
+---+---+-----+------
+ 1 | 2 | 100 |     
+(1 row)
+
+select * from test_new_gc where z=3;
+ x | y | z | data 
+---+---+---+------
+(0 rows)
+
+select * from test_new_gc where z=4;
+ x | y | z | data 
+---+---+---+------
+(0 rows)
+
+select * from test_new_gc where z=100;
+ x | y |  z  | data 
+---+---+-----+------
+ 1 | 2 | 100 |     
+(1 row)
+
+drop foreign table test_new_gc;
+-- bug 150
+create foreign table test_new (x integer primary key, y integer not null, c1 varchar(1020), c2 varchar(1020)) ;
+NOTICE:  CREATE FOREIGN TABLE / PRIMARY KEY will create constraint "test_new_pkey" for foreign table "test_new"
+create index idx on test_new (x,y);
+begin;
+insert into test_new values (generate_series(1, 500), generate_series(1, 500));
+delete from test_new where x = 15;
+insert into test_new values (15,15);
+insert into test_new values (15,15);
+ERROR:  duplicate key value violates unique constraint "test_new_pkey"
+DETAIL:  Key (x)=(15) already exists.
+end;
+drop foreign table test_new;
+-- bug 170
+create foreign table test_new (i int primary key, x int not null);
+NOTICE:  CREATE FOREIGN TABLE / PRIMARY KEY will create constraint "test_new_pkey" for foreign table "test_new"
+insert into test_new values (generate_series(1,100));
+ERROR:  null value in column "x" violates not-null constraint
+DETAIL:  Failing row contains (1, null).
+begin;
+update test_new set x = i+1;
+delete from test_new where i = 3;
+insert into test_new values (3,333);
+commit;
+begin;
+delete from test_new where i = 3;
+insert into test_new values (3,333);
+commit;
+drop foreign table test_new;
+-- bug 169
+create foreign table test_new (i int primary key, x int not null);
+NOTICE:  CREATE FOREIGN TABLE / PRIMARY KEY will create constraint "test_new_pkey" for foreign table "test_new"
+insert into test_new values (generate_series(1,100));
+ERROR:  null value in column "x" violates not-null constraint
+DETAIL:  Failing row contains (1, null).
+begin;
+update test_new set x = i+1;
+delete from test_new where i = 3;
+insert into test_new values (3,333);
+commit;
+delete from test_new where i = 3;
+drop foreign table test_new;

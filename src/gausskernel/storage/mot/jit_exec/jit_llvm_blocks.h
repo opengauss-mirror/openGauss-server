@@ -56,8 +56,8 @@ llvm::Value* buildCreateNewRow(JitLlvmCodeGenContext* ctx);
 llvm::Value* buildSearchRow(
     JitLlvmCodeGenContext* ctx, MOT::AccessType access_type, JitRangeScanType range_scan_type, int subQueryIndex = -1);
 
-bool buildFilterRow(
-    JitLlvmCodeGenContext* ctx, llvm::Value* row, JitFilterArray* filters, int* max_arg, llvm::BasicBlock* next_block);
+bool buildFilterRow(JitLlvmCodeGenContext* ctx, llvm::Value* row, llvm::Value* innerRow, JitFilterArray* filters,
+    llvm::BasicBlock* next_block);
 
 /** @brief Adds code to insert a new row. */
 void buildInsertRow(JitLlvmCodeGenContext* ctx, llvm::Value* row);
@@ -65,39 +65,49 @@ void buildInsertRow(JitLlvmCodeGenContext* ctx, llvm::Value* row);
 /** @brief Adds code to delete a row. */
 void buildDeleteRow(JitLlvmCodeGenContext* ctx);
 
-/** @brief Adds code to get row from iterator. */
-llvm::Value* buildGetRowFromIterator(JitLlvmCodeGenContext* ctx, llvm::BasicBlock* endLoopBlock,
-    MOT::AccessType access_mode, JitIndexScanDirection index_scan_direction, JitLlvmRuntimeCursor* cursor,
-    JitRangeScanType range_scan_type, int subQueryIndex = -1);
-
-bool buildPointScan(JitLlvmCodeGenContext* ctx, JitColumnExprArray* exprArray, int* maxArg,
-    JitRangeScanType rangeScanType, llvm::Value* outerRow, int exprCount = -1, int subQueryIndex = -1);
-
-bool writeRowColumns(
-    JitLlvmCodeGenContext* ctx, llvm::Value* row, JitColumnExprArray* expr_array, int* max_arg, bool is_update);
-
-bool selectRowColumns(JitLlvmCodeGenContext* ctx, llvm::Value* row, JitSelectExprArray* expr_array, int* max_arg,
-    JitRangeScanType range_scan_type, int subQueryIndex = -1);
-
-llvm::Value* buildPrepareStateScanRow(JitLlvmCodeGenContext* ctx, JitIndexScan* index_scan,
-    JitRangeScanType range_scan_type, MOT::AccessType access_mode, int* max_arg, llvm::Value* outer_row,
-    llvm::BasicBlock* next_block, llvm::BasicBlock** loop_block);
-
-JitLlvmRuntimeCursor buildRangeCursor(JitLlvmCodeGenContext* ctx, JitIndexScan* indexScan, int* maxArg,
-    JitRangeScanType rangeScanType, JitIndexScanDirection indexScanDirection, llvm::Value* outerRow,
+/** @brief Adds code to check whether cursor contains one more row (without row copy). */
+void BuildCheckRowExistsInIterator(JitLlvmCodeGenContext* ctx, llvm::BasicBlock* endLoopBlock,
+    JitIndexScanDirection indexScanDirection, JitLlvmRuntimeCursor* cursor, JitRangeScanType rangeScanType,
     int subQueryIndex = -1);
 
-bool prepareAggregate(JitLlvmCodeGenContext* ctx, JitAggregate* aggregate);
+/** @brief Adds code to get row from iterator. */
+llvm::Value* buildGetRowFromIterator(JitLlvmCodeGenContext* ctx, llvm::BasicBlock* startLoopBlock,
+    llvm::BasicBlock* endLoopBlock, MOT::AccessType access_mode, JitIndexScanDirection index_scan_direction,
+    JitLlvmRuntimeCursor* cursor, JitRangeScanType range_scan_type, int subQueryIndex = -1);
 
-bool buildAggregateRow(
-    JitLlvmCodeGenContext* ctx, JitAggregate* aggregate, llvm::Value* row, llvm::BasicBlock* next_block);
+bool buildPointScan(JitLlvmCodeGenContext* ctx, JitColumnExprArray* exprArray, JitRangeScanType rangeScanType,
+    llvm::Value* outerRow, int exprCount = -1, int subQueryIndex = -1);
 
-void buildAggregateResult(JitLlvmCodeGenContext* ctx, const JitAggregate* aggregate);
+bool writeRowColumns(JitLlvmCodeGenContext* ctx, llvm::Value* row, JitColumnExprArray* expr_array, bool is_update);
+
+bool selectRowColumns(
+    JitLlvmCodeGenContext* ctx, llvm::Value* row, JitSelectExprArray* expr_array, llvm::Value* innerRow = nullptr);
+
+llvm::Value* buildPrepareStateScanRow(JitLlvmCodeGenContext* ctx, JitIndexScan* index_scan,
+    JitRangeScanType range_scan_type, MOT::AccessType access_mode, llvm::Value* outer_row, llvm::BasicBlock* next_block,
+    llvm::BasicBlock** loop_block, bool emitReturnOnFail = true);
+
+JitLlvmRuntimeCursor buildRangeCursor(JitLlvmCodeGenContext* ctx, JitIndexScan* indexScan,
+    JitRangeScanType rangeScanType, llvm::Value* outerRow, int subQueryIndex = -1);
+
+bool prepareAggregates(JitLlvmCodeGenContext* ctx, JitAggregate* aggregates, int aggCount);
+
+bool buildAggregateRow(JitLlvmCodeGenContext* ctx, JitAggregate* aggregate, int aggIndex, llvm::Value* row,
+    llvm::Value* innerRow, llvm::Value* aggCount);
+
+void buildAggregateResult(JitLlvmCodeGenContext* ctx, const JitAggregate* aggregates, int aggCount);
 
 void buildCheckLimit(JitLlvmCodeGenContext* ctx, int limit_count);
 
-bool selectJoinRows(
-    JitLlvmCodeGenContext* ctx, llvm::Value* outer_row_copy, llvm::Value* inner_row, JitJoinPlan* plan, int* max_arg);
+void BuildCheckLimitNoState(JitLlvmCodeGenContext* ctx, int limitCount);
+
+llvm::Value* ProcessExpr(JitLlvmCodeGenContext* ctx, llvm::Value* row, llvm::Value* innerRow, JitExpr* expr);
+
+bool BuildSelectLeftJoinRowColumns(JitLlvmCodeGenContext* ctx, llvm::Value* outerRowCopy, JitJoinPlan* plan,
+    llvm::Value* innerRow, llvm::Value* filterPassed);
+
+bool BuildOneTimeFilters(
+    JitLlvmCodeGenContext* ctx, JitFilterArray* oneTimeFilterArray, llvm::BasicBlock* nextBlock = nullptr);
 }  // namespace JitExec
 
 #endif /* JIT_LLVM_BLOCKS_H */

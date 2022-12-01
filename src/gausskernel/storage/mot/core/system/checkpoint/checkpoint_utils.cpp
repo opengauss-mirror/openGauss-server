@@ -32,7 +32,7 @@ DECLARE_LOGGER(CheckpointUtils, Checkpoint);
 
 namespace CheckpointUtils {
 
-bool IsFileExists(std::string fileName)
+bool IsFileExists(const std::string& fileName)
 {
     struct stat statBuf = {0};
     if (stat(fileName.c_str(), &statBuf) == -1 && errno == ENOENT) {
@@ -43,7 +43,7 @@ bool IsFileExists(std::string fileName)
     return true;
 }
 
-bool IsDirExists(std::string dirName)
+bool IsDirExists(const std::string& dirName)
 {
     struct stat statBuf = {0};
     if (stat(dirName.c_str(), &statBuf) == -1 && errno == ENOENT) {
@@ -54,7 +54,7 @@ bool IsDirExists(std::string dirName)
     return true;
 }
 
-bool OpenFileWrite(std::string fileName, FILE*& pFile)
+bool OpenFileWrite(const std::string& fileName, FILE*& pFile)
 {
     pFile = fopen(fileName.c_str(), "wb");
     if (pFile == nullptr) {
@@ -64,7 +64,7 @@ bool OpenFileWrite(std::string fileName, FILE*& pFile)
     return true;
 }
 
-bool OpenFileRead(std::string fileName, FILE*& pFile)
+bool OpenFileRead(const std::string& fileName, FILE*& pFile)
 {
     pFile = fopen(fileName.c_str(), "rb");
     if (pFile == nullptr) {
@@ -74,7 +74,7 @@ bool OpenFileRead(std::string fileName, FILE*& pFile)
     return true;
 }
 
-bool OpenFileWrite(std::string fileName, int& fd)
+bool OpenFileWrite(const std::string& fileName, int& fd)
 {
     fd = open(fileName.c_str(), O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR); /* 0600 */
     if (fd == -1) {
@@ -83,7 +83,7 @@ bool OpenFileWrite(std::string fileName, int& fd)
     return (fd != -1);
 }
 
-bool OpenFileRead(std::string fileName, int& fd)
+bool OpenFileRead(const std::string& fileName, int& fd)
 {
     fd = open(fileName.c_str(), O_RDONLY);
     if (fd == -1) {
@@ -101,7 +101,7 @@ int CloseFile(int fd)
     return rc;
 }
 
-size_t WriteFile(int fd, char* data, size_t len)
+size_t WriteFile(int fd, const char* data, size_t len)
 {
     ssize_t wrote = write(fd, (const void*)data, len);
     if (wrote == -1) {
@@ -144,17 +144,17 @@ bool SeekFile(int fd, uint64_t offset)
 bool GetWorkingDir(std::string& dir)
 {
     dir.clear();
-    char cwd[maxPath] = {0};
+    char cwd[MAX_PATH] = {0};
     size_t checkpointDirLength = GetGlobalConfiguration().m_checkpointDir.length();
     if (checkpointDirLength > 0) {
-        errno_t erc = strncpy_s(cwd, maxPath, GetGlobalConfiguration().m_checkpointDir.c_str(), checkpointDirLength);
+        errno_t erc = strncpy_s(cwd, MAX_PATH, GetGlobalConfiguration().m_checkpointDir.c_str(), checkpointDirLength);
         securec_check(erc, "\0", "\0");
     } else if (!getcwd(cwd, sizeof(cwd))) {
         MOT_REPORT_SYSTEM_ERROR(getcwd, "N/A", "Failed to get current working directory");
         return false;
     }
-    dir.append(cwd);
-    dir.append("/");
+    (void)dir.append(cwd);
+    (void)dir.append("/");
     return true;
 }
 
@@ -177,7 +177,7 @@ void Hexdump(const char* msg, char* b, uint32_t buflen)
     }
 
     if (msg != nullptr) {
-        fprintf(stderr, "%s (len %u)\n", msg, buflen);
+        (void)fprintf(stderr, "%s (len %u)\n", msg, buflen);
     }
 
     for (i = 0; i < buflen; i += elemSize) {
@@ -224,7 +224,7 @@ void Hexdump(const char* msg, char* b, uint32_t buflen)
                 securec_check(erc, "\0", "\0");
             }
         }
-        fprintf(stderr, "%s\n", line);
+        (void)fprintf(stderr, "%s\n", line);
     }
 }
 }  // namespace CheckpointUtils

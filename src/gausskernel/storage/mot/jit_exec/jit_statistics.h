@@ -28,6 +28,7 @@
 #include "frequency_statistic_variable.h"
 #include "level_statistic_variable.h"
 #include "numeric_statistic_variable.h"
+#include "memory_statistic_variable.h"
 #include "iconfig_change_listener.h"
 #include "statistics_provider.h"
 #include "typed_statistics_generator.h"
@@ -73,6 +74,12 @@ public:
         m_execAbortQueryCount.AddSample();
     }
 
+    /** @var Updates the number of session-bytes allocated for JIT query execution. */
+    inline void AddSessionBytes(int64_t bytes)
+    {
+        m_sessionBytes.AddSample(bytes);
+    }
+
 private:
     /** @var The successful JIT query execution count statistic variable. */
     MOT::FrequencyStatisticVariable m_execQueryCount;
@@ -85,6 +92,9 @@ private:
 
     /** @var The aborted JIT query execution count statistic variable. */
     MOT::FrequencyStatisticVariable m_execAbortQueryCount;
+
+    /** @var The number of session-bytes allocated for JIT query execution. */
+    MOT::MemoryStatisticVariable m_sessionBytes;
 };
 
 class JitGlobalStatistics : public MOT::GlobalStatistics {
@@ -148,6 +158,12 @@ public:
         m_codeExpiredQueryCount.AddSample(1);
     }
 
+    /** @var Updates the number of global-bytes allocated for JIT query execution. */
+    inline void AddGlobalBytes(int64_t bytes)
+    {
+        m_globalBytes.AddSample(bytes);
+    }
+
 private:
     MOT::LevelStatisticVariable m_jittableQueryCount;
     MOT::LevelStatisticVariable m_unjittableLimitQueryCount;
@@ -158,6 +174,7 @@ private:
     MOT::LevelStatisticVariable m_codeCloneQueryCount;
     MOT::LevelStatisticVariable m_codeCloneErrorQueryCount;
     MOT::LevelStatisticVariable m_codeExpiredQueryCount;
+    MOT::MemoryStatisticVariable m_globalBytes;
 };
 
 /**
@@ -298,18 +315,36 @@ public:
         }
     }
 
+    /** @var Updates the number of session-bytes allocated for JIT query execution. */
+    inline void AddSessionBytes(int64_t bytes)
+    {
+        JitThreadStatistics* jts = GetCurrentThreadStatistics<JitThreadStatistics>();
+        if (jts != nullptr) {
+            jts->AddSessionBytes(bytes);
+        }
+    }
+
+    /** @var Updates the number of global-bytes allocated for JIT query execution. */
+    inline void AddGlobalBytes(int64_t bytes)
+    {
+        JitGlobalStatistics* jgs = GetGlobalStatistics<JitGlobalStatistics>();
+        if (jgs) {
+            jgs->AddGlobalBytes(bytes);
+        }
+    }
+
     /**
      * @brief Derives classes should react to a notification that configuration changed. New
      * configuration is accessible via the ConfigManager.
      */
-    virtual void OnConfigChange();
+    void OnConfigChange() override;
 
 private:
     /** @brief Constructor. */
     JitStatisticsProvider();
 
     /** @brief Destructor. */
-    virtual ~JitStatisticsProvider();
+    ~JitStatisticsProvider() override;
 
     /** @brief Registers the provider in the manager. */
     void RegisterProvider();

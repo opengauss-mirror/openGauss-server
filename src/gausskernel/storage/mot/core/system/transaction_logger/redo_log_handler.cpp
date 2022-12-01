@@ -29,8 +29,8 @@
 #include "redo_log_handler.h"
 #include "logger_factory.h"
 #include "logger_type.h"
-#include "synchronous_redo_log_handler.h"
-#include "segmented_group_synchronous_redo_log_handler.h"
+#include "sync_redo_log_handler.h"
+#include "segmented_group_sync_redo_log_handler.h"
 #include "mot_error.h"
 
 namespace MOT {
@@ -48,11 +48,11 @@ RedoLogHandler* RedoLogHandlerFactory::CreateRedoLogHandler()
 
     RedoLogHandler* handler = nullptr;
     switch (cfg.m_redoLogHandlerType) {
-        case RedoLogHandlerType::NONE:
+        case RedoLogHandlerType::NONE_REDO_LOG_HANDLER:
             handler = nullptr;
             break;
         case RedoLogHandlerType::SYNC_REDO_LOG_HANDLER:
-            handler = new (std::nothrow) SynchronousRedoLogHandler();
+            handler = new (std::nothrow) SyncRedoLogHandler();
             break;
         case RedoLogHandlerType::SEGMENTED_GROUP_SYNC_REDO_LOG_HANDLER:
             handler = new (std::nothrow) SegmentedGroupSyncRedoLogHandler();
@@ -66,7 +66,7 @@ RedoLogHandler* RedoLogHandlerFactory::CreateRedoLogHandler()
             return handler;
     }
 
-    if ((cfg.m_redoLogHandlerType != RedoLogHandlerType::NONE) && (handler == nullptr)) {
+    if ((cfg.m_redoLogHandlerType != RedoLogHandlerType::NONE_REDO_LOG_HANDLER) && (handler == nullptr)) {
         MOT_REPORT_PANIC(MOT_ERROR_OOM,
             "Redo Log Handler Initialization",
             "Failed to allocate memory for redo log handler, aborting");
@@ -83,8 +83,11 @@ RedoLogHandler::~RedoLogHandler()
     if (m_logger != nullptr) {
         m_logger->FlushLog();
         m_logger->CloseLog();
-        if (GetGlobalConfiguration().m_loggerType != LoggerType::EXTERNAL_LOGGER)
+        if (GetGlobalConfiguration().m_loggerType != LoggerType::EXTERNAL_LOGGER) {
             delete m_logger;
+        }
+        m_logger = nullptr;
     }
+    m_wakeupFunc = nullptr;
 }
 }  // namespace MOT

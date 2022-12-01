@@ -34,12 +34,12 @@ namespace MOT {
 DECLARE_LOGGER(BufferHeap, Memory)
 
 // fullness bit-set utility macros
-#define CHUNK_FULLNESS_INDEX(chunkHeader) ((chunkHeader)->m_bufferCount - (chunkHeader)->m_allocatedCount - 1)
+#define CHUNK_FULLNESS_INDEX(chunkHeader) (((chunkHeader)->m_bufferCount - (chunkHeader)->m_allocatedCount) - 1)
 #define FULLNESS_BIT(fullnessOffset) (((uint64_t)1) << (63 - (fullnessOffset)))
 #define RAISE_FULLNESS_BIT(bufferHeap, fullnessIndex, fullnessOffset) \
-    (bufferHeap)->m_fullnessBitset[fullnessIndex] |= FULLNESS_BIT(fullnessOffset)
+    ((bufferHeap)->m_fullnessBitset[fullnessIndex] |= FULLNESS_BIT(fullnessOffset))
 #define RESET_FULLNESS_BIT(bufferHeap, fullnessIndex, fullnessOffset) \
-    (bufferHeap)->m_fullnessBitset[fullnessIndex] &= ~FULLNESS_BIT(fullnessOffset)
+    ((bufferHeap)->m_fullnessBitset[fullnessIndex] &= ~FULLNESS_BIT(fullnessOffset))
 
 // helpers
 static inline int GetNonEmptyFullnessIndex(MemBufferHeap* bufferHeap);
@@ -57,6 +57,7 @@ static inline void MemChunkListUnlink(MemBufferChunkHeader** chunkList, MemBuffe
 static inline void MemChunkListFree(MemBufferHeap* bufferHeap, MemBufferChunkHeader* chunkList);
 static void AssertHeapValid(MemBufferHeap* bufferHeap);
 static void AssertChunkRemoved(MemBufferHeap* bufferHeap, MemBufferChunkHeader* chunkHeader);
+static int AllocAndPushChunk(MemBufferHeap* bufferHeap);
 
 #ifdef MOT_DEBUG
 #define ASSERT_HEAP_VALID AssertHeapValid
@@ -128,7 +129,8 @@ extern void MemBufferHeapDestroy(MemBufferHeap* bufferHeap)
         bufferHeap->m_allocatedChunkCount,
         bufferHeap->m_allocatedBufferCount);
 
-    MemLockDestroy(&bufferHeap->m_lock);  // error ignored, it is already reported, and we have nothing to do about it
+    // error ignored, it is already reported, and we have nothing to do about it
+    (void)MemLockDestroy(&bufferHeap->m_lock);
 }
 
 extern MemBufferHeader* MemBufferHeapAlloc(MemBufferHeap* bufferHeap)
@@ -140,7 +142,7 @@ extern MemBufferHeader* MemBufferHeapAlloc(MemBufferHeap* bufferHeap)
     int fullnessIndex = EnsureChunkExists(bufferHeap);
     if (fullnessIndex != -1) {  // need to check, could be out of memory
         // unlink first first chunk in fullest chunk list
-        uint64_t fullnessOffset = __builtin_clzll(bufferHeap->m_fullnessBitset[fullnessIndex]);
+        int fullnessOffset = __builtin_clzll(bufferHeap->m_fullnessBitset[fullnessIndex]);
         MemBufferChunkHeader* chunkHeader = MemBufferHeapPopChunk(bufferHeap, fullnessIndex, fullnessOffset);
 
         // get buffer from chunk
@@ -153,7 +155,7 @@ extern MemBufferHeader* MemBufferHeapAlloc(MemBufferHeap* bufferHeap)
         ++bufferHeap->m_allocatedBufferCount;
 
         // link modified chunk head to its new fullness list
-        MemBufferHeapPushChunk(bufferHeap, chunkHeader, 1);
+        (void)MemBufferHeapPushChunk(bufferHeap, chunkHeader, 1);
     }
 
     MemLockRelease(&bufferHeap->m_lock);
@@ -178,7 +180,8 @@ extern void MemBufferHeapFree(MemBufferHeap* bufferHeap, MemBufferHeader* buffer
     --bufferHeap->m_allocatedBufferCount;
 
     // push chunk on its fullness list head
-    MemBufferHeapPushChunk(bufferHeap, chunkHeader, 1);
+    int allowFreeChunk = bufferHeap->m_inReserveMode ? 0 : 1;
+    (void)MemBufferHeapPushChunk(bufferHeap, chunkHeader, allowFreeChunk);
 
     MemLockRelease(&bufferHeap->m_lock);
 }
@@ -193,7 +196,7 @@ extern uint32_t MemBufferHeapAllocMultiple(MemBufferHeap* bufferHeap, uint32_t i
         int fullnessIndex = EnsureChunkExists(bufferHeap);
         if (fullnessIndex != -1) {
             // unlink first first chunk in fullest chunk list
-            uint64_t fullnessOffset = __builtin_clzll(bufferHeap->m_fullnessBitset[fullnessIndex]);
+            int fullnessOffset = __builtin_clzll(bufferHeap->m_fullnessBitset[fullnessIndex]);
             MemBufferChunkHeader* chunkHeader = MemBufferHeapPopChunk(bufferHeap, fullnessIndex, fullnessOffset);
 
             // get buffer from chunk
@@ -207,7 +210,7 @@ extern uint32_t MemBufferHeapAllocMultiple(MemBufferHeap* bufferHeap, uint32_t i
             bufferHeap->m_allocatedBufferCount += buffersAllocatedCurr;
 
             // link modified chunk head to its new fullness list
-            MemBufferHeapPushChunk(bufferHeap, chunkHeader, 1);
+            (void)MemBufferHeapPushChunk(bufferHeap, chunkHeader, 1);
         } else {
             break;  // out of memory
         }
@@ -227,7 +230,7 @@ extern MemBufferChunkHeader* MemBufferHeapExtractChunk(MemBufferHeap* bufferHeap
     // get fullest fit if any
     int nonEmptyIndex = GetNonEmptyFullnessIndex(bufferHeap);
     if (nonEmptyIndex != -1) {
-        uint64_t fullnessOffset = __builtin_clzll(bufferHeap->m_fullnessBitset[nonEmptyIndex]);
+        int fullnessOffset = __builtin_clzll(bufferHeap->m_fullnessBitset[nonEmptyIndex]);
         chunkHeader = MemBufferHeapPopChunk(bufferHeap, nonEmptyIndex, fullnessOffset);
         MOT_ASSERT(chunkHeader);
         MOT_ASSERT(chunkHeader->m_allocatedCount < chunkHeader->m_bufferCount);
@@ -249,7 +252,8 @@ extern void MemBufferHeapRelinkChunk(
     ASSERT_HEAP_VALID(bufferHeap);
 
     // push chunk on its fullness list head
-    MemBufferHeapPushChunk(bufferHeap, chunkHeader, 1);
+    int allowFreeChunk = bufferHeap->m_inReserveMode ? 0 : 1;
+    (void)MemBufferHeapPushChunk(bufferHeap, chunkHeader, allowFreeChunk);
     bufferHeap->m_allocatedBufferCount += buffersAllocated;
     if (newChunk) {
         ++bufferHeap->m_allocatedChunkCount;
@@ -270,7 +274,7 @@ extern MemBufferChunkHeader* MemBufferHeapSnapshotChunk(MemBufferHeap* bufferHea
     if (nonEmptyIndex != -1) {
         // attention: we call ctz and **NOT** clz (trailing zeroes, not leading zeroes) since we search in
         // reverse order for the emptiest non-empty chunk list
-        uint64_t fullnessOffset = __builtin_ctzll(bufferHeap->m_fullnessBitset[nonEmptyIndex]);
+        int fullnessOffset = __builtin_ctzll(bufferHeap->m_fullnessBitset[nonEmptyIndex]);
         chunkHeader = MemBufferHeapPopChunk(bufferHeap, nonEmptyIndex, 63 - fullnessOffset);
         MOT_ASSERT(chunkHeader);
         MOT_ASSERT(chunkHeader->m_allocatedCount < chunkHeader->m_bufferCount);
@@ -280,7 +284,7 @@ extern MemBufferChunkHeader* MemBufferHeapSnapshotChunk(MemBufferHeap* bufferHea
         errno_t erc = memcpy_s(chunkSnapshot, sizeof(MemBufferChunkHeader), chunkHeader, sizeof(MemBufferChunkHeader));
         securec_check(erc, "\0", "\0");
         MemBufferChunkMarkFull(chunkHeader);
-        MemBufferHeapPushChunk(bufferHeap, chunkHeader, 0);
+        (void)MemBufferHeapPushChunk(bufferHeap, chunkHeader, 0);
 
         // update statistics
         bufferHeap->m_allocatedBufferCount += chunkSnapshot->m_bufferCount - chunkSnapshot->m_allocatedCount;
@@ -314,11 +318,68 @@ extern void MemBufferHeapFreeMultiple(MemBufferHeap* bufferHeap, MemBufferList* 
         --bufferHeap->m_allocatedBufferCount;
 
         // push chunk on its fullness list head
-        MemBufferHeapPushChunk(bufferHeap, chunkHeader, 1);
+        int allowFreeChunk = bufferHeap->m_inReserveMode ? 0 : 1;
+        (void)MemBufferHeapPushChunk(bufferHeap, chunkHeader, allowFreeChunk);
     }
 
     ASSERT_HEAP_VALID(bufferHeap);
     MemLockRelease(&bufferHeap->m_lock);
+}
+
+extern int MemBufferHeapReserve(MemBufferHeap* bufferHeap, uint32_t bufferCount)
+{
+    int result = 0;
+    MemLockAcquire(&bufferHeap->m_lock);
+
+    // raise reserve mode flag
+    bufferHeap->m_inReserveMode = 1;
+
+    // count number of available buffers
+    uint32_t availableBuffers = 0;
+    for (uint32_t i = 0; i < bufferHeap->m_maxBuffersInChunk; ++i) {
+        MemBufferChunkHeader* chunkHeader = bufferHeap->m_fullnessDirectory[i];
+        while (chunkHeader != nullptr) {
+            availableBuffers += (chunkHeader->m_bufferCount - chunkHeader->m_allocatedCount);
+            chunkHeader = chunkHeader->m_nextChunk;
+        }
+    }
+
+    if (availableBuffers < bufferCount) {
+        // compute number of required chunks (round up)
+        uint32_t requiredBuffers = bufferCount - availableBuffers;
+        uint32_t requiredBytes =
+            (requiredBuffers + bufferHeap->m_maxBuffersInChunk - 1) * bufferHeap->m_bufferSizeKb * KILO_BYTE;
+        uint32_t requiredChunks = requiredBytes / (MEM_CHUNK_SIZE_MB * MEGA_BYTE);
+        for (uint32_t i = 0; i < requiredChunks; ++i) {
+            result = AllocAndPushChunk(bufferHeap);
+            if (result == -1) {
+                result = MOT_ERROR_OOM;
+                bufferHeap->m_inReserveMode = 0;
+                break;
+            }
+        }
+    }
+
+    MemLockRelease(&bufferHeap->m_lock);
+    return result;
+}
+
+extern int MemBufferHeapUnreserve(MemBufferHeap* bufferHeap)
+{
+    // just reset reserve flag and let things happen naturally
+    MemLockAcquire(&bufferHeap->m_lock);
+    bufferHeap->m_inReserveMode = 0;
+
+    // free all empty chunks in compact mode
+    if (g_memGlobalCfg.m_storeMemoryPolicy == MEM_STORE_COMPACT) {
+        while (bufferHeap->m_fullnessDirectory[bufferHeap->m_maxBuffersInChunk - 1] != nullptr) {
+            MemBufferChunkHeader* chunkHeader = bufferHeap->m_fullnessDirectory[bufferHeap->m_maxBuffersInChunk - 1];
+            MemBufferHeapUnlinkChunk(bufferHeap, chunkHeader);
+            (void)MemBufferHeapPushChunk(bufferHeap, chunkHeader, 1);
+        }
+    }
+    MemLockRelease(&bufferHeap->m_lock);
+    return 0;
 }
 
 extern void MemBufferHeapPrint(const char* name, LogLevel logLevel, MemBufferHeap* bufferHeap)
@@ -353,11 +414,11 @@ extern void MemBufferHeapToString(int indent, const char* name, MemBufferHeap* b
     StringBufferAppend(stringBuffer, "\n%*sFullness Chunk Lists =\n", indent + PRINT_REPORT_INDENT, "");
     for (uint32_t i = 0; i < bufferHeap->m_maxBuffersInChunk; ++i) {
         if (bufferHeap->m_fullnessDirectory[i] != NULL) {
-            char name[20];
-            erc = snprintf_s(name, sizeof(name), sizeof(name) - 1, "Fullness[%u]", i);
+            char tmpName[20];
+            erc = snprintf_s(tmpName, sizeof(tmpName), sizeof(tmpName) - 1, "Fullness[%u]", i);
             securec_check_ss(erc, "\0", "\0");
             MemBufferChunkListToString(
-                indent + (2 * PRINT_REPORT_INDENT), name, bufferHeap->m_fullnessDirectory[i], stringBuffer);
+                indent + (2 * PRINT_REPORT_INDENT), tmpName, bufferHeap->m_fullnessDirectory[i], stringBuffer);
             StringBufferAppend(stringBuffer, "\n");
         }
     }
@@ -394,22 +455,25 @@ static inline int EnsureChunkExists(MemBufferHeap* bufferHeap)
 {
     int nonEmptyIndex = GetNonEmptyFullnessIndex(bufferHeap);
     if (nonEmptyIndex == -1) {
-        // allocate one chunk and update bit set (very costly unless preallocated in background)
-        MemBufferChunkHeader* chunkHeader = NULL;
-        if (bufferHeap->m_allocType == MEM_ALLOC_GLOBAL) {
-            chunkHeader = (MemBufferChunkHeader*)MemRawChunkStoreAllocGlobal(bufferHeap->m_node);
-        } else {
-            chunkHeader = (MemBufferChunkHeader*)MemRawChunkStoreAllocLocal(bufferHeap->m_node);
-        }
-        if (chunkHeader != NULL) {
-            MemBufferChunkInit(chunkHeader,
-                chunkHeader->m_node,
-                bufferHeap->m_allocType,
-                bufferHeap->m_node,
-                bufferHeap->m_bufferClass);
-            ++bufferHeap->m_allocatedChunkCount;
-            nonEmptyIndex = MemBufferHeapPushChunk(bufferHeap, chunkHeader, 0);
-        }
+        nonEmptyIndex = AllocAndPushChunk(bufferHeap);
+    }
+    return nonEmptyIndex;
+}
+
+static int AllocAndPushChunk(MemBufferHeap* bufferHeap)
+{
+    // allocate one chunk and update bit set (very costly unless preallocated in background)
+    int nonEmptyIndex = -1;
+    MemBufferChunkHeader* chunkHeader = NULL;
+    if (bufferHeap->m_allocType == MEM_ALLOC_GLOBAL) {
+        chunkHeader = (MemBufferChunkHeader*)MemRawChunkStoreAllocGlobal(bufferHeap->m_node);
+    } else {
+        chunkHeader = (MemBufferChunkHeader*)MemRawChunkStoreAllocLocal(bufferHeap->m_node);
+    }
+    if (chunkHeader != NULL) {
+        MemBufferChunkInit(chunkHeader, bufferHeap->m_allocType, bufferHeap->m_node, bufferHeap->m_bufferClass);
+        ++bufferHeap->m_allocatedChunkCount;
+        nonEmptyIndex = MemBufferHeapPushChunk(bufferHeap, chunkHeader, 0);
     }
     return nonEmptyIndex;
 }
@@ -419,7 +483,7 @@ static inline MemBufferChunkHeader* MemBufferHeapPopChunk(
     MemBufferHeap* bufferHeap, int fullnessIndex, int fullnessOffset)
 {
     // pop chunk from list
-    int chunkListIndex = (fullnessIndex << 6) + fullnessOffset;
+    uint32_t chunkListIndex = (static_cast<unsigned int>(fullnessIndex) << 6) + fullnessOffset;
     MemBufferChunkHeader* chunkHeader = MemChunkListPop(&bufferHeap->m_fullnessDirectory[chunkListIndex]);
     MOT_ASSERT(chunkHeader);
 
@@ -502,7 +566,7 @@ static inline void MemChunkListUnlink(MemBufferChunkHeader** chunkList, MemBuffe
 {
     // separate cases
     if (*chunkList == chunkHeader) {  // unlink head
-        MemChunkListPop(chunkList);
+        (void)MemChunkListPop(chunkList);
     } else {
         if (chunkHeader->m_prevChunk != nullptr) {
             chunkHeader->m_prevChunk->m_nextChunk = chunkHeader->m_nextChunk;
@@ -573,7 +637,7 @@ extern "C" void MemBufferHeapDump(void* arg)
 
     MOT::StringBufferApply([bufferHeap](MOT::StringBuffer* stringBuffer) {
         MOT::MemBufferHeapToString(0, "Debug Dump", bufferHeap, stringBuffer);
-        fprintf(stderr, "%s", stringBuffer->m_buffer);
-        fflush(stderr);
+        (void)fprintf(stderr, "%s", stringBuffer->m_buffer);
+        (void)fflush(stderr);
     });
 }

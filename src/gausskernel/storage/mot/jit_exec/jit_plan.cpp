@@ -28,11 +28,14 @@
  */
 #include "global.h"
 #include "jit_plan.h"
+#include "jit_plan_sp.h"
 #include "jit_common.h"
 #include "mm_session_api.h"
 #include "utilities.h"
 #include "nodes/pg_list.h"
 #include "catalog/pg_aggregate.h"
+#include "cycles.h"
+#include "mot_internal.h"
 
 #include <algorithm>
 
@@ -91,7 +94,7 @@ static bool countWhereClauseEqualsLeaves(Query* query, MOT::Table* table, MOT::I
         return false;                                                            \
     }
 
-static bool CheckQueryAttributes(const Query* query, bool allowSorting, bool allowAggregate, bool allowSublink)
+bool CheckQueryAttributes(const Query* query, bool allowSorting, bool allowAggregate, bool allowSublink)
 {
     checkJittableAttribute(query, hasWindowFuncs);
     checkJittableAttribute(query, hasDistinctOn);
@@ -179,12 +182,13 @@ static void freeSelectExprArray(JitSelectExprArray* expr_array)
 {
     if (expr_array->_exprs != nullptr) {
         for (int i = 0; i < expr_array->_count; ++i) {
-            if (expr_array->_exprs[i]._column_expr) {
-                freeExpr((JitExpr*)expr_array->_exprs[i]._column_expr);
+            if (expr_array->_exprs[i]._expr) {
+                freeExpr((JitExpr*)expr_array->_exprs[i]._expr);
             }
         }
         MOT::MemSessionFree(expr_array->_exprs);
         expr_array->_exprs = nullptr;
+        expr_array->_count = 0;
     }
 }
 
@@ -246,7 +250,7 @@ static bool prepareTargetExpressions(Query* query, JitColumnExprArray* expr_arra
 
 static bool prepareSelectExpressions(Query* query, JitSelectExprArray* expr_array)
 {
-    MOT_LOG_TRACE("Preparing target expressions");
+    MOT_LOG_TRACE("Preparing select expressions");
     bool result = false;
     int expr_count = getNonJunkTargetEntryCount(query);
     MOT_LOG_TRACE("Counted %d non-junk target expressions", expr_count);
@@ -255,9 +259,8 @@ static bool prepareSelectExpressions(Query* query, JitSelectExprArray* expr_arra
     } else {
         // retrieve search expressions
         if (!getSelectExpressions(query, expr_array)) {
-            MOT_REPORT_ERROR(MOT_ERROR_OOM, "Prepare JIT plan", "Failed to collect target expressions");
-            MOT::MemSessionFree(expr_array->_exprs);
-            expr_array->_exprs = nullptr;
+            MOT_REPORT_ERROR(MOT_ERROR_OOM, "Prepare JIT plan", "Failed to collect select expressions");
+            freeSelectExprArray(expr_array);
         } else {
             result = true;
         }
@@ -291,22 +294,38 @@ static bool prepareRangeSearchExpressions(
 
 // Count all leaves in parsed WHERE clause tree, that belong to the given table
 // but do not refer to the index columns
-static bool countFilters(Query* query, MOT::Table* table, MOT::Index* index, int* count, JitColumnExprArray* pkey_exprs)
+static bool countFilters(Query* query, MOT::Table* table, MOT::Index* index, int* count, int* oneTimeFilterCount,
+    JitColumnExprArray* pkey_exprs, JoinClauseType join_clause_type)
 {
     MOT_LOG_TRACE("Counting filters for table %s, index %s", table->GetTableName().c_str(), index->GetName().c_str());
-    FilterCounter filter_counter(count);
+    FilterCounter filter_counter(count, oneTimeFilterCount);
     Node* quals = query->jointree->quals;
     bool result = true;
     if (quals == nullptr) {
         *count = 0;
     } else {
-        result =
-            visitSearchExpressions(query, table, index, (Expr*)&quals[0], false, &filter_counter, false, pkey_exprs);
+        bool includeJoinExprs = (join_clause_type == JoinClauseImplicit);
+        result = visitSearchExpressions(
+            query, table, index, (Expr*)&quals[0], false, &filter_counter, includeJoinExprs, pkey_exprs);
+        if (result && (join_clause_type == JoinClauseExplicit)) {
+            // add filters from explicit join clause
+            quals = getJoinQualifiers(query);
+            if (quals == nullptr) {
+                MOT_LOG_TRACE("Query is not jittable: JOIN clause has unexpectedly no qualifiers");
+            } else {
+                MOT_LOG_TRACE("Adding JOIN clause qualifiers for filter count");
+                if (!visitSearchExpressions(
+                        query, table, index, (Expr*)&quals[0], false, &filter_counter, true, pkey_exprs)) {
+                    MOT_LOG_TRACE("Failed to collect range search expressions from JOIN qualifiers");
+                    result = false;
+                }
+            }
+        }
     }
     if (!result) {
         MOT_LOG_TRACE("Failed to count number of filters");
     } else {
-        MOT_LOG_TRACE("Found %d filters", *count);
+        MOT_LOG_TRACE("Found %d filters (%d one-time filters)", *count, *oneTimeFilterCount);
     }
     return result;
 }
@@ -314,8 +333,8 @@ static bool countFilters(Query* query, MOT::Table* table, MOT::Index* index, int
 static bool allocFilterArray(JitFilterArray* filter_array, int filter_count)
 {
     bool result = false;
-    size_t alloc_size = filter_count * sizeof(JitFilter);
-    filter_array->_scan_filters = (JitFilter*)MOT::MemSessionAlloc(alloc_size);
+    size_t alloc_size = filter_count * sizeof(JitExpr*);
+    filter_array->_scan_filters = (JitExpr**)MOT::MemSessionAlloc(alloc_size);
     if (filter_array->_scan_filters == nullptr) {
         MOT_REPORT_ERROR(MOT_ERROR_OOM,
             "Prepare JIT plan",
@@ -335,8 +354,9 @@ static void freeFilterArray(JitFilterArray* filter_array)
 {
     if (filter_array->_scan_filters != nullptr) {
         for (int i = 0; i < filter_array->_filter_count; ++i) {
-            freeExpr(filter_array->_scan_filters[i]._lhs_operand);
-            freeExpr(filter_array->_scan_filters[i]._rhs_operand);
+            if (filter_array->_scan_filters[i] != nullptr) {
+                freeExpr(filter_array->_scan_filters[i]);
+            }
         }
         MOT::MemSessionFree(filter_array->_scan_filters);
         filter_array->_scan_filters = nullptr;
@@ -344,17 +364,34 @@ static void freeFilterArray(JitFilterArray* filter_array)
 }
 
 static bool getFilters(Query* query, MOT::Table* table, MOT::Index* index, JitFilterArray* filter_array, int* count,
-    JitColumnExprArray* pkey_exprs)
+    JitFilterArray* oneTimeFilterArray, int* oneTimeFilterCount, JitColumnExprArray* pkey_exprs,
+    JoinClauseType join_clause_type)
 {
     MOT_LOG_TRACE("Retrieving filters for table %s, index %s", table->GetTableName().c_str(), index->GetName().c_str());
-    FilterCollector filter_collector(query, filter_array, count);
+    FilterCollector filter_collector(query, filter_array, count, oneTimeFilterArray, oneTimeFilterCount);
     Node* quals = query->jointree->quals;
     bool result = true;
     if (quals == nullptr) {
         *count = 0;
+        *oneTimeFilterCount = 0;
     } else {
-        result =
-            visitSearchExpressions(query, table, index, (Expr*)&quals[0], false, &filter_collector, false, pkey_exprs);
+        bool includeJoinExprs = (join_clause_type == JoinClauseImplicit);
+        result = visitSearchExpressions(
+            query, table, index, (Expr*)&quals[0], false, &filter_collector, includeJoinExprs, pkey_exprs);
+        if (result && (join_clause_type == JoinClauseExplicit)) {
+            // add filters from explicit join clause
+            quals = getJoinQualifiers(query);
+            if (quals == nullptr) {
+                MOT_LOG_TRACE("Query is not jittable: JOIN clause has unexpectedly no qualifiers");
+            } else {
+                MOT_LOG_TRACE("Adding JOIN clause qualifiers for filter collector");
+                if (!visitSearchExpressions(
+                        query, table, index, (Expr*)&quals[0], false, &filter_collector, true, pkey_exprs)) {
+                    MOT_LOG_TRACE("Failed to collect range search expressions from JOIN qualifiers");
+                    result = false;
+                }
+            }
+        }
     }
     if (!result) {
         MOT_LOG_TRACE("Failed to retrieve filters");
@@ -364,37 +401,67 @@ static bool getFilters(Query* query, MOT::Table* table, MOT::Index* index, JitFi
     return result;
 }
 
-static bool prepareFilters(
-    Query* query, MOT::Table* table, MOT::Index* index, JitFilterArray* filter_array, JitColumnExprArray* pkey_exprs)
+static bool prepareFilters(Query* query, MOT::Table* table, MOT::Index* index, JitFilterArray* filter_array,
+    JitFilterArray* oneTimeFilterArray, JitColumnExprArray* pkey_exprs, JoinClauseType join_clause_type)
 {
     MOT_LOG_TRACE(
         "Preparing search filters on table %s, index %s", table->GetTableName().c_str(), index->GetName().c_str());
-    bool result = false;
 
     // retrieve filters
     int filter_count = 0;
-    if (!countFilters(query, table, index, &filter_count, pkey_exprs)) {
+    int oneTimeFilterCount = 0;
+    if (!countFilters(query, table, index, &filter_count, &oneTimeFilterCount, pkey_exprs, join_clause_type)) {
         MOT_LOG_TRACE("Failed to count filter expressions");
-    } else if (filter_count == 0) {
-        result = true;
-    } else {
-        // allocate filter array
-        result = allocFilterArray(filter_array, filter_count);
-        if (!result) {
+        return false;
+    }
+    if ((filter_count == 0) && (oneTimeFilterCount == 0)) {
+        return true;
+    }
+
+    // allocate filter array
+    if (filter_count > 0) {
+        if (!allocFilterArray(filter_array, filter_count)) {
             MOT_LOG_TRACE("Failed to allocate filter array with %d items", filter_count);
-        } else {
-            int collected_count = 0;
-            result = getFilters(query, table, index, filter_array, &collected_count, pkey_exprs);
-            if (!result) {
-                MOT_LOG_TRACE("Failed to collect filters");
-                freeFilterArray(filter_array);
-            } else {
-                MOT_LOG_TRACE("Collected %d filters", collected_count);
-            }
+            return false;
         }
     }
 
-    return result;
+    // allocate one-time filter array
+    if (oneTimeFilterCount > 0) {
+        MOT_LOG_TRACE("Counted %d one-time filters", oneTimeFilterCount);
+        if (oneTimeFilterArray == nullptr) {
+            MOT_LOG_TRACE("Missing one-time filter array, while there are %d one-time filters", oneTimeFilterCount);
+            return false;
+        }
+        if (!allocFilterArray(oneTimeFilterArray, oneTimeFilterCount)) {
+            MOT_LOG_TRACE("Failed to allocate one-time filter array with %d items", oneTimeFilterCount);
+            return false;
+        }
+    }
+
+    int collected_count = 0;
+    int oneTimeCollectedCount = 0;
+    if (!getFilters(query,
+            table,
+            index,
+            filter_array,
+            &collected_count,
+            oneTimeFilterArray,
+            &oneTimeCollectedCount,
+            pkey_exprs,
+            join_clause_type)) {
+        MOT_LOG_TRACE("Failed to collect filters");
+        if (filter_count > 0) {
+            freeFilterArray(filter_array);
+        }
+        if (oneTimeFilterCount > 0) {
+            freeFilterArray(oneTimeFilterArray);
+        }
+        return false;
+    }
+
+    MOT_LOG_TRACE("Collected %d filters (%d one-time filters)", collected_count, oneTimeCollectedCount);
+    return true;
 }
 
 static TargetEntry* getRefTargetEntry(const List* targetList, int ref_index)
@@ -418,10 +485,23 @@ static bool getSortClauseColumns(
     *column_count = 0;
     ListCell* lc = nullptr;
 
+    JitQuerySortOrder commonSortOrder = JIT_QUERY_SORT_INVALID;
     foreach (lc, query->sortClause) {
         SortGroupClause* sgc = (SortGroupClause*)lfirst(lc);
         if (sgc->groupSet) {
             MOT_LOG_TRACE("getSortClauseColumns(): Found groupSet flag in sort group clause");
+            return false;
+        }
+
+        JitQuerySortOrder sortOrder = ClassifyOperatorSortOrder(sgc->sortop);
+        if (sortOrder == JIT_QUERY_SORT_INVALID) {
+            MOT_LOG_TRACE("getSortClauseColumns(): Failed to classify sort clause operator");
+            return false;
+        }
+        if (commonSortOrder == JIT_QUERY_SORT_INVALID) {
+            commonSortOrder = sortOrder;
+        } else if (commonSortOrder != sortOrder) {
+            MOT_LOG_TRACE("getSortClauseColumns(): Sort clause specifying varying sort direction");
             return false;
         }
 
@@ -439,7 +519,7 @@ static bool getSortClauseColumns(
 
         int table_column_id = ((Var*)te->expr)->varattno;
         int index_column_id = MapTableColumnToIndex(table, index, table_column_id);
-        if (index_column_id >= key_column_count) {
+        if (index_column_id < 0) {
             MOT_LOG_TRACE("getSortClauseColumns(): Disqualifying query - ORDER BY clause references invalid index "
                           "column %d from table column %d",
                 index_column_id,
@@ -455,13 +535,107 @@ static bool getSortClauseColumns(
     return true;
 }
 
-static bool isJittableSortClause(Query* query, MOT::Table* table, MOT::Index* index, int prefix_column_count)
+// Based on functions make_sort_from_sortclauses and getSortClauseColumns
+static bool isJittableNonNativeSortClause(Query* query, JitRangeSelectPlan* jitRangeSelectPlan, MOT::Index* index)
 {
-    // the ordered-by columns is an ordered list that must exhibit the following properties:
-    // 1. columns must appear in order of index column
-    // 2. it must contain a full prefix of the missing columns in the WHERE clause full prefix
-    // This means that the ORDERED BY clause may contain some redundant column already found in the WHERE clause,
-    // even with "holes", but they must be in the same order of the index columns.
+    ListCell* l = nullptr;
+    int numSortKeys = 0;
+
+    MOT_ASSERT(jitRangeSelectPlan->m_nonNativeSortParams == nullptr);
+
+    if (jitRangeSelectPlan->m_nonNativeSortParams) {
+        MOT_LOG_TRACE("isJittableNonNativeSortClause(): non native sort plan already exists %p",
+            jitRangeSelectPlan->m_nonNativeSortParams);
+        MOT_LOG_ERROR("Non native sort plan already exists");
+
+        return false;
+    }
+
+    int numCols = list_length(query->sortClause);
+
+    JitNonNativeSortParams* jitNonNativeSortParams = AllocJitNonNativeSortParams(numCols, JIT_CONTEXT_LOCAL);
+
+    if (!jitNonNativeSortParams) {
+        MOT_LOG_ERROR("Failed to create JitNonNativeSortParams with %d columns).", numCols);
+
+        return false;
+    }
+
+    do {
+        foreach (l, query->sortClause) {
+            SortGroupClause* sortCl = (SortGroupClause*)lfirst(l);
+            if (sortCl->groupSet) {
+                MOT_LOG_TRACE("isJittableNonNativeSortClause(): Found groupSet flag in sort group clause");
+                break;
+            }
+
+            int teIndex = sortCl->tleSortGroupRef;
+            TargetEntry* te = getRefTargetEntry(query->targetList, teIndex);
+            if (te == nullptr) {
+                MOT_LOG_TRACE("isJittableNonNativeSortClause(): Cannot find TargetEntry by ref-index %d", teIndex);
+                break;
+            }
+
+            if (te->expr->type != T_Var) {
+                MOT_LOG_TRACE("isJittableNonNativeSortClause(): TargetEntry sub-expression is not Var expression");
+                break;
+            }
+
+            if (te->resjunk) {
+                MOT_LOG_TRACE(
+                    "isJittableNonNativeSortClause(): TargetEntry is marked as resjunk and cannot be used for sorting");
+                break;
+            }
+
+            // collations supports only T_Var for now. Might work with other types.
+            jitNonNativeSortParams->sortColIdx[numSortKeys] = te->resno;
+            jitNonNativeSortParams->sortOperators[numSortKeys] = sortCl->sortop;
+            jitNonNativeSortParams->collations[numSortKeys] =
+                ((const Var*)te->expr)->varcollid;  // exprCollation((Node*)te->expr);
+            jitNonNativeSortParams->nullsFirst[numSortKeys] = sortCl->nulls_first;
+            numSortKeys++;
+        }
+
+        if (numSortKeys != jitNonNativeSortParams->numCols) {
+            MOT_LOG_TRACE("isJittableNonNativeSortClause(): Number of sortClause is different from scanned entries. "
+                          "scanned entries: %d, number of sortClause: %d",
+                numSortKeys,
+                jitNonNativeSortParams->numCols);
+            break;
+        }
+
+        // update the rest of variables in JitNonNativeSortParams before update the main plan.
+        jitNonNativeSortParams->plan_node_id = 0;
+        jitNonNativeSortParams->bound = jitRangeSelectPlan->_limit_count;
+
+        // iterating the results always forward, as the tuple sort is already sorted using the order direction.
+        jitNonNativeSortParams->scanDir = ScanDirection::ForwardScanDirection;
+
+        // set jitNonNativeSortParams in main plan.
+        jitRangeSelectPlan->m_nonNativeSortParams = jitNonNativeSortParams;
+
+        // non-native sort will handle the limit count instead of the jit function.
+        jitRangeSelectPlan->_limit_count = 0;
+
+        return true;
+    } while (false);
+
+    // bad flow
+    DestroyJitNonNativeSortParams(jitNonNativeSortParams, JIT_CONTEXT_LOCAL);
+    jitNonNativeSortParams = nullptr;
+
+    return false;
+}
+
+static bool isJittableSortClause(Query* query, JitIndexScan* indexScan, MOT::Index* index)
+{
+    // The ordered-by columns is an ordered list that must exhibit the following properties:
+    // 1. Columns in sort clause must appear in the same order of index column
+    // 2. All sort columns must specify the same sort order (either all ASC or all DESC)
+    // 3. The union of the columns in the index scan that appear with EQUALS and the columns in the sort clause
+    // combined should together form a full prefix
+    // This means that the ORDERED BY clause may contain some redundant columns already found in the WHERE clause
+    MOT::Table* table = indexScan->_table;
     int key_column_count = index->GetNumFields();
     int* column_array = (int*)calloc(key_column_count, sizeof(int));
     if (column_array == nullptr) {
@@ -475,41 +649,67 @@ static bool isJittableSortClause(Query* query, MOT::Table* table, MOT::Index* in
         free(column_array);
         return false;
     }
+    if (column_count == 0) {
+        MOT_LOG_TRACE("isJittableSortClause(): No sort clause found");
+        free(column_array);
+        return true;
+    }
 
-    // now check all columns are in order (according to index order)
-    for (int i = 1; i < column_count; ++i) {
-        if (column_array[i] < column_array[i - 1]) {
-            MOT_LOG_TRACE("isJittableSortClause(): Disqualifying query - ORDER BY clause mismatches index %s order",
-                index->GetName().c_str());
+    // verify all sort clause columns appear as in index order and with same sort direction
+    // pay attention that sort clause is not jittable if it refers any non-index columns, or if sort clauses specify
+    // varying sort directions (see getSortClauseColumns())
+    int prevSortColumn = -1;
+    for (int i = 0; i < column_count; ++i) {
+        int sortColumn = column_array[i];
+        if (sortColumn < prevSortColumn) {  // we expect ascending index columns with possible holes
+            MOT_LOG_TRACE("isJittableSortClause(): Disqualifying query - ORDER BY clause field %d referring index %s"
+                          " column %d and table column %d cannot be used by index due to non-full prefix (expecting"
+                          " index column %d referring table column %d)",
+                i,
+                index->GetName().c_str(),
+                sortColumn,
+                index->GetColumnKeyFields()[sortColumn],
+                i,
+                index->GetColumnKeyFields()[i]);
             free(column_array);
             return false;
         }
+        prevSortColumn = sortColumn;
     }
 
-    // now check that sort clause columns contains a full-prefix of columns not in WHERE clause (i.e. no "holes" in
-    // excess columns)
-    int column_id = 0;
-    while ((column_id < column_count) && (column_array[column_id] < prefix_column_count)) {
-        ++column_id;
+    // now unify index scan columns having EQUALS with sort clause columns
+    set<int> unifiedColumns;
+    for (int i = 0; i < column_count; ++i) {
+        (void)unifiedColumns.insert(column_array[i]);
+        MOT_LOG_TRACE("isJittableSortClause(): Adding sort clause column %d", column_array[i]);
     }
-    int last_excess_column = prefix_column_count;
-    while (column_id < column_count) {
-        if (column_array[column_id] != last_excess_column) {
-            MOT_LOG_TRACE("isJittableSortClause(): Disqualifying query - ORDER BY clause does not contain full-prefix "
-                          "of missing columns in WHERE clause (hole found at column %d)",
-                column_id);
+    for (int i = 0; i < indexScan->_search_exprs._count; ++i) {
+        if (indexScan->_search_exprs._exprs[i]._op_class == JIT_WOC_EQUALS) {
+            int columnId = indexScan->_search_exprs._exprs[i]._index_column_id;
+            (void)unifiedColumns.insert(columnId);
+            MOT_LOG_TRACE("isJittableSortClause(): Adding WHERE clause EQUALS column %d", columnId);
+        }
+    }
+
+    // now verify we have a full prefix of index columns
+    int i = 0;
+    set<int>::iterator itr = unifiedColumns.begin();
+    while (itr != unifiedColumns.end()) {
+        int column = *itr;
+        if (column != i) {
+            MOT_LOG_TRACE("isJittableSortClause(): Sort clause is not jittable - found hole");
             free(column_array);
             return false;
         }
-        ++last_excess_column;
-        ++column_id;
+        ++i;
+        ++itr;
     }
 
     free(column_array);
     return true;
 }
 
-static bool isPlanSortOrderValid(Query* query, JitRangeSelectPlan* plan)
+static bool isPlanSortOrderValid(Query* query, JitRangeScanPlan* plan)
 {
     bool result = false;
 
@@ -517,257 +717,17 @@ static bool isPlanSortOrderValid(Query* query, JitRangeSelectPlan* plan)
         // not having a sort clause is fine
         result = true;
     } else {
-        MOT::Index* index = plan->_index_scan._table->GetIndex(plan->_index_scan._index_id);
-        result = isJittableSortClause(query, plan->_index_scan._table, index, plan->_index_scan._column_count);
+        MOT::Index* index = plan->_index_scan._index;
+        result = isJittableSortClause(query, &plan->_index_scan, index);
         if (!result) {
-            MOT_LOG_TRACE("isPlanSortOrderValid(): Disqualifying query - Sort clause is not jittable")
-        }
-    }
-
-    return result;
-}
-
-static int evalConstExpr(Expr* expr)
-{
-    int result = -1;
-
-    // we expect to see either a Const or a cast to int8 of a Const
-    Const* const_expr = nullptr;
-    if (expr->type == T_Const) {
-        MOT_LOG_TRACE("evalConstExpr(): Found direct const expression");
-        const_expr = (Const*)expr;
-    } else if (expr->type == T_FuncExpr) {
-        FuncExpr* func_expr = (FuncExpr*)expr;
-        if (func_expr->funcid == 481) {  // cast to int8
-            Expr* sub_expr = (Expr*)linitial(func_expr->args);
-            if (sub_expr->type == T_Const) {
-                MOT_LOG_TRACE("evalConstExpr(): Found const expression within cast to int8 function expression");
-                const_expr = (Const*)sub_expr;
-            }
-        }
-    }
-
-    if (const_expr != nullptr) {
-        // extract integer value
-        result = const_expr->constvalue;
-        MOT_LOG_TRACE("evalConstExpr(): Expression evaluated to constant value %d", result);
-    } else {
-        MOT_LOG_TRACE("evalConstExpr(): Could not infer const expression");
-    }
-
-    return result;
-}
-
-static bool getLimitCount(Query* query, int* limit_count)
-{
-    bool result = false;
-    if (query->limitOffset) {
-        MOT_LOG_TRACE("getLimitCount(): invalid limit clause - encountered limitOffset clause");
-    } else if (query->limitCount) {
-        *limit_count = evalConstExpr((Expr*)query->limitCount);
-        result = true;
-    } else {
-        *limit_count = 0;  // no limit clause
-        result = true;
-    }
-    return result;
-}
-
-static inline bool isValidAggregateResultType(int restype)
-{
-    bool result = false;
-    if ((restype == INT1OID) || (restype == INT2OID) || (restype == INT4OID) || (restype == INT8OID) ||
-        (restype == FLOAT4OID) || (restype == FLOAT8OID) || (restype == NUMERICOID)) {
-        result = true;
-    }
-    return result;
-}
-
-static bool isAvgAggregateOperator(int funcid)
-{
-    bool result = false;
-    if ((funcid == INT8AVGFUNCOID) /* int8_avg_accum */ || (funcid == INT4AVGFUNCOID) /* int4_avg_accum */ ||
-        (funcid == INT2AVGFUNCOID) /* int2_avg_accum */ || (funcid == 5537) /* int1_avg_accum */ ||
-        (funcid == 2104) /* float4_accum */ || (funcid == 2105) /* float8_accum */ ||
-        (funcid == NUMERICAVGFUNCOID) /* numeric_avg_accum */) {
-        result = true;
-    }
-    return result;
-}
-
-static bool isSumAggregateOperator(int funcid)
-{
-    bool result = false;
-    if ((funcid == INT8SUMFUNCOID) /* int8_sum */ || (funcid == INT4SUMFUNCOID) /* int4_sum */ ||
-        (funcid == INT2SUMFUNCOID) /* int2_sum */ || (funcid == 2110) /* float4pl */ ||
-        (funcid == 2111) /* float8pl */ || (funcid == NUMERICSUMFUNCOID) /* numeric_sum */) {
-        result = true;
-    }
-    return result;
-}
-
-static bool isMaxAggregateOperator(int funcid)
-{
-    bool result = false;
-    if ((funcid == INT8LARGERFUNCOID) /* int8larger */ || (funcid == INT4LARGERFUNCOID) /* int4larger */ ||
-        (funcid == INT2LARGERFUNCOID) /* int2larger */ || (funcid == 5538) /* int1larger */ ||
-        (funcid == 2119) /* float4larger */ || (funcid == 2120) /* float8larger */ ||
-        (funcid == NUMERICLARGERFUNCOID) /* numeric_larger */ || (funcid == 2126) /* timestamp_larger */ ||
-        (funcid == 2122) /* date_larger */ || (funcid == 2244) /* bpchar_larger */ ||
-        (funcid == 2129) /* text_larger */) {
-        result = true;
-    }
-    return result;
-}
-
-static bool isMinAggregateOperator(int funcid)
-{
-    bool result = false;
-    if ((funcid == INT8SMALLERFUNCOID) /* int8smaller */ || (funcid == INT4SMALLERFUNCOID) /* int4smaller */ ||
-        (funcid == INT2SMALLERFUNCOID) /* int2smaller */ ||  // not int1 function was found for MIN operator
-        (funcid == 2135) /* float4smaller */ || (funcid == 2136) /* float8smaller */ ||
-        (funcid == NUMERICSMALLERFUNCOID) /* numeric_smaller */ || (funcid == 2142) /* timestamp_smaller */ ||
-        (funcid == 2138) /* date_smaller */ || (funcid == 2245) /* bpchar_smaller */ ||
-        (funcid == 2145) /* text_smaller */) {
-        result = true;
-    }
-    return result;
-}
-
-static bool isCountAggregateOperator(int funcid)
-{
-    bool result = false;
-    if ((funcid == 2147) /* int8inc_any */ || (funcid == 2803) /* int8inc */) {
-        result = true;
-    }
-    return result;
-}
-
-static JitAggregateOperator classifyAggregateOperator(int funcid)
-{
-    JitAggregateOperator result = JIT_AGGREGATE_NONE;
-    if (isAvgAggregateOperator(funcid)) {
-        result = JIT_AGGREGATE_AVG;
-    } else if (isSumAggregateOperator(funcid)) {
-        result = JIT_AGGREGATE_SUM;
-    } else if (isMaxAggregateOperator(funcid)) {
-        result = JIT_AGGREGATE_MAX;
-    } else if (isMinAggregateOperator(funcid)) {
-        result = JIT_AGGREGATE_MIN;
-    } else if (isCountAggregateOperator(funcid)) {
-        result = JIT_AGGREGATE_COUNT;
-    }
-    return result;
-}
-
-static int classifyAggregateAvgType(int funcid, int* element_count)
-{
-    int element_type = -1;
-
-    switch (funcid) {
-        case INT8AVGFUNCOID:
-        case NUMERICAVGFUNCOID:
-            // the current_aggregate is a 2 numeric array
-            element_type = NUMERICOID;
-            *element_count = 2;
-            break;
-
-        case INT4AVGFUNCOID:
-        case INT2AVGFUNCOID:
-        case 5537:  // int1 avg
-            // the current_aggregate is a 2 int8 array
-            element_type = INT8OID;
-            *element_count = 2;
-            break;
-
-        case 2104:  // float4
-        case 2105:  // float8
-            // the current_aggregate is a 3 float8 array
-            element_type = FLOAT8OID;
-            *element_count = 3;
-            break;
-
-        default:
-            MOT_LOG_TRACE("Unsupported aggregate AVG() operator function type: %d", funcid);
-            break;
-    }
-
-    return element_type;
-}
-
-static inline bool isValidAggregateFunction(int funcid)
-{
-    bool result = false;
-    // check for aggregate_dummy leading to numeric_add and others (see src/include/catalog/pg_proc.h and
-    // pg_aggregate.h)
-    if (classifyAggregateOperator(funcid) != JIT_AGGREGATE_NONE) {
-        result = true;
-    }
-    return result;
-}
-
-static inline bool isValidAggregateDistinctClause(const List* agg_distinct)
-{
-    bool result = false;
-
-    if (agg_distinct == nullptr) {
-        result = true;
-    } else if (list_length(agg_distinct) != 1) {
-        MOT_LOG_TRACE("Invalid DISTINCIT specifier with more than one sort clause");
-    } else {
-        SortGroupClause* sgc = (SortGroupClause*)linitial(agg_distinct);
-        if (sgc->groupSet) {
-            MOT_LOG_TRACE("Invalid DISTINCIT specifier with group-set flag");
-        } else {
-            result = true;
-        }
-    }
-
-    return result;
-}
-
-static bool getTargetEntryAggregateOperator(Query* query, TargetEntry* target_entry, JitAggregate* aggregate)
-{
-    bool result = false;
-
-    Aggref* agg_ref = (Aggref*)target_entry->expr;
-    if (agg_ref->aggorder) {
-        MOT_LOG_TRACE("getTargetEntryAggregateOperator(): Unsupported aggregate operator with ORDER BY specifiers");
-    } else if (!isValidAggregateFunction(agg_ref->aggfnoid)) {
-        MOT_LOG_TRACE("getTargetEntryAggregateOperator(): Unsupported aggregate operator %d", agg_ref->aggfnoid);
-    } else if (!isValidAggregateResultType(agg_ref->aggtype)) {
-        MOT_LOG_TRACE("getTargetEntryAggregateOperator(): Unsupported aggregate result type %d", agg_ref->aggtype);
-    } else if (!isValidAggregateDistinctClause(agg_ref->aggdistinct)) {
-        MOT_LOG_TRACE("getTargetEntryAggregateOperator(): Unsupported aggregate distinct clause");
-    } else if (list_length(agg_ref->args) != 1) {
-        MOT_LOG_TRACE(
-            "getTargetEntryAggregateOperator(): Unsupported aggregate argument list with length unequal to 1");
-    } else {
-        TargetEntry* sub_te = (TargetEntry*)linitial(agg_ref->args);
-        if (sub_te->expr->type != T_Var) {
-            MOT_LOG_TRACE("getTargetEntryAggregateOperator(): Unsupported aggregate operator with non-column argument");
-        } else {
-            Var* var_expr = (Var*)sub_te->expr;
-            int result_type = var_expr->vartype;
-            if (!IsTypeSupported(result_type)) {
-                MOT_LOG_TRACE("getTargetEntryAggregateOperator(): Unsupported aggregate operator with column type %d",
-                    result_type);
-            } else {
-                MOT_LOG_TRACE("getTargetEntryAggregateOperator(): target entry for aggregate query is jittable");
-                aggregate->_aggreaget_op = classifyAggregateOperator(agg_ref->aggfnoid);
-                aggregate->_element_type = agg_ref->aggtype;
-                if (aggregate->_aggreaget_op == JIT_AGGREGATE_AVG) {
-                    aggregate->_avg_element_type =
-                        classifyAggregateAvgType(agg_ref->aggfnoid, &aggregate->_avg_element_count);
-                } else {
-                    aggregate->_avg_element_type = -1;
+            if (plan->_command_type == JIT_COMMAND_SELECT) {
+                MOT_LOG_TRACE(
+                    "isPlanSortOrderValid(): Jittable sort clause is not supported. trying non-native Sort clause");
+                result = isJittableNonNativeSortClause(query, (JitRangeSelectPlan*)plan, index);
+                if (!result) {
+                    MOT_LOG_TRACE(
+                        "isPlanSortOrderValid(): Disqualifying query - non native Sort clause is not jittable");
                 }
-                aggregate->_func_id = agg_ref->aggfnoid;
-                aggregate->_table = getRealTable(query, var_expr->varno, var_expr->varattno);
-                aggregate->_table_column_id =
-                    getRealColumnId(query, var_expr->varno, var_expr->varattno, aggregate->_table);
-                aggregate->_distinct = (agg_ref->aggdistinct != nullptr) ? true : false;
-                result = true;
             }
         }
     }
@@ -775,47 +735,71 @@ static bool getTargetEntryAggregateOperator(Query* query, TargetEntry* target_en
     return result;
 }
 
-static bool getAggregateOperator(Query* query, JitAggregate* aggregate)
+static bool getAggregateOperators(Query* query, JitAggregate** aggregates, uint32_t* aggCount)
 {
-    bool result = false;
+    // we allow specifying several aggregators as long as there are only aggregators
+    *aggCount = 0;
+    *aggregates = nullptr;
+    bool nonAggFound = false;
 
-    // if an aggregate operator is specified, then only one column can exist
-    // so we check all target entries, and if one of them specifies an aggregate operator, then
-    // it must be the only target entry in the query
+    // first pass: count number of aggregators, and in case there are such verify there are only aggregates
     ListCell* lc = nullptr;
-
-    bool aggregate_found = false;
-    int entry_count = list_length(query->targetList);
-
     foreach (lc, query->targetList) {
         TargetEntry* target_entry = (TargetEntry*)lfirst(lc);
-        if (target_entry->expr->type == T_Aggref) {
+        if (target_entry->expr->type != T_Aggref) {
+            nonAggFound = true;
+        } else {
             // found an aggregate target entry
-            aggregate_found = true;
-            if (entry_count != 1) {
-                MOT_LOG_TRACE(
-                    "getAggregateOperator(): Disqualifying query - aggregate must specify only 1 target entry");
+            if (nonAggFound) {
+                MOT_LOG_TRACE("getAggregateOperators(): Mixing aggregate and non-aggregate is not supported");
+                *aggCount = 0;
+                return false;
             }
-            result = getTargetEntryAggregateOperator(query, target_entry, aggregate);
+            ++(*aggCount);
         }
     }
 
-    if (!aggregate_found) {
-        // it is fine not to have an aggregate clause
-        result = true;
+    if (*aggCount > 0) {
+        uint32_t allocSize = sizeof(JitAggregate) * (*aggCount);
+        *aggregates = (JitAggregate*)MOT::MemSessionAlloc(allocSize);
+        if (*aggregates == nullptr) {
+            MOT_REPORT_ERROR(MOT_ERROR_OOM,
+                "JIT Compile Query",
+                "Failed to allocate %u bytes for %u aggregates",
+                allocSize,
+                *aggCount);
+            *aggregates = nullptr;
+            *aggCount = 0;
+            return false;
+        }
+
+        // second pass: collect aggregates
+        int aggIndex = 0;
+        foreach (lc, query->targetList) {
+            TargetEntry* target_entry = (TargetEntry*)lfirst(lc);
+            MOT_ASSERT(target_entry->expr->type == T_Aggref);
+            // found an aggregate target entry
+            if (!getTargetEntryAggregateOperator(query, target_entry, *aggregates + aggIndex)) {
+                MOT::MemSessionFree(*aggregates);
+                *aggregates = nullptr;
+                *aggCount = 0;
+                return false;
+            }
+            ++aggIndex;
+        }
     }
 
-    return result;
+    return true;
 }
 
-static double evaluatePlan(const JitRangeSelectPlan* plan)
+static double evaluatePlan(const JitRangeScanPlan* plan)
 {
     // currently the value of a range scan plan is how much it matches the used index
-    MOT::Index* index = plan->_index_scan._table->GetIndex(plan->_index_scan._index_id);
+    MOT::Index* index = plan->_index_scan._index;
     return ((double)plan->_index_scan._column_count) / ((double)index->GetNumFields());
 }
 
-static bool isJitPlanBetter(JitRangeSelectPlan* candidate_plan, JitRangeSelectPlan* current_plan)
+static bool isJitPlanBetter(JitRangeScanPlan* candidate_plan, JitRangeScanPlan* current_plan)
 {
     bool result = false;
 
@@ -845,6 +829,7 @@ static JitPlan* JitPrepareInsertPlan(Query* query, MOT::Table* table)
         errno_t erc = memset_s(insert_plan, alloc_size, 0, alloc_size);
         securec_check(erc, "\0", "\0");
         insert_plan->_plan_type = JIT_PLAN_INSERT_QUERY;
+        insert_plan->_command_type = JIT_COMMAND_INSERT;
         insert_plan->_table = table;
 
         // retrieve insert expressions
@@ -883,7 +868,13 @@ static JitPointQueryPlan* JitPreparePointQueryPlan(
         // prepare search expressions and optional filters
         MOT::Index* index = table->GetPrimaryIndex();
         if (!prepareSearchExpressions(query, table, index, &plan->_query._search_exprs) ||
-            !prepareFilters(query, table, index, &plan->_query._filters, &plan->_query._search_exprs)) {
+            !prepareFilters(query,
+                table,
+                index,
+                &plan->_query._filters,
+                &plan->_query.m_oneTimeFilters,
+                &plan->_query._search_exprs,
+                JoinClauseNone)) {
             MOT_LOG_TRACE("Failed to prepare search expressions or filters");
             // cleanup
             JitDestroyPlan((JitPlan*)plan);
@@ -944,8 +935,8 @@ static JitPlan* JitPrepareSelectPlan(Query* query, MOT::Table* table)
     JitSelectPlan* select_plan = (JitSelectPlan*)JitPreparePointQueryPlan(query, table, alloc_size, JIT_COMMAND_SELECT);
     if (select_plan != nullptr) {
         if (!prepareSelectExpressions(query, &select_plan->_select_exprs)) {
-            MOT_LOG_TRACE("Failed to prepare target expressions");
-            JitDestroyPlan((JitPlan*)plan);
+            MOT_LOG_TRACE("Failed to prepare select expressions");
+            JitDestroyPlan((JitPlan*)select_plan);
         } else {
             plan = (JitPlan*)select_plan;
         }
@@ -957,14 +948,44 @@ static JitPlan* JitPrepareSelectPlan(Query* query, MOT::Table* table)
     return plan;
 }
 
-static JitRangeScanPlan* JitPrepareRangeScanPlan(Query* query, MOT::Table* table, int index_id, size_t alloc_size,
-    JitCommandType command_type, JoinClauseType join_clause_type)
+inline void DestroyColumnExprArray(JitColumnExprArray* exprArray)
 {
-    MOT::Index* index = table->GetIndex(index_id);
-    MOT_LOG_TRACE("Preparing Range Scan plan for table %s, index %d (%s)",
-        table->GetTableName().c_str(),
-        index_id,
-        index->GetName().c_str());
+    if (exprArray->_exprs != nullptr) {
+        MOT::MemSessionFree(exprArray->_exprs);
+        exprArray->_exprs = nullptr;
+    }
+}
+
+inline bool ConcatColumnExprArray(JitColumnExprArray* lhs, JitColumnExprArray* rhs, JitColumnExprArray* res)
+{
+    res->_count = lhs->_count + rhs->_count;
+    uint32_t allocSize = sizeof(JitColumnExpr) * res->_count;
+    res->_exprs = (JitColumnExpr*)MOT::MemSessionAlloc(allocSize);
+    if (res->_exprs == nullptr) {
+        MOT_REPORT_ERROR(MOT_ERROR_OOM,
+            "Prepare JIT plan",
+            "Failed to allocate %u bytes for %d combined column expressions",
+            allocSize,
+            res->_count);
+        return false;
+    }
+    for (int i = 0; i < lhs->_count; ++i) {
+        res->_exprs[i] = lhs->_exprs[i];
+    }
+    for (int i = 0; i < rhs->_count; ++i) {
+        res->_exprs[lhs->_count + i] = rhs->_exprs[i];
+    }
+    for (int i = 0; i < res->_count; ++i) {
+        MOT_LOG_TRACE("Combined expr %d: %p", i, res->_exprs[i]._expr->_source_expr);
+    }
+    return true;
+}
+
+static JitRangeScanPlan* JitPrepareRangeScanPlan(Query* query, MOT::Table* table, MOT::Index* index, size_t alloc_size,
+    JitCommandType command_type, JoinClauseType join_clause_type, JitColumnExprArray* outerSearchExprs = nullptr)
+{
+    MOT_LOG_TRACE(
+        "Preparing Range Scan plan for table %s, index %s", table->GetTableName().c_str(), index->GetName().c_str());
     JitRangeScanPlan* plan = (JitRangeScanPlan*)MOT::MemSessionAlloc(alloc_size);
     if (plan == nullptr) {
         MOT_REPORT_ERROR(MOT_ERROR_OOM,
@@ -972,23 +993,44 @@ static JitRangeScanPlan* JitPrepareRangeScanPlan(Query* query, MOT::Table* table
             "Failed to allocate %u bytes for %s range scan plan",
             (unsigned)alloc_size,
             CommandToString(command_type));
-    } else {
-        errno_t erc = memset_s(plan, alloc_size, 0, alloc_size);
-        securec_check(erc, "\0", "\0");
-        plan->_plan_type = JIT_PLAN_RANGE_SCAN;
-        plan->_command_type = command_type;
-        plan->_index_scan._table = table;
-
-        // prepare search expressions and optional filters
-        plan->_index_scan._index_id = index_id;
-        if (!prepareRangeSearchExpressions(query, table, index, &plan->_index_scan, join_clause_type) ||
-            !prepareFilters(query, table, index, &plan->_index_scan._filters, &plan->_index_scan._search_exprs)) {
-            MOT_LOG_TRACE("Failed to prepare search or filters expressions");
-            // cleanup
-            JitDestroyPlan((JitPlan*)plan);
-            plan = nullptr;
-        }
+        return nullptr;
     }
+
+    errno_t erc = memset_s(plan, alloc_size, 0, alloc_size);
+    securec_check(erc, "\0", "\0");
+    plan->_plan_type = JIT_PLAN_RANGE_SCAN;
+    plan->_command_type = command_type;
+    plan->_index_scan._table = table;
+    plan->_index_scan._index = index;
+
+    // prepare search expressions and optional filters
+    if (!prepareRangeSearchExpressions(query, table, index, &plan->_index_scan, join_clause_type)) {
+        MOT_LOG_TRACE("Failed to prepare search or filters expressions");
+        // cleanup
+        JitDestroyPlan((JitPlan*)plan);
+        return nullptr;
+    }
+
+    // prepare filters - use outer scan search expression as well if specified
+    JitColumnExprArray* pkeyExprs = &plan->_index_scan._search_exprs;
+    JitColumnExprArray combinedExprs = {nullptr, 0};
+    if (outerSearchExprs != nullptr) {
+        if (!ConcatColumnExprArray(pkeyExprs, outerSearchExprs, &combinedExprs)) {
+            MOT_REPORT_ERROR(MOT_ERROR_OOM, "Prepare JIT plan", "Failed to prepare combined expression array");
+            JitDestroyPlan((JitPlan*)plan);
+            return nullptr;
+        }
+        pkeyExprs = &combinedExprs;
+    }
+    JitFilterArray* filters = &plan->_index_scan._filters;
+    JitFilterArray* oneTimeFilters = &plan->_index_scan.m_oneTimeFilters;
+    if (!prepareFilters(query, table, index, filters, oneTimeFilters, pkeyExprs, join_clause_type)) {
+        MOT_LOG_TRACE("Failed to prepare filters expressions");
+        // cleanup
+        JitDestroyPlan((JitPlan*)plan);
+        plan = nullptr;
+    }
+    DestroyColumnExprArray(&combinedExprs);
 
     if (plan == nullptr) {
         MOT_LOG_TRACE("Failed to prepare Range scan plan");
@@ -1000,102 +1042,206 @@ static JitPlan* JitPrepareRangeUpdatePlan(Query* query, MOT::Table* table)
 {
     MOT_LOG_TRACE("Preparing range UPDATE plan for table %s", table->GetTableName().c_str());
     size_t alloc_size = sizeof(JitRangeUpdatePlan);
-    int index_id = 0;  // primary index
-    JitRangeUpdatePlan* plan = (JitRangeUpdatePlan*)JitPrepareRangeScanPlan(
-        query, table, index_id, alloc_size, JIT_COMMAND_UPDATE, JoinClauseNone);
+
+    JitRangeUpdatePlan* plan = nullptr;
+
+    MOT_LOG_TRACE("Attempting to prepare plan, checking %" PRIu16 " indices", table->GetNumIndexes());
+    for (uint16_t indexId = 0; indexId < table->GetNumIndexes(); ++indexId) {
+        MOT::Index* index = table->GetIndex(indexId);
+        MOT_LOG_TRACE("Attempting to prepare plan with index %d", indexId);
+        JitRangeUpdatePlan* nextPlan = (JitRangeUpdatePlan*)JitPrepareRangeScanPlan(
+            query, table, index, alloc_size, JIT_COMMAND_UPDATE, JoinClauseNone);
+        if (nextPlan == nullptr) {
+            MOT_LOG_TRACE("Failed to prepare Range UPDATE plan with index %u", indexId);
+            continue;
+        }
+
+        if (!prepareTargetExpressions(query, &nextPlan->_update_exprs)) {
+            MOT_LOG_TRACE("Failed to prepare target expressions for current plan");
+            // cleanup
+            JitDestroyPlan((JitPlan*)nextPlan);
+            continue;
+        }
+        nextPlan->_index_scan._sort_order = JIT_QUERY_SORT_ASCENDING;
+        nextPlan->_index_scan._scan_direction = JIT_INDEX_SCAN_FORWARD;
+
+        MOT_LOG_TRACE("Found a candidate plan with value %0.2f:", evaluatePlan((JitRangeScanPlan*)nextPlan));
+        JitExplainPlan(query, (JitPlan*)nextPlan);
+        if (plan == nullptr) {
+            MOT_LOG_TRACE("Using initial plan with index %u (%s)", indexId, index->GetName().c_str());
+            plan = nextPlan;
+        } else if (isJitPlanBetter((JitRangeScanPlan*)nextPlan, (JitRangeScanPlan*)plan)) {
+            MOT_LOG_TRACE("Plan with index %u (%s) is better than previous plan", indexId, index->GetName().c_str());
+            JitDestroyPlan((JitPlan*)plan);
+            plan = nextPlan;
+        } else {
+            MOT_LOG_TRACE("Discarding plan with index %u (%s), not better than previous best plan",
+                indexId,
+                index->GetName().c_str());
+            JitDestroyPlan((JitPlan*)nextPlan);
+        }
+    }
+
     if (plan == nullptr) {
         MOT_LOG_TRACE("Failed to prepare Range UPDATE plan");
-    } else {
-        if (!prepareTargetExpressions(query, &plan->_update_exprs)) {
-            MOT_LOG_TRACE("Failed to prepare target expressions");
-            // cleanup
-            JitDestroyPlan((JitPlan*)plan);
-            plan = nullptr;
-        } else {
-            plan->_index_scan._sort_order = JIT_QUERY_SORT_ASCENDING;
-            plan->_index_scan._scan_direction = JIT_INDEX_SCAN_FORWARD;
-        }
     }
     return (JitPlan*)plan;
 }
 
-static JitPlan* JitPrepareRangeSelectPlan(Query* query, MOT::Table* table, JoinClauseType join_clause_type)
+static JitPlan* JitPrepareRangeSelectPlan(
+    Query* query, MOT::Table* table, JoinClauseType join_clause_type, JitColumnExprArray* outerSearchExprs = nullptr)
 {
     MOT_LOG_TRACE("Preparing range SELECT plan for table %s", table->GetTableName().c_str());
 
     JitRangeSelectPlan* plan = nullptr;
-    bool clean_plan = false;
 
     // the limit count and aggregation can be inferred regardless of plan
     int limit_count = 0;
-    JitAggregate aggregate = {JIT_AGGREGATE_NONE, 0, 0, nullptr, 0, 0, 0, false};
-    if (!getLimitCount(query, &limit_count) || !getAggregateOperator(query, &aggregate)) {
+    JitAggregate* aggregates = nullptr;
+    uint32_t aggCount = 0;
+    if (!getLimitCount(query, &limit_count) || !getAggregateOperators(query, &aggregates, &aggCount)) {
         MOT_LOG_TRACE(
             "JitPrepareRangeSelectPlan(): Disqualifying query - unsupported scan limit count or aggregate operation");
         return nullptr;
     }
 
     // now we search for the best index/plan
-    bool has_aggregate = (aggregate._aggreaget_op != JIT_AGGREGATE_NONE);
     size_t alloc_size = sizeof(JitRangeSelectPlan);
-
-    for (int index_id = 0; index_id < (int)table->GetNumIndexes(); ++index_id) {
-        MOT_LOG_TRACE("Attempting to prepare plan with index %d", index_id);
+    MOT_LOG_TRACE("Attempting to prepare plan, checking %" PRIu16 " indices", table->GetNumIndexes());
+    for (uint16_t indexId = 0; indexId < table->GetNumIndexes(); ++indexId) {
+        MOT::Index* index = table->GetIndex(indexId);
+        MOT_LOG_TRACE("Attempting to prepare plan with index %u", indexId);
         JitRangeSelectPlan* next_plan = (JitRangeSelectPlan*)JitPrepareRangeScanPlan(
-            query, table, index_id, alloc_size, JIT_COMMAND_SELECT, join_clause_type);
+            query, table, index, alloc_size, JIT_COMMAND_SELECT, join_clause_type, outerSearchExprs);
 
         if (next_plan == nullptr) {
             MOT_LOG_TRACE(
-                "Failed to prepare range select plan with index %d: failed to prepare range scan plan", index_id);
-            clean_plan = true;
-            break;
+                "Failed to prepare range select plan with index %u: failed to prepare range scan plan", indexId);
+            continue;
         }
 
-        if (!has_aggregate && !prepareSelectExpressions(query, &next_plan->_select_exprs)) {
+        if ((aggCount == 0) && !prepareSelectExpressions(query, &next_plan->_select_exprs)) {
             MOT_LOG_TRACE(
-                "Failed to prepare range select plan with index %d: failed to prepare select expressions", index_id);
+                "Failed to prepare range select plan with index %u: failed to prepare select expressions", indexId);
             JitDestroyPlan((JitPlan*)next_plan);
-            clean_plan = true;
-            break;
+            next_plan = nullptr;
+            continue;
         }
+
+        next_plan->_index_scan._sort_order = GetQuerySortOrder(query);
+        next_plan->_index_scan._scan_direction = (next_plan->_index_scan._sort_order == JIT_QUERY_SORT_ASCENDING)
+                                                     ? JIT_INDEX_SCAN_FORWARD
+                                                     : JIT_INDEX_SCAN_BACKWARDS;
+        next_plan->_limit_count = limit_count;
+        next_plan->m_nonNativeSortParams = nullptr;
 
         // verify sort order is valid (if one is specified)
-        if (!isPlanSortOrderValid(query, next_plan)) {
+        if (!isPlanSortOrderValid(query, (JitRangeScanPlan*)next_plan)) {
             MOT_LOG_TRACE("Disqualifying plan - Query sort order is incompatible with index");
             JitDestroyPlan((JitPlan*)next_plan);
-        } else {
-            next_plan->_index_scan._sort_order = GetQuerySortOrder(query);
-            next_plan->_index_scan._scan_direction = (next_plan->_index_scan._sort_order == JIT_QUERY_SORT_ASCENDING)
-                                                         ? JIT_INDEX_SCAN_FORWARD
-                                                         : JIT_INDEX_SCAN_BACKWARDS;
-            next_plan->_limit_count = limit_count;
-            next_plan->_aggregate = aggregate;
-            MOT_LOG_TRACE("Found a candidate plan with value %0.2f:", evaluatePlan(next_plan));
-            JitExplainPlan(query, (JitPlan*)next_plan);
-            if (plan == nullptr) {
-                MOT_LOG_TRACE(
-                    "Using initial plan with index %d (%s)", index_id, table->GetIndex(index_id)->GetName().c_str());
-                plan = next_plan;
-            } else if (isJitPlanBetter(next_plan, plan)) {
-                MOT_LOG_TRACE("Plan with index %d (%s) is better than previous plan",
-                    index_id,
-                    table->GetIndex(index_id)->GetName().c_str());
-                JitDestroyPlan((JitPlan*)plan);
-                plan = next_plan;
-            } else {
-                JitDestroyPlan((JitPlan*)next_plan);
-            }
+            next_plan = nullptr;
+            continue;
         }
-    }
 
-    if (clean_plan && (plan != nullptr)) {
-        JitDestroyPlan((JitPlan*)plan);
-        plan = nullptr;
+        MOT_LOG_TRACE("Found a candidate plan with value %0.2f:", evaluatePlan((JitRangeScanPlan*)next_plan));
+        JitExplainPlan(query, (JitPlan*)next_plan);
+        if (plan == nullptr) {
+            MOT_LOG_TRACE("Using initial plan with index %u (%s)", indexId, index->GetName().c_str());
+            plan = next_plan;
+        } else if (isJitPlanBetter((JitRangeScanPlan*)next_plan, (JitRangeScanPlan*)plan)) {
+            MOT_LOG_TRACE("Plan with index %u (%s) is better than previous plan", indexId, index->GetName().c_str());
+            JitDestroyPlan((JitPlan*)plan);
+            plan = next_plan;
+            next_plan = nullptr;
+        } else {
+            MOT_LOG_TRACE("Discarding plan with index %u (%s), not better than previous best plan",
+                indexId,
+                index->GetName().c_str());
+            JitDestroyPlan((JitPlan*)next_plan);
+            next_plan = nullptr;
+        }
     }
 
     if (plan == nullptr) {
         MOT_LOG_TRACE("Failed to prepare Range SELECT plan");
+        if (aggregates != nullptr) {
+            MOT::MemSessionFree(aggregates);
+            aggregates = nullptr;
+        }
+    } else {
+        // we set aggregates only now to avoid double free if pointed by more than one plan
+        plan->m_aggCount = aggCount;
+        plan->m_aggregates = aggregates;
     }
+
+    return (JitPlan*)plan;
+}
+
+static JitPlan* JitPrepareRangeDeletePlan(Query* query, MOT::Table* table)
+{
+    MOT_LOG_TRACE("Preparing range DELETE plan for table %s", table->GetTableName().c_str());
+
+    // get the limit count
+    int limitCount = 0;
+    if (!getLimitCount(query, &limitCount)) {
+        MOT_LOG_TRACE("JitPrepareRangeDeletePlan(): Disqualifying query - unsupported scan limit count");
+        return nullptr;
+    }
+
+    JitRangeDeletePlan* plan = nullptr;
+
+    // now we search for the best index/plan
+    size_t allocSize = sizeof(JitRangeDeletePlan);
+    MOT_LOG_TRACE("Attempting to prepare plan, checking %" PRIu16 " indices", table->GetNumIndexes());
+    for (uint16_t indexId = 0; indexId < table->GetNumIndexes(); ++indexId) {
+        MOT::Index* index = table->GetIndex(indexId);
+        MOT_LOG_TRACE("Attempting to prepare plan with index %u", indexId);
+        JitRangeDeletePlan* nextPlan = (JitRangeDeletePlan*)JitPrepareRangeScanPlan(
+            query, table, index, allocSize, JIT_COMMAND_DELETE, JoinClauseNone);
+
+        if (nextPlan == nullptr) {
+            MOT_LOG_TRACE(
+                "Failed to prepare range delete plan with index %u: failed to prepare range scan plan", indexId);
+            continue;
+        }
+
+        nextPlan->_index_scan._sort_order = GetQuerySortOrder(query);
+        nextPlan->_index_scan._scan_direction = (nextPlan->_index_scan._sort_order == JIT_QUERY_SORT_ASCENDING)
+                                                    ? JIT_INDEX_SCAN_FORWARD
+                                                    : JIT_INDEX_SCAN_BACKWARDS;
+        nextPlan->_limit_count = limitCount;
+
+        // verify sort order is valid (if one is specified)
+        if (!isPlanSortOrderValid(query, (JitRangeScanPlan*)nextPlan)) {
+            MOT_LOG_TRACE("Disqualifying plan - Query sort order is incompatible with index");
+            JitDestroyPlan((JitPlan*)nextPlan);
+            nextPlan = nullptr;
+            continue;
+        }
+
+        MOT_LOG_TRACE("Found a candidate plan with value %0.2f:", evaluatePlan((JitRangeScanPlan*)nextPlan));
+        JitExplainPlan(query, (JitPlan*)nextPlan);
+        if (plan == nullptr) {
+            MOT_LOG_TRACE("Using initial plan with index %u (%s)", indexId, index->GetName().c_str());
+            plan = nextPlan;
+        } else if (isJitPlanBetter((JitRangeScanPlan*)nextPlan, (JitRangeScanPlan*)plan)) {
+            MOT_LOG_TRACE("Plan with index %u (%s) is better than previous plan", indexId, index->GetName().c_str());
+            JitDestroyPlan((JitPlan*)plan);
+            plan = nextPlan;
+            nextPlan = nullptr;
+        } else {
+            MOT_LOG_TRACE("Discarding plan with index %u (%s), not better than previous best plan",
+                indexId,
+                index->GetName().c_str());
+            JitDestroyPlan((JitPlan*)nextPlan);
+            nextPlan = nullptr;
+        }
+    }
+
+    if (plan == nullptr) {
+        MOT_LOG_TRACE("Failed to prepare Range DELETE plan");
+    }
+
     return (JitPlan*)plan;
 }
 
@@ -1165,6 +1311,14 @@ static JitPlan* JitPrepareSimplePlan(Query* query)
                 } else {
                     plan = JitPrepareRangeSelectPlan(query, table, JoinClauseNone);
                 }
+            } else if (query->commandType == CMD_DELETE) {
+                if (!CheckQueryAttributes(
+                        query, false, false, false)) {  // range delete does not expect sort clause or aggregate clause
+                    MOT_LOG_TRACE(
+                        "JitPrepareSimplePlan(): Disqualifying range delete query - Invalid query attributes");
+                } else {
+                    plan = JitPrepareRangeDeletePlan(query, table);
+                }
             } else {
                 MOT_LOG_TRACE("JitPrepareSimplePlan(): Disqualifying unsupported range delete query");
             }
@@ -1205,6 +1359,26 @@ static bool isValidJoinedRangeScan(Query* query, JitRangeSelectPlan* scan_plan2,
     return true;
 }
 
+static JitJoinType getJoinType(JoinType joinType)
+{
+    switch (joinType) {
+        case JOIN_INNER:
+            return JitJoinType::JIT_JOIN_INNER;
+
+        case JOIN_LEFT:
+            return JitJoinType::JIT_JOIN_LEFT;
+
+        case JOIN_FULL:
+            return JitJoinType::JIT_JOIN_FULL;
+
+        case JOIN_RIGHT:
+            return JitJoinType::JIT_JOIN_RIGHT;
+
+        default:
+            return JitJoinType::JIT_JOIN_INVALID;
+    }
+}
+
 static JitJoinScanType getJoinScanType(JitIndexScanType outer_scan_type, JitIndexScanType inner_scan_type)
 {
     JitJoinScanType scan_type = JIT_JOIN_SCAN_INVALID;
@@ -1220,6 +1394,30 @@ static JitJoinScanType getJoinScanType(JitIndexScanType outer_scan_type, JitInde
     }
 
     return scan_type;
+}
+
+static bool SetJoinCommandType(JitJoinPlan* joinPlan)
+{
+    if (joinPlan->m_aggCount == 0) {
+        switch (joinPlan->_scan_type) {
+            case JIT_JOIN_SCAN_POINT:
+                joinPlan->_command_type = JIT_COMMAND_POINT_JOIN;
+                break;
+
+            case JIT_JOIN_SCAN_OUTER_POINT:
+            case JIT_JOIN_SCAN_INNER_POINT:
+            case JIT_JOIN_SCAN_RANGE:
+                joinPlan->_command_type = JIT_COMMAND_RANGE_JOIN;
+                break;
+
+            default:
+                MOT_LOG_TRACE("Invalid JOIN scan type %d", (int)joinPlan->_scan_type);
+                return false;
+        }
+    } else {
+        joinPlan->_command_type = JIT_COMMAND_AGGREGATE_JOIN;
+    }
+    return true;
 }
 
 static JitPlan* JitPrepareExplicitJoinPlan(Query* query)
@@ -1244,9 +1442,26 @@ static JitPlan* JitPrepareExplicitJoinPlan(Query* query)
         Oid relid1 = rte1->relid;
         Oid relid2 = rte2->relid;
 
+        // make sure we support the join type:
+        JitJoinType joinType = getJoinType(rte3->jointype);
+        if ((joinType != JitJoinType::JIT_JOIN_INNER) && (joinType != JitJoinType::JIT_JOIN_LEFT)) {
+            MOT_LOG_TRACE("Unsupported join type: %d", (int)joinType);
+            return nullptr;
+        }
+
         // make sure that WHERE clause refers to full prefix in each table (even an empty one)
-        MOT::Table* table1 = MOT::GetTableManager()->GetTableByExternal(relid1);
-        MOT::Table* table2 = MOT::GetTableManager()->GetTableByExternal(relid2);
+        MOT::TxnManager* currTxn = GetSafeTxn(__FUNCTION__);
+        MOT_ASSERT(currTxn != nullptr);
+        MOT::Table* table1 = currTxn->GetTableByExternalId(relid1);
+        if (table1 == nullptr) {
+            MOT_LOG_TRACE("Cannot prepare JOIN plan with table %u %s: not MOT table", relid1, rte1->relname);
+            return nullptr;
+        }
+        MOT::Table* table2 = currTxn->GetTableByExternalId(relid2);
+        if (table2 == nullptr) {
+            MOT_LOG_TRACE("Cannot prepare JOIN plan with table %u %s: not MOT table", relid2, rte2->relname);
+            return nullptr;
+        }
 
         MOT_LOG_TRACE("Preparing an explicit JOIN plan on tables: %s, %s",
             table1->GetTableName().c_str(),
@@ -1287,12 +1502,22 @@ static JitPlan* JitPrepareExplicitJoinPlan(Query* query)
         // verify that point join has no aggregate
         if ((scan_plan1->_index_scan._scan_type == JIT_INDEX_SCAN_POINT) &&
             (scan_plan2->_index_scan._scan_type == JIT_INDEX_SCAN_POINT)) {
-            if (scan_plan1->_aggregate._aggreaget_op != JIT_AGGREGATE_NONE) {
+            if (scan_plan1->m_aggCount > 0) {
                 MOT_LOG_TRACE("Invalid aggregate specifier for point JOIN plan");
                 JitDestroyPlan((JitPlan*)scan_plan1);
                 JitDestroyPlan((JitPlan*)scan_plan2);
                 return nullptr;
             }
+        }
+
+        // aggregate and left/right outer joins are not supported
+        bool outerJoinWithAgg = ((joinType == JitJoinType::JIT_JOIN_LEFT || joinType == JitJoinType::JIT_JOIN_RIGHT) &&
+                                 (scan_plan1->m_aggCount > 0 || scan_plan2->m_aggCount > 0));
+        if (outerJoinWithAgg) {
+            MOT_LOG_TRACE("Joins left/right outer with aggregate function are not supported");
+            JitDestroyPlan((JitPlan*)scan_plan1);
+            JitDestroyPlan((JitPlan*)scan_plan2);
+            return nullptr;
         }
 
         // now prepare the final join plan
@@ -1309,13 +1534,21 @@ static JitPlan* JitPrepareExplicitJoinPlan(Query* query)
             errno_t erc = memset_s(join_plan, alloc_size, 0, alloc_size);
             securec_check(erc, "\0", "\0");
             join_plan->_plan_type = JIT_PLAN_JOIN;
+            join_plan->_join_type = joinType;
             join_plan->_outer_scan = scan_plan1->_index_scan;
             join_plan->_inner_scan = scan_plan2->_index_scan;
             join_plan->_select_exprs = scan_plan1->_select_exprs;
             join_plan->_limit_count = scan_plan1->_limit_count;
-            join_plan->_aggregate = scan_plan1->_aggregate;
+            join_plan->m_aggregates = scan_plan1->m_aggregates;
+            join_plan->m_aggCount = scan_plan1->m_aggCount;
+            scan_plan1->m_aggregates = nullptr;
+            scan_plan1->m_aggCount = 0;
             join_plan->_scan_type =
                 getJoinScanType(join_plan->_outer_scan._scan_type, join_plan->_inner_scan._scan_type);
+            if (!SetJoinCommandType(join_plan)) {
+                JitDestroyPlan((JitPlan*)join_plan);
+                join_plan = nullptr;
+            }
 
             // cleanup only second plan's select expressions
             freeSelectExprArray(&scan_plan2->_select_exprs);
@@ -1337,8 +1570,18 @@ static JitPlan* JitPrepareImplicitJoinPlan(Query* query)
     RangeTblEntry* rte1 = (RangeTblEntry*)linitial(query->rtable);
     RangeTblEntry* rte2 = (RangeTblEntry*)lsecond(query->rtable);
 
-    MOT::Table* table1 = MOT::GetTableManager()->GetTableByExternal(rte1->relid);
-    MOT::Table* table2 = MOT::GetTableManager()->GetTableByExternal(rte2->relid);
+    MOT::TxnManager* currTxn = GetSafeTxn(__FUNCTION__);
+    MOT_ASSERT(currTxn != nullptr);
+    MOT::Table* table1 = currTxn->GetTableByExternalId(rte1->relid);
+    if (table1 == nullptr) {
+        MOT_LOG_TRACE("Cannot prepare JOIN plan with table %u %s: not MOT table", rte1->relid, rte1->relname);
+        return nullptr;
+    }
+    MOT::Table* table2 = currTxn->GetTableByExternalId(rte2->relid);
+    if (table2 == nullptr) {
+        MOT_LOG_TRACE("Cannot prepare JOIN plan with table %u %s: not MOT table", rte2->relid, rte2->relname);
+        return nullptr;
+    }
 
     MOT_LOG_TRACE("Preparing an implicit JOIN plan on tables: %s, %s",
         table1->GetTableName().c_str(),
@@ -1351,8 +1594,9 @@ static JitPlan* JitPrepareImplicitJoinPlan(Query* query)
         MOT_LOG_TRACE("Failed to prepare a scan plan for JOIN query first table %s", table1->GetTableName().c_str());
         return nullptr;
     }
-    JitRangeSelectPlan* scan_plan2 =
-        (JitRangeSelectPlan*)JitPrepareRangeSelectPlan(query, table2, JoinClauseImplicit);  // use JOIN clause
+    // use JOIN clause ans skip outer scan search expressions
+    JitRangeSelectPlan* scan_plan2 = (JitRangeSelectPlan*)JitPrepareRangeSelectPlan(
+        query, table2, JoinClauseImplicit, &scan_plan1->_index_scan._search_exprs);
     if (scan_plan2 == nullptr) {
         MOT_LOG_TRACE("Failed to prepare a scan plan for JOIN query second table %s", table2->GetTableName().c_str());
         JitDestroyPlan((JitPlan*)scan_plan1);
@@ -1376,7 +1620,7 @@ static JitPlan* JitPrepareImplicitJoinPlan(Query* query)
         // verify that point join has no aggregate
         if ((scan_plan1->_index_scan._scan_type == JIT_INDEX_SCAN_POINT) &&
             (scan_plan2->_index_scan._scan_type == JIT_INDEX_SCAN_POINT)) {
-            if (scan_plan1->_aggregate._aggreaget_op != JIT_AGGREGATE_NONE) {
+            if (scan_plan1->m_aggCount > 0) {
                 MOT_LOG_TRACE("Invalid aggregate specifier for point JOIN plan");
                 JitDestroyPlan((JitPlan*)scan_plan1);
                 JitDestroyPlan((JitPlan*)scan_plan2);
@@ -1402,9 +1646,16 @@ static JitPlan* JitPrepareImplicitJoinPlan(Query* query)
             join_plan->_inner_scan = scan_plan2->_index_scan;
             join_plan->_select_exprs = scan_plan1->_select_exprs;
             join_plan->_limit_count = scan_plan1->_limit_count;
-            join_plan->_aggregate = scan_plan1->_aggregate;
+            join_plan->m_aggregates = scan_plan1->m_aggregates;
+            join_plan->m_aggCount = scan_plan1->m_aggCount;
+            scan_plan1->m_aggregates = nullptr;
+            scan_plan1->m_aggCount = 0;
             join_plan->_scan_type =
                 getJoinScanType(join_plan->_outer_scan._scan_type, join_plan->_inner_scan._scan_type);
+            if (!SetJoinCommandType(join_plan)) {
+                JitDestroyPlan((JitPlan*)join_plan);
+                join_plan = nullptr;
+            }
 
             // cleanup only second plan's select expressions
             freeSelectExprArray(&scan_plan2->_select_exprs);
@@ -1448,8 +1699,7 @@ static SubLink* GetSingleSubLink(Query* query, MOT::Table* table)
     if (quals != nullptr) {
         SubLinkFetcher subLinkFetcher;
         MOT::Index* index = table->GetPrimaryIndex();
-        bool result = visitSearchExpressions(query, table, index, (Expr*)&quals[0], true, &subLinkFetcher, false);
-        if (!result) {
+        if (!visitSearchExpressions(query, table, index, (Expr*)&quals[0], true, &subLinkFetcher, false)) {
             MOT_LOG_TRACE("Failed to fetch WHERE clause single sub-link node");
         }
         result = subLinkFetcher.GetSubLink();
@@ -1531,7 +1781,7 @@ static bool IsSingleResultPlan(JitPlan* plan)
                 result = true;
             } else if (rangeSelectPlan->_limit_count == 1) {
                 result = true;
-            } else if (rangeSelectPlan->_aggregate._aggreaget_op != JIT_AGGREGATE_NONE) {
+            } else if (rangeSelectPlan->m_aggCount == 1) {
                 result = true;
             }
         }
@@ -1570,8 +1820,10 @@ static JitPlan* JitPrepareCompoundPlan(Query* query, Query* subQuery)
     RangeTblEntry* rte = (RangeTblEntry*)linitial(query->rtable);
     RangeTblEntry* subQueryRte = (RangeTblEntry*)linitial(subQuery->rtable);
 
-    MOT::Table* table = MOT::GetTableManager()->GetTableByExternal(rte->relid);
-    MOT::Table* subQueryTable = MOT::GetTableManager()->GetTableByExternal(subQueryRte->relid);
+    MOT::TxnManager* currTxn = GetSafeTxn(__FUNCTION__);
+    MOT_ASSERT(currTxn != nullptr);
+    MOT::Table* table = currTxn->GetTableByExternalId(rte->relid);
+    MOT::Table* subQueryTable = currTxn->GetTableByExternalId(subQueryRte->relid);
 
     MOT_LOG_TRACE("Preparing a compound plan on tables: %s, %s",
         table->GetTableName().c_str(),
@@ -1709,48 +1961,73 @@ static JitPlan* JitPrepareCompoundPlan(Query* query)
     return plan;
 }
 
-extern JitPlan* JitPreparePlan(Query* query, const char* query_string)
+JitPlan* JitPreparePlan(Query* query, const char* query_string)
 {
     JitPlan* plan = nullptr;
     MOT_LOG_TRACE("Preparing plan for query: %s", query_string);
+    uint64_t startTime = GetSysClock();
 
     // we start by checking the number of tables involved
-    if (list_length(query->rtable) == 1) {
-        plan = JitPrepareSimplePlan(query);
-        // special case: a sub-query that evaluates to point query or single value aggregate, which in turn
-        // is used in a point-select outer query
-        if ((plan == nullptr) && query->hasSubLinks && (query->commandType == CMD_SELECT)) {
-            plan = JitPrepareCompoundPlan(query);
+    int tableCount = list_length(query->rtable);
+    if (tableCount == 0) {
+        plan = JitPrepareInvokePlan(query);
+    } else if (tableCount == 1) {
+        // special case: table is a function execution result
+        RangeTblEntry* tableEntry = (RangeTblEntry*)linitial(query->rtable);
+        if (tableEntry->rtekind == RTE_FUNCTION) {
+            plan = JitPrepareInvokePlan(query);
+        } else {
+            plan = JitPrepareSimplePlan(query);
+            // special case: a sub-query that evaluates to point query or single value aggregate, which in turn
+            // is used in a point-select outer query
+            if ((plan == nullptr) && query->hasSubLinks && (query->commandType == CMD_SELECT)) {
+                plan = JitPrepareCompoundPlan(query);
+            }
         }
     } else {
-        plan = JitPrepareJoinPlan(query);
+        if (query->commandType == CMD_SELECT) {
+            plan = JitPrepareJoinPlan(query);
+        } else {
+            MOT_LOG_TRACE("JitPreparePlan(): Disqualifying query - unsupported JOIN operation");
+        }
     }
 
+    if (plan != nullptr) {
+        uint64_t endTime = GetSysClock();
+        uint64_t planTimeMicros = MOT::CpuCyclesLevelTime::CyclesToMicroseconds(endTime - startTime);
+        MOT_LOG_TRACE("Plan time %" PRIu64 " micros for query: %s", planTimeMicros, query_string);
+    }
     return plan;
 }
 
-extern bool JitPlanHasDistinct(JitPlan* plan)
+bool JitPlanHasDistinct(JitPlan* plan)
 {
     bool result = false;
 
     if (plan->_plan_type == JIT_PLAN_RANGE_SCAN) {
         if (((JitRangeScanPlan*)plan)->_command_type == JIT_COMMAND_SELECT) {
             JitRangeSelectPlan* select_plan = (JitRangeSelectPlan*)plan;
-            if ((select_plan->_aggregate._aggreaget_op != JIT_AGGREGATE_NONE) && select_plan->_aggregate._distinct) {
-                result = true;
+            for (int i = 0; i < select_plan->m_aggCount; ++i) {
+                if (select_plan->m_aggregates[i]._distinct) {
+                    result = true;
+                    break;
+                }
             }
         }
     } else if (plan->_plan_type == JIT_PLAN_JOIN) {
         JitJoinPlan* join_plan = (JitJoinPlan*)plan;
-        if ((join_plan->_aggregate._aggreaget_op != JIT_AGGREGATE_NONE) && join_plan->_aggregate._distinct) {
-            result = true;
+        for (int i = 0; i < join_plan->m_aggCount; ++i) {
+            if (join_plan->m_aggregates[i]._distinct) {
+                result = true;
+                break;
+            }
         }
     }
 
     return result;
 }
 
-extern bool JitPlanHasSort(JitPlan* plan)
+bool JitPlanHasSort(JitPlan* plan)
 {
     bool result = false;
 
@@ -1807,6 +2084,15 @@ static void JitDestroyRangeUpdatePlan(JitRangeUpdatePlan* plan)
 static void JitDestroyRangeSelectPlan(JitRangeSelectPlan* plan)
 {
     freeSelectExprArray(&plan->_select_exprs);
+    if (plan->m_aggregates != nullptr) {
+        MOT::MemSessionFree(plan->m_aggregates);
+        plan->m_aggregates = nullptr;
+    }
+
+    if (plan->m_nonNativeSortParams) {
+        DestroyJitNonNativeSortParams(plan->m_nonNativeSortParams, JIT_CONTEXT_LOCAL);
+        plan->m_nonNativeSortParams = nullptr;
+    }
 }
 
 static void JitDestroyRangeScanPlan(JitRangeScanPlan* plan)
@@ -1839,9 +2125,9 @@ static void JitDestroyCompoundPlan(JitCompoundPlan* plan)
     MOT::MemSessionFree(plan);
 }
 
-extern void JitDestroyPlan(JitPlan* plan)
+void JitDestroyPlan(JitPlan* plan)
 {
-    if (plan != nullptr) {
+    if ((plan != nullptr) && (plan != MOT_READY_JIT_PLAN)) {
         switch (plan->_plan_type) {
             case JIT_PLAN_INSERT_QUERY:
                 JitDestroyInsertPlan((JitInsertPlan*)plan);
@@ -1863,10 +2149,39 @@ extern void JitDestroyPlan(JitPlan* plan)
                 JitDestroyCompoundPlan((JitCompoundPlan*)plan);
                 break;
 
+            case JIT_PLAN_FUNCTION:
+                JitDestroyFunctionPlan((JitFunctionPlan*)plan);
+                break;
+
+            case JIT_PLAN_INVOKE:
+                JitDestroyInvokePlan((JitInvokePlan*)plan);
+                break;
+
             case JIT_PLAN_INVALID:
+            // fall through
             default:
                 break;
         }
     }
+}
+
+bool JitPlanHasFunctionPlan(JitPlan* plan, JitFunctionPlan** outPlan)
+{
+    JitFunctionPlan* functionPlan = nullptr;
+    if (plan->_plan_type == JIT_PLAN_FUNCTION) {
+        functionPlan = (JitFunctionPlan*)plan;
+    } else if (plan->_plan_type == JIT_PLAN_INVOKE) {
+        functionPlan = ((JitInvokePlan*)plan)->m_functionPlan;
+    }
+
+    if (outPlan != nullptr) {
+        *outPlan = functionPlan;
+    }
+
+    if (functionPlan == nullptr) {
+        return false;
+    }
+
+    return true;
 }
 }  // namespace JitExec

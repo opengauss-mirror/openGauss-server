@@ -24,85 +24,77 @@
 
 #include "mm_gc_manager.h"
 #include "mot_configuration.h"
+#include "mot_engine.h"
 
 namespace MOT {
 IMPLEMENT_CLASS_LOGGER(GcManager, GC);
 
 class Table;
 
-/** @var Global epoch, updated every barrier */
-volatile GcEpochType g_gcGlobalEpoch = 1;
-/** @var Current lowest epoch among all active GC Managers */
-volatile GcEpochType g_gcActiveEpoch = 1;
-
 /** @var Lock to sync GC Manager's Limbo groups access by other threads */
 GcLock g_gcGlobalEpochLock;
 
 GcManager* GcManager::allGcManagers = nullptr;
 
-inline GcManager::GcManager(GC_TYPE purpose, int getThreadId, int rcuMaxFreeCount)
-    : m_rcuFreeCount(rcuMaxFreeCount), m_tid(getThreadId), m_purpose(purpose)
+static GcQueueEntry gcQueuesParams[static_cast<uint8_t>(GC_QUEUE_TYPE::GC_QUEUES)] = {
+    {GC_QUEUE_TYPE::DELETE_QUEUE, 1024, 8388608, 500},
+    {GC_QUEUE_TYPE::VERSION_QUEUE, 102400, 8388608, 1000},
+    {GC_QUEUE_TYPE::UPDATE_COLUMN_QUEUE, 1, 8388608, 100000},
+    {GC_QUEUE_TYPE::GENERIC_QUEUE, 102400, 8388608, 1000}};
+
+uint64_t GetGlobalEpoch()
+{
+    return MOTEngine::GetInstance()->GetGcEpoch();
+}
+
+uint64_t GetCurrentSnapshotCSN()
+{
+    return MOTEngine::GetInstance()->GetCurrentCSN();
+}
+
+inline GcManager::GcManager(GC_TYPE purpose, int threadId, bool global /* = false */)
+    : m_gcEpoch(0),
+      m_limboGroupPool(nullptr),
+      m_next(nullptr),
+      m_limboGroupAllocations(0),
+      m_tid((uint16_t)threadId),
+      m_purpose(purpose),
+      m_global(global)
 {}
 
 bool GcManager::Initialize()
 {
     bool result = true;
-
-    if (m_purpose == GC_MAIN) {
-        m_limboGroupPool = ObjAllocInterface::GetObjPool(sizeof(LimboGroup), true);
-        if (!m_limboGroupPool) {
-            MOT_REPORT_ERROR(MOT_ERROR_OOM,
-                "Initialize ObjectPool",
-                "Failed to allocate LimboGroup pool for thread %d",
-                GetThreadId());
-            return false;
-        }
-
-#ifdef MOT_DEBUG
-        PoolStatsSt stats;
-        errno_t erc = memset_s(&stats, sizeof(PoolStatsSt), 0, sizeof(PoolStatsSt));
-        securec_check(erc, "\0", "\0");
-        stats.m_type = PoolStatsT::POOL_STATS_ALL;
-        m_limboGroupPool->GetStats(stats);
-        m_limboGroupPool->PrintStats(stats, "GC_MANAGER", LogLevel::LL_INFO);
-#endif
-
-        LimboGroup* limboGroup = CreateNewLimboGroup();
-        if (limboGroup == nullptr) {
-            MOT_REPORT_ERROR(MOT_ERROR_OOM,
-                "Create GC Context",
-                "Failed to allocate %u bytes for limbo group",
-                (unsigned)sizeof(LimboGroup));
-            result = false;
-        } else {
-            m_limboHead = m_limboTail = limboGroup;
-            m_limboGroupAllocations = 1;
-        }
-    } else {
-        m_limboHead = m_limboTail = nullptr;
-        m_limboGroupAllocations = 0;
+    m_limboGroupPool = ObjAllocInterface::GetObjPool(sizeof(LimboGroup), !m_global);
+    if (!m_limboGroupPool) {
+        MOT_REPORT_ERROR(
+            MOT_ERROR_OOM, "Initialize ObjectPool", "Failed to allocate LimboGroup pool for thread %d", GetThreadId());
+        return false;
     }
 
-    if (result) {
-        m_totalLimboInuseElements = 0;
-        m_totalLimboSizeInBytes = 0;
-        m_totalLimboReclaimedSizeInBytes = 0;
-        m_totalLimboRetiredSizeInBytes = 0;
-        m_totalLimboSizeInBytesByCleanIndex = 0;
+    uint32_t queueSize = static_cast<uint32_t>(GC_QUEUE_TYPE::GC_QUEUES);
+    m_GcQueues.reserve(queueSize);
+    for (uint32_t q = 0; q < queueSize; q++) {
+        m_GcQueues.push_back(GcQueue(gcQueuesParams[q]));
+        result = m_GcQueues[q].Initialize(this);
+        if (result == false) {
+            return result;
+        }
+    }
+
+    if (!m_reservedManager.initialize()) {
+        MOT_REPORT_ERROR(MOT_ERROR_OOM, "Create GC Context", "Failed to create GcQueueReservedMemory");
+        result = false;
     }
 
     return result;
 }
 
-GcManager* GcManager::Make(GC_TYPE purpose, int threadId, int rcuMaxFreeCount)
+GcManager* GcManager::Make(GC_TYPE purpose, int threadId, bool global)
 {
+    static bool once = false;
     GcManager* gc = nullptr;
-
-#ifdef MEM_SESSION_ACTIVE
-    void* gcBuffer = MemSessionAlloc(sizeof(GcManager));
-#else
-    void* gcBuffer = malloc(sizeof(GcManager));
-#endif
+    void* gcBuffer = MemAlloc(sizeof(GcManager), global);
 
     if (gcBuffer == nullptr) {
         MOT_REPORT_ERROR(MOT_ERROR_OOM,
@@ -113,29 +105,24 @@ GcManager* GcManager::Make(GC_TYPE purpose, int threadId, int rcuMaxFreeCount)
     } else {
         errno_t erc = memset_s(gcBuffer, sizeof(GcManager), 0, sizeof(GcManager));
         securec_check(erc, "\0", "\0");
-        gc = new (gcBuffer) GcManager(purpose, threadId, rcuMaxFreeCount);
+        gc = new (gcBuffer) GcManager(purpose, threadId, global);
         if (!gc->Initialize()) {
             MOT_REPORT_ERROR(MOT_ERROR_INTERNAL, "Create GC Context", "Failed to initialize GC context object");
             gc->~GcManager();
-
-#ifdef MEM_SESSION_ACTIVE
-            MemSessionFree(gcBuffer);
-#else
-            free(gcBuffer);
-#endif
+            gc = nullptr;
+            MemFree(gcBuffer, global);
         } else {
-            MOTConfiguration& cfg = GetGlobalConfiguration();
-            gc->m_isGcEnabled = cfg.m_gcEnable;
-            gc->m_limboSizeLimit = (uint32_t)cfg.m_gcReclaimThresholdBytes;
-            gc->m_limboSizeLimitHigh = (uint32_t)cfg.m_gcHighReclaimThresholdBytes;
-            gc->m_rcuFreeCount = cfg.m_gcReclaimBatchSize;
-            if (threadId == 0) {
-                MOT_LOG_INFO(
-                    "GC PARAMS: isGcEnabled = %s, limboSizeLimit = %d, limboSizeLimitHigh = %d, rcuFreeCount = %d",
-                    gc->m_isGcEnabled ? "true" : "false",
-                    gc->m_limboSizeLimit,
-                    gc->m_limboSizeLimitHigh,
-                    gc->m_rcuFreeCount);
+            if (!once) {
+                MOT_LOG_INFO("GC PARAMS: ");
+                for (uint32_t queue = 0; queue < gc->m_GcQueues.size(); ++queue) {
+                    MOT_LOG_INFO("QUEUE%u:%s SizeLimit = %uKB, SizeLimitHigh = %uKB, Count = %u",
+                        queue,
+                        GcQueue::enGcQueue[queue],
+                        gcQueuesParams[queue].m_limboSizeLimit / 1024,
+                        gcQueuesParams[queue].m_limboSizeLimitHigh / 1024,
+                        gcQueuesParams[queue].m_rcuFreeCount)
+                }
+                once = true;
             }
         }
     }
@@ -143,157 +130,193 @@ GcManager* GcManager::Make(GC_TYPE purpose, int threadId, int rcuMaxFreeCount)
     return gc;
 }
 
-void GcManager::HardQuiesce(uint32_t numOfElementsToClean)
+void GcManager::CleanIndexItems(uint32_t indexId, GC_OPERATION_TYPE oper)
 {
-    LimboGroup* emptyHead = nullptr;
-    LimboGroup* emptyTail = nullptr;
-    unsigned count = numOfElementsToClean;
-    unsigned locCount = 0;
-
-    // Update values from cleanIndexItemPerGroup flow
-    if (m_totalLimboSizeInBytesByCleanIndex) {
-        m_totalLimboSizeInBytes -= m_totalLimboSizeInBytesByCleanIndex;
-        m_totalLimboReclaimedSizeInBytes += m_totalLimboSizeInBytesByCleanIndex;
-        m_totalLimboSizeInBytesByCleanIndex = 0;
-    }
-
-    GcEpochType epochBound = g_gcActiveEpoch - 1;
-    if (m_limboHead->m_head == m_limboHead->m_tail || GcSignedEpochType(epochBound - m_limboHead->FirstEpoch()) < 0)
-        goto done;
-
-    // clean [limbo_head_, limbo_tail_]
-    while (count) {
-        locCount = m_limboHead->CleanUntil(*this, epochBound, count);
-        m_totalLimboInuseElements -= (count - locCount);
-        count = locCount;
-        if (m_limboHead->m_head != m_limboHead->m_tail) {
-            break;
-        }
-        if (emptyHead == nullptr) {
-            emptyHead = m_limboHead;
-        }
-        emptyTail = m_limboHead;
-        if (m_limboHead == m_limboTail) {
-            m_limboHead = m_limboTail = emptyHead;
-            goto done;
-        }
-        m_limboHead = m_limboHead->m_next;
-    }
-    // hook empties after limbo_tail_
-    if (emptyHead != nullptr) {
-        emptyTail->m_next = m_limboTail->m_next;
-        m_limboTail->m_next = emptyHead;
-    }
-
-done:
-    if (!count) {
-        m_performGcEpoch = epochBound;  // do GC again immediately
-    } else {
-        m_performGcEpoch = epochBound + 1;
-    }
-
-    MOT_LOG_DEBUG("threadId = %d cleaned items = %d\n", m_tid, m_rcuFreeCount - count);
-}
-
-inline unsigned LimboGroup::CleanUntil(GcManager& ti, GcEpochType epochBound, unsigned count)
-{
-    EpochType epoch = 0;
-    uint32_t size = 0;
-    while (m_head != m_tail) {
-        if (m_elements[m_head].m_objectPtr) {
-            size = m_elements[m_head].m_cb(m_elements[m_head].m_objectPtr, m_elements[m_head].m_objectPool, false);
-            MemoryStatisticsProvider::m_provider->AddGCReclaimedBytes(size);
-            ti.m_totalLimboSizeInBytes -= size;
-            ti.m_totalLimboReclaimedSizeInBytes += size;  // stats
-            --count;
-            if (!count) {
-                m_elements[m_head].m_objectPtr = nullptr;
-                m_elements[m_head].m_epoch = epoch;
-                break;
-            }
-        } else {
-            epoch = m_elements[m_head].m_epoch;
-            if (SignedEpochType(epochBound - epoch) < 0) {
-                break;
-            }
-        }
-        ++m_head;
-    }
-    if (m_head == m_tail) {
-        m_head = m_tail = 0;
-    }
-    return count;
-}
-
-inline unsigned LimboGroup::CleanIndexItemPerGroup(GcManager& ti, uint32_t indexId, bool dropIndex)
-{
-    unsigned gHead = m_head;
-    unsigned gTail = m_tail;
-    uint32_t size = 0;
-    uint32_t itemCleaned = 0;
-
-    while (gHead != gTail) {
-        if (m_elements[gHead].m_objectPtr != nullptr && m_elements[gHead].m_indexId == indexId &&
-            m_elements[gHead].m_cb != ti.NullDtor) {
-            size = m_elements[gHead].m_cb(m_elements[gHead].m_objectPtr, m_elements[gHead].m_objectPool, dropIndex);
-            MemoryStatisticsProvider::m_provider->AddGCReclaimedBytes(size);
-            ti.m_totalLimboSizeInBytesByCleanIndex += size;
-            m_elements[gHead].m_cb = ti.NullDtor;
-            itemCleaned++;
-        }
-        ++gHead;
-    }
-    return itemCleaned;
-}
-
-void GcManager::CleanIndexItems(uint32_t indexId, bool dropIndex)
-{
-    if (m_isGcEnabled == false) {
-        return;
-    }
     uint32_t counter = 0;
+
     m_managerLock.lock();
-    LimboGroup* head = m_limboHead;
-    LimboGroup* tail = m_limboTail;
-    while (head != nullptr) {
-        counter += head->CleanIndexItemPerGroup(*this, indexId, dropIndex);
-        head = head->m_next;
+    for (uint32_t queue = 0; queue < m_GcQueues.size(); ++queue) {
+        counter += m_GcQueues[queue].CleanIndexItems(indexId, oper);
     }
     m_managerLock.unlock();
+
     if (counter) {
-        MOT_LOG_INFO("Entity:%s threadId = %d cleaned from index id = %u items = %u\n",
-            enGcTypes[m_purpose],
+        uint64_t items = GetTotalLimboInuseElements();
+        MOT_LOG_INFO("Entity:%s threadId = %d cleaned from index id = %d items = %u inuseItems = %lu",
+            enGcTypes[static_cast<uint8_t>(m_purpose)],
             m_tid,
             indexId,
-            counter);
+            counter,
+            items);
     }
 }
 
-bool GcManager::RefillLimboGroup()
+bool GcManager::ReserveGCMemory(uint32_t elements)
 {
-    if (!m_limboTail->m_next) {
+    bool res = true;
+    for (uint32_t queue = 0; queue < m_GcQueues.size(); ++queue) {
+        if (m_GcQueues[queue].GetFreeAllocations() < elements) {
+            res = m_GcQueues[queue].ReserveGCMemory(elements);
+            if (res == false) {
+                return false;
+            }
+        }
+    }
+    return res;
+}
+
+bool GcManager::ReserveGCMemoryPerQueue(GC_QUEUE_TYPE queueId, uint32_t elements, bool reserveGroups)
+{
+    if (elements == 0) {
+        return true;
+    }
+
+    MOT_ASSERT(queueId < GC_QUEUE_TYPE::GC_QUEUES);
+
+    return m_GcQueues[static_cast<uint8_t>(queueId)].ReserveGCMemory(elements, reserveGroups);
+}
+
+bool GcManager::ReserveGCRollbackMemory(uint32_t elements)
+{
+    LimboGroup* list = nullptr;
+    if (elements == 0) {
+        return true;
+    }
+
+    uint32_t limboGroups = static_cast<uint32_t>(std::ceil(double(elements) / LimboGroup::CAPACITY));
+    list = AllocLimboGroups(limboGroups);
+    if (list == nullptr) {
+        return false;
+    }
+    m_reservedManager.ReserveGCMemory(list, elements);
+    return true;
+}
+
+LimboGroup* GcManager::AllocLimboGroups(uint32_t limboGroups)
+{
+    LimboGroup* currentTail = nullptr;
+    LimboGroup* currentHead = nullptr;
+    for (uint32_t group = 0; group < limboGroups; group++) {
         LimboGroup* limboGroup = CreateNewLimboGroup();
-        if (limboGroup == nullptr) {
+        if (limboGroup != nullptr) {
+            if (!currentTail) {
+                currentTail = limboGroup;
+                currentHead = currentTail;
+            } else {
+                limboGroup->m_next = currentHead;
+                currentHead = limboGroup;
+            }
+        } else {
+            // Release memory
+            while (currentHead) {
+                LimboGroup* tmp = currentHead;
+                currentHead = currentHead->m_next;
+                DestroyLimboGroup(tmp);
+            }
             MOT_REPORT_ERROR(MOT_ERROR_OOM,
-                "GC Refill Limbo Group",
+                "GC Reserve Limbo Group",
                 "Failed to allocate %u bytes for limbo group",
                 (unsigned)sizeof(LimboGroup));
-            return false;
+            return nullptr;
         }
-        m_limboTail->m_next = limboGroup;
-        m_limboGroupAllocations++;
     }
-    m_limboTail = m_limboTail->m_next;
-    MOT_ASSERT(m_limboTail->m_head == 0 && m_limboTail->m_tail == 0);
-    return true;
+
+    return currentHead;
+}
+
+void GcManager::RunQuicese()
+{
+    bool isBarrierReached = false;
+    GcEpochType performGCEpoch = 0;
+    for (uint32_t queue = 0; queue < m_GcQueues.size(); ++queue) {
+        isBarrierReached = false;
+        m_gcEpoch = GetGlobalEpoch();
+        bool isThresholdReached = m_GcQueues[queue].IsThresholdReached();
+        if (isThresholdReached) {
+            if (!m_isThresholdReached) {
+                m_GcQueues[queue].SetPerformGcEpoch(g_gcActiveEpoch);
+            } else {
+                m_GcQueues[queue].SetPerformGcEpoch(performGCEpoch);
+            }
+
+            if (!m_isThresholdReached) {
+                if (m_GcQueues[queue].GetPerformGcEpoch() <= m_GcQueues[queue].FirstEpoch()) {
+                    MOT_LOG_DEBUG("Entity:%s THD_ID:%d Increase Epoch", GcQueue::enGcQueue[queue], m_tid);
+                    SetActiveEpoch(isBarrierReached, GetThreadId());
+                    m_GcQueues[queue].SetPerformGcEpoch(g_gcActiveEpoch);
+                    performGCEpoch = m_GcQueues[queue].GetPerformGcEpoch();
+                    m_isThresholdReached = true;
+                }
+            }
+
+            m_GcQueues[queue].RunQuiesce();
+        }
+    }
+    GcMaintenance();
+    m_isThresholdReached = false;
+    m_gcEpoch = 0;
+}
+
+void GcManager::GcCleanAll()
+{
+    m_gcEpoch = GetGlobalEpoch();
+    bool isBarrierReached = false;
+    MOT_LOG_DEBUG("Entity:%s THD_ID:%d start closing session .... #allocations = %d",
+        enGcTypes[static_cast<uint8_t>(m_purpose)],
+        m_tid,
+        m_limboGroupAllocations);
+
+    uint64_t inuseElements = 0;
+    for (uint32_t queue = 0; queue < m_GcQueues.size(); ++queue) {
+        inuseElements += m_GcQueues[queue].m_stats.m_totalLimboInuseElements;
+        while (m_GcQueues[queue].m_stats.m_totalLimboInuseElements > 0) {
+            // Read Latest snapshot
+            m_gcEpoch = GetGlobalEpoch();
+            m_managerLock.lock();
+            // Increase the global epoch to insure all elements are from a lower epoch
+            SetActiveEpoch(isBarrierReached, GetThreadId());
+            if ((queue == static_cast<uint32_t>(GC_QUEUE_TYPE::GENERIC_QUEUE) or
+                    MOTEngine::GetInstance()->IsRecovering()) and
+                isBarrierReached) {
+                m_GcQueues[queue].SetPerformGcEpoch(g_gcActiveEpoch + 1);
+            } else {
+                m_GcQueues[queue].SetPerformGcEpoch(g_gcActiveEpoch);
+            }
+            uint64_t cleaned = m_GcQueues[queue].m_stats.m_totalLimboInuseElements;
+            m_GcQueues[queue].HardQuiesce(m_GcQueues[queue].m_stats.m_totalLimboInuseElements);
+            if (cleaned != m_GcQueues[queue].m_stats.m_totalLimboInuseElements) {
+                MOT_LOG_DEBUG("Entity:%s THD_ID:%d cleaned %lu from queue %s elements left: %lu elements",
+                    enGcTypes[static_cast<uint8_t>(m_purpose)],
+                    m_tid,
+                    cleaned - m_GcQueues[queue].m_stats.m_totalLimboInuseElements,
+                    GcQueue::enGcQueue[queue],
+                    m_GcQueues[queue].m_stats.m_totalLimboInuseElements);
+            }
+            // Reset local epoch
+            m_gcEpoch = 0;
+            m_GcQueues[queue].RegisterDeletedSentinels();
+            m_managerLock.unlock();
+            // every 20ms + break symmetry
+            if (m_GcQueues[queue].m_stats.m_totalLimboInuseElements > 0) {
+                (void)usleep(GC_CLEAN_SLEEP + m_tid * GC_CLEAN_SESSION_SLEEP);
+            }
+        }
+        m_managerLock.lock();
+        m_GcQueues[queue].Maintenance();
+        m_managerLock.unlock();
+    }
+
+    m_gcEpoch = 0;
+    MOT_LOG_DEBUG("Entity:%s THD_ID:%d closed session cleaned %lu elements from limbo! #allocations = %u",
+        enGcTypes[static_cast<uint8_t>(m_purpose)],
+        m_tid,
+        inuseElements,
+        m_limboGroupAllocations);
 }
 
 void GcManager::RemoveFromGcList(GcManager* n)
 {
     // When node to be deleted is head node
-    if (m_isGcEnabled == false) {
-        return;
-    }
     MOT_ASSERT(n != nullptr);
     g_gcGlobalEpochLock.lock();
 
@@ -315,7 +338,6 @@ void GcManager::RemoveFromGcList(GcManager* n)
 
     // Check if node really exists in Linked List
     if (prev->m_next == nullptr) {
-        printf("\nGiven node is not present in Linked List\n");
         g_gcGlobalEpochLock.unlock();
         return;
     }
@@ -328,16 +350,22 @@ void GcManager::RemoveFromGcList(GcManager* n)
 
 void GcManager::ReportGcStats()
 {
-    MOT_LOG_INFO("----------GC Thd:%d-----------\n", m_tid);
-    MOT_LOG_INFO("total_limbo_inuse_elements = %d\n", m_totalLimboInuseElements);
-    MOT_LOG_INFO("limbo_group_allocations = %d\n", m_limboGroupAllocations);
-    MOT_LOG_INFO("total_limbo_reclaimed_size_in_bytes = %lld in MB = %lf \n",
-        m_totalLimboReclaimedSizeInBytes,
-        double((double)m_totalLimboReclaimedSizeInBytes / ONE_MB));
-    MOT_LOG_INFO("total_limbo_retired_size_in_bytes = %lld in MB = %lf \n",
-        m_totalLimboRetiredSizeInBytes,
-        double((double)m_totalLimboRetiredSizeInBytes / ONE_MB));
-    MOT_LOG_INFO("------------------------------\n");
+    MOT_LOG_INFO("----------GC Thd:%d m_gcEpoch = %lu-----------", m_tid, m_gcEpoch);
+    MOT_LOG_INFO("total_limbo_inuse_elements = %lu", GetTotalLimboInuseElements());
+    MOT_LOG_INFO("limbo_group_allocations = %u", GetLimboGroupAllocations());
+    MOT_LOG_INFO("total_limbo_reclaimed_size_in_bytes = %lu in MB = %lf",
+        GetTotalLimboReclaimedSizeInBytes(),
+        double((double)GetTotalLimboReclaimedSizeInBytes() / ONE_MB));
+    MOT_LOG_INFO("total_limbo_retired_size_in_bytes = %lu in MB = %lf",
+        GetTotalLimboRetiredSizeInBytes(),
+        double((double)GetTotalLimboRetiredSizeInBytes() / ONE_MB));
+    PoolStatsSt stats;
+    errno_t erc = memset_s(&stats, sizeof(PoolStatsSt), 0, sizeof(PoolStatsSt));
+    securec_check(erc, "\0", "\0");
+    stats.m_type = PoolStatsT::POOL_STATS_ALL;
+
+    m_limboGroupPool->GetStats(stats);
+    m_limboGroupPool->PrintStats(stats, "Limbo Group Pool", LogLevel::LL_INFO);
 }
 
 void GcManager::ReportGcAll()
@@ -346,4 +374,19 @@ void GcManager::ReportGcAll()
         ti->ReportGcStats();
     }
 }
+
+void GcManager::GcReinitEpoch()
+{
+    m_gcEpoch = 0;
+    COMPILER_BARRIER;
+    if (MOTEngine::GetInstance()->IsRecovering()) {
+        while (MOTEngine::GetInstance()->IsRecoveryPerformingCleanup()) {
+            PAUSE;
+        }
+    }
+    if (m_isTxnSnapshotTaken) {
+        m_gcEpoch = GetGlobalEpoch();
+    }
+}
+
 }  // namespace MOT

@@ -22,7 +22,7 @@
  * -------------------------------------------------------------------------
  */
 
-#include <string.h>
+#include <cstring>
 
 #include "mm_session_api.h"
 #include "mm_cfg.h"
@@ -101,7 +101,7 @@ extern int MemSessionApiInit()
                     }
                     free(g_sessionAllocators);
                     g_sessionAllocators = nullptr;
-                    pthread_mutex_destroy(&g_sessionLock);
+                    (void)pthread_mutex_destroy(&g_sessionLock);
                     result = GetLastError();
                     break;
                 }
@@ -139,7 +139,7 @@ extern void MemSessionApiDestroy()
     // 3. Free g_sessionAllocators global array.
     free(g_sessionAllocators);
     g_sessionAllocators = nullptr;
-    pthread_mutex_destroy(&g_sessionLock);
+    (void)pthread_mutex_destroy(&g_sessionLock);
     MOT_LOG_TRACE("Session API destroyed");
 }
 
@@ -202,9 +202,8 @@ extern int MemSessionReserve(uint32_t sizeBytes)
         } else {
             MOT_LOG_TRACE("Initializing g_sessionAllocators[%u]", attrSet.m_connectionId, node);
             // 1.  get the right start address of g_sessionAllocatorBuf.
-            MemSessionAllocator* sessionAllocator =
-                (MemSessionAllocator*)(((char*)g_sessionAllocatorBuf[node]) +
-                                       sizeof(MemSessionAllocator) * connectionId);
+            MemSessionAllocator* sessionAllocator = (MemSessionAllocator*)(((char*)g_sessionAllocatorBuf[node]) +
+                                                                           sizeof(MemSessionAllocator) * connectionId);
 
             // 2. Allocate raw chunks from the NUMA node local chunk pool according to the requested size.
             uint32_t chunkCount = (sizeBytes + MEM_CHUNK_SIZE_MB * MEGA_BYTE - 1) / (MEM_CHUNK_SIZE_MB * MEGA_BYTE);
@@ -224,7 +223,7 @@ extern int MemSessionReserve(uint32_t sizeBytes)
                     while (chunkList != nullptr) {
                         MemSessionChunkHeader* temp = chunkList;
                         chunkList = chunkList->m_next;
-                        MemRawChunkStoreFreeLocal((void*)temp, node);
+                        MemRawChunkStoreFreeLocal((void*)temp, temp->m_node);
                     }
 
                     break;
@@ -240,9 +239,9 @@ extern int MemSessionReserve(uint32_t sizeBytes)
                     sessionAllocator, attrSet.m_sessionId, connectionId, chunkList, chunkCount, MEM_ALLOC_LOCAL);
 
                 // save the new allocator in the allocator array (minimize time lock is held)
-                pthread_mutex_lock(&g_sessionLock);
+                (void)pthread_mutex_lock(&g_sessionLock);
                 g_sessionAllocators[connectionId] = sessionAllocator;
-                pthread_mutex_unlock(&g_sessionLock);
+                (void)pthread_mutex_unlock(&g_sessionLock);
 
                 MOT_LOG_DEBUG("Session allocator initialized for thread id %u, connection id %u, session id: %u",
                     (unsigned)attrSet.m_threadId,
@@ -277,9 +276,9 @@ extern void MemSessionUnreserve()
         MemSessionAllocatorPrint("Pre-Terminate report", LogLevel::LL_TRACE, sessionAllocator);
 
         // minimize time lock is held (set NULL quickly before destroying later)
-        pthread_mutex_lock(&g_sessionLock);
+        (void)pthread_mutex_lock(&g_sessionLock);
         g_sessionAllocators[connectionId] = nullptr;
-        pthread_mutex_unlock(&g_sessionLock);
+        (void)pthread_mutex_unlock(&g_sessionLock);
 
         MemSessionAllocatorDestroy(sessionAllocator);
     }
@@ -380,13 +379,15 @@ extern void* MemSessionAllocAligned(uint64_t sizeBytes, uint32_t alignment)
             sessionId,
             connectionId);
         result = MemSessionAllocatorAllocAligned(g_sessionAllocators[connectionId], sizeBytes, alignment);
-    } else if ((alignment % PAGE_SIZE_BYTES) == 0) {
-        // allocate as a regular allocation, since we have native 4 KB alignment
+    } else if ((alignment == 0) || ((PAGE_SIZE_BYTES % alignment) == 0)) {
+        // page size is a multiple of required alignment
+        // allocate as a large/huge allocation, since we have native page alignment
         result = MemSessionAlloc(sizeBytes);
     } else {
         MOT_REPORT_ERROR(MOT_ERROR_INVALID_MEMORY_SIZE,
             "Session Memory Allocation",
-            "Unsupported size %" PRIu64 " for aligned allocations",
+            "Unsupported alignment %u and size %" PRIu64 " for aligned allocations",
+            alignment,
             sizeBytes);
     }
 #endif
@@ -546,6 +547,12 @@ extern void* MemSessionRealloc(void* object, uint64_t newSizeBytes, MemReallocFl
 
     if (object == nullptr) {
         newObject = MemSessionAlloc(newSizeBytes);
+        if (newObject != nullptr) {
+            if (flags == MEM_REALLOC_ZERO) {
+                errno_t erc = memset_s(newObject, newSizeBytes, 0, newSizeBytes);
+                securec_check(erc, "\0", "\0");
+            }
+        }
     } else {
 #ifndef USING_LARGE_HUGE_SESSION_BUFFERS
         MOT_LOG_DEBUG("Reallocating %" PRIu64 " bytes by session %u from session allocator %u",
@@ -689,7 +696,7 @@ extern int MemSessionGetStats(ConnectionId connectionId, MemSessionAllocatorStat
 {
     // get the session allocator for the session id
     int result = 0;
-    pthread_mutex_lock(&g_sessionLock);
+    (void)pthread_mutex_lock(&g_sessionLock);
 
     if (connectionId != INVALID_CONNECTION_ID) {
         MemSessionAllocator* sessionAllocator = g_sessionAllocators[connectionId];
@@ -702,7 +709,7 @@ extern int MemSessionGetStats(ConnectionId connectionId, MemSessionAllocatorStat
         }
     }
 
-    pthread_mutex_unlock(&g_sessionLock);
+    (void)pthread_mutex_unlock(&g_sessionLock);
     return result;
 }
 
@@ -727,7 +734,7 @@ extern void MemSessionPrintCurrentStats(const char* name, LogLevel logLevel)
 extern uint32_t MemSessionGetAllStats(MemSessionAllocatorStats* sessionStatsArray, uint32_t sessionCount)
 {
     uint32_t entriesReported = 0;
-    pthread_mutex_lock(&g_sessionLock);
+    (void)pthread_mutex_lock(&g_sessionLock);
 
     for (uint32_t connectionId = 0; connectionId < g_memGlobalCfg.m_maxConnectionCount; ++connectionId) {
         MemSessionAllocator* sessionAllocator = g_sessionAllocators[connectionId];
@@ -739,7 +746,7 @@ extern uint32_t MemSessionGetAllStats(MemSessionAllocatorStats* sessionStatsArra
             }
         }
     }
-    pthread_mutex_unlock(&g_sessionLock);
+    (void)pthread_mutex_unlock(&g_sessionLock);
     return entriesReported;
 }
 
@@ -790,12 +797,13 @@ extern void MemSessionPrintSummary(const char* name, LogLevel logLevel, bool ful
                 aggStats.m_realUsedSize / MEGA_BYTE);
 
             if (fullReport) {
-                double memUtilInternal = ((double)aggStats.m_usedSize) / ((double)aggStats.m_realUsedSize) * 100.0;
-                double memUtilExternal = ((double)aggStats.m_usedSize) / aggStats.m_reservedSize * 100.0;
+                double memUtilInternal = (((double)aggStats.m_usedSize) / ((double)aggStats.m_realUsedSize)) * 100.0;
+                double memUtilExternal = (((double)aggStats.m_usedSize) / aggStats.m_reservedSize) * 100.0;
                 uint32_t minRequiredChunks =
                     (aggStats.m_usedSize + MEM_CHUNK_SIZE_MB * MEGA_BYTE - 1) / (MEM_CHUNK_SIZE_MB * MEGA_BYTE);
-                double maxUtilExternal =
-                    ((double)aggStats.m_usedSize) / (minRequiredChunks * MEM_CHUNK_SIZE_MB * MEGA_BYTE) * 100.0;
+                double maxUtilExternal = (((double)aggStats.m_usedSize) /
+                                             static_cast<uint64_t>(minRequiredChunks * MEM_CHUNK_SIZE_MB * MEGA_BYTE)) *
+                                         100.0;
 
                 MOT_LOG(logLevel,
                     "Session %s [Peak]:    Reserved = %" PRIu64 " MB, Requested = %" PRIu64 " MB, Allocated = %" PRIu64
@@ -820,15 +828,15 @@ extern "C" void MemSessionApiDump()
 {
     MOT::StringBufferApply([](MOT::StringBuffer* stringBuffer) {
         MOT::MemSessionApiToString(0, "Debug Dump", stringBuffer, MOT::MEM_REPORT_DETAILED);
-        fprintf(stderr, "%s", stringBuffer->m_buffer);
-        fflush(stderr);
+        (void)fprintf(stderr, "%s", stringBuffer->m_buffer);
+        (void)fflush(stderr);
     });
 }
 
 extern "C" int MemSessionApiAnalyze(void* buffer)
 {
     for (uint32_t i = 0; i < MOT::g_memGlobalCfg.m_maxConnectionCount; ++i) {
-        fprintf(stderr, "Searching buffer %p in session allocator %u...\n", buffer, i);
+        (void)fprintf(stderr, "Searching buffer %p in session allocator %u...\n", buffer, i);
         if (MOT::g_sessionAllocators[i]) {
             if (MemSessionAllocatorAnalyze(MOT::g_sessionAllocators[i], buffer)) {
                 return 1;

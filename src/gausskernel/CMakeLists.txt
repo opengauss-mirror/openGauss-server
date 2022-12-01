@@ -225,6 +225,7 @@ if("${ENABLE_MOT}" STREQUAL "ON")
         $<TARGET_OBJECTS:gausskernel_storage_mot_core_storage>
         $<TARGET_OBJECTS:gausskernel_storage_mot_core_storage_index>
         $<TARGET_OBJECTS:gausskernel_storage_mot_core_storage_index_masstree>
+        $<TARGET_OBJECTS:gausskernel_storage_mot_core_storage_sentinel>
         $<TARGET_OBJECTS:gausskernel_storage_mot_core_system>
         $<TARGET_OBJECTS:gausskernel_storage_mot_core_system_checkpoint>
         $<TARGET_OBJECTS:gausskernel_storage_mot_core_system_common>

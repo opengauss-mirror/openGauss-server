@@ -251,7 +251,8 @@ function real_hacheck()
             sh ./run_ha_multi_single.sh 1 ${part}
             sh ./run_ha_multi_cascade.sh ;;
         hacheck_multi_single_mot)
-            sh ./run_ha_multi_single_mot.sh 1 ${part} ;;
+            sh ./run_ha_multi_single_mot.sh 1 ${part}
+            sh ./run_ha_multi_cascade_mot.sh ;;
         hacheck_single_paxos)
             sh ./run_paxos_single.sh ;;
         hacheck_ss_all)

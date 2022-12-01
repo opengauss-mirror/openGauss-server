@@ -30,3 +30,12 @@ test: mot/single_update
 test: mot/single_supported_unsupported_types
 test: mot/single_relation_size
 test: mot/single_join_cross_engine_check
+test: mot/single_sp_queries_rtd
+test: mot/single_sp_queries_rtd2
+test: mot/single_sp_queries_rtd3
+test: mot/single_sp_queries_rtd5
+test: mot/single_sp_queries_rtd6
+test: mot/single_new_indexes
+test: mot/single_new_indexes2
+test: mot/single_new_indexes3
+test: mot/single_update_secondary_index_column

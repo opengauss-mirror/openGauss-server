@@ -42,7 +42,7 @@ CheckpointControlFile* CheckpointControlFile::GetCtrlFile()
         return ctrlfileInst;
     }
 
-    g_ctrlfileLock.lock();
+    std::lock_guard<spin_lock> lock(g_ctrlfileLock);
     ctrlfileInst = new (std::nothrow) CheckpointControlFile();
     if (ctrlfileInst == nullptr) {
         MOT_REPORT_ERROR(MOT_ERROR_OOM, "Checkpoint", "Failed to allocate memory for checkpoint control file object");
@@ -54,7 +54,6 @@ CheckpointControlFile* CheckpointControlFile::GetCtrlFile()
             ctrlfileInst = nullptr;
         }
     }
-    g_ctrlfileLock.unlock();
     return ctrlfileInst;
 }
 
@@ -65,7 +64,7 @@ bool CheckpointControlFile::Init()
     }
 
     do {
-        if (GetGlobalConfiguration().m_checkpointDir.length() >= CheckpointUtils::maxPath) {
+        if (GetGlobalConfiguration().m_checkpointDir.length() >= CheckpointUtils::MAX_PATH) {
             MOT_REPORT_ERROR(MOT_ERROR_INVALID_CFG,
                 "Checkpoint",
                 "Invalid checkpoint_dir configuration, length exceeds max path length");
@@ -84,7 +83,7 @@ bool CheckpointControlFile::Init()
         }
 
         // "/" is already appended in CheckpointUtils::GetWorkingDir.
-        m_fullPath.append(CTRL_FILE_NAME);
+        (void)m_fullPath.append(CTRL_FILE_NAME);
         MOT_LOG_TRACE("CheckpointControlFile: Fullpath - '%s'", m_fullPath.c_str());
 
         // try to open an old file
@@ -99,7 +98,7 @@ bool CheckpointControlFile::Init()
             }
             if (CheckpointUtils::ReadFile(fd, (char*)&m_ctrlFileData, sizeof(CtrlFileData)) != sizeof(CtrlFileData)) {
                 MOT_LOG_ERROR("CheckpointControlFile: init - failed to read data from file");
-                CheckpointUtils::CloseFile(fd);
+                (void)CheckpointUtils::CloseFile(fd);
                 break;
             } else {
                 MOT_LOG_INFO("CheckpointControlFile: init - loaded file: checkpointId %lu",
@@ -118,7 +117,7 @@ bool CheckpointControlFile::Init()
     return initialized;
 }
 
-bool CheckpointControlFile::Update(uint64_t id, uint64_t lsn, uint64_t lastReplayLsn)
+bool CheckpointControlFile::Update(uint64_t id, uint64_t lsn, uint64_t lastReplayLsn, uint64_t maxTxnId)
 {
     int fd = -1;
     bool ret = false;
@@ -129,20 +128,23 @@ bool CheckpointControlFile::Update(uint64_t id, uint64_t lsn, uint64_t lastRepla
             break;
         }
 
+        uint32_t metaVersion = MetadataProtoVersion::METADATA_VER_CURR;
         m_ctrlFileData.entry[0].checkpointId = id;
         m_ctrlFileData.entry[0].lsn = lsn;
         m_ctrlFileData.entry[0].lastReplayLsn = lastReplayLsn;
-        m_ctrlFileData.entry[0].metaVersion = MetadataProtoVersion::METADATA_VER_CURR;
+        m_ctrlFileData.entry[0].metaVersion = metaVersion;
+        m_ctrlFileData.entry[0].maxTransactionId = maxTxnId;
 
-        if (CheckpointUtils::WriteFile(fd, (char*)&m_ctrlFileData, sizeof(CtrlFileData)) != sizeof(CtrlFileData)) {
+        if (CheckpointUtils::WriteFile(fd, (const char*)&m_ctrlFileData, sizeof(CtrlFileData)) !=
+            sizeof(CtrlFileData)) {
             MOT_LOG_ERROR("CheckpointControlFile::update - failed to write control file");
-            CheckpointUtils::CloseFile(fd);
+            (void)CheckpointUtils::CloseFile(fd);
             break;
         }
 
         if (CheckpointUtils::FlushFile(fd)) {
             MOT_LOG_ERROR("CheckpointControlFile::update - failed to flush control file");
-            CheckpointUtils::CloseFile(fd);
+            (void)CheckpointUtils::CloseFile(fd);
             break;
         }
 
@@ -151,14 +153,14 @@ bool CheckpointControlFile::Update(uint64_t id, uint64_t lsn, uint64_t lastRepla
             break;
         }
         ret = true;
-        MOT_LOG_DEBUG("CheckpointControlFile::Update %lu:%lu", id, lsn);
+        MOT_LOG_TRACE("CheckpointControlFile::Update [%lu:%lu:%lu:%u]", id, lsn, lastReplayLsn, metaVersion);
     } while (0);
 
     return ret;
 }
 
-void CheckpointControlFile::Print()
+void CheckpointControlFile::Print() const
 {
-    MOT_LOG_DEBUG("CheckpointControlFile: [%lu:%lu:%lu]", GetLsn(), GetId(), GetLastReplayLsn());
+    MOT_LOG_DEBUG("CheckpointControlFile: [%lu:%lu:%lu:%u]", GetId(), GetLsn(), GetLastReplayLsn(), GetMetaVersion());
 }
 }  // namespace MOT

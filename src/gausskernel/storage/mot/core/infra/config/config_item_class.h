@@ -25,7 +25,7 @@
 #ifndef CONFIG_ITEM_CLASS_H
 #define CONFIG_ITEM_CLASS_H
 
-#include <stdint.h>
+#include <cstdint>
 
 namespace MOT {
 /**

@@ -112,7 +112,14 @@ enum JitExprType {
     /** @var Sub-link expression type (for a sub-query). */
     JIT_EXPR_TYPE_SUBLINK,
 
-    JIT_EXPR_TYPE_BOOL
+    /** @var Boolean expression type. */
+    JIT_EXPR_TYPE_BOOL,
+
+    /** @var Scalar Array operation expression type. */
+    JIT_EXPR_TYPE_SCALAR_ARRAY_OP,
+
+    /** @var Coerce via IO expression type. */
+    JIT_EXPR_TYPE_COERCE_VIA_IO
 };
 
 /** @enum Join scan types. */
@@ -133,6 +140,24 @@ enum JitJoinScanType {
     JIT_JOIN_SCAN_RANGE
 };
 
+/** @enum Join types. */
+enum class JitJoinType {
+    /** @var Inner join (includes records that have matching values in both tables). */
+    JIT_JOIN_INNER,
+
+    /** @var Left join (include all records from the left table, and the matched records from the right table). */
+    JIT_JOIN_LEFT,
+
+    /** @var full join (includes all records when there is a match in either left or right table). */
+    JIT_JOIN_FULL,
+
+    /** @var Right join (includes all records from the right table, and the matched records from the left table). */
+    JIT_JOIN_RIGHT,
+
+    /** @var Invalid join type. */
+    JIT_JOIN_INVALID
+};
+
 enum JoinClauseType { JoinClauseNone, JoinClauseExplicit, JoinClauseImplicit };
 
 struct JitExpr {
@@ -143,10 +168,10 @@ struct JitExpr {
     Expr* _source_expr;
 
     /** @var The expression result type. */
-    int _result_type;
+    Oid _result_type;
 
-    /** @var The position of the expression in the arg-is-null array. */
-    int _arg_pos;
+    /** @var The expression evaluated collation. */
+    Oid m_collationId;
 };
 
 /** @struct A parsed constant expression. */
@@ -158,10 +183,10 @@ struct JitConstExpr {
     Expr* _source_expr;
 
     /** @var The constant type. */
-    int _const_type;
+    Oid _const_type;
 
-    /** @var The position of the expression in the arg-is-null array. */
-    int _arg_pos;
+    /** @var The expression evaluated collation. */
+    Oid m_collationId;
 
     /** @var The constant value. */
     Datum _value;
@@ -172,17 +197,17 @@ struct JitConstExpr {
 
 /** @struct A parsed parameter expression. */
 struct JitParamExpr {
-    /** @var The expression type. */
+    /** @var The expression type (always @ref JIT_EXPR_TYPE_PARAM). */
     JitExprType _expr_type;
 
     /** @var The original expression in the parsed query (required for convenient filter collection). */
     Expr* _source_expr;
 
-    /** @var The parameter type (always @ref JIT_EXPR_TYPE_PARAM). */
-    int _param_type;
+    /** @var The parameter type. */
+    Oid _param_type;
 
-    /** @var The position of the expression in the arg-is-null array. */
-    int _arg_pos;
+    /** @var The expression evaluated collation. */
+    Oid m_collationId;
 
     /** @var The zero-based index of the parameter in the parameter array. */
     int _param_id;
@@ -197,10 +222,10 @@ struct JitVarExpr {
     Expr* _source_expr;
 
     /** @var The column type. */
-    int _column_type;
+    Oid _column_type;
 
-    /** @var The position of the expression in the arg-is-null array. */
-    int _arg_pos;
+    /** @var The expression evaluated collation. */
+    Oid m_collationId;
 
     /** @var The column position. */
     int _column_id;
@@ -217,19 +242,22 @@ struct JitOpExpr {
     Expr* _source_expr;
 
     /** @var The expression result type. */
-    int _result_type;
+    Oid _result_type;
 
-    /** @var The position of the expression in the arg-is-null array. */
-    int _arg_pos;
+    /** @var The expression evaluated collation. */
+    Oid m_collationId;
 
     /** @var The operator number. */
-    int _op_no;
+    Oid _op_no;
 
     /** @var The correlating function id. */
-    int _op_func_id;
+    Oid _op_func_id;
 
-    /** @var The operator arguments (3 at most). */
-    JitExpr* _args[MOT_JIT_MAX_FUNC_EXPR_ARGS];
+    /** @var Collation used by the operator. */
+    Oid m_opCollationId;
+
+    /** @var The operator arguments. */
+    JitExpr** _args;
 
     /** @var The number of arguments used in the operator. */
     int _arg_count;
@@ -243,16 +271,19 @@ struct JitFuncExpr {
     Expr* _source_expr;
 
     /** @var The expression result type. */
-    int _result_type;
+    Oid _result_type;
 
-    /** @var The position of the expression in the arg-is-null array. */
-    int _arg_pos;
+    /** @var The expression evaluated collation. */
+    Oid m_collationId;
 
     /** @var The correlating function id. */
-    int _func_id;
+    Oid _func_id;
 
-    /** @var The function arguments (3 at most). */
-    JitExpr* _args[MOT_JIT_MAX_FUNC_EXPR_ARGS];
+    /** @var Collation used by the function. */
+    Oid m_funcCollationId;
+
+    /** @var The function arguments. */
+    JitExpr** _args;
 
     /** @var The number of arguments used in the function. */
     int _arg_count;
@@ -268,9 +299,6 @@ struct JitSubLinkExpr {
     /** @var The sub-query result type. */
     int _result_type;
 
-    /** @var The position of the expression in the arg-is-null array. */
-    int _arg_pos;
-
     /** @var The position of the sub-query plan in the sub-query plan array of the containing compound plan. */
     int _sub_query_index;
 };
@@ -283,10 +311,10 @@ struct JitBoolExpr {
     Expr* _source_expr;
 
     /** @var The expression result type (always BOOLOID). */
-    int _result_type;
+    Oid _result_type;
 
-    /** @var The position of the expression in the arg-is-null array. */
-    int _arg_pos;
+    /** @var The expression evaluated collation. */
+    Oid m_collationId;
 
     /** @var The correlating Boolean operator type. */
     BoolExprType _bool_expr_type;
@@ -296,6 +324,58 @@ struct JitBoolExpr {
 
     /** @var The number of arguments used in the Boolean operator. */
     int _arg_count;
+};
+
+struct JitScalarArrayOpExpr {
+    /** @var The expression type (always @ref JIT_EXPR_TYPE_SCALAR_ARRAY_OP). */
+    JitExprType _expr_type;
+
+    /** @var The original expression in the parsed query. */
+    Expr* _source_expr;
+
+    /** @var The expression result type (always BOOLOID). */
+    Oid _result_type;
+
+    /** @var The expression evaluated collation. */
+    Oid m_collationId;
+
+    /** @var The operator number. */
+    Oid _op_no;
+
+    /** @var The correlating function id. */
+    Oid _op_func_id;
+
+    /** @var Collation used by the function. */
+    Oid m_funcCollationId;
+
+    /** @var Specifies the Boolean operation (OR or AND)*/
+    bool m_useOr;
+
+    /** @var The Scalar argument. */
+    JitExpr* m_scalar;
+
+    /** @var The array argument. */
+    JitExpr** m_arrayElements;
+
+    /** @var The array size. */
+    int m_arraySize;
+};
+
+struct JitCoerceViaIOExpr {
+    /** @var The expression type (always @ref JIT_EXPR_TYPE_COERCE_VIA_IO). */
+    JitExprType _expr_type;
+
+    /** @var The original expression in the parsed query. */
+    Expr* _source_expr;
+
+    /** @var The expression result type (always BOOLOID). */
+    Oid _result_type;
+
+    /** @var The expression evaluated collation. */
+    Oid m_collationId;
+
+    /** @var The value to convert. */
+    JitExpr* m_arg;
 };
 
 /** @struct An expression tied to a table column. */
@@ -314,6 +394,12 @@ struct JitColumnExpr {
 
     /** @var Specifies that this is a join expression (and the @ref _expr member is a Var expression). */
     bool _join_expr;
+
+    /** @var The position of the column according to the used index. */
+    int _index_column_id;
+
+    /** @var The operator class used with this column. */
+    JitWhereOperatorClass _op_class;
 };
 
 /** @struct An array of column-tied expressions. */
@@ -328,7 +414,7 @@ struct JitColumnExprArray {
 /** @struct A column select expression used in SELECT statements. */
 struct JitSelectExpr {
     /** @var The expression. */
-    JitVarExpr* _column_expr;
+    JitExpr* _expr;
 
     /** @var The zero-based output tuple column id. */
     int _tuple_column_id;
@@ -343,25 +429,10 @@ struct JitSelectExprArray {
     int _count;
 };
 
-/** @struct Scan filter. */
-struct JitFilter {
-    /** @var The left-hand side operand. */
-    JitExpr* _lhs_operand;
-
-    /** @var The right-hand side operand. */
-    JitExpr* _rhs_operand;
-
-    /** @var The operator to evaluate (see catalog/pg_operator.h). */
-    int _filter_op;
-
-    /** @var The function identifier of the operator to evaluate (see catalog/pg_proc.h). */
-    int _filter_op_funcid;
-};
-
 /** @struct Scan filter array. */
 struct JitFilterArray {
     /** @var An array of scan filters used to filter rows in the scan. */
-    JitFilter* _scan_filters;
+    JitExpr** _scan_filters;
 
     /** @var The number of filters used. */
     int _filter_count;
@@ -380,6 +451,9 @@ struct JitPointQuery {
 
     /** @var Any additional filters imposed on the scan. */
     JitFilterArray _filters;
+
+    /** @var Any additional one-time filters imposed on the scan. */
+    JitFilterArray m_oneTimeFilters;
 };
 
 /** @struct Index scan. */
@@ -387,8 +461,8 @@ struct JitIndexScan {
     /** @var The table being scanned. */
     MOT::Table* _table;
 
-    /** @var The zero-based identifier of the index being used for scanning. */
-    int _index_id;
+    /** @var The index being used for scanning. */
+    MOT::Index* _index;
 
     /** @var The number of columns participating in the scan. */
     int _column_count;
@@ -426,6 +500,9 @@ struct JitIndexScan {
 
     /** @var Any additional filters imposed on the scan. */
     JitFilterArray _filters;
+
+    /** @var Additional one-time filters. */
+    JitFilterArray m_oneTimeFilters;
 };
 
 /** @struct Specifies aggregation parameters. */
@@ -435,6 +512,9 @@ struct JitAggregate {
 
     /** @var The aggregate function identifier. */
     int _func_id;
+
+    /** @var Collation used by the function. */
+    Oid m_funcCollationId;
 
     /** @var The table column id to aggregate (we always aggregate into slot tuple column id 0). */
     int _table_column_id;
@@ -464,6 +544,9 @@ struct JitJoinExpr {
     int _inner_column_id;
 };
 
+/** @brief Queries whether the expression tree contains a column reference. */
+extern bool ExprHasVarRef(Expr* expr);
+
 // Parent class for all expression visitors
 class ExpressionVisitor {
 public:
@@ -473,7 +556,7 @@ public:
     virtual ~ExpressionVisitor()
     {}
 
-    virtual bool OnFilterExpr(int filterOp, int filterOpFuncId, Expr* lhs, Expr* rhs)
+    virtual bool OnFilterExpr(Expr* expr)
     {
         return true;
     }
@@ -483,9 +566,6 @@ public:
     {
         return true;
     }
-
-protected:
-    DECLARE_CLASS_LOGGER()
 };
 
 // Expression visitor that counts number of expressions
@@ -550,6 +630,7 @@ public:
         if (_index_ops != nullptr) {
             // NOTE: this is a good use case for txn-level allocation, right? (the transaction being PREPARE command)
             MOT::MemSessionFree(_index_ops);
+            _index_ops = nullptr;
         }
         _query = nullptr;
         _table = nullptr;
@@ -586,9 +667,23 @@ private:
 
     int RemoveSingleDuplicate();
 
+    static bool IsSameOp(JitWhereOperatorClass lhs, JitWhereOperatorClass rhs);
+
     static int IntCmp(int lhs, int rhs);
 
     static bool IndexOpCmp(const IndexOpClass& lhs, const IndexOpClass& rhs);
+
+    struct ExprCmp {
+        RangeScanExpressionCollector& m_exprCollector;
+        explicit ExprCmp(RangeScanExpressionCollector& exprCollector) : m_exprCollector(exprCollector)
+        {}
+        inline bool operator()(const JitColumnExpr& lhs, const JitColumnExpr& rhs)
+        {
+            return m_exprCollector.ExprCmpImp(lhs, rhs);
+        }
+    };
+
+    bool ExprCmpImp(const JitColumnExpr& lhs, const JitColumnExpr& rhs);
 
     bool ScanHasHoles(JitIndexScanType scan_type) const;
 };
@@ -596,29 +691,40 @@ private:
 // Expression visitor that counts number of filters
 class FilterCounter : public ExpressionVisitor {
 public:
-    explicit FilterCounter(int* count) : _count(count)
+    explicit FilterCounter(int* count, int* oneTimeCount) : _count(count), m_oneTimeCount(oneTimeCount)
     {}
 
     ~FilterCounter() final
     {
         _count = nullptr;
+        m_oneTimeCount = nullptr;
     }
 
-    bool OnFilterExpr(int filterOp, int filterOpFuncId, Expr* lhs, Expr* rhs) final
+    bool OnFilterExpr(Expr* expr) final
     {
-        ++(*_count);
+        if (!ExprHasVarRef(expr)) {
+            ++(*m_oneTimeCount);
+        } else {
+            ++(*_count);
+        }
         return true;
     }
 
 private:
     int* _count;
+    int* m_oneTimeCount;
 };
 
 // Expression visitor that collects filters
 class FilterCollector : public ExpressionVisitor {
 public:
-    FilterCollector(Query* query, JitFilterArray* filter_array, int* count)
-        : _query(query), _filter_array(filter_array), _filter_count(count)
+    FilterCollector(Query* query, JitFilterArray* filter_array, int* count, JitFilterArray* oneTimeFilterArray,
+        int* oneTimeFilterCount)
+        : _query(query),
+          _filter_array(filter_array),
+          _filter_count(count),
+          m_oneTimeFilterArray(oneTimeFilterArray),
+          m_oneTimeFilterCount(oneTimeFilterCount)
     {}
 
     ~FilterCollector() final
@@ -626,14 +732,18 @@ public:
         _query = nullptr;
         _filter_array = nullptr;
         _filter_count = nullptr;
+        m_oneTimeFilterArray = nullptr;
+        m_oneTimeFilterCount = nullptr;
     }
 
-    bool OnFilterExpr(int filterOp, int filterOpFuncId, Expr* lhs, Expr* rhs) final;
+    bool OnFilterExpr(Expr* expr) final;
 
 private:
     Query* _query;
     JitFilterArray* _filter_array;
     int* _filter_count;
+    JitFilterArray* m_oneTimeFilterArray;
+    int* m_oneTimeFilterCount;
 
     void Cleanup();
 };
@@ -645,7 +755,9 @@ public:
     {}
 
     ~SubLinkFetcher() final
-    {}
+    {
+        _subLink = nullptr;
+    }
 
     inline SubLink* GetSubLink()
     {
@@ -660,6 +772,7 @@ private:
     int _count;
 };
 
+JitExpr* parseExpr(Query* query, Expr* expr, int depth, bool* hasVarExpr = nullptr);
 MOT::Table* getRealTable(const Query* query, int table_ref_id, int column_id);
 int getRealColumnId(const Query* query, int table_ref_id, int column_id, const MOT::Table* table);
 void freeExpr(JitExpr* expr);
@@ -667,10 +780,13 @@ bool visitSearchExpressions(Query* query, MOT::Table* table, MOT::Index* index, 
     ExpressionVisitor* visitor, bool include_join_exprs, JitColumnExprArray* pkey_exprs = nullptr);
 bool getSearchExpressions(Query* query, MOT::Table* table, MOT::Index* index, bool include_pkey,
     JitColumnExprArray* search_exprs, int* count, bool use_join_clause);
+Node* getJoinQualifiers(const Query* query);
 bool getRangeSearchExpressions(
     Query* query, MOT::Table* table, MOT::Index* index, JitIndexScan* index_scan, JoinClauseType join_clause_type);
 bool getTargetExpressions(Query* query, JitColumnExprArray* target_exprs);
 bool getSelectExpressions(Query* query, JitSelectExprArray* select_exprs);
+bool getLimitCount(Query* query, int* limit_count);
+bool getTargetEntryAggregateOperator(Query* query, TargetEntry* target_entry, JitAggregate* aggregate);
 }  // namespace JitExec
 
 #endif /* JIT_PLAN_EXPR_H */

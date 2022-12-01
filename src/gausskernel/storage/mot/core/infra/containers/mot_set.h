@@ -44,11 +44,6 @@ public:
     /** @typedef The set implementation (currently a simple list of items). */
     typedef mot_list<T, Allocator, Assigner> set_impl;
 
-private:
-    /** @var The set of items. */
-    set_impl _set;
-
-public:
     /** @brief Consturctor. */
     mot_set()
     {}
@@ -188,6 +183,10 @@ public:
     {
         return _set.cend();
     }
+
+private:
+    /** @var The set of items. */
+    set_impl _set;
 };
 }  // namespace MOT
 

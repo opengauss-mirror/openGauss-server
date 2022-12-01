@@ -54,7 +54,7 @@ public:
      * or -1 in case the group could not be joined
      */
     int AddToGroup(RedoLogBuffer* buffer);
-    inline uint32_t GetGroupSize()
+    inline uint32_t GetGroupSize() const
     {
         return m_groupSize;
     }
@@ -66,13 +66,13 @@ public:
 
     /**
      * @brief On a leader, waits for the right condition to commit
-     * as a member waits for the group to be comitted
+     * as a member waits for the group to be committed
      * @param isLeader is the current caller a leader
      * @param groupRef a reference to the group
      */
     void Commit(bool isLeader, std::shared_ptr<CommitGroup> groupRef);
 
-    inline bool IsCommitted()
+    inline bool IsCommitted() const
     {
         return m_commited;
     }

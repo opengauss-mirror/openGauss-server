@@ -88,6 +88,20 @@ extern void MemRawChunkStoreFreeGlobal(void* chunk, int node);
 extern void MemRawChunkStoreFreeLocal(void* chunk, int node);
 
 /**
+ * @brief Reserve global memory for current session. While in reserve-mode, released chunks  are kept in the current
+ * session's reserve, rather than being released to global memory.
+ * @param chunkCount The number of chunks to reserve.
+ * @return Zero on success, otherwise error code on failure.
+ */
+extern int MemRawChunkStoreReserveGlobal(int node, uint32_t chunkCount);
+
+/**
+ * @brief Release all global memory reserved for current session.
+ * @param bufferClass The buffer class for which an existing reservation is to be released.
+ */
+extern void MemRawChunkStoreUnreserveGlobal(int node, uint32_t chunkCount);
+
+/**
  * @brief Prints status of all chunk pools in chunk store into log.
  * @param name The name to prepend to the log message.
  * @param logLevel The log level to use in printing.

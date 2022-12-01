@@ -26,12 +26,12 @@
 #define MOT_GLOBAL_H
 
 #include <pthread.h>
-#include <stddef.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <string.h>
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
 #include <sys/time.h>
-#include <time.h>
+#include <ctime>
 #include <unistd.h>
 #include <cinttypes>
 #include <cassert>
@@ -94,14 +94,20 @@ enum RC : uint32_t {
     RC_LOCAL_ROW_FOUND,
     RC_LOCAL_ROW_NOT_FOUND,
     RC_LOCAL_ROW_DELETED,
+    RC_PRIMARY_SENTINEL_NOT_MAPPED,
     RC_INSERT_ON_EXIST,
     RC_INDEX_RETRY_INSERT,
     RC_INDEX_DELETE,
+    RC_GC_INFO_REMOVE,
     RC_LOCAL_ROW_NOT_VISIBLE,
     RC_MEMORY_ALLOCATION_ERROR,
     RC_ILLEGAL_ROW_STATE,
     RC_NULL_VIOLATION,
     RC_PANIC,
+    RC_JIT_SP_EXCEPTION,
+    RC_TXN_ABORTED,
+    RC_CONCURRENT_MODIFICATION,
+    RC_STATEMENT_CANCELED,
 
     /** @var operation currently n.a. */
     RC_NA,
@@ -115,6 +121,8 @@ enum RC : uint32_t {
  * @return The string representation of the return code.
  */
 extern const char* RcToString(RC rc);
+
+enum SubTxnOperType : uint32_t { SUB_TXN_READ = 0, SUB_TXN_DML = 1, SUB_TXN_DDL = 2 };
 
 /**
  * @enum Transaction State.
@@ -205,7 +213,7 @@ enum CheckpointPhase : uint8_t {
  */
 enum AccessType : uint8_t {
     /** @var Invalid row access code. */
-    INV,
+    INV = 0,
 
     /** @var Denotes read row access code. */
     RD,
@@ -231,14 +239,24 @@ enum AccessType : uint8_t {
     INC,
 
     DEC
-
 };
 
-#define BITMAP_BYTE_IX(x) ((x) >> 3)
+enum UpdateIndexColumnType : uint8_t {
+    /** @var Checkpoint phase is unknown. */
+    UPDATE_COLUMN_NONE,
+
+    /** @var Update primary index column */
+    UPDATE_COLUMN_PRIMARY,
+
+    /** @var Update secondary index column. */
+    UPDATE_COLUMN_SECONDARY
+};
+
+#define BITMAP_BYTE_IX(x) (static_cast<uint32_t>(x) >> 3)
 #define BITMAP_GETLEN(x) (BITMAP_BYTE_IX(x) + 1)
-#define BITMAP_SET(b, x) (b[BITMAP_BYTE_IX(x)] |= (1 << ((x) & 0x07)))
-#define BITMAP_CLEAR(b, x) (b[BITMAP_BYTE_IX(x)] &= ~(1 << ((x) & 0x07)))
-#define BITMAP_GET(b, x) (b[BITMAP_BYTE_IX(x)] & (1 << ((x) & 0x07)))
+#define BITMAP_SET(b, x) ((b)[BITMAP_BYTE_IX(x)] |= (1U << ((x) & 0x07)))
+#define BITMAP_CLEAR(b, x) ((b)[BITMAP_BYTE_IX(x)] &= ~(1U << ((x) & 0x07)))
+#define BITMAP_GET(b, x) ((b)[BITMAP_BYTE_IX(x)] & (1U << ((x) & 0x07)))
 
 /************************************************/
 // constants
@@ -251,6 +269,9 @@ enum AccessType : uint8_t {
 #endif  // UINT64_MAX
 
 #define INVALID_TRANSACTION_ID ((TransactionId)0)  // Equal to InvalidTransactionId in the envelope.
+
+#define INVALID_CSN ((uint64_t)0)  // Equal to InvalidCommitSeqNo in the envelope.
+#define INITIAL_CSN ((uint64_t)3)  // Equal to COMMITSEQNO_FIRST_NORMAL in the envelope.
 
 // masstree cleanup
 #define MASSTREE_OBJECT_COUNT_PER_CLEANUP 8000  // max # of objects to free per rcu_quiesce() call
@@ -282,24 +303,29 @@ inline void Prefetch(const void* ptr)
 #endif
 }
 
-// Isolation Levels
-#define SERIALIZABLE 4
-#define SNAPSHOT 3
-#define REPEATABLE_READ 2
-#define READ_COMMITED 1
+// Isolation Levels - // Equal to Xact isolation levels in the envelope.
+enum ISOLATION_LEVEL : uint32_t {
+    READ_COMMITED = 1,
+
+    REPEATABLE_READ,
+
+    SERIALIZABLE
+};
 
 /* Storage Params */
 #define MAX_NUM_INDEXES (10U)
 #define MAX_KEY_COLUMNS (10U)
 #define MAX_TUPLE_SIZE 16384  // in bytes
 
-#define MAX_VARCHAR_LEN 1024
+#define MAX_VARCHAR_LEN 2052
 
 // Do not change this. Masstree assumes 15 for optimization purposes
 #define BTREE_ORDER 15
 
 /** @define Constant denoting indentation used for MOT printouts. */
 #define PRINT_REPORT_INDENT 2
-}  // namespace MOT
 
+/* GC Parmas */
+#define GC_MAX_ELEMENTS_TO_SKIP 5
+}  // namespace MOT
 #endif  // MOT_GLOBAL_H

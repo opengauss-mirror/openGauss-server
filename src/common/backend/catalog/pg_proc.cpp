@@ -73,6 +73,10 @@
 #include "storage/lmgr.h"
 #include "libpq/md5.h"
 
+#ifdef ENABLE_MOT
+#include "storage/mot/jit_exec.h"
+#endif
+
 #define TEMPSEPARATOR '@'
 #define SEPARATOR '#'
 
@@ -1611,6 +1615,14 @@ Oid ProcedureCreate(const char* procedureName, Oid procNamespace, Oid propackage
 
         /* send invalid message for for relation holding replaced function as trigger */
         InvalidRelcacheForTriggerFunction(retval, ((Form_pg_proc)GETSTRUCT(tup))->prorettype);
+
+#ifdef ENABLE_MOT
+        if (proIsProcedure && !package && JitExec::IsMotSPCodegenEnabled()) {
+            /* Notify MOT that current function is about to be modified */
+            JitExec::PurgeJitSourceCache(
+                retval, JitExec::JIT_PURGE_SCOPE_SP, JitExec::JIT_PURGE_REPLACE, procedureName);
+        }
+#endif
     }
 
     myself.classId = ProcedureRelationId;
@@ -2097,12 +2109,27 @@ bool function_parse_error_transpose(const char* prosrc)
         }
     }
 
-    /* We can get the original query text from the active portal (hack...) */
-    Assert(ActivePortal && ActivePortal->status == PORTAL_ACTIVE);
-    queryText = ActivePortal->sourceText;
+#ifdef ENABLE_MOT
+    /*
+     * When MOT JIT is active we need to be careful, because we might not have a portal yet.
+     * This can happen when we trigger compilation of a function during a PERPARE statement
+     * (and not through a CREATE FUNCTION command). In this case the portal does not exist
+     * yet, and we report the error relative to function body text.
+     */
+    if (ActivePortal == nullptr) {
+        newerrposition = match_prosrc_to_query(prosrc, prosrc, origerrposition);
+    } else {
+#endif
+        /* We can get the original query text from the active portal (hack...) */
+        Assert(ActivePortal && ActivePortal->status == PORTAL_ACTIVE);
+        queryText = ActivePortal->sourceText;
 
-    /* Try to locate the prosrc in the original text */
-    newerrposition = match_prosrc_to_query(prosrc, queryText, origerrposition);
+        /* Try to locate the prosrc in the original text */
+        newerrposition = match_prosrc_to_query(prosrc, queryText, origerrposition);
+#ifdef ENABLE_MOT
+    }
+#endif
+
     if (newerrposition > 0) {
         /* Successful, so fix error position to reference original query */
         errposition(newerrposition);

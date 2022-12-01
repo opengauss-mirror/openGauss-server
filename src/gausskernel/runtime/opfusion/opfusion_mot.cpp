@@ -37,6 +37,8 @@ MotJitSelectFusion::MotJitSelectFusion(
         old_context = MemoryContextSwitchTo(m_global->m_context);
         InitGlobals();
         MemoryContextSwitchTo(old_context);
+    } else {
+        m_c_global = ((MotJitSelectFusion*)(psrc->opFusionObj))->m_c_global;
     }
     old_context = MemoryContextSwitchTo(m_local.m_localContext);
     InitLocals(params);
@@ -49,10 +51,25 @@ void MotJitSelectFusion::InitGlobals()
         m_global->m_tupDesc = ExecCleanTypeFromTL(m_global->m_planstmt->planTree->targetlist, false);
     } else {
         ereport(ERROR,
-                (errmodule(MOD_EXECUTOR),
-                 errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
-                 errmsg("unrecognized node type: %d when executing executor node.",
-                        (int)nodeTag(m_global->m_planstmt->planTree))));
+            (errmodule(MOD_EXECUTOR),
+                errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                errmsg("unrecognized node type: %d when executing executor node.",
+                    (int)nodeTag(m_global->m_planstmt->planTree))));
+    }
+    m_c_global = (MotJitSelectFusionGlobalVariable*)palloc0(sizeof(MotJitSelectFusionGlobalVariable));
+
+    m_c_global->m_limitCount = -1;
+    m_c_global->m_limitOffset = -1;
+    /* get limit num */
+    if (IsA(m_global->m_planstmt->planTree, Limit)) {
+        Limit* limit = (Limit*)m_global->m_planstmt->planTree;
+        if (limit->limitCount != NULL && IsA(limit->limitCount, Const) && !((Const*)limit->limitCount)->constisnull) {
+            m_c_global->m_limitCount = DatumGetInt64(((Const*)limit->limitCount)->constvalue);
+        }
+        if (limit->limitOffset != NULL && IsA(limit->limitOffset, Const) &&
+            !((Const*)limit->limitOffset)->constisnull) {
+            m_c_global->m_limitOffset = DatumGetInt64(((Const*)limit->limitOffset)->constvalue);
+        }
     }
 }
 
@@ -70,39 +87,45 @@ bool MotJitSelectFusion::execute(long max_rows, char* completionTag)
     bool success = false;
     setReceiver();
     unsigned long nprocessed = 0;
-    bool finish = false;
     int rc = 0;
-    while (!finish) {
+    int64 start_row = 0;
+    int64 get_rows = 0;
+
+    start_row = m_c_global->m_limitOffset >= 0 ? m_c_global->m_limitOffset : start_row;
+    get_rows = m_c_global->m_limitCount >= 0 ? (m_c_global->m_limitCount + start_row) : max_rows;
+
+    while (nprocessed < (unsigned long)get_rows) {
         uint64_t tpProcessed = 0;
         int scanEnded = 0;
-        rc = JitExec::JitExecQuery(m_global->m_cacheplan->mot_jit_context, params, m_local.m_reslot,
-                                   &tpProcessed, &scanEnded);
-        if (scanEnded || (tpProcessed == 0) || (rc != 0)) {
-            // raise flag so that next round we will bail out (current tuple still must be reported to user)
-            finish = true;
-        }
+        rc = JitExec::JitExecQuery(
+            m_global->m_cacheplan->mot_jit_context, params, m_local.m_reslot, &tpProcessed, &scanEnded);
         CHECK_FOR_INTERRUPTS();
         if (tpProcessed > 0) {
             nprocessed++;
             (*m_local.m_receiver->receiveSlot)(m_local.m_reslot, m_local.m_receiver);
             (void)ExecClearTuple(m_local.m_reslot);
-            if ((max_rows != FETCH_ALL) && (nprocessed == (unsigned long)max_rows)) {
-                finish = true;
-            }
+        }
+        if (scanEnded || (tpProcessed == 0) || (rc != 0)) {
+            break;
         }
     }
 
-    success = true;
+    if (rc == 0) {
+        success = true;
+    }
 
     if (m_local.m_isInsideRec) {
         (*m_local.m_receiver->rDestroy)(m_local.m_receiver);
     }
 
+    if (t_thrd.utils_cxt.CurrentResourceOwner != m_local.m_resOwner) {
+        t_thrd.utils_cxt.CurrentResourceOwner = m_local.m_resOwner;
+    }
     m_local.m_position = 0;
     m_local.m_isCompleted = true;
 
-    errno_t errorno = snprintf_s(completionTag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1,
-                                 "SELECT %lu", nprocessed);
+    errno_t errorno =
+        snprintf_s(completionTag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1, "SELECT %lu", nprocessed);
     securec_check_ss(errorno, "\0", "\0");
 
     return success;
@@ -151,36 +174,35 @@ void MotJitModifyFusion::InitLocals(ParamListInfo params)
 
 bool MotJitModifyFusion::execute(long max_rows, char* completionTag)
 {
+    errno_t ret = EOK;
     bool success = false;
     uint64_t tpProcessed = 0;
     int scanEnded = 0;
     ParamListInfo params = (m_local.m_outParams != NULL) ? m_local.m_outParams : m_local.m_params;
-    int rc = JitExec::JitExecQuery(m_global->m_cacheplan->mot_jit_context, params, m_local.m_reslot,
-                                   &tpProcessed, &scanEnded);
+    int rc = JitExec::JitExecQuery(
+        m_global->m_cacheplan->mot_jit_context, params, m_local.m_reslot, &tpProcessed, &scanEnded);
     if (rc == 0) {
-        (void)ExecClearTuple(m_local.m_reslot);
         success = true;
-        errno_t ret = EOK;
-        switch (m_c_local.m_cmdType)
-        {
-            case CMD_INSERT:
-                ret = snprintf_s(completionTag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1,
-                    "INSERT 0 %lu", tpProcessed);
-                securec_check_ss(ret, "\0", "\0");
-                break;
-            case CMD_UPDATE:
-                ret = snprintf_s(completionTag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1,
-                    "UPDATE %lu", tpProcessed);
-                securec_check_ss(ret, "\0", "\0");
-                break;
-            case CMD_DELETE:
-                ret = snprintf_s(completionTag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1,
-                    "DELETE %lu", tpProcessed);
-                securec_check_ss(ret, "\0", "\0");
-                break;
-            default:
-                break;
-        }
+    }
+    (void)ExecClearTuple(m_local.m_reslot);
+    switch (m_c_local.m_cmdType) {
+        case CMD_INSERT:
+            ret = snprintf_s(
+                completionTag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1, "INSERT 0 %lu", tpProcessed);
+            securec_check_ss(ret, "\0", "\0");
+            break;
+        case CMD_UPDATE:
+            ret = snprintf_s(
+                completionTag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1, "UPDATE %lu", tpProcessed);
+            securec_check_ss(ret, "\0", "\0");
+            break;
+        case CMD_DELETE:
+            ret = snprintf_s(
+                completionTag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1, "DELETE %lu", tpProcessed);
+            securec_check_ss(ret, "\0", "\0");
+            break;
+        default:
+            break;
     }
 
     m_local.m_isCompleted = true;

@@ -34,7 +34,6 @@ template <typename P>
 void* basic_table<P>::insert(
     const uint8_t* key, const uint32_t key_len, void* const& entry, bool& result, const uint32_t& pid)
 {
-
     MOT_LOG_DEBUG("table: %s", name_.c_str());
     // This should be optimized at compile time by bitshifts and using ctz
     cursor_type lp(*this, key, ALIGN8(key_len));
@@ -77,9 +76,6 @@ void* basic_table<P>::insert(
     // If the key is new (not previously existing) then we record the entry under
     // that key
     if (!found) {
-#if ISOLATION_LEVEL == SERIALIZABLE
-        handler->observe_phantoms(lp.node());
-#endif
         lp.value() = reinterpret_cast<value_type>(entry);
     } else {
         // If the insertion was successful, we return nullptr (the sentinel was

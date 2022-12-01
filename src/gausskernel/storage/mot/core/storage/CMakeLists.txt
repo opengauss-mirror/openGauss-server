@@ -12,7 +12,9 @@ add_static_objtarget(gausskernel_storage_mot_core_storage TGT_mot_core_storage_S
 
 set(CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/index
+    ${CMAKE_CURRENT_SOURCE_DIR}/sentinel
 )
 
 add_subdirectory(index)
+add_subdirectory(sentinel)
 

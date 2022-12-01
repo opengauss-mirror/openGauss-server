@@ -25,7 +25,7 @@
 #ifndef SYS_NUMA_API_H
 #define SYS_NUMA_API_H
 
-#include <stddef.h>
+#include <cstddef>
 
 // Memory policy mode constants (adapted from /usr/include/linux/mempolicy.h)
 #define MPOL_DEFAULT 0

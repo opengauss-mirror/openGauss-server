@@ -32,7 +32,7 @@
 #include "mm_def.h"
 #include "mm_api.h"
 
-#include <string.h>
+#include <cstring>
 
 namespace MOT {
 DECLARE_LOGGER(BufferChunk, Memory)
@@ -49,7 +49,7 @@ static uint32_t CalcMaxBuffers(uint32_t bufferSizeKb, uint64_t* paddedSizeOut)
 
     // now we calculate the padded size required for all headers (rounded up to the next page boundary)
     uint32_t fullHeaderSize = sizeof(MemBufferChunkHeader) + bufferCount * sizeof(MemBufferHeader);
-    uint64_t paddedSize = (fullHeaderSize + PAGE_SIZE_BYTES - 1) / PAGE_SIZE_BYTES * PAGE_SIZE_BYTES;
+    uint64_t paddedSize = ((fullHeaderSize + PAGE_SIZE_BYTES - 1) / PAGE_SIZE_BYTES) * PAGE_SIZE_BYTES;
     if (paddedSizeOut != nullptr) {
         *paddedSizeOut = paddedSize;
     }
@@ -85,11 +85,10 @@ extern void MemBufferChunkReportError(int errorCode, const char* format, ...)
     va_end(args);
 }
 
-extern void MemBufferChunkInit(MemBufferChunkHeader* chunkHeader, int16_t node, MemAllocType allocType,
-    int16_t allocatorNode, MemBufferClass bufferClass)
+extern void MemBufferChunkInit(
+    MemBufferChunkHeader* chunkHeader, MemAllocType allocType, int16_t allocatorNode, MemBufferClass bufferClass)
 {
     chunkHeader->m_chunkType = MEM_CHUNK_TYPE_BUFFER;
-    chunkHeader->m_node = node;
     chunkHeader->m_allocType = allocType;
     chunkHeader->m_allocatorNode = allocatorNode;
     chunkHeader->m_bufferClass = bufferClass;
@@ -190,7 +189,7 @@ extern "C" void MemBufferHeaderDump(void* arg)
 {
     MOT::MemBufferHeader* bufferHeader = (MOT::MemBufferHeader*)arg;
     MOT::MemBufferChunkHeader* chunkHeader = (MOT::MemBufferChunkHeader*)MOT::MemRawChunkDirLookup(bufferHeader);
-    fprintf(stderr,
+    (void)fprintf(stderr,
         "Buffer Header %u @ %p --> %p (source chunk: %p)\n",
         (unsigned)bufferHeader->m_index,
         bufferHeader,
@@ -203,8 +202,8 @@ extern "C" void MemBufferChunkHeaderDump(void* arg)
     MOT::MemBufferChunkHeader* chunkHeader = (MOT::MemBufferChunkHeader*)arg;
     MOT::StringBufferApply([chunkHeader](MOT::StringBuffer* stringBuffer) {
         MOT::MemBufferChunkHeaderToString(chunkHeader, stringBuffer);
-        fprintf(stderr, "%s", stringBuffer->m_buffer);
-        fflush(stderr);
+        (void)fprintf(stderr, "%s", stringBuffer->m_buffer);
+        (void)fflush(stderr);
     });
 }
 
@@ -214,14 +213,13 @@ extern "C" void MemBufferChunkListDump(void* arg)
 
     MOT::StringBufferApply([chunkList](MOT::StringBuffer* stringBuffer) {
         MOT::MemBufferChunkListToString(0, "Debug Dump", chunkList, stringBuffer);
-        fprintf(stderr, "%s", stringBuffer->m_buffer);
-        fflush(stderr);
+        (void)fprintf(stderr, "%s", stringBuffer->m_buffer);
+        (void)fflush(stderr);
     });
 }
 
 extern "C" void MemBufferDump(void* arg)
 {
-
     MOT::StringBufferApply([arg](MOT::StringBuffer* stringBuffer) {
         StringBufferAppend(stringBuffer, "Analysis report for memory buffer %p:\n", arg);
         MOT::MemBufferChunkHeader* chunkHeader = (MOT::MemBufferChunkHeader*)MOT::MemRawChunkDirLookup(arg);
@@ -238,7 +236,7 @@ extern "C" void MemBufferDump(void* arg)
         } else {
             StringBufferAppend(stringBuffer, " buffer not found");
         }
-        fprintf(stderr, "%s", stringBuffer->m_buffer);
-        fflush(stderr);
+        (void)fprintf(stderr, "%s", stringBuffer->m_buffer);
+        (void)fflush(stderr);
     });
 }

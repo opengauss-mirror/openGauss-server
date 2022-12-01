@@ -50,16 +50,6 @@ namespace MOT {
  * @brief The base interface for all configuration loaders.
  */
 class ConfigLoader {
-protected:
-    /**
-     * @brief Constructor.
-     * @param name The name of the configuration loader. Must be unique among all loaders.
-     * @param priority The priority of the configuration loader. Lower numbers mean higher priority.
-     * This is for managing layered configuration and it determines precedence while merging
-     * configuration trees.
-     */
-    ConfigLoader(const char* name, uint32_t priority);
-
 public:
     /** Destructor. */
     virtual ~ConfigLoader()
@@ -140,6 +130,15 @@ public:
     }
 
 protected:
+    /**
+     * @brief Constructor.
+     * @param name The name of the configuration loader. Must be unique among all loaders.
+     * @param priority The priority of the configuration loader. Lower numbers mean higher priority.
+     * This is for managing layered configuration and it determines precedence while merging
+     * configuration trees.
+     */
+    ConfigLoader(const char* name, uint32_t priority);
+
     /**
      * @brief Implement configuration loading.
      * @return The resulting configuration tree or null pointer if failed.

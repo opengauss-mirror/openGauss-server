@@ -54,13 +54,27 @@ namespace JitExec {
  * @return Zero if succeeded, otherwise an error code.
  * @note This function may cause transaction abort.
  */
-typedef int (*JitFunc)(MOT::Table* table, MOT::Index* index, MOT::Key* key, MOT::BitmapSet* bitmapSet,
+typedef int (*JitQueryFunc)(MOT::Table* table, MOT::Index* index, MOT::Key* key, MOT::BitmapSet* bitmapSet,
     ParamListInfo params, TupleTableSlot* slot, uint64_t* tuplesProcessed, int* scanEnded, int newScan,
     MOT::Key* endIteratorKey, MOT::Table* innerTable, MOT::Index* innerIndex, MOT::Key* innerKey,
     MOT::Key* innerEndIteratorKey);
 
 // the number of arguments in the jitted function
-#define MOT_JIT_FUNC_ARG_COUNT 14
+#define MOT_JIT_QUERY_ARG_COUNT 14
+
+/**
+ * @typedef Jitted stored procedure function prototype.
+ * @param params The list of bound parameters passed to the query.
+ * @param[out] slot The slot used for reporting select result.
+ * @param[out] tuplesProcessed The variable used to report the number of processed rows.
+ * @param[out] scanEnded Signifies in range scans whether scan ended.
+ * @return Zero if succeeded, otherwise an error code.
+ * @note This function may cause transaction abort.
+ */
+typedef int (*JitSPFunc)(ParamListInfo params, TupleTableSlot* slot, uint64_t* tuplesProcessed, int* scanEnded);
+
+// the number of arguments in the jitted function
+#define MOT_JIT_FUNC_ARG_COUNT 4
 
 /** @brief Prints startup information regarding LLVM version. */
 void PrintNativeLlvmStartupInfo();

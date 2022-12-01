@@ -27,8 +27,8 @@
 
 #include "mm_chunk_type.h"
 #include "mm_def.h"
-#include <stddef.h>
-#include <stdint.h>
+#include <cstddef>
+#include <cstdint>
 
 namespace MOT {
 struct PACKED MemVirtualHugeChunkHeader {

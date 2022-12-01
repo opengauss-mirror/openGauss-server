@@ -63,18 +63,18 @@ DbSessionStatisticsProvider::DbSessionStatisticsProvider()
 
 DbSessionStatisticsProvider::~DbSessionStatisticsProvider()
 {
-    ConfigManager::GetInstance().RemoveConfigChangeListener(this);
+    (void)ConfigManager::GetInstance().RemoveConfigChangeListener(this);
     if (m_enable) {
-        StatisticsManager::GetInstance().UnregisterStatisticsProvider(this);
+        (void)StatisticsManager::GetInstance().UnregisterStatisticsProvider(this);
     }
 }
 
 void DbSessionStatisticsProvider::RegisterProvider()
 {
     if (m_enable) {
-        StatisticsManager::GetInstance().RegisterStatisticsProvider(this);
+        (void)StatisticsManager::GetInstance().RegisterStatisticsProvider(this);
     }
-    ConfigManager::GetInstance().AddConfigChangeListener(this);
+    (void)ConfigManager::GetInstance().AddConfigChangeListener(this);
 }
 
 bool DbSessionStatisticsProvider::CreateInstance()
@@ -123,9 +123,9 @@ void DbSessionStatisticsProvider::OnConfigChange()
     if (m_enable != GetGlobalConfiguration().m_enableDbSessionStatistics) {
         m_enable = GetGlobalConfiguration().m_enableDbSessionStatistics;
         if (m_enable) {
-            StatisticsManager::GetInstance().RegisterStatisticsProvider(this);
+            (void)StatisticsManager::GetInstance().RegisterStatisticsProvider(this);
         } else {
-            StatisticsManager::GetInstance().UnregisterStatisticsProvider(this);
+            (void)StatisticsManager::GetInstance().UnregisterStatisticsProvider(this);
         }
     }
 }

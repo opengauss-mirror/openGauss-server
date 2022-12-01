@@ -42,6 +42,7 @@ class RedoLogHandler {
 public:
     RedoLogHandler();
     RedoLogHandler(const RedoLogHandler& orig) = delete;
+    RedoLogHandler& operator=(const RedoLogHandler& orig) = delete;
     virtual ~RedoLogHandler();
 
     virtual bool Init()
@@ -118,7 +119,7 @@ protected:
     ILogger* m_logger;
     RwLock m_redo_lock;
 
-    inline void WakeupWalWriter()
+    inline void WakeupWalWriter() const
     {
         if (m_wakeupFunc != nullptr) {
             m_wakeupFunc();

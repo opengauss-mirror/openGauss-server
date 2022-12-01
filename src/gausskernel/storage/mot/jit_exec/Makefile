@@ -35,18 +35,23 @@ ENGINE_INC = ../core
 include $(top_builddir)/src/Makefile.global
 
 OBJ_DIR = ./obj
-OBJS = $(OBJ_DIR)/jit_exec.o $(OBJ_DIR)/jit_common.o $(OBJ_DIR)/jit_llvm_query_codegen.o $(OBJ_DIR)/jit_llvm_blocks.o $(OBJ_DIR)/jit_tvm_query_codegen.o $(OBJ_DIR)/jit_tvm_blocks.o $(OBJ_DIR)/jit_helpers.o $(OBJ_DIR)/jit_context.o $(OBJ_DIR)/jit_source.o $(OBJ_DIR)/jit_source_pool.o $(OBJ_DIR)/jit_source_map.o $(OBJ_DIR)/jit_context_pool.o $(OBJ_DIR)/jit_plan.o $(OBJ_DIR)/jit_plan_expr.o $(OBJ_DIR)/jit_explain.o $(OBJ_DIR)/jit_llvm_util.o $(OBJ_DIR)/jit_tvm_util.o $(OBJ_DIR)/jit_llvm.o $(OBJ_DIR)/jit_tvm.o $(OBJ_DIR)/jit_statistics.o
 
-DEPS := $(OBJ_DIR)/jit_exec.d $(OBJ_DIR)/jit_common.d $(OBJ_DIR)/jit_llvm_query_codegen.d $(OBJ_DIR)/jit_llvm_blocks.d $(OBJ_DIR)/jit_tvm_query_codegen.d $(OBJ_DIR)/jit_tvm_blocks.d $(OBJ_DIR)/jit_helpers.d $(OBJ_DIR)/jit_context.d $(OBJ_DIR)/jit_source.d $(OBJ_DIR)/jit_source_pool.d $(OBJ_DIR)/jit_source_map.d $(OBJ_DIR)/jit_context_pool.d $(OBJ_DIR)/jit_plan.d $(OBJ_DIR)/jit_plan_expr.d $(OBJ_DIR)/jit_explain.d $(OBJ_DIR)/jit_llvm_util.d $(OBJ_DIR)/jit_tvm_util.d $(OBJ_DIR)/jit_llvm.d $(OBJ_DIR)/jit_tvm.d $(OBJ_DIR)/jit_statistics.d
+SRCS := $(wildcard *.cpp)
+OBJS := $(patsubst %.cpp, $(OBJ_DIR)/%.o, $(SRCS))
+DEPS := $(patsubst %.cpp, $(OBJ_DIR)/%.d, $(SRCS))
 
 # Shared library stuff
 include $(top_srcdir)/src/gausskernel/common.mk
 override CXXFLAGS += -DMOT_SECURE -I$(top_builddir)/src/gausskernel/storage/mot/jit_exec -I$(top_builddir)/src/gausskernel/storage/mot/fdw_adapter -I$(ENGINE_INC) -I$(ENGINE_INC)/storage -I$(ENGINE_INC)/system -I$(ENGINE_INC)/memory -I$(ENGINE_INC)/memory/garbage_collector
-override CXXFLAGS +=  -I$(ENGINE_INC)/infra -I$(ENGINE_INC)/infra/config -I$(ENGINE_INC)/infra/containers  -I$(ENGINE_INC)/infra/stats -I$(ENGINE_INC)/infra/synchronization -I$(ENGINE_INC)/concurrency_control -I$(ENGINE_INC)/storage/index -I$(ENGINE_INC)/system/transaction -I$(ENGINE_INC)/system/common -I$(ENGINE_INC)/system/statistics -I$(ENGINE_INC)/system/transaction_logger -I$(ENGINE_INC)/system/transaction_logger/asynchronous_redo_log -I$(ENGINE_INC)/system/transaction_logger/synchronous_redo_log -I$(ENGINE_INC)/system/transaction_logger/group_synchronous_redo_log -I$(ENGINE_INC)/system/checkpoint -I$(ENGINE_INC)/system/recovery -I$(ENGINE_INC)/utils
+override CXXFLAGS +=  -I$(ENGINE_INC)/infra -I$(ENGINE_INC)/infra/config -I$(ENGINE_INC)/infra/containers  -I$(ENGINE_INC)/infra/stats -I$(ENGINE_INC)/infra/synchronization -I$(ENGINE_INC)/concurrency_control -I$(ENGINE_INC)/storage/index -I$(ENGINE_INC)/storage/sentinel  -I$(ENGINE_INC)/system/transaction -I$(ENGINE_INC)/system/common -I$(ENGINE_INC)/system/statistics -I$(ENGINE_INC)/system/transaction_logger -I$(ENGINE_INC)/system/transaction_logger/asynchronous_redo_log -I$(ENGINE_INC)/system/transaction_logger/synchronous_redo_log -I$(ENGINE_INC)/system/transaction_logger/group_synchronous_redo_log -I$(ENGINE_INC)/system/checkpoint -I$(ENGINE_INC)/system/recovery -I$(ENGINE_INC)/utils
 
 override CXXFLAGS += -faligned-new -fno-rtti
 
 override CXXFLAGS += -D__STDC_FORMAT_MACROS
+
+ifeq ($(enable_cassert), yes)
+override CXXFLAGS += -DDEBUG
+endif
 
 $(OBJS): | buildrepo
 
@@ -73,6 +78,11 @@ buildrepo:
 
 $(OBJ_DIR)/%.o: %.cpp
 	$(COMPILE.cpp) -MMD -MP -MF"$(patsubst %.o,%.d,$@)" -MT"$@" -o $@ $<
+
+show:
+	@echo "enable_cassert=${enable_cassert}"
+	@echo
+	@echo "CXXFLAGS=${CXXFLAGS}"
 
 ifneq ($(MAKECMDGOALS),clean)
 -include $(DEPS)

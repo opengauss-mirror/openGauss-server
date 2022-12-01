@@ -25,7 +25,7 @@
 #ifndef MOT_BUFFER_H
 #define MOT_BUFFER_H
 
-#define DEFAULT_BUFFER_SIZE 4096 * 1000  // 4MB
+#define DEFAULT_BUFFER_SIZE (4 * 1024 * 1024)  // 4MB
 
 #include <stdint.h>
 #include <string>
@@ -42,14 +42,19 @@ public:
         : m_bufferSize(size), m_nextFree(0), m_buffer(buffer), m_allocated(true)
     {}
 
-    inline Buffer(uint32_t size) : m_bufferSize(size), m_nextFree(0), m_allocated(false)
+    inline Buffer(uint32_t size) : m_bufferSize(size), m_nextFree(0), m_buffer(nullptr), m_allocated(false)
     {}
 
-    inline virtual ~Buffer()
+    ~Buffer()
     {
         if (m_buffer) {
             delete[] m_buffer;
         }
+    }
+
+    inline bool IsAllocated() const
+    {
+        return m_allocated;
     }
 
     inline bool Initialize()
@@ -124,39 +129,11 @@ public:
     }
 
     /**
-     * @brief Appends raw data from input stream.
-     * @param is The input stream
-     * @param size The amount of bytes to append from the stream.
-     */
-    bool Append(std::istream& is, uint32_t size)
-    {
-        if (m_nextFree + size <= m_bufferSize) {
-            char* ptr = (char*)&m_buffer[m_nextFree];
-            is.read(ptr, size);
-            m_nextFree += size;
-            return true;
-        } else {
-            return false;
-        }
-    }
-
-    /**
      * @brief Retrieves the data of the buffer.
      * @return The buffer.
      */
-    inline void* Data() const
+    inline const void* Data() const
     {
-        return m_buffer;
-    }
-
-    /**
-     * @brief Retrieves the data of the buffer.
-     * @param[out] size of the buffer.
-     * @return The buffer.
-     */
-    inline void* Data(uint32_t* size) const
-    {
-        *size = m_nextFree;
         return m_buffer;
     }
 

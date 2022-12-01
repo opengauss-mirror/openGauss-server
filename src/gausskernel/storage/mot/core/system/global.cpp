@@ -59,17 +59,32 @@ extern const char* RcToString(RC rc)
         case RC_LOCAL_ROW_DELETED:
             return "Local row deleted";
         case RC_INSERT_ON_EXIST:
-            return "Insert on exist";  // what does that mean?
+            return "Insert on exist";
         case RC_INDEX_RETRY_INSERT:
             return "Insert to index failed: row concurrency";
         case RC_INDEX_DELETE:
             return "Insert to index failed: row deleted";
+        case RC_GC_INFO_REMOVE:
+            return "GC info can be removed";
+        case RC_SERIALIZATION_FAILURE:
+            return "could not serialize access due to concurrent update";
         case RC_LOCAL_ROW_NOT_VISIBLE:
             return "Local row not visible";
         case RC_MEMORY_ALLOCATION_ERROR:
             return "Out of memory";
         case RC_ILLEGAL_ROW_STATE:
             return "Illegal row state";
+        case RC_NULL_VIOLATION:
+            return "Null-constraint violation";
+        case RC_JIT_SP_EXCEPTION:
+            return "JIT stored procedure exception thrown";
+        case RC_TXN_ABORTED:
+            return "Current transaction is aborted";
+        case RC_CONCURRENT_MODIFICATION:
+            return "Concurrent modification";
+        case RC_STATEMENT_CANCELED:
+            return "Statement canceled due to user request";
+
         default:
             return "N/A";
     }

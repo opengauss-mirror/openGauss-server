@@ -88,6 +88,9 @@
 #include "tsearch/ts_type.h"
 #include "commands/comment.h"
 
+#ifdef ENABLE_MOT
+#include "storage/mot/jit_exec.h"
+#endif
 
 typedef struct PendingLibraryDelete {
     char* filename; /* library file name. */
@@ -1389,6 +1392,15 @@ void RemoveFunctionById(Oid funcOid)
     Form_pg_proc procedureStruct = (Form_pg_proc)GETSTRUCT(tup);
     isagg = procedureStruct->proisagg;
 
+#ifdef ENABLE_MOT
+    char* funcName = pstrdup(NameStr(procedureStruct->proname));
+    bool isNull = false;
+    Datum prokindDatum = SysCacheGetAttr(PROCOID, tup, Anum_pg_proc_prokind, &isNull);
+    bool proIsProcedure = isNull ? false : PROC_IS_PRO(CharGetDatum(prokindDatum));
+    Datum packageDatum = SysCacheGetAttr(PROCOID, tup, Anum_pg_proc_package, &isNull);
+    bool isPackage = isNull ? false : DatumGetBool(packageDatum);
+#endif
+
     if (procedureStruct->prolang == ClanguageId) {
         PrepareCFunctionLibrary(tup);
     }
@@ -1424,6 +1436,13 @@ void RemoveFunctionById(Oid funcOid)
     }
     DropErrorByOid(PLPGSQL_PROC, funcOid); 
         ce_cache_refresh_type |= 0x20; /* refresh proc cache */
+
+#ifdef ENABLE_MOT
+    if (proIsProcedure && !isPackage && JitExec::IsMotSPCodegenEnabled()) {
+        JitExec::PurgeJitSourceCache(funcOid, JitExec::JIT_PURGE_SCOPE_SP, JitExec::JIT_PURGE_EXPIRE, funcName);
+    }
+    pfree_ext(funcName);
+#endif
 }
 /*
  * Guts of function deletion.

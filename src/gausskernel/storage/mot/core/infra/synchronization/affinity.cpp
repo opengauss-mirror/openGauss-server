@@ -24,7 +24,7 @@
 
 #include <pthread.h>
 #include <sched.h>
-#include <stdlib.h>
+#include <cstdlib>
 
 #include "affinity.h"
 #include "global.h"
@@ -47,81 +47,64 @@ void Affinity::Configure(uint64_t numaNodes, uint64_t physicalCoresNuma, Affinit
     m_affinityMode = affinityMode;
 }
 
-uint32_t Affinity::GetAffineProcessor(uint64_t threadId) const
+int Affinity::GetAffineProcessor(uint64_t threadId) const
 {
-    uint32_t result = INVALID_CPU_ID;
+    int result = INVALID_CPU_ID;
     threadId = threadId % (m_numaNodes * m_physicalCoresNuma);
 
     switch (m_affinityMode) {
         case AffinityMode::FILL_SOCKET_FIRST: {
-            result = (uint32_t)GetGlobalConfiguration().GetMappedCore(threadId);
+            result = GetGlobalConfiguration().GetMappedCore(threadId);
             break;
         }
 
         case AffinityMode::EQUAL_PER_SOCKET: {
-            threadId = threadId % (m_numaNodes * m_physicalCoresNuma);
-            uint32_t numaId = threadId % m_numaNodes;
-            uint32_t localProc = threadId / m_numaNodes;
-            result = (uint32_t)(numaId * m_physicalCoresNuma + localProc);
+            int numaId = threadId % m_numaNodes;
+            int localProc = threadId / m_numaNodes;
+            result = GetGlobalConfiguration().GetCoreFromNumaNodeByIndex(numaId, localProc);
             break;
         }
 
         case AffinityMode::FILL_PHYSICAL_FIRST:
-            result = (uint32_t)GetGlobalConfiguration().GetCoreByConnidFP(threadId);
+            result = GetGlobalConfiguration().GetCoreByConnidFP((int)threadId);
             break;
 
         default:
             MOT_LOG_ERROR("%s: Invalid affinity configuration: %d", __func__, (int)m_affinityMode);
-            result = INVALID_CPU_ID;
             break;
     }
     return result;
 }
 
-uint32_t Affinity::GetAffineNuma(uint64_t threadId) const
+int Affinity::GetAffineNuma(uint64_t threadId) const
 {
-    uint32_t result = INVALID_NODE_ID;
-    threadId = threadId % (m_numaNodes * m_physicalCoresNuma);
+    int result = INVALID_NODE_ID;
 
     switch (m_affinityMode) {
-        case AffinityMode::FILL_SOCKET_FIRST: {
-            result = (uint32_t)GetGlobalConfiguration().GetCpuNode(GetGlobalConfiguration().GetMappedCore(threadId));
-            break;
-        }
-
+        case AffinityMode::FILL_SOCKET_FIRST:
         case AffinityMode::EQUAL_PER_SOCKET:
-            result = (uint32_t)threadId % m_numaNodes;
-            break;
-
         case AffinityMode::FILL_PHYSICAL_FIRST: {
-            uint64_t realCoreCount = 0;
-            if (GetGlobalConfiguration().IsHyperThread() == true) {
-                realCoreCount = m_physicalCoresNuma / 2;
-            } else {
-                realCoreCount = m_physicalCoresNuma;
-            }
-            threadId = threadId % (m_numaNodes * realCoreCount);
-            result = (uint32_t)(threadId / realCoreCount);
+            int coreId = GetAffineProcessor(threadId);
+            result = GetGlobalConfiguration().GetCpuNode(coreId);
             break;
         }
 
         default:
             MOT_LOG_ERROR("%s: Invalid affinity configuration: %d", __func__, (int)m_affinityMode);
-            result = (uint32_t)INVALID_NODE_ID;
             break;
     }
 
     return result;
 }
 
-bool Affinity::SetAffinity(uint64_t threadId, uint32_t* threadCore /* = nullptr */) const
+bool Affinity::SetAffinity(uint64_t threadId, int* threadCore /* = nullptr */) const
 {
     bool result = true;
-    uint32_t coreId = GetAffineProcessor(threadId);
+    int coreId = GetAffineProcessor(threadId);
 
     cpu_set_t mask;
     CPU_ZERO(&mask);
-    GetGlobalConfiguration().SetMaskToAllCoresinNumaSocket(mask, coreId);
+    GetGlobalConfiguration().SetMaskToAllCoresinNumaSocketByCoreId(mask, coreId);
 
     pthread_t currentThread = pthread_self();
     // The following call forces migration of the thread if it is
@@ -155,7 +138,7 @@ bool Affinity::SetNodeAffinity(int nodeId)
     bool result = true;
     cpu_set_t mask;
     CPU_ZERO(&mask);
-    GetGlobalConfiguration().SetMaskToAllCoresinNumaSocket2(mask, nodeId);
+    GetGlobalConfiguration().SetMaskToAllCoresinNumaSocketByNodeId(mask, nodeId);
 
     pthread_t currentThread = pthread_self();
     // The following call forces migration of the thread if it is incorrectly placed
@@ -173,10 +156,10 @@ bool Affinity::SetNodeAffinity(int nodeId)
     return result;
 }
 
-static const char* AFFINITY_FILL_SOCKET_FIRST_STR = "fill-socket-first";
-static const char* AFFINITY_EQUAL_PER_SOCKET_STR = "equal-per-socket";
-static const char* AFFINITY_FILL_PHYSICAL_FIRST_STR = "fill-physical-first";
-static const char* AFFINITY_NONE_STR = "none";
+static const char* const AFFINITY_FILL_SOCKET_FIRST_STR = "fill-socket-first";
+static const char* const AFFINITY_EQUAL_PER_SOCKET_STR = "equal-per-socket";
+static const char* const AFFINITY_FILL_PHYSICAL_FIRST_STR = "fill-physical-first";
+static const char* const AFFINITY_NONE_STR = "none";
 
 extern AffinityMode AffinityModeFromString(const char* affinityModeStr)
 {
@@ -211,5 +194,13 @@ extern const char* AffinityModeToString(AffinityMode affinityMode)
         default:
             return "N/A";
     }
+}
+
+extern bool ValidateAffinityMode(const char* affinityModeStr)
+{
+    if (AffinityModeFromString(affinityModeStr) == AffinityMode::AFFINITY_INVALID) {
+        return false;
+    }
+    return true;
 }
 }  // namespace MOT

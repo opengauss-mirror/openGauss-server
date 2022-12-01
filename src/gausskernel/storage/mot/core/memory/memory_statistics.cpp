@@ -180,18 +180,18 @@ DetailedMemoryStatisticsProvider::DetailedMemoryStatisticsProvider()
 
 DetailedMemoryStatisticsProvider::~DetailedMemoryStatisticsProvider()
 {
-    ConfigManager::GetInstance().RemoveConfigChangeListener(this);
+    (void)ConfigManager::GetInstance().RemoveConfigChangeListener(this);
     if (m_enable) {
-        StatisticsManager::GetInstance().UnregisterStatisticsProvider(this);
+        (void)StatisticsManager::GetInstance().UnregisterStatisticsProvider(this);
     }
 }
 
 void DetailedMemoryStatisticsProvider::RegisterProvider()
 {
     if (m_enable) {
-        StatisticsManager::GetInstance().RegisterStatisticsProvider(this);
+        (void)StatisticsManager::GetInstance().RegisterStatisticsProvider(this);
     }
-    ConfigManager::GetInstance().AddConfigChangeListener(this);
+    (void)ConfigManager::GetInstance().AddConfigChangeListener(this);
 }
 
 bool DetailedMemoryStatisticsProvider::CreateInstance()
@@ -240,9 +240,9 @@ void DetailedMemoryStatisticsProvider::OnConfigChange()
     if (m_enable != GetGlobalConfiguration().m_enableDetailedMemoryStatistics) {
         m_enable = GetGlobalConfiguration().m_enableDetailedMemoryStatistics;
         if (m_enable) {
-            StatisticsManager::GetInstance().RegisterStatisticsProvider(this);
+            (void)StatisticsManager::GetInstance().RegisterStatisticsProvider(this);
         } else {
-            StatisticsManager::GetInstance().UnregisterStatisticsProvider(this);
+            (void)StatisticsManager::GetInstance().UnregisterStatisticsProvider(this);
         }
     }
 }
@@ -256,18 +256,18 @@ MemoryStatisticsProvider::MemoryStatisticsProvider()
 
 MemoryStatisticsProvider::~MemoryStatisticsProvider()
 {
-    ConfigManager::GetInstance().RemoveConfigChangeListener(this);
+    (void)ConfigManager::GetInstance().RemoveConfigChangeListener(this);
     if (m_enable) {
-        StatisticsManager::GetInstance().UnregisterStatisticsProvider(this);
+        (void)StatisticsManager::GetInstance().UnregisterStatisticsProvider(this);
     }
 }
 
 void MemoryStatisticsProvider::RegisterProvider()
 {
     if (m_enable) {
-        StatisticsManager::GetInstance().RegisterStatisticsProvider(this);
+        (void)StatisticsManager::GetInstance().RegisterStatisticsProvider(this);
     }
-    ConfigManager::GetInstance().AddConfigChangeListener(this);
+    (void)ConfigManager::GetInstance().AddConfigChangeListener(this);
 }
 
 bool MemoryStatisticsProvider::CreateInstance()
@@ -314,9 +314,9 @@ void MemoryStatisticsProvider::OnConfigChange()
     if (m_enable != GetGlobalConfiguration().m_enableMemoryStatistics) {
         m_enable = GetGlobalConfiguration().m_enableMemoryStatistics;
         if (m_enable) {
-            StatisticsManager::GetInstance().RegisterStatisticsProvider(this);
+            (void)StatisticsManager::GetInstance().RegisterStatisticsProvider(this);
         } else {
-            StatisticsManager::GetInstance().UnregisterStatisticsProvider(this);
+            (void)StatisticsManager::GetInstance().UnregisterStatisticsProvider(this);
         }
     }
 }

@@ -40,9 +40,9 @@ void RedoTransactionCommit(TransactionId xid, void* arg);
 
 class XLOGLogger : public MOT::ILogger {
 public:
-    inline XLOGLogger()
+    inline XLOGLogger() noexcept
     {}
-    inline ~XLOGLogger()
+    ~XLOGLogger()
     {}
 
     uint64_t AddToLog(MOT::RedoLogBuffer** redoLogBufferArray, uint32_t size);

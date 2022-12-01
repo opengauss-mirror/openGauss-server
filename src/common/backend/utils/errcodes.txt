@@ -506,7 +506,8 @@ HV030    E    ERRCODE_FDW_KEY_SIZE_EXCEEDS_MAX_ALLOWED                       fdw
 HV031    E    ERRCODE_FDW_DDL_IN_TRANSACTION_NOT_ALLOWED                     fdw_ddl_in_transaction_not_allowed
 HV032    E    ERRCODE_FDW_TOO_MANY_INDEX_COLUMNS                             fdw_too_many_index_columns
 HV033    E    ERRCODE_FDW_INDEX_ON_NULLABLE_COLUMN_NOT_ALLOWED               fdw_index_on_nullable_column_not_allowed
-HV034    E    ERRCODE_FDW_TOO_MANY_DDL_CHANGES_IN_TRANSACTION_NOT_ALLOWED    fdw_too_many_ddl_statements_in_transaction
+HV034    E    ERRCODE_FDW_TOO_MANY_DDL_CHANGES_IN_TRANSACTION                fdw_too_many_ddl_statements_in_transaction
+HV035    E    ERRCODE_FDW_DROP_INDEXED_COLUMN_NOT_ALLOWED                    fdw_drop_indexed_column_not_allowed
 
 Section: Class P0 - PL/pgSQL Error
 
