@@ -761,6 +761,7 @@ other			.
 					ident = litbufdup(yyscanner);
 					if (yyextra->literallen >= NAMEDATALEN && u_sess->parser_cxt.is_load_copy == false && u_sess->parser_cxt.isForbidTruncate == false)
 						truncate_identifier(ident, yyextra->literallen, yyextra->warnOnTruncateIdent);
+					set_is_delimiter_name(ident,yyscanner);
 					yylval->str = ident;
 					yyextra->ident_quoted = true;
 					yyextra->is_hint_str = false;
@@ -1153,6 +1154,7 @@ other			.
 							yyextra->is_hint_str = true;
 						}
 
+                        set_is_delimiter_name(yytext,yyscanner);
 						return keyword->value;
 					}
 

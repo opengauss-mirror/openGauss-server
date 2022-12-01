@@ -174,6 +174,10 @@ static char* get_correct_str(char*str, const char *delimiter_name, bool is_new_l
     bool is_delimiter = false;
     char *token = strstr(str_temp, "delimiter");
     errno_t rc = 0;
+    char *end = NULL;
+    bool quoted = false;
+    char quoted_type = 0;
+
     if(token != NULL) {
         is_delimiter = true;
         char* pos = str_temp;
@@ -186,25 +190,65 @@ static char* get_correct_str(char*str, const char *delimiter_name, bool is_new_l
             }
         }
         if(is_delimiter) {
-            char* end = pos + strlen("delimiter");
+            end = pos + strlen("delimiter");
             if(*end != ' ' && *end != '\0') {
                 is_delimiter = false;
             }
         }
     }
-    if (is_new_lines && is_delimiter && strstr(str, delimiter_name) == NULL) {
-        Size slen1 = strlen(str) + strlen(delimiter_name) + DELIMITER_LENGTH;
-        char* result1 = (char *) pg_malloc(slen1);
-        rc = sprintf_s(result1, slen1, "%s %s", str, delimiter_name);
+    if (is_new_lines && is_delimiter) {
+        /* delimiter command, looking for the first parameter */
+        Size deliSlen = strlen(str) + strlen(delimiter_name) + DELIMITER_LENGTH;
+        char *deliResultTemp = (char *)pg_malloc(deliSlen);
+        char *start = deliResultTemp;
+        int length = end - str_temp;
+        char *temp_pos = str;
+        bool is_spec_type = false;
+        while(length--) {
+            *start++ = *temp_pos++;
+        }
+        *start++ = ' ';
+        while(*temp_pos == ' ') {
+            temp_pos++;
+        }
+        if (*temp_pos != '\0') {
+            if (*temp_pos != ';') {
+                if (JudgeQuteType(*temp_pos)) {
+                    quoted_type = *temp_pos;
+                    *start++ = *temp_pos++;
+                    quoted = true;
+                }
+                if (JudgeSpecialType(*temp_pos)) {
+                    is_spec_type = true;
+                    *start++ = *temp_pos++;
+                }
+                for (; *temp_pos; temp_pos++) {
+                    bool is_spec = JudgeSpecialType(*temp_pos) ? true : false;
+                    if (!quoted && ((is_spec_type ^ is_spec) || *temp_pos == ';'))
+                        break;
+                    *start++ = *temp_pos;
+                    if ((!quoted && *temp_pos == ' ') || (quoted && *temp_pos == quoted_type)) 
+                        break;
+                }
+            } else {
+                *start++ = *temp_pos++;
+            }
+        }
+
+        *start = '\0';
+        char* deliResult = (char *) pg_malloc(deliSlen);
+        rc = sprintf_s(deliResult, deliSlen, "%s \"%s\"", deliResultTemp, delimiter_name);
         securec_check_ss_c(rc, "", ""); 
         free(str_temp);
         str_temp =NULL;
-        return result1;
+        free(deliResultTemp);
+        deliResultTemp =NULL;
+        return deliResult;
     } 
     free(str_temp);
     str_temp =NULL;
 
-    if (!((*delimiter_name >= 'a' && *delimiter_name <='z') || (*delimiter_name >= 'A' && *delimiter_name <= 'Z'))) {
+    if (!JudgeAlphType(*delimiter_name)) {
         return pg_strdup(str);
     }
     Size slen = 2 * strlen(str) + 1;
@@ -228,7 +272,7 @@ static char* get_correct_str(char*str, const char *delimiter_name, bool is_new_l
         } else {
             if (in == special_str) {
                  special_str = 0;
-            } else if (!special_str && (in == '\'' || in == '"' || in == '`')) {
+            } else if (!special_str && JudgeQuteType(in)) {
                 special_str = (char)in; 
             }
             *temp++ = *pos;

@@ -34,8 +34,8 @@ delimiter ;Mysql
 --Test other
 delimiter sds;
 delimiter aasds
-select 1aa
-delimiter ;aa
+select 1aasds
+delimiter ;aasds
 
 --
 delimiter asd ss;
@@ -45,6 +45,17 @@ delimiter ;asd
 delimiter bb
 delimiter aa
 select 1aa
+delimiter ;
+
+delimiter de
+delimiter abcde
+select 1abcde
+delimiter zz sdsd aasds
+delimiter kkasda "sdsd" sdsda
+select 1kkasda
+delimiter
+delimiter "sdsd sd"
+select 1"sdsd sd"
 delimiter ;
 
 \c regression
