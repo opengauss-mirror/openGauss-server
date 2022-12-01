@@ -164,5 +164,118 @@ insert into t_func_trigger(rep) values('after insert');END;
 /
 drop trigger trigger_insert on t_trigger;
 drop user vbadmin;
+-- test declare cursor
+create table company(name varchar(100), loc varchar(100), no integer);
+insert into company values ('macrosoft',    'usa',          001);
+insert into company values ('oracle',       'usa',          002);
+insert into company values ('backberry',    'canada',       003);
+create or replace procedure test_cursor_1 
+as
+    company_name    varchar(100);
+    company_loc varchar(100);
+    company_no  integer;
+
+begin 
+    declare c1_all cursor is --cursor without args 
+        select name, loc, no from company order by 1, 2, 3;
+    if not c1_all%isopen then
+        open c1_all;
+    end if;
+    loop
+        fetch c1_all into company_name, company_loc, company_no;
+        exit when c1_all%notfound;
+        raise notice '% : % : %',company_name,company_loc,company_no;
+    end loop;
+    if c1_all%isopen then
+        close c1_all;
+    end if;
+end;
+/
+call test_cursor_1();
+-- test declare condition
+create or replace procedure test_condition_1 as
+declare
+    a int;
+BEGIN
+    declare DIVISION_ZERO condition for SQLSTATE '22012';
+    a := 1/0;
+exception
+    when DIVISION_ZERO then
+    BEGIN
+        RAISE NOTICE 'SQLSTATE = %, SQLERRM = %', SQLSTATE,SQLERRM;
+    END;
+END;
+/
+call test_condition_1();
+-- test rename condition
+create or replace procedure test_condition_2 as
+declare
+    a int;
+BEGIN
+    declare DIVISION_ZERO condition for SQLSTATE '22012';
+    declare DIVISION_ZERO_two condition for SQLSTATE '22012';
+    a := 1/0;
+exception
+    when DIVISION_ZERO then
+    BEGIN
+        RAISE NOTICE 'SQLSTATE = %, SQLERRM = %', SQLSTATE,SQLERRM;
+    END;
+END;
+/
+call test_condition_2();
+
+-- test reuse condition name
+create or replace procedure test_condition_3 as
+declare
+    a int;
+BEGIN
+    declare DIVISION_ZERO condition for SQLSTATE '22012';
+    declare DIVISION_ZERO condition for SQLSTATE '22005';
+    a := 1/0;
+exception
+    when DIVISION_ZERO then
+    BEGIN
+        RAISE NOTICE 'SQLSTATE = %, SQLERRM = %', SQLSTATE,SQLERRM;
+    END;
+END;
+/
+-- declare condition sqlcode
+create or replace procedure test_condition_4 as
+BEGIN
+    declare DIVISION_ZERO condition for 1;
+    RAISE NOTICE 'declare condition successed';
+END;
+/
+call test_condition_4();
+-- declare condition sqlcode 0
+create or replace procedure test_condition_5 as
+BEGIN
+    declare DIVISION_ZERO condition for 0;
+    RAISE NOTICE 'declare condition successed';
+END;
+/
+-- declare condition sqlstate begin with '00'
+create or replace procedure test_condition_6 as
+BEGIN
+    declare DIVISION_ZERO condition for sqlstate '00000';
+    RAISE NOTICE 'declare condition successed';
+END;
+/
+
 \c regression
 drop database db_mysql;
+
+-- test declare condition in other compatibility
+create or replace procedure test_condition_1 as
+declare
+    a int;
+BEGIN
+    declare DIVISION_ZERO condition for SQLSTATE '22012';
+    a := 1/0;
+exception
+    when DIVISION_ZERO then
+    BEGIN
+        RAISE NOTICE 'SQLSTATE = %, SQLERRM = %', SQLSTATE,SQLERRM;
+    END;
+END;
+/

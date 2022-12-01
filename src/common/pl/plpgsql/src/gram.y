@@ -396,6 +396,7 @@ static void processFunctionRecordOutParam(int varno, Oid funcoid, int* outparam)
 %type <fetch>	opt_fetch_direction
 %type <expr>	fetch_limit_expr
 %type <datum>	fetch_into_target
+%type <ival>    condition_value
 
 %type <keyword>	unreserved_keyword
 
@@ -441,6 +442,8 @@ static void processFunctionRecordOutParam(int varno, Oid funcoid, int* outparam)
 %token				T_CURSOR_FOUND
 %token				T_CURSOR_NOTFOUND
 %token				T_CURSOR_ROWCOUNT
+%token				T_DECLARE_CURSOR
+%token				T_DECLARE_CONDITION
 
 /*
  * Keyword tokens.  Some of these are reserved and some are not;
@@ -463,6 +466,7 @@ static void processFunctionRecordOutParam(int varno, Oid funcoid, int* outparam)
 %token <keyword>	K_COLLATE
 %token <keyword>	K_COLLECT
 %token <keyword>	K_COMMIT
+%token <keyword>	K_CONDITION
 %token <keyword>	K_CONSTANT
 %token <keyword>	K_CONTINUE
 %token <keyword>	K_CURRENT
@@ -662,7 +666,7 @@ opt_semi		:
                 | ';'
                 ;
 
-pl_block		: decl_sect K_BEGIN proc_sect exception_sect K_END opt_label
+pl_block		: decl_sect begin_decl proc_sect exception_sect K_END opt_label
                     {
                         PLpgSQL_stmt_block *newp;
 
@@ -688,6 +692,103 @@ pl_block		: decl_sect K_BEGIN proc_sect exception_sect K_END opt_label
                     }
                 ;
 
+begin_decl      : K_BEGIN 
+                | K_BEGIN declare_stmts
+                ;
+
+declare_stmts   : declare_stmts declare_stmt
+                | declare_stmt
+                ;
+
+declare_stmt    : T_DECLARE_CURSOR decl_varname K_CURSOR opt_scrollable 
+                    {
+                        IsInPublicNamespace($2->name);
+                        plpgsql_ns_push($2->name); 
+                    }
+                    decl_cursor_args decl_is_for decl_cursor_query
+                    {
+                        PLpgSQL_var *newp;
+
+                        /* pop local namespace for cursor args */
+                        plpgsql_ns_pop();
+
+                        newp = (PLpgSQL_var *)
+                                plpgsql_build_variable($2->name, $2->lineno,
+                                                    plpgsql_build_datatype(REFCURSOROID,
+                                                                            -1,
+                                                                            InvalidOid),
+                                                                            true);
+
+                        newp->cursor_explicit_expr = $8;
+                        if ($6 == NULL)
+                            newp->cursor_explicit_argrow = -1;
+                        else
+                            newp->cursor_explicit_argrow = $6->dno;
+                        newp->cursor_options = CURSOR_OPT_FAST_PLAN | $4;
+                        u_sess->plsql_cxt.plpgsql_yylloc = plpgsql_yylloc;
+                        newp->datatype->cursorCompositeOid = IS_ANONYMOUS_BLOCK ? 
+                            InvalidOid : createCompositeTypeForCursor(newp, $8);
+                        pfree_ext($2->name);
+                        pfree($2);
+                    }
+                | T_DECLARE_CONDITION decl_varname K_CONDITION K_FOR condition_value ';'
+                    {
+                        IsInPublicNamespace($2->name);
+                        PLpgSQL_var	*var;
+
+                        var = (PLpgSQL_var *)plpgsql_build_variable($2->name, $2->lineno,
+                                                     plpgsql_build_datatype(INT4OID,
+                                                                                  -1,
+                                                                                  InvalidOid),
+                                                          true);
+                        var->customCondition = $5;
+                        pfree_ext($2->name);
+                        pfree($2);
+                    }
+                ;
+
+condition_value	: any_identifier
+                    {
+                        if (strcmp($1, "sqlstate") == 0) {
+                            /* next token should be a string literal */
+                            char   *sqlstatestr;
+                            if (yylex() != SCONST)
+                                yyerror("syntax error");
+                            sqlstatestr = yylval.str;
+                        
+                            if (strlen(sqlstatestr) != 5)
+                                yyerror("invalid SQLSTATE code");
+                            if (strspn(sqlstatestr, "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ") != 5)
+                                yyerror("invalid SQLSTATE code");
+                            if (strncmp(sqlstatestr, "00", 2) == 0) {
+                                const char* message = "bad SQLSTATE";
+                                InsertErrorMessage(message, plpgsql_yylloc);
+                                ereport(ERROR,
+                                        (errcode(ERRCODE_SYNTAX_ERROR_OR_ACCESS_RULE_VIOLATION),
+                                            errmsg("bad SQLSTATE '%s'",sqlstatestr)));
+                            }
+
+                            $$ = MAKE_SQLSTATE(sqlstatestr[0],
+                                              sqlstatestr[1],
+                                              sqlstatestr[2],
+                                              sqlstatestr[3],
+                                              sqlstatestr[4]);
+                        } else {
+                            yyerror("syntax error");
+                        }
+                    }
+                | ICONST
+                    {
+                        if ($1 == 0){
+                            const char* message = "Incorrect CONDITION value: '0'";
+                            InsertErrorMessage(message, plpgsql_yylloc);
+                            ereport(ERROR,
+                                    (errcode(ERRCODE_SYNTAX_ERROR_OR_ACCESS_RULE_VIOLATION),
+                                        errmsg("Incorrect CONDITION value: '0'")));
+                        }
+                        $$ = $1;
+                    }
+                ;
 
 decl_sect		: opt_block_label
                     {
@@ -5582,6 +5683,7 @@ unreserved_keyword	:
                 | K_BACKWARD
                 | K_CALL
                 | K_COMMIT
+                | K_CONDITION
                 | K_CONSTANT
                 | K_CONTINUE
                 | K_CURRENT
