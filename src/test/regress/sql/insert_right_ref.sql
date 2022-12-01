@@ -65,6 +65,23 @@ select * from upser order by c1;
 
 drop table upser;
 
+-- test var
+create table with_var(a int default 999);
+create function with_var_func() return int as
+declare 
+    a int := 666;
+begin
+    insert into with_var values(a);
+    return a;
+end;
+/
+
+call with_var_func();
+select * from with_var;
+
+drop function with_var_func;
+drop table with_var;
+
 \c postgres
 
 drop database rightref;

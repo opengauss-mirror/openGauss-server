@@ -966,10 +966,15 @@ Node* transformColumnRef(ParseState* pstate, ColumnRef* cref)
         if (node == NULL) {
             node = hookresult;
         } else if (hookresult != NULL) {
-            ereport(ERROR,
-                (errcode(ERRCODE_AMBIGUOUS_COLUMN),
-                    errmsg("column reference \"%s\" is ambiguous", NameListToString(cref->fields)),
-                    parser_errposition(pstate, cref->location)));
+            if (IS_SUPPORT_RIGHT_REF(pstate->rightRefState)) {
+                node = hookresult;
+            } else {
+                ereport(ERROR,
+                    (errcode(ERRCODE_AMBIGUOUS_COLUMN),
+                        errmsg("column reference \"%s\" is ambiguous", NameListToString(cref->fields)),
+                        parser_errposition(pstate, cref->location)));
+            }
+
         }
     }
     
