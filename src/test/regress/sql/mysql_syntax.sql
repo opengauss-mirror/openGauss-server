@@ -49,6 +49,17 @@ begin
 end;
 /
 
+--different type trigger follows|precedes
+
+create trigger animal_trigger2
+before insert on animals
+for each row
+follows animal_trigger1
+begin
+    insert into food(id, foodtype, remark, time_flag) values (2,'chocolate', 'sdsdsdsd', now());
+end;
+/
+
 create trigger animal_trigger2
 after insert on animals
 for each row
@@ -130,5 +141,28 @@ end;
 /
 drop table food;
 drop table animals;
+
+DROP TABLE t_trigger cascade;
+CREATE TABLE t_trigger(
+id int primary key,
+name varchar(20) not null
+)partition by hash(id)
+(partition p1 ,
+partition p2,
+partition p3);
+INSERT INTO t_trigger values(1,'liuyi');
+INSERT INTO t_trigger values(2,'chener');
+DROP TABLE t_func_trigger;
+CREATE TABLE t_func_trigger(rep text);
+create user vbadmin password 'Aa@111111';
+CREATE definer=vbadmin TRIGGER trigger_insert
+AFTER insert
+ON t_trigger
+FOR EACH ROW
+BEGIN 
+insert into t_func_trigger(rep) values('after insert');END;
+/
+drop trigger trigger_insert on t_trigger;
+drop user vbadmin;
 \c regression
 drop database db_mysql;
