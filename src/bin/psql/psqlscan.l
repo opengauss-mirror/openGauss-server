@@ -755,8 +755,8 @@ other			.
 					ECHO;
 					if (cur_state->is_end_state) {
 						RESET_XP_STATUS() ;
-						return LEXRES_SEMI;
 						cur_state->is_end_state = false;
+						return LEXRES_SEMI;
 					}
 				}
 <xui>{xuistop1}	{
