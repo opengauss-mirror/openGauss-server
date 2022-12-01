@@ -46,8 +46,8 @@ select 1//
 delimiter ;//
 --Test delimiter length
 delimiter aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa;
-ERROR:  syntax error at or near ";"
-LINE 1: delimiter aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ;
+ERROR:  syntax error at or near "";""
+LINE 1: delimiter aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ";"
                                                        ^
 --Test delimiter %
 delimiter %;
@@ -112,9 +112,16 @@ select 1kkasda
 (1 row)
 
 delimiter
-ERROR:  syntax error at or near "kkasda"
-LINE 1: delimiter  kkasda
+ERROR:  syntax error at or near ""kkasda""
+LINE 1: delimiter  "kkasda"
                    ^
+delimiter "sdsd sd"
+select 1"sdsd sd"
+ ?column? 
+----------
+        1
+(1 row)
+
 delimiter ;
 \c regression
 drop database my_test;

@@ -54,6 +54,8 @@ delimiter zz sdsd aasds
 delimiter kkasda "sdsd" sdsda
 select 1kkasda
 delimiter
+delimiter "sdsd sd"
+select 1"sdsd sd"
 delimiter ;
 
 \c regression
