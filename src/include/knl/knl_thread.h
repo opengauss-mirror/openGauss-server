@@ -2427,6 +2427,13 @@ typedef struct knl_t_walsender_context {
     /* Timestamp of the last check-timeout time in WalSndCheckTimeOut. */
     TimestampTz last_check_timeout_timestamp;
 
+    /*
+     * Actual timeout for guc wal_sender_timeout, default value is wal_sender_timeout.
+     * timeoutCheckInternal will greater than or equal to 30 minutes for gs_probackup. It is so
+     * hackly of 30 minutes, but now, 30 minutes is enough.
+     */
+    int timeoutCheckInternal;
+
     /* Read data from WAL into xlogReadBuf, then compress it to compressBuf */
     char *xlogReadBuf;
     char *compressBuf;
