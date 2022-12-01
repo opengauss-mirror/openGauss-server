@@ -1621,7 +1621,7 @@ static Node* plpgsql_post_column_ref(ParseState* pstate, ColumnRef* cref, Node* 
      */
     Node* myvar = resolve_column_ref(pstate, expr, cref, (var == NULL));
 
-    if (myvar != NULL && var != NULL) {
+    if (myvar != NULL && var != NULL && !IS_SUPPORT_RIGHT_REF(pstate->rightRefState)) {
         /*
          * We could leave it to the core parser to throw this error, but we
          * can add a more useful detail message than the core could.
