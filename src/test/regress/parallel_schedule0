@@ -1028,6 +1028,9 @@ test: gsbasebackup_options
 test: gsdump_options
 test: gsloader_options
 
+# debug ceil(-0.5) -0
+test: ceil_negtive_zero
+
 # dolphin_guc_config
 test: dolphin_guc_config
 

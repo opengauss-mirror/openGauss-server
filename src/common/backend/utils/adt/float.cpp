@@ -1418,7 +1418,13 @@ Datum dceil(PG_FUNCTION_ARGS)
 {
     float8 arg1 = PG_GETARG_FLOAT8(0);
 
-    PG_RETURN_FLOAT8(ceil(arg1));
+    float8 result = ceil(arg1);
+    if (DB_IS_CMPT(A_FORMAT) && -0.0 == result) {
+        /* ceil function won't return -0 if compatible with O type database */
+        result = 0.0;
+    }
+
+    PG_RETURN_FLOAT8(result);
 }
 
 /*
