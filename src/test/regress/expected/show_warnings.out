@@ -69,6 +69,46 @@ show warnings;
  Note  |    0 | TEST CHAR VALUE IS abc
 (1 row)
 
+drop table if exists t_showtest;
+NOTICE:  table "t_showtest" does not exist, skipping
+create table t_showtest(a int, primary key(a));
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_showtest_pkey" for table "t_showtest"
+show errors;
+ level | code | message 
+-------+------+---------
+(0 rows)
+
+show errors limit 10;
+ level | code | message 
+-------+------+---------
+(0 rows)
+
+drop table if exists t_showtest;
+create table t_showtest(a int, primary key(a));
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t_showtest_pkey" for table "t_showtest"
+show warnings;
+ level | code |                                            message                                             
+-------+------+------------------------------------------------------------------------------------------------
+ Note  |    0 | CREATE TABLE / PRIMARY KEY will create implicit index "t_showtest_pkey" for table "t_showtest"
+(1 row)
+
+drop table if exists t_showtest;
+update user set b = 'x' where a = 1;
+ERROR:  column "a" does not exist
+LINE 1: update user set b = 'x' where a = 1;
+                                      ^
+show warnings;
+ level |   code   |          message          
+-------+----------+---------------------------
+ Error | 50360452 | column "a" does not exist
+(1 row)
+
+show errors;
+ level |   code   |          message          
+-------+----------+---------------------------
+ Error | 50360452 | column "a" does not exist
+(1 row)
+
 set sql_note=false;
 select TEST_FUNC('abc'::clob);
 INFO:  TEST CHAR VALUE IS abc
