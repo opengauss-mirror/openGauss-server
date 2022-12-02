@@ -1564,6 +1564,10 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
 
     list_free_ext(recheck_indexes);
 
+    /* Check any WITH CHECK OPTION constraints */
+    if (result_rel_info->ri_WithCheckOptions != NIL)
+        ExecWithCheckOptions(result_rel_info, slot, estate);
+
     /* Process RETURNING if present */
     if (result_rel_info->ri_projectReturning)
 #ifdef PGXC
@@ -3050,6 +3054,10 @@ ldelete:
 
     list_free_ext(recheck_indexes);
 
+    /* Check any WITH CHECK OPTION constraints */
+    if (result_rel_info->ri_WithCheckOptions != NIL)
+        ExecWithCheckOptions(result_rel_info, slot, estate);
+
     /* Process RETURNING if present */
     if (result_rel_info->ri_projectReturning)
 #ifdef PGXC
@@ -3985,6 +3993,37 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
 #ifdef PGXC
     estate->es_result_remoterel = saved_remote_rel_info;
 #endif
+
+    /*
+     * Initialize any WITH CHECK OPTION constraints if needed.
+     */
+    result_rel_info = mt_state->resultRelInfo;
+    i = 0;
+
+    /*
+     * length of node->withCheckOptionLists must be 1 because inherited
+     * table is not supported yet.
+     */
+    Assert(node->withCheckOptionLists == NULL || list_length(node->withCheckOptionLists) == 1);
+
+    for (int ri = 0; node->withCheckOptionLists != NULL && ri < resultRelationNum; ri++) {
+        List* wcoList = NIL;
+        List* wcoExprs = NIL;
+        ListCell* ll = NULL;
+
+        foreach(ll, (List*)linitial(node->withCheckOptionLists)) {
+            WithCheckOption* wco = (WithCheckOption*)lfirst(ll);
+            if (wco->rtindex == result_rel_info->ri_RangeTableIndex) {
+                ExprState* wcoExpr = ExecInitExpr((Expr*)wco->qual, mt_state->mt_plans[i]);
+                wcoExprs = lappend(wcoExprs, wcoExpr);
+                wcoList = lappend(wcoList, wco);
+            }
+        }
+
+        result_rel_info->ri_WithCheckOptions = wcoList;
+        result_rel_info->ri_WithCheckOptionExprs = wcoExprs;
+        result_rel_info++;
+    }
 
     /*
      * Initialize RETURNING projections if needed.

@@ -743,8 +743,6 @@ static List* transformUpdateTargetList(ParseState* pstate, List* origTlist)
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("UPDATE target count mismatch --- internal error")));
     }
 
-    setExtraUpdatedCols(target_rte, targetrel->rd_att);
-
     return tlist;
 }
 

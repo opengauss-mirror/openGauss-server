@@ -1607,6 +1607,8 @@ bool expression_tree_walker(Node* node, bool (*walker)(), void* context)
         case T_SetVariableExpr:
             /* primitive node types with no expression subnodes */
             break;
+        case T_WithCheckOption:
+            return p2walker(((WithCheckOption*)node)->qual, context);
         case T_Aggref: {
             Aggref* expr = (Aggref*)node;
 
@@ -1961,6 +1963,8 @@ bool query_tree_walker(Query* query, bool (*walker)(), void* context, int flags)
     if (p2walker((Node*)query->targetList, context)) {
         return true;
     }
+    if (p2walker((Node*)query->withCheckOptions, context))
+        return true;
     if (p2walker((Node*)query->mergeSourceTargetList, context)) {
         return true;
     }
@@ -2208,6 +2212,14 @@ Node* expression_tree_mutator(Node* node, Node* (*mutator)(Node*, void*), void* 
                 return (Node*)copyObject(node);
             } else {
                 return node;
+            }
+        case T_WithCheckOption: {
+                WithCheckOption* wco = (WithCheckOption*)node;
+                WithCheckOption* newnode;
+
+                FLATCOPY(newnode, wco, WithCheckOption, isCopy);
+                MUTATE(newnode->qual, wco->qual, Node*);
+                return (Node*)newnode;
             }
         case T_Aggref: {
             Aggref* aggref = (Aggref*)node;
@@ -2721,6 +2733,7 @@ Query* query_tree_mutator(Query* query, Node* (*mutator)(Node*, void*), void* co
     }
 
     MUTATE(query->targetList, query->targetList, List*);
+    MUTATE(query->withCheckOptions, query->withCheckOptions, List *);
     MUTATE(query->mergeSourceTargetList, query->mergeSourceTargetList, List*);
     MUTATE(query->mergeActionList, query->mergeActionList, List*);
     MUTATE(query->upsertClause, query->upsertClause, UpsertExpr*);

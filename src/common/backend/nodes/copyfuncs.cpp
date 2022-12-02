@@ -321,6 +321,7 @@ static ModifyTable* _copyModifyTable(const ModifyTable* from)
     COPY_SCALAR_FIELD(exclRelRTIndex);
     COPY_NODE_FIELD(upsertWhere);
     COPY_NODE_FIELD(targetlists);
+    COPY_NODE_FIELD(withCheckOptionLists);
 
     return newnode;
 }
@@ -3602,6 +3603,18 @@ static TimeCapsuleClause* CopyTimeCapsuleClause(const TimeCapsuleClause* from)
     return newnode;
 }
 
+static WithCheckOption* _copyWithCheckOption(const WithCheckOption* from)
+{
+    WithCheckOption* newnode = makeNode(WithCheckOption);
+
+    COPY_STRING_FIELD(viewname);
+    COPY_NODE_FIELD(qual);
+    COPY_SCALAR_FIELD(cascaded);
+    COPY_SCALAR_FIELD(rtindex);
+
+    return newnode;
+}
+
 static SortGroupClause* _copySortGroupClause(const SortGroupClause* from)
 {
     SortGroupClause* newnode = makeNode(SortGroupClause);
@@ -4608,6 +4621,7 @@ static Query* _copyQuery(const Query* from)
     COPY_SCALAR_FIELD(can_push);
     COPY_SCALAR_FIELD(unique_check);
     COPY_NODE_FIELD(resultRelations);
+    COPY_NODE_FIELD(withCheckOptions);
 
     return newnode;
 }
@@ -5423,6 +5437,7 @@ static ViewStmt* _copyViewStmt(const ViewStmt* from)
     COPY_SCALAR_FIELD(relkind);
     COPY_STRING_FIELD(definer);
     COPY_SCALAR_FIELD(is_alter);
+    COPY_SCALAR_FIELD(withCheckOption);
 
     return newnode;
 }
@@ -8116,6 +8131,9 @@ void* copyObject(const void* from)
             break;
         case T_TimeCapsuleClause:
             retval = CopyTimeCapsuleClause((TimeCapsuleClause*)from);
+            break;
+        case T_WithCheckOption:
+            retval = _copyWithCheckOption((WithCheckOption*)from);
             break;
         case T_SortGroupClause:
             retval = _copySortGroupClause((SortGroupClause*)from);

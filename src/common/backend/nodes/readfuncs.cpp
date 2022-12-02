@@ -1536,6 +1536,10 @@ static Query* _readQuery(void)
     } else if (local_node->resultRelation != 0) {
         local_node->resultRelations = list_make1_int(local_node->resultRelation);
     }
+
+    IF_EXIST(withCheckOptions) {
+        READ_NODE_FIELD(withCheckOptions);
+    }
 	
     READ_DONE();
 }
@@ -1615,6 +1619,21 @@ static PLDebug_frame* _readPLDebug_frame(void)
     READ_INT_FIELD(lineno);
     READ_STRING_FIELD(query);
     READ_INT_FIELD(funcoid);
+
+    READ_DONE();
+}
+
+/*
+ * _readWithCheckOption
+ */
+static WithCheckOption* _readWithCheckOption(void)
+{
+    READ_LOCALS(WithCheckOption);
+
+    READ_STRING_FIELD(viewname);
+    READ_NODE_FIELD(qual);
+    READ_BOOL_FIELD(cascaded);
+    READ_UINT_FIELD(rtindex);
 
     READ_DONE();
 }
@@ -5856,6 +5875,8 @@ Node* parseNodeString(void)
 
     if (MATCH("QUERY", 5)) {
         return_value = _readQuery();
+    } else if (MATCH("WITHCHECKOPTION", 15)) {
+        return_value = _readWithCheckOption();
     } else if (MATCH("SORTGROUPCLAUSE", 15)) {
         return_value = _readSortGroupClause();
     } else if (MATCH("GROUPINGSET", 11)) {

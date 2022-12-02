@@ -3723,7 +3723,8 @@ static void subquery_push_qual(Query* subquery, RangeTblEntry* rte, Index rti, N
          */
         if (levelsup == 0)
         {
-            qual = ResolveNew(qual, rti, 0, rte, subquery->targetList, CMD_SELECT, 0, &subquery->hasSubLinks);
+            qual = ReplaceVarsFromTargetList(qual, rti, 0, rte, subquery->targetList, REPLACEVARS_REPORT_ERROR,
+                                             0, &subquery->hasSubLinks);
         }
         else
         {

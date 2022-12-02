@@ -430,6 +430,7 @@ typedef struct ModifyTable {
 
     OpMemInfo mem_info;    /*  Memory info for modify node */
     List* targetlists;     /* For multi-relation modifying */
+    List* withCheckOptionLists; /* per-target-table WCO lists */
 } ModifyTable;
 
 /* ----------------

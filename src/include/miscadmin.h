@@ -116,6 +116,7 @@ extern const uint32 ON_UPDATE_TIMESTAMP_VERSION_NUM;
 extern const uint32 STANDBY_STMTHIST_VERSION_NUM;
 extern const uint32 PG_AUTHID_PASSWORDEXT_VERSION_NUM;
 extern const uint32 MAT_VIEW_RECURSIVE_VERSION_NUM;
+extern const uint32 SUPPORT_VIEW_AUTO_UPDATABLE;
 
 extern void register_backend_version(uint32 backend_version);
 extern bool contain_backend_version(uint32 version_number);

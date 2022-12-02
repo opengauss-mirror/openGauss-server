@@ -90,12 +90,6 @@ CREATE MATERIALIZED VIEW mate_multiview2 as select * from t_t_mutil_t2;
 update t_t_mutil_t1 a,mate_multiview1 b,mate_multiview2 c set a.col1 = 4, b.col2 = 5,c.col2 =6; --error
 drop MATERIALIZED VIEW mate_multiview1;
 drop MATERIALIZED VIEW mate_multiview2;
--- view
-create view multiview1 as select * from t_t_mutil_t1;
-create view multiview2 as select * from t_t_mutil_t2;
-update t_t_mutil_t1 a,multiview1 b,multiview2 c set a.col1 = 4, b.col2 = 5,c.col2 =6; --error
-drop view multiview1;
-drop view multiview2;
 -- same relname
 begin;
 update t_t_mutil_t1 a,t_t_mutil_t1 b set a.col2=5,b.col2=4 where a.col1=b.col1;
@@ -580,5 +574,58 @@ begin;
 update s_t_mutil_t2,s_t_mutil_t1 set s_t_mutil_t1.col2 = 3, s_t_mutil_t2.col2 = 4;
 select * from t_t_mutil_t1;
 rollback;
+-- view
+create view multiview1 as select * from t_t_mutil_t1;
+create view multiview2 as select * from t_t_mutil_t2;
+create view multiview3 as select * from t_t_mutil_t3;
+update multiview1 a,multiview2 b,multiview3 c set a.col2 = 6, b.col2 = 7,c.col2 =8 where a.col1 = b.col1 and a.col1 = c.col1;
+select * from t_t_mutil_t1;
+select * from t_t_mutil_t2;
+select * from t_t_mutil_t3;
+update t_t_mutil_t1 a,multiview2 b,t_t_mutil_t3 c set a.col2 = 4, b.col2 = 5,c.col2 = 6 where a.col1 = b.col1 and a.col1 = c.col1;
+select * from t_t_mutil_t1;
+select * from t_t_mutil_t2;
+select * from t_t_mutil_t3;
+-- left join
+update multiview1 a left join multiview2 b on a.col1=b.col1 set a.col2=7,b.col2=8;
+select * from t_t_mutil_t1;
+select * from t_t_mutil_t2;
+select * from t_t_mutil_t3;
+-- with check option
+create or replace view multiview1 as select * from t_t_mutil_t1 where col2 > 3 with local check option;
+create or replace view multiview2 as select * from t_t_mutil_t2 where col2 < 10 with local check option;
+update multiview1 a,multiview2 b,multiview3 c set a.col2 = 2, b.col2 = 7,c.col2 =8 where a.col1 = b.col1 and a.col1 = c.col1; --error
+update multiview1 a,multiview2 b,multiview3 c set a.col2 = 5, b.col2 = 15,c.col2 =8 where a.col1 = b.col1 and a.col1 = c.col1; --error
+update multiview1 a,multiview2 b,multiview3 c set a.col2 = 5, b.col2 = 7,c.col2 =8 where a.col1 = b.col1 and a.col1 = c.col1;
+select * from t_t_mutil_t1;
+select * from t_t_mutil_t2;
+select * from t_t_mutil_t3;
+-- update same relation
+update t_t_mutil_t1 a,multiview2 b,t_t_mutil_t2 c,t_t_mutil_t3 d set a.col2 = 6, b.col2 = 9, c.col3 = 10, d.col2 = 6 where a.col1 = b.col1 and a.col1 = d.col1;
+select * from t_t_mutil_t1;
+select * from t_t_mutil_t2;
+select * from t_t_mutil_t3;
+-- view with rules or triggers should fail
+create rule multiview1_rule as on insert to multiview1 do instead insert into t_t_mutil_t1 values (new.col1, new.col2);
+update multiview1 a,multiview2 b,t_t_mutil_t3 c set a.col2 = 6, b.col2 = 7,c.col2 =8 where a.col1 = b.col1 and a.col1 = c.col1; --error
+drop rule multiview1_rule on multiview1;
+CREATE OR REPLACE FUNCTION trigger_func_update_multiview1() RETURNS TRIGGER AS
+$$
+DECLARE
+BEGIN
+UPDATE t_t_mutil_t1 SET col2 = NEW.col2 WHERE col1=OLD.col1;
+RETURN OLD;
+END
+$$ LANGUAGE PLPGSQL;
+CREATE TRIGGER update_multiview1_trigger
+INSTEAD OF UPDATE ON multiview1 
+FOR EACH ROW
+EXECUTE PROCEDURE trigger_func_update_multiview1();
+update multiview1 a,multiview2 b,t_t_mutil_t3 c set a.col2 = 6, b.col2 = 7,c.col2 =8 where a.col1 = b.col1 and a.col1 = c.col1; --error
+drop trigger update_multiview1_trigger on multiview1;
+drop function trigger_func_update_multiview1();
+drop view multiview1;
+drop view multiview2;
+drop view multiview3;
 \c regression
 drop database multiupdate;

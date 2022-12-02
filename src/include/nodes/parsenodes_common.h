@@ -2034,6 +2034,7 @@ typedef struct Query {
     List* resultRelations; /* rtable index list of target relation for INSERT/UPDATE/DELETE/MERGE. */
     
     RightRefState* rightRefState;
+    List* withCheckOptions; /* a list of WithCheckOption's */
 } Query;
 
 /* ----------------------
@@ -2065,6 +2066,12 @@ typedef struct TransactionStmt {
  * Create View Statement
  * ----------------------
  */
+typedef enum ViewCheckOption {
+    NO_CHECK_OPTION,
+    LOCAL_CHECK_OPTION,
+    CASCADED_CHECK_OPTION
+} ViewCheckOption;
+
 typedef struct ViewStmt {
     NodeTag type;
     RangeVar *view;      /* the view to be created */
@@ -2082,6 +2089,7 @@ typedef struct ViewStmt {
 #ifdef ENABLE_MULTIPLE_NODES
     struct PGXCSubCluster* subcluster; /* subcluster of table */
 #endif
+    ViewCheckOption	withCheckOption; /* WITH CHECK OPTION */
 } ViewStmt;
 
 /* ----------------------

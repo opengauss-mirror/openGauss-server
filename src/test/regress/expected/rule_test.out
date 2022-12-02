@@ -315,15 +315,14 @@ create rule "_RETURN" as on select to ttt1 do instead (
 	select * from ttt2;
 	);
 -- test
-insert into ttt1 values (1, 'hello'); --error
-ERROR:  cannot insert into view "ttt1"
-HINT:  You need an unconditional ON INSERT DO INSTEAD rule or an INSTEAD OF INSERT trigger.
+insert into ttt1 values (1, 'hello');
 insert into ttt2 values (10, 'world');
 select * from ttt1;
  a  |   b   
 ----+-------
+  1 | hello
  10 | world
-(1 row)
+(2 rows)
 
 drop table if exists ttt1; --error
 ERROR:  "ttt1" is not a table

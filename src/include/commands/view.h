@@ -16,6 +16,7 @@
 
 #include "nodes/parsenodes.h"
 
+extern void validateWithCheckOption(const char* value);
 extern Oid DefineView(ViewStmt* stmt, const char* queryString, bool send_remote = true, bool isFirstNode = true);
 extern bool IsViewTemp(ViewStmt* stmt, const char* queryString);
 extern void StoreViewQuery(Oid viewOid, Query *viewParse, bool replace);
