@@ -642,6 +642,8 @@ Command:     DROP TRIGGER
 Description: remove a trigger
 Syntax:
 DROP TRIGGER [ IF EXISTS ] name ON table_name [ CASCADE | RESTRICT ]
+In B compatibility also support:
+DROP TRIGGER [ IF EXISTS ] name [ CASCADE | RESTRICT ]
 
 \h alter table
 Command:     ALTER TABLE
