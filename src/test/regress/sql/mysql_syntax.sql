@@ -139,6 +139,31 @@ begin
     insert into food(id, foodtype, remark, time_flag) values (1,'ice cream', 'sdsdsdsd', now());
 end;
 /
+
+CREATE OR REPLACE FUNCTION tri_insert_func() RETURNS TRIGGER AS
+$$
+DECLARE
+BEGIN
+INSERT INTO food(id, foodtype, remark, time_flag) values (1,'ice cream', 'sdsdsdsd', now());
+RETURN NEW;
+END
+$$ LANGUAGE PLPGSQL;
+
+create trigger trigger_rename_test
+after insert on animals
+for each row
+EXECUTE PROCEDURE tri_insert_func();
+
+create trigger trigger_rename_test
+after insert on food
+for each row
+EXECUTE PROCEDURE tri_insert_func();
+
+drop trigger trigger_rename_test;
+-- drop trigger test
+drop trigger animal_trigger1;
+drop trigger animal_trigger1;
+drop trigger if exists animal_trigger1;
 drop table food;
 drop table animals;
 
@@ -263,6 +288,8 @@ END;
 /
 
 \c regression
+drop trigger animal_trigger1;
+drop trigger if exists animal_trigger1;
 drop database db_mysql;
 
 -- test declare condition in other compatibility

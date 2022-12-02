@@ -700,12 +700,19 @@ static ObjectAddress get_object_address_relobject(ObjectType objtype, List* objn
          * work.  But objects other than rules don't get this special
          * treatment.
          */
-        if (objtype != OBJECT_RULE)
-            ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NODE_STATE), errmsg("must specify relation and object name")));
-        address.classId = RewriteRelationId;
-        address.objectId = get_rewrite_oid_without_relid(depname, &reloid, missing_ok);
-        address.objectSubId = 0;
-
+         /*mysql drop trigger syntax*/
+        if (objtype == OBJECT_TRIGGER && u_sess->attr.attr_sql.sql_compatibility == B_FORMAT)
+        {
+            address.classId = TriggerRelationId;
+            address.objectId = get_trigger_oid_b(depname, &reloid, missing_ok);
+            address.objectSubId = 0;
+        } else {
+            if (objtype != OBJECT_RULE)
+                ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NODE_STATE), errmsg("must specify relation and object name")));
+            address.classId = RewriteRelationId;
+            address.objectId = get_rewrite_oid_without_relid(depname, &reloid, missing_ok);
+            address.objectSubId = 0;
+        }
         /*
          * Caller is expecting to get back the relation, even though we didn't
          * end up using it to find the rule.

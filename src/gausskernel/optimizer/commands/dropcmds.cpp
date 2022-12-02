@@ -376,10 +376,16 @@ static void does_not_exist_skipping(ObjectType objtype, List* objname, List* obj
             args = format_type_be(typenameTypeId(NULL, (TypeName*)linitial(objargs)));
             break;
         case OBJECT_TRIGGER:
-            msg = gettext_noop("trigger \"%s\" for table \"%s\" does not exist");
-            name = NameListToString(objname);
-            args = NameListToString(list_truncate(list_copy(objname), list_length(objname) - 1));
-            break;
+            if (list_length(objname) == 1) {
+                msg = gettext_noop("trigger \"%s\" does not exist");
+                name = NameListToString(objname);
+                break;
+            } else {
+                msg = gettext_noop("trigger \"%s\" for table \"%s\" does not exist");
+                name = NameListToString(objname);
+                args = NameListToString(list_truncate(list_copy(objname), list_length(objname) - 1));
+                break;
+            }
         case OBJECT_RULE:
             msg = gettext_noop("rule \"%s\" for relation \"%s\" does not exist");
             name = strVal(llast(objname));

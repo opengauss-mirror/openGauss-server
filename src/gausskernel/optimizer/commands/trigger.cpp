@@ -467,17 +467,15 @@ Oid CreateTrigger(CreateTrigStmt* stmt, const char* queryString, Oid relOid, Oid
      * relation, so the trigger set won't be changing underneath us.
      */
     if (!isInternal) {
-        ScanKeyInit(
-            &key, Anum_pg_trigger_tgrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(RelationGetRelid(rel)));
-        tgscan = systable_beginscan(tgrel, TriggerRelidNameIndexId, true, NULL, 1, &key);
-        while (HeapTupleIsValid(tuple = systable_getnext(tgscan))) {
-            Form_pg_trigger pg_trigger = (Form_pg_trigger)GETSTRUCT(tuple);
-            if (namestrcmp(&(pg_trigger->tgname), trigname) == 0) {
+        if (stmt->funcSource != NULL && u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) {
+            ScanKeyInit(
+                &key, Anum_pg_trigger_tgname, BTEqualStrategyNumber, F_NAMEEQ, CStringGetDatum(trigname));
+            tgscan = systable_beginscan(tgrel, TriggerNameIndexId, true, NULL, 1, &key);
+            if (HeapTupleIsValid(tuple = systable_getnext(tgscan))) {
                 if (stmt->if_not_exists) {
                     ereport(NOTICE,
-                        (errmsg("trigger \"%s\" for relation \"%s\" already exists,skipping",
-                            trigname,
-                            RelationGetRelationName(rel))));
+                        (errmsg("trigger \"%s\" already exists, skipping",
+                            trigname)));
                     systable_endscan(tgscan);
                     heap_close(tgrel, RowExclusiveLock);
                     heap_close(rel, NoLock);
@@ -489,15 +487,31 @@ Oid CreateTrigger(CreateTrigStmt* stmt, const char* queryString, Oid relOid, Oid
                     heap_close(rel, NoLock);
                     ereport(ERROR,
                         (errcode(ERRCODE_DUPLICATE_OBJECT),
+                        errmsg("trigger \"%s\" already exists",
+                            trigname)));
+                }
+            }
+            systable_endscan(tgscan);
+        } else {
+            ScanKeyInit(
+            &key, Anum_pg_trigger_tgrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(RelationGetRelid(rel)));
+            tgscan = systable_beginscan(tgrel, TriggerRelidNameIndexId, true, NULL, 1, &key);
+            while (HeapTupleIsValid(tuple = systable_getnext(tgscan))) {
+                Form_pg_trigger pg_trigger = (Form_pg_trigger)GETSTRUCT(tuple);
+                if (namestrcmp(&(pg_trigger->tgname), trigname) == 0) {
+                    systable_endscan(tgscan);
+                    heap_close(tgrel, RowExclusiveLock);
+                    heap_close(rel, NoLock);
+                    ereport(ERROR,
+                        (errcode(ERRCODE_DUPLICATE_OBJECT),
                         errmsg("trigger \"%s\" for relation \"%s\" already exists",
                             trigname,
                             RelationGetRelationName(rel))));
                 }
             }
+            systable_endscan(tgscan);
         }
-        systable_endscan(tgscan);
     }
-
 
     if (stmt->funcSource != NULL && u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) {
         CreateFunctionStmt* n = makeNode(CreateFunctionStmt);
@@ -1302,6 +1316,53 @@ Oid get_trigger_oid(Oid relid, const char* trigname, bool missing_ok)
     return oid;
 }
 
+Oid get_trigger_oid_b(const char* trigname, Oid* reloid, bool missing_ok)
+{
+    Relation tgrel;
+    ScanKeyData skey;
+    SysScanDesc tgscan;
+    HeapTuple tup;
+    Oid oid;
+    int count = 0;
+
+    /*
+     * Find the trigger, verify permissions, set up object address
+     */
+    tgrel = heap_open(TriggerRelationId, AccessShareLock);
+
+    ScanKeyInit(&skey, Anum_pg_trigger_tgname, BTEqualStrategyNumber, F_NAMEEQ, CStringGetDatum(trigname));
+
+    tgscan = systable_beginscan(tgrel, TriggerNameIndexId, true, NULL, 1, &skey);
+
+    while (HeapTupleIsValid(tup = systable_getnext(tgscan))) {
+        count ++;
+        if (count == 1) {
+            Form_pg_trigger pg_trigger = (Form_pg_trigger)GETSTRUCT(tup);
+            *reloid = pg_trigger->tgrelid;
+            oid = HeapTupleGetOid(tup);
+        } else if (count > 1) {
+            systable_endscan(tgscan);
+            heap_close(tgrel, AccessShareLock);
+            ereport(ERROR,
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("trigger named \"%s\" has more than one trigger, please use drop trigger on syntax", trigname)));
+        }
+    }
+    if (count == 0) {
+        if (!missing_ok) {
+            systable_endscan(tgscan);
+            heap_close(tgrel, AccessShareLock);
+            ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_OBJECT),
+                    errmsg("trigger \"%s\" does not exist", trigname)));
+        }
+        oid = InvalidOid;
+    }
+
+    systable_endscan(tgscan);
+    heap_close(tgrel, AccessShareLock);
+    return oid;
+}
 /*
  * Perform permissions and integrity checks before acquiring a relation lock.
  */

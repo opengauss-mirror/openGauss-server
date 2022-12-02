@@ -152,7 +152,7 @@ begin
     insert into food(id, foodtype, remark, time_flag) values (1,'ice cream', 'sdsdsdsd', now());
 end;
 /
-ERROR:  trigger "animal_trigger1" for relation "animals" already exists
+ERROR:  trigger "animal_trigger1" already exists
 create trigger if not exists animal_trigger1
 after insert on animals
 for each row
@@ -160,7 +160,31 @@ begin
     insert into food(id, foodtype, remark, time_flag) values (1,'ice cream', 'sdsdsdsd', now());
 end;
 /
-NOTICE:  trigger "animal_trigger1" for relation "animals" already exists,skipping
+NOTICE:  trigger "animal_trigger1" already exists, skipping
+CREATE OR REPLACE FUNCTION tri_insert_func() RETURNS TRIGGER AS
+$$
+DECLARE
+BEGIN
+INSERT INTO food(id, foodtype, remark, time_flag) values (1,'ice cream', 'sdsdsdsd', now());
+RETURN NEW;
+END
+$$ LANGUAGE PLPGSQL;
+create trigger trigger_rename_test
+after insert on animals
+for each row
+EXECUTE PROCEDURE tri_insert_func();
+create trigger trigger_rename_test
+after insert on food
+for each row
+EXECUTE PROCEDURE tri_insert_func();
+drop trigger trigger_rename_test;
+ERROR:  trigger named "trigger_rename_test" has more than one trigger, please use drop trigger on syntax
+-- drop trigger test
+drop trigger animal_trigger1;
+drop trigger animal_trigger1;
+ERROR:  trigger "animal_trigger1" does not exist
+drop trigger if exists animal_trigger1;
+NOTICE:  trigger "animal_trigger1" does not exist, skipping
 drop table food;
 drop table animals;
 DROP TABLE t_trigger cascade;
@@ -331,6 +355,10 @@ END;
 ERROR:  bad SQLSTATE '00000'
 CONTEXT:  compilation of PL/pgSQL function "test_condition_6" near line 3
 \c regression
+drop trigger animal_trigger1;
+ERROR:  drop trigger without table name only support in B-format database
+drop trigger if exists animal_trigger1;
+ERROR:  drop trigger without table name only support in B-format database
 drop database db_mysql;
 -- test declare condition in other compatibility
 create or replace procedure test_condition_1 as

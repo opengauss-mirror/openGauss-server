@@ -11203,6 +11203,52 @@ DropTrigStmt:
 					n->concurrent = false;
 					$$ = (Node *) n;
 				}
+			| DROP TRIGGER name opt_drop_behavior
+				{
+#ifdef	ENABLE_MULTIPLE_NODES
+					const char* message = "drop trigger name is not yet supported in distributed database.";
+					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);			
+					ereport(errstate,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("drop trigger name is not yet supported in distributed database.")));
+#endif
+					if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT) {
+						ereport(errstate, 
+								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								errmsg("drop trigger without table name only support in B-format database")));
+					}
+					DropStmt *n = makeNode(DropStmt);
+					n->removeType = OBJECT_TRIGGER;
+					n->objects = list_make1(list_make1(makeString($3)));
+					n->arguments = NIL;
+					n->behavior = $4;
+					n->missing_ok = false;
+					n->concurrent = false;
+					$$ = (Node *) n;
+				}
+			| DROP TRIGGER IF_P EXISTS name opt_drop_behavior
+				{
+#ifdef	ENABLE_MULTIPLE_NODES
+					const char* message = "drop trigger if exists name is not yet supported in distributed database.";
+					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);			
+					ereport(errstate,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("drop trigger if exists name is not yet supported in distributed database.")));
+#endif
+					if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT) {
+						ereport(errstate, 
+								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								errmsg("drop trigger without table name only support in B-format database")));
+					}
+					DropStmt *n = makeNode(DropStmt);
+					n->removeType = OBJECT_TRIGGER;
+					n->objects = list_make1(list_make1(makeString($5)));
+					n->arguments = NIL;
+					n->behavior = $6;
+					n->missing_ok = true;
+					n->concurrent = false;
+					$$ = (Node *) n;
+				}
 		;
 
 
