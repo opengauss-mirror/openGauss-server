@@ -31,6 +31,7 @@
  */
 
 #include "postgres_fe.h"
+#include <string>
 
 #ifdef WIN32_PG_DUMP
 #undef PGDLLIMPORT
@@ -17498,6 +17499,72 @@ static void OutputIntervalPartitionDef(Archive* fout, const PGresult* res, PQExp
     free(interTblSpcs);
 }
 
+static bool PartkeyexprIsNull(Archive* fout, TableInfo* tbinfo, bool isSubPart)
+{
+    PQExpBuffer partkeyexpr = createPQExpBuffer();
+    PGresult* partkeyexpr_res = NULL;
+    int i_partkeyexpr;
+    bool partkeyexprIsNull = true;
+    if (!isSubPart)
+        appendPQExpBuffer(partkeyexpr,
+            "select partkeyexpr from pg_partition where (parttype = 'r') and (parentid in (select oid from pg_class where relname = \'%s\' and "
+            "relnamespace = %u));",tbinfo->dobj.name, tbinfo->dobj.nmspace->dobj.catId.oid);
+    else
+        appendPQExpBuffer(partkeyexpr,
+            "select distinct partkeyexpr from pg_partition where (parttype = 'p') and (parentid in (select oid from pg_class where relname = \'%s\' and "
+            "relnamespace = %u));",tbinfo->dobj.name, tbinfo->dobj.nmspace->dobj.catId.oid);
+    partkeyexpr_res = ExecuteSqlQueryForSingleRow(fout, partkeyexpr->data);
+    i_partkeyexpr = PQfnumber(partkeyexpr_res, "partkeyexpr");
+    char* partkeyexpr_buf = PQgetvalue(partkeyexpr_res, 0, i_partkeyexpr);
+    if (partkeyexpr_buf && strcmp(partkeyexpr_buf, "") != 0)
+        partkeyexprIsNull = false;
+    PQclear(partkeyexpr_res);
+    destroyPQExpBuffer(partkeyexpr);
+    return partkeyexprIsNull;
+}
+
+static void GetPartkeyexprSrc(PQExpBuffer result, Archive* fout, TableInfo* tbinfo, bool isSubPart)
+{
+    PQExpBuffer tabledef = createPQExpBuffer();
+    PGresult* tabledef_res = NULL;
+    int i_tabledef;
+    appendPQExpBuffer(tabledef,"select pg_get_tabledef(\'%s\');",tbinfo->dobj.name);
+    tabledef_res = ExecuteSqlQueryForSingleRow(fout, tabledef->data);
+    i_tabledef = PQfnumber(tabledef_res, "pg_get_tabledef");
+    char* tabledef_buf = PQgetvalue(tabledef_res, 0, i_tabledef);
+    std::string tabledef_str(tabledef_buf);
+    size_t start;
+    if (isSubPart) {
+        start = tabledef_str.find("SUBPARTITION BY");
+        start+=16;
+    } else {
+        start = tabledef_str.find("PARTITION BY");
+        start+=13;
+    }
+    destroyPQExpBuffer(tabledef);
+    PQclear(tabledef_res);
+    if (start != std::string::npos) {
+        std::string tmp = tabledef_str.substr(start);
+        size_t pos = tmp.find("(");
+        size_t i = 0;
+        size_t j = pos+1;
+        size_t icount = 0;
+        size_t jcount = 0;
+        i = tmp.find(")");
+        while ((j = tmp.find("(", j)) != std::string::npos && j < i) {
+            j++;
+            jcount++;
+        }
+        while (i != std::string::npos && icount < jcount) {
+            i++;
+            i = tmp.find(")", i);
+            icount++;
+        }
+        std::string res = tmp.substr(pos+1,i-pos-1);
+        appendPQExpBuffer(result, "%s", res.c_str());
+    }
+}
+
 static void GenerateSubPartitionBy(PQExpBuffer result, Archive *fout, TableInfo *tbinfo)
 {
     int i;
@@ -17509,6 +17576,7 @@ static void GenerateSubPartitionBy(PQExpBuffer result, Archive *fout, TableInfo 
     PQExpBuffer subPartStrategyQ = createPQExpBuffer();
     PGresult *res = NULL;
 
+    bool partkeyexprIsNull = PartkeyexprIsNull(fout, tbinfo, true);
     /* get subpartitioned table's partstrategy */
     appendPQExpBuffer(subPartStrategyQ,
         "SELECT partstrategy "
@@ -17550,14 +17618,19 @@ static void GenerateSubPartitionBy(PQExpBuffer result, Archive *fout, TableInfo 
     }
 
     /* assign subpartitioning columns */
-    for (i = 0; i < partkeynum; i++) {
-        if (i > 0)
-            appendPQExpBuffer(result, ", ");
-        if (partkeycols[i] < 1) {
-            exit_horribly(NULL, "array index should not be smaller than zero: %d\n", partkeycols[i] - 1);
+    if (partkeyexprIsNull) {
+        for (i = 0; i < partkeynum; i++) {
+            if (i > 0)
+                appendPQExpBuffer(result, ", ");
+            if (partkeycols[i] < 1) {
+                exit_horribly(NULL, "array index should not be smaller than zero: %d\n", partkeycols[i] - 1);
+            }
+            appendPQExpBuffer(result, "%s", fmtId(tbinfo->attnames[partkeycols[i] - 1]));
         }
-        appendPQExpBuffer(result, "%s", fmtId(tbinfo->attnames[partkeycols[i] - 1]));
+    } else {
+        GetPartkeyexprSrc(result, fout, tbinfo, true);
     }
+
     appendPQExpBuffer(result, ")\n");
 
     PQclear(res);
@@ -17738,6 +17811,7 @@ static PQExpBuffer createTablePartition(Archive* fout, TableInfo* tbinfo)
     int i;
     int j;
 
+    bool partkeyexprIsNull = PartkeyexprIsNull(fout, tbinfo, false);
     /* get partitioned table info */
     appendPQExpBuffer(defq,
         "SELECT partstrategy, interval[1], "
@@ -17804,13 +17878,17 @@ static PQExpBuffer createTablePartition(Archive* fout, TableInfo* tbinfo)
     }
 
     /* assign partitioning columns */
-    for (i = 0; i < partkeynum; i++) {
-        if (i > 0)
-            appendPQExpBuffer(result, ", ");
-        if (partkeycols[i] < 1) {
-            exit_horribly(NULL, "array index should not be smaller than zero: %d\n", partkeycols[i] - 1);
+    if (partkeyexprIsNull) {
+        for (i = 0; i < partkeynum; i++) {
+            if (i > 0)
+                appendPQExpBuffer(result, ", ");
+            if (partkeycols[i] < 1) {
+                exit_horribly(NULL, "array index should not be smaller than zero: %d\n", partkeycols[i] - 1);
+            }
+            appendPQExpBuffer(result, "%s", fmtId(tbinfo->attnames[partkeycols[i] - 1]));
         }
-        appendPQExpBuffer(result, "%s", fmtId(tbinfo->attnames[partkeycols[i] - 1]));
+    } else {
+        GetPartkeyexprSrc(result, fout, tbinfo, false);
     }
 
     if (tbinfo->parttype == PARTTYPE_SUBPARTITIONED_RELATION) {

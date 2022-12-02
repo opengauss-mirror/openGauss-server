@@ -266,6 +266,7 @@ static bool CheckWhetherInColList(char *colname, List *col_list);
 static int GetFillerColIndex(char *filler_col_name, List *col_list);
 static void RemoveFillerCol(List *filler_list, List *col_list);
 static int errstate;
+static void CheckPartitionExpr(Node* expr, int* colCount);
 
 static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStmt*n);
 %}
@@ -6364,9 +6365,14 @@ column_item_list:
 		;
 
 column_item:
-		ColId
+		a_expr
 			{
-				$$ = makeColumnRef($1, NIL, @1, yyscanner);
+				//$$ = makeColumnRef($1, NIL, @1, yyscanner);
+				$$ = $1;
+				int colCount = 0;
+				CheckPartitionExpr($$, &colCount);
+				if (colCount == 0)
+					ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("No Column in the part expr")));
 			}
 		;
 
@@ -29062,6 +29068,45 @@ static void checkDeleteRelationError()
 		ereport(errstate, 
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 					errmsg("multi-relation delete only support in B-format database")));
+}
+
+#ifndef MAX_SUPPORTED_FUNC_FOR_PART_EXPR
+#define MAX_SUPPORTED_FUNC_FOR_PART_EXPR 23
+#endif
+static void CheckPartitionExpr(Node* expr, int* colCount)
+{
+	if (expr == NULL)
+		ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("The expr can't be NULL")));
+	if (expr->type == T_A_Expr) {
+		char* name = strVal(linitial(((A_Expr*)expr)->name));
+		if (strcmp(name, "+") != 0 && strcmp(name, "-") != 0 && strcmp(name, "*") != 0)
+			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("The %s operator is not supported for Partition Expr", name)));
+		CheckPartitionExpr(((A_Expr*)expr)->lexpr, colCount);
+		CheckPartitionExpr(((A_Expr*)expr)->rexpr, colCount);
+	} else if (expr->type == T_FuncCall) {
+		char* validFuncName[MAX_SUPPORTED_FUNC_FOR_PART_EXPR] = {"abs","ceiling","datediff","day","dayofmonth","dayofweek","dayofyear","extract","floor","hour",
+		"microsecond","minute","mod","month","quarter","second","time_to_sec","to_days","to_seconds","unix_timestamp","weekday","year","yearweek"};
+		char* funcname = strVal(linitial(((FuncCall*)expr)->funcname));
+		int count = 0;
+		for (;count < MAX_SUPPORTED_FUNC_FOR_PART_EXPR;count++) {
+			if (strcmp(funcname, validFuncName[count]) == 0)
+				break;
+			else
+				continue;
+		}
+		if (count == MAX_SUPPORTED_FUNC_FOR_PART_EXPR)
+			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("The %s func is not supported for Partition Expr", funcname)));
+		ListCell* cell = NULL;
+		foreach (cell, ((FuncCall*)expr)->args) {
+			CheckPartitionExpr((Node*)(lfirst(cell)),colCount);
+		}
+	} else if (expr->type == T_ColumnRef) {
+		(*colCount)++;
+	} else if (expr->type == T_A_Const) {
+		return;
+	} else {
+		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("The Partition Expr can't be %d type", expr->type)));
+	}
 }
 
 /*

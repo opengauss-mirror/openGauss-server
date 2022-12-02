@@ -165,8 +165,14 @@ typedef struct HashPartitionMap {
             column_raw = (is_ustore)                                                                                  \
                              ? UHeapFastGetAttr((UHeapTuple)(tuple), partkey_column->values[i], tuple_desc, &isnull)  \
                              : fastgetattr((HeapTuple)(tuple), partkey_column->values[i], tuple_desc, &isnull);       \
-            values[i] =                                                                                               \
-                transformDatum2Const((rel)->rd_att, partkey_column->values[i], column_raw, isnull, &consts[i]);       \
+            bool isNull = PartExprKeyIsNull(rel, NULL);                                                               \
+            if (isNull) {                                                                                             \
+                values[i] =                                                                                           \
+                    transformDatum2Const((rel)->rd_att, partkey_column->values[i], column_raw, isnull, &consts[i]);   \
+            } else {                                                                                                  \
+                values[i] =                                                                                           \
+                    transformDatum2ConstForPartKeyExpr((rel)->partMap, column_raw, isnull, &consts[i]);               \
+            }                                                                                                         \
         }                                                                                                             \
         if (PartitionMapIsInterval((rel)->partMap) && values[0]->constisnull) {                                       \
             if (canIgnore) {                                                                                          \
