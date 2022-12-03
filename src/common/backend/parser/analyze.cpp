@@ -3967,7 +3967,7 @@ static Query* transformUpdateStmt(ParseState* pstate, UpdateStmt* stmt)
     }
 
     /* non-supported IGNORE cases */
-    Relation rel = ((Relation)linitial(pstate->p_target_relation));
+    Relation rel = ((Relation)linitial2(pstate->p_target_relation));
     if (pstate->p_has_ignore && rel != NULL) {
         if (RelationIsColumnFormat(rel)) {
             ereport(ERROR, ((errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
