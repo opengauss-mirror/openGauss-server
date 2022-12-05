@@ -261,7 +261,7 @@ public:
         m_refCount = m_refCount & (~S_COUNTER_LOCK_BIT);
 #else
 
-        uint64_t v = GetRefCount();
+        uint32_t v = GetRefCount();
         while (!__sync_bool_compare_and_swap(&m_refCount, v, (v & ~S_COUNTER_LOCK_BIT))) {
             PAUSE
             v = GetRefCount();

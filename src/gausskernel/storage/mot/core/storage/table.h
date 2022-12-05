@@ -592,7 +592,7 @@ public:
      * @brief Retrieves the number of fields (columns) in each row in the table.
      * @return Number of fields in a row.
      */
-    inline uint64_t GetFieldCount() const
+    inline uint32_t GetFieldCount() const
     {
         return m_fieldCnt;
     }

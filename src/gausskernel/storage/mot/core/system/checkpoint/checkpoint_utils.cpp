@@ -54,26 +54,6 @@ bool IsDirExists(const std::string& dirName)
     return true;
 }
 
-bool OpenFileWrite(const std::string& fileName, FILE*& pFile)
-{
-    pFile = fopen(fileName.c_str(), "wb");
-    if (pFile == nullptr) {
-        MOT_REPORT_SYSTEM_ERROR(fopen, "N/A", "Failed to open file %s for writing", fileName.c_str());
-        return false;
-    }
-    return true;
-}
-
-bool OpenFileRead(const std::string& fileName, FILE*& pFile)
-{
-    pFile = fopen(fileName.c_str(), "rb");
-    if (pFile == nullptr) {
-        MOT_REPORT_SYSTEM_ERROR(fopen, "N/A", "Failed to open file %s for reading", fileName.c_str());
-        return false;
-    }
-    return true;
-}
-
 bool OpenFileWrite(const std::string& fileName, int& fd)
 {
     fd = open(fileName.c_str(), O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR); /* 0600 */
@@ -132,9 +112,9 @@ int FlushFile(int fd)
     return rc;
 }
 
-bool SeekFile(int fd, uint64_t offset)
+bool SeekFile(int fd, off64_t offset)
 {
-    int rc = lseek(fd, offset, SEEK_SET);
+    int rc = lseek64(fd, offset, SEEK_SET);
     if (rc == -1) {
         MOT_REPORT_SYSTEM_ERROR(write, "N/A", "Failed to seek file descriptor %d to offset %" PRIu64, fd);
     }

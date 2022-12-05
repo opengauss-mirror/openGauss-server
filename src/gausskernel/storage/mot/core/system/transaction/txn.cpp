@@ -2008,11 +2008,11 @@ RC TxnIxColUpdate::InitAndBuildOldKeys(Row* row)
 
     for (uint64_t i = 0; i < m_cols; i++) {
         if (BITMAP_GET(m_modBitmap, i)) {
-            if (m_tab->GetField((uint16_t)(i + 1))->IsUsedByIndex()) {
+            if (m_tab->GetField((i + 1))->IsUsedByIndex()) {
                 for (uint16_t j = 0; j < m_arrLen; j++) {
                     if (m_ix[j] == nullptr) {
                         MOT::Index* ix = m_tab->GetIndex(j);
-                        if (ix->IsFieldPresent((uint16_t)(i + 1))) {
+                        if (ix->IsFieldPresent(static_cast<int16_t>(i + 1))) {
                             m_ix[j] = ix;
                         }
                     }

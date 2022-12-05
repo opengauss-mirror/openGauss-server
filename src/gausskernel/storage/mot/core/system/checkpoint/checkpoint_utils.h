@@ -80,22 +80,6 @@ bool IsDirExists(const std::string& dirName);
 /**
  * @brief A wrapper function that opens a file for writing.
  * @param fileName The file name to open
- * @param pFile The returned FILE* pointer
- * @return Boolean value denoting success or failure.
- */
-bool OpenFileWrite(const std::string& fileName, FILE*& pFile);
-
-/**
- * @brief A wrapper function that opens a file for reading.
- * @param fileName The file name to open
- * @param pFile The returned FILE* pointer
- * @return Boolean value denoting success or failure.
- */
-bool OpenFileRead(const std::string& fileName, FILE*& pFile);
-
-/**
- * @brief A wrapper function that opens a file for writing.
- * @param fileName The file name to open
  * @param fd The returned file descriptor
  * @return Boolean value denoting success or failure.
  */
@@ -147,7 +131,7 @@ int FlushFile(int fd);
  * @param offset The offset in the file to seek to.
  * @return Boolean value denoting success or failure.
  */
-bool SeekFile(int fd, uint64_t offset);
+bool SeekFile(int fd, off64_t offset);
 
 /**
  * @brief Frees a row's stable version row.

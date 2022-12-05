@@ -940,7 +940,7 @@ MOT::RC MOTAdaptor::CreateIndex(IndexStmt* stmt, ::TransactionId tid)
         stmt->idxname,
         stmt->indexOid,
         stmt->relation->relname);
-    uint64_t keyLength = 0;
+    uint32_t keyLength = 0;
     MOT::Index* index = nullptr;
     MOT::IndexOrder index_order = MOT::IndexOrder::INDEX_ORDER_SECONDARY;
 
@@ -964,7 +964,7 @@ MOT::RC MOTAdaptor::CreateIndex(IndexStmt* stmt, ::TransactionId tid)
         return MOT::RC_ABORT;
     }
     index->SetExtId(stmt->indexOid);
-    if (!index->SetNumTableFields((uint32_t)table->GetFieldCount())) {
+    if (!index->SetNumTableFields(table->GetFieldCount())) {
         table->GetOrigTable()->Unlock();
         delete index;
         report_pg_error(MOT::RC_ABORT);
