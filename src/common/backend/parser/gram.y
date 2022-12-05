@@ -266,6 +266,7 @@ static bool CheckWhetherInColList(char *colname, List *col_list);
 static int GetFillerColIndex(char *filler_col_name, List *col_list);
 static void RemoveFillerCol(List *filler_list, List *col_list);
 static int errstate;
+static void CheckPartitionExpr(Node* expr, int* colCount);
 
 static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStmt*n);
 %}
@@ -661,7 +662,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 %type <boolean> OptRelative
 %type <boolean> OptGPI
 %type <str>		OptTableSpace OptConsTableSpace OptTableSpaceOwner LoggingStr size_clause OptMaxSize OptDatafileSize OptReuse OptAuto OptNextStr OptDatanodeName
-%type <list>	opt_check_option
+%type <ival>	opt_check_option
 
 %type <str>		opt_provider security_label
 
@@ -6364,9 +6365,14 @@ column_item_list:
 		;
 
 column_item:
-		ColId
+		a_expr
 			{
-				$$ = makeColumnRef($1, NIL, @1, yyscanner);
+				//$$ = makeColumnRef($1, NIL, @1, yyscanner);
+				$$ = $1;
+				int colCount = 0;
+				CheckPartitionExpr($$, &colCount);
+				if (colCount == 0)
+					ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("No Column in the part expr")));
 			}
 		;
 
@@ -10879,9 +10885,9 @@ CreateTrigStmt:
 					{
 						parser_yyerror("syntax error found");
 					}
-					if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT && $3 != NULL)
+					if ($3 != NULL)
 					{
-						parser_yyerror("only support definer in mysql compatibility database");
+						parser_yyerror("only support definer in B compatibility database and B syntax");
 					}
 					CreateTrigStmt *n = makeNode(CreateTrigStmt);
 					n->definer = $3;
@@ -10943,7 +10949,7 @@ CreateTrigStmt:
 				{
 					if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT || $2 != false)
 					{
-						parser_yyerror("only support definer, trigger_order, subprogram_body in mysql compatibility database");
+						parser_yyerror("only support definer, trigger_order, subprogram_body in B compatibility database");
 					}
 					CreateTrigStmt *n = makeNode(CreateTrigStmt);
 					if ($2 != false)
@@ -10981,7 +10987,7 @@ CreateTrigStmt:
 				{
 					if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT)
 					{
-						parser_yyerror("only support definer, if not exists, trigger_order, subprogram_body in mysql compatibility database");
+						parser_yyerror("only support definer, if not exists, trigger_order, subprogram_body in B compatibility database");
 					}
 					CreateTrigStmt *n = makeNode(CreateTrigStmt);
 					if ($2 != false)
@@ -11193,6 +11199,52 @@ DropTrigStmt:
 					n->objects = list_make1(lappend($7, makeString($5)));
 					n->arguments = NIL;
 					n->behavior = $8;
+					n->missing_ok = true;
+					n->concurrent = false;
+					$$ = (Node *) n;
+				}
+			| DROP TRIGGER name opt_drop_behavior
+				{
+#ifdef	ENABLE_MULTIPLE_NODES
+					const char* message = "drop trigger name is not yet supported in distributed database.";
+					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);			
+					ereport(errstate,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("drop trigger name is not yet supported in distributed database.")));
+#endif
+					if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT) {
+						ereport(errstate, 
+								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								errmsg("drop trigger without table name only support in B-format database")));
+					}
+					DropStmt *n = makeNode(DropStmt);
+					n->removeType = OBJECT_TRIGGER;
+					n->objects = list_make1(list_make1(makeString($3)));
+					n->arguments = NIL;
+					n->behavior = $4;
+					n->missing_ok = false;
+					n->concurrent = false;
+					$$ = (Node *) n;
+				}
+			| DROP TRIGGER IF_P EXISTS name opt_drop_behavior
+				{
+#ifdef	ENABLE_MULTIPLE_NODES
+					const char* message = "drop trigger if exists name is not yet supported in distributed database.";
+					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);			
+					ereport(errstate,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("drop trigger if exists name is not yet supported in distributed database.")));
+#endif
+					if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT) {
+						ereport(errstate, 
+								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								errmsg("drop trigger without table name only support in B-format database")));
+					}
+					DropStmt *n = makeNode(DropStmt);
+					n->removeType = OBJECT_TRIGGER;
+					n->objects = list_make1(list_make1(makeString($5)));
+					n->arguments = NIL;
+					n->behavior = $6;
 					n->missing_ok = true;
 					n->concurrent = false;
 					$$ = (Node *) n;
@@ -15510,6 +15562,7 @@ RenameStmt: ALTER AGGREGATE func_name aggr_args RENAME TO name
 					n->replace = true;
 					n->sql_statement = NULL;
 					n->is_alter = true;
+					n->withCheckOption = (ViewCheckOption)$7;
 					$$ = (Node *) n;
 				}
 			| ALTER definer_expression VIEW qualified_name opt_column_list AS SelectStmt opt_check_option
@@ -15530,6 +15583,7 @@ RenameStmt: ALTER AGGREGATE func_name aggr_args RENAME TO name
 					n->replace = true;
 					n->sql_statement = NULL;
 					n->is_alter = true;
+					n->withCheckOption = (ViewCheckOption)$8;
 					$$ = (Node *) n;
 				}
 			| ALTER MATERIALIZED VIEW qualified_name RENAME TO name
@@ -16989,7 +17043,8 @@ ViewStmt: CREATE OptTemp VIEW qualified_name opt_column_list opt_reloptions
 					n->query = $8;
 					n->replace = false;
 					n->options = $6;
-                                                                                n->sql_statement = NULL;
+					n->sql_statement = NULL;
+					n->withCheckOption = (ViewCheckOption)$9;
 					$$ = (Node *) n;
 				}
 		| CREATE OR REPLACE OptTemp VIEW qualified_name opt_column_list opt_reloptions
@@ -17002,7 +17057,8 @@ ViewStmt: CREATE OptTemp VIEW qualified_name opt_column_list opt_reloptions
 					n->query = $10;
 					n->replace = true;
 					n->options = $8;
-                                                                                n->sql_statement = NULL;
+					n->sql_statement = NULL;
+					n->withCheckOption = (ViewCheckOption)$11;
 					$$ = (Node *) n;
 				}
 		| CREATE opt_or_replace definer_expression OptTemp VIEW qualified_name opt_column_list opt_reloptions
@@ -17017,36 +17073,16 @@ ViewStmt: CREATE OptTemp VIEW qualified_name opt_column_list opt_reloptions
 					n->replace = $2;
 					n->options = $8;
 					n->sql_statement = NULL;
+					n->withCheckOption = (ViewCheckOption)$11;
 					$$ = (Node *) n;
 				}
 		;
 
 opt_check_option:
-		WITH CHECK OPTION
-				{
-					const char* message = "WITH CHECK OPTION is not implemented";
-    				InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
-					ereport(errstate,
-							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-							 errmsg("WITH CHECK OPTION is not implemented")));
-				}
-		| WITH CASCADED CHECK OPTION
-				{
-					const char* message = "WITH CHECK OPTION is not implemented";
-    				InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
-					ereport(errstate,
-							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-							 errmsg("WITH CHECK OPTION is not implemented")));
-				}
-		| WITH LOCAL CHECK OPTION
-				{
-					const char* message = "WITH CHECK OPTION is not implemented";
-    				InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
-					ereport(errstate,
-							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-							 errmsg("WITH CHECK OPTION is not implemented")));
-				}
-		| /* EMPTY */							{ $$ = NIL; }
+		WITH CHECK OPTION				{ $$ = CASCADED_CHECK_OPTION; }
+		| WITH CASCADED CHECK OPTION	{ $$ = CASCADED_CHECK_OPTION; }
+		| WITH LOCAL CHECK OPTION		{ $$ = LOCAL_CHECK_OPTION; }
+		| /* EMPTY */					{ $$ = NO_CHECK_OPTION; }
 		;
 
 /*****************************************************************************
@@ -29062,6 +29098,45 @@ static void checkDeleteRelationError()
 		ereport(errstate, 
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 					errmsg("multi-relation delete only support in B-format database")));
+}
+
+#ifndef MAX_SUPPORTED_FUNC_FOR_PART_EXPR
+#define MAX_SUPPORTED_FUNC_FOR_PART_EXPR 23
+#endif
+static void CheckPartitionExpr(Node* expr, int* colCount)
+{
+	if (expr == NULL)
+		ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmsg("The expr can't be NULL")));
+	if (expr->type == T_A_Expr) {
+		char* name = strVal(linitial(((A_Expr*)expr)->name));
+		if (strcmp(name, "+") != 0 && strcmp(name, "-") != 0 && strcmp(name, "*") != 0)
+			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("The %s operator is not supported for Partition Expr", name)));
+		CheckPartitionExpr(((A_Expr*)expr)->lexpr, colCount);
+		CheckPartitionExpr(((A_Expr*)expr)->rexpr, colCount);
+	} else if (expr->type == T_FuncCall) {
+		char* validFuncName[MAX_SUPPORTED_FUNC_FOR_PART_EXPR] = {"abs","ceiling","datediff","day","dayofmonth","dayofweek","dayofyear","extract","floor","hour",
+		"microsecond","minute","mod","month","quarter","second","time_to_sec","to_days","to_seconds","unix_timestamp","weekday","year","yearweek"};
+		char* funcname = strVal(linitial(((FuncCall*)expr)->funcname));
+		int count = 0;
+		for (;count < MAX_SUPPORTED_FUNC_FOR_PART_EXPR;count++) {
+			if (strcmp(funcname, validFuncName[count]) == 0)
+				break;
+			else
+				continue;
+		}
+		if (count == MAX_SUPPORTED_FUNC_FOR_PART_EXPR)
+			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("The %s func is not supported for Partition Expr", funcname)));
+		ListCell* cell = NULL;
+		foreach (cell, ((FuncCall*)expr)->args) {
+			CheckPartitionExpr((Node*)(lfirst(cell)),colCount);
+		}
+	} else if (expr->type == T_ColumnRef) {
+		(*colCount)++;
+	} else if (expr->type == T_A_Const) {
+		return;
+	} else {
+		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("The Partition Expr can't be %d type", expr->type)));
+	}
 }
 
 /*

@@ -1,1 +1,2 @@
 select provariadic,oid, proname from pg_proc where arraycontains(proargmodes::char[],ARRAY['v'::char]) order by oid;
+select prokind,length(prokind),count(*) from pg_proc where oid < 16384 group by prokind;

@@ -1621,7 +1621,7 @@ static Node* plpgsql_post_column_ref(ParseState* pstate, ColumnRef* cref, Node* 
      */
     Node* myvar = resolve_column_ref(pstate, expr, cref, (var == NULL));
 
-    if (myvar != NULL && var != NULL) {
+    if (myvar != NULL && var != NULL && !IS_SUPPORT_RIGHT_REF(pstate->rightRefState)) {
         /*
          * We could leave it to the core parser to throw this error, but we
          * can add a more useful detail message than the core could.
@@ -3429,6 +3429,7 @@ PLpgSQL_variable* plpgsql_build_variable(const char* refname, int lineno, PLpgSQ
             var->lineno = lineno;
             var->datatype = dtype;
             var->pkg = NULL;
+            var->customCondition = 0;
             /* other fields might be filled by caller */
 
             /* preset to NULL */
@@ -4258,15 +4259,30 @@ PLpgSQL_condition* plpgsql_parse_err_condition(char* condname)
     }
 
     if (prev == NULL) {
-        char message[MAXSTRLEN]; 
-        errno_t rc = 0;
-        rc = sprintf_s(message, MAXSTRLEN, "unrecognized exception condition \"%s\"", condname);
-        securec_check_ss(rc, "", "");
-        InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
-        ereport(ERROR,
-            (errmodule(MOD_PLSQL),
-                errcode(ERRCODE_UNDEFINED_OBJECT),
-                errmsg("unrecognized exception condition \"%s\"", condname)));
+        PLpgSQL_nsitem* ns = plpgsql_ns_lookup(plpgsql_ns_top(), false, condname, NULL, NULL, NULL);
+        if (ns != NULL) {
+            PLpgSQL_var* var = NULL;
+
+            var = (PLpgSQL_var*)(u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[ns->itemno]);
+            if (var->customCondition != 0) {
+                newm = (PLpgSQL_condition*)palloc(sizeof(PLpgSQL_condition));
+                newm->sqlerrstate = var->customCondition;
+                newm->condname = condname;
+                newm->next = prev;
+                prev = newm;
+            }
+        }
+        if (prev == NULL) {
+            char message[MAXSTRLEN]; 
+            errno_t rc = 0;
+            rc = sprintf_s(message, MAXSTRLEN, "unrecognized exception condition \"%s\"", condname);
+            securec_check_ss(rc, "", "");
+            InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+            ereport(ERROR,
+                (errmodule(MOD_PLSQL),
+                    errcode(ERRCODE_UNDEFINED_OBJECT),
+                    errmsg("unrecognized exception condition \"%s\"", condname)));
+        }
     }
     return prev;
 }

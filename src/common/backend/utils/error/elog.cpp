@@ -5369,14 +5369,13 @@ void gramShowWarningsErrors(int offset, int count, DestReceiver *dest, bool isSh
         Assert(lc != NULL);
         DolphinErrorData *eData = (DolphinErrorData *)lfirst(lc);
         values[1] = Int32GetDatum(eData->errorcode);
-        if (eData->message) {
-            values[2] = CStringGetTextDatum(eData->message);
-        } else {
-            values[2] = CStringGetTextDatum("");
-        }
+
         if (isShowErrors) {
             if (eData->elevel == enum_dolphin_error_level::B_ERROR) {
                 values[0] = CStringGetTextDatum("Error");
+            } else {
+                currIdx++;
+                continue;
             }
         } else {
             switch (eData->elevel) {
@@ -5391,6 +5390,12 @@ void gramShowWarningsErrors(int offset, int count, DestReceiver *dest, bool isSh
                     values[0] = CStringGetTextDatum("Error");
                     break;
             }
+        }
+
+        if (eData->message) {
+            values[2] = CStringGetTextDatum(eData->message);
+        } else {
+            values[2] = CStringGetTextDatum("");
         }
         limit--;
         currIdx++;

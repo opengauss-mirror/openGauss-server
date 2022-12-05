@@ -106,8 +106,6 @@
 
 #define SS_ACQUIRE_LOCK_DO_NOT_WAIT 0
 #define SS_ACQUIRE_LOCK_RETRY_INTERVAL (50)   // 50ms
-#define MILLISEC2SEC (1000)
-#define MICROSEC2MILLISEC (1000)
 
 typedef enum SSBroadcastOp {
     BCAST_GET_XMIN = 0,

@@ -10,6 +10,10 @@
 
 #include "postgres_fe.h"
 
+#define JudgeQuteType(value) ((value == '\'' || value == '\"' || value == '`'))
+#define JudgeAlphType(value) ((value >= 'a' && value <='z') || (value >= 'A' && value <= 'Z'))
+#define JudgeSpecialType(value) (!JudgeQuteType(value) && !JudgeAlphType(value))
+
 int MainLoop(FILE* source, char* querystring = NULL);
 
 #endif /* MAINLOOP_H */

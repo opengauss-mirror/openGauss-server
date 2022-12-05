@@ -201,6 +201,9 @@ RelOptInfo* build_simple_rel(PlannerInfo* root, int relid, RelOptKind reloptkind
     rel->subplan = NULL;
     rel->subroot = NULL;
     rel->subplan_params = NIL;
+    rel->serverid = InvalidOid;
+    rel->userid = rte->checkAsUser;
+    rel->useridiscurrent = false;
     rel->fdwroutine = NULL;
     rel->fdw_private = NULL;
     rel->baserestrictinfo = NIL;
@@ -455,6 +458,45 @@ RelOptInfo* find_join_rel(PlannerInfo* root, Relids relids)
     return NULL;
 }
 
+/*
+ * set_foreign_rel_properties
+ * 		Set up foreign-join fields if outer and inner relation are foreign
+ * 		tables (or joins) belonging to the same server and assigned to the same
+ * 		user to check access permissions as.
+ *
+ * In addition to an exact match of userid, we allow the case where one side
+ * has zero userid (implying current user) and the other side has explicit
+ * userid that happens to equal the current user; but in that case, pushdown of
+ * the join is only valid for the current user.  The useridiscurrent field
+ * records whether we had to make such an assumption for this join or any
+ * sub-join.
+ *
+ * Otherwise these fields are left invalid, so GetForeignJoinPaths will not be
+ * called for the join relation.
+ *
+ */
+static void set_foreign_rel_properties(RelOptInfo *joinrel, RelOptInfo *outer_rel, RelOptInfo *inner_rel)
+{
+    if (OidIsValid(outer_rel->serverid) && inner_rel->serverid == outer_rel->serverid) {
+        if (inner_rel->userid == outer_rel->userid) {
+            joinrel->serverid = outer_rel->serverid;
+            joinrel->userid = outer_rel->userid;
+            joinrel->useridiscurrent = outer_rel->useridiscurrent || inner_rel->useridiscurrent;
+            joinrel->fdwroutine = outer_rel->fdwroutine;
+        } else if (!OidIsValid(inner_rel->userid) && outer_rel->userid == GetUserId()) {
+            joinrel->serverid = outer_rel->serverid;
+            joinrel->userid = outer_rel->userid;
+            joinrel->useridiscurrent = true;
+            joinrel->fdwroutine = outer_rel->fdwroutine;
+        } else if (!OidIsValid(outer_rel->userid) && inner_rel->userid == GetUserId()) {
+            joinrel->serverid = outer_rel->serverid;
+            joinrel->userid = inner_rel->userid;
+            joinrel->useridiscurrent = true;
+            joinrel->fdwroutine = outer_rel->fdwroutine;
+        }
+    }
+}
+
 void remove_join_rel(PlannerInfo *root, RelOptInfo *rel)
 {
     root->join_rel_level[root->join_cur_level] =
@@ -631,10 +673,14 @@ RelOptInfo* build_join_rel(PlannerInfo* root, Relids joinrelids, RelOptInfo* out
     joinrel->joininfo = NIL;
     joinrel->has_eclass_joins = false;
     joinrel->varratio = NIL;
-    if (IsLocatorReplicated(inner_rel->locator_type) && IsLocatorReplicated(outer_rel->locator_type))
+    if (IsLocatorReplicated(inner_rel->locator_type) && IsLocatorReplicated(outer_rel->locator_type)) {
         joinrel->locator_type = LOCATOR_TYPE_REPLICATED;
-    else
+    } else {
         joinrel->locator_type = LOCATOR_TYPE_NONE;
+    }
+
+    /* Compute information relevant to the foreign relations. */
+    set_foreign_rel_properties(joinrel, outer_rel, inner_rel);
 
     /*
      * Create a new tlist containing just the vars that need to be output from

@@ -584,6 +584,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  shared_buffers                                   | integer | 8kB  | 16        | 1073741823
  shared_preload_libraries                         | string  |      |           | 
  show_acce_estimate_detail                        | bool    |      |           | 
+ show_fdw_remote_plan                             | bool    |      |           | 
  skew_option                                      | enum    |      |           | 
  sql_beta_feature                                 | enum    |      |           | 
  sql_compatibility                                | enum    |      |           | 

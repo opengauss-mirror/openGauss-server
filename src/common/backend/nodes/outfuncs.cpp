@@ -811,6 +811,9 @@ static void _outModifyTable(StringInfo str, ModifyTable* node)
         WRITE_NODE_FIELD(targetlists);
     }
 #endif		
+    if (t_thrd.proc->workingVersionNum >= SUPPORT_VIEW_AUTO_UPDATABLE) {
+        WRITE_NODE_FIELD(withCheckOptionLists);
+    }
 }
 
 static void _outUpsertClause(StringInfo str, const UpsertClause* node)
@@ -1479,6 +1482,15 @@ static void _outCommonForeignScanPart(StringInfo str, T* node)
         WRITE_NODE_FIELD(bloomFilterSet[i]);
     }
     WRITE_BOOL_FIELD(in_compute_pool);
+
+    if (t_thrd.proc->workingVersionNum >= FDW_SUPPORT_JOIN_AGG_VERSION_NUM) {
+        WRITE_ENUM_FIELD(operation, CmdType);
+        WRITE_UINT_FIELD(resultRelation);
+        WRITE_OID_FIELD(fs_server);
+        WRITE_BITMAPSET_FIELD(fs_relids);
+        WRITE_NODE_FIELD(fdw_scan_tlist);
+        WRITE_NODE_FIELD(fdw_recheck_quals);
+    }
 }
 static void _outForeignScan(StringInfo str, ForeignScan* node)
 {
@@ -3286,6 +3298,9 @@ static void _outRelOptInfo(StringInfo str, RelOptInfo* node)
     WRITE_INT_FIELD(partItrs);
     WRITE_NODE_FIELD(subplan);
     WRITE_NODE_FIELD(subroot);
+    WRITE_OID_FIELD(serverid);
+    WRITE_OID_FIELD(userid);
+    WRITE_BOOL_FIELD(useridiscurrent);
     /* we don't try to print fdwroutine or fdw_private */
     WRITE_NODE_FIELD(baserestrictinfo);
     WRITE_UINT_FIELD(baserestrict_min_security);
@@ -4474,6 +4489,19 @@ static void _outQuery(StringInfo str, Query* node)
     if (t_thrd.proc->workingVersionNum >= MULTI_MODIFY_VERSION_NUM) {
         WRITE_NODE_FIELD(resultRelations);
     }
+    if (t_thrd.proc->workingVersionNum >= SUPPORT_VIEW_AUTO_UPDATABLE) {
+        WRITE_NODE_FIELD(withCheckOptions);
+    }
+}
+
+static void _outWithCheckOption(StringInfo str, const WithCheckOption* node)
+{
+    WRITE_NODE_TYPE("WITHCHECKOPTION");
+
+    WRITE_STRING_FIELD(viewname);
+    WRITE_NODE_FIELD(qual);
+    WRITE_BOOL_FIELD(cascaded);
+    WRITE_UINT_FIELD(rtindex);
 }
 
 static void _outSortGroupClause(StringInfo str, SortGroupClause* node)
@@ -6276,6 +6304,9 @@ static void _outNode(StringInfo str, const void* obj)
                 break;
             case T_Query:
                 _outQuery(str, (Query*)obj);
+                break;
+            case T_WithCheckOption:
+                _outWithCheckOption(str, (WithCheckOption*)obj);
                 break;
             case T_SortGroupClause:
                 _outSortGroupClause(str, (SortGroupClause*)obj);

@@ -242,7 +242,7 @@ char* pretty_format_node_dump(const char* dump)
  */
 void format_debug_print_plan(char *force_line, int index, int length)
 {
-    if (u_sess->attr.attr_sql.Debug_print_plan) {
+    if (u_sess->attr.attr_sql.Debug_print_plan && u_sess->attr.attr_common.log_min_messages <= LOG) {
         char *result = NULL;
         char *encrypt = NULL;
         char *decrypt = NULL;

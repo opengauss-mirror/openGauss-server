@@ -1015,6 +1015,7 @@ static Oid ExecUpsert(ModifyTableState* state, TupleTableSlot* slot, TupleTableS
     return newid;
 }
 
+extern Tuple ComputePartKeyExprTuple(Relation rel, EState *estate, TupleTableSlot *slot, Tuple oldtuple, Relation partRel);
 /* ----------------------------------------------------------------
  *		ExecInsert
  *
@@ -1342,8 +1343,11 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
 
                     case PARTTYPE_PARTITIONED_RELATION: {
                         /* get partititon oid for insert the record */
-                        partition_id =
-                            heapTupleGetPartitionId(result_relation_desc, tuple, false, estate->es_plannedstmt->hasIgnore);
+                        Tuple newtuple = ComputePartKeyExprTuple(result_relation_desc, estate, slot, tuple, NULL);
+                        if (newtuple)
+                            partition_id = heapTupleGetPartitionId(result_relation_desc, newtuple, false, estate->es_plannedstmt->hasIgnore);
+                        else
+                            partition_id = heapTupleGetPartitionId(result_relation_desc, tuple, false, estate->es_plannedstmt->hasIgnore);
                         /* if cannot find valid partition oid and sql has keyword ignore, return and don't insert */
                         if (estate->es_plannedstmt->hasIgnore && partition_id == InvalidOid) {
                             return NULL;
@@ -1400,8 +1404,11 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                         Partition subPart = NULL;
 
                         /* get partititon oid for insert the record */
-                        partitionId = heapTupleGetPartitionId(result_relation_desc, tuple, false,
-                                                              estate->es_plannedstmt->hasIgnore);
+                        Tuple newtuple = ComputePartKeyExprTuple(result_relation_desc, estate, slot, tuple, NULL);
+                        if (newtuple)
+                            partitionId = heapTupleGetPartitionId(result_relation_desc, newtuple, false, estate->es_plannedstmt->hasIgnore);
+                        else
+                            partitionId = heapTupleGetPartitionId(result_relation_desc, tuple, false, estate->es_plannedstmt->hasIgnore);
                         if (estate->es_plannedstmt->hasIgnore && partitionId == InvalidOid) {
                             return NULL;
                         }
@@ -1418,7 +1425,11 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                         }
 
                         /* get subpartititon oid for insert the record */
-                        subPartitionId = heapTupleGetPartitionId(partRel, tuple, false, estate->es_plannedstmt->hasIgnore);
+                        Tuple newsubtuple = ComputePartKeyExprTuple(result_relation_desc, estate, slot, tuple, partRel);
+                        if (newsubtuple)
+                            subPartitionId = heapTupleGetPartitionId(partRel, newsubtuple, false, estate->es_plannedstmt->hasIgnore);
+                        else
+                            subPartitionId = heapTupleGetPartitionId(partRel, tuple, false, estate->es_plannedstmt->hasIgnore);
                         if (estate->es_plannedstmt->hasIgnore && subPartitionId == InvalidOid) {
                             return NULL;
                         }
@@ -1552,6 +1563,10 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
     }
 
     list_free_ext(recheck_indexes);
+
+    /* Check any WITH CHECK OPTION constraints */
+    if (result_rel_info->ri_WithCheckOptions != NIL)
+        ExecWithCheckOptions(result_rel_info, slot, estate);
 
     /* Process RETURNING if present */
     if (result_rel_info->ri_projectReturning)
@@ -2407,15 +2422,25 @@ lreplace:
                     row_movement = false;
                     new_partId = oldPartitionOid;
                 } else {
-                    partitionRoutingForTuple(result_relation_desc, tuple, u_sess->exec_cxt.route, can_ignore);
+                    Tuple newtuple = ComputePartKeyExprTuple(result_relation_desc, estate, slot, tuple, NULL);
+                    if (newtuple) {
+                        partitionRoutingForTuple(result_relation_desc, newtuple, u_sess->exec_cxt.route, can_ignore);
+                    } else {
+                        partitionRoutingForTuple(result_relation_desc, tuple, u_sess->exec_cxt.route, can_ignore);
+                    }
 
                     if (u_sess->exec_cxt.route->fileExist) {
                         new_partId = u_sess->exec_cxt.route->partitionId;
                         if (RelationIsSubPartitioned(result_relation_desc)) {
                             Partition part = partitionOpen(result_relation_desc, new_partId, RowExclusiveLock);
                             Relation partRel = partitionGetRelation(result_relation_desc, part);
+                            Tuple newsubtuple = ComputePartKeyExprTuple(result_relation_desc, estate, slot, tuple, partRel);
+                            if (newsubtuple) {
+                                partitionRoutingForTuple(partRel, newsubtuple, u_sess->exec_cxt.route, can_ignore);
+                            } else {
+                                partitionRoutingForTuple(partRel, tuple, u_sess->exec_cxt.route, can_ignore);
+                            }
 
-                            partitionRoutingForTuple(partRel, tuple, u_sess->exec_cxt.route, can_ignore);
                             if (u_sess->exec_cxt.route->fileExist) {
                                 new_partId = u_sess->exec_cxt.route->partitionId;
                             } else {
@@ -3028,6 +3053,10 @@ ldelete:
             recheck_indexes);
 
     list_free_ext(recheck_indexes);
+
+    /* Check any WITH CHECK OPTION constraints */
+    if (result_rel_info->ri_WithCheckOptions != NIL)
+        ExecWithCheckOptions(result_rel_info, slot, estate);
 
     /* Process RETURNING if present */
     if (result_rel_info->ri_projectReturning)
@@ -3964,6 +3993,37 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
 #ifdef PGXC
     estate->es_result_remoterel = saved_remote_rel_info;
 #endif
+
+    /*
+     * Initialize any WITH CHECK OPTION constraints if needed.
+     */
+    result_rel_info = mt_state->resultRelInfo;
+    i = 0;
+
+    /*
+     * length of node->withCheckOptionLists must be 1 because inherited
+     * table is not supported yet.
+     */
+    Assert(node->withCheckOptionLists == NULL || list_length(node->withCheckOptionLists) == 1);
+
+    for (int ri = 0; node->withCheckOptionLists != NULL && ri < resultRelationNum; ri++) {
+        List* wcoList = NIL;
+        List* wcoExprs = NIL;
+        ListCell* ll = NULL;
+
+        foreach(ll, (List*)linitial(node->withCheckOptionLists)) {
+            WithCheckOption* wco = (WithCheckOption*)lfirst(ll);
+            if (wco->rtindex == result_rel_info->ri_RangeTableIndex) {
+                ExprState* wcoExpr = ExecInitExpr((Expr*)wco->qual, mt_state->mt_plans[i]);
+                wcoExprs = lappend(wcoExprs, wcoExpr);
+                wcoList = lappend(wcoList, wco);
+            }
+        }
+
+        result_rel_info->ri_WithCheckOptions = wcoList;
+        result_rel_info->ri_WithCheckOptionExprs = wcoExprs;
+        result_rel_info++;
+    }
 
     /*
      * Initialize RETURNING projections if needed.

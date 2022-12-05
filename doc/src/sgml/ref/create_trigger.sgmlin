@@ -22,12 +22,25 @@ CREATE [ CONSTRAINT ] TRIGGER name { BEFORE | AFTER | INSTEAD OF } { event [ OR 
     [ WHEN ( condition ) ]
     EXECUTE PROCEDURE function_name ( arguments )
 
+In B compatibility also support:
+CREATE [ DEFINER = user ] TRIGGER [ IF NOT EXISTS ] name { BEFORE | AFTER | INSTEAD OF } { event [ OR ... ] }
+    ON table_name
+    [ FROM referenced_table_name ]
+    { NOT DEFERRABLE | [ DEFERRABLE ] { INITIALLY IMMEDIATE | INITIALLY DEFERRED } }
+    [ FOR [ EACH ] { ROW | STATEMENT } ]
+    [ WHEN ( condition ) ]
+    [ trigger_order ]
+    trigger_body
+
 where event can be one of:
 
     INSERT
     UPDATE [ OF column_name [, ... ] ]
     DELETE
     TRUNCATE
+
+where trigger_order can be [ FOLLOWS | PRECEDES ]
+
 </synopsis>
 </refsynopsisdiv>
 </refentry>

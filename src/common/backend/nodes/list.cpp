@@ -541,6 +541,31 @@ List* list_concat(List* list1, List* list2)
     return list1;
 }
 
+/* make new listcell to concat data of list2, not distory the struction of list2. */
+List* list_concat2(List* list1, List* list2)
+{
+    if (list2 == NIL) {
+        return list1;
+    }
+    if (list1 == list2) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("cannot list_concat2() a list to itself")));
+    }
+
+    Assert(list1 == NIL || list1->type == list2->type);
+
+    ListCell* lc = NULL;
+    foreach(lc, list2) {
+        /* no matter the type, use "lfirst" */
+        list1 = lappend(list1, lfirst(lc));
+    }
+
+    list1->type = list2->type;
+
+    check_list_invariants(list1);
+    check_list_invariants(list2);
+    return list1;
+}
+
 /*
  * Truncate 'list' to contain no more than 'new_size' elements. This
  * modifies the list in-place! Despite this, callers should use the

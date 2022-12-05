@@ -22,6 +22,21 @@ $$ LANGUAGE plpgsql;
 select TEST_FUNC('abc'::clob);
 
 show warnings;
+
+drop table if exists t_showtest;
+create table t_showtest(a int, primary key(a));
+show errors;
+show errors limit 10;
+
+drop table if exists t_showtest;
+create table t_showtest(a int, primary key(a));
+show warnings;
+drop table if exists t_showtest;
+
+update user set b = 'x' where a = 1;
+show warnings;
+show errors;
+
 set sql_note=false;
 select TEST_FUNC('abc'::clob);
 show warnings;

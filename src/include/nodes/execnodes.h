@@ -471,6 +471,8 @@ struct ExprState {
  *		junkFilter				for removing junk attributes from tuples
  *		projectReturning		for computing a RETURNING list
  *		updateProj				for computing a UPSERT update list
+ *		WithCheckOptions		list of WithCheckOption's for views
+ *		WithCheckOptionExprs	list of WithCheckOption expr states
  * ----------------
  */
 typedef struct ResultRelInfo {
@@ -522,6 +524,8 @@ typedef struct ResultRelInfo {
     int ri_NumGeneratedNeeded;
     /* number of stored UpdateExpr columns we need to compute */
     int ri_NumUpdatedNeeded;
+    List* ri_WithCheckOptions;
+    List* ri_WithCheckOptionExprs;
 } ResultRelInfo;
 
 /* bloom filter controller */
@@ -2003,6 +2007,7 @@ typedef struct WorkTableScanState {
  */
 typedef struct ForeignScanState {
     ScanState ss; /* its first field is NodeTag */
+    ExprState* fdw_recheck_quals; /* original quals not in ss.ps.qual */
     /* use struct pointer to avoid including fdwapi.h here */
     struct FdwRoutine* fdwroutine;
     void* fdw_state; /* foreign-data wrapper can keep state here */

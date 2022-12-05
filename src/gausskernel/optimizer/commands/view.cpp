@@ -35,6 +35,7 @@
 #include "parser/parse_relation.h"
 #include "rewrite/rewriteDefine.h"
 #include "rewrite/rewriteManip.h"
+#include "rewrite/rewriteHandler.h"
 #include "rewrite/rewriteSupport.h"
 #include "optimizer/nodegroups.h"
 #include "utils/acl.h"
@@ -50,6 +51,19 @@
 static void checkViewTupleDesc(TupleDesc newdesc, TupleDesc olddesc);
 
 InSideView query_from_view_hook = NULL;
+
+/*---------------------------------------------------------------------
+ * Validator for "check_option" reloption on views. The allowed values
+ * are "local" and "cascaded".
+ */
+void validateWithCheckOption(const char *value)
+{
+    if (value == NULL || (pg_strcasecmp(value, "local") != 0 && pg_strcasecmp(value, "cascaded") != 0)) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("invalid value for \"check_option\" option"),
+                errdetail("Valid values are \"local\", and \"cascaded\".")));
+    }
+}
 
 static void setEncryptedColumnRef(ColumnDef *def, TargetEntry *tle)
 {
@@ -78,14 +92,12 @@ static void setEncryptedColumnRef(ColumnDef *def, TargetEntry *tle)
 /* ---------------------------------------------------------------------
  * DefineVirtualRelation
  *
- * Create the "view" relation. `DefineRelation' does all the work,
- * we just provide the correct arguments ... at least when we're
- * creating a view.  If we're updating an existing view, we have to
- * work harder.
+ * Create a view relation and use the rules system to store the query
+ * for the view.
  * ---------------------------------------------------------------------
  */
 static Oid DefineVirtualRelation(RangeVar* relation, List* tlist, bool replace, List* options, ObjectType relkind,
-                                    ViewStmt* stmt)
+                                    ViewStmt* stmt, Query* viewParse)
 {
     Oid viewOid;
     LOCKMODE lockmode;
@@ -204,15 +216,6 @@ static Oid DefineVirtualRelation(RangeVar* relation, List* tlist, bool replace, 
         if (!u_sess->attr.attr_common.IsInplaceUpgrade)
             checkViewTupleDesc(descriptor, rel->rd_att);
 
-        /*
-         * The new options list replaces the existing options list, even if
-         * it's empty.
-         */
-        atcmd = makeNode(AlterTableCmd);
-        atcmd->subtype = AT_ReplaceRelOptions;
-        atcmd->def = (Node*)options;
-        atcmds = lappend(atcmds, atcmd);
-
         /* 
          * set definer by AlterTameCmd
          */
@@ -256,6 +259,38 @@ static Oid DefineVirtualRelation(RangeVar* relation, List* tlist, bool replace, 
                 atcmds = lappend(atcmds, atcmd);
             }
         }
+
+        if (atcmds) {
+            AlterTableInternal(viewOid, atcmds, true);
+
+            /* Make the new view columns visible */
+            CommandCounterIncrement();
+        }
+
+        /*
+         * Update the query for the view.
+         *
+         * Note that we must do this before updating the view options, because
+         * the new options may not be compatible with the old view query (for
+         * example if we attempt to add the WITH CHECK OPTION, we require that
+         * the new view be automatically updatable, but the old view may not
+         * have been).
+         */
+        StoreViewQuery(viewOid, viewParse, replace);
+
+        /* Make the new view query visible */
+        CommandCounterIncrement();
+
+         /*
+          * Finally update the view options.
+          *
+          * The new options list replaces the existing options list, even if
+          * it's empty.
+          */
+        atcmd = makeNode(AlterTableCmd);
+        atcmd->subtype = AT_ReplaceRelOptions;
+        atcmd->def = (Node*)options;
+        atcmds = list_make1(atcmd);
 
         /* OK, let's do it. */
         AlterTableInternal(viewOid, atcmds, true);
@@ -318,6 +353,13 @@ static Oid DefineVirtualRelation(RangeVar* relation, List* tlist, bool replace, 
             relid = DefineRelation(createStmt, RELKIND_VIEW, ownerOid);
         }
         Assert(relid != InvalidOid);
+
+        /* Make the new view relation visible */
+        CommandCounterIncrement();
+
+        /* Store the query for the view */
+        StoreViewQuery(relid, viewParse, replace);
+
         return relid;
     }
 }
@@ -498,6 +540,8 @@ Oid DefineView(ViewStmt* stmt, const char* queryString, bool send_remote, bool i
     Query* viewParse = NULL;
     Oid viewOid = InvalidOid;
     RangeVar* view = NULL;
+    ListCell* cell = NULL;
+    bool check_option;
 
     /*
      * Run parse analysis to convert the raw parse tree to a Query.  Note this
@@ -542,6 +586,42 @@ Oid DefineView(ViewStmt* stmt, const char* queryString, bool send_remote, bool i
 #ifdef ENABLE_MULTIPLE_NODES
     validate_streaming_engine_status((Node*) stmt);
 #endif
+
+    /*
+     * If the user specified the WITH CHECK OPTION, add it to the list of
+     * reloptions.
+     */
+    if (stmt->withCheckOption == LOCAL_CHECK_OPTION)
+        stmt->options = lappend(stmt->options, makeDefElem("check_option", (Node*)makeString("local")));
+    else if (stmt->withCheckOption == CASCADED_CHECK_OPTION)
+        stmt->options = lappend(stmt->options, makeDefElem("check_option", (Node*)makeString("cascaded")));
+
+    /*
+    * Check that the view is auto-updatable if WITH CHECK OPTION was
+    * specified.
+    */
+    check_option = false;
+
+    foreach(cell, stmt->options) {
+        DefElem* defel = (DefElem*)lfirst(cell);
+
+        if (pg_strcasecmp(defel->defname, "check_option") == 0)
+            check_option = true;
+    }
+
+    /*
+     * If the check option is specified, look to see if the view is
+     * actually auto-updatable or not.
+     */
+    if (check_option) {
+        const char *view_updatable_error = view_query_is_auto_updatable(viewParse, true);
+
+        if (view_updatable_error)
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("WITH CHECK OPTION is supported only on auto-updatable views"),
+                    errhint("%s", view_updatable_error)));
+    }
+
     /*
      * If a list of column names was given, run through and insert these into
      * the actual query tree. - thomas 2000-03-08
@@ -608,6 +688,7 @@ Oid DefineView(ViewStmt* stmt, const char* queryString, bool send_remote, bool i
             CreateMvCommand(stmt, queryString);
         }
 #endif
+        StoreViewQuery(viewOid, viewParse, stmt->replace);
      } else {
         /*
          * Create the view relation
@@ -615,7 +696,8 @@ Oid DefineView(ViewStmt* stmt, const char* queryString, bool send_remote, bool i
          * NOTE: if it already exists and replace is false, the xact will be
          * aborted.
          */
-        viewOid = DefineVirtualRelation(view, viewParse->targetList, stmt->replace, stmt->options, stmt->relkind, stmt);
+        viewOid = DefineVirtualRelation(view, viewParse->targetList, stmt->replace, stmt->options,
+                                        stmt->relkind, stmt, viewParse);
 
         /*
          * The relation we have just created is not visible to any other commands
@@ -624,8 +706,6 @@ Oid DefineView(ViewStmt* stmt, const char* queryString, bool send_remote, bool i
          */
         CommandCounterIncrement();
     }
-
-    StoreViewQuery(viewOid, viewParse, stmt->replace);
 
     return viewOid;
 }

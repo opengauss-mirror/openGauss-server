@@ -102,12 +102,6 @@ CREATE MATERIALIZED VIEW mate_multiview2 as select * from t_t_mutil_t2;
 delete t_t_mutil_t1 a,mate_multiview1 b,mate_multiview2 c ;
 drop MATERIALIZED VIEW mate_multiview1;
 drop MATERIALIZED VIEW mate_multiview2;
--- view
-create view multiview1 as select * from t_t_mutil_t1;
-create view multiview2 as select * from t_t_mutil_t2;
-delete t_t_mutil_t1 a,multiview1 b,multiview2 c where a.col1 = 4 and b.col2 = 5 and c.col2 =6; --error
-drop view multiview1;
-drop view multiview2;
 -- different explain plan
 explain(verbose) delete/*+nestloop(a b)*/ from t_t_mutil_t1 a,t_t_mutil_t2 b where a.col2=b.col2;
 explain(verbose) delete/*+hashjoin(a b)*/ from t_t_mutil_t1 a,t_t_mutil_t2 b where a.col2=b.col2;
@@ -481,5 +475,31 @@ delete from t_t_mutil_t1,t_t_mutil_t1 using t_t_mutil_t1,t_t_mutil_t1 where t_t_
 delete from t_t_mutil_t1 using t_t_mutil_t1,t_t_mutil_t1 where t_t_mutil_t1.col1=1;
 delete from t_t_mutil_t1 a,t_t_mutil_t1 a where a.col1=1;
 delete from t_t_mutil_t1 a,t_t_mutil_t1 b where a.col1=1;
+-- view
+drop table if exists t_t_mutil_t1;
+drop table if exists t_t_mutil_t2;
+drop table if exists t_t_mutil_t3;
+create table t_t_mutil_t1(col1 int,col2 int);
+create table t_t_mutil_t2(col1 int,col2 int,col3 int);
+create table t_t_mutil_t3(col1 int,col2 int);
+insert into t_t_mutil_t1 values(1,1),(1,1);
+insert into t_t_mutil_t2 values(1,1),(1,2);
+insert into t_t_mutil_t3 values(1,1),(1,3);
+create view multiview1 as select * from t_t_mutil_t1;
+create view multiview2 as select * from t_t_mutil_t2;
+create view multiview3 as select * from t_t_mutil_t3;
+delete multiview1 a,multiview2 b,multiview3 c where a.col1 = b.col1 and b.col2 = c.col2;
+select * from t_t_mutil_t1;
+select * from t_t_mutil_t2;
+select * from t_t_mutil_t3;
+-- left join
+insert into t_t_mutil_t1 values(1,1),(1,1);
+insert into t_t_mutil_t2 values(1,1),(1,2);
+delete from multiview1,t_t_mutil_t2 using t_t_mutil_t2 left join multiview1 on multiview1.col2=t_t_mutil_t2.col1;
+select * from t_t_mutil_t1;
+select * from t_t_mutil_t2;
+drop view multiview1;
+drop view multiview2;
+drop view multiview3;
 \c regression
 drop database multidelete;

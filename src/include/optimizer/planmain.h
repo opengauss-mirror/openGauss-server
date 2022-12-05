@@ -71,7 +71,7 @@ extern void disuse_physical_tlist(Plan* plan, Path* path);
 extern void copy_plan_costsize(Plan* dest, Plan* src);
 extern SubqueryScan* make_subqueryscan(List* qptlist, List* qpqual, Index scanrelid, Plan* subplan);
 extern ForeignScan* make_foreignscan(List* qptlist, List* qpqual, Index scanrelid, List* fdw_exprs, List* fdw_private,
-    RemoteQueryExecType type = EXEC_ON_ALL_NODES);
+    List *fdw_scan_tlist, List *fdw_recheck_quals, Plan *outer_plan, RemoteQueryExecType type = EXEC_ON_ALL_NODES);
 extern Append* make_append(List* appendplans, List* tlist);
 extern RecursiveUnion* make_recursive_union(
     List* tlist, Plan* lefttree, Plan* righttree, int wtParam, List* distinctList, long numGroups);
@@ -118,8 +118,9 @@ extern bool check_dsitribute_key_in_targetlist(PlannerInfo* root, List* distribu
 extern int get_plan_actual_total_width(Plan* plan, bool vectorized, OpType type, int newcol = 0);
 #ifdef STREAMPLAN
 extern Plan* make_modifytable(PlannerInfo* root, CmdType operation, bool canSetTag, List* resultRelations,
-    List* subplans, List* returningLists, List* rowMarks, int epqParam, bool partKeyUpdated, Index mergeTargetRelation,
-    List* mergeSourceTargetList, List* mergeActionList, UpsertExpr* upsertClause);
+    List* subplans, List *withCheckOptionLists, List* returningLists, List* rowMarks, int epqParam,
+    bool partKeyUpdated, Index mergeTargetRelation, List* mergeSourceTargetList, List* mergeActionList,
+    UpsertExpr* upsertClause);
 extern Plan* make_modifytables(PlannerInfo* root, CmdType operation, bool canSetTag, List* resultRelations,
     List* subplans, List* returningLists, List* rowMarks, int epqParam, bool partKeyUpdated,
     Index mergeTargetRelation, List* mergeSourceTargetList, List *mergeActionList, UpsertExpr *upsertClause);
@@ -129,8 +130,9 @@ extern Plan* make_stream_plan(PlannerInfo* root, Plan* lefttree, List* redistrib
     Distribution* target_distribution = NULL);
 #else
 extern ModifyTable* make_modifytable(CmdType operation, bool canSetTag, List* resultRelations,
-    List* subplans, List* returningLists, List* rowMarks, int epqParam, bool partKeyUpdated, Index mergeTargetRelation,
-    List* mergeSourceTargetList, List* mergeActionList, UpsertExpr* upsertClause);
+    List* subplans, List *withCheckOptionLists, List* returningLists, List* rowMarks, int epqParam,
+    bool partKeyUpdated, Index mergeTargetRelation, List* mergeSourceTargetList, List* mergeActionList,
+    UpsertExpr* upsertClause);
 extern ModifyTable* make_modifytables(CmdType operation, bool canSetTag, List* resultRelations,
     List* subplans, List* returningLists, List* rowMarks, int epqParam, bool partKeyUpdated,
     Index mergeTargetRelation, List* mergeSourceTargetList, List* mergeActionList, UpsertExpr* upsertClause);

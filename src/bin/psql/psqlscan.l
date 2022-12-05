@@ -148,6 +148,7 @@ typedef struct PsqlScanStateData
 	bool		include_ora_comment; /* dont igore comment when ture, such as single line comment after function/procedure param */
     bool is_b_format;
 	char *delimiter_name;
+	bool is_end_state;   /* judge end state */
 } PsqlScanStateData;
 
 static PsqlScanState cur_state;	/* current state while active */
@@ -752,6 +753,11 @@ other			.
 <xd>{xdstop}	{
 					BEGIN(INITIAL);
 					ECHO;
+					if (cur_state->is_end_state) {
+						RESET_XP_STATUS() ;
+						cur_state->is_end_state = false;
+						return LEXRES_SEMI;
+					}
 				}
 <xui>{xuistop1}	{
 					yyless(1);
@@ -767,6 +773,12 @@ other			.
 				}
 <xd,xui>{xdinside}	{
 					ECHO;
+					if ((lex_param->begin_state == BEGIN_CURSOR || 
+							( !lex_param->declare_encountered && cur_state->paren_depth == 0))
+							&& judge_end_state(yytext))
+					{
+						cur_state->is_end_state = true;
+					}
 				}
 
 {xufailed}	{
@@ -1429,6 +1441,7 @@ psql_scan(PsqlScanState state,
 
 	BEGIN(state->start_state);
 	state->is_b_format = is_b_format;
+	state->is_end_state = false;
 	if (is_b_format) {
 		if (state->delimiter_name) {
 			free(state->delimiter_name);
@@ -1603,6 +1616,7 @@ psql_scan_reset(PsqlScanState state)
 	state->butt_num = 0;
 	state->declare_encountered = false;
 	state->is_b_format = false;
+	state->is_end_state = false;
 	if (state->delimiter_name) {
 		free(state->delimiter_name);
 	}

@@ -16,6 +16,7 @@
 #include "access/obs/obs_am.h"
 #include "commands/defrem.h"
 #include "nodes/parsenodes.h"
+#include "nodes/relation.h"
 
 #ifndef OBS_SERVER
 #define OBS_SERVER "obs"
@@ -223,7 +224,7 @@ extern bool IsSpecifiedFDWFromRelid(Oid relId, const char* SepcifiedType);
  * @in relId: The foreign table Oid.
  * @return Rreturn true if the foreign table support those DML.
  */
-extern bool CheckSupportedFDWType(Oid relId);
+extern bool CheckSupportedFDWType(Oid oid, bool byServerId = false);
 
 /**
  * @Description: Get the all options for the OBS foreign table.
@@ -304,11 +305,101 @@ void CheckGetServerIpAndPort(const char *Address, List **AddrList, bool IsCheck,
 
 bool isWriteOnlyFt(Oid relid);
 
+/*
+ * state for explain foreign remote sql
+ */
+typedef struct ExplainFRSqlState {
+    struct ExplainState* parent;
+    int node_num;
+    StringInfo str;  /* output buffer */
+} ExplainFRSqlState;
+
+typedef struct SPJPathExtraData {
+    List *targetList;
+} SPJPathExtraData;
+
+/*
+ * Struct for extra information passed to subroutines of create_grouping_paths
+ *
+ * flags indicating what kinds of grouping are possible.
+ * partial_costs_set is true if the agg_partial_costs and agg_final_costs
+ * 		have been initialized.
+ * agg_partial_costs gives partial aggregation costs.
+ * agg_final_costs gives finalization costs.
+ * target_parallel_safe is true if target is parallel safe.
+ * havingQual gives list of quals to be applied after aggregation.
+ * targetList gives list of columns to be projected.
+ * patype is the type of partitionwise aggregation that is being performed.
+ */
+typedef struct GroupPathExtraData {
+    /* Data which remains constant once set. */
+    int flags;
+    bool partial_costs_set;
+    AggClauseCosts agg_partial_costs;
+    AggClauseCosts agg_final_costs;
+
+    /* Data which may differ across partitions. */
+    Node *havingQual;
+    List *targetList;
+} GroupPathExtraData;
+
+typedef double Cardinality;		/* (estimated) number of rows or other integer count */
+
+
+typedef struct OrderPathExtraData {
+    List *targetList;
+    List *irel_tel;   // target entry list of lefttree
+} OrderPathExtraData;
+
+/*
+ * Struct for extra information passed to subroutines of grouping_planner
+ *
+ * limit_needed is true if we actually need a Limit plan node.
+ * limit_tuples is an estimated bound on the number of output tuples,
+ * 		or -1 if no LIMIT or couldn't estimate.
+ * count_est and offset_est are the estimated values of the LIMIT and OFFSET
+ * 		expressions computed by preprocess_limit() (see comments for
+ * 		preprocess_limit() for more information).
+ */
+typedef struct FinalPathExtraData {
+    bool limit_needed;
+    Cardinality limit_tuples;
+    int64 count_est;
+    int64 offset_est;
+
+    List* targetList;
+} FinalPathExtraData;
+
+typedef enum FDWUpperRelState {
+    FDW_UPPER_REL_INIT,
+    FDW_UPPER_REL_TRY,
+    FDW_UPPER_REL_END
+} FDWUpperRelState;
+
+typedef struct FDWUpperRelCxt {
+    FDWUpperRelState   state;
+    PlannerInfo*       root;
+    RelOptInfo*        currentRel;  // current rel to create path
+    RelOptInfo*        upperRels[UPPERREL_FINAL + 1];      // the rel that we using to create foreign path
+    SPJPathExtraData*   spjExtra;
+    GroupPathExtraData* groupExtra;
+    OrderPathExtraData* orderExtra;
+    FinalPathExtraData* finalExtra;
+
+    /* result */
+    Plan* resultPlan;
+    List* resultPathKeys;
+} FDWUpperRelCxt;
+
+#define FDWUpperPlanContinue(cxt) ((cxt) != NULL && (cxt)->stage != FDW_UPPER_REL_END)
+extern FDWUpperRelCxt* InitFDWUpperPlan(PlannerInfo* root, RelOptInfo* baseRel, Plan* localPlan);
+extern void AdvanceFDWUpperPlan(FDWUpperRelCxt* ufdwCxt, UpperRelationKind stage, Plan* localPlan);
+
 #define isObsOrHdfsTableFormTblOid(relId) \
-    (isSpecifiedSrvTypeFromRelId(relId, HDFS) || isSpecifiedSrvTypeFromRelId(relId, OBS))
+    (OidIsValid(relId) && (isSpecifiedSrvTypeFromRelId(relId, HDFS) || isSpecifiedSrvTypeFromRelId(relId, OBS)))
 
 #define isMOTFromTblOid(relId) \
-    (IsSpecifiedFDWFromRelid(relId, MOT_FDW))
+    (OidIsValid(relId) && IsSpecifiedFDWFromRelid(relId, MOT_FDW))
 
 #define isObsOrHdfsTableFormSrvName(srvName) \
     (isSpecifiedSrvTypeFromSrvName(srvName, HDFS) || isSpecifiedSrvTypeFromSrvName(srvName, OBS))
@@ -320,16 +411,18 @@ bool isWriteOnlyFt(Oid relid);
     (IsSpecifiedFDW(srvName, POSTGRES_FDW))
 
 #define isMysqlFDWFromTblOid(relId) \
-    (IsSpecifiedFDWFromRelid(relId, MYSQL_FDW))
+    (OidIsValid(relId) && IsSpecifiedFDWFromRelid(relId, MYSQL_FDW))
 
 #define isOracleFDWFromTblOid(relId) \
-    (IsSpecifiedFDWFromRelid(relId, ORACLE_FDW))
+    (OidIsValid(relId) && IsSpecifiedFDWFromRelid(relId, ORACLE_FDW))
 
 #define isPostgresFDWFromTblOid(relId) \
-    (IsSpecifiedFDWFromRelid(relId, POSTGRES_FDW))
+    (OidIsValid(relId) && IsSpecifiedFDWFromRelid(relId, POSTGRES_FDW))
 
 #define IS_OBS_CSV_TXT_FOREIGN_TABLE(relId) \
-    (IsSpecifiedFDWFromRelid(relId, DIST_FDW) && (is_obs_protocol(HdfsGetOptionValue(relId, optLocation))))
+    (OidIsValid(relId) && \
+     IsSpecifiedFDWFromRelid(relId, DIST_FDW) && \
+     (is_obs_protocol(HdfsGetOptionValue(relId, optLocation))))
 
 #define CAN_BUILD_INFORMATIONAL_CONSTRAINT_BY_RELID(relId) \
     (isObsOrHdfsTableFormTblOid(relId) || IS_OBS_CSV_TXT_FOREIGN_TABLE(relId))
@@ -340,9 +433,9 @@ bool isWriteOnlyFt(Oid relid);
                 ? false                                       \
                 : is_obs_protocol(getFTOptionValue(stmt->options, optLocation))))
 
-#define IS_LOGFDW_FOREIGN_TABLE(relId) (IsSpecifiedFDWFromRelid(relId, LOG_FDW))
+#define IS_LOGFDW_FOREIGN_TABLE(relId) (OidIsValid(relId) && IsSpecifiedFDWFromRelid(relId, LOG_FDW))
 
-#define IS_POSTGRESFDW_FOREIGN_TABLE(relId) (IsSpecifiedFDWFromRelid(relId, GC_FDW))
+#define IS_POSTGRESFDW_FOREIGN_TABLE(relId) (OidIsValid(relId) && IsSpecifiedFDWFromRelid(relId, GC_FDW))
 
 #define ENCRYPT_STR_PREFIX "encryptstr"
 #define MIN_ENCRYPTED_PASSWORD_LENGTH 54

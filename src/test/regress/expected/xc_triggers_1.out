@@ -612,12 +612,24 @@ CREATE [ CONSTRAINT ] TRIGGER name { BEFORE | AFTER | INSTEAD OF } { event [ OR 
     [ WHEN ( condition ) ]
     EXECUTE PROCEDURE function_name ( arguments )
 
+In B compatibility also support:
+CREATE [ DEFINER = user ] TRIGGER [ IF NOT EXISTS ] name { BEFORE | AFTER | INSTEAD OF } { event [ OR ... ] }
+    ON table_name
+    [ FROM referenced_table_name ]
+    { NOT DEFERRABLE | [ DEFERRABLE ] { INITIALLY IMMEDIATE | INITIALLY DEFERRED } }
+    [ FOR [ EACH ] { ROW | STATEMENT } ]
+    [ WHEN ( condition ) ]
+    [ trigger_order ]
+    trigger_body
+
 where event can be one of:
 
     INSERT
     UPDATE [ OF column_name [, ... ] ]
     DELETE
     TRUNCATE
+
+where trigger_order can be [ FOLLOWS | PRECEDES ]
 
 \h alter trigger
 Command:     ALTER TRIGGER
@@ -630,6 +642,8 @@ Command:     DROP TRIGGER
 Description: remove a trigger
 Syntax:
 DROP TRIGGER [ IF EXISTS ] name ON table_name [ CASCADE | RESTRICT ]
+In B compatibility also support:
+DROP TRIGGER [ IF EXISTS ] name [ CASCADE | RESTRICT ]
 
 \h alter table
 Command:     ALTER TABLE

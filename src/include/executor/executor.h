@@ -227,6 +227,7 @@ extern void InitResultRelInfo(
 extern ResultRelInfo* ExecGetTriggerResultRel(EState* estate, Oid relid);
 extern bool ExecContextForcesOids(PlanState* planstate, bool* hasoids);
 extern bool ExecConstraints(ResultRelInfo* resultRelInfo, TupleTableSlot* slot, EState* estate, bool skipAutoInc = false);
+extern void ExecWithCheckOptions(ResultRelInfo *resultRelInfo, TupleTableSlot *slot, EState *estate);
 extern ExecRowMark* ExecFindRowMark(EState* estate, Index rti);
 extern ExecAuxRowMark* ExecBuildAuxRowMark(ExecRowMark* erm, List* targetlist);
 extern TupleTableSlot* EvalPlanQual(EState* estate, EPQState* epqstate, Relation relation, Index rti,

@@ -1107,7 +1107,7 @@ static List* pg_rewrite_query(Query* query)
     List* querytree_list = NIL;
     PGSTAT_INIT_TIME_RECORD();
 
-    if (u_sess->attr.attr_sql.Debug_print_parse)
+    if (u_sess->attr.attr_sql.Debug_print_parse && u_sess->attr.attr_common.log_min_messages <= LOG)
         elog_node_display(LOG, "parse tree", query, u_sess->attr.attr_sql.Debug_pretty_print);
 
     if (u_sess->attr.attr_common.log_parser_stats)
@@ -1221,7 +1221,7 @@ static List* pg_rewrite_query(Query* query)
     }
 #endif
 
-    if (u_sess->attr.attr_sql.Debug_print_rewritten)
+    if (u_sess->attr.attr_sql.Debug_print_rewritten && u_sess->attr.attr_common.log_min_messages <= LOG)
         elog_node_display(LOG, "rewritten parse tree", querytree_list, u_sess->attr.attr_sql.Debug_pretty_print);
 
     return querytree_list;
@@ -1315,7 +1315,7 @@ PlannedStmt* pg_plan_query(Query* querytree, int cursorOptions, ParamListInfo bo
     /*
      * Print plan if debugging.
      */
-    if (u_sess->attr.attr_sql.Debug_print_plan)
+    if (u_sess->attr.attr_sql.Debug_print_plan && u_sess->attr.attr_common.log_min_messages <= LOG)
         elog_node_display(LOG, "plan", plan, u_sess->attr.attr_sql.Debug_pretty_print);
 
     if (!underExplain)

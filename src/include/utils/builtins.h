@@ -720,6 +720,8 @@ extern Datum pg_collation_for(PG_FUNCTION_ARGS);
 extern Datum pg_sync_cstore_delta(PG_FUNCTION_ARGS);
 extern Datum pg_sync_all_cstore_delta(PG_FUNCTION_ARGS);
 extern Datum pg_test_err_contain_err(PG_FUNCTION_ARGS);
+extern Datum pg_relation_is_updatable(PG_FUNCTION_ARGS);
+extern Datum pg_column_is_updatable(PG_FUNCTION_ARGS);
 
 /* oid.c */
 extern Datum oidin(PG_FUNCTION_ARGS);

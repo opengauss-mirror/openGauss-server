@@ -31,6 +31,7 @@
  */
 
 #include "postgres_fe.h"
+#include <string>
 
 #ifdef WIN32_PG_DUMP
 #undef PGDLLIMPORT
@@ -6545,6 +6546,7 @@ TableInfo* getTables(Archive* fout, int* numTables)
 #endif
     int i_reltablespace = 0;
     int i_reloptions = 0;
+    int i_checkoption = 0;
     int i_toastreloptions = 0;
     int i_reloftype = 0;
     int i_parttype = 0;
@@ -6652,7 +6654,9 @@ TableInfo* getTables(Archive* fout, int* numTables)
                 "(SELECT pg_catalog.string_agg(node_name,',') AS pgxc_node_names from pgxc_node n where n.oid "
                 "in (select pg_catalog.unnest(nodeoids) from pgxc_class v where v.pcrelid=c.oid) ) , "
 #endif
-                "pg_catalog.array_to_string(c.reloptions, ', ') AS reloptions, "
+                "pg_catalog.array_to_string(pg_catalog.array_remove(pg_catalog.array_remove(c.reloptions,'check_option=local'),'check_option=cascaded'), ', ') AS reloptions, "
+                      "CASE WHEN 'check_option=local' = ANY (c.reloptions) THEN 'LOCAL'::text "
+                        "WHEN 'check_option=cascaded' = ANY (c.reloptions) THEN 'CASCADED'::text ELSE NULL END AS checkoption, "
                 "pg_catalog.array_to_string(array(SELECT 'toast.' || "
                 "x FROM pg_catalog.unnest(tc.reloptions) x), ', ') AS toast_reloptions "
                 "FROM pg_class c "
@@ -6702,7 +6706,9 @@ TableInfo* getTables(Archive* fout, int* numTables)
                 "(SELECT pg_catalog.string_agg(node_name,',') AS pgxc_node_names from pgxc_node n where n.oid "
                 "in (select pg_catalog.unnest(nodeoids) from pgxc_class v where v.pcrelid=c.oid) ) , "
 #endif
-                "pg_catalog.array_to_string(c.reloptions, ', ') AS reloptions, "
+                "pg_catalog.array_to_string(pg_catalog.array_remove(pg_catalog.array_remove(c.reloptions,'check_option=local'),'check_option=cascaded'), ', ') AS reloptions, "
+                      "CASE WHEN 'check_option=local' = ANY (c.reloptions) THEN 'LOCAL'::text "
+                        "WHEN 'check_option=cascaded' = ANY (c.reloptions) THEN 'CASCADED'::text ELSE NULL END AS checkoption, "
                 "pg_catalog.array_to_string(array(SELECT 'toast.' || "
                 "x FROM pg_catalog.unnest(tc.reloptions) x), ', ') AS toast_reloptions "
                 "FROM pg_class c "
@@ -7055,6 +7061,7 @@ TableInfo* getTables(Archive* fout, int* numTables)
 #endif
     i_reltablespace = PQfnumber(res, "reltablespace");
     i_reloptions = PQfnumber(res, "reloptions");
+    i_checkoption = PQfnumber(res, "checkoption");
     i_toastreloptions = PQfnumber(res, "toast_reloptions");
     i_reloftype = PQfnumber(res, "reloftype");
 
@@ -7226,6 +7233,10 @@ TableInfo* getTables(Archive* fout, int* numTables)
             free(tmp_str);
             tmp_str = NULL;
         }
+        if (i_checkoption == -1 || PQgetisnull(res, i, i_checkoption))
+            tblinfo[i].checkoption = NULL;
+        else
+            tblinfo[i].checkoption = gs_strdup(PQgetvalue(res, i, i_checkoption));
         tblinfo[i].toast_reloptions = gs_strdup(PQgetvalue(res, i, i_toastreloptions));
 
         /* other fields were zeroed above */
@@ -17498,6 +17509,72 @@ static void OutputIntervalPartitionDef(Archive* fout, const PGresult* res, PQExp
     free(interTblSpcs);
 }
 
+static bool PartkeyexprIsNull(Archive* fout, TableInfo* tbinfo, bool isSubPart)
+{
+    PQExpBuffer partkeyexpr = createPQExpBuffer();
+    PGresult* partkeyexpr_res = NULL;
+    int i_partkeyexpr;
+    bool partkeyexprIsNull = true;
+    if (!isSubPart)
+        appendPQExpBuffer(partkeyexpr,
+            "select partkeyexpr from pg_partition where (parttype = 'r') and (parentid in (select oid from pg_class where relname = \'%s\' and "
+            "relnamespace = %u));",tbinfo->dobj.name, tbinfo->dobj.nmspace->dobj.catId.oid);
+    else
+        appendPQExpBuffer(partkeyexpr,
+            "select distinct partkeyexpr from pg_partition where (parttype = 'p') and (parentid in (select oid from pg_class where relname = \'%s\' and "
+            "relnamespace = %u));",tbinfo->dobj.name, tbinfo->dobj.nmspace->dobj.catId.oid);
+    partkeyexpr_res = ExecuteSqlQueryForSingleRow(fout, partkeyexpr->data);
+    i_partkeyexpr = PQfnumber(partkeyexpr_res, "partkeyexpr");
+    char* partkeyexpr_buf = PQgetvalue(partkeyexpr_res, 0, i_partkeyexpr);
+    if (partkeyexpr_buf && strcmp(partkeyexpr_buf, "") != 0)
+        partkeyexprIsNull = false;
+    PQclear(partkeyexpr_res);
+    destroyPQExpBuffer(partkeyexpr);
+    return partkeyexprIsNull;
+}
+
+static void GetPartkeyexprSrc(PQExpBuffer result, Archive* fout, TableInfo* tbinfo, bool isSubPart)
+{
+    PQExpBuffer tabledef = createPQExpBuffer();
+    PGresult* tabledef_res = NULL;
+    int i_tabledef;
+    appendPQExpBuffer(tabledef,"select pg_get_tabledef(\'%s\');",tbinfo->dobj.name);
+    tabledef_res = ExecuteSqlQueryForSingleRow(fout, tabledef->data);
+    i_tabledef = PQfnumber(tabledef_res, "pg_get_tabledef");
+    char* tabledef_buf = PQgetvalue(tabledef_res, 0, i_tabledef);
+    std::string tabledef_str(tabledef_buf);
+    size_t start;
+    if (isSubPart) {
+        start = tabledef_str.find("SUBPARTITION BY");
+        start+=16;
+    } else {
+        start = tabledef_str.find("PARTITION BY");
+        start+=13;
+    }
+    destroyPQExpBuffer(tabledef);
+    PQclear(tabledef_res);
+    if (start != std::string::npos) {
+        std::string tmp = tabledef_str.substr(start);
+        size_t pos = tmp.find("(");
+        size_t i = 0;
+        size_t j = pos+1;
+        size_t icount = 0;
+        size_t jcount = 0;
+        i = tmp.find(")");
+        while ((j = tmp.find("(", j)) != std::string::npos && j < i) {
+            j++;
+            jcount++;
+        }
+        while (i != std::string::npos && icount < jcount) {
+            i++;
+            i = tmp.find(")", i);
+            icount++;
+        }
+        std::string res = tmp.substr(pos+1,i-pos-1);
+        appendPQExpBuffer(result, "%s", res.c_str());
+    }
+}
+
 static void GenerateSubPartitionBy(PQExpBuffer result, Archive *fout, TableInfo *tbinfo)
 {
     int i;
@@ -17509,6 +17586,7 @@ static void GenerateSubPartitionBy(PQExpBuffer result, Archive *fout, TableInfo 
     PQExpBuffer subPartStrategyQ = createPQExpBuffer();
     PGresult *res = NULL;
 
+    bool partkeyexprIsNull = PartkeyexprIsNull(fout, tbinfo, true);
     /* get subpartitioned table's partstrategy */
     appendPQExpBuffer(subPartStrategyQ,
         "SELECT partstrategy "
@@ -17550,14 +17628,19 @@ static void GenerateSubPartitionBy(PQExpBuffer result, Archive *fout, TableInfo 
     }
 
     /* assign subpartitioning columns */
-    for (i = 0; i < partkeynum; i++) {
-        if (i > 0)
-            appendPQExpBuffer(result, ", ");
-        if (partkeycols[i] < 1) {
-            exit_horribly(NULL, "array index should not be smaller than zero: %d\n", partkeycols[i] - 1);
+    if (partkeyexprIsNull) {
+        for (i = 0; i < partkeynum; i++) {
+            if (i > 0)
+                appendPQExpBuffer(result, ", ");
+            if (partkeycols[i] < 1) {
+                exit_horribly(NULL, "array index should not be smaller than zero: %d\n", partkeycols[i] - 1);
+            }
+            appendPQExpBuffer(result, "%s", fmtId(tbinfo->attnames[partkeycols[i] - 1]));
         }
-        appendPQExpBuffer(result, "%s", fmtId(tbinfo->attnames[partkeycols[i] - 1]));
+    } else {
+        GetPartkeyexprSrc(result, fout, tbinfo, true);
     }
+
     appendPQExpBuffer(result, ")\n");
 
     PQclear(res);
@@ -17738,6 +17821,7 @@ static PQExpBuffer createTablePartition(Archive* fout, TableInfo* tbinfo)
     int i;
     int j;
 
+    bool partkeyexprIsNull = PartkeyexprIsNull(fout, tbinfo, false);
     /* get partitioned table info */
     appendPQExpBuffer(defq,
         "SELECT partstrategy, interval[1], "
@@ -17804,13 +17888,17 @@ static PQExpBuffer createTablePartition(Archive* fout, TableInfo* tbinfo)
     }
 
     /* assign partitioning columns */
-    for (i = 0; i < partkeynum; i++) {
-        if (i > 0)
-            appendPQExpBuffer(result, ", ");
-        if (partkeycols[i] < 1) {
-            exit_horribly(NULL, "array index should not be smaller than zero: %d\n", partkeycols[i] - 1);
+    if (partkeyexprIsNull) {
+        for (i = 0; i < partkeynum; i++) {
+            if (i > 0)
+                appendPQExpBuffer(result, ", ");
+            if (partkeycols[i] < 1) {
+                exit_horribly(NULL, "array index should not be smaller than zero: %d\n", partkeycols[i] - 1);
+            }
+            appendPQExpBuffer(result, "%s", fmtId(tbinfo->attnames[partkeycols[i] - 1]));
         }
-        appendPQExpBuffer(result, "%s", fmtId(tbinfo->attnames[partkeycols[i] - 1]));
+    } else {
+        GetPartkeyexprSrc(result, fout, tbinfo, false);
     }
 
     if (tbinfo->parttype == PARTTYPE_SUBPARTITIONED_RELATION) {
@@ -18098,7 +18186,14 @@ static void dumpViewSchema(
     appendPQExpBuffer(q, " VIEW %s(%s)", fmtId(tbinfo->dobj.name), schemainfo);
     if ((tbinfo->reloptions != NULL) && strlen(tbinfo->reloptions) > 0)
         appendPQExpBuffer(q, " WITH (%s)", tbinfo->reloptions);
-    appendPQExpBuffer(q, " AS\n    %s\n", viewdef);
+    appendPQExpBuffer(q, " AS\n    ");
+
+    Assert(viewdef[strlen(viewdef) - 1] == ';');
+    appendBinaryPQExpBuffer(q, viewdef, strlen(viewdef) - 1);
+
+    if (tbinfo->checkoption != NULL)
+        appendPQExpBuffer(q, "\n  WITH %s CHECK OPTION", tbinfo->checkoption);
+    appendPQExpBuffer(q, ";\n");
 
     appendPQExpBuffer(labelq, "VIEW %s", fmtId(tbinfo->dobj.name));
 

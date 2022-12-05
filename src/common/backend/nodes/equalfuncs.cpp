@@ -896,6 +896,7 @@ static bool _equalQuery(const Query* a, const Query* b)
     COMPARE_SCALAR_FIELD(can_push);
     COMPARE_SCALAR_FIELD(unique_check);
     COMPARE_NODE_FIELD(resultRelations);
+    COMPARE_NODE_FIELD(withCheckOptions);
 
     return true;
 }
@@ -1620,6 +1621,7 @@ static bool _equalViewStmt(const ViewStmt* a, const ViewStmt* b)
     COMPARE_SCALAR_FIELD(relkind);
     COMPARE_STRING_FIELD(definer);
     COMPARE_SCALAR_FIELD(is_alter);
+    COMPARE_SCALAR_FIELD(withCheckOption);
 
     return true;
 }
@@ -2805,6 +2807,15 @@ static bool EqualTimeCapsuleClause(const TimeCapsuleClause* a, const TimeCapsule
     return true;
 }
 
+static bool _equalWithCheckOption(const WithCheckOption* a, const WithCheckOption* b)
+{
+    COMPARE_STRING_FIELD(viewname);
+    COMPARE_NODE_FIELD(qual);
+    COMPARE_SCALAR_FIELD(cascaded);
+    COMPARE_SCALAR_FIELD(rtindex);
+
+    return true;
+}
 
 static bool _equalSortGroupClause(const SortGroupClause* a, const SortGroupClause* b)
 {
@@ -4114,6 +4125,9 @@ bool equal(const void* a, const void* b)
             break;
         case T_TimeCapsuleClause:
             retval = EqualTimeCapsuleClause((TimeCapsuleClause*)a, (TimeCapsuleClause*)b);
+            break;
+        case T_WithCheckOption:
+            retval = _equalWithCheckOption((WithCheckOption*)a, (WithCheckOption*)b);
             break;
         case T_SortGroupClause:
             retval = _equalSortGroupClause((SortGroupClause*)a, (SortGroupClause*)b);

@@ -72,12 +72,8 @@ static void gcGetForeignPaths(PlannerInfo* root, RelOptInfo* baserel, Oid foreig
     return;
 }
 
-static ForeignScan *gcGetForeignPlan(PlannerInfo *root,
-                    					   RelOptInfo *baserel,
-                    					   Oid foreigntableid,
-                    					   ForeignPath *best_path,
-                    					   List *tlist,
-                    					   List *scan_clauses)
+static ForeignScan *gcGetForeignPlan(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid,
+ ForeignPath *best_path, List *tlist, List *scan_clauses, Plan *outer_plan)
 {
     DISTRIBUTED_FEATURE_NOT_SUPPORTED();
     return NULL;

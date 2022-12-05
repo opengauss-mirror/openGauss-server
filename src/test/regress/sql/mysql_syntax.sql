@@ -49,6 +49,17 @@ begin
 end;
 /
 
+--different type trigger follows|precedes
+
+create trigger animal_trigger2
+before insert on animals
+for each row
+follows animal_trigger1
+begin
+    insert into food(id, foodtype, remark, time_flag) values (2,'chocolate', 'sdsdsdsd', now());
+end;
+/
+
 create trigger animal_trigger2
 after insert on animals
 for each row
@@ -128,7 +139,170 @@ begin
     insert into food(id, foodtype, remark, time_flag) values (1,'ice cream', 'sdsdsdsd', now());
 end;
 /
+
+CREATE OR REPLACE FUNCTION tri_insert_func() RETURNS TRIGGER AS
+$$
+DECLARE
+BEGIN
+INSERT INTO food(id, foodtype, remark, time_flag) values (1,'ice cream', 'sdsdsdsd', now());
+RETURN NEW;
+END
+$$ LANGUAGE PLPGSQL;
+
+create trigger trigger_rename_test
+after insert on animals
+for each row
+EXECUTE PROCEDURE tri_insert_func();
+
+create trigger trigger_rename_test
+after insert on food
+for each row
+EXECUTE PROCEDURE tri_insert_func();
+
+drop trigger trigger_rename_test;
+-- drop trigger test
+drop trigger animal_trigger1;
+drop trigger animal_trigger1;
+drop trigger if exists animal_trigger1;
 drop table food;
 drop table animals;
+
+DROP TABLE t_trigger cascade;
+CREATE TABLE t_trigger(
+id int primary key,
+name varchar(20) not null
+)partition by hash(id)
+(partition p1 ,
+partition p2,
+partition p3);
+INSERT INTO t_trigger values(1,'liuyi');
+INSERT INTO t_trigger values(2,'chener');
+DROP TABLE t_func_trigger;
+CREATE TABLE t_func_trigger(rep text);
+create user vbadmin password 'Aa@111111';
+CREATE definer=vbadmin TRIGGER trigger_insert
+AFTER insert
+ON t_trigger
+FOR EACH ROW
+BEGIN 
+insert into t_func_trigger(rep) values('after insert');END;
+/
+drop trigger trigger_insert on t_trigger;
+drop user vbadmin;
+-- test declare cursor
+create table company(name varchar(100), loc varchar(100), no integer);
+insert into company values ('macrosoft',    'usa',          001);
+insert into company values ('oracle',       'usa',          002);
+insert into company values ('backberry',    'canada',       003);
+create or replace procedure test_cursor_1 
+as
+    company_name    varchar(100);
+    company_loc varchar(100);
+    company_no  integer;
+
+begin 
+    declare c1_all cursor is --cursor without args 
+        select name, loc, no from company order by 1, 2, 3;
+    if not c1_all%isopen then
+        open c1_all;
+    end if;
+    loop
+        fetch c1_all into company_name, company_loc, company_no;
+        exit when c1_all%notfound;
+        raise notice '% : % : %',company_name,company_loc,company_no;
+    end loop;
+    if c1_all%isopen then
+        close c1_all;
+    end if;
+end;
+/
+call test_cursor_1();
+-- test declare condition
+create or replace procedure test_condition_1 as
+declare
+    a int;
+BEGIN
+    declare DIVISION_ZERO condition for SQLSTATE '22012';
+    a := 1/0;
+exception
+    when DIVISION_ZERO then
+    BEGIN
+        RAISE NOTICE 'SQLSTATE = %, SQLERRM = %', SQLSTATE,SQLERRM;
+    END;
+END;
+/
+call test_condition_1();
+-- test rename condition
+create or replace procedure test_condition_2 as
+declare
+    a int;
+BEGIN
+    declare DIVISION_ZERO condition for SQLSTATE '22012';
+    declare DIVISION_ZERO_two condition for SQLSTATE '22012';
+    a := 1/0;
+exception
+    when DIVISION_ZERO then
+    BEGIN
+        RAISE NOTICE 'SQLSTATE = %, SQLERRM = %', SQLSTATE,SQLERRM;
+    END;
+END;
+/
+call test_condition_2();
+
+-- test reuse condition name
+create or replace procedure test_condition_3 as
+declare
+    a int;
+BEGIN
+    declare DIVISION_ZERO condition for SQLSTATE '22012';
+    declare DIVISION_ZERO condition for SQLSTATE '22005';
+    a := 1/0;
+exception
+    when DIVISION_ZERO then
+    BEGIN
+        RAISE NOTICE 'SQLSTATE = %, SQLERRM = %', SQLSTATE,SQLERRM;
+    END;
+END;
+/
+-- declare condition sqlcode
+create or replace procedure test_condition_4 as
+BEGIN
+    declare DIVISION_ZERO condition for 1;
+    RAISE NOTICE 'declare condition successed';
+END;
+/
+call test_condition_4();
+-- declare condition sqlcode 0
+create or replace procedure test_condition_5 as
+BEGIN
+    declare DIVISION_ZERO condition for 0;
+    RAISE NOTICE 'declare condition successed';
+END;
+/
+-- declare condition sqlstate begin with '00'
+create or replace procedure test_condition_6 as
+BEGIN
+    declare DIVISION_ZERO condition for sqlstate '00000';
+    RAISE NOTICE 'declare condition successed';
+END;
+/
+
 \c regression
+drop trigger animal_trigger1;
+drop trigger if exists animal_trigger1;
 drop database db_mysql;
+
+-- test declare condition in other compatibility
+create or replace procedure test_condition_1 as
+declare
+    a int;
+BEGIN
+    declare DIVISION_ZERO condition for SQLSTATE '22012';
+    a := 1/0;
+exception
+    when DIVISION_ZERO then
+    BEGIN
+        RAISE NOTICE 'SQLSTATE = %, SQLERRM = %', SQLSTATE,SQLERRM;
+    END;
+END;
+/

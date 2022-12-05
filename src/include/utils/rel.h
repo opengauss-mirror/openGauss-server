@@ -405,6 +405,7 @@ typedef struct StdRdOptions {
     bool enable_tde;     /* switch flag for table-level TDE encryption */
     bool on_commit_delete_rows; /* global temp table */
     PageCompressOpts compress; /* page compress related reloptions. */
+    int check_option_offset; /* for views */
 } StdRdOptions;
 
 #define HEAP_MIN_FILLFACTOR 10
@@ -462,6 +463,39 @@ typedef struct StdRdOptions {
  */
 #define RelationIsSecurityView(relation) \
     ((relation)->rd_options ? ((StdRdOptions*)(relation)->rd_options)->security_barrier : false)
+
+/*
+ * RelationHasCheckOption
+ *		Returns true if the relation is a view defined with either the local
+ *		or the cascaded check option.
+ */
+#define RelationHasCheckOption(relation)                                  \
+    ((relation)->rd_options &&                                            \
+     ((StdRdOptions *) (relation)->rd_options)->check_option_offset != 0)
+
+/*
+ * RelationHasLocalCheckOption
+ *		Returns true if the relation is a view defined with the local check
+ *		option.
+ */
+#define RelationHasLocalCheckOption(relation)                               \
+    ((relation)->rd_options &&                                              \
+    ((StdRdOptions *) (relation)->rd_options)->check_option_offset != 0 ?   \
+    strcmp((char *) (relation)->rd_options +                                \
+            ((StdRdOptions *) (relation)->rd_options)->check_option_offset, \
+            "local") == 0 : false)
+
+/*
+ * RelationHasCascadedCheckOption
+ *		Returns true if the relation is a view defined with the cascaded check
+ *		option.
+ */
+#define RelationHasCascadedCheckOption(relation)                            \
+    ((relation)->rd_options &&                                              \
+     ((StdRdOptions *) (relation)->rd_options)->check_option_offset != 0 ?  \
+     strcmp((char *) (relation)->rd_options +                               \
+            ((StdRdOptions *) (relation)->rd_options)->check_option_offset, \
+            "cascaded") == 0 : false)
 
 /*
  * RelationGetParallelWorkers

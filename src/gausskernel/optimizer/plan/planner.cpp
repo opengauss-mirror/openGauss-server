@@ -1191,6 +1191,22 @@ void recover_set_hint(int savedNestLevel)
     u_sess->attr.attr_common.node_name = "";
 }
 
+static bool has_foreign_table_in_rtable(Query* query)
+{
+    ListCell* lc = NULL;
+    RangeTblEntry* rte = NULL;
+    foreach(lc, query->rtable) {
+        rte = (RangeTblEntry*)lfirst(lc);
+        if (rte->rtekind != RTE_RELATION) {
+            continue;
+        }
+        if (rte->relkind == RELKIND_FOREIGN_TABLE) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /* --------------------
  * subquery_planner
  *	  Invokes the planner on a subquery.  We recurse to here for each
@@ -1224,6 +1240,7 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
     int num_old_subplans = list_length(glob->subplans);
     PlannerInfo* root = NULL;
     Plan* plan = NULL;
+    List* newWithCheckOptions = NIL;
     List* newHaving = NIL;
     bool hasOuterJoins = false;
     bool hasResultRTEs = false;
@@ -1552,6 +1569,15 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
      */
     parse->targetList = (List*)preprocess_expression(root, (Node*)parse->targetList, EXPRKIND_TARGET);
 
+    foreach(l, parse->withCheckOptions) {
+        WithCheckOption* wco = (WithCheckOption*)lfirst(l);
+
+        wco->qual = preprocess_expression(root, wco->qual, EXPRKIND_QUAL);
+        if (wco->qual != NULL)
+            newWithCheckOptions = lappend(newWithCheckOptions, wco);
+    }
+    parse->withCheckOptions = newWithCheckOptions;
+
     parse->returningList = (List*)preprocess_expression(root, (Node*)parse->returningList, EXPRKIND_TARGET);
 
     preprocess_qual_conditions(root, (Node*)parse->jointree);
@@ -1747,6 +1773,9 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
                 context.func_exprs = NIL;
                 support_rewrite = false;
             }
+            if (has_foreign_table_in_rtable(root->parse)) {
+                support_rewrite = false;
+            }
             if (support_rewrite) {
                 reduce_inequality_fulljoins(root);
                 DEBUG_QRW("After full join conversion");
@@ -1784,6 +1813,7 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
         plan = grouping_planner(root, tuple_fraction);
         /* If it's not SELECT, we need a ModifyTable node */
         if (parse->commandType != CMD_SELECT) {
+            List* withCheckOptionLists = NIL;
             List* returningLists = NIL;
             List* rowMarks = NIL;
             Relation mainRel = NULL;
@@ -1793,8 +1823,14 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
             RelationClose(mainRel);
 
             /*
-             * Set up the RETURNING list-of-lists, if needed.
+             * Set up the WITH CHECK OPTION and RETURNING lists-of-lists, if
+             * needed.
              */
+            if (parse->withCheckOptions)
+                withCheckOptionLists = list_make1(parse->withCheckOptions);
+            else
+                withCheckOptionLists = NIL;
+
             if (parse->returningList)
                 returningLists = list_make1(parse->returningList);
             else
@@ -1815,6 +1851,7 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
                 parse->canSetTag,
                 list_make1(parse->resultRelations),
                 list_make1(plan),
+                withCheckOptionLists,
                 returningLists,
                 rowMarks,
                 SS_assign_special_param(root),
@@ -1828,6 +1865,7 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
                 parse->canSetTag,
                 list_make1(parse->resultRelations),
                 list_make1(plan),
+                withCheckOptionLists,
                 returningLists,
                 rowMarks,
                 SS_assign_special_param(root),
@@ -2609,6 +2647,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
     char PlanContextName[NAMEDATALEN] = {0};
     MemoryContext PlanGenerateContext = NULL;
     MemoryContext oldcontext = NULL;
+    FDWUpperRelCxt* ufdwCxt = NULL;
     errno_t rc = EOK;
 
     /*
@@ -2704,6 +2743,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
         List* sub_tlist = NIL;
         double sub_limit_tuples;
         AttrNumber* groupColIdx = NULL;
+        bool need_try_fdw_plan = false;
         bool need_tlist_eval = true;
         Path* cheapest_path = NULL;
         Path* sorted_path = NULL;
@@ -3076,6 +3116,11 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
 
             rel_info = best_path->parent;
 
+            /* if it is an foreign rel, try to create foreign plan continue */
+            if (rel_info != NULL && rel_info->fdwroutine != NULL) {
+                need_try_fdw_plan = true;
+            }
+
             /*
              * For dummy plan, we should return it quickly. Meanwhile, we should
              * eliminate agg node, or an error will thrown out later
@@ -3209,6 +3254,10 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                     disuse_physical_tlist(result_plan, best_path);
 
                 locate_grouping_columns(root, tlist, result_plan->targetlist, groupColIdx);
+            }
+            
+            if (need_try_fdw_plan) {
+                ufdwCxt = InitFDWUpperPlan(root, rel_info, result_plan);
             }
 #ifdef ENABLE_MULTIPLE_NODES
             /* shuffle to another node group in FORCE mode (CNG_MODE_FORCE) */
@@ -3819,6 +3868,18 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                     result_plan = (Plan*)make_append(plans, tlist);
                 }
             }
+
+            if (parse->hasAggs || parse->groupClause != NIL || parse->groupingSets || parse->havingQual != NULL) {
+                if (ufdwCxt != NULL && ufdwCxt->state != FDW_UPPER_REL_END) {
+                    GroupPathExtraData *extra = (GroupPathExtraData*)palloc0(sizeof(GroupPathExtraData));
+                    extra->havingQual = parse->havingQual;
+                    extra->targetList = parse->targetList;
+                    extra->partial_costs_set = false;
+                    ufdwCxt->groupExtra = extra;
+                    AdvanceFDWUpperPlan(ufdwCxt, UPPERREL_GROUP_AGG, result_plan);
+                }
+            }
+
 #ifdef PGXC
             /*
              * Grouping will certainly not increase the number of rows
@@ -3980,6 +4041,10 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                     result_plan = (Plan*)mark_windowagg_stream(root, result_plan, tlist, wc, current_pathkeys, wflists);
                 }
 #endif
+            }
+
+            if (ufdwCxt != NULL && ufdwCxt->state != FDW_UPPER_REL_END) {
+                AdvanceFDWUpperPlan(ufdwCxt, UPPERREL_WINDOW, result_plan);
             }
         }
         (void)MemoryContextSwitchTo(oldcontext);
@@ -4175,6 +4240,10 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
             }
 #endif
         }
+
+        if (ufdwCxt != NULL && ufdwCxt->state != FDW_UPPER_REL_END) {
+            AdvanceFDWUpperPlan(ufdwCxt, UPPERREL_WINDOW, result_plan);
+        }
     }
 
     /*
@@ -4199,6 +4268,10 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
 #ifndef PGXC
         current_pathkeys = NIL;
 #endif
+
+        if (ufdwCxt != NULL && ufdwCxt->state != FDW_UPPER_REL_END) {
+            AdvanceFDWUpperPlan(ufdwCxt, UPPERREL_ROWMARKS, result_plan);
+        }
     }
 
     /*
@@ -4226,6 +4299,12 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                 result_plan = (Plan*)create_remotesort_plan(root, result_plan);
 #endif /* PGXC */
             current_pathkeys = root->sort_pathkeys;
+        }
+
+        if (ufdwCxt != NULL && ufdwCxt->state != FDW_UPPER_REL_END) {
+            ufdwCxt->orderExtra = (OrderPathExtraData*)palloc(sizeof(OrderPathExtraData));
+            ufdwCxt->orderExtra->targetList = result_plan->targetlist;
+            AdvanceFDWUpperPlan(ufdwCxt, UPPERREL_ORDERED, result_plan);
         }
     }
 
@@ -4256,6 +4335,27 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
         if (IS_PGXC_COORDINATOR && !IsConnFromCoord() && !IS_STREAM)
             result_plan = (Plan*)create_remotelimit_plan(root, result_plan);
 #endif /* PGXC */
+
+        if (ufdwCxt != NULL && ufdwCxt->state != FDW_UPPER_REL_END) {
+            ufdwCxt->finalExtra->limit_needed = true;
+            ufdwCxt->finalExtra->limit_tuples = limit_tuples;
+            ufdwCxt->finalExtra->count_est = count_est;
+            ufdwCxt->finalExtra->offset_est = offset_est;
+            AdvanceFDWUpperPlan(ufdwCxt, UPPERREL_LIMIT, result_plan);
+        }
+    }
+
+    if (ufdwCxt != NULL && ufdwCxt->state != FDW_UPPER_REL_END) {
+        Assert(!IS_STREAM_PLAN);
+        ufdwCxt->finalExtra->targetList = result_plan->targetlist;
+
+        AdvanceFDWUpperPlan(ufdwCxt, UPPERREL_FINAL, result_plan);
+
+        /* apply plan. */
+        if (ufdwCxt->resultPlan != NULL) {
+            result_plan = ufdwCxt->resultPlan;
+            current_pathkeys = ufdwCxt->resultPathKeys;
+        }
     }
 
 #ifdef STREAMPLAN
@@ -4977,7 +5077,7 @@ static void preprocess_rowmarks(PlannerInfo* root)
         PlanRowMark* newrc = NULL;
 
         i++;
-        if (rte->rtekind == RTE_JOIN || rte->rtekind == RTE_REMOTE_DUMMY)
+        if (rte->rtekind == RTE_JOIN || rte->rtekind == RTE_REMOTE_DUMMY || rte->relkind == RELKIND_VIEW)
             continue;
         if (!bms_is_member(i, rels) && list_length(parse->resultRelations) <= 1)
             continue;
@@ -9014,6 +9114,12 @@ static bool CheckWindowsAggExpr(Plan* resultPlan, bool check_rescan, VectorPlanC
 static bool CheckForeignScanExpr(Plan* resultPlan, VectorPlanContext* planContext)
 {
     ForeignScan* fscan = (ForeignScan*)resultPlan;
+
+    /* only support foreign scan for base rel, not support for join\agg\etc. */
+    if (!OidIsValid(fscan->scan_relid)) {
+        return false;
+    }
+
     if (IsSpecifiedFDWFromRelid(fscan->scan_relid, GC_FDW) ||
         IsSpecifiedFDWFromRelid(fscan->scan_relid, LOG_FDW)) {
         resultPlan->vec_output = false;

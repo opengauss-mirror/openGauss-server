@@ -716,10 +716,13 @@ void get_relation_info(PlannerInfo* root, Oid relationObjectId, bool inhparent, 
     setRelStoreInfo(rel, relation);
 
     /* Grab the fdwroutine info using the relcache, while we have it */
-    if (relation->rd_rel->relkind == RELKIND_FOREIGN_TABLE || relation->rd_rel->relkind == RELKIND_STREAM)
+    if (relation->rd_rel->relkind == RELKIND_FOREIGN_TABLE || relation->rd_rel->relkind == RELKIND_STREAM) {
+        rel->serverid = GetForeignServerIdByRelId(RelationGetRelid(relation));
         rel->fdwroutine = GetFdwRoutineForRelation(relation, true);
-    else
+    } else {
+        rel->serverid = InvalidOid;
         rel->fdwroutine = NULL;
+    }
 
     heap_close(relation, NoLock);
 

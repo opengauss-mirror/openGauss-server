@@ -32,8 +32,6 @@
 #include "utils/lsyscache.h"
 
 static PathKey* makePathKey(EquivalenceClass* eclass, Oid opfamily, int strategy, bool nulls_first);
-static PathKey* make_canonical_pathkey(
-    PlannerInfo* root, EquivalenceClass* eclass, Oid opfamily, int strategy, bool nulls_first);
 static bool pathkey_is_redundant(PathKey* new_pathkey, List* pathkeys, bool predpush = false);
 static bool right_merge_direction(PlannerInfo* root, PathKey* pathkey);
 
@@ -68,7 +66,7 @@ static PathKey* makePathKey(EquivalenceClass* eclass, Oid opfamily, int strategy
  * Note that this function must not be used until after we have completed
  * merging EquivalenceClasses.
  */
-static PathKey* make_canonical_pathkey(
+PathKey* make_canonical_pathkey(
     PlannerInfo* root, EquivalenceClass* eclass, Oid opfamily, int strategy, bool nulls_first)
 {
     PathKey* pk = NULL;

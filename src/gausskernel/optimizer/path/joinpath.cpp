@@ -14,6 +14,7 @@
  * -------------------------------------------------------------------------
  */
 #include "postgres.h"
+#include "foreign/fdwapi.h"
 #include "knl/knl_variable.h"
 
 #include <math.h>
@@ -337,6 +338,15 @@ void add_paths_to_joinrel(PlannerInfo* root, RelOptInfo* joinrel, RelOptInfo* ou
 
     list_free_ext(mergejoin_hint);
     list_free_ext(hashjoin_hint);
+
+    /*
+     * 5. If inner and outer relations are foreign tables (or joins) belonging
+     * to the same server and assigned to the same user to check access
+     * permissions as, give the FDW a chance to push down joins.
+     */
+    if (joinrel->fdwroutine && joinrel->fdwroutine->GetForeignJoinPaths) {
+        joinrel->fdwroutine->GetForeignJoinPaths(root, joinrel, outerrel, innerrel, jointype, sjinfo, restrictlist);
+    }
 
     /*
      * Finally, give extensions a change to manipulate the path list.

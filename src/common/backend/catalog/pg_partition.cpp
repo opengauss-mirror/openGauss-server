@@ -47,7 +47,7 @@
 
 void insertPartitionEntry(Relation pg_partition_desc, Partition new_part_desc, Oid new_part_id, int2vector* pkey,
     const oidvector* tablespaces, Datum interval, Datum maxValues, Datum transitionPoint, Datum reloptions,
-    char parttype)
+    char parttype, bool partkeyexprIsNull)
 {
     Datum values[Natts_pg_partition];
     bool nulls[Natts_pg_partition];
@@ -148,7 +148,11 @@ void insertPartitionEntry(Relation pg_partition_desc, Partition new_part_desc, O
         values[Anum_pg_partition_relminmxid - 1] = InvalidMultiXactId;
 #endif
     }
-
+    if (partkeyexprIsNull) {
+        nulls[Anum_pg_partition_partkeyexpr - 1] = true;
+    } else {
+        values[Anum_pg_partition_partkeyexpr - 1] = CStringGetTextDatum("");
+    }
     /* form a tuple using values and null array, and insert it */
     tup = heap_form_tuple(RelationGetDescr(pg_partition_desc), values, nulls);
     HeapTupleSetOid(tup, new_part_id);
@@ -1523,3 +1527,25 @@ void UnlockRelationForAddIntervalPartition(Relation rel)
     t_thrd.utils_cxt.CurrentResourceOwner = currentOwner;
 }
 
+bool PartExprKeyIsNull(Relation rel, Relation partitionRel)
+{
+    Relation pgPartitionRel = partitionRel;
+    HeapTuple partTuple = NULL;
+    if (!partitionRel)
+        pgPartitionRel = heap_open(PartitionRelationId, RowExclusiveLock);
+    if (OidIsValid(rel->parentId))
+        partTuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(rel->rd_id));
+    else
+        partTuple = searchPgPartitionByParentIdCopy(PART_OBJ_TYPE_PARTED_TABLE, rel->rd_id);
+    if (!partTuple)
+        ereport(ERROR,(errcode(ERRCODE_PARTITION_ERROR),errmsg("The partition can't be found")));
+    bool isnull = false;
+    fastgetattr(partTuple, Anum_pg_partition_partkeyexpr, RelationGetDescr(pgPartitionRel), &isnull);
+    if (OidIsValid(rel->parentId))
+        ReleaseSysCache(partTuple);
+    else
+        heap_freetuple(partTuple);
+    if (!partitionRel)
+        heap_close(pgPartitionRel, RowExclusiveLock);
+    return isnull;
+}
