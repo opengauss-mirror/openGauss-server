@@ -1,0 +1,1 @@
+add_custom_target(check COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/run_check.sh ${CMAKE_CURRENT_SOURCE_DIR} \$\(p\))

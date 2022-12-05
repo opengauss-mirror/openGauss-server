@@ -11,6 +11,7 @@ set(CMAKE_MODULE_PATH
 add_subdirectory(isolation)
 if ("${ENABLE_MULTIPLE_NODES}" STREQUAL "OFF")
     add_subdirectory(regress)
+    add_subdirectory(subscription)
 endif ()
 
 if ("${ENABLE_UT}" STREQUAL "ON" AND "${ENABLE_MULTIPLE_NODES}" STREQUAL "OFF")
