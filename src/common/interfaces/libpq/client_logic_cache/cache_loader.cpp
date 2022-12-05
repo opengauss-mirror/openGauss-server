@@ -249,44 +249,52 @@ size_t CacheLoader::get_object_fqdn(const char *object_name, const bool is_globa
 void CacheLoader::load_search_path(const char *search_path, const char *user_name)
 {
     m_search_path_list.clear();
-    /*
-     * search if there is more than 1 schema in search_path
-     * if there is, comma will separate between schemas names
-     */
-    size_t search_path_size = strlen(search_path);
-    size_t schema_start(0);
-    size_t schema_end(0);
-    for (size_t i = 0; i < search_path_size; ++i) {
-        bool is_delimiter(false);
+ 
+    const char *paths;
+    const char *path;
+    size_t pathlen;
+    char tmp[NAMEDATALEN] = {0};
 
-        /* check if end of string */
-        if (i + 1 == search_path_size) {
-            schema_end = i;
-        } else if (search_path[i + 1] == ',') {
-            /*
-             * check for delimiter
-             */
-            is_delimiter = true;
-            schema_end = i;
-        } else {
-            continue;
+    if (search_path == NULL) {
+        return;
+    }
+
+	/*
+	 * spilit paths into several path with ','
+	 * strip whitespace at both head and tail of each path
+	 * we are consistent with the back-end who calls SplitIdentifierString()
+	 *
+	 * e.g.
+	 *		spilit "a,b,, , c,d ,  e   "
+	 * 		into   {"a", "b", "c", "d", "e"}
+	 */
+    paths = search_path;
+    path = paths;
+    pathlen = 0;
+    for (; paths[0] != '\0'; paths++) {
+        if (paths[0] != ',') {
+            pathlen++;
+            if (paths[1] != '\0') {
+                continue;
+            }
         }
 
-        NameData schema;
-        check_strncpy_s(
-            strncpy_s(schema.data, sizeof(schema.data), search_path + schema_start, schema_end - schema_start + 1));
-        if (pg_strcasecmp(schema.data, "\"$user\"") == 0) {
-            m_search_path_list.add_user_schema(user_name);
-        } else {
-            m_search_path_list.add(schema.data);
+        for (; path[0] == ' '; pathlen--, path++) {}; /* skip whitespace at the head */
+        if (pathlen != 0) {
+            for (; path[pathlen - 1] == ' '; pathlen--) {}; /* skip whitespace at the tail */
+            if (pathlen != 0) {
+                check_strncpy_s(strncpy_s(tmp, NAMEDATALEN, path, pathlen));
+                if (pg_strcasecmp(tmp, "\"$user\"") == 0) {
+                    m_search_path_list.add_user_schema(user_name);
+                } else {
+                    m_search_path_list.add(tmp);
+                }
+            }
         }
 
-        /*
-         * if there's a delimiter so there probably is another schema after the delimiter but let's make sure
-         */
-        if (is_delimiter && (i + 2 < search_path_size)) { /* 2 is the size of , + 1 */
-            schema_start = i + 2;
-        }
+        check_memset_s(memset_s(tmp, NAMEDATALEN, 0, NAMEDATALEN));
+        path = paths + 1;
+        pathlen = 0;
     }
 }
 
