@@ -42,6 +42,14 @@ typedef struct {
     List* activeWindows;
 } WindowLists;
 
+typedef struct {
+    ParamListInfo boundParams;
+    PlannerInfo* root;
+    List* active_fns;
+    Node* case_val;
+    bool estimate;
+} eval_const_expressions_context;
+
 typedef enum { UNIQUE_CONSTRAINT, NOT_NULL_CONSTRAINT } constraintType;
 
 extern Expr* make_opclause(
@@ -145,5 +153,7 @@ static inline void ExcludeRownumExpr(ParseState* pstate, Node* expr)
 extern List* get_quals_lists(Node *jtnode);
 
 extern bool isTableofType(Oid typeOid, Oid* base_oid, Oid* indexbyType);
+extern Expr* simplify_function(Oid funcid, Oid result_type, int32 result_typmod, Oid result_collid, Oid input_collid,
+    List** args_p, bool process_args, bool allow_non_const, eval_const_expressions_context* context);
 
 #endif /* CLAUSES_H */

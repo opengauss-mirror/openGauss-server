@@ -118,6 +118,13 @@ static void AddDefaultExprNode(ParseState* pstate)
     int fieldCnt = rdAtt->natts;
     refState->constValues = (Const**)palloc0(sizeof(Const) * fieldCnt);
     
+    eval_const_expressions_context context;
+    context.boundParams = nullptr;
+    context.root = nullptr;
+    context.active_fns = NIL;
+    context.case_val = NULL;
+    context.estimate = false;
+
     for (int i = 0; i < fieldCnt; ++i) {
         Form_pg_attribute attTup = rdAtt->attrs[i];
         if (IsAutoIncrementColumn(rdAtt, i + 1)) {
@@ -126,9 +133,21 @@ static void AddDefaultExprNode(ParseState* pstate)
         } else if (ISGENERATEDCOL(rdAtt, i)) {
             refState->constValues[i] = nullptr;
         } else {
-            Node* expr = build_column_default(relation, i + 1, true);
-            if (expr && IsA(expr, Const)) {
-                refState->constValues[i] = (Const*)expr;
+            Node* node = build_column_default(relation, i + 1, true);
+            if (node == nullptr) {
+                refState->constValues[i] = nullptr;
+            } else if (IsA(node, Const)) {
+                refState->constValues[i] = (Const*)node;
+            } else if (IsA(node, FuncExpr)) {
+                FuncExpr* expr = (FuncExpr*)node;
+                List* args = expr->args;
+                Expr* simple = simplify_function(expr->funcid, expr->funcresulttype, exprTypmod((const Node*)expr), 
+                                                    expr->funccollid, expr->inputcollid, &args, true, false, &context);
+                if (simple && IsA(simple, Const)) {
+                    refState->constValues[i] = (Const*)simple;
+                } else {
+                    refState->constValues[i] = nullptr;
+                }
             } else {
                 refState->constValues[i] = nullptr;
             }

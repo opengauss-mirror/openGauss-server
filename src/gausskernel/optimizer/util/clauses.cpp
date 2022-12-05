@@ -65,14 +65,6 @@ typedef struct {
 } count_agg_clauses_context;
 
 typedef struct {
-    ParamListInfo boundParams;
-    PlannerInfo* root;
-    List* active_fns;
-    Node* case_val;
-    bool estimate;
-} eval_const_expressions_context;
-
-typedef struct {
     int nargs;
     List* args;
     int* usecounts;
@@ -125,8 +117,6 @@ static List* simplify_or_arguments(
 static List* simplify_and_arguments(
     List* args, eval_const_expressions_context* context, bool* haveNull, bool* forceFalse);
 static Node* simplify_boolean_equality(Oid opno, List* args);
-static Expr* simplify_function(Oid funcid, Oid result_type, int32 result_typmod, Oid result_collid, Oid input_collid,
-    List** args_p, bool process_args, bool allow_non_const, eval_const_expressions_context* context);
 static List* expand_function_arguments(List* args, Oid result_type, HeapTuple func_tuple);
 static List* reorder_function_arguments(List* args, HeapTuple func_tuple);
 static List* add_function_defaults(List* args, HeapTuple func_tuple);
@@ -3665,7 +3655,7 @@ static Node* simplify_boolean_equality(Oid opno, List* args)
  * will be done even if simplification of the function call itself is not
  * possible.
  */
-static Expr* simplify_function(Oid funcid, Oid result_type, int32 result_typmod, Oid result_collid, Oid input_collid,
+Expr* simplify_function(Oid funcid, Oid result_type, int32 result_typmod, Oid result_collid, Oid input_collid,
     List** args_p, bool process_args, bool allow_non_const, eval_const_expressions_context* context)
 {
     List* args = *args_p;
