@@ -943,8 +943,6 @@ test: publication
 test: subscription
 test: fdw_audit
 test: gs_global_config_audit
-<<<<<<< HEAD
-<<<<<<< HEAD
 test: detail
 test: gs_dump_encrypt
 test: composite_datum_record
