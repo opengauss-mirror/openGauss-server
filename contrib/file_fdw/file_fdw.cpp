@@ -106,8 +106,8 @@ PG_FUNCTION_INFO_V1(file_fdw_validator);
  */
 static void fileGetForeignRelSize(PlannerInfo* root, RelOptInfo* baserel, Oid foreigntableid);
 static void fileGetForeignPaths(PlannerInfo* root, RelOptInfo* baserel, Oid foreigntableid);
-static ForeignScan* fileGetForeignPlan(PlannerInfo* root, RelOptInfo* baserel, Oid foreigntableid,
-    ForeignPath* best_path, List* tlist, List* scan_clauses);
+static ForeignScan *fileGetForeignPlan(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid,
+    ForeignPath *best_path, List *tlist, List *scan_clauses, Plan *outer_plan);
 static void fileExplainForeignScan(ForeignScanState* node, ExplainState* es);
 static void fileBeginForeignScan(ForeignScanState* node, int eflags);
 static TupleTableSlot* fileIterateForeignScan(ForeignScanState* node);
@@ -452,8 +452,9 @@ static void fileGetForeignPaths(PlannerInfo* root, RelOptInfo* baserel, Oid fore
             startup_cost,
             total_cost,
             NIL,   /* no pathkeys */
-            NULL,  /* no outer rel either */
-            NIL)); /* no fdw_private data */
+            NULL,  /* no outer rel either  */
+            NULL,  /* no outer path either */
+            NIL)); /* no fdw_private data  */
 
     /*
      * If data file was sorted, and we knew it somehow, we could insert
@@ -464,10 +465,10 @@ static void fileGetForeignPaths(PlannerInfo* root, RelOptInfo* baserel, Oid fore
 
 /*
  * fileGetForeignPlan
- *		Create a ForeignScan plan node for scanning the foreign table
+ * 		Create a ForeignScan plan node for scanning the foreign table
  */
-static ForeignScan* fileGetForeignPlan(
-    PlannerInfo* root, RelOptInfo* baserel, Oid foreigntableid, ForeignPath* best_path, List* tlist, List* scan_clauses)
+static ForeignScan *fileGetForeignPlan(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid,
+    ForeignPath *best_path, List *tlist, List *scan_clauses, Plan *outer_plan)
 {
     Index scan_relid = baserel->relid;
 
@@ -485,8 +486,11 @@ static ForeignScan* fileGetForeignPlan(
         scan_clauses,
         scan_relid,
         NIL, /* no expressions to evaluate */
+        NIL, /* no private state either */
         NIL,
-        EXEC_ON_DATANODES); /* no private state either */
+        NIL,
+        NULL,
+        EXEC_ON_DATANODES);
 }
 
 /*

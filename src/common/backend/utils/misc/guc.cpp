@@ -1921,6 +1921,18 @@ static void InitConfigureNamesBool()
             NULL,
             NULL
         },
+        {{"show_fdw_remote_plan",
+            PGC_USERSET,
+            NODE_SINGLENODE,
+            UNGROUPED,
+            gettext_noop("show remote plan of a foreign scan."),
+            NULL},
+            &u_sess->attr.attr_common.show_fdw_remote_plan,
+            false,
+            NULL,
+            NULL,
+            NULL
+        },
         /* End-of-list marker */
         {{NULL,
             (GucContext)0,

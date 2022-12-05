@@ -30,7 +30,7 @@ typedef void (*GetForeignRelSize_function)(PlannerInfo* root, RelOptInfo* basere
 typedef void (*GetForeignPaths_function)(PlannerInfo* root, RelOptInfo* baserel, Oid foreigntableid);
 
 typedef ForeignScan* (*GetForeignPlan_function)(PlannerInfo* root, RelOptInfo* baserel, Oid foreigntableid,
-    ForeignPath* best_path, List* tlist, List* scan_clauses);
+    ForeignPath* best_path, List* tlist, List* scan_clauses, Plan *outer_plan);
 
 typedef void (*BeginForeignScan_function)(ForeignScanState* node, int eflags);
 
@@ -39,6 +39,11 @@ typedef TupleTableSlot* (*IterateForeignScan_function)(ForeignScanState* node);
 typedef void (*ReScanForeignScan_function)(ForeignScanState* node);
 
 typedef void (*EndForeignScan_function)(ForeignScanState* node);
+
+typedef void (*GetForeignJoinPaths_function)(PlannerInfo *root, RelOptInfo *joinrel, RelOptInfo *outerrel,
+    RelOptInfo *innerrel, JoinType jointype,  SpecialJoinInfo* sjinfo, List* restrictlist);
+
+typedef void (*GetForeignUpperPaths_function)(FDWUpperRelCxt* ufdwCxt, UpperRelationKind stage, Plan* mainPlan);
 
 typedef void (*AddForeignUpdateTargets_function)(Query* parsetree, RangeTblEntry* target_rte, Relation target_relation);
 
@@ -62,6 +67,8 @@ typedef void (*EndForeignModify_function)(EState* estate, ResultRelInfo* rinfo);
 typedef int (*IsForeignRelUpdatable_function)(Relation rel);
 
 typedef void (*ExplainForeignScan_function)(ForeignScanState* node, struct ExplainState* es);
+
+typedef void (*ExplainForeignScanRemote_function)(ForeignScanState* node, struct ExplainState* es);
 
 typedef void (*ExplainForeignModify_function)(
     ModifyTableState* mtstate, ResultRelInfo* rinfo, List* fdw_private, int subplan_index, struct ExplainState* es);
@@ -140,6 +147,12 @@ typedef struct FdwRoutine {
      * These functions are optional.  Set the pointer to NULL for any that are
      * not provided.
      */
+    
+    /* Functions for remote-join planning */
+    GetForeignJoinPaths_function GetForeignJoinPaths;
+
+    /* Functions for remote upper-relation (post scan/join) planning */
+    GetForeignUpperPaths_function GetForeignUpperPaths;
 
     /* Functions for updating foreign tables */
     AddForeignUpdateTargets_function AddForeignUpdateTargets;
@@ -154,6 +167,7 @@ typedef struct FdwRoutine {
     /* Support functions for EXPLAIN */
     ExplainForeignScan_function ExplainForeignScan;
     ExplainForeignModify_function ExplainForeignModify;
+    ExplainForeignScanRemote_function ExplainForeignScanRemote;
 
     /* @hdfs Support functions for ANALYZE */
     AnalyzeForeignTable_function AnalyzeForeignTable;
@@ -202,5 +216,6 @@ extern FdwRoutine* GetFdwRoutine(Oid fdwhandler);
 extern FdwRoutine* GetFdwRoutineByRelId(Oid relid, bool missHandlerOk = false);
 extern FdwRoutine* GetFdwRoutineByServerId(Oid serverid);
 extern FdwRoutine* GetFdwRoutineForRelation(Relation relation, bool makecopy);
+extern Oid GetForeignServerIdByRelId(Oid relid);
 
 #endif /* FDWAPI_H */

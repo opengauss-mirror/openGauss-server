@@ -133,6 +133,9 @@ static bool extract_query_dependencies_walker(Node* node, PlannerInfo* context);
 static void fix_skew_quals(PlannerInfo* root, Plan* plan, indexed_tlist* subplan_itlist, int rtoffset);
 static void fix_assign_targetlists(ModifyTable* plan, Plan* subplan, List* resultRelation);
 
+static Relids offset_relid_set(Relids relids, int rtoffset);
+static void set_foreignscan_references(PlannerInfo *root, ForeignScan *fscan, int rtoffset);
+
 #ifdef PGXC
 /* References for remote plans */
 static List* fix_remote_expr(PlannerInfo* root, List* clauses, indexed_tlist* base_itlist, Index newrelid, int rtoffset,
@@ -496,22 +499,7 @@ static Plan* set_plan_refs(PlannerInfo* root, Plan* plan, int rtoffset)
             break;
         case T_ForeignScan:
         case T_VecForeignScan: {
-            ForeignScan* splan = (ForeignScan*)plan;
-
-            splan->scan.scanrelid += rtoffset;
-            splan->scan.plan.targetlist = fix_scan_list(root, splan->scan.plan.targetlist, rtoffset);
-            if (splan->scan.plan.distributed_keys != NIL) {
-                splan->scan.plan.distributed_keys = fix_scan_list(root, splan->scan.plan.distributed_keys, rtoffset);
-            }
-            splan->scan.plan.var_list = fix_scan_list(root, splan->scan.plan.var_list, rtoffset);
-            splan->scan.plan.qual = fix_scan_list(root, splan->scan.plan.qual, rtoffset);
-            splan->fdw_exprs = fix_scan_list(root, splan->fdw_exprs, rtoffset);
-
-            if (isObsOrHdfsTableFormTblOid(splan->scan_relid)) {
-                DefElem* private_data = (DefElem*)linitial(splan->fdw_private);
-                DfsPrivateItem* item = (DfsPrivateItem*)private_data->arg;
-                fix_dfs_private_item(root, rtoffset, item);
-            }
+            set_foreignscan_references(root, (ForeignScan*) plan, rtoffset);
         } break;
         case T_NestLoop:
         case T_VecNestLoop:
@@ -2727,3 +2715,75 @@ void pgxc_set_agg_references(PlannerInfo* root, Agg* aggplan)
     return;
 }
 #endif /* PGXC */
+
+/*
+ * offset_relid_set
+ * 		Apply rtoffset to the members of a Relids set.
+ */
+static Relids offset_relid_set(Relids relids, int rtoffset)
+{
+    Relids result = NULL;
+    int rtindex;
+
+    /* If there's no offset to apply, we needn't recompute the value */
+    if (rtoffset == 0) {
+        return relids;
+    }
+    rtindex = -1;
+    while ((rtindex = bms_next_member(relids, rtindex)) >= 0) {
+        result = bms_add_member(result, rtindex + rtoffset);
+    }
+    return result;
+}
+
+/*
+ * set_foreignscan_references
+ * 	   Do set_plan_references processing on a ForeignScan
+ */
+static void set_foreignscan_references(PlannerInfo *root, ForeignScan *fscan, int rtoffset)
+{
+    /* Adjust scanrelid if it's valid */
+    if (fscan->scan.scanrelid > 0) {
+        fscan->scan.scanrelid += rtoffset;
+    }
+
+    if (fscan->fdw_scan_tlist != NIL || fscan->scan.scanrelid == 0) {
+        /*
+         * Adjust tlist, qual, fdw_exprs, fdw_recheck_quals to reference
+         * foreign scan tuple
+         */
+        indexed_tlist *itlist = build_tlist_index(fscan->fdw_scan_tlist);
+
+        fscan->scan.plan.targetlist =
+            (List *)fix_upper_expr(root, (Node *)fscan->scan.plan.targetlist, itlist, INDEX_VAR, rtoffset);
+        fscan->scan.plan.qual =
+            (List *)fix_upper_expr(root, (Node *)fscan->scan.plan.qual, itlist, INDEX_VAR, rtoffset);
+        fscan->fdw_exprs = (List *)fix_upper_expr(root, (Node *)fscan->fdw_exprs, itlist, INDEX_VAR, rtoffset);
+        fscan->fdw_recheck_quals =
+            (List *)fix_upper_expr(root, (Node *)fscan->fdw_recheck_quals, itlist, INDEX_VAR, rtoffset);
+        pfree(itlist);
+        /* fdw_scan_tlist itself just needs fix_scan_list() adjustments */
+        fscan->fdw_scan_tlist = fix_scan_list(root, fscan->fdw_scan_tlist, rtoffset);
+    } else {
+        /*
+         * Adjust tlist, qual, fdw_exprs, fdw_recheck_quals in the standard
+         * way
+         */
+        fscan->scan.plan.targetlist = fix_scan_list(root, fscan->scan.plan.targetlist, rtoffset);
+        fscan->scan.plan.qual = fix_scan_list(root, fscan->scan.plan.qual, rtoffset);
+        fscan->fdw_exprs = fix_scan_list(root, fscan->fdw_exprs, rtoffset);
+        fscan->fdw_recheck_quals = fix_scan_list(root, fscan->fdw_recheck_quals, rtoffset);
+    }
+
+    if (fscan->scan.plan.distributed_keys != NIL) {
+        fscan->scan.plan.distributed_keys = fix_scan_list(root, fscan->scan.plan.distributed_keys, rtoffset);
+    }
+
+    fscan->fs_relids = offset_relid_set(fscan->fs_relids, rtoffset);
+
+    if (fscan->scan_relid > 0 && isObsOrHdfsTableFormTblOid(fscan->scan_relid)) {
+        DefElem* private_data = (DefElem*)linitial(fscan->fdw_private);
+        DfsPrivateItem* item = (DfsPrivateItem*)private_data->arg;
+        fix_dfs_private_item(root, rtoffset, item);
+    }
+}

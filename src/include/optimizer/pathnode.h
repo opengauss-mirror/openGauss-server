@@ -84,7 +84,7 @@ extern Path* create_valuesscan_path(PlannerInfo* root, RelOptInfo* rel, Relids r
 extern Path* create_ctescan_path(PlannerInfo* root, RelOptInfo* rel);
 extern Path* create_worktablescan_path(PlannerInfo* root, RelOptInfo* rel);
 extern ForeignPath* create_foreignscan_path(PlannerInfo* root, RelOptInfo* rel, Cost startup_cost, Cost total_cost,
-    List* pathkeys, Relids required_outer, List* fdw_private, int dop = 1);
+    List* pathkeys, Relids required_outer, Path* fdw_outerpath, List* fdw_private, int dop = 1);
 extern Relids calc_nestloop_required_outer(Path* outer_path, Path* inner_path);
 extern Relids calc_non_nestloop_required_outer(Path* outer_path, Path* inner_path);
 

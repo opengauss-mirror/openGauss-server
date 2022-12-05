@@ -448,8 +448,9 @@ static void gcGetForeignPaths(PlannerInfo* root, RelOptInfo* baserel, Oid foreig
         fpinfo->startup_cost,
         fpinfo->total_cost,
         NIL,  /* no pathkeys */
-        NULL, /* no outer rel either */
-        NIL,  /* no fdw_private list */
+        NULL, /* no outer rel either  */
+        NULL, /* no outer path either */
+        NIL,  /* no fdw_private list  */
         u_sess->opt_cxt.query_dop);
     add_path(root, baserel, (Path*)path);
 }
@@ -459,7 +460,7 @@ static void gcGetForeignPaths(PlannerInfo* root, RelOptInfo* baserel, Oid foreig
  *		Create ForeignScan plan node which implements selected best path
  */
 static ForeignScan* gcGetForeignPlan(PlannerInfo* root, RelOptInfo* foreignrel, Oid foreigntableid,
-    ForeignPath* best_path, List* tlist, List* scan_clauses)
+    ForeignPath* best_path, List* tlist, List* scan_clauses, Plan* outer_plan)
 {
     GcFdwRelationInfo* fpinfo = (GcFdwRelationInfo*)foreignrel->fdw_private;
     Index scan_relid;
@@ -617,7 +618,8 @@ static ForeignScan* gcGetForeignPlan(PlannerInfo* root, RelOptInfo* foreignrel, 
      * field of the finished plan node; we can't keep them in private state
      * because then they wouldn't be subject to later planner processing.
      */
-    return make_foreignscan(tlist, local_exprs, scan_relid, params_list, fdw_private, EXEC_ON_DATANODES);
+    return make_foreignscan(tlist, local_exprs, scan_relid, params_list, fdw_private, NIL, NIL, NULL,
+        EXEC_ON_DATANODES);
 }
 
 /*

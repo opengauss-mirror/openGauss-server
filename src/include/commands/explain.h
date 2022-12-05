@@ -472,6 +472,7 @@ typedef struct ExplainState {
     char* statement_id;                 /* statement_id for EXPLAIN PLAN */
     bool is_explain_gplan;
     char* opt_model_name;
+    ExplainFRSqlState es_frs;   /* explain state for remote sql of foreign scan. */
 } ExplainState;
 
 /* Hook for plugins to get control in explain_get_index_name() */

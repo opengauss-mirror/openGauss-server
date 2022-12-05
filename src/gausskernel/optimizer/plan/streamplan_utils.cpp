@@ -56,9 +56,12 @@ List* check_op_list_template(Plan* result_plan, List* (*check_eval)(Node*))
         case T_ForeignScan:
         case T_VecForeignScan: {
             ForeignScan* foreignScan = (ForeignScan*)result_plan;
+            if (!OidIsValid(foreignScan->scan_relid)) {
+                break;
+            }
+
             ForeignTable* ftbl = NULL;
             ForeignServer* fsvr = NULL;
-
             ftbl = GetForeignTable(foreignScan->scan_relid);
             AssertEreport(NULL != ftbl, MOD_OPT, "The foreign table is NULL");
             fsvr = GetForeignServer(ftbl->serverid);

@@ -1198,7 +1198,7 @@ void distImportGetPaths(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntable
      */
     add_path(root, baserel,
              (Path *)create_foreignscan_path(root, baserel, startup_cost, total_cost, NIL, /* no pathkeys */
-                                             NULL,                                         /* no outer rel either */
+                                             NULL, NULL,                  /* no outer rel and path either */
                                              coptions, u_sess->opt_cxt.query_dop));
 }
 
@@ -1207,7 +1207,7 @@ void distImportGetPaths(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntable
  * 	 Create a ForeignScan plan node for scanning the foreign table
  */
 ForeignScan *distImportGetPlan(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid, ForeignPath *best_path,
-                               List *tlist, List *scan_clauses)
+                               List *tlist, List *scan_clauses, Plan *outer_plan)
 {
     Index scan_relid = baserel->relid;
     DistImportPlanState *planstate = (DistImportPlanState *)baserel->fdw_private;
@@ -1252,7 +1252,7 @@ ForeignScan *distImportGetPlan(PlannerInfo *root, RelOptInfo *baserel, Oid forei
 
     /* Create the ForeignScan node */
     ForeignScan *fScan = make_foreignscan(tlist, scan_clauses, scan_relid, NIL, /* no expressions to evaluate */
-                                          fdw_data, EXEC_ON_DATANODES);         /* no private state either */
+        fdw_data, NIL, NIL, NULL, EXEC_ON_DATANODES);  /* no private state either */
 
     fScan->objectNum = fileNum;
     if (root->parse->commandType != CMD_INSERT && is_obs_protocol(HdfsGetOptionValue(foreigntableid, optLocation))) {

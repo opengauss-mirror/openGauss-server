@@ -142,7 +142,7 @@ extern bool have_relevant_eclass_joinclause(PlannerInfo* root, RelOptInfo* rel1,
 extern bool has_relevant_eclass_joinclause(PlannerInfo* root, RelOptInfo* rel1);
 extern bool eclass_useful_for_merging(EquivalenceClass* eclass, RelOptInfo* rel);
 extern bool is_redundant_derived_clause(RestrictInfo* rinfo, List* clauselist);
-
+extern PathKey* make_canonical_pathkey(PlannerInfo* root, EquivalenceClass* eclass, Oid opfamily, int strategy, bool nulls_first);
 /*
  * pathkeys.c
  *	  utilities for matching and building path keys

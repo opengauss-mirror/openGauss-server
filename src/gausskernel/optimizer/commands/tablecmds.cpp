@@ -17810,13 +17810,11 @@ static void ATExecGenericOptions(Relation rel, List* options)
     simple_heap_update(ftrel, &tuple->t_self, tuple);
     CatalogUpdateIndexes(ftrel, tuple);
 
-#ifdef ENABLE_MOT
     /*
      * Invalidate relcache so that all sessions will refresh any cached plans
      * that might depend on the old options.
      */
     CacheInvalidateRelcache(rel);
-#endif
 
     heap_close(ftrel, RowExclusiveLock);
 

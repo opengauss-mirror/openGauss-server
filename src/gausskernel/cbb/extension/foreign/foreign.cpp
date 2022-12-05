@@ -33,6 +33,8 @@
 #include "utils/syscache.h"
 #include "cipher.h"
 #include "utils/knl_relcache.h"
+#include "optimizer/planmain.h"
+#include "optimizer/pathnode.h"
 
 extern Datum pg_options_to_table(PG_FUNCTION_ARGS);
 extern Datum postgresql_fdw_validator(PG_FUNCTION_ARGS);
@@ -215,6 +217,11 @@ bool IsSpecifiedFDW(const char* ServerName, const char* SepcifiedType)
  */
 bool IsSpecifiedFDWFromRelid(Oid relId, const char* SepcifiedType)
 {
+    if (!OidIsValid(relId)) {
+        ereport(ERROR, (errmsg("Invalid relid is used to verify fdw type."),
+                        errhint("This may be a join relationship, or has aggregation, etc.")));
+    }
+
     ForeignTable* ftbl = NULL;
     ForeignServer* fsvr = NULL;
     bool IsSpecifiedTable = false;
@@ -248,10 +255,10 @@ bool IsSpecifiedFDWFromRelid(Oid relId, const char* SepcifiedType)
 
 /**
  * @Description: Jude whether type of the foreign table support SELECT/INSERT/UPDATE/DELETE/COPY
- * @in relId: The foreign table Oid.
+ * @in oid: The foreign table Oid or The foreign server Oid.
  * @return Rreturn true if the foreign table support those DML.
  */
-bool CheckSupportedFDWType(Oid relId)
+bool CheckSupportedFDWType(Oid oid, bool byServerId)
 {
     static const char* supportFDWType[] = {MOT_FDW, MYSQL_FDW, ORACLE_FDW, POSTGRES_FDW};
     int size = sizeof(supportFDWType) / sizeof(supportFDWType[0]);
@@ -268,8 +275,8 @@ bool CheckSupportedFDWType(Oid relId)
     }
     MemoryContext oldContext = MemoryContextSwitchTo(u_sess->opt_cxt.ft_context);
 
-    ForeignTable* ftbl = GetForeignTable(relId);
-    ForeignServer* fsvr = GetForeignServer(ftbl->serverid);
+    Oid serverid = byServerId ? oid : GetForeignTable(oid)->serverid;
+    ForeignServer* fsvr = GetForeignServer(serverid);
     ForeignDataWrapper* fdw = GetForeignDataWrapper(fsvr->fdwid);
 
     for (int i = 0; i < size; i++) {
@@ -286,6 +293,11 @@ bool CheckSupportedFDWType(Oid relId)
 
 bool isSpecifiedSrvTypeFromRelId(Oid relId, const char* SepcifiedType)
 {
+    if (!OidIsValid(relId)) {
+        ereport(ERROR, (errmsg("Invalid relid is used to verify foreign server type."),
+                        errhint("This may be a join relationship, or has aggregation, etc.")));
+    }
+
     ForeignTable* ftbl = NULL;
     ForeignServer* fsrv = NULL;
     bool ret = false;
@@ -492,6 +504,26 @@ FdwRoutine* GetFdwRoutine(Oid fdwhandler)
     }
 
     return routine;
+}
+
+/*
+ * GetForeignServerIdByRelId - look up the foreign server
+ * for the given foreign table, and return its OID.
+ */
+Oid GetForeignServerIdByRelId(Oid relid)
+{
+    HeapTuple tp;
+    Form_pg_foreign_table tableform;
+    Oid serverid;
+
+    tp = SearchSysCache1(FOREIGNTABLEREL, ObjectIdGetDatum(relid));
+    if (!HeapTupleIsValid(tp))
+        elog(ERROR, "cache lookup failed for foreign table %u", relid);
+    tableform = (Form_pg_foreign_table)GETSTRUCT(tp);
+    serverid = tableform->ftserver;
+    ReleaseSysCache(tp);
+
+    return serverid;
 }
 
 /*
@@ -996,6 +1028,10 @@ ObsOptions* getObsOptions(Oid foreignTableId)
  */
 ServerTypeOption getServerType(Oid foreignTableId)
 {
+    if (!OidIsValid(foreignTableId)) {
+        ereport(ERROR, (errmsg("Invalid foreignTableId is used to get server type."),
+                        errhint("This may be a join relationship, or has aggregation, etc.")));
+    }
     char* optionValue = HdfsGetOptionValue(foreignTableId, "type");
     ServerTypeOption srvType = T_INVALID;
 
@@ -1698,3 +1734,38 @@ void CheckFoldernameOrFilenamesOrCfgPtah(const char *OptStr, char *OptType)
     }
 }
 
+FDWUpperRelCxt* InitFDWUpperPlan(PlannerInfo* root, RelOptInfo* baseRel, Plan* localPlan)
+{
+    if (baseRel == NULL || baseRel->fdwroutine == NULL ||
+        baseRel->fdwroutine->GetForeignUpperPaths == NULL) {
+        return NULL;
+    }
+
+    if (IS_STREAM_PLAN) {
+        return NULL;
+    }
+
+    FDWUpperRelCxt* ufdwCxt = (FDWUpperRelCxt*)palloc0(sizeof(FDWUpperRelCxt));
+    ufdwCxt->root = root;
+    ufdwCxt->currentRel = baseRel;
+
+    /* these will definitely be used, create it early. */
+    ufdwCxt->spjExtra = (SPJPathExtraData*)palloc0(sizeof(SPJPathExtraData));
+    ufdwCxt->finalExtra = (FinalPathExtraData*)palloc0(sizeof(FinalPathExtraData));
+
+    ufdwCxt->spjExtra->targetList = localPlan->targetlist;
+    AdvanceFDWUpperPlan(ufdwCxt, UPPERREL_INIT, localPlan);
+
+    return ufdwCxt;
+}
+
+void AdvanceFDWUpperPlan(FDWUpperRelCxt* ufdwCxt, UpperRelationKind stage, Plan* localPlan)
+{
+    if (ufdwCxt->currentRel == NULL || ufdwCxt->currentRel->fdwroutine == NULL ||
+        ufdwCxt->currentRel->fdwroutine->GetForeignUpperPaths == NULL) {
+        ufdwCxt->state = FDW_UPPER_REL_END;
+        return;
+    }
+
+    ufdwCxt->currentRel->fdwroutine->GetForeignUpperPaths(ufdwCxt, stage, localPlan);
+}

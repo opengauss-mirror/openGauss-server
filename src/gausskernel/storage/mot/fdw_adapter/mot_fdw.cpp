@@ -127,7 +127,7 @@ PG_FUNCTION_INFO_V1(mot_fdw_validator);
 static void MOTGetForeignRelSize(PlannerInfo* root, RelOptInfo* baserel, Oid foreigntableid);
 static void MOTGetForeignPaths(PlannerInfo* root, RelOptInfo* baserel, Oid foreigntableid);
 static ForeignScan* MOTGetForeignPlan(PlannerInfo* root, RelOptInfo* baserel, Oid foreigntableid,
-    ForeignPath* best_path, List* tlist, List* scan_clauses);
+    ForeignPath* best_path, List* tlist, List* scan_clauses, Plan *outer_plan);
 static void MOTExplainForeignScan(ForeignScanState* node, ExplainState* es);
 static void MOTBeginForeignScan(ForeignScanState* node, int eflags);
 static TupleTableSlot* MOTIterateForeignScan(ForeignScanState* node);
@@ -621,7 +621,8 @@ static void MOTGetForeignPaths(PlannerInfo* root, RelOptInfo* baserel, Oid forei
         planstate->m_startupCost,
         planstate->m_totalCost,
         usablePathkeys,
-        nullptr,  /* no outer rel either */
+        nullptr,  /* no outer rel either  */
+        nullptr,  /* no outer path either */
         nullptr,  // private data will be assigned later
         0);
 
@@ -691,6 +692,7 @@ static void MOTGetForeignPaths(PlannerInfo* root, RelOptInfo* baserel, Oid forei
                 planstate->m_totalCost,
                 usablePathkeys,
                 nullptr,  /* no outer rel either */
+                nullptr,  /* no outer path either */
                 nullptr,  // private data will be assigned later
                 0);
 
@@ -721,8 +723,8 @@ static void MOTGetForeignPaths(PlannerInfo* root, RelOptInfo* baserel, Oid forei
 /*
  *
  */
-static ForeignScan* MOTGetForeignPlan(
-    PlannerInfo* root, RelOptInfo* baserel, Oid foreigntableid, ForeignPath* best_path, List* tlist, List* scan_clauses)
+static ForeignScan *MOTGetForeignPlan(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid,
+    ForeignPath *best_path, List *tlist, List *scan_clauses, Plan *outer_plan)
 {
     ListCell* lc = nullptr;
     ::Index scanRelid = baserel->relid;
@@ -789,7 +791,10 @@ static ForeignScan* MOTGetForeignPlan(
         quals,
         scanRelid,
         remote, /* no expressions to evaluate */
-        (List*)SerializeFdwState(planstate)
+        (List*)SerializeFdwState(planstate),
+        NIL,
+        NIL,
+        NULL
 #if PG_VERSION_NUM >= 90500
             ,
         nullptr,
