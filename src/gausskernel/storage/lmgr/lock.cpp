@@ -4041,9 +4041,14 @@ static bool SSDmsLockAcquire(LOCALLOCK *locallock, bool dontWait, int waitSec)
     bool timeout = true;
     bool skipAcquire = false;
     int waitMilliSec = 0;
+    int needWaitMilliSec = 0;
+    TimestampTz startTime;
 
     InitDmsContext(&dms_ctx);
     TransformLockTagToDmsLatch(&dlatch, locallock->tag.lock);
+
+    needWaitMilliSec = (waitSec == 0) ? u_sess->attr.attr_storage.LockWaitTimeout : waitSec * SEC2MILLISEC;
+    startTime = GetCurrentTimestamp();
 
     PG_TRY();
     {
@@ -4057,7 +4062,7 @@ static bool SSDmsLockAcquire(LOCALLOCK *locallock, bool dontWait, int waitSec)
             }
 
             // acquire failed, and need wait
-            if (!dontWait && !ret) {
+            if (!(dontWait || ret)) {
                 CHECK_FOR_INTERRUPTS();
 
                 // first entry
@@ -4065,11 +4070,16 @@ static bool SSDmsLockAcquire(LOCALLOCK *locallock, bool dontWait, int waitSec)
                     LOCK_PRINT("WaitOnLock: sleeping on ss_lock start", locallock->lock, locallock->tag.mode);
                     instr_stmt_report_lock(LOCK_WAIT_START, locallock->tag.mode, &locallock->tag.lock);
                 }
-                timeout = (waitSec == 0) ? false : (waitMilliSec >= waitSec * MILLISEC2SEC);
-                pg_usleep(SS_ACQUIRE_LOCK_RETRY_INTERVAL * MICROSEC2MILLISEC);  // 50 ms
-                waitMilliSec += SS_ACQUIRE_LOCK_RETRY_INTERVAL;
+
+                waitMilliSec = ComputeTimeStamp(startTime);
+                timeout = (waitMilliSec >= needWaitMilliSec);
+                if (timeout) {
+                    ereport(ERROR, (errcode(ERRCODE_LOCK_WAIT_TIMEOUT),
+                        errmsg("SSLock wait timeout after %d ms", waitMilliSec)));
+                }
+                pg_usleep(SS_ACQUIRE_LOCK_RETRY_INTERVAL * MILLISEC2MICROSEC);  // 50 ms
             }
-        } while (!timeout && !ret);
+        } while (!(timeout || ret));
     }
     PG_CATCH();
     {

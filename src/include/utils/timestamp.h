@@ -90,6 +90,9 @@
 
 #define MAXTIMESTAMPLEN 128
 
+#define SEC2MILLISEC (1000)
+#define MILLISEC2MICROSEC (1000)
+
 /*
  * HA wal replication timestamp info
  */
