@@ -2379,7 +2379,7 @@ int buftag_compare(const void *pa, const void *pb)
         /* compare block number */
     } else if (a->buf_tag.blockNum < b->buf_tag.blockNum) {
         return -1;
-    } else {
+    } else if (a->buf_tag.blockNum > b->buf_tag.blockNum) {
         return 1;
     }
 
