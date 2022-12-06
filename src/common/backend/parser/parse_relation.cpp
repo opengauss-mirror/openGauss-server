@@ -71,6 +71,7 @@ static void expandTupleDesc(TupleDesc tupdesc, Alias* eref, int rtindex, int sub
     bool include_dropped, List** colnames, List** colvars);
 static void setRteOrientation(Relation rel, RangeTblEntry* rte);
 static int32* getValuesTypmods(RangeTblEntry* rte);
+static IndexHintType preCheckIndexHints(ParseState* pstate, List* indexhints, Relation relation);
 
 #ifndef PGXC
 static int specialAttNum(const char* attname);
@@ -1285,6 +1286,21 @@ RangeTblEntry* addRangeTableEntry(ParseState* pstate, RangeVar* relation, Alias*
         }
     }
 
+    /* B compatibility deal index hint pre check*/
+    IndexHintType ihtype = INDEX_HINT_USE;
+    if (DB_IS_CMPT(B_FORMAT) && relation->indexhints != NIL) {
+        ihtype = preCheckIndexHints(pstate, relation->indexhints, rel);
+        if (ihtype == INDEX_HINT_NOT_EXISTS) {
+            ereport(ERROR,
+            (errcode(ERRCODE_UNDEFINED_OBJECT),
+                errmsg(
+                    "index not exists in relation %s", RelationGetRelationName(rel))));
+        } else if (ihtype == INDEX_HINT_MIX) {
+            ereport(ERROR,
+            (errcode(ERRCODE_DUPLICATE_OBJECT),
+                errmsg("mixed use force index and use index")));
+        }
+    }
     return rte;
 }
 
@@ -3001,4 +3017,59 @@ static void setRteOrientation(Relation rel, RangeTblEntry* rte)
     } else {
         rte->orientation = REL_ROW_ORIENTED;
     }
+}
+
+/*check index in the table , and mixd write force and use*/
+static IndexHintType preCheckIndexHints(ParseState* pstate, List* indexhints, Relation relation)
+{
+    IndexHintType retType = INDEX_HINT_USE;
+    ListCell* lc = NULL;
+    ListCell* lc_index = NULL;
+    List* indexOidList = NIL;
+    Oid indexOid = InvalidOid;
+    Oid relationOid = RelationGetRelid(relation);
+    Oid relationNsOid = RelationGetNamespace(relation);
+    List* indexList = RelationGetIndexList(relation);
+    IndexHintDefinition* idef = NULL;
+    bool exist_indexs = false;
+
+    /*no index in table ,return */
+    if (indexList == NIL) {
+        retType = INDEX_HINT_NOT_EXISTS;
+        return retType;
+    }
+
+    IndexHintType itype = ((IndexHintDefinition*)lfirst(list_head(indexhints)))->index_type;
+    foreach (lc, indexhints) {
+        idef = (IndexHintDefinition*)lfirst(lc);
+        itype = (IndexHintType)(idef->index_type | itype);
+        if (itype == INDEX_HINT_MIX) {
+            retType = INDEX_HINT_MIX;
+            goto err;
+        }
+        /*check index is in table*/
+        foreach (lc_index, idef->indexnames) {
+            indexOid = get_relname_relid(strVal(lfirst(lc_index)), relationNsOid);
+            exist_indexs = false;
+            if (OidIsValid(indexOid)) {
+                if (list_member_oid(indexList, indexOid)) {
+                    exist_indexs = true;
+                }
+            }
+            if (!exist_indexs) {
+                retType = INDEX_HINT_NOT_EXISTS;
+                goto err;
+            }
+            IndexHintRelationData* indexdata = makeNode(IndexHintRelationData);
+            indexdata->indexOid = indexOid;
+            indexdata->relationOid = relationOid;
+            indexdata->index_type = idef->index_type;
+            indexOidList = list_append_unique(indexOidList, (Node*)indexdata);
+        }
+    }
+    pstate->p_indexhintLists = list_copy(indexOidList);
+err:
+    if (indexOidList != NIL)
+        list_free(indexOidList);
+    return retType;
 }

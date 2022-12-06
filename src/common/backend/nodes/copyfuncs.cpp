@@ -2331,6 +2331,7 @@ static RangeVar* _copyRangeVar(const RangeVar* from)
 #endif
     COPY_SCALAR_FIELD(withVerExpr);
     COPY_NODE_FIELD(partitionNameList);
+    COPY_NODE_FIELD(indexhints);
     return newnode;
 }
 
@@ -4494,6 +4495,27 @@ static SkewHint* _copySkewHint(const SkewHint* from)
     return newnode;
 }
 
+static IndexHintRelationData* _copyIndexHintRelationData(const IndexHintRelationData* from)
+{
+    IndexHintRelationData* newnode = makeNode(IndexHintRelationData);
+
+    COPY_SCALAR_FIELD(relationOid);
+    COPY_SCALAR_FIELD(indexOid);
+    COPY_SCALAR_FIELD(index_type);
+
+    return newnode;
+}
+
+static IndexHintDefinition* _copyIndexHintDefinition(const IndexHintDefinition* from)
+{
+    IndexHintDefinition* newnode = makeNode(IndexHintDefinition);
+
+    COPY_NODE_FIELD(indexnames);
+    COPY_SCALAR_FIELD(index_type);
+
+    return newnode;
+}
+
 static SkewRelInfo* _copySkewRelInfo(const SkewRelInfo* from)
 {
     SkewRelInfo* newnode = makeNode(SkewRelInfo);
@@ -4681,6 +4703,7 @@ static Query* _copyQuery(const Query* from)
     if (t_thrd.proc->workingVersionNum >= REPLACE_INTO_VERSION_NUM) {
         COPY_SCALAR_FIELD(isReplace);
     }
+    COPY_NODE_FIELD(indexhintList);
 
     newnode->rightRefState = CopyRightRefState(from->rightRefState);
 
@@ -8581,6 +8604,11 @@ void* copyObject(const void* from)
             break;
         case T_ShowEventStmt:
             retval =node_copy_show_event_info((ShowEventStmt *)from);
+        case T_IndexHintRelationData:
+            retval = _copyIndexHintRelationData((IndexHintRelationData *)from);
+            break;
+        case T_IndexHintDefinition:
+            retval = _copyIndexHintDefinition((IndexHintDefinition *)from);
             break;
         default:
             ereport(ERROR,

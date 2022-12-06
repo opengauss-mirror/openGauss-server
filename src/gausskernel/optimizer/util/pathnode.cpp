@@ -1362,6 +1362,54 @@ void set_hint_value(RelOptInfo* join_rel, Path* new_path, HintState* hstate)
     }
 }
 
+bool find_index_hint_value(List* indexhintList, Oid pathindexOid, bool* isUse)
+{
+    ListCell* lc = NULL;
+    Oid indexOid;
+    foreach(lc, indexhintList) {
+        indexOid = ((IndexHintRelationData*)lfirst(lc))->indexOid;
+        *isUse = (((IndexHintRelationData*)lfirst(lc))->index_type == INDEX_HINT_USE);
+        if (pathindexOid == indexOid) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void set_index_hint_value(Path* new_path, List* indexhintList)
+{
+    if (indexhintList == NULL)
+        return ;
+    IndexPath* index_path = (IndexPath*)new_path;
+    bool useIndex = false;
+    bool hintUse = false;
+    
+    switch (new_path->pathtype) {
+        case T_SeqScan:
+        case T_CStoreScan:
+#ifdef ENABLE_MULTIPLE_NODES
+        case T_TsStoreScan:
+#endif   /* ENABLE_MULTIPLE_NODES */
+        case T_SubqueryScan:
+        case T_ForeignScan: {
+            useIndex = find_index_hint_value(indexhintList, InvalidOid, &hintUse);
+            break;
+        }
+        case T_IndexScan:
+        case T_IndexOnlyScan: {
+            useIndex = find_index_hint_value(indexhintList, index_path->indexinfo->indexoid, &hintUse);
+            break;
+        }
+        default:
+            break;
+    }
+    if (useIndex)
+        new_path->hint_value++;
+    else if (hintUse)
+        new_path->hint_value++;
+    return ;
+}
+
 static void AddGatherJoinrel(PlannerInfo* root, RelOptInfo* parentRel,
                                 Path* oldPath, Path* newPath)
 {
@@ -1562,6 +1610,11 @@ void add_path(PlannerInfo* root, RelOptInfo* parent_rel, Path* new_path)
     /* Set path's hint_value. */
     if (root != NULL && root->parse->hintState != NULL) {
         set_hint_value(parent_rel, new_path, root->parse->hintState);
+    }
+
+    /*Set path's index_hint */
+    if (root != NULL && root->parse->indexhintList != NULL) {
+        set_index_hint_value(new_path, root->parse->indexhintList);
     }
 
     /* we will add cn gather path when cn gather hint switch on */

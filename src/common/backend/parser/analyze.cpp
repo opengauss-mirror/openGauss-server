@@ -2779,6 +2779,9 @@ static Query* transformSelectStmt(ParseState* pstate, SelectStmt* stmt, bool isF
     /* process the FROM clause */
     transformFromClause(pstate, stmt->fromClause, isFirstNode, isCreateView);
 
+    /* process index_hint in tables*/
+    qry->indexhintList = lappend3(qry->indexhintList, pstate->p_indexhintLists);
+
     /* transform START WITH...CONNECT BY clause */
     if (shouldTransformStartWithStmt(pstate, stmt, qry)) {
         transformStartWith(pstate, stmt, qry);

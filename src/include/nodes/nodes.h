@@ -558,6 +558,8 @@ typedef enum NodeTag {
     T_WithCheckOption,
     T_TableSampleClause,
     T_TimeCapsuleClause,
+    T_IndexHintDefinition,
+    T_IndexHintRelationData,
     T_SortGroupClause,
     T_GroupingSet,
     T_WindowClause,

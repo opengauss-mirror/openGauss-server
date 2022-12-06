@@ -2068,6 +2068,7 @@ typedef struct Query {
     
     RightRefState* rightRefState;
     List* withCheckOptions; /* a list of WithCheckOption's */
+    List* indexhintList;   /* a list of b mode index hint members */
 } Query;
 
 /* ----------------------
@@ -2426,5 +2427,25 @@ typedef struct AutoIncrement {
     Oid autoincin_funcid;
     Oid autoincout_funcid;
 } AutoIncrement;
+
+typedef enum IndexHintType {
+    INDEX_HINT_USE =1,
+    INDEX_HINT_FORCE, 
+    INDEX_HINT_MIX,
+    INDEX_HINT_NOT_EXISTS
+}IndexHintType;
+
+typedef struct IndexHintDefinition {
+    NodeTag type;
+    List* indexnames;
+    IndexHintType index_type;
+}IndexHintDefinition;
+
+typedef struct IndexHintRelationData{
+    NodeTag type;
+    Oid relationOid; 
+    Oid indexOid;
+    IndexHintType index_type;
+}IndexHintRelationData;
 
 #endif /* PARSENODES_COMMONH */

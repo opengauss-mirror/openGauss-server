@@ -525,6 +525,8 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 %type <node>    part_option
 /* b compatibility: comment end */
 
+%type <list>	key_usage_list index_hint_list opt_index_hint_list
+%type <node>	index_hint_definition
 %type <list>	group_by_list
 %type <node>	group_by_item empty_grouping_set rollup_clause cube_clause
 %type <node>	grouping_sets_clause OptAutoIncrement
@@ -848,7 +850,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 	CROSS CSN CSV CUBE CURRENT_P
 	CURRENT_CATALOG CURRENT_DATE CURRENT_ROLE CURRENT_SCHEMA
 	CURRENT_TIME CURRENT_TIMESTAMP CURRENT_USER CURSOR CYCLE
-	SHRINK
+	SHRINK USE_P
 
 	DATA_P DATABASE DATAFILE DATANODE DATANODES DATATYPE_CL DATE_P DATE_FORMAT_P DAY_P DBCOMPATIBILITY_P DEALLOCATE DEC DECIMAL_P DECLARE DECODE DEFAULT DEFAULTS
 	DEFERRABLE DEFERRED DEFINER DELETE_P DELIMITER DELIMITERS DELTA DELTAMERGE DESC DETERMINISTIC
@@ -955,6 +957,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 			END_OF_INPUT_COLON
 			END_OF_PROC
 			NOT_IN NOT_BETWEEN NOT_LIKE NOT_ILIKE NOT_SIMILAR
+			FORCE_INDEX USE_INDEX
 
 /* Precedence: lowest to highest */
 %nonassoc   COMMENT
@@ -14123,6 +14126,70 @@ opt_index_name:
 			| /*EMPTY*/								{ $$ = makeRangeVar(NULL, NULL, -1); }
 		;
 
+/* b compatibility index hint part */
+key_usage_list:
+			index_name
+			{
+				$$ = list_make1(makeString($1));
+			}
+			| key_usage_list ',' index_name
+			{
+				$$ = lappend($1,makeString($3));
+			}
+		;
+
+index_hint_definition:
+			USE_INDEX '(' key_usage_list ')'
+			{
+				IndexHintDefinition* n = makeNode(IndexHintDefinition);
+				n->index_type = INDEX_HINT_USE;
+				n->indexnames = $3;
+				$$ = (Node*)n;
+			}
+			| USE_INDEX '(' ')'
+			{
+				IndexHintDefinition* n = makeNode(IndexHintDefinition);
+				n->index_type = INDEX_HINT_USE;
+				n->indexnames = NIL;
+				$$ = (Node*)n;
+			}
+			| FORCE_INDEX '(' key_usage_list ')'
+			{
+				IndexHintDefinition* n = makeNode(IndexHintDefinition);
+				n->index_type = INDEX_HINT_FORCE;
+				n->indexnames = $3;
+				$$ = (Node*)n;
+			}
+		;
+
+index_hint_list:
+			index_hint_definition
+			{
+				if (u_sess->attr.attr_sql.sql_compatibility != B_FORMAT)
+				{
+					const char* message = "index_hint is supported only in B-format database";
+					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+					ereport(errstate,
+							(errmodule(MOD_PARSER),
+							errcode(ERRCODE_SYNTAX_ERROR),
+							errmsg("index_hint is supported only in B-format database"),
+							parser_errposition(@1)));
+				}
+				$$ = list_make1($1);
+			}
+			| index_hint_list index_hint_definition
+			{
+				$$ = lappend($1,$2);
+			}
+		;
+
+opt_index_hint_list:
+			index_hint_list {$$ = $1;}
+			| /*Empty*/ {$$ = NIL;}
+		;
+/* b compatibility index hint part end*/
+
+
 access_method_clause:
 			USING access_method						{ $$ = $2; }
 			| /*EMPTY*/								{ $$ = NULL; }
@@ -23507,9 +23574,15 @@ table_ref:	relation_expr		%prec UMINUS
 #endif
 					$$ = (Node *) $1;
 				}
-			| relation_expr alias_clause
+			| relation_expr alias_clause opt_index_hint_list
 				{
 					$1->alias = $2;
+					$1->indexhints = $3;
+					$$ = (Node *) $1;
+				}
+			| relation_expr index_hint_list
+				{
+					$1->indexhints = $2;
 					$$ = (Node *) $1;
 				}
 			| relation_expr opt_alias_clause tablesample_clause
@@ -23564,32 +23637,71 @@ table_ref:	relation_expr		%prec UMINUS
 					$1->issubpartition = true;
 					$$ = (Node *)$1;
 				}
-			| relation_expr PARTITION '(' name ')' alias_clause
+			| relation_expr PARTITION '(' name ')' index_hint_list
+				{
+					$1->partitionname = $4;
+					$1->ispartition = true;
+					$1->indexhints = $6;
+					$$ = (Node *)$1;
+				}
+			| relation_expr SUBPARTITION '(' name ')' index_hint_list
+				{
+					$1->subpartitionname = $4;
+					$1->issubpartition = true;
+					$1->indexhints = $6;
+					$$ = (Node *)$1;
+				}
+			| relation_expr BUCKETS '(' bucket_list ')' index_hint_list
+				{
+					$1->buckets = $4;
+					$1->isbucket = true;
+					$1->indexhints = $6;
+					$$ = (Node *)$1;
+				}
+			| relation_expr PARTITION_FOR '(' expr_list ')' index_hint_list
+				{
+					$1->partitionKeyValuesList = $4;
+					$1->ispartition = true;
+					$1->indexhints = $6;
+					$$ = (Node *)$1;
+				}
+			| relation_expr SUBPARTITION_FOR '(' expr_list ')' index_hint_list
+				{
+					$1->partitionKeyValuesList = $4;
+					$1->issubpartition = true;
+					$1->indexhints = $6;
+					$$ = (Node *)$1;
+				}
+			| relation_expr PARTITION '(' name ')' alias_clause opt_index_hint_list
 				{
 					$1->partitionname = $4;
 					$1->alias = $6;
 					$1->ispartition = true;
+					$1->indexhints = $7;
 					$$ = (Node *)$1;
 				}
-			| relation_expr SUBPARTITION '(' name ')' alias_clause
+			| relation_expr SUBPARTITION '(' name ')' alias_clause opt_index_hint_list
 				{
 					$1->subpartitionname = $4;
 					$1->alias = $6;
 					$1->issubpartition = true;
+					$1->indexhints = $7;
 					$$ = (Node *)$1;
 				}
-			| relation_expr PARTITION_FOR '(' expr_list ')' alias_clause
+			| relation_expr PARTITION_FOR '(' expr_list ')' alias_clause opt_index_hint_list
 				{
 					$1->partitionKeyValuesList = $4;
 					$1->alias = $6;
 					$1->ispartition = true;
+					$1->indexhints = $7;
 					$$ = (Node *)$1;
 				}
-			| relation_expr SUBPARTITION_FOR '(' expr_list ')' alias_clause
+			| relation_expr SUBPARTITION_FOR '(' expr_list ')' alias_clause opt_index_hint_list
 				{
 					$1->partitionKeyValuesList = $4;
 					$1->alias = $6;
 					$1->issubpartition = true;
+					$1->indexhints = $7;
 					$$ = (Node *)$1;
 				}
 			| func_table		%prec UMINUS
@@ -28415,6 +28527,7 @@ unreserved_keyword:
 			| UNTIL
 			| UNUSABLE
 			| UPDATE
+			| USE_P
                         | USEEOF
 			| VACUUM
 			| VALID

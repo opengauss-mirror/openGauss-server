@@ -2144,6 +2144,9 @@ static void _outRangeVar(StringInfo str, RangeVar* node)
     if (t_thrd.proc->workingVersionNum >= MULTI_PARTITIONS_VERSION_NUM) {
         WRITE_NODE_FIELD(partitionNameList);
     }
+    if (t_thrd.proc->workingVersionNum >= INDEX_HINT_VERSION_NUM) {
+        WRITE_NODE_FIELD(indexhints);
+    }
 }
 
 static void _outIntoClause(StringInfo str, IntoClause* node)
@@ -4632,6 +4635,9 @@ static void _outQuery(StringInfo str, Query* node)
         appendStringInfo(str, " :" CppAsString(rightRefState) " ");
         _outRightRefState(str, node->rightRefState);
     }
+    if (t_thrd.proc->workingVersionNum >= INDEX_HINT_VERSION_NUM) {
+        WRITE_NODE_FIELD(indexhintList);
+    }
 }
 
 static void _outWithCheckOption(StringInfo str, const WithCheckOption* node)
@@ -4840,6 +4846,21 @@ static void _outRteRelation(StringInfo str, const RangeTblEntry *node)
             WRITE_SYNINFO_FIELD(refSynOid);
         }
     }
+}
+
+static void _outIndexHintRelationData(StringInfo str, IndexHintRelationData* node)
+{
+    WRITE_NODE_TYPE("INDEXHINT_RELATION_DATA");
+    WRITE_OID_FIELD(relationOid);
+    WRITE_OID_FIELD(indexOid);
+    WRITE_ENUM_FIELD(index_type, IndexHintType);
+}
+
+static void _outIndexHintDefinition(StringInfo str, IndexHintDefinition* node)
+{
+    WRITE_NODE_TYPE("INDEXHINT_DEFINITION");
+    WRITE_NODE_FIELD(indexnames);
+    WRITE_ENUM_FIELD(index_type, IndexHintType);
 }
 
 static void _outRangeTblEntry(StringInfo str, RangeTblEntry* node)
@@ -6806,6 +6827,12 @@ static void _outNode(StringInfo str, const void* obj)
                 break;
             case T_AutoIncrement:
                 _outAutoIncrement(str, (AutoIncrement*)obj);
+                break;
+            case T_IndexHintDefinition:
+                _outIndexHintDefinition(str, (IndexHintDefinition*)obj);
+                break;
+            case T_IndexHintRelationData:
+                _outIndexHintRelationData(str, (IndexHintRelationData*)obj);
                 break;
             default:
 

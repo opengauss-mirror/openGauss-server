@@ -1636,6 +1636,10 @@ static Query* _readQuery(void)
         local_node->rightRefState = _readRightRefStateWrap(local_node);
     }
 	
+    IF_EXIST(indexhintList) {
+        READ_NODE_FIELD(indexhintList);
+    }
+
     READ_DONE();
 }
 
@@ -1943,6 +1947,9 @@ static RangeVar* _readRangeVar(void)
     }
     IF_EXIST(partitionNameList) {
         READ_NODE_FIELD(partitionNameList);
+    }
+    IF_EXIST(indexhints) {
+        READ_NODE_FIELD(indexhints);
     }
     READ_DONE();
 }
@@ -2269,6 +2276,31 @@ static ArrayRef* _readArrayRef(void)
 
     READ_TYPEINFO_FIELD(refarraytype);
     READ_TYPEINFO_FIELD(refelemtype);
+    READ_DONE();
+}
+
+/*
+* _readIndexHintDefinition
+*/
+static IndexHintDefinition* _readIndexHintDefinition(void)
+{
+    READ_LOCALS(IndexHintDefinition);
+    READ_NODE_FIELD(indexnames);
+    READ_ENUM_FIELD(index_type, IndexHintType);
+
+    READ_DONE();
+}
+
+/*
+* _readIndexHintDefinition
+*/
+static IndexHintRelationData* _readIndexHintRelationData(void)
+{
+    READ_LOCALS(IndexHintRelationData);
+    READ_OID_FIELD(relationOid);
+    READ_OID_FIELD(indexOid);
+    READ_ENUM_FIELD(index_type, IndexHintType);
+
     READ_DONE();
 }
 
@@ -6542,6 +6574,10 @@ Node* parseNodeString(void)
         return_value = _readAutoIncrement();
     } else if (MATCH("PREFIXKEY", 9)) {
         return_value = _readPrefixKey();
+    } else if (MATCH("INDEXHINT_RELATION_DATA", 23)) {
+        return_value = _readIndexHintRelationData();
+    } else if (MATCH("INDEXHINT_DEFINITION", 20)) {
+        return_value = _readIndexHintDefinition();
     } else if (MATCH("USERSETELEM", 11)) {
         return_value = _readUserSetElem();
     } else if (MATCH("USERVAR", 7)) {

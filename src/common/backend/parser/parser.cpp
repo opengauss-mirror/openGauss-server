@@ -598,6 +598,50 @@ int base_yylex(YYSTYPE* lvalp, YYLTYPE* llocp, core_yyscan_t yyscanner)
                     break;
             }
             break;
+        case USE_P:
+        /*
+        * USE INDEX \USE KEY must be reduced to one token,to allow KEY\USE as table / column alias.
+        */
+            GET_NEXT_TOKEN();
+
+            switch (next_token) {
+                case KEY:
+                    cur_token = USE_INDEX;
+                    break;
+                case INDEX:
+                    cur_token = USE_INDEX;
+                    break;
+                default:
+                    /* save the lookahead token for next time */
+                    SET_LOOKAHEAD_TOKEN();
+                    /* and back up the output info to cur_token */
+                    lvalp->core_yystype = cur_yylval;
+                    *llocp = cur_yylloc;
+                    break;
+            }
+            break;
+        case FORCE:
+        /*
+        * FORCE INDEX \FORCE KEY must be reduced to one token,to allow KEY\FORCE as table / column alias.
+        */
+            GET_NEXT_TOKEN();
+
+            switch (next_token) {
+                case KEY:
+                    cur_token = FORCE_INDEX;
+                    break;
+                case INDEX:
+                    cur_token = FORCE_INDEX;
+                    break;
+                default:
+                    /* save the lookahead token for next time */
+                    SET_LOOKAHEAD_TOKEN();
+                    /* and back up the output info to cur_token */
+                    lvalp->core_yystype = cur_yylval;
+                    *llocp = cur_yylloc;
+                    break;
+            }
+            break;
         default:
             break;
     }

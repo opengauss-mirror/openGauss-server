@@ -1,0 +1,484 @@
+\c postgres
+DROP DATABASE IF EXISTS db_1097149;
+NOTICE:  database "db_1097149" does not exist, skipping
+CREATE DATABASE db_1097149 DBCOMPATIBILITY 'B';
+\c db_1097149
+-- normal index 
+create table db_1097149_tb (col1 int ,col2 int,col3 int,col4 varchar(10));
+insert into db_1097149_tb values(1,1,1,'a');
+insert into db_1097149_tb values(1,2,2,'a');
+insert into db_1097149_tb values(2,2,2,'a');
+insert into db_1097149_tb values(2,2,3,'b');
+insert into db_1097149_tb values(2,3,3,'b');
+insert into db_1097149_tb values(3,3,4,'b');
+insert into db_1097149_tb values(3,3,4,'a');
+insert into db_1097149_tb values(3,4,5,'c');
+insert into db_1097149_tb values(4,4,5,'c');
+insert into db_1097149_tb values(4,null,1,'c');
+create index index_1097149_1 on db_1097149_tb (col1);
+create index index_1097149_2 on db_1097149_tb (col2);
+create index index_1097149_3 on db_1097149_tb (col3);
+create index index_1097149_4 on db_1097149_tb (col4);
+analyze db_1097149_tb;
+select * from db_1097149_tb force key (index_1097149_2) where col2= 3;
+ col1 | col2 | col3 | col4 
+------+------+------+------
+    2 |    3 |    3 | b
+    3 |    3 |    4 | b
+    3 |    3 |    4 | a
+(3 rows)
+
+select * from db_1097149_tb force key (index_1097149_4) where col2= 3 and col4 = 'a';
+ col1 | col2 | col3 | col4 
+------+------+------+------
+    3 |    3 |    4 | a
+(1 row)
+
+select * from db_1097149_tb FORCE key (index_1097149_1) where col2= 3;
+ col1 | col2 | col3 | col4 
+------+------+------+------
+    2 |    3 |    3 | b
+    3 |    3 |    4 | b
+    3 |    3 |    4 | a
+(3 rows)
+
+explain (costs off,verbose true  )select * from db_1097149_tb force key (index_1097149_2) where col2= 3;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ [Bypass]
+ Index Scan using index_1097149_2 on public.db_1097149_tb
+   Output: col1, col2, col3, col4
+   Index Cond: (db_1097149_tb.col2 = 3)
+(4 rows)
+
+explain (costs off,verbose true  )select * from db_1097149_tb force key (index_1097149_4) where col2= 3 and col4 = 'a';
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Index Scan using index_1097149_4 on public.db_1097149_tb
+   Output: col1, col2, col3, col4
+   Index Cond: ((db_1097149_tb.col4)::text = 'a'::text)
+   Filter: (db_1097149_tb.col2 = 3)
+(4 rows)
+
+explain (costs off,verbose true ) select * from db_1097149_tb FORCE key (index_1097149_1) where col2= 3;
+             QUERY PLAN             
+------------------------------------
+ Seq Scan on public.db_1097149_tb
+   Output: col1, col2, col3, col4
+   Filter: (db_1097149_tb.col2 = 3)
+(3 rows)
+
+--mix use force  and use index error.
+create table db_1097156_tb (col1 int ,col2 int,col3 int,col4 varchar(10));
+insert into db_1097156_tb values(1,1,1,'a');
+insert into db_1097156_tb values(1,2,2,'a');
+insert into db_1097156_tb values(2,2,2,'a');
+insert into db_1097156_tb values(2,2,3,'b');
+insert into db_1097156_tb values(2,3,3,'b');
+insert into db_1097156_tb values(3,3,4,'b');
+insert into db_1097156_tb values(3,3,4,'a');
+insert into db_1097156_tb values(3,4,5,'c');
+insert into db_1097156_tb values(4,4,5,'c');
+insert into db_1097156_tb values(4,null,1,'c');
+create index index_1097156_1 on db_1097156_tb (col1);
+create index index_1097156_2 on db_1097156_tb (col2);
+create index index_1097156_3 on db_1097156_tb (col3);
+create index index_1097156_4 on db_1097156_tb (col4);
+analyze db_1097156_tb;
+select * from db_1097156_tb use index (index_1097156_1) force index (index_1097156_2) where col2= 3;
+ERROR:  mixed use force index and use index
+select * from db_1097156_tb force index (index_1097156_2) use index (index_1097156_1) where col2= 3;
+ERROR:  mixed use force index and use index
+select * from db_1097156_tb use index (index_1097156_2) force index (index_1097156_2) where col2= 3;
+ERROR:  mixed use force index and use index
+select * from db_1097156_tb use index (index_1097156_1) force index (index_1097156_2) use index (index_1097156_3) use index (index_1097156_4) where col2= 3 and col1 = 2 and col3 = 3 and col4='b';
+ERROR:  mixed use force index and use index
+-- use ,choose low cost  plan in index or seqscan
+create table db_1097155_tb (col1 int ,col2 int,col3 int,col4 varchar(10));
+insert into db_1097155_tb values(1,1,1,'a');
+insert into db_1097155_tb values(1,2,2,'a');
+insert into db_1097155_tb values(2,2,2,'a');
+insert into db_1097155_tb values(2,2,3,'b');
+insert into db_1097155_tb values(2,3,3,'b');
+insert into db_1097155_tb values(3,3,4,'b');
+insert into db_1097155_tb values(3,3,4,'a');
+insert into db_1097155_tb values(3,4,5,'c');
+insert into db_1097155_tb values(4,4,5,'c');
+insert into db_1097155_tb values(4,null,1,'c');
+create index index_1097155_1 on db_1097155_tb (col1);
+create index index_1097155_2 on db_1097155_tb (col2);
+create index index_1097155_3 on db_1097155_tb (col3);
+create index index_1097155_4 on db_1097155_tb (col4);
+analyze db_1097155_tb;
+select * from db_1097155_tb use index (index_1097155_1) use index (index_1097155_2) where col2= 3 order by 1,2,3,4;
+ col1 | col2 | col3 | col4 
+------+------+------+------
+    2 |    3 |    3 | b
+    3 |    3 |    4 | a
+    3 |    3 |    4 | b
+(3 rows)
+
+select * from db_1097155_tb use index (index_1097155_2) use index (index_1097155_1) where col2= 3 order by 1,2,3,4;
+ col1 | col2 | col3 | col4 
+------+------+------+------
+    2 |    3 |    3 | b
+    3 |    3 |    4 | a
+    3 |    3 |    4 | b
+(3 rows)
+
+select * from db_1097155_tb use index (index_1097155_2) use index (index_1097155_2) where col2= 3 order by 1,2,3,4;
+ col1 | col2 | col3 | col4 
+------+------+------+------
+    2 |    3 |    3 | b
+    3 |    3 |    4 | a
+    3 |    3 |    4 | b
+(3 rows)
+
+select * from db_1097155_tb use index (index_1097155_1) use index (index_1097155_2)use index (index_1097155_3) use index (index_1097155_4) where col2= 3 and col1 = 2 and col3 = 3 and col4='b' order by 1,2,3,4;
+ col1 | col2 | col3 | col4 
+------+------+------+------
+    2 |    3 |    3 | b
+(1 row)
+
+select * from db_1097155_tb use index (index_1097155_1, index_1097155_2) where col2= 3 order by 1,2,3,4;
+ col1 | col2 | col3 | col4 
+------+------+------+------
+    2 |    3 |    3 | b
+    3 |    3 |    4 | a
+    3 |    3 |    4 | b
+(3 rows)
+
+select * from db_1097155_tb use index (index_1097155_2, index_1097155_1) where col2= 3 order by 1,2,3,4;
+ col1 | col2 | col3 | col4 
+------+------+------+------
+    2 |    3 |    3 | b
+    3 |    3 |    4 | a
+    3 |    3 |    4 | b
+(3 rows)
+
+select * from db_1097155_tb use index (index_1097155_2, index_1097155_2) where col2= 3 order by 1,2,3,4;
+ col1 | col2 | col3 | col4 
+------+------+------+------
+    2 |    3 |    3 | b
+    3 |    3 |    4 | a
+    3 |    3 |    4 | b
+(3 rows)
+
+select * from db_1097155_tb use index (index_1097155_1, index_1097155_2, index_1097155_3, index_1097155_4) where col2= 3 and col1 = 2 and col3 = 3 and col4='b' order by 1,2,3,4;
+ col1 | col2 | col3 | col4 
+------+------+------+------
+    2 |    3 |    3 | b
+(1 row)
+
+explain (costs off )select * from db_1097155_tb use index (index_1097155_1) use index (index_1097155_2) where col2= 3;
+        QUERY PLAN         
+---------------------------
+ Seq Scan on db_1097155_tb
+   Filter: (col2 = 3)
+(2 rows)
+
+explain (costs off )select * from db_1097155_tb use index (index_1097155_2) use index (index_1097155_1) where col2= 3;
+        QUERY PLAN         
+---------------------------
+ Seq Scan on db_1097155_tb
+   Filter: (col2 = 3)
+(2 rows)
+
+explain (costs off )select * from db_1097155_tb use index (index_1097155_2) use index (index_1097155_2) where col2= 3;
+        QUERY PLAN         
+---------------------------
+ Seq Scan on db_1097155_tb
+   Filter: (col2 = 3)
+(2 rows)
+
+explain (costs off )select * from db_1097155_tb use index (index_1097155_1) use index (index_1097155_2)use index (index_1097155_3) use index (index_1097155_4) where col2= 3 and col1 = 2 and col3 = 3 and col4='b';
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Seq Scan on db_1097155_tb
+   Filter: ((col2 = 3) AND (col3 = 3) AND (col1 = 2) AND ((col4)::text = 'b'::text))
+(2 rows)
+
+explain (costs off  )select * from db_1097155_tb use index (index_1097155_1, index_1097155_2) where col2= 3;
+        QUERY PLAN         
+---------------------------
+ Seq Scan on db_1097155_tb
+   Filter: (col2 = 3)
+(2 rows)
+
+explain (costs off  )select * from db_1097155_tb use index (index_1097155_2, index_1097155_1) where col2= 3;
+        QUERY PLAN         
+---------------------------
+ Seq Scan on db_1097155_tb
+   Filter: (col2 = 3)
+(2 rows)
+
+explain (costs off  )select * from db_1097155_tb use index (index_1097155_2, index_1097155_2) where col2= 3;
+        QUERY PLAN         
+---------------------------
+ Seq Scan on db_1097155_tb
+   Filter: (col2 = 3)
+(2 rows)
+
+explain (costs off )select * from db_1097155_tb use index (index_1097155_1, index_1097155_2, index_1097155_3, index_1097155_4) where col2= 3 and col1 = 2 and col3 = 3 and col4='b';
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Seq Scan on db_1097155_tb
+   Filter: ((col2 = 3) AND (col3 = 3) AND (col1 = 2) AND ((col4)::text = 'b'::text))
+(2 rows)
+
+-- force ,choose index only, no seqscan
+explain (costs off )select * from db_1097155_tb force index (index_1097155_1) use index (index_1097155_2) where col2= 3;
+ERROR:  mixed use force index and use index
+explain (costs off )select * from db_1097155_tb force index (index_1097155_2) use index (index_1097155_1) where col2= 3;
+ERROR:  mixed use force index and use index
+explain (costs off )select * from db_1097155_tb force index (index_1097155_2) use index (index_1097155_2) where col2= 3;
+ERROR:  mixed use force index and use index
+explain (costs off )select * from db_1097155_tb force index (index_1097155_1) use index (index_1097155_2)use index (index_1097155_3) use index (index_1097155_4) where col2= 3 and col1 = 2 and col3 = 3 and col4='b';
+ERROR:  mixed use force index and use index
+explain (costs off  )select * from db_1097155_tb force index (index_1097155_1, index_1097155_2) where col2= 3;
+                    QUERY PLAN                     
+---------------------------------------------------
+ [Bypass]
+ Index Scan using index_1097155_2 on db_1097155_tb
+   Index Cond: (col2 = 3)
+(3 rows)
+
+explain (costs off  )select * from db_1097155_tb force index (index_1097155_2, index_1097155_1) where col2= 3;
+                    QUERY PLAN                     
+---------------------------------------------------
+ [Bypass]
+ Index Scan using index_1097155_2 on db_1097155_tb
+   Index Cond: (col2 = 3)
+(3 rows)
+
+explain (costs off  )select * from db_1097155_tb force index (index_1097155_2, index_1097155_2) where col2= 3;
+                    QUERY PLAN                     
+---------------------------------------------------
+ [Bypass]
+ Index Scan using index_1097155_2 on db_1097155_tb
+   Index Cond: (col2 = 3)
+(3 rows)
+
+explain (costs off )select * from db_1097155_tb force index (index_1097155_1, index_1097155_2, index_1097155_3, index_1097155_4) where col2= 3 and col1 = 2 and col3 = 3 and col4='b';
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Index Scan using index_1097155_3 on db_1097155_tb
+   Index Cond: (col3 = 3)
+   Filter: ((col2 = 3) AND (col1 = 2) AND ((col4)::text = 'b'::text))
+(3 rows)
+
+-- test use index can choose best index and seqscan
+insert into db_1097155_tb select * from db_1097155_tb;
+insert into db_1097155_tb select * from db_1097155_tb;
+insert into db_1097155_tb select * from db_1097155_tb;
+insert into db_1097155_tb select * from db_1097155_tb;
+insert into db_1097155_tb select * from db_1097155_tb;
+insert into db_1097155_tb select * from db_1097155_tb;
+explain (costs off )select * from db_1097155_tb use index (index_1097155_1)  where col1 > 1;
+        QUERY PLAN         
+---------------------------
+ Seq Scan on db_1097155_tb
+   Filter: (col1 > 1)
+(2 rows)
+
+explain (costs off )select * from db_1097155_tb use index (index_1097155_1)  where col1 < 1;
+                    QUERY PLAN                     
+---------------------------------------------------
+ [Bypass]
+ Index Scan using index_1097155_1 on db_1097155_tb
+   Index Cond: (col1 < 1)
+(3 rows)
+
+-- index not exists 
+create table db_1097157_tb (col1 int ,col2 int,col3 int,col4 varchar(10));
+insert into db_1097157_tb values(1,1,1,'a');
+insert into db_1097157_tb values(1,2,2,'a');
+insert into db_1097157_tb values(2,2,2,'a');
+insert into db_1097157_tb values(2,2,3,'b');
+insert into db_1097157_tb values(2,3,3,'b');
+insert into db_1097157_tb values(3,3,4,'b');
+insert into db_1097157_tb values(3,3,4,'a');
+insert into db_1097157_tb values(3,4,5,'c');
+insert into db_1097157_tb values(4,4,5,'c');
+insert into db_1097157_tb values(4,null,1,'c');
+create index index_1097157_1 on db_1097157_tb (col1);
+create index index_1097157_2 on db_1097157_tb (col2);
+create index index_1097157_3 on db_1097157_tb (col3);
+create index index_1097157_4 on db_1097157_tb (col4);
+analyze db_1097157_tb;
+create table db_1097157_tb_1 as select * from db_1097157_tb;
+create index index_1097157_5 on db_1097157_tb_1 (col1);
+select * from db_1097157_tb use index (index_1097157_5) where col2= 3;
+ERROR:  index not exists in relation db_1097157_tb
+select * from db_1097157_tb force index (index_1097157_5) where col2= 3;
+ERROR:  index not exists in relation db_1097157_tb
+select * from db_1097157_tb use index (index_1097157_6) where col2= 3;
+ERROR:  index not exists in relation db_1097157_tb
+select * from db_1097157_tb force index (index_1097157_6) where col2= 3;
+ERROR:  index not exists in relation db_1097157_tb
+-- index_hint in group by 
+create table db_ID1097254_tb (col1 int ,col2 int,col3 int,col4 varchar(10));
+insert into db_ID1097254_tb values(1,1,1,'a');
+insert into db_ID1097254_tb values(1,2,2,'a');
+insert into db_ID1097254_tb values(2,2,2,'a');
+insert into db_ID1097254_tb values(2,2,3,'b');
+insert into db_ID1097254_tb values(2,3,3,'b');
+insert into db_ID1097254_tb values(3,3,4,'b');
+insert into db_ID1097254_tb values(3,3,4,'a');
+insert into db_ID1097254_tb values(3,4,5,'c');
+insert into db_ID1097254_tb values(4,4,5,'c');
+insert into db_ID1097254_tb values(4,null,1,'c');
+create index "Index_ID1097254%%_1" on db_ID1097254_tb (col1);
+create index INDEX_ID1097254_2 on db_ID1097254_tb (col2);
+analyze db_ID1097254_tb;
+select max(t1.col2)+1,t2.col2 from db_ID1097254_tb t1 force index ("Index_ID1097254%%_1") join db_ID1097254_tb t2 force index (INDEX_ID1097254_2) on t1.col3=t2.col3 where t1.col1>= 3 and t2.col2 <=4 group by 2,t1.col2 having t1.col2 in (select max(col2) from db_ID1097254_tb force index ("Index_ID1097254%%_1") where col1>= 3) order by 1,2 ;
+ ?column? | col2 
+----------+------
+        5 |    4
+(1 row)
+
+explain (costs off )select max(t1.col2)+1,t2.col2 from db_ID1097254_tb t1 force index ("Index_ID1097254%%_1") join db_ID1097254_tb t2 force index (INDEX_ID1097254_2) on t1.col3=t2.col3 where t1.col1>= 3 and t2.col2 <=4 group by 2,t1.col2 having t1.col2 in (select max(col2) from db_ID1097254_tb force index ("Index_ID1097254%%_1") where col1>= 3) order by 1,2 ;
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
+ Sort
+   Sort Key: ((max(t1.col2) + 1)), t2.col2
+   ->  HashAggregate
+         Group By Key: t2.col2, t1.col2
+         Filter: (hashed SubPlan 1)
+         ->  Hash Join
+               Hash Cond: (t2.col3 = t1.col3)
+               ->  Index Scan using index_id1097254_2 on db_id1097254_tb t2
+                     Index Cond: (col2 <= 4)
+               ->  Hash
+                     ->  Seq Scan on db_id1097254_tb t1
+                           Filter: (col1 >= 3)
+         SubPlan 1
+           ->  Aggregate
+                 ->  Index Scan using "Index_ID1097254%%_1" on db_id1097254_tb
+                       Index Cond: (col1 >= 3)
+(16 rows)
+
+--test first index exists ,second not exists
+create table tb_ih_1 (a int, b int);
+insert into tb_ih_1 values(1,2),(3,4),(5,6);
+create index INDEX_tb1 on tb_ih_1 (a);
+create index INDEX_tb2 on tb_ih_1 (a);
+analyze tb_ih_1;
+--can report
+explain (costs off) select a from tb_ih_1 force key (INDEX_tb1,idex_t2);
+ERROR:  index not exists in relation tb_ih_1
+--can plan
+explain (costs off) select a from tb_ih_1 force key (INDEX_tb1,INDEX_tb2);
+                 QUERY PLAN                 
+--------------------------------------------
+ [Bypass]
+ Index Only Scan using index_tb2 on tb_ih_1
+(2 rows)
+
+--partition
+drop table if exists startend_pt;
+NOTICE:  table "startend_pt" does not exist, skipping
+CREATE TABLE startend_pt (c1 INT, c2 INT) 
+PARTITION BY RANGE (c2) (
+    PARTITION p1 START(1) END(1000),
+    PARTITION p2 END(2000)
+);
+create index idx_startend on startend_pt(c2) local (partition  idxp1,partition idxp2,partition idxp3);
+insert into startend_pt values(2,2),(3,3),(4,4),(5,5);
+insert into startend_pt values(202,202),(203,203),(204,204),(1999,1999);
+analyze startend_pt;
+explain(costs off) select c2 from startend_pt partition (p2) force index (idx_startend) where c2 > 1998;
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Partitioned Index Only Scan using idx_startend on startend_pt
+   Index Cond: (c2 > 1998)
+   Selected Partitions:  3
+(3 rows)
+
+explain(costs off) select c2 from startend_pt partition for (200) force index (idx_startend) where c2 > 1998;
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Partitioned Index Only Scan using idx_startend on startend_pt
+   Index Cond: (c2 > 1998)
+   Selected Partitions:  2
+(3 rows)
+
+explain(costs off) select c2 from startend_pt partition (p2) where c2 > 1998;
+             QUERY PLAN              
+-------------------------------------
+ Partitioned Seq Scan on startend_pt
+   Filter: (c2 > 1998)
+   Selected Partitions:  3
+(3 rows)
+
+drop table if exists list_list;
+NOTICE:  table "list_list" does not exist, skipping
+CREATE TABLE list_list
+(
+    month_code int  NOT NULL ,
+    dept_code  int  NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+)
+PARTITION BY LIST  (month_code) SUBPARTITION BY RANGE (dept_code)
+(
+  PARTITION p_201901 values(100)
+  (
+    SUBPARTITION pa1 values less than (100),
+	SUBPARTITION pa2 values less than (200)
+  )
+);
+create index idx_list on list_list(dept_code) local ;
+insert into list_list values('100', '2', '1', 1);
+insert into list_list values('100', '1', '1', 1);
+analyze list_list;
+explain (costs off) select  user_no from list_list subpartition (pa1) use index (idx_list) where user_no = 1;
+               QUERY PLAN                
+-----------------------------------------
+ Partition Iterator
+   Iterations: 1, Sub Iterations: 1
+   ->  Partitioned Seq Scan on list_list
+         Filter: ((user_no)::bigint = 1)
+         Selected Partitions:  1
+         Selected Subpartitions:  1:1
+(6 rows)
+
+explain (costs off)select  user_no from list_list subpartition for (100,4) use index (idx_list) where user_no = 1;
+               QUERY PLAN                
+-----------------------------------------
+ Partition Iterator
+   Iterations: 1, Sub Iterations: 1
+   ->  Partitioned Seq Scan on list_list
+         Filter: ((user_no)::bigint = 1)
+         Selected Partitions:  1
+         Selected Subpartitions:  1:1
+(6 rows)
+
+\c postgres
+DROP DATABASE IF EXISTS db_1097149;
+DROP DATABASE IF EXISTS db_ID1097168;
+NOTICE:  database "db_id1097168" does not exist, skipping
+CREATE DATABASE db_ID1097168 DBCOMPATIBILITY 'A';
+\c db_ID1097168
+-- not support in a database 
+create table db_ID1097168_tb (col1 int ,col2 int,col3 int,col4 varchar(10));
+insert into db_ID1097168_tb values(1,1,1,'a');
+insert into db_ID1097168_tb values(1,2,2,'a');
+insert into db_ID1097168_tb values(2,2,2,'a');
+insert into db_ID1097168_tb values(2,2,3,'b');
+insert into db_ID1097168_tb values(2,3,3,'b');
+insert into db_ID1097168_tb values(3,3,4,'b');
+insert into db_ID1097168_tb values(3,3,4,'a');
+insert into db_ID1097168_tb values(3,4,5,'c');
+insert into db_ID1097168_tb values(4,4,5,'c');
+insert into db_ID1097168_tb values(4,null,1,'c');
+create index "Index_ID1097168%%_1" on db_ID1097168_tb (col1);
+create index INDEX_ID1097168_2 on db_ID1097168_tb (col2);
+create index index_ID1097168_3 on db_ID1097168_tb (col3);
+analyze db_ID1097168_tb;
+select max(col2)+1 from db_ID1097168_tb force index ("Index_ID1097168%%_1") where col2>= 3 ;
+ERROR:  index_hint is supported only in B-format database
+LINE 1: select max(col2)+1 from db_ID1097168_tb force index ("Index_...
+                                                      ^
+\c postgres
+DROP DATABASE IF EXISTS db_ID1097168;
