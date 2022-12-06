@@ -7170,7 +7170,8 @@ static List* make_windowInputTargetList(PlannerInfo* root, List* tlist, List* ac
             if (IsA(node, Var)) {
                 if (!tlist_member(node, new_tlist)) {
                     if (var_from_dependency_rel(parse, (Var *)node, dep_oids) ||
-                        var_from_sublink_pulluped(parse, (Var *) node)) {
+                        var_from_sublink_pulluped(parse, (Var *) node) ||
+                        var_from_subquery_pulluped(parse, (Var *) node)) {
                         flattenable_vars_final = lappend(flattenable_vars_final, node);
                     }
                 }
