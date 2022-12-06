@@ -1083,7 +1083,22 @@ static Datum ExecEvalConst(ExprState* exprstate, ExprContext* econtext, bool* is
         GucUserParamsEntry *entry = (GucUserParamsEntry *)hash_search(u_sess->utils_cxt.set_user_params_htab, uservar->name, HASH_FIND, &found);
 
         /* if not found, return a null const */
-        con = found ? entry->value : makeConst(UNKNOWNOID, -1, InvalidOid, -2, (Datum)0, true, false);
+        if (found) {
+            if (entry->isParse) {
+                con = (Const *)uservar->value;
+            } else {
+                Node *node = coerce_type(NULL, (Node *)entry->value, entry->value->consttype, ((Const *)uservar->value)->consttype,
+                    -1, COERCION_IMPLICIT, COERCE_IMPLICIT_CAST, -1);
+                node = eval_const_expression_value(NULL, node, NULL);
+                if (nodeTag(node) != T_Const) {
+                    ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION),
+                        errmsg("The value of a user_defined variable must be convertible to a constant.")));
+                }
+                con = (Const *)node;
+            }
+        } else {
+            con = makeConst(UNKNOWNOID, -1, InvalidOid, -2, (Datum)0, true, false);
+        }
     } else if (IsA(exprstate->expr, SetVariableExpr)) {
         SetVariableExpr* setvar = (SetVariableExpr*)transformSetVariableExpr((SetVariableExpr*)exprstate->expr);
         con = (Const*)setvar->value;

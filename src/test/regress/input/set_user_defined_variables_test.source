@@ -532,6 +532,28 @@ select @v1;
 set @ v1:=10;
 select @v1:=10;
 
+--DTS
+\c test_set
+set @v := 10;
+select @v + 666::numeric(10, 2), @v + 20::float;
+set @v = @v + 666::numeric(10, 2);
+select @v;
+
+set @v1 := 10, @v2 := 13.3;
+drop table if exists test_pro;
+create table test_pro(f1 int, f2 float);
+create or replace procedure pro_insert()
+as
+begin
+    insert into test_pro values(@v1 + 666::numeric(10, 2), @v2 + 20::float);
+end;
+/
+call pro_insert();
+select * from test_pro;
+set @v1 := 11, @v2 := 14.3;
+call pro_insert();
+select * from test_pro;
+
 \c test_set
 show enable_set_variable_b_format;
 set enable_set_variable_b_format = off;
