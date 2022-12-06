@@ -115,9 +115,9 @@ static void InitHashTable(int size)
 static HTAB* get_name_hash_table_type() 
 {
 #if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
-    if (a_nameHash != NULL && u_sess->attr.attr_sql.whale) {
+    if (a_nameHash != NULL && DB_IS_CMPT(A_FORMAT)) {
         return a_nameHash;
-    } else if (b_nameHash != NULL && u_sess->attr.attr_sql.dolphin) {
+    } else if (b_nameHash != NULL && DB_IS_CMPT(B_FORMAT)) {
         return b_nameHash;
     }
 #endif
@@ -127,9 +127,9 @@ static HTAB* get_name_hash_table_type()
 static HTAB* get_oid_hash_table_type()
 {
 #if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
-    if (a_oidHash != NULL && u_sess->attr.attr_sql.whale) {
+    if (a_oidHash != NULL && DB_IS_CMPT(A_FORMAT)) {
         return a_oidHash;
-    } else if (b_oidHash != NULL && u_sess->attr.attr_sql.dolphin) {
+    } else if (b_oidHash != NULL && DB_IS_CMPT(B_FORMAT)) {
         return b_oidHash;
     }
 #endif
