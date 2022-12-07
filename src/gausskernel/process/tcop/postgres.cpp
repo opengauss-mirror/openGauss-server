@@ -7474,13 +7474,22 @@ void LoadSqlPlugin()
             /* recheck and load dolphin within lock */
             pthread_mutex_lock(&g_instance.loadPluginLock[DB_CMPT_B]);
 
-            start_xact_command();
-            u_sess->attr.attr_sql.dolphin = CheckIfExtensionExists("dolphin");
-            finish_xact_command();
+            PG_TRY();
+            {
+                start_xact_command();
+                u_sess->attr.attr_sql.dolphin = CheckIfExtensionExists("dolphin");
+                finish_xact_command();
 
-            if (!u_sess->attr.attr_sql.dolphin) {
-                LoadDolphinIfNeeded();
+                if (!u_sess->attr.attr_sql.dolphin) {
+                    LoadDolphinIfNeeded();
+                }
             }
+            PG_CATCH();
+            {
+                pthread_mutex_unlock(&g_instance.loadPluginLock[DB_CMPT_B]);
+                PG_RE_THROW();
+            }
+            PG_END_TRY();
             pthread_mutex_unlock(&g_instance.loadPluginLock[DB_CMPT_B]);
         } else if (u_sess->attr.attr_sql.dolphin) {
             InitBSqlPluginHookIfNeeded();
