@@ -23,6 +23,7 @@ ifneq "$(MAKECMDGOALS)" "clean"
   endif
 endif
 OBJS= pg_resetxlog.o $(WIN32RES)
+OBJS += $(top_builddir)/src/gausskernel/storage/dss/dss_adaptor.o
 
 all: pg_resetxlog
 
