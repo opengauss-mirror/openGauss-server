@@ -1,21 +1,3 @@
-DO $DODO$
-DECLARE
-no_id boolean;
-has_version_proc boolean;
-need_upgrade boolean;
-BEGIN
-  need_upgrade = false;
-  select case when count(*)=1 then true else false end as has_version_proc from (select * from pg_proc where proname = 'working_version_num' limit 1) into has_version_proc;
-  IF has_version_proc = true  then
-    select working_version_num < 92299 or (working_version_num < 92407 and working_version_num >= 92350) as no_id from working_version_num() into no_id;
-    if no_id = true then
-      need_upgrade = true;
-    end if;
-  ELSE
-    need_upgrade = true;
-  END IF;
-  if need_upgrade = true then
-
 DROP VIEW IF EXISTS pg_catalog.gs_wlm_ec_operator_statistics CASCADE;
 DROP VIEW IF EXISTS pg_catalog.gs_wlm_operator_statistics CASCADE;
 DROP VIEW IF EXISTS pg_catalog.pg_get_invalid_backends CASCADE;
@@ -954,6 +936,3 @@ BEGIN
 		DROP COLUMN IF EXISTS snap_global_sessionid;
   end if;
 END$DO$;
-
-  end if;
-END$DODO$;
