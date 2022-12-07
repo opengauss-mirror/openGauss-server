@@ -24,7 +24,6 @@
 
 #include "mot_engine.h"
 #include "spin_lock.h"
-
 #include "config_manager.h"
 #include "statistics_manager.h"
 #include "network_statistics.h"
@@ -45,12 +44,13 @@
 #include "cycles.h"
 #include "debug_utils.h"
 #include "recovery_manager_factory.h"
+#include "csn_manager.h"
 
 // For mtSessionThreadInfo thread local
 #include "kvthread.hh"
 
 #include <unistd.h>
-#include <stdlib.h>
+#include <cstdlib>
 #include <sys/utsname.h>
 #include <fstream>
 
@@ -58,6 +58,8 @@ namespace MOT {
 IMPLEMENT_CLASS_LOGGER(MOTEngine, System);
 
 MOTEngine* MOTEngine::m_engine = nullptr;
+
+static CSNManager csnManager;
 
 // Initialization helper macro (for system calls)
 #define CHECK_SYS_INIT_STATUS(rc, syscall, format, ...)                                         \
@@ -76,20 +78,32 @@ MOTEngine* MOTEngine::m_engine = nullptr;
 MOTEngine::MOTEngine()
     : m_initialized(false),
       m_recovering(false),
+      m_recoveringCleanup(false),
       m_sessionAffinity(0, 0, AffinityMode::AFFINITY_INVALID),
       m_taskAffinity(0, 0, AffinityMode::AFFINITY_INVALID),
+      m_csnManager(nullptr),
       m_softMemoryLimitReached(0),
+      m_padding(0),
       m_sessionManager(nullptr),
       m_tableManager(nullptr),
       m_surrogateKeyManager(nullptr),
       m_recoveryManager(nullptr),
       m_redoLogHandler(nullptr),
-      m_checkpointManager(nullptr)
+      m_checkpointManager(nullptr),
+      m_ddlSigFunc(nullptr)
 {}
 
 MOTEngine::~MOTEngine()
 {
     Destroy();
+    m_csnManager = nullptr;
+    m_ddlSigFunc = nullptr;
+    m_sessionManager = nullptr;
+    m_tableManager = nullptr;
+    m_recoveryManager = nullptr;
+    m_surrogateKeyManager = nullptr;
+    m_redoLogHandler = nullptr;
+    m_checkpointManager = nullptr;
 }
 
 MOTEngine* MOTEngine::CreateInstance(
@@ -249,9 +263,13 @@ void MOTEngine::Destroy()
     MOT_LOG_INFO("Shutdown: MOT Engine shutdown finished");
 }
 
-void MOTEngine::PrintCurrentWorkingDirectory()
+void MOTEngine::PrintCurrentWorkingDirectory() const
 {
     char* cwd = (char*)malloc(sizeof(char) * PATH_MAX);
+    if (cwd == nullptr) {
+        MOT_LOG_TRACE("%s: Failed to allocate %d bytes", __FUNCTION__, PATH_MAX);
+        return;
+    }
     if (!getcwd(cwd, PATH_MAX)) {
         errno_t erc = strcpy_s(cwd, PATH_MAX, "N/A");
         securec_check(erc, "\0", "\0");
@@ -260,7 +278,7 @@ void MOTEngine::PrintCurrentWorkingDirectory()
     free(cwd);
 }
 
-void MOTEngine::PrintSystemInfo()
+void MOTEngine::PrintSystemInfo() const
 {
 #ifdef MOT_DEBUG
     MOT_LOG_WARN("Running in DEBUG mode");
@@ -293,7 +311,7 @@ void MOTEngine::PrintSystemInfo()
                 break;
             }
         }
-        fclose(f);
+        (void)fclose(f);
     } else {
         // default to /etc/os-release
         f = fopen("/etc/os-release", "r");
@@ -309,7 +327,7 @@ void MOTEngine::PrintSystemInfo()
                     break;
                 }
             }
-            fclose(f);
+            (void)fclose(f);
         }
     }
 }
@@ -328,7 +346,12 @@ bool MOTEngine::InitializeCoreServices()
         MOTConfiguration& cfg = GetGlobalConfiguration();
         m_sessionAffinity.Configure(cfg.m_numaNodes, cfg.m_coresPerCpu, cfg.m_sessionAffinityMode);
         m_taskAffinity.Configure(cfg.m_numaNodes, cfg.m_coresPerCpu, cfg.m_taskAffinityMode);
-        MOT_LOG_TRACE("Startup: Affinity initialized");
+        MOT_LOG_INFO("Startup: Affinity initialized - numaNodes = %u, coresPerCpu = %u, sessionAffinityMode = %u, "
+                     "taskAffinityMode = %u",
+            cfg.m_numaNodes,
+            cfg.m_coresPerCpu,
+            cfg.m_sessionAffinityMode,
+            cfg.m_taskAffinityMode);
 
         result = (InitThreadIdPool(cfg.m_maxThreads) == 0);
         CHECK_INIT_STATUS(result, "Failed to Initialize reusable thread identifier pool");
@@ -342,7 +365,10 @@ bool MOTEngine::InitializeCoreServices()
         result = (AllocThreadIdNumaHighest(0) != INVALID_THREAD_ID);
         CHECK_INIT_STATUS(result, "Failed to allocate loader thread identifier");
         m_initCoreStack.push(INIT_LOADER_THREAD_ID_PHASE);
-        InitCurrentNumaNodeId();
+
+        result = InitCurrentNumaNodeId();
+        CHECK_INIT_STATUS(result, "Failed to allocate loader thread NUMA node identifier");
+        m_initCoreStack.push(INIT_LOADER_NODE_ID_PHASE);
 
         result = InitializeStatistics();  // Initialize statistics objects
         CHECK_INIT_STATUS(result, "Failed to Initialize statistics collection");
@@ -373,6 +399,9 @@ bool MOTEngine::InitializeCoreServices()
         result = InitializeDebugUtils();
         CHECK_INIT_STATUS(result, "Failed to Initialize debug utilities");
         m_initCoreStack.push(INIT_DEBUG_UTILS);
+
+        SetCSNManager(&csnManager);
+        m_initCoreStack.push(INIT_CSN_MANAGER);
     } while (0);
 
     if (result) {
@@ -391,13 +420,13 @@ bool MOTEngine::InitializeAppServices()
     MOT_LOG_TRACE("Startup: Initializing applicative services");
 
     do {
-        result = InitializeRecoveryManager();
-        CHECK_INIT_STATUS(result, "Failed to Initialize the recovery manager");
-        m_initAppStack.push(INIT_RECOVERY_MANAGER_PHASE);
-
         result = InitializeRedoLogHandler();
         CHECK_INIT_STATUS(result, "Failed to Initialize the redo-log handler");
         m_initAppStack.push(INIT_REDO_LOG_HANDLER_PHASE);
+
+        result = InitializeRecoveryManager();
+        CHECK_INIT_STATUS(result, "Failed to Initialize the recovery manager");
+        m_initAppStack.push(INIT_RECOVERY_MANAGER_PHASE);
 
         // CheckpointManager uses RedoLogHandler, always make sure that
         // RedoLogHandler is initialize before CheckpointManager
@@ -475,8 +504,11 @@ void MOTEngine::DestroyCoreServices()
                 DestroyStatistics();
                 break;
 
-            case INIT_LOADER_THREAD_ID_PHASE:
+            case INIT_LOADER_NODE_ID_PHASE:
                 ClearCurrentNumaNodeId();
+                break;
+
+            case INIT_LOADER_THREAD_ID_PHASE:
                 FreeThreadId();
                 break;
 
@@ -511,12 +543,12 @@ void MOTEngine::DestroyAppServices()
                 DestroyCheckpointManager();
                 break;
 
-            case INIT_REDO_LOG_HANDLER_PHASE:
-                DestroyRedoLogHandler();
-                break;
-
             case INIT_RECOVERY_MANAGER_PHASE:
                 DestroyRecoveryManager();
+                break;
+
+            case INIT_REDO_LOG_HANDLER_PHASE:
+                DestroyRedoLogHandler();
                 break;
 
             default:
@@ -886,7 +918,6 @@ void MOTEngine::DestroyRecoveryManager()
 {
     MOT_LOG_INFO("Destroying the Recovery Manager");
     if (m_recoveryManager != nullptr) {
-        m_recoveryManager->CleanUp();
         delete m_recoveryManager;
         m_recoveryManager = nullptr;
     }
@@ -935,12 +966,12 @@ void MOTEngine::OnCurrentThreadEnding()
     FreeThreadId();
 }
 
-uint64_t MOTEngine::GetCurrentMemoryConsumptionBytes()
+uint64_t MOTEngine::GetCurrentMemoryConsumptionBytes() const
 {
     return MemGetCurrentGlobalMemoryBytes();
 }
 
-uint64_t MOTEngine::GetHardMemoryLimitBytes()
+uint64_t MOTEngine::GetHardMemoryLimitBytes() const
 {
     return g_memGlobalCfg.m_maxGlobalMemoryMb * MEGA_BYTE;
 }

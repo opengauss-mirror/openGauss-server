@@ -19,6 +19,7 @@ set(MOT_CORE_INCLUDE_PATH
     ${MOT_CORE_PATH}/memory/garbage_collector
     ${MOT_CORE_PATH}/storage
     ${MOT_CORE_PATH}/storage/index
+    ${MOT_CORE_PATH}/storage/sentinel
     ${MOT_CORE_PATH}/system
     ${MOT_CORE_PATH}/system/checkpoint
     ${MOT_CORE_PATH}/system/common

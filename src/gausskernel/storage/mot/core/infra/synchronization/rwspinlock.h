@@ -129,7 +129,7 @@ static __LOCK_INLINE int spinlock_trylock(spinlock_t* lock)
  * @param lock The spin-lock to query its state.
  * @return Non-zero value if the spin-lock is locked, otherwise zero.
  */
-static __LOCK_INLINE int spinlock_is_locked(spinlock_t* lock)
+static __LOCK_INLINE bool spinlock_is_locked(spinlock_t* lock)
 {
     return (*lock == MEBUSY);
 }

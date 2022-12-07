@@ -226,9 +226,10 @@ public:
                             fullPathName,
                             defaultValueStr);
                     } else {
-                        MOT_LOG_ERROR("Unexpected non-integer item value type %s, using default value: %s",
-                            fullPathName,
+                        MOT_LOG_ERROR("Unexpected non-integer item value type (%s) for configuration item %s, "
+                                      "using default value: %s",
                             ConfigValueTypeToString(configValue->GetConfigValueType()),
+                            fullPathName,
                             TypeFormatter<T>::ToString(defaultValue, stringValue));
                     }
                 }
@@ -332,7 +333,7 @@ private:
         }
 
         // check empty string, regardless of value type correctness
-        ConfigValue* configValue = (ConfigValue*)configItem;
+        const ConfigValue* configValue = static_cast<const ConfigValue*>(configItem);
         if ((configValue->GetConfigValueType() == ConfigValueType::CONFIG_VALUE_STRING) &&
             (((const StringConfigValue*)configValue)->GetValue().length() == 0)) {
             // warning is printed in a nicer way be caller
@@ -460,7 +461,7 @@ private:
      * @param configTree The configuration tree to insert.
      * @return True if insertion succeeded, otherwise false.
      */
-    bool AddNewConfigTreeAt(LayeredConfigTrees::iterator itr, ConfigTree* configTree);
+    bool AddNewConfigTreeAt(const LayeredConfigTrees::iterator& itr, ConfigTree* configTree);
 
     /**
      * @brief Adds a configuration tree to an existing list of configuration trees.

@@ -25,6 +25,7 @@
 #include "global.h"
 #include "postgres.h"
 #include "utils/memutils.h"
+#include "storage/mot/jit_exec.h"
 
 #include "jit_source_pool.h"
 #include "utilities.h"
@@ -57,14 +58,17 @@ struct __attribute__((packed)) JitSourcePool {
     uint64_t m_padding2[5];
 };
 
-// Globals
+// Global variables
 static JitSourcePool g_jitSourcePool __attribute__((aligned(64))) = {0};
 
+static bool g_isFirstBreach = true;
+
 // forward declarations
-static void FreeJitSourceArray(uint32_t count);
+static void FreeJitSourceArray();
 
 extern bool InitJitSourcePool(uint32_t poolSize)
 {
+    MOT_LOG_TRACE("Initializing global JIT source pool with size: %u", poolSize);
     MOT_ASSERT(g_jitSourcePool.m_sourcePool == nullptr);
     errno_t erc = memset_s((void*)&g_jitSourcePool, sizeof(JitSourcePool), 0, sizeof(JitSourcePool));
     securec_check(erc, "\0", "\0");
@@ -85,30 +89,18 @@ extern bool InitJitSourcePool(uint32_t poolSize)
             "Failed to allocate %u JIT source objects (64-byte aligned %u bytes) for global JIT source pool",
             poolSize,
             allocSize);
-        pthread_spin_destroy(&g_jitSourcePool.m_lock);
+        (void)pthread_spin_destroy(&g_jitSourcePool.m_lock);
         return false;
     }
     erc = memset_s(g_jitSourcePool.m_sourcePool, allocSize, 0, allocSize);
     securec_check(erc, "\0", "\0");
 
-    // we need now to construct each object
-    for (uint32_t i = 0; i < poolSize; ++i) {
-        JitSource* jitSource = &g_jitSourcePool.m_sourcePool[i];
-        if (!InitJitSource(jitSource, "")) {
-            MOT_REPORT_ERROR(
-                MOT_ERROR_INTERNAL, "JIT Source Pool Initialization", "Failed to initialize JIT source %u", i);
-            // cleanup
-            FreeJitSourceArray(i);
-            pthread_spin_destroy(&g_jitSourcePool.m_lock);
-            return false;
-        }
-    }
-
     // fill the free list
     g_jitSourcePool.m_poolSize = poolSize;
     for (uint32_t i = 0; i < g_jitSourcePool.m_poolSize; ++i) {
         JitSource* jitSource = &g_jitSourcePool.m_sourcePool[i];
-        jitSource->_next = g_jitSourcePool.m_freeSourceList;
+        jitSource->m_sourceId = i;
+        jitSource->m_next = g_jitSourcePool.m_freeSourceList;
         g_jitSourcePool.m_freeSourceList = jitSource;
     }
     g_jitSourcePool.m_freeSourceCount = g_jitSourcePool.m_poolSize;
@@ -118,11 +110,12 @@ extern bool InitJitSourcePool(uint32_t poolSize)
 
 extern void DestroyJitSourcePool()
 {
+    MOT_LOG_TRACE("Destroying global JIT source pool");
     if (g_jitSourcePool.m_sourcePool == nullptr) {
         return;
     }
 
-    FreeJitSourceArray(g_jitSourcePool.m_poolSize);
+    FreeJitSourceArray();
 
     int res = pthread_spin_destroy(&g_jitSourcePool.m_lock);
     if (res != 0) {
@@ -138,8 +131,38 @@ extern void DestroyJitSourcePool()
     g_jitSourcePool.m_freeSourceCount = 0;
 }
 
-extern JitSource* AllocPooledJitSource(const char* queryString)
+/** @brief Returns a JIT source to the pool. */
+static void FreePooledJitSource(JitSource* jitSource)
 {
+    MOT_LOG_TRACE("Freeing JIT source %p", jitSource);
+    int res = pthread_spin_lock(&g_jitSourcePool.m_lock);
+    if (res != 0) {
+        MOT_REPORT_SYSTEM_ERROR_CODE(res,
+            pthread_spin_lock,
+            "Global JIT Source De-allocation",
+            "Failed to acquire spin lock for global JIT source pool");
+        return;
+    }
+
+    jitSource->m_next = g_jitSourcePool.m_freeSourceList;
+    g_jitSourcePool.m_freeSourceList = jitSource;
+    ++g_jitSourcePool.m_freeSourceCount;
+    g_isFirstBreach = true;
+
+    res = pthread_spin_unlock(&g_jitSourcePool.m_lock);
+    if (res != 0) {
+        MOT_REPORT_SYSTEM_ERROR_CODE(res,
+            pthread_spin_unlock,
+            "Global JIT Source De-allocation",
+            "Failed to release spin lock for global JIT source pool");
+        // system is in undefined state, we expect to crash any time soon, but we continue anyway
+    }
+}
+
+/** @brief Allocates a JIT source from the pool. */
+static JitSource* AllocPooledJitSource(const char* queryString, JitContextUsage usage)
+{
+    bool issueWarningOnFailure = false;
     MOT_LOG_TRACE("Allocating JIT source for query: %s", queryString);
     int res = pthread_spin_lock(&g_jitSourcePool.m_lock);
     if (res != 0) {
@@ -152,8 +175,12 @@ extern JitSource* AllocPooledJitSource(const char* queryString)
 
     JitSource* result = g_jitSourcePool.m_freeSourceList;
     if (g_jitSourcePool.m_freeSourceList != nullptr) {
-        g_jitSourcePool.m_freeSourceList = g_jitSourcePool.m_freeSourceList->_next;
+        g_jitSourcePool.m_freeSourceList = g_jitSourcePool.m_freeSourceList->m_next;
         --g_jitSourcePool.m_freeSourceCount;
+    }
+    if ((result == nullptr) && g_isFirstBreach) {
+        issueWarningOnFailure = true;
+        g_isFirstBreach = false;
     }
 
     res = pthread_spin_unlock(&g_jitSourcePool.m_lock);
@@ -166,46 +193,68 @@ extern JitSource* AllocPooledJitSource(const char* queryString)
     }
 
     if (result == nullptr) {
-        MOT_REPORT_ERROR(MOT_ERROR_RESOURCE_LIMIT,
-            "Global JIT Source Allocation",
-            "Failed to allocate JIT source, reached configured limit");
+        if (issueWarningOnFailure) {
+            MOT_LOG_WARN("Cannot allocate JIT source, reached configured limit: %u. Consider increasing the value "
+                         "of 'mot_codegen_limit' in mot.conf.",
+                GetMotCodegenLimit());
+        }
     } else {
-        ReInitJitSource(result, queryString);
+        if (!InitJitSource(result, queryString, usage)) {
+            MOT_LOG_WARN("Failed to initialize JIT source");
+            FreePooledJitSource(result);
+            result = nullptr;
+        }
     }
 
     return result;
 }
 
-extern void FreePooledJitSource(JitSource* jitSource)
+extern JitSource* AllocJitSource(const char* queryString, JitContextUsage usage)
 {
-    MOT_LOG_TRACE("Freeing JIT source %p with query: %s", jitSource, jitSource->_query_string);
-    int res = pthread_spin_lock(&g_jitSourcePool.m_lock);
-    if (res != 0) {
-        MOT_REPORT_SYSTEM_ERROR_CODE(res,
-            pthread_spin_lock,
-            "Global JIT Source De-allocation",
-            "Failed to acquire spin lock for global JIT source pool");
-        return;
+    if (usage == JIT_CONTEXT_GLOBAL) {
+        return AllocPooledJitSource(queryString, usage);
     }
 
-    jitSource->_next = g_jitSourcePool.m_freeSourceList;
-    g_jitSourcePool.m_freeSourceList = jitSource;
-    ++g_jitSourcePool.m_freeSourceCount;
+    size_t allocSize = sizeof(JitSource);
+    JitSource* jitSource = (JitSource*)MOT::MemSessionAlloc(allocSize);
+    if (jitSource == nullptr) {
+        MOT_REPORT_ERROR(MOT_ERROR_OOM,
+            "Local JIT Source Allocation",
+            "Failed to allocate %" PRIu64 " bytes for local JIT source",
+            allocSize);
+        return nullptr;
+    }
 
-    res = pthread_spin_unlock(&g_jitSourcePool.m_lock);
-    if (res != 0) {
-        MOT_REPORT_SYSTEM_ERROR_CODE(res,
-            pthread_spin_unlock,
-            "Global JIT Source De-allocation",
-            "Failed to release spin lock for global JIT source pool");
-        // system is in undefined state, we expect to crash any time soon, but we continue anyway
+    if (!InitJitSource(jitSource, queryString, usage)) {
+        MOT_LOG_WARN("Failed to initialize JIT source");
+        MOT::MemSessionFree(jitSource);
+        jitSource = nullptr;
+    }
+
+    return jitSource;
+}
+
+extern void FreeJitSource(JitSource* jitSource)
+{
+    MOT_ASSERT(!jitSource->m_initialized);
+    if (jitSource->m_usage == JIT_CONTEXT_GLOBAL) {
+        FreePooledJitSource(jitSource);
+    } else {
+        MOT::MemSessionFree(jitSource);
     }
 }
 
-static void FreeJitSourceArray(uint32_t count)
+static void FreeJitSourceArray()
 {
-    for (uint32_t i = 0; i < count; ++i) {
-        DestroyJitSource(&g_jitSourcePool.m_sourcePool[i]);
+    MOT_LOG_TRACE("Freeing JIT source array");
+    // destroy whatever is left
+    for (uint32_t i = 0; i < g_jitSourcePool.m_poolSize; ++i) {
+        JitSource* jitSource = &g_jitSourcePool.m_sourcePool[i];
+        if (jitSource->m_initialized) {
+            MOT_LOG_WARN("Found JIT source %p id %u not destroyed yet: %s", jitSource, i, jitSource->m_queryString);
+            (void)CleanUpDeprecateJitSourceContexts(jitSource);
+            DestroyJitSource(jitSource);
+        }
     }
     MOT::MemGlobalFree(g_jitSourcePool.m_sourcePool);
     g_jitSourcePool.m_sourcePool = nullptr;

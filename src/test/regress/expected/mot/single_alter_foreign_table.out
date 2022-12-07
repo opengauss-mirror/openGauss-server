@@ -12,7 +12,8 @@ SELECT * FROM T1;
 (1 row)
 
 ALTER TABLE T1 ADD COLUMN STR1 varchar(80);
-ERROR:  "t1" is a mot, which does not support alter table.
+ERROR:  "t1" is not a table
+HINT:  Use ALTER FOREIGN TABLE to alter a foreign table.
 SELECT * FROM T1;
                              string                             
 ----------------------------------------------------------------

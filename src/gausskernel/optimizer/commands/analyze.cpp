@@ -905,10 +905,9 @@ HeapTuple* get_total_rows(Relation onerel, VacuumStmt* vacstmt, BlockNumber relp
             onerel, vacstmt, elevel, rows, target_rows, totalrows, totaldeadrows, vacattrstats, attr_cnt);
     } else if (isForeignTable || onerel->rd_rel->relkind == RELKIND_STREAM ||
             (onerel->rd_rel->relkind == RELKIND_FOREIGN_TABLE &&
-#ifdef ENABLE_MOT
-            (isMOTFromTblOid(RelationGetRelid(onerel)) || isOracleFDWFromTblOid(RelationGetRelid(onerel)) ||
-#else
             (isOracleFDWFromTblOid(RelationGetRelid(onerel)) ||
+#ifdef ENABLE_MOT
+             isMOTFromTblOid(RelationGetRelid(onerel)) ||
 #endif
              isPostgresFDWFromTblOid(RelationGetRelid(onerel))))) {
         /*

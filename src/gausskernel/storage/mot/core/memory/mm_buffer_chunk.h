@@ -33,7 +33,7 @@
 #include "mm_raw_chunk_dir.h"
 #include "string_buffer.h"
 
-#include <string.h>
+#include <cstring>
 
 // API for chunk allocation
 // Chunk layout is as follows:
@@ -142,8 +142,8 @@ extern void MemBufferChunkReportError(int errorCode, const char* format, ...);
  * @param allocatorNode The allocator node with which the chunk is associated (source allocator).
  * @param bufferClass The class of buffers managed by the chunk.
  */
-extern void MemBufferChunkInit(MemBufferChunkHeader* chunkHeader, int16_t node, MemAllocType allocType,
-    int16_t allocatorNode, MemBufferClass bufferClass);
+extern void MemBufferChunkInit(
+    MemBufferChunkHeader* chunkHeader, MemAllocType allocType, int16_t allocatorNode, MemBufferClass bufferClass);
 
 /**
  * @brief Allocates a buffer from a chunk
@@ -197,7 +197,7 @@ inline MemBufferHeader* MemBufferChunkGetBufferHeader(MemBufferChunkHeader* chun
  * @param buffer The buffer to check.
  * @return Non-zero value if the buffer is allocated, otherwise zero.
  */
-inline int MemBufferChunkIsAllocated(MemBufferChunkHeader* chunkHeader, MemBufferHeader* bufferHeader);
+inline bool MemBufferChunkIsAllocated(MemBufferChunkHeader* chunkHeader, MemBufferHeader* bufferHeader);
 
 /**
  * @brief Queries whether a buffer is free.
@@ -205,7 +205,7 @@ inline int MemBufferChunkIsAllocated(MemBufferChunkHeader* chunkHeader, MemBuffe
  * @param buffer The buffer to check.
  * @return Non-zero value if the buffer is free, otherwise zero.
  */
-inline int MemBufferChunkIsFree(MemBufferChunkHeader* chunkHeader, MemBufferHeader* bufferHeader);
+inline bool MemBufferChunkIsFree(MemBufferChunkHeader* chunkHeader, MemBufferHeader* bufferHeader);
 
 /**
  * @brief Handles double buffer free. Dumps all relevant information and aborts.
@@ -265,7 +265,7 @@ inline MemBufferHeader* MemBufferChunkAllocBuffer(MemBufferChunkHeader* chunkHea
         for (uint32_t i = 0; i < chunkHeader->m_freeBitsetCount; ++i) {
             if (chunkHeader->m_freeBitset[i] != 0) {
                 uint64_t bitIndex = __builtin_clzll(chunkHeader->m_freeBitset[i]);
-                uint64_t bufferIndex = (i << 6) + bitIndex;
+                uint64_t bufferIndex = ((uint64_t)i << 6) + bitIndex;
                 if (bufferIndex < chunkHeader->m_bufferCount) {
                     chunkHeader->m_freeBitset[i] &= ~(((uint64_t)1) << (63 - bitIndex));
                     ++chunkHeader->m_allocatedCount;
@@ -355,18 +355,18 @@ inline MemBufferHeader* MemBufferChunkGetBufferHeader(MemBufferChunkHeader* chun
     return bufferHeader;
 }
 
-inline int MemBufferChunkIsAllocated(MemBufferChunkHeader* chunkHeader, MemBufferHeader* bufferHeader)
+inline bool MemBufferChunkIsAllocated(MemBufferChunkHeader* chunkHeader, MemBufferHeader* bufferHeader)
 {
     return !MemBufferChunkIsFree(chunkHeader, bufferHeader);
 }
 
-inline int MemBufferChunkIsFree(MemBufferChunkHeader* chunkHeader, MemBufferHeader* bufferHeader)
+inline bool MemBufferChunkIsFree(MemBufferChunkHeader* chunkHeader, MemBufferHeader* bufferHeader)
 {
-    int result = 0;
+    bool result = false;
     uint32_t slot = bufferHeader->m_index / 64;
     uint32_t index = bufferHeader->m_index % 64;
     if (chunkHeader->m_freeBitset[slot] & (((uint64_t)1) << (63 - index))) {
-        result = 1;
+        result = true;
     }
     return result;
 }

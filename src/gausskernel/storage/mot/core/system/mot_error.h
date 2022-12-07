@@ -22,14 +22,14 @@
  * -------------------------------------------------------------------------
  */
 
-#ifndef MM_ERROR_H
-#define MM_ERROR_H
+#ifndef MOT_ERROR_H
+#define MOT_ERROR_H
 
 #include "mot_error_codes.h"
 #include "global.h"
 #include "mot_log.h"
 
-#include <stdarg.h>
+#include <cstdarg>
 
 namespace MOT {
 /**
@@ -228,4 +228,4 @@ extern RC ErrorToRC(int errorCode);
 #define MOT_REPORT_SYSTEM_PANIC(systemCall, context, format, ...) \
     MOT_REPORT_SYSTEM_PANIC_CODE(errno, systemCall, context, format, ##__VA_ARGS__)
 
-#endif /* MM_ERROR_H */
+#endif /* MOT_ERROR_H */

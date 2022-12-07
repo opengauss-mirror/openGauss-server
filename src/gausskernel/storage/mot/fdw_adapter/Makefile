@@ -28,7 +28,6 @@ EXTENSION = mot_fdw
 REGRESS = mot_fdw
 
 EXTRA_CLEAN = sql/mot_fdw.sql expected/mot_fdw.out
-DATA = mot_fdw--1.0.sql mot_fdw.control
 
 subdir=src/gausskernel/storage/mot/fdw_adapter
 top_builddir ?= ../../../../../
@@ -38,18 +37,23 @@ ENGINE_INC = $(top_builddir)/src/gausskernel/storage/mot/core
 include $(top_builddir)/src/Makefile.global
 
 OBJ_DIR = ./obj
-OBJS = $(OBJ_DIR)/mot_fdw.o $(OBJ_DIR)/mot_internal.o $(OBJ_DIR)/mot_fdw_xlog.o $(OBJ_DIR)/mot_match_index.o $(OBJ_DIR)/mot_fdw_error.o
+
+SRCS := $(wildcard *.cpp)
+OBJS := $(patsubst %.cpp, $(OBJ_DIR)/%.o, $(SRCS))
+DEPS := $(patsubst %.cpp, $(OBJ_DIR)/%.d, $(SRCS))
 
 DATA = mot_fdw.control mot_fdw--1.0.sql
-
-DEPS := $(OBJ_DIR)/mot_fdw.d $(OBJ_DIR)/mot_internal.d $(OBJ_DIR)/mot_fdx_xlog.d $(OBJ_DIR)/mot_match_index.d $(OBJ_DIR)/mot_fdw_error.d
 
 # Shared library stuff
 include $(top_srcdir)/src/gausskernel/common.mk
 override CXXFLAGS += -DMOT_SECURE -I$(top_builddir)/src/gausskernel/storage/mot/jit_exec -I$(top_builddir)/src/gausskernel/storage/mot/fdw_adapter -I$(ENGINE_INC) -I$(ENGINE_INC)/storage -I$(ENGINE_INC)/system -I$(ENGINE_INC)/memory -I$(ENGINE_INC)/memory/garbage_collector
-override CXXFLAGS +=  -I$(ENGINE_INC)/infra -I$(ENGINE_INC)/infra/config -I$(ENGINE_INC)/infra/containers  -I$(ENGINE_INC)/infra/stats -I$(ENGINE_INC)/infra/synchronization -I$(ENGINE_INC)/concurrency_control -I$(ENGINE_INC)/storage/index -I$(ENGINE_INC)/system/transaction -I$(ENGINE_INC)/system/common -I$(ENGINE_INC)/system/statistics -I$(ENGINE_INC)/system/transaction_logger -I$(ENGINE_INC)/system/transaction_logger/asynchronous_redo_log -I$(ENGINE_INC)/system/transaction_logger/synchronous_redo_log -I$(ENGINE_INC)/system/transaction_logger/group_synchronous_redo_log -I$(ENGINE_INC)/system/checkpoint -I$(ENGINE_INC)/system/recovery -I$(ENGINE_INC)/utils
+override CXXFLAGS +=  -I$(ENGINE_INC)/infra -I$(ENGINE_INC)/infra/config -I$(ENGINE_INC)/infra/containers  -I$(ENGINE_INC)/infra/stats -I$(ENGINE_INC)/infra/synchronization -I$(ENGINE_INC)/concurrency_control -I$(ENGINE_INC)/storage/index -I$(ENGINE_INC)/storage/sentinel -I$(ENGINE_INC)/system/transaction -I$(ENGINE_INC)/system/common -I$(ENGINE_INC)/system/statistics -I$(ENGINE_INC)/system/transaction_logger -I$(ENGINE_INC)/system/transaction_logger/asynchronous_redo_log -I$(ENGINE_INC)/system/transaction_logger/synchronous_redo_log -I$(ENGINE_INC)/system/transaction_logger/group_synchronous_redo_log -I$(ENGINE_INC)/system/checkpoint -I$(ENGINE_INC)/system/recovery -I$(ENGINE_INC)/utils
 
 override CXXFLAGS += -faligned-new
+
+ifeq ($(enable_cassert), yes)
+override CXXFLAGS += -DDEBUG
+endif
 
 $(OBJS): | buildrepo
 
@@ -81,6 +85,7 @@ $(OBJ_DIR)/%.o: %.cpp
 
 show:
 	@echo "CC_VERSION=${CC_VERSION}"
+	@echo "enable_cassert=${enable_cassert}"
 	@echo "CC=${CC}"
 	@echo
 	@echo "DEBUG=${DEBUG}"

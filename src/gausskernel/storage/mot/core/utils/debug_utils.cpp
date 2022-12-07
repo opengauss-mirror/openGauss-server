@@ -71,22 +71,22 @@ extern bool InitializeDebugUtils()
 extern void DestroyDebugUtils()
 {
     if (initialized) {
-        pthread_mutex_destroy(&abortLock);
+        (void)pthread_mutex_destroy(&abortLock);
         initialized = false;
     }
 }
 
-extern void MOTAbort(void* faultAddress /* = NULL */)
+extern void MOTAbort(void* faultAddress /* = nullptr */)
 {
-    pthread_mutex_lock(&abortLock);
+    (void)pthread_mutex_lock(&abortLock);
     if (!abortFlag) {
         abortFlag = true;
 
         MOTDumpCallStack();
 
         // print whatever the application wanted to print
-        fflush(stderr);
-        fflush(stdout);
+        (void)fflush(stderr);
+        (void)fflush(stdout);
 
         // analyze fault address
         if (faultAddress != nullptr) {
@@ -99,7 +99,7 @@ extern void MOTAbort(void* faultAddress /* = NULL */)
         // now call abort
         ::abort();
     }
-    pthread_mutex_unlock(&abortLock);  // just for proper order
+    (void)pthread_mutex_unlock(&abortLock);  // just for proper order
 }
 
 static void SetCallStackName(char* name, const char* sourceName, size_t size)
@@ -136,7 +136,7 @@ static void ParseCallStackFrame(void* frame, char* frameStr, CallStackFrame* res
         // parse frame and offset
         char* closeParenPos = strchr(frameStr, ')');
         if (closeParenPos != nullptr) {
-            size = closeParenPos - openParenPos - 1;
+            size = (closeParenPos - openParenPos) - 1;
             SetCallStackName(resolvedFrame->m_frame, openParenPos + 1, size);
 
             // now break it again into frame and offset
@@ -158,22 +158,28 @@ static void ParseCallStackFrame(void* frame, char* frameStr, CallStackFrame* res
     if (opts & MOT_CALL_STACK_DEMANGLE) {
         if (resolvedFrame->m_frame[0] != 0) {
             mot_string sysCom;
-            sysCom.format("echo '%s' | c++filt", resolvedFrame->m_frame);
-            std::string sysRes = ExecOsCommand(sysCom.c_str());
-            SetCallStackName(resolvedFrame->m_demangledFrame, sysRes.c_str(), sysRes.length());
+            if (!sysCom.format("echo '%s' | c++filt", resolvedFrame->m_frame)) {
+                MOT_LOG_TRACE("Failed to format de-mangle command line");
+            } else {
+                std::string sysRes = ExecOsCommand(sysCom.c_str());
+                SetCallStackName(resolvedFrame->m_demangledFrame, sysRes.c_str(), sysRes.length());
+            }
         }
     }
 
     // 4. get file and line if required
     if (opts & MOT_CALL_STACK_FILE_LINE) {
         mot_string sysCom;
-        sysCom.format("addr2line %p -e %s", frame, resolvedFrame->m_module);
-        std::string sysRes = ExecOsCommand(sysCom.c_str());
-        SetCallStackName(resolvedFrame->m_file, sysRes.c_str(), sysRes.length());
-        char* colonPos = strchr(resolvedFrame->m_file, ':');
-        if (colonPos != nullptr) {
-            resolvedFrame->m_line = strtoull(colonPos + 1, nullptr, 0);
-            *colonPos = 0;
+        if (!sysCom.format("addr2line %p -e %s", frame, resolvedFrame->m_module)) {
+            MOT_LOG_TRACE("Failed to format address-to-line command line");
+        } else {
+            std::string sysRes = ExecOsCommand(sysCom.c_str());
+            SetCallStackName(resolvedFrame->m_file, sysRes.c_str(), sysRes.length());
+            char* colonPos = strchr(resolvedFrame->m_file, ':');
+            if (colonPos != nullptr) {
+                resolvedFrame->m_line = strtoull(colonPos + 1, nullptr, 0);
+                *colonPos = 0;
+            }
         }
     }
 }
@@ -224,7 +230,7 @@ extern void MOTPrintCallStackImplV(LogLevel logLevel, const char* logger, int op
 
     // format message
     StringBuffer sb = {0};
-    StringBufferInit(&sb, 1024, 2, MOT::StringBuffer::MULTIPLY);
+    StringBufferInit(&sb, 1024, MOT::StringBuffer::GROWTH_FACTOR, MOT::StringBuffer::MULTIPLY);
     StringBufferAppendV(&sb, format, argsCopy);
     StringBufferAppend(&sb, "\n");
     for (int i = 0; i < frameCount; ++i) {

@@ -25,15 +25,15 @@
 #ifndef MOT_ROW_H
 #define MOT_ROW_H
 
-#include <string.h>
+#include <cstring>
 #include <iosfwd>
 #include <string>
 #include <type_traits>
 
 #include "table.h"
+#include "column.h"
 #include "key.h"
 #include "sentinel.h"
-#include "row_header.h"
 #include "object_pool.h"
 
 // forward declaration
@@ -41,6 +41,8 @@ namespace MOT {
 class OccTransactionManager;
 class CheckpointWorkerPool;
 class RecoveryOps;
+
+enum class RowType : uint8_t { ROW, TOMBSTONE, STABLE, ROW_ZERO };
 
 /**
  * @class Row
@@ -57,10 +59,19 @@ public:
 
     Row(const Row& src);
 
+    Row(const Row& src, Table* tab);
+    Row(const Row& src, bool nullBitsChanged, size_t srcBitsSize, size_t newBitsSize, size_t dataSize, Column* col);
+    Row(const Row& src, Column** newCols, uint32_t newColCnt, Column** oldCols, uint32_t oldColCnt);
+
     /**
      * @brief Destructor.
      */
-    inline __attribute__((always_inline)) ~Row(){};
+    inline __attribute__((always_inline)) ~Row()
+    {
+        m_table = nullptr;
+        m_pSentinel = nullptr;
+        m_next = nullptr;
+    };
 
     // class non-copy-able, non-assignable, non-movable
     /** @cond EXCLUDE_DOC */
@@ -71,6 +82,9 @@ public:
     Row& operator=(Row&&) = delete;
     /** @endcond */
 
+    void CopyRowZero(const Row* src, Table* txnTable);
+
+    void CopyHeader(const Row& src, RowType rowType = RowType::ROW);
     /**
      * @brief Retrieves the table containing the row.
      * @return The owning table.
@@ -78,6 +92,16 @@ public:
     inline Table* GetTable() const
     {
         return m_table;
+    }
+
+    inline Table* GetOrigTable() const
+    {
+        return m_table->GetOrigTable();
+    }
+
+    inline void SetTable(Table* tab)
+    {
+        m_table = tab;
     }
 
     /**
@@ -155,8 +179,16 @@ public:
      */
     inline void Copy(const Row* src)
     {
-        CopyData(src->GetData(), src->GetTupleSize());
-        m_table = src->m_table;
+        if (unlikely(GetTable()->GetHasColumnChanges())) {
+            CopyVersion(*src,
+                GetTable()->m_columns,
+                GetTable()->m_fieldCnt,
+                src->GetTable()->m_columns,
+                src->GetTable()->m_fieldCnt);
+        } else {
+            CopyData(src->GetData(), src->GetTupleSize());
+            m_table = src->m_table;
+        }
     }
 
     /**
@@ -166,11 +198,7 @@ public:
     inline void DeepCopy(const Row* src)
     {
         CopyData(src->GetData(), src->GetTupleSize());
-        SetCommitSequenceNumber(src->GetCommitSequenceNumber());
-        m_table = src->m_table;
-        m_surrogateKey = src->m_surrogateKey;
-        m_rowId = src->m_rowId;
-        m_keyType = src->m_keyType;
+        CopyHeader(*src, src->GetRowType());
     }
 
     /**
@@ -179,6 +207,14 @@ public:
      * @param src A source row.
      */
     void CopyOpt(const Row* src);
+
+    /**
+     * @brief full row copy, src row is an old version.
+     * @param src A source row.
+     * @param newCols A new data version
+     * @param oldCols An old data version
+     */
+    void CopyVersion(const Row& src, Column** newCols, uint32_t newColCnt, Column** oldCols, uint32_t oldColCnt);
 
     /**
      * @brief Retrieves a pointer to the raw data of the row.
@@ -198,46 +234,34 @@ public:
         return m_table->GetTupleSize();
     };
 
+    RowType GetRowType() const
+    {
+        return m_rowType;
+    }
+
     /**
      * @brief Sets (turns on) the absent bit for the row.
      */
-    inline void SetAbsentRow()
+    inline void SetDeletedRow()
     {
-        m_rowHeader.SetAbsentBit();
+        m_rowType = RowType::TOMBSTONE;
     }
 
     /**
-     * @brief Sets (turns on) the row header absent lock bit for the row.
+     * @brief Sets stable flag on the row.
      */
-    inline void SetAbsentLockedRow()
+    inline void SetStableRow()
     {
-        m_rowHeader.SetAbsentLockedBit();
-    }
-
-    /**
-     * @brief Resets (turns off) the row header absent bit for the row.
-     */
-    inline void UnsetAbsentRow()
-    {
-        m_rowHeader.UnsetAbsentBit();
+        m_rowType = RowType::STABLE;
     }
 
     /**
      * @brief Queries the status of the row header absent bit for the row.
      * @return Boolean value denoting whether the absent bit is set or not.
      */
-    inline bool IsAbsentRow() const
-    {
-        return m_rowHeader.IsAbsent();
-    }
-
-    /**
-     * @brief Queries the validity of the row header.
-     * @return Boolean value denoting whether the row is valid or not.
-     */
     inline bool IsRowDeleted() const
     {
-        return m_rowHeader.IsRowDeleted();
+        return (m_rowType == RowType::TOMBSTONE);
     }
 
     /**
@@ -246,27 +270,17 @@ public:
      */
     inline uint64_t GetCommitSequenceNumber() const
     {
-        return m_rowHeader.GetCSN();
+        return m_rowCSN;
     }
 
     /**
      * @brief Sets the commit sequence number (CSN) of the row.
-     * @param csn The row commit sequnence number.
+     * @param csn The row commit sequence number.
      */
     inline void SetCommitSequenceNumber(uint64_t csn)
     {
-        m_rowHeader.SetCSN(csn);
+        m_rowCSN = csn;
     }
-
-    /**
-     * @brief Accesses the row trough the concurrency contorl management.
-     * @param type The concurrency contorl access type.
-     * @param txn The local private transaction cache.
-     * @param[out] row Receives a copy of this row.
-     * @param[out] lastTid Receives the last tuple id version of the row.
-     * @return Return code denoting the execution result.
-     */
-    RC GetRow(AccessType type, TxnAccess* txn, Row* row, TransactionId& lastTid) const;
 
     /**
      * @brief Class specific in-place new operator.
@@ -282,11 +296,12 @@ public:
 
     /**
      * @brief Class specific in-place delete operator.
-     * @param ptr The pointer to the object being deallocated.
+     * @param ptr The pointer to the object being de-allocated.
      * @param place The object's allocation address.
      */
     static inline __attribute__((always_inline)) void operator delete(void* ptr, void* place) noexcept
     {
+        MOT_ASSERT(ptr != nullptr);
         (void)ptr;
         (void)place;
     }
@@ -309,22 +324,36 @@ public:
         return m_pSentinel->GetStable();
     };
 
-    /**
-     * @brief Returns if row in a two phase recovery mode.
-     * @return Boolean value denoting whether the row is in a two phase recovery mode or not.
-     */
-    bool GetTwoPhaseMode()
+    Row* GetNextVersion() const
     {
-        return m_twoPhaseRecoverMode;
+        return m_next;
+    }
+
+    void SetNextVersion(Row* r)
+    {
+        m_next = r;
     }
 
     /**
-     * @brief Sets the row to two phase recovery mode
-     * @param val true/false
+     * @brief Obtains the original row's transaction id from the stable row.
+     *  We reuse the m_next member in order to avoid adding more members.
+     * @return the transaction id.
      */
-    void SetTwoPhaseMode(bool val)
+    uint64_t GetStableTid() const
     {
-        m_twoPhaseRecoverMode = val;
+        MOT_ASSERT(m_rowType == RowType::STABLE);
+        return reinterpret_cast<uint64_t>(m_next);
+    }
+
+    /**
+     * @brief Sets the original row's transaction id on the stable row.
+     *  We reuse the m_next member in order to avoid adding more members.
+     * @param the transaction id.
+     */
+    void SetStableTid(uint64_t tid)
+    {
+        MOT_ASSERT(m_rowType == RowType::STABLE);
+        m_next = reinterpret_cast<Row*>(tid);
     }
 
     /**
@@ -333,14 +362,14 @@ public:
      */
     void SetPrimarySentinel(Sentinel* s)
     {
-        m_pSentinel = s;
+        m_pSentinel = reinterpret_cast<PrimarySentinel*>(s);
     }
 
     /**
      * @brief Gets the row's primary sentinel.
      * @return pointer to the row's primary sentinel.
      */
-    Sentinel* GetPrimarySentinel()
+    PrimarySentinel* GetPrimarySentinel()
     {
         return m_pSentinel;
     }
@@ -389,7 +418,7 @@ public:
      */
     uint8_t* GetSurrogateKeyBuff() const
     {
-        return (uint8_t*)&m_surrogateKey;
+        return (uint8_t*)&m_rowId;
     }
 
     /**
@@ -422,9 +451,8 @@ public:
      * @brief Sets surrogate key.
      * @param key The surrogate key value.
      */
-    void SetSurrogateKey(uint64_t key)
+    void SetSurrogateKey()
     {
-        m_surrogateKey = key;
         m_keyType = KeyType::SURROGATE_KEY;
     }
 
@@ -451,7 +479,7 @@ public:
      */
     uint64_t GetSurrogateKey() const
     {
-        return m_surrogateKey;
+        return htobe64(m_rowId);
     }
 
     /**
@@ -469,7 +497,6 @@ public:
      */
     void CopySurrogateKey(const Row* r)
     {
-        m_surrogateKey = r->GetSurrogateKey();
         m_keyType = r->GetKeyType();
     }
 
@@ -494,25 +521,182 @@ public:
         }
     }
 
+    void Print();
+
     /**
-     * @brief a callback function to remove and destroy a row.
-     * @param gcParam1 A place holder for first paramater passed by the GC.
-     * @param gcParam1 A place holder for second param passed by the GC.
-     * @param dropIndex An indicator for drop index operator.
+     * @brief a callback function to remove and destroy a version chain.
+     * @param gcElement A place holder for the gc element metadata.
+     * @param oper GC operation for the current element
+     * @param aux a pointer to the GC delete vector
+     * @return size of cleaned element
      */
-    static uint32_t RowDtor(void* gcParam1, void* gcParam2, bool dropIndex)
+    static uint32_t RowVersionDtor(void* gcElement, void* oper, void* aux)
     {
-        // We want to destroy the row even if this is a drop_index flow
-        uint32_t size = 0;
-        Row* r = reinterpret_cast<Row*>(gcParam1);
-        // Add size of key and row
-        MOT_ASSERT(r != nullptr);
-        Table* t = r->GetTable();
-        MOT_ASSERT(t != nullptr);
-        size += t->GetRowSizeFromPool();
-        if (!dropIndex) {
-            t->DestroyRow(r);
+        GC_OPERATION_TYPE gcOperType = (*(GC_OPERATION_TYPE*)oper);
+        GcQueue::DeleteVector* deleteVector = static_cast<GcQueue::DeleteVector*>(aux);
+        LimboElement* elem = reinterpret_cast<LimboElement*>(gcElement);
+        PrimarySentinel* ps = reinterpret_cast<PrimarySentinel*>(elem->m_objectPool);
+        uint32_t size = ps->GetIndex()->GetTable()->GetRowSizeFromPool();
+        if (unlikely(gcOperType == GC_OPERATION_TYPE::GC_OPER_DROP_INDEX)) {
+            return size;
         }
+        // We want to destroy the row even if this is a drop_index flow
+        GcSharedInfo& gcInfo = ps->GetGcInfo();
+        MOT_ASSERT(gcInfo.GetCounter() > 0);
+        // Decrement reference count
+        uint32_t gcSlot = gcInfo.RefCountUpdate(DEC);
+        gcSlot--;
+        // Check if we are the last owners of the sentinel
+        // if so reclaim it
+        if ((gcSlot == 0) and ps->IsSentinelRemovable()) {
+            MOT_LOG_DEBUG("RowVersionDtor Deleting ps %p minActiveCSN %lu ", ps, MOT::g_gcActiveEpoch);
+            ps->ReclaimSentinel(ps);
+            return size;
+        }
+        uint64_t reclaimCSN = elem->m_csn;
+        // If row was reclaimed skip this element
+        if (reclaimCSN <= gcInfo.GetMinCSN()) {
+            return size;
+        }
+        // We try to reclaim every N element
+        if (gcSlot and gcSlot % GC_MAX_ELEMENTS_TO_SKIP) {
+            // At this point we can check if the row was updated
+            // If so we can skip
+            if (ps->GetData() != elem->m_objectPtr) {
+                return size;
+            }
+        }
+        bool res = gcInfo.TryLock();
+        if (res == false) {
+            return size;
+        }
+        uint64_t min_csn = gcInfo.GetMinCSN();
+        // Locked Re-verify element is still valid
+        if (reclaimCSN <= min_csn) {
+            gcInfo.Release();
+            return size;
+        }
+        // Set MIN_CSN in the gcInfo to inform Concurrent GC's about the latest version.
+        gcInfo.SetMinCSN(reclaimCSN);
+        Row* tmp = nullptr;
+        Row* versionRow = reinterpret_cast<Row*>(elem->m_objectPtr);
+        // Add size of key and row
+        MOT_ASSERT(versionRow != nullptr);
+        Table* t = versionRow->GetTable();
+        MOT_ASSERT(t != nullptr);
+
+        // We reclaim all the versions below this versions
+        tmp = versionRow;
+        versionRow = versionRow->GetNextVersion();
+        // Detach the list of rows
+        tmp->SetNextVersion(nullptr);
+
+        // Clean older version
+        while (versionRow) {
+            tmp = versionRow;
+            versionRow = versionRow->GetNextVersion();
+            if (tmp->IsRowDeleted() == false) {
+                t->DestroyRow(tmp);
+            } else {
+                uint64_t tombstoneCSN = tmp->GetCommitSequenceNumber();
+                if (tombstoneCSN > min_csn) {
+                    (void)t->GCRemoveRow(deleteVector, tmp, gcOperType);
+                }
+                t->DestroyRow(tmp);
+            }
+        }
+        // Unlock gcInfo
+        gcInfo.Release();
+
+        return size;
+    }
+
+    /**
+     * @brief a callback function to remove and destroy a deleted version chain.
+     * @param gcElement A place holder for the gc element metadata.
+     * @param oper GC operation for the current element
+     * @param aux a pointer to the GC delete vector
+     * @return size of cleaned element
+     */
+    static uint32_t DeleteRowDtor(void* gcElement, void* oper, void* aux)
+    {
+        GC_OPERATION_TYPE gcOperType = (*(GC_OPERATION_TYPE*)oper);
+        GcQueue::DeleteVector* deleteVector = static_cast<GcQueue::DeleteVector*>(aux);
+        LimboElement* limboElem = reinterpret_cast<LimboElement*>(gcElement);
+        PrimarySentinel* ps = reinterpret_cast<PrimarySentinel*>(limboElem->m_objectPool);
+        uint32_t size = ps->GetIndex()->GetTable()->GetRowSizeFromPool();
+        if (unlikely(gcOperType == GC_OPERATION_TYPE::GC_OPER_DROP_INDEX)) {
+            return size;
+        }
+        // We want to destroy the row even if this is a drop_index flow
+        GcSharedInfo& gcInfo = ps->GetGcInfo();
+        MOT_ASSERT(gcInfo.GetCounter() > 0);
+        // Decrement reference count
+        uint32_t gcSlot = gcInfo.RefCountUpdate(DEC);
+        // Check if we are the last owners of the sentinel
+        // if so reclaim it
+        if ((gcSlot == 1) and ps->IsSentinelRemovable()) {
+            MOT_LOG_DEBUG("RowVersionDtor Deleting ps %p minActiveCSN %lu ", ps, MOT::g_gcActiveEpoch);
+            ps->ReclaimSentinel(ps);
+            return size;
+        }
+        uint64_t reclaimCSN = limboElem->m_csn;
+        // If row was reclaimed skip this element
+        if (reclaimCSN <= gcInfo.GetMinCSN()) {
+            MOT_LOG_DEBUG("Skipping Element %s %d ", __func__, __LINE__);
+            return size;
+        }
+        // Lock the gcInfo
+        gcInfo.Lock();
+        uint64_t min_csn = gcInfo.GetMinCSN();
+        // Re-verify element is still valid
+        if (reclaimCSN <= min_csn) {
+            gcInfo.Release();
+            return size;
+        }
+        //  If a key was inserted on top of us ignore this element
+        //  Since we passed CSN check
+        //  Serialize the operations from newest to oldest!
+        if (ps->GetData() != limboElem->m_objectPtr) {
+            MOT_LOG_DEBUG("Skipping Element %s %d ", __func__, __LINE__);
+            gcInfo.Release();
+            return size;
+        }
+        gcInfo.SetMinCSN(reclaimCSN);
+        Row* tombstone = reinterpret_cast<Row*>(limboElem->m_objectPtr);
+        Row* versionRow = tombstone->GetNextVersion();
+        // Add size of key and row
+        MOT_ASSERT(tombstone != nullptr);
+        Table* table = tombstone->GetTable();
+        MOT_ASSERT(table != nullptr);
+        (void)table->GCRemoveRow(deleteVector, tombstone, gcOperType);
+
+        if (versionRow) {
+            Row* currentRow = versionRow;
+            versionRow = versionRow->GetNextVersion();
+            currentRow->SetNextVersion(nullptr);
+        }
+
+        // Clean older version
+        while (versionRow) {
+            Row* tmp = versionRow;
+            versionRow = versionRow->GetNextVersion();
+            if (tmp->IsRowDeleted() == false) {
+                MOT_LOG_DEBUG("Deleting Version %s %d ", __func__, __LINE__);
+                table->DestroyRow(tmp);
+            } else {
+                MOT_LOG_DEBUG("Deleting tombstone - Clean Secondary Only! %s %d ", __func__, __LINE__);
+                uint64_t tombstoneCSN = tmp->GetCommitSequenceNumber();
+                if (tombstoneCSN > min_csn) {
+                    (void)table->GCRemoveRow(deleteVector, tmp, gcOperType);
+                }
+                table->DestroyRow(tmp);
+            }
+        }
+
+        // Unlock gcInfo
+        gcInfo.Release();
+
         return size;
     }
 
@@ -526,7 +710,7 @@ private:
      * @param dataSize[out] The number of bytes to update in the field (column).
      * @return The field offset in the row.
      */
-    inline uint64_t GetSetValuePosition(int id, uint64_t& dataSize)
+    inline uint64_t GetSetValuePosition(int id, uint64_t& dataSize) const
     {
         uint64_t dSize = m_table->GetFieldSize(id);
         uint64_t pos = m_table->GetFieldOffset(id);
@@ -563,19 +747,17 @@ protected:
     void SetValue(int colId, const void* value) = delete;
     /** @endcond */
 
-    // Header of the row reserved for the concurrency control method
-    // NOTE: This member should always be first (DO NOT CHANGE)
     /** @var The row header. */
-    RowHeader m_rowHeader;
+    uint64_t m_rowCSN;
+
+    /** @var The next version ordered from N2O */
+    Row* m_next = nullptr;
 
     /** @var The table to which this row belongs. */
     Table* m_table = nullptr;
 
-    /** @var The internal key number on cases where primary key doesn't exist. */
-    uint64_t m_surrogateKey;
-
     /** @var The reference to the sentinel that points to this row. */
-    Sentinel* m_pSentinel = nullptr;
+    PrimarySentinel* m_pSentinel = nullptr;
 
     /** @var the row id. */
     uint64_t m_rowId;
@@ -583,8 +765,8 @@ protected:
     /** @var The key type. */
     KeyType m_keyType;
 
-    /** @var A flag to identify if row is in recover mode state. */
-    bool m_twoPhaseRecoverMode = false;
+    /** @var The row type. */
+    RowType m_rowType;
 
     /** @var The raw buffer holding the row data. Starts at the end of the class
      * Must be last member */
@@ -610,6 +792,7 @@ protected:
     friend Index;
     friend RecoveryOps;
     friend Table;
+    friend TxnTable;
 
     DECLARE_CLASS_LOGGER()
 };

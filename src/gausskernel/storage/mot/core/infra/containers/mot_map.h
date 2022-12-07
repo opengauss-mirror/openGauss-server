@@ -48,11 +48,6 @@ public:
     /** @typedef The map implementation (currently a simple list of key-value pairs). */
     typedef mot_list<mot_pair<K, V>, Allocator, mot_pair_assigner<K, V, KeyAssigner, ValueAssigner> > map_impl;
 
-private:
-    /** @var The key-value map. */
-    map_impl _map;
-
-public:
     /** @brief Default constructor. */
     mot_map()
     {}
@@ -195,6 +190,10 @@ public:
     {
         return _map.cend();
     }
+
+private:
+    /** @var The key-value map. */
+    map_impl _map;
 };
 }  // namespace MOT
 

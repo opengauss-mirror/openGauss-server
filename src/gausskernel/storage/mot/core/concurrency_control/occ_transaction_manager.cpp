@@ -23,11 +23,10 @@
  */
 
 #include "occ_transaction_manager.h"
-#include "../utils/utilities.h"
+#include "utilities.h"
 #include "cycles.h"
 #include "mot_engine.h"
 #include "row.h"
-#include "row_header.h"
 #include "txn.h"
 #include "txn_access.h"
 #include "checkpoint_manager.h"
@@ -42,82 +41,151 @@ OccTransactionManager::OccTransactionManager()
     : m_txnCounter(0),
       m_abortsCounter(0),
       m_writeSetSize(0),
-      m_rowsSetSize(0),
-      m_deleteSetSize(0),
       m_insertSetSize(0),
       m_dynamicSleep(100),
       m_rowsLocked(false),
       m_preAbort(true),
-      m_validationNoWait(true)
+      m_validationNoWait(true),
+      m_isTransactionCommited(false)
 {}
 
 OccTransactionManager::~OccTransactionManager()
 {}
 
-bool OccTransactionManager::Init()
+bool OccTransactionManager::PreAbortCheck(TxnManager* txMan, GcMaintenanceInfo& gcMemoryReserve)
 {
-    bool result = true;
-    return result;
+    TxnAccess* tx = txMan->m_accessMgr;
+    TxnOrderedSet_t& orderedSet = tx->GetOrderedRowSet();
+    auto itr = orderedSet.begin();
+    while (itr != orderedSet.end()) {
+        Access* ac = (*itr).second;
+        switch (ac->m_type) {
+            case WR:
+                m_writeSetSize++;
+                gcMemoryReserve.m_version_queue++;
+                break;
+            case DEL:
+                m_writeSetSize++;
+                if (ac->m_params.IsPrimarySentinel()) {
+                    gcMemoryReserve.m_delete_queue++;
+                } else {
+                    if (ac->m_params.IsIndexUpdate()) {
+                        gcMemoryReserve.m_update_column_queue++;
+                    }
+                }
+                gcMemoryReserve.m_generic_queue++;
+                break;
+            case INS:
+                m_insertSetSize++;
+                m_writeSetSize++;
+                if (ac->m_params.IsUpgradeInsert()) {
+                    gcMemoryReserve.m_version_queue++;
+                }
+                break;
+            case RD_FOR_UPDATE:
+            case RD:
+                itr = orderedSet.erase(itr);
+                txMan->m_accessMgr->PubReleaseAccess(ac);
+                continue;
+            default:
+                break;
+        }
+
+        if (m_preAbort) {
+            if (!QuickHeaderValidation(ac)) {
+                if (MOTEngine::GetInstance()->IsRecovering() && ResolveRecoveryOccConflict(txMan, ac) == RC_OK) {
+                    (void)++itr;
+                    continue;
+                }
+                return false;
+            }
+        }
+        (void)++itr;
+    }
+    return true;
 }
 
-bool OccTransactionManager::CheckVersion(const Access* access)
+bool OccTransactionManager::QuickVersionCheck(const Access* access)
 {
-    // We always validate on committed rows!
-    const Row* row = access->GetRowFromHeader();
-    return (row->m_rowHeader.GetCSN() == access->m_tid);
+    if (access->m_params.IsPrimarySentinel()) {
+        // For Upgrade IOD - Verify the sentinel snapshot is still valid
+        // Check if the key is still visible
+        if (access->m_snapshot <= access->m_origSentinel->GetStartCSN()) {
+            return false;
+        }
+        MOT_ASSERT(access->m_csn == access->m_globalRow->GetCommitSequenceNumber());
+        return (access->m_csn == access->m_origSentinel->GetData()->GetCommitSequenceNumber());
+    } else {
+        if (access->m_params.IsSecondaryUniqueSentinel()) {
+            PrimarySentinelNode* node = static_cast<SecondarySentinelUnique*>(access->m_origSentinel)->GetTopNode();
+            if (node->GetEndCSN() != Sentinel::SENTINEL_INIT_CSN) {
+                return false;
+            }
+            return (access->m_secondaryUniqueNode == node);
+        } else {
+            MOT_ASSERT(access->GetType() == AccessType::DEL);
+            // Check that the Sentinel is not deleted!
+            return (static_cast<SecondarySentinel*>(access->GetSentinel())->GetEndCSN() == Sentinel::SENTINEL_INIT_CSN);
+        }
+    }
+}
+
+bool OccTransactionManager::QuickInsertCheck(const Access* access)
+{
+    // Lets verify the inserts
+    Sentinel* sent = access->m_origSentinel;
+    if (access->m_params.IsUpgradeInsert() == false) {
+        // if the sent is committed we abort!
+        if (sent->IsCommited()) {
+            return false;
+        }
+    } else {
+        if (access->m_params.IsPrimarySentinel()) {
+            // For Upgrade IOD - Verify the sentinel snapshot is still valid
+            if (access->m_params.IsInsertOnDeletedRow()) {
+                if (access->m_origSentinel->GetData()->IsRowDeleted() == false) {
+                    return false;
+                }
+            }
+            return (access->m_csn == access->m_origSentinel->GetData()->GetCommitSequenceNumber());
+        } else {
+            if (access->m_params.IsSecondaryUniqueSentinel()) {
+                PrimarySentinelNode* node = static_cast<SecondarySentinelUnique*>(access->m_origSentinel)->GetTopNode();
+                if (access->m_params.IsInsertOnDeletedRow()) {
+                    // Check if node is deleted
+                    if (node->GetEndCSN() == Sentinel::SENTINEL_INIT_CSN) {
+                        return false;
+                    }
+                } else {
+                    // Check if node is committed
+                    if (node->GetEndCSN() != Sentinel::SENTINEL_INIT_CSN) {
+                        return false;
+                    }
+                }
+                return (access->m_secondaryUniqueNode == node);
+            } else {
+                MOT_ASSERT(access->GetType() == AccessType::INS);
+                MOT_ASSERT(access->m_params.IsIndexUpdate() == true);
+                if (static_cast<SecondarySentinel*>(access->GetSentinel())->GetEndCSN() ==
+                    Sentinel::SENTINEL_INIT_CSN) {
+                    return false;
+                }
+                return (static_cast<SecondarySentinel*>(access->GetSentinel())->GetStartCSN() == access->m_csn);
+            }
+        }
+    }
+
+    return true;
 }
 
 bool OccTransactionManager::QuickHeaderValidation(const Access* access)
 {
     if (access->m_type != INS) {
         // For WR/DEL/RD_FOR_UPDATE lets verify CSN
-        return CheckVersion(access);
+        return QuickVersionCheck(access);
     } else {
-        // Lets verify the inserts
-        // For upgrade we verify  the row
-        // csn has not changed!
-        Sentinel* sent = access->m_origSentinel;
-        if (access->m_params.IsUpgradeInsert()) {
-            if (access->m_params.IsDummyDeletedRow()) {
-                // Check is sentinel is deleted and CSN is VALID -  ABA problem
-                if (sent->IsCommited() == false) {
-                    if (sent->GetData()->GetCommitSequenceNumber() != access->m_tid) {
-                        return false;
-                    }
-                } else {
-                    return false;
-                }
-            } else {
-                // We deleted internally!, we only need to check version
-                if (sent->GetData()->GetCommitSequenceNumber() != access->m_tid) {
-                    return false;
-                }
-            }
-        } else {
-            // If the sent is committed or inserted-deleted we abort!
-            if (sent->IsCommited() or sent->GetData() != nullptr) {
-                return false;
-            }
-        }
+        return QuickInsertCheck(access);
     }
-
-    return true;
-}
-
-bool OccTransactionManager::ValidateReadSet(TxnManager* txMan)
-{
-    TxnOrderedSet_t& orderedSet = txMan->m_accessMgr->GetOrderedRowSet();
-    for (const auto& raPair : orderedSet) {
-        const Access* ac = raPair.second;
-        if (ac->m_type != RD) {
-            continue;
-        }
-        if (!ac->GetRowFromHeader()->m_rowHeader.ValidateRead(ac->m_tid)) {
-            return false;
-        }
-    }
-
-    return true;
 }
 
 bool OccTransactionManager::ValidateWriteSet(TxnManager* txMan)
@@ -125,10 +193,6 @@ bool OccTransactionManager::ValidateWriteSet(TxnManager* txMan)
     TxnOrderedSet_t& orderedSet = txMan->m_accessMgr->GetOrderedRowSet();
     for (const auto& raPair : orderedSet) {
         const Access* ac = raPair.second;
-        if (ac->m_type == RD) {
-            continue;
-        }
-
         if (!QuickHeaderValidation(ac)) {
             return false;
         }
@@ -136,106 +200,65 @@ bool OccTransactionManager::ValidateWriteSet(TxnManager* txMan)
     return true;
 }
 
-RC OccTransactionManager::LockRows(TxnManager* txMan, uint32_t& numRowsLock)
+RC OccTransactionManager::LockHeaders(TxnManager* txMan, uint32_t& numSentinelsLock)
 {
     RC rc = RC_OK;
-    TxnOrderedSet_t& orderedSet = txMan->m_accessMgr->GetOrderedRowSet();
-    numRowsLock = 0;
-    for (const auto& raPair : orderedSet) {
-        const Access* ac = raPair.second;
-        if (ac->m_type == RD) {
-            continue;
-        }
-        if (ac->m_params.IsPrimarySentinel()) {
-            Row* row = ac->GetRowFromHeader();
-            row->m_rowHeader.Lock();
-            numRowsLock++;
-            MOT_ASSERT(row->GetPrimarySentinel()->IsLocked() == true);
-        }
-    }
-
-    return rc;
-}
-
-bool OccTransactionManager::LockHeadersNoWait(TxnManager* txMan, uint32_t& numSentinelsLock)
-{
     uint64_t sleepTime = 1;
     uint64_t thdId = txMan->GetThdId();
     TxnOrderedSet_t& orderedSet = txMan->m_accessMgr->GetOrderedRowSet();
     numSentinelsLock = 0;
-    while (numSentinelsLock != m_writeSetSize) {
-        for (const auto& raPair : orderedSet) {
-            const Access* ac = raPair.second;
-            if (ac->m_type == RD) {
-                continue;
+    if (m_validationNoWait) {
+        while (numSentinelsLock != m_writeSetSize) {
+            for (const auto& raPair : orderedSet) {
+                const Access* ac = raPair.second;
+                Sentinel* sent = ac->m_origSentinel;
+                if (!sent->TryLock(thdId)) {
+                    break;
+                }
+                numSentinelsLock++;
+                // New insert row is already committed!
+                // Check if row has changed in sentinel
+                if (!QuickHeaderValidation(ac)) {
+                    rc = RC_ABORT;
+                    goto final;
+                }
             }
-            Sentinel* sent = ac->m_origSentinel;
-            if (!sent->TryLock(thdId)) {
-                break;
-            }
-            numSentinelsLock++;
-            if (ac->m_params.IsPrimaryUpgrade()) {
-                ac->m_auxRow->m_rowHeader.Lock();
-            }
-            // New insert row is already committed!
-            // Check if row has changed in sentinel
-            if (!QuickHeaderValidation(ac)) {
-                return false;
-            }
-        }
 
-        if (numSentinelsLock != m_writeSetSize) {
-            ReleaseHeaderLocks(txMan, numSentinelsLock);
-            numSentinelsLock = 0;
-            if (m_preAbort) {
-                for (const auto& acPair : orderedSet) {
-                    const Access* ac = acPair.second;
-                    if (!QuickHeaderValidation(ac)) {
-                        return false;
+            if (numSentinelsLock != m_writeSetSize) {
+                ReleaseHeaderLocks(txMan, numSentinelsLock);
+                numSentinelsLock = 0;
+                if (m_preAbort) {
+                    for (const auto& acPair : orderedSet) {
+                        const Access* ac = acPair.second;
+                        if (!QuickHeaderValidation(ac)) {
+                            return RC_ABORT;
+                        }
                     }
                 }
-            }
-            if (sleepTime > LOCK_TIME_OUT) {
-                return false;
-            } else {
-                if (IsHighContention() == false) {
-                    CpuCyclesLevelTime::Sleep(5);
+                if (!MOTEngine::GetInstance()->IsRecovering()) {
+                    if (sleepTime > LOCK_TIME_OUT) {
+                        return RC_ABORT;
+                    } else {
+                        if (!IsHighContention()) {
+                            CpuCyclesLevelTime::Sleep(5);
+                        } else {
+                            (void)usleep(m_dynamicSleep);
+                        }
+                        sleepTime = sleepTime << 1;
+                    }
                 } else {
-                    usleep(m_dynamicSleep);
+                    (void)usleep(1000);
                 }
-                sleepTime = sleepTime << 1;
             }
-        }
-    }
-
-    return true;
-}
-
-RC OccTransactionManager::LockHeaders(TxnManager* txMan, uint32_t& numSentinelsLock)
-{
-    RC rc = RC_OK;
-    uint64_t thdId = txMan->GetThdId();
-    TxnOrderedSet_t& orderedSet = txMan->m_accessMgr->GetOrderedRowSet();
-    numSentinelsLock = 0;
-    if (m_validationNoWait) {
-        if (!LockHeadersNoWait(txMan, numSentinelsLock)) {
-            rc = RC_ABORT;
-            goto final;
         }
     } else {
         for (const auto& raPair : orderedSet) {
             const Access* ac = raPair.second;
-            if (ac->m_type == RD) {
-                continue;
-            }
             Sentinel* sent = ac->m_origSentinel;
             sent->Lock(thdId);
             numSentinelsLock++;
-            if (ac->m_params.IsPrimaryUpgrade()) {
-                ac->m_auxRow->m_rowHeader.Lock();
-            }
             // New insert row is already committed!
-            // Check if row has chained in sentinel
+            // Check if row has changed in sentinel
             if (!QuickHeaderValidation(ac)) {
                 rc = RC_ABORT;
                 goto final;
@@ -249,18 +272,15 @@ final:
 bool OccTransactionManager::PreAllocStableRow(TxnManager* txMan)
 {
     if (GetGlobalConfiguration().m_enableCheckpoint) {
-        GetCheckpointManager()->BeginCommit(txMan);
-
         TxnOrderedSet_t& orderedSet = txMan->m_accessMgr->GetOrderedRowSet();
         for (const auto& raPair : orderedSet) {
             const Access* access = raPair.second;
-            if (access->m_type == RD) {
+            if (access->m_type == RD || (access->m_type == INS && access->m_params.IsUpgradeInsert() == false)) {
                 continue;
             }
             if (access->m_params.IsPrimarySentinel()) {
                 if (!GetCheckpointManager()->PreAllocStableRow(txMan, access->GetRowFromHeader(), access->m_type)) {
                     GetCheckpointManager()->FreePreAllocStableRows(txMan);
-                    GetCheckpointManager()->EndCommit(txMan);
                     return false;
                 }
             }
@@ -269,60 +289,41 @@ bool OccTransactionManager::PreAllocStableRow(TxnManager* txMan)
     return true;
 }
 
-bool OccTransactionManager::QuickVersionCheck(TxnManager* txMan, uint32_t& readSetSize)
+bool OccTransactionManager::ReserveGcMemory(TxnManager* txMan, const GcMaintenanceInfo& gcMemoryReserve)
 {
-    int isolationLevel = txMan->GetTxnIsoLevel();
-    TxnOrderedSet_t& orderedSet = txMan->m_accessMgr->GetOrderedRowSet();
-    readSetSize = 0;
-    for (const auto& raPair : orderedSet) {
-        const Access* ac = raPair.second;
-        if (ac->m_params.IsPrimarySentinel()) {
-            m_rowsSetSize++;
-        }
-        switch (ac->m_type) {
-            case RD_FOR_UPDATE:
-            case WR:
-                m_writeSetSize++;
-                break;
-            case DEL:
-                m_writeSetSize++;
-                m_deleteSetSize++;
-                break;
-            case INS:
-                m_insertSetSize++;
-                m_writeSetSize++;
-                break;
-            case RD:
-                if (isolationLevel > READ_COMMITED) {
-                    readSetSize++;
-                } else {
-                    continue;
-                }
-                break;
-            default:
-                break;
-        }
-
-        if (m_preAbort) {
-            if (!QuickHeaderValidation(ac)) {
-                return false;
-            }
-        }
+    bool res = true;
+    GcManager* gc_manager = txMan->GetGcSession();
+    MOT_ASSERT(gc_manager != nullptr);
+    res = gc_manager->ReserveGCMemoryPerQueue(GC_QUEUE_TYPE::DELETE_QUEUE, gcMemoryReserve.m_delete_queue);
+    if (!res) {
+        return false;
     }
-    return true;
+    res = gc_manager->ReserveGCMemoryPerQueue(GC_QUEUE_TYPE::VERSION_QUEUE, gcMemoryReserve.m_version_queue);
+    if (!res) {
+        return false;
+    }
+    res =
+        gc_manager->ReserveGCMemoryPerQueue(GC_QUEUE_TYPE::UPDATE_COLUMN_QUEUE, gcMemoryReserve.m_update_column_queue);
+    if (!res) {
+        return false;
+    }
+    res = gc_manager->ReserveGCMemoryPerQueue(GC_QUEUE_TYPE::GENERIC_QUEUE, gcMemoryReserve.m_generic_queue, true);
+    if (!res) {
+        return false;
+    }
+
+    return res;
 }
 
 RC OccTransactionManager::ValidateOcc(TxnManager* txMan)
 {
     uint32_t numSentinelLock = 0;
     m_rowsLocked = false;
-    TxnAccess* tx = txMan->m_accessMgr.Get();
+    TxnAccess* txnAccess = txMan->m_accessMgr;
     RC rc = RC_OK;
-    const uint32_t rowCount = tx->m_rowCnt;
+    const uint32_t rowCount = txnAccess->Size();
 
     m_writeSetSize = 0;
-    m_rowsSetSize = 0;
-    m_deleteSetSize = 0;
     m_insertSetSize = 0;
     m_txnCounter++;
 
@@ -331,42 +332,39 @@ RC OccTransactionManager::ValidateOcc(TxnManager* txMan)
         return rc;
     }
 
-    uint32_t readSetSize = 0;
-    TxnOrderedSet_t& orderedSet = tx->GetOrderedRowSet();
-    MOT_ASSERT(rowCount == orderedSet.size());
+    GcMaintenanceInfo gcMemoryReserve{};
 
-    /* Perform Quick Version check */
-    if (!QuickVersionCheck(txMan, readSetSize)) {
-        rc = RC_ABORT;
-        goto final;
-    }
+    MOT_ASSERT(rowCount == txnAccess->GetOrderedRowSet().size());
 
-    MOT_LOG_DEBUG("Validate OCC rowCnt=%u RD=%u WR=%u\n", tx->m_rowCnt, tx->m_rowCnt - m_writeSetSize, m_writeSetSize);
-    rc = LockHeaders(txMan, numSentinelLock);
-    if (rc != RC_OK) {
-        goto final;
-    }
-
-    // Validate rows in the read set and write set
-    if (readSetSize > 0) {
-        if (!ValidateReadSet(txMan)) {
+    do {
+        /* 1.Perform pre-abort check and pre-processing */
+        if (!PreAbortCheck(txMan, gcMemoryReserve)) {
             rc = RC_ABORT;
-            goto final;
+            break;
         }
-    }
 
-    if (!ValidateWriteSet(txMan)) {
-        rc = RC_ABORT;
-        goto final;
-    }
+        rc = LockHeaders(txMan, numSentinelLock);
+        if (rc != RC_OK) {
+            break;
+        }
 
-    // Pre-allocate stable row according to the checkpoint state.
-    if (!PreAllocStableRow(txMan)) {
-        rc = RC_MEMORY_ALLOCATION_ERROR;
-        goto final;
-    }
+        if (!ValidateWriteSet(txMan)) {
+            rc = RC_ABORT;
+            break;
+        }
 
-final:
+        // Pre-allocate stable row according to the checkpoint state.
+        if (!PreAllocStableRow(txMan)) {
+            rc = RC_MEMORY_ALLOCATION_ERROR;
+            break;
+        }
+
+        if (!ReserveGcMemory(txMan, gcMemoryReserve)) {
+            rc = RC_MEMORY_ALLOCATION_ERROR;
+            break;
+        }
+    } while (0);
+
     if (likely(rc == RC_OK)) {
         MOT_ASSERT(numSentinelLock == m_writeSetSize);
         m_rowsLocked = true;
@@ -380,15 +378,85 @@ final:
     return rc;
 }
 
-void OccTransactionManager::RollbackInserts(TxnManager* txMan)
+RC OccTransactionManager::ResolveRecoveryOccConflict(TxnManager* txMan, Access* access)
 {
-    return txMan->UndoInserts();
+    Row* row = nullptr;
+    RC rc = RC_ABORT;
+    uint64_t endCSN = static_cast<uint64_t>(-1);
+    MOT_ASSERT(access->m_type == INS);
+    switch (access->m_origSentinel->GetIndexOrder()) {
+        case IndexOrder::INDEX_ORDER_PRIMARY:
+            // Check what is the current row the sentinel is pointing
+            row = access->m_origSentinel->GetData();
+            if (row) {
+                // Row must be deleted with Smaller CSN
+                if (row->IsRowDeleted() == false) {
+                    MOT_LOG_ERROR("ERROR In Recovery Order!");
+                    return RC_ABORT;
+                }
+                MOT_ASSERT(access->m_origSentinel->GetData()->GetCommitSequenceNumber() > access->m_csn);
+                // Reset the global version and set to insert on delete
+                access->m_params.SetUpgradeInsert();
+                access->m_params.SetInsertOnDeletedRow();
+                access->m_globalRow = row;
+                access->m_csn = row->GetCommitSequenceNumber();
+                access->m_snapshot = static_cast<uint64_t>(-1);
+                rc = RC_OK;
+            } else {
+                MOT_ASSERT(false);
+                return RC_ABORT;
+            }
+            break;
+        case IndexOrder::INDEX_ORDER_SECONDARY:
+            endCSN = static_cast<SecondarySentinel*>(access->m_origSentinel)->GetEndCSN();
+            if (txMan->GetCommitSequenceNumber() <= endCSN) {
+                MOT_LOG_ERROR("ERROR In Recovery Order!");
+                return RC_ABORT;
+            }
+            if (endCSN == Sentinel::SENTINEL_INIT_CSN) {
+                MOT_LOG_ERROR("ERROR In Recovery Order!");
+                return RC_ABORT;
+            }
+            access->m_params.SetUpgradeInsert();
+            access->m_params.SetInsertOnDeletedRow();
+            access->m_csn = static_cast<SecondarySentinel*>(access->m_origSentinel)->GetStartCSN();
+            rc = RC_OK;
+            break;
+        case IndexOrder::INDEX_ORDER_SECONDARY_UNIQUE:
+            PrimarySentinelNode* node = static_cast<SecondarySentinelUnique*>(access->m_origSentinel)->GetTopNode();
+            if (node != nullptr) {
+                if (txMan->GetCommitSequenceNumber() <= node->GetEndCSN()) {
+                    MOT_LOG_ERROR("ERROR In Recovery Order!");
+                    return RC_ABORT;
+                }
+            }
+            // Reset Visible node
+            access->m_params.SetUpgradeInsert();
+            if (node->GetEndCSN() < Sentinel::SENTINEL_INIT_CSN) {
+                access->m_params.SetInsertOnDeletedRow();
+            } else {
+                MOT_LOG_ERROR("ERROR In Recovery Order!");
+                return RC_ABORT;
+            }
+            access->m_secondaryUniqueNode = node;
+            rc = RC_OK;
+            break;
+    }
+    return rc;
 }
-
-void OccTransactionManager::ApplyWrite(TxnManager* txMan)
+void OccTransactionManager::WriteChanges(TxnManager* txMan)
 {
-    if (GetGlobalConfiguration().m_enableCheckpoint) {
-        TxnOrderedSet_t& orderedSet = txMan->m_accessMgr->GetOrderedRowSet();
+    if (m_writeSetSize == 0 && m_insertSetSize == 0) {
+        return;
+    }
+
+    MOTConfiguration& cfg = GetGlobalConfiguration();
+    uint64_t commit_csn = txMan->GetCommitSequenceNumber();
+    uint64_t transaction_id = txMan->GetInternalTransactionId();
+    TxnOrderedSet_t& orderedSet = txMan->m_accessMgr->GetOrderedRowSet();
+
+    // Stable rows for checkpoint needs to be created (copied from original row) before modifying the global rows.
+    if (cfg.m_enableCheckpoint) {
         for (const auto& raPair : orderedSet) {
             const Access* access = raPair.second;
             if (access->m_type == RD) {
@@ -397,33 +465,40 @@ void OccTransactionManager::ApplyWrite(TxnManager* txMan)
             if (access->m_params.IsPrimarySentinel()) {
                 // Pass the actual global row (access->GetRowFromHeader()), so that the stable row will have the
                 // same CSN, rowid, etc as the original row before the modifications are applied.
-                GetCheckpointManager()->ApplyWrite(txMan, access->GetRowFromHeader(), access->m_type);
+                GetCheckpointManager()->ApplyWrite(txMan, access->GetRowFromHeader(), access);
             }
         }
     }
-}
-
-void OccTransactionManager::WriteChanges(TxnManager* txMan)
-{
-    if (m_writeSetSize == 0 && m_insertSetSize == 0) {
-        return;
-    }
-
-    LockRows(txMan, m_rowsSetSize);
-
-    // Stable rows for checkpoint needs to be created (copied from original row) before modifying the global rows.
-    ApplyWrite(txMan);
-
-    TxnOrderedSet_t& orderedSet = txMan->m_accessMgr->GetOrderedRowSet();
 
     // Update CSN with all relevant information on global rows
     // For deletes invalidate sentinels - rows still locked!
     for (const auto& raPair : orderedSet) {
-        const Access* access = raPair.second;
-        access->GetRowFromHeader()->m_rowHeader.WriteChangesToRow(access, txMan->GetCommitSequenceNumber());
+        Access* access = raPair.second;
+        access->WriteGlobalChanges(commit_csn, transaction_id);
     }
 
-    // Treat Inserts
+    WriteSentinelChanges(txMan);
+
+    // For Recovery operation:Update transactionID
+    for (const auto& raPair : orderedSet) {
+        const Access* access = raPair.second;
+        if (access->m_type == RD) {
+            continue;
+        }
+        if (access->m_params.IsPrimarySentinel()) {
+            static_cast<PrimarySentinel*>(access->m_origSentinel)->SetTransactionId(transaction_id);
+        }
+    }
+
+    m_isTransactionCommited = true;
+}
+
+void OccTransactionManager::WriteSentinelChanges(TxnManager* txMan)
+{
+    uint64_t commit_csn = txMan->GetCommitSequenceNumber();
+    S_SentinelNodePool* sentinelObjectPool = txMan->m_accessMgr->GetSentinelObjectPool();
+    TxnOrderedSet_t& orderedSet = txMan->m_accessMgr->GetOrderedRowSet();
+
     if (m_insertSetSize > 0) {
         for (const auto& raPair : orderedSet) {
             Access* access = raPair.second;
@@ -434,81 +509,73 @@ void OccTransactionManager::WriteChanges(TxnManager* txMan)
             if (access->m_params.IsUpgradeInsert() == false) {
                 if (access->m_params.IsPrimarySentinel()) {
                     MOT_ASSERT(access->m_origSentinel->IsDirty() == true);
+                    MOT_ASSERT(access->m_origSentinel->IsLocked() == true);
                     // Connect row and sentinel, row is set to absent and locked
-                    access->m_origSentinel->SetNextPtr(access->GetRowFromHeader());
+                    access->m_origSentinel->SetStartCSN(commit_csn);
+                    access->m_origSentinel->SetNextPtr(access->GetLocalInsertRow());
                     // Current state: row is set to absent,sentinel is locked and not dirty
                     // Readers will not see the row
+                    COMPILER_BARRIER;
+                    access->m_origSentinel->SetWriteBit();
                     access->GetTxnRow()->GetTable()->UpdateRowCount(1);
                 } else {
-                    // We only set the in the secondary sentinel!
-                    access->m_origSentinel->SetNextPtr(access->GetRowFromHeader()->GetPrimarySentinel());
+                    if (access->m_params.IsSecondaryUniqueSentinel() == false) {
+                        // We only set the in the secondary sentinel!
+                        access->m_origSentinel->SetStartCSN(commit_csn);
+                        access->m_origSentinel->SetEndCSN(Sentinel::SENTINEL_INIT_CSN);
+                        access->m_origSentinel->SetNextPtr(access->GetLocalInsertRow()->GetPrimarySentinel());
+                    } else {
+                        access->m_origSentinel->SetStartCSN(commit_csn);
+                        auto object = sentinelObjectPool->find(access->m_origSentinel->GetIndex());
+                        PrimarySentinelNode* node = object->second;
+                        (void)sentinelObjectPool->erase(object);
+                        node->Init(
+                            commit_csn, Sentinel::SENTINEL_INIT_CSN, access->GetLocalInsertRow()->GetPrimarySentinel());
+                        access->m_origSentinel->SetNextPtr(node);
+                    }
                 }
+                // Unset Dirty - still locked!
+                access->m_origSentinel->UnSetDirty();
             } else {
-                MOT_ASSERT(access->m_params.IsUniqueIndex() == true);
-                // Rows are locked and marked as deleted
-                if (access->m_params.IsPrimarySentinel()) {
-                    /* Switch the locked row's in the sentinel
-                     * The old row is locked and marked deleted
-                     * The new row is locked
-                     * Save previous row in the access!
-                     * We need it for the row release!
-                     */
-                    Row* row = access->GetRowFromHeader();
-                    access->m_localInsertRow = row;
-                    access->m_origSentinel->SetNextPtr(access->m_auxRow);
-                    // Add row to GC!
-                    txMan->GetGcSession()->GcRecordObject(row->GetTable()->GetPrimaryIndex()->GetIndexId(),
-                        row,
-                        nullptr,
-                        Row::RowDtor,
-                        ROW_SIZE_FROM_POOL(row->GetTable()));
+                if (access->m_params.IsInsertOnDeletedRow()) {
+                    if (access->m_params.IsPrimarySentinel()) {
+                        access->GetTxnRow()->GetTable()->UpdateRowCount(1);
+                        access->m_origSentinel->SetNextPtr(access->GetLocalInsertRow());
+                        COMPILER_BARRIER;
+                        access->m_origSentinel->SetWriteBit();
+                    } else if (access->m_params.IsUniqueIndex() == true) {
+                        auto object = sentinelObjectPool->find(access->m_origSentinel->GetIndex());
+                        PrimarySentinelNode* node = object->second;
+                        (void)sentinelObjectPool->erase(object);
+                        node->Init(
+                            commit_csn, Sentinel::SENTINEL_INIT_CSN, access->GetLocalInsertRow()->GetPrimarySentinel());
+                        auto oldNode = static_cast<SecondarySentinelUnique*>(access->m_origSentinel)->GetTopNode();
+                        node->SetNextVersion(oldNode);
+                        access->m_origSentinel->SetNextPtr(node);
+                    } else {
+                        MOT_ASSERT(access->m_params.IsIndexUpdate());
+                        // Revalidate End CSN
+                        static_cast<SecondarySentinel*>(access->m_origSentinel)->SetEndCSN(Sentinel::SENTINEL_INIT_CSN);
+                    }
                 } else {
-                    // Set Sentinel for
-                    access->m_origSentinel->SetNextPtr(access->m_auxRow->GetPrimarySentinel());
-                }
-                // upgrade should not change the reference count!
-                if (access->m_origSentinel->IsCommited()) {
-                    access->m_origSentinel->SetUpgradeCounter();
+                    // We delete row internally and insert a new row
+                    if (access->m_params.IsPrimarySentinel()) {
+                        access->m_origSentinel->SetNextPtr(access->GetLocalInsertRow());
+                        COMPILER_BARRIER;
+                        access->m_origSentinel->SetWriteBit();
+                    } else {
+                        auto object = sentinelObjectPool->find(access->m_origSentinel->GetIndex());
+                        PrimarySentinelNode* node = object->second;
+                        (void)sentinelObjectPool->erase(object);
+                        node->Init(
+                            commit_csn, Sentinel::SENTINEL_INIT_CSN, access->GetLocalInsertRow()->GetPrimarySentinel());
+                        auto oldNode = static_cast<SecondarySentinelUnique*>(access->m_origSentinel)->GetTopNode();
+                        oldNode->SetEndCSN(commit_csn);
+                        node->SetNextVersion(oldNode);
+                        access->m_origSentinel->SetNextPtr(node);
+                    }
                 }
             }
-        }
-    }
-
-    // Treat Inserts
-    if (m_insertSetSize > 0) {
-        for (const auto& raPair : orderedSet) {
-            const Access* access = raPair.second;
-            if (access->m_type != INS) {
-                continue;
-            }
-            access->m_origSentinel->UnSetDirty();
-        }
-    }
-
-    CleanRowsFromIndexes(txMan);
-}
-
-void OccTransactionManager::CleanRowsFromIndexes(TxnManager* txMan)
-{
-    if (m_deleteSetSize == 0) {
-        return;
-    }
-
-    TxnAccess* tx = txMan->m_accessMgr.Get();
-    TxnOrderedSet_t& orderedSet = tx->GetOrderedRowSet();
-    uint32_t numOfDeletes = m_deleteSetSize;
-    // use local counter to optimize
-    for (const auto& raPair : orderedSet) {
-        const Access* access = raPair.second;
-        if (access->m_type == DEL) {
-            numOfDeletes--;
-            access->GetTxnRow()->GetTable()->UpdateRowCount(-1);
-            MOT_ASSERT(access->m_params.IsUpgradeInsert() == false);
-            // Use Txn Row as row may change INSERT after DELETE leaves residue
-            txMan->RemoveKeyFromIndex(access->GetTxnRow(), access->m_origSentinel);
-        }
-        if (!numOfDeletes) {
-            break;
         }
     }
 }
@@ -519,7 +586,7 @@ void OccTransactionManager::ReleaseHeaderLocks(TxnManager* txMan, uint32_t numOf
         return;
     }
 
-    TxnAccess* tx = txMan->m_accessMgr.Get();
+    TxnAccess* tx = txMan->m_accessMgr;
     TxnOrderedSet_t& orderedSet = tx->GetOrderedRowSet();
     // use local counter to optimize
     for (const auto& raPair : orderedSet) {
@@ -528,41 +595,7 @@ void OccTransactionManager::ReleaseHeaderLocks(TxnManager* txMan, uint32_t numOf
             continue;
         } else {
             numOfLocks--;
-            access->m_origSentinel->Release();
-            if (access->m_params.IsPrimaryUpgrade()) {
-                access->m_auxRow->m_rowHeader.Release();
-            }
-        }
-        if (!numOfLocks) {
-            break;
-        }
-    }
-}
-
-void OccTransactionManager::ReleaseRowsLocks(TxnManager* txMan, uint32_t numOfLocks)
-{
-    if (numOfLocks == 0) {
-        return;
-    }
-
-    TxnAccess* tx = txMan->m_accessMgr.Get();
-    TxnOrderedSet_t& orderedSet = tx->GetOrderedRowSet();
-
-    // use local counter to optimize
-    for (const auto& raPair : orderedSet) {
-        const Access* access = raPair.second;
-        if (access->m_type == RD) {
-            continue;
-        }
-
-        if (access->m_params.IsPrimarySentinel()) {
-            numOfLocks--;
-            access->GetRowFromHeader()->m_rowHeader.Release();
-            if (access->m_params.IsUpgradeInsert()) {
-                // This is the global row that we switched!
-                // Currently it's in the gc!
-                access->m_localInsertRow->m_rowHeader.Release();
-            }
+            access->m_origSentinel->Unlock();
         }
         if (!numOfLocks) {
             break;
@@ -574,6 +607,6 @@ void OccTransactionManager::CleanUp()
 {
     m_writeSetSize = 0;
     m_insertSetSize = 0;
-    m_rowsSetSize = 0;
+    m_isTransactionCommited = false;
 }
 }  // namespace MOT

@@ -46,7 +46,6 @@ extern void applyLockingClause(Query* qry, Index rtindex, LockClauseStrength str
                                int waitSec);
 #ifdef ENABLE_MOT
 extern void CheckTablesStorageEngine(Query* qry, StorageEngineType* type);
-extern bool CheckMotIndexedColumnUpdate(Query* qry);
 
 typedef struct RTEDetectorContext {
     bool isMotTable;
@@ -54,12 +53,6 @@ typedef struct RTEDetectorContext {
     List* queryNodes;
     int sublevelsUp;
 } RTEDetectorContext;
-
-typedef struct UpdateDetectorContext {
-    bool isIndexedColumnUpdate;
-    List* queryNodes;
-    int sublevelsUp;
-} UpdateDetectorContext;
 #endif
 
 /* Record the rel name and corresponding columan name info */

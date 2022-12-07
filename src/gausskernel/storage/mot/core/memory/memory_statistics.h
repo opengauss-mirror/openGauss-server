@@ -30,7 +30,7 @@
 #include "iconfig_change_listener.h"
 #include "numeric_statistic_variable.h"
 #include "statistics_provider.h"
-#include "stats/frequency_statistic_variable.h"
+#include "frequency_statistic_variable.h"
 #include "typed_statistics_generator.h"
 
 #include "mm_def.h"
@@ -289,13 +289,6 @@ private:
 };
 
 class DetailedMemoryStatisticsProvider : public StatisticsProvider, public IConfigChangeListener {
-private:
-    DetailedMemoryStatisticsProvider();
-    virtual ~DetailedMemoryStatisticsProvider();
-
-    /** @brief Registers the provider in the manager. */
-    void RegisterProvider();
-
 public:
     /**
      * @brief Creates singleton instance. Must be called once during engine startup.
@@ -427,22 +420,20 @@ public:
      */
     void OnConfigChange() override;
 
-public:  // special case for performance reasons: allow direct access to singleton
-    /** @var The single instance. */
-    static DetailedMemoryStatisticsProvider* m_provider;
-
 private:
-    static TypedStatisticsGenerator<DetailedMemoryThreadStatistics, DetailedMemoryGlobalStatistics> m_generator;
-};
-
-class MemoryStatisticsProvider : public StatisticsProvider, public IConfigChangeListener {
-private:
-    MemoryStatisticsProvider();
-    virtual ~MemoryStatisticsProvider();
+    DetailedMemoryStatisticsProvider();
+    ~DetailedMemoryStatisticsProvider() override;
 
     /** @brief Registers the provider in the manager. */
     void RegisterProvider();
 
+    /** @var The single instance. */
+    static DetailedMemoryStatisticsProvider* m_provider;
+
+    static TypedStatisticsGenerator<DetailedMemoryThreadStatistics, DetailedMemoryGlobalStatistics> m_generator;
+};
+
+class MemoryStatisticsProvider : public StatisticsProvider, public IConfigChangeListener {
 public:
     /**
      * @brief Creates singleton instance. Must be called once during engine startup.
@@ -624,18 +615,23 @@ public:
      */
     void OnConfigChange() override;
 
-public:  // special case for performance reasons: allow direct access to singleton
-    /** @var The single instance. */
-    static MemoryStatisticsProvider* m_provider;
-
-private:
-    static TypedStatisticsGenerator<MemoryThreadStatistics, MemoryGlobalStatistics> m_generator;
-
 protected:
     /**
      * @brief Print current memory status summary.
      */
-    virtual void PrintStatisticsEx();
+    void PrintStatisticsEx() override;
+
+private:
+    MemoryStatisticsProvider();
+    ~MemoryStatisticsProvider() override;
+
+    /** @brief Registers the provider in the manager. */
+    void RegisterProvider();
+
+    /** @var The single instance. */
+    static MemoryStatisticsProvider* m_provider;
+
+    static TypedStatisticsGenerator<MemoryThreadStatistics, MemoryGlobalStatistics> m_generator;
 };
 }  // namespace MOT
 

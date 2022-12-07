@@ -32,6 +32,7 @@
 #include "mm_numa.h"
 
 #include "knl/knl_thread.h"
+#include "knl/knl_session.h"
 
 namespace MOT {
 DECLARE_LOGGER(SessionManager, System)
@@ -123,7 +124,7 @@ void SessionManager::CleanupFailedSessionContext(
 
 SessionContext* SessionManager::CreateSessionContext(bool isLightSession /* = false */,
     uint64_t reserveMemoryKb /* = 0 */, void* userData /* = nullptr */,
-    ConnectionId connectionId /* = INVALID_CONNECTION_ID */)
+    ConnectionId connectionId /* = INVALID_CONNECTION_ID */, bool isMtls /* = false */)
 {
     // reject request if a session was already defined for the current thread
     SessionContext* sessionContext = MOT_GET_CURRENT_SESSION_CONTEXT();
@@ -140,7 +141,6 @@ SessionContext* SessionManager::CreateSessionContext(bool isLightSession /* = fa
 
     SessionId sessionId = INVALID_SESSION_ID;
     do {  // instead of goto
-
         // phase 1: setup all identifiers
         MOTThreadId threadId = AllocThreadId();
         if (threadId == INVALID_THREAD_ID) {
@@ -183,7 +183,11 @@ SessionContext* SessionManager::CreateSessionContext(bool isLightSession /* = fa
         // although this is thread-level attribute (even in a thread-pooled envelope) we still initialize it on-demand
         // whenever a new session starts, since we do not have a "on-thread-started" event (and delivering such an event
         // in the correct timing could be difficult, cumbersome and eventually counter-productive)
-        InitCurrentNumaNodeId();
+        if (!InitCurrentNumaNodeId()) {
+            MOT_REPORT_ERROR(
+                MOT_ERROR_INTERNAL, "Create Session Context", "Failed to initializes NUMA node identifier");
+            break;
+        }
         MOT_LOG_TRACE("Creating session for thread id %" PRIu16
                       ", connection id %u, node id %u (light session: %s, memory reservation: %" PRIu64 " KB)",
             threadId,
@@ -240,7 +244,7 @@ SessionContext* SessionManager::CreateSessionContext(bool isLightSession /* = fa
             break;
         }
 
-        sessionContext = new (inplaceBuffer) SessionContext(sessionId, connectionId, userData);
+        sessionContext = new (inplaceBuffer) SessionContext(sessionId, connectionId, userData, isMtls);
         MOT_LOG_TRACE("Created new session %u", sessionContext->GetSessionId());
         initPhase = ALLOC_SESSION_BUFFER_PHASE;
 
@@ -252,9 +256,11 @@ SessionContext* SessionManager::CreateSessionContext(bool isLightSession /* = fa
                 sessionContext->GetSessionId());
             break;
         }
-        m_sessionContextMap.insert(sessionContext->GetSessionId(), sessionContext);
-        // Add Garbage collection to active_list
-        sessionContext->GetTxnManager()->GcAddSession();
+        (void)m_sessionContextMap.insert(sessionContext->GetSessionId(), sessionContext);
+        if (!isMtls) {
+            // Add Garbage collection to active_list
+            sessionContext->GetTxnManager()->GcAddSession();
+        }
         initPhase = INIT_SESSION_PHASE;
 
         // phase 5: reserve statistics thread slot
@@ -296,7 +302,7 @@ void SessionManager::DestroySessionContext(SessionContext* sessionContext)
             "Ignoring attempt to delete mismatching session context (attempting to delete from another thread?)");
         return;
     }
-
+    bool isMtls = sessionContext->IsMtlsRecoverySession();
     MOT_LOG_DEBUG("deleteSessionContext(): Session %u for thread id %" PRIu16 ", connection %u: ref-cnt=%" PRIu64,
         sessionContext->GetSessionId(),
         MOTCurrThreadId,
@@ -305,10 +311,14 @@ void SessionManager::DestroySessionContext(SessionContext* sessionContext)
     if (sessionContext->DecRefCount() == 0) {
         ConnectionId connectionId = sessionContext->GetConnectionId();
         SessionId sessionId = sessionContext->GetSessionId();
-        MOT_LOG_TRACE("Destroying session %u, connection %u with surrogate key %" PRIu64,
-            sessionId,
-            connectionId,
-            sessionContext->GetTxnManager()->GetSurrogateCount());
+        if (!isMtls) {
+            MOT_LOG_TRACE("Destroying session %u, connection %u with surrogate key %" PRIu64,
+                sessionId,
+                connectionId,
+                sessionContext->GetTxnManager()->GetSurrogateCount());
+        } else {
+            MOT_LOG_TRACE("Destroying session %u, connection %u (mtls)", sessionId, connectionId);
+        }
 
 #ifdef MEM_SESSION_ACTIVE
         MemSessionPrintStats(connectionId, "Pre-Shutdown report", LogLevel::LL_TRACE);
@@ -326,11 +336,12 @@ void SessionManager::DestroySessionContext(SessionContext* sessionContext)
         if (!m_sessionContextMap.remove(sessionId)) {
             MOT_LOG_WARN("Failed to remove session %u from global session map - not found", sessionId);
         }
-
-        GetSurrogateKeyManager()->SetSurrogateSlot(connectionId, sessionContext->GetTxnManager()->GetSurrogateCount());
-
-        // Remove from link list
-        sessionContext->GetTxnManager()->GcRemoveSession();
+        if (!isMtls) {
+            GetSurrogateKeyManager()->SetSurrogateSlot(
+                connectionId, sessionContext->GetTxnManager()->GetSurrogateCount());
+            // Remove from link list
+            sessionContext->GetTxnManager()->GcRemoveSession();
+        }
         sessionContext->~SessionContext();
 
 #ifdef MEM_SESSION_ACTIVE
@@ -370,23 +381,10 @@ ScopedSessionManager::ScopedSessionManager()
     knl_thread_mot_init();
 
     // initialize session members
-    errno_t erc = memset_s(&m_localUSess, sizeof(knl_session_context), 0, sizeof(knl_session_context));
+    errno_t erc =
+        memset_s(static_cast<void*>(&m_localUSess), sizeof(knl_session_context), 0, sizeof(knl_session_context));
     securec_check(erc, "\0", "\0");
-    m_localUSess.mot_cxt.callbacks_set = false;
-    m_localUSess.mot_cxt.session_id = INVALID_SESSION_ID;
-    m_localUSess.mot_cxt.connection_id = INVALID_CONNECTION_ID;
-    m_localUSess.mot_cxt.session_context = nullptr;
-    m_localUSess.mot_cxt.txn_manager = nullptr;
-    m_localUSess.mot_cxt.jit_session_context_pool = nullptr;
-    m_localUSess.mot_cxt.jit_context_count = 0;
-    m_localUSess.mot_cxt.jit_llvm_if_stack = nullptr;
-    m_localUSess.mot_cxt.jit_llvm_while_stack = nullptr;
-    m_localUSess.mot_cxt.jit_llvm_do_while_stack = nullptr;
-    m_localUSess.mot_cxt.jit_tvm_if_stack = nullptr;
-    m_localUSess.mot_cxt.jit_tvm_while_stack = nullptr;
-    m_localUSess.mot_cxt.jit_tvm_do_while_stack = nullptr;
-    m_localUSess.mot_cxt.jit_context = nullptr;
-    m_localUSess.mot_cxt.jit_txn = nullptr;
+    knl_u_mot_init(&m_localUSess.mot_cxt);
 
     // setup the session context
     u_sess = &m_localUSess;

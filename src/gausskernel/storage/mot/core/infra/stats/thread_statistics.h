@@ -56,7 +56,10 @@ public:
 
     /** @brief Destructor. */
     virtual ~ThreadStatistics()
-    {}
+    {
+        // m_inplaceBuffer is not owned by this class
+        m_inplaceBuffer = nullptr;
+    }
 
     /**
      * @brief Retrieves the amount of statistic variables contained by this object.

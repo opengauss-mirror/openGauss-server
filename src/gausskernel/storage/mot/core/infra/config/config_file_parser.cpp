@@ -28,7 +28,7 @@
 #include "mot_error.h"
 
 #include <strings.h>
-#include <errno.h>
+#include <cerrno>
 #include <algorithm>
 #include <climits>
 #include <cmath>
@@ -69,32 +69,51 @@ bool ConfigFileParser::ParseKeyValue(const mot_string& keyValuePart, const mot_s
             "Load Configuration",
             "Failed to parse key/value: missing equal sign (%s)",
             keyValuePart.c_str());
-    } else if (!keyValuePart.substr(key, 0, equalPos) || !keyValuePart.substr(value, equalPos + 1)) {
-        MOT_REPORT_ERROR(MOT_ERROR_INTERNAL, "Load Configuration", "Failed to parse key/value");
-    } else {
-        key.trim();
-        value.trim();
-        result = true;
+        return result;
+    }
 
-        // check for array item
-        uint32_t poundPos = key.find('#');
-        if (poundPos != mot_string::npos) {
-            result = false;
-            mot_string intPart;
-            if (!key.substr(intPart, poundPos + 1)) {
-                MOT_REPORT_ERROR(
-                    MOT_ERROR_INTERNAL, "Load Configuration", "Failed to parse integer part from array item specifier");
+    if (!keyValuePart.substr(key, 0, equalPos) || !keyValuePart.substr(value, equalPos + 1)) {
+        MOT_REPORT_ERROR(MOT_ERROR_INTERNAL, "Load Configuration", "Failed to parse key/value");
+        return result;
+    }
+
+    key.trim();
+    value.trim();
+
+    uint32_t startQuotePos = value.find('\'');
+    if (startQuotePos == 0) {
+        // Value part starts with '\'', probably enclosed in single quotes.
+        uint32_t endQuotePos = value.find_last_of('\'');
+        if (startQuotePos == endQuotePos || endQuotePos != (value.length() - 1)) {
+            // Value part starts with '\'', but not enclosed in single quotes properly, illegal format.
+            MOT_REPORT_ERROR(MOT_ERROR_INTERNAL, "Load Configuration", "Failed to parse value");
+            return result;
+        }
+        uint32_t valueLength = ((endQuotePos - startQuotePos) - 1);
+        value.substr_inplace(startQuotePos + 1, valueLength);
+        value.trim();
+    }
+
+    result = true;
+
+    // check for array item
+    uint32_t poundPos = key.find('#');
+    if (poundPos != mot_string::npos) {
+        result = false;
+        mot_string intPart;
+        if (!key.substr(intPart, poundPos + 1)) {
+            MOT_REPORT_ERROR(
+                MOT_ERROR_INTERNAL, "Load Configuration", "Failed to parse integer part from array item specifier");
+        } else {
+            if (ParseUIntValue(section, key, intPart, arrayIndex, true)) {
+                hasArrayIndex = true;
+                key.substr_inplace(0, poundPos);
+                result = true;
             } else {
-                if (ParseUIntValue(section, key, intPart, arrayIndex, true)) {
-                    hasArrayIndex = true;
-                    key.substr_inplace(0, poundPos);
-                    result = true;
-                } else {
-                    MOT_REPORT_ERROR(MOT_ERROR_INVALID_CFG,
-                        "Load Configuration",
-                        "Invalid array item specifier encountered: %s",
-                        key.c_str());
-                }
+                MOT_REPORT_ERROR(MOT_ERROR_INVALID_CFG,
+                    "Load Configuration",
+                    "Invalid array item specifier encountered: %s",
+                    key.c_str());
             }
         }
     }

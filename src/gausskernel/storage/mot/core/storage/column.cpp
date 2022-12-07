@@ -22,8 +22,8 @@
  * -------------------------------------------------------------------------
  */
 
-#include <stdlib.h>
-#include <string.h>
+#include <cstdlib>
+#include <cstring>
 #include <arpa/inet.h>
 #include "global.h"
 #include "column.h"
@@ -36,6 +36,8 @@ extern uint16_t MOTDateToStr(uintptr_t src, char* destBuf, size_t len);
 
 namespace MOT {
 DECLARE_LOGGER(Column, Storage)
+static const char* const MOT_DROPPED_COL_NAME = ".....dropped.....";
+static const size_t MOT_DROPPED_COL_NAME_LEN = strlen(MOT_DROPPED_COL_NAME);
 
 // Class column
 const char* Column::ColumnTypeToStr(MOT_CATALOG_FIELD_TYPES type)
@@ -120,18 +122,116 @@ Column::Column()
 {
     this->m_id = 0;
     this->m_size = 0;
+    this->m_keySize = 0;
     this->m_offset = 0;
     this->m_isNotNull = true;
     this->m_nameLen = 0;
-    errno_t erc = memset_s(&(this->m_name), sizeof(this->m_name), 0, sizeof(this->m_name));
+    this->m_isDropped = false;
+    this->m_hasDefault = false;
+    this->m_defValue = 0;
+    this->m_defSize = 0;
+    this->m_isCommitted = true;
+    errno_t erc = memset_s(this->m_name, sizeof(this->m_name), 0, sizeof(this->m_name));
     securec_check(erc, "\0", "\0");
     erc = memset_s(&(this->m_type), sizeof(this->m_type), 0, sizeof(this->m_type));
     securec_check(erc, "\0", "\0");
     this->m_envelopeType = 0;
 }
 
+RC Column::Clone(Column* col)
+{
+    m_id = col->m_id;
+    m_size = col->m_size;
+    m_keySize = col->m_keySize;
+    m_offset = col->m_offset;
+    m_isNotNull = col->m_isNotNull;
+    m_nameLen = col->m_nameLen;
+    m_numIndexesUsage = col->m_numIndexesUsage;
+    m_isDropped = col->m_isDropped;
+    m_hasDefault = col->m_hasDefault;
+    m_isCommitted = col->m_isCommitted;
+    m_envelopeType = col->m_envelopeType;
+    m_type = col->m_type;
+    errno_t erc = memcpy_s(m_name, sizeof(m_name), col->m_name, col->m_nameLen + 1);
+    securec_check(erc, "\0", "\0");
+    if (m_hasDefault) {
+        RC rc = SetDefaultValue(col->m_defValue, col->m_defSize);
+        if (rc != RC_OK) {
+            return rc;
+        }
+    }
+    return RC_OK;
+}
+
 Column::~Column()
-{}
+{
+    ResetDefaultValue();
+}
+
+RC Column::SetDefaultValue(uintptr_t val, size_t size)
+{
+    switch (m_type) {
+        case MOT_CATALOG_FIELD_TYPES::MOT_TYPE_BLOB:
+        case MOT_CATALOG_FIELD_TYPES::MOT_TYPE_VARCHAR:
+        case MOT_CATALOG_FIELD_TYPES::MOT_TYPE_DECIMAL:
+        case MOT_CATALOG_FIELD_TYPES::MOT_TYPE_TIMETZ:
+        case MOT_CATALOG_FIELD_TYPES::MOT_TYPE_TINTERVAL:
+        case MOT_CATALOG_FIELD_TYPES::MOT_TYPE_INTERVAL: {
+            if (size > 0) {
+                m_defValue = (uintptr_t)malloc(size);
+                if (m_defValue == 0) {
+                    return RC_MEMORY_ALLOCATION_ERROR;
+                }
+                errno_t erc = memcpy_s((void*)m_defValue, size, (void*)val, size);
+                securec_check(erc, "\0", "\0");
+            }
+            m_defSize = size;
+            break;
+        }
+        default:
+            m_defSize = size;
+            m_defValue = val;
+            break;
+    }
+    m_hasDefault = true;
+    return RC_OK;
+}
+
+void Column::ResetDefaultValue()
+{
+    if (m_hasDefault) {
+        switch (m_type) {
+            case MOT_CATALOG_FIELD_TYPES::MOT_TYPE_BLOB:
+            case MOT_CATALOG_FIELD_TYPES::MOT_TYPE_VARCHAR:
+            case MOT_CATALOG_FIELD_TYPES::MOT_TYPE_DECIMAL:
+            case MOT_CATALOG_FIELD_TYPES::MOT_TYPE_TIMETZ:
+            case MOT_CATALOG_FIELD_TYPES::MOT_TYPE_TINTERVAL:
+            case MOT_CATALOG_FIELD_TYPES::MOT_TYPE_INTERVAL: {
+                if (m_defValue != 0) {
+                    free((void*)m_defValue);
+                }
+                break;
+            }
+            default:
+                break;
+        }
+        m_defSize = 0;
+        m_defValue = 0;
+        m_hasDefault = false;
+    }
+}
+
+void Column::SetDropped()
+{
+    m_isDropped = true;
+    m_offset = 0;
+    m_size = 0;
+    errno_t erc = memset_s(this->m_name, sizeof(this->m_name), 0, sizeof(this->m_name));
+    securec_check(erc, "\0", "\0");
+    erc = memcpy_s(&m_name[0], Column::MAX_COLUMN_NAME_LEN, MOT_DROPPED_COL_NAME, MOT_DROPPED_COL_NAME_LEN + 1);
+    securec_check(erc, "\0", "\0");
+    ResetDefaultValue();
+}
 
 bool ColumnCHAR::Pack(uint8_t* dest, uintptr_t src, size_t len)
 {
@@ -157,10 +257,14 @@ void ColumnCHAR::SetKeySize()
     m_keySize = m_size;
 }
 
-uint16_t ColumnCHAR::PrintValue(uint8_t* data, char* destBuf, size_t len)
+uint16_t ColumnCHAR::PrintValue(uint8_t* data, char* destBuf, size_t len, bool useDefault)
 {
     if (len >= 1) {
-        *destBuf = GetBytes1(*(uint8_t*)(data + m_offset));
+        if (useDefault) {
+            *destBuf = (uint8_t)GetBytes1(m_defValue);
+        } else {
+            *destBuf = GetBytes1(*(uint8_t*)(data + m_offset));
+        }
         return 1;
     } else
         return 0;
@@ -194,10 +298,15 @@ void ColumnTINY::SetKeySize()
     m_keySize = m_size + 1;
 }
 
-uint16_t ColumnTINY::PrintValue(uint8_t* data, char* destBuf, size_t len)
+uint16_t ColumnTINY::PrintValue(uint8_t* data, char* destBuf, size_t len, bool useDefault)
 {
     if (len >= 3) {
-        uint8_t val = GetBytes1(*(uint8_t*)(data + m_offset));
+        uint8_t val;
+        if (useDefault) {
+            val = (uint8_t)GetBytes1(m_defValue);
+        } else {
+            val = GetBytes1(*(uint8_t*)(data + m_offset));
+        }
         errno_t erc = snprintf_s(destBuf, len, len - 1, "%d", val);
         securec_check_ss(erc, "\0", "\0");
         return erc;
@@ -234,10 +343,15 @@ void ColumnSHORT::SetKeySize()
     m_keySize = m_size + 1;
 }
 
-uint16_t ColumnSHORT::PrintValue(uint8_t* data, char* destBuf, size_t len)
+uint16_t ColumnSHORT::PrintValue(uint8_t* data, char* destBuf, size_t len, bool useDefault)
 {
     if (len >= 5) {
-        uint16_t val = GetBytes2(*(uint16_t*)(data + m_offset));
+        uint16_t val;
+        if (useDefault) {
+            val = (uint16_t)GetBytes2(m_defValue);
+        } else {
+            val = GetBytes2(*(uint16_t*)(data + m_offset));
+        }
         errno_t erc = snprintf_s(destBuf, len, len - 1, "%d", val);
         securec_check_ss(erc, "\0", "\0");
         return erc;
@@ -275,10 +389,15 @@ void ColumnINT::SetKeySize()
     m_keySize = m_size + 1;
 }
 
-uint16_t ColumnINT::PrintValue(uint8_t* data, char* destBuf, size_t len)
+uint16_t ColumnINT::PrintValue(uint8_t* data, char* destBuf, size_t len, bool useDefault)
 {
     if (len >= 10) {
-        uint32_t val = GetBytes4(*(uint32_t*)(data + m_offset));
+        uint32_t val;
+        if (useDefault) {
+            val = (uint32_t)GetBytes4(m_defValue);
+        } else {
+            val = GetBytes4(*(uint32_t*)(data + m_offset));
+        }
         errno_t erc = snprintf_s(destBuf, len, len - 1, "%d", val);
         securec_check_ss(erc, "\0", "\0");
         return erc;
@@ -316,10 +435,15 @@ void ColumnLONG::SetKeySize()
     m_keySize = m_size + 1;
 }
 
-uint16_t ColumnLONG::PrintValue(uint8_t* data, char* destBuf, size_t len)
+uint16_t ColumnLONG::PrintValue(uint8_t* data, char* destBuf, size_t len, bool useDefault)
 {
     if (len >= 20) {
-        uint64_t val = GetBytes8(*(uint64_t*)(data + m_offset));
+        uint64_t val;
+        if (useDefault) {
+            val = (uint64_t)GetBytes8(m_defValue);
+        } else {
+            val = GetBytes8(*(uint64_t*)(data + m_offset));
+        }
         errno_t erc = snprintf_s(destBuf, len, len - 1, "%ld", val);
         securec_check_ss(erc, "\0", "\0");
         return erc;
@@ -378,11 +502,15 @@ void ColumnFLOAT::SetKeySize()
     m_keySize = m_size + 2;
 }
 
-uint16_t ColumnFLOAT::PrintValue(uint8_t* data, char* destBuf, size_t len)
+uint16_t ColumnFLOAT::PrintValue(uint8_t* data, char* destBuf, size_t len, bool useDefault)
 {
     if (len >= 40) {
         FloatConvT t;
-        t.m_v = *(float*)(data + m_offset);
+        if (useDefault) {
+            t.m_v = (float)(m_defValue);
+        } else {
+            t.m_v = *(float*)(data + m_offset);
+        }
         errno_t erc = snprintf_s(destBuf, len, len - 1, "%.9g", t.m_v);
         securec_check_ss(erc, "\0", "\0");
         return erc;
@@ -450,11 +578,15 @@ void ColumnDOUBLE::SetKeySize()
     m_keySize = m_size + 3;
 }
 
-uint16_t ColumnDOUBLE::PrintValue(uint8_t* data, char* destBuf, size_t len)
+uint16_t ColumnDOUBLE::PrintValue(uint8_t* data, char* destBuf, size_t len, bool useDefault)
 {
     if (len >= 40) {
         DoubleConvT t;
-        t.m_v = *(double*)(data + m_offset);
+        if (useDefault) {
+            t.m_v = (double)(m_defValue);
+        } else {
+            t.m_v = *(double*)(data + m_offset);
+        }
         errno_t erc = snprintf_s(destBuf, len, len - 1, "%.17g", t.m_v);
         securec_check_ss(erc, "\0", "\0");
         return erc;
@@ -486,10 +618,14 @@ void ColumnDATE::SetKeySize()
     m_keySize = m_size + 1;
 }
 
-uint16_t ColumnDATE::PrintValue(uint8_t* data, char* destBuf, size_t len)
+uint16_t ColumnDATE::PrintValue(uint8_t* data, char* destBuf, size_t len, bool useDefault)
 {
     if (len >= MOT_MAXDATELEN) {
-        return MOTDateToStr(GetBytes4(*(uint32_t*)(data + m_offset)), destBuf, len);
+        if (useDefault) {
+            return MOTDateToStr(GetBytes4(m_defValue), destBuf, len);
+        } else {
+            return MOTDateToStr(GetBytes4(*(uint32_t*)(data + m_offset)), destBuf, len);
+        }
     }
     return 0;
 }
@@ -518,7 +654,7 @@ void ColumnTIME::SetKeySize()
     m_keySize = m_size;
 }
 
-uint16_t ColumnTIME::PrintValue(uint8_t* data, char* destBuf, size_t len)
+uint16_t ColumnTIME::PrintValue(uint8_t* data, char* destBuf, size_t len, bool useDefault)
 {
     if (len >= 3) {
         errno_t erc = snprintf_s(destBuf, len, len - 1, "NaN");
@@ -552,7 +688,7 @@ void ColumnINTERVAL::SetKeySize()
     m_keySize = m_size;
 }
 
-uint16_t ColumnINTERVAL::PrintValue(uint8_t* data, char* destBuf, size_t len)
+uint16_t ColumnINTERVAL::PrintValue(uint8_t* data, char* destBuf, size_t len, bool useDefault)
 {
     if (len >= 3) {
         errno_t erc = snprintf_s(destBuf, len, len - 1, "NaN");
@@ -586,7 +722,7 @@ void ColumnTINTERVAL::SetKeySize()
     m_keySize = m_size;
 }
 
-uint16_t ColumnTINTERVAL::PrintValue(uint8_t* data, char* destBuf, size_t len)
+uint16_t ColumnTINTERVAL::PrintValue(uint8_t* data, char* destBuf, size_t len, bool useDefault)
 {
     if (len >= 3) {
         errno_t erc = snprintf_s(destBuf, len, len - 1, "NaN");
@@ -620,7 +756,7 @@ void ColumnTIMETZ::SetKeySize()
     m_keySize = m_size;
 }
 
-uint16_t ColumnTIMETZ::PrintValue(uint8_t* data, char* destBuf, size_t len)
+uint16_t ColumnTIMETZ::PrintValue(uint8_t* data, char* destBuf, size_t len, bool useDefault)
 {
     if (len >= 3) {
         errno_t erc = snprintf_s(destBuf, len, len - 1, "NaN");
@@ -659,10 +795,14 @@ void ColumnTIMESTAMP::SetKeySize()
     m_keySize = m_size + 1;
 }
 
-uint16_t ColumnTIMESTAMP::PrintValue(uint8_t* data, char* destBuf, size_t len)
+uint16_t ColumnTIMESTAMP::PrintValue(uint8_t* data, char* destBuf, size_t len, bool useDefault)
 {
     if (len >= MOT_MAXDATELEN) {
-        return MOTTimestampToStr(GetBytes8(*(uint64_t*)(data + m_offset)), destBuf, len);
+        if (useDefault) {
+            return MOTTimestampToStr(GetBytes8(m_defValue), destBuf, len);
+        } else {
+            return MOTTimestampToStr(GetBytes8(*(uint64_t*)(data + m_offset)), destBuf, len);
+        }
     }
     return 0;
 }
@@ -696,10 +836,14 @@ void ColumnTIMESTAMPTZ::SetKeySize()
     m_keySize = m_size + 1;
 }
 
-uint16_t ColumnTIMESTAMPTZ::PrintValue(uint8_t* data, char* destBuf, size_t len)
+uint16_t ColumnTIMESTAMPTZ::PrintValue(uint8_t* data, char* destBuf, size_t len, bool useDefault)
 {
     if (len >= MOT_MAXDATELEN) {
-        return MOTTimestampTzToStr(GetBytes8(*(uint64_t*)(data + m_offset)), destBuf, len);
+        if (useDefault) {
+            return MOTTimestampTzToStr(GetBytes8(m_defValue), destBuf, len);
+        } else {
+            return MOTTimestampTzToStr(GetBytes8(*(uint64_t*)(data + m_offset)), destBuf, len);
+        }
     }
     return 0;
 }
@@ -737,7 +881,7 @@ void ColumnDECIMAL::SetKeySize()
     m_keySize = m_size;
 }
 
-uint16_t ColumnDECIMAL::PrintValue(uint8_t* data, char* destBuf, size_t len)
+uint16_t ColumnDECIMAL::PrintValue(uint8_t* data, char* destBuf, size_t len, bool useDefault)
 {
     if (len >= 3) {
         errno_t erc = snprintf_s(destBuf, len, len - 1, "NaN");
@@ -749,9 +893,9 @@ uint16_t ColumnDECIMAL::PrintValue(uint8_t* data, char* destBuf, size_t len)
 
 bool ColumnVARCHAR::Pack(uint8_t* dest, uintptr_t src, size_t len)
 {
-    if (len > m_size)
+    if (len > (m_size - 4)) {
         return false;
-
+    }
     *((uint32_t*)(dest + m_offset)) = len;
     errno_t erc = memcpy_s(dest + m_offset + 4, m_size - 4, (void*)src, len);
     securec_check(erc, "\0", "\0");
@@ -760,14 +904,16 @@ bool ColumnVARCHAR::Pack(uint8_t* dest, uintptr_t src, size_t len)
 
 bool ColumnVARCHAR::PackKey(uint8_t* dest, uintptr_t src, size_t len, uint8_t fill)
 {
-    *((uint32_t*)dest) = 0;
-    errno_t erc = memcpy_s(dest + 4, m_keySize - 4, (void*)src, len);
+    errno_t erc = memcpy_s(dest, m_keySize, (void*)src, len);
     securec_check(erc, "\0", "\0");
-    if (fill != 0x00) {
-        erc = memset_s(dest + 4 + len, m_keySize - len - 4, fill, m_keySize - len - 4);
-        securec_check(erc, "\0", "\0");
+    if (m_keySize > len) {
+        if (fill != 0x00) {
+            erc = memset_s(dest + len, m_keySize - len, fill, (m_keySize - len) - 1);
+            securec_check(erc, "\0", "\0");
+        }
+        // zero padding for delimiter
+        dest[m_keySize - 1] = 0;
     }
-
     return true;
 }
 
@@ -779,15 +925,23 @@ void ColumnVARCHAR::Unpack(uint8_t* data, uintptr_t* dest, size_t& len)
 
 void ColumnVARCHAR::SetKeySize()
 {
-    m_keySize = m_size;
+    // zero padding of one byte
+    m_keySize = (m_size - sizeof(uint32_t)) + 1;
 }
 
-uint16_t ColumnVARCHAR::PrintValue(uint8_t* data, char* destBuf, size_t len)
+uint16_t ColumnVARCHAR::PrintValue(uint8_t* data, char* destBuf, size_t len, bool useDefault)
 {
-    uint32_t val_len = *(uint32_t*)(data + m_offset);
+    uint32_t val_len;
+    uintptr_t val;
+    if (useDefault) {
+        val_len = m_defSize;
+        val = m_defValue;
+    } else {
+        val_len = *(uint32_t*)(data + m_offset);
+        val = GetBytes8(data + m_offset + 4);
+    }
     if (len >= val_len) {
-        errno_t erc =
-            snprintf_s(destBuf, len, len - 1, "%*.*s", val_len, val_len, (char*)GetBytes8(data + m_offset + 4));
+        errno_t erc = snprintf_s(destBuf, len, len - 1, "%*.*s", val_len, val_len, (char*)val);
         securec_check_ss(erc, "\0", "\0");
         return erc;
     }
@@ -796,9 +950,9 @@ uint16_t ColumnVARCHAR::PrintValue(uint8_t* data, char* destBuf, size_t len)
 
 bool ColumnBLOB::Pack(uint8_t* dest, uintptr_t src, size_t len)
 {
-    if (len > m_size)
+    if (len > (m_size - 4)) {
         return false;
-
+    }
     *((uint32_t*)(dest + m_offset)) = len;
     errno_t erc = memcpy_s(dest + m_offset + 4, m_size - 4, (void*)src, len);
     securec_check(erc, "\0", "\0");
@@ -824,7 +978,7 @@ void ColumnBLOB::SetKeySize()
     m_keySize = m_size;
 }
 
-uint16_t ColumnBLOB::PrintValue(uint8_t* data, char* destBuf, size_t len)
+uint16_t ColumnBLOB::PrintValue(uint8_t* data, char* destBuf, size_t len, bool useDefault)
 {
     if (len >= 3) {
         errno_t erc = snprintf_s(destBuf, len, len - 1, "NaN");
@@ -859,7 +1013,7 @@ void ColumnNULLBYTES::SetKeySize()
     m_keySize = m_size;
 }
 
-uint16_t ColumnNULLBYTES::PrintValue(uint8_t* data, char* destBuf, size_t len)
+uint16_t ColumnNULLBYTES::PrintValue(uint8_t* data, char* destBuf, size_t len, bool useDefault)
 {
     if (len >= 3) {
         errno_t erc = snprintf_s(destBuf, len, len - 1, "NaN");
@@ -891,7 +1045,7 @@ void ColumnUNKNOWN::SetKeySize()
     MOT_ASSERT(false);
 }
 
-uint16_t ColumnUNKNOWN::PrintValue(uint8_t* data, char* destBuf, size_t len)
+uint16_t ColumnUNKNOWN::PrintValue(uint8_t* data, char* destBuf, size_t len, bool useDefault)
 {
     if (len >= 3) {
         errno_t erc = snprintf_s(destBuf, len, len - 1, "NaN");

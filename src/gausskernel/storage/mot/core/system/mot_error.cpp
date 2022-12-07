@@ -28,8 +28,8 @@
 #include "postgres.h"
 #include "knl/knl_thread.h"
 
-#include <stdarg.h>
-#include <string.h>
+#include <cstdarg>
+#include <cstring>
 
 namespace MOT {
 DECLARE_LOGGER(Error, System)
@@ -106,6 +106,12 @@ extern const char* ErrorCodeToString(int errorCode)
             return "Invalid memory allocation size";
         case MOT_ERROR_INDEX_OUT_OF_RANGE:
             return "Index out of range";
+        case MOT_ERROR_INVALID_STATE:
+            return "Invalid state";
+        case MOT_ERROR_CONCURRENT_MODIFICATION:
+            return "Concurrent modification";
+        case MOT_ERROR_STATEMENT_CANCELED:
+            return "Statement canceled due to user request";
         default:
             return "Error code unknown";
     }
@@ -154,9 +160,9 @@ extern void PushErrorV(int errorCode, int severity, const char* file, int line, 
 
         va_list args2;
         va_copy(args2, args);
-        errno_t erc =
-            vsnprintf_s(errorFrame->m_errorMessage, MOT_MAX_ERROR_MESSAGE, MOT_MAX_ERROR_MESSAGE - 1, format, args2);
+        errno_t erc = vsnprintf_truncated_s(errorFrame->m_errorMessage, MOT_MAX_ERROR_MESSAGE, format, args2);
         securec_check_ss(erc, "\0", "\0");
+        errorFrame->m_errorMessage[MOT_MAX_ERROR_MESSAGE - 1] = 0;
         ++errorFrameCount;
     }
 }
@@ -179,31 +185,29 @@ extern void PushSystemError(int errorCode, int severity, const char* file, int l
 
 #if (_POSIX_C_SOURCE >= 200112L || _XOPEN_SOURCE >= 600) && !_GNU_SOURCE
         strerror_r(errorCode, errbuf, bufSize);
-        erc = snprintf_s(errorFrame->m_errorMessage,
+        erc = snprintf_truncated_s(errorFrame->m_errorMessage,
             MOT_MAX_ERROR_MESSAGE,
-            MOT_MAX_ERROR_MESSAGE - 1,
             "System call %s() failed: %s (error code: %d)",
             systemCall,
             errbuf,
             errorCode);
 #else
-        erc = snprintf_s(errorFrame->m_errorMessage,
+        erc = snprintf_truncated_s(errorFrame->m_errorMessage,
             MOT_MAX_ERROR_MESSAGE,
-            MOT_MAX_ERROR_MESSAGE - 1,
             "System call %s() failed: %s (error code: %d)",
             systemCall,
             strerror_r(errorCode, errbuf, bufSize),
             errorCode);
         securec_check_ss(erc, "\0", "\0");
 #endif
-
+        errorFrame->m_errorMessage[MOT_MAX_ERROR_MESSAGE - 1] = 0;
         ++errorFrameCount;
     }
 }
 
 static void PrintErrorFrame(ErrorFrame* errorFrame)
 {
-    fprintf(stderr,
+    (void)fprintf(stderr,
         "\nat %s() (%s:%d)\n"
         "\tEntity    : %s\n"
         "\tContext   : %s\n"
@@ -227,7 +231,7 @@ extern void PrintErrorStack()
     for (int i = errorFrameCount - 1; i >= 0; --i) {
         PrintErrorFrame(&errorStack[i]);
     }
-    fprintf(stderr, "\n");
+    (void)fprintf(stderr, "\n");
 }
 
 extern void ClearErrorStack()
@@ -246,6 +250,10 @@ extern RC ErrorToRC(int errorCode)
             return RC_MEMORY_ALLOCATION_ERROR;
         case MOT_ERROR_UNIQUE_VIOLATION:
             return RC_UNIQUE_VIOLATION;
+        case MOT_ERROR_CONCURRENT_MODIFICATION:
+            return RC_CONCURRENT_MODIFICATION;
+        case MOT_ERROR_STATEMENT_CANCELED:
+            return RC_STATEMENT_CANCELED;
         case MOT_ERROR_INVALID_CFG:
         case MOT_ERROR_INVALID_ARG:
         case MOT_ERROR_SYSTEM_FAILURE:
@@ -253,6 +261,7 @@ extern RC ErrorToRC(int errorCode)
         case MOT_ERROR_INTERNAL:
         case MOT_ERROR_RESOURCE_UNAVAILABLE:
         case MOT_ERROR_INVALID_MEMORY_SIZE:
+        case MOT_ERROR_INVALID_STATE:
         default:
             return RC_ERROR;
     }

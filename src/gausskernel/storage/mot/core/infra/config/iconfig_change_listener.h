@@ -31,21 +31,21 @@ namespace MOT {
  * @brief Configuration change listener interface.
  */
 class IConfigChangeListener {
-protected:
-    /** Constructor. */
-    IConfigChangeListener()
-    {}
-
 public:
-    /** Destructor. */
-    virtual ~IConfigChangeListener()
-    {}
-
     /**
      * @brief Derives classes should react to a notification that configuration changed. New
      * configuration is accessible via the ConfigManager.
      */
     virtual void OnConfigChange() = 0;
+
+protected:
+    /** Constructor. */
+    IConfigChangeListener()
+    {}
+
+    /** Destructor. */
+    virtual ~IConfigChangeListener()
+    {}
 };
 }  // namespace MOT
 

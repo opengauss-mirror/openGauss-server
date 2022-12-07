@@ -32,15 +32,15 @@
 #include "postgres.h"
 #include "knl/knl_thread.h"
 
-#include <stddef.h>
-#include <string.h>
+#include <cstddef>
+#include <cstring>
 #include <sys/types.h>
 #include <sys/mman.h>
 #include <sys/syscall.h>
-#include <stdlib.h>
+#include <cstdlib>
 #include <unistd.h>
-#include <errno.h>
-#include <stdarg.h>
+#include <cerrno>
+#include <cstdarg>
 #include <dirent.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -52,19 +52,19 @@
 #endif
 
 /* Flags for mbind */
-#define MPOL_MF_STRICT (1 << 0)   /* Verify existing pages in the mapping */
-#define MPOL_MF_MOVE (1 << 1)     /* Move pages owned by this process to conform to mapping */
-#define MPOL_MF_MOVE_ALL (1 << 2) /* Move every page to conform to mapping */
+#define MPOL_MF_STRICT (1U)        /* Verify existing pages in the mapping */
+#define MPOL_MF_MOVE (1U << 1)     /* Move pages owned by this process to conform to mapping */
+#define MPOL_MF_MOVE_ALL (1U << 2) /* Move every page to conform to mapping */
 
 // some required utility macros
-#define ROUND_UP(x, y) (((x) + (y)-1) & ~((y)-1))
+#define ROUND_UP(x, y) (((x) + (y) - 1) & ~((y) - 1))
 #define CPU_BYTES(x) (ROUND_UP(x, sizeof(long)))
 #define CPU_LONGS(x) (CPU_BYTES(x) / sizeof(long))
 
-#define HOW_MANY(x, y) (((x) + ((y)-1)) / (y))
-#define BITS_PER_LONG (8 * sizeof(unsigned long))
-#define BITS_PER_INT (8 * sizeof(unsigned int))
-#define LONGS_PER_BITS(n) HOW_MANY(n, BITS_PER_LONG)
+#define HOW_MANY(x, y) (((x) + ((y) - 1)) / (y))
+#define BITS_PER_ULONG ((unsigned int)8 * sizeof(unsigned long))
+#define BITS_PER_UINT ((unsigned int)8 * sizeof(unsigned int))
+#define LONGS_PER_BITS(n) HOW_MANY(n, BITS_PER_ULONG)
 #define BYTES_PER_BITS(x) ((x + 7) / 8)
 
 // define maximum number of NUMA nodes
@@ -93,16 +93,21 @@ typedef struct PACKED BitMask_ST {
     unsigned long m_maskp[0];
 } BitMaskSt;
 
-#define BITMASK_NBYTES(bmp) (LONGS_PER_BITS(bmp->m_size) * sizeof(unsigned long))
-#define BITMASK_GETBIT(bmp, n) \
-    (((unsigned int)n < bmp->m_size) ? ((bmp->m_maskp[n / BITS_PER_LONG] >> (n % BITS_PER_LONG)) & 1) : 0)
-#define BITMASK_SETBIT(bmp, n)                                         \
-    if ((unsigned int)n < bmp->m_size) {                               \
-        bmp->m_maskp[n / BITS_PER_LONG] |= 1UL << (n % BITS_PER_LONG); \
+#define BITMASK_NBYTES(bmp) (LONGS_PER_BITS((bmp)->m_size) * sizeof(unsigned long))
+
+#define BITMASK_GETBIT(bmp, n)                                                                                   \
+    (((unsigned int)(n) < (bmp)->m_size)                                                                         \
+            ? (((bmp)->m_maskp[(unsigned int)(n) / BITS_PER_ULONG] >> ((unsigned int)(n) % BITS_PER_ULONG)) & 1) \
+            : 0)
+
+#define BITMASK_SETBIT(bmp, n)                                                                             \
+    if ((unsigned int)(n) < (bmp)->m_size) {                                                               \
+        (bmp)->m_maskp[(unsigned int)(n) / BITS_PER_ULONG] |= 1UL << ((unsigned int)(n) % BITS_PER_ULONG); \
     }
-#define BITMASK_CLEARBIT(bmp, n)                                          \
-    if ((unsigned int)n < bmp->m_size) {                                  \
-        bmp->m_maskp[n / BITS_PER_LONG] &= ~(1UL << (n % BITS_PER_LONG)); \
+
+#define BITMASK_CLEARBIT(bmp, n)                                                                              \
+    if ((unsigned int)(n) < (bmp)->m_size) {                                                                  \
+        (bmp)->m_maskp[(unsigned int)(n) / BITS_PER_ULONG] &= ~(1UL << ((unsigned int)(n) % BITS_PER_ULONG)); \
     }
 
 #define BITMASK_FREE(x) \
@@ -111,11 +116,11 @@ typedef struct PACKED BitMask_ST {
         x = nullptr;    \
     }
 
-#define BITMASK_ONSTACK(name, x)                                              \
-    int sz = sizeof(BitMaskSt) + (LONGS_PER_BITS(x) * sizeof(unsigned long)); \
-    char _bmp_buf[sz];                                                        \
-    BitMaskSt* name = (BitMaskSt*)_bmp_buf;                                   \
-    bzero(name, sz);                                                          \
+#define BITMASK_ONSTACK(name, x)                                                 \
+    size_t sz = sizeof(BitMaskSt) + (LONGS_PER_BITS(x) * sizeof(unsigned long)); \
+    char _bmp_buf[sz];                                                           \
+    BitMaskSt* name = (BitMaskSt*)_bmp_buf;                                      \
+    bzero(name, sz);                                                             \
     name->m_size = x;
 
 // Report errors/warnings
@@ -145,13 +150,13 @@ extern void MotSysNumaDumpMMapError(
     int errnum, void* address, size_t length, int prot, int flags, int fd, off_t offset);
 
 // Static variables
-static const char* MASK_SIZE_FILE = "/proc/self/status";
-static const char* NODE_MASK_PREFIX = "Mems_allowed:\t";
+static const char* const MASK_SIZE_FILE = "/proc/self/status";
+static const char* const NODE_MASK_PREFIX = "Mems_allowed:\t";
 static const int NODE_MASK_PREFIX_SIZE = strlen(NODE_MASK_PREFIX);
-static const char* NODE_CPU_MAP_FILE = "/sys/devices/system/node/node%d/cpumap";
+static const char* const NODE_CPU_MAP_FILE = "/sys/devices/system/node/node%d/cpumap";
 #define MOTBindPolicy t_thrd.mot_cxt.bindPolicy
 #define MOTMBindFlags t_thrd.mot_cxt.mbindFlags
-static int g_nodeMaskSize = 0;
+static unsigned int g_nodeMaskSize = 0;
 static int g_cpuMaskSize = 0;
 static int g_maxConfNode = -1;
 static int g_maxConfCpu = -1;
@@ -210,7 +215,9 @@ void* MotSysNumaAllocInterleaved(size_t size)
                 g_allNodesBm->m_size + 1,
                 MOTMBindFlags) != 0) {
             MotSysNumaReportError("mbind");
-            munmap(mem, size);
+            if (munmap(mem, size) != 0) {
+                MotSysNumaReportError("munmap");
+            }
             mem = nullptr;
         }
     }
@@ -237,7 +244,9 @@ void* MotSysNumaAllocOnNode(size_t size, int node)
                 bmp->m_size + 1,
                 MOTMBindFlags) != 0) {
             MotSysNumaReportError("mbind");
-            munmap(mem, size);
+            if (munmap(mem, size) != 0) {
+                MotSysNumaReportError("munmap");
+            }
             mem = nullptr;
         }
     }
@@ -256,7 +265,9 @@ void* MotSysNumaAllocLocal(size_t size)
     } else {
         if (syscall(__NR_mbind, (intptr_t)mem, size, MPOL_PREFERRED, nullptr, 0, MOTMBindFlags) != 0) {
             MotSysNumaReportError("mbind");
-            munmap(mem, size);
+            if (munmap(mem, size) != 0) {
+                MotSysNumaReportError("munmap");
+            }
             mem = nullptr;
         }
     }
@@ -277,19 +288,19 @@ static void* MotSysNumaMapAligned(size_t size, size_t align)
 
     if (((uint64_t)mem) % align != 0) {
         // take the slow route
-        munmap(mem, size);
+        (void)munmap(mem, size);
         mem = MOTSysNumaMmap(0, size + align, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, 0, 0);
         if (mem == MAP_FAILED) {
             return mem;
         } else {
             uint64_t offset = ((uint64_t)mem) % align;
             if (offset == 0) {  // aligned this time so we only need to unmap suffix of align bytes
-                munmap(((char*)mem) + size, align);
+                (void)munmap(((char*)mem) + size, align);
             } else {
                 size_t leadingUseless = align - offset;  // guaranteed to be non-negative
-                munmap(mem, leadingUseless);
+                (void)munmap(mem, leadingUseless);
                 void* alignedMem = ((char*)mem) + leadingUseless;
-                munmap(((char*)alignedMem) + size, offset);
+                (void)munmap(((char*)alignedMem) + size, offset);
                 mem = alignedMem;
             }
         }
@@ -317,7 +328,9 @@ void* MotSysNumaAllocAlignedInterleaved(size_t size, size_t align)
                 g_allNodesBm->m_size + 1,
                 MOTMBindFlags) != 0) {
             MotSysNumaReportError("mbind");
-            munmap(mem, size);
+            if (munmap(mem, size) != 0) {
+                MotSysNumaReportError("munmap");
+            }
             mem = nullptr;
         }
     }
@@ -345,7 +358,9 @@ void* MotSysNumaAllocAlignedOnNode(size_t size, size_t align, int node)
                 bmp->m_size + 1,
                 MOTMBindFlags) != 0) {
             MotSysNumaReportError("mbind");
-            munmap(mem, size);
+            if (munmap(mem, size) != 0) {
+                MotSysNumaReportError("munmap");
+            }
             mem = nullptr;
         }
     }
@@ -365,7 +380,9 @@ void* MotSysNumaAllocAlignedLocal(size_t size, size_t align)
     } else {
         if (syscall(__NR_mbind, (intptr_t)mem, size, MPOL_PREFERRED, nullptr, 0, MOTMBindFlags) != 0) {
             MotSysNumaReportError("mbind");
-            munmap(mem, size);
+            if (munmap(mem, size) != 0) {
+                MotSysNumaReportError("munmap");
+            }
             mem = nullptr;
         }
     }
@@ -374,7 +391,9 @@ void* MotSysNumaAllocAlignedLocal(size_t size, size_t align)
 
 void MotSysNumaFree(void* mem, size_t size)
 {
-    munmap(mem, size);
+    if (munmap(mem, size) != 0) {
+        MotSysNumaReportError("munmap");
+    }
 }
 
 int MotSysNumaAvailable()
@@ -428,10 +447,11 @@ void MotSysNumaSetBindPolicy(int strict)
 
 void MotSysNumaSetStrict(int flag)
 {
-    if (flag)
+    if (flag) {
         MOTMBindFlags |= MPOL_MF_STRICT;
-    else
+    } else {
         MOTMBindFlags &= ~MPOL_MF_STRICT;
+    }
 }
 
 void MotSysNumaSetPreferred(int node)
@@ -490,7 +510,7 @@ static int MotSysNumaParseBitmap(char* line, BitMaskSt* mask)
 
         if (p > line && sizeof(unsigned long) == 8) {
             oldp--;
-            errno_t erc = memmove_s(p, oldp - p + 1, p + 1, oldp - p + 1);
+            errno_t erc = memmove_s(p, (oldp - p) + 1, p + 1, (oldp - p) + 1);
             securec_check(erc, "\0", "\0");
             while (p > line && *p != ',') {
                 --p;
@@ -540,7 +560,7 @@ static void MotSysNumaSetConfiguredNodes()
                 g_maxConfNode = node;
             }
         }
-        closedir(d);
+        (void)closedir(d);
     }
 }
 
@@ -554,19 +574,23 @@ static void MotSysNumaSetTaskConstraints()
     g_allCpusBm = MotSysNumaBitmaskAlloc(g_cpuMaskSize);
     g_allNodesBm = MotSysNumaBitmaskAlloc(g_nodeMaskSize);
 
-    if ((f = fopen(MASK_SIZE_FILE, "r")) == nullptr)
+    if ((f = fopen(MASK_SIZE_FILE, "r")) == nullptr) {
         return;
+    }
 
     while (getline(&buffer, &buflen, f) > 0) {
+        MOT_ASSERT(buffer != nullptr);
         char* mask = strrchr(buffer, '\t') + 1;
 
-        if (strncmp(buffer, "Cpus_allowed:", 13) == 0)
+        if (strncmp(buffer, "Cpus_allowed:", 13) == 0) {
             g_numProcCpu = MotSysNumaReadBitmask(mask, g_allCpusBm);
+        }
 
-        if (strncmp(buffer, "Mems_allowed:", 13) == 0)
+        if (strncmp(buffer, "Mems_allowed:", 13) == 0) {
             g_numProcNode = MotSysNumaReadBitmask(mask, g_allNodesBm);
+        }
     }
-    fclose(f);
+    (void)fclose(f);
     if (buffer != nullptr) {
         free(buffer);
     }
@@ -663,7 +687,7 @@ static unsigned int MotSysNumaBitmaskWeight(const BitMaskSt* bmp)
 static int MotSysNumaReadBitmask(char* s, BitMaskSt* bmp)
 {
     char* end = s;
-    unsigned tmplen = (bmp->m_size + BITS_PER_INT - 1) / BITS_PER_INT;
+    unsigned tmplen = (bmp->m_size + BITS_PER_UINT - 1) / BITS_PER_UINT;
     unsigned int tmp[tmplen];
     unsigned int* start = tmp;
     unsigned int n = 0;
@@ -696,7 +720,7 @@ static int MotSysNumaReadBitmask(char* s, BitMaskSt* bmp)
     while (n) {
         unsigned int w;
         unsigned long x = 0;
-        for (w = 0; n && w < BITS_PER_LONG; w += BITS_PER_INT) {
+        for (w = 0; n && w < BITS_PER_ULONG; w += BITS_PER_UINT) {
             x |= ((unsigned long)start[n-- - 1] << w);
         }
 
@@ -708,7 +732,7 @@ static int MotSysNumaReadBitmask(char* s, BitMaskSt* bmp)
 static void MotSysNumaNodeCpuMaskCleanup(void)
 {
     if (g_nodeCpuBm != nullptr) {
-        for (int i = 0; i < g_nodeMaskSize; i++) {
+        for (unsigned int i = 0; i < g_nodeMaskSize; i++) {
             BITMASK_FREE(g_nodeCpuBm[i]);
         }
         free(g_nodeCpuBm);
@@ -728,7 +752,7 @@ static void MotSysNumaNodeCpuMaskInit(void)
 
     g_nodeCpuBm = (BitMaskSt**)calloc(g_nodeMaskSize, sizeof(BitMaskSt*));
 
-    for (int i = 0; i < g_nodeMaskSize; i++) {
+    for (unsigned int i = 0; i < g_nodeMaskSize; i++) {
         len = 0;
         FILE* f = nullptr;
         char* line = nullptr;
@@ -762,7 +786,7 @@ static void MotSysNumaNodeCpuMaskInit(void)
         }
 
         if (f != nullptr) {
-            fclose(f);
+            (void)fclose(f);
         }
     }
 }
@@ -782,7 +806,7 @@ static void MotSysNumaSetNodemaskSize()
         }
         if (line != nullptr)
             free(line);
-        fclose(fp);
+        (void)fclose(fp);
     }
 
     if (g_nodeMaskSize == 0) {

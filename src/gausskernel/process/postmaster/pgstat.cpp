@@ -92,6 +92,9 @@
 #include "instruments/instr_slow_query.h"
 #include "instruments/instr_statement.h"
 #include "instruments/instr_handle_mgr.h"
+#ifdef ENABLE_MOT
+#include "storage/mot/jit_exec.h"
+#endif
 
 #ifdef ENABLE_UT
 #define static
@@ -7958,6 +7961,44 @@ MotMemoryDetail* GetMotMemoryDetail(uint32* num, bool isGlobal)
     }
 
     return returnDetailArray;
+}
+
+MotJitDetail* GetMotJitDetail(uint32* num)
+{
+    MotJitDetail* returnDetailArray = NULL;
+
+    *num = 0;
+
+    // Ensure that MOT FDW routine and Xact callbacks are registered.
+    if (!u_sess->mot_cxt.callbacks_set) {
+        ForeignDataWrapper* fdw = GetForeignDataWrapperByName(MOT_FDW, false);
+        if (fdw != NULL) {
+            (void)GetFdwRoutine(fdw->fdwhandler);
+        }
+    }
+
+    returnDetailArray = JitExec::MOTGetJitDetail(num);
+
+    return returnDetailArray;
+}
+
+MotJitProfile* GetMotJitProfile(uint32* num)
+{
+    MotJitProfile* returnProfileArray = NULL;
+
+    *num = 0;
+
+    // Ensure that MOT FDW routine and Xact callbacks are registered.
+    if (!u_sess->mot_cxt.callbacks_set) {
+        ForeignDataWrapper* fdw = GetForeignDataWrapperByName(MOT_FDW, false);
+        if (fdw != NULL) {
+            (void)GetFdwRoutine(fdw->fdwhandler);
+        }
+    }
+
+    returnProfileArray = JitExec::MOTGetJitProfile(num);
+
+    return returnProfileArray;
 }
 #endif
 

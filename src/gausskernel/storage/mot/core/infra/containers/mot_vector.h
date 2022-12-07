@@ -225,7 +225,7 @@ public:
      * @param capacity The initial capacity for the vector.
      */
     mot_vector(uint32_t size_limit = DEFAULT_SIZE_LIMIT, uint32_t capacity = INIT_CAPACITY)
-        : _array(nullptr), _size(0), _capacity(0), _size_limit(size_limit)
+        : _array(nullptr), _size(0), _capacity(capacity), _size_limit(size_limit)
     {
         // we initialize capacity member to zero on purpose because vector array has not been allocated yet
         if (_capacity > 0) {
@@ -292,16 +292,16 @@ public:
     }
 
     /** @brief Retrieves a modifiable reference to the item at the specified position. */
-    T& at(int pos)
+    T& at(uint32_t pos)
     {
-        MOT_INFRA_ASSERT(pos < (int)_size);
+        MOT_INFRA_ASSERT(pos < _size);
         return _array[pos];
     }
 
     /** @brief Retrieves a non-modifiable reference to the item at the specified position. */
-    const T& at(int pos) const
+    const T& at(uint32_t pos) const
     {
-        MOT_INFRA_ASSERT(pos < (int)_size);
+        MOT_INFRA_ASSERT(pos < _size);
         return _array[pos];
     }
 
@@ -336,7 +336,7 @@ public:
             // move items
             uint32_t items_to_move = _size - pos.get_pos();
             for (uint32_t i = 0; i < items_to_move; ++i) {
-                Assigner::move(_array[_size - i], std::move(_array[_size - i - 1]));
+                Assigner::move(_array[_size - i], std::move(_array[(_size - i) - 1]));
             }
             result = Assigner::assign(_array[pos.get_pos()], item);
             if (!result) {
@@ -364,13 +364,13 @@ public:
     }
 
     /** @brief Retrieves a modifiable reference to the item at the specified position. */
-    inline T& operator[](int pos)
+    inline T& operator[](uint32_t pos)
     {
         return at(pos);
     }
 
     /** @brief Retrieves a non-modifiable reference to the item at the specified position. */
-    inline const T& operator[](int pos) const
+    inline const T& operator[](uint32_t pos) const
     {
         return at(pos);
     }
@@ -412,13 +412,13 @@ public:
     }
 
     /** @brief Retrieves a modifying iterator pointing to the item in the specified position in the vector. */
-    inline iterator itr_at(int pos)
+    inline iterator itr_at(uint32_t pos)
     {
         return iterator(_array, pos);
     }
 
     /** @brief Retrieves a non-modifying iterator pointing to the item in the specified position in the vector. */
-    inline const_iterator citr_at(int pos) const
+    inline const_iterator citr_at(uint32_t pos) const
     {
         return const_iterator(_array, pos);
     }
@@ -440,7 +440,7 @@ private:
                 _size_limit);
         } else {
             // align and check with limit
-            uint32_t aligned_capacity = (new_capacity + GROW_SIZE - 1) / GROW_SIZE * GROW_SIZE;
+            uint32_t aligned_capacity = ((new_capacity + GROW_SIZE - 1) / GROW_SIZE) * GROW_SIZE;
             if (aligned_capacity > _size_limit) {
                 mot_infra_report_error(MOT_ERROR_RESOURCE_LIMIT,
                     "",

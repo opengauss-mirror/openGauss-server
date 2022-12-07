@@ -102,7 +102,7 @@ private:
      * @brief Retrieves the last modification time of the configuration file.
      * @return The last modification time of the configuration file or zero if failed.
      */
-    uint64_t GetFileModificationTime();
+    uint64_t GetFileModificationTime() const;
 };
 }  // namespace MOT
 

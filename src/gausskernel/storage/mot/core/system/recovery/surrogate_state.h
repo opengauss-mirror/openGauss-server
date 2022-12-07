@@ -39,6 +39,14 @@ class SurrogateState {
 public:
     SurrogateState();
 
+    ~SurrogateState();
+
+    /**
+     * @brief Initializes the surrogate state.
+     * @return Boolean value denoting success or failure.
+     */
+    bool Init();
+
     /**
      * @brief Extracts the surrogate counter from the key and updates
      * the array according to the connection id
@@ -61,7 +69,12 @@ public:
      * @param pid The returned thread id.
      * @param insertions The returned number of insertions.
      */
-    inline void ExtractInfoFromKey(uint64_t key, uint64_t& pid, uint64_t& insertions);
+    inline void ExtractInfoFromKey(uint64_t key, uint64_t& pid, uint64_t& insertions) const
+    {
+        pid = key >> SurrogateKeyGenerator::KEY_BITS;
+        insertions = key & 0x0000FFFFFFFFFFFFULL;
+        insertions++;
+    }
 
     /**
      * @brief merges some max insertions arrays into a one single state
@@ -84,13 +97,6 @@ public:
     {
         return m_maxConnections;
     }
-
-    bool IsValid() const
-    {
-        return (m_insertsArray != nullptr);
-    }
-
-    ~SurrogateState();
 
 private:
     uint64_t* m_insertsArray;

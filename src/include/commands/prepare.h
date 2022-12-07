@@ -69,4 +69,8 @@ extern void PlanTreeWalker(
     Plan* plan, void (*walker)(Plan*, void*, const char*), void* context, const char* queryString);
 
 extern DatanodeStatement* light_set_datanode_queries(const char* stmt_name);
+
+#ifdef ENABLE_MOT
+extern void TryMotJitCodegenQuery(const char* queryString, CachedPlanSource* psrc, Query* query);
+#endif
 #endif /* PREPARE_H */

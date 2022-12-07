@@ -1024,7 +1024,7 @@ typedef struct knl_g_archive_context {
 
 #ifdef ENABLE_MOT
 typedef struct knl_g_mot_context {
-    JitExec::JitExecMode jitExecMode;
+    struct VariableCacheData* shmemVariableCache;
 } knl_g_mot_context;
 #endif
 

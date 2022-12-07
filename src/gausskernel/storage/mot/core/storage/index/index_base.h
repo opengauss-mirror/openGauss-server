@@ -28,7 +28,7 @@
 #define MOT_INDEX_BASE_H
 
 #include <sched.h>
-#include <stdint.h>
+#include <cstdint>
 #include <iostream>
 #include <string>
 

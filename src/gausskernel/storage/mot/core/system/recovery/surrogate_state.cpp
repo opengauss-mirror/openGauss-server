@@ -29,31 +29,27 @@ namespace MOT {
 DECLARE_LOGGER(SurrogateState, Recovery);
 
 SurrogateState::SurrogateState()
+    : m_insertsArray(nullptr), m_empty(true), m_maxConnections(GetGlobalConfiguration().m_maxConnections)
+{}
+
+bool SurrogateState::Init()
 {
-    uint32_t maxConnections = GetGlobalConfiguration().m_maxConnections;
-    m_empty = true;
-    m_maxConnections = 0;
-    m_insertsArray = new (std::nothrow) uint64_t[maxConnections];
-    if (m_insertsArray != nullptr) {
-        m_maxConnections = maxConnections;
-        errno_t erc =
-            memset_s(m_insertsArray, m_maxConnections * sizeof(uint64_t), 0, m_maxConnections * sizeof(uint64_t));
-        securec_check(erc, "\0", "\0");
+    m_insertsArray = new (std::nothrow) uint64_t[m_maxConnections];
+    if (m_insertsArray == nullptr) {
+        return false;
     }
+    errno_t erc = memset_s(m_insertsArray, m_maxConnections * sizeof(uint64_t), 0, m_maxConnections * sizeof(uint64_t));
+    securec_check(erc, "\0", "\0");
+    return true;
 }
 
 SurrogateState::~SurrogateState()
 {
     if (m_insertsArray != nullptr) {
         delete[] m_insertsArray;
+        m_insertsArray = nullptr;
     }
-}
-
-void SurrogateState::ExtractInfoFromKey(uint64_t key, uint64_t& pid, uint64_t& insertions)
-{
-    pid = key >> SurrogateKeyGenerator::KEY_BITS;
-    insertions = key & 0x0000FFFFFFFFFFFFULL;
-    insertions++;
+    m_empty = true;
 }
 
 void SurrogateState::UpdateMaxInsertions(uint64_t insertions, uint32_t pid)
@@ -84,12 +80,17 @@ bool SurrogateState::UpdateMaxKey(uint64_t key)
 
 void SurrogateState::Merge(std::list<uint64_t*>& arrays, SurrogateState& global)
 {
-    std::list<uint64_t*>::iterator i;
-    for (i = arrays.begin(); i != arrays.end(); ++i) {
-        for (uint32_t j = 0; j < global.GetMaxConnections(); ++j) {
-            global.UpdateMaxInsertions((*i)[j], j);
+    for (auto i = arrays.begin(); i != arrays.end();) {
+        uint64_t* ptr = (*i);
+        if (ptr) {
+            for (uint32_t j = 0; j < global.GetMaxConnections(); ++j) {
+                global.UpdateMaxInsertions(ptr[j], j);
+            }
+            i = arrays.erase(i);
+            free(ptr);
+        } else {
+            ++i;
         }
-        delete[](*i);
     }
 }
 }  // namespace MOT

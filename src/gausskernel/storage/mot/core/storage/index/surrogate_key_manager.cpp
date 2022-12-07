@@ -45,7 +45,7 @@ void SurrogateKeyManager::Destroy()
 void SurrogateKeyManager::PrintSurrogateMap()
 {
     for (int i = 0; i < (int)m_surrogateArray.size(); i++) {
-        MOT_LOG_INFO("ThreadID:%d InsertCounter = %lu\n", i, m_surrogateArray[i].GetCurrentCount());
+        MOT_LOG_INFO("ThreadID: %d InsertCounter = %lu", i, m_surrogateArray[i].GetCurrentCount());
     }
 }
 

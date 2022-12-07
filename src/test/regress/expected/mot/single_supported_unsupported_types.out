@@ -37,6 +37,9 @@ DETAIL:  Column type inet is not supported yet
 create foreign table test14 (m macaddr);
 ERROR:  Column definition of m is not supported
 DETAIL:  Column type macaddr is not supported yet
+create foreign table test15 (t text);
+ERROR:  Column definition of t is not supported
+DETAIL:  Column size -1 exceeds max size 2052
 drop foreign table test0;
 drop foreign table test1;
 drop foreign table test2;

@@ -100,12 +100,11 @@ protected:
 
     /**
      * @brief Loads external configuration.
-     * @detail The envelope should override and implement this method to actually build the
-     * configuration tree for this loader. If the purpose is to override configuration values loaded
-     * by other loaders, then make sure to build a configuration tree with identical paths.
-     * @note While overriding this method, the envelope can call the utility helper functions devised
-     * for this purpose as follows:
-     *
+     * @detail The envelope should override and implement this method to actually build the configuration tree for this
+     * loader. If the purpose is to override configuration values loaded by other loaders, then make sure to build a
+     * configuration tree with identical paths.
+     * @note While overriding this method, the envelope can call the utility helper functions devised for this purpose
+     * as follows:
      * <code>
      * ...
      * if (!AddExtStringConfigItem(...)) {
@@ -116,7 +115,6 @@ protected:
      * }
      * ...
      * </code>
-     *
      * @ref AddConfigItem().
      */
     virtual bool OnLoadExtConfig()
@@ -238,6 +236,8 @@ protected:
         return AddExtStringConfigItem(path, key, TypeFormatter<T>::ToString(value, str));
     }
 
+    DECLARE_CLASS_LOGGER()
+
 private:
     /** @var The section map used to build the configuration tree. */
     ConfigSectionMap m_sectionMap;
@@ -275,7 +275,7 @@ private:
     bool EndExtConfigLoad();
 
     /** Free all resources associated with the external loader. */
-    void Cleanup();
+    void Cleanup() noexcept;
 
     /**
      * @brief Helper function for adding a typed configuration item.
@@ -285,7 +285,7 @@ private:
      * @return True if succeeded, otherwise false.
      */
     template <typename T, typename V = TypedConfigValue<T>>
-    inline bool AddTypedConfigItem(const char* path, const char* key, T value)
+    inline bool AddTypedConfigItem(const char* path, const char* key, const T& value)
     {
         bool result = false;
 
@@ -305,9 +305,6 @@ private:
 
         return result;
     }
-
-protected:
-    DECLARE_CLASS_LOGGER()
 };
 }  // namespace MOT
 

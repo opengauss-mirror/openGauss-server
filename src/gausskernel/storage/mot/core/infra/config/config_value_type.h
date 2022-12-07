@@ -25,7 +25,7 @@
 #ifndef CONFIG_VALUE_TYPE_H
 #define CONFIG_VALUE_TYPE_H
 
-#include <stdint.h>
+#include <cstdint>
 
 namespace MOT {
 /**

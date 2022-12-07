@@ -30,8 +30,8 @@
 #include "string_buffer.h"
 #include "utilities.h"
 
-#include <stddef.h>
-#include <stdint.h>
+#include <cstddef>
+#include <cstdint>
 
 namespace MOT {
 

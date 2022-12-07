@@ -25,7 +25,8 @@
 #ifndef MOT_BITMAPSET_H
 #define MOT_BITMAPSET_H
 
-#include <stdint.h>
+#include <cstdint>
+#include "debug_utils.h"
 
 namespace MOT {
 class BitmapSet {
@@ -64,8 +65,8 @@ public:
     void Reset(uint16_t size);
     void SetBit(uint16_t bit);
     void UnsetBit(uint16_t bit);
-    uint8_t GetBit(uint16_t bit);
-    bool IsClear();
+    bool GetBit(uint16_t bit) const;
+    bool IsClear() const;
 
     inline uint8_t* GetData()
     {
@@ -79,7 +80,7 @@ public:
     {
         return m_init;
     }
-    inline uint16_t GetLength()
+    inline uint16_t GetLength() const
     {
         return GetLength(m_size);
     }
@@ -89,8 +90,14 @@ public:
         return GetByteIndex(numBits) + 1;
     }
 
-    void operator|=(BitmapSet bitmapSet);
-    void operator&=(BitmapSet bitmapSet);
+    inline void AddBit()
+    {
+        MOT_ASSERT(((m_size >> 3) + 1) == (((m_size + 1) >> 3) + 1));
+        m_size += 1;
+    }
+
+    void operator|=(const BitmapSet& bitmapSet);
+    void operator&=(const BitmapSet& bitmapSet);
 
 private:
     uint8_t* m_data;

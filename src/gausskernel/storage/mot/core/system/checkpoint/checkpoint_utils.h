@@ -33,40 +33,49 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 
-const uint64_t CP_MGR_MAGIC = 0xaabbccdd;
-
 namespace MOT {
 namespace CheckpointUtils {
+
+// Checkpoint file header magic number
+const uint64_t HEADER_MAGIC = 0xaabbccdd;
+
+// Checkpoint dir prefix
+const char* const CKPT_DIR_PREFIX = "chkpt_";
+
+// Checkpoint file suffix
+const char* const CKPT_FILE_SUFFIX = ".cp";
+
+// Metadata file suffix
+const char* const MD_FILE_SUFFIX = ".md";
+
+// Map file suffix
+const char* const MAP_FILE_SUFFIX = ".map";
+
+// TPC file suffix
+const char* const TPC_FILE_SUFFIX = ".tpc";
+
+// PTD file suffix
+const char* const IPD_FILE_SUFFIX = ".ptd";
+
+// End file suffix
+const char* const END_FILE_SUFFIX = ".end";
+
+// Max path length
+const size_t MAX_PATH = 1024;
 
 /**
  * @brief A wrapper function that checks if a file exists
  * @param fileName The file name to check
  * @return Boolean value denoting success or failure.
  */
-bool IsFileExists(std::string fileName);
+bool IsFileExists(const std::string& fileName);
 
 /**
  * @brief A wrapper function that checks if a dir exists
  * @param fileName The directory name to check
  * @return Boolean value denoting success or failure.
  */
-bool IsDirExists(std::string dirName);
-
-/**
- * @brief A wrapper function that opens a file for writing.
- * @param fileName The file name to open
- * @param pFile The returned FILE* pointer
- * @return Boolean value denoting success or failure.
- */
-bool OpenFileWrite(std::string fileName, FILE*& pFile);
-
-/**
- * @brief A wrapper function that opens a file for reading.
- * @param fileName The file name to open
- * @param pFile The returned FILE* pointer
- * @return Boolean value denoting success or failure.
- */
-bool OpenFileRead(std::string fileName, FILE*& pFile);
+bool IsDirExists(const std::string& dirName);
 
 /**
  * @brief A wrapper function that opens a file for writing.
@@ -74,7 +83,7 @@ bool OpenFileRead(std::string fileName, FILE*& pFile);
  * @param fd The returned file descriptor
  * @return Boolean value denoting success or failure.
  */
-bool OpenFileWrite(std::string fileName, int& fd);
+bool OpenFileWrite(const std::string& fileName, int& fd);
 
 /**
  * @brief A wrapper function that opens a file for reading.
@@ -82,7 +91,7 @@ bool OpenFileWrite(std::string fileName, int& fd);
  * @param fd The returned file descriptor
  * @return Boolean value denoting success or failure.
  */
-bool OpenFileRead(std::string fileName, int& fd);
+bool OpenFileRead(const std::string& fileName, int& fd);
 
 /**
  * @brief a wrapper function that closes a file fd.
@@ -98,7 +107,7 @@ int CloseFile(int fd);
  * @param len The number of bytes to write
  * @return size_t value equals to the bytes that were written.
  */
-size_t WriteFile(int fd, char* data, size_t len);
+size_t WriteFile(int fd, const char* data, size_t len);
 
 /**
  * @brief A wrapper function that reads from a file fd.
@@ -122,7 +131,7 @@ int FlushFile(int fd);
  * @param offset The offset in the file to seek to.
  * @return Boolean value denoting success or failure.
  */
-bool SeekFile(int fd, uint64_t offset);
+bool SeekFile(int fd, off64_t offset);
 
 /**
  * @brief Frees a row's stable version row.
@@ -143,7 +152,7 @@ inline void DestroyStableRow(Row* row)
 inline bool CreateStableRow(Row* origRow)
 {
     Row* tmpRow = nullptr;
-    Sentinel* s = origRow->GetPrimarySentinel();
+    PrimarySentinel* s = origRow->GetPrimarySentinel();
     MOT_ASSERT(s);
     if (s == nullptr) {
         return false;
@@ -159,29 +168,9 @@ inline bool CreateStableRow(Row* origRow)
         tmpRow = s->GetStable();
         tmpRow->DeepCopy(origRow);
     }
+    s->GetStable()->SetStableTid(s->GetTransactionId());
     return true;
 }
-
-// Checkpoint dir prefix
-static const char* dirPrefix = "chkpt_";
-
-// Checkpoint file suffix
-static const char* cpFileSuffix = ".cp";
-
-// Metadata file suffix
-static const char* mdFileSuffix = ".md";
-
-// Map file suffix
-static const char* mapFileSuffix = ".map";
-
-// TPC file suffix
-static const char* tpcFileSuffix = ".tpc";
-
-// End file suffix
-static const char* validFileSuffix = ".end";
-
-// Max path len
-static const size_t maxPath = 1024;
 
 /**
  * @brief Returns the current working directory.
@@ -199,8 +188,8 @@ bool GetWorkingDir(std::string& dir);
  */
 inline bool SetDirName(std::string& workingDir, uint64_t cpId)
 {
-    workingDir.append(dirPrefix);
-    workingDir.append(std::to_string(cpId));
+    (void)workingDir.append(CKPT_DIR_PREFIX);
+    (void)workingDir.append(std::to_string(cpId));
     return true;
 }
 
@@ -224,11 +213,11 @@ inline bool SetWorkingDir(std::string& workingDir, uint64_t cpId)
  * @param fileName The returned prefix for the filename.
  * @param workingDir The directory in which the file is located.
  */
-inline void MakeFilename(std::string& fileName, std::string& workingDir)
+inline void MakeFilename(std::string& fileName, const std::string& workingDir)
 {
     fileName.clear();
-    fileName.append(workingDir);
-    fileName.append("/");
+    (void)fileName.append(workingDir);
+    (void)fileName.append("/");
 }
 
 /**
@@ -237,11 +226,11 @@ inline void MakeFilename(std::string& fileName, std::string& workingDir)
  * @param workingDir The directory in which the file should be located.
  * @param cpId The checkpoint id.
  */
-inline void MakeMapFilename(std::string& fileName, std::string& workingDir, uint64_t cpId)
+inline void MakeMapFilename(std::string& fileName, const std::string& workingDir, uint64_t cpId)
 {
     MakeFilename(fileName, workingDir);
-    fileName.append(std::to_string(cpId));
-    fileName.append(mapFileSuffix);
+    (void)fileName.append(std::to_string(cpId));
+    (void)fileName.append(MAP_FILE_SUFFIX);
 }
 
 /**
@@ -251,14 +240,14 @@ inline void MakeMapFilename(std::string& fileName, std::string& workingDir, uint
  * @param workingDir The directory in which the file should be located.
  * @param seg The segment number.
  */
-inline void MakeCpFilename(uint64_t tableId, std::string& fileName, std::string& workingDir, int seg = 0)
+inline void MakeCpFilename(uint64_t tableId, std::string& fileName, const std::string& workingDir, int seg = 0)
 {
     MakeFilename(fileName, workingDir);
-    fileName.append("tab_");
-    fileName.append(std::to_string(tableId));
-    fileName.append("_");
-    fileName.append(std::to_string(seg));
-    fileName.append(cpFileSuffix);
+    (void)fileName.append("tab_");
+    (void)fileName.append(std::to_string(tableId));
+    (void)fileName.append("_");
+    (void)fileName.append(std::to_string(seg));
+    (void)fileName.append(CKPT_FILE_SUFFIX);
 }
 
 /**
@@ -267,11 +256,11 @@ inline void MakeCpFilename(uint64_t tableId, std::string& fileName, std::string&
  * @param fileName The returned filename string.
  * @param workingDir The directory in which the file should be located.
  */
-inline void MakeMdFilename(uint64_t tableId, std::string& fileName, std::string& workingDir)
+inline void MakeMdFilename(uint64_t tableId, std::string& fileName, const std::string& workingDir)
 {
     MakeFilename(fileName, workingDir);
-    fileName.append(std::to_string(tableId));
-    fileName.append(mdFileSuffix);
+    (void)fileName.append(std::to_string(tableId));
+    (void)fileName.append(MD_FILE_SUFFIX);
 }
 
 /**
@@ -280,11 +269,24 @@ inline void MakeMdFilename(uint64_t tableId, std::string& fileName, std::string&
  * @param workingDir The directory in which the file should be located.
  * @param cpId The checkpoint id.
  */
-inline void MakeTpcFilename(std::string& fileName, std::string& workingDir, uint64_t cpId)
+inline void MakeTpcFilename(std::string& fileName, const std::string& workingDir, uint64_t cpId)
 {
     MakeFilename(fileName, workingDir);
-    fileName.append(std::to_string(cpId));
-    fileName.append(tpcFileSuffix);
+    (void)fileName.append(std::to_string(cpId));
+    (void)fileName.append(TPC_FILE_SUFFIX);
+}
+
+/**
+ * @brief Creates an in-process data filename.
+ * @param fileName The returned filename string.
+ * @param workingDir The directory in which the file should be located.
+ * @param cpId The checkpoint id.
+ */
+inline void MakeIpdFilename(std::string& fileName, const std::string& workingDir, uint64_t cpId)
+{
+    MakeFilename(fileName, workingDir);
+    (void)fileName.append(std::to_string(cpId));
+    (void)fileName.append(IPD_FILE_SUFFIX);
 }
 
 /**
@@ -293,11 +295,11 @@ inline void MakeTpcFilename(std::string& fileName, std::string& workingDir, uint
  * @param workingDir The directory in which the file should be located.
  * @param cpId The checkpoint id.
  */
-inline void MakeEndFilename(std::string& fileName, std::string& workingDir, uint64_t cpId)
+inline void MakeEndFilename(std::string& fileName, const std::string& workingDir, uint64_t cpId)
 {
     MakeFilename(fileName, workingDir);
-    fileName.append(std::to_string(cpId));
-    fileName.append(validFileSuffix);
+    (void)fileName.append(std::to_string(cpId));
+    (void)fileName.append(END_FILE_SUFFIX);
 }
 
 /**
@@ -321,11 +323,21 @@ struct FileHeader {
     uint64_t m_numOps;
 };
 
-struct EntryHeader {
+struct EntryHeaderBase {
     uint64_t m_csn;
     uint64_t m_rowId;
     uint32_t m_dataLen;
     uint16_t m_keyLen;
+};
+
+struct EntryHeader {
+    EntryHeaderBase m_base;
+    uint64_t m_transactionId;
+};
+
+struct MetaFileHeaderBase {
+    FileHeader m_fileHeader;
+    EntryHeaderBase m_entryHeader;
 };
 
 struct MetaFileHeader {
@@ -338,11 +350,12 @@ struct MapFileHeader {
     uint64_t m_numEntries;
 };
 
-struct TpcFileHeader {
+struct PendingTxnDataFileHeader {
     uint64_t m_magic;
     uint64_t m_numEntries;
 };
 
+/* Deprecated, used in older versions (metaVersion < METADATA_VER_LOW_RTO). */
 struct TpcEntryHeader {
     uint64_t m_magic;
     uint64_t m_len;

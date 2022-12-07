@@ -25,9 +25,9 @@
 #include "mot_string.h"
 #include "infra_util.h"
 
-#include <stdarg.h>
-#include <stdio.h>
-#include <ctype.h>
+#include <cstdarg>
+#include <cstdio>
+#include <cctype>
 
 namespace MOT {
 template <>

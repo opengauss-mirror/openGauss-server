@@ -38,6 +38,7 @@ hacheck_multi_single: all
 
 hacheck_multi_single_mot: all
 	export prefix=$(prefix) && sh $(CURDIR)/run_ha_multi_single_mot.sh 1 $(PART)
+	export prefix=$(prefix) && sh $(CURDIR)/run_ha_multi_cascade_mot.sh 1 $(PART)
 
 hacheck_multi_single_shared_storage: all
 	export prefix=$(prefix) && sh $(CURDIR)/run_ha_multi_single_shared_storage.sh 2 $(PART)

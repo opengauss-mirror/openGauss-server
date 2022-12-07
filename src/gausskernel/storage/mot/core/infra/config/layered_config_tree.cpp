@@ -25,7 +25,7 @@
 #include "layered_config_tree.h"
 #include "mot_error.h"
 
-#include <string.h>
+#include <cstring>
 
 #include <algorithm>
 
@@ -55,7 +55,9 @@ public:
     {}
 
     ~PrintVisitor() override
-    {}
+    {
+        m_printList = nullptr;
+    }
 
     /** @brief Queries whether status is ok or error occurred. */
     inline bool GetStatus() const
@@ -125,7 +127,7 @@ bool LayeredConfigTree::AddConfigTree(ConfigTree* configTree)
             return configTreeAdded;  // whether succeeded or not, we are done
         } else if (currConfigTree->GetPriority() < configTree->GetPriority()) {
             // not found yet, go on to next list
-            ++itr;
+            (void)++itr;
         } else {
             // the priority of this list is too large, so we need to add a new list before the current one
             configTreeAdded = AddNewConfigTreeAt(itr, configTree);
@@ -163,9 +165,9 @@ void LayeredConfigTree::RemoveConfigTree(ConfigTree* configTree)
             ++priority;  // for debug printing
         } else {
             MOT_LOG_TRACE("Removing configuration tree %s from layered configuration tree", configTree->GetSource());
-            configTreeList.erase(itr2);
+            (void)configTreeList.erase(itr2);
             if (configTreeList.empty()) {
-                m_configTrees.erase(itr);
+                (void)m_configTrees.erase(itr);
             }
             found = true;
             break;  // stop searching
@@ -275,7 +277,7 @@ void LayeredConfigTree::ClearConfigTrees()
     m_printList.clear();
 }
 
-bool LayeredConfigTree::AddNewConfigTreeAt(LayeredConfigTrees::iterator itr, ConfigTree* configTree)
+bool LayeredConfigTree::AddNewConfigTreeAt(const LayeredConfigTrees::iterator& itr, ConfigTree* configTree)
 {
     bool configTreeAdded = false;
     LayeredConfigTrees::pairib pb = m_configTrees.insert(itr, ConfigTreeList());

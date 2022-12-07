@@ -26,53 +26,41 @@
 #include "mot_internal.h"
 #include "nodes/makefuncs.h"
 
-static KEY_OPER keyOperStateMachine[KEY_OPER::READ_INVALID + 1][KEY_OPER::READ_INVALID];
+static KEY_OPER g_keyOperStateMachine[static_cast<uint8_t>(KEY_OPER::READ_INVALID) + 1]
+                                     [static_cast<uint8_t>(KEY_OPER::READ_INVALID)];
 
 void InitKeyOperStateMachine()
 {
     // fill key operation matrix
-    for (uint8_t i = 0; i <= KEY_OPER::READ_INVALID; i++) {
-        for (uint8_t j = 0; j < KEY_OPER::READ_INVALID; j++) {
+    for (uint8_t i = 0; i <= static_cast<uint8_t>(KEY_OPER::READ_INVALID); i++) {
+        for (uint8_t j = 0; j < static_cast<uint8_t>(KEY_OPER::READ_INVALID); j++) {
             switch ((KEY_OPER)i) {
                 case KEY_OPER::READ_KEY_EXACT:  // = : allows all operations
-                    keyOperStateMachine[i][j] = (KEY_OPER)j;
+                    g_keyOperStateMachine[i][j] = (KEY_OPER)j;
                     break;
-                case KEY_OPER::READ_KEY_OR_NEXT:  // >= : allows =, >, >=, like
-                    keyOperStateMachine[i][j] =
-                        (KEY_OPER)(((KEY_OPER)j) < KEY_OPER::READ_KEY_OR_PREV ? j : KEY_OPER::READ_INVALID);
+                case KEY_OPER::READ_KEY_OR_NEXT:  // >= : allows nothing
+                    g_keyOperStateMachine[i][j] = KEY_OPER::READ_INVALID;
                     break;
                 case KEY_OPER::READ_KEY_AFTER:  // > : allows nothing
-                    keyOperStateMachine[i][j] = KEY_OPER::READ_INVALID;
+                    g_keyOperStateMachine[i][j] = KEY_OPER::READ_INVALID;
                     break;
-                case KEY_OPER::READ_KEY_OR_PREV:  // <= : allows =, <, <=, like
-                {
-                    switch ((KEY_OPER)j) {
-                        case KEY_OPER::READ_KEY_EXACT:
-                        case KEY_OPER::READ_KEY_LIKE:
-                        case KEY_OPER::READ_KEY_OR_PREV:
-                        case KEY_OPER::READ_KEY_BEFORE:
-                            keyOperStateMachine[i][j] = (KEY_OPER)j;
-                            break;
-                        default:
-                            keyOperStateMachine[i][j] = KEY_OPER::READ_INVALID;
-                            break;
-                    }
+                case KEY_OPER::READ_KEY_OR_PREV:  // <= : allows nothing
+                    g_keyOperStateMachine[i][j] = KEY_OPER::READ_INVALID;
                     break;
-                }
                 case KEY_OPER::READ_KEY_BEFORE:  // < : allows nothing
-                    keyOperStateMachine[i][j] = KEY_OPER::READ_INVALID;
+                    g_keyOperStateMachine[i][j] = KEY_OPER::READ_INVALID;
                     break;
 
                 case KEY_OPER::READ_KEY_LIKE:  // like: allows nothing
-                    keyOperStateMachine[i][j] = KEY_OPER::READ_INVALID;
+                    g_keyOperStateMachine[i][j] = KEY_OPER::READ_INVALID;
                     break;
 
                 case KEY_OPER::READ_INVALID:  // = : allows all operations
-                    keyOperStateMachine[i][j] = (KEY_OPER)j;
+                    g_keyOperStateMachine[i][j] = (KEY_OPER)j;
                     break;
 
                 default:
-                    keyOperStateMachine[i][j] = KEY_OPER::READ_INVALID;
+                    g_keyOperStateMachine[i][j] = KEY_OPER::READ_INVALID;
                     break;
             }
         }
@@ -140,7 +128,18 @@ void MatchIndex::ClearPreviousMatch(MOTFdwStateSt* state, bool setLocal, int i, 
         }
 
         m_parentColMatch[i][j] = nullptr;
+        m_colMatch[i][j] = nullptr;
+        m_opers[i][j] = KEY_OPER::READ_INVALID;
         m_numMatches[i]--;
+    }
+    // in case second bound is set, move it to be a first bound
+    if (i == 0 && m_parentColMatch[1][j] != nullptr) {
+        m_parentColMatch[0][j] = m_parentColMatch[1][j];
+        m_colMatch[0][j] = m_colMatch[1][j];
+        m_opers[0][i] = m_opers[1][i];
+        m_parentColMatch[1][j] = nullptr;
+        m_colMatch[1][j] = nullptr;
+        m_opers[1][j] = KEY_OPER::READ_INVALID;
     }
 }
 
@@ -196,15 +195,15 @@ bool MatchIndex::SetIndexColumn(
                 // in index selection
                 // we can not differentiate between a > 2 and a > 1
                 if (sameOper) {
-                    if (op == KEY_OPER::READ_KEY_EXACT && m_opers[0][i] != op) {
-                        ClearPreviousMatch(state, setLocal, 0, i);
-                        m_parentColMatch[0][i] = parent;
-                        m_colMatch[0][i] = expr;
-                        m_opers[0][i] = op;
-                        m_numMatches[0]++;
+                    if (op == KEY_OPER::READ_KEY_EXACT && m_opers[1][i] != op) {
+                        ClearPreviousMatch(state, setLocal, 1, i);
+                        m_parentColMatch[1][i] = parent;
+                        m_colMatch[1][i] = expr;
+                        m_opers[1][i] = op;
+                        m_numMatches[1]++;
                         res = true;
                     } else if (m_opers[0][i] != KEY_OPER::READ_KEY_EXACT) {
-                        ClearPreviousMatch(state, setLocal, 0, i);
+                        ClearPreviousMatch(state, setLocal, 1, i);
                     }
                     break;
                 }
@@ -214,16 +213,6 @@ bool MatchIndex::SetIndexColumn(
         }
     }
 
-    if (res && (i < numKeyCols)) {
-        switch (state->m_table->GetFieldType(cols[i])) {
-            case MOT::MOT_CATALOG_FIELD_TYPES::MOT_TYPE_CHAR:
-            case MOT::MOT_CATALOG_FIELD_TYPES::MOT_TYPE_VARCHAR:
-                res = false;
-                break;
-            default:
-                break;
-        }
-    }
     return res;
 }
 
@@ -264,10 +253,17 @@ double MatchIndex::GetCost(int numClauses)
                 m_opers[0][i] = KEY_OPER::READ_INVALID;
                 notUsed[0]++;
             } else if (m_opers[0][i] < KEY_OPER::READ_INVALID) {
-                KEY_OPER curr = keyOperStateMachine[m_ixOpers[0]][m_opers[0][i]];
+                KEY_OPER curr =
+                    g_keyOperStateMachine[static_cast<uint8_t>(m_ixOpers[0])][static_cast<uint8_t>(m_opers[0][i])];
 
                 if (curr < KEY_OPER::READ_INVALID) {
-                    m_ixOpers[0] = curr;
+                    if (m_ixOpers[0] != KEY_OPER::READ_INVALID) {
+                        if (curr > m_ixOpers[0]) {
+                            m_ixOpers[0] = curr;
+                        }
+                    } else {
+                        m_ixOpers[0] = curr;
+                    }
                     used[0]++;
                     if (m_colMatch[1][i] == nullptr &&
                         (m_opers[0][i] == KEY_OPER::READ_KEY_EXACT || m_opers[0][i] == KEY_OPER::READ_KEY_LIKE)) {
@@ -288,7 +284,8 @@ double MatchIndex::GetCost(int numClauses)
                 m_opers[1][i] = KEY_OPER::READ_INVALID;
                 notUsed[1]++;
             } else if (m_opers[1][i] < KEY_OPER::READ_INVALID) {
-                KEY_OPER curr = keyOperStateMachine[m_ixOpers[1]][m_opers[1][i]];
+                KEY_OPER curr =
+                    g_keyOperStateMachine[static_cast<uint8_t>(m_ixOpers[1])][static_cast<uint8_t>(m_opers[1][i])];
 
                 if (curr < KEY_OPER::READ_INVALID) {
                     m_ixOpers[1] = curr;
@@ -340,7 +337,8 @@ double MatchIndex::GetCost(int numClauses)
             if (m_colMatch[1][0]) {
                 m_end = 1;
                 if (m_ixOpers[1] == KEY_OPER::READ_PREFIX || m_ixOpers[1] == KEY_OPER::READ_PREFIX_LIKE) {
-                    if (((m_ixOpers[0] & ~KEY_OPER_PREFIX_BITMASK) < KEY_OPER::READ_KEY_OR_PREV)) {
+                    if (((static_cast<uint8_t>(m_ixOpers[0]) & ~KEY_OPER_PREFIX_BITMASK) <
+                            static_cast<uint8_t>(KEY_OPER::READ_KEY_OR_PREV))) {
                         m_ixOpers[1] = KEY_OPER::READ_PREFIX_OR_PREV;
                     } else {
                         m_ixOpers[1] = KEY_OPER::READ_PREFIX_OR_NEXT;
@@ -382,11 +380,11 @@ double MatchIndex::GetCost(int numClauses)
 
 bool MatchIndex::AdjustForOrdering(bool desc)
 {
-    if (m_end == -1 && m_ixOpers[0] == READ_KEY_EXACT) {  // READ_KEY_EXACT
+    if (m_end == -1 && m_ixOpers[0] == KEY_OPER::READ_KEY_EXACT) {  // READ_KEY_EXACT
         return true;
     }
 
-    KEY_OPER curr = (KEY_OPER)(m_ixOpers[0] & ~KEY_OPER_PREFIX_BITMASK);
+    KEY_OPER curr = (KEY_OPER)(static_cast<uint8_t>(m_ixOpers[0]) & ~KEY_OPER_PREFIX_BITMASK);
     bool hasBoth = (m_start != -1 && m_end != -1);
     bool currDesc = !(curr < KEY_OPER::READ_KEY_OR_PREV);
 
@@ -418,6 +416,11 @@ bool MatchIndex::CanApplyOrdering(const int* orderCols) const
             return true;
         }
 
+        // ordering does not include all index columns from the start
+        if (m_colMatch[0][i] != nullptr && orderCols[i] == 0) {
+            return false;
+        }
+
         // suffix: the order columns are continuation of index columns, we can use index ordering
         if (m_colMatch[0][i] == nullptr && orderCols[i] == 1) {
             return true;
@@ -440,6 +443,8 @@ void MatchIndex::Serialize(List** list) const
     ixlist = lappend(ixlist, makeConst(INT4OID, -1, InvalidOid, 4, Int32GetDatum(m_start), false, true));
     ixlist = lappend(ixlist, makeConst(INT4OID, -1, InvalidOid, 4, Int32GetDatum(m_end), false, true));
     ixlist = lappend(ixlist, makeConst(INT4OID, -1, InvalidOid, 4, UInt32GetDatum(m_cost), false, true));
+    ixlist = lappend(ixlist, makeConst(BOOLOID, -1, InvalidOid, 1, BoolGetDatum(m_fullScan), false, true));
+    ixlist = lappend(ixlist, makeConst(INT1OID, -1, InvalidOid, 1, Int8GetDatum(m_order), false, true));
 
     for (int i = 0; i < 2; i++) {
         ixlist = lappend(ixlist, makeConst(INT4OID, -1, InvalidOid, 4, Int32GetDatum(m_numMatches[i]), false, true));
@@ -474,6 +479,12 @@ void MatchIndex::Deserialize(ListCell* cell, uint64_t exTableID)
     cell = lnext(cell);
 
     m_cost = (uint32_t)((Const*)lfirst(cell))->constvalue;
+    cell = lnext(cell);
+
+    m_fullScan = (bool)((Const*)lfirst(cell))->constvalue;
+    cell = lnext(cell);
+
+    m_order = (SortDir)((Const*)lfirst(cell))->constvalue;
     cell = lnext(cell);
 
     for (int i = 0; i < 2; i++) {

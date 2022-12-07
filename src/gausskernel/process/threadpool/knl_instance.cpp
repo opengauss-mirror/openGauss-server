@@ -678,7 +678,7 @@ static void knl_g_archive_thread_info_init(knl_g_archive_thread_info *archive_th
 #ifdef ENABLE_MOT
 static void knl_g_mot_init(knl_g_mot_context* mot_cxt)
 {
-    mot_cxt->jitExecMode = JitExec::JIT_EXEC_MODE_INVALID;
+    mot_cxt->shmemVariableCache = NULL;
 }
 #endif
 

@@ -25,8 +25,8 @@
 #ifndef INFRA_H
 #define INFRA_H
 
-#include <stdlib.h>
-#include <stdint.h>
+#include <cstdlib>
+#include <cstdint>
 #include <utility>
 
 #include "debug_utils.h"
@@ -192,7 +192,7 @@ public:
 template <typename T1, typename T2>
 struct mot_pair {
     /** @brief Default constructor. */
-    mot_pair()
+    mot_pair() : first(), second()
     {}
 
     /**

@@ -42,7 +42,7 @@ struct gc_layer_rcu_callback_ng : public P::threadinfo_type::mrcu_callback {
     size_t size_;
     MOT::MasstreePrimaryIndex* index_;
     char s_[0];
-    gc_layer_rcu_callback_ng(node_base<P>** root_ref, Str prefix, size_t size)
+    gc_layer_rcu_callback_ng(node_base<P>** root_ref, const Str& prefix, size_t size)
         : root_ref_(root_ref),
           len_(prefix.length()),
           size_(size),
@@ -58,7 +58,7 @@ struct gc_layer_rcu_callback_ng : public P::threadinfo_type::mrcu_callback {
         return size_;
     }
 
-    static void make(node_base<P>** root_ref, Str prefix, threadinfo& ti);
+    static void make(node_base<P>** root_ref, const Str& prefix, threadinfo& ti);
 };
 
 template <typename P>
@@ -66,9 +66,9 @@ size_t gc_layer_rcu_callback_ng<P>::operator()(bool drop_index)
 {
     // If drop_index == true, all index's pools are going to be cleaned, so we can skip gc_layer call (which might add
     // more elements into GC)
-    if (drop_index == false) {
-        // GC layer remove might delete elements from tree and might create new gc layer removal requests and add them
-        // to GC. Index must be provided to allow access to the memory pools.
+    if (!drop_index) {
+        // GC layer remove might delete elements from tree or create new gc layer removal requests and add them to GC.
+        // Index must be provided to allow access to the memory pools.
         mtSessionThreadInfo->set_working_index(index_);
         (*this)(*mtSessionThreadInfo);
         mtSessionThreadInfo->set_working_index(NULL);
@@ -91,7 +91,7 @@ void gc_layer_rcu_callback_ng<P>::operator()(threadinfo& ti)
 }
 
 template <typename P>
-void gc_layer_rcu_callback_ng<P>::make(node_base<P>** root_ref, Str prefix, threadinfo& ti)
+void gc_layer_rcu_callback_ng<P>::make(node_base<P>** root_ref, const Str& prefix, threadinfo& ti)
 {
     size_t sz = prefix.len + sizeof(gc_layer_rcu_callback_ng<P>);
     // As we are using slab allocator for allocation, sz is will be updated by ti.allocate with the real allocation

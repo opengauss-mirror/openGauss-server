@@ -26,7 +26,7 @@
 #define LOG_LEVEL_H
 
 #include <cinttypes>
-#include <stdint.h>
+#include <cstdint>
 
 namespace MOT {
 /**
@@ -66,6 +66,9 @@ extern LogLevel LogLevelFromString(const char* logLevelStr);
 
 /** @brief Converts log level constant to string. */
 extern const char* LogLevelToString(LogLevel logLevel);
+
+/** @brief Validates the log level string. */
+extern bool ValidateLogLevel(const char* logLevelStr);
 }  // namespace MOT
 
 #endif /* LOG_LEVEL_H */

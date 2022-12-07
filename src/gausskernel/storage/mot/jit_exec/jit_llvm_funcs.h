@@ -31,35 +31,50 @@
  */
 #include "jit_llvm_query.h"
 #include "jit_plan.h"
+#include "jit_llvm_util.h"
+#include "jit_profiler.h"
 
 #include <vector>
 
 namespace JitExec {
 /** @brief Gets a key from the execution context. */
-inline llvm::Value* getExecContextKey(JitLlvmCodeGenContext* ctx, JitRangeIteratorType range_itr_type,
-    JitRangeScanType range_scan_type, int subQueryIndex)
+inline llvm::Value* getExecContextKey(
+    JitLlvmCodeGenContext* ctx, JitRangeIteratorType rangeItrType, JitRangeScanType rangeScanType, int subQueryIndex)
 {
     llvm::Value* key = nullptr;
-    if (range_scan_type == JIT_RANGE_SCAN_INNER) {
-        if (range_itr_type == JIT_RANGE_ITERATOR_END) {
+    if (rangeScanType == JIT_RANGE_SCAN_INNER) {
+        if (rangeItrType == JIT_RANGE_ITERATOR_END) {
             key = ctx->inner_end_iterator_key_value;
         } else {
             key = ctx->inner_key_value;
         }
-    } else if (range_scan_type == JIT_RANGE_SCAN_MAIN) {
-        if (range_itr_type == JIT_RANGE_ITERATOR_END) {
+    } else if (rangeScanType == JIT_RANGE_SCAN_MAIN) {
+        if (rangeItrType == JIT_RANGE_ITERATOR_END) {
             key = ctx->end_iterator_key_value;
         } else {
             key = ctx->key_value;
         }
-    } else if (range_scan_type == JIT_RANGE_SCAN_SUB_QUERY) {
-        if (range_itr_type == JIT_RANGE_ITERATOR_END) {
+    } else if (rangeScanType == JIT_RANGE_SCAN_SUB_QUERY) {
+        if (rangeItrType == JIT_RANGE_ITERATOR_END) {
             key = ctx->m_subQueryData[subQueryIndex].m_endIteratorKey;
         } else {
             key = ctx->m_subQueryData[subQueryIndex].m_searchKey;
         }
     }
     return key;
+}
+
+inline llvm::Value* getExecContextTable(JitLlvmCodeGenContext* ctx, JitRangeScanType rangeScanType, int subQueryIndex)
+{
+    llvm::Value* tableValue = nullptr;
+    if (rangeScanType == JIT_RANGE_SCAN_INNER) {
+        tableValue = ctx->inner_table_value;
+    } else if (rangeScanType == JIT_RANGE_SCAN_MAIN) {
+        tableValue = ctx->table_value;
+    } else if (rangeScanType == JIT_RANGE_SCAN_SUB_QUERY) {
+        tableValue = ctx->m_subQueryData[subQueryIndex].m_table;
+    }
+    return tableValue;
 }
 
 inline llvm::Value* getExecContextIndex(JitLlvmCodeGenContext* ctx, JitRangeScanType rangeScanType, int subQueryIndex)
@@ -76,85 +91,76 @@ inline llvm::Value* getExecContextIndex(JitLlvmCodeGenContext* ctx, JitRangeScan
 }
 
 /*--------------------------- Define LLVM Helper Prototypes  ---------------------------*/
-inline llvm::FunctionCallee defineFunction(llvm::Module* module, llvm::Type* ret_type, const char* name, ...)
-{
-    va_list vargs;
-    va_start(vargs, name);
-    std::vector<llvm::Type*> args;
-    llvm::Type* arg_type = va_arg(vargs, llvm::Type*);
-    while (arg_type != nullptr) {
-        args.push_back(arg_type);
-        arg_type = va_arg(vargs, llvm::Type*);
-    }
-    va_end(vargs);
-    llvm::ArrayRef<llvm::Type*> argsRef(args);
-    llvm::FunctionType* funcType = llvm::FunctionType::get(ret_type, argsRef, false);
-    return module->getOrInsertFunction(name, funcType);
-}
-
 inline void defineDebugLog(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->debugLogFunc = defineFunction(module, ctx->VOID_T, "debugLog", ctx->STR_T, ctx->STR_T, nullptr);
+    ctx->debugLogFunc = llvm_util::DefineFunction(module, ctx->VOID_T, "debugLog", ctx->STR_T, ctx->STR_T, nullptr);
 }
 
 inline void defineIsSoftMemoryLimitReached(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->isSoftMemoryLimitReachedFunc = defineFunction(module, ctx->INT32_T, "isSoftMemoryLimitReached", nullptr);
+    ctx->isSoftMemoryLimitReachedFunc =
+        llvm_util::DefineFunction(module, ctx->INT32_T, "isSoftMemoryLimitReached", nullptr);
 }
 
 inline void defineGetPrimaryIndex(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->getPrimaryIndexFunc = defineFunction(
+    ctx->getPrimaryIndexFunc = llvm_util::DefineFunction(
         module, ctx->IndexType->getPointerTo(), "getPrimaryIndex", ctx->TableType->getPointerTo(), nullptr);
 }
 
 inline void defineGetTableIndex(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->getTableIndexFunc = defineFunction(
+    ctx->getTableIndexFunc = llvm_util::DefineFunction(
         module, ctx->IndexType->getPointerTo(), "getTableIndex", ctx->TableType->getPointerTo(), ctx->INT32_T, nullptr);
 }
 
 inline void defineInitKey(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->initKeyFunc = defineFunction(
+    ctx->initKeyFunc = llvm_util::DefineFunction(
         module, ctx->VOID_T, "InitKey", ctx->KeyType->getPointerTo(), ctx->IndexType->getPointerTo(), nullptr);
 }
 
 inline void defineGetColumnAt(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->getColumnAtFunc = defineFunction(
+    ctx->getColumnAtFunc = llvm_util::DefineFunction(
         module, ctx->ColumnType->getPointerTo(), "getColumnAt", ctx->TableType->getPointerTo(), ctx->INT32_T, nullptr);
 }
 
-inline void defineSetExprArgIsNull(JitLlvmCodeGenContext* ctx, llvm::Module* module)
+inline void DefineGetExprIsNull(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->setExprArgIsNullFunc =
-        defineFunction(module, ctx->VOID_T, "setExprArgIsNull", ctx->INT32_T, ctx->INT32_T, nullptr);
+    ctx->m_getExprIsNullFunc = llvm_util::DefineFunction(module, ctx->INT32_T, "GetExprIsNull", nullptr);
 }
 
-inline void defineGetExprArgIsNull(JitLlvmCodeGenContext* ctx, llvm::Module* module)
+inline void DefineSetExprIsNull(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->getExprArgIsNullFunc = defineFunction(module, ctx->INT32_T, "getExprArgIsNull", ctx->INT32_T, nullptr);
+    ctx->m_setExprIsNullFunc = llvm_util::DefineFunction(module, ctx->VOID_T, "SetExprIsNull", ctx->INT32_T, nullptr);
+}
+
+inline void DefineGetExprCollation(JitLlvmCodeGenContext* ctx, llvm::Module* module)
+{
+    ctx->m_getExprCollationFunc = llvm_util::DefineFunction(module, ctx->INT32_T, "GetExprCollation", nullptr);
+}
+
+inline void DefineSetExprCollation(JitLlvmCodeGenContext* ctx, llvm::Module* module)
+{
+    ctx->m_setExprCollationFunc =
+        llvm_util::DefineFunction(module, ctx->VOID_T, "SetExprCollation", ctx->INT32_T, nullptr);
 }
 
 inline void defineGetDatumParam(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->getDatumParamFunc = defineFunction(module,
-        ctx->DATUM_T,
-        "getDatumParam",
-        ctx->ParamListInfoDataType->getPointerTo(),
-        ctx->INT32_T,
-        ctx->INT32_T,
-        nullptr);
+    ctx->getDatumParamFunc = llvm_util::DefineFunction(
+        module, ctx->DATUM_T, "getDatumParam", ctx->ParamListInfoDataType->getPointerTo(), ctx->INT32_T, nullptr);
 }
 
 inline void defineReadDatumColumn(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->readDatumColumnFunc = defineFunction(module,
+    ctx->readDatumColumnFunc = llvm_util::DefineFunction(module,
         ctx->DATUM_T,
         "readDatumColumn",
         ctx->TableType->getPointerTo(),
         ctx->RowType->getPointerTo(),
+        ctx->INT32_T,
         ctx->INT32_T,
         ctx->INT32_T,
         nullptr);
@@ -162,7 +168,7 @@ inline void defineReadDatumColumn(JitLlvmCodeGenContext* ctx, llvm::Module* modu
 
 inline void defineWriteDatumColumn(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->writeDatumColumnFunc = defineFunction(module,
+    ctx->writeDatumColumnFunc = llvm_util::DefineFunction(module,
         ctx->VOID_T,
         "writeDatumColumn",
         ctx->RowType->getPointerTo(),
@@ -173,7 +179,7 @@ inline void defineWriteDatumColumn(JitLlvmCodeGenContext* ctx, llvm::Module* mod
 
 inline void defineBuildDatumKey(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->buildDatumKeyFunc = defineFunction(module,
+    ctx->buildDatumKeyFunc = llvm_util::DefineFunction(module,
         ctx->VOID_T,
         "buildDatumKey",
         ctx->ColumnType->getPointerTo(),
@@ -188,65 +194,67 @@ inline void defineBuildDatumKey(JitLlvmCodeGenContext* ctx, llvm::Module* module
 
 inline void defineSetBit(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->setBitFunc =
-        defineFunction(module, ctx->VOID_T, "setBit", ctx->BitmapSetType->getPointerTo(), ctx->INT32_T, nullptr);
+    ctx->setBitFunc = llvm_util::DefineFunction(
+        module, ctx->VOID_T, "setBit", ctx->BitmapSetType->getPointerTo(), ctx->INT32_T, nullptr);
 }
 
 inline void defineResetBitmapSet(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
     ctx->resetBitmapSetFunc =
-        defineFunction(module, ctx->VOID_T, "resetBitmapSet", ctx->BitmapSetType->getPointerTo(), nullptr);
+        llvm_util::DefineFunction(module, ctx->VOID_T, "resetBitmapSet", ctx->BitmapSetType->getPointerTo(), nullptr);
 }
 
 inline void defineGetTableFieldCount(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
     ctx->getTableFieldCountFunc =
-        defineFunction(module, ctx->INT32_T, "getTableFieldCount", ctx->TableType->getPointerTo(), nullptr);
+        llvm_util::DefineFunction(module, ctx->INT32_T, "getTableFieldCount", ctx->TableType->getPointerTo(), nullptr);
 }
 
 inline void defineWriteRow(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->writeRowFunc = defineFunction(
+    ctx->writeRowFunc = llvm_util::DefineFunction(
         module, ctx->INT32_T, "writeRow", ctx->RowType->getPointerTo(), ctx->BitmapSetType->getPointerTo(), nullptr);
 }
 
 inline void defineSearchRow(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->searchRowFunc = defineFunction(module,
+    ctx->searchRowFunc = llvm_util::DefineFunction(module,
         ctx->RowType->getPointerTo(),
         "searchRow",
         ctx->TableType->getPointerTo(),
         ctx->KeyType->getPointerTo(),
+        ctx->INT32_T,
+        ctx->INT32_T,
         ctx->INT32_T,
         nullptr);
 }
 
 inline void defineCreateNewRow(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->createNewRowFunc =
-        defineFunction(module, ctx->RowType->getPointerTo(), "createNewRow", ctx->TableType->getPointerTo(), nullptr);
+    ctx->createNewRowFunc = llvm_util::DefineFunction(
+        module, ctx->RowType->getPointerTo(), "createNewRow", ctx->TableType->getPointerTo(), nullptr);
 }
 
 inline void defineInsertRow(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->insertRowFunc = defineFunction(
+    ctx->insertRowFunc = llvm_util::DefineFunction(
         module, ctx->INT32_T, "insertRow", ctx->TableType->getPointerTo(), ctx->RowType->getPointerTo(), nullptr);
 }
 
 inline void defineDeleteRow(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->deleteRowFunc = defineFunction(module, ctx->INT32_T, "deleteRow", nullptr);
+    ctx->deleteRowFunc = llvm_util::DefineFunction(module, ctx->INT32_T, "deleteRow", nullptr);
 }
 
 inline void defineSetRowNullBits(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->setRowNullBitsFunc = defineFunction(
+    ctx->setRowNullBitsFunc = llvm_util::DefineFunction(
         module, ctx->VOID_T, "setRowNullBits", ctx->TableType->getPointerTo(), ctx->RowType->getPointerTo(), nullptr);
 }
 
 inline void defineSetExprResultNullBit(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->setExprResultNullBitFunc = defineFunction(module,
+    ctx->setExprResultNullBitFunc = llvm_util::DefineFunction(module,
         ctx->INT32_T,
         "setExprResultNullBit",
         ctx->TableType->getPointerTo(),
@@ -257,19 +265,19 @@ inline void defineSetExprResultNullBit(JitLlvmCodeGenContext* ctx, llvm::Module*
 
 inline void defineExecClearTuple(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->execClearTupleFunc =
-        defineFunction(module, ctx->VOID_T, "execClearTuple", ctx->TupleTableSlotType->getPointerTo(), nullptr);
+    ctx->execClearTupleFunc = llvm_util::DefineFunction(
+        module, ctx->VOID_T, "execClearTuple", ctx->TupleTableSlotType->getPointerTo(), nullptr);
 }
 
 inline void defineExecStoreVirtualTuple(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->execStoreVirtualTupleFunc =
-        defineFunction(module, ctx->VOID_T, "execStoreVirtualTuple", ctx->TupleTableSlotType->getPointerTo(), nullptr);
+    ctx->execStoreVirtualTupleFunc = llvm_util::DefineFunction(
+        module, ctx->VOID_T, "execStoreVirtualTuple", ctx->TupleTableSlotType->getPointerTo(), nullptr);
 }
 
 inline void defineSelectColumn(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->selectColumnFunc = defineFunction(module,
+    ctx->selectColumnFunc = llvm_util::DefineFunction(module,
         ctx->VOID_T,
         "selectColumn",
         ctx->TableType->getPointerTo(),
@@ -282,19 +290,19 @@ inline void defineSelectColumn(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 
 inline void defineSetTpProcessed(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->setTpProcessedFunc =
-        defineFunction(module, ctx->VOID_T, "setTpProcessed", ctx->INT64_T->getPointerTo(), ctx->INT64_T, nullptr);
+    ctx->setTpProcessedFunc = llvm_util::DefineFunction(
+        module, ctx->VOID_T, "setTpProcessed", ctx->INT64_T->getPointerTo(), ctx->INT64_T, nullptr);
 }
 
 inline void defineSetScanEnded(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->setScanEndedFunc =
-        defineFunction(module, ctx->VOID_T, "setScanEnded", ctx->INT32_T->getPointerTo(), ctx->INT32_T, nullptr);
+    ctx->setScanEndedFunc = llvm_util::DefineFunction(
+        module, ctx->VOID_T, "setScanEnded", ctx->INT32_T->getPointerTo(), ctx->INT32_T, nullptr);
 }
 
 inline void defineCopyKey(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->copyKeyFunc = defineFunction(module,
+    ctx->copyKeyFunc = llvm_util::DefineFunction(module,
         ctx->VOID_T,
         "copyKey",
         ctx->IndexType->getPointerTo(),
@@ -305,7 +313,7 @@ inline void defineCopyKey(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 
 inline void defineFillKeyPattern(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->fillKeyPatternFunc = defineFunction(module,
+    ctx->fillKeyPatternFunc = llvm_util::DefineFunction(module,
         ctx->VOID_T,
         "FillKeyPattern",
         ctx->KeyType->getPointerTo(),
@@ -317,7 +325,7 @@ inline void defineFillKeyPattern(JitLlvmCodeGenContext* ctx, llvm::Module* modul
 
 inline void defineAdjustKey(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->adjustKeyFunc = defineFunction(module,
+    ctx->adjustKeyFunc = llvm_util::DefineFunction(module,
         ctx->VOID_T,
         "adjustKey",
         ctx->KeyType->getPointerTo(),
@@ -328,7 +336,7 @@ inline void defineAdjustKey(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 
 inline void defineSearchIterator(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->searchIteratorFunc = defineFunction(module,
+    ctx->searchIteratorFunc = llvm_util::DefineFunction(module,
         ctx->IndexIteratorType->getPointerTo(),
         "searchIterator",
         ctx->IndexType->getPointerTo(),
@@ -340,13 +348,13 @@ inline void defineSearchIterator(JitLlvmCodeGenContext* ctx, llvm::Module* modul
 
 inline void defineBeginIterator(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->beginIteratorFunc = defineFunction(
+    ctx->beginIteratorFunc = llvm_util::DefineFunction(
         module, ctx->IndexIteratorType->getPointerTo(), "beginIterator", ctx->IndexType->getPointerTo(), nullptr);
 }
 
 inline void defineCreateEndIterator(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->createEndIteratorFunc = defineFunction(module,
+    ctx->createEndIteratorFunc = llvm_util::DefineFunction(module,
         ctx->IndexIteratorType->getPointerTo(),
         "createEndIterator",
         ctx->IndexType->getPointerTo(),
@@ -358,7 +366,7 @@ inline void defineCreateEndIterator(JitLlvmCodeGenContext* ctx, llvm::Module* mo
 
 inline void defineIsScanEnd(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->isScanEndFunc = defineFunction(module,
+    ctx->isScanEndFunc = llvm_util::DefineFunction(module,
         ctx->INT32_T,
         "isScanEnd",
         ctx->IndexType->getPointerTo(),
@@ -368,9 +376,21 @@ inline void defineIsScanEnd(JitLlvmCodeGenContext* ctx, llvm::Module* module)
         nullptr);
 }
 
+inline void DefineCheckRowExistsInIterator(JitLlvmCodeGenContext* ctx, llvm::Module* module)
+{
+    ctx->CheckRowExistsInIteratorFunc = llvm_util::DefineFunction(module,
+        ctx->INT32_T,
+        "CheckRowExistsInIterator",
+        ctx->IndexType->getPointerTo(),
+        ctx->IndexIteratorType->getPointerTo(),
+        ctx->IndexIteratorType->getPointerTo(),
+        ctx->INT32_T,
+        nullptr);
+}
+
 inline void defineGetRowFromIterator(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->getRowFromIteratorFunc = defineFunction(module,
+    ctx->getRowFromIteratorFunc = llvm_util::DefineFunction(module,
         ctx->RowType->getPointerTo(),
         "getRowFromIterator",
         ctx->IndexType->getPointerTo(),
@@ -378,18 +398,20 @@ inline void defineGetRowFromIterator(JitLlvmCodeGenContext* ctx, llvm::Module* m
         ctx->IndexIteratorType->getPointerTo(),
         ctx->INT32_T,
         ctx->INT32_T,
+        ctx->INT32_T,
+        ctx->INT32_T,
         nullptr);
 }
 
 inline void defineDestroyIterator(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->destroyIteratorFunc =
-        defineFunction(module, ctx->VOID_T, "destroyIterator", ctx->IndexIteratorType->getPointerTo(), nullptr);
+    ctx->destroyIteratorFunc = llvm_util::DefineFunction(
+        module, ctx->VOID_T, "destroyIterator", ctx->IndexIteratorType->getPointerTo(), nullptr);
 }
 
 inline void defineSetStateIterator(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->setStateIteratorFunc = defineFunction(module,
+    ctx->setStateIteratorFunc = llvm_util::DefineFunction(module,
         ctx->VOID_T,
         "setStateIterator",
         ctx->IndexIteratorType->getPointerTo(),
@@ -400,25 +422,25 @@ inline void defineSetStateIterator(JitLlvmCodeGenContext* ctx, llvm::Module* mod
 
 inline void defineGetStateIterator(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->getStateIteratorFunc = defineFunction(
+    ctx->getStateIteratorFunc = llvm_util::DefineFunction(
         module, ctx->IndexIteratorType->getPointerTo(), "getStateIterator", ctx->INT32_T, ctx->INT32_T, nullptr);
 }
 
 inline void defineIsStateIteratorNull(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
     ctx->isStateIteratorNullFunc =
-        defineFunction(module, ctx->INT32_T, "isStateIteratorNull", ctx->INT32_T, ctx->INT32_T, nullptr);
+        llvm_util::DefineFunction(module, ctx->INT32_T, "isStateIteratorNull", ctx->INT32_T, ctx->INT32_T, nullptr);
 }
 
 inline void defineIsStateScanEnd(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
     ctx->isStateScanEndFunc =
-        defineFunction(module, ctx->INT32_T, "isStateScanEnd", ctx->INT32_T, ctx->INT32_T, nullptr);
+        llvm_util::DefineFunction(module, ctx->INT32_T, "isStateScanEnd", ctx->INT32_T, ctx->INT32_T, nullptr);
 }
 
 inline void defineGetRowFromStateIteratorFunc(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->getRowFromStateIteratorFunc = defineFunction(module,
+    ctx->getRowFromStateIteratorFunc = llvm_util::DefineFunction(module,
         ctx->RowType->getPointerTo(),
         "getRowFromStateIterator",
         ctx->INT32_T,
@@ -430,137 +452,143 @@ inline void defineGetRowFromStateIteratorFunc(JitLlvmCodeGenContext* ctx, llvm::
 inline void defineDestroyStateIterators(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
     ctx->destroyStateIteratorsFunc =
-        defineFunction(module, ctx->VOID_T, "destroyStateIterators", ctx->INT32_T, nullptr);
+        llvm_util::DefineFunction(module, ctx->VOID_T, "destroyStateIterators", ctx->INT32_T, nullptr);
 }
 
 inline void defineSetStateScanEndFlag(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
     ctx->setStateScanEndFlagFunc =
-        defineFunction(module, ctx->VOID_T, "setStateScanEndFlag", ctx->INT32_T, ctx->INT32_T, nullptr);
+        llvm_util::DefineFunction(module, ctx->VOID_T, "setStateScanEndFlag", ctx->INT32_T, ctx->INT32_T, nullptr);
 }
 
 inline void defineGetStateScanEndFlag(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->getStateScanEndFlagFunc = defineFunction(module, ctx->INT32_T, "getStateScanEndFlag", ctx->INT32_T, nullptr);
+    ctx->getStateScanEndFlagFunc =
+        llvm_util::DefineFunction(module, ctx->INT32_T, "getStateScanEndFlag", ctx->INT32_T, nullptr);
 }
 
 inline void defineResetStateRow(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->resetStateRowFunc = defineFunction(module, ctx->VOID_T, "resetStateRow", ctx->INT32_T, nullptr);
+    ctx->resetStateRowFunc = llvm_util::DefineFunction(module, ctx->VOID_T, "resetStateRow", ctx->INT32_T, nullptr);
 }
 
 inline void defineSetStateRow(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->setStateRowFunc =
-        defineFunction(module, ctx->VOID_T, "setStateRow", ctx->RowType->getPointerTo(), ctx->INT32_T, nullptr);
+    ctx->setStateRowFunc = llvm_util::DefineFunction(
+        module, ctx->VOID_T, "setStateRow", ctx->RowType->getPointerTo(), ctx->INT32_T, nullptr);
 }
 
 inline void defineGetStateRow(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->getStateRowFunc = defineFunction(module, ctx->RowType->getPointerTo(), "getStateRow", ctx->INT32_T, nullptr);
+    ctx->getStateRowFunc =
+        llvm_util::DefineFunction(module, ctx->RowType->getPointerTo(), "getStateRow", ctx->INT32_T, nullptr);
 }
 
 inline void defineCopyOuterStateRow(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->copyOuterStateRowFunc = defineFunction(module, ctx->VOID_T, "copyOuterStateRow", nullptr);
+    ctx->copyOuterStateRowFunc = llvm_util::DefineFunction(module, ctx->VOID_T, "copyOuterStateRow", nullptr);
 }
 
 inline void defineGetOuterStateRowCopy(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
     ctx->getOuterStateRowCopyFunc =
-        defineFunction(module, ctx->RowType->getPointerTo(), "getOuterStateRowCopy", nullptr);
+        llvm_util::DefineFunction(module, ctx->RowType->getPointerTo(), "getOuterStateRowCopy", nullptr);
 }
 
 inline void defineIsStateRowNull(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->isStateRowNullFunc = defineFunction(module, ctx->INT32_T, "isStateRowNull", ctx->INT32_T, nullptr);
+    ctx->isStateRowNullFunc = llvm_util::DefineFunction(module, ctx->INT32_T, "isStateRowNull", ctx->INT32_T, nullptr);
 }
 
 inline void defineResetStateLimitCounter(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->resetStateLimitCounterFunc = defineFunction(module, ctx->VOID_T, "resetStateLimitCounter", nullptr);
+    ctx->resetStateLimitCounterFunc = llvm_util::DefineFunction(module, ctx->VOID_T, "resetStateLimitCounter", nullptr);
 }
 
 inline void defineIncrementStateLimitCounter(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->incrementStateLimitCounterFunc = defineFunction(module, ctx->VOID_T, "incrementStateLimitCounter", nullptr);
+    ctx->incrementStateLimitCounterFunc =
+        llvm_util::DefineFunction(module, ctx->VOID_T, "incrementStateLimitCounter", nullptr);
 }
 
 inline void defineGetStateLimitCounter(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->getStateLimitCounterFunc = defineFunction(module, ctx->INT32_T, "getStateLimitCounter", nullptr);
+    ctx->getStateLimitCounterFunc = llvm_util::DefineFunction(module, ctx->INT32_T, "getStateLimitCounter", nullptr);
 }
 
 inline void definePrepareAvgArray(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->prepareAvgArrayFunc =
-        defineFunction(module, ctx->VOID_T, "prepareAvgArray", ctx->INT32_T, ctx->INT32_T, nullptr);
+    ctx->prepareAvgArrayFunc = llvm_util::DefineFunction(
+        module, ctx->VOID_T, "prepareAvgArray", ctx->INT32_T, ctx->INT32_T, ctx->INT32_T, nullptr);
 }
 
 inline void defineLoadAvgArray(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->loadAvgArrayFunc = defineFunction(module, ctx->DATUM_T, "loadAvgArray", nullptr);
+    ctx->loadAvgArrayFunc = llvm_util::DefineFunction(module, ctx->DATUM_T, "loadAvgArray", ctx->INT32_T, nullptr);
 }
 
 inline void defineSaveAvgArray(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->saveAvgArrayFunc = defineFunction(module, ctx->VOID_T, "saveAvgArray", ctx->DATUM_T, nullptr);
+    ctx->saveAvgArrayFunc =
+        llvm_util::DefineFunction(module, ctx->VOID_T, "saveAvgArray", ctx->INT32_T, ctx->DATUM_T, nullptr);
 }
 
 inline void defineComputeAvgFromArray(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->computeAvgFromArrayFunc = defineFunction(module, ctx->DATUM_T, "computeAvgFromArray", ctx->INT32_T, nullptr);
+    ctx->computeAvgFromArrayFunc =
+        llvm_util::DefineFunction(module, ctx->DATUM_T, "computeAvgFromArray", ctx->INT32_T, ctx->INT32_T, nullptr);
 }
 
 inline void defineResetAggValue(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->resetAggValueFunc = defineFunction(module, ctx->VOID_T, "resetAggValue", ctx->INT32_T, nullptr);
+    ctx->resetAggValueFunc =
+        llvm_util::DefineFunction(module, ctx->VOID_T, "resetAggValue", ctx->INT32_T, ctx->INT32_T, nullptr);
 }
 
 inline void defineGetAggValue(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->getAggValueFunc = defineFunction(module, ctx->DATUM_T, "getAggValue", nullptr);
+    ctx->getAggValueFunc = llvm_util::DefineFunction(module, ctx->DATUM_T, "getAggValue", ctx->INT32_T, nullptr);
 }
 
 inline void defineSetAggValue(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->setAggValueFunc = defineFunction(module, ctx->VOID_T, "setAggValue", ctx->DATUM_T, nullptr);
+    ctx->setAggValueFunc =
+        llvm_util::DefineFunction(module, ctx->VOID_T, "setAggValue", ctx->INT32_T, ctx->DATUM_T, nullptr);
 }
 
-inline void defineResetAggMaxMinNull(JitLlvmCodeGenContext* ctx, llvm::Module* module)
+inline void defineGetAggValueIsNull(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->resetAggMaxMinNullFunc = defineFunction(module, ctx->VOID_T, "resetAggMaxMinNull", nullptr);
+    ctx->getAggValueIsNullFunc =
+        llvm_util::DefineFunction(module, ctx->INT32_T, "getAggValueIsNull", ctx->INT32_T, nullptr);
 }
 
-inline void defineSetAggMaxMinNotNull(JitLlvmCodeGenContext* ctx, llvm::Module* module)
+inline void defineSetAggValueIsNull(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->setAggMaxMinNotNullFunc = defineFunction(module, ctx->VOID_T, "setAggMaxMinNotNull", nullptr);
-}
-
-inline void defineGetAggMaxMinIsNull(JitLlvmCodeGenContext* ctx, llvm::Module* module)
-{
-    ctx->getAggMaxMinIsNullFunc = defineFunction(module, ctx->INT32_T, "getAggMaxMinIsNull", nullptr);
+    ctx->setAggValueIsNullFunc =
+        llvm_util::DefineFunction(module, ctx->INT32_T, "setAggValueIsNull", ctx->INT32_T, ctx->INT32_T, nullptr);
 }
 
 inline void definePrepareDistinctSet(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->prepareDistinctSetFunc = defineFunction(module, ctx->VOID_T, "prepareDistinctSet", ctx->INT32_T, nullptr);
+    ctx->prepareDistinctSetFunc =
+        llvm_util::DefineFunction(module, ctx->VOID_T, "prepareDistinctSet", ctx->INT32_T, ctx->INT32_T, nullptr);
 }
 
 inline void defineInsertDistinctItem(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->insertDistinctItemFunc =
-        defineFunction(module, ctx->INT32_T, "insertDistinctItem", ctx->INT32_T, ctx->DATUM_T, nullptr);
+    ctx->insertDistinctItemFunc = llvm_util::DefineFunction(
+        module, ctx->INT32_T, "insertDistinctItem", ctx->INT32_T, ctx->INT32_T, ctx->DATUM_T, nullptr);
 }
 
 inline void defineDestroyDistinctSet(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->destroyDistinctSetFunc = defineFunction(module, ctx->VOID_T, "destroyDistinctSet", ctx->INT32_T, nullptr);
+    ctx->destroyDistinctSetFunc =
+        llvm_util::DefineFunction(module, ctx->VOID_T, "destroyDistinctSet", ctx->INT32_T, ctx->INT32_T, nullptr);
 }
 
 inline void defineResetTupleDatum(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->resetTupleDatumFunc = defineFunction(module,
+    ctx->resetTupleDatumFunc = llvm_util::DefineFunction(module,
         ctx->VOID_T,
         "resetTupleDatum",
         ctx->TupleTableSlotType->getPointerTo(),
@@ -571,100 +599,119 @@ inline void defineResetTupleDatum(JitLlvmCodeGenContext* ctx, llvm::Module* modu
 
 inline void defineReadTupleDatum(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->readTupleDatumFunc = defineFunction(module,
-        ctx->DATUM_T,
-        "readTupleDatum",
-        ctx->TupleTableSlotType->getPointerTo(),
-        ctx->INT32_T,
-        ctx->INT32_T,
-        nullptr);
+    ctx->readTupleDatumFunc = llvm_util::DefineFunction(
+        module, ctx->DATUM_T, "readTupleDatum", ctx->TupleTableSlotType->getPointerTo(), ctx->INT32_T, nullptr);
 }
 
 inline void defineWriteTupleDatum(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->writeTupleDatumFunc = defineFunction(module,
+    ctx->writeTupleDatumFunc = llvm_util::DefineFunction(module,
         ctx->VOID_T,
         "writeTupleDatum",
         ctx->TupleTableSlotType->getPointerTo(),
         ctx->INT32_T,
         ctx->DATUM_T,
+        ctx->INT32_T,
         nullptr);
 }
 
 inline void DefineSelectSubQueryResultFunc(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->selectSubQueryResultFunc = defineFunction(module, ctx->DATUM_T, "SelectSubQueryResult", ctx->INT32_T, nullptr);
+    ctx->selectSubQueryResultFunc =
+        llvm_util::DefineFunction(module, ctx->DATUM_T, "SelectSubQueryResult", ctx->INT32_T, nullptr);
 }
 
 inline void DefineCopyAggregateToSubQueryResultFunc(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
     ctx->copyAggregateToSubQueryResultFunc =
-        defineFunction(module, ctx->VOID_T, "CopyAggregateToSubQueryResult", ctx->INT32_T, nullptr);
+        llvm_util::DefineFunction(module, ctx->VOID_T, "CopyAggregateToSubQueryResult", ctx->INT32_T, nullptr);
 }
 
 inline void DefineGetSubQuerySlot(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->GetSubQuerySlotFunc =
-        defineFunction(module, ctx->TupleTableSlotType->getPointerTo(), "GetSubQuerySlot", ctx->INT32_T, nullptr);
+    ctx->GetSubQuerySlotFunc = llvm_util::DefineFunction(
+        module, ctx->TupleTableSlotType->getPointerTo(), "GetSubQuerySlot", ctx->INT32_T, nullptr);
 }
 
 inline void DefineGetSubQueryTable(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
     ctx->GetSubQueryTableFunc =
-        defineFunction(module, ctx->TableType->getPointerTo(), "GetSubQueryTable", ctx->INT32_T, nullptr);
+        llvm_util::DefineFunction(module, ctx->TableType->getPointerTo(), "GetSubQueryTable", ctx->INT32_T, nullptr);
 }
 
 inline void DefineGetSubQueryIndex(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
     ctx->GetSubQueryIndexFunc =
-        defineFunction(module, ctx->IndexType->getPointerTo(), "GetSubQueryIndex", ctx->INT32_T, nullptr);
+        llvm_util::DefineFunction(module, ctx->IndexType->getPointerTo(), "GetSubQueryIndex", ctx->INT32_T, nullptr);
 }
 
 inline void DefineGetSubQuerySearchKey(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
     ctx->GetSubQuerySearchKeyFunc =
-        defineFunction(module, ctx->KeyType->getPointerTo(), "GetSubQuerySearchKey", ctx->INT32_T, nullptr);
+        llvm_util::DefineFunction(module, ctx->KeyType->getPointerTo(), "GetSubQuerySearchKey", ctx->INT32_T, nullptr);
 }
 
 inline void DefineGetSubQueryEndIteratorKey(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->GetSubQueryEndIteratorKeyFunc =
-        defineFunction(module, ctx->KeyType->getPointerTo(), "GetSubQueryEndIteratorKey", ctx->INT32_T, nullptr);
+    ctx->GetSubQueryEndIteratorKeyFunc = llvm_util::DefineFunction(
+        module, ctx->KeyType->getPointerTo(), "GetSubQueryEndIteratorKey", ctx->INT32_T, nullptr);
 }
 
 inline void DefineGetConstAt(JitLlvmCodeGenContext* ctx, llvm::Module* module)
 {
-    ctx->GetConstAtFunc = defineFunction(module, ctx->DATUM_T, "GetConstAt", ctx->INT32_T, ctx->INT32_T, nullptr);
+    ctx->GetConstAtFunc = llvm_util::DefineFunction(module, ctx->DATUM_T, "GetConstAt", ctx->INT32_T, nullptr);
+}
+
+inline void DefineGetInvokeParamListInfo(JitLlvmCodeGenContext* ctx, llvm::Module* module)
+{
+    ctx->GetInvokeParamListInfoFunc = llvm_util::DefineFunction(
+        module, ctx->ParamListInfoDataType->getPointerTo(), "GetInvokeParamListInfo", nullptr);
+}
+
+inline void DefineSetParamValue(JitLlvmCodeGenContext* ctx, llvm::Module* module)
+{
+    ctx->SetParamValueFunc = llvm_util::DefineFunction(module,
+        ctx->VOID_T,
+        "SetParamValue",
+        ctx->ParamListInfoDataType->getPointerTo(),
+        ctx->INT32_T,
+        ctx->INT32_T,
+        ctx->INT64_T,
+        ctx->INT32_T,
+        nullptr);
+}
+
+inline void DefineInvokeStoredProcedure(JitLlvmCodeGenContext* ctx, llvm::Module* module)
+{
+    ctx->InvokeStoredProcedureFunc = llvm_util::DefineFunction(module, ctx->INT32_T, "InvokeStoredProcedure", nullptr);
+}
+
+inline void DefineConvertViaString(JitLlvmCodeGenContext* ctx, llvm::Module* module)
+{
+    ctx->ConvertViaStringFunc = llvm_util::DefineFunction(
+        module, ctx->DATUM_T, "JitConvertViaString", ctx->DATUM_T, ctx->INT32_T, ctx->INT32_T, ctx->INT32_T, nullptr);
+}
+
+inline void DefineEmitProfileData(JitLlvmCodeGenContext* ctx, llvm::Module* module)
+{
+    ctx->EmitProfileDataFunc = llvm_util::DefineFunction(
+        module, ctx->VOID_T, "EmitProfileData", ctx->INT32_T, ctx->INT32_T, ctx->INT32_T, nullptr);
 }
 
 /*--------------------------- End of LLVM Helper Prototypes ---------------------------*/
 
 /*--------------------------- Helpers to generate calls to Helper function via LLVM ---------------------------*/
-inline llvm::Value* AddFunctionCall(JitLlvmCodeGenContext* ctx, llvm::FunctionCallee func, ...)
-{
-    va_list vargs;
-    va_start(vargs, func);
-    std::vector<llvm::Value*> args;
-    llvm::Value* arg_value = va_arg(vargs, llvm::Value*);
-    while (arg_value != nullptr) {
-        args.push_back(arg_value);
-        arg_value = va_arg(vargs, llvm::Value*);
-    }
-    va_end(vargs);
-    llvm::ArrayRef<llvm::Value*> argsRef(args);
-    return ctx->_builder->CreateCall(func, argsRef);
-}
 
 /** @brief Adds a call to isSoftMemoryLimitReached(). */
 inline llvm::Value* AddIsSoftMemoryLimitReached(JitLlvmCodeGenContext* ctx)
 {
-    return AddFunctionCall(ctx, ctx->isSoftMemoryLimitReachedFunc, nullptr);
+    return llvm_util::AddFunctionCall(ctx, ctx->isSoftMemoryLimitReachedFunc, nullptr);
 }
 
 /** @brief Adds a call to InitKey(). */
 inline void AddInitKey(JitLlvmCodeGenContext* ctx, llvm::Value* key, llvm::Value* index)
 {
-    AddFunctionCall(ctx, ctx->initKeyFunc, key, index, nullptr);
+    llvm_util::AddFunctionCall(ctx, ctx->initKeyFunc, key, index, nullptr);
 }
 
 /** @brief Adds a call to initSearchKey(key, index). */
@@ -679,212 +726,182 @@ inline void AddInitSearchKey(JitLlvmCodeGenContext* ctx, JitRangeScanType rangeS
     }
 }
 
-/** @brief Adds a call to getColumnAt(table, colid). */
+/** @brief Adds a call to getColumnAt(table, columnId). */
 inline llvm::Value* AddGetColumnAt(
-    JitLlvmCodeGenContext* ctx, int colid, JitRangeScanType range_scan_type, int subQueryIndex = -1)
+    JitLlvmCodeGenContext* ctx, int columnId, JitRangeScanType rangeScanType, int subQueryIndex = -1)
 {
-    llvm::ConstantInt* colid_value = llvm::ConstantInt::get(ctx->INT32_T, colid, true);
-    llvm::Value* table = nullptr;
-    if (range_scan_type == JIT_RANGE_SCAN_INNER) {
-        table = ctx->inner_table_value;
-    } else if (range_scan_type == JIT_RANGE_SCAN_MAIN) {
-        table = ctx->table_value;
-    } else if (range_scan_type == JIT_RANGE_SCAN_SUB_QUERY) {
-        table = ctx->m_subQueryData[subQueryIndex].m_table;
-    }
-    return AddFunctionCall(ctx, ctx->getColumnAtFunc, table, colid_value, nullptr);
+    llvm::Value* table = getExecContextTable(ctx, rangeScanType, subQueryIndex);
+    return llvm_util::AddFunctionCall(ctx, ctx->getColumnAtFunc, table, JIT_CONST_INT32(columnId), nullptr);
 }
 
-/** @brief Adds a call to setExprArgIsNull(arg_pos, isnull). */
-inline void AddSetExprArgIsNull(JitLlvmCodeGenContext* ctx, int arg_pos, int isnull)
+inline void AddSetExprIsNull(JitLlvmCodeGenContext* ctx, int isnull)
 {
-    llvm::ConstantInt* arg_pos_value = llvm::ConstantInt::get(ctx->INT32_T, arg_pos, true);
-    llvm::ConstantInt* isnull_value = llvm::ConstantInt::get(ctx->INT32_T, isnull, true);
-    AddFunctionCall(ctx, ctx->setExprArgIsNullFunc, arg_pos_value, isnull_value, nullptr);
+    llvm_util::AddFunctionCall(ctx, ctx->m_setExprIsNullFunc, JIT_CONST_INT32(isnull), nullptr);
 }
 
-/** @brief Adds a call to getExprArgIsNull(arg_pos). */
-inline llvm::Value* AddGetExprArgIsNull(JitLlvmCodeGenContext* ctx, int arg_pos)
+inline llvm::Value* AddGetExprIsNull(JitLlvmCodeGenContext* ctx)
 {
-    llvm::ConstantInt* arg_pos_value = llvm::ConstantInt::get(ctx->INT32_T, arg_pos, true);
-    return AddFunctionCall(ctx, ctx->getExprArgIsNullFunc, arg_pos_value, nullptr);
+    return llvm_util::AddFunctionCall(ctx, ctx->m_getExprIsNullFunc, nullptr);
 }
 
-/** @brief Adds a call to getDatumParam(paramid, arg_pos). */
-inline llvm::Value* AddGetDatumParam(JitLlvmCodeGenContext* ctx, int paramid, int arg_pos)
+inline void AddSetExprCollation(JitLlvmCodeGenContext* ctx, int collation)
 {
-    llvm::ConstantInt* paramid_value = llvm::ConstantInt::get(ctx->INT32_T, paramid, true);
-    llvm::ConstantInt* arg_pos_value = llvm::ConstantInt::get(ctx->INT32_T, arg_pos, true);
-    return AddFunctionCall(ctx, ctx->getDatumParamFunc, ctx->params_value, paramid_value, arg_pos_value, nullptr);
+    llvm_util::AddFunctionCall(ctx, ctx->m_setExprCollationFunc, JIT_CONST_INT32(collation), nullptr);
 }
 
-/** @brief Adds a call to readDatumColumn(table_colid, arg_pos). */
-inline llvm::Value* AddReadDatumColumn(
-    JitLlvmCodeGenContext* ctx, llvm::Value* table, llvm::Value* row, int table_colid, int arg_pos)
+inline llvm::Value* AddGetExprCollation(JitLlvmCodeGenContext* ctx)
 {
-    llvm::ConstantInt* table_colid_value = llvm::ConstantInt::get(ctx->INT32_T, table_colid, true);
-    llvm::ConstantInt* arg_pos_value = llvm::ConstantInt::get(ctx->INT32_T, arg_pos, true);
-    return AddFunctionCall(
-        ctx, ctx->readDatumColumnFunc, ctx->table_value, row, table_colid_value, arg_pos_value, nullptr);
+    return llvm_util::AddFunctionCall(ctx, ctx->m_getExprCollationFunc, nullptr);
 }
 
-/** @brief Adds a call to writeDatumColumn(table_colid, value). */
-inline void AddWriteDatumColumn(JitLlvmCodeGenContext* ctx, int table_colid, llvm::Value* row, llvm::Value* value)
+/** @brief Adds a call to getDatumParam(paramid, argPos). */
+inline llvm::Value* AddGetDatumParam(JitLlvmCodeGenContext* ctx, int paramid)
 {
-    // make sure we have a column before issuing the call
-    // we always write to a main table row (whether UPDATE or range UPDATE, so inner_scan value below is false)
-    llvm::Value* column = AddGetColumnAt(ctx, table_colid, JIT_RANGE_SCAN_MAIN);
-    AddFunctionCall(ctx, ctx->writeDatumColumnFunc, row, column, value, nullptr);
+    return llvm_util::AddFunctionCall(
+        ctx, ctx->getDatumParamFunc, ctx->params_value, JIT_CONST_INT32(paramid), nullptr);
 }
 
-/** @brief Adds a call to buildDatumKey(column, key, value, index_colid, offset, value). */
-inline void AddBuildDatumKey(JitLlvmCodeGenContext* ctx, llvm::Value* column, int index_colid, llvm::Value* value,
-    int value_type, JitRangeIteratorType range_itr_type, JitRangeScanType range_scan_type, int subQueryIndex = -1)
+/** @brief Adds a call to readDatumColumn(tableColumnId, argPos). */
+inline llvm::Value* AddReadDatumColumn(JitLlvmCodeGenContext* ctx, llvm::Value* table, llvm::Value* row,
+    int tableColumnId, int isInnerRow, int subQueryIndex)
 {
-    int offset = -1;
-    int size = -1;
-    if (range_scan_type == JIT_RANGE_SCAN_INNER) {
-        offset = ctx->_inner_table_info.m_indexColumnOffsets[index_colid];
-        size = ctx->_inner_table_info.m_index->GetLengthKeyFields()[index_colid];
-    } else if (range_scan_type == JIT_RANGE_SCAN_MAIN) {
-        offset = ctx->_table_info.m_indexColumnOffsets[index_colid];
-        size = ctx->_table_info.m_index->GetLengthKeyFields()[index_colid];
-    } else if (range_scan_type == JIT_RANGE_SCAN_SUB_QUERY) {
-        offset = ctx->m_subQueryTableInfo[subQueryIndex].m_indexColumnOffsets[index_colid];
-        size = ctx->m_subQueryTableInfo[subQueryIndex].m_index->GetLengthKeyFields()[index_colid];
-    }
-    llvm::ConstantInt* colid_value = llvm::ConstantInt::get(ctx->INT32_T, index_colid, true);
-    llvm::ConstantInt* offset_value = llvm::ConstantInt::get(ctx->INT32_T, offset, true);
-    llvm::ConstantInt* value_type_value = llvm::ConstantInt::get(ctx->INT32_T, value_type, true);
-    llvm::ConstantInt* size_value = llvm::ConstantInt::get(ctx->INT32_T, size, true);
-    llvm::Value* key_value = getExecContextKey(ctx, range_itr_type, range_scan_type, subQueryIndex);
-    AddFunctionCall(ctx,
-        ctx->buildDatumKeyFunc,
-        column,
-        key_value,
-        value,
-        colid_value,
-        offset_value,
-        size_value,
-        value_type_value,
+    return AddFunctionCall(ctx,
+        ctx->readDatumColumnFunc,
+        table,
+        row,
+        JIT_CONST_INT32(tableColumnId),
+        JIT_CONST_INT32(isInnerRow),
+        JIT_CONST_INT32(subQueryIndex),
         nullptr);
 }
 
-/** @brief Adds a call to setBit(bitmap, colid). */
-inline void AddSetBit(JitLlvmCodeGenContext* ctx, int colid)
+/** @brief Adds a call to writeDatumColumn(tableColumnId, value). */
+inline void AddWriteDatumColumn(JitLlvmCodeGenContext* ctx, int tableColumnId, llvm::Value* row, llvm::Value* value)
 {
-    llvm::ConstantInt* bit_index = llvm::ConstantInt::get(ctx->INT32_T, colid, true);
-    AddFunctionCall(ctx, ctx->setBitFunc, ctx->bitmap_value, bit_index, nullptr);
+    // make sure we have a column before issuing the call
+    // we always write to a main table row (whether UPDATE or range UPDATE, so inner_scan value below is false)
+    llvm::Value* column = AddGetColumnAt(ctx, tableColumnId, JIT_RANGE_SCAN_MAIN);
+    llvm_util::AddFunctionCall(ctx, ctx->writeDatumColumnFunc, row, column, value, nullptr);
+}
+
+/** @brief Adds a call to buildDatumKey(column, key, value, index_colid, offset, value). */
+inline void AddBuildDatumKey(JitLlvmCodeGenContext* ctx, llvm::Value* column, int indexColumnId, llvm::Value* value,
+    int valueType, JitRangeIteratorType rangeItrType, JitRangeScanType rangeScanType, int subQueryIndex = -1)
+{
+    int offset = -1;
+    int size = -1;
+    if (rangeScanType == JIT_RANGE_SCAN_INNER) {
+        offset = ctx->_inner_table_info.m_indexColumnOffsets[indexColumnId];
+        size = ctx->_inner_table_info.m_index->GetLengthKeyFields()[indexColumnId];
+    } else if (rangeScanType == JIT_RANGE_SCAN_MAIN) {
+        offset = ctx->_table_info.m_indexColumnOffsets[indexColumnId];
+        size = ctx->_table_info.m_index->GetLengthKeyFields()[indexColumnId];
+    } else if (rangeScanType == JIT_RANGE_SCAN_SUB_QUERY) {
+        offset = ctx->m_subQueryTableInfo[subQueryIndex].m_indexColumnOffsets[indexColumnId];
+        size = ctx->m_subQueryTableInfo[subQueryIndex].m_index->GetLengthKeyFields()[indexColumnId];
+    }
+    llvm::Value* key = getExecContextKey(ctx, rangeItrType, rangeScanType, subQueryIndex);
+    llvm_util::AddFunctionCall(ctx,
+        ctx->buildDatumKeyFunc,
+        column,
+        key,
+        value,
+        JIT_CONST_INT32(indexColumnId),
+        JIT_CONST_INT32(offset),
+        JIT_CONST_INT32(size),
+        JIT_CONST_INT32(valueType),
+        nullptr);
+}
+
+/** @brief Adds a call to setBit(bitmap, columnId). */
+inline void AddSetBit(JitLlvmCodeGenContext* ctx, int columnId)
+{
+    llvm_util::AddFunctionCall(ctx, ctx->setBitFunc, ctx->bitmap_value, JIT_CONST_INT32(columnId), nullptr);
 }
 
 /** @brief Adds a call to resetBitmapSet(bitmap). */
 inline void AddResetBitmapSet(JitLlvmCodeGenContext* ctx)
 {
-    AddFunctionCall(ctx, ctx->resetBitmapSetFunc, ctx->bitmap_value, nullptr);
+    llvm_util::AddFunctionCall(ctx, ctx->resetBitmapSetFunc, ctx->bitmap_value, nullptr);
 }
 
 /** @brief Adds a call to writeRow(row, bitmap). */
 inline llvm::Value* AddWriteRow(JitLlvmCodeGenContext* ctx, llvm::Value* row)
 {
-    return AddFunctionCall(ctx, ctx->writeRowFunc, row, ctx->bitmap_value, nullptr);
+    return llvm_util::AddFunctionCall(ctx, ctx->writeRowFunc, row, ctx->bitmap_value, nullptr);
 }
 
-/** @brief Adds a call to searchRow(table, key, access_mode). */
+/** @brief Adds a call to searchRow(table, key, accessMode). */
 inline llvm::Value* AddSearchRow(
-    JitLlvmCodeGenContext* ctx, MOT::AccessType access_mode, JitRangeScanType range_scan_type, int subQueryIndex)
+    JitLlvmCodeGenContext* ctx, MOT::AccessType accessMode, JitRangeScanType rangeScanType, int subQueryIndex = -1)
 {
-    llvm::Value* row = nullptr;
-    llvm::ConstantInt* access_mode_value = llvm::ConstantInt::get(ctx->INT32_T, access_mode, true);
-    if (range_scan_type == JIT_RANGE_SCAN_INNER) {
-        row = AddFunctionCall(
-            ctx, ctx->searchRowFunc, ctx->inner_table_value, ctx->inner_key_value, access_mode_value, nullptr);
-    } else if (range_scan_type == JIT_RANGE_SCAN_MAIN) {
-        row = AddFunctionCall(ctx, ctx->searchRowFunc, ctx->table_value, ctx->key_value, access_mode_value, nullptr);
-    } else if (range_scan_type == JIT_RANGE_SCAN_SUB_QUERY) {
-        JitLlvmCodeGenContext::SubQueryData* subQueryData = &ctx->m_subQueryData[subQueryIndex];
-        row = AddFunctionCall(
-            ctx, ctx->searchRowFunc, subQueryData->m_table, subQueryData->m_searchKey, access_mode_value, nullptr);
-    }
-    return row;
+    llvm::Value* table = getExecContextTable(ctx, rangeScanType, subQueryIndex);
+    llvm::Value* key = getExecContextKey(ctx, JIT_RANGE_ITERATOR_START, rangeScanType, subQueryIndex);
+    int innerRow = (rangeScanType == JIT_RANGE_SCAN_INNER);
+    return AddFunctionCall(ctx,
+        ctx->searchRowFunc,
+        table,
+        key,
+        JIT_CONST_INT32(accessMode),
+        JIT_CONST_INT32(innerRow),
+        JIT_CONST_INT32(subQueryIndex),
+        nullptr);
 }
 
 /** @brief Adds a call to createNewRow(table). */
 inline llvm::Value* AddCreateNewRow(JitLlvmCodeGenContext* ctx)
 {
-    return AddFunctionCall(ctx, ctx->createNewRowFunc, ctx->table_value, nullptr);
+    return llvm_util::AddFunctionCall(ctx, ctx->createNewRowFunc, ctx->table_value, nullptr);
 }
 
 inline llvm::Value* AddInsertRow(JitLlvmCodeGenContext* ctx, llvm::Value* row)
 {
-    return AddFunctionCall(ctx, ctx->insertRowFunc, ctx->table_value, row, nullptr);
+    return llvm_util::AddFunctionCall(ctx, ctx->insertRowFunc, ctx->table_value, row, nullptr);
 }
 
 inline llvm::Value* AddDeleteRow(JitLlvmCodeGenContext* ctx)
 {
-    return AddFunctionCall(ctx, ctx->deleteRowFunc, nullptr);
+    return llvm_util::AddFunctionCall(ctx, ctx->deleteRowFunc, nullptr);
 }
 
 /** @brief Adds a call to setRowNullBits(table, row). */
 inline void AddSetRowNullBits(JitLlvmCodeGenContext* ctx, llvm::Value* row)
 {
-    AddFunctionCall(ctx, ctx->setRowNullBitsFunc, ctx->table_value, row, nullptr);
+    llvm_util::AddFunctionCall(ctx, ctx->setRowNullBitsFunc, ctx->table_value, row, nullptr);
 }
 
-/** @brief Adds a call to setExprResultNullBit(table, row, colid). */
-inline llvm::Value* AddSetExprResultNullBit(JitLlvmCodeGenContext* ctx, llvm::Value* row, int colid)
+/** @brief Adds a call to setExprResultNullBit(table, row, columnId). */
+inline llvm::Value* AddSetExprResultNullBit(JitLlvmCodeGenContext* ctx, llvm::Value* row, int columnId)
 {
-    llvm::ConstantInt* colid_value = llvm::ConstantInt::get(ctx->INT32_T, colid, true);
-    return AddFunctionCall(ctx, ctx->setExprResultNullBitFunc, ctx->table_value, row, colid_value, nullptr);
+    return llvm_util::AddFunctionCall(
+        ctx, ctx->setExprResultNullBitFunc, ctx->table_value, row, JIT_CONST_INT32(columnId), nullptr);
 }
 
 /** @brief Adds a call to execClearTuple(slot). */
 inline void AddExecClearTuple(JitLlvmCodeGenContext* ctx)
 {
-    AddFunctionCall(ctx, ctx->execClearTupleFunc, ctx->slot_value, nullptr);
+    llvm_util::AddFunctionCall(ctx, ctx->execClearTupleFunc, ctx->slot_value, nullptr);
 }
 
 /** @brief Adds a call to execStoreVirtualTuple(slot). */
 inline void AddExecStoreVirtualTuple(JitLlvmCodeGenContext* ctx)
 {
-    AddFunctionCall(ctx, ctx->execStoreVirtualTupleFunc, ctx->slot_value, nullptr);
+    llvm_util::AddFunctionCall(ctx, ctx->execStoreVirtualTupleFunc, ctx->slot_value, nullptr);
 }
 
-/** @brief Adds a call to selectColumn(table, row, slot, colid, column_count). */
+/** @brief Adds a call to selectColumn(table, row, slot, columnId, column_count). */
 inline bool AddSelectColumn(JitLlvmCodeGenContext* ctx, llvm::Value* row, int tableColumnId, int tupleColumnId,
     JitRangeScanType rangeScanType, int subQueryIndex)
 {
-    llvm::ConstantInt* table_colid_value = llvm::ConstantInt::get(ctx->INT32_T, tableColumnId, true);
-    llvm::ConstantInt* tuple_colid_value = llvm::ConstantInt::get(ctx->INT32_T, tupleColumnId, true);
-    llvm::Value* value = nullptr;
-    if (rangeScanType == JIT_RANGE_SCAN_INNER) {
-        value = AddFunctionCall(ctx,
-            ctx->selectColumnFunc,
-            ctx->inner_table_value,
-            row,
-            ctx->slot_value,
-            table_colid_value,
-            tuple_colid_value,
-            nullptr);
-    } else if (rangeScanType == JIT_RANGE_SCAN_MAIN) {
-        value = AddFunctionCall(ctx,
-            ctx->selectColumnFunc,
-            ctx->table_value,
-            row,
-            ctx->slot_value,
-            table_colid_value,
-            tuple_colid_value,
-            nullptr);
-    } else if (rangeScanType == JIT_RANGE_SCAN_SUB_QUERY) {
-        JitLlvmCodeGenContext::SubQueryData* subQueryData = &ctx->m_subQueryData[subQueryIndex];
-        value = AddFunctionCall(ctx,
-            ctx->selectColumnFunc,
-            subQueryData->m_table,
-            row,
-            subQueryData->m_slot,
-            table_colid_value,
-            tuple_colid_value,
-            nullptr);
-    }
+    llvm::Value* table = getExecContextTable(ctx, rangeScanType, subQueryIndex);
+    llvm::Value* value = llvm_util::AddFunctionCall(ctx,
+        ctx->selectColumnFunc,
+        table,
+        row,
+        ctx->slot_value,
+        JIT_CONST_INT32(tableColumnId),
+        JIT_CONST_INT32(tupleColumnId),
+        nullptr);
 
     if (value == nullptr) {
         return false;
@@ -896,186 +913,134 @@ inline bool AddSelectColumn(JitLlvmCodeGenContext* ctx, llvm::Value* row, int ta
 /** @brief Adds a call to setTpProcessed(tp_processed, rows_processed). */
 inline void AddSetTpProcessed(JitLlvmCodeGenContext* ctx)
 {
-    AddFunctionCall(ctx, ctx->setTpProcessedFunc, ctx->tp_processed_value, ctx->rows_processed, nullptr);
+    llvm::Value* rowsProcessed = ctx->m_builder->CreateLoad(ctx->rows_processed, true);
+    llvm_util::AddFunctionCall(ctx, ctx->setTpProcessedFunc, ctx->tp_processed_value, rowsProcessed, nullptr);
 }
 
 /** @brief Adds a call to setScanEnded(scan_ended, result). */
 inline void AddSetScanEnded(JitLlvmCodeGenContext* ctx, int result)
 {
     llvm::ConstantInt* result_value = llvm::ConstantInt::get(ctx->INT32_T, result, true);
-    AddFunctionCall(ctx, ctx->setScanEndedFunc, ctx->scan_ended_value, result_value, nullptr);
+    llvm_util::AddFunctionCall(ctx, ctx->setScanEndedFunc, ctx->scan_ended_value, result_value, nullptr);
 }
 
 /** @brief Adds a call to copyKey(index, key, end_iterator_key). */
 inline void AddCopyKey(JitLlvmCodeGenContext* ctx, JitRangeScanType rangeScanType, int subQueryIndex)
 {
-    if (rangeScanType == JIT_RANGE_SCAN_INNER) {
-        AddFunctionCall(ctx,
-            ctx->copyKeyFunc,
-            ctx->inner_index_value,
-            ctx->inner_key_value,
-            ctx->inner_end_iterator_key_value,
-            nullptr);
-    } else if (rangeScanType == JIT_RANGE_SCAN_MAIN) {
-        AddFunctionCall(ctx, ctx->copyKeyFunc, ctx->index_value, ctx->key_value, ctx->end_iterator_key_value, nullptr);
-    } else if (rangeScanType == JIT_RANGE_SCAN_SUB_QUERY) {
-        JitLlvmCodeGenContext::SubQueryData* subQueryData = &ctx->m_subQueryData[subQueryIndex];
-        AddFunctionCall(ctx,
-            ctx->copyKeyFunc,
-            subQueryData->m_index,
-            subQueryData->m_searchKey,
-            subQueryData->m_endIteratorKey,
-            nullptr);
-    }
+    llvm::Value* index = getExecContextIndex(ctx, rangeScanType, subQueryIndex);
+    llvm::Value* beginKey = getExecContextKey(ctx, JIT_RANGE_ITERATOR_START, rangeScanType, subQueryIndex);
+    llvm::Value* endKey = getExecContextKey(ctx, JIT_RANGE_ITERATOR_END, rangeScanType, subQueryIndex);
+    AddFunctionCall(ctx, ctx->copyKeyFunc, index, beginKey, endKey, nullptr);
 }
 
 /** @brief Adds a call to FillKeyPattern(key, pattern, offset, size) or FillKeyPattern(end_iterator_key, pattern,
  * offset, size). */
 inline void AddFillKeyPattern(JitLlvmCodeGenContext* ctx, unsigned char pattern, int offset, int size,
-    JitRangeIteratorType range_itr_type, JitRangeScanType range_scan_type, int subQueryIndex)
+    JitRangeIteratorType rangeItrType, JitRangeScanType rangeScanType, int subQueryIndex)
 {
-    llvm::ConstantInt* pattern_value = llvm::ConstantInt::get(ctx->INT8_T, pattern, true);
-    llvm::ConstantInt* offset_value = llvm::ConstantInt::get(ctx->INT32_T, offset, true);
-    llvm::ConstantInt* size_value = llvm::ConstantInt::get(ctx->INT32_T, size, true);
-    llvm::Value* key_value = getExecContextKey(ctx, range_itr_type, range_scan_type, subQueryIndex);
-    AddFunctionCall(ctx, ctx->fillKeyPatternFunc, key_value, pattern_value, offset_value, size_value, nullptr);
+    llvm::Value* key = getExecContextKey(ctx, rangeItrType, rangeScanType, subQueryIndex);
+    llvm_util::AddFunctionCall(ctx,
+        ctx->fillKeyPatternFunc,
+        key,
+        JIT_CONST_INT8(pattern),
+        JIT_CONST_INT32(offset),
+        JIT_CONST_INT32(size),
+        nullptr);
 }
 
 /** @brief Adds a call to adjustKey(key, index, pattern) or adjustKey(end_iterator_key, index, pattern). */
-inline void AddAdjustKey(JitLlvmCodeGenContext* ctx, unsigned char pattern, JitRangeIteratorType range_itr_type,
-    JitRangeScanType range_scan_type, int subQueryIndex)
+inline void AddAdjustKey(JitLlvmCodeGenContext* ctx, unsigned char pattern, JitRangeIteratorType rangeItrType,
+    JitRangeScanType rangeScanType, int subQueryIndex)
 {
-    llvm::ConstantInt* pattern_value = llvm::ConstantInt::get(ctx->INT8_T, pattern, true);
-    llvm::Value* key_value = getExecContextKey(ctx, range_itr_type, range_scan_type, subQueryIndex);
-    llvm::Value* index_value = getExecContextIndex(ctx, range_scan_type, subQueryIndex);
-    AddFunctionCall(ctx, ctx->adjustKeyFunc, key_value, index_value, pattern_value, nullptr);
+    llvm::Value* key = getExecContextKey(ctx, rangeItrType, rangeScanType, subQueryIndex);
+    llvm::Value* index = getExecContextIndex(ctx, rangeScanType, subQueryIndex);
+    llvm_util::AddFunctionCall(ctx, ctx->adjustKeyFunc, key, index, JIT_CONST_INT8(pattern), nullptr);
 }
 
 /** @brief Adds a call to searchIterator(index, key). */
-inline llvm::Value* AddSearchIterator(JitLlvmCodeGenContext* ctx, JitIndexScanDirection index_scan_direction,
-    JitRangeBoundMode range_bound_mode, JitRangeScanType range_scan_type, int subQueryIndex)
+inline llvm::Value* AddSearchIterator(JitLlvmCodeGenContext* ctx, JitIndexScanDirection indexScanDirection,
+    JitRangeBoundMode rangeBoundMode, JitRangeScanType rangeScanType, int subQueryIndex)
 {
-    llvm::Value* itr = nullptr;
-    uint64_t forward_scan = (index_scan_direction == JIT_INDEX_SCAN_FORWARD) ? 1 : 0;
-    uint64_t include_bound = (range_bound_mode == JIT_RANGE_BOUND_INCLUDE) ? 1 : 0;
-    llvm::ConstantInt* forward_iterator_value = llvm::ConstantInt::get(ctx->INT32_T, forward_scan, true);
-    llvm::ConstantInt* include_bound_value = llvm::ConstantInt::get(ctx->INT32_T, include_bound, true);
-    if (range_scan_type == JIT_RANGE_SCAN_INNER) {
-        itr = AddFunctionCall(ctx,
-            ctx->searchIteratorFunc,
-            ctx->inner_index_value,
-            ctx->inner_key_value,
-            forward_iterator_value,
-            include_bound_value,
-            nullptr);
-    } else if (range_scan_type == JIT_RANGE_SCAN_MAIN) {
-        itr = AddFunctionCall(ctx,
-            ctx->searchIteratorFunc,
-            ctx->index_value,
-            ctx->key_value,
-            forward_iterator_value,
-            include_bound_value,
-            nullptr);
-    } else if (range_scan_type == JIT_RANGE_SCAN_SUB_QUERY) {
-        JitLlvmCodeGenContext::SubQueryData* subQueryData = &ctx->m_subQueryData[subQueryIndex];
-        itr = AddFunctionCall(ctx,
-            ctx->searchIteratorFunc,
-            subQueryData->m_index,
-            subQueryData->m_searchKey,
-            forward_iterator_value,
-            include_bound_value,
-            nullptr);
-    }
-    return itr;
+    int forwardScan = (indexScanDirection == JIT_INDEX_SCAN_FORWARD) ? 1 : 0;
+    int includeBound = (rangeBoundMode == JIT_RANGE_BOUND_INCLUDE) ? 1 : 0;
+    llvm::Value* index = getExecContextIndex(ctx, rangeScanType, subQueryIndex);
+    llvm::Value* key = getExecContextKey(ctx, JIT_RANGE_ITERATOR_START, rangeScanType, subQueryIndex);
+    return llvm_util::AddFunctionCall(
+        ctx, ctx->searchIteratorFunc, index, key, JIT_CONST_INT32(forwardScan), JIT_CONST_INT32(includeBound), nullptr);
 }
 
 /** @brief Adds a call to beginIterator(index). */
 inline llvm::Value* AddBeginIterator(JitLlvmCodeGenContext* ctx, JitRangeScanType rangeScanType, int subQueryIndex)
 {
-    llvm::Value* itr = nullptr;
-    if (rangeScanType == JIT_RANGE_SCAN_INNER) {
-        itr = AddFunctionCall(ctx, ctx->beginIteratorFunc, ctx->inner_index_value, nullptr);
-    } else if (rangeScanType == JIT_RANGE_SCAN_MAIN) {
-        itr = AddFunctionCall(ctx, ctx->beginIteratorFunc, ctx->index_value, nullptr);
-    } else if (rangeScanType == JIT_RANGE_SCAN_SUB_QUERY) {
-        JitLlvmCodeGenContext::SubQueryData* subQueryData = &ctx->m_subQueryData[subQueryIndex];
-        itr = AddFunctionCall(ctx, ctx->beginIteratorFunc, subQueryData->m_index, nullptr);
-    }
-    return itr;
+    llvm::Value* index = getExecContextIndex(ctx, rangeScanType, subQueryIndex);
+    return llvm_util::AddFunctionCall(ctx, ctx->beginIteratorFunc, index, nullptr);
 }
 
 /** @brief Adds a call to createEndIterator(index, end_iterator_key). */
-inline llvm::Value* AddCreateEndIterator(JitLlvmCodeGenContext* ctx, JitIndexScanDirection index_scan_direction,
-    JitRangeBoundMode range_bound_mode, JitRangeScanType range_scan_type, int subQueryIndex = -1)
+inline llvm::Value* AddCreateEndIterator(JitLlvmCodeGenContext* ctx, JitIndexScanDirection indexScanDirection,
+    JitRangeBoundMode rangeBoundMode, JitRangeScanType rangeScanType, int subQueryIndex = -1)
 {
-    llvm::Value* itr = nullptr;
-    uint64_t forward_scan = (index_scan_direction == JIT_INDEX_SCAN_FORWARD) ? 1 : 0;
-    uint64_t include_bound = (range_bound_mode == JIT_RANGE_BOUND_INCLUDE) ? 1 : 0;
-    llvm::ConstantInt* forward_scan_value = llvm::ConstantInt::get(ctx->INT32_T, forward_scan, true);
-    llvm::ConstantInt* include_bound_value = llvm::ConstantInt::get(ctx->INT32_T, include_bound, true);
-    if (range_scan_type == JIT_RANGE_SCAN_INNER) {
-        itr = AddFunctionCall(ctx,
-            ctx->createEndIteratorFunc,
-            ctx->inner_index_value,
-            ctx->inner_end_iterator_key_value,
-            forward_scan_value,
-            include_bound_value,
-            nullptr);
-    } else if (range_scan_type == JIT_RANGE_SCAN_MAIN) {
-        itr = AddFunctionCall(ctx,
-            ctx->createEndIteratorFunc,
-            ctx->index_value,
-            ctx->end_iterator_key_value,
-            forward_scan_value,
-            include_bound_value,
-            nullptr);
-    } else if (range_scan_type == JIT_RANGE_SCAN_SUB_QUERY) {
-        JitLlvmCodeGenContext::SubQueryData* subQueryData = &ctx->m_subQueryData[subQueryIndex];
-        itr = AddFunctionCall(ctx,
-            ctx->createEndIteratorFunc,
-            subQueryData->m_index,
-            subQueryData->m_endIteratorKey,
-            forward_scan_value,
-            include_bound_value,
-            nullptr);
-    }
-    return itr;
+    int forwardScan = (indexScanDirection == JIT_INDEX_SCAN_FORWARD) ? 1 : 0;
+    int includeBound = (rangeBoundMode == JIT_RANGE_BOUND_INCLUDE) ? 1 : 0;
+    llvm::Value* index = getExecContextIndex(ctx, rangeScanType, subQueryIndex);
+    llvm::Value* key = getExecContextKey(ctx, JIT_RANGE_ITERATOR_END, rangeScanType, subQueryIndex);
+    return llvm_util::AddFunctionCall(ctx,
+        ctx->createEndIteratorFunc,
+        index,
+        key,
+        JIT_CONST_INT32(forwardScan),
+        JIT_CONST_INT32(includeBound),
+        nullptr);
 }
 
 /** @brief Adds a call to isScanEnd(index, iterator, end_iterator). */
-inline llvm::Value* AddIsScanEnd(JitLlvmCodeGenContext* ctx, JitIndexScanDirection index_scan_direction,
-    JitLlvmRuntimeCursor* cursor, JitRangeScanType range_scan_type, int subQueryIndex = -1)
+inline llvm::Value* AddIsScanEnd(JitLlvmCodeGenContext* ctx, JitIndexScanDirection indexScanDirection,
+    JitLlvmRuntimeCursor* cursor, JitRangeScanType rangeScanType, int subQueryIndex = -1)
 {
-    uint64_t forward_scan = (index_scan_direction == JIT_INDEX_SCAN_FORWARD) ? 1 : 0;
-    llvm::ConstantInt* forward_scan_value = llvm::ConstantInt::get(ctx->INT32_T, forward_scan, true);
-    llvm::Value* index_value = getExecContextIndex(ctx, range_scan_type, subQueryIndex);
-    return AddFunctionCall(
-        ctx, ctx->isScanEndFunc, index_value, cursor->begin_itr, cursor->end_itr, forward_scan_value, nullptr);
+    int forwardScan = (indexScanDirection == JIT_INDEX_SCAN_FORWARD) ? 1 : 0;
+    llvm::Value* index = getExecContextIndex(ctx, rangeScanType, subQueryIndex);
+    return llvm_util::AddFunctionCall(
+        ctx, ctx->isScanEndFunc, index, cursor->begin_itr, cursor->end_itr, JIT_CONST_INT32(forwardScan), nullptr);
+}
+
+inline llvm::Value* AddCheckRowExistsInIterator(JitLlvmCodeGenContext* ctx, JitIndexScanDirection indexScanDirection,
+    JitLlvmRuntimeCursor* cursor, JitRangeScanType rangeScanType, int subQueryIndex)
+{
+    int forwardScan = (indexScanDirection == JIT_INDEX_SCAN_FORWARD) ? 1 : 0;
+    llvm::Value* index = getExecContextIndex(ctx, rangeScanType, subQueryIndex);
+    return llvm_util::AddFunctionCall(ctx,
+        ctx->CheckRowExistsInIteratorFunc,
+        index,
+        cursor->begin_itr,
+        cursor->end_itr,
+        JIT_CONST_INT32(forwardScan),
+        nullptr);
 }
 
 /** @brief Adds a cal to getRowFromIterator(index, iterator, end_iterator). */
-inline llvm::Value* AddGetRowFromIterator(JitLlvmCodeGenContext* ctx, MOT::AccessType access_mode,
-    JitIndexScanDirection index_scan_direction, JitLlvmRuntimeCursor* cursor, JitRangeScanType range_scan_type,
+inline llvm::Value* AddGetRowFromIterator(JitLlvmCodeGenContext* ctx, MOT::AccessType accessMode,
+    JitIndexScanDirection indexScanDirection, JitLlvmRuntimeCursor* cursor, JitRangeScanType rangeScanType,
     int subQueryIndex)
 {
-    uint64_t forward_scan = (index_scan_direction == JIT_INDEX_SCAN_FORWARD) ? 1 : 0;
-    llvm::ConstantInt* access_mode_value = llvm::ConstantInt::get(ctx->INT32_T, access_mode, true);
-    llvm::ConstantInt* forward_scan_value = llvm::ConstantInt::get(ctx->INT32_T, forward_scan, true);
-    llvm::Value* index_value = getExecContextIndex(ctx, range_scan_type, subQueryIndex);
-    return AddFunctionCall(ctx,
+    int innerRow = (rangeScanType == JIT_RANGE_SCAN_INNER) ? 1 : 0;
+    int forwardScan = (indexScanDirection == JIT_INDEX_SCAN_FORWARD) ? 1 : 0;
+    llvm::Value* index = getExecContextIndex(ctx, rangeScanType, subQueryIndex);
+    return llvm_util::AddFunctionCall(ctx,
         ctx->getRowFromIteratorFunc,
-        index_value,
+        index,
         cursor->begin_itr,
         cursor->end_itr,
-        access_mode_value,
-        forward_scan_value,
+        JIT_CONST_INT32(accessMode),
+        JIT_CONST_INT32(forwardScan),
+        JIT_CONST_INT32(innerRow),
+        JIT_CONST_INT32(subQueryIndex),
         nullptr);
 }
 
 /** @brief Adds a call to destroyIterator(iterator). */
 inline void AddDestroyIterator(JitLlvmCodeGenContext* ctx, llvm::Value* itr)
 {
-    AddFunctionCall(ctx, ctx->destroyIteratorFunc, itr, nullptr);
+    llvm_util::AddFunctionCall(ctx, ctx->destroyIteratorFunc, itr, nullptr);
 }
 
 inline void AddDestroyCursor(JitLlvmCodeGenContext* ctx, JitLlvmRuntimeCursor* cursor)
@@ -1088,265 +1053,307 @@ inline void AddDestroyCursor(JitLlvmCodeGenContext* ctx, JitLlvmRuntimeCursor* c
 
 /** @brief Adds a call to setStateIterator(itr, begin_itr). */
 inline void AddSetStateIterator(
-    JitLlvmCodeGenContext* ctx, llvm::Value* itr, JitRangeIteratorType range_itr_type, JitRangeScanType range_scan_type)
+    JitLlvmCodeGenContext* ctx, llvm::Value* itr, JitRangeIteratorType rangeItrType, JitRangeScanType rangeScanType)
 {
-    uint64_t begin_itr = (range_itr_type == JIT_RANGE_ITERATOR_START) ? 1 : 0;
-    uint64_t inner_scan = (range_scan_type == JIT_RANGE_SCAN_INNER) ? 1 : 0;
-    llvm::ConstantInt* begin_itr_value = llvm::ConstantInt::get(ctx->INT32_T, begin_itr, true);
-    llvm::ConstantInt* inner_scan_value = llvm::ConstantInt::get(ctx->INT32_T, inner_scan, true);
-    AddFunctionCall(ctx, ctx->setStateIteratorFunc, itr, begin_itr_value, inner_scan_value, nullptr);
+    int beginItr = (rangeItrType == JIT_RANGE_ITERATOR_START) ? 1 : 0;
+    int innerScan = (rangeScanType == JIT_RANGE_SCAN_INNER) ? 1 : 0;
+    llvm_util::AddFunctionCall(
+        ctx, ctx->setStateIteratorFunc, itr, JIT_CONST_INT32(beginItr), JIT_CONST_INT32(innerScan), nullptr);
 }
 
 /** @brief Adds a call to isStateIteratorNull(begin_itr). */
 inline llvm::Value* AddIsStateIteratorNull(
-    JitLlvmCodeGenContext* ctx, JitRangeIteratorType range_itr_type, JitRangeScanType range_scan_type)
+    JitLlvmCodeGenContext* ctx, JitRangeIteratorType rangeItrType, JitRangeScanType rangeScanType)
 {
-    uint64_t begin_itr = (range_itr_type == JIT_RANGE_ITERATOR_START) ? 1 : 0;
-    uint64_t inner_scan = (range_scan_type == JIT_RANGE_SCAN_INNER) ? 1 : 0;
-    llvm::ConstantInt* begin_itr_value = llvm::ConstantInt::get(ctx->INT32_T, begin_itr, true);
-    llvm::ConstantInt* inner_scan_value = llvm::ConstantInt::get(ctx->INT32_T, inner_scan, true);
-    return AddFunctionCall(ctx, ctx->isStateIteratorNullFunc, begin_itr_value, inner_scan_value, nullptr);
+    int beginItr = (rangeItrType == JIT_RANGE_ITERATOR_START) ? 1 : 0;
+    int innerScan = (rangeScanType == JIT_RANGE_SCAN_INNER) ? 1 : 0;
+    return llvm_util::AddFunctionCall(
+        ctx, ctx->isStateIteratorNullFunc, JIT_CONST_INT32(beginItr), JIT_CONST_INT32(innerScan), nullptr);
 }
 
 /** @brief Adds a call to isStateScanEnd(index, forward_scan). */
 inline llvm::Value* AddIsStateScanEnd(
-    JitLlvmCodeGenContext* ctx, JitIndexScanDirection index_scan_direction, JitRangeScanType range_scan_type)
+    JitLlvmCodeGenContext* ctx, JitIndexScanDirection indexScanDirection, JitRangeScanType rangeScanType)
 {
-    uint64_t forward_scan = (index_scan_direction == JIT_INDEX_SCAN_FORWARD) ? 1 : 0;
-    uint64_t inner_scan = (range_scan_type == JIT_RANGE_SCAN_INNER) ? 1 : 0;
-    llvm::ConstantInt* forward_scan_value = llvm::ConstantInt::get(ctx->INT32_T, forward_scan, true);
-    llvm::ConstantInt* inner_scan_value = llvm::ConstantInt::get(ctx->INT32_T, inner_scan, true);
-    return AddFunctionCall(ctx, ctx->isStateScanEndFunc, forward_scan_value, inner_scan_value, nullptr);
+    int forwardScan = (indexScanDirection == JIT_INDEX_SCAN_FORWARD) ? 1 : 0;
+    int innerScan = (rangeScanType == JIT_RANGE_SCAN_INNER) ? 1 : 0;
+    return llvm_util::AddFunctionCall(
+        ctx, ctx->isStateScanEndFunc, JIT_CONST_INT32(forwardScan), JIT_CONST_INT32(innerScan), nullptr);
 }
 
-/** @brief Adds a cal to getRowFromStateIterator(index, access_mode, forward_scan). */
-inline llvm::Value* AddGetRowFromStateIterator(JitLlvmCodeGenContext* ctx, MOT::AccessType access_mode,
-    JitIndexScanDirection index_scan_direction, JitRangeScanType range_scan_type)
+/** @brief Adds a cal to getRowFromStateIterator(index, accessMode, forward_scan). */
+inline llvm::Value* AddGetRowFromStateIterator(JitLlvmCodeGenContext* ctx, MOT::AccessType accessMode,
+    JitIndexScanDirection indexScanDirection, JitRangeScanType rangeScanType)
 {
-    uint64_t forward_scan = (index_scan_direction == JIT_INDEX_SCAN_FORWARD) ? 1 : 0;
-    uint64_t inner_scan = (range_scan_type == JIT_RANGE_SCAN_INNER) ? 1 : 0;
-    llvm::ConstantInt* access_mode_value = llvm::ConstantInt::get(ctx->INT32_T, access_mode, true);
-    llvm::ConstantInt* forward_scan_value = llvm::ConstantInt::get(ctx->INT32_T, forward_scan, true);
-    llvm::ConstantInt* inner_scan_value = llvm::ConstantInt::get(ctx->INT32_T, inner_scan, true);
-    return AddFunctionCall(
-        ctx, ctx->getRowFromStateIteratorFunc, access_mode_value, forward_scan_value, inner_scan_value, nullptr);
+    int forwardScan = (indexScanDirection == JIT_INDEX_SCAN_FORWARD) ? 1 : 0;
+    int innerScan = (rangeScanType == JIT_RANGE_SCAN_INNER) ? 1 : 0;
+    return llvm_util::AddFunctionCall(ctx,
+        ctx->getRowFromStateIteratorFunc,
+        JIT_CONST_INT32(accessMode),
+        JIT_CONST_INT32(forwardScan),
+        JIT_CONST_INT32(innerScan),
+        nullptr);
 }
 
 /** @brief Adds a call to destroyStateIterators(). */
-inline void AddDestroyStateIterators(JitLlvmCodeGenContext* ctx, JitRangeScanType range_scan_type)
+inline void AddDestroyStateIterators(JitLlvmCodeGenContext* ctx, JitRangeScanType rangeScanType)
 {
-    uint64_t inner_scan = (range_scan_type == JIT_RANGE_SCAN_INNER) ? 1 : 0;
-    llvm::ConstantInt* inner_scan_value = llvm::ConstantInt::get(ctx->INT32_T, inner_scan, true);
-    AddFunctionCall(ctx, ctx->destroyStateIteratorsFunc, inner_scan_value, nullptr);
+    int innerScan = (rangeScanType == JIT_RANGE_SCAN_INNER) ? 1 : 0;
+    llvm_util::AddFunctionCall(ctx, ctx->destroyStateIteratorsFunc, JIT_CONST_INT32(innerScan), nullptr);
 }
 
-/** @brief Adds a call to setStateScanEndFlag(scan_ended). */
-inline void AddSetStateScanEndFlag(JitLlvmCodeGenContext* ctx, int scan_ended, JitRangeScanType range_scan_type)
+/** @brief Adds a call to setStateScanEndFlag(scanEnded). */
+inline void AddSetStateScanEndFlag(JitLlvmCodeGenContext* ctx, int scanEnded, JitRangeScanType rangeScanType)
 {
-    uint64_t inner_scan = (range_scan_type == JIT_RANGE_SCAN_INNER) ? 1 : 0;
-    llvm::ConstantInt* scan_ended_value = llvm::ConstantInt::get(ctx->INT32_T, scan_ended, true);
-    llvm::ConstantInt* inner_scan_value = llvm::ConstantInt::get(ctx->INT32_T, inner_scan, true);
-    AddFunctionCall(ctx, ctx->setStateScanEndFlagFunc, scan_ended_value, inner_scan_value, nullptr);
+    int innerScan = (rangeScanType == JIT_RANGE_SCAN_INNER) ? 1 : 0;
+    llvm_util::AddFunctionCall(
+        ctx, ctx->setStateScanEndFlagFunc, JIT_CONST_INT32(scanEnded), JIT_CONST_INT32(innerScan), nullptr);
 }
 
 /** @brief Adds a call to getStateScanEndFlag(). */
-inline llvm::Value* AddGetStateScanEndFlag(JitLlvmCodeGenContext* ctx, JitRangeScanType range_scan_type)
+inline llvm::Value* AddGetStateScanEndFlag(JitLlvmCodeGenContext* ctx, JitRangeScanType rangeScanType)
 {
-    uint64_t inner_scan = (range_scan_type == JIT_RANGE_SCAN_INNER) ? 1 : 0;
-    llvm::ConstantInt* inner_scan_value = llvm::ConstantInt::get(ctx->INT32_T, inner_scan, true);
-    return AddFunctionCall(ctx, ctx->getStateScanEndFlagFunc, inner_scan_value, nullptr);
+    int innerScan = (rangeScanType == JIT_RANGE_SCAN_INNER) ? 1 : 0;
+    return llvm_util::AddFunctionCall(ctx, ctx->getStateScanEndFlagFunc, JIT_CONST_INT32(innerScan), nullptr);
 }
 
-inline void AddResetStateRow(JitLlvmCodeGenContext* ctx, JitRangeScanType range_scan_type)
+inline void AddResetStateRow(JitLlvmCodeGenContext* ctx, JitRangeScanType rangeScanType)
 {
-    uint64_t inner_scan = (range_scan_type == JIT_RANGE_SCAN_INNER) ? 1 : 0;
-    llvm::ConstantInt* inner_scan_value = llvm::ConstantInt::get(ctx->INT32_T, inner_scan, true);
-    AddFunctionCall(ctx, ctx->resetStateRowFunc, inner_scan_value, nullptr);
+    int innerScan = (rangeScanType == JIT_RANGE_SCAN_INNER) ? 1 : 0;
+    llvm_util::AddFunctionCall(ctx, ctx->resetStateRowFunc, JIT_CONST_INT32(innerScan), nullptr);
 }
 
-inline void AddSetStateRow(JitLlvmCodeGenContext* ctx, llvm::Value* row, JitRangeScanType range_scan_type)
+inline void AddSetStateRow(JitLlvmCodeGenContext* ctx, llvm::Value* row, JitRangeScanType rangeScanType)
 {
-    uint64_t inner_scan = (range_scan_type == JIT_RANGE_SCAN_INNER) ? 1 : 0;
-    llvm::ConstantInt* inner_scan_value = llvm::ConstantInt::get(ctx->INT32_T, inner_scan, true);
-    AddFunctionCall(ctx, ctx->setStateRowFunc, row, inner_scan_value, nullptr);
+    int innerScan = (rangeScanType == JIT_RANGE_SCAN_INNER) ? 1 : 0;
+    llvm_util::AddFunctionCall(ctx, ctx->setStateRowFunc, row, JIT_CONST_INT32(innerScan), nullptr);
 }
 
-inline llvm::Value* AddGetStateRow(JitLlvmCodeGenContext* ctx, JitRangeScanType range_scan_type)
+inline llvm::Value* AddGetStateRow(JitLlvmCodeGenContext* ctx, JitRangeScanType rangeScanType)
 {
-    uint64_t inner_scan = (range_scan_type == JIT_RANGE_SCAN_INNER) ? 1 : 0;
-    llvm::ConstantInt* inner_scan_value = llvm::ConstantInt::get(ctx->INT32_T, inner_scan, true);
-    return AddFunctionCall(ctx, ctx->getStateRowFunc, inner_scan_value, nullptr);
+    int innerScan = (rangeScanType == JIT_RANGE_SCAN_INNER) ? 1 : 0;
+    return llvm_util::AddFunctionCall(ctx, ctx->getStateRowFunc, JIT_CONST_INT32(innerScan), nullptr);
 }
 
 inline void AddCopyOuterStateRow(JitLlvmCodeGenContext* ctx)
 {
-    AddFunctionCall(ctx, ctx->copyOuterStateRowFunc, nullptr);
+    llvm_util::AddFunctionCall(ctx, ctx->copyOuterStateRowFunc, nullptr);
 }
 
 inline llvm::Value* AddGetOuterStateRowCopy(JitLlvmCodeGenContext* ctx)
 {
-    return AddFunctionCall(ctx, ctx->getOuterStateRowCopyFunc, nullptr);
+    return llvm_util::AddFunctionCall(ctx, ctx->getOuterStateRowCopyFunc, nullptr);
 }
 
-inline llvm::Value* AddIsStateRowNull(JitLlvmCodeGenContext* ctx, JitRangeScanType range_scan_type)
+inline llvm::Value* AddIsStateRowNull(JitLlvmCodeGenContext* ctx, JitRangeScanType rangeScanType)
 {
-    uint64_t inner_scan = (range_scan_type == JIT_RANGE_SCAN_INNER) ? 1 : 0;
-    llvm::ConstantInt* inner_scan_value = llvm::ConstantInt::get(ctx->INT32_T, inner_scan, true);
-    return AddFunctionCall(ctx, ctx->isStateRowNullFunc, inner_scan_value, nullptr);
+    int innerScan = (rangeScanType == JIT_RANGE_SCAN_INNER) ? 1 : 0;
+    return llvm_util::AddFunctionCall(ctx, ctx->isStateRowNullFunc, JIT_CONST_INT32(innerScan), nullptr);
 }
 
 inline void AddResetStateLimitCounter(JitLlvmCodeGenContext* ctx)
 {
-    AddFunctionCall(ctx, ctx->resetStateLimitCounterFunc, nullptr);
+    llvm_util::AddFunctionCall(ctx, ctx->resetStateLimitCounterFunc, nullptr);
 }
 
 inline void AddIncrementStateLimitCounter(JitLlvmCodeGenContext* ctx)
 {
-    AddFunctionCall(ctx, ctx->incrementStateLimitCounterFunc, nullptr);
+    llvm_util::AddFunctionCall(ctx, ctx->incrementStateLimitCounterFunc, nullptr);
 }
 
 inline llvm::Value* AddGetStateLimitCounter(JitLlvmCodeGenContext* ctx)
 {
-    return AddFunctionCall(ctx, ctx->getStateLimitCounterFunc, nullptr);
+    return llvm_util::AddFunctionCall(ctx, ctx->getStateLimitCounterFunc, nullptr);
 }
 
-inline void AddPrepareAvgArray(JitLlvmCodeGenContext* ctx, int element_type, int element_count)
+inline void AddPrepareAvgArray(JitLlvmCodeGenContext* ctx, int aggIndex, int elementType, int elementCount)
 {
-    llvm::ConstantInt* element_type_value = llvm::ConstantInt::get(ctx->INT32_T, element_type, true);
-    llvm::ConstantInt* element_count_value = llvm::ConstantInt::get(ctx->INT32_T, element_count, true);
-    AddFunctionCall(ctx, ctx->prepareAvgArrayFunc, element_type_value, element_count_value, nullptr);
+    llvm_util::AddFunctionCall(ctx,
+        ctx->prepareAvgArrayFunc,
+        JIT_CONST_INT32(aggIndex),
+        JIT_CONST_INT32(elementType),
+        JIT_CONST_INT32(elementCount),
+        nullptr);
 }
 
-inline llvm::Value* AddLoadAvgArray(JitLlvmCodeGenContext* ctx)
+inline llvm::Value* AddLoadAvgArray(JitLlvmCodeGenContext* ctx, int aggIndex)
 {
-    return AddFunctionCall(ctx, ctx->loadAvgArrayFunc, nullptr);
+    return llvm_util::AddFunctionCall(ctx, ctx->loadAvgArrayFunc, JIT_CONST_INT32(aggIndex), nullptr);
 }
 
-inline void AddSaveAvgArray(JitLlvmCodeGenContext* ctx, llvm::Value* avg_array)
+inline void AddSaveAvgArray(JitLlvmCodeGenContext* ctx, int aggIndex, llvm::Value* avgArray)
 {
-    AddFunctionCall(ctx, ctx->saveAvgArrayFunc, avg_array, nullptr);
+    llvm_util::AddFunctionCall(ctx, ctx->saveAvgArrayFunc, JIT_CONST_INT32(aggIndex), avgArray, nullptr);
 }
 
-inline llvm::Value* AddComputeAvgFromArray(JitLlvmCodeGenContext* ctx, int element_type)
+inline llvm::Value* AddComputeAvgFromArray(JitLlvmCodeGenContext* ctx, int aggIndex, int elementType)
 {
-    llvm::ConstantInt* element_type_value = llvm::ConstantInt::get(ctx->INT32_T, element_type, true);
-    return AddFunctionCall(ctx, ctx->computeAvgFromArrayFunc, element_type_value, nullptr);
+    return llvm_util::AddFunctionCall(
+        ctx, ctx->computeAvgFromArrayFunc, JIT_CONST_INT32(aggIndex), JIT_CONST_INT32(elementType), nullptr);
 }
 
-inline void AddResetAggValue(JitLlvmCodeGenContext* ctx, int element_type)
+inline void AddResetAggValue(JitLlvmCodeGenContext* ctx, int aggIndex, int elementType)
 {
-    llvm::ConstantInt* element_type_value = llvm::ConstantInt::get(ctx->INT32_T, element_type, true);
-    AddFunctionCall(ctx, ctx->resetAggValueFunc, element_type_value, nullptr);
+    llvm_util::AddFunctionCall(
+        ctx, ctx->resetAggValueFunc, JIT_CONST_INT32(aggIndex), JIT_CONST_INT32(elementType), nullptr);
 }
 
-inline void AddResetAggMaxMinNull(JitLlvmCodeGenContext* ctx)
+inline llvm::Value* AddGetAggValue(JitLlvmCodeGenContext* ctx, int aggIndex)
 {
-    AddFunctionCall(ctx, ctx->resetAggMaxMinNullFunc, nullptr);
+    return llvm_util::AddFunctionCall(ctx, ctx->getAggValueFunc, JIT_CONST_INT32(aggIndex), nullptr);
 }
 
-inline llvm::Value* AddGetAggValue(JitLlvmCodeGenContext* ctx)
+inline void AddSetAggValue(JitLlvmCodeGenContext* ctx, int aggIndex, llvm::Value* value)
 {
-    return AddFunctionCall(ctx, ctx->getAggValueFunc, nullptr);
+    llvm_util::AddFunctionCall(ctx, ctx->setAggValueFunc, JIT_CONST_INT32(aggIndex), value, nullptr);
 }
 
-inline void AddSetAggValue(JitLlvmCodeGenContext* ctx, llvm::Value* value)
+inline llvm::Value* AddGetAggValueIsNull(JitLlvmCodeGenContext* ctx, int aggIndex)
 {
-    AddFunctionCall(ctx, ctx->setAggValueFunc, value, nullptr);
+    return llvm_util::AddFunctionCall(ctx, ctx->getAggValueIsNullFunc, JIT_CONST_INT32(aggIndex), nullptr);
 }
 
-inline void AddSetAggMaxMinNotNull(JitLlvmCodeGenContext* ctx)
+inline llvm::Value* AddSetAggValueIsNull(JitLlvmCodeGenContext* ctx, int aggIndex, llvm::Value* isNull)
 {
-    AddFunctionCall(ctx, ctx->setAggMaxMinNotNullFunc, nullptr);
+    return llvm_util::AddFunctionCall(ctx, ctx->setAggValueIsNullFunc, JIT_CONST_INT32(aggIndex), isNull, nullptr);
 }
 
-inline llvm::Value* AddGetAggMaxMinIsNull(JitLlvmCodeGenContext* ctx)
+inline void AddPrepareDistinctSet(JitLlvmCodeGenContext* ctx, int aggIndex, int elementType)
 {
-    return AddFunctionCall(ctx, ctx->getAggMaxMinIsNullFunc, nullptr);
+    llvm_util::AddFunctionCall(
+        ctx, ctx->prepareDistinctSetFunc, JIT_CONST_INT32(aggIndex), JIT_CONST_INT32(elementType), nullptr);
 }
 
-inline void AddPrepareDistinctSet(JitLlvmCodeGenContext* ctx, int element_type)
+inline llvm::Value* AddInsertDistinctItem(JitLlvmCodeGenContext* ctx, int aggIndex, int elementType, llvm::Value* value)
 {
-    llvm::ConstantInt* element_type_value = llvm::ConstantInt::get(ctx->INT32_T, element_type, true);
-    AddFunctionCall(ctx, ctx->prepareDistinctSetFunc, element_type_value, nullptr);
+    return llvm_util::AddFunctionCall(
+        ctx, ctx->insertDistinctItemFunc, JIT_CONST_INT32(aggIndex), JIT_CONST_INT32(elementType), value, nullptr);
 }
 
-inline llvm::Value* AddInsertDistinctItem(JitLlvmCodeGenContext* ctx, int element_type, llvm::Value* value)
+inline void AddDestroyDistinctSet(JitLlvmCodeGenContext* ctx, int aggIndex, int elementType)
 {
-    llvm::ConstantInt* element_type_value = llvm::ConstantInt::get(ctx->INT32_T, element_type, true);
-    return AddFunctionCall(ctx, ctx->insertDistinctItemFunc, element_type_value, value, nullptr);
-}
-
-inline void AddDestroyDistinctSet(JitLlvmCodeGenContext* ctx, int element_type)
-{
-    llvm::ConstantInt* element_type_value = llvm::ConstantInt::get(ctx->INT32_T, element_type, true);
-    AddFunctionCall(ctx, ctx->destroyDistinctSetFunc, element_type_value, nullptr);
+    llvm_util::AddFunctionCall(
+        ctx, ctx->destroyDistinctSetFunc, JIT_CONST_INT32(aggIndex), JIT_CONST_INT32(elementType), nullptr);
 }
 
 /** @brief Adds a call to writeTupleDatum(slot, tuple_colid, value). */
-inline void AddWriteTupleDatum(JitLlvmCodeGenContext* ctx, int tuple_colid, llvm::Value* value)
+inline void AddWriteTupleDatum(JitLlvmCodeGenContext* ctx, int tupleColumnId, llvm::Value* value, llvm::Value* isNull)
 {
-    llvm::ConstantInt* tuple_colid_value = llvm::ConstantInt::get(ctx->INT32_T, tuple_colid, true);
-    AddFunctionCall(ctx, ctx->writeTupleDatumFunc, ctx->slot_value, tuple_colid_value, value, nullptr);
+    llvm_util::AddFunctionCall(
+        ctx, ctx->writeTupleDatumFunc, ctx->slot_value, JIT_CONST_INT32(tupleColumnId), value, isNull, nullptr);
 }
 
 inline llvm::Value* AddSelectSubQueryResult(JitLlvmCodeGenContext* ctx, int subQueryIndex)
 {
-    llvm::ConstantInt* subQueryIndexValue = llvm::ConstantInt::get(ctx->INT32_T, subQueryIndex, true);
-    return AddFunctionCall(ctx, ctx->selectSubQueryResultFunc, subQueryIndexValue, nullptr);
+    return llvm_util::AddFunctionCall(ctx, ctx->selectSubQueryResultFunc, JIT_CONST_INT32(subQueryIndex), nullptr);
 }
 
 inline void AddCopyAggregateToSubQueryResult(JitLlvmCodeGenContext* ctx, int subQueryIndex)
 {
-    llvm::ConstantInt* subQueryIndexValue = llvm::ConstantInt::get(ctx->INT32_T, subQueryIndex, true);
-    AddFunctionCall(ctx, ctx->copyAggregateToSubQueryResultFunc, subQueryIndexValue, nullptr);
+    llvm_util::AddFunctionCall(ctx, ctx->copyAggregateToSubQueryResultFunc, JIT_CONST_INT32(subQueryIndex), nullptr);
 }
 
 inline llvm::Value* AddGetSubQuerySlot(JitLlvmCodeGenContext* ctx, int subQueryIndex)
 {
-    llvm::ConstantInt* subQueryIndexValue = llvm::ConstantInt::get(ctx->INT32_T, subQueryIndex, true);
-    return AddFunctionCall(ctx, ctx->GetSubQuerySlotFunc, subQueryIndexValue, nullptr);
+    return llvm_util::AddFunctionCall(ctx, ctx->GetSubQuerySlotFunc, JIT_CONST_INT32(subQueryIndex), nullptr);
 }
 
 inline llvm::Value* AddGetSubQueryTable(JitLlvmCodeGenContext* ctx, int subQueryIndex)
 {
-    llvm::ConstantInt* subQueryIndexValue = llvm::ConstantInt::get(ctx->INT32_T, subQueryIndex, true);
-    return AddFunctionCall(ctx, ctx->GetSubQueryTableFunc, subQueryIndexValue, nullptr);
+    return llvm_util::AddFunctionCall(ctx, ctx->GetSubQueryTableFunc, JIT_CONST_INT32(subQueryIndex), nullptr);
 }
 
 inline llvm::Value* AddGetSubQueryIndex(JitLlvmCodeGenContext* ctx, int subQueryIndex)
 {
-    llvm::ConstantInt* subQueryIndexValue = llvm::ConstantInt::get(ctx->INT32_T, subQueryIndex, true);
-    return AddFunctionCall(ctx, ctx->GetSubQueryIndexFunc, subQueryIndexValue, nullptr);
+    return llvm_util::AddFunctionCall(ctx, ctx->GetSubQueryIndexFunc, JIT_CONST_INT32(subQueryIndex), nullptr);
 }
 
 inline llvm::Value* AddGetSubQuerySearchKey(JitLlvmCodeGenContext* ctx, int subQueryIndex)
 {
-    llvm::ConstantInt* subQueryIndexValue = llvm::ConstantInt::get(ctx->INT32_T, subQueryIndex, true);
-    return AddFunctionCall(ctx, ctx->GetSubQuerySearchKeyFunc, subQueryIndexValue, nullptr);
+    return llvm_util::AddFunctionCall(ctx, ctx->GetSubQuerySearchKeyFunc, JIT_CONST_INT32(subQueryIndex), nullptr);
 }
 
 inline llvm::Value* AddGetSubQueryEndIteratorKey(JitLlvmCodeGenContext* ctx, int subQueryIndex)
 {
-    llvm::ConstantInt* subQueryIndexValue = llvm::ConstantInt::get(ctx->INT32_T, subQueryIndex, true);
-    return AddFunctionCall(ctx, ctx->GetSubQueryEndIteratorKeyFunc, subQueryIndexValue, nullptr);
+    return llvm_util::AddFunctionCall(ctx, ctx->GetSubQueryEndIteratorKeyFunc, JIT_CONST_INT32(subQueryIndex), nullptr);
 }
 
-inline llvm::Value* AddGetConstAt(JitLlvmCodeGenContext* ctx, int constId, int argPos)
+inline llvm::Value* AddGetConstAt(JitLlvmCodeGenContext* ctx, int constId)
 {
-    llvm::ConstantInt* constIdValue = llvm::ConstantInt::get(ctx->INT32_T, constId, true);
-    llvm::ConstantInt* argPosValue = llvm::ConstantInt::get(ctx->INT32_T, argPos, true);
-    return AddFunctionCall(ctx, ctx->GetConstAtFunc, constIdValue, argPosValue, nullptr);
+    return llvm_util::AddFunctionCall(ctx, ctx->GetConstAtFunc, JIT_CONST_INT32(constId), nullptr);
+}
+
+inline llvm::Value* AddGetInvokeParamListInfo(JitLlvmCodeGenContext* ctx)
+{
+    return llvm_util::AddFunctionCall(ctx, ctx->GetInvokeParamListInfoFunc, nullptr);
+}
+
+inline void AddSetParamValue(JitLlvmCodeGenContext* ctx, llvm::Value* params, llvm::Value* paramId, int paramType,
+    llvm::Value* value, llvm::Value* argPos)
+{
+    llvm_util::AddFunctionCall(
+        ctx, ctx->SetParamValueFunc, params, paramId, JIT_CONST_INT32(paramType), value, argPos, nullptr);
+}
+
+inline llvm::Value* AddInvokeStoredProcedure(JitLlvmCodeGenContext* ctx)
+{
+    return llvm_util::AddFunctionCall(ctx, ctx->InvokeStoredProcedureFunc, nullptr);
+}
+
+inline llvm::Value* AddConvertViaString(JitLlvmCodeGenContext* ctx, llvm::Value* value, llvm::Value* resultType,
+    llvm::Value* targetType, llvm::Value* typeMod)
+{
+    return llvm_util::AddFunctionCall(ctx, ctx->ConvertViaStringFunc, value, resultType, targetType, typeMod, nullptr);
+}
+
+inline void AddEmitProfileData(JitLlvmCodeGenContext* ctx, uint32_t functionId, uint32_t regionId, bool startRegion)
+{
+    llvm::ConstantInt* functionIdValue = llvm::ConstantInt::get(ctx->INT32_T, functionId, true);
+    llvm::ConstantInt* regionIdValue = llvm::ConstantInt::get(ctx->INT32_T, regionId, true);
+    llvm::ConstantInt* startRegionValue = llvm::ConstantInt::get(ctx->INT32_T, startRegion ? 1 : 0, true);
+    llvm_util::AddFunctionCall(
+        ctx, ctx->EmitProfileDataFunc, functionIdValue, regionIdValue, startRegionValue, nullptr);
+}
+
+inline void InjectProfileDataImpl(JitLlvmCodeGenContext* ctx, const char* nameSpace, const char* queryString,
+    const char* regionName, bool beginRegion)
+{
+    JitProfiler* jitProfiler = JitProfiler::GetInstance();
+    uint32_t profileFunctionId = jitProfiler->GetProfileQueryId(nameSpace, queryString);
+    if (profileFunctionId == MOT_JIT_PROFILE_INVALID_FUNCTION_ID) {
+        profileFunctionId = jitProfiler->GetProfileFunctionId(queryString, InvalidOid);
+    }
+    if (profileFunctionId != MOT_JIT_PROFILE_INVALID_FUNCTION_ID) {
+        uint32_t profileRegionId = jitProfiler->GetQueryProfileRegionId(nameSpace, queryString, regionName);
+        if (profileRegionId != MOT_JIT_PROFILE_INVALID_REGION_ID) {
+            AddEmitProfileData(ctx, profileFunctionId, profileRegionId, beginRegion);
+        }
+    }
+}
+
+inline void InjectProfileData(
+    JitLlvmCodeGenContext* ctx, const char* nameSpace, const char* queryString, bool beginRegion)
+{
+    if (MOT::GetGlobalConfiguration().m_enableCodegenProfile) {
+        InjectProfileDataImpl(ctx, nameSpace, queryString, MOT_JIT_PROFILE_REGION_TOTAL, beginRegion);
+    }
+}
+
+inline void InjectInvokeProfileData(
+    JitLlvmCodeGenContext* ctx, const char* nameSpace, const char* queryString, bool beginRegion)
+{
+    if (MOT::GetGlobalConfiguration().m_enableCodegenProfile) {
+        InjectProfileDataImpl(ctx, nameSpace, queryString, MOT_JIT_PROFILE_REGION_CHILD_CALL, beginRegion);
+    }
 }
 
 /** @brief Adds a call to issueDebugLog(function, msg). */
 #ifdef MOT_JIT_DEBUG
 inline void IssueDebugLogImpl(JitLlvmCodeGenContext* ctx, const char* function, const char* msg)
 {
-    llvm::ConstantInt* function_value = llvm::ConstantInt::get(ctx->INT64_T, (int64_t)function, true);
-    llvm::ConstantInt* msg_value = llvm::ConstantInt::get(ctx->INT64_T, (int64_t)msg, true);
-    llvm::Value* function_ptr = llvm::ConstantExpr::getIntToPtr(function_value, ctx->STR_T);
-    llvm::Value* msg_ptr = llvm::ConstantExpr::getIntToPtr(msg_value, ctx->STR_T);
-    AddFunctionCall(ctx, ctx->debugLogFunc, function_ptr, msg_ptr, nullptr);
+    llvm::Value* functionValue = ctx->m_builder->CreateGlobalStringPtr(function);
+    llvm::Value* msgValue = ctx->m_builder->CreateGlobalStringPtr(msg);
+    llvm_util::AddFunctionCall(ctx, ctx->debugLogFunc, functionValue, msgValue, nullptr);
 }
 #endif
 

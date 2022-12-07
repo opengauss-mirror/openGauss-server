@@ -59,11 +59,12 @@ public:
      * @param[opt] reserveMemoryKb Specify a memory reservation for the session in kilo bytes.
      * Pass zero to use default session reservation (see workMemoryMaxLimitKB in mot_configuration.h).
      * @param[opt] userData User data associated with the session.
+     * @param[opt] is this an MTLS recovery session.
      * @return The new session context.
      * @see @ref workMemoryMaxLimitKB)
      */
     SessionContext* CreateSessionContext(bool isLightSession = false, uint64_t reserveMemoryKb = 0,
-        void* userData = nullptr, ConnectionId connectionId = INVALID_CONNECTION_ID);
+        void* userData = nullptr, ConnectionId connectionId = INVALID_CONNECTION_ID, bool isMtls = false);
 
     /**
      * @brief Destroys a session context.
@@ -99,8 +100,12 @@ public:
     {
         GcManager* result = nullptr;
         SessionContext* sessionContext = MOT_GET_CURRENT_SESSION_CONTEXT();
-        if (sessionContext != nullptr) {
+        if (sessionContext != nullptr && !sessionContext->IsMtlsRecoverySession()) {
             result = sessionContext->GetTxnManager()->GetGcSession();
+        } else {
+            if (u_sess->mot_cxt.txn_manager != nullptr) {
+                result = u_sess->mot_cxt.txn_manager->GetGcSession();
+            }
         }
         return result;
     }

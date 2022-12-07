@@ -94,9 +94,9 @@ mot_string GlobalStatistics::MakeName(const char* baseName, NamingScheme namingS
 
     if ((namingScheme == NamingScheme::NAMING_SCHEME_TOTAL) ||
         (namingScheme == NamingScheme::NAMING_SCHEME_TOTAL_PREV)) {
-        result.format("%s[TOTAL]", baseName);
+        (void)result.format("%s[TOTAL]", baseName);
     } else if (namingScheme == NamingScheme::NAMING_SCHEME_DIFF) {
-        result.format("%s[DIFF]", baseName);
+        (void)result.format("%s[DIFF]", baseName);
     }
 
     return result;

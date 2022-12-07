@@ -22,8 +22,8 @@
  * -------------------------------------------------------------------------
  */
 
-#include <math.h>
-#include <stdio.h>
+#include <cmath>
+#include <cstdio>
 
 #include "numeric_statistic_variable.h"
 
@@ -32,6 +32,7 @@ NumericStatisticVariable::NumericStatisticVariable(
     const char* name, uint64_t factor /* = 1 */, const char* units /* = "" */, uint64_t limit /* = ULONG_LONG_MAX */)
     : StatisticVariable(name),
       m_factor(factor),
+      m_units{0},
       m_limit(limit),
       m_sum(0),
       m_squareSum(0),

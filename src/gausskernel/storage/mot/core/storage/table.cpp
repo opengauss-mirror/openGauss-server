@@ -23,16 +23,16 @@
  */
 
 #include <malloc.h>
-#include <string.h>
+#include <cstring>
 #include <algorithm>
 #include "table.h"
+#include "txn_table.h"
 #include "mot_engine.h"
 #include "utilities.h"
 #include "txn.h"
 #include "txn_access.h"
 #include "txn_insert_action.h"
 #include "redo_log_writer.h"
-#include "recovery_manager.h"
 
 namespace MOT {
 IMPLEMENT_CLASS_LOGGER(Table, Storage);
@@ -59,20 +59,33 @@ Table::~Table()
         }
 
         free(m_columns);
+        m_columns = nullptr;
     }
 
     if (m_indexes != nullptr) {
         free(m_indexes);
+        m_indexes = nullptr;
     }
 
     if (m_rowPool) {
         ObjAllocInterface::FreeObjPool(&m_rowPool);
     }
 
+    if (m_tombStonePool) {
+        ObjAllocInterface::FreeObjPool(&m_tombStonePool);
+    }
+
     int destroyRc = pthread_rwlock_destroy(&m_rwLock);
     if (destroyRc != 0) {
         MOT_LOG_ERROR("~Table: rwlock destroy failed (%d)", destroyRc);
     }
+
+    destroyRc = pthread_mutex_destroy(&m_metaLock);
+    if (destroyRc != 0) {
+        MOT_LOG_ERROR("~Table: metaLock destroy failed (%d)", destroyRc);
+    }
+
+    m_primaryIndex = nullptr;
 }
 
 bool Table::Init(const char* tableName, const char* longName, unsigned int fieldCnt, uint64_t tableExId)
@@ -83,11 +96,17 @@ bool Table::Init(const char* tableName, const char* longName, unsigned int field
         return false;
     }
 
-    m_tableName.assign(tableName);
-    m_longTableName.assign(longName);
+    initRc = pthread_mutex_init(&m_metaLock, NULL);
+    if (initRc != 0) {
+        MOT_LOG_ERROR("failed to initialize Table %s, could not init metalock (%d)", tableName, initRc);
+        return false;
+    }
+
+    (void)m_tableName.assign(tableName);
+    (void)m_longTableName.assign(longName);
 
     // allocate columns
-    MOT_LOG_DEBUG("GC Create table id %d table name %s table addr = %p \n", m_tableId, tableName, this);
+    MOT_LOG_DEBUG("GC Create table id %d table name %s table addr = %p", m_tableId, tableName, this);
     this->m_columns = (Column**)memalign(CL_SIZE, fieldCnt * sizeof(Column*));
     if (m_columns == nullptr) {
         return false;
@@ -108,7 +127,7 @@ bool Table::Init(const char* tableName, const char* longName, unsigned int field
     this->m_tupleSize = 0;
     this->m_maxFields = (unsigned int)fieldCnt;
 
-    MOT_LOG_DEBUG("Table::%s %s TableId:%d ExId:%d\n", __func__, this->m_longTableName.c_str(), m_tableId, m_tableExId);
+    MOT_LOG_DEBUG("Table::%s %s TableId:%d ExId:%d", __func__, this->m_longTableName.c_str(), m_tableId, m_tableExId);
     return true;
 }
 
@@ -117,6 +136,18 @@ bool Table::InitRowPool(bool local)
     bool result = true;
     m_rowPool = ObjAllocInterface::GetObjPool(sizeof(Row) + m_tupleSize, local);
     if (!m_rowPool) {
+        MOT_REPORT_ERROR(
+            MOT_ERROR_OOM, "Initialize Table", "Failed to allocate row pool for table %s", m_longTableName.c_str());
+        result = false;
+    }
+    return result;
+}
+
+bool Table::InitTombStonePool(bool local)
+{
+    bool result = true;
+    m_tombStonePool = ObjAllocInterface::GetObjPool(sizeof(Row), local);
+    if (!m_tombStonePool) {
         MOT_REPORT_ERROR(
             MOT_ERROR_OOM, "Initialize Table", "Failed to allocate row pool for table %s", m_longTableName.c_str());
         result = false;
@@ -134,6 +165,10 @@ void Table::ClearThreadMemoryCache()
 
     if (m_rowPool != nullptr) {
         m_rowPool->ClearThreadCache();
+    }
+
+    if (m_tombStonePool != nullptr) {
+        m_tombStonePool->ClearThreadCache();
     }
 }
 
@@ -192,9 +227,7 @@ bool Table::UpdatePrimaryIndex(MOT::Index* index, TxnManager* txn, uint32_t tid)
     if (this->m_primaryIndex) {
         DecIndexColumnUsage(this->m_primaryIndex);
         if (txn == nullptr) {
-            if (DeleteIndex(this->m_primaryIndex) != RC_OK) {
-                return false;
-            }
+            DeleteIndex(this->m_primaryIndex);
         } else {
             if (txn->DropIndex(this->m_primaryIndex) != RC_OK) {
                 return false;
@@ -212,16 +245,17 @@ bool Table::UpdatePrimaryIndex(MOT::Index* index, TxnManager* txn, uint32_t tid)
     return true;
 }
 
-RC Table::DeleteIndex(MOT::Index* index)
+void Table::DeleteIndex(MOT::Index* index)
 {
     GcManager::ClearIndexElements(index->GetIndexId());
     delete index;
-
-    return RC::RC_OK;
 }
 
 bool Table::AddSecondaryIndex(const string& indexName, MOT::Index* index, TxnManager* txn, uint32_t tid)
 {
+    index->SetTable(this);
+    IncIndexColumnUsage(index);
+
     // Should we check for duplicate indices with same name?
     // first create secondary index data
     bool createdIndexData =
@@ -237,9 +271,6 @@ bool Table::AddSecondaryIndex(const string& indexName, MOT::Index* index, TxnMan
 
     // add index to table structure after the data is in place
     // this order prevents index usage before all rows are indexed
-    index->SetTable(this);
-    IncIndexColumnUsage(index);
-
     m_secondaryIndexes[indexName] = index;
     m_indexes[m_numIndexes] = index;
     ++m_numIndexes;
@@ -262,7 +293,7 @@ bool Table::CreateSecondaryIndexDataNonTransactional(MOT::Index* index, uint32_t
     // iterate over primary index and insert secondary index keys
     while (it->IsValid()) {
         Row* row = it->GetRow();
-        if (row == nullptr) {
+        if (row == nullptr or row->IsRowDeleted()) {
             it->Next();
             continue;
         }
@@ -290,7 +321,6 @@ bool Table::CreateSecondaryIndexData(MOT::Index* index, TxnManager* txn)
 {
     RC status = RC_OK;
     bool error = false;
-    Key* key = nullptr;
     bool ret = true;
     IndexIterator* it = m_indexes[0]->Begin(txn->GetThdId());
 
@@ -300,14 +330,16 @@ bool Table::CreateSecondaryIndexData(MOT::Index* index, TxnManager* txn)
         return false;
     }
 
+    // increment statement count to avoid not seeing inserted index rows...
+    // this was found as part of a RC_LOCAL_ROW_NOT_VISIBLE on index creation
+    // in recovery
+    txn->IncStmtCount();
+
     do {
         // return if empty
-        if (!it->IsValid())
+        if (!it->IsValid()) {
             break;
-
-        // increment statement count to avoid not seeing inserted index rows...
-        // this was found as part of a RC_LOCAL_ROW_NOT_VISIBLE on index creation
-        txn->IncStmtCount();
+        }
 
         // iterate over primary index and insert secondary index keys
         while (it->IsValid()) {
@@ -321,9 +353,7 @@ bool Table::CreateSecondaryIndexData(MOT::Index* index, TxnManager* txn)
                 case RC::RC_LOCAL_ROW_NOT_FOUND:
                     break;
                 case RC::RC_LOCAL_ROW_FOUND:
-                    if (row == nullptr) {
-                        row = tmpRow;
-                    }
+                    row = tmpRow;
                     break;
                 case RC::RC_MEMORY_ALLOCATION_ERROR:
                     // error handling
@@ -333,25 +363,29 @@ bool Table::CreateSecondaryIndexData(MOT::Index* index, TxnManager* txn)
                     break;
             }
 
-            if (row == nullptr) {
+            if (row == nullptr or row->IsRowDeleted()) {
                 it->Next();
                 continue;
             }
 
             if (!error) {
-                key = txn->GetTxnKey(index);
-                index->BuildKey(this, row, key);
-                txn->GetNextInsertItem()->SetItem(row, index, key);
-                status = txn->InsertRow(row);
-                if (status != RC_OK) {
+                InsItem* insItem = txn->GetNextInsertItem();
+                if (insItem == nullptr) {
+                    MOT_REPORT_ERROR(MOT_ERROR_RESOURCE_LIMIT, "Insert Row", "Cannot get insert item");
                     error = true;
-                    if (MOT_IS_SEVERE()) {  // report to error stack only in severe error conditions (we do not want to
-                                            // burden "unique violation" scenario)
-                        MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
-                            "Create Secondary Index",
-                            "Failed to insert row into unique secondary index %s in table %s",
-                            index->GetName().c_str(),
-                            m_longTableName.c_str());
+                } else {
+                    insItem->SetItem(row, index);
+                    status = txn->InsertRow(row);
+                    if (status != RC_OK) {
+                        error = true;
+                        // report to error stack only in severe error conditions (avoid log flooding)
+                        if (MOT_IS_SEVERE()) {
+                            MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
+                                "Create Secondary Index",
+                                "Failed to insert row into unique secondary index %s in table %s",
+                                index->GetName().c_str(),
+                                m_longTableName.c_str());
+                        }
                     }
                 }
             }
@@ -408,22 +442,22 @@ RC Table::InsertRowNonTransactional(Row* row, uint64_t tid, Key* k, bool skipSec
         pk->InitKey(ix->GetKeyLength());
         // set primary key
         if (ix->IsFakePrimary()) {
-            surrogateprimaryKey = _surr_gen.GetSurrogateKey(MOT_GET_CURRENT_CONNECTION_ID());
-            surrogateprimaryKey = htobe64(surrogateprimaryKey);
-            row->SetSurrogateKey(surrogateprimaryKey);
+            surrogateprimaryKey = row->GetSurrogateKey();
+            row->SetSurrogateKey();
             pk->CpKey((uint8_t*)&surrogateprimaryKey, sizeof(uint64_t));
         } else {
             ix->BuildKey(this, row, pk);
         }
     }
-    Sentinel* res = ix->IndexInsert(pk, row, tid);
 
+    Sentinel* res = ix->IndexInsert(pk, row, tid);
     if (res == nullptr) {
         if (MOT_IS_SEVERE()) {
             MOT_REPORT_ERROR(MOT_ERROR_INTERNAL, "Insert row", "Failed to insert row to index");
         }
         return MOT_GET_LAST_ERROR_RC();
     } else {
+        res->SetStartCSN(row->GetCommitSequenceNumber());
         row->SetPrimarySentinel(res);
     }
 
@@ -433,7 +467,8 @@ RC Table::InsertRowNonTransactional(Row* row, uint64_t tid, Key* k, bool skipSec
             ix = GetSecondaryIndex(i);
             key.InitKey(ix->GetKeyLength());
             ix->BuildKey(this, row, &key);
-            if (ix->IndexInsert(&key, row, tid) == nullptr) {
+            res = ix->IndexInsert(&key, row, tid);
+            if (res == nullptr) {
                 if (MOT_IS_SEVERE()) {
                     MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
                         "Insert row",
@@ -443,6 +478,10 @@ RC Table::InsertRowNonTransactional(Row* row, uint64_t tid, Key* k, bool skipSec
                 }
                 return MOT_GET_LAST_ERROR_RC();
             }
+            res->SetStartCSN(row->GetCommitSequenceNumber());
+            if (ix->GetIndexOrder() == IndexOrder::INDEX_ORDER_SECONDARY_UNIQUE) {
+                static_cast<SecondarySentinelUnique*>(res)->GetTopNode()->SetStartCSN(row->GetCommitSequenceNumber());
+            }
         }
     }
 
@@ -451,150 +490,152 @@ RC Table::InsertRowNonTransactional(Row* row, uint64_t tid, Key* k, bool skipSec
 
 RC Table::InsertRow(Row* row, TxnManager* txn)
 {
-    MOT::Key* key = nullptr;
-    uint64_t surrogateprimaryKey = 0;
     MOT::Index* ix = GetPrimaryIndex();
     uint32_t numIndexes = GetNumIndexes();
-    MOT::Key* cleanupKeys[numIndexes] = {nullptr};
 
     // add row
     // set primary key
     row->SetRowId(txn->GetSurrogateKey());
 
-    key = txn->GetTxnKey(ix);
-    if (key == nullptr) {
-        DestroyRow(row);
-        MOT_REPORT_ERROR(MOT_ERROR_OOM, "Insert Row", "Failed to create primary key");
-        return RC_MEMORY_ALLOCATION_ERROR;
-    }
-    cleanupKeys[0] = key;
     if (ix->IsFakePrimary()) {
-        surrogateprimaryKey = htobe64(row->GetRowId());
-        row->SetSurrogateKey(surrogateprimaryKey);
-        key->CpKey((uint8_t*)&surrogateprimaryKey, sizeof(uint64_t));
-    } else {
-        ix->BuildKey(this, row, key);
+        row->SetSurrogateKey();
     }
 
-    txn->GetNextInsertItem()->SetItem(row, ix, key);
+    InsItem* insItem = txn->GetNextInsertItem();
+    if (insItem == nullptr) {
+        MOT_REPORT_ERROR(MOT_ERROR_RESOURCE_LIMIT, "Insert Row", "Cannot get insert item for inserting a row");
+        return RC_MEMORY_ALLOCATION_ERROR;
+    }
+    insItem->SetItem(row, ix);
 
     // add secondary indexes
     for (uint16_t i = 1; i < numIndexes; i++) {
         ix = GetSecondaryIndex(i);
-        key = txn->GetTxnKey(ix);
-        if (key == nullptr) {
-            MOT_REPORT_ERROR(
-                MOT_ERROR_OOM, "Insert Row", "Failed to create key for secondary index %s", ix->GetName().c_str());
-            for (uint16_t j = 0; j < numIndexes; j++) {
-                if (cleanupKeys[j] != nullptr) {
-                    MOTCurrTxn->DestroyTxnKey(cleanupKeys[j]);
-                }
-            }
-            DestroyRow(row);
-            MOTCurrTxn->Rollback();
+        insItem = txn->GetNextInsertItem();
+        if (insItem == nullptr) {
+            MOT_REPORT_ERROR(MOT_ERROR_RESOURCE_LIMIT, "Insert Row", "Cannot get insert item for inserting a row");
             return RC_MEMORY_ALLOCATION_ERROR;
         }
-        cleanupKeys[i] = key;
-        ix->BuildKey(this, row, key);
-        txn->GetNextInsertItem()->SetItem(row, ix, key);
+        insItem->SetItem(row, ix);
     }
 
     return txn->InsertRow(row);
 }
 
-Row* Table::RemoveRow(Row* row, uint64_t tid, GcManager* gc)
+PrimarySentinel* Table::GCRemoveRow(GcQueue::DeleteVector* deletes, Row* tombstone, GC_OPERATION_TYPE gcOper)
 {
     MaxKey key;
-    Row* OutputRow = nullptr;
+    PrimarySentinel* OutputSentinel = nullptr;
+    Row* VersionRow = tombstone->GetNextVersion();
+    if (VersionRow == nullptr) {
+        return nullptr;
+    }
+    uint64_t version_csn = VersionRow->GetCommitSequenceNumber();
     uint32_t numIndexes = GetNumIndexes();
     Sentinel* currSentinel = nullptr;
     // Build keys and mark sentinels for delete
     for (uint16_t i = 0; i < numIndexes; i++) {
         MOT::Index* ix = GetIndex(i);
+        // Check if the scheme is matching the current row
+        if (version_csn <= ix->GetSnapshot()) {
+            continue;
+        }
         switch (ix->GetIndexOrder()) {
             case IndexOrder::INDEX_ORDER_PRIMARY: {
                 key.InitKey(ix->GetKeyLength());
-                ix->BuildKey(this, row, &key);
-                currSentinel = ix->IndexReadImpl(&key, tid);
+                ix->BuildKey(this, VersionRow, &key);
+                currSentinel = ix->IndexReadImpl(&key, 0);
                 MOT_ASSERT(currSentinel != nullptr);
-                OutputRow = currSentinel->GetData();
-                RC rc = currSentinel->RefCountUpdate(DEC, tid);
+                MOT_ASSERT(currSentinel->GetData() != nullptr);
+                // Increase reference count for the reclaim of the primary Sentinel
+                (void)static_cast<PrimarySentinel*>(currSentinel)->GetGcInfo().RefCountUpdate(INC);
+                RC rc = currSentinel->RefCountUpdate(DEC);
                 if (rc == RC::RC_INDEX_DELETE) {
-                    currSentinel = ix->IndexRemove(&key, tid);
-                    if (likely(gc != nullptr)) {
-                        gc->GcRecordObject(
-                            ix->GetIndexId(), currSentinel, nullptr, ix->SentinelDtor, SENTINEL_SIZE(ix));
-                        gc->GcRecordObject(ix->GetIndexId(), row, nullptr, row->RowDtor, ROW_SIZE_FROM_POOL(this));
-                    } else {
-                        if (!MOTEngine::GetInstance()->IsRecovering()) {
-                            MOT_LOG_ERROR("RemoveRow called without GC when not recovering");
-                            return nullptr;
-                        }
-                        DestroyRow(row);
-                        ix->SentinelDtor(currSentinel, nullptr, false);
+                    // At this point the sentinel is detached from the tree!
+                    OutputSentinel = static_cast<PrimarySentinel*>(currSentinel);
+                    currSentinel = ix->IndexRemove(&key, 0);
+                    MOT_ASSERT(currSentinel->GetCounter() == 0);
+                    MOT_ASSERT(tombstone->GetPrimarySentinel() == currSentinel);
+                    MOT_LOG_DEBUG("Detaching ps %p CSN %lu ",
+                        tombstone->GetPrimarySentinel(),
+                        tombstone->GetCommitSequenceNumber());
+                    if (gcOper != GC_OPERATION_TYPE::GC_OPER_DROP_INDEX) {
+                        deletes->push_back(currSentinel);
                     }
+                } else {
+                    (void)static_cast<PrimarySentinel*>(currSentinel)->GetGcInfo().RefCountUpdate(DEC);
+                    MOT_LOG_DEBUG("Skipping primary cleanup %s %d ", __func__, __LINE__);
+                    continue;
                 }
                 break;
             }
             case IndexOrder::INDEX_ORDER_SECONDARY: {
                 key.InitKey(ix->GetKeyLength());
-                ix->BuildKey(this, row, &key);
-                currSentinel = ix->IndexReadImpl(&key, tid);
-                MOT_ASSERT(currSentinel != nullptr);
-                RC rc = currSentinel->RefCountUpdate(DEC, tid);
-                if (rc == RC::RC_INDEX_DELETE) {
-                    currSentinel = ix->IndexRemove(&key, tid);
-                    if (likely(gc != nullptr)) {
-                        gc->GcRecordObject(
-                            ix->GetIndexId(), currSentinel, nullptr, ix->SentinelDtor, SENTINEL_SIZE(ix));
-                    } else {
-                        if (!MOTEngine::GetInstance()->IsRecovering()) {
-                            MOT_LOG_ERROR("RemoveRow called without GC when not recovering");
-                            return nullptr;
+                ix->BuildKey(this, VersionRow, &key);
+                currSentinel = ix->IndexReadImpl(&key, 0);
+                if (currSentinel != nullptr) {
+                    RC rc = currSentinel->RefCountUpdate(DEC);
+                    if (rc == RC::RC_INDEX_DELETE) {
+                        MOT_LOG_DEBUG("Releasing SS memory %s %d ", __func__, __LINE__);
+                        currSentinel = ix->IndexRemove(&key, 0);
+                        if (gcOper != GC_OPERATION_TYPE::GC_OPER_DROP_INDEX) {
+                            deletes->push_back(currSentinel);
+                        } else {
+                            ix->ReclaimSentinel(currSentinel);
                         }
-                        ix->SentinelDtor(currSentinel, nullptr, false);
                     }
                 }
                 break;
             }
+            case IndexOrder::INDEX_ORDER_SECONDARY_UNIQUE: {
+                key.InitKey(ix->GetKeyLength());
+                ix->BuildKey(this, VersionRow, &key);
+                currSentinel = ix->IndexReadImpl(&key, 0);
+                if (currSentinel != nullptr) {
+                    GCRemoveSecondaryUnique(deletes, tombstone, gcOper, ix, currSentinel, &key);
+                }
+                break;
+            }
+            default:
+                break;
         }
-        MOT_ASSERT(currSentinel != nullptr);
-        MOT_ASSERT(currSentinel->IsCommited() == true);
     }
-    return OutputRow;
+    return OutputSentinel;
 }
 
-Row* Table::RemoveKeyFromIndex(Row* row, Sentinel* sentinel, uint64_t tid, GcManager* gc)
+void Table::GCRemoveSecondaryUnique(GcQueue::DeleteVector* deletes, Row* tombstone, GC_OPERATION_TYPE gcOper,
+    MOT::Index* ix, Sentinel* currSentinel, const Key* key)
 {
-    MaxKey key;
-    Row* OutputRow = nullptr;
-    MOT::Index* ix = sentinel->GetIndex();
-    Sentinel* currSentinel = nullptr;
-    MOT_ASSERT(sentinel != nullptr);
-    RC rc = sentinel->RefCountUpdate(DEC, tid);
+    if (currSentinel == nullptr) {
+        return;
+    }
+
+    // Multiple threads might try to reclaim concurrently from different positions in the primary
+    // sentinel node chain. So, we must ensure protection by detaching the unused nodes (cutting the
+    // chain) within the RefCount lock.
+    currSentinel->LockRefCount();
+    RC rc = currSentinel->RefCountUpdateNoLock(DEC);
     if (rc == RC::RC_INDEX_DELETE) {
-        key.InitKey(ix->GetKeyLength());
-        ix->BuildKey(this, row, &key);
-#ifdef MOT_DEBUG
-        currSentinel = ix->IndexReadImpl(&key, tid);
-        MOT_ASSERT(currSentinel == sentinel);
-        MOT_ASSERT(currSentinel->GetCounter() == 0);
-#endif
-        currSentinel = ix->IndexRemove(&key, tid);
-        MOT_ASSERT(currSentinel == sentinel);
-        MOT_ASSERT(currSentinel->GetCounter() == 0);
-        if (likely(gc != nullptr)) {
-            if (ix->GetIndexOrder() == IndexOrder::INDEX_ORDER_PRIMARY) {
-                OutputRow = currSentinel->GetData();
-                MOT_ASSERT(OutputRow != nullptr);
-                gc->GcRecordObject(ix->GetIndexId(), currSentinel, nullptr, Index::SentinelDtor, SENTINEL_SIZE(ix));
-                gc->GcRecordObject(ix->GetIndexId(), OutputRow, nullptr, Row::RowDtor, ROW_SIZE_FROM_POOL(this));
-            } else {
-                gc->GcRecordObject(ix->GetIndexId(), currSentinel, nullptr, Index::SentinelDtor, SENTINEL_SIZE(ix));
-            }
+        currSentinel->UnlockRefCount();
+        MOT_LOG_DEBUG("Releasing SS Unique memory %s %d ", __func__, __LINE__);
+        currSentinel = ix->IndexRemove(key, 0);
+        if (gcOper != GC_OPERATION_TYPE::GC_OPER_DROP_INDEX) {
+            deletes->push_back(currSentinel);
+        } else {
+            ix->ReclaimSentinel(currSentinel);
+        }
+    } else {
+        // Reclaim deleted nodes
+        uint64_t snapshot = tombstone->GetCommitSequenceNumber();
+        PrimarySentinelNode* detachedChain = nullptr;
+        static_cast<SecondarySentinelUnique*>(currSentinel)->DetachUnusedNodes(snapshot, detachedChain);
+        currSentinel->UnlockRefCount();
+
+        // Once the detached from the chain, we can safely release the detached nodes (if any).
+        if (detachedChain != nullptr) {
+            SecondarySentinelUnique::ReleaseNodeChain(detachedChain, ix);
         }
     }
-    return OutputRow;
 }
 
 Row* Table::CreateNewRow()
@@ -606,9 +647,49 @@ Row* Table::CreateNewRow()
     return row;
 }
 
+Row* Table::CreateTombStone()
+{
+    Row* row = m_tombStonePool->Alloc<Row>(this);
+    if (row == nullptr) {
+        MOT_REPORT_ERROR(
+            MOT_ERROR_OOM, "Create Row", "Failed to create new tombstone in table %s", m_longTableName.c_str());
+    }
+    return row;
+}
+
+Row* Table::CreateNewRowCopy(const Row* r, AccessType type)
+{
+    Row* row = nullptr;
+    if (type != DEL) {
+        row = m_rowPool->Alloc<Row>(*r, this);
+    } else {
+        row = m_tombStonePool->Alloc<Row>(this);
+    }
+
+    if (row == nullptr) {
+        MOT_REPORT_ERROR(
+            MOT_ERROR_OOM, "Create Row", "Failed to copy or create new row in table %s", m_longTableName.c_str());
+        return nullptr;
+    }
+    if (type == DEL) {
+        row->CopyHeader(*r);
+        row->SetDeletedRow();
+    }
+    return row;
+}
+
 void Table::DestroyRow(Row* row)
 {
-    m_rowPool->Release<Row>(row);
+    if (row->IsRowDeleted() == false) {
+        // in case of rollback the TxnTable row pool was destroyed
+        // no need to release the row;
+        if (IsTxnTable() && m_rowPool == nullptr) {
+            return;
+        }
+        m_rowPool->Release<Row>(row);
+    } else {
+        m_tombStonePool->Release<Row>(row);
+    }
 }
 
 bool Table::CreateMultipleRows(size_t numRows, Row* rows[])
@@ -657,20 +738,24 @@ RC Table::AddColumn(
     const char* colName, uint64_t size, MOT_CATALOG_FIELD_TYPES type, bool isNotNull, unsigned int envelopeType)
 {
     // validate input parameters
-    if (!colName || type >= MOT_CATALOG_FIELD_TYPES::MOT_TYPE_UNKNOWN)
+    if (!colName || type >= MOT_CATALOG_FIELD_TYPES::MOT_TYPE_UNKNOWN) {
         return RC_UNSUPPORTED_COL_TYPE;
+    }
 
-    if (m_fieldCnt == m_maxFields)
+    if (m_fieldCnt == m_maxFields) {
         return RC_TABLE_EXCEEDS_MAX_DECLARED_COLS;
+    }
 
     // column size is uint64_t but tuple size is uint32_t, so we must check for overflow
-    if (size >= (uint64_t)std::numeric_limits<decltype(this->m_tupleSize)>::max())
+    if (size >= (uint64_t)std::numeric_limits<decltype(this->m_tupleSize)>::max()) {
         return RC_EXCEEDS_MAX_ROW_SIZE;
+    }
 
     decltype(this->m_tupleSize) old_size = m_tupleSize;
     decltype(this->m_tupleSize) new_size = old_size + size;
-    if (new_size < old_size)
+    if (new_size < old_size) {
         return RC_COL_SIZE_INVALID;
+    }
 
     m_columns[m_fieldCnt] = Column::AllocColumn(type);
     if (m_columns[m_fieldCnt] == nullptr) {
@@ -683,9 +768,12 @@ RC Table::AddColumn(
             m_longTableName.c_str());
         return RC_MEMORY_ALLOCATION_ERROR;
     }
+
     m_columns[m_fieldCnt]->m_nameLen = strlen(colName);
-    if (m_columns[m_fieldCnt]->m_nameLen >= Column::MAX_COLUMN_NAME_LEN)
+    if (m_columns[m_fieldCnt]->m_nameLen >= Column::MAX_COLUMN_NAME_LEN) {
         return RC_COL_NAME_EXCEEDS_MAX_SIZE;
+    }
+
     errno_t erc = memcpy_s(&(m_columns[m_fieldCnt]->m_name[0]),
         Column::MAX_COLUMN_NAME_LEN,
         colName,
@@ -705,6 +793,93 @@ RC Table::AddColumn(
     return RC_OK;
 }
 
+RC Table::CreateColumn(Column*& newColumn, const char* colName, uint64_t size, MOT_CATALOG_FIELD_TYPES type,
+    bool isNotNull, unsigned int envelopeType, bool hasDefault, uintptr_t defValue, size_t defLen)
+{
+    uint32_t newColCount = m_fieldCnt + 1;
+    uint64_t newNullBytesSize = BITMAP_GETLEN(newColCount);
+    bool isNullBytesSizeChanged = false;
+    // calculate new row size by adding size of new column and difference of NULLBUTES column size
+    uint32_t newTupleSize = m_tupleSize + size + newNullBytesSize - m_columns[0]->m_size;
+
+    RC rc = RC_OK;
+    errno_t erc;
+
+    if (!colName || type >= MOT_CATALOG_FIELD_TYPES::MOT_TYPE_UNKNOWN) {
+        return RC_UNSUPPORTED_COL_TYPE;
+    }
+
+    uint64_t colId = GetFieldId(colName);
+    if (colId < m_fieldCnt) {
+        MOT_LOG_INFO("The column %s already exists in table %s", colName, GetTableName().c_str());
+        return rc;
+    }
+
+    // column size is uint64_t but tuple size is uint32_t, so we must check for overflow
+    if (size >= (uint64_t)std::numeric_limits<decltype(this->m_tupleSize)>::max()) {
+        return RC_EXCEEDS_MAX_ROW_SIZE;
+    }
+
+    if (newTupleSize <= m_tupleSize) {
+        return RC_COL_SIZE_INVALID;
+    }
+
+    if (newTupleSize >= MAX_TUPLE_SIZE) {
+        return RC_EXCEEDS_MAX_ROW_SIZE;
+    }
+
+    if (newNullBytesSize > m_columns[0]->m_size) {
+        isNullBytesSizeChanged = true;
+    }
+
+    // actually allocate new column
+    do {
+        newColumn = Column::AllocColumn(type);
+        if (newColumn == nullptr) {
+            MOT_REPORT_ERROR(MOT_ERROR_OOM,
+                "Add Column",
+                "Failed to allocate column %s of type %u, having size %" PRIu64 " bytes, for table %s",
+                colName,
+                (unsigned)type,
+                size,
+                m_longTableName.c_str());
+            rc = RC_MEMORY_ALLOCATION_ERROR;
+            break;
+        }
+        newColumn->m_nameLen = strlen(colName);
+        if (newColumn->m_nameLen >= Column::MAX_COLUMN_NAME_LEN) {
+            rc = RC_COL_NAME_EXCEEDS_MAX_SIZE;
+            break;
+        }
+        erc = memcpy_s(&(newColumn->m_name[0]), Column::MAX_COLUMN_NAME_LEN, colName, newColumn->m_nameLen + 1);
+        securec_check(erc, "\0", "\0");
+
+        newColumn->m_type = type;
+        newColumn->m_size = size;
+        newColumn->m_id = m_fieldCnt;
+        newColumn->m_offset = (isNullBytesSizeChanged ? m_tupleSize + 1 : m_tupleSize);
+        newColumn->m_isNotNull = isNotNull;
+        newColumn->m_envelopeType = envelopeType;
+        newColumn->m_isCommitted = false;
+        newColumn->SetKeySize();
+        if (hasDefault) {
+            rc = newColumn->SetDefaultValue(defValue, defLen);
+            if (rc != RC_OK) {
+                MOT_LOG_ERROR("Failed to set default value for column %s", colName);
+                break;
+            }
+        }
+    } while (false);
+
+    if (rc != RC_OK) {
+        if (newColumn != nullptr) {
+            delete newColumn;
+            newColumn = nullptr;
+        }
+    }
+    return rc;
+}
+
 bool Table::ModifyColumnSize(const uint32_t& id, const uint64_t& size)
 {
     // validate input parameters
@@ -718,7 +893,7 @@ bool Table::ModifyColumnSize(const uint32_t& id, const uint64_t& size)
     }
 
     uint64_t oldColSize = m_columns[id]->m_size;
-    uint64_t newTupleSize = ((uint64_t)m_tupleSize) - oldColSize + size;
+    uint64_t newTupleSize = (((uint64_t)m_tupleSize) - oldColSize) + size;
     if (newTupleSize >= (uint64_t)std::numeric_limits<decltype(this->m_tupleSize)>::max()) {
         return false;
     }
@@ -728,7 +903,7 @@ bool Table::ModifyColumnSize(const uint32_t& id, const uint64_t& size)
 
     // now we need to fix the offset of all subsequent fields
     for (uint32_t i = id + 1; i < m_fieldCnt; ++i) {
-        m_columns[id]->m_offset = m_columns[id]->m_offset - oldColSize + size;
+        m_columns[id]->m_offset = (m_columns[id]->m_offset - oldColSize) + size;
     }
 
     return true;
@@ -749,38 +924,12 @@ uint64_t Table::GetFieldId(const char* name) const
     return (i < m_fieldCnt ? i : (uint64_t)-1);
 }
 
-void Table::PrintSchema()
+void Table::PrintSchema() const
 {
-    printf("\n[Table] %s\n", m_tableName.c_str());
+    (void)printf("\n[Table] %s\n", m_tableName.c_str());
     for (uint32_t i = 0; i < m_fieldCnt; i++) {
-        printf("\t%s\t%s\t%lu\n", GetFieldName(i), GetFieldTypeStr(i), GetFieldSize(i));
+        (void)printf("\t%s\t%s\t%lu\n", GetFieldName(i), GetFieldTypeStr(i), GetFieldSize(i));
     }
-}
-
-void Table::Truncate(TxnManager* txn)
-{
-    uint32_t pid = txn->GetThdId();
-    (void)pthread_rwlock_wrlock(&m_rwLock);
-
-    // first destroy secondary index data
-    for (int i = 1; i < m_numIndexes; i++) {
-        GcManager::ClearIndexElements(m_indexes[i]->GetIndexId());
-        m_indexes[i]->Truncate(false);
-    }
-
-    // destroy primary index data and row data
-    GcManager::ClearIndexElements(m_indexes[0]->GetIndexId());
-    m_indexes[0]->Truncate(false);
-    ObjAllocInterface::FreeObjPool(&m_rowPool);
-    m_rowPool = ObjAllocInterface::GetObjPool(sizeof(Row) + m_tupleSize, false);
-    if (!m_rowPool) {
-        MOT_REPORT_ERROR(MOT_ERROR_OOM,
-            "Truncate Table",
-            "Failed to allocate row pool after truncate in table %s",
-            m_longTableName.c_str());
-    }
-
-    (void)pthread_rwlock_unlock(&m_rwLock);
 }
 
 void Table::Compact(TxnManager* txn)
@@ -788,12 +937,13 @@ void Table::Compact(TxnManager* txn)
     uint32_t pid = txn->GetThdId();
     // first destroy secondary index data
     for (int i = 0; i < m_numIndexes; i++) {
-        GcManager::ClearIndexElements(m_indexes[i]->GetIndexId(), false);
+        GcManager::ClearIndexElements(m_indexes[i]->GetIndexId(), GC_OPERATION_TYPE::GC_OPER_TRUNCATE);
         m_indexes[i]->Compact(this, pid);
     }
+    ClearThreadMemoryCache();
 }
 
-uint64_t Table::GetTableSize()
+uint64_t Table::GetTableSize(uint64_t& netTotal)
 {
     PoolStatsSt stats;
     errno_t erc = memset_s(&stats, sizeof(PoolStatsSt), 0, sizeof(PoolStatsSt));
@@ -801,31 +951,53 @@ uint64_t Table::GetTableSize()
     stats.m_type = PoolStatsT::POOL_STATS_ALL;
 
     m_rowPool->GetStats(stats);
-    if (MOT_CHECK_LOG_LEVEL(LogLevel::LL_TRACE)) {
-        m_rowPool->PrintStats(stats, "GC_TEST", LogLevel::LL_TRACE);
-    }
+    m_rowPool->PrintStats(stats, "Row Pool", LogLevel::LL_INFO);
+
     uint64_t res = stats.m_poolCount * stats.m_poolGrossSize;
-    uint64_t netto = (stats.m_totalObjCount - stats.m_freeObjCount) * stats.m_objSize;
+    netTotal = (stats.m_totalObjCount - stats.m_freeObjCount) * stats.m_objSize;
 
     erc = memset_s(&stats, sizeof(PoolStatsSt), 0, sizeof(PoolStatsSt));
     securec_check(erc, "\0", "\0");
     stats.m_type = PoolStatsT::POOL_STATS_ALL;
 
-    MOT_LOG_INFO("Table %s memory size: gross: %lu", m_tableName.c_str(), res);
+    m_tombStonePool->GetStats(stats);
+    m_tombStonePool->PrintStats(stats, "TombStone Pool", LogLevel::LL_INFO);
+
+    res += stats.m_poolCount * stats.m_poolGrossSize;
+    netTotal += (stats.m_totalObjCount - stats.m_freeObjCount) * stats.m_objSize;
+
+    MOT_LOG_INFO("Table %s memory size - Gross: %lu, NetTotal: %lu", m_tableName.c_str(), res, netTotal);
     return res;
 }
 
-size_t Table::SerializeItemSize(Column* column)
+size_t Table::SerializeItemSize(Column* column) const
 {
     size_t ret = SerializableARR<char, Column::MAX_COLUMN_NAME_LEN>::SerializeSize(column->m_name) +
                  SerializablePOD<uint64_t>::SerializeSize(column->m_size) +
                  SerializablePOD<MOT_CATALOG_FIELD_TYPES>::SerializeSize(column->m_type) +
                  SerializablePOD<bool>::SerializeSize(column->m_isNotNull) +
-                 SerializablePOD<unsigned int>::SerializeSize(column->m_envelopeType);  // required for MOT JIT
+                 SerializablePOD<unsigned int>::SerializeSize(column->m_envelopeType) +  // required for MOT JIT
+                 SerializablePOD<bool>::SerializeSize(column->m_isDropped) +
+                 SerializablePOD<bool>::SerializeSize(column->m_hasDefault);
+    if (column->m_hasDefault) {
+        switch (column->m_type) {
+            case MOT_CATALOG_FIELD_TYPES::MOT_TYPE_BLOB:
+            case MOT_CATALOG_FIELD_TYPES::MOT_TYPE_VARCHAR:
+            case MOT_CATALOG_FIELD_TYPES::MOT_TYPE_DECIMAL:
+            case MOT_CATALOG_FIELD_TYPES::MOT_TYPE_TIMETZ:
+            case MOT_CATALOG_FIELD_TYPES::MOT_TYPE_TINTERVAL:
+            case MOT_CATALOG_FIELD_TYPES::MOT_TYPE_INTERVAL:
+                ret += SerializableCharBuf::SerializeSize(column->m_defSize);
+                break;
+            default:
+                ret += SerializablePOD<uint64_t>::SerializeSize(column->m_defValue);
+                break;
+        }
+    }
     return ret;
 }
 
-char* Table::SerializeItem(char* dataOut, Column* column)
+char* Table::SerializeItem(char* dataOut, Column* column) const
 {
     if (!column || !dataOut) {
         return nullptr;
@@ -835,20 +1007,49 @@ char* Table::SerializeItem(char* dataOut, Column* column)
     dataOut = SerializablePOD<MOT_CATALOG_FIELD_TYPES>::Serialize(dataOut, column->m_type);
     dataOut = SerializablePOD<bool>::Serialize(dataOut, column->m_isNotNull);
     dataOut = SerializablePOD<unsigned int>::Serialize(dataOut, column->m_envelopeType);  // required for MOT JIT
+    dataOut = SerializablePOD<bool>::Serialize(dataOut, column->m_isDropped);
+    dataOut = SerializablePOD<bool>::Serialize(dataOut, column->m_hasDefault);
+    if (column->m_hasDefault) {
+        switch (column->m_type) {
+            case MOT_CATALOG_FIELD_TYPES::MOT_TYPE_BLOB:
+            case MOT_CATALOG_FIELD_TYPES::MOT_TYPE_VARCHAR:
+            case MOT_CATALOG_FIELD_TYPES::MOT_TYPE_DECIMAL:
+            case MOT_CATALOG_FIELD_TYPES::MOT_TYPE_TIMETZ:
+            case MOT_CATALOG_FIELD_TYPES::MOT_TYPE_TINTERVAL:
+            case MOT_CATALOG_FIELD_TYPES::MOT_TYPE_INTERVAL:
+                if (column->m_defSize > 0) {
+                    dataOut =
+                        SerializableCharBuf::Serialize(dataOut, (char*)column->m_defValue, (size_t)column->m_defSize);
+                } else {
+                    dataOut = SerializablePOD<size_t>::Serialize(dataOut, column->m_defSize);
+                }
+                break;
+            default:
+                dataOut = SerializablePOD<uint64_t>::Serialize(dataOut, column->m_defValue);
+                break;
+        }
+    }
     return dataOut;
 }
 
-char* Table::DeserializeMeta(char* dataIn, CommonColumnMeta& meta, uint32_t metaVersion)
+char* Table::DeserializeMeta(char* dataIn, CommonColumnMeta& meta, uint32_t metaVersion) const
 {
     dataIn = SerializableARR<char, Column::MAX_COLUMN_NAME_LEN>::Deserialize(dataIn, meta.m_name);
     dataIn = SerializablePOD<uint64_t>::Deserialize(dataIn, meta.m_size);
     dataIn = SerializablePOD<MOT_CATALOG_FIELD_TYPES>::Deserialize(dataIn, meta.m_type);
     dataIn = SerializablePOD<bool>::Deserialize(dataIn, meta.m_isNotNull);
     dataIn = SerializablePOD<unsigned int>::Deserialize(dataIn, meta.m_envelopeType);  // required for MOT JIT
+    if (metaVersion >= MetadataProtoVersion::METADATA_VER_ALTER_COLUMN) {
+        dataIn = SerializablePOD<bool>::Deserialize(dataIn, meta.m_isDropped);
+        dataIn = SerializablePOD<bool>::Deserialize(dataIn, meta.m_hasDefault);
+    } else {
+        meta.m_isDropped = false;
+        meta.m_hasDefault = false;
+    }
     return dataIn;
 }
 
-size_t Table::SerializeItemSize(MOT::Index* index)
+size_t Table::SerializeItemSize(MOT::Index* index) const
 {
     size_t ret = SerializableSTR::SerializeSize(index->m_name) +
                  SerializablePOD<uint32_t>::SerializeSize(index->m_keyLength) +
@@ -864,7 +1065,7 @@ size_t Table::SerializeItemSize(MOT::Index* index)
     return ret;
 }
 
-char* Table::SerializeItem(char* dataOut, MOT::Index* index)
+char* Table::SerializeItem(char* dataOut, MOT::Index* index) const
 {
     if (!index || !dataOut) {
         return nullptr;
@@ -894,11 +1095,11 @@ RC Table::RemoveSecondaryIndex(MOT::Index* index, TxnManager* txn)
     do {
         SecondaryIndexMap::iterator itr = m_secondaryIndexes.find(index->GetName());
         if (MOT_EXPECT_TRUE(itr != m_secondaryIndexes.end())) {
-            MOT_LOG_DEBUG("logging drop index operation (tableId %u), index name: %s index id = %d \n",
+            MOT_LOG_DEBUG("Drop index operation (tableId %u), index name: %s index id = %d",
                 GetTableId(),
                 index->GetName().c_str(),
                 index->GetIndexId());
-            m_secondaryIndexes.erase(itr);
+            (void)m_secondaryIndexes.erase(itr);
         } else {
             if (m_numIndexes > 0 && (strcmp(m_indexes[0]->GetName().c_str(), index->GetName().c_str()) == 0)) {
                 MOT_LOG_INFO("Trying to remove primary index %s, not supported", index->GetName().c_str());
@@ -926,7 +1127,7 @@ RC Table::RemoveSecondaryIndex(MOT::Index* index, TxnManager* txn)
             m_indexes[m_numIndexes] = nullptr;
         }
         GcManager::ClearIndexElements(index->GetIndexId());
-        index->Truncate(true);
+        (void)index->Truncate(true);
 
         DecIndexColumnUsage(index);
         delete index;
@@ -934,9 +1135,8 @@ RC Table::RemoveSecondaryIndex(MOT::Index* index, TxnManager* txn)
     return res;
 }
 
-char* Table::DeserializeMeta(char* dataIn, CommonIndexMeta& meta, uint32_t metaVersion)
+char* Table::DeserializeMeta(char* dataIn, CommonIndexMeta& meta, uint32_t metaVersion) const
 {
-    uint32_t order, method, constr;
     dataIn = SerializableSTR::Deserialize(dataIn, meta.m_name);
     dataIn = SerializablePOD<uint32_t>::Deserialize(dataIn, meta.m_keyLength);
     dataIn = SerializablePOD<IndexOrder>::Deserialize(dataIn, meta.m_indexOrder);
@@ -952,8 +1152,8 @@ char* Table::DeserializeMeta(char* dataIn, CommonIndexMeta& meta, uint32_t metaV
     return dataIn;
 }
 
-RC Table::CreateIndexFromMeta(CommonIndexMeta& meta, bool primary, uint32_t tid, bool addToTable /* = true */,
-    MOT::Index** outIndex /* = nullptr */)
+RC Table::CreateIndexFromMeta(CommonIndexMeta& meta, bool primary, uint32_t tid, uint32_t metaVersion,
+    bool addToTable /* = true */, MOT::Index** outIndex /* = nullptr */)
 {
     IndexTreeFlavor flavor = DEFAULT_TREE_FLAVOR;
     MOT::Index* ix = nullptr;
@@ -981,6 +1181,16 @@ RC Table::CreateIndexFromMeta(CommonIndexMeta& meta, bool primary, uint32_t tid,
             meta.m_numTableFields);
         delete ix;
         return RC_ERROR;
+    }
+
+    // re-calculate key length if needed
+    if (!meta.m_fake && metaVersion < METADATA_VER_IDX_KEY_LEN) {
+        meta.m_keyLength = 0;
+        for (int i = 0; i < meta.m_numKeyFields; i++) {
+            Column* col = GetField(meta.m_columnKeyFields[i]);
+            meta.m_lengthKeyFields[i] = col->m_keySize;
+            meta.m_keyLength += col->m_keySize;
+        }
     }
 
     for (int i = 0; i < meta.m_numKeyFields; i++) {
@@ -1050,7 +1260,6 @@ size_t Table::SerializeSize()
 void Table::Serialize(char* dataOut)
 {
     uint32_t metaVersion = MetadataProtoVersion::METADATA_VER_CURR;
-    char* savedDO = dataOut;
     dataOut = SerializablePOD<uint32_t>::Serialize(dataOut, metaVersion);
     dataOut = SerializableSTR::Serialize(dataOut, m_tableName);
     dataOut = SerializableSTR::Serialize(dataOut, m_longTableName);
@@ -1125,6 +1334,33 @@ void Table::Deserialize(const char* in)
             MOT_LOG_ERROR("Table::deserialize - failed to add column %u", i);
             return;
         }
+        m_columns[i]->m_isDropped = col.m_isDropped;
+        if (col.m_hasDefault) {
+            switch (col.m_type) {
+                case MOT_CATALOG_FIELD_TYPES::MOT_TYPE_BLOB:
+                case MOT_CATALOG_FIELD_TYPES::MOT_TYPE_VARCHAR:
+                case MOT_CATALOG_FIELD_TYPES::MOT_TYPE_DECIMAL:
+                case MOT_CATALOG_FIELD_TYPES::MOT_TYPE_TIMETZ:
+                case MOT_CATALOG_FIELD_TYPES::MOT_TYPE_TINTERVAL:
+                case MOT_CATALOG_FIELD_TYPES::MOT_TYPE_INTERVAL:
+                    SerializableCharBuf::DeserializeSize(dataIn, m_columns[i]->m_defSize);
+                    if (m_columns[i]->m_defSize > 0) {
+                        m_columns[i]->m_defValue = (uintptr_t)malloc(m_columns[i]->m_defSize);
+                        if (m_columns[i]->m_defValue == 0) {
+                            MOT_LOG_ERROR("Table::deserialize - failed to add default for column %u", i);
+                            return;
+                        }
+                        dataIn = SerializableCharBuf::Deserialize(
+                            dataIn, (char*)m_columns[i]->m_defValue, m_columns[i]->m_defSize);
+                    }
+                    break;
+                default:
+                    dataIn = SerializablePOD<uint64_t>::Deserialize(dataIn, m_columns[i]->m_defValue);
+                    m_columns[i]->m_defSize = col.m_size;
+                    break;
+            }
+            m_columns[i]->m_hasDefault = true;
+        }
     }
 
     if (!InitRowPool()) {
@@ -1132,11 +1368,16 @@ void Table::Deserialize(const char* in)
         return;
     }
 
+    if (!InitTombStonePool()) {
+        MOT_LOG_ERROR("Table::deserialize - failed to create tombstone pool");
+        return;
+    }
+
     if (savedNumIndexes > 0) {
         CommonIndexMeta idx;
         /* primary key */
         dataIn = DeserializeMeta(dataIn, idx, metaVersion);
-        if (CreateIndexFromMeta(idx, true, MOTCurrThreadId) != RC_OK) {
+        if (CreateIndexFromMeta(idx, true, MOTCurrThreadId, metaVersion) != RC_OK) {
             MOT_LOG_ERROR("Table::deserialize - failed to create primary index");
             return;
         }
@@ -1144,7 +1385,7 @@ void Table::Deserialize(const char* in)
         /* secondaries */
         for (uint16_t i = 2; i <= savedNumIndexes; i++) {
             dataIn = DeserializeMeta(dataIn, idx, metaVersion);
-            if (CreateIndexFromMeta(idx, false, MOTCurrThreadId) != RC_OK) {
+            if (CreateIndexFromMeta(idx, false, MOTCurrThreadId, metaVersion) != RC_OK) {
                 MOT_LOG_ERROR("Table::deserialize - failed to create secondary index [%u]", (i - 2));
                 return;
             }
@@ -1154,24 +1395,27 @@ void Table::Deserialize(const char* in)
     SetDeserialized(true);
 }
 
-RC Table::DropImpl()
+void Table::DropImpl()
 {
-    RC res = RC_OK;
-
-    if (m_numIndexes == 0)
-        return res;
+    if (m_numIndexes == 0) {
+        return;
+    }
 
     (void)pthread_rwlock_wrlock(&m_rwLock);
     do {
+        for (int i = 0; i < m_numIndexes; i++) {
+            if (m_indexes[i] != nullptr) {
+                GcManager::ClearIndexElements(m_indexes[i]->GetIndexId());
+            }
+        }
         m_secondaryIndexes.clear();
-        MOT_LOG_DEBUG("DropImpl numIndexes = %d \n", m_numIndexes);
+        MOT_LOG_DEBUG("DropImpl numIndexes = %d", m_numIndexes);
         for (int i = m_numIndexes - 1; i >= 0; i--) {
             if (m_indexes[i] != nullptr) {
                 MOT::Index* index = m_indexes[i];
                 // first remove index from table metadata to prevent it's usage
                 m_indexes[i] = nullptr;
-                GcManager::ClearIndexElements(index->GetIndexId());
-                index->Truncate(true);
+                (void)index->Truncate(true);
                 DecIndexColumnUsage(index);
                 delete index;
             }
@@ -1179,7 +1423,6 @@ RC Table::DropImpl()
         m_numIndexes = 0;
     } while (0);
     (void)pthread_rwlock_unlock(&m_rwLock);
-    return res;
 }
 
 Table* Table::CreateDummyTable()
@@ -1198,7 +1441,7 @@ Table* Table::CreateDummyTable()
                 MOT_REPORT_ERROR(
                     MOT_ERROR_INTERNAL, "Dummy Table Creation", "Failed to add column 'dummy' to dummy table");
             } else {
-                if (!tab->InitRowPool(true)) {
+                if (!tab->InitRowPool(true) and !tab->InitTombStonePool(true)) {
                     MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
                         "Dummy Table Creation",
                         "Failed to initialize row pool, while creating dummy table");
@@ -1263,7 +1506,6 @@ void Table::SerializeRedo(char* dataOut)
      */
     uint16_t numIndexes = 0;
     uint32_t metaVersion = MetadataProtoVersion::METADATA_VER_CURR;
-    char* savedDO = dataOut;
     dataOut = SerializablePOD<uint32_t>::Serialize(dataOut, metaVersion);
     dataOut = SerializableSTR::Serialize(dataOut, m_tableName);
     dataOut = SerializableSTR::Serialize(dataOut, m_longTableName);
@@ -1279,5 +1521,22 @@ void Table::SerializeRedo(char* dataOut)
     for (uint32_t i = 0; i < m_fieldCnt; i++) {
         dataOut = SerializeItem(dataOut, GetField(i));
     }
+}
+
+bool Table::IsTableSingleVersion()
+{
+    MOT_LOG_INFO("Testing table %s", GetTableName().c_str());
+    Index* index = GetPrimaryIndex();
+    IndexIterator* it = index->Begin(0);
+    while (it->IsValid()) {
+        PrimarySentinel* ps = static_cast<PrimarySentinel*>(it->GetPrimarySentinel());
+        Row* r = ps->GetData();
+        if (r and r->GetNextVersion()) {
+            r->Print();
+            return false;
+        }
+        it->Next();
+    }
+    return true;
 }
 }  // namespace MOT

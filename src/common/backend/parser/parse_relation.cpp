@@ -57,6 +57,9 @@
 #include "optimizer/planner.h"
 #include "storage/tcap.h"
 #include "gs_ledger/ledger_utils.h"
+#ifdef ENABLE_MOT
+#include "storage/mot/jit_def.h"
+#endif
 
 #define MAXSTRLEN ((1 << 11) - 1)
 static RangeTblEntry* scanNameSpaceForRefname(ParseState* pstate, const char* refname, int location);
@@ -1008,6 +1011,11 @@ Relation parserOpenTable(ParseState *pstate, const RangeVar *relation, int lockm
     rel = HeapOpenrvExtended(relation, lockmode, true, isSupportSynonym, &detailInfo);
     if (rel == NULL) {
         /* Report some error and detail info if detailInfo has some messages. */
+#ifdef ENABLE_MOT
+        if (u_sess->mot_cxt.jit_compile_depth > 0) {
+            u_sess->mot_cxt.jit_parse_error = MOT_JIT_TABLE_NOT_FOUND;
+        }
+#endif
         if (relation->schemaname) {
             if (IS_PGXC_DATANODE) {
                 /*

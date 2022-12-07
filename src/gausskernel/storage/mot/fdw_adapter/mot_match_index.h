@@ -29,13 +29,11 @@
 #include "logger.h"
 #include "nodes/primnodes.h"
 
-#ifndef MOTFdwStateSt
 typedef struct MOTFdwState_St MOTFdwStateSt;
-#endif
 
-#define KEY_OPER_PREFIX_BITMASK 0x10
+#define KEY_OPER_PREFIX_BITMASK static_cast<uint8_t>(0x10)
 
-typedef enum : uint8_t {
+enum class KEY_OPER : uint8_t {
     READ_KEY_EXACT = 0,    // equal
     READ_KEY_LIKE = 1,     // like
     READ_KEY_OR_NEXT = 2,  // ge
@@ -45,18 +43,20 @@ typedef enum : uint8_t {
     READ_INVALID = 6,
 
     // partial key eq
-    READ_PREFIX = KEY_OPER_PREFIX_BITMASK | READ_KEY_EXACT,
+    READ_PREFIX = KEY_OPER_PREFIX_BITMASK | KEY_OPER::READ_KEY_EXACT,
     // partial key ge
-    READ_PREFIX_OR_NEXT = KEY_OPER_PREFIX_BITMASK | READ_KEY_OR_NEXT,
+    READ_PREFIX_OR_NEXT = KEY_OPER_PREFIX_BITMASK | KEY_OPER::READ_KEY_OR_NEXT,
     // partial key gt
-    READ_PREFIX_AFTER = KEY_OPER_PREFIX_BITMASK | READ_KEY_AFTER,
+    READ_PREFIX_AFTER = KEY_OPER_PREFIX_BITMASK | KEY_OPER::READ_KEY_AFTER,
     // partial key le
-    READ_PREFIX_OR_PREV = KEY_OPER_PREFIX_BITMASK | READ_KEY_OR_PREV,
+    READ_PREFIX_OR_PREV = KEY_OPER_PREFIX_BITMASK | KEY_OPER::READ_KEY_OR_PREV,
     // partial key lt
-    READ_PREFIX_BEFORE = KEY_OPER_PREFIX_BITMASK | READ_KEY_BEFORE,
+    READ_PREFIX_BEFORE = KEY_OPER_PREFIX_BITMASK | KEY_OPER::READ_KEY_BEFORE,
     // partial key like
-    READ_PREFIX_LIKE = KEY_OPER_PREFIX_BITMASK | READ_KEY_LIKE,
-} KEY_OPER;
+    READ_PREFIX_LIKE = KEY_OPER_PREFIX_BITMASK | KEY_OPER::READ_KEY_LIKE,
+};
+
+enum class SortDir : uint8_t { SORTDIR_NONE = 0, SORTDIR_ASC = 1, SORTDIR_DESC = 2 };
 
 class MatchIndex {
 public:
@@ -66,7 +66,11 @@ public:
     }
 
     ~MatchIndex()
-    {}
+    {
+        m_remoteConds = nullptr;
+        m_remoteCondsOrig = nullptr;
+        m_ix = nullptr;
+    }
 
     List* m_remoteConds = nullptr;
     List* m_remoteCondsOrig = nullptr;
@@ -78,12 +82,14 @@ public:
     int32_t m_params[2][MAX_KEY_COLUMNS];
     int32_t m_numMatches[2] = {0, 0};
     double m_costs[2] = {0, 0};
-    KEY_OPER m_ixOpers[2] = {READ_INVALID, READ_INVALID};
+    KEY_OPER m_ixOpers[2] = {KEY_OPER::READ_INVALID, KEY_OPER::READ_INVALID};
 
     // this is for iteration start condition
     int32_t m_start = -1;
     int32_t m_end = -1;
     double m_cost = 0;
+    bool m_fullScan = false;
+    SortDir m_order;
 
     void Init()
     {
@@ -91,14 +97,16 @@ public:
             for (uint j = 0; j < MAX_KEY_COLUMNS; j++) {
                 m_colMatch[i][j] = nullptr;
                 m_parentColMatch[i][j] = nullptr;
-                m_opers[i][j] = READ_INVALID;
+                m_opers[i][j] = KEY_OPER::READ_INVALID;
                 m_params[i][j] = -1;
             }
-            m_ixOpers[i] = READ_INVALID;
+            m_ixOpers[i] = KEY_OPER::READ_INVALID;
             m_costs[i] = 0;
             m_numMatches[i] = 0;
         }
         m_start = m_end = -1;
+        m_fullScan = false;
+        m_order = SortDir::SORTDIR_ASC;
     }
 
     bool IsSameOper(KEY_OPER op1, KEY_OPER op2) const;
@@ -132,6 +140,7 @@ class MatchIndexArr {
 public:
     MatchIndexArr()
     {
+        m_ixOid = InvalidOid;
         for (uint i = 0; i < MAX_NUM_INDEXES; i++) {
             m_idx[i] = nullptr;
         }
@@ -142,6 +151,7 @@ public:
 
     void Clear(bool release = false)
     {
+        m_ixOid = InvalidOid;
         for (uint i = 0; i < MAX_NUM_INDEXES; i++) {
             if (m_idx[i]) {
                 if (release) {
@@ -151,6 +161,7 @@ public:
             }
         }
     }
+    Oid m_ixOid;
     MatchIndex* m_idx[MAX_NUM_INDEXES];
 };
 

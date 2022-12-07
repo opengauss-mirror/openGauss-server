@@ -22,10 +22,11 @@
  * -------------------------------------------------------------------------
  */
 
-#include "global.h"
-
 #ifndef TXN_DDL_ACCESS_H
 #define TXN_DDL_ACCESS_H
+
+#include "global.h"
+#include <map>
 
 #define MAX_DDL_ACCESS_SIZE 100
 
@@ -49,11 +50,21 @@ enum DDLAccessType : uint8_t {
     /** @var drop index. */
     DDL_ACCESS_DROP_INDEX,
 
+    /** @var add column. */
+    DDL_ACCESS_ADD_COLUMN,
+
+    /** @var drop column. */
+    DDL_ACCESS_DROP_COLUMN,
+
+    /** @var rename column. */
+    DDL_ACCESS_RENAME_COLUMN,
 };
 
 // forward declaration
 class OccTransactionManager;
 class TxnManager;
+class Table;
+class TxnTable;
 
 /**
  * @class TxnDDLAccess
@@ -76,24 +87,31 @@ public:
         DDLAccess();
         /* @brief Constructor. */
         inline DDLAccess(uint64_t oid, DDLAccessType accessType, void* ddlEntry)
-        {
-            Set(oid, accessType, ddlEntry);
-        }
+            : m_oid(oid), m_type(accessType), m_entry(ddlEntry)
+        {}
 
         ~DDLAccess()
-        {}
+        {
+            m_entry = nullptr;
+        }
 
         /**
          * @brief GetOid, returns the ddl change object id.
          * @return uint64_t object id.
          */
-        uint64_t GetOid();
+        inline uint64_t GetOid() const
+        {
+            return m_oid;
+        }
 
         /**
          * @brief GetDDLAccessType, returns the ddl change type.
          * @return DDLAccessType.
          */
-        DDLAccessType GetDDLAccessType();
+        inline DDLAccessType GetDDLAccessType() const
+        {
+            return m_type;
+        }
 
         /**
          * @brief GetEntry, returns the object entry.
@@ -104,6 +122,8 @@ public:
          * @brief Set, Sets a DDLAccess entry
          */
         void Set(uint64_t oid, DDLAccessType accessType, void* ddlEntry);
+
+        void ResetEntry();
 
     private:
         /** @var DDL entry object id */
@@ -126,7 +146,7 @@ public:
      * @brief Init. Initialize DDLTxnAccess class, currently not doing too much
      * as there is nothing to allocate or initialize.
      */
-    RC Init();
+    void Init();
 
     /**
      * @brief Adds a new ddlAccess to the list of transaction DDL changes.
@@ -136,7 +156,15 @@ public:
     /**
      * @brief Returns the number of "in-flight" transaction DDL changes.
      */
-    uint32_t Size();
+    inline uint16_t Size() const
+    {
+        return m_size;
+    }
+
+    inline bool HasEnoughSpace() const
+    {
+        return (m_size < MAX_DDL_ACCESS_SIZE);
+    }
 
     /**
      * @brief Returns DDLAccess in the provided index.
@@ -163,6 +191,13 @@ public:
      */
     void EraseByOid(uint64_t oid);
 
+    void AddTxnTable(TxnTable* table);
+    void DelTxnTable(TxnTable* table);
+    Table* GetTxnTable(uint64_t tabId);
+    RC ValidateDDLChanges(TxnManager* txn);
+    void ApplyDDLChanges(TxnManager* txn);
+    void RollbackDDLChanges(TxnManager* txn);
+
 private:
     /** @var TxnManager the Transaction owning the ddl changes */
     TxnManager* m_txn;
@@ -175,6 +210,9 @@ private:
 
     /** @var Denotes an array of DDLAccess entries */
     TxnDDLAccess::DDLAccess* m_accessList[MAX_DDL_ACCESS_SIZE];
+
+    using ExternalTableMap = std::map<uint64_t, TxnTable*>;
+    ExternalTableMap m_txnTableMap;
 };
 }  // namespace MOT
 

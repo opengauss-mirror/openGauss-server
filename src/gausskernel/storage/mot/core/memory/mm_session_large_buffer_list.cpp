@@ -64,16 +64,17 @@ extern int MemSessionLargeBufferListInit(
     return result;
 }
 
-extern void MemSessionLargeBufferListOnDoubleFree(
-    MemSessionLargeBufferList* sessionBufferList, void* buffer, uint32_t bufferIndex)
+extern void MemSessionLargeBufferListOnInvalidFree(
+    MemSessionLargeBufferList* sessionBufferList, void* buffer, uint64_t bufferIndex, const char* invalidType)
 {
-    MOT_LOG_PANIC("Double free of session large buffer %p [@%u] in buffer list %p  (node: %d, buffer-size=%u KB, "
-                  "allocated=%u/%u)",
+    MOT_LOG_PANIC("%s free of session large buffer %p [@%" PRIu64
+                  "] in buffer list %p  (node: %d, buffer-size=%" PRIu64 " MB, allocated=%u/%u)",
+        invalidType,
         buffer,
         bufferIndex,
         sessionBufferList,
         MOTCurrentNumaNodeId,
-        sessionBufferList->m_bufferSize,
+        sessionBufferList->m_bufferSize / MEGA_BYTE,
         sessionBufferList->m_allocatedCount,
         sessionBufferList->m_maxBufferCount);
 
@@ -101,8 +102,8 @@ extern void MemSessionLargeBufferListToString(int indent, const char* name,
     if (stats.m_allocatedBytes > 0) {
         if (reportMode == MEM_REPORT_SUMMARY) {
             StringBufferAppend(stringBuffer,
-                "%*sSession Large Buffer List %s [buffer-size=%u MB, max-buffers=%u]: %u MB allocated, %u MB "
-                "requested\n",
+                "%*sSession Large Buffer List %s [buffer-size=%" PRIu64 " MB, max-buffers=%u]: %" PRIu64 " MB allocated"
+                ", %" PRIu64 " MB requested\n",
                 indent,
                 "",
                 name,
@@ -112,11 +113,11 @@ extern void MemSessionLargeBufferListToString(int indent, const char* name,
                 stats.m_requestedBytes / MEGA_BYTE);
         } else {
             StringBufferAppend(stringBuffer,
-                "%*sSession Large Buffer List %s: [buffer-size=%u MB, max-buffers=%u]\n",
+                "%*sSession Large Buffer List %s: [buffer-size=%" PRIu64 " MB, max-buffers=%u]\n",
                 indent,
                 "",
                 name,
-                sessionBufferList->m_bufferSize,
+                sessionBufferList->m_bufferSize / MEGA_BYTE,
                 sessionBufferList->m_allocatedCount,
                 sessionBufferList->m_maxBufferCount);
             StringBufferAppend(stringBuffer, "%*sBit-set: { ", indent + PRINT_REPORT_INDENT, "");
@@ -159,8 +160,8 @@ extern "C" void MemSessionLargeBufferListDump(void* arg)
 
     MOT::StringBufferApply([list](MOT::StringBuffer* stringBuffer) {
         MOT::MemSessionLargeBufferListToString(0, "Debug Dump", list, stringBuffer, MOT::MEM_REPORT_DETAILED);
-        fprintf(stderr, "%s", stringBuffer->m_buffer);
-        fflush(stderr);
+        (void)fprintf(stderr, "%s", stringBuffer->m_buffer);
+        (void)fflush(stderr);
     });
 }
 
@@ -170,12 +171,13 @@ extern "C" int MemSessionLargeBufferListAnalyze(void* list, void* buffer)
     MOT::MemSessionLargeBufferList* sessionBufferList = (MOT::MemSessionLargeBufferList*)list;
     if (((uint8_t*)buffer) >= ((uint8_t*)sessionBufferList->m_bufferList)) {
         uint64_t bufferOffset = (uint64_t)(((uint8_t*)buffer) - ((uint8_t*)sessionBufferList->m_bufferList));
-        uint32_t bufferIndex = bufferOffset / sessionBufferList->m_bufferSize;
+        uint64_t bufferIndex = bufferOffset / sessionBufferList->m_bufferSize;
         if (bufferIndex < sessionBufferList->m_maxBufferCount) {
             MOT::MemSessionLargeBufferHeader* bufferHeader =
                 (MOT::MemSessionLargeBufferHeader*)(sessionBufferList->m_bufferHeaderList + bufferIndex);
-            fprintf(stderr,
-                "Object %p found in session buffer list of %u bytes buffers at index %u, with real size %" PRIu64 "\n",
+            (void)fprintf(stderr,
+                "Object %p found in session buffer list of %" PRIu64 " bytes buffers at index %" PRIu64 ", with real "
+                "size %" PRIu64 "\n",
                 buffer,
                 sessionBufferList->m_bufferSize,
                 bufferIndex,

@@ -78,6 +78,14 @@ const char* getBypassReason(FusionType result)
         	return "Bypass executed through sort fusion";
         }
 
+        case MOT_JIT_SELECT_FUSION: {
+            return "Bypass executed through MOT JIT select fusion";
+        }
+
+        case MOT_JIT_MODIFY_FUSION: {
+            return "Bypass executed through MOT JIT modify fusion";
+        }
+
         case NOBYPASS_NO_SIMPLE_PLAN: {
             return "Bypass not executed because the plan of query is not a simple plan";
         }

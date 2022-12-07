@@ -104,7 +104,6 @@ bool ConfigSection::GetConfigSectionNames(mot_string_list& sectionNames) const
 
 bool ConfigSection::GetConfigValueNames(mot_string_list& valueNames) const
 {
-    bool result = true;
     ConfigValueMap::const_iterator itr = m_valueMap.begin();
     while (itr != m_valueMap.end()) {
         if (!valueNames.push_back(itr->first)) {
@@ -366,7 +365,7 @@ bool ConfigSection::MergeValues(ConfigSection* configSection)
             ConfigValue* oldConfigValue = itr2->second;
             MOT_LOG_DEBUG(" *** --> Deleting merged section value %s", oldConfigValue->GetFullPathName());
             oldConfigValue->Print(LogLevel::LL_DEBUG, true);
-            m_valueMap.erase(itr2);
+            (void)m_valueMap.erase(itr2);
             MOT_LOG_DEBUG(" *** --> Delete merged section value done");
             delete oldConfigValue;
             if (!m_valueMap.insert(ConfigValueMap::value_type(configValue->GetName(), configValue)).second) {
@@ -415,7 +414,7 @@ bool ConfigSection::MergeArrays(ConfigSection* configSection)
             // not inserted, so replace existing value
             ConfigArrayMap::iterator& itr2 = pairis.first;
             delete itr2->second;
-            m_arrayMap.erase(itr2);
+            (void)m_arrayMap.erase(itr2);
             if (!m_arrayMap.insert(ConfigArrayMap::value_type(configArray->GetName(), configArray)).second) {
                 if (MOT_IS_SEVERE()) {
                     MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
@@ -434,7 +433,7 @@ bool ConfigSection::MergeArrays(ConfigSection* configSection)
                 return false;
             }
         }
-        itr++;
+        (void)itr++;
     }
     configSection->m_arrayMap.clear();  // required to make sure items are not deleted in destructor
     return true;

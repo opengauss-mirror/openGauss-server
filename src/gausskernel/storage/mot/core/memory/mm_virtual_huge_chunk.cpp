@@ -31,7 +31,7 @@
 #include "mot_atomic_ops.h"
 #include "utilities.h"
 
-#include <string.h>
+#include <cstring>
 
 namespace MOT {
 DECLARE_LOGGER(VirtualHugeChunkHeader, Memory)
@@ -127,13 +127,13 @@ extern void MemVirtualHugeChunkHeaderDestroy()
     if (g_vhcInit) {
         // free all headers and lock
         FreeHeaders(g_globalFreeHeaders);
-        MemLockDestroy(&g_globalHeadersLock);
+        (void)MemLockDestroy(&g_globalHeadersLock);
 
         for (uint32_t i = 0; i < g_memGlobalCfg.m_nodeCount; ++i) {
             // free all headers and locks
             FreeHeaders(g_localFreeHeaders[i]);
             if (g_localHeadersLock[i] != nullptr) {
-                MemLockDestroy(g_localHeadersLock[i]);
+                (void)MemLockDestroy(g_localHeadersLock[i]);
                 MemNumaFreeLocal(g_localHeadersLock[i], sizeof(MemLock), i);
                 g_localHeadersLock[i] = nullptr;
             }

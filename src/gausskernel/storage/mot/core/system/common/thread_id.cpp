@@ -31,7 +31,7 @@
 #include "mot_atomic_ops.h"
 
 #include <pthread.h>
-#include <string.h>
+#include <cstring>
 
 namespace MOT {
 DECLARE_LOGGER(ThreadIdPool, System)
@@ -50,10 +50,10 @@ static MOTThreadId numaOrdinalThreadMap[MAX_THREAD_COUNT];
 static enum ThreadIdInitPhase { INIT, LOCK_INIT, KEY_CREATE, ARRAY_ALLOC, DONE } initPhase = INIT;
 
 // the bit index is counted from MSB[0] to LSB[63]!
-#define THREAD_ID_BIT_AT(bitIndex) (((uint64_t)1) << (THREADS_PER_WORD - (bitIndex)-1))
+#define THREAD_ID_BIT_AT(bitIndex) (((uint64_t)1) << ((THREADS_PER_WORD - (bitIndex)) - 1))
 #define IS_THREAD_ID_BIT_SET(arrayIndex, bitIndex) (threadIdBitsetArray[arrayIndex] & THREAD_ID_BIT_AT(bitIndex))
-#define RAISE_THREAD_ID_BIT(arrayIndex, bitIndex) threadIdBitsetArray[arrayIndex] |= THREAD_ID_BIT_AT(bitIndex)
-#define CLEAR_THREAD_ID_BIT(arrayIndex, bitIndex) threadIdBitsetArray[arrayIndex] &= ~THREAD_ID_BIT_AT(bitIndex)
+#define RAISE_THREAD_ID_BIT(arrayIndex, bitIndex) (threadIdBitsetArray[arrayIndex] |= THREAD_ID_BIT_AT(bitIndex))
+#define CLEAR_THREAD_ID_BIT(arrayIndex, bitIndex) (threadIdBitsetArray[arrayIndex] &= ~THREAD_ID_BIT_AT(bitIndex))
 
 // pay attention: the bit set is inverted - "0" means occupied and "1" means free for usage
 #define MARK_THREAD_ID_USED(arrayIndex, bitIndex) CLEAR_THREAD_ID_BIT(arrayIndex, bitIndex)
@@ -96,7 +96,7 @@ static void ScheduleThreadIdCleanup()
     // install auto-cleanup for current thread in case a call to FreeThreadId() is missing
     // pay attention we add 1 to thread id because pthread key destructor is called only if key for
     // the current thread is non-zero, and we want to recycle also thread id zero
-    pthread_setspecific(threadIdCleanupKey, (const void*)(uint64_t)(MOTCurrThreadId + 1));
+    (void)pthread_setspecific(threadIdCleanupKey, (const void*)(uint64_t)(MOTCurrThreadId + 1));
 }
 
 static void SetCurrentThreadId(MOTThreadId threadId)
@@ -185,11 +185,11 @@ extern void DestroyThreadIdPool()
 
         // fall through
         case KEY_CREATE:
-            pthread_key_delete(threadIdCleanupKey);
+            (void)pthread_key_delete(threadIdCleanupKey);
 
         // fall through
         case LOCK_INIT:
-            pthread_spin_destroy(&threadIdLock);
+            (void)pthread_spin_destroy(&threadIdLock);
 
         // fall through
         default:
@@ -204,7 +204,7 @@ extern MOTThreadId AllocThreadId()
     if (MOTCurrThreadId != INVALID_THREAD_ID) {
         MOT_LOG_TRACE("Double attempt to allocate thread identifier for thread %" PRIu16 " declined", MOTCurrThreadId);
     } else {
-        pthread_spin_lock(&threadIdLock);
+        (void)pthread_spin_lock(&threadIdLock);
         for (uint16_t arrayIndex = 0; arrayIndex < threadIdArraySize; ++arrayIndex) {
             if (threadIdBitsetArray[arrayIndex] != 0) {
                 uint16_t bitIndex = __builtin_clzll(threadIdBitsetArray[arrayIndex]);
@@ -215,7 +215,7 @@ extern MOTThreadId AllocThreadId()
                 break;
             }
         }
-        pthread_spin_unlock(&threadIdLock);
+        (void)pthread_spin_unlock(&threadIdLock);
 
         if (MOTCurrThreadId == INVALID_THREAD_ID) {
             MOT_REPORT_ERROR(MOT_ERROR_RESOURCE_LIMIT,
@@ -235,11 +235,11 @@ extern MOTThreadId AllocThreadIdHighest()
     if (MOTCurrThreadId != INVALID_THREAD_ID) {
         MOT_LOG_TRACE("Double attempt to allocate thread identifier for thread %" PRIu16 " declined", MOTCurrThreadId);
     } else {
-        pthread_spin_lock(&threadIdLock);
+        (void)pthread_spin_lock(&threadIdLock);
         // since computation is tedious in case maxThreadCount is not a full multiple of 64, we do it in the opposite
         // way
         for (uint16_t i = 0; i < maxThreadCount; ++i) {
-            MOTThreadId threadId = maxThreadCount - i - 1;
+            MOTThreadId threadId = (maxThreadCount - i) - 1;
             uint16_t arrayIndex = threadId / THREADS_PER_WORD;
             uint16_t bitIndex = threadId % THREADS_PER_WORD;
             if (IS_THREAD_ID_FREE(arrayIndex, bitIndex)) {
@@ -247,7 +247,7 @@ extern MOTThreadId AllocThreadIdHighest()
                 break;
             }
         }
-        pthread_spin_unlock(&threadIdLock);
+        (void)pthread_spin_unlock(&threadIdLock);
 
         if (MOTCurrThreadId == INVALID_THREAD_ID) {
             MOT_REPORT_ERROR(MOT_ERROR_RESOURCE_LIMIT,
@@ -268,11 +268,11 @@ extern MOTThreadId AllocThreadIdNumaHighest(int nodeId)
         MOT_LOG_TRACE("Double attempt to allocate thread identifier for thread %" PRIu16 " declined", MOTCurrThreadId);
     } else {
         Affinity& affinity = GetTaskAffinity();
-        pthread_spin_lock(&threadIdLock);
+        (void)pthread_spin_lock(&threadIdLock);
         // since computation is tedious in case maxThreadCount is not a full multiple of 64, we do it in the opposite
         // way
         for (uint16_t i = 0; i < maxThreadCount; ++i) {
-            MOTThreadId threadId = maxThreadCount - i - 1;
+            MOTThreadId threadId = (maxThreadCount - i) - 1;
             uint16_t arrayIndex = threadId / THREADS_PER_WORD;
             uint16_t bitIndex = threadId % THREADS_PER_WORD;
             if (IS_THREAD_ID_FREE(arrayIndex, bitIndex)) {
@@ -284,7 +284,7 @@ extern MOTThreadId AllocThreadIdNumaHighest(int nodeId)
                 }
             }
         }
-        pthread_spin_unlock(&threadIdLock);
+        (void)pthread_spin_unlock(&threadIdLock);
 
         if (MOTCurrThreadId == INVALID_THREAD_ID) {
             MOT_REPORT_ERROR(MOT_ERROR_RESOURCE_LIMIT,
@@ -314,7 +314,7 @@ extern MOTThreadId ReserveThreadId()
 {
     MOTThreadId result = INVALID_THREAD_ID;
 
-    pthread_spin_lock(&threadIdLock);
+    (void)pthread_spin_lock(&threadIdLock);
     for (uint16_t arrayIndex = 0; arrayIndex < threadIdArraySize; ++arrayIndex) {
         if (threadIdBitsetArray[arrayIndex] != 0) {
             uint16_t bitIndex = __builtin_clzll(threadIdBitsetArray[arrayIndex]);
@@ -327,7 +327,7 @@ extern MOTThreadId ReserveThreadId()
             break;
         }
     }
-    pthread_spin_unlock(&threadIdLock);
+    (void)pthread_spin_unlock(&threadIdLock);
 
     return result;
 }
@@ -351,7 +351,7 @@ extern void FreeThreadId()
         MOT_ATOMIC_DEC(currentThreadCount);
 
         // cancel auto-cleanup for current thread (reset pthread key to zero)
-        pthread_setspecific(threadIdCleanupKey, 0);
+        (void)pthread_setspecific(threadIdCleanupKey, nullptr);
         MOT_LOG_TRACE("De-allocated internal thread id %" PRIu16, threadId);
     }
 }
@@ -385,10 +385,10 @@ static void FreeThreadIdInternal(MOTThreadId threadId)
     uint16_t arrayIndex = threadId / THREADS_PER_WORD;
     uint16_t bitIndex = threadId % THREADS_PER_WORD;
 
-    pthread_spin_lock(&threadIdLock);
+    (void)pthread_spin_lock(&threadIdLock);
     MOT_ASSERT(IS_THREAD_ID_USED(arrayIndex, bitIndex));
     MARK_THREAD_ID_FREE(arrayIndex, bitIndex);
-    pthread_spin_unlock(&threadIdLock);
+    (void)pthread_spin_unlock(&threadIdLock);
 }
 
 static int InitNumaOrdinalThreadMap()
@@ -397,11 +397,11 @@ static int InitNumaOrdinalThreadMap()
     // this we we are ready for any future thread distribution over NUMA sockets.
     int result = 0;
 
-    uint32_t nodeCount = GetGlobalConfiguration().m_numaNodes;
+    int nodeCount = GetGlobalConfiguration().m_numaNodes;
     if (nodeCount > MEM_MAX_NUMA_NODES) {
         MOT_REPORT_PANIC(MOT_ERROR_INVALID_CFG,
             "Thread Id Pool Initialization",
-            "Invalid configuration for number of NUMA node %u (exceeds allowed maximum %u)",
+            "Invalid configuration for number of NUMA node %d (exceeds allowed maximum %u)",
             nodeCount,
             (unsigned)MEM_MAX_NUMA_NODES);
         result = MOT_ERROR_INVALID_CFG;
@@ -412,7 +412,7 @@ static int InitNumaOrdinalThreadMap()
         Affinity& affinity = GetTaskAffinity();  // this is always valid, even on thread-pool environment
         for (MOTThreadId i = 0; i < maxThreadCount; ++i) {
             int nodeId = affinity.GetAffineNuma(i);
-            if (nodeId < (int)nodeCount) {
+            if (nodeId < nodeCount) {
                 // record the number of thread affined to this socket, and the ordinal number of current thread in this
                 // socket
                 numaOrdinalThreadMap[i] = counterMap[nodeId]++;

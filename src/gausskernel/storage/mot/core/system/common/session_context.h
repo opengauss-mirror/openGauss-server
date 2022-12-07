@@ -60,8 +60,9 @@ private:
      * @param sessionId The unique session identifier.
      * @param sessionId The reusable connection identifier.
      * @param userData Session-level envelope data.
+     * @param isMtls Whether it is an MTLS thread's session context.
      */
-    SessionContext(SessionId sessionId, ConnectionId connectionId, void* userData);
+    SessionContext(SessionId sessionId, ConnectionId connectionId, void* userData, bool isMtls = false);
 
     /** @brief Destructor. */
     ~SessionContext();
@@ -131,6 +132,13 @@ public:
         return m_txn;
     }
 
+    static void SetTxnContext(TxnManager* txn);
+
+    inline bool IsMtlsRecoverySession() const
+    {
+        return (bool)m_isMtls;
+    }
+
 private:
     /** @brief Creates a transaction object. */
     static TxnManager* CreateTransaction(
@@ -157,8 +165,11 @@ private:
     /** @var The (reusable) transaction object associated with the session. */
     TxnManager* m_txn;  // L1 offset 24-32
 
+    /** @var parallel recovery thread indication. */
+    uint8_t m_isMtls;  // L1 offset 32-33
+
     /** @var Align class size to L1 cache line. */
-    uint8_t m_padding3[32];  // L1 offset 32-64
+    uint8_t m_padding3[31];  // L1 offset 33-64
 };
 
 /** @define Thread-local quick access to current session identifier. */
@@ -174,7 +185,7 @@ private:
 #define MOT_SET_CURRENT_SESSION_CONTEXT(sessionContext) u_sess->mot_cxt.session_context = sessionContext;
 
 /** @brief Initializes the current NUMA node identifier TLS. */
-extern void InitCurrentNumaNodeId();
+extern bool InitCurrentNumaNodeId();
 
 /** @brief Clears the current NUMA node identifier TLS. */
 extern void ClearCurrentNumaNodeId();

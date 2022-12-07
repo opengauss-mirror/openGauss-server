@@ -25,8 +25,8 @@
 #ifndef MOT_KEY_H
 #define MOT_KEY_H
 
-#include <stdint.h>
-#include <string.h>
+#include <cstdint>
+#include <cstring>
 
 #include "utilities.h"
 #include "global.h"
@@ -69,7 +69,7 @@ public:
         securec_check(erc, "\0", "\0");
     }
 
-    inline __attribute__((always_inline)) virtual ~Key()
+    virtual ~Key()
     {}
 
     /**
@@ -120,7 +120,7 @@ public:
     }
 
     /**
-     * @brief Fills a patern in a specific locaion of the key
+     * @brief Fills a pattern in a specific location of the key
      *        to break similarity in secondary non-unique indices
      * @param buf Buffer to copy
      * @param len Length of the buffer
@@ -167,14 +167,14 @@ public:
         CpKey(key.GetKeyBuf(), key.GetKeyLength());
     }
 
-    void PrintKey() const
+    void PrintKey(const char* msg = nullptr) const
     {
-        MOT_LOG_INFO("Key:%s Key length = %d ", HexStr(m_keyBuf, m_keyLen).c_str(), m_keyLen);
+        MOT_LOG_INFO("(%s) Key:%s Key length = %d ", msg ? msg : "", HexStr(m_keyBuf, m_keyLen).c_str(), m_keyLen);
     }
 
     std::string GetKeyStr() const
     {
-        return HexStr(m_keyBuf, m_keyLen).c_str();
+        return HexStr(m_keyBuf, m_keyLen);
     }
 
     bool operator==(const Key& key) const
@@ -195,9 +195,11 @@ public:
         return ((memcmp(m_keyBuf, key.GetKeyBuf(), m_keyLen) <= 0) ? true : false);
     }
 
-    Key& operator=(const Key& other)
+    Key& operator=(const Key& right)
     {
-        CpKey(other);
+        if (this != &right) {
+            CpKey(right);
+        }
         return *this;
     }
 

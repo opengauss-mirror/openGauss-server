@@ -42,7 +42,7 @@ public:
      * @brief Constructor.
      * @param name Name used for printing.
      */
-    explicit StatisticVariable(const char* name) : m_count(0)
+    explicit StatisticVariable(const char* name) : m_name{0}, m_count(0)
     {
         SetName(name);
     }

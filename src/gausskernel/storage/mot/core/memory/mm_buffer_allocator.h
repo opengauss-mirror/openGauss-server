@@ -216,6 +216,23 @@ inline void* MemBufferAllocatorAlloc(MemBufferAllocator* bufferAllocator)
 extern void MemBufferAllocatorFree(MemBufferAllocator* bufferAllocator, void* buffer);
 
 /**
+ * @brief Reserve memory for current session. While in reserve-mode, released chunks are kept in the current session's
+ * reserve, rather than being released to global memory.
+ * @param bufferAllocator The buffer allocator.
+ * @param chunkCount The number of chunks to reserve.
+ * @return Zero on success, otherwise error code on failure.
+ */
+extern int MemBufferAllocatorReserve(MemBufferAllocator* bufferAllocator, uint32_t chunkCount);
+
+/**
+ * @brief Release all global memory reserved for current session for a specific buffer class.
+ * @param bufferAllocator The buffer allocator.
+ * @param bufferClass The buffer class for which an existing reservation is to be released.
+ * @return Zero on success, otherwise error code on failure.
+ */
+extern int MemBufferAllocatorUnreserve(MemBufferAllocator* bufferAllocator);
+
+/**
  * @brief Utility function for guarding against double free.
  * @param buffer The buffer to check.
  * @return The origin buffer header.

@@ -1140,14 +1140,8 @@ void lightProxy::runMsg(StringInfo exec_message)
                     "commands ignored until end of transaction block, firstChar[%c]",
                     u_sess->proc_cxt.firstChar), 0));
 
-    /* Must set snapshot before starting executor, unless it is a MOT tables transaction. */
-#ifdef ENABLE_MOT
-    if (!IsMOTEngineUsed()) {
-#endif
-        PushActiveSnapshot(GetTransactionSnapshot(GTM_LITE_MODE));
-#ifdef ENABLE_MOT
-    }
-#endif
+    /* Must set snapshot before starting executor. */
+    PushActiveSnapshot(GetTransactionSnapshot(GTM_LITE_MODE));
 
     connect();
 
@@ -1201,13 +1195,7 @@ void lightProxy::runMsg(StringInfo exec_message)
     m_msgctl->hasResult = (m_cplan->resultDesc != NULL) ? true : false;
     handleResponse();
 
-#ifdef ENABLE_MOT
-    if (!IsMOTEngineUsed()) {
-#endif
-        PopActiveSnapshot();
-#ifdef ENABLE_MOT
-    }
-#endif
+    PopActiveSnapshot();
 
     /*
      * We need a CommandCounterIncrement after every query, except

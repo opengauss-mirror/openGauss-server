@@ -24,6 +24,7 @@
 
 #include "txn_ddl_access.h"
 #include "debug_utils.h"
+#include "txn_table.h"
 
 namespace MOT {
 TxnDDLAccess::DDLAccess::DDLAccess()
@@ -33,19 +34,9 @@ TxnDDLAccess::DDLAccess::DDLAccess()
     m_entry = nullptr;
 }
 
-uint64_t TxnDDLAccess::DDLAccess::GetOid()
-{
-    return m_oid;
-}
-
 void* TxnDDLAccess::DDLAccess::GetEntry()
 {
     return m_entry;
-}
-
-DDLAccessType TxnDDLAccess::DDLAccess::GetDDLAccessType()
-{
-    return m_type;
 }
 
 void TxnDDLAccess::DDLAccess::Set(uint64_t oid, DDLAccessType accessType, void* ddlEntry)
@@ -55,21 +46,17 @@ void TxnDDLAccess::DDLAccess::Set(uint64_t oid, DDLAccessType accessType, void* 
     m_entry = ddlEntry;
 }
 
+void TxnDDLAccess::DDLAccess::ResetEntry()
+{
+    m_entry = nullptr;
+}
+
 TxnDDLAccess::TxnDDLAccess(TxnManager* txn) : m_txn(txn), m_initialized(false), m_size(0), m_accessList()
 {}
 
-RC TxnDDLAccess::Init()
+void TxnDDLAccess::Init()
 {
-    if (m_initialized)
-        return RC_OK;
-
     m_initialized = true;
-    return RC_OK;
-}
-
-uint32_t TxnDDLAccess::Size()
-{
-    return m_size;
 }
 
 void TxnDDLAccess::Reset()
@@ -79,13 +66,19 @@ void TxnDDLAccess::Reset()
         m_accessList[i] = nullptr;
     }
 
+    for (ExternalTableMap::iterator it = m_txnTableMap.begin(); it != m_txnTableMap.end(); (void)++it) {
+        TxnTable* t = it->second;
+        delete t;
+    }
+    m_txnTableMap.clear();
     m_size = 0;
 }
 
 RC TxnDDLAccess::Add(TxnDDLAccess::DDLAccess* ddlAccess)
 {
-    if (m_size == MAX_DDL_ACCESS_SIZE)
+    if (m_size == MAX_DDL_ACCESS_SIZE) {
         return RC_TXN_EXCEEDS_MAX_DDLS;
+    }
     m_accessList[m_size++] = ddlAccess;
     return RC_OK;
 }
@@ -115,23 +108,24 @@ TxnDDLAccess::~TxnDDLAccess()
     // assumption is that caller destroyed referenced objects already
     if (m_initialized) {
         Reset();
+        m_initialized = false;
     }
+    m_txn = nullptr;
 }
 
 void TxnDDLAccess::EraseByOid(uint64_t oid)
 {
-    bool deleted = false;
-    for (int i = 0; i < m_size; i++) {
+    uint16_t i = 0;
+    while (i < m_size) {
         if (m_accessList[i]->GetOid() == oid) {
-            delete m_accessList[i];
-            deleted = true;
-        } else if (deleted) {
-            // remove empty spaces created by entry removal;
-            m_accessList[i - 1] = m_accessList[i];
+            EraseAt(i);
+
+            // EraseAt will move the remaining entries forward to remove the hole created by entry removal,
+            // so we still have to continue from i (without advancing).
+            continue;
         }
+        ++i;
     }
-    if (deleted)
-        m_size--;
 }
 
 void TxnDDLAccess::EraseAt(uint16_t index)
@@ -143,5 +137,58 @@ void TxnDDLAccess::EraseAt(uint16_t index)
         m_accessList[i - 1] = m_accessList[i];
     }
     m_size--;
+}
+
+void TxnDDLAccess::AddTxnTable(TxnTable* table)
+{
+    m_txnTableMap[table->GetTableExId()] = table;
+}
+
+void TxnDDLAccess::DelTxnTable(TxnTable* table)
+{
+    ExternalTableMap::iterator it = m_txnTableMap.find(table->GetTableExId());
+    if (it != m_txnTableMap.end()) {
+        TxnTable* tab = it->second;
+        (void)m_txnTableMap.erase(it);
+        delete tab;
+    }
+}
+
+Table* TxnDDLAccess::GetTxnTable(uint64_t tabId)
+{
+    ExternalTableMap::iterator it = m_txnTableMap.find(tabId);
+    if (it != m_txnTableMap.end()) {
+        if (!it->second->IsDropped()) {
+            it->second->ApplyAddIndexFromOtherTxn();
+            return it->second;
+        }
+    }
+    return nullptr;
+}
+
+RC TxnDDLAccess::ValidateDDLChanges(TxnManager* txn)
+{
+    RC res = RC_OK;
+    for (ExternalTableMap::iterator it = m_txnTableMap.begin(); it != m_txnTableMap.end() && res == RC_OK; (void)++it) {
+        TxnTable* tab = (TxnTable*)it->second;
+        res = tab->ValidateDDLChanges(txn);
+    }
+    return res;
+}
+
+void TxnDDLAccess::ApplyDDLChanges(TxnManager* txn)
+{
+    for (ExternalTableMap::iterator it = m_txnTableMap.begin(); it != m_txnTableMap.end(); (void)++it) {
+        TxnTable* tab = (TxnTable*)it->second;
+        tab->ApplyDDLChanges(txn);
+    }
+}
+
+void TxnDDLAccess::RollbackDDLChanges(TxnManager* txn)
+{
+    for (ExternalTableMap::iterator it = m_txnTableMap.begin(); it != m_txnTableMap.end(); (void)++it) {
+        TxnTable* tab = (TxnTable*)it->second;
+        tab->RollbackDDLChanges(txn);
+    }
 }
 }  // namespace MOT

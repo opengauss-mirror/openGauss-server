@@ -38,6 +38,7 @@
 #include "index_defs.h"
 #include "mm_def.h"
 #include "mot_error.h"
+#include "recovery_mode.h"
 
 namespace MOT {
 /** @typedef Mapping from CPU identifier to NUMA node identifier. */
@@ -52,7 +53,7 @@ typedef std::map<int, std::set<int>> CpuMap;
 class MOTConfiguration : public IConfigChangeListener {
 public:
     MOTConfiguration();
-    ~MOTConfiguration();
+    ~MOTConfiguration() override;
 
     /** @var Initialize configuration singleton. */
     void Initialize();
@@ -67,7 +68,7 @@ public:
      * @brief Derives classes should react to a notification that configuration changed. New
      * configuration is accessible via the ConfigManager.
      */
-    virtual void OnConfigChange()
+    void OnConfigChange() override
     {
         MOT_LOG_TRACE("Reloading configuration after change");
         LoadConfig();
@@ -139,9 +140,6 @@ public:
     /** Determines the redo log handler type (not configurable, but derived). */
     RedoLogHandlerType m_redoLogHandlerType;
 
-    /** Determines the number of asynchronous redo log buffer arrays. */
-    uint32_t m_asyncRedoLogBufferArrayCount;
-
     /**********************************************************************/
     // Commit configuration
     /**********************************************************************/
@@ -175,6 +173,15 @@ public:
     /**********************************************************************/
     // Recovery configuration
     /**********************************************************************/
+
+    /** @var Specifies recovery type. */
+    RecoveryMode m_recoveryMode;
+
+    /** @var Specifies the number of recovery workers to spawn in case of parallel recovery. */
+    uint32_t m_parallelRecoveryWorkers;
+
+    /** @var Specifies parallel recovery's queue size. */
+    uint32_t m_parallelRecoveryQueueSize;
 
     /** @var Specifies the number of workers used to recover from checkpoint. */
     uint32_t m_checkpointRecoveryWorkers;
@@ -319,9 +326,6 @@ public:
     /**********************************************************************/
     // Garbage Collection configuration
     /**********************************************************************/
-    /** @var Enable/disable garbage collection. */
-    bool m_gcEnable;
-
     /** @var The threshold in bytes for reclamation to be triggered (per-thread). */
     uint64_t m_gcReclaimThresholdBytes;
 
@@ -337,14 +341,30 @@ public:
     /** @var Enable/disable JIT compilation and execution for planned queries. */
     bool m_enableCodegen;
 
-    /** @var Specifies whether to force usage of TVM JIT compilation and execution. */
-    bool m_forcePseudoCodegen;
+    /** @var Enable/disable JIT compilation and execution of prepared queries. */
+    bool m_enableQueryCodegen;
 
-    /** @var Specifies whether to print emitted LLVM/TVM IR code for JIT-compiled queries. */
+    /** @var Enable/disable JIT compilation and execution of stored procedures. */
+    bool m_enableSPCodegen;
+
+    /** @var List of regular expressions denoting which stored procedures can use JIT compilation. */
+    std::string m_spCodegenAllowed;
+
+    /** @var List of regular expressions denoting which stored procedures cannot use JIT compilation. */
+    std::string m_spCodegenProhibited;
+
+    /** @var White-list of stored procedures allowed to use JIT compilation even though they do not access MOT tables.
+     */
+    std::string m_pureSPCodegen;
+
+    /** @var Specifies whether to print emitted LLVM IR code for JIT-compiled queries. */
     bool m_enableCodegenPrint;
 
     /** @var Limits the amount of JIT queries allowed per user session. */
     uint32_t m_codegenLimit;
+
+    /** @var Specified whether to enable jitted functions profiling. */
+    bool m_enableCodegenProfile;
 
     /**********************************************************************/
     // Storage configuration
@@ -364,6 +384,9 @@ public:
     /** @var Specifies whether to run consistency validation checks after benchmark. */
     bool m_runInternalConsistencyValidation;
 
+    /** @var Specifies whether to run consistency validation checks after benchmark. */
+    bool m_runInternalMvccConsistencyValidation;
+
     /**
      * @brief Retrieves the NUMA node for the given CPU.
      * @param cpu The logical identifier of the CPU.
@@ -371,7 +394,7 @@ public:
      */
     int GetCpuNode(int cpu) const;
 
-    uint16_t GetCoreByConnidFP(uint16_t cpu) const;
+    int GetCoreByConnidFP(int cpu) const;
 
     inline bool IsHyperThread() const
     {
@@ -380,9 +403,11 @@ public:
 
     int GetMappedCore(int logicId) const;
 
-    void SetMaskToAllCoresinNumaSocket(cpu_set_t& mask, uint64_t threadId);
+    int GetCoreFromNumaNodeByIndex(int numaId, int logicId) const;
 
-    void SetMaskToAllCoresinNumaSocket2(cpu_set_t& mask, int nodeId);
+    void SetMaskToAllCoresinNumaSocketByCoreId(cpu_set_t& mask, int coreId);
+
+    void SetMaskToAllCoresinNumaSocketByNodeId(cpu_set_t& mask, int nodeId);
 
     // class non-copy-able, non-assignable, non-movable
     /** @cond EXCLUDE_DOC */
@@ -391,10 +416,6 @@ public:
     MOTConfiguration& operator=(const MOTConfiguration& orig) = delete;
     MOTConfiguration& operator=(const MOTConfiguration&& orig) = delete;
     /** @endcond */
-
-    /** @var Asynchronous redo-log buffer array bounds (exposed as public for external use). */
-    static constexpr uint32_t MIN_ASYNC_REDO_LOG_BUFFER_ARRAY_COUNT = 8;
-    static constexpr uint32_t MAX_ASYNC_REDO_LOG_BUFFER_ARRAY_COUNT = 128;
 
     /** @var Memory scaling constants (from bytes). */
     static constexpr uint64_t SCALE_BYTES = 1;
@@ -416,9 +437,6 @@ public:
     /** @var Default redo log handler type. */
     static constexpr RedoLogHandlerType DEFAULT_REDO_LOG_HANDLER_TYPE = RedoLogHandlerType::SYNC_REDO_LOG_HANDLER;
 
-    /** @var Default asynchronous redo log buffer array count. */
-    static constexpr uint32_t DEFAULT_ASYNC_REDO_LOG_BUFFER_ARRAY_COUNT = 24;
-
     /** @var Default enable group commit. */
     static constexpr bool DEFAULT_ENABLE_GROUP_COMMIT = false;
 
@@ -431,9 +449,9 @@ public:
     static constexpr const char* DEFAULT_GROUP_COMMIT_TIMEOUT = "10 ms";
 
     /** @var Default group commit timeout in micro-seconds. */
-    static constexpr uint64_t DEFAULT_GROUP_COMMIT_TIMEOUT_USEC = 10000;
-    static constexpr uint64_t MIN_GROUP_COMMIT_TIMEOUT_USEC = 100;
-    static constexpr uint64_t MAX_GROUP_COMMIT_TIMEOUT_USEC = 200000;  // 200 ms
+    static constexpr uint64_t DEFAULT_GROUP_COMMIT_TIMEOUT_USEC = 10000;  // 10 ms
+    static constexpr uint64_t MIN_GROUP_COMMIT_TIMEOUT_USEC = 1000;       // 1 ms
+    static constexpr uint64_t MAX_GROUP_COMMIT_TIMEOUT_USEC = 200000;     // 200 ms
 
     /** ------------------ Default Checkpoint Configuration ------------ */
     /** @var Default enable checkpoint. */
@@ -461,6 +479,19 @@ public:
     static constexpr uint32_t DEFAULT_CHECKPOINT_RECOVERY_WORKERS = 3;
     static constexpr uint32_t MIN_CHECKPOINT_RECOVERY_WORKERS = 1;
     static constexpr uint32_t MAX_CHECKPOINT_RECOVERY_WORKERS = 1024;
+
+    /** @var Default recovery mode. */
+    static constexpr RecoveryMode DEFAULT_RECOVERY_MODE = RecoveryMode::MTLS;
+
+    /** @var Default number of workers used in parallel recovery. */
+    static constexpr uint32_t DEFAULT_PARALLEL_RECOVERY_WORKERS = 5;
+    static constexpr uint32_t MIN_PARALLEL_RECOVERY_WORKERS = 1;
+    static constexpr uint32_t MAX_PARALLEL_RECOVERY_WORKERS = 1024;
+
+    /** @var Default queue size for parallel recovery. */
+    static constexpr uint32_t DEFAULT_PARALLEL_RECOVERY_QUEUE_SIZE = 512;
+    static constexpr uint32_t MIN_PARALLEL_RECOVERY_QUEUE_SIZE = 16;
+    static constexpr uint32_t MAX_PARALLEL_RECOVERY_QUEUE_SIZE = 4096;
 
     /** @var Default enable log recovery statistics. */
     static constexpr bool DEFAULT_ENABLE_LOG_RECOVERY_STATS = false;
@@ -538,7 +569,7 @@ public:
     static constexpr uint32_t MAX_MAX_CONNECTIONS = UINT16_MAX;
 
     /** @var Default thread affinity policy. */
-    static constexpr AffinityMode DEFAULT_AFFINITY_MODE = AffinityMode::FILL_PHYSICAL_FIRST;
+    static constexpr AffinityMode DEFAULT_AFFINITY_MODE = AffinityMode::EQUAL_PER_SOCKET;
 
     /** @var The default value for using lazy load scheme in the global chunk directory. */
     static constexpr bool DEFAULT_LAZY_LOAD_CHUNK_DIRECTORY = true;
@@ -643,18 +674,37 @@ public:
 
     /** ------------------ Default JIT Configuration ------------ */
     /** @var Default enable JIT compilation and execution. */
-    static constexpr bool DEFAULT_ENABLE_MOT_CODEGEN = true;
+    static constexpr bool DEFAULT_ENABLE_MOT_CODEGEN = false;
 
-    /* @var Default force usage of TVM although LLVM is supported on current platform. */
-    static constexpr bool DEFAULT_FORCE_MOT_PSEUDO_CODEGEN = false;
+    /** @var Default enable JIT compilation and execution of prepared queries. */
+    static constexpr bool DEFAULT_ENABLE_MOT_QUERY_CODEGEN = true;
 
-    /** @var Default enable printing of emitted LLVM/TVM IR code of JIT-compiled queries. */
+    /** @var Default enable JIT compilation and execution of stored procedures. */
+    static constexpr bool DEFAULT_ENABLE_MOT_SP_CODEGEN = true;
+
+    /** @var Default value for the list of regular expressions denoting stored procedures that can use JIT compilation.
+     */
+    static constexpr const char* DEFAULT_MOT_SP_CODEGEN_ALLOWED = "[a-zA-z0-9_]*";
+
+    /** @var Default value for the list of regular expressions denoting stored procedures that cannot use JIT
+     *  compilation.
+     */
+    static constexpr const char* DEFAULT_MOT_SP_CODEGEN_PROHIBITED = "";
+
+    /** @var Default white list of stored procedure that can use JIT compilation even though not accessing MOT tables.
+     */
+    static constexpr const char* DEFAULT_MOT_PURE_SP_CODEGEN = "[a-zA-z0-9_]*";
+
+    /** @var Default enable printing of emitted LLVM IR code of JIT-compiled queries. */
     static constexpr bool DEFAULT_ENABLE_MOT_CODEGEN_PRINT = false;
 
-    /** @vart Default limit for the amount of JIT queries allowed per user session. */
-    static constexpr uint32_t DEFAULT_MOT_CODEGEN_LIMIT = 100;
+    /** @var Default limit for the amount of JIT queries allowed per user session. */
+    static constexpr uint32_t DEFAULT_MOT_CODEGEN_LIMIT = 50000;
     static constexpr uint32_t MIN_MOT_CODEGEN_LIMIT = 1;
-    static constexpr uint32_t MAX_MOT_CODEGEN_LIMIT = 1000;
+    static constexpr uint32_t MAX_MOT_CODEGEN_LIMIT = 100000;
+
+    /** @var Default enable profiling of jitted functions. */
+    static constexpr bool DEFAULT_ENABLE_MOT_CODEGEN_PROFILE = true;
 
     /** ------------------ Default Storage Configuration ------------ */
     /** @var The default allow index on null-able column. */

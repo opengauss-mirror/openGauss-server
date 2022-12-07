@@ -34,9 +34,6 @@
 #include "storage/pmsignal.h"
 #include "storage/proc.h"
 #include "utils/guc.h"
-#ifdef ENABLE_MOT
-#include "storage/mot/mot_fdw.h"
-#endif
 
 #include "gssignal/gs_signal.h"
 #include "access/parallel_recovery/dispatcher.h"
@@ -363,17 +360,6 @@ void StartupProcessMain(void)
         StartupDummyStandby();
     } else {
         on_shmem_exit(StartupReleaseAllLocks, 0);
-
-#ifdef ENABLE_MOT
-        /*
-         * Init MOT first
-         */
-        InitMOT();
-
-        /*
-         * MOT recovery is part of StartupXlog
-         */
-#endif
         DeleteDisConnFileInClusterStandby();
         if (!dummyStandbyMode) {
             Assert(g_instance.startup_cxt.badPageHashTbl == NULL);

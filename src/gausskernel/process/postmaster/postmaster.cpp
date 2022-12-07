@@ -2337,6 +2337,12 @@ int PostmasterMain(int argc, char* argv[])
     RemovePgTempFiles();
 
     RemoveErrorCacheFiles();
+
+#ifdef ENABLE_MOT
+    /* Initialize the MOT engine */
+    InitMOT();
+#endif
+
     /*
      * Remember postmaster startup time
      */
@@ -8537,7 +8543,9 @@ void ExitPostmaster(int status)
     }
 
 #ifdef ENABLE_MOT
-    TermMOT();   /* shutdown memory engine before codegen is destroyed */
+    if (g_instance.status != ImmediateShutdown) {
+        TermMOT();  /* shutdown memory engine before codegen is destroyed */
+    }
 #endif
 
     if (ENABLE_THREAD_POOL_DN_LOGICCONN) {

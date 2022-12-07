@@ -22,37 +22,68 @@
  * -------------------------------------------------------------------------
  */
 
-#pragma once
-
 #ifndef MOT_ACCESS_H
 #define MOT_ACCESS_H
 
-#include <stdint.h>
+#include <cstdint>
 
 namespace MOT {
 /**
  * @class Access
  * @brief Holds data for single row access.
  */
-class Access {
 
+class Access {
 public:
-    explicit Access(uint32_t id) : m_localRowSize(0), m_bufferId(id)
-    {}
+    explicit Access(uint32_t id) : m_csn(0), m_snapshot(0), m_stmtCount(0), m_redoStmt(0), m_ops(0), m_bufferId(id)
+    {
+        m_modifiedColumns.Reset();
+    }
 
     ~Access()
-    {}
+    {
+        m_localInsertRow = nullptr;
+        m_globalRow = nullptr;
+        m_localRow = nullptr;
+        m_origSentinel = nullptr;
+        m_secondaryUniqueNode = nullptr;
+        m_secondaryDelKey = nullptr;
+    }
+
+    void Print() const;
+
+    void WriteGlobalChanges(uint64_t csn, uint64_t transaction_id);
 
     void ResetUsedParameters()
     {
         m_localInsertRow = nullptr;
-        m_auxRow = nullptr;
+        m_globalRow = nullptr;
+        m_localRow = nullptr;
         m_origSentinel = nullptr;
+        m_secondaryUniqueNode = nullptr;
+        m_secondaryDelKey = nullptr;
         m_stmtCount = 0;
+        m_redoStmt = 0;
+        m_ops = 0;
+        m_csn = 0;
+        m_snapshot = 0;
         m_params.AssignParams(0);
     }
 
-    /** @var Access type. */
+    inline Row* GetLocalVersion()
+    {
+        if (m_type != INS) {
+            return m_localRow;
+        } else {
+            return m_localInsertRow;
+        }
+    }
+
+    inline Row* GetGlobalVersion() const
+    {
+        return m_globalRow;
+    }
+
     inline Sentinel* GetSentinel() const
     {
         return m_origSentinel;
@@ -61,7 +92,7 @@ public:
     /**
      * @brief Get row from header
      *  for inserts the local header if mapped is the local draft
-     * @return Pointer to the currrent row
+     * @return Pointer to the current row
      */
     inline Row* GetRowFromHeader() const
     {
@@ -71,20 +102,10 @@ public:
         return m_origSentinel->GetData();
     }
 
-    /** @var The original row */
-    Row* m_localInsertRow = nullptr;
-
-    /** @var The modified draft row. */
-    Row* m_localRow = nullptr;
-
-    /** @var The auxiliary row */
-    Row* m_auxRow = nullptr;
-
-    /** @var The original row header */
-    Sentinel* m_origSentinel = nullptr;
-
-    /** @var The bitmap set represents the updated columns. */
-    BitmapSet m_modifiedColumns;
+    inline Row* GetLocalInsertRow() const
+    {
+        return m_localInsertRow;
+    }
 
     /**
      * @brief Gets a consistent local copy of the row which is used by the OCC transaction.
@@ -96,29 +117,19 @@ public:
      */
     inline Row* GetTxnRow() const
     {
+        if (m_type == RD or m_type == RD_FOR_UPDATE) {
+            return m_globalRow;
+        }
         if (m_type != INS) {
             return m_localRow;
         } else {
-            if (m_params.IsUpgradeInsert()) {
-                return m_auxRow;
-            } else
-                return m_localInsertRow;
+            return m_localInsertRow;
         }
     }
 
-    /**
-     * @brief When validating INS operation we want to verify no
-     *  other commiter commited before us.
-     *  for regular insert we start by pointing at a null pointer
-     * @return row pointer
-     */
-    inline Row* GetRecordedSentinelRow() const
+    inline AccessType GetType() const
     {
-        if (m_params.IsUpgradeInsert() == false) {
-            return nullptr;
-        } else {
-            return GetSentinel()->GetData();
-        }
+        return m_type;
     }
 
     inline uint32_t GetBufferId() const
@@ -131,19 +142,66 @@ public:
         m_bufferId = id;
     }
 
-    /** @var OCC transaction identifier. */
-    TransactionId m_tid = 0;
+    void IncreaseOps()
+    {
+        m_ops++;
+    }
+
+    uint16_t GetOpsCount() const
+    {
+        return m_ops;
+    }
+
+    uint32_t GetStmtCount() const
+    {
+        return m_stmtCount;
+    }
+
+    uint32_t GetRedoStmt() const
+    {
+        return m_redoStmt;
+    }
+
+    /** @var The global visible sentinel */
+    Sentinel* m_origSentinel = nullptr;
+
+    /** @var The global visible version   */
+    Row* m_globalRow = nullptr;
+
+    /** @var The inserted row for the INS operation */
+    Row* m_localInsertRow = nullptr;
+
+    /** @var The modified draft row. */
+    Row* m_localRow = nullptr;
+
+    /** @var Key used for delete from secondary index in case of update on indexed column */
+    Key* m_secondaryDelKey = nullptr;
+
+    /** @var the snapshot of the current operation */
+    uint64_t m_csn = 0;
+
+    uint64_t m_snapshot = 0;
+
+    /** @var The bitmap set represents the updated columns. */
+    BitmapSet m_modifiedColumns;
+
+    /** @var The secondary-sentinel unique cached node */
+    PrimarySentinelNode* m_secondaryUniqueNode = nullptr;
+
+    /** @var Transaction statement counter   */
+    uint32_t m_stmtCount = 0;
+
+    /** @var redo statement index   */
+    uint32_t m_redoStmt = 0;
+
+    /** @var number of operation performed in a single query   */
+    uint16_t m_ops = 0;
 
     /** @var Local access parameters */
     AccessParams<uint8_t> m_params;
 
     /** @var Row state   */
     AccessType m_type = AccessType::INV;
-
-    /** @var Transaction statement counter   */
-    uint32_t m_stmtCount = 0;
-
-    uint32_t m_localRowSize;
 
 private:
     /**
@@ -162,6 +220,8 @@ private:
     uint32_t m_bufferId;
 
     friend class TxnAccess;
+
+    DECLARE_CLASS_LOGGER();
 };
 }  // namespace MOT
 

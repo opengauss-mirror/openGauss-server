@@ -33,6 +33,14 @@ class Access;
 class TxnManager;
 
 constexpr uint64_t LOCK_TIME_OUT = 1 << 16;
+
+struct GcMaintenanceInfo {
+    GcMaintenanceInfo() = default;
+    uint32_t m_version_queue = 0;
+    uint32_t m_delete_queue = 0;
+    uint32_t m_update_column_queue = 0;
+    uint32_t m_generic_queue = 0;
+};
 /**
  * @class OccTransactionManager
  * @brief Optimistic concurrency control implementation.
@@ -44,11 +52,6 @@ public:
 
     /** @brief Destructor. */
     ~OccTransactionManager();
-
-    /**
-     * @brief Initialize _writeSet, _readSet and _insertSet array.
-     */
-    bool Init();
 
     /**
      * @brief Sets or clears the pre-abort flag.
@@ -81,10 +84,6 @@ public:
      */
     RC ValidateOcc(TxnManager* tx);
 
-    RC LockHeaders(TxnManager* txMan, uint32_t& numSentinelsLock);
-
-    RC LockRows(TxnManager* txMan, uint32_t& numRowsLock);
-
     /**
      * @brief Writes all the changes in the write set of a transaction and
      * release the locks associated with all the write access items.
@@ -92,17 +91,17 @@ public:
      */
     void WriteChanges(TxnManager* txMan);
 
-    /** @brief remove all deleted keys from the global indices   */
-    void CleanRowsFromIndexes(TxnManager* txMan);
-
-    /** @brief Rollack insert-set due to an abort   */
-    void RollbackInserts(TxnManager* txMan);
+    /**
+     * @brief Writes all the changes in the insert set of a transaction
+     * and release the locks associated with all the write access items.
+     * @param txMan The committing transaction.
+     */
+    void WriteSentinelChanges(TxnManager* txMan);
 
     void ReleaseLocks(TxnManager* txMan)
     {
         if (m_rowsLocked) {
             ReleaseHeaderLocks(txMan, m_writeSetSize);
-            ReleaseRowsLocks(txMan, m_rowsSetSize);
             m_rowsLocked = false;
         }
     }
@@ -139,56 +138,55 @@ public:
         }
     }
 
-private:
-    /**
-     * @brief Checks whether the transaction identifier in the original row
-     * in the access matches the transaction identifier in the access object.
-     * @detail The check is faster than a cc validate, but it does not
-     * guarantee correctness. If the versions do not match, cc
-     * verification will always fail too. However, if the function returns
-     * true, cc may fail during the verification (i.e. it may produce
-     * false positive reports).
-     */
-    bool CheckVersion(const Access* access);
+    inline bool IsTransactionCommited() const
+    {
+        return m_isTransactionCommited;
+    }
 
-    /** @brief Validate Header for insert */
+    inline uint64_t GetTxnCounter() const
+    {
+        return m_txnCounter;
+    }
+
+private:
+    /** @brief Perform validation of current access   */
+    bool QuickVersionCheck(const Access* access);
+
+    /** @brief Perform validation of current access   */
+    bool QuickInsertCheck(const Access* access);
+
+    /** @brief Perform pre-processing and validation   */
+    bool PreAbortCheck(TxnManager* txMan, GcMaintenanceInfo& gcMemoryReserve);
+
+    /** @brief Validate Header for insert   */
     bool QuickHeaderValidation(const Access* access);
 
-    bool QuickVersionCheck(TxnManager* txMan, uint32_t& readSetSize);
+    /** @brief Lock all keys   */
+    RC LockHeaders(TxnManager* txMan, uint32_t& numSentinelsLock);
 
-    bool LockHeadersNoWait(TxnManager* txMan, uint32_t& numSentinelsLock);
-
+    /** @brief Release Header locks   */
     void ReleaseHeaderLocks(TxnManager* txMan, uint32_t numOfLocks);
 
-    /** @brief Release all the locked rows */
-    void ReleaseRowsLocks(TxnManager* txMan, uint32_t numOfLocks);
+    /** For Recovery, takes care of IDI (Insert, Delete, Insert) use case    */
+    RC ResolveRecoveryOccConflict(TxnManager* txMan, Access* access);
 
-    /** @brief Validate the read set */
-    bool ValidateReadSet(TxnManager* txMan);
-
-    /** @brief Validate the write set */
+    /** @brief validate the write set   */
     bool ValidateWriteSet(TxnManager* txMan);
 
     /** @brief Pre-allocates stable row according to the checkpoint state. */
     bool PreAllocStableRow(TxnManager* txMan);
 
-    /** @brief Sets stable row according to the checkpoint state. */
-    void ApplyWrite(TxnManager* txMan);
+    /** @brief Pre-allocates GC memory for reclamation. */
+    bool ReserveGcMemory(TxnManager* txMan, const GcMaintenanceInfo& gcMemoryReserve);
 
     /** @var transaction counter   */
-    uint32_t m_txnCounter;
+    uint64_t m_txnCounter;
 
     /** @var aborts counter   */
-    uint32_t m_abortsCounter;
+    uint64_t m_abortsCounter;
 
     /** @var Write set size. */
     uint32_t m_writeSetSize;
-
-    /** @var total number of rows   */
-    uint32_t m_rowsSetSize;
-
-    /** @var Write set size. */
-    uint32_t m_deleteSetSize;
 
     /** @var Write set size. */
     uint32_t m_insertSetSize;
@@ -203,6 +201,9 @@ private:
 
     /** @var Validate-no-wait configuration. */
     bool m_validationNoWait;
+
+    /** @var flag indicating whether transaction committed */
+    bool m_isTransactionCommited;
 };
 }  // namespace MOT
 

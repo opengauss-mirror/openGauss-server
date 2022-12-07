@@ -95,7 +95,7 @@ public:
         return m_keySize;
     }
 
-    virtual uint16_t PrintValue(uint8_t* data, char* destBuf, size_t len)
+    virtual uint16_t PrintValue(uint8_t* data, char* destBuf, size_t len, bool useDefault = false)
     {
         if (len >= 3) {
             errno_t erc = snprintf_s(destBuf, len, len - 1, "NaN");
@@ -121,10 +121,38 @@ public:
         m_numIndexesUsage--;
     }
 
-    const char* GetTypeStr()
+    const char* GetTypeStr() const
     {
         return ColumnTypeToStr(m_type);
     }
+
+    RC SetDefaultValue(uintptr_t val, size_t size);
+
+    void ResetDefaultValue();
+
+    void SetDropped();
+
+    inline void SetIsDropped(bool isDropped)
+    {
+        m_isDropped = isDropped;
+    }
+
+    inline bool GetIsDropped() const
+    {
+        return m_isDropped;
+    }
+
+    inline void SetIsCommitted(bool isCommited)
+    {
+        m_isCommitted = isCommited;
+    }
+
+    inline bool GetIsCommitted() const
+    {
+        return m_isCommitted;
+    }
+
+    RC Clone(Column* col);
 
     // class non-copy-able, non-assignable, non-movable
     /** @cond EXCLUDE_DOC */
@@ -149,10 +177,10 @@ public:
     uint64_t m_offset = 0;
 
     /** @var Column name. */
-    char m_name[MAX_COLUMN_NAME_LEN];
+    char m_name[MAX_COLUMN_NAME_LEN] = {0};
 
     /** @var Column name length */
-    uint16_t m_nameLen;
+    uint16_t m_nameLen = 0;
 
     /** @var Number of indexes which using this column as part of their key. */
     uint16_t m_numIndexesUsage = 0;
@@ -161,22 +189,38 @@ public:
     MOT_CATALOG_FIELD_TYPES m_type;
 
     /** @var Column does not allow null values. */
-    bool m_isNotNull;
+    bool m_isNotNull = false;
 
     /** @var Envelope column type. */
-    unsigned int m_envelopeType;
+    unsigned int m_envelopeType = 0;
+
+    /** @var Column is dropped. */
+    bool m_isDropped = 0;
+
+    /** @var Column has default value. */
+    bool m_hasDefault = false;
+
+    /** @var Column's default value. */
+    uintptr_t m_defValue = 0;
+
+    /** @var Column's default value size. */
+    size_t m_defSize = 0;
+
+    /** @var Column's commit state. */
+    bool m_isCommitted = false;
 };
 
 // derived column classes
-#define X(Enum, String)                                                                      \
-    class alignas(CACHE_LINE_SIZE) Column##Enum : public Column {                            \
-        virtual ~Column##Enum()                                                              \
-        {}                                                                                   \
-        virtual bool Pack(uint8_t* dest, uintptr_t src, size_t len);                         \
-        virtual bool PackKey(uint8_t* dest, uintptr_t src, size_t len, uint8_t fill = 0x00); \
-        virtual void Unpack(uint8_t* data, uintptr_t* dest, size_t& len);                    \
-        virtual void SetKeySize();                                                           \
-        virtual uint16_t PrintValue(uint8_t* data, char* destBuf, size_t len);               \
+#define X(Enum, String)                                                                          \
+    class alignas(CACHE_LINE_SIZE) Column##Enum : public Column {                                \
+    public:                                                                                      \
+        ~Column##Enum() override                                                                 \
+        {}                                                                                       \
+        bool Pack(uint8_t* dest, uintptr_t src, size_t len) override;                            \
+        bool PackKey(uint8_t* dest, uintptr_t src, size_t len, uint8_t fill) override;           \
+        void Unpack(uint8_t* data, uintptr_t* dest, size_t& len) override;                       \
+        void SetKeySize() override;                                                              \
+        uint16_t PrintValue(uint8_t* data, char* destBuf, size_t len, bool useDefault) override; \
     };
 TYPENAMES
 #undef X

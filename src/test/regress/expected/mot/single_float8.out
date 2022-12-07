@@ -395,7 +395,7 @@ SELECT '' AS five, * FROM FLOAT8_TBL ORDER BY f1;
 UPDATE FLOAT8_TBL
    SET f1 = FLOAT8_TBL.f1 * '-1'
    WHERE FLOAT8_TBL.f1 > '0.0';
-ERROR:  Update of indexed column is not supported for memory table
+ERROR:  Update of primary key column is not supported for memory table
    
 SELECT '' AS bad, f.f1 * '1e200' from FLOAT8_TBL f ORDER BY f1;
 ERROR:  value out of range: overflow

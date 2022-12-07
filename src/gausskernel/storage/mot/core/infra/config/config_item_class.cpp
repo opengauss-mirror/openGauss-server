@@ -23,7 +23,7 @@
  */
 
 #include "config_item_class.h"
-#include <string.h>
+#include <cstring>
 
 namespace MOT {
 static const char* CONFIG_ITEM_SECTION_STR = "section";

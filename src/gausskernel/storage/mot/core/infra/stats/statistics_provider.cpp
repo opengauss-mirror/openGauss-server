@@ -41,6 +41,7 @@ StatisticsProvider::StatisticsProvider(
       m_threadStats(nullptr),
       m_threadStatCount(0),
       m_hasExtendedStats(extended),
+      m_statLock(0),
       m_globalStats(nullptr),
       m_aggregateStats(nullptr),
       m_prevAggregateStats(nullptr),
@@ -95,6 +96,9 @@ StatisticsProvider::~StatisticsProvider()
     if (m_deadThreadStats) {
         delete m_deadThreadStats;
     }
+
+    // Generator will be destroyed by the provider
+    m_generator = nullptr;
 }
 
 bool StatisticsProvider::Initialize()
@@ -173,9 +177,9 @@ bool StatisticsProvider::ReserveThreadSlot()
                     "Failed to allocate buffer in size of %u bytes",
                     m_generator->GetObjectSize());
             } else {
-                pthread_spin_lock(&m_statLock);
+                (void)pthread_spin_lock(&m_statLock);
                 m_threadStats[threadId] = m_generator->CreateThreadStatistics(threadId, buffer);
-                pthread_spin_unlock(&m_statLock);
+                (void)pthread_spin_unlock(&m_statLock);
                 MOT_LOG_DEBUG("m_threadStats[%u] = %p", (unsigned)threadId, m_threadStats[threadId]);
                 result = true;
             }
@@ -199,11 +203,11 @@ void StatisticsProvider::UnreserveThreadSlot()
                 threadId);
         } else {
             // aggregate dead thread statistics and cleanup
-            pthread_spin_lock(&m_statLock);
+            (void)pthread_spin_lock(&m_statLock);
             ThreadStatistics* threadStats = m_threadStats[threadId];
             m_deadThreadStats->Add(*threadStats);
             m_threadStats[threadId] = nullptr;  // this must be guarded with a lock due to race with Summarize()
-            pthread_spin_unlock(&m_statLock);
+            (void)pthread_spin_unlock(&m_statLock);
             FreeThreadStats(threadId, threadStats);  // cleanup now outside lock scope
             MOT_LOG_TRACE("Unreserved %s statistics thread slot for thread id %" PRIu16, GetName(), threadId);
         }
@@ -212,7 +216,7 @@ void StatisticsProvider::UnreserveThreadSlot()
 
 void StatisticsProvider::Summarize()
 {
-    pthread_spin_lock(&m_statLock);
+    (void)pthread_spin_lock(&m_statLock);
 
     m_prevAggregateStats->Assign(*m_aggregateStats);
     m_aggregateStats->Reset();
@@ -230,7 +234,7 @@ void StatisticsProvider::Summarize()
     m_aggregateStats->Add(*m_deadThreadStats);
     m_deadThreadStats->Reset();
 
-    pthread_spin_unlock(&m_statLock);
+    (void)pthread_spin_unlock(&m_statLock);
 
     // from this point onward there is no race over m_threadStats or m_deadThreadStats
     m_aggregateStats->Summarize(false);
@@ -270,7 +274,7 @@ bool StatisticsProvider::HasStatisticsFor(uint32_t statOpts)
 
     if (!result && (statOpts & STAT_OPT_SCOPE_GLOBAL)) {
         if (statOpts & STAT_OPT_LEVEL_DETAIL) {
-            pthread_spin_lock(&m_statLock);
+            (void)pthread_spin_lock(&m_statLock);
             for (uint32_t i = 0; i < m_threadStatCount; ++i) {
                 if (m_threadStats[i] != nullptr) {
                     result = m_threadStats[i]->HasValidSamples();
@@ -279,7 +283,7 @@ bool StatisticsProvider::HasStatisticsFor(uint32_t statOpts)
                     }
                 }
             }
-            pthread_spin_unlock(&m_statLock);
+            (void)pthread_spin_unlock(&m_statLock);
             if (!result) {
                 result = m_averageStats->HasValidSamples();
             }
@@ -323,13 +327,13 @@ void StatisticsProvider::PrintThreadStats(uint32_t statOpts, uint32_t statId, Lo
     // print total stats
     if (statOpts & STAT_OPT_PERIOD_TOTAL) {
         if (statOpts & STAT_OPT_LEVEL_DETAIL) {
-            pthread_spin_lock(&m_statLock);
+            (void)pthread_spin_lock(&m_statLock);
             for (uint32_t i = 0; i < m_threadStatCount; ++i) {
                 if (m_threadStats[i] != nullptr) {
                     m_threadStats[i]->Print(statId, logLevel);
                 }
             }
-            pthread_spin_unlock(&m_statLock);
+            (void)pthread_spin_unlock(&m_statLock);
             m_averageStats->Print(statId, logLevel);
         }
         if (statOpts & STAT_OPT_LEVEL_SUMMARY) {
@@ -338,7 +342,7 @@ void StatisticsProvider::PrintThreadStats(uint32_t statOpts, uint32_t statId, Lo
     }
 }
 
-void StatisticsProvider::PrintGlobalStats(uint32_t statOpts, uint32_t statId, LogLevel logLevel)
+void StatisticsProvider::PrintGlobalStats(uint32_t statOpts, uint32_t statId, LogLevel logLevel) const
 {
     // print diff stats
     if (statOpts & STAT_OPT_PERIOD_DIFF) {

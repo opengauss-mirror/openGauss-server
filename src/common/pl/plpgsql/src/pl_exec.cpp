@@ -65,6 +65,11 @@
 #include "access/hash.h"
 #include "distributelayer/streamMain.h"
 
+#ifdef ENABLE_MOT
+#include "storage/mot/jit_exec.h"
+#include "storage/mot/mot_fdw.h"
+#endif
+
 extern bool checkRecompileCondition(CachedPlanSource* plansource);
 static const char* const raise_skip_msg = "RAISE";
 typedef struct {
@@ -105,7 +110,6 @@ typedef struct SimpleEcontextStackEntry {
  * Local function forward declarations
  ************************************************************/
 static void plpgsql_exec_error_callback(void* arg);
-extern PLpgSQL_datum* copy_plpgsql_datum(PLpgSQL_datum* datum);
 
 static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block);
 static int exec_stmts(PLpgSQL_execstate* estate, List* stmts);
@@ -146,8 +150,6 @@ static int exchange_parameters(
     PLpgSQL_execstate* estate, PLpgSQL_stmt_dynexecute* dynstmt, List* stmts, int* ppdindex, int* datumindex);
 static bool is_anonymous_block(const char* query);
 static int exec_stmt_dynfors(PLpgSQL_execstate* estate, PLpgSQL_stmt_dynfors* stmt);
-static void plpgsql_estate_setup(PLpgSQL_execstate* estate, PLpgSQL_function* func, ReturnSetInfo* rsi);
-void exec_eval_cleanup(PLpgSQL_execstate* estate);
 
 static void exec_prepare_plan(PLpgSQL_execstate* estate, PLpgSQL_expr* expr, int cursorOptions);
 static bool exec_simple_check_node(Node* node);
@@ -170,12 +172,10 @@ static int exec_run_select(PLpgSQL_execstate* estate, PLpgSQL_expr* expr, long m
                            Portal* portalP, bool isCollectParam = false);
 static int exec_for_query(PLpgSQL_execstate* estate, PLpgSQL_stmt_forq* stmt, Portal portal, bool prefetch_ok, int dno);
 static ParamListInfo setup_param_list(PLpgSQL_execstate* estate, PLpgSQL_expr* expr);
-static void plpgsql_param_fetch(ParamListInfo params, int paramid);
 static void exec_move_row(PLpgSQL_execstate* estate,
     PLpgSQL_rec* rec, PLpgSQL_row* row, HeapTuple tup, TupleDesc tupdesc, bool fromExecSql = false);
 static void exec_read_bulk_collect(PLpgSQL_execstate *estate, PLpgSQL_row *row, SPITupleTable *tuptab);
 static char* convert_value_to_string(PLpgSQL_execstate* estate, Datum value, Oid valtype);
-static Datum pl_coerce_type_typmod(Datum value, Oid targetTypeId, int32 targetTypMod);
 static Datum exec_cast_value(PLpgSQL_execstate* estate, Datum value, Oid valtype, Oid reqtype, FmgrInfo* reqinput,
     Oid reqtypioparam, int32 reqtypmod, bool isnull);
 static Datum exec_simple_cast_value(
@@ -192,7 +192,6 @@ static void exec_set_sql_notfound(PLpgSQL_execstate* estate, PLpgSQL_state state
 static void exec_set_sql_isopen(PLpgSQL_execstate* estate, bool state);
 static void exec_set_sql_rowcount(PLpgSQL_execstate* estate, int rowcount);
 static void plpgsql_create_econtext(PLpgSQL_execstate *estate, MemoryContext saveCxt = NULL);
-static void plpgsql_destroy_econtext(PLpgSQL_execstate *estate);
 static void free_var(PLpgSQL_var* var);
 static PreparedParamsData* exec_eval_using_params(PLpgSQL_execstate* estate, List* params);
 static void free_params_data(PreparedParamsData* ppd);
@@ -218,7 +217,6 @@ static int check_line_validity_in_for_query(PLpgSQL_stmt_forq* stmt, int, int);
 
 static void BindCursorWithPortal(Portal portal, PLpgSQL_execstate *estate, int varno);
 static char* transformAnonymousBlock(char* query);
-static bool needRecompilePlan(SPIPlanPtr plan);
 
 static void rebuild_exception_subtransaction_chain(PLpgSQL_execstate* estate, List* transactionList);
 
@@ -2991,6 +2989,11 @@ static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block)
             /* Run the block's statements */
             rc = exec_stmts(estate, block->body);
 
+#ifdef ENABLE_MOT
+            // throws ereport
+            MOTCheckTransactionAborted();
+#endif
+
             estate->err_text = gettext_noop("during statement block exit");
 
             /*
@@ -3066,6 +3069,12 @@ static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block)
 #ifndef ENABLE_MULTIPLE_NODES
         }
 #endif
+
+#ifdef ENABLE_MOT
+        // throws ereport
+        MOTCheckTransactionAborted();
+#endif
+
         stp_retore_old_xact_stmt_state(savedisAllowCommitRollback);
         u_sess->SPI_cxt.is_stp = savedIsSTP;
         u_sess->SPI_cxt.is_proconfig_set = savedProConfigIsSet;
@@ -3268,6 +3277,10 @@ static int exec_stmts(PLpgSQL_execstate* estate, List* stmts)
 
         int rc = exec_stmt(estate, stmt);
         stmtid++;
+
+#ifdef ENABLE_MOT
+        CallXactCallbacks(XACT_EVENT_STMT_FINISH);
+#endif
 
         if (rc == PLPGSQL_RC_GOTO_UNRESOLVED) {
             /*
@@ -5475,7 +5488,7 @@ static int exec_stmt_raise(PLpgSQL_execstate* estate, PLpgSQL_stmt_raise* stmt)
  * Initialize a mostly empty execution state
  * ----------
  */
-static void plpgsql_estate_setup(PLpgSQL_execstate* estate, PLpgSQL_function* func, ReturnSetInfo* rsi)
+void plpgsql_estate_setup(PLpgSQL_execstate* estate, PLpgSQL_function* func, ReturnSetInfo* rsi)
 {
     /* this link will be restored at exit from plpgsql_call_handler */
     func->cur_estate = estate;
@@ -5695,7 +5708,6 @@ static int exec_stmt_execsql(PLpgSQL_execstate* estate, PLpgSQL_stmt_execsql* st
 
             foreach (l2, plansource->query_list) {
                 Query* q = (Query*)lfirst(l2);
-
                 AssertEreport(IsA(q, Query), MOD_PLSQL, "Query is required.");
                 if (q->canSetTag) {
                     if (q->commandType == CMD_INSERT || q->commandType == CMD_UPDATE || q->commandType == CMD_DELETE ||
@@ -10352,7 +10364,7 @@ static ParamListInfo setup_param_list(PLpgSQL_execstate* estate, PLpgSQL_expr* e
 /*
  * plpgsql_param_fetch		paramFetch callback for dynamic parameter fetch
  */
-static void plpgsql_param_fetch(ParamListInfo params, int paramid)
+void plpgsql_param_fetch(ParamListInfo params, int paramid)
 {
     int dno;
     PLpgSQL_execstate* estate = NULL;
@@ -11293,7 +11305,7 @@ static char* convert_value_to_string(PLpgSQL_execstate* estate, Datum value, Oid
  * @IN targetTypMod: target type mode.
  * @return: Datum - the result of specified typmode.
  */
-static Datum pl_coerce_type_typmod(Datum value, Oid targetTypeId, int32 targetTypMod)
+Datum pl_coerce_type_typmod(Datum value, Oid targetTypeId, int32 targetTypMod)
 {
     CoercionPathType pathtype;
     Oid funcId;
@@ -12184,7 +12196,7 @@ static void plpgsql_create_econtext(PLpgSQL_execstate* estate, MemoryContext sav
  * We check that it matches the top stack entry, and destroy the stack
  * entry along with the context.
  */
-static void plpgsql_destroy_econtext(PLpgSQL_execstate* estate)
+void plpgsql_destroy_econtext(PLpgSQL_execstate* estate)
 {
     SimpleEcontextStackEntry *pre = NULL;
     SimpleEcontextStackEntry *plcontext = u_sess->plsql_cxt.simple_econtext_stack;
@@ -12231,10 +12243,10 @@ void plpgsql_xact_cb(XactEvent event, void* arg)
 {
 #ifdef ENABLE_MOT
     /*
-     * XACT_EVENT_PREROLLBACK_CLEANUP is added only for MOT FDW to cleanup some
-     * internal resources. So, others can safely ignore this event.
+     * These events are added only for MOT FDW. So, others can safely ignore these event.
      */
-    if (event == XACT_EVENT_PREROLLBACK_CLEANUP) {
+    if (event == XACT_EVENT_START || event == XACT_EVENT_RECORD_COMMIT || event == XACT_EVENT_PREROLLBACK_CLEANUP ||
+        event == XACT_EVENT_POST_COMMIT_CLEANUP || event == XACT_EVENT_STMT_FINISH) {
         return;
     }
 #endif
@@ -12640,7 +12652,7 @@ static char* transformAnonymousBlock(char* query)
  * 		True : need to redo Prepare proc before exec stored procedure.
  *		False: could execute SP execution directly.
  */
-static bool needRecompilePlan(SPIPlanPtr plan)
+bool needRecompilePlan(SPIPlanPtr plan)
 {
     bool ret_val = false;
     ListCell* l = NULL;

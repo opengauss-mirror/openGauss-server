@@ -27,8 +27,6 @@
 #include "utilities.h"
 
 namespace MOT {
-DECLARE_LOGGER(IndexFactory, Storage)
-
 IMPLEMENT_CLASS_LOGGER(IndexFactory, Storage);
 
 Index* IndexFactory::CreateIndex(IndexOrder indexOrder, IndexingMethod indexingMethod, IndexTreeFlavor flavor)

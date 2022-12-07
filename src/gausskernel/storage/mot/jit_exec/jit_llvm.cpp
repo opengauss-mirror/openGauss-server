@@ -57,33 +57,39 @@ bool JitCanInitThreadCodeGen()
         MOT_LOG_WARN("LLVM default target triple is: %s, process triple is: %s",
             llvm::sys::getDefaultTargetTriple().c_str(),
             llvm::sys::getProcessTriple().c_str());
+        MOT_LOG_WARN("LLVM is disabled due to undetected platform");
         return false;
     }
 
 #ifdef __aarch64__
     return true;  // Using native llvm on ARM
 #else
-    bool canInit = false;
-    if (IS_PGXC_DATANODE && IsMotCodegenEnabled()) {
-        canInit = GlobalCodeGenEnvironmentSuccess;
-        if (!canInit) {
-            MOT_LOG_WARN("LLVM environment is not initialized, native LLVM will not be used.");
-        }
+    if (!IsMotCodegenEnabled()) {
+        MOT_LOG_INFO("LLVM is disabled by configuration");
+        return false;
     }
-    return canInit;
+    if (!IS_PGXC_DATANODE) {
+        MOT_LOG_INFO("LLVM is disabled: current node is not a data node");
+        return false;
+    }
+    if (!GlobalCodeGenEnvironmentSuccess) {
+        MOT_LOG_WARN("LLVM is disabled due to LLVM environment initialization failure");
+        return false;
+    }
+    return true;
 #endif
 }
 
 /** @brief Prepares for code generation. */
 GsCodeGen* SetupCodegenEnv()
 {
-    MOT_ASSERT(g_instance.mot_cxt.jitExecMode == JIT_EXEC_MODE_LLVM);
-
     // create GsCodeGen object for LLVM code generation
     GsCodeGen* code_gen = New(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR)) GsCodeGen();
     if (code_gen != nullptr) {
         code_gen->initialize();
         code_gen->createNewModule();
+        // we use large compilation model for ARM machines (otherwise relocation fails when generated code is large)
+        code_gen->getCurrentModule()->setCodeModel(llvm::CodeModel::Large);
     }
     return code_gen;
 }

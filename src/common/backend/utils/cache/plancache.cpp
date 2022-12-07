@@ -293,6 +293,7 @@ CachedPlanSource* CreateCachedPlan(Node* raw_parse_tree, const char* query_strin
 
 #ifdef ENABLE_MOT
     plansource->storageEngineType = SE_TYPE_UNSPECIFIED;
+    plansource->checkedMotJitCodegen = false;
     plansource->mot_jit_context = NULL;
 #endif
 
@@ -375,6 +376,7 @@ CachedPlanSource* CreateOneShotCachedPlan(Node* raw_parse_tree, const char* quer
 
 #ifdef ENABLE_MOT
     plansource->storageEngineType = SE_TYPE_UNSPECIFIED;
+    plansource->checkedMotJitCodegen = false;
     plansource->mot_jit_context = NULL;
 #endif
 
@@ -715,6 +717,86 @@ void ReleaseGenericPlan(CachedPlanSource* plansource)
     }
 }
 
+#ifdef ENABLE_MOT
+void MotTryRevalidateJitContext(CachedPlanSource* plansource)
+{
+    // while pending for recompilation to finish we keep the opfusion object as-is (using FDW)
+    JitExec::JitContextState currState = JitExec::GetJitContextState(plansource->mot_jit_context);
+    if (currState == JitExec::JIT_CONTEXT_STATE_READY) {
+        return;
+    }
+
+    u_sess->mot_cxt.jit_codegen_error = 0;
+    bool destroyContext = false;
+    bool destroyOpfusion = false;
+    if (currState == JitExec::JIT_CONTEXT_STATE_PENDING) {
+        // if opfusion object needs to be destroyed we do not return early
+        if (plansource->opFusionObj == NULL) {
+            return;
+        }
+        destroyOpfusion = true;
+    } else if (currState == JitExec::JIT_CONTEXT_STATE_ERROR) {
+        destroyContext = true;
+        destroyOpfusion = true;
+    } else {
+        // if compilation is done, or the context is invalid we need to revalidate it
+        if ((currState == JitExec::JIT_CONTEXT_STATE_DONE) || (currState == JitExec::JIT_CONTEXT_STATE_INVALID)) {
+            Oid funcId = InvalidOid;
+            TransactionId funcXmin = InvalidTransactionId;
+            (void)JitExec::IsInvokeQueryPlan(plansource, &funcId, &funcXmin);
+            (void)JitExec::TryRevalidateJitContext(plansource->mot_jit_context, funcXmin);
+        }
+
+        // if we arrive to error state we destroy everything, otherwise, if we have an opfusion
+        // object, and the next state is not ready, then we must recreate Opfusion object
+        // another case is when we don't have opfusion object and the next state is ready (so the
+        // plansource->is_checked_opfusion must be set to false
+        JitExec::JitContextState nextState = JitExec::GetJitContextState(plansource->mot_jit_context);
+        if (nextState == JitExec::JIT_CONTEXT_STATE_ERROR) {
+            destroyContext = true;
+            destroyOpfusion = true;
+        } else if ((plansource->opFusionObj != NULL) && (nextState != JitExec::JIT_CONTEXT_STATE_READY)) {
+            destroyOpfusion = true;
+        } else if ((plansource->opFusionObj == NULL) && (nextState == JitExec::JIT_CONTEXT_STATE_READY)) {
+            destroyOpfusion = true;
+        }
+    }
+
+    if (destroyContext) {
+        if (plansource->mot_jit_context != nullptr) {
+            JitExec::DestroyJitContext(plansource->mot_jit_context, true);
+            plansource->mot_jit_context = nullptr;
+        }
+        plansource->checkedMotJitCodegen = false;
+    }
+
+    if (destroyOpfusion) {
+        // we must also destroy the opfusion object (which relies on the JIT context), and have it recreated
+        if (!plansource->gpc.status.InShareTable()) {
+            if (plansource->opFusionObj != NULL) {
+                OpFusion *opfusion = (OpFusion *)plansource->opFusionObj;
+                if (opfusion->m_local.m_portalName == NULL ||
+                    OpFusion::locateFusion(opfusion->m_local.m_portalName) == NULL) {
+                    OpFusion::tearDown(opfusion);
+                } else {
+                    opfusion->m_global->m_psrc = NULL;
+                }
+                plansource->opFusionObj = NULL;
+            }
+            plansource->is_checked_opfusion = false;
+        }
+    }
+
+    if (u_sess->mot_cxt.jit_codegen_error == ERRCODE_QUERY_CANCELED) {
+        // If JIT revalidation failed due to cancel request, we need to ereport. JIT source will be in error state,
+        // but checkedMotJitCodegen will still be false so that the JIT compilation will be triggered on next
+        // attempt.
+        Assert(!plansource->checkedMotJitCodegen);
+        ereport(ERROR, (errcode(ERRCODE_QUERY_CANCELED), errmsg("canceling statement due to user request")));
+    }
+}
+#endif
+
 /*
  * RevalidateCachedQuery: ensure validity of analyzed-and-rewritten query tree.
  *
@@ -799,6 +881,38 @@ List* RevalidateCachedQuery(CachedPlanSource* plansource, bool has_lp)
     if (plansource->is_valid) {
         AcquirePlannerLocks(plansource->query_list, true);
 
+#ifdef ENABLE_MOT
+        /*
+         * In case the plan is valid, We must revalidate MOT JIT context early
+         * enough before success is declared, but after plan locks are taken.
+         * We want to make sure that in case JIT context was invalidated and
+         * cannot be revalidated, then the opfusion object should be discarded,
+         * since it must be recreated, this time without JIT.
+         * This use case can happen with select from stored procedure, where
+         * some sub-query was invalidated, or even the stored procedure itself
+         * was modified.
+         * ATTENTION: This case relates only to MOT tables, since we have a
+         * ready MOT JIT context.
+         */
+        if (plansource->is_valid) {
+            if (plansource->mot_jit_context != nullptr) {
+                MotTryRevalidateJitContext(plansource);
+            } else {
+                bool checkMotJitCodegen = (!IS_PGXC_COORDINATOR && (u_sess->SPI_cxt._connected == -1) &&
+                                            (plansource->checkedMotJitCodegen == false));
+                if (checkMotJitCodegen) {
+                    // generate JIT code here
+                    if ((plansource->storageEngineType == SE_TYPE_MOT ||
+                        plansource->storageEngineType == SE_TYPE_UNSPECIFIED) && JitExec::IsMotCodegenEnabled()) {
+                        // MOT LLVM - due to plan invalidation we might need to re-create JIT context
+                        TryMotJitCodegenQuery(plansource->query_string, plansource, NULL);
+                    }
+                    plansource->checkedMotJitCodegen = true;
+                }
+            }
+        }
+#endif
+
         /*
          * By now, if any invalidation has happened, the inval callback
          * functions will have marked the query invalid.
@@ -813,6 +927,19 @@ List* RevalidateCachedQuery(CachedPlanSource* plansource, bool has_lp)
     }
 
     Assert(!plansource->gpc.status.InShareTable());
+
+#ifdef ENABLE_MOT
+    /*
+     * CachedPlanSource is no longer valid. Invalidate MOT JIT context forcefully,
+     * so that it will be re-validated in the next execution.
+     * ATTENTION: This case relates only to MOT tables, since we have a
+     * ready MOT JIT context.
+     */
+    if (plansource->mot_jit_context != nullptr) {
+        JitExec::ForceJitContextInvalidation(plansource->mot_jit_context);
+    }
+    plansource->checkedMotJitCodegen = false;
+#endif
 
     /*
      * Discard the no-longer-useful query tree.  (Note: we don't want to do
@@ -1007,14 +1134,6 @@ List* RevalidateCachedQuery(CachedPlanSource* plansource, bool has_lp)
     }
     plansource->is_checked_opfusion = false;
 
-#ifdef ENABLE_MOT
-    /* clean JIT context if exists */
-    if (plansource->mot_jit_context) {
-        JitExec::DestroyJitContext(plansource->mot_jit_context);
-        plansource->mot_jit_context = NULL;
-    }
-#endif
-
     /*
      * Note: we do not reset generic_cost or total_custom_cost, although we
      * could choose to do so.  If the DDL or statistics change that prompted
@@ -1204,9 +1323,6 @@ CachedPlan* BuildCachedPlan(CachedPlanSource* plansource, List* qlist, ParamList
      */
     snapshot_set = false;
     if (!ActiveSnapshotSet() &&
-#ifdef ENABLE_MOT
-        !(plansource->storageEngineType == SE_TYPE_MOT) &&
-#endif
         analyze_requires_snapshot(plansource->raw_parse_tree)) {
         PushActiveSnapshot(GetTransactionSnapshot(GTM_LITE_MODE));
         snapshot_set = true;
@@ -1385,6 +1501,12 @@ CachedPlan* BuildCachedPlan(CachedPlanSource* plansource, List* qlist, ParamList
 
     plpgsql_estate = saved_estate;
     u_sess->opt_cxt.nextval_default_expr_type = plansource->nextval_default_expr_type;
+
+#ifdef ENABLE_MOT
+    /* Set plan storageEngineType and mot_jit_context */
+    plan->storageEngineType = plansource->storageEngineType;
+    plan->mot_jit_context = plansource->mot_jit_context;
+#endif
 
     return plan;
 }
@@ -1876,6 +1998,12 @@ CachedPlan* GetCachedPlan(CachedPlanSource* plansource, ParamListInfo boundParam
             plan = plansource->gplan;
             Assert(plan->magic == CACHEDPLAN_MAGIC);
 
+#ifdef ENABLE_MOT
+            /* MOT JIT context might have got revalidated and destroyed, so we fetch it again from plan source. */
+            plan->storageEngineType = plansource->storageEngineType;
+            plan->mot_jit_context = plansource->mot_jit_context;
+#endif
+
             /* Update soft parse counter for Unique SQL */
             UniqueSQLStatCountSoftParse(1);
         } else {
@@ -2052,9 +2180,8 @@ CachedPlan* GetCachedPlan(CachedPlanSource* plansource, ParamListInfo boundParam
     }
 
 #ifdef ENABLE_MOT
-    /* set plan storageEngineType */
-    plan->storageEngineType = plansource->storageEngineType;
-    plan->mot_jit_context = plansource->mot_jit_context;
+    Assert(plan->storageEngineType == plansource->storageEngineType);
+    Assert(plan->mot_jit_context == plansource->mot_jit_context);
 #endif
 
     ListCell *lc;
@@ -2494,6 +2621,7 @@ CachedPlanSource* CopyCachedPlan(CachedPlanSource* plansource, bool is_share)
 
 #ifdef ENABLE_MOT
     newsource->storageEngineType = SE_TYPE_UNSPECIFIED;
+    newsource->checkedMotJitCodegen = false;
     newsource->mot_jit_context = NULL;
 #endif
 
@@ -3113,10 +3241,13 @@ void ResetPlanCache(void)
 {
 #ifdef ENABLE_MOT
     /* MOT: clean any JIT context */
-    if (plansource->mot_jit_context) {
-        JitExec::DestroyJitContext(plansource->mot_jit_context);
+    if (plansource->mot_jit_context != NULL) {
+        if (!JitExec::IsJitSubContext(plansource->mot_jit_context)) {
+            JitExec::DestroyJitContext(plansource->mot_jit_context, true);
+        }
         plansource->mot_jit_context = NULL;
     }
+    plansource->checkedMotJitCodegen = false;
 #endif
 
     if (plansource->lightProxyObj != NULL) {

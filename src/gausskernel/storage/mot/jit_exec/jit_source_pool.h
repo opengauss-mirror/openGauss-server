@@ -39,19 +39,20 @@ extern bool InitJitSourcePool(uint32_t poolSize);
 extern void DestroyJitSourcePool();
 
 /**
- * @brief Allocates a JIT source from the pool.
- * @param queryString The query string for which a JIT source is to be allocated. Used to
- * re-initialize the pooled object.
- * @return The JIT source if allocation succeeded, otherwise NULL. Consult @ref
- * MOT::GetRootError() for further details.
+ * @brief Allocates a JIT source.
+ * @param queryString The query string for which a JIT source is to be allocated. Used to re-initialize the JIT source
+ * object.
+ * @param usage Specifies the usage of the source.
+ * @return The JIT source if allocation succeeded, otherwise NULL. Consult @ref MOT::GetRootError() for further
+ * details.
  */
-extern JitSource* AllocPooledJitSource(const char* queryString);
+extern JitSource* AllocJitSource(const char* queryString, JitContextUsage usage);
 
 /**
- * @brief Returns a JIT source to the pool.
- * @param jitSource The JIT source to return.
+ * @brief Frees a JIT source.
+ * @param jitSource The JIT source to free.
  */
-extern void FreePooledJitSource(JitSource* jitSource);
+extern void FreeJitSource(JitSource* jitSource);
 }  // namespace JitExec
 
 #endif

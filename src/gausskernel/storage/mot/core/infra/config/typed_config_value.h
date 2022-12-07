@@ -120,7 +120,7 @@ template <typename T, typename V = TypedConfigValue<T>>
 static V* CreateConfigValue(const char* path, const char* name, const T& value)
 {
     V* result = ConfigItem::CreateConfigItem<V>(path, name, value);
-    if (!result->IsValid()) {
+    if (result != nullptr && !result->IsValid()) {
         delete result;
         result = nullptr;
     }
@@ -359,8 +359,11 @@ struct ConfigItemClassMapper<StringConfigValue> {
     public:                                                                                \
         static inline const char* ToString(const typeName& value, mot_string& stringValue) \
         {                                                                                  \
-            stringValue.format(formatStr, value);                                          \
-            return stringValue.c_str();                                                    \
+            if (stringValue.format(formatStr, value)) {                                    \
+                return stringValue.c_str();                                                \
+            } else {                                                                       \
+                return "";                                                                 \
+            }                                                                              \
         }                                                                                  \
         static inline bool FromString(const char* stringValue, typeName& value)            \
         {                                                                                  \
@@ -391,8 +394,8 @@ public:
      */
     static inline const char* ToString(const bool& value, mot_string& stringValue)
     {
-        stringValue.format("%s", value ? "true" : "false");
-        return stringValue.c_str();
+        // we avoid formatting altogether and just use constant string literals
+        return value ? "true" : "false";
     }
 
     /**

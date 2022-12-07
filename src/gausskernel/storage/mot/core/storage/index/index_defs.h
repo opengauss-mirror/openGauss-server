@@ -120,7 +120,12 @@ enum class IndexOrder : uint32_t {
     /**
      * @var Denotes a secondary index.
      */
-    INDEX_ORDER_SECONDARY
+    INDEX_ORDER_SECONDARY,
+
+    /**
+     * @var Denotes a secondary unique index.
+     */
+    INDEX_ORDER_SECONDARY_UNIQUE
 };
 
 /**

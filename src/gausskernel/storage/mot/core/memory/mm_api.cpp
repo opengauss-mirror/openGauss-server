@@ -204,7 +204,7 @@ extern uint64_t MemGetCurrentGlobalMemoryBytes()
 {
     // we need only the first statistics slot (accumulation of all global pools)
     MemRawChunkPoolStats chunkPoolStats = {0};
-    MemRawChunkStoreGetGlobalStats(&chunkPoolStats, 1);
+    (void)MemRawChunkStoreGetGlobalStats(&chunkPoolStats, 1);
     return chunkPoolStats.m_usedBytes;
 }
 
@@ -239,19 +239,19 @@ extern "C" void MemDump()
 {
     MOT::StringBufferApply([](MOT::StringBuffer* stringBuffer) {
         MOT::MemToString("Debug Dump", stringBuffer, MOT::MEM_REPORT_SUMMARY);
-        fprintf(stderr, "%s", stringBuffer->m_buffer);
-        fflush(stderr);
+        (void)fprintf(stderr, "%s", stringBuffer->m_buffer);
+        (void)fflush(stderr);
     });
 }
 
 extern "C" void MemAnalyze(void* address)
 {
     // find source chunk
-    fprintf(stderr, "Analysis report for address %p\n", address);
-    fprintf(stderr, "==============================\n");
+    (void)fprintf(stderr, "Analysis report for address %p\n", address);
+    (void)fprintf(stderr, "==============================\n");
     MOT::MemRawChunkHeader* chunk = (MOT::MemRawChunkHeader*)MOT::MemRawChunkDirLookup(address);
     if (chunk) {
-        fprintf(
+        (void)fprintf(
             stderr, "Found source chunk %p (chunk type: %s)\n", chunk, MOT::MemChunkTypeToString(chunk->m_chunkType));
         // continue according to chunk type
         int found = 0;
@@ -290,7 +290,7 @@ extern "C" void MemAnalyze(void* address)
                 break;
         }
         if (!found) {
-            fprintf(stderr, "Found not found yet, searching in chunk store...\n");
+            (void)fprintf(stderr, "Address not found yet, searching in chunk store...\n");
             MemRawChunkStoreAnalyze(address);
         }
     }

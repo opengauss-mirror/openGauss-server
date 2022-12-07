@@ -27,7 +27,7 @@
 #ifndef TXN_INSERT_ACTION_H
 #define TXN_INSERT_ACTION_H
 
-#include <stdint.h>
+#include <cstdint>
 
 namespace MOT {
 /**
@@ -37,7 +37,7 @@ namespace MOT {
 class InsItem {
 public:
     /** @brief Default constructor. */
-    InsItem() : m_index(nullptr), m_row(nullptr), m_key(nullptr), m_indexOrder(IndexOrder::INDEX_ORDER_PRIMARY)
+    InsItem() : m_index(nullptr), m_row(nullptr)
     {}
 
     /**
@@ -52,19 +52,15 @@ public:
      * @brief Destructor.
      */
     inline ~InsItem()
-    {}
+    {
+        m_row = nullptr;
+        m_index = nullptr;
+    }
 
-    inline __attribute__((always_inline)) void SetItem(Row* row, Index* index, Key* key)
+    inline __attribute__((always_inline)) void SetItem(Row* row, Index* index)
     {
         m_row = row;
         m_index = index;
-        m_indexOrder = index->GetIndexOrder();
-        m_key = key;
-    }
-
-    inline Key* GetKey() const
-    {
-        return m_key;
     }
 
     /**
@@ -73,7 +69,7 @@ public:
      */
     inline IndexOrder getIndexOrder() const
     {
-        return m_indexOrder;
+        return m_index->GetIndexOrder();
     }
 
     /** @var The index to insert the row into. */
@@ -81,12 +77,6 @@ public:
 
     /** @var The new row to insert. */
     Row* m_row;
-
-    /** @var The key by which to insert the row. */
-    MOT::Key* m_key;
-
-    /** @var The order of the stored index. */
-    IndexOrder m_indexOrder;
 
 private:
     DECLARE_CLASS_LOGGER()
@@ -125,25 +115,43 @@ public:
     /**
      * @brief Executes all stored row insertion requests.
      * @param row
+     * @param isUpdateColumn Indicate whether the insert source is update column
      * @return Return code denoting the execution result.
      */
-    RC ExecuteOptimisticInsert(Row* row);
+    RC ExecuteOptimisticInsert(Row* row, Key* updateColumnKey = nullptr);
+
+    /**
+     * @brief Executes all stored row insertion requests in recovery.
+     * @param row
+     * @return Return code denoting the execution result.
+     */
+    RC ExecuteRecoveryOCCInsert(Row* row);
 
     /**
      * @bruef Retrieves the first insertion request.
      * @return The first insertion request.
      */
-    inline InsItem* BeginCursor() const
+    inline InsItem* BeginCursor()
     {
         return &(m_insertSet[0]);
     };
 
-    inline InsItem* EndCursor() const
+    inline InsItem* EndCursor()
     {
         return (&m_insertSet[m_insertSetSize]);
     };
 
     void ReportError(RC rc, InsItem* currentItem = nullptr);
+
+    uint32_t GetInsertSetSize() const
+    {
+        return m_insertSetSize;
+    }
+
+    bool IsInsertSetEmpty() const
+    {
+        return (m_insertSetSize == 0);
+    }
 
 private:
     static constexpr uint32_t INSERT_ARRAY_EXTEND_FACTOR = 2;
@@ -151,23 +159,25 @@ private:
     /** @var The row insertion request array. */
     InsItem* m_insertSet = nullptr;
 
+    /** @var The owning transaction manager object. */
+    TxnManager* m_manager = nullptr;
+
     /** @var Number of stored row insertion requests. */
     uint32_t m_insertSetSize = 0;
 
     /** @var The capacity of the row insertion request array. */
     uint32_t m_insertArraySize = 0;
 
-    /** @var The owning transaction manager object. */
-    TxnManager* m_manager = nullptr;
-
     /** @var The row insertion request array growth factor.  */
     static constexpr uint64_t INSERT_ARRAY_DEFAULT_SIZE = 64;
 
     inline InsItem* GetInsertItem(Index* index = nullptr)
     {
-
         if (__builtin_expect(m_insertSetSize == m_insertArraySize, 0)) {
-            ReallocInsertSet();
+            if (!ReallocInsertSet()) {
+                MOT_REPORT_ERROR(MOT_ERROR_RESOURCE_LIMIT, "Transaction Processing", "Cannot get insert item");
+                return nullptr;
+            }
         }
 
         return &(m_insertSet[m_insertSetSize++]);
@@ -180,11 +190,17 @@ private:
 
     void ShrinkInsertSet();
 
+    RC AddInsertToLocalAccess(Row* row, InsItem* currentItem, Sentinel* pIndexInsertResult, bool& isMappedToCache);
+
     /**
      * @brief Cleans up the current aborted row.
      */
     void CleanupOptimisticInsert(
         InsItem* currentItem, Sentinel* pIndexInsertResult, bool isInserted, bool isMappedToCache);
+
+    void CleanupRecoveryOCCInsert(Row* row, std::vector<Sentinel*>& sentinels);
+
+    void CleanupInsertReclaimKey(Row* row, Sentinel* sentinel);
 
     // class non-copy-able, non-assignable, non-movable
     /** @cond EXCLUDE_DOC */

@@ -33,7 +33,7 @@ void MemoryStatisticVariable::Print(LogLevel logLevel) const
 
 void MemoryStatisticVariable::Assign(const StatisticVariable& rhs)
 {
-    const MemoryStatisticVariable& memRhs = (const MemoryStatisticVariable&)rhs;
+    const MemoryStatisticVariable& memRhs = static_cast<const MemoryStatisticVariable&>(rhs);
     m_count = memRhs.m_count;
     m_level.Assign(memRhs.m_level);
     m_rate.Assign(memRhs.m_rate);
@@ -41,7 +41,7 @@ void MemoryStatisticVariable::Assign(const StatisticVariable& rhs)
 
 void MemoryStatisticVariable::Add(const StatisticVariable& rhs)
 {
-    const MemoryStatisticVariable& memRhs = (const MemoryStatisticVariable&)rhs;
+    const MemoryStatisticVariable& memRhs = static_cast<const MemoryStatisticVariable&>(rhs);
     m_count += memRhs.m_count;
     m_level.Add(memRhs.m_level);
     m_rate.Add(memRhs.m_rate);
@@ -49,7 +49,7 @@ void MemoryStatisticVariable::Add(const StatisticVariable& rhs)
 
 void MemoryStatisticVariable::Subtract(const StatisticVariable& rhs)
 {
-    const MemoryStatisticVariable& memRhs = (const MemoryStatisticVariable&)rhs;
+    const MemoryStatisticVariable& memRhs = static_cast<const MemoryStatisticVariable&>(rhs);
     m_count -= memRhs.m_count;
     m_level.Subtract(memRhs.m_level);
     m_rate.Subtract(memRhs.m_rate);

@@ -963,6 +963,26 @@ typedef struct CreateForeignTableStmt {
     ForeignPartState* part_state;
 } CreateForeignTableStmt;
 
+#ifdef ENABLE_MOT
+typedef struct AlterForeingTableCmd {
+    NodeTag type;
+    AlterTableType subtype;
+    Relation rel;
+    const char* name;
+    Node* def;
+    Oid colTypeOid;
+    Expr* defValue;
+} AlterForeingTableCmd;
+
+typedef struct RenameForeingTableCmd {
+    NodeTag type;
+    Oid relid;
+    ObjectType renameType;
+    char* oldname;
+    char* newname;
+} RenameForeingTableCmd;
+#endif
+
 /* ----------------------
  *		Create/Drop USER MAPPING Statements
  * ----------------------

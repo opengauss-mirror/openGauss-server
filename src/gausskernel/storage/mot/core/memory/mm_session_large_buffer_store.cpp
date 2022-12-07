@@ -43,12 +43,18 @@ extern int MemSessionLargeBufferStoreInit()
     MOT_LOG_TRACE("Initializing Session Large Buffer Store");
     uint64_t storeSizeBytes = g_memGlobalCfg.m_sessionLargeBufferStoreSizeMb * MEGA_BYTE;
     if (storeSizeBytes == 0) {  // pool disabled
+        MOT_LOG_TRACE("Session large buffer stored is disabled");
         return 0;
     }
+    MOT_LOG_TRACE("Using store size %" PRIu64 " bytes", storeSizeBytes);
 
     uint64_t maxObjectSizeBytes = g_memGlobalCfg.m_sessionLargeBufferStoreMaxObjectSizeMb * MEGA_BYTE;
     uint64_t poolSizeBytes = storeSizeBytes / g_memGlobalCfg.m_nodeCount;
+    MOT_LOG_TRACE(
+        "Using pool size %" PRIu64 " bytes, according to %u nodes", poolSizeBytes, g_memGlobalCfg.m_nodeCount);
+    MOT_LOG_TRACE("Using configured max object size %" PRIu64 " bytes", maxObjectSizeBytes);
     g_memSessionLargeBufferMaxObjectSizeBytes = ComputeRealMaxObjectSize(poolSizeBytes, maxObjectSizeBytes);
+    MOT_LOG_TRACE("Using computed max object size %" PRIu64 " bytes", g_memSessionLargeBufferMaxObjectSizeBytes);
     g_globalPools = (MemSessionLargeBufferPool**)calloc(g_memGlobalCfg.m_nodeCount, sizeof(MemSessionLargeBufferPool*));
     if (unlikely(g_globalPools == nullptr)) {
         MOT_REPORT_ERROR(MOT_ERROR_OOM,
@@ -167,8 +173,8 @@ extern "C" void MemSessionLargeBufferDump()
     if (MOT::g_globalPools != nullptr) {
         MOT::StringBufferApply([](MOT::StringBuffer* stringBuffer) {
             MOT::MemSessionLargeBufferToString(0, "Debug Dump", stringBuffer, MOT::MEM_REPORT_DETAILED);
-            fprintf(stderr, "%s", stringBuffer->m_buffer);
-            fflush(stderr);
+            (void)fprintf(stderr, "%s", stringBuffer->m_buffer);
+            (void)fflush(stderr);
         });
     }
 }
@@ -177,7 +183,7 @@ extern "C" int MemSessionLargeBufferStoreAnalyze(void* buffer)
 {
     if (MOT::g_globalPools != nullptr) {
         for (uint32_t node = 0; node < MOT::g_memGlobalCfg.m_nodeCount; ++node) {
-            fprintf(stderr, "Searching buffer %p in session large buffer pool %u...\n", buffer, node);
+            (void)fprintf(stderr, "Searching buffer %p in session large buffer pool %u...\n", buffer, node);
             if (MOT::g_globalPools[node]) {
                 if (MemSessionLargeBufferPoolAnalyze(MOT::g_globalPools[node], buffer)) {
                     return 1;

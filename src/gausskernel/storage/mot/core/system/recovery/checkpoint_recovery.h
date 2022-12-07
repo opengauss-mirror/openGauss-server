@@ -32,6 +32,7 @@
 #include "spin_lock.h"
 #include "table.h"
 #include "surrogate_state.h"
+#include "checkpoint_utils.h"
 
 namespace MOT {
 class CheckpointRecovery {
@@ -40,10 +41,13 @@ public:
         : m_checkpointId(0),
           m_lsn(0),
           m_lastReplayLsn(0),
+          m_maxCsn(INVALID_CSN),
+          m_maxTransactionId(INVALID_TRANSACTION_ID),
           m_numWorkers(GetGlobalConfiguration().m_checkpointRecoveryWorkers),
           m_stopWorkers(false),
           m_errorSet(false),
-          m_errorCode(RC_OK)
+          m_errorCode(RC_OK),
+          m_preMvccUpgrade(false)
     {}
 
     ~CheckpointRecovery()
@@ -108,7 +112,35 @@ public:
      * @brief Implements the a checkpoint recovery worker
      * @param checkpointRecovery The caller checkpoint recovery class
      */
-    static void CheckpointRecoveryWorker(CheckpointRecovery* checkpointRecovery);
+    static void CheckpointRecoveryWorker(uint32_t workerId, CheckpointRecovery* checkpointRecovery);
+
+    inline void SetMaxCsn(uint64_t newMaxCsn)
+    {
+        uint64_t currentMaxCsn = INVALID_CSN;
+        do {
+            currentMaxCsn = m_maxCsn;
+            if (currentMaxCsn >= newMaxCsn) {
+                break;
+            }
+        } while (!m_maxCsn.compare_exchange_strong(currentMaxCsn, newMaxCsn, std::memory_order_acq_rel));
+    }
+
+    inline uint64_t GetMaxCsn() const
+    {
+        return m_maxCsn;
+    }
+
+    inline uint64_t GetMaxTransactionId() const
+    {
+        return m_maxTransactionId;
+    }
+
+    inline void SetLastReplayLsn(uint64_t replayLsn)
+    {
+        if (m_lastReplayLsn < replayLsn) {
+            m_lastReplayLsn = replayLsn;
+        }
+    }
 
 private:
     /**
@@ -128,26 +160,16 @@ private:
     int FillTasksFromMapFile();
 
     /**
-     * @brief Checks if there are any more tasks left in the queue
-     * @return Int value where 0 means failure and 1 success
+     * @brief Checks if all the tasks are completed.
+     * @return Boolean value that is true if all the tasks are completed.
      */
-    uint32_t HaveTasks();
+    bool AllTasksDone();
 
+    /**
+     * @brief Spawns threads to perform the recovery from checkpoint and waits for them to complete.
+     * @return Boolean value that is true if the recovery was successfully completed.
+     */
     bool PerformRecovery();
-
-    /**
-     * @brief Recovers the in process two phase commit related transactions
-     * from the checkpoint data file.
-     * @return Boolean value denoting success or failure.
-     */
-    bool RecoverInProcessTxns();
-
-    /**
-     * @brief Deserializes the in process two phase commit data from the
-     * checkpoint data file. called by RecoverTpc.
-     * @return Boolean value denoting success or failure.
-     */
-    bool DeserializeInProcessTxns(int fd, uint64_t numEntries);
 
     /**
      * @brief Inserts a row into the database in a non transactional manner.
@@ -159,11 +181,12 @@ private:
      * @param csn the operation's csn.
      * @param tid the thread id of the recovering thread.
      * @param sState the returned surrogate state.
-     * @param status the returned status of the operation
-     * @param rowId the row's internal id
+     * @param status the returned status of the operation.
+     * @param rowId the row's internal id.
+     * @param version the row's version.
      */
     void InsertRow(Table* table, char* keyData, uint16_t keyLen, char* rowData, uint64_t rowLen, uint64_t csn,
-        uint32_t tid, SurrogateState& sState, RC& status, uint64_t rowId);
+        uint32_t tid, SurrogateState& sState, RC& status, uint64_t rowId, uint64_t version);
 
     /**
      * @brief performs table creation.
@@ -186,13 +209,26 @@ private:
      * @return Boolean value that is true if there is not enough memory for
      * recovery.
      */
-    bool IsMemoryLimitReached(uint32_t numThreads, uint32_t neededMBs);
+    bool IsMemoryLimitReached(uint32_t numThreads, uint64_t neededBytes) const;
+
+    /**
+     * @brief Recovers in process transaction data.
+     * @return Boolean value that represents that status of the operation.
+     */
+    bool RecoverInProcessData();
+
+    RC ReadEntry(
+        int fd, size_t entryHeaderSize, CheckpointUtils::EntryHeader& entry, char* keyData, char* entryData) const;
 
     uint64_t m_checkpointId;
 
     uint64_t m_lsn;
 
     uint64_t m_lastReplayLsn;
+
+    std::atomic<uint64_t> m_maxCsn;
+
+    uint64_t m_maxTransactionId;
 
     uint32_t m_numWorkers;
 
@@ -213,6 +249,8 @@ private:
     std::set<uint32_t> m_tableIds;
 
     std::list<Task*> m_tasksList;
+
+    bool m_preMvccUpgrade;
 };
 }  // namespace MOT
 

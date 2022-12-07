@@ -36,15 +36,15 @@ namespace MOT {
  * @brief Global GC managers pool
  */
 class GcContext {
-
 public:
     GcContext(){};
 
     ~GcContext()
     {
-        if (m_isInitialized == true) {
+        if (m_isInitialized) {
             delete[] m_privateHandler;
         }
+        m_privateHandler = nullptr;
     };
 
     /**

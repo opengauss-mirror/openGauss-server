@@ -177,7 +177,7 @@ private:
     uint32_t m_depth;
 
     /** @brief Compute section depth. */
-    uint32_t ComputeDepth();
+    uint32_t ComputeDepth() const;
 };
 
 /** @typedef The data structure for holding a list of configuration items. */

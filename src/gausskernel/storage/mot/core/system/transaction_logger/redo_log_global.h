@@ -42,7 +42,7 @@ enum OperationCode : uint16_t {
     UPDATE_ROW_VARIABLE = 3,
 
     /** @var Full overwrite an existing row. */
-    OVERWRITE_ROW = 4,
+    OVERWRITE_ROW = 4,  // Deprecated
 
     /** @var Remove a row by primary key. */
     REMOVE_ROW = 5,
@@ -50,8 +50,8 @@ enum OperationCode : uint16_t {
     /** @var Prepare a transaction. */
     PREPARE_TX = 6,
 
-    /** @var Commit a transaction. */
-    COMMIT_TX = 7,
+    /** @var Commit a transaction (1VCC), this is deprecated. */
+    COMMIT_TX_1VCC = 7,
 
     /** @var Commit Prepared transaction. */
     COMMIT_PREPARED_TX = 8,
@@ -62,23 +62,50 @@ enum OperationCode : uint16_t {
     /** @var Rollback Prepared transaction. */
     ROLLBACK_PREPARED_TX = 10,
 
-    /** @var partial redo. */
-    PARTIAL_REDO_TX = 11,
+    /** @var Partial redo (1VCC), this is deprecated. */
+    PARTIAL_REDO_TX_1VCC = 11,
 
-    /** @var table creation. */
+    /** @var Create table. */
     CREATE_TABLE = 12,
 
-    /** @var table drop. */
+    /** @var Drop table. */
     DROP_TABLE = 13,
 
-    /** @var index creation. */
+    /** @var Create index. */
     CREATE_INDEX = 14,
 
-    /** @var index drop. */
+    /** @var Drop index. */
     DROP_INDEX = 15,
 
-    /** @var truncate table. */
+    /** @var Truncate table. */
     TRUNCATE_TABLE = 16,
+
+    /** @var Alter table add column*/
+    ALTER_TABLE_ADD_COLUMN = 17,
+
+    /** @var Alter table drop column*/
+    ALTER_TABLE_DROP_COLUMN = 18,
+
+    /** @var Alter table drop column*/
+    ALTER_TABLE_RENAME_COLUMN = 19,
+
+    /** @var Commit a transaction (MVCC). */
+    COMMIT_TX = 20,
+
+    /** @var Partial redo (MVCC). */
+    PARTIAL_REDO_TX = 21,
+
+    /** @var Commit a transaction with DDL(s) in it. */
+    COMMIT_DDL_TX = 22,
+
+    /** @var Partial redo for a transaction with DDL(s) in it. */
+    PARTIAL_REDO_DDL_TX = 23,
+
+    /** @var Commit a cross engine transaction. */
+    COMMIT_CROSS_TX = 24,
+
+    /** @var Partial redo for a cross engine transaction. */
+    PARTIAL_REDO_CROSS_TX = 25,
 
     /** @var This must be the last entry. */
     INVALID_OPERATION_CODE
@@ -99,16 +126,16 @@ inline const char* OperationCodeToString(OperationCode op)
             return "REMOVE_ROW";
         case OperationCode::PREPARE_TX:
             return "PREPARE_TX";
-        case OperationCode::COMMIT_TX:
-            return "COMMIT_TX";
+        case OperationCode::COMMIT_TX_1VCC:
+            return "COMMIT_TX_1VCC";
         case OperationCode::COMMIT_PREPARED_TX:
             return "COMMIT_PREPARED_TX";
         case OperationCode::ROLLBACK_TX:
             return "ROLLBACK_TX";
         case OperationCode::ROLLBACK_PREPARED_TX:
             return "ROLLBACK_PREPARED_TX";
-        case OperationCode::PARTIAL_REDO_TX:
-            return "PARTIAL_REDO_TX";
+        case OperationCode::PARTIAL_REDO_TX_1VCC:
+            return "PARTIAL_REDO_TX_1VCC";
         case OperationCode::CREATE_TABLE:
             return "CREATE_TABLE";
         case OperationCode::CREATE_INDEX:
@@ -117,6 +144,26 @@ inline const char* OperationCodeToString(OperationCode op)
             return "DROP_TABLE";
         case OperationCode::DROP_INDEX:
             return "DROP_INDEX";
+        case OperationCode::TRUNCATE_TABLE:
+            return "TRUNCATE_TABLE";
+        case OperationCode::ALTER_TABLE_ADD_COLUMN:
+            return "ALTER_TABLE_ADD_COLUMN";
+        case OperationCode::ALTER_TABLE_DROP_COLUMN:
+            return "ALTER_TABLE_DROP_COLUMN";
+        case OperationCode::ALTER_TABLE_RENAME_COLUMN:
+            return "ALTER_TABLE_RENAME_COLUMN";
+        case OperationCode::COMMIT_TX:
+            return "COMMIT_TX";
+        case OperationCode::PARTIAL_REDO_TX:
+            return "PARTIAL_REDO_TX";
+        case OperationCode::COMMIT_DDL_TX:
+            return "COMMIT_DDL_TX";
+        case OperationCode::PARTIAL_REDO_DDL_TX:
+            return "PARTIAL_REDO_DDL_TX";
+        case OperationCode::COMMIT_CROSS_TX:
+            return "COMMIT_CROSS_TX";
+        case OperationCode::PARTIAL_REDO_CROSS_TX:
+            return "PARTIAL_REDO_CROSS_TX";
         case OperationCode::INVALID_OPERATION_CODE:
         default:
             return "UNKNOWN_OP_CODE";
@@ -130,7 +177,14 @@ inline bool IsAbortOp(OperationCode op)
 
 inline bool IsCommitOp(OperationCode op)
 {
-    return (op == OperationCode::COMMIT_TX || op == OperationCode::COMMIT_PREPARED_TX);
+    return (op == OperationCode::COMMIT_TX || op == OperationCode::COMMIT_DDL_TX ||
+            op == OperationCode::COMMIT_CROSS_TX || op == OperationCode::COMMIT_TX_1VCC ||
+            op == OperationCode::COMMIT_PREPARED_TX);
+}
+
+inline bool Is1VCCEndSegmentOpCode(OperationCode op)
+{
+    return (op == OperationCode::COMMIT_TX_1VCC || op == OperationCode::PARTIAL_REDO_TX_1VCC);
 }
 }  // namespace MOT
 

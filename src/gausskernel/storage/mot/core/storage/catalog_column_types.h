@@ -25,7 +25,7 @@
 #ifndef _CATALOG_COLUMN_TYPES_H_
 #define _CATALOG_COLUMN_TYPES_H_
 
-#include <stdint.h>
+#include <cstdint>
 
 namespace MOT {
 #define GetBytes1(x) (((uintptr_t)(x)) & 0x000000ff)

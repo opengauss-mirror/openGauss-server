@@ -63,12 +63,12 @@ public:
 // String serialization
 class SerializableSTR {
 public:
-    static size_t SerializeSize(string str)
+    static size_t SerializeSize(const string& str)
     {
         return str.length() + sizeof(size_t);
     }
 
-    static char* Serialize(char* target, string value)
+    static char* Serialize(char* target, const string& value)
     {
         size_t length = value.length();
         errno_t erc = memcpy_s(target, sizeof(size_t), &length, sizeof(size_t));
@@ -83,7 +83,7 @@ public:
         size_t length;
         errno_t erc = memcpy_s(&length, sizeof(size_t), source, sizeof(size_t));
         securec_check(erc, "\0", "\0");
-        target.assign(source + sizeof(size_t), length);
+        (void)target.assign(source + sizeof(size_t), length);
         return source + sizeof(size_t) + length;
     }
 };
@@ -103,6 +103,12 @@ public:
         erc = memcpy_s(target + sizeof(size_t), len, value, len);
         securec_check(erc, "\0", "\0");
         return target + sizeof(size_t) + len;
+    }
+
+    static void DeserializeSize(char* source, size_t& len)
+    {
+        errno_t erc = memcpy_s(&len, sizeof(size_t), source, sizeof(size_t));
+        securec_check(erc, "\0", "\0");
     }
 
     static char* Deserialize(char* source, char* target, size_t target_len)

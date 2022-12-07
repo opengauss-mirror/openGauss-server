@@ -27,7 +27,7 @@
 #ifndef TXN_LOCAL_ALLOCATORS_H
 #define TXN_LOCAL_ALLOCATORS_H
 
-#include <stdint.h>
+#include <cstdint>
 #include <cmath>
 #include "table.h"
 #include "row.h"
@@ -36,15 +36,21 @@
 #include "access.h"
 
 namespace MOT {
+
 /**
  * @class DummyTable
  * @brief local row allocator for current transaction manager
  */
 class DummyTable {
 public:
-    static constexpr double BITMAP_BITS_IN_BYTE = 8.0;
+    static constexpr uint32_t BITMAP_BITS_IN_BYTE = 8;
 
-    DummyTable() : m_slab(nullptr)
+    /* Max supported by the envelope (MaxHeapAttributeNumber in htup.h) */
+    static constexpr uint32_t MAX_COLUMNS_PER_TABLE = 1600;
+
+    static constexpr uint32_t MAX_BITMAP_BUFFER_SIZE = MAX_COLUMNS_PER_TABLE / BITMAP_BITS_IN_BYTE;
+
+    DummyTable() : m_slab(nullptr), m_recovery(false)
     {}
 
     ~DummyTable()
@@ -58,9 +64,11 @@ public:
     /**
      * @brief Initialize the slab allocator for sizes ranging from 64B to size of 32K
      */
-    bool inline Init()
+    bool inline Init(bool recovery, bool global = false)
     {
-        m_slab = new (std::nothrow) SlabAllocator(SLAB_MIN_BIN, std::ceil(std::log2(MAX_TUPLE_SIZE) + 1), true);
+        m_recovery = recovery;
+        m_slab = new (std::nothrow) SlabAllocator(
+            SlabAllocator::SLAB_MIN_BIN, static_cast<int>(std::ceil(std::log2(MAX_BITMAP_BUFFER_SIZE) + 1)), !global);
         if (m_slab == nullptr) {
             return false;
         }
@@ -70,7 +78,7 @@ public:
     /** @brief return bitmap buffer   */
     uint8_t* CreateBitMapBuffer(int fieldCount)
     {
-        int size = std::ceil(fieldCount / BITMAP_BITS_IN_BYTE);
+        int size = BitmapSet::GetLength(fieldCount);
         void* buf = m_slab->Alloc(size);
         if (buf == nullptr) {
             return nullptr;
@@ -80,53 +88,40 @@ public:
         return reinterpret_cast<uint8_t*>(buf);
     }
 
-    /** @brief return row match the current table schema   */
-    Row* CreateNewRow(Table* t, Access* ac)
+    void* AllocBuf(size_t size)
     {
-        int size = t->GetTupleSize() + sizeof(Row);
-        ac->m_localRowSize = size;
-        void* buf = m_slab->Alloc(size);
-        if (buf == nullptr) {
-            return nullptr;
-        }
-        return new (buf) Row(t);
+        int temp = size + sizeof(Row);
+        return m_slab->Alloc(temp);
     }
 
-    Row* CreateMaxRow(Table* t = nullptr)
+    void DestroyBuf(void* ptr, size_t size)
     {
-        int size = MAX_TUPLE_SIZE + sizeof(Row);
-        void* buf = m_slab->Alloc(size);
-        if (buf == nullptr) {
-            return nullptr;
-        }
-        return new (buf) Row(t);
+        m_slab->Release(ptr, size);
     }
 
-    void DestroyRow(Row* row, Access* ac)
-    {
-        m_slab->Release(row, ac->m_localRowSize);
-    }
-
+    /** @brief Destroy Bitmap Buffer   */
     void DestroyBitMapBuffer(void* buffer, int fieldCount)
     {
-        int sizeInBytes = std::ceil(fieldCount / BITMAP_BITS_IN_BYTE);
+        int sizeInBytes = BitmapSet::GetLength(fieldCount);
         m_slab->Release(buffer, sizeInBytes);
     }
 
-    void DestroyMaxRow(Row* row)
-    {
-        int size = MAX_TUPLE_SIZE + sizeof(Row);
-        m_slab->Release(row, size);
-    }
-
+    /** @brief Clear row cache   */
     void ClearRowCache()
     {
         m_slab->ClearFreeCache();
     }
 
+    void PrintStats()
+    {
+        uint64_t gross = 0;
+        uint64_t netTotal = 0;
+        m_slab->PrintSize(gross, netTotal, "DummyTable Slab");
+    }
+
 private:
-    static constexpr int SLAB_MIN_BIN = 3;  // 2^3 = 8Bytes
     SlabAllocator* m_slab;
+    bool m_recovery;
 };
 
 /**
@@ -147,11 +142,12 @@ public:
     }
 
     /**
-     * @brief Initialiaze the local slabAllocator
+     * @brief Initialize the local slabAllocator
      */
-    bool inline Init()
+    bool inline Init(bool global = false)
     {
-        m_slab = new (std::nothrow) SlabAllocator(SLAB_MIN_BIN, std::ceil(std::log2(MAX_KEY_SIZE) + 1), true);
+        m_slab = new (std::nothrow) SlabAllocator(
+            SlabAllocator::SLAB_MIN_BIN, static_cast<int>(std::ceil(std::log2(MAX_KEY_SIZE) + 1)), !global);
         if (m_slab == nullptr) {
             return false;
         }
@@ -190,9 +186,14 @@ public:
         m_slab->ClearFreeCache();
     }
 
-private:
-    static constexpr int SLAB_MIN_BIN = 3;  // 2^3 = 8Bytes
+    void PrintStats()
+    {
+        uint64_t gross = 0;
+        uint64_t netTotal = 0;
+        m_slab->PrintSize(gross, netTotal, "DummyIndex Slab");
+    }
 
+private:
     SlabAllocator* m_slab;
 
     DECLARE_CLASS_LOGGER();

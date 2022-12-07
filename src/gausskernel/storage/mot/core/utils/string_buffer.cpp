@@ -26,9 +26,9 @@
 #include "string_buffer.h"
 #include "debug_utils.h"
 
-#include <stdarg.h>
-#include <stdio.h>
-#include <string.h>
+#include <cstdarg>
+#include <cstdio>
+#include <cstring>
 
 namespace MOT {
 static bool StringBufferRealloc(StringBuffer* stringBuffer, int sppendSize);
@@ -72,7 +72,7 @@ extern void StringBufferAppendV(StringBuffer* stringBuffer, const char* format, 
     va_copy(argsCopy, args);  // must reaffirm after previous call to vsnprintf()!
     errno_t erc = vsnprintf_s(stringBuffer->m_buffer + stringBuffer->m_pos,
         stringBuffer->m_length - stringBuffer->m_pos,
-        stringBuffer->m_length - stringBuffer->m_pos - 1,
+        (stringBuffer->m_length - stringBuffer->m_pos) - 1,
         format,
         argsCopy);
     securec_check_ss(erc, "\0", "\0");
@@ -117,7 +117,7 @@ static bool StringBufferRealloc(StringBuffer* stringBuffer, int sppendSize)
     int requiredSize = stringBuffer->m_pos + sppendSize;
     if (stringBuffer->m_growMethod == StringBuffer::ADD) {
         newLength =
-            (requiredSize + stringBuffer->m_growFactor - 1) / stringBuffer->m_growFactor * stringBuffer->m_growFactor;
+            ((requiredSize + stringBuffer->m_growFactor - 1) / stringBuffer->m_growFactor) * stringBuffer->m_growFactor;
     } else {  // multiply
         while (newLength <= requiredSize) {
             newLength *= stringBuffer->m_growFactor;

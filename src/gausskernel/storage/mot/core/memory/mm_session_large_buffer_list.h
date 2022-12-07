@@ -31,7 +31,7 @@
 #include "utilities.h"
 #include "string_buffer.h"
 
-#include <string.h>
+#include <cstring>
 
 namespace MOT {
 /**
@@ -64,43 +64,43 @@ struct PACKED MemSessionLargeBufferList {
     MemLock m_lock;  // L1 offset [0-64]
 
     /** @var The size in bytes of each buffer in the list. */
-    uint32_t m_bufferSize;  // L1 offset [0-4]
-
-    /** @var The maximum number of buffers in the list/ */
-    uint32_t m_maxBufferCount;  // L1 offset [4-8]
+    uint64_t m_bufferSize;  // L1 offset [0-8]
 
     /** @var The total number of bytes requested by the user. */
-    uint32_t m_requestedBytes;  // L1 offset [8-12]
+    uint64_t m_requestedBytes;  // L1 offset [8-16]
+
+    /** @var The maximum number of buffers in the list/ */
+    uint32_t m_maxBufferCount;  // L1 offset [16-20]
 
     /** @var The current number of buffers allocated to the application. */
-    uint32_t m_allocatedCount;  // L1 offset [12-16]
+    uint32_t m_allocatedCount;  // L1 offset [20-24]
 
     /** @var The number of words in the free bit-set array. */
-    uint32_t m_freeBitsetCount;  // L1 offset [16-20]
+    uint32_t m_freeBitsetCount;  // L1 offset [24-28]
 
     /** @var Align next member offset to 8 bytes. */
-    uint32_t m_padding;  // L1 offset [20-24]
+    uint32_t m_padding;  // L1 offset [28-32]
 
     /** @var The starting address of the buffer containing the flat buffer list. */
-    void* m_bufferList;  // L1 offset [24-32]
+    void* m_bufferList;  // L1 offset [32-40]
 
     /** @var An array of buffer header points to all buffers in the m_bufferList respectively. */
-    MemSessionLargeBufferHeader* m_bufferHeaderList;  // L1 offset [32-40]
+    MemSessionLargeBufferHeader* m_bufferHeaderList;  // L1 offset [40-48]
 
     /**
      * @var A bit-set array denoting which buffers are free in this buffer list. A value of "1" means
      * "free" and a value of "0" means "allocated".
      */
-    uint64_t m_freeBitset[0];  // L1 offset [40-...]
+    uint64_t m_freeBitset[0];  // L1 offset [48-...]
 };
 
 /** @struct MemSessionLargeBufferStats */
 struct PACKED MemSessionLargeBufferStats {
     /** @var The total number of bytes requested by the user. */
-    uint32_t m_requestedBytes;
+    uint64_t m_requestedBytes;
 
     /** @var The total number of bytes given to the user. */
-    uint32_t m_allocatedBytes;
+    uint64_t m_allocatedBytes;
 };
 
 /**
@@ -136,17 +136,18 @@ extern int MemSessionLargeBufferListInit(
  */
 inline void MemSessionLargeBufferListDestroy(MemSessionLargeBufferList* sessionBufferList)
 {
-    MemLockDestroy(&sessionBufferList->m_lock);
+    (void)MemLockDestroy(&sessionBufferList->m_lock);
 }
 
 /**
- * @brief Handles double buffer free. Dumps all relevant information and aborts.
+ * @brief Handles invalid or double buffer free. Dumps all relevant information and aborts.
  * @param sessionBufferList The faulting session large buffer list.
  * @param buffer The faulting buffer.
  * @param bufferIndex The faulting buffer index.
+ * @param invalidType "INVALID" or "DOUBLE"
  */
-extern void MemSessionLargeBufferListOnDoubleFree(
-    MemSessionLargeBufferList* sessionBufferList, void* buffer, uint32_t bufferIndex);
+extern void MemSessionLargeBufferListOnInvalidFree(
+    MemSessionLargeBufferList* sessionBufferList, void* buffer, uint64_t bufferIndex, const char* invalidType);
 
 /**
  * @brief Allocates a buffer from a session large buffer list.
@@ -163,7 +164,7 @@ inline MemSessionLargeBufferHeader* MemSessionLargeBufferListAlloc(
         for (uint32_t i = 0; i < sessionBufferList->m_freeBitsetCount; ++i) {
             if (sessionBufferList->m_freeBitset[i] != 0) {
                 uint64_t bitIndex = __builtin_clzll(sessionBufferList->m_freeBitset[i]);
-                uint64_t freeBufferIndex = (i << 6) + bitIndex;
+                uint64_t freeBufferIndex = ((uint64_t)i << 6) + bitIndex;
                 if (freeBufferIndex <
                     sessionBufferList->m_maxBufferCount) {  // guard against extreme case: max_buffer_count is not a
                                                             // multiple of 64
@@ -203,12 +204,18 @@ inline void MemSessionLargeBufferListFree(
 {
     void* buffer = bufferHeader->m_buffer;
     uint64_t bufferOffset = (uint64_t)(((uint8_t*)buffer) - ((uint8_t*)sessionBufferList->m_bufferList));
-    uint32_t bufferIndex = bufferOffset / sessionBufferList->m_bufferSize;
-    uint32_t slot = bufferIndex / 64;
+    uint64_t bufferIndex = bufferOffset / sessionBufferList->m_bufferSize;
+    if (bufferIndex >= sessionBufferList->m_maxBufferCount) {
+        MemSessionLargeBufferListOnInvalidFree(sessionBufferList, buffer, bufferIndex, "INVALID");
+    }
+    uint64_t slot = bufferIndex / 64;
     uint32_t index = bufferIndex % 64;
+    if (slot >= sessionBufferList->m_freeBitsetCount) {
+        MemSessionLargeBufferListOnInvalidFree(sessionBufferList, buffer, bufferIndex, "INVALID");
+    }
     MemLockAcquire(&sessionBufferList->m_lock);
     if (sessionBufferList->m_freeBitset[slot] & (((uint64_t)1) << (63 - index))) {
-        MemSessionLargeBufferListOnDoubleFree(sessionBufferList, buffer, bufferIndex);
+        MemSessionLargeBufferListOnInvalidFree(sessionBufferList, buffer, bufferIndex, "DOUBLE");
     }
     sessionBufferList->m_freeBitset[slot] |= (((uint64_t)1) << (63 - index));
     MOT_ASSERT(sessionBufferList->m_allocatedCount > 0);
@@ -235,7 +242,7 @@ inline int MemSessionLargeBufferListGetIndex(MemSessionLargeBufferList* sessionB
     int result = -1;
     if (((uint8_t*)buffer) >= ((uint8_t*)sessionBufferList->m_bufferList)) {
         uint64_t bufferOffset = (uint64_t)(((uint8_t*)buffer) - ((uint8_t*)sessionBufferList->m_bufferList));
-        uint32_t bufferIndex = bufferOffset / sessionBufferList->m_bufferSize;
+        uint64_t bufferIndex = bufferOffset / sessionBufferList->m_bufferSize;
         if (bufferIndex < sessionBufferList->m_maxBufferCount) {
             result = (int)bufferIndex;
         }
@@ -254,7 +261,7 @@ inline uint64_t MemSessionLargeBufferListGetRealObjectSize(MemSessionLargeBuffer
     uint64_t result = 0;
     if (((uint8_t*)buffer) >= ((uint8_t*)sessionBufferList->m_bufferList)) {
         uint64_t bufferOffset = (uint64_t)(((uint8_t*)buffer) - ((uint8_t*)sessionBufferList->m_bufferList));
-        uint32_t bufferIndex = bufferOffset / sessionBufferList->m_bufferSize;
+        uint64_t bufferIndex = bufferOffset / sessionBufferList->m_bufferSize;
         if (bufferIndex < sessionBufferList->m_maxBufferCount) {
             MemSessionLargeBufferHeader* bufferHeader = (MemSessionLargeBufferHeader*)(sessionBufferList + bufferIndex);
             result = bufferHeader->m_realObjectSize;

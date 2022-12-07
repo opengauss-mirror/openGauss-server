@@ -28,6 +28,8 @@
 #include "utilities.h"
 #include "string_buffer.h"
 #include "mm_def.h"
+#include "mm_global_api.h"
+#include "mm_session_api.h"
 
 namespace MOT {
 /**
@@ -82,6 +84,94 @@ extern void MemPrint(const char* name, LogLevel logLevel, MemReportMode reportMo
  * @param[opt] reportMode Specifies the report mode.
  */
 extern void MemToString(const char* name, StringBuffer* stringBuffer, MemReportMode reportMode = MEM_REPORT_SUMMARY);
+
+inline void* MemAlloc(uint64_t sizeBytes, bool global)
+{
+    if (global) {
+        return MemGlobalAlloc(sizeBytes);
+    } else {
+#ifdef MEM_SESSION_ACTIVE
+        return MemSessionAlloc(sizeBytes);
+#else
+        return malloc(sizeBytes);
+#endif
+    }
+}
+
+inline void* MemAllocAligned(uint64_t sizeBytes, uint32_t alignment, bool global)
+{
+    if (global) {
+        return MemGlobalAllocAligned(sizeBytes, alignment);
+    } else {
+#ifdef MEM_SESSION_ACTIVE
+        return MemSessionAllocAligned(sizeBytes, alignment);
+#else
+        return memalign(alignment, sizeBytes));
+#endif
+    }
+}
+
+template <typename T, class... Args>
+inline T* MemAllocObject(bool global, Args&&... args)
+{
+    T* object = nullptr;
+    void* buffer;
+    if (global) {
+        buffer = MemGlobalAlloc(sizeof(T));
+    } else {
+#ifdef MEM_SESSION_ACTIVE
+        buffer = MemSessionAlloc(sizeof(T));
+#else
+        buffer = malloc(sizeof(T));
+#endif
+    }
+    if (buffer != nullptr) {
+        object = new (buffer) T(std::forward<Args>(args)...);
+    }
+    return object;
+}
+
+template <typename T, class... Args>
+inline T* MemAllocAlignedObject(uint32_t alignment, bool global, Args&&... args)
+{
+    T* object = nullptr;
+    void* buffer;
+    if (global) {
+        buffer = MemGlobalAllocAligned(sizeof(T), alignment);
+    } else {
+#ifdef MEM_SESSION_ACTIVE
+        buffer = MemSessionAllocAligned(sizeof(T), alignment);
+#else
+        buffer = memalign(alignment, sizeof(T));
+#endif
+    }
+    if (buffer != nullptr) {
+        object = new (buffer) T(std::forward<Args>(args)...);
+    }
+    return object;
+}
+
+inline void MemFree(void* object, bool global)
+{
+    if (global) {
+        return MemGlobalFree(object);
+    } else {
+#ifdef MEM_SESSION_ACTIVE
+        return MemSessionFree(object);
+#else
+        return free(object);
+#endif
+    }
+}
+
+template <typename T>
+inline void MemFreeObject(T* object, bool global)
+{
+    if (object != nullptr) {
+        object->~T();
+        MemFree((void*)object, global);
+    }
+}
 };  // namespace MOT
 
 /**

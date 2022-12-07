@@ -50,13 +50,13 @@ bool TableManager::AddTable(Table* table)
 void TableManager::ClearTablesThreadMemoryCache()
 {
     m_rwLock.RdLock();
-    InternalTableMap::iterator it = m_tablesById.begin();
-    while (it != m_tablesById.end()) {
+    ExternalTableMap::iterator it = m_tablesByExId.begin();
+    while (it != m_tablesByExId.end()) {
         // lock table to prevent concurrent ddl and truncate operations
         it->second->RdLock();
         it->second->ClearThreadMemoryCache();
         it->second->Unlock();
-        it++;
+        (void)++it;
     }
     m_rwLock.RdUnlock();
 }
@@ -68,7 +68,7 @@ void TableManager::ClearAllTables()
     while (it != m_tablesById.end()) {
         Table* table = it->second;
         delete table;
-        ++it;
+        (void)++it;
     }
 
     m_tablesById.clear();

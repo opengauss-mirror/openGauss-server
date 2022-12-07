@@ -100,8 +100,8 @@ private:
 };
 }  // namespace MOT
 
-#endif /* SPIN_LOCK_H */
-
 #if defined(MOT_SPINLOCK_INLINE)
 #include "spin_lock.cpp"
 #endif
+
+#endif /* SPIN_LOCK_H */

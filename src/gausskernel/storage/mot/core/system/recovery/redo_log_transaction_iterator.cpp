@@ -25,11 +25,6 @@
 #include "redo_log_transaction_iterator.h"
 
 namespace MOT {
-bool RedoLogTransactionIterator::End()
-{
-    return (m_position >= m_bufferLength);
-}
-
 bool RedoLogTransactionIterator::Next()
 {
     m_position += m_txnLength;
@@ -51,14 +46,21 @@ void* RedoLogTransactionIterator::GetTransactionEntry()
     return reinterpret_cast<void*>(m_buffer + m_position);
 }
 
-LogSegment* RedoLogTransactionIterator::AllocRedoSegment(uint64_t replayLsn)
+LogSegment* RedoLogTransactionIterator::AllocRedoSegment(uint64_t replayLsn, SPSCVarSizeAllocator* allocator)
 {
     LogSegment* segment = new (std::nothrow) LogSegment();
     if (segment == nullptr) {
         return nullptr;
     }
     segment->m_len = m_txnLength - sizeof(uint32_t);
-    segment->m_data = new (std::nothrow) char[segment->m_len];
+    if (allocator == nullptr) {
+        segment->m_data = new (std::nothrow) char[segment->m_len];
+    } else {
+        segment->m_data = (char*)(allocator->Alloc(segment->m_len * sizeof(char)));
+        if (segment->m_data != nullptr) {
+            segment->m_allocator = allocator;
+        }
+    }
     if (segment->m_data == nullptr) {
         delete segment;
         return nullptr;

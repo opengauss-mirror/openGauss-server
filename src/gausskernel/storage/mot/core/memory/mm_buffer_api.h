@@ -36,7 +36,7 @@
 #include "mm_cfg.h"
 #include "mot_error.h"
 
-#include <stddef.h>
+#include <cstddef>
 
 namespace MOT {
 /** @var Array of global (long-term) buffer allocators per NUMA node. */
@@ -85,7 +85,7 @@ inline void* MemBufferAllocGlobal(MemBufferClass bufferClass)
         if (buffer == nullptr) {
             // this is a rare out of memory scenario - all chunk pools are depleted, but other allocators might still
             // have memory
-            for (uint32_t i = (node + 1) % g_memGlobalCfg.m_nodeCount; i != (uint32_t)node;
+            for (uint32_t i = ((uint32_t)node + 1) % g_memGlobalCfg.m_nodeCount; i != (uint32_t)node;
                  i = (i + 1) % g_memGlobalCfg.m_nodeCount) {
                 buffer = MemBufferAllocatorAlloc(&g_globalAllocators[i][bufferClass]);
                 if (buffer != nullptr) {
@@ -94,7 +94,7 @@ inline void* MemBufferAllocGlobal(MemBufferClass bufferClass)
             }
         }
         if (buffer != nullptr) {
-            DetailedMemoryStatisticsProvider::m_provider->AddGlobalBuffersUsed(node, bufferClass);
+            DetailedMemoryStatisticsProvider::GetInstance().AddGlobalBuffersUsed(node, bufferClass);
         } else {
             MemBufferIssueError(MOT_ERROR_OOM,
                 "Failed to allocate %s global buffer: out of memory",
@@ -122,7 +122,7 @@ inline void* MemBufferAllocOnNode(MemBufferClass bufferClass, int node)
     } else {
         buffer = MemBufferAllocatorAlloc(&g_localAllocators[node][bufferClass]);
         if (buffer != nullptr) {
-            DetailedMemoryStatisticsProvider::m_provider->AddLocalBuffersUsed(node, bufferClass);
+            DetailedMemoryStatisticsProvider::GetInstance().AddLocalBuffersUsed(node, bufferClass);
         } else {
             MemBufferIssueError(MOT_ERROR_OOM,
                 "Failed to allocate %s local buffer on node %d: out of memory",
@@ -163,7 +163,7 @@ inline void MemBufferFreeOnNode(void* buffer, MemBufferClass bufferClass, int no
         MemBufferIssueError(MOT_ERROR_INVALID_ARG, "Cannot free %s local buffer on node %d", node);
     } else {
         MemBufferAllocatorFree(&g_localAllocators[node][bufferClass], buffer);
-        DetailedMemoryStatisticsProvider::m_provider->AddLocalBuffersFreed(node, bufferClass);
+        DetailedMemoryStatisticsProvider::GetInstance().AddLocalBuffersFreed(node, bufferClass);
     }
 }
 
@@ -178,6 +178,66 @@ extern void MemBufferFreeLocal(void* buffer, MemBufferClass bufferClass);
  * @brief Clears the current session caches on all global buffer allocators.
  */
 extern void MemBufferClearSessionCache();
+
+/**
+ * @brief Reserve global memory for current session. While in reserve-mode, released chunks  are kept in the current
+ * session's reserve, rather than being released to global memory.
+ * @param chunkCount The number of chunks to reserve.
+ * @return Zero on success, otherwise error code on failure.
+ */
+extern int MemBufferReserveGlobal(uint32_t chunkCount);
+
+/**
+ * @brief Release all global memory reserved for current session.
+ * @param bufferClass The buffer class for which an existing reservation is to be released.
+ * @return Zero on success, otherwise error code on failure.
+ */
+extern int MemBufferUnreserveGlobal(uint32_t chunkCount);
+
+/**
+ * @brief Reserve global memory for current session for a specific buffer class. While in reserve-mode, released chunks
+ * are kept in the current session's reserve, rather than being released to global memory.
+ * @param bufferClass The buffer class for which reservation is to be made.
+ * @param chunkCount The number of chunks to reserve.
+ * @return Zero on success, otherwise error code on failure.
+ */
+inline int MemBufferReserveGlobal(MemBufferClass bufferClass, uint32_t chunkCount)
+{
+    int result = 0;
+    int node = MOTCurrentNumaNodeId;
+    if (node < 0) {
+        MemBufferIssueError(MOT_ERROR_INVALID_ARG,
+            "Cannot reserve %u chunks for %s global buffers: Invalid NUMA node identifier %u",
+            chunkCount,
+            MemBufferClassToString(bufferClass),
+            node);
+        result = MOT_ERROR_INVALID_ARG;
+    } else {
+        result = MemBufferAllocatorReserve(&g_localAllocators[node][bufferClass], chunkCount);
+    }
+    return result;
+}
+
+/**
+ * @brief Release all global memory reserved for current session for a specific buffer class.
+ * @param bufferClass The buffer class for which an existing reservation is to be released.
+ * @return Zero on success, otherwise error code on failure.
+ */
+inline int MemBufferUnreserveGlobal(MemBufferClass bufferClass)
+{
+    int result = 0;
+    int node = MOTCurrentNumaNodeId;
+    if (node < 0) {
+        MemBufferIssueError(MOT_ERROR_INVALID_ARG,
+            "Cannot unreserve global memory for %s buffers: Invalid NUMA node identifier %u",
+            MemBufferClassToString(bufferClass),
+            node);
+        result = MOT_ERROR_INVALID_ARG;
+    } else {
+        result = MemBufferAllocatorUnreserve(&g_localAllocators[node][bufferClass]);
+    }
+    return result;
+}
 
 /**
  * @brief Prints all buffer API status into log.

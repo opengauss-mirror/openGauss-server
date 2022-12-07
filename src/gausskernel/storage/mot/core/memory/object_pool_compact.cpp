@@ -25,7 +25,7 @@
 #include "object_pool_compact.h"
 
 namespace MOT {
-addrMap_t::size_type g_addrMap_size = 1024;
+static constexpr addrMap_t::size_type ADDR_MAP_SIZE = 1024;
 
 IMPLEMENT_CLASS_LOGGER(CompactHandler, System)
 
@@ -34,7 +34,7 @@ CompactHandler::CompactHandler(ObjAllocInterface* pool, const char* prefix)
     : m_orig(pool),
       m_compactionNeeded(false),
       m_ctype(COMPACT_SIMPLE),
-      m_addrMap(1024, hashing_func(), key_equal_fn()),
+      m_addrMap(ADDR_MAP_SIZE, hashing_func(), key_equal_fn()),
       m_poolsToCompact(0),
       m_compactedPools(nullptr),
       m_curr(nullptr),
@@ -99,7 +99,7 @@ void CompactHandler::EndCompaction()
 
     // add current object pool to free list
     if (m_curr != nullptr) {
-        ADD_TO_LIST(m_orig->m_objList, m_curr);
+        ADD_TO_LIST(m_orig->m_listLock, m_orig->m_objList, m_curr);
         if (m_curr->m_freeCount < m_curr->m_totalCount) {
             ObjPoolPtr p = m_curr;
             PUSH(m_orig->m_nextFree, p);

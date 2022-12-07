@@ -60,20 +60,20 @@ public:
      * @brief Derives classes should react to a notification that configuration changed. New
      * configuration is accessible via the ConfigManager.
      */
-    virtual void OnConfigChange();
+    void OnConfigChange() override;
 
 protected:
     /**
      * @brief Override default behavior, and print current system status summary.
      */
-    virtual void PrintStatisticsEx();
+    void PrintStatisticsEx() override;
 
 private:
     /** @brief Constructor. */
     SystemStatisticsProvider();
 
     /** @brief Destructor. */
-    virtual ~SystemStatisticsProvider();
+    ~SystemStatisticsProvider() override;
 
     /** @brief Registers the provider in the manager. */
     void RegisterProvider();
@@ -104,10 +104,10 @@ private:
      * @param totalIdle Total time spent in the idle task.
      * @return True if operations succeeded and output data is valid, otherwise false.
      */
-    bool SnapshotCpuStats(uint64_t& totalUser, uint64_t& totalUserLow, uint64_t& totalSys, uint64_t& totalIdle);
+    bool SnapshotCpuStats(uint64_t& totalUser, uint64_t& totalUserLow, uint64_t& totalSys, uint64_t& totalIdle) const;
 
     /** @brief Prints memory usage statistics. */
-    void PrintMemoryInfo();
+    void PrintMemoryInfo() const;
 
     /** @brief Prints CPU usage statistics. */
     void PrintTotalCpuUsage();

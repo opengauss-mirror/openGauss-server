@@ -23,7 +23,7 @@
  */
 
 #include "mm_def.h"
-#include <string.h>
+#include <cstring>
 
 namespace MOT {
 
@@ -146,4 +146,27 @@ extern const char* MemAllocPolicyToString(MemAllocPolicy allocPolicy)
     }
 }
 
+extern bool ValidateMemReserveMode(const char* reserveModeStr)
+{
+    if (MemReserveModeFromString(reserveModeStr) == MemReserveMode::MEM_RESERVE_INVALID) {
+        return false;
+    }
+    return true;
+}
+
+extern bool ValidateMemStorePolicy(const char* storePolicyStr)
+{
+    if (MemStorePolicyFromString(storePolicyStr) == MemStorePolicy::MEM_STORE_INVALID) {
+        return false;
+    }
+    return true;
+}
+
+extern bool ValidateMemAllocPolicy(const char* allocPolicyStr)
+{
+    if (MemAllocPolicyFromString(allocPolicyStr) == MemAllocPolicy::MEM_ALLOC_POLICY_INVALID) {
+        return false;
+    }
+    return true;
+}
 }  // namespace MOT

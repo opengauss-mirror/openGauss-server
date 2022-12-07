@@ -30,7 +30,7 @@
 #include "string_buffer.h"
 #include "mm_session_large_buffer_pool.h"
 
-#include <stdint.h>
+#include <cstdint>
 
 namespace MOT {
 /**

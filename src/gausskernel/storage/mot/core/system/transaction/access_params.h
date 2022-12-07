@@ -27,16 +27,19 @@
 #ifndef ACCESS_PARAMS_H
 #define ACCESS_PARAMS_H
 
-#include <stdint.h>
+#include <cstdint>
 #include <type_traits>
+#include "logger.h"
 
 namespace MOT {
 enum AccessFlags : uint8_t {
-    primary_sentinel_bit = (1U << 0),
+    primary_sentinel_bit = (1U),
     unique_index_bit = (1U << 1),
     row_commited_bit = (1U << 2),
     upgrade_insert_bit = (1U << 3),
     dummy_deleted_bit = (1U << 4),
+    index_update_bit = (1U << 5),
+    update_deleted_bit = (1U << 6),
 };
 
 /**
@@ -54,24 +57,35 @@ public:
         static_assert(sizeof(T) == sizeof(AccessFlags), "Sizes are different");
     };
 
+    __attribute__((noinline)) void Print() const
+    {
+        MOT_LOG_INFO("PrimarySentinel: %s", IsPrimarySentinel() ? "TRUE" : "FALSE");
+        MOT_LOG_INFO("UniqueIndex: %s", IsUniqueIndex() ? "TRUE" : "FALSE");
+        MOT_LOG_INFO("RowCommited: %s", IsRowCommited() ? "TRUE" : "FALSE");
+        MOT_LOG_INFO("UpgradeInsert: %s", IsUpgradeInsert() ? "TRUE" : "FALSE");
+        MOT_LOG_INFO("InsertOnDeleted: %s", IsInsertOnDeletedRow() ? "TRUE" : "FALSE");
+        MOT_LOG_INFO("IndexUpdate: %s", IsIndexUpdate() ? "TRUE" : "FALSE");
+        MOT_LOG_INFO("UpdateDeleted: %s", IsUpdateDeleted() ? "TRUE" : "FALSE");
+    }
+
     bool IsPrimarySentinel() const
     {
-        return m_value & primary_sentinel_bit;
+        return static_cast<bool>(m_value & primary_sentinel_bit);
     }
 
     bool IsUniqueIndex() const
     {
-        return m_value & unique_index_bit;
+        return static_cast<bool>(m_value & unique_index_bit);
     }
 
     bool IsRowCommited() const
     {
-        return m_value & row_commited_bit;
+        return static_cast<bool>(m_value & row_commited_bit);
     }
 
     bool IsUpgradeInsert() const
     {
-        return m_value & upgrade_insert_bit;
+        return static_cast<bool>(m_value & upgrade_insert_bit);
     }
 
     bool IsPrimaryUpgrade() const
@@ -79,9 +93,24 @@ public:
         return (IsPrimarySentinel() and IsUpgradeInsert());
     }
 
-    bool IsDummyDeletedRow() const
+    bool IsSecondaryUniqueSentinel() const
     {
-        return m_value & dummy_deleted_bit;
+        return !IsPrimarySentinel() and IsUniqueIndex();
+    }
+
+    bool IsInsertOnDeletedRow() const
+    {
+        return static_cast<bool>(m_value & dummy_deleted_bit);
+    }
+
+    bool IsIndexUpdate() const
+    {
+        return static_cast<bool>(m_value & index_update_bit);
+    }
+
+    bool IsUpdateDeleted() const
+    {
+        return static_cast<bool>(m_value & update_deleted_bit);
     }
 
     void SetPrimarySentinel()
@@ -117,16 +146,37 @@ public:
     void UnsetUpgradeInsert()
     {
         m_value &= ~upgrade_insert_bit;
+        UnsetInsertOnDeletedRow();
     }
 
-    void SetDummyDeletedRow()
+    void SetInsertOnDeletedRow()
     {
         m_value |= dummy_deleted_bit;
     }
 
-    void UnsetDeletedCommitedRow()
+    void SetIndexUpdate()
+    {
+        m_value |= index_update_bit;
+    }
+
+    void UnsetIndexUpdate()
+    {
+        m_value &= ~index_update_bit;
+    }
+
+    void UnsetInsertOnDeletedRow()
     {
         m_value &= ~dummy_deleted_bit;
+    }
+
+    void SetUpdateDeleted()
+    {
+        m_value |= update_deleted_bit;
+    }
+
+    void UnsetUpdateDeleted()
+    {
+        m_value &= ~update_deleted_bit;
     }
 
     void AssignParams(T x)
@@ -140,6 +190,8 @@ private:
 
     AccessParams(T v) : m_value(v)
     {}
+
+    DECLARE_CLASS_LOGGER();
 };
 }  // namespace MOT
 

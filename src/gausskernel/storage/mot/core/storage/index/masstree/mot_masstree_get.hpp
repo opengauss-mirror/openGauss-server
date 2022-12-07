@@ -38,7 +38,6 @@ void basic_table<P>::find(
     unlocked_cursor_type lp(*this, reinterpret_cast<const unsigned char*>(key), ALIGN8(key_len));
 
     found = lp.find_unlocked(*mtSessionThreadInfo);
-
     if (found) {
         output = reinterpret_cast<void*>(lp.value());
     }

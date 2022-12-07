@@ -39,9 +39,7 @@ public:
      * @brief Destructor.
      */
     virtual ~IndexIterator()
-    {
-        Destroy();
-    }
+    {}
 
     /**
      * @@brief Retrieves the type of the iterator.

@@ -80,7 +80,7 @@ static bool CreateRecursiveMutex(pthread_mutex_t* mutex)
                 result = true;
             }
         }
-        pthread_mutexattr_destroy(&lockattr);
+        (void)pthread_mutexattr_destroy(&lockattr);
     }
 
     return result;
@@ -108,7 +108,7 @@ bool StatisticsManager::Initialize()
         m_initPhase = INIT_STAT_PRINT_CV;
 
         // register to configuration change notifications
-        ConfigManager::GetInstance().AddConfigChangeListener(this);
+        (void)ConfigManager::GetInstance().AddConfigChangeListener(this);
     } while (0);
 
     if (result) {
@@ -121,6 +121,7 @@ bool StatisticsManager::Initialize()
 StatisticsManager::StatisticsManager()
     : m_statsPrintPeriodSeconds(GetGlobalConfiguration().m_statPrintPeriodSeconds),
       m_fullStatsPrintPeriodSeconds(GetGlobalConfiguration().m_statPrintFullPeriodSeconds),
+      m_statsThread(0),
       m_running(false),
       m_initPhase(INIT)
 {
@@ -134,16 +135,16 @@ StatisticsManager::~StatisticsManager()
             // stop the statistics printing thread
             StopStatsPrintThread();
             // unregister from configuration change notifications
-            ConfigManager::GetInstance().RemoveConfigChangeListener(this);
+            (void)ConfigManager::GetInstance().RemoveConfigChangeListener(this);
             // fall through
         case INIT_STAT_PRINT_CV:
-            pthread_cond_destroy(&m_statsPrintCond);
+            (void)pthread_cond_destroy(&m_statsPrintCond);
             // fall through
         case INIT_STAT_PRINT_LOCK:
-            pthread_mutex_destroy(&m_statsPrintLock);
+            (void)pthread_mutex_destroy(&m_statsPrintLock);
             // fall through
         case INIT_PROVIDERS_LOCK:
-            pthread_mutex_destroy(&m_providersLock);
+            (void)pthread_mutex_destroy(&m_providersLock);
             // fall through
         case INIT:
         default:
@@ -189,7 +190,7 @@ StatisticsManager& StatisticsManager::GetInstance()
 bool StatisticsManager::RegisterStatisticsProvider(StatisticsProvider* statisticsProvider)
 {
     bool result = false;
-    pthread_mutex_lock(&m_providersLock);
+    (void)pthread_mutex_lock(&m_providersLock);
 
     mot_list<StatisticsProvider*>::iterator itr = find(m_providers.begin(), m_providers.end(), statisticsProvider);
     if (itr == m_providers.end()) {
@@ -204,23 +205,23 @@ bool StatisticsManager::RegisterStatisticsProvider(StatisticsProvider* statistic
         }
     }
 
-    pthread_mutex_unlock(&m_providersLock);
+    (void)pthread_mutex_unlock(&m_providersLock);
     return result;
 }
 
 bool StatisticsManager::UnregisterStatisticsProvider(StatisticsProvider* statisticsProvider)
 {
     bool result = false;
-    pthread_mutex_lock(&m_providersLock);
+    (void)pthread_mutex_lock(&m_providersLock);
 
     mot_list<StatisticsProvider*>::iterator itr = find(m_providers.begin(), m_providers.end(), statisticsProvider);
     if (itr != m_providers.end()) {
-        m_providers.erase(itr);
+        (void)m_providers.erase(itr);
         MOT_LOG_TRACE("Unregistered statistics provider: %s", statisticsProvider->GetName());
         result = true;
     }
 
-    pthread_mutex_unlock(&m_providersLock);
+    (void)pthread_mutex_unlock(&m_providersLock);
     return result;
 }
 
@@ -264,7 +265,7 @@ struct StatisticsProviderPrinter {
 StatisticsProvider* StatisticsManager::GetStatisticsProvider(const char* name)
 {
     StatisticsProvider* result = nullptr;
-    pthread_mutex_lock(&m_providersLock);
+    (void)pthread_mutex_lock(&m_providersLock);
 
     mot_list<StatisticsProvider*>::iterator itr =
         find_if(m_providers.begin(), m_providers.end(), StatisticsProviderFinder(name));
@@ -272,7 +273,7 @@ StatisticsProvider* StatisticsManager::GetStatisticsProvider(const char* name)
         result = *itr;
     }
 
-    pthread_mutex_unlock(&m_providersLock);
+    (void)pthread_mutex_unlock(&m_providersLock);
     return result;
 }
 
@@ -286,7 +287,7 @@ bool StatisticsManager::ReserveThreadSlot()
             "Reserve Thread Slot for Statistics",
             "Invalid attempt to reserve statistics thread slot without current thread identifier denied");
     } else {
-        pthread_mutex_lock(&m_providersLock);
+        (void)pthread_mutex_lock(&m_providersLock);
 
         result = true;
         MOT_LOG_TRACE("Reserving statistics thread slot for thread id %" PRIu16, tid);
@@ -300,7 +301,7 @@ bool StatisticsManager::ReserveThreadSlot()
             ++itr;
         }
 
-        pthread_mutex_unlock(&m_providersLock);
+        (void)pthread_mutex_unlock(&m_providersLock);
     }
 
     return result;
@@ -312,7 +313,7 @@ void StatisticsManager::UnreserveThreadSlot()
     if (tid == INVALID_THREAD_ID) {
         MOT_LOG_ERROR("Invalid attempt to un-reserve statistics thread slot without current thread identifier denied");
     } else {
-        pthread_mutex_lock(&m_providersLock);
+        (void)pthread_mutex_lock(&m_providersLock);
 
         MOT_LOG_TRACE("Un-reserving statistics thread slot for thread id %" PRIu16, tid);
         mot_list<StatisticsProvider*>::iterator itr = m_providers.begin();
@@ -322,13 +323,13 @@ void StatisticsManager::UnreserveThreadSlot()
             ++itr;
         }
 
-        pthread_mutex_unlock(&m_providersLock);
+        (void)pthread_mutex_unlock(&m_providersLock);
     }
 }
 
 void StatisticsManager::PrintStatistics(LogLevel logLevel, uint32_t statOpts /* = STAT_OPT_DEFAULT */)
 {
-    pthread_mutex_lock(&m_providersLock);
+    (void)pthread_mutex_lock(&m_providersLock);
 
     // make sure there is at least one enabled provider with some statistics
     if (!m_providers.empty()) {
@@ -358,12 +359,12 @@ void StatisticsManager::PrintStatistics(LogLevel logLevel, uint32_t statOpts /* 
             }
 
             MOT_LOG(logLevel, "======================================================");
-            for_each(m_providers.cbegin(), m_providers.cend(), StatisticsProviderPrinter(logLevel, statOpts));
+            (void)for_each(m_providers.cbegin(), m_providers.cend(), StatisticsProviderPrinter(logLevel, statOpts));
             MOT_LOG(logLevel, "======================================================");
         }
     }
 
-    pthread_mutex_unlock(&m_providersLock);
+    (void)pthread_mutex_unlock(&m_providersLock);
 }
 
 bool StatisticsManager::StartStatsPrintThread()
@@ -384,13 +385,17 @@ void StatisticsManager::StopStatsPrintThread()
 {
     // signal done flag and wake up statistics printing thread
     if (m_running) {
-        pthread_mutex_lock(&m_statsPrintLock);
+        (void)pthread_mutex_lock(&m_statsPrintLock);
         m_running = false;
-        pthread_cond_signal(&m_statsPrintCond);
-        pthread_mutex_unlock(&m_statsPrintLock);
+        (void)pthread_cond_signal(&m_statsPrintCond);
+        (void)pthread_mutex_unlock(&m_statsPrintLock);
 
         // wait for statistics printing thread to finish
-        pthread_join(m_statsThread, nullptr);
+        int rc = pthread_join(m_statsThread, nullptr);
+        if (rc) {
+            MOT_REPORT_SYSTEM_ERROR_CODE(
+                rc, pthread_join, "Statistics Manager Ending", "Failed to join statistics thread");
+        }
     }
 }
 
@@ -414,13 +419,11 @@ void StatisticsManager::StatsPrintThread()
 
         statsPrintCount += STAT_PRINT_CHECK_PERIOD_SECONDS;
         fullStatsPrintCount += STAT_PRINT_CHECK_PERIOD_SECONDS;
-        bool statsPrinted = false;
 
         // print periodic report
         if (statsPrintCount >= m_statsPrintPeriodSeconds) {
             PrintStatistics(LogLevel::LL_INFO, STAT_OPT_SCOPE_ALL | STAT_OPT_PERIOD_DIFF | STAT_OPT_LEVEL_SUMMARY);
             statsPrintCount = 0;
-            statsPrinted = true;
         }
 
         // print full report
@@ -428,7 +431,6 @@ void StatisticsManager::StatsPrintThread()
             PrintStatistics(LogLevel::LL_INFO, STAT_OPT_SCOPE_ALL | STAT_OPT_PERIOD_TOTAL | STAT_OPT_LEVEL_SUMMARY);
             PrintStatistics(LogLevel::LL_INFO, STAT_OPT_SCOPE_ALL | STAT_OPT_PERIOD_TOTAL | STAT_OPT_LEVEL_DETAIL);
             fullStatsPrintCount = 0;
-            statsPrinted = true;
         }
     }
 
@@ -442,12 +444,12 @@ void StatisticsManager::StatsPrintThread()
 void StatisticsManager::WaitNextPrint()
 {
     struct timeval now;
-    gettimeofday(&now, nullptr);
+    (void)gettimeofday(&now, nullptr);
     struct timespec ts = {(time_t)(now.tv_sec + STAT_PRINT_CHECK_PERIOD_SECONDS), now.tv_usec * 1000L};
 
-    pthread_mutex_lock(&m_statsPrintLock);
-    pthread_cond_timedwait(&m_statsPrintCond, &m_statsPrintLock, &ts);
-    pthread_mutex_unlock(&m_statsPrintLock);
+    (void)pthread_mutex_lock(&m_statsPrintLock);
+    (void)pthread_cond_timedwait(&m_statsPrintCond, &m_statsPrintLock, &ts);
+    (void)pthread_mutex_unlock(&m_statsPrintLock);
 }
 }  // namespace MOT
 

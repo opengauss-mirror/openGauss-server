@@ -1454,6 +1454,8 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  6202 | mot_local_memory_detail
  6203 | pg_start_backup
  6204 | pg_stop_backup
+ 6205 | mot_jit_detail
+ 6206 | mot_jit_profile
  6224 | gs_get_next_xid_csn
  6321 | pg_stat_file_recursive
  6322 | gs_decrypt

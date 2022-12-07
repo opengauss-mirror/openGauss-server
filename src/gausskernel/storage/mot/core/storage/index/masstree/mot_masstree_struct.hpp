@@ -30,7 +30,7 @@ namespace Masstree {
 class key_unparse_printable_string {
 public:
     template <typename K>
-    static int unparse_key(key<K> key, char* buf, int buflen)
+    static int unparse_key(const key<K>& key, char* buf, int buflen)
     {
         String s = key.unparse().printable();
         int cplen = std::min(s.length(), buflen);
@@ -54,24 +54,25 @@ template <>
 class value_print<unsigned char*> {
 public:
     static void print(
-        unsigned char* value, FILE* f, const char* prefix, int indent, Str key, kvtimestamp_t, char* suffix)
+        unsigned char* value, FILE* f, const char* prefix, int indent, const Str& key, kvtimestamp_t, char* suffix)
     {
-        fprintf(f, "%s%*s%.*s = %p%s\n", prefix, indent, "", key.len, key.s, value, suffix);
+        (void)fprintf(f, "%s%*s%.*s = %p%s\n", prefix, indent, "", key.len, key.s, value, suffix);
     }
 };
 
 template <>
 class value_print<uint64_t> {
 public:
-    static void print(uint64_t value, FILE* f, const char* prefix, int indent, Str key, kvtimestamp_t, char* suffix)
+    static void print(
+        uint64_t value, FILE* f, const char* prefix, int indent, const Str& key, kvtimestamp_t, char* suffix)
     {
-        fprintf(f, "%s%*s%.*s = %" PRIu64 "%s\n", prefix, indent, "", key.len, key.s, value, suffix);
+        (void)fprintf(f, "%s%*s%.*s = %" PRIu64 "%s\n", prefix, indent, "", key.len, key.s, value, suffix);
     }
 };
 
 class key_unparse_unsigned {
 public:
-    static int unparse_key(Masstree::key<long unsigned int> key, char* buf, int buflen)
+    static int unparse_key(const Masstree::key<long unsigned int>& key, char* buf, int buflen)
     {
         errno_t erc = snprintf_s(buf, buflen, buflen - 1, "%" PRIu64, key.ikey());
         securec_check_ss(erc, "\0", "\0");

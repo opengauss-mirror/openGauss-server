@@ -39,9 +39,9 @@
 #include "session_context.h"
 #include "mm_api.h"
 
-#include <stdint.h>
+#include <cstdint>
 #include <pthread.h>
-#include <stdarg.h>
+#include <cstdarg>
 
 namespace MOT {
 DECLARE_LOGGER(BufferApi, Memory)
@@ -101,7 +101,7 @@ extern void MemBufferFreeGlobal(void* buffer, MemBufferClass bufferClass)
         // allocator node in a local variables to avoid core dump
         int allocatorNode = bufferChunkHeader->m_allocatorNode;
         MemBufferAllocatorFree(&g_globalAllocators[allocatorNode][bufferClass], buffer);
-        DetailedMemoryStatisticsProvider::m_provider->AddGlobalBuffersFreed(allocatorNode, bufferClass);
+        DetailedMemoryStatisticsProvider::GetInstance().AddGlobalBuffersFreed(allocatorNode, bufferClass);
     } else {
         MOT_LOG_PANIC("Attempt to release invalid buffer at %p: source chunk not found", buffer);
 
@@ -136,6 +136,36 @@ extern void MemBufferClearSessionCache()
             (unsigned)MOTCurrThreadId,
             node);
     }
+}
+
+extern int MemBufferReserveGlobal(uint32_t chunkCount)
+{
+    int result = 0;
+    int node = MOTCurrentNumaNodeId;
+    if (node < 0) {
+        MemBufferIssueError(MOT_ERROR_INVALID_ARG,
+            "Cannot reserve %u chunks from global memory: Invalid NUMA node identifier %u",
+            chunkCount,
+            node);
+        result = MOT_ERROR_INVALID_ARG;
+    } else {
+        result = MemRawChunkStoreReserveGlobal(node, chunkCount);
+    }
+    return result;
+}
+
+extern int MemBufferUnreserveGlobal(uint32_t chunkCount)
+{
+    int result = 0;
+    int node = MOTCurrentNumaNodeId;
+    if (node < 0) {
+        MemBufferIssueError(
+            MOT_ERROR_INVALID_ARG, "Cannot unreserve global memory: Invalid NUMA node identifier %u", node);
+        result = MOT_ERROR_INVALID_ARG;
+    } else {
+        MemRawChunkStoreUnreserveGlobal(node, chunkCount);
+    }
+    return result;
 }
 
 extern void MemBufferApiPrint(const char* name, LogLevel logLevel, MemReportMode reportMode /* = MEM_REPORT_SUMMARY */)
@@ -339,8 +369,8 @@ extern "C" void MemBufferApiDump()
 {
     MOT::StringBufferApply([](MOT::StringBuffer* stringBuffer) {
         MOT::MemBufferApiToString(0, "Debug Dump", stringBuffer, MOT::MEM_REPORT_DETAILED);
-        fprintf(stderr, "%s", stringBuffer->m_buffer);
-        fflush(stderr);
+        (void)fprintf(stderr, "%s", stringBuffer->m_buffer);
+        (void)fflush(stderr);
     });
 }
 
@@ -348,8 +378,8 @@ extern "C" int MemBufferApiAnalyze(void* buffer)
 {
     for (uint32_t i = 0; i < MOT::g_memGlobalCfg.m_nodeCount; ++i) {
         for (MOT::MemBufferClass bc = MOT::MEM_BUFFER_CLASS_KB_1; bc < MOT::MEM_BUFFER_CLASS_LARGEST; ++bc) {
-            fprintf(stderr,
-                "Searching buffer %p in %s global-%d buffer allocator...\n",
+            (void)fprintf(stderr,
+                "Searching buffer %p in %s global-%u buffer allocator...\n",
                 buffer,
                 MOT::MemBufferClassToString(bc),
                 i);
@@ -360,8 +390,8 @@ extern "C" int MemBufferApiAnalyze(void* buffer)
     }
     for (uint32_t i = 0; i < MOT::g_memGlobalCfg.m_nodeCount; ++i) {
         for (MOT::MemBufferClass bc = MOT::MEM_BUFFER_CLASS_KB_1; bc < MOT::MEM_BUFFER_CLASS_LARGEST; ++bc) {
-            fprintf(stderr,
-                "Searching buffer %p in %s local-%d buffer allocator...\n",
+            (void)fprintf(stderr,
+                "Searching buffer %p in %s local-%u buffer allocator...\n",
                 buffer,
                 MOT::MemBufferClassToString(bc),
                 i);

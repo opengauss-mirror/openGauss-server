@@ -23,7 +23,7 @@
  */
 
 #include <arpa/inet.h>
-#include <errno.h>
+#include <cerrno>
 #include "sys_numa_api.h"
 #include <string.h>
 #include <time.h>
@@ -57,14 +57,17 @@ std::string ExecOsCommand(const string& cmd)
 
 std::string ExecOsCommand(const char* cmd)
 {
-    char buffer[128];
+    const int bufSize = 128;
+    char buffer[bufSize];
     std::string result;
     std::shared_ptr<FILE> pipe(popen(cmd, "r"), pclose);
-    if (!pipe)
+    if (!pipe) {
         return nullptr;
+    }
     while (!feof(pipe.get())) {
-        if (fgets(buffer, 128, pipe.get()) != nullptr)
+        if (fgets(buffer, bufSize, pipe.get()) != nullptr) {
             result += buffer;
+        }
     }
     return result;
 }

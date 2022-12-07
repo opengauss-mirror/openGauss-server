@@ -126,6 +126,15 @@ void InitShmemAllocation(void)
                           0,
                           sizeof(*t_thrd.xact_cxt.ShmemVariableCache));
     securec_check(rc, "\0", "\0");
+
+#ifdef ENABLE_MOT
+    /*
+     * Allow non backend (MOT) threads to access ShmemVariableCache for transaction manager.
+     */
+    if (g_instance.mot_cxt.shmemVariableCache == NULL) {
+        g_instance.mot_cxt.shmemVariableCache = t_thrd.xact_cxt.ShmemVariableCache;
+    }
+#endif
 }
 
 /*

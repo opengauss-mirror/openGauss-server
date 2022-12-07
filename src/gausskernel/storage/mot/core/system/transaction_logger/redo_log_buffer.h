@@ -25,8 +25,8 @@
 #ifndef REDO_LOG_BUFFER_H
 #define REDO_LOG_BUFFER_H
 
-#include <stdint.h>
-#include <string.h>
+#include <cstdint>
+#include <cstring>
 #include <istream>
 #include <string>
 #include <sstream>
@@ -41,11 +41,7 @@ namespace MOT {
 class RedoLogBuffer {
 public:
     inline RedoLogBuffer()
-        : m_bufferSize(REDO_DEFAULT_BUFFER_SIZE),
-          m_nextFree(sizeof(uint32_t)),
-          m_buffer(nullptr),
-          m_allocated(false),
-          m_next(nullptr)
+        : m_bufferSize(REDO_DEFAULT_BUFFER_SIZE), m_nextFree(sizeof(uint32_t)), m_buffer(nullptr), m_allocated(false)
     {}
 
     inline bool Initialize()
@@ -62,9 +58,13 @@ public:
     RedoLogBuffer(const RedoLogBuffer& orig) = delete;
 
     RedoLogBuffer(RedoLogBuffer&& other)
-        : m_bufferSize(other.m_bufferSize), m_nextFree(other.m_nextFree), m_buffer(other.m_buffer)
+        : m_bufferSize(other.m_bufferSize),
+          m_nextFree(other.m_nextFree),
+          m_buffer(other.m_buffer),
+          m_allocated(other.m_allocated)
     {
         other.m_buffer = nullptr;
+        other.m_allocated = false;
     }
 
     inline ~RedoLogBuffer()
@@ -72,6 +72,8 @@ public:
         if (m_buffer != nullptr) {
             delete[] m_buffer;
         }
+        m_buffer = nullptr;
+        m_allocated = false;
     }
 
     RedoLogBuffer& operator=(RedoLogBuffer&& other)
@@ -85,7 +87,9 @@ public:
         m_bufferSize = other.m_bufferSize;
         m_nextFree = other.m_nextFree;
         m_buffer = other.m_buffer;
+        m_allocated = other.m_allocated;
         other.m_buffer = nullptr;
+        other.m_allocated = false;
         return *this;
     }
 
@@ -130,19 +134,6 @@ public:
         MOT_ASSERT(m_nextFree + size <= m_bufferSize);
         errno_t erc = memcpy_s(&m_buffer[m_nextFree], m_bufferSize - m_nextFree, data, size);
         securec_check(erc, "\0", "\0");
-        m_nextFree += size;
-    }
-
-    /**
-     * @brief Appends raw data from input stream.
-     * @param is The input stream
-     * @param size The amount of bytes to append from the stream.
-     */
-    void Append(std::istream& is, uint32_t size)
-    {
-        MOT_ASSERT(m_nextFree + size <= m_bufferSize);
-        char* ptr = (char*)&m_buffer[m_nextFree];
-        is.read(ptr, size);
         m_nextFree += size;
     }
 
@@ -287,21 +278,12 @@ public:
         std::stringstream ss;
         ss << std::hex;
         for (uint32_t i = 0; i < len; i++) {
-            if (m_buffer[i] < 16)
+            if (m_buffer[i] < 16) {
                 ss << "0";
+            }
             ss << (uint32_t)m_buffer[i] << "::";
         }
         return ss.str();
-    }
-
-    inline void SetNext(RedoLogBuffer* nextBuffer)
-    {
-        m_next = nextBuffer;
-    }
-
-    inline RedoLogBuffer* GetNext()
-    {
-        return m_next;
     }
 
     /** @define By default use 1 MB buffers for redo log. */
@@ -319,9 +301,6 @@ private:
 
     /** @var Indicates whether buffer was allocated. */
     bool m_allocated;
-
-    /** @var Manages in-place list of objects. */
-    RedoLogBuffer* m_next;
 };
 }  // namespace MOT
 

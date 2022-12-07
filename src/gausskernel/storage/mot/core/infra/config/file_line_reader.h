@@ -54,6 +54,15 @@ public:
     }
 
     /**
+     * @brief Queries whether the configuration file was fully loaded.
+     * @return True if all data were read from file.
+     */
+    inline bool IsInitialized() const
+    {
+        return m_initialized;
+    }
+
+    /**
      * @brief Retrieves the configuration file path.
      * @return The configuration file path.
      */
@@ -115,6 +124,9 @@ private:
 
     /** @var The currently parsed line number. */
     uint32_t m_lineNumber;
+
+    /** @var Initialization state. */
+    bool m_initialized;
 
     /** @brief Parses the configuration file, breaking it into lines. */
     void ParseFile();

@@ -25,11 +25,18 @@
 #ifndef MM_ATOMIC_OPS_H
 #define MM_ATOMIC_OPS_H
 
-/** @define COMPILER_BARRIER A macro for generating a compiler barrier. */
+/** @define COMPILER_BARRIER A macro for generating a compiler barrier (same as defined in barrier.h). */
 #if defined(__x86_64__) || defined(__x86__)
-#define COMPILER_BARRIER asm volatile("" : : : "memory");
+#define COMPILER_BARRIER asm volatile("" : : : "memory")
+#define MEMORY_BARRIER() asm volatile("lock; addl $0,0(%%rsp)" : : : "memory")
+#define READ_BARRIER() COMPILER_BARRIER
+#define WRITE_BARRIER() COMPILER_BARRIER
 #else
-#define COMPILER_BARRIER __sync_synchronize();
+#define COMPILER_BARRIER __sync_synchronize()
+#define MEMORY_BARRIER_DSB(opt) __asm__ __volatile__("DMB " #opt::: "memory")
+#define MEMORY_BARRIER() MEMORY_BARRIER_DSB(ish)
+#define READ_BARRIER() MEMORY_BARRIER_DSB(ishld)
+#define WRITE_BARRIER() MEMORY_BARRIER_DSB(ishst)
 #endif
 
 /** @define PAUSE A macro for memory pause. */

@@ -30,6 +30,31 @@
 #include "jit_context.h"
 
 namespace JitExec {
+/** @struct A sub-pool of JIT context objects. */
+struct __attribute__((packed)) JitContextSubPool {
+    /** @var The array of pooled JIT context objects. */
+    MotJitContext* m_contextPool;  // L1 offset 0
+
+    /** @var The list of free JIT context objects. */
+    MotJitContext* m_freeContextList;  // L1 offset 8
+
+    /** @var The number of free JIT context objects. */
+    uint32_t m_freeContextCount;  // L1 offset 16
+
+    /** @var The unique pool identifier. */
+    uint16_t m_subPoolId;  // L1 offset 20
+
+    /** @var Align struct size to cache line. */
+    uint8_t m_padding3[42];  // L1 offset 22
+
+#ifdef MOT_JIT_DEBUG
+    int* m_freeContextIds;
+#endif
+};
+
+/** @define The size of each sub-pool is fixed at 256 items, so each sub-pool takes about 66 KB.  */
+#define JIT_SUB_POOL_SIZE 256
+
 /** @struct A pool of JIT context objects. */
 struct __attribute__((packed)) JitContextPool {
     /** @var A lock to synchronize pool access. */
@@ -39,25 +64,25 @@ struct __attribute__((packed)) JitContextPool {
     uint8_t m_padding1[60];
 
     /** @var The array of pooled JIT context objects. */
-    JitContext* m_contextPool;  // L1 offset 0
+    JitContextSubPool** m_subPools;  // L1 offset 0
 
-    /** @var The size of the pool. */
+    /** @var The maximum size of the pool (number of objects). */
     uint32_t m_poolSize;  // L1 offset 8
 
+    /** @var The maximum number of sub-pools. */
+    uint16_t m_subPoolCount;  // L1 offset 12
+
     /** @var The usage of this context pool (global or session-local). */
-    JitContextUsage m_usage;  // L1 offset 12 (1 byte)
+    JitContextUsage m_usage;  // L1 offset 14 (1 byte)
 
     /** @var Align next pointer to 8 bytes. */
-    uint8_t m_padding2[3];  // L1 offset 13
+    uint8_t m_padding2[1];  // L1 offset 15
 
-    /** @var The list of free JIT context objects. */
-    JitContext* m_freeContextList;  // L1 offset 16
+    /** @var The unique pool identifier. */
+    uint32_t m_poolId;  // L1 offset 16
 
-    /** @var The number of free JIT context objects. */
-    uint32_t m_freeContextCount;  // L1 offset 24
-
-    /** @var Align struct size to 2 cache lines. */
-    uint8_t m_padding3[36];  // align to cache line
+    /** @var Align struct size to cache line. */
+    uint8_t m_padding3[44];  // L1 offset 20
 };
 
 /**
@@ -81,14 +106,17 @@ extern void DestroyJitContextPool(JitContextPool* contextPool);
  * @return The JIT context if allocation succeeded, otherwise NULL. Consult @ref
  * mm_get_root_error() for futher details.
  */
-JitContext* AllocPooledJitContext(JitContextPool* contextPool);
+MotJitContext* AllocPooledJitContext(JitContextPool* contextPool);
 
 /**
  * @brief Returns a JIT context to a pool.
  * @param contextPool The JIT context pool into which the context object is to be returned.
  * @param jitContext The JIT context to return.
  */
-extern void FreePooledJitContext(JitContextPool* contextPool, JitContext* jitContext);
+extern void FreePooledJitContext(JitContextPool* contextPool, MotJitContext* jitContext);
+
+/** @brief Retrieves the actual size in bytes that an allocated JIT context takes. */
+extern uint32_t GetJitContextSize();
 }  // namespace JitExec
 
 #endif

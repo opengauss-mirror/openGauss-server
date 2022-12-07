@@ -82,14 +82,42 @@ static void RegisterLogger(Logger* logger)
     if (itr == loggerMap->end()) {
         LoggerMap::pairis pairis = loggerMap->insert(
             LoggerMap::value_type(logger->m_componentName, mot_make_pair(LogLevel::LL_INFO, LoggerList())));
-        MOT_ASSERT(pairis.second == INSERT_SUCCESS);
+        switch (pairis.second) {
+            case INSERT_SUCCESS:
+                break;
+            case INSERT_FAILED:
+                MOT_REPORT_ERROR(MOT_ERROR_OOM,
+                    "System Startup",
+                    "Failed to insert component %s for logger %s to loggerMap",
+                    logger->m_componentName,
+                    logger->m_loggerName);
+                return;
+            case INSERT_EXISTS:
+                MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
+                    "System Startup",
+                    "Failed to insert component %s for logger %s to loggerMap. Element already exists",
+                    logger->m_componentName,
+                    logger->m_loggerName);
+                return;
+            default:
+                MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
+                    "System Startup",
+                    "Unknown error code %d while inserting component %s logger %s to loggerMap",
+                    pairis.second,
+                    logger->m_componentName,
+                    logger->m_loggerName);
+                return;
+        }
+
         itr = pairis.first;
         MOT_LOG_DEBUG("Registered log component: %s", logger->m_componentName);
     }
     LoggerList& loggerList = itr->second.second;
     LoggerList::iterator itr2 = find(loggerList.begin(), loggerList.end(), logger);
     MOT_ASSERT(itr2 == loggerList.end());
-    loggerList.push_back(logger);
+    if (!loggerList.push_back(logger)) {
+        MOT_LOG_ERROR("Failed to add log %s to logger's list", logger->m_loggerName);
+    }
 }
 
 /**
@@ -107,10 +135,10 @@ static void UnregisterLogger(Logger* logger)
     LoggerList& loggerList = itr->second.second;
     LoggerList::iterator itr2 = find(loggerList.begin(), loggerList.end(), logger);
     MOT_ASSERT(itr2 != loggerList.end());
-    loggerList.erase(itr2);
+    (void)loggerList.erase(itr2);
     if (loggerList.empty()) {
         MOT_LOG_DEBUG("Unregistered log component: %s", logger->m_componentName);
-        loggerMap->erase(itr);
+        (void)loggerMap->erase(itr);
         if (loggerMap->empty()) {
             delete loggerMap;
             loggerMap = nullptr;

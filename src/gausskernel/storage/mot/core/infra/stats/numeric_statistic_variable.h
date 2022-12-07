@@ -27,7 +27,7 @@
 
 #include "statistic_variable.h"
 
-#include <limits.h>
+#include <climits>
 
 namespace MOT {
 /**

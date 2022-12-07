@@ -22,7 +22,7 @@
  * -------------------------------------------------------------------------
  */
 
-#include <string.h>
+#include <cstring>
 
 #include "mm_session_allocator.h"
 #include "session_context.h"
@@ -201,11 +201,11 @@ extern void* MemSessionAllocatorAlloc(MemSessionAllocator* sessionAllocator, uin
                 sessionAllocator->m_maxRealUsedSize = sessionAllocator->m_realUsedSize;
             }
             if (sessionAllocator->m_allocType == MEM_ALLOC_GLOBAL) {
-                MemoryStatisticsProvider::m_provider->AddGlobalBytesUsed(realSize);
-                DetailedMemoryStatisticsProvider::m_provider->AddGlobalBytesRequested(size);
+                MemoryStatisticsProvider::GetInstance().AddGlobalBytesUsed(realSize);
+                DetailedMemoryStatisticsProvider::GetInstance().AddGlobalBytesRequested(size);
             } else {
-                MemoryStatisticsProvider::m_provider->AddSessionBytesUsed(realSize);
-                DetailedMemoryStatisticsProvider::m_provider->AddSessionBytesRequested(size);
+                MemoryStatisticsProvider::GetInstance().AddSessionBytesUsed(realSize);
+                DetailedMemoryStatisticsProvider::GetInstance().AddSessionBytesRequested(size);
             }
         }
     }
@@ -250,7 +250,6 @@ extern void MemSessionAllocatorFree(MemSessionAllocator* sessionAllocator, void*
 {
     ASSERT_SESSION_ALLOCATOR_VALID(sessionAllocator);
 
-    uint32_t objectSize = 0;
     MemSessionObjectHeader* objectHeader = (MemSessionObjectHeader*)((char*)object - MEM_SESSION_OBJECT_HEADER_LEN);
 
     // fix to real header of aligned object
@@ -297,12 +296,12 @@ extern void MemSessionAllocatorFree(MemSessionAllocator* sessionAllocator, void*
         sessionAllocator->m_usedSize -= objectHeader->m_objectSize.m_size;
         sessionAllocator->m_realUsedSize -= objectHeader->m_objectSize.m_realSize;
         if (sessionAllocator->m_allocType == MEM_ALLOC_GLOBAL) {
-            MemoryStatisticsProvider::m_provider->AddGlobalBytesUsed(-((int64_t)objectHeader->m_objectSize.m_size));
-            DetailedMemoryStatisticsProvider::m_provider->AddGlobalBytesRequested(
+            MemoryStatisticsProvider::GetInstance().AddGlobalBytesUsed(-((int64_t)objectHeader->m_objectSize.m_size));
+            DetailedMemoryStatisticsProvider::GetInstance().AddGlobalBytesRequested(
                 -((int64_t)objectHeader->m_objectSize.m_realSize));
         } else {
-            MemoryStatisticsProvider::m_provider->AddSessionBytesUsed(-((int64_t)objectHeader->m_objectSize.m_size));
-            DetailedMemoryStatisticsProvider::m_provider->AddSessionBytesRequested(
+            MemoryStatisticsProvider::GetInstance().AddSessionBytesUsed(-((int64_t)objectHeader->m_objectSize.m_size));
+            DetailedMemoryStatisticsProvider::GetInstance().AddSessionBytesRequested(
                 -((int64_t)objectHeader->m_objectSize.m_realSize));
         }
 
@@ -347,6 +346,7 @@ extern void* MemSessionAllocatorRealloc(
         objectHeader = (MemSessionObjectHeader*)(((uint8_t*)object) - MEM_SESSION_OBJECT_HEADER_LEN);
     }
 
+    uint32_t objectSizeBytes = objectHeader->m_objectSize.m_size;
     if (objectHeader->m_objectSize.m_realSize >= newSize) {
         result = object;
         MOT_LOG_DEBUG("The old object is big enough for requested new size.");
@@ -356,17 +356,41 @@ extern void* MemSessionAllocatorRealloc(
         // unsigned)
         int64_t sizeDiff = ((int64_t)newSize) - ((int64_t)objectHeader->m_objectSize.m_size);
         if (sessionAllocator->m_allocType == MEM_ALLOC_GLOBAL) {
-            MemoryStatisticsProvider::m_provider->AddGlobalBytesUsed(sizeDiff);
+            MemoryStatisticsProvider::GetInstance().AddGlobalBytesUsed(sizeDiff);
         } else {
-            MemoryStatisticsProvider::m_provider->AddSessionBytesUsed(sizeDiff);
+            MemoryStatisticsProvider::GetInstance().AddSessionBytesUsed(sizeDiff);
         }
 
+        // update allocator and object header statistics
         sessionAllocator->m_usedSize -= objectHeader->m_objectSize.m_size;
         sessionAllocator->m_usedSize += newSize;
         if (sessionAllocator->m_usedSize > sessionAllocator->m_maxUsedSize) {
             sessionAllocator->m_maxUsedSize = sessionAllocator->m_usedSize;
         }
         objectHeader->m_objectSize.m_size = newSize;
+
+        // attention: when object is reallocated in-place we treat flags a bit differently, but achieve the same effect
+        // so MEM_REALLOC_COPY has no effect
+        if (flags == MEM_REALLOC_ZERO) {
+            erc = memset_s(result, newSize, 0, newSize);
+            securec_check(erc, "\0", "\0");
+        } else if (flags == MEM_REALLOC_COPY_ZERO) {
+            // attention: new size may be smaller
+            if (newSize > objectSizeBytes) {
+                erc = memset_s(
+                    ((char*)result) + objectSizeBytes, newSize - objectSizeBytes, 0, newSize - objectSizeBytes);
+                securec_check(erc, "\0", "\0");
+            } else {
+#ifdef MOT_DEBUG
+                // set dead land pattern in the reduced tail of the object
+                erc = memset_s(((char*)result) + newSize,
+                    objectHeader->m_objectSize.m_realSize - newSize,
+                    MEM_DEAD_LAND,
+                    objectSizeBytes - newSize);
+                securec_check(erc, "\0", "\0");
+#endif
+            }
+        }
     } else {
         void* newObject = MemSessionAllocatorAlloc(sessionAllocator, newSize);
         if (newObject == NULL) {
@@ -376,7 +400,6 @@ extern void* MemSessionAllocatorRealloc(
                 newSize,
                 (unsigned)sessionAllocator->m_threadId);
         } else {
-            uint32_t objectSizeBytes = objectHeader->m_objectSize.m_size;
             if (flags == MEM_REALLOC_COPY) {
                 // attention: new size may be smaller
                 erc = memcpy_s(newObject, newSize, object, min(objectSizeBytes, newSize));
@@ -403,9 +426,7 @@ extern void* MemSessionAllocatorRealloc(
 
 extern uint32_t MemSessionAllocatorGetObjectSize(void* object, uint32_t* requestedSize /* = NULL */)
 {
-    uint32_t objectSize = 0;
     MemSessionObjectHeader* objectHeader = (MemSessionObjectHeader*)((char*)object - MEM_SESSION_OBJECT_HEADER_LEN);
-
     if (objectHeader->m_alignedOffset != 0) {
         MOT_LOG_DEBUG("Reallocating aligned allocation %p by offset %u", object, objectHeader->m_alignedOffset);
         object = ((uint8_t*)object) - objectHeader->m_alignedOffset;
@@ -530,12 +551,13 @@ extern void MemSessionAllocatorFormatStats(int indent, const char* name, StringB
         stats->m_realUsedSize / MEGA_BYTE);
 
     if (reportMode == MEM_REPORT_DETAILED) {
-        double memUtilInternal = ((double)stats->m_usedSize) / ((double)stats->m_realUsedSize) * 100.0;
-        double memUtilExternal = ((double)stats->m_usedSize) / stats->m_reservedSize * 100.0;
+        double memUtilInternal = (((double)stats->m_usedSize) / ((double)stats->m_realUsedSize)) * 100.0;
+        double memUtilExternal = (((double)stats->m_usedSize) / stats->m_reservedSize) * 100.0;
         uint32_t minRequiredChunks =
             (stats->m_usedSize + MEM_CHUNK_SIZE_MB * MEGA_BYTE - 1) / (MEM_CHUNK_SIZE_MB * MEGA_BYTE);
         double maxUtilExternal =
-            ((double)stats->m_usedSize) / (minRequiredChunks * MEM_CHUNK_SIZE_MB * MEGA_BYTE) * 100.0;
+            (((double)stats->m_usedSize) / static_cast<uint64_t>(minRequiredChunks * MEM_CHUNK_SIZE_MB * MEGA_BYTE)) *
+            100.0;
 
         StringBufferAppend(stringBuffer,
             "%*sPeak Reserved : %" PRIu64 "\n",
@@ -654,12 +676,11 @@ extern void MemSessionAllocatorToString(int indent, const char* name, MemSession
 }
 
 extern void MemSessionChunkInit(
-    MemSessionChunkHeader* chunk, MemChunkType chunkType, int nodeId, MemAllocType allocType)
+    MemSessionChunkHeader* chunk, MemChunkType chunkType, int allocatorNode, MemAllocType allocType)
 {
     chunk->m_chunkType = chunkType;
-    chunk->m_node = nodeId;
     chunk->m_allocType = allocType;
-    chunk->m_allocatorNode = chunk->m_node;
+    chunk->m_allocatorNode = allocatorNode;
     chunk->m_freePtr = (char*)chunk + MEM_SESSION_CHUNK_HEADER_LEN;
     chunk->m_endPtr = (char*)chunk + MEM_CHUNK_SIZE_MB * MEGA_BYTE;
     chunk->m_freeSize = MEM_CHUNK_SIZE_MB * MEGA_BYTE - MEM_SESSION_CHUNK_HEADER_LEN;
@@ -880,8 +901,8 @@ extern "C" void MemSessionAllocatorDump(void* arg)
 
     MOT::StringBufferApply([sessionAllocator](MOT::StringBuffer* stringBuffer) {
         MOT::MemSessionAllocatorToString(0, "Debug Dump", sessionAllocator, stringBuffer, MOT::MEM_REPORT_DETAILED);
-        fprintf(stderr, "%s", stringBuffer->m_buffer);
-        fflush(stderr);
+        (void)fprintf(stderr, "%s", stringBuffer->m_buffer);
+        (void)fflush(stderr);
     });
 }
 
@@ -905,7 +926,7 @@ extern "C" int MemSessionAllocatorAnalyze(void* allocator, void* buffer)
         return 0;
     }
 
-    fprintf(stderr,
+    (void)fprintf(stderr,
         "Object %p found in session allocator for session %u thread %u\n",
         buffer,
         sessionAllocator->m_sessionId,
@@ -914,7 +935,7 @@ extern "C" int MemSessionAllocatorAnalyze(void* allocator, void* buffer)
     // Step 2: print object details
     MOT::MemSessionObjectHeader* objectHeader =
         (MOT::MemSessionObjectHeader*)(((char*)buffer) - MEM_SESSION_OBJECT_HEADER_LEN);
-    fprintf(stderr,
+    (void)fprintf(stderr,
         "Object %p details: size = %u bytes, real size = %u bytes, session id = %u\n",
         buffer,
         objectHeader->m_objectSize.m_size,
@@ -923,17 +944,17 @@ extern "C" int MemSessionAllocatorAnalyze(void* allocator, void* buffer)
 
     // Guard against double free of an object.
     if (objectHeader->m_sessionId == INVALID_SESSION_ID) {
-        fprintf(stderr, "Object %p is an already freed object\n", buffer);
+        (void)fprintf(stderr, "Object %p is an already freed object\n", buffer);
     } else if (objectHeader->m_sessionId !=
                sessionAllocator->m_sessionId) {  // Check if the object belongs to this chunk or not.
-        fprintf(stderr,
+        (void)fprintf(stderr,
             "Object %p is a live object marked as belonging to session %u, but is actually found in session allocator "
             "for session %u\n",
             buffer,
             objectHeader->m_sessionId,
             sessionAllocator->m_sessionId);
     } else {
-        fprintf(stderr, "Object %p is a live object\n", buffer);
+        (void)fprintf(stderr, "Object %p is a live object\n", buffer);
     }
 
     // Step 3: search buffer in all free lists (maybe this object was already freed)
@@ -942,7 +963,7 @@ extern "C" int MemSessionAllocatorAnalyze(void* allocator, void* buffer)
         MOT::MemSessionObjectHeader* freeList = sessionAllocator->m_freeList[i];
         while (freeList && !foundInList) {
             if (freeList == objectHeader) {
-                fprintf(stderr, "Object %p found in free list %u\n", buffer, i);
+                (void)fprintf(stderr, "Object %p found in free list %u\n", buffer, i);
                 foundInList = true;
             } else {
                 freeList = freeList->m_next;

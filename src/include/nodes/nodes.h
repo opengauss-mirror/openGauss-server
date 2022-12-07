@@ -397,6 +397,10 @@ typedef enum NodeTag {
     T_SelectIntoVarList,
     T_AlterTableStmt,
     T_AlterTableCmd,
+#ifdef ENABLE_MOT
+    T_AlterForeingTableCmd,
+    T_RenameForeingTableCmd,
+#endif
     T_AlterDomainStmt,
     T_SetOperationStmt,
     T_GrantStmt,

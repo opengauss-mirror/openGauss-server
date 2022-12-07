@@ -16,6 +16,7 @@ create foreign table test11 (l lseg);
 create foreign table test12 (p polygon);
 create foreign table test13 (i inet);
 create foreign table test14 (m macaddr);
+create foreign table test15 (t text);
 
 drop foreign table test0;
 drop foreign table test1;

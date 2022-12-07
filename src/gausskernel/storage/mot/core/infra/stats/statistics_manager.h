@@ -118,7 +118,7 @@ public:
      * @brief Derives classes should react to a notification that configuration changed. New
      * configuration is accessible via the ConfigManager.
      */
-    virtual void OnConfigChange();
+    void OnConfigChange() override;
 
 private:
     /** @var The single instance. */
@@ -155,7 +155,7 @@ private:
     StatisticsManager();
 
     /** @brief Destructor. */
-    ~StatisticsManager();
+    ~StatisticsManager() override;
 
     /**
      *  @brief Initializes the manager.

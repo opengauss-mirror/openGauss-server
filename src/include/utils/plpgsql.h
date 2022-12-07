@@ -1661,6 +1661,9 @@ extern void exec_eval_datum(PLpgSQL_execstate *estate,
 				bool *isnull,
 				bool isretry);
 extern void exec_eval_cleanup(PLpgSQL_execstate *estate);
+extern void plpgsql_estate_setup(PLpgSQL_execstate* estate, PLpgSQL_function* func, ReturnSetInfo* rsi);
+extern void plpgsql_destroy_econtext(PLpgSQL_execstate* estate);
+extern PLpgSQL_datum* copy_plpgsql_datum(PLpgSQL_datum* datum);
 extern void free_expr(PLpgSQL_expr* expr);
 extern void free_assignlist(List* assignlist);
 extern HeapTuple make_tuple_from_row(PLpgSQL_execstate* estate, PLpgSQL_row* row, TupleDesc tupdesc);
@@ -1669,6 +1672,9 @@ extern int getTableOfIndexByDatumValue(TableOfIndexKey key, HTAB* tableOfIndex, 
 extern Datum fillNestedTableArray(ArrayType* arrayval, Oid parenttypoid, Oid elemtypoid, int value, int idx);
 extern int plpgsql_estate_adddatum(PLpgSQL_execstate* estate, PLpgSQL_datum* newm);
 extern void CheckCurrCompileDependOnPackage(Oid pkgOid);
+extern bool needRecompilePlan(SPIPlanPtr plan);
+extern void plpgsql_param_fetch(ParamListInfo params, int paramid);
+extern Datum pl_coerce_type_typmod(Datum value, Oid targetTypeId, int32 targetTypMod);
 #ifndef ENABLE_MULTIPLE_NODES
 extern void estate_cursor_set(FormatCallStack* plcallstack);
 #endif

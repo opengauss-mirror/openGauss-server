@@ -261,6 +261,8 @@ extern Datum pv_session_memctx_detail(PG_FUNCTION_ARGS);
 extern Datum pv_total_memory_detail(PG_FUNCTION_ARGS);
 extern Datum mot_global_memory_detail(PG_FUNCTION_ARGS);
 extern Datum mot_local_memory_detail(PG_FUNCTION_ARGS);
+extern Datum mot_jit_detail(PG_FUNCTION_ARGS);
+extern Datum mot_jit_profile(PG_FUNCTION_ARGS);
 extern Datum gs_total_nodegroup_memory_detail(PG_FUNCTION_ARGS);
 
 
@@ -8256,6 +8258,190 @@ Datum mot_global_memory_detail(PG_FUNCTION_ARGS)
         values[0] = Int32GetDatum(entry->numaNode);
         values[1] = Int64GetDatum(entry->reservedMemory);
         values[2] = Int64GetDatum(entry->usedMemory);
+
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
+    } else {
+        /* do when there is no more left */
+        SRF_RETURN_DONE(funcctx);
+    }
+#endif
+}
+
+/*
+ * Description: Produce a view to show all JIT compilation information
+ */
+Datum mot_jit_detail(PG_FUNCTION_ARGS)
+{
+#ifndef ENABLE_MOT
+    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("This function is not supported in cluster mode.")));
+    PG_RETURN_NULL();
+#else
+    FuncCallContext* funcctx = NULL;
+    MotJitDetail* entry = NULL;
+    MemoryContext oldcontext;
+
+    if (SRF_IS_FIRSTCALL()) {
+        TupleDesc tupdesc;
+
+        /* create a function context for cross-call persistence */
+        funcctx = SRF_FIRSTCALL_INIT();
+
+        /*
+         * Switch to memory context appropriate for multiple function calls
+         */
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+
+        /* build tupdesc for result tuples */
+        tupdesc = CreateTemplateTupleDesc(NUM_MOT_JIT_DETAIL_ELEM, false);
+
+        TupleDescInitEntry(tupdesc, (AttrNumber) 1, "proc_oid", OIDOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber) 2, "query", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber) 3, "namespace", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber) 4, "jittable_status", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber) 5, "valid_status", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber) 6, "last_updated", TIMESTAMPTZOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber) 7, "plan_type", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber) 8, "codegen_time", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber) 9, "verify_time", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber) 10, "finalize_time", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber) 11, "compile_time", INT8OID, -1, 0);
+
+        /* complete descriptor of the tupledesc */
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+
+        /* total number of tuples to be returned */
+        funcctx->user_fctx = (void *)GetMotJitDetail(&(funcctx->max_calls));
+
+        (void)MemoryContextSwitchTo(oldcontext);
+    }
+
+    /* stuff done on every call of the function */
+    funcctx = SRF_PERCALL_SETUP();
+    entry = (MotJitDetail *)funcctx->user_fctx;
+
+    if (funcctx->call_cntr < funcctx->max_calls) {
+        Datum values[NUM_MOT_JIT_DETAIL_ELEM];
+        bool nulls[NUM_MOT_JIT_DETAIL_ELEM] = {false};
+        HeapTuple tuple = NULL;
+
+        /*
+         * Form tuple with appropriate data.
+         */
+        errno_t rc = 0;
+        rc = memset_s(values, sizeof(values), 0, sizeof(values));
+        securec_check(rc, "\0", "\0");
+        rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
+        securec_check(rc, "\0", "\0");
+
+        entry += funcctx->call_cntr;
+
+        /* Locking is probably not really necessary */
+        values[0] = ObjectIdGetDatum(entry->procOid);
+        values[1] = CStringGetTextDatum(entry->query);
+        values[2] = CStringGetTextDatum(entry->nameSpace);
+        values[3] = CStringGetTextDatum(entry->jittableStatus);
+        values[4] = CStringGetTextDatum(entry->validStatus);
+        values[5] = TimestampTzGetDatum(entry->lastUpdatedTimestamp);
+        values[6] = CStringGetTextDatum(entry->planType);
+        values[7] = Int64GetDatum(entry->codegenTime);
+        values[8] = Int64GetDatum(entry->verifyTime);
+        values[9] = Int64GetDatum(entry->finalizeTime);
+        values[10] = Int64GetDatum(entry->compileTime);
+
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
+    } else {
+        /* do when there is no more left */
+        SRF_RETURN_DONE(funcctx);
+    }
+#endif
+}
+
+/*
+ * Description: Produce a view to show profile data of MOT jitted functions and queries
+ */
+Datum mot_jit_profile(PG_FUNCTION_ARGS)
+{
+#ifndef ENABLE_MOT
+    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("This function is not supported in cluster mode.")));
+    PG_RETURN_NULL();
+#else
+    FuncCallContext* funcctx = NULL;
+    MotJitProfile* entry = NULL;
+    MemoryContext oldcontext;
+
+    if (SRF_IS_FIRSTCALL()) {
+        TupleDesc tupdesc;
+
+        /* create a function context for cross-call persistence */
+        funcctx = SRF_FIRSTCALL_INIT();
+
+        /*
+         * Switch to memory context appropriate for multiple function calls
+         */
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+
+        /* build tupdesc for result tuples */
+        tupdesc = CreateTemplateTupleDesc(NUM_MOT_JIT_PROFILE_ELEM, false);
+
+        TupleDescInitEntry(tupdesc, (AttrNumber) 1, "proc_oid", OIDOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber) 2, "id", INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber) 3, "parent_id", INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber) 4, "query", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber) 5, "namespace", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber) 6, "weight", FLOAT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber) 7, "total", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber) 8, "self", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber) 9, "child_gross", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber) 10, "child_net", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber) 11, "def_vars", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber) 12, "init_vars", INT8OID, -1, 0);
+
+        /* complete descriptor of the tupledesc */
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+
+        /* total number of tuples to be returned */
+        funcctx->user_fctx = (void *)GetMotJitProfile(&(funcctx->max_calls));
+
+        (void)MemoryContextSwitchTo(oldcontext);
+    }
+
+    /* stuff done on every call of the function */
+    funcctx = SRF_PERCALL_SETUP();
+    entry = (MotJitProfile *)funcctx->user_fctx;
+
+    if (funcctx->call_cntr < funcctx->max_calls) {
+        Datum values[NUM_MOT_JIT_PROFILE_ELEM];
+        bool nulls[NUM_MOT_JIT_PROFILE_ELEM] = {false};
+        HeapTuple tuple = NULL;
+
+        /*
+         * Form tuple with appropriate data.
+         */
+        errno_t rc = 0;
+        rc = memset_s(values, sizeof(values), 0, sizeof(values));
+        securec_check(rc, "\0", "\0");
+        rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
+        securec_check(rc, "\0", "\0");
+
+        entry += funcctx->call_cntr;
+
+        /* Locking is probably not really necessary */
+        values[0] = ObjectIdGetDatum(entry->procOid);
+        values[1] = Int32GetDatum(entry->id);
+        values[2] = Int32GetDatum(entry->parentId);
+        values[3] = CStringGetTextDatum(entry->query);
+        values[4] = CStringGetTextDatum(entry->nameSpace);
+        values[5] = Float4GetDatum(entry->weight);
+        values[6] = Int64GetDatum(entry->totalTime);
+        values[7] = Int64GetDatum(entry->selfTime);
+        values[8] = Int64GetDatum(entry->childGrossTime);
+        values[9] = Int64GetDatum(entry->childNetTime);
+        values[10] = Int64GetDatum(entry->defVarsTime);
+        values[11] = Int64GetDatum(entry->initVarsTime);
 
         tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
 

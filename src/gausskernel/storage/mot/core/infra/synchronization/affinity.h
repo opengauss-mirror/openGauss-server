@@ -25,7 +25,7 @@
 #ifndef AFFINITY_H
 #define AFFINITY_H
 
-#include <stdint.h>
+#include <cstdint>
 #include "type_formatter.h"
 
 namespace MOT {
@@ -81,10 +81,10 @@ enum class AffinityMode {
     (((affinity) != MOT::AffinityMode::AFFINITY_NONE) && ((affinity) != MOT::AffinityMode::AFFINITY_INVALID))
 
 /** @define Constant denoting an invalid CPU identifier. */
-#define INVALID_CPU_ID ((uint32_t)-1)
+#define INVALID_CPU_ID (-1)
 
 /** @define Constant denoting an invalid NUMA node identifier. */
-#define INVALID_NODE_ID ((uint32_t)-1)
+#define INVALID_NODE_ID (-1)
 
 /**
  * @class Affinity
@@ -113,14 +113,14 @@ public:
      * @param threadId The logical identifier of the thread.
      * @return The CPU identifier, or @ref INVALID_CPU_ID in case of failure.
      */
-    uint32_t GetAffineProcessor(uint64_t threadId) const;
+    int GetAffineProcessor(uint64_t threadId) const;
 
     /**
      * @brief Retrieves the identifier of the NUMA node affined to a given thread.
      * @param threadId The logical identifier of the thread.
      * @return The NUMA node identifier, or @ref INVALID_NODE_ID in case of failure.
      */
-    uint32_t GetAffineNuma(uint64_t threadId) const;
+    int GetAffineNuma(uint64_t threadId) const;
 
     /**
      * @brief Sets the CPU affinity of a thread.
@@ -128,7 +128,7 @@ public:
      * @param[out,opt] threadCore The resulting core identifier.
      * @return True if operation succeeded, otherwise false.
      */
-    bool SetAffinity(uint64_t threadId, uint32_t* threadCore = nullptr) const;
+    bool SetAffinity(uint64_t threadId, int* threadCore = nullptr) const;
 
     /**
      * @brief Sets the CPU affinity of a thread to the specified NUMA node.
@@ -187,6 +187,13 @@ extern AffinityMode AffinityModeFromString(const char* affinityModeStr);
  * @return The affinity mode string.
  */
 extern const char* AffinityModeToString(AffinityMode affinityMode);
+
+/**
+ * @brief Validates the affinity mode string value.
+ * @param affinityModeStr The affinity string.
+ * @return True if affinity mode is valid, otherwise false.
+ */
+extern bool ValidateAffinityMode(const char* affinityModeStr);
 
 /**
  * @class TypeFormatter<AffinityMode>

@@ -114,15 +114,15 @@ mot_string ThreadStatistics::MakeName(const char* baseName, uint64_t threadId)
 {
     mot_string result;
     if (threadId == THREAD_ID_TOTAL) {
-        result.format("%s[TOTAL]", baseName);
+        (void)result.format("%s[TOTAL]", baseName);
     } else if (threadId == THREAD_ID_AVG) {
-        result.format("%s[AVG]", baseName);
+        (void)result.format("%s[AVG]", baseName);
     } else if (threadId == THREAD_ID_DIFF) {
-        result.format("%s[DIFF]", baseName);
+        (void)result.format("%s[DIFF]", baseName);
     } else if (threadId == THREAD_ID_DIFF_AVG) {
-        result.format("%s[DIFF-AVG]", baseName);
+        (void)result.format("%s[DIFF-AVG]", baseName);
     } else {
-        result.format("%s[%u]", baseName, (unsigned)threadId);
+        (void)result.format("%s[%u]", baseName, (unsigned)threadId);
     }
 
     return result;

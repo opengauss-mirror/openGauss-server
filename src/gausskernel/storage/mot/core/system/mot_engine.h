@@ -25,7 +25,7 @@
 #ifndef MOT_ENGINE_H
 #define MOT_ENGINE_H
 
-#include <stdint.h>
+#include <cstdint>
 #include <map>
 #include <string>
 #include <queue>
@@ -33,7 +33,7 @@
 #include <stack>
 #include "table.h"
 #include "affinity.h"
-#include "commit_sequence_number.h"
+#include "icsn_manager.h"
 #include "checkpoint_manager.h"
 #include "utilities.h"
 #include "redo_log_handler.h"
@@ -44,7 +44,6 @@
 #include "surrogate_key_manager.h"
 #include "gc_context.h"
 #include "mot_atomic_ops.h"
-#include "inprocess_transactions.h"
 
 namespace MOT {
 class ConfigLoader;
@@ -52,6 +51,26 @@ class RedoLogHandler;
 
 /** @typedef CpSigFunc Callback for notifying envelope that engine finished checkpoint. */
 typedef void (*CpSigFunc)(void);
+
+/** @enum Transactional DDL execution phase constants. */
+enum class TxnDDLPhase {
+    /** @var Denotes transaction DDL execution. Emitted for each DDL operation within the transaction. */
+    TXN_DDL_PHASE_EXEC,
+
+    /** @var Denotes transaction DDL commit. Emitted only for the entire transaction. */
+    TXN_DDL_PHASE_COMMIT,
+
+    /**
+     * @var Denotes transaction DDL rollback. Emitted on the relation level for create table and create index, and also
+     * for the entire transaction.
+     */
+    TXN_DDL_PHASE_ROLLBACK,
+
+    TXN_DDL_PHASE_POST_COMMIT_CLEANUP
+};
+
+/** @typedef DDLSigFunc Callback for being notified of DDL events in MOT tables. */
+typedef void (*DDLSigFunc)(uint64_t relationId, DDLAccessType event, TxnDDLPhase txnDdlPhase);
 
 /**
  * @class MOTEngine
@@ -72,9 +91,7 @@ private:
     static MOTEngine* m_engine;
 
 public:
-    /**********************************************************************/
     // Initialization/Termination/Configuration API
-    /**********************************************************************/
     /**
      * @brief Creates the single MOT engine instance. Use this variant when you have no external configuration
      * loaders involved.
@@ -152,9 +169,7 @@ public:
         m_taskAffinity.Configure(cfg.m_numaNodes, cfg.m_coresPerCpu, cfg.m_taskAffinityMode);
     }
 
-    /**********************************************************************/
     // Misc API
-    /**********************************************************************/
     /** @brief Retrieves the session manager. */
     inline SessionManager* GetSessionManager()
     {
@@ -201,14 +216,30 @@ public:
     }
 
     /** @brief Retrieves the commit sequence number manager. */
-    inline CSNManager& GetCSNManager()
+    inline void SetCSNManager(ICSNManager* manager)
     {
-        return m_csnManager;
+        m_csnManager = manager;
+    }
+
+    /** @brief Retrieves the commit sequence number manager. */
+    inline ICSNManager& GetCSNManager()
+    {
+        return *m_csnManager;
     }
 
     inline uint64_t GetCurrentCSN()
     {
-        return m_csnManager.GetCurrentCSN();
+        return m_csnManager->GetCurrentCSN();
+    }
+
+    inline uint64_t GetNextCSN()
+    {
+        return m_csnManager->GetNextCSN();
+    }
+
+    inline uint64_t GetGcEpoch()
+    {
+        return m_csnManager->GetGcEpoch();
     }
 
     /** @brief Retrieves the transaction id manager. */
@@ -217,16 +248,21 @@ public:
         return m_txnIdManager;
     }
 
-    /**
-     * @brief Sets the CPU affinity of a thread.
-     * @param threadId The logical identifier of the thread.
-     * @param[out,opt] threadCore The resulting core identifier.
-     */
-    void SetAffinity(uint64_t threadId, uint32_t* threadCore = nullptr) const;
+    /** @brief Installs DDL event listener. */
+    inline void SetDDLCallback(DDLSigFunc ddlSigFunc)
+    {
+        m_ddlSigFunc = ddlSigFunc;
+    }
 
-    /**********************************************************************/
+    /** @brief Notify of DDL events to external listeners. */
+    inline void NotifyDDLEvent(uint64_t relationId, DDLAccessType event, TxnDDLPhase txnPhase) const
+    {
+        if (m_ddlSigFunc != nullptr) {
+            m_ddlSigFunc(relationId, event, txnPhase);
+        }
+    }
+
     // Logging/Checkpoint API
-    /**********************************************************************/
     inline CheckpointManager* GetCheckpointManager()
     {
         return m_checkpointManager;
@@ -303,9 +339,7 @@ public:
         return result;
     }
 
-    /**********************************************************************/
     // GC Context API
-    /**********************************************************************/
     inline GcManager* GetGcContext(uint32_t threadId)
     {
         return m_gcContext.GetGcContext(threadId);
@@ -316,17 +350,10 @@ public:
         return m_gcContext.SetGcContext(threadId, gcManager);
     }
 
-    /**********************************************************************/
     // Recovery API
-    /**********************************************************************/
     inline IRecoveryManager* GetRecoveryManager()
     {
         return m_recoveryManager;
-    }
-
-    inline InProcessTransactions& GetInProcessTransactions()
-    {
-        return m_inProcessTransactions;
     }
 
     inline bool CreateRecoverySessionContext()
@@ -351,29 +378,43 @@ public:
     inline void DestroyRecoverySessionContext()
     {
         SessionContext* ctx = MOT_GET_CURRENT_SESSION_CONTEXT();
-        MOT_ASSERT(ctx);
         if (ctx != nullptr) {
             m_sessionManager->DestroySessionContext(ctx);
         }
         OnCurrentThreadEnding();
     }
 
+    inline void SetRecoveryStatus(bool value)
+    {
+        MOT_ATOMIC_STORE(m_recovering, value);
+    }
+
+    inline void SetRecoveryCleanupStatus(bool value)
+    {
+        MOT_ATOMIC_STORE(m_recoveringCleanup, value);
+    }
+
     inline bool StartRecovery()
     {
-        m_recovering = true;
+        SetRecoveryStatus(true);
         if (!CreateRecoverySessionContext()) {
             return false;
         }
         MOT_ASSERT(m_recoveryManager);
-        return m_recoveryManager->RecoverDbStart();
+        if (!m_recoveryManager->RecoverDbStart()) {
+            return false;
+        }
+        return true;
     }
 
     inline bool EndRecovery()
     {
         MOT_ASSERT(m_recoveryManager);
+        SetRecoveryCleanupStatus(true);
         bool status = m_recoveryManager->RecoverDbEnd();
         DestroyRecoverySessionContext();
-        m_recovering = false;
+        SetRecoveryCleanupStatus(false);
+        SetRecoveryStatus(false);
         return status;
     }
 
@@ -382,9 +423,12 @@ public:
         return m_recovering;
     }
 
-    /**********************************************************************/
+    bool IsRecoveryPerformingCleanup() const
+    {
+        return MOT_ATOMIC_LOAD(m_recoveringCleanup);
+    }
+
     // Memory Limit API
-    /**********************************************************************/
     /** @brief Queries if soft memory limit was reached. */
     inline bool IsSoftMemoryLimitReached() const
     {
@@ -407,20 +451,20 @@ public:
      * @brief Retrieves the current memory consumption (on all chunk pools).
      * @return The total memory consumption in bytes or zero if failed.
      */
-    uint64_t GetCurrentMemoryConsumptionBytes();
+    uint64_t GetCurrentMemoryConsumptionBytes() const;
 
     /** @brief Retrieves the configured maximum memory consumption (on all chunk pools). */
-    uint64_t GetHardMemoryLimitBytes();
+    uint64_t GetHardMemoryLimitBytes() const;
 
 private:
     /** @brief Safe cleanup of all Initialized resources. */
     void Destroy();
 
     /** @brief Print startup information. */
-    void PrintCurrentWorkingDirectory();
+    void PrintCurrentWorkingDirectory() const;
 
     /** @brief Print startup information. */
-    void PrintSystemInfo();
+    void PrintSystemInfo() const;
 
     /**
      * @brief Initializes all core services in the engine.
@@ -518,6 +562,9 @@ private:
     /** @var Specifies whether the engine is in recovery mode. */
     bool m_recovering;
 
+    /** @var Specifies whether the engine is in recovery mode and performing final cleanups. */
+    bool m_recoveringCleanup;
+
     /** @var Auxiliary structure to compute affinity for user sessions (when thread-pool is off). */
     Affinity m_sessionAffinity;
 
@@ -525,7 +572,7 @@ private:
     Affinity m_taskAffinity;
 
     /** @var The commit sequence number handler (CSN). */
-    CSNManager m_csnManager;
+    ICSNManager* m_csnManager;
 
     /** @var The transaction id manager. */
     TransactionIdManager m_txnIdManager;
@@ -557,8 +604,8 @@ private:
     /** @var The checkpoint manager. */
     CheckpointManager* m_checkpointManager;
 
-    /** @var The In-ProcessTransactions container. */
-    InProcessTransactions m_inProcessTransactions;
+    /** @var DDL event */
+    DDLSigFunc m_ddlSigFunc;
 
     // record initialization failure point, so that Destroy can be called at any point of failure
     enum InitPhase {
@@ -575,6 +622,7 @@ private:
         INIT_THREAD_ID_POOL_PHASE,
         INIT_CONNECTION_ID_POOL_PHASE,
         INIT_LOADER_THREAD_ID_PHASE,
+        INIT_LOADER_NODE_ID_PHASE,
         INIT_STATISTICS_PHASE,
         INIT_MM_PHASE,
         INIT_SESSION_MANAGER_PHASE,
@@ -582,14 +630,15 @@ private:
         INIT_SURROGATE_KEY_MANAGER_PHASE,
         INIT_GC_PHASE,
         INIT_DEBUG_UTILS,
+        INIT_CSN_MANAGER,
         INIT_CORE_DONE
     };
     stack<InitCorePhase> m_initCoreStack;
 
     enum InitAppPhase {
         INIT_APP_START,
-        INIT_RECOVERY_MANAGER_PHASE,
         INIT_REDO_LOG_HANDLER_PHASE,
+        INIT_RECOVERY_MANAGER_PHASE,
         INIT_CHECKPOINT_MANAGER_PHASE,
         INIT_APP_DONE
     };
@@ -622,7 +671,7 @@ inline Affinity& GetTaskAffinity()
 }
 
 /** @brief Retrieves the CSN manager. */
-inline CSNManager& GetCSNManager()
+inline ICSNManager& GetCSNManager()
 {
     return MOTEngine::GetInstance()->GetCSNManager();
 }

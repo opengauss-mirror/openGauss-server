@@ -9702,7 +9702,9 @@ void StartupXLOG(void)
     /*
      * Recover MOT
      */
-    MOTRecover();
+    if (!IsInitdb) {
+        MOTRecover();
+    }
 #endif
 
     /* initialize shared memory variables from the checkpoint record */
@@ -10879,7 +10881,9 @@ void StartupXLOG(void)
     /*
      * Cleanup MOT recovery
      */
-    MOTRecoveryDone();
+    if (!IsInitdb) {
+        MOTRecoveryDone();
+    }
 #endif
 }
 

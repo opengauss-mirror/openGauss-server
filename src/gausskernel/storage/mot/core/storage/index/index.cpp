@@ -23,6 +23,7 @@
  */
 
 #include "index.h"
+#include "index_defs.h"
 #include "row.h"
 #include "sentinel.h"
 #include "object_pool_compact.h"
@@ -135,7 +136,8 @@ void Index::BuildKey(Table* table, const Row* row, Key* key)
     securec_check(erc, "\0", "\0");
     // Need to verify we copy secondary index keys
     if (IsFakePrimary()) {
-        key->CpKey(const_cast<uint8_t*>(row->GetSurrogateKeyBuff()), m_keyLength);
+        uint64_t surrogateprimaryKey = row->GetSurrogateKey();
+        key->CpKey((uint8_t*)(&surrogateprimaryKey), m_keyLength);
     } else if (row->IsInternalKey()) {
         buf = (const_cast<Row*>(row))->GetInternalKeyBuff(GetIndexOrder());
         key->CpKey(buf, m_keyLength);
@@ -143,12 +145,19 @@ void Index::BuildKey(Table* table, const Row* row, Key* key)
         for (int i = 0; i < m_numKeyFields; i++) {
             Column* col = table->GetField(m_columnKeyFields[i]);
 
-            if (BITMAP_GET(data, (col->m_id - 1))) {
+            if (!col->GetIsCommitted() && row->GetTable() != table) {
+                if (col->m_hasDefault) {
+                    (void)col->PackKey(buf + offset, col->m_defValue, col->m_defSize);
+                } else {
+                    erc = memset_s(buf + offset, m_keyLength - offset, 0x00, m_lengthKeyFields[i]);
+                    securec_check(erc, "\0", "\0");
+                }
+            } else if (BITMAP_GET(data, (col->m_id - 1))) {
                 uintptr_t val = 0;
                 size_t len = 0;
 
                 col->Unpack(data, &val, len);
-                col->PackKey(buf + offset, val, len);
+                (void)col->PackKey(buf + offset, val, len);
             } else {
                 MOT_ASSERT((offset + m_lengthKeyFields[i]) <= m_keyLength);
                 // NOTE: we should consider different data types and fill NULL value according to a data type
@@ -161,7 +170,7 @@ void Index::BuildKey(Table* table, const Row* row, Key* key)
 
     if (!m_unique) {
         uint64_t rowId = row->GetRowId();
-        const_cast<Key*>(key)->FillValue(reinterpret_cast<const uint8_t*>(&rowId),
+        (void)const_cast<Key*>(key)->FillValue(reinterpret_cast<const uint8_t*>(&rowId),
             NON_UNIQUE_INDEX_SUFFIX_LEN,
             m_keyLength - NON_UNIQUE_INDEX_SUFFIX_LEN);
     }
@@ -179,7 +188,7 @@ void Index::BuildErrorMsg(Table* table, const Row* row, char* destBuf, size_t le
     destBuf[offset++] = '(';
 
     for (int i = 0; i < m_numKeyFields; i++) {
-        Column* col = table->GetField(m_columnKeyFields[i]);
+        Column* col = m_table->GetField(m_columnKeyFields[i]);
         erc = memcpy_s(destBuf + offset, len - offset, col->m_name, col->m_nameLen);
         securec_check(erc, "\0", "\0");
         offset += col->m_nameLen;
@@ -192,9 +201,17 @@ void Index::BuildErrorMsg(Table* table, const Row* row, char* destBuf, size_t le
     destBuf[offset++] = '(';
 
     for (int i = 0; i < m_numKeyFields; i++) {
-        Column* col = table->GetField(m_columnKeyFields[i]);
+        Column* col = m_table->GetField(m_columnKeyFields[i]);
 
-        if (BITMAP_GET(data, (col->m_id - 1))) {
+        if (!col->GetIsCommitted() && row->GetTable() != table) {
+            if (col->m_hasDefault) {
+                offset += col->PrintValue(data, destBuf + offset, len - offset, true);
+            } else {
+                erc = snprintf_s(destBuf, len - offset, 4, "NULL");
+                securec_check_ss(erc, "\0", "\0");
+                offset += erc;
+            }
+        } else if (BITMAP_GET(data, (col->m_id - 1))) {
             offset += col->PrintValue(data, destBuf + offset, len - offset);
         } else {
             erc = snprintf_s(destBuf, len - offset, 4, "NULL");
@@ -208,12 +225,16 @@ void Index::BuildErrorMsg(Table* table, const Row* row, char* destBuf, size_t le
     destBuf[offset] = 0;
 }
 
-void Index::Truncate(bool isDrop)
+RC Index::Truncate(bool isDrop)
 {
     ObjAllocInterface::FreeObjPool(&m_keyPool);
     ObjAllocInterface::FreeObjPool(&m_sentinelPool);
+    ObjAllocInterface::FreeObjPool(&m_sSentinelVersionPool);
 
-    this->ReInitIndex();
+    RC res = this->ReInitIndex(isDrop);
+    if (res != RC_OK) {
+        return res;
+    }
 
     if (!isDrop) {
         m_keyPool = ObjAllocInterface::GetObjPool(sizeof(Key) + ALIGN8(m_keyLength), false);
@@ -222,21 +243,39 @@ void Index::Truncate(bool isDrop)
                 "Truncate Index",
                 "Failed to allocate key pool for index %s after truncation",
                 m_name.c_str());
+            return RC_MEMORY_ALLOCATION_ERROR;
         }
-        m_sentinelPool = ObjAllocInterface::GetObjPool(sizeof(Sentinel), false);
+        if (m_indexOrder == IndexOrder::INDEX_ORDER_PRIMARY) {
+            m_sentinelPool = ObjAllocInterface::GetObjPool(sizeof(PrimarySentinel), false);
+        } else {
+            if (m_unique) {
+                m_sSentinelVersionPool = ObjAllocInterface::GetObjPool(sizeof(PrimarySentinelNode), false);
+                if (m_sSentinelVersionPool == nullptr) {
+                    MOT_REPORT_ERROR(MOT_ERROR_OOM,
+                        "Truncate Index",
+                        "Failed to allocate sentinel objects pool for index %s after truncation",
+                        m_name.c_str());
+                }
+                m_sentinelPool = ObjAllocInterface::GetObjPool(sizeof(SecondarySentinelUnique), false);
+            } else {
+                m_sentinelPool = ObjAllocInterface::GetObjPool(sizeof(SecondarySentinel), false);
+            }
+        }
         if (m_sentinelPool == nullptr) {
             MOT_REPORT_ERROR(MOT_ERROR_OOM,
                 "Truncate Index",
                 "Failed to allocate sentinel pool for index %s after truncation",
                 m_name.c_str());
+            return RC_MEMORY_ALLOCATION_ERROR;
         }
     }
+    return RC_OK;
 }
 
-bool Index::IndexInsert(Sentinel*& outputSentinel, const Key* key, uint32_t pid, RC& rc)
+bool Index::IndexInsert(Sentinel*& outputSentinel, const Key* key, uint32_t pid, RC& rc, bool isRecovery)
 {
     bool inserted = false;
-    Sentinel* sentinel = m_sentinelPool->Alloc<Sentinel>();
+    Sentinel* sentinel = SentinelAlloc();
     if (unlikely(sentinel == nullptr)) {
         MOT_REPORT_ERROR(MOT_ERROR_OOM,
             "Index Insert",
@@ -248,37 +287,50 @@ bool Index::IndexInsert(Sentinel*& outputSentinel, const Key* key, uint32_t pid,
     sentinel->Init(this, nullptr);
 
     MOT_ASSERT(sentinel->GetCounter() == 1);
-    if (m_indexOrder == IndexOrder::INDEX_ORDER_PRIMARY) {
-        sentinel->SetPrimaryIndex();
-    }
+    sentinel->SetIndexOrder(m_indexOrder);
 
     bool retryInsert = true;
-
     while (retryInsert) {
         outputSentinel = IndexInsertImpl(key, sentinel, inserted, pid);
         // sync between rollback/delete and insert
-        if (inserted == false) {
+        if (!inserted) {
             if (unlikely(outputSentinel == nullptr)) {
                 MOT_REPORT_ERROR(
                     MOT_ERROR_OOM, "Index Insert", "Failed to insert sentinel to index %s", m_name.c_str());
                 rc = RC_MEMORY_ALLOCATION_ERROR;
-                m_sentinelPool->Release<Sentinel>(sentinel);
-                sentinel = nullptr;
+                SentinelRelease(sentinel);
                 return false;
             }
 
+            if (outputSentinel->IsCounterReachedSoftLimit() and isRecovery == false) {
+                if (GetIndexOrder() == IndexOrder::INDEX_ORDER_PRIMARY) {
+                    Row* row = outputSentinel->GetData();
+                    if (row) {
+                        if (row->IsRowDeleted() == false) {
+                            rc = RC_UNIQUE_VIOLATION;
+                            retryInsert = false;
+                            continue;
+                        }
+                    }
+                } else {
+                    rc = RC_UNIQUE_VIOLATION;
+                    retryInsert = false;
+                    continue;
+                }
+            }
             // Spin if the counter is 0 - aborting in parallel or sentinel is marks for commit
-            if (outputSentinel->RefCountUpdate(INC, pid) == RC_OK)
+            if (outputSentinel->RefCountUpdate(INC) == RC_OK) {
                 retryInsert = false;
+            }
         } else {
             retryInsert = false;
         }
     }
 
-    if (inserted == false) {
+    if (!inserted) {
         MOT_ASSERT(outputSentinel != sentinel);
         // Failed sentinels return to the pool
-        m_sentinelPool->Release<Sentinel>(sentinel);
+        SentinelRelease(sentinel);
         return false;
     } else {
         // I am the owner of the inserted sentinel counter = 1
@@ -292,8 +344,9 @@ bool Index::IndexInsert(Sentinel*& outputSentinel, const Key* key, uint32_t pid,
 Sentinel* Index::IndexInsert(const Key* key, Row* row, uint32_t pid)
 {
     bool inserted = false;
+    PrimarySentinelNode* node = nullptr;
     Sentinel* currSentinel = nullptr;
-    Sentinel* sentinel = m_sentinelPool->Alloc<Sentinel>();
+    Sentinel* sentinel = SentinelAlloc();
     if (unlikely(sentinel == nullptr)) {
         MOT_REPORT_ERROR(MOT_ERROR_OOM,
             "Index Insert",
@@ -301,31 +354,46 @@ Sentinel* Index::IndexInsert(const Key* key, Row* row, uint32_t pid)
             m_name.c_str());
         return nullptr;
     }
-
+    if (GetIndexOrder() == IndexOrder::INDEX_ORDER_SECONDARY_UNIQUE) {
+        node = SentinelNodeAlloc();
+        if (node == nullptr) {
+            MOT_REPORT_ERROR(MOT_ERROR_OOM, "Sentinel node", "Failed to create new sentinel entry");
+            SentinelRelease(sentinel);
+            return nullptr;
+        }
+    }
     sentinel->Init(this, nullptr);
     sentinel->UnSetDirty();
     currSentinel = IndexInsertImpl(key, sentinel, inserted, pid);
     if (currSentinel != nullptr) {
         // no need to report to full error stack
         SetLastError(MOT_ERROR_UNIQUE_VIOLATION, MOT_SEVERITY_NORMAL);
-        m_sentinelPool->Release<Sentinel>(sentinel);
-        sentinel = nullptr;
+        SentinelRelease(sentinel);
+        if (GetIndexOrder() == IndexOrder::INDEX_ORDER_SECONDARY_UNIQUE) {
+            SentinelNodeRelease(node);
+        }
         return nullptr;
     } else {
-        if (inserted == false) {
+        if (!inserted) {
             MOT_REPORT_ERROR(MOT_ERROR_OOM, "Index Insert", "Failed to insert sentinel to index %s", m_name.c_str());
-            m_sentinelPool->Release<Sentinel>(sentinel);
-            sentinel = nullptr;
+            SentinelRelease(sentinel);
+            if (GetIndexOrder() == IndexOrder::INDEX_ORDER_SECONDARY_UNIQUE) {
+                SentinelNodeRelease(node);
+            }
             return nullptr;
         }
 
+        sentinel->SetIndexOrder(m_indexOrder);
         if (GetIndexOrder() == IndexOrder::INDEX_ORDER_PRIMARY) {
-            sentinel->SetPrimaryIndex();
             sentinel->SetNextPtr(row);
             row->SetPrimarySentinel(sentinel);
-        } else {
+        } else if (GetIndexOrder() == IndexOrder::INDEX_ORDER_SECONDARY) {
             MOT_ASSERT(row->GetPrimarySentinel() != nullptr);
             sentinel->SetNextPtr(row->GetPrimarySentinel());
+        } else {
+            MOT_ASSERT(node != nullptr);
+            node->Init(0, Sentinel::SENTINEL_INIT_CSN, row->GetPrimarySentinel());
+            sentinel->SetNextPtr(node);
         }
         MOT_ASSERT(sentinel->IsCommited() == true);
         return sentinel;
@@ -341,7 +409,7 @@ Row* Index::IndexRead(const Key* key, uint32_t pid) const
     Sentinel* sentinel = IndexReadImpl(key, pid);
     if (sentinel != nullptr) {
         row = sentinel->GetData();
-        if (row == nullptr || row->IsAbsentRow())
+        if (row == nullptr || row->IsRowDeleted())
             row = nullptr;
     }
 
@@ -360,18 +428,15 @@ Sentinel* Index::IndexReadHeader(const Key* key, uint32_t pid) const
 Sentinel* Index::IndexRemove(const Key* key, uint32_t pid)
 {
     Sentinel* sentinel = IndexRemoveImpl(key, pid);
+
     return sentinel;
 }
 
 void Index::Compact(Table* table, uint32_t pid)
 {
     IndexIterator* it = nullptr;
-    char ixPrefix[256];
     char sentinelPrefix[256];
-    errno_t erc = snprintf_s(ixPrefix, sizeof(ixPrefix), sizeof(ixPrefix) - 1, "%s(key pool)", m_name.c_str());
-    securec_check_ss(erc, "\0", "\0");
-    ixPrefix[erc] = 0;
-    erc = snprintf_s(
+    errno_t erc = snprintf_s(
         sentinelPrefix, sizeof(sentinelPrefix), sizeof(sentinelPrefix) - 1, "%s(sentinel pool)", m_name.c_str());
     securec_check_ss(erc, "\0", "\0");
     sentinelPrefix[erc] = 0;
@@ -386,6 +451,11 @@ void Index::Compact(Table* table, uint32_t pid)
             return;
         }
 
+        // return if empty
+        if (!it->IsValid()) {
+            break;
+        }
+
         if (m_indexOrder == IndexOrder::INDEX_ORDER_PRIMARY) {
             char tabPrefix[256];
             erc = snprintf_s(
@@ -396,33 +466,85 @@ void Index::Compact(Table* table, uint32_t pid)
 
             chRow.StartCompaction();
 
-            if (!chRow.IsCompactionNeeded()) {
-                break;
-            }
-
-            // return if empty
-            if (it == nullptr || !it->IsValid()) {
-                break;
-            }
-
-            // do compaction
-            while (it->IsValid()) {
-                Sentinel* ps = it->GetPrimarySentinel();
-                Row* row = ps->GetData();
-                if (row != nullptr) {
-                    Row* newRow = chRow.CompactObj<Row>(row);
-                    if (newRow != nullptr) {
-                        ps->SetNextPtr(newRow);
+            if (chRow.IsCompactionNeeded()) {
+                // do compaction
+                while (it->IsValid()) {
+                    PrimarySentinel* ps = static_cast<PrimarySentinel*>(it->GetPrimarySentinel());
+                    Row* head = ps->GetData();
+                    Row* next = nullptr;
+                    if (head != nullptr and !head->IsRowDeleted()) {
+                        next = head->GetNextVersion();
+                        Row* newHead = chRow.CompactObj<Row>(head);
+                        if (newHead != nullptr) {
+                            ps->SetNextPtr(newHead);
+                            head = newHead;
+                            head->SetNextVersion(nullptr);
+                        }
+                        // Traverse on next
+                        Row* tmp = next;
+                        while (tmp) {
+                            if (tmp->IsRowDeleted()) {
+                                head->SetNextVersion(tmp);
+                                head = tmp;
+                                next = next->GetNextVersion();
+                                tmp = next;
+                                continue;
+                            }
+                            next = next->GetNextVersion();
+                            Row* newRow = chRow.CompactObj<Row>(tmp);
+                            if (newRow != nullptr) {
+                                head->SetNextVersion(newRow);
+                                head = newRow;
+                            } else {
+                                head->SetNextVersion(tmp);
+                                head = tmp;
+                            }
+                            tmp = next;
+                        }
                     }
+
+                    it->Next();
                 }
-                it->Next();
             }
 
             // end compaction
             chRow.EndCompaction();
+
+            // Compact TombStone Pool
+            erc = snprintf_s(tabPrefix,
+                sizeof(tabPrefix),
+                sizeof(tabPrefix) - 1,
+                "%s(tombstone pool)",
+                table->GetTableName().c_str());
+            securec_check_ss(erc, "\0", "\0");
+            tabPrefix[erc] = 0;
+            CompactHandler chTombStone(table->m_tombStonePool, tabPrefix);
+            chTombStone.StartCompaction(CompactTypeT::COMPACT_SIMPLE);
+            chTombStone.EndCompaction();
         }
 
         chSentinel.EndCompaction();
+
+        if (m_sSentinelVersionPool != nullptr) {
+            erc = snprintf_s(sentinelPrefix,
+                sizeof(sentinelPrefix),
+                sizeof(sentinelPrefix) - 1,
+                "%s(sentinel version pool)",
+                m_name.c_str());
+            securec_check_ss(erc, "\0", "\0");
+            sentinelPrefix[erc] = 0;
+            CompactHandler chSentinelVersion(m_sSentinelVersionPool, sentinelPrefix);
+            chSentinelVersion.StartCompaction(CompactTypeT::COMPACT_SIMPLE);
+            chSentinelVersion.EndCompaction();
+        }
+
+        erc = snprintf_s(
+            sentinelPrefix, sizeof(sentinelPrefix), sizeof(sentinelPrefix) - 1, "%s(key pool)", m_name.c_str());
+        securec_check_ss(erc, "\0", "\0");
+        sentinelPrefix[erc] = 0;
+        CompactHandler chKey(m_keyPool, sentinelPrefix);
+        chKey.StartCompaction(CompactTypeT::COMPACT_SIMPLE);
+        chKey.EndCompaction();
     } while (false);
 
     if (it != nullptr) {
@@ -431,29 +553,37 @@ void Index::Compact(Table* table, uint32_t pid)
     }
 }
 
-uint64_t Index::GetIndexSize()
+uint64_t Index::GetIndexSize(uint64_t& netTotal)
 {
-    uint64_t res;
-    uint64_t netto;
-
     PoolStatsSt stats;
+
     errno_t erc = memset_s(&stats, sizeof(PoolStatsSt), 0, sizeof(PoolStatsSt));
     securec_check(erc, "\0", "\0");
     stats.m_type = PoolStatsT::POOL_STATS_ALL;
-
     m_keyPool->GetStats(stats);
-    res = stats.m_poolCount * stats.m_poolGrossSize;
-    netto = (stats.m_totalObjCount - stats.m_freeObjCount) * stats.m_objSize;
+    m_keyPool->PrintStats(stats, "Key Pool", LogLevel::LL_INFO);
+    uint64_t res = stats.m_poolCount * stats.m_poolGrossSize;
+    netTotal = (stats.m_totalObjCount - stats.m_freeObjCount) * stats.m_objSize;
 
     erc = memset_s(&stats, sizeof(PoolStatsSt), 0, sizeof(PoolStatsSt));
     securec_check(erc, "\0", "\0");
     stats.m_type = PoolStatsT::POOL_STATS_ALL;
-
     m_sentinelPool->GetStats(stats);
+    m_sentinelPool->PrintStats(stats, "Sentinel Pool", LogLevel::LL_INFO);
     res += stats.m_poolCount * stats.m_poolGrossSize;
-    netto += (stats.m_totalObjCount - stats.m_freeObjCount) * stats.m_objSize;
+    netTotal += (stats.m_totalObjCount - stats.m_freeObjCount) * stats.m_objSize;
 
-    MOT_LOG_INFO("Index %s memory size: gross: %lu, netto: %lu", m_name.c_str(), res, netto);
+    if (m_sSentinelVersionPool) {
+        erc = memset_s(&stats, sizeof(PoolStatsSt), 0, sizeof(PoolStatsSt));
+        securec_check(erc, "\0", "\0");
+        stats.m_type = PoolStatsT::POOL_STATS_ALL;
+        m_sSentinelVersionPool->GetStats(stats);
+        m_sSentinelVersionPool->PrintStats(stats, "Sentinel Version Pool", LogLevel::LL_INFO);
+        res += stats.m_poolCount * stats.m_poolGrossSize;
+        netTotal += (stats.m_totalObjCount - stats.m_freeObjCount) * stats.m_objSize;
+    }
+
+    MOT_LOG_INFO("Index %s memory size - Gross: %lu, NetTotal: %lu", m_name.c_str(), res, netTotal);
     return res;
 }
 
@@ -474,10 +604,25 @@ Index* Index::CloneEmpty()
     clonedIndex->m_name = m_name;
     clonedIndex->m_table = m_table;
     clonedIndex->m_keyPool = ObjAllocInterface::GetObjPool(sizeof(Key) + ALIGN8(m_keyLength), false);
-    clonedIndex->m_sentinelPool = ObjAllocInterface::GetObjPool(sizeof(Sentinel), false);
+    if (m_indexOrder == IndexOrder::INDEX_ORDER_PRIMARY) {
+        clonedIndex->m_sentinelPool = ObjAllocInterface::GetObjPool(sizeof(PrimarySentinel), false);
+    } else {
+        if (m_unique) {
+            clonedIndex->m_sSentinelVersionPool = ObjAllocInterface::GetObjPool(sizeof(PrimarySentinelNode), false);
+            if (clonedIndex->m_sSentinelVersionPool == nullptr) {
+                MOT_REPORT_ERROR(
+                    MOT_ERROR_OOM, "Clone Index", "Failed to allocate sentinel object pool for cloned index");
+                delete clonedIndex;
+                return nullptr;
+            }
+            clonedIndex->m_sentinelPool = ObjAllocInterface::GetObjPool(sizeof(SecondarySentinelUnique), false);
+        } else {
+            clonedIndex->m_sentinelPool = ObjAllocInterface::GetObjPool(sizeof(SecondarySentinel), false);
+        }
+    }
     clonedIndex->m_fake = m_fake;
     clonedIndex->m_indexId = m_indexId;
-    clonedIndex->m_isCommited = m_isCommited;
+    clonedIndex->m_isCommited = false;
     clonedIndex->m_numKeyFields = m_numKeyFields;
     clonedIndex->m_unique = m_unique;
 
@@ -512,14 +657,26 @@ Index* Index::CloneEmpty()
     return clonedIndex;
 }
 
-MOTIndexArr::MOTIndexArr(MOT::Table* table)
+void Index::ReclaimSentinel(Sentinel* sentinel)
 {
-    m_numIndexes = 0;
-    m_table = table;
-    m_rowPool = table->GetRowPool();
-    errno_t erc = memset_s(m_indexArr, MAX_NUM_INDEXES * sizeof(MOT::Index*), 0, MAX_NUM_INDEXES * sizeof(MOT::Index*));
-    securec_check(erc, "\0", "\0");
-    erc = memset_s(m_origIx, MAX_NUM_INDEXES * sizeof(uint16_t), 0, MAX_NUM_INDEXES * sizeof(uint16_t));
-    securec_check(erc, "\0", "\0");
+    Row* r = nullptr;
+    switch (GetIndexOrder()) {
+        case IndexOrder::INDEX_ORDER_PRIMARY:
+            r = sentinel->GetData();
+            while (r) {
+                Row* reclaimRow = r;
+                r = r->GetNextVersion();
+                reclaimRow->GetTable()->DestroyRow(reclaimRow);
+            }
+            break;
+        case IndexOrder::INDEX_ORDER_SECONDARY:
+            break;
+        case IndexOrder::INDEX_ORDER_SECONDARY_UNIQUE:
+            static_cast<SecondarySentinelUnique*>(sentinel)->ReleaseAllNodes();
+            break;
+    }
+
+    m_sentinelPool->Release(sentinel);
 }
+
 }  // namespace MOT

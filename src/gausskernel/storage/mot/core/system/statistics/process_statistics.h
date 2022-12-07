@@ -60,20 +60,20 @@ public:
      * @brief Derives classes should react to a notification that configuration changed. New
      * configuration is accessible via the ConfigManager.
      */
-    virtual void OnConfigChange();
+    void OnConfigChange() override;
 
 protected:
     /**
      * @brief Override default behavior, and print current process status summary.
      */
-    virtual void PrintStatisticsEx();
+    void PrintStatisticsEx() override;
 
 private:
     /** @brief Constructor. */
     ProcessStatisticsProvider();
 
     /** @brief Destructor. */
-    virtual ~ProcessStatisticsProvider();
+    ~ProcessStatisticsProvider() override;
 
     /** @brief Registers the provider in the manager. */
     void RegisterProvider();
@@ -114,7 +114,7 @@ private:
      * @param sysCpu Total CPU usage count in kernel-space.
      * @param userCpu Total CPU usage count in user-space.
      */
-    void SnapshotCpuStats(clock_t& cpu, clock_t& sysCpu, clock_t& userCpu);
+    void SnapshotCpuStats(clock_t& cpu, clock_t& sysCpu, clock_t& userCpu) const;
 
     /**
      * @brief Take a snapshot of memory and I/O counters for this process.
@@ -126,7 +126,7 @@ private:
      * @return True if operations succeeded and output data is valid, otherwise false.
      */
     bool SnapMemoryIOStats(
-        uint64_t& minorFaults, uint64_t& majorFfaults, uint64_t& inputOps, uint64_t& outputOps, uint64_t& maxRss);
+        uint64_t& minorFaults, uint64_t& majorFfaults, uint64_t& inputOps, uint64_t& outputOps, uint64_t& maxRss) const;
 
     /** @brief Prints memory usage statistics. */
     void PrintMemoryInfo();

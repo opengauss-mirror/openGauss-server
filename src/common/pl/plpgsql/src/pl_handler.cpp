@@ -1057,11 +1057,22 @@ Datum plpgsql_inline_handler(PG_FUNCTION_ARGS)
      * Connect to SPI manager
      */
     SPI_STACK_LOG("connect", NULL, NULL);
+#ifdef ENABLE_MOT
+    bool needSPIFinish = true;
+#endif
     rc = SPI_connect_ext(DestSPI, NULL, NULL, codeblock->atomic ? 0 : SPI_OPT_NONATOMIC);
     if (rc != SPI_OK_CONNECT) {
-        ereport(ERROR, (errmodule(MOD_PLSQL),
-                errcode(ERRCODE_SPI_CONNECTION_FAILURE),
-                errmsg("SPI_connect failed: %s when execute anonymous block.", SPI_result_code_string(rc))));
+#ifdef ENABLE_MOT
+        if (rc != SPI_ERROR_CONNECT) {
+#endif
+            ereport(ERROR, (errmodule(MOD_PLSQL),
+                    errcode(ERRCODE_SPI_CONNECTION_FAILURE),
+                    errmsg("SPI_connect failed: %s when execute anonymous block.", SPI_result_code_string(rc))));
+#ifdef ENABLE_MOT
+        } else {
+            needSPIFinish = false;
+        }
+#endif
     }
     PGSTAT_START_PLSQL_TIME_RECORD();
 
@@ -1188,11 +1199,17 @@ Datum plpgsql_inline_handler(PG_FUNCTION_ARGS)
      * Disconnect from SPI manager
      */
     SPI_STACK_LOG("finish", NULL, NULL);
-    if (((rc = SPI_finish()) != SPI_OK_FINISH)) {
-        ereport(ERROR, (errmodule(MOD_PLSQL),
-                errcode(ERRCODE_SPI_CONNECTION_FAILURE),
-                errmsg("SPI_finish failed: %s when execute anonymous block.", SPI_result_code_string(rc))));
+#ifdef ENABLE_MOT
+    if (needSPIFinish) {
+#endif
+        if (((rc = SPI_finish()) != SPI_OK_FINISH)) {
+            ereport(ERROR, (errmodule(MOD_PLSQL),
+                    errcode(ERRCODE_SPI_CONNECTION_FAILURE),
+                    errmsg("SPI_finish failed: %s when execute anonymous block.", SPI_result_code_string(rc))));
+        }
+#ifdef ENABLE_MOT
     }
+#endif
 
     return retval;
 }

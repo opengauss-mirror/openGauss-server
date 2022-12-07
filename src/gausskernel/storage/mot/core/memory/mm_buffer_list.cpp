@@ -58,7 +58,7 @@ extern "C" void MemBufferListDump(void* arg)
 
     MOT::StringBufferApply([bufferList](MOT::StringBuffer* stringBuffer) {
         MOT::MemBufferListToString(0, "Debug Dump", bufferList, stringBuffer);
-        fprintf(stderr, "%s", stringBuffer->m_buffer);
-        fflush(stderr);
+        (void)fprintf(stderr, "%s", stringBuffer->m_buffer);
+        (void)fflush(stderr);
     });
 }

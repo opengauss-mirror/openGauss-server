@@ -50,16 +50,16 @@ SystemStatisticsProvider::SystemStatisticsProvider()
 void SystemStatisticsProvider::RegisterProvider()
 {
     if (m_enable) {
-        StatisticsManager::GetInstance().RegisterStatisticsProvider(this);
+        (void)StatisticsManager::GetInstance().RegisterStatisticsProvider(this);
     }
-    ConfigManager::GetInstance().AddConfigChangeListener(this);
+    (void)ConfigManager::GetInstance().AddConfigChangeListener(this);
 }
 
 SystemStatisticsProvider::~SystemStatisticsProvider()
 {
-    ConfigManager::GetInstance().RemoveConfigChangeListener(this);
+    (void)ConfigManager::GetInstance().RemoveConfigChangeListener(this);
     if (m_enable) {
-        StatisticsManager::GetInstance().UnregisterStatisticsProvider(this);
+        (void)StatisticsManager::GetInstance().UnregisterStatisticsProvider(this);
     }
 }
 
@@ -79,8 +79,7 @@ bool SystemStatisticsProvider::CreateInstance()
                 delete m_provider;
                 m_provider = nullptr;
             } else {
-                result = m_provider->SnapshotInitialMetrics();
-                if (!result) {
+                if (!m_provider->SnapshotInitialMetrics()) {
                     MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
                         "Load Statistics",
                         "Failed to take initial metrics snapshot in System Statistics Provider, aborting");
@@ -88,6 +87,7 @@ bool SystemStatisticsProvider::CreateInstance()
                     m_provider = nullptr;
                 } else {
                     m_provider->RegisterProvider();
+                    result = true;
                 }
             }
         }
@@ -120,9 +120,9 @@ void SystemStatisticsProvider::OnConfigChange()
     if (m_enable != GetGlobalConfiguration().m_enableSystemStatistics) {
         m_enable = GetGlobalConfiguration().m_enableSystemStatistics;
         if (m_enable) {
-            StatisticsManager::GetInstance().RegisterStatisticsProvider(this);
+            (void)StatisticsManager::GetInstance().RegisterStatisticsProvider(this);
         } else {
-            StatisticsManager::GetInstance().UnregisterStatisticsProvider(this);
+            (void)StatisticsManager::GetInstance().UnregisterStatisticsProvider(this);
         }
     }
 }
@@ -134,7 +134,7 @@ void SystemStatisticsProvider::PrintStatisticsEx()
 }
 
 bool SystemStatisticsProvider::SnapshotCpuStats(
-    uint64_t& totalUser, uint64_t& totalUserLow, uint64_t& totalSys, uint64_t& totalIdle)
+    uint64_t& totalUser, uint64_t& totalUserLow, uint64_t& totalSys, uint64_t& totalIdle) const
 {
     bool result = false;
     FILE* file = fopen("/proc/stat", "r");
@@ -152,7 +152,7 @@ bool SystemStatisticsProvider::SnapshotCpuStats(
         if (!result) {
             MOT_LOG_DEBUG("Failed to get system stats from /proc/stat: cpu line not found");
         }
-        fclose(file);
+        (void)fclose(file);
     } else {
         MOT_LOG_DEBUG("Failed to get system stats from /proc/stat: cannot open file for reading");
     }
@@ -165,10 +165,13 @@ bool SystemStatisticsProvider::SnapshotCpuStats(
     return result;
 }
 
-void SystemStatisticsProvider::PrintMemoryInfo()
+void SystemStatisticsProvider::PrintMemoryInfo() const
 {
     struct sysinfo memInfo;
-    sysinfo(&memInfo);
+    if (sysinfo(&memInfo) != 0) {
+        MOT_LOG_TRACE("Failed to retrieve sysinfo");
+        return;
+    }
 
     // total virtual memory in the system
     uint64_t totalVirtualMem = memInfo.totalram;
@@ -222,8 +225,8 @@ void SystemStatisticsProvider::PrintTotalCpuUsage()
             diffIdle = (totalIdle - m_lastTotalIdle);
             total = diffUser + diffUserLow + diffSys + diffIdle;
             if (total > 0) {
-                percentUser = ((double)(diffUser + diffUserLow)) / total * 100.0f;
-                percentSys = ((double)diffSys) / total * 100.0f;
+                percentUser = (((double)(diffUser + diffUserLow)) / total) * 100.0f;
+                percentSys = (((double)diffSys) / total) * 100.0f;
                 percent = percentUser + percentSys;
             }
         }
