@@ -892,7 +892,7 @@ compress_init(void)
 
     if (instance_config.compress_alg == LZ4_COMPRESS && instance_config.compress_level > 1)
     {
-        elog(WARNING, "Compression level will be set to 1 due to lz4 only supports level 1!");
+        elog(WARNING, "Compression level will be set to 1 due to lz4 only supports level 0 and 1!");
     }
 
     if (backup_subcmd == BACKUP_CMD)
