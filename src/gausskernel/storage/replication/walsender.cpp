@@ -6680,10 +6680,15 @@ static bool SendConfigFile(char *path)
         ereport(LOG, (errcode_for_file_access(), errmsg("could not stat file or directory \"%s\": %m", path)));
         return false;
     }
+    /**
+     * Get two locks for config file before making changes, please refer to 
+     * AlterSystemSetConfigFile() in guc.cpp for detailed explanations.
+     */
     if (get_file_lock(t_thrd.walsender_cxt.gucconf_lock_file, &filelock) != CODE_OK) {
         ereport(LOG, (errmsg("get lock failed when send gaussdb config file to the peer.")));
         return false;
     }
+    LWLockAcquire(ConfigFileLock, LW_EXCLUSIVE);
     PG_TRY();
     {
     opt_lines = read_guc_file(path);
@@ -6698,10 +6703,12 @@ static bool SendConfigFile(char *path)
     if (!read_guc_file_success) {
         /* if failed to read guc file, will log the error info in PG_CATCH(), no need to log again. */
         release_file_lock(&filelock);
+        LWLockRelease(ConfigFileLock);
         return false;
     }
     if (opt_lines == nullptr) {
         release_file_lock(&filelock);
+        LWLockRelease(ConfigFileLock);
         ereport(LOG, (errmsg("the config file has no data,please check it.")));
         return false;
     }
@@ -6723,6 +6730,7 @@ static bool SendConfigFile(char *path)
     pfree(temp_buf);
     temp_buf = NULL;
     release_file_lock(&filelock);
+    LWLockRelease(ConfigFileLock);
     /* Send the chunk as a CopyData message */
     (void)pq_putmessage_noblock('d', buf, len);
     pfree(buf);

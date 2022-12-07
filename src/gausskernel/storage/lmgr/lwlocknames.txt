@@ -136,3 +136,4 @@ SQLAdvisorLock 126
 AuditIndexFileLock 127
 GsStackLock 128
 DropArchiveSlotLock 129
+ConfigFileLock 130
