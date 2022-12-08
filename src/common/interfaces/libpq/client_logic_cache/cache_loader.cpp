@@ -259,15 +259,15 @@ void CacheLoader::load_search_path(const char *search_path, const char *user_nam
         return;
     }
 
-	/*
-	 * spilit paths into several path with ','
-	 * strip whitespace at both head and tail of each path
-	 * we are consistent with the back-end who calls SplitIdentifierString()
-	 *
-	 * e.g.
-	 *		spilit "a,b,, , c,d ,  e   "
-	 * 		into   {"a", "b", "c", "d", "e"}
-	 */
+    /*
+     * spilit paths into several path with ','
+     * strip whitespace at both head and tail of each path
+     * we are consistent with the back-end who calls SplitIdentifierString()
+     *
+     * e.g.
+     *		spilit "a,b,, , c,d ,  e   "
+     * 		into   {"a", "b", "c", "d", "e"}
+     */
     paths = search_path;
     path = paths;
     pathlen = 0;
