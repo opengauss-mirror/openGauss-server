@@ -339,6 +339,7 @@ test: gtt_function
 test: gtt_prepare
 test: gtt_parallel_1 gtt_parallel_2
 test: gtt_clean
+test: gtt_merge
 
 #openGauss synchronization test cases
 test: partiton_pathkey_col_plan partiton_pathkey_col_randomexec partiton_pathkey_row_plan partiton_pathkey_row_randomexec
