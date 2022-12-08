@@ -2587,7 +2587,8 @@ static char* pg_get_tabledef_worker(Oid tableoid)
 {
     StringInfoData buf;
     StringInfoData query;
-    const char* reltypename = NULL;
+    const char* reltypename = NULL; // pg_class reltype
+    char* relOfTypeName = NULL; // pg_class reloftype
     int actual_atts = 0;
     bool isnull = false;
     char* srvname = NULL;
@@ -2774,54 +2775,60 @@ static char* pg_get_tabledef_worker(Oid tableoid)
         reltypename, relname);
 
 
-    // get attribute info
-    actual_atts = get_table_attribute(tableoid, &buf, formatter, ft_frmt_clmn, cnt_ft_frmt_clmns, &tableinfo);
-
-    /*
-     * Fetch the constraint tuple from pg_constraint.  There may be more than
-     * one match, because constraints are not required to have unique names;
-     * if so, error out.
-     */
-    pg_constraint = heap_open(ConstraintRelationId, AccessShareLock);
-
-    ScanKeyInit(&skey[0], Anum_pg_constraint_conrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(tableoid));
-
-    scan = systable_beginscan(pg_constraint, ConstraintRelidIndexId, true, NULL, 1, skey);
-
-    while (HeapTupleIsValid(tuple = systable_getnext(scan))) {
-        Form_pg_constraint con = (Form_pg_constraint)GETSTRUCT(tuple);
-
-        if (con->contype == 'c' || con->contype == 'f') {
-            if (!con->convalidated) {
-                has_not_valid_check = true;
-                continue;
-            }
-
-            if (actual_atts == 0)
-                appendStringInfo(&buf, " (\n    ");
-            else
-                appendStringInfo(&buf, ",\n    ");
-
-            appendStringInfo(&buf, "CONSTRAINT %s ", quote_identifier(NameStr(con->conname)));
-            Oid conOid = HeapTupleGetOid(tuple);
-            appendStringInfo(&buf, "%s", pg_get_constraintdef_worker(conOid, false, 0));
-
-            actual_atts++;
-        } else if (tableinfo.autoinc_consoid == 0 &&
-            ConstraintSatisfyAutoIncrement(tuple, pg_constraint->rd_att, tableinfo.autoinc_attnum, con->contype)) {
-            tableinfo.autoinc_consoid = HeapTupleGetOid(tuple);
-            appendStringInfo(&buf, (actual_atts == 0) ? " (\n    " : ",\n    ");
-            appendStringInfo(&buf, "CONSTRAINT %s ", quote_identifier(NameStr(con->conname)));
-            appendStringInfo(&buf, "%s", pg_get_constraintdef_worker(tableinfo.autoinc_consoid, false, 0));
-            actual_atts++;
-        }
+    if (classForm->reloftype != 0) {
+        relOfTypeName = get_typename(classForm->reloftype);
+        appendStringInfo(&buf, " of %s", relOfTypeName);
     }
+    else {
+        // get attribute info
+        actual_atts = get_table_attribute(tableoid, &buf, formatter, ft_frmt_clmn, cnt_ft_frmt_clmns);
 
-    systable_endscan(scan);
-    heap_close(pg_constraint, AccessShareLock);
+        /*
+        * Fetch the constraint tuple from pg_constraint.  There may be more than
+        * one match, because constraints are not required to have unique names;
+        * if so, error out.
+        */
+        pg_constraint = heap_open(ConstraintRelationId, AccessShareLock);
 
-    if (actual_atts) {
-        appendStringInfo(&buf, "\n)");
+        ScanKeyInit(&skey[0], Anum_pg_constraint_conrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(tableoid));
+
+        scan = systable_beginscan(pg_constraint, ConstraintRelidIndexId, true, NULL, 1, skey);
+
+        while (HeapTupleIsValid(tuple = systable_getnext(scan))) {
+            Form_pg_constraint con = (Form_pg_constraint)GETSTRUCT(tuple);
+
+            if (con->contype == 'c' || con->contype == 'f') {
+                if (!con->convalidated) {
+                    has_not_valid_check = true;
+                    continue;
+                }
+
+                if (actual_atts == 0)
+                    appendStringInfo(&buf, " (\n    ");
+                else
+                    appendStringInfo(&buf, ",\n    ");
+
+                appendStringInfo(&buf, "CONSTRAINT %s ", quote_identifier(NameStr(con->conname)));
+                Oid conOid = HeapTupleGetOid(tuple);
+                appendStringInfo(&buf, "%s", pg_get_constraintdef_worker(conOid, false, 0));
+
+                actual_atts++;
+            } else if (tableinfo.autoinc_consoid == 0 &&
+                ConstraintSatisfyAutoIncrement(tuple, pg_constraint->rd_att, tableinfo.autoinc_attnum, con->contype)) {
+                tableinfo.autoinc_consoid = HeapTupleGetOid(tuple);
+                appendStringInfo(&buf, (actual_atts == 0) ? " (\n    " : ",\n    ");
+                appendStringInfo(&buf, "CONSTRAINT %s ", quote_identifier(NameStr(con->conname)));
+                appendStringInfo(&buf, "%s", pg_get_constraintdef_worker(tableinfo.autoinc_consoid, false, 0));
+                actual_atts++;
+            }
+        }
+
+        systable_endscan(scan);
+        heap_close(pg_constraint, AccessShareLock);
+
+        if (actual_atts) {
+            appendStringInfo(&buf, "\n)");
+        }
     }
 
     /* append  table info to buf */
