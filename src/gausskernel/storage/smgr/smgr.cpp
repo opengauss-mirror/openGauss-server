@@ -178,6 +178,23 @@ void smgrshutdown(int code, Datum arg)
     }
 }
 
+static uint32 RelFileNodeBackendHashWithoutOpt(const void* key, Size keySize)
+{
+    RelFileNodeBackend relFileNodeBackend = *(const RelFileNodeBackend*)key;
+    relFileNodeBackend.node.opt = 0;
+    return tag_hash((const void*)&relFileNodeBackend, keySize);
+}
+
+static int RelFileNodeBackendCompareWithoutOpt(const void* left, const void* right, Size keySize)
+{
+    Assert(left != NULL && right != NULL);
+    Assert(keySize == sizeof(RelFileNodeBackend));
+    const RelFileNodeBackend* leftRelBackend = (const RelFileNodeBackend*)left;
+    const RelFileNodeBackend* rightRelBackend = (const RelFileNodeBackend*)right;
+    /* we just care whether the result is 0 or not */
+    return RelFileNodeBackendEquals(*leftRelBackend, *rightRelBackend) ? 0 : 1;
+}
+
 /*
  *  smgropen() -- Return an SMgrRelation object, creating it if need be.
  *
@@ -204,16 +221,17 @@ SMgrRelation smgropen(const RelFileNode& rnode, BackendId backend, int col /* = 
         securec_check(rc, "", "");
         hashCtrl.keysize = sizeof(RelFileNodeBackend);
         hashCtrl.entrysize = sizeof(SMgrRelationData);
-        hashCtrl.hash = tag_hash;
+        hashCtrl.hash = RelFileNodeBackendHashWithoutOpt;
+        hashCtrl.match = RelFileNodeBackendCompareWithoutOpt;
         if (EnableLocalSysCache()) {
             hashCtrl.hcxt = t_thrd.lsc_cxt.lsc->lsc_mydb_memcxt;
             t_thrd.lsc_cxt.lsc->SMgrRelationHash = hash_create("smgr relation table", 400,
-                &hashCtrl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
+                &hashCtrl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT | HASH_COMPARE);
             dlist_init(&t_thrd.lsc_cxt.lsc->unowned_reln);
         } else {
             hashCtrl.hcxt = u_sess->cache_mem_cxt;
             u_sess->storage_cxt.SMgrRelationHash = hash_create("smgr relation table", 400,
-                &hashCtrl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
+                &hashCtrl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT | HASH_COMPARE);
             dlist_init(&u_sess->storage_cxt.unowned_reln);
         }
         
