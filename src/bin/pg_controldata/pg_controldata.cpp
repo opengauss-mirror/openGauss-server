@@ -239,7 +239,8 @@ int main(int argc, char* argv[])
     off_t ControlFileSize;
 
     static struct option long_options[] = {{"enable-dss", no_argument, NULL, 1},
-        {"socketpath", required_argument, NULL, 2}};
+        {"socketpath", required_argument, NULL, 2},
+        {NULL, 0, NULL, 0}};
 
     set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("pg_controldata"));
 
