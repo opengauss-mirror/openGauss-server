@@ -3853,6 +3853,7 @@ int ProcessStartupPacket(Port* port, bool SSLdone)
                         u_sess->proc_cxt.clientIsGsdump = true;
                         ereport(DEBUG5, (errmsg("gs_dump connected")));
                     } else if (strcmp(valptr, "gs_basebackup") == 0) {
+                        t_thrd.postmaster_cxt.senderToBuildStandby = true;
                         u_sess->proc_cxt.clientIsGsBasebackup = true;
                         ereport(LOG, (errmsg("gs_basebackup connected")));
                     } else if (strcmp(valptr, "gs_restore") == 0) {
