@@ -2781,7 +2781,7 @@ static char* pg_get_tabledef_worker(Oid tableoid)
     }
     else {
         // get attribute info
-        actual_atts = get_table_attribute(tableoid, &buf, formatter, ft_frmt_clmn, cnt_ft_frmt_clmns);
+        actual_atts = get_table_attribute(tableoid, &buf, formatter, ft_frmt_clmn, cnt_ft_frmt_clmns, &tableinfo);
 
         /*
         * Fetch the constraint tuple from pg_constraint.  There may be more than
