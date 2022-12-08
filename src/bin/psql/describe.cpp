@@ -2961,6 +2961,7 @@ error_return:
      */
     if (unlikely(uppercaseIsOn)) {
         printfPQExpBuffer(&buf, "set uppercase_attribute_name=on;");
+        PQclear(res);
         res = PSQLexec(buf.data, false);
     }
 #endif

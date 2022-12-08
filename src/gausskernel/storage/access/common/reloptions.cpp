@@ -2972,6 +2972,16 @@ bool is_cstore_option(char relkind, Datum reloptions)
     return result;
 }
 
+bool ReadBoolFromDefElem(DefElem* defElem)
+{
+    bool result = false;
+    char *boolStr = defGetString(defElem);
+    if (!parse_bool_with_len(boolStr, strlen(boolStr), &result)) {
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("%s requires a Boolean value", defElem->defname)));
+    }
+    return result;
+}
+
 void SetOneOfCompressOption(DefElem* defElem, TableCreateSupport* tableCreateSupport)
 {
     auto defname = defElem->defname;
@@ -2985,9 +2995,9 @@ void SetOneOfCompressOption(DefElem* defElem, TableCreateSupport* tableCreateSup
     } else if (pg_strcasecmp(defname, "compress_level") == 0) {
         tableCreateSupport->compressLevel = true;
     } else if (pg_strcasecmp(defname, "compress_byte_convert") == 0) {
-        tableCreateSupport->compressByteConvert = defGetBoolean(defElem);
+        tableCreateSupport->compressByteConvert = ReadBoolFromDefElem(defElem);
     } else if (pg_strcasecmp(defname, "compress_diff_convert") == 0) {
-        tableCreateSupport->compressDiffConvert = defGetBoolean(defElem);
+        tableCreateSupport->compressDiffConvert = ReadBoolFromDefElem(defElem);
     }
 }
 

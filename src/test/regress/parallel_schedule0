@@ -956,3 +956,4 @@ test: builtin_func_13
 
 # test for slow_sql
 test: slow_sql
+test: alter_ctable_compress
