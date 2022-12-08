@@ -54,6 +54,9 @@ extern bool        smooth_checkpoint;
    it will be backuped up in external dirs  */
 extern parray *pgdata_nobackup_dir;
 
+/* list of logical replication slots */
+extern parray *logical_replslot;
+
 /* remote probackup options */
 extern char* remote_agent;
 
@@ -89,7 +92,7 @@ extern const char *pgdata_exclude_dir[];
 
 /* in backup.c */
 extern int do_backup(time_t start_time, pgSetBackupParams *set_backup_params,
-                     bool no_validate, bool no_sync, bool backup_logs);
+                     bool no_validate, bool no_sync, bool backup_logs, bool backup_replslots);
 extern BackupMode parse_backup_mode(const char *value);
 extern const char *deparse_backup_mode(BackupMode mode);
 extern void process_block_change(ForkNumber forknum, const RelFileNode rnode,
@@ -238,7 +241,8 @@ extern const char* deparse_compress_alg(int alg);
 /* in dir.c */
 extern void dir_list_file(parray *files, const char *root, bool exclude,
                           bool follow_symlink, bool add_root, bool backup_logs,
-                          bool skip_hidden, int external_dir_num, fio_location location);
+                          bool skip_hidden, int external_dir_num, fio_location location,
+                          bool backup_replslots = false);
 
 extern void create_data_directories(parray *dest_files,
                                         const char *data_dir,
@@ -431,7 +435,8 @@ extern int fio_send_file(const char *from_fullpath, const char *to_fullpath, FIL
                                                         pgFile *file, char **errormsg);
 
 extern void fio_list_dir(parray *files, const char *root, bool exclude, bool follow_symlink,
-                         bool add_root, bool backup_logs, bool skip_hidden, int external_dir_num);
+                         bool add_root, bool backup_logs, bool skip_hidden, int external_dir_num,
+                         bool backup_replslots = false);
 
 extern bool pgut_rmtree(const char *path, bool rmtopdir, bool strict);
 
