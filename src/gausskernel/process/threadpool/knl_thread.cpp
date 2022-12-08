@@ -1499,6 +1499,7 @@ static void knl_t_walsender_init(knl_t_walsender_context* walsender_cxt)
     walsender_cxt->standbyConnection = false;
     walsender_cxt->restoreLogicalLogHead = NULL;
     walsender_cxt->firstConfirmedFlush = InvalidXLogRecPtr;
+    walsender_cxt->timeoutCheckInternal = 0;
 }
 
 static void knl_t_tsearch_init(knl_t_tsearch_context* tsearch_cxt)
