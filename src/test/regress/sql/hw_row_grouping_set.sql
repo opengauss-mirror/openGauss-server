@@ -67,6 +67,17 @@ select a, b, grouping(a, b), sum(t1.v), max(t2.c) from row_gstest1 t1 join row_g
 -- check that functionally dependent cols are not nulled
 select a, d, grouping(a,b,c) from row_gstest3 group by grouping sets ((a,b), (a,c));
 
+-- check that distinct grouping columns are kept separate
+-- even if they are equal()
+explain (costs off)
+select g as alias1, g as alias2
+  from generate_series(1,3) g
+ group by alias1, rollup(alias2);
+
+select g as alias1, g as alias2
+  from generate_series(1,3) g
+ group by alias1, rollup(alias2);
+
 -- Views with GROUPING SET queries
 select a, b, grouping(a,b), sum(c), count(*), max(c) from row_gstest2 group by rollup ((a,b,c),(c,d)) order by 1, 2, 3, 4, 5, 6;
 
@@ -344,5 +355,35 @@ drop table row_gstest_empty;
 drop table location;
 drop table alert_emails;
 
+create table t1 (c1 text, c2 text);
+create table t2 (c1 text);
+insert into t1 values('a', 'a'), ('b', 'b'), ('c', 'c'), ('d', 'd');
+insert into t2 values ('a');
 
+select
+    a1.c2,a8.a3,a8.a2,
+    count(*)
+    from
+        t1 a1
+    join (
+        select
+            t2.c1 a2,
+            t2.c1 a3,
+            t2.c1 a4,
+            t2.c1 a5,
+            t2.c1 a7
+        from
+            t2
+    ) a8
+    on a1.c1 >= a8.a5
+group by
+        cube (
+            a1.c2,
+            a8.a3,
+            a8.a2
+        )
+order by 4,1;
+
+drop table t1;
+drop table t2;
 drop schema hw_row_groupingsets cascade;

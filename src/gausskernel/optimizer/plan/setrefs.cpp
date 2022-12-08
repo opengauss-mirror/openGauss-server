@@ -1611,7 +1611,7 @@ static void set_upper_references(PlannerInfo* root, Plan* plan, int rtoffset)
 #ifdef ENABLE_MULTIPLE_NODES
         if (tle->ressortgroupref != 0 && !IsA(tle->expr, Var)) {
 #else
-        if (tle->ressortgroupref != 0 && !IsA(tle->expr, Var) && groupby_same) {
+        if (tle->ressortgroupref != 0 && groupby_same) {
 #endif
             newexpr = (Node*)search_indexed_tlist_for_sortgroupref(
                 (Node*)tle->expr, tle->ressortgroupref, subplan_itlist, OUTER_VAR);
@@ -1892,7 +1892,6 @@ static Var* search_indexed_tlist_for_non_var(Node* node, indexed_tlist* itlist, 
 
 /*
  * search_indexed_tlist_for_sortgroupref --- find a sort/group expression
- *		(which is assumed not to be just a Var)
  *
  * If a match is found, return a Var constructed to reference the tlist item.
  * If no match, return NULL.
