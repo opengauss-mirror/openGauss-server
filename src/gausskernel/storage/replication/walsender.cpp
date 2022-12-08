@@ -2050,7 +2050,6 @@ static bool cmdStringLengthCheck(const char* cmd_string)
 {
     const size_t cmd_length_limit = 1024;
     const size_t slotname_limit = 64;
-    const size_t double_quotes_len = 2;
     char comd[cmd_length_limit] = {'\0'};
     char* sub_cmd = NULL;
     char* rm_cmd = NULL;
@@ -2073,17 +2072,13 @@ static bool cmdStringLengthCheck(const char* cmd_string)
         if (strlen(sub_cmd) != strlen("SLOT") ||
             strncmp(sub_cmd, "SLOT", strlen("SLOT")) != 0) {
             return true;
-        } else {
-            slot_name = strtok_r(NULL, " ", &rm_cmd);
         }
     } else if (cmd_length > strlen("CREATE_REPLICATION_SLOT") &&
         strncmp(cmd_string, "CREATE_REPLICATION_SLOT", strlen("CREATE_REPLICATION_SLOT")) == 0) {
         sub_cmd = strtok_r(comd, " ", &rm_cmd);
-        slot_name = strtok_r(NULL, " ", &rm_cmd);
     } else if (cmd_length > strlen("DROP_REPLICATION_SLOT") &&
         strncmp(cmd_string, "DROP_REPLICATION_SLOT", strlen("DROP_REPLICATION_SLOT")) == 0) {
         sub_cmd = strtok_r(comd, " ", &rm_cmd);
-        slot_name = strtok_r(NULL, " ", &rm_cmd);
     /* ADVANCE_REPLICATION SLOT slotname LOGICAL %X/%X */
     } else if (cmd_length > strlen("ADVANCE_REPLICATION") &&
         strncmp(cmd_string, "ADVANCE_REPLICATION", strlen("ADVANCE_REPLICATION")) == 0) {
@@ -2093,12 +2088,16 @@ static bool cmdStringLengthCheck(const char* cmd_string)
             strncmp(sub_cmd, "SLOT", strlen("SLOT")) != 0) {
             return false;
         }
-        slot_name = strtok_r(NULL, " ", &rm_cmd);
     } else {
         return true;
     }
-
-    if (strlen(slot_name) >= slotname_limit + double_quotes_len) {
+    slot_name = strtok_r(NULL, " ", &rm_cmd);
+    /* if slot_name contains "", its length should minus 2. */
+    size_t slot_name_len = strlen(slot_name);
+    if (slot_name_len != 0 && slot_name[0] == '"' && slot_name[slot_name_len - 1] == '"') {
+        slot_name_len -= 2;
+    }
+    if (slot_name_len >= slotname_limit) {
         return false;
     }
     return true;
