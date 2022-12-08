@@ -27,6 +27,7 @@
 #include "storage/buf/buf.h"
 #include "storage/lock/lwlock.h"
 #include "catalog/pg_control.h"
+#include "ddes/dms/ss_aio.h"
 
 #define ENABLE_INCRE_CKPT g_instance.attr.attr_storage.enableIncrementalCheckpoint
 #define NEED_CONSIDER_USECOUNT u_sess->attr.attr_storage.enable_candidate_buf_usage_count
@@ -82,6 +83,10 @@ typedef struct PageWriterProc {
     CandidateList normal_list;
     CandidateList nvm_list;
     CandidateList seg_list;
+
+    /* auxiluary structs for implementing AIO in DSS */
+    DSSAioCxt aio_cxt;
+    char *aio_buf;
 } PageWriterProc;
 
 typedef struct PageWriterProcs {

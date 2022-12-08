@@ -72,6 +72,7 @@ typedef struct st_ss_dms_func {
     bool (*dms_latch_timed_s)(dms_context_t *dms_ctx, dms_drlatch_t *dlatch, unsigned int wait_ticks,
         unsigned char is_force);
     void (*dms_unlatch)(dms_context_t *dms_ctx, dms_drlatch_t *dlatch);
+    void (*dms_pre_uninit)(void);
 } ss_dms_func_t;
 
 int ss_dms_func_init();
@@ -109,6 +110,7 @@ int dms_reform_last_failed(void);
 bool dms_latch_timed_x(dms_context_t *dms_ctx, dms_drlatch_t *dlatch, unsigned int wait_ticks);
 bool dms_latch_timed_s(dms_context_t *dms_ctx, dms_drlatch_t *dlatch, unsigned int wait_ticks, unsigned char is_force);
 void dms_unlatch(dms_context_t *dms_ctx, dms_drlatch_t *dlatch);
+void dms_pre_uninit(void);
 #ifdef __cplusplus
 }
 #endif

@@ -66,6 +66,8 @@ int SSLockRelease(const LOCKTAG *locktag, LOCKMODE lockmode, bool sessionLock);
 void SSLockReleaseAll();
 void SSLockAcquireAll();
 void MarkReadPblk(int buf_id, const XLogPhyBlock *pblk);
+void SSCheckBufferIfNeedMarkDirty(Buffer buf);
+void SSRecheckBufferPool();
 void TransformLockTagToDmsLatch(dms_drlatch_t* dlatch, const LOCKTAG locktag);
 
 #endif

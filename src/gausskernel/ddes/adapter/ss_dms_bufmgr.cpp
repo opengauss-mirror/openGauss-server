@@ -26,7 +26,7 @@
 #include "storage/proc.h"
 #include "storage/buf/bufmgr.h"
 #include "storage/smgr/segment.h"
-#include "replication/shared_storage_walreceiver.h"
+#include "utils/resowner.h"
 #include "ddes/dms/ss_dms_bufmgr.h"
 #include "securec_check.h"
 #include "miscadmin.h"
@@ -155,7 +155,8 @@ void MarkReadHint(int buf_id, char persistence, bool extend, const XLogPhyBlock 
 void ClearReadHint(int buf_id, bool buf_deleted)
 {
     dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_id);
-    buf_ctrl->state &= ~(BUF_NEED_LOAD | BUF_IS_LOADED | BUF_LOAD_FAILED | BUF_NEED_TRANSFER | BUF_IS_EXTEND);
+    buf_ctrl->state &=
+        ~(BUF_NEED_LOAD | BUF_IS_LOADED | BUF_LOAD_FAILED | BUF_NEED_TRANSFER | BUF_IS_EXTEND | BUF_DIRTY_NEED_FLUSH);
     if (buf_deleted) {
         buf_ctrl->state = 0;
     }
@@ -184,6 +185,9 @@ Buffer TerminateReadPage(BufferDesc* buf_desc, ReadBufferMode read_mode, const X
     Buffer buffer;
     bool isExtend = (buf_ctrl->state & BUF_IS_EXTEND) ? true: false;
     if (buf_ctrl->state & BUF_NEED_LOAD) {
+        if (g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy && AmDmsReformProcProcess()) {
+            ereport(PANIC, (errmsg("SS In flush copy, can't read from disk!")));
+        }
         buffer = ReadBuffer_common_for_dms(read_mode, buf_desc, pblk);
     } else {
         Block bufBlock = BufHdrGetBlock(buf_desc);
@@ -221,7 +225,7 @@ Buffer TerminateReadPage(BufferDesc* buf_desc, ReadBufferMode read_mode, const X
 
         TerminateBufferIO(buf_desc, false, BM_VALID);
         buffer = BufferDescriptorGetBuffer(buf_desc);
-        if (!SSFAILOVER_TRIGGER && !RecoveryInProgress()) {
+        if (!SS_IN_FAILOVER && !RecoveryInProgress()) {
             CalcSegDmsPhysicalLoc(buf_desc, buffer);
         }
     }
@@ -392,9 +396,25 @@ int32 CheckBuf4Rebuild(BufferDesc *buf_desc)
     dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
     Assert(buf_ctrl != NULL);
     Assert(buf_ctrl->is_edp != 1);
+    Assert(XLogRecPtrIsValid(g_instance.dms_cxt.ckptRedo));
 
-    if (buf_ctrl->lock_mode == (unsigned char)DMS_LOCK_NULL) {
+    XLogRecPtr pagelsn = BufferGetLSN(buf_desc);
+    if (buf_ctrl->lock_mode == (unsigned char)DMS_LOCK_NULL || XLByteLT(pagelsn, g_instance.dms_cxt.ckptRedo) ||
+        IsSegmentBufferID(buf_desc->buf_id) ||
+        (!SS_MY_INST_IS_MASTER && buf_ctrl->lock_mode == (unsigned char)DMS_LOCK_EXCLUSIVE)) {
         if (g_instance.dms_cxt.SSRecoveryInfo.in_failover) {
+            if (buf_ctrl->lock_mode != (unsigned char)DMS_LOCK_NULL) {
+                buf_ctrl->state = 0;
+                buf_ctrl->is_remote_dirty = 0;
+                buf_ctrl->lock_mode = (uint8)DMS_LOCK_NULL;
+                buf_ctrl->is_edp = 0;
+                buf_ctrl->force_request = 0;
+                buf_ctrl->edp_scn = 0;
+                buf_ctrl->edp_map = 0;
+                buf_ctrl->pblk_relno = InvalidOid;
+                buf_ctrl->pblk_blkno = InvalidBlockNumber;
+                buf_ctrl->pblk_lsn = InvalidXLogRecPtr;
+            }
             InvalidateBuffer(buf_desc);
         }
         return DMS_SUCCESS;
@@ -405,7 +425,7 @@ int32 CheckBuf4Rebuild(BufferDesc *buf_desc)
     bool is_dirty = (buf_desc->state & (BM_DIRTY | BM_JUST_DIRTIED)) > 0 ? true : false;
     int ret = dms_buf_res_rebuild_drc(&dms_ctx, buf_ctrl, (unsigned long long)BufferGetLSN(buf_desc), is_dirty);
     if (ret != DMS_SUCCESS) {
-        ereport(DEBUG1, (errmsg("Failed to rebuild page, rel:%u/%u/%u/%d, forknum:%d, blocknum:%u.",
+        ereport(LOG, (errmsg("Failed to rebuild page, rel:%u/%u/%u/%d, forknum:%d, blocknum:%u.",
             buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode,
             buf_desc->tag.rnode.bucketNode, buf_desc->tag.forkNum, buf_desc->tag.blockNum)));
         return ret;
@@ -461,7 +481,7 @@ int SSLockRelease(const LOCKTAG *locktag, LOCKMODE lockmode, bool sessionLock)
     int output_backup = t_thrd.postgres_cxt.whereToSendOutput;
     t_thrd.postgres_cxt.whereToSendOutput = DestNone;
     int ret = dms_broadcast_opengauss_ddllock(&dms_ctx, (char *)&ssmsg, sizeof(SSBroadcastDDLLock),
-        (unsigned char)false, SS_BROADCAST_WAIT_FIVE_SECONDS, (unsigned char)false);
+        (unsigned char)false, SS_BROADCAST_WAIT_FIVE_SECONDS, (unsigned char)LOCK_NORMAL_MODE);
     if (ret != DMS_SUCCESS) {
         ereport(WARNING, (errmsg("SS broadcast DDLLockRelease request failed!")));
     }
@@ -512,5 +532,44 @@ void SSLockAcquireAll()
 
     for (i = NUM_LOCK_PARTITIONS; --i >= 0;) {
         LWLockRelease(GetMainLWLockByIndex(FirstLockMgrLock + i));
+    }
+}
+
+void SSCheckBufferIfNeedMarkDirty(Buffer buf)
+{
+    dms_buf_ctrl_t* buf_ctrl = GetDmsBufCtrl(buf - 1);
+    if (buf_ctrl->state & BUF_DIRTY_NEED_FLUSH) {
+        MarkBufferDirty(buf);
+    }
+}
+
+void SSRecheckBufferPool()
+{
+    uint32 buf_state;
+    for (int i = 0; i < TOTAL_BUFFER_NUM; i++) {
+        /*
+         * BUF_DIRTY_NEED_FLUSH was removed during mark buffer dirty and lsn_on_disk was set during sync buffer
+         * As BUF_DIRTY_NEED_FLUSH was set only if page lsn is bigger than ckpt redo, it should be removed at this time
+         * Unfortunately if it is not, mark it dirty again. For lsn_on_disk, if it is still invalid, this means it is
+         * not flushed. So if it is not dirty, invalidate it again.
+         */
+        BufferDesc *buf_desc = GetBufferDescriptor(i);
+        pg_memory_barrier();
+        buf_state = pg_atomic_read_u32(&buf_desc->state);
+        if (!(buf_state & BM_VALID || buf_state & BM_TAG_VALID)) {
+            continue;
+        }
+
+        dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(i);
+        if (buf_ctrl->state & BUF_DIRTY_NEED_FLUSH) {
+            (void)PinBuffer(buf_desc, NULL);
+            LockBuffer(i + 1, BUFFER_LOCK_SHARE);
+            ereport(WARNING,
+                (errmsg("Buffer was not flushed or replayed, spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u",
+                buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode,
+                buf_desc->tag.rnode.bucketNode, buf_desc->tag.forkNum, buf_desc->tag.blockNum)));
+            MarkBufferDirty(i + 1);
+            UnlockReleaseBuffer(i + 1);
+        }
     }
 }

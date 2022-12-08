@@ -210,6 +210,7 @@ static bool check_ss_rdma_work_config(char** newval, void** extra, GucSource sou
 static bool check_ss_dss_vg_name(char** newval, void** extra, GucSource source);
 static bool check_ss_dss_conn_path(char** newval, void** extra, GucSource source);
 static bool check_ss_enable_ssl(bool* newval, void** extra, GucSource source);
+static void assign_ss_enable_aio(bool newval, void *extra);
 
 #ifndef ENABLE_MULTIPLE_NODES
 static void assign_dcf_election_timeout(int newval, void* extra);
@@ -1007,6 +1008,19 @@ static void InitStorageConfigureNamesBool()
             false,
             NULL,
             NULL,
+            NULL},
+
+        {{"ss_enable_aio",
+            PGC_SIGHUP,
+            NODE_SINGLENODE,
+            SHARED_STORAGE_OPTIONS,
+            gettext_noop("Whether use dss aio"),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_storage.dms_attr.enable_dss_aio,
+            true,
+            NULL,
+            assign_ss_enable_aio,
             NULL},
 
         {{"ss_enable_catalog_centralized",
@@ -5794,6 +5808,11 @@ static bool check_ss_enable_ssl(bool *newval, void **extra, GucSource source)
     return true;
 }
 
+static void assign_ss_enable_aio(bool newval, void *extra)
+{
+    g_instance.attr.attr_storage.dms_attr.enable_dss_aio = newval;
+}
+
 #ifndef ENABLE_MULTIPLE_NODES
 
 static void assign_dcf_election_timeout(int newval, void* extra)
@@ -5909,3 +5928,4 @@ static void assign_logical_decode_options_default(const char* newval, void* extr
 {
     u_sess->attr.attr_storage.logical_decode_options_default = extra;
 }
+

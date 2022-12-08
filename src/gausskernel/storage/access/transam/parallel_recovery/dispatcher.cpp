@@ -1583,6 +1583,8 @@ void InitReaderStateByOld(XLogReaderState *newState, XLogReaderState *oldState, 
     newState->currRecPtr = oldState->currRecPtr;
     newState->readLen = oldState->readLen;
     newState->readBuf = oldState->readBuf;
+    newState->preReadStartPtr = oldState->preReadStartPtr;
+    newState->preReadBuf = oldState->preReadBuf;
 
     if (isNew) {
         newState->readRecordBuf = NULL;

@@ -211,6 +211,8 @@ typedef struct BufferDesc {
     bool encrypt; /* enable table's level data encryption */
     
     volatile uint64 lsn_on_disk;
+
+    volatile bool aio_in_progress; /* indicate aio is in progress */
 #ifdef USE_ASSERT_CHECKING
     volatile uint64 lsn_dirty;
 #endif

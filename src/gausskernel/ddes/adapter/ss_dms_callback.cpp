@@ -220,10 +220,6 @@ static int CBGetTxnCSN(void *db_handle, dms_opengauss_xid_csn_t *csn_req, dms_op
 
 static int CBGetSnapshotData(void *db_handle, dms_opengauss_txn_snapshot_t *txn_snapshot)
 {
-    if (SS_IN_REFORM) {
-        return DMS_ERROR;
-    }
-
     if (RecoveryInProgress()) {
         return DMS_ERROR;
     }
@@ -347,6 +343,7 @@ static int CBSwitchoverDemote(void *db_handle)
                         DemoteModeDesc(demote_mode))));
                 return DMS_ERROR;
             }
+            ntries = 0;
         }
 
         CHECK_FOR_INTERRUPTS();
@@ -364,6 +361,11 @@ static int CBSwitchoverPromote(void *db_handle, unsigned char origPrimaryId)
 {
     g_instance.dms_cxt.SSClusterState = NODESTATE_STANDBY_PROMOTING;
     g_instance.dms_cxt.SSRecoveryInfo.new_primary_reset_walbuf_flag = true;
+    /* allow recovery in switchover to keep LSN in order */
+    t_thrd.shemem_ptr_cxt.XLogCtl->IsRecoveryDone = false;
+    t_thrd.shemem_ptr_cxt.XLogCtl->SharedRecoveryInProgress = true;
+    t_thrd.shemem_ptr_cxt.ControlFile->state = DB_IN_CRASH_RECOVERY;
+    pg_memory_barrier();
     ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS switchover] Starting to promote standby.")));
 
     /* since original primary must have demoted, it is safe to allow promting standby write */
@@ -392,6 +394,7 @@ static int CBSwitchoverPromote(void *db_handle, unsigned char origPrimaryId)
                 ereport(WARNING, (errmodule(MOD_DMS),
                     errmsg("[SS switchover] Standby promote timeout, please try again later.")));
             }
+            ntries = 0;
         }
 
         CHECK_FOR_INTERRUPTS();
@@ -407,8 +410,12 @@ static void CBSwitchoverResult(void *db_handle, int result)
         ereport(LOG, (errmodule(MOD_DMS),
             errmsg("[SS switchover] Switchover success, letting reformer update roles.")));
         return;
+    } else {
+        /* abort and restore state */
+        g_instance.dms_cxt.SSReformInfo.in_reform = false;
+        g_instance.dms_cxt.SSClusterState = NODESTATE_NORMAL;
+        ereport(WARNING, (errmodule(MOD_DMS), errmsg("[SS switchover] Switchover failed, errno: %d.", result)));
     }
-    ereport(WARNING, (errmodule(MOD_DMS), errmsg("[SS switchover] Switchover failed, errno: %d.", result)));
 }
 
 static int SetPrimaryIdOnStandby(int primary_id)
@@ -466,15 +473,6 @@ static int CBSaveStableList(void *db_handle, unsigned long long list_stable, uns
     } else { /* we are on standby */
         ret = SetPrimaryIdOnStandby(primary_id);
     }
-
-    /* SSClusterState and in_reform must be set atomically */
-    g_instance.dms_cxt.SSClusterState = NODESTATE_NORMAL;
-    g_instance.dms_cxt.SSReformInfo.in_reform = false;
-    g_instance.dms_cxt.SSRecoveryInfo.startup_reform = false;
-    ereport(LOG,
-        (errmodule(MOD_DMS),
-            errmsg("[SS reform/SS switchover/SS failover] Reform success, instance:%d is running.",
-                g_instance.attr.attr_storage.dms_attr.instance_id)));
     return ret;
 }
 
@@ -525,7 +523,7 @@ static void DmsReleaseBuffer(int buffer, bool is_seg)
     }
 }
 
-static int tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_t **buf_ctrl)
+static void tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_t **buf_ctrl)
 {
     bool is_seg;
     int buf_id = -1;
@@ -549,7 +547,6 @@ static int tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_
     hash = BufTableHashCode(tag);
     partition_lock = BufMappingPartitionLock(hash);
 
-    int buffer;
     uint32 saveInterruptHoldoffCount = t_thrd.int_cxt.InterruptHoldoffCount;
     PG_TRY();
     {
@@ -558,7 +555,6 @@ static int tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_
             buf_id = BufTableLookup(tag, hash);
             if (buf_id < 0) {
                 LWLockRelease(partition_lock);
-                buffer = 0;
                 break;
             }
 
@@ -581,7 +577,6 @@ static int tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_
                     tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
                     tag->forkNum, tag->blockNum, buf_desc->state)));
                 DmsReleaseBuffer(buf_desc->buf_id + 1, is_seg);
-                buffer = 0;
                 break;
             }
 
@@ -591,18 +586,13 @@ static int tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_
                     tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
                     tag->forkNum, tag->blockNum, buf_desc->state)));
                 DmsReleaseBuffer(buf_desc->buf_id + 1, is_seg);
-                buffer = 0;
                 break;
             }
 
             LWLockMode content_mode = (mode == DMS_LOCK_SHARE) ? LW_SHARED : LW_EXCLUSIVE;
             (void)LWLockAcquire(buf_desc->content_lock, content_mode);
             *buf_ctrl = GetDmsBufCtrl(buf_id);
-            (*buf_ctrl)->lsn_on_disk = BufferGetLSN(buf_desc);
-            (*buf_ctrl)->seg_fileno = buf_desc->seg_fileno;
-            (*buf_ctrl)->seg_blockno = buf_desc->seg_blockno;
             Assert(buf_id >= 0);
-            buffer = buf_id + 1;
         } while (0);
     }
     PG_CATCH();
@@ -611,34 +601,14 @@ static int tryEnterLocalPage(BufferTag *tag, dms_lock_mode_t mode, dms_buf_ctrl_
         ReleaseResource();
     }
     PG_END_TRY();
-
-    return buffer;
-}
-
-static int CBTryEnterLocalPage(void *db_handle, char pageid[DMS_PAGEID_SIZE], dms_lock_mode_t mode,
-    dms_buf_ctrl_t **buf_ctrl)
-{
-    BufferTag *tag = (BufferTag *)pageid;
-    Buffer buffer = tryEnterLocalPage(tag, mode, buf_ctrl);
-    if (buffer <= 0) {
-        if (*buf_ctrl != NULL) {
-            ereport(PANIC, (errmsg("CBTryEnterLocalPage failed")));
-        }
-    } else {
-        if (*buf_ctrl == NULL) {
-            ereport(PANIC, (errmsg("CBTryEnterLocalPage failed")));
-        }
-    }
-    
-    return DMS_SUCCESS;
 }
 
 static int CBEnterLocalPage(void *db_handle, char pageid[DMS_PAGEID_SIZE], dms_lock_mode_t mode,
     dms_buf_ctrl_t **buf_ctrl)
 {
     BufferTag *tag = (BufferTag *)pageid;
-    Buffer buffer = tryEnterLocalPage(tag, mode, buf_ctrl);
-    return (buffer > 0) ? DMS_SUCCESS : DMS_ERROR;
+    tryEnterLocalPage(tag, mode, buf_ctrl);
+    return  DMS_SUCCESS;
 }
 
 static unsigned char CBPageDirty(dms_buf_ctrl_t *buf_ctrl)
@@ -648,7 +618,8 @@ static unsigned char CBPageDirty(dms_buf_ctrl_t *buf_ctrl)
         return 0;
     }
     BufferDesc *buf_desc = GetBufferDescriptor(buf_ctrl->buf_id);
-    return pg_atomic_read_u32(&buf_desc->state) & (BM_DIRTY | BM_JUST_DIRTIED);
+    bool is_dirty = (pg_atomic_read_u32(&buf_desc->state) & (BM_DIRTY | BM_JUST_DIRTIED)) > 0;
+    return (unsigned char)is_dirty;
 }
 
 static void CBLeaveLocalPage(void *db_handle, dms_buf_ctrl_t *buf_ctrl)
@@ -675,7 +646,7 @@ static char* CBGetPage(dms_buf_ctrl_t *buf_ctrl)
     return (char *)BufHdrGetBlock(buf_desc);
 }
 
-static void CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE])
+static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsigned long long ver)
 {
     bool valid = false;
     int buf_id;
@@ -684,6 +655,7 @@ static void CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE])
     LWLock *partition_lock = NULL;
     BufferDesc *buf_desc = NULL;
     dms_buf_ctrl_t *buf_ctrl = NULL;
+    int ret = DMS_SUCCESS;
 
     hash = BufTableHashCode(tag);
     partition_lock = BufMappingPartitionLock(hash);
@@ -692,7 +664,7 @@ static void CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE])
     if (buf_id < 0) {
         /* not found in shared buffer */
         LWLockRelease(partition_lock);
-        return;
+        return ret;
     }
 
     uint32 saveInterruptHoldoffCount = t_thrd.int_cxt.InterruptHoldoffCount;
@@ -710,7 +682,13 @@ static void CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE])
         if (valid) {
             (void)LWLockAcquire(buf_desc->content_lock, LW_EXCLUSIVE);
             buf_ctrl = GetDmsBufCtrl(buf_id);
-            buf_ctrl->lock_mode = (unsigned char)DMS_LOCK_NULL;
+            if (ver >= buf_ctrl->ver) {
+                buf_ctrl->lock_mode = (unsigned char)DMS_LOCK_NULL;
+            } else {
+                ereport(WARNING, (errmodule(MOD_DMS),
+                errmsg("[CBInvalidatePage] invalid ver:%llu, buf_ctrl ver:%llu", ver, buf_ctrl->ver)));
+                ret = DMS_ERROR;
+            }
             LWLockRelease(buf_desc->content_lock);
         }
         if (IsSegmentBufferID(buf_id)) {
@@ -725,14 +703,16 @@ static void CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE])
         ReleaseResource();
     }
     PG_END_TRY();
+    return ret;
 }
 
-static void CBXLogFlush(void *db_handle, unsigned long long *lsn)
+static int CBXLogFlush(void *db_handle, unsigned long long *lsn)
 {
     (void)LWLockAcquire(WALWriteLock, LW_EXCLUSIVE);
     (void)XLogBackgroundFlush();
     *lsn = GetFlushRecPtr();
     LWLockRelease(WALWriteLock);
+    return GS_SUCCESS;
 }
 
 static char *CBDisplayBufferTag(char *displayBuf, unsigned int count, char *pageid)
@@ -1034,6 +1014,10 @@ static void CBSetDmsStatus(void *db_handle, int dms_status)
 
 static int32 CBDrcBufRebuild(void *db_handle)
 {
+    /* Load Control File */
+    int src_id = SSGetPrimaryInstId();
+    SSReadControlFile(src_id, true);
+
     uint32 buf_state;
     for (int i = 0; i < TOTAL_BUFFER_NUM; i++) {
         BufferDesc *buf_desc = GetBufferDescriptor(i);
@@ -1148,7 +1132,7 @@ static int CBConfirmOwner(void *db_handle, char *pageid, unsigned char *lock_mod
 }
 
 static int CBConfirmConverting(void *db_handle, char *pageid, unsigned char smon_chk,
-    unsigned char *lock_mode, unsigned long long *edp_map, unsigned long long *lsn)
+    unsigned char *lock_mode, unsigned long long *edp_map, unsigned long long *lsn, unsigned long long *ver)
 {
     BufferDesc *buf_desc = NULL;
     bool valid;
@@ -1186,6 +1170,7 @@ static int CBConfirmConverting(void *db_handle, char *pageid, unsigned char smon
         bool is_locked = LWLockConditionalAcquire(buf_desc->content_lock, LW_EXCLUSIVE);
         if (is_locked) {
             buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
+            *ver = buf_ctrl->ver;
             *lock_mode = buf_ctrl->lock_mode;
             LWLockRelease(buf_desc->content_lock);
             break;
@@ -1205,6 +1190,7 @@ static int CBConfirmConverting(void *db_handle, char *pageid, unsigned char smon
 
     // without lock
     buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
+    *ver = buf_ctrl->ver;
     *lock_mode = buf_ctrl->lock_mode;
 
     SSUnPinBuffer(buf_desc);
@@ -1244,6 +1230,7 @@ static int CBRecoveryPrimary(void *db_handle, int inst_id)
     Assert(g_instance.dms_cxt.SSReformerControl.primaryInstId == inst_id ||
         g_instance.dms_cxt.SSReformerControl.primaryInstId == -1);
     g_instance.dms_cxt.SSRecoveryInfo.skip_redo_replay = false;
+    g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy = false;
     ereport(LOG, (errmsg("[SS reform] Recovery as primary, will replay xlog from inst:%d",
                          g_instance.dms_cxt.SSReformerControl.primaryInstId)));
 
@@ -1257,12 +1244,8 @@ static int CBRecoveryPrimary(void *db_handle, int inst_id)
 
 static int CBFlushCopy(void *db_handle, char *pageid)
 {
-    /*
-     * 1. request page from remote
-     * 2. mark page need flush
-     */
-    while (!g_instance.dms_cxt.SSRecoveryInfo.reclsn_updated) {
-        pg_usleep(100L); /* sleep 0.1ms */
+    if (SS_REFORM_REFORMER && !g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy) {
+        g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy = true;
     }
 
     BufferTag* tag = (BufferTag*)pageid;
@@ -1281,9 +1264,13 @@ static int CBFlushCopy(void *db_handle, char *pageid)
     PG_CATCH();
     {
         t_thrd.int_cxt.InterruptHoldoffCount = saveInterruptHoldoffCount;
-        if (t_thrd.role == DMS_WORKER) {
-            FlushErrorState();
-        }
+        /* Save error info */
+        ErrorData* edata = CopyErrorData();
+        FlushErrorState();
+        FreeErrorData(edata);
+        ereport(PANIC, (errmsg("[SS Flush Copy] Error happend, spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u",
+                        tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
+                        tag->forkNum, tag->blockNum)));
     }
     PG_END_TRY();
 
@@ -1299,12 +1286,18 @@ static int CBFlushCopy(void *db_handle, char *pageid)
         }
     }
 
-    LockBuffer(buffer, BUFFER_LOCK_SHARE);
     ereport(LOG, (errmsg("[SS] ready to flush copy, spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u",
                          tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
                          tag->forkNum, tag->blockNum)));
-    MarkBufferDirty(buffer);
-    UnlockReleaseBuffer(buffer);
+    Assert(XLogRecPtrIsValid(g_instance.dms_cxt.ckptRedo));
+    BufferDesc* buf_desc = GetBufferDescriptor(buffer - 1);
+    XLogRecPtr pagelsn = BufferGetLSN(buf_desc);
+    if (XLByteLT(g_instance.dms_cxt.ckptRedo, pagelsn) && !IsSegmentPhysicalRelNode(tag->rnode)) {
+        dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buffer - 1);
+        buf_ctrl->state |= BUF_DIRTY_NEED_FLUSH;
+    }
+
+    ReleaseBuffer(buffer);
     return GS_SUCCESS;
 }
 
@@ -1331,14 +1324,20 @@ static int CBGetDBPrimaryId(void *db_handle, unsigned int *primary_id)
     return GS_SUCCESS;
 }
 
-static void CBReformStartNotify(void *db_handle, dms_role_t role)
+static void CBReformStartNotify(void *db_handle, dms_role_t role, unsigned char reform_type)
 {
+    SSReformType ss_reform_type = (SSReformType)reform_type;
     ss_reform_info_t *reform_info = &g_instance.dms_cxt.SSReformInfo;
     reform_info->dms_role = role;
     reform_info->in_reform = true;
     g_instance.dms_cxt.SSClusterState = NODESTATE_NORMAL;
     g_instance.dms_cxt.SSRecoveryInfo.reform_ready = false;
-    ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform] dms reform start, role:%d", role)));
+    g_instance.dms_cxt.resetSyscache = true;
+    if (ss_reform_type == DMS_REFORM_TYPE_FOR_FAILOVER_OPENGAUSS) {
+        g_instance.dms_cxt.SSRecoveryInfo.in_failover = true;
+    }
+    ereport(LOG, (errmodule(MOD_DMS),
+        errmsg("[SS reform] dms reform start, role:%d, reform type:%d", role, (int)ss_reform_type)));
     if (reform_info->dms_role == DMS_ROLE_REFORMER) {
         if (dss_set_server_status_wrapper(true) != GS_SUCCESS) {
             ereport(PANIC, (errmodule(MOD_DMS), errmsg("[SS reform] Could not set dssserver flag=read_write")));
@@ -1346,7 +1345,6 @@ static void CBReformStartNotify(void *db_handle, dms_role_t role)
         if (!SS_MY_INST_IS_MASTER) {
             // means failover
             g_instance.dms_cxt.SSRecoveryInfo.reclsn_updated = false;
-            g_instance.dms_cxt.SSRecoveryInfo.in_failover = true;
         }
     } else {
         if (dss_set_server_status_wrapper(false) != GS_SUCCESS) {
@@ -1361,28 +1359,37 @@ static void CBReformStartNotify(void *db_handle, dms_role_t role)
 
     while (true) {
         if (dms_reform_failed()) {
-            ereport(WARNING, (errmodule(MOD_DMS), errmsg("reform failed during caneling backends")));
+            ereport(WARNING, (errmodule(MOD_DMS), errmsg("[SS reform]reform failed during caneling backends")));
             return;
         }
         if (g_instance.dms_cxt.SSRecoveryInfo.reform_ready || g_instance.dms_cxt.SSRecoveryInfo.startup_reform) {
-            ereport(LOG, (errmodule(MOD_DMS), errmsg("reform ready, backends have been terminated")));
+            ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform]reform ready, backends have been terminated")));
             return;
         }
         pg_usleep(REFORM_WAIT_TIME);
     }
 }
 
-static int CBSetBufInfo(dms_buf_ctrl_t* buf_ctrl)
+static int CBReformDoneNotify(void *db_handle)
 {
-    Assert(buf_ctrl->buf_id < TOTAL_BUFFER_NUM);
-    if (buf_ctrl->buf_id >= TOTAL_BUFFER_NUM) {
-        return DMS_ERROR;
+    /* SSClusterState and in_reform must be set atomically */
+    g_instance.dms_cxt.SSClusterState = NODESTATE_NORMAL;
+    g_instance.dms_cxt.SSReformInfo.in_reform = false;
+    if (g_instance.dms_cxt.SSRecoveryInfo.in_failover) {
+        g_instance.dms_cxt.SSRecoveryInfo.in_failover = false;
     }
+    g_instance.dms_cxt.SSRecoveryInfo.startup_reform = false;
+    g_instance.dms_cxt.SSRecoveryInfo.restart_failover_flag = false;
+    ereport(LOG,
+            (errmodule(MOD_DMS),
+                errmsg("[SS reform/SS switchover/SS failover] Reform success, instance:%d is running.",
+                       g_instance.attr.attr_storage.dms_attr.instance_id)));
+    return GS_SUCCESS;
+}
 
-    BufferDesc *buf_desc = GetBufferDescriptor(buf_ctrl->buf_id);
-    buf_desc->lsn_on_disk = buf_ctrl->lsn_on_disk;
-    buf_desc->seg_fileno = buf_ctrl->seg_fileno;
-    buf_desc->seg_blockno = buf_ctrl->seg_blockno;
+static int CBXLogWaitFlush(void *db_handle, unsigned long long lsn)
+{
+    XLogWaitFlush(lsn);
     return GS_SUCCESS;
 }
 
@@ -1454,11 +1461,9 @@ void DmsInitCallback(dms_callback_t *callback)
     callback->get_db_primary_id = CBGetDBPrimaryId;
     callback->failover_promote_opengauss = CBFailoverPromote;
     callback->reform_start_notify = CBReformStartNotify;
-    callback->set_buf_info = CBSetBufInfo;
 
     callback->get_page_hash_val = CBPageHashCode;
     callback->read_local_page4transfer = CBEnterLocalPage;
-    callback->try_read_local_page = CBTryEnterLocalPage;
     callback->leave_local_page = CBLeaveLocalPage;
     callback->page_is_dirty = CBPageDirty;
     callback->get_page = CBGetPage;
@@ -1491,4 +1496,6 @@ void DmsInitCallback(dms_callback_t *callback)
     callback->set_switchover_result = CBSwitchoverResult;
     callback->set_db_standby = CBSetDbStandby;
     callback->db_is_primary = CBDbIsPrimary;
+    callback->reform_done_notify = CBReformDoneNotify;
+    callback->log_wait_flush = CBXLogWaitFlush;
 }

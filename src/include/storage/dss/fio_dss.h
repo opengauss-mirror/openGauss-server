@@ -33,7 +33,6 @@
 #include "storage/dss/dss_adaptor.h"
 
 void dss_device_register(dss_device_op_t *dss_device_op, bool enable_dss);
-
 void dss_set_errno(int *errcode);
 bool dss_exist_file(const char *file_name);
 int dss_access_file(const char *file_name, int mode);
@@ -79,5 +78,8 @@ int dss_fstat_file(int handle, struct stat *buf);
 int dss_chmod_file(const char* path, mode_t mode);
 int dss_set_server_status_wrapper(bool is_master);
 int dss_remove_dev(const char *name);
+
+int dss_aio_prep_pwrite(void *iocb, int fd, void *buf, size_t count, long long offset);
+int dss_aio_prep_pread(void *iocb, int fd, void *buf, size_t count, long long offset);
 
 #endif // FIO_DSS_H

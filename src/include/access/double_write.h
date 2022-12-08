@@ -148,6 +148,10 @@ const uint16 DW_SECOND_DATA_START_IDX = DW_SECOND_BUFTAG_START_IDX + DW_SECOND_B
 
 inline bool dw_buf_valid_dirty(uint32 buf_state)
 {
+    if (ENABLE_DMS && ENABLE_DSS_AIO) {
+        return true;
+    }
+
     return ((buf_state & (BM_VALID | BM_DIRTY)) == (BM_VALID | BM_DIRTY));
 }
 
@@ -300,6 +304,18 @@ void dw_exit(bool single);
 inline bool dw_page_writer_running()
 {
     return (dw_enabled() && pg_atomic_read_u32(&g_instance.ckpt_cxt_ctl->current_page_writer_count) > 0);
+}
+
+/**
+ * If enable dms and aio, the aio_in_process should be false.
+ */
+inline bool dw_buf_valid_aio_finished(BufferDesc *buf_desc, uint32 buf_state)
+{
+    if (!ENABLE_DMS || !ENABLE_DSS_AIO) {
+        return true;
+    }
+
+    return ((buf_state & BM_VALID) && ((buf_state & BM_DIRTY) || buf_desc->aio_in_progress));
 }
 
 extern bool free_space_enough(int buf_id);

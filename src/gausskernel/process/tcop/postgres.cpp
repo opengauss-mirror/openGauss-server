@@ -6388,10 +6388,14 @@ void ProcessInterrupts(void)
 
         if (u_sess->ClientAuthInProgress) {
             t_thrd.int_cxt.ImmediateInterruptOK = false;        /* not idle anymore */
+            int errlevel = ERROR;
+            if (ENABLE_DMS && IS_THREAD_POOL_WORKER) {
+                errlevel = FATAL;
+            }
 
             if (t_thrd.storage_cxt.cancel_from_timeout) {
                 force_backtrace_messages = true;
-                ereport(ERROR,
+                ereport(errlevel,
                         (errcode(ERRCODE_QUERY_CANCELED),
                          errmsg("terminate because authentication timeout(%ds)",
                              u_sess->attr.attr_network.PoolerConnectTimeout)));
@@ -6399,7 +6403,7 @@ void ProcessInterrupts(void)
                 if (t_thrd.postgres_cxt.whereToSendOutput == DestRemote) {
                     t_thrd.postgres_cxt.whereToSendOutput = DestNone;
                 }
-                ereport(ERROR,
+                ereport(errlevel,
                         (errcode(ERRCODE_QUERY_CANCELED),
                          errmsg("terminate because cancel interrupts")));
             }

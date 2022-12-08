@@ -205,7 +205,7 @@ char* relpathbackend(RelFileNode rnode, BackendId backend, ForkNumber forknum)
     char* path = NULL;
     char* datadir = (char *)palloc(MAXPGPATH);
 
-    if (ENABLE_DSS && rnode.dbNode != 1) {
+    if (ENABLE_DSS) {
         errno_t rc = snprintf_s(datadir, MAXPGPATH, MAXPGPATH - 1, "%s/",
             g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name);
         securec_check_ss(rc, "\0", "\0");
@@ -685,7 +685,7 @@ char* GetDatabasePath(Oid dbNode, Oid spcNode)
     errno_t rc = EOK;
     char* datadir = (char *)palloc(MAXPGPATH);
 
-    if (ENABLE_DSS && dbNode != 1) {
+    if (ENABLE_DSS) {
         rc = snprintf_s(datadir, MAXPGPATH, MAXPGPATH - 1, "%s/",
             g_instance.attr.attr_storage.dss_attr.ss_dss_vg_name);
         securec_check_ss(rc, "\0", "\0");

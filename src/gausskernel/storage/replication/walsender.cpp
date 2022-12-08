@@ -7059,7 +7059,7 @@ static void WalSndRefreshPercentCountStartLsn(XLogRecPtr currentMaxLsn, XLogRecP
 
 XLogSegNo WalGetSyncCountWindow(void)
 {
-    return (XLogSegNo)(uint32)u_sess->attr.attr_storage.wal_keep_segments;
+    return (XLogSegNo)(uint32)XLogSegmentsNum(u_sess->attr.attr_storage.wal_keep_segments);
 }
 
 void add_archive_task_to_list(int archive_task_status_idx, WalSnd *walsnd) 

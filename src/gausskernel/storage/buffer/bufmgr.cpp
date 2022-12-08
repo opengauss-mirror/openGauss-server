@@ -2372,6 +2372,9 @@ found_branch:
 
                 dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(bufHdr->buf_id);
                 LWLockMode req_lock_mode = isExtend ? LW_EXCLUSIVE : LW_SHARED;
+                if (g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy && SS_REFORM_REFORMER) {
+                    req_lock_mode = LW_EXCLUSIVE;
+                }
                 if (!LockModeCompatible(buf_ctrl, req_lock_mode)) {
                     if (!StartReadPage(bufHdr, req_lock_mode)) {
                         TerminateBufferIO(bufHdr, false, 0);
@@ -2522,13 +2525,19 @@ void SimpleMarkBufDirty(BufferDesc *buf)
 
 void PageCheckIfCanEliminate(BufferDesc *buf, uint32 *oldFlags, bool *needGetLock)
 {
+    if (SS_REFORM_REFORMER) {
+        Assert(XLogRecPtrIsValid(g_instance.dms_cxt.ckptRedo));
+    }
+
     Block tmpBlock = BufHdrGetBlock(buf);
 
-    if ((*oldFlags & BM_TAG_VALID) && !XLByteEQ(buf->lsn_on_disk, PageGetLSN(tmpBlock)) && !(*oldFlags & BM_DIRTY) &&
-        RecoveryInProgress()) {
+    if ((*oldFlags & BM_TAG_VALID) &&
+        !(XLByteEQ(buf->lsn_on_disk, PageGetLSN(tmpBlock)) ||
+        (SS_REFORM_REFORMER && XLByteLT(PageGetLSN(tmpBlock), g_instance.dms_cxt.ckptRedo))) &&
+        !(*oldFlags & BM_DIRTY) && RecoveryInProgress()) {
         int mode = DEBUG1;
 #ifdef USE_ASSERT_CHECKING
-        mode = PANIC;
+        mode = ENABLE_DMS ? WARNING : PANIC;
 #endif
         const uint32 shiftSize = 32;
         ereport(mode, (errmodule(MOD_INCRE_BG),
@@ -2546,6 +2555,10 @@ void PageCheckIfCanEliminate(BufferDesc *buf, uint32 *oldFlags, bool *needGetLoc
 #ifdef USE_ASSERT_CHECKING
 void PageCheckWhenChosedElimination(const BufferDesc *buf, uint32 oldFlags)
 {
+    if (SS_REFORM_REFORMER) {
+        return;
+    }
+
     if ((oldFlags & BM_TAG_VALID) && RecoveryInProgress()) {
         if (!XLByteEQ(buf->lsn_dirty, InvalidXLogRecPtr)) {
             Assert(XLByteEQ(buf->lsn_on_disk, buf->lsn_dirty));
@@ -2637,6 +2650,14 @@ static BufferDesc *BufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumbe
                  */
                 *found = FALSE;
             }
+        }
+
+        /* set Physical segment file. */
+        if (ENABLE_DMS && pblk != NULL) {
+            Assert(PhyBlockIsValid(*pblk));
+            buf->seg_fileno = pblk->relNode;
+            buf->seg_blockno = pblk->block;
+            MarkReadPblk(buf->buf_id, pblk);
         }
 
         return buf;
@@ -2989,7 +3010,6 @@ void InvalidateBuffer(BufferDesc *buf)
     old_partition_lock = BufMappingPartitionLock(old_hash);
 
 retry:
-
     /*
      * Acquire exclusive mapping lock in preparation for changing the buffer's
      * association.
@@ -3159,6 +3179,10 @@ void MarkBufferDirty(Buffer buffer)
 
     UnlockBufHdr(buf_desc, buf_state);
 
+    if (SS_REFORM_REFORMER) {
+        dms_buf_ctrl_t* buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
+        buf_ctrl->state &= ~BUF_DIRTY_NEED_FLUSH;
+    }
     /*
      * If the buffer was not dirty already, do vacuum accounting.
      */
@@ -4015,6 +4039,7 @@ bool BgBufferSync(WritebackContext *wb_context)
 const int CONDITION_LOCK_RETRY_TIMES = 5;
 bool SyncFlushOneBuffer(int buf_id, bool get_condition_lock)
 {
+    t_thrd.dms_cxt.buf_in_aio = false;
     BufferDesc *buf_desc = GetBufferDescriptor(buf_id);
     /*
      * Pin it, share-lock it, write it.  (FlushBuffer will do nothing if the
@@ -4041,6 +4066,10 @@ bool SyncFlushOneBuffer(int buf_id, bool get_condition_lock)
         if (!BufferIsInvalid(queue_head_buffer) && (queue_head_buffer - 1 == buf_id)) {
             retry_times = CONDITION_LOCK_RETRY_TIMES;
         }
+        if (ENABLE_DMS) {
+            /* to speed the rate of flushing dirty page to disk */
+            retry_times = CONDITION_LOCK_RETRY_TIMES;
+        }
         for (;;) {
             if (!LWLockConditionalAcquire(buf_desc->content_lock, LW_SHARED)) {
                 i++;
@@ -4057,11 +4086,21 @@ bool SyncFlushOneBuffer(int buf_id, bool get_condition_lock)
         (void)LWLockAcquire(buf_desc->content_lock, LW_SHARED);
     }
 
+    if (ENABLE_DMS && buf_desc->aio_in_progress) {
+        LWLockRelease(buf_desc->content_lock);
+        UnpinBuffer(buf_desc, true);
+        return false;
+    }
+
     if (IsSegmentBufferID(buf_id)) {
         Assert(IsSegmentPhysicalRelNode(buf_desc->tag.rnode));
         SegFlushBuffer(buf_desc, NULL);
     } else {
         FlushBuffer(buf_desc, NULL);
+    }
+
+    if (SS_REFORM_REFORMER) {
+        ClearReadHint(buf_desc->buf_id);
     }
 
     LWLockRelease(buf_desc->content_lock);
@@ -4126,7 +4165,11 @@ uint32 SyncOneBuffer(int buf_id, bool skip_recently_used, WritebackContext* wb_c
         tag.rnode.relNode = buf_desc->seg_fileno;
         tag.blockNum = buf_desc->seg_blockno;
     }
-    UnpinBuffer(buf_desc, true);
+
+    if (!t_thrd.dms_cxt.buf_in_aio) {
+        /* when enable DSS AIO, UnpinBuffer in AIO complete callback */
+        UnpinBuffer(buf_desc, true);
+    }
 
     ScheduleBufferTagForWriteback(wb_context, &tag);
 
@@ -4533,6 +4576,8 @@ void FlushBuffer(void *buf, SMgrRelation reln, ReadBufferMethod flushmethod, boo
     uint32 buf_state;
     RedoBufferInfo bufferinfo = {0};
 
+    t_thrd.dms_cxt.buf_in_aio = false;
+
     /*
      * Acquire the buffer's io_in_progress lock.  If StartBufferIO returns
      * false, then someone else flushed the buffer before we could, so we need
@@ -4629,7 +4674,39 @@ void FlushBuffer(void *buf, SMgrRelation reln, ReadBufferMethod flushmethod, boo
             .bucketNode = SegmentBktId,
             .opt = 0
         };
-        seg_physical_write(spc, fakenode, bufferinfo.blockinfo.forknum, bufdesc->seg_blockno, bufToWrite, false);
+
+        if (ENABLE_DMS && t_thrd.role == PAGEWRITER_THREAD && ENABLE_DSS_AIO) {
+            int thread_id = t_thrd.pagewriter_cxt.pagewriter_id;
+            PageWriterProc *pgwr = &g_instance.ckpt_cxt_ctl->pgwr_procs.writer_proc[thread_id];
+            DSSAioCxt *aio_cxt = &pgwr->aio_cxt;
+            int aiobuf_id = DSSAioGetIOCBIndex(aio_cxt);
+            char *tempBuf = (char *)(pgwr->aio_buf + aiobuf_id * BLCKSZ);
+            errno_t ret = memcpy_s(tempBuf, BLCKSZ, bufToWrite, BLCKSZ);
+            securec_check(ret, "\0", "\0");
+
+            struct iocb *iocb_ptr = DSSAioGetIOCB(aio_cxt);
+            int32 io_ret = seg_physical_aio_prep_pwrite(spc, fakenode, bufferinfo.blockinfo.forknum,
+                bufdesc->seg_blockno, tempBuf, (void *)iocb_ptr);
+            if (io_ret != DSS_SUCCESS) {
+                ereport(PANIC, (errmsg("dss aio failed, buffer: %d/%d/%d/%d/%d %d-%u",
+                    fakenode.spcNode, fakenode.dbNode, fakenode.relNode, (int)fakenode.bucketNode,
+                    (int)fakenode.opt, bufferinfo.blockinfo.forknum, bufdesc->seg_blockno)));
+            }
+
+            if (bufdesc->aio_in_progress) {
+                ereport(PANIC, (errmsg("buffer is already in aio progress, buffer: %d/%d/%d/%d/%d %d-%u",
+                    fakenode.spcNode, fakenode.dbNode, fakenode.relNode, (int)fakenode.bucketNode,
+                    (int)fakenode.opt, bufferinfo.blockinfo.forknum, bufdesc->seg_blockno)));
+            }
+
+            t_thrd.dms_cxt.buf_in_aio = true;
+            bufdesc->aio_in_progress = true;
+            /* should be after io_prep_pwrite, because io_prep_pwrite will memset iocb struct */
+            iocb_ptr->data = (void *)bufdesc;
+            DSSAioAppendIOCB(aio_cxt, iocb_ptr);
+        } else {
+            seg_physical_write(spc, fakenode, bufferinfo.blockinfo.forknum, bufdesc->seg_blockno, bufToWrite, false);
+        }
     } else {
         SegmentCheck(!IsSegmentFileNode(bufdesc->tag.rnode));
         smgrwrite(reln, bufferinfo.blockinfo.forknum, bufferinfo.blockinfo.blkno, bufToWrite, skipFsync);
@@ -5304,7 +5381,8 @@ static void flush_wait_page_writer(BufferDesc *buf_desc, Relation rel, Oid db_id
     uint32 buf_state;
     for (;;) {
         buf_state = LockBufHdr(buf_desc);
-        if (flush_buffer_match(buf_desc, rel, db_id) && dw_buf_valid_dirty(buf_state)) {
+        if (flush_buffer_match(buf_desc, rel, db_id) && dw_buf_valid_aio_finished(buf_desc, buf_state) &&
+            dw_buf_valid_dirty(buf_state)) {
             UnlockBufHdr(buf_desc, buf_state);
             pg_usleep(MILLISECOND_TO_MICROSECOND);
         } else {
@@ -6217,6 +6295,12 @@ bool StartBufferIO(BufferDesc *buf, bool for_input)
          * me to finish the I/O.
          */
         (void)LWLockAcquire(buf->io_in_progress_lock, LW_EXCLUSIVE);
+
+        if (buf->aio_in_progress) {
+            LWLockRelease(buf->io_in_progress_lock);
+            pg_usleep(1000L);
+            continue;
+        }
 
         buf_state = LockBufHdr(buf);
         if (!(buf_state & BM_IO_IN_PROGRESS)) {

@@ -190,10 +190,14 @@ static void knl_g_dms_init(knl_g_dms_context *dms_cxt)
     dms_cxt->SSRecoveryInfo.restart_failover_flag = false;
     dms_cxt->SSRecoveryInfo.reform_ready = false;
     dms_cxt->SSRecoveryInfo.in_failover = false;
+    dms_cxt->SSRecoveryInfo.in_flushcopy = false;
     dms_cxt->log_timezone = NULL;
     pg_atomic_init_u32(&dms_cxt->inDmsThreShmemInitCnt, 0);
     pg_atomic_init_u32(&dms_cxt->inProcExitCnt, 0);
     dms_cxt->dmsInited = false;
+    dms_cxt->ckptRedo = InvalidXLogRecPtr;
+    dms_cxt->resetSyscache = false;
+    dms_cxt->finishedRecoverOldPrimaryDWFile = false;
 }
 
 static void knl_g_tests_init(knl_g_tests_context* tests_cxt)

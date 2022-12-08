@@ -164,8 +164,11 @@ void ReceiveSharedInvalidMessages(void (*invalFunction)(SharedInvalidationMessag
      * catchup signal this way avoids creating spikes in system load for what
      * should be just a background maintenance activity.
      */
-    if (catchupInterruptPending) {
+    if (catchupInterruptPending || (ENABLE_DMS && g_instance.dms_cxt.resetSyscache)) {
         catchupInterruptPending = false;
+        if (ENABLE_DMS) {
+            g_instance.dms_cxt.resetSyscache = false;
+        }
         ereport(DEBUG4, (errmsg("sinval catchup complete, cleaning queue")));
         SICleanupQueue(false, 0);
     }

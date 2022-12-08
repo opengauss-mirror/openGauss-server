@@ -57,6 +57,11 @@
 #define XLogSegSize XLogSegmentSize
 #define XLogSegmentsPerXLogId (UINT64CONST(0x100000000) / XLogSegmentSize)
 #define XLogRecordMaxSize ((uint32)0x3fffe000) /* 1 gigabyte - 8 kbyte */
+#define XLogBaseSize (16ULL * 1024 * 1024)
+#define XLogSegmentsNum(val) (((val) * XLogBaseSize + XLogSegSize - 1) / XLogSegSize)
+
+
+#define XLogPreReadSize 67108864 // 64MB
 
 /* Compute XLogRecPtr with segment number and offset. */
 #define XLogSegNoOffsetToRecPtr(segno, offset, dest) \
@@ -84,6 +89,9 @@
 
 #define XLByteInPrevSeg(xlrp, logSegNo) ((((xlrp)-1) / XLogSegSize) == (logSegNo))
 
+#define XLByteInPreReadBuf(xlrp, preReadStartPtr) \
+    (((xlrp) >= (preReadStartPtr)) && ((xlrp) < (preReadStartPtr + XLogPreReadSize)))
+
 /* Check if an XLogRecPtr value is in a plausible range */
 #define XRecOffIsValid(xlrp) ((xlrp) % XLOG_BLCKSZ >= SizeOfXLogShortPHD)
 
@@ -103,6 +111,7 @@
 
 
 #define InvalidRepOriginId 0
+#define InvalidXlogPreReadStartPtr 0xFFFFFFFFFFFFFFFF
 
 /*
  * Block IDs used to distinguish different kinds of record fragments. Block
@@ -300,6 +309,12 @@ struct XLogReaderState {
     char* readBuf;
     uint32 readLen;
     char* readBufOrigin;
+
+    /* per-reading for dss */
+    XLogRecPtr preReadStartPtr;
+    char* preReadBuf;
+    char* preReadBufOrigin;
+
     /* last read segment, segment offset, TLI for data currently in readBuf */
     XLogSegNo readSegNo;
     uint32 readOff;

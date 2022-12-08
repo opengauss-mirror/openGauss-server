@@ -35,12 +35,24 @@ Snapshot SSGetSnapshotData(Snapshot snapshot)
     dms_opengauss_txn_snapshot_t dms_snapshot;
     dms_context_t dms_ctx;
     InitDmsContext(&dms_ctx);
-    dms_ctx.xmap_ctx.dest_id = (unsigned int)SS_MASTER_ID;
-
-    if (dms_request_opengauss_txn_snapshot(&dms_ctx, &dms_snapshot) != DMS_SUCCESS) {
-        ereport(ERROR, (errmsg("failed to request snapshot from master through dms")));
+    if (SS_IN_REFORM) {
+        ereport(WARNING, (errmsg("[SS reform] SSGetSnapshotData returns NULL in reform.")));
         return NULL;
     }
+
+    do {
+        dms_ctx.xmap_ctx.dest_id = (unsigned int)SS_MASTER_ID;
+        if (dms_request_opengauss_txn_snapshot(&dms_ctx, &dms_snapshot) == DMS_SUCCESS) {
+            break;
+        }
+
+        if (SS_IN_REFORM) {
+            ereport(WARNING, (errmsg("[SS reform] SSGetSnapshotData returns NULL in reform.")));
+            return NULL;
+        }
+        pg_usleep(USECS_PER_SEC);
+
+    } while (true);
 
     snapshot->xmin = dms_snapshot.xmin;
     snapshot->xmax = dms_snapshot.xmax;
@@ -105,28 +117,26 @@ CommitSeqNo SSTransactionIdGetCommitSeqNo(TransactionId transactionId, bool isCo
         dms_txn_info.snapshotxmin = InvalidTransactionId;
     }
 
-    if (SSTransactionIdGetCSN(&dms_txn_info, &xid_csn_result) == DMS_SUCCESS) {
-        csn = xid_csn_result.csn;
-        clogstatus = (int)xid_csn_result.clogstatus;
-        lsn = xid_csn_result.lsn;
-        if (sync != NULL && (bool)xid_csn_result.sync) {
-            *sync = (bool)xid_csn_result.sync;
-            ereport(DEBUG1, (errmsg("SS primary xid sync success, xid=%lu.", transactionId)));
-        }
-        if (snapshot != NULL) {
-            ereport(DEBUG1, (errmsg("SS get txn info success, xid=%lu, snapshot=%lu-%lu-%lu, csn=%lu.", transactionId,
-                snapshot->xmin, snapshot->xmax, snapshot->snapshotcsn, csn)));
+    do {
+        if (SSTransactionIdGetCSN(&dms_txn_info, &xid_csn_result) == DMS_SUCCESS) {
+            csn = xid_csn_result.csn;
+            clogstatus = (int)xid_csn_result.clogstatus;
+            lsn = xid_csn_result.lsn;
+            if (sync != NULL && (bool)xid_csn_result.sync) {
+                *sync = (bool)xid_csn_result.sync;
+                ereport(DEBUG1, (errmsg("SS primary xid sync success, xid=%lu.", transactionId)));
+            }
+            if (snapshot != NULL) {
+                ereport(DEBUG1, (errmsg("SS get txn info success, xid=%lu, snapshot=%lu-%lu-%lu, csn=%lu.", transactionId,
+                    snapshot->xmin, snapshot->xmax, snapshot->snapshotcsn, csn)));
+            } else {
+                ereport(DEBUG1, (errmsg("SS get txn info success, snapshot is NULL")));
+            }
         } else {
-            ereport(DEBUG1, (errmsg("SS get txn info success, snapshot is NULL")));
+            pg_usleep(USECS_PER_SEC);
+            continue;
         }
-    } else {
-        if (snapshot != NULL) {
-            ereport(ERROR, (errmsg("SS get txn info failed, xid=%lu, snapshot=%lu-%lu-%lu.", transactionId,
-                snapshot->xmin, snapshot->xmax, snapshot->snapshotcsn)));
-        } else {
-            ereport(ERROR, (errmsg("SS get txn info failed, snapshot is NULL")));
-        }
-    }
+    } while (true);
 
     if (COMMITSEQNO_IS_COMMITTED(csn) || COMMITSEQNO_IS_ABORTED(csn)) {
         t_thrd.xact_cxt.cachedFetchCSNXid = transactionId;
@@ -174,12 +184,19 @@ bool SSTransactionIdDidCommit(TransactionId transactionId)
         dms_ctx.xid_ctx.xid = *(uint64 *)(&transactionId);
         dms_ctx.xid_ctx.inst_id = (unsigned char)SS_MASTER_ID;
 
-        if (dms_request_opengauss_txn_status(&dms_ctx, (uint8)XID_COMMITTED, (uint8 *)&did_commit) != DMS_SUCCESS) {
-            ereport(FATAL, (errmsg("SS get txn did_commit failed, xid=%lu.", transactionId)));
-        }
-        remote_get = true;
-        ereport(DEBUG1,
-                (errmsg("SS get txn did_commit success, xid=%lu, did_commit=%d.", transactionId, did_commit)));
+        do {
+            if (dms_request_opengauss_txn_status(&dms_ctx, (uint8)XID_COMMITTED, (uint8 *)&did_commit)
+                == DMS_SUCCESS) {
+                remote_get = true;
+                ereport(DEBUG1,
+                    (errmsg("SS get txn did_commit success, xid=%lu, did_commit=%d.",
+                        transactionId, did_commit)));
+                break;
+            } else {
+                pg_usleep(USECS_PER_SEC);
+                continue;
+            }
+        } while (true);
     }
 
     if (did_commit && remote_get) {
@@ -203,10 +220,16 @@ bool SSTransactionIdIsInProgress(TransactionId transactionId)
     dms_ctx.xid_ctx.xid = *(uint64 *)(&transactionId);
     dms_ctx.xid_ctx.inst_id = (unsigned char)SS_MASTER_ID;
 
-    if (dms_request_opengauss_txn_status(&dms_ctx, (uint8)XID_INPROGRESS, (uint8 *)&in_progress) != DMS_SUCCESS) {
-        ereport(ERROR, (errmsg("SS get txn in_progress failed, xid=%lu.", transactionId)));
-    }
-    ereport(DEBUG1, (errmsg("SS get txn in_progress success, xid=%lu, in_progress=%d.", transactionId, in_progress)));
+    do {
+        if (dms_request_opengauss_txn_status(&dms_ctx, (uint8)XID_INPROGRESS, (uint8 *)&in_progress) == DMS_SUCCESS) {
+            ereport(DEBUG1, (errmsg("SS get txn in_progress success, xid=%lu, in_progress=%d.",
+                transactionId, in_progress)));
+            break;
+        } else {
+            pg_usleep(USECS_PER_SEC);
+            continue;
+        }
+    } while (true);
     return in_progress;
 }
 
@@ -219,14 +242,17 @@ TransactionId SSMultiXactIdGetUpdateXid(TransactionId xmax, uint16 t_infomask, u
     dms_ctx.xid_ctx.xid = *(uint64 *)(&xmax);
     dms_ctx.xid_ctx.inst_id = (unsigned char)SS_MASTER_ID;
 
-    int ret = dms_request_opengauss_update_xid(&dms_ctx, t_infomask, t_infomask2, (unsigned long long *)&update_xid);
-    if (ret != DMS_SUCCESS) {
-        update_xid = InvalidTransactionId;
-        ereport(WARNING,
-            (errmsg("SS get update xid failed, multixact xid=%lu.", xmax)));
-    }
+    do {
+        if (dms_request_opengauss_update_xid(&dms_ctx, t_infomask, t_infomask2, (unsigned long long *)&update_xid)
+            == DMS_SUCCESS) {
+            ereport(DEBUG1, (errmsg("SS get update xid success, multixact xid=%lu, uxid=%lu.", xmax, update_xid)));
+            break;
+        } else {
+            pg_usleep(USECS_PER_SEC);
+            continue;
+        }
+    } while (true);
 
-    ereport(DEBUG1, (errmsg("SS get update xid success, multixact xid=%lu, uxid=%lu.", xmax, update_xid)));
     return update_xid;
 }
 

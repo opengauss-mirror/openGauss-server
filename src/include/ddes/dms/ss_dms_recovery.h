@@ -34,6 +34,7 @@
 #define SSSKIP_REDO_REPLAY (ENABLE_DMS && g_instance.dms_cxt.SSRecoveryInfo.skip_redo_replay == true)
 #define SS_BEFORE_RECOVERY (ENABLE_DMS && g_instance.dms_cxt.SSReformInfo.in_reform == true \
                             && g_instance.dms_cxt.SSRecoveryInfo.recovery_pause_flag == true)
+#define SS_IN_FAILOVER (ENABLE_DMS && g_instance.dms_cxt.SSRecoveryInfo.in_failover == true)
 
 typedef struct st_reformer_ctrl {
     uint64 list_stable; // stable instances list
@@ -60,12 +61,13 @@ typedef struct ss_recovery_info {
     bool reform_ready;
     bool in_failover;      // used to judge this is failover, this tag will combine with failover_triggered later
     // in failover Scenario,before failover_triggered become true, this node knows itself will become new primary
+    bool in_flushcopy;
 } ss_recovery_info_t;
 
 extern bool SSRecoveryNodes();
 extern int SSGetPrimaryInstId();
 extern void SSSavePrimaryInstId(int id);
-extern void SSReadControlFile(int id);
+extern void SSReadControlFile(int id, bool updateDmsCtx = false);
 extern void SSWriteReformerControlPages(void);
 extern bool SSRecoveryApplyDelay(const XLogReaderState *record);
 extern void SShandle_promote_signal();

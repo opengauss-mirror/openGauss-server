@@ -33,10 +33,12 @@
 #include "storage/buf/bufmgr.h"
 #include "storage/ipc.h"
 #include "storage/smgr/smgr.h"
+#include "storage/smgr/segment.h"
 #include "storage/pmsignal.h"
 #include "storage/standby.h"
 #include "access/double_write.h"
 #include "access/xlog.h"
+#include "utils/aiomem.h"
 #include "utils/guc.h"
 #include "utils/memutils.h"
 #include "utils/resowner.h"
@@ -44,6 +46,7 @@
 #include "gssignal/gs_signal.h"
 #include "gstrace/gstrace_infra.h"
 #include "gstrace/postmaster_gstrace.h"
+#include "ddes/dms/ss_dms_bufmgr.h"
 
 #include <zstd.h>
 
@@ -311,6 +314,16 @@ void incre_ckpt_pagewriter_cxt_init()
         pgwr->thrd_dw_cxt.is_new_relfilenode = false;
         pgwr->dirty_list_size = dirty_list_size;
         pgwr->dirty_buf_list = (CkptSortItem *)palloc0(dirty_list_size * sizeof(CkptSortItem));
+    }
+
+    if (ENABLE_DMS) {
+        /* initialize aio block buffer */
+        for (int i = 1; i < thread_num; i++) {
+            PageWriterProc *pgwr = &g_instance.ckpt_cxt_ctl->pgwr_procs.writer_proc[i];
+            /* 2M AIO buffer */
+            char *unaligned_buf = (char *)palloc0(DSS_AIO_BATCH_SIZE * DSS_AIO_UTIL_NUM * BLCKSZ + BLCKSZ);
+            pgwr->aio_buf = (char *)TYPEALIGN(BLCKSZ, unaligned_buf);
+        }
     }
 
     init_candidate_list();
@@ -1357,6 +1370,11 @@ static void ckpt_pagewriter_sub_thread_loop()
             (errmodule(MOD_INCRE_CKPT),
                 errmsg("pagewriter thread shut down, id is %d", t_thrd.pagewriter_cxt.pagewriter_id)));
 
+        if (ENABLE_DMS) {
+            PageWriterProc *pgwr = &g_instance.ckpt_cxt_ctl->pgwr_procs.writer_proc[thread_id];
+            DSSAioDestroy(&pgwr->aio_cxt);
+        }
+
         /*
          * From here on, elog(ERROR) should end with exit(1), not send control back to
          * the sigsetjmp block above
@@ -1617,6 +1635,21 @@ void crps_destory_ctxs()
     }
 }
 
+static void incre_ckpt_aio_callback(struct io_event *event)
+{
+    BufferDesc *buf_desc = (BufferDesc *)(event->data);
+    uint32 written_size = event->obj->u.c.nbytes;
+    if (written_size != event->res) {
+        ereport(PANIC, (errmsg("aio write failed, buffer: %d/%d/%d/%d/%d %d-%d",
+            buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode,
+            buf_desc->tag.rnode.relNode, (int32)buf_desc->tag.rnode.bucketNode,
+            (int32)buf_desc->tag.rnode.opt, buf_desc->tag.forkNum, buf_desc->tag.blockNum)));
+    }
+
+    buf_desc->aio_in_progress = false;
+    UnpinBuffer(buf_desc, true);
+}
+
 void ckpt_pagewriter_main(void)
 {
     sigjmp_buf localSigjmpBuf;
@@ -1658,6 +1691,12 @@ void ckpt_pagewriter_main(void)
     (void)MemoryContextSwitchTo(pagewriter_context);
     on_shmem_exit(pagewriter_kill, (Datum)0);
 
+    /* initialize AIO context */
+    if (ENABLE_DMS && t_thrd.pagewriter_cxt.pagewriter_id != 0) {
+        PageWriterProc *pgwr = &g_instance.ckpt_cxt_ctl->pgwr_procs.writer_proc[t_thrd.pagewriter_cxt.pagewriter_id];
+        DSSAioInitialize(&pgwr->aio_cxt, incre_ckpt_aio_callback);
+    }
+
     /*
      * If an exception is encountered, processing resumes here.
      *
@@ -1665,6 +1704,11 @@ void ckpt_pagewriter_main(void)
      */
     if (sigsetjmp(localSigjmpBuf, 1) != 0) {
         ereport(WARNING, (errmodule(MOD_INCRE_CKPT), errmsg("pagewriter exception occured.")));
+        if (ENABLE_DMS && t_thrd.pagewriter_cxt.pagewriter_id != 0) {
+            int thread_id = t_thrd.pagewriter_cxt.pagewriter_id;
+            PageWriterProc *pgwr = &g_instance.ckpt_cxt_ctl->pgwr_procs.writer_proc[thread_id];
+            DSSAioFlush(&pgwr->aio_cxt);
+        }
         ckpt_pagewriter_handle_exception(pagewriter_context);
     }
 
@@ -1953,12 +1997,18 @@ static uint32 incre_ckpt_pgwr_flush_dirty_page(WritebackContext *wb_context,
     uint32 sync_state;
     BufferDesc *buf_desc = NULL;
     int buf_id;
+    int thread_id = t_thrd.pagewriter_cxt.pagewriter_id;
+    PageWriterProc *pgwr = &g_instance.ckpt_cxt_ctl->pgwr_procs.writer_proc[thread_id];
+    DSSAioCxt *aio_cxt = &pgwr->aio_cxt;
 
     for (int i = start; i < start + batch_num; i++) {
         buf_id = dirty_buf_list[i].buf_id;
         if (buf_id == DW_INVALID_BUFFER_ID) {
             continue;
         }
+
+        /* Make sure we will have room to remember the buffer pin */
+        ResourceOwnerEnlargeBuffers(t_thrd.utils_cxt.CurrentResourceOwner);
 
         buf_desc = GetBufferDescriptor(buf_id);
         buf_state = LockBufHdr(buf_desc);
@@ -1973,6 +2023,11 @@ static uint32 incre_ckpt_pgwr_flush_dirty_page(WritebackContext *wb_context,
             UnlockBufHdr(buf_desc, buf_state);
         }
     }
+
+    if (ENABLE_DMS) {
+        DSSAioFlush(aio_cxt);
+    }
+
     return num_actual_flush;
 }
 
@@ -1994,20 +2049,28 @@ static void incre_ckpt_pgwr_flush_dirty_queue(WritebackContext *wb_context)
 
     ResourceOwnerEnlargeBuffers(t_thrd.utils_cxt.CurrentResourceOwner);
 
-    /* Double write can only handle at most DW_DIRTY_PAGE_MAX at one time. */
-    for (int i = 0; i < runs; i++) {
-        /* Last batch, take the rest of the buffers */
-        int offset = i * dw_batch_page_max;
-        int batch_num = (i == runs - 1) ? (need_flush_num - offset) : dw_batch_page_max;
-        uint32 flush_num;
-
+    if (ENABLE_DMS) {
         pgwr->thrd_dw_cxt.is_new_relfilenode = is_new_relfilenode;
         pgwr->thrd_dw_cxt.dw_page_idx = -1;
-        dw_perform_batch_flush(batch_num, dirty_buf_list + offset, thread_id, &pgwr->thrd_dw_cxt);
-        flush_num = incre_ckpt_pgwr_flush_dirty_page(wb_context, dirty_buf_list, offset, batch_num);
+        num_actual_flush = incre_ckpt_pgwr_flush_dirty_page(wb_context, dirty_buf_list, 0, need_flush_num);
         pgwr->thrd_dw_cxt.dw_page_idx = -1;
-        num_actual_flush += flush_num;
+    } else {
+        /* Double write can only handle at most DW_DIRTY_PAGE_MAX at one time. */
+        for (int i = 0; i < runs; i++) {
+            /* Last batch, take the rest of the buffers */
+            int offset = i * dw_batch_page_max;
+            int batch_num = (i == runs - 1) ? (need_flush_num - offset) : dw_batch_page_max;
+            uint32 flush_num;
+
+            pgwr->thrd_dw_cxt.is_new_relfilenode = is_new_relfilenode;
+            pgwr->thrd_dw_cxt.dw_page_idx = -1;
+            dw_perform_batch_flush(batch_num, dirty_buf_list + offset, thread_id, &pgwr->thrd_dw_cxt);
+            flush_num = incre_ckpt_pgwr_flush_dirty_page(wb_context, dirty_buf_list, offset, batch_num);
+            pgwr->thrd_dw_cxt.dw_page_idx = -1;
+            num_actual_flush += flush_num;
+        }
     }
+
     (void)pg_atomic_fetch_add_u64(&g_instance.ckpt_cxt_ctl->page_writer_actual_flush, num_actual_flush);
     (void)pg_atomic_fetch_add_u32(&g_instance.ckpt_cxt_ctl->page_writer_last_flush, num_actual_flush);
     (void)pg_atomic_fetch_add_u32(&g_instance.ckpt_cxt_ctl->page_writer_last_queue_flush, num_actual_flush);
@@ -2030,19 +2093,26 @@ static void incre_ckpt_pgwr_flush_dirty_list(WritebackContext *wb_context, uint3
     qsort(dirty_buf_list, need_flush_num, sizeof(CkptSortItem), ckpt_buforder_comparator);
     ResourceOwnerEnlargeBuffers(t_thrd.utils_cxt.CurrentResourceOwner);
 
-    /* Double write can only handle at most DW_DIRTY_PAGE_MAX at one time. */
-    for (int i = 0; i < runs; i++) {
-        /* Last batch, take the rest of the buffers */
-        int offset = i * dw_batch_page_max;
-        int batch_num = (i == runs - 1) ? (need_flush_num - offset) : dw_batch_page_max;
-        uint32 flush_num;
-
+    if (ENABLE_DMS) {
         pgwr->thrd_dw_cxt.is_new_relfilenode = is_new_relfilenode;
         pgwr->thrd_dw_cxt.dw_page_idx = -1;
-        dw_perform_batch_flush(batch_num, dirty_buf_list + offset, thread_id, &pgwr->thrd_dw_cxt);
-        flush_num = incre_ckpt_pgwr_flush_dirty_page(wb_context, dirty_buf_list, offset, batch_num);
+        num_actual_flush = incre_ckpt_pgwr_flush_dirty_page(wb_context, dirty_buf_list, 0, need_flush_num);
         pgwr->thrd_dw_cxt.dw_page_idx = -1;
-        num_actual_flush += flush_num;
+    } else {
+        /* Double write can only handle at most DW_DIRTY_PAGE_MAX at one time. */
+        for (int i = 0; i < runs; i++) {
+            /* Last batch, take the rest of the buffers */
+            int offset = i * dw_batch_page_max;
+            int batch_num = (i == runs - 1) ? (need_flush_num - offset) : dw_batch_page_max;
+            uint32 flush_num;
+
+            pgwr->thrd_dw_cxt.is_new_relfilenode = is_new_relfilenode;
+            pgwr->thrd_dw_cxt.dw_page_idx = -1;
+            dw_perform_batch_flush(batch_num, dirty_buf_list + offset, thread_id, &pgwr->thrd_dw_cxt);
+            flush_num = incre_ckpt_pgwr_flush_dirty_page(wb_context, dirty_buf_list, offset, batch_num);
+            pgwr->thrd_dw_cxt.dw_page_idx = -1;
+            num_actual_flush += flush_num;
+        }
     }
     (void)pg_atomic_fetch_add_u64(&g_instance.ckpt_cxt_ctl->page_writer_actual_flush, num_actual_flush);
     (void)pg_atomic_fetch_add_u32(&g_instance.ckpt_cxt_ctl->page_writer_last_flush, num_actual_flush);
@@ -2070,6 +2140,11 @@ static bool check_buffer_dirty_flag(BufferDesc* buf_desc)
     uint32 local_buf_state = pg_atomic_read_u32(&buf_desc->state);
     bool check_lsn_not_match = (local_buf_state & BM_VALID) && !(local_buf_state & BM_DIRTY) &&
         XLByteLT(buf_desc->lsn_on_disk, PageGetLSN(tmpBlock)) && RecoveryInProgress() && !segment_buf;
+
+    if (ENABLE_DMS && check_lsn_not_match &&
+        (XLogRecPtrIsInvalid(buf_desc->lsn_on_disk) || GetDmsBufCtrl(buf_desc->buf_id)->state & BUF_DIRTY_NEED_FLUSH)) {
+        return false;
+    }
 
     if (check_lsn_not_match) {
         PinBuffer(buf_desc, NULL);

@@ -1109,7 +1109,12 @@ static void knl_u_statement_init(knl_u_statement_context* statement_cxt)
 
 void knl_u_relmap_init(knl_u_relmap_context* relmap_cxt)
 {
-    relmap_cxt->shared_map = (RelMapFile*)palloc0(sizeof(RelMapFile));
+    if (ENABLE_DMS) {
+        char *unaligned_buf = (char*)palloc0(sizeof(RelMapFile) + ALIGNOF_BUFFER);
+        relmap_cxt->shared_map = (RelMapFile*)BUFFERALIGN(unaligned_buf);
+    } else {
+        relmap_cxt->shared_map = (RelMapFile*)palloc0(sizeof(RelMapFile));
+    }
     relmap_cxt->local_map = (RelMapFile*)palloc0(sizeof(RelMapFile));
     relmap_cxt->active_shared_updates = (RelMapFile*)palloc0(sizeof(RelMapFile));
     relmap_cxt->active_local_updates = (RelMapFile*)palloc0(sizeof(RelMapFile));

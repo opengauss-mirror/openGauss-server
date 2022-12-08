@@ -40,6 +40,8 @@
 #include "utils/relfilenodemap.h"
 #include "pgxc/execRemote.h"
 #include "ddes/dms/ss_transaction.h"
+#include "storage/file/fio_device.h"
+#include "libaio.h"
 
 void spc_lock(SegSpace *spc)
 {
@@ -101,6 +103,28 @@ void spc_write_block(SegSpace *spc, RelFileNode relNode, ForkNumber forknum, con
     SegExtentGroup *seg = &spc->extent_group[egid][forknum];
 
     df_pwrite_block(seg->segfile, buffer, blocknum);
+}
+
+int32 spc_aio_prep_pwrite(SegSpace *spc, RelFileNode relNode, ForkNumber forknum, BlockNumber blocknum,
+    const char *buffer, void *iocb_ptr)
+{
+    int egid = EXTENT_TYPE_TO_GROUPID(relNode.relNode);
+    SegExtentGroup *seg = &spc->extent_group[egid][forknum];
+
+    off_t offset = ((off_t)blocknum) * BLCKSZ;
+    int sliceno = DF_OFFSET_TO_SLICENO(offset);
+    off_t roffset = DF_OFFSET_TO_SLICE_OFFSET(offset);
+
+    SegPhysicalFile spf = df_get_physical_file(seg->segfile, sliceno, blocknum);
+    int32 ret;
+    if (is_dss_fd(spf.fd)) {
+        ret = dss_aio_prep_pwrite(iocb_ptr, spf.fd, (void *)buffer, BLCKSZ, roffset);
+    } else {
+        io_prep_pwrite((struct iocb *)iocb_ptr, spf.fd, (void *)buffer, BLCKSZ, roffset);
+        ret = DSS_SUCCESS;
+    }
+
+    return ret;
 }
 
 void spc_writeback(SegSpace *spc, int extent_size, ForkNumber forknum, BlockNumber blocknum, BlockNumber nblocks)

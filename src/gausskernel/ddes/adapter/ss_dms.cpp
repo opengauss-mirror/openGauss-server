@@ -117,7 +117,7 @@ int ss_dms_func_init()
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_latch_timed_x));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_latch_timed_s));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_unlatch));
-
+    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_pre_uninit));
     return DMS_SUCCESS;
 }
 
@@ -295,4 +295,9 @@ int dms_drc_accessible(void)
 int dms_reform_last_failed(void)
 {
     return g_ss_dms_func.dms_reform_last_failed();
+}
+
+void dms_pre_uninit(void)
+{
+    return g_ss_dms_func.dms_pre_uninit();
 }

@@ -160,25 +160,17 @@ static int SSReadXLog(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int
     /* Read the requested page */
     t_thrd.xlog_cxt.readOff = targetPageOff;
 
-try_again:
-    ssize_t actualBytes = pread(t_thrd.xlog_cxt.readFile, buf, XLOG_BLCKSZ, t_thrd.xlog_cxt.readOff);
-    if (actualBytes != XLOG_BLCKSZ) {
+    bool ret = SSReadXlogInternal(xlogreader, targetPagePtr, buf);
+    if (!ret) {
         ereport(LOG, (errcode_for_file_access(), errmsg("read xlog(start:%X/%X, pos:%u len:%d) failed : %m",
                                                         static_cast<uint32>(targetPagePtr >> BIT_NUM_INT32),
                                                         static_cast<uint32>(targetPagePtr), targetPageOff,
                                                         expectReadLen)));
-
         ereport(emode_for_corrupt_record(emode, targetPagePtr),
                 (errcode_for_file_access(),
                  errmsg("could not read from log file %s to offset %u: %m",
                         XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, t_thrd.xlog_cxt.readSegNo),
                         t_thrd.xlog_cxt.readOff)));
-        if (errno == EINTR) {
-            errno = 0;
-            pg_usleep(REFORM_WAIT_TIME);
-            goto try_again;
-        }
-
         goto next_record_is_invalid;
     }
 
@@ -209,6 +201,61 @@ int SSXLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int re
     int read_len = SSReadXLog(xlogreader, targetPagePtr, Max(XLOG_BLCKSZ, reqLen), readBuf,
         readTLI, g_instance.dms_cxt.SSRecoveryInfo.recovery_xlogDir);
     return read_len;
+}
+
+bool SSReadXlogInternal(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, char *buf)
+{
+    uint32 preReadOff;
+
+    do {
+        if (XLByteInPreReadBuf(targetPagePtr, xlogreader->preReadStartPtr)) {
+            preReadOff = targetPagePtr % XLogPreReadSize;
+            int err = memcpy_s(buf, XLOG_BLCKSZ, xlogreader->preReadBuf + preReadOff, XLOG_BLCKSZ);
+            securec_check(err, "\0", "\0");
+            break;
+        } else {
+            // pre-reading for dss
+            uint32 targetPageOff = targetPagePtr % XLogSegSize;
+            preReadOff = targetPageOff - targetPageOff % XLogPreReadSize;
+            ssize_t actualBytes = pread(t_thrd.xlog_cxt.readFile, xlogreader->preReadBuf, XLogPreReadSize, preReadOff);
+            if (actualBytes != XLogPreReadSize) {
+                return false;
+            }
+            xlogreader->preReadStartPtr = targetPagePtr + preReadOff - targetPageOff;
+        }
+    } while (true);
+
+    return true;
+}
+
+XLogReaderState *SSXLogReaderAllocate(XLogPageReadCB pagereadfunc, void *private_data, Size alignedSize)
+{
+    XLogReaderState *state = XLogReaderAllocate(pagereadfunc, private_data, alignedSize);
+    if (state != NULL) {
+        state->preReadStartPtr = InvalidXlogPreReadStartPtr;
+        state->preReadBufOrigin = (char *)palloc_extended(XLogPreReadSize + alignedSize,
+            MCXT_ALLOC_NO_OOM | MCXT_ALLOC_ZERO);
+        if (state->preReadBufOrigin == NULL) {
+            pfree(state->errormsg_buf);
+            state->errormsg_buf = NULL;
+            pfree(state->readBufOrigin);
+            state->readBufOrigin = NULL;
+            state->readBuf = NULL;
+            pfree(state->readRecordBuf);
+            state->readRecordBuf = NULL;
+            pfree(state);
+            state = NULL;
+            return NULL;
+        }
+
+        if (alignedSize == 0) {
+            state->preReadBuf = state->preReadBufOrigin;
+        } else {
+            state->preReadBuf = (char *)TYPEALIGN(alignedSize, state->preReadBufOrigin);
+        }
+    }
+
+    return state;
 }
 
 void SSGetXlogPath()

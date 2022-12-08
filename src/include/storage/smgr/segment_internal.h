@@ -35,6 +35,7 @@
 #include "storage/smgr/smgr.h"
 #include "storage/file/fio_device_com.h"
 #include "utils/segment_test.h"
+#include "libaio.h"
 
 const int DF_MAP_GROUP_RESERVED = 3;
 const int DF_MAX_MAP_GROUP_CNT = 33;
@@ -102,6 +103,7 @@ void df_create_file(SegLogicFile *sf, bool redo);
 void df_shrink(SegLogicFile *sf, BlockNumber target);
 void df_flush_data(SegLogicFile *sf, BlockNumber blocknum, BlockNumber nblocks);
 bool df_ss_update_segfile_size(SegLogicFile *sf, BlockNumber target_block);
+SegPhysicalFile df_get_physical_file(SegLogicFile *sf, int sliceno, BlockNumber target_block);
 
 /*
  * Data files status in the segment space;
@@ -412,6 +414,8 @@ BlockNumber spc_size(SegSpace *spc, BlockNumber egRelNode, ForkNumber forknum);
 void spc_datafile_create(SegSpace *spc, BlockNumber egRelNode, ForkNumber forknum);
 void spc_extend_file(SegSpace *spc, BlockNumber egRelNode, ForkNumber forknum, BlockNumber blkno);
 bool spc_datafile_exist(SegSpace *spc, BlockNumber egRelNode, ForkNumber forknum);
+int32 spc_aio_prep_pwrite(SegSpace *spc, RelFileNode relNode, ForkNumber forknum, BlockNumber blocknum,
+    const char *buffer, void *iocb_ptr);
 
 extern void spc_shrink_files(SegExtentGroup *seg, BlockNumber target_size, bool redo);
 

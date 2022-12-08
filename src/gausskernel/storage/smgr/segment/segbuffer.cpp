@@ -81,6 +81,12 @@ static bool SegStartBufferIO(BufferDesc *buf, bool forInput)
     while (true) {
         LWLockAcquire(buf->io_in_progress_lock, LW_EXCLUSIVE);
 
+        if (buf->aio_in_progress) {
+            LWLockRelease(buf->io_in_progress_lock);
+            pg_usleep(1000L);
+            continue;
+        }
+
         buf_state = LockBufHdr(buf);
 
         if (!(buf_state & BM_IO_IN_PROGRESS)) {
@@ -302,6 +308,8 @@ void SegMarkBufferDirty(Buffer buf)
 
 void SegFlushBuffer(BufferDesc *buf, SMgrRelation reln)
 {
+    t_thrd.dms_cxt.buf_in_aio = false;
+
     if (!SegStartBufferIO(buf, false)) {
         /* Someone else flushed the buffer */
         return;
@@ -321,7 +329,7 @@ void SegFlushBuffer(BufferDesc *buf, SMgrRelation reln)
 
     char *buf_to_write = NULL;
     RedoBufferInfo buffer_info;
-    
+
     SegSpace *spc;
     if (reln == NULL || reln->seg_space == NULL) {
         spc = spc_open(buf->tag.rnode.spcNode, buf->tag.rnode.dbNode, false);
@@ -354,7 +362,38 @@ void SegFlushBuffer(BufferDesc *buf, SMgrRelation reln)
         buf_to_write = PageSetChecksumCopy((Page)buf_to_write, buffer_info.blockinfo.blkno, true);
     }
 
-    seg_physical_write(spc, buf->tag.rnode, buf->tag.forkNum, buf->tag.blockNum, (char *)buf_to_write, false);
+    if (ENABLE_DMS && t_thrd.role == PAGEWRITER_THREAD && ENABLE_DSS_AIO) {
+        int thread_id = t_thrd.pagewriter_cxt.pagewriter_id;
+        PageWriterProc *pgwr = &g_instance.ckpt_cxt_ctl->pgwr_procs.writer_proc[thread_id];
+        DSSAioCxt *aio_cxt = &pgwr->aio_cxt;
+        int aiobuf_id = DSSAioGetIOCBIndex(aio_cxt);
+        char *tempBuf = (char *)(pgwr->aio_buf + aiobuf_id * BLCKSZ);
+        errno_t ret = memcpy_s(tempBuf, BLCKSZ, buf_to_write, BLCKSZ);
+        securec_check(ret, "\0", "\0");
+
+        struct iocb *iocb_ptr = DSSAioGetIOCB(aio_cxt);
+        int32 io_ret = seg_physical_aio_prep_pwrite(spc, buf->tag.rnode, buf->tag.forkNum,
+            buf->tag.blockNum, tempBuf, (void *)iocb_ptr);
+        if (io_ret != DSS_SUCCESS) {
+            ereport(PANIC, (errmsg("dss aio failed, buffer: %d/%d/%d/%d/%d %d-%u",
+                buf->tag.rnode.spcNode, buf->tag.rnode.dbNode, buf->tag.rnode.relNode, (int)buf->tag.rnode.bucketNode,
+                (int)buf->tag.rnode.opt, buf->tag.forkNum, buf->tag.blockNum)));
+        }
+
+        if (buf->aio_in_progress) {
+            ereport(PANIC, (errmsg("buffer is already in aio progress, buffer: %d/%d/%d/%d/%d %d-%u",
+                buf->tag.rnode.spcNode, buf->tag.rnode.dbNode, buf->tag.rnode.relNode, (int)buf->tag.rnode.bucketNode,
+                (int)buf->tag.rnode.opt, buf->tag.forkNum, buf->tag.blockNum)));
+        }
+
+        buf->aio_in_progress = true;
+        t_thrd.dms_cxt.buf_in_aio = true;
+        /* should be after io_prep_pwrite, because io_prep_pwrite will memset iocb struct */
+        iocb_ptr->data = (void *)buf;
+        DSSAioAppendIOCB(aio_cxt, iocb_ptr);
+    } else {
+        seg_physical_write(spc, buf->tag.rnode, buf->tag.forkNum, buf->tag.blockNum, (char *)buf_to_write, false);
+    }
 
     SegTerminateBufferIO(buf, true, 0);
 
@@ -485,8 +524,12 @@ Buffer ReadBufferFast(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum, Bloc
                 }
 
                 dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(bufHdr->buf_id);
-                if (!LockModeCompatible(buf_ctrl, LW_SHARED)) {
-                    if (!StartReadPage(bufHdr, LW_SHARED)) {
+                LWLockMode lockmode = LW_SHARED;
+                if (g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy && SS_REFORM_REFORMER) {
+                    lockmode = LW_EXCLUSIVE;
+                }
+                if (!LockModeCompatible(buf_ctrl, lockmode)) {
+                    if (!StartReadPage(bufHdr, lockmode)) {
                         SegTerminateBufferIO((BufferDesc *)bufHdr, false, 0);
                         // when reform fail, should return InvalidBuffer to reform proc thread
                         if (AmDmsReformProcProcess() && dms_reform_failed()) {
