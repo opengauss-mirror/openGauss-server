@@ -1125,6 +1125,57 @@ LINE 1: set @ v1:=10;
             ^
 select @v1:=10;
 ERROR:  user_defined variables cannot be set, such as @var_name := expr is not supported.
+--DTS
+\c test_set
+set @v := 10;
+select @v + 666::numeric(10, 2), @v + 20::float;
+ ?column? | ?column? 
+----------+----------
+   676.00 |       30
+(1 row)
+
+set @v = @v + 666::numeric(10, 2);
+select @v;
+ @v  
+-----
+ 676
+(1 row)
+
+set @v1 := 10, @v2 := 13.3;
+drop table if exists test_pro;
+create table test_pro(f1 int, f2 float);
+create or replace procedure pro_insert()
+as
+begin
+    insert into test_pro values(@v1 + 666::numeric(10, 2), @v2 + 20::float);
+end;
+/
+call pro_insert();
+ pro_insert 
+------------
+ 
+(1 row)
+
+select * from test_pro;
+ f1  |  f2  
+-----+------
+ 676 | 33.3
+(1 row)
+
+set @v1 := 11, @v2 := 14.3;
+call pro_insert();
+ pro_insert 
+------------
+ 
+(1 row)
+
+select * from test_pro;
+ f1  |  f2  
+-----+------
+ 676 | 33.3
+ 677 | 34.3
+(2 rows)
+
 \c test_set
 show enable_set_variable_b_format;
  enable_set_variable_b_format 

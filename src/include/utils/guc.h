@@ -191,6 +191,7 @@ typedef struct {
 typedef struct {
     char name[NAMEDATALEN];   /* user-defined name */
     Const *value;
+    bool isParse;
 } GucUserParamsEntry;
 
 #define GUC_QUALIFIER_SEPARATOR '.'

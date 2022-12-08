@@ -1567,16 +1567,27 @@ static Node* transformUserVar(UserVar *uservar)
 
     GucUserParamsEntry *entry = (GucUserParamsEntry *)hash_search(u_sess->utils_cxt.set_user_params_htab,
         uservar->name, HASH_FIND, &found);
-
     if (!found) {
         /* return a null const */
         Const *nullValue = makeConst(UNKNOWNOID, -1, InvalidOid, -2, (Datum)0, true, false);
         return (Node *)nullValue;
     }
 
+    entry = (GucUserParamsEntry *)hash_search(u_sess->utils_cxt.set_user_params_htab, uservar->name, HASH_ENTER, &found);
+    if (entry == NULL) {
+        ereport(ERROR,
+            (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("Failed to create user_defined entry due to out of memory")));
+    }
+
     UserVar *result = makeNode(UserVar);
+    Const *con = (Const *)copyObject(entry->value);
     result->name = uservar->name;
-    result->value = (Expr *)copyObject(entry->value);
+    result->value = (Expr *)con;
+
+    USE_MEMORY_CONTEXT(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB));
+    /* if uservar is parsed, set to true */
+    entry->value = (Const *)copyObject(con);
+    entry->isParse = true;
 
     return (Node *)result;
 }

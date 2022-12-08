@@ -12975,11 +12975,13 @@ void check_variable_value_info(const char* var_name, const Expr* var_expr)
 
     if (found) {
         entry->value = (Const *)copyObject((Const *)(var_expr));
+        entry->isParse = false;
     } else {
         errno_t errval = strncpy_s(entry->name, sizeof(entry->name), var_name, sizeof(entry->name) - 1);
         securec_check_errval(errval, , LOG);
 
         entry->value = (Const *)copyObject((Const *)(var_expr));
+        entry->isParse = false;
     }
 }
 
