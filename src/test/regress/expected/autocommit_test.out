@@ -85,7 +85,7 @@ SELECT * FROM test_a;
 
 ROLLBACK;
 SELECT * FROM test_a;
-ERROR:  relation "test_a" does not exist on datanode1
+--?ERROR:  relation "test_a" does not exist on .*
 LINE 1: SELECT * FROM test_a;
                       ^
 COMMIT;
@@ -236,6 +236,23 @@ SELECT * FROM test_table;
    a   
 -------
  aaaaa
+(1 row)
+
+-- set autocommit = 0 and rollback
+BEGIN;
+INSERT INTO test_table values('ccccc');
+SET autocommit = 0;
+ROLLBACK;
+SELECT * FROM test_table;
+   a   
+-------
+ aaaaa
+(1 row)
+
+SHOW autocommit;
+ autocommit 
+------------
+ on
 (1 row)
 
 \c regression

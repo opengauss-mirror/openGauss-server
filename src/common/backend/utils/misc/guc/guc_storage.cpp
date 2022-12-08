@@ -4672,7 +4672,7 @@ static void assign_phony_autocommit(bool newval, void* extra)
 {
     /* change autocommit from false to on */
     if (newval && u_sess->attr.attr_storage.phony_autocommit != newval) {
-        if (!IsTransactionDefaultState() && !EndTransactionBlock()) {
+        if (IsTransactionInProgressState() && !EndTransactionBlock()) {
             ereport(ERROR, (errmsg("end transaction failed")));
         }
     }
