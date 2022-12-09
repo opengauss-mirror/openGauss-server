@@ -81,7 +81,7 @@ GRANT SELECT,INSERT,UPDATE,DELETE ON TABLE DBE_PLDEVELOPER.gs_errors TO PUBLIC;
 DROP INDEX IF EXISTS pg_catalog.pg_proc_proname_args_nsp_new_index;
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0, 0, 0, 9378;
 CREATE INDEX pg_catalog.pg_proc_proname_args_nsp_new_index on pg_catalog.pg_proc USING BTREE(proname name_ops, proargtypes oidvector_ops, pronamespace oid_ops);
-SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0, 0, 0, 9378;
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0, 0, 0, 0;
 -- ----------------------------------------------------------------
 -- upgrade pg_catalog.pg_conversion 
 -- ----------------------------------------------------------------

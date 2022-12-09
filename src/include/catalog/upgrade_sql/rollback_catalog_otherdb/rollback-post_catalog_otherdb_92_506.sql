@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS pg_catalog.pg_proc_proname_all_args_nsp_index;
