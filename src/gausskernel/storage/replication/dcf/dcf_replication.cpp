@@ -614,7 +614,7 @@ void SetThrdLocals()
 
         nRet = snprintf_s(t_thrd.dcf_cxt.dcfCtxInfo->bak_guc_conf_file,
                           MAXPGPATH, MAXPGPATH - 1, "%s/%s",
-                          t_thrd.proc_cxt.DataDir, CONFIG_BAK_FILENAME);
+                          t_thrd.proc_cxt.DataDir, CONFIG_BAK_FILENAME_WAL);
         securec_check_ss(nRet, "\0", "\0");
 
         nRet = snprintf_s(t_thrd.dcf_cxt.dcfCtxInfo->gucconf_lock_file,

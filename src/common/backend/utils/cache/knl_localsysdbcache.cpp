@@ -700,7 +700,7 @@ bool LocalSysDBCache::LocalSysDBCacheNeedReBuild()
         return true;
     }
     /* we assum 1kb memory leaked once */
-    if (unlikely(abort_count > (uint64)g_instance.attr.attr_memory.local_syscache_threshold)) {
+    if (unlikely(abort_count > (uint64)u_sess->attr.attr_memory.local_syscache_threshold)) {
         return true;
     }
 
@@ -711,7 +711,7 @@ bool LocalSysDBCache::LocalSysDBCacheNeedReBuild()
         ((AllocSet)u_sess->cache_mem_cxt)->totalSpace +
         rel_index_rule_space;
 
-    uint64 memory_upper_limit = ((uint64)g_instance.attr.attr_memory.local_syscache_threshold) << 10;
+    uint64 memory_upper_limit = ((uint64)u_sess->attr.attr_memory.local_syscache_threshold) << 10;
 
     return total_space * (1 - MAX_LSC_FREESIZE_RATIO) > memory_upper_limit;
 }
@@ -750,7 +750,7 @@ bool LocalSysDBCache::LocalSysDBCacheNeedSwapOut()
         AllocSetContextUsedSpace((AllocSet)u_sess->cache_mem_cxt) +
         rel_index_rule_space;
     uint64 memory_upper_limit =
-        (((uint64)g_instance.attr.attr_memory.local_syscache_threshold) << 10) * cur_swapout_ratio;
+        (((uint64)u_sess->attr.attr_memory.local_syscache_threshold) << 10) * cur_swapout_ratio;
     bool need_swapout = used_space > memory_upper_limit;
 
     /* swapout until memory used space is from MAX_LSC_SWAPOUT_RATIO=90% to MIN_LSC_SWAPOUT_RATIO=70% */

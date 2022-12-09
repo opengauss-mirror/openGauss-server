@@ -474,7 +474,7 @@ typedef struct {
 
 #define PG_LOCKFILE_SIZE 1024
 
-#define CONFIG_BAK_FILENAME "postgresql.conf.bak"
+#define CONFIG_BAK_FILENAME_WAL "postgresql.conf.wal"
 
 extern void* pg_malloc(size_t size);
 extern char* xstrdup(const char* s);
