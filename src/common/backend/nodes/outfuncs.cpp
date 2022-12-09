@@ -3735,6 +3735,7 @@ static void _outInsertStmt(StringInfo str, InsertStmt* node)
     WRITE_NODE_FIELD(withClause);
     if (t_thrd.proc->workingVersionNum >= REPLACE_INTO_VERSION_NUM) {
         WRITE_NODE_FIELD(targetList);
+        WRITE_BOOL_FIELD(isReplace);
     }
 #ifdef ENABLE_MULTIPLE_NODES
     if (t_thrd.proc->workingVersionNum >= UPSERT_ROW_STORE_VERSION_NUM) {
@@ -4491,6 +4492,9 @@ static void _outQuery(StringInfo str, Query* node)
     }
     if (t_thrd.proc->workingVersionNum >= SUPPORT_VIEW_AUTO_UPDATABLE) {
         WRITE_NODE_FIELD(withCheckOptions);
+    }
+    if (t_thrd.proc->workingVersionNum >= REPLACE_INTO_VERSION_NUM) {
+        WRITE_BOOL_FIELD(isReplace);
     }
 }
 

@@ -1819,7 +1819,20 @@ CachedPlan* GetWiseCachedPlan(CachedPlanSource* plansource,
 
         if (!IsA(plannedstmt, PlannedStmt))
             continue; /* Ignore utility statements */
+        else {
+            Plan* node = ((PlannedStmt*)plannedstmt)->planTree;
+            ListCell *l2 = NULL;
+            if (IsA(node, ModifyTable)) {
+                foreach (l2, plansource->query_list) {
+                    Query* q = (Query*)lfirst(l2);
 
+                    if (q->commandType == CMD_INSERT && IsA(plansource->raw_parse_tree, InsertStmt)) {
+                        InsertStmt *node2 = (InsertStmt*)plansource->raw_parse_tree;
+                        ((ModifyTable*)node)->isReplace = node2->isReplace;
+                    }
+                }
+            }
+        }
         check_gtm_free_plan(plannedstmt, elevel);
     }
 

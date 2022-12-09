@@ -93,6 +93,38 @@ select * from replace_test;
   1 | aaaaa | ddddd
 (4 rows)
 
+explain analyze REPLACE INTO replace_test values(2,'aaaa','bbbb');
+NOTICE:  before delete trigger
+NOTICE:  before insert trigger
+NOTICE:  after delete trigger
+NOTICE:  after insert trigger
+                                             QUERY PLAN                                              
+-----------------------------------------------------------------------------------------------------
+--? Replace on replace_test  (cost= .* rows=1 width=0) (actual time= .* rows=2 loops=1)
+--?   ->  Result  (cost= .* rows=1 width=0) (actual time= .* rows=1 loops=1)
+--? Trigger replace_before: time= .* calls=2
+--? Trigger replace_after: time= .* calls=2
+--? Total runtime: .* ms
+(5 rows)
+
+explain performance REPLACE INTO replace_test values(2,'ddddd','fffff');
+NOTICE:  before delete trigger
+NOTICE:  before insert trigger
+NOTICE:  after delete trigger
+NOTICE:  after insert trigger
+                                                 QUERY PLAN                                                 
+------------------------------------------------------------------------------------------------------------
+--? Replace on public.replace_test  (cost= .* rows=1 width=0) (actual time= .* rows=2 loops=1)
+   (Buffers: shared hit=27)
+   (CPU: ex c/r=0, ex row=2, ex cyc=0, inc cyc=0)
+--?   ->  Result  (cost= .* rows=1 width=0) (actual time= .* rows=1 loops=1)
+         Output: 2, 'ddddd'::character varying(20), 'fffff'::character varying(20)
+         (CPU: ex c/r=0, ex row=1, ex cyc=0, inc cyc=0)
+--? Trigger replace_before: time= .* calls=2
+--? Trigger replace_after: time= .* calls=2
+--? Total runtime: .* ms
+(9 rows)
+
 truncate replace_test;
 select * from replace_test;
  id | name | key 

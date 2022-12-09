@@ -4636,6 +4636,9 @@ static Query* _copyQuery(const Query* from)
     COPY_SCALAR_FIELD(unique_check);
     COPY_NODE_FIELD(resultRelations);
     COPY_NODE_FIELD(withCheckOptions);
+    if (t_thrd.proc->workingVersionNum >= REPLACE_INTO_VERSION_NUM) {
+        COPY_SCALAR_FIELD(isReplace);
+    }
 
     return newnode;
 }

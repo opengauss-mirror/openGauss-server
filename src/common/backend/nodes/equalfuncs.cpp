@@ -897,6 +897,9 @@ static bool _equalQuery(const Query* a, const Query* b)
     COMPARE_SCALAR_FIELD(unique_check);
     COMPARE_NODE_FIELD(resultRelations);
     COMPARE_NODE_FIELD(withCheckOptions);
+    if (t_thrd.proc->workingVersionNum >= REPLACE_INTO_VERSION_NUM) {
+        COMPARE_SCALAR_FIELD(isReplace);
+    }
 
     return true;
 }
@@ -910,6 +913,7 @@ static bool _equalInsertStmt(const InsertStmt* a, const InsertStmt* b)
     COMPARE_NODE_FIELD(withClause);
     if (t_thrd.proc->workingVersionNum >= REPLACE_INTO_VERSION_NUM) {
         COMPARE_NODE_FIELD(targetList);
+        COMPARE_SCALAR_FIELD(isReplace);
     }
     COMPARE_NODE_FIELD(upsertClause);   
     COMPARE_SCALAR_FIELD(hasIgnore);
