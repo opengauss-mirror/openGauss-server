@@ -5523,7 +5523,7 @@ bool SelectConfigFiles(const char* userDoption, const char* progname)
         }
         TempConfigPath = TempConfigFile;
         get_parent_directory(TempConfigPath);
-        rc = snprintf_s(TempConfigFileName, MAXPGPATH, MAXPGPATH - 1, "%s/%s", TempConfigPath, CONFIG_BAK_FILENAME);
+        rc = snprintf_s(TempConfigFileName, MAXPGPATH, MAXPGPATH - 1, "%s/%s", TempConfigPath, CONFIG_BAK_FILENAME_WAL);
         securec_check_ss(rc, configdir, "\0");
         if (lstat(TempConfigFileName, &stat_buf) != 0) {
             write_stderr("%s cannot access the server configuration file \"%s\": %s\n",
@@ -11061,11 +11061,11 @@ static bool check_gpc_syscache_threshold(bool* newval, void** extra, GucSource s
     if (*newval) {
         /* in case local_syscache_threshold is too low cause gpc does not take effect, we set local_syscache_threshold
            at least 16MB if gpc is on. */
-        if (g_instance.attr.attr_memory.local_syscache_threshold < 16 * 1024) {
+        if (u_sess->attr.attr_memory.local_syscache_threshold < 16 * 1024) {
             ereport(WARNING, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                           errmsg("set local_syscache_threshold from %dMB to 16MB in case gpc is on but not valid.",
-                                 g_instance.attr.attr_memory.local_syscache_threshold / 1024)));
-            g_instance.attr.attr_memory.local_syscache_threshold = 16 * 1024;
+                                 u_sess->attr.attr_memory.local_syscache_threshold / 1024)));
+            u_sess->attr.attr_memory.local_syscache_threshold = 16 * 1024;
         }
     }
     return true;

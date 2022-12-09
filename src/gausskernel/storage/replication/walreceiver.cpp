@@ -2531,7 +2531,7 @@ static bool ProcessConfigFileMessage(char *buf, Size len)
     int ret = 0;
     char **reserve_item = NULL;
 
-    ret = snprintf_s(conf_bak, MAXPGPATH, MAXPGPATH - 1, "%s/%s", t_thrd.proc_cxt.DataDir, CONFIG_BAK_FILENAME);
+    ret = snprintf_s(conf_bak, MAXPGPATH, MAXPGPATH - 1, "%s/%s", t_thrd.proc_cxt.DataDir, CONFIG_BAK_FILENAME_WAL);
     securec_check_ss(ret, "\0", "\0");
 
     if (lstat(t_thrd.walreceiver_cxt.gucconf_file, &statbuf) != 0) {
