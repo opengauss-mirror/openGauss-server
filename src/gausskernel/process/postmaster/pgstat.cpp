@@ -8455,6 +8455,18 @@ static void pgstat_recv_filestat(PgStat_MsgFile* msg, int len)
 
     if (i == NUM_FILES || entry->fn == InvalidOid) {
         LWLockAcquire(FileStatLock, LW_EXCLUSIVE);
+        if (i == NUM_FILES) {
+            TimestampTz longestTime = DBL_MAX;
+            int minLocation = 0;
+            for (int j = NUM_FILES - 1; j >= 0; j--) {
+                entry = (PgStat_FileEntry*)&pgStatFileArray[j];
+                if (entry->time < longestTime) {
+                    longestTime = entry->time;
+                    minLocation = j;
+                }
+            }
+            fileStatCount = minLocation;
+        }
         entry = (PgStat_FileEntry*)&pgStatFileArray[fileStatCount];
 
         /* reset this entry */
@@ -8470,6 +8482,7 @@ static void pgstat_recv_filestat(PgStat_MsgFile* msg, int len)
     }
 
     entry->changeCount++;
+    entry->time = GetCurrentTimestamp();
     g_instance.stat_cxt.fileIOStat->changeCount++;
 
     if ('r' == msg->rw) {
