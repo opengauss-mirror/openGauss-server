@@ -174,7 +174,7 @@ const int EQUAL_MARK_LEN = 3;
 #define ADDPOINTER_SIZE 2
 #define MAX_HOST_NAME_LENGTH 255
 
-#define TEMP_PGCONF_FILE "postgresql.conf.bak"
+#define TEMP_PGCONF_FILE "postgresql.conf.guc.bak"
 #define TEMP_CMAGENTCONF_FILE "cm_agent.conf.bak"
 #define TEMP_CMSERVERCONF_FILE "cm_server.conf.bak"
 #define TEMP_GTMCONF_FILE "gtm.conf.bak"
