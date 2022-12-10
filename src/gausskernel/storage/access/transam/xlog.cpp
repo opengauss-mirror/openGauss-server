@@ -19391,7 +19391,7 @@ void UpdatePostgresqlFile(const char *optName, const char *gucLine)
     char gucLock[MAXPGPATH];
     errno_t ret = snprintf_s(guc, MAXPGPATH, MAXPGPATH - 1, "%s/postgresql.conf", t_thrd.proc_cxt.DataDir);
     securec_check_ss(ret, "\0", "\0");
-    ret = snprintf_s(gucBak, MAXPGPATH, MAXPGPATH - 1, "%s/%s", t_thrd.proc_cxt.DataDir, CONFIG_BAK_FILENAME);
+    ret = snprintf_s(gucBak, MAXPGPATH, MAXPGPATH - 1, "%s/%s", t_thrd.proc_cxt.DataDir, CONFIG_BAK_FILENAME_WAL);
     securec_check_ss(ret, "\0", "\0");
 
     struct stat statbuf;

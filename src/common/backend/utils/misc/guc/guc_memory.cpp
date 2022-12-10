@@ -347,7 +347,7 @@ static void InitMemoryConfigureNamesInt()
             gettext_noop("Sets the maximum threshold for cleaning cache."),
             NULL,
             GUC_UNIT_KB},
-            &g_instance.attr.attr_memory.local_syscache_threshold,
+            &u_sess->attr.attr_memory.local_syscache_threshold,
             256 * 1024,
             1 * 1024,
             512 * 1024,
@@ -693,7 +693,7 @@ static bool check_syscache_threshold_gpc(int* newval, void** extra, GucSource so
             errmsg("cannot set local_syscache_threshold to %dMB in case gpc is on but not valid."
                    "Set local_syscache_threshold to 16MB default.",
                    *newval / 1024)));
-        g_instance.attr.attr_memory.local_syscache_threshold = 16 * 1024;
+        u_sess->attr.attr_memory.local_syscache_threshold = 16 * 1024;
     }
     return true;
 }
