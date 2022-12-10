@@ -116,6 +116,14 @@ SET autocommit = 1;
 ROLLBACK;
 SELECT * FROM test_table;
 
+-- set autocommit = 0 and rollback
+BEGIN;
+INSERT INTO test_table values('ccccc');
+SET autocommit = 0;
+ROLLBACK;
+SELECT * FROM test_table;
+SHOW autocommit;
+
 \c regression
 DROP DATABASE test_db;
 DROP DATABASE test_drop;

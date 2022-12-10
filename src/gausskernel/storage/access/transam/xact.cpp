@@ -8483,16 +8483,10 @@ static void AtEOXact_Proceed_PatchSeq()
     }
 }
 
-bool IsTransactionDefaultState()
-{
-    TransactionState s = CurrentTransactionState;
-    return s->blockState == TBLOCK_DEFAULT;
-}
-
 bool IsTransactionInProgressState()
 {
     TransactionState s = CurrentTransactionState;
-    return s->blockState == TBLOCK_INPROGRESS;
+    return (s->blockState == TBLOCK_INPROGRESS) || (s->blockState == TBLOCK_SUBINPROGRESS);
 }
 
 void BeginTxnForAutoCommitOff()

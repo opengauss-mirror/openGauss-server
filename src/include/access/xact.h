@@ -468,5 +468,4 @@ extern char* GetCurrentTransactionName();
 extern List* GetTransactionList(List *head);
 extern void BeginTxnForAutoCommitOff();
 extern bool IsTransactionInProgressState();
-extern bool IsTransactionDefaultState();
 #endif /* XACT_H */
