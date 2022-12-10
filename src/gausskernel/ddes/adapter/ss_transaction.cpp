@@ -133,6 +133,9 @@ CommitSeqNo SSTransactionIdGetCommitSeqNo(TransactionId transactionId, bool isCo
                 ereport(DEBUG1, (errmsg("SS get txn info success, snapshot is NULL")));
             }
         } else {
+            if (SS_IN_FAILOVER && (t_thrd.role == WORKER || t_thrd.role == THREADPOOL_WORKER)) {
+                ereport(FATAL, (errmsg("SS get CSN by TransactionId failed during failover, xid=%lu", transactionId)));
+            }
             pg_usleep(USECS_PER_SEC);
             continue;
         }
