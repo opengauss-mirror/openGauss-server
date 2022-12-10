@@ -2134,7 +2134,17 @@ static void incre_ckpt_pgwr_flush_dirty_list(WritebackContext *wb_context, uint3
 }
 
 static bool check_buffer_dirty_flag(BufferDesc* buf_desc)
-{
+{   
+    /* This function in the pagewriter thread has a concurrency problem with invalidatebuffer of dms reform rebuild,
+     * there probably exists condition that one page is mark as dirty page in pagewriter thread and invalidatebuffer
+     * of rebuild is executed before PinBuffer in this function. When flushbuffer function is executed, the tag of 
+     * this buffer is cleaned so that flushbuffer cause core problem.The dirty operation is performed by other normal
+     * dirty operation logics (for example, the dirty operation is placed back).
+     */
+    if (ENABLE_DMS) {
+        return false;
+    }
+    
     bool segment_buf = (buf_desc->buf_id >= SegmentBufferStartID);
     Block tmpBlock = BufHdrGetBlock(buf_desc);
     uint32 local_buf_state = pg_atomic_read_u32(&buf_desc->state);
