@@ -437,7 +437,6 @@ static bool DMSReformCheckStartup()
     }
 
     if (g_instance.dms_cxt.SSRecoveryInfo.restart_failover_flag) {
-        g_instance.dms_cxt.SSRecoveryInfo.restart_failover_flag = false;
         SSRestartFailoverPromote();
         return true;
     }

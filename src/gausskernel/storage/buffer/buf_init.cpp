@@ -166,6 +166,7 @@ void InitBufferPool(void)
             buf->io_in_progress_lock = LWLockAssign(LWTRANCHE_BUFFER_IO_IN_PROGRESS);
             buf->content_lock = LWLockAssign(LWTRANCHE_BUFFER_CONTENT);
             pg_atomic_init_u64(&buf->rec_lsn, InvalidXLogRecPtr);
+            buf->aio_in_progress = false;
             buf->dirty_queue_loc = PG_UINT64_MAX;
             buf->encrypt = false;
         }

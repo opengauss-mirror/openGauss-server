@@ -1502,7 +1502,7 @@ NON_EXEC_STATIC void SnapshotMain()
          */
         pg_usleep(INTERVAL);
         if ((PgxcIsCentralCoordinator(g_instance.attr.attr_common.PGXCNodeName) || IS_SINGLE_NODE) &&
-            u_sess->attr.attr_common.enable_wdr_snapshot) {
+            u_sess->attr.attr_common.enable_wdr_snapshot && !SS_IN_REFORM) {
             /* to avoid dead lock with redis, disable snapshot during redistribution */
             check_snapshot_thd_exit();
             SnapshotNameSpace::SubSnapshotMain();

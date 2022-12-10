@@ -40,6 +40,7 @@
 
 static const char* ss_clusterdirs[] = {"+global",
                                        "+base",
+                                       "+base/1",
                                        "+pg_tblspc",
                                        "+pg_clog",
                                        "+pg_csnlog",

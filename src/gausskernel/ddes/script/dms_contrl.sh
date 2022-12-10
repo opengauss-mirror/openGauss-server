@@ -173,7 +173,7 @@ function Start()
     if [[ -z ${pid} ]]
     then
         log "dssserver not exist in dir ${DSS_HOME}..."
-        exit 1
+        exit 6
     else
         log "Starting dn..."
         nohup ${GSDB_BIN} -D ${GSDB_HOME} >> $db_start_log 2>&1 &

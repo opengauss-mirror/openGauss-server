@@ -32,6 +32,7 @@
 #include "access/parallel_recovery/redo_item.h"
 #include "utils/memutils.h"
 #include "utils/elog.h"
+#include "ddes/dms/ss_dms_recovery.h"
 
 typedef struct XLogPageReadPrivate {
     const char *datadir;
@@ -172,6 +173,11 @@ void XLogReaderFree(XLogReaderState *state)
     pfree(state->readBufOrigin);
     state->readBufOrigin = NULL;
     state->readBuf = NULL;
+    if (state->preReadBufOrigin) {
+        pfree(state->preReadBufOrigin);
+        state->preReadBufOrigin = NULL;
+        state->preReadBuf = NULL;
+    }
 
     /* state need to be reset NULL by caller */
     pfree(state);

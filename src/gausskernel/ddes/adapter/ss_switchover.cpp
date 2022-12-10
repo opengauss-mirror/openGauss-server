@@ -72,12 +72,6 @@ void SSHandleSwitchoverPromote()
     ereport(LOG, (errmsg("[SS switchover] Standby promote: begin StartupThread.")));
     Assert(g_instance.dms_cxt.SSReformerControl.primaryInstId != SS_MY_INST_ID);
 
-    /* allow recovery in switchover to keep LSN in order */
-    t_thrd.shemem_ptr_cxt.XLogCtl->IsRecoveryDone = false;
-    t_thrd.shemem_ptr_cxt.XLogCtl->SharedRecoveryInProgress = true;
-    t_thrd.shemem_ptr_cxt.ControlFile->state = DB_IN_CRASH_RECOVERY;
-    pg_memory_barrier();
-
     /* let StartupXLOG do the rest of switchover standby promotion */
     if (pmState == PM_WAIT_BACKENDS) {
         g_instance.pid_cxt.StartupPID = initialize_util_thread(STARTUP);

@@ -178,6 +178,12 @@ digestControlFile(ControlFileData *ControlFile, char *src, size_t size)
         tmpDssSrc = oldSrc;
         tmpDssSrc += (MAX_INSTANCEID + 1) * PG_CONTROL_SIZE;
         checkSSControlFile(ControlFile, tmpDssSrc, PG_CONTROL_SIZE);
+        /* Calculate the control file CRC */
+        pg_crc32c   crc;
+        INIT_CRC32C(crc);
+        COMP_CRC32C(crc, src, offsetof(ControlFileData, crc));
+        FIN_CRC32C(crc);
+        ((ControlFileData*)src)->crc = crc;
     } else {
         checkControlFile(ControlFile);
     }
@@ -653,6 +659,23 @@ copy_pgcontrol_file(const char *from_fullpath, fio_location from_location,
     size_t        size;
 
     buffer = slurpFile(from_fullpath, &size, false, from_location);
+
+    /* 
+     * In dss mode, we need to set the parameter list_stable  
+     * on the pg_control file's last page to 0.
+     */
+    if (is_dss_type(file->type)) {
+        ss_reformer_ctrl_t *reformerCtrl;
+        reformerCtrl = (ss_reformer_ctrl_t *)(buffer + (MAX_INSTANCEID + 1) * PG_CONTROL_SIZE);
+        reformerCtrl->list_stable = 0;
+        /* Calculate the reformer_ctrl CRC */
+        pg_crc32c   crc;
+        INIT_CRC32C(crc);
+        COMP_CRC32C(crc, (char *) reformerCtrl, offsetof(ss_reformer_ctrl_t, crc));
+        FIN_CRC32C(crc);
+        reformerCtrl->crc = crc;
+    }
+
     digestControlFile(&ControlFile, buffer, size);
     file->crc = ControlFile.crc;
     file->read_size = size;

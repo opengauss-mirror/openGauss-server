@@ -708,3 +708,13 @@ int dss_remove_dev(const char *name)
         return GS_SUCCESS;
     }
 }
+
+int dss_aio_prep_pwrite(void *iocb, int fd, void *buf, size_t count, long long offset)
+{
+    return g_dss_device_op.dss_aio_pwrite(iocb, fd, buf, count, offset);
+}
+
+int dss_aio_prep_pread(void *iocb, int fd, void *buf, size_t count, long long offset)
+{
+    return g_dss_device_op.dss_aio_pread(iocb, fd, buf, count, offset);
+}

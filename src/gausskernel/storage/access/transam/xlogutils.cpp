@@ -48,6 +48,7 @@
 #include "commands/dbcommands.h"
 #include "postmaster/pagerepair.h"
 #include "storage/cfs/cfs_converter.h"
+#include "ddes/dms/ss_dms_bufmgr.h"
 
 /*
  * During XLOG replay, we may see XLOG records for incremental updates of
@@ -665,9 +666,12 @@ XLogRedoAction XLogReadBufferForRedoBlockExtend(RedoBufferTag *redoblock, ReadBu
         redobufferinfo->pageinfo.page = page;
         redobufferinfo->pageinfo.pagesize = pagesize;
 
-        if (XLByteLE(xloglsn, PageGetLSN(page)))
+        if (XLByteLE(xloglsn, PageGetLSN(page))) {
+            if (ENABLE_DMS) {
+                SSCheckBufferIfNeedMarkDirty(redobufferinfo->buf);
+            }
             return BLK_DONE;
-        else {
+        } else {
             if (SegmentNeedAdvancedLSNCheck(redoblock->rnode, redoblock->forknum, mode)) {
                 /*
                  * For segment-page storage, before returning BLK_NEEDS_REDO, we need checking LSN. Illegal LSN may be

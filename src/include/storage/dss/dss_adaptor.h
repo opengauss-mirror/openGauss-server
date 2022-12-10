@@ -68,6 +68,8 @@ typedef void (*dss_error_info)(int *errorcode, const char **errormsg);
 typedef void (*dss_svr_path)(const char *conn_path);
 typedef void (*dss_log_callback)(dss_log_output cb_log_output);
 typedef int (*dss_version)(void);
+typedef int (*dss_aio_prep_pwrite_device)(void *iocb, int handle, void *buf, size_t count, long long offset);
+typedef int (*dss_aio_prep_pread_device)(void *iocb, int handle, void *buf, size_t count, long long offset);
 typedef struct st_dss_device_op_t {
     void *handle;
     dss_create_device dss_create;
@@ -104,6 +106,8 @@ typedef struct st_dss_device_op_t {
     dss_svr_path dss_set_svr_path;
     dss_log_callback dss_register_log_callback;
     dss_version dss_get_version;
+    dss_aio_prep_pwrite_device dss_aio_pwrite;
+    dss_aio_prep_pread_device dss_aio_pread;
 } dss_device_op_t;
 
 void dss_register_log_callback(dss_log_output cb_log_output);

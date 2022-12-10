@@ -3258,7 +3258,7 @@ static int ServerLoop(void)
                 u_sess->attr.attr_storage.enable_cbm_tracking)
                 g_instance.pid_cxt.CBMWriterPID = initialize_util_thread(CBMWRITER);
 
-            if (!dummyStandbyMode && ENABLE_INCRE_CKPT) {
+            if (!dummyStandbyMode && ENABLE_INCRE_CKPT && !SS_IN_FAILOVER) {
                 for (int i = 0; i < g_instance.ckpt_cxt_ctl->pgwr_procs.num; i++) {
                     if (g_instance.pid_cxt.PageWriterPID[i] == 0) {
                         g_instance.pid_cxt.PageWriterPID[i] = initialize_util_thread(PAGEWRITER_THREAD);
@@ -3307,7 +3307,7 @@ static int ServerLoop(void)
             (AutoVacuumingActive() || t_thrd.postmaster_cxt.start_autovac_launcher) && pmState == PM_RUN &&
             !dummyStandbyMode && u_sess->attr.attr_common.upgrade_mode != 1 &&
             !g_instance.streaming_dr_cxt.isInSwitchover &&
-            !SS_STANDBY_MODE && !SS_PERFORMING_SWITCHOVER && !SS_STANDBY_FAILOVER) {
+            !SS_STANDBY_MODE && !SS_PERFORMING_SWITCHOVER && !SS_STANDBY_FAILOVER && !SS_IN_REFORM) {
             g_instance.pid_cxt.AutoVacPID = initialize_util_thread(AUTOVACUUM_LAUNCHER);
 
             if (g_instance.pid_cxt.AutoVacPID != 0)
@@ -3338,7 +3338,7 @@ static int ServerLoop(void)
         if ((u_sess->attr.attr_common.upgrade_mode == 0 ||
             pg_atomic_read_u32(&WorkingGrandVersionNum) >= PUBLICATION_VERSION_NUM) &&
             g_instance.pid_cxt.ApplyLauncerPID == 0 &&
-            pmState == PM_RUN && !dummyStandbyMode) {
+            pmState == PM_RUN && !dummyStandbyMode && !SS_IN_REFORM) {
             g_instance.pid_cxt.ApplyLauncerPID = initialize_util_thread(APPLY_LAUNCHER);
         }
 #endif
@@ -3350,7 +3350,7 @@ static int ServerLoop(void)
          */
         if (g_instance.pid_cxt.PgJobSchdPID == 0 && pmState == PM_RUN &&
             (g_instance.attr.attr_sql.job_queue_processes || t_thrd.postmaster_cxt.start_job_scheduler) &&
-            u_sess->attr.attr_common.upgrade_mode != 1) {
+            u_sess->attr.attr_common.upgrade_mode != 1 && !SS_IN_REFORM) {
             g_instance.pid_cxt.PgJobSchdPID = initialize_util_thread(JOB_SCHEDULER);
 
             if (g_instance.pid_cxt.PgJobSchdPID != 0) {
@@ -3414,17 +3414,17 @@ static int ServerLoop(void)
             g_instance.pid_cxt.SnapshotPID = snapshot_start();
 
         if (ENABLE_ASP && g_instance.pid_cxt.AshPID == 0 && pmState == PM_RUN && !dummyStandbyMode
-            && !SS_STANDBY_MODE && !SS_PERFORMING_SWITCHOVER && !SS_STANDBY_FAILOVER)
+            && !SS_STANDBY_MODE && !SS_PERFORMING_SWITCHOVER && !SS_STANDBY_FAILOVER && !SS_IN_REFORM)
             g_instance.pid_cxt.AshPID = initialize_util_thread(ASH_WORKER);
 
         /* If we have lost the full sql flush thread, try to start a new one */
         if (ENABLE_STATEMENT_TRACK && g_instance.pid_cxt.StatementPID == 0 && (pmState == PM_RUN || pmState == PM_HOT_STANDBY)
-            && !SS_STANDBY_MODE && !SS_PERFORMING_SWITCHOVER && !SS_STANDBY_FAILOVER)
+            && !SS_STANDBY_MODE && !SS_PERFORMING_SWITCHOVER && !SS_STANDBY_FAILOVER && !SS_IN_REFORM)
             g_instance.pid_cxt.StatementPID = initialize_util_thread(TRACK_STMT_WORKER);
 
         if ((IS_PGXC_COORDINATOR || IS_SINGLE_NODE) && u_sess->attr.attr_common.enable_instr_rt_percentile &&
             g_instance.pid_cxt.PercentilePID == 0 &&
-            pmState == PM_RUN)
+            pmState == PM_RUN && !SS_IN_REFORM)
             g_instance.pid_cxt.PercentilePID = initialize_util_thread(PERCENTILE_WORKER);
         if ((ENABLE_DMS && pmState == PM_RUN && g_instance.stat_cxt.stack_perf_start)
             || (!ENABLE_DMS && g_instance.stat_cxt.stack_perf_start)) {
@@ -3433,15 +3433,15 @@ static int ServerLoop(void)
         }
         /* if workload manager is off, we still use this thread to build user hash table */
         if ((ENABLE_WORKLOAD_CONTROL || !WLMIsInfoInit()) && g_instance.pid_cxt.WLMCollectPID == 0 &&
-            pmState == PM_RUN && !dummyStandbyMode)
+            pmState == PM_RUN && !dummyStandbyMode && !SS_IN_REFORM)
             g_instance.pid_cxt.WLMCollectPID = initialize_util_thread(WLM_WORKER);
 
         if (ENABLE_WORKLOAD_CONTROL && (g_instance.pid_cxt.WLMMonitorPID == 0) && (pmState == PM_RUN) &&
-            !dummyStandbyMode)
+            !dummyStandbyMode && !SS_IN_REFORM)
             g_instance.pid_cxt.WLMMonitorPID = initialize_util_thread(WLM_MONITOR);
 
         if (ENABLE_WORKLOAD_CONTROL && (g_instance.pid_cxt.WLMArbiterPID == 0) && (pmState == PM_RUN) &&
-            !dummyStandbyMode)
+            !dummyStandbyMode && !SS_IN_REFORM)
             g_instance.pid_cxt.WLMArbiterPID = initialize_util_thread(WLM_ARBITER);
 
         if (IS_PGXC_COORDINATOR && g_instance.attr.attr_sql.max_resource_package &&
@@ -4273,8 +4273,9 @@ int ProcessStartupPacket(Port* port, bool SSLdone)
             }
 
             if (SS_IN_REFORM) {
-                ereport(ERROR, (errcode(ERRCODE_CANNOT_CONNECT_NOW),
+                ereport(DEBUG1, (errcode(ERRCODE_CANNOT_CONNECT_NOW),
                         errmsg("cannot accept connection during SS cluster reform")));
+                return STATUS_ERROR;
             }
 #endif
         }
@@ -5170,6 +5171,10 @@ static void pmdie(SIGNAL_ARGS)
 
                 /*  Audit system stop */
                 pgaudit_system_stop_ok(FastShutdown);
+            }
+
+            if (ENABLE_DMS && pmState == PM_STARTUP) {
+                pmState = PM_RECOVERY;
             }
 
             if (pmState == PM_STARTUP || pmState == PM_INIT) {
@@ -6146,12 +6151,18 @@ static void reaper(SIGNAL_ARGS)
             if (!u_sess->proc_cxt.IsBinaryUpgrade && AutoVacuumingActive() && g_instance.pid_cxt.AutoVacPID == 0 &&
                 !dummyStandbyMode && u_sess->attr.attr_common.upgrade_mode != 1 &&
                 !g_instance.streaming_dr_cxt.isInSwitchover &&
-                !SS_STANDBY_MODE && !SS_PERFORMING_SWITCHOVER && !SS_STANDBY_FAILOVER)
+                !SS_STANDBY_MODE && !SS_PERFORMING_SWITCHOVER && !SS_STANDBY_FAILOVER && !SS_IN_REFORM)
                 g_instance.pid_cxt.AutoVacPID = initialize_util_thread(AUTOVACUUM_LAUNCHER);
+
+            if (SS_REFORM_PARTNER) {
+                write_stderr("%s LOG: I'm still a reform partner waiting for refom finished\n",
+                    GetReaperLogPrefix(logBuf, ReaperLogBufSize));
+                continue;
+            }
 
             /* Before GRAND VERSION NUM 81000, we do not support scheduled job. */
             if (g_instance.pid_cxt.PgJobSchdPID == 0 &&
-                g_instance.attr.attr_sql.job_queue_processes && u_sess->attr.attr_common.upgrade_mode != 1)
+                g_instance.attr.attr_sql.job_queue_processes && u_sess->attr.attr_common.upgrade_mode != 1 && !SS_IN_REFORM)
                 g_instance.pid_cxt.PgJobSchdPID = initialize_util_thread(JOB_SCHEDULER);
 
             if ((IS_PGXC_COORDINATOR) && g_instance.pid_cxt.CommPoolerCleanPID == 0 &&
@@ -6173,7 +6184,7 @@ static void reaper(SIGNAL_ARGS)
 #ifndef ENABLE_MULTIPLE_NODES
             if ((u_sess->attr.attr_common.upgrade_mode == 0 ||
                 pg_atomic_read_u32(&WorkingGrandVersionNum) >= PUBLICATION_VERSION_NUM) &&
-                g_instance.pid_cxt.ApplyLauncerPID == 0 && !dummyStandbyMode) {
+                g_instance.pid_cxt.ApplyLauncerPID == 0 && !dummyStandbyMode && !SS_IN_REFORM) {
                 g_instance.pid_cxt.ApplyLauncerPID = initialize_util_thread(APPLY_LAUNCHER);
             }
 #endif
@@ -6207,15 +6218,15 @@ static void reaper(SIGNAL_ARGS)
                 !dummyStandbyMode && !SS_STANDBY_MODE && !SS_PERFORMING_SWITCHOVER && !SS_STANDBY_FAILOVER)
                 g_instance.pid_cxt.SnapshotPID = snapshot_start();
             if ((IS_PGXC_COORDINATOR || IS_SINGLE_NODE) && u_sess->attr.attr_common.enable_instr_rt_percentile &&
-                g_instance.pid_cxt.PercentilePID == 0 && !dummyStandbyMode)
+                g_instance.pid_cxt.PercentilePID == 0 && !dummyStandbyMode && !SS_IN_REFORM)
                 g_instance.pid_cxt.PercentilePID = initialize_util_thread(PERCENTILE_WORKER);
 
             if (ENABLE_ASP && g_instance.pid_cxt.AshPID == 0 && !dummyStandbyMode
-                && !SS_STANDBY_MODE && !SS_PERFORMING_SWITCHOVER && !SS_STANDBY_FAILOVER)
+                && !SS_STANDBY_MODE && !SS_PERFORMING_SWITCHOVER && !SS_STANDBY_FAILOVER && !SS_IN_REFORM)
                 g_instance.pid_cxt.AshPID = initialize_util_thread(ASH_WORKER);
 
             if (ENABLE_STATEMENT_TRACK && g_instance.pid_cxt.StatementPID == 0
-                && !SS_STANDBY_MODE && !SS_PERFORMING_SWITCHOVER && !SS_STANDBY_FAILOVER)
+                && !SS_STANDBY_MODE && !SS_PERFORMING_SWITCHOVER && !SS_STANDBY_FAILOVER && !SS_IN_REFORM)
                 g_instance.pid_cxt.StatementPID = initialize_util_thread(TRACK_STMT_WORKER);
 
             /* Database Security: Support database audit */
@@ -6252,7 +6263,7 @@ static void reaper(SIGNAL_ARGS)
 
             /* if workload manager is off, we still use this thread to build user hash table */
             if ((ENABLE_WORKLOAD_CONTROL || !WLMIsInfoInit()) && g_instance.pid_cxt.WLMCollectPID == 0 &&
-                !dummyStandbyMode) {
+                !dummyStandbyMode && !SS_IN_REFORM) {
                 /* DN need rebuild hash when upgrade to primary */
                 if (IS_PGXC_DATANODE)
                     g_instance.wlm_cxt->stat_manager.infoinit = 0;
@@ -6732,7 +6743,7 @@ static void reaper(SIGNAL_ARGS)
                 LogChildExit(LOG, _("Active session history collector process"), pid, exitstatus);
 
             if (pmState == PM_RUN && ENABLE_ASP && !SS_STANDBY_MODE && !SS_PERFORMING_SWITCHOVER
-                && !SS_STANDBY_FAILOVER)
+                && !SS_STANDBY_FAILOVER && !SS_IN_REFORM)
                 g_instance.pid_cxt.AshPID = initialize_util_thread(ASH_WORKER);
             continue;
         }
@@ -6745,7 +6756,7 @@ static void reaper(SIGNAL_ARGS)
                 LogChildExit(LOG, _("full SQL statement flush process"), pid, exitstatus);
 
             if (pmState == PM_RUN && ENABLE_STATEMENT_TRACK && !SS_STANDBY_MODE && !SS_PERFORMING_SWITCHOVER
-                && !SS_STANDBY_FAILOVER)
+                && !SS_STANDBY_FAILOVER && !SS_IN_REFORM)
                 g_instance.pid_cxt.StatementPID = initialize_util_thread(TRACK_STMT_WORKER);
             continue;
         }
@@ -6757,7 +6768,7 @@ static void reaper(SIGNAL_ARGS)
             if (!EXIT_STATUS_0(exitstatus))
                 LogChildExit(LOG, _("percentile collector process"), pid, exitstatus);
 
-            if (pmState == PM_RUN)
+            if (pmState == PM_RUN && !SS_IN_REFORM)
                 g_instance.pid_cxt.PercentilePID = initialize_util_thread(PERCENTILE_WORKER);
             continue;
         }
@@ -9301,6 +9312,7 @@ static void sigusr1_handler(SIGNAL_ARGS)
     }
 
     if (ENABLE_DMS && CheckPostmasterSignal(PMSIGNAL_DMS_SWITCHOVER_PROMOTE)) {
+        PMUpdateDBState(PROMOTING_STATE, get_cur_mode(), get_cur_repl_num());
         if (ENABLE_THREAD_POOL) {
             g_threadPoolControler->CloseAllSessions();
             /*
@@ -9354,15 +9366,7 @@ static void sigusr1_handler(SIGNAL_ARGS)
     }
 
     if (ENABLE_DMS && CheckPostmasterSignal(PMSIGNAL_DMS_REFORM)) {
-        if (ENABLE_THREAD_POOL) {
-            g_threadPoolControler->CloseAllSessions();
-            /*
-            * before pmState set to wait backends,
-            * threadpool cannot launch new thread by scheduler during demote.
-            */
-            g_threadPoolControler->ShutDownScheduler(true, true);
-            g_threadPoolControler->ShutDownThreads(true);
-        }
+        PMUpdateDBState(STARTING_STATE, get_cur_mode(), get_cur_repl_num());
         /* shut down all backends and autovac workers */
         (void)SignalSomeChildren(SIGTERM, BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC);
 
@@ -9425,15 +9429,12 @@ static void sigusr1_handler(SIGNAL_ARGS)
             signal_child(g_instance.pid_cxt.SnapshotPID, SIGTERM);
         }
 
-        if (ENABLE_THREAD_POOL) {
-            g_threadPoolControler->EnableAdjustPool();
-        }
-
         ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS reform] terminate backends success")));
         g_instance.dms_cxt.SSRecoveryInfo.reform_ready = true;
     }
 
     if (ENABLE_DMS && CheckPostmasterSignal(PMSIGNAL_DMS_TRIGGERFAILOVER)) {
+        PMUpdateDBState(PROMOTING_STATE, get_cur_mode(), get_cur_repl_num());
         if (ENABLE_THREAD_POOL) {
             g_threadPoolControler->CloseAllSessions();
             /*
@@ -11666,6 +11667,8 @@ DbState get_local_dbstate(void)
             db_state = WAITING_STATE;
         } else if (SS_STANDBY_PROMOTING || SS_STANDBY_FAILOVER) {
             db_state = PROMOTING_STATE;
+        } else if (SS_IN_REFORM) {
+            db_state = STARTING_STATE;
         } else {
             db_state = NORMAL_STATE;
         }
@@ -11716,9 +11719,6 @@ const char* wal_get_db_state_string(DbState db_state)
 static ServerMode get_cur_mode(void)
 {
     if (ENABLE_DMS) {
-        if (RecoveryInProgress()) {
-            return RECOVERY_MODE;
-        }
         return SS_STANDBY_MODE ? STANDBY_MODE : PRIMARY_MODE;
     }
     return t_thrd.postmaster_cxt.HaShmData->current_mode;
@@ -11845,6 +11845,10 @@ static void PMInitDBStateFile()
 static void PMUpdateDBState(DbState db_state, ServerMode mode, int conn_num)
 {
     GaussState state;
+
+    if (ENABLE_DMS && SS_IN_REFORM && db_state == NORMAL_STATE) {
+        db_state = STARTING_STATE;
+    }
 
     PMReadDBStateFile(&state);
     state.state = db_state;
@@ -13866,8 +13870,8 @@ void set_disable_conn_mode()
 
 static bool NeedHeartbeat()
 {
-    /* heartbeat is no longer needed on DCF mode */
-    if (g_instance.attr.attr_storage.dcf_attr.enable_dcf)
+    /* heartbeat is no longer needed in DCF/DMS mode */
+    if (ENABLE_DMS || g_instance.attr.attr_storage.dcf_attr.enable_dcf)
         return false;
 
     if (!(IS_PGXC_DATANODE && g_instance.pid_cxt.HeartbeatPID == 0 &&
@@ -13971,7 +13975,7 @@ const char *GetSSServerMode()
  
 bool SSIsServerModeReadOnly()
 {
-    return SS_PERFORMING_SWITCHOVER || SS_STANDBY_MODE;
+    return SS_STANDBY_FAILOVER || SS_PERFORMING_SWITCHOVER || SS_STANDBY_MODE;
 }
 
 void SSRestartFailoverPromote()

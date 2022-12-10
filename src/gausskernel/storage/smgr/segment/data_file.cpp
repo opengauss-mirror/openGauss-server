@@ -199,7 +199,7 @@ bool df_ss_update_segfile_size(SegLogicFile *sf, BlockNumber target_block)
     return true;
 }
 
-static SegPhysicalFile df_get_physical_file(SegLogicFile *sf, int sliceno, BlockNumber target_block)
+SegPhysicalFile df_get_physical_file(SegLogicFile *sf, int sliceno, BlockNumber target_block)
 {
     AutoMutexLock filelock(&sf->filelock);
     filelock.lock();

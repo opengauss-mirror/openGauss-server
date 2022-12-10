@@ -499,7 +499,8 @@ void LocalSysDBCache::LocalSysDBCacheReleaseCritialReSource(bool include_shared)
 bool LocalSysDBCache::DBStandbyChanged()
 {
     /* for standby, we cannot recognize whether event of alter db rename happened */
-    if (unlikely(t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE && my_database_id != InvalidOid)) {
+    bool isStandby = t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE || (ENABLE_DMS && SS_STANDBY_MODE);
+    if (unlikely(isStandby && my_database_id != InvalidOid)) {
         if (unlikely(my_database_id != u_sess->proc_cxt.MyDatabaseId)) {
             return true;
         }
@@ -922,7 +923,7 @@ void LocalSysDBCache::FixWrongCacheStat(Oid db_id, Oid db_tabspc)
 
     /* only for standby, we cannot recognize alter db rename event
      * otherwise, it should not happen */
-    Assert(t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE);
+    Assert(t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE || (ENABLE_DMS && SS_STANDBY_MODE));
 
     LocalSysDBCacheClearMyDB();
     InitFileAccess();

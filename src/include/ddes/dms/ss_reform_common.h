@@ -36,6 +36,8 @@ typedef struct SSBroadcastCancelTrx {
 
 int SSXLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int reqLen,
     XLogRecPtr targetRecPtr, char *readBuf, TimeLineID *readTLI, char* xlog_path);
+bool SSReadXlogInternal(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, char *buf);
+XLogReaderState *SSXLogReaderAllocate(XLogPageReadCB pagereadfunc, void *private_data, Size alignedSize);
 void SSGetXlogPath();
 void SSSaveReformerCtrl();
 void SSClearSegCache();

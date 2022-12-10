@@ -3319,6 +3319,7 @@ typedef struct knl_t_publication_context {
 
 typedef struct knl_t_dms_context {
     MemoryContext msgContext;
+    bool buf_in_aio;
 } knl_t_dms_context;
 
 /* thread context. */

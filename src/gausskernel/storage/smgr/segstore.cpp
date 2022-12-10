@@ -1113,14 +1113,16 @@ SegPageLocation seg_get_physical_location(RelFileNode rnode, ForkNumber forknum,
 
     reln = smgropen(rnode, InvalidBackendId);
     Buffer buffer = read_head_buffer(reln, forknum, false);
-    if (ENABLE_DMS) {
-        LockBuffer(buffer, BUFFER_LOCK_SHARE);
-    }
     SegmentCheck(BufferIsValid(buffer));
+    volatile BufferDesc *buf = GetBufferDescriptor(buffer - 1);
+    bool need_lock = !LWLockHeldByMe(buf->content_lock);
+    if (ENABLE_DMS && need_lock) {
+        LockBuffer(buffer, BUFFER_LOCK_SHARE);
+    } 
     SegmentHead *head = (SegmentHead *)PageGetContents(BufferGetBlock(buffer));
 
     SegPageLocation loc = seg_logic_to_physic_mapping(reln, head, blocknum);
-    if (ENABLE_DMS) {
+    if (ENABLE_DMS && need_lock) {
         LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
     }
 
@@ -1896,6 +1898,14 @@ void seg_physical_write(SegSpace *spc, RelFileNode &rNode, ForkNumber forknum, B
     spc_write_block(spc, rNode, forknum, buffer, blocknum);
 }
 
+int32 seg_physical_aio_prep_pwrite(SegSpace *spc, RelFileNode &rNode, ForkNumber forknum, BlockNumber blocknum,
+    const char *buffer, void *iocb_ptr)
+{
+    SegmentCheck(IsSegmentPhysicalRelNode(rNode));
+    SegmentCheck(spc != NULL);
+
+    return spc_aio_prep_pwrite(spc, rNode, forknum, blocknum, buffer, iocb_ptr);
+}
 static bool check_meta_data(BlockNumber extent, uint32 extent_size, uint32* offset_block)
 {
     if (extent < DF_MAP_HEAD_PAGE + 1 || extent_size == EXTENT_1) {

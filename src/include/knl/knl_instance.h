@@ -112,16 +112,6 @@ enum knl_parallel_redo_state {
     REDO_DONE,
 };
 
-/*
- *  used for dms
- */
-typedef enum en_dms_status {
-    DMS_STATUS_OUT = 0,
-    DMS_STATUS_JOIN = 1,
-    DMS_STATUS_REFORM = 2,
-    DMS_STATUS_IN = 3
-} dms_status_t;
-
 /* all process level attribute which expose to user */
 typedef struct knl_instance_attr {
 
@@ -1206,7 +1196,10 @@ typedef struct knl_g_dms_context {
     pg_atomic_uint32 inDmsThreShmemInitCnt; // the count of threads in DmsCallbackThreadShmemInit
     pg_atomic_uint32 inProcExitCnt; // Post Main in proc_exit function
     bool dmsInited;
-}knl_g_dms_context;
+    XLogRecPtr ckptRedo;
+    bool resetSyscache;
+    bool finishedRecoverOldPrimaryDWFile;
+} knl_g_dms_context;
 
 typedef struct knl_instance_context {
     knl_virtual_role role;

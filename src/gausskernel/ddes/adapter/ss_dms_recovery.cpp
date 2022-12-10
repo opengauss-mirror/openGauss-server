@@ -60,6 +60,12 @@ void SSSavePrimaryInstId(int id)
  */
 void SSWakeupRecovery(void)
 {
+    uint32 thread_num = (uint32)g_instance.ckpt_cxt_ctl->pgwr_procs.num;
+    /* need make sure pagewriter started first */
+    while (pg_atomic_read_u32(&g_instance.ckpt_cxt_ctl->current_page_writer_count) != thread_num) {
+        pg_usleep(REFORM_WAIT_TIME);
+    }
+
     g_instance.dms_cxt.SSRecoveryInfo.recovery_pause_flag = false;
 }
 
@@ -107,7 +113,7 @@ bool SSRecoveryApplyDelay(const XLogReaderState *record)
     return true;
 }
 
-void SSReadControlFile(int id)
+void SSReadControlFile(int id, bool updateDmsCtx)
 {
     pg_crc32c crc;
     errno_t rc = EOK;
@@ -161,7 +167,15 @@ loop:
             }
         }
     } else {
-        rc = memcpy_s(t_thrd.shemem_ptr_cxt.ControlFile, (size_t)len, buffer, (size_t)len);
+        ControlFileData* controlFile = NULL;
+        ControlFileData tempControlFile;
+        if (updateDmsCtx) {
+            controlFile = &tempControlFile;
+        } else {
+            controlFile = t_thrd.shemem_ptr_cxt.ControlFile;
+        }
+
+        rc = memcpy_s(controlFile, (size_t)len, buffer, (size_t)len);
         securec_check(rc, "", "");
         if (close(fd) < 0) {
             ereport(PANIC, (errcode_for_file_access(), errmsg("could not close control file: %m")));
@@ -169,10 +183,10 @@ loop:
 
         /* Now check the CRC. */
         INIT_CRC32C(crc);
-        COMP_CRC32C(crc, (char *)t_thrd.shemem_ptr_cxt.ControlFile, offsetof(ControlFileData, crc));
+        COMP_CRC32C(crc, (char *)controlFile, offsetof(ControlFileData, crc));
         FIN_CRC32C(crc);
 
-        if (!EQ_CRC32C(crc, t_thrd.shemem_ptr_cxt.ControlFile->crc)) {
+        if (!EQ_CRC32C(crc, controlFile->crc)) {
             if (retry == false) {
                 ereport(WARNING, (errmsg("control file \"%s\" contains incorrect checksum, try backup file", fname)));
                 fname = XLOG_CONTROL_FILE_BAK;
@@ -181,6 +195,10 @@ loop:
             } else {
                 ereport(FATAL, (errmsg("incorrect checksum in control file")));
             }
+        }
+
+        if (XLByteLE(g_instance.dms_cxt.ckptRedo, controlFile->checkPointCopy.redo)) {
+            g_instance.dms_cxt.ckptRedo = controlFile->checkPointCopy.redo;
         }
     }
 }
@@ -293,15 +311,18 @@ void ss_failover_dw_init_internal()
         dw_exit(false);
     }
 
+    dw_exit(true);
+    dw_exit(false);
     ss_initdwsubdir(dssdir, old_primary_id);
     dw_ext_init();
     dw_init();
+    g_instance.dms_cxt.finishedRecoverOldPrimaryDWFile = true;
     dw_exit(true);
     dw_exit(false);
-
     ss_initdwsubdir(dssdir, self_id);
     dw_ext_init();
     dw_init();
+    g_instance.dms_cxt.finishedRecoverOldPrimaryDWFile = false;
     ereport(LOG, (errmodule(MOD_DMS), errmsg("[SS failover] dw init finish")));
 }
 
@@ -313,7 +334,6 @@ void ss_failover_dw_init()
         }
     }
     ckpt_shutdown_pagewriter();
-
+    g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy = false;
     ss_failover_dw_init_internal();
 }
-

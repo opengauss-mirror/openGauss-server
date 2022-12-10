@@ -1308,7 +1308,9 @@ void dw_file_check_rebuild()
     dw_batch_meta_file batch_meta_file;
 
     if (!file_exists(DW_BUILD_FILE_NAME)) {
-        return;
+        if (!ENABLE_DMS || (ENABLE_DMS && !g_instance.dms_cxt.finishedRecoverOldPrimaryDWFile)) {
+            return;
+        }
     }
 
     ereport(LOG, (errmodule(MOD_DW), errmsg("Double write initializing after build")));
@@ -1802,6 +1804,10 @@ void dw_enable_init()
     /* init dw batch and dw single */
     dw_cxt_init_batch();
     dw_cxt_init_single();
+
+    if (SS_REFORM_PARTNER || g_instance.dms_cxt.finishedRecoverOldPrimaryDWFile) {
+        return;
+    }
 
     /* recovery batch flush dw file */
     dw_recover_all_partial_write_batch(batch_cxt);
