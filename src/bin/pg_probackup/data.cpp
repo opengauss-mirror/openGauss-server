@@ -26,6 +26,8 @@
 
 #include "thread.h"
 #include "common/fe_memutils.h"
+#include "lz4.h"
+#include "zstd.h"
 
 /* Union to ease operations on relation pages */
 typedef struct DataPage
@@ -142,6 +144,79 @@ zlib_decompress(void *dst, size_t dst_size, void const *src, size_t src_size)
 }
 #endif
 
+/* Implementation of lz4 compression method */
+static int32 lz4_compress(const char *src, size_t src_size, char *dst, size_t dst_size)
+{
+    int write_len;
+
+    write_len = LZ4_compress_default(src, dst, src_size, dst_size);
+    if (write_len <= 0) {
+        elog(LOG, "lz4 compress error, src: [%s], src size: %u, dest size: %u, written size: %d.",
+            src, src_size, dst_size, write_len);
+        elog(ERROR, "lz4 compress data failed, return: %d.", write_len);
+        return -1;
+    }
+
+    return write_len;
+}
+
+/* Implementation of lz4 decompression method */
+static int32 lz4_decompress(const char *src, size_t src_size, char *dst, size_t dst_size)
+{
+    int write_len;
+
+    write_len = LZ4_decompress_safe(src, dst, src_size, dst_size);
+    if (write_len <= 0) {
+        elog(LOG, "lz4 decompress error, src size: %u, dest size: %u, written size: %d.",
+            src_size, dst_size, write_len);
+        elog(ERROR, "lz4 decompress data failed, return: %d.", write_len);
+        return -1;
+    }
+
+    /* Upper will check if write_len equal to dst_size */
+    if (write_len != (int)dst_size) {
+        elog(WARNING, "lz4 decompress data corrupted, actually written: %d, expected: %u.", write_len, dst_size);
+    }
+
+    return write_len;
+}
+
+/* Implementation of zstd compression method */
+static int32 zstd_compress(const char *src, size_t src_size, char *dst, size_t dst_size, int level)
+{
+    size_t write_len;
+
+    write_len = ZSTD_compress(dst, dst_size, src, src_size, level);
+    if (ZSTD_isError(write_len)) {
+        elog(LOG, "zstd compress error, src: [%s], src size: %u, dest size: %u, written size: %u.",
+            src, src_size, dst_size, write_len);
+        elog(ERROR, "zstd compress data failed, return: %u.", write_len);
+        return -1;
+    }
+
+    return (int32)write_len;
+}
+
+/* Implementation of zstd decompression method */
+static int32 zstd_decompress(const char *src, size_t src_size, char *dst, size_t dst_size)
+{
+    size_t write_len;
+
+    write_len = ZSTD_decompress(dst, dst_size, src, src_size);
+    if (ZSTD_isError(write_len)) {
+        elog(LOG, "zstd decompress error, src size: %u, dest size: %u, written size: %u.",
+            src_size, dst_size, write_len);
+        elog(ERROR, "zstd decompress data failed, return: %u.", write_len);
+        return -1;
+    }
+
+    if (write_len != dst_size) {
+        elog(WARNING, "zstd decompress data corrupted, actually written: %u, expected: %u.", write_len, dst_size);
+    }
+
+    return (int32)write_len;
+}
+
 /*
  * Compresses source into dest using algorithm. Returns the number of bytes
  * written in the destination buffer, or -1 if compression fails.
@@ -167,6 +242,10 @@ do_compress(void* dst, size_t dst_size, void const* src, size_t src_size,
 #endif
         case PGLZ_COMPRESS:
             return pglz_compress((const char*)src, src_size, (char*)dst, PGLZ_strategy_always);
+        case LZ4_COMPRESS: 
+            return lz4_compress((const char*)src, src_size, (char*)dst, dst_size);
+        case ZSTD_COMPRESS:
+            return zstd_compress((const char*)src, src_size, (char*)dst, dst_size, level);
     }
 
     return -1;
@@ -199,6 +278,10 @@ do_decompress(void* dst, size_t dst_size, void const* src, size_t src_size,
 #endif
         case PGLZ_COMPRESS:
             return pglz_decompress((const char*)src, src_size, (char*)dst, dst_size, true);
+        case LZ4_COMPRESS:
+            return lz4_decompress((const char*)src, src_size, (char*)dst, dst_size);
+        case ZSTD_COMPRESS:
+            return zstd_decompress((const char*)src, src_size, (char*)dst, dst_size);
     }
 
     return -1;
