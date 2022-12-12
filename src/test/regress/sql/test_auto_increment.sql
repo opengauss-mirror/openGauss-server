@@ -6,12 +6,71 @@ ALTER TABLE test_create_autoinc_err AUTO_INCREMENT=100;
 create database autoinc_b_db with dbcompatibility = 'B';
 \c autoinc_b_db
 -- test CREATE TABLE with AUTO_INCREMENT
--- syntax error
-CREATE TABLE test_create_autoinc_err(id int auto_increment key, name varchar(200),a int);
-CREATE TABLE test_create_autoinc_err(id int auto_increment unique key, name varchar(200),a int);
+-- test create table
+CREATE TABLE test_create_autoinc(
+    a int AUTO_INCREMENT INDEX,
+    b varchar(32)
+); -- ERROR
+
+CREATE TABLE test_create_autoinc(
+    a int AUTO_INCREMENT KEY,
+    b varchar(32)
+); -- ERROR
+
+CREATE TABLE test_create_autoinc(
+    a int AUTO_INCREMENT PRIMARY KEY,
+    b varchar(32)
+);
+\d test_create_autoinc;
+DROP TABLE test_create_autoinc;
+
+CREATE TABLE test_create_autoinc(
+    a int AUTO_INCREMENT UNIQUE KEY,
+    b varchar(32)
+); -- ERROR
+
+CREATE TABLE test_create_autoinc(
+    a int AUTO_INCREMENT UNIQUE,
+    b varchar(32)
+);
+\d test_create_autoinc;
+DROP TABLE test_create_autoinc;
+
+CREATE TABLE test_create_autoinc(
+    a int AUTO_INCREMENT,
+    b varchar(32),
+    UNIQUE ((b||'1'),a)
+); -- ERROR
+
+CREATE TABLE test_create_autoinc(
+    a int AUTO_INCREMENT,
+    b varchar(32),
+    UNIQUE (a,b)
+);
+\d test_create_autoinc;
+DROP TABLE test_create_autoinc;
+
+CREATE TABLE test_create_autoinc(
+    a int AUTO_INCREMENT,
+    b varchar(32),
+    PRIMARY KEY ((b||'1'),a)
+); -- ERROR
+
+CREATE TABLE test_create_autoinc(
+    a int AUTO_INCREMENT,
+    b varchar(32),
+    PRIMARY KEY (a,b)
+);
+\d test_create_autoinc;
+DROP TABLE test_create_autoinc;
+
+CREATE TABLE test_create_autoinc(
+    a int AUTO_INCREMENT,
+    b varchar(32),
+    KEY (b,a)
+); -- ERROR
+
 -- constraint error
-CREATE TABLE test_create_autoinc_err(id int auto_increment, name varchar(200),a int, primary key(name, id));
-CREATE TABLE test_create_autoinc_err(id int auto_increment, name varchar(200),a int, unique(name, id));
 CREATE TABLE test_create_autoinc_err(id int auto_increment primary key CHECK (id < 500), name varchar(200),a int);
 CREATE TABLE test_create_autoinc_err(id int auto_increment primary key, name varchar(200),a int CHECK ((id + a) < 500));
 CREATE TABLE test_create_autoinc_err(id int auto_increment primary key DEFAULT 100, name varchar(200),a int);
@@ -321,6 +380,21 @@ TRUNCATE TABLE test_alter_partition_autoinc;
 INSERT INTO test_alter_partition_autoinc VALUES(1,1,DEFAULT);
 SELECT col1, col2, col3 FROM test_alter_partition_autoinc ORDER BY 1, 2;
 DROP TABLE test_alter_partition_autoinc;
+
+-- test alter table add column, add/drop index
+CREATE TABLE test_alter_autoinc(
+    a int,
+    b varchar(32)
+);
+ALTER TABLE test_alter_autoinc ADD COLUMN seq int AUTO_INCREMENT, ADD CONSTRAINT test_alter_autoinc_uk UNIQUE ((seq + 1), seq); -- ERROR
+ALTER TABLE test_alter_autoinc ADD COLUMN seq int AUTO_INCREMENT, ADD CONSTRAINT test_alter_autoinc_uk UNIQUE (seq);
+CREATE INDEX test_alter_autoinc_idx1 ON test_alter_autoinc (seq,a);
+SELECT pg_get_tabledef('test_alter_autoinc'::regclass);
+ALTER TABLE test_alter_autoinc DROP CONSTRAINT test_alter_autoinc_uk; -- ERROR
+DROP INDEX test_alter_autoinc_idx1;
+ALTER TABLE test_alter_autoinc DROP CONSTRAINT test_alter_autoinc_uk, ADD CONSTRAINT test_alter_autoinc_pk PRIMARY KEY (seq);
+ALTER TABLE test_alter_autoinc DROP CONSTRAINT test_alter_autoinc_pk; -- ERROR
+DROP TABLE test_alter_autoinc;
 
 -- auto_increment in table with single column PRIMARY KEY
 CREATE TABLE single_autoinc_pk(col int auto_increment PRIMARY KEY) AUTO_INCREMENT = 10;

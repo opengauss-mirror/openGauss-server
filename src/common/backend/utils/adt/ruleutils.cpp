@@ -2201,25 +2201,23 @@ static void get_index_list_info(Oid tableoid, StringInfo buf, const char* relnam
 
         constriantid = get_index_constraint(index->indexrelid);
         if (OidIsValid(constriantid)) {
-            if (tableinfo->autoinc_consoid == constriantid) {
-                continue;
-            }
+            if (tableinfo->autoinc_consoid != constriantid) {
+                HeapTuple tup = SearchSysCache1(CONSTROID, ObjectIdGetDatum(constriantid));
+                if (!HeapTupleIsValid(tup)) { /* should not happen */
+                    ereport(ERROR,
+                        (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("cache lookup failed for constraint %u", constriantid)));
+                }
+                Form_pg_constraint conForm = (Form_pg_constraint)GETSTRUCT(tup);
 
-            HeapTuple tup = SearchSysCache1(CONSTROID, ObjectIdGetDatum(constriantid));
-            if (!HeapTupleIsValid(tup)) { /* should not happen */
-                ereport(ERROR,
-                    (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("cache lookup failed for constraint %u", constriantid)));
-            }
-            Form_pg_constraint conForm = (Form_pg_constraint)GETSTRUCT(tup);
-
-            if (conForm->contype == CONSTRAINT_UNIQUE || conForm->contype == CONSTRAINT_PRIMARY) {
-                get_table_constraint_info(conForm, tup, buf, constriantid, relname);
-                appendStringInfo(buf, ";");
-            } else {
-                appendStringInfo(buf, "\n%s;", pg_get_indexdef_worker(index->indexrelid, 0, NULL, false, true, 0));
-            }
-            /* Cleanup */
-            ReleaseSysCache(tup);
+                if (conForm->contype == CONSTRAINT_UNIQUE || conForm->contype == CONSTRAINT_PRIMARY) {
+                    get_table_constraint_info(conForm, tup, buf, constriantid, relname);
+                    appendStringInfo(buf, ";");
+                } else {
+                    appendStringInfo(buf, "\n%s;", pg_get_indexdef_worker(index->indexrelid, 0, NULL, false, true, 0));
+                }
+                /* Cleanup */
+                ReleaseSysCache(tup);
+    		}
         } else {
             appendStringInfo(buf, "\n%s;", pg_get_indexdef_worker(index->indexrelid, 0, NULL, false, true, 0));
 

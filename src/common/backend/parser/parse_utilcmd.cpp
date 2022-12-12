@@ -8023,8 +8023,8 @@ static void CheckAutoIncrementIndex(CreateStmtContext *cxt)
                 continue;
             }
             Assert(cons->keys->length > 0);
-            Value *name = (Value *)lfirst(cons->keys->head);
-            if (strcasecmp(name->val.str, column->colname) == 0) {
+            IndexElem *elem = (IndexElem *)lfirst(cons->keys->head);
+            if (elem->name != NULL && strcasecmp(elem->name, column->colname) == 0) {
                 has_found = true;
                 break;
             }
@@ -8041,7 +8041,7 @@ static void CheckAutoIncrementIndex(CreateStmtContext *cxt)
             }
             Assert(index->indexParams->length > 0);
             IndexElem *elem = (IndexElem *)lfirst(index->indexParams->head);
-            if (strcasecmp(elem->name, column->colname) == 0) {
+            if (elem->name != NULL && strcasecmp(elem->name, column->colname) == 0) {
                 has_found = true;
                 break;
             }
