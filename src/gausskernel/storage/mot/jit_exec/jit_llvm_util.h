@@ -222,6 +222,9 @@ extern void CloseCompileFrame(LlvmCodeGenContext* ctx);
 
 extern void CleanupCompileFrames(LlvmCodeGenContext* ctx);
 
+/** @brief Reset compile state for LLVM (cleanup in case of error). */
+extern void JitResetCompileState();
+
 /**
  * @brief Helper function for defining LLVM external function.
  * @param module The LLVM module into which the function declaration is to be added.
@@ -897,6 +900,16 @@ private:
     void PrepareExceptionBlock();
 };
 }  // namespace llvm_util
+
+#define JIT_ASSERT_LLVM_CODEGEN_UTIL_VALID()           \
+    do {                                               \
+        MOT_ASSERT(JIT_IF_CURRENT() == nullptr);       \
+        MOT_ASSERT(JIT_WHILE_CURRENT() == nullptr);    \
+        MOT_ASSERT(JIT_DO_WHILE_CURRENT() == nullptr); \
+        MOT_ASSERT(JIT_FOR_CURRENT() == nullptr);      \
+        MOT_ASSERT(JIT_SWITCH_CURRENT() == nullptr);   \
+        MOT_ASSERT(JIT_TRY_CURRENT() == nullptr);      \
+    } while (0)
 
 /**************************************
  *      Return Statement

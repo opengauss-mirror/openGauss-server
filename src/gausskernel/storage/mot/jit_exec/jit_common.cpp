@@ -49,7 +49,6 @@
 #include "mm_global_api.h"
 #include "catalog_column_types.h"
 #include "mot_internal.h"
-#include "jit_llvm_query_codegen.h"
 
 namespace JitExec {
 DECLARE_LOGGER(JitCommon, JitExec)
@@ -66,11 +65,6 @@ const char* JitRuntimeFaultToString(int faultCode)
         default:
             return "Unknown generic fault code";
     }
-}
-
-void JitResetCompileState()
-{
-    JitLlvmResetCompileState();
 }
 
 const char* CommandToString(JitCommandType commandType)
