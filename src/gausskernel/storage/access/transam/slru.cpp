@@ -422,8 +422,10 @@ int SimpleLruReadPage(SlruCtl ctl, int64 pageno, bool write_ok, TransactionId xi
         /* Acquire per-buffer lock (cannot deadlock, see notes at top) */
         (void)LWLockAcquire(shared->buffer_locks[slotno], LW_EXCLUSIVE);
 
-        /* Release control lock while doing I/O */
-        LWLockRelease(shared->control_lock);
+        if (!ENABLE_DSS) {
+            /* Release control lock while doing I/O */
+            LWLockRelease(shared->control_lock);
+        }
 
         /* Do the read */
         ok = SlruPhysicalReadPage(ctl, pageno, slotno);
@@ -431,8 +433,10 @@ int SimpleLruReadPage(SlruCtl ctl, int64 pageno, bool write_ok, TransactionId xi
         /* Set the LSNs for this newly read-in page to zero */
         SimpleLruZeroLSNs(ctl, slotno);
 
-        /* Re-acquire control lock and update page state */
-        (void)LWLockAcquire(shared->control_lock, LW_EXCLUSIVE);
+        if (!ENABLE_DSS) {
+            /* Re-acquire control lock and update page state */
+            (void)LWLockAcquire(shared->control_lock, LW_EXCLUSIVE);
+        }
 
         if (!(shared->page_number[slotno] == pageno && shared->page_status[slotno] == SLRU_PAGE_READ_IN_PROGRESS &&
               !shared->page_dirty[slotno]))
@@ -583,6 +587,41 @@ void SimpleLruWritePage(SlruCtl ctl, int slotno)
     SlruInternalWritePage(ctl, slotno, NULL);
 }
 
+static bool SSPreAllocSegment(int fd, SlruFlush fdata)
+{
+    struct stat s;
+    if (fstat(fd, &s) < 0) {
+        t_thrd.xact_cxt.slru_errcause = SLRU_OPEN_FAILED;
+        t_thrd.xact_cxt.slru_errno = errno;
+        if (fdata == NULL) {
+            (void)close(fd);
+        }
+        return false;
+    }
+
+    int64 trunc_size = (int64)(SLRU_PAGES_PER_SEGMENT * BLCKSZ);
+    if (s.st_size < trunc_size) {
+        /* extend file at once to avoid dss cross-border write issue */
+        pgstat_report_waitevent(WAIT_EVENT_SLRU_WRITE);
+        errno = 0;
+        if (fallocate(fd, 0, s.st_size, trunc_size) != 0) {
+            pgstat_report_waitevent(WAIT_EVENT_END);
+            if (errno == 0) {
+                errno = ENOSPC;
+            }
+            t_thrd.xact_cxt.slru_errcause = SLRU_WRITE_FAILED;
+            t_thrd.xact_cxt.slru_errno = errno;
+            if (fdata == NULL) {
+                (void)close(fd);
+            }
+            return false;
+        }
+        pgstat_report_waitevent(WAIT_EVENT_END);
+    }
+
+    return true;
+}
+
 /*
  * Physical read of a (previously existing) page into a buffer slot
  *
@@ -629,10 +668,22 @@ static bool SlruPhysicalReadPage(SlruCtl ctl, int64 pageno, int slotno)
     }
 
     if (lseek(fd, (off_t)offset, SEEK_SET) < 0) {
-        t_thrd.xact_cxt.slru_errcause = SLRU_SEEK_FAILED;
-        t_thrd.xact_cxt.slru_errno = errno;
-        (void)close(fd);
-        return false;
+        bool failed = true;
+        if (ENABLE_DSS && errno == ERR_DSS_FILE_SEEK) {
+            if (!SSPreAllocSegment(fd, NULL)) {
+                return false;
+            }
+            if (lseek(fd, (off_t)offset, SEEK_SET) >= 0) {
+                failed = false;
+            }
+        }
+
+        if (failed) {
+            t_thrd.xact_cxt.slru_errcause = SLRU_SEEK_FAILED;
+            t_thrd.xact_cxt.slru_errno = errno;
+            (void)close(fd);
+            return false;
+        }
     }
 
     errno = 0;
@@ -658,41 +709,6 @@ static bool SlruPhysicalReadPage(SlruCtl ctl, int64 pageno, int slotno)
         t_thrd.xact_cxt.slru_errcause = SLRU_CLOSE_FAILED;
         t_thrd.xact_cxt.slru_errno = errno;
         return false;
-    }
-
-    return true;
-}
-
-static bool SSPreAllocSegment(int fd, SlruFlush fdata)
-{
-    struct stat s;
-    if (fstat(fd, &s) < 0) {
-        t_thrd.xact_cxt.slru_errcause = SLRU_OPEN_FAILED;
-        t_thrd.xact_cxt.slru_errno = errno;
-        if (fdata == NULL) {
-            (void)close(fd);
-        }
-        return false;
-    }
-
-    int64 trunc_size = (int64)(SLRU_PAGES_PER_SEGMENT * BLCKSZ);
-    if (s.st_size < trunc_size) {
-        /* extend file at once to avoid dss cross-border write issue */
-        pgstat_report_waitevent(WAIT_EVENT_SLRU_WRITE);
-        errno = 0;
-        if (fallocate(fd, 0, s.st_size, trunc_size) != 0) {
-            pgstat_report_waitevent(WAIT_EVENT_END);
-            if (errno == 0) {
-                errno = ENOSPC;
-            }
-            t_thrd.xact_cxt.slru_errcause = SLRU_WRITE_FAILED;
-            t_thrd.xact_cxt.slru_errno = errno;
-            if (fdata == NULL) {
-                (void)close(fd);
-            }
-            return false;
-        }
-        pgstat_report_waitevent(WAIT_EVENT_END);
     }
 
     return true;

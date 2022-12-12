@@ -258,11 +258,7 @@ static Page _bt_blnewpage(uint32 level)
     }
     ADIO_ELSE()
     {
-        if (ENABLE_DSS) {
-            page = (Page)mem_align_alloc(SYS_LOGICAL_BLOCK_SIZE, BLCKSZ);
-        } else {
-            page = (Page)palloc(BLCKSZ);
-        }
+        page = (Page)palloc(BLCKSZ);
     }
     ADIO_END();
 
@@ -312,11 +308,7 @@ static void _bt_segment_blwritepage(BTWriteState *wstate, Page page, BlockNumber
     PageSetLSN(BufferGetPage(buf), xlog_ptr);
     MarkBufferDirty(buf);
     UnlockReleaseBuffer(buf);
-    if (ENABLE_DSS) {
-        mem_align_free(page);
-    } else {
-        pfree(page);
-    }
+    pfree(page);
     page = NULL;
 }
 
@@ -433,11 +425,7 @@ static void _bt_blwritepage(BTWriteState *wstate, Page page, BlockNumber blkno)
             }
             wstate->btws_zeropage = NULL;
         }
-        if (ENABLE_DSS) {
-            mem_align_free(page);
-        } else {
-            pfree(page);
-        }
+        pfree(page);
         page = NULL;
     }
     ADIO_END();
@@ -828,11 +816,7 @@ void _bt_uppershutdown(BTWriteState *wstate, BTPageState *state)
     }
     ADIO_ELSE()
     {
-        if (ENABLE_DSS) {
-            metapage = (Page)mem_align_alloc(SYS_LOGICAL_BLOCK_SIZE, BLCKSZ);
-        } else {
-            metapage = (Page)palloc(BLCKSZ);
-        }
+        metapage = (Page)palloc(BLCKSZ);
     }
     ADIO_END();
     _bt_initmetapage(metapage, rootblkno, rootlevel);
