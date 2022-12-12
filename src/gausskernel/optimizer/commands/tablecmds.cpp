@@ -3777,6 +3777,47 @@ static void DropRelationPermissionCheck(char relkind, Oid relOid, Oid nspOid, co
         aclcheck_error(aclresult, ACL_KIND_CLASS, relname);
     }
 }
+
+static bool IsPartitionDeltaCudesc(Oid relOid)
+{
+#define PARTITION_DELTA_NAME "pg_delta_part_"
+#define PARTITION_CUDESC_NAME "pg_cudesc_part_"
+
+    int attnum;
+    bool found = false;
+    ScanKeyData scanKey[1];
+    TableScanDesc scan;
+    Relation pgpartition = NULL;
+    Relation rel = NULL;
+
+    rel = try_relation_open(relOid, AccessShareLock);
+    if (!RelationIsValid(rel)) {
+        return false;
+    }
+
+    const char *relname = RelationGetRelationName(rel);
+    if (strncmp(relname, PARTITION_DELTA_NAME, strlen(PARTITION_DELTA_NAME)) == 0) {
+        attnum = Anum_pg_partition_reltoastrelid;
+    } else if (strncmp(relname, PARTITION_CUDESC_NAME, strlen(PARTITION_CUDESC_NAME)) == 0) {
+        attnum = Anum_pg_partition_relcudescrelid;
+    } else {
+        heap_close(rel, AccessShareLock);
+        return false;
+    }
+
+    ScanKeyInit(&scanKey[0], attnum, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(rel->rd_id));
+    pgpartition = heap_open(PartitionRelationId, AccessShareLock);
+    scan = tableam_scan_begin(pgpartition, SnapshotNow, 1, scanKey);
+    if (tableam_scan_getnexttuple(scan, ForwardScanDirection)) {
+        found = true;
+    }
+    tableam_scan_end(scan);
+    heap_close(pgpartition, AccessShareLock);
+    heap_close(rel, AccessShareLock);
+
+    return found;
+}
+
 /*
  * Before acquiring a table lock, check whether we have sufficient rights.
  * In the case of DROP INDEX, also try to lock the table before the index.
@@ -3825,6 +3866,12 @@ static void RangeVarCallbackForDropRelation(
                 relkind == RELKIND_RELATION && expected_relkind == RELKIND_TOASTVALUE);
     if (flag) {
         DropErrorMsgWrongType(rel->relname, classform->relkind, relkind);
+    }
+
+    if (IsPartitionDeltaCudesc(relOid)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                errmsg("cannot drop relation \"%s\", it is a partition delta/cudesc table", rel->relname)));
     }
 
     /* Permission Check */
