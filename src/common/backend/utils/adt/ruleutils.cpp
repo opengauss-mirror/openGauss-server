@@ -1664,10 +1664,10 @@ static int get_table_attribute(
                         isDefault = true;
                     }
                     Datum onUpdateExpr = fastgetattr(tup, Anum_pg_attrdef_adsrc_on_update, attrdefDesc->rd_att, &isnull);
-                    if (onUpdateExpr && pg_strcasecmp(TextDatumGetCString(onUpdateExpr), "") == 0) {
-                        isOnUpdate = false;
-                    } else {
+                    if (onUpdateExpr && pg_strcasecmp(TextDatumGetCString(onUpdateExpr), "") != 0) {
                         isOnUpdate = true;
+                    } else {
+                        isOnUpdate = false;
                     }
 
                     if (attrdef->adnum == att_tup->attnum) {

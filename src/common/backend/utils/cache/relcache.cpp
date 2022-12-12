@@ -5665,10 +5665,10 @@ static void UpdatedColFetch(TupleConstr *constr, HeapTuple htup, Relation adrel,
         bool isnull = false;
         Datum val;
         val = fastgetattr(htup, Anum_pg_attrdef_adsrc_on_update, adrel->rd_att, &isnull);
-        if (val && pg_strcasecmp(TextDatumGetCString(val), "") == 0) {
-            updatedCol = false;
-        } else {
+        if (val && pg_strcasecmp(TextDatumGetCString(val), "") != 0) {
             updatedCol = true;
+        } else {
+            updatedCol = false;
         }
     }
     attrdef[attrdefIndex].has_on_update = updatedCol;
