@@ -214,6 +214,13 @@ create table generated_test(a int, b int generated always as (length((a)::text))
 select * from pg_get_tabledef('generated_test');
 drop table generated_test;
 
+--type table
+create type test_type_table is(a varchar2, b int);
+create table test_type_table_t of test_type_table;
+select pg_get_tabledef('test_type_table_t');
+drop table test_type_table_t;
+drop type test_type_table;
+
 reset current_schema;
 drop schema test_get_table_def cascade;
 
