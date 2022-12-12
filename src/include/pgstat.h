@@ -2542,6 +2542,7 @@ extern void reportRedoWrite(PgStat_Counter blks, PgStat_Counter tim);
 
 typedef struct PgStat_FileEntry {
     int changeCount;
+    TimestampTz time;
 
     Oid dbid;
     Oid spcid;
