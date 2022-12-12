@@ -775,6 +775,9 @@
 ./lib/libpq_ce.so.5
 ./lib/libpq_ce.so.5.5
 ./lib/libgauss_cl_jni.so
+./lib/libnuma.so
+./lib/libnuma.so.1
+./lib/libnuma.so.1.0.0
 ./lib/libcgroup.so
 ./lib/libcgroup.so.1
 ./lib/libcom_err_gauss.so
