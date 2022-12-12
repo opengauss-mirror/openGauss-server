@@ -3005,7 +3005,6 @@ static void ProcessStandbySwitchRequestMessage(void)
         return;
     } else if (message.demoteMode == ExtremelyFast){
         g_instance.wal_cxt.upgradeSwitchMode = ExtremelyFast;
-        message.demoteMode = FastDemote;
     }
 
     SpinLockAcquire(&t_thrd.walsender_cxt.WalSndCtl->mutex);
