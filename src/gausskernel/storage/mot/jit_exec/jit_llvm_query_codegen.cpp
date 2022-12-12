@@ -2446,16 +2446,6 @@ static MotJitContext* JitInvokeCodegen(JitLlvmCodeGenContext* ctx, Query* query,
     return jitContext;
 }
 
-#define JIT_ASSERT_QUERY_CODEGEN_UTIL_VALID()          \
-    do {                                               \
-        MOT_ASSERT(JIT_IF_CURRENT() == nullptr);       \
-        MOT_ASSERT(JIT_WHILE_CURRENT() == nullptr);    \
-        MOT_ASSERT(JIT_DO_WHILE_CURRENT() == nullptr); \
-        MOT_ASSERT(JIT_FOR_CURRENT() == nullptr);      \
-        MOT_ASSERT(JIT_SWITCH_CURRENT() == nullptr);   \
-        MOT_ASSERT(JIT_TRY_CURRENT() == nullptr);      \
-    } while (0)
-
 static bool InitCodeGenContextByPlan(
     JitLlvmCodeGenContext* ctx, GsCodeGen* codeGen, GsCodeGen::LlvmBuilder* builder, JitPlan* plan)
 {
@@ -2521,7 +2511,7 @@ static bool InitCodeGenContextByPlan(
 
 MotJitContext* JitCodegenLlvmQuery(Query* query, const char* query_string, JitPlan* plan, JitCodegenStats& codegenStats)
 {
-    JIT_ASSERT_QUERY_CODEGEN_UTIL_VALID();
+    JIT_ASSERT_LLVM_CODEGEN_UTIL_VALID();
     GsCodeGen* codeGen = SetupCodegenEnv();
     if (codeGen == nullptr) {
         return nullptr;
@@ -2596,7 +2586,9 @@ MotJitContext* JitCodegenLlvmQuery(Query* query, const char* query_string, JitPl
             "Got LLVM-jitted function %p after compile, for query: %s", jitContext->m_llvmFunction, query_string);
     }
 
-    JIT_ASSERT_QUERY_CODEGEN_UTIL_VALID();
+    // reset compile state for robustness
+    llvm_util::JitResetCompileState();
+    JIT_ASSERT_LLVM_CODEGEN_UTIL_VALID();
     return (MotJitContext*)jitContext;
 }
 
@@ -2641,16 +2633,5 @@ extern int JitExecLlvmQuery(JitQueryContext* jitContext, ParamListInfo params, T
 
     MOT_LOG_TRACE("JitExecLlvmQuery returned %d/%u for query: %s", result, jitContext->m_rc, jitContext->m_queryString);
     return result;
-}
-
-extern void JitLlvmResetCompileState()
-{
-    u_sess->mot_cxt.jit_llvm_if_stack = nullptr;
-    u_sess->mot_cxt.jit_llvm_loop_stack = nullptr;
-    u_sess->mot_cxt.jit_llvm_while_stack = nullptr;
-    u_sess->mot_cxt.jit_llvm_do_while_stack = nullptr;
-    u_sess->mot_cxt.jit_llvm_for_stack = nullptr;
-    u_sess->mot_cxt.jit_llvm_switch_case_stack = nullptr;
-    u_sess->mot_cxt.jit_llvm_try_catch_stack = nullptr;
 }
 }  // namespace JitExec

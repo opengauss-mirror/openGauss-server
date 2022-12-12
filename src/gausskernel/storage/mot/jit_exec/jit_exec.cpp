@@ -869,9 +869,6 @@ extern MotJitContext* JitCodegenQuery(Query* query, const char* queryString, Jit
     }
     PG_END_TRY();
 
-    // reset compile state for robustness
-    JitResetCompileState();
-
     // pop currently parsed query
     u_sess->mot_cxt.jit_pg_query = prevQuery;
 
@@ -1005,9 +1002,6 @@ extern MotJitContext* JitCodegenFunction(PLpgSQL_function* function, HeapTuple p
         FlushErrorState();
     }
     PG_END_TRY();
-
-    // reset compile state for robustness
-    JitResetCompileState();
 
     if (nsPushed) {
         PopJitSourceNamespace();

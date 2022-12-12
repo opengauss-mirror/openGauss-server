@@ -1081,9 +1081,6 @@ static JitCodegenState RegenerateJitFunctionSource(JitSource* jitSource)
     }
     PG_END_TRY();
 
-    // reset compile state for robustness
-    JitResetCompileState();
-
     if (plan != nullptr) {
         JitDestroyPlan((JitPlan*)plan);
     }

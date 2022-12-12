@@ -5338,20 +5338,10 @@ static bool InitLocalVariables(JitLlvmFunctionCodeGenContext* ctx)
     return true;
 }
 
-#define JIT_ASSERT_SP_CODEGEN_UTIL_VALID()             \
-    do {                                               \
-        MOT_ASSERT(JIT_IF_CURRENT() == nullptr);       \
-        MOT_ASSERT(JIT_WHILE_CURRENT() == nullptr);    \
-        MOT_ASSERT(JIT_DO_WHILE_CURRENT() == nullptr); \
-        MOT_ASSERT(JIT_FOR_CURRENT() == nullptr);      \
-        MOT_ASSERT(JIT_SWITCH_CURRENT() == nullptr);   \
-        MOT_ASSERT(JIT_TRY_CURRENT() == nullptr);      \
-    } while (0)
-
 extern MotJitContext* JitCodegenLlvmFunction(PLpgSQL_function* function, HeapTuple procTuple, Oid functionOid,
     ReturnSetInfo* returnSetInfo, JitPlan* plan, JitCodegenStats& codegenStats)
 {
-    JIT_ASSERT_SP_CODEGEN_UTIL_VALID();
+    JIT_ASSERT_LLVM_CODEGEN_UTIL_VALID();
     bool procNameIsNull = false;
     bool procSrcIsNull = false;
     bool procIsStrictIsNull = false;
@@ -5361,7 +5351,7 @@ extern MotJitContext* JitCodegenLlvmFunction(PLpgSQL_function* function, HeapTup
     if (procNameIsNull || procSrcIsNull || procIsStrictIsNull) {
         MOT_LOG_TRACE("Failed to generate jitted code for stored procedure: catalog entry for stored procedure "
                       "contains null attributes");
-        JIT_ASSERT_SP_CODEGEN_UTIL_VALID();
+        JIT_ASSERT_LLVM_CODEGEN_UTIL_VALID();
         return nullptr;
     }
 
@@ -5377,7 +5367,7 @@ extern MotJitContext* JitCodegenLlvmFunction(PLpgSQL_function* function, HeapTup
     if (!functionSource) {
         MOT_REPORT_ERROR(
             MOT_ERROR_OOM, "Parse Stored Procedure", "Failed to allocate memory for stored procedure source code");
-        JIT_ASSERT_SP_CODEGEN_UTIL_VALID();
+        JIT_ASSERT_LLVM_CODEGEN_UTIL_VALID();
         return nullptr;
     }
     bool isStrict = DatumGetBool(procIsStrictDatum);
@@ -5388,14 +5378,14 @@ extern MotJitContext* JitCodegenLlvmFunction(PLpgSQL_function* function, HeapTup
     // prepare compile context
     GsCodeGen* codeGen = SetupCodegenEnv();
     if (codeGen == nullptr) {
-        JIT_ASSERT_SP_CODEGEN_UTIL_VALID();
+        JIT_ASSERT_LLVM_CODEGEN_UTIL_VALID();
         return nullptr;
     }
     GsCodeGen::LlvmBuilder builder(codeGen->context());
     volatile JitLlvmFunctionCodeGenContext cgCtx = {};
     if (!InitLlvmFunctionCodeGenContext(
             (JitLlvmFunctionCodeGenContext*)&cgCtx, codeGen, &builder, function, returnSetInfo)) {
-        JIT_ASSERT_SP_CODEGEN_UTIL_VALID();
+        JIT_ASSERT_LLVM_CODEGEN_UTIL_VALID();
         FreeGsCodeGen(codeGen);
         return nullptr;
     }
@@ -5490,7 +5480,10 @@ extern MotJitContext* JitCodegenLlvmFunction(PLpgSQL_function* function, HeapTup
     // cleanup
     function->pre_parse_trig = preParseTrig;
     DestroyLlvmFunctionCodeGenContext((JitLlvmFunctionCodeGenContext*)ctx);
-    JIT_ASSERT_SP_CODEGEN_UTIL_VALID();
+
+    // reset compile state for robustness
+    llvm_util::JitResetCompileState();
+    JIT_ASSERT_LLVM_CODEGEN_UTIL_VALID();
     return (MotJitContext*)jitContext;
 }
 

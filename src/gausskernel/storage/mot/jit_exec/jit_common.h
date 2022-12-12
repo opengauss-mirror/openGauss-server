@@ -92,9 +92,6 @@ inline bool IsJitRuntimeFaultCode(int faultCode)
 /** @brief Converts JIT generic fault code to string. */
 extern const char* JitRuntimeFaultToString(int faultCode);
 
-/** @brief Reset compile state for LLVM (cleanup in case of error). */
-extern void JitResetCompileState();
-
 // common helpers for code generation
 /** @brief Converts an LLVM command type to string form. */
 extern const char* CommandToString(JitCommandType commandType);

@@ -87,6 +87,17 @@ extern void CleanupCompileFrames(LlvmCodeGenContext* ctx)
     }
 }
 
+extern void JitResetCompileState()
+{
+    u_sess->mot_cxt.jit_llvm_if_stack = nullptr;
+    u_sess->mot_cxt.jit_llvm_loop_stack = nullptr;
+    u_sess->mot_cxt.jit_llvm_while_stack = nullptr;
+    u_sess->mot_cxt.jit_llvm_do_while_stack = nullptr;
+    u_sess->mot_cxt.jit_llvm_for_stack = nullptr;
+    u_sess->mot_cxt.jit_llvm_switch_case_stack = nullptr;
+    u_sess->mot_cxt.jit_llvm_try_catch_stack = nullptr;
+}
+
 extern llvm::FunctionCallee DefineFunction(llvm::Module* module, llvm::Type* returnType, const char* name, ...)
 {
     va_list vargs;
