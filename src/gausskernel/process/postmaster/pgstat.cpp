@@ -8458,7 +8458,7 @@ static void pgstat_recv_filestat(PgStat_MsgFile* msg, int len)
         if (i == NUM_FILES) {
             TimestampTz longestTime = DBL_MAX;
             int minLocation = 0;
-            for (int j = NUM_FILES - 1; j >= 0; j--) {
+            for (int j = 0; j < NUM_FILES; j++) {
                 entry = (PgStat_FileEntry*)&pgStatFileArray[j];
                 if (entry->time < longestTime) {
                     longestTime = entry->time;
