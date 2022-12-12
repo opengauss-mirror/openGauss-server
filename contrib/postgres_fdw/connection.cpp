@@ -795,6 +795,16 @@ static void pgfdw_xact_callback(XactEvent event, void *arg)
         return;
     }
 
+#ifdef ENABLE_MOT
+    /*
+     * These events are added only for MOT FDW. So, others can safely ignore these event.
+     */
+    if (event == XACT_EVENT_START || event == XACT_EVENT_RECORD_COMMIT || event == XACT_EVENT_PREROLLBACK_CLEANUP ||
+        event == XACT_EVENT_POST_COMMIT_CLEANUP || event == XACT_EVENT_STMT_FINISH) {
+        return;
+    }
+#endif
+
     /*
      * Scan all connection cache entries to find open remote transactions, and
      * close them.
