@@ -2774,13 +2774,11 @@ static char* pg_get_tabledef_worker(Oid tableoid)
         ((tableinfo.relpersistence == RELPERSISTENCE_GLOBAL_TEMP) ? "GLOBAL TEMPORARY " : ""),
         reltypename, relname);
 
-
     if (classForm->reloftype != 0) {
         relOfTypeName = get_typename(classForm->reloftype);
         appendStringInfo(&buf, " of %s", relOfTypeName);
-    }
-    else {
-        // get attribute info
+    } else {
+        /* get attribute info */
         actual_atts = get_table_attribute(tableoid, &buf, formatter, ft_frmt_clmn, cnt_ft_frmt_clmns, &tableinfo);
 
         /*
