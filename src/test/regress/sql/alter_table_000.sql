@@ -1346,4 +1346,34 @@ alter table test_p_unique add constraint con_t_unique unique key using btree(f1)
 alter table test_p_unique add constraint con_t_unique unique index using btree(f1);
 drop table test_p_unique;
 
+create table test_primary(f11 int, f12 varchar(20), f13 bool);
+alter table test_primary add primary key using btree(f11 desc, f12 asc) comment 'primary key' using btree;
+\d+ test_primary
+drop table test_primary;
+
+create table test_primary(f11 int, f12 varchar(20), f13 bool);
+alter table test_primary add primary key (f11 desc, f12 asc) comment 'primary key' using btree;
+\d+ test_primary
+drop table test_primary;
+
+create table test_primary(f11 int, f12 varchar(20), f13 bool);
+alter table test_primary add primary key using btree(f11 desc, f12 asc) comment 'primary key' using btree using btree;
+\d+ test_primary
+drop table test_primary;
+
+create table test_unique(f31 int, f32 varchar(20));
+alter table test_unique add unique using btree(f31) comment 'unique index' using btree;
+\d+ test_unique
+drop table test_unique;
+
+create table test_unique(f31 int, f32 varchar(20));
+alter table test_unique add unique (f31) comment 'unique index' using btree;
+\d+ test_unique
+drop table test_unique;
+
+create table test_unique(f31 int, f32 varchar(20));
+alter table test_unique add unique using btree(f31) comment 'unique index' using btree using btree;
+\d+ test_unique
+drop table test_unique;
+
 \c postgres

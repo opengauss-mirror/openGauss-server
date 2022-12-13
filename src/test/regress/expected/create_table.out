@@ -2103,4 +2103,91 @@ PARTITION BY RANGE(f1)
 ERROR:  index/key cannot be used as unique name.
 LINE 6:     constraint con_t_unique unique index using btree(f1)
                                     ^
+create table test_unique(f31 int, f32 varchar(20), constraint con_t_unique unique using btree(f31, f32) comment 'unique index' using btree);
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "con_t_unique" for table "test_unique"
+\d+ test_unique
+                             Table "public.test_unique"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f31    | integer               |           | plain    |              | 
+ f32    | character varying(20) |           | extended |              | 
+Indexes:
+    "con_t_unique" UNIQUE CONSTRAINT, btree (f31, f32) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_unique;
+create table test_unique(f31 int, f32 varchar(20), constraint con_t_unique unique (f31, f32) comment 'unique index' using btree);
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "con_t_unique" for table "test_unique"
+\d+ test_unique
+                             Table "public.test_unique"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f31    | integer               |           | plain    |              | 
+ f32    | character varying(20) |           | extended |              | 
+Indexes:
+    "con_t_unique" UNIQUE CONSTRAINT, btree (f31, f32) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_unique;
+create table test_unique(f31 int, f32 varchar(20), constraint con_t_unique unique (f31, f32) comment 'unique index' using btree using btree);
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "con_t_unique" for table "test_unique"
+\d+ test_unique
+                             Table "public.test_unique"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f31    | integer               |           | plain    |              | 
+ f32    | character varying(20) |           | extended |              | 
+Indexes:
+    "con_t_unique" UNIQUE CONSTRAINT, btree (f31, f32) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_unique;
+create table test_primary(f11 int, f12 varchar(20), f13 bool, constraint con_t_pri primary key using btree(f11 desc, f12 asc) comment 'primary key' using btree);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "con_t_pri" for table "test_primary"
+\d+ test_primary
+                            Table "public.test_primary"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f11    | integer               | not null  | plain    |              | 
+ f12    | character varying(20) | not null  | extended |              | 
+ f13    | boolean               |           | plain    |              | 
+Indexes:
+    "con_t_pri" PRIMARY KEY, btree (f11 DESC, f12) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_primary;
+create table test_primary(f11 int, f12 varchar(20), f13 bool, constraint con_t_pri primary key (f11 desc, f12 asc) comment 'primary key' using btree);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "con_t_pri" for table "test_primary"
+\d+ test_primary
+                            Table "public.test_primary"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f11    | integer               | not null  | plain    |              | 
+ f12    | character varying(20) | not null  | extended |              | 
+ f13    | boolean               |           | plain    |              | 
+Indexes:
+    "con_t_pri" PRIMARY KEY, btree (f11 DESC, f12) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_primary;
+create table test_primary(f11 int, f12 varchar(20), f13 bool, constraint con_t_pri primary key using btree(f11 desc, f12 asc) comment 'primary key' using btree using btree);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "con_t_pri" for table "test_primary"
+\d+ test_primary
+                            Table "public.test_primary"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f11    | integer               | not null  | plain    |              | 
+ f12    | character varying(20) | not null  | extended |              | 
+ f13    | boolean               |           | plain    |              | 
+Indexes:
+    "con_t_pri" PRIMARY KEY, btree (f11 DESC, f12) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_primary;
 \c postgres

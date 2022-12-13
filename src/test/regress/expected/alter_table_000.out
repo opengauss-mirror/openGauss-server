@@ -2755,4 +2755,97 @@ ERROR:  index/key cannot be used as unique name.
 LINE 1: ...r table test_p_unique add constraint con_t_unique unique ind...
                                                              ^
 drop table test_p_unique;
+create table test_primary(f11 int, f12 varchar(20), f13 bool);
+alter table test_primary add primary key using btree(f11 desc, f12 asc) comment 'primary key' using btree;
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "test_primary_pkey" for table "test_primary"
+\d+ test_primary
+                            Table "public.test_primary"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f11    | integer               | not null  | plain    |              | 
+ f12    | character varying(20) | not null  | extended |              | 
+ f13    | boolean               |           | plain    |              | 
+Indexes:
+    "test_primary_pkey" PRIMARY KEY, btree (f11 DESC, f12) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_primary;
+create table test_primary(f11 int, f12 varchar(20), f13 bool);
+alter table test_primary add primary key (f11 desc, f12 asc) comment 'primary key' using btree;
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "test_primary_pkey" for table "test_primary"
+\d+ test_primary
+                            Table "public.test_primary"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f11    | integer               | not null  | plain    |              | 
+ f12    | character varying(20) | not null  | extended |              | 
+ f13    | boolean               |           | plain    |              | 
+Indexes:
+    "test_primary_pkey" PRIMARY KEY, btree (f11 DESC, f12) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_primary;
+create table test_primary(f11 int, f12 varchar(20), f13 bool);
+alter table test_primary add primary key using btree(f11 desc, f12 asc) comment 'primary key' using btree using btree;
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "test_primary_pkey" for table "test_primary"
+\d+ test_primary
+                            Table "public.test_primary"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f11    | integer               | not null  | plain    |              | 
+ f12    | character varying(20) | not null  | extended |              | 
+ f13    | boolean               |           | plain    |              | 
+Indexes:
+    "test_primary_pkey" PRIMARY KEY, btree (f11 DESC, f12) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_primary;
+create table test_unique(f31 int, f32 varchar(20));
+alter table test_unique add unique using btree(f31) comment 'unique index' using btree;
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "test_unique_f31_key" for table "test_unique"
+\d+ test_unique
+                             Table "public.test_unique"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f31    | integer               |           | plain    |              | 
+ f32    | character varying(20) |           | extended |              | 
+Indexes:
+    "test_unique_f31_key" UNIQUE CONSTRAINT, btree (f31) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_unique;
+create table test_unique(f31 int, f32 varchar(20));
+alter table test_unique add unique (f31) comment 'unique index' using btree;
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "test_unique_f31_key" for table "test_unique"
+\d+ test_unique
+                             Table "public.test_unique"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f31    | integer               |           | plain    |              | 
+ f32    | character varying(20) |           | extended |              | 
+Indexes:
+    "test_unique_f31_key" UNIQUE CONSTRAINT, btree (f31) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_unique;
+create table test_unique(f31 int, f32 varchar(20));
+alter table test_unique add unique using btree(f31) comment 'unique index' using btree using btree;
+NOTICE:  ALTER TABLE / ADD UNIQUE will create implicit index "test_unique_f31_key" for table "test_unique"
+\d+ test_unique
+                             Table "public.test_unique"
+ Column |         Type          | Modifiers | Storage  | Stats target | Description 
+--------+-----------------------+-----------+----------+--------------+-------------
+ f31    | integer               |           | plain    |              | 
+ f32    | character varying(20) |           | extended |              | 
+Indexes:
+    "test_unique_f31_key" UNIQUE CONSTRAINT, btree (f31) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_unique;
 \c postgres

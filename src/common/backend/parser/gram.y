@@ -267,6 +267,8 @@ static int GetFillerColIndex(char *filler_col_name, List *col_list);
 static void RemoveFillerCol(List *filler_list, List *col_list);
 static int errstate;
 static void CheckPartitionExpr(Node* expr, int* colCount);
+static char* transformIndexOptions(List* list);
+static void setAccessMethod(Constraint *n);
 
 static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStmt*n);
 %}
@@ -444,7 +446,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 %type <node>	TriggerWhen
 
 %type <str>		copy_file_name
-				database_name access_method_clause access_method attr_name
+				database_name access_method_clause access_method access_method_clause_without_keyword attr_name
 				name namedata_string fdwName cursor_name file_name
 				index_name cluster_index_specification
 				pgxcnode_name pgxcgroup_name resource_pool_name workload_group_name
@@ -509,7 +511,8 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 
 /* b compatibility: comment start */
 %type <list>	opt_index_options index_options opt_table_options table_options opt_column_options column_options
-%type <node>	index_option table_option column_option
+%type <node>	index_option table_option column_option table_index_option
+%type <list>	opt_table_index_options table_index_options
 
 %type <str>     opt_part_options
 %type <list>    part_options
@@ -661,7 +664,7 @@ static void setDelimiterName(core_yyscan_t yyscanner, char*input, VariableSetStm
 %type <boolean> constraints_set_mode
 %type <boolean> OptRelative
 %type <boolean> OptGPI
-%type <str>		OptTableSpace OptConsTableSpace OptTableSpaceOwner LoggingStr size_clause OptMaxSize OptDatafileSize OptReuse OptAuto OptNextStr OptDatanodeName
+%type <str>		OptTableSpace OptConsTableSpace OptConsTableSpaceWithEmpty OptTableSpaceOwner LoggingStr size_clause OptMaxSize OptDatafileSize OptReuse OptAuto OptNextStr OptDatanodeName
 %type <ival>	opt_check_option
 
 %type <str>		opt_provider security_label
@@ -4968,6 +4971,37 @@ index_option:
 			 }
 			 ;
 
+opt_table_index_options:
+			 /* EMPTY */		{ $$ = NIL; }
+			 | table_index_options	{ $$ = $1; }
+			 ;
+table_index_options:
+			 table_index_option
+			 {
+					BCompatibilityOptionSupportCheck();
+					$$ = list_make1($1);
+			 }
+			 | table_index_options table_index_option
+			 {
+					$$ = lcons($2, $1);
+			 }
+			 ;
+table_index_option:
+			 COMMENT opt_equal Sconst
+			 {
+					CommentStmt *n = makeNode(CommentStmt);
+					n->objtype = OBJECT_INDEX;
+					n->objname = NIL;
+					n->objargs = NIL;
+					n->comment = $3;
+					$$ = (Node*)n;
+			 }
+			 | USING IDENT
+			 {
+					$$ = makeStringConst($2, -1);
+			 }
+		;
+
 opt_table_options:
 			 /* EMPTY */						{ $$ = NIL; }
 			 | table_options  { $$ = $1; }
@@ -7135,7 +7169,7 @@ ColConstraintElem:
 					n->location = @1;
 					$$ = (Node *)n;
 				}
-			| UNIQUE opt_definition OptConsTableSpace InformationalConstraintElem
+			| UNIQUE opt_definition OptConsTableSpaceWithEmpty InformationalConstraintElem
 				{
 					Constraint *n = makeNode(Constraint);
 					n->contype = CONSTR_UNIQUE;
@@ -7147,7 +7181,7 @@ ColConstraintElem:
 					n->inforConstraint = (InformationalConstraint *) $4;
 					$$ = (Node *)n;
 				}
-			| UNIQUE opt_definition OptConsTableSpace ENABLE_P InformationalConstraintElem
+			| UNIQUE opt_definition OptConsTableSpaceWithEmpty ENABLE_P InformationalConstraintElem
 				{
 					Constraint *n = makeNode(Constraint);
 					n->contype = CONSTR_UNIQUE;
@@ -7159,7 +7193,7 @@ ColConstraintElem:
 					n->inforConstraint = (InformationalConstraint *) $5;
 					$$ = (Node *)n;
 				}
-			| PRIMARY KEY opt_definition OptConsTableSpace InformationalConstraintElem
+			| PRIMARY KEY opt_definition OptConsTableSpaceWithEmpty InformationalConstraintElem
 				{
 					Constraint *n = makeNode(Constraint);
 					n->contype = CONSTR_PRIMARY;
@@ -7171,7 +7205,7 @@ ColConstraintElem:
 					n->inforConstraint = (InformationalConstraint *) $5;
 					$$ = (Node *)n;
 				}
-			| PRIMARY KEY opt_definition OptConsTableSpace ENABLE_P InformationalConstraintElem
+			| PRIMARY KEY opt_definition OptConsTableSpaceWithEmpty ENABLE_P InformationalConstraintElem
 				{
 					Constraint *n = makeNode(Constraint);
 					n->contype = CONSTR_PRIMARY;
@@ -7460,7 +7494,7 @@ internal_data_body: 	{
  * - thomas 1997-12-03
  */
 TableConstraint:
-			CONSTRAINT name ConstraintElem opt_index_options
+			CONSTRAINT name ConstraintElem
 				{
 					Constraint *n = (Constraint *) $3;
 					Assert(IsA(n, Constraint));
@@ -7468,10 +7502,9 @@ TableConstraint:
 						n->conname = $2;
 					}		
 					n->location = @1;
-					n->constraintOptions = $4;
 					$$ = (Node *) n;
 				}
-			| CONSTRAINT ConstraintElem opt_index_options
+			| CONSTRAINT ConstraintElem
 				{
 #ifdef 			ENABLE_MULTIPLE_NODES	
 					const char* message = "CONSTRAINT without constraint_name is not yet supported in distributed database.";
@@ -7484,7 +7517,6 @@ TableConstraint:
 						Constraint *n = (Constraint *) $2;
 						Assert(IsA(n, Constraint));
 						n->location = @1;
-						n->constraintOptions = $3;
 						$$ = (Node *) n;
 					} else {
 						const char* message = "CONSTRAINT without constraint_name is supported only in B-format database.";
@@ -7497,16 +7529,15 @@ TableConstraint:
   						$$ = NULL;/* not reached */
 					}
 				}
-			| ConstraintElem opt_index_options
+			| ConstraintElem
 			    {
 					Constraint *n = (Constraint *) $1;
-					n->constraintOptions = $2;
 					$$ = (Node *) n;
                 }
 		;
 
 ConstraintElem:
-			CHECK '(' a_expr ')' ConstraintAttributeSpec
+			CHECK '(' a_expr ')' ConstraintAttributeSpec opt_index_options
 				{
 					Constraint *n = makeNode(Constraint);
 					n->contype = CONSTR_CHECK;
@@ -7516,10 +7547,11 @@ ConstraintElem:
 					processCASbits($5, @5, "CHECK",
 								   NULL, NULL, &n->skip_validation,
 								   &n->is_no_inherit, yyscanner);
+					n->constraintOptions = $6;
 					n->initially_valid = !n->skip_validation;
 					$$ = (Node *)n;
 				}
-			| UNIQUE name access_method_clause '(' constraint_params ')' opt_c_include opt_definition OptConsTableSpace
+			| UNIQUE name access_method_clause_without_keyword '(' constraint_params ')' opt_c_include opt_definition OptConsTableSpace opt_table_index_options
 				ConstraintAttributeSpec InformationalConstraintElem
 				{
 #ifdef 			ENABLE_MULTIPLE_NODES	
@@ -7549,10 +7581,12 @@ ConstraintElem:
 						n->options = $8;
 						n->indexname = NULL;
 						n->indexspace = $9;
-						processCASbits($10, @10, "UNIQUE",
+						n->constraintOptions = $10;
+						processCASbits($11, @11, "UNIQUE",
 									   &n->deferrable, &n->initdeferred, NULL,
 									   NULL, yyscanner);
-						n->inforConstraint = (InformationalConstraint *) $11; /* informational constraint info */
+						n->inforConstraint = (InformationalConstraint *) $12; /* informational constraint info */
+						setAccessMethod(n);
 						$$ = (Node *)n;
 					} else {
 						const char* message = "UNIQUE name is supported only in B-format database.";
@@ -7566,7 +7600,56 @@ ConstraintElem:
 					}
 					
 				}
-			| UNIQUE USING access_method '(' constraint_params ')' opt_c_include opt_definition OptConsTableSpace
+			| UNIQUE name access_method_clause_without_keyword '(' constraint_params ')' opt_c_include opt_definition opt_table_index_options
+				ConstraintAttributeSpec InformationalConstraintElem
+				{
+#ifdef 			ENABLE_MULTIPLE_NODES	
+					const char* message = "UNIQUE name is not yet supported in distributed database.";
+					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);			
+					ereport(errstate,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("UNIQUE name is not yet supported in distributed database.")));
+#endif	
+					if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) {
+						if (strcasecmp($2, "index") == 0 || strcasecmp($2, "key") == 0) {
+							const char* message = "index/key cannot be used as unique name.";
+							InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+							ereport(errstate,
+									(errmodule(MOD_PARSER),
+										errcode(ERRCODE_SYNTAX_ERROR),
+										errmsg("index/key cannot be used as unique name."),
+										parser_errposition(@1)));
+						}
+						Constraint *n = makeNode(Constraint);
+						n->contype = CONSTR_UNIQUE;
+						n->location = @1;
+						n->conname = $2;
+						n->access_method = $3;
+						n->keys = $5;
+						n->including = $7;
+						n->options = $8;
+						n->indexname = NULL;
+						n->indexspace = NULL;
+						n->constraintOptions = $9;
+						processCASbits($10, @10, "UNIQUE",
+									   &n->deferrable, &n->initdeferred, NULL,
+									   NULL, yyscanner);
+						n->inforConstraint = (InformationalConstraint *) $11; /* informational constraint info */
+						setAccessMethod(n);
+						$$ = (Node *)n;
+					} else {
+						const char* message = "UNIQUE name is supported only in B-format database.";
+						InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+						ereport(errstate,
+								(errmodule(MOD_PARSER),
+									errcode(ERRCODE_SYNTAX_ERROR),
+									errmsg("UNIQUE name is supported only in B-format database."),
+									parser_errposition(@1)));
+						$$ = NULL;/* not reached */
+					}
+					
+				}
+			| UNIQUE USING IDENT '(' constraint_params ')' opt_c_include opt_definition OptConsTableSpace opt_table_index_options
 				ConstraintAttributeSpec InformationalConstraintElem
 				{
 #ifdef 			ENABLE_MULTIPLE_NODES	
@@ -7586,10 +7669,12 @@ ConstraintElem:
 						n->options = $8;
 						n->indexname = NULL;
 						n->indexspace = $9;
-						processCASbits($10, @10, "UNIQUE",
+						n->constraintOptions = $10;
+						processCASbits($11, @11, "UNIQUE",
 									   &n->deferrable, &n->initdeferred, NULL,
 									   NULL, yyscanner);
-						n->inforConstraint = (InformationalConstraint *) $11; /* informational constraint info */
+						n->inforConstraint = (InformationalConstraint *) $12; /* informational constraint info */
+						setAccessMethod(n);
 						$$ = (Node *)n;
 					} else {
 						const char* message = "UNIQUE access_method_clause is supported only in B-format database.";
@@ -7602,7 +7687,45 @@ ConstraintElem:
 						$$ = NULL;/* not reached */						
 					}
 				}
-			| UNIQUE '(' constraint_params ')' opt_c_include opt_definition OptConsTableSpace
+			| UNIQUE USING IDENT '(' constraint_params ')' opt_c_include opt_definition opt_table_index_options
+				ConstraintAttributeSpec InformationalConstraintElem
+				{
+#ifdef 			ENABLE_MULTIPLE_NODES	
+					const char* message = "UNIQUE access_method_clause is not yet supported in distributed database.";
+					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);			
+					ereport(errstate,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("UNIQUE access_method_clause is not yet supported in distributed database.")));
+#endif	
+					if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) {
+						Constraint *n = makeNode(Constraint);
+						n->contype = CONSTR_UNIQUE;
+						n->location = @1;
+						n->access_method = $3;
+						n->keys = $5;
+						n->including = $7;
+						n->options = $8;
+						n->indexname = NULL;
+						n->indexspace = NULL;
+						n->constraintOptions = $9;
+						processCASbits($10, @10, "UNIQUE",
+									   &n->deferrable, &n->initdeferred, NULL,
+									   NULL, yyscanner);
+						n->inforConstraint = (InformationalConstraint *) $11; /* informational constraint info */
+						setAccessMethod(n);
+						$$ = (Node *)n;
+					} else {
+						const char* message = "UNIQUE access_method_clause is supported only in B-format database.";
+						InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+						ereport(errstate,
+								(errmodule(MOD_PARSER),
+									errcode(ERRCODE_SYNTAX_ERROR),
+									errmsg("UNIQUE access_method_clause is supported only in B-format database."),
+									parser_errposition(@1)));
+						$$ = NULL;/* not reached */						
+					}
+				}
+			| UNIQUE '(' constraint_params ')' opt_c_include opt_definition OptConsTableSpace opt_table_index_options
 				ConstraintAttributeSpec InformationalConstraintElem
 				{
 					Constraint *n = makeNode(Constraint);
@@ -7613,13 +7736,34 @@ ConstraintElem:
 					n->options = $6;
 					n->indexname = NULL;
 					n->indexspace = $7;
+					n->constraintOptions = $8;
+					processCASbits($9, @9, "UNIQUE",
+								   &n->deferrable, &n->initdeferred, NULL,
+								   NULL, yyscanner);
+					n->inforConstraint = (InformationalConstraint *) $10; /* informational constraint info */
+					setAccessMethod(n);
+					$$ = (Node *)n;
+				}
+			| UNIQUE '(' constraint_params ')' opt_c_include opt_definition opt_table_index_options
+				ConstraintAttributeSpec InformationalConstraintElem
+				{
+					Constraint *n = makeNode(Constraint);
+					n->contype = CONSTR_UNIQUE;
+					n->location = @1;
+					n->keys = $3;
+					n->including = $5;
+					n->options = $6;
+					n->indexname = NULL;
+					n->indexspace = NULL;
+					n->constraintOptions = $7;
 					processCASbits($8, @8, "UNIQUE",
 								   &n->deferrable, &n->initdeferred, NULL,
 								   NULL, yyscanner);
 					n->inforConstraint = (InformationalConstraint *) $9; /* informational constraint info */
+					setAccessMethod(n);
 					$$ = (Node *)n;
 				}
-			| UNIQUE ExistingIndex ConstraintAttributeSpec InformationalConstraintElem
+			| UNIQUE ExistingIndex ConstraintAttributeSpec InformationalConstraintElem opt_index_options
 				{
 					Constraint *n = makeNode(Constraint);
 					n->contype = CONSTR_UNIQUE;
@@ -7633,9 +7777,10 @@ ConstraintElem:
 								   &n->deferrable, &n->initdeferred, NULL,
 								   NULL, yyscanner);
 					n->inforConstraint = (InformationalConstraint *) $4; /* informational constraint info */
+					n->constraintOptions = $5;
 					$$ = (Node *)n;
 				}
-			| PRIMARY KEY USING access_method '(' constraint_params ')' opt_c_include opt_definition OptConsTableSpace
+			| PRIMARY KEY USING IDENT '(' constraint_params ')' opt_c_include opt_definition OptConsTableSpace opt_table_index_options
 				ConstraintAttributeSpec InformationalConstraintElem
 				{
 #ifdef 			ENABLE_MULTIPLE_NODES	
@@ -7655,10 +7800,12 @@ ConstraintElem:
 						n->options = $9;
 						n->indexname = NULL;
 						n->indexspace = $10;
-						processCASbits($11, @11, "PRIMARY KEY",
+						n->constraintOptions = $11;
+						processCASbits($12, @12, "PRIMARY KEY",
 									   &n->deferrable, &n->initdeferred, NULL,
 									   NULL, yyscanner);
-						n->inforConstraint = (InformationalConstraint *) $12; /* informational constraint info */
+						n->inforConstraint = (InformationalConstraint *) $13; /* informational constraint info */
+						setAccessMethod(n);
 						$$ = (Node *)n;
 					} else {
 						const char* message = "PRIMARY KEY USING access_method is supported only in B-format database.";
@@ -7671,7 +7818,45 @@ ConstraintElem:
 						$$ = NULL;/* not reached */					
 					}
 				}
-			| PRIMARY KEY '(' constraint_params ')' opt_c_include opt_definition OptConsTableSpace
+			| PRIMARY KEY USING IDENT '(' constraint_params ')' opt_c_include opt_definition opt_table_index_options
+				ConstraintAttributeSpec InformationalConstraintElem
+				{
+#ifdef 			ENABLE_MULTIPLE_NODES	
+					const char* message = "PRIMARY KEY USING access_method is not yet supported in distributed database.";
+					InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);			
+					ereport(errstate,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("PRIMARY KEY USING access_method is not yet supported in distributed database.")));
+#endif	
+					if (u_sess->attr.attr_sql.sql_compatibility == B_FORMAT) {
+						Constraint *n = makeNode(Constraint);
+						n->contype = CONSTR_PRIMARY;
+						n->location = @1;
+						n->access_method = $4;
+						n->keys = $6;
+						n->including = $8;
+						n->options = $9;
+						n->indexname = NULL;
+						n->indexspace = NULL;
+						n->constraintOptions = $10;
+						processCASbits($11, @11, "PRIMARY KEY",
+									   &n->deferrable, &n->initdeferred, NULL,
+									   NULL, yyscanner);
+						n->inforConstraint = (InformationalConstraint *) $12; /* informational constraint info */
+						setAccessMethod(n);
+						$$ = (Node *)n;
+					} else {
+						const char* message = "PRIMARY KEY USING access_method is supported only in B-format database.";
+						InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+						ereport(errstate,
+								(errmodule(MOD_PARSER),
+									errcode(ERRCODE_SYNTAX_ERROR),
+									errmsg("PRIMARY KEY USING access_method is supported only in B-format database."),
+									parser_errposition(@1)));
+						$$ = NULL;/* not reached */					
+					}
+				}
+			| PRIMARY KEY '(' constraint_params ')' opt_c_include opt_definition OptConsTableSpace opt_table_index_options
 				ConstraintAttributeSpec InformationalConstraintElem
 				{
 					Constraint *n = makeNode(Constraint);
@@ -7682,13 +7867,34 @@ ConstraintElem:
 					n->options = $7;
 					n->indexname = NULL;
 					n->indexspace = $8;
+					n->constraintOptions = $9;
+					processCASbits($10, @10, "PRIMARY KEY",
+								   &n->deferrable, &n->initdeferred, NULL,
+								   NULL, yyscanner);
+					n->inforConstraint = (InformationalConstraint *) $11; /* informational constraint info */
+					setAccessMethod(n);
+					$$ = (Node *)n;
+				}
+			| PRIMARY KEY '(' constraint_params ')' opt_c_include opt_definition opt_table_index_options
+				ConstraintAttributeSpec InformationalConstraintElem
+				{
+					Constraint *n = makeNode(Constraint);
+					n->contype = CONSTR_PRIMARY;
+					n->location = @1;
+					n->keys = $4;
+					n->including = $6;
+					n->options = $7;
+					n->indexname = NULL;
+					n->indexspace = NULL;
+					n->constraintOptions = $8;
 					processCASbits($9, @9, "PRIMARY KEY",
 								   &n->deferrable, &n->initdeferred, NULL,
 								   NULL, yyscanner);
 					n->inforConstraint = (InformationalConstraint *) $10; /* informational constraint info */
+					setAccessMethod(n);
 					$$ = (Node *)n;
 				}
-			| PRIMARY KEY ExistingIndex ConstraintAttributeSpec InformationalConstraintElem
+			| PRIMARY KEY ExistingIndex ConstraintAttributeSpec InformationalConstraintElem opt_index_options
 				{
 					Constraint *n = makeNode(Constraint);
 					n->contype = CONSTR_PRIMARY;
@@ -7702,11 +7908,12 @@ ConstraintElem:
 								   &n->deferrable, &n->initdeferred, NULL,
 								   NULL, yyscanner);
 					n->inforConstraint = (InformationalConstraint*) $5; /* informational constraint info */
+					n->constraintOptions = $6;
 					$$ = (Node *)n;
 				}
 			| EXCLUDE access_method_clause '(' ExclusionConstraintList ')'
-				opt_c_include opt_definition OptConsTableSpace ExclusionWhereClause
-				ConstraintAttributeSpec
+				opt_c_include opt_definition OptConsTableSpaceWithEmpty ExclusionWhereClause
+				ConstraintAttributeSpec opt_index_options
 				{
             		const char* message = "EXCLUDE constraint is not yet supported.";
         			InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
@@ -7726,10 +7933,11 @@ ConstraintElem:
 					processCASbits($10, @10, "EXCLUDE",
 								   &n->deferrable, &n->initdeferred, NULL,
 								   NULL, yyscanner);
+					n->constraintOptions = $11;
 					$$ = (Node *)n;
 				}
 			| FOREIGN KEY name '(' columnList ')' REFERENCES qualified_name
-				opt_column_list key_match key_actions ConstraintAttributeSpec
+				opt_column_list key_match key_actions ConstraintAttributeSpec opt_index_options
 				{
 #ifdef 			ENABLE_MULTIPLE_NODES	
 					const char* message = "FOREIGN KEY name ... REFERENCES constraint is not yet supported.";
@@ -7754,6 +7962,7 @@ ConstraintElem:
 									   &n->skip_validation, NULL,
 									   yyscanner);
 						n->initially_valid = !n->skip_validation;
+						n->constraintOptions = $13;
 						$$ = (Node *)n;
 					} else {
 						const char* message = "FOREIGN KEY name is supported only in B-format database.";
@@ -7767,7 +7976,7 @@ ConstraintElem:
 					}
 				}
 			| FOREIGN KEY '(' columnList ')' REFERENCES qualified_name
-				opt_column_list key_match key_actions ConstraintAttributeSpec
+				opt_column_list key_match key_actions ConstraintAttributeSpec opt_index_options
 				{
 #ifdef 			ENABLE_MULTIPLE_NODES	
             		const char* message = "FOREIGN KEY ... REFERENCES constraint is not yet supported.";
@@ -7790,9 +7999,10 @@ ConstraintElem:
 								   &n->skip_validation, NULL,
 								   yyscanner);
 					n->initially_valid = !n->skip_validation;
+					n->constraintOptions = $12;
 					$$ = (Node *)n;
 				}			
-			| PARTIAL CLUSTER KEY '(' columnList ')' ConstraintAttributeSpec
+			| PARTIAL CLUSTER KEY '(' columnList ')' ConstraintAttributeSpec opt_index_options
 				{
 					Constraint *n = makeNode(Constraint);
 					n->contype = CONSTR_CLUSTER;
@@ -7801,6 +8011,7 @@ ConstraintElem:
 					processCASbits($7, @7, "PARTIAL CLUSTER KEY",
 								   NULL, NULL, NULL, NULL,
 								   yyscanner);
+					n->constraintOptions = $8;
 					$$ = (Node *)n;
 				}
 		;
@@ -8354,7 +8565,10 @@ OptSubClusterInternal:
 /* PGXC_END */
 
 OptConsTableSpace:   USING INDEX OptPartitionElement	{ $$ = $3; }
-			| /*EMPTY*/								{ $$ = NULL; }
+		;
+
+OptConsTableSpaceWithEmpty:	USING INDEX OptPartitionElement		{ $$ = $3; }
+				| /*EMPTY*/				{ $$ = NULL; }
 		;
 
 OptPartitionElement:
@@ -13344,6 +13558,11 @@ opt_index_name:
 
 access_method_clause:
 			USING access_method						{ $$ = $2; }
+			| /*EMPTY*/								{ $$ = NULL; }
+		;
+
+access_method_clause_without_keyword:
+			USING IDENT								{ $$ = $2; }
 			| /*EMPTY*/								{ $$ = NULL; }
 		;
 
@@ -29136,6 +29355,44 @@ static void CheckPartitionExpr(Node* expr, int* colCount)
 		return;
 	} else {
 		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("The Partition Expr can't be %d type", expr->type)));
+	}
+}
+
+static char* transformIndexOptions(List* list)
+{
+    char* method = NULL;
+    ListCell* cell = NULL;
+    int first = 0;
+
+    /* check every access method name in index_options, if not exist, return error */
+    foreach (cell, list) {
+        void* pointer = lfirst(cell);
+        if (IsA(pointer, A_Const)) {
+            A_Const* con = (A_Const*) pointer;
+            if (IsA((Node*)&con->val, String)) {
+                /* return the last access method name */
+                char* am = strVal(&con->val);
+                if (am && get_am_oid(am, false) && first < 1) {
+                    method = am;
+                    first++;
+                }
+            }
+        }
+    }
+    return method;
+}
+
+static void setAccessMethod(Constraint *n)
+{
+	char* method = transformIndexOptions(n->constraintOptions);
+	if (method != NULL) {
+		/* check current index access method name is exist? If not, return error */
+		if (n->access_method == NULL) {
+			n->access_method = method;
+		} else {
+			get_am_oid(n->access_method, false);
+			n->access_method = method;
+		}
 	}
 }
 
