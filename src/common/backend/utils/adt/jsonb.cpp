@@ -45,6 +45,7 @@ Datum jsonb_in(PG_FUNCTION_ARGS)
     json = json == NULL ? pstrdup("") : json;
 
     Datum result;
+    MemoryContext oldcxt = CurrentMemoryContext;
     PG_TRY();
     {
         result = jsonb_from_cstring(json, strlen(json));
@@ -52,9 +53,13 @@ Datum jsonb_in(PG_FUNCTION_ARGS)
     PG_CATCH();
     {
         if (fcinfo->can_ignore) {
+            (void)MemoryContextSwitchTo(oldcxt);
+            ErrorData *edata = CopyErrorData();
             ereport(WARNING,
                     (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
                      errmsg("invalid input syntax for type json")));
+            FlushErrorState();
+            FreeErrorData(edata);
             PG_RETURN_DATUM((Datum)DirectFunctionCall1(jsonb_in, CStringGetDatum("null")));
         } else {
             PG_RE_THROW();

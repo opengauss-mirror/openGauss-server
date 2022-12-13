@@ -203,7 +203,7 @@ Datum date_in(PG_FUNCTION_ARGS)
     }
 
     /*
-     * the following logic is unified for date parsing.`
+     * the following logic is unified for date parsing.
      */
     if (!IS_VALID_JULIAN(tm->tm_year, tm->tm_mon, tm->tm_mday))
         ereport(ERROR, (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE), errmsg("date out of range: \"%s\"", str)));
@@ -1105,7 +1105,7 @@ Datum time_in(PG_FUNCTION_ARGS)
     int nf;
     int dterr;
     char workbuf[MAXDATELEN + 1];
-    char* field[MAXDATEFIELDS];
+    char* field[MAXDATEFIELDS] = {0};
     int dtype;
     int ftype[MAXDATEFIELDS];
     char* time_fmt = NULL;
@@ -1135,6 +1135,9 @@ Datum time_in(PG_FUNCTION_ARGS)
              * then we will return 00:00:xx if the first 1 or 2 character is lower than 60, otherwise return 00:00:00
              */
             char* field_str = field[0];
+            if (field_str == NULL) {
+                PG_RETURN_TIMEADT(0);
+            }
             if (*field_str == '+') {
                 field_str++;
             }
@@ -1870,7 +1873,7 @@ Datum timetz_in(PG_FUNCTION_ARGS)
     int nf;
     int dterr;
     char workbuf[MAXDATELEN + 1];
-    char* field[MAXDATEFIELDS];
+    char* field[MAXDATEFIELDS] = {0};
     int dtype;
     int ftype[MAXDATEFIELDS];
 
@@ -1884,13 +1887,17 @@ Datum timetz_in(PG_FUNCTION_ARGS)
          * then we will return 00:00:xx if the first 1 or 2 character is lower than 60, otherwise return 00:00:00
          */
         char* field_str = field[0];
-        if (*field_str == '+') {
-            field_str++;
+        if (field_str == NULL) {
+            tm->tm_sec = 0;
+        } else {
+            if (*field_str == '+') {
+                field_str++;
+            }
+            int trunc_val = getStartingDigits(field_str);
+            tm->tm_sec = (trunc_val < 0 || trunc_val >= 60) ? 0 : trunc_val;
         }
         tm->tm_hour = 0;
         tm->tm_min = 0;
-        int trunc_val = getStartingDigits(field_str);
-        tm->tm_sec = (trunc_val < 0 || trunc_val >= 60) ? 0 : trunc_val;
         fsec = 0;
     }
 
