@@ -64,7 +64,7 @@ static void scanURL(dms_profile_t* profile, char* ipportstr, int index)
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
             errmsg("invalid ip string: %s", ipstr)));
     }
-    profile->inst_net_addr[index].port = (uint16)pg_strtoint16(portstr);
+    profile->inst_net_addr[index].port = (uint16)pg_strtoint32(portstr);
     profile->inst_map |= ((uint64)1 << index);
 
     return;
