@@ -33,6 +33,7 @@
 #include "nodes/nodeFuncs.h"
 #include "parser/analyze.h"
 #include "parser/parse_relation.h"
+#include "parser/parsetree.h"
 #include "rewrite/rewriteDefine.h"
 #include "rewrite/rewriteManip.h"
 #include "rewrite/rewriteHandler.h"
@@ -44,6 +45,7 @@
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 #include "utils/syscache.h"
+#include "foreign/foreign.h"
 #ifdef PGXC
 #include "pgxc/execRemote.h"
 #include "tcop/utility.h"
@@ -532,6 +534,41 @@ static void CreateMvCommand(ViewStmt* stmt, const char* queryString)
 #endif
 
 /*
+ * Check the base relation of view whether is a MySQL foreign table
+ * for WITH CHECK OPTION.
+ *
+ * Return true if it is, false means that it isn't or the view could not
+ * be auto-updatable.
+ */
+bool CheckMySQLFdwForWCO(Query* viewquery)
+{
+    RangeTblRef* rtr = NULL;
+
+    if (list_length(viewquery->jointree->fromlist) != 1) {
+        return false;
+    }
+
+    rtr = (RangeTblRef*)linitial(viewquery->jointree->fromlist);
+    if (!IsA(rtr, RangeTblRef)) {
+        return false;
+    }
+
+    RangeTblEntry* base_rte = rt_fetch(rtr->rtindex, viewquery->rtable);
+
+    if (base_rte->relkind == RELKIND_FOREIGN_TABLE) {
+        return isMysqlFDWFromTblOid(base_rte->relid);
+    } else if (base_rte->relkind == RELKIND_VIEW) {
+        /* recursive check for view */
+        Relation base_rel = try_relation_open(base_rte->relid, AccessShareLock);
+        bool res = CheckMySQLFdwForWCO(get_view_query(base_rel));
+        relation_close(base_rel, AccessShareLock);
+        return res;
+    }
+
+    return false;
+}
+
+/*
  * DefineView
  *		Execute a CREATE VIEW command.
  */
@@ -620,6 +657,15 @@ Oid DefineView(ViewStmt* stmt, const char* queryString, bool send_remote, bool i
             ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("WITH CHECK OPTION is supported only on auto-updatable views"),
                     errhint("%s", view_updatable_error)));
+
+        /* 
+         * Views based on MySQL foreign table is not allowed to add check option,
+         * because returning clause which check option dependend on is not supported
+         * on MySQL.
+         */
+        if (CheckMySQLFdwForWCO(viewParse))
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("WITH CHECK OPTION is not supported on views that base on MySQL foreign table")));
     }
 
     /*

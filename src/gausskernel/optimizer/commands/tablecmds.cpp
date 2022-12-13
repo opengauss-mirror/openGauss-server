@@ -88,6 +88,7 @@
 #include "commands/vacuum.h"
 #include "commands/verify.h"
 #include "commands/matview.h"
+#include "commands/view.h"
 #include "executor/executor.h"
 #include "executor/node/nodeModifyTable.h"
 #include "foreign/fdwapi.h"
@@ -15683,9 +15684,9 @@ static void ATExecSetRelOptions(Relation rel, List* defList, AlterTableType oper
         }
 
         /*
-        * If the check option is specified, look to see if the view is
-        * actually auto-updatable or not.
-        */
+         * If the check option is specified, look to see if the view is
+         * actually auto-updatable or not.
+         */
         if (check_option) {
             const char *view_updatable_error = view_query_is_auto_updatable(view_query, true);
 
@@ -15694,6 +15695,15 @@ static void ATExecSetRelOptions(Relation rel, List* defList, AlterTableType oper
                         (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                         errmsg("WITH CHECK OPTION is supported only on auto-updatable views"),
                         errhint("%s", view_updatable_error)));
+
+            /* 
+             * Views based on MySQL foreign table is not allowed to add check option,
+             * because returning clause which check option dependend on is not supported
+             * on MySQL.
+             */
+            if (CheckMySQLFdwForWCO(view_query))
+                ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("WITH CHECK OPTION is not supported on views that base on MySQL foreign table")));
         }
     }
 

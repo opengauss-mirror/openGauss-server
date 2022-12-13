@@ -1054,6 +1054,101 @@ SELECT f_test(100);
 DROP FUNCTION f_test(int);
 
 -- ======================================================================================================================================
+-- TEST-MODULE: IUD VIEW and WITH CHECK OPTION constraints
+-- --------------------------------------
+-- ======================================================================================================================================
+CREATE TABLE base_tbl (id int, a int, b int)
+    partition by range(a) (partition a1 values less than(100), partition a2 values less than(200));
+ALTER TABLE base_tbl SET (autovacuum_enabled = 'false');
+CREATE FOREIGN TABLE foreign_tbl (id int, a int, b int) SERVER loopback OPTIONS (table_name 'base_tbl');
+CREATE VIEW rw_view1 AS SELECT * FROM foreign_tbl WHERE a < b and id = 1;
+CREATE VIEW rw_view2 AS SELECT * FROM foreign_tbl WHERE a < b and id = 2 WITH CHECK OPTION;
+\d+ rw_view1
+\d+ rw_view2
+CREATE OR REPLACE FUNCTION checkdata(out tbname text, out id int, out a int, out b int) RETURNS SETOF record as $$ 
+  select * from (
+     (select 'rw_view1', * from rw_view1 where id = 1) union all 
+     (select 'rw_view2', * from rw_view2 where id = 2) union all 
+     (select 'base_tbl p1', * from base_tbl) union all 
+     (select 'base_tbl p2', * from base_tbl) union all 
+     (select 'foreign_tbl', * from foreign_tbl)
+  ) data(tbname, id, a, b)
+  order by 1,2,3,4;
+$$ language sql;
+
+-- simple case
+EXPLAIN (VERBOSE, COSTS OFF) INSERT INTO rw_view1 VALUES (1, 0, 5);  -- should success
+INSERT INTO rw_view1 VALUES (1, 0, 5); 
+EXPLAIN (VERBOSE, COSTS OFF) INSERT INTO rw_view1 VALUES (1, 100, 5); -- should success
+INSERT INTO rw_view1 VALUES (1, 100, 5);
+EXPLAIN (VERBOSE, COSTS OFF) INSERT INTO rw_view1 VALUES (1, 1000, 5000); -- should failed
+INSERT INTO rw_view1 VALUES (1, 1000, 5000);
+EXPLAIN (VERBOSE, COSTS OFF) INSERT INTO rw_view2 VALUES (2, 0, 5);  -- should success
+INSERT INTO rw_view2 VALUES (2, 0, 5);
+EXPLAIN (VERBOSE, COSTS OFF) INSERT INTO rw_view2 VALUES (2, 100, 5); -- should failed
+INSERT INTO rw_view2 VALUES (2, 100, 5);
+EXPLAIN (VERBOSE, COSTS OFF) INSERT INTO rw_view2 VALUES (2, 1000, 5000); -- should failed
+INSERT INTO rw_view2 VALUES (2, 1000, 5000);
+select * from checkdata();
+delete from base_tbl;
+
+insert into base_tbl values(1, 65, 100), (2, 85, 100);  -- in and cross partition update
+EXPLAIN (VERBOSE, COSTS OFF) UPDATE rw_view1 SET a = a + 20 where id = 1;  -- should success
+UPDATE rw_view1 SET a = a + 10 where id = 1;
+EXPLAIN (VERBOSE, COSTS OFF) UPDATE rw_view1 SET a = a + 20 where id = 1;  -- should success
+UPDATE rw_view1 SET a = a + 10 where id = 1;
+EXPLAIN (VERBOSE, COSTS OFF) UPDATE rw_view2 SET a = a + 20 where id = 2;  -- should failed
+UPDATE rw_view2 SET a = a + 20 where id = 2;
+EXPLAIN (VERBOSE, COSTS OFF) UPDATE rw_view2 SET a = a + 20, b = 200 where id = 2;  -- should success
+UPDATE rw_view2 SET a = a + 20, b = 200 where id = 2;
+select * from checkdata();
+delete from base_tbl;
+
+insert into base_tbl values(1, 100, 99),(2, 100, 99);
+EXPLAIN (VERBOSE, COSTS OFF) delete from rw_view1 where id = 1;
+delete from rw_view1 where id = 1;
+EXPLAIN (VERBOSE, COSTS OFF) delete from rw_view2 where id = 2;
+delete from rw_view2 where id = 2;
+select * from checkdata();
+delete from base_tbl;
+
+-- with trigger
+CREATE FUNCTION row_before_insupd_trigfunc() RETURNS trigger AS $$BEGIN NEW.a := NEW.a + 10; RETURN NEW; END$$ LANGUAGE plpgsql;
+CREATE TRIGGER row_before_insupd_trigger BEFORE INSERT OR UPDATE ON base_tbl FOR EACH ROW EXECUTE PROCEDURE row_before_insupd_trigfunc();
+
+EXPLAIN (VERBOSE, COSTS OFF) INSERT INTO rw_view1 VALUES (1, 0, 5);  -- should success
+INSERT INTO rw_view1 VALUES (1, 0, 5);
+EXPLAIN (VERBOSE, COSTS OFF) INSERT INTO rw_view1 VALUES (1, 80, 16); -- should success
+INSERT INTO rw_view1 VALUES (1, 80, 16);
+EXPLAIN (VERBOSE, COSTS OFF) INSERT INTO rw_view2 VALUES (2, 0, 5);  -- should failed
+INSERT INTO rw_view2 VALUES (2, 0, 5);
+EXPLAIN (VERBOSE, COSTS OFF) INSERT INTO rw_view2 VALUES (2, 0, 16); -- should success
+INSERT INTO rw_view2 VALUES (2, 0, 16);
+select * from checkdata();
+delete from base_tbl;
+
+insert into base_tbl values(1, 50, 101), (2, 50, 120);  -- in and cross partition update
+-- (1, 60, 101), (2, 60, 120)
+EXPLAIN (VERBOSE, COSTS OFF) UPDATE rw_view1 SET a = a + 20 where id = 1; -- should success
+UPDATE rw_view1 SET a = a +20 where id = 1;
+EXPLAIN (VERBOSE, COSTS OFF) UPDATE rw_view1 SET a = a + 20 where id = 1; -- should success
+UPDATE rw_view1 SET a = a +20 where id = 1;
+EXPLAIN (VERBOSE, COSTS OFF) UPDATE rw_view2 SET a = a + 55 where id = 2; -- should failed
+UPDATE rw_view2 SET a = a + 55 where id = 2;
+EXPLAIN (VERBOSE, COSTS OFF) UPDATE rw_view2 SET a = a + 45 where id = 2; -- should success
+UPDATE rw_view2 SET a = a + 45 where id = 2;
+select * from checkdata();
+
+DROP TRIGGER row_before_insupd_trigger ON base_tbl;
+DROP FUNCTION row_before_insupd_trigfunc;
+DROP FUNCTION checkdata;
+DROP VIEW rw_view1 cascade;
+DROP VIEW rw_view2 cascade;
+DROP FOREIGN TABLE foreign_tbl CASCADE;
+DROP TABLE base_tbl CASCADE;
+
+
+-- ======================================================================================================================================
 -- TEST-MODULE: test writable foreign table stuff
 -- --------------------------------------
 -- ======================================================================================================================================

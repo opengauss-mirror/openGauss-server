@@ -121,7 +121,7 @@ static bool foreign_expr_walker(Node *node, foreign_glob_cxt *glob_cxt, foreign_
 static void deparseTargetList(StringInfo buf, RangeTblEntry *rte, Index rtindex, Relation rel, bool is_returning,
     Bitmapset *attrs_used, bool qualify_col, List **retrieved_attrs);
 static void deparseReturningList(StringInfo buf, RangeTblEntry *root, Index rtindex, Relation rel, bool trig_after_row,
-    List *returningList, List **retrieved_attrs);
+    List *withCheckOptionList, List *returningList, List **retrieved_attrs);
 static void deparseColumnRef(StringInfo buf, int varno, int varattno, RangeTblEntry *rte, bool qualify_col);
 static void deparseRelation(StringInfo buf, Relation rel);
 static void deparseStringLiteral(StringInfo buf, const char *val);
@@ -1844,11 +1844,11 @@ static void deparseRangeTblRef(StringInfo buf, PlannerInfo *root, RelOptInfo *fo
  * deparse remote INSERT statement
  *
  * The statement text is appended to buf, and we also create an integer List
- * of the columns being retrieved by RETURNING (if any), which is returned
- * to *retrieved_attrs.
+ * of the columns being retrieved by WITH CHECK OPTION or RETURNING (if any),
+ * which is returned to *retrieved_attrs.
  */
 void deparseInsertSql(StringInfo buf, RangeTblEntry *rte, Index rtindex, Relation rel, List *targetAttrs,
-    List *returningList, List **retrieved_attrs)
+    List *withCheckOptionList, List *returningList, List **retrieved_attrs)
 {
     AttrNumber pindex;
     ListCell *lc = NULL;
@@ -1890,19 +1890,19 @@ void deparseInsertSql(StringInfo buf, RangeTblEntry *rte, Index rtindex, Relatio
         appendStringInfoString(buf, " DEFAULT VALUES");
     }
 
-    deparseReturningList(buf, rte, rtindex, rel, rel->trigdesc && rel->trigdesc->trig_insert_after_row, returningList,
-        retrieved_attrs);
+    deparseReturningList(buf, rte, rtindex, rel, rel->trigdesc && rel->trigdesc->trig_insert_after_row,
+        withCheckOptionList, returningList, retrieved_attrs);
 }
 
 /*
  * deparse remote UPDATE statement
  *
  * The statement text is appended to buf, and we also create an integer List
- * of the columns being retrieved by RETURNING (if any), which is returned
- * to *retrieved_attrs.
+ * of the columns being retrieved by WITH CHECK OPTION or RETURNING (if any),
+ * which is returned to *retrieved_attrs.
  */
 void deparseUpdateSql(StringInfo buf, RangeTblEntry *rte, Index rtindex, Relation rel, List *targetAttrs,
-    List *returningList, List **retrieved_attrs)
+    List *withCheckOptionList, List *returningList, List **retrieved_attrs)
 {
     AttrNumber pindex;
     ListCell *lc = NULL;
@@ -1927,8 +1927,8 @@ void deparseUpdateSql(StringInfo buf, RangeTblEntry *rte, Index rtindex, Relatio
     }
     appendStringInfoString(buf, " WHERE ctid = $1 and tableoid = $2");
 
-    deparseReturningList(buf, rte, rtindex, rel, rel->trigdesc && rel->trigdesc->trig_update_after_row, returningList,
-        retrieved_attrs);
+    deparseReturningList(buf, rte, rtindex, rel, rel->trigdesc && rel->trigdesc->trig_update_after_row,
+        withCheckOptionList, returningList, retrieved_attrs);
 }
 
 /*
@@ -1945,21 +1945,34 @@ void deparseDeleteSql(StringInfo buf, RangeTblEntry *rte, Index rtindex, Relatio
     deparseRelation(buf, rel);
     appendStringInfoString(buf, " WHERE ctid = $1 and tableoid = $2");
 
-    deparseReturningList(buf, rte, rtindex, rel, rel->trigdesc && rel->trigdesc->trig_delete_after_row, returningList,
-        retrieved_attrs);
+    deparseReturningList(buf, rte, rtindex, rel, rel->trigdesc && rel->trigdesc->trig_delete_after_row, NIL,
+        returningList, retrieved_attrs);
 }
 
 /*
  * Add a RETURNING clause, if needed, to an INSERT/UPDATE/DELETE.
  */
 static void deparseReturningList(StringInfo buf, RangeTblEntry *rte, Index rtindex, Relation rel, bool trig_after_row,
-    List *returningList, List **retrieved_attrs)
+    List *withCheckOptionList, List *returningList, List **retrieved_attrs)
 {
     Bitmapset *attrs_used = NULL;
 
     if (trig_after_row) {
         /* whole-row reference acquires all non-system columns */
         attrs_used = bms_make_singleton(0 - FirstLowInvalidHeapAttributeNumber);
+    }
+
+    if (withCheckOptionList != NIL) {
+        /*
+         * We need the attrs, non-system and system, mentioned in the local
+         * query's WITH CHECK OPTION list.
+         *
+         * Note: we do this to ensure that WCO constraints will be evaluated
+         * on the data actually inserted/updated on the remote side, which
+         * might differ from the data supplied by the core code, for example
+         * as a result of remote triggers.
+         */
+        pull_varattnos((Node*)withCheckOptionList, rtindex, &attrs_used);
     }
 
     if (returningList != NIL) {

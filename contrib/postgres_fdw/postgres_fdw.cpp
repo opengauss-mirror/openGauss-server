@@ -1300,6 +1300,7 @@ static List *postgresPlanForeignModify(PlannerInfo *root, ModifyTable *plan, Ind
     RangeTblEntry *rte = planner_rt_fetch(resultRelation, root);
     StringInfoData sql;
     List *targetAttrs = NIL;
+    List *withCheckOptionList = NIL;
     List *returningList = NIL;
     List *retrieved_attrs = NIL;
 
@@ -1348,6 +1349,13 @@ static List *postgresPlanForeignModify(PlannerInfo *root, ModifyTable *plan, Ind
     }
 
     /*
+     * Extract the relevant WITH CHECK OPTION list if any.
+     */
+    if (plan->withCheckOptionLists) {
+        withCheckOptionList = (List*)list_nth(plan->withCheckOptionLists, subplan_index);
+    }
+
+    /*
      * Extract the relevant RETURNING list if any.
      */
     if (plan->returningLists) {
@@ -1359,10 +1367,12 @@ static List *postgresPlanForeignModify(PlannerInfo *root, ModifyTable *plan, Ind
      */
     switch (operation) {
         case CMD_INSERT:
-            deparseInsertSql(&sql, rte, resultRelation, rel, targetAttrs, returningList, &retrieved_attrs);
+            deparseInsertSql(&sql, rte, resultRelation, rel, targetAttrs, withCheckOptionList, returningList,
+                &retrieved_attrs);
             break;
         case CMD_UPDATE:
-            deparseUpdateSql(&sql, rte, resultRelation, rel, targetAttrs, returningList, &retrieved_attrs);
+            deparseUpdateSql(&sql, rte, resultRelation, rel, targetAttrs, withCheckOptionList, returningList,
+                &retrieved_attrs);
             break;
         case CMD_DELETE:
             deparseDeleteSql(&sql, rte, resultRelation, rel, returningList, &retrieved_attrs);
@@ -1535,7 +1545,7 @@ static TupleTableSlot *postgresExecForeignInsert(EState *estate, ResultRelInfo *
                 targetAttrs = lappend_int(targetAttrs, attnum);
             }
         }
-        deparseInsertSql(&sql, rte, resultRelation, rel, targetAttrs, NULL, &retrieved_attrs);
+        deparseInsertSql(&sql, rte, resultRelation, rel, targetAttrs, NULL, NULL, &retrieved_attrs);
 
         fmstate = createForeignModify(estate, rte, resultRelInfo, CMD_INSERT, NULL, sql.data, targetAttrs,
             retrieved_attrs != NIL, retrieved_attrs);

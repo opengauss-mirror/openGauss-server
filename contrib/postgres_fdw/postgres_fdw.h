@@ -151,9 +151,9 @@ extern void classifyConditions(PlannerInfo *root, RelOptInfo *baserel, List *inp
 extern bool is_foreign_expr(PlannerInfo *root, RelOptInfo *baserel, Expr *expr);
 extern bool is_foreign_pathkey(PlannerInfo *root, RelOptInfo *baserel, PathKey *pathkey);
 extern void deparseInsertSql(StringInfo buf, RangeTblEntry *rte, Index rtindex, Relation rel, List *targetAttrs,
-    List *returningList, List **retrieved_attrs);
+    List *withCheckOptionList, List *returningList, List **retrieved_attrs);
 extern void deparseUpdateSql(StringInfo buf, RangeTblEntry *rte, Index rtindex, Relation rel, List *targetAttrs,
-    List *returningList, List **retrieved_attrs);
+    List *withCheckOptionList, List *returningList, List **retrieved_attrs);
 extern void deparseDeleteSql(StringInfo buf, RangeTblEntry *rte, Index rtindex, Relation rel, List *returningList,
     List **retrieved_attrs);
 extern void deparseAnalyzeSizeSql(StringInfo buf, Relation rel);
