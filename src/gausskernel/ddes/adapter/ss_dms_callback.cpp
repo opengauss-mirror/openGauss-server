@@ -1384,6 +1384,9 @@ static int CBReformDoneNotify(void *db_handle)
             (errmodule(MOD_DMS),
                 errmsg("[SS reform/SS switchover/SS failover] Reform success, instance:%d is running.",
                        g_instance.attr.attr_storage.dms_attr.instance_id)));
+
+    /* reform success indicates that reform of primary and standby all complete, then update gaussdb.state */
+    SendPostmasterSignal(PMSIGNAL_DMS_REFORM_DONE);
     return GS_SUCCESS;
 }
 
