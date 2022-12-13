@@ -1,0 +1,22 @@
+CREATE SERVER alter_foreign_schema_test FOREIGN DATA WRAPPER file_fdw;
+CREATE FOREIGN TABLE file_f_table (id int) SERVER alter_foreign_schema_test OPTIONs (filename 'test');
+select nspname from pg_class a left join pg_namespace b on b.oid = a.relnamespace  where relname = 'file_f_table';
+ nspname 
+---------
+ public
+(1 row)
+
+create schema alter_foreign_schema_test_schema;
+alter foreign table file_f_table set schema alter_foreign_schema_test_schema;
+select nspname from pg_class a left join pg_namespace b on b.oid = a.relnamespace  where relname = 'file_f_table';
+             nspname              
+----------------------------------
+ alter_foreign_schema_test_schema
+(1 row)
+
+select * from file_f_table;
+ERROR:  relation "file_f_table" does not exist on datanode1
+LINE 1: select * from file_f_table;
+                      ^
+select * from alter_foreign_schema_test_schema.file_f_table;
+ERROR:  could not open file "test" for reading: No such file or directory

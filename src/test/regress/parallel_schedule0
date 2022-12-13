@@ -1031,3 +1031,4 @@ test: show_warnings
 
 # partition expression key
 test: partition_expr_key
+test: alter_foreign_schema

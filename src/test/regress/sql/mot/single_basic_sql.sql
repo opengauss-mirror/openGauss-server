@@ -143,6 +143,11 @@ DELETE FROM bmsql_district WHERE d_w_id=1;
 
 SELECT * FROM bmsql_district ORDER BY d_id, d_w_id;
 
+--unsupport feature
+create schema alter_schema_mot_test;
+alter foreign table bmsql_district set schema alter_schema_mot_test;
+drop schema alter_schema_mot_test;
+
 --cleanup
 DROP FOREIGN TABLE bmsql_warehouse;
 DROP FOREIGN TABLE bmsql_district;
