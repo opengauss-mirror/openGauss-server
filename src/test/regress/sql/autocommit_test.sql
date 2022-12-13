@@ -124,6 +124,13 @@ ROLLBACK;
 SELECT * FROM test_table;
 SHOW autocommit;
 
+-- error in transaction block
+SET autocommit = 0;
+CREATE;
+SET autocommit = 1;
+ROLLBACK;
+SET autocommit = 1;
+
 \c regression
 DROP DATABASE test_db;
 DROP DATABASE test_drop;

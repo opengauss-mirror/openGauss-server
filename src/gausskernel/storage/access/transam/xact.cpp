@@ -4564,8 +4564,12 @@ void AbortCurrentTransaction(bool STP_rollback)
         case TBLOCK_STARTED:
             AbortTransaction(PerfectRollback, STP_rollback);
             ApplyUndoActions();
-            CleanupTransaction();
-            s->blockState = TBLOCK_DEFAULT;
+            if (u_sess->attr.attr_storage.phony_autocommit || STP_rollback) {
+                CleanupTransaction();
+                s->blockState = TBLOCK_DEFAULT;
+            } else {
+                s->blockState = TBLOCK_ABORT;
+            }
             break;
 
             /*
