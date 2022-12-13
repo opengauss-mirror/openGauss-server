@@ -1,0 +1,33 @@
+--prepare_test
+create user gsqlbot2 password 'Gaussdba_Mpp';
+--?.*
+create database gsqldb2 with encoding='UTF8' template=template0 owner gsqlbot2;
+--?.*
+\c gsqldb2
+grant all on schema public to gsqlbot2;
+GRANT CREATE ON SCHEMA public TO PUBLIC;
+CREATE TABLE loader_tbl (ID NUMBER, NAME VARCHAR2(20), CON VARCHAR2(20), DT DATE);
+\! mkdir @abs_srcdir@/tmp_check/bktempdir
+\! touch @abs_srcdir@/tmp_check/bktempdir/loader_tbl.ctl
+\! echo "load data" >> @abs_srcdir@/tmp_check/bktempdir/loader_tbl.ctl
+\! echo "append" >> @abs_srcdir@/tmp_check/bktempdir/loader_tbl.ctl
+\! echo "into table loader_tbl" >> @abs_srcdir@/tmp_check/bktempdir/loader_tbl.ctl
+\! echo "fields terminated by ','" >> @abs_srcdir@/tmp_check/bktempdir/loader_tbl.ctl
+\! echo "trailing nullcols" >> @abs_srcdir@/tmp_check/bktempdir/loader_tbl.ctl
+\! echo "(" >> @abs_srcdir@/tmp_check/bktempdir/loader_tbl.ctl
+\! echo "id integer," >> @abs_srcdir@/tmp_check/bktempdir/loader_tbl.ctl
+\! echo "name char(32)," >> @abs_srcdir@/tmp_check/bktempdir/loader_tbl.ctl
+\! echo "con char(32)," >> @abs_srcdir@/tmp_check/bktempdir/loader_tbl.ctl
+\! echo "dt date" >> @abs_srcdir@/tmp_check/bktempdir/loader_tbl.ctl
+\! echo ")" >> @abs_srcdir@/tmp_check/bktempdir/loader_tbl.ctl
+\! touch @abs_srcdir@/tmp_check/bktempdir/load_tbl.csv
+\! echo "1,OK,a,2007-07-8" >> @abs_srcdir@/tmp_check/bktempdir/load_tbl.csv
+\! echo "2,OK,b,2008-07-8" >> @abs_srcdir@/tmp_check/bktempdir/load_tbl.csv
+\! echo "3,OK,c,2009-07-8" >> @abs_srcdir@/tmp_check/bktempdir/load_tbl.csv
+\! @abs_bindir@/gs_loader -W Gaussdba_Mpp control=@abs_srcdir@/tmp_check/bktempdir/loader_tbl.ctl data=@abs_srcdir@/tmp_check/bktempdir/load_tbl.csv -p -d gsqldb2
+ERROR: '-d' is not a valid port number
+\! @abs_bindir@/gs_loader -W Gaussdba_Mpp control=@abs_srcdir@/tmp_check/bktempdir/loader_tbl.ctl data=@abs_srcdir@/tmp_check/bktempdir/load_tbl.csv -p @portstring@d -d gsqldb2
+ERROR: '@portstring@d' is not a valid port number
+\! @abs_bindir@/gs_loader -W Gaussdba_Mpp control=@abs_srcdir@/tmp_check/bktempdir/loader_tbl.ctl data=@abs_srcdir@/tmp_check/bktempdir/load_tbl.csv -p@portstring@ -dgsqldb2
+ERROR: unknown param:-p@portstring@
+\! rm -rf @abs_srcdir@/tmp_check/bktempdir

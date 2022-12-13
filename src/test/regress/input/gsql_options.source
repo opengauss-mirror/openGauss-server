@@ -1,0 +1,12 @@
+--prepare_test
+create user gsqlbot2 password 'Gaussdba_Mpp';
+create database gsqldb2 with encoding='UTF8' template=template0 owner gsqlbot2;
+\c gsqldb2
+grant all on schema public to gsqlbot2;
+GRANT CREATE ON SCHEMA public TO PUBLIC;
+
+\! @abs_bindir@/gsql -h localhost -d gsqldb2 -p -U gsqlbot2 -W Gaussdba_Mpp
+\! @abs_bindir@/gsql -h localhost -d gsqldb2 -U gsqlbot2 -W Gaussdba_Mpp -p
+\! @abs_bindir@/gsql -h localhost -d gsqldb2 -p @portstring@s -U gsqlbot2 -W Gaussdba_Mpp
+\! @abs_bindir@/gsql -hlocalhost -dgsqldb2 -p@portstring@ -Ugsqlbot2 -WGaussdba_Mpp
+\! @abs_bindir@/gsql -h localhost -d gsqldb2 -p @portstring@ -U gsqlbot2 -W Gaussdba_Mpp

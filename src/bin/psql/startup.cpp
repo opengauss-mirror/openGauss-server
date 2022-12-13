@@ -960,6 +960,49 @@ static void ParseHostArg(const char *arg, struct adhoc_opts *options)
 #endif
 
 /*
+ * check if a required_argument option has a void argument
+ */
+void check_short_optOfVoid(char *optstring, int argc, char *const *argv)
+{
+    for (int i = 0; i < argc; i++) {
+        char *optstr = argv[i];
+        int is_only_shortbar;
+        if (strlen(optstr) == 1) {
+            is_only_shortbar = optstr[0] == '-' ? 1 : 0;
+        } else {
+            is_only_shortbar = 0;
+        }
+        if (is_only_shortbar) {
+            fprintf(stderr, _("%s: The option '-' is not a valid option.\n"), pset.progname);
+            exit(1);
+        }
+
+        char *oli = strchr(optstring, optstr[1]);
+        int is_shortopt_with_space;
+        if (oli != NULL && strlen(optstr) >= 1 && strlen(oli) >= 2) {
+            is_shortopt_with_space =
+                optstr[0] == '-' && oli != NULL && oli[1] == ':' && oli[2] != ':' && optstr[2] == '\0';
+        } else {
+            is_shortopt_with_space = 0;
+        }
+        if (is_shortopt_with_space) {
+            if (i == argc - 1) {
+                fprintf(stderr, _("%s: The option '-%c' need a parameter.\n"), pset.progname, optstr[1]);
+                exit(1);
+            }
+
+            char *next_optstr = argv[i + 1];
+            char *next_oli = strchr(optstring, next_optstr[1]);
+            int is_arg_optionform = next_optstr[0] == '-' && next_oli != NULL;
+            if (is_arg_optionform) {
+                fprintf(stderr, _("%s: The option '-%c' need a parameter.\n"), pset.progname, optstr[1]);
+                exit(1);
+            }
+        }
+    }
+}
+
+/*
  * Parse command line options
  */
 static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* options)
@@ -1024,6 +1067,8 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
 
     rc = memset_s(options, sizeof(*options), 0, sizeof(*options));
     check_memset_s(rc);
+
+    check_short_optOfVoid("aAc:d:eEf:F:gh:Hlk:L:mno:p:P:qCR:rsStT:U:v:W:VxXz?012", argc, argv);
 
     while ((c = getopt_long(
                 argc, argv, "aAc:d:eEf:F:gh:Hlk:L:mno:p:P:qCR:rsStT:U:v:W:VxXz?012", long_options, &optindex)) != -1) {
@@ -1121,6 +1166,10 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
                 setQFout(optarg);
                 break;
             case 'p':
+                if (atoi(optarg) <= 0) {
+                    fprintf(stderr, _("%s: Invalid port number \"%s\".\n"), pset.progname, optarg);
+                    exit(1);
+                }
                 options->port = optarg;
                 break;
             case 'P': {

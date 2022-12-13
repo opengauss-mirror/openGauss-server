@@ -1339,12 +1339,53 @@ static int findOption(int argc, char** argv, const char* option, size_t len_opti
     return -1;
 }
 
+static int ifStrBeganOption(const char *str, const char *option)
+{
+    if (strlen(str) < strlen(option)) {
+        return 0;
+    }
+    size_t i = 0;
+    for (; i < strlen(option); i++) {
+        if (str[i] != option[i]) {
+            return 0;
+        }
+    }
+    return i;
+}
+
+static int isValidArgument(const char *argument)
+{
+    const char *keyWords[] = {"start", "dump", "stop", "config", "detail", "codepath", "analyze",
+                              "-p",    "-f",   "-o",   "-t",     "-m",     "-s"};
+    const int kwLen = sizeof(keyWords) / sizeof(*keyWords);
+    for (int i = 0; i < kwLen; i++) {
+        if (strcmp(argument, keyWords[i]) == 0) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 // get an optional argument
 static char* getCmdOption(int argc, char** argv, const char* option, size_t len_option)
 {
     int idx = findOption(argc, argv, option, len_option);
     if (idx != -1 && idx < argc - 1) {
-        return argv[idx + 1];
+        return isValidArgument(argv[idx + 1]) == 1 ? argv[idx + 1] : NULL;
+    }
+
+    // if don't find argument of the option at (index of option) + 1
+    for (int i = 0; i < argc; i++) {
+        int argStartIdx = ifStrBeganOption(argv[i], option);
+        if (argStartIdx > 0) {
+            if (argv[i][argStartIdx] != '\0') {
+                const int argstrLen = 500;
+                static char argString[argstrLen];
+                strncpy_s(argString, argstrLen, argv[i] + argStartIdx, strlen(argv[i]) - argStartIdx);
+                return argString;
+            }
+            break;
+        }
     }
 
     return NULL;

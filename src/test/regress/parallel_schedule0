@@ -1020,6 +1020,14 @@ test: rename_table
 test: test_debug5
 test: fulljoin_rewrite
 
+# fix echo infos
+test: gstrace_options
+test: gaussdb_options
+test: gsql_options
+test: gsbasebackup_options
+test: gsdump_options
+test: gsloader_options
+
 # dolphin_guc_config
 test: dolphin_guc_config
 

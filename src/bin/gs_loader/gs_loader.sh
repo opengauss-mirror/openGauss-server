@@ -584,6 +584,15 @@ function check_param_exists()
     unique_params[$param_name]="true"
 }
 
+function isValidPort()
+{
+    string=$1
+    if [[ ! $string =~ ^[0-9]+$ ]]; then
+        echo "ERROR: '"$string"' is not a valid port number"
+        exit 1
+    fi
+}
+
 function parse_cmd_params()
 {
     while [[ $# -gt 0 ]]; do
@@ -603,12 +612,14 @@ function parse_cmd_params()
             port=*)
                 check_param_exists "port"
                 cmd_param_port=$(get_value $1)
+                isValidPort $cmd_param_port
                 shift # past value
                 ;;
             -p)
                 check_param_exists "port"
                 shift 
                 cmd_param_port=$1
+                isValidPort $cmd_param_port
                 shift 
                 ;;
             user=*)

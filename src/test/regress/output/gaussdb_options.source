@@ -1,0 +1,6 @@
+\! @abs_bindir@/gaussdb --single_node -p -D @abs_srcdir@/tmp_check/datanode1/ 2>&1| grep FATAL
+[gaussdb] FATAL: The option '-p' need a parameter.
+\! @abs_bindir@/gaussdb --single_node -D @abs_srcdir@/tmp_check/datanode1/ -p 2>&1| grep FATAL
+[gaussdb] FATAL: The option '-p' need a parameter.
+\! @abs_bindir@/gaussdb --single_node -p @portstring@s -D @abs_srcdir@/tmp_check/datanode1/ 2>&1| grep FATAL
+--?.*FATAL:  invalid value for parameter "port": "@portstring@s"
