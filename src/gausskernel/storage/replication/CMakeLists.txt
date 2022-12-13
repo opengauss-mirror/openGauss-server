@@ -62,6 +62,7 @@ set(TGT_replication_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/syncrep_gram.cpp 
     ${CMAKE_CURRENT_SOURCE_DIR}/shared_storage_walreceiver.cpp 
     ${CMAKE_CURRENT_SOURCE_DIR}/subscription_walreceiver.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/libpqsw.cpp
 )
 
 set(TGT_replication_INC 

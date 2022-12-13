@@ -71,6 +71,7 @@
 #include "replication/libpqwalreceiver.h"
 #include "replication/worker_internal.h"
 #include "replication/origin.h"
+#include "replication/libpqsw.h"
 #include "catalog/pg_subscription.h"
 #include "port/pg_crc32c.h"
 #include "ddes/dms/ss_common_attr.h"
@@ -3068,6 +3069,15 @@ typedef struct knl_t_security_ledger_context {
     void *prev_ExecutorEnd;
 } knl_t_security_ledger_context;
 
+typedef struct knl_t_libsw_context {
+    /* Current connection to the primary, if any */
+    struct pg_conn* streamConn;
+    /* which command in last sql */
+    const char* commandTag;
+    /* the redirect manager */
+    void* redirect_manager;
+} knl_t_libsw_context;
+
 typedef struct knl_t_csnmin_sync_context {
     volatile sig_atomic_t got_SIGHUP;
     volatile sig_atomic_t shutdown_requested;
@@ -3470,6 +3480,7 @@ typedef struct knl_thrd_context {
     knl_t_cfs_shrinker_context cfs_shrinker_cxt;
     knl_t_sql_patch_context sql_patch_cxt;
     knl_t_dms_context dms_cxt;
+    knl_t_libsw_context libsw_cxt;
 } knl_thrd_context;
 
 #ifdef ENABLE_MOT

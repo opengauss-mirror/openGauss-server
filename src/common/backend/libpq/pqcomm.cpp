@@ -133,6 +133,7 @@ extern ProtocolExtensionConfig default_protocol_config;
 #define NAPTIME_PER_SEND 10        /* max sleep before sending next batch of data (10ms) */
 
 void pq_close(int code, Datum arg);
+int internal_putbytes(const char* s, size_t len);
 
 /* Internal functions */
 static int internal_flush(void);

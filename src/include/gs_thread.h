@@ -148,7 +148,8 @@ typedef enum knl_thread_role {
     WAL_DB_SENDER,
     TOP_CONSUMER,
     DCF_WORKER,
-    DMS_WORKER
+    DMS_WORKER,
+    SW_SENDER
 } knl_thread_role;
 
 /*

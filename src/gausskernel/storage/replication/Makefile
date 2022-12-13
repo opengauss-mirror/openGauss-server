@@ -16,7 +16,7 @@ endif
 OBJS = walsender.o datasender.o walreceiverfuncs.o walreceiver.o walrcvwriter.o subscription_walreceiver.o\
 	datareceiver.o datarcvwriter.o basebackup.o libpqwalreceiver.o archive_walreceiver.o repl_gram.o\
 	syncrep.o dataqueue.o bcm.o datasyncrep.o catchup.o slot.o slotfuncs.o shared_storage_walreceiver.o\
-	syncrep_gram.o heartbeat.o rto_statistic.o
+	syncrep_gram.o heartbeat.o rto_statistic.o libpqsw.o
 SUBDIRS = logical heartbeat dcf
 
 include $(top_srcdir)/src/gausskernel/common.mk

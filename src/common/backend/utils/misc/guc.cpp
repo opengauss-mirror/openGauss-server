@@ -1933,6 +1933,19 @@ static void InitConfigureNamesBool()
             NULL,
             NULL
         },
+        {{"enable_remote_excute",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            QUERY_TUNING,
+            gettext_noop("Enable write on standby"),
+            NULL,
+            },
+            &g_instance.attr.attr_sql.enableRemoteExcute,
+            false,
+            NULL,
+            NULL,
+            NULL
+        },
         /* End-of-list marker */
         {{NULL,
             (GucContext)0,

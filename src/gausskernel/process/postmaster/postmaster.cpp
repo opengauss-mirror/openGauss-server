@@ -265,6 +265,8 @@
 #define static
 #endif
 
+#include "utils/postinit.h"
+
 extern void InitGlobalSeq();
 extern void auto_explain_init(void);
 extern int S3_init();
@@ -3974,6 +3976,8 @@ int ProcessStartupPacket(Port* port, bool SSLdone)
                     t_thrd.role = WAL_HADR_CN_SENDER;
                 } else if (strcmp(valptr, "standby_cluster") == 0) {
                     t_thrd.role = WAL_SHARE_STORE_SENDER;
+                } else if (strcmp(valptr, "standbywrite") == 0) {
+                    t_thrd.role = SW_SENDER;
                 } else {
                     bool _am_normal_walsender = false;
                     if (!parse_bool(valptr, &_am_normal_walsender)) {
@@ -4273,6 +4277,8 @@ int ProcessStartupPacket(Port* port, bool SSLdone)
                     (errcode(ERRCODE_CANNOT_CONNECT_NOW), errmsg("the ha connection is not in the channel list")));
             }
         }
+    } else if (t_thrd.role == SW_SENDER) {
+        // nothing to do.
     } else {
         if (dummyStandbyMode)
             ereport(
