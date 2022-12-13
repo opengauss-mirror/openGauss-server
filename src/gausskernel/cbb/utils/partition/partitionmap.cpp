@@ -1878,7 +1878,6 @@ static void buildRangePartitionMap(Relation relation, Form_pg_partition partitio
 
     /* iterate partition tuples, build RangeElement for per partition tuple */
     range_itr = 0;
-    Datum val = 0;
     char* partkeystr = CheckPartExprKey(partitioned_tuple, pg_partition);
     foreach (tuple_cell, partition_list) {
         partition_tuple = (HeapTuple)lfirst(tuple_cell);

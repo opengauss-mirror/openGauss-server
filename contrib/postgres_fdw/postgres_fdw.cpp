@@ -4406,7 +4406,6 @@ static void add_foreign_grouping_paths(PlannerInfo *root, RelOptInfo *input_rel,
 static void add_foreign_ordered_paths(PlannerInfo *root, RelOptInfo *input_rel, RelOptInfo *ordered_rel,
     OrderPathExtraData *extra)
 {
-    Query *parse = root->parse;
     PgFdwRelationInfo *ifpinfo = (PgFdwRelationInfo *)input_rel->fdw_private;
     PgFdwRelationInfo *fpinfo = (PgFdwRelationInfo *)ordered_rel->fdw_private;
     PgFdwPathExtraData *fpextra = NULL;
@@ -4419,7 +4418,7 @@ static void add_foreign_ordered_paths(PlannerInfo *root, RelOptInfo *input_rel, 
     ListCell *lc = NULL;
 
     /* Shouldn't get here unless the query has ORDER BY */
-    Assert(parse->sortClause);
+    Assert(root->parse->sortClause);
 
     /* Save the input_rel as outerrel in fpinfo */
     fpinfo->outerrel = input_rel;

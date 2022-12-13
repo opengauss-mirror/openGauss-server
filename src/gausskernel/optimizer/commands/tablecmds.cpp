@@ -1946,7 +1946,7 @@ void UpdatePartKeyExpr(Relation rel, PartitionState *partTableState, Oid partOid
     if (!partTuple)
         ereport(ERROR,(errcode(ERRCODE_PARTITION_ERROR),errmsg("The partition can't be found")));
     bool isnull = false;
-    Datum val = fastgetattr(partTuple, Anum_pg_partition_partkeyexpr, RelationGetDescr(pgPartitionRel), &isnull);
+    fastgetattr(partTuple, Anum_pg_partition_partkeyexpr, RelationGetDescr(pgPartitionRel), &isnull);
     if (isnull) {
         if (OidIsValid(partOid))
             ReleaseSysCache(partTuple);
