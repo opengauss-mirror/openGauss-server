@@ -1,4 +1,7 @@
 #This is the main CMAKE for build all components.
+execute_process(
+    COMMAND ln -fs ${PROJECT_SRC_DIR}/gausskernel/storage/dss/dss_adaptor.cpp ${CMAKE_CURRENT_SOURCE_DIR}/dss_adaptor.cpp
+)
 # pg_resetxlog bin
 AUX_SOURCE_DIRECTORY(${CMAKE_CURRENT_SOURCE_DIR} TGT_resetxlog_SRC)
 
