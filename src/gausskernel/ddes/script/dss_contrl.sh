@@ -191,6 +191,24 @@ function check_dss_config()
     CONN_PATH=UDS:${LSNR_PATH}/.dss_unix_d_socket
 }
 
+function ScandCheck()
+{
+    groups=`groups`
+    echo $groups
+    array=(${groups// / })
+    for var in ${array[@]}
+    do
+        echo $var
+        nohup dsscmd scandisk -t block -p /dev/sd -u $os_user -g $var >> /dev/null 2>&1
+        if [[ $? != 0 ]]
+        then
+            log "[SCAND]dsscmd scandisk -t block -p /dev/sd -u $os_user -g $var fail."
+            exit 1
+        fi
+        log "[SCAND]dsscmd scandisk."
+    done
+}
+
 # 1st step: if database exists, kill it
 # 2nd step: if dssserver no exists, start it
 function Start()
@@ -230,6 +248,7 @@ function Start()
         else
             log "${GSDB_BIN} is offline in dir ${GSDB_HOME}..."
         fi
+        ScandCheck
         nohup dssserver -D ${DSS_HOME} >> ${startdss_log} 2>&1  &
         check_dss_start ${DSS_HOME}
         log "start dss in ${DSS_HOME} success."
@@ -335,6 +354,7 @@ function Clean()
 
 function Reg()
 {
+    ScandCheck
     LOCAL_INSTANCE_ID=`awk '/INST_ID/{print}' ${DSS_HOME}/cfg/dss_inst.ini | awk -F= '{print $2}' | xargs`
     if [[ -z ${LOCAL_INSTANCE_ID} ]]
     then
