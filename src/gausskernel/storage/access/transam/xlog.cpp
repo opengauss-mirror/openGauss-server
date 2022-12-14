@@ -18041,11 +18041,8 @@ int CheckSwitchoverSignal(void)
         ereport(LOG, (errcode_for_file_access(), errmsg("cannot close switchfile.\n")));
     }
     (void)unlink(SWITCHOVER_SIGNAL_FILE);
-    if (mode == ExtremelyFast) {
-        return FastDemote;
-    } else {
-        return mode;
-    }
+
+    return mode;
 }
 
 /*
