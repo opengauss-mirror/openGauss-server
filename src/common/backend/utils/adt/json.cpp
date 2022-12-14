@@ -162,6 +162,7 @@ Datum json_in(PG_FUNCTION_ARGS)
 
     /* validate it */
     lex = makeJsonLexContext(result, false);
+    MemoryContext oldcxt = CurrentMemoryContext;
     PG_TRY();
     {
         pg_parse_json(lex, &nullSemAction);
@@ -169,9 +170,13 @@ Datum json_in(PG_FUNCTION_ARGS)
     PG_CATCH();
     {
         if (fcinfo->can_ignore) {
+            (void)MemoryContextSwitchTo(oldcxt);
+            ErrorData *edata = CopyErrorData();
             ereport(WARNING,
                     (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
                      errmsg("invalid input syntax for type json")));
+            FlushErrorState();
+            FreeErrorData(edata);
             PG_RETURN_DATUM((Datum)DirectFunctionCall1(json_in, CStringGetDatum("null")));
         } else {
             PG_RE_THROW();

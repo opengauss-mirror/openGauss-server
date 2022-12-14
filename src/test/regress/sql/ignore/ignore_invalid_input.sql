@@ -10,6 +10,7 @@ insert /*+ ignore_error */ into t_tinyint values('12555a34');
 insert /*+ ignore_error */ into t_tinyint values('-12555a34');
 insert /*+ ignore_error */ into t_tinyint values('aaa123a34');
 insert /*+ ignore_error */ into t_tinyint values('abcde');
+insert /*+ ignore_error */ into t_tinyint values('');
 select * from t_tinyint;
 update /*+ ignore_error */ t_tinyint set c = '12a34';
 
@@ -20,6 +21,7 @@ insert /*+ ignore_error */ into t_smallint values ('123333333333333a34');
 insert /*+ ignore_error */ into t_smallint values ('-123333333333333a34');
 insert /*+ ignore_error */ into t_smallint values ('aaa1234a5');
 insert /*+ ignore_error */ into t_smallint values ('abcde');
+insert /*+ ignore_error */ into t_smallint values ('');
 select * from t_smallint;
 update /*+ ignore_error */ t_smallint set c = '12a34';
 
@@ -30,6 +32,7 @@ insert /*+ ignore_error */ into t_int values ('123333333333333333333333333a34');
 insert /*+ ignore_error */ into t_int values ('-123333333333333333333333333a34');
 insert /*+ ignore_error */ into t_int values ('aaa123a45');
 insert /*+ ignore_error */ into t_int values ('abcde');
+insert /*+ ignore_error */ into t_int values ('');
 select * from t_int;
 update /*+ ignore_error */ t_int set c = '12a34';
 
@@ -40,6 +43,7 @@ insert /*+ ignore_error */ into t_bigint values ('123333333333333333333333333333
 insert /*+ ignore_error */ into t_bigint values ('-123333333333333333333333333333333333333333333333333333333333333333333333333333333333333a34');
 insert /*+ ignore_error */ into t_bigint values ('aaa123a45');
 insert /*+ ignore_error */ into t_bigint values ('abcde');
+insert /*+ ignore_error */ into t_bigint values ('');
 select * from t_bigint;
 update /*+ ignore_error */ t_bigint set c = '12a34';
 
@@ -50,6 +54,7 @@ insert /*+ ignore_error */ into t_float4 values ('123333333333333333333333333333
 insert /*+ ignore_error */ into t_float4 values ('-123333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333.123a34');
 insert /*+ ignore_error */ into t_float4 values ('aaa123.12a45');
 insert /*+ ignore_error */ into t_float4 values ('abcde');
+insert /*+ ignore_error */ into t_float4 values ('');
 select * from t_float4;
 update /*+ ignore_error */ t_float4 set c = '12a34';
 
@@ -60,6 +65,7 @@ insert /*+ ignore_error */ into t_float8 values ('333333333189203809743298758943
 insert /*+ ignore_error */ into t_float8 values ('-3333333331892038097432987589432759843769348605436304758493758943758943758943759843756983760945860948605948765487689547893475893475918920380974329875894327598437693486054363047584937589437589437589437598437569837609458609486059487654876895478934758934759627346378267863475863875648365843734895749837589437589473988.18920380974329875894327598437693486054363047584937589437589437589437598437569837609458609486059487654876895478934758934759189203809743298758943275984376934860543630475849375894375894375894375984375698376094586094860594876548768954789347589347593874894375984aaa34');
 insert /*+ ignore_error */ into t_float8 values ('aaa123.12a45');
 insert /*+ ignore_error */ into t_float8 values ('abcde');
+insert /*+ ignore_error */ into t_float8 values ('');
 select * from t_float8;
 update /*+ ignore_error */ t_float8 set c = '12a34';
 
@@ -70,6 +76,7 @@ insert /*+ ignore_error */ into t_numeric values ('33333189203809743298758943275
 insert /*+ ignore_error */ into t_numeric values ('-333331892038097432987589432759843769348605436304758493758943758943758943759843756983760945860948605948765487689547893475893475918920380974329875894327598437693486054363047584937589437589437589437598437569837609458609486059487654876895478934758934759627346378267863475863875648365843734895749837589437589473988.18920380974329875894327598437693486054363047584937589437589437589437598437569837609458609486059487654876895478934758934759189203809743298758943275984376934860543630475849375894375894375894375984375698376094586094860594876548768954789347589347593874894375984aaa34');
 insert /*+ ignore_error */ into t_numeric values ('aaa123.12a45');
 insert /*+ ignore_error */ into t_numeric values ('abcde');
+insert /*+ ignore_error */ into t_numeric values ('');
 select * from t_numeric;
 update /*+ ignore_error */ t_numeric set c = '12a34';
 
@@ -80,6 +87,7 @@ insert /*+ ignore_error */ into t_date values('123a34');
 insert /*+ ignore_error */ into t_date values('12aaaaaaa34');
 insert /*+ ignore_error */ into t_date values('aaaaaaa12aaaaaaa34');
 insert /*+ ignore_error */ into t_date values('abcde');
+insert /*+ ignore_error */ into t_date values('');
 select * from t_date;
 update /*+ ignore_error */ t_date set c = '12a34';
 
@@ -90,6 +98,7 @@ insert /*+ ignore_error */ into t_time values('123a34');
 insert /*+ ignore_error */ into t_time values('12aaaaaaa34');
 insert /*+ ignore_error */ into t_time values('aaaaaaa12aaaaaaa34');
 insert /*+ ignore_error */ into t_time values('abcde');
+insert /*+ ignore_error */ into t_time values('');
 select * from t_time;
 update /*+ ignore_error */ t_time set c = '12a34';
 
@@ -98,6 +107,7 @@ create table t_timestamp(c timestamp);
 insert  /*+ ignore_error */ into t_timestamp values('12a34');
 insert  /*+ ignore_error */ into t_timestamp values('abcde');
 insert  /*+ ignore_error */ into t_timestamp values('aaaaaa12a34');
+insert  /*+ ignore_error */ into t_timestamp values('');
 select * from t_timestamp;
 update /*+ ignore_error */ t_timestamp set c = '12a34';
 
@@ -106,6 +116,7 @@ create table t_timestamptz(c timestamptz);
 insert  /*+ ignore_error */ into t_timestamptz values('12a34');
 insert  /*+ ignore_error */ into t_timestamptz values('abcde');
 insert  /*+ ignore_error */ into t_timestamptz values('aaaaaa12a34');
+insert  /*+ ignore_error */ into t_timestamptz values('');
 select * from t_timestamptz;
 update /*+ ignore_error */ t_timestamptz set c = '12a34';
 
@@ -116,6 +127,7 @@ insert /*+ ignore_error */ into t_timetz values('123a34');
 insert /*+ ignore_error */ into t_timetz values('12aaaaaaa34');
 insert /*+ ignore_error */ into t_timetz values('aaaaaaa12aaaaaaa34');
 insert /*+ ignore_error */ into t_timetz values('abcde');
+insert /*+ ignore_error */ into t_timetz values('');
 select * from t_timetz;
 update /*+ ignore_error */ t_timetz set c = '12a34';
 
@@ -126,6 +138,7 @@ insert /*+ ignore_error */ into t_interval values('123a34');
 insert /*+ ignore_error */ into t_interval values('12aaaaaaa34');
 insert /*+ ignore_error */ into t_interval values('aaaaaaa12aaaaaaa34');
 insert /*+ ignore_error */ into t_interval values('abcde');
+insert /*+ ignore_error */ into t_interval values('');
 select * from t_interval;
 update /*+ ignore_error */ t_interval set c = '12a34';
 
@@ -136,6 +149,7 @@ insert /*+ ignore_error */ into t_tinterval values('123a34');
 insert /*+ ignore_error */ into t_tinterval values('12aaaaaaa34');
 insert /*+ ignore_error */ into t_tinterval values('aaaaaaa12aaaaaaa34');
 insert /*+ ignore_error */ into t_tinterval values('abcde');
+insert /*+ ignore_error */ into t_tinterval values('');
 select * from t_tinterval;
 update /*+ ignore_error */ t_tinterval set c = '12a34';
 
@@ -146,18 +160,21 @@ insert /*+ ignore_error */ into t_smalldatetime values('123a34');
 insert /*+ ignore_error */ into t_smalldatetime values('12aaaaaaa34');
 insert /*+ ignore_error */ into t_smalldatetime values('aaaaaaa12aaaaaaa34');
 insert /*+ ignore_error */ into t_smalldatetime values('abcde');
+insert /*+ ignore_error */ into t_smalldatetime values('');
 select * from t_smalldatetime;
 update /*+ ignore_error */ t_smalldatetime set c = '12a34';
 
 -- type: uuid
 create table t_uuid(c uuid);
 insert /*+ ignore_error */ into t_uuid values('12a34');
+insert /*+ ignore_error */ into t_uuid values('');
 update /*+ ignore_error */ t_uuid set c = '12a34';
 select * from t_uuid;
 
 -- type: point
 create table t_point(c point);
 insert /*+ ignore_error */ into t_point values('12a34');
+insert /*+ ignore_error */ into t_point values('');
 select * from t_point;
 update /*+ ignore_error */ t_point set c = '12a34';
 select * from t_point;
@@ -165,6 +182,7 @@ select * from t_point;
 -- type: path
 create table t_path(c path);
 insert /*+ ignore_error */ into t_path values('12a34');
+insert /*+ ignore_error */ into t_path values('');
 select * from t_path;
 update /*+ ignore_error */ t_path set c = '12a34';
 select * from t_path;
@@ -172,6 +190,7 @@ select * from t_path;
 -- type: polygon
 create table t_polygon(c polygon);
 insert /*+ ignore_error */ into t_polygon values('12a34');
+insert /*+ ignore_error */ into t_polygon values('');
 select * from t_polygon;
 update /*+ ignore_error */ t_polygon set c = '12a34';
 select * from t_polygon;
@@ -179,6 +198,7 @@ select * from t_polygon;
 -- type: circle
 create table t_circle(c circle);
 insert /*+ ignore_error */ into t_circle values('12a34');
+insert /*+ ignore_error */ into t_circle values('');
 select * from t_circle;
 update /*+ ignore_error */ t_circle set c = '12a34';
 select * from t_circle;
@@ -186,6 +206,7 @@ select * from t_circle;
 -- type: lseg
 create table t_lseg(c lseg);
 insert /*+ ignore_error */ into t_lseg values('12a34');
+insert /*+ ignore_error */ into t_lseg values('');
 select * from t_lseg;
 update /*+ ignore_error */ t_lseg set c = '12a34';
 select * from t_lseg;
@@ -193,6 +214,7 @@ select * from t_lseg;
 -- type: box
 create table t_box(c box);
 insert /*+ ignore_error */ into t_box values('12a34');
+insert /*+ ignore_error */ into t_box values('');
 select * from t_box;
 update /*+ ignore_error */ t_box set c = '12a34';
 select * from t_box;
@@ -200,6 +222,12 @@ select * from t_box;
 -- type: json
 create table t_json(c json);
 insert /*+ ignore_error */ into t_json values('12a34');
+insert /*+ ignore_error */ into t_json values('');
+insert /*+ ignore_error */ into t_json values('');
+insert /*+ ignore_error */ into t_json values('');
+insert /*+ ignore_error */ into t_json values('');
+insert /*+ ignore_error */ into t_json values('');
+insert /*+ ignore_error */ into t_json values('');
 select * from t_json;
 update /*+ ignore_error */ t_json set c = '12a34';
 select * from t_json;
@@ -207,6 +235,12 @@ select * from t_json;
 -- type: jsonb
 create table t_jsonb(c jsonb);
 insert /*+ ignore_error */ into t_jsonb values('12a34');
+insert /*+ ignore_error */ into t_jsonb values('');
+insert /*+ ignore_error */ into t_jsonb values('');
+insert /*+ ignore_error */ into t_jsonb values('');
+insert /*+ ignore_error */ into t_jsonb values('');
+insert /*+ ignore_error */ into t_jsonb values('');
+insert /*+ ignore_error */ into t_jsonb values('');
 select * from t_jsonb;
 update /*+ ignore_error */ t_jsonb set c = '12a34';
 select * from t_jsonb;
@@ -214,6 +248,7 @@ select * from t_jsonb;
 -- type: bit
 create table t_bit(c bit);
 insert /*+ ignore_error */ into t_bit values('12a34');
+insert /*+ ignore_error */ into t_bit values('');
 select * from t_bit;
 update /*+ ignore_error */ t_bit set c = '12a34';
 select * from t_bit;

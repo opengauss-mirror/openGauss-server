@@ -257,10 +257,17 @@ Datum float4in(PG_FUNCTION_ARGS)
      * Check for an empty-string input to begin with, to avoid the vagaries of
      * strtod() on different platforms.
      */
-    if (*num == '\0')
+    if (*num == '\0') {
+        if (fcinfo->can_ignore) {
+            ereport(WARNING,
+                    (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+                     errmsg("invalid input syntax for type real: \"%s\". truncated automatically", orig_num)));
+            PG_RETURN_FLOAT4(0);
+        }
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
                 errmsg("invalid input syntax for type real: \"%s\"", orig_num)));
+    }
 
     /* skip leading whitespace */
     while (*num != '\0' && isspace((unsigned char)*num))
@@ -493,10 +500,17 @@ Datum float8in(PG_FUNCTION_ARGS)
      * Check for an empty-string input to begin with, to avoid the vagaries of
      * strtod() on different platforms.
      */
-    if (*num == '\0')
+    if (*num == '\0') {
+        if (fcinfo->can_ignore) {
+            ereport(WARNING,
+                    (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+                     errmsg("invalid input syntax for type double precision: \"%s\". truncated automatically", orig_num)));
+            PG_RETURN_FLOAT8(0);
+        }
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
                 errmsg("invalid input syntax for type double precision: \"%s\"", orig_num)));
+    }
 
     /* skip leading whitespace */
     while (*num != '\0' && isspace((unsigned char)*num))
