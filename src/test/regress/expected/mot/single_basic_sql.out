@@ -446,6 +446,12 @@ SELECT * FROM bmsql_district ORDER BY d_id, d_w_id;
       3 |    3 | 123.22 | .2234 |         100 | VVV    | FFF        | DDD        | XXX    | IL      | 84965    
 (6 rows)
 
+--unsupport feature
+create schema alter_schema_mot_test;
+alter foreign table bmsql_district set schema alter_schema_mot_test;
+ERROR:  Un-support feature
+DETAIL:  target table is a mot foreign table
+drop schema alter_schema_mot_test;
 --cleanup
 DROP FOREIGN TABLE bmsql_warehouse;
 DROP FOREIGN TABLE bmsql_district;

@@ -18671,6 +18671,13 @@ void AlterTableNamespace(AlterObjectSchemaStmt* stmt)
         return;
     }
 
+#ifdef ENABLE_MOT
+    if (IsMOTForeignTable(relid)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("Un-support feature"),
+                        errdetail("target table is a mot table")));
+    }
+#endif
+    
     TrForbidAccessRbObject(RelationRelationId, relid, stmt->relation->relname);
 
     rel = relation_open(relid, NoLock);

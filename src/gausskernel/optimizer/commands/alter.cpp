@@ -249,11 +249,6 @@ void ExecAlterObjectSchemaStmt(AlterObjectSchemaStmt* stmt)
         case OBJECT_MATVIEW:
         case OBJECT_FOREIGN_TABLE:
         case OBJECT_STREAM:
-            if (stmt->objectType == OBJECT_FOREIGN_TABLE)
-                ereport(ERROR,
-                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("Un-support feature"),
-                        errdetail("target table is a foreign table")));
             if (stmt->objectType == OBJECT_STREAM)
                 ereport(ERROR,
                     (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
