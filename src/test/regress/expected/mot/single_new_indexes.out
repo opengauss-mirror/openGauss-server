@@ -46,7 +46,7 @@ create index idx7 on test_new_index (c,v);
 create index idx8 on test_new_index (d,t,ts);
 create index idx9 on test_new_index (intrvl);
 create index idx10 on test_new_index (b);
-ERROR:  Can not create index, max number of indexes 10 reached
+ERROR:  Cannot create index, max number of indexes 10 reached
 insert into test_new_index (i, i2, i4) values (generate_series(1,100), generate_series(1,100), generate_series(1,100));
 ERROR:  null value in column "i8" violates not-null constraint
 DETAIL:  Failing row contains (1, 1, 1, null, null, null, null, 1, null, null, null, null, null, null, null, null).
