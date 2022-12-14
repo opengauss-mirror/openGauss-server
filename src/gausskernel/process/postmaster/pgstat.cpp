@@ -8456,7 +8456,7 @@ static void pgstat_recv_filestat(PgStat_MsgFile* msg, int len)
     if (i == NUM_FILES || entry->fn == InvalidOid) {
         LWLockAcquire(FileStatLock, LW_EXCLUSIVE);
         if (i == NUM_FILES) {
-            TimestampTz longestTime = DBL_MAX;
+            TimestampTz longestTime = GetCurrentTimestamp();
             int minLocation = 0;
             for (int j = 0; j < NUM_FILES; j++) {
                 entry = (PgStat_FileEntry*)&pgStatFileArray[j];
