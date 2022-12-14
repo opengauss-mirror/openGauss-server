@@ -1446,4 +1446,28 @@ PARTITION BY RANGE(f1)
         PARTITION P4 VALUES LESS THAN(MAXVALUE)
 );
 
+create table test_unique(f31 int, f32 varchar(20), constraint con_t_unique unique using btree(f31, f32) comment 'unique index' using btree);
+\d+ test_unique
+drop table test_unique;
+
+create table test_unique(f31 int, f32 varchar(20), constraint con_t_unique unique (f31, f32) comment 'unique index' using btree);
+\d+ test_unique
+drop table test_unique;
+
+create table test_unique(f31 int, f32 varchar(20), constraint con_t_unique unique (f31, f32) comment 'unique index' using btree using btree);
+\d+ test_unique
+drop table test_unique;
+
+create table test_primary(f11 int, f12 varchar(20), f13 bool, constraint con_t_pri primary key using btree(f11 desc, f12 asc) comment 'primary key' using btree);
+\d+ test_primary
+drop table test_primary;
+
+create table test_primary(f11 int, f12 varchar(20), f13 bool, constraint con_t_pri primary key (f11 desc, f12 asc) comment 'primary key' using btree);
+\d+ test_primary
+drop table test_primary;
+
+create table test_primary(f11 int, f12 varchar(20), f13 bool, constraint con_t_pri primary key using btree(f11 desc, f12 asc) comment 'primary key' using btree using btree);
+\d+ test_primary
+drop table test_primary;
+
 \c postgres
