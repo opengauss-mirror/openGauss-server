@@ -40,7 +40,6 @@
 ./bin/kadmin.local
 ./bin/lz4
 ./bin/kadmind
-./bin/dbmind
 ./bin/gs_dbmind
 ./bin/constant
 ./bin/server.key.cipher

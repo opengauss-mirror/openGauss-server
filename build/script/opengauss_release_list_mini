@@ -38,7 +38,6 @@
 ./bin/kadmin.local
 ./bin/lz4
 ./bin/kadmind
-./bin/dbmind
 ./bin/server.key.cipher
 ./bin/server.key.rand
 ./etc/kerberos/kadm5.acl  
