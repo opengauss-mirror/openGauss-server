@@ -888,7 +888,7 @@ static void ValidateCreateIndex(IndexStmt* stmt, MOT::Table* table, MOT::TxnMana
         ereport(ERROR,
             (errmodule(MOD_MOT),
                 errcode(ERRCODE_FDW_TOO_MANY_INDEXES),
-                errmsg("Can not create index, max number of indexes %u reached", MAX_NUM_INDEXES)));
+                errmsg("Cannot create index, max number of indexes %u reached", MAX_NUM_INDEXES)));
     }
 
     if (strcmp(stmt->accessMethod, "btree") != 0) {
@@ -1061,7 +1061,7 @@ MOT::RC MOTAdaptor::CreateIndex(IndexStmt* stmt, ::TransactionId tid)
             ereport(ERROR,
                 (errmodule(MOD_MOT),
                     errcode(ERRCODE_FDW_TOO_MANY_INDEXES),
-                    errmsg("Can not create index, max number of indexes %u reached", MAX_NUM_INDEXES)));
+                    errmsg("Cannot create index, max number of indexes %u reached", MAX_NUM_INDEXES)));
             return MOT::RC_TABLE_EXCEEDS_MAX_INDEXES;
         }
         report_pg_error(txn->m_err, stmt->idxname, txn->m_errMsgBuf);

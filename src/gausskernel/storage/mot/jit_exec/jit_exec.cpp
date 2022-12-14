@@ -1613,10 +1613,6 @@ extern int JitExecFunction(
         return result;
     }
 
-    // setup current JIT context
-    volatile MotJitContext* prevContext = u_sess->mot_cxt.jit_context;
-    u_sess->mot_cxt.jit_context = jitContext;
-
     // we avoid weird stuff by putting null in case of internal error
     bool isFunctionContext = (jitContext->m_contextType == JitContextType::JIT_CONTEXT_TYPE_FUNCTION);
     volatile JitFunctionExecState* execState =
@@ -1661,6 +1657,10 @@ extern int JitExecFunction(
                     SPI_result_code_string(rc),
                     jitContext->m_queryString)));
     }
+
+    // setup current JIT context
+    volatile MotJitContext* prevContext = u_sess->mot_cxt.jit_context;
+    u_sess->mot_cxt.jit_context = jitContext;
 
     // invoke the jitted function
     volatile MemoryContext origCxt = CurrentMemoryContext;
