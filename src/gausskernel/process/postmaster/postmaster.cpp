@@ -9524,6 +9524,13 @@ static void sigusr1_handler(SIGNAL_ARGS)
         SShandle_promote_signal();
     }
 
+    if (ENABLE_DMS && CheckPostmasterSignal(PMSIGNAL_DMS_REFORM_DONE)) {
+        PMUpdateDBState(NORMAL_STATE, get_cur_mode(), get_cur_repl_num());
+        ereport(LOG,
+            (errmsg("update gaussdb state file: db state(NORMAL_STATE), server mode(%s)",
+                wal_get_role_string(get_cur_mode()))));
+    }
+
     if (CheckPromoteSignal()) {
         handle_promote_signal();
     }
