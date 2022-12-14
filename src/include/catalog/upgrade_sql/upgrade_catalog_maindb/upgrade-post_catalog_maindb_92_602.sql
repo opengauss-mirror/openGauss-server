@@ -49,12 +49,7 @@ BEGIN
 END
 $do$;
 
-SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0, 0, 0, 0;
-DROP INDEX IF EXISTS pg_catalog.pg_proc_proname_all_args_nsp_index;
-SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0, 0, 0, 9666;
-CREATE INDEX pg_catalog.pg_proc_proname_all_args_nsp_index on pg_catalog.pg_proc USING BTREE(proname name_ops, allargtypes oidvector_ops, pronamespace oid_ops, propackageid oid_ops);
-SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0, 0, 0, 0;
-REINDEX INDEX pg_catalog.pg_proc_proname_all_args_nsp_index;
+update pg_index set indisunique=false where indexrelid=9666;
 DROP FUNCTION IF EXISTS pg_catalog.gs_get_shared_memctx_detail() cascade;
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 5255;
 CREATE OR REPLACE FUNCTION pg_catalog.gs_get_shared_memctx_detail(
