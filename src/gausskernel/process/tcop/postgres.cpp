@@ -3783,9 +3783,9 @@ pass_parsing:
      */
     bool need_redirect = libpqsw_process_parse_message(commandTag, psrc->query_list);
     if (need_redirect) {
-        libpqsw_trace("we find pbe new transfer cmdtag:%s, sql:%s", commandTag, psrc->query_string);
+        libpqsw_trace("we find pbe new transfer cmdtag:%s, sql:%s", commandTag, psrc == NULL ? "" : psrc->query_string);
     } else {
-        libpqsw_trace("we find pbe new select cmdtag:%s, sql:%s", commandTag, psrc->query_string);
+        libpqsw_trace("we find pbe new select cmdtag:%s, sql:%s", commandTag, psrc == NULL ? "" : psrc->query_string);
         if (t_thrd.postgres_cxt.whereToSendOutput == DestRemote)
             pq_putemptymessage('1');
     }

@@ -226,6 +226,9 @@ public:
 
     void logtrace(int level, const char* fmt, ...)
     {
+        if (!log_enable()) {
+            return;
+        }
         if (fmt != log_trace_msg->data) {
             va_list args;
             int nRet = 0;

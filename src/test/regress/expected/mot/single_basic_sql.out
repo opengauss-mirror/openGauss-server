@@ -450,7 +450,7 @@ SELECT * FROM bmsql_district ORDER BY d_id, d_w_id;
 create schema alter_schema_mot_test;
 alter foreign table bmsql_district set schema alter_schema_mot_test;
 ERROR:  Un-support feature
-DETAIL:  target table is a mot foreign table
+DETAIL:  target table is a mot table
 drop schema alter_schema_mot_test;
 --cleanup
 DROP FOREIGN TABLE bmsql_warehouse;
