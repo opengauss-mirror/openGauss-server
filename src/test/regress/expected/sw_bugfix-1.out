@@ -1577,6 +1577,225 @@ select * from (select 'test111' col from sys_dummy) connect by rownum < length(t
 select test1.a, cast (min(1) OVER (PARTITION BY test1.a ORDER BY test1.b) as integer) from test1 where test1.b is NULL connect by exists(select test2.id from test2 where false limit 40) order siblings by test1.ctid;
 ERROR:  Siblings sort entry not found
 DETAIL:  Column ctid not found or not allowed here
+--test swcb func with aggregate
+create table test3(id text, name text, parentid text);
+insert into test3 values('001', 'root', '0');
+insert into test3 values('001001', 'a', '001');
+insert into test3 values('001002', 'b', '001');
+insert into test3 values('001003', 'c', '001');
+insert into test3 values('001001001', 'a1', '001001');
+insert into test3 values('001001002', 'a2', '001001');
+insert into test3 values('001001003', 'a3', '001001');
+insert into test3 values('001001003001', 'a31', '001001003');
+insert into test3 values('001002001', 'b1', '001002');
+insert into test3 values('001002002', 'b2', '001002');
+insert into test3 values('001003001', 'c1', '001003');
+explain(verbose on, costs off) select sys_connect_by_path(min(name || 'hahaha'), '/') from test3 connect by parentid = prior id;
+                                                   QUERY PLAN                                                    
+-----------------------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: sys_connect_by_path(min((tmp_reuslt."test3@name" || 'hahaha'::text)), '/'::text)
+   CTE tmp_reuslt
+     ->  StartWith Operator
+           Output: swtest.test3.id, swtest.test3.name, swtest.test3.parentid
+           Start With pseudo atts: RUITR, array_key_1, array_col_2
+           ->  Recursive Union
+                 ->  Seq Scan on swtest.test3
+                       Output: swtest.test3.id, swtest.test3.name, swtest.test3.parentid
+                 ->  Hash Join
+                       Output: swtest.test3.id, swtest.test3.name, swtest.test3.parentid
+                       Hash Cond: (tmp_reuslt."test3@id" = swtest.test3.parentid)
+                       ->  WorkTable Scan on tmp_reuslt
+                             Output: tmp_reuslt."test3@id", tmp_reuslt."test3@name", tmp_reuslt."test3@parentid"
+                       ->  Hash
+                             Output: swtest.test3.id, swtest.test3.name, swtest.test3.parentid
+                             ->  Seq Scan on swtest.test3
+                                   Output: swtest.test3.id, swtest.test3.name, swtest.test3.parentid
+   ->  CTE Scan on tmp_reuslt
+         Output: tmp_reuslt."test3@id", tmp_reuslt."test3@name", tmp_reuslt."test3@parentid"
+(20 rows)
+
+select sys_connect_by_path(min(name || 'hahaha'), '/') from test3 connect by parentid = prior id;
+ERROR:  node value is not in path (value:a1hahaha path:/root)
+CONTEXT:  referenced column: sys_connect_by_path
+explain(verbose on, costs off) select max(sys_connect_by_path(name, '/')) from test3 connect by parentid = prior id;
+                                                   QUERY PLAN                                                    
+-----------------------------------------------------------------------------------------------------------------
+ Aggregate
+   Output: max(sys_connect_by_path(tmp_reuslt."test3@name", '/'::text))
+   CTE tmp_reuslt
+     ->  StartWith Operator
+           Output: swtest.test3.id, swtest.test3.name, swtest.test3.parentid
+           Start With pseudo atts: RUITR, array_key_1, array_col_2
+           ->  Recursive Union
+                 ->  Seq Scan on swtest.test3
+                       Output: swtest.test3.id, swtest.test3.name, swtest.test3.parentid
+                 ->  Hash Join
+                       Output: swtest.test3.id, swtest.test3.name, swtest.test3.parentid
+                       Hash Cond: (tmp_reuslt."test3@id" = swtest.test3.parentid)
+                       ->  WorkTable Scan on tmp_reuslt
+                             Output: tmp_reuslt."test3@id", tmp_reuslt."test3@name", tmp_reuslt."test3@parentid"
+                       ->  Hash
+                             Output: swtest.test3.id, swtest.test3.name, swtest.test3.parentid
+                             ->  Seq Scan on swtest.test3
+                                   Output: swtest.test3.id, swtest.test3.name, swtest.test3.parentid
+   ->  CTE Scan on tmp_reuslt
+         Output: tmp_reuslt."test3@id", tmp_reuslt."test3@name", tmp_reuslt."test3@parentid"
+(20 rows)
+
+select max(sys_connect_by_path(name, '/')) from test3 connect by parentid = prior id;
+    max     
+------------
+ /root/c/c1
+(1 row)
+
+explain(verbose on, costs off) select sys_connect_by_path(name, '/') from test3 connect by parentid = prior id group by 1;
+                                                   QUERY PLAN                                                    
+-----------------------------------------------------------------------------------------------------------------
+ HashAggregate
+   Output: (sys_connect_by_path(tmp_reuslt."test3@name", '/'::text))
+   Group By Key: sys_connect_by_path(tmp_reuslt."test3@name", '/'::text)
+   CTE tmp_reuslt
+     ->  StartWith Operator
+           Output: swtest.test3.id, swtest.test3.name, swtest.test3.parentid
+           Start With pseudo atts: RUITR, array_key_1, array_col_2
+           ->  Recursive Union
+                 ->  Seq Scan on swtest.test3
+                       Output: swtest.test3.id, swtest.test3.name, swtest.test3.parentid
+                 ->  Hash Join
+                       Output: swtest.test3.id, swtest.test3.name, swtest.test3.parentid
+                       Hash Cond: (tmp_reuslt."test3@id" = swtest.test3.parentid)
+                       ->  WorkTable Scan on tmp_reuslt
+                             Output: tmp_reuslt."test3@id", tmp_reuslt."test3@name", tmp_reuslt."test3@parentid"
+                       ->  Hash
+                             Output: swtest.test3.id, swtest.test3.name, swtest.test3.parentid
+                             ->  Seq Scan on swtest.test3
+                                   Output: swtest.test3.id, swtest.test3.name, swtest.test3.parentid
+   ->  CTE Scan on tmp_reuslt
+         Output: sys_connect_by_path(tmp_reuslt."test3@name", '/'::text)
+(21 rows)
+
+select sys_connect_by_path(name, '/') from test3 connect by parentid = prior id group by 1;
+ sys_connect_by_path 
+---------------------
+ /root
+ /a/a2
+ /root/a/a1
+ /root/a
+ /b
+ /root/b/b2
+ /root/c/c1
+ /c/c1
+ /c1
+ /b/b1
+ /b1
+ /a3
+ /c
+ /b/b2
+ /a/a3
+ /a
+ /root/b
+ /root/a/a2
+ /a1
+ /a3/a31
+ /b2
+ /root/a/a3
+ /root/b/b1
+ /root/c
+ /a/a3/a31
+ /a/a1
+ /a2
+ /a31
+ /root/a/a3/a31
+(29 rows)
+
+explain select max(name) from test3 where sys_connect_by_path(name,'/') > 'dasdsa' connect by parentid = prior id;
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Aggregate  (cost=13715.19..13715.20 rows=1 width=64)
+   CTE tmp_reuslt
+     ->  StartWith Operator  (cost=0.00..8274.74 rows=210598 width=96)
+           Start With pseudo atts: RUITR, array_key_1, array_col_2
+           ->  Recursive Union  (cost=0.00..8274.74 rows=210598 width=96)
+                 ->  Seq Scan on test3  (cost=0.00..16.48 rows=648 width=96)
+                 ->  Hash Join  (cost=24.58..404.63 rows=20995 width=96)
+                       Hash Cond: (tmp_reuslt."test3@id" = swtest.test3.parentid)
+                       ->  WorkTable Scan on tmp_reuslt  (cost=0.00..129.60 rows=6480 width=32)
+                       ->  Hash  (cost=16.48..16.48 rows=648 width=96)
+                             ->  Seq Scan on test3  (cost=0.00..16.48 rows=648 width=96)
+   ->  CTE Scan on tmp_reuslt  (cost=0.00..5264.95 rows=70199 width=32)
+         Filter: (sys_connect_by_path("test3@name", '/'::text) > 'dasdsa'::text)
+(13 rows)
+
+select max(name) from test3 where sys_connect_by_path(name,'/') > 'dasdsa' connect by parentid = prior id;
+ max  
+------
+ root
+(1 row)
+
+explain select max(name) from test3 connect by parentid = prior id order by sys_connect_by_path(name,'/');
+ERROR:  column "tmp_reuslt.name" must appear in the GROUP BY clause or be used in an aggregate function
+LINE 1: ... parentid = prior id order by sys_connect_by_path(name,'/');
+                                                             ^
+DETAIL:  Please check your start with rewrite table's column.
+select max(name) from test3 connect by parentid = prior id order by sys_connect_by_path(name,'/');
+ERROR:  column "tmp_reuslt.name" must appear in the GROUP BY clause or be used in an aggregate function
+LINE 1: ... parentid = prior id order by sys_connect_by_path(name,'/');
+                                                             ^
+DETAIL:  Please check your start with rewrite table's column.
+explain select max(name) from test3 connect by parentid = prior id group by sys_connect_by_path(name,'/');
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ HashAggregate  (cost=14066.18..14068.68 rows=200 width=64)
+   Group By Key: sys_connect_by_path(tmp_reuslt."test3@name", '/'::text)
+   CTE tmp_reuslt
+     ->  StartWith Operator  (cost=0.00..8274.74 rows=210598 width=96)
+           Start With pseudo atts: RUITR, array_key_1, array_col_2
+           ->  Recursive Union  (cost=0.00..8274.74 rows=210598 width=96)
+                 ->  Seq Scan on test3  (cost=0.00..16.48 rows=648 width=96)
+                 ->  Hash Join  (cost=24.58..404.63 rows=20995 width=96)
+                       Hash Cond: (tmp_reuslt."test3@id" = swtest.test3.parentid)
+                       ->  WorkTable Scan on tmp_reuslt  (cost=0.00..129.60 rows=6480 width=32)
+                       ->  Hash  (cost=16.48..16.48 rows=648 width=96)
+                             ->  Seq Scan on test3  (cost=0.00..16.48 rows=648 width=96)
+   ->  CTE Scan on tmp_reuslt  (cost=0.00..4738.45 rows=210598 width=32)
+(13 rows)
+
+select max(name) from test3 connect by parentid = prior id group by sys_connect_by_path(name,'/');
+ max  
+------
+ root
+ a2
+ a1
+ a
+ b
+ b2
+ c1
+ c1
+ c1
+ b1
+ b1
+ a3
+ c
+ b2
+ a3
+ a
+ b
+ a2
+ a1
+ a31
+ b2
+ a3
+ b1
+ c
+ a31
+ a1
+ a2
+ a31
+ a31
+(29 rows)
+
+drop table test3;
 drop table test2;
 drop table test1;
 -- test connnect by nocycle without start-with
