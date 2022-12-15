@@ -139,7 +139,7 @@ int main(int argc, char* argv[])
         }
     }
 
-    while ((c = getopt_long(argc, argv, "fl:m:no:OI:x:e:", long_options, &option_index)) != -1) {
+    while ((c = getopt_long(argc, argv, "fl:m:no:O:I:x:e:", long_options, &option_index)) != -1) {
         switch (c) {
             case 'f':
                 force = true;
