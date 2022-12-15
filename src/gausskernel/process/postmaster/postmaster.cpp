@@ -5519,7 +5519,7 @@ static void SetWalsndsNodeState(ClusterNodeState requester, ClusterNodeState oth
         if (0 == walsnd->pid)
             continue;
 
-        if (walsnd->node_state >= NODESTATE_SMART_DEMOTE_REQUEST && walsnd->node_state <= NODESTATE_FAST_DEMOTE_REQUEST)
+        if (walsnd->node_state >= NODESTATE_SMART_DEMOTE_REQUEST && walsnd->node_state <= NODESTATE_EXTRM_FAST_DEMOTE_REQUEST)
             walsnd->node_state = requester;
         else
             walsnd->node_state = others;
