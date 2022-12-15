@@ -1261,6 +1261,7 @@ static int CBRecoveryPrimary(void *db_handle, int inst_id)
         g_instance.dms_cxt.SSReformerControl.primaryInstId == -1);
     g_instance.dms_cxt.SSRecoveryInfo.skip_redo_replay = false;
     g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy = false;
+    t_thrd.xlog_cxt.LocalRecoveryInProgress = true;
     ereport(LOG, (errmsg("[SS reform] Recovery as primary, will replay xlog from inst:%d",
                          g_instance.dms_cxt.SSReformerControl.primaryInstId)));
 
@@ -1316,15 +1317,19 @@ static int CBFlushCopy(void *db_handle, char *pageid)
         }
     }
 
-    ereport(LOG, (errmsg("[SS] ready to flush copy, spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u",
-                         tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
-                         tag->forkNum, tag->blockNum)));
     Assert(XLogRecPtrIsValid(g_instance.dms_cxt.ckptRedo));
     BufferDesc* buf_desc = GetBufferDescriptor(buffer - 1);
     XLogRecPtr pagelsn = BufferGetLSN(buf_desc);
-    if (XLByteLT(g_instance.dms_cxt.ckptRedo, pagelsn) && !IsSegmentPhysicalRelNode(tag->rnode)) {
+    if (XLByteLT(g_instance.dms_cxt.ckptRedo, pagelsn)) {
         dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buffer - 1);
         buf_ctrl->state |= BUF_DIRTY_NEED_FLUSH;
+        ereport(LOG, (errmsg("[SS] Mark need flush in flush copy, spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u, page lsn (0x%llx)",
+                            tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
+                            tag->forkNum, tag->blockNum, (unsigned long long)pagelsn)));
+    } else {
+        ereport(LOG, (errmsg("[SS] ready to flush copy, spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u, page lsn (0x%llx)",
+                        tag->rnode.spcNode, tag->rnode.dbNode, tag->rnode.relNode, tag->rnode.bucketNode,
+                        tag->forkNum, tag->blockNum, (unsigned long long)pagelsn)));
     }
 
     ReleaseBuffer(buffer);
@@ -1363,6 +1368,7 @@ static void CBReformStartNotify(void *db_handle, dms_role_t role, unsigned char 
     g_instance.dms_cxt.SSClusterState = NODESTATE_NORMAL;
     g_instance.dms_cxt.SSRecoveryInfo.reform_ready = false;
     g_instance.dms_cxt.resetSyscache = true;
+    t_thrd.xlog_cxt.LocalRecoveryInProgress = false;
     if (ss_reform_type == DMS_REFORM_TYPE_FOR_FAILOVER_OPENGAUSS) {
         g_instance.dms_cxt.SSRecoveryInfo.in_failover = true;
     }
@@ -1447,8 +1453,10 @@ void DmsCallbackThreadShmemInit(unsigned char need_startup, char **reg_data)
     t_thrd.proc_cxt.MyProcPid = gs_thread_self();
     if (!need_startup) {
         t_thrd.proc_cxt.MyProgName = "DMS WORKER";
+        t_thrd.dms_cxt.is_reform_proc = false;
     } else {
         t_thrd.proc_cxt.MyProgName = "DMS REFORM PROC";
+        t_thrd.dms_cxt.is_reform_proc = true;
     }
     t_thrd.proc_cxt.MyStartTime = time(NULL);
 

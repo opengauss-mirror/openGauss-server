@@ -62,8 +62,13 @@ void InitDmsContext(dms_context_t *dmsContext)
     dmsContext->inst_id = (unsigned int)SS_MY_INST_ID;
     dmsContext->sess_id = (unsigned int)(t_thrd.proc ? t_thrd.proc->logictid : t_thrd.myLogicTid + TotalProcs);
     dmsContext->db_handle = t_thrd.proc;
-    dmsContext->sess_rcy = (unsigned int)AmPageRedoProcess() || (unsigned int)AmStartupProcess()
-                           || (unsigned int)AmDmsReformProcProcess();
+    if (AmDmsReformProcProcess()) {
+        dmsContext->sess_rcy = DMS_SESSION_IN_REFORM;
+    } else if (AmPageRedoProcess() || AmStartupProcess()) {
+        dmsContext->sess_rcy = DMS_SESSION_IN_RECOVERY;
+    } else {
+        dmsContext->sess_rcy = DMS_SESSION_NORMAL;
+    }
     dmsContext->is_try = 0;
 }
 
@@ -209,19 +214,20 @@ Buffer TerminateReadPage(BufferDesc* buf_desc, ReadBufferMode read_mode, const X
 {
     dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
     Buffer buffer;
-    bool isExtend = (buf_ctrl->state & BUF_IS_EXTEND) ? true: false;
     if (buf_ctrl->state & BUF_NEED_LOAD) {
         if (g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy && AmDmsReformProcProcess()) {
             ereport(PANIC, (errmsg("SS In flush copy, can't read from disk!")));
         }
         buffer = ReadBuffer_common_for_dms(read_mode, buf_desc, pblk);
     } else {
-        Block bufBlock = BufHdrGetBlock(buf_desc);
-        if (isExtend) {
+#ifdef USE_ASSERT_CHECKING
+        if (buf_ctrl->state & BUF_IS_EXTEND) {
             ereport(PANIC, (errmsg("extend page should not be tranferred from DMS, "
                 "and needs to be loaded from disk!")));
         }
+#endif
 
+        Block bufBlock = BufHdrGetBlock(buf_desc);
         Page page = (Page)(bufBlock);
         PageSetChecksumInplace(page, buf_desc->tag.blockNum);
 
@@ -231,7 +237,7 @@ Buffer TerminateReadPage(BufferDesc* buf_desc, ReadBufferMode read_mode, const X
 
         TerminateBufferIO(buf_desc, false, BM_VALID);
         buffer = BufferDescriptorGetBuffer(buf_desc);
-        if (!SS_IN_FAILOVER && !RecoveryInProgress()) {
+        if (!RecoveryInProgress()) {
             CalcSegDmsPhysicalLoc(buf_desc, buffer);
         }
     }
@@ -417,25 +423,7 @@ int32 CheckBuf4Rebuild(BufferDesc *buf_desc)
     Assert(buf_ctrl->is_edp != 1);
     Assert(XLogRecPtrIsValid(g_instance.dms_cxt.ckptRedo));
 
-    XLogRecPtr pagelsn = BufferGetLSN(buf_desc);
-    if (buf_ctrl->lock_mode == (unsigned char)DMS_LOCK_NULL || XLByteLT(pagelsn, g_instance.dms_cxt.ckptRedo) ||
-        IsSegmentBufferID(buf_desc->buf_id) ||
-        (!SS_MY_INST_IS_MASTER && buf_ctrl->lock_mode == (unsigned char)DMS_LOCK_EXCLUSIVE)) {
-        if (g_instance.dms_cxt.SSRecoveryInfo.in_failover) {
-            if (buf_ctrl->lock_mode != (unsigned char)DMS_LOCK_NULL) {
-                buf_ctrl->state = 0;
-                buf_ctrl->is_remote_dirty = 0;
-                buf_ctrl->lock_mode = (uint8)DMS_LOCK_NULL;
-                buf_ctrl->is_edp = 0;
-                buf_ctrl->force_request = 0;
-                buf_ctrl->edp_scn = 0;
-                buf_ctrl->edp_map = 0;
-                buf_ctrl->pblk_relno = InvalidOid;
-                buf_ctrl->pblk_blkno = InvalidBlockNumber;
-                buf_ctrl->pblk_lsn = InvalidXLogRecPtr;
-            }
-            InvalidateBuffer(buf_desc);
-        }
+    if (buf_ctrl->lock_mode == (unsigned char)DMS_LOCK_NULL) {
         return DMS_SUCCESS;
     }
 
@@ -581,14 +569,34 @@ void SSRecheckBufferPool()
 
         dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(i);
         if (buf_ctrl->state & BUF_DIRTY_NEED_FLUSH) {
-            (void)PinBuffer(buf_desc, NULL);
-            LockBuffer(i + 1, BUFFER_LOCK_SHARE);
-            ereport(WARNING,
-                (errmsg("Buffer was not flushed or replayed, spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u",
+            XLogRecPtr pagelsn = BufferGetLSN(buf_desc);
+            int mode = WARNING;
+#ifdef USE_ASSERT_CHECKING
+            mode = PANIC;
+#endif
+            ereport(mode,
+                (errmsg("Buffer was not flushed or replayed, spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u, page lsn (0x%llx)",
                 buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode,
-                buf_desc->tag.rnode.bucketNode, buf_desc->tag.forkNum, buf_desc->tag.blockNum)));
-            MarkBufferDirty(i + 1);
-            UnlockReleaseBuffer(i + 1);
+                buf_desc->tag.rnode.bucketNode, buf_desc->tag.forkNum, buf_desc->tag.blockNum, (unsigned long long)pagelsn)));
         }
     }
+}
+
+void CheckPageNeedSkipInRecovery(Buffer buf)
+{
+    dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf - 1);
+    if (buf_ctrl->lock_mode == DMS_LOCK_EXCLUSIVE) {
+        return;
+    }
+
+    BufferDesc* buf_desc = GetBufferDescriptor(buf - 1);
+    char pageid[DMS_PAGEID_SIZE];
+    errno_t err = memcpy_s(pageid, DMS_PAGEID_SIZE, &(buf_desc->tag), sizeof(BufferTag));
+    securec_check(err, "\0", "\0");
+    bool skip = false;
+    int ret = dms_recovery_page_need_skip(pageid, (unsigned char *)&skip);
+    if (ret != DMS_SUCCESS) {
+        ereport(PANIC, (errmsg("DMS Internal error happened during recovery, errno %d", ret)));
+    }
+    Assert(!skip);
 }

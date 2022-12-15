@@ -2157,7 +2157,7 @@ Buffer ReadBuffer_common_for_dms(ReadBufferMode readmode, BufferDesc* buf_desc, 
     Block bufBlock = BufHdrGetBlock(buf_desc);
 
 #ifdef USE_ASSERT_CHECKING
-    bool need_verify = (((pg_atomic_read_u32(&buf_desc->state) & BM_VALID) != 0) && ENABLE_VERIFY_PAGE_VERSION);
+    bool need_verify = (!RecoveryInProgress() && ((pg_atomic_read_u32(&buf_desc->state) & BM_VALID) != 0) && ENABLE_VERIFY_PAGE_VERSION);
     char *past_image = NULL;
     if (need_verify) {
         past_image = (char *)palloc(BLCKSZ);
@@ -2433,9 +2433,6 @@ found_branch:
 
                 dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(bufHdr->buf_id);
                 LWLockMode req_lock_mode = isExtend ? LW_EXCLUSIVE : LW_SHARED;
-                if (g_instance.dms_cxt.SSRecoveryInfo.in_flushcopy && SS_REFORM_REFORMER) {
-                    req_lock_mode = LW_EXCLUSIVE;
-                }
                 if (!LockModeCompatible(buf_ctrl, req_lock_mode)) {
                     if (!StartReadPage(bufHdr, req_lock_mode)) {
                         TerminateBufferIO(bufHdr, false, 0);
@@ -3109,13 +3106,6 @@ retry:
     }
 
     if (ENABLE_DMS && (buf_state & BM_TAG_VALID)) {
-        /* before release owner, request page again using X to ensure other node invalid page */
-        if (SS_NORMAL_PRIMARY && GetDmsBufCtrl(buf->buf_id)->lock_mode != DMS_LOCK_EXCLUSIVE &&
-            !(GetDmsBufCtrl(buf->buf_id)->state & BUF_IS_RELPERSISTENT_TEMP)) {
-            ereport(DEBUG1, (errmodule(MOD_DMS), errmsg("DMS master force invalidate other node's page")));
-            (void)StartReadPage(buf, LW_EXCLUSIVE);
-        }
-
         if (!DmsReleaseOwner(buf->tag, buf->buf_id)) {
             UnlockBufHdr(buf, buf_state);
             LWLockRelease(old_partition_lock);

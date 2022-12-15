@@ -549,8 +549,7 @@ typedef enum {
 #define AmTsCompactionConsumerProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == TsCompactionConsumerProcess)
 #define AmTsCompactionAuxiliaryProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == TsCompactionAuxiliaryProcess)
 #define AmPageRedoWorker() (t_thrd.bootstrap_cxt.MyAuxProcType == PageRedoProcess)
-#define AmDmsReformProcProcess() (t_thrd.role == DMS_WORKER && \
-    strncmp("DMS REFORM PROC", t_thrd.proc_cxt.MyProgName, 15) == 0)
+#define AmDmsReformProcProcess() (t_thrd.role == DMS_WORKER && t_thrd.dms_cxt.is_reform_proc)
 
 
 
