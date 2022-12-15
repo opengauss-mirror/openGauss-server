@@ -943,7 +943,7 @@ void PromoteCallbackFunc()
            /* Database Security: Support database audit */
            if (t_thrd.walreceiverfuncs_cxt.WalRcv &&
                t_thrd.walreceiverfuncs_cxt.WalRcv->node_state >= NODESTATE_SMART_DEMOTE_REQUEST &&
-               t_thrd.walreceiverfuncs_cxt.WalRcv->node_state <= NODESTATE_FAST_DEMOTE_REQUEST) {
+               t_thrd.walreceiverfuncs_cxt.WalRcv->node_state <= NODESTATE_EXTRM_FAST_DEMOTE_REQUEST) {
                /* Now it's only assumed the primary was demoted successfully but actually it  only succeeded in DCF. */
                t_thrd.walreceiverfuncs_cxt.WalRcv->node_state = NODESTATE_STANDBY_PROMOTING;
                t_thrd.postmaster_cxt.audit_standby_switchover = true;

@@ -994,7 +994,7 @@ static void sigusr1_handler(SIGNAL_ARGS)
     gs_signal_setmask(&t_thrd.libpq_cxt.BlockSig, NULL);
     if (t_thrd.walreceiverfuncs_cxt.WalRcv &&
         t_thrd.walreceiverfuncs_cxt.WalRcv->node_state >= NODESTATE_SMART_DEMOTE_REQUEST &&
-        t_thrd.walreceiverfuncs_cxt.WalRcv->node_state <= NODESTATE_FAST_DEMOTE_REQUEST) {
+        t_thrd.walreceiverfuncs_cxt.WalRcv->node_state <= NODESTATE_EXTRM_FAST_DEMOTE_REQUEST) {
         /* Tell walreceiver process to start switchover */
         t_thrd.walreceiver_cxt.start_switchover = true;
     }
