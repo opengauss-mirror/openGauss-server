@@ -86,9 +86,9 @@ const uint64 FREEZE_MAX_AGE = 2000000000;
 typedef struct DssOptions
 {
     bool enable_dss;
-    int64 ss_nodeid;
     char *vgname;
     char *socketpath;
+    int  primaryInstId;
 } DssOptions;
 
 /* DSS connect parameters */
@@ -115,6 +115,7 @@ int main(int argc, char* argv[])
 
     static struct option long_options[] = {{"enable-dss", no_argument, NULL, 1},
         {"socketpath", required_argument, NULL, 2},
+        {"vgname", required_argument, NULL, 3},
         {NULL, 0, NULL, 0}};
 
     /* init DSS parameters */
@@ -139,7 +140,7 @@ int main(int argc, char* argv[])
         }
     }
 
-    while ((c = getopt_long(argc, argv, "fl:m:no:O:I:x:e:", long_options, &option_index)) != -1) {
+    while ((c = getopt_long(argc, argv, "fl:m:no:O:x:e:D:", long_options, &option_index)) != -1) {
         switch (c) {
             case 'f':
                 force = true;
@@ -224,21 +225,16 @@ int main(int argc, char* argv[])
                 minXlogSegNo = (uint64)log_temp * XLogSegmentsPerXLogId + seg_temp;
                 break;
 
-            case 'I':
-                if (atoi(optarg) < MIN_INSTANCEID || atoi(optarg) > MAX_INSTANCEID) {
-                    fprintf(stderr, _("%s: unexpected node id specified, valid range is %d - %d.\n"),
-                            progname, MIN_INSTANCEID, MAX_INSTANCEID);
-                    exit(1);
-                }
-                dss.ss_nodeid = atoi(optarg);
-                break;
-
             case 1:
                 dss.enable_dss = true;
                 break;
 
             case 2:
                 dss.socketpath = strdup(optarg);
+                break;
+
+            case 3:
+                dss.vgname = strdup(optarg);
                 break;
 
             default:
@@ -259,8 +255,8 @@ int main(int argc, char* argv[])
             fprintf(stderr, _("%s: socketpath cannot be NULL when enable dss\n"), progname);
             exit(1);
         }
-        if (dss.ss_nodeid == INVALID_INSTANCEID) {
-            fprintf(stderr, _("%s: you should give an instance id when enable dss\n"), progname);
+        if (dss.vgname == NULL) {
+            fprintf(stderr, _("%s: vgname cannot be NULL when enable dss\n"), progname);
             exit(1);
         }
     } else {
@@ -268,8 +264,8 @@ int main(int argc, char* argv[])
             fprintf(stderr, _("%s: socketpath cannot be set when disable dss\n"), progname);
             exit(1);
         }
-        if (dss.ss_nodeid != INVALID_INSTANCEID) {
-            fprintf(stderr, _("%s: node id cannot be set when disable dss\n"), progname);
+        if (dss.vgname == NULL) {
+            fprintf(stderr, _("%s: vgname cannot be set when disable dss\n"), progname);
             exit(1);
         }
     }
@@ -294,14 +290,10 @@ int main(int argc, char* argv[])
         exit(1);
     }
 
-    if (!dss.enable_dss) {
-        if (chdir(DataDir) < 0) {
-            fprintf(stderr, _("%s: could not change directory to \"%s\": %s\n"), 
-                    progname, DataDir, strerror(errno));
-            exit(1);
-        }
-    } else {
-        dss.vgname = strdup(DataDir);
+    if (chdir(DataDir) < 0) {
+        fprintf(stderr, _("%s: could not change directory to \"%s\": %s\n"), 
+                progname, DataDir, strerror(errno));
+        exit(1);
     }
 
     /* set DSS connect parameters */
@@ -430,14 +422,13 @@ int main(int argc, char* argv[])
 static void DssInit(void)
 {
     dss.enable_dss = false;
-    dss.ss_nodeid = INVALID_INSTANCEID;
     dss.socketpath = NULL;
     dss.vgname = NULL;
+    dss.primaryInstId = INVALID_INSTANCEID;
 }
 
 static void SetGlobalDssParam(void)
 {
-    g_datadir.instance_id = dss.ss_nodeid;
     errno_t rc = strcpy_s(g_datadir.dss_data, strlen(dss.vgname) + 1, dss.vgname);
     securec_check_c(rc, "\0", "\0");
     XLogSegmentSize = DSS_XLOG_SEG_SIZE;
@@ -497,11 +488,33 @@ static int ReadDssControlFile(int *fd, char *buffer)
         *fd = -1;
         exit(1);
     }
+
+    /* 
+     * In dss mode, we need to get the primary instance id
+     * from the pg_control file's last page.
+     */
+    ss_reformer_ctrl_t *reformerCtrl;
+    reformerCtrl = (ss_reformer_ctrl_t *)(tmpBuffer + (MAX_INSTANCEID + 1) * PG_CONTROL_SIZE);
+    dss.primaryInstId = reformerCtrl->primaryInstId;
+    if (dss.primaryInstId < MIN_INSTANCEID || dss.primaryInstId > MAX_INSTANCEID) {
+        fprintf(stderr, _("%s: unexpected primary node id: %d, valid range is %d - %d.\n"),
+                progname, dss.primaryInstId, MIN_INSTANCEID, MAX_INSTANCEID);
+        free(tmpBuffer);
+        tmpBuffer = NULL;
+        close(*fd);
+        *fd = -1;
+        exit(1);
+    }
+    g_datadir.instance_id = dss.primaryInstId;
+    /* update the dss data path */
+    initDataPathStruct(dss.enable_dss);
+
     tmpBuffer[len] = '\0';
     tmpDssSrc = tmpBuffer;
-    tmpDssSrc += dss.ss_nodeid * PG_CONTROL_SIZE;
+    tmpDssSrc += dss.primaryInstId * PG_CONTROL_SIZE;
     rc = memcpy_s(buffer, PG_CONTROL_SIZE, tmpDssSrc, PG_CONTROL_SIZE);
     securec_check_c(rc, "\0", "\0");
+
     free(tmpBuffer);
     tmpBuffer = NULL;
     return PG_CONTROL_SIZE;
@@ -801,10 +814,10 @@ static void RewriteControlFile(void)
 
     errno = 0;
     if (dss.enable_dss) {
-        off_t seekpos = (off_t)BLCKSZ * dss.ss_nodeid;
+        off_t seekpos = (off_t)BLCKSZ * dss.primaryInstId;
         if (lseek(fd, seekpos, SEEK_SET) < 0) {
-            fprintf(stderr, _("%s: Can not seek the node id %ld of \"%s\": %s\n"),
-                    progname, dss.ss_nodeid, T_XLOG_CONTROL_FILE, strerror(errno));
+            fprintf(stderr, _("%s: Can not seek the primary id %d of \"%s\": %s\n"),
+                    progname, dss.primaryInstId, T_XLOG_CONTROL_FILE, strerror(errno));
             close(fd);
             fd = -1;
             exit(1);
@@ -1169,8 +1182,8 @@ static void usage(void)
     printf(_("  -V, --version    output version information, then exit\n"));
     printf(_("  -x XID           set next transaction ID\n"));
     printf(_("  -?, --help       show this help, then exit\n"));
-    printf(_("  -I INSTANCE_ID\n"));
-    printf(_("                   the information of specified instance\n"));
+    printf(_("  --vgname\n"));
+    printf(_("                   the dss data on dss mode\n"));
     printf(_("  --enable-dss     enable shared storage mode\n"));
     printf(_("  --socketpath=SOCKETPATH\n"));
     printf(_("                   dss connect socket file path\n"));
