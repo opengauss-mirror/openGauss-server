@@ -711,9 +711,7 @@ endif
 
 	@rm -f '$(DESTDIR)$(bindir)/gs_encrypt$(X)'
 	ln -s gaussdb$(X) '$(DESTDIR)$(bindir)/gs_encrypt$(X)'
-	cp -rf $(srcdir)/dbmind/dbmind '$(DESTDIR)$(bindir)/dbmind'
 	cp -rf $(srcdir)/dbmind/gs_dbmind '$(DESTDIR)$(bindir)/gs_dbmind'
-	cp -rf $(srcdir)/dbmind/constant '$(DESTDIR)$(bindir)/constant'
 	chmod +x '$(DESTDIR)$(bindir)/gs_dbmind'
 endif
 ifeq ($(enable_multiple_nodes), yes)

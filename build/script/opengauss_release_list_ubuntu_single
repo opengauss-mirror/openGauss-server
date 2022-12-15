@@ -37,7 +37,7 @@
 ./bin/kadmin.local
 ./bin/lz4
 ./bin/kadmind
-./bin/dbmind
+./bin/gs_dbmind
 ./bin/server.key.cipher
 ./bin/server.key.rand
 ./bin/gs_plan_simulator.sh
