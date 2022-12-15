@@ -6788,6 +6788,459 @@ SELECT f_test(100);
 
 DROP FUNCTION f_test(int);
 -- ======================================================================================================================================
+-- TEST-MODULE: IUD VIEW and WITH CHECK OPTION constraints
+-- --------------------------------------
+-- ======================================================================================================================================
+CREATE TABLE base_tbl (id int, a int, b int)
+    partition by range(a) (partition a1 values less than(100), partition a2 values less than(200));
+ALTER TABLE base_tbl SET (autovacuum_enabled = 'false');
+CREATE FOREIGN TABLE foreign_tbl (id int, a int, b int) SERVER loopback OPTIONS (table_name 'base_tbl');
+CREATE VIEW rw_view1 AS SELECT * FROM foreign_tbl WHERE a < b and id = 1;
+CREATE VIEW rw_view2 AS SELECT * FROM foreign_tbl WHERE a < b and id = 2 WITH CHECK OPTION;
+\d+ rw_view1
+                View "public.rw_view1"
+ Column |  Type   | Modifiers | Storage | Description 
+--------+---------+-----------+---------+-------------
+ id     | integer |           | plain   | 
+ a      | integer |           | plain   | 
+ b      | integer |           | plain   | 
+View definition:
+ SELECT  *
+   FROM foreign_tbl
+  WHERE foreign_tbl.a < foreign_tbl.b AND foreign_tbl.id = 1;
+
+\d+ rw_view2
+                View "public.rw_view2"
+ Column |  Type   | Modifiers | Storage | Description 
+--------+---------+-----------+---------+-------------
+ id     | integer |           | plain   | 
+ a      | integer |           | plain   | 
+ b      | integer |           | plain   | 
+View definition:
+ SELECT  *
+   FROM foreign_tbl
+  WHERE foreign_tbl.a < foreign_tbl.b AND foreign_tbl.id = 2;
+Options: check_option=cascaded
+
+CREATE OR REPLACE FUNCTION checkdata(out tbname text, out id int, out a int, out b int) RETURNS SETOF record as $$ 
+  select * from (
+     (select 'rw_view1', * from rw_view1 where id = 1) union all 
+     (select 'rw_view2', * from rw_view2 where id = 2) union all 
+     (select 'base_tbl p1', * from base_tbl) union all 
+     (select 'base_tbl p2', * from base_tbl) union all 
+     (select 'foreign_tbl', * from foreign_tbl)
+  ) data(tbname, id, a, b)
+  order by 1,2,3,4;
+$$ language sql;
+-- simple case
+EXPLAIN (VERBOSE, COSTS OFF) INSERT INTO rw_view1 VALUES (1, 0, 5);  -- should success
+          QUERY PLAN          
+------------------------------
+ Insert on public.foreign_tbl
+   ->  Result
+         Output: 1, 0, 5
+(3 rows)
+
+INSERT INTO rw_view1 VALUES (1, 0, 5); 
+EXPLAIN (VERBOSE, COSTS OFF) INSERT INTO rw_view1 VALUES (1, 100, 5); -- should success
+          QUERY PLAN          
+------------------------------
+ Insert on public.foreign_tbl
+   ->  Result
+         Output: 1, 100, 5
+(3 rows)
+
+INSERT INTO rw_view1 VALUES (1, 100, 5);
+EXPLAIN (VERBOSE, COSTS OFF) INSERT INTO rw_view1 VALUES (1, 1000, 5000); -- should failed
+          QUERY PLAN           
+-------------------------------
+ Insert on public.foreign_tbl
+   ->  Result
+         Output: 1, 1000, 5000
+(3 rows)
+
+INSERT INTO rw_view1 VALUES (1, 1000, 5000);
+ERROR:  inserted partition key does not map to any table partition
+CONTEXT:  Remote SQL command: INSERT INTO public.base_tbl(id, a, b) VALUES ($1, $2, $3)
+EXPLAIN (VERBOSE, COSTS OFF) INSERT INTO rw_view2 VALUES (2, 0, 5);  -- should success
+          QUERY PLAN          
+------------------------------
+ Insert on public.foreign_tbl
+   ->  Result
+         Output: 2, 0, 5
+(3 rows)
+
+INSERT INTO rw_view2 VALUES (2, 0, 5);
+EXPLAIN (VERBOSE, COSTS OFF) INSERT INTO rw_view2 VALUES (2, 100, 5); -- should failed
+          QUERY PLAN          
+------------------------------
+ Insert on public.foreign_tbl
+   ->  Result
+         Output: 2, 100, 5
+(3 rows)
+
+INSERT INTO rw_view2 VALUES (2, 100, 5);
+ERROR:  new row violates WITH CHECK OPTION for view "rw_view2"
+DETAIL:  Failing row contains (2, 100, 5).
+EXPLAIN (VERBOSE, COSTS OFF) INSERT INTO rw_view2 VALUES (2, 1000, 5000); -- should failed
+          QUERY PLAN           
+-------------------------------
+ Insert on public.foreign_tbl
+   ->  Result
+         Output: 2, 1000, 5000
+(3 rows)
+
+INSERT INTO rw_view2 VALUES (2, 1000, 5000);
+ERROR:  inserted partition key does not map to any table partition
+CONTEXT:  Remote SQL command: INSERT INTO public.base_tbl(id, a, b) VALUES ($1, $2, $3) RETURNING id, a, b
+select * from checkdata();
+   tbname    | id |  a  | b 
+-------------+----+-----+---
+ base_tbl p1 |  1 |   0 | 5
+ base_tbl p1 |  1 | 100 | 5
+ base_tbl p1 |  2 |   0 | 5
+ base_tbl p2 |  1 |   0 | 5
+ base_tbl p2 |  1 | 100 | 5
+ base_tbl p2 |  2 |   0 | 5
+ foreign_tbl |  1 |   0 | 5
+ foreign_tbl |  1 | 100 | 5
+ foreign_tbl |  2 |   0 | 5
+ rw_view1    |  1 |   0 | 5
+ rw_view2    |  2 |   0 | 5
+(11 rows)
+
+delete from base_tbl;
+insert into base_tbl values(1, 65, 100), (2, 85, 100);  -- in and cross partition update
+EXPLAIN (VERBOSE, COSTS OFF) UPDATE rw_view1 SET a = a + 20 where id = 1;  -- should success
+                                                          QUERY PLAN                                                          
+------------------------------------------------------------------------------------------------------------------------------
+ Update on public.foreign_tbl
+   ->  Foreign Scan on public.foreign_tbl
+         Output: foreign_tbl.id, (foreign_tbl.a + 20), foreign_tbl.b, foreign_tbl.ctid, foreign_tbl.tableoid
+         Node ID: 1
+         Remote SQL: SELECT id, a, b, ctid, tableoid FROM public.base_tbl WHERE ((a < b)) AND ((id = 1))
+ 
+ FDW remote plans:
+ Node 1: EXPLAIN (VERBOSE ON, COSTS OFF) SELECT id, a, b, ctid, tableoid FROM public.base_tbl WHERE ((a < b)) AND ((id = 1)) 
+   Partition Iterator
+     Output: id, a, b, ctid, tableoid
+     Iterations: 2
+     ->  Partitioned Seq Scan on public.base_tbl
+           Output: id, a, b, ctid, tableoid
+           Filter: ((base_tbl.a < base_tbl.b) AND (base_tbl.id = 1))
+           Selected Partitions:  1..2
+ 
+(16 rows)
+
+UPDATE rw_view1 SET a = a + 10 where id = 1;
+EXPLAIN (VERBOSE, COSTS OFF) UPDATE rw_view1 SET a = a + 20 where id = 1;  -- should success
+                                                          QUERY PLAN                                                          
+------------------------------------------------------------------------------------------------------------------------------
+ Update on public.foreign_tbl
+   ->  Foreign Scan on public.foreign_tbl
+         Output: foreign_tbl.id, (foreign_tbl.a + 20), foreign_tbl.b, foreign_tbl.ctid, foreign_tbl.tableoid
+         Node ID: 1
+         Remote SQL: SELECT id, a, b, ctid, tableoid FROM public.base_tbl WHERE ((a < b)) AND ((id = 1))
+ 
+ FDW remote plans:
+ Node 1: EXPLAIN (VERBOSE ON, COSTS OFF) SELECT id, a, b, ctid, tableoid FROM public.base_tbl WHERE ((a < b)) AND ((id = 1)) 
+   Partition Iterator
+     Output: id, a, b, ctid, tableoid
+     Iterations: 2
+     ->  Partitioned Seq Scan on public.base_tbl
+           Output: id, a, b, ctid, tableoid
+           Filter: ((base_tbl.a < base_tbl.b) AND (base_tbl.id = 1))
+           Selected Partitions:  1..2
+ 
+(16 rows)
+
+UPDATE rw_view1 SET a = a + 10 where id = 1;
+EXPLAIN (VERBOSE, COSTS OFF) UPDATE rw_view2 SET a = a + 20 where id = 2;  -- should failed
+                                                          QUERY PLAN                                                          
+------------------------------------------------------------------------------------------------------------------------------
+ Update on public.foreign_tbl
+   ->  Foreign Scan on public.foreign_tbl
+         Output: foreign_tbl.id, (foreign_tbl.a + 20), foreign_tbl.b, foreign_tbl.ctid, foreign_tbl.tableoid
+         Node ID: 1
+         Remote SQL: SELECT id, a, b, ctid, tableoid FROM public.base_tbl WHERE ((a < b)) AND ((id = 2))
+ 
+ FDW remote plans:
+ Node 1: EXPLAIN (VERBOSE ON, COSTS OFF) SELECT id, a, b, ctid, tableoid FROM public.base_tbl WHERE ((a < b)) AND ((id = 2)) 
+   Partition Iterator
+     Output: id, a, b, ctid, tableoid
+     Iterations: 2
+     ->  Partitioned Seq Scan on public.base_tbl
+           Output: id, a, b, ctid, tableoid
+           Filter: ((base_tbl.a < base_tbl.b) AND (base_tbl.id = 2))
+           Selected Partitions:  1..2
+ 
+(16 rows)
+
+UPDATE rw_view2 SET a = a + 20 where id = 2;
+ERROR:  new row violates WITH CHECK OPTION for view "rw_view2"
+DETAIL:  Failing row contains (2, 105, 100).
+EXPLAIN (VERBOSE, COSTS OFF) UPDATE rw_view2 SET a = a + 20, b = 200 where id = 2;  -- should success
+                                                        QUERY PLAN                                                         
+---------------------------------------------------------------------------------------------------------------------------
+ Update on public.foreign_tbl
+   ->  Foreign Scan on public.foreign_tbl
+         Output: foreign_tbl.id, (foreign_tbl.a + 20), 200, foreign_tbl.ctid, foreign_tbl.tableoid
+         Node ID: 1
+         Remote SQL: SELECT id, a, ctid, tableoid FROM public.base_tbl WHERE ((a < b)) AND ((id = 2))
+ 
+ FDW remote plans:
+ Node 1: EXPLAIN (VERBOSE ON, COSTS OFF) SELECT id, a, ctid, tableoid FROM public.base_tbl WHERE ((a < b)) AND ((id = 2)) 
+   Partition Iterator
+     Output: id, a, ctid, tableoid
+     Iterations: 2
+     ->  Partitioned Seq Scan on public.base_tbl
+           Output: id, a, ctid, tableoid
+           Filter: ((base_tbl.a < base_tbl.b) AND (base_tbl.id = 2))
+           Selected Partitions:  1..2
+ 
+(16 rows)
+
+UPDATE rw_view2 SET a = a + 20, b = 200 where id = 2;
+select * from checkdata();
+   tbname    | id |  a  |  b  
+-------------+----+-----+-----
+ base_tbl p1 |  1 |  85 | 100
+ base_tbl p1 |  2 | 105 | 200
+ base_tbl p2 |  1 |  85 | 100
+ base_tbl p2 |  2 | 105 | 200
+ foreign_tbl |  1 |  85 | 100
+ foreign_tbl |  2 | 105 | 200
+ rw_view1    |  1 |  85 | 100
+ rw_view2    |  2 | 105 | 200
+(8 rows)
+
+delete from base_tbl;
+insert into base_tbl values(1, 100, 99),(2, 100, 99);
+EXPLAIN (VERBOSE, COSTS OFF) delete from rw_view1 where id = 1;
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
+ Delete on public.foreign_tbl
+   ->  Foreign Scan on public.foreign_tbl
+         Output: foreign_tbl.ctid, foreign_tbl.tableoid
+         Node ID: 1
+         Remote SQL: SELECT ctid, tableoid FROM public.base_tbl WHERE ((a < b)) AND ((id = 1))
+ 
+ FDW remote plans:
+ Node 1: EXPLAIN (VERBOSE ON, COSTS OFF) SELECT ctid, tableoid FROM public.base_tbl WHERE ((a < b)) AND ((id = 1)) 
+   Partition Iterator
+     Output: ctid, tableoid
+     Iterations: 2
+     ->  Partitioned Seq Scan on public.base_tbl
+           Output: ctid, tableoid
+           Filter: ((base_tbl.a < base_tbl.b) AND (base_tbl.id = 1))
+           Selected Partitions:  1..2
+ 
+(16 rows)
+
+delete from rw_view1 where id = 1;
+EXPLAIN (VERBOSE, COSTS OFF) delete from rw_view2 where id = 2;
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
+ Delete on public.foreign_tbl
+   ->  Foreign Scan on public.foreign_tbl
+         Output: foreign_tbl.ctid, foreign_tbl.tableoid
+         Node ID: 1
+         Remote SQL: SELECT ctid, tableoid FROM public.base_tbl WHERE ((a < b)) AND ((id = 2))
+ 
+ FDW remote plans:
+ Node 1: EXPLAIN (VERBOSE ON, COSTS OFF) SELECT ctid, tableoid FROM public.base_tbl WHERE ((a < b)) AND ((id = 2)) 
+   Partition Iterator
+     Output: ctid, tableoid
+     Iterations: 2
+     ->  Partitioned Seq Scan on public.base_tbl
+           Output: ctid, tableoid
+           Filter: ((base_tbl.a < base_tbl.b) AND (base_tbl.id = 2))
+           Selected Partitions:  1..2
+ 
+(16 rows)
+
+delete from rw_view2 where id = 2;
+select * from checkdata();
+   tbname    | id |  a  | b  
+-------------+----+-----+----
+ base_tbl p1 |  1 | 100 | 99
+ base_tbl p1 |  2 | 100 | 99
+ base_tbl p2 |  1 | 100 | 99
+ base_tbl p2 |  2 | 100 | 99
+ foreign_tbl |  1 | 100 | 99
+ foreign_tbl |  2 | 100 | 99
+(6 rows)
+
+delete from base_tbl;
+-- with trigger
+CREATE FUNCTION row_before_insupd_trigfunc() RETURNS trigger AS $$BEGIN NEW.a := NEW.a + 10; RETURN NEW; END$$ LANGUAGE plpgsql;
+CREATE TRIGGER row_before_insupd_trigger BEFORE INSERT OR UPDATE ON base_tbl FOR EACH ROW EXECUTE PROCEDURE row_before_insupd_trigfunc();
+EXPLAIN (VERBOSE, COSTS OFF) INSERT INTO rw_view1 VALUES (1, 0, 5);  -- should success
+          QUERY PLAN          
+------------------------------
+ Insert on public.foreign_tbl
+   ->  Result
+         Output: 1, 0, 5
+(3 rows)
+
+INSERT INTO rw_view1 VALUES (1, 0, 5);
+EXPLAIN (VERBOSE, COSTS OFF) INSERT INTO rw_view1 VALUES (1, 80, 16); -- should success
+          QUERY PLAN          
+------------------------------
+ Insert on public.foreign_tbl
+   ->  Result
+         Output: 1, 80, 16
+(3 rows)
+
+INSERT INTO rw_view1 VALUES (1, 80, 16);
+EXPLAIN (VERBOSE, COSTS OFF) INSERT INTO rw_view2 VALUES (2, 0, 5);  -- should failed
+          QUERY PLAN          
+------------------------------
+ Insert on public.foreign_tbl
+   ->  Result
+         Output: 2, 0, 5
+(3 rows)
+
+INSERT INTO rw_view2 VALUES (2, 0, 5);
+ERROR:  new row violates WITH CHECK OPTION for view "rw_view2"
+DETAIL:  Failing row contains (2, 10, 5).
+EXPLAIN (VERBOSE, COSTS OFF) INSERT INTO rw_view2 VALUES (2, 0, 16); -- should success
+          QUERY PLAN          
+------------------------------
+ Insert on public.foreign_tbl
+   ->  Result
+         Output: 2, 0, 16
+(3 rows)
+
+INSERT INTO rw_view2 VALUES (2, 0, 16);
+select * from checkdata();
+   tbname    | id | a  | b  
+-------------+----+----+----
+ base_tbl p1 |  1 | 10 |  5
+ base_tbl p1 |  1 | 90 | 16
+ base_tbl p1 |  2 | 10 | 16
+ base_tbl p2 |  1 | 10 |  5
+ base_tbl p2 |  1 | 90 | 16
+ base_tbl p2 |  2 | 10 | 16
+ foreign_tbl |  1 | 10 |  5
+ foreign_tbl |  1 | 90 | 16
+ foreign_tbl |  2 | 10 | 16
+ rw_view2    |  2 | 10 | 16
+(10 rows)
+
+delete from base_tbl;
+insert into base_tbl values(1, 50, 101), (2, 50, 120);  -- in and cross partition update
+-- (1, 60, 101), (2, 60, 120)
+EXPLAIN (VERBOSE, COSTS OFF) UPDATE rw_view1 SET a = a + 20 where id = 1; -- should success
+                                                          QUERY PLAN                                                          
+------------------------------------------------------------------------------------------------------------------------------
+ Update on public.foreign_tbl
+   ->  Foreign Scan on public.foreign_tbl
+         Output: foreign_tbl.id, (foreign_tbl.a + 20), foreign_tbl.b, foreign_tbl.ctid, foreign_tbl.tableoid
+         Node ID: 1
+         Remote SQL: SELECT id, a, b, ctid, tableoid FROM public.base_tbl WHERE ((a < b)) AND ((id = 1))
+ 
+ FDW remote plans:
+ Node 1: EXPLAIN (VERBOSE ON, COSTS OFF) SELECT id, a, b, ctid, tableoid FROM public.base_tbl WHERE ((a < b)) AND ((id = 1)) 
+   Partition Iterator
+     Output: id, a, b, ctid, tableoid
+     Iterations: 2
+     ->  Partitioned Seq Scan on public.base_tbl
+           Output: id, a, b, ctid, tableoid
+           Filter: ((base_tbl.a < base_tbl.b) AND (base_tbl.id = 1))
+           Selected Partitions:  1..2
+ 
+(16 rows)
+
+UPDATE rw_view1 SET a = a +20 where id = 1;
+EXPLAIN (VERBOSE, COSTS OFF) UPDATE rw_view1 SET a = a + 20 where id = 1; -- should success
+                                                          QUERY PLAN                                                          
+------------------------------------------------------------------------------------------------------------------------------
+ Update on public.foreign_tbl
+   ->  Foreign Scan on public.foreign_tbl
+         Output: foreign_tbl.id, (foreign_tbl.a + 20), foreign_tbl.b, foreign_tbl.ctid, foreign_tbl.tableoid
+         Node ID: 1
+         Remote SQL: SELECT id, a, b, ctid, tableoid FROM public.base_tbl WHERE ((a < b)) AND ((id = 1))
+ 
+ FDW remote plans:
+ Node 1: EXPLAIN (VERBOSE ON, COSTS OFF) SELECT id, a, b, ctid, tableoid FROM public.base_tbl WHERE ((a < b)) AND ((id = 1)) 
+   Partition Iterator
+     Output: id, a, b, ctid, tableoid
+     Iterations: 2
+     ->  Partitioned Seq Scan on public.base_tbl
+           Output: id, a, b, ctid, tableoid
+           Filter: ((base_tbl.a < base_tbl.b) AND (base_tbl.id = 1))
+           Selected Partitions:  1..2
+ 
+(16 rows)
+
+UPDATE rw_view1 SET a = a +20 where id = 1;
+EXPLAIN (VERBOSE, COSTS OFF) UPDATE rw_view2 SET a = a + 55 where id = 2; -- should failed
+                                                          QUERY PLAN                                                          
+------------------------------------------------------------------------------------------------------------------------------
+ Update on public.foreign_tbl
+   ->  Foreign Scan on public.foreign_tbl
+         Output: foreign_tbl.id, (foreign_tbl.a + 55), foreign_tbl.b, foreign_tbl.ctid, foreign_tbl.tableoid
+         Node ID: 1
+         Remote SQL: SELECT id, a, b, ctid, tableoid FROM public.base_tbl WHERE ((a < b)) AND ((id = 2))
+ 
+ FDW remote plans:
+ Node 1: EXPLAIN (VERBOSE ON, COSTS OFF) SELECT id, a, b, ctid, tableoid FROM public.base_tbl WHERE ((a < b)) AND ((id = 2)) 
+   Partition Iterator
+     Output: id, a, b, ctid, tableoid
+     Iterations: 2
+     ->  Partitioned Seq Scan on public.base_tbl
+           Output: id, a, b, ctid, tableoid
+           Filter: ((base_tbl.a < base_tbl.b) AND (base_tbl.id = 2))
+           Selected Partitions:  1..2
+ 
+(16 rows)
+
+UPDATE rw_view2 SET a = a + 55 where id = 2;
+ERROR:  new row violates WITH CHECK OPTION for view "rw_view2"
+DETAIL:  Failing row contains (2, 125, 120).
+EXPLAIN (VERBOSE, COSTS OFF) UPDATE rw_view2 SET a = a + 45 where id = 2; -- should success
+                                                          QUERY PLAN                                                          
+------------------------------------------------------------------------------------------------------------------------------
+ Update on public.foreign_tbl
+   ->  Foreign Scan on public.foreign_tbl
+         Output: foreign_tbl.id, (foreign_tbl.a + 45), foreign_tbl.b, foreign_tbl.ctid, foreign_tbl.tableoid
+         Node ID: 1
+         Remote SQL: SELECT id, a, b, ctid, tableoid FROM public.base_tbl WHERE ((a < b)) AND ((id = 2))
+ 
+ FDW remote plans:
+ Node 1: EXPLAIN (VERBOSE ON, COSTS OFF) SELECT id, a, b, ctid, tableoid FROM public.base_tbl WHERE ((a < b)) AND ((id = 2)) 
+   Partition Iterator
+     Output: id, a, b, ctid, tableoid
+     Iterations: 2
+     ->  Partitioned Seq Scan on public.base_tbl
+           Output: id, a, b, ctid, tableoid
+           Filter: ((base_tbl.a < base_tbl.b) AND (base_tbl.id = 2))
+           Selected Partitions:  1..2
+ 
+(16 rows)
+
+UPDATE rw_view2 SET a = a + 45 where id = 2;
+select * from checkdata();
+   tbname    | id |  a  |  b  
+-------------+----+-----+-----
+ base_tbl p1 |  1 | 120 | 101
+ base_tbl p1 |  2 | 115 | 120
+ base_tbl p2 |  1 | 120 | 101
+ base_tbl p2 |  2 | 115 | 120
+ foreign_tbl |  1 | 120 | 101
+ foreign_tbl |  2 | 115 | 120
+ rw_view2    |  2 | 115 | 120
+(7 rows)
+
+DROP TRIGGER row_before_insupd_trigger ON base_tbl;
+DROP FUNCTION row_before_insupd_trigfunc;
+DROP FUNCTION checkdata;
+DROP VIEW rw_view1 cascade;
+DROP VIEW rw_view2 cascade;
+DROP FOREIGN TABLE foreign_tbl CASCADE;
+DROP TABLE base_tbl CASCADE;
+-- ======================================================================================================================================
 -- TEST-MODULE: test writable foreign table stuff
 -- --------------------------------------
 -- ======================================================================================================================================

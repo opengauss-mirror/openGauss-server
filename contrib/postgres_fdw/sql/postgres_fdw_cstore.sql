@@ -1008,26 +1008,59 @@ UPDATE ft1 SET c2 = c2 + 1 WHERE c1 = 1;
 ALTER FOREIGN TABLE ft1 DROP CONSTRAINT ft1_c2negative;
 
 -- ======================================================================================================================================
--- TEST-MODULE: WITH CHECK OPTION constraints
+-- TEST-MODULE: IUD VIEW and WITH CHECK OPTION constraints
 -- --------------------------------------
---     openGauss not support WITH CHECK OPTION, so this test module
---     is unuseful.
 -- ======================================================================================================================================
-
-CREATE FUNCTION row_before_insupd_trigfunc() RETURNS trigger AS $$BEGIN NEW.a := NEW.a + 10; RETURN NEW; END$$ LANGUAGE plpgsql;
-
-CREATE TABLE base_tbl (a int, b int) with (orientation=column);
+CREATE TABLE base_tbl (id int, a int, b int) with (orientation=column);
 ALTER TABLE base_tbl SET (autovacuum_enabled = 'false');
-CREATE TRIGGER row_before_insupd_trigger BEFORE INSERT OR UPDATE ON base_tbl FOR EACH ROW EXECUTE PROCEDURE row_before_insupd_trigfunc();
-CREATE FOREIGN TABLE foreign_tbl (a int, b int)
-  SERVER loopback OPTIONS (table_name 'base_tbl');
--- CREATE VIEW rw_view AS SELECT * FROM foreign_tbl
---   WHERE a < b WITH CHECK OPTION;
--- \d+ rw_view
+CREATE FOREIGN TABLE foreign_tbl (id int, a int, b int) SERVER loopback OPTIONS (table_name 'base_tbl');
+CREATE VIEW rw_view1 AS SELECT * FROM foreign_tbl WHERE a < b and id = 1;
+CREATE VIEW rw_view2 AS SELECT * FROM foreign_tbl WHERE a < b and id = 2 WITH CHECK OPTION;
+\d+ rw_view1
+\d+ rw_view2
+CREATE OR REPLACE FUNCTION checkdata(out tbname text, out id int, out a int, out b int) RETURNS SETOF record as $$ 
+  select * from (
+     (select 'rw_view1', * from rw_view1 where id = 1) union all 
+     (select 'rw_view2', * from rw_view2 where id = 2) union all 
+     (select 'base_tbl', * from base_tbl) union all 
+     (select 'foreign_tbl', * from foreign_tbl)
+  ) data(tbname, id, a, b)
+  order by 1,2,3,4;
+$$ language sql;
 
-DROP FOREIGN TABLE foreign_tbl CASCADE;
+-- simple case
+EXPLAIN (VERBOSE, COSTS OFF) INSERT INTO rw_view1 VALUES (1, 0, 5);  -- should success
+INSERT INTO rw_view1 VALUES (1, 0, 5); 
+EXPLAIN (VERBOSE, COSTS OFF) INSERT INTO rw_view1 VALUES (1, 10, 5); -- should success
+INSERT INTO rw_view1 VALUES (1, 10, 5);
+EXPLAIN (VERBOSE, COSTS OFF) INSERT INTO rw_view2 VALUES (2, 0, 5);  -- should failed
+INSERT INTO rw_view2 VALUES (2, 0, 5);
+select * from checkdata();
+
+EXPLAIN (VERBOSE, COSTS OFF) UPDATE rw_view1 SET a = a + 20 where id = 1;  -- should success
+UPDATE rw_view1 SET a = a + 20 where id = 1;
+select * from checkdata();
+
+insert into base_tbl values(1,100,99),(2,100,99);
+EXPLAIN (VERBOSE, COSTS OFF) delete from rw_view1 where id = 1;
+delete from rw_view1 where id = 1;
+select * from checkdata();
+
+delete from base_tbl;
+
+-- with trigger
+CREATE FUNCTION row_before_insupd_trigfunc() RETURNS trigger AS $$BEGIN NEW.a := NEW.a + 10; RETURN NEW; END$$ LANGUAGE plpgsql;
+CREATE TRIGGER row_before_insupd_trigger BEFORE INSERT OR UPDATE ON base_tbl FOR EACH ROW EXECUTE PROCEDURE row_before_insupd_trigfunc();
+-- not support, do nothing
+
 DROP TRIGGER row_before_insupd_trigger ON base_tbl;
-DROP TABLE base_tbl;
+DROP FUNCTION row_before_insupd_trigfunc;
+DROP FUNCTION checkdata;
+DROP VIEW rw_view1 cascade;
+DROP VIEW rw_view2 cascade;
+DROP FOREIGN TABLE foreign_tbl CASCADE;
+DROP TABLE base_tbl CASCADE;
+
 
 -- ======================================================================================================================================
 -- TEST-MODULE: test serial columns (ie, sequence-based defaults)
