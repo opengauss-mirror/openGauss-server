@@ -1566,7 +1566,7 @@ extern const char *plpgsql_code_int2cstring(int sqlcode);
 extern const int plpgsql_code_cstring2int(const char *codename);
 extern void plpgsql_set_variable(const char* varname, int value);
 extern PLpgSQL_variable* plpgsql_build_variable(const char* refname, int lineno, PLpgSQL_type* dtype, bool add2namespace, bool isImplicit = false,
-    const char* varname = NULL, knl_pl_body_type plType = PL_BODY_FUNCTION);
+    const char* varname = NULL, knl_pl_body_type plType = PL_BODY_FUNCTION, bool notNull = false);
 PLpgSQL_variable* plpgsql_build_varrayType(const char* refname, int lineno, PLpgSQL_type* dtype, bool add2namespace);
 PLpgSQL_variable* plpgsql_build_tableType(const char* refname, int lineno, PLpgSQL_type* dtype, bool add2namespace);
 extern PLpgSQL_rec_type* plpgsql_build_rec_type(const char* typname, int lineno, List* list, bool add2namespace);
