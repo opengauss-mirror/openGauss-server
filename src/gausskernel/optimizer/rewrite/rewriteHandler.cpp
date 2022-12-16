@@ -1173,13 +1173,11 @@ Node* build_column_default(Relation rel, int attrno, bool isInsertCmd, bool need
                  * if adbin is not null character string, then doing convert adbin to expression.
                  */
                 
-                if (needOnUpdate && (!isInsertCmd) && defval[ndef].has_on_update &&
+                if (needOnUpdate && (!isInsertCmd) && defval[ndef].adbin_on_update != nullptr &&
                     pg_strcasecmp(defval[ndef].adbin_on_update, "") != 0) {
                     expr = (Node*)stringToNode_skip_extern_fields(defval[ndef].adbin_on_update);
-                } else {
-                    if (pg_strcasecmp(defval[ndef].adbin, "") != 0) {
-                        expr = (Node*)stringToNode_skip_extern_fields(defval[ndef].adbin);                      
-                    }
+                } else if (defval[ndef].adbin != nullptr && pg_strcasecmp(defval[ndef].adbin, "") != 0) {
+                    expr = (Node*)stringToNode_skip_extern_fields(defval[ndef].adbin);
                 }
                 if (t_thrd.proc->workingVersionNum < LARGE_SEQUENCE_VERSION_NUM) {
                     (void)check_sequence_return_numeric_walker(expr, &(u_sess->opt_cxt.nextval_default_expr_type));
