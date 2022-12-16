@@ -10,11 +10,7 @@ begin
     if have_column = false then
         DROP INDEX IF EXISTS pg_catalog.pg_proc_proname_all_args_nsp_index;
     else
-        DROP INDEX IF EXISTS pg_catalog.pg_proc_proname_all_args_nsp_index;
-        SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0, 0, 0, 9666;
-        CREATE UNIQUE INDEX pg_catalog.pg_proc_proname_all_args_nsp_index on pg_catalog.pg_proc USING BTREE(proname name_ops, allargtypes oidvector_ops, pronamespace oid_ops, propackageid oid_ops);
-        SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0, 0, 0, 0;
-        REINDEX INDEX pg_catalog.pg_proc_proname_all_args_nsp_index;
+        update pg_index set indisunique=true where indexrelid=9666;
     end if;
 end;
 DROP INDEX IF EXISTS pg_catalog.gs_uid_relid_index;
