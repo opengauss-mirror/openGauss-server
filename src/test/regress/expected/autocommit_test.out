@@ -255,6 +255,16 @@ SHOW autocommit;
  on
 (1 row)
 
+-- error in transaction block
+SET autocommit = 0;
+CREATE;
+ERROR:  syntax error at or near ";"
+LINE 1: CREATE;
+              ^
+SET autocommit = 1;
+ERROR:  current transaction is aborted, commands ignored until end of transaction block, firstChar[Q]
+ROLLBACK;
+SET autocommit = 1;
 \c regression
 DROP DATABASE test_db;
 DROP DATABASE test_drop;
