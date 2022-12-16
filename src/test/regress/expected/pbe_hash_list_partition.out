@@ -256,3 +256,659 @@ select * from h ORDER BY h.a;
  16 | 16
 (16 rows)
 
+drop table pbe_pt1;
+ERROR:  table "pbe_pt1" does not exist
+create table pbe_pt1 (id int, name varchar2(100))
+partition by range (id)
+(
+partition p1 values less than (100),
+partition p2 values less than (200),
+partition p3 values less than (MAXVALUE)
+);
+insert into pbe_pt1 values (1,'a'),(100,'b'),(200,'c');
+select ctid, * from pbe_pt1;
+ ctid  | id  | name 
+-------+-----+------
+ (0,1) |   1 | a
+ (0,1) | 100 | b
+ (0,1) | 200 | c
+(3 rows)
+
+-- tidscan
+prepare pp1 as update pbe_pt1 set id = id + 10 where ctid = (select ctid from pbe_pt1 where id=$1) and id=$1;
+explain (costs off) execute pp1 (1);
+               QUERY PLAN                
+-----------------------------------------
+ Update on pbe_pt1
+   InitPlan 1 (returns $2)
+     ->  Partitioned Seq Scan on pbe_pt1
+           Filter: (id = $1)
+           Selected Partitions:  PART
+   ->  Partitioned Tid Scan on pbe_pt1
+         TID Cond: (ctid = $2)
+         Filter: (id = $1)
+         Selected Partitions:  PART
+(9 rows)
+
+begin;
+execute pp1 (1);
+select ctid, * from pbe_pt1;
+ ctid  | id  | name 
+-------+-----+------
+ (0,2) |  11 | a
+ (0,1) | 100 | b
+ (0,1) | 200 | c
+(3 rows)
+
+execute pp1 (100);
+select ctid, * from pbe_pt1;
+ ctid  | id  | name 
+-------+-----+------
+ (0,2) |  11 | a
+ (0,2) | 110 | b
+ (0,1) | 200 | c
+(3 rows)
+
+execute pp1 (200);
+select ctid, * from pbe_pt1;
+ ctid  | id  | name 
+-------+-----+------
+ (0,2) |  11 | a
+ (0,2) | 110 | b
+ (0,2) | 210 | c
+(3 rows)
+
+rollback;
+-- seqscan
+set enable_tidscan = 0;
+prepare pp1_2 as update pbe_pt1 set id = id + 10 where ctid = (select ctid from pbe_pt1 where id=$1) and id=$1;
+explain (costs off) execute pp1_2 (1);
+                 QUERY PLAN                  
+---------------------------------------------
+ Update on pbe_pt1
+   InitPlan 1 (returns $2)
+     ->  Partitioned Seq Scan on pbe_pt1
+           Filter: (id = $1)
+           Selected Partitions:  PART
+   ->  Partitioned Seq Scan on pbe_pt1
+         Filter: ((ctid = $2) AND (id = $1))
+         Selected Partitions:  PART
+(8 rows)
+
+begin;
+execute pp1_2 (1);
+select ctid, * from pbe_pt1;
+ ctid  | id  | name 
+-------+-----+------
+ (0,3) |  11 | a
+ (0,1) | 100 | b
+ (0,1) | 200 | c
+(3 rows)
+
+execute pp1_2 (100);
+select ctid, * from pbe_pt1;
+ ctid  | id  | name 
+-------+-----+------
+ (0,3) |  11 | a
+ (0,3) | 110 | b
+ (0,1) | 200 | c
+(3 rows)
+
+execute pp1_2 (200);
+select ctid, * from pbe_pt1;
+ ctid  | id  | name 
+-------+-----+------
+ (0,3) |  11 | a
+ (0,3) | 110 | b
+ (0,3) | 210 | c
+(3 rows)
+
+rollback;
+-- indexscan
+set enable_indexscan = 1;
+set enable_seqscan = 0;
+set enable_bitmapscan = 0;
+create index i_pbe_pt1 on pbe_pt1 (id) local;
+prepare pp1_3 as update pbe_pt1 set id = id + 10 where ctid = (select ctid from pbe_pt1 where id=$1) and id=$1;
+explain (costs off) execute pp1_3 (1);
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Update on pbe_pt1
+   InitPlan 1 (returns $2)
+     ->  Partitioned Index Scan using i_pbe_pt1 on pbe_pt1
+           Index Cond: (id = $1)
+           Selected Partitions:  PART
+   ->  Partitioned Index Scan using i_pbe_pt1 on pbe_pt1
+         Index Cond: (id = $1)
+         Filter: (ctid = $2)
+         Selected Partitions:  PART
+(9 rows)
+
+begin;
+execute pp1_3 (1);
+select ctid, * from pbe_pt1;
+ ctid  | id  | name 
+-------+-----+------
+ (0,4) |  11 | a
+ (0,1) | 100 | b
+ (0,1) | 200 | c
+(3 rows)
+
+execute pp1_3 (100);
+select ctid, * from pbe_pt1;
+ ctid  | id  | name 
+-------+-----+------
+ (0,4) |  11 | a
+ (0,4) | 110 | b
+ (0,1) | 200 | c
+(3 rows)
+
+execute pp1_3 (200);
+select ctid, * from pbe_pt1;
+ ctid  | id  | name 
+-------+-----+------
+ (0,4) |  11 | a
+ (0,4) | 110 | b
+ (0,4) | 210 | c
+(3 rows)
+
+rollback;
+-- tidscan
+set enable_tidscan = 1;
+set enable_indexscan = 0;
+prepare pp2 as select ctid, * from pbe_pt1 where id=$1 and ctid = (select ctid from pbe_pt1 where id=$1 and name=$2);
+explain (costs off) execute pp2 (1, 'a');
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Partitioned Tid Scan on pbe_pt1
+   TID Cond: (ctid = $2)
+   Filter: (id = $1)
+   Selected Partitions:  PART
+   InitPlan 1 (returns $2)
+     ->  Partitioned Seq Scan on pbe_pt1
+           Filter: ((id = $1) AND ((name)::text = $2))
+           Selected Partitions:  PART
+(8 rows)
+
+execute pp2 (1,'a');
+ ctid  | id | name 
+-------+----+------
+ (0,1) |  1 | a
+(1 row)
+
+execute pp2 (100,'b');
+ ctid  | id  | name 
+-------+-----+------
+ (0,1) | 100 | b
+(1 row)
+
+execute pp2 (200,'c');
+ ctid  | id  | name 
+-------+-----+------
+ (0,1) | 200 | c
+(1 row)
+
+execute pp2 (100,'c');
+ ctid | id | name 
+------+----+------
+(0 rows)
+
+execute pp2 (201,'c');
+ ctid | id | name 
+------+----+------
+(0 rows)
+
+-- seqscan
+set enable_seqscan = 1;
+set enable_tidscan = 0;
+prepare pp2_2 as select ctid, * from pbe_pt1 where id=$1 and ctid = (select ctid from pbe_pt1 where id=$1 and name=$2);
+explain (costs off) execute pp2_2 (1, 'a');
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Partitioned Seq Scan on pbe_pt1
+   Filter: ((id = $1) AND (ctid = $2))
+   Selected Partitions:  PART
+   InitPlan 1 (returns $2)
+     ->  Partitioned Seq Scan on pbe_pt1
+           Filter: ((id = $1) AND ((name)::text = $2))
+           Selected Partitions:  PART
+(7 rows)
+
+execute pp2_2 (1,'a');
+ ctid  | id | name 
+-------+----+------
+ (0,1) |  1 | a
+(1 row)
+
+execute pp2_2 (100,'b');
+ ctid  | id  | name 
+-------+-----+------
+ (0,1) | 100 | b
+(1 row)
+
+execute pp2_2 (200,'c');
+ ctid  | id  | name 
+-------+-----+------
+ (0,1) | 200 | c
+(1 row)
+
+execute pp2_2 (100,'c');
+ ctid | id | name 
+------+----+------
+(0 rows)
+
+execute pp2_2 (111,'c');
+ ctid | id | name 
+------+----+------
+(0 rows)
+
+-- indexscan
+set enable_indexscan = 1;
+set enable_seqscan = 0;
+prepare pp2_3 as select ctid, * from pbe_pt1 where id=$1 and ctid = (select ctid from pbe_pt1 where id=$1 and name=$2);
+explain (costs off) execute pp2_3 (1, 'a');
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Partitioned Index Scan using i_pbe_pt1 on pbe_pt1
+   Index Cond: (id = $1)
+   Filter: (ctid = $2)
+   Selected Partitions:  PART
+   InitPlan 1 (returns $2)
+     ->  Partitioned Index Scan using i_pbe_pt1 on pbe_pt1
+           Index Cond: (id = $1)
+           Filter: ((name)::text = $2)
+           Selected Partitions:  PART
+(9 rows)
+
+execute pp2_3 (1,'a');
+ ctid  | id | name 
+-------+----+------
+ (0,1) |  1 | a
+(1 row)
+
+execute pp2_3 (100,'b');
+ ctid  | id  | name 
+-------+-----+------
+ (0,1) | 100 | b
+(1 row)
+
+execute pp2_3 (200,'c');
+ ctid  | id  | name 
+-------+-----+------
+ (0,1) | 200 | c
+(1 row)
+
+execute pp2_3 (100,'c');
+ ctid | id | name 
+------+----+------
+(0 rows)
+
+execute pp2_3 (111,'c');
+ ctid | id | name 
+------+----+------
+(0 rows)
+
+drop table pbe_pt1;
+set enable_tidscan = 1;
+set enable_indexscan = 1;
+set enable_seqscan = 1;
+set enable_bitmapscan = 1;
+drop table pbe_sp1;
+ERROR:  table "pbe_sp1" does not exist
+create table pbe_sp1(id int, name text, age int)
+partition by hash(id)
+subpartition by list(age)
+(
+partition p1
+  (
+    subpartition sp11 values (1,2,3,4,5),
+    subpartition sp12 values (default)
+  ),
+partition p2
+  (
+    subpartition sp21 values (11,12,13,14,15),
+    subpartition sp22 values (default)
+  )
+);
+insert into pbe_sp1 values (3,'sp11',1), (4,'sp12',6), (5,'sp21',11), (6,'sp22', NULL);
+select ctid, * from pbe_sp1 subpartition (sp11);
+ ctid  | id | name | age 
+-------+----+------+-----
+ (0,1) |  3 | sp11 |   1
+(1 row)
+
+select ctid, * from pbe_sp1 subpartition (sp12);
+ ctid  | id | name | age 
+-------+----+------+-----
+ (0,1) |  4 | sp12 |   6
+(1 row)
+
+select ctid, * from pbe_sp1 subpartition (sp21);
+ ctid  | id | name | age 
+-------+----+------+-----
+ (0,1) |  5 | sp21 |  11
+(1 row)
+
+select ctid, * from pbe_sp1 subpartition (sp22);
+ ctid  | id | name | age 
+-------+----+------+-----
+ (0,1) |  6 | sp22 |    
+(1 row)
+
+-- tidscan
+prepare pp3 as update pbe_sp1 set age=$4 where ctid = (select ctid from pbe_sp1 where name=$2 and (age=$3 or ($3 is null and age is null))) and id=$1 and (age=$3 or ($3 is null and age is null));
+explain (costs off) execute pp3 (6, 'sp22', NULL, NULL);
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ Update on pbe_sp1
+   InitPlan 1 (returns $2)
+     ->  Partition Iterator
+           Iterations: 2, Sub Iterations: 4
+           ->  Partitioned Seq Scan on pbe_sp1
+                 Filter: (((age = $3) OR (($3 IS NULL) AND (age IS NULL))) AND (name = $2))
+                 Selected Partitions:  1..2
+                 Selected Subpartitions:  ALL
+   ->  Partition Iterator
+         Iterations: 2
+         ->  Partitioned Tid Scan on pbe_sp1
+               TID Cond: (ctid = $2)
+               Filter: (((age = $3) OR (($3 IS NULL) AND (age IS NULL))) AND (id = $1))
+               Selected Partitions:  PART
+(14 rows)
+
+begin;
+execute pp3 (3, 'sp11', 1, 2);
+select ctid, * from pbe_sp1 subpartition (sp11) order by id;
+ ctid  | id | name | age 
+-------+----+------+-----
+ (0,2) |  3 | sp11 |   2
+(1 row)
+
+execute pp3 (3, 'sp11', 2, 7);
+select ctid, * from pbe_sp1 subpartition (sp12) order by id;
+ ctid  | id | name | age 
+-------+----+------+-----
+ (0,2) |  3 | sp11 |   7
+ (0,1) |  4 | sp12 |   6
+(2 rows)
+
+execute pp3 (4, 'sp12', 6, 8);
+select ctid, * from pbe_sp1 subpartition (sp12) order by id;
+ ctid  | id | name | age 
+-------+----+------+-----
+ (0,2) |  3 | sp11 |   7
+ (0,3) |  4 | sp12 |   8
+(2 rows)
+
+execute pp3 (4, 'sp12', 8, 5);
+select ctid, * from pbe_sp1 subpartition (sp11) order by id;
+ ctid  | id | name | age 
+-------+----+------+-----
+ (0,3) |  4 | sp12 |   5
+(1 row)
+
+execute pp3 (6, 'sp22', NULL, NULL);
+select ctid, * from pbe_sp1 subpartition (sp22) order by id;
+ ctid  | id | name | age 
+-------+----+------+-----
+ (0,2) |  6 | sp22 |    
+(1 row)
+
+execute pp3 (6, 'sp22', NULL, 15);
+select ctid, * from pbe_sp1 subpartition (sp21) order by id;
+ ctid  | id | name | age 
+-------+----+------+-----
+ (0,1) |  5 | sp21 |  11
+ (0,2) |  6 | sp22 |  15
+(2 rows)
+
+execute pp3 (5, 'sp21', 11, 12);
+select ctid, * from pbe_sp1 subpartition (sp21) order by id;
+ ctid  | id | name | age 
+-------+----+------+-----
+ (0,3) |  5 | sp21 |  12
+ (0,2) |  6 | sp22 |  15
+(2 rows)
+
+execute pp3 (5, 'sp21', 12, NULL);
+select ctid, * from pbe_sp1 subpartition (sp22) order by id;
+ ctid  | id | name | age 
+-------+----+------+-----
+ (0,3) |  5 | sp21 |    
+(1 row)
+
+rollback;
+prepare pp4 as select ctid, * from pbe_sp1 where id=$1 and (age=$3 or ($3 is null and age is null)) and name=$2 and ctid=(select ctid from pbe_sp1 where id=$1 and name=$2);
+explain (costs off) execute pp4 (3, 'sp11', 1);
+                                            QUERY PLAN                                            
+--------------------------------------------------------------------------------------------------
+ Partition Iterator
+   Iterations: 2
+   InitPlan 1 (returns $2)
+     ->  Partition Iterator
+           Iterations: PART
+           ->  Partitioned Seq Scan on pbe_sp1
+                 Filter: ((id = $1) AND (name = $2))
+                 Selected Partitions:  PART
+   ->  Partitioned Tid Scan on pbe_sp1
+         TID Cond: (ctid = $2)
+         Filter: (((age = $3) OR (($3 IS NULL) AND (age IS NULL))) AND (id = $1) AND (name = $2))
+         Selected Partitions:  PART
+(12 rows)
+
+execute pp4 (3, 'sp11', 1);
+ ctid  | id | name | age 
+-------+----+------+-----
+ (0,1) |  3 | sp11 |   1
+(1 row)
+
+execute pp4 (4, 'sp12', 6);
+ ctid  | id | name | age 
+-------+----+------+-----
+ (0,1) |  4 | sp12 |   6
+(1 row)
+
+execute pp4 (5, 'sp21', 11);
+ ctid  | id | name | age 
+-------+----+------+-----
+ (0,1) |  5 | sp21 |  11
+(1 row)
+
+execute pp4 (6, 'sp22', NULL);
+ ctid  | id | name | age 
+-------+----+------+-----
+ (0,1) |  6 | sp22 |    
+(1 row)
+
+-- seqscan
+set enable_tidscan=0;
+prepare pp5 as select ctid, * from pbe_sp1 where id=$1 and name=$2 and ctid = (select ctid from pbe_sp1 where id=$1 and (age=$3 or ($3 is null and age is null)) and name=$2);
+explain (costs off) execute pp5 (3, 'sp11', 1);
+                                                QUERY PLAN                                                
+----------------------------------------------------------------------------------------------------------
+ Partition Iterator
+   Iterations: PART
+   InitPlan 1 (returns $2)
+     ->  Partition Iterator
+           Iterations: PART
+           ->  Partitioned Seq Scan on pbe_sp1
+                 Filter: (((age = $3) OR (($3 IS NULL) AND (age IS NULL))) AND (id = $1) AND (name = $2))
+                 Selected Partitions:  PART
+   ->  Partitioned Seq Scan on pbe_sp1
+         Filter: ((id = $1) AND (name = $2) AND (ctid = $2))
+         Selected Partitions:  PART
+(11 rows)
+
+execute pp5 (3, 'sp11', 1);
+ ctid  | id | name | age 
+-------+----+------+-----
+ (0,1) |  3 | sp11 |   1
+(1 row)
+
+execute pp5 (4, 'sp12', 6);
+ ctid  | id | name | age 
+-------+----+------+-----
+ (0,1) |  4 | sp12 |   6
+(1 row)
+
+execute pp5 (5, 'sp21', 11);
+ ctid  | id | name | age 
+-------+----+------+-----
+ (0,1) |  5 | sp21 |  11
+(1 row)
+
+execute pp5 (6, 'sp22', NULL);
+ ctid  | id | name | age 
+-------+----+------+-----
+ (0,1) |  6 | sp22 |    
+(1 row)
+
+-- indexscan
+create unique index i_pbe_sp1 on pbe_sp1(id,age) local;
+set enable_seqscan = 0;
+set enable_indexscan = 1;
+set enable_indexonlyscan = 0;
+set enable_bitmapscan = 0;
+set enable_tidscan = 0;
+prepare pp6 as select ctid, * from pbe_sp1 where id=$1 and (age=$3 or ($3 is null and age is null)) and name=$2 and ctid=(select ctid from pbe_sp1 where id=$1 and name=$2);
+explain (costs off) execute pp6 (3, 'sp11', 1);
+                                             QUERY PLAN                                             
+----------------------------------------------------------------------------------------------------
+ Partition Iterator
+   Iterations: PART
+   InitPlan 1 (returns $2)
+     ->  Partition Iterator
+           Iterations: PART
+           ->  Partitioned Index Scan using i_pbe_sp1 on pbe_sp1
+                 Index Cond: (id = $1)
+                 Filter: (name = $2)
+                 Selected Partitions:  PART
+   ->  Partitioned Index Scan using i_pbe_sp1 on pbe_sp1
+         Index Cond: (id = $1)
+         Filter: (((age = $3) OR (($3 IS NULL) AND (age IS NULL))) AND (name = $2) AND (ctid = $2))
+         Selected Partitions:  PART
+(13 rows)
+
+execute pp6 (3, 'sp11', 1);
+ ctid  | id | name | age 
+-------+----+------+-----
+ (0,1) |  3 | sp11 |   1
+(1 row)
+
+execute pp6 (4, 'sp12', 6);
+ ctid  | id | name | age 
+-------+----+------+-----
+ (0,1) |  4 | sp12 |   6
+(1 row)
+
+execute pp6 (5, 'sp21', 11);
+ ctid  | id | name | age 
+-------+----+------+-----
+ (0,1) |  5 | sp21 |  11
+(1 row)
+
+execute pp6 (6, 'sp22', NULL);
+ ctid  | id | name | age 
+-------+----+------+-----
+ (0,1) |  6 | sp22 |    
+(1 row)
+
+-- indexonlyscan
+create index i2_pbe_sp1 on pbe_sp1(id,name,ctid) local;
+set enable_indexscan = 0;
+set enable_indexonlyscan = 1;
+prepare pp7 as select ctid, id, name from pbe_sp1 where id=$1 and name = (select name from pbe_sp1 where id=$1 and name=$2);
+explain (costs off) execute pp7 (3, 'sp11');
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Partition Iterator
+   Iterations: PART
+   InitPlan 1 (returns $2)
+     ->  Partition Iterator
+           Iterations: PART
+           ->  Partitioned Index Only Scan using i2_pbe_sp1 on pbe_sp1
+                 Index Cond: ((id = $1) AND (name = $2))
+                 Selected Partitions:  PART
+   ->  Partitioned Index Only Scan using i2_pbe_sp1 on pbe_sp1
+         Index Cond: ((id = $1) AND (name = $2))
+         Selected Partitions:  PART
+(11 rows)
+
+execute pp7 (3, 'sp11');
+ ctid  | id | name 
+-------+----+------
+ (0,1) |  3 | sp11
+(1 row)
+
+execute pp7 (4, 'sp12');
+ ctid  | id | name 
+-------+----+------
+ (0,1) |  4 | sp12
+(1 row)
+
+execute pp7 (5, 'sp21');
+ ctid  | id | name 
+-------+----+------
+ (0,1) |  5 | sp21
+(1 row)
+
+execute pp7 (6, 'sp22');
+ ctid  | id | name 
+-------+----+------
+ (0,1) |  6 | sp22
+(1 row)
+
+drop index i2_pbe_sp1;
+-- bitmapscan
+set enable_indexonlyscan = 0;
+set enable_bitmapscan = 1;
+prepare pp8 as select ctid, id from pbe_sp1 where id=$1 and name=$2 and ctid=(select ctid from pbe_sp1 where id=$1 and name=$2 and (age=$3 or ($3 is null and age is null)));
+explain (costs off) execute pp8 (3, 'sp11', 1);
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ Partition Iterator
+   Iterations: PART
+   InitPlan 1 (returns $2)
+     ->  Partition Iterator
+           Iterations: PART
+           ->  Partitioned Bitmap Heap Scan on pbe_sp1
+                 Recheck Cond: (id = $1)
+                 Filter: (((age = $3) OR (($3 IS NULL) AND (age IS NULL))) AND (name = $2))
+                 Selected Partitions:  PART
+                 ->  Partitioned Bitmap Index Scan on i_pbe_sp1
+                       Index Cond: (id = $1)
+                       Selected Partitions:  PART
+   ->  Partitioned Bitmap Heap Scan on pbe_sp1
+         Recheck Cond: (id = $1)
+         Filter: ((name = $2) AND (ctid = $2))
+         Selected Partitions:  PART
+         ->  Partitioned Bitmap Index Scan on i_pbe_sp1
+               Index Cond: (id = $1)
+               Selected Partitions:  PART
+(19 rows)
+
+execute pp8 (3, 'sp11', 1);
+ ctid  | id 
+-------+----
+ (0,1) |  3
+(1 row)
+
+execute pp8 (4, 'sp12', 6);
+ ctid  | id 
+-------+----
+ (0,1) |  4
+(1 row)
+
+execute pp8 (5, 'sp21', 11);
+ ctid  | id 
+-------+----
+ (0,1) |  5
+(1 row)
+
+execute pp8 (6, 'sp22', NULL);
+ ctid  | id 
+-------+----
+ (0,1) |  6
+(1 row)
+
+drop table pbe_sp1;

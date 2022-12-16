@@ -70,6 +70,7 @@ static int GetScanPartitionNum(PartIteratorState* node, PlanState* noden)
         case T_IndexScanState:
         case T_IndexOnlyScanState:
         case T_BitmapHeapScanState:
+        case T_TidScanState:
             partitionScan =  ((ScanState*)noden)->part_id;
             break;
         case T_VecToRowState:
