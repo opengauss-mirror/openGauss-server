@@ -4227,6 +4227,14 @@ static List* RewriteQuery(Query* parsetree, List* rewrite_events)
                     errmsg("WITH cannot be used in a query that is rewritten by rules into multiple queries")));
     }
 
+    if (parsetree->isReplace) {
+        foreach (lc1, rewritten) {
+            Query* q = (Query*)lfirst(lc1);
+ 
+            q->isReplace = parsetree->isReplace;
+        }
+    }
+
     return rewritten;
 }
 

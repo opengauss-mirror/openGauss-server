@@ -1540,6 +1540,10 @@ static Query* _readQuery(void)
     IF_EXIST(withCheckOptions) {
         READ_NODE_FIELD(withCheckOptions);
     }
+
+    IF_EXIST(isReplace) {
+        READ_BOOL_FIELD(isReplace);
+    }
 	
     READ_DONE();
 }
