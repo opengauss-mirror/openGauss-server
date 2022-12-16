@@ -646,7 +646,7 @@ static char* CBGetPage(dms_buf_ctrl_t *buf_ctrl)
     return (char *)BufHdrGetBlock(buf_desc);
 }
 
-static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsigned long long ver)
+static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsigned int ver)
 {
     bool valid = false;
     int buf_id;
@@ -682,11 +682,11 @@ static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsig
         if (valid) {
             (void)LWLockAcquire(buf_desc->content_lock, LW_EXCLUSIVE);
             buf_ctrl = GetDmsBufCtrl(buf_id);
-            if (ver >= buf_ctrl->ver) {
+            if (ver == buf_ctrl->ver) {
                 buf_ctrl->lock_mode = (unsigned char)DMS_LOCK_NULL;
             } else {
                 ereport(WARNING, (errmodule(MOD_DMS),
-                errmsg("[CBInvalidatePage] invalid ver:%llu, buf_ctrl ver:%llu", ver, buf_ctrl->ver)));
+                errmsg("[CBInvalidatePage] invalid ver:%u, buf_ctrl ver:%u", ver, buf_ctrl->ver)));
                 ret = DMS_ERROR;
             }
             LWLockRelease(buf_desc->content_lock);
@@ -1132,7 +1132,7 @@ static int CBConfirmOwner(void *db_handle, char *pageid, unsigned char *lock_mod
 }
 
 static int CBConfirmConverting(void *db_handle, char *pageid, unsigned char smon_chk,
-    unsigned char *lock_mode, unsigned long long *edp_map, unsigned long long *lsn, unsigned long long *ver)
+    unsigned char *lock_mode, unsigned long long *edp_map, unsigned long long *lsn, unsigned int *ver)
 {
     BufferDesc *buf_desc = NULL;
     bool valid;
