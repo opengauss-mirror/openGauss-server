@@ -268,7 +268,7 @@ typedef struct st_dms_buf_ctrl {
     unsigned long long edp_scn;          // set when become edp, lastest scn when page becomes edp
     unsigned long long edp_map;             // records edp instance
     long long last_ckpt_time; // last time when local edp page is added to group.
-    unsigned long long ver;
+    unsigned int ver;
 #ifdef OPENGAUSS
     int buf_id;
     unsigned int state;
@@ -337,6 +337,7 @@ typedef enum en_dms_log_id {
 
 /*
 * lock mode in DMS, we use it to coordinate concurrent access among different instances.
+* !!!!Attention Do not modify its order
 */
 typedef enum en_dms_lock_mode {
     DMS_LOCK_NULL = 0,
@@ -458,7 +459,7 @@ typedef int(*dms_save_list_stable)(void *db_handle, unsigned long long list_stab
 typedef int(*dms_get_dms_status)(void *db_handle);
 typedef void(*dms_set_dms_status)(void *db_handle, int status);
 typedef int(*dms_confirm_converting)(void *db_handle, char *pageid, unsigned char smon_chk,
-    unsigned char *lock_mode, unsigned long long *edp_map, unsigned long long *lsn, unsigned long long *ver);
+    unsigned char *lock_mode, unsigned long long *edp_map, unsigned long long *lsn, unsigned int *ver);
 typedef int(*dms_confirm_owner)(void *db_handle, char *pageid, unsigned char *lock_mode, unsigned char *is_edp,
                                 unsigned long long *lsn);
 typedef int(*dms_flush_copy)(void *db_handle, char *pageid);
@@ -494,7 +495,7 @@ typedef unsigned char(*dms_page_is_dirty)(dms_buf_ctrl_t *buf_ctrl);
 typedef void(*dms_leave_local_page)(void *db_handle, dms_buf_ctrl_t *buf_ctrl);
 typedef void(*dms_get_pageid)(dms_buf_ctrl_t *buf_ctrl, char **pageid, unsigned int *size);
 typedef char *(*dms_get_page)(dms_buf_ctrl_t *buf_ctrl);
-typedef int (*dms_invalidate_page)(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsigned long long ver);
+typedef int (*dms_invalidate_page)(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsigned int ver);
 typedef void *(*dms_get_db_handle)(unsigned int *db_handle_index);
 typedef void *(*dms_stack_push_cr_cursor)(void *db_handle);
 typedef void (*dms_stack_pop_cr_cursor)(void *db_handle);
@@ -759,7 +760,7 @@ typedef struct st_dms_profile {
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           35
+#define DMS_LOCAL_VERSION           36
 
 #ifdef __cplusplus
 }
