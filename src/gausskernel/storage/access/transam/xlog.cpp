@@ -2953,7 +2953,8 @@ void XLogSetReplicationSlotMinimumLSN(XLogRecPtr lsn)
     SpinLockAcquire(&xlogctl->info_lck);
     xlogctl->replicationSlotMinLSN = lsn;
     SpinLockRelease(&xlogctl->info_lck);
-    if (XLByteEQ(lsn, InvalidXLogRecPtr) && !IsInitdb && !RecoveryInProgress() && !AM_WAL_SENDER && !AM_WAL_DB_SENDER &&
+    if (!ENABLE_DMS && XLByteEQ(lsn, InvalidXLogRecPtr) && !IsInitdb && !RecoveryInProgress() 
+        && !AM_WAL_SENDER && !AM_WAL_DB_SENDER &&
         strcmp(u_sess->attr.attr_common.application_name, "gs_roach") != 0) {
         ereport(WARNING, (errmsg("replicationSlotMinLSN is InvalidXLogRecPtr!!!")));
     }
@@ -2996,7 +2997,8 @@ void XLogSetReplicationSlotMaximumLSN(XLogRecPtr lsn)
     SpinLockAcquire(&xlogctl->info_lck);
     xlogctl->replicationSlotMaxLSN = lsn;
     SpinLockRelease(&xlogctl->info_lck);
-    if (XLByteEQ(lsn, InvalidXLogRecPtr) && !IsInitdb && !RecoveryInProgress() && !AM_WAL_SENDER && !AM_WAL_DB_SENDER &&
+    if (!ENABLE_DMS && XLByteEQ(lsn, InvalidXLogRecPtr) && !IsInitdb && !RecoveryInProgress() 
+        && !AM_WAL_SENDER && !AM_WAL_DB_SENDER &&
         strcmp(u_sess->attr.attr_common.application_name, "gs_roach") != 0) {
         ereport(WARNING, (errmsg("replicationSlotMaxLSN is InvalidXLogRecPtr!!!")));
     }
