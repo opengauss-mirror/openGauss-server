@@ -94,6 +94,25 @@ CONTEXT:  referenced column: f1
   4
 (1 row)
 
+--test not null
+CREATE OR REPLACE FUNCTION regress_record1(p_w VARCHAR2)
+RETURNS
+VARCHAR2 AS $$
+DECLARE
+type rec_type is record (name varchar2(100) not null default 'a', epno int);
+employer rec_type;
+BEGIN
+employer.name := null;
+employer.epno = 18;
+raise info 'employer name: % , epno:%', employer.name, employer.epno;
+return employer.name;
+END;
+$$
+LANGUAGE plpgsql;
+CALL regress_record1('aaa');
+ERROR:  null value cannot be assigned to variable "employer.name" declared NOT NULL
+CONTEXT:  PL/pgSQL function regress_record1(character varying) line 6 at assignment
+DROP FUNCTION regress_record1;
 --------------------------------------------------
 ------------------ END OF TESTS ------------------
 --------------------------------------------------
