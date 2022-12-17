@@ -592,6 +592,7 @@ bool libpqsw_process_query_message(const char* commandTag, List* query_list, con
         }
     }
     libpqsw_set_set_command(false);
+    libpqsw_set_redirect(false);
     return need_redirect;
 }
 
