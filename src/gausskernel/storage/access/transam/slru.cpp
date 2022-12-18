@@ -667,18 +667,36 @@ static bool SlruPhysicalReadPage(SlruCtl ctl, int64 pageno, int slotno)
         return true;
     }
 
-    if (lseek(fd, (off_t)offset, SEEK_SET) < 0) {
-        bool failed = true;
-        if (ENABLE_DSS && errno == ERR_DSS_FILE_SEEK) {
-            if (!SSPreAllocSegment(fd, NULL)) {
-                return false;
-            }
-            if (lseek(fd, (off_t)offset, SEEK_SET) >= 0) {
-                failed = false;
+    if (ENABLE_DSS) {
+        struct stat s;
+        if (fstat(fd, &s) < 0) {
+            t_thrd.xact_cxt.slru_errcause = SLRU_OPEN_FAILED;
+            t_thrd.xact_cxt.slru_errno = errno;
+            (void)close(fd);
+            return false;
+        }
+        if (s.st_size <= offset) {
+            /* extend the file*/
+            int64 trunc_size = (int64)(SLRU_PAGES_PER_SEGMENT * BLCKSZ);
+            if (s.st_size < trunc_size) {
+                /* extend file at once to avoid dss cross-border write issue*/
+                pgstat_report_waitevent(WAIT_EVENT_SLRU_WRITE);
+                errno = 0;
+                if (fallocate(fd, 0, s.st_size, trunc_size) != 0) {
+                    pgstat_report_waitevent(WAIT_EVENT_END);
+                    if (errno == 0) {
+                        errno = ENOSPC;
+                    }
+                   t_thrd.xact_cxt.slru_errcause = SLRU_WRITE_FAILED;
+                   t_thrd.xact_cxt.slru_errno = errno;
+                   (void)close(fd);
+                    return false;                   
+                }
+                pgstat_report_waitevent(WAIT_EVENT_END);
             }
         }
-
-        if (failed) {
+    } else {
+        if (lseek(fd, (off_t)offset, SEEK_SET) < 0) {
             t_thrd.xact_cxt.slru_errcause = SLRU_SEEK_FAILED;
             t_thrd.xact_cxt.slru_errno = errno;
             (void)close(fd);
@@ -688,7 +706,7 @@ static bool SlruPhysicalReadPage(SlruCtl ctl, int64 pageno, int slotno)
 
     errno = 0;
     pgstat_report_waitevent(WAIT_EVENT_SLRU_READ);
-    if (read(fd, shared->page_buffer[slotno], BLCKSZ) != BLCKSZ) {
+    if (pread(fd, shared->page_buffer[slotno], BLCKSZ, (off_t)offset) != BLCKSZ) {
         pgstat_report_waitevent(WAIT_EVENT_END);
         if (!t_thrd.xlog_cxt.InRecovery) {
             t_thrd.xact_cxt.slru_errcause = SLRU_READ_FAILED;
