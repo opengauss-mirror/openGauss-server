@@ -1148,7 +1148,11 @@ ERROR:  syntax error at or near "@"
 LINE 1: set @ v1:=10;
             ^
 select @v1:=10;
-ERROR:  user_defined variables cannot be set, such as @var_name := expr is not supported.
+ ?column? 
+----------
+       10
+(1 row)
+
 --DTS
 \c test_set
 set @v := 10;

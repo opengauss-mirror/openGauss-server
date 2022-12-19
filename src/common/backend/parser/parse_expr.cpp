@@ -1699,8 +1699,12 @@ static Node* transformUserVar(UserVar *uservar)
         uservar->name, HASH_FIND, &found);
     if (!found) {
         /* return a null const */
-        Const *nullValue = makeConst(UNKNOWNOID, -1, InvalidOid, -2, (Datum)0, true, false);
-        return (Node *)nullValue;
+        Const *nullValue = makeConst(TEXTOID, -1, InvalidOid, -2, (Datum)0, true, false);
+        /*in parser ,can not return null const , it should be NULL in UserVar */
+        UserVar *result = makeNode(UserVar);
+        result->name = uservar->name;
+        result->value = (Expr *)nullValue;
+        return (Node *)result;
     }
 
     entry = (GucUserParamsEntry *)hash_search(u_sess->utils_cxt.set_user_params_htab, uservar->name, HASH_ENTER, &found);
