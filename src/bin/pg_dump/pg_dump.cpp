@@ -7169,6 +7169,7 @@ TableInfo* getTables(Archive* fout, int* numTables)
         }
         tblinfo[i].autoinc_attnum = 0;
         tblinfo[i].autoincconstraint = 0;
+        tblinfo[i].autoincindex = 0;
 #ifdef PGXC
         /* Not all the tables have pgxc locator Data */
         if (PQgetisnull(res, i, i_pgxclocatortype)) {
@@ -7858,6 +7859,12 @@ void getIndexes(Archive* fout, TableInfo tblinfo[], int numTables)
             } else {
                 /* Plain secondary index */
                 indxinfo[j].indexconstraint = 0;
+                if (tbinfo->autoinc_attnum > 0 &&
+                    tbinfo->autoincconstraint == 0 &&
+                    tbinfo->autoincindex == 0 &&
+                    (Oid)tbinfo->autoinc_attnum == indxinfo[j].indkeys[0]) {
+                    tbinfo->autoincindex = indxinfo[j].dobj.dumpId;
+                }
             }
         }
         if (0 == contrants_processed) {
@@ -19288,6 +19295,26 @@ static void dumpTableSchema(Archive* fout, TableInfo* tbinfo)
             appendPQExpBuffer(q, "CONSTRAINT %s ", fmtId(coninfo->dobj.name));
             dumpUniquePrimaryDef(q, coninfo, indxinfo, isBcompatibility);
             actual_atts++;
+        } else if (tbinfo->autoincindex != 0) {
+            ddr_Assert(actual_atts != 0);
+            IndxInfo* indxinfo = (IndxInfo*)findObjectByDumpId(tbinfo->autoincindex);
+            uint32 posoffset;
+            const char* endpos = NULL;
+            char* usingpos = strstr(indxinfo->indexdef, " USING ");
+            if (usingpos != NULL) {
+                endpos = strstr(usingpos, " TABLESPACE ");
+                if (endpos != NULL) {
+                    posoffset = (uint32)(endpos - usingpos);
+                } else {
+                    posoffset = (uint32)strlen(usingpos);
+                }
+                /* get "USING ... (keypart, ...)" from indexdef */
+                char indexpartdef[posoffset + 1] = {0};
+                errno_t rc = strncpy_s(indexpartdef, posoffset + 1, usingpos, posoffset);
+                securec_check_c(rc, "\0", "\0");
+                appendPQExpBuffer(q, ",\n    INDEX %s%s", fmtId(indxinfo->dobj.name), indexpartdef);
+                actual_atts++;
+            }
         }
 
         if (actual_atts) {
@@ -20282,7 +20309,7 @@ static void dumpIndex(Archive* fout, IndxInfo* indxinfo)
      * emitted comment has to be shown as depending on the constraint, not
      * the index, in such cases.
      */
-    if (!is_constraint) {
+    if (!is_constraint && (tbinfo->autoincconstraint > 0 || indxinfo->dobj.dumpId != tbinfo->autoincindex)) {
         if (binary_upgrade) {
             binary_upgrade_set_pg_class_oids(fout, q, indxinfo->dobj.catId.oid, true, false);
 

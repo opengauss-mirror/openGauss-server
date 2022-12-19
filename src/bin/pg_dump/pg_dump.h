@@ -242,6 +242,7 @@ typedef struct _tableInfo {
     bool interesting; /* true if need to collect more data */
     int autoinc_attnum;
     DumpId autoincconstraint;
+    DumpId autoincindex;
     char* autoinc_seqname;
 #ifdef PGXC
     /* PGXC table locator Data */

@@ -8329,6 +8329,9 @@ static void ATRewriteCatalogs(List** wqueue, LOCKMODE lockmode)
             AlterTableCreateToastTable(tab->relid, toast_reloptions);
             relation_close(rel, NoLock);
         }
+        if (tab->relkind == RELKIND_RELATION) {
+            CheckRelAutoIncrementIndex(tab->relid, NoLock);
+        }
     }
 }
 
@@ -13172,24 +13175,6 @@ bool ConstraintSatisfyAutoIncrement(HeapTuple tuple, TupleDesc desc, AttrNumber 
     pfree(keys);
     return false;
 }
-
-static void CheckAutoIncrementConstraints(Relation conrel, SysScanDesc scan, HeapTuple tuple,
-    AttrNumber attrnum, bool satisfy_autoinc)
-{
-    if (attrnum == 0 || satisfy_autoinc) {
-        return;
-    }
-    Form_pg_constraint con;
-    while (HeapTupleIsValid(tuple = systable_getnext(scan))) {
-        con = (Form_pg_constraint)GETSTRUCT(tuple);
-        if (ConstraintSatisfyAutoIncrement(tuple, RelationGetDescr(conrel), attrnum, con->contype)) {
-            return;
-        }
-    }
-    ereport(ERROR, (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-                    (errmsg("auto_increment column must be defined as a unique or primary key"))));
-}
-
 /*
  * ALTER TABLE DROP CONSTRAINT
  *
@@ -13207,8 +13192,6 @@ static void ATExecDropConstraint(Relation rel, const char* constrName, DropBehav
     HeapTuple tuple;
     bool found = false;
     bool is_no_inherit_constraint = false;
-    AttrNumber autoinc_attnum = RelAutoIncAttrNum(rel);
-    bool satisfy_autoinc = false;
 
     /* At top level, permission check was done in ATPrepCmd, else do it */
     if (recursing)
@@ -13229,9 +13212,6 @@ static void ATExecDropConstraint(Relation rel, const char* constrName, DropBehav
         con = (Form_pg_constraint)GETSTRUCT(tuple);
 
         if (strcmp(NameStr(con->conname), constrName) != 0) {
-            if (ConstraintSatisfyAutoIncrement(tuple, RelationGetDescr(conrel), autoinc_attnum, con->contype)) {
-                satisfy_autoinc = true;
-            }
             continue;
         }
 
@@ -13294,7 +13274,6 @@ static void ATExecDropConstraint(Relation rel, const char* constrName, DropBehav
         /* constraint found and dropped -- no need to keep looping */
         break;
     }
-    CheckAutoIncrementConstraints(conrel, scan, tuple, autoinc_attnum, satisfy_autoinc);
 
     systable_endscan(scan);
 
@@ -28609,5 +28588,45 @@ static void CopyTempAutoIncrement(Relation oldrel, Relation newrel)
     int128* value = find_tmptable_cache_autoinc(oldrel->rd_rel->relfilenode);
     if (value != NULL) {
         tmptable_autoinc_reset(newrel->rd_rel->relfilenode, *value);
+    }
+}
+
+void CheckRelAutoIncrementIndex(Oid relid, LOCKMODE lockmode)
+{
+    List* idxoidlist = NULL;
+    bool found = false;
+    Relation rel = relation_open(relid, lockmode);
+    AttrNumber autoinc_attnum = RelAutoIncAttrNum(rel);
+
+    if (autoinc_attnum <= 0) {
+        relation_close(rel, lockmode);
+        return;
+    }
+
+    if (!rel->rd_rel->relhasindex) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                (errmsg("Incorrect table definition, auto_increment column must be defined as a key"))));
+    }
+
+    idxoidlist = RelationGetIndexList(rel);
+    relation_close(rel, lockmode);
+
+    foreach_cell(l, idxoidlist) {
+        Relation idxrel = index_open(lfirst_oid(l), AccessShareLock);
+        Form_pg_index index = idxrel->rd_index;
+        
+        if (IndexIsValid(index) && (index->indisunique || index->indisprimary) &&
+            index->indkey.values[0] == autoinc_attnum) {
+            found = true;
+            index_close(idxrel, AccessShareLock);
+            break;
+        }
+        index_close(idxrel, AccessShareLock);
+    }
+
+    list_free(idxoidlist);
+    if (!found) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                (errmsg("Incorrect table definition, auto_increment column must be defined as a key"))));
     }
 }
