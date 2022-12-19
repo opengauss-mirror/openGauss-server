@@ -94,12 +94,15 @@ extern THR_LOCAL PGDLLIMPORT MemoryContext ErrorContext;
  */
 extern void MemoryContextInit(void);
 extern void MemoryContextReset(MemoryContext context);
+extern void opt_MemoryContextReset(MemoryContext context);
 extern void MemoryContextDelete(MemoryContext context);
+extern void opt_MemoryContextDeleteInternal(MemoryContext context, List* context_list = NULL);
 extern void MemoryContextResetChildren(MemoryContext context);
 extern void MemoryContextDeleteChildren(MemoryContext context, List* context_list = NULL);
 extern void MemoryContextDestroyAtThreadExit(MemoryContext context);
 extern void MemoryContextResetAndDeleteChildren(MemoryContext context);
 extern void MemoryContextSetParent(MemoryContext context, MemoryContext new_parent);
+extern void opt_MemoryContextSetParent(MemoryContext context, MemoryContext new_parent);
 extern Size GetMemoryChunkSpace(void* pointer);
 extern MemoryContext GetMemoryChunkContext(void* pointer);
 extern MemoryContext MemoryContextGetParent(MemoryContext context);
@@ -131,6 +134,8 @@ extern MemoryContext MemoryContextCreate(
 extern MemoryContext MemoryContextCreate(
     NodeTag tag, Size size, MemoryContextMethods* methods, MemoryContext parent, const char* name);
 
+extern MemoryContext opt_MemoryContextCreate(MemoryContext node, NodeTag tag,
+    MemoryContextMethods *methods, MemoryContext parent, const char* name);
 /*
  * Memory-context-type-specific functions
  */
@@ -140,6 +145,8 @@ extern MemoryContext MemoryContextCreate(
 extern MemoryContext AllocSetContextCreate(MemoryContext parent, const char* name, Size minContextSize,
     Size initBlockSize, Size maxBlockSize, MemoryContextType type = STANDARD_CONTEXT,
     Size maxSize = DEFAULT_MEMORY_CONTEXT_MAX_SIZE, bool isSession = false);
+extern MemoryContext opt_AllocSetContextCreate(MemoryContext parent,
+    const char* name, Size minContextSize, Size initBlockSize, Size maxBlockSize);
 
 /*
  * Recommended default alloc parameters, suitable for "ordinary" contexts

@@ -379,9 +379,14 @@ MemoryContext AllocSetContextCreate(_in_ MemoryContext parent, _in_ const char* 
     }
     switch (contextType) {
 #ifndef ENABLE_MEMORY_CHECK
-        case STANDARD_CONTEXT:
-            return GenericMemoryAllocator::AllocSetContextCreate(
-                parent, name, minContextSize, initBlockSize, maxBlockSize, maxSize, false, isSession);
+        case STANDARD_CONTEXT: {
+            if (g_instance.attr.attr_memory.disable_memory_stats) {
+                return opt_AllocSetContextCreate(parent, name, minContextSize, initBlockSize, maxBlockSize);
+            } else {
+                return GenericMemoryAllocator::AllocSetContextCreate(
+                    parent, name, minContextSize, initBlockSize, maxBlockSize, maxSize, false, isSession);
+            }
+        }
         case SHARED_CONTEXT:
             return GenericMemoryAllocator::AllocSetContextCreate(
                 parent, name, minContextSize, initBlockSize, maxBlockSize, maxSize, true, false);

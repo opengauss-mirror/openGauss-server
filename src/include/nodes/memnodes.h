@@ -148,6 +148,7 @@ typedef struct AllocSetContext {
 
     /* maximum memory allocation of MemoryContext.For more information,we could see @StackSetContext too. */
     Size maxSpaceSize;
+	int freeListIndex;
 
     MemoryTrack track; /* used to track the memory allocation information */
 } AllocSetContext;
@@ -278,6 +279,9 @@ extern MemoryProtectFuncDef GenericFunctions;
 extern MemoryProtectFuncDef SessionFunctions;
 extern MemoryProtectFuncDef SharedFunctions;
 
+#define IsOptAllocSetContext(cxt)           \
+    ((cxt) != NULL && (IsA((cxt), OptAllocSetContext)))
+
 /*
  * MemoryContextIsValid
  *		True iff memory context is valid.
@@ -288,7 +292,7 @@ extern MemoryProtectFuncDef SharedFunctions;
     ((context) != NULL &&                                                                                             \
         (IsA((context), AllocSetContext) || IsA((context), AsanSetContext) || IsA((context), StackAllocSetContext) || \
             IsA((context), SharedAllocSetContext) || IsA((context), MemalignAllocSetContext) ||                       \
-            IsA((context), MemalignSharedAllocSetContext)))
+            IsA((context), MemalignSharedAllocSetContext) || IsA((context), OptAllocSetContext)))
 
 #define AllocSetContextUsedSpace(aset) ((aset)->totalSpace - (aset)->freeSpace)
 
