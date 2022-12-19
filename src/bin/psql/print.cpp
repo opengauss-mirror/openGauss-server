@@ -780,7 +780,9 @@ static void print_aligned_text(const printTableContent* cont, FILE* fout)
 
             more_col_wrapping = col_count;
             curr_nl_line = 0;
-            check_memset_s(memset_s(header_done, col_count * sizeof(bool), false, col_count * sizeof(bool)));
+            if (col_count > 0) {
+                check_memset_s(memset_s(header_done, col_count * sizeof(bool), false, col_count * sizeof(bool)));
+            }
             while (more_col_wrapping) {
                 if (opt_border == 2) {
                     fputs(dformat->leftvrule, fout);
@@ -809,7 +811,7 @@ static void print_aligned_text(const printTableContent* cont, FILE* fout)
                     if (opt_border != 0 || format->wrap_right_border)
                         fputs(!header_done[i] ? format->header_nl_right : " ", fout);
 
-                    if (opt_border != 0 && i < col_count - 1)
+                    if (opt_border != 0 && col_count > 0 && i < col_count - 1)
                         fputs(dformat->midvrule, fout);
                 }
                 curr_nl_line++;

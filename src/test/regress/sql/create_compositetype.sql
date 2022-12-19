@@ -6,6 +6,17 @@ drop type  "01jfiejriouieraejijiosjoerqkjou含有中文字符feoajfoeuitoooeiajf
 create type pg_class as (a int);
 drop type public.pg_class;
 
+/* drop type to make a 0 column table */
+create type s_type as (a int, b text);
+create table t_zero_col(a s_type);
+insert into t_zero_col values((1, '1'));
+select * from t_zero_col order by 1;
+drop type s_type cascade;
+select * from t_zero_col;
+insert into t_zero_col values((2, '1'));
+insert into t_zero_col values(null);
+drop table t_zero_col;
+
 create table t_group (a int, b compfoo) WITH (orientation=row);
 insert into t_group values (1,(1,'Simon1'));
 insert into t_group values (2,(2,'Simon2'));
