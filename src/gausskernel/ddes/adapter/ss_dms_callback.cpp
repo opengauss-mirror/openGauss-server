@@ -1065,7 +1065,6 @@ static void SSGetBufferDesc(char *pageid, bool *is_valid, BufferDesc** ret_buf_d
     {
         (void)LWLockAcquire(partition_lock, LW_SHARED);
         buf_id = BufTableLookup(tag, hash);
-        Assert(buf_id >= 0);
         if (buf_id >= 0) {
             buf_desc = GetBufferDescriptor(buf_id);
             ResourceOwnerEnlargeBuffers(t_thrd.utils_cxt.CurrentResourceOwner);
@@ -1118,7 +1117,7 @@ static int CBConfirmOwner(void *db_handle, char *pageid, unsigned char *lock_mod
     }
 
     /*
-     * not acquire buf_desc->content_lock
+     * not acquire buf_desc->io_in_progress_lock
      * consistency guaranteed by reform phase
      */
     buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
@@ -1156,23 +1155,23 @@ static int CBConfirmConverting(void *db_handle, char *pageid, unsigned char smon
     struct timeval begin_tv;
     struct timeval now_tv;
     (void)gettimeofday(&begin_tv, NULL);
-    long begin = GET_MS(begin_tv);
+    long begin = GET_US(begin_tv);
     long now;
 
     while (true) {
-        (void)gettimeofday(&now_tv, NULL);
-        now = GET_MS(now_tv);
-        if (now - begin > REFORM_CONFIRM_TIMEOUT) {
-            timeout = true;
-            break;
-        }
-
-        bool is_locked = LWLockConditionalAcquire(buf_desc->content_lock, LW_EXCLUSIVE);
+        bool is_locked = LWLockConditionalAcquire(buf_desc->io_in_progress_lock, LW_EXCLUSIVE);
         if (is_locked) {
             buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
             *ver = buf_ctrl->ver;
             *lock_mode = buf_ctrl->lock_mode;
-            LWLockRelease(buf_desc->content_lock);
+            LWLockRelease(buf_desc->io_in_progress_lock);
+            break;
+        }
+
+        (void)gettimeofday(&now_tv, NULL);
+        now = GET_US(now_tv);
+        if (now - begin > REFORM_CONFIRM_TIMEOUT) {
+            timeout = true;
             break;
         }
         pg_usleep(REFORM_CONFIRM_INTERVAL); /* sleep 5ms */

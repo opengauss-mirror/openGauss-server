@@ -28,7 +28,7 @@
 /* 5 seconds */
 #define REFORM_CONFIRM_TIMEOUT  5000000
 #define REFORM_CONFIRM_INTERVAL 5000
-#define GET_MS(tv) (tv.tv_sec * 1000000 + tv.tv_usec)
+#define GET_US(tv) ((int64)tv.tv_sec * 1000000U + tv.tv_usec)
 #define DMS_LOGGER_BUFFER_SIZE 2048
 
 extern void DmsInitCallback(dms_callback_t *callback);
