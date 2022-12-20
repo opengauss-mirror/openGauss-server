@@ -231,10 +231,10 @@ public:
         }
         if (fmt != log_trace_msg->data) {
             va_list args;
-            int nRet = 0;
             (void)va_start(args, fmt);
-            nRet = vsnprintf_s(log_trace_msg->data, log_trace_msg->maxlen, log_trace_msg->maxlen - 1, fmt, args);
-            securec_check_ss_c(nRet, "\0", "\0");
+            // This place just is the message print. So there is't need check the value of vsnprintf_s function return. if
+            // checked, when the message lengtn is over than log_trace_msg->maxlen, will be abnormal exit.
+            (void)vsnprintf_s(log_trace_msg->data, log_trace_msg->maxlen, log_trace_msg->maxlen - 1, fmt, args);
             va_end(args);
         }
         ereport(level, (errmsg("libpqsw:%s", log_trace_msg->data)));
