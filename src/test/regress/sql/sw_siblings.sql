@@ -167,3 +167,28 @@ SELECT * FROM test_area
 START WITH name = '中国'
 CONNECT BY prior id = fatherid
 ORDER SIBLINGS BY id desc, name, name_desc desc;
+
+-- test siblings by + limit
+SELECT *, LEVEL, connect_by_isleaf, connect_by_iscycle, connect_by_root(name_desc), SYS_CONNECT_BY_PATH(name, '@') cpath
+FROM test_area
+START WITH name = '中国'
+CONNECT BY prior id = fatherid
+ORDER SIBLINGS BY 1 limit 5;
+
+SELECT *, LEVEL, connect_by_isleaf, connect_by_iscycle, connect_by_root(name_desc), SYS_CONNECT_BY_PATH(name, '@') cpath
+FROM test_area
+START WITH name = '中国'
+CONNECT BY prior id = fatherid
+ORDER SIBLINGS BY 1 limit 5 offset 5;
+
+SELECT *, LEVEL, connect_by_isleaf, connect_by_iscycle, connect_by_root(name_desc), SYS_CONNECT_BY_PATH(name, '@') cpath
+FROM test_area
+START WITH name = '中国'
+CONNECT BY prior id = fatherid
+ORDER SIBLINGS BY 1 order by name limit 5;
+
+SELECT *, LEVEL, connect_by_isleaf, connect_by_iscycle, connect_by_root(name_desc), SYS_CONNECT_BY_PATH(name, '@') cpath
+FROM test_area
+START WITH name = '中国'
+CONNECT BY prior id = fatherid
+ORDER SIBLINGS BY 1 order by name limit 5 offset 5;
