@@ -706,6 +706,37 @@ static int CBInvalidatePage(void *db_handle, char pageid[DMS_PAGEID_SIZE], unsig
     return ret;
 }
 
+static void CBVerifyPage(dms_buf_ctrl_t *buf_ctrl, char *new_page)
+{
+    Assert(buf_ctrl->buf_id < TOTAL_BUFFER_NUM);
+    if (buf_ctrl->buf_id >= TOTAL_BUFFER_NUM) {
+        return;
+    }
+
+    BufferDesc *buf_desc = GetBufferDescriptor(buf_ctrl->buf_id);
+    /* page content is not valid */
+    if ((pg_atomic_read_u32(&buf_desc->state) & BM_VALID) == 0) {
+        return;
+    }
+
+    /* we only verify segment-page version */
+    if (!(buf_desc->seg_fileno != EXTENT_INVALID || IsSegmentBufferID(buf_desc->buf_id))) {
+        return;
+    }
+
+    char *page = (char *)BufHdrGetBlock(buf_desc);
+    XLogRecPtr lsn_past = PageGetLSN(page);
+    XLogRecPtr lsn_now = PageGetLSN(new_page);
+    if ((lsn_now != InvalidXLogRecPtr) && (lsn_past > lsn_now)) {
+        RelFileNode rnode = buf_desc->tag.rnode;
+        ereport(PANIC, (errmsg("[%d/%d/%d/%d/%d %d-%d] now lsn(0x%llx) is less than past lsn(0x%llx)",
+            rnode.spcNode, rnode.dbNode, rnode.relNode, rnode.bucketNode, rnode.opt,
+            buf_desc->tag.forkNum, buf_desc->tag.blockNum,
+            (unsigned long long)lsn_now, (unsigned long long)lsn_past)));
+    }
+    return;
+}
+
 static int CBXLogFlush(void *db_handle, unsigned long long *lsn)
 {
     (void)LWLockAcquire(WALWriteLock, LW_EXCLUSIVE);
@@ -1474,6 +1505,7 @@ void DmsInitCallback(dms_callback_t *callback)
     callback->invld_share_copy = CBInvalidatePage;
     callback->get_db_handle = CBGetHandle;
     callback->display_pageid = CBDisplayBufferTag;
+    callback->verify_page = CBVerifyPage;
 
     callback->mem_alloc = CBMemAlloc;
     callback->mem_free = CBMemFree;

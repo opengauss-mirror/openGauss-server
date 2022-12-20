@@ -1941,6 +1941,29 @@ Buffer ReadBuffer_common_for_direct(RelFileNode rnode, char relpersistence, Fork
     return RedoBufferSlotGetBuffer(bufferslot);
 }
 
+static void WriteZeroPageToDisk(SMgrRelation smgr, ForkNumber forknum, BlockNumber blocknum,
+    Block bufBlock, const XLogPhyBlock *pblk)
+{
+    if (ENABLE_DSS) {
+        if (pblk != NULL) {
+            SegmentCheck(XLOG_NEED_PHYSICAL_LOCATION(smgr->smgr_rnode.node));
+            SegmentCheck(PhyBlockIsValid(*pblk));
+            SegSpace* spc = spc_open(smgr->smgr_rnode.node.spcNode, smgr->smgr_rnode.node.dbNode, false);
+            SegmentCheck(spc);
+            RelFileNode fakenode = {
+                .spcNode = spc->spcNode,
+                .dbNode = spc->dbNode,
+                .relNode = pblk->relNode,
+                .bucketNode = SegmentBktId,
+                .opt = 0
+            };
+            seg_physical_write(spc, fakenode, forknum, pblk->block, (char *)bufBlock, false);
+        } else {
+            smgrwrite(smgr, forknum, blocknum, (char *)bufBlock, false);
+        }
+    }
+}
+
 /*
  * ReadBuffer_common_ReadBlock -- common logic for all ReadBuffer variants
  *  reconstruct for batch redo
@@ -1971,6 +1994,7 @@ static bool ReadBuffer_common_ReadBlock(SMgrRelation smgr, char relpersistence, 
          */
         if (mode == RBM_ZERO || mode == RBM_ZERO_AND_LOCK || mode == RBM_ZERO_AND_CLEANUP_LOCK) {
             MemSet((char *)bufBlock, 0, BLCKSZ);
+            WriteZeroPageToDisk(smgr, forkNum, blockNum, bufBlock, pblk);
         } else {
             instr_time io_start, io_time;
 
@@ -2024,6 +2048,7 @@ static bool ReadBuffer_common_ReadBlock(SMgrRelation smgr, char relpersistence, 
                                              relpath(smgr->smgr_rnode, forkNum)),
                                       handle_in_client(true)));
                     MemSet((char *)bufBlock, 0, BLCKSZ);
+                    WriteZeroPageToDisk(smgr, forkNum, blockNum, bufBlock, pblk);
                 } else if (mode != RBM_FOR_REMOTE && relpersistence == RELPERSISTENCE_PERMANENT &&
                            CanRemoteRead() && !IsSegmentFileNode(smgr->smgr_rnode.node)) {
                     /* not alread in remote read and not temp/unlogged table, try to remote read */
@@ -2123,6 +2148,16 @@ Buffer ReadBuffer_common_for_dms(ReadBufferMode readmode, BufferDesc* buf_desc, 
     char relpersistence = (buf_ctrl->state & BUF_IS_RELPERSISTENT)? 'p': 0;
     Block bufBlock = BufHdrGetBlock(buf_desc);
 
+#ifdef USE_ASSERT_CHECKING
+    bool need_verify = (((pg_atomic_read_u32(&buf_desc->state) & BM_VALID) != 0) && ENABLE_VERIFY_PAGE_VERSION);
+    char *past_image = NULL;
+    if (need_verify) {
+        past_image = (char *)palloc(BLCKSZ);
+        errno_t ret = memcpy_s(past_image, BLCKSZ, bufBlock, BLCKSZ);
+        securec_check_ss(ret, "\0", "\0");
+    }
+#endif
+
     if (pblk != NULL) {
         Assert(PhyBlockIsValid(*pblk));
         Assert(OidIsValid(pblk->relNode));
@@ -2138,8 +2173,26 @@ Buffer ReadBuffer_common_for_dms(ReadBufferMode readmode, BufferDesc* buf_desc, 
         LWLockRelease(buf_desc->io_in_progress_lock);
         UnpinBuffer(buf_desc, true);
         AbortBufferIO();
+#ifdef USE_ASSERT_CHECKING
+        pfree_ext(past_image);
+#endif
         return InvalidBuffer;
     }
+
+#ifdef USE_ASSERT_CHECKING
+    if (need_verify) {
+        XLogRecPtr lsn_past = PageGetLSN(past_image);
+        XLogRecPtr lsn_now = PageGetLSN(bufBlock);
+        if (lsn_now < lsn_past) {
+            RelFileNode rnode = buf_desc->tag.rnode;
+            ereport(PANIC, (errmsg("[%d/%d/%d/%d/%d %d-%d] now lsn(0x%llx) is less than past lsn(0x%llx)",
+                rnode.spcNode, rnode.dbNode, rnode.relNode, rnode.bucketNode, rnode.opt,
+                buf_desc->tag.forkNum, buf_desc->tag.blockNum,
+                (unsigned long long)lsn_now, (unsigned long long)lsn_past)));
+        }
+    }
+    pfree_ext(past_image);
+#endif
 
     buf_desc->lsn_on_disk = PageGetLSN(bufBlock);
 #ifdef USE_ASSERT_CHECKING
@@ -4674,6 +4727,10 @@ void FlushBuffer(void *buf, SMgrRelation reln, ReadBufferMethod flushmethod, boo
             .bucketNode = SegmentBktId,
             .opt = 0
         };
+
+#ifdef USE_ASSERT_CHECKING
+        SegFlushCheckDiskLSN(spc, fakenode, bufferinfo.blockinfo.forknum, bufdesc->seg_blockno, bufToWrite);
+#endif
 
         if (ENABLE_DMS && t_thrd.role == PAGEWRITER_THREAD && ENABLE_DSS_AIO) {
             int thread_id = t_thrd.pagewriter_cxt.pagewriter_id;

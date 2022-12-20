@@ -306,6 +306,26 @@ void SegMarkBufferDirty(Buffer buf)
     UnlockBufHdr(bufHdr, buf_state);
 }
 
+#ifdef USE_ASSERT_CHECKING
+void SegFlushCheckDiskLSN(SegSpace *spc, RelFileNode rNode, ForkNumber forknum, BlockNumber blocknum, char *buf)
+{
+    if (ENABLE_DSS && ENABLE_VERIFY_PAGE_VERSION) {
+        char *origin_buf = (char *)palloc(BLCKSZ + ALIGNOF_BUFFER);
+        char *temp_buf = (char *)BUFFERALIGN(origin_buf);
+        seg_physical_read(spc, rNode, forknum, blocknum, temp_buf);
+        XLogRecPtr lsn_on_disk = PageGetLSN(temp_buf);
+        XLogRecPtr lsn_on_mem = PageGetLSN(buf);
+        /* maybe some pages are not protected by WAL-Logged */
+        if ((lsn_on_mem != InvalidXLogRecPtr) && (lsn_on_disk > lsn_on_mem)) {
+            ereport(PANIC, (errmsg("[%d/%d/%d/%d/%d %d-%d] memory lsn(0x%llx) is less than disk lsn(0x%llx)",
+                rNode.spcNode, rNode.dbNode, rNode.relNode, rNode.bucketNode, rNode.opt,
+                forknum, blocknum, (unsigned long long)lsn_on_mem, (unsigned long long)lsn_on_disk)));
+        }
+        pfree(origin_buf);
+    }
+}
+#endif
+
 void SegFlushBuffer(BufferDesc *buf, SMgrRelation reln)
 {
     t_thrd.dms_cxt.buf_in_aio = false;
@@ -361,6 +381,10 @@ void SegFlushBuffer(BufferDesc *buf, SMgrRelation reln)
     } else {
         buf_to_write = PageSetChecksumCopy((Page)buf_to_write, buffer_info.blockinfo.blkno, true);
     }
+
+#ifdef USE_ASSERT_CHECKING
+    SegFlushCheckDiskLSN(spc, buf->tag.rnode, buf->tag.forkNum, buf->tag.blockNum, buf_to_write);
+#endif
 
     if (ENABLE_DMS && t_thrd.role == PAGEWRITER_THREAD && ENABLE_DSS_AIO) {
         int thread_id = t_thrd.pagewriter_cxt.pagewriter_id;
@@ -462,7 +486,22 @@ Buffer ReadSegBufferForDMS(BufferDesc* bufHdr, ReadBufferMode mode, SegSpace *sp
     if (mode == RBM_ZERO_AND_LOCK || mode == RBM_ZERO_AND_CLEANUP_LOCK || mode == RBM_ZERO) {
         errno_t er = memset_s((char *)bufBlock, BLCKSZ, 0, BLCKSZ);
         securec_check(er, "", "");
+        if (ENABLE_DSS) {
+            /* set dss block content to zero */
+            seg_physical_write(spc, bufHdr->tag.rnode, bufHdr->tag.forkNum, bufHdr->tag.blockNum, bufBlock, false);
+        }
     } else {
+#ifdef USE_ASSERT_CHECKING
+        bool need_verify = (((pg_atomic_read_u32(&bufHdr->state) & BM_VALID) != 0) &&
+            ENABLE_DSS && ENABLE_VERIFY_PAGE_VERSION);
+        char *past_image = NULL;
+        if (need_verify) {
+            past_image = (char *)palloc(BLCKSZ);
+            errno_t ret = memcpy_s(past_image, BLCKSZ, bufBlock, BLCKSZ);
+            securec_check_ss(ret, "\0", "\0");
+        }
+#endif
+    
         seg_physical_read(spc, bufHdr->tag.rnode, bufHdr->tag.forkNum, bufHdr->tag.blockNum, bufBlock);
         ereport(DEBUG1,
             (errmsg("DMS SegPage ReadBuffer success, bufid:%d, blockNum:%u of reln:%s mode %d.",
@@ -473,8 +512,26 @@ Buffer ReadSegBufferForDMS(BufferDesc* bufHdr, ReadBufferMode mode, SegSpace *sp
             key.forknum = bufHdr->tag.forkNum;
             key.blocknum = bufHdr->tag.blockNum;
             ReportInvalidPage(key);
+#ifdef USE_ASSERT_CHECKING
+            pfree_ext(past_image);
+#endif
             return InvalidBuffer;
         }
+
+#ifdef USE_ASSERT_CHECKING
+        if (need_verify) {
+            XLogRecPtr lsn_past = PageGetLSN(past_image);
+            XLogRecPtr lsn_now = PageGetLSN(bufBlock);
+            if (lsn_now < lsn_past) {
+                RelFileNode rnode = bufHdr->tag.rnode;
+                ereport(PANIC, (errmsg("[%d/%d/%d/%d/%d %d-%d] now lsn(0x%llx) is less than past lsn(0x%llx)",
+                    rnode.spcNode, rnode.dbNode, rnode.relNode, rnode.bucketNode, rnode.opt,
+                    bufHdr->tag.forkNum, bufHdr->tag.blockNum,
+                    (unsigned long long)lsn_now, (unsigned long long)lsn_past)));
+            }
+        }
+        pfree_ext(past_image);
+#endif
 
         if (!PageIsSegmentVersion(bufBlock) && !PageIsNew(bufBlock)) {
             ereport(PANIC, (errmsg("Read DMS SegPage buffer, block %u of relation %s, but page version is %d",
@@ -556,6 +613,9 @@ Buffer ReadBufferFast(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum, Bloc
         if (mode == RBM_ZERO_AND_LOCK || mode == RBM_ZERO_AND_CLEANUP_LOCK || mode == RBM_ZERO) {
             errno_t er = memset_s((char *)bufBlock, BLCKSZ, 0, BLCKSZ);
             securec_check(er, "", "");
+            if (ENABLE_DSS) {
+                seg_physical_write(spc, rnode, forkNum, blockNum, bufBlock, false);
+            }
         } else {
             seg_physical_read(spc, rnode, forkNum, blockNum, bufBlock);
             if (!PageIsVerified(bufBlock, blockNum)) {

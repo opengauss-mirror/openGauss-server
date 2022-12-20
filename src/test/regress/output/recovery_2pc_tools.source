@@ -604,6 +604,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  ss_enable_scrlock                                | bool    |      |           | 
  ss_enable_scrlock_sleep_mode                     | bool    |      |           | 
  ss_enable_ssl                                    | bool    |      |           | 
+ ss_enable_verify_page                            | bool    |      |           | 
  ss_instance_id                                   | integer |      | 0         | 63
  ss_interconnect_channel_count                    | integer |      | 1         | 32
  ss_interconnect_type                             | string  |      |           | 

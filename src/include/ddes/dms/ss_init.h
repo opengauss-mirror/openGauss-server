@@ -29,6 +29,7 @@
 
 #define DMS_MAX_INSTANCE 64
 #define DMS_MAX_SESSIONS (uint32)16320
+#define DMS_MAX_CONNECTIONS (int32)16000
 
 #define SS_MASTER_ID g_instance.dms_cxt.SSReformerControl.primaryInstId // currently master ID is hardcoded as 0
 #define SS_MY_INST_ID g_instance.attr.attr_storage.dms_attr.instance_id
