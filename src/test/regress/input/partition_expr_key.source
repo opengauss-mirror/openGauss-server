@@ -171,6 +171,19 @@ select * from testhashsubpart partition(p0);
 select * from testhashsubpart partition(p1);
 delete from testtab;
 
+--test extract function
+drop table if exists test_extract;
+create table test_extract (id int not null,
+ename varchar(30),
+hired date not null default '1970-01-01',
+separated date not null default '9999-12-31',
+job varchar(30) not null,store_id int not null)
+partition by range(extract(year from separated))
+ (partition p0 values less than (1995),
+partition p1 values less than (2000),
+partition p2 values less than (2005));
+select partkeyexpr from pg_partition where (parttype = 'r') and (parentid in (select oid from pg_class where relname = 'test_extract'));
+select partkeyexpr from pg_partition where (parttype = 'p') and (parentid in (select oid from pg_class where relname = 'test_extract'));
 
 --test pg_get_tabledef and pg_dump
 create table testnormalsubpart(a int, b int) partition by range(a) subpartition by range(b)

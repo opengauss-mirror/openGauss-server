@@ -129,10 +129,10 @@ extern Datum caculateBoundary(Datum transpoint, Oid attrtypid, Datum intervalue,
 extern void ATExecSetIndexUsableState(Oid objclassOid, Oid objOid, bool newState);
 extern bool checkPartitionLocalIndexesUsable(Oid partitionOid);
 extern bool checkRelationLocalIndexesUsable(Relation relation);
-extern List* GetPartitionkeyPos(List* partitionkeys, List* schema);
+extern List* GetPartitionkeyPos(List* partitionkeys, List* schema, bool* partkeyIsFunc = NULL);
 
-extern void ComparePartitionValue(List* pos, Form_pg_attribute* attrs, List *partitionList, bool isPartition = true);
-extern void CompareListValue(const List* pos, Form_pg_attribute* attrs, List *partitionList);
+extern void ComparePartitionValue(List* pos, Form_pg_attribute* attrs, List *partitionList, bool isPartition = true, bool partkeyIsFunc = false);
+extern void CompareListValue(const List* pos, Form_pg_attribute* attrs, List *partitionList, bool partkeyIsFunc = false);
 extern void clearAttrInitDefVal(Oid relid);
 
 extern void ATMatviewGroup(List* stmts, Oid mvid, LOCKMODE lockmode);
@@ -145,8 +145,8 @@ extern void AlterCreateChainTables(Oid relOid, Datum reloptions, CreateStmt *mai
  * @return If the the column is partition column, return true, otherwise return false.
  */
 extern bool is_partition_column(Relation rel, AttrNumber att_no);
-extern Const* GetPartitionValue(List* pos, Form_pg_attribute* attrs, List* value, bool isinterval, bool isPartition);
-extern Node* GetTargetValue(Form_pg_attribute attrs, Const* src, bool isinterval);
+extern Const* GetPartitionValue(List* pos, Form_pg_attribute* attrs, List* value, bool isinterval, bool isPartition, bool partkeyIsFunc = false);
+extern Node* GetTargetValue(Form_pg_attribute attrs, Const* src, bool isinterval, bool partkeyIsFunc = false);
 extern void ATExecEnableDisableRls(Relation rel, RelationRlsStatus changeType, LOCKMODE lockmode);
 extern bool isQueryUsingTempRelation(Query *query);
 extern void addToastTableForNewPartition(Relation relation, Oid newPartId, bool isForSubpartition = false);

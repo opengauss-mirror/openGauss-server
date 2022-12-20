@@ -1550,16 +1550,19 @@ static void BuildElementForPartKeyExpr(void* element, HeapTuple partTuple, Tuple
     } else {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("The partstrategy %c is not supported", partstrategy)));
     }
-
-    partkeyexpr = (Node*)stringToNode_skip_extern_fields(partkeystr);
-    if (partkeyexpr->type == T_OpExpr)
-        typoid = ((OpExpr*)partkeyexpr)->opresulttype;
-    else if (partkeyexpr->type == T_FuncExpr)
-        typoid = ((FuncExpr*)partkeyexpr)->funcresulttype;
-    else
-        ereport(ERROR,
-            (errcode(ERRCODE_NODE_ID_MISSMATCH),
-                errmsg("The node type %d is wrong, it must be T_OpExpr or T_FuncExpr", partkeyexpr->type)));
+    if ((pg_strcasecmp(partkeystr, "partkeyisfunc") == 0)) {
+        typoid = INT8OID;
+    } else {
+        partkeyexpr = (Node*)stringToNode_skip_extern_fields(partkeystr);
+        if (partkeyexpr->type == T_OpExpr)
+            typoid = ((OpExpr*)partkeyexpr)->opresulttype;
+        else if (partkeyexpr->type == T_FuncExpr)
+            typoid = ((FuncExpr*)partkeyexpr)->funcresulttype;
+        else
+            ereport(ERROR,
+                (errcode(ERRCODE_NODE_ID_MISSMATCH),
+                    errmsg("The node type %d is wrong, it must be T_OpExpr or T_FuncExpr", partkeyexpr->type)));
+    }
     Relation typeRel = heap_open(TypeRelationId, RowExclusiveLock);
     typeTuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typoid));
     pgTypeForm = (Form_pg_type)GETSTRUCT(typeTuple);
