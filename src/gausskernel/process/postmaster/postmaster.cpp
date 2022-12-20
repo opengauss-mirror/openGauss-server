@@ -11876,7 +11876,11 @@ static void PMInitDBStateFile()
     int rc = memset_s(&state, sizeof(state), 0, sizeof(state));
     securec_check(rc, "", "");
     state.conn_num = t_thrd.postmaster_cxt.HaShmData->repl_list_num;
-    state.mode = t_thrd.postmaster_cxt.HaShmData->current_mode;
+    if (ENABLE_DMS) {
+        state.mode = STANDBY_MODE;
+    } else {
+        state.mode = t_thrd.postmaster_cxt.HaShmData->current_mode;
+    }
     state.state = STARTING_STATE;
     state.lsn = 0;
     state.term = 0;
