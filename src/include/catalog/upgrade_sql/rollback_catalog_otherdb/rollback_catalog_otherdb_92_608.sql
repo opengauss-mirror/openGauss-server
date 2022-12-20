@@ -125,7 +125,7 @@ BEGIN
     IF ans = false then
       select case when count(*)=1 then true else false end as has_version_proc from (select * from pg_proc where proname = 'working_version_num' limit 1) into has_version_proc;
       IF has_version_proc = true then
-        select working_version_num < 92626 as old_version from working_version_num() into old_version;
+        select working_version_num < 92608 as old_version from working_version_num() into old_version;
         IF old_version = true then
           raise info 'Processing hdfs extension';
           query_str := 'CREATE EXTENSION IF NOT EXISTS hdfs_fdw;';
