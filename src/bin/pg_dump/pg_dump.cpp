@@ -22865,8 +22865,8 @@ static void dumpTableAutoIncrement(Archive* fout, PQExpBuffer sqlbuf, TableInfo*
     appendPQExpBuffer(query,
         "SELECT CASE WHEN is_called AND last_value < max_value THEN last_value + 1 "
         "     WHEN is_called AND last_value >= max_value THEN max_value "
-        "     ELSE last_value END AS last_value FROM %s.%s",
-        PQgetvalue(res, 0, 0), PQgetvalue(res, 0, 1));
+        "     ELSE last_value END AS last_value FROM %s",
+        fmtQualifiedId(fout, PQgetvalue(res, 0, 0), PQgetvalue(res, 0, 1)));
     PQclear(res);
 
     res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);

@@ -74,10 +74,15 @@ PARTITION BY RANGE (col_1) SUBPARTITION BY list (col_2)
 INSERT INTO test_dump_autoinc_range_list VALUES(0,1,'1');
 INSERT INTO test_dump_autoinc_range_list VALUES(0,6,'6');
 
+CREATE TABLE "TEST_DUMP_autoinc_word"("Col1" int auto_increment UNIQUE, col2 int default 1) AUTO_INCREMENT = 10;
+
 \! @abs_bindir@/gs_dump dump_autoinc_db -p @portstring@ -f @abs_bindir@/dump_autoinc_test.tar -F t >/dev/null 2>&1; echo $?
 \! @abs_bindir@/gs_restore -d restore_autoinc_db -p @portstring@ @abs_bindir@/dump_autoinc_test.tar >/dev/null 2>&1; echo $?
 
 \c restore_autoinc_db
+-- TEST_DUMP_autoinc_word
+\d "TEST_DUMP_autoinc_word"
+SELECT pg_get_tabledef('"TEST_DUMP_autoinc_word"'::regclass);
 -- local temp table was not dumped
 \d+ test_dump_autoinc_ltmp
 -- check restored tables

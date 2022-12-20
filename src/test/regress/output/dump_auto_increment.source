@@ -84,11 +84,36 @@ NOTICE:  CREATE TABLE will create implicit sequence "test_dump_autoinc_range_lis
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test_dump_autoinc_range_list_pkey" for table "test_dump_autoinc_range_list"
 INSERT INTO test_dump_autoinc_range_list VALUES(0,1,'1');
 INSERT INTO test_dump_autoinc_range_list VALUES(0,6,'6');
+CREATE TABLE "TEST_DUMP_autoinc_word"("Col1" int auto_increment UNIQUE, col2 int default 1) AUTO_INCREMENT = 10;
+NOTICE:  CREATE TABLE will create implicit sequence "TEST_DUMP_autoinc_word_Col1_seq" for serial column "TEST_DUMP_autoinc_word.Col1"
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "TEST_DUMP_autoinc_word_Col1_key" for table "TEST_DUMP_autoinc_word"
 \! @abs_bindir@/gs_dump dump_autoinc_db -p @portstring@ -f @abs_bindir@/dump_autoinc_test.tar -F t >/dev/null 2>&1; echo $?
 0
 \! @abs_bindir@/gs_restore -d restore_autoinc_db -p @portstring@ @abs_bindir@/dump_autoinc_test.tar >/dev/null 2>&1; echo $?
 0
 \c restore_autoinc_db
+-- TEST_DUMP_autoinc_word
+\d "TEST_DUMP_autoinc_word"
+   Table "public.TEST_DUMP_autoinc_word"
+ Column |  Type   |        Modifiers        
+--------+---------+-------------------------
+ Col1   | integer | not null AUTO_INCREMENT
+ col2   | integer | default 1
+Indexes:
+    "TEST_DUMP_autoinc_word_Col1_key" UNIQUE CONSTRAINT, btree ("Col1") TABLESPACE pg_default
+
+SELECT pg_get_tabledef('"TEST_DUMP_autoinc_word"'::regclass);
+                         pg_get_tabledef                          
+------------------------------------------------------------------
+ SET search_path = public;                                       +
+ CREATE TABLE "TEST_DUMP_autoinc_word" (                         +
+     "Col1" integer AUTO_INCREMENT NOT NULL,                     +
+     col2 integer DEFAULT 1,                                     +
+     CONSTRAINT "TEST_DUMP_autoinc_word_Col1_key" UNIQUE ("Col1")+
+ ) AUTO_INCREMENT = 10                                           +
+ WITH (orientation=row, compression=no);
+(1 row)
+
 -- local temp table was not dumped
 \d+ test_dump_autoinc_ltmp
 -- check restored tables
