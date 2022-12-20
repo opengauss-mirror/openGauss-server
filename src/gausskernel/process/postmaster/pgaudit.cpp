@@ -2442,7 +2442,7 @@ static void pgaudit_indextbl_init_new(void)
 
     /* audit threads are writing files in range [earliest_idx, latest_idx) */
     uint32 earliest_idx = 0;
-    if (g_instance.audit_cxt.audit_indextbl->latest_idx >= g_instance.audit_cxt.thread_num) {
+    if (g_instance.audit_cxt.audit_indextbl->latest_idx >= (uint32)g_instance.audit_cxt.thread_num) {
         earliest_idx = g_instance.audit_cxt.audit_indextbl->latest_idx - g_instance.audit_cxt.thread_num;
         index = g_instance.audit_cxt.audit_indextbl->begidx;
     } else {
