@@ -6,6 +6,31 @@ drop type  "01jfiejriouieraejijiosjoerqkjou含有中文字符feoajfoeuitoooeiajf
 NOTICE:  identifier "01jfiejriouieraejijiosjoerqkjou含有中文字符feoajfoeuitoooeiajfo" will be truncated to "01jfiejriouieraejijiosjoerqkjou含有中文字符feoajfoeuitooo"
 create type pg_class as (a int);
 drop type public.pg_class;
+/* drop type to make a 0 column table */
+create type s_type as (a int, b text);
+create table t_zero_col(a s_type);
+insert into t_zero_col values((1, '1'));
+select * from t_zero_col order by 1;
+   a   
+-------
+ (1,1)
+(1 row)
+
+drop type s_type cascade;
+NOTICE:  drop cascades to table t_zero_col column a
+select * from t_zero_col;
+--
+(1 row)
+
+insert into t_zero_col values((2, '1'));
+ERROR:  INSERT has more expressions than target columns
+LINE 1: insert into t_zero_col values((2, '1'));
+                                      ^
+insert into t_zero_col values(null);
+ERROR:  INSERT has more expressions than target columns
+LINE 1: insert into t_zero_col values(null);
+                                      ^
+drop table t_zero_col;
 create table t_group (a int, b compfoo) WITH (orientation=row);
 insert into t_group values (1,(1,'Simon1'));
 insert into t_group values (2,(2,'Simon2'));
