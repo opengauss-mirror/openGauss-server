@@ -290,7 +290,7 @@ end pkg1;
 /
 NOTICE:  syntax error at or near "F"
 LINE 3: procedure proc1(c ff%F);
-              ^
+                             ^
 CONTEXT:  compilation of PL/pgSQL package near line 1
 ERROR:  Debug mod,create procedure has error.
 DETAIL:  N/A

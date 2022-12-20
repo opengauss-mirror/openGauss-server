@@ -211,11 +211,11 @@ static	PLpgSQL_expr	*read_cursor_args(PLpgSQL_var *cursor,
                                           int until, const char *expected);
 static	List			*read_raise_options(void);
 static  int             errstate = ERROR;
-static char* get_proc_str(int tok);
+static DefElem* get_proc_str(int tok);
 static char* get_init_proc(int tok);
 static char* get_attrname(int tok);
 static AttrNumber get_assign_attrno(PLpgSQL_datum* target,  char* attrname);
-static void raw_parse_package_function(char* proc_str);
+static void raw_parse_package_function(char* proc_str, int location, int leaderlen);
 static void checkFuncName(List* funcname);
 static void IsInPublicNamespace(char* varname);
 static void SetErrorState();
@@ -336,6 +336,7 @@ static void processFunctionRecordOutParam(int varno, Oid funcoid, int* outparam)
         PLpgSQL_case_when		*casewhen;
         PLpgSQL_rec_attr	*recattr;
         Node                            *plnode;
+        DefElem             *def;
 }
 
 %type <plnode> assign_el
@@ -361,7 +362,8 @@ static void processFunctionRecordOutParam(int varno, Oid funcoid, int* outparam)
 %type <forvariable>	for_variable
 %type <stmt>	for_control forall_control
 
-%type <str>		any_identifier opt_block_label opt_label goto_block_label label_name spec_proc init_proc
+%type <def>		spec_proc
+%type <str>		any_identifier opt_block_label opt_label goto_block_label label_name init_proc
 %type <str>		opt_rollback_to opt_savepoint_name savepoint_name attr_name
 
 %type <list>	proc_sect proc_stmts stmt_elsifs stmt_else forall_body
@@ -1606,20 +1608,22 @@ decl_statement	: decl_varname_list decl_const decl_datatype decl_collate decl_no
                     }
                 |   K_FUNCTION {u_sess->parser_cxt.is_procedure=false;} spec_proc
                     {
+                        DefElem *def = $3;
                         u_sess->plsql_cxt.procedure_start_line = GetLineNumber(u_sess->plsql_cxt.curr_compile_context->core_yy->scanbuf, @1);
                         u_sess->plsql_cxt.plpgsql_yylloc = @1;
                         u_sess->plsql_cxt.isCreateFunction = true;
-                        raw_parse_package_function($3);
+                        raw_parse_package_function(def->defname, def->location, def->begin_location);
                         u_sess->plsql_cxt.isCreateFunction = false;
                         u_sess->plsql_cxt.procedure_start_line = 0;
                         u_sess->plsql_cxt.plpgsql_yylloc = 0;
                     }
                 |   K_PROCEDURE {u_sess->parser_cxt.is_procedure=true;} spec_proc
                     {
+                        DefElem *def = $3;
                         u_sess->plsql_cxt.procedure_start_line = GetLineNumber(u_sess->plsql_cxt.curr_compile_context->core_yy->scanbuf, @1);
                         u_sess->plsql_cxt.plpgsql_yylloc = plpgsql_yylloc;
                         u_sess->plsql_cxt.isCreateFunction = true;
-                        raw_parse_package_function($3);
+                        raw_parse_package_function(def->defname, def->location, def->begin_location);
                         u_sess->plsql_cxt.isCreateFunction = false;
                         u_sess->plsql_cxt.procedure_start_line = 0;
                         u_sess->plsql_cxt.plpgsql_yylloc = 0;
@@ -8639,15 +8643,18 @@ read_sql_construct(int until,
 /*
  * get function declare or definition string in package.
  */
-static char * 
+static DefElem*
 get_proc_str(int tok)
 {
     int     blocklevel = 0;
     int     pre_tok = 0;
+    DefElem *def;
     if (u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package == NULL) {
         yyerror("not allowed create procedure in function or procedure.");
     }
-    tok = yylex(); 
+    tok = yylex();
+    def = makeDefElem(NULL, NULL); /* make an empty DefElem */
+    def->location = yylloc;
     StringInfoData      ds;  
     bool is_defining_proc = false;
     char * spec_proc_str = NULL;
@@ -8661,6 +8668,7 @@ get_proc_str(int tok)
     } else {
         appendStringInfoString(&ds, " CREATE OR REPLACE PROCEDURE ");
     }
+    def->begin_location = ds.len;
     u_sess->parser_cxt.in_package_function_compile = true;
     while(true)
     {    
@@ -8735,9 +8743,10 @@ get_proc_str(int tok)
         u_sess->parser_cxt.isFunctionDeclare = false;
     }
 
+    def->defname = pstrdup(ds.data);
     spec_proc_str = pstrdup(ds.data);
     pfree_ext(ds.data);
-    return spec_proc_str;
+    return def;
 }
 static char* get_init_proc(int tok) 
 {
@@ -10098,6 +10107,12 @@ static void check_record_nest_tableof_index(PLpgSQL_datum* datum)
         PLpgSQL_row* row = (PLpgSQL_row*)datum;
         for (int i = 0; i < row->nfields; i++) {
             PLpgSQL_datum* row_element = NULL; 
+
+            /* check wether attisdropped */
+            if (row->varnos[i] == -1 && row->fieldnames[i] == NULL) {
+                continue;
+            }
+
             if (row->ispkg) {
                 row_element = (PLpgSQL_datum*)(row->pkg->datums[row->varnos[i]]);
             } else {
@@ -12657,14 +12672,39 @@ parse_lob_open_close(int location)
 	return NULL;
 }
 
-static void raw_parse_package_function(char* proc_str)
+static void raw_parse_package_function_callback(void *arg)
+{
+    sql_error_callback_arg *cbarg = (sql_error_callback_arg*)arg;
+    int cur_pos = geterrposition();
+
+    if (cur_pos > cbarg->leaderlen)
+    {
+        cur_pos += cbarg->location - cbarg->leaderlen;
+        errposition(cur_pos);
+    }
+}
+
+static void raw_parse_package_function(char* proc_str, int location, int leaderlen)
 {
     if (u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package != NULL)
     {
+        sql_error_callback_arg cbarg;
+        ErrorContextCallback  syntax_errcontext;
         List* raw_parsetree_list = NULL;
         u_sess->plsql_cxt.plpgsql_yylloc = plpgsql_yylloc;
         u_sess->plsql_cxt.rawParsePackageFunction = true;
+
+        cbarg.location = location;
+        cbarg.leaderlen = leaderlen;
+
+        syntax_errcontext.callback = raw_parse_package_function_callback;
+        syntax_errcontext.arg = &cbarg;
+        syntax_errcontext.previous = t_thrd.log_cxt.error_context_stack;
+        t_thrd.log_cxt.error_context_stack = &syntax_errcontext;
         raw_parsetree_list = raw_parser(proc_str);
+        /* Restore former ereport callback */
+        t_thrd.log_cxt.error_context_stack = syntax_errcontext.previous;
+
         CreateFunctionStmt* stmt;
         u_sess->plsql_cxt.rawParsePackageFunction = false;
         int rc = 0;

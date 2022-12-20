@@ -60,6 +60,22 @@
 #include "tcop/utility.h"
 
 
+static void create_package_error_callback(void *arg)
+{
+    CreatePackageStmt* stmt = (CreatePackageStmt*)arg;
+    int cur_pos;
+
+    if (stmt->pkgspec_location <= 0)
+        return;
+
+    cur_pos = geterrposition();
+    if (cur_pos > 0)
+    {
+        cur_pos += (stmt->pkgspec_location - stmt->pkgspec_prefix_len);
+        errposition(cur_pos);
+    }
+}
+
 void CreatePackageCommand(CreatePackageStmt* stmt, const char* queryString)
 {
 #ifdef ENABLE_MULTIPLE_NODES
@@ -72,6 +88,7 @@ void CreatePackageCommand(CreatePackageStmt* stmt, const char* queryString)
     char* pkgname = NULL;
     char* pkgspecsrc = NULL;
     Oid pkgOwner;
+    ErrorContextCallback err_context;
 
     /* Convert list of names to a name and namespace */
     namespaceId = QualifiedNameGetCreationNamespace(stmt->pkgname, &pkgname);
@@ -122,7 +139,13 @@ void CreatePackageCommand(CreatePackageStmt* stmt, const char* queryString)
                 errcause("package name is null"),
                 erraction("rename package")));
     }
+
+    err_context.arg = (void*)stmt;
+    err_context.previous = t_thrd.log_cxt.error_context_stack;
+    err_context.callback = create_package_error_callback;
+    t_thrd.log_cxt.error_context_stack = &err_context;
     packageId = PackageSpecCreate(namespaceId, pkgname, pkgOwner, pkgspecsrc, stmt->replace, stmt->pkgsecdef);
+    t_thrd.log_cxt.error_context_stack = err_context.previous;
 
     /* Advance cmd counter to make the package visible */
     if (OidIsValid(packageId)) {

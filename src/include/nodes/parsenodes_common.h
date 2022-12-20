@@ -2207,6 +2207,8 @@ typedef struct CreatePackageStmt {
     List* pkgname;       /* qualified name of function to create */
     bool pkgsecdef;        /* package security definer or invoker */
     char* pkgspec;            /* content of package spec */
+    int pkgspec_location;   /* pkgspec start location */
+    int pkgspec_prefix_len; /* inserted string length in pkgspec */
 } CreatePackageStmt;
 
 typedef struct CreatePackageBodyStmt {

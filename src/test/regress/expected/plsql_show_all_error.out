@@ -390,167 +390,167 @@ end AA;
 /
 NOTICE:  syntax error at or near "json"
 LINE 3:   procedure aa_remove(p_self in out nocopy json, pair_name v...
-                                   ^
+                                                   ^
 CONTEXT:  compilation of PL/pgSQL package near line 1
 NOTICE:  syntax error at or near "json"
-LINE 3:   procedure aa_remove(p_self in out nocopy json, pair_name v...
-                               ^
+LINE 4:   procedure aa_bb(p_self in out nocopy json, pair_name varch...
+                                               ^
 CONTEXT:  compilation of PL/pgSQL package near line 1
 NOTICE:  syntax error at or near "json"
-LINE 3:   procedure aa_remove(p_self in out nocopy json, pair_name v...
-                               ^
+LINE 5:   procedure aa_bb(p_self in out nocopy json, pair_name varch...
+                                               ^
 CONTEXT:  compilation of PL/pgSQL package near line 1
 NOTICE:  syntax error at or near "json"
-LINE 3:   procedure aa_remove(p_self in out nocopy json, pair_name v...
-                               ^
+LINE 6:   procedure aa_bb(p_self in out nocopy json, pair_name varch...
+                                               ^
 CONTEXT:  compilation of PL/pgSQL package near line 1
 NOTICE:  syntax error at or near "json"
-LINE 3:   procedure aa_remove(p_self in out nocopy json, pair_name v...
-                               ^
+LINE 7:   procedure aa_bb(p_self in out nocopy json, pair_name varch...
+                                               ^
 CONTEXT:  compilation of PL/pgSQL package near line 1
 NOTICE:  syntax error at or near "json"
-LINE 3:   procedure aa_remove(p_self in out nocopy json, pair_name v...
-                                            ^
+LINE 8: ...procedure aa_check_duplicate(p_self in out nocopy json, v_se...
+                                                             ^
 CONTEXT:  compilation of PL/pgSQL package near line 1
 NOTICE:  syntax error at or near "json"
-LINE 3:   procedure aa_remove(p_self in out nocopy json, pair_name v...
-                                              ^
+LINE 9:   procedure aa_remove_duplicates(p_self in out nocopy json);
+                                                              ^
 CONTEXT:  compilation of PL/pgSQL package near line 1
 NOTICE:  syntax error at or near "json"
-LINE 3:   procedure aa_remove(p_self in out nocopy json, pair_name v...
-                               ^
+LINE 11:   procedure aa_bb(p_self in out nocopy json, pair_name varch...
+                                                ^
 CONTEXT:  compilation of PL/pgSQL package near line 1
 NOTICE:  syntax error at or near "json"
-LINE 3:   procedure aa_remove(p_self in out nocopy json, pair_name v...
-                               ^
+LINE 12:   procedure aa_bb(p_self in out nocopy json, pair_name varch...
+                                                ^
 CONTEXT:  compilation of PL/pgSQL package near line 1
 NOTICE:  syntax error at or near "position"
-LINE 3:   procedure aa_remove(p_self in out nocopy json, pair_name v...
-                          ^
+LINE 16:   function aa_get(p_self in json, position pls_integer) retu...
+                                           ^
 CONTEXT:  compilation of PL/pgSQL package near line 1
 NOTICE:  syntax error at or near "clob"
-LINE 3:   procedure aa_remove(p_self in out nocopy json, pair_name v...
-                                                 ^
+LINE 21: ...dure aa_to_clob(p_self in json, buf in out nocopy clob, spac...
+                                                              ^
 CONTEXT:  compilation of PL/pgSQL package near line 1
 NOTICE:  syntax error at or near "json"
-LINE 3:   procedure aa_remove(p_self in out nocopy json, pair_name v...
-                                    ^
+LINE 28:   procedure aa_path_bb(p_self in out nocopy json, json_path ...
+                                                     ^
 CONTEXT:  compilation of PL/pgSQL package near line 1
 NOTICE:  syntax error at or near "json"
-LINE 3:   procedure aa_remove(p_self in out nocopy json, pair_name v...
-                                    ^
+LINE 29:   procedure aa_path_bb(p_self in out nocopy json, json_path ...
+                                                     ^
 CONTEXT:  compilation of PL/pgSQL package near line 1
 NOTICE:  syntax error at or near "json"
-LINE 3:   procedure aa_remove(p_self in out nocopy json, pair_name v...
-                                    ^
+LINE 30:   procedure aa_path_bb(p_self in out nocopy json, json_path ...
+                                                     ^
 CONTEXT:  compilation of PL/pgSQL package near line 1
 NOTICE:  syntax error at or near "json"
-LINE 3:   procedure aa_remove(p_self in out nocopy json, pair_name v...
-                                    ^
+LINE 31:   procedure aa_path_bb(p_self in out nocopy json, json_path ...
+                                                     ^
 CONTEXT:  compilation of PL/pgSQL package near line 1
 NOTICE:  syntax error at or near "json"
-LINE 3:   procedure aa_remove(p_self in out nocopy json, pair_name v...
-                                    ^
+LINE 32:   procedure aa_path_bb(p_self in out nocopy json, json_path ...
+                                                     ^
 CONTEXT:  compilation of PL/pgSQL package near line 1
 NOTICE:  syntax error at or near "json"
-LINE 3:   procedure aa_remove(p_self in out nocopy json, pair_name v...
-                                    ^
+LINE 33:   procedure aa_path_bb(p_self in out nocopy json, json_path ...
+                                                     ^
 CONTEXT:  compilation of PL/pgSQL package near line 1
 NOTICE:  syntax error at or near "json"
-LINE 3:   procedure aa_remove(p_self in out nocopy json, pair_name v...
-                                        ^
+LINE 35:   procedure aa_path_remove(p_self in out nocopy json, json_p...
+                                                         ^
 CONTEXT:  compilation of PL/pgSQL package near line 1
 NOTICE:  syntax error at or near "json_list"
-LINE 3:   procedure aa_remove(p_self in out nocopy json, pair_name v...
-                                   ^
+LINE 41:   procedure aa_append(p_self in out nocopy json_list, elem j...
+                                                    ^
 CONTEXT:  compilation of PL/pgSQL package near line 1
 NOTICE:  syntax error at or near "json_list"
-LINE 3:   procedure aa_remove(p_self in out nocopy json, pair_name v...
-                                   ^
+LINE 42:   procedure aa_append(p_self in out nocopy json_list, elem v...
+                                                    ^
 CONTEXT:  compilation of PL/pgSQL package near line 1
 NOTICE:  syntax error at or near "json_list"
-LINE 3:   procedure aa_remove(p_self in out nocopy json, pair_name v...
-                                   ^
+LINE 43:   procedure aa_append(p_self in out nocopy json_list, elem n...
+                                                    ^
 CONTEXT:  compilation of PL/pgSQL package near line 1
 NOTICE:  syntax error at or near "json_list"
-LINE 3:   procedure aa_remove(p_self in out nocopy json, pair_name v...
-                                   ^
+LINE 44:   procedure aa_append(p_self in out nocopy json_list, elem b...
+                                                    ^
 CONTEXT:  compilation of PL/pgSQL package near line 1
 NOTICE:  syntax error at or near "json_list"
-LINE 3:   procedure aa_remove(p_self in out nocopy json, pair_name v...
-                                   ^
+LINE 45:   procedure aa_append(p_self in out nocopy json_list, elem j...
+                                                    ^
 CONTEXT:  compilation of PL/pgSQL package near line 1
 NOTICE:  syntax error at or near "json_list"
-LINE 3:   procedure aa_remove(p_self in out nocopy json, pair_name v...
-                                    ^
+LINE 47:   procedure aa_replace(p_self in out nocopy json_list, posit...
+                                                     ^
 CONTEXT:  compilation of PL/pgSQL package near line 1
 NOTICE:  syntax error at or near "json_list"
-LINE 3:   procedure aa_remove(p_self in out nocopy json, pair_name v...
-                                    ^
+LINE 48:   procedure aa_replace(p_self in out nocopy json_list, posit...
+                                                     ^
 CONTEXT:  compilation of PL/pgSQL package near line 1
 NOTICE:  syntax error at or near "json_list"
-LINE 3:   procedure aa_remove(p_self in out nocopy json, pair_name v...
-                                    ^
+LINE 49:   procedure aa_replace(p_self in out nocopy json_list, posit...
+                                                     ^
 CONTEXT:  compilation of PL/pgSQL package near line 1
 NOTICE:  syntax error at or near "json_list"
-LINE 3:   procedure aa_remove(p_self in out nocopy json, pair_name v...
-                                    ^
+LINE 50:   procedure aa_replace(p_self in out nocopy json_list, posit...
+                                                     ^
 CONTEXT:  compilation of PL/pgSQL package near line 1
 NOTICE:  syntax error at or near "json_list"
-LINE 3:   procedure aa_remove(p_self in out nocopy json, pair_name v...
-                                    ^
+LINE 51:   procedure aa_replace(p_self in out nocopy json_list, posit...
+                                                     ^
 CONTEXT:  compilation of PL/pgSQL package near line 1
 NOTICE:  syntax error at or near "json_list"
-LINE 3:   procedure aa_remove(p_self in out nocopy json, pair_name v...
-                                   ^
+LINE 54:   procedure aa_remove(p_self in out nocopy json_list, positi...
+                                                    ^
 CONTEXT:  compilation of PL/pgSQL package near line 1
 NOTICE:  syntax error at or near "json_list"
-LINE 3:   procedure aa_remove(p_self in out nocopy json, pair_name v...
-                                         ^
-CONTEXT:  compilation of PL/pgSQL package near line 1
-NOTICE:  syntax error at or near "json_list"
-LINE 3:   procedure aa_remove(p_self in out nocopy json, pair_name v...
-                                        ^
-CONTEXT:  compilation of PL/pgSQL package near line 1
-NOTICE:  syntax error at or near "position"
-LINE 3:   procedure aa_remove(p_self in out nocopy json, pair_name v...
-                               ^
-CONTEXT:  compilation of PL/pgSQL package near line 1
-NOTICE:  syntax error at or near "clob"
-LINE 3:   procedure aa_remove(p_self in out nocopy json, pair_name v...
-                                                      ^
-CONTEXT:  compilation of PL/pgSQL package near line 1
-NOTICE:  syntax error at or near "json_list"
-LINE 3:   procedure aa_remove(p_self in out nocopy json, pair_name v...
-                                    ^
-CONTEXT:  compilation of PL/pgSQL package near line 1
-NOTICE:  syntax error at or near "json_list"
-LINE 3:   procedure aa_remove(p_self in out nocopy json, pair_name v...
-                                    ^
-CONTEXT:  compilation of PL/pgSQL package near line 1
-NOTICE:  syntax error at or near "json_list"
-LINE 3:   procedure aa_remove(p_self in out nocopy json, pair_name v...
-                                    ^
-CONTEXT:  compilation of PL/pgSQL package near line 1
-NOTICE:  syntax error at or near "json_list"
-LINE 3:   procedure aa_remove(p_self in out nocopy json, pair_name v...
-                                    ^
-CONTEXT:  compilation of PL/pgSQL package near line 1
-NOTICE:  syntax error at or near "json_list"
-LINE 3:   procedure aa_remove(p_self in out nocopy json, pair_name v...
-                                    ^
-CONTEXT:  compilation of PL/pgSQL package near line 1
-NOTICE:  syntax error at or near "json_list"
-LINE 3:   procedure aa_remove(p_self in out nocopy json, pair_name v...
-                                        ^
-CONTEXT:  compilation of PL/pgSQL package near line 1
-NOTICE:  syntax error at or near "clob"
-LINE 3:   procedure aa_remove(p_self in out nocopy json, pair_name v...
+LINE 55:   procedure aa_remove_first(p_self in out nocopy json_list);
                                                           ^
 CONTEXT:  compilation of PL/pgSQL package near line 1
+NOTICE:  syntax error at or near "json_list"
+LINE 56:   procedure aa_remove_last(p_self in out nocopy json_list);
+                                                         ^
+CONTEXT:  compilation of PL/pgSQL package near line 1
+NOTICE:  syntax error at or near "position"
+LINE 57:   function aa_get(p_self in json_list, position pls_integer)...
+                                                ^
+CONTEXT:  compilation of PL/pgSQL package near line 1
 NOTICE:  syntax error at or near "clob"
-LINE 3:   procedure aa_remove(p_self in out nocopy json, pair_name v...
-                                                       ^
+LINE 63: ...aa_to_clob(p_self in json_list, buf in out nocopy clob, spac...
+                                                              ^
+CONTEXT:  compilation of PL/pgSQL package near line 1
+NOTICE:  syntax error at or near "json_list"
+LINE 68:   procedure aa_path_bb(p_self in out nocopy json_list, json_...
+                                                     ^
+CONTEXT:  compilation of PL/pgSQL package near line 1
+NOTICE:  syntax error at or near "json_list"
+LINE 69:   procedure aa_path_bb(p_self in out nocopy json_list, json_...
+                                                     ^
+CONTEXT:  compilation of PL/pgSQL package near line 1
+NOTICE:  syntax error at or near "json_list"
+LINE 70:   procedure aa_path_bb(p_self in out nocopy json_list, json_...
+                                                     ^
+CONTEXT:  compilation of PL/pgSQL package near line 1
+NOTICE:  syntax error at or near "json_list"
+LINE 71:   procedure aa_path_bb(p_self in out nocopy json_list, json_...
+                                                     ^
+CONTEXT:  compilation of PL/pgSQL package near line 1
+NOTICE:  syntax error at or near "json_list"
+LINE 72:   procedure aa_path_bb(p_self in out nocopy json_list, json_...
+                                                     ^
+CONTEXT:  compilation of PL/pgSQL package near line 1
+NOTICE:  syntax error at or near "json_list"
+LINE 74:   procedure aa_path_remove(p_self in out nocopy json_list, j...
+                                                         ^
+CONTEXT:  compilation of PL/pgSQL package near line 1
+NOTICE:  syntax error at or near "clob"
+LINE 83: ...aa_get_string(p_self in json_value, buf in out nocopy clob);
+                                                                  ^
+CONTEXT:  compilation of PL/pgSQL package near line 1
+NOTICE:  syntax error at or near "clob"
+LINE 96: ...a_to_clob(p_self in json_value, buf in out nocopy clob, spac...
+                                                              ^
 CONTEXT:  compilation of PL/pgSQL package near line 1
 ERROR:  Debug mod,create procedure has error.
 DETAIL:  N/A
