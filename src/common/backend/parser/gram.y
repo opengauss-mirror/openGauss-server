@@ -21173,9 +21173,12 @@ select_with_parens:
  */
 select_no_parens:
 			simple_select						{ $$ = $1; }
-                        | select_clause siblings_clause
+                        | select_clause siblings_clause opt_select_limit
                                 {
                                         SelectStmt* stmt = (SelectStmt *) $1;
+                                        insertSelectOptions((SelectStmt *) $1, NIL, NIL,
+                                            (Node*)list_nth($3, 0), (Node*)list_nth($3, 1), NULL,
+                                            yyscanner);
                                         StartWithClause* swc = (StartWithClause*) stmt->startWithClause;
                                         if (swc == NULL) {
                                             ereport(errstate,
@@ -21187,11 +21190,11 @@ select_no_parens:
                                         }
                                         $$ = $1;
                                 }
-                        | select_clause siblings_clause sort_clause
+                        | select_clause siblings_clause sort_clause opt_select_limit
                                 {
                                         SelectStmt* stmt = (SelectStmt *) $1;
 					insertSelectOptions((SelectStmt *) $1, $3, NIL,
-										NULL, NULL, NULL,
+										(Node*)list_nth($4, 0), (Node*)list_nth($4, 1), NULL,
 										yyscanner);
                                         StartWithClause* swc = (StartWithClause*) stmt->startWithClause;
                                         if (swc == NULL) {
