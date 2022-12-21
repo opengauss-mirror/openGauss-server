@@ -402,6 +402,46 @@ END;
 /
 ERROR:  bad SQLSTATE '00000'
 CONTEXT:  compilation of PL/pgSQL function "test_condition_6" near line 3
+create or replace procedure test_condition_1 as
+declare
+    a int;
+BEGIN
+    declare DIVISION_ZERO condition for SQLSTATE value '22012';
+    a := 1/0;
+exception
+    when DIVISION_ZERO then
+    BEGIN
+        RAISE NOTICE 'SQLSTATE = %, SQLERRM = %', SQLSTATE,SQLERRM;
+    END;
+END;
+/
+call test_condition_1();
+NOTICE:  SQLSTATE = 22012, SQLERRM = division by zero
+ test_condition_1 
+------------------
+ 
+(1 row)
+
+create or replace procedure test_condition_1 as
+declare
+    a int;
+BEGIN
+    declare DIVISION_ZERO condition for SQLSTATE "22012";
+    a := 1/0;
+exception
+    when DIVISION_ZERO then
+    BEGIN
+        RAISE NOTICE 'SQLSTATE = %, SQLERRM = %', SQLSTATE,SQLERRM;
+    END;
+END;
+/
+call test_condition_1();
+NOTICE:  SQLSTATE = 22012, SQLERRM = division by zero
+ test_condition_1 
+------------------
+ 
+(1 row)
+
 \c regression
 drop trigger animal_trigger1;
 ERROR:  drop trigger without table name only support in B-format database

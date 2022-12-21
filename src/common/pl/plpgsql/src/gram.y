@@ -772,10 +772,31 @@ declare_stmt    : T_DECLARE_CURSOR decl_varname K_CURSOR opt_scrollable
 
 condition_value	: K_SQLSTATE
                     {
-                        /* next token should be a string literal */
                         char   *sqlstatestr;
-                        if (yylex() != SCONST)
-                            yyerror("syntax error");
+                        yylex();
+                        if (strcmp(yylval.str, "value") ==0) {
+                            yylex();
+                        }
+                        sqlstatestr = yylval.str;
+                        
+                        if (strlen(sqlstatestr) != 5)
+                            yyerror("invalid SQLSTATE code");
+                        if (strspn(sqlstatestr, "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ") != 5)
+                            yyerror("invalid SQLSTATE code");
+                        if (strncmp(sqlstatestr, "00", 2) == 0) {
+                            const char* message = "bad SQLSTATE";
+                            InsertErrorMessage(message, plpgsql_yylloc);
+                            ereport(ERROR,
+                                    (errcode(ERRCODE_SYNTAX_ERROR_OR_ACCESS_RULE_VIOLATION),
+                                        errmsg("bad SQLSTATE '%s'",sqlstatestr)));
+                        }
+
+                        $$ = MAKE_SQLSTATE(sqlstatestr[0],
+                                          sqlstatestr[1],
+                                          sqlstatestr[2],
+                                          sqlstatestr[3],
+                                          sqlstatestr[4]);
+
                         sqlstatestr = yylval.str;
                         
                         if (strlen(sqlstatestr) != 5)
