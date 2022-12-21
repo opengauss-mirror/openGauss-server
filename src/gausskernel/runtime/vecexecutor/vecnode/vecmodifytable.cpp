@@ -199,6 +199,11 @@ bool checkPartitionBoundary(Relation insert_rel, Relation scan_rel)
     List* insert_rel_boundary = NIL;
     List* scan_rel_boundary = NIL;
 
+    /* Now support List/Hash partition, check partition type, only Range partitions are supported here */
+    if (!PartitionMapIsRange(insert_rel->partMap) || !PartitionMapIsRange(scan_rel->partMap)) {
+        return false;
+    }
+
     if (insert_rel_range_num != scan_rel_range_num) {
         return false;
     }
