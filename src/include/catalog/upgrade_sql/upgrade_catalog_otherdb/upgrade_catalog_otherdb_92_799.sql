@@ -57,3 +57,5 @@ CREATE OR REPLACE FUNCTION pg_catalog.gs_undo_dump_parsepage_mv(relpath text, bl
     STABLE STRICT NOT FENCED NOT SHIPPABLE
 AS $function$gs_undo_dump_parsepage_mv$function$;
 comment on function PG_CATALOG.gs_undo_dump_parsepage_mv(relpath text, blkno bigint, reltype text, rmem boolean) is 'parse uheap data page and undo to output file based on given filepath';
+
+DROP EXTENSION IF EXISTS hdfs_fdw;
