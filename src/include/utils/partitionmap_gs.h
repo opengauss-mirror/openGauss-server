@@ -162,14 +162,15 @@ typedef struct HashPartitionMap {
         tuple_desc = (rel)->rd_att;                                                                                   \
         for (i = 0; i < partkey_column_n; i++) {                                                                      \
             isnull = false;                                                                                           \
-            column_raw = (is_ustore)                                                                                  \
-                             ? UHeapFastGetAttr((UHeapTuple)(tuple), partkey_column->values[i], tuple_desc, &isnull)  \
-                             : fastgetattr((HeapTuple)(tuple), partkey_column->values[i], tuple_desc, &isnull);       \
             bool isNull = PartExprKeyIsNull(rel, NULL);                                                               \
             if (isNull) {                                                                                             \
+                column_raw = (is_ustore)                                                                              \
+                            ? UHeapFastGetAttr((UHeapTuple)(tuple), partkey_column->values[i], tuple_desc, &isnull)   \
+                            : fastgetattr((HeapTuple)(tuple), partkey_column->values[i], tuple_desc, &isnull);        \
                 values[i] =                                                                                           \
                     transformDatum2Const((rel)->rd_att, partkey_column->values[i], column_raw, isnull, &consts[i]);   \
             } else {                                                                                                  \
+                column_raw = Datum(tuple);                                                                            \
                 values[i] =                                                                                           \
                     transformDatum2ConstForPartKeyExpr((rel)->partMap, column_raw, isnull, &consts[i]);               \
             }                                                                                                         \

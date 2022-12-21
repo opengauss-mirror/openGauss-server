@@ -182,7 +182,7 @@ void InsertFusion::refreshParameterIfNecessary()
 }
 
 extern HeapTuple searchPgPartitionByParentIdCopy(char parttype, Oid parentId);
-Tuple ComputePartKeyExprTuple(Relation rel, EState *estate, TupleTableSlot *slot, Tuple oldtuple, Relation partRel)
+Datum ComputePartKeyExprTuple(Relation rel, EState *estate, TupleTableSlot *slot, Relation partRel)
 {
     Relation pgPartition = NULL;
     HeapTuple partitionedTuple = NULL;
@@ -190,7 +190,6 @@ Tuple ComputePartKeyExprTuple(Relation rel, EState *estate, TupleTableSlot *slot
     Datum val = 0;
     char* partkeystr = "";
     Node* partkeyexpr = NULL;
-    Tuple newtuple = NULL;
     Relation tmpRel = NULL;
     pgPartition = relation_open(PartitionRelationId, AccessShareLock);
     if (PointerIsValid(partRel))
@@ -204,7 +203,7 @@ Tuple ComputePartKeyExprTuple(Relation rel, EState *estate, TupleTableSlot *slot
             ReleaseSysCache(partitionedTuple);
         else
             heap_freetuple(partitionedTuple);
-        return newtuple;
+        return 0;
     }
 	int2vector* partitionKey = NULL;
 	Oid* partitionKeyDataType = NULL;
@@ -240,18 +239,11 @@ Tuple ComputePartKeyExprTuple(Relation rel, EState *estate, TupleTableSlot *slot
 
     if (!isnull)
         val = datumCopy(val, boundary[0]->constbyval, boundary[0]->constlen);
-    bool nulls[rel->rd_att->natts] = {false};
-    bool replaces[rel->rd_att->natts] = {false};
-    Datum values[rel->rd_att->natts] = {0};
-    values[partitionKey->values[0]-1] = val;
-    nulls[partitionKey->values[0]-1] = isnull;
-    replaces[partitionKey->values[0]-1] = true;
-    newtuple = tableam_tops_modify_tuple(oldtuple, rel->rd_att, values, nulls, replaces);
     if (PointerIsValid(partRel))
         ReleaseSysCache(partitionedTuple);
     else
         heap_freetuple(partitionedTuple);
-    return newtuple;
+    return val;
 }
 
 unsigned long InsertFusion::ExecInsert(Relation rel, ResultRelInfo* result_rel_info)
