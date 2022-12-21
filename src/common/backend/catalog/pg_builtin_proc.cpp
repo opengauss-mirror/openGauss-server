@@ -38,6 +38,9 @@
 static_assert(sizeof(true) == sizeof(char), "illegal bool size");
 static_assert(sizeof(false) == sizeof(char), "illegal bool size");
 
+#define CUR_THR_IS_WORKER() (t_thrd.role == WORKER || t_thrd.role == THREADPOOL_WORKER ||\
+    t_thrd.role == STREAM_WORKER || t_thrd.role == THREADPOOL_STREAM)
+
 #ifdef ENABLE_MULTIPLE_NODES
     FuncGroup g_func_groups[] = {
         #include "builtin_funcs.ini"
@@ -115,9 +118,9 @@ static void InitHashTable(int size)
 static HTAB* get_name_hash_table_type() 
 {
 #if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
-    if (a_nameHash != NULL && DB_IS_CMPT(A_FORMAT)) {
+    if (a_nameHash != NULL && DB_IS_CMPT(A_FORMAT) && CUR_THR_IS_WORKER()) {
         return a_nameHash;
-    } else if (b_nameHash != NULL && DB_IS_CMPT(B_FORMAT)) {
+    } else if (b_nameHash != NULL && DB_IS_CMPT(B_FORMAT) && CUR_THR_IS_WORKER()) {
         return b_nameHash;
     }
 #endif
@@ -127,9 +130,9 @@ static HTAB* get_name_hash_table_type()
 static HTAB* get_oid_hash_table_type()
 {
 #if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
-    if (a_oidHash != NULL && DB_IS_CMPT(A_FORMAT)) {
+    if (a_oidHash != NULL && DB_IS_CMPT(A_FORMAT) && CUR_THR_IS_WORKER()) {
         return a_oidHash;
-    } else if (b_oidHash != NULL && DB_IS_CMPT(B_FORMAT)) {
+    } else if (b_oidHash != NULL && DB_IS_CMPT(B_FORMAT) && CUR_THR_IS_WORKER()) {
         return b_oidHash;
     }
 #endif
