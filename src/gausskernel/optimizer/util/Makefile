@@ -19,7 +19,7 @@ endif
 
 SUBDIRS	= learn
 
-OBJS = clauses.o joininfo.o pathnode.o placeholder.o plancat.o predtest.o \
+OBJS = clauses.o joininfo.o pathnode.o placeholder.o plancat.o predtest.o orclauses.o \
        relnode.o restrictinfo.o tlist.o var.o pruningboundary.o pgxcship.o pruning.o randomplan.o optimizerdebug.o planmem_walker.o \
        nodegroups.o plananalyzer.o optcommon.o dataskew.o joinskewinfo.o autoanalyzer.o bucketinfo.o bucketpruning.o subpartitionpruning.o
 
