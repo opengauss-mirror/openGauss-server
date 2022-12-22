@@ -9674,14 +9674,10 @@ void StartupXLOG(void)
      * in SS Switchover, skip dw init since we didn't do ShutdownXLOG
      */
 
-    if (!SS_PERFORMING_SWITCHOVER && !SSFAILOVER_TRIGGER) {
+    if (!SS_PERFORMING_SWITCHOVER && !SSFAILOVER_TRIGGER && !ENABLE_DMS) {
         /* process assist file of chunk recycling */
         dw_ext_init();
         dw_init();
-    }
-
-    if (SS_IN_FAILOVER && SS_REFORM_REFORMER) {
-        ss_failover_dw_init();
     }
 
     /* Recover meta of undo subsystem. */
