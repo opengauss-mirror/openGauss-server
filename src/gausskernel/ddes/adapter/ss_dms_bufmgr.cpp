@@ -179,6 +179,32 @@ bool StartReadPage(BufferDesc *buf_desc, LWLockMode mode)
     return (ret == DMS_SUCCESS);
 }
 
+#ifdef USE_ASSERT_CHECKING
+static void SmgrNetPageCheckDiskLSN(BufferDesc *buf_desc, ReadBufferMode read_mode, const XLogPhyBlock *pblk)
+{
+    /*
+     * prerequisite is that the page that initialized to zero in memory should be flush to disk
+     */
+    if (ENABLE_VERIFY_PAGE_VERSION && (buf_desc->seg_fileno != EXTENT_INVALID ||
+        IsSegmentBufferID(buf_desc->buf_id)) && (read_mode == RBM_NORMAL)) {
+        char *origin_buf = (char *)palloc(BLCKSZ + ALIGNOF_BUFFER);
+        char *temp_buf = (char *)BUFFERALIGN(origin_buf);
+        ReadBuffer_common_for_check(read_mode, buf_desc, pblk, temp_buf);
+        XLogRecPtr lsn_on_disk = PageGetLSN(temp_buf);
+        XLogRecPtr lsn_on_mem = PageGetLSN(BufHdrGetBlock(buf_desc));
+        /* maybe some pages are not protected by WAL-Logged */
+        if ((lsn_on_mem != InvalidXLogRecPtr) && (lsn_on_disk > lsn_on_mem)) {
+            RelFileNode rnode = buf_desc->tag.rnode;
+            ereport(PANIC, (errmsg("[%d/%d/%d/%d/%d %d-%d] memory lsn(0x%llx) is less than disk lsn(0x%llx)",
+                rnode.spcNode, rnode.dbNode, rnode.relNode, rnode.bucketNode, rnode.opt,
+                buf_desc->tag.forkNum, buf_desc->tag.blockNum,
+                (unsigned long long)lsn_on_mem, (unsigned long long)lsn_on_disk)));
+        }
+        pfree(origin_buf);
+    }
+}
+#endif
+
 Buffer TerminateReadPage(BufferDesc* buf_desc, ReadBufferMode read_mode, const XLogPhyBlock *pblk)
 {
     dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
@@ -191,36 +217,16 @@ Buffer TerminateReadPage(BufferDesc* buf_desc, ReadBufferMode read_mode, const X
         buffer = ReadBuffer_common_for_dms(read_mode, buf_desc, pblk);
     } else {
         Block bufBlock = BufHdrGetBlock(buf_desc);
-        if (isExtend && !PageIsNew((Page)bufBlock)) {
-            ForkNumber forkNum = buf_desc->tag.forkNum;
-            SMgrRelation smgr = smgropen(buf_desc->tag.rnode, InvalidBackendId);
-            BlockNumber blockNum = buf_desc->tag.blockNum;
-            if (blockNum != smgrnblocks(smgr, forkNum)) {
-                ereport(PANIC, (errmsg("For DMS Master it can't extend a page already exits!")));
-            }
-            ereport(DEBUG1, (errmodule(MOD_DMS), errmsg("The page is from standby but it is not empty!")));
-            errno_t er = memset_s((char *)bufBlock, BLCKSZ, 0, BLCKSZ);
-            securec_check(er, "", "");
+        if (isExtend) {
+            ereport(PANIC, (errmsg("extend page should not be tranferred from DMS, "
+                "and needs to be loaded from disk!")));
         }
 
         Page page = (Page)(bufBlock);
         PageSetChecksumInplace(page, buf_desc->tag.blockNum);
 
 #ifdef USE_ASSERT_CHECKING
-        if (SS_NORMAL_PRIMARY && read_mode == RBM_NORMAL && !isExtend &&
-            (!(pg_atomic_read_u32(&buf_desc->state) & BM_VALID))) {
-            Block aux_block = palloc(8192);
-            ReadBuffer_common_for_check(read_mode, buf_desc, pblk, aux_block);
-            XLogRecPtr disk_lsn = PageGetLSN(aux_block);
-            XLogRecPtr mem_lsn = PageGetLSN(page);
-            if (disk_lsn > mem_lsn) {
-                ereport(PANIC, (errmsg("[%d/%d/%d/%d %d-%d] memory lsn(0x%llx) is less than disk lsn(0x%llx).",
-                    buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode,
-                    buf_desc->tag.rnode.bucketNode, buf_desc->tag.forkNum, buf_desc->tag.blockNum,
-                    (unsigned long long)mem_lsn, (unsigned long long)disk_lsn)));
-            }
-            pfree(aux_block);
-        }
+        SmgrNetPageCheckDiskLSN(buf_desc, read_mode, pblk);
 #endif
 
         TerminateBufferIO(buf_desc, false, BM_VALID);
@@ -291,6 +297,32 @@ static bool DmsStartBufferIO(BufferDesc *buf_desc, LWLockMode mode)
     return true;
 }
 
+#ifdef USE_ASSERT_CHECKING
+static void SegNetPageCheckDiskLSN(BufferDesc *buf_desc, ReadBufferMode read_mode, SegSpace *spc)
+{
+    /*
+     * prequisite is that the page that initialized to zero in memory should be flushed to disk,
+     * references to seg_extend
+     */
+    if (ENABLE_VERIFY_PAGE_VERSION && (read_mode == RBM_NORMAL)) {
+        char *origin_buf = (char *)palloc(BLCKSZ + ALIGNOF_BUFFER);
+        char *temp_buf = (char *)BUFFERALIGN(origin_buf);
+        ReadSegBufferForCheck(buf_desc, read_mode, spc, temp_buf);
+        XLogRecPtr lsn_on_disk = PageGetLSN(temp_buf);
+        XLogRecPtr lsn_on_mem = PageGetLSN(BufHdrGetBlock(buf_desc));
+        /* maybe some pages are not protected by WAL-Logged */
+        if ((lsn_on_mem != InvalidXLogRecPtr) && (lsn_on_disk > lsn_on_mem)) {
+            RelFileNode rnode = buf_desc->tag.rnode;
+            ereport(PANIC, (errmsg("[%d/%d/%d/%d/%d %d-%d] memory lsn(0x%llx) is less than disk lsn(0x%llx)",
+                rnode.spcNode, rnode.dbNode, rnode.relNode, rnode.bucketNode, rnode.opt,
+                buf_desc->tag.forkNum, buf_desc->tag.blockNum,
+                (unsigned long long)lsn_on_mem, (unsigned long long)lsn_on_disk)));
+        }
+        pfree(origin_buf);
+    }
+}
+#endif
+
 Buffer TerminateReadSegPage(BufferDesc *buf_desc, ReadBufferMode read_mode, SegSpace *spc)
 {
     dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
@@ -302,20 +334,7 @@ Buffer TerminateReadSegPage(BufferDesc *buf_desc, ReadBufferMode read_mode, SegS
         PageSetChecksumInplace(page, buf_desc->tag.blockNum);
 
 #ifdef USE_ASSERT_CHECKING
-        if (SS_NORMAL_PRIMARY && read_mode == RBM_NORMAL &&
-            (!(pg_atomic_read_u32(&buf_desc->state) & BM_VALID))) {
-            Block aux_block = palloc(8192);
-            ReadSegBufferForCheck(buf_desc, read_mode, spc, aux_block);
-            XLogRecPtr disk_lsn = PageGetLSN(aux_block);
-            XLogRecPtr mem_lsn = PageGetLSN(page);
-            if (disk_lsn > mem_lsn) {
-                ereport(PANIC, (errmsg("[%d/%d/%d/%d %d-%d] memory lsn(0x%llu) is less than disk lsn(0x%llx).",
-                    buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode,
-                    buf_desc->tag.rnode.bucketNode, buf_desc->tag.forkNum, buf_desc->tag.blockNum,
-                    (unsigned long long)mem_lsn, (unsigned long long)disk_lsn)));
-            }
-            pfree(aux_block);
-        }
+        SegNetPageCheckDiskLSN(buf_desc, read_mode, spc);
 #endif
 
         SegTerminateBufferIO(buf_desc, false, BM_VALID);

@@ -144,6 +144,7 @@
 #include "workload/cpwlm.h"
 #include "workload/workload.h"
 #include "utils/guc_network.h"
+#include "ddes/dms/ss_init.h"
 
 static bool check_maxconnections(int* newval, void** extra, GucSource source);
 static bool check_pooler_maximum_idle_time(int* newval, void** extra, GucSource source);
@@ -1084,6 +1085,11 @@ static bool check_maxconnections(int* newval, void** extra, GucSource source)
     if (*newval + g_instance.attr.attr_storage.autovacuum_max_workers + g_instance.attr.attr_sql.job_queue_processes +
         AUXILIARY_BACKENDS + AV_LAUNCHER_PROCS +
         g_instance.attr.attr_network.maxInnerToolConnections + g_max_worker_processes > MAX_BACKENDS) {
+        return false;
+    }
+
+    if (g_instance.attr.attr_storage.dms_attr.enable_dms && *newval > DMS_MAX_CONNECTIONS) {
+        ereport(LOG, (errmsg("Shared Storage can't support max_connections more than %d.", DMS_MAX_CONNECTIONS)));
         return false;
     }
     return true;

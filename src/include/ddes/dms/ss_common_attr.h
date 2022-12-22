@@ -34,6 +34,7 @@
 #define ENABLE_DMS (g_instance.attr.attr_storage.dms_attr.enable_dms && !IsInitdb)
 #define ENABLE_SS_LOG (g_instance.attr.attr_storage.dms_attr.enable_log_level)
 #define ENABLE_REFORM (g_instance.attr.attr_storage.dms_attr.enable_reform)
+#define ENABLE_VERIFY_PAGE_VERSION (g_instance.attr.attr_storage.dms_attr.enable_verify_page)
 
 #define SS_REFORM_REFORMER                                                  \
     (ENABLE_DMS && (g_instance.dms_cxt.SSReformInfo.in_reform == true) \

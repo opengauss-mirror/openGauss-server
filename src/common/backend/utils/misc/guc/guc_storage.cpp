@@ -211,6 +211,9 @@ static bool check_ss_dss_vg_name(char** newval, void** extra, GucSource source);
 static bool check_ss_dss_conn_path(char** newval, void** extra, GucSource source);
 static bool check_ss_enable_ssl(bool* newval, void** extra, GucSource source);
 static void assign_ss_enable_aio(bool newval, void *extra);
+#ifdef USE_ASSERT_CHECKING
+static void assign_ss_enable_verify_page(bool newval, void *extra);
+#endif
 
 #ifndef ENABLE_MULTIPLE_NODES
 static void assign_dcf_election_timeout(int newval, void* extra);
@@ -1022,6 +1025,21 @@ static void InitStorageConfigureNamesBool()
             NULL,
             assign_ss_enable_aio,
             NULL},
+
+#ifdef USE_ASSERT_CHECKING
+        {{"ss_enable_verify_page",
+            PGC_SIGHUP,
+            NODE_SINGLENODE,
+            SHARED_STORAGE_OPTIONS,
+            gettext_noop("Whether enable verify page version"),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_storage.dms_attr.enable_verify_page,
+            true,
+            NULL,
+            assign_ss_enable_verify_page,
+            NULL},
+#endif
 
         {{"ss_enable_catalog_centralized",
             PGC_POSTMASTER,
@@ -5812,6 +5830,13 @@ static void assign_ss_enable_aio(bool newval, void *extra)
 {
     g_instance.attr.attr_storage.dms_attr.enable_dss_aio = newval;
 }
+
+#ifdef USE_ASSERT_CHECKING
+static void assign_ss_enable_verify_page(bool newval, void *extra)
+{
+    g_instance.attr.attr_storage.dms_attr.enable_verify_page = newval;
+}
+#endif
 
 #ifndef ENABLE_MULTIPLE_NODES
 

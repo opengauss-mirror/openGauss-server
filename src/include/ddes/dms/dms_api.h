@@ -584,6 +584,7 @@ typedef int (*dms_failover_promote_opengauss)(void *db_handle);
 typedef int (*dms_reform_done_notify)(void *db_handle);
 typedef int (*dms_log_wait_flush)(void *db_handle, unsigned long long lsn);
 typedef int (*dms_wait_ckpt)(void *db_handle);
+typedef void (*dms_verify_page)(dms_buf_ctrl_t *buf_ctrl, char *new_page);
 
 typedef struct st_dms_callback {
     // used in reform
@@ -653,6 +654,7 @@ typedef struct st_dms_callback {
     dms_get_rowid_from_cr_cursor get_rowid_from_cr_cursor;
     dms_read_page read_page;
     dms_leave_page leave_page;
+    dms_verify_page verify_page;
 
     /* memory manager callback functions provided by DB */
     dms_mem_alloc mem_alloc;
@@ -760,7 +762,7 @@ typedef struct st_dms_profile {
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           36
+#define DMS_LOCAL_VERSION           38
 
 #ifdef __cplusplus
 }

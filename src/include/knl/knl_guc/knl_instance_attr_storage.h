@@ -99,6 +99,7 @@ typedef struct knl_instance_attr_dms {
     bool enable_dms;
     bool enable_catalog_centralized;
     bool enable_dss_aio;
+    bool enable_verify_page;
     int instance_id;
     int recv_msg_pool_size;
     char* interconnect_url;

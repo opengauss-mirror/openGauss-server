@@ -1434,6 +1434,17 @@ void seg_extend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, cha
 
     SegPageLocation loc = seg_logic_to_physic_mapping(reln, seg_head, blocknum);
 
+    if (ENABLE_DSS) {
+        RelFileNode relNode = {
+            .spcNode = rnode.spcNode,
+            .dbNode = rnode.dbNode,
+            .relNode = EXTENT_SIZE_TO_TYPE(loc.extent_size),
+            .bucketNode = rnode.bucketNode,
+            .opt = rnode.opt
+        };
+        seg_physical_write(reln->seg_space, relNode, forknum, loc.blocknum, buffer, false);
+    }
+
     LockBuffer(seg_buffer, BUFFER_LOCK_EXCLUSIVE);
 
     ereport(DEBUG5,
