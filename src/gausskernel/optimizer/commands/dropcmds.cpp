@@ -262,6 +262,14 @@ void RemoveObjects(DropStmt* stmt, bool missing_ok, bool is_securityadmin)
             CacheInvalidateFunction(InvalidOid, pkgOid);
             ReleaseSysCache(tup);
         }
+
+#if (!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS))
+        if (stmt->removeType == OBJECT_SCHEMA && u_sess->attr.attr_sql.dolphin && strcmp(strVal(linitial(objname)), "public") == 0) {
+            ereport(ERROR,
+                (errcode(ERRCODE_DEPENDENT_OBJECTS_STILL_EXIST),
+                    errmsg("cannot drop schema public because dolphin depends on it")));
+        }
+#endif
         // @Temp Table. myTempNamespace and myTempToastNamespace's owner is
         // bootstrap user, so can not be deleted by ordinary user. to ensuer this two
         // schema be deleted on session quiting, we should bypass acl check when
