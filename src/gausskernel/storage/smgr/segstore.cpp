@@ -1434,6 +1434,7 @@ void seg_extend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, cha
 
     SegPageLocation loc = seg_logic_to_physic_mapping(reln, seg_head, blocknum);
 
+#ifdef USE_ASSERT_CHECKING
     if (ENABLE_DSS) {
         RelFileNode relNode = {
             .spcNode = rnode.spcNode,
@@ -1444,6 +1445,7 @@ void seg_extend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, cha
         };
         seg_physical_write(reln->seg_space, relNode, forknum, loc.blocknum, buffer, false);
     }
+#endif
 
     LockBuffer(seg_buffer, BUFFER_LOCK_EXCLUSIVE);
 

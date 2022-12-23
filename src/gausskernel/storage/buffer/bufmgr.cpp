@@ -1941,28 +1941,28 @@ Buffer ReadBuffer_common_for_direct(RelFileNode rnode, char relpersistence, Fork
     return RedoBufferSlotGetBuffer(bufferslot);
 }
 
+#ifdef USE_ASSERT_CHECKING
 static void WriteZeroPageToDisk(SMgrRelation smgr, ForkNumber forknum, BlockNumber blocknum,
     Block bufBlock, const XLogPhyBlock *pblk)
 {
-    if (ENABLE_DSS) {
-        if (pblk != NULL) {
-            SegmentCheck(XLOG_NEED_PHYSICAL_LOCATION(smgr->smgr_rnode.node));
-            SegmentCheck(PhyBlockIsValid(*pblk));
-            SegSpace* spc = spc_open(smgr->smgr_rnode.node.spcNode, smgr->smgr_rnode.node.dbNode, false);
-            SegmentCheck(spc);
-            RelFileNode fakenode = {
-                .spcNode = spc->spcNode,
-                .dbNode = spc->dbNode,
-                .relNode = pblk->relNode,
-                .bucketNode = SegmentBktId,
-                .opt = 0
-            };
-            seg_physical_write(spc, fakenode, forknum, pblk->block, (char *)bufBlock, false);
-        } else {
-            smgrwrite(smgr, forknum, blocknum, (char *)bufBlock, false);
-        }
+    if (pblk != NULL) {
+        SegmentCheck(XLOG_NEED_PHYSICAL_LOCATION(smgr->smgr_rnode.node));
+        SegmentCheck(PhyBlockIsValid(*pblk));
+        SegSpace* spc = spc_open(smgr->smgr_rnode.node.spcNode, smgr->smgr_rnode.node.dbNode, false);
+        SegmentCheck(spc);
+        RelFileNode fakenode = {
+            .spcNode = spc->spcNode,
+            .dbNode = spc->dbNode,
+            .relNode = pblk->relNode,
+            .bucketNode = SegmentBktId,
+            .opt = 0
+        };
+        seg_physical_write(spc, fakenode, forknum, pblk->block, (char *)bufBlock, false);
+    } else {
+        smgrwrite(smgr, forknum, blocknum, (char *)bufBlock, false);
     }
 }
+#endif
 
 /*
  * ReadBuffer_common_ReadBlock -- common logic for all ReadBuffer variants
@@ -1994,7 +1994,11 @@ static bool ReadBuffer_common_ReadBlock(SMgrRelation smgr, char relpersistence, 
          */
         if (mode == RBM_ZERO || mode == RBM_ZERO_AND_LOCK || mode == RBM_ZERO_AND_CLEANUP_LOCK) {
             MemSet((char *)bufBlock, 0, BLCKSZ);
-            WriteZeroPageToDisk(smgr, forkNum, blockNum, bufBlock, pblk);
+#ifdef USE_ASSERT_CHECKING
+            if (ENABLE_DSS) {
+                WriteZeroPageToDisk(smgr, forkNum, blockNum, bufBlock, pblk);
+            }
+#endif
         } else {
             instr_time io_start, io_time;
 
@@ -2048,7 +2052,11 @@ static bool ReadBuffer_common_ReadBlock(SMgrRelation smgr, char relpersistence, 
                                              relpath(smgr->smgr_rnode, forkNum)),
                                       handle_in_client(true)));
                     MemSet((char *)bufBlock, 0, BLCKSZ);
-                    WriteZeroPageToDisk(smgr, forkNum, blockNum, bufBlock, pblk);
+#ifdef USE_ASSERT_CHECKING
+                    if (ENABLE_DSS) {
+                        WriteZeroPageToDisk(smgr, forkNum, blockNum, bufBlock, pblk);
+                    }
+#endif
                 } else if (mode != RBM_FOR_REMOTE && relpersistence == RELPERSISTENCE_PERMANENT &&
                            CanRemoteRead() && !IsSegmentFileNode(smgr->smgr_rnode.node)) {
                     /* not alread in remote read and not temp/unlogged table, try to remote read */
