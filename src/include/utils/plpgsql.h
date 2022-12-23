@@ -1726,6 +1726,7 @@ extern int plpgsql_yylex(void);
 extern void plpgsql_push_back_token(int token);
 extern void plpgsql_append_source_text(StringInfo buf, int startlocation, int endlocation);
 extern void plpgsql_peek2(int* tok1_p, int* tok2_p, int* tok1_loc, int* tok2_loc);
+extern void plpgsql_peek(int* tok1_p);
 extern int plpgsql_scanner_errposition(int location);
 extern void plpgsql_yyerror(const char* message, bool isError = false);
 extern int plpgsql_location_to_lineno(int location);
