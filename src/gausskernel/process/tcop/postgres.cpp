@@ -2566,6 +2566,15 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
         commandTag = CreateCommandTag(parsetree);
 
         set_ps_display(commandTag, false);
+        if (libpqsw_skip_check_readonly()) {
+            // create table as / select into / insert into
+            if (nodeTag(parsetree) == T_CreateTableAsStmt
+                || ((nodeTag(parsetree) == T_SelectStmt) && ((SelectStmt*)parsetree)->intoClause != NULL)
+                ) {
+                libpqsw_set_redirect(true);
+            }
+
+        }
 
         if (libpqsw_redirect()) {
             // quick transfer to master

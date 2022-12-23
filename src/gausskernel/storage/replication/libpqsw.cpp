@@ -384,6 +384,11 @@ bool libpqsw_get_set_command()
     return get_redirect_manager()->state.set_command;
 }
 
+/* if skip readonly check in P or Q message */
+bool libpqsw_skip_check_readonly() {
+    return get_redirect_manager()->get_remote_excute();
+}
+
 /* query if enable set command*/
 void libpqsw_set_set_command(bool set_command)
 {

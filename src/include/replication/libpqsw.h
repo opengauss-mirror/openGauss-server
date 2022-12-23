@@ -54,6 +54,8 @@ void libpqsw_set_redirect(bool redirect);
 bool enable_remote_excute();
 /* query if enable set command*/
 bool libpqsw_get_set_command();
+/* if skip readonly check in P or Q message */
+bool libpqsw_skip_check_readonly();
 /* get unique redirect manager*/
 RedirectManager* get_redirect_manager();
 #ifdef _cplusplus
