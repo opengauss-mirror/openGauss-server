@@ -1758,6 +1758,10 @@ void dw_upgrade_renable_double_write()
         return;
     }
 
+    if (ENABLE_DMS) {
+        return;
+    }
+
     ereport(LOG, (errmodule(MOD_DW), errmsg("support renable dw upgrade start")));
 
     /* generate the pg_dw_meta with dw_file_num = 0 */
