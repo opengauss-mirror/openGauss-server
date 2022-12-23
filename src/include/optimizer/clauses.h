@@ -20,6 +20,8 @@
 #include "nodes/nodeFuncs.h"
 
 #ifndef ENABLE_MULTIPLE_NODES
+#define is_andclause(clause) \
+    ((clause) != NULL && IsA(clause, BoolExpr) && (((const BoolExpr *)(clause))->boolop) == AND_EXPR)
 #define is_orclause(clause) \
     ((clause) != NULL && IsA(clause, BoolExpr) && (((const BoolExpr *)(clause))->boolop) == OR_EXPR)
 #define is_notclause(clause) \

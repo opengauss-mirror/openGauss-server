@@ -1,0 +1,88 @@
+create table a(id1 int, id2 int);
+create table b(id1 int, id2 int);
+insert into a select n,n from generate_series(-5,5) n;
+insert into b select n,n from generate_series(0,5) n;
+explain(costs off) select count(*) from a inner join  b on a.id1 > b.id1 where (sqrt(a.id1) < 10 and b.id2 < 10) or (sqrt(a.id1) > 5 and b.id2 > 0);
+                                                                                              QUERY PLAN                                                                                               
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate
+   ->  Nested Loop
+         Join Filter: ((a.id1 > b.id1) AND (((sqrt((a.id1)::double precision) < 10::double precision) AND (b.id2 < 10)) OR ((sqrt((a.id1)::double precision) > 5::double precision) AND (b.id2 > 0))))
+         ->  Seq Scan on a
+         ->  Materialize
+               ->  Seq Scan on b
+(6 rows)
+
+select count(*) from a inner join  b on a.id1 > b.id1 where (sqrt(a.id1) < 10 and b.id2 < 10) or (sqrt(a.id1) > 5 and b.id2 > 0);
+ count 
+-------
+    15
+(1 row)
+
+create table ta(id int,id1 int);
+create table tb(id int,id1 int);
+insert into ta values (1, 1);
+insert into ta values (2, 2);
+insert into ta values (3, 3);
+insert into ta values (4, 4);
+insert into tb values (1, 1);
+insert into tb values (2, 2);
+insert into tb values (3, 3);
+insert into tb values (4, 4);
+select * from ta,tb where (ta.id=1 and tb.id=2) or (ta.id=2 and tb.id=1);
+ id | id1 | id | id1 
+----+-----+----+-----
+  1 |   1 |  2 |   2
+  2 |   2 |  1 |   1
+(2 rows)
+
+explain(costs off) select * from ta,tb where (ta.id=1 and tb.id=2) or (ta.id=2 and tb.id=1);
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Nested Loop
+   Join Filter: (((ta.id = 1) AND (tb.id = 2)) OR ((ta.id = 2) AND (tb.id = 1)))
+   ->  Seq Scan on ta
+   ->  Materialize
+         ->  Seq Scan on tb
+(5 rows)
+
+set sql_beta_feature=extract_pushdown_or_clause;
+explain(costs off) select count(*) from a inner join  b on a.id1 > b.id1 where (sqrt(a.id1) < 10 and b.id2 < 10) or (sqrt(a.id1) > 5 and b.id2 > 0);
+                                                                                              QUERY PLAN                                                                                               
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate
+   ->  Nested Loop
+         Join Filter: ((a.id1 > b.id1) AND (((sqrt((a.id1)::double precision) < 10::double precision) AND (b.id2 < 10)) OR ((sqrt((a.id1)::double precision) > 5::double precision) AND (b.id2 > 0))))
+         ->  Seq Scan on a
+               Filter: ((sqrt((id1)::double precision) < 10::double precision) OR (sqrt((id1)::double precision) > 5::double precision))
+         ->  Materialize
+               ->  Seq Scan on b
+                     Filter: ((id2 < 10) OR (id2 > 0))
+(8 rows)
+
+select count(*) from a inner join  b on a.id1 > b.id1 where (sqrt(a.id1) < 10 and b.id2 < 10) or (sqrt(a.id1) > 5 and b.id2 > 0);
+ERROR:  cannot take square root of a negative number
+select * from ta,tb where (ta.id=1 and tb.id=2) or (ta.id=2 and tb.id=1);
+ id | id1 | id | id1 
+----+-----+----+-----
+  1 |   1 |  2 |   2
+  2 |   2 |  1 |   1
+(2 rows)
+
+explain(costs off) select * from ta,tb where (ta.id=1 and tb.id=2) or (ta.id=2 and tb.id=1);
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Nested Loop
+   Join Filter: (((ta.id = 1) AND (tb.id = 2)) OR ((ta.id = 2) AND (tb.id = 1)))
+   ->  Seq Scan on ta
+         Filter: ((id = 1) OR (id = 2))
+   ->  Materialize
+         ->  Seq Scan on tb
+               Filter: ((id = 2) OR (id = 1))
+(7 rows)
+
+drop table ta;
+drop table tb;
+drop table a;
+drop table b;
+set sql_beta_feature=none;

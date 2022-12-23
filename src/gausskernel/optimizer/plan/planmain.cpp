@@ -33,6 +33,7 @@
 #include "optimizer/planmain.h"
 #include "optimizer/randomplan.h"
 #include "optimizer/tlist.h"
+#include "optimizer/orclauses.h"
 #include "utils/selfuncs.h"
 
 /* Local functions */
@@ -234,6 +235,14 @@ RelOptInfo* query_planner(PlannerInfo* root, List* tlist,
      * placeholder is evaluatable at a base rel.
      */
     add_placeholders_to_base_rels(root);
+
+    /*
+     * Look for join OR clauses that we can extract single-relation
+     * restriction OR clauses from.
+     */
+    if (ENABLE_SQL_BETA_FEATURE(EXTRACT_PUSHDOWN_OR_CLAUSE)) {
+        extract_restriction_or_clauses(root);
+    }
 
     /*
      * We should now have size estimates for every actual table involved in
