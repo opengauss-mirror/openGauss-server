@@ -121,6 +121,7 @@ typedef struct RelFileNodeV2 {
 #define IsSegmentPhysicalRelNode(rNode) (IsSegmentFileNode(rNode) && (rNode).relNode <= 5)
 
 #define IsBucketFileNode(rnode) ((rnode).bucketNode > InvalidBktId && (rnode).bucketNode < SegmentBktId)
+#define DefaultFileNodeOpt 0
 
 /*RelFileNodeOld: Old version relfilenode. Compatible with older versions of relfilenode.*/
 

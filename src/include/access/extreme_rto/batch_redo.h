@@ -46,8 +46,6 @@ namespace extreme_rto {
 #define INIT_REDO_ITEM_TAG(a, xx_rnode, xx_forkNum, xx_blockNum) \
     ((a).rNode = (xx_rnode), (a).forkNum = (xx_forkNum), (a).blockNum = (xx_blockNum))
 
-#define InvalidRelFileNode ((RelFileNode){ 0, 0, 0 })
-
 /*
  * Note: if there are any pad bytes in the struct, INIT_RedoItemTag have
  * to be fixed to zero them, since this struct is used as a hash key.

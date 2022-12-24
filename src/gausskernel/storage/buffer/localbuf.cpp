@@ -23,6 +23,7 @@
 #include "storage/buf/buf_internals.h"
 #include "storage/buf/bufmgr.h"
 #include "storage/smgr/segment.h"
+#include "storage/smgr/relfilenode_hash.h"
 #include "utils/guc.h"
 #include "utils/memutils.h"
 #include "utils/resowner.h"
@@ -443,11 +444,12 @@ static void InitLocalBuffers(void)
     securec_check(ret, "\0", "\0");
     info.keysize = sizeof(BufferTag);
     info.entrysize = sizeof(LocalBufferLookupEnt);
-    info.hash = tag_hash;
+    info.match = BufTagMatchWithoutOpt;
+    info.hash = BufTagHashWithoutOpt;
     info.hcxt = SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE);
 
     u_sess->storage_cxt.LocalBufHash = hash_create(
-            "Local Buffer Lookup Table", nbufs, &info, HASH_ELEM | HASH_CONTEXT | HASH_FUNCTION);
+            "Local Buffer Lookup Table", nbufs, &info, HASH_ELEM | HASH_CONTEXT | HASH_FUNCTION | HASH_COMPARE);
 
     if (!u_sess->storage_cxt.LocalBufHash) {
         ereport(ERROR, (errcode(ERRCODE_INITIALIZE_FAILED),

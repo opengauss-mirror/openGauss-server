@@ -61,6 +61,7 @@
 #include "commands/directory.h"
 #include "cstore.h"
 #include "storage/custorage.h"
+#include "storage/page_compression.h"
 #include "threadpool/threadpool.h"
 #include "catalog/pg_resource_pool.h"
 #include "catalog/pg_workload_group.h"
@@ -1171,6 +1172,7 @@ Oid GetNewRelFileNode(Oid reltablespace, Relation pg_class, char relpersistence)
     rnode.node.spcNode = ConvertToRelfilenodeTblspcOid(reltablespace);
     rnode.node.dbNode = (rnode.node.spcNode == GLOBALTABLESPACE_OID) ? InvalidOid : u_sess->proc_cxt.MyDatabaseId;
     rnode.node.bucketNode = InvalidBktId;
+    rnode.node.opt = DefaultFileNodeOpt;
 
     /*
      * The relpath will vary based on the backend ID, so we must initialize

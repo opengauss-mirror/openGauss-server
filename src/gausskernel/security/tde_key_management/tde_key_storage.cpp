@@ -27,6 +27,7 @@
 #include "utils/memutils.h"
 #include "utils/elog.h"
 #include "access/hash.h"
+#include "storage/smgr/relfilenode_hash.h"
 
 namespace TDE {
 void TDEKeyStorage::init()
@@ -304,10 +305,11 @@ void TDEBufferCache::init()
     securec_check(rc, "", "");
     tde_buffer_ctl.keysize = sizeof(RelFileNode);
     tde_buffer_ctl.entrysize = sizeof(TdeFileNodeEntry);
-    tde_buffer_ctl.hash = tag_hash;
+    tde_buffer_ctl.hash = file_node_ignore_opt_hash;
+    tde_buffer_ctl.match = file_node_ignore_opt_match;
     tde_buffer_ctl.hcxt = tde_buffer_mem;
     tde_buffer_cache = hash_create(tde_buffer_name, max_bucket, &tde_buffer_ctl, 
-        HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
+        HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT | HASH_COMPARE);
     if (tde_buffer_cache == NULL) {
         ereport(ERROR, (errmodule(MOD_SEC_TDE), errcode(ERRCODE_FUNCTION_HASH_NOT_INITED), 
             errmsg("init TDE buffer cache is NULL"), errdetail("N/A"), 

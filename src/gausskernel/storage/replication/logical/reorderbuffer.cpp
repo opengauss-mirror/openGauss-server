@@ -74,6 +74,7 @@
 
 #include "storage/buf/bufmgr.h"
 #include "storage/smgr/fd.h"
+#include "storage/smgr/relfilenode_hash.h"
 #include "storage/sinval.h"
 
 #include "utils/acl.h"
@@ -1179,7 +1180,8 @@ static void ReorderBufferBuildTupleCidHash(ReorderBuffer *rb, ReorderBufferTXN *
 
     hash_ctl.keysize = sizeof(ReorderBufferTupleCidKey);
     hash_ctl.entrysize = sizeof(ReorderBufferTupleCidEnt);
-    hash_ctl.hash = tag_hash;
+    hash_ctl.hash = ReorderBufferTupleCidKeyHash;
+    hash_ctl.match = ReorderBufferTupleCidKeyMatch;
     hash_ctl.hcxt = rb->context;
 
     /*
@@ -1187,7 +1189,7 @@ static void ReorderBufferBuildTupleCidHash(ReorderBuffer *rb, ReorderBufferTXN *
      * the start
      */
     txn->tuplecid_hash = hash_create("ReorderBufferTupleCid", txn->ntuplecids, &hash_ctl,
-                                     HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
+                                     HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT | HASH_COMPARE);
 
     dlist_foreach(iter, &txn->tuplecids)
     {

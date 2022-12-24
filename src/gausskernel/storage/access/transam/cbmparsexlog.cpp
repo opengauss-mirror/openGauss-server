@@ -44,6 +44,7 @@
 #include "postmaster/cbmwriter.h"
 #include "storage/copydir.h"
 #include "storage/smgr/fd.h"
+#include "storage/smgr/relfilenode_hash.h"
 #include "storage/freespace.h"
 #include "storage/lock/lwlock.h"
 #include "storage/proc.h"
@@ -636,9 +637,10 @@ static HTAB *CBMPageHashInitialize(MemoryContext memoryContext)
     ctl.hcxt = memoryContext;
     ctl.keysize = sizeof(CBMPageTag);
     ctl.entrysize = sizeof(CbmHashEntry);
-    ctl.hash = tag_hash;
+    ctl.hash = CBMPageTagHash;
+    ctl.match = CBMPageTagMatch;
     hTab = hash_create("CBM page hash by relfilenode and forknum", INITCBMPAGEHASHSIZE, &ctl,
-                       HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
+                       HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT | HASH_COMPARE);
 
     return hTab;
 }
