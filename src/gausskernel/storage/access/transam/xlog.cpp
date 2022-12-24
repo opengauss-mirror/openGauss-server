@@ -697,6 +697,10 @@ static XLogRecPtr XLogInsertRecordGroup(XLogRecData *rdata, XLogRecPtr fpw_lsn)
                 break;
             }
 #else
+            if (extra_waits % FOLLOWER_TRIGER_SLEEP_LOOP_COUNT == 0 && extra_waits > 0) {
+                pg_usleep(FOLLOWER_SLEEP_USECS);
+            }
+            
             pg_read_barrier();
             if (!proc->xlogGroupMember) {
                 break;

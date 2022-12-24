@@ -250,6 +250,9 @@ struct WALInitSegLockPadded {
 #define PAGERANGE_BACKWRITE 0x0800  /* PageRangeBackWrite */
 
 
+#define FOLLOWER_TRIGER_SLEEP_LOOP_COUNT 1000
+#define FOLLOWER_SLEEP_USECS 1000
+
 /* Checkpoint statistics */
 typedef struct CheckpointStatsData {
     TimestampTz ckpt_start_t;    /* start of checkpoint */
