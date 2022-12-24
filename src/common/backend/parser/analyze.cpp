@@ -3467,8 +3467,17 @@ static Node* transformSetOperationTree(ParseState* pstate, SelectStmt* stmt, boo
             int32 rescoltypmod;
             Oid rescolcoll;
 
-            /* select common type, same as CASE et al */
-            rescoltype = select_common_type(pstate, list_make2(lcolnode, rcolnode), context, &bestexpr);
+            if (IsA(lcolnode, SetToDefault) && ((SetToDefault*)lcolnode)->lrchild_unknown && rcoltype != UNKNOWNOID) {
+                /* the type of lcolnode's l&r child must be unknown or NULL, and lcoltype must be text. so allow text cover to other type */
+                rescoltype = rcoltype;
+                bestexpr = rcolnode;
+            } else if (IsA(rcolnode, SetToDefault) && ((SetToDefault*)rcolnode)->lrchild_unknown && lcoltype != UNKNOWNOID) {
+                rescoltype = lcoltype;
+                bestexpr = lcolnode;
+            } else {
+                /* select common type, same as CASE et al */
+                rescoltype = select_common_type(pstate, list_make2(lcolnode, rcolnode), context, &bestexpr);
+            }
             bestlocation = exprLocation(bestexpr);
             /* if same type and same typmod, use typmod; else default */
             if (lcoltype == rcoltype && lcoltypmod == rcoltypmod) {
@@ -3577,6 +3586,11 @@ static Node* transformSetOperationTree(ParseState* pstate, SelectStmt* stmt, boo
                 rescolnode->typeMod = rescoltypmod;
                 rescolnode->collation = rescolcoll;
                 rescolnode->location = bestlocation;
+                rescolnode->lrchild_unknown = false;
+                if ((lcoltype == UNKNOWNOID || (IsA(ltle->expr, SetToDefault) && ((SetToDefault*)ltle->expr)->lrchild_unknown))
+                    && (rcoltype == UNKNOWNOID || (IsA(rtle->expr, SetToDefault) && ((SetToDefault*)rtle->expr)->lrchild_unknown))) {
+                    rescolnode->lrchild_unknown = true;
+                }
                 restle = makeTargetEntry((Expr*)rescolnode,
                     0, /* no need to set resno */
                     NULL,

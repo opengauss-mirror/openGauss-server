@@ -59,7 +59,7 @@ bool open_join_children = true;
 bool will_shutdown = false;
 
 /* hard-wired binary version number */
-const uint32 GRAND_VERSION_NUM = 92840;
+const uint32 GRAND_VERSION_NUM = 92841;
 
 const uint32 SELECT_INTO_VAR_VERSION_NUM = 92834;
 const uint32 DOLPHIN_ENABLE_DROP_NUM = 92830;
@@ -165,6 +165,8 @@ const uint32 MAT_VIEW_RECURSIVE_VERSION_NUM = 92833;
 const uint32 NEGETIVE_BOOL_VERSION_NUM = 92835;
 
 const uint32 FDW_SUPPORT_JOIN_AGG_VERSION_NUM = 92839;
+
+const uint32 UNION_NULL_VERSION_NUM = 92841;
 
 #ifdef PGXC
 bool useLocalXid = false;

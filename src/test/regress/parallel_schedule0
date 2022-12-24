@@ -1004,6 +1004,8 @@ test: cost_model
 test: base_update
 test: seqscan_fusion
 
+test: union_null_01
+
 # var selectivity
 test: var_eq_const_selectivity
 
