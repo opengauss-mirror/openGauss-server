@@ -486,10 +486,11 @@ Buffer ReadSegBufferForDMS(BufferDesc* bufHdr, ReadBufferMode mode, SegSpace *sp
     if (mode == RBM_ZERO_AND_LOCK || mode == RBM_ZERO_AND_CLEANUP_LOCK || mode == RBM_ZERO) {
         errno_t er = memset_s((char *)bufBlock, BLCKSZ, 0, BLCKSZ);
         securec_check(er, "", "");
+#ifdef USE_ASSERT_CHECKING
         if (ENABLE_DSS) {
-            /* set dss block content to zero */
             seg_physical_write(spc, bufHdr->tag.rnode, bufHdr->tag.forkNum, bufHdr->tag.blockNum, bufBlock, false);
         }
+#endif
     } else {
 #ifdef USE_ASSERT_CHECKING
         bool need_verify = (((pg_atomic_read_u32(&bufHdr->state) & BM_VALID) != 0) &&
@@ -613,9 +614,11 @@ Buffer ReadBufferFast(SegSpace *spc, RelFileNode rnode, ForkNumber forkNum, Bloc
         if (mode == RBM_ZERO_AND_LOCK || mode == RBM_ZERO_AND_CLEANUP_LOCK || mode == RBM_ZERO) {
             errno_t er = memset_s((char *)bufBlock, BLCKSZ, 0, BLCKSZ);
             securec_check(er, "", "");
+#ifdef USE_ASSERT_CHECKING
             if (ENABLE_DSS) {
                 seg_physical_write(spc, rnode, forkNum, blockNum, bufBlock, false);
             }
+#endif
         } else {
             seg_physical_read(spc, rnode, forkNum, blockNum, bufBlock);
             if (!PageIsVerified(bufBlock, blockNum)) {
