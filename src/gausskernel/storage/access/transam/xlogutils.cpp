@@ -672,7 +672,9 @@ XLogRedoAction XLogReadBufferForRedoBlockExtend(RedoBufferTag *redoblock, ReadBu
         if (pageisvalid) {
             if (readmethod != WITH_LOCAL_CACHE) {
                 if (mode != RBM_ZERO_AND_LOCK && mode != RBM_ZERO_AND_CLEANUP_LOCK) {
-                    if (get_cleanup_lock)
+                    if (ENABLE_DMS)
+                        LockBuffer(buf, BUFFER_LOCK_SHARE);
+                    else if (get_cleanup_lock)
                         LockBufferForCleanup(buf);
                     else
                         LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
@@ -696,6 +698,16 @@ XLogRedoAction XLogReadBufferForRedoBlockExtend(RedoBufferTag *redoblock, ReadBu
             }
             return BLK_DONE;
         } else {
+            if (readmethod != WITH_LOCAL_CACHE && mode != RBM_ZERO_AND_LOCK && mode != RBM_ZERO_AND_CLEANUP_LOCK &&
+                ENABLE_DMS) {
+                CheckPageNeedSkipInRecovery(buf);
+                LockBuffer(buf, BUFFER_LOCK_UNLOCK);
+                if (get_cleanup_lock) {
+                    LockBufferForCleanup(buf);
+                } else {
+                    LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
+                }
+            }
             if (SegmentNeedAdvancedLSNCheck(redoblock->rnode, redoblock->forknum, mode)) {
                 /*
                  * For segment-page storage, before returning BLK_NEEDS_REDO, we need checking LSN. Illegal LSN may be

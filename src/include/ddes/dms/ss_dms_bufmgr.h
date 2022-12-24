@@ -69,5 +69,6 @@ void MarkReadPblk(int buf_id, const XLogPhyBlock *pblk);
 void SSCheckBufferIfNeedMarkDirty(Buffer buf);
 void SSRecheckBufferPool();
 void TransformLockTagToDmsLatch(dms_drlatch_t* dlatch, const LOCKTAG locktag);
+void CheckPageNeedSkipInRecovery(Buffer buf);
 
 #endif
