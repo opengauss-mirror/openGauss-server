@@ -256,6 +256,9 @@ struct WALInitSegLockPadded {
 #define CHECKPOINTPLUS_LEN (SizeOfXLogRecord + SizeOfXLogRecordDataHeaderShort + sizeof(CheckPointPlus))
 #define CHECKPOINTUNDO_LEN (SizeOfXLogRecord + SizeOfXLogRecordDataHeaderShort + sizeof(CheckPointUndo))
 
+#define FOLLOWER_TRIGER_SLEEP_LOOP_COUNT 1000
+#define FOLLOWER_SLEEP_USECS 1000
+
 /* Checkpoint statistics */
 typedef struct CheckpointStatsData {
     TimestampTz ckpt_start_t;    /* start of checkpoint */
