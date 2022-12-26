@@ -2065,7 +2065,7 @@ locale_t
 locate_agg_of_level_context
 locate_var_of_level_context
 locate_var_of_relation_context
-locate_windowfunc_context
+locate_func_context
 logstreamer_param
 lquery
 lquery_level
