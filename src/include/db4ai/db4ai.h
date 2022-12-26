@@ -76,7 +76,6 @@ typedef enum {
     XG_REG_GAMMA,
     MULTICLASS,
     BAYES_NET_INTERNAL,
-    LINREGR,
     // for internal use
     INVALID_ALGORITHM_ML,
 
