@@ -63,6 +63,12 @@ FROM (
  .933333333333333
 (1 row)
 
+-- testing nonexistent algorithms
+CREATE model m_model_xgboost_0030 USING xgboost features treatment,
+trait_anxiety target second_attack 
+FROM
+	t_model_tab_0030;
+ERROR:  Invalid ML algorithm 'xgboost'
 -- svm binary classification with normalized data
 CREATE MODEL houses_svm_gd USING svm_classification
        FEATURES tax_n, bath_n, size_n TARGET price < 100000
