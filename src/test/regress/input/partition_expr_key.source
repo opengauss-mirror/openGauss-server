@@ -185,6 +185,22 @@ partition p2 values less than (2005));
 select partkeyexpr from pg_partition where (parttype = 'r') and (parentid in (select oid from pg_class where relname = 'test_extract'));
 select partkeyexpr from pg_partition where (parttype = 'p') and (parentid in (select oid from pg_class where relname = 'test_extract'));
 
+--test some bug cases
+drop table if exists b_bug_1;
+create table b_bug_1(c1 int primary key,c2 numeric)
+partition by range(c1 + c2) (
+partition p1 values less than(200),
+partition p2 values less than(300),
+partition p3 values less than(400)
+);
+create index on b_bug_1 (c2) global;
+create index on b_bug_1 (c1) local;
+insert into b_bug_1 values(100,1.5),(199,2.5);
+select * from b_bug_1 partition(p1);
+select * from b_bug_1 partition(p2);
+drop table if exists b_bug_1;
+
+
 --test pg_get_tabledef and pg_dump
 create table testnormalsubpart(a int, b int) partition by range(a) subpartition by range(b)
 (

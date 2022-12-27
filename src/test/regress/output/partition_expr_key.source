@@ -531,6 +531,33 @@ select partkeyexpr from pg_partition where (parttype = 'p') and (parentid in (se
  
 (3 rows)
 
+--test some bug cases
+drop table if exists b_bug_1;
+NOTICE:  table "b_bug_1" does not exist, skipping
+create table b_bug_1(c1 int primary key,c2 numeric)
+partition by range(c1 + c2) (
+partition p1 values less than(200),
+partition p2 values less than(300),
+partition p3 values less than(400)
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "b_bug_1_pkey" for table "b_bug_1"
+create index on b_bug_1 (c2) global;
+create index on b_bug_1 (c1) local;
+ERROR:  Global and local partition index should not be on same column
+insert into b_bug_1 values(100,1.5),(199,2.5);
+select * from b_bug_1 partition(p1);
+ c1  | c2  
+-----+-----
+ 100 | 1.5
+(1 row)
+
+select * from b_bug_1 partition(p2);
+ c1  | c2  
+-----+-----
+ 199 | 2.5
+(1 row)
+
+drop table if exists b_bug_1;
 --test pg_get_tabledef and pg_dump
 create table testnormalsubpart(a int, b int) partition by range(a) subpartition by range(b)
 (
