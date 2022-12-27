@@ -264,7 +264,7 @@ int main(int argc, char* argv[])
             fprintf(stderr, _("%s: socketpath cannot be set when disable dss\n"), progname);
             exit(1);
         }
-        if (dss.vgname == NULL) {
+        if (dss.vgname != NULL) {
             fprintf(stderr, _("%s: vgname cannot be set when disable dss\n"), progname);
             exit(1);
         }
