@@ -211,6 +211,14 @@ void transformAggregateCall(ParseState* pstate, Aggref* agg, List* args, List* a
         }
     }
 
+    /* It can't contain set-returning functions either */
+    if (checkExprHasSetReturningFuncs((Node*)agg->args)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_GROUPING_ERROR),
+                errmsg("aggregate function calls cannot contain set-returning function calls"),
+                parser_errposition(pstate, locate_srfunc((Node*)agg->args))));
+    }
+
     /* It can't contain window functions either */
     if (pstate->p_hasWindowFuncs && checkExprHasWindowFuncs((Node*)agg->args)) {
         ereport(ERROR,
