@@ -41,7 +41,8 @@ static void WaitDSSAioComplete(DSSAioCxt *aio_cxt, int index)
             if (errno == EINTR || num == -EINTR) {
                 continue;
             }
-            ereport(PANIC, (errmsg("failed to getevent by aio, errno = %d, retCode = %d", errno, num)));
+            ereport(WARNING, (errmsg("failed to getevent by aio, errno = %d, retCode = %d", errno, num)));
+            _exit(0);
         }
 
         for (int i = 0; i < num; i++) {
@@ -65,7 +66,8 @@ void DSSAioFlush(DSSAioCxt *aio_cxt)
     AioUtil *aio = &aio_cxt->aio[aio_cxt->index];
     if (aio->iocount > 0) {
         if (io_submit(aio->handle, aio->iocount, aio->iocbs_ptr) != aio->iocount) {
-            ereport(PANIC, (errmsg("io_submit failed, errno = %d", errno)));
+            ereport(WARNING, (errmsg("io_submit failed, errno = %d", errno)));
+            _exit(0);
         }
         need_wait = true;
         /* wait aio result at last to improve performance */
@@ -118,11 +120,13 @@ void DSSAioInitialize(DSSAioCxt *aio_cxt, aio_callback callback)
     securec_check_ss(err, "\0", "\0");
 
     if (io_setup(DSS_AIO_BATCH_SIZE, &aio_cxt->aio[0].handle) < 0) {
-        ereport(PANIC, (errmsg("io_setup failed for DSS AIO, errno=%d", errno)));
+        ereport(WARNING, (errmsg("io_setup failed for DSS AIO, errno=%d", errno)));
+        _exit(0);
     }
 
     if (io_setup(DSS_AIO_BATCH_SIZE, &aio_cxt->aio[1].handle) < 0) {
-        ereport(PANIC, (errmsg("io_setup failed for DSS AIO, errno=%d", errno)));
+        ereport(WARNING, (errmsg("io_setup failed for DSS AIO, errno=%d", errno)));
+        _exit(0);
     }
     aio_cxt->initialized = true;
     aio_cxt->aiocb = callback;
