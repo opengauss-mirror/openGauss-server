@@ -116,7 +116,7 @@ static void AddDefaultExprNode(ParseState* pstate)
     Relation relation = (Relation)linitial(pstate->p_target_relation);
     TupleDesc rdAtt = relation->rd_att;
     int fieldCnt = rdAtt->natts;
-    refState->constValues = (Const**)palloc0(sizeof(Const) * fieldCnt);
+    refState->constValues = (Const**)palloc0(sizeof(Const*) * fieldCnt);
     
     eval_const_expressions_context context;
     context.boundParams = nullptr;
