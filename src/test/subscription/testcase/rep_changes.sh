@@ -15,6 +15,8 @@ function test_1() {
 	exec_sql $case_db $pub_node1_port "CREATE TABLE tab_full2 (x text)"
 	exec_sql $case_db $pub_node1_port "INSERT INTO tab_full2 VALUES ('a'), ('b'), ('b')"
 	exec_sql $case_db $pub_node1_port "CREATE TABLE tab_rep (a int primary key)"
+	exec_sql $case_db $pub_node1_port "CREATE TABLE tab_mixed (a int primary key, b text, c numeric)"
+	exec_sql $case_db $pub_node1_port "INSERT INTO tab_mixed (a, b, c) VALUES (1, 'foo', 1.1)"
 	exec_sql $case_db $pub_node1_port "CREATE TABLE tab_include (a int, b text) WITH (storage_type = ustore)"
 	exec_sql $case_db $pub_node1_port "CREATE INDEX covering ON tab_include USING ubtree (a) INCLUDE(b)"
 	exec_sql $case_db $pub_node1_port "ALTER TABLE tab_include REPLICA IDENTITY FULL"
@@ -36,6 +38,10 @@ function test_1() {
 	exec_sql $case_db $sub_node1_port "CREATE TABLE tab_full_pk (a int primary key, b text)"
 	exec_sql $case_db $sub_node1_port "ALTER TABLE tab_full_pk REPLICA IDENTITY FULL"
 	exec_sql $case_db $sub_node1_port "CREATE TABLE tab_nothing (a int)"
+
+	# different column count and order than on publisher
+	exec_sql $case_db $sub_node1_port "CREATE TABLE tab_mixed (d text default 'local', c numeric, b text, a int primary key)"
+
 	# replication of the table with included index
 	exec_sql $case_db $sub_node1_port "CREATE TABLE tab_include (a int, b text) WITH (storage_type = ustore)"
 	exec_sql $case_db $sub_node1_port "CREATE INDEX covering ON tab_include USING ubtree (a) INCLUDE(b)"
@@ -49,7 +55,7 @@ function test_1() {
 	publisher_connstr="port=$pub_node1_port host=$g_local_ip dbname=$case_db user=$username password=$passwd"
 	exec_sql $case_db $pub_node1_port "CREATE PUBLICATION tap_pub"
 	exec_sql $case_db $pub_node1_port "CREATE PUBLICATION tap_pub_ins_only WITH (publish = insert)"
-	exec_sql $case_db $pub_node1_port "ALTER PUBLICATION tap_pub ADD TABLE tab_rep, tab_full, tab_full2, tab_include, tab_nothing, tab_full_pk, tab_no_replidentity_index"
+	exec_sql $case_db $pub_node1_port "ALTER PUBLICATION tap_pub ADD TABLE tab_rep, tab_full, tab_full2, tab_mixed, tab_include, tab_nothing, tab_full_pk, tab_no_replidentity_index"
 	exec_sql $case_db $pub_node1_port "ALTER PUBLICATION tap_pub_ins_only ADD TABLE tab_ins"
 	exec_sql $case_db $sub_node1_port "CREATE SUBSCRIPTION tap_sub CONNECTION '$publisher_connstr' PUBLICATION tap_pub, tap_pub_ins_only"
 
@@ -70,18 +76,19 @@ function test_1() {
 		exit 1
 	fi
 
-	exec_sql $case_db $pub_node1_port  "INSERT INTO tab_ins SELECT generate_series(1,50)"
-	exec_sql $case_db $pub_node1_port  "DELETE FROM tab_ins WHERE a > 20"
-	exec_sql $case_db $pub_node1_port  "UPDATE tab_ins SET a = -a"
-	exec_sql $case_db $pub_node1_port  "INSERT INTO tab_rep SELECT generate_series(1,50)"
-	exec_sql $case_db $pub_node1_port  "DELETE FROM tab_rep WHERE a > 20"
-	exec_sql $case_db $pub_node1_port  "UPDATE tab_rep SET a = -a"
-	exec_sql $case_db $pub_node1_port  "INSERT INTO tab_full_pk VALUES (1, 'foo'), (2, 'baz')"
-	exec_sql $case_db $pub_node1_port  "INSERT INTO tab_nothing VALUES (generate_series(1,20))"
-	exec_sql $case_db $pub_node1_port  "INSERT INTO tab_include SELECT generate_series(1,50)"
-	exec_sql $case_db $pub_node1_port  "DELETE FROM tab_include WHERE a > 20"
-	exec_sql $case_db $pub_node1_port  "UPDATE tab_include SET a = -a"
-	exec_sql $case_db $pub_node1_port  "INSERT INTO tab_no_replidentity_index VALUES(1)"
+	exec_sql $case_db $pub_node1_port "INSERT INTO tab_ins SELECT generate_series(1,50)"
+	exec_sql $case_db $pub_node1_port "DELETE FROM tab_ins WHERE a > 20"
+	exec_sql $case_db $pub_node1_port "UPDATE tab_ins SET a = -a"
+	exec_sql $case_db $pub_node1_port "INSERT INTO tab_rep SELECT generate_series(1,50)"
+	exec_sql $case_db $pub_node1_port "DELETE FROM tab_rep WHERE a > 20"
+	exec_sql $case_db $pub_node1_port "UPDATE tab_rep SET a = -a"
+	exec_sql $case_db $pub_node1_port "INSERT INTO tab_mixed VALUES (2, 'bar', 2.2)"
+	exec_sql $case_db $pub_node1_port "INSERT INTO tab_full_pk VALUES (1, 'foo'), (2, 'baz')"
+	exec_sql $case_db $pub_node1_port "INSERT INTO tab_nothing VALUES (generate_series(1,20))"
+	exec_sql $case_db $pub_node1_port "INSERT INTO tab_include SELECT generate_series(1,50)"
+	exec_sql $case_db $pub_node1_port "DELETE FROM tab_include WHERE a > 20"
+	exec_sql $case_db $pub_node1_port "UPDATE tab_include SET a = -a"
+	exec_sql $case_db $pub_node1_port "INSERT INTO tab_no_replidentity_index VALUES(1)"
 
 	wait_for_catchup $case_db $pub_node1_port "tap_sub"
 
@@ -96,6 +103,14 @@ function test_1() {
 		echo "check replicated changes on subscriber success"
 	else
 		echo "$failed_keyword when check replicated changes on subscriber"
+		exit 1
+	fi
+
+	if [ "$(exec_sql $case_db $sub_node1_port "SELECT * FROM tab_mixed")" = "local|1.1|foo|1
+local|2.2|bar|2" ]; then
+		echo "check replicated changes with different column order success"
+	else
+		echo "$failed_keyword when check replicated changes with different column order"
 		exit 1
 	fi
 
@@ -212,11 +227,251 @@ function test_1() {
 	exec_sql $case_db $pub_node1_port "DROP TABLE temp2"
 	exec_sql $case_db $sub_node1_port "DROP TABLE temp1"
 	exec_sql $case_db $sub_node1_port "DROP TABLE temp2"
+
+	# add REPLICA IDENTITY FULL so we can update
+	exec_sql $case_db $pub_node1_port "ALTER TABLE tab_full REPLICA IDENTITY FULL"
+	exec_sql $case_db $sub_node1_port "ALTER TABLE tab_full REPLICA IDENTITY FULL"
+	exec_sql $case_db $pub_node1_port "ALTER TABLE tab_full2 REPLICA IDENTITY FULL"
+	exec_sql $case_db $sub_node1_port "ALTER TABLE tab_full2 REPLICA IDENTITY FULL"
+	exec_sql $case_db $pub_node1_port "ALTER TABLE tab_ins REPLICA IDENTITY FULL"
+	exec_sql $case_db $sub_node1_port "ALTER TABLE tab_ins REPLICA IDENTITY FULL"
+	# tab_mixed can use DEFAULT, since it has a primary key
+
+	# and do the updates
+	exec_sql $case_db $pub_node1_port "UPDATE tab_full SET a = a * a"
+	exec_sql $case_db $pub_node1_port "UPDATE tab_full2 SET x = 'bb' WHERE x = 'b'"
+	exec_sql $case_db $pub_node1_port "UPDATE tab_mixed SET b = 'baz' WHERE a = 1"
+	exec_sql $case_db $pub_node1_port "UPDATE tab_full_pk SET b = 'bar' WHERE a = 1"
+
+	wait_for_catchup $case_db $pub_node1_port "tap_sub"
+
+	if [ "$(exec_sql $case_db $sub_node1_port "SELECT count(*), min(a), max(a) FROM tab_full")" = "20|1|100" ]; then
+		echo "check update works with REPLICA IDENTITY FULL and duplicate tuples success"
+	else
+		echo "$failed_keyword when check update works with REPLICA IDENTITY FULL and duplicate tuples"
+		exit 1
+	fi
+
+	if [ "$(exec_sql $case_db $sub_node1_port "SELECT x FROM tab_full2 ORDER BY 1")" = "a
+bb
+bb" ]; then
+		echo "check update works with REPLICA IDENTITY FULL and text datums success"
+	else
+		echo "$failed_keyword when check update works with REPLICA IDENTITY FULL and text datums"
+		exit 1
+	fi
+
+	if [ "$(exec_sql $case_db $sub_node1_port "SELECT * FROM tab_mixed ORDER BY a")" = "local|1.1|baz|1
+local|2.2|bar|2" ]; then
+		echo "check update works with different column order and subscriber local values success"
+	else
+		echo "$failed_keyword when check update works with different column order and subscriber local values"
+		exit 1
+	fi
+
+	if [ "$(exec_sql $case_db $sub_node1_port "SELECT * FROM tab_full_pk ORDER BY a")" = "1|bar
+2|baz" ]; then
+		echo "check update works with REPLICA IDENTITY FULL and a primary key success"
+	else
+		echo "$failed_keyword when check update works with REPLICA IDENTITY FULL and a primary key"
+		exit 1
+	fi
+
+	# Check that subscriber handles cases where update/delete target tuple
+	# is missing. 
+	exec_sql $case_db $sub_node1_port "DELETE FROM tab_full_pk"
+
+	# Note that the current location of the log file is not grabbed immediately
+	# after reloading the configuration, but after sending one SQL command to
+	# the node so that we are sure that the reloading has taken effect.
+	logfile=$(get_log_file "sub_datanode1")
+
+	location=$(awk 'END{print NR}' $logfile)
+
+	exec_sql $case_db $pub_node1_port "UPDATE tab_full_pk SET b = 'quux' WHERE a = 1"
+
+	wait_for_catchup $case_db $pub_node1_port "tap_sub"
+
+	content=$(tail -n +$location $logfile)
+	if [[ "$content" =~ "logical replication did not find row for update in replication target relation \"tab_full_pk\"" ]]; then
+		echo "check print updated row is missing success"
+	else
+		echo "$failed_keyword when check print updated row is missing"
+		exit 1
+	fi
+
+	# check behavior with toasted values
+	exec_sql $case_db $pub_node1_port "UPDATE tab_mixed SET b = repeat('xyzzy', 100000) WHERE a = 2"
+
+	wait_for_catchup $case_db $pub_node1_port "tap_sub"
+
+	if [ "$(exec_sql $case_db $sub_node1_port "SELECT a, length(b), c, d FROM tab_mixed ORDER BY a")" = "1|3|1.1|local
+2|500000|2.2|local" ]; then
+		echo "check update transmits large column value success"
+	else
+		echo "$failed_keyword when check update transmits large column value"
+		exit 1
+	fi
+
+	exec_sql $case_db $pub_node1_port "UPDATE tab_mixed SET c = 3.3 WHERE a = 2"
+
+	wait_for_catchup $case_db $pub_node1_port "tap_sub"
+
+	if [ "$(exec_sql $case_db $sub_node1_port "SELECT a, length(b), c, d FROM tab_mixed ORDER BY a")" = "1|3|1.1|local
+2|500000|3.3|local" ]; then
+		echo "check update with non-transmitted large column value success"
+	else
+		echo "$failed_keyword when check update with non-transmitted large column value"
+		exit 1
+	fi
+
+	# check behavior with dropped columns
+
+	# this update should get transmitted before the column goes away
+	exec_sql $case_db $pub_node1_port "UPDATE tab_mixed SET b = 'bar', c = 2.2 WHERE a = 2"
+	exec_sql $case_db $pub_node1_port "ALTER TABLE tab_mixed DROP COLUMN b"
+	exec_sql $case_db $pub_node1_port "UPDATE tab_mixed SET c = 11.11 WHERE a = 1"
+
+	wait_for_catchup $case_db $pub_node1_port "tap_sub"
+
+	if [ "$(exec_sql $case_db $sub_node1_port "SELECT * FROM tab_mixed ORDER BY a")" = "local|11.11|baz|1
+local|2.2|bar|2" ]; then
+		echo "check update works with dropped publisher column success"
+	else
+		echo "$failed_keyword when check update works with dropped publisher column"
+		exit 1
+	fi
+
+	exec_sql $case_db $sub_node1_port "ALTER TABLE tab_mixed DROP COLUMN d"
+	exec_sql $case_db $pub_node1_port "UPDATE tab_mixed SET c = 22.22 WHERE a = 2"
+
+	wait_for_catchup $case_db $pub_node1_port "tap_sub"
+
+	if [ "$(exec_sql $case_db $sub_node1_port "SELECT * FROM tab_mixed ORDER BY a")" = "11.11|baz|1
+22.22|bar|2" ]; then
+		echo "check update works with dropped subscriber column success"
+	else
+		echo "$failed_keyword when check update works with dropped subscriber column"
+		exit 1
+	fi
+
+	# check that change of connection string and/or publication list causes
+	# restart of subscription workers. We check the state along with
+	# application_name to ensure that the walsender is (re)started.
+	#
+	# Not all of these are registered as tests as we need to poll for a change
+	# but the test suite will fail nonetheless when something goes wrong.
+	exec_sql $case_db $sub_node1_port "ALTER SUBSCRIPTION tap_sub SET PUBLICATION tap_pub_ins_only"
+
+	exec_sql $case_db $pub_node1_port "INSERT INTO tab_ins SELECT generate_series(1001,1100)"
+	exec_sql $case_db $pub_node1_port "DELETE FROM tab_rep"
+
+	wait_for_catchup $case_db $pub_node1_port "tap_sub"
+
+	if [ "$(exec_sql $case_db $sub_node1_port "SELECT count(*), min(a), max(a) FROM tab_ins")" = "1152|1|1100" ]; then
+		echo "check replicated inserts after subscription publication change success"
+	else
+		echo "$failed_keyword when check replicated inserts after subscription publication change"
+		exit 1
+	fi
+
+	if [ "$(exec_sql $case_db $sub_node1_port "SELECT count(*), min(a), max(a) FROM tab_rep")" = "20|-20|-1" ]; then
+		echo "check changes skipped after subscription publication change success"
+	else
+		echo "$failed_keyword when check changes skipped after subscription publication change"
+		exit 1
+	fi
+
+	# check alter publication (relcache invalidation etc)
+	exec_sql $case_db $pub_node1_port "ALTER PUBLICATION tap_pub_ins_only SET (publish = 'insert, delete')"
+	exec_sql $case_db $pub_node1_port "ALTER PUBLICATION tap_pub_ins_only ADD TABLE tab_full"
+	exec_sql $case_db $pub_node1_port "DELETE FROM tab_ins WHERE a > 0"
+	exec_sql $case_db $sub_node1_port "ALTER SUBSCRIPTION tap_sub REFRESH PUBLICATION WITH (copy_data = false)"
+	exec_sql $case_db $pub_node1_port "INSERT INTO tab_full VALUES(0)"
+	exec_sql $case_db $pub_node1_port "INSERT INTO tab_notrep VALUES (11)"
+
+	wait_for_catchup $case_db $pub_node1_port "tap_sub"
+
+	if [ "$(exec_sql $case_db $sub_node1_port "SELECT count(*) FROM tab_notrep")" = "0" ]; then
+		echo "check non-replicated table is empty on subscriber success"
+	else
+		echo "$failed_keyword when check non-replicated table is empty on subscriber"
+		exit 1
+	fi
+
+	# note that data are different on provider and subscriber
+	if [ "$(exec_sql $case_db $sub_node1_port "SELECT count(*), min(a), max(a) FROM tab_ins")" = "1052|1|1002" ]; then
+		echo "check replicated deletes after alter publication success"
+	else
+		echo "$failed_keyword when check replicated deletes after alter publication"
+		exit 1
+	fi
+
+	if [ "$(exec_sql $case_db $sub_node1_port "SELECT count(*), min(a), max(a) FROM tab_full")" = "21|0|100" ]; then
+		echo "check replicated insert after alter publication success"
+	else
+		echo "$failed_keyword when check replicated insert after alter publication"
+		exit 1
+	fi
+
+	# check restart on rename
+	exec_sql $case_db $sub_node1_port "ALTER SUBSCRIPTION tap_sub RENAME TO tap_sub_renamed"
+
+	poll_query_until $case_db $sub_node1_port "SELECT subname FROM pg_stat_subscription" "tap_sub_renamed" "Timed out while waiting for apply to restart after renaming SUBSCRIPTION"
+
+	# check all the cleanup
+	exec_sql $case_db $sub_node1_port "DROP SUBSCRIPTION tap_sub_renamed"
+
+	if [ "$(exec_sql $case_db $sub_node1_port "SELECT count(*) FROM pg_subscription")" = "0" ]; then
+		echo "check subscription was dropped on subscriber success"
+	else
+		echo "$failed_keyword when check subscription was dropped on subscriber"
+		exit 1
+	fi
+
+	if [ "$(exec_sql $case_db $pub_node1_port "SELECT count(*) FROM pg_replication_slots")" = "2" ]; then
+		echo "check replication slot was dropped on publisher success"
+	else
+		echo "$failed_keyword when check replication slot was dropped on publisher"
+		exit 1
+	fi
+
+	if [ "$(exec_sql $case_db $sub_node1_port "SELECT count(*) FROM pg_subscription_rel")" = "0" ]; then
+		echo "check subscription relation status was dropped on subscriber success"
+	else
+		echo "$failed_keyword when check subscription relation status was dropped on subscriber"
+		exit 1
+	fi
+
+	if [ "$(exec_sql $case_db $sub_node1_port "SELECT count(*) FROM pg_replication_origin")" = "0" ]; then
+		echo "check replication origin was dropped on subscriber success"
+	else
+		echo "$failed_keyword when check replication origin was dropped on subscriber"
+		exit 1
+	fi
+
+	# CREATE PUBLICATION while wal_level=hot_standby should succeed, with a WARNING
+	restart_guc "pub_datanode1" "wal_level = hot_standby"
+	logfile=$(get_log_file "pub_datanode1")
+
+	location=$(awk 'END{print NR}' $logfile)
+
+	exec_sql $case_db $pub_node1_port "BEGIN;CREATE TABLE skip_wal(a int);CREATE PUBLICATION tap_pub2 FOR TABLE skip_wal;ROLLBACK;"
+
+	content=$(tail -n +$location $logfile)
+	if [[ "$content" =~ "wal_level is insufficient to publish logical changes" ]]; then
+		echo "check print wal_level warning success"
+	else
+		echo "$failed_keyword when check print wal_level warning"
+		exit 1
+	fi
+
+	restart_guc "pub_datanode1" "wal_level = logical"
 }
 
 function tear_down() {
-	exec_sql $case_db $sub_node1_port "DROP SUBSCRIPTION tap_sub"
-	exec_sql $case_db $pub_node1_port "DROP PUBLICATION tap_pub, tap_pub_ins_only"
+	exec_sql $case_db $sub_node1_port "DROP SUBSCRIPTION IF EXISTS tap_sub"
+	exec_sql $case_db $pub_node1_port "DROP PUBLICATION IF EXISTS tap_pub, tap_pub_ins_only"
 
 	exec_sql $db $sub_node1_port "DROP DATABASE $case_db"
 	exec_sql $db $pub_node1_port "DROP DATABASE $case_db"

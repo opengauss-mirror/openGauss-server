@@ -547,21 +547,10 @@ void process_syncing_tables(XLogRecPtr current_lsn)
 static List *make_copy_attnamelist(LogicalRepRelMapEntry *rel)
 {
     List *attnamelist = NIL;
-    TupleDesc desc = RelationGetDescr(rel->localrel);
     int i;
 
-    for (i = 0; i < desc->natts; i++) {
-        int remoteattnum = rel->attrmap[i];
-
-        /* Skip dropped attributes. */
-        if (desc->attrs[i]->attisdropped)
-            continue;
-
-        /* Skip attributes that are missing on remote side. */
-        if (remoteattnum < 0)
-            continue;
-
-        attnamelist = lappend(attnamelist, makeString(rel->remoterel.attnames[remoteattnum]));
+    for (i = 0; i < rel->remoterel.natts; i++) {
+        attnamelist = lappend(attnamelist, makeString(rel->remoterel.attnames[i]));
     }
 
     return attnamelist;

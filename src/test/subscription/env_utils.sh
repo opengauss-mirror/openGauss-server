@@ -28,9 +28,9 @@ gsctl_wait_time=3600
 data_dir=$g_data_path
 
 function exec_sql(){
-	result=$(gsql -d $1 -p $2 -Atq -c "$3" |sed 'N;s/\n/ /g;b')
+	result=$(gsql -d $1 -p $2 -Atq -c "$3")
 	if [ "$result" != "" ]; then
-		echo $result
+		echo "$result"
 	fi
 }
 
@@ -81,6 +81,40 @@ function switchover_to_primary() {
 		echo "switchover to primary success!"
 	else
 		echo "$failed_keyword, switchover to pirmary fail!"
+		exit 1
+	fi
+}
+
+function get_log_file(){
+	logfile=$(ls -rtl $data_dir/$1/pg_log/ | tail -n 1 | awk '{print $9}')
+	echo "$data_dir/$1/pg_log/$logfile"
+}
+
+function restart_guc(){
+	gs_guc set -D $data_dir/$1 -c "$2"
+	gs_ctl restart -D $data_dir/$1
+	if [ $? -eq 0 ]; then
+		echo "restart $2 success!"
+	else
+		echo "$failed_keyword, restart $2 fail!"
+		exit 1
+	fi
+}
+
+function poll_query_until(){
+	max_attempts=20
+	attempt=0
+	while (($attempt < $max_attempts))
+	do
+		if [ "$(exec_sql $1 $2 "$3")" = "$4" ]; then
+			break
+		fi
+		sleep 1
+		attempt=`expr $attempt \+ 1`
+	done
+
+	if [ $attempt -eq $max_attempts ]; then
+		echo "$failed_keyword, $5"
 		exit 1
 	fi
 }
