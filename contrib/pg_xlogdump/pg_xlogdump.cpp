@@ -1038,6 +1038,9 @@ int main(int argc, char** argv)
         }
     }
 
+    if (dumpprivate.enable_dss)
+        XLogSegmentSize = DSS_XLOG_SEG_SIZE;
+
     /* parse files as start/end boundaries, extract path if not specified */
     if (optind < argc) {
         char* directory = NULL;
