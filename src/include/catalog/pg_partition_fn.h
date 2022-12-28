@@ -74,7 +74,8 @@ typedef void (*PartitionNameGetPartidCallback) (Oid partitioned_relation, const 
     Oid oldPartId, char partition_type, void *callback_arg, LOCKMODE callbackobj_lockMode);
 extern void insertPartitionEntry(Relation pg_partition_desc, Partition new_part_desc, Oid new_part_id, 
                                  int2vector *pkey, const oidvector *inttablespace, Datum interval,
-                                 Datum maxValues, Datum transitionPoint, Datum reloptions, char parttype, bool partkeyexprIsNull = true);
+                                 Datum maxValues, Datum transitionPoint, Datum reloptions, char parttype, bool partkeyexprIsNull = true,
+                                 bool partkeyIsFunc = false);
 extern bool isPartitionedObject(Oid relid, char relkind, bool missing_ok);
 extern bool isSubPartitionedObject(Oid relid, char relkind, bool missing_ok);
 extern bool isPartitionObject(Oid partid, char partkind, bool missing_ok);

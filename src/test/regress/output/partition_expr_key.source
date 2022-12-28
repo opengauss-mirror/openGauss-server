@@ -24,7 +24,7 @@ CREATE TABLE testrangepart(a date) PARTITION BY RANGE (a*2) INTERVAL ('1 month')
 	PARTITION p0 VALUES LESS THAN ('2020-03-01'),
 	PARTITION p1 VALUES LESS THAN ('2020-04-01')
 );
-ERROR:  The partition expr key doesn't supprt value or interval partition
+ERROR:  The partition expr key doesn't support value or interval partition
 --test partkeyexpr in pg_partition 
 create table testtmp1(a int, b int) partition by range(a) subpartition by range(b)
 (
@@ -505,6 +505,32 @@ select * from testhashsubpart partition(p1);
 (1 row)
 
 delete from testtab;
+--test extract function
+drop table if exists test_extract;
+NOTICE:  table "test_extract" does not exist, skipping
+create table test_extract (id int not null,
+ename varchar(30),
+hired date not null default '1970-01-01',
+separated date not null default '9999-12-31',
+job varchar(30) not null,store_id int not null)
+partition by range(extract(year from separated))
+ (partition p0 values less than (1995),
+partition p1 values less than (2000),
+partition p2 values less than (2005));
+select partkeyexpr from pg_partition where (parttype = 'r') and (parentid in (select oid from pg_class where relname = 'test_extract'));
+                                                                                                                                                                                                                                                                                               partkeyexpr                                                                                                                                                                                                                                                                                                
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ {FUNCEXPR :funcid 2021 :funcresulttype 701 :funcresulttype_orig -1 :funcretset false :funcformat 0 :funccollid 0 :inputcollid 100 :args ({CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :ismaxvalue false :location 226 :constvalue 8 [ 32 0 0 0 121 101 97 114 ] :cursor_data  :row_count 0 :cur_dno -1 :is_open false :found false :not_found false :null_open false :null_fetch false} {VAR :varno 1 :varattno 4 :vartype 1114 :vartypmod 0 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 4 :location 236}) :location 218 :refSynOid 0}
+(1 row)
+
+select partkeyexpr from pg_partition where (parttype = 'p') and (parentid in (select oid from pg_class where relname = 'test_extract'));
+ partkeyexpr 
+-------------
+ 
+ 
+ 
+(3 rows)
+
 --test pg_get_tabledef and pg_dump
 create table testnormalsubpart(a int, b int) partition by range(a) subpartition by range(b)
 (

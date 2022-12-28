@@ -640,7 +640,7 @@ static void CheckIntervalPartitionKeyType(Form_pg_attribute* attrs, List* pos);
 static void CheckIntervalValue(
     const Form_pg_attribute* attrs, const List* pos, const IntervalPartitionDefState* intervalPartDef);
 static void CheckPartitionTablespace(const char* spcname, Oid owner);
-static Const* GetListPartitionValue(Form_pg_attribute attrs, List* value);
+static Const* GetListPartitionValue(Form_pg_attribute attrs, List* value, bool partkeyIsFunc = false);
 static bool ConfirmTypeInfo(Oid* target_oid, int* target_mod, Const* src, Form_pg_attribute attrs, bool isinterval);
 
 static void ATPrepAddPartition(Relation rel);
@@ -1853,10 +1853,10 @@ static void DetermineColumnCollationForMOTTable(Oid *collOid)
 static void CheckPartitionKeyForCreateTable(PartitionState *partTableState, List *schema, TupleDesc descriptor)
 {
     List *pos = NIL;
+    bool partkeyIsFunc = false;
 
     /* get partitionkey's position */
-    pos = GetPartitionkeyPos(partTableState->partitionKey, schema);
-
+    pos = GetPartitionkeyPos(partTableState->partitionKey, schema, &partkeyIsFunc);
     /* check partitionkey's datatype */
     if (partTableState->partitionStrategy == PART_STRATEGY_VALUE) {
         CheckValuePartitionKeyType(descriptor->attrs, pos);
@@ -1883,9 +1883,9 @@ static void CheckPartitionKeyForCreateTable(PartitionState *partTableState, List
     if (partTableState->partitionStrategy != PART_STRATEGY_VALUE &&
         partTableState->partitionStrategy != PART_STRATEGY_HASH &&
         partTableState->partitionStrategy != PART_STRATEGY_LIST)
-        ComparePartitionValue(pos, descriptor->attrs, partTableState->partitionList);
+        ComparePartitionValue(pos, descriptor->attrs, partTableState->partitionList, true, partkeyIsFunc);
     else if (partTableState->partitionStrategy == PART_STRATEGY_LIST)
-        CompareListValue(pos, descriptor->attrs, partTableState->partitionList);
+        CompareListValue(pos, descriptor->attrs, partTableState->partitionList, partkeyIsFunc);
 
     list_free_ext(pos);
 }
@@ -19419,7 +19419,7 @@ void checkPartNotInUse(Partition part, const char* stmt)
     }
 }
 
-extern Node* GetColumnRef(Node* key, bool* isExpr);
+extern Node* GetColumnRef(Node* key, bool* isExpr, bool* isFunc);
 /*
  * @@GaussDB@@
  * Target		: data partition
@@ -19427,7 +19427,7 @@ extern Node* GetColumnRef(Node* key, bool* isExpr);
  * Description	:
  * Notes		: invoker to free the return list
  */
-List* GetPartitionkeyPos(List* partitionkeys, List* schema)
+List* GetPartitionkeyPos(List* partitionkeys, List* schema, bool* partkeyIsFunc)
 {
     ListCell* partitionkey_cell = NULL;
     ListCell* schema_cell = NULL;
@@ -19450,7 +19450,7 @@ List* GetPartitionkeyPos(List* partitionkeys, List* schema)
     securec_check(rc, "\0", "\0");
     bool isExpr = false;
     foreach (partitionkey_cell, partitionkeys) {
-        ColumnRef* partitionkey_ref = (ColumnRef*)GetColumnRef((Node*)lfirst(partitionkey_cell),&isExpr);
+        ColumnRef* partitionkey_ref = (ColumnRef*)GetColumnRef((Node*)lfirst(partitionkey_cell), &isExpr, partkeyIsFunc);
         if (!partitionkey_ref)
             ereport(ERROR,(errcode(ERRCODE_UNDEFINED_COLUMN),(errmsg("The partition key doesn't have any column."))));
         if (isExpr && partitionkeys->length > 1)
@@ -19827,7 +19827,20 @@ static void CheckPartitionTablespace(const char* spcname, Oid owner)
     }
 }
 
-static Const* GetListPartitionValue(Form_pg_attribute attrs, List* value)
+Oid GetPartkeyExprType(Oid* target_oid, int* target_mod)
+{
+    *target_oid = INT8OID;
+    Relation typeRel = heap_open(TypeRelationId, RowExclusiveLock);
+    HeapTuple typeTuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(*target_oid));
+    Form_pg_type pgTypeForm = (Form_pg_type)GETSTRUCT(typeTuple);
+    *target_mod = pgTypeForm->typtypmod;
+    Oid typcollation = pgTypeForm->typcollation;
+    ReleaseSysCache(typeTuple);
+    heap_close(typeRel, RowExclusiveLock);
+    return typcollation;
+}
+
+static Const* GetListPartitionValue(Form_pg_attribute attrs, List* value, bool partkeyIsFunc)
 {
     Const* result = NULL;
     Const* cell = NULL;
@@ -19849,7 +19862,7 @@ static Const* GetListPartitionValue(Form_pg_attribute attrs, List* value)
         }
 
         /* transform the const to target datatype */
-        targetExpr = (Const*)GetTargetValue(attrs, cell, false);
+        targetExpr = (Const*)GetTargetValue(attrs, cell, false, partkeyIsFunc);
         if (targetExpr == NULL) {
             pfree_ext(result);
             ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION),
@@ -19857,7 +19870,13 @@ static Const* GetListPartitionValue(Form_pg_attribute attrs, List* value)
         }
 
         result[count] = *targetExpr;
-        result[count].constcollid = attrs->attcollation;
+        if (partkeyIsFunc) {
+            Oid target_oid = InvalidOid;
+            int target_mod = -1;
+            result[count].constcollid = GetPartkeyExprType(&target_oid, &target_mod);
+        } else {
+            result[count].constcollid = attrs->attcollation;
+        }
 
         count++;
     }
@@ -19873,7 +19892,7 @@ static Const* GetListPartitionValue(Form_pg_attribute attrs, List* value)
  * Description	:
  * Notes		: the invoker should free the arry
  */
-Const* GetPartitionValue(List* pos, Form_pg_attribute* attrs, List* value, bool isinterval, bool isPartition)
+Const* GetPartitionValue(List* pos, Form_pg_attribute* attrs, List* value, bool isinterval, bool isPartition, bool partkeyIsFunc)
 {
     Const* result = NULL;
     Const* cell = NULL;
@@ -19915,7 +19934,7 @@ Const* GetPartitionValue(List* pos, Form_pg_attribute* attrs, List* value, bool 
         }
 
         /* transform the const to target datatype */
-        target_expr = (Const*)GetTargetValue(attrs[valuepos], cell, isinterval);
+        target_expr = (Const*)GetTargetValue(attrs[valuepos], cell, isinterval, partkeyIsFunc);
         if (target_expr == NULL) {
             pfree_ext(result);
             list_free_ext(pos);
@@ -19926,7 +19945,13 @@ Const* GetPartitionValue(List* pos, Form_pg_attribute* attrs, List* value, bool 
         }
 
         result[count] = *target_expr;
-        result[count].constcollid = attrs[valuepos]->attcollation;
+        if (partkeyIsFunc) {
+            Oid target_oid = InvalidOid;
+            int target_mod = -1;
+            result[count].constcollid = GetPartkeyExprType(&target_oid, &target_mod);
+        } else {
+            result[count].constcollid = attrs[valuepos]->attcollation;
+        }
 
         count++;
     }
@@ -19943,7 +19968,7 @@ Const* GetPartitionValue(List* pos, Form_pg_attribute* attrs, List* value, bool 
  * Description	:
  * Notes		:
  */
-Node* GetTargetValue(Form_pg_attribute attrs, Const* src, bool isinterval)
+Node* GetTargetValue(Form_pg_attribute attrs, Const* src, bool isinterval, bool partkeyIsFunc)
 {
     Oid target_oid = InvalidOid;
     int target_mod = -1;
@@ -19953,7 +19978,9 @@ Node* GetTargetValue(Form_pg_attribute attrs, Const* src, bool isinterval)
     Assert(src);
 
     /* transform the const to target datatype */
-    if (!ConfirmTypeInfo(&target_oid, &target_mod, src, attrs, isinterval)) {
+    if (partkeyIsFunc) {
+        GetPartkeyExprType(&target_oid, &target_mod);
+    } else if (!ConfirmTypeInfo(&target_oid, &target_mod, src, attrs, isinterval)) {
         return NULL;
     }
 
@@ -20055,7 +20082,7 @@ static void ReportListPartitionIntersect(const List* partitionList, Const* value
     }
 }
 
-void CompareListValue(const List* pos, Form_pg_attribute* attrs, List *partitionList)
+void CompareListValue(const List* pos, Form_pg_attribute* attrs, List *partitionList, bool partkeyIsFunc)
 {
     if (pos == NULL || attrs == NULL) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION), errmsg("invalid list partiiton table definition")));
@@ -20097,7 +20124,7 @@ void CompareListValue(const List* pos, Form_pg_attribute* attrs, List *partition
             }
         }
         partValueLen[partListIdx] = partValue->length;
-        valueArray[partListIdx] = GetListPartitionValue(attrs[location], partValue);
+        valueArray[partListIdx] = GetListPartitionValue(attrs[location], partValue, partkeyIsFunc);
         ++partListIdx;
     }
 
@@ -20141,7 +20168,7 @@ void CompareListValue(const List* pos, Form_pg_attribute* attrs, List *partition
  * Description	:
  * Notes		:
  */
-void ComparePartitionValue(List* pos, Form_pg_attribute* attrs, List *partitionList, bool isPartition)
+void ComparePartitionValue(List* pos, Form_pg_attribute* attrs, List *partitionList, bool isPartition, bool partkeyIsFunc)
 {
     Const* pre_value = NULL;
     Const* cur_value = NULL;
@@ -20172,12 +20199,12 @@ void ComparePartitionValue(List* pos, Form_pg_attribute* attrs, List *partitionL
         value = ((RangePartitionDefState*)lfirst(cell))->boundary;
 
         if (pre_value == NULL) {
-            pre_value = GetPartitionValue(pos, attrs, value, is_intreval, isPartition);
+            pre_value = GetPartitionValue(pos, attrs, value, is_intreval, isPartition, partkeyIsFunc);
             for (counter = 0; counter < pos->length; counter++) {
                 pre[counter] = pre_value + counter;
             }
         } else {
-            cur_value = GetPartitionValue(pos, attrs, value, is_intreval, isPartition);
+            cur_value = GetPartitionValue(pos, attrs, value, is_intreval, isPartition, partkeyIsFunc);
             for (counter = 0; counter < pos->length; counter++) {
                 cur[counter] = cur_value + counter;
             }

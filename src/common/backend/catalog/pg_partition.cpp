@@ -47,7 +47,7 @@
 
 void insertPartitionEntry(Relation pg_partition_desc, Partition new_part_desc, Oid new_part_id, int2vector* pkey,
     const oidvector* tablespaces, Datum interval, Datum maxValues, Datum transitionPoint, Datum reloptions,
-    char parttype, bool partkeyexprIsNull)
+    char parttype, bool partkeyexprIsNull, bool partkeyIsFunc)
 {
     Datum values[Natts_pg_partition];
     bool nulls[Natts_pg_partition];
@@ -150,6 +150,8 @@ void insertPartitionEntry(Relation pg_partition_desc, Partition new_part_desc, O
     }
     if (partkeyexprIsNull) {
         nulls[Anum_pg_partition_partkeyexpr - 1] = true;
+    } else if (partkeyIsFunc) {
+        values[Anum_pg_partition_partkeyexpr - 1] = CStringGetTextDatum("partkeyisfunc");
     } else {
         values[Anum_pg_partition_partkeyexpr - 1] = CStringGetTextDatum("");
     }
