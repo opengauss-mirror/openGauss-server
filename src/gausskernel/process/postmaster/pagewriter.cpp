@@ -1640,10 +1640,11 @@ static void incre_ckpt_aio_callback(struct io_event *event)
     BufferDesc *buf_desc = (BufferDesc *)(event->data);
     uint32 written_size = event->obj->u.c.nbytes;
     if (written_size != event->res) {
-        ereport(PANIC, (errmsg("aio write failed, buffer: %d/%d/%d/%d/%d %d-%d",
-            buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode,
-            buf_desc->tag.rnode.relNode, (int32)buf_desc->tag.rnode.bucketNode,
-            (int32)buf_desc->tag.rnode.opt, buf_desc->tag.forkNum, buf_desc->tag.blockNum)));
+        ereport(WARNING, (errmsg("aio write failed (errno = %d), buffer: %d/%d/%d/%d/%d %d-%d", -(int32)(event->res),
+            buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode,
+            (int32)buf_desc->tag.rnode.bucketNode, (int32)buf_desc->tag.rnode.opt,
+            buf_desc->tag.forkNum, buf_desc->tag.blockNum)));
+        _exit(0);
     }
 
     buf_desc->aio_in_progress = false;
