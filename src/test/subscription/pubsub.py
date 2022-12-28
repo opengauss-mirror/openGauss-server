@@ -4,6 +4,7 @@ import getopt, sys, os
 import shutil
 import time
 import string
+from multiprocessing import Process
 
 g_data_path = os.environ.get("g_data_path")
 install_path = os.environ.get("install_path")
@@ -28,24 +29,35 @@ class Pterodb():
 		self.service_port_arr = [port_arr[i] + 1 for i in range(data_node_num)]
 		self.heartbeat_port_arr = [port_arr[i] + 2 for i in range(data_node_num)]
 
+	def real_init_env(self, i):
+		datanode_cmd_init = install_path + "/bin/gs_initdb -D " + self.data_dir + "/" + self.dname_prefix + str(i) + " --nodename=" + self.dname_prefix + str(i)  + " -w " + g_passwd
+		print datanode_cmd_init
+		os.system(datanode_cmd_init)
+
+		conf_file = self.data_dir + "/" + self.dname_prefix + str(i) + "/postgresql.conf"
+		self.__modify_conf_port(conf_file,self.ha_port_arr[i-1])
+		self.__turn_on_pg_log(conf_file)
+		self.__modify_conf_standby(conf_file,i)
+		self.__modify_conf_application_name(conf_file, "dn" + str(i))
+		self.__modify_remote_read_mode(conf_file)
+
+		hba_file = self.data_dir + "/" + self.dname_prefix + str(i) + "/pg_hba.conf"
+		self.__config_replication_hba(hba_file)
+
 	def init_env(self):
 		if(os.path.exists(self.data_dir) == False):
 			os.mkdir(self.data_dir)
 
+		processes = []
 		for i in range(1, self.data_node_num + 1):
-			datanode_cmd_init = install_path + "/bin/gs_initdb -D " + self.data_dir + "/" + self.dname_prefix + str(i) + " --nodename=" + self.dname_prefix + str(i)  + " -w " + g_passwd
-			print datanode_cmd_init
-			os.system(datanode_cmd_init)
-
-			conf_file = self.data_dir + "/" + self.dname_prefix + str(i) + "/postgresql.conf"
-			self.__modify_conf_port(conf_file,self.ha_port_arr[i-1])
-			self.__turn_on_pg_log(conf_file)
-			self.__modify_conf_standby(conf_file,i)
-			self.__modify_conf_application_name(conf_file, "dn" + str(i))
-			self.__modify_remote_read_mode(conf_file)
-
-			hba_file = self.data_dir + "/" + self.dname_prefix + str(i) + "/pg_hba.conf"
-			self.__config_replication_hba(hba_file)
+			process = Process(target=self.real_init_env, args=(i,))
+			process.daemon = True
+			processes.append(process)
+			process.start()
+		
+		for process in processes:
+			if process.is_alive():
+				process.join()
 
 	def __modify_conf_standby(self, conf_file, n):
 		j = 1
@@ -118,6 +130,14 @@ class Pterodb():
 			print rm_cmd
 			os.system(rm_cmd)
 
+	def __real_start_server(self, i):
+		datanode_cmd = install_path + "/bin/gs_ctl" + " start -M standby "+ " -D " + self.data_dir + "/" + self.dname_prefix + str(i) + "   > "  + self.data_dir + "/" + self.dname_prefix + str(i) + "/logdn" + str(i) + ".log 2>&1"
+		print datanode_cmd
+		os.system(datanode_cmd)
+
+		datanode_cmd = install_path + "/bin/gs_ctl" + " build "+ "-D " + self.data_dir + "/" + self.dname_prefix + str(i) + " -Z single_node " + " > "  + self.data_dir + "/" + self.dname_prefix + str(i) + "/logdn" + str(i) + ".log 2>&1"
+		print datanode_cmd
+		os.system(datanode_cmd)
 
 	def __start_server(self):
 		#clean evn
@@ -130,17 +150,17 @@ class Pterodb():
 
 		time.sleep(5)
 
+		processes = []
 		#start data_node_standby1,2,3...7
 		for i in range(2,self.data_node_num+1):
-			datanode_cmd = install_path + "/bin/gs_ctl" + " start -M standby "+ " -D " + self.data_dir + "/" + self.dname_prefix + str(i) + "   > "  + self.data_dir + "/" + self.dname_prefix + str(i) + "/logdn" + str(i) + ".log 2>&1 &"
-			print datanode_cmd
-			os.system(datanode_cmd)
-			time.sleep(5)
+			process = Process(target=self.__real_start_server, args=(i,))
+			process.daemon = True
+			processes.append(process)
+			process.start()
 
-			datanode_cmd = install_path + "/bin/gs_ctl" + " build "+ "-D " + self.data_dir + "/" + self.dname_prefix + str(i) + " -Z single_node " + " > "  + self.data_dir + "/" + self.dname_prefix + str(i) + "/logdn" + str(i) + ".log 2>&1 &"
-			print datanode_cmd
-			os.system(datanode_cmd)
-			time.sleep(5)
+		for process in processes:
+			if process.is_alive():
+				process.join()
 
 		time.sleep(5)
 
@@ -174,6 +194,9 @@ def usage():
 	print "	-o means stop"
 	print "	-D data directory"
 	print "------------------------------------------------------"
+
+def real_run(ptdb, run_type):
+	ptdb.run(run_type)
 
 def main():
 	try:
@@ -214,13 +237,19 @@ def main():
 	os.system(create_key_cipher_cmd)
 
 	pub_port_arr = [pub_node1_port, pub_node2_port, pub_node3_port];
-	ptdb = Pterodb(datanode_num, pub_port_arr, data_dir, "pub_datanode");
-	ptdb.run(run_type)
+	pub_ptdb = Pterodb(datanode_num, pub_port_arr, data_dir, "pub_datanode");
+	pub_process = Process(target=real_run, args=(pub_ptdb,run_type,))
+	pub_process.start()
 
 	sub_port_arr = [sub_node1_port, sub_node2_port, sub_node3_port];
-	ptdb = Pterodb(datanode_num, sub_port_arr, data_dir, "sub_datanode");
-	ptdb.run(run_type)
+	sub_ptdb = Pterodb(datanode_num, sub_port_arr, data_dir, "sub_datanode");
+	sub_process = Process(target=real_run, args=(sub_ptdb,run_type,))
+	sub_process.start()
 
+	if pub_process.is_alive():
+		pub_process.join()
+	if sub_process.is_alive():
+		sub_process.join()
 
 
 if __name__ == "__main__":
