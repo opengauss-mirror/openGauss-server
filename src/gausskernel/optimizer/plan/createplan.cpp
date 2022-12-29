@@ -1407,7 +1407,7 @@ static void adjust_scan_targetlist(ResultPath* best_path, Plan* subplan)
         sub_targetlist = lappend(sub_targetlist, entry);
     }
     subplan->targetlist = sub_targetlist;
-    if (IsA(subplan, PartIterator)) {
+    if (IsA(subplan, PartIterator) || IsA(subplan, BaseResult)) {
         subplan->lefttree->targetlist = subplan->targetlist;
     }
 }
