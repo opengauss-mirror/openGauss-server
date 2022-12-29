@@ -395,7 +395,7 @@ do_retention_internal(parray *backup_list, parray *to_keep_list, parray *to_purg
     * PAGE
     * FULL
     */
-    get_keep_list(backup_list, to_purge_list, to_keep_list);    
+    get_keep_list(backup_list, to_keep_list, to_purge_list);    
 
     /* Message about retention state of backups
     * TODO: message is ugly, rewrite it to something like show table in stdout.
