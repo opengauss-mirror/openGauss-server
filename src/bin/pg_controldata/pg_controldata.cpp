@@ -305,7 +305,7 @@ int main(int argc, char* argv[])
         }
 
         if (DataDir[0] != '+') {
-            fprintf(stderr, _("%s: DATADIR should be specified when enable dss\n"), progname);
+            fprintf(stderr, _("%s: the DATADIR is not correct with enable dss."), progname);
             exit_safely(1);
         }
     }
