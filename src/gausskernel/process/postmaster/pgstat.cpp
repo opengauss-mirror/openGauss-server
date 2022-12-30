@@ -8467,6 +8467,9 @@ static void pgstat_recv_filestat(PgStat_MsgFile* msg, int len)
                 }
             }
             fileStatCount = minLocation;
+            ereport(DEBUG1, (errmodule(MOD_INSTR), 
+                errmsg("the latest filenum is %d, update is %ld",
+                    fileStatCount, pgStatFileArray[fileStatCount].time)));
         }
         entry = (PgStat_FileEntry*)&pgStatFileArray[fileStatCount];
 
