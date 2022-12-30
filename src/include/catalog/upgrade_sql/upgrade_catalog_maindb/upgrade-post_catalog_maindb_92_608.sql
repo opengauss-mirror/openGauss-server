@@ -864,3 +864,4 @@ $do$
         END IF;
     END
 $do$;
+DROP EXTENSION IF EXISTS hdfs_fdw;
