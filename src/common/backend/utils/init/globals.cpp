@@ -59,7 +59,7 @@ bool open_join_children = true;
 bool will_shutdown = false;
 
 /* hard-wired binary version number */
-const uint32 GRAND_VERSION_NUM = 92842;
+const uint32 GRAND_VERSION_NUM = 92843;
 
 const uint32 SELECT_INTO_VAR_VERSION_NUM = 92834;
 const uint32 DOLPHIN_ENABLE_DROP_NUM = 92830;
@@ -118,6 +118,7 @@ const uint32 REPLACE_INTO_VERSION_NUM = 92828;
 const uint32 PG_AUTHID_PASSWORDEXT_VERSION_NUM = 92830;
 const uint32 SUPPORT_VIEW_AUTO_UPDATABLE = 92838;
 const uint32 INSERT_RIGHT_REF_VERSION_NUM = 92842;
+const uint32 B_DUMP_TRIGGER_VERSION_NUM = 92843;
 
 /* Version number of the guc parameter backend_version added in V500R001C20 */
 const uint32 V5R1C20_BACKEND_VERSION_NUM = 92305;

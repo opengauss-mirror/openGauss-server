@@ -63,6 +63,7 @@ CATALOG(pg_trigger,2620) BKI_SCHEMA_MACRO
     NameData      tgordername;        /* trigger_order name */
     NameData      tgorder;            /* follows| precedes */
     NameData      tgtime;             /* create trigger time */
+    text          tgfbody;            /* trigger function body */
 #endif
 } FormData_pg_trigger;
 
@@ -77,7 +78,7 @@ typedef FormData_pg_trigger *Form_pg_trigger;
  *        compiler constants for pg_trigger
  * ----------------
  */
-#define Natts_pg_trigger                   19
+#define Natts_pg_trigger                   20
 #define Anum_pg_trigger_tgrelid            1
 #define Anum_pg_trigger_tgname             2
 #define Anum_pg_trigger_tgfoid             3
@@ -97,6 +98,7 @@ typedef FormData_pg_trigger *Form_pg_trigger;
 #define Anum_pg_trigger_tgordername        17
 #define Anum_pg_trigger_tgorder            18
 #define Anum_pg_trigger_tgtime             19
+#define Anum_pg_trigger_tgfbody            20
 
 
 
