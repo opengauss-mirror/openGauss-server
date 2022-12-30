@@ -425,13 +425,13 @@ static void DssInit(void)
     dss.socketpath = NULL;
     dss.vgname = NULL;
     dss.primaryInstId = INVALID_INSTANCEID;
+    XLogSegmentSize = DSS_XLOG_SEG_SIZE;
 }
 
 static void SetGlobalDssParam(void)
 {
     errno_t rc = strcpy_s(g_datadir.dss_data, strlen(dss.vgname) + 1, dss.vgname);
     securec_check_c(rc, "\0", "\0");
-    XLogSegmentSize = DSS_XLOG_SEG_SIZE;
 }
 
 /*
