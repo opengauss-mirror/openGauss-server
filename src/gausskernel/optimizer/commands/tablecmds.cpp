@@ -20485,7 +20485,7 @@ static Oid GetPartOidByATcmd(Relation rel, AlterTableCmd *cmd, const char *comma
     RangePartitionDefState *rangePartDef = (RangePartitionDefState*)cmd->def;
     switch (rel->partMap->type) {
         case PART_TYPE_RANGE:
-        case PART_AREA_INTERVAL:
+        case PART_TYPE_INTERVAL:
             rangePartDef->boundary = transformConstIntoTargetType(rel->rd_att->attrs,
                 ((RangePartitionMap*)rel->partMap)->partitionKey,
                 rangePartDef->boundary);
