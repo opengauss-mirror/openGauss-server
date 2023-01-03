@@ -6641,6 +6641,7 @@ static void _outNode(StringInfo str, const void* obj)
                 break;
             case T_NoGPCHint:
                 _outNoGPCHint(str, (NoGPCHint*) obj);
+                break;
             case T_TrainModel:
                 _outTrainModel(str, (TrainModel*)obj);
                 break;
