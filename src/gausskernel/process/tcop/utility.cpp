@@ -9289,6 +9289,7 @@ const char* CreateAlterTableCommandTag(const AlterTableType subtype)
             break;
         case AT_EncryptionKeyRotation:
             tag = "ENCRYPTION KEY ROTATION";
+            break;
         case AT_AddInherit:
             tag = "ADD INHERIT";
             break;
