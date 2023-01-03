@@ -43,11 +43,13 @@ static void usage(const char* prog_name)
     printf(_("Usage:\n"));
     printf(_("  %s [OPTION] [DATADIR]\n"), prog_name);
     printf(_("\nOptions:\n"));
+#ifndef ENABLE_LITE_MODE
     printf(_("  -I, --instance-id=INSTANCE_ID\n"));
     printf(_("                    display information of specified instance (default all)\n"));
     printf(_("      --enable-dss  enable shared storage mode\n"));
     printf(_("      --socketpath=SOCKETPATH\n"));
     printf(_("                    dss connect socket file path\n"));
+#endif
     printf(_("  -V, --version     output version information, then exit\n"));
     printf(_("  -?, --help        show this help, then exit\n"));
     printf(_("\nIf no data directory (DATADIR) is specified, "
@@ -263,6 +265,7 @@ int main(int argc, char* argv[])
 
     while ((option_value = getopt_long(argc, argv, "I:V", long_options, &option_index)) != -1) {
         switch (option_value) {
+#ifndef ENABLE_LITE_MODE
             case 'I':
                 if (atoi(optarg) < MIN_INSTANCEID || atoi(optarg) > MAX_INSTANCEID) {
                     fprintf(stderr, _("%s: unexpected node id specified, valid range is %d - %d\n"),
@@ -279,6 +282,7 @@ int main(int argc, char* argv[])
                 enable_dss = true;
                 socketpath = strdup(optarg);
                 break;
+#endif
             default:
                 /* getopt_long already emitted a complaint */
                 fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname);

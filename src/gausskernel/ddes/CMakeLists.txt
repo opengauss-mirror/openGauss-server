@@ -8,7 +8,9 @@ set(CMAKE_MODULE_PATH
     ${PROJECT_OPENGS_DIR}/src/gausskernel/ddes/adapter
 )
 
-install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/script/dms_contrl.sh DESTINATION bin)
-install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/script/dss_contrl.sh DESTINATION bin)
+if(NOT "${ENABLE_LITE_MODE}" STREQUAL "ON")
+    install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/script/dms_contrl.sh DESTINATION bin)
+    install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/script/dss_contrl.sh DESTINATION bin)
+endif()
 
 add_subdirectory(adapter)

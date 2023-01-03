@@ -927,14 +927,14 @@ compress_init(void)
 
 static void dss_init(void)
 {
-    if (instance_config.dss.enable_dss) {
+    if (IsDssMode()) {
         /* skip in some special backup modes */
         if (backup_subcmd == DELETE_CMD || backup_subcmd == DELETE_INSTANCE_CMD) {
             return;
         }
 
         /* register for dssapi */
-        if (dss_device_init(instance_config.dss.socketpath, instance_config.dss.enable_dss) != DSS_SUCCESS) {
+        if (dss_device_init(instance_config.dss.socketpath, IsDssMode()) != DSS_SUCCESS) {
             elog(ERROR, "fail to init dss device");
             return;
         }

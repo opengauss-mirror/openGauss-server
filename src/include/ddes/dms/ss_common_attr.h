@@ -31,10 +31,17 @@
 #include "dms_api.h"
 #include "ss_init.h"
 
+#ifdef ENABLE_LITE_MODE
+#define ENABLE_DMS false
+#define ENABLE_SS_LOG false
+#define ENABLE_REFORM false
+#define ENABLE_VERIFY_PAGE_VERSION false
+#else
 #define ENABLE_DMS (g_instance.attr.attr_storage.dms_attr.enable_dms && !IsInitdb)
 #define ENABLE_SS_LOG (g_instance.attr.attr_storage.dms_attr.enable_log_level)
 #define ENABLE_REFORM (g_instance.attr.attr_storage.dms_attr.enable_reform)
 #define ENABLE_VERIFY_PAGE_VERSION (g_instance.attr.attr_storage.dms_attr.enable_verify_page)
+#endif
 
 #define SS_REFORM_REFORMER                                                  \
     (ENABLE_DMS && (g_instance.dms_cxt.SSReformInfo.in_reform == true) \
