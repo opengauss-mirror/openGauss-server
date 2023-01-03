@@ -401,7 +401,7 @@ static bool HasNOTNULLConstraint(Query* parse, NullTest* ntest)
             if (!HeapTupleIsValid(atttuple)) {
                 ereport(ERROR,
                     (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
-                        errmsg("cache lookup failed for attribute %u of relation %hd",
+                        errmsg("cache lookup failed for attribute %hd of relation %u",
                         attno, reloid)));
             }
             Form_pg_attribute attStruct = (Form_pg_attribute)GETSTRUCT(atttuple);
