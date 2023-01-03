@@ -297,7 +297,7 @@ static void show_version(int alls)
     if (alls) {
 	printf("OPENGAUSS_VERSION = ");
     }
-    printf("openGauss 3.1.0\n");
+    printf("openGauss 3.1.1\n");
 #endif
 }
 
