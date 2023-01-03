@@ -2418,11 +2418,11 @@ lreplace:
                 bool need_create_file = false;
                 int seqNum = -1;
                 bool can_ignore = estate->es_plannedstmt->hasIgnore;
-                if (!partKeyUpdate) {
+                Datum newval = ComputePartKeyExprTuple(result_relation_desc, estate, slot, NULL);
+                if (!newval && !partKeyUpdate) {
                     row_movement = false;
                     new_partId = oldPartitionOid;
                 } else {
-                    Datum newval = ComputePartKeyExprTuple(result_relation_desc, estate, slot, NULL);
                     if (newval) {
                         partitionRoutingForTuple(result_relation_desc, (void*)newval, u_sess->exec_cxt.route, can_ignore);
                     } else {

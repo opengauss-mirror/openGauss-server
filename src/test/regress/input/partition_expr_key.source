@@ -199,6 +199,22 @@ insert into b_bug_1 values(100,1.5),(199,2.5);
 select * from b_bug_1 partition(p1);
 select * from b_bug_1 partition(p2);
 drop table if exists b_bug_1;
+create table b_bug_2(a int, b int, c int) partition by range(a-b)
+(
+	partition p1 values less than(10),
+	partition p2 values less than(20),
+	partition p3 values less than(30)
+);
+create index on b_bug_2(a) global;
+create index on b_bug_2(b) local;
+insert into b_bug_2 values(19,10,1),(30,20,2),(50,30,3);
+select * from b_bug_2 partition(p1);
+select * from b_bug_2 partition(p2);
+select * from b_bug_2 partition(p3);
+update b_bug_2 set b = 21 where c = 2;
+select * from b_bug_2 partition(p1);
+select * from b_bug_2 partition(p2);
+select * from b_bug_2 partition(p3);
 
 
 --test pg_get_tabledef and pg_dump
