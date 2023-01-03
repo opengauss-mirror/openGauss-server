@@ -25,6 +25,7 @@
 #include "ddes/dms/ss_aio.h"
 #include "utils/elog.h"
 
+#ifndef ENABLE_LITE_MODE
 static void WaitDSSAioComplete(DSSAioCxt *aio_cxt, int index)
 {
     AioUtil *aio = &aio_cxt->aio[index];
@@ -59,9 +60,11 @@ static void WaitDSSAioComplete(DSSAioCxt *aio_cxt, int index)
         0, sizeof(struct io_event) * DSS_AIO_BATCH_SIZE);
     securec_check_c(ret, "\0", "\0");
 }
+#endif
 
 void DSSAioFlush(DSSAioCxt *aio_cxt)
 {
+#ifndef ENABLE_LITE_MODE
     bool need_wait = false;
     AioUtil *aio = &aio_cxt->aio[aio_cxt->index];
     if (aio->iocount > 0) {
@@ -81,10 +84,12 @@ void DSSAioFlush(DSSAioCxt *aio_cxt)
     if (need_wait) {
         WaitDSSAioComplete(aio_cxt, aio_cxt->index);
     }
+#endif
 }
 
 void DSSAioAppendIOCB(DSSAioCxt *aio_cxt, struct iocb *iocb_ptr)
 {
+#ifndef ENABLE_LITE_MODE
     AioUtil *aio = &aio_cxt->aio[aio_cxt->index];
     aio->iocbs_ptr[aio->iocount] = iocb_ptr;
     aio->iocount++;
@@ -100,6 +105,7 @@ void DSSAioAppendIOCB(DSSAioCxt *aio_cxt, struct iocb *iocb_ptr)
             WaitDSSAioComplete(aio_cxt, aio_cxt->index);
         }
     }
+#endif
 }
 
 struct iocb* DSSAioGetIOCB(DSSAioCxt *aio_cxt)
@@ -116,6 +122,7 @@ int DSSAioGetIOCBIndex(DSSAioCxt *aio_cxt)
 
 void DSSAioInitialize(DSSAioCxt *aio_cxt, aio_callback callback)
 {
+#ifndef ENABLE_LITE_MODE
     errno_t err = memset_s(aio_cxt, sizeof(DSSAioCxt), 0, sizeof(DSSAioCxt));
     securec_check_ss(err, "\0", "\0");
 
@@ -131,10 +138,12 @@ void DSSAioInitialize(DSSAioCxt *aio_cxt, aio_callback callback)
     aio_cxt->initialized = true;
     aio_cxt->aiocb = callback;
     aio_cxt->index = 0;
+#endif
 }
 
 void DSSAioDestroy(DSSAioCxt *aio_cxt)
 {
+#ifndef ENABLE_LITE_MODE
     if (aio_cxt->initialized) {
         (void)io_destroy(aio_cxt->aio[0].handle);
         (void)io_destroy(aio_cxt->aio[1].handle);
@@ -142,5 +151,6 @@ void DSSAioDestroy(DSSAioCxt *aio_cxt)
         errno_t err = memset_s(aio_cxt, sizeof(DSSAioCxt), 0, sizeof(DSSAioCxt));
         securec_check_ss(err, "\0", "\0");
     }
+#endif
 }
 

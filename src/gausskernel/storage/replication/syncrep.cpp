@@ -737,7 +737,7 @@ static SyncStandbyNumState check_sync_standbys_num(const SyncRepStandbyData* syn
 {
     int i;
     int* num_group_standbys;
-    const SyncRepStandbyData* stby;
+    const SyncRepStandbyData* stby = sync_standbys;
 
     SyncStandbyNumState res = STANDBIES_ENOUGH;
 

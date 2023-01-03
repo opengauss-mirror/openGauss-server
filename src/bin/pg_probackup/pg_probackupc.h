@@ -26,7 +26,11 @@
      strspn(fname, "0123456789ABCDEF") == XLOG_FNAME_LEN &&        \
      strcmp((fname) + XLOG_FNAME_LEN, ".gz.part") == 0)
 
+#ifdef ENABLE_LITE_MODE
+#define IsDssMode() false
+#else
 #define IsDssMode() (instance_config.dss.enable_dss == true)
+#endif
 #define IsSshProtocol() (instance_config.remote.host && strcmp(instance_config.remote.proto, "ssh") == 0)
 
 /* directory options */

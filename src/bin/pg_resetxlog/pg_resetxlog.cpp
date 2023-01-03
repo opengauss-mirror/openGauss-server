@@ -225,6 +225,7 @@ int main(int argc, char* argv[])
                 minXlogSegNo = (uint64)log_temp * XLogSegmentsPerXLogId + seg_temp;
                 break;
 
+#ifndef ENABLE_LITE_MODE
             case 1:
                 dss.enable_dss = true;
                 break;
@@ -236,6 +237,7 @@ int main(int argc, char* argv[])
             case 3:
                 dss.vgname = strdup(optarg);
                 break;
+#endif
 
             default:
                 fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname);
@@ -1182,11 +1184,13 @@ static void usage(void)
     printf(_("  -V, --version    output version information, then exit\n"));
     printf(_("  -x XID           set next transaction ID\n"));
     printf(_("  -?, --help       show this help, then exit\n"));
+#ifndef ENABLE_LITE_MODE
     printf(_("  --vgname\n"));
     printf(_("                   the dss data on dss mode\n"));
     printf(_("  --enable-dss     enable shared storage mode\n"));
     printf(_("  --socketpath=SOCKETPATH\n"));
     printf(_("                   dss connect socket file path\n"));
+#endif
 #if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
     printf("\nReport bugs to GaussDB support.\n");
 #else

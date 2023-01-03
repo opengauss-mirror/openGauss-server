@@ -3797,7 +3797,9 @@ static void usage(const char* prog_name)
 #ifndef ENABLE_MULTIPLE_NODES
     printf(_("  -c, --enable-dcf          enable DCF mode\n"));
 #endif
+#ifndef ENABLE_LITE_MODE
     printf(_("      --enable-dss          enable shared storage mode\n"));
+#endif
     printf(_(" [-D, --pgdata=]DATADIR     location for this database cluster\n"));
 #ifdef ENABLE_MULTIPLE_NODES
     printf(_("      --nodename=NODENAME   name of openGauss node initialized\n"));
@@ -3805,9 +3807,11 @@ static void usage(const char* prog_name)
 #else
     printf(_("      --nodename=NODENAME   name of single node initialized\n"));
 #endif
+#ifndef ENABLE_LITE_MODE
     printf(_("      --vgname=VGNAME       name of dss volume group\n"));
     printf(_("      --socketpath=SOCKETPATH\n"
              "                            dss connect socket file path\n"));
+#endif
     printf(_("  -E, --encoding=ENCODING   set default encoding for new databases\n"));
     printf(_("      --locale=LOCALE       set default locale for new databases\n"));
     printf(_("      --dbcompatibility=DBCOMPATIBILITY   set default dbcompatibility for new database\n"));
@@ -3891,6 +3895,7 @@ static bool is_file_exist(const char* path)
     return isExist;
 }
 
+#ifndef ENABLE_LITE_MODE
 static void parse_vgname_args(char* args)
 {
     vgname = xstrdup(args);
@@ -3920,6 +3925,7 @@ static void parse_vgname_args(char* args)
         exit(1);
     }
 }
+#endif
 
 int main(int argc, char* argv[])
 {
@@ -4255,6 +4261,7 @@ int main(int argc, char* argv[])
                 }
                 g_bucket_len = atoi(optarg);
                 break;
+#ifndef ENABLE_LITE_MODE
             case 15:
                 FREE_NOT_STATIC_ZERO_STRING(vgname);
                 FREE_NOT_STATIC_ZERO_STRING(vgdata);
@@ -4274,6 +4281,7 @@ int main(int argc, char* argv[])
                 check_input_spec_char(optarg);
                 ss_nodedatainfo = xstrdup(optarg);
                 break;
+#endif
             default:
                 /* getopt_long already emitted a complaint */
                 write_stderr(_("Try \"%s --help\" for more information.\n"), progname);

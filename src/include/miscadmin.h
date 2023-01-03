@@ -467,8 +467,13 @@ extern bool CheckExecDirectPrivilege(const char* query); /* check user have priv
         u_sess->misc_cxt.Mode = (mode);                                                                      \
     } while (0)
 
+#ifdef ENABLE_LITE_MODE
+#define ENABLE_DSS false
+#define ENABLE_DSS_AIO false
+#else
 #define ENABLE_DSS (g_instance.attr.attr_storage.dss_attr.ss_enable_dss)
 #define ENABLE_DSS_AIO (ENABLE_DSS && g_instance.attr.attr_storage.dms_attr.enable_dss_aio && !IsInitdb)
+#endif
 
 /*
  * Auxiliary-process type identifiers.
