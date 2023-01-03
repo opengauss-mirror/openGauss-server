@@ -209,4 +209,6 @@ extern bool check_stream_for_loop_fetch(Portal portal);
 extern bool IsPlanForPartitionScan(Plan* plan);
 extern bool queryIsReadOnly(Query* query);
 
+typedef PlannedStmt* (*plannerFunc)(Query* parse, int cursorOptions, ParamListInfo boundParams);
+
 #endif /* PLANNER_H */

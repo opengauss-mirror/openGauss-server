@@ -1289,8 +1289,12 @@ PlannedStmt* pg_plan_query(Query* querytree, int cursorOptions, ParamListInfo bo
     if (!OidIsValid(lc_replan_nodegroup))
         check_query_acl(querytree);
 
-    /* call the optimizer */
-    plan = planner(querytree, cursorOptions, boundParams);
+    if (u_sess->hook_cxt.plannerHook != NULL) {
+        plan = ((plannerFunc)(u_sess->hook_cxt.plannerHook))(querytree, cursorOptions, boundParams);
+    } else {
+        /* call the optimizer */
+        plan = planner(querytree, cursorOptions, boundParams);
+    }
 
     PGSTAT_END_TIME_RECORD(PLAN_TIME);
 
