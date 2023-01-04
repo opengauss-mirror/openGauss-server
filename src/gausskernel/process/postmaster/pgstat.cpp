@@ -8696,7 +8696,7 @@ static void calculateThreadMemoryContextStats(const volatile PGPROC* proc, const
             threadId = proc->pid;
             rc = strncpy_s(threadType,
                 PROC_NAME_LEN,
-                (proc->myProgName != NULL) ? (const char*)proc->myProgName : "",
+                (proc->myProgName[0] != '\0') ? (const char*)proc->myProgName : "",
                 PROC_NAME_LEN - 1);
             securec_check(rc, "\0", "\0");
             getSessionID(sessId, proc->myStartTime, threadId);
