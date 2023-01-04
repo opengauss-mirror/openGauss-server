@@ -115,7 +115,7 @@ static bool IsConvertableInlistRestrict(RelOptInfo* rel, const RestrictInfo* res
 static bool HasConvertableInlistCond(RelOptInfo* rel);
 static int ConvertableInlistMaxNum(const RelOptInfo* rel);
 static bool IsEqualOpr(Oid opno);
-static bool inline IsConvertableType(Oid typoid);
+static inline bool IsConvertableType(Oid typoid);
 static List* convert_constarray_to_simple(Const* combined_const, Var* listvar, Oid* paramtype);
 static char* get_attr_name(int attrnum);
 static void rebuild_subquery(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* rte, RangeTblEntry* new_rte);
@@ -834,7 +834,7 @@ static bool IsEqualOpr(Oid opno)
  *
  * Return: bool. indicate Yes/Not for convertable type for check
  */
-static bool inline IsConvertableType(Oid typoid)
+static inline bool IsConvertableType(Oid typoid)
 {
     switch (typoid) {
         case INT1OID:          /* for TINYINT */
