@@ -8416,9 +8416,9 @@ bool StrToInt32(const char* s, int *val)
             return false;
         int8 digit = (*ptr++ - '0');
         _val = _val * base + digit;
-	if (_val > PG_INT32_MAX || _val < PG_INT32_MIN) {
-	    return false;
-	}
+        if (_val > PG_INT32_MAX || _val < PG_INT32_MIN) {
+            return false;
+        }
     }
     *val = (int)_val;
     return true;
