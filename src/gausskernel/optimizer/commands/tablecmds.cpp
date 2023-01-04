@@ -28275,12 +28275,6 @@ void DropWeakPasswordDictionary()
     }
 
     Relation rel = heap_open(GsGlobalConfigRelationId, RowExclusiveLock);
-    if (!OidIsValid(rel)) {
-        ereport(ERROR, 
-            (errcode(ERRCODE_SYSTEM_ERROR),
-                errmsg("could not open gs_global_config")));
-        return;
-    }
 
     HeapTuple tuple = NULL;
     bool is_null = false;
