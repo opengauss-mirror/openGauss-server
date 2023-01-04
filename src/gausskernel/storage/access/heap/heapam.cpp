@@ -2360,7 +2360,7 @@ bool heap_fetch(
     return false;
 }
 
-static TransactionId inline GetOldestXminForHot(Relation relation)
+static inline TransactionId GetOldestXminForHot(Relation relation)
 {
     if (IsCatalogRelation(relation) || RelationIsAccessibleInLogicalDecoding(relation)) {
         return u_sess->utils_cxt.RecentGlobalCatalogXmin;
