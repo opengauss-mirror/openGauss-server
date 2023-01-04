@@ -1385,7 +1385,7 @@ static void pgaudit_ProcessUtility(Node* parsetree, const char* queryString, Par
         } break;
         case T_AlterTableStmt: {
             AlterTableStmt* altertablestmt = (AlterTableStmt*)(parsetree); /* Audit alter table */
-            if (RELKIND_IS_SEQUENCE(altertablestmt->relkind)) {
+            if (OBJECT_SEQUENCE == altertablestmt->relkind || OBJECT_LARGE_SEQUENCE == altertablestmt->relkind) {
                 pgaudit_ddl_sequence(altertablestmt->relation->relname, queryString);
             } else {
                 pgaudit_ddl_table(altertablestmt->relation->relname, queryString);
