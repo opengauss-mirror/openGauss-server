@@ -1,27 +1,27 @@
 DROP DATABASE IF EXISTS test_db;
 NOTICE:  database "test_db" does not exist, skipping
 CREATE DATABASE test_db DBCOMPATIBILITY 'B';
-CREATE USER root_test WITH PASSWORD 'openGauss@123';
-GRANT ALL PRIVILEGES TO root_test;
+CREATE USER "Root_Test" WITH PASSWORD 'openGauss@123';
+GRANT ALL PRIVILEGES TO "Root_Test";
 \c test_db
-SET ROLE root_test PASSWORD 'openGauss@123';
-CREATE USER test_user with password 'openGauss@123';
+SET ROLE "Root_Test" PASSWORD 'openGauss@123';
+CREATE USER "Test_User" with password 'openGauss@123';
 CREATE VIEW definer_test_view1 AS SELECT log(10, 100);
-CREATE DEFINER=test_user VIEW definer_test_view2 AS SELECT log(10, 100);
+CREATE DEFINER="Test_User" VIEW definer_test_view2 AS SELECT log(10, 100);
 ERROR:  permission denied for schema public
 DETAIL:  N/A
-CREATE OR REPLACE DEFINER=test_user VIEW definer_test_view3 AS SELECT log(10, 100);
+CREATE OR REPLACE DEFINER="Test_User" VIEW definer_test_view3 AS SELECT log(10, 100);
 ERROR:  permission denied for schema public
 DETAIL:  N/A
-GRANT ALL PRIVILEGES TO test_user;
-CREATE DEFINER=test_user VIEW definer_test_view2 AS SELECT log(10, 100);
-CREATE OR REPLACE DEFINER=test_user VIEW definer_test_view3 AS SELECT log(10, 100);
+GRANT ALL PRIVILEGES TO "Test_User";
+CREATE DEFINER="Test_User" VIEW definer_test_view2 AS SELECT log(10, 100);
+CREATE OR REPLACE DEFINER="Test_User" VIEW definer_test_view3 AS SELECT log(10, 100);
 SELECT c.relname as view_name, u.usename as rolname FROM pg_class c, pg_user u WHERE u.usesysid = c.relowner AND relname like '%definer_test_view%';
      view_name      |  rolname  
 --------------------+-----------
- definer_test_view1 | root_test
- definer_test_view2 | test_user
- definer_test_view3 | test_user
+ definer_test_view1 | Root_Test
+ definer_test_view2 | Test_User
+ definer_test_view3 | Test_User
 (3 rows)
 
 CREATE USER test_user2 with password 'openGauss@123';
@@ -39,41 +39,86 @@ SELECT * FROM definer_test_view1;
 (1 row)
 
 ALTER DEFINER=test_user2 VIEW definer_test_view2 AS SELECT log(10, 100);
+create table tab_1107262(id int,c1 int);
+create or replace procedure pro_1107262(n int)
+as
+begin
+repeat
+insert into tab_1107262 values(n,n*2);
+n:=n+1;
+until n>10 end repeat;
+end;
+/
 SELECT c.relname as view_name, u.usename as rolname FROM pg_class c, pg_user u WHERE u.usesysid = c.relowner AND relname like '%definer_test_view%';
      view_name      |  rolname   
 --------------------+------------
- definer_test_view1 | root_test
+ definer_test_view1 | Root_Test
  definer_test_view2 | test_user2
- definer_test_view3 | test_user
+ definer_test_view3 | Test_User
 (3 rows)
 
 -- dump all views
 \! @abs_bindir@/gs_dump test_db -p @portstring@ --include-depend-objs --exclude-self | grep -vE '^SET|^REVOKE|^GRANT|^--|^gs_dump|^COMMENT|^ALTER|^DROP'| tr -s ‘'\n' > @abs_bindir@/definer_view_dump.sql 2>&1
 \! cat @abs_bindir@/definer_view_dump.sql
 
-CREATE SCHEMA test_user;
+CREATE SCHEMA "Test_User";
 CREATE SCHEMA test_user2;
-CREATE  DEFINER = root_test  VIEW definer_test_view1(log) AS
+CREATE DEFINER = "Root_Test" PROCEDURE pro_1107262(n int)  NOT SHIPPABLE
+ AS  DECLARE 
+begin
+repeat
+insert into tab_1107262 values(n,n*2);
+n:=n+1;
+until n>10 end repeat;
+end;
+/
+CREATE  DEFINER = "Root_Test"  VIEW definer_test_view1(log) AS
     SELECT log((10)::numeric, (1000)::numeric) AS log;
-CREATE  DEFINER = test_user2  VIEW definer_test_view2(log) AS
+CREATE  DEFINER = "test_user2"  VIEW definer_test_view2(log) AS
     SELECT log((10)::numeric, (100)::numeric) AS log;
-CREATE  DEFINER = test_user  VIEW definer_test_view3(log) AS
+CREATE  DEFINER = "Test_User"  VIEW definer_test_view3(log) AS
     SELECT log((10)::numeric, (100)::numeric) AS log;
+CREATE TABLE tab_1107262 (
+    id integer,
+    c1 integer
+)
+WITH (orientation=row, compression=no);
+COPY tab_1107262 (id, c1) FROM stdin;
+\.
+;
 DROP VIEW definer_test_view1;
 DROP VIEW definer_test_view2;
 DROP VIEW definer_test_view3;
-DROP SCHEMA test_user;
+DROP FUNCTION pro_1107262(n int);
+DROP TABLE tab_1107262;
+DROP SCHEMA "Test_User";
 DROP SCHEMA test_user2;
 GRANT ALL PRIVILEGES TO test_user2;
 \i @abs_bindir@/definer_view_dump.sql
-CREATE SCHEMA test_user;
+CREATE SCHEMA "Test_User";
 CREATE SCHEMA test_user2;
-CREATE  DEFINER = root_test  VIEW definer_test_view1(log) AS
+CREATE DEFINER = "Root_Test" PROCEDURE pro_1107262(n int)  NOT SHIPPABLE
+ AS  DECLARE 
+begin
+repeat
+insert into tab_1107262 values(n,n*2);
+n:=n+1;
+until n>10 end repeat;
+end;
+/
+CREATE  DEFINER = "Root_Test"  VIEW definer_test_view1(log) AS
     SELECT log((10)::numeric, (1000)::numeric) AS log;
-CREATE  DEFINER = test_user2  VIEW definer_test_view2(log) AS
+CREATE  DEFINER = "test_user2"  VIEW definer_test_view2(log) AS
     SELECT log((10)::numeric, (100)::numeric) AS log;
-CREATE  DEFINER = test_user  VIEW definer_test_view3(log) AS
+CREATE  DEFINER = "Test_User"  VIEW definer_test_view3(log) AS
     SELECT log((10)::numeric, (100)::numeric) AS log;
+CREATE TABLE tab_1107262 (
+    id integer,
+    c1 integer
+)
+WITH (orientation=row, compression=no);
+COPY tab_1107262 (id, c1) FROM stdin;
+;
 SELECT * FROM definer_test_view1;
         log         
 --------------------
@@ -95,9 +140,9 @@ SELECT * FROM definer_test_view3;
 SELECT c.relname as view_name, u.usename as rolname FROM pg_class c, pg_user u WHERE u.usesysid = c.relowner AND relname like '%definer_test_view%';
      view_name      |  rolname   
 --------------------+------------
- definer_test_view1 | root_test
+ definer_test_view1 | Root_Test
  definer_test_view2 | test_user2
- definer_test_view3 | test_user
+ definer_test_view3 | Test_User
 (3 rows)
 
 RESET ROLE;
@@ -141,6 +186,6 @@ GRANT
 drop database test_db;
 drop database test_1;
 drop database test_2;
-DROP USER test_user;
+DROP USER "Test_User";
 DROP USER test_user2;
-DROP USER root_test CASCADE;
+DROP USER "Root_Test" CASCADE;

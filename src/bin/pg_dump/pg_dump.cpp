@@ -13066,7 +13066,7 @@ static void dumpFunc(Archive* fout, FuncInfo* finfo)
                       fmtId(finfo->dobj.nmspace->dobj.name), funcsig, if_cascade);
 
     if ((gdatcompatibility != NULL) && strcmp(gdatcompatibility, B_FORMAT) == 0) {
-        appendPQExpBuffer(q, "CREATE DEFINER = %s %s %s ", definer, funcKind, funcfullsig);
+        appendPQExpBuffer(q, "CREATE DEFINER = \"%s\" %s %s ", definer, funcKind, funcfullsig);
         PQclear(defres);
     } else {
          appendPQExpBuffer(q, "CREATE %s %s ", funcKind, funcfullsig);
@@ -18227,7 +18227,7 @@ static void dumpViewSchema(
     appendPQExpBuffer(q, "CREATE ");
     if ((gdatcompatibility != NULL) && strcmp(gdatcompatibility, B_FORMAT) == 0 &&
         tbinfo->rolname != NULL && strlen(tbinfo->rolname) > 0) {
-        appendPQExpBuffer(q, " DEFINER = %s ", tbinfo->rolname);
+        appendPQExpBuffer(q, " DEFINER = \"%s\" ", tbinfo->rolname);
     }
     appendPQExpBuffer(q, " VIEW %s(%s)", fmtId(tbinfo->dobj.name), schemainfo);
     if ((tbinfo->reloptions != NULL) && strlen(tbinfo->reloptions) > 0)
