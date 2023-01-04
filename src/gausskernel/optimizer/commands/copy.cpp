@@ -8737,7 +8737,7 @@ List* getPrivateModeDataNodeTask(List* urllist, const char* dnName)
         getPathAndPattern(url, &path, &pattern);
 
         /* datanode private path = url + nodename */
-        rc = snprintf_s(privatePath, sizeof(privatePath), PATH_MAX, "%s\%s", path, dnName);
+        rc = snprintf_s(privatePath, sizeof(privatePath), PATH_MAX, "%s/%s", path, dnName);
         securec_check_ss(rc, "\0", "\0");
 
         privatePath[PATH_MAX] = '\0';
