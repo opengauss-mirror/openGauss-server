@@ -13249,7 +13249,8 @@ int GaussDbThreadMain(knl_thread_arg* arg)
             InitProcessAndShareMemory();
             BackgroundWorkerMain();
             proc_exit(0);
-        }
+        } break;
+
         case COMM_SENDERFLOWER: {
             commSenderFlowMain();
             proc_exit(0);
@@ -13305,7 +13306,7 @@ int GaussDbThreadMain(knl_thread_arg* arg)
             InitProcessAndShareMemory();
             GlobalStatsTrackerMain();
             proc_exit(0);
-        }
+        } break;
 
 #ifndef ENABLE_LITE_MODE
         case BARRIER_CREATOR: {
