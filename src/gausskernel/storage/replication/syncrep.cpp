@@ -571,7 +571,7 @@ void SyncRepInitConfig(void)
     SyncRepGetStandbyGroupAndPriority(&group, &priority);
     if (t_thrd.walsender_cxt.MyWalSnd->sync_standby_group != group ||
         t_thrd.walsender_cxt.MyWalSnd->sync_standby_priority != priority) {
-        SpinLockAcquire(&t_thrd.walsender_cxt.MyWalSnd->mutex);
+        LWLockAcquire(SyncRepLock, LW_EXCLUSIVE);
 
         t_thrd.walsender_cxt.MyWalSnd->sync_standby_group = group;
         t_thrd.walsender_cxt.MyWalSnd->sync_standby_priority = priority;
@@ -582,7 +582,7 @@ void SyncRepInitConfig(void)
          */
         SyncRepCheckSyncStandbyAlive();
 
-        SpinLockRelease(&t_thrd.walsender_cxt.MyWalSnd->mutex);
+        LWLockRelease(SyncRepLock);
         ereport(DEBUG1, (errmsg("standby \"%s\" now has synchronous standby group and priority: %d %d",
                                 u_sess->attr.attr_common.application_name, group, priority)));
     }
