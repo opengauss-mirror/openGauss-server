@@ -595,6 +595,7 @@ typedef int (*dms_reform_done_notify)(void *db_handle);
 typedef int (*dms_log_wait_flush)(void *db_handle, unsigned long long lsn);
 typedef int (*dms_wait_ckpt)(void *db_handle);
 typedef void (*dms_verify_page)(dms_buf_ctrl_t *buf_ctrl, char *new_page);
+typedef int (*dms_drc_validate)(void *db_handle);
 
 typedef struct st_dms_callback {
     // used in reform
@@ -712,6 +713,8 @@ typedef struct st_dms_callback {
     dms_reform_done_notify reform_done_notify;
     dms_log_wait_flush log_wait_flush;
     dms_wait_ckpt wait_ckpt;
+
+    dms_drc_validate drc_validate;
 } dms_callback_t;
 
 typedef struct st_dms_instance_net_addr {
@@ -779,7 +782,7 @@ typedef struct st_logger_param {
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           44
+#define DMS_LOCAL_VERSION           45
 
 #ifdef __cplusplus
 }

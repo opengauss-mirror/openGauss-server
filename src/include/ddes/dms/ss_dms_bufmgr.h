@@ -73,5 +73,6 @@ void CheckPageNeedSkipInRecovery(Buffer buf);
 void SmgrNetPageCheckDiskLSN(BufferDesc* buf_desc, ReadBufferMode read_mode, const XLogPhyBlock *pblk);
 void SegNetPageCheckDiskLSN(BufferDesc* buf_desc, ReadBufferMode read_mode, SegSpace *spc);
 unsigned int DMSGetProcType4RequestPage();
+void BufValidateDrc(BufferDesc *buf_desc);
 
 #endif

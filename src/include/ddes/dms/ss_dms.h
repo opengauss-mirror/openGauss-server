@@ -76,6 +76,8 @@ typedef struct st_ss_dms_func {
     void (*dms_pre_uninit)(void);
     int (*dms_init_logger)(logger_param_t *log_param);
     void (*dms_refresh_logger)(char *log_field, unsigned long long *value);
+    void (*dms_validate_drc)(dms_context_t *dms_ctx, dms_buf_ctrl_t *ctrl, unsigned long long lsn,
+        unsigned char is_dirty);
 } ss_dms_func_t;
 
 int ss_dms_func_init();
@@ -116,6 +118,7 @@ bool dms_latch_timed_x(dms_context_t *dms_ctx, dms_drlatch_t *dlatch, unsigned i
 bool dms_latch_timed_s(dms_context_t *dms_ctx, dms_drlatch_t *dlatch, unsigned int wait_ticks, unsigned char is_force);
 void dms_unlatch(dms_context_t *dms_ctx, dms_drlatch_t *dlatch);
 void dms_pre_uninit(void);
+void dms_validate_drc(dms_context_t *dms_ctx, dms_buf_ctrl_t *ctrl, unsigned long long lsn, unsigned char is_dirty);
 #ifdef __cplusplus
 }
 #endif

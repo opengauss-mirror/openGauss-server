@@ -468,6 +468,20 @@ bool DmsReleaseOwner(BufferTag buf_tag, int buf_id)
     return ((dms_release_owner(&dms_ctx, buf_ctrl, &released) == DMS_SUCCESS) && (released != 0));
 }
 
+void BufValidateDrc(BufferDesc *buf_desc)
+{
+    dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
+    Assert(buf_ctrl != NULL);
+    Assert(buf_ctrl->is_edp != 1);
+    Assert(XLogRecPtrIsValid(g_instance.dms_cxt.ckptRedo));
+
+    dms_context_t dms_ctx;
+    InitDmsBufContext(&dms_ctx, buf_desc->tag);
+    unsigned long long lsn = (unsigned long long)BufferGetLSN(buf_desc);
+    bool is_dirty = (buf_desc->state & (BM_DIRTY | BM_JUST_DIRTIED)) > 0 ? true : false;
+    dms_validate_drc(&dms_ctx, buf_ctrl, lsn, (unsigned char)is_dirty);
+}
+
 int32 CheckBuf4Rebuild(BufferDesc *buf_desc)
 {
     dms_buf_ctrl_t *buf_ctrl = GetDmsBufCtrl(buf_desc->buf_id);
@@ -610,7 +624,7 @@ void SSRecheckBufferPool()
          * BUF_DIRTY_NEED_FLUSH was removed during mark buffer dirty and lsn_on_disk was set during sync buffer
          * As BUF_DIRTY_NEED_FLUSH was set only if page lsn is bigger than ckpt redo, it should be removed at this time
          * Unfortunately if it is not, mark it dirty again. For lsn_on_disk, if it is still invalid, this means it is
-         * not flushed. So if it is not dirty, invalidate it again.
+         * not flushed.
          */
         BufferDesc *buf_desc = GetBufferDescriptor(i);
         pg_memory_barrier();
