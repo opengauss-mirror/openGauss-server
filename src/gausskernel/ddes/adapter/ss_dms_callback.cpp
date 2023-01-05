@@ -47,55 +47,6 @@
 #include "storage/file/fio_device.h"
 #include "storage/buf/bufmgr.h"
 
-static void DMSWriteNormalLog(dms_log_id_t dms_log_id, dms_log_level_t dms_log_level, const char *code_file_name,
-    uint32 code_line_num, const char *module_name, const char *format, ...)
-{
-    int32 errcode;
-    uint32 log_level;
-    const char *last_file = NULL;
-    int32 ret = DMSLogLevelCheck(dms_log_id, dms_log_level, &log_level);
-    if (ret == -1) {
-        return;
-    }
-
-#ifdef WIN32
-    last_file = strrchr(code_file_name, '\\');
-#else
-    last_file = strrchr(code_file_name, '/');
-#endif
-    if (last_file == NULL) {
-        last_file = code_file_name;
-    } else {
-        last_file++;
-    }
-
-    va_list args;
-    va_start(args, format);
-    char buf[DMS_LOGGER_BUFFER_SIZE];
-    errcode = vsnprintf_s(buf, DMS_LOGGER_BUFFER_SIZE, DMS_LOGGER_BUFFER_SIZE, format, args);
-    if (errcode < 0) {
-        va_end(args);
-        return;
-    }
-    va_end(args);
-
-    uint32 saveInterruptHoldoffCount = t_thrd.int_cxt.InterruptHoldoffCount;
-    MemoryContext old_context = MemoryContextSwitchTo(ErrorContext);
-    PG_TRY();
-    {
-        DMSLogOutput(log_level, last_file, code_line_num, buf);
-    }
-    PG_CATCH();
-    {
-        t_thrd.int_cxt.InterruptHoldoffCount = saveInterruptHoldoffCount;
-        if (t_thrd.role == DMS_WORKER) {
-            FlushErrorState();
-        }
-    }
-    PG_END_TRY();
-    (void)MemoryContextSwitchTo(old_context);
-}
-
 static int CBGetUpdateXid(void *db_handle, unsigned long long xid, unsigned int t_infomask, unsigned int t_infomask2,
     unsigned long long *uxid)
 {
@@ -749,9 +700,9 @@ static int CBXLogFlush(void *db_handle, unsigned long long *lsn)
 static char *CBDisplayBufferTag(char *displayBuf, unsigned int count, char *pageid)
 {
     BufferTag pagetag = *(BufferTag *)pageid;
-    int ret = sprintf_s(displayBuf, count, "spc/db/rel/bucket fork-block: %u/%u/%u/%d %d-%u",
-        pagetag.rnode.spcNode, pagetag.rnode.dbNode, pagetag.rnode.relNode, pagetag.rnode.bucketNode,
-        pagetag.forkNum, pagetag.blockNum);
+    int ret = sprintf_s(displayBuf, count, "%u/%u/%u/%d/%d %d-%u",
+        pagetag.rnode.spcNode, pagetag.rnode.dbNode, pagetag.rnode.relNode, (int)pagetag.rnode.bucketNode,
+        (int)pagetag.rnode.opt, pagetag.forkNum, pagetag.blockNum);
     securec_check_ss(ret, "", "");
     return displayBuf;
 }
@@ -1531,7 +1482,7 @@ void DmsInitCallback(dms_callback_t *callback)
     callback->opengauss_lock_buffer = CBGetCurrModeAndLockBuffer;
     callback->get_opengauss_txn_snapshot = CBGetSnapshotData;
 
-    callback->log_output = DMSWriteNormalLog;
+    callback->log_output = NULL;
 
     callback->switchover_demote = CBSwitchoverDemote;
     callback->switchover_promote_opengauss = CBSwitchoverPromote;

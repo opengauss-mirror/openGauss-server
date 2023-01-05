@@ -34,6 +34,7 @@ extern "C" {
 #define SS_LIBDMS_NAME "libdms.so"
 
 typedef struct st_ss_dms_func {
+    bool inited;
     void *handle;
     int (*dms_get_version)(void);
     void (*dms_show_version)(char *version);
@@ -73,10 +74,14 @@ typedef struct st_ss_dms_func {
         unsigned char is_force);
     void (*dms_unlatch)(dms_context_t *dms_ctx, dms_drlatch_t *dlatch);
     void (*dms_pre_uninit)(void);
+    int (*dms_init_logger)(logger_param_t *log_param);
+    void (*dms_refresh_logger)(char *log_field, unsigned long long *value);
 } ss_dms_func_t;
 
 int ss_dms_func_init();
 int dms_init(dms_profile_t *dms_profile);
+int dms_init_logger(logger_param_t *log_param);
+void dms_refresh_logger(char *log_field, unsigned long long *value);
 void dms_get_error(int *errcode, const char **errmsg);
 void dms_uninit(void);
 int dms_request_page(dms_context_t *dms_ctx, dms_buf_ctrl_t *ctrl, dms_lock_mode_t mode);

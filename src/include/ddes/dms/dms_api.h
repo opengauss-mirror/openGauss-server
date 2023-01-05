@@ -1,7 +1,7 @@
 /*
- * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ * Copyright (c) 2022 Huawei Technologies Co.,Ltd.
  *
- * openGauss is licensed under Mulan PSL v2.
+ * DMS is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
  * You may obtain a copy of Mulan PSL v2 at:
  *
@@ -14,10 +14,9 @@
  * ---------------------------------------------------------------------------------------
  *
  * dms_api.h
- *        Defines the DMS data structure.
  *
  * IDENTIFICATION
- *        src/include/ddes/dms/dms_api.h
+ *        src/interface/dms_api.h
  *
  * ---------------------------------------------------------------------------------------
  */
@@ -29,9 +28,10 @@
 extern "C" {
 #endif
 
-#ifdef OPENGAUSS
+
 #define DMS_SUCCESS 0
 #define DMS_ERROR (-1)
+#ifdef OPENGAUSS
 #define DMS_PAGEID_SIZE         24  // openGauss bufferTag size
 #else
 #define DMS_PAGEID_SIZE         16
@@ -46,6 +46,7 @@ extern "C" {
 
 #define DMS_VERSION_MAX_LEN     256
 #define DMS_OCK_LOG_PATH_LEN    256
+#define DMS_LOG_PATH_LEN        (256)
 typedef enum en_dms_online_status {
     DMS_ONLINE_STATUS_OUT = 0,
     DMS_ONLINE_STATUS_JOIN = 1,
@@ -183,6 +184,7 @@ typedef struct st_dms_context {
     unsigned int inst_id;   // current instance id
     unsigned int sess_id;   // current session id
     unsigned int sess_rcy;  // request page: recovery session flag
+
     void *db_handle;
     unsigned char is_try;
     unsigned char type;
@@ -276,7 +278,7 @@ typedef struct st_dms_buf_ctrl {
     unsigned int pblk_blkno;
     unsigned long long  pblk_lsn;
 #endif
-} dms_buf_ctrl_t;
+}dms_buf_ctrl_t;
 
 typedef enum en_dms_page_latch_mode {
     DMS_PAGE_LATCH_MODE_S = 1,
@@ -432,10 +434,11 @@ typedef enum en_dms_role {
 
 typedef enum en_reform_phase {
     DMS_PHASE_START = 0,
-    DMS_PHASE_AFTER_RECOVERY = 1,
-    DMS_PHASE_BEFORE_DC_INIT = 2,
-    DMS_PHASE_BEFORE_ROLLBACK = 3,
-    DMS_PHASE_END = 4,
+    DMS_PHASE_AFTER_DRC_ACCESS = 1,
+    DMS_PHASE_AFTER_RECOVERY = 2,
+    DMS_PHASE_BEFORE_DC_INIT = 3,
+    DMS_PHASE_BEFORE_ROLLBACK = 4,
+    DMS_PHASE_END = 5,
 } reform_phase_t;
 
 typedef enum en_dms_status {
@@ -455,13 +458,13 @@ typedef struct st_dcs_batch_buf {
 
 typedef int(*dms_get_list_stable)(void *db_handle, unsigned long long *list_stable, unsigned char *reformer_id);
 typedef int(*dms_save_list_stable)(void *db_handle, unsigned long long list_stable, unsigned char reformer_id,
-                                   unsigned int save_ctrl);
+            unsigned int save_ctrl);
 typedef int(*dms_get_dms_status)(void *db_handle);
 typedef void(*dms_set_dms_status)(void *db_handle, int status);
 typedef int(*dms_confirm_converting)(void *db_handle, char *pageid, unsigned char smon_chk,
     unsigned char *lock_mode, unsigned long long *edp_map, unsigned long long *lsn, unsigned int *ver);
 typedef int(*dms_confirm_owner)(void *db_handle, char *pageid, unsigned char *lock_mode, unsigned char *is_edp,
-                                unsigned long long *lsn);
+            unsigned long long *lsn);
 typedef int(*dms_flush_copy)(void *db_handle, char *pageid);
 typedef int(*dms_edp_lsn)(void *db_handle, char *pageid, unsigned long long *lsn);
 typedef int(*dms_disk_lsn)(void *db_handle, char *pageid, unsigned long long *lsn);
@@ -472,8 +475,8 @@ typedef int(*dms_opengauss_recovery_primary)(void *db_handle, int inst_id);
 typedef void(*dms_reform_start_notify)(void *db_handle, dms_role_t role, unsigned char reform_type);
 typedef int(*dms_undo_init)(void *db_handle, unsigned char inst_id);
 typedef int(*dms_tx_area_init)(void *db_handle, unsigned char inst_id);
-typedef int (*dms_tx_area_load)(void *db_handle, unsigned char inst_id);
-typedef int (*dms_tx_rollback_finish)(void *db_handle, unsigned char inst_id);
+typedef int(*dms_tx_area_load)(void *db_handle, unsigned char inst_id);
+typedef int(*dms_tx_rollback_finish)(void *db_handle, unsigned char inst_id);
 typedef unsigned char(*dms_recovery_in_progress)(void *db_handle);
 typedef unsigned int(*dms_get_page_hash_val)(const char pageid[DMS_PAGEID_SIZE]);
 typedef unsigned long long(*dms_get_page_lsn)(const dms_buf_ctrl_t *buf_ctrl);
@@ -739,7 +742,7 @@ typedef struct st_dms_profile {
     unsigned char rdma_rpc_bind_core_end;
     char ock_log_path[DMS_OCK_LOG_PATH_LEN];
     unsigned char enable_reform;
-    // scrlock
+    //ock scrlock configs
     unsigned char enable_scrlock;
     unsigned int primary_inst_id;
     unsigned char enable_scrlock_secure_mode;   // enable ssl
@@ -754,6 +757,13 @@ typedef struct st_dms_profile {
     unsigned char scrlock_server_bind_core_end;
 } dms_profile_t;
 
+typedef struct st_logger_param {
+    unsigned int log_level;
+    unsigned long long log_max_file_size;
+    unsigned int log_backup_file_count;
+    char log_home[DMS_LOG_PATH_LEN];
+} logger_param_t;
+
 #define DMS_BUF_CTRL_IS_OWNER(ctrl) ((ctrl)->lock_mode == DMS_LOCK_EXCLUSIVE || \
     ((ctrl)->lock_mode == DMS_LOCK_SHARE))
 #define DMS_BUF_CTRL_NOT_LOCK(ctrl)  ((ctrl)->lock_mode == DMS_LOCK_NULL)
@@ -762,7 +772,7 @@ typedef struct st_dms_profile {
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           38
+#define DMS_LOCAL_VERSION           43
 
 #ifdef __cplusplus
 }

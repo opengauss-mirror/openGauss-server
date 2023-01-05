@@ -149,6 +149,8 @@
 #include "workload/workload.h"
 #include "utils/guc_storage.h"
 #include "access/ustore/knl_undoworker.h"
+#include "ddes/dms/ss_init.h"
+#include "storage/dss/dss_log.h"
 
 #define atooid(x) ((Oid)strtoul((x), NULL, 10))
 
@@ -230,6 +232,10 @@ static void assign_dcf_log_backup_file_count(int newval, void* extra);
 static void assign_dcf_flow_control_rto(int newval, void *extra);
 static void assign_dcf_flow_control_rpo(int newval, void *extra);
 #endif
+
+static void assign_ss_log_level(int newval, void *extra);
+static void assign_ss_log_max_file_size(int newval, void *extra);
+static void assign_ss_log_backup_file_count(int newval, void *extra);
 
 static void InitStorageConfigureNamesBool();
 static void InitStorageConfigureNamesInt();
@@ -3516,6 +3522,48 @@ static void InitStorageConfigureNamesInt()
             NULL,
             NULL,
             NULL},
+        {{"ss_log_level",
+            PGC_SIGHUP,
+            NODE_SINGLENODE,
+            SHARED_STORAGE_OPTIONS,
+            gettext_noop("Sets the ss log level"),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_storage.dms_attr.sslog_level,
+            7,
+            0,
+            887,
+            NULL,
+            assign_ss_log_level,
+            NULL},
+        {{"ss_log_backup_file_count",
+            PGC_SIGHUP,
+            NODE_SINGLENODE,
+            SHARED_STORAGE_OPTIONS,
+            gettext_noop("Sets the ss log backup file count"),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_storage.dms_attr.sslog_backup_file_count,
+            10,
+            0,
+            128,
+            NULL,
+            assign_ss_log_backup_file_count,
+            NULL},
+        {{"ss_log_max_file_size",
+            PGC_SIGHUP,
+            NODE_SINGLENODE,
+            SHARED_STORAGE_OPTIONS,
+            gettext_noop("Sets the ss log max file size (KB)"),
+            NULL,
+            GUC_SUPERUSER_ONLY | GUC_UNIT_KB},
+            &g_instance.attr.attr_storage.dms_attr.sslog_max_file_size,
+            10 * 1024,
+            1 * 1024,
+            4 * 1024 *1024,
+            NULL,
+            assign_ss_log_max_file_size,
+            NULL},  
         /* End-of-list marker */
         {{NULL,
             (GucContext)0,
@@ -5938,6 +5986,49 @@ static void assign_dcf_flow_control_rpo(int newval, void *extra)
 }
 
 #endif
+
+static void assign_ss_log_level(int newval, void *extra)
+{
+    g_instance.attr.attr_storage.dms_attr.sslog_level = newval;
+    if (t_thrd.proc_cxt.MyProcPid == PostmasterPid) {
+        unsigned long long val = (unsigned long long)newval;
+        if (ENABLE_DMS) {
+            DMSRefreshLogger("LOG_LEVEL", &val);
+        }
+        if (ENABLE_DSS) {
+            DSSRefreshLogger("LOG_LEVEL", &val);
+        }
+    }
+}
+
+static void assign_ss_log_max_file_size(int newval, void *extra)
+{
+    g_instance.attr.attr_storage.dms_attr.sslog_max_file_size = newval;
+    if (t_thrd.proc_cxt.MyProcPid == PostmasterPid) {
+        unsigned long long val = (unsigned long long)newval;
+        if (ENABLE_DMS) {
+            DMSRefreshLogger("LOG_MAX_FILE_SIZE", &val);
+        }
+        if (ENABLE_DSS) {
+            DSSRefreshLogger("LOG_MAX_FILE_SIZE", &val);
+        }
+    }
+}
+
+static void assign_ss_log_backup_file_count(int newval, void *extra)
+{
+    g_instance.attr.attr_storage.dms_attr.sslog_backup_file_count = newval;
+    if (t_thrd.proc_cxt.MyProcPid == PostmasterPid) {
+        unsigned long long val = (unsigned long long)newval;
+        if (ENABLE_DMS) {
+            DMSRefreshLogger("LOG_BACKUP_FILE_COUNT", &val);
+        }
+        if (ENABLE_DSS) {
+            DSSRefreshLogger("LOG_BACKUP_FILE_COUNT", &val);
+        }
+    }
+}
+
 
 static bool check_logical_decode_options_default(char** newval, void** extra, GucSource source)
 {

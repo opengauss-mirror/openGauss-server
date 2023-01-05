@@ -89,8 +89,7 @@ static int dss_get_my_version()
 
 int dss_device_init(const char *conn_path, bool enable_dss)
 {
-    if (!enable_dss) {
-        // not enable dss, just return success
+    if (!enable_dss || device_op.inited) {
         return DSS_SUCCESS;
     }
     SS_RETURN_IFERR(dss_open_dl(&device_op.handle, (char *)SS_LIBDSS_NAME));
@@ -133,6 +132,8 @@ int dss_device_init(const char *conn_path, bool enable_dss)
     SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_get_lib_version", (void **)&device_op.dss_get_version));
     SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_aio_prep_pwrite", (void **)&device_op.dss_aio_pwrite));
     SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_aio_prep_pread", (void **)&device_op.dss_aio_pread));
+    SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_init_logger", (void **)&device_op.dss_init_logger));
+    SS_RETURN_IFERR(dss_load_symbol(device_op.handle, "dss_refresh_logger", (void **)&device_op.dss_refresh_logger));
 
     int my_version = dss_get_my_version();
     int lib_version = dss_get_lib_version();
@@ -149,10 +150,23 @@ int dss_device_init(const char *conn_path, bool enable_dss)
         device_op.dss_set_svr_path(conn_path);
     }
 
+    device_op.inited = true;
     return DSS_SUCCESS;
 }
 
 void dss_register_log_callback(dss_log_output cb_log_output)
 {
     device_op.dss_register_log_callback(cb_log_output);
+}
+
+int dss_call_init_logger(char *log_home, unsigned int log_level, unsigned int log_backup_file_count, unsigned long long log_max_file_size)
+{
+    return device_op.dss_init_logger(log_home, log_level, log_backup_file_count, log_max_file_size);
+}
+
+void dss_call_refresh_logger(char * log_field, unsigned long long *value)
+{
+    if (device_op.inited) {
+        device_op.dss_refresh_logger(log_field, value);
+    }
 }

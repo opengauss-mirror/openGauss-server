@@ -7712,7 +7712,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         proc_exit(1);
     }
     if (ENABLE_DSS) {
-        dss_log_init();
+        DSSInitLogger();
     }
     initDSSConf();
 

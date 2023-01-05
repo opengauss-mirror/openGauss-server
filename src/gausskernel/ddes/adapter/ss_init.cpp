@@ -395,6 +395,8 @@ void DMSInit()
     securec_check(rc, "\0", "\0");
     setDMSProfile(&profile);
 
+    DMSInitLogger();
+
     g_instance.dms_cxt.log_timezone = u_sess->attr.attr_common.log_timezone;
 
     if (dms_init(&profile) != DMS_SUCCESS) {
@@ -406,6 +408,55 @@ void DMSInit()
             errmsg("failed to initialize dms, errno: %d, reason: %s", err, msg)));
     }
     g_instance.dms_cxt.dmsInited = true;
+}
+
+void GetSSLogPath(char *sslog_path)
+{
+    int ret;
+    char realPath[PATH_MAX + 1] = {0};
+    char *log_home = gs_getenv_r("GAUSSLOG");
+    if (log_home == NULL || log_home[0] == '\0') {
+        log_home = t_thrd.proc_cxt.DataDir;
+        if (log_home == NULL || log_home[0] == '\0') {
+            ereport(FATAL, (errmsg("failed to get $GAUSSLOG or DataDir for log")));
+        }
+    }
+
+    check_backend_env(log_home);
+    if (realpath(log_home, realPath) == NULL) {
+        ereport(FATAL, (errmsg("failed to realpaht $GAUSSLOG[DataDir]/pg_log")));
+    }
+
+    sslog_path[0] = '\0';
+    ret = snprintf_s(sslog_path, DMS_LOG_PATH_LEN, DMS_LOG_PATH_LEN - 1, "%s/pg_log", realPath);
+    securec_check_ss(ret, "", "");
+    if (pg_mkdir_p(sslog_path, S_IRWXU) != 0 && errno !=EEXIST) {
+        ereport(FATAL, (errmsg("failed to mkdir $GAUSSLOG[DataDir]/pg_log")));
+    }
+    return ;
+}
+
+void DMSInitLogger()
+{
+    if (ss_dms_func_init() != DMS_SUCCESS) {
+        ereport(FATAL, (errmsg("failed to init dms library")));
+    }
+
+    knl_instance_attr_dms *dms_attr = &g_instance.attr.attr_storage.dms_attr;
+    logger_param_t log_param;
+    log_param.log_level = (unsigned int)(dms_attr->sslog_level);
+    log_param.log_backup_file_count = (unsigned int)(dms_attr->sslog_backup_file_count);
+    log_param.log_max_file_size = ((uint64)(dms_attr->sslog_max_file_size)) * 1024;
+    GetSSLogPath(log_param.log_home);
+
+    if (dms_init_logger(&log_param) != DMS_SUCCESS) {
+        ereport(FATAL,(errmsg("failed to init dms logger")));
+    }
+}
+
+void DMSRefreshLogger(char *log_field, unsigned long long *value)
+{
+    dms_refresh_logger(log_field, value);
 }
 
 void DMSUninit()
@@ -424,7 +475,6 @@ int32 DMSWaitReform()
     uint32 has_offline; /* currently not used in openGauss */
     return dms_wait_reform(&has_offline);
 }
-
 
 static bool DMSReformCheckStartup()
 {

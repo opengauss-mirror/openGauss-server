@@ -118,6 +118,9 @@ typedef struct knl_instance_attr_dms {
     char* scrlock_worker_bind_core_config;
     int scrlock_server_port;
     int scrlock_worker_count;
+    int32 sslog_level;
+    int32 sslog_backup_file_count;
+    int32 sslog_max_file_size; //Unit:KB
 } knl_instance_attr_dms;
 
 typedef struct knl_instance_attr_storage {

@@ -349,7 +349,7 @@ void BootStrapProcessMain(int argc, char* argv[])
         proc_exit(1);
     }
     if (ENABLE_DSS) {
-        dss_log_init();
+       DSSInitLogger();
     }
     initDSSConf();
 

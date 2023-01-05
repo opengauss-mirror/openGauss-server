@@ -26,7 +26,8 @@
 
 #define DMS_LOGGER_BUFFER_SIZE 2048
 
-void dss_log_init(void);
+void DSSInitLogger();
+void DSSRefreshLogger(char *log_field, unsigned long long *value);
 
 typedef enum dss_log_level {
     LOG_RUN_ERR_LEVEL = 0,
