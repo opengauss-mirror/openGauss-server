@@ -6544,7 +6544,7 @@ static void pgstat_recv_inquiry(PgStat_MsgInquiry* msg, int len)
         g_instance.stat_cxt.last_statrequest = msg->inquiry_time;
 }
 
-static void inline init_tabentry_truncate(PgStat_StatTabEntry* tabentry, PgStat_TableEntry* tabmsg)
+static inline void init_tabentry_truncate(PgStat_StatTabEntry* tabentry, PgStat_TableEntry* tabmsg)
 {
     tabentry->n_live_tuples = 0;
     tabentry->n_dead_tuples = 0;
