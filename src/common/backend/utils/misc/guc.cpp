@@ -1823,7 +1823,7 @@ static void InitConfigureNamesBool()
             NULL,
             NULL,
             NULL,
-            NULL
+            false
         },
         {{"enable_gtt_concurrent_truncate",
             PGC_SIGHUP,
