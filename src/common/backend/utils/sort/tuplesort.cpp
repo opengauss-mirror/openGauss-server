@@ -4295,12 +4295,6 @@ static unsigned int getlen_stream(Tuplesortstate* state, int tapenum, bool eofOK
             } break;
             case RESPONSE_DATAROW: {
                 return node->buf.len;
-                /* If we have message in the buffer, consume it */
-                if (node->buf.len != 0) {
-                    AssembleDataRow(node);
-                    node->need_fresh_data = false;
-                    return true;
-                }
             } break;
 
             default:
