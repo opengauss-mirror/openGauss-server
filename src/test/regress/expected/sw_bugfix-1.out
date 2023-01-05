@@ -1172,6 +1172,13 @@ select * from test1 t1 connect by NOCYCLE prior c2<>c3;
   1 |  1 |  1
 (4 rows)
 
+select *,connect_by_isleaf is_leaf from test1 t1 connect by NOCYCLE c2<>c3;
+ c1 | c2 | c3 | is_leaf 
+----+----+----+---------
+  1 |  1 |  1 |       1
+  2 |  2 |  2 |       1
+(2 rows)
+
 drop table test1;
 -- error out a case when NOCYCLE is not specify and use connect_by_iscycle
 select t1.id, LEVEL, connect_by_iscycle from test_hcb_ptb t1 start with id = 1 connect by  prior id = pid;
