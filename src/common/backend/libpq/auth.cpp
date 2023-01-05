@@ -2228,6 +2228,7 @@ retry_init:
     krbconfig = gs_getenv_r("MPPDB_KRB5_FILE_PATH");
     if (krbconfig != NULL) {
         if (realpath(krbconfig, real_krbconfig) == NULL) {
+            (void)syscalllockRelease(&kerberos_conn_lock);
             return -1;
         }
         check_backend_env(real_krbconfig);
