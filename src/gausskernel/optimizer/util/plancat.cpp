@@ -1971,7 +1971,7 @@ void estimatePartitionSize(
      * pages added since the last VACUUM are most likely not marked
      * all-visible.  But costsize.c wants it converted to a fraction.
      */
-    if (partitionallvisible == 0 || curpages <= 0) {
+    if (partitionallvisible == 0 || curpages == 0) {
         *allvisfrac = 0;
     } else if ((double)partitionallvisible >= curpages) {
         *allvisfrac = 1;
