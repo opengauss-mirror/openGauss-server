@@ -316,6 +316,7 @@ static void VerifyDestDirIsEmptyOrCreate(char* dirname)
             if (pg_mkdir_p(dirname, S_IRWXU) == -1) {
                 ereport(FATAL, (errmsg_internal("could not create directory \"%s\": %s\n", dirname, strerror(errno))));
             }
+            break;
         case -1:
             /* Access problem */
             ereport(FATAL, (errmsg_internal("could not access directory \"%s\": %s\n", dirname, strerror(errno))));
