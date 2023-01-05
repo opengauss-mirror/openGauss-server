@@ -3158,7 +3158,7 @@ HeapTuple GetTupleForTrigger(EState* estate, EPQState* epqstate, ResultRelInfo* 
             /*
              * lock tuple for update
              */
-ltrmark:;
+ltrmark:
             tuple.t_self = *tid;
             test = tableam_tuple_lock(fakeRelation,
                 &tuple,
