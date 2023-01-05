@@ -1623,7 +1623,7 @@ XLogRedoAction XLogBlockGetOperatorBuffer(XLogBlockHead *blockhead, void *blockr
                                                       XLogBlockDataGetLastBlockLSN(blockdatarec), willinit, readmethod);
     } else if (block_valid == BLOCK_DATA_VM_TYPE || block_valid == BLOCK_DATA_FSM_TYPE) {
         redoaction = XLogReadBufferForRedoBlockExtend(&bufferinfo->blockinfo, RBM_ZERO_ON_ERROR, false, bufferinfo,
-                                                      xlogLsn, true, InvalidXLogRecPtr, readmethod);
+                                                      xlogLsn, InvalidXLogRecPtr, true, readmethod);
     } else if (block_valid == BLOCK_DATA_DDL_TYPE || block_valid == BLOCK_DATA_UNDO_TYPE) {
         redoaction = NO_BLK;
     }
