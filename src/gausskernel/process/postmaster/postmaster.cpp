@@ -12433,6 +12433,7 @@ void SetExtraThreadInfo(knl_thread_arg* arg)
             t_thrd.bgworker_cxt.bgworker   = ((BackgroundWorkerArgs *)arg->payload)->bgworker;
             t_thrd.bgworker_cxt.bgworkerId = ((BackgroundWorkerArgs *)arg->payload)->bgworkerId;
             pfree_ext(arg->payload);
+            break;
         }
         default:
             break;
