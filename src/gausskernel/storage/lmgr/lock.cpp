@@ -572,7 +572,7 @@ bool IsOtherProcRedistribution(PGPROC *otherProc)
  * when query run as stream mode, the topConsumer and producer thread hold differnt
  * Procs, but we treat them as one transaction
  */
-bool inline IsInSameTransaction(PGPROC *proc1, PGPROC *proc2)
+inline bool IsInSameTransaction(PGPROC *proc1, PGPROC *proc2)
 {
     return u_sess->stream_cxt.global_obj == NULL ? false
             : u_sess->stream_cxt.global_obj->inNodeGroup(proc1->pid, proc2->pid);
