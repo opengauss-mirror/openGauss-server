@@ -7210,6 +7210,13 @@ static void xact_redo_commit_internal(TransactionId xid, XLogRecPtr lsn, Transac
     }
 
     if (t_thrd.xlog_cxt.standbyState == STANDBY_DISABLED) {
+#ifdef ENABLE_MOT
+    /*
+     * Report committed transaction to MOT Engine.
+     */
+    CallRedoCommitCallback(xid);
+#endif
+
         /*
          * Mark the transaction committed in pg_xact. We don't bother updating
          * pg_csnlog during replay.
@@ -7242,6 +7249,13 @@ static void xact_redo_commit_internal(TransactionId xid, XLogRecPtr lsn, Transac
 #endif
     } else {
         CSNLogRecordAssignedTransactionId(max_xid);
+
+#ifdef ENABLE_MOT
+    /*
+     * Report committed transaction to MOT Engine.
+     */
+    CallRedoCommitCallback(xid);
+#endif
 
         /*
          * Mark the transaction committed in pg_clog. We use async commit
@@ -7301,17 +7315,6 @@ static void xact_redo_commit_internal(TransactionId xid, XLogRecPtr lsn, Transac
          */
         StandbyReleaseLockTree(xid, 0, NULL);
     }
-
-#ifdef ENABLE_MOT
-    /*
-     * Report committed transaction to MOT Engine.
-     * If (XactMOTEngineUsed(xinfo)) - This is an optimization to avoid calling
-     * MOT redo commit callbacks in case of commit does not have MOT records.
-     * It is disabled for the time being since data used to identify storage
-     * engine type is cleared in 2phase commit prepare phase.
-     */
-    CallRedoCommitCallback(xid);
-#endif
 
     xact_redo_forget_alloc_segs(xid, sub_xids, nsubxacts, lsn);
 
