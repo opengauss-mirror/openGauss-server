@@ -1989,7 +1989,7 @@ void update_run_job_to_fail()
  */
 static int get_random_job_id(int64 job_max_number = JOBID_MAX_NUMBER) 
 {
-    if (job_max_number < InvalidJobId) {
+    if (job_max_number <= InvalidJobId) {
         ereport(ERROR, (errmodule(MOD_JOB), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                         errmsg("Cannot generate job id."), errdetail("N/A"), errcause("Invalid job id range set."),
                         erraction("Please recheck job status.")));
