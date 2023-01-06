@@ -2582,7 +2582,7 @@ void instr_stmt_dynamic_change_level()
 
     /* if find user defined statement level, dynamic change the statement track level */
     StatLevel specified_level = instr_track_stmt_find_level();
-    if (specified_level <= STMT_TRACK_OFF) {
+    if (specified_level == STMT_TRACK_OFF) {
         return;
     }
 
