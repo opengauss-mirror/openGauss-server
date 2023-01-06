@@ -122,9 +122,9 @@ static bool isInitialized = false;
  */
 const char *sha256_digests[SHA256_DIGESTS_COUNT] = {NULL, NULL};
 /* The product control file information. */
-static LicenseControl versionControl = {PRODUCT_VERSION_FILE, PRODUCT_VERSION_UNKNOWN, {0}, false};
+static LicenseControl versionControl = {PRODUCT_VERSION_FILE, PRODUCT_VERSION_UNKNOWN, {{0}}, false};
 /* The license control file information. */
-static LicenseControl licenseControl = {LICENSE_VERSION_FILE, 0, {0}, false};
+static LicenseControl licenseControl = {LICENSE_VERSION_FILE, 0, {{0}}, false};
 
 /* The Premium edition license features. */
 static const feature_name ADVANCED_EDITION[] = {
