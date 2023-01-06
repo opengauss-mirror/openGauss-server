@@ -1508,7 +1508,7 @@ static void pgaudit_ProcessUtility(Node* parsetree, const char* queryString, Par
         case T_CreatePackageStmt:
         case T_CreatePackageBodyStmt: {
             pgaudit_ddl_package(object_name_pointer, queryString);
-        }
+        } break;
         case T_AlterFunctionStmt: { /* Audit  procedure */
             AlterFunctionStmt* alterfunctionstmt = (AlterFunctionStmt*)(parsetree);
 
