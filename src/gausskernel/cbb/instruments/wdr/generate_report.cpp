@@ -4467,7 +4467,10 @@ static bool IsNodeNameValid(const report_params* params)
         currentNodeName = g_instance.attr.attr_common.PGXCNodeName;
     }
 
-    if (strncmp(params->report_node, currentNodeName, strlen(currentNodeName)) != 0) {
+    int curLen = strlen(currentNodeName);
+    int reportLen = strlen(params->report_node);
+    int compareLen = curLen > reportLen ? curLen : reportLen;
+    if (strncmp(params->report_node, currentNodeName, compareLen) != 0) {
         return false;
     }
 #else
