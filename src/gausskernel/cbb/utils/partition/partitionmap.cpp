@@ -1688,6 +1688,8 @@ static void BuildListPartitionMap(Relation relation, Form_pg_partition partition
         list_itr++;
     }
 
+    qsort(list_eles, list_map->listElementsNum, sizeof(ListPartElement), ListElementCmp);
+
     /* list element array back in RangePartitionMap */
     old_context = MemoryContextSwitchTo(LocalMyDBCacheMemCxt());
 
@@ -2730,6 +2732,15 @@ int rangeElementCmp(const void* a, const void* b)
     Assert(rea->len <= RANGE_PARTKEYMAXNUM);
 
     return partitonKeyCompare((Const**)rea->boundary, (Const**)reb->boundary, rea->len);
+}
+
+int ListElementCmp(const void* a, const void* b)
+{
+    const ListPartElement* rea = (const ListPartElement*)a;
+    const ListPartElement* reb = (const ListPartElement*)b;
+
+    /* just compare the first boundary */
+    return partitonKeyCompare((Const**)rea->boundary, (Const**)reb->boundary, 1);
 }
 
 int HashElementCmp(const void* a, const void* b)

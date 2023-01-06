@@ -1585,7 +1585,7 @@ explain(costs off, verbose on) select min(a) from test_list_lt where a = 2000;
            ->  Partitioned Index Only Scan using idx_list_a on partition_minmax.test_list_lt
                  Output: partition_minmax.test_list_lt.a
                  Index Cond: ((partition_minmax.test_list_lt.a IS NOT NULL) AND (partition_minmax.test_list_lt.a = 2000))
-                 Selected Partitions:  3
+                 Selected Partitions:  1
 (9 rows)
 
 select min(a) from test_list_lt where a = 2000;

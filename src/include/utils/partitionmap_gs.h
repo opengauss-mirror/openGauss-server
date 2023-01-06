@@ -513,6 +513,7 @@ int ValueCmpLowBoudary(Const** partKeyValue, const RangeElement* partition, Inte
 extern void get_typlenbyval(Oid typid, int16 *typlen, bool *typbyval);
 extern RangeElement* copyRangeElements(RangeElement* src, int elementNum, int partkeyNum);
 extern int rangeElementCmp(const void* a, const void* b);
+extern int ListElementCmp(const void* a, const void* b);
 extern int HashElementCmp(const void* a, const void* b);
 extern void DestroyListElements(ListPartElement* src, int elementNum);
 extern void PartitionMapDestroyHashArray(HashPartElement* hashArray, int arrLen);

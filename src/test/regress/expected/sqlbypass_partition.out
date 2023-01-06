@@ -2683,7 +2683,7 @@ explain(costs off, verbose on) select *from test_list_lt where a = 2000 and b = 
    Output: a, b, c
    Index Cond: (test_list_lt.b = 1)
    Filter: (test_list_lt.a = 2000)
-   Selected Partitions:  3
+   Selected Partitions:  1
 (6 rows)
 
 explain(costs off, verbose on) select *from test_list_lt where a = 5000 and b = 1 order by c;
