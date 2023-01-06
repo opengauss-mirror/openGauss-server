@@ -1147,13 +1147,13 @@ Oid ProcedureCreate(const char* procedureName, Oid procNamespace, Oid propackage
     }
 
     bool existOutParam = false;
-    if (allParameterTypes != PointerGetDatum(NULL)) {
+    if (allParameterTypes != PointerGetDatum(NULL) && paramModes != NULL) {
         for (i = 0; i < allParamCount; i++) {
+            if (paramModes[i] == PROARGMODE_IN || paramModes[i] == PROARGMODE_VARIADIC)
+                continue; /* ignore input-only params */
             if (paramModes[i] == PROARGMODE_OUT || paramModes[i] == PROARGMODE_INOUT) {
                 existOutParam = true;
             }
-            if (paramModes == NULL || paramModes[i] == PROARGMODE_IN || paramModes[i] == PROARGMODE_VARIADIC)
-                continue; /* ignore input-only params */
 
             switch (allParams[i]) {
                 case ANYARRAYOID:
