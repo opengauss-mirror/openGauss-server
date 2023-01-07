@@ -54,10 +54,10 @@
 #include <sys/poll.h>
 #include <sys/prctl.h>
 #include <sys/socket.h>
-#ifndef WITH_OPENEULER_OS
-#include <sys/sysctl.h>
-#else
+#if (defined WITH_OPENEULER_OS) || (defined OPENEULER_MAJOR)
 #include <linux/sysctl.h>
+#else
+#include <sys/sysctl.h>
 #endif
 #include <sys/uio.h>
 #include <sys/wait.h>
