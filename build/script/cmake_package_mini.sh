@@ -454,6 +454,10 @@ function install_gaussdb()
     	export DEBUG_TYPE=debug
     fi
 
+    if [[ -e "/etc/openEuler-release" && "$(cat /etc/openEuler-release | awk '{print $3}')" == "22.03" ]]; then
+        CMAKE_OPT="$CMAKE_OPT -DENABLE_OPENEULER_MAJOR=ON"
+    fi
+    echo "CMAKE_OPT----> $CMAKE_OPT"
     echo "Begin run cmake for gaussdb server" >> "$LOG_FILE" 2>&1
     echo "CMake options: ${CMAKE_OPT}" >> "$LOG_FILE" 2>&1
     echo "CMake release: ${DEBUG_TYPE}" >> "$LOG_FILE" 2>&1
