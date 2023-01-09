@@ -39,6 +39,7 @@
 #include "vectorsonic/vsonichash.h"
 #include "storage/procarray.h"
 #include "ddes/dms/ss_transaction.h"
+#include "ddes/dms/ss_dms_bufmgr.h"
 /*
  * This code manages relations that reside on segment-page storage. It implements functions used for smgr.cpp.
  *
@@ -368,7 +369,7 @@ SegPageLocation seg_logic_to_physic_mapping(SMgrRelation reln, SegmentHead *seg_
     BlockNumber blocknum;
 
     /* Recovery thread should use physical location to read data directly. */
-    if (RecoveryInProgress() && !CurrentThreadIsWorker()) {
+    if (RecoveryInProgress() && !CurrentThreadIsWorker() && !SS_IN_FLUSHCOPY) {
         ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg("recovery is in progress"),
                         errhint("cannot do segment address translation during recovery")));
     }
@@ -1480,6 +1481,13 @@ void seg_extend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, cha
         XLogRegisterBuffer(1, buf, REGBUF_WILL_INIT);
         XLogRecPtr xlog_rec = XLogInsert(RM_SEGPAGE_ID, XLOG_SEG_SEGMENT_EXTEND, SegmentBktId);
         END_CRIT_SECTION();
+
+#ifdef USE_ASSERT_CHECKING
+        if (ENABLE_DMS) {
+            SegNetPageCheckDiskLSN(GetBufferDescriptor(seg_buffer - 1), RBM_NORMAL, NULL);
+            SmgrNetPageCheckDiskLSN(buf_desc, RBM_NORMAL, NULL);
+        }
+#endif
 
         PageSetLSN(BufferGetPage(seg_buffer), xlog_rec);
         PageSetLSN(buffer, xlog_rec);

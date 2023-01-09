@@ -44,6 +44,7 @@ typedef struct SSBroadcastXminAck {
 
 typedef struct SSBroadcastSI {
     SSBroadcastOp type; // must be first
+    Oid tablespaceid;
     SharedInvalidationMessage msg;
 } SSBroadcastSI;
 

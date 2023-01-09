@@ -230,6 +230,8 @@ typedef struct dms_opengauss_txn_snapshot {
 } dms_opengauss_txn_snapshot_t;
 
 typedef enum dms_opengauss_lock_req_type {
+    SHARED_INVAL_MSG,
+    DROP_BUF_MSG,
     LOCK_NORMAL_MODE,
     LOCK_RELEASE_SELF,
     LOCK_REACQUIRE,
@@ -772,7 +774,7 @@ typedef struct st_logger_param {
 #define DMS_LOCAL_MINOR_VER_WEIGHT  1000
 #define DMS_LOCAL_MAJOR_VERSION     0
 #define DMS_LOCAL_MINOR_VERSION     0
-#define DMS_LOCAL_VERSION           43
+#define DMS_LOCAL_VERSION           44
 
 #ifdef __cplusplus
 }

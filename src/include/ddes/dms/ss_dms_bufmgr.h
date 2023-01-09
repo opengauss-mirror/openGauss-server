@@ -70,5 +70,7 @@ void SSCheckBufferIfNeedMarkDirty(Buffer buf);
 void SSRecheckBufferPool();
 void TransformLockTagToDmsLatch(dms_drlatch_t* dlatch, const LOCKTAG locktag);
 void CheckPageNeedSkipInRecovery(Buffer buf);
+void SmgrNetPageCheckDiskLSN(BufferDesc* buf_desc, ReadBufferMode read_mode, const XLogPhyBlock *pblk);
+void SegNetPageCheckDiskLSN(BufferDesc* buf_desc, ReadBufferMode read_mode, SegSpace *spc);
 
 #endif
