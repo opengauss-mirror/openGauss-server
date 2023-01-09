@@ -1600,7 +1600,7 @@ static bool find_expr_references_walker(Node* node, find_expr_references_context
             ereport(ERROR, (errmodule(MOD_OPT), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                     errmsg("invalid varlevelsup %u", var->varlevelsup)));
         rtable = (List*)list_nth(context->rtables, var->varlevelsup);
-        if (var->varno <= 0 || var->varno > (Index)list_length(rtable))
+        if (var->varno == 0 || var->varno > (Index)list_length(rtable))
             ereport(ERROR,
                 (errmodule(MOD_OPT), errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid varno %u", var->varno)));
 
