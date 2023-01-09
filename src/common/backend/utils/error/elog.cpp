@@ -4503,6 +4503,8 @@ static char* mask_Password_internal(const char* query_string)
                             if (query_string[position[i] + length[i] - 1] == ';') {
                                 length[i]--;
                             }
+                            curStmtType = 0;
+                            isPassword = false;
                         }
 
                         /*
@@ -4532,7 +4534,7 @@ static char* mask_Password_internal(const char* query_string)
 
                         char* maskBegin = mask_string + (position[i] - truncateLen);
                         int copySize = strlen(mask_string) - (position[i] - truncateLen) - length[i] + 1;
-                        if (copySize > 0) {
+                        if ((position[i] - truncateLen) >= 0 && copySize > 0) {
                             rc = memmove_s(maskBegin + maskLen, copySize, maskBegin + length[i], copySize);
                             securec_check(rc, "", "");
                             rc = memset_s(maskBegin, maskLen, '*', maskLen);

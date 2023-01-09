@@ -18,3 +18,13 @@ ERROR:  Permission denied.
 reset role;
 drop role test_myrole001;
 drop role test_myrole002;
+alter user u1 identified by aswd3456 replace dfg1637484kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkklll;
+ERROR:  Password must be quoted
+alter user u1 ACCOUNT LOCK PASSWORD EXPIRE NEVER                         PASSWORD EXPIRE NEVER ACCOUNT UNLOCK                       ACCOUNT UNLOCK ACCOUNT UNLOCK ACCOUNT UNLOCK;
+ERROR:  syntax error at or near "PASSWORD"
+LINE 1: alter user u1 ACCOUNT LOCK PASSWORD EXPIRE NEVER            ...
+                                   ^
+alter user u1 lock password expir never lock password expire never lock password expire never lock;
+ERROR:  syntax error at or near "lock"
+LINE 1: alter user u1 lock password expir never lock password expire...
+                      ^
