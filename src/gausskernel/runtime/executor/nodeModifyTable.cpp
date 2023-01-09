@@ -517,9 +517,22 @@ bool ExecComputeStoredUpdateExpr(ResultRelInfo *resultRelInfo, EState *estate, T
             } else {
                 Form_pg_attribute attr = TupleDescAttr(tupdesc, i);
                 opfuncoid = OpernameGetOprid(list_make1(makeString("=")), attr->atttypid, attr->atttypid);
-                RegProcedure oprcode = get_opcode(opfuncoid);
-                fmgr_info(oprcode, &eqproc);
-                match = DatumGetBool(FunctionCall2Coll(&eqproc, DEFAULT_COLLATION_OID, slot->tts_values[i], oldvalues[i]));
+                if (OidIsValid(opfuncoid)) {
+                    RegProcedure oprcode = get_opcode(opfuncoid);
+                    fmgr_info(oprcode, &eqproc);
+                    match = DatumGetBool(FunctionCall2Coll(&eqproc, DEFAULT_COLLATION_OID, slot->tts_values[i], oldvalues[i]));
+                } else {
+                    Oid typoutput = 0;
+                    bool typisvarlena = false;
+                    getTypeOutputInfo(attr->atttypid, &typoutput, &typisvarlena);
+                    char *value_old = DatumGetCString(OidOutputFunctionCall(typoutput, oldvalues[i]));
+                    char *value_new = DatumGetCString(OidOutputFunctionCall(typoutput, slot->tts_values[i]));
+                    if (pg_strcasecmp(value_old, value_new) == 0) {
+                        match = true;
+                    } else {
+                        match = false;
+                    }
+                }
             }
             update_fix_result = update_fix_result && match;
             attnum = bms_next_member(updatedCols, temp_id);
