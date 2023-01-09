@@ -2977,8 +2977,12 @@ PLpgSQL_type* plpgsql_parse_wordtype(char* ident)
             return NULL;
         }
 
-        dtype = build_datatype(type_tup, -1, 
-            u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->fn_input_collation);
+        if (u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile == NULL) {
+            dtype = build_datatype(type_tup, -1, 0);
+        } else {
+            dtype = build_datatype(type_tup, -1,
+                u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile->fn_input_collation);
+        }
 
         ReleaseSysCache(type_tup);
         return dtype;
