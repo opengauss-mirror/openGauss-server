@@ -110,7 +110,7 @@ static void exit_safely(int returnCode)
     exit(returnCode);
 }
 
-static void display_data(ControlFileData ControlFile, int instance_id)
+static void display_control_page(ControlFileData ControlFile, int instance_id, bool display_all)
 {
     pg_crc32c crc; /* pg_crc32c as same as pg_crc32 */
     time_t time_tmp;
@@ -119,6 +119,10 @@ static void display_data(ControlFileData ControlFile, int instance_id)
     char sysident_str[32];
     const char* strftime_fmt = "%c";
     int sret = 0;
+
+    /* skip invalid node in shared storage mode */
+    if (enable_dss && ControlFile.system_identifier == 0 && display_all)
+        return;
 
     /* display instance id in shared storage mode */
     if (enable_dss) {
@@ -224,6 +228,26 @@ static void display_data(ControlFileData ControlFile, int instance_id)
     printf(_("Database system TimeLine:             %u\n"), ControlFile.timeline);
 }
 
+static void display_last_page(ss_reformer_ctrl_t reformerCtrl, int last_page_id)
+{
+    pg_crc32c crc;
+
+    /* Check the CRC. */
+    /* using CRC32C since 923 */
+    INIT_CRC32C(crc);
+    COMP_CRC32C(crc, (char*)&reformerCtrl, offsetof(ss_reformer_ctrl_t, crc));
+    FIN_CRC32C(crc);
+
+    if (!EQ_CRC32C(crc, reformerCtrl.crc)) {
+        printf(_("WARNING: Calculated CRC checksum does not match value stored in file.\n"
+                 "Either the file is corrupt, or it has a different layout than this program\n"
+                 "is expecting.  The results below are untrustworthy.\n\n"));
+    }
+    printf(_("\nreformer data (last page id %d)\n\n"), last_page_id);
+    printf(_("Stable instances list:                %lu\n"), reformerCtrl.list_stable);
+    printf(_("Primary instance ID:                  %d\n"), reformerCtrl.primaryInstId);
+}
+
 int main(int argc, char* argv[])
 {
     ControlFileData ControlFile;
@@ -267,9 +291,9 @@ int main(int argc, char* argv[])
         switch (option_value) {
 #ifndef ENABLE_LITE_MODE
             case 'I':
-                if (atoi(optarg) < MIN_INSTANCEID || atoi(optarg) > MAX_INSTANCEID) {
+                if (atoi(optarg) < MIN_INSTANCEID || atoi(optarg) > REFORMER_CTL_INSTANCEID) {
                     fprintf(stderr, _("%s: unexpected node id specified, valid range is %d - %d\n"),
-                            progname, MIN_INSTANCEID, MAX_INSTANCEID);
+                            progname, MIN_INSTANCEID, REFORMER_CTL_INSTANCEID);
                     exit_safely(1);
                 }
                 ss_nodeid = atoi(optarg);
@@ -358,13 +382,26 @@ int main(int argc, char* argv[])
             exit_safely(2);
         }
 
-        if (read(fd, &ControlFile, sizeof(ControlFileData)) != sizeof(ControlFileData)) {
-            fprintf(stderr, _("%s: could not read file \"%s\": %s\n"), progname, ControlFilePath, strerror(errno));
-            close(fd);
-            exit_safely(2);
+        if (display_id <= MAX_INSTANCEID) {
+            if (read(fd, &ControlFile, sizeof(ControlFileData)) != sizeof(ControlFileData)) {
+                fprintf(stderr, _("%s: could not read file \"%s\": %s\n"), progname, ControlFilePath, strerror(errno));
+                close(fd);
+                exit_safely(2);
+            }
+            display_control_page(ControlFile, display_id, display_all);
+        }   
+
+        /* get the last page from the the pg_control in shared storage mode */
+        if (enable_dss && display_id > MAX_INSTANCEID) {
+            ss_reformer_ctrl_t reformerCtrl;
+            if (read(fd, &reformerCtrl, sizeof(ss_reformer_ctrl_t)) != sizeof(ss_reformer_ctrl_t)) {
+                fprintf(stderr, _("%s: could not read file \"%s\": %s\n"), progname, ControlFilePath, strerror(errno));
+                close(fd);
+                exit_safely(2);
+            }
+            display_last_page(reformerCtrl, display_id);
         }
 
-        display_data(ControlFile, display_id);
         seekpos += BLCKSZ;
         display_id = display_id + 1;
     } while (display_all && seekpos < ControlFileSize);

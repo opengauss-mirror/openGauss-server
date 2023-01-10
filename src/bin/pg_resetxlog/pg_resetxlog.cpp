@@ -496,7 +496,7 @@ static int ReadDssControlFile(int *fd, char *buffer)
      * from the pg_control file's last page.
      */
     ss_reformer_ctrl_t *reformerCtrl;
-    reformerCtrl = (ss_reformer_ctrl_t *)(tmpBuffer + (MAX_INSTANCEID + 1) * PG_CONTROL_SIZE);
+    reformerCtrl = (ss_reformer_ctrl_t *)(tmpBuffer + REFORMER_CTL_INSTANCEID * PG_CONTROL_SIZE);
     dss.primaryInstId = reformerCtrl->primaryInstId;
     if (dss.primaryInstId < MIN_INSTANCEID || dss.primaryInstId > MAX_INSTANCEID) {
         fprintf(stderr, _("%s: unexpected primary node id: %d, valid range is %d - %d.\n"),

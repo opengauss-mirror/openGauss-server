@@ -258,6 +258,7 @@ typedef struct LsnXlogFlushData {
 
 #define MIN_INSTANCEID   0
 #define MAX_INSTANCEID   63
+#define REFORMER_CTL_INSTANCEID MAX_INSTANCEID + 1  /* the last page id of pg_control file */
 #define INVALID_INSTANCEID -1
 #define MAX_INSTANCEID_LEN 3     /* max string len of instance id */ 
 
