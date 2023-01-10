@@ -30,7 +30,9 @@
 #include "typed_statistics_generator.h"
 
 #include "sys/times.h"
+#ifndef OPENEULER_MAJOR
 #include "sys/vtimes.h"
+#endif
 
 namespace MOT {
 /**
