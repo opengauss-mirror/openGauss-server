@@ -717,3 +717,5 @@ CREATE OR REPLACE FUNCTION pg_catalog.gs_block_dw_io(timeout integer, identifier
  STABLE STRICT NOT FENCED NOT SHIPPABLE
 AS $function$gs_block_dw_io$function$;
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0, 0, 0, 0;
+
+DROP EXTENSION IF EXISTS hdfs_fdw;
