@@ -7711,9 +7711,6 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         ereport(FATAL, (errmsg("failed to init dss device")));
         proc_exit(1);
     }
-    if (ENABLE_DSS) {
-        DSSInitLogger();
-    }
     initDSSConf();
 
     /* Early initialization */

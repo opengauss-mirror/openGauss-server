@@ -1639,7 +1639,6 @@ int PostmasterMain(int argc, char* argv[])
             write_stderr("Not support archive function while DMS and DSS enabled\n");
             ExitPostmaster(1);
         }
-        DSSInitLogger();
     }
 
     noProcLogicTid = GLOBAL_ALL_PROCS;
@@ -2466,6 +2465,10 @@ int PostmasterMain(int argc, char* argv[])
             /* need to initialize before STARTUP */
             DMSInit();
         }
+    }
+
+    if (ENABLE_DSS) {
+        DSSInitLogger();
     }
 
     /*
