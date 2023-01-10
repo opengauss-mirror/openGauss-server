@@ -3811,6 +3811,7 @@ static void usage(const char* prog_name)
     printf(_("      --vgname=VGNAME       name of dss volume group\n"));
     printf(_("      --socketpath=SOCKETPATH\n"
              "                            dss connect socket file path\n"));
+    printf(_("      --dms_url=URL         message communication url between nodes\n"));
 #endif
     printf(_("  -E, --encoding=ENCODING   set default encoding for new databases\n"));
     printf(_("      --locale=LOCALE       set default locale for new databases\n"));
