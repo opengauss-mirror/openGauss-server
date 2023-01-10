@@ -70,7 +70,10 @@ typedef void (*dss_log_callback)(dss_log_output cb_log_output);
 typedef int (*dss_version)(void);
 typedef int (*dss_aio_prep_pwrite_device)(void *iocb, int handle, void *buf, size_t count, long long offset);
 typedef int (*dss_aio_prep_pread_device)(void *iocb, int handle, void *buf, size_t count, long long offset);
+typedef int (*dss_init_logger_t)(char *log_home, unsigned int log_level, unsigned int log_backup_file_count, unsigned long long log_max_file_size);
+typedef void (*dss_refresh_logger_t)(char *log_field, unsigned long long *value);
 typedef struct st_dss_device_op_t {
+    bool inited;
     void *handle;
     dss_create_device dss_create;
     dss_remove_device dss_remove;
@@ -108,8 +111,12 @@ typedef struct st_dss_device_op_t {
     dss_version dss_get_version;
     dss_aio_prep_pwrite_device dss_aio_pwrite;
     dss_aio_prep_pread_device dss_aio_pread;
+    dss_init_logger_t dss_init_logger;
+    dss_refresh_logger_t dss_refresh_logger;
 } dss_device_op_t;
 
 void dss_register_log_callback(dss_log_output cb_log_output);
+int dss_call_init_logger(char *log_home, unsigned int log_level, unsigned int log_backup_file_count, unsigned long long log_max_file_size);
+void dss_call_refresh_logger(char *log_field, unsigned long long *value);
 
 #endif // DSS_ADAPTOR_H

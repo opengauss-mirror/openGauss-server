@@ -39,5 +39,8 @@ void DMSInit();
 void DMSUninit();
 int32 DMSWaitReform();
 bool DMSWaitInitStartup();
+void DMSInitLogger();
+void DMSRefreshLogger(char *log_field, unsigned long long *value);
+void GetSSLogPath(char *sslog_path);
 
 #endif

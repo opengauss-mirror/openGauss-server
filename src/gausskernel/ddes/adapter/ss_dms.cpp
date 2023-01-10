@@ -29,7 +29,7 @@
 #include "ddes/dms/ss_dms.h"
 #include "utils/elog.h"
 
-ss_dms_func_t g_ss_dms_func;
+ss_dms_func_t g_ss_dms_func = { 0 };
 
 // return DMS_ERROR if error occurs
 #define SS_RETURN_IFERR(ret)                            \
@@ -81,6 +81,9 @@ void dms_close_dl(void *lib_handle)
 
 int ss_dms_func_init()
 {
+    if (g_ss_dms_func.inited) {
+        return DMS_SUCCESS;
+    }
     SS_RETURN_IFERR(dms_open_dl(&g_ss_dms_func.handle, (char *)SS_LIBDMS_NAME));
 
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_show_version));
@@ -118,6 +121,9 @@ int ss_dms_func_init()
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_latch_timed_s));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_unlatch));
     SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_pre_uninit));
+    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_init_logger));
+    SS_RETURN_IFERR(DMS_LOAD_SYMBOL_FUNC(dms_refresh_logger));
+    g_ss_dms_func.inited = true;
     return DMS_SUCCESS;
 }
 
@@ -126,6 +132,7 @@ void ss_dms_func_uninit()
     if (g_ss_dms_func.handle != NULL) {
         dms_close_dl(g_ss_dms_func.handle);
         g_ss_dms_func.handle = NULL;
+        g_ss_dms_func.inited = false;
     }
 }
 
@@ -156,6 +163,18 @@ int dms_init(dms_profile_t *dms_profile)
     }
 
     return DMS_SUCCESS;
+}
+
+int dms_init_logger(logger_param_t *log_param)
+{
+    return g_ss_dms_func.dms_init_logger(log_param);
+}
+
+void dms_refresh_logger(char *log_field, unsigned long long *value)
+{
+    if (g_ss_dms_func.inited) {
+        g_ss_dms_func.dms_refresh_logger(log_field, value);
+    }
 }
 
 void dms_uninit(void)

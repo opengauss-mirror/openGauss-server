@@ -616,6 +616,9 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  ssl_ciphers                                      | string  |      |           | 
  ssl_crl_file                                     | string  |      |           | 
  ssl_key_file                                     | string  |      |           | 
+ ss_log_backup_file_count                         | integer |      | 0         | 128
+ ss_log_level                                     | integer |      | 0         | 887
+ ss_log_max_file_size                             | integer | kB   | 1024      | 4194304
  ssl_renegotiation_limit                          | integer | kB   | 0         | 2147483647
  ss_ock_log_path                                  | string  |      |           | 
  ss_rdma_work_config                              | string  |      |           | 
