@@ -246,6 +246,23 @@ Datum ComputePartKeyExprTuple(Relation rel, EState *estate, TupleTableSlot *slot
     return val;
 }
 
+static void ExecReleaseResource(Tuple tuple, TupleTableSlot *slot, ResultRelInfo *result_rel_info, EState *estate,
+                                Relation bucket_rel, Relation rel, Partition part, Relation partRel)
+{
+    tableam_tops_free_tuple(tuple);
+    (void)ExecClearTuple(slot);
+    ExecCloseIndices(result_rel_info);
+    ExecDoneStepInFusion(estate);
+    if (bucket_rel != NULL) {
+        bucketCloseRelation(bucket_rel);
+    }
+    if (RELATION_IS_PARTITIONED(rel) && part != NULL) {
+        partitionClose(rel, part, RowExclusiveLock);
+        releaseDummyRelation(&partRel);
+    }
+}
+
+
 unsigned long InsertFusion::ExecInsert(Relation rel, ResultRelInfo* result_rel_info)
 {
     /*******************
@@ -270,6 +287,8 @@ unsigned long InsertFusion::ExecInsert(Relation rel, ResultRelInfo* result_rel_i
         m_c_local.m_estate->esfRelations = NULL;
         partOid = heapTupleGetPartitionId(rel, tuple, false, m_c_local.m_estate->es_plannedstmt->hasIgnore);
         if (m_c_local.m_estate->es_plannedstmt->hasIgnore && partOid == InvalidOid) {
+            ExecReleaseResource(tuple, m_local.m_reslot, result_rel_info, m_c_local.m_estate, bucket_rel, rel, part,
+                                partRel);
             return 0;
         }
         part = partitionOpen(rel, partOid, RowExclusiveLock);
@@ -301,6 +320,8 @@ unsigned long InsertFusion::ExecInsert(Relation rel, ResultRelInfo* result_rel_i
          */
         if(!ExecConstraints(result_rel_info, m_local.m_reslot, m_c_local.m_estate, true)) {
             if (u_sess->utils_cxt.sql_ignore_strategy_val != SQL_OVERWRITE_NULL) {
+                ExecReleaseResource(tuple, m_local.m_reslot, result_rel_info, m_c_local.m_estate, bucket_rel, rel, part,
+                                    partRel);
                 return 0;
             }
             tuple = ReplaceTupleNullCol(RelationGetDescr(result_rel_info->ri_RelationDesc), m_local.m_reslot);
@@ -336,20 +357,8 @@ unsigned long InsertFusion::ExecInsert(Relation rel, ResultRelInfo* result_rel_i
                                    &conflictInfo, &conflictPartOid, &conflictBucketid)) {
         ereport(WARNING, (errmsg("duplicate key value violates unique constraint in table \"%s\"",
                                  RelationGetRelationName(target_rel))));
-        
-        /* clear before ended */
-        tableam_tops_free_tuple(tuple);
-        (void)ExecClearTuple(m_local.m_reslot);
-        ExecCloseIndices(result_rel_info);
-        ExecDoneStepInFusion(m_c_local.m_estate);
-        if (bucket_rel != NULL) {
-            bucketCloseRelation(bucket_rel);
-        }
-        if (RELATION_IS_PARTITIONED(rel)) {
-            partitionClose(rel, part, RowExclusiveLock);
-            releaseDummyRelation(&partRel);
-        }
-
+        ExecReleaseResource(tuple, m_local.m_reslot, result_rel_info, m_c_local.m_estate, bucket_rel, rel, part,
+                            partRel);
         return 0;
     }
 
@@ -386,25 +395,10 @@ unsigned long InsertFusion::ExecInsert(Relation rel, ResultRelInfo* result_rel_i
     if (result_rel_info->ri_WithCheckOptions != NIL)
         ExecWithCheckOptions(result_rel_info, m_local.m_reslot, m_c_local.m_estate);
 
-    tableam_tops_free_tuple(tuple);
-
-    (void)ExecClearTuple(m_local.m_reslot);
-
     /****************
      * step 3: done *
      ****************/
-    ExecCloseIndices(result_rel_info);
-
-
-    ExecDoneStepInFusion(m_c_local.m_estate);
-
-    if (bucket_rel != NULL) {
-        bucketCloseRelation(bucket_rel);
-    }
-    if (RELATION_IS_PARTITIONED(rel)) {
-        partitionClose(rel, part, RowExclusiveLock);
-        releaseDummyRelation(&partRel);
-    }
+    ExecReleaseResource(tuple, m_local.m_reslot, result_rel_info, m_c_local.m_estate, bucket_rel, rel, part, partRel);
 
     return 1;
 }
